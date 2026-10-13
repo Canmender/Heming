@@ -4,6 +4,7 @@ import {
   WsServerEventSchema,
   MessageSchema,
   RegisterBodySchema,
+  CreateFileBodySchema,
 } from "./schemas.js";
 
 describe("WsClientEventSchema", () => {
@@ -76,5 +77,19 @@ describe("RegisterBodySchema", () => {
   it("username 至少 3 字符", () => {
     expect(RegisterBodySchema.safeParse({ username: "ab", password: "p123456", displayName: "甲" }).success).toBe(false);
     expect(RegisterBodySchema.safeParse({ username: "abc", password: "p123456", displayName: "甲" }).success).toBe(true);
+  });
+});
+
+describe("CreateFileBodySchema", () => {
+  it("接受合法上传体", () => {
+    expect(
+      CreateFileBodySchema.safeParse({ name: "a.txt", mime: "text/plain", contentBase64: "aGk=" }).success,
+    ).toBe(true);
+  });
+  it("拒绝超长文件名", () => {
+    expect(
+      CreateFileBodySchema.safeParse({ name: "x".repeat(256), mime: "text/plain", contentBase64: "aGk=" })
+        .success,
+    ).toBe(false);
   });
 });

@@ -1,11 +1,12 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useUiStore } from "./store/ui.js";
 import { useAuthStore } from "./store/auth.js";
-import { getToken } from "./lib/api.js";
+import { getToken, fetchFiles, api } from "./lib/api.js";
+import type { SharedFileMeta } from "@heming/shared";
 import { LoginPage } from "./components/LoginPage.js";
 import { NavSidebar } from "./components/NavSidebar.js";
 import { NavRail } from "./components/NavRail.js";
-import { FileTree, type TreeItem } from "./components/FileTree.js";
+import { FileTree } from "./components/FileTree.js";
 import { WorkspacePage } from "./components/WorkspacePage.js";
 import { ChatPage } from "./components/ChatPage.js";
 import { HomePage } from "./components/HomePage.js";
@@ -18,6 +19,37 @@ export function App() {
   useEffect(() => {
     void restore();
   }, [restore]);
+
+  const [files, setFiles] = useState<SharedFileMeta[]>([]);
+  const refreshFiles = useCallback(() => {
+    void fetchFiles().then(setFiles);
+  }, []);
+  useEffect(() => {
+    if (authUser) refreshFiles();
+  }, [authUser, refreshFiles]);
+
+  const onUpload = async () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const buf = await file.arrayBuffer();
+      let binary = "";
+      const bytes = new Uint8Array(buf);
+      for (const b of bytes) binary += String.fromCharCode(b);
+      await api("/api/files", {
+        method: "POST",
+        body: JSON.stringify({
+          name: file.name,
+          mime: file.type || "application/octet-stream",
+          contentBase64: btoa(binary),
+        }),
+      });
+      refreshFiles();
+    };
+    input.click();
+  };
 
   const page = useUiStore((s) => s.page);
   const navCollapsed = useUiStore((s) => s.navCollapsed);
@@ -42,7 +74,6 @@ export function App() {
     );
   }
 
-  const demoItems: TreeItem[] = [];
   const view =
     page === "home" ? (
       <HomePage />
@@ -67,8 +98,20 @@ export function App() {
     <div className="flex h-screen overflow-hidden border border-line bg-white">
       {navCollapsed ? <NavRail /> : <NavSidebar />}
       <main className="flex min-w-0 flex-1 flex-col">{view}</main>
-      <aside className="w-[240px] shrink-0 border-l border-line-soft">
-        <FileTree items={demoItems} localPaths={[]} />
+      <aside className="flex w-[240px] shrink-0 flex-col border-l border-line-soft">
+        <div className="flex items-center justify-between border-b border-line-soft px-3 py-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted">目录</span>
+          <button
+            type="button"
+            onClick={() => void onUpload()}
+            className="rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card"
+          >
+            上传
+          </button>
+        </div>
+        <div className="min-h-0 flex-1">
+          <FileTree items={files} localPaths={[]} />
+        </div>
       </aside>
     </div>
   );

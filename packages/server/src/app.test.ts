@@ -110,3 +110,45 @@ describe("auth + friends + conversations API", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("files API", () => {
+  let app: ReturnType<typeof createApp>;
+  beforeEach(() => {
+    app = createApp(createMemoryStore());
+  });
+
+  it("上传 → 列表 → 删除", async () => {
+    const a = await register(app, "alice");
+    const up = await request(app)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "需求草案.md", mime: "text/markdown", contentBase64: Buffer.from("# 你好").toString("base64") });
+    expect(up.status).toBe(201);
+    expect(up.body.name).toBe("需求草案.md");
+    expect(up.body.owner).toBe("alice");
+
+    const list = await request(app).get("/api/files").set("Authorization", `Bearer ${a.token}`);
+    expect(list.body).toHaveLength(1);
+
+    const del = await request(app)
+      .delete(`/api/files/${up.body.id}`)
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(del.status).toBe(204);
+
+    const after = await request(app).get("/api/files").set("Authorization", `Bearer ${a.token}`);
+    expect(after.body).toHaveLength(0);
+  });
+
+  it("非 owner 删除返回 403", async () => {
+    const a = await register(app, "alice");
+    const b = await register(app, "bob");
+    const up = await request(app)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "x.txt", mime: "text/plain", contentBase64: "eA==" });
+    const del = await request(app)
+      .delete(`/api/files/${up.body.id}`)
+      .set("Authorization", `Bearer ${b.token}`);
+    expect(del.status).toBe(403);
+  });
+});

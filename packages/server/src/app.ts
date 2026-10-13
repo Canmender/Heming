@@ -1,10 +1,12 @@
 import express, { type Request, type Response, type NextFunction } from "express";
-import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
+import { scryptSync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   RegisterBodySchema,
   LoginBodySchema,
   CreateConversationBodySchema,
   CreateFriendRequestBodySchema,
+  CreateFileBodySchema,
+  type SharedFileMeta,
 } from "@heming/shared";
 import type { Store } from "./store.js";
 import { issueToken, userIdFromToken } from "./auth.js";
@@ -142,8 +144,48 @@ export function createApp(store: Store): express.Express {
     res.json(store.listMessages(req.params.id));
   });
 
+  interface StoredFile {
+    meta: SharedFileMeta;
+    content: string; // base64
+  }
+  const files = new Map<string, StoredFile>();
+
   app.get("/api/files", authOnly, (_req, res) => {
-    res.json([]);
+    res.json([...files.values()].map((f) => f.meta));
+  });
+
+  app.post("/api/files", authOnly, (req, res) => {
+    const parsed = CreateFileBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid body" });
+      return;
+    }
+    const user = store.findUserById(userId(req))!;
+    const meta: SharedFileMeta = {
+      id: randomUUID(),
+      owner: user.username,
+      name: parsed.data.name,
+      mime: parsed.data.mime,
+      size: Math.floor((parsed.data.contentBase64.length * 3) / 4),
+      updatedAt: new Date().toISOString(),
+    };
+    files.set(meta.id, { meta, content: parsed.data.contentBase64 });
+    res.status(201).json(meta);
+  });
+
+  app.delete("/api/files/:id", authOnly, (req, res) => {
+    const stored = files.get(req.params.id);
+    if (!stored) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    const user = store.findUserById(userId(req))!;
+    if (stored.meta.owner !== user.username) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    files.delete(req.params.id);
+    res.status(204).end();
   });
 
   return app;

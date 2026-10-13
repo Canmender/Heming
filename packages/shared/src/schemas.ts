@@ -77,3 +77,10 @@ export const SharedFileMetaSchema = z.object({
   updatedAt: z.string(),
 });
 export type SharedFileMeta = z.infer<typeof SharedFileMetaSchema>;
+
+export const CreateFileBodySchema = z.object({
+  name: z.string().min(1).max(255),
+  mime: z.string().min(1).max(128),
+  contentBase64: z.string().max(4_000_000),
+});
+export type CreateFileBody = z.infer<typeof CreateFileBodySchema>;
