@@ -1,10 +1,21 @@
 import { useEffect } from "react";
 import { useUiStore } from "./store/ui.js";
+import { useAuthStore } from "./store/auth.js";
+import { getToken } from "./lib/api.js";
+import { LoginPage } from "./components/LoginPage.js";
 import { NavSidebar } from "./components/NavSidebar.js";
 import { NavRail } from "./components/NavRail.js";
 import { FileTree, type TreeItem } from "./components/FileTree.js";
 
 export function App() {
+  const authStatus = useAuthStore((s) => s.status);
+  const authUser = useAuthStore((s) => s.user);
+  const restore = useAuthStore((s) => s.restore);
+
+  useEffect(() => {
+    void restore();
+  }, [restore]);
+
   const page = useUiStore((s) => s.page);
   const navCollapsed = useUiStore((s) => s.navCollapsed);
   const setNavCollapsed = useUiStore((s) => s.setNavCollapsed);
@@ -20,6 +31,14 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [navCollapsed, setNavCollapsed]);
+
+  if (!authUser) {
+    return authStatus === "pending" && getToken() ? (
+      <div className="flex h-screen items-center justify-center text-muted">加载中…</div>
+    ) : (
+      <LoginPage />
+    );
+  }
 
   const demoItems: TreeItem[] = [];
   const view = (
