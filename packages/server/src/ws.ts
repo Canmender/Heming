@@ -87,6 +87,8 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
       sockets!.delete(ws);
       if (sockets!.size === 0) socketsByUser.delete(userId);
     });
+
+    ws.on("error", () => { /* 连接级错误忽略，避免未捕获异常崩溃进程 */ });
   });
 
   return wss;

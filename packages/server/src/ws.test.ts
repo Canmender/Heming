@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import net from "node:net";
 import WebSocket from "ws";
 import { createMemoryStore, Store } from "./store.js";
 import { startServer } from "./index.js";
@@ -23,6 +24,44 @@ function nextEvent(ws: WebSocket): Promise<WsServerEvent> {
   return new Promise((resolve, reject) => {
     ws.once("message", (data) => resolve(JSON.parse(data.toString())));
     ws.once("error", reject);
+  });
+}
+
+/** 用裸 TCP 完成合法 WS 升级握手（绕过 ws 客户端，以便随后发送非法协议帧）。 */
+function rawUpgrade(port: number, token: string): Promise<net.Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(port, "127.0.0.1", () => {
+      socket.write(
+        [
+          `GET /api/ws?token=${token} HTTP/1.1`,
+          `Host: 127.0.0.1:${port}`,
+          "Upgrade: websocket",
+          "Connection: Upgrade",
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+          "Sec-WebSocket-Version: 13",
+          "",
+          "",
+        ].join("\r\n"),
+      );
+    });
+    let buf = Buffer.alloc(0);
+    const onData = (chunk: Buffer) => {
+      buf = Buffer.concat([buf, chunk]);
+      const headerEnd = buf.indexOf("\r\n\r\n");
+      if (headerEnd === -1) return;
+      socket.off("data", onData);
+      if (buf.subarray(0, headerEnd).toString().startsWith("HTTP/1.1 101")) {
+        resolve(socket);
+      } else {
+        socket.destroy();
+        reject(new Error("upgrade rejected"));
+      }
+    };
+    socket.on("data", onData);
+    // 握手失败时 reject；握手成功后服务端按协议关闭导致的 RST 等也一并吞掉，避免测试进程未处理 error。
+    socket.on("error", () => {
+      reject(new Error("socket error during handshake"));
+    });
   });
 }
 
@@ -82,6 +121,23 @@ describe("ws", () => {
   });
 
   it("mark_read 广播 read_update", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
+    const event = await bWait;
+    expect(event.type).toBe("read_update");
+    a.close();
+    b.close();
+  });
+
+  it("协议错误帧不崩溃 server，后续连接仍可用", async () => {
+    const raw = await rawUpgrade(ctx.port, issueToken(aliceId));
+    // 0xC1 0x00 = FIN + RSV1 + opcode text、无 mask：无 permessage-deflate 协商时
+    // 服务端 receiver 抛 ProtocolError → WebSocket 'error'（无监听器则进程级未捕获异常）。
+    raw.write(Buffer.from([0xc1, 0x00]));
+    raw.destroy();
+    // 断言 server 未崩溃：正常客户端仍可完成一轮广播回环。
     const a = await connect(issueToken(aliceId));
     const b = await connect(issueToken(bobId));
     const bWait = nextEvent(b);
