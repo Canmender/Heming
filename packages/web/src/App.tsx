@@ -8,6 +8,7 @@ import { NavRail } from "./components/NavRail.js";
 import { FileTree, type TreeItem } from "./components/FileTree.js";
 import { WorkspacePage } from "./components/WorkspacePage.js";
 import { ChatPage } from "./components/ChatPage.js";
+import { HomePage } from "./components/HomePage.js";
 
 export function App() {
   const authStatus = useAuthStore((s) => s.status);
@@ -43,14 +44,12 @@ export function App() {
 
   const demoItems: TreeItem[] = [];
   const view =
-    page === "chat" ? (
+    page === "home" ? (
+      <HomePage />
+    ) : page === "chat" ? (
       <ChatPage />
     ) : page === "workspace" ? (
       <WorkspacePage />
-    ) : page === "home" ? (
-      <div className="p-6">
-        <h1 className="text-lg font-extrabold">主页</h1>
-      </div>
     ) : (
       <div className="p-6">
         <h1 className="text-lg font-extrabold">占位页面</h1>
