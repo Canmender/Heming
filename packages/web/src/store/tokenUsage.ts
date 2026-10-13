@@ -10,11 +10,15 @@ export interface UsageRecord {
 }
 
 export function monthKeyOf(iso: string): string {
-  return iso.slice(0, 7);
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 export function dayKeyOf(iso: string): string {
-  return iso.slice(0, 10);
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate(),
+  ).padStart(2, "0")}`;
 }
 
 export function summarizeMonth(

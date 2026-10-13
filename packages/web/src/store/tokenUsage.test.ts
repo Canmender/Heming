@@ -17,23 +17,27 @@ describe("tokenUsage：按天/按月重算，不存累计总值", () => {
   });
 
   it("record 只追加原始记录，不存 total 字段", () => {
-    useTokenUsageStore.getState().record("claude-sonnet-5", 1000, "2026-10-13T10:00:00.000Z");
-    useTokenUsageStore.getState().record("deepseek-v3", 200, "2026-10-13T11:00:00.000Z");
+    useTokenUsageStore
+      .getState()
+      .record("claude-sonnet-5", 1000, new Date(2026, 9, 13, 10).toISOString());
+    useTokenUsageStore
+      .getState()
+      .record("deepseek-v3", 200, new Date(2026, 9, 13, 11).toISOString());
     const s = useTokenUsageStore.getState();
     expect(s.records).toHaveLength(2);
     expect("total" in s).toBe(false);
   });
 
-  it("monthKeyOf/dayKeyOf 提取自然月与自然日", () => {
-    expect(monthKeyOf("2026-10-13T23:59:59.000Z")).toBe("2026-10");
-    expect(dayKeyOf("2026-10-13T00:00:01.000Z")).toBe("2026-10-13");
+  it("monthKeyOf/dayKeyOf 提取本地自然月与自然日", () => {
+    expect(monthKeyOf(new Date(2026, 9, 13, 23, 59, 59).toISOString())).toBe("2026-10");
+    expect(dayKeyOf(new Date(2026, 9, 13, 0, 0, 1).toISOString())).toBe("2026-10-13");
   });
 
   it("summarizeMonth 只统计当月、跨月不串", () => {
     const records = [
-      rec("a", 100, "2026-10-01T01:00:00.000Z"),
-      rec("a", 50, "2026-10-31T23:00:00.000Z"),
-      rec("b", 999, "2026-09-30T23:00:00.000Z"),
+      rec("a", 100, new Date(2026, 9, 1, 1).toISOString()),
+      rec("a", 50, new Date(2026, 9, 31, 23).toISOString()),
+      rec("b", 999, new Date(2026, 8, 30, 23).toISOString()),
     ];
     const s = summarizeMonth(records, "2026-10");
     expect(s.total).toBe(150);
@@ -51,9 +55,9 @@ describe("tokenUsage：按天/按月重算，不存累计总值", () => {
 
   it("dailyTotals 零值天不跳过，且每行自带按模型明细", () => {
     const records = [
-      rec("a", 100, "2026-10-01T01:00:00.000Z"),
-      rec("a", 40, "2026-10-03T01:00:00.000Z"),
-      rec("b", 6, "2026-10-03T05:00:00.000Z"),
+      rec("a", 100, new Date(2026, 9, 1, 1).toISOString()),
+      rec("a", 40, new Date(2026, 9, 3, 1).toISOString()),
+      rec("b", 6, new Date(2026, 9, 3, 5).toISOString()),
     ];
     const rows = dailyTotals(records, "2026-10");
     expect(rows).toHaveLength(31);
@@ -63,14 +67,14 @@ describe("tokenUsage：按天/按月重算，不存累计总值", () => {
   });
 
   it("持久化写入 records 数组", () => {
-    useTokenUsageStore.getState().record("qwen", 42, "2026-10-13T08:00:00.000Z");
+    useTokenUsageStore.getState().record("qwen", 42, new Date(2026, 9, 13, 8).toISOString());
     const saved = JSON.parse(localStorage.getItem("heming.tokenUsage")!);
     expect(saved.records).toHaveLength(1);
     expect(saved.records[0].tokens).toBe(42);
   });
 
   it("reset 清空记录", () => {
-    useTokenUsageStore.getState().record("qwen", 42, "2026-10-13T08:00:00.000Z");
+    useTokenUsageStore.getState().record("qwen", 42, new Date(2026, 9, 13, 8).toISOString());
     useTokenUsageStore.getState().reset();
     expect(useTokenUsageStore.getState().records).toEqual([]);
   });
