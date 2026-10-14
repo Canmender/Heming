@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import { login as apiLogin, register as apiRegister, fetchMe, setToken, getToken } from "../lib/api.js";
+import {
+  login as apiLogin,
+  register as apiRegister,
+  fetchMe,
+  setToken,
+  getToken,
+  setOnUnauthorized,
+} from "../lib/api.js";
 import type { User } from "@heming/shared";
 
 interface AuthState {
@@ -54,3 +61,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 }));
+
+// 模块底部注册（避免初始化顺序问题）：运行中任一请求 401 → 清会话回登录页
+setOnUnauthorized(() => useAuthStore.getState().logout());

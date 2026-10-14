@@ -17,7 +17,7 @@ describe("NavRail 图标轨（A 方案）", () => {
 
   it("渲染 5 个带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键）", () => {
     render(<NavRail />);
-    for (const name of ["主页 ⌘1", "工作区 ⌘2", "接口区 ⌘3", "记忆区 ⌘4", "设置区 ⌘5"]) {
+    for (const name of ["主页 Alt1", "工作区 Alt2", "接口区 Alt3", "记忆区 Alt4", "设置区 Alt5"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
   });
@@ -30,23 +30,23 @@ describe("NavRail 图标轨（A 方案）", () => {
 
   it("点击切页，选中项为 ink 底反白", () => {
     render(<NavRail />);
-    const homeBtn = screen.getByRole("button", { name: "主页 ⌘1" });
+    const homeBtn = screen.getByRole("button", { name: "主页 Alt1" });
     expect(homeBtn.className).toContain("bg-ink");
     expect(homeBtn.className).toContain("text-white");
 
-    fireEvent.click(screen.getByRole("button", { name: "接口区 ⌘3" }));
+    fireEvent.click(screen.getByRole("button", { name: "接口区 Alt3" }));
     expect(useUiStore.getState().page).toBe("interfaces");
 
-    const intfBtn = screen.getByRole("button", { name: "接口区 ⌘3" });
+    const intfBtn = screen.getByRole("button", { name: "接口区 Alt3" });
     expect(intfBtn.className).toContain("bg-ink");
     expect(intfBtn.className).toContain("text-white");
-    expect(screen.getByRole("button", { name: "主页 ⌘1" }).className).not.toContain("bg-ink");
+    expect(screen.getByRole("button", { name: "主页 Alt1" }).className).not.toContain("bg-ink");
   });
 
   it("悬停浮签内容常驻 DOM（名称 + 快捷键徽标，opacity 0 → group-hover 淡入）", () => {
     render(<NavRail />);
     const name = screen.getByText("主页"); // 浮签里的名称文本，供测试查询
-    expect(screen.getByText("⌘1")).toBeInTheDocument(); // 快捷键徽标
+    expect(screen.getByText("Alt1")).toBeInTheDocument(); // 快捷键徽标
     const tip = name.parentElement as HTMLElement;
     expect(tip.className).toContain("opacity-0");
     expect(tip.className).toContain("group-hover:opacity-100");
@@ -54,9 +54,17 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(tip.className).toContain("translate-x-1");
   });
 
-  it("底部头像悬停浮签为「{displayName} · 在线」", () => {
+  it("底部头像 aria-label 为「退出登录」，点击调 logout，浮签仍显示在线状态", () => {
     render(<NavRail />);
-    expect(screen.getByRole("button", { name: "爱丽丝 · 在线" })).toBeInTheDocument();
+    const avatar = screen.getByRole("button", { name: "退出登录" });
+    expect(screen.getByText("爱丽丝 · 在线")).toBeInTheDocument(); // 悬停浮签（span）
+    expect(useAuthStore.getState().user).not.toBeNull();
+
+    fireEvent.click(avatar);
+    const s = useAuthStore.getState();
+    expect(s.user).toBeNull();
+    expect(s.token).toBeNull();
+    expect(localStorage.getItem("heming.token")).toBeNull();
   });
 });
 
@@ -67,7 +75,7 @@ describe("NavPeek 会话隐藏态呼出提示", () => {
 
   it("窄条 + 呼出按钮，点击展开回图标轨", () => {
     render(<NavPeek />);
-    expect(screen.queryByRole("button", { name: "主页 ⌘1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "主页 Alt1" })).not.toBeInTheDocument();
     const btn = screen.getByRole("button", { name: "呼出导航" });
     fireEvent.click(btn);
     expect(useUiStore.getState().navCollapsed).toBe(false);

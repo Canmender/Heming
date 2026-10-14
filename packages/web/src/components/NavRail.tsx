@@ -38,7 +38,7 @@ export function NavRail() {
     >
       {ITEMS.map((it) => {
         const active = page === it.page || (it.page === "workspace" && page === "chat");
-        const shortcut = `⌘${it.digit}`;
+        const shortcut = `Alt${it.digit}`;
         return (
           <div key={it.page} className="group relative">
             <button
@@ -59,7 +59,8 @@ export function NavRail() {
       <div className="group relative mt-auto">
         <button
           type="button"
-          aria-label={`${who} · 在线`}
+          aria-label="退出登录"
+          onClick={() => useAuthStore.getState().logout()}
           className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[#ececec] text-[12px] font-bold text-[#555] transition-colors duration-150 hover:bg-[#f0f0f0]"
         >
           {who.slice(0, 1)}

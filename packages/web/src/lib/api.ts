@@ -20,13 +20,23 @@ export class ApiError extends Error {
   }
 }
 
+/** 运行中收到 401（token 失效/被撤销）时的全局回调，由 auth store 注册为 logout。 */
+let onUnauthorized: (() => void) | null = null;
+
+export function setOnUnauthorized(fn: (() => void) | null): void {
+  onUnauthorized = fn;
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(path, { ...init, headers });
   const body = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new ApiError(res.status, body.error ?? `http ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
+    throw new ApiError(res.status, body.error ?? `http ${res.status}`);
+  }
   return body as T;
 }
 
