@@ -1,0 +1,15 @@
+{
+  "name": "@heming/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron .",
+    "typecheck": "node --check main.js && node --check preload.js",
+    "test": "node --check main.js && node --check preload.js"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}
