@@ -179,6 +179,14 @@ describe("files API", () => {
     expect(noMime.status).toBe(400);
   });
 
+  it("删除不存在的文件返回 404", async () => {
+    const a = await register(app, "alice");
+    const del = await request(app)
+      .delete("/api/files/no-such-id")
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(del.status).toBe(404);
+  });
+
   it("size 扣除 base64 padding（aGk= → 2 字节）", async () => {
     const a = await register(app, "alice");
     const up = await request(app)

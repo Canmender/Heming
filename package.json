@@ -3,8 +3,8 @@
   "private": true,
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "test": "pnpm -r build && pnpm -r test",
+    "typecheck": "pnpm -r build && pnpm -r typecheck"
   },
   "engines": { "node": ">=20" },
   "pnpm": {

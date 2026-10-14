@@ -22,12 +22,16 @@ pnpm --filter @heming/web dev
 HEMING_DEV_URL=http://localhost:5173 pnpm --filter @heming/desktop dev
 ```
 
+> 桌面壳生产模式（`pnpm --filter @heming/desktop start`，直接加载 web 静态产物）需 M2 接通 API base；当前请用上面的 dev 模式（`HEMING_DEV_URL` 指向 Vite 开发服务器，由其代理 `/api`）。
+
 ## 测试
 
 ```bash
-pnpm -r test
-pnpm -r typecheck
+pnpm test        # 等价于 pnpm -r build && pnpm -r test
+pnpm typecheck   # 等价于 pnpm -r build && pnpm -r typecheck
 ```
+
+说明：根目录 `pnpm test` / `pnpm typecheck` 会先自动 `pnpm -r build`（`shared` 的类型产物被其他包经 workspace 引用，fresh clone 直接跑测试会因缺 `dist` 失败），再执行各包的 test/typecheck。
 
 ## 结构
 

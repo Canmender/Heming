@@ -10,7 +10,7 @@ import { WorkspacePage } from "./components/WorkspacePage.js";
 import { ChatPage } from "./components/ChatPage.js";
 import { HomePage } from "./components/HomePage.js";
 
-/** ⌘1–⌘5 / Ctrl+1–Ctrl+5 目标页（1 主页、2 工作区、3 接口区、4 记忆区、5 设置区）。 */
+/** Alt+1–Alt+5 目标页（1 主页、2 工作区、3 接口区、4 记忆区、5 设置区）。 */
 const SHORTCUT_PAGES: Page[] = [
   "home",
   "workspace",
@@ -71,21 +71,31 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // 未登录（登录页）或焦点在文本输入时，不响应任何壳层快捷键
+      if (!authUser) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          (t as HTMLElement).isContentEditable)
+      )
+        return;
+      // Alt+1–5 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）
+      if (e.altKey && !e.metaKey && !e.ctrlKey && ["1", "2", "3", "4", "5"].includes(e.key)) {
+        e.preventDefault();
+        setPage(SHORTCUT_PAGES["12345".indexOf(e.key)]);
+        return;
+      }
       if (!e.metaKey && !e.ctrlKey) return;
       if (e.key === "\\") {
         e.preventDefault();
         setNavCollapsed(!navCollapsed);
-        return;
-      }
-      const idx = "12345".indexOf(e.key);
-      if (idx !== -1) {
-        e.preventDefault();
-        setPage(SHORTCUT_PAGES[idx]);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navCollapsed, setNavCollapsed, setPage]);
+  }, [authUser, navCollapsed, setNavCollapsed, setPage]);
 
   if (!authUser) {
     return authStatus === "pending" && getToken() ? (

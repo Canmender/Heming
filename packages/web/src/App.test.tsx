@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { App } from "./App.js";
 import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
@@ -63,7 +63,7 @@ describe("App 认证门禁", () => {
     render(<App />);
 
     // 导航 A 方案：壳以图标轨呈现（原「已登录」状态页脚已随展开文字栏移除，改查导航按钮）
-    expect(await screen.findByRole("button", { name: "主页 ⌘1" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     expect(screen.getAllByText("主页").length).toBeGreaterThan(0); // 浮签名称文本
     expect(screen.getByRole("navigation", { name: "主导航" }).textContent).not.toMatch(
@@ -148,13 +148,14 @@ describe("App 右栏云端共享", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("上传失败（413）时 alert 提示且不刷新列表", async () => {
+  it("上传失败（413 非 JSON 体）时 alert 走 http 413 兜底且不刷新列表", async () => {
     setToken("t1");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url === "/api/me") return Promise.resolve(jsonRes(alice));
+      // 真实网关超限时多为纯文本体，res.json() 解析失败 → api.ts 兜底 `http ${status}`
       if (url === "/api/files" && init?.method === "POST")
-        return Promise.resolve(jsonRes({ error: "payload too large" }, 413));
+        return Promise.resolve(new Response("Payload too large", { status: 413 }));
       if (url === "/api/files") return Promise.resolve(jsonRes([]));
       // HomePage 挂载时的 health/工作区探测，正常应答避免噪声告警
       if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
@@ -189,7 +190,7 @@ describe("App 右栏云端共享", () => {
       const btn = await screen.findByRole("button", { name: "上传" });
       btn.click();
       await waitFor(() =>
-        expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining("payload too large")),
+        expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining("http 413")),
       );
       expect(errSpy).toHaveBeenCalledWith("上传失败", expect.any(Error));
       // 失败后不触发 refreshFiles 的 GET（仅 restore 的 /api/me 与初始 GET /api/files）
@@ -212,17 +213,23 @@ describe("App 导航快捷键与隐藏态", () => {
     useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
   });
 
-  it("Ctrl+1–5 直接切页，Ctrl+\ 切换导航显隐", async () => {
+  it("Alt+1–5 直接切页，Ctrl+\ 切换导航显隐；Ctrl+数字 不再切页", async () => {
     setToken("t1");
     mockFetch();
     render(<App />);
-    await screen.findByRole("button", { name: "主页 ⌘1" });
+    await screen.findByRole("button", { name: "主页 Alt1" });
 
-    fireEvent.keyDown(window, { key: "2", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "2", altKey: true });
     expect(useUiStore.getState().page).toBe("workspace");
-    fireEvent.keyDown(window, { key: "4", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "4", altKey: true });
     expect(useUiStore.getState().page).toBe("memory");
-    fireEvent.keyDown(window, { key: "1", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "1", altKey: true });
+    expect(useUiStore.getState().page).toBe("home");
+
+    // I5：旧的 Ctrl/⌘+数字 组合不再切页（避开浏览器/输入法冲突）
+    fireEvent.keyDown(window, { key: "2", ctrlKey: true });
+    expect(useUiStore.getState().page).toBe("home");
+    fireEvent.keyDown(window, { key: "3", metaKey: true });
     expect(useUiStore.getState().page).toBe("home");
 
     fireEvent.keyDown(window, { key: "\\", ctrlKey: true });
@@ -232,7 +239,35 @@ describe("App 导航快捷键与隐藏态", () => {
 
     fireEvent.keyDown(window, { key: "\\", ctrlKey: true });
     expect(useUiStore.getState().navCollapsed).toBe(false);
-    expect(await screen.findByRole("button", { name: "主页 ⌘1" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
+  });
+
+  it("焦点在输入框 / 未登录时，Alt+数字 不切页", async () => {
+    setToken("t1");
+    mockFetch();
+    const { container } = render(<App />);
+    await screen.findByRole("button", { name: "主页 Alt1" });
+
+    // 焦点在文本输入（右栏上传按钮无 input，用导航区外的窗口内 input 模拟）
+    const probe = document.createElement("input");
+    container.appendChild(probe);
+    probe.focus();
+    fireEvent.keyDown(probe, { key: "3", altKey: true });
+    expect(useUiStore.getState().page).toBe("home");
+    probe.remove();
+    fireEvent.keyDown(window, { key: "3", altKey: true });
+    expect(useUiStore.getState().page).toBe("interfaces");
+
+    // 未登录：App 走登录页分支，快捷键静默不改 page
+    act(() => {
+      setToken(null);
+      useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
+      useUiStore.setState({ page: "home" });
+    });
+    render(<App />);
+    fireEvent.keyDown(window, { key: "2", altKey: true });
+    expect(useUiStore.getState().page).toBe("home");
+    expect(screen.getAllByText("登录你的账号").length).toBeGreaterThan(0);
   });
 
   it("导航收起态（如进入会话后）左缘呼出提示可点击展开", async () => {
@@ -247,6 +282,6 @@ describe("App 导航快捷键与隐藏态", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "呼出导航" }));
     expect(useUiStore.getState().navCollapsed).toBe(false);
-    expect(await screen.findByRole("button", { name: "主页 ⌘1" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
   });
 });
