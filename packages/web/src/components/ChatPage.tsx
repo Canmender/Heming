@@ -15,6 +15,7 @@ export function ChatPage() {
   const appendMessage = useChatStore((s) => s.appendMessage);
   const me = useAuthStore((s) => s.user);
   const [draft, setDraft] = useState("");
+  const [sendNotice, setSendNotice] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const wsHandleRef = useRef<WsHandle | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -34,15 +35,19 @@ export function ChatPage() {
           console.warn(`[${e.code}] ${e.message}`);
         }
       },
-      onOpen: () => setConnected(true),
+      onOpen: () => {
+        setConnected(true);
+        // 断线重连成功：补拉断档消息（setMessages 是合并去重语义，幂等）
+        void fetchMessages(convId).then((msgs) => setMessages(convId, msgs));
+      },
       onClose: () => setConnected(false),
     });
     wsHandleRef.current = handle;
     return () => {
-      handle.close();
+      handle?.close();
       wsHandleRef.current = null;
     };
-  }, [convId, appendMessage]);
+  }, [convId, appendMessage, setMessages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -52,12 +57,19 @@ export function ChatPage() {
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
-    wsHandleRef.current?.send({
+    const handle = wsHandleRef.current;
+    if (!handle) {
+      // 保留草稿，给出可见提示（不静默丢弃）
+      setSendNotice("连接未就绪，消息未发送");
+      return;
+    }
+    handle.send({
       type: "send_message",
       conversationId: convId,
       payload: { text },
     });
     setDraft("");
+    setSendNotice(null);
   };
 
   return (
@@ -90,16 +102,26 @@ export function ChatPage() {
         ))}
         <div ref={bottomRef} />
       </div>
-      <form onSubmit={send} className="flex gap-2 border-t border-line-soft px-5 py-3">
-        <input
-          className="flex-1 rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
-          placeholder="输入消息…"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <button type="submit" className="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white">
-          发送
-        </button>
+      <form onSubmit={send} className="border-t border-line-soft">
+        {sendNotice && (
+          <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
+            {sendNotice}
+          </p>
+        )}
+        <div className="flex gap-2 px-5 py-3">
+          <input
+            className="flex-1 rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
+            placeholder="输入消息…"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <button
+            type="submit"
+            className="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white"
+          >
+            发送
+          </button>
+        </div>
       </form>
     </div>
   );
