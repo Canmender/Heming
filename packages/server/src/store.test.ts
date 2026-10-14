@@ -51,4 +51,30 @@ describe("memory store", () => {
     expect(store.isMember(c1.id, alice.id)).toBe(true);
     expect(store.isMember(c1.id, "stranger")).toBe(false);
   });
+
+  it("updateProfile 更新昵称与 avatar，返回新对象（旧引用不被原地篡改）", () => {
+    const before = store.findUserByUsername("alice")!.user;
+    const updated = store.updateProfile(before.id, {
+      displayName: "新名",
+      avatar: "data:image/png;base64,AAAA",
+    });
+    expect(updated.displayName).toBe("新名");
+    expect(updated.avatar).toBe("data:image/png;base64,AAAA");
+    expect(updated).not.toBe(before);
+    expect(before.displayName).toBe("爱丽丝");
+    expect(store.findUserById(before.id)!.displayName).toBe("新名");
+    expect(store.findUserById(before.id)!.avatar).toBe("data:image/png;base64,AAAA");
+  });
+
+  it("updateProfile 省略 avatar 时保留原值", () => {
+    const alice = store.findUserByUsername("alice")!.user;
+    store.updateProfile(alice.id, { displayName: "A", avatar: "data:image/png;base64,QQ==" });
+    const r = store.updateProfile(alice.id, { displayName: "B" });
+    expect(r.displayName).toBe("B");
+    expect(r.avatar).toBe("data:image/png;base64,QQ==");
+  });
+
+  it("updateProfile 未知用户抛错", () => {
+    expect(() => store.updateProfile("nope", { displayName: "X" })).toThrow("user not found");
+  });
 });

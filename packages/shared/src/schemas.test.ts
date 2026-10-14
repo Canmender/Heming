@@ -5,6 +5,8 @@ import {
   MessageSchema,
   RegisterBodySchema,
   CreateFileBodySchema,
+  UpdateProfileBodySchema,
+  UserSchema,
 } from "./schemas.js";
 
 describe("WsClientEventSchema", () => {
@@ -91,5 +93,47 @@ describe("CreateFileBodySchema", () => {
       CreateFileBodySchema.safeParse({ name: "x".repeat(256), mime: "text/plain", contentBase64: "aGk=" })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("UpdateProfileBodySchema", () => {
+  it("接受 displayName + data URL avatar", () => {
+    const r = UpdateProfileBodySchema.safeParse({
+      displayName: "和鸣",
+      avatar: `data:image/png;base64,${"A".repeat(64)}`,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("接受仅 displayName（avatar 可省略）", () => {
+    expect(UpdateProfileBodySchema.safeParse({ displayName: "Alice" }).success).toBe(true);
+  });
+
+  it("拒绝空 displayName", () => {
+    expect(UpdateProfileBodySchema.safeParse({ displayName: "" }).success).toBe(false);
+  });
+
+  it("拒绝超 64 字 displayName", () => {
+    expect(UpdateProfileBodySchema.safeParse({ displayName: "名".repeat(65) }).success).toBe(false);
+  });
+
+  it("拒绝超 600_000 字符的 avatar", () => {
+    const r = UpdateProfileBodySchema.safeParse({
+      displayName: "Alice",
+      avatar: "x".repeat(600_001),
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("UserSchema.avatar", () => {
+  it("接受存入 data URL 头像的 User（与 UpdateProfileBody 上限一致）", () => {
+    const r = UserSchema.safeParse({
+      id: "u1",
+      username: "alice",
+      displayName: "Alice",
+      avatar: `data:image/png;base64,${"A".repeat(1000)}`,
+    });
+    expect(r.success).toBe(true);
   });
 });

@@ -12,6 +12,8 @@ export interface Store {
   createUser(username: string, passwordHash: string, displayName: string): User;
   findUserByUsername(username: string): { user: User; passwordHash: string } | null;
   findUserById(id: string): User | null;
+  /** avatar 省略时保留原值。返回新 User 对象（见 createMemoryStore 内注释）。 */
+  updateProfile(userId: string, patch: { displayName: string; avatar?: string }): User;
   createFriendRequest(fromId: string, toUsername: string): { id: string; from: User; to: User; status: "pending" };
   acceptFriendRequest(requestId: string, userId: string): { id: string; user: User };
   listFriends(userId: string): { id: string; user: User }[];
@@ -58,6 +60,20 @@ export function createMemoryStore(): Store {
     },
     findUserById(id) {
       return users.get(id)?.user ?? null;
+    },
+    updateProfile(userId, patch) {
+      const row = users.get(userId);
+      if (!row) throw new Error("user not found");
+      // 新对象替换而非原地改：findUser* 返回内部引用，原地修改会让持有旧引用的
+      // 调用方（含测试）观察到非预期副作用；好友申请的 status 原地改是既有的
+      // 小对象模式，用户对象更大且会被多处持有，故取替换语义。
+      const user: User = {
+        ...row.user,
+        displayName: patch.displayName,
+        ...(patch.avatar !== undefined ? { avatar: patch.avatar } : {}),
+      };
+      users.set(userId, { user, passwordHash: row.passwordHash });
+      return user;
     },
     createFriendRequest(fromId, toUsername) {
       mustUser(fromId);

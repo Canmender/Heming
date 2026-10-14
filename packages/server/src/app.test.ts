@@ -161,6 +161,63 @@ describe("auth + friends + conversations API", () => {
   });
 });
 
+describe("PUT /api/me 个人资料", () => {
+  let app: ReturnType<typeof createApp>;
+  let token: string;
+
+  beforeEach(async () => {
+    app = createApp(createMemoryStore(), { allowRegister: true });
+    token = (await register(app, "alice")).token;
+  });
+
+  it("改昵称成功，GET /api/me 返回最新", async () => {
+    const res = await request(app)
+      .put("/api/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ displayName: "新昵称" });
+    expect(res.status).toBe(200);
+    expect(res.body.displayName).toBe("新昵称");
+    expect(res.body.username).toBe("alice");
+
+    const me = await request(app).get("/api/me").set("Authorization", `Bearer ${token}`);
+    expect(me.body.displayName).toBe("新昵称");
+  });
+
+  it("写入 avatar 后 GET /api/me 返回", async () => {
+    const avatar = `data:image/png;base64,${"A".repeat(64)}`;
+    const res = await request(app)
+      .put("/api/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ displayName: "Alice", avatar });
+    expect(res.status).toBe(200);
+    expect(res.body.avatar).toBe(avatar);
+
+    const me = await request(app).get("/api/me").set("Authorization", `Bearer ${token}`);
+    expect(me.body.avatar).toBe(avatar);
+  });
+
+  it("空 displayName 返回 400", async () => {
+    const res = await request(app)
+      .put("/api/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ displayName: "" });
+    expect(res.status).toBe(400);
+  });
+
+  it("avatar 超 600_000 返回 400", async () => {
+    const res = await request(app)
+      .put("/api/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ displayName: "Alice", avatar: "x".repeat(600_001) });
+    expect(res.status).toBe(400);
+  });
+
+  it("无 token 返回 401", async () => {
+    const res = await request(app).put("/api/me").send({ displayName: "X" });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("files API", () => {
   let app: ReturnType<typeof createApp>;
   beforeEach(() => {

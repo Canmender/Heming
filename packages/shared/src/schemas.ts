@@ -4,7 +4,8 @@ export const UserSchema = z.object({
   id: z.string().min(1),
   username: z.string().min(3).max(32),
   displayName: z.string().min(1).max(64),
-  avatar: z.string().max(512).optional(),
+  // data URL base64 头像，与 UpdateProfileBodySchema.avatar 同上限（约 450KB 图片）
+  avatar: z.string().max(600_000).optional(),
 });
 export type User = z.infer<typeof UserSchema>;
 
@@ -64,6 +65,13 @@ export const LoginBodySchema = z.object({
   password: z.string().min(6).max(128),
 });
 export type LoginBody = z.infer<typeof LoginBodySchema>;
+
+/** PUT /api/me：avatar 为 data URL base64 字符串（如 data:image/png;base64,...），上限约 450KB 图片。 */
+export const UpdateProfileBodySchema = z.object({
+  displayName: z.string().min(1).max(64),
+  avatar: z.string().max(600_000).optional(),
+});
+export type UpdateProfileBody = z.infer<typeof UpdateProfileBodySchema>;
 
 export const CreateConversationBodySchema = z.object({ peerId: z.string().min(1) });
 export const CreateFriendRequestBodySchema = z.object({ username: z.string().min(3).max(32) });

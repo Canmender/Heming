@@ -3,6 +3,7 @@ import { scryptSync, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import {
   RegisterBodySchema,
   LoginBodySchema,
+  UpdateProfileBodySchema,
   CreateConversationBodySchema,
   CreateFriendRequestBodySchema,
   CreateFileBodySchema,
@@ -105,6 +106,19 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     res.json(user);
+  });
+
+  app.put("/api/me", authOnly, (req, res) => {
+    const parsed = UpdateProfileBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    try {
+      res.json(store.updateProfile(userId(req), parsed.data));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
   });
 
   app.get("/api/friends", authOnly, (req, res) => {
