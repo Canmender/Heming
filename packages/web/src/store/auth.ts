@@ -23,7 +23,8 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => ({
   token: getToken(),
   user: null,
-  status: "idle",
+  // 带 token 启动即 pending：首帧渲染「加载中…」而非闪一帧登录页（restore 随后接管）
+  status: getToken() ? "pending" : "idle",
   error: null,
   async login(username, password) {
     set({ status: "pending", error: null });
