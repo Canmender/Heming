@@ -64,15 +64,6 @@ export function seedUsersFromEnv(
   if (!spec || spec.trim() === "") return;
   try {
     const users = parseSeedUsers(spec);
-    // LoginBodySchema 要求密码 6-128 位；短/超长密码的账号登录接口会 400，告警提示。
-    const bad = users.filter((u) => u.password.length < 6 || u.password.length > 128);
-    if (bad.length > 0) {
-      log(
-        `seed: warning: password length outside login range (6-128), account(s) may fail to login: ${bad
-          .map((u) => u.username)
-          .join(",")}`,
-      );
-    }
     const { created, skipped } = seedUsers(store, users);
     log(`seed: created=${created.join(",") || "-"} skipped=${skipped.join(",") || "-"}`);
   } catch (e) {

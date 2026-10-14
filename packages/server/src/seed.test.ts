@@ -94,10 +94,11 @@ describe("seedUsersFromEnv", () => {
     expect(store.findUserByUsername("badspec")).toBeNull();
   });
 
-  it("密码长度不合规（<6，无法通过登录校验）仍播种但告警", () => {
+  it("短密码（如 admin/admin）照常播种：登录端不规定密码策略", () => {
     seedUsersFromEnv(store, "admin:admin", log);
-    expect(store.findUserByUsername("admin")).not.toBeNull();
-    expect(logs.join("\n")).toContain("admin");
-    expect(logs.join("\n")).toMatch(/无法登录|login/);
+    const row = store.findUserByUsername("admin");
+    expect(row).not.toBeNull();
+    expect(row && verifyPassword("admin", row.passwordHash)).toBe(true);
+    expect(logs.join("\n")).not.toContain("warning");
   });
 });

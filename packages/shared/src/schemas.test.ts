@@ -4,6 +4,7 @@ import {
   WsServerEventSchema,
   MessageSchema,
   RegisterBodySchema,
+  LoginBodySchema,
   CreateFileBodySchema,
   UpdateProfileBodySchema,
   UserSchema,
@@ -79,6 +80,17 @@ describe("RegisterBodySchema", () => {
   it("username 至少 3 字符", () => {
     expect(RegisterBodySchema.safeParse({ username: "ab", password: "p123456", displayName: "甲" }).success).toBe(false);
     expect(RegisterBodySchema.safeParse({ username: "abc", password: "p123456", displayName: "甲" }).success).toBe(true);
+  });
+});
+
+describe("LoginBodySchema", () => {
+  it("登录端不规定密码策略：短密码（播种账号 admin/admin）body 合法", () => {
+    expect(LoginBodySchema.safeParse({ username: "admin", password: "admin" }).success).toBe(true);
+    expect(LoginBodySchema.safeParse({ username: "admin", password: "a" }).success).toBe(true);
+  });
+
+  it("仍拒绝空密码", () => {
+    expect(LoginBodySchema.safeParse({ username: "admin", password: "" }).success).toBe(false);
   });
 });
 

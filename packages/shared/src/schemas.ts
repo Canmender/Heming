@@ -62,7 +62,9 @@ export type RegisterBody = z.infer<typeof RegisterBodySchema>;
 
 export const LoginBodySchema = z.object({
   username: z.string().min(3).max(32),
-  password: z.string().min(6).max(128),
+  // 登录端不规定密码策略（策略在注册侧 RegisterBodySchema），
+  // 否则 HEMING_SEED_USERS 播种的短密码账号（如 admin/admin）无法登录。
+  password: z.string().min(1).max(128),
 });
 export type LoginBody = z.infer<typeof LoginBodySchema>;
 

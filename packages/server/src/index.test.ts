@@ -6,7 +6,8 @@ const ENV = "HEMING_SEED_USERS";
 let ctx: Awaited<ReturnType<typeof startServer>>;
 
 beforeAll(async () => {
-  process.env[ENV] = "root:rootpass1";
+  // admin:admin 刻意为 5 位短密码：登录端不规定密码策略，播种账号须可登录。
+  process.env[ENV] = "root:rootpass1,admin:admin";
   ctx = await startServer(0);
 });
 
@@ -23,6 +24,15 @@ describe("startServer 环境变量播种接线", () => {
     expect(login.status).toBe(200);
     expect(login.body.user.username).toBe("root");
     expect(login.body.user.displayName).toBe("root");
+  });
+
+  it("5 位短密码播种账号（admin/admin）可登录并拿到 token", async () => {
+    const login = await request(ctx.server)
+      .post("/api/auth/login")
+      .send({ username: "admin", password: "admin" });
+    expect(login.status).toBe(200);
+    expect(login.body.token).toBeTruthy();
+    expect(login.body.user.username).toBe("admin");
   });
 
   it("未设 HEMING_ALLOW_REGISTER 时注册仍关闭", async () => {
