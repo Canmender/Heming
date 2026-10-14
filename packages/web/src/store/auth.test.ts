@@ -99,4 +99,22 @@ describe("auth store", () => {
     expect(s.status).toBe("idle");
     expect(localStorage.getItem("heming.token")).toBeNull();
   });
+
+  // 放在最后：resetModules 会重建模块注册表，放在前面会污染前面用例的动态 import
+  it("模块初始 status：有 token → pending（刷新首帧显示加载中），无 token → idle", async () => {
+    localStorage.setItem("heming.token", "t1");
+    vi.resetModules();
+    try {
+      const withToken = await import("./auth.js");
+      expect(withToken.useAuthStore.getState().status).toBe("pending");
+
+      localStorage.removeItem("heming.token");
+      vi.resetModules();
+      const withoutToken = await import("./auth.js");
+      expect(withoutToken.useAuthStore.getState().status).toBe("idle");
+    } finally {
+      vi.resetModules();
+      localStorage.removeItem("heming.token");
+    }
+  });
 });
