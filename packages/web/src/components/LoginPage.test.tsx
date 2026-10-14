@@ -21,6 +21,14 @@ describe("LoginPage", () => {
     expect(screen.getByText("登录你的账号")).toBeInTheDocument();
   });
 
+  it("仅登录：不渲染注册切换按钮与昵称输入（服务端注册默认 403）", () => {
+    render(<LoginPage />);
+    expect(screen.queryByRole("button", { name: "没有账号？注册" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "注册" })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("昵称")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "已有账号？登录" })).not.toBeInTheDocument();
+  });
+
   it("提交调用 login：fetch 收到正确 body，成功后 store authed 并持久化 token", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

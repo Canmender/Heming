@@ -42,12 +42,6 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 type AuthResponse = { token: string; user: User };
 
-export const register = (username: string, password: string, displayName: string) =>
-  api<AuthResponse>("/api/auth/register", {
-    method: "POST",
-    body: JSON.stringify({ username, password, displayName }),
-  });
-
 export const login = (username: string, password: string) =>
   api<AuthResponse>("/api/auth/login", {
     method: "POST",

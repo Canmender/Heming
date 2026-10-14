@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import {
   login as apiLogin,
-  register as apiRegister,
   fetchMe,
   setToken,
   getToken,
@@ -15,7 +14,6 @@ interface AuthState {
   status: "idle" | "pending" | "authed" | "error";
   error: string | null;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string, displayName: string) => Promise<void>;
   logout: () => void;
   restore: () => Promise<void>;
 }
@@ -29,16 +27,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ status: "pending", error: null });
     try {
       const { token, user } = await apiLogin(username, password);
-      setToken(token);
-      set({ token, user, status: "authed" });
-    } catch (e) {
-      set({ status: "error", error: (e as Error).message });
-    }
-  },
-  async register(username, password, displayName) {
-    set({ status: "pending", error: null });
-    try {
-      const { token, user } = await apiRegister(username, password, displayName);
       setToken(token);
       set({ token, user, status: "authed" });
     } catch (e) {
