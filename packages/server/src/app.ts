@@ -51,6 +51,22 @@ export function envFlagEnabled(value: string | undefined): boolean {
   return v === "1" || v === "true";
 }
 
+/**
+ * 最小 CORS 中间件（手写，不引 cors 依赖）。
+ * 鉴权走 Bearer token 而非 cookie，故 `Allow-Origin: *` 不会带来凭据泄露风险；
+ * 预检 OPTIONS 直接 204 短路，不进 JSON 解析与业务路由。
+ */
+function cors(req: Request, res: Response, next: NextFunction): void {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type");
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+  next();
+}
+
 export interface CreateAppOptions {
   /** 覆盖注册开关（优先于 HEMING_ALLOW_REGISTER），测试注入用；缺省读环境变量。 */
   allowRegister?: boolean;
@@ -60,6 +76,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   // 环境变量在 createApp 调用时读取（非 module 级缓存），便于测试内 set/delete 后注入。
   const allowRegister = opts?.allowRegister ?? envFlagEnabled(process.env.HEMING_ALLOW_REGISTER);
   const app = express();
+  app.use(cors);
   app.use(express.json({ limit: "8mb" }));
 
   app.get("/api/health", (_req, res) => {

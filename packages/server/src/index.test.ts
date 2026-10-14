@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import { startServer } from "./index.js";
 
@@ -43,5 +43,56 @@ describe("startServer 环境变量播种接线", () => {
     });
     expect(res.status).toBe(403);
     expect(res.body).toEqual({ error: "registration disabled" });
+  });
+});
+
+describe("HOST 绑定地址可配（容器内 0.0.0.0 供 nginx 访问）", () => {
+  let savedHost: string | undefined;
+
+  beforeEach(() => {
+    savedHost = process.env.HOST;
+    delete process.env.HOST;
+  });
+  afterEach(() => {
+    if (savedHost === undefined) delete process.env.HOST;
+    else process.env.HOST = savedHost;
+  });
+
+  function boundAddress(c: Awaited<ReturnType<typeof startServer>>): string {
+    const addr = c.server.address();
+    if (typeof addr !== "object" || addr === null) throw new Error("server not listening");
+    return addr.address;
+  }
+
+  it("未设 HOST 时默认绑定 127.0.0.1（本地安全默认不变）", async () => {
+    const c = await startServer(0);
+    try {
+      expect(boundAddress(c)).toBe("127.0.0.1");
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("HOST=0.0.0.0 时绑定全网卡，且 loopback 仍可访问", async () => {
+    process.env.HOST = "0.0.0.0";
+    const c = await startServer(0);
+    try {
+      expect(boundAddress(c)).toBe("0.0.0.0");
+      const res = await request(c.server).get("/api/health");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ok: true });
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("HOST 空串视为未设置（回落 127.0.0.1）", async () => {
+    process.env.HOST = "   ";
+    const c = await startServer(0);
+    try {
+      expect(boundAddress(c)).toBe("127.0.0.1");
+    } finally {
+      await c.close();
+    }
   });
 });

@@ -304,3 +304,40 @@ describe("files API", () => {
     expect(up.body.size).toBe(2);
   });
 });
+
+describe("CORS 兜底（浏览器直连场景，手写中间件无依赖）", () => {
+  let app: App;
+  beforeEach(() => {
+    app = createApp(createMemoryStore());
+  });
+
+  it("OPTIONS 预检直接 204，带完整 CORS 头且不进业务路由", async () => {
+    const res = await request(app)
+      .options("/api/auth/login")
+      .set("Origin", "http://47.92.39.184")
+      .set("Access-Control-Request-Method", "POST")
+      .set("Access-Control-Request-Headers", "Content-Type");
+    expect(res.status).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe("*");
+    expect(res.headers["access-control-allow-methods"]).toBe("GET,POST,PUT,DELETE,OPTIONS");
+    expect(res.headers["access-control-allow-headers"]).toBe("Authorization,Content-Type");
+    expect(res.body).toEqual({});
+  });
+
+  it("简单请求（GET /api/health）响应带 Allow-Origin: *", async () => {
+    const res = await request(app)
+      .get("/api/health")
+      .set("Origin", "http://47.92.39.184");
+    expect(res.status).toBe(200);
+    expect(res.headers["access-control-allow-origin"]).toBe("*");
+  });
+
+  it("带鉴权的请求（401）同样带 CORS 头（错误响应不漏头）", async () => {
+    const res = await request(app)
+      .get("/api/me")
+      .set("Origin", "http://elsewhere.example");
+    expect(res.status).toBe(401);
+    expect(res.headers["access-control-allow-origin"]).toBe("*");
+    expect(res.headers["access-control-allow-headers"]).toBe("Authorization,Content-Type");
+  });
+});
