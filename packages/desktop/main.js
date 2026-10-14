@@ -1,39 +1,246 @@
-const { app, BrowserWindow } = require("electron");
+"use strict";
+const { app, BrowserWindow, Menu, dialog, shell, screen } = require("electron");
 const path = require("node:path");
+const { loadWindowState, saveWindowState } = require("./window-state");
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    backgroundColor: "#ffffff",
-    title: "和鸣",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
+const pkg = require("./package.json");
+const APP_DEFAULT_URL = "http://47.92.39.184";
 
-  // 加载地址优先级：HEMING_DEV_URL（本地开发）> HEMING_WEB_URL > 默认远程（云端中心化，file:// 静态产物方案废弃）
-  const devUrl = process.env.HEMING_DEV_URL;
-  const webUrl = process.env.HEMING_WEB_URL;
-  if (devUrl) {
-    win.loadURL(devUrl);
-  } else if (webUrl) {
-    win.loadURL(webUrl);
-  } else {
-    win.loadURL("http://47.92.39.184");
+// 加载地址优先级：HEMING_DEV_URL（本地开发）> HEMING_WEB_URL > 默认远程（云端中心化）
+function resolveAppUrl(env) {
+  const e = env || process.env;
+  return e.HEMING_DEV_URL || e.HEMING_WEB_URL || APP_DEFAULT_URL;
+}
+
+function isSafeExternalUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:" || u.protocol === "mailto:";
+  } catch {
+    return false;
   }
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+// 协议白名单内才交给系统浏览器（http/https/mailto），失败仅记日志
+function openInSystemBrowser(url) {
+  if (!isSafeExternalUrl(url)) return;
+  shell.openExternal(url).catch((err) => {
+    console.log("[heming] 打开系统浏览器失败:", (err && err.message) || err);
   });
-});
+}
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+function originOf(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+// 主 frame 导航白名单：本应用加载源 + 默认远程源 + localhost（dev 代理等）。
+// 命中白名单 = 站内路由跳转放行；否则视为「离开应用」，转系统浏览器。
+function isAllowedNavigation(url, appUrl) {
+  const target = originOf(url);
+  if (!target) return false;
+  if (target === originOf(appUrl)) return true;
+  if (target === originOf(APP_DEFAULT_URL)) return true;
+  try {
+    const host = new URL(url).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function displayWorkAreas() {
+  try {
+    return screen.getAllDisplays().map((d) => d.workArea);
+  } catch {
+    return [];
+  }
+}
+
+// 单例锁：拿不到锁直接退出；second-instance 时聚焦已存在窗口
+const gotLock = app.requestSingleInstanceLock();
+
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    console.log("[heming] 检测到第二实例，聚焦已有窗口");
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  });
+
+  function windowStateFile() {
+    return path.join(app.getPath("userData"), "window-state.json");
+  }
+
+  function createWindow() {
+    const appUrl = resolveAppUrl();
+    const bounds = loadWindowState(windowStateFile(), displayWorkAreas());
+
+    const win = new BrowserWindow({
+      ...bounds,
+      backgroundColor: "#ffffff",
+      title: "和鸣",
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+
+    // 窗口位置尺寸记忆：resize/move 后 debounce 500ms 落盘，关闭时立即落盘
+    let saveTimer = null;
+    const scheduleSave = () => {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        saveTimer = null;
+        saveWindowState(windowStateFile(), win.getBounds());
+      }, 500);
+    };
+    win.on("resize", scheduleSave);
+    win.on("move", scheduleSave);
+    win.on("close", () => {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      saveWindowState(windowStateFile(), win.getBounds());
+    });
+
+    // window.open / target=_blank 一律交给系统浏览器，主窗口不开新页
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      console.log("[heming] 新窗口请求转系统浏览器打开:", url);
+      openInSystemBrowser(url);
+      return { action: "deny" };
+    });
+
+    // 主 frame 导航拦截：离开白名单的跳转改走系统浏览器（站内路由不受影响）
+    win.webContents.on("will-navigate", (event, url) => {
+      if (isAllowedNavigation(url, appUrl)) return;
+      event.preventDefault();
+      console.log("[heming] 拦截离开应用的导航，转系统浏览器打开:", url);
+      openInSystemBrowser(url);
+    });
+
+    // 开发模式 F12 快捷键打开开发者工具（Ctrl+Shift+I 由菜单 role 提供）
+    if (!app.isPackaged) {
+      win.webContents.on("before-input-event", (event, input) => {
+        if (input.type === "keyDown" && input.key === "F12") {
+          win.webContents.toggleDevTools();
+          event.preventDefault();
+        }
+      });
+    }
+
+    win.loadURL(appUrl);
+    return win;
+  }
+
+  function setupMenu() {
+    const isDev = !app.isPackaged;
+    const template = [];
+
+    // macOS 归属菜单（简化：关于 + 退出）；Windows 不需要
+    if (process.platform === "darwin") {
+      template.push({
+        label: "和鸣",
+        submenu: [
+          { role: "about", label: "关于和鸣" },
+          { type: "separator" },
+          { role: "quit", label: "退出和鸣" },
+        ],
+      });
+    }
+
+    template.push(
+      {
+        label: "文件",
+        submenu: [{ role: "quit", label: "退出" }],
+      },
+      {
+        label: "编辑",
+        submenu: [
+          { role: "undo", label: "撤销" },
+          { role: "redo", label: "重做" },
+          { type: "separator" },
+          { role: "cut", label: "剪切" },
+          { role: "copy", label: "复制" },
+          { role: "paste", label: "粘贴" },
+          { type: "separator" },
+          { role: "selectAll", label: "全选" },
+        ],
+      },
+      {
+        label: "视图",
+        submenu: [
+          { role: "reload", label: "重新加载" },
+          { type: "separator" },
+          { role: "zoomIn", label: "放大" },
+          { role: "zoomOut", label: "缩小" },
+          { role: "resetZoom", label: "恢复缩放" },
+          { type: "separator" },
+          // 开发者工具仅 dev 模式可见（生产隐藏）
+          ...(isDev
+            ? [
+                { role: "toggleDevTools", label: "开发者工具" },
+                { type: "separator" },
+              ]
+            : []),
+          { role: "togglefullscreen", label: "全屏" },
+        ],
+      },
+      {
+        label: "窗口",
+        submenu: [
+          { role: "minimize", label: "最小化" },
+          {
+            label: "缩放",
+            click: (menuItem, browserWindow) => {
+              if (!browserWindow) return;
+              if (browserWindow.isMaximized()) browserWindow.unmaximize();
+              else browserWindow.maximize();
+            },
+          },
+          { role: "close", label: "关闭" },
+        ],
+      },
+      {
+        label: "帮助",
+        submenu: [
+          {
+            label: "关于和鸣",
+            click: async () => {
+              await dialog.showMessageBox({
+                type: "info",
+                title: "关于和鸣",
+                message: "和鸣",
+                detail: `版本 ${pkg.version}`,
+                buttons: ["确定"],
+              });
+            },
+          },
+        ],
+      }
+    );
+
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  }
+
+  app.whenReady().then(() => {
+    setupMenu();
+    createWindow();
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
+}
