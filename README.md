@@ -22,7 +22,17 @@ pnpm --filter @heming/web dev
 HEMING_DEV_URL=http://localhost:5173 pnpm --filter @heming/desktop dev
 ```
 
-> 桌面壳加载地址优先级：`HEMING_DEV_URL`（本地开发）> `HEMING_WEB_URL`（自定义生产地址）> 默认远程 `http://47.92.39.184`。生产模式（`pnpm --filter @heming/desktop start`）默认直接加载线上 web（云端中心化，不再加载本地 file:// 静态产物）。
+> 桌面壳（`packages/desktop`）是原生 Electron 外壳，不打包本地 web 产物，直接加载远程页面。加载地址优先级：`HEMING_DEV_URL`（本地开发，如 `http://localhost:5173`）> `HEMING_WEB_URL`（自定义生产地址）> 默认云端 `http://47.92.39.184`。`pnpm --filter @heming/desktop start` 即以默认云端地址启动。
+
+## 打包 Windows 安装包
+
+```bash
+# 国内网络需先设置 electron-builder 二进制镜像（NSIS / winCodeSign 下载）
+export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+pnpm --filter @heming/desktop dist    # 或根目录：pnpm dist:desktop
+```
+
+产物在 `packages/desktop/release/`（NSIS 安装包，`oneClick: false` 可选安装目录，快捷方式名「和鸣」）。暂未配置应用图标，使用 Electron 默认图标，待提供 `.ico` 后补 `build.win.icon`。
 
 ## 测试
 
