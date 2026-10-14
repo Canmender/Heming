@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import request from "supertest";
+import type { Conversation } from "@heming/shared";
 import { createMemoryStore } from "./store.js";
 import { createApp } from "./app.js";
 
@@ -302,6 +303,94 @@ describe("files API", () => {
       .send({ name: "hi.txt", mime: "text/plain", contentBase64: "aGk=" });
     expect(up.status).toBe(201);
     expect(up.body.size).toBe(2);
+  });
+});
+
+describe("group api", () => {
+  let app: App;
+  beforeEach(() => {
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  it("创建群并列出（含 unreadCount/memberCount）", async () => {
+    const a = await register(app, "alice");
+    const b = await register(app, "bob");
+    const req = await request(app)
+      .post("/api/friends/request")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ username: "bob" });
+    expect(req.status).toBe(201);
+    const incoming = await request(app)
+      .get("/api/friends/requests")
+      .set("Authorization", `Bearer ${b.token}`);
+    await request(app)
+      .post(`/api/friends/${incoming.body[0].id}/accept`)
+      .set("Authorization", `Bearer ${b.token}`)
+      .send({});
+
+    const g = await request(app)
+      .post("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "评审组", memberIds: [b.user.id] });
+    expect(g.status).toBe(201);
+    expect(g.body.type).toBe("group");
+    expect(g.body.name).toBe("评审组");
+    expect(g.body.memberCount).toBe(2);
+    expect(g.body.unreadCount).toBe(0);
+
+    const list = await request(app)
+      .get("/api/conversations")
+      .set("Authorization", `Bearer ${b.token}`);
+    const row = (list.body as Conversation[]).find((c) => c.id === g.body.id);
+    expect(row?.type).toBe("group");
+
+    const members = await request(app)
+      .get(`/api/conversations/${g.body.id}/members`)
+      .set("Authorization", `Bearer ${b.token}`);
+    expect(members.status).toBe(200);
+    expect(members.body).toHaveLength(2);
+    expect(members.body.map((m: { name: string }) => m.name)).toContain("BOB");
+  });
+
+  it("非成员读成员列表 403", async () => {
+    const a = await register(app, "alice");
+    const c = await register(app, "carol");
+    const g = await request(app)
+      .post("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "小群", memberIds: [] });
+    expect(g.status).toBe(201);
+    const res = await request(app)
+      .get(`/api/conversations/${g.body.id}/members`)
+      .set("Authorization", `Bearer ${c.token}`);
+    expect(res.status).toBe(403);
+  });
+
+  it("reads 端点返回已读列表", async () => {
+    const a = await register(app, "alice");
+    const g = await request(app)
+      .post("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "单人群", memberIds: [] });
+    // memberIds:[] + creator 自动入群 → memberCount 1（口径：min(1)）
+    const reads = await request(app)
+      .get(`/api/conversations/${g.body.id}/reads`)
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(reads.status).toBe(200);
+    expect(Array.isArray(reads.body)).toBe(true);
+  });
+
+  it("非成员读 reads 端点 403", async () => {
+    const a = await register(app, "alice");
+    const c = await register(app, "carol");
+    const g = await request(app)
+      .post("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "又一群", memberIds: [] });
+    const res = await request(app)
+      .get(`/api/conversations/${g.body.id}/reads`)
+      .set("Authorization", `Bearer ${c.token}`);
+    expect(res.status).toBe(403);
   });
 });
 

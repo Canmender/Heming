@@ -14,6 +14,7 @@ let store: Store;
 let aliceId: string;
 let bobId: string;
 let convId: string;
+let groupId: string;
 // 独占临时库：默认 ./data/heming.db 会跨文件并行锁冲突、跨次运行 alice 撞 UNIQUE（"username taken"）。
 let dbDir: string;
 
@@ -80,6 +81,7 @@ beforeAll(async () => {
   bobId = bob.id;
   store.acceptFriendRequest(store.createFriendRequest(aliceId, "bob").id, bobId);
   convId = store.createDirectConversation(aliceId, bobId).id;
+  groupId = store.createGroup(aliceId, "评审组", [bobId]).id;
 });
 
 afterAll(async () => {
@@ -117,6 +119,35 @@ describe("ws", () => {
     expect(event.type).toBe("error");
     s.close();
     expect(store.listMessages(convId)).toHaveLength(1);
+  });
+
+  it("群聊：成员发送广播给其他成员并持久化", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({ type: "send_message", conversationId: groupId, payload: { text: "群消息" } }));
+    const event = await bWait;
+    expect(event.type).toBe("message_new");
+    if (event.type === "message_new") {
+      expect(event.message.conversationId).toBe(groupId);
+      expect(event.message.payload.text).toBe("群消息");
+      expect(event.message.senderId).toBe(aliceId);
+    }
+    expect(store.listMessages(groupId)).toHaveLength(1);
+    a.close();
+    b.close();
+  });
+
+  it("群聊：非成员发送收 forbidden 且不入库", async () => {
+    const stranger = store.createUser("carol", "h", "卡罗尔");
+    const s = await connect(issueToken(stranger.id));
+    const wait = nextEvent(s);
+    s.send(JSON.stringify({ type: "send_message", conversationId: groupId, payload: { text: "x" } }));
+    const event = await wait;
+    expect(event.type).toBe("error");
+    if (event.type === "error") expect(event.code).toBe("forbidden");
+    s.close();
+    expect(store.listMessages(groupId)).toHaveLength(1);
   });
 
   it("非法事件回 error", async () => {

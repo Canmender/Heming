@@ -178,15 +178,17 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "invalid body" });
       return;
     }
-    if ("peerId" in parsed.data) {
-      try {
+    try {
+      if ("peerId" in parsed.data) {
         res.status(201).json(store.createDirectConversation(userId(req), parsed.data.peerId));
-      } catch (e) {
-        res.status(400).json({ error: (e as Error).message });
+        return;
       }
-      return;
+      const g = store.createGroup(userId(req), parsed.data.name, parsed.data.memberIds);
+      const row = store.listConversations(userId(req)).find((c) => c.id === g.id);
+      res.status(201).json(row ?? { ...g, memberCount: parsed.data.memberIds.length + 1, unreadCount: 0 });
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
     }
-    res.status(400).json({ error: "group conversations not yet supported" }); // Task 4 会替换本段
   });
 
   app.get("/api/conversations/:id/messages", authOnly, (req, res) => {
@@ -195,6 +197,22 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     res.json(store.listMessages(req.params.id));
+  });
+
+  app.get("/api/conversations/:id/members", authOnly, (req, res) => {
+    if (!store.isMember(req.params.id, userId(req))) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    res.json(store.listMembers(req.params.id));
+  });
+
+  app.get("/api/conversations/:id/reads", authOnly, (req, res) => {
+    if (!store.isMember(req.params.id, userId(req))) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    res.json(store.listReads(req.params.id));
   });
 
   interface StoredFile {
