@@ -16,7 +16,7 @@ describe("LoginPage", () => {
     render(<LoginPage />);
     expect(screen.getByText("和鸣")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("用户名")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("密码（至少 6 位）")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("密码")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
     expect(screen.getByText("登录你的账号")).toBeInTheDocument();
   });
@@ -38,7 +38,7 @@ describe("LoginPage", () => {
     );
     render(<LoginPage />);
     fireEvent.change(screen.getByPlaceholderText("用户名"), { target: { value: "alice" } });
-    fireEvent.change(screen.getByPlaceholderText("密码（至少 6 位）"), { target: { value: "secret123" } });
+    fireEvent.change(screen.getByPlaceholderText("密码"), { target: { value: "secret123" } });
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
 
     await waitFor(() => expect(useAuthStore.getState().status).toBe("authed"));
@@ -61,7 +61,7 @@ describe("LoginPage", () => {
     );
     render(<LoginPage />);
     fireEvent.change(screen.getByPlaceholderText("用户名"), { target: { value: "alice" } });
-    fireEvent.change(screen.getByPlaceholderText("密码（至少 6 位）"), { target: { value: "wrongpass" } });
+    fireEvent.change(screen.getByPlaceholderText("密码"), { target: { value: "wrongpass" } });
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
 
     expect(await screen.findByText("invalid credentials")).toBeInTheDocument();

@@ -32,7 +32,7 @@ export function LoginPage() {
           />
           <input
             className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
-            placeholder="密码（至少 6 位）"
+            placeholder="密码"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
