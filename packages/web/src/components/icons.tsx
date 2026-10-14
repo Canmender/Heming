@@ -57,6 +57,12 @@ export const ChevronIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M9 6l6 6-6 6" />
   </svg>
 );
+export const UserIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" />
+  </svg>
+);
 export const MenuIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M4 7h16M4 12h16M4 17h16" />

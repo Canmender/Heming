@@ -156,6 +156,14 @@ describe("App 右栏云端共享", () => {
       if (url === "/api/files" && init?.method === "POST")
         return Promise.resolve(jsonRes({ error: "payload too large" }, 413));
       if (url === "/api/files") return Promise.resolve(jsonRes([]));
+      // HomePage 挂载时的 health/工作区探测，正常应答避免噪声告警
+      if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
+      if (
+        url === "/api/conversations" ||
+        url === "/api/friends" ||
+        url === "/api/friends/requests"
+      )
+        return Promise.resolve(jsonRes([]));
       return Promise.resolve(jsonRes({ error: "not found" }, 404));
     });
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
