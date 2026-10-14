@@ -22,7 +22,7 @@ docker compose version
 | 端口 | 归属 | 说明 |
 | --- | --- | --- |
 | 80/tcp | web 容器 | **对外唯一端口**：静态页 + `/api` 反代 + WS |
-| 127.0.0.1:8787 | api 容器（compose 回环映射） | 维护口，仅宿主机回环可达，外网不可达；不想要就在 docker-compose.yml 里删掉 api 的 `ports` 段 |
+| 127.0.0.1:8787 | api 容器（compose 回环映射） | 宿主机回环维护口（**有意发布**，仅本机可达，SSH 隧道调试用；若与宿主进程冲突可整体删除该行，维护改用 `docker compose exec api wget -qO- http://127.0.0.1:8787/api/health`） |
 | 8788/tcp | preview 容器（profile） | 更新验证用，`docker compose --profile preview up -d` 才启动，平时不运行 |
 | 9090/tcp | （预留） | 监控端口，本套件**不发布**任何监控服务，表内仅作占位说明 |
 
@@ -97,6 +97,8 @@ docker compose build
 docker compose up -d
 ```
 
+端口冲突排查：若 `up -d` 报 `bind: address already in use`（通常是 127.0.0.1:8787 维护口被宿主进程占用），按 §1 端口表该行的说明整体删除端口映射行即可，**不影响 80 对外服务**，维护改走 `docker compose exec api ...`。
+
 回滚（二选一）：
 
 ```bash
@@ -110,6 +112,8 @@ docker tag heming-web:latest heming-web:prev
 ```
 
 数据卷 `heming-data` 在整个过程中不删除、不重建，回滚安全。
+
+镜像名（`heming-api` / `heming-web`）与卷名（`heming_heming-data`）依赖 compose 项目名，**默认等于仓库目录名**；若目录名不是 `heming`、或要在别的路径下操作，统一加 `-p heming` 固定项目名（`docker compose -p heming build/up/tag ...`），否则镜像 tag、§6 备份里的卷名会对不上。
 
 ## 6. 备份
 
