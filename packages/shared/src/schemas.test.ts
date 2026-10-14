@@ -8,6 +8,10 @@ import {
   CreateFileBodySchema,
   UpdateProfileBodySchema,
   UserSchema,
+  ConversationSchema,
+  CreateConversationBodySchema,
+  ReadStateSchema,
+  MemberSchema,
 } from "./schemas.js";
 
 describe("WsClientEventSchema", () => {
@@ -147,5 +151,38 @@ describe("UserSchema.avatar", () => {
       avatar: `data:image/png;base64,${"A".repeat(1000)}`,
     });
     expect(r.success).toBe(true);
+  });
+});
+
+describe("M2 schemas", () => {
+  it("接受 direct 会话（含 unreadCount）", () => {
+    expect(ConversationSchema.safeParse({
+      id: "c1", type: "direct", unreadCount: 3,
+      peer: { id: "u1", username: "alice", displayName: "爱丽丝" },
+    }).success).toBe(true);
+  });
+  it("接受 group 会话", () => {
+    expect(ConversationSchema.safeParse({
+      id: "g1", type: "group", name: "评审组", memberCount: 4, unreadCount: 0,
+    }).success).toBe(true);
+  });
+  it("拒绝缺 name 的 group", () => {
+    expect(ConversationSchema.safeParse({ id: "g1", type: "group", memberCount: 4, unreadCount: 0 }).success).toBe(false);
+  });
+  it("建会话 body 二选一（peerId 或 name+memberIds）", () => {
+    expect(CreateConversationBodySchema.safeParse({ peerId: "u1" }).success).toBe(true);
+    expect(CreateConversationBodySchema.safeParse({ name: "群", memberIds: ["u1"] }).success).toBe(true);
+    expect(CreateConversationBodySchema.safeParse({ name: "群", memberIds: [] }).success).toBe(true);
+    expect(CreateConversationBodySchema.safeParse({}).success).toBe(false);
+  });
+  it("ReadState 与 Member", () => {
+    expect(ReadStateSchema.safeParse({ userId: "u1", at: "2026-10-14T00:00:00.000Z" }).success).toBe(true);
+    expect(MemberSchema.safeParse({
+      kind: "agent", id: "a1", name: "和小鸣", avatar: null, user: null,
+    }).success).toBe(true);
+    expect(MemberSchema.safeParse({
+      kind: "user", id: "u1", name: "张三", avatar: null,
+      user: { id: "u1", username: "zhang", displayName: "张三" },
+    }).success).toBe(true);
   });
 });

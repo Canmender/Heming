@@ -75,7 +75,47 @@ export const UpdateProfileBodySchema = z.object({
 });
 export type UpdateProfileBody = z.infer<typeof UpdateProfileBodySchema>;
 
-export const CreateConversationBodySchema = z.object({ peerId: z.string().min(1) });
+export const ConversationSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("direct"),
+    id: z.string().min(1),
+    peer: UserSchema,
+    unreadCount: z.number().int().min(0),
+  }),
+  z.object({
+    type: z.literal("group"),
+    id: z.string().min(1),
+    name: z.string().min(1).max(64),
+    // 口径裁决（计划 Task 4 写死）：memberIds 允许空数组（单人群，creator 自动入群）→ memberCount 下限 1
+    memberCount: z.number().int().min(1),
+    unreadCount: z.number().int().min(0),
+  }),
+]);
+export type Conversation = z.infer<typeof ConversationSchema>;
+
+export const DirectConversationBodySchema = z.object({ peerId: z.string().min(1) });
+export const GroupConversationBodySchema = z.object({
+  name: z.string().min(1).max(32),
+  memberIds: z.array(z.string().min(1)).max(200),
+});
+export const CreateConversationBodySchema = z.union([
+  DirectConversationBodySchema,
+  GroupConversationBodySchema,
+]);
+
+export const ReadStateSchema = z.object({ userId: z.string().min(1), at: z.string() });
+export type ReadState = z.infer<typeof ReadStateSchema>;
+export const ReadStateListSchema = z.array(ReadStateSchema);
+
+export const MemberSchema = z.object({
+  kind: z.enum(["user", "agent"]),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  avatar: z.string().max(600_000).nullable(),
+  user: UserSchema.nullable(),
+});
+export type Member = z.infer<typeof MemberSchema>;
+
 export const CreateFriendRequestBodySchema = z.object({ username: z.string().min(3).max(32) });
 
 export const SharedFileMetaSchema = z.object({
