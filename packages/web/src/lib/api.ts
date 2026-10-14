@@ -71,6 +71,12 @@ export const login = (username: string, password: string) =>
   });
 
 export const fetchMe = () => api<User>("/api/me");
+/** 更新个人资料：avatar 为 data URL base64 字符串；省略 avatar 时服务端保留原头像。 */
+export const updateProfile = (displayName: string, avatar?: string) =>
+  api<User>("/api/me", {
+    method: "PUT",
+    body: JSON.stringify({ displayName, ...(avatar !== undefined ? { avatar } : {}) }),
+  });
 export const fetchFriends = () =>
   api<{ id: string; user: User }[]>("/api/friends");
 export const requestFriend = (username: string) =>

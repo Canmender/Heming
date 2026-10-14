@@ -36,6 +36,40 @@ describe("auth store", () => {
     expect(localStorage.getItem("heming.token")).toBeNull();
   });
 
+  it("updateProfile 成功：PUT /api/me 后用返回 User 更新 store.user", async () => {
+    localStorage.setItem("heming.token", "t1");
+    useAuthStore.setState({
+      token: "t1",
+      user: { id: "u1", username: "alice", displayName: "爱丽丝" },
+      status: "authed",
+      error: null,
+    });
+    const { setToken } = await import("../lib/api.js");
+    setToken("t1");
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "u1",
+          username: "alice",
+          displayName: "新昵称",
+          avatar: "data:image/png;base64,AAA",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await useAuthStore.getState().updateProfile("新昵称", "data:image/png;base64,AAA");
+
+    const s = useAuthStore.getState();
+    expect(s.user?.displayName).toBe("新昵称");
+    expect(s.user?.avatar).toBe("data:image/png;base64,AAA");
+    expect(s.status).toBe("authed"); // 资料更新不动登录状态
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/me");
+    expect(init.method).toBe("PUT");
+  });
+
   it("运行中请求 401（onUnauthorized 已注册）→ logout 清会话", async () => {
     // 模拟已登录会话
     localStorage.setItem("heming.token", "t1");

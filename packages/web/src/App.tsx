@@ -9,6 +9,7 @@ import { FileTree } from "./components/FileTree.js";
 import { WorkspacePage } from "./components/WorkspacePage.js";
 import { ChatPage } from "./components/ChatPage.js";
 import { HomePage } from "./components/HomePage.js";
+import { SettingsPage } from "./components/SettingsPage.js";
 
 /** Alt+1–Alt+5 目标页（1 主页、2 工作区、3 接口区、4 记忆区、5 设置区）。 */
 const SHORTCUT_PAGES: Page[] = [
@@ -112,15 +113,15 @@ export function App() {
       <ChatPage />
     ) : page === "workspace" ? (
       <WorkspacePage />
+    ) : page === "settings" ? (
+      <SettingsPage />
     ) : (
       <div className="p-6">
         <h1 className="text-lg font-extrabold">占位页面</h1>
         <p className="mt-2 text-[13px] text-muted">
           {page === "interfaces"
             ? "接口区（MCP/工具）二期开放"
-            : page === "memory"
-              ? "记忆区（全局记忆 + 知识库）二期开放"
-              : "设置区"}
+            : "记忆区（全局记忆 + 知识库）二期开放"}
         </p>
       </div>
     );

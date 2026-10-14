@@ -66,6 +66,32 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(s.token).toBeNull();
     expect(localStorage.getItem("heming.token")).toBeNull();
   });
+
+  it("有 user.avatar 时底部按钮渲染 <img>（圆形裁剪，src 为 data URL）", () => {
+    useAuthStore.setState({
+      user: {
+        id: "u1",
+        username: "alice",
+        displayName: "爱丽丝",
+        avatar: "data:image/png;base64,AAA",
+      },
+    });
+    render(<NavRail />);
+    const btn = screen.getByRole("button", { name: "退出登录" });
+    const img = btn.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toBe("data:image/png;base64,AAA");
+    expect(img!.className).toContain("rounded-full");
+    expect(img!.className).toContain("object-cover");
+    expect(screen.getByText("爱丽丝 · 在线")).toBeInTheDocument();
+  });
+
+  it("无 user.avatar 时底部按钮显示默认人形图标（不渲染 img）", () => {
+    render(<NavRail />);
+    const btn = screen.getByRole("button", { name: "退出登录" });
+    expect(btn.querySelector("img")).toBeNull();
+    expect(btn.querySelector("svg")).not.toBeNull();
+  });
 });
 
 describe("NavPeek 会话隐藏态呼出提示", () => {

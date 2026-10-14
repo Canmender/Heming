@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   login as apiLogin,
   fetchMe,
+  updateProfile as apiUpdateProfile,
   setToken,
   getToken,
   setOnUnauthorized,
@@ -14,6 +15,7 @@ interface AuthState {
   status: "idle" | "pending" | "authed" | "error";
   error: string | null;
   login: (username: string, password: string) => Promise<void>;
+  updateProfile: (displayName: string, avatar?: string) => Promise<void>;
   logout: () => void;
   restore: () => Promise<void>;
 }
@@ -32,6 +34,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (e) {
       set({ status: "error", error: (e as Error).message });
     }
+  },
+  async updateProfile(displayName, avatar) {
+    // 成功后用服务端返回的 User 整体替换；失败直接抛给页面展示（不改登录状态）
+    const user = await apiUpdateProfile(displayName, avatar);
+    set({ user });
   },
   logout() {
     setToken(null);

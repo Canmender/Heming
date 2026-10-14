@@ -1,4 +1,4 @@
-import { HomeIcon, ChatIcon, PlugIcon, MemoryIcon, GearIcon, ChevronIcon } from "./icons.js";
+import { HomeIcon, ChatIcon, PlugIcon, MemoryIcon, GearIcon, ChevronIcon, UserIcon } from "./icons.js";
 import { useUiStore, type Page } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 
@@ -29,6 +29,7 @@ export function NavRail() {
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
   const displayName = useAuthStore((s) => s.user?.displayName);
+  const avatar = useAuthStore((s) => s.user?.avatar);
   const who = displayName || "我";
 
   return (
@@ -61,9 +62,13 @@ export function NavRail() {
           type="button"
           aria-label="退出登录"
           onClick={() => useAuthStore.getState().logout()}
-          className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[#ececec] text-[12px] font-bold text-[#555] transition-colors duration-150 hover:bg-[#f0f0f0]"
+          className="flex h-[28px] w-[28px] items-center justify-center overflow-hidden rounded-full bg-[#ececec] text-[12px] font-bold text-[#555] transition-colors duration-150 hover:bg-[#f0f0f0]"
         >
-          {who.slice(0, 1)}
+          {avatar ? (
+            <img src={avatar} alt="" className="h-full w-full rounded-full object-cover" />
+          ) : (
+            <UserIcon width={14} height={14} />
+          )}
         </button>
         <Tip label={`${who} · 在线`} />
       </div>
