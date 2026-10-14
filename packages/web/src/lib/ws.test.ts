@@ -24,6 +24,18 @@ describe("resolveWsUrl（ws 地址派生）", () => {
       /未配置 VITE_API_BASE/,
     );
   });
+
+  it("API_BASE 缺 http(s) 协议（如 localhost:5173 伪协议）→ 抛统一「VITE_API_BASE 配置无效」", () => {
+    expect(() => resolveWsUrl("localhost:5173", { protocol: "http:", host: "x" })).toThrow(
+      /VITE_API_BASE 配置无效，需形如 http:\/\/host/,
+    );
+  });
+
+  it("API_BASE 为垃圾值 → 抛统一「VITE_API_BASE 配置无效」", () => {
+    expect(() => resolveWsUrl("not a url", { protocol: "http:", host: "x" })).toThrow(
+      /VITE_API_BASE 配置无效，需形如 http:\/\/host/,
+    );
+  });
 });
 
 class FakeWebSocket {

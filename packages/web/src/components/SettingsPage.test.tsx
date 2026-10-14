@@ -98,15 +98,45 @@ describe("SettingsPage 个人资料", () => {
     expect(useAuthStore.getState().user?.avatar).toMatch(/^data:image\/png;base64,/);
   });
 
-  it("超 450KB（450_001 字节）头像拒绝并提示，未生成预览", async () => {
+  it("超 449KB（449_001 字节）头像拒绝并提示，未生成预览", async () => {
     vi.spyOn(globalThis, "fetch");
     render(<SettingsPage />);
-    const big = new File([new Uint8Array(450_001)], "big.png", { type: "image/png" });
+    const big = new File([new Uint8Array(449_001)], "big.png", { type: "image/png" });
     fireEvent.change(screen.getByLabelText("上传头像"), { target: { files: [big] } });
 
-    expect(await screen.findByText(/不能超过 450KB/)).toBeInTheDocument();
+    expect(await screen.findByText(/不能超过约 449KB/)).toBeInTheDocument();
     expect(screen.queryByAltText("当前头像")).not.toBeInTheDocument();
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+  });
+
+  it("449_000 字节头像放行（上限边界内，不再报错）", async () => {
+    render(<SettingsPage />);
+    const ok = new File([new Uint8Array(449_000)], "ok.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("上传头像"), { target: { files: [ok] } });
+
+    await waitFor(() => expect(screen.getByAltText("当前头像")).toBeInTheDocument());
+    expect(screen.queryByText(/不能超过约 449KB/)).not.toBeInTheDocument();
+  });
+
+  it("保存成功后再选头像文件：复位「已保存」状态（与昵称 onChange 一致）", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === "/api/me" && init?.method === "PUT") {
+        const body = JSON.parse(String(init.body)) as { displayName: string };
+        return Promise.resolve(jsonRes({ ...alice, ...body }));
+      }
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+
+    render(<SettingsPage />);
+    fireEvent.change(screen.getByLabelText("昵称"), { target: { value: "新昵称" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(screen.getByText("已保存")).toBeInTheDocument());
+
+    // 选文件后 saved 复位（昵称 onChange 已是此行为，头像选择保持一致）
+    const png = new File([new Uint8Array([1, 2, 3])], "a.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("上传头像"), { target: { files: [png] } });
+    await waitFor(() => expect(screen.queryByText("已保存")).not.toBeInTheDocument());
   });
 
   it("非图片文件拒绝并提示", async () => {

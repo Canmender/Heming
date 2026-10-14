@@ -17,6 +17,18 @@ describe("resolveUrl（API base 直连注入）", () => {
     expect(() => resolveUrl("/api/me", "", "")).toThrow(/未配置 VITE_API_BASE/);
   });
 
+  it("base 缺 http(s) 协议（如 localhost:3000 伪协议）→ 抛统一「VITE_API_BASE 配置无效」", () => {
+    expect(() => resolveUrl("/api/me", "localhost:3000", "x")).toThrow(
+      /VITE_API_BASE 配置无效，需形如 http:\/\/host/,
+    );
+  });
+
+  it("base 为垃圾值 → 抛统一「VITE_API_BASE 配置无效」", () => {
+    expect(() => resolveUrl("/api/me", "not a url", "x")).toThrow(
+      /VITE_API_BASE 配置无效，需形如 http:\/\/host/,
+    );
+  });
+
   it("模块常量 API_BASE 读取 VITE_API_BASE（stubEnv + 重载模块）", async () => {
     vi.stubEnv("VITE_API_BASE", "http://x");
     vi.resetModules();
