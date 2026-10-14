@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import net from "node:net";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import WebSocket from "ws";
 import { createMemoryStore, Store } from "./store.js";
 import { startServer } from "./index.js";
@@ -11,6 +14,8 @@ let store: Store;
 let aliceId: string;
 let bobId: string;
 let convId: string;
+// 独占临时库：默认 ./data/heming.db 会跨文件并行锁冲突、跨次运行 alice 撞 UNIQUE（"username taken"）。
+let dbDir: string;
 
 function connect(token: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
@@ -66,7 +71,8 @@ function rawUpgrade(port: number, token: string): Promise<net.Socket> {
 }
 
 beforeAll(async () => {
-  ctx = await startServer(0);
+  dbDir = mkdtempSync(join(tmpdir(), "heming-ws-"));
+  ctx = await startServer(0, undefined, join(dbDir, "t.db"));
   store = ctx.store;
   const alice = store.createUser("alice", "h", "爱丽丝");
   const bob = store.createUser("bob", "h", "鲍勃");
@@ -76,7 +82,10 @@ beforeAll(async () => {
   convId = store.createDirectConversation(aliceId, bobId).id;
 });
 
-afterAll(() => ctx.close());
+afterAll(async () => {
+  await ctx.close();
+  rmSync(dbDir, { recursive: true, force: true });
+});
 
 describe("ws", () => {
   it("非法 token 拒绝连接", async () => {

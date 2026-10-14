@@ -5,7 +5,7 @@
 # ---------------------------------------------------------------------------
 # build：安装依赖并编译 @heming/shared + @heming/server
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 
 # 固定 pnpm 版本（与 pnpm-lock.yaml 的 lockfileVersion 9.0 同代）。
 # 不走 corepack enable：其默认 pnpm 版本未钉死，且历史出现过签名密钥过期
@@ -38,7 +38,7 @@ RUN pnpm --filter @heming/shared build \
 # 影响），改为按锁文件冻结重装一次 prod 依赖，行为确定、可复现；
 # 独立阶段保证最终镜像既无 pnpm 也无 devDeps。
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS prod
+FROM node:24-alpine AS prod
 
 RUN npm install -g pnpm@10.33.2
 WORKDIR /app
@@ -54,7 +54,7 @@ RUN pnpm install --frozen-lockfile --prod --filter @heming/server...
 # ---------------------------------------------------------------------------
 # run：仅 node + 生产依赖 + 编译产物，非 root 运行（不含 pnpm 等构建工具）
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS run
+FROM node:24-alpine AS run
 
 WORKDIR /app
 

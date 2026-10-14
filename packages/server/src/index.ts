@@ -1,12 +1,13 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { createApp, envFlagEnabled } from "./app.js";
-import { createMemoryStore, type Store } from "./store.js";
+import { resolveDbPath } from "./db.js";
+import { createSqliteStore, type SqliteStore } from "./sqliteStore.js";
 import { seedUsersFromEnv } from "./seed.js";
 import { attachWs } from "./ws.js";
 
 export interface ServerContext {
   server: HttpServer;
-  store: Store;
+  store: SqliteStore;
   port: number;
   close(): Promise<void>;
 }
@@ -19,8 +20,12 @@ export function resolveHost(): string {
   return process.env.HOST?.trim() || "127.0.0.1";
 }
 
-export async function startServer(port: number, host: string = resolveHost()): Promise<ServerContext> {
-  const store = createMemoryStore();
+export async function startServer(
+  port: number,
+  host: string = resolveHost(),
+  dbPath: string = resolveDbPath(),
+): Promise<ServerContext> {
+  const store = createSqliteStore(dbPath);
   // 播种在开始监听前完成，避免出现"已可登录但账号未就绪"的窗口。
   seedUsersFromEnv(store, process.env.HEMING_SEED_USERS);
   if (
@@ -43,7 +48,14 @@ export async function startServer(port: number, host: string = resolveHost()): P
     port: actualPort,
     close: () =>
       new Promise((resolve, reject) => {
-        server.close((err) => (err ? reject(err) : resolve()));
+        server.close((err) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          store.close();
+          resolve();
+        });
       }),
   };
 }

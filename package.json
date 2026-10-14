@@ -7,7 +7,7 @@
     "typecheck": "pnpm -r build && pnpm -r typecheck",
     "dist:desktop": "pnpm --filter @heming/desktop dist"
   },
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=24" },
   "pnpm": {
     "onlyBuiltDependencies": ["electron"]
   }

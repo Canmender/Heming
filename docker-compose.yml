@@ -15,7 +15,7 @@ services:
       # 置 1/true 才放开公开注册（缺省为关：403 registration disabled）
       HEMING_ALLOW_REGISTER: "${HEMING_ALLOW_REGISTER:-}"
       # M2 前为内存存储，此值仅预留；数据卷已挂在 /data
-      HEMING_DB_PATH: /data
+      HEMING_DB_PATH: /data/heming.db
     ports:
       # 维护口只绑回环地址，外网（安全组也拦）不可达；完全不需要就删掉本段
       - "127.0.0.1:8787:8787"
