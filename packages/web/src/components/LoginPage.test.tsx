@@ -14,7 +14,7 @@ describe("LoginPage", () => {
 
   it("渲染登录表单（标题与用户名/密码占位文案）", () => {
     render(<LoginPage />);
-    expect(screen.getByText("合序 Heming")).toBeInTheDocument();
+    expect(screen.getByText("和鸣")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("用户名")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("密码（至少 6 位）")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();

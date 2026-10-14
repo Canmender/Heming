@@ -6,7 +6,7 @@ function createWindow() {
     width: 1280,
     height: 840,
     backgroundColor: "#ffffff",
-    title: "合序 Heming",
+    title: "和鸣",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

@@ -174,7 +174,7 @@ export function HomePage() {
         <div className="mb-1 text-[12px] font-bold text-[#777]">动态</div>
         <div className="border-b border-[#f1f1f1] py-1.5 text-[12px]">
           <span className="mr-2 inline-block h-1.5 w-1.5 rounded-full bg-ink align-middle" />
-          欢迎使用合序 Heming —— 从工作区添加好友开始
+          欢迎使用和鸣 —— 从工作区添加好友开始
         </div>
         <div className="py-1.5 text-[12px] text-muted">智能体动态将在 M3 后出现</div>
       </div>

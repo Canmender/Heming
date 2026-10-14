@@ -23,7 +23,7 @@ export function LoginPage() {
         onSubmit={submit}
         className="w-[340px] rounded-xl border border-line bg-white p-7 shadow-card"
       >
-        <h1 className="mb-1 text-xl font-extrabold">合序 Heming</h1>
+        <h1 className="mb-1 text-xl font-extrabold">和鸣</h1>
         <p className="mb-5 text-[13px] text-muted">
           {mode === "login" ? "登录你的账号" : "创建新账号"}
         </p>

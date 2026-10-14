@@ -1,15 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
-import { useUiStore } from "./store/ui.js";
+import { useUiStore, type Page } from "./store/ui.js";
 import { useAuthStore } from "./store/auth.js";
 import { getToken, fetchFiles, api } from "./lib/api.js";
 import type { SharedFileMeta } from "@heming/shared";
 import { LoginPage } from "./components/LoginPage.js";
-import { NavSidebar } from "./components/NavSidebar.js";
-import { NavRail } from "./components/NavRail.js";
+import { NavRail, NavPeek } from "./components/NavRail.js";
 import { FileTree } from "./components/FileTree.js";
 import { WorkspacePage } from "./components/WorkspacePage.js";
 import { ChatPage } from "./components/ChatPage.js";
 import { HomePage } from "./components/HomePage.js";
+
+/** ⌘1–⌘5 / Ctrl+1–Ctrl+5 目标页（1 主页、2 工作区、3 接口区、4 记忆区、5 设置区）。 */
+const SHORTCUT_PAGES: Page[] = [
+  "home",
+  "workspace",
+  "interfaces",
+  "memory",
+  "settings",
+];
 
 export function App() {
   const authStatus = useAuthStore((s) => s.status);
@@ -59,17 +67,25 @@ export function App() {
   const page = useUiStore((s) => s.page);
   const navCollapsed = useUiStore((s) => s.navCollapsed);
   const setNavCollapsed = useUiStore((s) => s.setNavCollapsed);
+  const setPage = useUiStore((s) => s.setPage);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.key === "\\") {
         e.preventDefault();
         setNavCollapsed(!navCollapsed);
+        return;
+      }
+      const idx = "12345".indexOf(e.key);
+      if (idx !== -1) {
+        e.preventDefault();
+        setPage(SHORTCUT_PAGES[idx]);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navCollapsed, setNavCollapsed]);
+  }, [navCollapsed, setNavCollapsed, setPage]);
 
   if (!authUser) {
     return authStatus === "pending" && getToken() ? (
@@ -101,7 +117,7 @@ export function App() {
 
   return (
     <div className="flex h-screen overflow-hidden border border-line bg-white">
-      {navCollapsed ? <NavRail /> : <NavSidebar />}
+      {navCollapsed ? <NavPeek /> : <NavRail />}
       <main className="flex min-w-0 flex-1 flex-col">{view}</main>
       <aside className="flex w-[240px] shrink-0 flex-col border-l border-line-soft">
         <div className="flex items-center justify-between border-b border-line-soft px-3 py-2">

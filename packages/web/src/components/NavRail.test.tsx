@@ -1,0 +1,81 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { NavRail, NavPeek } from "./NavRail.js";
+import { useUiStore } from "../store/ui.js";
+import { useAuthStore } from "../store/auth.js";
+
+describe("NavRail 图标轨（A 方案）", () => {
+  beforeEach(() => {
+    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+    useAuthStore.setState({
+      token: "t1",
+      user: { id: "u1", username: "alice", displayName: "爱丽丝" },
+      status: "authed",
+      error: null,
+    });
+  });
+
+  it("渲染 5 个带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键）", () => {
+    render(<NavRail />);
+    for (const name of ["主页 ⌘1", "工作区 ⌘2", "接口区 ⌘3", "记忆区 ⌘4", "设置区 ⌘5"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("导航区不出现产品名文字（A 方案无品牌位）", () => {
+    render(<NavRail />);
+    const nav = screen.getByRole("navigation", { name: "主导航" });
+    expect(nav.textContent).not.toMatch(/和鸣|Heming/);
+  });
+
+  it("点击切页，选中项为 ink 底反白", () => {
+    render(<NavRail />);
+    const homeBtn = screen.getByRole("button", { name: "主页 ⌘1" });
+    expect(homeBtn.className).toContain("bg-ink");
+    expect(homeBtn.className).toContain("text-white");
+
+    fireEvent.click(screen.getByRole("button", { name: "接口区 ⌘3" }));
+    expect(useUiStore.getState().page).toBe("interfaces");
+
+    const intfBtn = screen.getByRole("button", { name: "接口区 ⌘3" });
+    expect(intfBtn.className).toContain("bg-ink");
+    expect(intfBtn.className).toContain("text-white");
+    expect(screen.getByRole("button", { name: "主页 ⌘1" }).className).not.toContain("bg-ink");
+  });
+
+  it("悬停浮签内容常驻 DOM（名称 + 快捷键徽标，opacity 0 → group-hover 淡入）", () => {
+    render(<NavRail />);
+    const name = screen.getByText("主页"); // 浮签里的名称文本，供测试查询
+    expect(screen.getByText("⌘1")).toBeInTheDocument(); // 快捷键徽标
+    const tip = name.parentElement as HTMLElement;
+    expect(tip.className).toContain("opacity-0");
+    expect(tip.className).toContain("group-hover:opacity-100");
+    expect(tip.className).toContain("duration-150");
+    expect(tip.className).toContain("translate-x-1");
+  });
+
+  it("底部头像悬停浮签为「{displayName} · 在线」", () => {
+    render(<NavRail />);
+    expect(screen.getByRole("button", { name: "爱丽丝 · 在线" })).toBeInTheDocument();
+  });
+});
+
+describe("NavPeek 会话隐藏态呼出提示", () => {
+  beforeEach(() => {
+    useUiStore.setState({ page: "home", navCollapsed: true, activeConversationId: null });
+  });
+
+  it("窄条 + 呼出按钮，点击展开回图标轨", () => {
+    render(<NavPeek />);
+    expect(screen.queryByRole("button", { name: "主页 ⌘1" })).not.toBeInTheDocument();
+    const btn = screen.getByRole("button", { name: "呼出导航" });
+    fireEvent.click(btn);
+    expect(useUiStore.getState().navCollapsed).toBe(false);
+  });
+
+  it("呼出提示内不出现产品名文字", () => {
+    render(<NavPeek />);
+    expect(screen.getByRole("button", { name: "呼出导航" })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/和鸣|Heming/);
+  });
+});

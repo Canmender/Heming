@@ -1,40 +1,88 @@
-import { HomeIcon, ChatIcon, PlugIcon, MemoryIcon, GearIcon, MenuIcon } from "./icons.js";
+import { HomeIcon, ChatIcon, PlugIcon, MemoryIcon, GearIcon, ChevronIcon } from "./icons.js";
 import { useUiStore, type Page } from "../store/ui.js";
+import { useAuthStore } from "../store/auth.js";
 
-const ITEMS: { page: Page; icon: JSX.Element; label: string }[] = [
-  { page: "home", icon: <HomeIcon width={16} height={16} />, label: "主页" },
-  { page: "workspace", icon: <ChatIcon width={16} height={16} />, label: "工作区" },
-  { page: "interfaces", icon: <PlugIcon width={16} height={16} />, label: "接口区" },
-  { page: "memory", icon: <MemoryIcon width={16} height={16} />, label: "记忆区" },
-  { page: "settings", icon: <GearIcon width={16} height={16} />, label: "设置区" },
+const ITEMS: { page: Page; label: string; icon: JSX.Element; digit: string }[] = [
+  { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
+  { page: "workspace", label: "工作区", icon: <ChatIcon width={17} height={17} />, digit: "2" },
+  { page: "interfaces", label: "接口区", icon: <PlugIcon width={17} height={17} />, digit: "3" },
+  { page: "memory", label: "记忆区", icon: <MemoryIcon width={17} height={17} />, digit: "4" },
+  { page: "settings", label: "设置区", icon: <GearIcon width={17} height={17} />, digit: "5" },
 ];
 
+/** 悬停黑色胶囊浮签：淡入 + 轻微左移进入（group-hover，150ms）。 */
+function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
+  return (
+    <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-1.5 whitespace-nowrap rounded-[7px] bg-ink px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-[0_2px_6px_rgba(0,0,0,0.25)] transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100">
+      <span>{label}</span>
+      {shortcut && (
+        <kbd className="rounded border border-[#666] px-1 text-[10px] font-normal text-[#ccc]">
+          {shortcut}
+        </kbd>
+      )}
+    </span>
+  );
+}
+
+/** 图标轨（A 方案默认态）：约 54px 常驻左缘，无产品名文字。 */
 export function NavRail() {
+  const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
+  const displayName = useAuthStore((s) => s.user?.displayName);
+  const who = displayName || "我";
+
+  return (
+    <nav
+      aria-label="主导航"
+      className="flex w-[54px] shrink-0 flex-col items-center gap-1.5 border-r border-line-soft bg-[#fafafa] py-3"
+    >
+      {ITEMS.map((it) => {
+        const active = page === it.page || (it.page === "workspace" && page === "chat");
+        const shortcut = `⌘${it.digit}`;
+        return (
+          <div key={it.page} className="group relative">
+            <button
+              type="button"
+              aria-label={`${it.label} ${shortcut}`}
+              onClick={() => setPage(it.page)}
+              className={`flex h-[34px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
+                active ? "bg-ink text-white" : "text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
+              }`}
+            >
+              {it.icon}
+            </button>
+            <Tip label={it.label} shortcut={shortcut} />
+          </div>
+        );
+      })}
+
+      <div className="group relative mt-auto">
+        <button
+          type="button"
+          aria-label={`${who} · 在线`}
+          className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[#ececec] text-[12px] font-bold text-[#555] transition-colors duration-150 hover:bg-[#f0f0f0]"
+        >
+          {who.slice(0, 1)}
+        </button>
+        <Tip label={`${who} · 在线`} />
+      </div>
+    </nav>
+  );
+}
+
+/** 会话隐藏态（navCollapsed=true）左缘的可发现呼出提示。 */
+export function NavPeek() {
   const setNavCollapsed = useUiStore((s) => s.setNavCollapsed);
   return (
-    <nav className="flex w-[48px] shrink-0 flex-col items-center gap-2 border-r border-line-soft bg-panel py-3">
+    <div className="flex w-[8px] shrink-0 flex-col items-center border-r border-line-soft bg-[#fafafa] pt-3">
       <button
         type="button"
-        aria-label="展开导航"
-        title="展开导航 (⌘\)"
+        aria-label="呼出导航"
         onClick={() => setNavCollapsed(false)}
-        className="rounded-md p-1.5 text-ink hover:bg-[#f0f0f0]"
+        className="rounded p-0.5 text-[#999] transition-colors duration-150 hover:bg-[#f0f0f0] hover:text-ink"
       >
-        <MenuIcon width={16} height={16} />
+        <ChevronIcon width={12} height={12} />
       </button>
-      {ITEMS.map((it) => (
-        <button
-          key={it.page}
-          type="button"
-          aria-label={it.label}
-          title={it.label}
-          onClick={() => setPage(it.page)}
-          className="rounded-md p-1.5 text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
-        >
-          {it.icon}
-        </button>
-      ))}
-    </nav>
+    </div>
   );
 }

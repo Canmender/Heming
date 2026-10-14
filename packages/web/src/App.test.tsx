@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { App } from "./App.js";
 import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
@@ -14,12 +14,27 @@ function jsonRes(body: unknown, status = 200): Response {
 
 const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
 
-/** 按 URL 分发：/api/me 返回用户，/api/files 返回共享文件列表，其余 404。 */
-function mockFetch(routes: { me?: unknown; files?: unknown } = {}) {
+/** 按 URL 分发：/api/me 返回用户，/api/files 返回共享文件列表，工作区/健康等返回空集合，其余 404。 */
+function mockFetch(
+  routes: {
+    me?: unknown;
+    files?: unknown;
+    conversations?: unknown;
+    friends?: unknown;
+    incoming?: unknown;
+    messages?: unknown;
+  } = {},
+) {
   return vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = String(input);
     if (url === "/api/me") return Promise.resolve(jsonRes(routes.me ?? alice));
     if (url === "/api/files") return Promise.resolve(jsonRes(routes.files ?? []));
+    if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
+    if (url === "/api/conversations") return Promise.resolve(jsonRes(routes.conversations ?? []));
+    if (url === "/api/friends/requests") return Promise.resolve(jsonRes(routes.incoming ?? []));
+    if (url === "/api/friends") return Promise.resolve(jsonRes(routes.friends ?? []));
+    if (/^\/api\/conversations\/[^/]+\/messages$/.test(url))
+      return Promise.resolve(jsonRes(routes.messages ?? []));
     return Promise.resolve(jsonRes({ error: "not found" }, 404));
   });
 }
@@ -35,7 +50,7 @@ describe("App 认证门禁", () => {
 
   it("无 token 渲染登录页而非三栏壳", () => {
     render(<App />);
-    expect(screen.getByText("合序 Heming")).toBeInTheDocument();
+    expect(screen.getByText("和鸣")).toBeInTheDocument();
     expect(screen.getByText("登录你的账号")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
     expect(screen.queryByText("已登录")).not.toBeInTheDocument();
@@ -47,12 +62,19 @@ describe("App 认证门禁", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("已登录")).toBeInTheDocument();
-    expect(screen.getByText("合序 Heming")).toBeInTheDocument();
-    expect(screen.getAllByText("主页").length).toBeGreaterThan(0);
+    // 导航 A 方案：壳以图标轨呈现（原「已登录」状态页脚已随展开文字栏移除，改查导航按钮）
+    expect(await screen.findByRole("button", { name: "主页 ⌘1" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.getAllByText("主页").length).toBeGreaterThan(0); // 浮签名称文本
+    expect(screen.getByRole("navigation", { name: "主导航" }).textContent).not.toMatch(
+      /和鸣|Heming/,
+    ); // 导航区不显示产品名
     expect(screen.queryByText("登录你的账号")).not.toBeInTheDocument();
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // v7 主页挂载后还会发起 /api/health 探测与工作区数据加载，硬计数改为按 URL 断言
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(true),
+    );
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/me");
     const headers = init.headers as Headers;
@@ -170,5 +192,53 @@ describe("App 右栏云端共享", () => {
     } finally {
       HTMLInputElement.prototype.click = origClick;
     }
+  });
+});
+
+describe("App 导航快捷键与隐藏态", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+    setToken(null);
+    useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
+    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+  });
+
+  it("Ctrl+1–5 直接切页，Ctrl+\ 切换导航显隐", async () => {
+    setToken("t1");
+    mockFetch();
+    render(<App />);
+    await screen.findByRole("button", { name: "主页 ⌘1" });
+
+    fireEvent.keyDown(window, { key: "2", ctrlKey: true });
+    expect(useUiStore.getState().page).toBe("workspace");
+    fireEvent.keyDown(window, { key: "4", ctrlKey: true });
+    expect(useUiStore.getState().page).toBe("memory");
+    fireEvent.keyDown(window, { key: "1", ctrlKey: true });
+    expect(useUiStore.getState().page).toBe("home");
+
+    fireEvent.keyDown(window, { key: "\\", ctrlKey: true });
+    expect(useUiStore.getState().navCollapsed).toBe(true);
+    expect(await screen.findByRole("button", { name: "呼出导航" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "\\", ctrlKey: true });
+    expect(useUiStore.getState().navCollapsed).toBe(false);
+    expect(await screen.findByRole("button", { name: "主页 ⌘1" })).toBeInTheDocument();
+  });
+
+  it("导航收起态（如进入会话后）左缘呼出提示可点击展开", async () => {
+    setToken("t1");
+    mockFetch();
+    // 模拟 openConversation 后的状态（page/chat 由 store 测试覆盖，这里只验证壳的导航显隐）
+    useUiStore.setState({ page: "home", navCollapsed: true, activeConversationId: null });
+    render(<App />);
+
+    await screen.findByRole("button", { name: "呼出导航" });
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "呼出导航" }));
+    expect(useUiStore.getState().navCollapsed).toBe(false);
+    expect(await screen.findByRole("button", { name: "主页 ⌘1" })).toBeInTheDocument();
   });
 });
