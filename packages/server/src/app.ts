@@ -178,11 +178,15 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "invalid body" });
       return;
     }
-    try {
-      res.status(201).json(store.createDirectConversation(userId(req), parsed.data.peerId));
-    } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
+    if ("peerId" in parsed.data) {
+      try {
+        res.status(201).json(store.createDirectConversation(userId(req), parsed.data.peerId));
+      } catch (e) {
+        res.status(400).json({ error: (e as Error).message });
+      }
+      return;
     }
+    res.status(400).json({ error: "group conversations not yet supported" }); // Task 4 会替换本段
   });
 
   app.get("/api/conversations/:id/messages", authOnly, (req, res) => {
