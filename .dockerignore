@@ -1,0 +1,10 @@
+# 构建上下文瘦身：这些都不会进镜像（依赖与产物在镜像内重建）
+.git
+.gitignore
+**/node_modules
+**/dist
+.superpowers
+.claude
+.worktrees
+docs
+*.md

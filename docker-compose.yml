@@ -1,0 +1,73 @@
+# 和鸣单机部署编排：api（仅 compose 内网）+ web（nginx 对外 80）。
+# 预览实例：docker compose --profile preview up -d  →  http://<host>:8788
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    environment:
+      # 容器内必须绑 0.0.0.0 才能被同 compose 网内的 nginx 反代到；
+      # 进程代码在无 HOST 时默认仍是 127.0.0.1（本地安全默认不变）。
+      HOST: "0.0.0.0"
+      PORT: "8787"
+      # 预设账号，逗号分隔 user:pass；追加即改写，如 "admin:admin,alice:alice123"
+      HEMING_SEED_USERS: "${HEMING_SEED_USERS:-admin:admin}"
+      # 置 1/true 才放开公开注册（缺省为关：403 registration disabled）
+      HEMING_ALLOW_REGISTER: "${HEMING_ALLOW_REGISTER:-}"
+      # M2 前为内存存储，此值仅预留；数据卷已挂在 /data
+      HEMING_DB_PATH: /data
+    ports:
+      # 维护口只绑回环地址，外网（安全组也拦）不可达；完全不需要就删掉本段
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - heming-data:/data
+    restart: unless-stopped
+    healthcheck:
+      # alpine 自带 busybox wget
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8787/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    # 注意：api 不向公网发布端口，对外流量只走 web 的 80。
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # 更新验证用的第二实例：与 web 同镜像同配置，仅发布端口 8788。
+  # 启用：docker compose --profile preview up -d
+  preview:
+    profiles: ["preview"]
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    ports:
+      - "8788:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+# 预留 9090：监控端口，本套件不发布任何监控服务（将来接时再开）。
+volumes:
+  heming-data:
