@@ -72,23 +72,20 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // 未登录（登录页）或焦点在文本输入时，不响应任何壳层快捷键
       if (!authUser) return;
       const t = e.target as HTMLElement | null;
-      if (
-        t &&
-        (t.tagName === "INPUT" ||
-          t.tagName === "TEXTAREA" ||
-          (t as HTMLElement).isContentEditable)
-      )
-        return;
-      // Alt+1–5 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）
+      const inText =
+        !!t &&
+        (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      // Alt+1–5 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应
       if (e.altKey && !e.metaKey && !e.ctrlKey && ["1", "2", "3", "4", "5"].includes(e.key)) {
+        if (inText) return;
         e.preventDefault();
         setPage(SHORTCUT_PAGES["12345".indexOf(e.key)]);
         return;
       }
       if (!e.metaKey && !e.ctrlKey) return;
+      // ⌘/Ctrl+\ 收放导航：无冲突组合，输入框内也生效（聊天中高频操作）
       if (e.key === "\\") {
         e.preventDefault();
         setNavCollapsed(!navCollapsed);
