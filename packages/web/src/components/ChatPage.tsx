@@ -5,6 +5,7 @@ import { useAuthStore } from "../store/auth.js";
 import { fetchMessages } from "../lib/api.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { ChevronIcon } from "./icons.js";
+import { Avatar } from "./Avatar.js";
 
 export function ChatPage() {
   const convId = useUiStore((s) => s.activeConversationId)!;
@@ -87,19 +88,26 @@ export function ChatPage() {
         <span className="text-[12px] text-muted">{connected ? "已连接" : "连接中…"}</span>
       </header>
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`mb-3 max-w-[70%] rounded-lg border border-line px-3 py-2 text-[13px] shadow-card ${
-              m.senderId === me?.id ? "ml-auto bg-white" : "bg-[#f7f7f7]"
-            }`}
-          >
-            <div className="mb-0.5 text-[10px] text-muted">
-              {m.senderId === me?.id ? "我" : peer?.displayName}
+        {messages.map((m) => {
+          const mine = m.senderId === me?.id;
+          return (
+            <div
+              key={m.id}
+              className={`mb-3 flex ${mine ? "justify-end" : "items-start gap-2"}`}
+            >
+              {/* 对方消息：左侧头像（无 avatar 首字回退）；自己的消息不显示头像 */}
+              {!mine && peer && <Avatar user={peer} size={22} className="mt-0.5" />}
+              <div
+                className={`max-w-[70%] rounded-lg border border-line px-3 py-2 text-[13px] shadow-card ${
+                  mine ? "bg-white" : "bg-[#f7f7f7]"
+                }`}
+              >
+                <div className="mb-0.5 text-[10px] text-muted">{mine ? "我" : peer?.displayName}</div>
+                {m.payload.text}
+              </div>
             </div>
-            {m.payload.text}
-          </div>
-        ))}
+          );
+        })}
         <div ref={bottomRef} />
       </div>
       <form onSubmit={send} className="border-t border-line-soft">

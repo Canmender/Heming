@@ -3,7 +3,7 @@ import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { requestFriend, acceptFriend } from "../lib/api.js";
-import { ChatIcon } from "./icons.js";
+import { Avatar } from "./Avatar.js";
 
 export function WorkspacePage() {
   const { conversations, friends, incoming, loadWorkspace, openDirect } = useChatStore();
@@ -40,6 +40,7 @@ export function WorkspacePage() {
         ) : (
           incoming.map((r) => (
             <div key={r.id} className="mb-1.5 flex items-center gap-2 text-[13px]">
+              <Avatar user={r.from} size={22} />
               <span className="font-medium">{r.from.displayName}</span>
               <span className="text-muted">@{r.from.username}</span>
               <button
@@ -78,7 +79,7 @@ export function WorkspacePage() {
               className="mb-1.5 flex w-full items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-left text-[13px] shadow-card hover:shadow-float"
               onClick={() => void openDirect(f.user.id).then(openConversation)}
             >
-              <ChatIcon width={15} height={15} className="text-muted" />
+              <Avatar user={f.user} size={22} />
               <span className="font-medium">{f.user.displayName}</span>
               <span className="text-muted">@{f.user.username}</span>
               {f.user.id === me?.id && <span className="ml-auto text-[11px] text-muted">我</span>}
@@ -99,6 +100,7 @@ export function WorkspacePage() {
               className="mb-1.5 flex w-full items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-left text-[13px] shadow-card hover:shadow-float"
               onClick={() => openConversation(c.id)}
             >
+              <Avatar user={c.peer} size={22} />
               <span className="font-medium">{c.peer.displayName}</span>
               <span className="text-muted">@{c.peer.username}</span>
             </button>

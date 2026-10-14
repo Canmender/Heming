@@ -10,7 +10,7 @@ import {
   dayKeyOf,
 } from "../store/tokenUsage.js";
 import { acceptFriend, resolveUrl } from "../lib/api.js";
-import { UserIcon } from "./icons.js";
+import { Avatar } from "./Avatar.js";
 
 /** 底部通栏「最新资讯」：静态产品介绍常量（非虚构统计数据）。 */
 const NEWS: { source: string; title: string; summary: string; date: string }[] = [
@@ -274,9 +274,7 @@ export function HomePage() {
                   onClick={() => openConversation(c.id)}
                   className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors duration-150 hover:bg-[#f7f7f7]"
                 >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#f0f0f0] text-[#777]">
-                    <UserIcon width={14} height={14} />
-                  </span>
+                  <Avatar user={c.peer} size={28} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-medium">
                       {c.peer.displayName}
@@ -307,6 +305,7 @@ export function HomePage() {
             ) : (
               incoming.map((r) => (
                 <div key={r.id} className="flex items-center gap-2 py-1 text-[12px]">
+                  <Avatar user={r.from} size={22} />
                   <span className="font-medium">{r.from.displayName}</span>
                   <span className="text-muted">@{r.from.username}</span>
                   <button
