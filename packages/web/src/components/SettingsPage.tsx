@@ -3,10 +3,12 @@ import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
 
 /**
- * 头像文件上限：450_000 字节 → base64 data URL 约 600_000 字符，
- * 与服务端 UpdateProfileBodySchema.avatar 上限（600_000）对齐。
+ * 头像文件上限：449_000 字节 → base64 data URL 约 598_700 字符，
+ * 低于服务端 UpdateProfileBodySchema.avatar 上限（600_000 字符）；
+ * 若取 450_000 字节，base64 后恰为 600_000 字符再加 data: 前缀必超边界，
+ * 449_000 留出安全窗（评审遗留修正）。
  */
-const MAX_AVATAR_BYTES = 450_000;
+const MAX_AVATAR_BYTES = 449_000;
 
 /** 设置区 · 个人资料：头像（data URL）与昵称，保存走 PUT /api/me。 */
 export function SettingsPage() {
@@ -24,13 +26,14 @@ export function SettingsPage() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    setSaved(false); // 选文件视为编辑，复位「已保存」（与昵称 onChange 行为一致）
     setFileError(null);
     if (!file.type.startsWith("image/")) {
       setFileError("请选择图片文件");
       return;
     }
     if (file.size > MAX_AVATAR_BYTES) {
-      setFileError("头像图片不能超过 450KB");
+      setFileError("头像不能超过约 449KB");
       return;
     }
     const reader = new FileReader();

@@ -6,9 +6,27 @@ import type { User, SharedFileMeta, Message } from "@heming/shared";
  */
 export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
 
+/** VITE_API_BASE 形状不合法（无法解析 / 缺 http(s) 协议）时的统一错误文案。 */
+export const INVALID_API_BASE_ERROR =
+  "VITE_API_BASE 配置无效，需形如 http://host（不含末尾斜杠）";
+
+/** 校验并解析非空 base：必须是可解析的 http(s) 绝对地址（可测纯函数）。 */
+export function parseApiBase(base: string): URL {
+  let u: URL;
+  try {
+    u = new URL(base);
+  } catch {
+    throw new Error(INVALID_API_BASE_ERROR);
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error(INVALID_API_BASE_ERROR);
+  }
+  return u;
+}
+
 /**
  * 拼接请求 URL（可测纯函数）：
- * - base 非空 → `${base}${path}` 绝对地址直连；
+ * - base 非空 → 先做形状校验（http(s) 绝对地址），再 `${base}${path}` 直连；
  * - base 为空且页面 host 非空 → 保持同源相对路径；
  * - base 为空且 host 为空（file:// 桌面页未配置）→ 抛清晰错误。
  */
@@ -17,7 +35,10 @@ export function resolveUrl(
   base: string = API_BASE,
   host: string = typeof location !== "undefined" ? location.host : "",
 ): string {
-  if (base) return `${base}${path}`;
+  if (base) {
+    parseApiBase(base);
+    return `${base}${path}`;
+  }
   if (!host) throw new Error("未配置 VITE_API_BASE：file:// 页面需指向服务端绝对地址");
   return path;
 }
