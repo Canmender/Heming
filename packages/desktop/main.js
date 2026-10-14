@@ -15,11 +15,15 @@ function createWindow() {
     },
   });
 
+  // 加载地址优先级：HEMING_DEV_URL（本地开发）> HEMING_WEB_URL > 默认远程（云端中心化，file:// 静态产物方案废弃）
   const devUrl = process.env.HEMING_DEV_URL;
+  const webUrl = process.env.HEMING_WEB_URL;
   if (devUrl) {
     win.loadURL(devUrl);
+  } else if (webUrl) {
+    win.loadURL(webUrl);
   } else {
-    win.loadFile(path.join(__dirname, "..", "web", "dist", "index.html"));
+    win.loadURL("http://47.92.39.184");
   }
 }
 

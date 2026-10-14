@@ -18,11 +18,11 @@ pnpm --filter @heming/server dev
 # 终端 B：前端（Vite，代理 /api 到 8787）
 pnpm --filter @heming/web dev
 
-# 终端 C（可选）：桌面壳
+# 终端 C（可选）：桌面壳（本地 dev：加载 Vite 开发服务器，由其代理 /api）
 HEMING_DEV_URL=http://localhost:5173 pnpm --filter @heming/desktop dev
 ```
 
-> 桌面壳生产模式（`pnpm --filter @heming/desktop start`，直接加载 web 静态产物）需 M2 接通 API base；当前请用上面的 dev 模式（`HEMING_DEV_URL` 指向 Vite 开发服务器，由其代理 `/api`）。
+> 桌面壳加载地址优先级：`HEMING_DEV_URL`（本地开发）> `HEMING_WEB_URL`（自定义生产地址）> 默认远程 `http://47.92.39.184`。生产模式（`pnpm --filter @heming/desktop start`）默认直接加载线上 web（云端中心化，不再加载本地 file:// 静态产物）。
 
 ## 测试
 
