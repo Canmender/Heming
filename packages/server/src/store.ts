@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { User, Message } from "@heming/shared";
+import type { User, Message, Conversation, Member, ReadState } from "@heming/shared";
 
 export interface FriendshipRequest {
   id: string;
@@ -19,7 +19,7 @@ export interface Store {
   listFriends(userId: string): { id: string; user: User }[];
   listIncomingRequests(userId: string): { id: string; from: User }[];
   createDirectConversation(aId: string, bId: string): { id: string; type: "direct"; peer: User };
-  listConversations(userId: string): { id: string; type: "direct"; peer: User }[];
+  listConversations(userId: string): Conversation[];
   isMember(conversationId: string, userId: string): boolean;
   addMessage(
     conversationId: string,
@@ -29,14 +29,19 @@ export interface Store {
     replyTo: string | null,
   ): Message;
   listMessages(conversationId: string, limit?: number): Message[];
+  createGroup(creatorId: string, name: string, memberIds: string[]): { id: string; type: "group"; name: string };
+  listMembers(conversationId: string): Member[];
+  markRead(conversationId: string, userId: string): void;
+  listReads(conversationId: string): ReadState[];
 }
 
 export function createMemoryStore(): Store {
   const users = new Map<string, { user: User; passwordHash: string }>();
   const usersByName = new Map<string, string>();
   const requests: FriendshipRequest[] = [];
-  const conversations = new Map<string, { members: string[] }>();
+  const conversations = new Map<string, { members: string[]; kind: "direct" | "group"; name?: string }>();
   const messages = new Map<string, Message[]>();
+  const reads = new Map<string, Map<string, string>>();
   const pairToConv = new Map<string, string>();
 
   const mustUser = (id: string): User => {
@@ -120,17 +125,34 @@ export function createMemoryStore(): Store {
         return { id: existingId, type: "direct", peer: mustUser(bId) };
       }
       const id = randomUUID();
-      conversations.set(id, { members: [aId, bId] });
+      conversations.set(id, { members: [aId, bId], kind: "direct" });
       messages.set(id, []);
+      reads.set(id, new Map());
       pairToConv.set(key, id);
       return { id, type: "direct", peer: mustUser(bId) };
     },
     listConversations(userId) {
-      const out: { id: string; type: "direct"; peer: User }[] = [];
+      const unread = (convId: string): number => {
+        const readAt = reads.get(convId)?.get(userId);
+        return (messages.get(convId) ?? []).filter(
+          (m) => m.senderId !== userId && (!readAt || m.createdAt > readAt),
+        ).length;
+      };
+      const out: Conversation[] = [];
       for (const [id, conv] of conversations) {
         if (!conv.members.includes(userId)) continue;
-        const peerId = conv.members.find((m) => m !== userId);
-        if (peerId) out.push({ id, type: "direct", peer: mustUser(peerId) });
+        if (conv.kind === "group") {
+          out.push({
+            id,
+            type: "group",
+            name: conv.name!,
+            memberCount: conv.members.length,
+            unreadCount: unread(id),
+          });
+        } else {
+          const peerId = conv.members.find((m) => m !== userId);
+          if (peerId) out.push({ id, type: "direct", peer: mustUser(peerId), unreadCount: unread(id) });
+        }
       }
       return out;
     },
@@ -155,6 +177,40 @@ export function createMemoryStore(): Store {
       const all = messages.get(conversationId);
       if (!all) throw new Error("conversation not found");
       return limit ? all.slice(-limit) : [...all];
+    },
+    createGroup(creatorId, name, memberIds) {
+      mustUser(creatorId);
+      const ids = [...new Set([creatorId, ...memberIds])];
+      for (const id of ids) mustUser(id);
+      const id = randomUUID();
+      conversations.set(id, { members: ids, kind: "group", name });
+      messages.set(id, []);
+      reads.set(id, new Map());
+      return { id, type: "group", name };
+    },
+    listMembers(conversationId) {
+      const conv = conversations.get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      return conv.members.map((id) => {
+        const u = mustUser(id);
+        return { kind: "user" as const, id, name: u.displayName, avatar: u.avatar ?? null, user: u };
+      });
+    },
+    markRead(conversationId, userId) {
+      const conv = conversations.get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      if (!conv.members.includes(userId)) throw new Error("not a member");
+      let m = reads.get(conversationId);
+      if (!m) {
+        m = new Map();
+        reads.set(conversationId, m);
+      }
+      m.set(userId, new Date().toISOString());
+    },
+    listReads(conversationId) {
+      const m = reads.get(conversationId);
+      if (!m) return [];
+      return [...m.entries()].map(([userId, at]) => ({ userId, at }));
     },
   };
 }

@@ -1,0 +1,285 @@
+import { randomUUID } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
+import type { User, Message, Conversation, Member, ReadState } from "@heming/shared";
+import type { Store } from "./store.js";
+import { openDb } from "./db.js";
+
+export type SqliteStore = Store & { close(): void };
+
+function rowToUser(r: { id: string; username: string; display_name: string; avatar: string | null }): User {
+  return {
+    id: r.id,
+    username: r.username,
+    displayName: r.display_name,
+    // `!= null` 而非真值判断：空串 avatar 是合法用户输入（清空头像），与内存实现同语义
+    ...(r.avatar != null ? { avatar: r.avatar } : {}),
+  };
+}
+
+export function createSqliteStore(dbPath: string): SqliteStore {
+  const db: DatabaseSync = openDb(dbPath);
+
+  const mustUser = (id: string): User => {
+    const row = db
+      .prepare("SELECT id, username, display_name, avatar FROM users WHERE id = ?")
+      .get(id) as { id: string; username: string; display_name: string; avatar: string | null } | undefined;
+    if (!row) throw new Error("user not found");
+    return rowToUser(row);
+  };
+
+  return {
+    close() {
+      db.close();
+    },
+
+    createUser(username, passwordHash, displayName) {
+      const id = randomUUID();
+      try {
+        db.prepare("INSERT INTO users (id, username, password_hash, display_name) VALUES (?, ?, ?, ?)").run(
+          id,
+          username,
+          passwordHash,
+          displayName,
+        );
+      } catch (e) {
+        if (String(e).includes("UNIQUE")) throw new Error("username taken");
+        throw e;
+      }
+      return { id, username, displayName };
+    },
+    findUserByUsername(username) {
+      const row = db
+        .prepare("SELECT id, username, display_name, avatar, password_hash FROM users WHERE username = ?")
+        .get(username) as
+        | { id: string; username: string; display_name: string; avatar: string | null; password_hash: string }
+        | undefined;
+      return row ? { user: rowToUser(row), passwordHash: row.password_hash } : null;
+    },
+    findUserById(id) {
+      const row = db.prepare("SELECT id, username, display_name, avatar FROM users WHERE id = ?").get(id) as
+        | { id: string; username: string; display_name: string; avatar: string | null }
+        | undefined;
+      return row ? rowToUser(row) : null;
+    },
+    updateProfile(userId, patch) {
+      const existing = db.prepare("SELECT id, username, display_name, avatar FROM users WHERE id = ?").get(userId) as
+        | { id: string; username: string; display_name: string; avatar: string | null }
+        | undefined;
+      if (!existing) throw new Error("user not found");
+      const nextAvatar = patch.avatar !== undefined ? patch.avatar : existing.avatar;
+      db.prepare("UPDATE users SET display_name = ?, avatar = ? WHERE id = ?").run(patch.displayName, nextAvatar, userId);
+      return {
+        id: existing.id,
+        username: existing.username,
+        displayName: patch.displayName,
+        ...(nextAvatar != null ? { avatar: nextAvatar } : {}),
+      };
+    },
+    createFriendRequest(fromId, toUsername) {
+      mustUser(fromId);
+      const to = this.findUserByUsername(toUsername);
+      if (!to) throw new Error("peer not found");
+      if (to.user.id === fromId) throw new Error("cannot friend self");
+      const dup = db
+        .prepare(
+          `SELECT id FROM friend_requests WHERE status = 'pending' AND
+            ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))`,
+        )
+        .get(fromId, to.user.id, to.user.id, fromId);
+      if (dup) throw new Error("request already exists");
+      const id = randomUUID();
+      db.prepare("INSERT INTO friend_requests (id, from_id, to_id, status) VALUES (?, ?, ?, 'pending')").run(
+        id,
+        fromId,
+        to.user.id,
+      );
+      return { id, from: mustUser(fromId), to: to.user, status: "pending" as const };
+    },
+    acceptFriendRequest(requestId, userId) {
+      const row = db.prepare("SELECT id, from_id, to_id, status FROM friend_requests WHERE id = ?").get(requestId) as
+        | { id: string; from_id: string; to_id: string; status: string }
+        | undefined;
+      if (!row) throw new Error("request not found");
+      if (row.to_id !== userId) throw new Error("not request recipient");
+      db.prepare("UPDATE friend_requests SET status = 'accepted' WHERE id = ?").run(requestId);
+      return { id: row.id, user: mustUser(row.from_id) };
+    },
+    listFriends(userId) {
+      const rows = db
+        .prepare(
+          `SELECT id, from_id, to_id FROM friend_requests WHERE status = 'accepted' AND (from_id = ? OR to_id = ?)`,
+        )
+        .all(userId, userId) as { id: string; from_id: string; to_id: string }[];
+      return rows.map((r) => ({ id: r.id, user: mustUser(r.from_id === userId ? r.to_id : r.from_id) }));
+    },
+    listIncomingRequests(userId) {
+      const rows = db
+        .prepare(`SELECT id, from_id FROM friend_requests WHERE status = 'pending' AND to_id = ?`)
+        .all(userId) as { id: string; from_id: string }[];
+      return rows.map((r) => ({ id: r.id, from: mustUser(r.from_id) }));
+    },
+    createDirectConversation(aId, bId) {
+      mustUser(aId);
+      mustUser(bId);
+      const friends = db
+        .prepare(
+          `SELECT 1 FROM friend_requests WHERE status = 'accepted' AND
+            ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))`,
+        )
+        .get(aId, bId, bId, aId);
+      if (!friends) throw new Error("not friends");
+      const found = db
+        .prepare(
+          `SELECT c.id FROM conversations c
+           JOIN conversation_members m1 ON m1.conv_id = c.id AND m1.member_id = ?
+           JOIN conversation_members m2 ON m2.conv_id = c.id AND m2.member_id = ?
+           WHERE c.kind = 'direct'`,
+        )
+        .get(aId, bId) as { id: string } | undefined;
+      if (found) return { id: found.id, type: "direct", peer: mustUser(bId) };
+      const id = randomUUID();
+      db.prepare("INSERT INTO conversations (id, kind) VALUES (?, 'direct')").run(id);
+      const ins = db.prepare("INSERT INTO conversation_members (conv_id, member_id) VALUES (?, ?)");
+      ins.run(id, aId);
+      ins.run(id, bId);
+      return { id, type: "direct", peer: mustUser(bId) };
+    },
+    createGroup(creatorId, name, memberIds) {
+      mustUser(creatorId);
+      const ids = [...new Set([creatorId, ...memberIds])];
+      for (const id of ids) mustUser(id);
+      const id = randomUUID();
+      db.prepare("INSERT INTO conversations (id, kind, name, created_by) VALUES (?, 'group', ?, ?)").run(
+        id,
+        name,
+        creatorId,
+      );
+      const ins = db.prepare("INSERT INTO conversation_members (conv_id, member_id) VALUES (?, ?)");
+      for (const m of ids) ins.run(id, m);
+      return { id, type: "group", name };
+    },
+    isMember(conversationId, userId) {
+      const row = db
+        .prepare("SELECT 1 AS x FROM conversation_members WHERE conv_id = ? AND member_id = ?")
+        .get(conversationId, userId);
+      return !!row;
+    },
+    addMessage(conversationId, senderType, senderId, payload, replyTo) {
+      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      const msg: Message = {
+        id: randomUUID(),
+        conversationId,
+        senderType,
+        senderId,
+        payload,
+        replyTo,
+        createdAt: new Date().toISOString(),
+      };
+      db.prepare(
+        "INSERT INTO messages (id, conv_id, sender_type, sender_id, payload, reply_to, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).run(msg.id, conversationId, senderType, senderId, JSON.stringify(payload), replyTo, msg.createdAt);
+      return msg;
+    },
+    listMessages(conversationId, limit) {
+      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      const rows = (
+        limit
+          ? db
+              .prepare("SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?")
+              .all(conversationId, limit)
+          : db.prepare("SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at ASC, rowid ASC").all(conversationId)
+      ) as {
+        id: string;
+        conv_id: string;
+        sender_type: string;
+        sender_id: string;
+        payload: string;
+        reply_to: string | null;
+        created_at: string;
+      }[];
+      const ordered = limit ? [...rows].reverse() : rows;
+      return ordered.map((r) => ({
+        id: r.id,
+        conversationId: r.conv_id,
+        senderType: r.sender_type as "user" | "agent",
+        senderId: r.sender_id,
+        payload: JSON.parse(r.payload),
+        replyTo: r.reply_to,
+        createdAt: r.created_at,
+      }));
+    },
+    listConversations(userId) {
+      const convs = db
+        .prepare(
+          `SELECT c.id, c.kind, c.name FROM conversations c
+           JOIN conversation_members m ON m.conv_id = c.id WHERE m.member_id = ?`,
+        )
+        .all(userId) as { id: string; kind: string; name: string | null }[];
+      const unreadOf = (convId: string): number => {
+        const read = db
+          .prepare("SELECT read_at FROM message_reads WHERE conv_id = ? AND user_id = ?")
+          .get(convId, userId) as { read_at: string } | undefined;
+        if (read) {
+          const row = db
+            .prepare("SELECT COUNT(*) AS n FROM messages WHERE conv_id = ? AND sender_id != ? AND created_at > ?")
+            .get(convId, userId, read.read_at) as { n: number };
+          return Number(row.n);
+        }
+        const row = db
+          .prepare("SELECT COUNT(*) AS n FROM messages WHERE conv_id = ? AND sender_id != ?")
+          .get(convId, userId) as { n: number };
+        return Number(row.n);
+      };
+      const out: Conversation[] = [];
+      for (const c of convs) {
+        if (c.kind === "group") {
+          const mc = db
+            .prepare("SELECT COUNT(*) AS n FROM conversation_members WHERE conv_id = ?")
+            .get(c.id) as { n: number };
+          out.push({
+            id: c.id,
+            type: "group",
+            name: c.name ?? "未命名群",
+            memberCount: Number(mc.n),
+            unreadCount: unreadOf(c.id),
+          });
+        } else {
+          const peer = db
+            .prepare("SELECT member_id FROM conversation_members WHERE conv_id = ? AND member_id != ?")
+            .get(c.id, userId) as { member_id: string } | undefined;
+          if (peer) out.push({ id: c.id, type: "direct", peer: mustUser(peer.member_id), unreadCount: unreadOf(c.id) });
+        }
+      }
+      return out;
+    },
+    listMembers(conversationId) {
+      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      const rows = db.prepare("SELECT member_id FROM conversation_members WHERE conv_id = ?").all(conversationId) as {
+        member_id: string;
+      }[];
+      return rows.map((r) => {
+        const u = mustUser(r.member_id);
+        return { kind: "user" as const, id: r.member_id, name: u.displayName, avatar: u.avatar ?? null, user: u };
+      });
+    },
+    markRead(conversationId, userId) {
+      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      if (!this.isMember(conversationId, userId)) throw new Error("not a member");
+      db.prepare(
+        `INSERT INTO message_reads (conv_id, user_id, read_at) VALUES (?, ?, ?)
+         ON CONFLICT(conv_id, user_id) DO UPDATE SET read_at = excluded.read_at`,
+      ).run(conversationId, userId, new Date().toISOString());
+    },
+    listReads(conversationId) {
+      const rows = db.prepare("SELECT user_id, read_at FROM message_reads WHERE conv_id = ?").all(conversationId) as {
+        user_id: string;
+        read_at: string;
+      }[];
+      return rows.map((r) => ({ userId: r.user_id, at: r.read_at }));
+    },
+  };
+}
