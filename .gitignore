@@ -1,6 +1,7 @@
 .superpowers/
 node_modules/
 dist/
+release/
 .env
 .worktrees/
 .claude/

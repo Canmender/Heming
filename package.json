@@ -4,7 +4,8 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r build && pnpm -r test",
-    "typecheck": "pnpm -r build && pnpm -r typecheck"
+    "typecheck": "pnpm -r build && pnpm -r typecheck",
+    "dist:desktop": "pnpm --filter @heming/desktop dist"
   },
   "engines": { "node": ">=20" },
   "pnpm": {
