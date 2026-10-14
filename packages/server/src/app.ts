@@ -43,7 +43,21 @@ function userId(req: Request): string {
   return (req as Request & { userId: string }).userId;
 }
 
-export function createApp(store: Store): express.Express {
+/** 环境变量开关：仅 "1" / "true"（大小写不敏感）为开，其余（含未设置）为关。 */
+export function envFlagEnabled(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const v = value.trim().toLowerCase();
+  return v === "1" || v === "true";
+}
+
+export interface CreateAppOptions {
+  /** 覆盖注册开关（优先于 HEMING_ALLOW_REGISTER），测试注入用；缺省读环境变量。 */
+  allowRegister?: boolean;
+}
+
+export function createApp(store: Store, opts?: CreateAppOptions): express.Express {
+  // 环境变量在 createApp 调用时读取（非 module 级缓存），便于测试内 set/delete 后注入。
+  const allowRegister = opts?.allowRegister ?? envFlagEnabled(process.env.HEMING_ALLOW_REGISTER);
   const app = express();
   app.use(express.json({ limit: "8mb" }));
 
@@ -52,6 +66,10 @@ export function createApp(store: Store): express.Express {
   });
 
   app.post("/api/auth/register", (req, res) => {
+    if (!allowRegister) {
+      res.status(403).json({ error: "registration disabled" });
+      return;
+    }
     const parsed = RegisterBodySchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });

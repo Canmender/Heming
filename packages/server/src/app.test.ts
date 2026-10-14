@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import { createMemoryStore } from "./store.js";
 import { createApp } from "./app.js";
@@ -15,10 +15,60 @@ async function register(app: App, username: string) {
   return res.body as { token: string; user: { id: string; username: string } };
 }
 
+describe("公开注册门控", () => {
+  const ENV = "HEMING_ALLOW_REGISTER";
+  let saved: string | undefined;
+
+  beforeEach(() => {
+    saved = process.env[ENV];
+    delete process.env[ENV];
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env[ENV];
+    else process.env[ENV] = saved;
+  });
+
+  const regBody = { username: "alice", password: "secret123", displayName: "Alice" };
+
+  it("默认注册关闭：403 registration disabled", async () => {
+    const app = createApp(createMemoryStore());
+    const res = await request(app).post("/api/auth/register").send(regBody);
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: "registration disabled" });
+  });
+
+  it("opts.allowRegister=true 时可注册", async () => {
+    const app = createApp(createMemoryStore(), { allowRegister: true });
+    const res = await request(app).post("/api/auth/register").send(regBody);
+    expect(res.status).toBe(201);
+  });
+
+  it("HEMING_ALLOW_REGISTER=1 时可注册", async () => {
+    process.env[ENV] = "1";
+    const app = createApp(createMemoryStore());
+    const res = await request(app).post("/api/auth/register").send(regBody);
+    expect(res.status).toBe(201);
+  });
+
+  it("HEMING_ALLOW_REGISTER=true（大小写不敏感）时可注册", async () => {
+    process.env[ENV] = "TRUE";
+    const app = createApp(createMemoryStore());
+    const res = await request(app).post("/api/auth/register").send(regBody);
+    expect(res.status).toBe(201);
+  });
+
+  it("opts 优先于环境变量（env=1 但 opts=false → 403）", async () => {
+    process.env[ENV] = "1";
+    const app = createApp(createMemoryStore(), { allowRegister: false });
+    const res = await request(app).post("/api/auth/register").send(regBody);
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("auth + friends + conversations API", () => {
   let app: ReturnType<typeof createApp>;
   beforeEach(() => {
-    app = createApp(createMemoryStore());
+    app = createApp(createMemoryStore(), { allowRegister: true });
   });
 
   it("health 免鉴权", async () => {
@@ -114,7 +164,7 @@ describe("auth + friends + conversations API", () => {
 describe("files API", () => {
   let app: ReturnType<typeof createApp>;
   beforeEach(() => {
-    app = createApp(createMemoryStore());
+    app = createApp(createMemoryStore(), { allowRegister: true });
   });
 
   it("上传 → 列表 → 删除", async () => {
