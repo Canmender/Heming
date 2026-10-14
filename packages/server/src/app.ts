@@ -45,7 +45,7 @@ function userId(req: Request): string {
 
 export function createApp(store: Store): express.Express {
   const app = express();
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "8mb" }));
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
@@ -166,7 +166,13 @@ export function createApp(store: Store): express.Express {
       owner: user.username,
       name: parsed.data.name,
       mime: parsed.data.mime,
-      size: Math.floor((parsed.data.contentBase64.length * 3) / 4),
+      size:
+        Math.floor((parsed.data.contentBase64.length * 3) / 4) -
+        (parsed.data.contentBase64.endsWith("==")
+          ? 2
+          : parsed.data.contentBase64.endsWith("=")
+            ? 1
+            : 0),
       updatedAt: new Date().toISOString(),
     };
     files.set(meta.id, { meta, content: parsed.data.contentBase64 });

@@ -151,4 +151,41 @@ describe("files API", () => {
       .set("Authorization", `Bearer ${b.token}`);
     expect(del.status).toBe(403);
   });
+
+  it("上传 1.5MB base64（超 1MB 旧限制）成功 201", async () => {
+    const a = await register(app, "alice");
+    const big = "A".repeat(1_500_000);
+    const up = await request(app)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "big.bin", mime: "application/octet-stream", contentBase64: big });
+    expect(up.status).toBe(201);
+    expect(up.body.size).toBe(Math.floor((1_500_000 * 3) / 4));
+    const list = await request(app).get("/api/files").set("Authorization", `Bearer ${a.token}`);
+    expect(list.body).toHaveLength(1);
+  });
+
+  it("无效上传体返回 400", async () => {
+    const a = await register(app, "alice");
+    const bad = await request(app)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "", mime: "text/plain", contentBase64: "eA==" });
+    expect(bad.status).toBe(400);
+    const noMime = await request(app)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "x.txt", contentBase64: "eA==" });
+    expect(noMime.status).toBe(400);
+  });
+
+  it("size 扣除 base64 padding（aGk= → 2 字节）", async () => {
+    const a = await register(app, "alice");
+    const up = await request(app)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "hi.txt", mime: "text/plain", contentBase64: "aGk=" });
+    expect(up.status).toBe(201);
+    expect(up.body.size).toBe(2);
+  });
 });

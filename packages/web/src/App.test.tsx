@@ -125,4 +125,50 @@ describe("App 右栏云端共享", () => {
     expect(screen.queryByRole("button", { name: "上传" })).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("上传失败（413）时 alert 提示且不刷新列表", async () => {
+    setToken("t1");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === "/api/me") return Promise.resolve(jsonRes(alice));
+      if (url === "/api/files" && init?.method === "POST")
+        return Promise.resolve(jsonRes({ error: "payload too large" }, 413));
+      if (url === "/api/files") return Promise.resolve(jsonRes([]));
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const origClick = HTMLInputElement.prototype.click;
+    HTMLInputElement.prototype.click = function (this: HTMLInputElement) {
+      if (this.type !== "file") {
+        origClick.call(this);
+        return;
+      }
+      const file = new File(["hi"], "a.txt", { type: "text/plain" });
+      // jsdom 的 Blob 未实现 arrayBuffer，补上以走真实上传路径（否则在读文件处就进 catch）
+      Object.defineProperty(file, "arrayBuffer", {
+        value: async () => new TextEncoder().encode("hi").buffer,
+      });
+      Object.defineProperty(this, "files", { value: [file], configurable: true });
+      queueMicrotask(() => {
+        void this.onchange?.(new Event("change"));
+      });
+    };
+    try {
+      render(<App />);
+      const btn = await screen.findByRole("button", { name: "上传" });
+      btn.click();
+      await waitFor(() =>
+        expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining("payload too large")),
+      );
+      expect(errSpy).toHaveBeenCalledWith("上传失败", expect.any(Error));
+      // 失败后不触发 refreshFiles 的 GET（仅 restore 的 /api/me 与初始 GET /api/files）
+      const getCalls = fetchMock.mock.calls.filter(
+        (c) => String(c[0]) === "/api/files" && !(c[1] as RequestInit | undefined)?.method,
+      );
+      expect(getCalls).toHaveLength(1);
+    } finally {
+      HTMLInputElement.prototype.click = origClick;
+    }
+  });
 });

@@ -34,19 +34,24 @@ export function App() {
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
-      const buf = await file.arrayBuffer();
-      let binary = "";
-      const bytes = new Uint8Array(buf);
-      for (const b of bytes) binary += String.fromCharCode(b);
-      await api("/api/files", {
-        method: "POST",
-        body: JSON.stringify({
-          name: file.name,
-          mime: file.type || "application/octet-stream",
-          contentBase64: btoa(binary),
-        }),
-      });
-      refreshFiles();
+      try {
+        const buf = await file.arrayBuffer();
+        let binary = "";
+        const bytes = new Uint8Array(buf);
+        for (const b of bytes) binary += String.fromCharCode(b);
+        await api("/api/files", {
+          method: "POST",
+          body: JSON.stringify({
+            name: file.name,
+            mime: file.type || "application/octet-stream",
+            contentBase64: btoa(binary),
+          }),
+        });
+        refreshFiles();
+      } catch (e) {
+        console.error("上传失败", e);
+        window.alert(`上传失败：${e instanceof Error ? e.message : String(e)}`);
+      }
     };
     input.click();
   };
