@@ -9,7 +9,7 @@ import {
   dailyTotals,
   dayKeyOf,
 } from "../store/tokenUsage.js";
-import { acceptFriend } from "../lib/api.js";
+import { acceptFriend, resolveUrl } from "../lib/api.js";
 import { UserIcon } from "./icons.js";
 
 /** 底部通栏「最新资讯」：静态产品介绍常量（非虚构统计数据）。 */
@@ -74,7 +74,7 @@ export function HomePage() {
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/health")
+    fetch(resolveUrl("/api/health"))
       .then((r) => {
         if (alive) setCloud(r.ok ? "正常" : "失败");
       })

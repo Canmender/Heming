@@ -1,7 +1,30 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WsServerEvent } from "@heming/shared";
-import { connectWs } from "./ws.js";
+import { connectWs, resolveWsUrl } from "./ws.js";
 import { setToken } from "./api.js";
+
+describe("resolveWsUrl（ws 地址派生）", () => {
+  it("API_BASE http → ws:// 绝对地址", () => {
+    expect(resolveWsUrl("http://47.92.39.184")).toBe("ws://47.92.39.184");
+  });
+
+  it("API_BASE https → wss://", () => {
+    expect(resolveWsUrl("https://h.example.com")).toBe("wss://h.example.com");
+  });
+
+  it("无 API_BASE：按页面协议/域名派生（https→wss，其余 ws）", () => {
+    expect(resolveWsUrl("", { protocol: "https:", host: "app.local" })).toBe("wss://app.local");
+    expect(resolveWsUrl("", { protocol: "http:", host: "localhost:5173" })).toBe(
+      "ws://localhost:5173",
+    );
+  });
+
+  it("无 API_BASE 且页面 host 为空（file:// 桌面页）→ 抛「未配置 VITE_API_BASE」", () => {
+    expect(() => resolveWsUrl("", { protocol: "file:", host: "" })).toThrow(
+      /未配置 VITE_API_BASE/,
+    );
+  });
+});
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];

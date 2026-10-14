@@ -1,5 +1,5 @@
 import type { WsClientEvent, WsServerEvent } from "@heming/shared";
-import { getToken } from "./api.js";
+import { getToken, API_BASE } from "./api.js";
 
 export interface WsHandlers {
   onEvent: (e: WsServerEvent) => void;
@@ -10,6 +10,26 @@ export interface WsHandlers {
 export interface WsHandle {
   send: (payload: WsClientEvent) => void;
   close: () => void;
+}
+
+/**
+ * 派生 WebSocket 地址（可测纯函数，不含 token/路径）：
+ * - apiBase 非空 → 由其派生（http→ws、https→wss），覆盖桌面 file:// 页面；
+ * - apiBase 为空且页面 host 非空 → 按页面协议/域名（本地 dev vite 代理）；
+ * - 两者皆空 → 抛清晰错误提示配置 VITE_API_BASE。
+ */
+export function resolveWsUrl(
+  apiBase: string = API_BASE,
+  loc: { protocol: string; host: string } = location,
+): string {
+  if (apiBase) {
+    const u = new URL(apiBase);
+    const proto = u.protocol === "https:" || u.protocol === "wss:" ? "wss" : "ws";
+    return `${proto}://${u.host}`;
+  }
+  if (!loc.host) throw new Error("未配置 VITE_API_BASE：file:// 页面需指向服务端绝对地址");
+  const proto = loc.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${loc.host}`;
 }
 
 export function connectWs(handlers: WsHandlers): WsHandle {
@@ -23,8 +43,7 @@ export function connectWs(handlers: WsHandlers): WsHandle {
     if (closed) return;
     const token = getToken();
     if (!token) return;
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(`${proto}://${location.host}/api/ws?token=${token}`);
+    ws = new WebSocket(`${resolveWsUrl()}/api/ws?token=${token}`);
     ws.onopen = () => {
       attempt = 0;
       handlers.onOpen?.();

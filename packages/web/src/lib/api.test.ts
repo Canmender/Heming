@@ -1,5 +1,35 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { api, ApiError, setOnUnauthorized, setToken } from "./api.js";
+import { api, ApiError, setOnUnauthorized, setToken, resolveUrl } from "./api.js";
+
+describe("resolveUrl（API base 直连注入）", () => {
+  it("base 为空：保持同源相对路径（本地 dev 走 vite 代理）", () => {
+    expect(resolveUrl("/api/me", "", "localhost:3000")).toBe("/api/me");
+    expect(resolveUrl("/api/auth/login", "", "localhost:3000")).toBe("/api/auth/login");
+  });
+
+  it("配置 base：拼接为绝对地址直连服务端", () => {
+    expect(resolveUrl("/api/me", "http://47.92.39.184", "localhost:3000")).toBe(
+      "http://47.92.39.184/api/me",
+    );
+  });
+
+  it("base 为空且页面 host 为空（file:// 桌面页）→ 抛「未配置 VITE_API_BASE」", () => {
+    expect(() => resolveUrl("/api/me", "", "")).toThrow(/未配置 VITE_API_BASE/);
+  });
+
+  it("模块常量 API_BASE 读取 VITE_API_BASE（stubEnv + 重载模块）", async () => {
+    vi.stubEnv("VITE_API_BASE", "http://x");
+    vi.resetModules();
+    try {
+      const mod = await import("./api.js");
+      expect(mod.API_BASE).toBe("http://x");
+      expect(mod.resolveUrl("/api/me")).toBe("http://x/api/me");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+});
 
 describe("api 401 全局回调", () => {
   beforeEach(() => {
