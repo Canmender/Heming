@@ -155,4 +155,21 @@ describe("ChatPage", () => {
     expect(input).toHaveValue("");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
+
+  it("对方消息显示对方头像（无头像首字回退），自己的消息不显示头像", async () => {
+    const mine: Message = {
+      ...msg("m2", "我回一句", "2026-10-14T01:05:00.000Z"),
+      senderId: "u1",
+    };
+    mockMessagesFetch([msg("m1", "在的", "2026-10-14T01:00:00.000Z"), mine]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("在的")).toBeInTheDocument());
+
+    // 对方两条中仅 m1 是对方消息：首字「鲍」头像出现且仅出现一次（自己的消息不带头像）
+    expect(screen.getByText("鲍")).toBeInTheDocument();
+    expect(screen.getAllByText("鲍")).toHaveLength(1);
+    // 自己的消息气泡正常渲染（右对齐为既有样式，不另作断言）
+    expect(screen.getByText("我回一句")).toBeInTheDocument();
+  });
 });

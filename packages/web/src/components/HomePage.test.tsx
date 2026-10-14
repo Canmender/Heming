@@ -157,13 +157,19 @@ describe("HomePage", () => {
       replyTo: null,
       createdAt: now.toISOString(),
     };
+    // c1 有头像 → 圆形 <img>；c2 无头像 → 首字回退（替代人形图标）
+    const convWithAvatar = {
+      id: "c2",
+      type: "direct" as const,
+      peer: { ...peer, avatar: "data:image/png;base64,AAA" },
+    };
     useChatStore.setState({
-      conversations: [conv("c1"), conv("c2")],
+      conversations: [conv("c1"), convWithAvatar],
       friends: [],
       incoming: [],
       messages: { c1: [msg] },
     });
-    mockFetch({ conversations: [conv("c1"), conv("c2")] });
+    mockFetch({ conversations: [conv("c1"), convWithAvatar] });
 
     render(<HomePage />);
     await act(async () => {}); // 冲刷挂载时 health/工作区加载的异步状态更新
@@ -173,6 +179,14 @@ describe("HomePage", () => {
     expect(screen.getByText("暂无消息")).toBeInTheDocument(); // c2 未加载消息
     const row = screen.getByText("你好，这是最近一条").closest("button") as HTMLElement;
     expect(row.textContent).toMatch(/\d{2}:\d{2}$/); // 右侧时间
+    // c1 无头像：首字圆底「测」（peer 为测试阿丽），不渲染 img
+    expect(within(row).getByText("测")).toBeInTheDocument();
+    expect(row.querySelector("img")).toBeNull();
+    // c2 有头像：圆形 <img> 指向 data URL
+    const row2 = screen.getByText("暂无消息").closest("button") as HTMLElement;
+    const img2 = row2.querySelector("img");
+    expect(img2).not.toBeNull();
+    expect(img2!.getAttribute("src")).toBe("data:image/png;base64,AAA");
     expect(screen.queryByText(/未读/)).not.toBeInTheDocument(); // M1 无未读角标
   });
 
@@ -225,6 +239,9 @@ describe("HomePage", () => {
     await act(async () => {}); // 冲刷挂载时 health/工作区加载的异步状态更新
     expect(screen.getByText("鲍勃")).toBeInTheDocument();
     expect(screen.getByText("@bob")).toBeInTheDocument();
+    // 申请行头像：无 avatar → 首字「鲍」圆底（精确匹配，避开姓名文本）
+    const reqRow = screen.getByText("@bob").closest("div") as HTMLElement;
+    expect(within(reqRow).getByText("鲍")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "接受" }));
     await waitFor(() =>
