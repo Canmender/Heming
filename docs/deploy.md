@@ -1,0 +1,154 @@
+# 和鸣部署（Docker，单机）
+
+目标机：`47.92.39.184`（阿里云 Linux x86_64）。架构：**api 容器**（Node 进程，Express + ws 同端口 8787，仅 compose 内网可达）+ **web 容器**（nginx 托管静态资源并反代 `/api` 与 WS，对外发布 80）。
+
+## 0. 前置：服务器装 Docker
+
+```bash
+# 最省事（官方脚本，自动识别阿里云 Linux / CentOS 系）
+curl -fsSL https://get.docker.com | sh
+sudo systemctl enable --now docker
+
+# 验证
+docker --version
+docker compose version
+```
+
+- 阿里云控制台**安全组**只放行 80（HTTP）；需要预览实例时临时放行 8788。
+- 非 root 使用 docker：`sudo usermod -aG docker $USER`（重新登录生效）；或全程 sudo。
+
+## 1. 端口表
+
+| 端口 | 归属 | 说明 |
+| --- | --- | --- |
+| 80/tcp | web 容器 | **对外唯一端口**：静态页 + `/api` 反代 + WS |
+| 127.0.0.1:8787 | api 容器（compose 回环映射） | 维护口，仅宿主机回环可达，外网不可达；不想要就在 docker-compose.yml 里删掉 api 的 `ports` 段 |
+| 8788/tcp | preview 容器（profile） | 更新验证用，`docker compose --profile preview up -d` 才启动，平时不运行 |
+| 9090/tcp | （预留） | 监控端口，本套件**不发布**任何监控服务，表内仅作占位说明 |
+
+api 服务本身**不向公网发布端口**（compose 内网互通）；对外流量一律走 80 → nginx。
+
+## 2. 上传代码（本地打包 → 服务器解包）
+
+本地（排除依赖与版本库，镜像内会重建依赖）：
+
+```bash
+# 在仓库根目录
+tar --exclude=node_modules --exclude=.git --exclude=.superpowers \
+    --exclude=.worktrees --exclude=.claude --exclude=dist \
+    -czf heming.tar.gz .
+scp heming.tar.gz root@47.92.39.184:~/
+
+# 服务器解包
+ssh root@47.92.39.184
+mkdir -p ~/heming && tar -xzf ~/heming.tar.gz -C ~/heming && cd ~/heming
+```
+
+## 3. 构建与启动
+
+```bash
+cd ~/heming
+docker compose build
+docker compose up -d
+docker compose ps          # api healthy、web running 即就绪
+```
+
+验证：
+
+```bash
+curl -s http://127.0.0.1/api/health          # {"ok":true}
+curl -s -i -X OPTIONS http://127.0.0.1/api/auth/login | head -5   # 204 + CORS 头
+```
+
+浏览器打开 `http://47.92.39.184`，用预设账号 `admin / admin` 登录。
+
+**nginx 配置无法在本机静态验证**——首次启动务必看日志确认无报错：
+
+```bash
+docker compose logs web | tail -50   # 期望无 [emerg]/[error]，只有 "start worker process"
+docker compose logs api  | tail -50   # 期望 "heming server listening on http://0.0.0.0:8787"
+```
+
+## 4. 增加预设账号
+
+改 `HEMING_SEED_USERS`（逗号分隔 `用户名:密码`）后重新 up（环境变量变化会自动重建 api 容器）：
+
+```bash
+HEMING_SEED_USERS="admin:admin,alice:alice123,bob:bob1" docker compose up -d
+```
+
+或在仓库根目录放一个 `.env`（docker compose 会自动读取，不含在上传包内）：
+
+```bash
+HEMING_SEED_USERS=admin:admin,alice:alice123
+# HEMING_ALLOW_REGISTER=1   # 取消注释才放开公开注册（默认关，403）
+```
+
+注意：播种只在进程启动时执行，且**当前为内存存储**——容器重启后运行期产生的账号/会话会丢失，播种账号会重新创建（见 §6 备份）。
+
+## 5. 更新流程与回滚
+
+更新（数据卷不动）：
+
+```bash
+# 本地重新打包上传解包（§2）
+cd ~/heming
+docker compose build
+docker compose up -d
+```
+
+回滚（二选一）：
+
+```bash
+# A. 代码回退后重建（上传旧版本包，或服务器上 git 管理时）
+git checkout <上一个提交> && docker compose build && docker compose up -d
+
+# B. 镜像 tag 回滚（更新前先打 tag，推荐生产用）
+docker tag heming-api:latest heming-api:prev
+docker tag heming-web:latest heming-web:prev
+# 出问题后：把 compose 的 image 字段指到 heming-api:prev / heming-web:prev，再 up -d
+```
+
+数据卷 `heming-data` 在整个过程中不删除、不重建，回滚安全。
+
+## 6. 备份
+
+- **M2 之前**：服务端是内存存储（`HEMING_DB_PATH=/data` 只是预留，进程尚未使用），重启即清空，**没有可备份的持久数据**；账号靠 `HEMING_SEED_USERS` 重建。
+- **M2 接入 SQLite 之后**：数据落在卷 `heming-data`（容器内 `/data`），备份：
+
+```bash
+docker run --rm -v heming_heming-data:/data -v "$PWD":/backup \
+  alpine tar czf /backup/heming-data-$(date +%F).tar.gz /data
+```
+
+恢复：停服务 → 解包回卷 → 起服务。
+
+## 7. CORS 与同源决策
+
+- **同源（默认，Docker 部署）**：浏览器访问 `http://47.92.39.184` 时，页面（nginx:80）与 API（nginx 反代 `/api` → api:8787）**同源**，WS 走 `ws://47.92.39.184/api/ws` 同样被 nginx 反代。因此 **web 镜像构建时不注入 `VITE_API_BASE`**（留空 = 同源相对路径），配置最少、不依赖任何跨域。
+- **CORS 兜底**：服务端仍带最小 CORS 头（`Allow-Origin: *`、预检 `OPTIONS` 直接 204），用于直连场景（如本机开发的 web 连远程 api、或桌面壳 file:// 页面）。鉴权是 Bearer token 而非 cookie，`*` 不带来凭据风险；未引入 `cors` 依赖，10 行手写。
+- **`VITE_API_BASE` 只服务桌面壳**（`file://` 无同源可用），给桌面打包时单独注入绝对地址即可，与本套 Docker 部署互不影响。
+
+## 8. 预览实例（更新验证）
+
+```bash
+docker compose --profile preview up -d     # 启动与 web 同镜像的 preview，端口 8788
+curl -s http://127.0.0.1:8788/api/health   # 走同一 api 实例
+docker compose --profile preview down      # 验证完关掉
+```
+
+用法：新代码上线前先 `docker compose build` 再起 preview，浏览器开 `http://47.92.39.184:8788`（安全组需临时放行 8788）确认无误，再 `docker compose up -d` 切正式 web。
+
+## 9. 资源与运维参考
+
+- 内存上限：api 512M、web/preview 各 128M（compose `deploy.resources.limits`）。
+- 重启策略：`unless-stopped`（宿主机重启后自动拉起）。
+- 健康检查：api 每 30s `wget http://127.0.0.1:8787/api/health`；web `depends_on` api healthy 后才启动。
+- 常用命令：
+
+```bash
+docker compose ps
+docker compose logs -f api
+docker compose restart web
+docker compose down            # 停（保留 heming-data 卷）
+```

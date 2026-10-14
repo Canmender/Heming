@@ -1,0 +1,5 @@
+# docker 构建资产必须保持 LF：Dockerfile 的指令解析对行尾 \r 容错差，
+# 而本仓库 Windows 侧 core.autocrlf=true（checkout 会把 LF 转成 CRLF）。
+docker/** text eol=lf
+docker-compose.yml text eol=lf
+.dockerignore text eol=lf
