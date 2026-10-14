@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { User, Message, Conversation, Member, ReadState } from "@heming/shared";
 import type { Store } from "./store.js";
+import { SYSTEM_AGENTS } from "./store.js";
 import { openDb } from "./db.js";
 
 export type SqliteStore = Store & { close(): void };
@@ -260,10 +261,22 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       const rows = db.prepare("SELECT member_id FROM conversation_members WHERE conv_id = ?").all(conversationId) as {
         member_id: string;
       }[];
-      return rows.map((r) => {
+      const out: Member[] = rows.map((r) => {
         const u = mustUser(r.member_id);
         return { kind: "user" as const, id: r.member_id, name: u.displayName, avatar: u.avatar ?? null, user: u };
       });
+      // agent 行尾部追加：conversation_agents JOIN agents 取元数据（INNER JOIN——
+      // agents 行缺失即丢行，与内存实现「未知 agentId 跳过」同语义）。
+      const agentRows = db
+        .prepare(
+          `SELECT a.id, a.name, a.avatar FROM conversation_agents ca
+           JOIN agents a ON a.id = ca.agent_id WHERE ca.conv_id = ?`,
+        )
+        .all(conversationId) as { id: string; name: string; avatar: string | null }[];
+      for (const a of agentRows) {
+        out.push({ kind: "agent", id: a.id, name: a.name, avatar: a.avatar, user: null });
+      }
+      return out;
     },
     markRead(conversationId, userId) {
       const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
@@ -280,6 +293,42 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         read_at: string;
       }[];
       return rows.map((r) => ({ userId: r.user_id, at: r.read_at }));
+    },
+    listUserIds() {
+      const rows = db.prepare("SELECT id FROM users").all() as { id: string }[];
+      return rows.map((r) => r.id);
+    },
+    ensurePresetGroup(name, userIds, agentId) {
+      // 幂等：同名 group 已存在直接返回 id（不补成员/不补关联，与内存实现同语义）
+      const existing = db
+        .prepare("SELECT id FROM conversations WHERE kind = 'group' AND name = ?")
+        .get(name) as { id: string } | undefined;
+      if (existing) return existing.id;
+      const meta = SYSTEM_AGENTS[agentId];
+      if (!meta) throw new Error(`unknown system agent: ${agentId}`);
+      if (userIds.length === 0) throw new Error("preset group requires at least one user");
+      const ids = [...new Set(userIds)];
+      for (const id of ids) mustUser(id);
+      const id = randomUUID();
+      db.prepare("INSERT INTO conversations (id, kind, name, created_by) VALUES (?, 'group', ?, NULL)").run(id, name);
+      const ins = db.prepare("INSERT INTO conversation_members (conv_id, member_id) VALUES (?, ?)");
+      for (const m of ids) ins.run(id, m);
+      // 登记 agent（upsert——已存在则保留既有 name/avatar 等行数据？不：预设 agent 元数据
+      // 以 SYSTEM_AGENTS 为准，DO UPDATE 保证幂等后元数据仍一致）
+      db.prepare(
+        `INSERT INTO agents (id, owner_id, name, avatar, description, system_prompt)
+         VALUES (?, NULL, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar,
+           description = excluded.description, system_prompt = excluded.system_prompt`,
+      ).run(agentId, meta.name, meta.avatar, meta.description, meta.systemPrompt);
+      db.prepare("INSERT INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(id, agentId);
+      return id;
+    },
+    listAgentIds(conversationId) {
+      const rows = db.prepare("SELECT agent_id FROM conversation_agents WHERE conv_id = ?").all(conversationId) as {
+        agent_id: string;
+      }[];
+      return rows.map((r) => r.agent_id);
     },
   };
 }

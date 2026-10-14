@@ -8,6 +8,17 @@ export interface FriendshipRequest {
   status: "pending" | "accepted";
 }
 
+/**
+ * 系统预设 agent 元数据单一真源：内存注册表与 sqlite agents 表 upsert 共用，
+ * seedPreset 侧的 SYSTEM_AGENT_NAME 亦由此派生，避免三处字面量漂移。
+ */
+export const SYSTEM_AGENTS: Record<
+  string,
+  { name: string; avatar: string | null; description: string; systemPrompt: string }
+> = {
+  "system-assistant": { name: "和小鸣", avatar: null, description: "和鸣官方预设智能体", systemPrompt: "" },
+};
+
 export interface Store {
   createUser(username: string, passwordHash: string, displayName: string): User;
   findUserByUsername(username: string): { user: User; passwordHash: string } | null;
@@ -33,13 +44,26 @@ export interface Store {
   listMembers(conversationId: string): Member[];
   markRead(conversationId: string, userId: string): void;
   listReads(conversationId: string): ReadState[];
+  /** 全部已存在用户 id（预设群播种取成员用）。 */
+  listUserIds(): string[];
+  /**
+   * 幂等建预设群：同名 group 已存在直接返回其 id（不改动既有成员/关联）；
+   * 否则建群（成员 = userIds 去重，仅用户）、upsert agentId 元数据并挂
+   * conversation_agents。agentId 必须在 SYSTEM_AGENTS 中，否则抛错（双实现同语义）。
+   */
+  ensurePresetGroup(name: string, userIds: string[], agentId: string): string;
+  /** 会话挂载的 agent id 列表（conversation_agents / 内存 agentIds），无则空数组。 */
+  listAgentIds(conversationId: string): string[];
 }
 
 export function createMemoryStore(): Store {
   const users = new Map<string, { user: User; passwordHash: string }>();
   const usersByName = new Map<string, string>();
   const requests: FriendshipRequest[] = [];
-  const conversations = new Map<string, { members: string[]; kind: "direct" | "group"; name?: string }>();
+  const conversations = new Map<
+    string,
+    { members: string[]; kind: "direct" | "group"; name?: string; agentIds?: string[] }
+  >();
   const messages = new Map<string, Message[]>();
   const reads = new Map<string, Map<string, string>>();
   const pairToConv = new Map<string, string>();
@@ -191,10 +215,18 @@ export function createMemoryStore(): Store {
     listMembers(conversationId) {
       const conv = conversations.get(conversationId);
       if (!conv) throw new Error("conversation not found");
-      return conv.members.map((id) => {
+      const out: Member[] = conv.members.map((id) => {
         const u = mustUser(id);
         return { kind: "user" as const, id, name: u.displayName, avatar: u.avatar ?? null, user: u };
       });
+      // agent 行尾部追加；元数据取自 SYSTEM_AGENTS（sqlite 侧取自 agents 表，播种时同一来源 upsert）。
+      // 未知 agentId 跳过，与 sqlite INNER JOIN agents 的丢行语义一致。
+      for (const agentId of conv.agentIds ?? []) {
+        const meta = SYSTEM_AGENTS[agentId];
+        if (!meta) continue;
+        out.push({ kind: "agent", id: agentId, name: meta.name, avatar: meta.avatar, user: null });
+      }
+      return out;
     },
     markRead(conversationId, userId) {
       const conv = conversations.get(conversationId);
@@ -211,6 +243,27 @@ export function createMemoryStore(): Store {
       const m = reads.get(conversationId);
       if (!m) return [];
       return [...m.entries()].map(([userId, at]) => ({ userId, at }));
+    },
+    listUserIds() {
+      return [...users.keys()];
+    },
+    ensurePresetGroup(name, userIds, agentId) {
+      for (const [id, conv] of conversations) {
+        if (conv.kind === "group" && conv.name === name) return id;
+      }
+      const meta = SYSTEM_AGENTS[agentId];
+      if (!meta) throw new Error(`unknown system agent: ${agentId}`);
+      if (userIds.length === 0) throw new Error("preset group requires at least one user");
+      const ids = [...new Set(userIds)];
+      for (const id of ids) mustUser(id);
+      const id = randomUUID();
+      conversations.set(id, { members: ids, kind: "group", name, agentIds: [agentId] });
+      messages.set(id, []);
+      reads.set(id, new Map());
+      return id;
+    },
+    listAgentIds(conversationId) {
+      return [...(conversations.get(conversationId)?.agentIds ?? [])];
     },
   };
 }

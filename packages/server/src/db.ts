@@ -49,6 +49,9 @@ export function initSchema(db: DatabaseSyncType): void {
       id TEXT PRIMARY KEY, owner_id TEXT, name TEXT NOT NULL, avatar TEXT,
       description TEXT NOT NULL DEFAULT '', system_prompt TEXT NOT NULL DEFAULT ''
     );
+    CREATE TABLE IF NOT EXISTS conversation_agents (
+      conv_id TEXT NOT NULL, agent_id TEXT NOT NULL, PRIMARY KEY (conv_id, agent_id)
+    );
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, created_at);
   `);
 }

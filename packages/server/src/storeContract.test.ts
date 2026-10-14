@@ -145,5 +145,35 @@ for (const f of factories) {
       expect(store.findUserById(a.id)!.avatar).toBe("");
       expect(() => store.updateProfile("nope", { displayName: "X" })).toThrow("user not found");
     });
+
+    it("ensurePresetGroup 幂等；无用户时 seedPreset 语义经 listUserIds 为空可判", () => {
+      expect(store.listUserIds()).toEqual([]);
+      store.createUser("alice", "h", "爱丽丝");
+      store.createUser("bob", "h", "鲍勃");
+      expect(store.listUserIds().sort()).toEqual(
+        [store.findUserByUsername("alice")!.user.id, store.findUserByUsername("bob")!.user.id].sort(),
+      );
+      const ids = store.listUserIds();
+      const g1 = store.ensurePresetGroup("和鸣交流群", ids, "system-assistant");
+      const g2 = store.ensurePresetGroup("和鸣交流群", ids, "system-assistant");
+      expect(g2).toBe(g1);
+      expect(store.listAgentIds(g1)).toEqual(["system-assistant"]);
+    });
+
+    it("listMembers 对挂 agent 的群尾部追加 agent 行；user 行不受影响", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const g = store.createGroup(a.id, "普通群", []);
+      expect(store.listMembers(g.id).every((m) => m.kind === "user")).toBe(true);
+      const presetId = store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant");
+      const members = store.listMembers(presetId);
+      expect(members.filter((m) => m.kind === "user").map((m) => m.id)).toEqual([a.id]);
+      expect(members[members.length - 1]).toEqual({
+        kind: "agent",
+        id: "system-assistant",
+        name: "和小鸣",
+        avatar: null,
+        user: null,
+      });
+    });
   });
 }
