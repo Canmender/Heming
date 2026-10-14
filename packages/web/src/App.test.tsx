@@ -270,6 +270,28 @@ describe("App 导航快捷键与隐藏态", () => {
     expect(screen.getAllByText("登录你的账号").length).toBeGreaterThan(0);
   });
 
+  it("输入框聚焦时：Ctrl+\\ 仍切换导航折叠（聊天高频操作不拦截），Alt+数字 仍被过滤", async () => {
+    setToken("t1");
+    mockFetch();
+    const { container } = render(<App />);
+    await screen.findByRole("button", { name: "主页 Alt1" });
+
+    const probe = document.createElement("input");
+    container.appendChild(probe);
+    probe.focus();
+
+    // Alt+数字 在输入框内仍过滤（防与输入法/浏览器快捷键冲突）
+    fireEvent.keyDown(probe, { key: "2", altKey: true });
+    expect(useUiStore.getState().page).toBe("home");
+
+    // Ctrl+\ 在输入框内也生效（无冲突组合，聊天中收放导航是高频操作）
+    fireEvent.keyDown(probe, { key: "\\", ctrlKey: true });
+    expect(useUiStore.getState().navCollapsed).toBe(true);
+    fireEvent.keyDown(probe, { key: "\\", ctrlKey: true });
+    expect(useUiStore.getState().navCollapsed).toBe(false);
+    probe.remove();
+  });
+
   it("导航收起态（如进入会话后）左缘呼出提示可点击展开", async () => {
     setToken("t1");
     mockFetch();
