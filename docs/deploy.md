@@ -36,6 +36,7 @@ api 服务本身**不向公网发布端口**（compose 内网互通）；对外�
 # 在仓库根目录（data/ 是本地开发库，不上传——服务器用数据卷）
 tar --exclude=node_modules --exclude=.git --exclude=.superpowers \
     --exclude=dist --exclude=.worktrees --exclude=data \
+    --exclude=release --exclude=.claude \
     -czf heming.tar.gz .
 scp heming.tar.gz root@47.92.39.184:~/
 
