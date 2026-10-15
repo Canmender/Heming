@@ -167,6 +167,11 @@ describe("ws", () => {
     a.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
     const event = await bWait;
     expect(event.type).toBe("read_update");
+    // F5（L3 内容契约）：read_update 携带会话与读用户
+    if (event.type === "read_update") {
+      expect(event.conversationId).toBe(convId);
+      expect(event.userId).toBe(aliceId);
+    }
     a.close();
     b.close();
   });
@@ -182,6 +187,11 @@ describe("ws", () => {
     wsA.send(JSON.stringify({ type: "mark_read", conversationId: conv.id }));
     const ev = await wait;
     expect(ev.type).toBe("read_update");
+    // F5（L3 内容契约）：read_update 携带会话与读用户
+    if (ev.type === "read_update") {
+      expect(ev.conversationId).toBe(conv.id);
+      expect(ev.userId).toBe(a.id);
+    }
     expect(store.listReads(conv.id).some((r) => r.userId === a.id)).toBe(true);
     wsA.close();
     wsB.close();

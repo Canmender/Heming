@@ -262,17 +262,29 @@ describe("ChatPage", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("群会话头显示「群名（N 人）」，且群会话不显示「已读」（M2 仅 1:1）", async () => {
+  it("群会话头显示「群名（N 人）」，且群会话不显示「已读」（真击穿守卫）", async () => {
     useChatStore.setState({
       conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 5, unreadCount: 0 }],
     });
     const other = msg("m1", "我提个问题", "2026-10-14T01:00:00.000Z"); // senderId u2
-    mockMessagesFetch([other], undefined, {
-      reads: [[{ userId: "u2", at: "2026-10-14T09:00:00.000Z" }]],
+    // 真击穿：我方消息（senderId=me）+ 对方读点晚于消息 → 若守卫失效本应显示「已读」
+    const mine: Message = {
+      ...msg("m2", "群里我发的", "2026-10-14T09:00:00.000Z"),
+      senderId: "u1",
+    };
+    mockMessagesFetch([other, mine], undefined, {
+      reads: [[{ userId: "u2", at: "2026-10-14T09:30:00.000Z" }]],
+      members: [
+        [
+          { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
+          { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer },
+        ],
+      ],
     });
 
     render(<ChatPage />);
     expect(await screen.findByText("评审组（5 人）")).toBeInTheDocument();
+    expect(screen.getByText("群里我发的")).toBeInTheDocument(); // 群内我方消息确实渲染
     expect(screen.queryByText("已读")).not.toBeInTheDocument();
   });
 

@@ -5,6 +5,13 @@ import { RadarContacts, layoutSector } from "./RadarContacts.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
+import { createConversation } from "../lib/api.js";
+
+// createConversation 走 store.openDirect 内部：模块级部分 mock，其余导出（requestFriend 等）保持真实
+vi.mock("../lib/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/api.js")>();
+  return { ...actual, createConversation: vi.fn() };
+});
 
 const me: User = { id: "u1", username: "alice", displayName: "爱丽丝" };
 const li: User = { id: "u2", username: "lisi", displayName: "李四", avatar: "data:image/png;base64,AAA" };
@@ -72,6 +79,8 @@ describe("RadarContacts 雷达通讯录", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    // vi.mock 工厂里的 vi.fn 不受 restoreAllMocks 影响（vitest 1.6），逐用例显式复位
+    vi.mocked(createConversation).mockReset();
     seedStore();
     effects = spyEffects();
   });
@@ -144,6 +153,32 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(s.contactsHidden).toBe(true);
     expect(s.page).toBe("chat");
     expect(s.activeConversationId).toBe("g1");
+  });
+
+  it("F6 人类节点无既有直聊 → openDirect 链路（createConversation → 进会话）", async () => {
+    // 张三是好友但 conversations 无其直聊 → 节点 peerId 分支
+    vi.mocked(createConversation).mockResolvedValue({ id: "c2", type: "direct", peer: zhang });
+    render(<RadarContacts />);
+    await screen.findByText("张三");
+    fireEvent.click(screen.getByText("张三"));
+    await waitFor(() => expect(createConversation).toHaveBeenCalledWith("u3"));
+    await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c2"));
+    const s = useUiStore.getState();
+    expect(s.contactsHidden).toBe(true);
+    expect(s.page).toBe("chat");
+  });
+
+  it("F8 openDirect 失败：面板恢复（未停在隐藏态）+ 顶部错误提示可见", async () => {
+    vi.mocked(createConversation).mockRejectedValue(new Error("network down"));
+    render(<RadarContacts />);
+    await screen.findByText("张三");
+    fireEvent.click(screen.getByText("张三"));
+    const err = await screen.findByRole("alert");
+    expect(err).toHaveTextContent("无法打开与 张三 的会话");
+    const s = useUiStore.getState();
+    expect(s.contactsHidden).toBe(false); // hideContacts 之后被 showContacts 拉回
+    expect(s.page).toBe("workspace"); // 未进入任何会话
+    expect(s.activeConversationId).toBeNull();
   });
 
   it("智能体节点：点开发消息按钮 disabled（title「M3 开放对话」）", async () => {

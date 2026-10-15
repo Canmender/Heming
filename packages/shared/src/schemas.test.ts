@@ -169,6 +169,16 @@ describe("M2 schemas", () => {
   it("拒绝缺 name 的 group", () => {
     expect(ConversationSchema.safeParse({ id: "g1", type: "group", memberCount: 4, unreadCount: 0 }).success).toBe(false);
   });
+  it("memberCount 边界（min(1) 口径）：0 拒绝、1 接受", () => {
+    expect(
+      ConversationSchema.safeParse({ id: "g1", type: "group", name: "单人群", memberCount: 0, unreadCount: 0 })
+        .success,
+    ).toBe(false);
+    expect(
+      ConversationSchema.safeParse({ id: "g1", type: "group", name: "单人群", memberCount: 1, unreadCount: 0 })
+        .success,
+    ).toBe(true);
+  });
   it("建会话 body 二选一（peerId 或 name+memberIds）", () => {
     expect(CreateConversationBodySchema.safeParse({ peerId: "u1" }).success).toBe(true);
     expect(CreateConversationBodySchema.safeParse({ name: "群", memberIds: ["u1"] }).success).toBe(true);
