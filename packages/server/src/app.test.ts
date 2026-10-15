@@ -352,6 +352,22 @@ describe("group api", () => {
     expect(members.body.map((m: { name: string }) => m.name)).toContain("BOB");
   });
 
+  it("POST group 含非好友成员 → 400 not friends", async () => {
+    const a = await register(app, "alice");
+    const b = await register(app, "bob"); // 未加好友
+    const res = await request(app)
+      .post("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "拉人", memberIds: [b.user.id] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("not friends");
+    // 会话未创建：列表无该群
+    const list = await request(app)
+      .get("/api/conversations")
+      .set("Authorization", `Bearer ${a.token}`);
+    expect((list.body as Conversation[]).filter((c) => c.type === "group")).toHaveLength(0);
+  });
+
   it("非成员读成员列表 403", async () => {
     const a = await register(app, "alice");
     const c = await register(app, "carol");
@@ -360,6 +376,8 @@ describe("group api", () => {
       .set("Authorization", `Bearer ${a.token}`)
       .send({ name: "小群", memberIds: [] });
     expect(g.status).toBe(201);
+    // F4（L1 口径锁）：memberIds:[] → creator 自动入群 → memberCount 1（min(1)）
+    expect(g.body.memberCount).toBe(1);
     const res = await request(app)
       .get(`/api/conversations/${g.body.id}/members`)
       .set("Authorization", `Bearer ${c.token}`);
@@ -373,6 +391,7 @@ describe("group api", () => {
       .set("Authorization", `Bearer ${a.token}`)
       .send({ name: "单人群", memberIds: [] });
     // memberIds:[] + creator 自动入群 → memberCount 1（口径：min(1)）
+    expect(g.body.memberCount).toBe(1);
     const reads = await request(app)
       .get(`/api/conversations/${g.body.id}/reads`)
       .set("Authorization", `Bearer ${a.token}`);

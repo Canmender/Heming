@@ -110,6 +110,8 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
   const [addOpen, setAddOpen] = useState(false);
   const [addName, setAddName] = useState("");
   const [hint, setHint] = useState("");
+  /** 打开直聊失败提示（顶部条下方一行；成功进入/切换节点时清除）。 */
+  const [openErr, setOpenErr] = useState("");
   const [groupOpen, setGroupOpen] = useState(false);
   /** 悬浮信息卡：节点 + 卡片坐标（相对雷达容器）。 */
   const [card, setCard] = useState<{ node: RadarNode; x: number; y: number } | null>(null);
@@ -218,11 +220,18 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
 
   const enter = (n: RadarNode) => {
     if (n.agent) return; // 智能体：仅展示卡（M2 不假装能聊）
+    setOpenErr("");
     hideContacts();
     if (n.convId) {
       openConversation(n.convId);
     } else if (n.peerId) {
-      void openDirect(n.peerId).then(openConversation);
+      void openDirect(n.peerId)
+        .then(openConversation)
+        .catch(() => {
+          // 失败恢复：面板已先 hide，拉回避免停在空态，并在顶部条下方提示
+          showContacts();
+          setOpenErr(`无法打开与 ${n.name} 的会话，请稍后重试`);
+        });
     }
   };
 
@@ -335,6 +344,12 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
           </div>
         )}
       </div>
+
+      {openErr && (
+        <div className="toperr" role="alert">
+          {openErr}
+        </div>
+      )}
 
       {/* 雷达区：环 / 扇区分隔 / 扫描线 / 圆心 / 节点 / 信息卡 */}
       <div className="radar" ref={radarRef}>
@@ -497,6 +512,7 @@ const STYLE = `
 .top .addpop-input:focus { border-color:#bbb; }
 .top .addpop-send { border:none; background:#1a1a1a; color:#fff; border-radius:6px; font-size:12px; padding:4px 10px; cursor:pointer; }
 .top .addpop-hint { margin-top:4px; font-size:12px; color:#888; }
+.toperr { padding:6px 14px; font-size:11.5px; color:#b42318; background:#fdf3f2; border-bottom:1px solid #f1f1f1; }
 
 .radar { position:relative; flex:1; overflow:hidden; }
 .radar-ring { position:absolute; border-radius:50%; border:1px dashed #e8e8e8; left:50%; top:50%; transform:translate(-50%,-50%); }

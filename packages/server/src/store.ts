@@ -40,6 +40,10 @@ export interface Store {
     replyTo: string | null,
   ): Message;
   listMessages(conversationId: string, limit?: number): Message[];
+  /**
+   * 建群（用户自建）：creator 自动入群；除 creator 外的每个 memberIds 必须与 creator
+   * 是**已接受好友**关系，否则抛 "not friends"（对齐 createDirectConversation 口径）。
+   */
   createGroup(creatorId: string, name: string, memberIds: string[]): { id: string; type: "group"; name: string };
   listMembers(conversationId: string): Member[];
   markRead(conversationId: string, userId: string): void;
@@ -47,9 +51,10 @@ export interface Store {
   /** 全部已存在用户 id（预设群播种取成员用）。 */
   listUserIds(): string[];
   /**
-   * 幂等建预设群：同名 group 已存在直接返回其 id（不改动既有成员/关联）；
-   * 否则建群（成员 = userIds 去重，仅用户）、upsert agentId 元数据并挂
-   * conversation_agents。agentId 必须在 SYSTEM_AGENTS 中，否则抛错（双实现同语义）。
+   * 幂等建预设群（B 语义）：同名**预设**群（非用户自建）已存在 → 把 userIds 中尚不在
+   * 成员表的用户补入（幂等，不重复插入）并返回其 id；否则建群（成员 = userIds 去重，
+   * 仅用户）、upsert agentId 元数据并挂 conversation_agents。agentId 必须在 SYSTEM_AGENTS
+   * 中，否则抛错（双实现同语义）。用户自建同名群不遮蔽预设群（created_by 非 NULL 不参与匹配）。
    */
   ensurePresetGroup(name: string, userIds: string[], agentId: string): string;
   /** 会话挂载的 agent id 列表（conversation_agents / 内存 agentIds），无则空数组。 */
@@ -62,7 +67,14 @@ export function createMemoryStore(): Store {
   const requests: FriendshipRequest[] = [];
   const conversations = new Map<
     string,
-    { members: string[]; kind: "direct" | "group"; name?: string; agentIds?: string[] }
+    {
+      members: string[];
+      kind: "direct" | "group";
+      name?: string;
+      agentIds?: string[];
+      /** 仅用户自建群写入（createGroup）；预设群与 direct 会话不写 → undefined。 */
+      createdBy?: string;
+    }
   >();
   const messages = new Map<string, Message[]>();
   const reads = new Map<string, Map<string, string>>();
@@ -206,8 +218,16 @@ export function createMemoryStore(): Store {
       mustUser(creatorId);
       const ids = [...new Set([creatorId, ...memberIds])];
       for (const id of ids) mustUser(id);
+      // 口径同 createDirectConversation：除 creator 自身外，入群者须与 creator 已接受好友
+      for (const id of ids) {
+        if (id === creatorId) continue;
+        const friends = requests.some(
+          (r) => r.status === "accepted" && pairKey(r.fromId, r.toId) === pairKey(creatorId, id),
+        );
+        if (!friends) throw new Error("not friends");
+      }
       const id = randomUUID();
-      conversations.set(id, { members: ids, kind: "group", name });
+      conversations.set(id, { members: ids, kind: "group", name, createdBy: creatorId });
       messages.set(id, []);
       reads.set(id, new Map());
       return { id, type: "group", name };
@@ -248,8 +268,16 @@ export function createMemoryStore(): Store {
       return [...users.keys()];
     },
     ensurePresetGroup(name, userIds, agentId) {
+      // B 语义（防劫持 + 启动补成员）：只匹配**预设**群（createdBy 为 undefined——
+      // 用户自建同名群由 createGroup 写 createdBy，不参与匹配）；命中则把 userIds 中
+      // 尚未入群的用户补入（幂等，不去改动已入群成员）并返回同一 id。
       for (const [id, conv] of conversations) {
-        if (conv.kind === "group" && conv.name === name) return id;
+        if (conv.kind === "group" && conv.name === name && conv.createdBy === undefined) {
+          const missing = [...new Set(userIds)].filter((u) => !conv.members.includes(u));
+          for (const u of missing) mustUser(u);
+          conv.members.push(...missing);
+          return id;
+        }
       }
       const meta = SYSTEM_AGENTS[agentId];
       if (!meta) throw new Error(`unknown system agent: ${agentId}`);

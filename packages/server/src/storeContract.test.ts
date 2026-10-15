@@ -33,11 +33,17 @@ for (const f of factories) {
       store.close?.();
     });
 
+    /** 与 F3 口径配套：既有用例的成员须先是已接受好友。 */
+    function befriend(fromId: string, toUsername: string, toId: string): void {
+      store.acceptFriendRequest(store.createFriendRequest(fromId, toUsername).id, toId);
+    }
+
     it("createGroup 幂等成员并列入群", () => {
       store.createUser("alice", "h", "爱丽丝");
       store.createUser("bob", "h", "鲍勃");
       const a = store.findUserByUsername("alice")!.user;
       const b = store.findUserByUsername("bob")!.user;
+      befriend(a.id, "bob", b.id);
       const g = store.createGroup(a.id, "评审组", [b.id, a.id]);
       expect(g.type).toBe("group");
       const convs = store.listConversations(a.id);
@@ -49,10 +55,25 @@ for (const f of factories) {
       expect(members.every((m) => m.kind === "user")).toBe(true);
     });
 
+    it("createGroup 非好友成员拒绝（not friends），接受后可建", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      expect(() => store.createGroup(a.id, "群", [b.id])).toThrow("not friends");
+      befriend(a.id, "bob", b.id);
+      const g = store.createGroup(a.id, "群", [b.id]);
+      expect(store.listMembers(g.id).filter((m) => m.kind === "user")).toHaveLength(2);
+    });
+
     it("createGroup 成员不存在抛错", () => {
       store.createUser("alice", "h", "爱丽丝");
       const a = store.findUserByUsername("alice")!.user;
       expect(() => store.createGroup(a.id, "群", ["nope"])).toThrow();
+    });
+
+    it("createGroup creator 自带自身 + 去重：creator 不做好友校验", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const g = store.createGroup(a.id, "单人群", [a.id, a.id]);
+      expect(store.listMembers(g.id).filter((m) => m.kind === "user")).toHaveLength(1);
     });
 
     it("群消息计入未读并可 markRead 清零", () => {
@@ -60,6 +81,7 @@ for (const f of factories) {
       store.createUser("bob", "h", "B");
       const a = store.findUserByUsername("alice")!.user;
       const b = store.findUserByUsername("bob")!.user;
+      befriend(a.id, "bob", b.id);
       const g = store.createGroup(a.id, "群", [b.id]);
       store.addMessage(g.id, "user", b.id, { text: "hi" }, null);
       const before = store.listConversations(a.id).find((c) => c.id === g.id);
@@ -76,6 +98,7 @@ for (const f of factories) {
       store.createUser("bob", "h", "B");
       const a = store.findUserByUsername("alice")!.user;
       const b = store.findUserByUsername("bob")!.user;
+      befriend(a.id, "bob", b.id);
       const g = store.createGroup(a.id, "群", [b.id]);
       store.addMessage(g.id, "user", a.id, { text: "self" }, null);
       const conv = store.listConversations(a.id).find((c) => c.id === g.id);
@@ -105,6 +128,7 @@ for (const f of factories) {
       store.createUser("bob", "h", "B");
       const a = store.findUserByUsername("alice")!.user;
       const b = store.findUserByUsername("bob")!.user;
+      befriend(a.id, "bob", b.id);
       const g = store.createGroup(a.id, "群", [b.id]);
       store.markRead(g.id, a.id);
       const reads = store.listReads(g.id);
@@ -174,6 +198,35 @@ for (const f of factories) {
         avatar: null,
         user: null,
       });
+    });
+
+    // —— F1/F2（user ruling B）：预设群启动补成员 + 用户自建同名群不遮蔽 ——
+
+    it("F1 ensurePresetGroup B 语义：新用户启动补入预设群，groupId 不变且幂等", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const g1 = store.ensurePresetGroup("和鸣交流群", [a.id], "system-assistant");
+      const newbie = store.createUser("newbie", "h", "新同学");
+      // 同 name/userIds 列表更新（播种每次传当前全部账号）
+      const g2 = store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant");
+      expect(g2).toBe(g1);
+      const users = store.listMembers(g1).filter((m) => m.kind === "user");
+      expect(users.map((m) => m.id).sort()).toEqual([a.id, newbie.id].sort());
+      // 幂等：再来一次不重复、不改 id
+      expect(store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant")).toBe(g1);
+      expect(store.listMembers(g1).filter((m) => m.kind === "user")).toHaveLength(2);
+    });
+
+    it("F2 用户自建同名群不遮蔽预设群：仍新建预设群，agent 挂预设群", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const userG = store.createGroup(a.id, "和鸣交流群", []);
+      const presetId = store.ensurePresetGroup("和鸣交流群", [a.id], "system-assistant");
+      expect(presetId).not.toBe(userG.id);
+      expect(store.listAgentIds(presetId)).toEqual(["system-assistant"]);
+      expect(store.listAgentIds(userG.id)).toEqual([]);
+      // 用户群成员不受预设群补成员影响
+      expect(store.listMembers(userG.id).filter((m) => m.kind === "user")).toHaveLength(1);
+      // 再播种仍回到预设群（不会误匹配用户群）
+      expect(store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant")).toBe(presetId);
     });
   });
 }

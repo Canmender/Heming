@@ -149,6 +149,17 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       mustUser(creatorId);
       const ids = [...new Set([creatorId, ...memberIds])];
       for (const id of ids) mustUser(id);
+      // 口径同 createDirectConversation：除 creator 自身外，入群者须与 creator 已接受好友
+      for (const id of ids) {
+        if (id === creatorId) continue;
+        const friends = db
+          .prepare(
+            `SELECT 1 FROM friend_requests WHERE status = 'accepted' AND
+              ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))`,
+          )
+          .get(creatorId, id, id, creatorId);
+        if (!friends) throw new Error("not friends");
+      }
       const id = randomUUID();
       db.prepare("INSERT INTO conversations (id, kind, name, created_by) VALUES (?, 'group', ?, ?)").run(
         id,
@@ -299,11 +310,22 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       return rows.map((r) => r.id);
     },
     ensurePresetGroup(name, userIds, agentId) {
-      // 幂等：同名 group 已存在直接返回 id（不补成员/不补关联，与内存实现同语义）
+      // B 语义（防劫持 + 启动补成员）：只匹配预设群（created_by IS NULL——用户自建同名群
+      // 由 createGroup 写 creator id，不参与匹配）；命中则把 userIds 中尚未入群的用户
+      // INSERT OR IGNORE 补入（幂等），返回同一 id。
       const existing = db
-        .prepare("SELECT id FROM conversations WHERE kind = 'group' AND name = ?")
+        .prepare("SELECT id FROM conversations WHERE kind = 'group' AND name = ? AND created_by IS NULL")
         .get(name) as { id: string } | undefined;
-      if (existing) return existing.id;
+      if (existing) {
+        const hasMember = db.prepare("SELECT 1 FROM conversation_members WHERE conv_id = ? AND member_id = ?");
+        const ins = db.prepare("INSERT OR IGNORE INTO conversation_members (conv_id, member_id) VALUES (?, ?)");
+        for (const u of new Set(userIds)) {
+          if (hasMember.get(existing.id, u)) continue;
+          mustUser(u);
+          ins.run(existing.id, u);
+        }
+        return existing.id;
+      }
       const meta = SYSTEM_AGENTS[agentId];
       if (!meta) throw new Error(`unknown system agent: ${agentId}`);
       if (userIds.length === 0) throw new Error("preset group requires at least one user");
