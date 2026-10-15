@@ -74,11 +74,13 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
         );
         broadcastToConversation(event.conversationId, { type: "message_new", message });
       } else {
+        const at = new Date().toISOString();
+        store.markRead(event.conversationId, userId);
         broadcastToConversation(event.conversationId, {
           type: "read_update",
           conversationId: event.conversationId,
           userId,
-          at: new Date().toISOString(),
+          at,
         });
       }
     });

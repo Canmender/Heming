@@ -171,6 +171,22 @@ describe("ws", () => {
     b.close();
   });
 
+  it("mark_read 持久化：广播后 REST reads 可见", async () => {
+    const a = store.createUser(`alice-${Date.now()}`, "h", "A");
+    const b = store.createUser(`bob-${Date.now()}`, "h", "B");
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const conv = store.createDirectConversation(a.id, b.id);
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+    const wait = nextEvent(wsB);
+    wsA.send(JSON.stringify({ type: "mark_read", conversationId: conv.id }));
+    const ev = await wait;
+    expect(ev.type).toBe("read_update");
+    expect(store.listReads(conv.id).some((r) => r.userId === a.id)).toBe(true);
+    wsA.close();
+    wsB.close();
+  });
+
   it("协议错误帧不崩溃 server，后续连接仍可用", async () => {
     const raw = await rawUpgrade(ctx.port, issueToken(aliceId));
     // 0xC1 0x00 = FIN + RSV1 + opcode text、无 mask：无 permessage-deflate 协商时
