@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { GroupCreateModal } from "./GroupCreateModal.js";
 import { useChatStore } from "../store/chat.js";
 
@@ -42,5 +42,28 @@ describe("GroupCreateModal", () => {
     expect(await screen.findByText("名称已存在")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(createGroup).toHaveBeenCalledWith("重名群", []);
+  });
+
+  it("提交 pending 期间禁用：同帧双击不重复调用、不误报名称错误", async () => {
+    let resolveCreate: ((id: string) => void) | undefined;
+    const createGroup = vi
+      .spyOn(useChatStore.getState(), "createGroup")
+      .mockImplementation(() => new Promise<string>((res) => {
+        resolveCreate = res;
+      }));
+    const onClose = vi.fn();
+    render(<GroupCreateModal open onClose={onClose} />);
+    fireEvent.change(screen.getByPlaceholderText("群名称"), { target: { value: "评审组" } });
+    const submit = screen.getByRole("button", { name: "创建" });
+    // 同一 act 内同步连点（模拟真实浏览器同帧双击：React 渲染/状态闭包尚未更新）
+    act(() => {
+      submit.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      submit.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    expect(createGroup).toHaveBeenCalledTimes(1);
+    expect(submit).toBeDisabled();
+    expect(screen.queryByText("请输入群名称")).not.toBeInTheDocument();
+    resolveCreate!("g1");
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 });

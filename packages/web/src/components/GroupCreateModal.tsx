@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useChatStore } from "../store/chat.js";
 
 /**
@@ -12,6 +12,9 @@ export function GroupCreateModal({ open, onClose }: { open: boolean; onClose: ()
   const [picked, setPicked] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  // 同步提交互斥：state 闭包在同帧双击下仍是旧值（真实浏览器已复现二次 POST），
+  // ref 在渲染外即时翻转，与 ChatPage 的 wsHandleRef 同一模式
+  const pendingRef = useRef(false);
   if (!open) return null;
 
   const toggle = (id: string) =>
@@ -19,10 +22,13 @@ export function GroupCreateModal({ open, onClose }: { open: boolean; onClose: ()
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || pending) {
+    // pending 守卫与空名校验分开：双击/连点期间不误报「请输入群名称」
+    if (pendingRef.current) return;
+    if (!name.trim()) {
       setError("请输入群名称");
       return;
     }
+    pendingRef.current = true;
     setPending(true);
     setError("");
     try {
@@ -33,6 +39,7 @@ export function GroupCreateModal({ open, onClose }: { open: boolean; onClose: ()
     } catch (err) {
       setError((err as Error).message);
     } finally {
+      pendingRef.current = false;
       setPending(false);
     }
   };
@@ -79,7 +86,8 @@ export function GroupCreateModal({ open, onClose }: { open: boolean; onClose: ()
           </button>
           <button
             type="submit"
-            className="rounded-lg bg-ink px-3 py-1.5 text-[13px] font-bold text-white"
+            disabled={pending}
+            className="rounded-lg bg-ink px-3 py-1.5 text-[13px] font-bold text-white disabled:opacity-60"
           >
             创建
           </button>

@@ -119,6 +119,7 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
    */
   const [show, setShow] = useState(true);
   const radarRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const hideTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -132,6 +133,12 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
   useEffect(() => {
     if (overlay) setShow(!contactsHidden);
   }, [overlay, contactsHidden]);
+
+  // 隐藏态同时 inert：面板平移出屏后内部节点仍可 Tab 聚焦（Enter 会隐式切会话）。
+  // React 18 无 inert 属性类型，用原生 toggleAttribute 等价设置/移除。
+  useEffect(() => {
+    panelRef.current?.toggleAttribute("inert", !show);
+  }, [show]);
 
   useEffect(
     () => () => {
@@ -260,6 +267,7 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
 
   const panel = (
     <div
+      ref={panelRef}
       className={
         overlay
           ? `absolute inset-0 z-10 flex flex-col overflow-hidden bg-white${show ? "" : " -translate-x-full"}`

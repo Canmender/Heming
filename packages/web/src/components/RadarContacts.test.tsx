@@ -171,6 +171,22 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(useUiStore.getState().page).toBe("chat"); // showContacts 不改页
   });
 
+  it("overlay 隐藏态面板 inert + aria-hidden（屏外不可 Tab 聚焦），拉回后移除", async () => {
+    render(<RadarContacts overlay />);
+    await screen.findByText("评审组");
+    const panel = () => document.querySelector(".radar")!.parentElement!;
+    expect(panel()).not.toHaveAttribute("inert");
+
+    fireEvent.click(screen.getByText("评审组"));
+    await screen.findByTitle("呼出通讯录");
+    expect(panel()).toHaveAttribute("inert");
+    expect(panel()).toHaveAttribute("aria-hidden", "true");
+
+    fireEvent.click(screen.getByTitle("呼出通讯录"));
+    expect(panel()).not.toHaveAttribute("inert");
+    expect(panel()).not.toHaveAttribute("aria-hidden");
+  });
+
   it("「＋ 加好友」面板可达：申请表单与待处理申请列表", async () => {
     useChatStore.setState({
       incoming: [{ id: "r1", from: zhang }],
