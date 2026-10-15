@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Conversation, Member, Message, User } from "@heming/shared";
+import type { Conversation, Member, Message, ReadState, User } from "@heming/shared";
 import {
   fetchConversations,
   fetchFriends,
@@ -17,12 +17,16 @@ interface ChatState {
   messages: Record<string, Message[]>;
   /** 跨群去重收集的智能体成员（雷达右下扇区；M2 仅展示，无 1:1 会话）。 */
   agents: Member[];
+  /** 各会话已读状态（convId → [{userId, at}]；direct 气泡「已读」判定与 read_update 随动用）。 */
+  reads: Record<string, ReadState[]>;
   loadWorkspace: () => Promise<void>;
   openDirect: (peerId: string) => Promise<string>;
   createGroup: (name: string, memberIds: string[]) => Promise<string>;
   loadAgents: () => Promise<void>;
   appendMessage: (m: Message) => void;
   setMessages: (convId: string, msgs: Message[]) => void;
+  setReads: (convId: string, reads: ReadState[]) => void;
+  loadReads: (convId: string) => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -31,6 +35,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   incoming: [],
   messages: {},
   agents: [],
+  reads: {},
   async loadWorkspace() {
     const [conversations, friends, incoming] = await Promise.all([
       fetchConversations(),
@@ -88,5 +93,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       else merged.splice(at, 0, m);
     }
     set({ messages: { ...get().messages, [convId]: merged } });
+  },
+  setReads(convId, reads) {
+    set({ reads: { ...get().reads, [convId]: reads } });
+  },
+  async loadReads(convId) {
+    const reads = await api<ReadState[]>(`/api/conversations/${convId}/reads`);
+    get().setReads(convId, reads);
   },
 }));

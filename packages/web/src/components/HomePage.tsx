@@ -285,6 +285,15 @@ export function HomePage() {
                   <span className="shrink-0 text-[10px] text-muted">
                     {last ? fmtTime(last.createdAt) : ""}
                   </span>
+                  {/* 未读角标（direct/group 一致，取服务端 unreadCount）：黑底白字圆角小徽标 */}
+                  {c.unreadCount > 0 && (
+                    <span
+                      aria-label={`${c.unreadCount} 条未读`}
+                      className="min-w-[18px] shrink-0 rounded-full bg-ink px-1.5 text-center text-[10px] font-semibold leading-[16px] text-white"
+                    >
+                      {c.unreadCount}
+                    </span>
+                  )}
                 </button>
               );
             })

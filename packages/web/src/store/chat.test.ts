@@ -33,6 +33,7 @@ describe("chat store", () => {
       incoming: [],
       messages: {},
       agents: [],
+      reads: {},
     });
   });
 
@@ -160,5 +161,23 @@ describe("chat store", () => {
     });
     await expect(useChatStore.getState().loadAgents()).resolves.toBeUndefined();
     expect(useChatStore.getState().agents.map((a) => a.id)).toEqual(["a1"]);
+  });
+
+  it("setReads 覆盖该会话已读状态（其他会话不受影响）", () => {
+    useChatStore.getState().setReads("c2", [{ userId: "u9", at: "2026-10-13T00:00:00.000Z" }]);
+    useChatStore.getState().setReads("c1", [{ userId: "u1", at: "2026-10-14T01:00:00.000Z" }]);
+    expect(useChatStore.getState().reads["c1"]).toHaveLength(1);
+    expect(useChatStore.getState().reads["c1"][0].at).toBe("2026-10-14T01:00:00.000Z");
+    // c2 的既有读态保留（按会话分桶，不整表覆盖）
+    expect(useChatStore.getState().reads["c2"][0].userId).toBe("u9");
+  });
+
+  it("loadReads 拉取 GET /api/conversations/:id/reads 并写入该会话", async () => {
+    vi.mocked(api).mockResolvedValue([{ userId: "u2", at: "2026-10-14T01:00:00.000Z" }]);
+    await useChatStore.getState().loadReads("c1");
+    expect(api).toHaveBeenCalledWith("/api/conversations/c1/reads");
+    expect(useChatStore.getState().reads["c1"]).toEqual([
+      { userId: "u2", at: "2026-10-14T01:00:00.000Z" },
+    ]);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import type { Message, User } from "@heming/shared";
+import type { Member, Message, ReadState, User } from "@heming/shared";
 import { ChatPage } from "./ChatPage.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
@@ -29,14 +29,30 @@ function jsonRes(body: unknown, status = 200): Response {
   });
 }
 
-/** 按调用序返回不同历史列表的 fetch mock（首次 → first，其后 → second ?? first）。 */
-function mockMessagesFetch(first: Message[], second?: Message[]) {
-  let call = 0;
+/**
+ * 会话 fetch mock：/messages 按调用序返回不同历史（首次 → first，其后 → second ?? first）；
+ * /reads、/members 按调用序取 conv 内对应序列（缺省空表 200，避免挂载期 loadReads/fetchMembers 走 404 噪声）。
+ */
+function mockMessagesFetch(
+  first: Message[],
+  second?: Message[],
+  conv: { reads?: ReadState[][]; members?: Member[][] } = {},
+) {
+  let m = 0;
+  let r = 0;
+  let k = 0;
+  const pick = <T,>(seq: T[][] | undefined, i: number): T[] =>
+    seq ? seq[Math.min(i, seq.length - 1)] : [];
   return vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = String(input);
     if (/^\/api\/conversations\/[^/]+\/messages$/.test(url)) {
-      const list = call++ === 0 ? first : (second ?? first);
-      return Promise.resolve(jsonRes(list));
+      return Promise.resolve(jsonRes(m++ === 0 ? first : (second ?? first)));
+    }
+    if (/^\/api\/conversations\/[^/]+\/reads$/.test(url)) {
+      return Promise.resolve(jsonRes(pick(conv.reads, r++)));
+    }
+    if (/^\/api\/conversations\/[^/]+\/members$/.test(url)) {
+      return Promise.resolve(jsonRes(pick(conv.members, k++)));
     }
     return Promise.resolve(jsonRes({ error: "not found" }, 404));
   });
@@ -63,6 +79,7 @@ describe("ChatPage", () => {
       friends: [],
       incoming: [],
       messages: {},
+      reads: {},
     });
   });
 
@@ -171,5 +188,159 @@ describe("ChatPage", () => {
     expect(screen.getAllByText("鲍")).toHaveLength(1);
     // 自己的消息气泡正常渲染（右对齐为既有样式，不另作断言）
     expect(screen.getByText("我回一句")).toBeInTheDocument();
+  });
+
+  it("direct 下对方已读我的消息时显示「已读」（晚于读点的不显示）", async () => {
+    const mine1: Message = {
+      ...msg("m1", "我 10:00 发的", "2026-10-14T02:00:00.000Z"),
+      senderId: "u1",
+    };
+    const mine2: Message = {
+      ...msg("m2", "我 10:03 发的", "2026-10-14T02:03:00.000Z"),
+      senderId: "u1",
+    };
+    mockMessagesFetch([mine1, mine2], undefined, {
+      reads: [[{ userId: "u2", at: "2026-10-14T02:01:00.000Z" }]],
+    });
+
+    render(<ChatPage />);
+    expect(await screen.findByText("已读")).toBeInTheDocument();
+    // 逐条判断：m1 早于对方读点 → 已读；m2 晚于读点 → 不显示
+    expect(screen.getByText("我 10:00 发的")).toHaveTextContent("已读");
+    expect(screen.getByText("我 10:03 发的")).not.toHaveTextContent("已读");
+    expect(screen.getAllByText("已读")).toHaveLength(1);
+  });
+
+  it("挂载后 unreadCount>0 时发送 mark_read", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 3 }],
+    });
+
+    render(<ChatPage />);
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({ type: "mark_read", conversationId: "c1" }),
+    );
+  });
+
+  it("挂载后 unreadCount=0 时不发送 mark_read", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+
+    render(<ChatPage />);
+    await act(async () => {}); // 冲刷挂载 effects（loadReads/fetchMessages 落定）
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("会话内收到他人新消息补发 mark_read，自己发的消息不补发", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument());
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: { ...msg("m2", "刚发来的", "2026-10-14T02:10:00.000Z"), senderId: "u2" },
+      });
+    });
+    // 正在会话内看到的消息即时标记已读：否则退出后角标会把已读内容算作未读
+    expect(send).toHaveBeenCalledWith({ type: "mark_read", conversationId: "c1" });
+
+    send.mockClear();
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: { ...msg("m3", "我自己发的", "2026-10-14T02:11:00.000Z"), senderId: "u1" },
+      });
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("群会话头显示「群名（N 人）」，且群会话不显示「已读」（M2 仅 1:1）", async () => {
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 5, unreadCount: 0 }],
+    });
+    const other = msg("m1", "我提个问题", "2026-10-14T01:00:00.000Z"); // senderId u2
+    mockMessagesFetch([other], undefined, {
+      reads: [[{ userId: "u2", at: "2026-10-14T09:00:00.000Z" }]],
+    });
+
+    render(<ChatPage />);
+    expect(await screen.findByText("评审组（5 人）")).toBeInTheDocument();
+    expect(screen.queryByText("已读")).not.toBeInTheDocument();
+  });
+
+  it("群内他人消息气泡显示成员映射名，自己的显示「我」", async () => {
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    const other = msg("m1", "我提个问题", "2026-10-14T01:00:00.000Z"); // senderId u2
+    const mine: Message = {
+      ...msg("m2", "同意", "2026-10-14T01:02:00.000Z"),
+      senderId: "u1",
+    };
+    const fetchMock = mockMessagesFetch([other, mine], undefined, {
+      members: [
+        [
+          { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
+          { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer },
+        ],
+      ],
+    });
+
+    render(<ChatPage />);
+    // 挂载时拉一次 members 建 id→名字映射（M2 消息体无 senderName）
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((c) => String(c[0]) === "/api/conversations/c1/members")).toBe(
+        true,
+      ),
+    );
+    expect(await screen.findByText("鲍勃")).toBeInTheDocument(); // 他人气泡：映射名
+    expect(screen.getByText("我")).toBeInTheDocument(); // 自己
+    expect(screen.getByText("同意")).toBeInTheDocument();
+  });
+
+  it("收到 read_update：仅本会话重拉 /reads 并更新「已读」标记", async () => {
+    const mine: Message = {
+      ...msg("m1", "我发的", "2026-10-14T02:00:00.000Z"),
+      senderId: "u1",
+    };
+    const fetchMock = mockMessagesFetch([mine], undefined, {
+      reads: [[], [{ userId: "u2", at: "2026-10-14T02:01:00.000Z" }]],
+    });
+
+    render(<ChatPage />);
+    const readsCalls = () => fetchMock.mock.calls.filter((c) => String(c[0]).includes("/reads"));
+    await waitFor(() => expect(readsCalls()).toHaveLength(1)); // 挂载 loadReads
+    await waitFor(() => expect(screen.getByText("我发的")).toBeInTheDocument());
+    expect(screen.queryByText("已读")).not.toBeInTheDocument(); // 首拉空表 → 无已读标记
+
+    // 他会话的 read_update 不触发重拉
+    act(() => {
+      lastHandlers().onEvent({
+        type: "read_update",
+        conversationId: "other",
+        userId: "u2",
+        at: "2026-10-14T02:01:00.000Z",
+      });
+    });
+    expect(readsCalls()).toHaveLength(1);
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "read_update",
+        conversationId: "c1",
+        userId: "u2",
+        at: "2026-10-14T02:01:00.000Z",
+      });
+    });
+    expect(await screen.findByText("已读")).toBeInTheDocument();
+    expect(readsCalls().length).toBeGreaterThan(1);
   });
 });

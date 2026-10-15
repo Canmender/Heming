@@ -3,10 +3,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { NavRail, NavPeek } from "./NavRail.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
+import { useChatStore } from "../store/chat.js";
 
 describe("NavRail 图标轨（A 方案）", () => {
   beforeEach(() => {
     useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+    // 角标用例注入未读会话：逐例清零，避免泄漏到「无角标」断言
+    useChatStore.setState({ conversations: [] });
     useAuthStore.setState({
       token: "t1",
       user: { id: "u1", username: "alice", displayName: "爱丽丝" },
@@ -20,6 +23,39 @@ describe("NavRail 图标轨（A 方案）", () => {
     for (const name of ["主页 Alt1", "工作区 Alt2", "接口区 Alt3", "记忆区 Alt4", "设置区 Alt5"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
+  });
+
+  it("工作区按钮角标 = 会话未读总和，aria-label 追加「N 条未读」", () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "direct",
+          peer: { id: "u9", username: "bob", displayName: "鲍勃" },
+          unreadCount: 2,
+        },
+        { id: "g1", type: "group", name: "评审组", memberCount: 3, unreadCount: 5 },
+      ],
+    });
+    render(<NavRail />);
+
+    const btn = screen.getByRole("button", { name: "工作区 Alt2 7 条未读" });
+    const badge = btn.querySelector("span.bg-ink") as HTMLElement;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toBe("7");
+    expect(badge.className).toContain("text-white");
+    // 其余按钮不受全局未读总和影响
+    expect(screen.getByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
+  });
+
+  it("无未读时工作区按钮无角标、aria-label 不带未读文案", () => {
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer: { id: "u9", username: "bob", displayName: "鲍勃" }, unreadCount: 0 }],
+    });
+    render(<NavRail />);
+
+    const btn = screen.getByRole("button", { name: "工作区 Alt2" });
+    expect(btn.querySelector("span.bg-ink")).toBeNull();
   });
 
   it("导航区不出现产品名文字（A 方案无品牌位）", () => {

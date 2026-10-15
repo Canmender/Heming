@@ -1,6 +1,7 @@
 import { HomeIcon, ChatIcon, PlugIcon, MemoryIcon, GearIcon, ChevronIcon, UserIcon } from "./icons.js";
 import { useUiStore, type Page } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
+import { useChatStore } from "../store/chat.js";
 
 const ITEMS: { page: Page; label: string; icon: JSX.Element; digit: string }[] = [
   { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
@@ -30,6 +31,8 @@ export function NavRail() {
   const setPage = useUiStore((s) => s.setPage);
   const displayName = useAuthStore((s) => s.user?.displayName);
   const avatar = useAuthStore((s) => s.user?.avatar);
+  // 全局未读总和（direct+group）：数据由登录后已有挂载加载（HomePage/RadarContacts 的 loadWorkspace），此处纯读取
+  const unread = useChatStore((s) => s.conversations.reduce((n, c) => n + c.unreadCount, 0));
   const who = displayName || "我";
 
   return (
@@ -40,17 +43,24 @@ export function NavRail() {
       {ITEMS.map((it) => {
         const active = page === it.page || (it.page === "workspace" && page === "chat");
         const shortcut = `Alt${it.digit}`;
+        // 工作区按钮承载全局未读角标：>0 时 aria-label 追加「N 条未读」
+        const showUnread = it.page === "workspace" && unread > 0;
         return (
           <div key={it.page} className="group relative">
             <button
               type="button"
-              aria-label={`${it.label} ${shortcut}`}
+              aria-label={`${it.label} ${shortcut}${showUnread ? ` ${unread} 条未读` : ""}`}
               onClick={() => setPage(it.page)}
-              className={`flex h-[34px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
+              className={`relative flex h-[34px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
                 active ? "bg-ink text-white" : "text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
               }`}
             >
               {it.icon}
+              {showUnread && (
+                <span className="absolute -right-1 -top-1 min-w-[16px] rounded-full border border-white bg-ink px-1 text-center text-[9px] font-semibold leading-[14px] text-white">
+                  {unread}
+                </span>
+              )}
             </button>
             <Tip label={it.label} shortcut={shortcut} />
           </div>

@@ -189,7 +189,34 @@ describe("HomePage", () => {
     const img2 = row2.querySelector("img");
     expect(img2).not.toBeNull();
     expect(img2!.getAttribute("src")).toBe("data:image/png;base64,AAA");
-    expect(screen.queryByText(/未读/)).not.toBeInTheDocument(); // M1 无未读角标
+    expect(screen.queryByLabelText(/条未读/)).not.toBeInTheDocument(); // unreadCount=0 → 不渲染角标
+  });
+
+  it("最近会话行尾未读角标：unreadCount>0 黑底白字圆角数字，0 不渲染", async () => {
+    const unreadConv = { id: "c3", type: "direct" as const, peer, unreadCount: 3 };
+    const zeroConv = conv("c1");
+    const rows = [zeroConv, unreadConv];
+    useChatStore.setState({
+      conversations: rows,
+      friends: [],
+      incoming: [],
+      messages: { c1: [{ id: "m0", conversationId: "c1", senderType: "user", senderId: "u1", payload: { text: "c1 有历史" }, replyTo: null, createdAt: now.toISOString() }] },
+    });
+    mockFetch({ conversations: rows });
+
+    render(<HomePage />);
+    await act(async () => {}); // 冲刷挂载时 health/工作区加载的异步状态更新
+
+    const badge = screen.getByLabelText("3 条未读");
+    expect(badge.textContent).toBe("3");
+    expect(badge.className).toContain("bg-ink"); // 黑底白字圆角小徽标
+    expect(badge.className).toContain("text-white");
+    expect(badge.className).toContain("rounded-full");
+    expect(screen.queryByLabelText("0 条未读")).not.toBeInTheDocument();
+
+    // 行尾位置：徽标落在该会话行按钮内（c3 无消息 → 预览「暂无消息」唯一）
+    const row = screen.getByText("暂无消息").closest("button") as HTMLElement;
+    expect(row.contains(badge)).toBe(true);
   });
 
   it("最近会话空态提示去工作区", async () => {
