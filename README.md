@@ -4,7 +4,7 @@
 
 ## 环境
 
-- Node ≥ 20，pnpm ≥ 10
+- Node ≥ 24，pnpm ≥ 10
 
 ## 启动
 
@@ -46,8 +46,16 @@ pnpm typecheck   # 等价于 pnpm -r build && pnpm -r typecheck
 ## 结构
 
 - `packages/shared` — 协议类型与 Zod schema（前后端唯一事实来源）
-- `packages/server` — Express 5 + WebSocket + 内存存储（M2 换 SQLite）
+- `packages/server` — Express 5 + WebSocket + SQLite 持久化存储
 - `packages/web` — React 18 + Tailwind 三栏 UI
 - `packages/desktop` — Electron 壳
 
 设计文档：`docs/superpowers/specs/2026-10-13-heming-platform-design.md`
+
+## 数据
+
+服务端数据（账号、会话、消息、已读状态）持久化在 SQLite：
+
+- 库文件路径由 `HEMING_DB_PATH` 指定，缺省 `./data/heming.db`（相对进程工作目录）。
+- Docker 部署（见 `docs/deploy.md`）注入 `HEMING_DB_PATH=/data/heming.db`，`/data` 挂 named volume `heming-data`——容器重启、镜像重建、回滚都不丢数据；备份/恢复针对该卷（`docs/deploy.md` §6）。
+- 本地开发默认落 `./data/heming.db`，已在 `.gitignore` 排除（`data/`），不进版本库、不进部署包。

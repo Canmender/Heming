@@ -33,9 +33,9 @@ api 服务本身**不向公网发布端口**（compose 内网互通）；对外�
 本地（排除依赖与版本库，镜像内会重建依赖）：
 
 ```bash
-# 在仓库根目录
+# 在仓库根目录（data/ 是本地开发库，不上传——服务器用数据卷）
 tar --exclude=node_modules --exclude=.git --exclude=.superpowers \
-    --exclude=.worktrees --exclude=.claude --exclude=dist \
+    --exclude=dist --exclude=.worktrees --exclude=data \
     -czf heming.tar.gz .
 scp heming.tar.gz root@47.92.39.184:~/
 
@@ -84,11 +84,14 @@ HEMING_SEED_USERS=admin:admin,alice:alice123
 # HEMING_ALLOW_REGISTER=1   # 取消注释才放开公开注册（默认关，403）
 ```
 
-注意：播种只在进程启动时执行，且**当前为内存存储**——容器重启后运行期产生的账号/会话会丢失，播种账号会重新创建（见 §6 备份）。
+注意：
+
+- 播种只在进程启动时执行。数据已由 SQLite 持久化（卷 `heming_heming-data`，容器内 `/data`），容器重启、重建不丢运行期产生的账号、会话与消息（见 §6 备份）。
+- `HEMING_SEED_USERS` **新增的账号不会自动加入预设群「和鸣交流群」**——群成员是群创建时刻的快照，群建好后不再补成员；M3 群管理开放后可调整。
 
 ## 5. 更新流程与回滚
 
-更新（数据卷不动）：
+更新（数据卷不动，即持久）：整个流程只重建镜像与容器，`heming-data` 卷从不删除，SQLite 数据（账号/会话/消息/已读状态）原样保留：
 
 ```bash
 # 本地重新打包上传解包（§2）
@@ -117,15 +120,21 @@ docker tag heming-web:latest heming-web:prev
 
 ## 6. 备份
 
-- **M2 之前**：服务端是内存存储（`HEMING_DB_PATH=/data` 只是预留，进程尚未使用），重启即清空，**没有可备份的持久数据**；账号靠 `HEMING_SEED_USERS` 重建。
-- **M2 接入 SQLite 之后**：数据落在卷 `heming-data`（容器内 `/data`），备份：
+数据（SQLite 库 `heming.db`）落在 named volume `heming_heming-data`（容器内 `/data`）。**备份 = 打包该卷**，与代码/镜像无关：
 
 ```bash
-docker run --rm -v heming_heming-data:/data -v "$PWD":/backup \
-  alpine tar czf /backup/heming-data-$(date +%F).tar.gz /data
+# 备份（在 /root/heming 执行；文件名带日期）
+docker run --rm -v heming_heming-data:/d -v "$PWD":/backup \
+  alpine tar czf /backup/heming-data-$(date +%F).tar.gz -C /d .
+
+# 恢复：停服务 → 解包回卷 → 起服务
+cd ~/heming && docker compose -p heming stop api
+docker run --rm -v heming_heming-data:/d -v "$PWD":/backup \
+  alpine tar xzf /backup/heming-data-<日期>.tar.gz -C /d
+docker compose -p heming start api
 ```
 
-恢复：停服务 → 解包回卷 → 起服务。
+卷不删不重建时数据一直在：`docker compose down` 默认保留卷，回滚/更新见 §5。
 
 ## 7. CORS 与同源决策
 
