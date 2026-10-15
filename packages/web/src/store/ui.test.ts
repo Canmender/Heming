@@ -3,7 +3,12 @@ import { useUiStore } from "./ui.js";
 
 describe("ui store 导航显隐", () => {
   beforeEach(() => {
-    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+    useUiStore.setState({
+      page: "home",
+      navCollapsed: false,
+      activeConversationId: null,
+      contactsHidden: false,
+    });
   });
 
   it("默认主页且导航展开", () => {
@@ -31,5 +36,39 @@ describe("ui store 导航显隐", () => {
     expect(useUiStore.getState().navCollapsed).toBe(true);
     useUiStore.getState().setNavCollapsed(false);
     expect(useUiStore.getState().navCollapsed).toBe(false);
+  });
+
+  it("打开会话同时隐藏通讯录（contactsHidden → true）", () => {
+    useUiStore.getState().showContacts();
+    expect(useUiStore.getState().contactsHidden).toBe(false);
+    useUiStore.getState().openConversation("c1");
+    expect(useUiStore.getState().contactsHidden).toBe(true);
+  });
+
+  it("切到非聊天页复位通讯录可见（contactsHidden → false）", () => {
+    useUiStore.getState().openConversation("c1");
+    expect(useUiStore.getState().contactsHidden).toBe(true);
+    useUiStore.getState().setPage("workspace");
+    expect(useUiStore.getState().contactsHidden).toBe(false);
+  });
+
+  it("showContacts 仅恢复通讯录、不改页与当前会话", () => {
+    useUiStore.getState().openConversation("c1");
+    useUiStore.getState().showContacts();
+    const s = useUiStore.getState();
+    expect(s.contactsHidden).toBe(false);
+    expect(s.page).toBe("chat");
+    expect(s.activeConversationId).toBe("c1");
+    expect(s.navCollapsed).toBe(true);
+  });
+
+  it("hideContacts 仅隐藏、不改页", () => {
+    useUiStore.getState().openConversation("c1");
+    useUiStore.getState().showContacts();
+    useUiStore.getState().hideContacts();
+    const s = useUiStore.getState();
+    expect(s.contactsHidden).toBe(true);
+    expect(s.page).toBe("chat");
+    expect(s.activeConversationId).toBe("c1");
   });
 });

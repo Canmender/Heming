@@ -140,7 +140,7 @@ export function HomePage() {
 
       {/* 2. 四张统计卡（真实数据） */}
       <div className="grid grid-cols-4 gap-2.5">
-        <StatCard title="会话总数" value={String(conversations.length)} sub="直聊" />
+        <StatCard title="会话总数" value={String(conversations.length)} sub="含群聊" />
         <StatCard title="好友数" value={String(friends.length)} sub="可拉群聊" />
         <StatCard title="我的智能体" value="0" sub="M3 开放创建" />
         <div className="col-span-4 rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
@@ -267,6 +267,9 @@ export function HomePage() {
               const list = messages[c.id] ?? [];
               const last = list[list.length - 1];
               const preview = last ? last.payload.text : "暂无消息";
+              // conversations 联合类型（M2）：direct 显 peer、group 显群名
+              const title = c.type === "direct" ? c.peer.displayName : c.name;
+              const avatarUser = c.type === "direct" ? c.peer : { displayName: c.name };
               return (
                 <button
                   key={c.id}
@@ -274,11 +277,9 @@ export function HomePage() {
                   onClick={() => openConversation(c.id)}
                   className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors duration-150 hover:bg-[#f7f7f7]"
                 >
-                  <Avatar user={c.peer} size={28} />
+                  <Avatar user={avatarUser} size={28} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium">
-                      {c.peer.displayName}
-                    </span>
+                    <span className="block truncate text-[13px] font-medium">{title}</span>
                     <span className="block truncate text-[11px] text-muted">{preview}</span>
                   </span>
                   <span className="shrink-0 text-[10px] text-muted">

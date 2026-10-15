@@ -1,4 +1,4 @@
-import type { User, SharedFileMeta, Message } from "@heming/shared";
+import type { User, SharedFileMeta, Message, Conversation, Member } from "@heming/shared";
 
 /**
  * API 直连地址：构建时由 VITE_API_BASE 注入（vite 对 VITE_ 前缀 env 天然内联，无需 define）。
@@ -106,8 +106,8 @@ export const fetchIncomingRequests = () =>
   api<{ id: string; from: User }[]>("/api/friends/requests");
 export const acceptFriend = (id: string) =>
   api(`/api/friends/${id}/accept`, { method: "POST", body: "{}" });
-export const fetchConversations = () =>
-  api<{ id: string; type: "direct"; peer: User }[]>("/api/conversations");
+export const fetchConversations = () => api<Conversation[]>("/api/conversations");
+/** 建直聊会话：服务端该响应体不带 unreadCount（store.createDirectConversation 原样返回），由调用方补 0。 */
 export const createConversation = (peerId: string) =>
   api<{ id: string; type: "direct"; peer: User }>("/api/conversations", {
     method: "POST",
@@ -115,4 +115,6 @@ export const createConversation = (peerId: string) =>
   });
 export const fetchMessages = (convId: string) =>
   api<Message[]>(`/api/conversations/${convId}/messages`);
+export const fetchMembers = (convId: string) =>
+  api<Member[]>(`/api/conversations/${convId}/members`);
 export const fetchFiles = () => api<SharedFileMeta[]>("/api/files");

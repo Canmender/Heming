@@ -1,6 +1,13 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import type { Message } from "@heming/shared";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { Member, Message, User } from "@heming/shared";
 import { useChatStore } from "./chat.js";
+import { api, fetchMembers } from "../lib/api.js";
+
+// createGroup 走 api()、loadAgents 走 fetchMembers：模块级 mock（其余导出保持真实）
+vi.mock("../lib/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/api.js")>();
+  return { ...actual, api: vi.fn(), fetchMembers: vi.fn() };
+});
 
 const msg = (id: string, text: string): Message => ({
   id,
@@ -19,7 +26,14 @@ const msgAt = (id: string, text: string, createdAt: string): Message => ({
 
 describe("chat store", () => {
   beforeEach(() => {
-    useChatStore.setState({ conversations: [], friends: [], incoming: [], messages: {} });
+    vi.clearAllMocks(); // 模块 mock（api/fetchMembers）的调用历史逐例归零
+    useChatStore.setState({
+      conversations: [],
+      friends: [],
+      incoming: [],
+      messages: {},
+      agents: [],
+    });
   });
 
   it("appendMessage 追加消息", () => {
@@ -69,5 +83,82 @@ describe("chat store", () => {
     ]);
     const ids = useChatStore.getState().messages["c1"].map((m) => m.id);
     expect(ids).toEqual(["m1", "m2", "m3"]);
+  });
+
+  it("conversations 联合类型：group 行可读 name/memberCount/unreadCount", () => {
+    const peer: User = { id: "u1", username: "alice", displayName: "A" };
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 0 },
+        { id: "g1", type: "group", name: "评审组", memberCount: 3, unreadCount: 2 },
+      ],
+    });
+    const groups = useChatStore.getState().conversations.filter((c) => c.type === "group");
+    expect(groups[0].type === "group" && groups[0].name).toBe("评审组");
+    expect(groups[0].unreadCount).toBe(2);
+    const directs = useChatStore.getState().conversations.filter((c) => c.type === "direct");
+    expect(directs[0].type === "direct" && directs[0].peer.username).toBe("alice");
+  });
+
+  it("createGroup：POST /api/conversations 后 reload 并返回新 id", async () => {
+    vi.mocked(api).mockResolvedValue({ id: "g9", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 });
+    const loadWorkspace = vi
+      .spyOn(useChatStore.getState(), "loadWorkspace")
+      .mockResolvedValue(undefined);
+    const id = await useChatStore.getState().createGroup("评审组", ["u2", "u3"]);
+    expect(id).toBe("g9");
+    expect(api).toHaveBeenCalledWith(
+      "/api/conversations",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const [, init] = vi.mocked(api).mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toEqual({ name: "评审组", memberIds: ["u2", "u3"] });
+    expect(loadWorkspace).toHaveBeenCalledTimes(1);
+    loadWorkspace.mockRestore();
+  });
+
+  it("loadAgents：逐群拉 members，kind=agent 按 id 去重", async () => {
+    const agentA: Member = { kind: "agent", id: "a1", name: "和小鸣", avatar: null, user: null };
+    const agentB: Member = { kind: "agent", id: "a2", name: "架构师", avatar: null, user: null };
+    const human: Member = {
+      kind: "user",
+      id: "u9",
+      name: "路人",
+      avatar: null,
+      user: { id: "u9", username: "passer", displayName: "路人" },
+    };
+    vi.mocked(fetchMembers).mockImplementation(async (convId) => {
+      // g1 与 g2 都含 a1（跨群重复）、g1 另含 a2 与一个人类成员（应被过滤）
+      if (convId === "g1") return [human, agentA, agentB];
+      return [agentA];
+    });
+    useChatStore.setState({
+      conversations: [
+        { id: "g1", type: "group", name: "预设群", memberCount: 4, unreadCount: 0 },
+        { id: "g2", type: "group", name: "评审组", memberCount: 2, unreadCount: 0 },
+      ],
+      agents: [],
+    });
+    await useChatStore.getState().loadAgents();
+    expect(fetchMembers).toHaveBeenCalledWith("g1");
+    expect(fetchMembers).toHaveBeenCalledWith("g2");
+    expect(useChatStore.getState().agents.map((a) => a.id)).toEqual(["a1", "a2"]);
+  });
+
+  it("loadAgents：群 members 拉取失败不炸（其余群照常收集）", async () => {
+    const agentA: Member = { kind: "agent", id: "a1", name: "和小鸣", avatar: null, user: null };
+    vi.mocked(fetchMembers).mockImplementation(async (convId) => {
+      if (convId === "bad") throw new Error("forbidden");
+      return [agentA];
+    });
+    useChatStore.setState({
+      conversations: [
+        { id: "bad", type: "group", name: "坏群", memberCount: 1, unreadCount: 0 },
+        { id: "g2", type: "group", name: "好群", memberCount: 2, unreadCount: 0 },
+      ],
+      agents: [],
+    });
+    await expect(useChatStore.getState().loadAgents()).resolves.toBeUndefined();
+    expect(useChatStore.getState().agents.map((a) => a.id)).toEqual(["a1"]);
   });
 });

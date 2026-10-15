@@ -59,7 +59,7 @@ describe("ChatPage", () => {
     useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
     useUiStore.setState({ page: "chat", navCollapsed: true, activeConversationId: "c1" });
     useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer }],
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
       friends: [],
       incoming: [],
       messages: {},

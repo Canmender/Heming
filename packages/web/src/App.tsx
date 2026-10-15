@@ -8,6 +8,7 @@ import { NavRail, NavPeek } from "./components/NavRail.js";
 import { FileTree } from "./components/FileTree.js";
 import { WorkspacePage } from "./components/WorkspacePage.js";
 import { ChatPage } from "./components/ChatPage.js";
+import { RadarContacts } from "./components/RadarContacts.js";
 import { HomePage } from "./components/HomePage.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 
@@ -107,7 +108,14 @@ export function App() {
     page === "home" ? (
       <HomePage />
     ) : page === "chat" ? (
-      <ChatPage />
+      // 会话态：ChatPage 常驻底层（保持 WS/草稿状态）；雷达覆盖层按 contactsHidden
+      // 滑出/呼出（面板自身管理 transform，隐藏时平移出容器并由 overflow 裁切）
+      <div className="relative h-full min-h-0 w-full overflow-hidden">
+        <div className="absolute inset-0 flex flex-col">
+          <ChatPage />
+        </div>
+        <RadarContacts overlay />
+      </div>
     ) : page === "workspace" ? (
       <WorkspacePage />
     ) : page === "settings" ? (

@@ -21,7 +21,9 @@ export function ChatPage() {
   const wsHandleRef = useRef<WsHandle | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const peer = conversations.find((c) => c.id === convId)?.peer;
+  // conversations 为联合类型（M2）：仅 direct 有 peer；group 头显名随后续任务
+  const conv = conversations.find((c) => c.id === convId);
+  const peer = conv?.type === "direct" ? conv.peer : undefined;
 
   useEffect(() => {
     void fetchMessages(convId).then((msgs) => setMessages(convId, msgs));

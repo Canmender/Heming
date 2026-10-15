@@ -9,7 +9,8 @@ import { useTokenUsageStore, monthKeyOf, daysOfMonth } from "../store/tokenUsage
 const user: User = { id: "u1", username: "alice", displayName: "测试阿丽" };
 const peer: User = { id: "u2", username: "bob", displayName: "鲍勃" };
 
-const conv = (id: string) => ({ id, type: "direct" as const, peer: user });
+// conversations 为联合类型（M2）：direct 夹具补 unreadCount
+const conv = (id: string) => ({ id, type: "direct" as const, peer: user, unreadCount: 0 });
 
 const now = new Date();
 const at = (day: number, hour = 12) =>
@@ -162,6 +163,7 @@ describe("HomePage", () => {
       id: "c2",
       type: "direct" as const,
       peer: { ...peer, avatar: "data:image/png;base64,AAA" },
+      unreadCount: 0,
     };
     useChatStore.setState({
       conversations: [conv("c1"), convWithAvatar],

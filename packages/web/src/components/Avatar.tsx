@@ -16,12 +16,13 @@ export function Avatar({
   className = "",
 }: {
   user: AvatarUser;
-  size?: 22 | 28 | 32;
+  /** 雷达节点/悬浮卡用到 38/40；29 为外圈 far 节点小号。 */
+  size?: 22 | 28 | 29 | 32 | 38 | 40;
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
   const initial = user.displayName.trim().charAt(0) || "?";
-  const fontSize = size >= 32 ? 14 : size >= 28 ? 12 : 11;
+  const fontSize = size >= 38 ? 15 : size >= 32 ? 14 : size >= 28 ? 12 : 11;
 
   if (user.avatar && !failed) {
     return (
