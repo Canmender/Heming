@@ -26,6 +26,7 @@ describe("WorkspacePage（薄容器 → 雷达）", () => {
       navCollapsed: false,
       activeConversationId: null,
       contactsHidden: false,
+      detailContact: null,
     });
     useChatStore.setState({
       conversations: [{ id: "g1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
@@ -51,5 +52,14 @@ describe("WorkspacePage（薄容器 → 雷达）", () => {
     expect(screen.getByText("智能体")).toBeInTheDocument();
     expect(screen.getByText("李四")).toBeInTheDocument();
     expect(screen.getByText("和小鸣")).toBeInTheDocument();
+  });
+
+  it("detailContact 置位 → 分组竖列 + 详情卡（雷达标题消失、返回雷达可见）", () => {
+    useUiStore.setState({ detailContact: { kind: "group", id: "g1" } });
+    render(<WorkspacePage />);
+    expect(screen.getByLabelText("联系人列")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回雷达" })).toBeInTheDocument();
+    expect(screen.queryByText("通讯录 · 雷达")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("查看 评审组").getAttribute("aria-current")).toBe("true");
   });
 });

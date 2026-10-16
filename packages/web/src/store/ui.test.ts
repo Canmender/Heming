@@ -71,4 +71,15 @@ describe("ui store 导航显隐", () => {
     expect(s.page).toBe("chat");
     expect(s.activeConversationId).toBe("c1");
   });
+
+  it("openContactDetail/closeContactDetail 与 setPage 清空", () => {
+    const s = useUiStore.getState();
+    s.openContactDetail("human", "u1");
+    expect(useUiStore.getState().detailContact).toEqual({ kind: "human", id: "u1" });
+    useUiStore.getState().setPage("home");
+    expect(useUiStore.getState().detailContact).toBeNull();
+    useUiStore.getState().openContactDetail("agent", "a1");
+    useUiStore.getState().closeContactDetail();
+    expect(useUiStore.getState().detailContact).toBeNull();
+  });
 });

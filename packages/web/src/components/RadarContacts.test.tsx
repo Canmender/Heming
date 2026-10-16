@@ -27,6 +27,7 @@ function seedStore() {
     navCollapsed: false,
     activeConversationId: null,
     contactsHidden: false,
+    detailContact: null,
   });
   useChatStore.setState({
     conversations: [
@@ -154,22 +155,34 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(screen.getByRole("button", { name: "历史会话" })).toBeEnabled();
   });
 
-  it("点击群节点：进入会话且通讯录隐藏", async () => {
+  it("非 overlay 点击群节点：打开群详情（不直进会话，overlay 直进会话另测）", async () => {
     render(<RadarContacts />);
     await screen.findByText("评审组");
     fireEvent.click(screen.getByText("评审组"));
     const s = useUiStore.getState();
-    expect(s.contactsHidden).toBe(true);
-    expect(s.page).toBe("chat");
-    expect(s.activeConversationId).toBe("g1");
+    expect(s.detailContact).toEqual({ kind: "group", id: "g1" });
+    expect(s.page).toBe("workspace");
+    expect(s.contactsHidden).toBe(false);
   });
 
-  it("F6 人类节点无既有直聊 → openDirect 链路（createConversation → 进会话）", async () => {
-    // 张三是好友但 conversations 无其直聊 → 节点 peerId 分支
-    vi.mocked(createConversation).mockResolvedValue({ id: "c2", type: "direct", peer: zhang });
+  it("非 overlay 点击人类节点：打开详情（不直进会话、不触发 openDirect）", async () => {
     render(<RadarContacts />);
     await screen.findByText("张三");
     fireEvent.click(screen.getByText("张三"));
+    const s = useUiStore.getState();
+    expect(s.detailContact).toEqual({ kind: "human", id: "u3" });
+    expect(s.page).toBe("workspace");
+    expect(s.activeConversationId).toBeNull();
+    expect(createConversation).not.toHaveBeenCalled();
+  });
+
+  it("F6 悬浮卡「发消息」（快速通道）：人类无既有直聊 → openDirect 链路（createConversation → 进会话）", async () => {
+    // 张三是好友但 conversations 无其直聊 → enter 分支走 openDirect
+    vi.mocked(createConversation).mockResolvedValue({ id: "c2", type: "direct", peer: zhang });
+    render(<RadarContacts />);
+    await screen.findByText("张三");
+    fireEvent.mouseOver(screen.getByText("张三"));
+    fireEvent.click(await screen.findByRole("button", { name: "发消息" }));
     await waitFor(() => expect(createConversation).toHaveBeenCalledWith("u3"));
     await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c2"));
     const s = useUiStore.getState();
@@ -177,11 +190,12 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(s.page).toBe("chat");
   });
 
-  it("F8 openDirect 失败：面板恢复（未停在隐藏态）+ 顶部错误提示可见", async () => {
+  it("F8 悬浮卡「发消息」openDirect 失败：面板恢复（未停在隐藏态）+ 顶部错误提示可见", async () => {
     vi.mocked(createConversation).mockRejectedValue(new Error("network down"));
     render(<RadarContacts />);
     await screen.findByText("张三");
-    fireEvent.click(screen.getByText("张三"));
+    fireEvent.mouseOver(screen.getByText("张三"));
+    fireEvent.click(await screen.findByRole("button", { name: "发消息" }));
     const err = await screen.findByRole("alert");
     expect(err).toHaveTextContent("无法打开与 张三 的会话");
     const s = useUiStore.getState();
@@ -199,9 +213,10 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(send).toHaveAttribute("title", "M3 开放对话");
     // 卡片打开后名称两处（节点 + 卡片）：点节点本体（DOM 在前）
     fireEvent.click(screen.getAllByText("和小鸣")[0]);
-    // 点击智能体不进入会话、不隐藏通讯录
+    // 点击智能体不进入会话、不隐藏通讯录，打开智能体详情
     expect(useUiStore.getState().page).toBe("workspace");
     expect(useUiStore.getState().contactsHidden).toBe(false);
+    expect(useUiStore.getState().detailContact).toEqual({ kind: "agent", id: "a1" });
   });
 
   it("overlay 模式：点群节点隐藏后「呼出」按钮拉回（不改页）", async () => {

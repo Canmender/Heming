@@ -1,10 +1,21 @@
+import { useUiStore } from "../store/ui.js";
 import { RadarContacts } from "./RadarContacts.js";
+import { ContactColumn } from "./ContactColumn.js";
+import { ContactDetail } from "./ContactDetail.js";
 
 /**
- * 工作区 = 雷达通讯录主视图（定稿：圆形雷达三扇区）。
- * 原好友列表/申请表单/直聊列表已迁移：申请与待处理在「＋ 加好友」面板、
- * 直聊/群聊节点在雷达扇区（见 RadarContacts.tsx）。
+ * 工作区三态：无 detailContact = 雷达主视图；置位 = 左侧分组竖列 + 右侧联系人详情卡
+ * （雷达节点点击进详情；竖列点头像切换详情）。
  */
 export function WorkspacePage() {
-  return <RadarContacts />;
+  const detail = useUiStore((s) => s.detailContact);
+  if (!detail) return <RadarContacts />;
+  return (
+    <div className="flex h-full min-h-0">
+      <ContactColumn />
+      <div className="min-w-0 flex-1">
+        <ContactDetail target={detail} />
+      </div>
+    </div>
+  );
 }

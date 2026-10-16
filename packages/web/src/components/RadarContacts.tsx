@@ -12,7 +12,8 @@ import { AgentFormModal } from "./AgentFormModal.js";
 /**
  * 通讯录主视图 · 圆形雷达（视觉定稿 contacts-final-v2.html 移植）：
  * 圆心「我」+ 三同心虚线环 + 10s 扫描线；三扇区（上=群聊 / 左下=人类 / 右下=智能体）。
- * 悬浮节点 → 信息卡；点击（群/人类）→ 进会话并左滑隐藏；overlay 模式左缘「呼出」拉回。
+ * 悬浮节点 → 信息卡；工作区主视图点击节点 → 详情页（悬浮卡「发消息/历史会话」仍直进会话）；
+ * overlay 模式（聊天页呼出层）点击 → 直进会话并左滑隐藏，左缘「呼出」拉回。
  */
 
 // ---------- 扇区落位（纯函数，导出可测） ----------
@@ -112,6 +113,7 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
   const hideContacts = useUiStore((s) => s.hideContacts);
   const showContacts = useUiStore((s) => s.showContacts);
   const contactsHidden = useUiStore((s) => s.contactsHidden);
+  const openContactDetail = useUiStore((s) => s.openContactDetail);
 
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
@@ -434,7 +436,12 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
                 onMouseLeave={scheduleHide}
                 onClick={() => {
                   setCard(null);
-                  enter(n);
+                  // 仅 overlay（聊天页呼出层）点节点直进会话；工作区主视图点节点开详情页
+                  if (overlay) {
+                    enter(n);
+                  } else {
+                    openContactDetail(n.agent ? "agent" : n.peerId ? "human" : "group", n.key);
+                  }
                 }}
               >
                 <span className="avwrap">
