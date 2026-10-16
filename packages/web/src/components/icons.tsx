@@ -88,3 +88,9 @@ export const MicIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M6 11.5a6 6 0 0 0 12 0M12 17.5V21" />
   </svg>
 );
+export const EyeIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);

@@ -141,7 +141,12 @@ describe("ChatPage", () => {
     vi.mocked(streamChat).mockResolvedValue("");
     useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
     useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
-    useUiStore.setState({ page: "chat", navCollapsed: true, activeConversationId: "c1" });
+    useUiStore.setState({
+      page: "chat",
+      navCollapsed: true,
+      activeConversationId: "c1",
+      pendingAttachment: null,
+    });
     useChatStore.setState({
       conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
       friends: [],
@@ -1293,6 +1298,59 @@ describe("ChatPage", () => {
     // 旧闭包的 convId/handle 都过期：不得把附件发进 B 会话
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
     expect(await screen.findByRole("status")).toHaveTextContent("已切换会话，文件未发送");
+  });
+
+  it("消费 pendingAttachment：切到目标会话后经 WS 发送 file 消息", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 0 },
+        { id: "c2", type: "direct", peer, unreadCount: 0 },
+      ],
+    });
+
+    render(<ChatPage />); // 挂在 c1（beforeEach 口径）
+    await act(async () => {});
+
+    // 槽指向 c2：本会话（c1）不发、槽保留
+    const file = { id: "f-share", name: "共享.md", mime: "text/markdown", size: 3 };
+    act(() => {
+      useUiStore.setState({ pendingAttachment: { conversationId: "c2", file } });
+    });
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+    expect(useUiStore.getState().pendingAttachment).toEqual({ conversationId: "c2", file });
+
+    // 切到目标会话 → 消费槽，经 WS 发出纯附件消息（text 空串 + payload.file）
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" });
+    });
+    expect(send).toHaveBeenCalledWith({
+      type: "send_message",
+      conversationId: "c2",
+      payload: { text: "", file },
+    });
+    expect(useUiStore.getState().pendingAttachment).toBeNull();
+  });
+
+  it("pendingAttachment 目标不是本会话时不发送", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const file = { id: "f-other", name: "别会话.txt", mime: "text/plain", size: 1 };
+    act(() => {
+      useUiStore.setState({ pendingAttachment: { conversationId: "c-other", file } });
+    });
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+    expect(useUiStore.getState().pendingAttachment).toEqual({
+      conversationId: "c-other",
+      file,
+    }); // 槽保留，等目标会话激活时再消费
   });
 });
 

@@ -82,4 +82,24 @@ describe("ui store 导航显隐", () => {
     useUiStore.getState().closeContactDetail();
     expect(useUiStore.getState().detailContact).toBeNull();
   });
+
+  it("sendFileToConversation/consumePendingAttachment 单槽语义", () => {
+    useUiStore
+      .getState()
+      .sendFileToConversation("c1", { id: "f1", name: "a.png", mime: "image/png", size: 3 });
+    expect(useUiStore.getState().pendingAttachment).toEqual({
+      conversationId: "c1",
+      file: { id: "f1", name: "a.png", mime: "image/png", size: 3 },
+    });
+    useUiStore.getState().consumePendingAttachment();
+    expect(useUiStore.getState().pendingAttachment).toBeNull();
+  });
+
+  it("setPage 清空 pendingAttachment", () => {
+    useUiStore
+      .getState()
+      .sendFileToConversation("c1", { id: "f1", name: "a", mime: "text/plain", size: 1 });
+    useUiStore.getState().setPage("home");
+    expect(useUiStore.getState().pendingAttachment).toBeNull();
+  });
 });

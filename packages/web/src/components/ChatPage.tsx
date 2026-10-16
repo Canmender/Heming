@@ -399,6 +399,20 @@ export function ChatPage() {
     [],
   );
 
+  /** 右栏目录「发送到会话」投递：单槽命中本会话即经 WS 发纯附件消息并清槽。 */
+  const pendingAttachment = useUiStore((s) => s.pendingAttachment);
+  useEffect(() => {
+    if (!pendingAttachment || pendingAttachment.conversationId !== convId) return;
+    const handle = wsHandleRef.current;
+    if (!handle) return; // 未连上：保留槽，连上后（onOpen 重渲染）重试
+    handle.send({
+      type: "send_message",
+      conversationId: convId,
+      payload: { text: "", file: pendingAttachment.file },
+    });
+    useUiStore.getState().consumePendingAttachment();
+  }, [pendingAttachment, convId]);
+
   /** 键入触发：草稿尾随 @token（空格一断 token 即结束）→ 过滤弹选择器；direct 不触发。 */
   const onDraftChange = (value: string) => {
     setDraft(value);

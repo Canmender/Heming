@@ -151,7 +151,23 @@ export function App() {
           </button>
         </div>
         <div className="min-h-0 flex-1">
-          <FileTree items={files} localPaths={[]} />
+          <FileTree
+            items={files}
+            localPaths={[]}
+            onSendToConversation={(item) => {
+              const { page, activeConversationId } = useUiStore.getState();
+              if (page !== "chat" || !activeConversationId) {
+                window.alert("先打开一个会话，再从目录发送文件");
+                return;
+              }
+              useUiStore.getState().sendFileToConversation(activeConversationId, {
+                id: item.id,
+                name: item.name,
+                mime: item.mime,
+                size: item.size,
+              });
+            }}
+          />
         </div>
       </aside>
     </div>

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { FileTree } from "./FileTree.js";
 
@@ -22,5 +22,35 @@ describe("FileTree", () => {
   it("本地未绑定时显示绑定入口文案", () => {
     render(<FileTree items={[]} localPaths={[]} />);
     expect(screen.getByText("未绑定本地目录")).toBeInTheDocument();
+  });
+
+  it("文件行提供发送到会话与预览操作（目录行没有）", () => {
+    render(
+      <FileTree
+        items={[
+          { id: "d1", owner: "me", name: "docs", mime: "inode/directory", size: 0, updatedAt: "" },
+          { id: "f1", owner: "me", name: "a.txt", mime: "text/plain", size: 1, updatedAt: "" },
+        ]}
+        localPaths={[]}
+        onSendToConversation={vi.fn()}
+        onPreview={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("发送到会话 a.txt")).toBeTruthy();
+    expect(screen.getByLabelText("预览 a.txt")).toBeTruthy();
+    // 目录行只给展开/折叠，不给文件操作
+    expect(screen.queryByLabelText("发送到会话 docs")).toBeNull();
+    expect(screen.queryByLabelText("预览 docs")).toBeNull();
+  });
+
+  it("未传操作回调时不渲染操作钮", () => {
+    render(
+      <FileTree
+        items={[{ id: "f1", owner: "me", name: "a.txt", mime: "text/plain", size: 1, updatedAt: "" }]}
+        localPaths={[]}
+      />,
+    );
+    expect(screen.queryByLabelText("发送到会话 a.txt")).toBeNull();
+    expect(screen.queryByLabelText("预览 a.txt")).toBeNull();
   });
 });

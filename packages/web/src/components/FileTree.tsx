@@ -1,12 +1,16 @@
 import { useState } from "react";
 import type { SharedFileMeta } from "@heming/shared";
-import { ChevronIcon, FileIcon, FolderIcon } from "./icons.js";
+import { ChatIcon, ChevronIcon, EyeIcon, FileIcon, FolderIcon } from "./icons.js";
 
 export type TreeItem = SharedFileMeta & { parentId?: string };
 
 interface Props {
   items: TreeItem[];
   localPaths: string[];
+  /** 文件行 hover「发送到会话」（App 传入时才渲染操作钮；目录行恒无）。 */
+  onSendToConversation?: (item: TreeItem) => void;
+  /** 文件行 hover「预览」（Task 4 接线；与 onSendToConversation 同为可选）。 */
+  onPreview?: (item: TreeItem) => void;
 }
 
 function Row({ label, depth, onClick, ariaLabel, expandable, expanded }: {
@@ -39,7 +43,19 @@ function Row({ label, depth, onClick, ariaLabel, expandable, expanded }: {
   );
 }
 
-function SectionRows({ title, items, rootParentId }: { title: string; items: TreeItem[]; rootParentId?: string }) {
+function SectionRows({
+  title,
+  items,
+  rootParentId,
+  onSendToConversation,
+  onPreview,
+}: {
+  title: string;
+  items: TreeItem[];
+  rootParentId?: string;
+  onSendToConversation?: (item: TreeItem) => void;
+  onPreview?: (item: TreeItem) => void;
+}) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
     setOpen((prev) => {
@@ -57,17 +73,56 @@ function SectionRows({ title, items, rootParentId }: { title: string; items: Tre
       const isDir = item.mime === "inode/directory";
       const kids = isDir ? children(item.id) : [];
       const isOpen = open.has(item.id);
+      const row = (
+        <Row
+          label={item.name}
+          depth={depth}
+          ariaLabel={isDir ? `切换文件夹 ${item.name}` : undefined}
+          expandable={isDir}
+          expanded={isOpen}
+          onClick={isDir ? () => toggle(item.id) : undefined}
+        />
+      );
+      if (isDir) {
+        return (
+          <div key={item.id}>
+            {row}
+            {isOpen ? render(kids, depth + 1) : null}
+          </div>
+        );
+      }
+      // 文件行：group 容器承载 hover 态，操作钮与 Row 平级（button 不可嵌套）
       return (
-        <div key={item.id}>
-          <Row
-            label={item.name}
-            depth={depth}
-            ariaLabel={isDir ? `切换文件夹 ${item.name}` : undefined}
-            expandable={isDir}
-            expanded={isOpen}
-            onClick={isDir ? () => toggle(item.id) : undefined}
-          />
-          {isDir && isOpen ? render(kids, depth + 1) : null}
+        <div key={item.id} className="group relative flex items-center">
+          {row}
+          <span className="ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex">
+            {onSendToConversation && (
+              <button
+                type="button"
+                aria-label={`发送到会话 ${item.name}`}
+                className="rounded p-0.5 text-muted hover:bg-[#ebebeb] hover:text-ink"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSendToConversation(item);
+                }}
+              >
+                <ChatIcon width={13} height={13} />
+              </button>
+            )}
+            {onPreview && (
+              <button
+                type="button"
+                aria-label={`预览 ${item.name}`}
+                className="rounded p-0.5 text-muted hover:bg-[#ebebeb] hover:text-ink"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPreview(item);
+                }}
+              >
+                <EyeIcon width={13} height={13} />
+              </button>
+            )}
+          </span>
         </div>
       );
     });
@@ -80,10 +135,15 @@ function SectionRows({ title, items, rootParentId }: { title: string; items: Tre
   );
 }
 
-export function FileTree({ items, localPaths }: Props) {
+export function FileTree({ items, localPaths, onSendToConversation, onPreview }: Props) {
   return (
     <div className="flex h-full flex-col gap-1 overflow-y-auto bg-panel py-2">
-      <SectionRows title="云端共享" items={items} />
+      <SectionRows
+        title="云端共享"
+        items={items}
+        onSendToConversation={onSendToConversation}
+        onPreview={onPreview}
+      />
       <div className="mx-2 border-t border-line-soft" />
       <div className="mb-1 mt-1 px-2 pb-0 text-[10px] font-bold uppercase tracking-wider text-muted">
         本地工作目录
