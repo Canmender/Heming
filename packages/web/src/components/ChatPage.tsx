@@ -2,11 +2,15 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
+import { useLlmStore } from "../store/llm.js";
 import { fetchMessages, fetchMembers } from "../lib/api.js";
+import { streamChat } from "../lib/llmClient.js";
+import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { ChevronIcon } from "./icons.js";
 import { Avatar } from "./Avatar.js";
 import { MentionPicker, type MentionItem } from "./MentionPicker.js";
+import { AgentStreamBubble } from "./AgentStreamBubble.js";
 
 /** 正则转义：mention 名按字面量匹配（名字可含 . * + 等元字符）。 */
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -45,6 +49,12 @@ export function ChatPage() {
   const appendMessage = useChatStore((s) => s.appendMessage);
   const reads = useChatStore((s) => s.reads);
   const loadReads = useChatStore((s) => s.loadReads);
+  const streaming = useChatStore((s) => s.streaming);
+  const streamOwner = useChatStore((s) => s.streamOwner);
+  const upsertStream = useChatStore((s) => s.upsertStream);
+  const removeStream = useChatStore((s) => s.removeStream);
+  const markStreamOwner = useChatStore((s) => s.markStreamOwner);
+  const agentsRoster = useChatStore((s) => s.agentsRoster);
   const me = useAuthStore((s) => s.user);
   const [draft, setDraft] = useState("");
   const [sendNotice, setSendNotice] = useState<string | null>(null);
@@ -68,6 +78,10 @@ export function ChatPage() {
   } | null>(null);
   const wsHandleRef = useRef<WsHandle | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  /** 触发句柄（convId → 集合）：「中断」只 abort 当前会话的流；卸载时全部中止（关页不空烧 token）。 */
+  const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
+  /** 本机流元数据（streamId → 触发上下文）：onLocalDelta 回填 agentId、重试取原触发文本。 */
+  const streamMeta = useRef<Record<string, { agentId: string; name: string; text: string }>>({});
 
   // conversations 为联合类型（M2）：仅 direct 有 peer；群显群名+人数
   const conv = conversations.find((c) => c.id === convId);
@@ -92,6 +106,89 @@ export function ChatPage() {
       !selectedMentions.some((m) => m.agentId === a.id) &&
       a.name.toLowerCase().includes((picker?.query ?? "").toLowerCase()),
   );
+
+  /** agentId → LLM 连接（绑定表解析）：无绑定/连接已删都归为 undefined（发送前拦截与触发共用）。 */
+  const resolveProfile = (agentId: string) => {
+    const llm = useLlmStore.getState();
+    const pid = llm.bindings[agentId];
+    return pid ? llm.getProfile(pid) : undefined;
+  };
+
+  /** 流气泡署名：本会话 members 映射名优先，其次名册，兜底「智能体」。 */
+  const nameOf = (agentId: string) =>
+    memberNameById?.[agentId] ?? agentsRoster.find((a) => a.id === agentId)?.name ?? "智能体";
+
+  /** 本会话的打字机项（含他机流）：渲染在消息列表尾部。 */
+  const streamEntries = Object.entries(streaming).filter(([, s]) => s.conversationId === convId);
+  /** 「生成中」提示行只报本机流（他机流错误行短暂停留，不占中断入口）。 */
+  const activeLocal = streamEntries.filter(([id, s]) => streamOwner[id] && s.status === "streaming");
+
+  /**
+   * 启动一次 mention 触发（发送成功 / 错误行重试共用）：
+   * deps 全部从 stores + WS 句柄组装；fetchHistory 映射 role 并剔掉刚发出的这条
+   * （服务端很可能已入库，否则当前 user 轮会在提示词里出现两遍）。
+   */
+  const startRun = (mentions: { agentId: string; name: string }[], text: string) => {
+    const deps: TriggerDeps = {
+      getProfile: resolveProfile,
+      getPrompt: (agentId) => useLlmStore.getState().prompts[agentId] ?? "",
+      fetchHistory: async () => {
+        const msgs = await fetchMessages(convId);
+        const rows = msgs.map((m) => ({
+          role: m.senderType === "user" ? ("user" as const) : ("assistant" as const),
+          content: m.payload.text,
+        }));
+        const last = rows[rows.length - 1];
+        if (last && last.role === "user" && last.content === text) rows.pop();
+        return rows;
+      },
+      send: (e) => wsHandleRef.current?.send(e),
+      streamChat,
+      onLocalDelta: (streamId, acc) => {
+        const meta = streamMeta.current[streamId];
+        if (!meta) return;
+        // 本机流文本已本地累积（不等 WS 回声），回声由 onWsEvent 按 streamOwner 跳过
+        upsertStream(streamId, {
+          agentId: meta.agentId,
+          conversationId: convId,
+          text: acc,
+          status: "streaming",
+        });
+      },
+      onStart: (streamId, mention) => {
+        streamMeta.current[streamId] = { ...mention, text };
+        markStreamOwner(streamId);
+        upsertStream(streamId, {
+          agentId: mention.agentId,
+          conversationId: convId,
+          text: "",
+          status: "streaming",
+        });
+      },
+    };
+    // 同步拿句柄（挂在 promise 上）：中断按钮不必等 fetchHistory/流完成
+    const run = runAgentMentions(convId, mentions, text, deps);
+    (runsRef.current[convId] ??= new Set()).add(run);
+    void run.catch((e) => {
+      // fetchHistory 失败等启动期错误：生成未开始，可见提示而非静默
+      console.warn("智能体生成启动失败", e);
+      setSendNotice("智能体生成启动失败，请稍后重试");
+    });
+  };
+
+  /** 中断当前会话全部进行中流：abort → 各流 catch 走 finish-partial + agent_error(aborted)。 */
+  const abortRuns = () => {
+    for (const h of runsRef.current[convId] ?? []) h.abortAll();
+  };
+
+  /** 错误行重试：清掉旧项，按原触发文本重新跑该单个 mention（新 streamId 重新登记）。 */
+  const retryStream = (streamId: string) => {
+    const meta = streamMeta.current[streamId];
+    if (!meta) return;
+    removeStream(streamId);
+    delete streamMeta.current[streamId];
+    startRun([{ agentId: meta.agentId, name: meta.name }], meta.text);
+  };
 
   // 切会话清 @ 选择态：chip/picker/锁都是会话级（ChatPage 常驻不重挂），防跨会话带出 mentions
   useEffect(() => {
@@ -137,6 +234,8 @@ export function ChatPage() {
   useEffect(() => {
     const handle = connectWs({
       onEvent: (e) => {
+        // 流式三事件收口（chunk 累积/message_new{streamId} 移除/agent_error 分态）在 store 统一处理
+        useChatStore.getState().onWsEvent(e);
         if (e.type === "message_new" && e.message.conversationId === convId) {
           appendMessage(e.message);
           // 会话内正在看的新消息即时标记已读：否则退出后 loadWorkspace 会把已读内容算作未读
@@ -178,6 +277,16 @@ export function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
+  // 卸载（离开聊天页）：中止全部进行中流，不再空烧供应商 token
+  useEffect(
+    () => () => {
+      for (const set of Object.values(runsRef.current)) {
+        for (const h of set) h.abortAll();
+      }
+    },
+    [],
+  );
+
   /** 键入触发：草稿尾随 @token（空格一断 token 即结束）→ 过滤弹选择器；direct 不触发。 */
   const onDraftChange = (value: string) => {
     setDraft(value);
@@ -215,19 +324,26 @@ export function ChatPage() {
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
+    // 发送前拦截：@ 到的智能体没绑 LLM 连接 → 不发消息，本地提示去设置页配置（草稿/chip 保留）
+    const unbound = selectedMentions.find((m) => !resolveProfile(m.agentId));
+    if (unbound) {
+      setSendNotice(`${unbound.name} 未绑定 LLM 连接，请先在设置页配置`);
+      return;
+    }
     const handle = wsHandleRef.current;
     if (!handle) {
       // 保留草稿与已选 mention，给出可见提示（不静默丢弃）
       setSendNotice("连接未就绪，消息未发送");
       return;
     }
+    const mentions = selectedMentions;
     handle.send({
       type: "send_message",
       conversationId: convId,
       payload: {
         text,
         // mentions 非空才带（空则整个键不出现，与 M2 消息形状一致）
-        ...(selectedMentions.length ? { mentions: selectedMentions } : {}),
+        ...(mentions.length ? { mentions } : {}),
       },
     });
     setDraft("");
@@ -235,6 +351,8 @@ export function ChatPage() {
     setPicker(null);
     setTokenLock(false);
     setSendNotice(null);
+    // 发送成功即触发各 mention 的本机流式生成（失败/中断由 WS 三事件回声收口）
+    if (mentions.length) startRun(mentions, text);
   };
 
   return (
@@ -285,6 +403,17 @@ export function ChatPage() {
             </div>
           );
         })}
+        {/* 流式打字机行（本机/他机）：渲染于消息列表尾部，finish 的 message_new 收口后移除 */}
+        {streamEntries.map(([id, s]) => (
+          <AgentStreamBubble
+            key={id}
+            name={nameOf(s.agentId)}
+            text={s.text}
+            status={s.status}
+            errorMessage={s.errorMessage}
+            onRetry={streamOwner[id] && s.status === "error" ? () => retryStream(id) : undefined}
+          />
+        ))}
         <div ref={bottomRef} />
       </div>
       <form onSubmit={send} className="relative border-t border-line-soft">
@@ -295,6 +424,19 @@ export function ChatPage() {
         )}
         {/* @ 选择器：输入栏上方浮层（仅群会话；direct 无智能体可提及） */}
         {isGroup && picker && <MentionPicker items={pickerItems} onPick={pickMention} />}
+        {/* 「生成中」提示行（输入栏上方）：本机流署名 + 中断入口 */}
+        {activeLocal.length > 0 && (
+          <div className="flex items-center gap-3 px-5 pt-2 text-[12px] text-muted">
+            <span>生成中：{activeLocal.map(([, s]) => nameOf(s.agentId)).join("、")}</span>
+            <button
+              type="button"
+              className="rounded border border-line px-2 py-0.5 hover:bg-[#f3f3f3]"
+              onClick={abortRuns}
+            >
+              中断
+            </button>
+          </div>
+        )}
         <div className="flex gap-2 px-5 py-3">
           {isGroup && (
             <button

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { Agent, Member, Message, User } from "@heming/shared";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { Agent, Member, Message, User, WsServerEvent } from "@heming/shared";
 import { useChatStore } from "./chat.js";
 import { api, fetchMembers } from "../lib/api.js";
 import { listAgents } from "../lib/agentsApi.js";
@@ -45,7 +45,13 @@ describe("chat store", () => {
       agentsRoster: [],
       agentIdsInGroups: new Set<string>(),
       reads: {},
+      streaming: {},
+      streamOwner: {},
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers(); // agent_error 自清用例即便断言失败也不把假时钟泄漏到后续
   });
 
   it("appendMessage 追加消息", () => {
@@ -212,5 +218,97 @@ describe("chat store", () => {
     expect(useChatStore.getState().reads["c1"]).toEqual([
       { userId: "u2", at: "2026-10-14T01:00:00.000Z" },
     ]);
+  });
+
+  // —— M3 Task 8：流式管道收口（streaming/streamOwner/onWsEvent）——
+
+  const chunk = (streamId: string, text: string): WsServerEvent => ({
+    type: "agent_chunk",
+    conversationId: "c1",
+    agentId: "a1",
+    streamId,
+    text,
+  });
+
+  it("upsertStream 首帧建项（默认值补齐）、后续 patch 合并；removeStream 移除", () => {
+    useChatStore
+      .getState()
+      .upsertStream("s1", { agentId: "a1", conversationId: "c1", text: "你", status: "streaming" });
+    expect(useChatStore.getState().streaming["s1"]).toEqual({
+      agentId: "a1",
+      conversationId: "c1",
+      text: "你",
+      status: "streaming",
+    });
+    // 合并：不带 text 的 patch 保留已累积文本
+    useChatStore
+      .getState()
+      .upsertStream("s1", { agentId: "a1", conversationId: "c1", status: "error", errorMessage: "HTTP 401" });
+    expect(useChatStore.getState().streaming["s1"]).toMatchObject({
+      text: "你",
+      status: "error",
+      errorMessage: "HTTP 401",
+    });
+    useChatStore.getState().removeStream("s1");
+    expect(useChatStore.getState().streaming["s1"]).toBeUndefined();
+  });
+
+  it("onWsEvent agent_chunk：本机流（已标 owner）跳过不重复累积，他机流按 text 累加", () => {
+    useChatStore.getState().markStreamOwner("mine");
+    useChatStore.getState().onWsEvent(chunk("mine", "你"));
+    expect(useChatStore.getState().streaming["mine"]).toBeUndefined(); // 触发端已本地累积
+
+    useChatStore.getState().onWsEvent(chunk("other", "你"));
+    useChatStore.getState().onWsEvent(chunk("other", "好"));
+    expect(useChatStore.getState().streaming["other"]).toEqual({
+      agentId: "a1",
+      conversationId: "c1",
+      text: "你好",
+      status: "streaming",
+    });
+  });
+
+  it("onWsEvent message_new：带 streamId 移除 streaming 项，不带则不动", () => {
+    useChatStore
+      .getState()
+      .upsertStream("s1", { agentId: "a1", conversationId: "c1", text: "你", status: "streaming" });
+    const m = { ...msg("m1", "你好"), senderType: "agent" as const, senderId: "a1" };
+    useChatStore.getState().onWsEvent({ type: "message_new", message: m });
+    expect(useChatStore.getState().streaming["s1"]).toBeDefined(); // 普通消息不误删
+    useChatStore.getState().onWsEvent({ type: "message_new", message: m, streamId: "s1" });
+    expect(useChatStore.getState().streaming["s1"]).toBeUndefined();
+  });
+
+  it("onWsEvent agent_error：本机流置 error 保留供重试，他机流短暂显示后自清", () => {
+    vi.useFakeTimers();
+    useChatStore.getState().markStreamOwner("mine");
+    useChatStore
+      .getState()
+      .upsertStream("mine", { agentId: "a1", conversationId: "c1", text: "半", status: "streaming" });
+    useChatStore
+      .getState()
+      .upsertStream("his", { agentId: "a2", conversationId: "c1", text: "半", status: "streaming" });
+
+    const err = (streamId: string, agentId: string): WsServerEvent => ({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId,
+      streamId,
+      code: "provider_error",
+      message: "HTTP 401",
+    });
+    useChatStore.getState().onWsEvent(err("mine", "a1"));
+    useChatStore.getState().onWsEvent(err("his", "a2"));
+
+    expect(useChatStore.getState().streaming["mine"]).toMatchObject({
+      status: "error",
+      errorMessage: "HTTP 401",
+      text: "半",
+    });
+    expect(useChatStore.getState().streaming["his"]).toMatchObject({ status: "error" });
+
+    vi.advanceTimersByTime(6000);
+    expect(useChatStore.getState().streaming["his"]).toBeUndefined(); // 他机流自清
+    expect(useChatStore.getState().streaming["mine"]).toBeDefined(); // 本机流保留（重试入口）
   });
 });

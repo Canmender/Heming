@@ -5,9 +5,17 @@ import { ChatPage, renderTextWithMentions } from "./ChatPage.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
+import { useLlmStore, type LlmProfile } from "../store/llm.js";
+import { streamChat } from "../lib/llmClient.js";
 import { connectWs, type WsHandlers, type WsHandle } from "../lib/ws.js";
 
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
+// 流式打底走本机 streamChat：模块 mock（保留 testConnection/buildRequest 真实现），
+// 默认立即回空串——mention 发送用例不至于把 fetch 打到供应商端点
+vi.mock("../lib/llmClient.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/llmClient.js")>();
+  return { ...actual, streamChat: vi.fn(async () => "") };
+});
 
 const me: User = { id: "u1", username: "alice", displayName: "爱丽丝" };
 const peer: User = { id: "u2", username: "bob", displayName: "鲍勃" };
@@ -71,6 +79,22 @@ const inGroupMembers: Member[] = [
   { kind: "agent", id: "system-assistant", name: "和小鸣", avatar: null, user: null },
 ];
 
+/** 本机 LLM 连接（Key 不出设备）：绑定到「和小鸣」后 mention 发送才不被拦截。 */
+const testProfile: LlmProfile = {
+  id: "p1",
+  label: "l",
+  provider: "openai",
+  apiKey: "k",
+  model: "m",
+};
+function bindAssistant() {
+  useLlmStore.setState({
+    profiles: [testProfile],
+    bindings: { "system-assistant": "p1" },
+    prompts: { "system-assistant": "你是和小鸣" },
+  });
+}
+
 /**
  * @ 选择器用例共用底座：群会话 c1 + members 响应（默认本群含「和小鸣」）+ 可断言的 ws send。
  * 不预置 store 跨群 join 视图（agents）——候选必须来自本会话 members（评审 F1 锁死口径）。
@@ -94,6 +118,11 @@ describe("ChatPage", () => {
     Element.prototype.scrollIntoView = vi.fn();
     vi.mocked(connectWs).mockReset();
     vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() });
+    // 流式管道复位：streamChat 回空串；llm 绑定默认清空（无绑定 → 发送前拦截路径）；
+    // chat store 的 streaming/streamOwner 跨用例不残留
+    vi.mocked(streamChat).mockReset();
+    vi.mocked(streamChat).mockResolvedValue("");
+    useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
     useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
     useUiStore.setState({ page: "chat", navCollapsed: true, activeConversationId: "c1" });
     useChatStore.setState({
@@ -102,6 +131,8 @@ describe("ChatPage", () => {
       incoming: [],
       messages: {},
       reads: {},
+      streaming: {},
+      streamOwner: {},
     });
   });
 
@@ -380,6 +411,7 @@ describe("ChatPage", () => {
 
   it("点 @ 按钮出选择器，Esc 关；选中后发送 payload 含 mentions，发送成功清 chip", async () => {
     const send = await setupGroupChat();
+    bindAssistant(); // 有绑定才不被发送前拦截（无绑定用例见下方「发送前拦截」）
 
     // @ 按钮 → 选择器出现（本群 agent 来自 agents join 视图）
     fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
@@ -407,6 +439,11 @@ describe("ChatPage", () => {
     });
     expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument(); // 发送成功清 chip
     expect(input).toHaveValue("");
+    // 冲刷发送后启动的本机流（fetchHistory → streamChat → finish 上行），
+    // 否则挂起的异步链会漂到下一条用例才落定，污染其 store 断言
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_finish" })),
+    );
   });
 
   it("chip 点 × 移除后发送不带 mentions", async () => {
@@ -514,6 +551,207 @@ describe("ChatPage", () => {
     expect(hl.tagName).toBe("SPAN");
     expect(hl).toHaveClass("bg-[#eef3f8]"); // 浅蓝 chip 高亮
     expect(screen.getByText(/看下这版/)).toBeInTheDocument(); // 其余文本照常渲染
+  });
+
+  /** 选中 mention「和小鸣」并发出指定文本（流式用例共用前奏）。 */
+  async function pickAndSend(text: string) {
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    fireEvent.click(screen.getByText("和小鸣"));
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+  }
+
+  it("发送前拦截：@ 到未绑定 LLM 的智能体 → 不发消息，提示先在设置页配置", async () => {
+    const send = await setupGroupChat();
+
+    await pickAndSend("@和小鸣 帮我看下");
+
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "和小鸣 未绑定 LLM 连接，请先在设置页配置",
+    );
+    expect(screen.getByPlaceholderText("输入消息…")).toHaveValue("@和小鸣 帮我看下"); // 草稿保留
+    expect(screen.getByText("@和小鸣")).toBeInTheDocument(); // chip 保留
+    expect(streamChat).not.toHaveBeenCalled(); // 拦截在触发编排之前
+  });
+
+  it("mentions 发送成功触发本机流：打字机气泡 + 生成中提示行 + 自身 chunk 回声不重复累积 + message_new 收口", async () => {
+    const send = await setupGroupChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      o.onDelta("你");
+      o.onDelta("好");
+      return "你好";
+    });
+
+    await pickAndSend("@和小鸣 打个招呼");
+
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_chunk", text: "你" })),
+    );
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agent_chunk", text: "好" }),
+    );
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agent_finish", text: "你好" }),
+    );
+
+    // 打字机气泡（累积文本 + 光标）与输入栏上方「生成中」提示行
+    await waitFor(() => expect(screen.getByText(/你好/)).toBeInTheDocument());
+    expect(screen.getByText("▌")).toBeInTheDocument();
+    expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument();
+
+    const finish = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_finish");
+    const streamId = (finish as { streamId: string }).streamId;
+
+    // 自身 agent_chunk 回声（服务端全量广播）：本机流已本地累积 → 不重复 upsert
+    act(() => {
+      lastHandlers().onEvent({
+        type: "agent_chunk",
+        conversationId: "c1",
+        agentId: "system-assistant",
+        streamId,
+        text: "你",
+      });
+    });
+    expect(screen.getByText(/你好/)).toBeInTheDocument();
+    expect(screen.queryByText(/你好你/)).not.toBeInTheDocument();
+
+    // agent_finish → 服务端回 message_new{streamId}：移除 streaming 项，正式消息入列
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        streamId,
+        message: {
+          ...msg("mAgent", "你好", "2026-10-14T01:01:00.000Z"),
+          senderType: "agent",
+          senderId: "system-assistant",
+        },
+      });
+    });
+    expect(screen.queryByText("▌")).not.toBeInTheDocument();
+    expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument();
+    expect(screen.getByText("你好")).toBeInTheDocument();
+    expect(useChatStore.getState().streaming[streamId]).toBeUndefined();
+    expect(useChatStore.getState().streamOwner[streamId]).toBe(true); // 归属标记保留（迟到 error 回声仍按本机流处理）
+  });
+
+  it("流失败：finish(partial) 上行，agent_error 回声置错误行，点重试重新触发该 mention", async () => {
+    const send = await setupGroupChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      o.onDelta("半");
+      throw new Error("provider_error: HTTP 401 bad key");
+    });
+
+    await pickAndSend("@和小鸣 帮我看下");
+
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_finish", text: "半" })),
+    );
+    const errEv = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_error");
+    expect(errEv).toMatchObject({ type: "agent_error", code: "provider_error" });
+    const streamId = (errEv as { streamId: string }).streamId;
+
+    // 服务端按序回声：partial 入库的 message_new → agent_error 广播（同帧转发）
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        streamId,
+        message: {
+          ...msg("mHalf", "半", "2026-10-14T01:01:00.000Z"),
+          senderType: "agent",
+          senderId: "system-assistant",
+        },
+      });
+    });
+    act(() => {
+      lastHandlers().onEvent(errEv);
+    });
+
+    expect(screen.getByText(/HTTP 401/)).toBeInTheDocument(); // 错误原因行
+    expect(screen.getByText("半")).toBeInTheDocument(); // partial 消息仍在列表
+
+    // 重试 = 对该 mention 重新跑一遍流
+    vi.mocked(streamChat).mockClear();
+    fireEvent.click(screen.getByText("重试"));
+    await waitFor(() => expect(streamChat).toHaveBeenCalledTimes(1));
+  });
+
+  it("生成中提示行点中断：abortAll → finish(partial) + aborted 错误行可重试", async () => {
+    const send = await setupGroupChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockImplementation(
+      (_p, _m, o) =>
+        new Promise<string>((_res, rej) => {
+          o.onDelta("半");
+          o.signal.addEventListener("abort", () =>
+            rej(new DOMException("AbortError", "AbortError")),
+          );
+        }),
+    );
+
+    await pickAndSend("@和小鸣 写段文字");
+    await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
+    expect(screen.getByText("▌")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("中断"));
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "agent_error", code: "aborted" }),
+      ),
+    );
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_finish", text: "半" }));
+
+    const errEv = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_error");
+    act(() => {
+      lastHandlers().onEvent(errEv); // 本机流回声 → 错误态供重试
+    });
+    expect(screen.getByText(/AbortError/)).toBeInTheDocument();
+    expect(screen.getByText("重试")).toBeInTheDocument();
+    expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 不再生成中
+  });
+
+  it("他机流：非本机 agent_chunk 按 text 累积渲染，message_new{streamId} 收口移除", async () => {
+    await setupGroupChat();
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "agent_chunk",
+        conversationId: "c1",
+        agentId: "system-assistant",
+        streamId: "remote-1",
+        text: "你",
+      });
+    });
+    act(() => {
+      lastHandlers().onEvent({
+        type: "agent_chunk",
+        conversationId: "c1",
+        agentId: "system-assistant",
+        streamId: "remote-1",
+        text: "好",
+      });
+    });
+
+    expect(screen.getByText(/你好/)).toBeInTheDocument(); // 累积而非单段
+    expect(screen.getByText("和小鸣")).toBeInTheDocument(); // 署名取 members 映射名
+    expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 非本机流不占「生成中」行
+    expect(useChatStore.getState().streaming["remote-1"]?.text).toBe("你好");
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        streamId: "remote-1",
+        message: {
+          ...msg("mRemote", "你好", "2026-10-14T01:02:00.000Z"),
+          senderType: "agent",
+          senderId: "system-assistant",
+        },
+      });
+    });
+    expect(screen.queryByText("▌")).not.toBeInTheDocument();
+    expect(useChatStore.getState().streaming["remote-1"]).toBeUndefined();
   });
 });
 
