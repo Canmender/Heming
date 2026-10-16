@@ -141,7 +141,22 @@ export async function uploadFile(file: File): Promise<SharedFileMeta> {
   });
 }
 
-/** 附件内容直链（气泡缩略图 <img src> / 文件卡 <a href> 下载）。 */
-export function fileContentUrl(id: string): string {
-  return resolveUrl(`/api/files/${id}/content`);
+/**
+ * 附件内容取 objectURL（气泡缩略图 <img> / 文件卡 <a download> 共用）：
+ * content 路由 authOnly 只认 Authorization 头，而浏览器裸 <img src>/<a href> 的标签页
+ * 请求带不上鉴权（实测 401 断图）→ 带 token fetch 取 blob 后 URL.createObjectURL。
+ * 401 与 api() 同口径触发全局 onUnauthorized 并抛 ApiError；不设 Content-Type（GET 取二进制）。
+ * 调用方负责在组件卸载/换附件时 URL.revokeObjectURL（见 ChatPage 的 AttachmentPreview）。
+ */
+export async function fetchFileBlobUrl(id: string): Promise<string> {
+  const headers = new Headers();
+  const t = token ?? localStorage.getItem("heming.token");
+  if (t) headers.set("Authorization", `Bearer ${t}`);
+  const res = await fetch(resolveUrl(`/api/files/${id}/content`), { headers });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
+    throw new ApiError(res.status, body.error ?? `http ${res.status}`);
+  }
+  return URL.createObjectURL(await res.blob());
 }

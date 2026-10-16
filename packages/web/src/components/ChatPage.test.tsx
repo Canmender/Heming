@@ -39,12 +39,14 @@ function jsonRes(body: unknown, status = 200): Response {
 
 /**
  * 会话 fetch mock：/messages 按调用序返回不同历史（首次 → first，其后 → second ?? first）；
- * /reads、/members 按调用序取 conv 内对应序列（缺省空表 200，避免挂载期 loadReads/fetchMembers 走 404 噪声）。
+ * /reads、/members 按调用序取 conv 内对应序列（缺省空表 200，避免挂载期 loadReads/fetchMembers 走 404 噪声）；
+ * /files/:id/content 走 fetchFileBlobUrl 的同一 fetch 面（默认 200 blob；contentFail 模拟 401）——
+ * jsdom 不发真实网络请求，附件断言统一落在 objectURL 桩上。
  */
 function mockMessagesFetch(
   first: Message[],
   second?: Message[],
-  conv: { reads?: ReadState[][]; members?: Member[][] } = {},
+  conv: { reads?: ReadState[][]; members?: Member[][]; contentFail?: boolean } = {},
 ) {
   let m = 0;
   let r = 0;
@@ -61,6 +63,14 @@ function mockMessagesFetch(
     }
     if (/^\/api\/conversations\/[^/]+\/members$/.test(url)) {
       return Promise.resolve(jsonRes(pick(conv.members, k++)));
+    }
+    if (/^\/api\/files\/[^/]+\/content$/.test(url)) {
+      if (conv.contentFail) return Promise.resolve(jsonRes({ error: "unauthorized" }, 401));
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        blob: async () => new Blob(["bin"]),
+      } as unknown as Response);
     }
     return Promise.resolve(jsonRes({ error: "not found" }, 404));
   });
@@ -112,10 +122,17 @@ async function setupGroupChat(rows: Member[] = inGroupMembers) {
 }
 
 describe("ChatPage", () => {
+  /** objectURL 桩的序号（每用例归零）：附件断言落在 `blob:mock-N` 上，不依赖真实请求。 */
+  let blobSeq = 0;
+
   beforeEach(() => {
     vi.restoreAllMocks();
     // jsdom 未实现 scrollIntoView
     Element.prototype.scrollIntoView = vi.fn();
+    // 附件气泡：createObjectURL 给可区分伪地址，revoke 留给卸载断言（jsdom 原生缺，由 test-setup 补桩）
+    blobSeq = 0;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:mock-${++blobSeq}`);
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     vi.mocked(connectWs).mockReset();
     vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() });
     // 流式管道复位：streamChat 回空串；llm 绑定默认清空（无绑定 → 发送前拦截路径）；
@@ -941,7 +958,7 @@ describe("ChatPage", () => {
     expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持语音输入");
   });
 
-  it("渲染带 file 的消息为附件卡：非图片显示文件名，链接可下载", async () => {
+  it("渲染带 file 的消息为附件卡：非图片显示文件名，链接指向带鉴权取到的 objectURL", async () => {
     const m: Message = {
       ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
       payload: {
@@ -955,13 +972,14 @@ describe("ChatPage", () => {
     expect(await screen.findByText("报告.pdf")).toBeInTheDocument();
 
     const link = screen.getByRole("link", { name: /报告\.pdf/ });
-    expect(link).toHaveAttribute("href", "/api/files/f1/content");
-    expect(link).toHaveAttribute("download", "报告.pdf");
+    // content 路由裸链接会 401 → 组件带 Authorization fetch 后落 objectURL 桩
+    expect(link).toHaveAttribute("href", "blob:mock-1");
+    expect(link).toHaveAttribute("download", "报告.pdf"); // objectURL 上 download 属性仍可用
     expect(link).toHaveTextContent("0.0 KB"); // 10 字节 → 0.0 KB（size 口径）
     expect(screen.queryByRole("img")).not.toBeInTheDocument(); // 非图片不出缩略图
   });
 
-  it("图片附件渲染为缩略图（img 指向 content 路由）", async () => {
+  it("图片附件渲染为缩略图（src 为鉴权 fetch 得到的 objectURL，非裸 content 地址）", async () => {
     const m: Message = {
       ...msg("m1", "看这张图", "2026-10-14T01:00:00.000Z"),
       payload: {
@@ -973,8 +991,45 @@ describe("ChatPage", () => {
 
     render(<ChatPage />);
     const img = (await screen.findByRole("img", { name: "a.png" })) as HTMLImageElement;
-    expect(img).toHaveAttribute("src", "/api/files/f9/content");
+    expect(img).toHaveAttribute("src", "blob:mock-1");
     expect(screen.getByText("看这张图")).toBeInTheDocument(); // 文本与附件共存
+  });
+
+  it("附件 objectURL：卸载时 revoke（防泄漏），卸载前不销", async () => {
+    const m: Message = {
+      ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "",
+        file: { id: "f1", name: "报告.pdf", mime: "application/pdf", size: 10 },
+      },
+    };
+    mockMessagesFetch([m]);
+
+    const view = render(<ChatPage />);
+    const link = await screen.findByRole("link", { name: /报告\.pdf/ });
+    expect(link).toHaveAttribute("href", "blob:mock-1");
+    expect(vi.mocked(URL.revokeObjectURL)).not.toHaveBeenCalled(); // 仍在用
+
+    view.unmount();
+    expect(vi.mocked(URL.revokeObjectURL)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(URL.revokeObjectURL)).toHaveBeenCalledWith("blob:mock-1");
+  });
+
+  it("附件 content 拉取失败（401）：给「加载失败」占位，不出断链 img/链接", async () => {
+    const m: Message = {
+      ...msg("m1", "看这张图", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "看这张图",
+        file: { id: "f9", name: "a.png", mime: "image/png", size: 1024 },
+      },
+    };
+    mockMessagesFetch([m], undefined, { contentFail: true });
+
+    render(<ChatPage />);
+    expect(await screen.findByText("加载失败")).toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument(); // 不渲染 src 指向裸地址的断图
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 
   /**

@@ -19,3 +19,22 @@ if (typeof Blob !== "undefined" && typeof Blob.prototype.arrayBuffer !== "functi
     },
   });
 }
+
+/**
+ * jsdom 未实现 URL.createObjectURL/revokeObjectURL（浏览器原生有），附件气泡
+ * （fetchFileBlobUrl → objectURL → 卸载 revoke）的用例要 spyOn 这两个方法，
+ * 先补可被覆盖的桩（伪地址带序号可区分），真实浏览器不走此分支。
+ */
+if (typeof URL !== "undefined" && typeof URL.createObjectURL !== "function") {
+  let seq = 0;
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    writable: true,
+    value: () => `blob:jsdom-${++seq}`,
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    writable: true,
+    value: () => {},
+  });
+}

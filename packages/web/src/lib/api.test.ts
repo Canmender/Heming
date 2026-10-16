@@ -6,7 +6,7 @@ import {
   setToken,
   resolveUrl,
   uploadFile,
-  fileContentUrl,
+  fetchFileBlobUrl,
 } from "./api.js";
 
 describe("resolveUrl（API base 直连注入）", () => {
@@ -165,8 +165,57 @@ describe("uploadFile（附件上传下沉，App/Chat 共用）", () => {
     const body = JSON.parse(String(fetchSpy.mock.calls[0]![1]?.body)) as { mime: string };
     expect(body.mime).toBe("application/octet-stream");
   });
+});
 
-  it("fileContentUrl 走 resolveUrl（API base 直连注入）", () => {
-    expect(fileContentUrl("f1")).toBe(resolveUrl("/api/files/f1/content"));
+/** 附件 content 路由 authOnly：裸 <img src>/<a href> 带不上 Bearer 会 401 → 走 fetch blob。 */
+describe("fetchFileBlobUrl（附件 content 带鉴权取 objectURL）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setOnUnauthorized(null);
+    localStorage.clear();
+  });
+
+  it("fetchFileBlobUrl 带 Authorization 请求 content 并把 blob 转成 objectURL", async () => {
+    localStorage.clear();
+    setToken("t1");
+    const fakeBlob = { size: 3, type: "image/png" } as Blob;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => fakeBlob,
+    } as unknown as Response);
+    const createSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:t1url");
+
+    const url = await fetchFileBlobUrl("f9");
+
+    expect(url).toBe("blob:t1url"); // 返回的是 objectURL 而非裸 content 地址
+    const [req, init] = fetchSpy.mock.calls[0]!;
+    expect(String(req)).toBe(resolveUrl("/api/files/f9/content"));
+    // content 路由 authOnly：必须带 Bearer（裸 <img src>/<a href> 带不上 → 401 的根因）
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer t1");
+    expect(new Headers(init?.headers).get("Content-Type")).toBeNull(); // GET 取二进制，不塞 JSON 头
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(createSpy).toHaveBeenCalledWith(fakeBlob);
+  });
+
+  it("fetchFileBlobUrl 401：触发全局 onUnauthorized 并抛 ApiError，不建 objectURL", async () => {
+    setToken("t1");
+    const onUnauthorized = vi.fn();
+    setOnUnauthorized(onUnauthorized);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const createSpy = vi.spyOn(URL, "createObjectURL");
+
+    const err = await fetchFileBlobUrl("f9").catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(401);
+    expect((err as Error).message).toBe("unauthorized");
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(createSpy).not.toHaveBeenCalled();
   });
 });

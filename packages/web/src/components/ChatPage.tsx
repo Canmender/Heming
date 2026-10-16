@@ -3,7 +3,7 @@ import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
-import { fetchMessages, fetchMembers, uploadFile, fileContentUrl } from "../lib/api.js";
+import { fetchMessages, fetchMembers, uploadFile, fetchFileBlobUrl } from "../lib/api.js";
 import { streamChat } from "../lib/llmClient.js";
 import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
@@ -39,6 +39,70 @@ export function renderTextWithMentions(
     ) : (
       <Fragment key={i}>{part}</Fragment>
     ),
+  );
+}
+
+/**
+ * 附件气泡（图片缩略图 / 文件卡）：content 路由 authOnly，裸 src/href 会 401 →
+ * 挂载时走 fetchFileBlobUrl（带 Authorization 取 blob）拿 objectURL，卸载或换附件时
+ * revoke（含「fetch 还没回来就已卸载」的竞态：取到即弃），防 objectURL 内存泄漏。
+ * 加载失败（401/网络）给可见占位，不渲染断链的 <img>/<a>。
+ */
+export function AttachmentPreview({
+  file,
+}: {
+  file: { id: string; name: string; mime: string; size: number };
+}): JSX.Element | null {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    let owned: string | null = null; // 本 effect 实例持有的 objectURL（闭包内跨 then/cleanup 可见）
+    setUrl(null);
+    setFailed(false);
+    fetchFileBlobUrl(file.id)
+      .then((u) => {
+        if (!alive) {
+          URL.revokeObjectURL(u); // 晚到的结果：无人再用，直接销
+          return;
+        }
+        owned = u;
+        setUrl(u);
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+      if (owned) URL.revokeObjectURL(owned);
+    };
+  }, [file.id]);
+
+  if (failed) {
+    return (
+      <div className="mt-1 flex items-center gap-2 rounded-md border border-line bg-white px-2 py-1.5 text-[12px] text-muted shadow-card">
+        <FileIcon width={15} height={15} />
+        <span className="min-w-0 truncate">{file.name}</span>
+        <span className="shrink-0 text-[10px]">加载失败</span>
+      </div>
+    );
+  }
+  if (!url) return null; // 取 blob 期间不渲染，避免闪出断链
+  return file.mime.startsWith("image/") ? (
+    <img src={url} alt={file.name} className="mt-1 max-h-40 rounded-md object-cover" />
+  ) : (
+    <a
+      href={url}
+      download={file.name}
+      className="mt-1 flex items-center gap-2 rounded-md border border-line bg-white px-2 py-1.5 text-[12px] shadow-card hover:bg-[#f7f7f7]"
+    >
+      <FileIcon width={15} height={15} />
+      <span className="min-w-0 truncate">{file.name}</span>
+      <span className="shrink-0 text-[10px] text-muted">
+        {(file.size / 1024).toFixed(1)} KB
+      </span>
+    </a>
   );
 }
 
@@ -556,26 +620,7 @@ export function ChatPage() {
                 {m.payload.text
                   ? renderTextWithMentions(m.payload.text, m.payload.mentions)
                   : null}
-                {m.payload.file &&
-                  (m.payload.file.mime.startsWith("image/") ? (
-                    <img
-                      src={fileContentUrl(m.payload.file.id)}
-                      alt={m.payload.file.name}
-                      className="mt-1 max-h-40 rounded-md object-cover"
-                    />
-                  ) : (
-                    <a
-                      href={fileContentUrl(m.payload.file.id)}
-                      download={m.payload.file.name}
-                      className="mt-1 flex items-center gap-2 rounded-md border border-line bg-white px-2 py-1.5 text-[12px] shadow-card hover:bg-[#f7f7f7]"
-                    >
-                      <FileIcon width={15} height={15} />
-                      <span className="min-w-0 truncate">{m.payload.file.name}</span>
-                      <span className="shrink-0 text-[10px] text-muted">
-                        {(m.payload.file.size / 1024).toFixed(1)} KB
-                      </span>
-                    </a>
-                  ))}
+                {m.payload.file ? <AttachmentPreview file={m.payload.file} /> : null}
                 {readByPeer ? (
                   <div className="mt-0.5 text-right text-[9px] text-muted">已读</div>
                 ) : null}
