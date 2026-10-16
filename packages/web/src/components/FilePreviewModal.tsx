@@ -59,9 +59,7 @@ export function MarkdownLite({ text }: { text: string }) {
       while (i < lines.length && !lines[i].startsWith("```")) buf.push(lines[i++]);
       i += 1;
       out.push(
-        <pre key={`p${out.length}`} className="whitespace-pre-wrap rounded bg-[#f6f6f6] p-2 text-[12px]">
-          {buf.join("\n")}
-        </pre>,
+        <pre key={`p${out.length}`} className="whitespace-pre-wrap rounded bg-[#f6f6f6] p-2 text-[12px]">{buf.join("\n")}</pre>,
       );
       continue;
     }
@@ -69,9 +67,7 @@ export function MarkdownLite({ text }: { text: string }) {
     if (h) {
       const Tag = `h${h[1].length + 1}` as "h2" | "h3" | "h4";
       out.push(
-        <Tag key={`h${out.length}`} className="mt-1 font-bold">
-          {inline(h[2], `h${out.length}`)}
-        </Tag>,
+        <Tag key={`h${out.length}`} className="mt-1 font-bold">{inline(h[2], `h${out.length}`)}</Tag>,
       );
       i += 1;
       continue;
@@ -79,15 +75,11 @@ export function MarkdownLite({ text }: { text: string }) {
     if (/^[-*] /.test(line)) {
       const items: ReactNode[] = [];
       while (i < lines.length && /^[-*] /.test(lines[i])) {
-        items.push(
-          <li key={items.length}>{inline(lines[i].slice(2), `l${out.length}.${items.length}`)}</li>,
-        );
+        items.push(<li key={items.length}>{inline(lines[i].slice(2), `l${out.length}.${items.length}`)}</li>);
         i += 1;
       }
       out.push(
-        <ul key={`u${out.length}`} className="list-disc pl-5">
-          {items}
-        </ul>,
+        <ul key={`u${out.length}`} className="list-disc pl-5">{items}</ul>,
       );
       continue;
     }
@@ -96,14 +88,9 @@ export function MarkdownLite({ text }: { text: string }) {
     while (i < lines.length && lines[i].trim() && !/^(#{1,3} |[-*] |```)/.test(lines[i]))
       buf.push(lines[i++]);
     out.push(
-      <p key={`t${out.length}`}>
-        {buf.map((l, j) => (
-          <span key={j}>
-            {j > 0 ? <br /> : null}
-            {inline(l, `t${out.length}.${j}`)}
-          </span>
-        ))}
-      </p>,
+      <p key={`t${out.length}`}>{buf.map((l, j) => (
+        <span key={j}>{j > 0 ? <br /> : null}{inline(l, `t${out.length}.${j}`)}</span>
+      ))}</p>,
     );
   }
   return <div className="space-y-1 text-[13px] leading-relaxed">{out}</div>;
