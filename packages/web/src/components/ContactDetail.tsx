@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { Conversation } from "@heming/shared";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore, type ContactKind } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -23,7 +24,10 @@ export function ContactDetail({ target }: { target: { kind: ContactKind; id: str
 
   const group =
     target.kind === "group"
-      ? conversations.find((c) => c.id === target.id && c.type === "group")
+      ? conversations.find(
+          (c): c is Extract<Conversation, { type: "group" }> =>
+            c.type === "group" && c.id === target.id,
+        )
       : undefined;
   const human =
     target.kind === "human" ? friends.map((f) => f.user).find((u) => u.id === target.id) : undefined;
@@ -47,7 +51,10 @@ export function ContactDetail({ target }: { target: { kind: ContactKind; id: str
   const title = group?.name ?? human?.displayName ?? agent?.name ?? "";
   const kindLabel = target.kind === "group" ? "群聊" : target.kind === "human" ? "人类" : "智能体";
   const directConv = human
-    ? conversations.find((c) => c.type === "direct" && c.peer.id === human.id)
+    ? conversations.find(
+        (c): c is Extract<Conversation, { type: "direct" }> =>
+          c.type === "direct" && c.peer.id === human.id,
+      )
     : undefined;
   const convForLast = group ?? directConv;
   const lastMsg = convForLast ? (messages[convForLast.id] ?? []).slice(-1)[0] : undefined;
