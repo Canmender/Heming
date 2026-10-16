@@ -958,6 +958,59 @@ describe("ChatPage", () => {
     expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持语音输入");
   });
 
+  it("切会话停掉旧识别器：convId 切换调其 stop 并清实例，旧 onend 不清新会话指示", async () => {
+    mockMessagesFetch([]);
+    const instances: FakeSR[] = [];
+    class FakeSR {
+      lang = "";
+      interimResults = false;
+      continuous = false;
+      onresult?: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
+      onend?: () => void;
+      onerror?: () => void;
+      start = vi.fn();
+      stop = vi.fn();
+      constructor() {
+        instances.push(this);
+      }
+    }
+    (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition = FakeSR;
+    try {
+      render(<ChatPage />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      expect(instances).toHaveLength(1);
+      expect(instances[0].start).toHaveBeenCalledTimes(1);
+      expect(screen.getByLabelText("语音输入")).toHaveClass("bg-ink"); // 识别中
+
+      // 切会话：旧识别器必须立即停（否则其 onresult 继续回填新会话草稿）
+      act(() => {
+        useUiStore.setState({ activeConversationId: "c2" });
+      });
+      expect(instances[0].stop).toHaveBeenCalledTimes(1);
+      expect(screen.getByLabelText("语音输入")).not.toHaveClass("bg-ink"); // 识别态复位
+
+      // 实例已清空：再切会话/卸载不重复 stop 旧实例
+      act(() => {
+        useUiStore.setState({ activeConversationId: "c3" });
+      });
+      expect(instances[0].stop).toHaveBeenCalledTimes(1);
+
+      // 新会话重开识别后，旧实例晚到的 onend 不得误清新会话的指示
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      expect(instances).toHaveLength(2);
+      expect(screen.getByLabelText("语音输入")).toHaveClass("bg-ink");
+      act(() => {
+        instances[0].onend?.();
+      });
+      expect(screen.getByLabelText("语音输入")).toHaveClass("bg-ink");
+      expect(instances[1].start).toHaveBeenCalledTimes(1); // 新实例确在识别
+    } finally {
+      delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
+    }
+  });
+
   it("渲染带 file 的消息为附件卡：非图片显示文件名，链接指向带鉴权取到的 objectURL", async () => {
     const m: Message = {
       ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
@@ -1013,6 +1066,53 @@ describe("ChatPage", () => {
     view.unmount();
     expect(vi.mocked(URL.revokeObjectURL)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(URL.revokeObjectURL)).toHaveBeenCalledWith("blob:mock-1");
+  });
+
+  it("附件 objectURL 竞态：content fetch 未回即卸载 → 晚到结果取到即销（不渲染不泄漏）", async () => {
+    const m: Message = {
+      ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "",
+        file: { id: "f1", name: "报告.pdf", mime: "application/pdf", size: 10 },
+      },
+    };
+    // content 请求悬停：由用例掌控 resolve 时机，模拟「fetch 还没回来就已卸载」
+    let resolveContent!: (r: Response) => void;
+    const pending = new Promise<Response>((res) => {
+      resolveContent = res;
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (/\/messages$/.test(url)) return Promise.resolve(jsonRes([m]));
+      if (/\/(reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      if (/\/files\/[^/]+\/content$/.test(url)) return pending;
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+
+    const view = render(<ChatPage />);
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some((c) => String(c[0]).includes("/files/f1/content")),
+      ).toBe(true), // 附件 effect 已发起 content fetch（响应仍挂起）
+    );
+    expect(screen.queryByRole("link")).not.toBeInTheDocument(); // 取 blob 期间不渲染
+
+    view.unmount(); // effect cleanup：alive=false，owned 尚空 → 卸载本身不销
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+
+    // 晚到的响应：取到即销（无人再用，不 setUrl、不留 objectURL）
+    await act(async () => {
+      resolveContent({
+        ok: true,
+        status: 200,
+        blob: async () => new Blob(["bin"]),
+      } as unknown as Response);
+      await new Promise((r) => setTimeout(r, 0)); // 冲刷 fetchFileBlobUrl 的多跳微任务
+    });
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-1");
   });
 
   it("附件 content 拉取失败（401）：给「加载失败」占位，不出断链 img/链接", async () => {

@@ -48,7 +48,7 @@ export function renderTextWithMentions(
  * revoke（含「fetch 还没回来就已卸载」的竞态：取到即弃），防 objectURL 内存泄漏。
  * 加载失败（401/网络）给可见占位，不渲染断链的 <img>/<a>。
  */
-export function AttachmentPreview({
+function AttachmentPreview({
   file,
 }: {
   file: { id: string; name: string; mime: string; size: number };
@@ -273,8 +273,11 @@ export function ChatPage() {
   };
 
   // 切会话清 @ 选择态 + 输入区浮层：chip/picker/锁/表情/语音都是会话级（ChatPage 常驻不重挂），
-  // 防跨会话带出 mentions 或把识别中的收尾状态留给新会话
+  // 防跨会话带出 mentions 或把识别中的收尾状态留给新会话。语音必须真正 stop 旧识别器并清实例——
+  // 只复位 listening 标志的话，旧实例仍在后台识别：onresult 回填新会话草稿、晚到的 onend 误清新指示。
   useEffect(() => {
+    recRef.current?.stop();
+    recRef.current = null;
     setSelectedMentions([]);
     setPicker(null);
     setTokenLock(false);
@@ -547,13 +550,20 @@ export function ChatPage() {
     rec.lang = "zh-CN";
     rec.interimResults = true;
     rec.continuous = false;
+    // 迟到回调守卫：切会话后 recRef 已置空/换新，旧实例的收尾回调不得作用于新会话
+    // （onresult 回填新会话草稿、onend 误清新指示、onerror 弹无关的错误提示）
     rec.onresult = (e) => {
+      if (recRef.current !== rec) return;
       let t = "";
       for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
       setDraft((d) => (d ? `${d}${t}` : t));
     };
-    rec.onend = () => setListening(false);
+    rec.onend = () => {
+      if (recRef.current !== rec) return;
+      setListening(false);
+    };
     rec.onerror = () => {
+      if (recRef.current !== rec) return;
       setListening(false);
       setSendNotice("语音识别不可用");
     };
