@@ -3,15 +3,16 @@ import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
-import { fetchMessages, fetchMembers } from "../lib/api.js";
+import { fetchMessages, fetchMembers, uploadFile, fileContentUrl } from "../lib/api.js";
 import { streamChat } from "../lib/llmClient.js";
 import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
-import { ChevronIcon, MenuIcon } from "./icons.js";
+import { ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon } from "./icons.js";
 import { Avatar } from "./Avatar.js";
 import { MentionPicker, type MentionItem } from "./MentionPicker.js";
 import { AgentStreamBubble } from "./AgentStreamBubble.js";
 import { ChatInfoCard } from "./ChatInfoCard.js";
+import { EmojiPicker } from "./EmojiPicker.js";
 
 /** 正则转义：mention 名按字面量匹配（名字可含 . * + 等元字符）。 */
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -63,6 +64,10 @@ export function ChatPage() {
   const [connected, setConnected] = useState(false);
   /** 会话信息卡（三横线弹出）开关。 */
   const [infoOpen, setInfoOpen] = useState(false);
+  /** 表情选择器开关（输入区工具行左上角）。 */
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  /** 语音输入进行中（Web Speech API 可用时；不可用时 toggleVoice 给可见提示）。 */
+  const [listening, setListening] = useState(false);
   /** @ 选择器：null=关；via 区分按钮/键入 token（键入选中后锁到 token 消失，防草稿未变时每击键重弹）。 */
   const [picker, setPicker] = useState<{ via: "button" | "token"; query: string } | null>(null);
   /** 已选 mention（输入栏下 chip）：与草稿文本解耦，发送时非空才进 payload.mentions。 */
@@ -81,6 +86,8 @@ export function ChatPage() {
     agents: MentionItem[];
   } | null>(null);
   const wsHandleRef = useRef<WsHandle | null>(null);
+  /** 语音识别器实例：切会话/卸载时 stop，避免后台继续识别回填草稿。 */
+  const recRef = useRef<{ start(): void; stop(): void } | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   /** 触发句柄（convId → 集合）：「中断」只 abort 当前会话的流；卸载时全部中止（关页不空烧 token）。 */
   const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
@@ -201,11 +208,14 @@ export function ChatPage() {
     startRun([{ agentId: meta.agentId, name: meta.name }], meta.text);
   };
 
-  // 切会话清 @ 选择态：chip/picker/锁都是会话级（ChatPage 常驻不重挂），防跨会话带出 mentions
+  // 切会话清 @ 选择态 + 输入区浮层：chip/picker/锁/表情/语音都是会话级（ChatPage 常驻不重挂），
+  // 防跨会话带出 mentions 或把识别中的收尾状态留给新会话
   useEffect(() => {
     setSelectedMentions([]);
     setPicker(null);
     setTokenLock(false);
+    setEmojiOpen(false);
+    setListening(false);
   }, [convId]);
 
   useEffect(() => {
@@ -309,12 +319,13 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 卸载（离开聊天页）：中止全部进行中流，不再空烧供应商 token
+  // 卸载（离开聊天页）：中止全部进行中流，不再空烧供应商 token；语音识别同停
   useEffect(
     () => () => {
       for (const set of Object.values(runsRef.current)) {
         for (const h of set) h.abortAll();
       }
+      recRef.current?.stop();
     },
     [],
   );
@@ -397,6 +408,96 @@ export function ChatPage() {
     if (mentions.length) startRun(mentions, text);
   };
 
+  /** 附件上限：服务端 json 体上限 8MB，base64 膨胀约 4/3 → 6MB 留余量（超限给可见提示）。 */
+  const MAX_UPLOAD = 6 * 1024 * 1024;
+
+  /** 工具行「图片/文件」入口：临时 file input（不入 DOM），选中即走 sendFile。 */
+  const pickFile = (accept: string | undefined) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    if (accept) input.accept = accept;
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (!f) return;
+      void sendFile(f);
+    };
+    input.click();
+  };
+
+  /** 附件发送：先传共享库拿 meta，再经 WS 发纯附件消息（text 空串，气泡只渲染附件段）。 */
+  const sendFile = async (f: File) => {
+    const handle = wsHandleRef.current;
+    if (!handle) {
+      setSendNotice("连接未就绪，消息未发送");
+      return;
+    }
+    if (f.size > MAX_UPLOAD) {
+      setSendNotice("文件需小于 6MB");
+      return;
+    }
+    try {
+      const meta = await uploadFile(f);
+      handle.send({
+        type: "send_message",
+        conversationId: convId,
+        payload: {
+          text: "",
+          file: { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size },
+        },
+      });
+      setSendNotice(null);
+    } catch (err) {
+      setSendNotice(`上传失败：${(err as Error).message}`);
+    }
+  };
+
+  /**
+   * 语音输入开关（Web Speech API）：环境缺构造器（Electron/无 Google 语音 key 属预期）
+   * → 可见提示，不自造录音/转写；可用时识别结果直接追加进草稿。
+   */
+  const toggleVoice = () => {
+    const SR =
+      (window as unknown as {
+        SpeechRecognition?: new () => never;
+        webkitSpeechRecognition?: new () => never;
+      }).SpeechRecognition ??
+      (window as unknown as { webkitSpeechRecognition?: new () => never }).webkitSpeechRecognition;
+    if (!SR) {
+      setSendNotice("当前环境不支持语音输入");
+      return;
+    }
+    if (listening) {
+      recRef.current?.stop();
+      return;
+    }
+    const rec = new (SR as unknown as new () => {
+      lang: string;
+      interimResults: boolean;
+      continuous: boolean;
+      onresult: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
+      onend: () => void;
+      onerror: () => void;
+      start(): void;
+      stop(): void;
+    })();
+    rec.lang = "zh-CN";
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.onresult = (e) => {
+      let t = "";
+      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+      setDraft((d) => (d ? `${d}${t}` : t));
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => {
+      setListening(false);
+      setSendNotice("语音识别不可用");
+    };
+    recRef.current = rec;
+    rec.start();
+    setListening(true);
+  };
+
   return (
     <div className="flex h-full flex-col">
       <header className="relative flex items-center gap-2.5 border-b border-line-soft px-5 py-3">
@@ -452,7 +553,29 @@ export function ChatPage() {
                 {senderName ? (
                   <div className="mb-0.5 text-[10px] text-muted">{senderName}</div>
                 ) : null}
-                {renderTextWithMentions(m.payload.text, m.payload.mentions)}
+                {m.payload.text
+                  ? renderTextWithMentions(m.payload.text, m.payload.mentions)
+                  : null}
+                {m.payload.file &&
+                  (m.payload.file.mime.startsWith("image/") ? (
+                    <img
+                      src={fileContentUrl(m.payload.file.id)}
+                      alt={m.payload.file.name}
+                      className="mt-1 max-h-40 rounded-md object-cover"
+                    />
+                  ) : (
+                    <a
+                      href={fileContentUrl(m.payload.file.id)}
+                      download={m.payload.file.name}
+                      className="mt-1 flex items-center gap-2 rounded-md border border-line bg-white px-2 py-1.5 text-[12px] shadow-card hover:bg-[#f7f7f7]"
+                    >
+                      <FileIcon width={15} height={15} />
+                      <span className="min-w-0 truncate">{m.payload.file.name}</span>
+                      <span className="shrink-0 text-[10px] text-muted">
+                        {(m.payload.file.size / 1024).toFixed(1)} KB
+                      </span>
+                    </a>
+                  ))}
                 {readByPeer ? (
                   <div className="mt-0.5 text-right text-[9px] text-muted">已读</div>
                 ) : null}
@@ -494,16 +617,51 @@ export function ChatPage() {
             </button>
           </div>
         )}
-        <div className="flex gap-2 px-5 py-3">
+        {/* 工具行：表情 / 图片 / 文件（左上角）；群会话保留 @ */}
+        <div className="flex items-center gap-1 px-5 pt-2">
+          <button
+            type="button"
+            aria-label="表情"
+            className={`rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3]${emojiOpen ? " bg-[#f3f3f3]" : ""}`}
+            onClick={() => setEmojiOpen((v) => !v)}
+          >
+            <SmileIcon width={16} height={16} />
+          </button>
+          <button
+            type="button"
+            aria-label="图片"
+            className="rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3]"
+            onClick={() => pickFile("image/*")}
+          >
+            <ImageIcon width={16} height={16} />
+          </button>
+          <button
+            type="button"
+            aria-label="文件"
+            className="rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3]"
+            onClick={() => pickFile(undefined)}
+          >
+            <FileIcon width={16} height={16} />
+          </button>
           {isGroup && (
             <button
               type="button"
               aria-label="提及智能体"
-              className="shrink-0 rounded-lg border border-line px-2.5 text-sm text-muted hover:bg-[#f3f3f3]"
+              className="ml-1 rounded-lg border border-line px-2 text-sm text-muted hover:bg-[#f3f3f3]"
               onClick={() => setPicker({ via: "button", query: "" })}
             >
               @
             </button>
+          )}
+        </div>
+        <div className="relative flex gap-2 px-5 py-3">
+          {emojiOpen && (
+            <EmojiPicker
+              onPick={(e) => {
+                setDraft((d) => d + e);
+                setEmojiOpen(false);
+              }}
+            />
           )}
           <input
             className="flex-1 rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
@@ -512,6 +670,18 @@ export function ChatPage() {
             onChange={(e) => onDraftChange(e.target.value)}
             onKeyDown={onInputKeyDown}
           />
+          <button
+            type="button"
+            aria-label="语音输入"
+            className={`rounded-lg border px-2.5 ${
+              listening
+                ? "border-ink bg-ink text-white"
+                : "border-line text-muted hover:bg-[#f3f3f3]"
+            }`}
+            onClick={toggleVoice}
+          >
+            <MicIcon width={16} height={16} />
+          </button>
           <button
             type="submit"
             className="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white"

@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { api, ApiError, setOnUnauthorized, setToken, resolveUrl } from "./api.js";
+import {
+  api,
+  ApiError,
+  setOnUnauthorized,
+  setToken,
+  resolveUrl,
+  uploadFile,
+  fileContentUrl,
+} from "./api.js";
 
 describe("resolveUrl（API base 直连注入）", () => {
   it("base 为空：保持同源相对路径（本地 dev 走 vite 代理）", () => {
@@ -97,5 +105,68 @@ describe("api 401 全局回调", () => {
 
     await expect(api<{ ok: boolean }>("/api/health")).resolves.toEqual({ ok: true });
     expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+});
+
+describe("uploadFile（附件上传下沉，App/Chat 共用）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("uploadFile POST base64 并返回 meta", async () => {
+    const meta = {
+      id: "f1",
+      owner: "alice",
+      name: "a.txt",
+      mime: "text/plain",
+      size: 2,
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    };
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify(meta), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    const got = await uploadFile(new File(["ab"], "a.txt", { type: "text/plain" }));
+
+    expect(got).toEqual(meta);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(String(url)).toBe(resolveUrl("/api/files"));
+    expect(init?.method).toBe("POST");
+    const body = JSON.parse(String(init?.body)) as {
+      name: string;
+      mime: string;
+      contentBase64: string;
+    };
+    expect(body).toEqual({
+      name: "a.txt",
+      mime: "text/plain",
+      contentBase64: "YWI=", // btoa("ab")
+    });
+  });
+
+  it("无 type 的文件回退 application/octet-stream", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: "f2" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    await uploadFile(new File(["x"], "无扩展名"));
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]![1]?.body)) as { mime: string };
+    expect(body.mime).toBe("application/octet-stream");
+  });
+
+  it("fileContentUrl 走 resolveUrl（API base 直连注入）", () => {
+    expect(fileContentUrl("f1")).toBe(resolveUrl("/api/files/f1/content"));
   });
 });

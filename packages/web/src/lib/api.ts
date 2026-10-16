@@ -120,3 +120,28 @@ export const fetchMessages = (convId: string) =>
 export const fetchMembers = (convId: string) =>
   api<Member[]>(`/api/conversations/${convId}/members`);
 export const fetchFiles = () => api<SharedFileMeta[]>("/api/files");
+
+/**
+ * 上传共享库文件（App 的「上传」与聊天附件共用同一路径）：
+ * 浏览器 File → ArrayBuffer → 手工逐字节拼二进制串 → btoa（TextEncoder 不必引入，
+ * 文件名/类型走 JSON 字段，contentBase64 只承载原始字节）。上限由服务端 8MB json 上限兜底。
+ */
+export async function uploadFile(file: File): Promise<SharedFileMeta> {
+  const buf = await file.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buf);
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return api<SharedFileMeta>("/api/files", {
+    method: "POST",
+    body: JSON.stringify({
+      name: file.name,
+      mime: file.type || "application/octet-stream",
+      contentBase64: btoa(binary),
+    }),
+  });
+}
+
+/** 附件内容直链（气泡缩略图 <img src> / 文件卡 <a href> 下载）。 */
+export function fileContentUrl(id: string): string {
+  return resolveUrl(`/api/files/${id}/content`);
+}

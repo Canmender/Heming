@@ -68,3 +68,23 @@ export const MenuIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M4 7h16M4 12h16M4 17h16" />
   </svg>
 );
+export const SmileIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M8.5 14.5c1 1.2 2.2 1.8 3.5 1.8s2.5-.6 3.5-1.8" />
+    <path d="M9 9.5h.01M15 9.5h.01" />
+  </svg>
+);
+export const ImageIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+    <circle cx="9" cy="10" r="1.5" />
+    <path d="M4 17l4.5-4.5 3 3L15 12l5 5" />
+  </svg>
+);
+export const MicIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="9.5" y="3" width="5" height="11" rx="2.5" />
+    <path d="M6 11.5a6 6 0 0 0 12 0M12 17.5V21" />
+  </svg>
+);

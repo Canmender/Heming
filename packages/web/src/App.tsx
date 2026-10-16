@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useUiStore, type Page } from "./store/ui.js";
 import { useAuthStore } from "./store/auth.js";
-import { getToken, fetchFiles, api } from "./lib/api.js";
+import { getToken, fetchFiles, uploadFile } from "./lib/api.js";
 import type { SharedFileMeta } from "@heming/shared";
 import { LoginPage } from "./components/LoginPage.js";
 import { NavRail, NavPeek } from "./components/NavRail.js";
@@ -45,18 +45,7 @@ export function App() {
       const file = input.files?.[0];
       if (!file) return;
       try {
-        const buf = await file.arrayBuffer();
-        let binary = "";
-        const bytes = new Uint8Array(buf);
-        for (const b of bytes) binary += String.fromCharCode(b);
-        await api("/api/files", {
-          method: "POST",
-          body: JSON.stringify({
-            name: file.name,
-            mime: file.type || "application/octet-stream",
-            contentBase64: btoa(binary),
-          }),
-        });
+        await uploadFile(file); // base64 编码与 POST 已下沉到 lib/api
         refreshFiles();
       } catch (e) {
         console.error("上传失败", e);

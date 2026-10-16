@@ -898,6 +898,188 @@ describe("ChatPage", () => {
     fireEvent.click(screen.getByText("架构师"));
     expect(screen.getByText("@架构师")).toBeInTheDocument();
   });
+
+  it("输入区有表情/图片/文件/语音/发送按钮（工具行 + 输入行两行布局）", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {}); // 冲刷挂载 effects
+
+    expect(screen.getByLabelText("表情")).toBeInTheDocument();
+    expect(screen.getByLabelText("图片")).toBeInTheDocument();
+    expect(screen.getByLabelText("文件")).toBeInTheDocument();
+    expect(screen.getByLabelText("语音输入")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送" })).toBeInTheDocument();
+
+    // 工具行（表情/图片/文件）与输入行（输入框/语音/发送）是两个相邻容器
+    const tool = screen.getByLabelText("表情").parentElement!;
+    const input = screen.getByPlaceholderText("输入消息…");
+    expect(tool).toContainElement(screen.getByLabelText("图片"));
+    expect(tool).toContainElement(screen.getByLabelText("文件"));
+    const inputRow = input.parentElement!;
+    expect(inputRow).toContainElement(screen.getByLabelText("语音输入"));
+    expect(inputRow).toContainElement(screen.getByRole("button", { name: "发送" }));
+    expect(tool).not.toBe(inputRow);
+  });
+
+  it("点表情按钮弹选择器，选中后追加进输入框（并关选择器）", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByLabelText("表情"));
+    fireEvent.click(await screen.findByRole("button", { name: "😀" }));
+    expect((screen.getByPlaceholderText("输入消息…") as HTMLInputElement).value).toBe("😀");
+    expect(screen.queryByRole("button", { name: "😄" })).not.toBeInTheDocument(); // 选中即关
+  });
+
+  it("点语音输入：无 Web Speech API 的环境提示不支持，不静默", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByLabelText("语音输入"));
+    expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持语音输入");
+  });
+
+  it("渲染带 file 的消息为附件卡：非图片显示文件名，链接可下载", async () => {
+    const m: Message = {
+      ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "",
+        file: { id: "f1", name: "报告.pdf", mime: "application/pdf", size: 10 },
+      },
+    };
+    mockMessagesFetch([m]);
+
+    render(<ChatPage />);
+    expect(await screen.findByText("报告.pdf")).toBeInTheDocument();
+
+    const link = screen.getByRole("link", { name: /报告\.pdf/ });
+    expect(link).toHaveAttribute("href", "/api/files/f1/content");
+    expect(link).toHaveAttribute("download", "报告.pdf");
+    expect(link).toHaveTextContent("0.0 KB"); // 10 字节 → 0.0 KB（size 口径）
+    expect(screen.queryByRole("img")).not.toBeInTheDocument(); // 非图片不出缩略图
+  });
+
+  it("图片附件渲染为缩略图（img 指向 content 路由）", async () => {
+    const m: Message = {
+      ...msg("m1", "看这张图", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "看这张图",
+        file: { id: "f9", name: "a.png", mime: "image/png", size: 1024 },
+      },
+    };
+    mockMessagesFetch([m]);
+
+    render(<ChatPage />);
+    const img = (await screen.findByRole("img", { name: "a.png" })) as HTMLImageElement;
+    expect(img).toHaveAttribute("src", "/api/files/f9/content");
+    expect(screen.getByText("看这张图")).toBeInTheDocument(); // 文本与附件共存
+  });
+
+  /**
+   * 工具行选文件走 document.createElement("input") 弹系统选择器（jsdom 无文件 UI）：
+   * 拦下创建的 input、塞 files、手动触 onchange，等价于「用户选中了文件」。
+   */
+  function captureFilePicker() {
+    const created: HTMLInputElement[] = [];
+    const orig = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation(
+      ((tag: string) => {
+        const el = orig(tag);
+        if (tag === "input") created.push(el as HTMLInputElement);
+        return el;
+      }) as typeof document.createElement,
+    );
+    return {
+      pick(accept: string | undefined, file: File | Partial<File>) {
+        fireEvent.click(screen.getByLabelText(accept ? "图片" : "文件"));
+        const input = created[0];
+        expect(input).toBeDefined();
+        expect(input.type).toBe("file");
+        expect(input.accept).toBe(accept ?? "");
+        Object.defineProperty(input, "files", { value: [file], configurable: true });
+        input.onchange?.call(input, new Event("change"));
+        return input;
+      },
+    };
+  }
+
+  /** 附件用例的 fetch 面：POST /api/files 回 meta，会话只读端点回空表（其余 404）。 */
+  function mockUploadFetch(
+    meta = { id: "f1", owner: "alice", name: "a.txt", mime: "text/plain", size: 2, updatedAt: "2026-10-17T00:00:00.000Z" },
+  ) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === "/api/files") return Promise.resolve(jsonRes(meta, 201));
+      if (/\/(messages|reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+  }
+
+  it("选中文件 → 上传共享库 → 发纯附件消息（text 空串 + payload.file）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockUploadFetch();
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
+
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({
+        type: "send_message",
+        conversationId: "c1",
+        payload: {
+          text: "",
+          file: { id: "f1", name: "a.txt", mime: "text/plain", size: 2 },
+        },
+      }),
+    );
+    expect(
+      fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files" && c[1]?.method === "POST"),
+    ).toBe(true); // 附件已落共享库
+    expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 成功路径不报错
+  });
+
+  it("附件超 6MB：不上传不发送，提示「文件需小于 6MB」；图片入口限定 image/*", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockUploadFetch();
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    captureFilePicker().pick("image/*", {
+      name: "huge.png",
+      type: "image/png",
+      size: 7 * 1024 * 1024,
+    } as unknown as File);
+
+    expect(await screen.findByRole("status")).toHaveTextContent("文件需小于 6MB");
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false); // 未发起上传
+  });
+
+  it("上传失败：提示上传失败原因，不发消息", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === "/api/files") return Promise.resolve(jsonRes({ error: "too large" }, 413));
+      if (/\/(messages|reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("上传失败：too large");
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+  });
 });
 
 describe("renderTextWithMentions", () => {
