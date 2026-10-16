@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { buildRequest, testConnection, type ChatMessage } from "./llmClient.js";
+import { buildRequest, testConnection, streamChat, type ChatMessage } from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
 
 const openai: LlmProfile = { id: "p1", label: "o", provider: "openai", apiKey: "sk-o", model: "gpt-x" };
@@ -106,5 +106,111 @@ describe("testConnection", () => {
     expect(body.max_tokens).toBe(1);
     // 红线：请求目标不是部署机
     expect(String(url)).not.toContain("47.92.39.184");
+  });
+});
+
+describe("streamChat", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const openaiProfile: LlmProfile = { id: "p", label: "l", provider: "openai", apiKey: "k", model: "m" };
+  const anthropicProfile: LlmProfile = { id: "p2", label: "l2", provider: "anthropic", apiKey: "k", model: "m" };
+  const userMsg: ChatMessage[] = [{ role: "user", content: "hi" }];
+
+  function sseResponse(chunks: string[]): Response {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder();
+        for (const c of chunks) controller.enqueue(enc.encode(c));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+  }
+
+  it("openai SSE 逐段回调并返回全文", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"你"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
+        "data: [DONE]\n\n",
+      ]),
+    );
+    const deltas: string[] = [];
+    const text = await streamChat(openaiProfile, userMsg, {
+      signal: new AbortController().signal,
+      onDelta: (t) => deltas.push(t),
+    });
+    expect(deltas).toEqual(["你", "好"]);
+    expect(text).toBe("你好");
+  });
+
+  it("anthropic SSE content_block_delta", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      sseResponse([
+        'event: content_block_delta\ndata: {"delta":{"text":"和"}}\n\n',
+        "event: message_stop\ndata: {}\n\n",
+      ]),
+    );
+    const deltas: string[] = [];
+    const text = await streamChat(anthropicProfile, userMsg, {
+      signal: new AbortController().signal,
+      onDelta: (t) => deltas.push(t),
+    });
+    expect(deltas).toEqual(["和"]);
+    expect(text).toBe("和");
+  });
+
+  it("非流式 json 响应单次回调", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "整段" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const deltas: string[] = [];
+    const text = await streamChat(openaiProfile, userMsg, {
+      signal: new AbortController().signal,
+      onDelta: (t) => deltas.push(t),
+    });
+    expect(text).toBe("整段");
+    expect(deltas).toEqual(["整段"]);
+  });
+
+  it("HTTP 错误抛 provider_error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "bad key" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await expect(
+      streamChat(openaiProfile, [{ role: "user", content: "x" }], {
+        signal: new AbortController().signal,
+        onDelta: () => {},
+      }),
+    ).rejects.toThrow(/provider_error/);
+  });
+
+  it("AbortSignal 中止抛 AbortError", async () => {
+    const ac = new AbortController();
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      void init;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"a"}}]}\n\n'));
+          ac.abort(); // 中止发生在首个 chunk 已入队之后
+          setTimeout(() => controller.error(new DOMException("aborted", "AbortError")), 0);
+        },
+      });
+      return Promise.resolve(new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } }));
+    });
+    await expect(
+      streamChat(openaiProfile, [{ role: "user", content: "x" }], {
+        signal: ac.signal,
+        onDelta: () => {},
+      }),
+    ).rejects.toThrow(/AbortError|aborted/i);
   });
 });

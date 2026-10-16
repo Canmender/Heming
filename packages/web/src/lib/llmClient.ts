@@ -87,3 +87,115 @@ export async function testConnection(
     return { ok: false, error: (e as Error).message };
   }
 }
+
+/** streamChat 的 opts：中止信号 + 逐段回调（调用方据 signal 中止转 finish-partial）。 */
+export interface StreamChatOpts {
+  signal: AbortSignal;
+  onDelta: (text: string) => void;
+  /** anthropic max_tokens 覆盖（openai 分支忽略） */
+  maxTokens?: number;
+}
+
+/**
+ * 双协议 SSE 流式对话：URL/头/body 仍出自 buildRequest（Key 红线不旁路）。
+ * - openai：`data:` 行 choices[0].delta.content，`[DONE]` 结束；
+ * - anthropic：`data:` 行 delta.text（event 行仅作前缀，按 provider 取字段）；
+ * - 非流式（content-type 不含 event-stream）：整段 json 单次 onDelta；
+ * - AbortSignal 中止 → DOMException("AbortError")；网络/HTTP 错 → Error("provider_error: ...")。
+ * 返回值 = 全文累积。
+ */
+export async function streamChat(
+  profile: LlmProfile,
+  messages: ChatMessage[],
+  opts: StreamChatOpts,
+): Promise<string> {
+  // 同步抛出（如缺 scheme 的 baseUrl 守卫）自然向上传播，不转 provider_error
+  const req = buildRequest(profile, messages, { stream: true, maxTokens: opts.maxTokens });
+
+  const toAbortError = () => new DOMException("AbortError", "AbortError");
+  const toProviderError = (e: unknown) =>
+    new Error(`provider_error: ${e instanceof Error ? e.message : String(e)}`);
+
+  let res: Response;
+  try {
+    res = await fetch(req.url, {
+      method: "POST",
+      headers: req.headers,
+      body: req.body,
+      signal: opts.signal,
+    });
+  } catch (e) {
+    if (opts.signal.aborted || (e as { name?: string })?.name === "AbortError") throw toAbortError();
+    throw toProviderError(e);
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`provider_error: HTTP ${res.status} ${text.slice(0, 300)}`);
+  }
+
+  const ctype = res.headers.get("content-type") ?? "";
+  if (!ctype.includes("event-stream")) {
+    // 非流式兼容：供应商未跟随 stream 开关（如本地代理），整段读出单次回调
+    let json: {
+      choices?: { message?: { content?: string } }[];
+      content?: { text?: string }[];
+    };
+    try {
+      json = (await res.json()) as typeof json;
+    } catch (e) {
+      if (opts.signal.aborted) throw toAbortError();
+      throw toProviderError(e);
+    }
+    const text =
+      profile.provider === "anthropic"
+        ? (json.content?.[0]?.text ?? "")
+        : (json.choices?.[0]?.message?.content ?? "");
+    if (text) opts.onDelta(text);
+    return text;
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let acc = "";
+  const handleLine = (line: string) => {
+    if (!line.startsWith("data:")) return;
+    const data = line.slice(5).trim();
+    if (data === "[DONE]") return;
+    let delta = "";
+    try {
+      const parsed = JSON.parse(data) as {
+        choices?: { delta?: { content?: string } }[];
+        delta?: { text?: string };
+      };
+      delta =
+        profile.provider === "anthropic"
+          ? (parsed.delta?.text ?? "")
+          : (parsed.choices?.[0]?.delta?.content ?? "");
+    } catch {
+      /* 非 JSON 心跳行忽略 */
+    }
+    if (delta) {
+      acc += delta;
+      opts.onDelta(delta);
+    }
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.trim() === "") continue;
+        handleLine(line);
+      }
+    }
+    if (buffer.trim()) handleLine(buffer.trim());
+  } catch (e) {
+    if (opts.signal.aborted || (e as { name?: string })?.name === "AbortError") throw toAbortError();
+    throw toProviderError(e);
+  }
+  return acc;
+}
