@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import type { Member, Message, ReadState, User } from "@heming/shared";
+import type { Member, Message, ReadState, User, WsClientEvent } from "@heming/shared";
 import { ChatPage, renderTextWithMentions } from "./ChatPage.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
@@ -752,6 +752,51 @@ describe("ChatPage", () => {
     });
     expect(screen.queryByText("▌")).not.toBeInTheDocument();
     expect(useChatStore.getState().streaming["remote-1"]).toBeUndefined();
+  });
+
+  it("F1 回归：卸载中止后 finish(partial)/agent_error 在 ws close 之前实际发出", async () => {
+    // 受控时序：send 与 close 往同一 order 记事件类型，锁定「catch 两帧先于 close」的次序
+    const order: string[] = [];
+    const send = vi.fn((e: WsClientEvent) => {
+      order.push(e.type);
+    });
+    const close = vi.fn(() => {
+      order.push("close");
+    });
+    vi.mocked(connectWs).mockReturnValue({ send, close } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+    bindAssistant();
+    vi.mocked(streamChat).mockImplementation(
+      (_p, _m, o) =>
+        new Promise<string>((_res, rej) => {
+          const abort = () => rej(new DOMException("AbortError", "AbortError"));
+          if (o.signal.aborted) return abort();
+          o.onDelta("半");
+          o.signal.addEventListener("abort", abort);
+        }),
+    );
+
+    const view = render(<ChatPage />);
+    await act(async () => {});
+    await pickAndSend("@和小鸣 写段文字");
+    await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
+    expect(Object.keys(useChatStore.getState().streaming)).toHaveLength(1); // 流已在飞（onDelta 半）
+
+    view.unmount(); // cleanup：WS effect 先排期延迟 close，随后 abort effect 中止进行中流
+
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agent_finish", text: "半" }),
+    );
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agent_error", code: "aborted" }),
+    );
+    // 次序不变量：catch（微任务）的两帧落到句柄上，必须早于 close（宏任务）——否则 partial 不入库
+    expect(order.indexOf("agent_finish")).toBeLessThan(order.indexOf("close"));
+    expect(order.indexOf("agent_error")).toBeLessThan(order.indexOf("close"));
   });
 });
 

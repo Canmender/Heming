@@ -168,12 +168,18 @@ export function ChatPage() {
     };
     // 同步拿句柄（挂在 promise 上）：中断按钮不必等 fetchHistory/流完成
     const run = runAgentMentions(convId, mentions, text, deps);
-    (runsRef.current[convId] ??= new Set()).add(run);
-    void run.catch((e) => {
-      // fetchHistory 失败等启动期错误：生成未开始，可见提示而非静默
-      console.warn("智能体生成启动失败", e);
-      setSendNotice("智能体生成启动失败，请稍后重试");
-    });
+    const runs = (runsRef.current[convId] ??= new Set());
+    runs.add(run);
+    // 完成即摘除：卸载时 WS cleanup 据此判断是否还有「进行中流」需延迟 close（F1）
+    run.then(
+      () => runs.delete(run),
+      (e) => {
+        runs.delete(run);
+        // fetchHistory 失败等启动期错误：生成未开始，可见提示而非静默
+        console.warn("智能体生成启动失败", e);
+        setSendNotice("智能体生成启动失败，请稍后重试");
+      },
+    );
   };
 
   /** 中断当前会话全部进行中流：abort → 各流 catch 走 finish-partial + agent_error(aborted)。 */
@@ -268,8 +274,20 @@ export function ChatPage() {
       handle?.send({ type: "mark_read", conversationId: convId });
     }
     return () => {
-      handle?.close();
-      wsHandleRef.current = null;
+      // F1 回归：进行中流被卸载中止时，catch 要经此连接补发 finish(partial)+agent_error
+      // （服务端入库 partial、他机端收 error 收口）。立即 close + 清 ref 会把两帧静默丢弃——
+      // catch 在微任务里跑，故把 close 延后一个宏任务（微任务必先排空），ref 同步清空也一并延后。
+      // 无进行中流则立即关（绝大多数切会话/卸载路径，行为不变）。
+      const hasInFlight = Object.values(runsRef.current).some((s) => s.size > 0);
+      if (hasInFlight && handle) {
+        setTimeout(() => {
+          handle.close();
+          if (wsHandleRef.current === handle) wsHandleRef.current = null;
+        }, 0);
+      } else {
+        handle?.close();
+        wsHandleRef.current = null;
+      }
     };
   }, [convId, appendMessage, setMessages, loadReads]);
 
