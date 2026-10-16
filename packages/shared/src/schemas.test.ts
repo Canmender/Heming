@@ -222,6 +222,20 @@ describe("M3 schemas", () => {
     expect(WsClientEventSchema.safeParse({ type: "agent_finish", conversationId: "c1", agentId: "a1", streamId: "s1", text: "你好" }).success).toBe(true);
     expect(WsClientEventSchema.safeParse({ type: "agent_chunk", conversationId: "c1", agentId: "a1", streamId: "s1", text: "" }).success).toBe(false);
   });
+  it("客户端 agent_error 双向事件（合法通过 / 空 code 拒绝）", () => {
+    expect(
+      WsClientEventSchema.safeParse({
+        type: "agent_error", conversationId: "c1", agentId: "a1", streamId: "s1",
+        code: "aborted", message: "用户中断",
+      }).success,
+    ).toBe(true);
+    expect(
+      WsClientEventSchema.safeParse({
+        type: "agent_error", conversationId: "c1", agentId: "a1", streamId: "s1",
+        code: "", message: "x",
+      }).success,
+    ).toBe(false);
+  });
   it("服务端 agent_chunk / agent_error 与 message_new.streamId", () => {
     expect(WsServerEventSchema.safeParse({ type: "agent_chunk", conversationId: "c1", agentId: "a1", streamId: "s1", text: "你" }).success).toBe(true);
     expect(WsServerEventSchema.safeParse({ type: "agent_error", conversationId: "c1", agentId: "a1", streamId: "s1", code: "provider_error", message: "401" }).success).toBe(true);

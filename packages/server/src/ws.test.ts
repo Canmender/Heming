@@ -302,6 +302,23 @@ describe("agent streaming", () => {
     wsC.close();
   });
 
+  it("agent_finish 空文本被拒（bad_event）不入库", async () => {
+    // F2：shared 的 finish text 保持宽松入站（无 min），服务端对 trim 空串拒收。
+    const a = store.createUser(`aj-${Date.now()}`, "h", "A");
+    const g5 = store.createGroup(a.id, "空群", []);
+    const wsA = await connect(issueToken(a.id));
+    const wait = nextEvent(wsA);
+    wsA.send(JSON.stringify({ type: "agent_finish", conversationId: g5.id, agentId: "system-assistant", streamId: "s6", text: "   " }));
+    const ev = await wait;
+    expect(ev.type).toBe("agent_error");
+    if (ev.type === "agent_error") {
+      expect(ev.code).toBe("bad_event");
+      expect(ev.message).toBe("empty text");
+    }
+    expect(store.listMessages(g5.id)).toHaveLength(0);
+    wsA.close();
+  });
+
   it("send_message 携带 mentions 落库并随 message_new 广播（无 streamId）", async () => {
     // Task 1 concern#2/#3：payload.mentions 往返契约 + send_message 广播不带 streamId。
     const a = store.createUser(`ah-${Date.now()}`, "h", "A");

@@ -52,6 +52,16 @@ export const WsClientEventSchema = z.discriminatedUnion("type", [
     text: z.string().max(60000),
     replyTo: z.string().optional(),
   }),
+  // 双向事件（设计 §3）：客户端上报流失败（aborted/provider_error），服务端回 forbidden。
+  // 形状与 WsServerEventSchema 的 agent_error 成员一致（同构复用，见 ws.ts）。
+  z.object({
+    type: z.literal("agent_error"),
+    conversationId: z.string().min(1),
+    agentId: z.string().min(1),
+    streamId: z.string().min(1),
+    code: z.string().min(1),
+    message: z.string().min(1).max(1000),
+  }),
 ]);
 export type WsClientEvent = z.infer<typeof WsClientEventSchema>;
 
