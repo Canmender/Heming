@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { User, Message, Conversation, Member, ReadState, Agent } from "@heming/shared";
+import type { User, Message, Conversation, Member, ReadState, Agent, SharedFileMeta } from "@heming/shared";
 import type { Store } from "./store.js";
 import { SYSTEM_AGENTS } from "./store.js";
 import { openDb } from "./db.js";
@@ -433,6 +433,40 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       if (cur.owner_id === null || cur.owner_id !== ownerId) throw new Error("forbidden");
       db.prepare("DELETE FROM conversation_agents WHERE agent_id = ?").run(id);
       db.prepare("DELETE FROM agents WHERE id = ?").run(id);
+    },
+    // —— M4 共享文件（shared_files 表；行结构 ↔ SharedFileMeta 映射同 users 行的 rowTo* 口径）——
+    addFile(meta, contentBase64) {
+      db.prepare(
+        "INSERT INTO shared_files (id, owner, name, mime, size, updated_at, content_base64) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).run(meta.id, meta.owner, meta.name, meta.mime, meta.size, meta.updatedAt, contentBase64);
+      return meta;
+    },
+    getFile(id) {
+      const row = db
+        .prepare("SELECT id, owner, name, mime, size, updated_at, content_base64 FROM shared_files WHERE id = ?")
+        .get(id) as
+        | { id: string; owner: string; name: string; mime: string; size: number; updated_at: string; content_base64: string }
+        | undefined;
+      if (!row) return null;
+      return {
+        meta: { id: row.id, owner: row.owner, name: row.name, mime: row.mime, size: row.size, updatedAt: row.updated_at },
+        contentBase64: row.content_base64,
+      };
+    },
+    listFiles() {
+      const rows = db
+        .prepare("SELECT id, owner, name, mime, size, updated_at FROM shared_files ORDER BY updated_at DESC")
+        .all() as Array<{ id: string; owner: string; name: string; mime: string; size: number; updated_at: string }>;
+      return rows.map((row) => ({ id: row.id, owner: row.owner, name: row.name, mime: row.mime, size: row.size, updatedAt: row.updated_at }));
+    },
+    deleteFile(id) {
+      return db.prepare("DELETE FROM shared_files WHERE id = ?").run(id).changes > 0;
+    },
+    userFileBytes(ownerUsername) {
+      const row = db
+        .prepare("SELECT COALESCE(SUM(size), 0) AS total FROM shared_files WHERE owner = ?")
+        .get(ownerUsername) as { total: number };
+      return row.total;
     },
   };
 }

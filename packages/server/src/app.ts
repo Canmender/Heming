@@ -217,14 +217,10 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.json(store.listReads(req.params.id));
   });
 
-  interface StoredFile {
-    meta: SharedFileMeta;
-    content: string; // base64
-  }
-  const files = new Map<string, StoredFile>();
+  // —— M4：共享文件从 app.ts 闭包 Map 迁入 Store（memory/sqlite 双实现持久化）——
 
   app.get("/api/files", authOnly, (_req, res) => {
-    res.json([...files.values()].map((f) => f.meta));
+    res.json(store.listFiles());
   });
 
   app.post("/api/files", authOnly, (req, res) => {
@@ -248,12 +244,12 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
             : 0),
       updatedAt: new Date().toISOString(),
     };
-    files.set(meta.id, { meta, content: parsed.data.contentBase64 });
+    store.addFile(meta, parsed.data.contentBase64);
     res.status(201).json(meta);
   });
 
   app.delete("/api/files/:id", authOnly, (req, res) => {
-    const stored = files.get(req.params.id);
+    const stored = store.getFile(req.params.id);
     if (!stored) {
       res.status(404).json({ error: "not found" });
       return;
@@ -263,19 +259,19 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(403).json({ error: "forbidden" });
       return;
     }
-    files.delete(req.params.id);
+    store.deleteFile(req.params.id);
     res.status(204).end();
   });
 
   // 附件内容（气泡图片/下载）：与列表同为登录可见口径（共享库语义），无属主校验
   app.get("/api/files/:id/content", authOnly, (req, res) => {
-    const stored = files.get(req.params.id);
+    const stored = store.getFile(req.params.id);
     if (!stored) {
       res.status(404).json({ error: "not found" });
       return;
     }
     res.setHeader("Content-Type", stored.meta.mime);
-    res.send(Buffer.from(stored.content, "base64"));
+    res.send(Buffer.from(stored.contentBase64, "base64"));
   });
 
   // —— M3 智能体名册：错误口径 forbidden→403、agent not found→404、其余 400 ——

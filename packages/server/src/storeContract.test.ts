@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMemoryStore, type Store } from "./store.js";
 import { createSqliteStore } from "./sqliteStore.js";
+import type { SharedFileMeta } from "@heming/shared";
 
 type Factory = { name: string; create: () => Store & { close?: () => void } };
 const tmpDirs: string[] = [];
@@ -296,6 +297,36 @@ for (const f of factories) {
       store.deleteAgent(mine.id, a.id);
       expect(store.listAgentIds(g.id)).toEqual([]);
       expect(store.listMembers(g.id).some((m) => m.id === mine.id)).toBe(false);
+    });
+
+    // —— M4 Task 1：共享文件落 Store（memory/sqlite 双实现持久化）——
+
+    describe("files", () => {
+      it("addFile/getFile/listFiles/deleteFile/userFileBytes", () => {
+        const u = store.createUser("fileu", "hash", "文件王");
+        const meta: SharedFileMeta = {
+          id: "f-1",
+          owner: "fileu",
+          name: "a.txt",
+          mime: "text/plain",
+          size: 5,
+          updatedAt: "2026-10-17T00:00:00.000Z",
+        };
+        store.addFile(meta, Buffer.from("hello").toString("base64"));
+        const got = store.getFile("f-1");
+        expect(got?.meta.name).toBe("a.txt");
+        expect(Buffer.from(got!.contentBase64, "base64").toString()).toBe("hello");
+        expect(store.listFiles().map((f) => f.id)).toContain("f-1");
+        expect(store.userFileBytes("fileu")).toBe(5);
+        expect(store.deleteFile("f-1")).toBe(true);
+        expect(store.getFile("f-1")).toBeNull();
+        expect(store.userFileBytes("fileu")).toBe(0);
+        void u;
+      });
+      it("getFile 不存在返回 null；deleteFile 不存在返回 false", () => {
+        expect(store.getFile("nope")).toBeNull();
+        expect(store.deleteFile("nope")).toBe(false);
+      });
     });
   });
 }

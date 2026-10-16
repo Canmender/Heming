@@ -52,6 +52,10 @@ export function initSchema(db: DatabaseSyncType): void {
     CREATE TABLE IF NOT EXISTS conversation_agents (
       conv_id TEXT NOT NULL, agent_id TEXT NOT NULL, PRIMARY KEY (conv_id, agent_id)
     );
+    CREATE TABLE IF NOT EXISTS shared_files (
+      id TEXT PRIMARY KEY, owner TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL,
+      size INTEGER NOT NULL, updated_at TEXT NOT NULL, content_base64 TEXT NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, created_at);
   `);
 }

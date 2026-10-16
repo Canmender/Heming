@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { User, Message, Conversation, Member, ReadState, Agent } from "@heming/shared";
+import type { User, Message, Conversation, Member, ReadState, Agent, SharedFileMeta } from "@heming/shared";
 
 export interface FriendshipRequest {
   id: string;
@@ -76,6 +76,17 @@ export interface Store {
   updateAgent(id: string, ownerId: string, patch: { name?: string; avatar?: string | null; description?: string }): Agent;
   /** 权限同 updateAgent；删除同时清理 conversation_agents 关联。 */
   deleteAgent(id: string, ownerId: string): void;
+  // —— M4 共享文件（app.ts 内存 Map 迁入 Store 的持久化契约，双实现同语义）——
+  /** 落库一个共享文件（元数据 + base64 内容），返回入参 meta。 */
+  addFile(meta: SharedFileMeta, contentBase64: string): SharedFileMeta;
+  /** 取文件（元数据 + base64 内容）；不存在返回 null。 */
+  getFile(id: string): { meta: SharedFileMeta; contentBase64: string } | null;
+  /** 全部共享文件元数据，按 updatedAt 降序。 */
+  listFiles(): SharedFileMeta[];
+  /** 删除文件；存在并删除成功 true，不存在 false。 */
+  deleteFile(id: string): boolean;
+  /** 某用户全部共享文件字节数（size 求和，配额用）。 */
+  userFileBytes(ownerUsername: string): number;
 }
 
 export function createMemoryStore(): Store {
@@ -100,6 +111,8 @@ export function createMemoryStore(): Store {
   // 系统 agent 不在此预置：由 ensurePresetGroup 从 SYSTEM_AGENTS 登记（对齐 sqlite 的
   // INSERT ... ON CONFLICT DO UPDATE），未播种时两实现 listAgents 均不含系统 agent。
   const agents = new Map<string, Agent>();
+  // 共享文件（M4：app.ts 闭包 Map 迁入 Store——与 users/messages 同层的 store 实例级资源）
+  const files = new Map<string, { meta: SharedFileMeta; contentBase64: string }>();
 
   const mustUser = (id: string): User => {
     const row = users.get(id);
@@ -371,6 +384,24 @@ export function createMemoryStore(): Store {
       for (const conv of conversations.values()) {
         if (conv.agentIds) conv.agentIds = conv.agentIds.filter((x) => x !== id);
       }
+    },
+    addFile(meta, contentBase64) {
+      files.set(meta.id, { meta, contentBase64 });
+      return meta;
+    },
+    getFile(id) {
+      return files.get(id) ?? null;
+    },
+    listFiles() {
+      return [...files.values()].map((f) => f.meta).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+    },
+    deleteFile(id) {
+      return files.delete(id);
+    },
+    userFileBytes(ownerUsername) {
+      let sum = 0;
+      for (const f of files.values()) if (f.meta.owner === ownerUsername) sum += f.meta.size;
+      return sum;
     },
   };
 }
