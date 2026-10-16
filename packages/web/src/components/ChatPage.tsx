@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { useChatStore, selectMentionCandidates } from "../store/chat.js";
+import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { fetchMessages, fetchMembers } from "../lib/api.js";
@@ -56,12 +56,15 @@ export function ChatPage() {
     [],
   );
   const [tokenLock, setTokenLock] = useState(false);
-  // 本群可 @ 的候选（join 视图经 selector；direct 恒空）——hook 无条件挂顶层
-  const mentionCandidates = useChatStore((s) => selectMentionCandidates(s, convId));
-  /** 群成员 id→名映射：M2 消息体无 senderName，挂载时拉一次 members 建表（带 convId 防跨会话串名）。 */
-  const [memberNames, setMemberNames] = useState<{
+  /**
+   * 群成员挂载快照（带 convId 防跨会话串数据）：
+   * byId = id→名（他人气泡署名，M2 消息体无 senderName）；
+   * agents = kind=agent 行 → @ 选择器候选（**只认本会话群 members**，评审 F1——跨群 join 视图不作数）。
+   */
+  const [groupMembers, setGroupMembers] = useState<{
     convId: string;
     byId: Record<string, string>;
+    agents: MentionItem[];
   } | null>(null);
   const wsHandleRef = useRef<WsHandle | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -69,7 +72,9 @@ export function ChatPage() {
   // conversations 为联合类型（M2）：仅 direct 有 peer；群显群名+人数
   const conv = conversations.find((c) => c.id === convId);
   const peer = conv?.type === "direct" ? conv.peer : undefined;
-  const memberNameById = memberNames?.convId === convId ? memberNames.byId : undefined;
+  const memberNameById = groupMembers?.convId === convId ? groupMembers.byId : undefined;
+  /** 本会话群的 @ 候选：只认本群 members 的 agent 行（评审 F1；快照未落定/失败则空）。 */
+  const mentionCandidates = groupMembers?.convId === convId ? groupMembers.agents : [];
   // 仅 direct 有「已读」：取对方（peer）在本会话的读点；ISO 时间戳同构（…Z），字符串比较即时间序
   const peerReadAt =
     conv?.type === "direct"
@@ -106,20 +111,23 @@ export function ChatPage() {
     });
   }, [convId, loadReads]);
 
-  // 群会话挂载拉一次成员表建 id→名字映射（他人气泡发送者名；direct 走 peer.displayName）
+  // 群会话挂载拉一次成员表：id→名（气泡署名）+ agent 行（@ 候选，本会话群口径）；direct 走 peer.displayName
   useEffect(() => {
     if (conv?.type !== "group") return;
     let alive = true;
     void fetchMembers(convId)
       .then((list) => {
         if (!alive) return;
-        setMemberNames({
+        setGroupMembers({
           convId,
           byId: Object.fromEntries(list.map((m) => [m.id, m.name])),
+          agents: list
+            .filter((m) => m.kind === "agent")
+            .map((m) => ({ id: m.id, name: m.name, avatar: m.avatar })),
         });
       })
       .catch(() => {
-        /* 成员名缺失仅影响气泡署名，不阻断会话 */
+        /* 成员缺失仅影响署名与 @ 候选，不阻断会话 */
       });
     return () => {
       alive = false;
@@ -199,6 +207,7 @@ export function ChatPage() {
     if (e.key === "Escape" && picker) {
       e.preventDefault();
       setPicker(null);
+      setTokenLock(false); // Esc 关闭同步解锁：后续键入可重开（否则旧锁卡住 token 路径）
     }
   };
 

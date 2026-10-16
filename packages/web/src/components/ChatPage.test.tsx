@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import type { Agent, Member, Message, ReadState, User } from "@heming/shared";
+import type { Member, Message, ReadState, User } from "@heming/shared";
 import { ChatPage, renderTextWithMentions } from "./ChatPage.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
@@ -65,25 +65,23 @@ function lastHandlers(): WsHandlers {
   return calls[calls.length - 1][0];
 }
 
-/** @ 选择器用例共用底座：群会话 + 名册 join（含「和小鸣」）+ 可断言的 ws send。 */
-const agentRow: Agent = {
-  id: "system-assistant",
-  owner_id: "u1",
-  name: "和小鸣",
-  avatar: null,
-  description: "",
-};
+/** 本会话群 members 行（@ 候选唯一数据源）：默认含人类 u1 + agent「和小鸣」。 */
+const inGroupMembers: Member[] = [
+  { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
+  { kind: "agent", id: "system-assistant", name: "和小鸣", avatar: null, user: null },
+];
 
-async function setupGroupChat() {
+/**
+ * @ 选择器用例共用底座：群会话 c1 + members 响应（默认本群含「和小鸣」）+ 可断言的 ws send。
+ * 不预置 store 跨群 join 视图（agents）——候选必须来自本会话 members（评审 F1 锁死口径）。
+ */
+async function setupGroupChat(rows: Member[] = inGroupMembers) {
   const send = vi.fn();
   vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
   useChatStore.setState({
     conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    agentsRoster: [agentRow],
-    agentIdsInGroups: new Set([agentRow.id]),
-    agents: [agentRow],
   });
-  mockMessagesFetch([], undefined, { members: [[]], reads: [[]] });
+  mockMessagesFetch([], undefined, { members: [rows], reads: [[]] });
   render(<ChatPage />);
   await act(async () => {}); // 冲刷挂载 effects（fetchMessages/loadReads/fetchMembers 落定）
   return send;
@@ -465,6 +463,40 @@ describe("ChatPage", () => {
     });
     expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "提及智能体" })).not.toBeInTheDocument(); // direct/未知会话不给 @ 入口
+  });
+
+  it("候选只认本会话群 members：跨群 join 视图里的外群 agent 不可见不可选（评审 F1）", async () => {
+    // 跨群 join 视图（Task 6 的 agents）含只在 B 群的 agent——@ 候选若读它就会漏出外群项
+    useChatStore.setState({
+      agents: [{ id: "foreign-1", owner_id: null, name: "外群甲", avatar: null, description: "" }],
+    });
+    await setupGroupChat(); // members 响应仅本群行：有和小鸣，无外群甲
+
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    expect(screen.getByText("和小鸣")).toBeInTheDocument(); // 正例：本群 members 中的 agent 可见
+    expect(screen.queryByText("外群甲")).not.toBeInTheDocument(); // 负例：只在跨群视图的外群 agent 不可见
+
+    fireEvent.click(screen.getByText("和小鸣"));
+    expect(screen.getByText("@和小鸣")).toBeInTheDocument(); // 正例：本群 agent 可选
+    expect(screen.queryByText("外群甲")).not.toBeInTheDocument();
+    useChatStore.setState({ agents: [] }); // 还原，防泄漏到后续用例
+  });
+
+  it("Esc 关闭选择器同步清 tokenLock：token 仍在也可再键入重开", async () => {
+    await setupGroupChat();
+    const input = screen.getByPlaceholderText("输入消息…");
+
+    fireEvent.change(input, { target: { value: "@" } }); // 键入路径开
+    fireEvent.click(screen.getByText("和小鸣")); // 键入路径选中 → tokenLock 置位
+    expect(input).toHaveValue("@"); // 草稿保持原样（token 还在）
+
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" })); // 按钮重开（已选被过滤 → 空态）
+    expect(screen.getByText("群内暂无智能体")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" }); // Esc 关 + 解锁（Minor#3）
+    expect(screen.queryByText("群内暂无智能体")).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "@再看" } }); // token 未断开，解锁后应能重开
+    expect(screen.getByText("群内暂无智能体")).toBeInTheDocument();
   });
 
   it("气泡对 mentions 名称高亮渲染", async () => {
