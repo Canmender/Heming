@@ -352,6 +352,23 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       }[];
       return rows.map((r) => r.agent_id);
     },
+    attachAgentToGroup(conversationId, agentId) {
+      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      // 幂等：PRIMARY KEY (conv_id, agent_id) 冲突即 no-op（与内存 includes 判断同语义）
+      db.prepare("INSERT OR IGNORE INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(
+        conversationId,
+        agentId,
+      );
+    },
+    detachAgentFromGroup(conversationId, agentId) {
+      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      db.prepare("DELETE FROM conversation_agents WHERE conv_id = ? AND agent_id = ?").run(
+        conversationId,
+        agentId,
+      );
+    },
     listAgents() {
       // 永不 SELECT system_prompt：系统提示词是部署侧内部字段，名册 API 契约不含它。
       // 系统 agent 由 ensurePresetGroup upsert 落行，此处直接读表即自然出现。

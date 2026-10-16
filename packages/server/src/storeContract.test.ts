@@ -258,5 +258,44 @@ for (const f of factories) {
       expect(() => store.updateAgent("system-assistant", a.id, { name: "改名" })).toThrow("forbidden");
       expect(() => store.deleteAgent("system-assistant", a.id)).toThrow("forbidden");
     });
+
+    // —— M3 I2：attach/detach 双实现同语义（幂等、缺失会话同拒、名册 join 生效）——
+
+    it("attach/detach 幂等：listAgentIds 与 listMembers 一致联动", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const g = store.createGroup(a.id, "入群群", []);
+      const mine = store.createAgent(a.id, { name: "架构师", description: "画图的" });
+
+      store.attachAgentToGroup(g.id, mine.id);
+      store.attachAgentToGroup(g.id, mine.id); // 幂等：重复挂载 no-op
+      expect(store.listAgentIds(g.id)).toEqual([mine.id]);
+      // 名册 join：挂载后 listMembers 尾部出现 agent 行（@ 候选 / finish 校验的数据源）
+      const agents = store.listMembers(g.id).filter((m) => m.kind === "agent");
+      expect(agents).toEqual([{ kind: "agent", id: mine.id, name: "架构师", avatar: null, user: null }]);
+
+      store.detachAgentFromGroup(g.id, mine.id);
+      store.detachAgentFromGroup(g.id, mine.id); // 幂等：未挂载再卸 no-op
+      expect(store.listAgentIds(g.id)).toEqual([]);
+      expect(store.listMembers(g.id).some((m) => m.kind === "agent")).toBe(false);
+    });
+
+    it("attach/detach 对不存在会话抛 conversation not found", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const mine = store.createAgent(a.id, { name: "架构师", description: "" });
+      expect(() => store.attachAgentToGroup("ghost", mine.id)).toThrow("conversation not found");
+      expect(() => store.detachAgentFromGroup("ghost", mine.id)).toThrow("conversation not found");
+    });
+
+    it("attach 后 deleteAgent：会话关联同步清理，listMembers 不再含该 agent", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const g = store.createGroup(a.id, "清理群", []);
+      const mine = store.createAgent(a.id, { name: "临时工", description: "" });
+      store.attachAgentToGroup(g.id, mine.id);
+      expect(store.listMembers(g.id).some((m) => m.id === mine.id)).toBe(true);
+
+      store.deleteAgent(mine.id, a.id);
+      expect(store.listAgentIds(g.id)).toEqual([]);
+      expect(store.listMembers(g.id).some((m) => m.id === mine.id)).toBe(false);
+    });
   });
 }

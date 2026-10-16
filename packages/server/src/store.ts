@@ -60,6 +60,13 @@ export interface Store {
   /** 会话挂载的 agent id 列表（conversation_agents / 内存 agentIds），无则空数组。 */
   listAgentIds(conversationId: string): string[];
   /**
+   * 会话挂载 agent（幂等，重复挂载为 no-op）。**不做**成员/存在性校验——权限与
+   * 403/404 口径在路由层（app.ts）做；会话不存在抛 "conversation not found"（双实现同语义）。
+   */
+  attachAgentToGroup(conversationId: string, agentId: string): void;
+  /** 会话卸载 agent（幂等，未挂载也为 no-op → 204）；会话不存在同 attach 抛错。 */
+  detachAgentFromGroup(conversationId: string, agentId: string): void;
+  /**
    * 智能体名册：用户自建 + 已播种的系统 agent（未播种时仅用户自建）。
    * 返回结构不含 system_prompt（部署边界：系统提示词永不进 API）。
    */
@@ -253,12 +260,13 @@ export function createMemoryStore(): Store {
         const u = mustUser(id);
         return { kind: "user" as const, id, name: u.displayName, avatar: u.avatar ?? null, user: u };
       });
-      // agent 行尾部追加；元数据取自 SYSTEM_AGENTS（sqlite 侧取自 agents 表，播种时同一来源 upsert）。
-      // 未知 agentId 跳过，与 sqlite INNER JOIN agents 的丢行语义一致。
+      // agent 行尾部追加；元数据取自名册 agents（系统 agent 由 ensurePresetGroup 登记、
+      // 用户自建由 createAgent 落行）——sqlite 侧为 conversation_agents JOIN agents 同语义。
+      // 名册缺行的 agentId 跳过（与 sqlite INNER JOIN 的丢行一致）。
       for (const agentId of conv.agentIds ?? []) {
-        const meta = SYSTEM_AGENTS[agentId];
+        const meta = agents.get(agentId);
         if (!meta) continue;
-        out.push({ kind: "agent", id: agentId, name: meta.name, avatar: meta.avatar, user: null });
+        out.push({ kind: "agent", id: meta.id, name: meta.name, avatar: meta.avatar, user: null });
       }
       return out;
     },
@@ -314,6 +322,17 @@ export function createMemoryStore(): Store {
     },
     listAgentIds(conversationId) {
       return [...(conversations.get(conversationId)?.agentIds ?? [])];
+    },
+    attachAgentToGroup(conversationId, agentId) {
+      const conv = conversations.get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      const ids = (conv.agentIds ??= []);
+      if (!ids.includes(agentId)) ids.push(agentId);
+    },
+    detachAgentFromGroup(conversationId, agentId) {
+      const conv = conversations.get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      if (conv.agentIds) conv.agentIds = conv.agentIds.filter((x) => x !== agentId);
     },
     listAgents() {
       return [...agents.values()];

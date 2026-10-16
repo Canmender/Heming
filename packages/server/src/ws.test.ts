@@ -319,6 +319,26 @@ describe("agent streaming", () => {
     wsA.close();
   });
 
+  it("agent_finish 文本超 20000 被 shared schema 拒（bad_event）不入库", async () => {
+    // I4：finish.text 上限与 MessagePayloadSchema.text 对齐（防「schema 过了、入库即违规」）
+    const a = store.createUser(`ak-${Date.now()}`, "h", "A");
+    const g6 = store.createGroup(a.id, "超长群", []);
+    const wsA = await connect(issueToken(a.id));
+    const wait = nextEvent(wsA);
+    wsA.send(JSON.stringify({
+      type: "agent_finish",
+      conversationId: g6.id,
+      agentId: "system-assistant",
+      streamId: "s7",
+      text: "x".repeat(20001),
+    }));
+    const ev = await wait;
+    expect(ev.type).toBe("error");
+    if (ev.type === "error") expect(ev.code).toBe("bad_event");
+    expect(store.listMessages(g6.id)).toHaveLength(0);
+    wsA.close();
+  });
+
   it("send_message 携带 mentions 落库并随 message_new 广播（无 streamId）", async () => {
     // Task 1 concern#2/#3：payload.mentions 往返契约 + send_message 广播不带 streamId。
     const a = store.createUser(`ah-${Date.now()}`, "h", "A");

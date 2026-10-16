@@ -8,6 +8,7 @@ import {
   CreateFriendRequestBodySchema,
   CreateFileBodySchema,
   AgentBodySchema,
+  AttachAgentBodySchema,
   type SharedFileMeta,
 } from "@heming/shared";
 import type { Store } from "./store.js";
@@ -313,6 +314,38 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       const msg = (e as Error).message;
       res.status(msg === "forbidden" ? 403 : msg === "agent not found" ? 404 : 400).json({ error: msg });
     }
+  });
+
+  // —— M3 I2：自建智能体入群（挂载/卸载）。权限在此层做（Store 不校验）：
+  // 非成员 403、agent 不存在 404；挂载幂等（首挂 201、已挂 200），卸载幂等 204。——
+
+  app.post("/api/conversations/:id/agents", authOnly, (req, res) => {
+    if (!store.isMember(req.params.id, userId(req))) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    const parsed = AttachAgentBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const { agentId } = parsed.data;
+    if (!store.listAgents().some((a) => a.id === agentId)) {
+      res.status(404).json({ error: "agent not found" });
+      return;
+    }
+    const existed = store.listAgentIds(req.params.id).includes(agentId);
+    store.attachAgentToGroup(req.params.id, agentId);
+    res.status(existed ? 200 : 201).json({ conversationId: req.params.id, agentId });
+  });
+
+  app.delete("/api/conversations/:id/agents/:agentId", authOnly, (req, res) => {
+    if (!store.isMember(req.params.id, userId(req))) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    store.detachAgentFromGroup(req.params.id, req.params.agentId);
+    res.status(204).end();
   });
 
   return app;
