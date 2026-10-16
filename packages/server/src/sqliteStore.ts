@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { User, Message, Conversation, Member, ReadState } from "@heming/shared";
+import type { User, Message, Conversation, Member, ReadState, Agent } from "@heming/shared";
 import type { Store } from "./store.js";
 import { SYSTEM_AGENTS } from "./store.js";
 import { openDb } from "./db.js";
@@ -351,6 +351,71 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         agent_id: string;
       }[];
       return rows.map((r) => r.agent_id);
+    },
+    listAgents() {
+      // 永不 SELECT system_prompt：系统提示词是部署侧内部字段，名册 API 契约不含它。
+      // 系统 agent 由 ensurePresetGroup upsert 落行，此处直接读表即自然出现。
+      const rows = db
+        .prepare("SELECT id, owner_id, name, avatar, description FROM agents")
+        .all() as {
+        id: string;
+        owner_id: string | null;
+        name: string;
+        avatar: string | null;
+        description: string;
+      }[];
+      return rows.map((r) => ({
+        id: r.id,
+        owner_id: r.owner_id,
+        name: r.name,
+        avatar: r.avatar,
+        description: r.description,
+      }));
+    },
+    createAgent(ownerId, body) {
+      mustUser(ownerId);
+      const id = randomUUID();
+      const avatar = body.avatar ?? null;
+      db.prepare("INSERT INTO agents (id, owner_id, name, avatar, description) VALUES (?, ?, ?, ?, ?)").run(
+        id,
+        ownerId,
+        body.name,
+        avatar,
+        body.description,
+      );
+      return { id, owner_id: ownerId, name: body.name, avatar, description: body.description };
+    },
+    updateAgent(id, ownerId, patch) {
+      const cur = db
+        .prepare("SELECT id, owner_id, name, avatar, description FROM agents WHERE id = ?")
+        .get(id) as
+        | { id: string; owner_id: string | null; name: string; avatar: string | null; description: string }
+        | undefined;
+      if (!cur) throw new Error("agent not found");
+      // 系统 agent（owner_id IS NULL）与非 owner 同拒：forbidden
+      if (cur.owner_id === null || cur.owner_id !== ownerId) throw new Error("forbidden");
+      const next: Agent = {
+        ...cur,
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.avatar !== undefined ? { avatar: patch.avatar } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+      };
+      db.prepare("UPDATE agents SET name = ?, avatar = ?, description = ? WHERE id = ?").run(
+        next.name,
+        next.avatar,
+        next.description,
+        id,
+      );
+      return next;
+    },
+    deleteAgent(id, ownerId) {
+      const cur = db.prepare("SELECT owner_id FROM agents WHERE id = ?").get(id) as
+        | { owner_id: string | null }
+        | undefined;
+      if (!cur) throw new Error("agent not found");
+      if (cur.owner_id === null || cur.owner_id !== ownerId) throw new Error("forbidden");
+      db.prepare("DELETE FROM conversation_agents WHERE agent_id = ?").run(id);
+      db.prepare("DELETE FROM agents WHERE id = ?").run(id);
     },
   };
 }

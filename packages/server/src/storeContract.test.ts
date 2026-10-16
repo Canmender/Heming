@@ -228,5 +228,35 @@ for (const f of factories) {
       // 再播种仍回到预设群（不会误匹配用户群）
       expect(store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant")).toBe(presetId);
     });
+
+    // —— M3 Task 2：智能体名册 CRUD（brief 裁决形态：工厂无预设前提，系统 agent 断言容忍缺省）——
+
+    it("agents CRUD 与系统 agent 保护", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const mine = store.createAgent(a.id, { name: "架构师", description: "画图的" });
+      expect(mine.owner_id).toBe(a.id);
+      const all = store.listAgents();
+      expect(all.some((x) => x.id === mine.id)).toBe(true);
+      expect(all.some((x) => x.name === "架构师")).toBe(true);
+      const upd = store.updateAgent(mine.id, a.id, { description: "改了" });
+      expect(upd.description).toBe("改了");
+      // 系统 agent 未播种时 not found、已播种时 owner_id NULL → forbidden，均属拒绝口径
+      expect(() => store.updateAgent("system-assistant", a.id, { name: "改名" })).toThrow(/forbidden|not found/);
+      expect(() => store.updateAgent(mine.id, "someone-else", { name: "劫持" })).toThrow("forbidden");
+      store.deleteAgent(mine.id, a.id);
+      expect(store.listAgents().some((x) => x.id === mine.id)).toBe(false);
+      expect(() => store.deleteAgent("system-assistant", a.id)).toThrow(/forbidden|not found/);
+    });
+
+    it("ensurePresetGroup 播种后 listAgents 含系统 agent，且仍拒改/拒删", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      store.ensurePresetGroup("和鸣交流群", [a.id], "system-assistant");
+      const sys = store.listAgents().find((x) => x.id === "system-assistant");
+      expect(sys).toBeTruthy();
+      expect(sys!.owner_id).toBeNull();
+      expect(sys!.name).toBe("和小鸣");
+      expect(() => store.updateAgent("system-assistant", a.id, { name: "改名" })).toThrow("forbidden");
+      expect(() => store.deleteAgent("system-assistant", a.id)).toThrow("forbidden");
+    });
   });
 }

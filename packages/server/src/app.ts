@@ -7,6 +7,7 @@ import {
   CreateConversationBodySchema,
   CreateFriendRequestBodySchema,
   CreateFileBodySchema,
+  AgentBodySchema,
   type SharedFileMeta,
 } from "@heming/shared";
 import type { Store } from "./store.js";
@@ -263,6 +264,55 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     }
     files.delete(req.params.id);
     res.status(204).end();
+  });
+
+  // —— M3 智能体名册：错误口径 forbidden→403、agent not found→404、其余 400 ——
+
+  app.get("/api/agents", authOnly, (_req, res) => {
+    res.json(store.listAgents());
+  });
+
+  app.post("/api/agents", authOnly, (req, res) => {
+    const parsed = AgentBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid body" });
+      return;
+    }
+    try {
+      res.status(201).json(
+        store.createAgent(userId(req), {
+          name: parsed.data.name,
+          avatar: parsed.data.avatar ?? null,
+          description: parsed.data.description,
+        }),
+      );
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/agents/:id", authOnly, (req, res) => {
+    const parsed = AgentBodySchema.partial().safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid body" });
+      return;
+    }
+    try {
+      res.json(store.updateAgent(req.params.id, userId(req), parsed.data));
+    } catch (e) {
+      const msg = (e as Error).message;
+      res.status(msg === "forbidden" ? 403 : msg === "agent not found" ? 404 : 400).json({ error: msg });
+    }
+  });
+
+  app.delete("/api/agents/:id", authOnly, (req, res) => {
+    try {
+      store.deleteAgent(req.params.id, userId(req));
+      res.status(204).end();
+    } catch (e) {
+      const msg = (e as Error).message;
+      res.status(msg === "forbidden" ? 403 : msg === "agent not found" ? 404 : 400).json({ error: msg });
+    }
   });
 
   return app;

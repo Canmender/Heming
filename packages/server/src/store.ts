@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { User, Message, Conversation, Member, ReadState } from "@heming/shared";
+import type { User, Message, Conversation, Member, ReadState, Agent } from "@heming/shared";
 
 export interface FriendshipRequest {
   id: string;
@@ -59,6 +59,16 @@ export interface Store {
   ensurePresetGroup(name: string, userIds: string[], agentId: string): string;
   /** 会话挂载的 agent id 列表（conversation_agents / 内存 agentIds），无则空数组。 */
   listAgentIds(conversationId: string): string[];
+  /**
+   * 智能体名册：用户自建 + 已播种的系统 agent（未播种时仅用户自建）。
+   * 返回结构不含 system_prompt（部署边界：系统提示词永不进 API）。
+   */
+  listAgents(): Agent[];
+  createAgent(ownerId: string, body: { name: string; avatar?: string | null; description: string }): Agent;
+  /** owner_id IS NULL（系统）或非 ownerId → 抛 "forbidden"；不存在 → "agent not found"。 */
+  updateAgent(id: string, ownerId: string, patch: { name?: string; avatar?: string | null; description?: string }): Agent;
+  /** 权限同 updateAgent；删除同时清理 conversation_agents 关联。 */
+  deleteAgent(id: string, ownerId: string): void;
 }
 
 export function createMemoryStore(): Store {
@@ -79,6 +89,10 @@ export function createMemoryStore(): Store {
   const messages = new Map<string, Message[]>();
   const reads = new Map<string, Map<string, string>>();
   const pairToConv = new Map<string, string>();
+  // 智能体名册（closure 级，随 store 实例隔离——与 users/conversations 同层）。
+  // 系统 agent 不在此预置：由 ensurePresetGroup 从 SYSTEM_AGENTS 登记（对齐 sqlite 的
+  // INSERT ... ON CONFLICT DO UPDATE），未播种时两实现 listAgents 均不含系统 agent。
+  const agents = new Map<string, Agent>();
 
   const mustUser = (id: string): User => {
     const row = users.get(id);
@@ -288,10 +302,56 @@ export function createMemoryStore(): Store {
       conversations.set(id, { members: ids, kind: "group", name, agentIds: [agentId] });
       messages.set(id, []);
       reads.set(id, new Map());
+      // 系统 agent 登记进名册（元数据单一真源 SYSTEM_AGENTS；与 sqlite 侧同路径 upsert 对齐）
+      agents.set(agentId, {
+        id: agentId,
+        owner_id: null,
+        name: meta.name,
+        avatar: meta.avatar,
+        description: meta.description,
+      });
       return id;
     },
     listAgentIds(conversationId) {
       return [...(conversations.get(conversationId)?.agentIds ?? [])];
+    },
+    listAgents() {
+      return [...agents.values()];
+    },
+    createAgent(ownerId, body) {
+      mustUser(ownerId);
+      const agent: Agent = {
+        id: randomUUID(),
+        owner_id: ownerId,
+        name: body.name,
+        avatar: body.avatar ?? null,
+        description: body.description,
+      };
+      agents.set(agent.id, agent);
+      return agent;
+    },
+    updateAgent(id, ownerId, patch) {
+      const cur = agents.get(id);
+      if (!cur) throw new Error("agent not found");
+      if (cur.owner_id === null || cur.owner_id !== ownerId) throw new Error("forbidden");
+      const next: Agent = {
+        ...cur,
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.avatar !== undefined ? { avatar: patch.avatar } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+      };
+      agents.set(id, next);
+      return next;
+    },
+    deleteAgent(id, ownerId) {
+      const cur = agents.get(id);
+      if (!cur) throw new Error("agent not found");
+      if (cur.owner_id === null || cur.owner_id !== ownerId) throw new Error("forbidden");
+      agents.delete(id);
+      // 同步清会话关联（内存 agentIds；sqlite 侧对应 DELETE conversation_agents）
+      for (const conv of conversations.values()) {
+        if (conv.agentIds) conv.agentIds = conv.agentIds.filter((x) => x !== id);
+      }
     },
   };
 }

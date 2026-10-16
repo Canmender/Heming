@@ -449,3 +449,68 @@ describe("CORS 兜底（浏览器直连场景，手写中间件无依赖）", ()
     expect(res.headers["access-control-allow-headers"]).toBe("Authorization,Content-Type");
   });
 });
+
+describe("agents api", () => {
+  let store: ReturnType<typeof createMemoryStore>;
+  let app: App;
+  beforeEach(() => {
+    store = createMemoryStore();
+    app = createApp(store, { allowRegister: true });
+  });
+
+  it("注册用户可建/改/删自己的智能体，系统与他人 403", async () => {
+    const a = await register(app, "alice");
+    const b = await register(app, "bob");
+    // 播种系统 agent（同 sqlite ensurePreset upsert 口径），供「系统 403」断言
+    store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant");
+
+    const created = await request(app).post("/api/agents")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "架构师", description: "画图" });
+    expect(created.status).toBe(201);
+    expect(created.body.owner_id).toBe(a.user.id);
+    expect(created.body).not.toHaveProperty("system_prompt");
+
+    const list = await request(app).get("/api/agents").set("Authorization", `Bearer ${a.token}`);
+    expect(list.status).toBe(200);
+    expect(Array.isArray(list.body)).toBe(true);
+
+    const upd = await request(app).put(`/api/agents/${created.body.id}`)
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ description: "改" });
+    expect(upd.status).toBe(200);
+    expect(upd.body.description).toBe("改");
+
+    const notFound = await request(app).put("/api/agents/nope")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ description: "x" });
+    expect(notFound.status).toBe(404);
+
+    // 标题承诺的 403 分支：他人 PUT/DELETE + 系统 PUT（forbidden → 403 映射）
+    const otherUpd = await request(app).put(`/api/agents/${created.body.id}`)
+      .set("Authorization", `Bearer ${b.token}`)
+      .send({ description: "劫持" });
+    expect(otherUpd.status).toBe(403);
+    const sysUpd = await request(app).put("/api/agents/system-assistant")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "改名" });
+    expect(sysUpd.status).toBe(403);
+
+    const del = await request(app).delete(`/api/agents/${created.body.id}`)
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(del.status).toBe(204);
+
+    const delNotFound = await request(app).delete("/api/agents/nope")
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(delNotFound.status).toBe(404);
+  });
+
+  it("未鉴权 401；非法 body 400", async () => {
+    expect((await request(app).get("/api/agents")).status).toBe(401);
+    const a = await register(app, "alice");
+    const bad = await request(app).post("/api/agents")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "" });
+    expect(bad.status).toBe(400);
+  });
+});
