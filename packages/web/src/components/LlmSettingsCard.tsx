@@ -76,6 +76,11 @@ export function LlmSettingsCard() {
       setError("请填写名称、模型与 API Key");
       return;
     }
+    // F1 表单层拦截：缺 scheme 的 baseUrl 交给 buildRequest 会变相对路径（Key 打到自有域）
+    if (baseUrl.trim() && !/^https?:\/\//.test(baseUrl.trim())) {
+      setError("Base URL 需以 http:// 或 https:// 开头");
+      return;
+    }
     let temp: number | undefined;
     if (temperature.trim() !== "") {
       temp = Number(temperature);

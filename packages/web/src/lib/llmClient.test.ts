@@ -54,8 +54,14 @@ describe("buildRequest", () => {
     for (const url of urls) {
       expect(url).toMatch(/^https?:\/\//); // 绝对地址，非相对路径（相对路径会被浏览器发往自有域）
       expect(url).not.toContain("47.92.39.184"); // 部署机 IP（自有服务端）锁死不出现
-      expect(url).not.toMatch(/^\/(api)?\//);
     }
+    // 配套 F1：缺 scheme 的 baseUrl 拼出的正是相对路径——守卫直接拒绝，而非产出上面这种 URL
+    expect(() =>
+      buildRequest({ ...openai, baseUrl: "api.deepseek.com/v1" }, msgs, { stream: false }),
+    ).toThrow("baseUrl 必须以 http:// 或 https:// 开头");
+    expect(() =>
+      buildRequest({ ...anthropic, baseUrl: "api.deepseek.com" }, msgs, { stream: false }),
+    ).toThrow("baseUrl 必须以 http:// 或 https:// 开头");
   });
 });
 
@@ -76,6 +82,14 @@ describe("testConnection", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("fetch failed"));
     const r = await testConnection(openai);
     expect(r).toEqual({ ok: false, error: "fetch failed" });
+  });
+
+  it("缺 scheme baseUrl → ok:false（守卫经 testConnection 转错误，不抛出且不发请求）", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const r = await testConnection({ ...openai, baseUrl: "api.deepseek.com/v1" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/https?:\/\//);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("成功：POST 官方端点，非流式 + anthropic max_tokens:1", async () => {

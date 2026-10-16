@@ -21,6 +21,10 @@ export function buildRequest(
   messages: ChatMessage[],
   opts: BuildRequestOpts,
 ): { url: string; headers: Record<string, string>; body: string } {
+  // Key 红线守卫：baseUrl 缺 scheme 会拼出相对路径，浏览器将带 Key 的请求发往自有域
+  if (profile.baseUrl && !/^https?:\/\//.test(profile.baseUrl)) {
+    throw new Error("baseUrl 必须以 http:// 或 https:// 开头");
+  }
   if (profile.provider === "anthropic") {
     const base = profile.baseUrl || "https://api.anthropic.com";
     return {
@@ -59,14 +63,19 @@ export function buildRequest(
   };
 }
 
-/** 非流式 1-token 冒烟：anthropic max_tokens:1，openai 走最小 body。 */
+/** 非流式 1-token 冒烟：anthropic max_tokens:1，openai 走最小 body。永不抛出。 */
 export async function testConnection(
   profile: LlmProfile,
 ): Promise<{ ok: boolean; error?: string }> {
-  const req = buildRequest(profile, [{ role: "user", content: "ping" }], {
-    stream: false,
-    maxTokens: 1,
-  });
+  let req: { url: string; headers: Record<string, string>; body: string };
+  try {
+    req = buildRequest(profile, [{ role: "user", content: "ping" }], {
+      stream: false,
+      maxTokens: 1,
+    });
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }; // 如缺 scheme 的 baseUrl 守卫
+  }
   try {
     const res = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body });
     if (!res.ok) {

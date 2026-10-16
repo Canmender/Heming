@@ -43,6 +43,21 @@ describe("LlmSettingsCard", () => {
     expect(screen.getByLabelText("Base URL")).toHaveAttribute("placeholder", "https://api.anthropic.com");
   });
 
+  // F1 红线：缺 scheme 的 baseUrl 保存被拦在表单层（不写 store、不发请求）
+  it("baseUrl 缺 http(s):// 时保存被拦截并提示", async () => {
+    render(<LlmSettingsCard />);
+    fireEvent.click(screen.getByText("＋ 新建连接"));
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "deepseek" } });
+    fireEvent.change(screen.getByLabelText("模型"), { target: { value: "deepseek-chat" } });
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-test" } });
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "api.deepseek.com/v1" } });
+    fireEvent.click(screen.getByText("保存"));
+    await waitFor(() => expect(screen.getByText(/需以 http:\/\/ 或 https:\/\//)).toBeInTheDocument());
+    expect(useLlmStore.getState().profiles).toHaveLength(0);
+    expect(localStorage.getItem("heming.llmConfigs")).toBeNull();
+    expect(screen.getByLabelText("名称")).toHaveValue("deepseek"); // 表单未关、可改后重交
+  });
+
   it("列表展示 provider/model 与 key 末 4 位；删除提示已绑定智能体失联并清绑定", async () => {
     useLlmStore.getState().addProfile({ id: "p1", label: "长连接", provider: "anthropic", apiKey: "sk-ant-secret9", model: "claude-sonnet-5" });
     useLlmStore.getState().setBinding("agent-1", "p1");
