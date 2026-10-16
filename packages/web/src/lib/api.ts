@@ -73,7 +73,9 @@ export function setOnUnauthorized(fn: (() => void) | null): void {
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  // 模块级 token 优先；为空时回退 localStorage（测试环境 setToken 未先行、模块加载早于写入的场景）
+  const t = token ?? localStorage.getItem("heming.token");
+  if (t) headers.set("Authorization", `Bearer ${t}`);
   const res = await fetch(resolveUrl(path), { ...init, headers });
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) {

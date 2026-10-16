@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Conversation, Member, Message, ReadState, User } from "@heming/shared";
+import type { Agent, Conversation, Member, Message, ReadState, User } from "@heming/shared";
 import {
   fetchConversations,
   fetchFriends,
@@ -9,20 +9,37 @@ import {
   fetchMembers,
   api,
 } from "../lib/api.js";
+import { listAgents } from "../lib/agentsApi.js";
+
+/** 名册 join：群内 agentId 集合 × 名册全量 → Agent 行（roster 缺行的 id 跳过，不占位）。 */
+function joinRoster(roster: Agent[], ids: Set<string>): Agent[] {
+  const byId = new Map(roster.map((a) => [a.id, a]));
+  const out: Agent[] = [];
+  for (const id of ids) {
+    const a = byId.get(id);
+    if (a) out.push(a);
+  }
+  return out;
+}
 
 interface ChatState {
   conversations: Conversation[];
   friends: { id: string; user: User }[];
   incoming: { id: string; from: User }[];
   messages: Record<string, Message[]>;
-  /** 跨群去重收集的智能体成员（雷达右下扇区；M2 仅展示，无 1:1 会话）。 */
-  agents: Member[];
+  /** 名册全量（GET /api/agents；雷达扇区 join 与编辑弹窗取 owner/description 用）。 */
+  agentsRoster: Agent[];
+  /** 跨群去重收集的智能体成员 id（雷达扇区「出现在我任一群 members」判定）。 */
+  agentIdsInGroups: Set<string>;
+  /** 群内出现过的 agentId × 名册 join 的视图（M3 起为 Agent 行，非 Member 行）。 */
+  agents: Agent[];
   /** 各会话已读状态（convId → [{userId, at}]；direct 气泡「已读」判定与 read_update 随动用）。 */
   reads: Record<string, ReadState[]>;
   loadWorkspace: () => Promise<void>;
   openDirect: (peerId: string) => Promise<string>;
   createGroup: (name: string, memberIds: string[]) => Promise<string>;
   loadAgents: () => Promise<void>;
+  loadAgentsRoster: () => Promise<void>;
   appendMessage: (m: Message) => void;
   setMessages: (convId: string, msgs: Message[]) => void;
   setReads: (convId: string, reads: ReadState[]) => void;
@@ -34,6 +51,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   friends: [],
   incoming: [],
   messages: {},
+  agentsRoster: [],
+  agentIdsInGroups: new Set<string>(),
   agents: [],
   reads: {},
   async loadWorkspace() {
@@ -67,13 +86,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const lists = await Promise.all(
       groups.map((g) => fetchMembers(g.id).catch(() => [] as Member[])),
     );
-    const byId = new Map<string, Member>();
+    const ids = new Set<string>();
     for (const list of lists) {
       for (const m of list) {
-        if (m.kind === "agent" && !byId.has(m.id)) byId.set(m.id, m);
+        if (m.kind === "agent") ids.add(m.id);
       }
     }
-    set({ agents: [...byId.values()] });
+    // join 名册拿 owner/description（Member 行升级为名册全量行）；与 loadAgentsRoster 双向重算，
+    // 谁后完成谁用对方已落定的 state 再 join 一次，保证终态一致
+    set({ agentIdsInGroups: ids, agents: joinRoster(get().agentsRoster, ids) });
+  },
+  async loadAgentsRoster() {
+    const agentsRoster = await listAgents();
+    set({ agentsRoster, agents: joinRoster(agentsRoster, get().agentIdsInGroups) });
   },
   appendMessage(m) {
     const list = get().messages[m.conversationId] ?? [];

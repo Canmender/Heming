@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, type MockInstance } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import type { Member, User } from "@heming/shared";
+import type { Agent, User } from "@heming/shared";
 import { RadarContacts, layoutSector } from "./RadarContacts.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
@@ -16,7 +16,8 @@ vi.mock("../lib/api.js", async (importOriginal) => {
 const me: User = { id: "u1", username: "alice", displayName: "爱丽丝" };
 const li: User = { id: "u2", username: "lisi", displayName: "李四", avatar: "data:image/png;base64,AAA" };
 const zhang: User = { id: "u3", username: "zhangsan", displayName: "张三" };
-const xiaoMing: Member = { kind: "agent", id: "a1", name: "和小鸣", avatar: null, user: null };
+const xiaoMing: Agent = { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "官方" };
+const mine: Agent = { id: "a2", owner_id: "u1", name: "架构师", avatar: null, description: "d" };
 
 /** 注入三扇区数据：群「评审组」(未读2)、好友李四(有 avatar+直聊未读5)/张三(无 avatar)、智能体和小鸣。 */
 function seedStore() {
@@ -37,7 +38,9 @@ function seedStore() {
       { id: "f2", user: zhang },
     ],
     incoming: [],
-    agents: [xiaoMing],
+    agents: [],
+    agentsRoster: [xiaoMing],
+    agentIdsInGroups: new Set(["a1"]),
     messages: {},
   });
 }
@@ -48,7 +51,10 @@ function spyEffects() {
     .spyOn(useChatStore.getState(), "loadWorkspace")
     .mockResolvedValue(undefined);
   const loadAgents = vi.spyOn(useChatStore.getState(), "loadAgents").mockResolvedValue(undefined);
-  return { loadWorkspace, loadAgents };
+  const loadAgentsRoster = vi
+    .spyOn(useChatStore.getState(), "loadAgentsRoster")
+    .mockResolvedValue(undefined);
+  return { loadWorkspace, loadAgents, loadAgentsRoster };
 }
 
 describe("layoutSector 扇区落位（纯函数、无随机）", () => {
@@ -75,7 +81,11 @@ describe("layoutSector 扇区落位（纯函数、无随机）", () => {
 });
 
 describe("RadarContacts 雷达通讯录", () => {
-  let effects: { loadWorkspace: MockInstance; loadAgents: MockInstance };
+  let effects: {
+    loadWorkspace: MockInstance;
+    loadAgents: MockInstance;
+    loadAgentsRoster: MockInstance;
+  };
 
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -85,13 +95,14 @@ describe("RadarContacts 雷达通讯录", () => {
     effects = spyEffects();
   });
 
-  it("挂载即 loadWorkspace → loadAgents", async () => {
+  it("挂载即 loadWorkspace → loadAgents + loadAgentsRoster", async () => {
     render(<RadarContacts />);
     await waitFor(() => expect(effects.loadWorkspace).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(effects.loadAgents).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(effects.loadAgentsRoster).toHaveBeenCalledTimes(1));
   });
 
-  it("三扇区节点名全部渲染（群聊/人类/智能体）＋ 新建智能体按钮禁用", async () => {
+  it("三扇区节点名全部渲染（群聊/人类/智能体）＋ 新建智能体按钮可用", async () => {
     render(<RadarContacts />);
     await screen.findByText("评审组");
     expect(screen.getByText("李四")).toBeInTheDocument();
@@ -100,9 +111,7 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(screen.getByText("人类")).toBeInTheDocument();
     expect(screen.getByText("智能体")).toBeInTheDocument();
     expect(screen.getByText("通讯录 · 雷达")).toBeInTheDocument();
-    const agentBtn = screen.getByRole("button", { name: "＋ 新建智能体" });
-    expect(agentBtn).toBeDisabled();
-    expect(agentBtn).toHaveAttribute("title", "M3 开放");
+    expect(screen.getByRole("button", { name: "＋ 新建智能体" })).toBeEnabled();
   });
 
   it("未读徽标：群 2、李四直聊 5", async () => {
@@ -240,5 +249,49 @@ describe("RadarContacts 雷达通讯录", () => {
     fireEvent.click(screen.getByRole("button", { name: "＋ 新建群" }));
     expect(await screen.findByText("新建群聊")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("群名称")).toBeInTheDocument();
+  });
+
+  it("「＋ 新建智能体」打开 AgentFormModal（create）", async () => {
+    render(<RadarContacts />);
+    await screen.findByText("评审组");
+    fireEvent.click(screen.getByRole("button", { name: "＋ 新建智能体" }));
+    expect(await screen.findByText("新建智能体")).toBeInTheDocument();
+    expect(screen.getByLabelText("名称")).toBeInTheDocument();
+  });
+
+  it("自己拥有的名册项悬浮卡显示「编辑」（打开 edit 弹窗），他人/系统不显示", async () => {
+    useChatStore.setState({
+      agentsRoster: [xiaoMing, mine],
+      agentIdsInGroups: new Set(["a1", "a2"]),
+    });
+    render(<RadarContacts />);
+    await screen.findByText("架构师");
+    fireEvent.mouseOver(screen.getByText("架构师"));
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    expect(await screen.findByText("编辑智能体")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("架构师")).toBeInTheDocument();
+    fireEvent.mouseOver(screen.getByText("和小鸣"));
+    expect(screen.getByRole("button", { name: "发消息" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
+  });
+
+  it("名册为空时智能体扇区显示播种空态文案", async () => {
+    useChatStore.setState({ agentsRoster: [], agentIdsInGroups: new Set<string>() });
+    render(<RadarContacts />);
+    await screen.findByText("评审组");
+    expect(
+      screen.getByText("智能体将在预设群播种后出现（重启服务端后可见）"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("和小鸣")).not.toBeInTheDocument();
+  });
+
+  it("群内出现过 || 自己拥有 才上雷达（未入群的自有项也显示）", async () => {
+    useChatStore.setState({
+      agentsRoster: [xiaoMing, mine],
+      agentIdsInGroups: new Set(["a1"]), // a2 未入任何群，但 owner 是我
+    });
+    render(<RadarContacts />);
+    await screen.findByText("和小鸣");
+    expect(screen.getByText("架构师")).toBeInTheDocument();
   });
 });

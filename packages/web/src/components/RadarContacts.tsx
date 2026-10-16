@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Conversation } from "@heming/shared";
+import type { Agent, Conversation } from "@heming/shared";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -7,6 +7,7 @@ import { requestFriend, acceptFriend } from "../lib/api.js";
 import { Avatar } from "./Avatar.js";
 import { ChevronIcon } from "./icons.js";
 import { GroupCreateModal } from "./GroupCreateModal.js";
+import { AgentFormModal } from "./AgentFormModal.js";
 
 /**
  * 通讯录主视图 · 圆形雷达（视觉定稿 contacts-final-v2.html 移植）：
@@ -74,6 +75,10 @@ interface RadarNode {
   peerId?: string;
   /** 智能体（M2 无 1:1 会话）：仅展示信息卡，发消息/历史会话禁用。 */
   agent?: boolean;
+  /** 名册行（owner 悬浮卡据此渲染「编辑」入口）。 */
+  agentData?: Agent;
+  /** roster.owner_id === me.id：名册项属主。 */
+  agentOwned?: boolean;
   avatarCls: string;
 }
 
@@ -95,10 +100,12 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
   const conversations = useChatStore((s) => s.conversations);
   const friends = useChatStore((s) => s.friends);
   const incoming = useChatStore((s) => s.incoming);
-  const agents = useChatStore((s) => s.agents);
+  const agentsRoster = useChatStore((s) => s.agentsRoster);
+  const agentIdsInGroups = useChatStore((s) => s.agentIdsInGroups);
   const messages = useChatStore((s) => s.messages);
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
   const loadAgents = useChatStore((s) => s.loadAgents);
+  const loadAgentsRoster = useChatStore((s) => s.loadAgentsRoster);
   const openDirect = useChatStore((s) => s.openDirect);
   const me = useAuthStore((s) => s.user);
   const openConversation = useUiStore((s) => s.openConversation);
@@ -113,6 +120,10 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
   /** 打开直聊失败提示（顶部条下方一行；成功进入/切换节点时清除）。 */
   const [openErr, setOpenErr] = useState("");
   const [groupOpen, setGroupOpen] = useState(false);
+  /** 智能体弹窗：create 由顶栏「＋ 新建智能体」打开；edit 由 owner 悬浮卡「编辑」打开。 */
+  const [agentModal, setAgentModal] = useState<
+    { mode: "create" } | { mode: "edit"; agent: Agent }
+  | null>(null);
   /** 悬浮信息卡：节点 + 卡片坐标（相对雷达容器）。 */
   const [card, setCard] = useState<{ node: RadarNode; x: number; y: number } | null>(null);
   /**
@@ -125,10 +136,11 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
   const hideTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    // 名册与群内收集并发拉取：两者的 join 各自重算（store 内谁后完成谁见对方新值），终态一致
     void loadWorkspace()
-      .then(() => loadAgents())
+      .then(() => Promise.all([loadAgentsRoster(), loadAgents()]))
       .catch((err) => console.warn("通讯录数据加载失败", err));
-  }, [loadWorkspace, loadAgents]);
+  }, [loadWorkspace, loadAgents, loadAgentsRoster]);
 
   // 面板可见态跟随 contactsHidden：初值 true，挂载后的首个 effect 同步——
   // 从工作区点节点进会话时，overlay 面板先以可见态挂载再滑出（380ms），复刻定稿的左滑揭示
@@ -196,7 +208,13 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
       };
     });
 
-  const agentNodes: RadarNode[] = agents
+  // 扇区简化裁决（写死）：出现在我任一群 members 的名册项 ∪ 自己拥有的名册项；
+  // 群内 id 集合来自 loadAgents，名册行带 owner/description（join 在此完成）
+  const displayAgents = agentsRoster.filter(
+    (a) => agentIdsInGroups.has(a.id) || (me != null && a.owner_id === me.id),
+  );
+
+  const agentNodes: RadarNode[] = displayAgents
     .filter((a) => match(a.name))
     .map((a) => ({
       key: a.id,
@@ -206,6 +224,8 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
       typeLabel: "智能体",
       unread: 0,
       agent: true,
+      agentData: a,
+      agentOwned: me != null && a.owner_id === me.id,
       avatarCls: "!bg-[#dce6f0] !text-[#5b7899]",
       ...lastOf(undefined),
     }));
@@ -304,7 +324,7 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
           <button type="button" onClick={() => setGroupOpen(true)}>
             ＋ 新建群
           </button>
-          <button type="button" disabled title="M3 开放">
+          <button type="button" onClick={() => setAgentModal({ mode: "create" })}>
             ＋ 新建智能体
           </button>
         </div>
@@ -371,6 +391,11 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
         <div className="wlabel" style={{ right: 24, bottom: 18 }}>
           智能体
         </div>
+
+        {/* Task 2 handoff 落地：名册/扇区为空时的播种空态（不 hack 客户端触发播种） */}
+        {displayAgents.length === 0 && (
+          <div className="agent-empty">智能体将在预设群播种后出现（重启服务端后可见）</div>
+        )}
 
         <div className="scan" />
         <div className="core">
@@ -448,6 +473,18 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
               {card.node.lastText}
             </div>
             <div className="hb">
+              {card.node.agentOwned && card.node.agentData && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const rec = card.node.agentData;
+                    setCard(null);
+                    if (rec) setAgentModal({ mode: "edit", agent: rec });
+                  }}
+                >
+                  编辑
+                </button>
+              )}
               <button
                 type="button"
                 className="pri"
@@ -477,6 +514,15 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
       </div>
 
       <GroupCreateModal open={groupOpen} onClose={() => setGroupOpen(false)} />
+      {agentModal && (
+        <AgentFormModal
+          key={agentModal.mode === "edit" ? agentModal.agent.id : "new"}
+          open
+          mode={agentModal.mode}
+          agent={agentModal.mode === "edit" ? agentModal.agent : undefined}
+          onClose={() => setAgentModal(null)}
+        />
+      )}
     </div>
   );
 
@@ -526,6 +572,7 @@ const STYLE = `
 
 .wedge { position:absolute; left:50%; top:50%; width:1.5px; height:176px; background:repeating-linear-gradient(#e0e0e0 0 5px,transparent 5px 10px); transform-origin:top center; z-index:1; }
 .wlabel { position:absolute; font-size:9.5px; font-weight:800; letter-spacing:.18em; color:#c8c8c8; z-index:3; }
+.agent-empty { position:absolute; right:16px; bottom:4px; max-width:66%; font-size:9.5px; color:#b8b8b8; z-index:3; text-align:right; }
 
 .node { position:absolute; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; z-index:6; font-size:9.5px; color:#666; transition:transform .15s; background:none; border:none; padding:0; }
 .node:hover { transform:translate(-50%,-50%) scale(1.15); z-index:20; }

@@ -1,13 +1,22 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { Member, Message, User } from "@heming/shared";
+import type { Agent, Member, Message, User } from "@heming/shared";
 import { useChatStore } from "./chat.js";
 import { api, fetchMembers } from "../lib/api.js";
+import { listAgents } from "../lib/agentsApi.js";
 
 // createGroup 走 api()、loadAgents 走 fetchMembers：模块级 mock（其余导出保持真实）
 vi.mock("../lib/api.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api.js")>();
   return { ...actual, api: vi.fn(), fetchMembers: vi.fn() };
 });
+// loadAgentsRoster 走 listAgents：同款模块级 mock
+vi.mock("../lib/agentsApi.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/agentsApi.js")>();
+  return { ...actual, listAgents: vi.fn() };
+});
+
+const rosterA1: Agent = { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "官方" };
+const rosterA2: Agent = { id: "a2", owner_id: "u1", name: "架构师", avatar: null, description: "d" };
 
 const msg = (id: string, text: string): Message => ({
   id,
@@ -26,13 +35,15 @@ const msgAt = (id: string, text: string, createdAt: string): Message => ({
 
 describe("chat store", () => {
   beforeEach(() => {
-    vi.clearAllMocks(); // 模块 mock（api/fetchMembers）的调用历史逐例归零
+    vi.clearAllMocks(); // 模块 mock（api/fetchMembers/listAgents）的调用历史逐例归零
     useChatStore.setState({
       conversations: [],
       friends: [],
       incoming: [],
       messages: {},
       agents: [],
+      agentsRoster: [],
+      agentIdsInGroups: new Set<string>(),
       reads: {},
     });
   });
@@ -118,7 +129,7 @@ describe("chat store", () => {
     loadWorkspace.mockRestore();
   });
 
-  it("loadAgents：逐群拉 members，kind=agent 按 id 去重", async () => {
+  it("loadAgents：逐群拉 members，kind=agent 按 id 去重并 join 名册（owner/description 来自 roster）", async () => {
     const agentA: Member = { kind: "agent", id: "a1", name: "和小鸣", avatar: null, user: null };
     const agentB: Member = { kind: "agent", id: "a2", name: "架构师", avatar: null, user: null };
     const human: Member = {
@@ -138,29 +149,51 @@ describe("chat store", () => {
         { id: "g1", type: "group", name: "预设群", memberCount: 4, unreadCount: 0 },
         { id: "g2", type: "group", name: "评审组", memberCount: 2, unreadCount: 0 },
       ],
+      agentsRoster: [rosterA1, rosterA2],
       agents: [],
     });
     await useChatStore.getState().loadAgents();
     expect(fetchMembers).toHaveBeenCalledWith("g1");
     expect(fetchMembers).toHaveBeenCalledWith("g2");
     expect(useChatStore.getState().agents.map((a) => a.id)).toEqual(["a1", "a2"]);
+    // join 拿到 roster 的 owner/description（Member 行升级为名册全量行）
+    expect(useChatStore.getState().agents[1].owner_id).toBe("u1");
+    expect(useChatStore.getState().agents[1].description).toBe("d");
+    expect(useChatStore.getState().agentIdsInGroups).toEqual(new Set(["a1", "a2"]));
   });
 
-  it("loadAgents：群 members 拉取失败不炸（其余群照常收集）", async () => {
+  it("loadAgents：群 members 拉取失败不炸（其余群照常收集）；roster 无此 id 时跳过不占位", async () => {
     const agentA: Member = { kind: "agent", id: "a1", name: "和小鸣", avatar: null, user: null };
+    const agentGhost: Member = { kind: "agent", id: "a9", name: "幽灵", avatar: null, user: null };
     vi.mocked(fetchMembers).mockImplementation(async (convId) => {
       if (convId === "bad") throw new Error("forbidden");
-      return [agentA];
+      return [agentA, agentGhost]; // a9 不在 roster → join 跳过
     });
     useChatStore.setState({
       conversations: [
         { id: "bad", type: "group", name: "坏群", memberCount: 1, unreadCount: 0 },
         { id: "g2", type: "group", name: "好群", memberCount: 2, unreadCount: 0 },
       ],
+      agentsRoster: [rosterA1],
       agents: [],
     });
     await expect(useChatStore.getState().loadAgents()).resolves.toBeUndefined();
     expect(useChatStore.getState().agents.map((a) => a.id)).toEqual(["a1"]);
+    expect(useChatStore.getState().agentIdsInGroups.has("a9")).toBe(true); // id 集合照收
+  });
+
+  it("loadAgentsRoster：GET /api/agents 全量入册并重算 join（已收集的群内 id 随 roster 刷新）", async () => {
+    vi.mocked(listAgents).mockResolvedValue([rosterA1, rosterA2]);
+    useChatStore.setState({
+      agentIdsInGroups: new Set(["a1", "a2", "a9"]),
+      agents: [],
+    });
+    await useChatStore.getState().loadAgentsRoster();
+    expect(listAgents).toHaveBeenCalledTimes(1);
+    expect(useChatStore.getState().agentsRoster.map((a) => a.id)).toEqual(["a1", "a2"]);
+    // 重算 join：a9 不在 roster 跳过，a1/a2 从名册带出
+    expect(useChatStore.getState().agents.map((a) => a.id)).toEqual(["a1", "a2"]);
+    expect(useChatStore.getState().agents[0].description).toBe("官方");
   });
 
   it("setReads 覆盖该会话已读状态（其他会话不受影响）", () => {
