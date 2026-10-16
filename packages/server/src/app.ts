@@ -267,6 +267,17 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.status(204).end();
   });
 
+  // 附件内容（气泡图片/下载）：与列表同为登录可见口径（共享库语义），无属主校验
+  app.get("/api/files/:id/content", authOnly, (req, res) => {
+    const stored = files.get(req.params.id);
+    if (!stored) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    res.setHeader("Content-Type", stored.meta.mime);
+    res.send(Buffer.from(stored.content, "base64"));
+  });
+
   // —— M3 智能体名册：错误口径 forbidden→403、agent not found→404、其余 400 ——
 
   app.get("/api/agents", authOnly, (_req, res) => {

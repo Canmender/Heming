@@ -146,8 +146,12 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
           event.conversationId,
           "user",
           userId,
-          // mentions 原样透传入库（内存存引用、sqlite JSON.stringify——两实现均无 shape 校验）。
-          { text: event.payload.text, ...(event.payload.mentions ? { mentions: event.payload.mentions } : {}) },
+          // mentions / file 原样透传入库（内存存引用、sqlite JSON.stringify——两实现均无 shape 校验）。
+          {
+            text: event.payload.text,
+            ...(event.payload.mentions ? { mentions: event.payload.mentions } : {}),
+            ...(event.payload.file ? { file: event.payload.file } : {}),
+          },
           event.replyTo ?? null,
         );
         broadcastToConversation(event.conversationId, { type: "message_new", message });

@@ -304,6 +304,28 @@ describe("files API", () => {
     expect(up.status).toBe(201);
     expect(up.body.size).toBe(2);
   });
+
+  it("GET /api/files/:id/content 返回原始字节与 mime", async () => {
+    const a = await register(app, "filec");
+    const up = await request(app)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "t.txt", mime: "text/plain", contentBase64: Buffer.from("hello").toString("base64") });
+    const got = await request(app)
+      .get(`/api/files/${up.body.id}/content`)
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(got.status).toBe(200);
+    expect(got.headers["content-type"]).toContain("text/plain");
+    expect(got.text).toBe("hello");
+  });
+
+  it("GET /api/files/:id/content 不存在 404", async () => {
+    const a = await register(app, "filec2");
+    const got = await request(app)
+      .get("/api/files/none-id/content")
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(got.status).toBe(404);
+  });
 });
 
 describe("group api", () => {

@@ -365,4 +365,32 @@ describe("agent streaming", () => {
     wsA.close();
     wsB.close();
   });
+
+  it("send_message 携带 file 原样入库并广播（text 空串纯附件）", async () => {
+    // UI 完善 Task 1：payload.file 往返契约，text 为空串（纯附件消息）也能过 shared schema 并落库。
+    const a = store.createUser(`am-${Date.now()}`, "h", "A");
+    const b = store.createUser(`an-${Date.now()}`, "h", "B");
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const conv = store.createDirectConversation(a.id, b.id).id;
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+    const wait = nextEvent(wsB);
+    wsA.send(JSON.stringify({
+      type: "send_message",
+      conversationId: conv,
+      payload: { text: "", file: { id: "f1", name: "a.png", mime: "image/png", size: 3 } },
+    }));
+    const ev = await wait;
+    expect(ev.type).toBe("message_new");
+    if (ev.type === "message_new") {
+      expect(ev.message.payload.text).toBe("");
+      expect(ev.message.payload.file).toEqual({ id: "f1", name: "a.png", mime: "image/png", size: 3 });
+    }
+    const msgs = store.listMessages(conv);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].payload.text).toBe("");
+    expect(msgs[0].payload.file).toEqual({ id: "f1", name: "a.png", mime: "image/png", size: 3 });
+    wsA.close();
+    wsB.close();
+  });
 });

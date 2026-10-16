@@ -17,6 +17,15 @@ export const MessagePayloadSchema = z.object({
     .array(z.object({ agentId: z.string().min(1), name: z.string().min(1).max(64) }))
     .max(50)
     .optional(),
+  // 消息附件（M4 前置）：引用共享库文件；text 可空串（纯附件消息）
+  file: z
+    .object({
+      id: z.string().min(1),
+      name: z.string().min(1).max(255),
+      mime: z.string().min(1).max(128),
+      size: z.number().int().min(0),
+    })
+    .optional(),
 });
 export type MessagePayload = z.infer<typeof MessagePayloadSchema>;
 

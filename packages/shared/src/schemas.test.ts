@@ -201,6 +201,32 @@ describe("M2 schemas", () => {
   });
 });
 
+describe("MessagePayloadSchema file 附件（M4 前置）", () => {
+  it("MessagePayload 允许仅附件（text 空串）", () => {
+    const r = MessagePayloadSchema.safeParse({
+      text: "",
+      file: { id: "f1", name: "a.png", mime: "image/png", size: 12 },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("MessagePayload.file 缺 id 拒绝", () => {
+    const r = MessagePayloadSchema.safeParse({
+      text: "hi",
+      file: { name: "a.png", mime: "image/png", size: 12 },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("MessagePayload.file.size 负数拒绝", () => {
+    const r = MessagePayloadSchema.safeParse({
+      text: "hi",
+      file: { id: "f1", name: "a.png", mime: "image/png", size: -1 },
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
 describe("M3 schemas", () => {
   it("Agent 名册（owner 可空）", () => {
     expect(AgentSchema.safeParse({ id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" }).success).toBe(true);
