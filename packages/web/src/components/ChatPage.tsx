@@ -404,7 +404,7 @@ export function ChatPage() {
   useEffect(() => {
     if (!pendingAttachment || pendingAttachment.conversationId !== convId) return;
     const handle = wsHandleRef.current;
-    if (!handle) return; // 未连上：保留槽，连上后（onOpen 重渲染）重试
+    if (!handle) return; // ws send 自带队列，句柄恒在（未连通也入队不丢）
     handle.send({
       type: "send_message",
       conversationId: convId,
