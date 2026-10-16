@@ -9,7 +9,10 @@ export const UserSchema = z.object({
 });
 export type User = z.infer<typeof UserSchema>;
 
-export const MessagePayloadSchema = z.object({ text: z.string().max(20000) });
+export const MessagePayloadSchema = z.object({
+  text: z.string().max(20000),
+  mentions: z.array(z.object({ agentId: z.string().min(1), name: z.string().min(1).max(64) })).optional(),
+});
 export type MessagePayload = z.infer<typeof MessagePayloadSchema>;
 
 export const MessageSchema = z.object({
@@ -34,11 +37,30 @@ export const WsClientEventSchema = z.discriminatedUnion("type", [
     type: z.literal("mark_read"),
     conversationId: z.string().min(1),
   }),
+  z.object({
+    type: z.literal("agent_chunk"),
+    conversationId: z.string().min(1),
+    agentId: z.string().min(1),
+    streamId: z.string().min(1),
+    text: z.string().min(1).max(4000),
+  }),
+  z.object({
+    type: z.literal("agent_finish"),
+    conversationId: z.string().min(1),
+    agentId: z.string().min(1),
+    streamId: z.string().min(1),
+    text: z.string().max(60000),
+    replyTo: z.string().optional(),
+  }),
 ]);
 export type WsClientEvent = z.infer<typeof WsClientEventSchema>;
 
 export const WsServerEventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("message_new"), message: MessageSchema }),
+  z.object({
+    type: z.literal("message_new"),
+    message: MessageSchema,
+    streamId: z.string().optional(),
+  }),
   z.object({
     type: z.literal("read_update"),
     conversationId: z.string().min(1),
@@ -49,6 +71,21 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     type: z.literal("error"),
     code: z.string().min(1),
     message: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("agent_chunk"),
+    conversationId: z.string().min(1),
+    agentId: z.string().min(1),
+    streamId: z.string().min(1),
+    text: z.string().min(1).max(4000),
+  }),
+  z.object({
+    type: z.literal("agent_error"),
+    conversationId: z.string().min(1),
+    agentId: z.string().min(1),
+    streamId: z.string().min(1),
+    code: z.string().min(1),
+    message: z.string().min(1).max(1000),
   }),
 ]);
 export type WsServerEvent = z.infer<typeof WsServerEventSchema>;
@@ -134,3 +171,19 @@ export const CreateFileBodySchema = z.object({
   contentBase64: z.string().max(4_000_000),
 });
 export type CreateFileBody = z.infer<typeof CreateFileBodySchema>;
+
+export const AgentSchema = z.object({
+  id: z.string().min(1),
+  owner_id: z.string().nullable(),
+  name: z.string().min(1).max(32),
+  avatar: z.string().max(600_000).nullable(),
+  description: z.string().max(500),
+});
+export type Agent = z.infer<typeof AgentSchema>;
+
+export const AgentBodySchema = z.object({
+  name: z.string().min(1).max(32),
+  avatar: z.string().max(600_000).nullable().optional(),
+  description: z.string().max(500).default(""),
+});
+export type AgentBody = z.infer<typeof AgentBodySchema>;

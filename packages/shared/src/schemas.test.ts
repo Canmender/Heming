@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  AgentSchema,
+  AgentBodySchema,
   WsClientEventSchema,
   WsServerEventSchema,
   MessageSchema,
@@ -194,5 +196,40 @@ describe("M2 schemas", () => {
       kind: "user", id: "u1", name: "张三", avatar: null,
       user: { id: "u1", username: "zhang", displayName: "张三" },
     }).success).toBe(true);
+  });
+});
+
+describe("M3 schemas", () => {
+  it("Agent 名册（owner 可空）", () => {
+    expect(AgentSchema.safeParse({ id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" }).success).toBe(true);
+    expect(AgentSchema.safeParse({ id: "a1", owner_id: "u1", name: "架构师", avatar: null, description: "x" }).success).toBe(true);
+    expect(AgentSchema.safeParse({ id: "a1", owner_id: null, name: "", avatar: null, description: "" }).success).toBe(false);
+  });
+  it("AgentBody 与 partial", () => {
+    expect(AgentBodySchema.safeParse({ name: "文案" }).success).toBe(true);
+    expect(AgentBodySchema.safeParse({ name: "" }).success).toBe(false);
+    expect(AgentBodySchema.partial().safeParse({ description: "改简介" }).success).toBe(true);
+  });
+  it("payload 可带 mentions", () => {
+    const r = WsClientEventSchema.safeParse({
+      type: "send_message", conversationId: "c1",
+      payload: { text: "@和小鸣 看下", mentions: [{ agentId: "a1", name: "和小鸣" }] },
+    });
+    expect(r.success).toBe(true);
+  });
+  it("agent_chunk / agent_finish 客户端事件", () => {
+    expect(WsClientEventSchema.safeParse({ type: "agent_chunk", conversationId: "c1", agentId: "a1", streamId: "s1", text: "你" }).success).toBe(true);
+    expect(WsClientEventSchema.safeParse({ type: "agent_finish", conversationId: "c1", agentId: "a1", streamId: "s1", text: "你好" }).success).toBe(true);
+    expect(WsClientEventSchema.safeParse({ type: "agent_chunk", conversationId: "c1", agentId: "a1", streamId: "s1", text: "" }).success).toBe(false);
+  });
+  it("服务端 agent_chunk / agent_error 与 message_new.streamId", () => {
+    expect(WsServerEventSchema.safeParse({ type: "agent_chunk", conversationId: "c1", agentId: "a1", streamId: "s1", text: "你" }).success).toBe(true);
+    expect(WsServerEventSchema.safeParse({ type: "agent_error", conversationId: "c1", agentId: "a1", streamId: "s1", code: "provider_error", message: "401" }).success).toBe(true);
+    const mn = WsServerEventSchema.safeParse({
+      type: "message_new",
+      message: { id: "m1", conversationId: "c1", senderType: "agent", senderId: "a1", payload: { text: "你好", mentions: [{ agentId: "a1", name: "和小鸣" }] }, replyTo: null, createdAt: "2026-10-16T00:00:00.000Z" },
+      streamId: "s1",
+    });
+    expect(mn.success).toBe(true);
   });
 });
