@@ -178,6 +178,26 @@ describe("streamChat", () => {
     expect(deltas).toEqual(["整段"]);
   });
 
+  it("I5：非流式长文本切片回调——每片 ≤4000、累积等于全文", async () => {
+    const long = "汉".repeat(7500); // > 两倍 agent_chunk 单帧上限
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: long } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const deltas: string[] = [];
+    const text = await streamChat(openaiProfile, userMsg, {
+      signal: new AbortController().signal,
+      onDelta: (t) => deltas.push(t),
+    });
+    expect(text).toBe(long);
+    expect(deltas.length).toBe(3); // 3000 + 3000 + 1500
+    for (const d of deltas) expect(d.length).toBeLessThanOrEqual(4000);
+    expect(deltas.every((d) => d.length <= 3000)).toBe(true);
+    expect(deltas.join("")).toBe(long);
+  });
+
   it("HTTP 错误抛 provider_error", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ error: { message: "bad key" } }), {

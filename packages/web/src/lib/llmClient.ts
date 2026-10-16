@@ -150,7 +150,11 @@ export async function streamChat(
       profile.provider === "anthropic"
         ? (json.content?.[0]?.text ?? "")
         : (json.choices?.[0]?.message?.content ?? "");
-    if (text) opts.onDelta(text);
+    if (text) {
+      // 非流式兼容：整段可能远超 agent_chunk 单帧上限（shared max(4000)）——
+      // 按 ≤3000 字符切片循环回调，既保证每帧合法、也不至于每片都顶格
+      for (let i = 0; i < text.length; i += 3000) opts.onDelta(text.slice(i, i + 3000));
+    }
     return text;
   }
 
