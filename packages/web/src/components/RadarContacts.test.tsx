@@ -275,12 +275,12 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
   });
 
-  it("名册为空时智能体扇区显示播种空态文案", async () => {
+  it("名册为空时智能体扇区显示空态文案（含自建入口，I2 后不再只提播种）", async () => {
     useChatStore.setState({ agentsRoster: [], agentIdsInGroups: new Set<string>() });
     render(<RadarContacts />);
     await screen.findByText("评审组");
     expect(
-      screen.getByText("智能体将在预设群播种后出现（重启服务端后可见）"),
+      screen.getByText("暂无智能体：可点右上角「＋ 新建智能体」自建，或重启服务端由预设群播种"),
     ).toBeInTheDocument();
     expect(screen.queryByText("和小鸣")).not.toBeInTheDocument();
   });
@@ -293,5 +293,20 @@ describe("RadarContacts 雷达通讯录", () => {
     render(<RadarContacts />);
     await screen.findByText("和小鸣");
     expect(screen.getByText("架构师")).toBeInTheDocument();
+  });
+
+  it("I7 状态文案按入群与否区分：已入群「群内 @ 对话」、未入群提示可在新建群时勾选", async () => {
+    useChatStore.setState({
+      agentsRoster: [xiaoMing, mine],
+      agentIdsInGroups: new Set(["a1"]), // a1 已入群、a2（自有）未入群
+    });
+    render(<RadarContacts />);
+    await screen.findByText("和小鸣");
+
+    fireEvent.mouseOver(screen.getByText("和小鸣"));
+    expect(await screen.findByText("智能体 · 群内 @ 对话")).toBeInTheDocument();
+
+    fireEvent.mouseOver(screen.getAllByText("架构师")[0]);
+    expect(await screen.findByText("智能体 · 未入群，可在新建群时勾选")).toBeInTheDocument();
   });
 });

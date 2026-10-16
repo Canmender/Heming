@@ -220,7 +220,11 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
       key: a.id,
       name: a.name,
       avatar: a.avatar ?? undefined,
-      status: "智能体 · 仅群内可对话",
+      // 状态文案随 I2（自建 agent 可入群）区分：未入群的自有项给的是「怎么入群」而非
+      // 一概「仅群内可对话」（后者对无群 agent 读起来像已入群，属误导）
+      status: agentIdsInGroups.has(a.id)
+        ? "智能体 · 群内 @ 对话"
+        : "智能体 · 未入群，可在新建群时勾选",
       typeLabel: "智能体",
       unread: 0,
       agent: true,
@@ -392,9 +396,12 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
           智能体
         </div>
 
-        {/* Task 2 handoff 落地：名册/扇区为空时的播种空态（不 hack 客户端触发播种） */}
+        {/* Task 2 handoff 落地：名册/扇区为空时的播种空态（不 hack 客户端触发播种）。
+            M3 I2 起用户可自建，空态一并给出自建入口，不再只提播种 */}
         {displayAgents.length === 0 && (
-          <div className="agent-empty">智能体将在预设群播种后出现（重启服务端后可见）</div>
+          <div className="agent-empty">
+            暂无智能体：可点右上角「＋ 新建智能体」自建，或重启服务端由预设群播种
+          </div>
         )}
 
         <div className="scan" />
