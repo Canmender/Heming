@@ -798,6 +798,81 @@ describe("ChatPage", () => {
     expect(order.indexOf("agent_finish")).toBeLessThan(order.indexOf("close"));
     expect(order.indexOf("agent_error")).toBeLessThan(order.indexOf("close"));
   });
+
+  it("I1 挂载清扫：本会话孤儿 streaming/streamOwner 条目被清，他会话条目保留", async () => {
+    // 上一轮卸载中止后 socket 已关、echo 收不到 → store 残留本会话「生成中」孤儿项
+    useChatStore.setState({
+      streaming: {
+        orphan1: {
+          agentId: "system-assistant",
+          conversationId: "c1",
+          text: "残留半句",
+          status: "streaming",
+        },
+        otherConv: {
+          agentId: "system-assistant",
+          conversationId: "c2",
+          text: "他会话的流",
+          status: "streaming",
+        },
+      },
+      streamOwner: { orphan1: true, otherConv: true },
+    });
+    mockMessagesFetch([]);
+
+    render(<ChatPage />);
+    await act(async () => {}); // 冲刷挂载 effects（含清扫）
+
+    const st = useChatStore.getState();
+    expect(Object.keys(st.streaming).sort()).toEqual(["otherConv"]); // 本 convId 孤儿被清
+    expect(st.streamOwner).toEqual({ otherConv: true }); // 归属键同步清，他会话保留
+    expect(screen.queryByText("残留半句")).not.toBeInTheDocument(); // 无「生成中」气泡残留
+    expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 中断行不再出现（no-op 中断按钮消失）
+  });
+
+  it("I3 fetchHistory 只取近 30 条：35 条历史组装出末 30 轮 + 本条 user 轮", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    const history = Array.from({ length: 35 }, (_, i) =>
+      msg(`m${i + 1}`, `历史${i + 1}`, `2026-10-14T01:00:${String(i).padStart(2, "0")}.000Z`),
+    );
+    mockMessagesFetch(history, undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 查下上下文");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    // 35 条 → slice(-30) 从「历史6」起；末条不等于发送文本故不被剔除 → 30 轮历史
+    // （bindAssistant 的系统提示词 unshift 在最前 + 本条 user 轮追加在尾 → 32 条）
+    expect(seen).toHaveLength(32);
+    expect(seen![0]).toEqual({ role: "system", content: "你是和小鸣" });
+    expect(seen![1]).toEqual({ role: "user", content: "历史6" });
+    expect(seen![30]).toEqual({ role: "user", content: "历史35" }); // 第 31 条之前的末轮历史
+    expect(seen![31]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
+  });
+
+  it("I2 雷达@链路：attach 后（本群 members 出现自建 agent 行）该 agent 进入 @ 候选并可选", async () => {
+    await setupGroupChat([
+      ...inGroupMembers,
+      { kind: "agent", id: "a-mine", name: "架构师", avatar: null, user: null },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    expect(screen.getByText("架构师")).toBeInTheDocument(); // 服务端 attach → listMembers 带出的行
+    fireEvent.click(screen.getByText("架构师"));
+    expect(screen.getByText("@架构师")).toBeInTheDocument();
+  });
 });
 
 describe("renderTextWithMentions", () => {

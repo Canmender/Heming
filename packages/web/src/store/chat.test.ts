@@ -311,4 +311,41 @@ describe("chat store", () => {
     expect(useChatStore.getState().streaming["his"]).toBeUndefined(); // 他机流自清
     expect(useChatStore.getState().streaming["mine"]).toBeDefined(); // 本机流保留（重试入口）
   });
+
+  it("I1 clearStreamsForConversation：只清本 convId 的 streaming 项与其 streamOwner 键", () => {
+    useChatStore.getState().markStreamOwner("mine-c1");
+    useChatStore.getState().markStreamOwner("his-c2");
+    useChatStore
+      .getState()
+      .upsertStream("mine-c1", { agentId: "a1", conversationId: "c1", text: "半", status: "streaming" });
+    useChatStore
+      .getState()
+      .upsertStream("his-c2", { agentId: "a2", conversationId: "c2", text: "别处", status: "streaming" });
+
+    useChatStore.getState().clearStreamsForConversation("c1");
+
+    const st = useChatStore.getState();
+    expect(Object.keys(st.streaming)).toEqual(["his-c2"]); // 本会话孤儿清空
+    expect(st.streamOwner).toEqual({ "his-c2": true }); // 归属键同步清；他会话不受影响
+    // 幂等：再清一次无副作用
+    useChatStore.getState().clearStreamsForConversation("c1");
+    expect(Object.keys(useChatStore.getState().streaming)).toEqual(["his-c2"]);
+  });
+
+  it("attachAgentToGroup / detachAgentFromGroup：POST/DELETE 路径与 body", async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await useChatStore.getState().attachAgentToGroup("g1", "a1");
+    expect(api).toHaveBeenCalledWith(
+      "/api/conversations/g1/agents",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const [, init] = vi.mocked(api).mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toEqual({ agentId: "a1" });
+
+    await useChatStore.getState().detachAgentFromGroup("g1", "a1");
+    expect(api).toHaveBeenCalledWith(
+      "/api/conversations/g1/agents/a1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
 });

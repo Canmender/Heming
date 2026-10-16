@@ -58,6 +58,10 @@ interface ChatState {
   loadWorkspace: () => Promise<void>;
   openDirect: (peerId: string) => Promise<string>;
   createGroup: (name: string, memberIds: string[]) => Promise<string>;
+  /** 把名册 agent 挂到会话（POST /api/conversations/:id/agents，幂等；权限在服务端路由层）。 */
+  attachAgentToGroup: (convId: string, agentId: string) => Promise<void>;
+  /** 会话卸载 agent（DELETE …/agents/:agentId，幂等 204）。 */
+  detachAgentFromGroup: (convId: string, agentId: string) => Promise<void>;
   loadAgents: () => Promise<void>;
   loadAgentsRoster: () => Promise<void>;
   appendMessage: (m: Message) => void;
@@ -67,6 +71,12 @@ interface ChatState {
   upsertStream: (id: string, patch: AgentStreamPatch) => void;
   removeStream: (id: string) => void;
   markStreamOwner: (id: string) => void;
+  /**
+   * 清掉某会话的全部打字机项连同其 streamOwner 键（I1）：ChatPage 新挂载时调用——
+   * runsRef 随组件重建必为空，该 convId 下不可能还有进行中流，残留项均为卸载后
+   * echo 收不到的孤儿（会一直渲染「生成中」且中断按钮 no-op）。
+   */
+  clearStreamsForConversation: (convId: string) => void;
   /** 流式三事件收口（chunk/error/message_new{streamId}），由 ChatPage 的 onEvent 转发。 */
   onWsEvent: (e: WsServerEvent) => void;
 }
@@ -106,6 +116,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     await get().loadWorkspace();
     return conv.id;
+  },
+  async attachAgentToGroup(convId, agentId) {
+    await api(`/api/conversations/${convId}/agents`, {
+      method: "POST",
+      body: JSON.stringify({ agentId }),
+    });
+  },
+  async detachAgentFromGroup(convId, agentId) {
+    await api(`/api/conversations/${convId}/agents/${agentId}`, { method: "DELETE" });
   },
   async loadAgents() {
     const groups = get().conversations.filter((c) => c.type === "group");
@@ -177,6 +196,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   markStreamOwner(id) {
     set({ streamOwner: { ...get().streamOwner, [id]: true } });
+  },
+  clearStreamsForConversation(convId) {
+    const { streaming, streamOwner } = get();
+    const kept: Record<string, AgentStreamState> = {};
+    const removed: string[] = [];
+    for (const [id, s] of Object.entries(streaming)) {
+      if (s.conversationId === convId) removed.push(id);
+      else kept[id] = s;
+    }
+    if (removed.length === 0) return;
+    const keptOwner = { ...streamOwner };
+    for (const id of removed) delete keptOwner[id];
+    // 只动本 convId 的条目：其他会话的流式项（含他机流）原样保留
+    set({ streaming: kept, streamOwner: keptOwner });
   },
   onWsEvent(e) {
     if (e.type === "message_new") {

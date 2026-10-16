@@ -54,6 +54,7 @@ export function ChatPage() {
   const upsertStream = useChatStore((s) => s.upsertStream);
   const removeStream = useChatStore((s) => s.removeStream);
   const markStreamOwner = useChatStore((s) => s.markStreamOwner);
+  const clearStreamsForConversation = useChatStore((s) => s.clearStreamsForConversation);
   const agentsRoster = useChatStore((s) => s.agentsRoster);
   const me = useAuthStore((s) => s.user);
   const [draft, setDraft] = useState("");
@@ -133,7 +134,8 @@ export function ChatPage() {
       getProfile: resolveProfile,
       getPrompt: (agentId) => useLlmStore.getState().prompts[agentId] ?? "",
       fetchHistory: async () => {
-        const msgs = await fetchMessages(convId);
+        // spec §3：提示词只带近 30 条历史（服务端全量返回，客户端切尾）
+        const msgs = (await fetchMessages(convId)).slice(-30);
         const rows = msgs.map((m) => ({
           role: m.senderType === "user" ? ("user" as const) : ("assistant" as const),
           content: m.payload.text,
@@ -294,6 +296,15 @@ export function ChatPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
+
+  // I1 挂载清扫：上一轮卸载中止流后 socket 已关，finish/echo 收不到，store（整页刷新
+  // 才会清空）里可能残留本会话的「生成中」孤儿项与 streamOwner 键。新挂载时 runsRef
+  // 必为空 → 该 convId 下不可能有进行中流，残留一律按孤儿清（他/其他会话条目不动）。
+  // 空依赖 = 只在新挂载执行；切会话（convId 变化）不清——那时他机流条目仍有效。
+  useEffect(() => {
+    clearStreamsForConversation(convId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 卸载（离开聊天页）：中止全部进行中流，不再空烧供应商 token
   useEffect(
