@@ -11,6 +11,7 @@ import {
 } from "../store/tokenUsage.js";
 import { acceptFriend, resolveUrl } from "../lib/api.js";
 import { Avatar } from "./Avatar.js";
+import { TokenHeatmap } from "./TokenHeatmap.js";
 
 /** 底部通栏「最新资讯」：静态产品介绍常量（非虚构统计数据）。 */
 const NEWS: { source: string; title: string; summary: string; date: string }[] = [
@@ -255,6 +256,21 @@ export function HomePage() {
           )}
         </div>
       </div>
+
+      {/* 2.5 近 30 日用量热力图 */}
+      <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
+        <div className="mb-1.5 flex items-center">
+          <div className="text-[12px] font-bold text-[#777]">近 30 日用量</div>
+          <div className="ml-auto flex items-center gap-1 text-[10px] text-muted">
+            少
+            {["#f1f4f7", "#dbeafe", "#93c5fd", "#3b82f6", "#1d4ed8"].map((c) => (
+              <span key={c} style={{ backgroundColor: c }} className="h-2.5 w-2.5 rounded-[2px]" />
+            ))}
+            多
+          </div>
+        </div>
+        <TokenHeatmap />
+      </section>
 
       {/* 3/4/5/6. 两栏：左最近会话；右智能体动态 + 待处理 + 系统状态 */}
       <div className="grid grid-cols-[1.5fr_1fr] gap-3">

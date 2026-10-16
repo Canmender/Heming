@@ -226,6 +226,14 @@ describe("HomePage", () => {
     expect(screen.getByText("暂无会话，从工作区开始")).toBeInTheDocument();
   });
 
+  it("主页含近 30 日用量热力图卡", async () => {
+    mockFetch();
+    render(<HomePage />);
+    await act(async () => {}); // 冲刷挂载时 health/工作区加载的异步状态更新
+    expect(screen.getByRole("img", { name: "近 30 日 token 用量" })).toBeInTheDocument();
+    expect(screen.getByText("近 30 日用量")).toBeInTheDocument();
+  });
+
   it("右栏智能体动态空态、系统状态三行与资讯三卡", async () => {
     mockFetch();
     render(<HomePage />);

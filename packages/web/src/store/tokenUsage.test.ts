@@ -6,6 +6,8 @@ import {
   summarizeMonth,
   daysOfMonth,
   dailyTotals,
+  last30DaysTotals,
+  heatLevel,
 } from "./tokenUsage.js";
 
 const rec = (model: string, tokens: number, at: string) => ({ model, tokens, at });
@@ -77,5 +79,40 @@ describe("tokenUsage：按天/按月重算，不存累计总值", () => {
     useTokenUsageStore.getState().record("qwen", 42, new Date(2026, 9, 13, 8).toISOString());
     useTokenUsageStore.getState().reset();
     expect(useTokenUsageStore.getState().records).toEqual([]);
+  });
+});
+
+describe("last30DaysTotals", () => {
+  it("30 项、零值天不跳过、末项为今天", () => {
+    const now = new Date(2026, 9, 17, 12); // 本地 2026-10-17
+    const rows = last30DaysTotals([], now);
+    expect(rows).toHaveLength(30);
+    expect(rows[29].day).toBe("2026-10-17");
+    expect(rows.every((r) => r.total === 0)).toBe(true);
+  });
+  it("按本地日聚合命中对应格", () => {
+    const now = new Date(2026, 9, 17, 12);
+    const recs = [
+      { model: "m", tokens: 10, at: new Date(2026, 9, 17, 1).toISOString() },
+      { model: "m", tokens: 5, at: new Date(2026, 9, 16, 23).toISOString() },
+      { model: "m", tokens: 999, at: new Date(2026, 8, 1, 1).toISOString() }, // 窗外
+    ];
+    const rows = last30DaysTotals(recs, now);
+    expect(rows[29].total).toBe(10);
+    expect(rows[28].total).toBe(5);
+    expect(rows.reduce((s, r) => s + r.total, 0)).toBe(15);
+  });
+});
+
+describe("heatLevel", () => {
+  it("零/无 max → 0；四档相对刻度", () => {
+    expect(heatLevel(0, 100)).toBe(0);
+    expect(heatLevel(10, 0)).toBe(0);
+    expect(heatLevel(25, 100)).toBe(1);
+    expect(heatLevel(26, 100)).toBe(2);
+    expect(heatLevel(50, 100)).toBe(2);
+    expect(heatLevel(51, 100)).toBe(3);
+    expect(heatLevel(75, 100)).toBe(3);
+    expect(heatLevel(76, 100)).toBe(4);
   });
 });
