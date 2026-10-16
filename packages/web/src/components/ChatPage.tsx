@@ -1,11 +1,40 @@
-import { useEffect, useRef, useState } from "react";
-import { useChatStore } from "../store/chat.js";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { useChatStore, selectMentionCandidates } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { fetchMessages, fetchMembers } from "../lib/api.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { ChevronIcon } from "./icons.js";
 import { Avatar } from "./Avatar.js";
+import { MentionPicker, type MentionItem } from "./MentionPicker.js";
+
+/** 正则转义：mention 名按字面量匹配（名字可含 . * + 等元字符）。 */
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * 气泡文本 mentions 高亮（M3 Task 7）：按各 name 在 text 中的出现位置 split 拆分——
+ * 命中段包浅蓝 chip span，其余段为 Fragment 纯文本节点（React 文本输出天然转义，防注入）。
+ * 名字按长度降序参与 alternation，防「小鸣」吃掉「和小鸣」的前缀；无 mentions 时原样单节点。
+ */
+export function renderTextWithMentions(
+  text: string,
+  mentions?: { agentId: string; name: string }[],
+): JSX.Element[] {
+  const names = [...new Set((mentions ?? []).map((m) => m.name).filter((n) => n.length > 0))].sort(
+    (a, b) => b.length - a.length,
+  );
+  if (names.length === 0) return [<Fragment key="t0">{text}</Fragment>];
+  const re = new RegExp(`(${names.map(escapeRegExp).join("|")})`, "g");
+  return text.split(re).map((part, i) =>
+    part !== "" && names.includes(part) ? (
+      <span key={i} className="rounded bg-[#eef3f8] px-0.5">
+        {part}
+      </span>
+    ) : (
+      <Fragment key={i}>{part}</Fragment>
+    ),
+  );
+}
 
 export function ChatPage() {
   const convId = useUiStore((s) => s.activeConversationId)!;
@@ -20,6 +49,15 @@ export function ChatPage() {
   const [draft, setDraft] = useState("");
   const [sendNotice, setSendNotice] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  /** @ 选择器：null=关；via 区分按钮/键入 token（键入选中后锁到 token 消失，防草稿未变时每击键重弹）。 */
+  const [picker, setPicker] = useState<{ via: "button" | "token"; query: string } | null>(null);
+  /** 已选 mention（输入栏下 chip）：与草稿文本解耦，发送时非空才进 payload.mentions。 */
+  const [selectedMentions, setSelectedMentions] = useState<{ agentId: string; name: string }[]>(
+    [],
+  );
+  const [tokenLock, setTokenLock] = useState(false);
+  // 本群可 @ 的候选（join 视图经 selector；direct 恒空）——hook 无条件挂顶层
+  const mentionCandidates = useChatStore((s) => selectMentionCandidates(s, convId));
   /** 群成员 id→名映射：M2 消息体无 senderName，挂载时拉一次 members 建表（带 convId 防跨会话串名）。 */
   const [memberNames, setMemberNames] = useState<{
     convId: string;
@@ -42,6 +80,20 @@ export function ChatPage() {
       ? conv.peer.displayName
       : `${conv.name}（${conv.memberCount} 人）`
     : "会话";
+  const isGroup = conv?.type === "group";
+  /** 选择器条目：剔除已选（防重复 chip）+ 按 token query 过滤（空串=全量）。 */
+  const pickerItems = mentionCandidates.filter(
+    (a) =>
+      !selectedMentions.some((m) => m.agentId === a.id) &&
+      a.name.toLowerCase().includes((picker?.query ?? "").toLowerCase()),
+  );
+
+  // 切会话清 @ 选择态：chip/picker/锁都是会话级（ChatPage 常驻不重挂），防跨会话带出 mentions
+  useEffect(() => {
+    setSelectedMentions([]);
+    setPicker(null);
+    setTokenLock(false);
+  }, [convId]);
 
   useEffect(() => {
     void fetchMessages(convId).then((msgs) => setMessages(convId, msgs));
@@ -118,22 +170,61 @@ export function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
+  /** 键入触发：草稿尾随 @token（空格一断 token 即结束）→ 过滤弹选择器；direct 不触发。 */
+  const onDraftChange = (value: string) => {
+    setDraft(value);
+    if (!isGroup) return;
+    const token = /@([^\s@]*)$/.exec(value);
+    if (token) {
+      if (!tokenLock) setPicker({ via: "token", query: token[1] });
+    } else {
+      if (tokenLock) setTokenLock(false);
+      // token 触发的选择器随 token 消失关闭；按钮开的保留（靠 Esc/发送关）
+      setPicker((p) => (p?.via === "token" ? null : p));
+    }
+  };
+
+  const pickMention = (item: MentionItem) => {
+    setSelectedMentions((prev) =>
+      prev.some((m) => m.agentId === item.id)
+        ? prev
+        : [...prev, { agentId: item.id, name: item.name }],
+    );
+    // 键入路径：草稿保持原样（@token 还在），锁住到 token 消失，否则继续输入会每击键重弹
+    if (picker?.via === "token") setTokenLock(true);
+    setPicker(null);
+  };
+
+  const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape" && picker) {
+      e.preventDefault();
+      setPicker(null);
+    }
+  };
+
   const send = (e: React.FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
     const handle = wsHandleRef.current;
     if (!handle) {
-      // 保留草稿，给出可见提示（不静默丢弃）
+      // 保留草稿与已选 mention，给出可见提示（不静默丢弃）
       setSendNotice("连接未就绪，消息未发送");
       return;
     }
     handle.send({
       type: "send_message",
       conversationId: convId,
-      payload: { text },
+      payload: {
+        text,
+        // mentions 非空才带（空则整个键不出现，与 M2 消息形状一致）
+        ...(selectedMentions.length ? { mentions: selectedMentions } : {}),
+      },
     });
     setDraft("");
+    setSelectedMentions([]);
+    setPicker(null);
+    setTokenLock(false);
     setSendNotice(null);
   };
 
@@ -177,7 +268,7 @@ export function ChatPage() {
                 {senderName ? (
                   <div className="mb-0.5 text-[10px] text-muted">{senderName}</div>
                 ) : null}
-                {m.payload.text}
+                {renderTextWithMentions(m.payload.text, m.payload.mentions)}
                 {readByPeer ? (
                   <div className="mt-0.5 text-right text-[9px] text-muted">已读</div>
                 ) : null}
@@ -187,18 +278,31 @@ export function ChatPage() {
         })}
         <div ref={bottomRef} />
       </div>
-      <form onSubmit={send} className="border-t border-line-soft">
+      <form onSubmit={send} className="relative border-t border-line-soft">
         {sendNotice && (
           <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
             {sendNotice}
           </p>
         )}
+        {/* @ 选择器：输入栏上方浮层（仅群会话；direct 无智能体可提及） */}
+        {isGroup && picker && <MentionPicker items={pickerItems} onPick={pickMention} />}
         <div className="flex gap-2 px-5 py-3">
+          {isGroup && (
+            <button
+              type="button"
+              aria-label="提及智能体"
+              className="shrink-0 rounded-lg border border-line px-2.5 text-sm text-muted hover:bg-[#f3f3f3]"
+              onClick={() => setPicker({ via: "button", query: "" })}
+            >
+              @
+            </button>
+          )}
           <input
             className="flex-1 rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
             placeholder="输入消息…"
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => onDraftChange(e.target.value)}
+            onKeyDown={onInputKeyDown}
           />
           <button
             type="submit"
@@ -207,6 +311,29 @@ export function ChatPage() {
             发送
           </button>
         </div>
+        {/* 已选 mention chip（输入栏下方）：× 移除；文本保持原样不注入草稿 */}
+        {selectedMentions.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-5 pb-3">
+            {selectedMentions.map((m) => (
+              <span
+                key={m.agentId}
+                className="inline-flex items-center gap-1 rounded-full border border-line bg-[#f3f3f3] py-0.5 pl-2 pr-1 text-[12px]"
+              >
+                @{m.name}
+                <button
+                  type="button"
+                  aria-label={`移除 ${m.name}`}
+                  className="rounded-full px-1 text-muted hover:text-ink"
+                  onClick={() =>
+                    setSelectedMentions((prev) => prev.filter((x) => x.agentId !== m.agentId))
+                  }
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </form>
     </div>
   );

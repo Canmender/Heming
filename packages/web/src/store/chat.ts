@@ -46,6 +46,19 @@ interface ChatState {
   loadReads: (convId: string) => Promise<void>;
 }
 
+/** 稳定空引用：非群会话的候选（zustand 选择器按 Object.is 比较，避免每次 state 变更重渲染）。 */
+const NO_MENTION_AGENTS: Agent[] = [];
+
+/**
+ * 本会话可 @ 的智能体候选（M3 Task 7 @ 选择器数据源）：
+ * 群会话取 Task 6 的「群内 agentId × 名册」join 视图（agents）；direct/未知会话不给候选
+ * （智能体仅群内可对话）。逐群 agent 集合未按会话分桶，「本群」口径即该 join 视图。
+ */
+export function selectMentionCandidates(state: ChatState, convId: string): Agent[] {
+  const conv = state.conversations.find((c) => c.id === convId);
+  return conv?.type === "group" ? state.agents : NO_MENTION_AGENTS;
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   friends: [],

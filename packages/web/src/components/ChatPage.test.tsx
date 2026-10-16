@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import type { Member, Message, ReadState, User } from "@heming/shared";
-import { ChatPage } from "./ChatPage.js";
+import type { Agent, Member, Message, ReadState, User } from "@heming/shared";
+import { ChatPage, renderTextWithMentions } from "./ChatPage.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
@@ -63,6 +63,30 @@ function lastHandlers(): WsHandlers {
   const calls = vi.mocked(connectWs).mock.calls;
   expect(calls.length).toBeGreaterThan(0);
   return calls[calls.length - 1][0];
+}
+
+/** @ 选择器用例共用底座：群会话 + 名册 join（含「和小鸣」）+ 可断言的 ws send。 */
+const agentRow: Agent = {
+  id: "system-assistant",
+  owner_id: "u1",
+  name: "和小鸣",
+  avatar: null,
+  description: "",
+};
+
+async function setupGroupChat() {
+  const send = vi.fn();
+  vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+  useChatStore.setState({
+    conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    agentsRoster: [agentRow],
+    agentIdsInGroups: new Set([agentRow.id]),
+    agents: [agentRow],
+  });
+  mockMessagesFetch([], undefined, { members: [[]], reads: [[]] });
+  render(<ChatPage />);
+  await act(async () => {}); // 冲刷挂载 effects（fetchMessages/loadReads/fetchMembers 落定）
+  return send;
 }
 
 describe("ChatPage", () => {
@@ -354,5 +378,149 @@ describe("ChatPage", () => {
     });
     expect(await screen.findByText("已读")).toBeInTheDocument();
     expect(readsCalls().length).toBeGreaterThan(1);
+  });
+
+  it("点 @ 按钮出选择器，Esc 关；选中后发送 payload 含 mentions，发送成功清 chip", async () => {
+    const send = await setupGroupChat();
+
+    // @ 按钮 → 选择器出现（本群 agent 来自 agents join 视图）
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    expect(screen.getByText("和小鸣")).toBeInTheDocument();
+    // Esc 关闭
+    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Escape" });
+    expect(screen.queryByText("和小鸣")).not.toBeInTheDocument();
+
+    // 再开 → 点选 → chip 出现（输入框文本不动，mentions 走内部 state）
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    fireEvent.click(screen.getByText("和小鸣"));
+    expect(screen.getByText("@和小鸣")).toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText("输入消息…");
+    fireEvent.change(input, { target: { value: "@和小鸣 帮我看下" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(send).toHaveBeenCalledWith({
+      type: "send_message",
+      conversationId: "c1",
+      payload: {
+        text: "@和小鸣 帮我看下",
+        mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
+      },
+    });
+    expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument(); // 发送成功清 chip
+    expect(input).toHaveValue("");
+  });
+
+  it("chip 点 × 移除后发送不带 mentions", async () => {
+    const send = await setupGroupChat();
+
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    fireEvent.click(screen.getByText("和小鸣"));
+    expect(screen.getByText("@和小鸣")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "移除 和小鸣" }));
+    expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText("输入消息…");
+    fireEvent.change(input, { target: { value: "这版先不提" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(send).toHaveBeenCalledWith({
+      type: "send_message",
+      conversationId: "c1",
+      payload: { text: "这版先不提" },
+    });
+  });
+
+  it("键入 @ 触发选择器过滤，选中后文字保持原样且 token 不再重弹", async () => {
+    await setupGroupChat();
+    const input = screen.getByPlaceholderText("输入消息…");
+
+    // 键入尾随 token → 弹选择器（空 query 全量）
+    fireEvent.change(input, { target: { value: "@" } });
+    expect(screen.getByText("和小鸣")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("和小鸣"));
+    expect(screen.getByText("@和小鸣")).toBeInTheDocument(); // chip
+    expect(input).toHaveValue("@"); // 文字保持原样（mention 不注入草稿）
+
+    // token 仍在（未空格断开）：继续输入不重弹——否则每击键都闪空态
+    fireEvent.change(input, { target: { value: "@和看下" } });
+    expect(screen.queryByText("群内暂无智能体")).not.toBeInTheDocument();
+    expect(screen.queryByText("和小鸣")).not.toBeInTheDocument(); // 仅剩 chip（@和小鸣 ≠ 和小鸣）
+
+    // token 消失（空格断开）→ 解锁；再键入 @ 重弹（已选项被过滤 → 空态）
+    fireEvent.change(input, { target: { value: "@和看下 中段" } });
+    fireEvent.change(input, { target: { value: "@和看下 中段 @" } });
+    expect(screen.getByText("群内暂无智能体")).toBeInTheDocument();
+  });
+
+  it("切换会话清空已选 mention chip（防跨会话带出）", async () => {
+    await setupGroupChat();
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    fireEvent.click(screen.getByText("和小鸣"));
+    expect(screen.getByText("@和小鸣")).toBeInTheDocument();
+
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" });
+    });
+    expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "提及智能体" })).not.toBeInTheDocument(); // direct/未知会话不给 @ 入口
+  });
+
+  it("气泡对 mentions 名称高亮渲染", async () => {
+    const m: Message = {
+      ...msg("m1", "@和小鸣 看下这版", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "@和小鸣 看下这版",
+        mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
+      },
+    };
+    mockMessagesFetch([m]);
+
+    render(<ChatPage />);
+    const hl = await screen.findByText("和小鸣");
+    expect(hl.tagName).toBe("SPAN");
+    expect(hl).toHaveClass("bg-[#eef3f8]"); // 浅蓝 chip 高亮
+    expect(screen.getByText(/看下这版/)).toBeInTheDocument(); // 其余文本照常渲染
+  });
+});
+
+describe("renderTextWithMentions", () => {
+  it("按各 mention.name 出现位置拆分，命中处包浅蓝高亮 span（长名优先不吃短名）", () => {
+    const parts = renderTextWithMentions("hi 和小鸣 与小鸣 再和小鸣", [
+      { agentId: "a1", name: "和小鸣" },
+      { agentId: "a2", name: "小鸣" },
+    ]);
+    const { container } = render(<div>{parts}</div>);
+    const hl = [...container.querySelectorAll("span")];
+    expect(hl.map((s) => s.textContent)).toEqual(["和小鸣", "小鸣", "和小鸣"]);
+    for (const s of hl) expect(s).toHaveClass("bg-[#eef3f8]");
+    expect(container.textContent).toBe("hi 和小鸣 与小鸣 再和小鸣"); // 原文无丢失
+  });
+
+  it("无 mentions 或名字未出现：原样单文本节点", () => {
+    const { container } = render(<div>{renderTextWithMentions("纯文本", undefined)}</div>);
+    expect(container.textContent).toBe("纯文本");
+    expect(container.querySelectorAll("span")).toHaveLength(0);
+
+    const { container: c2 } = render(
+      <div>{renderTextWithMentions("不提名", [{ agentId: "a1", name: "和小鸣" }])}</div>,
+    );
+    expect(c2.textContent).toBe("不提名");
+    expect(c2.querySelectorAll("span")).toHaveLength(0);
+  });
+
+  it("防注入：text 与 mention 名里的标签按 React 文本节点输出", () => {
+    const evil = '<img src=x onerror="alert(1)">';
+    const parts = renderTextWithMentions(`${evil} 提醒 <b>粗体</b>`, [
+      { agentId: "a1", name: "<b>粗体</b>" },
+    ]);
+    const { container } = render(<div>{parts}</div>);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("b")).toBeNull();
+    expect(container.textContent).toBe(`${evil} 提醒 <b>粗体</b>`);
+    expect([...container.querySelectorAll("span")].map((s) => s.textContent)).toEqual([
+      "<b>粗体</b>",
+    ]);
   });
 });
