@@ -6,6 +6,7 @@ import type { SharedFileMeta } from "@heming/shared";
 import { LoginPage } from "./components/LoginPage.js";
 import { NavRail, NavPeek } from "./components/NavRail.js";
 import { FileTree } from "./components/FileTree.js";
+import { FilePreviewModal } from "./components/FilePreviewModal.js";
 import { WorkspacePage } from "./components/WorkspacePage.js";
 import { ChatPage } from "./components/ChatPage.js";
 import { RadarContacts } from "./components/RadarContacts.js";
@@ -38,6 +39,8 @@ export function App() {
 
   const [files, setFiles] = useState<SharedFileMeta[]>([]);
   const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
+  /** 右栏文件行 hover「预览」的目标文件（null = 模态关闭）。 */
+  const [previewFile, setPreviewFile] = useState<SharedFileMeta | null>(null);
   const refreshFiles = useCallback(() => {
     void fetchFiles().then(setFiles);
     void fetchFileUsage()
@@ -154,6 +157,7 @@ export function App() {
           <FileTree
             items={files}
             localPaths={[]}
+            onPreview={setPreviewFile}
             onSendToConversation={(item) => {
               const { page, activeConversationId } = useUiStore.getState();
               if (page !== "chat" || !activeConversationId) {
@@ -169,6 +173,9 @@ export function App() {
             }}
           />
         </div>
+        {previewFile && (
+          <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+        )}
       </aside>
     </div>
   );

@@ -171,3 +171,21 @@ export async function fetchFileBlobUrl(id: string): Promise<string> {
   }
   return URL.createObjectURL(await res.blob());
 }
+
+/**
+ * 附件内容取纯文本（预览文本/Markdown 内嵌用）：与 fetchFileBlobUrl 同鉴权（content 路由
+ * authOnly 只认 Authorization 头），差异只在返回 res.text() 而非 objectURL——先取 blob URL
+ * 再二次 fetch 解码绕了一圈，文本路径独立函数更直白。401 同口径触发全局 onUnauthorized。
+ */
+export async function fetchFileBlobText(id: string): Promise<string> {
+  const headers = new Headers();
+  const t = token ?? localStorage.getItem("heming.token");
+  if (t) headers.set("Authorization", `Bearer ${t}`);
+  const res = await fetch(resolveUrl(`/api/files/${id}/content`), { headers });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
+    throw new ApiError(res.status, body.error ?? `http ${res.status}`);
+  }
+  return res.text();
+}

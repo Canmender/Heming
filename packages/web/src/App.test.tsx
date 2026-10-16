@@ -3,7 +3,13 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { App } from "./App.js";
 import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
-import { setToken } from "./lib/api.js";
+import { setToken, fetchFileBlobText } from "./lib/api.js";
+
+// 预览接线用：文件内容取纯文本走独立函数（其余 api 保持真实实现）
+vi.mock("./lib/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./lib/api.js")>();
+  return { ...actual, fetchFileBlobText: vi.fn() };
+});
 
 function jsonRes(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -142,6 +148,32 @@ describe("App 右栏云端共享", () => {
     expect(screen.getByText("云端共享")).toBeInTheDocument();
     // 根级行（无 parentId）直接显示，非文件夹行不带展开箭头
     expect(screen.queryByRole("button", { name: "切换文件夹 需求草案.md" })).not.toBeInTheDocument();
+  });
+
+  it("文件行点预览打开预览模态，点关闭消失（onPreview 接线）", async () => {
+    setToken("t1");
+    mockFetch({
+      files: [
+        {
+          id: "f1",
+          owner: "alice",
+          name: "需求草案.md",
+          mime: "text/markdown",
+          size: 18,
+          updatedAt: "2026-10-13T00:00:00.000Z",
+        },
+      ],
+    });
+    vi.mocked(fetchFileBlobText).mockResolvedValue("# 内容\n正文");
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByLabelText("预览 需求草案.md"));
+    expect(await screen.findByRole("heading", { name: "内容" })).toBeInTheDocument();
+    expect(fetchFileBlobText).toHaveBeenCalledWith("f1");
+
+    fireEvent.click(screen.getByLabelText("关闭预览"));
+    expect(screen.queryByLabelText("关闭预览")).not.toBeInTheDocument();
   });
 
   it("右栏头部显示存储用量（fmtBytes：5.0MB / 200.0MB）", async () => {

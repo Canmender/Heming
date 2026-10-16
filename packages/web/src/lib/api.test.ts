@@ -7,6 +7,7 @@ import {
   resolveUrl,
   uploadFile,
   fetchFileBlobUrl,
+  fetchFileBlobText,
   fetchFileUsage,
 } from "./api.js";
 
@@ -268,5 +269,52 @@ describe("fetchFileBlobUrl（附件 content 带鉴权取 objectURL）", () => {
     expect((err as Error).message).toBe("unauthorized");
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
     expect(createSpy).not.toHaveBeenCalled();
+  });
+});
+
+/** 预览文本/Markdown 内嵌：与 fetchFileBlobUrl 同鉴权，差异只在返回 res.text()。 */
+describe("fetchFileBlobText（附件 content 带鉴权取纯文本）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setOnUnauthorized(null);
+    localStorage.clear();
+  });
+
+  it("fetchFileBlobText 带 Authorization 请求 content 并返回 .text()", async () => {
+    localStorage.clear();
+    setToken("t1");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("# 标题", {
+        status: 200,
+        headers: { "Content-Type": "text/markdown; charset=utf-8" },
+      }),
+    );
+
+    const text = await fetchFileBlobText("f9");
+
+    expect(text).toBe("# 标题");
+    const [req, init] = fetchSpy.mock.calls[0]!;
+    expect(String(req)).toBe(resolveUrl("/api/files/f9/content"));
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer t1");
+    expect(new Headers(init?.headers).get("Content-Type")).toBeNull(); // GET 不塞 JSON 头
+  });
+
+  it("fetchFileBlobText 401：触发全局 onUnauthorized 并抛 ApiError", async () => {
+    setToken("t1");
+    const onUnauthorized = vi.fn();
+    setOnUnauthorized(onUnauthorized);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const err = await fetchFileBlobText("f9").catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(401);
+    expect((err as Error).message).toBe("unauthorized");
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
