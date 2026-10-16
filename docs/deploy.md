@@ -84,6 +84,7 @@ HEMING_SEED_USERS="admin:admin,alice:alice123,bob:bob1" docker compose up -d
 HEMING_SEED_USERS=admin:admin,alice:alice123
 # HEMING_ALLOW_REGISTER=1   # 取消注释才放开公开注册（默认关，403）
 # HEMING_DB_PATH=/data/heming.db   # 容器内缺省已是此值（见 §4 注意），仅需改动时覆盖
+# HEMING_FILE_QUOTA_MB=200   # 每用户共享文件存储配额（MB），超限上传 413 quota_exceeded
 ```
 
 注意：
@@ -91,6 +92,7 @@ HEMING_SEED_USERS=admin:admin,alice:alice123
 - 播种只在进程启动时执行。数据已由 SQLite 持久化（卷 `heming_heming-data`，容器内 `/data`），容器重启、重建不丢运行期产生的账号、会话与消息（见 §6 备份）。
 - 预设群「和鸣交流群」成员在**每次服务启动时补入当前全部账号**（B 语义，幂等）：`HEMING_SEED_USERS` 新增的账号在下一次启动后自动入群；用户自建同名群不会遮蔽预设群（预设匹配只认服务端播种的群）。M3 群管理开放后可调整。
 - `HEMING_DB_PATH`：SQLite 库文件路径，缺省 `./data/heming.db`；compose 已注入容器内 `HEMING_DB_PATH=/data/heming.db`（named volume `heming-data` → `/data`），一般无需改动。
+- `HEMING_FILE_QUOTA_MB`：每用户共享文件存储配额（MB，缺省 200，解析失败/≤0 回退 200）；超限上传返回 413 `quota_exceeded`，前端右栏目录头部显示已用/总量。
 
 ## 5. 更新流程与回滚
 

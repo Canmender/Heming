@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useUiStore, type Page } from "./store/ui.js";
 import { useAuthStore } from "./store/auth.js";
-import { getToken, fetchFiles, uploadFile } from "./lib/api.js";
+import { getToken, fetchFiles, fetchFileUsage, uploadFile } from "./lib/api.js";
 import type { SharedFileMeta } from "@heming/shared";
 import { LoginPage } from "./components/LoginPage.js";
 import { NavRail, NavPeek } from "./components/NavRail.js";
@@ -21,6 +21,12 @@ const SHORTCUT_PAGES: Page[] = [
   "settings",
 ];
 
+function fmtBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${n}B`;
+}
+
 export function App() {
   const authStatus = useAuthStore((s) => s.status);
   const authUser = useAuthStore((s) => s.user);
@@ -31,8 +37,12 @@ export function App() {
   }, [restore]);
 
   const [files, setFiles] = useState<SharedFileMeta[]>([]);
+  const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
   const refreshFiles = useCallback(() => {
     void fetchFiles().then(setFiles);
+    void fetchFileUsage()
+      .then(setUsage)
+      .catch(() => setUsage(null)); // 用量接口失败静默（不影响文件列表）
   }, []);
   useEffect(() => {
     if (authUser) refreshFiles();
@@ -127,6 +137,11 @@ export function App() {
       <aside className="flex w-[240px] shrink-0 flex-col border-l border-line-soft">
         <div className="flex items-center justify-between border-b border-line-soft px-3 py-2">
           <span className="text-[11px] font-bold uppercase tracking-wider text-muted">目录</span>
+          {usage && (
+            <span className="text-[10px] text-muted">
+              {fmtBytes(usage.used)} / {fmtBytes(usage.quota)}
+            </span>
+          )}
           <button
             type="button"
             onClick={() => void onUpload()}

@@ -219,8 +219,19 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
 
   // —— M4：共享文件从 app.ts 闭包 Map 迁入 Store（memory/sqlite 双实现持久化）——
 
+  /** 每用户存储配额（MB→字节）：HEMING_FILE_QUOTA_MB，缺省/解析失败/非正数回退 200MB。 */
+  const quotaBytes = (): number => {
+    const raw = Number.parseInt(process.env.HEMING_FILE_QUOTA_MB ?? "", 10);
+    return Number.isFinite(raw) && raw > 0 ? raw * 1024 * 1024 : 200 * 1024 * 1024;
+  };
+
   app.get("/api/files", authOnly, (_req, res) => {
     res.json(store.listFiles());
+  });
+
+  app.get("/api/files/usage", authOnly, (req, res) => {
+    const user = store.findUserById(userId(req))!;
+    res.json({ used: store.userFileBytes(user.username), quota: quotaBytes() });
   });
 
   app.post("/api/files", authOnly, (req, res) => {
@@ -230,18 +241,24 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     const user = store.findUserById(userId(req))!;
+    const size =
+      Math.floor((parsed.data.contentBase64.length * 3) / 4) -
+      (parsed.data.contentBase64.endsWith("==")
+        ? 2
+        : parsed.data.contentBase64.endsWith("=")
+          ? 1
+          : 0);
+    // 每用户总配额（按 owner username 计量，与他人文件无关），超限 413
+    if (store.userFileBytes(user.username) + size > quotaBytes()) {
+      res.status(413).json({ error: "quota_exceeded" });
+      return;
+    }
     const meta: SharedFileMeta = {
       id: randomUUID(),
       owner: user.username,
       name: parsed.data.name,
       mime: parsed.data.mime,
-      size:
-        Math.floor((parsed.data.contentBase64.length * 3) / 4) -
-        (parsed.data.contentBase64.endsWith("==")
-          ? 2
-          : parsed.data.contentBase64.endsWith("=")
-            ? 1
-            : 0),
+      size,
       updatedAt: new Date().toISOString(),
     };
     store.addFile(meta, parsed.data.contentBase64);

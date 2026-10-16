@@ -7,6 +7,7 @@ import {
   resolveUrl,
   uploadFile,
   fetchFileBlobUrl,
+  fetchFileUsage,
 } from "./api.js";
 
 describe("resolveUrl（API base 直连注入）", () => {
@@ -164,6 +165,56 @@ describe("uploadFile（附件上传下沉，App/Chat 共用）", () => {
 
     const body = JSON.parse(String(fetchSpy.mock.calls[0]![1]?.body)) as { mime: string };
     expect(body.mime).toBe("application/octet-stream");
+  });
+
+  it("uploadFile 413 quota_exceeded → 抛中文「超出存储配额」（非 ApiError，签名不变）", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "quota_exceeded" }), {
+        status: 413,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const err = await uploadFile(new File(["x"], "x.txt", { type: "text/plain" })).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ApiError);
+    expect((err as Error).message).toBe("超出存储配额");
+  });
+
+  it("uploadFile 413 非 quota_exceeded（如网关纯文本体）仍抛原 ApiError", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("Payload too large", { status: 413 }),
+    );
+    const err = await uploadFile(new File(["x"], "x.txt")).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(413);
+  });
+});
+
+describe("fetchFileUsage（右栏存储用量）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    setToken(null);
+  });
+
+  it("GET /api/files/usage 带 Bearer 并返回 {used,quota}", async () => {
+    setToken("t1");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ used: 5, quota: 200 * 1024 * 1024 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const got = await fetchFileUsage();
+
+    expect(got).toEqual({ used: 5, quota: 200 * 1024 * 1024 });
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(String(url)).toBe(resolveUrl("/api/files/usage"));
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer t1");
   });
 });
 

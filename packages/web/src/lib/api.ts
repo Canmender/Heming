@@ -120,6 +120,8 @@ export const fetchMessages = (convId: string) =>
 export const fetchMembers = (convId: string) =>
   api<Member[]>(`/api/conversations/${convId}/members`);
 export const fetchFiles = () => api<SharedFileMeta[]>("/api/files");
+/** 右栏用量：当前用户已用字节 + 每用户配额字节（服务端读 HEMING_FILE_QUOTA_MB）。 */
+export const fetchFileUsage = () => api<{ used: number; quota: number }>("/api/files/usage");
 
 /**
  * 上传共享库文件（App 的「上传」与聊天附件共用同一路径）：
@@ -131,14 +133,23 @@ export async function uploadFile(file: File): Promise<SharedFileMeta> {
   let binary = "";
   const bytes = new Uint8Array(buf);
   for (const b of bytes) binary += String.fromCharCode(b);
-  return api<SharedFileMeta>("/api/files", {
-    method: "POST",
-    body: JSON.stringify({
-      name: file.name,
-      mime: file.type || "application/octet-stream",
-      contentBase64: btoa(binary),
-    }),
-  });
+  try {
+    return await api<SharedFileMeta>("/api/files", {
+      method: "POST",
+      body: JSON.stringify({
+        name: file.name,
+        mime: file.type || "application/octet-stream",
+        contentBase64: btoa(binary),
+      }),
+    });
+  } catch (e) {
+    // 服务端每用户配额超限（api() 把 body.error 作为 message 抛出）→ 换成用户可读文案；
+    // 网关等非 JSON 体的 413（message 形如 "http 413"）保持原 ApiError 不动。
+    if (e instanceof ApiError && e.status === 413 && e.message === "quota_exceeded") {
+      throw new Error("超出存储配额");
+    }
+    throw e;
+  }
 }
 
 /**

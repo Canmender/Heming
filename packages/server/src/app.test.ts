@@ -326,6 +326,93 @@ describe("files API", () => {
       .set("Authorization", `Bearer ${a.token}`);
     expect(got.status).toBe(404);
   });
+
+  it("GET /api/files/usage 返回 used/quota", async () => {
+    const a = await register(app, "quota1");
+    const up = await request(app)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "u.txt", mime: "text/plain", contentBase64: Buffer.from("12345").toString("base64") });
+    expect(up.status).toBe(201);
+    const usage = await request(app)
+      .get("/api/files/usage")
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(usage.status).toBe(200);
+    expect(usage.body.used).toBe(5);
+    expect(usage.body.quota).toBe(200 * 1024 * 1024);
+  });
+
+  it("超过配额上传拒绝 413 quota_exceeded（按 username 计量，他人文件不占自己的额）", async () => {
+    const store = createMemoryStore();
+    const quotaApp = createApp(store, { allowRegister: true });
+    const a = await register(quotaApp, "quota2");
+    const b = await register(quotaApp, "quota3");
+    // quota3 已有文件（不占满）：证明按 username 独立计量，不影响 quota2 的配额判断
+    store.addFile(
+      {
+        id: "other-file",
+        owner: "quota3",
+        name: "o.bin",
+        mime: "application/octet-stream",
+        size: 10 * 1024 * 1024,
+        updatedAt: new Date().toISOString(),
+      },
+      "",
+    );
+    // quota2 预置占额至差 1 字节满：再传 "hi"（2 字节）即超限
+    store.addFile(
+      {
+        id: "filler",
+        owner: "quota2",
+        name: "f.bin",
+        mime: "application/octet-stream",
+        size: 200 * 1024 * 1024 - 1,
+        updatedAt: new Date().toISOString(),
+      },
+      "",
+    );
+    const up = await request(quotaApp)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ name: "x.txt", mime: "text/plain", contentBase64: Buffer.from("hi").toString("base64") });
+    expect(up.status).toBe(413);
+    expect(up.body.error).toBe("quota_exceeded");
+    // quota2 的 usage 只反映自己占额（不含 quota3 的 10MB）；quota3 配额独立不受影响
+    const usage = await request(quotaApp)
+      .get("/api/files/usage")
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(usage.body.used).toBe(200 * 1024 * 1024 - 1);
+    const okForB = await request(quotaApp)
+      .post("/api/files")
+      .set("Authorization", `Bearer ${b.token}`)
+      .send({ name: "b.txt", mime: "text/plain", contentBase64: Buffer.from("hi").toString("base64") });
+    expect(okForB.status).toBe(201);
+  });
+
+  it("HEMING_FILE_QUOTA_MB 生效；解析失败/≤0 回退 200MB", async () => {
+    const saved = process.env.HEMING_FILE_QUOTA_MB;
+    try {
+      const a = await register(app, "quotaenv");
+      const readQuota = async () => {
+        const usage = await request(app)
+          .get("/api/files/usage")
+          .set("Authorization", `Bearer ${a.token}`);
+        expect(usage.status).toBe(200);
+        return (usage.body as { quota: number }).quota;
+      };
+      process.env.HEMING_FILE_QUOTA_MB = "1";
+      expect(await readQuota()).toBe(1024 * 1024);
+      process.env.HEMING_FILE_QUOTA_MB = "not-a-number";
+      expect(await readQuota()).toBe(200 * 1024 * 1024);
+      process.env.HEMING_FILE_QUOTA_MB = "0";
+      expect(await readQuota()).toBe(200 * 1024 * 1024);
+      process.env.HEMING_FILE_QUOTA_MB = "-5";
+      expect(await readQuota()).toBe(200 * 1024 * 1024);
+    } finally {
+      if (saved === undefined) delete process.env.HEMING_FILE_QUOTA_MB;
+      else process.env.HEMING_FILE_QUOTA_MB = saved;
+    }
+  });
 });
 
 describe("group api", () => {

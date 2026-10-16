@@ -19,6 +19,7 @@ function mockFetch(
   routes: {
     me?: unknown;
     files?: unknown;
+    usage?: unknown;
     conversations?: unknown;
     friends?: unknown;
     incoming?: unknown;
@@ -28,6 +29,8 @@ function mockFetch(
   return vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = String(input);
     if (url === "/api/me") return Promise.resolve(jsonRes(routes.me ?? alice));
+    if (url === "/api/files/usage")
+      return Promise.resolve(jsonRes(routes.usage ?? { used: 0, quota: 200 * 1024 * 1024 }));
     if (url === "/api/files") return Promise.resolve(jsonRes(routes.files ?? []));
     if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
     if (url === "/api/conversations") return Promise.resolve(jsonRes(routes.conversations ?? []));
@@ -139,6 +142,41 @@ describe("App 右栏云端共享", () => {
     expect(screen.getByText("云端共享")).toBeInTheDocument();
     // 根级行（无 parentId）直接显示，非文件夹行不带展开箭头
     expect(screen.queryByRole("button", { name: "切换文件夹 需求草案.md" })).not.toBeInTheDocument();
+  });
+
+  it("右栏头部显示存储用量（fmtBytes：5.0MB / 200.0MB）", async () => {
+    setToken("t1");
+    mockFetch({
+      usage: { used: 5 * 1024 * 1024, quota: 200 * 1024 * 1024 },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("5.0MB / 200.0MB")).toBeInTheDocument();
+  });
+
+  it("用量接口失败时静默不显示用量（不打断文件列表渲染）", async () => {
+    setToken("t1");
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url === "/api/me") return Promise.resolve(jsonRes(alice));
+      if (url === "/api/files/usage")
+        return Promise.resolve(jsonRes({ error: "boom" }, 500));
+      if (url === "/api/files") return Promise.resolve(jsonRes([]));
+      if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
+      if (
+        url === "/api/conversations" ||
+        url === "/api/friends" ||
+        url === "/api/friends/requests"
+      )
+        return Promise.resolve(jsonRes([]));
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "上传" })).toBeInTheDocument();
+    expect(screen.queryByText(/\/ 200MB$/)).not.toBeInTheDocument();
   });
 
   it("未登录时不拉取文件列表", async () => {
