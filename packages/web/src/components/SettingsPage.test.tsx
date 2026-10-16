@@ -147,4 +147,16 @@ describe("SettingsPage 个人资料", () => {
     expect(await screen.findByText(/请选择图片文件/)).toBeInTheDocument();
     expect(screen.queryByAltText("当前头像")).not.toBeInTheDocument();
   });
+
+  it("个人资料卡下方挂载 LLM 连接卡（空态）", () => {
+    render(<SettingsPage />);
+    expect(screen.getByText("个人资料")).toBeInTheDocument();
+    expect(screen.getByText("LLM 连接")).toBeInTheDocument();
+    expect(screen.getByText(/还没有 LLM 连接/)).toBeInTheDocument();
+    // 两卡次序：个人资料在前、LLM 在后
+    const sections = document.querySelectorAll("section");
+    expect(sections).toHaveLength(2);
+    expect(sections[0].textContent).toContain("个人资料");
+    expect(sections[1].textContent).toContain("LLM 连接");
+  });
 });
