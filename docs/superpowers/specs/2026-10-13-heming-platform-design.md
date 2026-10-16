@@ -77,7 +77,7 @@ Heming/
 | `conversation_members` | conversation_id, user_id, role(owner/admin/member) | 群成员（人类与智能体统一入表） |
 | `messages` | id, conversation_id, sender_type(user/agent), sender_id, payload(JSON), reply_to, created_at | 消息：文本/文件引用/系统事件 |
 | `message_reads` | message_id, user_id, read_at | 已读回执 |
-| `shared_files` | id, owner_id, name, blob, mime, size, scope | **仅显式共享**的文件（右栏「云端共享」） |
+| `shared_files` | id, owner_id, name, blob, mime, size, scope | **仅显式共享**的文件（右栏「云端共享」）（口径：登录可见，DELETE 属主校验；会话级 ACL 留后续） |
 
 ### 3.2 桌面端本地（SQLite + 系统钥匙串）
 
@@ -149,5 +149,5 @@ Heming/
 2. **M2 IM 完善（已完成）**：SQLite 固化、群聊（含单人群）、预设混合群播种（M2 仅建结构，智能体回复归 M3）、已读回执与未读角标、雷达通讯录（通讯录按用户定稿改为圆形雷达视图：圆心「我」+ 三扇区——上=群聊、左下=人类、右下=智能体；悬浮信息卡，点击进会话时通讯录整体左滑隐藏并提供呼出按钮，替代原列表式设计）。
 3. **M3 通讯录+智能体（已完成）**：智能体名册 CRUD、本机 LLM 连接直连（Key 不出设备）、群内 @ 流式回复（本地驱动·云端桥梁）、@ 选择器与 mentions、入群接线（自建智能体可挂入自己创建的群：新建群时勾选 + `POST/DELETE /api/conversations/:id/agents`，挂载后即进 @ 候选与 finish 校验）。
 3.5. **M3.5 UI 完善（已完成）**：主页近 30 日 token 热力图；聊天头部头像昵称与三横线会话信息卡；输入栏表情/图片/文件/语音与附件消息（payload.file + 文件内容路由，鉴权 blob 预览）；雷达点击进联系人详情页，其余头像滚入右侧分组竖列（群聊/人类/智能体）。
-4. **M4 文件完善**：文件投递与预览、总量配额（Store）。
+4. **M4 文件完善（已完成）**：共享文件 Store 持久化（重启不丢）、右栏文件行 hover 投递到当前会话与预览（文本/Markdown/图片内嵌）、每用户存储配额（HEMING_FILE_QUOTA_MB，默认 200MB）。
 5. **二期**：记忆/知识库（本地 RAG）、MCP 接口区、harness 桥接、Token 团队视图/按日期跨端汇总、语音/表情/转发。
