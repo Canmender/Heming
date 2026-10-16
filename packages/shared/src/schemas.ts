@@ -10,8 +10,13 @@ export const UserSchema = z.object({
 export type User = z.infer<typeof UserSchema>;
 
 export const MessagePayloadSchema = z.object({
+  // 上限 20000：与 agent_finish.text 对齐（agent 回复经 finish 直接入库，两处不齐会「入库即违规」）
   text: z.string().max(20000),
-  mentions: z.array(z.object({ agentId: z.string().min(1), name: z.string().min(1).max(64) })).optional(),
+  // 单条消息 mentions 上限：@ 选择器为人工点选，50 已远超一屏；防契约无限扩张
+  mentions: z
+    .array(z.object({ agentId: z.string().min(1), name: z.string().min(1).max(64) }))
+    .max(50)
+    .optional(),
 });
 export type MessagePayload = z.infer<typeof MessagePayloadSchema>;
 
@@ -49,7 +54,9 @@ export const WsClientEventSchema = z.discriminatedUnion("type", [
     conversationId: z.string().min(1),
     agentId: z.string().min(1),
     streamId: z.string().min(1),
-    text: z.string().max(60000),
+    // 与 MessagePayloadSchema.text 同上限：finish 文本直接入 messages.payload（不改写），
+    // 宽于 payload 会出现「schema 过了、入库即违规」的缝
+    text: z.string().max(20000),
     replyTo: z.string().optional(),
   }),
   // 双向事件（设计 §3）：客户端上报流失败（aborted/provider_error），服务端回 forbidden。
@@ -197,3 +204,7 @@ export const AgentBodySchema = z.object({
   description: z.string().max(500).default(""),
 });
 export type AgentBody = z.infer<typeof AgentBodySchema>;
+
+/** POST /api/conversations/:id/agents：把名册 agent 挂到会话（幂等由服务端语义保证）。 */
+export const AttachAgentBodySchema = z.object({ agentId: z.string().min(1) });
+export type AttachAgentBody = z.infer<typeof AttachAgentBodySchema>;

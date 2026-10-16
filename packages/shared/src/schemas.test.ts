@@ -14,6 +14,8 @@ import {
   CreateConversationBodySchema,
   ReadStateSchema,
   MemberSchema,
+  MessagePayloadSchema,
+  AttachAgentBodySchema,
 } from "./schemas.js";
 
 describe("WsClientEventSchema", () => {
@@ -221,6 +223,24 @@ describe("M3 schemas", () => {
     expect(WsClientEventSchema.safeParse({ type: "agent_chunk", conversationId: "c1", agentId: "a1", streamId: "s1", text: "你" }).success).toBe(true);
     expect(WsClientEventSchema.safeParse({ type: "agent_finish", conversationId: "c1", agentId: "a1", streamId: "s1", text: "你好" }).success).toBe(true);
     expect(WsClientEventSchema.safeParse({ type: "agent_chunk", conversationId: "c1", agentId: "a1", streamId: "s1", text: "" }).success).toBe(false);
+  });
+  it("I4：finish.text 上限 20000 与 payload.text 对齐（20000 过 / 20001 拒）", () => {
+    const atLimit = "x".repeat(20000);
+    expect(WsClientEventSchema.safeParse({ type: "agent_finish", conversationId: "c1", agentId: "a1", streamId: "s1", text: atLimit }).success).toBe(true);
+    expect(MessagePayloadSchema.safeParse({ text: atLimit }).success).toBe(true);
+    expect(WsClientEventSchema.safeParse({ type: "agent_finish", conversationId: "c1", agentId: "a1", streamId: "s1", text: `${atLimit}x` }).success).toBe(false);
+    expect(MessagePayloadSchema.safeParse({ text: `${atLimit}x` }).success).toBe(false);
+  });
+  it("I4：payload.mentions 上限 50（50 过 / 51 拒）", () => {
+    const mk = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ agentId: `a${i}`, name: `智能体${i}` }));
+    expect(MessagePayloadSchema.safeParse({ text: "@x", mentions: mk(50) }).success).toBe(true);
+    expect(MessagePayloadSchema.safeParse({ text: "@x", mentions: mk(51) }).success).toBe(false);
+  });
+  it("AttachAgentBodySchema（agentId 非空）", () => {
+    expect(AttachAgentBodySchema.safeParse({ agentId: "a1" }).success).toBe(true);
+    expect(AttachAgentBodySchema.safeParse({ agentId: "" }).success).toBe(false);
+    expect(AttachAgentBodySchema.safeParse({}).success).toBe(false);
   });
   it("客户端 agent_error 双向事件（合法通过 / 空 code 拒绝）", () => {
     expect(
