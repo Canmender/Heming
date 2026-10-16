@@ -7,10 +7,11 @@ import { fetchMessages, fetchMembers } from "../lib/api.js";
 import { streamChat } from "../lib/llmClient.js";
 import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
-import { ChevronIcon } from "./icons.js";
+import { ChevronIcon, MenuIcon } from "./icons.js";
 import { Avatar } from "./Avatar.js";
 import { MentionPicker, type MentionItem } from "./MentionPicker.js";
 import { AgentStreamBubble } from "./AgentStreamBubble.js";
+import { ChatInfoCard } from "./ChatInfoCard.js";
 
 /** 正则转义：mention 名按字面量匹配（名字可含 . * + 等元字符）。 */
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -60,6 +61,8 @@ export function ChatPage() {
   const [draft, setDraft] = useState("");
   const [sendNotice, setSendNotice] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  /** 会话信息卡（三横线弹出）开关。 */
+  const [infoOpen, setInfoOpen] = useState(false);
   /** @ 选择器：null=关；via 区分按钮/键入 token（键入选中后锁到 token 消失，防草稿未变时每击键重弹）。 */
   const [picker, setPicker] = useState<{ via: "button" | "token"; query: string } | null>(null);
   /** 已选 mention（输入栏下 chip）：与草稿文本解耦，发送时非空才进 payload.mentions。 */
@@ -341,6 +344,16 @@ export function ChatPage() {
     setPicker(null);
   };
 
+  /** Esc 关信息卡（文档级：焦点不在输入框也能关；input 内 Esc 由 onInputKeyDown 管 picker）。 */
+  useEffect(() => {
+    if (!infoOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setInfoOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [infoOpen]);
+
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape" && picker) {
       e.preventDefault();
@@ -386,7 +399,7 @@ export function ChatPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-2 border-b border-line-soft px-5 py-3">
+      <header className="relative flex items-center gap-2.5 border-b border-line-soft px-5 py-3">
         <button
           type="button"
           aria-label="返回"
@@ -395,8 +408,23 @@ export function ChatPage() {
         >
           <ChevronIcon width={15} height={15} className="rotate-180" />
         </button>
+        {conv && (
+          <Avatar
+            user={conv.type === "direct" ? conv.peer : { displayName: conv.name }}
+            size={28}
+          />
+        )}
         <span className="text-[14px] font-bold">{headerTitle}</span>
         <span className="text-[12px] text-muted">{connected ? "已连接" : "连接中…"}</span>
+        <button
+          type="button"
+          aria-label="会话信息"
+          className={`ml-auto rounded-lg p-1.5 hover:bg-[#f3f3f3]${infoOpen ? " bg-[#f3f3f3]" : ""}`}
+          onClick={() => setInfoOpen((v) => !v)}
+        >
+          <MenuIcon width={17} height={17} />
+        </button>
+        {infoOpen && conv && <ChatInfoCard conv={conv} onClose={() => setInfoOpen(false)} />}
       </header>
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {messages.map((m) => {

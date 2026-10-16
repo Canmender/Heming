@@ -237,8 +237,8 @@ describe("ChatPage", () => {
     await waitFor(() => expect(screen.getByText("在的")).toBeInTheDocument());
 
     // 对方两条中仅 m1 是对方消息：首字「鲍」头像出现且仅出现一次（自己的消息不带头像）
-    expect(screen.getByText("鲍")).toBeInTheDocument();
-    expect(screen.getAllByText("鲍")).toHaveLength(1);
+    // 头部改版后 header 也渲染对方头像 → 共 2 处（header + m1 气泡；自己的消息仍无头像）
+    expect(screen.getAllByText("鲍")).toHaveLength(2);
     // 自己的消息气泡正常渲染（右对齐为既有样式，不另作断言）
     expect(screen.getByText("我回一句")).toBeInTheDocument();
   });
@@ -339,6 +339,31 @@ describe("ChatPage", () => {
     expect(await screen.findByText("评审组（5 人）")).toBeInTheDocument();
     expect(screen.getByText("群里我发的")).toBeInTheDocument(); // 群内我方消息确实渲染
     expect(screen.queryByText("已读")).not.toBeInTheDocument();
+  });
+
+  it("头部左侧显示会话头像与昵称、右侧有会话信息按钮", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {}); // 冲刷挂载 effects
+    // 触发 onOpen → 已连接（否则显示「连接中…」）
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    // direct：标题=对方昵称；头像为首字回退（peer 无 avatar）
+    expect(screen.getByText("鲍勃")).toBeInTheDocument();
+    expect(screen.getByText("鲍")).toBeInTheDocument();
+    expect(screen.getByText("已连接")).toBeInTheDocument();
+    expect(screen.getByLabelText("会话信息")).toBeInTheDocument();
+  });
+
+  it("点会话信息弹出信息卡", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+    fireEvent.click(screen.getByLabelText("会话信息"));
+    // direct 信息卡：@用户名 + 关闭钮
+    expect(screen.getByText("@bob")).toBeInTheDocument();
+    expect(screen.getByLabelText("关闭会话信息")).toBeInTheDocument();
   });
 
   it("群内他人消息气泡显示成员映射名，自己的显示「我」", async () => {
