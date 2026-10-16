@@ -7,6 +7,7 @@ import WebSocket from "ws";
 import { createMemoryStore, Store } from "./store.js";
 import { startServer } from "./index.js";
 import { issueToken } from "./auth.js";
+import { seedPreset } from "./preset.js";
 import type { WsServerEvent } from "@heming/shared";
 
 let ctx: Awaited<ReturnType<typeof startServer>>;
@@ -212,5 +213,119 @@ describe("ws", () => {
     expect(event.type).toBe("read_update");
     a.close();
     b.close();
+  });
+});
+
+describe("agent streaming", () => {
+  it("chunk 转发不入库；finish 入库并带 streamId 的 message_new", async () => {
+    // 修正版首用例（brief）：先建两个用户再 seedPreset，使其自动入预设群（system-assistant 已挂）。
+    const a = store.createUser(`aa-${Date.now()}`, "h", "A");
+    const b = store.createUser(`bb-${Date.now()}`, "h", "B");
+    const seed = seedPreset(store);
+    if (!seed) throw new Error("seed failed");
+    const g = { id: seed.groupId };
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+
+    const chunkWait = nextEvent(wsB);
+    wsA.send(JSON.stringify({ type: "agent_chunk", conversationId: g.id, agentId: "system-assistant", streamId: "s1", text: "你" }));
+    const chunkEv = await chunkWait;
+    expect(chunkEv.type).toBe("agent_chunk");
+    expect(store.listMessages(g.id)).toHaveLength(0);
+
+    const finishWait = nextEvent(wsB);
+    wsA.send(JSON.stringify({ type: "agent_finish", conversationId: g.id, agentId: "system-assistant", streamId: "s1", text: "你好，我是和小鸣" }));
+    const finishEv = await finishWait;
+    expect(finishEv.type).toBe("message_new");
+    if (finishEv.type === "message_new") {
+      expect(finishEv.streamId).toBe("s1");
+      expect(finishEv.message.senderType).toBe("agent");
+      expect(finishEv.message.senderId).toBe("system-assistant");
+    }
+    const msgs = store.listMessages(g.id);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].payload.text).toBe("你好，我是和小鸣");
+    wsA.close(); wsB.close();
+  });
+
+  it("agent 不在群内时 finish 被拒且不入库", async () => {
+    const a = store.createUser(`ac-${Date.now()}`, "h", "A");
+    const g2 = store.createGroup(a.id, "孤群", []);
+    const wsA = await connect(issueToken(a.id));
+    const wait = nextEvent(wsA);
+    wsA.send(JSON.stringify({ type: "agent_finish", conversationId: g2.id, agentId: "not-in-group-agent", streamId: "s2", text: "x" }));
+    const ev = await wait;
+    expect(ev.type).toBe("agent_error");
+    if (ev.type === "agent_error") expect(ev.code).toBe("forbidden");
+    expect(store.listMessages(g2.id)).toHaveLength(0);
+    wsA.close();
+  });
+
+  it("非成员 chunk 被拒", async () => {
+    const a = store.createUser(`ad-${Date.now()}`, "h", "A");
+    const c = store.createUser(`ae-${Date.now()}`, "h", "C");
+    const g3 = store.createGroup(a.id, "外群", []);
+    const wsC = await connect(issueToken(c.id));
+    const wait = nextEvent(wsC);
+    wsC.send(JSON.stringify({ type: "agent_chunk", conversationId: g3.id, agentId: "system-assistant", streamId: "s3", text: "x" }));
+    const ev = await wait;
+    expect(ev.type).toBe("agent_error");
+    wsC.close();
+  });
+
+  it("agent_error 成员广播不入库；非成员被拒回 forbidden", async () => {
+    // 设计 §3「双向广播」：触发端流失败时把 agent_error 广播给会话全员（不入库）。
+    // shared 的 WsClientEventSchema 暂未含该客户端类型（Task 1 遗漏），服务端按
+    // 服务端同形状 schema 直通校验——此用例锁广播与非成员拒绝行为。
+    const a = store.createUser(`af-${Date.now()}`, "h", "A");
+    const g4 = store.createGroup(a.id, "错群", []);
+    const wsA = await connect(issueToken(a.id));
+    const wait = nextEvent(wsA);
+    wsA.send(JSON.stringify({ type: "agent_error", conversationId: g4.id, agentId: "system-assistant", streamId: "s4", code: "provider_error", message: "401" }));
+    const ev = await wait;
+    expect(ev.type).toBe("agent_error");
+    if (ev.type === "agent_error") {
+      expect(ev.code).toBe("provider_error");
+      expect(ev.streamId).toBe("s4");
+    }
+    expect(store.listMessages(g4.id)).toHaveLength(0);
+    wsA.close();
+
+    const c = store.createUser(`ag-${Date.now()}`, "h", "C");
+    const wsC = await connect(issueToken(c.id));
+    const wait2 = nextEvent(wsC);
+    wsC.send(JSON.stringify({ type: "agent_error", conversationId: g4.id, agentId: "system-assistant", streamId: "s5", code: "aborted", message: "x" }));
+    const ev2 = await wait2;
+    expect(ev2.type).toBe("agent_error");
+    if (ev2.type === "agent_error") expect(ev2.code).toBe("forbidden");
+    expect(store.listMessages(g4.id)).toHaveLength(0);
+    wsC.close();
+  });
+
+  it("send_message 携带 mentions 落库并随 message_new 广播（无 streamId）", async () => {
+    // Task 1 concern#2/#3：payload.mentions 往返契约 + send_message 广播不带 streamId。
+    const a = store.createUser(`ah-${Date.now()}`, "h", "A");
+    const b = store.createUser(`ai-${Date.now()}`, "h", "B");
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const conv = store.createDirectConversation(a.id, b.id).id;
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+    const wait = nextEvent(wsB);
+    wsA.send(JSON.stringify({
+      type: "send_message",
+      conversationId: conv,
+      payload: { text: "@和小鸣 看下", mentions: [{ agentId: "system-assistant", name: "和小鸣" }] },
+    }));
+    const ev = await wait;
+    expect(ev.type).toBe("message_new");
+    if (ev.type === "message_new") {
+      expect(ev.message.payload.mentions).toEqual([{ agentId: "system-assistant", name: "和小鸣" }]);
+      expect(ev.streamId).toBeUndefined();
+    }
+    const msgs = store.listMessages(conv);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].payload.mentions).toEqual([{ agentId: "system-assistant", name: "和小鸣" }]);
+    wsA.close();
+    wsB.close();
   });
 });

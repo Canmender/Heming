@@ -1,6 +1,6 @@
 import type { Server as HttpServer, IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { WsClientEventSchema, type WsServerEvent } from "@heming/shared";
+import { WsClientEventSchema, WsServerEventSchema, type WsServerEvent } from "@heming/shared";
 import type { Store } from "./store.js";
 import { userIdFromToken } from "./auth.js";
 
@@ -54,12 +54,97 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
         send(ws, { type: "error", code: "bad_event", message: "invalid json" });
         return;
       }
+      // agent_error 是双向事件（设计 §3）：客户端也会发送（Task 8 触发端失败上报
+      // provider_error/aborted 等）。shared 的 WsClientEventSchema 暂未含该成员，
+      // 其形状与服务端同构，故用 WsServerEventSchema 校验后走同一广播路径；
+      // 待 shared 补齐客户端成员后可并回下方主 safeParse（行为不变）。
+      if (typeof json === "object" && json !== null && (json as { type?: unknown }).type === "agent_error") {
+        const errParsed = WsServerEventSchema.safeParse(json);
+        if (!errParsed.success || errParsed.data.type !== "agent_error") {
+          send(ws, { type: "error", code: "bad_event", message: "invalid event" });
+          return;
+        }
+        const errEv = errParsed.data;
+        if (!store.isMember(errEv.conversationId, userId)) {
+          send(ws, {
+            type: "agent_error",
+            conversationId: errEv.conversationId,
+            agentId: errEv.agentId,
+            streamId: errEv.streamId,
+            code: "forbidden",
+            message: "not a member",
+          });
+          return;
+        }
+        // 原样广播（含触发者在内的全员），不入库。
+        broadcastToConversation(errEv.conversationId, errEv);
+        return;
+      }
       const parsed = WsClientEventSchema.safeParse(json);
       if (!parsed.success) {
         send(ws, { type: "error", code: "bad_event", message: "invalid event" });
         return;
       }
       const event = parsed.data;
+      // 流式事件分支须排在下方通用 isMember 与 send_message/mark_read 二分之前：
+      // 否则 chunk/finish 会落入 else 被误当 mark_read 广播 read_update（Task 1 handoff），
+      // 且非成员收到的是通用 error(forbidden) 而非契约要求的 agent_error(forbidden)。
+      if (event.type === "agent_chunk") {
+        if (!store.isMember(event.conversationId, userId)) {
+          send(ws, {
+            type: "agent_error",
+            conversationId: event.conversationId,
+            agentId: event.agentId,
+            streamId: event.streamId,
+            code: "forbidden",
+            message: "not a member",
+          });
+          return;
+        }
+        broadcastToConversation(event.conversationId, {
+          type: "agent_chunk",
+          conversationId: event.conversationId,
+          agentId: event.agentId,
+          streamId: event.streamId,
+          text: event.text,
+        });
+        return;
+      }
+      if (event.type === "agent_finish") {
+        const member = store.isMember(event.conversationId, userId);
+        // isMember 对不存在会话返回 false；listMembers 会抛错——仅在确认是成员
+        // （会话必存在）后才调用，try/catch 兜底按 forbidden 处理。
+        let inGroup = false;
+        if (member) {
+          try {
+            inGroup = store
+              .listMembers(event.conversationId)
+              .some((m) => m.kind === "agent" && m.id === event.agentId);
+          } catch {
+            inGroup = false;
+          }
+        }
+        if (!member || !inGroup) {
+          send(ws, {
+            type: "agent_error",
+            conversationId: event.conversationId,
+            agentId: event.agentId,
+            streamId: event.streamId,
+            code: "forbidden",
+            message: member ? "agent not in group" : "not a member",
+          });
+          return;
+        }
+        const message = store.addMessage(
+          event.conversationId,
+          "agent",
+          event.agentId,
+          { text: event.text },
+          event.replyTo ?? null,
+        );
+        broadcastToConversation(event.conversationId, { type: "message_new", message, streamId: event.streamId });
+        return;
+      }
       if (!store.isMember(event.conversationId, userId)) {
         send(ws, { type: "error", code: "forbidden", message: "not a member" });
         return;
@@ -69,7 +154,8 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
           event.conversationId,
           "user",
           userId,
-          { text: event.payload.text },
+          // mentions 原样透传入库（内存存引用、sqlite JSON.stringify——两实现均无 shape 校验）。
+          { text: event.payload.text, ...(event.payload.mentions ? { mentions: event.payload.mentions } : {}) },
           event.replyTo ?? null,
         );
         broadcastToConversation(event.conversationId, { type: "message_new", message });
