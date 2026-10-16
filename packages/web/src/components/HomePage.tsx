@@ -282,7 +282,8 @@ export function HomePage() {
             recent.map((c) => {
               const list = messages[c.id] ?? [];
               const last = list[list.length - 1];
-              const preview = last ? last.payload.text : "暂无消息";
+              // 纯附件消息 text=""（T1）：空串直渲染会空白，回退口径与 ContactDetail 对齐
+              const preview = last ? last.payload.text || "(附件)" : "暂无消息";
               // conversations 联合类型（M2）：direct 显 peer、group 显群名
               const title = c.type === "direct" ? c.peer.displayName : c.name;
               const avatarUser = c.type === "direct" ? c.peer : { displayName: c.name };

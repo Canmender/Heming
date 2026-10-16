@@ -283,6 +283,8 @@ export function ChatPage() {
     setTokenLock(false);
     setEmojiOpen(false);
     setListening(false);
+    // 发送提示也是会话级：A 会话的「上传失败/不支持语音」不得带进 B 会话
+    setSendNotice(null);
   }, [convId]);
 
   useEffect(() => {
@@ -504,7 +506,13 @@ export function ChatPage() {
     }
     try {
       const meta = await uploadFile(f);
-      handle.send({
+      // await 后闭包已旧：切了会话或 socket 已换/已关则丢弃，防发错会话/向已关句柄静默发送
+      const live = wsHandleRef.current;
+      if (live !== handle || useUiStore.getState().activeConversationId !== convId) {
+        setSendNotice("已切换会话，文件未发送");
+        return;
+      }
+      live.send({
         type: "send_message",
         conversationId: convId,
         payload: {

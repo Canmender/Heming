@@ -155,6 +155,31 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(screen.getByRole("button", { name: "历史会话" })).toBeEnabled();
   });
 
+  it("悬浮卡最近消息：纯附件消息（text 空串）显示「(附件)」", async () => {
+    useChatStore.setState({
+      messages: {
+        c1: [
+          {
+            id: "m1",
+            conversationId: "c1",
+            senderType: "user" as const,
+            senderId: "u2",
+            payload: {
+              text: "",
+              file: { id: "f1", name: "报告.pdf", mime: "application/pdf", size: 10 },
+            },
+            replyTo: null,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      },
+    });
+    render(<RadarContacts />);
+    await screen.findByText("李四");
+    fireEvent.mouseOver(screen.getByText("李四"));
+    expect(await screen.findByText("(附件)")).toBeInTheDocument(); // 空串 `??` 走不到回退 → `||` 口径
+  });
+
   it("非 overlay 点击群节点：打开群详情（不直进会话，overlay 直进会话另测）", async () => {
     render(<RadarContacts />);
     await screen.findByText("评审组");

@@ -172,7 +172,8 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
     const list = convId ? messages[convId] : undefined;
     const last = list && list.length ? list[list.length - 1] : undefined;
     return {
-      lastText: last?.payload.text ?? "暂无消息",
+      // 纯附件消息 text=""：`??` 走不到回退，需 `||`；口径与 ContactDetail 对齐
+      lastText: last ? last.payload.text || "(附件)" : "暂无消息",
       lastTime: last ? fmtWhen(last.createdAt) : "—",
     };
   };

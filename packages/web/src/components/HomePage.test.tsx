@@ -192,6 +192,34 @@ describe("HomePage", () => {
     expect(screen.queryByLabelText(/条未读/)).not.toBeInTheDocument(); // unreadCount=0 → 不渲染角标
   });
 
+  it("最近会话预览：纯附件消息（text 空串）显示「(附件)」，无消息仍「暂无消息」", async () => {
+    const attachMsg = {
+      id: "m1",
+      conversationId: "c1",
+      senderType: "user" as const,
+      senderId: "u1",
+      payload: {
+        text: "",
+        file: { id: "f1", name: "报告.pdf", mime: "application/pdf", size: 10 },
+      },
+      replyTo: null,
+      createdAt: now.toISOString(),
+    };
+    useChatStore.setState({
+      conversations: [conv("c1"), conv("c2")],
+      friends: [],
+      incoming: [],
+      messages: { c1: [attachMsg] },
+    });
+    mockFetch({ conversations: [conv("c1"), conv("c2")] });
+
+    render(<HomePage />);
+    await act(async () => {});
+
+    expect(screen.getByText("(附件)")).toBeInTheDocument(); // 空串不走 `??` 回退 → 用 `||` 口径
+    expect(screen.getByText("暂无消息")).toBeInTheDocument(); // c2 无消息口径不受影响
+  });
+
   it("最近会话行尾未读角标：unreadCount>0 黑底白字圆角数字，0 不渲染", async () => {
     const unreadConv = { id: "c3", type: "direct" as const, peer, unreadCount: 3 };
     const zeroConv = conv("c1");

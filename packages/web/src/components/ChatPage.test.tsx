@@ -958,6 +958,20 @@ describe("ChatPage", () => {
     expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持语音输入");
   });
 
+  it("切 convId 清发送提示：A 会话的语音提示不带进 B 会话", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByLabelText("语音输入"));
+    expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持语音输入");
+
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" });
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 提示随会话清理
+  });
+
   it("切会话停掉旧识别器：convId 切换调其 stop 并清实例，旧 onend 不清新会话指示", async () => {
     mockMessagesFetch([]);
     const instances: FakeSR[] = [];
@@ -1234,6 +1248,51 @@ describe("ChatPage", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent("上传失败：too large");
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+  });
+
+  it("上传悬停期间切会话：await 后丢弃不发送，提示「已切换会话，文件未发送」", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    // 上传响应由用例掌控：先悬停（模拟慢网络），期间切会话，再让 uploadFile 落定
+    let resolveUpload!: (r: Response) => void;
+    const pending = new Promise<Response>((res) => {
+      resolveUpload = res;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url === "/api/files") return pending;
+      if (/\/(messages|reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" }); // await 未返回前已切会话
+    });
+
+    await act(async () => {
+      resolveUpload(
+        jsonRes(
+          {
+            id: "f1",
+            owner: "alice",
+            name: "a.txt",
+            mime: "text/plain",
+            size: 2,
+            updatedAt: "2026-10-17T00:00:00.000Z",
+          },
+          201,
+        ),
+      );
+      await new Promise((r) => setTimeout(r, 0)); // 冲刷 uploadFile → sendFile 收尾
+    });
+
+    // 旧闭包的 convId/handle 都过期：不得把附件发进 B 会话
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已切换会话，文件未发送");
   });
 });
 
