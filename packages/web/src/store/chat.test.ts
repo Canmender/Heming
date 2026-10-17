@@ -240,6 +240,7 @@ describe("chat store", () => {
       conversationId: "c1",
       text: "你",
       status: "streaming",
+      lastAt: expect.any(Number), // Task 7 watchdog：写入即打时间戳
     });
     // 合并：不带 text 的 patch 保留已累积文本
     useChatStore
@@ -266,6 +267,7 @@ describe("chat store", () => {
       conversationId: "c1",
       text: "你好",
       status: "streaming",
+      lastAt: expect.any(Number), // chunk 累积时刷新
     });
   });
 
@@ -425,5 +427,47 @@ describe("chat store", () => {
     const list = useChatStore.getState().messages["c1"];
     expect(list).toHaveLength(1);
     expect(list[0].payload.reactions).toBeUndefined();
+  });
+
+  // —— 二期 IM Task 7：他机流 watchdog（长时间无收尾 → error 行供手动重试）——
+
+  it("sweepStaleStreams：超时流置 error，新鲜流与已完成流不动", () => {
+    const now = 1_000_000;
+    useChatStore.setState({
+      streaming: {
+        stale: { conversationId: "c1", agentId: "a1", text: "x", status: "streaming", lastAt: now - 61_000 },
+        fresh: { conversationId: "c1", agentId: "a1", text: "y", status: "streaming", lastAt: now - 5_000 },
+        done: { conversationId: "c1", agentId: "a1", text: "z", status: "done", lastAt: now - 99_000 },
+      } as never,
+      streamOwner: {},
+    });
+    useChatStore.getState().sweepStaleStreams(now);
+    const st = useChatStore.getState().streaming;
+    expect(st.stale.status).toBe("error");
+    expect(st.stale.errorMessage).toBe("长时间无响应，生成可能已中断");
+    expect(st.fresh.status).toBe("streaming"); // 阈值内不动
+    expect(st.done.status).toBe("done"); // 非 streaming 状态一律不动
+  });
+
+  it("sweepStaleStreams：无过期流时不动引用（不触发多余的重渲染）", () => {
+    useChatStore.setState({
+      streaming: {
+        fresh: { conversationId: "c1", agentId: "a1", text: "y", status: "streaming", lastAt: 999_000 },
+      } as never,
+      streamOwner: {},
+    });
+    const before = useChatStore.getState().streaming;
+    useChatStore.getState().sweepStaleStreams(1_000_000);
+    expect(useChatStore.getState().streaming).toBe(before); // 未变更则保持同引用
+  });
+
+  it("onWsEvent agent_chunk：他机流每次累积都刷新 lastAt（watchdog 依据）", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    useChatStore.getState().onWsEvent(chunk("s1", "你"));
+    expect(useChatStore.getState().streaming["s1"].lastAt).toBe(10_000);
+    vi.setSystemTime(25_000);
+    useChatStore.getState().onWsEvent(chunk("s1", "好"));
+    expect(useChatStore.getState().streaming["s1"].lastAt).toBe(25_000); // 合并时刷新
   });
 });

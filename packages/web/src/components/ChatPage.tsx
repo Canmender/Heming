@@ -18,6 +18,9 @@ import { EmojiPicker } from "./EmojiPicker.js";
 /** 正则转义：mention 名按字面量匹配（名字可含 . * + 等元字符）。 */
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** 他机流 watchdog 清扫周期（Task 7）：15s 一次扫全局 streaming 的过期项（阈值在 store 内 60s）。 */
+const STREAM_SWEEP_INTERVAL_MS = 15_000;
+
 /** 表情回应浮排的常用 emoji（Task 6；emoji 仅作回应数据，不作图标）。 */
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🎉", "🔥", "✅", "👀", "🤔", "👏"];
 
@@ -169,6 +172,7 @@ export function ChatPage() {
   const removeStream = useChatStore((s) => s.removeStream);
   const markStreamOwner = useChatStore((s) => s.markStreamOwner);
   const clearStreamsForConversation = useChatStore((s) => s.clearStreamsForConversation);
+  const sweepStaleStreams = useChatStore((s) => s.sweepStaleStreams);
   const agentsRoster = useChatStore((s) => s.agentsRoster);
   const me = useAuthStore((s) => s.user);
   const [draft, setDraft] = useState("");
@@ -199,12 +203,12 @@ export function ChatPage() {
   const [reactFor, setReactFor] = useState<string | null>(null);
   /**
    * 群成员挂载快照（带 convId 防跨会话串数据）：
-   * byId = id→名（他人气泡署名，M2 消息体无 senderName）；
+   * byId = id→{名, 头像}（他人气泡署名与头像，M2 消息体无 senderName/avatar）；
    * agents = kind=agent 行 → @ 选择器候选（**只认本会话群 members**，评审 F1——跨群 join 视图不作数）。
    */
   const [groupMembers, setGroupMembers] = useState<{
     convId: string;
-    byId: Record<string, string>;
+    byId: Record<string, { name: string; avatar?: string }>;
     agents: MentionItem[];
   } | null>(null);
   const wsHandleRef = useRef<WsHandle | null>(null);
@@ -230,7 +234,7 @@ export function ChatPage() {
   // conversations 为联合类型（M2）：仅 direct 有 peer；群显群名+人数
   const conv = conversations.find((c) => c.id === convId);
   const peer = conv?.type === "direct" ? conv.peer : undefined;
-  const memberNameById = groupMembers?.convId === convId ? groupMembers.byId : undefined;
+  const memberInfoById = groupMembers?.convId === convId ? groupMembers.byId : undefined;
   /** 本会话群的 @ 候选：只认本群 members 的 agent 行（评审 F1；快照未落定/失败则空）。 */
   const mentionCandidates = groupMembers?.convId === convId ? groupMembers.agents : [];
   // 仅 direct 有「已读」：取对方（peer）在本会话的读点；ISO 时间戳同构（…Z），字符串比较即时间序
@@ -250,7 +254,17 @@ export function ChatPage() {
       ? "我"
       : conv?.type === "direct"
         ? peer?.displayName
-        : memberNameById?.[m.senderId];
+        : memberInfoById?.[m.senderId]?.name;
+  /**
+   * 他人气泡左侧头像数据（Task 7）：direct 恒为 peer（无 avatar 走首字回退，保持既有行为）；
+   * group 仅当该 sender 在成员快照中带 avatar 时给出（无则不出头像元素，群内无头像不多占位）。
+   */
+  const bubbleAvatar = (m: Message): { displayName: string; avatar?: string } | undefined => {
+    if (m.senderId === me?.id) return undefined;
+    if (conv?.type === "direct") return peer;
+    const info = memberInfoById?.[m.senderId];
+    return info?.avatar ? { displayName: info.name, avatar: info.avatar } : undefined;
+  };
   /** 选择器条目：剔除已选（防重复 chip）+ 按 token query 过滤（空串=全量）。 */
   const pickerItems = mentionCandidates.filter(
     (a) =>
@@ -267,7 +281,7 @@ export function ChatPage() {
 
   /** 流气泡署名：本会话 members 映射名优先，其次名册，兜底「智能体」。 */
   const nameOf = (agentId: string) =>
-    memberNameById?.[agentId] ?? agentsRoster.find((a) => a.id === agentId)?.name ?? "智能体";
+    memberInfoById?.[agentId]?.name ?? agentsRoster.find((a) => a.id === agentId)?.name ?? "智能体";
 
   /** 本会话的打字机项（含他机流）：渲染在消息列表尾部。 */
   const streamEntries = Object.entries(streaming).filter(([, s]) => s.conversationId === convId);
@@ -310,6 +324,7 @@ export function ChatPage() {
           conversationId: convId,
           text: acc,
           status: "streaming",
+          lastAt: Date.now(), // Task 7 watchdog：累积即刷新
         });
       },
       onStart: (streamId, mention) => {
@@ -320,6 +335,7 @@ export function ChatPage() {
           conversationId: convId,
           text: "",
           status: "streaming",
+          lastAt: Date.now(),
         });
       },
     };
@@ -398,7 +414,10 @@ export function ChatPage() {
         if (!alive) return;
         setGroupMembers({
           convId,
-          byId: Object.fromEntries(list.map((m) => [m.id, m.name])),
+          // Task 7：id→{名, 头像}（avatar 非空才带键）——署名与群内他人气泡头像共用此快照
+          byId: Object.fromEntries(
+            list.map((m) => [m.id, { name: m.name, ...(m.avatar ? { avatar: m.avatar } : {}) }]),
+          ),
           agents: list
             .filter((m) => m.kind === "agent")
             .map((m) => ({ id: m.id, name: m.name, avatar: m.avatar })),
@@ -436,6 +455,11 @@ export function ChatPage() {
         setConnected(true);
         // 断线重连成功：补拉断档消息（setMessages 是合并去重语义，幂等）
         void fetchMessages(convId).then((msgs) => setMessages(convId, msgs));
+        // Task 7：重连成功补齐「断线期间的已读」——仍有未读则补发 mark_read
+        // （与挂载逻辑同款读法；handle 取本 effect 闭包里的，非 ref，防重连期间句柄已换）
+        const unread =
+          useChatStore.getState().conversations.find((c) => c.id === convId)?.unreadCount ?? 0;
+        if (unread > 0) handle?.send({ type: "mark_read", conversationId: convId });
       },
       onClose: () => setConnected(false),
     });
@@ -478,6 +502,20 @@ export function ChatPage() {
     clearStreamsForConversation(convId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 他机流 watchdog（Task 7）：有流式项在飞时每 15s 扫一次全局 streaming，把长时间无响应
+  // （>60s 未刷新）的打字机项置 error 行（阈值在 store；本机流不自动重试，error 行已有手动重试入口）。
+  // 以「streaming 非空」为门：无流在飞时不挂定时器——既不空转，也让假时钟测试的 runAllTimers 能收敛；
+  // 有流即起、全部收口即清。sweepStaleStreams 为稳定引用。
+  const anyStreaming = Object.keys(streaming).length > 0;
+  useEffect(() => {
+    if (!anyStreaming) return;
+    const timer = window.setInterval(
+      () => sweepStaleStreams(Date.now()),
+      STREAM_SWEEP_INTERVAL_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [anyStreaming, sweepStaleStreams]);
 
   // 卸载（离开聊天页）：中止全部进行中流，不再空烧供应商 token；语音识别同停；
   // 录音中止同走取消位（onstop 停麦克风轨、放弃发送，60s 定时器一并清）
@@ -635,7 +673,7 @@ export function ChatPage() {
           from:
             forwardMsg.senderId === me?.id
               ? "我"
-              : (memberNameById?.[forwardMsg.senderId] ?? peer?.displayName ?? "未知"),
+              : (memberInfoById?.[forwardMsg.senderId]?.name ?? peer?.displayName ?? "未知"),
           source: src ? (src.type === "direct" ? src.peer.displayName : src.name) : "未知会话",
         },
       },
@@ -872,6 +910,8 @@ export function ChatPage() {
           const recalled = m.recalledAt != null;
           // 署名：自己「我」；direct 对方名；群内他人用挂载时拉到的成员映射名（缺失则不渲染署名行）
           const senderName = displaySenderName(m);
+          // 左侧头像（Task 7）：direct 恒为 peer；群内他人仅当成员快照带 avatar 时出（无则不出）
+          const senderAvatarUser = bubbleAvatar(m);
           // 仅 direct：对方读点 ≥ 本条时间 → 已读（逐条判断；群 M2 不显示；已撤回不显示）
           const readByPeer = mine && !recalled && !!peerReadAt && peerReadAt >= m.createdAt;
           // 引用卡：回复消息且原消息仍在本会话历史中才渲染；原消息已撤回则不渲染（对齐撤回不回显语义）
@@ -884,8 +924,10 @@ export function ChatPage() {
               id={`msg-${m.id}`}
               className={`mb-3 flex ${mine ? "justify-end" : "items-start gap-2"}`}
             >
-              {/* 对方消息：左侧头像（无 avatar 首字回退）；自己的消息不显示头像 */}
-              {!mine && peer && <Avatar user={peer} size={22} className="mt-0.5" />}
+              {/* 对方消息：左侧头像（direct 恒有、群内他人有 avatar 时；无 avatar 首字回退）；自己的消息不显示头像 */}
+              {senderAvatarUser && (
+                <Avatar user={senderAvatarUser} size={22} className="mt-0.5" />
+              )}
               <div
                 className={`group relative max-w-[70%] rounded-lg border border-line px-3 py-2 text-[13px] shadow-card ${
                   mine ? "bg-white" : "bg-[#f7f7f7]"

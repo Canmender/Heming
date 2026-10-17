@@ -861,12 +861,14 @@ describe("ChatPage", () => {
           conversationId: "c1",
           text: "残留半句",
           status: "streaming",
+          lastAt: 0,
         },
         otherConv: {
           agentId: "system-assistant",
           conversationId: "c2",
           text: "他会话的流",
           status: "streaming",
+          lastAt: 0,
         },
       },
       streamOwner: { orphan1: true, otherConv: true },
@@ -2181,6 +2183,100 @@ describe("ChatPage", () => {
     expect(screen.getByText("消息已撤回")).toBeInTheDocument();
     expect(screen.queryByLabelText("表情回应 👍 1")).not.toBeInTheDocument(); // 撤回消息的 chips 不渲染
     expect(screen.getAllByLabelText("添加表情回应")).toHaveLength(1); // 仅未撤回的 m2 有
+  });
+
+  // —— 二期 IM Task 7：重连补已读 · 群头像 · 定时清扫 ——
+
+  it("ws 重连 onOpen 且有未读时补发 mark_read（未读为 0 则不补）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 2 }],
+    });
+
+    render(<ChatPage />);
+    // 挂载期即因未读发过一次；清掉以隔离「重连 onOpen」这一次
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({ type: "mark_read", conversationId: "c1" }),
+    );
+    send.mockClear();
+
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    expect(send).toHaveBeenCalledWith({ type: "mark_read", conversationId: "c1" });
+
+    // 负例：未读归零后重连不再补发（守卫生效）
+    send.mockClear();
+    act(() => {
+      useChatStore.setState({
+        conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
+      });
+    });
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    expect(send).not.toHaveBeenCalledWith({ type: "mark_read", conversationId: "c1" });
+  });
+
+  it("群消息他人气泡渲染成员头像（快照带 avatar → img；无 avatar 不出头像）", async () => {
+    const avatar = "data:image/png;base64,QUJD";
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    const other = msg("m1", "我提个问题", "2026-10-14T01:00:00.000Z"); // senderId u2
+    mockMessagesFetch([other], undefined, {
+      members: [
+        [
+          { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
+          { kind: "user", id: "u2", name: "鲍勃", avatar, user: peer },
+        ],
+      ],
+    });
+
+    render(<ChatPage />);
+    await waitFor(() =>
+      expect([...document.querySelectorAll("img")].some((i) => i.getAttribute("src") === avatar)).toBe(
+        true,
+      ),
+    );
+    // 只有他人气泡那一个 img（群头/无头像成员均走首字回退，不产生 img）
+    expect([...document.querySelectorAll("img")].filter((i) => i.getAttribute("src") === avatar)).toHaveLength(1);
+    expect(screen.getByText("鲍勃")).toBeInTheDocument(); // 署名照常
+  });
+
+  it("定时清扫：15s 后过期他机流变 error 行（阈值内不动）", async () => {
+    vi.useFakeTimers();
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {}); // 挂载 effects 落定（含 I1 孤儿清扫，避免误清注入项）
+
+    // 挂载后注入一条 lastAt=0（远古）的他机流，绕开挂载清扫
+    act(() => {
+      useChatStore.setState({
+        streaming: {
+          s1: {
+            conversationId: "c1",
+            agentId: "system-assistant",
+            text: "半句",
+            status: "streaming",
+            lastAt: 0,
+          },
+        },
+      });
+    });
+    expect(screen.getByText(/半句/)).toBeInTheDocument();
+    expect(useChatStore.getState().streaming["s1"].status).toBe("streaming");
+
+    act(() => {
+      vi.advanceTimersByTime(15_000); // 清扫 interval 到点
+    });
+
+    expect(useChatStore.getState().streaming["s1"].status).toBe("error");
+    expect(screen.getByText("长时间无响应，生成可能已中断")).toBeInTheDocument();
+    vi.useRealTimers();
   });
 });
 

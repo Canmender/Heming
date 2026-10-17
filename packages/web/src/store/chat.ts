@@ -29,6 +29,8 @@ export interface AgentStreamState {
   text: string;
   status: "streaming" | "error";
   errorMessage?: string;
+  /** 最后一次写入（含文本累积/事件到达）的毫秒时间戳；他机流 watchdog 据此判「长时间无响应」。 */
+  lastAt: number;
 }
 
 /** upsert 补丁：必带归属字段（创建首帧即定 agent/会话），其余字段缺省继承/补默认。 */
@@ -37,6 +39,12 @@ export type AgentStreamPatch = Partial<AgentStreamState> &
 
 /** 他机流 agent_error 的「短暂显示」时长（本机流不走此路径——保留供重试）。 */
 const REMOTE_ERROR_TTL_MS = 6000;
+
+/**
+ * 他机流「无响应」判定阈值（Task 7 watchdog）：距最后一次写入超过此时长仍未收尾
+ * （message_new/agent_error）即判为中断，置 error 行——本机流不自动重试，error 行已有手动重试 UI。
+ */
+const STREAM_STALE_MS = 60_000;
 
 interface ChatState {
   conversations: Conversation[];
@@ -79,6 +87,11 @@ interface ChatState {
   clearStreamsForConversation: (convId: string) => void;
   /** 流式三事件收口（chunk/error/message_new{streamId}），由 ChatPage 的 onEvent 转发。 */
   onWsEvent: (e: WsServerEvent) => void;
+  /**
+   * 他机流 watchdog（Task 7）：扫描 streaming 项，status==="streaming" 且距 lastAt 超过
+   * STREAM_STALE_MS 未刷新者置 error（长时间无响应，生成可能已中断）。由 ChatPage 定时器调用。
+   */
+  sweepStaleStreams: (now: number) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -180,6 +193,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversationId: patch.conversationId,
       text: "",
       status: "streaming",
+      lastAt: Date.now(),
     };
     set({
       streaming: {
@@ -254,6 +268,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversationId: e.conversationId,
         text: (prev?.text ?? "") + e.text,
         status: "streaming",
+        lastAt: Date.now(), // Task 7：累积即刷新，watchdog 以此为「仍有活动」依据
       });
       return;
     }
@@ -275,5 +290,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }, REMOTE_ERROR_TTL_MS);
       }
     }
+  },
+  sweepStaleStreams(now) {
+    const entries = get().streaming;
+    let changed = false;
+    const next = { ...entries };
+    for (const [id, s] of Object.entries(entries)) {
+      if (s.status === "streaming" && now - (s.lastAt ?? 0) > STREAM_STALE_MS) {
+        next[id] = { ...s, status: "error", errorMessage: "长时间无响应，生成可能已中断" };
+        changed = true;
+      }
+    }
+    if (changed) set({ streaming: next }); // 无变更则不写（保引用稳定，不触发多余重渲染）
   },
 }));
