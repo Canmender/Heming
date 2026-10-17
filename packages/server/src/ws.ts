@@ -83,6 +83,16 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
             agentId: event.agentId,
             streamId: event.streamId,
             text: event.text,
+            // E2E 流式信封（Task 4，设计 §5.3）：密文 chunk 原样透传——服务端不读内容，
+            // 收端按 cipher/chainKid/n/index 开信封（明文 legacy chunk 无这些字段）。
+            ...(event.cipher !== undefined
+              ? {
+                  cipher: event.cipher,
+                  ...(event.chainKid !== undefined ? { chainKid: event.chainKid } : {}),
+                  ...(event.n !== undefined ? { n: event.n } : {}),
+                  ...(event.index !== undefined ? { index: event.index } : {}),
+                }
+              : {}),
           });
         } else {
           // agent_error：校验成员后广播原事件，不入库。
@@ -91,8 +101,10 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
         return;
       }
       if (event.type === "agent_finish") {
-        // F2：shared 的 finish text 保持宽松入站（无 min），服务端拒收 trim 空串。
-        if (event.text.trim() === "") {
+        // F2：shared 的 finish text 保持宽松入站（无 min），服务端拒收 trim 空串——
+        // 密文 finish（Task 4）text 恒为空、全文在 cipher 里，跳过该拒收（schema 层已
+        // 保证 cipher 非空且夹带明文会被拒，服务端对信封只存不读）。
+        if (event.text.trim() === "" && event.cipher === undefined) {
           send(ws, {
             type: "agent_error",
             conversationId: event.conversationId,
@@ -127,13 +139,30 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
           });
           return;
         }
-        const message = store.addMessage(
-          event.conversationId,
-          "agent",
-          event.agentId,
-          { text: event.text },
-          event.replyTo ?? null,
-        );
+        // 密文 finish 按信封入库（内容在 cipher，payload 落 {text:""} 占位、replyTo 置空——
+        // 与 send_message e2e 路径同口径，服务端不见内容）；明文 finish 保持原样。
+        const message =
+          event.cipher !== undefined
+            ? store.addMessage(
+                event.conversationId,
+                "agent",
+                event.agentId,
+                { text: "" },
+                null,
+                {
+                  enc: "e2e",
+                  cipher: event.cipher,
+                  ...(event.chainKid !== undefined ? { chainKid: event.chainKid } : {}),
+                  ...(event.n !== undefined ? { n: event.n } : {}),
+                },
+              )
+            : store.addMessage(
+                event.conversationId,
+                "agent",
+                event.agentId,
+                { text: event.text },
+                event.replyTo ?? null,
+              );
         broadcastToConversation(event.conversationId, { type: "message_new", message, streamId: event.streamId });
         return;
       }

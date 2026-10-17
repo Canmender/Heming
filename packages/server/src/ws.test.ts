@@ -564,4 +564,117 @@ describe("agent streaming", () => {
     wsA.close();
     wsB.close();
   });
+
+  // —— E2E Task 4：agent 流式信封（chunk 广播透传 / finish 按信封入库）——
+
+  it("密文 agent_chunk：广播透传 cipher/chainKid/n/index（text 空串），不入库", async () => {
+    const a = store.createUser(`ch-${Date.now()}`, "h", "A");
+    const b = store.createUser(`ci-${Date.now()}`, "h", "B");
+    seedPreset(store); // 只为登记 system-assistant 名册元数据（预设群不复用——其消息序列跨用例污染断言）
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const g = store.createGroup(a.id, "密文chunk群", [b.id]);
+    store.attachAgentToGroup(g.id, "system-assistant");
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+
+    const wait = nextEvent(wsB);
+    wsA.send(
+      JSON.stringify({
+        type: "agent_chunk",
+        conversationId: g.id,
+        agentId: "system-assistant",
+        streamId: "sc1",
+        text: "",
+        cipher: "Q2lwaGVyZGF0YQ==",
+        chainKid: "k1",
+        n: 7,
+        index: 0,
+      }),
+    );
+    const ev = await wait;
+    expect(ev.type).toBe("agent_chunk");
+    if (ev.type === "agent_chunk") {
+      expect(ev.text).toBe("");
+      expect(ev.cipher).toBe("Q2lwaGVyZGF0YQ==");
+      expect(ev.chainKid).toBe("k1");
+      expect(ev.n).toBe(7);
+      expect(ev.index).toBe(0);
+    }
+    expect(store.listMessages(g.id)).toHaveLength(0); // chunk 不入库（同明文路径）
+    wsA.close();
+    wsB.close();
+  });
+
+  it("密文 agent_finish：text 空串过 F2 拒收，按 e2e 信封入库并广播 message_new", async () => {
+    const a = store.createUser(`cj-${Date.now()}`, "h", "A");
+    const b = store.createUser(`ck-${Date.now()}`, "h", "B");
+    seedPreset(store);
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const g = store.createGroup(a.id, "密文finish群", [b.id]);
+    store.attachAgentToGroup(g.id, "system-assistant");
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+
+    const wait = nextEvent(wsB);
+    wsA.send(
+      JSON.stringify({
+        type: "agent_finish",
+        conversationId: g.id,
+        agentId: "system-assistant",
+        streamId: "sf1",
+        text: "",
+        cipher: "ZmluaXNoLWNpcGhlcg==",
+        chainKid: "k1",
+        n: 8,
+      }),
+    );
+    const ev = await wait;
+    expect(ev.type).toBe("message_new");
+    if (ev.type === "message_new") {
+      expect(ev.message.enc).toBe("e2e");
+      expect(ev.message.cipher).toBe("ZmluaXNoLWNpcGhlcg==");
+      expect(ev.message.chainKid).toBe("k1");
+      expect(ev.message.n).toBe(8);
+      expect(ev.message.payload.text).toBe(""); // 服务端只见信封
+      expect(ev.message.senderType).toBe("agent");
+      expect(ev.streamId).toBe("sf1");
+    }
+    const msgs = store.listMessages(g.id);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ enc: "e2e", cipher: "ZmluaXNoLWNpcGhlcg==", payload: { text: "" } });
+    wsA.close();
+    wsB.close();
+  });
+
+  it("密文 agent_finish 缺 chainKid/n 与夹明文 text 均拒（bad_event）不入库", async () => {
+    const a = store.createUser(`cl-${Date.now()}`, "h", "A");
+    seedPreset(store);
+    const g = store.createGroup(a.id, "密文finish拒收群", []);
+    store.attachAgentToGroup(g.id, "system-assistant");
+    const wsA = await connect(issueToken(a.id));
+    const cases: Array<Record<string, unknown>> = [
+      { text: "", cipher: "Qw==" }, // 缺 chainKid/n
+      { text: "", cipher: "Qw==", chainKid: "k1" }, // 缺 n
+      { text: "", cipher: "Qw==", n: 0 }, // 缺 chainKid
+      { text: "明文", cipher: "Qw==", chainKid: "k1", n: 0 }, // 夹明文
+      { text: "", cipher: "", chainKid: "k1", n: 0 }, // 空 cipher
+    ];
+    for (const extra of cases) {
+      const wait = nextEvent(wsA);
+      wsA.send(
+        JSON.stringify({
+          type: "agent_finish",
+          conversationId: g.id,
+          agentId: "system-assistant",
+          streamId: "sf2",
+          ...extra,
+        }),
+      );
+      const ev = await wait;
+      expect(ev.type).toBe("error");
+      if (ev.type === "error") expect(ev.code).toBe("bad_event");
+    }
+    expect(store.listMessages(g.id)).toHaveLength(0);
+    wsA.close();
+  });
 });

@@ -1,10 +1,31 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import type { Conversation, Message, WsClientEvent } from "@heming/shared";
-import { useChatStore } from "../store/chat.js";
+import type { Conversation, Message } from "@heming/shared";
+import { useChatStore, type E2eOpenHandler, type E2eOpenOutcome } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
-import { fetchMessages, fetchMembers, uploadFile, fetchFileBlobUrl } from "../lib/api.js";
+import {
+  fetchMembers,
+  uploadFile,
+  fetchFileBlobUrl,
+  fetchE2eKeys,
+  putE2eKeys,
+} from "../lib/api.js";
+import { hasSubtle } from "../lib/e2eCrypto.js";
+import {
+  initSession,
+  sealMessage,
+  openMessage,
+  msgCache,
+  isForMe,
+  sweepDeferred,
+  recvChainOwners,
+  chunkAad,
+  exportOwnDeviceKeys,
+  type E2eDeps,
+  type PlainEnvelope,
+  type SealedEnvelope,
+} from "../lib/e2eSession.js";
 import { streamChat } from "../lib/llmClient.js";
 import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
@@ -14,6 +35,24 @@ import { MentionPicker, type MentionItem } from "./MentionPicker.js";
 import { AgentStreamBubble } from "./AgentStreamBubble.js";
 import { ChatInfoCard } from "./ChatInfoCard.js";
 import { EmojiPicker } from "./EmojiPicker.js";
+
+/** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
+export const NO_E2E_NOTICE = "当前环境不支持端到端加密，请使用桌面端或 HTTPS";
+
+/** chips 空表的稳定引用（selector 兜底，防每次渲染新建 {} 触发多余重渲染）。 */
+const NO_PLAIN: Record<string, PlainEnvelope> = {};
+
+/**
+ * E2E 公钥短缓存：seal 内逐成员调 fetchPeerKeys，不缓存会让一次 seal 打 N 次
+ * GET /api/e2e/keys（群聊风暴）。3s TTL——新设备上云后最迟下次 seal 可见。
+ */
+let peerKeysCache: { at: number; data: Awaited<ReturnType<typeof fetchE2eKeys>> } | null = null;
+async function fetchPeerKeysCached(userId: string) {
+  if (!peerKeysCache || Date.now() - peerKeysCache.at > 3000) {
+    peerKeysCache = { at: Date.now(), data: await fetchE2eKeys() };
+  }
+  return peerKeysCache.data[userId] ?? null;
+}
 
 /** 正则转义：mention 名按字面量匹配（名字可含 . * + 等元字符）。 */
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -162,7 +201,7 @@ export function ChatPage() {
   const leave = useUiStore((s) => s.leaveConversation);
   const conversations = useChatStore((s) => s.conversations);
   const messages = useChatStore((s) => s.messages[convId] ?? []);
-  const setMessages = useChatStore((s) => s.setMessages);
+  const plainById = useChatStore((s) => s.plainById);
   const appendMessage = useChatStore((s) => s.appendMessage);
   const reads = useChatStore((s) => s.reads);
   const loadReads = useChatStore((s) => s.loadReads);
@@ -204,12 +243,14 @@ export function ChatPage() {
   /**
    * 群成员挂载快照（带 convId 防跨会话串数据）：
    * byId = id→{名, 头像}（他人气泡署名与头像，M2 消息体无 senderName/avatar）；
-   * agents = kind=agent 行 → @ 选择器候选（**只认本会话群 members**，评审 F1——跨群 join 视图不作数）。
+   * agents = kind=agent 行 → @ 选择器候选（**只认本会话群 members**，评审 F1——跨群 join 视图不作数）；
+   * userIds = kind=user 行 id → E2E chaindist 分发对象（agent 无设备公钥，不参与）。
    */
   const [groupMembers, setGroupMembers] = useState<{
     convId: string;
     byId: Record<string, { name: string; avatar?: string }>;
     agents: MentionItem[];
+    userIds: string[];
   } | null>(null);
   const wsHandleRef = useRef<WsHandle | null>(null);
   /** 语音识别器实例：切会话/卸载时 stop，避免后台继续识别回填草稿。 */
@@ -237,6 +278,134 @@ export function ChatPage() {
   const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
   /** 本机流元数据（streamId → 触发上下文）：onLocalDelta 回填 agentId、重试取原触发文本。 */
   const streamMeta = useRef<Record<string, { agentId: string; name: string; text: string }>>({});
+  /** 存量自迁移已尝试集（组件生命周期内）：跨 messages.length 变化的 effect 批次去重。 */
+  const migratedRef = useRef<Set<string>>(new Set());
+  /**
+   * 发送侧出站箱（`${chainKid}:${n}` → 明文）：自发消息的 echo 没有对应 recv 链（发送链
+   * 只有对方持有），openMessage 解不开——send 时把明文暂存这里，echo 到达时按链索引取回
+   * 并落 msgCache（§6 缓存优先，重载后走缓存自解）。上限 200 条溢出丢最旧（Map 插入序）。
+   */
+  const outboxRef = useRef(new Map<string, PlainEnvelope>());
+  /** subtle 可用性（每渲染实测）：横幅常驻与全发送路径拦截的统一开关。 */
+  const subtleOk = hasSubtle();
+
+  // —— E2E Task 4：会话接线（deps 组装 / 解密 handler / 公钥上云）——
+
+  /** seal 用 deps：sendRaw 走当前 WS 句柄（chaindist 与正文同一连接有序上行）。 */
+  const e2eDeps = (): E2eDeps => ({
+    fetchPeerKeys: fetchPeerKeysCached,
+    sendRaw: (e) => wsHandleRef.current?.send(e),
+    now: Date.now,
+  });
+
+  /**
+   * 解密 handler（注入 chat store）：isForMe 先滤非本机定向 chaindist（硬验收②——
+   * 群聊他设备的分发静默忽略不抛错）→ openMessage（chaindist 内自动落链）→
+   * chaindist 结果 await sweepDeferred 完成暂挂重扫（store 随即重试占位）→
+   * "duplicate"（硬验收③）查明文缓存补齐渲染、缓存无则忽略 → 异常映射
+   * e2e_not_for_device=skip、其余=failed 占位。
+   */
+  const makeOpenHandler = (conv: string): E2eOpenHandler => {
+    return async (env, ctx): Promise<E2eOpenOutcome> => {
+      const sealed: SealedEnvelope = {
+        id: env.id,
+        ...(env.senderId !== undefined ? { senderId: env.senderId } : {}),
+        ...(env.chainKid !== undefined ? { chainKid: env.chainKid } : {}),
+        ...(env.n !== undefined ? { n: env.n } : {}),
+        cipher: env.cipher,
+        ...(env.createdAt !== undefined ? { createdAt: env.createdAt } : {}),
+      };
+      if (!isForMe(sealed)) return { status: "skip" };
+      // 缓存优先（§6）：已解密过的（含重加密自发消息/本会话已开过的）直接取——
+      // 也是 (chainKid,n) 重放/并发 sweep 抢先解开时的补齐路径（硬验收③）。
+      const cached = msgCache.list(conv).find((c) => c.id === env.id);
+      if (cached) return { status: "ok", plain: cached.plain };
+      // 出站箱：自己的 echo 按链索引取回明文（对方能开、自己开不了），落缓存后返回
+      const outKey =
+        env.chainKid !== undefined && env.n !== undefined ? `${env.chainKid}:${env.n}` : "";
+      const outPlain = outKey ? outboxRef.current.get(outKey) : undefined;
+      if (outPlain) {
+        outboxRef.current.delete(outKey);
+        msgCache.append(conv, {
+          id: env.id,
+          senderId: env.senderId ?? "unknown",
+          at: env.createdAt ? Date.parse(env.createdAt) || Date.now() : Date.now(),
+          plain: outPlain,
+        });
+        return { status: "ok", plain: outPlain };
+      }
+      try {
+        const opts = ctx
+          ? { aad: chunkAad(conv, ctx.streamId, ctx.index), noDefer: true }
+          : undefined;
+        const r = await openMessage(
+          { id: conv, memberIdOf: (kid) => recvChainOwners(conv)[kid] },
+          sealed,
+          msgCache,
+          opts,
+        );
+        if (r === "defer") return { status: "defer" };
+        if (r === "duplicate") {
+          const cached = msgCache.list(conv).find((c) => c.id === env.id);
+          return cached ? { status: "ok", plain: cached.plain } : { status: "skip" };
+        }
+        if (r.kind === "chaindist") {
+          await sweepDeferred(conv); // 等重扫完成：store 的 pending 重试直接命中明文缓存
+          return { status: "ok", plain: r };
+        }
+        return { status: "ok", plain: r };
+      } catch (e) {
+        if ((e as Error).message === "e2e_not_for_device") return { status: "skip" };
+        return { status: "failed" };
+      }
+    };
+  };
+
+  /**
+   * seal 分发对象（硬验收①的对端集合）：direct=对端+自己；group=本群 user 行+自己
+   * （自己设备由 distributeChain 按公钥指纹自跳过，带上是为了多设备自同步）。
+   */
+  const resolveMembers = async (target: string): Promise<string[]> => {
+    const mine = me ? [me.id] : [];
+    const targetConv = conversations.find((c) => c.id === target);
+    if (targetConv?.type === "direct") return [targetConv.peer.id, ...mine];
+    if (groupMembers?.convId === target) return [...groupMembers.userIds, ...mine];
+    try {
+      const list = await fetchMembers(target);
+      return [...list.filter((m) => m.kind === "user").map((m) => m.id), ...mine];
+    } catch {
+      return []; // 成员快照缺失：正文照封（chaindist 留待下次 seal 重试分发）
+    }
+  };
+
+  /**
+   * E2E 统一封发：无 subtle 一律拦截给提示且不发送（硬验收⑤——绝不降级明文）；
+   * sealMessage 内部先分发 chaindist 再封正文，事件自带 enc/cipher/chainKid/n。
+   */
+  const sealAndSend = async (plain: PlainEnvelope, target: string = convId): Promise<boolean> => {
+    if (!hasSubtle()) {
+      setSendNotice(NO_E2E_NOTICE);
+      return false;
+    }
+    try {
+      const members = await resolveMembers(target);
+      const ev = await sealMessage({ id: target, members }, plain, e2eDeps());
+      if (ev.type === "send_message" && ev.cipher && ev.chainKid !== undefined && ev.n !== undefined) {
+        // 出站箱登记（echo 自解用）：Map 插入序裁最旧
+        const ob = outboxRef.current;
+        ob.set(`${ev.chainKid}:${ev.n}`, plain);
+        if (ob.size > 200) {
+          const oldest = ob.keys().next().value;
+          if (oldest !== undefined) ob.delete(oldest);
+        }
+      }
+      wsHandleRef.current?.send(ev);
+      return true;
+    } catch (err) {
+      setSendNotice(`发送失败：${(err as Error).message}`);
+      return false;
+    }
+  };
 
   // conversations 为联合类型（M2）：仅 direct 有 peer；群显群名+人数
   const conv = conversations.find((c) => c.id === convId);
@@ -295,33 +464,101 @@ export function ChatPage() {
   /** 「生成中」提示行只报本机流（他机流错误行短暂停留，不占中断入口）。 */
   const activeLocal = streamEntries.filter(([id, s]) => streamOwner[id] && s.status === "streaming");
 
+  /** 本会话已解密明文（占位判定与 reaction kind 判定的数据源；未解密消息无记录）。 */
+  const plainOf = plainById[convId] ?? NO_PLAIN;
+  /**
+   * 表情回应事件消息（kind="reaction" 的 e2e 消息）不画气泡——渲染前过滤，
+   * 由 chipsFor 聚合进目标消息的 chips（设计 §5.4）。未解密的事件暂以占位显示。
+   */
+  const visibleMessages = messages.filter(
+    (m) => !(m.enc === "e2e" && plainOf[m.id]?.kind === "reaction"),
+  );
+  /**
+   * 目标消息的回应 chips：存量 payload.reactions（服务端 toggle 时代）打底，
+   * 再按消息序叠加解密出的 kind=reaction 事件（add 进 / remove 出）；
+   * 空集条目剔除（remove 后无人参与的 emoji 不留死 chip）。
+   */
+  const chipsFor = (m: Message): { emoji: string; userIds: string[] }[] => {
+    const map = new Map<string, Set<string>>();
+    for (const r of m.payload.reactions ?? []) map.set(r.emoji, new Set(r.userIds));
+    for (const ev of messages) {
+      if (ev.recalledAt != null || ev.enc !== "e2e") continue;
+      const p = plainOf[ev.id];
+      if (p?.kind !== "reaction" || !p.reaction || p.reaction.target !== m.id) continue;
+      const set = map.get(p.reaction.emoji) ?? new Set<string>();
+      if (p.reaction.op === "add") set.add(ev.senderId);
+      else set.delete(ev.senderId);
+      map.set(p.reaction.emoji, set);
+    }
+    return [...map.entries()]
+      .filter(([, s]) => s.size > 0)
+      .map(([emoji, s]) => ({ emoji, userIds: [...s] }));
+  };
+
   /**
    * 启动一次 mention 触发（发送成功 / 错误行重试共用）：
    * deps 全部从 stores + WS 句柄组装；fetchHistory 映射 role 并剔掉刚发出的这条
    * （服务端很可能已入库，否则当前 user 轮会在提示词里出现两遍）。
    */
   const startRun = (mentions: { agentId: string; name: string }[], text: string) => {
+    // 无 subtle：触发端无法封 chunk/finish——拦截不启动（硬验收⑤：不降级明文回复）
+    if (!hasSubtle()) {
+      setSendNotice(NO_E2E_NOTICE);
+      return;
+    }
     const deps: TriggerDeps = {
       getProfile: resolveProfile,
       getPrompt: (agentId) => useLlmStore.getState().prompts[agentId] ?? "",
       fetchHistory: async () => {
-        // spec §3：提示词只带近 30 条历史（服务端全量返回，客户端切尾）；
-        // 已撤回消息一律跳过（recalledAt 非 null 不进提示词，撤回内容不外发模型供应商）——
-        // 在 30 条窗口内先跳过再组装，跳过后可能恰剔空尾部（窗口尾全是撤回），
-        // 末行 pop 的 `last &&` 守卫对空尾部仍正确，本条 user 轮照常被剔除
-        const msgs = (await fetchMessages(convId))
-          .slice(-30)
-          .filter((m) => m.recalledAt == null);
-        const rows = msgs.map((m) => ({
-          role: m.senderType === "user" ? ("user" as const) : ("assistant" as const),
-          content: m.payload.text,
-        }));
+        // spec §3：提示词只带近 30 条历史；已撤回跳过；E2E 信封经 loadMessages 合并
+        // （缓存优先 → handler 解密 → 占位）——**解不开的不进提示词**（硬验收⑤），
+        // reaction/chaindist 控制消息同样不进。
+        const msgs = (await useChatStore.getState().loadMessages(convId)).slice(-30);
+        const plainOf = useChatStore.getState().plainById[convId] ?? {};
+        const rows = msgs
+          .filter((m) => {
+            if (m.recalledAt != null) return false;
+            if (m.enc === "e2e") {
+              const p = plainOf[m.id];
+              if (!p) return false; // 占位（无法解密）→ 不外发模型供应商
+              if (p.kind !== "text" && p.kind !== "file" && p.kind !== "forward") return false;
+            }
+            return true;
+          })
+          .map((m) => ({
+            role: m.senderType === "user" ? ("user" as const) : ("assistant" as const),
+            content: m.payload.text,
+          }));
         const last = rows[rows.length - 1];
         if (last && last.role === "user" && last.content === text) rows.pop();
         return rows;
       },
       send: (e) => wsHandleRef.current?.send(e),
       streamChat,
+      // E2E 流式（硬验收④）：chunk 走 chunkAad（convId+streamId+index）信封、
+      // finish 全文进信封——由 agentStream 统一串行上行，加密失败跳过/报错不发明文。
+      sealChunk: async (streamId, index, delta) => {
+        const members = await resolveMembers(convId);
+        const ev = await sealMessage(
+          { id: convId, members },
+          { kind: "chunk", text: delta },
+          e2eDeps(),
+          { aad: chunkAad(convId, streamId, index) },
+        );
+        if (ev.type !== "send_message" || !ev.cipher) return null;
+        return { cipher: ev.cipher, chainKid: ev.chainKid, n: ev.n };
+      },
+      sealFinish: async (full) => {
+        const members = await resolveMembers(convId);
+        const plain: PlainEnvelope = { kind: "text", text: full };
+        const ev = await sealMessage({ id: convId, members }, plain, e2eDeps());
+        if (ev.type !== "send_message" || !ev.cipher) return null;
+        // finish 的入库 echo 也是自发信封：登记出站箱（同 sealAndSend）
+        if (ev.chainKid !== undefined && ev.n !== undefined) {
+          outboxRef.current.set(`${ev.chainKid}:${ev.n}`, plain);
+        }
+        return { cipher: ev.cipher, chainKid: ev.chainKid, n: ev.n };
+      },
       onLocalDelta: (streamId, acc) => {
         const meta = streamMeta.current[streamId];
         if (!meta) return;
@@ -402,9 +639,51 @@ export function ChatPage() {
     setSendNotice(null);
   }, [convId]);
 
+  // E2E Task 4：会话初始化 + 解密 handler 注入 + 身份公钥上云（硬验收①——不上云则
+  // 对端 fetchPeerKeys 恒 null：chaindist 永不发出、消息全 defer）。声明位置在 WS 效果
+  // 之前：effects 按声明序执行，首帧网络事件到达时 handler 必已就位。
   useEffect(() => {
-    void fetchMessages(convId).then((msgs) => setMessages(convId, msgs));
-  }, [convId, setMessages]);
+    if (!hasSubtle()) return; // 无 subtle：横幅 + 拦截，不建链不注入
+    void initSession(convId, e2eDeps());
+    useChatStore.getState().setOpenHandler(makeOpenHandler(convId));
+    void exportOwnDeviceKeys()
+      .then((keys) => putE2eKeys(keys))
+      .catch((e) => console.warn("E2E 公钥上云失败", e));
+    return () => {
+      useChatStore.getState().setOpenHandler(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convId]);
+
+  // 历史拉取走 store.loadMessages：plain 直通、信封经 handler 解密合并（§6 缓存优先），
+  // 解不开的留占位（渲染无法解密、不进提示词）；alive 挡卸载/切会话后的晚到写入
+  useEffect(() => {
+    let alive = true;
+    void useChatStore.getState().loadMessages(convId, () => alive);
+    return () => {
+      alive = false;
+    };
+  }, [convId]);
+
+  // 存量自迁移（设计 §7）：挂载后后台把本会话自己发的 plain 消息重封为 e2e 信封，
+  // store 内 20/s 节流逐条 PUT；attempted ref 跨批次去重（成功后 enc 变 e2e 自然出局）
+  useEffect(() => {
+    if (!hasSubtle() || !me) return;
+    const list = useChatStore.getState().messages[convId] ?? [];
+    if (!list.some((m) => m.enc === "plain" && m.senderId === me.id)) return;
+    let alive = true;
+    void (async () => {
+      const members = await resolveMembers(convId);
+      if (!alive) return;
+      await useChatStore
+        .getState()
+        .migrateOwnPlain(convId, members, e2eDeps(), migratedRef.current, me.id, () => alive);
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convId, messages.length, me?.id]);
 
   // 挂载拉本会话已读态（direct 气泡「已读」依赖；失败不阻断会话）
   useEffect(() => {
@@ -429,6 +708,7 @@ export function ChatPage() {
           agents: list
             .filter((m) => m.kind === "agent")
             .map((m) => ({ id: m.id, name: m.name, avatar: m.avatar })),
+          userIds: list.filter((m) => m.kind === "user").map((m) => m.id),
         });
       })
       .catch(() => {
@@ -440,6 +720,7 @@ export function ChatPage() {
   }, [convId, conv?.type]);
 
   useEffect(() => {
+    let alive = true; // 挡卸载后晚到的补拉写入（同 loadMessages effect 口径）
     const handle = connectWs({
       onEvent: (e) => {
         // 流式三事件收口（chunk 累积/message_new{streamId} 移除/agent_error 分态）在 store 统一处理
@@ -461,8 +742,8 @@ export function ChatPage() {
       },
       onOpen: () => {
         setConnected(true);
-        // 断线重连成功：补拉断档消息（setMessages 是合并去重语义，幂等）
-        void fetchMessages(convId).then((msgs) => setMessages(convId, msgs));
+        // 断线重连成功：补拉断档消息（合并去重语义，幂等；信封同走解密合并）
+        void useChatStore.getState().loadMessages(convId, () => alive);
         // Task 7：重连成功补齐「断线期间的已读」——仍有未读则补发 mark_read
         // （与挂载逻辑同款读法；handle 取本 effect 闭包里的，非 ref，防重连期间句柄已换）
         const unread =
@@ -481,6 +762,7 @@ export function ChatPage() {
       handle?.send({ type: "mark_read", conversationId: convId });
     }
     return () => {
+      alive = false;
       // F1 回归：进行中流被卸载中止时，catch 要经此连接补发 finish(partial)+agent_error
       // （服务端入库 partial、他机端收 error 收口）。立即 close + 清 ref 会把两帧静默丢弃——
       // catch 在微任务里跑，故把 close 延后一个宏任务（微任务必先排空），ref 同步清空也一并延后。
@@ -496,7 +778,7 @@ export function ChatPage() {
         wsHandleRef.current = null;
       }
     };
-  }, [convId, appendMessage, setMessages, loadReads]);
+  }, [convId, appendMessage, loadReads]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -538,18 +820,23 @@ export function ChatPage() {
     [],
   );
 
-  /** 右栏目录「发送到会话」投递：单槽命中本会话即经 WS 发纯附件消息并清槽。 */
+  /** 右栏目录「发送到会话」投递：单槽命中本会话即封 e2e 信封经 WS 发送并清槽。 */
   const pendingAttachment = useUiStore((s) => s.pendingAttachment);
   useEffect(() => {
     if (!pendingAttachment || pendingAttachment.conversationId !== convId) return;
-    const handle = wsHandleRef.current;
-    if (!handle) return; // ws send 自带队列，句柄恒在（未连通也入队不丢）
-    handle.send({
-      type: "send_message",
-      conversationId: convId,
-      payload: { text: "", file: pendingAttachment.file },
+    if (!hasSubtle()) {
+      // 硬验收⑤：附件路径同样拦截不降级；清槽防切会话后再次触发
+      setSendNotice(NO_E2E_NOTICE);
+      useUiStore.getState().consumePendingAttachment();
+      return;
+    }
+    void sealAndSend({
+      kind: "file",
+      text: "",
+      file: pendingAttachment.file,
     });
     useUiStore.getState().consumePendingAttachment();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAttachment, convId]);
 
   /** 键入触发：草稿尾随 @token（空格一断 token 即结束）→ 过滤弹选择器；direct 不触发。 */
@@ -625,10 +912,15 @@ export function ChatPage() {
     }
   };
 
-  const send = (e: React.FormEvent) => {
+  const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
+    // 硬验收⑤：无 subtle 先拦（保留草稿与已选 mention），绝不降级明文发送
+    if (!hasSubtle()) {
+      setSendNotice(NO_E2E_NOTICE);
+      return;
+    }
     // 发送前拦截：@ 到的智能体没绑 LLM 连接 → 不发消息，本地提示去设置页配置（草稿/chip 保留）
     const unbound = selectedMentions.find((m) => !resolveProfile(m.agentId));
     if (unbound) {
@@ -642,17 +934,14 @@ export function ChatPage() {
       return;
     }
     const mentions = selectedMentions;
-    handle.send({
-      type: "send_message",
-      conversationId: convId,
-      // replyTo 是事件顶层键（shared WsClientEventSchema），非 payload 内——塞 payload 会被 zod 剥掉
+    // 正文/mentions/replyTo 全进密文（§3.3），事件 payload 只留 {text:""} 占位
+    const plain: PlainEnvelope = {
+      kind: "text",
+      text,
+      ...(mentions.length ? { mentions } : {}),
       ...(replyTarget ? { replyTo: replyTarget.id } : {}),
-      payload: {
-        text,
-        // mentions 非空才带（空则整个键不出现，与 M2 消息形状一致）
-        ...(mentions.length ? { mentions } : {}),
-      },
-    });
+    };
+    if (!(await sealAndSend(plain))) return; // 拦截/封失败：草稿与浮层状态原样保留
     setDraft("");
     setSelectedMentions([]);
     setPicker(null);
@@ -665,27 +954,30 @@ export function ChatPage() {
 
   /**
    * 转发（Task 4）：原 text + 原 file 原样带走，**剥离 mentions**（@ 语境属于源会话），
-   * 带 forward 来源经当前 WS 连接发到目标会话（server 只按 isMember 校验）。
-   * 转发到非当前会话时借 sendNotice 给提示行（转发到当前会话则清提示）。
+   * forward 来源进密文（§3.3）封 e2e 信封发到目标会话（server 只按 isMember 校验）。
+   * 无 subtle 拦截不发送（硬验收⑤：转发路径同样不降级）。转发到非当前会话时借
+   * sendNotice 给提示行（转发到当前会话则清提示）。
    */
-  const doForward = (target: Conversation) => {
+  const doForward = async (target: Conversation) => {
     if (!forwardMsg || !wsHandleRef.current) return;
+    if (!hasSubtle()) {
+      setSendNotice(NO_E2E_NOTICE);
+      return;
+    }
     const src = conversations.find((x) => x.id === convId);
-    wsHandleRef.current.send({
-      type: "send_message",
-      conversationId: target.id,
-      payload: {
-        text: forwardMsg.payload.text,
-        ...(forwardMsg.payload.file ? { file: forwardMsg.payload.file } : {}),
-        forward: {
-          from:
-            forwardMsg.senderId === me?.id
-              ? "我"
-              : (memberInfoById?.[forwardMsg.senderId]?.name ?? peer?.displayName ?? "未知"),
-          source: src ? (src.type === "direct" ? src.peer.displayName : src.name) : "未知会话",
-        },
+    const plain: PlainEnvelope = {
+      kind: "forward",
+      text: forwardMsg.payload.text,
+      ...(forwardMsg.payload.file ? { file: forwardMsg.payload.file } : {}),
+      forward: {
+        from:
+          forwardMsg.senderId === me?.id
+            ? "我"
+            : (memberInfoById?.[forwardMsg.senderId]?.name ?? peer?.displayName ?? "未知"),
+        source: src ? (src.type === "direct" ? src.peer.displayName : src.name) : "未知会话",
       },
-    });
+    };
+    if (!(await sealAndSend(plain, target.id))) return;
     setForwardMsg(null);
     setSendNotice(
       target.id === convId
@@ -710,8 +1002,13 @@ export function ChatPage() {
     input.click();
   };
 
-  /** 附件发送：先传共享库拿 meta，再经 WS 发纯附件消息（text 空串，气泡只渲染附件段）。 */
+  /** 附件发送：先传共享库拿 meta，再封 file 信封经 WS 发（text 空串，气泡只渲染附件段）。
+   *  无 subtle 在上传前拦截——不白跑一次上传（硬验收⑤：附件/语音全路径不降级）。 */
   const sendFile = async (f: File) => {
+    if (!hasSubtle()) {
+      setSendNotice(NO_E2E_NOTICE);
+      return;
+    }
     const handle = wsHandleRef.current;
     if (!handle) {
       setSendNotice("连接未就绪，消息未发送");
@@ -729,15 +1026,12 @@ export function ChatPage() {
         setSendNotice("已切换会话，文件未发送");
         return;
       }
-      live.send({
-        type: "send_message",
-        conversationId: convId,
-        payload: {
-          text: "",
-          file: { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size },
-        },
+      const ok = await sealAndSend({
+        kind: "file",
+        text: "",
+        file: { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size },
       });
-      setSendNotice(null);
+      if (ok) setSendNotice(null);
     } catch (err) {
       setSendNotice(`上传失败：${(err as Error).message}`);
     }
@@ -918,7 +1212,7 @@ export function ChatPage() {
         {infoOpen && conv && <ChatInfoCard conv={conv} onClose={() => setInfoOpen(false)} />}
       </header>
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        {messages.map((m) => {
+        {visibleMessages.map((m) => {
           const mine = m.senderId === me?.id;
           // 已撤回：正文/附件/已读一律不渲染，只出一行灰字（头像与署名结构保留）
           const recalled = m.recalledAt != null;
@@ -932,6 +1226,8 @@ export function ChatPage() {
           const quoted = m.replyTo
             ? messages.find((x) => x.id === m.replyTo && x.recalledAt == null)
             : undefined;
+          // 回应 chips（存量 payload.reactions + 解密出的 reaction 事件聚合）
+          const chips = chipsFor(m);
           return (
             <div
               key={m.id}
@@ -952,6 +1248,9 @@ export function ChatPage() {
                 ) : null}
                 {recalled ? (
                   <div className="text-muted">消息已撤回</div>
+                ) : m.enc === "e2e" && !plainOf[m.id] ? (
+                  // E2E Task 4 / 设计 §8：解不开的信封渲染占位（不吞不崩），且不进 LLM 提示词
+                  <div className="text-muted">无法解密（密钥缺失）</div>
                 ) : (
                   <>
                     {/* 转发来源行（Task 4）：有 forward 时置于正文/附件上方 */}
@@ -992,11 +1291,12 @@ export function ChatPage() {
                     {readByPeer ? (
                       <div className="mt-0.5 text-right text-[9px] text-muted">已读</div>
                     ) : null}
-                    {/* 表情回应 chips（Task 6）：气泡下方一枚 emoji 一枚 chip；自己参与的深底可点掉，
+                    {/* 表情回应 chips（Task 6 → E2E 事件化）：存量 reactions + kind=reaction
+                        事件聚合；自己参与的深底可点掉（发 op:remove 密文事件），
                         他人参与的仅展示（点击 no-op）。已撤回消息整块不渲染（外层 recalled 分支）。 */}
-                    {m.payload.reactions?.length ? (
+                    {chips.length ? (
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {(m.payload.reactions ?? []).map((r) => {
+                        {chips.map((r) => {
                           const involvesMe = me != null && r.userIds.includes(me.id);
                           return (
                             <button
@@ -1010,14 +1310,11 @@ export function ChatPage() {
                               }`}
                               onClick={() => {
                                 if (!involvesMe) return; // 只有自己参与的才能点掉（他人 chip 仅展示）
-                                // 过渡 cast：react_message 已从 shared 契约移除（E2E Task 2），
-                                // 服务端回 bad_event 忽略；Task 4 把回应改为 e2e reaction 事件后删除本调用。
-                                wsHandleRef.current?.send({
-                                  type: "react_message",
-                                  conversationId: convId,
-                                  messageId: m.id,
-                                  emoji: r.emoji,
-                                } as unknown as WsClientEvent);
+                                // E2E Task 4：回应是密文事件消息（kind=reaction），不再发 react_message
+                                void sealAndSend({
+                                  kind: "reaction",
+                                  reaction: { target: m.id, emoji: r.emoji, op: "remove" },
+                                });
                               }}
                             >
                               {r.emoji} {r.userIds.length}
@@ -1097,13 +1394,14 @@ export function ChatPage() {
                         type="button"
                         className="rounded px-0.5 text-[15px] leading-none hover:bg-[#f3f3f3]"
                         onClick={() => {
-                          // 过渡 cast 同上（E2E Task 2 → Task 4 回应事件化后删除）
-                          wsHandleRef.current?.send({
-                            type: "react_message",
-                            conversationId: convId,
-                            messageId: m.id,
-                            emoji: e,
-                          } as unknown as WsClientEvent);
+                          // E2E 事件化 toggle：已在 chips 里的自己 → op remove，否则 add
+                          const involved =
+                            me != null &&
+                            (chips.find((c) => c.emoji === e)?.userIds.includes(me.id) ?? false);
+                          void sealAndSend({
+                            kind: "reaction",
+                            reaction: { target: m.id, emoji: e, op: involved ? "remove" : "add" },
+                          });
                           setReactFor(null);
                         }}
                       >
@@ -1130,6 +1428,15 @@ export function ChatPage() {
         <div ref={bottomRef} />
       </div>
       <form onSubmit={send} className="relative border-t border-line-soft">
+        {/* E2E 常驻横幅（硬验收⑤ / 设计 §2.1）：无 subtle 环境红字提示 + 全发送路径拦截 */}
+        {!subtleOk && (
+          <p
+            role="alert"
+            className="mx-5 mt-2 border-l-2 border-[#b42318] bg-[#fef3f2] px-2 py-1.5 text-[12px] text-[#b42318]"
+          >
+            {NO_E2E_NOTICE}
+          </p>
+        )}
         {/* 提示行（复用同一位）：录音中占位（停止/取消入口），否则走发送提示 */}
         {recording ? (
           <div className="flex items-center gap-3 px-5 pt-2 text-[12px]">

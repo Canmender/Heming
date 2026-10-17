@@ -139,6 +139,71 @@ describe("runAgentMentions", () => {
     );
     await run;
   });
+
+  // —— E2E Task 4：流式信封（sealChunk/sealFinish 注入，设计 §5.3）——
+
+  it("E2E：注入 sealChunk/sealFinish → chunk 文本置空带 cipher+index，finish 带全文信封", async () => {
+    const sealChunk = vi.fn(async (_s: string, index: number) => ({
+      cipher: `c${index}`,
+      chainKid: "k",
+      n: index,
+    }));
+    const sealFinish = vi.fn(async (text: string) => ({ cipher: `f-${text}`, chainKid: "k", n: 9 }));
+    const { send, onLocalDelta, deps } = makeDeps({ sealChunk, sealFinish });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const events = send.mock.calls.map((c) => c[0] as Record<string, unknown>);
+    const chunks = events.filter((e) => e.type === "agent_chunk");
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toMatchObject({ text: "", index: 0, cipher: "c0", chainKid: "k", n: 0 });
+    expect(chunks[1]).toMatchObject({ text: "", index: 1, cipher: "c1", chainKid: "k", n: 1 });
+    expect(chunks.every((e) => e.text === "")).toBe(true); // 密文片不夹明文
+    const finish = events.find((e) => e.type === "agent_finish");
+    expect(finish).toMatchObject({ text: "", cipher: "f-你好", chainKid: "k", n: 9 });
+    expect(sealChunk).toHaveBeenCalledTimes(2);
+    expect(sealFinish).toHaveBeenCalledWith("你好");
+    expect(onLocalDelta).toHaveBeenLastCalledWith(expect.any(String), "你好"); // 本机打字机不受加密影响
+  });
+
+  it("E2E：sealChunk 抛错该片跳过（绝不发明文片）；sealFinish 抛错改报 agent_error 不落明文 finish", async () => {
+    let calls = 0;
+    const { send, deps } = makeDeps({
+      sealChunk: vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("seal boom");
+        return { cipher: "ok", chainKid: "k", n: 1 };
+      }),
+      sealFinish: vi.fn(async () => {
+        throw new Error("seal boom");
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const events = send.mock.calls.map((c) => c[0] as Record<string, unknown>);
+    const chunks = events.filter((e) => e.type === "agent_chunk");
+    expect(chunks).toHaveLength(1); // 首片封失败跳过，次片照发
+    expect(chunks[0]).toMatchObject({ text: "", index: 1, cipher: "ok" });
+    expect(events.some((e) => e.type === "agent_chunk" && e.text === "你")).toBe(false); // 无明文回退
+    expect(events.some((e) => e.type === "agent_finish")).toBe(false); // 加密失败不发明文 finish
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "agent_error", code: "bad_event" }),
+    );
+  });
+
+  it("E2E：chunk 上行串行——首片 seal 未落定时次片不抢先（index 与发送序一致）", async () => {
+    const { send, deps } = makeDeps({
+      sealChunk: vi.fn(async (_s: string, index: number) => {
+        if (index === 0) await new Promise((r) => setTimeout(r, 15));
+        return { cipher: `c${index}`, chainKid: "k", n: index };
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const chunks = send.mock.calls
+      .map((c) => c[0] as { type: string; index?: number; cipher?: string })
+      .filter((e) => e.type === "agent_chunk");
+    expect(chunks.map((c) => c.index)).toEqual([0, 1]);
+    expect(chunks[0].cipher).toBe("c0"); // 未被 index=1 的密文抢先
+  });
 });
 
 it("newStreamId 唯一性", () => {

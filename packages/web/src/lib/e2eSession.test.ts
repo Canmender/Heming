@@ -21,6 +21,7 @@ import {
   recvChainOwners,
   msgCache,
   exportOwnDeviceKeys,
+  chunkAad,
   type E2eDeps,
   type PeerKeys,
   type SealedEnvelope,
@@ -512,5 +513,117 @@ describe("e2eSession 会话层", () => {
       ),
     ).toBe("duplicate");
     expect(msgCache.list(conv.id)).toHaveLength(1);
+  });
+
+  it("⑫ agent chunk 信封：AAD 绑定 convId+streamId+index，chunk 不落明文缓存", async () => {
+    const sent: WsClientEvent[] = [];
+    const deps = makeDeps(sent);
+    const snapA = await bootstrap("alice-t12");
+    const snapB = await bootstrap("bob-t12");
+    const conv = { id: "t12-conv", members: ["alice-t12", "bob-t12"] };
+
+    const aad0 = chunkAad(conv.id, "s1", 0);
+    const aad1 = chunkAad(conv.id, "s1", 1);
+    const c0 = (await asParty(snapA, () =>
+      sealMessage(conv, { kind: "chunk", text: "第一片" }, deps, { aad: aad0 }),
+    )) as SendEvent;
+    const c1 = (await asParty(snapA, () =>
+      sealMessage(conv, { kind: "chunk", text: "第二片" }, deps, { aad: aad1 }),
+    )) as SendEvent;
+    expect(c0.n).toBe(0);
+    expect(c1.n).toBe(1); // chunk 与正文共用会话链（n 连续推进）
+
+    // 对端先落链（首条 seal 随附的 chaindist）
+    const distEv = sent[0] as SendEvent;
+    const distPlain = await asParty(snapB, () =>
+      openMessage(convOf(conv.id), toEnv(distEv, "t12-dist", "alice-t12"), msgCache),
+    );
+    if (typeof distPlain === "string" || distPlain.kind !== "chaindist") {
+      throw new Error("chaindist 打开失败");
+    }
+
+    // 正确 AAD（同 streamId/index）→ 解开
+    const p0 = await asParty(snapB, () =>
+      openMessage(convOf(conv.id), toEnv(c0, "t12-c0", "alice-t12"), msgCache, { aad: aad0 }),
+    );
+    expect(p0).toEqual({ kind: "chunk", text: "第一片" });
+
+    // 错 AAD：按正文 AAD 开 chunk → GCM 拒（AAD 搬移/绑定失败 → 抛 e2e_decrypt_failed）
+    await expect(
+      asParty(snapB, () => openMessage(convOf(conv.id), toEnv(c1, "t12-c1", "alice-t12"), msgCache)),
+    ).rejects.toThrow("e2e_decrypt_failed");
+    // 错 index（同流不同片）同样拒
+    await expect(
+      asParty(snapB, () =>
+        openMessage(
+          convOf(conv.id),
+          toEnv(c1, "t12-c1b", "alice-t12"),
+          msgCache,
+          { aad: chunkAad(conv.id, "s1", 9) },
+        ),
+      ),
+    ).rejects.toThrow("e2e_decrypt_failed");
+    // 错 streamId 同样拒
+    await expect(
+      asParty(snapB, () =>
+        openMessage(convOf(conv.id), toEnv(c1, "t12-c1c", "alice-t12"), msgCache, {
+          aad: chunkAad(conv.id, "s2", 1),
+        }),
+      ),
+    ).rejects.toThrow("e2e_decrypt_failed");
+    // 前三次失败不消耗链状态：正确 AAD 仍能解开
+    const p1 = await asParty(snapB, () =>
+      openMessage(convOf(conv.id), toEnv(c1, "t12-c1", "alice-t12"), msgCache, { aad: aad1 }),
+    );
+    expect(p1).toEqual({ kind: "chunk", text: "第二片" });
+
+    // chunk 是流式瞬态，不进明文缓存（chaindist 同样不进）——缓存只装可回看的正文/回应
+    expect(msgCache.list(conv.id)).toHaveLength(0);
+  });
+
+  it("⑬ chunk 缺链 noDefer：返回 defer 但不进暂挂队列（对照组照常入队）", async () => {
+    const sent: WsClientEvent[] = [];
+    const deps = makeDeps(sent);
+    const snapA = await bootstrap("alice-t13");
+    const snapB = await bootstrap("bob-t13");
+    const conv = { id: "t13-conv", members: ["alice-t13", "bob-t13"] };
+
+    // 首封即 chunk（链尚未经 chaindist 到达对端）
+    const c0 = (await asParty(snapA, () =>
+      sealMessage(conv, { kind: "chunk", text: "缺链片" }, deps, { aad: chunkAad(conv.id, "s9", 0) }),
+    )) as SendEvent;
+    const env = toEnv(c0, "t13-c0", "alice-t13");
+
+    // noDefer（chunk 路径）：暂挂语义返回，但不占队列（流式 delta 不进 50 条上限）
+    await expect(
+      asParty(snapB, () =>
+        openMessage(convOf(conv.id), env, msgCache, { aad: chunkAad(conv.id, "s9", 0), noDefer: true }),
+      ),
+    ).resolves.toBe("defer");
+    expect(deferredCount(conv.id)).toBe(0);
+
+    // 对照：正文（无 noDefer）缺链 → 入队
+    await expect(
+      asParty(snapB, () => openMessage(convOf(conv.id), env, msgCache, { aad: chunkAad(conv.id, "s9", 0) })),
+    ).resolves.toBe("defer");
+    expect(deferredCount(conv.id)).toBe(1);
+  });
+
+  it("⑭ 同会话并发 seal 串行化：两条并行不撞 n（0/1 各一次，链推进到 2）", async () => {
+    const sent: WsClientEvent[] = [];
+    const deps = makeDeps(sent);
+    await bootstrap("alice-t14");
+    const conv = { id: "t14-conv", members: ["alice-t14"] };
+
+    const [e1, e2] = await Promise.all([
+      sealMessage(conv, { kind: "text", text: "并发一" }, deps),
+      sealMessage(conv, { kind: "text", text: "并发二" }, deps),
+    ]) as [SendEvent, SendEvent];
+
+    expect(new Set([e1.n, e2.n]).size).toBe(2); // 不撞同一 n（撞了会产出同 n 密文 → 收端去重误杀）
+    const chains = JSON.parse(localStorage.getItem("heming.e2e.chains." + conv.id)!) as {
+      send: { n: number };
+    };
+    expect(chains.send.n).toBe(2);
   });
 });

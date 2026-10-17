@@ -103,7 +103,15 @@ const WsClientEventUnion = z.discriminatedUnion("type", [
     conversationId: z.string().min(1),
     agentId: z.string().min(1),
     streamId: z.string().min(1),
-    text: z.string().min(1).max(4000),
+    // min(1) 下沉到联合体 superRefine：密文 chunk 的 text 恒为空串（内容只进 cipher），
+    // 明文 chunk（无 cipher，旧客户端兼容）仍要求非空——成员级直接 min(1) 会拒掉密文形态。
+    text: z.string().max(4000),
+    // E2E 流式信封（Task 4，设计 §5.3）：cipher 必带 chainKid/n（收端开信封）与 index
+    //（AAD=convId+streamId+index 绑定）。缺 cipher = 明文 chunk（legacy 路径）。
+    cipher: z.string().max(262144).optional(),
+    chainKid: z.string().max(64).optional(),
+    n: z.number().int().min(0).optional(),
+    index: z.number().int().min(0).optional(),
   }),
   z.object({
     type: z.literal("agent_finish"),
@@ -114,6 +122,10 @@ const WsClientEventUnion = z.discriminatedUnion("type", [
     // 宽于 payload 会出现「schema 过了、入库即违规」的缝
     text: z.string().max(20000),
     replyTo: z.string().optional(),
+    // E2E（Task 4）：finish 也走信封——text 置空、全文进 cipher，服务端按信封入库（§5.3）
+    cipher: z.string().max(262144).optional(),
+    chainKid: z.string().max(64).optional(),
+    n: z.number().int().min(0).optional(),
   }),
   // 双向事件（设计 §3）：客户端上报流失败（aborted/provider_error），服务端回 forbidden。
   // 形状与 WsServerEventSchema 的 agent_error 成员一致（同构复用，见 ws.ts）。
@@ -132,23 +144,86 @@ const WsClientEventUnion = z.discriminatedUnion("type", [
  * 不接受 ZodEffects 成员，且 superRefine 需看到 enc 的 default 结果）：
  *   enc="e2e" → cipher 必带且非空（空串按缺处理）；
  *   enc="plain" → 必不带 cipher（明文路径不得夹带信封字段）。
+ * agent 流式信封（Task 4，设计 §5.3）同口径：
+ *   agent_chunk 无 cipher → text min(1)（明文 legacy 路径，成员级已放宽）；
+ *   agent_chunk 有 cipher → 必带 chainKid/n/index 且 text 必须为空串（防明文夹带泄漏）；
+ *   agent_finish 有 cipher → 必带 chainKid/n 且 text 必须为空串。
  */
 export const WsClientEventSchema = WsClientEventUnion.superRefine((ev, ctx) => {
-  if (ev.type !== "send_message") return;
-  if (ev.enc === "e2e") {
+  if (ev.type === "send_message") {
+    if (ev.enc === "e2e") {
+      if (!ev.cipher) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["cipher"],
+          message: "e2e message requires cipher",
+        });
+      }
+    } else if (ev.cipher !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cipher"],
+        message: "plain message must not carry cipher",
+      });
+    }
+    return;
+  }
+  if (ev.type === "agent_chunk") {
+    if (ev.cipher !== undefined) {
+      if (!ev.cipher) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["cipher"],
+          message: "agent_chunk cipher must be non-empty",
+        });
+        return;
+      }
+      if (ev.chainKid === undefined || ev.n === undefined || ev.index === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["chainKid"],
+          message: "sealed agent_chunk requires chainKid, n and index",
+        });
+      }
+      if (ev.text !== "") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["text"],
+          message: "sealed agent_chunk must not carry plaintext text",
+        });
+      }
+    } else if (ev.text.length < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["text"],
+        message: "agent_chunk text required",
+      });
+    }
+    return;
+  }
+  if (ev.type === "agent_finish" && ev.cipher !== undefined) {
     if (!ev.cipher) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["cipher"],
-        message: "e2e message requires cipher",
+        message: "agent_finish cipher must be non-empty",
+      });
+      return;
+    }
+    if (ev.chainKid === undefined || ev.n === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["chainKid"],
+        message: "sealed agent_finish requires chainKid and n",
       });
     }
-  } else if (ev.cipher !== undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["cipher"],
-      message: "plain message must not carry cipher",
-    });
+    if (ev.text !== "") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["text"],
+        message: "sealed agent_finish must not carry plaintext text",
+      });
+    }
   }
 });
 /**
@@ -192,7 +267,13 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     conversationId: z.string().min(1),
     agentId: z.string().min(1),
     streamId: z.string().min(1),
-    text: z.string().min(1).max(4000),
+    // 收端两种形态并存：明文 text（legacy 触发端）/ 密文信封（text 空串 + cipher 字段）——
+    // 广播面不加约束（客户端事件侧的 superRefine 已卡住源头）
+    text: z.string().max(4000),
+    cipher: z.string().max(262144).optional(),
+    chainKid: z.string().max(64).optional(),
+    n: z.number().int().min(0).optional(),
+    index: z.number().int().min(0).optional(),
   }),
   z.object({
     type: z.literal("agent_error"),

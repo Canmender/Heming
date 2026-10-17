@@ -73,13 +73,16 @@ export interface ChainState {
   n: number; // 下一个待用链索引
 }
 
-/** 密文内 JSON（§3.3）：kind 判别 + 各类载荷；chaindist 携带 dist 链材料。 */
+/** 密文内 JSON（§3.3）：kind 判别 + 各类载荷；chaindist 携带 dist 链材料。
+ *  mentions 随正文进密文（§3.3「payload/replyTo/mentions 全进密文」）；
+ *  kind="chunk" 为 agent 流式增量（§5.3，AAD 绑定 streamId+index，不落明文缓存）。 */
 export interface PlainEnvelope {
-  kind: "text" | "file" | "forward" | "reaction" | "chaindist";
+  kind: "text" | "file" | "forward" | "reaction" | "chaindist" | "chunk";
   text?: string;
   file?: { id: string; name: string; mime: string; size: number; key?: string };
   forward?: { from: string; source: string };
   reaction?: { target: string; emoji: string; op: "add" | "remove" };
+  mentions?: { agentId: string; name: string }[];
   replyTo?: string;
   dist?: ChainDist;
 }
@@ -252,6 +255,15 @@ function aadMsg(convId: string, chainKid: string, n: number): Uint8Array {
   return utf8(`${AAD_PREFIX}|${convId}|${chainKid}|${n}`);
 }
 
+/**
+ * agent 流式 chunk 的 AAD（设计 §5.3：AAD=convId+streamId+index）：
+ * 与正文 AAD（convId|chainKid|n）不同命名空间——把 chunk 密文搬进正文位、
+ * 或调换流/片序，收端按事件里的 streamId/index 开封即 GCM 拒。
+ */
+export function chunkAad(convId: string, streamId: string, index: number): Uint8Array {
+  return utf8(`${AAD_PREFIX}|${convId}|chunk|${streamId}|${index}`);
+}
+
 function aadDist(convId: string, to: string): Uint8Array {
   return utf8(`${AAD_PREFIX}|${convId}|dist|${to}`);
 }
@@ -373,15 +385,43 @@ export function getE2eDeps(convId: string): E2eDeps | undefined {
 
 // —— sealMessage ——
 
+/** 同会话 seal 串行化：链文件 load→改→save 跨 await 交错会撞 n（同 n 密文 → 收端去重误杀）。 */
+const sealLocks = new Map<string, Promise<void>>();
+
 /**
  * 封一条密文消息 → send_message{enc:"e2e"} 事件。
  * 无链/新成员 → 先经 sendRaw 分发 chaindist（X3DH 成对封装），再封正文；
  * n>=100 或 now()-createdAt>24h → 轮换新链（旧链键随覆盖删除，前向保密）。
+ * opts.aad 覆盖正文 AAD（agent chunk 用 chunkAad——同链推进、不同绑定上下文）。
+ * 同会话并发调用按到达序串行（chunk/finish/正文/重加密共用一条发送链，必须排队）。
  */
-export async function sealMessage(
+export function sealMessage(
   conv: { id: string; members: string[] },
   plain: PlainEnvelope,
   deps: E2eDeps,
+  opts?: { aad?: Uint8Array },
+): Promise<WsClientEvent> {
+  const prev = sealLocks.get(conv.id) ?? Promise.resolve();
+  const run = prev.then(
+    () => doSealMessage(conv, plain, deps, opts),
+    () => doSealMessage(conv, plain, deps, opts),
+  );
+  const tracked: Promise<void> = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  sealLocks.set(conv.id, tracked);
+  void tracked.then(() => {
+    if (sealLocks.get(conv.id) === tracked) sealLocks.delete(conv.id);
+  });
+  return run;
+}
+
+async function doSealMessage(
+  conv: { id: string; members: string[] },
+  plain: PlainEnvelope,
+  deps: E2eDeps,
+  opts?: { aad?: Uint8Array },
 ): Promise<WsClientEvent> {
   await initSession(conv.id, deps); // 生成/载入身份 + 链（幂等）
   const identity = await loadIdentity();
@@ -402,7 +442,8 @@ export async function sealMessage(
   // 正文封条：msgKey = HKDF(CK_n, "msg")，CK_{n+1} = HKDF(CK_n, "chain")
   const { msgKey, next } = await hkdfChain(ab(fromB64(send.ck)), MSG_LABEL);
   const nonce = randomBytes(12);
-  const data = await encryptMsg(msgKey, nonce, utf8(JSON.stringify(plain)), aadMsg(conv.id, send.kid, send.n));
+  const aad = opts?.aad ?? aadMsg(conv.id, send.kid, send.n);
+  const data = await encryptMsg(msgKey, nonce, utf8(JSON.stringify(plain)), aad);
   const cipher = toB64(utf8(JSON.stringify({ v: 1, n: send.n, nonce: toB64(nonce), data })));
   const ev: WsClientEvent = {
     type: "send_message",
@@ -521,13 +562,16 @@ async function sealChainDist(
  * - chaindist（外层带 ek）→ X3DH 解封，**解密上下文内自动落链**（归属=outer.ik 认证出的
  *   发送设备，不信 env.senderId），返回 {kind:"chaindist", dist}；
  * - 正文 → 发送链 msgKey 解密并写明文缓存；已解开过的 (chainKid,n) → "duplicate"；
- * - 缺链/超窗 → 入暂挂队列（上限 50）并返回 "defer"；
+ * - 缺链/超窗 → 入暂挂队列（上限 50）并返回 "defer"（opts.noDefer 则只返回不入队——
+ *   agent chunk 走此路：流式增量不占暂挂队列）；
  * - GCM 校验失败（AAD 被搬移/密钥错）→ 抛错（接线层渲染「无法解密」占位）。
+ * opts.aad 覆盖正文解密 AAD（与 sealMessage 的 opts.aad 成对，chunk 用 chunkAad）。
  */
 export async function openMessage(
   conv: { id: string; memberIdOf: (chainKid: string) => string | undefined },
   env: SealedEnvelope,
   cache: MsgCache,
+  opts?: { aad?: Uint8Array; noDefer?: boolean },
 ): Promise<OpenResult> {
   cacheByConv.set(conv.id, cache);
   if (!env.cipher) throw new Error(DECRYPT_FAILED);
@@ -538,7 +582,7 @@ export async function openMessage(
     throw new Error(DECRYPT_FAILED);
   }
   if (outer.ek !== undefined) return openX3dhDist(conv, env, outer, cache);
-  return openChainMsg(conv, env, outer, cache);
+  return openChainMsg(conv, env, outer, cache, opts);
 }
 
 /** 正文路径：发送链查键 → 去重 → msgKey 派生 → GCM 解密 → 提交链状态 → 落缓存。 */
@@ -547,18 +591,22 @@ async function openChainMsg(
   env: SealedEnvelope,
   outer: CipherOuter,
   cache: MsgCache,
+  opts?: { aad?: Uint8Array; noDefer?: boolean },
 ): Promise<OpenResult> {
   const { chainKid, n } = env;
-  if (!chainKid || n === undefined) {
-    pushDeferred(conv.id, env); // 形状不全（缺链索引）→ 暂挂，元数据到达后重扫可解
-    return "defer";
-  }
   const convId = conv.id;
+  /** 暂挂（noDefer 时只返回不入队——chunk 缺链等链到达后由调用方重试，不占 50 条上限）。 */
+  const defer = (): OpenResult => {
+    if (!opts?.noDefer) pushDeferred(convId, env);
+    return "defer";
+  };
+  if (!chainKid || n === undefined) {
+    return defer(); // 形状不全（缺链索引）→ 暂挂，元数据到达后重扫可解
+  }
   const chains = loadChains(convId);
   const chain = chains.recv[chainKid];
   if (!chain) {
-    pushDeferred(convId, env); // 缺链 → 暂挂等 chaindist
-    return "defer";
+    return defer(); // 缺链 → 暂挂等 chaindist
   }
   if (chain.opened?.[String(n)]) return "duplicate"; // (chainKid,n) 已解开过——同会话重放拒收
 
@@ -567,8 +615,7 @@ async function openChainMsg(
   let advance: { ck: string; n: number; acc: Record<string, string> } | null = null;
   if (n >= chain.n) {
     if (n - chain.n > WINDOW) {
-      pushDeferred(convId, env); // 超前超窗（>1000）→ 暂挂
-      return "defer";
+      return defer(); // 超前超窗（>1000）→ 暂挂
     }
     let ck = chain.ck;
     const acc: Record<string, string> = {};
@@ -584,18 +631,17 @@ async function openChainMsg(
     if (cached) {
       keyB64 = cached; // 窗口内乱序回退
     } else if (chain.n - n > WINDOW) {
-      pushDeferred(convId, env); // 落后超窗（键已滚掉）→ 暂挂（重扫多半仍失败，上限兜底）
-      return "defer";
+      return defer(); // 落后超窗（键已滚掉）→ 暂挂（重扫多半仍失败，上限兜底）
     } else {
-      pushDeferred(convId, env); // 键缺失（理论不可达）→ 暂挂
-      return "defer";
+      return defer(); // 键缺失（理论不可达）→ 暂挂
     }
   }
 
   let plain: PlainEnvelope;
   try {
     if (outer.data === undefined || outer.nonce === undefined) throw new Error("bad cipher");
-    const bytes = await decryptMsg(ab(fromB64(keyB64)), fromB64(outer.nonce), fromB64(outer.data), aadMsg(convId, chainKid, n));
+    const aad = opts?.aad ?? aadMsg(convId, chainKid, n);
+    const bytes = await decryptMsg(ab(fromB64(keyB64)), fromB64(outer.nonce), fromB64(outer.data), aad);
     const parsed = JSON.parse(textDec.decode(bytes)) as PlainEnvelope;
     if (!parsed || typeof parsed !== "object" || typeof parsed.kind !== "string") throw new Error("bad plain");
     plain = parsed;
@@ -685,7 +731,7 @@ function appendCache(
   plain: PlainEnvelope,
   cache: MsgCache,
 ): void {
-  if (plain.kind === "chaindist") return; // 控制消息不进渲染缓存
+  if (plain.kind === "chaindist" || plain.kind === "chunk") return; // 控制消息与流式增量不进渲染缓存
   const senderId =
     env.senderId ?? (env.chainKid !== undefined ? conv.memberIdOf(env.chainKid) : undefined) ?? "unknown";
   const at = env.createdAt ? Date.parse(env.createdAt) || Date.now() : Date.now();

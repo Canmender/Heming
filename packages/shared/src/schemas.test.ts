@@ -527,3 +527,59 @@ describe("ReencryptBodySchema（PUT /api/messages/:id/reencrypt）", () => {
     expect(ReencryptBodySchema.safeParse({ cipher: "Q2lwaGVy" }).success).toBe(false); // 缺 enc
   });
 });
+
+// —— E2E Task 4：agent 流式信封（chunk/finish 的 cipher 字段，设计 §5.3）——
+
+describe("agent_chunk/agent_finish 信封（E2E Task 4）", () => {
+  const chunkBase = { type: "agent_chunk", conversationId: "c1", agentId: "a1", streamId: "s1" };
+  const finishBase = { type: "agent_finish", conversationId: "c1", agentId: "a1", streamId: "s1" };
+  const sealed = { text: "", cipher: "Q2lwaGVy", chainKid: "k1", n: 0, index: 0 };
+
+  it("密文 chunk：text 置空，cipher/chainKid/n/index 必带（缺一即拒）", () => {
+    expect(WsClientEventSchema.safeParse({ ...chunkBase, ...sealed }).success).toBe(true);
+    const { chainKid: _k, ...noKid } = sealed;
+    const { n: _n, ...noN } = sealed;
+    const { index: _i, ...noIndex } = sealed;
+    expect(WsClientEventSchema.safeParse({ ...chunkBase, ...noKid }).success).toBe(false);
+    expect(WsClientEventSchema.safeParse({ ...chunkBase, ...noN }).success).toBe(false);
+    expect(WsClientEventSchema.safeParse({ ...chunkBase, ...noIndex }).success).toBe(false);
+    expect(WsClientEventSchema.safeParse({ ...chunkBase, ...sealed, cipher: "" }).success).toBe(false);
+  });
+
+  it("密文 chunk 不得夹带明文 text（防明文泄漏）", () => {
+    expect(WsClientEventSchema.safeParse({ ...chunkBase, ...sealed, text: "漏了" }).success).toBe(false);
+  });
+
+  it("明文 chunk（无 cipher）text 保持 min(1)：空串拒、非空过", () => {
+    expect(WsClientEventSchema.safeParse({ ...chunkBase, text: "" }).success).toBe(false);
+    expect(WsClientEventSchema.safeParse({ ...chunkBase, text: "你" }).success).toBe(true);
+  });
+
+  it("密文 finish：text 置空，cipher/chainKid/n 必带；夹明文或缺信封字段拒", () => {
+    expect(
+      WsClientEventSchema.safeParse({ ...finishBase, text: "", cipher: "Q2lwaGVy", chainKid: "k1", n: 0 })
+        .success,
+    ).toBe(true);
+    expect(
+      WsClientEventSchema.safeParse({ ...finishBase, text: "", cipher: "Q2lwaGVy", chainKid: "k1" }).success,
+    ).toBe(false);
+    expect(
+      WsClientEventSchema.safeParse({ ...finishBase, text: "", cipher: "Q2lwaGVy", n: 0 }).success,
+    ).toBe(false);
+    expect(
+      WsClientEventSchema.safeParse({ ...finishBase, text: "你好", cipher: "Q2lwaGVy", chainKid: "k1", n: 0 })
+        .success,
+    ).toBe(false);
+    expect(
+      WsClientEventSchema.safeParse({ ...finishBase, text: "", cipher: "", chainKid: "k1", n: 0 }).success,
+    ).toBe(false);
+    // 明文 finish（无 cipher）行为不变：text 可空串（服务端 F2 层拒）
+    expect(WsClientEventSchema.safeParse({ ...finishBase, text: "" }).success).toBe(true);
+  });
+
+  it("服务端 agent_chunk 广播可带信封字段（密文时 text 空串也过）", () => {
+    expect(WsServerEventSchema.safeParse({ ...chunkBase, ...sealed }).success).toBe(true);
+    expect(WsServerEventSchema.safeParse({ ...chunkBase, text: "" }).success).toBe(true);
+    expect(WsServerEventSchema.safeParse({ ...chunkBase, text: "你" }).success).toBe(true);
+  });
+});

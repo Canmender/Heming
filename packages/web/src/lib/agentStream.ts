@@ -15,6 +15,23 @@ export interface TriggerDeps {
    * 建 streaming 打字机项并记录触发文本（重试用）。缺省不影响编排本身。
    */
   onStart?: (streamId: string, mention: { agentId: string; name: string }) => void;
+  /**
+   * E2E 流式片封条（Task 4，设计 §5.3）：把一片 delta 封成信封（cipher/chainKid/n）。
+   * 返回 null/undefined 视为「当前无法加密」→ 该片**跳过不发**（绝不降级明文片）；
+   * 抛错同跳过。未注入 = 明文 legacy 路径（测试/旧端）。
+   */
+  sealChunk?: (
+    streamId: string,
+    index: number,
+    text: string,
+  ) => Promise<{ cipher: string; chainKid?: string; n?: number } | null | undefined>;
+  /**
+   * E2E finish 封条：全文进信封（text 置空上行，服务端按信封入库）。
+   * 加密失败（抛错/null）→ 不发明文 finish，改报 agent_error(bad_event) 收口。
+   */
+  sealFinish?: (
+    text: string,
+  ) => Promise<{ cipher: string; chainKid?: string; n?: number } | null | undefined>;
 }
 
 /** 一次触发的句柄：中断按钮调用后，进行中的各流 abort → catch 走 finish-partial + agent_error(aborted)。 */
@@ -77,40 +94,94 @@ export function runAgentMentions(
         controllers.add(controller);
         if (aborted) controller.abort(); // fetchHistory 期间已按中断：启动即中止
         let acc = "";
+        let idx = 0;
+        // E2E 片上行串行闸：seal 读写会话链文件跨 await 交错会撞 n（同 n 密文被收端去重
+        // 误杀），乱序上行还会让收端 index 与发送序错位——片与 finish 依次过闸再 send。
+        let sealTail: Promise<void> = Promise.resolve();
+        const enqueue = (job: () => Promise<void>) => {
+          sealTail = sealTail.then(job, job);
+        };
+        const sealChunkHook = deps.sealChunk;
+        /** finish 上行：注入 sealFinish → 信封（text 置空）；加密失败返回 false（调用方收口）。 */
+        const sendFinish = async (text: string): Promise<boolean> => {
+          if (!deps.sealFinish) {
+            deps.send({ type: "agent_finish", conversationId, agentId: m.agentId, streamId, text });
+            return true;
+          }
+          try {
+            const sealed = await deps.sealFinish(text);
+            if (!sealed) return false; // 无法加密 → 不发明文 finish（绝不降级）
+            deps.send({
+              type: "agent_finish",
+              conversationId,
+              agentId: m.agentId,
+              streamId,
+              text: "",
+              cipher: sealed.cipher,
+              ...(sealed.chainKid !== undefined ? { chainKid: sealed.chainKid } : {}),
+              ...(sealed.n !== undefined ? { n: sealed.n } : {}),
+            });
+            return true;
+          } catch {
+            return false;
+          }
+        };
         try {
           await deps.streamChat(profile, messages, {
             signal: controller.signal,
             onDelta: (d) => {
               acc += d;
               deps.onLocalDelta(streamId, acc);
-              deps.send({
-                type: "agent_chunk",
-                conversationId,
-                agentId: m.agentId,
-                streamId,
-                text: d,
+              if (!sealChunkHook) {
+                deps.send({
+                  type: "agent_chunk",
+                  conversationId,
+                  agentId: m.agentId,
+                  streamId,
+                  text: d,
+                });
+                return;
+              }
+              const index = idx++;
+              enqueue(async () => {
+                let sealed: Awaited<ReturnType<typeof sealChunkHook>> = null;
+                try {
+                  sealed = await sealChunkHook(streamId, index, d);
+                } catch {
+                  return; // 封失败：跳过该片（finish 全文信封兜底展示，绝不发明文片）
+                }
+                if (!sealed) return;
+                deps.send({
+                  type: "agent_chunk",
+                  conversationId,
+                  agentId: m.agentId,
+                  streamId,
+                  text: "",
+                  index,
+                  cipher: sealed.cipher,
+                  ...(sealed.chainKid !== undefined ? { chainKid: sealed.chainKid } : {}),
+                  ...(sealed.n !== undefined ? { n: sealed.n } : {}),
+                });
               });
             },
           });
-          deps.send({
-            type: "agent_finish",
-            conversationId,
-            agentId: m.agentId,
-            streamId,
-            text: acc,
-          });
-        } catch (e) {
-          const err = e as Error;
-          // finish-partial：服务端拒空文本（F2），acc 为空则只报 error
-          if (acc) {
+          await sealTail; // 片全部落闸后再 finish（同一发送链推进有序）
+          if (!(await sendFinish(acc))) {
             deps.send({
-              type: "agent_finish",
+              type: "agent_error",
               conversationId,
               agentId: m.agentId,
               streamId,
-              text: acc,
+              code: "bad_event",
+              message: "端到端加密失败，回复未发送",
             });
           }
+        } catch (e) {
+          const err = e as Error;
+          await sealTail.catch(() => undefined);
+          // finish-partial：服务端拒空文本（F2），acc 为空则只报 error；
+          // 加密失败时 sendFinish 返回 false——仍走下方 error 收口（明文不外发）
+          if (acc) await sendFinish(acc);
           deps.send({
             type: "agent_error",
             conversationId,
