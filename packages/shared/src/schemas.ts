@@ -18,12 +18,15 @@ export const MessagePayloadSchema = z.object({
     .max(50)
     .optional(),
   // 消息附件（M4 前置）：引用共享库文件；text 可空串（纯附件消息）
+  // E2E Task 5：key=附件密钥 base64（32B→44 字符），随消息进密文（PlainEnvelope.file.key 同源）；
+  // legacy 明文附件无 key → 渲染层走明文 content 直通（规格 §2.4 文件边界）。空串/超长拒绝。
   file: z
     .object({
       id: z.string().min(1),
       name: z.string().min(1).max(255),
       mime: z.string().min(1).max(128),
       size: z.number().int().min(0),
+      key: z.string().min(1).max(128).optional(),
     })
     .optional(),
   // 转发来源（二期 IM Task 4）：发送者展示名 + 源会话名；转发时剥离 mentions、保留 text/file

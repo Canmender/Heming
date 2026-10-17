@@ -250,6 +250,28 @@ describe("MessagePayloadSchema file 附件（M4 前置）", () => {
     });
     expect(r.success).toBe(false);
   });
+
+  // E2E Task 5：附件密钥随消息进密文（PlainEnvelope.file.key 已预留，schema 同步收口）
+  it("MessagePayload.file.key 可选且被保留（解密渲染的密钥载体）", () => {
+    const key = "A".repeat(44); // 32B base64 = 44 字符
+    const r = MessagePayloadSchema.safeParse({
+      text: "",
+      file: { id: "f1", name: "a.png", mime: "image/png", size: 12, key },
+    });
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.file?.key).toBe(key); // parse 后不得被 strip 掉
+  });
+
+  it("MessagePayload.file.key 空串/超长拒绝（非密钥形状不入库）", () => {
+    const base = { id: "f1", name: "a.png", mime: "image/png", size: 12 };
+    expect(
+      MessagePayloadSchema.safeParse({ text: "", file: { ...base, key: "" } }).success,
+    ).toBe(false);
+    expect(
+      MessagePayloadSchema.safeParse({ text: "", file: { ...base, key: "k".repeat(129) } })
+        .success,
+    ).toBe(false);
+  });
 });
 
 describe("MessagePayloadSchema forward（二期 IM Task 4 消息转发）", () => {

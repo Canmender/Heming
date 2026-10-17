@@ -6,10 +6,19 @@ import {
   setToken,
   resolveUrl,
   uploadFile,
+  uploadEncryptedFile,
+  downloadEncryptedFile,
   fetchFileBlobUrl,
   fetchFileBlobText,
   fetchFileUsage,
 } from "./api.js";
+import { hasSubtle, fromB64, toB64 } from "./e2eCrypto.js";
+
+// E2E Task 5：hasSubtle 可翻转（附件加密/解密的无 subtle 拦截面），其余导出保持真身
+vi.mock("./e2eCrypto.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./e2eCrypto.js")>();
+  return { ...actual, hasSubtle: vi.fn(() => true) };
+});
 
 describe("resolveUrl（API base 直连注入）", () => {
   it("base 为空：保持同源相对路径（本地 dev 走 vite 代理）", () => {
@@ -316,5 +325,203 @@ describe("fetchFileBlobText（附件 content 带鉴权取纯文本）", () => {
     expect((err as ApiError).status).toBe(401);
     expect((err as Error).message).toBe("unauthorized");
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * E2E Task 5：附件密文上传与解密下载（规格 §2.4 文件边界——消息附件加密）。
+ * AAD 常量与 api.ts 的 FILE_ENC_AAD 同源（"heming.e2e.file.v1"）：测试独立拼一份，
+ * 锁死两侧口径（改生产常量不改测试 → GCM 校验失败，用例即红）。
+ * IV 12B 前置于密文字节（contentBase64 = base64(iv || ciphertext||tag)）——往返用例锁此形状。
+ */
+describe("uploadEncryptedFile / downloadEncryptedFile（E2E 附件加密）", () => {
+  const AAD = new TextEncoder().encode("heming.e2e.file.v1");
+
+  const serverMeta = (over: Record<string, unknown> = {}) => ({
+    id: "f1",
+    owner: "alice",
+    name: ".enca.txt",
+    mime: "application/octet-stream",
+    size: 44,
+    updatedAt: "2026-10-17T00:00:00.000Z",
+    ...over,
+  });
+
+  const json = (body: unknown, status: number): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(hasSubtle).mockReturnValue(true);
+    setOnUnauthorized(null);
+    setToken(null);
+    localStorage.clear();
+  });
+
+  it("上传：POST 体 mime 置 application/octet-stream、name 加 .enc 前缀、正文不含原文字节", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(json(serverMeta(), 201));
+
+    const got = await uploadEncryptedFile(
+      new File(["HEMING-SECRET-附件正文"], "a.txt", { type: "text/plain" }),
+    );
+
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(String(url)).toBe(resolveUrl("/api/files"));
+    expect(init?.method).toBe("POST");
+    const body = JSON.parse(String(init?.body)) as {
+      name: string;
+      mime: string;
+      contentBase64: string;
+    };
+    expect(body.mime).toBe("application/octet-stream"); // 服务端只见密文，不落明文类型
+    expect(body.name).toBe(".enca.txt"); // .enc 前缀（原名保留在消息 payload，不进共享库）
+    const raw = fromB64(body.contentBase64);
+    expect(raw.length).toBeGreaterThan(12 + 16); // IV + GCM tag
+    // 原文字节（ASCII 与 UTF-8）不得出现在上传体
+    const tail = raw.subarray(12);
+    expect(String.fromCharCode(...tail)).not.toContain("HEMING-SECRET");
+    expect(new TextDecoder("utf-8", { fatal: false }).decode(tail)).not.toContain("附件正文");
+    // 返回 meta：服务端形态 + 随消息进密文的 32B fileKey（base64）
+    expect(got.id).toBe("f1");
+    expect(got.name).toBe(".enca.txt");
+    expect(got.mime).toBe("application/octet-stream");
+    expect(fromB64(got.key)).toHaveLength(32);
+  });
+
+  it("往返：downloadEncryptedFile 用同一 key 解回原文（带鉴权、返回 Blob、IV 前置形状锁定）", async () => {
+    setToken("t1");
+    const plaintext = "端到端附件 roundtrip 明文";
+    const captured: { contentBase64: string } = { contentBase64: "" };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === resolveUrl("/api/files")) {
+        captured.contentBase64 = (JSON.parse(String(init?.body)) as { contentBase64: string })
+          .contentBase64;
+        return Promise.resolve(json(serverMeta(), 201));
+      }
+      if (url === resolveUrl("/api/files/f1/content")) {
+        const bytes = fromB64(captured.contentBase64);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          blob: async () => new Blob([bytes.buffer as ArrayBuffer]),
+        } as unknown as Response);
+      }
+      return Promise.resolve(json({ error: "not found" }, 404));
+    });
+
+    const got = await uploadEncryptedFile(
+      new File([plaintext], "a.txt", { type: "text/plain" }),
+    );
+    const blob = await downloadEncryptedFile(got.id, got.key, "text/plain");
+
+    expect(blob.type).toBe("text/plain");
+    expect(new TextDecoder().decode(await blob.arrayBuffer())).toBe(plaintext);
+    // content 请求与 fetchFileBlobUrl 同鉴权口径（Bearer + 不设 Content-Type）
+    const contentCall = fetchSpy.mock.calls.find((c) =>
+      String(c[0]).includes("/api/files/f1/content"),
+    )!;
+    expect(new Headers(contentCall[1]?.headers).get("Authorization")).toBe("Bearer t1");
+    expect(new Headers(contentCall[1]?.headers).get("Content-Type")).toBeNull();
+    // 同源 AAD 独立复解一遍：测试常量与生产 FILE_ENC_AAD 漂移时此处先红
+    const raw = fromB64(captured.contentBase64);
+    const ck = await crypto.subtle.importKey(
+      "raw",
+      fromB64(got.key).buffer as ArrayBuffer,
+      { name: "AES-GCM" },
+      false,
+      ["decrypt"],
+    );
+    const manual = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: raw.slice(0, 12), additionalData: AAD },
+      ck,
+      raw.slice(12),
+    );
+    expect(new TextDecoder().decode(manual)).toBe(plaintext);
+  });
+
+  it("解密失败（密钥错/密文被换）→ 抛可读「附件解密失败」，不建半吊子结果", async () => {
+    setToken("t1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob([crypto.getRandomValues(new Uint8Array(64))]),
+    } as unknown as Response);
+
+    const wrongKey = toB64(crypto.getRandomValues(new Uint8Array(32)));
+    const err = await downloadEncryptedFile("f1", wrongKey, "text/plain").catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("附件解密失败");
+  });
+
+  it("AAD 绑定：换 AAD 加密的密文解不开（锁定 FILE_ENC_AAD 口径，防两处常量漂移）", async () => {
+    setToken("t1");
+    const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ck = await crypto.subtle.importKey(
+      "raw",
+      keyBytes,
+      { name: "AES-GCM" },
+      false,
+      ["encrypt"],
+    );
+    const ct = new Uint8Array(
+      await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv, additionalData: new TextEncoder().encode("heming.other.v1") },
+        ck,
+        new TextEncoder().encode("x"),
+      ),
+    );
+    const sealed = new Uint8Array(iv.length + ct.length);
+    sealed.set(iv, 0);
+    sealed.set(ct, iv.length);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob([sealed]),
+    } as unknown as Response);
+
+    const err = await downloadEncryptedFile("f1", toB64(keyBytes)).catch((e: unknown) => e);
+    expect((err as Error).message).toContain("附件解密失败");
+  });
+
+  it("解密下载 401：与 fetchFileBlobUrl 同口径触发 onUnauthorized 并抛 ApiError", async () => {
+    setToken("t1");
+    const onUnauthorized = vi.fn();
+    setOnUnauthorized(onUnauthorized);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      json({ error: "unauthorized" }, 401),
+    );
+
+    const err = await downloadEncryptedFile("f1", toB64(new Uint8Array(32))).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(401);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("无 subtle：上传与解密下载都拦截抛可读错误，且不发任何请求（不降级明文）", async () => {
+    vi.mocked(hasSubtle).mockReturnValue(false);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(json({ ok: true }, 200));
+
+    const up = await uploadEncryptedFile(new File(["x"], "a.txt")).catch((e: unknown) => e);
+    expect(up).toBeInstanceOf(Error);
+    expect((up as Error).message).toMatch(/端到端加密/);
+    const down = await downloadEncryptedFile("f1", toB64(new Uint8Array(32))).catch(
+      (e: unknown) => e,
+    );
+    expect(down).toBeInstanceOf(Error);
+    expect((down as Error).message).toMatch(/端到端加密/);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

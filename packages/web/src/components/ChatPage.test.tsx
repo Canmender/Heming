@@ -8,7 +8,7 @@ import { useAuthStore } from "../store/auth.js";
 import { useLlmStore, type LlmProfile } from "../store/llm.js";
 import { streamChat } from "../lib/llmClient.js";
 import { connectWs, type WsHandlers, type WsHandle } from "../lib/ws.js";
-import { hasSubtle } from "../lib/e2eCrypto.js";
+import { hasSubtle, toB64, fromB64 } from "../lib/e2eCrypto.js";
 import { sealMessage } from "../lib/e2eSession.js";
 
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
@@ -66,6 +66,28 @@ function jsonRes(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+/**
+ * E2E Task 5 测试侧附件密文构造（与 api.ts 的 FILE_ENC_AAD +「12B IV 前置」同口径）：
+ * 生产实现改口径而测试没改 → 解密必失败，渲染用例即红（两处常量的可执行锁）。
+ */
+async function sealAttachment(keyB64: string, plaintext: string): Promise<Blob> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ck = await crypto.subtle.importKey("raw", fromB64(keyB64).buffer as ArrayBuffer, { name: "AES-GCM" }, false, [
+    "encrypt",
+  ]);
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: new TextEncoder().encode("heming.e2e.file.v1") },
+      ck,
+      new TextEncoder().encode(plaintext),
+    ),
+  );
+  const sealed = new Uint8Array(iv.length + ct.length);
+  sealed.set(iv, 0);
+  sealed.set(ct, iv.length);
+  return new Blob([sealed]);
 }
 
 /**
@@ -1265,6 +1287,113 @@ describe("ChatPage", () => {
   });
 
   /**
+   * 会话历史 + 自定义附件 content 的 fetch 面（E2E Task 5 渲染组）：
+   * content 返回什么字节由用例决定（密文/明文/坏字节），其余端点与 mockMessagesFetch 同口径。
+   */
+  function mockAttachmentFetch(messages: Message[], content: () => Blob) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (/\/messages$/.test(url)) return Promise.resolve(jsonRes(messages));
+      if (/\/(reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      if (url === "/api/e2e/keys") return Promise.resolve(jsonRes({}));
+      if (/\/files\/[^/]+\/content$/.test(url)) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          blob: async () => content(),
+        } as unknown as Response);
+      }
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+  }
+
+  /** objectURL 桩最近一次喂进去的 Blob 字节（断言「渲染的是解密明文还是服务端原字节」）。 */
+  async function servedBytes(index = 0): Promise<string> {
+    const calls = vi.mocked(URL.createObjectURL).mock.calls;
+    const blob = calls.at(-(index + 1))![0] as Blob;
+    return new TextDecoder().decode(await blob.arrayBuffer());
+  }
+
+  // —— E2E Task 5：附件解密渲染 ——
+
+  it("带 key 的图片附件：解密后渲染 img，objectURL 拿到的是解密明文", async () => {
+    const plaintext = "PNG-FAKE-BYTES-端到端附件";
+    const key = toB64(crypto.getRandomValues(new Uint8Array(32)));
+    const cipher = await sealAttachment(key, plaintext);
+    const m: Message = {
+      ...msg("m1", "看这张图", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "看这张图",
+        file: { id: "f1", name: "图.png", mime: "image/png", size: 48, key },
+      },
+    };
+    mockAttachmentFetch([m], () => cipher);
+
+    render(<ChatPage />);
+    const img = await screen.findByRole("img", { name: "图.png" });
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
+    expect(img).toHaveAttribute("src", "blob:mock-1");
+    expect(await servedBytes()).toBe(plaintext); // 解密回原文，而非服务端密文字节
+    expect(await servedBytes()).not.toBe(new TextDecoder().decode(await cipher.arrayBuffer()));
+  });
+
+  it("带 key 的音频附件：AudioBubble 解密后渲染播放器", async () => {
+    const plaintext = "audio-bytes";
+    const key = toB64(crypto.getRandomValues(new Uint8Array(32)));
+    const cipher = await sealAttachment(key, plaintext);
+    const m: Message = {
+      ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "",
+        file: { id: "f-a", name: "语音.webm", mime: "audio/webm", size: 11, key },
+      },
+    };
+    mockAttachmentFetch([m], () => cipher);
+
+    render(<ChatPage />);
+    const audio = (await screen.findByTestId("audio-bubble")) as HTMLAudioElement;
+    expect(audio).toHaveAttribute("src", "blob:mock-1");
+    expect(await servedBytes()).toBe(plaintext);
+    expect(screen.queryByRole("link", { name: /语音\.webm/ })).not.toBeInTheDocument();
+  });
+
+  it("带 key 但密钥不匹配：解密失败给「加载失败」占位，不建 objectURL不出断链", async () => {
+    const good = toB64(crypto.getRandomValues(new Uint8Array(32)));
+    const wrong = toB64(crypto.getRandomValues(new Uint8Array(32)));
+    const cipher = await sealAttachment(good, "解不开的内容");
+    const m: Message = {
+      ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "",
+        file: { id: "f1", name: "图.png", mime: "image/png", size: 48, key: wrong },
+      },
+    };
+    mockAttachmentFetch([m], () => cipher);
+
+    render(<ChatPage />);
+    expect(await screen.findByText("加载失败")).toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("无 key 的 legacy 明文附件照旧显示：服务端原字节直通 objectURL（不走解密）", async () => {
+    const plain = "LEGACY-PLAIN-BYTES";
+    const m: Message = {
+      ...msg("m1", "旧附件", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "旧附件",
+        file: { id: "f-old", name: "旧.pdf", mime: "application/pdf", size: 18 },
+      },
+    };
+    mockAttachmentFetch([m], () => new Blob([plain], { type: "application/pdf" }));
+
+    render(<ChatPage />);
+    const link = await screen.findByRole("link", { name: /旧\.pdf/ });
+    expect(link).toHaveAttribute("href", "blob:mock-1");
+    expect(await servedBytes()).toBe(plain); // 原样直通：没有 key 就没有解密步骤
+  });
+
+  /**
    * 工具行选文件走 document.createElement("input") 弹系统选择器（jsdom 无文件 UI）：
    * 拦下创建的 input、塞 files、手动触 onchange，等价于「用户选中了文件」。
    */
@@ -1306,7 +1435,7 @@ describe("ChatPage", () => {
     });
   }
 
-  it("选中文件 → 上传共享库 → 发纯附件消息（text 空串 + payload.file）", async () => {
+  it("选中文件 → 密文上传共享库 → 发纯附件消息（file.key 随密文，POST 体非明文）", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     const fetchSpy = mockUploadFetch();
@@ -1314,17 +1443,39 @@ describe("ChatPage", () => {
     render(<ChatPage />);
     await act(async () => {});
 
-    captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
+    captureFilePicker().pick(
+      undefined,
+      new File(["HEMING-SECRET"], "a.txt", { type: "text/plain" }),
+    );
 
     const plain = await lastSealed(send);
+    // 消息侧保留原名/原 mime（气泡按它路由与展示），密钥 key 随明文进密文
     expect(plain).toEqual({
       kind: "file",
       text: "",
-      file: { id: "f1", name: "a.txt", mime: "text/plain", size: 2 },
+      file: {
+        id: "f1",
+        name: "a.txt",
+        mime: "text/plain",
+        size: 13, // 原文件字节数（f.size），非服务端密文长度
+        key: expect.any(String),
+      },
     });
-    expect(
-      fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files" && c[1]?.method === "POST"),
-    ).toBe(true); // 附件已落共享库
+    expect(fromB64((plain.file as { key: string }).key)).toHaveLength(32);
+    const post = fetchSpy.mock.calls.find(
+      (c) => String(c[0]) === "/api/files" && c[1]?.method === "POST",
+    );
+    expect(post).toBeDefined(); // 附件已落共享库
+    const body = JSON.parse(String((post![1] as RequestInit).body)) as {
+      name: string;
+      mime: string;
+      contentBase64: string;
+    };
+    // 服务端只见密文：mime 降级 octet-stream、name 加 .enc 前缀、正文无原文字节
+    expect(body.mime).toBe("application/octet-stream");
+    expect(body.name).toBe(".enca.txt");
+    const raw = fromB64(body.contentBase64);
+    expect(String.fromCharCode(...raw.subarray(12))).not.toContain("HEMING-SECRET");
     expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 成功路径不报错
   });
 
@@ -1443,6 +1594,8 @@ describe("ChatPage", () => {
     });
     const plain = await lastSealed(send);
     expect(plain).toMatchObject({ kind: "file", file });
+    // 规格 §2.4 文件边界：右栏 FileTree 的上传与投递保持明文——不带 key、不走附件加密
+    expect((plain.file as { key?: string }).key).toBeUndefined();
     const ev = send.mock.calls.at(-1)![0] as Record<string, unknown>;
     expect(ev.conversationId).toBe("c2");
     expect(useUiStore.getState().pendingAttachment).toBeNull();
@@ -1933,11 +2086,20 @@ describe("ChatPage", () => {
       fireEvent.click(screen.getByLabelText("停止录音"));
       // 上传链含 FileReader 宏任务（jsdom setImmediate 两跳）：单次 act 冲不干净，waitFor 到 send 落定
       const plain = await lastSealed(send);
+      // payload 保留录音原名/原 mime（AudioBubble 按 audio/* 路由），key 随密文；
+      // 服务端存的则是 .enc 名 + octet-stream 密文（见下方 body 断言）
       expect(plain).toEqual({
         kind: "file",
         text: "",
-        file: { id: "f-a", name: "语音.webm", mime: "audio/webm", size: 11 },
+        file: {
+          id: "f-a",
+          name: expect.stringMatching(/^语音-\d{6}\.webm$/),
+          mime: "audio/webm",
+          size: 11, // fake 录音字节（"audio-bytes"）
+          key: expect.any(String),
+        },
       });
+      expect(fromB64((plain.file as { key: string }).key)).toHaveLength(32);
       const post = fetchSpy.mock.calls.find(
         (c) => String(c[0]) === "/api/files" && c[1]?.method === "POST",
       );
@@ -1946,8 +2108,8 @@ describe("ChatPage", () => {
         name: string;
         mime: string;
       };
-      expect(body.mime).toBe("audio/webm"); // 上传体带录音 mime
-      expect(body.name).toMatch(/^语音-\d{6}\.webm$/); // 文件名 HHMMSS 格式
+      expect(body.mime).toBe("application/octet-stream"); // 语音同样密文上传，不落 audio/webm
+      expect(body.name).toMatch(/^\.enc语音-\d{6}\.webm$/); // .enc 前缀 + 原文件名
       expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 录音态退出、无错误提示
       expect(media.trackStop).toHaveBeenCalledTimes(1); // 停录必停麦克风轨
     } finally {
@@ -2038,9 +2200,12 @@ describe("ChatPage", () => {
       });
       // 上传链的 file.arrayBuffer() 走 jsdom FileReader 的两跳 setImmediate（被假时钟接管）：
       // runAllTimersAsync 冲刷这两跳 + 其后的微任务，否则 send 永远到不了（假 setImmediate 不会被 await act 冲掉）
+      // crypto.subtle 走 I/O 阶段（非微任务），假时钟下不自动完成 → 切回真时钟让 WebCrypto 落地
       await act(async () => {
         await vi.runAllTimersAsync();
       });
+      vi.useRealTimers();
+      await act(async () => {});
 
       const ev = send.mock.calls
         .map((c) => c[0] as Record<string, unknown>)
@@ -2049,7 +2214,13 @@ describe("ChatPage", () => {
       expect(ev!.enc).toBe("e2e"); // 假时钟下 runAllTimersAsync 已冲刷封发链
       expect(decodePlain(ev!.cipher as string)).toMatchObject({
         kind: "file",
-        file: { id: "f-b", name: "语音.webm", mime: "audio/webm", size: 11 },
+        file: {
+          id: "f-b",
+          name: expect.stringMatching(/^语音-\d{6}\.webm$/),
+          mime: "audio/webm",
+          size: 11,
+          key: expect.any(String),
+        },
       });
       expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 录音态已退出
       expect(media.trackStop).toHaveBeenCalledTimes(1);

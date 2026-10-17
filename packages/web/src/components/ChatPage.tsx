@@ -6,8 +6,9 @@ import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
 import {
   fetchMembers,
-  uploadFile,
+  uploadEncryptedFile,
   fetchFileBlobUrl,
+  downloadEncryptedFile,
   fetchE2eKeys,
   putE2eKeys,
 } from "../lib/api.js";
@@ -158,14 +159,17 @@ export function renderTextWithMentions(
 
 /**
  * 附件气泡（图片缩略图 / 文件卡）：content 路由 authOnly，裸 src/href 会 401 →
- * 挂载时走 fetchFileBlobUrl（带 Authorization 取 blob）拿 objectURL，卸载或换附件时
- * revoke（含「fetch 还没回来就已卸载」的竞态：取到即弃），防 objectURL 内存泄漏。
- * 加载失败（401/网络）给可见占位，不渲染断链的 <img>/<a>。
+ * 挂载时走鉴权 blob 拿 objectURL，卸载或换附件时 revoke（含「fetch 还没回来就已卸载」的
+ * 竞态：取到即弃），防 objectURL 内存泄漏。加载失败（401/网络/解密失败）给可见占位，
+ * 不渲染断链的 <img>/<a>。
+ * E2E Task 5：payload.file.key 存在（消息附件已加密）→ downloadEncryptedFile 鉴权取密文
+ * 并解密成 Blob 再建 objectURL；无 key（legacy 明文附件 / 右栏投递）→ fetchFileBlobUrl
+ * 明文直通（规格 §2.4：无 key 照旧显示）。
  */
 function AttachmentPreview({
   file,
 }: {
-  file: { id: string; name: string; mime: string; size: number };
+  file: { id: string; name: string; mime: string; size: number; key?: string };
 }): JSX.Element | null {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -175,7 +179,10 @@ function AttachmentPreview({
     let owned: string | null = null; // 本 effect 实例持有的 objectURL（闭包内跨 then/cleanup 可见）
     setUrl(null);
     setFailed(false);
-    fetchFileBlobUrl(file.id)
+    const load: Promise<string> = file.key
+      ? downloadEncryptedFile(file.id, file.key, file.mime).then((b) => URL.createObjectURL(b))
+      : fetchFileBlobUrl(file.id);
+    load
       .then((u) => {
         if (!alive) {
           URL.revokeObjectURL(u); // 晚到的结果：无人再用，直接销
@@ -191,7 +198,7 @@ function AttachmentPreview({
       alive = false;
       if (owned) URL.revokeObjectURL(owned);
     };
-  }, [file.id]);
+  }, [file.id, file.key, file.mime]);
 
   if (failed) {
     return (
@@ -224,8 +231,17 @@ function AttachmentPreview({
  * 音频气泡（Task 5）：audio/* 附件在 image 分支之前路由到此——鉴权取 blob 后渲染
  * `<audio controls>` 播放器，替代通用文件卡。blob 生命周期与 AttachmentPreview 同款：
  * 晚到即销 + cleanup revoke（防 objectURL 泄漏），加载失败给可见占位不出断链播放器。
+ * E2E Task 5：fileKey 存在 → 解密后渲染（下载面同 key 判别；无 key 走明文 blob）。
  */
-function AudioBubble({ fileId }: { fileId: string }): JSX.Element | null {
+function AudioBubble({
+  fileId,
+  fileKey,
+  mime = "audio/webm",
+}: {
+  fileId: string;
+  fileKey?: string;
+  mime?: string;
+}): JSX.Element | null {
   const [url, setUrl] = useState<string | null>(null);
   const [err, setErr] = useState("");
 
@@ -234,7 +250,10 @@ function AudioBubble({ fileId }: { fileId: string }): JSX.Element | null {
     let alive = true;
     setUrl(null);
     setErr("");
-    void fetchFileBlobUrl(fileId)
+    const load: Promise<string> = fileKey
+      ? downloadEncryptedFile(fileId, fileKey, mime).then((b) => URL.createObjectURL(b))
+      : fetchFileBlobUrl(fileId);
+    void load
       .then((u) => {
         if (!alive) {
           URL.revokeObjectURL(u); // 晚到的结果：无人再用，直接销
@@ -250,7 +269,7 @@ function AudioBubble({ fileId }: { fileId: string }): JSX.Element | null {
       alive = false;
       if (revoked) URL.revokeObjectURL(revoked);
     };
-  }, [fileId]);
+  }, [fileId, fileKey, mime]);
 
   if (err) return <div className="mt-1 text-[11px] text-[#b42318]">音频加载失败：{err}</div>;
   return url ? (
@@ -1096,7 +1115,7 @@ export function ChatPage() {
       return;
     }
     try {
-      const meta = await uploadFile(f);
+      const meta = await uploadEncryptedFile(f);
       // await 后闭包已旧：切了会话或 socket 已换/已关则丢弃，防发错会话/向已关句柄静默发送
       const live = wsHandleRef.current;
       if (live !== handle || useUiStore.getState().activeConversationId !== convId) {
@@ -1106,7 +1125,9 @@ export function ChatPage() {
       const ok = await sealAndSend({
         kind: "file",
         text: "",
-        file: { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size },
+        // 消息侧保留原名/原 mime/原大小（气泡按它路由与展示），fileKey 随消息进密文；
+        // meta 是服务端密文形态（.enc 名 + octet-stream），仅取 id
+        file: { id: meta.id, name: f.name, mime: f.type || "application/octet-stream", size: f.size, key: meta.key },
       });
       if (ok) setSendNotice(null);
     } catch (err) {
@@ -1360,7 +1381,11 @@ export function ChatPage() {
                     {/* 附件：audio/* 先于 image/文件卡路由到播放器气泡（Task 5） */}
                     {m.payload.file ? (
                       m.payload.file.mime.startsWith("audio/") ? (
-                        <AudioBubble fileId={m.payload.file.id} />
+                        <AudioBubble
+                          fileId={m.payload.file.id}
+                          fileKey={m.payload.file.key}
+                          mime={m.payload.file.mime}
+                        />
                       ) : (
                         <AttachmentPreview file={m.payload.file} />
                       )

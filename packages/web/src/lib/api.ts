@@ -8,6 +8,7 @@ import type {
   PutE2eKeysBody,
   ReencryptBody,
 } from "@heming/shared";
+import { hasSubtle, toB64, fromB64 } from "./e2eCrypto.js";
 
 /**
  * API 直连地址：构建时由 VITE_API_BASE 注入（vite 对 VITE_ 前缀 env 天然内联，无需 define）。
@@ -149,24 +150,23 @@ export const reencryptMessage = (messageId: string, body: ReencryptBody) =>
 /** 右栏用量：当前用户已用字节 + 每用户配额字节（服务端读 HEMING_FILE_QUOTA_MB）。 */
 export const fetchFileUsage = () => api<{ used: number; quota: number }>("/api/files/usage");
 
-/**
- * 上传共享库文件（App 的「上传」与聊天附件共用同一路径）：
- * 浏览器 File → ArrayBuffer → 手工逐字节拼二进制串 → btoa（TextEncoder 不必引入，
- * 文件名/类型走 JSON 字段，contentBase64 只承载原始字节）。上限由服务端 8MB json 上限兜底。
- */
-export async function uploadFile(file: File): Promise<SharedFileMeta> {
-  const buf = await file.arrayBuffer();
+/** Uint8Array → base64（逐字节拼二进制串，与既有 uploadFile 同法）。 */
+function btoaBytes(bytes: Uint8Array): string {
   let binary = "";
-  const bytes = new Uint8Array(buf);
   for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+/** POST /api/files 与 413 配额映射（uploadFile / uploadEncryptedFile 共用一条通道）。 */
+async function postFileJson(payload: {
+  name: string;
+  mime: string;
+  contentBase64: string;
+}): Promise<SharedFileMeta> {
   try {
     return await api<SharedFileMeta>("/api/files", {
       method: "POST",
-      body: JSON.stringify({
-        name: file.name,
-        mime: file.type || "application/octet-stream",
-        contentBase64: btoa(binary),
-      }),
+      body: JSON.stringify(payload),
     });
   } catch (e) {
     // 服务端每用户配额超限（api() 把 body.error 作为 message 抛出）→ 换成用户可读文案；
@@ -176,6 +176,136 @@ export async function uploadFile(file: File): Promise<SharedFileMeta> {
     }
     throw e;
   }
+}
+
+/**
+ * 上传共享库文件（右栏「上传」与右栏投递共用同一路径）：
+ * 浏览器 File → ArrayBuffer → 手工逐字节拼二进制串 → btoa（TextEncoder 不必引入，
+ * 文件名/类型走 JSON 字段，contentBase64 只承载原始字节）。上限由服务端 8MB json 上限兜底。
+ * 明文语义（规格 §2.4）：显式共享=明文是既定产品语义——右栏上传/投递**保持明文**；
+ * 消息附件的加密走 uploadEncryptedFile（同一 base64 通道，先加密再 POST）。
+ */
+export async function uploadFile(file: File): Promise<SharedFileMeta> {
+  const buf = await file.arrayBuffer();
+  return postFileJson({
+    name: file.name,
+    mime: file.type || "application/octet-stream",
+    contentBase64: btoaBytes(new Uint8Array(buf)),
+  });
+}
+
+// —— E2E Task 5：消息附件加密（规格 §2.4 文件边界——消息附件加密，右栏共享保持明文）——
+
+/**
+ * 附件密文 AAD（固定上下文串）：AES-GCM 的 additionalData 不随密文传输，上传与解密两侧
+ * 必须同源同值——本常量即两侧唯一口径（api.test 与 ChatPage.test 各自独立拼一份做锁定，
+ * 改动此处不同步改测试 → 解密即红）。IV 12B 随机、**前置于密文字节**：
+ * contentBase64 = base64(iv(12) || ciphertext||tag(16))，解密时按同布局切分。
+ */
+const FILE_ENC_AAD = new TextEncoder().encode("heming.e2e.file.v1");
+const FILE_IV_LEN = 12;
+const FILE_KEY_LEN = 32;
+
+/** 无 subtle 的附件拦截文案（与 ChatPage NO_E2E_NOTICE 同语义；api 层不 import 组件防环）。 */
+const NO_E2E_FILE_ERROR = "当前环境不支持端到端加密，附件未处理";
+
+/** 解密失败的可读文案（密钥不匹配/密文损坏/AAD 漂移统一口径，气泡占位直接展示）。 */
+const FILE_DECRYPT_ERROR = "附件解密失败（密钥不匹配或数据已损坏）";
+
+/**
+ * 加密上传消息附件：随机 32B fileKey → AES-256-GCM 加密原字节 → POST /api/files。
+ * 服务端只见密文：mime 置 application/octet-stream、name 加 `.enc` 前缀（共享库列表里
+ * 也能一眼认出密文项，且不落明文类型供嗅探）；**fileKey 不上行**，由调用方随消息进密文
+ * （payload.file.key，见 shared MessagePayload.file）。返回的 name/mime/size 是服务端
+ * 密文形态；消息 payload 请用原文件的 name/mime/size + 本返回的 id/key（气泡按原 mime
+ * 路由 image/audio、按原名展示与下载）。
+ * 无 subtle 拦截：不发任何请求、不发明文（规格 §2.1 拒绝不降级）。
+ */
+export async function uploadEncryptedFile(file: File): Promise<{
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  key: string;
+}> {
+  if (!hasSubtle()) throw new Error(NO_E2E_FILE_ERROR);
+  const plain = new Uint8Array(await file.arrayBuffer());
+  const keyBytes = crypto.getRandomValues(new Uint8Array(FILE_KEY_LEN));
+  const iv = crypto.getRandomValues(new Uint8Array(FILE_IV_LEN));
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    toArrayBuffer(keyBytes),
+    { name: "AES-GCM" },
+    false,
+    ["encrypt"],
+  );
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: toArrayBuffer(FILE_ENC_AAD) },
+      cryptoKey,
+      toArrayBuffer(plain),
+    ),
+  );
+  const sealed = new Uint8Array(iv.length + ct.length);
+  sealed.set(iv, 0);
+  sealed.set(ct, iv.length);
+  // CreateFileBody.name 上限 255：前缀后超长截断（原名尾段丢失属极端边界，服务端契约优先）
+  const meta = await postFileJson({
+    name: (".enc" + file.name).slice(0, 255),
+    mime: "application/octet-stream",
+    contentBase64: btoaBytes(sealed),
+  });
+  return { id: meta.id, name: meta.name, mime: meta.mime, size: meta.size, key: toB64(keyBytes) };
+}
+
+/**
+ * 解密下载附件（uploadEncryptedFile 的逆向）：与 fetchFileBlobUrl 同鉴权同错误口径
+ * （Bearer 头、401 触发全局 onUnauthorized 并抛 ApiError），差异在拿到密文后用 fileKey
+ * 做 AES-GCM 解密再打包 Blob。objectURL 由调用方按既有模式创建与 revoke（AttachmentPreview/
+ * AudioBubble 的晚到即销 + cleanup 销仍成立）——本函数只负责取回明文 Blob。
+ * mime 决定 Blob type（<img>/<audio> 对 blob: URL 的类型嗅探依据）；调用方通常传 payload.file.mime。
+ * 解密失败抛 FILE_DECRYPT_ERROR（HTTP 错误保持原 ApiError 不吞）。
+ */
+export async function downloadEncryptedFile(
+  id: string,
+  key: string,
+  mime = "application/octet-stream",
+): Promise<Blob> {
+  if (!hasSubtle()) throw new Error(NO_E2E_FILE_ERROR);
+  const headers = new Headers();
+  const t = token ?? localStorage.getItem("heming.token");
+  if (t) headers.set("Authorization", `Bearer ${t}`);
+  const res = await fetch(resolveUrl(`/api/files/${id}/content`), { headers });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
+    throw new ApiError(res.status, body.error ?? `http ${res.status}`);
+  }
+  const sealed = new Uint8Array(await (await res.blob()).arrayBuffer());
+  if (sealed.length <= FILE_IV_LEN) throw new Error(FILE_DECRYPT_ERROR);
+  try {
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      toArrayBuffer(fromB64(key)),
+      { name: "AES-GCM" },
+      false,
+      ["decrypt"],
+    );
+    const plain = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: toArrayBuffer(sealed.slice(0, FILE_IV_LEN)), additionalData: toArrayBuffer(FILE_ENC_AAD) },
+      cryptoKey,
+      toArrayBuffer(sealed.slice(FILE_IV_LEN)),
+    );
+    return new Blob([plain], { type: mime });
+  } catch {
+    // WebCrypto OperationError（密钥错/AAD 变）与 atob 坏 key 统一成可读文案，不吐栈
+    throw new Error(FILE_DECRYPT_ERROR);
+  }
+}
+
+/** Uint8Array → ArrayBuffer 背书（TS 5.9 BufferSource 收紧，同 e2eCrypto 的同名工具）。 */
+function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
+  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
 }
 
 /**
