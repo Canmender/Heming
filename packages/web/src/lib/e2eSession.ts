@@ -11,7 +11,9 @@
  *     heming.e2e.deferred.<convId>     缺链/超窗暂挂信封（上限 50 条）
  *
  * 链分发（chaindist）走 X3DH 成对封装（§3.2「用对方 §3.1 会话加密」）：
- * 外层公参 ek/ik/to（服务端可见的引导材料），内层 GCM 密文装 {kind:"chaindist", dist}。
+ * 外层公参 ek/ik/to（服务端可见的引导材料），内层 GCM 密文装 {kind:"chaindist", dist}；
+ * 归属由 outer.ik 解密认证（不信 env.senderId），按认证设备定位/删链（多设备不互删），
+ * 每设备记最后接受分发的新鲜度拒旧重放，正文按 (chainKid,n) 去重拒同会话重放。
  * 正文消息走本会话发送链逐条 KDF（msgKey + 链推进），AAD 绑定 convId+chainKid+n 防搬移。
  */
 import type { WsClientEvent, E2eDeviceKeys } from "@heming/shared";
@@ -113,6 +115,12 @@ export interface MsgCache {
   list(convId: string): CachedMsg[];
 }
 
+/**
+ * openMessage 结果：明文 / "defer"（缺链超窗，已入暂挂队列）/
+ * "duplicate"（(chainKid,n) 已解开过——同会话密文重放，调用方忽略，不落缓存）。
+ */
+export type OpenResult = PlainEnvelope | "defer" | "duplicate";
+
 // —— 内部持久化形状 ——
 
 interface StoredIdentity {
@@ -139,13 +147,17 @@ interface SendChain extends ChainState {
 
 interface RecvChain extends ChainState {
   createdAt: number;
-  from?: string; // 发送者 userId（handleChainDist 登记，轮换删旧链用）
+  /** 认证发送设备标识（identity kid，由 outer.ik 解密认证得出——非 env.senderId） */
+  from?: string;
   msgKeys: Record<string, string>; // 乱序窗口内已缓存的 msgKey（key 为 n）
+  opened?: Record<string, true>; // 已成功解开的 (chainKid,n)——密文重放去重
 }
 
 interface ChainsFile {
   send?: SendChain;
   recv: Record<string, RecvChain>;
+  /** 每认证发送设备最后接受的 chaindist 新鲜度（防旧分发重放回滚接收链） */
+  lastDist?: Record<string, { ct: number; kid: string }>;
 }
 
 /** chaindist 信封外层（cipher 内 JSON 的非加密部分）：ek/ik/to 为公开引导材料。 */
@@ -506,8 +518,9 @@ async function sealChainDist(
 
 /**
  * 解开一条 e2e 信封。
- * - chaindist（外层带 ek）→ X3DH 解封，返回 {kind:"chaindist", dist}（落链交给 handleChainDist）；
- * - 正文 → 发送链 msgKey 解密并写明文缓存；
+ * - chaindist（外层带 ek）→ X3DH 解封，**解密上下文内自动落链**（归属=outer.ik 认证出的
+ *   发送设备，不信 env.senderId），返回 {kind:"chaindist", dist}；
+ * - 正文 → 发送链 msgKey 解密并写明文缓存；已解开过的 (chainKid,n) → "duplicate"；
  * - 缺链/超窗 → 入暂挂队列（上限 50）并返回 "defer"；
  * - GCM 校验失败（AAD 被搬移/密钥错）→ 抛错（接线层渲染「无法解密」占位）。
  */
@@ -515,7 +528,7 @@ export async function openMessage(
   conv: { id: string; memberIdOf: (chainKid: string) => string | undefined },
   env: SealedEnvelope,
   cache: MsgCache,
-): Promise<PlainEnvelope | "defer"> {
+): Promise<OpenResult> {
   cacheByConv.set(conv.id, cache);
   if (!env.cipher) throw new Error(DECRYPT_FAILED);
   let outer: CipherOuter;
@@ -528,13 +541,13 @@ export async function openMessage(
   return openChainMsg(conv, env, outer, cache);
 }
 
-/** 正文路径：发送链查键 → msgKey 派生 → GCM 解密 → 提交链状态 → 落缓存。 */
+/** 正文路径：发送链查键 → 去重 → msgKey 派生 → GCM 解密 → 提交链状态 → 落缓存。 */
 async function openChainMsg(
   conv: { id: string; memberIdOf: (chainKid: string) => string | undefined },
   env: SealedEnvelope,
   outer: CipherOuter,
   cache: MsgCache,
-): Promise<PlainEnvelope | "defer"> {
+): Promise<OpenResult> {
   const { chainKid, n } = env;
   if (!chainKid || n === undefined) {
     pushDeferred(conv.id, env); // 形状不全（缺链索引）→ 暂挂，元数据到达后重扫可解
@@ -547,6 +560,7 @@ async function openChainMsg(
     pushDeferred(convId, env); // 缺链 → 暂挂等 chaindist
     return "defer";
   }
+  if (chain.opened?.[String(n)]) return "duplicate"; // (chainKid,n) 已解开过——同会话重放拒收
 
   // msgKey 派生（先算不解、解密成功才提交——失败不留半推进状态）
   let keyB64: string;
@@ -589,7 +603,7 @@ async function openChainMsg(
     throw new Error(DECRYPT_FAILED); // GCM/AAD 失败 = 永久性（键对但绑错会话/被篡改）
   }
 
-  // 解密成功 → 提交链推进（含窗口 msgKey 缓存，保留最近 1000 个）
+  // 解密成功 → 提交链推进（含窗口 msgKey 缓存，保留最近 1000 个）并记 (chainKid,n) 已解开
   if (advance) {
     const floor = advance.n - WINDOW;
     const kept: Record<string, string> = {};
@@ -599,6 +613,18 @@ async function openChainMsg(
     chain.msgKeys = { ...kept, ...advance.acc };
     chain.ck = advance.ck;
     chain.n = advance.n;
+  }
+  // 去重标记与 msgKey 窗口同窗修剪（落后超窗的重放自然落回 defer 分支）
+  {
+    const floor = chain.n - WINDOW;
+    const opened = chain.opened ?? {};
+    if (advance) {
+      for (const k of Object.keys(opened)) {
+        if (Number(k) < floor) delete opened[k];
+      }
+    }
+    opened[String(n)] = true;
+    chain.opened = opened;
     saveChains(convId, chains);
   }
 
@@ -644,6 +670,10 @@ async function openX3dhDist(
     }
     // dist 完整性：kid 必须是 ck 的指纹（防改写 kid 塞错链）
     if ((await chainKidOf(fromB64(plain.dist.ck))) !== plain.dist.kid) throw new Error(DECRYPT_FAILED);
+    // 归属 = 解密认证出的发送设备：outer.ik 参与 X3DH 的 DH3/DH4，GCM 能解开 ⟺
+    // 发送方确持该 IK 私钥（换 ik 改不了密文，伪造者算不出同一 RK）——不信 env.senderId（服务端可伪造）。
+    const senderDev = await kidOfSpki(outer.ik);
+    handleChainDist(conv.id, senderDev, plain.dist);
   }
   appendCache(conv, env, plain, cache);
   return plain;
@@ -665,29 +695,55 @@ function appendCache(
 // —— handleChainDist ——
 
 /**
- * 落链（chaindist 解开后调用）：
+ * 落链（chaindist 解开后由 openMessage 自动调用；手工调用时 from 必须是**认证发送设备
+ * 标识**（identity kid），禁止传 env.senderId——服务端可伪造归属）：
  * - 同 kid 幂等（已持有更靠前的接收状态，不回退）；
- * - 同发送者旧链键整体删除（前向保密——轮换后旧密文不可再解）；
+ * - **新鲜度（I1）**：每个认证发送设备记录最后接受分发的 (createdAt, kid)；旧于已知链的
+ *   分发（重放/过期乱序）直接丢弃——否则重放旧 chaindist 会删掉新链、回滚到旧链，
+ *   后续新链消息最长 24h 解不开且 deferred 溢出丢真消息。双端约定：dist.createdAt 为
+ *   链创建时刻（发送端 deps.now 单调），严格小于已知值即拒绝；同刻不同 kid 亦拒。
+ * - 同发送设备旧链键整体删除（前向保密——按**设备**定位而非 userId，多设备不互删）；
  * - 落链后触发 deferred 重扫。
  */
 export function handleChainDist(convId: string, from: string, dist: ChainDist): void {
-  if (!dist || !dist.kid || typeof dist.ck !== "string" || !Number.isInteger(dist.n)) return;
-  const chains = loadChains(convId);
-  if (!chains.recv[dist.kid]) {
-    for (const [kid, rec] of Object.entries(chains.recv)) {
-      if (rec.from === from) delete chains.recv[kid]; // 旧链键删除（含其 msgKey 窗口）
-    }
-    chains.recv[dist.kid] = {
-      kid: dist.kid,
-      ck: dist.ck,
-      n: dist.n,
-      createdAt: dist.createdAt,
-      from,
-      msgKeys: {},
-    };
-    saveChains(convId, chains);
+  if (
+    !dist ||
+    !dist.kid ||
+    typeof dist.ck !== "string" ||
+    !Number.isInteger(dist.n) ||
+    !Number.isFinite(dist.createdAt)
+  ) {
+    return;
   }
+  const chains = loadChains(convId);
+  if (chains.recv[dist.kid]) return; // 幂等：同链已在（含更靠前索引），不回退
+  const last = chains.lastDist?.[from];
+  if (last && (dist.createdAt < last.ct || (dist.createdAt === last.ct && dist.kid !== last.kid))) {
+    return; // 旧分发重放/同刻异链 → 丢弃，不改任何状态
+  }
+  for (const [kid, rec] of Object.entries(chains.recv)) {
+    if (rec.from === from) delete chains.recv[kid]; // 同认证设备旧链键删除（含其 msgKey/opened 窗口）
+  }
+  chains.recv[dist.kid] = {
+    kid: dist.kid,
+    ck: dist.ck,
+    n: dist.n,
+    createdAt: dist.createdAt,
+    from,
+    msgKeys: {},
+  };
+  chains.lastDist = { ...(chains.lastDist ?? {}), [from]: { ct: dist.createdAt, kid: dist.kid } };
+  saveChains(convId, chains);
   void sweepDeferred(convId); // 落链后重扫暂挂（并发合并见 sweepDeferred）
+}
+
+/** 接收链归属（chainKid → 认证发送设备 id）——测试与诊断可观测。 */
+export function recvChainOwners(convId: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [kid, rec] of Object.entries(loadChains(convId).recv)) {
+    if (rec.from !== undefined) out[kid] = rec.from;
+  }
+  return out;
 }
 
 // —— sweepDeferred ——
@@ -695,7 +751,7 @@ export function handleChainDist(convId: string, from: string, dist: ChainDist): 
 const sweeps = new Map<string, Promise<number>>();
 
 /**
- * 重扫暂挂队列：单次最多 5 条，解开/永久失败移除、仍缺链保留；
+ * 重扫暂挂队列：单次最多 5 条，解开/"duplicate"/永久失败移除、仍缺链保留；
  * 有进展则继续下一轮（上限 50 条必然收敛）。并发调用合并到同一次扫描。
  */
 export function sweepDeferred(convId: string): Promise<number> {
@@ -736,19 +792,12 @@ async function doSweep(convId: string): Promise<number> {
         cacheByConv.get(convId) ?? msgCache,
       );
       if (r === "defer") continue; // 仍缺链/超窗 → 留在队列
+      // 成功 / "duplicate"（重放）/ chaindist（openMessage 内已落链）都移出队列，算进展
       saveDeferred(
         convId,
         loadDeferred(convId).filter((e) => e.id !== id),
       );
       opened += 1;
-      if (r.kind === "chaindist" && r.dist) {
-        // 暂挂里解出的链分发：链必须落否则后续永远缺链
-        const from =
-          env.senderId ??
-          (env.chainKid !== undefined ? chains.recv[env.chainKid]?.from : undefined) ??
-          "unknown";
-        handleChainDist(convId, from, r.dist); // 内部 void sweep → 合并到当前扫描
-      }
     } catch {
       // 永久失败（AAD 搬移/密钥失效）→ 移除，不许占满队列
       saveDeferred(
