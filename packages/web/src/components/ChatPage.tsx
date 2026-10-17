@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import type { Message } from "@heming/shared";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -139,6 +140,8 @@ export function ChatPage() {
     [],
   );
   const [tokenLock, setTokenLock] = useState(false);
+  /** 回复引用目标（Task 3）：非空时输入区上方出引用预览条，发送带顶层 replyTo。 */
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
   /**
    * 群成员挂载快照（带 convId 防跨会话串数据）：
    * byId = id→名（他人气泡署名，M2 消息体无 senderName）；
@@ -175,6 +178,13 @@ export function ChatPage() {
       : `${conv.name}（${conv.memberCount} 人）`
     : "会话";
   const isGroup = conv?.type === "group";
+  /** 消息署名（气泡/引用卡/引用预览共用）：自己「我」；direct 对方名；群内成员映射名（缺失回退 undefined 由调用方处理）。 */
+  const displaySenderName = (m: Message) =>
+    m.senderId === me?.id
+      ? "我"
+      : conv?.type === "direct"
+        ? peer?.displayName
+        : memberNameById?.[m.senderId];
   /** 选择器条目：剔除已选（防重复 chip）+ 按 token query 过滤（空串=全量）。 */
   const pickerItems = mentionCandidates.filter(
     (a) =>
@@ -288,6 +298,8 @@ export function ChatPage() {
     setTokenLock(false);
     setEmojiOpen(false);
     setListening(false);
+    // 回复引用也是会话级：A 会话的引用目标不得带进 B 会话
+    setReplyTarget(null);
     // 发送提示也是会话级：A 会话的「上传失败/不支持语音」不得带进 B 会话
     setSendNotice(null);
   }, [convId]);
@@ -481,6 +493,8 @@ export function ChatPage() {
     handle.send({
       type: "send_message",
       conversationId: convId,
+      // replyTo 是事件顶层键（shared WsClientEventSchema），非 payload 内——塞 payload 会被 zod 剥掉
+      ...(replyTarget ? { replyTo: replyTarget.id } : {}),
       payload: {
         text,
         // mentions 非空才带（空则整个键不出现，与 M2 消息形状一致）
@@ -492,6 +506,7 @@ export function ChatPage() {
     setPicker(null);
     setTokenLock(false);
     setSendNotice(null);
+    setReplyTarget(null);
     // 发送成功即触发各 mention 的本机流式生成（失败/中断由 WS 三事件回声收口）
     if (mentions.length) startRun(mentions, text);
   };
@@ -634,16 +649,17 @@ export function ChatPage() {
           // 已撤回：正文/附件/已读一律不渲染，只出一行灰字（头像与署名结构保留）
           const recalled = m.recalledAt != null;
           // 署名：自己「我」；direct 对方名；群内他人用挂载时拉到的成员映射名（缺失则不渲染署名行）
-          const senderName = mine
-            ? "我"
-            : conv?.type === "direct"
-              ? peer?.displayName
-              : memberNameById?.[m.senderId];
+          const senderName = displaySenderName(m);
           // 仅 direct：对方读点 ≥ 本条时间 → 已读（逐条判断；群 M2 不显示；已撤回不显示）
           const readByPeer = mine && !recalled && !!peerReadAt && peerReadAt >= m.createdAt;
+          // 引用卡：回复消息且原消息仍在本会话历史中才渲染；原消息已撤回则不渲染（对齐撤回不回显语义）
+          const quoted = m.replyTo
+            ? messages.find((x) => x.id === m.replyTo && x.recalledAt == null)
+            : undefined;
           return (
             <div
               key={m.id}
+              id={`msg-${m.id}`}
               className={`mb-3 flex ${mine ? "justify-end" : "items-start gap-2"}`}
             >
               {/* 对方消息：左侧头像（无 avatar 首字回退）；自己的消息不显示头像 */}
@@ -660,6 +676,24 @@ export function ChatPage() {
                   <div className="text-muted">消息已撤回</div>
                 ) : (
                   <>
+                    {quoted ? (
+                      <button
+                        type="button"
+                        className="mb-1 flex w-full cursor-pointer items-baseline gap-1 truncate rounded border-l-2 border-[#e6e6e6] bg-[#fafafa] px-1.5 py-0.5 text-left text-[10px] text-muted"
+                        onClick={() =>
+                          document
+                            .getElementById(`msg-${quoted.id}`)
+                            ?.scrollIntoView({ behavior: "smooth", block: "center" })
+                        }
+                      >
+                        <span className="shrink-0 font-medium">
+                          {displaySenderName(quoted) ?? "未知"}
+                        </span>
+                        <span className="min-w-0 truncate">
+                          {quoted.payload.text.slice(0, 60)}
+                        </span>
+                      </button>
+                    ) : null}
                     {m.payload.text
                       ? renderTextWithMentions(m.payload.text, m.payload.mentions)
                       : null}
@@ -686,6 +720,19 @@ export function ChatPage() {
                     撤回
                   </button>
                 )}
+                {/* 回复入口：自己/他人的未撤回消息皆可引用，hover 显出；与撤回钮同排错开位置 */}
+                {!recalled && (
+                  <button
+                    type="button"
+                    aria-label="回复此消息"
+                    className={`absolute -top-2 ${
+                      mine ? "right-10" : "right-0"
+                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block`}
+                    onClick={() => setReplyTarget(m)}
+                  >
+                    回复
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -708,6 +755,26 @@ export function ChatPage() {
           <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
             {sendNotice}
           </p>
+        )}
+        {/* 引用预览条：回复目标署名 + 原文片段 + × 取消（会话切换/发送成功自动清） */}
+        {replyTarget && (
+          <div className="mx-5 mt-2 flex items-center gap-2 rounded-lg border-l-2 border-ink bg-[#f7f7f7] px-3 py-1.5 text-[11px]">
+            <span className="text-muted">回复</span>
+            <span className="shrink-0 font-medium">
+              {displaySenderName(replyTarget) ?? "未知"}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-muted">
+              {replyTarget.payload.text.slice(0, 60) || "（无文本）"}
+            </span>
+            <button
+              type="button"
+              aria-label="取消回复"
+              className="shrink-0 px-1 text-muted hover:text-ink"
+              onClick={() => setReplyTarget(null)}
+            >
+              ×
+            </button>
+          </div>
         )}
         {/* @ 选择器：输入栏上方浮层（仅群会话；direct 无智能体可提及） */}
         {isGroup && picker && <MentionPicker items={pickerItems} onPick={pickMention} />}

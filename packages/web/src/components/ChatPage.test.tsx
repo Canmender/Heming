@@ -1461,6 +1461,126 @@ describe("ChatPage", () => {
     expect(seen![seen!.length - 1]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
   });
 
+  // —— 二期 IM Task 3：回复引用 UI ——
+
+  it("点回复出引用预览条，发送消息带 replyTo（协议顶层键，非 payload 内）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([msg("m1", "被回复的原句", "2026-10-14T01:00:00.000Z")]); // senderId u2
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("被回复的原句")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText("回复此消息"));
+    // 引用预览条：「回复」标签 + 署名 + 原文片段 + 取消钮（经取消钮的父容器圈定预览条，防与气泡同文撞车）
+    const bar = screen.getByLabelText("取消回复").parentElement!;
+    expect(bar).toHaveTextContent("回复");
+    expect(bar).toHaveTextContent("鲍勃"); // direct 会话署名 = peer.displayName
+    expect(bar).toHaveTextContent("被回复的原句");
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "我来回复" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    // replyTo 是 send_message 事件的顶层键（shared WsClientEventSchema），塞 payload 会被 zod 剥掉
+    expect(send).toHaveBeenCalledWith({
+      type: "send_message",
+      conversationId: "c1",
+      replyTo: "m1",
+      payload: { text: "我来回复" },
+    });
+    expect(screen.queryByLabelText("取消回复")).not.toBeInTheDocument(); // 发送成功清预览条
+  });
+
+  it("气泡渲染 replyTo 引用小卡且点引用滚动到原消息", async () => {
+    const orig = msg("m1", "最初的提议", "2026-10-14T01:00:00.000Z"); // senderId u2
+    const reply: Message = {
+      ...msg("m2", "同意这个方向", "2026-10-14T01:05:00.000Z"),
+      senderId: "u1",
+      replyTo: "m1",
+    };
+    mockMessagesFetch([orig, reply]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("同意这个方向")).toBeInTheDocument());
+
+    // 引用小卡：署名 + 原文片段（与 A 气泡正文区分：卡内含署名 span）
+    const card = await screen.findByRole("button", { name: /最初的提议/ });
+    expect(card).toHaveTextContent("鲍勃");
+    expect(card).toHaveTextContent("最初的提议");
+
+    fireEvent.click(card);
+    const target = document.getElementById("msg-m1");
+    expect(target).not.toBeNull();
+    expect(target!.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+  });
+
+  it("× 取消引用后发送不带 replyTo 键", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([msg("m1", "被回复的原句", "2026-10-14T01:00:00.000Z")]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("被回复的原句")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText("回复此消息"));
+    expect(screen.getByLabelText("取消回复")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("取消回复"));
+    expect(screen.queryByLabelText("取消回复")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "先不引用了" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(send).toHaveBeenCalledWith({
+      type: "send_message",
+      conversationId: "c1",
+      payload: { text: "先不引用了" }, // 精确形状：无 replyTo 键
+    });
+  });
+
+  it("已撤回消息不出回复钮；被撤回的原消息不渲染引用小卡", async () => {
+    const recalledOrig: Message = {
+      ...msg("m1", "会被撤回的原文", "2026-10-14T01:00:00.000Z"),
+      recalledAt: "2026-10-17T00:00:00.000Z",
+    };
+    const live: Message = {
+      ...msg("m2", "还在的回复", "2026-10-14T01:05:00.000Z"),
+      senderId: "u1",
+      replyTo: "m1", // 原消息已撤回 → 引用卡整体不渲染（撤回原文不回显）
+    };
+    const recalledReply: Message = {
+      ...msg("m3", "已撤回的回复体", "2026-10-14T01:06:00.000Z"),
+      replyTo: "m2",
+      recalledAt: "2026-10-17T00:01:00.000Z",
+    };
+    mockMessagesFetch([recalledOrig, live, recalledReply]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("还在的回复")).toBeInTheDocument());
+    expect(screen.getAllByText("消息已撤回")).toHaveLength(2); // m1（原消息）与 m3 都出灰字行
+
+    expect(screen.queryByText("会被撤回的原文")).not.toBeInTheDocument(); // 原文不回显
+    // m3 的引用卡不渲染：页面上没有任何按钮引用 m2 原文
+    expect(
+      [...document.querySelectorAll("button")].filter((b) => b.textContent?.includes("还在的回复")),
+    ).toHaveLength(0);
+    // 回复钮只出现在 m2（未撤回）上——m1/m3 已撤回不出
+    expect(screen.getAllByLabelText("回复此消息")).toHaveLength(1);
+  });
+
+  it("切换会话清空引用预览（防跨会话带出）", async () => {
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([msg("m1", "本会话的引用", "2026-10-14T01:00:00.000Z")]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("本会话的引用")).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText("回复此消息"));
+    expect(screen.getByLabelText("取消回复")).toBeInTheDocument();
+
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" });
+    });
+    expect(screen.queryByLabelText("取消回复")).not.toBeInTheDocument();
+  });
+
   it("fetchHistory 窗口尾全是已撤回消息（剔空尾部）：不炸，本条 user 轮照常在尾", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
