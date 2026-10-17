@@ -38,36 +38,38 @@ export function NavRail() {
   return (
     <nav
       aria-label="主导航"
-      className="flex w-[54px] shrink-0 flex-col items-center gap-1.5 border-r border-line-soft bg-[#fafafa] py-3"
+      className="flex w-[54px] shrink-0 flex-col items-center border-r border-line-soft bg-[#fafafa] py-3"
     >
-      {ITEMS.map((it) => {
-        const active = page === it.page || (it.page === "workspace" && page === "chat");
-        const shortcut = `Alt${it.digit}`;
-        // 工作区按钮承载全局未读角标：>0 时 aria-label 追加「N 条未读」
-        const showUnread = it.page === "workspace" && unread > 0;
-        return (
-          <div key={it.page} className="group relative">
-            <button
-              type="button"
-              aria-label={`${it.label} ${shortcut}${showUnread ? ` ${unread} 条未读` : ""}`}
-              onClick={() => setPage(it.page)}
-              className={`relative flex h-[34px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
-                active ? "bg-ink text-white" : "text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
-              }`}
-            >
-              {it.icon}
-              {showUnread && (
-                <span className="absolute -right-1 -top-1 min-w-[16px] rounded-full border border-white bg-ink px-1 text-center text-[9px] font-semibold leading-[14px] text-white">
-                  {unread}
-                </span>
-              )}
-            </button>
-            <Tip label={it.label} shortcut={shortcut} />
-          </div>
-        );
-      })}
+      <div className="flex flex-1 flex-col items-center justify-center gap-1.5">
+        {ITEMS.map((it) => {
+          const active = page === it.page || (it.page === "workspace" && page === "chat");
+          const shortcut = `Alt${it.digit}`;
+          // 工作区按钮承载全局未读角标：>0 时 aria-label 追加「N 条未读」
+          const showUnread = it.page === "workspace" && unread > 0;
+          return (
+            <div key={it.page} className="group relative">
+              <button
+                type="button"
+                aria-label={`${it.label} ${shortcut}${showUnread ? ` ${unread} 条未读` : ""}`}
+                onClick={() => setPage(it.page)}
+                className={`relative flex h-[34px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
+                  active ? "bg-ink text-white" : "text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
+                }`}
+              >
+                {it.icon}
+                {showUnread && (
+                  <span className="absolute -right-1 -top-1 min-w-[16px] rounded-full border border-white bg-ink px-1 text-center text-[9px] font-semibold leading-[14px] text-white">
+                    {unread}
+                  </span>
+                )}
+              </button>
+              <Tip label={it.label} shortcut={shortcut} />
+            </div>
+          );
+        })}
+      </div>
 
-      <div className="group relative mt-auto">
+      <div className="group relative">
         <button
           type="button"
           aria-label="退出登录"

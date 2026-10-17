@@ -128,6 +128,20 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(btn.querySelector("img")).toBeNull();
     expect(btn.querySelector("svg")).not.toBeNull();
   });
+
+  it("图标列包在垂直居中容器内，头像在容器外", () => {
+    render(<NavRail />);
+    const nav = screen.getByLabelText("主导航");
+    const items = ["主页 Alt1", "工作区 Alt2", "接口区 Alt3", "记忆区 Alt4", "设置区 Alt5"].map(
+      (l) => screen.getByLabelText(l),
+    );
+    const wrapper = items[0].closest("div")!.parentElement!;
+    expect(wrapper.className).toContain("flex-1");
+    expect(wrapper.className).toContain("justify-center");
+    for (const b of items) expect(wrapper.contains(b)).toBe(true);
+    expect(wrapper.contains(screen.getByLabelText("退出登录"))).toBe(false);
+    expect(nav.contains(wrapper)).toBe(true);
+  });
 });
 
 describe("NavPeek 会话隐藏态呼出提示", () => {
