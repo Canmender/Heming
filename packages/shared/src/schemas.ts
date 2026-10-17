@@ -30,6 +30,18 @@ export const MessagePayloadSchema = z.object({
   forward: z
     .object({ from: z.string().min(1).max(64), source: z.string().min(1).max(64) })
     .optional(),
+  // 表情回应（二期 IM Task 6）：每条目一个 emoji + 参与该 emoji 的 userIds。
+  // emoji 上限 16（多码位组合 emoji 留余量）；种类上限 20（UI 浮排 12 个常用，仍留余量）；
+  // userIds 由服务端 toggle 维护（不去重上限），schema 上限 500 防单条 payload 炸库。
+  reactions: z
+    .array(
+      z.object({
+        emoji: z.string().min(1).max(16),
+        userIds: z.array(z.string().min(1)).max(500),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 export type MessagePayload = z.infer<typeof MessagePayloadSchema>;
 
@@ -62,6 +74,14 @@ export const WsClientEventSchema = z.discriminatedUnion("type", [
     type: z.literal("recall_message"),
     conversationId: z.string().min(1),
     messageId: z.string().min(1),
+  }),
+  // 表情回应（二期 IM Task 6）：toggle 语义——服务端按 (messageId, userId, emoji) 加/删，
+  // 结果经 message_updated 广播整条消息。emoji 上限与 payload.reactions 单个条目对齐。
+  z.object({
+    type: z.literal("react_message"),
+    conversationId: z.string().min(1),
+    messageId: z.string().min(1),
+    emoji: z.string().min(1).max(16),
   }),
   z.object({
     type: z.literal("agent_chunk"),
@@ -116,6 +136,11 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     conversationId: z.string().min(1),
     messageId: z.string().min(1),
     at: z.string(),
+  }),
+  // 表情回应广播（二期 IM Task 6）：整条消息替换（接收端按 message.id 覆盖本地同 id 条目）
+  z.object({
+    type: z.literal("message_updated"),
+    message: MessageSchema,
   }),
   z.object({
     type: z.literal("agent_chunk"),

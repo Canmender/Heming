@@ -237,6 +237,55 @@ describe("ws", () => {
     wsB.close();
   });
 
+  it("react_message：成员 toggle 广播 message_updated（payload 带 reactions），非成员收 error", async () => {
+    const a = store.createUser(`rx-a-${Date.now()}`, "h", "甲");
+    const b = store.createUser(`rx-b-${Date.now()}`, "h", "乙");
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const conv = store.createDirectConversation(a.id, b.id);
+    const m = store.addMessage(conv.id, "user", a.id, { text: "求回应" }, null);
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+
+    // 消息不存在：成员收 bad_event，不广播（wsB 保持安静，先测此例避免混入后续广播帧）
+    const notFound = nextEvent(wsA);
+    wsA.send(JSON.stringify({ type: "react_message", conversationId: conv.id, messageId: "nope", emoji: "👍" }));
+    const nfEv = await notFound;
+    expect(nfEv.type).toBe("error");
+    if (nfEv.type === "error") expect(nfEv.code).toBe("bad_event");
+    expect(store.listMessages(conv.id)[0].payload.reactions).toBeUndefined(); // 未落库
+
+    // 非成员：error（不改库、不广播）
+    const stranger = store.createUser(`rx-c-${Date.now()}`, "h", "丙");
+    const s = await connect(issueToken(stranger.id));
+    const waitErr = nextEvent(s);
+    s.send(JSON.stringify({ type: "react_message", conversationId: conv.id, messageId: m.id, emoji: "🎉" }));
+    const errEv = await waitErr;
+    expect(errEv.type).toBe("error");
+    expect(store.listMessages(conv.id)[0].payload.reactions).toBeUndefined();
+
+    // 成员 toggle：b 收 message_updated（payload.reactions 带 a），并已持久化
+    const bWait = nextEvent(wsB);
+    wsA.send(JSON.stringify({ type: "react_message", conversationId: conv.id, messageId: m.id, emoji: "👍" }));
+    const ev = await bWait;
+    expect(ev.type).toBe("message_updated");
+    if (ev.type === "message_updated") {
+      expect(ev.message.id).toBe(m.id);
+      expect(ev.message.payload.reactions).toEqual([{ emoji: "👍", userIds: [a.id] }]);
+    }
+    expect(store.listMessages(conv.id)[0].payload.reactions).toEqual([{ emoji: "👍", userIds: [a.id] }]);
+
+    // 再次 toggle（同一 emoji 同一人）→ 取消：reactions 回落空数组
+    const bWait2 = nextEvent(wsB);
+    wsA.send(JSON.stringify({ type: "react_message", conversationId: conv.id, messageId: m.id, emoji: "👍" }));
+    const ev2 = await bWait2;
+    expect(ev2.type).toBe("message_updated");
+    if (ev2.type === "message_updated") expect(ev2.message.payload.reactions).toEqual([]);
+
+    wsA.close();
+    wsB.close();
+    s.close();
+  });
+
   it("协议错误帧不崩溃 server，后续连接仍可用", async () => {
     const raw = await rawUpgrade(ctx.port, issueToken(aliceId));
     // 0xC1 0x00 = FIN + RSV1 + opcode text、无 mask：无 permessage-deflate 协商时

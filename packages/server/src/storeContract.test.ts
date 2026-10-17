@@ -319,6 +319,42 @@ for (const f of factories) {
       expect(store.listMessages(conv.id)[0].recalledAt).not.toBeNull();
     });
 
+    // —— 二期 IM Task 6：表情回应（reactMessage 双实现同语义：成员/存在校验 + toggle + 持久化）——
+
+    it("reactMessage toggle 与权限", () => {
+      const a = store.createUser("ra", "h", "甲");
+      const b = store.createUser("rb", "h", "乙");
+      // 直聊前置须为已接受好友（brief 片段省略，按既有口径补齐）
+      befriend(a.id, "rb", b.id);
+      const conv = store.createDirectConversation(a.id, b.id);
+      const m = store.addMessage(conv.id, "user", a.id, { text: "被回应" }, null);
+      const out = store.reactMessage(conv.id, m.id, b.id, "👍")!;
+      expect(out.payload.reactions).toEqual([{ emoji: "👍", userIds: [b.id] }]);
+      const off = store.reactMessage(conv.id, m.id, b.id, "👍")!;
+      expect(off.payload.reactions).toEqual([]);
+      const outsider = store.createUser("rc", "h", "丙");
+      expect(store.reactMessage(conv.id, m.id, outsider.id, "👍")).toBeNull(); // 非成员
+    });
+
+    it("reactMessage 多用户同 emoji 与多 emoji 顺序双实现一致（持久化后 listMessages 可读）", () => {
+      const a = store.createUser("rd", "h", "甲");
+      const b = store.createUser("re", "h", "乙");
+      befriend(a.id, "re", b.id);
+      const conv = store.createDirectConversation(a.id, b.id);
+      const m = store.addMessage(conv.id, "user", a.id, { text: "回应我" }, null);
+      store.reactMessage(conv.id, m.id, a.id, "👍");
+      store.reactMessage(conv.id, m.id, b.id, "👍");
+      store.reactMessage(conv.id, m.id, b.id, "🎉");
+      // 同 emoji 追加在各自 userIds 尾；新 emoji 追加在数组尾（顺序逐字一致）
+      expect(store.listMessages(conv.id)[0].payload.reactions).toEqual([
+        { emoji: "👍", userIds: [a.id, b.id] },
+        { emoji: "🎉", userIds: [b.id] },
+      ]);
+      // 消息不存在 / 会话不存在 → null
+      expect(store.reactMessage(conv.id, "nope", a.id, "👍")).toBeNull();
+      expect(store.reactMessage("ghost", m.id, a.id, "👍")).toBeNull();
+    });
+
     // —— M4 Task 1：共享文件落 Store（memory/sqlite 双实现持久化）——
 
     describe("files", () => {

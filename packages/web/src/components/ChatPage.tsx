@@ -18,6 +18,9 @@ import { EmojiPicker } from "./EmojiPicker.js";
 /** 正则转义：mention 名按字面量匹配（名字可含 . * + 等元字符）。 */
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** 表情回应浮排的常用 emoji（Task 6；emoji 仅作回应数据，不作图标）。 */
+const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🎉", "🔥", "✅", "👀", "🤔", "👏"];
+
 /**
  * 气泡文本 mentions 高亮（M3 Task 7）：按各 name 在 text 中的出现位置 split 拆分——
  * 命中段包浅蓝 chip span，其余段为 Fragment 纯文本节点（React 文本输出天然转义，防注入）。
@@ -192,6 +195,8 @@ export function ChatPage() {
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
   /** 转发目标源消息（Task 4）：非空时出会话选择浮层；null=关。 */
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
+  /** 表情回应浮排当前打开的消息 id（Task 6）：null=关；点选 emoji 或 Esc 关闭。 */
+  const [reactFor, setReactFor] = useState<string | null>(null);
   /**
    * 群成员挂载快照（带 convId 防跨会话串数据）：
    * byId = id→名（他人气泡署名，M2 消息体无 senderName）；
@@ -367,6 +372,8 @@ export function ChatPage() {
     setReplyTarget(null);
     // 转发浮层同为会话级：A 会话选中的转发目标不得带进 B 会话
     setForwardMsg(null);
+    // 表情回应浮排同为会话级：A 会话打开的回应对不得带进 B 会话
+    setReactFor(null);
     // 发送提示也是会话级：A 会话的「上传失败/不支持语音」不得带进 B 会话
     setSendNotice(null);
   }, [convId]);
@@ -553,6 +560,16 @@ export function ChatPage() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [voiceMenu]);
+
+  /** Esc 关表情回应浮排（文档级，与信息卡/转发/语音浮层同口径）。 */
+  useEffect(() => {
+    if (reactFor === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setReactFor(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [reactFor]);
 
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape" && picker) {
@@ -919,6 +936,38 @@ export function ChatPage() {
                     {readByPeer ? (
                       <div className="mt-0.5 text-right text-[9px] text-muted">已读</div>
                     ) : null}
+                    {/* 表情回应 chips（Task 6）：气泡下方一枚 emoji 一枚 chip；自己参与的深底可点掉，
+                        他人参与的仅展示（点击 no-op）。已撤回消息整块不渲染（外层 recalled 分支）。 */}
+                    {m.payload.reactions?.length ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {(m.payload.reactions ?? []).map((r) => {
+                          const involvesMe = me != null && r.userIds.includes(me.id);
+                          return (
+                            <button
+                              key={r.emoji}
+                              type="button"
+                              aria-label={`表情回应 ${r.emoji} ${r.userIds.length}`}
+                              className={`rounded-full border px-1.5 py-0.5 text-[11px] ${
+                                involvesMe
+                                  ? "border-ink bg-ink text-white"
+                                  : "border-line bg-white text-[#555]"
+                              }`}
+                              onClick={() => {
+                                if (!involvesMe) return; // 只有自己参与的才能点掉（他人 chip 仅展示）
+                                wsHandleRef.current?.send({
+                                  type: "react_message",
+                                  conversationId: convId,
+                                  messageId: m.id,
+                                  emoji: r.emoji,
+                                });
+                              }}
+                            >
+                              {r.emoji} {r.userIds.length}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </>
                 )}
                 {/* 撤回入口：仅自己的未撤回消息，hover 气泡时显出（测试按 aria-label 断言） */}
@@ -963,6 +1012,46 @@ export function ChatPage() {
                   >
                     转发
                   </button>
+                )}
+                {/* 表情回应入口（Task 6）：未撤回消息（含他人）皆可回应，hover 显出；与撤回/回复/转发同排继续错开 */}
+                {!recalled && (
+                  <button
+                    type="button"
+                    aria-label="添加表情回应"
+                    className={`absolute -top-2 ${
+                      mine ? "right-[120px]" : "right-[80px]"
+                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] leading-none text-muted shadow-card hover:text-ink group-hover:block`}
+                    onClick={() => setReactFor((v) => (v === m.id ? null : m.id))}
+                  >
+                    <SmileIcon width={12} height={12} />
+                  </button>
+                )}
+                {/* 表情回应浮排：点选即 toggle 并关闭；Esc / 切会话关闭（会话级 state） */}
+                {!recalled && reactFor === m.id && (
+                  <div
+                    className={`absolute -top-9 z-20 flex gap-0.5 rounded-lg border border-line bg-white p-1 shadow-card ${
+                      mine ? "right-0" : "left-0"
+                    }`}
+                  >
+                    {QUICK_EMOJIS.map((e) => (
+                      <button
+                        key={e}
+                        type="button"
+                        className="rounded px-0.5 text-[15px] leading-none hover:bg-[#f3f3f3]"
+                        onClick={() => {
+                          wsHandleRef.current?.send({
+                            type: "react_message",
+                            conversationId: convId,
+                            messageId: m.id,
+                            emoji: e,
+                          });
+                          setReactFor(null);
+                        }}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>

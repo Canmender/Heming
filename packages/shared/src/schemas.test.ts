@@ -257,6 +257,61 @@ describe("MessagePayloadSchema forward（二期 IM Task 4 消息转发）", () =
   });
 });
 
+describe("MessagePayloadSchema reactions（二期 IM Task 6 表情回应）", () => {
+  it("payload.reactions 形状", () => {
+    expect(
+      MessagePayloadSchema.safeParse({ text: "x", reactions: [{ emoji: "👍", userIds: ["u1"] }] })
+        .success,
+    ).toBe(true);
+    expect(
+      MessagePayloadSchema.safeParse({ text: "x", reactions: [{ emoji: "👍".repeat(17), userIds: [] }] })
+        .success,
+    ).toBe(false);
+  });
+  it("reactions 数组上限 20 种、userIds 上限 500", () => {
+    const mk = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ emoji: `e${i}`, userIds: ["u1"] }));
+    expect(MessagePayloadSchema.safeParse({ text: "x", reactions: mk(20) }).success).toBe(true);
+    expect(MessagePayloadSchema.safeParse({ text: "x", reactions: mk(21) }).success).toBe(false);
+    expect(
+      MessagePayloadSchema.safeParse({
+        text: "x",
+        reactions: [{ emoji: "👍", userIds: Array.from({ length: 500 }, (_, i) => `u${i}`) }],
+      }).success,
+    ).toBe(true);
+    expect(
+      MessagePayloadSchema.safeParse({
+        text: "x",
+        reactions: [{ emoji: "👍", userIds: Array.from({ length: 501 }, (_, i) => `u${i}`) }],
+      }).success,
+    ).toBe(false);
+  });
+  it("react_message / message_updated 事件", () => {
+    expect(
+      WsClientEventSchema.safeParse({ type: "react_message", conversationId: "c1", messageId: "m1", emoji: "👍" })
+        .success,
+    ).toBe(true);
+    expect(
+      WsClientEventSchema.safeParse({ type: "react_message", conversationId: "c1", messageId: "m1" }).success,
+    ).toBe(false);
+    expect(
+      WsServerEventSchema.safeParse({
+        type: "message_updated",
+        message: {
+          id: "m1",
+          conversationId: "c1",
+          senderType: "user",
+          senderId: "u1",
+          payload: { text: "x", reactions: [{ emoji: "👍", userIds: ["u2"] }] },
+          replyTo: null,
+          createdAt: "2026-10-17T00:00:00.000Z",
+          recalledAt: null,
+        },
+      }).success,
+    ).toBe(true);
+  });
+});
+
 describe("M3 schemas", () => {
   it("Agent 名册（owner 可空）", () => {
     expect(AgentSchema.safeParse({ id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" }).success).toBe(true);

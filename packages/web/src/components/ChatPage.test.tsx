@@ -2088,6 +2088,100 @@ describe("ChatPage", () => {
     view.unmount();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-1"); // 同附件的卸载即销
   });
+
+  // —— 二期 IM Task 6：表情回应 UI ——
+
+  it("表情回应：点「添加表情回应」出浮排，点 emoji 发 react_message；收到 message_updated 出 chips，点自己的 chip 取消", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([msg("m1", "求回应", "2026-10-14T01:00:00.000Z")]); // senderId u2
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("求回应")).toBeInTheDocument());
+    expect(screen.queryByLabelText(/^表情回应 /)).not.toBeInTheDocument(); // 未回应前无 chips
+
+    fireEvent.click(screen.getByLabelText("添加表情回应"));
+    expect(screen.getByRole("button", { name: "🎉" })).toBeInTheDocument(); // 浮排：12 个常用 emoji
+    fireEvent.click(screen.getByRole("button", { name: "👍" }));
+    expect(send).toHaveBeenCalledWith({
+      type: "react_message",
+      conversationId: "c1",
+      messageId: "m1",
+      emoji: "👍",
+    });
+    expect(screen.queryByRole("button", { name: "🎉" })).not.toBeInTheDocument(); // 点选即关浮排
+
+    // 服务端回声 message_updated（自己参与）→ chip 出现且高亮
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_updated",
+        message: {
+          ...msg("m1", "求回应", "2026-10-14T01:00:00.000Z"),
+          payload: { text: "求回应", reactions: [{ emoji: "👍", userIds: ["u1"] }] },
+        },
+      });
+    });
+    const chip = screen.getByRole("button", { name: "表情回应 👍 1" });
+    expect(chip).toHaveTextContent("👍 1");
+    expect(chip).toHaveClass("bg-ink"); // 自己参与的 chip 高亮
+
+    // 再点自己的 chip → 取消（toggle）发送
+    fireEvent.click(chip);
+    expect(send.mock.calls.filter((c) => c[0]?.type === "react_message")).toHaveLength(2);
+
+    // 仅他人参与的 chip 只展示：点击不发送
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_updated",
+        message: {
+          ...msg("m1", "求回应", "2026-10-14T01:00:00.000Z"),
+          payload: { text: "求回应", reactions: [{ emoji: "❤️", userIds: ["u2"] }] },
+        },
+      });
+    });
+    const otherChip = screen.getByRole("button", { name: "表情回应 ❤️ 1" });
+    expect(otherChip).not.toHaveClass("bg-ink");
+    fireEvent.click(otherChip);
+    expect(send.mock.calls.filter((c) => c[0]?.type === "react_message")).toHaveLength(2); // 未增加
+  });
+
+  it("表情回应浮排 Esc 关闭且不发送；切换会话关浮排", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([msg("m1", "原句", "2026-10-14T01:00:00.000Z")]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("原句")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText("添加表情回应"));
+    expect(screen.getByRole("button", { name: "🔥" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "🔥" })).not.toBeInTheDocument();
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "react_message" }));
+
+    fireEvent.click(screen.getByLabelText("添加表情回应"));
+    expect(screen.getByRole("button", { name: "🔥" })).toBeInTheDocument();
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" }); // 会话级状态：浮排不得带进 B 会话
+    });
+    expect(screen.queryByRole("button", { name: "🔥" })).not.toBeInTheDocument();
+  });
+
+  it("已撤回消息不出表情回应按钮与 chips", async () => {
+    const recalled: Message = {
+      ...msg("m1", "已撤回的", "2026-10-14T01:00:00.000Z"),
+      recalledAt: "2026-10-17T00:00:00.000Z",
+      payload: { text: "已撤回的", reactions: [{ emoji: "👍", userIds: ["u2"] }] },
+    };
+    const live = msg("m2", "还在的", "2026-10-14T02:00:00.000Z");
+    mockMessagesFetch([recalled, live]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("还在的")).toBeInTheDocument());
+    expect(screen.getByText("消息已撤回")).toBeInTheDocument();
+    expect(screen.queryByLabelText("表情回应 👍 1")).not.toBeInTheDocument(); // 撤回消息的 chips 不渲染
+    expect(screen.getAllByLabelText("添加表情回应")).toHaveLength(1); // 仅未撤回的 m2 有
+  });
 });
 
 describe("renderTextWithMentions", () => {
