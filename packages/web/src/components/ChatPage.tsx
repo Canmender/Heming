@@ -141,7 +141,13 @@ function AudioBubble({ fileId }: { fileId: string }): JSX.Element | null {
 
   if (err) return <div className="mt-1 text-[11px] text-[#b42318]">音频加载失败：{err}</div>;
   return url ? (
-    <audio controls src={url} className="mt-1 w-full max-w-[260px]" data-testid="audio-bubble" />
+    <audio
+      controls
+      src={url}
+      aria-label="语音消息"
+      className="mt-1 w-full max-w-[260px]"
+      data-testid="audio-bubble"
+    />
   ) : null;
 }
 
@@ -538,6 +544,16 @@ export function ChatPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, [forwardMsg]);
 
+  /** Esc 关语音双选项浮层（文档级，与信息卡/转发浮层同口径）。 */
+  useEffect(() => {
+    if (!voiceMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setVoiceMenu(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [voiceMenu]);
+
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape" && picker) {
       e.preventDefault();
@@ -718,8 +734,8 @@ export function ChatPage() {
     setListening(true);
   };
 
-  /** 特性检测：无 MediaRecorder 时浮层录音选项禁用 + 小字提示（不自造降级）。 */
-  const hasRecorder = typeof MediaRecorder !== "undefined";
+  /** 特性检测：无 MediaRecorder 或缺 mediaDevices.getUserMedia 时录音选项禁用 + 小字提示（不自造降级）。 */
+  const hasRecorder = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
 
   /**
    * 开始录音（语音消息选项）：getUserMedia → MediaRecorder 录 webm。
@@ -729,30 +745,40 @@ export function ChatPage() {
   const startRecording = async () => {
     if (voiceRecRef.current) return; // 录音中防重入（浮层重开再选也不会并行开两条）
     let stream: MediaStream | null = null;
+    let rec: MediaRecorder | null = null;
+    let cancelled = false; // 本实例取消位（闭包）：取消/切会话/卸载 → 停止启动/跳过发送
+    // 取消位必须在 await getUserMedia「之前」注册：首次授权弹窗可能挂起数秒~数分钟，
+    // 该窗口内切会话/卸载调的 voiceRecCancelRef.current?.() 才不是 no-op。cancel 对尚未
+    // 创建的 rec 判空——此时只置位，resolve 后由下面的校验停轨且不启动。
+    const cancel = () => {
+      cancelled = true;
+      if (rec && rec.state === "recording") rec.stop();
+    };
+    voiceRecCancelRef.current = cancel;
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream = mediaStream;
-      const rec = new MediaRecorder(mediaStream);
+      // resolve 后先校验：授权等待期已被取消/切会话 → 立即停轨返回，不启动录音、不上传
+      if (cancelled) {
+        mediaStream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      const recorder = new MediaRecorder(mediaStream);
+      rec = recorder; // 供 cancel（await 前注册）与 finally 判空：闭包内改用窄化后的 recorder
       const chunks: BlobPart[] = [];
-      let cancelled = false; // 本实例取消位（闭包）：取消/切会话/卸载 → onstop 跳过发送
-      const cancel = () => {
-        cancelled = true;
-        if (rec.state === "recording") rec.stop();
-      };
-      voiceRecCancelRef.current = cancel;
-      rec.ondataavailable = (e) => chunks.push(e.data);
-      rec.onstop = () => {
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = () => {
         mediaStream.getTracks().forEach((t) => t.stop()); // 无论发不发送都停麦克风轨（防占用/泄漏）
         if (voiceRecTimerRef.current != null) {
           clearTimeout(voiceRecTimerRef.current); // 60s 上限定时器随结束即清
           voiceRecTimerRef.current = null;
         }
-        if (voiceRecRef.current === rec) voiceRecRef.current = null;
+        if (voiceRecRef.current === recorder) voiceRecRef.current = null;
         if (voiceRecCancelRef.current === cancel) voiceRecCancelRef.current = null;
         setRecording(false);
         if (cancelled) return; // 取消/切会话/卸载：静默放弃，不上传不发送
         const dur = Date.now() - voiceRecStartRef.current;
-        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
         if (dur < 1000) {
           setSendNotice("录音太短，未发送");
           return;
@@ -764,17 +790,21 @@ export function ChatPage() {
         );
         void sendFile(f); // 既有上传 + 发 file 消息（MAX_UPLOAD 6MB 检查复用）
       };
-      rec.start();
-      voiceRecRef.current = rec;
+      recorder.start();
+      voiceRecRef.current = recorder;
       voiceRecStartRef.current = Date.now();
       setRecording(true);
       setSendNotice(null);
       voiceRecTimerRef.current = window.setTimeout(() => {
-        if (voiceRecRef.current === rec && rec.state === "recording") rec.stop(); // 60s 上限自动停
+        if (voiceRecRef.current === recorder && recorder.state === "recording") recorder.stop(); // 60s 上限自动停
       }, 60_000);
     } catch {
       if (stream) stream.getTracks().forEach((t) => t.stop()); // 半途失败（权限拒/无设备）不留活轨
-      setSendNotice("无法访问麦克风");
+      if (!cancelled) setSendNotice("无法访问麦克风"); // 取消/切会话后的授权失败保持静默
+    } finally {
+      // 本次启动未接续到录音（授权等待期被取消 / getUserMedia 失败）：清掉可能残留的 cancel 注册。
+      // rec 非空时交给 onstop 收口，且不误清后一实例已注册的 cancel。
+      if (!rec && voiceRecCancelRef.current === cancel) voiceRecCancelRef.current = null;
     }
   };
 

@@ -1726,8 +1726,9 @@ describe("ChatPage", () => {
    * MediaRecorder + getUserMedia 桩（jsdom 均不实现）：实例表供 start/state 断言，
    * track.stop 句柄供「停录必停轨」断言；restore 摘掉 stubGlobal 与 navigator 覆盖
    * （navigator.mediaDevices 是文件级单例，不恢复会跨用例泄漏）。
+   * defer：getUserMedia 挂起不 resolve，由 resolveMedia() 手动放行——覆盖「授权等待期」竞态。
    */
-  function installFakeMedia(opts: { deny?: boolean } = {}) {
+  function installFakeMedia(opts: { deny?: boolean; defer?: boolean } = {}) {
     const instances: FakeMediaRecorder[] = [];
     class FakeMediaRecorder {
       state: "inactive" | "recording" = "inactive";
@@ -1747,21 +1748,26 @@ describe("ChatPage", () => {
       }
     }
     const trackStop = vi.fn();
+    let resolveMedia: (() => void) | null = null;
     const orig = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: {
-        getUserMedia: opts.deny
-          ? vi.fn(async (): Promise<never> => {
-              throw new Error("denied");
-            })
-          : vi.fn(async () => ({ getTracks: () => [{ stop: trackStop }] })),
+        getUserMedia: vi.fn((): Promise<{ getTracks: () => { stop: () => void }[] }> => {
+          if (opts.deny) return Promise.reject(new Error("denied"));
+          const stream = { getTracks: () => [{ stop: trackStop }] };
+          if (opts.defer) return new Promise((res) => {
+            resolveMedia = () => res(stream);
+          });
+          return Promise.resolve(stream);
+        }),
       },
     });
     vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
     return {
       instances,
       trackStop,
+      resolveMedia: () => resolveMedia?.(),
       restore() {
         vi.unstubAllGlobals();
         if (orig) Object.defineProperty(navigator, "mediaDevices", orig);
@@ -2000,6 +2006,70 @@ describe("ChatPage", () => {
     }
   });
 
+  it("授权挂起期间切会话：resolve 后不启动录音、tracks 被 stop、无上传（授权等待期竞态）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockUploadFetch();
+    const media = installFakeMedia({ defer: true }); // getUserMedia 挂起，等 resolveMedia 手动放行
+    try {
+      render(<ChatPage />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
+      await act(async () => {}); // 停在 await getUserMedia（授权弹窗未决）
+      expect(media.instances).toHaveLength(0); // 尚未创建 recorder
+      expect(screen.queryByText(/录音中/)).not.toBeInTheDocument(); // 也未进录音态 UI
+
+      act(() => {
+        useUiStore.setState({ activeConversationId: "c2" }); // 授权等待期切会话
+      });
+      await act(async () => {
+        media.resolveMedia(); // 此刻才授权 resolve
+      });
+
+      expect(media.instances).toHaveLength(0); // 已取消：不得创建 recorder、不得启动录音
+      expect(media.trackStop).toHaveBeenCalledTimes(1); // 半途拿到的麦克风轨必须停
+      expect(screen.queryByText(/录音中/)).not.toBeInTheDocument(); // 新会话不冒出录音态
+      expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 静默放弃，不落提示
+      await act(async () => {});
+      expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false); // 未上传
+    } finally {
+      media.restore();
+    }
+  });
+
+  it("有 MediaRecorder 但缺 mediaDevices.getUserMedia：录音选项照样禁用（特性检测双条件）", async () => {
+    vi.stubGlobal("MediaRecorder", class {} as unknown as typeof MediaRecorder); // 有构造器
+    const orig = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
+    try {
+      mockMessagesFetch([]);
+      render(<ChatPage />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      expect(screen.getByRole("button", { name: "语音消息（录音）" })).toBeDisabled();
+      expect(screen.getByText("当前环境不支持录音")).toBeInTheDocument();
+    } finally {
+      if (orig) Object.defineProperty(navigator, "mediaDevices", orig);
+      else Reflect.deleteProperty(navigator, "mediaDevices");
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("语音浮层 Esc 关闭（文档级，与信息卡/转发浮层同口径）", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByLabelText("语音输入"));
+    expect(screen.getByRole("button", { name: "语音消息（录音）" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "语音消息（录音）" })).not.toBeInTheDocument();
+  });
+
   it("音频消息气泡渲染 audio 元素：鉴权 blob src、不出文件卡、卸载 revoke", async () => {
     const m: Message = {
       ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
@@ -2011,6 +2081,7 @@ describe("ChatPage", () => {
     const audio = (await screen.findByTestId("audio-bubble")) as HTMLAudioElement;
     expect(audio.tagName).toBe("AUDIO");
     expect(audio).toHaveAttribute("controls");
+    expect(audio).toHaveAttribute("aria-label", "语音消息"); // 无障碍可访问名
     expect(audio).toHaveAttribute("src", "blob:mock-1"); // fetchFileBlobUrl 取到的鉴权 objectURL
     expect(screen.queryByRole("link", { name: /语音\.webm/ })).not.toBeInTheDocument(); // 非通用文件卡
 
