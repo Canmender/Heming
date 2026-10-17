@@ -1,4 +1,13 @@
-import type { User, SharedFileMeta, Message, Conversation, Member } from "@heming/shared";
+import type {
+  User,
+  SharedFileMeta,
+  Message,
+  Conversation,
+  Member,
+  E2eKeysResponse,
+  PutE2eKeysBody,
+  ReencryptBody,
+} from "@heming/shared";
 
 /**
  * API 直连地址：构建时由 VITE_API_BASE 注入（vite 对 VITE_ 前缀 env 天然内联，无需 define）。
@@ -120,6 +129,23 @@ export const fetchMessages = (convId: string) =>
 export const fetchMembers = (convId: string) =>
   api<Member[]>(`/api/conversations/${convId}/members`);
 export const fetchFiles = () => api<SharedFileMeta[]>("/api/files");
+
+/**
+ * E2E 公钥分发与明文重加密（Task 2 契约，设计 §3.1/§7）：
+ * - fetchE2eKeys：GET 全部用户设备公钥 {userId: [devices]}（X3DH 发起侧取对端 IK/SPK；
+ *   会话层 E2eDeps.fetchPeerKeys 由接线层包一层按 userId 取值）。
+ * - putE2eKeys：PUT 登记本人设备公钥（服务端 204 无响应体）。
+ * - reencryptMessage：PUT 把本人 plain 消息原子重封为 e2e 信封。
+ */
+export const fetchE2eKeys = () => api<E2eKeysResponse>("/api/e2e/keys");
+export const putE2eKeys = (body: PutE2eKeysBody) =>
+  api("/api/e2e/keys", { method: "PUT", body: JSON.stringify(body) });
+export const reencryptMessage = (messageId: string, body: ReencryptBody) =>
+  api<Message>(`/api/messages/${encodeURIComponent(messageId)}/reencrypt`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+
 /** 右栏用量：当前用户已用字节 + 每用户配额字节（服务端读 HEMING_FILE_QUOTA_MB）。 */
 export const fetchFileUsage = () => api<{ used: number; quota: number }>("/api/files/usage");
 
