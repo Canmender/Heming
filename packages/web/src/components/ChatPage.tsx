@@ -225,6 +225,13 @@ export function ChatPage() {
    * 取消位放闭包而非共享 ref，防前一实例的晚到 onstop 误清后一实例的标志。
    */
   const voiceRecCancelRef = useRef<(() => void) | null>(null);
+  /**
+   * 授权 `await getUserMedia` 挂起期的 pending 占位（身份 token 对象）：voiceRecRef 要到
+   * `recorder.start()` 后才有值，此窗口内录音态仍 false、浮层未禁用，不挡住会并发开第二条并
+   * 覆写 cancelRef → 首实例取消链断裂（麦克风轨无人停、60s 也管不到、且无「录音中」指示）。
+   * finally 只在「仍是本实例占位」时清，不误清后一实例。
+   */
+  const voiceRecPendingRef = useRef<object | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   /** 触发句柄（convId → 集合）：「中断」只 abort 当前会话的流；卸载时全部中止（关页不空烧 token）。 */
   const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
@@ -799,7 +806,11 @@ export function ChatPage() {
    * → 复用 sendFile（上传 + 纯附件消息，6MB 上限与失败提示一并继承）。
    */
   const startRecording = async () => {
-    if (voiceRecRef.current) return; // 录音中防重入（浮层重开再选也不会并行开两条）
+    // 录音中 或 授权 await 挂起中都挡重入：voiceRecRef 要到 recorder.start() 后才有值，
+    // 授权窗口内再点一次会覆写 voiceRecCancelRef，首实例取消链断裂 → 麦克风轨无「录音中」指示且无人停
+    if (voiceRecRef.current || voiceRecPendingRef.current) return;
+    const pendingToken = {}; // 身份 token：resolve/失败路径只清「仍是本实例」的占位，不误清后一实例
+    voiceRecPendingRef.current = pendingToken;
     let stream: MediaStream | null = null;
     let rec: MediaRecorder | null = null;
     let cancelled = false; // 本实例取消位（闭包）：取消/切会话/卸载 → 停止启动/跳过发送
@@ -861,6 +872,8 @@ export function ChatPage() {
       // 本次启动未接续到录音（授权等待期被取消 / getUserMedia 失败）：清掉可能残留的 cancel 注册。
       // rec 非空时交给 onstop 收口，且不误清后一实例已注册的 cancel。
       if (!rec && voiceRecCancelRef.current === cancel) voiceRecCancelRef.current = null;
+      // pending 占位同样按身份清（成功启动时：占位仍为本实例，一并清；voiceRecRef 已接管重入防线）
+      if (voiceRecPendingRef.current === pendingToken) voiceRecPendingRef.current = null;
     }
   };
 

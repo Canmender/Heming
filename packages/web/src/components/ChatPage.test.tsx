@@ -1752,23 +1752,23 @@ describe("ChatPage", () => {
     const trackStop = vi.fn();
     let resolveMedia: (() => void) | null = null;
     const orig = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+    const getUserMedia = vi.fn((): Promise<{ getTracks: () => { stop: () => void }[] }> => {
+      if (opts.deny) return Promise.reject(new Error("denied"));
+      const stream = { getTracks: () => [{ stop: trackStop }] };
+      if (opts.defer) return new Promise((res) => {
+        resolveMedia = () => res(stream);
+      });
+      return Promise.resolve(stream);
+    });
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
-      value: {
-        getUserMedia: vi.fn((): Promise<{ getTracks: () => { stop: () => void }[] }> => {
-          if (opts.deny) return Promise.reject(new Error("denied"));
-          const stream = { getTracks: () => [{ stop: trackStop }] };
-          if (opts.defer) return new Promise((res) => {
-            resolveMedia = () => res(stream);
-          });
-          return Promise.resolve(stream);
-        }),
-      },
+      value: { getUserMedia },
     });
     vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
     return {
       instances,
       trackStop,
+      getUserMedia,
       resolveMedia: () => resolveMedia?.(),
       restore() {
         vi.unstubAllGlobals();
@@ -2037,6 +2037,45 @@ describe("ChatPage", () => {
       await act(async () => {});
       expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
       expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false); // 未上传
+    } finally {
+      media.restore();
+    }
+  });
+
+  it("授权挂起期间再次触发录音：第二次立即返回、不并行开两条、首个取消链仍完整", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockUploadFetch();
+    const media = installFakeMedia({ defer: true });
+    try {
+      render(<ChatPage />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
+      await act(async () => {}); // 停在 await getUserMedia（授权弹窗挂起，录音态仍为 false）
+      expect(screen.queryByText(/录音中/)).not.toBeInTheDocument(); // 危险窗口：浮层未禁用
+
+      // 授权挂起期再开浮层点「录音」：第二次必须原地返回（连 getUserMedia 都不该调）
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
+      await act(async () => {});
+      expect(media.getUserMedia).toHaveBeenCalledTimes(1); // 第二次被 pending 位挡在门外
+
+      await act(async () => {
+        media.resolveMedia(); // 首个授权放行
+      });
+      expect(media.instances).toHaveLength(1); // 仍是唯一 recorder（未并行开第二条）
+
+      act(() => {
+        useUiStore.setState({ activeConversationId: "c2" }); // 首实例 cancel 链必须仍完整
+      });
+      expect(media.instances[0].state).toBe("inactive");
+      expect(media.trackStop).toHaveBeenCalledTimes(1); // 麦克风轨被停（无「录音中」泄漏）
+      expect(screen.queryByText(/录音中/)).not.toBeInTheDocument();
+      await act(async () => {});
+      expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false);
     } finally {
       media.restore();
     }
