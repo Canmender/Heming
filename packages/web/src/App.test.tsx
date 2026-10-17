@@ -30,6 +30,7 @@ function mockFetch(
     friends?: unknown;
     incoming?: unknown;
     messages?: unknown;
+    agents?: unknown;
   } = {},
 ) {
   return vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
@@ -40,6 +41,7 @@ function mockFetch(
     if (url === "/api/files") return Promise.resolve(jsonRes(routes.files ?? []));
     if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
     if (url === "/api/conversations") return Promise.resolve(jsonRes(routes.conversations ?? []));
+    if (url === "/api/agents") return Promise.resolve(jsonRes(routes.agents ?? []));
     if (url === "/api/friends/requests") return Promise.resolve(jsonRes(routes.incoming ?? []));
     if (url === "/api/friends") return Promise.resolve(jsonRes(routes.friends ?? []));
     if (/^\/api\/conversations\/[^/]+\/messages$/.test(url))
@@ -271,6 +273,32 @@ describe("App 右栏云端共享", () => {
     } finally {
       HTMLInputElement.prototype.click = origClick;
     }
+  });
+});
+
+describe("App 记忆区接线", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+    setToken(null);
+    useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
+    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+  });
+
+  it("page=memory 渲染记忆区（分段 + 智能体选择器），不再落到占位页", async () => {
+    setToken("t1");
+    mockFetch({
+      agents: [{ id: "a1", owner_id: "u1", name: "阿和", avatar: null, description: "" }],
+    });
+    useUiStore.setState({ page: "memory" });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "记忆" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "技能池" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "阿和" })).toBeInTheDocument();
+    expect(screen.queryByText("占位页面")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "语义记忆" })).toBeInTheDocument();
   });
 });
 

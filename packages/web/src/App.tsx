@@ -12,6 +12,7 @@ import { ChatPage } from "./components/ChatPage.js";
 import { RadarContacts } from "./components/RadarContacts.js";
 import { HomePage } from "./components/HomePage.js";
 import { SettingsPage } from "./components/SettingsPage.js";
+import { MemoryPage } from "./components/MemoryPage.js";
 
 /** Alt+1–Alt+5 目标页（1 主页、2 工作区、3 接口区、4 记忆区、5 设置区）。 */
 const SHORTCUT_PAGES: Page[] = [
@@ -120,16 +121,16 @@ export function App() {
       </div>
     ) : page === "workspace" ? (
       <WorkspacePage />
+    ) : page === "memory" ? (
+      // 记忆区：三层记忆 + 技能池（全部数据只在本机 localStorage）
+      <MemoryPage />
     ) : page === "settings" ? (
       <SettingsPage />
     ) : (
+      // 仅剩接口区未落地（记忆区已升级为 MemoryPage）
       <div className="p-6">
         <h1 className="text-lg font-extrabold">占位页面</h1>
-        <p className="mt-2 text-[13px] text-muted">
-          {page === "interfaces"
-            ? "接口区（MCP/工具）二期开放"
-            : "记忆区（全局记忆 + 知识库）二期开放"}
-        </p>
+        <p className="mt-2 text-[13px] text-muted">接口区（MCP/工具）二期开放</p>
       </div>
     );
 

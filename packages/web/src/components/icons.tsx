@@ -94,3 +94,23 @@ export const EyeIcon = (p: SVGProps<SVGSVGElement>) => (
     <circle cx="12" cy="12" r="3" />
   </svg>
 );
+export const PlusIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+export const TrashIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 7h16" />
+    <path d="M6.5 7l1 13h9l1-13" />
+    <path d="M9.5 7V4.5h5V7" />
+    <path d="M10.5 10.5v6M13.5 10.5v6" />
+  </svg>
+);
+export const DownloadIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M12 4v10.5" />
+    <path d="M8 11l4 3.5 4-3.5" />
+    <path d="M5 19.5h14" />
+  </svg>
+);

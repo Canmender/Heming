@@ -8,6 +8,8 @@ import { useAuthStore } from "../store/auth.js";
 import { useLlmStore, type LlmProfile } from "../store/llm.js";
 import { streamChat } from "../lib/llmClient.js";
 import { connectWs, type WsHandlers, type WsHandle } from "../lib/ws.js";
+import { memoryStore } from "../lib/memory/index.js";
+import { skillPool } from "../lib/skills/index.js";
 
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
 // 流式打底走本机 streamChat：模块 mock（保留 testConnection/buildRequest 真实现），
@@ -157,6 +159,12 @@ describe("ChatPage", () => {
       streaming: {},
       streamOwner: {},
     });
+    // 本批新增接线：@ 触发会注入记忆/技能段，从而改写系统提示词。既有用例只验证
+    // 「原提示词 + 历史」链路（如 I3 的 system 内容严格相等），故把两个模块级单例
+    // 内置为静止态（记忆总开关关闭 + 技能全禁用）——既有断言保持原样，不放宽；
+    // 本批新增用例（本 describe 末尾）按需临时打开。
+    memoryStore.updateSettings({ enabled: false });
+    for (const s of skillPool.list()) skillPool.setEnabled(s.id, false);
   });
 
   afterEach(() => {
@@ -2410,6 +2418,95 @@ describe("ChatPage", () => {
     expect(useChatStore.getState().streaming["remote-1"].errorMessage).toBeUndefined();
     expect(screen.queryByText("长时间无响应，生成可能已中断")).not.toBeInTheDocument();
     expect(screen.getByText(/半续/)).toBeInTheDocument();
+  });
+
+  // —— 智能体记忆 + 技能池接线（Task 5）：只验证接线本身，不重复记忆/技能内部逻辑 ——
+
+  it("记忆与技能接入 @ 触发：系统提示词 = 原提示词 + 记忆段 + 技能段；成功轮次写工作记忆并计技能使用", async () => {
+    await setupGroupChat();
+    bindAssistant();
+    // 记忆：打开总开关（beforeEach 默认关）+ 置顶一条语义记忆（pinned 必带，不依赖命词）
+    memoryStore.updateSettings({ enabled: true });
+    const entry = memoryStore.upsertSemantic({
+      agentId: "system-assistant",
+      key: "称呼",
+      value: "用户希望被称为「阿和」",
+      source: "manual",
+    });
+    memoryStore.updateSemantic("system-assistant", entry.id, { pinned: true });
+    // 技能：自建一条必命中（触发词与发送文本重合）
+    const skill = skillPool.create({
+      name: "上下文助手",
+      description: "按用户口令梳理上下文",
+      instructions: "按口令逐条梳理上下文。",
+      triggers: ["查下上下文"],
+      tags: [],
+      enabled: true,
+      version: "1.0.0",
+    });
+    const usage = vi.spyOn(skillPool, "recordUsage");
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "好";
+    });
+
+    await pickAndSend("@和小鸣 查下上下文");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    const system = seen![0];
+    expect(system.role).toBe("system");
+    expect(system.content.slice(0, "你是和小鸣".length)).toBe("你是和小鸣"); // 原提示词原文在前
+    expect(system.content).toContain("## 长期记忆（语义）");
+    expect(system.content).toContain("称呼：用户希望被称为「阿和」");
+    expect(system.content).toContain("## 已启用技能");
+    expect(system.content).toContain("### 上下文助手");
+    // 顺序：原提示词 → 记忆段 → 技能段
+    expect(system.content.indexOf("## 长期记忆（语义）")).toBeLessThan(
+      system.content.indexOf("## 已启用技能"),
+    );
+
+    // 成功 finish → onTurnComplete(ok) → 工作记忆落一条；命中技能 usage 计一次
+    await waitFor(() =>
+      expect(
+        memoryStore
+          .working("c1", "system-assistant")
+          .some((t) => t.userText === "@和小鸣 查下上下文"),
+      ).toBe(true),
+    );
+    expect(usage).toHaveBeenCalledWith(skill.id);
+
+    // 收尾：删掉自建技能，不把状态留给后续用例
+    skillPool.remove(skill.id);
+  });
+
+  it("记忆/技能异常静默降级：系统提示词仍是原提示词，发送与流式渲染不受影响", async () => {
+    const send = await setupGroupChat();
+    bindAssistant();
+    // 记忆读设置即抛错（模拟 localStorage 损坏/隐私模式）：注入与写入都必须被吞掉
+    vi.spyOn(memoryStore, "getSettings").mockImplementation(() => {
+      throw new Error("storage boom");
+    });
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages, o) => {
+      seen = messages;
+      o.onDelta("你");
+      o.onDelta("好");
+      return "你好";
+    });
+
+    await pickAndSend("@和小鸣 打个招呼");
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" })); // 消息照发
+    await waitFor(() => expect(seen).toBeDefined());
+    expect(seen![0]).toEqual({ role: "system", content: "你是和小鸣" }); // 组装失败 → 原提示词（零注入）
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_finish", text: "你好" })),
+    );
+    await waitFor(() => expect(screen.getByText(/你好/)).toBeInTheDocument()); // 打字机正常
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "agent_error" })); // 写入异常不上行
   });
 });
 

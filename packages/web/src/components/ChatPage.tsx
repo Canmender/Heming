@@ -7,6 +7,9 @@ import { useLlmStore } from "../store/llm.js";
 import { fetchMessages, fetchMembers, uploadFile, fetchFileBlobUrl } from "../lib/api.js";
 import { streamChat } from "../lib/llmClient.js";
 import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
+import { buildAgentContext } from "../lib/agentRuntime/context.js";
+import { memoryStore } from "../lib/memory/index.js";
+import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon } from "./icons.js";
 import { Avatar } from "./Avatar.js";
@@ -345,6 +348,43 @@ export function ChatPage() {
           status: "streaming",
           lastAt: Date.now(),
         });
+      },
+      // 系统提示词：原提示词 + 三层记忆 + 命中技能（本机拼装，不出设备）。
+      // 组装失败（记忆/技能读写异常）回落原提示词，绝不阻断生成。
+      buildSystemPrompt: async (agentId, text) => {
+        const basePrompt = useLlmStore.getState().prompts[agentId] ?? "";
+        try {
+          return buildAgentContext({
+            agentId,
+            conversationId: convId,
+            userText: text,
+            basePrompt,
+            memory: memoryStore,
+            skills: skillPool,
+          }).systemPrompt;
+        } catch {
+          return basePrompt;
+        }
+      },
+      // 轮次收尾写记忆（设计 §3）：成功轮次走 recordTurn（Working + 显式抽取 + 6 轮沉淀）；
+      // 中断/失败只记 Working 并标 partial，不沉淀长期记忆。全程静默，绝不影响发送与流式渲染。
+      // appendTurn 本身不判总开关，故这里先看 settings.enabled（关闭=不记录也不召回）。
+      onTurnComplete: (agentId, userText, assistantText, status) => {
+        try {
+          if (!memoryStore.getSettings().enabled) return;
+          if (status === "ok") memoryStore.recordTurn(agentId, convId, userText, assistantText);
+          else {
+            memoryStore.appendTurn({
+              conversationId: convId,
+              agentId,
+              userText,
+              assistantText,
+              partial: true,
+            });
+          }
+        } catch {
+          /* 记忆失败静默降级 */
+        }
       },
     };
     // 同步拿句柄（挂在 promise 上）：中断按钮不必等 fetchHistory/流完成
