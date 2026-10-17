@@ -303,14 +303,24 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       return back ? rowToMessage(back) : null;
     },
     reencryptMessage(messageId, userId, envelope) {
-      // 单条件 UPDATE 完成鉴权与写入（sender + enc='plain'）→ 原子替换信封四字段；
+      // 单条件 UPDATE 完成鉴权与写入（sender + enc='plain'）→ 原子替换信封四字段，
+      // 并在**同一条 UPDATE** 内清明文：payload 置 {"text":""} 占位（列 NOT NULL 不能
+      // 置 NULL）、reply_to 置 NULL——出站 listMessages 对 e2e 不再含原文/回复指向。
       // changes=0 时回读分类三态（sender 先于 enc 判，与内存实现同优先级）。
       const res = db
         .prepare(
-          `UPDATE messages SET enc = 'e2e', cipher = ?, chain_kid = ?, n = ?
+          `UPDATE messages SET enc = 'e2e', cipher = ?, chain_kid = ?, n = ?,
+             payload = ?, reply_to = NULL
            WHERE id = ? AND sender_id = ? AND enc = 'plain'`,
         )
-        .run(envelope.cipher, envelope.chainKid ?? null, envelope.n ?? null, messageId, userId);
+        .run(
+          envelope.cipher,
+          envelope.chainKid ?? null,
+          envelope.n ?? null,
+          JSON.stringify({ text: "" }),
+          messageId,
+          userId,
+        );
       if (res.changes > 0) {
         const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as
           | Parameters<typeof rowToMessage>[0]

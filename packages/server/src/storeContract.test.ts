@@ -424,7 +424,8 @@ for (const f of factories) {
         const b = store.createUser("rr2", "h", "乙");
         befriend(a.id, "rr2", b.id);
         const conv = store.createDirectConversation(a.id, b.id);
-        const m = store.addMessage(conv.id, "user", a.id, { text: "旧明文" }, null);
+        // 带正文 + 回复指向的明文行：重封须在同一次更新里把两者清掉（fix round 1 Critical）
+        const m = store.addMessage(conv.id, "user", a.id, { text: "旧明文" }, "r-old");
 
         expect(store.reencryptMessage("ghost", a.id, { cipher: "Qw==" })).toEqual({
           ok: false,
@@ -439,15 +440,21 @@ for (const f of factories) {
         const ok = store.reencryptMessage(m.id, a.id, { cipher: "Q2lwaGVy", chainKid: "kid1", n: 2 });
         expect(ok.ok).toBe(true);
         if (ok.ok) {
-          // 原子替换仅信封四字段（enc/cipher/chain_kid/n——裁定口径）
+          // 原子替换信封四字段（enc/cipher/chain_kid/n）
           expect(ok.message).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 2 });
+          // Critical（fix round 1）：同一更新内清明文——payload 空占位、reply_to 置 null
+          expect(ok.message.payload).toEqual({ text: "" });
+          expect(ok.message.replyTo).toBeNull();
         }
-        // 二次重封 → conflict；持久化回读
+        // 二次重封 → conflict；持久化回读（出站 listMessages 对 e2e 不带任何明文）
         expect(store.reencryptMessage(m.id, a.id, { cipher: "Qw==" })).toEqual({
           ok: false,
           reason: "conflict",
         });
-        expect(store.listMessages(conv.id)[0]).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy" });
+        const listed = store.listMessages(conv.id)[0];
+        expect(listed).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy" });
+        expect(listed.payload).toEqual({ text: "" });
+        expect(listed.replyTo).toBeNull();
       });
 
       it("reencryptMessage 对非 plain 初始消息（直接 e2e 入库）→ conflict", () => {

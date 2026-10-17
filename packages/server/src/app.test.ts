@@ -841,14 +841,15 @@ describe("PUT /api/messages/:id/reencrypt", () => {
     b = await register(app, "bob");
     store.acceptFriendRequest(store.createFriendRequest(a.user.id, "bob").id, b.user.id);
     convId = store.createDirectConversation(a.user.id, b.user.id).id;
-    msgId = store.addMessage(convId, "user", a.user.id, { text: "旧明文" }, null).id;
+    // 带正文 + 回复指向的明文行：重封后 GET 不得再见两者（fix round 1 Critical）
+    msgId = store.addMessage(convId, "user", a.user.id, { text: "旧明文" }, "r-old").id;
   });
 
   const env = { enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 5 };
   const put = (token: string, id: string, body: object) =>
     request(app).put(`/api/messages/${id}/reencrypt`).set("Authorization", `Bearer ${token}`).send(body);
 
-  it("本人 plain → 200 换信封并可回读；再 PUT → 409", async () => {
+  it("本人 plain → 200 换信封并可回读；明文 payload/reply_to 同一更新清空；再 PUT → 409", async () => {
     const ok = await put(a.token, msgId, env);
     expect(ok.status).toBe(200);
     expect(ok.body).toMatchObject({
@@ -858,11 +859,17 @@ describe("PUT /api/messages/:id/reencrypt", () => {
       chainKid: "kid1",
       n: 5,
     });
+    // 响应体（即出站消息形态）不得再含明文与回复指向
+    expect(ok.body.payload).toEqual({ text: "" });
+    expect(ok.body.replyTo).toBeNull();
 
+    // GET 对全体会员可见的正是该出站形态（原文明文/回复指向已不可读）
     const msgs = await request(app)
       .get(`/api/conversations/${convId}/messages`)
       .set("Authorization", `Bearer ${a.token}`);
     expect(msgs.body[0]).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 5 });
+    expect(msgs.body[0].payload).toEqual({ text: "" });
+    expect(msgs.body[0].replyTo).toBeNull();
 
     const again = await put(a.token, msgId, env);
     expect(again.status).toBe(409);

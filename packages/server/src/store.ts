@@ -60,8 +60,9 @@ export interface Store {
   reactMessage(conversationId: string, messageId: string, userId: string, emoji: string): Message | null;
   /**
    * 明文重加密（E2E Task 2，设计 §7）：按 messageId 定位，仅当 sender=userId 且当前
-   * enc="plain" 时**原子**替换信封四字段（enc/cipher/chain_kid/n）——payload 不动
-   * （裁定口径：只换信封字段）。三态：
+   * enc="plain" 时**原子**替换信封（enc/cipher/chain_kid/n），并在**同一更新内**清掉明文：
+   * payload 置 {"text":""} 占位、replyTo 置 null（设计 §1/§7：e2e 消息服务端不留内容/
+   * 回复指向，出站 listMessages 对 e2e 不得再含原文）。三态：
    *   消息不存在 → not_found；senderId≠userId → forbidden（只看本人，不看成员身份）；
    *   enc≠"plain"（已 e2e）→ conflict；成功 → ok + 更新后消息。
    */
@@ -335,11 +336,14 @@ export function createMemoryStore(): Store {
         if (!m) continue;
         if (m.senderId !== userId) return { ok: false, reason: "forbidden" };
         if (m.enc !== "plain") return { ok: false, reason: "conflict" };
-        // 只换信封四字段（enc/cipher/chain_kid/n）；payload 与其余字段不动
+        // 信封四字段（enc/cipher/chain_kid/n）+ **同一同步段内**清明文：
+        // payload 空占位、replyTo 置 null——出站 listMessages 对 e2e 不带任何明文
         m.enc = "e2e";
         m.cipher = envelope.cipher;
         if (envelope.chainKid !== undefined) m.chainKid = envelope.chainKid;
         if (envelope.n !== undefined) m.n = envelope.n;
+        m.payload = { text: "" };
+        m.replyTo = null;
         return { ok: true, message: { ...m } };
       }
       return { ok: false, reason: "not_found" };

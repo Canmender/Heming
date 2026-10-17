@@ -1,9 +1,13 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { createRequire } from "node:module";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSqliteStore } from "./sqliteStore.js";
 import { openDb, initSchema, resolveDbPath } from "./db.js";
+
+// node:sqlite 与 db.ts 同法经 createRequire 原生加载（静态 import 会被 vite-node 剥前缀）
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
 
 const tmpDirs: string[] = [];
 afterEach(() => {
@@ -16,6 +20,40 @@ const newDbPath = (): string => {
 };
 
 describe("sqlite 持久化专项", () => {
+  it("旧库（无信封列）幂等迁移后 reencrypt 同口径：明文 payload/reply_to 清空", () => {
+    // fix round 1 Critical「旧库行重加密后同口径」：以 E2E Task 2 之前的 messages 表
+    // 形状建库并预置一行带正文+回复指向的明文，再经 createSqliteStore（openDb→initSchema
+    // 的 PRAGMA/ALTER 迁移）打开、重封，断言出站口径与新装库一致。
+    const dbPath = newDbPath();
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec(`
+      CREATE TABLE conversations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT, created_by TEXT);
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, sender_type TEXT NOT NULL, sender_id TEXT NOT NULL,
+        payload TEXT NOT NULL, reply_to TEXT, created_at TEXT NOT NULL, recalled_at TEXT
+      );
+      INSERT INTO conversations (id, kind) VALUES ('c-legacy', 'direct');
+      INSERT INTO messages (id, conv_id, sender_type, sender_id, payload, reply_to, created_at, recalled_at)
+        VALUES ('m-legacy', 'c-legacy', 'user', 'u1', '{"text":"旧库明文"}', 'r-old', '2026-10-01T00:00:00.000Z', NULL);
+    `);
+    legacy.close();
+
+    const s = createSqliteStore(dbPath);
+    // 迁移后存量行：enc 按 DEFAULT 回填 plain，明文尚在（重封前口径）
+    const before = s.listMessages("c-legacy")[0];
+    expect(before).toMatchObject({ enc: "plain", replyTo: "r-old" });
+    expect(before.payload.text).toBe("旧库明文");
+
+    const res = s.reencryptMessage("m-legacy", "u1", { cipher: "Q2lwaGVy", chainKid: "kid1", n: 0 });
+    expect(res.ok).toBe(true);
+
+    const after = s.listMessages("c-legacy")[0];
+    expect(after).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 0 });
+    expect(after.payload).toEqual({ text: "" }); // 明文占位清空（出站无原文）
+    expect(after.replyTo).toBeNull(); // 回复指向清空
+    s.close();
+  });
+
   it("close 后重开同路径：用户/好友/会话/消息/未读/已读全量保留", () => {
     const dbPath = newDbPath();
     const s1 = createSqliteStore(dbPath);
