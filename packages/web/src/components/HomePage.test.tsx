@@ -157,6 +157,7 @@ describe("HomePage", () => {
       payload: { text: "你好，这是最近一条" },
       replyTo: null,
       createdAt: now.toISOString(),
+      recalledAt: null,
     };
     // c1 有头像 → 圆形 <img>；c2 无头像 → 首字回退（替代人形图标）
     const convWithAvatar = {
@@ -204,6 +205,7 @@ describe("HomePage", () => {
       },
       replyTo: null,
       createdAt: now.toISOString(),
+      recalledAt: null,
     };
     useChatStore.setState({
       conversations: [conv("c1"), conv("c2")],
@@ -228,7 +230,7 @@ describe("HomePage", () => {
       conversations: rows,
       friends: [],
       incoming: [],
-      messages: { c1: [{ id: "m0", conversationId: "c1", senderType: "user", senderId: "u1", payload: { text: "c1 有历史" }, replyTo: null, createdAt: now.toISOString() }] },
+      messages: { c1: [{ id: "m0", conversationId: "c1", senderType: "user", senderId: "u1", payload: { text: "c1 有历史" }, replyTo: null, createdAt: now.toISOString(), recalledAt: null }] },
     });
     mockFetch({ conversations: rows });
 

@@ -39,7 +39,7 @@ export function initSchema(db: DatabaseSyncType): void {
     );
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, sender_type TEXT NOT NULL, sender_id TEXT NOT NULL,
-      payload TEXT NOT NULL, reply_to TEXT, created_at TEXT NOT NULL
+      payload TEXT NOT NULL, reply_to TEXT, created_at TEXT NOT NULL, recalled_at TEXT
     );
     CREATE TABLE IF NOT EXISTS message_reads (
       conv_id TEXT NOT NULL, user_id TEXT NOT NULL, read_at TEXT NOT NULL,
@@ -58,4 +58,9 @@ export function initSchema(db: DatabaseSyncType): void {
     );
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, created_at);
   `);
+  // 幂等列迁移：生产库已有无 recalled_at 列的 messages 表（CREATE IF NOT EXISTS 不会补列）。
+  const cols = db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "recalled_at")) {
+    db.exec("ALTER TABLE messages ADD COLUMN recalled_at TEXT");
+  }
 }

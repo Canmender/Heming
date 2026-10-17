@@ -20,6 +20,30 @@ function rowToUser(r: { id: string; username: string; display_name: string; avat
 export function createSqliteStore(dbPath: string): SqliteStore {
   const db: DatabaseSync = openDb(dbPath);
 
+  /** messages 行 → Message（listMessages 与 recallMessage 回读共用，防映射口径漂移）。 */
+  function rowToMessage(r: {
+    id: string;
+    conv_id: string;
+    sender_type: string;
+    sender_id: string;
+    payload: string;
+    reply_to: string | null;
+    created_at: string;
+    recalled_at?: string | null;
+  }): Message {
+    return {
+      id: r.id,
+      conversationId: r.conv_id,
+      senderType: r.sender_type as "user" | "agent",
+      senderId: r.sender_id,
+      payload: JSON.parse(r.payload),
+      replyTo: r.reply_to,
+      createdAt: r.created_at,
+      // 老库迁移来的行 recalled_at 为 NULL → 恒有字段按 null 出
+      recalledAt: r.recalled_at ?? null,
+    };
+  }
+
   const mustUser = (id: string): User => {
     const row = db
       .prepare("SELECT id, username, display_name, avatar FROM users WHERE id = ?")
@@ -187,9 +211,10 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         payload,
         replyTo,
         createdAt: new Date().toISOString(),
+        recalledAt: null,
       };
       db.prepare(
-        "INSERT INTO messages (id, conv_id, sender_type, sender_id, payload, reply_to, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, conv_id, sender_type, sender_id, payload, reply_to, created_at, recalled_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
       ).run(msg.id, conversationId, senderType, senderId, JSON.stringify(payload), replyTo, msg.createdAt);
       return msg;
     },
@@ -202,25 +227,22 @@ export function createSqliteStore(dbPath: string): SqliteStore {
               .prepare("SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?")
               .all(conversationId, limit)
           : db.prepare("SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at ASC, rowid ASC").all(conversationId)
-      ) as {
-        id: string;
-        conv_id: string;
-        sender_type: string;
-        sender_id: string;
-        payload: string;
-        reply_to: string | null;
-        created_at: string;
-      }[];
+      ) as Parameters<typeof rowToMessage>[0][];
       const ordered = limit ? [...rows].reverse() : rows;
-      return ordered.map((r) => ({
-        id: r.id,
-        conversationId: r.conv_id,
-        senderType: r.sender_type as "user" | "agent",
-        senderId: r.sender_id,
-        payload: JSON.parse(r.payload),
-        replyTo: r.reply_to,
-        createdAt: r.created_at,
-      }));
+      return ordered.map(rowToMessage);
+    },
+    recallMessage(conversationId, messageId, userId) {
+      // 权限口径同 memory：非成员/消息不存在 → 0 changes → null；UPDATE 带 sender_id 限定
+      // 使「非本人」也不落库（changes=0 → null），单一语句完成鉴权与持久化。
+      if (!this.isMember(conversationId, userId)) return null;
+      const res = db
+        .prepare("UPDATE messages SET recalled_at = ? WHERE id = ? AND conv_id = ? AND sender_id = ?")
+        .run(new Date().toISOString(), messageId, conversationId, userId);
+      if (res.changes === 0) return null;
+      const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as
+        | Parameters<typeof rowToMessage>[0]
+        | undefined;
+      return row ? rowToMessage(row) : null;
     },
     listConversations(userId) {
       const convs = db

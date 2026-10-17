@@ -28,6 +28,7 @@ const msg = (id: string, text: string, createdAt: string): Message => ({
   payload: { text },
   replyTo: null,
   createdAt,
+  recalledAt: null,
 });
 
 function jsonRes(body: unknown, status = 200): Response {
@@ -1351,6 +1352,77 @@ describe("ChatPage", () => {
       conversationId: "c-other",
       file,
     }); // 槽保留，等目标会话激活时再消费
+  });
+
+  // —— 二期 IM Task 2：消息撤回 UI ——
+
+  it("自己消息出「撤回」按钮（对方消息无），点击经 ws 发 recall_message", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const theirs = msg("m2", "对方的", "2026-10-14T01:00:00.000Z"); // senderId u2
+    const mine: Message = { ...msg("m1", "我发的", "2026-10-14T01:01:00.000Z"), senderId: "u1" };
+    mockMessagesFetch([theirs, mine]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("我发的")).toBeInTheDocument());
+
+    // 按钮只在自己消息上出现（对方消息无）→ 全页恰 1 个
+    expect(screen.getAllByLabelText("撤回消息")).toHaveLength(1);
+    fireEvent.click(screen.getByLabelText("撤回消息"));
+    expect(send).toHaveBeenCalledWith({
+      type: "recall_message",
+      conversationId: "c1",
+      messageId: "m1",
+    });
+  });
+
+  it("已撤回消息渲染「消息已撤回」灰字：文本/附件/已读不显示，也不出撤回钮", async () => {
+    const recalled: Message = {
+      ...msg("m1", "敏感内容", "2026-10-14T01:00:00.000Z"),
+      senderId: "u1",
+      recalledAt: "2026-10-17T00:00:00.000Z",
+      payload: {
+        text: "敏感内容",
+        file: { id: "f1", name: "报告.pdf", mime: "application/pdf", size: 10 },
+      },
+    };
+    const live = msg("m2", "还在的", "2026-10-14T02:00:00.000Z");
+    mockMessagesFetch([recalled, live], undefined, {
+      // 对方读点晚于自己那条 → 若「已读」抑制失效本应显示（真击穿守卫）
+      reads: [[{ userId: "u2", at: "2026-10-14T03:00:00.000Z" }]],
+    });
+
+    render(<ChatPage />);
+    expect(await screen.findByText("消息已撤回")).toBeInTheDocument();
+    expect(screen.getByText("还在的")).toBeInTheDocument(); // 未撤回消息不受影响
+    expect(screen.queryByText("敏感内容")).not.toBeInTheDocument();
+    expect(screen.queryByText("报告.pdf")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument(); // 附件不渲染（也不发 content fetch）
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.queryByText("已读")).not.toBeInTheDocument(); // 已撤回不显已读
+    expect(screen.queryByLabelText("撤回消息")).not.toBeInTheDocument(); // 已撤回不再出撤回钮
+  });
+
+  it("收到 message_recalled 事件：气泡即时变「消息已撤回」，列表不移除", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([msg("m1", "刚发来的", "2026-10-14T01:00:00.000Z")]);
+
+    render(<ChatPage />);
+    expect(await screen.findByText("刚发来的")).toBeInTheDocument();
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_recalled",
+        conversationId: "c1",
+        messageId: "m1",
+        at: "2026-10-17T02:00:00.000Z",
+      });
+    });
+    expect(screen.getByText("消息已撤回")).toBeInTheDocument();
+    expect(screen.queryByText("刚发来的")).not.toBeInTheDocument();
+    expect(useChatStore.getState().messages.c1).toHaveLength(1); // 列表不移除
+    expect(useChatStore.getState().messages.c1[0].recalledAt).toBe("2026-10-17T02:00:00.000Z");
   });
 });
 

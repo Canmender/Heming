@@ -49,6 +49,7 @@ describe("MessageSchema", () => {
       payload: { text: "hi" },
       replyTo: null,
       createdAt: "2026-10-13T00:00:00.000Z",
+      recalledAt: null,
     });
     expect(r.success).toBe(true);
   });
@@ -61,8 +62,29 @@ describe("MessageSchema", () => {
       payload: { text: "hi" },
       replyTo: null,
       createdAt: "2026-10-13T00:00:00.000Z",
+      recalledAt: null,
     });
     expect(r.success).toBe(false);
+  });
+  it("recall_message / message_recalled 事件形状", () => {
+    expect(WsClientEventSchema.safeParse({ type: "recall_message", conversationId: "c1", messageId: "m1" }).success).toBe(true);
+    expect(WsClientEventSchema.safeParse({ type: "recall_message", conversationId: "c1" }).success).toBe(false);
+    expect(
+      WsServerEventSchema.safeParse({
+        type: "message_recalled", conversationId: "c1", messageId: "m1", at: "2026-10-17T00:00:00.000Z",
+      }).success,
+    ).toBe(true);
+  });
+  it("Message 恒有 recalledAt（null 或 ISO）", () => {
+    expect(MessageSchema.safeParse({
+      id: "m1", conversationId: "c1", senderType: "user", senderId: "u1",
+      payload: { text: "hi" }, replyTo: null, createdAt: "2026-10-17T00:00:00.000Z", recalledAt: null,
+    }).success).toBe(true);
+    // 缺 recalledAt 应失败（同步双端后新契约）
+    expect(MessageSchema.safeParse({
+      id: "m1", conversationId: "c1", senderType: "user", senderId: "u1",
+      payload: { text: "hi" }, replyTo: null, createdAt: "2026-10-17T00:00:00.000Z",
+    }).success).toBe(false);
   });
 });
 
@@ -78,6 +100,7 @@ describe("WsServerEventSchema", () => {
         payload: { text: "hi" },
         replyTo: null,
         createdAt: "2026-10-13T00:00:00.000Z",
+        recalledAt: null,
       },
     });
     expect(r.success).toBe(true);
@@ -287,7 +310,7 @@ describe("M3 schemas", () => {
     expect(WsServerEventSchema.safeParse({ type: "agent_error", conversationId: "c1", agentId: "a1", streamId: "s1", code: "provider_error", message: "401" }).success).toBe(true);
     const mn = WsServerEventSchema.safeParse({
       type: "message_new",
-      message: { id: "m1", conversationId: "c1", senderType: "agent", senderId: "a1", payload: { text: "你好", mentions: [{ agentId: "a1", name: "和小鸣" }] }, replyTo: null, createdAt: "2026-10-16T00:00:00.000Z" },
+      message: { id: "m1", conversationId: "c1", senderType: "agent", senderId: "a1", payload: { text: "你好", mentions: [{ agentId: "a1", name: "和小鸣" }] }, replyTo: null, createdAt: "2026-10-16T00:00:00.000Z", recalledAt: null },
       streamId: "s1",
     });
     expect(mn.success).toBe(true);

@@ -217,6 +217,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (e.streamId) get().removeStream(e.streamId);
       return;
     }
+    if (e.type === "message_recalled") {
+      // 撤回不移除列表：按 messageId 置 recalledAt（气泡渲染层按它切换「消息已撤回」）
+      const list = get().messages[e.conversationId];
+      if (list) {
+        set({
+          messages: {
+            ...get().messages,
+            [e.conversationId]: list.map((m) =>
+              m.id === e.messageId ? { ...m, recalledAt: e.at } : m,
+            ),
+          },
+        });
+      }
+      return;
+    }
     if (e.type === "agent_chunk") {
       // 本机流已在触发端本地累积（onLocalDelta），回声不再重复 upsert
       if (get().streamOwner[e.streamId]) return;

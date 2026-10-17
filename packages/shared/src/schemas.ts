@@ -37,6 +37,8 @@ export const MessageSchema = z.object({
   payload: MessagePayloadSchema,
   replyTo: z.string().nullable(),
   createdAt: z.string(),
+  // 撤回时间（ISO）；null=未撤回。恒有字段（双端同步后缺字段即契约违规）
+  recalledAt: z.string().nullable(),
 });
 export type Message = z.infer<typeof MessageSchema>;
 
@@ -50,6 +52,12 @@ export const WsClientEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("mark_read"),
     conversationId: z.string().min(1),
+  }),
+  // 消息撤回（仅发送者本人可撤；服务端校验后广播 message_recalled）
+  z.object({
+    type: z.literal("recall_message"),
+    conversationId: z.string().min(1),
+    messageId: z.string().min(1),
   }),
   z.object({
     type: z.literal("agent_chunk"),
@@ -97,6 +105,13 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     type: z.literal("error"),
     code: z.string().min(1),
     message: z.string().min(1),
+  }),
+  // 撤回广播：消息不移除，接收端按 messageId 置 recalledAt（at = 撤回时间）
+  z.object({
+    type: z.literal("message_recalled"),
+    conversationId: z.string().min(1),
+    messageId: z.string().min(1),
+    at: z.string(),
   }),
   z.object({
     type: z.literal("agent_chunk"),

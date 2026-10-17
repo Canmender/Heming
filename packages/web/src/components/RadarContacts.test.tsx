@@ -170,6 +170,7 @@ describe("RadarContacts 雷达通讯录", () => {
             },
             replyTo: null,
             createdAt: new Date().toISOString(),
+            recalledAt: null,
           },
         ],
       },

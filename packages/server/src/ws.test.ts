@@ -198,6 +198,45 @@ describe("ws", () => {
     wsB.close();
   });
 
+  it("recall_message：非发送者被拒（无广播），本人撤回广播 message_recalled", async () => {
+    const a = store.createUser(`rl-a-${Date.now()}`, "h", "甲");
+    const b = store.createUser(`rl-b-${Date.now()}`, "h", "乙");
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const conv = store.createDirectConversation(a.id, b.id);
+    const m = store.addMessage(conv.id, "user", a.id, { text: "撤我" }, null);
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+
+    // b 撤 a 的消息 → 错误帧回给发起者 b（forbidden），且不落库、不广播
+    const aSilent = nextEvent(wsA).then(() => "got" as const);
+    const bErr = nextEvent(wsB);
+    wsB.send(JSON.stringify({ type: "recall_message", conversationId: conv.id, messageId: m.id }));
+    const errEv = await bErr;
+    expect(errEv.type).toBe("error");
+    if (errEv.type === "error") expect(errEv.code).toBe("forbidden");
+    expect(store.listMessages(conv.id)[0].recalledAt).toBeNull(); // 未持久化
+    // a 未收到任何广播帧（message_recalled 不出现）
+    const raced = await Promise.race([
+      aSilent,
+      new Promise((r) => setTimeout(() => r("none" as const), 100)),
+    ]);
+    expect(raced).toBe("none");
+
+    // a 撤回自己的消息 → b 收到 message_recalled（messageId/会话匹配）
+    const bWait = nextEvent(wsB);
+    wsA.send(JSON.stringify({ type: "recall_message", conversationId: conv.id, messageId: m.id }));
+    const ev = await bWait;
+    expect(ev.type).toBe("message_recalled");
+    if (ev.type === "message_recalled") {
+      expect(ev.conversationId).toBe(conv.id);
+      expect(ev.messageId).toBe(m.id);
+      expect(ev.at).toBeTruthy();
+    }
+    expect(store.listMessages(conv.id)[0].recalledAt).not.toBeNull();
+    wsA.close();
+    wsB.close();
+  });
+
   it("协议错误帧不崩溃 server，后续连接仍可用", async () => {
     const raw = await rawUpgrade(ctx.port, issueToken(aliceId));
     // 0xC1 0x00 = FIN + RSV1 + opcode text、无 mask：无 permessage-deflate 协商时

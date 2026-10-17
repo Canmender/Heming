@@ -299,6 +299,26 @@ for (const f of factories) {
       expect(store.listMembers(g.id).some((m) => m.id === mine.id)).toBe(false);
     });
 
+    // —— 二期 IM Task 2：消息撤回（recallMessage 双实现同语义：权限 + 持久化）——
+
+    it("recallMessage 权限与持久化", () => {
+      const a = store.createUser("r1", "h", "甲");
+      const b = store.createUser("r2", "h", "乙");
+      // 直聊前置须为已接受好友（brief 片段省略，按既有口径补齐）
+      befriend(a.id, "r2", b.id);
+      const conv = store.createDirectConversation(a.id, b.id);
+      const m = store.addMessage(conv.id, "user", a.id, { text: "撤我" }, null);
+      expect(m.recalledAt).toBeNull(); // 新消息初值 null
+      expect(store.recallMessage(conv.id, m.id, b.id)).toBeNull();      // 非本人
+      expect(store.recallMessage(conv.id, "nope", a.id)).toBeNull();    // 不存在
+      const outsider = store.createUser("r3", "h", "丙");
+      expect(store.recallMessage(conv.id, m.id, outsider.id)).toBeNull(); // 非成员
+      const recalled = store.recallMessage(conv.id, m.id, a.id);
+      expect(recalled?.recalledAt).not.toBeNull();
+      expect(recalled?.payload.text).toBe("撤我"); // 返回更新后消息（内容不被清空）
+      expect(store.listMessages(conv.id)[0].recalledAt).not.toBeNull();
+    });
+
     // —— M4 Task 1：共享文件落 Store（memory/sqlite 双实现持久化）——
 
     describe("files", () => {

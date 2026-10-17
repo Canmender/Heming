@@ -41,6 +41,11 @@ export interface Store {
   ): Message;
   listMessages(conversationId: string, limit?: number): Message[];
   /**
+   * 撤回消息（仅发送者本人）：非本人发送 / 非成员 / 消息不存在 → null；
+   * 成功置 recalledAt（ISO）并持久化，返回更新后消息（内容不删，仅标记）。
+   */
+  recallMessage(conversationId: string, messageId: string, userId: string): Message | null;
+  /**
    * 建群（用户自建）：creator 自动入群；除 creator 外的每个 memberIds 必须与 creator
    * 是**已接受好友**关系，否则抛 "not friends"（对齐 createDirectConversation 口径）。
    */
@@ -239,6 +244,7 @@ export function createMemoryStore(): Store {
         payload,
         replyTo,
         createdAt: new Date().toISOString(),
+        recalledAt: null,
       };
       messages.get(conversationId)!.push(msg);
       return msg;
@@ -247,6 +253,18 @@ export function createMemoryStore(): Store {
       const all = messages.get(conversationId);
       if (!all) throw new Error("conversation not found");
       return limit ? all.slice(-limit) : [...all];
+    },
+    recallMessage(conversationId, messageId, userId) {
+      // 缺失会话 → messages.get 为 undefined → 按「消息不存在」返回 null（与 sqlite 的
+      // UPDATE 0 changes 同语义）；非成员/非发送者同为 null。
+      const list = messages.get(conversationId);
+      const m = list?.find((x) => x.id === messageId);
+      if (!m || m.senderId !== userId) return null;
+      if (!conversations.get(conversationId)?.members.includes(userId)) return null;
+      // 原地置位 + 浅拷贝返回：listMessages 持有内部引用（既有口径），改字段即持久；
+      // 返回拷贝避免调用方持有可变内部对象（对齐 updateProfile 的替换语义精神）。
+      m.recalledAt = new Date().toISOString();
+      return { ...m };
     },
     createGroup(creatorId, name, memberIds) {
       mustUser(creatorId);

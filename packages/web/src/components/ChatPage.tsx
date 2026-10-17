@@ -626,14 +626,16 @@ export function ChatPage() {
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {messages.map((m) => {
           const mine = m.senderId === me?.id;
+          // 已撤回：正文/附件/已读一律不渲染，只出一行灰字（头像与署名结构保留）
+          const recalled = m.recalledAt != null;
           // 署名：自己「我」；direct 对方名；群内他人用挂载时拉到的成员映射名（缺失则不渲染署名行）
           const senderName = mine
             ? "我"
             : conv?.type === "direct"
               ? peer?.displayName
               : memberNameById?.[m.senderId];
-          // 仅 direct：对方读点 ≥ 本条时间 → 已读（逐条判断；群 M2 不显示）
-          const readByPeer = mine && !!peerReadAt && peerReadAt >= m.createdAt;
+          // 仅 direct：对方读点 ≥ 本条时间 → 已读（逐条判断；群 M2 不显示；已撤回不显示）
+          const readByPeer = mine && !recalled && !!peerReadAt && peerReadAt >= m.createdAt;
           return (
             <div
               key={m.id}
@@ -642,20 +644,43 @@ export function ChatPage() {
               {/* 对方消息：左侧头像（无 avatar 首字回退）；自己的消息不显示头像 */}
               {!mine && peer && <Avatar user={peer} size={22} className="mt-0.5" />}
               <div
-                className={`max-w-[70%] rounded-lg border border-line px-3 py-2 text-[13px] shadow-card ${
+                className={`group relative max-w-[70%] rounded-lg border border-line px-3 py-2 text-[13px] shadow-card ${
                   mine ? "bg-white" : "bg-[#f7f7f7]"
                 }`}
               >
                 {senderName ? (
                   <div className="mb-0.5 text-[10px] text-muted">{senderName}</div>
                 ) : null}
-                {m.payload.text
-                  ? renderTextWithMentions(m.payload.text, m.payload.mentions)
-                  : null}
-                {m.payload.file ? <AttachmentPreview file={m.payload.file} /> : null}
-                {readByPeer ? (
-                  <div className="mt-0.5 text-right text-[9px] text-muted">已读</div>
-                ) : null}
+                {recalled ? (
+                  <div className="text-muted">消息已撤回</div>
+                ) : (
+                  <>
+                    {m.payload.text
+                      ? renderTextWithMentions(m.payload.text, m.payload.mentions)
+                      : null}
+                    {m.payload.file ? <AttachmentPreview file={m.payload.file} /> : null}
+                    {readByPeer ? (
+                      <div className="mt-0.5 text-right text-[9px] text-muted">已读</div>
+                    ) : null}
+                  </>
+                )}
+                {/* 撤回入口：仅自己的未撤回消息，hover 气泡时显出（测试按 aria-label 断言） */}
+                {mine && !recalled && (
+                  <button
+                    type="button"
+                    aria-label="撤回消息"
+                    className="absolute -top-2 right-0 hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block"
+                    onClick={() =>
+                      wsHandleRef.current?.send({
+                        type: "recall_message",
+                        conversationId: convId,
+                        messageId: m.id,
+                      })
+                    }
+                  >
+                    撤回
+                  </button>
+                )}
               </div>
             </div>
           );

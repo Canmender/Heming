@@ -26,6 +26,7 @@ const msg = (id: string, text: string): Message => ({
   payload: { text },
   replyTo: null,
   createdAt: "2026-10-13T00:00:00.000Z",
+  recalledAt: null,
 });
 
 const msgAt = (id: string, text: string, createdAt: string): Message => ({
@@ -347,5 +348,44 @@ describe("chat store", () => {
       "/api/conversations/g1/agents/a1",
       expect.objectContaining({ method: "DELETE" }),
     );
+  });
+
+  // —— 二期 IM Task 2：message_recalled 处理（置 recalledAt，列表不移除）——
+
+  it("onWsEvent message_recalled：对应消息置 recalledAt，其余与列表长度不变", () => {
+    useChatStore.getState().appendMessage(msg("m1", "一"));
+    useChatStore.getState().appendMessage(msg("m2", "二"));
+    useChatStore.getState().onWsEvent({
+      type: "message_recalled",
+      conversationId: "c1",
+      messageId: "m1",
+      at: "2026-10-17T01:00:00.000Z",
+    });
+    const list = useChatStore.getState().messages["c1"];
+    expect(list).toHaveLength(2); // 不移除
+    expect(list.find((m) => m.id === "m1")?.recalledAt).toBe("2026-10-17T01:00:00.000Z");
+    expect(list.find((m) => m.id === "m2")?.recalledAt).toBeNull(); // 其余不动
+  });
+
+  it("onWsEvent message_recalled：未知会话/未知消息静默忽略（不抛不建空表）", () => {
+    useChatStore.getState().appendMessage(msg("m1", "一"));
+    expect(() =>
+      useChatStore.getState().onWsEvent({
+        type: "message_recalled",
+        conversationId: "ghost",
+        messageId: "x",
+        at: "2026-10-17T01:00:00.000Z",
+      }),
+    ).not.toThrow();
+    expect(useChatStore.getState().messages["ghost"]).toBeUndefined();
+    useChatStore.getState().onWsEvent({
+      type: "message_recalled",
+      conversationId: "c1",
+      messageId: "nope",
+      at: "2026-10-17T01:00:00.000Z",
+    });
+    const list = useChatStore.getState().messages["c1"];
+    expect(list).toHaveLength(1);
+    expect(list[0].recalledAt).toBeNull();
   });
 });

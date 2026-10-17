@@ -141,7 +141,23 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
         send(ws, { type: "error", code: "forbidden", message: "not a member" });
         return;
       }
-      if (event.type === "send_message") {
+      // recall 独立成支（成员校验已在上方统一做过）；mark_read 保持 else 兜底——
+      // 只有「非 send、非 recall」的剩余事件（= mark_read，agent_* 已在上方 return）会走到，
+      // 防撤回/发送被误当已读广播 read_update。
+      if (event.type === "recall_message") {
+        const m = store.recallMessage(event.conversationId, event.messageId, userId);
+        if (!m) {
+          // store 口径：非本人发送 / 消息不存在 → null（非成员已在上方拦下）
+          send(ws, { type: "error", code: "forbidden", message: "not the sender" });
+          return;
+        }
+        broadcastToConversation(event.conversationId, {
+          type: "message_recalled",
+          conversationId: event.conversationId,
+          messageId: event.messageId,
+          at: m.recalledAt!,
+        });
+      } else if (event.type === "send_message") {
         const message = store.addMessage(
           event.conversationId,
           "user",
