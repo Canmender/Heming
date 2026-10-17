@@ -204,6 +204,72 @@ describe("runAgentMentions", () => {
     expect(chunks.map((c) => c.index)).toEqual([0, 1]);
     expect(chunks[0].cipher).toBe("c0"); // 未被 index=1 的密文抢先
   });
+
+  // —— fix I2：agent_error 信封化 ——
+
+  it("E2E：注入 sealError → agent_error 的 message 置空带 cipher；封失败回退通用明文文案", async () => {
+    const sealError = vi.fn(async (_s: string, message: string) => ({
+      cipher: `e-${message}`,
+      chainKid: "k",
+      n: 5,
+    }));
+    const { send, deps } = makeDeps({
+      streamChat: vi.fn(async (_p, _m, o: { onDelta: (t: string) => void }) => {
+        o.onDelta("半");
+        throw new Error("供应商把请求片段吐出来了: POST /v1/chat body=...");
+      }),
+      sealError,
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const errs = send.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((e) => e.type === "agent_error");
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toMatchObject({
+      code: "provider_error",
+      message: "",
+      cipher: "e-供应商把请求片段吐出来了: POST /v1/chat body=...",
+      chainKid: "k",
+      n: 5,
+    }); // 错误正文只进密文
+    expect(sealError).toHaveBeenCalledWith(expect.any(String), expect.stringContaining("供应商"));
+  });
+
+  it("E2E：sealError 抛错 → 通用明文文案收口（不发明文错误正文），code 保留", async () => {
+    const { send, deps } = makeDeps({
+      streamChat: vi.fn(async (_p, _m, o: { onDelta: (t: string) => void }) => {
+        o.onDelta("半");
+        throw new Error("供应商秘密片段");
+      }),
+      sealError: vi.fn(async () => {
+        throw new Error("seal boom");
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const errs = send.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((e) => e.type === "agent_error");
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toMatchObject({ code: "provider_error", message: "生成出错（内容无法解密）" });
+    expect(errs[0]).not.toHaveProperty("cipher");
+    expect(JSON.stringify(errs[0])).not.toContain("供应商秘密片段"); // 原文不落帧
+  });
+
+  it("E2E：无绑定分支的 agent_error 同样走信封（message 置空）", async () => {
+    const sealError = vi.fn(async (_s: string, message: string) => ({
+      cipher: `e-${message}`,
+      chainKid: "k",
+      n: 0,
+    }));
+    const { send, deps } = makeDeps({ getProfile: () => undefined, sealError });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const err = send.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .find((e) => e.type === "agent_error");
+    expect(err).toMatchObject({ code: "provider_error", message: "", cipher: "e-未绑定 LLM 连接" });
+  });
 });
 
 it("newStreamId 唯一性", () => {

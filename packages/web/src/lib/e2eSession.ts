@@ -77,7 +77,7 @@ export interface ChainState {
  *  mentions 随正文进密文（§3.3「payload/replyTo/mentions 全进密文」）；
  *  kind="chunk" 为 agent 流式增量（§5.3，AAD 绑定 streamId+index，不落明文缓存）。 */
 export interface PlainEnvelope {
-  kind: "text" | "file" | "forward" | "reaction" | "chaindist" | "chunk";
+  kind: "text" | "file" | "forward" | "reaction" | "chaindist" | "chunk" | "error";
   text?: string;
   file?: { id: string; name: string; mime: string; size: number; key?: string };
   forward?: { from: string; source: string };
@@ -264,6 +264,14 @@ export function chunkAad(convId: string, streamId: string, index: number): Uint8
   return utf8(`${AAD_PREFIX}|${convId}|chunk|${streamId}|${index}`);
 }
 
+/**
+ * agent_error 信封的 AAD（fix I2）：与 chunk 同款「会话+流」上下文绑定，独立 error
+ * 命名空间——错误与片互换密文时 GCM 拒（每 stream 恰一条错误，无 index 位）。
+ */
+export function errorAad(convId: string, streamId: string): Uint8Array {
+  return utf8(`${AAD_PREFIX}|${convId}|error|${streamId}`);
+}
+
 function aadDist(convId: string, to: string): Uint8Array {
   return utf8(`${AAD_PREFIX}|${convId}|dist|${to}`);
 }
@@ -276,29 +284,47 @@ function parseOuter(cipher: string): CipherOuter {
 
 // —— 身份（heming.e2e.identity）——
 
+/**
+ * 身份生成 in-flight 去重（fix I1）：并发 ensureIdentity（ChatPage 挂载时 initSession 与
+ * 公钥上云 exportOwnDeviceKeys 在同一同步块触发）共享同一生成 promise——否则首启
+ * （localStorage 无身份）会生成两套身份，落盘者与上云者错配（对端 X3DH 永久解不开、
+ * distFor 已标记不重发）。
+ */
+let identityInFlight: Promise<StoredIdentity> | null = null;
+
 async function ensureIdentity(): Promise<StoredIdentity> {
   const existing = readJson<StoredIdentity>(IDENTITY_KEY);
   if (existing?.kid && existing.spk?.pub) return existing;
+  if (identityInFlight) return identityInFlight; // 并发首启：共享同一生成
   // 生成/载入身份：IK 双键（ECDH 协商 + ECDSA 签名链）+ 签名预键 SPK（§3.1）
-  const id = await generateIdentity();
-  const spkPair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
-    "deriveBits",
-  ]);
-  const spkPub = await exportPub(spkPair.publicKey);
-  const sig = await signPrekeyPayload(id.ikSign, spkPub);
-  const stored: StoredIdentity = {
-    kid: id.kid,
-    ikEcdh: await crypto.subtle.exportKey("jwk", id.ikEcdh),
-    ikSign: await crypto.subtle.exportKey("jwk", id.ikSign),
-    spk: {
-      priv: await crypto.subtle.exportKey("jwk", spkPair.privateKey),
-      pub: spkPub,
-      sig,
-      createdAt: Date.now(),
-    },
-  };
-  writeJson(IDENTITY_KEY, stored);
-  return stored;
+  const gen = (async () => {
+    const id = await generateIdentity();
+    const spkPair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
+      "deriveBits",
+    ]);
+    const spkPub = await exportPub(spkPair.publicKey);
+    const sig = await signPrekeyPayload(id.ikSign, spkPub);
+    const stored: StoredIdentity = {
+      kid: id.kid,
+      ikEcdh: await crypto.subtle.exportKey("jwk", id.ikEcdh),
+      ikSign: await crypto.subtle.exportKey("jwk", id.ikSign),
+      spk: {
+        priv: await crypto.subtle.exportKey("jwk", spkPair.privateKey),
+        pub: spkPub,
+        sig,
+        createdAt: Date.now(),
+      },
+    };
+    writeJson(IDENTITY_KEY, stored);
+    return stored;
+  })();
+  identityInFlight = gen;
+  try {
+    return await gen;
+  } finally {
+    // 失败清位可重试；成功后由 localStorage 命中（并发者已共享同一 promise）
+    if (identityInFlight === gen) identityInFlight = null;
+  }
 }
 
 async function loadIdentity(): Promise<LoadedIdentity> {
@@ -353,7 +379,9 @@ export function isForMe(env: SealedEnvelope): boolean {
     if (!raw) return false;
     return (JSON.parse(raw) as StoredIdentity).kid === outer.to;
   } catch {
-    return false;
+    // cipher 损坏（无法解析）：无法判定定向——返回 true 交 openMessage 判定
+    // （坏密文 → e2e_decrypt_failed → 接线层按「无法解密」占位，而非静默丢弃；Minor）
+    return true;
   }
 }
 
@@ -861,15 +889,41 @@ async function doSweep(convId: string): Promise<number> {
 
 // —— MsgCache（localStorage heming.msgCache.<convId>，截尾 500 条/会话）——
 
+/**
+ * 进程内明文缓存视图（fix I3）：key → {raw, parsed}。list 只在 raw 字符串变化时重新
+ * JSON.parse（接收路径每个信封都 list，全量 parse 是热路径浪费）；append 写盘后同步
+ * 刷新视图。外部直接改/清 localStorage（测试 setup 常见）经 raw 比对自动失效。
+ * 返回的数组是缓存视图，调用方**只读**（本模块是唯一写入口）。
+ */
+const cacheView = new Map<string, { raw: string | null; parsed: CachedMsg[] }>();
+
+function viewCached(key: string): CachedMsg[] {
+  const raw = localStorage.getItem(key);
+  const hit = cacheView.get(key);
+  if (hit && hit.raw === raw) return hit.parsed;
+  let parsed: CachedMsg[] = [];
+  if (raw !== null) {
+    try {
+      parsed = JSON.parse(raw) as CachedMsg[];
+    } catch {
+      parsed = [];
+    }
+  }
+  cacheView.set(key, { raw, parsed });
+  return parsed;
+}
+
 /** 默认明文缓存实现（jsdom/浏览器共用；测试与接线层直接引用同一实例）。 */
 export const msgCache: MsgCache = {
   append(convId, m) {
     const key = MSGCACHE_PREFIX + convId;
-    const list = readJson<CachedMsg[]>(key) ?? [];
+    const list = viewCached(key).slice(); // 复制后改：不污染已发布的视图数组
     list.push(m);
-    writeJson(key, list.length > CACHE_CAP ? list.slice(-CACHE_CAP) : list);
+    const next = list.length > CACHE_CAP ? list.slice(-CACHE_CAP) : list;
+    writeJson(key, next);
+    cacheView.set(key, { raw: localStorage.getItem(key), parsed: next });
   },
   list(convId) {
-    return readJson<CachedMsg[]>(MSGCACHE_PREFIX + convId) ?? [];
+    return viewCached(MSGCACHE_PREFIX + convId);
   },
 };

@@ -677,4 +677,41 @@ describe("agent streaming", () => {
     expect(store.listMessages(g.id)).toHaveLength(0);
     wsA.close();
   });
+  it("密文 agent_error：广播透传 cipher/chainKid/n（message 空串），不入库", async () => {
+    const a = store.createUser(`cm-${Date.now()}`, "h", "A");
+    const b = store.createUser(`cn-${Date.now()}`, "h", "B");
+    seedPreset(store);
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const g = store.createGroup(a.id, "密文error群", [b.id]);
+    store.attachAgentToGroup(g.id, "system-assistant");
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+
+    const wait = nextEvent(wsB);
+    wsA.send(
+      JSON.stringify({
+        type: "agent_error",
+        conversationId: g.id,
+        agentId: "system-assistant",
+        streamId: "se1",
+        code: "provider_error",
+        message: "",
+        cipher: "ZXJyb3ItY2lwaGVy",
+        chainKid: "k1",
+        n: 3,
+      }),
+    );
+    const ev = await wait;
+    expect(ev.type).toBe("agent_error");
+    if (ev.type === "agent_error") {
+      expect(ev.message).toBe("");
+      expect(ev.cipher).toBe("ZXJyb3ItY2lwaGVy");
+      expect(ev.chainKid).toBe("k1");
+      expect(ev.n).toBe(3);
+      expect(ev.code).toBe("provider_error"); // code 非敏感，明文保留（收端降级文案拼接用）
+    }
+    expect(store.listMessages(g.id)).toHaveLength(0);
+    wsA.close();
+    wsB.close();
+  });
 });

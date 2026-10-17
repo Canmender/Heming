@@ -7,7 +7,7 @@
  * 以 asParty 切换 identity 快照模拟双端（链文件按会话隔离；多设备用例以链文件
  * 快照切换模拟同一用户的两台设备各自的发送链）。
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { WsClientEvent } from "@heming/shared";
 import { fromB64, toB64 } from "./e2eCrypto.js";
 import {
@@ -22,6 +22,7 @@ import {
   msgCache,
   exportOwnDeviceKeys,
   chunkAad,
+  errorAad,
   type E2eDeps,
   type PeerKeys,
   type SealedEnvelope,
@@ -625,5 +626,83 @@ describe("e2eSession 会话层", () => {
       send: { n: number };
     };
     expect(chains.send.n).toBe(2);
+  });
+
+  it("⑮ 身份生成并发去重：并发 exportOwnDeviceKeys 共享同一生成（kid 唯一、落盘一套）", async () => {
+    const deps = makeDeps([]);
+    // 首启（localStorage 无身份）并发两条路径（ChatPage 挂载时 initSession + 上云 export 同步块触发）：
+    // 旧实现 ensureIdentity 无 in-flight 去重 → 各自 generateKey → kid 不同、落盘者与上云者错配
+    const [a, , b] = await Promise.all([
+      exportOwnDeviceKeys(),
+      initSession("t15-conv", deps),
+      exportOwnDeviceKeys(),
+    ]);
+    expect(a.ikEcdh).toBe(b.ikEcdh); // 并发共享同一生成 promise
+    expect(a.ikSign).toBe(b.ikSign);
+    expect(a.spk.pub).toBe(b.spk.pub);
+    const c = await exportOwnDeviceKeys(); // 落盘的与上云的一致（后续读同一套）
+    expect(c.ikEcdh).toBe(a.ikEcdh);
+    const stored = JSON.parse(localStorage.getItem(IDENTITY_KEY)!) as { kid: string };
+    expect(typeof stored.kid).toBe("string");
+    expect(stored.kid.length).toBeGreaterThan(0);
+  });
+
+  it("⑯ msgCache 进程内视图：连续读只 parse 一次，append 同步刷新，外部清空自动失效", async () => {
+    // 直写 localStorage（绕过 append 的视图预热）：模拟冷启动首读
+    localStorage.setItem(
+      "heming.msgCache.t16-c",
+      JSON.stringify([{ id: "m1", senderId: "u1", at: 1, plain: { kind: "text", text: "一" } }]),
+    );
+    const spy = vi.spyOn(JSON, "parse");
+    try {
+      expect(msgCache.list("t16-c")).toHaveLength(1);
+      expect(msgCache.list("t16-c")).toHaveLength(1);
+      const cacheParses = () =>
+        spy.mock.calls.filter(
+          (c) => typeof c[0] === "string" && (c[0] as string).startsWith('[{"id"'),
+        ).length;
+      expect(cacheParses()).toBe(1); // 首读 parse 一次，后续命中进程内视图
+      msgCache.append("t16-c", { id: "m2", senderId: "u1", at: 2, plain: { kind: "text", text: "二" } });
+      expect(msgCache.list("t16-c")).toHaveLength(2);
+      expect(cacheParses()).toBe(1); // append 同步刷新视图，不重 parse
+      localStorage.removeItem("heming.msgCache.t16-c"); // 外部清空（测试 setup 常见）
+      expect(msgCache.list("t16-c")).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("⑰ error 信封：errorAad 绑定 convId+streamId，错 AAD 拒、正 AAD 开", async () => {
+    const sent: WsClientEvent[] = [];
+    const deps = makeDeps(sent);
+    const snapA = await bootstrap("alice-t17");
+    const snapB = await bootstrap("bob-t17");
+    const conv = { id: "t17-conv", members: ["alice-t17", "bob-t17"] };
+
+    const ev = (await asParty(snapA, () =>
+      sealMessage(conv, { kind: "error", text: "供应商 401" }, deps, { aad: errorAad(conv.id, "s1") }),
+    )) as SendEvent;
+    const distEv = sent[0] as SendEvent;
+    const distPlain = await asParty(snapB, () =>
+      openMessage(convOf(conv.id), toEnv(distEv, "t17-dist", "alice-t17"), msgCache),
+    );
+    if (typeof distPlain === "string" || distPlain.kind !== "chaindist") {
+      throw new Error("chaindist 打开失败");
+    }
+    // 错 AAD（按 chunk 规则）→ GCM 拒
+    await expect(
+      asParty(snapB, () =>
+        openMessage(convOf(conv.id), toEnv(ev, "t17-e1", "alice-t17"), msgCache, {
+          aad: chunkAad(conv.id, "s1", 0),
+        }),
+      ),
+    ).rejects.toThrow("e2e_decrypt_failed");
+    // 正确 errorAad → 解开
+    const plain = await asParty(snapB, () =>
+      openMessage(convOf(conv.id), toEnv(ev, "t17-e1", "alice-t17"), msgCache, {
+        aad: errorAad(conv.id, "s1"),
+      }),
+    );
+    expect(plain).toEqual({ kind: "error", text: "供应商 401" });
   });
 });

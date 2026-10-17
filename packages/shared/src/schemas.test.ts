@@ -582,4 +582,45 @@ describe("agent_chunk/agent_finish 信封（E2E Task 4）", () => {
     expect(WsServerEventSchema.safeParse({ ...chunkBase, text: "" }).success).toBe(true);
     expect(WsServerEventSchema.safeParse({ ...chunkBase, text: "你" }).success).toBe(true);
   });
+
+  it("agent_error 信封（fix I2）：cipher/chainKid/n 可选，密文 message 置空且字段落输出", () => {
+    const base = {
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "s1",
+      code: "provider_error",
+    };
+    // 明文 legacy：message min(1) 保持
+    expect(WsClientEventSchema.safeParse({ ...base, message: "401 bad key" }).success).toBe(true);
+    expect(WsClientEventSchema.safeParse({ ...base, message: "" }).success).toBe(false);
+    // 密文：message 置空 + cipher/chainKid/n 落输出（缺一即拒、夹明文拒、空 cipher 拒）
+    const sealed = WsClientEventSchema.safeParse({
+      ...base,
+      message: "",
+      cipher: "Q2lwaGVy",
+      chainKid: "k1",
+      n: 0,
+    });
+    expect(sealed.success).toBe(true);
+    if (sealed.success) {
+      expect(sealed.data).toMatchObject({ cipher: "Q2lwaGVy", chainKid: "k1", n: 0, message: "" });
+    }
+    expect(
+      WsClientEventSchema.safeParse({ ...base, message: "401", cipher: "Q2lwaGVy", chainKid: "k1", n: 0 })
+        .success,
+    ).toBe(false);
+    expect(WsClientEventSchema.safeParse({ ...base, message: "", cipher: "Q2lwaGVy", chainKid: "k1" }).success).toBe(false);
+    expect(WsClientEventSchema.safeParse({ ...base, message: "", cipher: "Q2lwaGVy", n: 0 }).success).toBe(false);
+    expect(
+      WsClientEventSchema.safeParse({ ...base, message: "", cipher: "", chainKid: "k1", n: 0 }).success,
+    ).toBe(false);
+    // 服务端广播面：密文形态放行（客户端 superRefine 已卡源头；服务端广播透传见 ws.test）
+    expect(
+      WsServerEventSchema.safeParse({ ...base, message: "", cipher: "Q2lwaGVy", chainKid: "k1", n: 0 })
+        .success,
+    ).toBe(true);
+    expect(WsServerEventSchema.safeParse({ ...base, message: "401" }).success).toBe(true);
+  });
 });
+

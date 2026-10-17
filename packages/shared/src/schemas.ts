@@ -129,13 +129,18 @@ const WsClientEventUnion = z.discriminatedUnion("type", [
   }),
   // 双向事件（设计 §3）：客户端上报流失败（aborted/provider_error），服务端回 forbidden。
   // 形状与 WsServerEventSchema 的 agent_error 成员一致（同构复用，见 ws.ts）。
+  // E2E（fix I2）：错误正文可回显供应商请求片段 → 同款信封（message 置空、全文进 cipher，
+  // 明文路径的 min(1) 约束由联合体 superRefine 按形态分派）。
   z.object({
     type: z.literal("agent_error"),
     conversationId: z.string().min(1),
     agentId: z.string().min(1),
     streamId: z.string().min(1),
     code: z.string().min(1),
-    message: z.string().min(1).max(1000),
+    message: z.string().max(1000),
+    cipher: z.string().max(262144).optional(),
+    chainKid: z.string().max(64).optional(),
+    n: z.number().int().min(0).optional(),
   }),
 ]);
 
@@ -197,6 +202,39 @@ export const WsClientEventSchema = WsClientEventUnion.superRefine((ev, ctx) => {
         code: z.ZodIssueCode.custom,
         path: ["text"],
         message: "agent_chunk text required",
+      });
+    }
+    return;
+  }
+  if (ev.type === "agent_error") {
+    if (ev.cipher !== undefined) {
+      if (!ev.cipher) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["cipher"],
+          message: "agent_error cipher must be non-empty",
+        });
+        return;
+      }
+      if (ev.chainKid === undefined || ev.n === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["chainKid"],
+          message: "sealed agent_error requires chainKid and n",
+        });
+      }
+      if (ev.message !== "") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["message"],
+          message: "sealed agent_error must not carry plaintext message",
+        });
+      }
+    } else if (ev.message.length < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["message"],
+        message: "agent_error message required",
       });
     }
     return;
@@ -281,7 +319,11 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     agentId: z.string().min(1),
     streamId: z.string().min(1),
     code: z.string().min(1),
-    message: z.string().min(1).max(1000),
+    // 密文错误（fix I2）message 为空串 + cipher 透传；明文（服务端自产 forbidden 等）非空
+    message: z.string().max(1000),
+    cipher: z.string().max(262144).optional(),
+    chainKid: z.string().max(64).optional(),
+    n: z.number().int().min(0).optional(),
   }),
 ]);
 export type WsServerEvent = z.infer<typeof WsServerEventSchema>;

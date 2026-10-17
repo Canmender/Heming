@@ -632,10 +632,11 @@ describe("chat store", () => {
 
   it("agent_chunk 密文：解密成功累积进打字机；失败/无 handler 跳过该片不崩", async () => {
     let mode: "ok" | "fail" = "ok";
-    const handler = vi.fn(async (_env: { id: string }, _ctx?: { streamId: string; index: number }) =>
-      mode === "ok"
-        ? ({ status: "ok" as const, plain: { kind: "chunk" as const, text: "你" } })
-        : ({ status: "failed" as const }),
+    const handler = vi.fn(
+      async (_env: { id: string }, _ctx?: { streamId: string; kind?: string; index?: number }) =>
+        mode === "ok"
+          ? ({ status: "ok" as const, plain: { kind: "chunk" as const, text: "你" } })
+          : ({ status: "failed" as const }),
     );
     useChatStore.getState().setOpenHandler(handler);
 
@@ -652,7 +653,7 @@ describe("chat store", () => {
     });
     await flush();
     expect(useChatStore.getState().streaming["s9"]?.text).toBe("你");
-    expect(handler.mock.calls[0][1]).toEqual({ streamId: "s9", index: 0 }); // AAD 上下文注入
+    expect(handler.mock.calls[0][1]).toEqual({ kind: "chunk", streamId: "s9", index: 0 }); // AAD 上下文注入
     expect(handler.mock.calls[0][0]).toMatchObject({ chainKid: "kid-1", n: 1, cipher: "Q2lwaGVy" });
 
     // 解不开 → 跳过该片（流式容错：不崩、不追加乱码）
@@ -767,5 +768,84 @@ describe("chat store", () => {
     // attempted 去重：再跑一遍不重复 PUT
     await useChatStore.getState().migrateOwnPlain("c1", ["u1"], deps, attempted, "u1");
     expect(reencryptMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("agent_error 密文（fix I2）：解密得 message；解不开/无 handler 降级通用文案（code 保留）", async () => {
+    let mode: "ok" | "fail" = "ok";
+    const handler = vi.fn(
+      async (_env: { id: string }, _ctx?: { streamId: string; kind?: string; index?: number }) =>
+        mode === "ok"
+          ? ({ status: "ok" as const, plain: { kind: "error" as const, text: "供应商 401 bad key" } })
+          : ({ status: "failed" as const }),
+    );
+    useChatStore.getState().setOpenHandler(handler);
+
+    useChatStore.getState().onWsEvent({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "sE1",
+      code: "provider_error",
+      message: "",
+      cipher: "Qw==",
+      chainKid: "kid-1",
+      n: 1,
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["sE1"]).toMatchObject({
+      status: "error",
+      errorMessage: "供应商 401 bad key", // 密文解开的错误正文
+    });
+    expect(handler.mock.calls[0][1]).toEqual({ kind: "error", streamId: "sE1" }); // AAD 上下文
+
+    // 解不开 → 通用降级文案（不显示密文乱码、不崩），code 语义保留
+    mode = "fail";
+    useChatStore.getState().onWsEvent({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "sE2",
+      code: "provider_error",
+      message: "",
+      cipher: "Qw==2",
+      chainKid: "kid-1",
+      n: 2,
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["sE2"]).toMatchObject({
+      status: "error",
+      errorMessage: "生成出错（内容无法解密）",
+    });
+
+    // 无 handler → 同样降级（绝不把密文当正文显示）
+    useChatStore.getState().setOpenHandler(null);
+    useChatStore.getState().onWsEvent({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "sE3",
+      code: "aborted",
+      message: "",
+      cipher: "Qw==3",
+      chainKid: "kid-1",
+      n: 3,
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["sE3"]).toMatchObject({
+      status: "error",
+      errorMessage: "生成出错（内容无法解密）",
+    });
+
+    // 明文 legacy 路径不变（服务端自产 forbidden / 旧端）
+    useChatStore.getState().onWsEvent({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "sE4",
+      code: "forbidden",
+      message: "not a member",
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["sE4"]?.errorMessage).toBe("not a member");
   });
 });

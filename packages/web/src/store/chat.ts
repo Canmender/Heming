@@ -27,11 +27,18 @@ export interface E2eOpenInput {
   createdAt?: string;
 }
 
-/** agent_chunk 的 AAD 上下文（设计 §5.3：AAD=convId+streamId+index）。 */
-export interface E2eChunkCtx {
+/**
+ * 流式事件的 AAD 上下文：chunk 按设计 §5.3（AAD=convId+streamId+index）；
+ * error（fix I2）按 errorAad（convId+streamId，每 stream 恰一条）。
+ */
+export interface E2eStreamCtx {
   streamId: string;
-  index: number;
+  kind: "chunk" | "error";
+  index?: number; // kind=chunk 必带（调用方保证）
 }
+
+/** 密文 agent_error 解不开/未注入 handler 时的降级文案（不含错误原文；agentStream 侧 GENERIC_SEAL_FALLBACK 同口径）。 */
+export const E2E_ERROR_FALLBACK = "生成出错（内容无法解密）";
 
 /**
  * 解密结果：ok=明文（chaindist 已在 handler 内落链并扫完暂挂）；defer=缺链暂挂（占位
@@ -46,7 +53,7 @@ export type E2eOpenOutcome =
 
 export type E2eOpenHandler = (
   env: E2eOpenInput,
-  ctx?: E2eChunkCtx,
+  ctx?: E2eStreamCtx,
 ) => Promise<E2eOpenOutcome>;
 
 /** 服务端信封消息 → 解密入参（enc=e2e 时 cipher/chainKid/n 由 schema 保证可达）。 */
@@ -582,7 +589,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             chainKid: e.chainKid,
             n: e.n,
           },
-          { streamId: e.streamId, index: e.index },
+          { streamId: e.streamId, kind: "chunk", index: e.index },
         )
           .then((out) => {
             if (out.status !== "ok" || out.plain.kind !== "chunk") return;
@@ -614,21 +621,54 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
     if (e.type === "agent_error") {
       const local = !!get().streamOwner[e.streamId];
-      get().upsertStream(e.streamId, {
-        agentId: e.agentId,
-        conversationId: e.conversationId,
-        status: "error",
-        errorMessage: e.message,
-      });
-      if (!local) {
-        // 他机流失败：短暂显示原因后自清（本机流保留错误行供重试）
-        const id = e.streamId;
-        setTimeout(() => {
-          if (!get().streamOwner[id] && get().streaming[id]?.status === "error") {
-            get().removeStream(id);
-          }
-        }, REMOTE_ERROR_TTL_MS);
+      const applyError = (errorMessage: string) => {
+        get().upsertStream(e.streamId, {
+          agentId: e.agentId,
+          conversationId: e.conversationId,
+          status: "error",
+          errorMessage,
+        });
+        if (!local) {
+          // 他机流失败：短暂显示原因后自清（本机流保留错误行供重试）
+          const id = e.streamId;
+          setTimeout(() => {
+            if (!get().streamOwner[id] && get().streaming[id]?.status === "error") {
+              get().removeStream(id);
+            }
+          }, REMOTE_ERROR_TTL_MS);
+        }
+      };
+      if (e.cipher !== undefined && e.chainKid !== undefined && e.n !== undefined) {
+        // 密文错误（fix I2）：正文只在 cipher 里——解密得正文；解不开/未注入 → 通用降级
+        // 文案（绝不把密文当正文显示）；code 非敏感明文保留。
+        const h = get().openHandler;
+        if (!h) {
+          applyError(E2E_ERROR_FALLBACK);
+          return;
+        }
+        void h(
+          {
+            conversationId: e.conversationId,
+            id: `err:${e.streamId}`,
+            senderId: e.agentId,
+            cipher: e.cipher,
+            chainKid: e.chainKid,
+            n: e.n,
+          },
+          { kind: "error", streamId: e.streamId },
+        )
+          .then((out) =>
+            applyError(
+              out.status === "ok" && out.plain.kind === "error" && typeof out.plain.text === "string"
+                ? out.plain.text
+                : E2E_ERROR_FALLBACK,
+            ),
+          )
+          .catch(() => applyError(E2E_ERROR_FALLBACK));
+        return;
       }
+      applyError(e.message); // 明文 legacy（服务端自产 forbidden / 旧端）
+      return;
     }
   },
   sweepStaleStreams(now) {

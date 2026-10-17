@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import type { Member, Message, ReadState, User, WsClientEvent } from "@heming/shared";
-import { ChatPage, renderTextWithMentions } from "./ChatPage.js";
+import { ChatPage, renderTextWithMentions, aggregateChips } from "./ChatPage.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
@@ -790,11 +790,19 @@ describe("ChatPage", () => {
 
     await waitFor(() => expect(sealedOf(send, "agent_finish")).toHaveLength(1));
     expect(sealedOf(send, "agent_finish")[0].plain).toMatchObject({ kind: "text", text: "半" }); // partial 也走信封
+    // fix I2：错误正文也信封化（message 置空 + cipher，code 明文保留）
     const errEv = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_error");
-    expect(errEv).toMatchObject({ type: "agent_error", code: "provider_error" });
+    expect(errEv).toMatchObject({
+      type: "agent_error",
+      code: "provider_error",
+      message: "",
+      chainKid: "test-kid",
+    });
+    expect(typeof (errEv as { cipher: string }).cipher).toBe("string");
     const streamId = (errEv as { streamId: string }).streamId;
 
-    // 服务端按序回声：partial 入库的 message_new → agent_error 广播（同帧转发）
+    // 服务端按序回声：partial 入库的 message_new → agent_error 广播（同帧转发；
+    // 此处推明文形态——服务端自产/旧端路径，密文回声的降级文案见下方专测）
     act(() => {
       lastHandlers().onEvent({
         type: "message_new",
@@ -807,7 +815,14 @@ describe("ChatPage", () => {
       });
     });
     act(() => {
-      lastHandlers().onEvent(errEv);
+      lastHandlers().onEvent({
+        type: "agent_error",
+        conversationId: "c1",
+        agentId: "system-assistant",
+        streamId,
+        code: "provider_error",
+        message: "provider_error: HTTP 401 bad key",
+      });
     });
 
     expect(screen.getByText(/HTTP 401/)).toBeInTheDocument(); // 错误原因行
@@ -846,8 +861,16 @@ describe("ChatPage", () => {
     expect(sealedOf(send, "agent_finish")[0].plain).toMatchObject({ kind: "text", text: "半" });
 
     const errEv = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_error");
+    expect(errEv).toMatchObject({ code: "aborted", message: "" }); // fix I2：message 进密文
     act(() => {
-      lastHandlers().onEvent(errEv); // 本机流回声 → 错误态供重试
+      lastHandlers().onEvent({
+        type: "agent_error",
+        conversationId: "c1",
+        agentId: "system-assistant",
+        streamId: (errEv as { streamId: string }).streamId,
+        code: "aborted",
+        message: "AbortError", // 明文回声（服务端自产/旧端路径）
+      });
     });
     expect(screen.getByText(/AbortError/)).toBeInTheDocument();
     expect(screen.getByText("重试")).toBeInTheDocument();
@@ -2656,6 +2679,101 @@ describe("ChatPage", () => {
     expect(useChatStore.getState().plainById.c1?.["mig-w"]).toMatchObject({ text: "旧明文待重封" });
   });
 
+  it("fix I2：密文 agent_error 回声解不开 → 降级通用文案 + code 保留（原文不显示）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "agent_error",
+        conversationId: "c1",
+        agentId: "system-assistant",
+        streamId: "s-err",
+        code: "provider_error",
+        message: "",
+        cipher: btoa(unescape(encodeURIComponent(JSON.stringify({ kind: "error", text: "供应商把请求片段吐出来了" })))),
+        chainKid: "test-kid",
+        n: 0,
+      });
+    });
+    // 桩 cipher 非真信封：真 openMessage 走缺链 defer → handler 非 ok → 通用降级文案
+    await waitFor(() =>
+      expect(screen.getByText("生成出错（内容无法解密）")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/供应商把请求片段吐出来了/)).not.toBeInTheDocument();
+    expect(useChatStore.getState().streaming["s-err"]).toMatchObject({
+      status: "error",
+      errorMessage: "生成出错（内容无法解密）",
+    });
+  });
+
+  it("硬验收②：他设备的定向 chaindist 经 isForMe 过滤——不入列不占位不报错", async () => {
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 外层带 ek/to 的定向信封（to 指向他人身份指纹）：isForMe → skip
+    const foreign = btoa(
+      JSON.stringify({ v: 1, ek: "BBB", ik: "CCC", to: "someone-else-kid", nonce: "AAA", data: "DDD" }),
+    );
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: {
+          ...msg("dist-x", "", "2026-10-14T01:00:00.000Z"),
+          senderId: "u2",
+          enc: "e2e",
+          cipher: foreign,
+          chainKid: "someone-else-kid",
+          n: 0,
+        },
+      });
+    });
+    await act(async () => {});
+    expect(useChatStore.getState().messages.c1 ?? []).toHaveLength(0); // 不入列
+    expect(useChatStore.getState().pendingE2e.c1 ?? []).toHaveLength(0); // 不挂起
+    expect(screen.queryByText("无法解密（密钥缺失）")).not.toBeInTheDocument(); // 不占位
+  });
+
+  it("硬验收③：同一信封 echo 重放——(chainKid,n) 去重经出站箱/缓存补齐，不重复入列", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "只出一条" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    const plain = await lastSealed(send);
+    expect(plain).toEqual({ kind: "text", text: "只出一条" });
+    const ev = send.mock.calls.at(-1)![0] as { cipher: string; chainKid: string; n: number };
+    const echo = {
+      type: "message_new" as const,
+      message: {
+        ...msg("m-replay", "", "2026-10-14T01:10:00.000Z"),
+        senderId: "u1",
+        enc: "e2e" as const,
+        cipher: ev.cipher,
+        chainKid: ev.chainKid,
+        n: ev.n,
+      },
+    };
+    act(() => {
+      lastHandlers().onEvent(echo);
+    });
+    await waitFor(() => expect(screen.getByText("只出一条")).toBeInTheDocument());
+    act(() => {
+      lastHandlers().onEvent(echo); // 服务端重放同一条信封
+    });
+    await act(async () => {});
+    expect(screen.queryAllByText("只出一条")).toHaveLength(1); // 仍只一条气泡
+    expect(useChatStore.getState().messages.c1).toHaveLength(1);
+  });
+
   it("自己发送的 e2e 消息：echo 走出站箱自解渲染并落明文缓存（自发消息无 recv 链）", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
@@ -2691,6 +2809,47 @@ describe("ChatPage", () => {
       plain: { text?: string };
     }[];
     expect(cached.some((c) => c.plain.text === "自发密文")).toBe(true);
+  });
+});
+
+describe("aggregateChips（fix I4 记忆化聚合）", () => {
+  it("legacy+事件聚合/ remove 生效 / 空集剔除；同引用输入返回同一结果对象（不重复计算）", () => {
+    const target = msg("m1", "求回应", "2026-10-14T01:00:00.000Z"); // senderId u2
+    const legacy: Message = {
+      ...msg("m0", "存量", "2026-10-14T00:59:00.000Z"),
+      payload: { text: "存量", reactions: [{ emoji: "❤️", userIds: ["u2"] }] },
+    };
+    const evAddU1: Message = {
+      ...msg("r1", "", "2026-10-14T01:01:00.000Z"),
+      senderId: "u1",
+      enc: "e2e",
+      cipher: "Qw==",
+      chainKid: "k1",
+      n: 1,
+    };
+    const evAddU2: Message = { ...evAddU1, id: "r2", n: 2, senderId: "u2" };
+    const evRemoveU1: Message = { ...evAddU1, id: "r3", n: 3 };
+    const plainOf = {
+      r1: { kind: "reaction" as const, reaction: { target: "m1", emoji: "👍", op: "add" as const } },
+      r2: { kind: "reaction" as const, reaction: { target: "m1", emoji: "👍", op: "add" as const } },
+      r3: {
+        kind: "reaction" as const,
+        reaction: { target: "m1", emoji: "👍", op: "remove" as const },
+      },
+    };
+    const messages = [legacy, target, evAddU1, evAddU2, evRemoveU1];
+
+    const a = aggregateChips(messages, plainOf);
+    const b = aggregateChips(messages, plainOf);
+    expect(b).toBe(a); // 同引用 → 进程内缓存命中，零重算（I4 断言）
+    // 聚合：m1 的 👍 add u1、add u2、remove u1 → 仅剩 u2；m0 存量 ❤️ 原样
+    expect(a.get("m1")).toEqual([{ emoji: "👍", userIds: ["u2"] }]);
+    expect(a.get("m0")).toEqual([{ emoji: "❤️", userIds: ["u2"] }]);
+
+    // 新数组引用 → 重算，但同内容聚合结果深等（「聚合结果不变」）
+    const c = aggregateChips([...messages], plainOf);
+    expect(c).not.toBe(a);
+    expect(c.get("m1")).toEqual(a.get("m1"));
   });
 });
 

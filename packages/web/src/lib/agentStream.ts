@@ -32,7 +32,19 @@ export interface TriggerDeps {
   sealFinish?: (
     text: string,
   ) => Promise<{ cipher: string; chainKid?: string; n?: number } | null | undefined>;
+  /**
+   * E2E 错误封条（fix I2）：agent_error 的正文可回显供应商请求片段 → 同款信封
+   * （message 置空、全文进 cipher，AAD 由接线层按 errorAad(convId, streamId) 绑定）。
+   * 加密失败（抛错/null）→ 回退通用明文文案（不含原文），绝不发明文错误正文。
+   */
+  sealError?: (
+    streamId: string,
+    message: string,
+  ) => Promise<{ cipher: string; chainKid?: string; n?: number } | null | undefined>;
 }
+
+/** 错误信封加密失败时的通用回退文案（不含错误原文；chat store 降级口径同其 E2E_ERROR_FALLBACK）。 */
+export const GENERIC_SEAL_FALLBACK = "生成出错（内容无法解密）";
 
 /** 一次触发的句柄：中断按钮调用后，进行中的各流 abort → catch 走 finish-partial + agent_error(aborted)。 */
 export interface AgentRunHandle {
@@ -75,16 +87,51 @@ export function runAgentMentions(
       mentions.map(async (m) => {
         const streamId = newStreamId();
         deps.onStart?.(streamId, m);
-        const profile = deps.getProfile(m.agentId);
-        if (!profile) {
-          deps.send({
-            type: "agent_error",
+        // E2E 串行闸与错误上行（fix I2）——先于 profile 判定定义：无绑定分支也要发信封错误
+        let idx = 0;
+        // 片/错误上行串行闸：seal 读写会话链文件跨 await 交错会撞 n（同 n 密文被收端去重
+        // 误杀），乱序上行还会让收端 index 与发送序错位——依次过闸再 send。
+        let sealTail: Promise<void> = Promise.resolve();
+        const enqueue = (job: () => Promise<void>) => {
+          sealTail = sealTail.then(job, job);
+        };
+        /** 错误上行：注入 sealError → message 置空带信封；封失败只发通用文案（不发明文原文）。 */
+        const sendError = async (code: string, message: string) => {
+          const base = {
+            type: "agent_error" as const,
             conversationId,
             agentId: m.agentId,
             streamId,
-            code: "provider_error",
-            message: "未绑定 LLM 连接",
+            code,
+          };
+          if (!deps.sealError) {
+            deps.send({ ...base, message }); // legacy 明文路径（测试/未注入）
+            return;
+          }
+          await enqueue(async () => {
+            let sealed: Awaited<ReturnType<NonNullable<TriggerDeps["sealError"]>>> = null;
+            try {
+              sealed = await deps.sealError!(streamId, message);
+            } catch {
+              sealed = null;
+            }
+            if (sealed) {
+              deps.send({
+                ...base,
+                message: "",
+                cipher: sealed.cipher,
+                ...(sealed.chainKid !== undefined ? { chainKid: sealed.chainKid } : {}),
+                ...(sealed.n !== undefined ? { n: sealed.n } : {}),
+              });
+            } else {
+              deps.send({ ...base, message: GENERIC_SEAL_FALLBACK }); // 无敏感正文，code 保留
+            }
           });
+          await sealTail;
+        };
+        const profile = deps.getProfile(m.agentId);
+        if (!profile) {
+          await sendError("provider_error", "未绑定 LLM 连接");
           return;
         }
         const messages = [...history, { role: "user" as const, content: userText }];
@@ -94,13 +141,6 @@ export function runAgentMentions(
         controllers.add(controller);
         if (aborted) controller.abort(); // fetchHistory 期间已按中断：启动即中止
         let acc = "";
-        let idx = 0;
-        // E2E 片上行串行闸：seal 读写会话链文件跨 await 交错会撞 n（同 n 密文被收端去重
-        // 误杀），乱序上行还会让收端 index 与发送序错位——片与 finish 依次过闸再 send。
-        let sealTail: Promise<void> = Promise.resolve();
-        const enqueue = (job: () => Promise<void>) => {
-          sealTail = sealTail.then(job, job);
-        };
         const sealChunkHook = deps.sealChunk;
         /** finish 上行：注入 sealFinish → 信封（text 置空）；加密失败返回 false（调用方收口）。 */
         const sendFinish = async (text: string): Promise<boolean> => {
@@ -167,14 +207,7 @@ export function runAgentMentions(
           });
           await sealTail; // 片全部落闸后再 finish（同一发送链推进有序）
           if (!(await sendFinish(acc))) {
-            deps.send({
-              type: "agent_error",
-              conversationId,
-              agentId: m.agentId,
-              streamId,
-              code: "bad_event",
-              message: "端到端加密失败，回复未发送",
-            });
+            await sendError("bad_event", "端到端加密失败，回复未发送");
           }
         } catch (e) {
           const err = e as Error;
@@ -182,14 +215,7 @@ export function runAgentMentions(
           // finish-partial：服务端拒空文本（F2），acc 为空则只报 error；
           // 加密失败时 sendFinish 返回 false——仍走下方 error 收口（明文不外发）
           if (acc) await sendFinish(acc);
-          deps.send({
-            type: "agent_error",
-            conversationId,
-            agentId: m.agentId,
-            streamId,
-            code: err.name === "AbortError" ? "aborted" : "provider_error",
-            message: err.message.slice(0, 300),
-          });
+          await sendError(err.name === "AbortError" ? "aborted" : "provider_error", err.message.slice(0, 300));
         } finally {
           controllers.delete(controller);
         }

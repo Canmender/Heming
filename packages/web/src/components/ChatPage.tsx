@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, Message } from "@heming/shared";
 import { useChatStore, type E2eOpenHandler, type E2eOpenOutcome } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
@@ -21,6 +21,7 @@ import {
   sweepDeferred,
   recvChainOwners,
   chunkAad,
+  errorAad,
   exportOwnDeviceKeys,
   type E2eDeps,
   type PlainEnvelope,
@@ -41,6 +42,73 @@ export const NO_E2E_NOTICE = "当前环境不支持端到端加密，请使用�
 
 /** chips 空表的稳定引用（selector 兜底，防每次渲染新建 {} 触发多余重渲染）。 */
 const NO_PLAIN: Record<string, PlainEnvelope> = {};
+
+/** 单条消息的回应 chip（emoji + 参与 userIds）。 */
+export type ReactionChip = { emoji: string; userIds: string[] };
+
+/** aggregateChips 结果里「无 chips」的稳定空表。 */
+const NO_CHIPS: ReactionChip[] = [];
+
+/** 进程内聚合缓存（fix I4）：同 (messages, plainOf) 引用 → 返回同一结果对象（可断言「不重复计算」）。 */
+let chipAggCache: {
+  messages: Message[];
+  plainOf: Record<string, PlainEnvelope>;
+  result: Map<string, ReactionChip[]>;
+} | null = null;
+
+/**
+ * 聚合各消息的回应 chips（fix I4：原每渲染对每条消息全量扫 reaction 消息 = O(n²)）：
+ * 存量 payload.reactions 打底，再按消息序叠加解密出的 kind=reaction 事件（add 进/remove 出），
+ * 空集条目剔除。同引用输入命中进程内缓存；渲染层经 useMemo 只在 messages/plainOf 变化时调用。
+ */
+export function aggregateChips(
+  messages: Message[],
+  plainOf: Record<string, PlainEnvelope>,
+): Map<string, ReactionChip[]> {
+  if (chipAggCache && chipAggCache.messages === messages && chipAggCache.plainOf === plainOf) {
+    return chipAggCache.result;
+  }
+  const acc = new Map<string, Map<string, Set<string>>>();
+  const bucket = (msgId: string, emoji: string): Set<string> => {
+    let byEmoji = acc.get(msgId);
+    if (!byEmoji) {
+      byEmoji = new Map();
+      acc.set(msgId, byEmoji);
+    }
+    let set = byEmoji.get(emoji);
+    if (!set) {
+      set = new Set();
+      byEmoji.set(emoji, set);
+    }
+    return set;
+  };
+  // 存量（服务端 toggle 时代）打底
+  for (const m of messages) {
+    for (const r of m.payload.reactions ?? []) {
+      const set = bucket(m.id, r.emoji);
+      for (const uid of r.userIds) set.add(uid);
+    }
+  }
+  // 解密出的 reaction 事件按消息序叠加
+  for (const ev of messages) {
+    if (ev.recalledAt != null || ev.enc !== "e2e") continue;
+    const p = plainOf[ev.id];
+    if (p?.kind !== "reaction" || !p.reaction) continue;
+    const set = bucket(p.reaction.target, p.reaction.emoji);
+    if (p.reaction.op === "add") set.add(ev.senderId);
+    else set.delete(ev.senderId);
+  }
+  const result = new Map<string, ReactionChip[]>();
+  for (const [msgId, byEmoji] of acc) {
+    const chips: ReactionChip[] = [];
+    for (const [emoji, set] of byEmoji) {
+      if (set.size > 0) chips.push({ emoji, userIds: [...set] });
+    }
+    if (chips.length) result.set(msgId, chips);
+  }
+  chipAggCache = { messages, plainOf, result };
+  return result;
+}
 
 /**
  * E2E 公钥短缓存：seal 内逐成员调 fetchPeerKeys，不缓存会让一次 seal 打 N 次
@@ -336,7 +404,13 @@ export function ChatPage() {
       }
       try {
         const opts = ctx
-          ? { aad: chunkAad(conv, ctx.streamId, ctx.index), noDefer: true }
+          ? {
+              aad:
+                ctx.kind === "error"
+                  ? errorAad(conv, ctx.streamId) // fix I2：错误信封独立 AAD 命名空间
+                  : chunkAad(conv, ctx.streamId, ctx.index ?? 0),
+              noDefer: true,
+            }
           : undefined;
         const r = await openMessage(
           { id: conv, memberIdOf: (kid) => recvChainOwners(conv)[kid] },
@@ -473,27 +547,9 @@ export function ChatPage() {
   const visibleMessages = messages.filter(
     (m) => !(m.enc === "e2e" && plainOf[m.id]?.kind === "reaction"),
   );
-  /**
-   * 目标消息的回应 chips：存量 payload.reactions（服务端 toggle 时代）打底，
-   * 再按消息序叠加解密出的 kind=reaction 事件（add 进 / remove 出）；
-   * 空集条目剔除（remove 后无人参与的 emoji 不留死 chip）。
-   */
-  const chipsFor = (m: Message): { emoji: string; userIds: string[] }[] => {
-    const map = new Map<string, Set<string>>();
-    for (const r of m.payload.reactions ?? []) map.set(r.emoji, new Set(r.userIds));
-    for (const ev of messages) {
-      if (ev.recalledAt != null || ev.enc !== "e2e") continue;
-      const p = plainOf[ev.id];
-      if (p?.kind !== "reaction" || !p.reaction || p.reaction.target !== m.id) continue;
-      const set = map.get(p.reaction.emoji) ?? new Set<string>();
-      if (p.reaction.op === "add") set.add(ev.senderId);
-      else set.delete(ev.senderId);
-      map.set(p.reaction.emoji, set);
-    }
-    return [...map.entries()]
-      .filter(([, s]) => s.size > 0)
-      .map(([emoji, s]) => ({ emoji, userIds: [...s] }));
-  };
+  // 回应 chips 聚合（fix I4）：useMemo 按 messages/plainOf 引用单次聚合——
+  // 原实现每渲染对每条消息全量扫 reaction 事件（O(n²)）
+  const chipsByMsgId = useMemo(() => aggregateChips(messages, plainOf), [messages, plainOf]);
 
   /**
    * 启动一次 mention 触发（发送成功 / 错误行重试共用）：
@@ -557,6 +613,18 @@ export function ChatPage() {
         if (ev.chainKid !== undefined && ev.n !== undefined) {
           outboxRef.current.set(`${ev.chainKid}:${ev.n}`, plain);
         }
+        return { cipher: ev.cipher, chainKid: ev.chainKid, n: ev.n };
+      },
+      // E2E 错误封条（fix I2）：错误正文（可回显供应商请求片段）同款信封上行
+      sealError: async (streamId, message) => {
+        const members = await resolveMembers(convId);
+        const ev = await sealMessage(
+          { id: convId, members },
+          { kind: "error", text: message },
+          e2eDeps(),
+          { aad: errorAad(convId, streamId) },
+        );
+        if (ev.type !== "send_message" || !ev.cipher) return null;
         return { cipher: ev.cipher, chainKid: ev.chainKid, n: ev.n };
       },
       onLocalDelta: (streamId, acc) => {
@@ -1226,8 +1294,8 @@ export function ChatPage() {
           const quoted = m.replyTo
             ? messages.find((x) => x.id === m.replyTo && x.recalledAt == null)
             : undefined;
-          // 回应 chips（存量 payload.reactions + 解密出的 reaction 事件聚合）
-          const chips = chipsFor(m);
+          // 回应 chips（存量 payload.reactions + 解密出的 reaction 事件聚合，记忆化）
+          const chips = chipsByMsgId.get(m.id) ?? NO_CHIPS;
           return (
             <div
               key={m.id}
