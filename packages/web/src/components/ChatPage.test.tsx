@@ -29,6 +29,7 @@ const msg = (id: string, text: string, createdAt: string): Message => ({
   replyTo: null,
   createdAt,
   recalledAt: null,
+  enc: "plain",
 });
 
 function jsonRes(body: unknown, status = 200): Response {

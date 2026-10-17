@@ -743,3 +743,147 @@ describe("conversation agents attach/detach（M3 I2：自建智能体入群）",
     expect((members.body as { id: string }[]).some((m) => m.id === agentId)).toBe(false);
   });
 });
+
+// —— E2E Task 2：公钥分发（设计 §3.1）——
+
+describe("e2e keys API", () => {
+  let app: App;
+  beforeEach(() => {
+    app = createApp(createMemoryStore(), { allowRegister: true });
+  });
+
+  const deviceA = {
+    ikEcdh: "QUlLRUNESAAAA",
+    ikSign: "QVNJR05LSVlJTkAAAAAAAAAAAAAAAAAA",
+    spk: { pub: "U1BLUFVC", sig: "U1BTSVc", createdAt: 1760659200000 },
+  };
+
+  it("PUT 登记本人设备 → GET 全量往返（双公钥 + spk；无 opks 字段）", async () => {
+    const a = await register(app, "alice");
+    const put = await request(app)
+      .put("/api/e2e/keys")
+      .set("Authorization", `Bearer ${a.token}`)
+      .send(deviceA);
+    expect(put.status).toBe(204);
+
+    const got = await request(app).get("/api/e2e/keys").set("Authorization", `Bearer ${a.token}`);
+    expect(got.status).toBe(200);
+    expect(got.body[a.user.id]).toEqual([deviceA]);
+    expect(got.body[a.user.id][0]).not.toHaveProperty("opks");
+  });
+
+  it("仅登记本人：body 夹 userId 被剥除不冒写；同设备再 PUT 覆盖（SPK 轮换）", async () => {
+    const a = await register(app, "alice");
+    const b = await register(app, "bob");
+    const devA = { ...deviceA };
+    const devB = {
+      ikEcdh: "Qk9CIExLTAAAA",
+      ikSign: "Qk9CU0lHTgAAAAAAAAAAAAAAAAAA",
+      spk: { pub: "Qk9CU1BL", sig: "Qk9CU1BJ", createdAt: 1760660000000 },
+    };
+    await request(app).put("/api/e2e/keys").set("Authorization", `Bearer ${a.token}`).send(devA).expect(204);
+
+    // b 冒写：body 夹 userId=a.id → Zod 剥掉未知键，仍只登记到 b 名下
+    const putB = await request(app)
+      .put("/api/e2e/keys")
+      .set("Authorization", `Bearer ${b.token}`)
+      .send({ ...devB, userId: a.user.id });
+    expect(putB.status).toBe(204);
+
+    // a 的同设备换 SPK 再登记 → 覆盖（条目数不变）
+    const rotated = { ...devA, spk: { pub: "U1BLUFVCMg==", sig: "U1BTSVcy", createdAt: 1760661000000 } };
+    await request(app).put("/api/e2e/keys").set("Authorization", `Bearer ${a.token}`).send(rotated).expect(204);
+
+    const got = await request(app).get("/api/e2e/keys").set("Authorization", `Bearer ${b.token}`);
+    expect(got.body[a.user.id]).toEqual([rotated]); // 未被 b 冒写；覆盖生效
+    expect(got.body[b.user.id]).toEqual([devB]); // userId 剥除后恒等
+  });
+
+  it("未登录 GET/PUT 401；非法 body 400；空库 GET → {}", async () => {
+    const a = await register(app, "alice");
+    expect((await request(app).get("/api/e2e/keys")).status).toBe(401);
+    expect((await request(app).put("/api/e2e/keys").send(deviceA)).status).toBe(401);
+
+    const empty = await request(app).get("/api/e2e/keys").set("Authorization", `Bearer ${a.token}`);
+    expect(empty.body).toEqual({});
+
+    const badCases: unknown[] = [
+      {},
+      { ikEcdh: "", ikSign: "x", spk: { pub: "p", sig: "s", createdAt: 1 } }, // 空公钥
+      { ikEcdh: "A".repeat(513), ikSign: "x", spk: { pub: "p", sig: "s", createdAt: 1 } }, // 超长 base64
+      { ikEcdh: "a", ikSign: "b" }, // 缺 spk
+      { ikEcdh: "a", ikSign: "b", spk: { pub: "p", sig: "s", createdAt: -1 } }, // createdAt 负数
+    ];
+    for (const body of badCases) {
+      const res = await request(app)
+        .put("/api/e2e/keys")
+        .set("Authorization", `Bearer ${a.token}`)
+        .send(body as object);
+      expect(res.status).toBe(400);
+    }
+  });
+});
+
+// —— E2E Task 2：明文消息重加密（设计 §7；403/409/404/400 语义）——
+
+describe("PUT /api/messages/:id/reencrypt", () => {
+  let store: ReturnType<typeof createMemoryStore>;
+  let app: App;
+  let a: { token: string; user: { id: string; username: string } };
+  let b: { token: string; user: { id: string; username: string } };
+  let convId: string;
+  let msgId: string;
+
+  beforeEach(async () => {
+    store = createMemoryStore();
+    app = createApp(store, { allowRegister: true });
+    a = await register(app, "alice");
+    b = await register(app, "bob");
+    store.acceptFriendRequest(store.createFriendRequest(a.user.id, "bob").id, b.user.id);
+    convId = store.createDirectConversation(a.user.id, b.user.id).id;
+    msgId = store.addMessage(convId, "user", a.user.id, { text: "旧明文" }, null).id;
+  });
+
+  const env = { enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 5 };
+  const put = (token: string, id: string, body: object) =>
+    request(app).put(`/api/messages/${id}/reencrypt`).set("Authorization", `Bearer ${token}`).send(body);
+
+  it("本人 plain → 200 换信封并可回读；再 PUT → 409", async () => {
+    const ok = await put(a.token, msgId, env);
+    expect(ok.status).toBe(200);
+    expect(ok.body).toMatchObject({
+      id: msgId,
+      enc: "e2e",
+      cipher: "Q2lwaGVy",
+      chainKid: "kid1",
+      n: 5,
+    });
+
+    const msgs = await request(app)
+      .get(`/api/conversations/${convId}/messages`)
+      .set("Authorization", `Bearer ${a.token}`);
+    expect(msgs.body[0]).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 5 });
+
+    const again = await put(a.token, msgId, env);
+    expect(again.status).toBe(409);
+  });
+
+  it("非 sender → 403；消息不存在 → 404；未登录 → 401", async () => {
+    // b 是会话成员但非 sender → 403（权限只看本人）
+    expect((await put(b.token, msgId, env)).status).toBe(403);
+    expect((await put(a.token, "no-such-id", env)).status).toBe(404);
+    const anon = await request(app)
+      .put(`/api/messages/${msgId}/reencrypt`)
+      .send(env);
+    expect(anon.status).toBe(401);
+    // 403 后消息仍是 plain（未被部分修改）
+    expect(store.listMessages(convId)[0].enc).toBe("plain");
+  });
+
+  it("body 非法 → 400（enc=plain / 空 cipher / 缺字段）", async () => {
+    expect((await put(a.token, msgId, { enc: "plain", cipher: "Q2lwaGVy" })).status).toBe(400);
+    expect((await put(a.token, msgId, { enc: "e2e", cipher: "" })).status).toBe(400);
+    expect((await put(a.token, msgId, {})).status).toBe(400);
+    expect(store.listMessages(convId)[0].enc).toBe("plain"); // 校验失败不改库
+  });
+});

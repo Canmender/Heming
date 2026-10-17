@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import type { Conversation, Message } from "@heming/shared";
+import type { Conversation, Message, WsClientEvent } from "@heming/shared";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -1010,12 +1010,14 @@ export function ChatPage() {
                               }`}
                               onClick={() => {
                                 if (!involvesMe) return; // 只有自己参与的才能点掉（他人 chip 仅展示）
+                                // 过渡 cast：react_message 已从 shared 契约移除（E2E Task 2），
+                                // 服务端回 bad_event 忽略；Task 4 把回应改为 e2e reaction 事件后删除本调用。
                                 wsHandleRef.current?.send({
                                   type: "react_message",
                                   conversationId: convId,
                                   messageId: m.id,
                                   emoji: r.emoji,
-                                });
+                                } as unknown as WsClientEvent);
                               }}
                             >
                               {r.emoji} {r.userIds.length}
@@ -1095,12 +1097,13 @@ export function ChatPage() {
                         type="button"
                         className="rounded px-0.5 text-[15px] leading-none hover:bg-[#f3f3f3]"
                         onClick={() => {
+                          // 过渡 cast 同上（E2E Task 2 → Task 4 回应事件化后删除）
                           wsHandleRef.current?.send({
                             type: "react_message",
                             conversationId: convId,
                             messageId: m.id,
                             emoji: e,
-                          });
+                          } as unknown as WsClientEvent);
                           setReactFor(null);
                         }}
                       >

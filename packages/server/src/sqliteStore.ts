@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { User, Message, Conversation, Member, ReadState, Agent, SharedFileMeta } from "@heming/shared";
+import type { User, Message, Conversation, Member, ReadState, Agent, SharedFileMeta, MessageEnvelope, E2eDeviceKeys } from "@heming/shared";
 import type { Store } from "./store.js";
 import { SYSTEM_AGENTS } from "./store.js";
 import { openDb } from "./db.js";
@@ -30,6 +30,11 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     reply_to: string | null;
     created_at: string;
     recalled_at?: string | null;
+    // E2E 信封列（Task 2）：enc 迁移列恒有（DEFAULT 'plain'）；cipher/chain_kid/n 可空
+    enc?: string | null;
+    cipher?: string | null;
+    chain_kid?: string | null;
+    n?: number | null;
   }): Message {
     return {
       id: r.id,
@@ -41,6 +46,11 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       createdAt: r.created_at,
       // 老库迁移来的行 recalled_at 为 NULL → 恒有字段按 null 出
       recalledAt: r.recalled_at ?? null,
+      // enc 迁移列 NOT NULL DEFAULT 'plain'：老行回读恒 plain；信封可空列 → 缺省不带键
+      enc: (r.enc as "plain" | "e2e" | null | undefined) ?? "plain",
+      ...(r.cipher != null ? { cipher: r.cipher } : {}),
+      ...(r.chain_kid != null ? { chainKid: r.chain_kid } : {}),
+      ...(r.n != null ? { n: Number(r.n) } : {}),
     };
   }
 
@@ -200,7 +210,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         .get(conversationId, userId);
       return !!row;
     },
-    addMessage(conversationId, senderType, senderId, payload, replyTo) {
+    addMessage(conversationId, senderType, senderId, payload, replyTo, envelope) {
       const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
       if (!conv) throw new Error("conversation not found");
       const msg: Message = {
@@ -212,10 +222,28 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         replyTo,
         createdAt: new Date().toISOString(),
         recalledAt: null,
+        // 信封（E2E Task 2）：省略 envelope → plain；列值与回读映射同口径
+        enc: envelope?.enc ?? "plain",
+        ...(envelope?.cipher !== undefined ? { cipher: envelope.cipher } : {}),
+        ...(envelope?.chainKid !== undefined ? { chainKid: envelope.chainKid } : {}),
+        ...(envelope?.n !== undefined ? { n: envelope.n } : {}),
       };
       db.prepare(
-        "INSERT INTO messages (id, conv_id, sender_type, sender_id, payload, reply_to, created_at, recalled_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
-      ).run(msg.id, conversationId, senderType, senderId, JSON.stringify(payload), replyTo, msg.createdAt);
+        `INSERT INTO messages (id, conv_id, sender_type, sender_id, payload, reply_to, created_at, recalled_at, enc, cipher, chain_kid, n)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+      ).run(
+        msg.id,
+        conversationId,
+        senderType,
+        senderId,
+        JSON.stringify(payload),
+        replyTo,
+        msg.createdAt,
+        msg.enc,
+        envelope?.cipher ?? null,
+        envelope?.chainKid ?? null,
+        envelope?.n ?? null,
+      );
       return msg;
     },
     listMessages(conversationId, limit) {
@@ -273,6 +301,64 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         | Parameters<typeof rowToMessage>[0]
         | undefined;
       return back ? rowToMessage(back) : null;
+    },
+    reencryptMessage(messageId, userId, envelope) {
+      // 单条件 UPDATE 完成鉴权与写入（sender + enc='plain'）→ 原子替换信封四字段；
+      // changes=0 时回读分类三态（sender 先于 enc 判，与内存实现同优先级）。
+      const res = db
+        .prepare(
+          `UPDATE messages SET enc = 'e2e', cipher = ?, chain_kid = ?, n = ?
+           WHERE id = ? AND sender_id = ? AND enc = 'plain'`,
+        )
+        .run(envelope.cipher, envelope.chainKid ?? null, envelope.n ?? null, messageId, userId);
+      if (res.changes > 0) {
+        const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as
+          | Parameters<typeof rowToMessage>[0]
+          | undefined;
+        if (row) return { ok: true, message: rowToMessage(row) };
+        return { ok: false, reason: "not_found" }; // 刚更新成功却回读缺失：理论不可达，兜底
+      }
+      const row = db.prepare("SELECT sender_id, enc FROM messages WHERE id = ?").get(messageId) as
+        | { sender_id: string; enc: string }
+        | undefined;
+      if (!row) return { ok: false, reason: "not_found" };
+      if (row.sender_id !== userId) return { ok: false, reason: "forbidden" };
+      return { ok: false, reason: "conflict" };
+    },
+    upsertE2eDevice(userId, device) {
+      // (user_id, ik_ecdh) 主键冲突 → 覆盖（SPK 轮换）；UPDATE 不动 rowid → 设备序保持
+      db.prepare(
+        `INSERT INTO e2e_keys (user_id, ik_ecdh, ik_sign, spk_pub, spk_sig, spk_created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, ik_ecdh) DO UPDATE SET
+           ik_sign = excluded.ik_sign, spk_pub = excluded.spk_pub,
+           spk_sig = excluded.spk_sig, spk_created_at = excluded.spk_created_at`,
+      ).run(userId, device.ikEcdh, device.ikSign, device.spk.pub, device.spk.sig, device.spk.createdAt);
+    },
+    listE2eKeys() {
+      // rowid 序 = 登记序（同内存 Map 插入序口径；冲突 UPDATE 保留原 rowid）
+      const rows = db
+        .prepare(
+          `SELECT user_id, ik_ecdh, ik_sign, spk_pub, spk_sig, spk_created_at
+           FROM e2e_keys ORDER BY rowid`,
+        )
+        .all() as {
+        user_id: string;
+        ik_ecdh: string;
+        ik_sign: string;
+        spk_pub: string;
+        spk_sig: string;
+        spk_created_at: number;
+      }[];
+      const out: Record<string, E2eDeviceKeys[]> = {};
+      for (const r of rows) {
+        (out[r.user_id] ??= []).push({
+          ikEcdh: r.ik_ecdh,
+          ikSign: r.ik_sign,
+          spk: { pub: r.spk_pub, sig: r.spk_sig, createdAt: Number(r.spk_created_at) },
+        });
+      }
+      return out;
     },
     listConversations(userId) {
       const convs = db

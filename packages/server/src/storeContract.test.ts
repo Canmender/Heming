@@ -384,5 +384,128 @@ for (const f of factories) {
         expect(store.deleteFile("nope")).toBe(false);
       });
     });
+
+    // —— E2E Task 2：信封落库、明文重加密、公钥登记（memory/sqlite 双实现同语义）——
+
+    describe("e2e envelope", () => {
+      it("addMessage 信封参数：e2e 落 cipher/chainKid/n 并经 listMessages 回读；省略 envelope 缺省 plain", () => {
+        const a = store.createUser("e1", "h", "甲");
+        const g = store.createGroup(a.id, "信封群", []);
+        const e2e = store.addMessage(g.id, "user", a.id, { text: "" }, null, {
+          enc: "e2e",
+          cipher: "Q2lwaGVy",
+          chainKid: "kid1",
+          n: 7,
+        });
+        expect(e2e.enc).toBe("e2e");
+        expect(e2e.cipher).toBe("Q2lwaGVy");
+        expect(e2e.chainKid).toBe("kid1");
+        expect(e2e.n).toBe(7);
+
+        const plain = store.addMessage(g.id, "user", a.id, { text: "旧明文" }, null);
+        expect(plain.enc).toBe("plain");
+        expect(plain.cipher).toBeUndefined();
+        expect(plain.chainKid).toBeUndefined();
+        expect(plain.n).toBeUndefined();
+
+        const back = store.listMessages(g.id);
+        expect(back.find((m) => m.id === e2e.id)).toMatchObject({
+          enc: "e2e",
+          cipher: "Q2lwaGVy",
+          chainKid: "kid1",
+          n: 7,
+        });
+        expect(back.find((m) => m.id === plain.id)).toMatchObject({ enc: "plain" });
+        expect(back.find((m) => m.id === plain.id)?.cipher).toBeUndefined();
+      });
+
+      it("reencryptMessage 三态：本人 plain 成功换信封；非本人 forbidden；已 e2e conflict；不存在 not_found", () => {
+        const a = store.createUser("rr1", "h", "甲");
+        const b = store.createUser("rr2", "h", "乙");
+        befriend(a.id, "rr2", b.id);
+        const conv = store.createDirectConversation(a.id, b.id);
+        const m = store.addMessage(conv.id, "user", a.id, { text: "旧明文" }, null);
+
+        expect(store.reencryptMessage("ghost", a.id, { cipher: "Qw==" })).toEqual({
+          ok: false,
+          reason: "not_found",
+        });
+        // b 是会话成员但非 sender → forbidden（权限只看 senderId）
+        expect(store.reencryptMessage(m.id, b.id, { cipher: "Qw==" })).toEqual({
+          ok: false,
+          reason: "forbidden",
+        });
+
+        const ok = store.reencryptMessage(m.id, a.id, { cipher: "Q2lwaGVy", chainKid: "kid1", n: 2 });
+        expect(ok.ok).toBe(true);
+        if (ok.ok) {
+          // 原子替换仅信封四字段（enc/cipher/chain_kid/n——裁定口径）
+          expect(ok.message).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 2 });
+        }
+        // 二次重封 → conflict；持久化回读
+        expect(store.reencryptMessage(m.id, a.id, { cipher: "Qw==" })).toEqual({
+          ok: false,
+          reason: "conflict",
+        });
+        expect(store.listMessages(conv.id)[0]).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy" });
+      });
+
+      it("reencryptMessage 对非 plain 初始消息（直接 e2e 入库）→ conflict", () => {
+        const a = store.createUser("rr3", "h", "甲");
+        const g = store.createGroup(a.id, "重封群", []);
+        const m = store.addMessage(g.id, "user", a.id, { text: "" }, null, {
+          enc: "e2e",
+          cipher: "AAA",
+        });
+        expect(store.reencryptMessage(m.id, a.id, { cipher: "BBB" })).toEqual({
+          ok: false,
+          reason: "conflict",
+        });
+      });
+    });
+
+    describe("e2e keys", () => {
+      it("upsertE2eDevice 按 ikEcdh upsert（SPK 轮换覆盖）；listE2eKeys 聚合多用户", () => {
+        const a = store.createUser("k1", "h", "甲");
+        const b = store.createUser("k2", "h", "乙");
+        const dev1 = {
+          ikEcdh: "AAAA",
+          ikSign: "BBBB",
+          spk: { pub: "CCCC", sig: "DDDD", createdAt: 1000 },
+        };
+        store.upsertE2eDevice(a.id, dev1);
+        // 同设备再登记（SPK 轮换）：不增行、覆盖字段
+        store.upsertE2eDevice(a.id, { ...dev1, spk: { pub: "EEEE", sig: "FFFF", createdAt: 2000 } });
+        // 第二台设备
+        store.upsertE2eDevice(a.id, {
+          ikEcdh: "GGGG",
+          ikSign: "HHHH",
+          spk: { pub: "IIII", sig: "JJJJ", createdAt: 3000 },
+        });
+        store.upsertE2eDevice(b.id, {
+          ikEcdh: "KKKK",
+          ikSign: "LLLL",
+          spk: { pub: "MMMM", sig: "NNNN", createdAt: 4000 },
+        });
+
+        const all = store.listE2eKeys();
+        expect(all[a.id]).toHaveLength(2);
+        expect(all[a.id].find((d) => d.ikEcdh === "AAAA")).toEqual({
+          ikEcdh: "AAAA",
+          ikSign: "BBBB",
+          spk: { pub: "EEEE", sig: "FFFF", createdAt: 2000 },
+        });
+        expect(all[a.id].find((d) => d.ikEcdh === "GGGG")).toMatchObject({ ikSign: "HHHH" });
+        expect(all[b.id]).toEqual([
+          { ikEcdh: "KKKK", ikSign: "LLLL", spk: { pub: "MMMM", sig: "NNNN", createdAt: 4000 } },
+        ]);
+        // 未登记用户不出现
+        expect(all).not.toHaveProperty("ghost");
+      });
+
+      it("listE2eKeys 未登记时为空对象", () => {
+        expect(store.listE2eKeys()).toEqual({});
+      });
+    });
   });
 }

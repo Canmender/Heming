@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { User, Message, Conversation, Member, ReadState, Agent, SharedFileMeta } from "@heming/shared";
+import type { User, Message, Conversation, Member, ReadState, Agent, SharedFileMeta, MessageEnvelope, E2eDeviceKeys } from "@heming/shared";
 
 export interface FriendshipRequest {
   id: string;
@@ -7,6 +7,11 @@ export interface FriendshipRequest {
   toId: string;
   status: "pending" | "accepted";
 }
+
+/** reencryptMessage 结果：ok 携更新后消息；否则三态 reason（app 层映射 404/403/409）。 */
+export type ReencryptResult =
+  | { ok: true; message: Message }
+  | { ok: false; reason: "not_found" | "forbidden" | "conflict" };
 
 /**
  * 系统预设 agent 元数据单一真源：内存注册表与 sqlite agents 表 upsert 共用，
@@ -38,6 +43,7 @@ export interface Store {
     senderId: string,
     payload: { text: string },
     replyTo: string | null,
+    envelope?: MessageEnvelope,
   ): Message;
   listMessages(conversationId: string, limit?: number): Message[];
   /**
@@ -52,6 +58,25 @@ export interface Store {
    * 回应自己/他人消息均可（不限制 sender）。
    */
   reactMessage(conversationId: string, messageId: string, userId: string, emoji: string): Message | null;
+  /**
+   * 明文重加密（E2E Task 2，设计 §7）：按 messageId 定位，仅当 sender=userId 且当前
+   * enc="plain" 时**原子**替换信封四字段（enc/cipher/chain_kid/n）——payload 不动
+   * （裁定口径：只换信封字段）。三态：
+   *   消息不存在 → not_found；senderId≠userId → forbidden（只看本人，不看成员身份）；
+   *   enc≠"plain"（已 e2e）→ conflict；成功 → ok + 更新后消息。
+   */
+  reencryptMessage(
+    messageId: string,
+    userId: string,
+    envelope: { cipher: string; chainKid?: string; n?: number },
+  ): ReencryptResult;
+  /**
+   * 登记本人设备公钥（E2E Task 2）：按 (userId, ikEcdh) upsert——同设备再登记覆盖
+   * （SPK 轮换），新 ikEcdh 追加设备。userId 恒来自登录态，不做用户存在性校验。
+   */
+  upsertE2eDevice(userId: string, device: E2eDeviceKeys): void;
+  /** 全部已登记设备公钥 { [userId]: devices[] }（GET /api/e2e/keys，登录可读）。 */
+  listE2eKeys(): Record<string, E2eDeviceKeys[]>;
   /**
    * 建群（用户自建）：creator 自动入群；除 creator 外的每个 memberIds 必须与 creator
    * 是**已接受好友**关系，否则抛 "not friends"（对齐 createDirectConversation 口径）。
@@ -125,6 +150,8 @@ export function createMemoryStore(): Store {
   const agents = new Map<string, Agent>();
   // 共享文件（M4：app.ts 闭包 Map 迁入 Store——与 users/messages 同层的 store 实例级资源）
   const files = new Map<string, { meta: SharedFileMeta; contentBase64: string }>();
+  // E2E 设备公钥（Task 2）：userId →（ikEcdh → 设备公钥包）；Map 插入序即登记序
+  const e2eKeys = new Map<string, Map<string, E2eDeviceKeys>>();
 
   const mustUser = (id: string): User => {
     const row = users.get(id);
@@ -241,7 +268,7 @@ export function createMemoryStore(): Store {
     isMember(conversationId, userId) {
       return conversations.get(conversationId)?.members.includes(userId) ?? false;
     },
-    addMessage(conversationId, senderType, senderId, payload, replyTo) {
+    addMessage(conversationId, senderType, senderId, payload, replyTo, envelope) {
       if (!conversations.has(conversationId)) throw new Error("conversation not found");
       const msg: Message = {
         id: randomUUID(),
@@ -252,6 +279,11 @@ export function createMemoryStore(): Store {
         replyTo,
         createdAt: new Date().toISOString(),
         recalledAt: null,
+        // 信封（E2E Task 2）：省略 envelope → plain；e2e 才带 cipher/chainKid/n
+        enc: envelope?.enc ?? "plain",
+        ...(envelope?.cipher !== undefined ? { cipher: envelope.cipher } : {}),
+        ...(envelope?.chainKid !== undefined ? { chainKid: envelope.chainKid } : {}),
+        ...(envelope?.n !== undefined ? { n: envelope.n } : {}),
       };
       messages.get(conversationId)!.push(msg);
       return msg;
@@ -295,6 +327,36 @@ export function createMemoryStore(): Store {
       // 返回拷贝避免调用方持有可变内部对象（对齐 recallMessage 口径）。
       m.payload = { ...m.payload, reactions };
       return { ...m };
+    },
+    reencryptMessage(messageId, userId, envelope) {
+      // 单线程同步段内「检查 + 替换」即原子（sqlite 侧用条件 UPDATE 同语义）
+      for (const list of messages.values()) {
+        const m = list.find((x) => x.id === messageId);
+        if (!m) continue;
+        if (m.senderId !== userId) return { ok: false, reason: "forbidden" };
+        if (m.enc !== "plain") return { ok: false, reason: "conflict" };
+        // 只换信封四字段（enc/cipher/chain_kid/n）；payload 与其余字段不动
+        m.enc = "e2e";
+        m.cipher = envelope.cipher;
+        if (envelope.chainKid !== undefined) m.chainKid = envelope.chainKid;
+        if (envelope.n !== undefined) m.n = envelope.n;
+        return { ok: true, message: { ...m } };
+      }
+      return { ok: false, reason: "not_found" };
+    },
+    upsertE2eDevice(userId, device) {
+      let devices = e2eKeys.get(userId);
+      if (!devices) {
+        devices = new Map();
+        e2eKeys.set(userId, devices);
+      }
+      // 同 ikEcdh 覆盖（Map.set 对已存在键保持原插入位置）→ SPK 轮换不增行
+      devices.set(device.ikEcdh, device);
+    },
+    listE2eKeys() {
+      const out: Record<string, E2eDeviceKeys[]> = {};
+      for (const [userId, devices] of e2eKeys) out[userId] = [...devices.values()];
+      return out;
     },
     createGroup(creatorId, name, memberIds) {
       mustUser(creatorId);

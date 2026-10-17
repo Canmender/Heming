@@ -27,6 +27,7 @@ const msg = (id: string, text: string): Message => ({
   replyTo: null,
   createdAt: "2026-10-13T00:00:00.000Z",
   recalledAt: null,
+  enc: "plain",
 });
 
 const msgAt = (id: string, text: string, createdAt: string): Message => ({
