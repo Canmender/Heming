@@ -181,6 +181,30 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(await screen.findByText("(附件)")).toBeInTheDocument(); // 空串 `??` 走不到回退 → `||` 口径
   });
 
+  it("悬浮卡最近消息：已撤回显示「消息已撤回」，不泄漏原文", async () => {
+    useChatStore.setState({
+      messages: {
+        c1: [
+          {
+            id: "m1",
+            conversationId: "c1",
+            senderType: "user" as const,
+            senderId: "u2",
+            payload: { text: "不该外泄的原文" },
+            replyTo: null,
+            createdAt: new Date().toISOString(),
+            recalledAt: "2026-10-17T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+    render(<RadarContacts />);
+    await screen.findByText("李四");
+    fireEvent.mouseOver(screen.getByText("李四"));
+    expect(await screen.findByText("消息已撤回")).toBeInTheDocument(); // 与气泡文案一致
+    expect(screen.queryByText("不该外泄的原文")).not.toBeInTheDocument();
+  });
+
   it("非 overlay 点击群节点：打开群详情（不直进会话，overlay 直进会话另测）", async () => {
     render(<RadarContacts />);
     await screen.findByText("评审组");

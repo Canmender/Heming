@@ -172,8 +172,13 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
     const list = convId ? messages[convId] : undefined;
     const last = list && list.length ? list[list.length - 1] : undefined;
     return {
-      // 纯附件消息 text=""：`??` 走不到回退，需 `||`；口径与 ContactDetail 对齐
-      lastText: last ? last.payload.text || "(附件)" : "暂无消息",
+      // 纯附件消息 text=""：`??` 走不到回退，需 `||`；口径与 ContactDetail 对齐；
+      // 已撤回不泄漏原文，统一「消息已撤回」（与气泡文案一致）
+      lastText: !last
+        ? "暂无消息"
+        : last.recalledAt != null
+          ? "消息已撤回"
+          : last.payload.text || "(附件)",
       lastTime: last ? fmtWhen(last.createdAt) : "—",
     };
   };

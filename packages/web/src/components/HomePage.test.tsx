@@ -222,6 +222,32 @@ describe("HomePage", () => {
     expect(screen.getByText("暂无消息")).toBeInTheDocument(); // c2 无消息口径不受影响
   });
 
+  it("最近会话预览：已撤回消息显示「消息已撤回」，不泄漏原文", async () => {
+    const recalledMsg = {
+      id: "m1",
+      conversationId: "c1",
+      senderType: "user" as const,
+      senderId: "u1",
+      payload: { text: "不该外泄的原文" },
+      replyTo: null,
+      createdAt: now.toISOString(),
+      recalledAt: "2026-10-17T00:00:00.000Z",
+    };
+    useChatStore.setState({
+      conversations: [conv("c1")],
+      friends: [],
+      incoming: [],
+      messages: { c1: [recalledMsg] },
+    });
+    mockFetch({ conversations: [conv("c1")] });
+
+    render(<HomePage />);
+    await act(async () => {});
+
+    expect(screen.getByText("消息已撤回")).toBeInTheDocument(); // 与气泡文案一致
+    expect(screen.queryByText("不该外泄的原文")).not.toBeInTheDocument();
+  });
+
   it("最近会话行尾未读角标：unreadCount>0 黑底白字圆角数字，0 不渲染", async () => {
     const unreadConv = { id: "c3", type: "direct" as const, peer, unreadCount: 3 };
     const zeroConv = conv("c1");

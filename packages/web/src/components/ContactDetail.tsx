@@ -97,7 +97,8 @@ export function ContactDetail({ target }: { target: { kind: ContactKind; id: str
         )}
         {lastMsg && (
           <p className="mt-2 truncate text-[11px] text-muted">
-            最近消息：{lastMsg.payload.text || "(附件)"}
+            最近消息：
+            {lastMsg.recalledAt != null ? "消息已撤回" : lastMsg.payload.text || "(附件)"}
           </p>
         )}
         <div className="mt-4 flex gap-2">

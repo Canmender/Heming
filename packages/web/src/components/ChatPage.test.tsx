@@ -1424,6 +1424,80 @@ describe("ChatPage", () => {
     expect(useChatStore.getState().messages.c1).toHaveLength(1); // 列表不移除
     expect(useChatStore.getState().messages.c1[0].recalledAt).toBe("2026-10-17T02:00:00.000Z");
   });
+
+  it("fetchHistory 跳过已撤回消息：streamChat 拿到的历史不含撤回原文，正常历史与本条 user 轮不受影响", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    // 末条是窗口尾的已撤回消息：跳过后尾部只剩正常历史，本条 user 轮的 pop 剔除逻辑仍正确
+    const history: Message[] = [
+      msg("m1", "早前正常讨论", "2026-10-14T01:00:00.000Z"),
+      {
+        ...msg("m2", "机密方案文本", "2026-10-14T01:01:00.000Z"),
+        recalledAt: "2026-10-17T00:00:00.000Z",
+      },
+    ];
+    mockMessagesFetch(history, undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 查下上下文");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    // 已撤回原文不进提示词；正常历史保留；末轮是本条 user 轮（未被误剔、未重复）
+    const contents = seen!.map((r) => r.content);
+    expect(contents).not.toContain("机密方案文本");
+    expect(contents).toContain("早前正常讨论");
+    expect(seen).toHaveLength(3); // system + 正常历史 1 条 + 本条 user 轮
+    expect(seen![seen!.length - 1]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
+  });
+
+  it("fetchHistory 窗口尾全是已撤回消息（剔空尾部）：不炸，本条 user 轮照常在尾", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    // 全部已撤回 → 跳过后 rows 为空：pop 的 `last &&` 守卫不炸，本条 user 轮由编排方追加
+    const history: Message[] = [
+      {
+        ...msg("m1", "被撤回的旧讨论", "2026-10-14T01:00:00.000Z"),
+        recalledAt: "2026-10-17T00:00:00.000Z",
+      },
+      {
+        ...msg("m2", "被撤回的末条", "2026-10-14T01:01:00.000Z"),
+        recalledAt: "2026-10-17T00:00:01.000Z",
+      },
+    ];
+    mockMessagesFetch(history, undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 空历史触发");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    const contents = seen!.map((r) => r.content);
+    expect(contents).not.toContain("被撤回的旧讨论");
+    expect(contents).not.toContain("被撤回的末条");
+    expect(seen).toHaveLength(2); // system + 本条 user 轮（历史被剔空）
+    expect(seen![1]).toEqual({ role: "user", content: "@和小鸣 空历史触发" });
+  });
 });
 
 describe("renderTextWithMentions", () => {

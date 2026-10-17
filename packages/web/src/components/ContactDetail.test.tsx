@@ -52,4 +52,26 @@ describe("ContactDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: "返回雷达" }));
     expect(useUiStore.getState().detailContact).toBeNull();
   });
+
+  it("最近消息：已撤回显示「消息已撤回」，不泄漏原文", () => {
+    useChatStore.setState({
+      messages: {
+        g1: [
+          {
+            id: "m1",
+            conversationId: "g1",
+            senderType: "user",
+            senderId: "u2",
+            payload: { text: "群内敏感原文" },
+            replyTo: null,
+            createdAt: new Date().toISOString(),
+            recalledAt: "2026-10-17T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+    render(<ContactDetail target={{ kind: "group", id: "g1" }} />);
+    expect(screen.getByText("最近消息：消息已撤回")).toBeTruthy(); // 与气泡文案一致
+    expect(screen.queryByText(/群内敏感原文/)).toBeNull();
+  });
 });

@@ -208,8 +208,13 @@ export function ChatPage() {
       getProfile: resolveProfile,
       getPrompt: (agentId) => useLlmStore.getState().prompts[agentId] ?? "",
       fetchHistory: async () => {
-        // spec §3：提示词只带近 30 条历史（服务端全量返回，客户端切尾）
-        const msgs = (await fetchMessages(convId)).slice(-30);
+        // spec §3：提示词只带近 30 条历史（服务端全量返回，客户端切尾）；
+        // 已撤回消息一律跳过（recalledAt 非 null 不进提示词，撤回内容不外发模型供应商）——
+        // 在 30 条窗口内先跳过再组装，跳过后可能恰剔空尾部（窗口尾全是撤回），
+        // 末行 pop 的 `last &&` 守卫对空尾部仍正确，本条 user 轮照常被剔除
+        const msgs = (await fetchMessages(convId))
+          .slice(-30)
+          .filter((m) => m.recalledAt == null);
         const rows = msgs.map((m) => ({
           role: m.senderType === "user" ? ("user" as const) : ("assistant" as const),
           content: m.payload.text,
