@@ -1401,6 +1401,9 @@ describe("ChatPage", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(screen.queryByText("已读")).not.toBeInTheDocument(); // 已撤回不显已读
     expect(screen.queryByLabelText("撤回消息")).not.toBeInTheDocument(); // 已撤回不再出撤回钮
+    // 已撤回气泡无转发钮：全页仅剩 m2（未撤回）那 1 个
+    expect(screen.getAllByLabelText("转发消息")).toHaveLength(1);
+    expect(document.getElementById("msg-m1")!.querySelector('[aria-label="转发消息"]')).toBeNull();
   });
 
   it("收到 message_recalled 事件：气泡即时变「消息已撤回」，列表不移除", async () => {
@@ -1617,6 +1620,94 @@ describe("ChatPage", () => {
     expect(contents).not.toContain("被撤回的末条");
     expect(seen).toHaveLength(2); // system + 本条 user 轮（历史被剔空）
     expect(seen![1]).toEqual({ role: "user", content: "@和小鸣 空历史触发" });
+  });
+
+  // —— 二期 IM Task 4：消息转发 ——
+
+  it("点转发出会话列表，选中后发送剥离 mentions 带 forward", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 },
+        { id: "c2", type: "direct", peer, unreadCount: 0 },
+        { id: "gA", type: "group", name: "群A", memberCount: 2, unreadCount: 0 },
+      ],
+    });
+    const m: Message = {
+      ...msg("m1", "@和小鸣 看下这版", "2026-10-14T01:00:00.000Z"),
+      senderId: "u1", // 自己的消息：forward.from 走「我」分支
+      payload: {
+        text: "@和小鸣 看下这版",
+        mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
+        file: { id: "f1", name: "方案.png", mime: "image/png", size: 10 },
+      },
+    };
+    mockMessagesFetch([m]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText(/看下这版/)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText("转发消息"));
+    // 浮层列出全部会话（群名 + direct 对方名）
+    expect(screen.getByText("转发到")).toBeInTheDocument();
+    expect(screen.getByText("评审组")).toBeInTheDocument();
+    expect(screen.getByText("鲍勃")).toBeInTheDocument(); // c2 direct 行
+    expect(screen.getByText("群A")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("群A"));
+    // 转发 = 原 text + 原 file，剥离 mentions，带 forward（from=我，source=源会话名）
+    expect(send).toHaveBeenCalledWith({
+      type: "send_message",
+      conversationId: "gA",
+      payload: {
+        text: "@和小鸣 看下这版",
+        file: { id: "f1", name: "方案.png", mime: "image/png", size: 10 },
+        forward: { from: "我", source: "评审组" },
+      },
+    });
+    expect(screen.queryByText("转发到")).not.toBeInTheDocument(); // 发送后浮层关闭
+    expect(screen.getByRole("status")).toHaveTextContent("已转发到 群A"); // 目标≠当前会话给提示
+  });
+
+  it("转发浮层可取消：Esc 或点遮罩关闭，不发送", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 },
+        { id: "gA", type: "group", name: "群A", memberCount: 2, unreadCount: 0 },
+      ],
+    });
+    mockMessagesFetch([msg("m1", "要转发吗", "2026-10-14T01:00:00.000Z")]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("要转发吗")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText("转发消息"));
+    expect(screen.getByText("转发到")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" }); // Esc 关（文档级监听）
+    expect(screen.queryByText("转发到")).not.toBeInTheDocument();
+
+    // 重开 → 点遮罩层关闭（内卡 stopPropagation 不误关）
+    fireEvent.click(screen.getByLabelText("转发消息"));
+    const card = screen.getByText("转发到").parentElement!;
+    fireEvent.click(card.parentElement!);
+    expect(screen.queryByText("转发到")).not.toBeInTheDocument();
+
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+  });
+
+  it("有 forward 的消息在文本上方渲染来源行「来自 {from} · {source}」", async () => {
+    const m: Message = {
+      ...msg("m1", "转发来的正文", "2026-10-14T01:00:00.000Z"),
+      payload: { text: "转发来的正文", forward: { from: "爱丽丝", source: "群A" } },
+    };
+    mockMessagesFetch([m]);
+
+    render(<ChatPage />);
+    expect(await screen.findByText("来自 爱丽丝 · 群A")).toBeInTheDocument();
+    expect(screen.getByText("转发来的正文")).toBeInTheDocument(); // 正文照常渲染
   });
 });
 

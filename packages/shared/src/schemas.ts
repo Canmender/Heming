@@ -26,6 +26,10 @@ export const MessagePayloadSchema = z.object({
       size: z.number().int().min(0),
     })
     .optional(),
+  // 转发来源（二期 IM Task 4）：发送者展示名 + 源会话名；转发时剥离 mentions、保留 text/file
+  forward: z
+    .object({ from: z.string().min(1).max(64), source: z.string().min(1).max(64) })
+    .optional(),
 });
 export type MessagePayload = z.infer<typeof MessagePayloadSchema>;
 

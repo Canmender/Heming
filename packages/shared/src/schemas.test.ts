@@ -250,6 +250,13 @@ describe("MessagePayloadSchema file 附件（M4 前置）", () => {
   });
 });
 
+describe("MessagePayloadSchema forward（二期 IM Task 4 消息转发）", () => {
+  it("payload.forward 可选且限长", () => {
+    expect(MessagePayloadSchema.safeParse({ text: "x", forward: { from: "甲", source: "群A" } }).success).toBe(true);
+    expect(MessagePayloadSchema.safeParse({ text: "x", forward: { from: "甲", source: "s".repeat(65) } }).success).toBe(false);
+  });
+});
+
 describe("M3 schemas", () => {
   it("Agent 名册（owner 可空）", () => {
     expect(AgentSchema.safeParse({ id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" }).success).toBe(true);

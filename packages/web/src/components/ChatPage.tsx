@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import type { Message } from "@heming/shared";
+import type { Conversation, Message } from "@heming/shared";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -142,6 +142,8 @@ export function ChatPage() {
   const [tokenLock, setTokenLock] = useState(false);
   /** 回复引用目标（Task 3）：非空时输入区上方出引用预览条，发送带顶层 replyTo。 */
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+  /** 转发目标源消息（Task 4）：非空时出会话选择浮层；null=关。 */
+  const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
   /**
    * 群成员挂载快照（带 convId 防跨会话串数据）：
    * byId = id→名（他人气泡署名，M2 消息体无 senderName）；
@@ -300,6 +302,8 @@ export function ChatPage() {
     setListening(false);
     // 回复引用也是会话级：A 会话的引用目标不得带进 B 会话
     setReplyTarget(null);
+    // 转发浮层同为会话级：A 会话选中的转发目标不得带进 B 会话
+    setForwardMsg(null);
     // 发送提示也是会话级：A 会话的「上传失败/不支持语音」不得带进 B 会话
     setSendNotice(null);
   }, [convId]);
@@ -465,6 +469,16 @@ export function ChatPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, [infoOpen]);
 
+  /** Esc 关转发浮层（文档级，与信息卡同口径）。 */
+  useEffect(() => {
+    if (!forwardMsg) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setForwardMsg(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [forwardMsg]);
+
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape" && picker) {
       e.preventDefault();
@@ -509,6 +523,37 @@ export function ChatPage() {
     setReplyTarget(null);
     // 发送成功即触发各 mention 的本机流式生成（失败/中断由 WS 三事件回声收口）
     if (mentions.length) startRun(mentions, text);
+  };
+
+  /**
+   * 转发（Task 4）：原 text + 原 file 原样带走，**剥离 mentions**（@ 语境属于源会话），
+   * 带 forward 来源经当前 WS 连接发到目标会话（server 只按 isMember 校验）。
+   * 转发到非当前会话时借 sendNotice 给提示行（转发到当前会话则清提示）。
+   */
+  const doForward = (target: Conversation) => {
+    if (!forwardMsg || !wsHandleRef.current) return;
+    const src = conversations.find((x) => x.id === convId);
+    wsHandleRef.current.send({
+      type: "send_message",
+      conversationId: target.id,
+      payload: {
+        text: forwardMsg.payload.text,
+        ...(forwardMsg.payload.file ? { file: forwardMsg.payload.file } : {}),
+        forward: {
+          from:
+            forwardMsg.senderId === me?.id
+              ? "我"
+              : (memberNameById?.[forwardMsg.senderId] ?? peer?.displayName ?? "未知"),
+          source: src ? (src.type === "direct" ? src.peer.displayName : src.name) : "未知会话",
+        },
+      },
+    });
+    setForwardMsg(null);
+    setSendNotice(
+      target.id === convId
+        ? null
+        : `已转发到 ${target.type === "direct" ? target.peer.displayName : target.name}`,
+    );
   };
 
   /** 附件上限：服务端 json 体上限 8MB，base64 膨胀约 4/3 → 6MB 留余量（超限给可见提示）。 */
@@ -676,6 +721,12 @@ export function ChatPage() {
                   <div className="text-muted">消息已撤回</div>
                 ) : (
                   <>
+                    {/* 转发来源行（Task 4）：有 forward 时置于正文/附件上方 */}
+                    {m.payload.forward ? (
+                      <div className="mb-0.5 text-[10px] text-muted">
+                        来自 {m.payload.forward.from} · {m.payload.forward.source}
+                      </div>
+                    ) : null}
                     {quoted ? (
                       <button
                         type="button"
@@ -731,6 +782,19 @@ export function ChatPage() {
                     onClick={() => setReplyTarget(m)}
                   >
                     回复
+                  </button>
+                )}
+                {/* 转发入口（Task 4）：所有未撤回消息（含他人）可转发，hover 显出；与撤回/回复钮同排继续错开 */}
+                {!recalled && (
+                  <button
+                    type="button"
+                    aria-label="转发消息"
+                    className={`absolute -top-2 ${
+                      mine ? "right-20" : "right-10"
+                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block`}
+                    onClick={() => setForwardMsg(m)}
+                  >
+                    转发
                   </button>
                 )}
               </div>
@@ -887,6 +951,38 @@ export function ChatPage() {
           </div>
         )}
       </form>
+      {/* 转发浮层（Task 4）：全会话列表（群+直聊），点选经当前 WS 连接发送；点遮罩/Esc 关闭 */}
+      {forwardMsg && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+          onClick={() => setForwardMsg(null)}
+        >
+          <div
+            className="w-[280px] rounded-xl border border-[#ececec] bg-white p-3 shadow-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-2 text-[12px] font-bold">转发到</div>
+            <div className="max-h-[240px] overflow-y-auto">
+              {conversations.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[#f7f7f7]"
+                  onClick={() => doForward(c)}
+                >
+                  <Avatar
+                    user={c.type === "direct" ? c.peer : { displayName: c.name }}
+                    size={22}
+                  />
+                  <span className="truncate">
+                    {c.type === "direct" ? c.peer.displayName : c.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

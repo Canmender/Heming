@@ -432,4 +432,37 @@ describe("agent streaming", () => {
     wsA.close();
     wsB.close();
   });
+
+  it("send_message 携带 forward 落库并随 message_new 广播", async () => {
+    // 二期 IM Task 4：payload.forward 往返契约（同 mentions/file 透传断言模式）。
+    const a = store.createUser(`ao-${Date.now()}`, "h", "A");
+    const b = store.createUser(`ap-${Date.now()}`, "h", "B");
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const conv = store.createDirectConversation(a.id, b.id).id;
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+    const wait = nextEvent(wsB);
+    wsA.send(JSON.stringify({
+      type: "send_message",
+      conversationId: conv,
+      payload: {
+        text: "转发的正文",
+        mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
+        file: { id: "f1", name: "a.png", mime: "image/png", size: 3 },
+        forward: { from: "爱丽丝", source: "评审组" },
+      },
+    }));
+    const ev = await wait;
+    expect(ev.type).toBe("message_new");
+    if (ev.type === "message_new") {
+      expect(ev.message.payload.forward).toEqual({ from: "爱丽丝", source: "评审组" });
+      expect(ev.message.payload.text).toBe("转发的正文");
+      expect(ev.message.payload.file).toEqual({ id: "f1", name: "a.png", mime: "image/png", size: 3 });
+    }
+    const msgs = store.listMessages(conv);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].payload.forward).toEqual({ from: "爱丽丝", source: "评审组" });
+    wsA.close();
+    wsB.close();
+  });
 });
