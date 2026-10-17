@@ -801,8 +801,9 @@ describe("ChatPage", () => {
     expect(typeof (errEv as { cipher: string }).cipher).toBe("string");
     const streamId = (errEv as { streamId: string }).streamId;
 
-    // 服务端按序回声：partial 入库的 message_new → agent_error 广播（同帧转发；
-    // 此处推明文形态——服务端自产/旧端路径，密文回声的降级文案见下方专测）
+    // 服务端按序回声：partial 入库的 message_new → agent_error 广播（同帧转发）。
+    // agent_error 回声必须走**真实密文信封形态**（服务端广播的就是触发端上行的信封）——
+    // 本机自己触发的错误没有 recv 链，只能靠 sealError 登记的出站箱还原原文（fix round 2）。
     act(() => {
       lastHandlers().onEvent({
         type: "message_new",
@@ -815,17 +816,11 @@ describe("ChatPage", () => {
       });
     });
     act(() => {
-      lastHandlers().onEvent({
-        type: "agent_error",
-        conversationId: "c1",
-        agentId: "system-assistant",
-        streamId,
-        code: "provider_error",
-        message: "provider_error: HTTP 401 bad key",
-      });
+      lastHandlers().onEvent(errEv); // 密文回声（含 cipher/chainKid/n）
     });
 
-    expect(screen.getByText(/HTTP 401/)).toBeInTheDocument(); // 错误原因行
+    // 密文回声经出站箱还原原文（异步解密链 → waitFor）
+    await waitFor(() => expect(screen.getByText(/HTTP 401/)).toBeInTheDocument()); // 错误原因行
     expect(screen.getByText("半")).toBeInTheDocument(); // partial 消息仍在列表
 
     // 重试 = 对该 mention 重新跑一遍流
@@ -863,16 +858,10 @@ describe("ChatPage", () => {
     const errEv = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_error");
     expect(errEv).toMatchObject({ code: "aborted", message: "" }); // fix I2：message 进密文
     act(() => {
-      lastHandlers().onEvent({
-        type: "agent_error",
-        conversationId: "c1",
-        agentId: "system-assistant",
-        streamId: (errEv as { streamId: string }).streamId,
-        code: "aborted",
-        message: "AbortError", // 明文回声（服务端自产/旧端路径）
-      });
+      lastHandlers().onEvent(errEv); // 密文回声：本机经出站箱还原原文（fix round 2）
     });
-    expect(screen.getByText(/AbortError/)).toBeInTheDocument();
+    // 密文回声经出站箱还原原文（异步解密链 → waitFor）
+    await waitFor(() => expect(screen.getByText(/AbortError/)).toBeInTheDocument());
     expect(screen.getByText("重试")).toBeInTheDocument();
     expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 不再生成中
   });

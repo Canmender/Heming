@@ -394,12 +394,15 @@ export function ChatPage() {
       const outPlain = outKey ? outboxRef.current.get(outKey) : undefined;
       if (outPlain) {
         outboxRef.current.delete(outKey);
-        msgCache.append(conv, {
-          id: env.id,
-          senderId: env.senderId ?? "unknown",
-          at: env.createdAt ? Date.parse(env.createdAt) || Date.now() : Date.now(),
-          plain: outPlain,
-        });
+        // 错误是流式瞬态（不入历史/不渲染消息列表）：不落明文缓存，其余（含自发正文）落
+        if (outPlain.kind !== "error") {
+          msgCache.append(conv, {
+            id: env.id,
+            senderId: env.senderId ?? "unknown",
+            at: env.createdAt ? Date.parse(env.createdAt) || Date.now() : Date.now(),
+            plain: outPlain,
+          });
+        }
         return { status: "ok", plain: outPlain };
       }
       try {
@@ -615,16 +618,22 @@ export function ChatPage() {
         }
         return { cipher: ev.cipher, chainKid: ev.chainKid, n: ev.n };
       },
-      // E2E 错误封条（fix I2）：错误正文（可回显供应商请求片段）同款信封上行
+      // E2E 错误封条（fix I2）：错误正文（可回显供应商请求片段）同款信封上行。
+      // fix round 2：登记出站箱——本机触发的错误经 WS 回声没有 recv 链可解，
+      // 只能按链索引取回明文；不登记则回声恒降级为通用文案（丢失真实错误原因）。
       sealError: async (streamId, message) => {
         const members = await resolveMembers(convId);
+        const plain: PlainEnvelope = { kind: "error", text: message };
         const ev = await sealMessage(
           { id: convId, members },
-          { kind: "error", text: message },
+          plain,
           e2eDeps(),
           { aad: errorAad(convId, streamId) },
         );
         if (ev.type !== "send_message" || !ev.cipher) return null;
+        if (ev.chainKid !== undefined && ev.n !== undefined) {
+          outboxRef.current.set(`${ev.chainKid}:${ev.n}`, plain);
+        }
         return { cipher: ev.cipher, chainKid: ev.chainKid, n: ev.n };
       },
       onLocalDelta: (streamId, acc) => {
