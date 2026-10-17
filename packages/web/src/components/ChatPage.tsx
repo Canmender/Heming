@@ -325,6 +325,7 @@ export function ChatPage() {
           text: acc,
           status: "streaming",
           lastAt: Date.now(), // Task 7 watchdog：累积即刷新
+          errorMessage: undefined, // 清掉可能残留的 watchdog 误报（恢复即自愈）
         });
       },
       onStart: (streamId, mention) => {
@@ -503,19 +504,19 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 他机流 watchdog（Task 7）：有流式项在飞时每 15s 扫一次全局 streaming，把长时间无响应
-  // （>60s 未刷新）的打字机项置 error 行（阈值在 store；本机流不自动重试，error 行已有手动重试入口）。
-  // 以「streaming 非空」为门：无流在飞时不挂定时器——既不空转，也让假时钟测试的 runAllTimers 能收敛；
-  // 有流即起、全部收口即清。sweepStaleStreams 为稳定引用。
-  const anyStreaming = Object.keys(streaming).length > 0;
+  // 他机流 watchdog（Task 7）：存在 status==="streaming" 的在飞项时，每 15s 扫一次全局 streaming，
+  // 把长时间无响应（>60s 未刷新）的打字机项置 error 行（阈值在 store；本机流不自动重试，error 行有手动重试）。
+  // 门取「存在 streaming 项」而非「streaming 非空」——纯 error 残留（本机 retry 行 / 他机流 6s 自清窗口）
+  // 不再挂表：既不空转、也不让假时钟测试的 runAllTimers 无法收敛。有在飞流即起、全部收口即卸。
+  const hasLiveStream = Object.values(streaming).some((s) => s.status === "streaming");
   useEffect(() => {
-    if (!anyStreaming) return;
+    if (!hasLiveStream) return;
     const timer = window.setInterval(
       () => sweepStaleStreams(Date.now()),
       STREAM_SWEEP_INTERVAL_MS,
     );
     return () => window.clearInterval(timer);
-  }, [anyStreaming, sweepStaleStreams]);
+  }, [hasLiveStream, sweepStaleStreams]);
 
   // 卸载（离开聊天页）：中止全部进行中流，不再空烧供应商 token；语音识别同停；
   // 录音中止同走取消位（onstop 停麦克风轨、放弃发送，60s 定时器一并清）

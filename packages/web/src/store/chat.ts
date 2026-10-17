@@ -43,6 +43,8 @@ const REMOTE_ERROR_TTL_MS = 6000;
 /**
  * 他机流「无响应」判定阈值（Task 7 watchdog）：距最后一次写入超过此时长仍未收尾
  * （message_new/agent_error）即判为中断，置 error 行——本机流不自动重试，error 行已有手动重试 UI。
+ * 取舍：TTFT 或流内间隔超过此值的慢模型会被短暂误报「生成可能已中断」，下个 chunk 到达即自愈
+ * （patch 会清掉 errorMessage 并回到 streaming）；60s 对常规对话式生成足够宽松，误报成本可接受。
  */
 const STREAM_STALE_MS = 60_000;
 
@@ -269,6 +271,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         text: (prev?.text ?? "") + e.text,
         status: "streaming",
         lastAt: Date.now(), // Task 7：累积即刷新，watchdog 以此为「仍有活动」依据
+        errorMessage: undefined, // 清掉可能残留的 watchdog 误报（恢复即自愈）
       });
       return;
     }
@@ -295,12 +298,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const entries = get().streaming;
     let changed = false;
     const next = { ...entries };
+    const selfClear: string[] = [];
     for (const [id, s] of Object.entries(entries)) {
       if (s.status === "streaming" && now - (s.lastAt ?? 0) > STREAM_STALE_MS) {
         next[id] = { ...s, status: "error", errorMessage: "长时间无响应，生成可能已中断" };
         changed = true;
+        // 他机流（非本机触发）：无 agent_error 回声来收口，与 agent_error 分支同款短暂显示后自清；
+        // 本机流保留 error 行供手动重试（不自清）。
+        if (!get().streamOwner[id]) selfClear.push(id);
       }
     }
-    if (changed) set({ streaming: next }); // 无变更则不写（保引用稳定，不触发多余重渲染）
+    if (!changed) return; // 无变更则不写（保引用稳定，不触发多余重渲染）
+    set({ streaming: next });
+    for (const id of selfClear) {
+      setTimeout(() => {
+        // 兜底：期间若该流自愈（回到 streaming）或已换归属，则不自清
+        if (!get().streamOwner[id] && get().streaming[id]?.status === "error") {
+          get().removeStream(id);
+        }
+      }, REMOTE_ERROR_TTL_MS);
+    }
   },
 }));

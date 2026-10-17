@@ -470,4 +470,57 @@ describe("chat store", () => {
     useChatStore.getState().onWsEvent(chunk("s1", "好"));
     expect(useChatStore.getState().streaming["s1"].lastAt).toBe(25_000); // 合并时刷新
   });
+
+  // —— Task 7 评审修复：他机流自清 + 恢复流清 errorMessage ——
+
+  it("sweepStaleStreams：他机流（非本机触发）过期项置 error 后短暂显示即自清", () => {
+    vi.useFakeTimers();
+    const now = 1_000_000;
+    useChatStore.setState({
+      streaming: {
+        remote: { conversationId: "c1", agentId: "a1", text: "x", status: "streaming", lastAt: now - 61_000 },
+      } as never,
+      streamOwner: {},
+    });
+    useChatStore.getState().sweepStaleStreams(now);
+    expect(useChatStore.getState().streaming.remote.status).toBe("error");
+    vi.advanceTimersByTime(6000); // REMOTE_ERROR_TTL_MS
+    expect(useChatStore.getState().streaming.remote).toBeUndefined(); // 与 agent_error 同款自清
+  });
+
+  it("sweepStaleStreams：本机流（owner）过期项置 error 后保留，不自清", () => {
+    vi.useFakeTimers();
+    const now = 1_000_000;
+    useChatStore.setState({
+      streaming: {
+        mine: { conversationId: "c1", agentId: "a1", text: "x", status: "streaming", lastAt: now - 61_000 },
+      } as never,
+      streamOwner: { mine: true },
+    });
+    useChatStore.getState().sweepStaleStreams(now);
+    expect(useChatStore.getState().streaming.mine.status).toBe("error");
+    vi.advanceTimersByTime(60_000);
+    expect(useChatStore.getState().streaming.mine).toBeDefined(); // 保留供手动重试
+  });
+
+  it("onWsEvent agent_chunk：恢复流回到 streaming 并清掉残留 errorMessage（watchdog 误报自愈）", () => {
+    useChatStore.setState({
+      streaming: {
+        s1: {
+          conversationId: "c1",
+          agentId: "a1",
+          text: "半",
+          status: "error",
+          errorMessage: "长时间无响应，生成可能已中断",
+          lastAt: 0,
+        },
+      } as never,
+      streamOwner: {},
+    });
+    useChatStore.getState().onWsEvent(chunk("s1", "续"));
+    const s = useChatStore.getState().streaming["s1"];
+    expect(s.status).toBe("streaming");
+    expect(s.errorMessage).toBeUndefined(); // 显式清（否则合并会留旧值）
+    expect(s.text).toBe("半续");
+  });
 });

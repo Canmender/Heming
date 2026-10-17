@@ -2278,6 +2278,100 @@ describe("ChatPage", () => {
     expect(screen.getByText("长时间无响应，生成可能已中断")).toBeInTheDocument();
     vi.useRealTimers();
   });
+
+  it("watchdog 门控：仅 error 残留（无 streaming 项）不挂 interval，出现 streaming 项才挂", async () => {
+    vi.useFakeTimers();
+    const sweep = vi.spyOn(useChatStore.getState(), "sweepStaleStreams");
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 纯 error 残留（本机流 error 行保留、无任何 streaming 项）：门为假 → 不得挂表
+    act(() => {
+      useChatStore.setState({
+        streaming: {
+          err: {
+            conversationId: "c1",
+            agentId: "system-assistant",
+            text: "半",
+            status: "error",
+            errorMessage: "旧原因",
+            lastAt: 0,
+          },
+        },
+      });
+    });
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(sweep).not.toHaveBeenCalled(); // 无 streaming 项 → 不起表（不空转、不重复误报）
+
+    // 补一条 streaming 项 → 起表并到点清扫
+    act(() => {
+      useChatStore.setState({
+        streaming: {
+          err: {
+            conversationId: "c1",
+            agentId: "system-assistant",
+            text: "半",
+            status: "error",
+            errorMessage: "旧原因",
+            lastAt: 0,
+          },
+          live: {
+            conversationId: "c1",
+            agentId: "system-assistant",
+            text: "在飞",
+            status: "streaming",
+            lastAt: Date.now(),
+          },
+        },
+      });
+    });
+    act(() => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(sweep).toHaveBeenCalled();
+
+    sweep.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("他机流 watchdog 误报后收到 chunk 自愈：error 行消失、文本续上", async () => {
+    await setupGroupChat();
+    // 注入被他机 watchdog 误判为中断的流（error 状态 + 文案）
+    act(() => {
+      useChatStore.setState({
+        streaming: {
+          "remote-1": {
+            conversationId: "c1",
+            agentId: "system-assistant",
+            text: "半",
+            status: "error",
+            errorMessage: "长时间无响应，生成可能已中断",
+            lastAt: 0,
+          },
+        },
+      });
+    });
+    expect(screen.getByText("长时间无响应，生成可能已中断")).toBeInTheDocument();
+
+    // 下个 chunk 到达 → 回到 streaming 并清 errorMessage（自愈）
+    act(() => {
+      lastHandlers().onEvent({
+        type: "agent_chunk",
+        conversationId: "c1",
+        agentId: "system-assistant",
+        streamId: "remote-1",
+        text: "续",
+      });
+    });
+    expect(useChatStore.getState().streaming["remote-1"].status).toBe("streaming");
+    expect(useChatStore.getState().streaming["remote-1"].errorMessage).toBeUndefined();
+    expect(screen.queryByText("长时间无响应，生成可能已中断")).not.toBeInTheDocument();
+    expect(screen.getByText(/半续/)).toBeInTheDocument();
+  });
 });
 
 describe("renderTextWithMentions", () => {
