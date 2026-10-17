@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import type { Member, Message, ReadState, User, WsClientEvent } from "@heming/shared";
 import { ChatPage, renderTextWithMentions } from "./ChatPage.js";
@@ -157,6 +157,11 @@ describe("ChatPage", () => {
       streaming: {},
       streamOwner: {},
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals(); // Task 5 的 MediaRecorder 桩不跨用例
+    if (vi.isFakeTimers()) vi.useRealTimers(); // 录音 60s 上限用例即便中途失败也不泄漏假时钟
   });
 
   it("挂载后收到 message_new：append 到消息列表", async () => {
@@ -960,7 +965,9 @@ describe("ChatPage", () => {
     render(<ChatPage />);
     await act(async () => {});
 
+    // mic 按钮改弹双选项浮层：先开菜单，再选「转文字」走原 STT 路径
     fireEvent.click(screen.getByLabelText("语音输入"));
+    fireEvent.click(screen.getByRole("button", { name: "语音输入（转文字）" }));
     expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持语音输入");
   });
 
@@ -970,6 +977,7 @@ describe("ChatPage", () => {
     await act(async () => {});
 
     fireEvent.click(screen.getByLabelText("语音输入"));
+    fireEvent.click(screen.getByRole("button", { name: "语音输入（转文字）" }));
     expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持语音输入");
 
     act(() => {
@@ -1000,6 +1008,7 @@ describe("ChatPage", () => {
       await act(async () => {});
 
       fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音输入（转文字）" }));
       expect(instances).toHaveLength(1);
       expect(instances[0].start).toHaveBeenCalledTimes(1);
       expect(screen.getByLabelText("语音输入")).toHaveClass("bg-ink"); // 识别中
@@ -1019,6 +1028,7 @@ describe("ChatPage", () => {
 
       // 新会话重开识别后，旧实例晚到的 onend 不得误清新会话的指示
       fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音输入（转文字）" }));
       expect(instances).toHaveLength(2);
       expect(screen.getByLabelText("语音输入")).toHaveClass("bg-ink");
       act(() => {
@@ -1708,6 +1718,304 @@ describe("ChatPage", () => {
     render(<ChatPage />);
     expect(await screen.findByText("来自 爱丽丝 · 群A")).toBeInTheDocument();
     expect(screen.getByText("转发来的正文")).toBeInTheDocument(); // 正文照常渲染
+  });
+
+  // —— 二期 IM Task 5：语音消息（录音 → 上传 → audio 气泡） ——
+
+  /**
+   * MediaRecorder + getUserMedia 桩（jsdom 均不实现）：实例表供 start/state 断言，
+   * track.stop 句柄供「停录必停轨」断言；restore 摘掉 stubGlobal 与 navigator 覆盖
+   * （navigator.mediaDevices 是文件级单例，不恢复会跨用例泄漏）。
+   */
+  function installFakeMedia(opts: { deny?: boolean } = {}) {
+    const instances: FakeMediaRecorder[] = [];
+    class FakeMediaRecorder {
+      state: "inactive" | "recording" = "inactive";
+      mimeType = "audio/webm";
+      ondataavailable?: (e: { data: Blob }) => void;
+      onstop?: () => void;
+      constructor() {
+        instances.push(this);
+      }
+      start() {
+        this.state = "recording";
+      }
+      stop() {
+        this.state = "inactive";
+        this.ondataavailable?.({ data: new Blob(["audio-bytes"], { type: "audio/webm" }) });
+        this.onstop?.(); // 浏览器里异步到事件循环；mock 同步触发收尾（onstop 内是幂等收口）
+      }
+    }
+    const trackStop = vi.fn();
+    const orig = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: opts.deny
+          ? vi.fn(async (): Promise<never> => {
+              throw new Error("denied");
+            })
+          : vi.fn(async () => ({ getTracks: () => [{ stop: trackStop }] })),
+      },
+    });
+    vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+    return {
+      instances,
+      trackStop,
+      restore() {
+        vi.unstubAllGlobals();
+        if (orig) Object.defineProperty(navigator, "mediaDevices", orig);
+        else Reflect.deleteProperty(navigator, "mediaDevices");
+      },
+    };
+  }
+
+  it("语音按钮弹双选项浮层", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    expect(screen.queryByText("语音消息（录音）")).not.toBeInTheDocument(); // 未点开不出浮层
+    fireEvent.click(screen.getByLabelText("语音输入"));
+    expect(await screen.findByText("语音输入（转文字）")).toBeInTheDocument();
+    expect(await screen.findByText("语音消息（录音）")).toBeInTheDocument();
+  });
+
+  it("无 MediaRecorder 时语音消息选项禁用并给提示，转文字入口不受影响", async () => {
+    vi.stubGlobal("MediaRecorder", undefined); // 锁死「无该 API」环境（不依赖 jsdom 版本是否自带）
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByLabelText("语音输入"));
+    expect(screen.getByRole("button", { name: "语音消息（录音）" })).toBeDisabled();
+    expect(screen.getByText("当前环境不支持录音")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "语音输入（转文字）" })).toBeEnabled();
+  });
+
+  it("录音流程：开始→停止→上传→发送 file 消息", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockUploadFetch({
+      id: "f-a",
+      owner: "alice",
+      name: "语音.webm",
+      mime: "audio/webm",
+      size: 11,
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    });
+    const media = installFakeMedia();
+    // 发送判定按 Date.now 差值（<1s 拒发）：用 now 桩把「录了 2 秒」钉成确定值
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      render(<ChatPage />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
+      await act(async () => {}); // getUserMedia → MediaRecorder.start 落定
+      expect(screen.getByRole("status")).toHaveTextContent("录音中…（最长 60 秒）");
+      expect(screen.getByLabelText("停止录音")).toBeInTheDocument();
+      expect(screen.getByLabelText("取消录音")).toBeInTheDocument();
+      expect(media.instances).toHaveLength(1);
+      expect(media.instances[0].state).toBe("recording");
+
+      now += 2000; // 录满 2 秒（越过 <1s 拒发线）
+      fireEvent.click(screen.getByLabelText("停止录音"));
+      // 上传链含 FileReader 宏任务（jsdom setImmediate 两跳）：单次 act 冲不干净，waitFor 到 send 落定
+      await waitFor(() =>
+        expect(send).toHaveBeenCalledWith({
+          type: "send_message",
+          conversationId: "c1",
+          payload: {
+            text: "",
+            file: { id: "f-a", name: "语音.webm", mime: "audio/webm", size: 11 },
+          },
+        }),
+      );
+      const post = fetchSpy.mock.calls.find(
+        (c) => String(c[0]) === "/api/files" && c[1]?.method === "POST",
+      );
+      expect(post).toBeDefined();
+      const body = JSON.parse(String((post![1] as RequestInit).body)) as {
+        name: string;
+        mime: string;
+      };
+      expect(body.mime).toBe("audio/webm"); // 上传体带录音 mime
+      expect(body.name).toMatch(/^语音-\d{6}\.webm$/); // 文件名 HHMMSS 格式
+      expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 录音态退出、无错误提示
+      expect(media.trackStop).toHaveBeenCalledTimes(1); // 停录必停麦克风轨
+    } finally {
+      media.restore();
+    }
+  });
+
+  it("录音 <1s 停止拒发：不上传不发送，提示录音太短", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockUploadFetch();
+    const media = installFakeMedia();
+    try {
+      render(<ChatPage />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
+      await act(async () => {});
+      fireEvent.click(screen.getByLabelText("停止录音")); // 开始后立即停：真实时差远小于 1s
+      await act(async () => {});
+
+      expect(screen.getByRole("status")).toHaveTextContent("录音太短，未发送");
+      expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false);
+      expect(media.trackStop).toHaveBeenCalledTimes(1); // 拒发也停轨
+      expect(screen.queryByText(/录音中/)).not.toBeInTheDocument();
+    } finally {
+      media.restore();
+    }
+  });
+
+  it("取消录音：停录停轨、不上传不发送、静默退出录音态", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockUploadFetch();
+    const media = installFakeMedia();
+    try {
+      render(<ChatPage />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
+      await act(async () => {});
+      expect(screen.getByRole("status")).toHaveTextContent("录音中");
+
+      fireEvent.click(screen.getByLabelText("取消录音"));
+      await act(async () => {});
+
+      expect(screen.queryByText(/录音中/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 取消是静默的（不弹提示行）
+      expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false);
+      expect(media.instances[0].state).toBe("inactive");
+      expect(media.trackStop).toHaveBeenCalledTimes(1);
+    } finally {
+      media.restore();
+    }
+  });
+
+  it("录音达 60 秒上限自动停止并按正常路径发送", async () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockUploadFetch({
+      id: "f-b",
+      owner: "alice",
+      name: "语音.webm",
+      mime: "audio/webm",
+      size: 11,
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    });
+    const media = installFakeMedia();
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      render(<ChatPage />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
+      await act(async () => {});
+      expect(screen.getByRole("status")).toHaveTextContent("录音中");
+
+      act(() => {
+        now += 60_000;
+        vi.advanceTimersByTime(60_000); // 60s 上限到点 → 自动 stop
+      });
+      // 上传链的 file.arrayBuffer() 走 jsdom FileReader 的两跳 setImmediate（被假时钟接管）：
+      // runAllTimersAsync 冲刷这两跳 + 其后的微任务，否则 send 永远到不了（假 setImmediate 不会被 await act 冲掉）
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(send).toHaveBeenCalledWith({
+        type: "send_message",
+        conversationId: "c1",
+        payload: { text: "", file: { id: "f-b", name: "语音.webm", mime: "audio/webm", size: 11 } },
+      });
+      expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 录音态已退出
+      expect(media.trackStop).toHaveBeenCalledTimes(1);
+      expect(media.instances[0].state).toBe("inactive");
+    } finally {
+      media.restore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("录音中切会话：中止录音（停轨、放弃发送）并退出录音态", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockUploadFetch();
+    const media = installFakeMedia();
+    try {
+      render(<ChatPage />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
+      await act(async () => {});
+      expect(screen.getByRole("status")).toHaveTextContent("录音中");
+
+      act(() => {
+        useUiStore.setState({ activeConversationId: "c2" });
+      });
+      expect(media.instances[0].state).toBe("inactive"); // 旧会话录音已停
+      expect(media.trackStop).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(/录音中/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 放弃发送不落提示
+      await act(async () => {});
+      expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false);
+    } finally {
+      media.restore();
+    }
+  });
+
+  it("有 MediaRecorder 但麦克风不可用（getUserMedia 失败）：提示无法访问麦克风", async () => {
+    const media = installFakeMedia({ deny: true });
+    try {
+      mockMessagesFetch([]);
+      render(<ChatPage />);
+      await act(async () => {});
+
+      fireEvent.click(screen.getByLabelText("语音输入"));
+      fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
+      await act(async () => {});
+
+      expect(screen.getByRole("status")).toHaveTextContent("无法访问麦克风");
+      expect(screen.queryByText(/录音中/)).not.toBeInTheDocument();
+      expect(media.instances).toHaveLength(0); // 未创建 recorder，也无需停轨
+    } finally {
+      media.restore();
+    }
+  });
+
+  it("音频消息气泡渲染 audio 元素：鉴权 blob src、不出文件卡、卸载 revoke", async () => {
+    const m: Message = {
+      ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
+      payload: { text: "", file: { id: "f-a", name: "语音.webm", mime: "audio/webm", size: 11 } },
+    };
+    mockMessagesFetch([m]);
+
+    const view = render(<ChatPage />);
+    const audio = (await screen.findByTestId("audio-bubble")) as HTMLAudioElement;
+    expect(audio.tagName).toBe("AUDIO");
+    expect(audio).toHaveAttribute("controls");
+    expect(audio).toHaveAttribute("src", "blob:mock-1"); // fetchFileBlobUrl 取到的鉴权 objectURL
+    expect(screen.queryByRole("link", { name: /语音\.webm/ })).not.toBeInTheDocument(); // 非通用文件卡
+
+    view.unmount();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-1"); // 同附件的卸载即销
   });
 });
 

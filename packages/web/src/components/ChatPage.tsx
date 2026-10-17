@@ -107,6 +107,44 @@ function AttachmentPreview({
   );
 }
 
+/**
+ * 音频气泡（Task 5）：audio/* 附件在 image 分支之前路由到此——鉴权取 blob 后渲染
+ * `<audio controls>` 播放器，替代通用文件卡。blob 生命周期与 AttachmentPreview 同款：
+ * 晚到即销 + cleanup revoke（防 objectURL 泄漏），加载失败给可见占位不出断链播放器。
+ */
+function AudioBubble({ fileId }: { fileId: string }): JSX.Element | null {
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let revoked: string | null = null; // 本 effect 实例持有的 objectURL（闭包内跨 then/cleanup 可见）
+    let alive = true;
+    setUrl(null);
+    setErr("");
+    void fetchFileBlobUrl(fileId)
+      .then((u) => {
+        if (!alive) {
+          URL.revokeObjectURL(u); // 晚到的结果：无人再用，直接销
+          return;
+        }
+        revoked = u;
+        setUrl(u);
+      })
+      .catch((e) => {
+        if (alive) setErr((e as Error).message);
+      });
+    return () => {
+      alive = false;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [fileId]);
+
+  if (err) return <div className="mt-1 text-[11px] text-[#b42318]">音频加载失败：{err}</div>;
+  return url ? (
+    <audio controls src={url} className="mt-1 w-full max-w-[260px]" data-testid="audio-bubble" />
+  ) : null;
+}
+
 export function ChatPage() {
   const convId = useUiStore((s) => s.activeConversationId)!;
   const leave = useUiStore((s) => s.leaveConversation);
@@ -133,6 +171,10 @@ export function ChatPage() {
   const [emojiOpen, setEmojiOpen] = useState(false);
   /** 语音输入进行中（Web Speech API 可用时；不可用时 toggleVoice 给可见提示）。 */
   const [listening, setListening] = useState(false);
+  /** 语音双选项浮层（mic 按钮弹出：转文字 / 录音），会话级清理。 */
+  const [voiceMenu, setVoiceMenu] = useState(false);
+  /** MediaRecorder 录音进行中（录音态提示行与中止收尾共用）。 */
+  const [recording, setRecording] = useState(false);
   /** @ 选择器：null=关；via 区分按钮/键入 token（键入选中后锁到 token 消失，防草稿未变时每击键重弹）。 */
   const [picker, setPicker] = useState<{ via: "button" | "token"; query: string } | null>(null);
   /** 已选 mention（输入栏下 chip）：与草稿文本解耦，发送时非空才进 payload.mentions。 */
@@ -157,6 +199,17 @@ export function ChatPage() {
   const wsHandleRef = useRef<WsHandle | null>(null);
   /** 语音识别器实例：切会话/卸载时 stop，避免后台继续识别回填草稿。 */
   const recRef = useRef<{ start(): void; stop(): void } | null>(null);
+  /** MediaRecorder 录音实例（与 STT 的 recRef 区分）：停录/中止收口都在 onstop。 */
+  const voiceRecRef = useRef<MediaRecorder | null>(null);
+  /** 录音起点毫秒（Date.now）：<1s 拒发与 60s 上限后的时长判定依据。 */
+  const voiceRecStartRef = useRef(0);
+  /** 60s 上限定时器 id：onstop 即清，防悬空回调作用于已结束的录音。 */
+  const voiceRecTimerRef = useRef<number | null>(null);
+  /**
+   * 当前录音的「取消」闭包（置取消位 + stop）：切会话/卸载/取消钮共用——
+   * 取消位放闭包而非共享 ref，防前一实例的晚到 onstop 误清后一实例的标志。
+   */
+  const voiceRecCancelRef = useRef<(() => void) | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   /** 触发句柄（convId → 集合）：「中断」只 abort 当前会话的流；卸载时全部中止（关页不空烧 token）。 */
   const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
@@ -299,6 +352,10 @@ export function ChatPage() {
     setPicker(null);
     setTokenLock(false);
     setEmojiOpen(false);
+    setVoiceMenu(false);
+    // 录音同为会话级：中止旧会话录音（置取消位 → stop，onstop 停轨且跳过发送），录音态即时退出
+    setRecording(false);
+    voiceRecCancelRef.current?.();
     setListening(false);
     // 回复引用也是会话级：A 会话的引用目标不得带进 B 会话
     setReplyTarget(null);
@@ -409,13 +466,15 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 卸载（离开聊天页）：中止全部进行中流，不再空烧供应商 token；语音识别同停
+  // 卸载（离开聊天页）：中止全部进行中流，不再空烧供应商 token；语音识别同停；
+  // 录音中止同走取消位（onstop 停麦克风轨、放弃发送，60s 定时器一并清）
   useEffect(
     () => () => {
       for (const set of Object.values(runsRef.current)) {
         for (const h of set) h.abortAll();
       }
       recRef.current?.stop();
+      voiceRecCancelRef.current?.();
     },
     [],
   );
@@ -659,6 +718,77 @@ export function ChatPage() {
     setListening(true);
   };
 
+  /** 特性检测：无 MediaRecorder 时浮层录音选项禁用 + 小字提示（不自造降级）。 */
+  const hasRecorder = typeof MediaRecorder !== "undefined";
+
+  /**
+   * 开始录音（语音消息选项）：getUserMedia → MediaRecorder 录 webm。
+   * 结束（自然停 / 60s 上限 / 手动停）统一在 onstop：停轨 → 时长判定（<1s 拒发）
+   * → 复用 sendFile（上传 + 纯附件消息，6MB 上限与失败提示一并继承）。
+   */
+  const startRecording = async () => {
+    if (voiceRecRef.current) return; // 录音中防重入（浮层重开再选也不会并行开两条）
+    let stream: MediaStream | null = null;
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = mediaStream;
+      const rec = new MediaRecorder(mediaStream);
+      const chunks: BlobPart[] = [];
+      let cancelled = false; // 本实例取消位（闭包）：取消/切会话/卸载 → onstop 跳过发送
+      const cancel = () => {
+        cancelled = true;
+        if (rec.state === "recording") rec.stop();
+      };
+      voiceRecCancelRef.current = cancel;
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = () => {
+        mediaStream.getTracks().forEach((t) => t.stop()); // 无论发不发送都停麦克风轨（防占用/泄漏）
+        if (voiceRecTimerRef.current != null) {
+          clearTimeout(voiceRecTimerRef.current); // 60s 上限定时器随结束即清
+          voiceRecTimerRef.current = null;
+        }
+        if (voiceRecRef.current === rec) voiceRecRef.current = null;
+        if (voiceRecCancelRef.current === cancel) voiceRecCancelRef.current = null;
+        setRecording(false);
+        if (cancelled) return; // 取消/切会话/卸载：静默放弃，不上传不发送
+        const dur = Date.now() - voiceRecStartRef.current;
+        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        if (dur < 1000) {
+          setSendNotice("录音太短，未发送");
+          return;
+        }
+        const f = new File(
+          [blob],
+          `语音-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}.webm`,
+          { type: blob.type },
+        );
+        void sendFile(f); // 既有上传 + 发 file 消息（MAX_UPLOAD 6MB 检查复用）
+      };
+      rec.start();
+      voiceRecRef.current = rec;
+      voiceRecStartRef.current = Date.now();
+      setRecording(true);
+      setSendNotice(null);
+      voiceRecTimerRef.current = window.setTimeout(() => {
+        if (voiceRecRef.current === rec && rec.state === "recording") rec.stop(); // 60s 上限自动停
+      }, 60_000);
+    } catch {
+      if (stream) stream.getTracks().forEach((t) => t.stop()); // 半途失败（权限拒/无设备）不留活轨
+      setSendNotice("无法访问麦克风");
+    }
+  };
+
+  /** 正常停止：onstop 里按时长判定发送（<1s 拒发）。 */
+  const stopRecording = () => {
+    const rec = voiceRecRef.current;
+    if (rec && rec.state === "recording") rec.stop();
+  };
+
+  /** 取消：置本实例取消位后 stop——onstop 停轨、跳过发送，静默退出录音态。 */
+  const cancelRecording = () => {
+    voiceRecCancelRef.current?.();
+  };
+
   return (
     <div className="flex h-full flex-col">
       <header className="relative flex items-center gap-2.5 border-b border-line-soft px-5 py-3">
@@ -748,7 +878,14 @@ export function ChatPage() {
                     {m.payload.text
                       ? renderTextWithMentions(m.payload.text, m.payload.mentions)
                       : null}
-                    {m.payload.file ? <AttachmentPreview file={m.payload.file} /> : null}
+                    {/* 附件：audio/* 先于 image/文件卡路由到播放器气泡（Task 5） */}
+                    {m.payload.file ? (
+                      m.payload.file.mime.startsWith("audio/") ? (
+                        <AudioBubble fileId={m.payload.file.id} />
+                      ) : (
+                        <AttachmentPreview file={m.payload.file} />
+                      )
+                    ) : null}
                     {readByPeer ? (
                       <div className="mt-0.5 text-right text-[9px] text-muted">已读</div>
                     ) : null}
@@ -815,10 +952,33 @@ export function ChatPage() {
         <div ref={bottomRef} />
       </div>
       <form onSubmit={send} className="relative border-t border-line-soft">
-        {sendNotice && (
-          <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
-            {sendNotice}
-          </p>
+        {/* 提示行（复用同一位）：录音中占位（停止/取消入口），否则走发送提示 */}
+        {recording ? (
+          <div className="flex items-center gap-3 px-5 pt-2 text-[12px]">
+            <span role="status">录音中…（最长 60 秒）</span>
+            <button
+              type="button"
+              aria-label="停止录音"
+              className="rounded border border-line px-2 py-0.5 hover:bg-[#f3f3f3]"
+              onClick={stopRecording}
+            >
+              停止
+            </button>
+            <button
+              type="button"
+              aria-label="取消录音"
+              className="rounded border border-line px-2 py-0.5 text-muted hover:bg-[#f3f3f3]"
+              onClick={cancelRecording}
+            >
+              取消
+            </button>
+          </div>
+        ) : (
+          sendNotice && (
+            <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
+              {sendNotice}
+            </p>
+          )
         )}
         {/* 引用预览条：回复目标署名 + 原文片段 + × 取消（会话切换/发送成功自动清） */}
         {replyTarget && (
@@ -908,6 +1068,35 @@ export function ChatPage() {
             onChange={(e) => onDraftChange(e.target.value)}
             onKeyDown={onInputKeyDown}
           />
+          {/* 语音双选项浮层：转文字（原 STT）/ 录音（MediaRecorder）；无该 API 时录音项禁用 */}
+          {voiceMenu && (
+            <div className="absolute bottom-full right-0 z-40 mb-1 w-[160px] rounded-xl border border-[#ececec] bg-white p-1 shadow-card">
+              <button
+                type="button"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[#f7f7f7]"
+                onClick={() => {
+                  setVoiceMenu(false);
+                  toggleVoice();
+                }}
+              >
+                语音输入（转文字）
+              </button>
+              <button
+                type="button"
+                disabled={!hasRecorder}
+                className="w-full rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[#f7f7f7] disabled:text-[#bbb] disabled:hover:bg-transparent"
+                onClick={() => {
+                  setVoiceMenu(false);
+                  void startRecording();
+                }}
+              >
+                语音消息（录音）
+              </button>
+              {!hasRecorder && (
+                <p className="px-2 pb-1 pt-0.5 text-[10px] text-muted">当前环境不支持录音</p>
+              )}
+            </div>
+          )}
           <button
             type="button"
             aria-label="语音输入"
@@ -916,7 +1105,7 @@ export function ChatPage() {
                 ? "border-ink bg-ink text-white"
                 : "border-line text-muted hover:bg-[#f3f3f3]"
             }`}
-            onClick={toggleVoice}
+            onClick={() => setVoiceMenu((v) => !v)}
           >
             <MicIcon width={16} height={16} />
           </button>
