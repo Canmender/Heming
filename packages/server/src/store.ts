@@ -52,13 +52,6 @@ export interface Store {
    */
   recallMessage(conversationId: string, messageId: string, userId: string): Message | null;
   /**
-   * 表情回应 toggle（二期 IM Task 6）：非成员 / 消息不存在 → null；
-   * 成员在 userIds 中则移除（移除后该 emoji 条目 userIds 空 → 剔除整项），不在则追加。
-   * emoji 条目按出现序保留，新 emoji 追加末尾；写回 payload 并持久化，返回更新后消息。
-   * 回应自己/他人消息均可（不限制 sender）。
-   */
-  reactMessage(conversationId: string, messageId: string, userId: string, emoji: string): Message | null;
-  /**
    * 明文重加密（E2E Task 2，设计 §7）：按 messageId 定位，仅当 sender=userId 且当前
    * enc="plain" 时**原子**替换信封（enc/cipher/chain_kid/n），并在**同一更新内**清掉明文：
    * payload 置 {"text":""} 占位、replyTo 置 null（设计 §1/§7：e2e 消息服务端不留内容/
@@ -304,29 +297,6 @@ export function createMemoryStore(): Store {
       // 原地置位 + 浅拷贝返回：listMessages 持有内部引用（既有口径），改字段即持久；
       // 返回拷贝避免调用方持有可变内部对象（对齐 updateProfile 的替换语义精神）。
       m.recalledAt = new Date().toISOString();
-      return { ...m };
-    },
-    reactMessage(conversationId, messageId, userId, emoji) {
-      // 权限/存在性口径同 recallMessage：非成员或消息不存在 → null。
-      if (!conversations.get(conversationId)?.members.includes(userId)) return null;
-      const list = messages.get(conversationId);
-      const m = list?.find((x) => x.id === messageId);
-      if (!m) return null;
-      const reactions = [...(m.payload.reactions ?? [])];
-      const idx = reactions.findIndex((r) => r.emoji === emoji);
-      if (idx === -1) {
-        reactions.push({ emoji, userIds: [userId] });
-      } else {
-        const cur = reactions[idx];
-        const userIds = cur.userIds.includes(userId)
-          ? cur.userIds.filter((u) => u !== userId)
-          : [...cur.userIds, userId];
-        if (userIds.length === 0) reactions.splice(idx, 1); // 空项剔除
-        else reactions[idx] = { emoji, userIds };
-      }
-      // 原地替换 payload（新对象）：listMessages 持有内部引用，改字段即持久；
-      // 返回拷贝避免调用方持有可变内部对象（对齐 recallMessage 口径）。
-      m.payload = { ...m.payload, reactions };
       return { ...m };
     },
     reencryptMessage(messageId, userId, envelope) {

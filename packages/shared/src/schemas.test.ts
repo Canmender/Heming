@@ -310,9 +310,10 @@ describe("MessagePayloadSchema reactions（二期 IM Task 6 表情回应）", ()
       }).success,
     ).toBe(false);
   });
-  it("react_message 已废（E2E Task 2）：客户端事件拒收；服务端 message_updated 形状保留", () => {
+  it("react_message 已废（E2E Task 2）：客户端事件拒收；message_updated 服务端广播已随 E2E 事件化移除", () => {
     // 回应改为 e2e 信封消息（kind=reaction，设计 §4）：react_message 客户端事件从契约移除，
-    // 服务端对旧客户端发来的该事件应回 bad_event（parse 失败）。message_updated 服务端广播保留。
+    // 服务端对旧客户端发来的该事件应回 bad_event（parse 失败）。message_updated 服务端广播
+    // 亦无生产者（回应事件化后），随 E2E 收尾一并从 WsServerEventSchema 删除。
     expect(
       WsClientEventSchema.safeParse({ type: "react_message", conversationId: "c1", messageId: "m1", emoji: "👍" })
         .success,
@@ -334,7 +335,7 @@ describe("MessagePayloadSchema reactions（二期 IM Task 6 表情回应）", ()
           recalledAt: null,
         },
       }).success,
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 

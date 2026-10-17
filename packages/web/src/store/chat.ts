@@ -554,19 +554,6 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       return;
     }
-    if (e.type === "message_updated") {
-      // 表情回应（Task 6）：整条替换，按 id 定位；列表长度与顺序不变（未加载的消息静默忽略）
-      const list = get().messages[e.message.conversationId];
-      if (list) {
-        set({
-          messages: {
-            ...get().messages,
-            [e.message.conversationId]: list.map((m) => (m.id === e.message.id ? e.message : m)),
-          },
-        });
-      }
-      return;
-    }
     if (e.type === "agent_chunk") {
       // 本机流已在触发端本地累积（onLocalDelta），回声不再重复 upsert
       if (get().streamOwner[e.streamId]) return;

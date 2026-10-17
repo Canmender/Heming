@@ -256,7 +256,7 @@ describe("ws", () => {
     if (ev.type === "error") expect(ev.code).toBe("bad_event");
     // 不入库（reactions 无落点）
     expect(store.listMessages(conv.id)[0].payload.reactions).toBeUndefined();
-    // 对端静默：既无 message_updated 广播，也未落入 mark_read 兜底广播 read_update
+    // 对端静默：既无任何广播，也未落入 mark_read 兜底广播 read_update
     const raced = await Promise.race([
       nextEvent(wsB).then(() => "got" as const),
       new Promise((r) => setTimeout(() => r("none" as const), 100)),

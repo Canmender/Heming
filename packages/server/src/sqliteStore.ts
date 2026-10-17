@@ -272,36 +272,6 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         | undefined;
       return row ? rowToMessage(row) : null;
     },
-    reactMessage(conversationId, messageId, userId, emoji) {
-      // 权限口径同 memory/recallMessage：非成员 → null（省掉后面对不存在行也返回 null 的歧义）
-      if (!this.isMember(conversationId, userId)) return null;
-      const row = db.prepare("SELECT * FROM messages WHERE id = ? AND conv_id = ?").get(messageId, conversationId) as
-        | Parameters<typeof rowToMessage>[0]
-        | undefined;
-      if (!row) return null;
-      const payload = rowToMessage(row).payload;
-      const reactions = [...(payload.reactions ?? [])];
-      const idx = reactions.findIndex((r) => r.emoji === emoji);
-      if (idx === -1) {
-        reactions.push({ emoji, userIds: [userId] });
-      } else {
-        const cur = reactions[idx];
-        const userIds = cur.userIds.includes(userId)
-          ? cur.userIds.filter((u) => u !== userId)
-          : [...cur.userIds, userId];
-        if (userIds.length === 0) reactions.splice(idx, 1); // 空项剔除
-        else reactions[idx] = { emoji, userIds };
-      }
-      // JSON.stringify 口径与 addMessage 对齐；读回走 rowToMessage（防映射漂移）。
-      db.prepare("UPDATE messages SET payload = ? WHERE id = ?").run(
-        JSON.stringify({ ...payload, reactions }),
-        messageId,
-      );
-      const back = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as
-        | Parameters<typeof rowToMessage>[0]
-        | undefined;
-      return back ? rowToMessage(back) : null;
-    },
     reencryptMessage(messageId, userId, envelope) {
       // 单条件 UPDATE 完成鉴权与写入（sender + enc='plain'）→ 原子替换信封四字段，
       // 并在**同一条 UPDATE** 内清明文：payload 置 {"text":""} 占位（列 NOT NULL 不能

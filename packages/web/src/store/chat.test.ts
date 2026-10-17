@@ -395,44 +395,6 @@ describe("chat store", () => {
     expect(list[0].recalledAt).toBeNull();
   });
 
-  // —— 二期 IM Task 6：message_updated 处理（按 id 整条替换，列表长度不变）——
-
-  it("onWsEvent message_updated：按 id 整条替换（含 reactions），其余消息不动", () => {
-    useChatStore.getState().appendMessage(msg("m1", "一"));
-    useChatStore.getState().appendMessage(msg("m2", "二"));
-    useChatStore.getState().onWsEvent({
-      type: "message_updated",
-      message: {
-        ...msg("m1", "一"),
-        payload: { text: "一", reactions: [{ emoji: "👍", userIds: ["u2"] }] },
-      },
-    });
-    const list = useChatStore.getState().messages["c1"];
-    expect(list).toHaveLength(2); // 整条替换，不追加/不移除
-    expect(list.find((m) => m.id === "m1")?.payload.reactions).toEqual([
-      { emoji: "👍", userIds: ["u2"] },
-    ]);
-    expect(list.find((m) => m.id === "m2")?.payload.reactions).toBeUndefined(); // 其余不动
-  });
-
-  it("onWsEvent message_updated：未知会话/未知消息静默忽略（不抛不建空表）", () => {
-    useChatStore.getState().appendMessage(msg("m1", "一"));
-    expect(() =>
-      useChatStore.getState().onWsEvent({
-        type: "message_updated",
-        message: { ...msg("m1", "一"), conversationId: "ghost" },
-      }),
-    ).not.toThrow();
-    expect(useChatStore.getState().messages["ghost"]).toBeUndefined();
-    useChatStore.getState().onWsEvent({
-      type: "message_updated",
-      message: { ...msg("nope", "改我"), payload: { text: "改我", reactions: [] } },
-    });
-    const list = useChatStore.getState().messages["c1"];
-    expect(list).toHaveLength(1);
-    expect(list[0].payload.reactions).toBeUndefined();
-  });
-
   // —— 二期 IM Task 7：他机流 watchdog（长时间无收尾 → error 行供手动重试）——
 
   it("sweepStaleStreams：超时流置 error，新鲜流与已完成流不动", () => {

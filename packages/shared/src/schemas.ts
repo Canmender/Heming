@@ -298,11 +298,6 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     messageId: z.string().min(1),
     at: z.string(),
   }),
-  // 表情回应广播（二期 IM Task 6）：整条消息替换（接收端按 message.id 覆盖本地同 id 条目）
-  z.object({
-    type: z.literal("message_updated"),
-    message: MessageSchema,
-  }),
   z.object({
     type: z.literal("agent_chunk"),
     conversationId: z.string().min(1),

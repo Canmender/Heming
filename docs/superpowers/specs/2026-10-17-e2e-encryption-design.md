@@ -1,7 +1,7 @@
 # 和鸣 E2E 端到端加密设计（前向保密棘轮）
 
 - 日期：2026-10-17
-- 状态：用户已确认三项选型（AskUserQuestion）：**①前向保密棘轮 ②服务端逻辑全部客户端化 ③密钥不恢复**
+- 状态：已实现
 - 关联：`2026-10-13-heming-platform-design.md`（总规格）、`2026-10-16-m3-agents-design.md`（本地驱动红线）
 
 ## 1. 红线与目标
@@ -30,6 +30,7 @@
 ### 3.1 设备身份与预配对
 - 每设备生成：身份键对 `IK`（P-256 ECDH，`kid = base64(SPKI thumbprint)`）。
 - 上云（仅公钥）：`POST/GET /api/e2e/keys` → `{ ik, signedPrekey: {pub, sig, createdAt}, onetime: [{pub}] }`；签名用 IK 的 ECDSA P-256 签名键（身份键对附带签名用途：生成 ECDH+签名两个算法键或用 SPKI 派生——实现取「IK 为 ECDSA 签名 + EK 为 ECDH」双键，简化签名链）。
+- **实现口径（消解上文措辞歧义）**：身份为 **ECDH + ECDSA 双键**——`IK` 生成两把 P-256 算法键（一把 ECDH 用于会话密钥协商、一把 ECDSA 用于 SPK/OPK 签名），`kid` 取 **ECDH SPKI 指纹**（`base64(SPKI thumbprint)`），用于链分发与信封的 `chainKid` 归属。
 - 发起方取对方 IK+SPK+OPK → X3DH 简化版（DH1=EK×IK, DH2=EK×SPK, DH3=SK×IK, DH4=SK×SPK → HKDF 拼接 → 根密钥 RK）。
 
 ### 3.2 会话棘轮（统一模型：Sender-Keys，直聊=1 人组）
@@ -44,8 +45,10 @@
   - 明文存量：`enc: "plain"`（既有形状不变）。
   - 密文：`enc: "e2e"`，`cipher: base64({v:1, n: number, nonce, data})`，公开字段仅 `chainKid`(发送链指纹)、`n`；**payload/replyTo/mentions 全进密文**。
 - 服务端 Store 持久化信封；REST/WS 转发信封不解析。
-- 新消息体结构（密文内 JSON，AAD 绑定 `conversationId+messageId` 防搬移）：
+- 新消息体结构（密文内 JSON）：
   `{ v:1, kind:"text"|"file"|"forward"|"reaction"|"chaindist"|"init", text?, file?, forward?, replyTo?, reaction?:{target,emoji,op:"add"|"remove"}, ... }`
+- **AAD 实际口径（消解早前措辞）**：消息信封的 AAD 绑定 `convId|chainKid|n`（`messageId` 在**发送时未知**——服务端在入库时才分配 id，故不入 AAD）。同会话内换 `messageId` 不构成已知边界的搬移防护；已有边界由 T4 的 `(chainKid, n)` 去重兜底（同链同索引只落一次），乱序窗口按 `n` 定位。agent 流式三事件的 AAD 为 `convId|streamId|index`（流式片发送时 `index` 已知）。
+- **`agent_error` 已信封化（消解早前措辞）**：触发端上报的 `agent_error` 同样走密文信封（`message` 置空、全文进 `cipher`，AAD=`convId|streamId`），与 `agent_chunk`/`agent_finish` 同口径——明文路径的 `min(1)` 约束由契约 superRefine 按形态分派，服务端对信封只存不读。
 
 ## 4. 协议改动清单（服务端）
 

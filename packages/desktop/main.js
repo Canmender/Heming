@@ -4,7 +4,7 @@ const path = require("node:path");
 const { loadWindowState, saveWindowState } = require("./window-state");
 
 const pkg = require("./package.json");
-const APP_DEFAULT_URL = "http://47.92.39.184";
+const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins");
 
 // 加载地址优先级：HEMING_DEV_URL（本地开发）> HEMING_WEB_URL > 默认远程（云端中心化）
 function resolveAppUrl(env) {
@@ -27,14 +27,6 @@ function openInSystemBrowser(url) {
   shell.openExternal(url).catch((err) => {
     console.log("[heming] 打开系统浏览器失败:", (err && err.message) || err);
   });
-}
-
-function originOf(url) {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return null;
-  }
 }
 
 // 主 frame 导航白名单：本应用加载源 + 默认远程源 + localhost（dev 代理等）。
@@ -66,6 +58,10 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  // 安全上下文白名单（E2E 设计 §2.1）：须在 whenReady 之前调用，恢复 crypto.subtle。
+  const origins = secureOrigins();
+  if (origins) app.commandLine.appendSwitch("unsafely-treat-insecure-origin-as-secure", origins);
+
   app.on("second-instance", () => {
     console.log("[heming] 检测到第二实例，聚焦已有窗口");
     const win = BrowserWindow.getAllWindows()[0];
