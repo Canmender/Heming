@@ -34,8 +34,10 @@ api 服务本身**不向公网发布端口**（compose 内网互通）；对外�
 
 ```bash
 # 在仓库根目录（data/ 是本地开发库，不上传——服务器用数据卷）
+# 注意：web-dist 必须单独排除 —— GNU tar 的 `--exclude=dist` 只匹配名为 dist 的路径段，
+# 不会连带排掉 packages/desktop/web-dist（嵌入客户端用的产物，服务器用不上，约 380KB）。
 tar --exclude=node_modules --exclude=.git --exclude=.superpowers \
-    --exclude=dist --exclude=.worktrees --exclude=data \
+    --exclude=dist --exclude=web-dist --exclude=.worktrees --exclude=data \
     --exclude=release --exclude=.claude \
     -czf heming.tar.gz .
 scp heming.tar.gz root@47.92.39.184:~/
@@ -44,6 +46,8 @@ scp heming.tar.gz root@47.92.39.184:~/
 ssh root@47.92.39.184
 mkdir -p ~/heming && tar -xzf ~/heming.tar.gz -C ~/heming && cd ~/heming
 ```
+
+> 校验打包是否干净：`tar -tzf heming.tar.gz | grep -cE "web-dist|node_modules|\.superpowers"` 应为 `0`。
 
 ## 3. 构建与启动
 
