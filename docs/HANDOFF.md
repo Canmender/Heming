@@ -39,7 +39,7 @@
 9. **主页真实数据化**：主页硬编码项全部换成真实数据源——「我的智能体」接名册（`agentsRoster`，含系统预设）、智能体动态区接群内已挂载（空时回退名册）前 3 个、版本徽标读构建期注入的 `__APP_VERSION__`。规格见 `docs/superpowers/specs/2026-10-18-home-page-real-data-design.md`。
 10. **桌面窗口视觉 + 启动动画**（美术会话交付）：
     - **自定义标题栏**：隐藏系统栏（`titleBarStyle: "hidden"`）+ 保留原生窗口控件（`titleBarOverlay`，配色随应用 `#fafafa`/`#666`、高 38px）；拖拽带用 `env(titlebar-area-*)` 自适应、宽度自动避让窗口控件；窗口背景改 `#fafafa` 消除启动白闪。浏览器端不渲染（靠 `window.heming` 区分）。规格见 `docs/superpowers/specs/2026-10-18-window-chrome-design.md`。
-    - **启动动画**：3 秒双段式（splash 粒子聚拢 1.5s → BootWave 声波扩散 1.3s），不可跳过，尊重 `prefers-reduced-motion`；动画期间后台恢复登录态。
+    - **启动动画**：3 秒双段式（splash 粒子聚拢 1.5s → 静默 0.2s → BootWave 声波扩散 1.3s），不可跳过，尊重 `prefers-reduced-motion`；动画期间后台恢复登录态（`AppShell` 从 T=0 常驻，`BootWave` 只作遮罩）。规格与实施记录见 `docs/superpowers/specs/2026-10-18-boot-animation-design.md`（§9 记了与设计正文的 9 处偏差及原因，**改动这块前先读**）。
 11. **语音通话**：Mesh WebRTC（1:1 + 群聊），信令复用现有 WS 通道（`voice_call_invite/accept/reject/hangup/ice` 五事件，服务端定向单播 + 内存 `activeCalls` 跟踪，30s ringing 超时兜底）；媒体流 DTLS-SRTP 点对点、服务端不碰媒体；仅桌面端（网页端收 invite 自动拒绝并提示）；Electron 注入 ICE 配置（`GET /api/ice-servers` 读 `HEMING_STUN` / `HEMING_TURN_*`）、窗口最小化与来电系统通知 + 任务栏闪烁。
 
 ## 3. 仓库结构与关键文件
@@ -70,8 +70,10 @@ packages/
     ├── main.js               # 窗口创建（含 titleBarOptions 接线）+ 菜单 + 导航白名单 + splash 生命周期
     ├── title-bar.js          # 自定义标题栏平台分支（纯函数，node:test 可测）
     ├── secure-origins.js     # HTTP 源安全上下文白名单
+    ├── splash-config.js      # 启动动画时序常量 + 纯净判定（shouldShowSplash / splashWindowOptions / isFatalLoadFailure）
+    ├── splash-lifecycle.js   # splash 窗口生命周期（关闭地板 / 8s 加载看门狗 / 失败兜底；注入窗口故可单测）
     ├── splash.html           # 启动动画·粒子聚拢段（无 preload，自包含）
-    └── preload.js            # contextBridge 暴露 window.heming（platform + 启动动画信号）
+    └── preload.js            # contextBridge 暴露 window.heming（platform + 启动动画信号；回调登记在隔离世界闭包）
 ```
 
 **本机存储键**（localStorage）：`heming.token` · `heming.llmConfigs` · `heming.agentLlm` · `heming.agentPrompts` · `heming.tokenUsage` · `heming.e2e.*`（身份/链/去重/新鲜度） · `heming.msgCache.*`（明文缓存） · `heming.memory.*` / `heming.skills` / `heming.skillBindings` / `heming.context*`（记忆/技能）。
@@ -88,10 +90,11 @@ packages/
 
 ## 5. 下一步候选（未完成工作）
 
-> **⚠ 本批（窗口标题栏 + 启动动画）只过了自动化门禁，真机与浏览器端尚未验证**——这类改动只有跑起来才看得出观感对不对：
-> 1. **真机验证**：`pnpm --filter @heming/desktop dist` 重打包 → 安装 → 确认标题栏高度/配色/拖拽手感/与窗口控件的避让/Win11 贴靠布局；顺带确认启动动画 3 秒节奏与音效。
-> 2. **浏览器端无回归**：标题栏只在 Electron 渲染，但 `LoginPage` 的 `h-full` 与背景改 `#fafafa` 对浏览器同样生效——需在 `http://47.92.39.184` 扫一眼登录页与主壳。
-> 3. **线上部署**：上述两项通过后再走 `docs/deploy.md` 流程。
+> **⚠ 本批（窗口标题栏 + 启动动画）尚未做肉眼/真机验证**——这类改动只有跑起来才看得出观感对不对：
+> 1. **启动动画**：逻辑与 DOM 层**已验**（粒子铺满 `20→1260`、核心圆点无延迟、遮罩揭示、`inert` + `pointer-events`、登录态与动画并行、rAF 被节流时遮罩仍按时卸载——见启动动画设计文档 §9），但**观感未过目**。注意当前 `release/` 里的安装包是合并**前**构建，需先重打再看 3 秒节奏、粒子质感、揭示连贯度、音效音量。
+> 2. **标题栏**：**完全未真机验证**——高度/配色/拖拽手感/与窗口控件避让/Win11 贴靠布局。
+> 3. **浏览器端无回归**：标题栏只在 Electron 渲染，但 `LoginPage` 的 `h-full` 与背景改 `#fafafa` 对浏览器同样生效——需在 `http://47.92.39.184` 扫一眼登录页与主壳。
+> 4. **线上部署**：上述通过后再走 `docs/deploy.md` 流程。
 
 **二期主线**（总规格 `2026-10-13-heming-platform-design.md` §9）：
 1. **MCP 接口区**：stdio/HTTP transport、命名空间前缀注册、渐进发现、白名单外危险操作 HITL 确认（参考调研报告 §3）。
@@ -103,6 +106,7 @@ packages/
 
 **技术债/遗留**（各批次终审均裁定「可留后续」，详见对应计划文件与账本注释）：
 - **语音通话**（终审批准延期）：ICE failed 后的自动重连、`disconnected` 状态提示、WS 断连重新协商、本地流断开重取（规格 §5.4 仅实现「failed 5s 挂断」）；通话中邀请新成员后期加入（§5.5）；通话中底部横幅条与「回到通话」（§6.4）；群面板逐成员在线状态（§6.2）；群聊「超过 6 人」提示（§6.4）；E2E 双标签真机通话测试（§8.5，建议云端真机验证替代）；`GET /api/ice-servers` 无鉴权——配置 TURN 时凭据对未登录者可读，属部署层风险（与规格 §7.3 一致）。
+- **启动动画**（终审后有 3 轮修复，见设计文档 §9）：四角 2px 粒子重合；规格 §4 圆点「轻微呼吸缩放」未实现（圆点 1400ms 出现 vs splash 1700ms 关闭，可用窗口仅约 300ms）；`WAVE_MS` 在 web 与 desktop 各写一份无跨包断言（漂移静默）；`backgroundThrottling: false` 覆盖窗口整个生命周期（被遮挡/最小化时不再省电）；纯浏览器直开时每次加载都播 1.3s 声波段。
 - 撤回时限与「撤回占位原文」；表情回应种类数封顶（服务端未限 20 种）；语音消息转文字；转发嵌套深度限制；上传进度条；会话级文件 ACL；CSP；Electron safeStorage（密钥落盘加密）；网页端 HTTPS 化。
 - 已知语义变化：**新入群成员只能解密加入之后的消息**（无密钥恢复模型的必然结果）；**旧客户端/纯浏览器（HTTP）无法发送**（安全上下文要求，桌面端经白名单解决）。
 
