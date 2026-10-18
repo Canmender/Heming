@@ -34,10 +34,13 @@ api 服务本身**不向公网发布端口**（compose 内网互通）；对外�
 
 ```bash
 # 在仓库根目录（data/ 是本地开发库，不上传——服务器用数据卷）
-# 注意：web-dist 必须单独排除 —— GNU tar 的 `--exclude=dist` 只匹配名为 dist 的路径段，
-# 不会连带排掉 packages/desktop/web-dist（嵌入客户端用的产物，服务器用不上，约 380KB）。
+# 注意：tar 不认 .gitignore，必须逐个排除构建产物。两个易漏的：
+#   web-dist        —— GNU tar 的 `--exclude=dist` 只匹配名为 dist 的路径段，
+#                      不会连带排掉 packages/desktop/web-dist（嵌入客户端用的产物，约 380KB）
+#   @hemingdesktop  —— electron-builder 偶发落在仓库根的产物目录（约 260MB！）
 tar --exclude=node_modules --exclude=.git --exclude=.superpowers \
-    --exclude=dist --exclude=web-dist --exclude=.worktrees --exclude=data \
+    --exclude=dist --exclude=web-dist --exclude=@hemingdesktop \
+    --exclude=.worktrees --exclude=data \
     --exclude=release --exclude=.claude \
     -czf heming.tar.gz .
 scp heming.tar.gz root@47.92.39.184:~/
@@ -47,7 +50,9 @@ ssh root@47.92.39.184
 mkdir -p ~/heming && tar -xzf ~/heming.tar.gz -C ~/heming && cd ~/heming
 ```
 
-> 校验打包是否干净：`tar -tzf heming.tar.gz | grep -cE "web-dist|node_modules|\.superpowers"` 应为 `0`。
+> **打包后必做洁净度校验**（曾经因为漏排 `@hemingdesktop` 把上传包从 0.7MB 变成 111MB）：
+> `tar -tzf heming.tar.gz | grep -cE "web-dist|node_modules|\.superpowers|@hemingdesktop"` 应为 `0`；
+> 包体积应在 1MB 量级。
 
 ## 3. 构建与启动
 
