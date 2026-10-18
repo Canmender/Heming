@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, Menu, dialog, shell, screen } = require("electron");
+const { app, BrowserWindow, Menu, dialog, shell, screen, ipcMain, Notification } = require("electron");
 const path = require("node:path");
 const { loadWindowState, saveWindowState } = require("./window-state");
 
@@ -135,8 +135,36 @@ if (!gotLock) {
     }
 
     win.loadURL(appUrl);
+
+    // 语音通话：拉取服务端 ICE 配置（STUN/TURN）并注入渲染层。
+    // 用 HEMING_API_BASE 指定 API 源；缺省与加载页同源（appUrl 去尾斜杠）。
+    // 拉取失败静默——渲染层有公共 STUN 兜底，不阻塞窗口启动。
+    const iceBase = process.env.HEMING_API_BASE || appUrl.replace(/\/$/, "");
+    fetch(`${iceBase}/api/ice-servers`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && data.iceServers) {
+          win.webContents.executeJavaScript(
+            `window.__heming_ice_servers = ${JSON.stringify(data.iceServers)}`,
+          );
+        }
+      })
+      .catch(() => {});
+
+    // 窗口最小化时通知渲染层（渲染层据此弹系统通知，来电不丢）
+    win.on("minimize", () => {
+      win.webContents.send("voice-call:minimized");
+    });
+
     return win;
   }
+
+  // 语音通话系统通知（渲染层经 preload 的 __heming_voice_call.notify 请求）
+  ipcMain.on("voice-call:notify", (_event, title, body) => {
+    if (Notification.isSupported()) {
+      new Notification({ title, body }).show();
+    }
+  });
 
   function setupMenu() {
     const isDev = !app.isPackaged;

@@ -840,3 +840,80 @@ describe("agent streaming", () => {
     wsB.close();
   });
 });
+
+
+describe("voice_call 多连接清理（T2 评审修复）", () => {
+  it("用户仍有其他连接时断开一个连接，不误断进行中的通话", async () => {
+    // 同一用户开两条连接（多设备/多标签页）：invite 建立通话后关掉其中一条，
+    // 对端不应收到 hangup（旧实现无条件 cleanupCallsForUser 会误断）。
+    // 用收集器而非 nextEvent 竞态：连接关闭后可能有其他事件，只断言窗口内
+    // 没有 voice_call_hangup 即可。
+    const a1 = await connect(issueToken(aliceId));
+    const a2 = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bEvents: WsServerEvent[] = [];
+    b.on("message", (d) => bEvents.push(JSON.parse(d.toString())));
+
+    const bInvite = nextEvent(b);
+    a1.send(
+      JSON.stringify({
+        type: "voice_call_invite",
+        conversationId: convId,
+        callId: "call-multiconn-1",
+        sdp: "v=0",
+      }),
+    );
+    await bInvite;
+
+    // 关掉 a1，但 a2 仍在线
+    a1.close();
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(bEvents.some((e) => e.type === "voice_call_hangup")).toBe(false);
+    // 通话仍在：a2 发 ice 应正常投递
+    bEvents.length = 0;
+    const bIce = nextEvent(b);
+    a2.send(
+      JSON.stringify({
+        type: "voice_call_ice",
+        conversationId: convId,
+        callId: "call-multiconn-1",
+        candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
+      }),
+    );
+    expect((await bIce).type).toBe("voice_call_ice");
+
+    a2.close();
+    b.close();
+  });
+
+  it("最后一个连接断开时才补发 hangup", async () => {
+    const a1 = await connect(issueToken(aliceId));
+    const a2 = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+
+    const bInvite = nextEvent(b);
+    a1.send(
+      JSON.stringify({
+        type: "voice_call_invite",
+        conversationId: convId,
+        callId: "call-multiconn-2",
+        sdp: "v=0",
+      }),
+    );
+    await bInvite;
+
+    a1.close();
+    a2.close();
+
+    // 两条都断开后，b 应收到补发的 hangup
+    const bHangup = nextEvent(b);
+    const event = await bHangup;
+    expect(event.type).toBe("voice_call_hangup");
+    if (event.type === "voice_call_hangup") {
+      expect(event.callId).toBe("call-multiconn-2");
+    }
+
+    b.close();
+  });
+});

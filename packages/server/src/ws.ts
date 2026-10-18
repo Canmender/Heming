@@ -370,8 +370,12 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
 
     ws.on("close", () => {
       sockets!.delete(ws);
-      if (sockets!.size === 0) socketsByUser.delete(userId);
-      cleanupCallsForUser(userId);
+      // 仅在用户最后一个连接断开时才清理通话：多设备/多标签页在线时，
+      // 单个连接断开不应误断正在进行通话（T2 评审遗留项）。
+      if (sockets!.size === 0) {
+        socketsByUser.delete(userId);
+        cleanupCallsForUser(userId);
+      }
     });
 
     ws.on("error", () => { /* 连接级错误忽略，避免未捕获异常崩溃进程 */ });

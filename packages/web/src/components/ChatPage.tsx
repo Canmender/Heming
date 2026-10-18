@@ -531,11 +531,15 @@ export function ChatPage() {
     : "会话";
   const isGroup = conv?.type === "group";
 
-  // —— 语音通话（Task 4）：useVoiceCall 状态机；信令复用当前 WS 通道 ——
+  // —— 语音通话（Task 4/5）：useVoiceCall 状态机；信令复用当前 WS 通道 ——
+  // 仅 Electron 桌面端支持通话：以 preload 暴露的桥接 API 是否存在为判定依据。
+  const isElectron =
+    typeof window !== "undefined" &&
+    (window as unknown as { __heming_voice_call?: unknown }).__heming_voice_call !== undefined;
   const voiceCall = useVoiceCall({
     send: (e) => wsHandleRef.current?.send(e),
     myUserId: me?.id ?? "",
-    isDesktop: true, // 桌面端判定由 Task 5 注入
+    isDesktop: isElectron,
   });
 
   /** 通话对端名映射（1:1 用 conv.peer.displayName）；ringing 横幅与面板共用。 */
