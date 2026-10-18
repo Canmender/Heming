@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useUiStore, type Page } from "./store/ui.js";
 import { useAuthStore } from "./store/auth.js";
 import { getToken, fetchFiles, fetchFileUsage, uploadFile } from "./lib/api.js";
@@ -44,10 +44,22 @@ function fmtBytes(n: number): string {
 export function App() {
   const [bootDone, setBootDone] = useState(false);
   const handleBootDone = useCallback(() => setBootDone(true), []);
+  const shellRef = useRef<HTMLDivElement>(null);
+
+  // 动画期间主界面不可交互（规格 §7：动画不可跳过，不响应点击/键盘）。
+  // 遮罩挡住了画面，但 AppShell 早已挂载且活着——不加 inert 的话点击会落在看不见的
+  // 按钮上，全局快捷键（Alt+1–5 / Ctrl+\）也会在启动动画期间生效。
+  // React 18 无 inert 属性类型，用原生 toggleAttribute 等价设置/移除（同 RadarContacts）。
+  useEffect(() => {
+    shellRef.current?.toggleAttribute("inert", !bootDone);
+  }, [bootDone]);
 
   return (
     <>
-      <AppShell />
+      {/* 包一层仅为挂 inert：不加样式，AppShell 根节点自身的 h-screen 决定布局 */}
+      <div ref={shellRef}>
+        <AppShell />
+      </div>
       {!bootDone && <BootWave onDone={handleBootDone} />}
     </>
   );

@@ -109,24 +109,9 @@ test("isFatalLoadFailure：ERR_ABORTED(-3) 不算失败（导航被主动取消�
   assert.equal(isFatalLoadFailure(-3, true), false);
 });
 
-// ── main.js 接线不变量（无法在 Node 里起 Electron，用源码断言钉住关键接线）──
-test("main.js：主窗口 closed 时主动关闭 splash（否则残留全屏置顶遮罩）", () => {
-  assert.ok(mainSrc.includes('mainWin.on("closed"'), "缺少主窗口 closed 监听");
-});
-
-test("main.js：did-fail-load 用 on 而非 once（once 会被子 frame 失败提前吃掉）", () => {
-  assert.ok(mainSrc.includes('mainWin.webContents.on("did-fail-load"'));
-  assert.ok(!mainSrc.includes('mainWin.webContents.once("did-fail-load"'));
-});
-
-test("main.js：executeJavaScript 前有 isDestroyed 守卫", () => {
-  const idx = mainSrc.indexOf("executeJavaScript(BOOT_WAVE_SNIPPET)");
-  assert.ok(idx > 0, "未找到 BootWave 信号注入点");
-  // 调用点紧邻的上下文里必须有销毁守卫（webContents 已销毁时调用会同步抛错）
-  const before = mainSrc.slice(Math.max(0, idx - 200), idx);
-  assert.ok(before.includes("isDestroyed()"), "executeJavaScript 调用点前缺少 isDestroyed() 守卫");
-});
-
+// ── main.js 接线不变量（无法在 Node 里起 Electron，用源码断言钉住无行为接缝的两处）──
+// 关闭时机 / 启动信号 / 失败兜底 / 看门狗 / 主窗口关闭等行为在 splash-lifecycle.test.js
+// 用假窗口真实驱动，不在这里做字符串断言。
 test("main.js：有启动动画时主窗口 show:false（避免先闪白底主窗口）", () => {
   assert.ok(mainSrc.includes("show: !withSplash"));
 });

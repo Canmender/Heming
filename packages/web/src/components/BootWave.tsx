@@ -25,7 +25,10 @@ interface BootWaveProps {
 const STYLES = `
   .boot-wave {
     position: fixed; inset: 0; z-index: 9999;
-    pointer-events: none;
+    /* 吞掉动画期间的所有指针事件（规格 §7：动画不可跳过，不响应点击/键盘）。
+       键盘由 App 在主界面容器上挂 inert 挡住。遮罩揭完即卸载，不残留拦截。 */
+    pointer-events: auto;
+    cursor: default;
     overflow: hidden;
   }
   /* 白底揭示层：以中心为圆心的透明洞从 0% 涨到 100%，洞经过的地方露出下面的主界面。

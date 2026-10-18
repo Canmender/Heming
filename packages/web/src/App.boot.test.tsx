@@ -108,6 +108,21 @@ describe("App 启动动画集成", () => {
     expect(fetchMe).not.toHaveBeenCalled();
   });
 
+  // 规格 §7：动画不可跳过（不响应点击/键盘）。主界面从 T=0 就活着，
+  // 必须用 inert 把整个子树从交互/焦点中摘出去，否则启动期间点击会命中看不见的按钮。
+  it("动画期间主界面容器 inert，动画结束后解除", async () => {
+    const { container } = render(<App />);
+    const shell = container.firstElementChild as HTMLElement;
+
+    // 已挂载（遮罩之下）但不可交互
+    expect(screen.getByText("LoginPage")).toBeTruthy();
+    expect(shell.hasAttribute("inert")).toBe(true);
+
+    await act(async () => { bootDoneFns[0]?.(); });
+    await waitFor(() => { expect(screen.queryByText("BootWave")).toBeNull(); });
+    expect((container.firstElementChild as HTMLElement).hasAttribute("inert")).toBe(false);
+  });
+
   it("恢复失败（token 失效）时：动画期间就已回落到登录页，结束后不会闪现加载态", async () => {
     setToken("stale");
     useAuthStore.setState({ token: "stale", user: null, status: "pending", error: null });

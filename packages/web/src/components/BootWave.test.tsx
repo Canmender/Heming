@@ -110,7 +110,9 @@ describe("BootWave", () => {
     channel.fire(); // 用完信号通道，避免 watch 噪声
   });
 
-  it("主界面内容在遮罩之下（遮罩不拦截鼠标事件）", () => {
+  // 规格 §7：动画不可跳过（不响应点击/键盘）。遮罩必须吞掉指针事件，
+  // 否则点击会落在「看得见但被盖住」的主界面按钮上。
+  it("遮罩叠在最上层且吞掉指针事件（动画期间不可点击穿透）", () => {
     useWaveFakeTimers();
     const channel = installSignalChannel();
     render(
@@ -120,7 +122,8 @@ describe("BootWave", () => {
       </>,
     );
     const css = document.querySelector(".boot-wave style")!.textContent!;
-    expect(css).toContain("pointer-events: none");
+    expect(css).toContain("pointer-events: auto");
+    expect(css).not.toContain("pointer-events: none");
     expect(overlay()!.nextSibling).toBeNull(); // 遮罩是最后一个节点 → 叠在最上层
     channel.fire();
   });

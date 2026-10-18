@@ -41,6 +41,16 @@
   var PARTICLE_COUNT = 24;
   var DURATION = 1500;
 
+  // 沿边均匀铺开：t ∈ [0,1] 是该边上的归一化位置，含两端（端点贴 margin 内缩框）。
+  // 抽成纯函数便于单测直接验证真实铺开效果（不是字符串匹配）。
+  function particlePosition(side, t, w, h, margin) {
+    var spanX = w - 2 * margin, spanY = h - 2 * margin;
+    if (side === 0) return { x: t * spanX + margin, y: margin };
+    if (side === 1) return { x: w - margin, y: t * spanY + margin };
+    if (side === 2) return { x: t * spanX + margin, y: h - margin };
+    return { x: margin, y: t * spanY + margin };
+  }
+
   function createParticles() {
     var scene = document.getElementById('scene');
     var w = window.innerWidth, h = window.innerHeight, margin = 20;
@@ -51,19 +61,15 @@
       var p = document.createElement('div');
       p.className = 'particle';
       var side = i % 4;
-      var t = counts[side] / perSide;
+      // 除以 perSide - 1：t 覆盖 0..1（含两端），末个粒子落在 w - margin。
+      // 旧实现除以 perSide 使 t 只到 5/6，每条边末端 1/6 永远没有粒子。
+      var t = counts[side] / (perSide - 1);
       counts[side]++;
-      var x, y;
-      // 沿各边均匀铺开：留出 margin 内缩（原 t*w 会从 0 起步，粒子贴在屏幕边缘/越出视野）
-      var spanX = w - 2 * margin, spanY = h - 2 * margin;
-      if (side === 0) { x = t * spanX + margin; y = margin; }
-      else if (side === 1) { x = w - margin; y = t * spanY + margin; }
-      else if (side === 2) { x = t * spanX + margin; y = h - margin; }
-      else { x = margin; y = t * spanY + margin; }
-      p.style.left = x + 'px';
-      p.style.top = y + 'px';
+      var pos = particlePosition(side, t, w, h, margin);
+      p.style.left = pos.x + 'px';
+      p.style.top = pos.y + 'px';
       scene.appendChild(p);
-      particles.push({ el: p, x: x, y: y });
+      particles.push({ el: p, x: pos.x, y: pos.y });
     }
     return particles;
   }

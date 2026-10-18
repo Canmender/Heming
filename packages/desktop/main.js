@@ -2,13 +2,8 @@
 const { app, BrowserWindow, Menu, dialog, shell, screen } = require("electron");
 const path = require("node:path");
 const { loadWindowState, saveWindowState } = require("./window-state");
-const {
-  shouldShowSplash,
-  splashWindowOptions,
-  splashCloseDelayMs,
-  isFatalLoadFailure,
-  LOAD_WATCHDOG_MS,
-} = require("./splash-config");
+const { shouldShowSplash, splashWindowOptions } = require("./splash-config");
+const { attachSplashLifecycle } = require("./splash-lifecycle");
 
 const pkg = require("./package.json");
 const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins");
@@ -59,21 +54,12 @@ function displayWorkAreas() {
   }
 }
 
-// 通知 web 端开始声波扩散段（BootWave）。preload 在隔离世界执行，故走 executeJavaScript
-// 注入到主世界；web 端未就绪（无 window.heming）时静默无副作用。
-const BOOT_WAVE_SNIPPET =
-  "if (window.heming && window.heming.__startBootWave) window.heming.__startBootWave()";
-
 // 启动动画 splash：无边框透明置顶窗口，覆盖**主窗口所在显示器**的工作区，
 // 加载 splash.html（粒子聚拢 1.5s）。HEMING_NO_SPLASH=1 时跳过（E2E/无头环境）。
 //
-// 时序（与 splash-config.js 的时间轴常量一致）：
-//   did-finish-load → 等满粒子聚拢段（splashCloseDelayMs）→ 关闭 splash + 触发声波扩散段。
-// 四条收尾路径都保证 splash 一定会被关掉：
-//   ① 正常：did-finish-load → 定时关闭 + 触发 BootWave
-//   ② 失败：主 frame did-fail-load（非 ERR_ABORTED）→ 直接关闭，露出错误页
-//   ③ 超时：LOAD_WATCHDOG_MS 内两者都没来 → 直接关闭
-//   ④ 用户关窗：主窗口 closed（此时 window-all-closed 不会触发，splash 还活着）
+// 关闭时机 + 启动信号的事件接线在 splash-lifecycle.js（与 Electron 解耦、可单测）：
+//   did-finish-load 首次 → 等满粒子段 → 关 splash + 发信号；之后每次加载 → 只重发信号；
+//   did-fail-load（非 ERR_ABORTED 主 frame）/ 8s 看门狗 / 主窗口 closed → 兜底关闭。
 function createSplashWindow(mainWin) {
   if (!shouldShowSplash()) return;
 
@@ -82,81 +68,14 @@ function createSplashWindow(mainWin) {
   const splash = new BrowserWindow(
     splashWindowOptions(screen.getDisplayMatching(mainWin.getBounds()).workArea)
   );
-  // 第一段动画从 splash 创建即开始计时（splash.html 加载完成后立刻自播）。
-  const splashStartedAt = Date.now();
 
-  let closeTimer = null;
-  let watchdog = null;
-  let settled = false; // 已决定收尾（关掉 splash），不再接受第二个触发源
-
-  const detach = () => {
-    if (closeTimer !== null) {
-      clearTimeout(closeTimer);
-      closeTimer = null;
-    }
-    if (watchdog !== null) {
-      clearTimeout(watchdog);
-      watchdog = null;
-    }
-    try {
-      // 主窗口可能已销毁：此时 webContents/窗口对象不可再访问，监听器随窗口一并回收
-      mainWin.webContents.removeListener("did-finish-load", onFinishLoad);
-      mainWin.webContents.removeListener("did-fail-load", onFailLoad);
-      mainWin.removeListener("closed", onMainClosed);
-    } catch {
-      /* 已销毁，无需清理 */
-    }
-  };
-
-  // 关闭 splash 并露出主窗口。主窗口以 show:false 创建（否则先于 splash 显示会闪白），
-  // 故每条收尾路径都必须负责把它 show 出来。
-  const closeSplash = () => {
-    if (!splash.isDestroyed()) splash.close();
-    if (!mainWin.isDestroyed() && !mainWin.isVisible()) mainWin.show();
-  };
-
-  // 正常路径：主窗口加载完成 → 补足粒子聚拢段时长 → 关闭 splash + 触发声波段
-  function onFinishLoad() {
-    if (settled) return;
-    settled = true;
-    detach();
-    closeTimer = setTimeout(() => {
-      closeTimer = null;
-      closeSplash();
-      if (mainWin.isDestroyed() || mainWin.webContents.isDestroyed()) return;
-      mainWin.webContents.executeJavaScript(BOOT_WAVE_SNIPPET).catch(() => {});
-    }, splashCloseDelayMs(Date.now() - splashStartedAt));
-  }
-
-  // 兜底路径（加载失败 / 看门狗超时 / 主窗口被关）：无动画可播，直接露出主窗口
-  const abortSplash = () => {
-    if (settled) return;
-    settled = true;
-    detach();
-    closeSplash();
-  };
-
-  // 失败路径：子 frame 的 did-fail-load 不代表主页面失败；ERR_ABORTED(-3) 是后续导航
-  // 主动取消旧请求，同样不算失败（详见 isFatalLoadFailure）。两者都放行，让启动动画继续。
-  function onFailLoad(event, errorCode, errorDescription, validatedURL, isMainFrame) {
-    if (!isFatalLoadFailure(errorCode, isMainFrame)) return;
-    abortSplash();
-  }
-
-  // 用户在主窗口加载完成前关掉主窗口：splash 仍是一个 BrowserWindow，window-all-closed
-  // 不会触发，若不主动关掉就会残留一个无任务栏入口的全屏置顶遮罩（只能任务管理器救场）。
-  function onMainClosed() {
-    if (!splash.isDestroyed()) splash.close();
-  }
-
-  watchdog = setTimeout(abortSplash, LOAD_WATCHDOG_MS);
-
-  mainWin.webContents.on("did-finish-load", onFinishLoad);
-  mainWin.webContents.on("did-fail-load", onFailLoad);
-  mainWin.on("closed", onMainClosed);
-
-  // splash 关闭后统一摘除监听与定时器（无论走哪条路径）
-  splash.once("closed", detach);
+  const lifecycle = attachSplashLifecycle({
+    splash,
+    mainWin,
+    now: Date.now,
+    setTimer: setTimeout,
+    clearTimer: clearTimeout,
+  });
 
   // show:false 创建，加载完成后再 show()，避免白屏闪烁；加载失败（splash.html 缺失等）
   // 则直接收尾，避免留下一块没人管的全屏空白置顶层。
@@ -169,7 +88,7 @@ function createSplashWindow(mainWin) {
       if (!mainWin.isDestroyed() && !mainWin.isVisible()) mainWin.show();
     })
     .catch(() => {
-      abortSplash();
+      lifecycle.abort();
     });
 }
 
