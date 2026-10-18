@@ -7,3 +7,6 @@ release/
 .claude/
 packages/server/data/
 data/
+
+# electron-builder 误落在仓库根的产物目录
+@hemingdesktop/
