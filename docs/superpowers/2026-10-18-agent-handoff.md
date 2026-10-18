@@ -1,7 +1,8 @@
 # 智能体批次交接文档（三层记忆 · 技能池 · 上下文预算）
 
 - 日期：2026-10-18
-- 状态：**已完成并合入 main**（`473945e`），全仓测试绿
+- 状态：**已完成并合入 main**（合并提交 `473945e`；本文档提交 `f49a652`），全仓测试绿
+- 定位：**智能体领域的深度交接**；项目级总交接（IM/E2E/部署/安装包）见 `docs/HANDOFF.md`
 - 分支/工作区：批次分支 `claude/xenodochial-aryabhata-24defe`（worktree `D:\Heming\.claude\worktrees\xenodochial-aryabhata-24defe`，与 main 同内容，保留未删）
 - 关联文档：
   - 设计 `docs/superpowers/specs/2026-10-17-agent-memory-skills-design.md`、`docs/superpowers/specs/2026-10-17-agent-context-budget-design.md`
