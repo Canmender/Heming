@@ -39,12 +39,14 @@ import {
 import { memoryStore } from "../lib/memory/index.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
-import { ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon } from "./icons.js";
+import { ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon } from "./icons.js";
 import { Avatar } from "./Avatar.js";
 import { MentionPicker, type MentionItem } from "./MentionPicker.js";
 import { AgentStreamBubble } from "./AgentStreamBubble.js";
 import { ChatInfoCard } from "./ChatInfoCard.js";
 import { EmojiPicker } from "./EmojiPicker.js";
+import { VoiceCallPanel } from "./VoiceCallPanel.js";
+import { useVoiceCall } from "../lib/voiceCall.js";
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
 export const NO_E2E_NOTICE = "当前环境不支持端到端加密，请使用桌面端或 HTTPS";
@@ -528,6 +530,26 @@ export function ChatPage() {
       : `${conv.name}（${conv.memberCount} 人）`
     : "会话";
   const isGroup = conv?.type === "group";
+
+  // —— 语音通话（Task 4）：useVoiceCall 状态机；信令复用当前 WS 通道 ——
+  const voiceCall = useVoiceCall({
+    send: (e) => wsHandleRef.current?.send(e),
+    myUserId: me?.id ?? "",
+    isDesktop: true, // 桌面端判定由 Task 5 注入
+  });
+
+  /** 通话对端名映射（1:1 用 conv.peer.displayName）；ringing 横幅与面板共用。 */
+  const voicePeerNames = useMemo(() => {
+    const map = new Map<string, string>();
+    if (conv?.type === "direct" && conv.peer) {
+      map.set(conv.peer.id, conv.peer.displayName);
+    }
+    for (const [id, info] of Object.entries(groupMembers?.byId ?? {})) {
+      map.set(id, info.name);
+    }
+    return map;
+  }, [conv, groupMembers]);
+
   /** 消息署名（气泡/引用卡/引用预览共用）：自己「我」；direct 对方名；群内成员映射名（缺失回退 undefined 由调用方处理）。 */
   const displaySenderName = (m: Message) =>
     m.senderId === me?.id
@@ -902,6 +924,8 @@ export function ChatPage() {
       onEvent: (e) => {
         // 流式三事件收口（chunk 累积/message_new{streamId} 移除/agent_error 分态）在 store 统一处理
         useChatStore.getState().onWsEvent(e);
+        // 语音通话信令（voice_call_*）转交 useVoiceCall 状态机
+        voiceCall.handleServerEvent(e);
         if (e.type === "message_new" && e.message.conversationId === convId) {
           appendMessage(e.message);
           // 会话内正在看的新消息即时标记已读：否则退出后 loadWorkspace 会把已读内容算作未读
@@ -1380,16 +1404,62 @@ export function ChatPage() {
         )}
         <span className="text-[14px] font-bold">{headerTitle}</span>
         <span className="text-[12px] text-muted">{connected ? "已连接" : "连接中…"}</span>
+        {conv?.type === "direct" && voiceCall.state.status === "idle" && (
+          <button
+            type="button"
+            aria-label="发起通话"
+            className="ml-auto rounded-lg p-1.5 hover:bg-[#f3f3f3]"
+            onClick={() => {
+              if (conv?.type === "direct") {
+                void voiceCall.call(conv.id, [conv.peer.id]);
+              }
+            }}
+          >
+            <PhoneIcon width={17} height={17} />
+          </button>
+        )}
         <button
           type="button"
           aria-label="会话信息"
-          className={`ml-auto rounded-lg p-1.5 hover:bg-[#f3f3f3]${infoOpen ? " bg-[#f3f3f3]" : ""}`}
+          className={`rounded-lg p-1.5 hover:bg-[#f3f3f3]${infoOpen ? " bg-[#f3f3f3]" : ""}${conv?.type === "direct" && voiceCall.state.status === "idle" ? "" : " ml-auto"}`}
           onClick={() => setInfoOpen((v) => !v)}
         >
           <MenuIcon width={17} height={17} />
         </button>
         {infoOpen && conv && <ChatInfoCard conv={conv} onClose={() => setInfoOpen(false)} />}
       </header>
+      {/* 来电接听横幅（ringing 状态时显示；接听后切全屏面板） */}
+      {voiceCall.state.status === "ringing" && (
+        <div className="flex items-center justify-between gap-3 border-b border-line-soft bg-[#1a1a2e] px-5 py-2.5 text-white">
+          <span className="text-[13px]">
+            {voiceCall.state.role === "caller" ? "正在呼叫…" : "来电"}
+          </span>
+          {voiceCall.state.incoming && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-label="接听"
+                className="rounded-lg bg-[#4ade80] px-3 py-1.5 text-[12px] font-bold text-white hover:bg-[#22c55e]"
+                onClick={() => {
+                  void voiceCall.accept(voiceCall.state.incoming!.callId);
+                }}
+              >
+                接听
+              </button>
+              <button
+                type="button"
+                aria-label="拒绝"
+                className="rounded-lg bg-[#ef4444] px-3 py-1.5 text-[12px] font-bold text-white hover:bg-[#dc2626]"
+                onClick={() => {
+                  voiceCall.reject(voiceCall.state.incoming!.callId, "decline");
+                }}
+              >
+                拒绝
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {visibleMessages.map((m) => {
           const mine = m.senderId === me?.id;
@@ -1840,6 +1910,13 @@ export function ChatPage() {
           </div>
         </div>
       )}
+      {/* 语音通话全屏面板（ringing + active 状态） */}
+      <VoiceCallPanel
+        state={voiceCall.state}
+        peerNames={voicePeerNames}
+        onHangup={voiceCall.hangup}
+        onToggleMute={voiceCall.toggleMute}
+      />
     </div>
   );
 }
