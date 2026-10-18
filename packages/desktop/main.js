@@ -1,18 +1,57 @@
 "use strict";
-const { app, BrowserWindow, Menu, dialog, shell, screen, ipcMain, Notification } = require("electron");
+const { app, BrowserWindow, Menu, dialog, shell, screen, ipcMain, Notification, protocol, net } = require("electron");
+const fs = require("node:fs");
 const path = require("node:path");
 const { loadWindowState, saveWindowState } = require("./window-state");
 const { shouldShowSplash, splashWindowOptions } = require("./splash-config");
 const { attachSplashLifecycle } = require("./splash-lifecycle");
+const { resolveRequest, contentTypeFor, INDEX_FILE } = require("./app-protocol");
 
 const pkg = require("./package.json");
 const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins");
 const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
 
-// 加载地址优先级：HEMING_DEV_URL（本地开发）> HEMING_WEB_URL > 默认远程（云端中心化）
+// ── web 界面嵌入（设计 §4）──────────────────────────────────────────────
+// 产物打进安装包、用自定义协议本地加载，摆脱「UI 必须部署云端才可见」与「启动依赖网络」。
+// 不能用 file://：它不是安全上下文，crypto.subtle 不可用会让 E2E 加密失效。
+// 注册为 privileged + secure 后实测 isSecureContext=true 且明文 ws:// 仍可连
+// （见设计文档 §3 的真实 Electron 实测表），且不需要放宽任何安全开关。
+const EMBEDDED_SCHEME = "app";
+const EMBEDDED_HOST = "heming";
+const EMBEDDED_ORIGIN = `${EMBEDDED_SCHEME}://${EMBEDDED_HOST}`;
+const EMBEDDED_URL = `${EMBEDDED_ORIGIN}/${INDEX_FILE}`;
+
+// 必须在 app ready 之前注册，否则自定义协议拿不到 secure 语义。
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: EMBEDDED_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
+  },
+]);
+
+/** 嵌入产物目录：打包后是 resources/web（electron-builder extraResources），开发时是 web-dist。 */
+function webDistDir() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "web")
+    : path.join(__dirname, "web-dist");
+}
+
+/** 嵌入产物是否可用。不可用则退回远程加载（老包/构建异常时不至于打不开）。 */
+function hasEmbeddedWeb() {
+  try {
+    return fs.existsSync(path.join(webDistDir(), INDEX_FILE));
+  } catch {
+    return false;
+  }
+}
+
+// 加载地址优先级：HEMING_DEV_URL（本地开发）> HEMING_WEB_URL > 嵌入式产物 > 默认远程
 function resolveAppUrl(env) {
   const e = env || process.env;
-  return e.HEMING_DEV_URL || e.HEMING_WEB_URL || APP_DEFAULT_URL;
+  if (e.HEMING_DEV_URL) return e.HEMING_DEV_URL;
+  if (e.HEMING_WEB_URL) return e.HEMING_WEB_URL;
+  if (hasEmbeddedWeb()) return EMBEDDED_URL;
+  return APP_DEFAULT_URL;
 }
 
 function isSafeExternalUrl(url) {
@@ -35,6 +74,11 @@ function openInSystemBrowser(url) {
 // 主 frame 导航白名单：本应用加载源 + 默认远程源 + localhost（dev 代理等）。
 // 命中白名单 = 站内路由跳转放行；否则视为「离开应用」，转系统浏览器。
 function isAllowedNavigation(url, appUrl) {
+  // 嵌入式源按前缀判定：originOf 走 Node 的 URL 实现，自定义非特殊 scheme 的
+  // origin 会得到 "null"，拿去比较必然不命中。
+  if (typeof url === "string" && (url === EMBEDDED_ORIGIN || url.startsWith(EMBEDDED_ORIGIN + "/"))) {
+    return true;
+  }
   const target = originOf(url);
   if (!target) return false;
   if (target === originOf(appUrl)) return true;
@@ -45,6 +89,46 @@ function isAllowedNavigation(url, appUrl) {
   } catch {
     return false;
   }
+}
+
+/**
+ * 注册 app:// 的资源处理器（须在 app ready 之后）。逻辑下沉到 app-protocol.js 的
+ * 纯函数，这里只做「解析 → 读文件 → 回响应」。
+ */
+function installAppProtocol() {
+  protocol.handle(EMBEDDED_SCHEME, async (request) => {
+    let urlPath = "/";
+    try {
+      urlPath = new URL(request.url).pathname;
+    } catch {
+      return new Response("bad request", { status: 400 });
+    }
+    const root = webDistDir();
+    const resolved = resolveRequest(urlPath, root, (f) => {
+      try {
+        return fs.existsSync(f);
+      } catch {
+        return false;
+      }
+    });
+    if (!resolved) {
+      // 资源缺失或路径越界：不回落首页（回落会把 404 变成难以排查的 MIME 错误）
+      return new Response("not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
+    try {
+      const body = await fs.promises.readFile(resolved.file);
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "Content-Type": contentTypeFor(resolved.file),
+          // 产物带内容哈希，可长缓存；index.html 不缓存以免版本切换时读到旧壳
+          "Cache-Control": resolved.spaFallback ? "no-store" : "public, max-age=31536000, immutable",
+        },
+      });
+    } catch {
+      return new Response("read failed", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
+  });
 }
 
 function displayWorkAreas() {
@@ -337,6 +421,8 @@ if (!gotLock) {
   }
 
   app.whenReady().then(() => {
+    // 自定义协议处理器须在创建窗口之前装好，否则首次 loadURL 会拿到空响应
+    installAppProtocol();
     setupMenu();
     createWindow();
     app.on("activate", () => {

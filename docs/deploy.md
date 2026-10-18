@@ -170,3 +170,46 @@ docker compose logs -f api
 docker compose restart web
 docker compose down            # 停（保留 heming-data 卷）
 ```
+
+## 10. 桌面端嵌入的 web 产物（与云端构建的关系）
+
+桌面客户端**不再从云端加载界面**——web 构建产物打进安装包，用自定义协议 `app://heming` 本地加载；API 与 WS 仍走云端。设计见 `docs/superpowers/specs/2026-10-18-embed-web-in-client-design.md`。
+
+**为什么用自定义协议而不是 `file://`**：`file://` 不是安全上下文，`crypto.subtle` 不可用会让 E2E 加密失效（红线：无安全上下文拒绝发送）。`app://` 注册为 privileged + secure 后实测 `isSecureContext === true`、明文 `ws://` 仍可连、且**不需要** `allowRunningInsecureContent` 之类放宽。
+
+### 两套产物，一处差别
+
+| | 云端（本文件 §2–§3） | 桌面嵌入（`pnpm -w run dist:desktop`） |
+|---|---|---|
+| 命令 | `docker compose build`（镜像内构建） | `node scripts/build-desktop-web.mjs` 预构建 |
+| `VITE_API_BASE` | **不注入**（同源相对路径） | **注入**云端绝对地址（跨域，靠服务端 CORS `*`） |
+| 产物落点 | web 镜像内 nginx 目录 | `packages/desktop/web-dist/` → 打包进 `resources/web` |
+| 更新方式 | 部署一次，**所有客户端立刻生效** | **必须重发安装包**（自动更新另开一批） |
+
+`VITE_API_BASE` 取值：`HEMING_WEB_URL` 环境变量 > 默认 `http://47.92.39.184`（与 `secure-origins.js` 的 `APP_DEFAULT_URL` 同源，避免两处常量漂移）。
+
+### 发布顺序
+
+改了 web 代码要**两处分别发布**：
+
+```bash
+# 1) 云端（浏览器访问 + 旧客户端仍是远程加载）
+tar ... -czf heming.tar.gz . && scp ...   # 见 §2
+ssh root@47.92.39.184 'cd ~/heming && docker compose -p heming build && docker compose -p heming up -d'
+
+# 2) 桌面端（嵌入产物随安装包）
+pnpm -w run dist:desktop                  # 内部先跑 scripts/build-desktop-web.mjs
+```
+
+**只发其中一处会出现版本不一致**：浏览器端看云端、已装客户端看包内。排查「为什么我这没有新功能」时先确认客户端版本。
+
+### 地址优先级（`main.js` 的 `resolveAppUrl`）
+
+```
+HEMING_DEV_URL（本地开发，热更新）
+  > HEMING_WEB_URL（显式指定远程）
+  > app://heming/index.html（默认；包内 web-dist 存在时）
+  > http://47.92.39.184（兜底：产物缺失时退回远程，不至于打不开）
+```
+
+开发时仍走 `HEMING_DEV_URL` 连本地 vite，**热更新不受影响**。

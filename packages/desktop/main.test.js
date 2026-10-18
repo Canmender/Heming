@@ -179,3 +179,56 @@ test("main.js：查询减弱动态偏好并回填给 splash 生命周期", () =>
     "查到后必须回填 setReducedMotion，否则查询没有意义"
   );
 });
+
+// ── web 界面嵌入（app:// 本地加载） ──
+
+test("main.js：app:// 注册为 privileged + secure（E2E 依赖安全上下文）", () => {
+  const m = mainSrc.match(/registerSchemesAsPrivileged\(\[[\s\S]*?\]\)/);
+  assert.ok(m, "未找到 registerSchemesAsPrivileged 调用");
+  assert.ok(m[0].includes('scheme: EMBEDDED_SCHEME'), "注册的应是 EMBEDDED_SCHEME");
+  assert.ok(m[0].includes("secure: true"), "必须 secure: true，否则 crypto.subtle 不可用、E2E 失效");
+  assert.ok(!m[0].includes("allowRunningInsecureContent"), "不应放宽任何安全开关");
+});
+
+test("main.js：scheme 注册在 app ready 之前（否则拿不到 secure 语义）", () => {
+  const reg = mainSrc.indexOf("registerSchemesAsPrivileged(");
+  const ready = mainSrc.indexOf("app.whenReady(");
+  assert.ok(reg > 0 && ready > 0);
+  assert.ok(reg < ready, "registerSchemesAsPrivileged 必须出现在 app.whenReady 之前");
+});
+
+test("main.js：地址优先级为 dev > 显式远程 > 嵌入式 > 兜底远程", () => {
+  const fn = mainSrc.match(/function resolveAppUrl\(env\) \{[\s\S]*?\n\}/);
+  assert.ok(fn, "未找到 resolveAppUrl");
+  const body = fn[0];
+  const iDev = body.indexOf("HEMING_DEV_URL");
+  const iWeb = body.indexOf("HEMING_WEB_URL");
+  const iEmbed = body.indexOf("hasEmbeddedWeb()");
+  const iDefault = body.indexOf("APP_DEFAULT_URL");
+  assert.ok(iDev > 0 && iWeb > iDev && iEmbed > iWeb && iDefault > iEmbed,
+    "优先级顺序应为 HEMING_DEV_URL > HEMING_WEB_URL > hasEmbeddedWeb() > APP_DEFAULT_URL");
+});
+
+test("main.js：嵌入产物缺失时退回远程（老包/构建异常不至于打不开）", () => {
+  assert.ok(mainSrc.includes("hasEmbeddedWeb()"), "应存在嵌入产物可用性判定");
+  assert.ok(/hasEmbeddedWeb\(\)\s*\)\s*return EMBEDDED_URL/.test(mainSrc) ||
+    /if \(hasEmbeddedWeb\(\)\) return EMBEDDED_URL/.test(mainSrc),
+    "只有产物存在时才用 app:// 地址");
+});
+
+test("main.js：导航白名单放行 app://（originOf 对自定义 scheme 会得到 null，必须按前缀判）", () => {
+  assert.ok(mainSrc.includes("EMBEDDED_ORIGIN + \"/\""), "应按前缀判定嵌入式源");
+});
+
+test("main.js：系统浏览器白名单不放行 app://（否则页面链接会把自己导航走）", () => {
+  const fn = mainSrc.match(/function isSafeExternalUrl\(url\) \{[\s\S]*?\n\}/);
+  assert.ok(fn, "未找到 isSafeExternalUrl");
+  assert.ok(!fn[0].includes("app:"), "isSafeExternalUrl 只应放行 http/https/mailto");
+});
+
+test("main.js：协议处理器在创建窗口之前装好", () => {
+  const install = mainSrc.indexOf("installAppProtocol();");
+  const create = mainSrc.indexOf("createWindow();", mainSrc.indexOf("app.whenReady("));
+  assert.ok(install > 0 && create > 0);
+  assert.ok(install < create, "installAppProtocol 必须在 createWindow 之前调用");
+});

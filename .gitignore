@@ -10,3 +10,6 @@ data/
 
 # electron-builder 误落在仓库根的产物目录
 @hemingdesktop/
+
+# 桌面端要嵌入的 web 产物（scripts/build-desktop-web.mjs 生成，打包时打进 resources/web）
+packages/desktop/web-dist/

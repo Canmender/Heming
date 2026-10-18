@@ -6,9 +6,9 @@
   "scripts": {
     "dev": "electron .",
     "start": "electron .",
-    "dist": "electron-builder --win nsis",
-    "typecheck": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check title-bar.js && node --check preload.js",
-    "test": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check title-bar.js && node --check preload.js && node --test"
+    "dist": "node ../../scripts/build-desktop-web.mjs && electron-builder --win nsis",
+    "typecheck": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check app-protocol.js && node --check title-bar.js && node --check preload.js",
+    "test": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check app-protocol.js && node --check title-bar.js && node --check preload.js && node --test"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -23,9 +23,16 @@
       "secure-origins.js",
       "splash-config.js",
       "splash-lifecycle.js",
+      "app-protocol.js",
       "splash.html",
       "title-bar.js",
       "preload.js"
+    ],
+    "extraResources": [
+      {
+        "from": "web-dist",
+        "to": "web"
+      }
     ],
     "directories": {
       "output": "release"
