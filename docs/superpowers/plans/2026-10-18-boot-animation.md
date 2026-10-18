@@ -1,5 +1,8 @@
 # 和鸣启动动画实施计划
 
+> **⚠ 已实施完毕（2026-10-18，合入 main `7207da2`）。本文件是当时的任务分解，**不是**最终实现的准确描述——计划里的 preload「注入」方案在 Electron 上物理不可行，实现时改成了闭包登记表。**
+> **改动启动动画前请先读 `docs/superpowers/specs/2026-10-18-boot-animation-design.md` §9（实施记录），那里列了与设计正文的 9 处偏差及原因。**
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为和鸣桌面端实现 3 秒双段式启动动画（粒子聚拢 → 声波扩散），不可跳过，动画期间后台恢复登录态。
