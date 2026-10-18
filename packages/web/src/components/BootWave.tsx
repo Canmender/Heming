@@ -1,62 +1,111 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+/** 声波扩散段时长；与 packages/desktop/splash-config.js 的 WAVE_MS 保持一致。 */
+const WAVE_MS = 1300;
+
+/**
+ * 兜底开播时限。真实信号由主进程 did-finish-load + 静默间隔后送达，远端慢时可能远超 1s，
+ * 所以兜底只覆盖「信号永远不会来」（主进程异常），必须放得足够宽：
+ * 定得太小会让波纹在 splash 还开着的时候就播完（用户只看到白屏）。
+ */
+const FALLBACK_MS = 5000;
+
+/** ease-out cubic：揭示进度的缓出曲线（0→1）。 */
+export function easeOutCubic(p: number): number {
+  const t = p <= 0 ? 0 : p >= 1 ? 1 : p;
+  return 1 - Math.pow(1 - t, 3);
+}
 
 interface BootWaveProps {
-  /** 动画完成回调 */
+  /** 动画完成回调（遮罩已完全揭开，可卸载）。只调用一次。 */
   onDone: () => void;
 }
 
+/** 组件自带的样式：遮罩揭示靠 CSS 变量 `--reveal`（由 rAF 逐帧写入，不依赖 @property）。 */
+const STYLES = `
+  .boot-wave {
+    position: fixed; inset: 0; z-index: 9999;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  /* 白底揭示层：以中心为圆心的透明洞从 0% 涨到 100%，洞经过的地方露出下面的主界面。
+     --reveal 未写入时回落到 0% —— 即「信号到达前完全不透明」。 */
+  .boot-wave-reveal {
+    position: absolute; inset: 0;
+    background: #ffffff;
+    mask-image: radial-gradient(circle at 50% 50%, transparent var(--reveal, 0%), #000 calc(var(--reveal, 0%) + 0.5%));
+    -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent var(--reveal, 0%), #000 calc(var(--reveal, 0%) + 0.5%));
+    mask-repeat: no-repeat;
+    -webkit-mask-repeat: no-repeat;
+    mask-size: 100% 100%;
+    -webkit-mask-size: 100% 100%;
+  }
+  /* 3 圈细线波纹叠在揭示层之上（不参与遮罩，否则会被中心洞吃掉） */
+  .boot-wave .ripple {
+    position: absolute; left: 50%; top: 50%;
+    width: 40px; height: 40px;
+    border: 1.5px solid #1a1a1a; border-radius: 50%;
+    opacity: 0;
+    animation: boot-ripple-expand 1.3s ease-out forwards;
+  }
+  .boot-wave .ripple:nth-of-type(1) { animation-delay: 0s; }
+  .boot-wave .ripple:nth-of-type(2) { animation-delay: 0.3s; }
+  .boot-wave .ripple:nth-of-type(3) { animation-delay: 0.6s; }
+  @keyframes boot-ripple-expand {
+    0% { opacity: 0.6; transform: translate(-50%,-50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%,-50%) scale(30); }
+  }
+`;
+
 /**
- * 声波扩散动画：3 圈同心圆从中心扩散，主界面内容从中心向外渐次浮现。
- * 时长 1.3s，与 splash 粒子聚拢段（1.5s）+ 静默（0.2s）组成完整约 3s 启动动画。
- * 启动信号由主进程 did-finish-load 后通过 window.heming.__startBootWave() 触发。
+ * 声波扩散段：一块全屏白底遮罩盖在**常驻的主界面**之上，以中心为圆心开一个透明洞，
+ * 洞从 0% 涨到 100%（1.3s，ease-out cubic），波纹经过的区域主界面内容
+ * （导航栏/内容区/文件树）从中心向外渐次显现；同时 3 圈细线波纹同步扩散。
  *
- * 挂载时调用 preload 暴露的 window.heming.__onBootReady(cb) 注册启动回调，
- * 主进程 did-finish-load 后调用 window.heming.__startBootWave() 触发播放。
+ * 与粒子聚拢段（splash 1.5s）+ 静默（0.2s）组成约 3s 的完整启动动画。
+ * 启动信号由主进程 did-finish-load 后经 preload 的 window.heming.__startBootWave() 触发；
+ * 本组件只**调用** preload 的 __onBootReady 注册回调（contextBridge 暴露的对象被冻结，
+ * 渲染进程不可注入）。preload 会缓冲信号，注册晚于信号也能立刻收到。
+ *
  * 无 preload（浏览器直接打开）时无外部信号源，直接开播兜底。
- *
- * 防御性兜底：即使有信号通道，也设 1700ms 兜底定时器——若主进程信号迟迟不到
- * （如远程加载极慢导致 did-finish-load 晚于 App 门禁翻转），仍会自动开播，
- * 避免 BootWave 停在 null（无波纹）。信号到达时清掉兜底定时器。
  */
 export function BootWave({ onDone }: BootWaveProps) {
+  const revealRef = useRef<HTMLDivElement | null>(null);
   const [started, setStarted] = useState(false);
-  const [phase, setPhase] = useState<"idle" | "playing" | "done">("idle");
-  const timerRef = useRef<number | null>(null);
+
+  const rafRef = useRef<number | null>(null);
   const fallbackRef = useRef<number | null>(null);
-  const startedRef = useRef(false);
+  const startedRef = useRef(false); // rAF/回调里的即时判重（state 更新是异步的）
+  const finishedRef = useRef(false);
+  const onDoneRef = useRef(onDone);
 
+  // onDone 每次渲染可能是新函数；用 ref 持有最新值，避免把动画生命周期绑到它上面。
   useEffect(() => {
-    // jsdom 未实现 matchMedia；真实浏览器/Electron 有。缺失时按未开启减弱动态处理。
-    const reduced =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) {
-      onDone();
-      return;
-    }
+    onDoneRef.current = onDone;
+  }, [onDone]);
 
-    // preload 通过 contextBridge 暴露 __onBootReady/__startBootWave（对象被冻结，
-    // 渲染进程只读、不可注入），故此处只「调用」而非注入。
-    const heming = (window as any).heming;
-    if (typeof heming?.__onBootReady === "function") {
-      heming.__onBootReady(() => {
-        startAnimation();
-      });
-    } else {
-      // 兜底：无可用信号通道（浏览器直接打开）时直接开播
-      startAnimation();
+  const stopTimers = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     }
-
-    // 防御性兜底：信号通道存在但信号迟迟不到时，1700ms 后自动开播（与 Task-4 草图一致）。
-    // 已开播时 startAnimation 会清除该定时器，故真实信号与兜底互斥。
-    fallbackRef.current = window.setTimeout(() => {
-      startAnimation();
-    }, 1700);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (fallbackRef.current !== null) {
+      window.clearTimeout(fallbackRef.current);
+      fallbackRef.current = null;
+    }
   }, []);
 
-  function startAnimation() {
-    if (startedRef.current) return;
+  /** 收尾：停掉所有定时器并回调 onDone（多次触发只有一次生效）。 */
+  const finish = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    stopTimers();
+    onDoneRef.current();
+  }, [stopTimers]);
+
+  /** 开播：清掉兜底定时器，用 rAF 逐帧把 --reveal 从 0% 推到 100%。 */
+  const startAnimation = useCallback(() => {
+    if (startedRef.current || finishedRef.current) return;
     startedRef.current = true;
     if (fallbackRef.current !== null) {
       window.clearTimeout(fallbackRef.current);
@@ -64,65 +113,83 @@ export function BootWave({ onDone }: BootWaveProps) {
     }
     playSound();
     setStarted(true);
-    setPhase("playing");
-    timerRef.current = window.setTimeout(() => {
-      setPhase("done");
-      onDone();
-    }, 1300);
-  }
+
+    // 时间基准取 rAF 自身的时间戳（同一时钟源，无需 performance.now）
+    let t0: number | null = null;
+    const tick = (now: number) => {
+      if (t0 === null) t0 = now;
+      const eased = easeOutCubic((now - t0) / WAVE_MS);
+      revealRef.current?.style.setProperty("--reveal", `${(eased * 100).toFixed(2)}%`);
+      if (eased >= 1) {
+        rafRef.current = null;
+        finish();
+        return;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }, [finish]);
 
   useEffect(() => {
+    // jsdom 未实现 matchMedia；真实浏览器/Electron 有。缺失时按未开启减弱动态处理。
+    const reduced =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) {
+      // 减弱动态：不播动画，立刻揭开遮罩
+      finish();
+      return;
+    }
+
+    const heming = window.heming;
+    if (typeof heming?.__onBootReady === "function") {
+      heming.__onBootReady(() => startAnimation());
+      // 兜底：信号通道存在但信号永远不来时自动开播，否则白底遮罩会永久挡住界面
+      fallbackRef.current = window.setTimeout(startAnimation, FALLBACK_MS);
+    } else {
+      // 无可用信号通道（浏览器直接打开）时直接开播
+      startAnimation();
+    }
+
     return () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      if (fallbackRef.current !== null) window.clearTimeout(fallbackRef.current);
+      stopTimers();
     };
-  }, []);
-
-  function playSound() {
-    try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const osc2 = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine"; osc.frequency.value = 440;
-      osc2.type = "sine"; osc2.frequency.value = 880;
-      gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.1);
-      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.3);
-      osc.connect(gain); osc2.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(ctx.currentTime); osc2.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 1.3); osc2.stop(ctx.currentTime + 1.3);
-    } catch { /* 音频不可用静默 */ }
-  }
-
-  if (!started) return null;
+  }, [finish, startAnimation, stopTimers]);
 
   return (
     <div className="boot-wave" aria-hidden="true">
-      <style>{`
-        .boot-wave {
-          position: fixed; inset: 0; z-index: 9999;
-          pointer-events: none;
-          display: flex; align-items: center; justify-content: center;
-        }
-        .boot-wave .ripple {
-          position: absolute; left: 50%; top: 50%;
-          border: 1.5px solid #1a1a1a; border-radius: 50%;
-          opacity: 0;
-          animation: ripple-expand 1.3s ease-out forwards;
-        }
-        .boot-wave .ripple:nth-child(1) { width: 40px; height: 40px; animation-delay: 0s; }
-        .boot-wave .ripple:nth-child(2) { width: 40px; height: 40px; animation-delay: 0.3s; }
-        .boot-wave .ripple:nth-child(3) { width: 40px; height: 40px; animation-delay: 0.6s; }
-        @keyframes ripple-expand {
-          0% { opacity: 0.6; transform: translate(-50%,-50%) scale(1); }
-          100% { opacity: 0; transform: translate(-50%,-50%) scale(30); }
-        }
-      `}</style>
-      <div className="ripple" />
-      <div className="ripple" />
-      <div className="ripple" />
+      <style>{STYLES}</style>
+      <div className="boot-wave-reveal" ref={revealRef} />
+      {started && (
+        <div className="boot-wave-ripples">
+          <div className="ripple" />
+          <div className="ripple" />
+          <div className="ripple" />
+        </div>
+      )}
     </div>
   );
+}
+
+/** Web Audio 合成声波音效（零外部资源）；音频不可用时静默。 */
+function playSound(): void {
+  try {
+    const Ctor =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return;
+    const ctx = new Ctor();
+    const osc = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine"; osc.frequency.value = 440;
+    osc2.type = "sine"; osc2.frequency.value = 880;
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.1);
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.3);
+    osc.connect(gain); osc2.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime); osc2.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 1.3); osc2.stop(ctx.currentTime + 1.3);
+  } catch { /* 音频不可用静默 */ }
 }

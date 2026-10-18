@@ -30,19 +30,30 @@ function fmtBytes(n: number): string {
   return `${n}B`;
 }
 
+/**
+ * 顶层：主界面常驻，启动动画作为全屏遮罩盖在其上。
+ *
+ * AppShell 从 T=0 就挂载，其 restore()（GET /api/me）在动画播放期间于后台完成——
+ * 动画约 3s，足够覆盖一次常规恢复，动画结束时已经是恢复后的界面。
+ * 若反过来把 AppShell 挡在动画之后（早期实现），restore 要到 T≈3s 才开始，
+ * 已登录用户会紧接着启动动画看到一个「加载中…」空窗。
+ *
+ * BootWave 的遮罩以中心透明洞向外揭示主界面，因此「先挂载、后揭开」在视觉上
+ * 等于「主界面从中心向外渐次显现」，不会提前暴露真实 UI。
+ */
 export function App() {
-  // 启动动画：BootWave 完成前只显示波纹，完成后才挂载登录页/主界面（避免启动帧闪一下真实 UI）。
   const [bootDone, setBootDone] = useState(false);
   const handleBootDone = useCallback(() => setBootDone(true), []);
 
-  if (!bootDone) {
-    return <BootWave onDone={handleBootDone} />;
-  }
-
-  return <AppShell />;
+  return (
+    <>
+      <AppShell />
+      {!bootDone && <BootWave onDone={handleBootDone} />}
+    </>
+  );
 }
 
-/** 登录页/主界面内容：由 App 在启动动画完成后渲染。 */
+/** 登录页/主界面内容：与启动动画并行挂载（动画仅作遮罩），不做时序门禁。 */
 function AppShell() {
   const authStatus = useAuthStore((s) => s.status);
   const authUser = useAuthStore((s) => s.user);

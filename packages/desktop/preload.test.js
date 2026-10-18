@@ -76,3 +76,47 @@ test("重复注册只保留最后一次回调", () => {
   assert.equal(first, 0);
   assert.equal(second, 1);
 });
+
+// ── 信号缓冲：主进程 did-finish-load 与 React 挂载注册是竞态，先发的信号不能丢 ──
+test("信号先到、回调后注册：注册时立即补发（不丢这次启动动画）", () => {
+  const heming = loadHeming();
+  // 主进程先发信号（此时 web 端还没挂载 BootWave、没注册回调）
+  assert.doesNotThrow(() => { heming.__startBootWave(); });
+  // 随后 BootWave 挂载注册：必须立刻收到补发的信号
+  let called = 0;
+  heming.__onBootReady(() => { called++; });
+  assert.equal(called, 1);
+});
+
+test("信号后注册的回调只补发一次（再调 __startBootWave 才再触发）", () => {
+  const heming = loadHeming();
+  heming.__startBootWave();
+  let called = 0;
+  heming.__onBootReady(() => { called++; });
+  assert.equal(called, 1);
+  heming.__startBootWave();
+  assert.equal(called, 2);
+});
+
+test("信号未到时注册：__onBootReady 不当场回调（只等 __startBootWave）", () => {
+  const heming = loadHeming();
+  let called = 0;
+  heming.__onBootReady(() => { called++; });
+  assert.equal(called, 0);
+  heming.__startBootWave();
+  assert.equal(called, 1);
+});
+
+test("__onBootReady 收到非函数参数时忽略（不抛出、不污染已有回调）", () => {
+  const heming = loadHeming();
+  let called = 0;
+  heming.__onBootReady(() => { called++; });
+  assert.doesNotThrow(() => {
+    heming.__onBootReady(null);
+    heming.__onBootReady(undefined);
+    heming.__onBootReady("not a function");
+  });
+  // 已有回调未被非函数参数覆盖，仍能被信号触发
+  heming.__startBootWave();
+  assert.equal(called, 1);
+});

@@ -25,7 +25,9 @@
     background: #1a1a1a;
     border-radius: 50%;
     transform: translate(-50%, -50%) scale(0);
-    transition: transform 0.4s ease 1.4s;
+    /* 无 transition-delay：.visible 在 DURATION-100ms 才加上，若再叠 1.4s 延迟，
+       核心圆点要到 2.8s 才起放大，而 splash 在 ~1.7s 就被主进程关闭——永远看不见。 */
+    transition: transform 0.4s ease;
     box-shadow: 0 0 20px rgba(26,26,26,.3);
   }
   .core.visible { transform: translate(-50%, -50%) scale(1); }
@@ -52,10 +54,12 @@
       var t = counts[side] / perSide;
       counts[side]++;
       var x, y;
-      if (side === 0) { x = t * w; y = margin; }
-      else if (side === 1) { x = w - margin; y = t * h; }
-      else if (side === 2) { x = t * w; y = h - margin; }
-      else { x = margin; y = t * h; }
+      // 沿各边均匀铺开：留出 margin 内缩（原 t*w 会从 0 起步，粒子贴在屏幕边缘/越出视野）
+      var spanX = w - 2 * margin, spanY = h - 2 * margin;
+      if (side === 0) { x = t * spanX + margin; y = margin; }
+      else if (side === 1) { x = w - margin; y = t * spanY + margin; }
+      else if (side === 2) { x = t * spanX + margin; y = h - margin; }
+      else { x = margin; y = t * spanY + margin; }
       p.style.left = x + 'px';
       p.style.top = y + 'px';
       scene.appendChild(p);
