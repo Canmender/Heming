@@ -1,7 +1,7 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-10-18
-- 当前 main：`d15abac`（工作区干净）
+- 当前 main：以 `git log -1` 为准（2026-10-18 校准时为 `d15abac`，之后仅文档提交）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
@@ -20,7 +20,7 @@
 
 | 项 | 状态 |
 |---|---|
-| main | `d15abac`，工作区干净 |
+| main | 见 `git log -1`（工作区干净） |
 | 测试 | shared 63 / server 169 / web 617 / desktop 19 全绿（`pnpm -r test`） |
 | 线上 | `http://47.92.39.184` 已部署最新版（`docker compose -p heming`） |
 | 安装包 | `packages/desktop/release/和鸣 Setup 0.0.1.exe`（78.3 MB，含全部功能） |
