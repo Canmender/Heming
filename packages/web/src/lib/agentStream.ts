@@ -1,6 +1,6 @@
 import type { WsClientEvent } from "@heming/shared";
 import type { LlmProfile } from "../store/llm.js";
-import { streamChat } from "./llmClient.js";
+import { streamChat, type ChatMessage } from "./llmClient.js";
 
 /** 触发编排的依赖注入面：stores/WS/流式适配器由 ChatPage 组装，本模块保持纯逻辑可测。 */
 export interface TriggerDeps {
@@ -31,6 +31,34 @@ export interface TriggerDeps {
     assistantText: string,
     status: "ok" | "partial",
   ) => void;
+  /**
+   * 历史准备（设计 §4）：`fetchHistory` 之后、组装 messages 之前调用——触发端在此做
+   * token 预算切分与早期对话压缩，返回值即本次要发送的历史。缺省或抛错 → 用原 history
+   * （行为与加预算之前完全一致）。溢出重试（设计 §3.4）会带 `aggressive` 重新调用以收紧预算。
+   */
+  prepareHistory?: (
+    rows: ChatMessage[],
+    agentId: string,
+    opts?: { aggressive?: 1 | 2 },
+  ) => Promise<ChatMessage[]>;
+}
+
+/**
+ * 上下文超限的供应商 400 特征（设计 §3.4）：OpenAI 的 `maximum context length`、
+ * Anthropic 的 `prompt is too long`、网关转写的 `context_length_exceeded` 等。
+ */
+const CONTEXT_OVERFLOW_RE = /context length|context_length|maximum context|too long|reduce the length/i;
+/** 收紧重试次数上限：首次之外再试 2 次（aggressive 1 → 2），不无限重试。 */
+const MAX_CONTEXT_RETRIES = 2;
+
+/**
+ * 是否为「上下文超限」的失败：既要求带 400（限流/鉴权的 400 不在此列），
+ * 也要求命中超限特征词；中断（AbortError / 已按中断）一律不算——abort 语义优先，不得重试。
+ */
+function isContextOverflow(err: Error | null | undefined, aborted: boolean): boolean {
+  if (aborted || err?.name === "AbortError") return false;
+  const message = String(err?.message ?? "");
+  return message.includes("400") && CONTEXT_OVERFLOW_RE.test(message);
 }
 
 /** 一次触发的句柄：中断按钮调用后，进行中的各流 abort → catch 走 finish-partial + agent_error(aborted)。 */
@@ -71,6 +99,8 @@ function notifyTurnComplete(
 /**
  * @ 触发编排：并行对各 mention 走「历史 →（系统提示词）→ 流式 → 三事件上行」。
  * - 无绑定：直接 agent_error(provider_error)，不触达供应商；
+ * - 历史准备：`deps.prepareHistory` 存在时在 fetchHistory 之后调用（缺省/抛错回落原历史）；
+ *   供应商 400 命中上下文超限特征时按其 `aggressive` 收紧重试（最多 2 次，重试期间不重复上行 chunk）；
  * - 失败/中断：已有部分文本先 agent_finish(partial)（服务端入库保内容），再 agent_error
  *   （AbortError → code=aborted，其余 → provider_error），message 统一截 300 字符；
  * - abortAll 任意时刻可调：在流启动前打标（aborted），启动后逐 controller abort。
@@ -105,7 +135,6 @@ export function runAgentMentions(
           });
           return;
         }
-        const messages = [...history, { role: "user" as const, content: userText }];
         // 系统提示词：deps.buildSystemPrompt 存在时优先（触发端在此拼装记忆/技能），
         // 抛错回落 getPrompt 的原提示词——上下文组装失败不影响生成
         let prompt: string;
@@ -118,15 +147,45 @@ export function runAgentMentions(
         } else {
           prompt = deps.getPrompt(m.agentId);
         }
-        if (prompt) messages.unshift({ role: "system" as const, content: prompt });
         const controller = new AbortController();
         controllers.add(controller);
         if (aborted) controller.abort(); // fetchHistory 期间已按中断：启动即中止
+        /** 已逐帧上行的累积：接收端按 streamId 累积的正是它（重试期间不再上行，避免重复文本）。 */
         let acc = "";
-        try {
-          await deps.streamChat(profile, messages, {
+        /** 当前尝试的本地累积：成功即 finish 全文，故每次尝试归零。 */
+        let local = "";
+        /**
+         * 组装一次尝试的 messages（设计 §4）：系统提示词 → 准备好的历史 → 本条 user 轮。
+         * 历史每次都重新走 `prepareHistory`（溢出重试据此用收紧后的预算重切分并重新前置系统提示词）；
+         * 缺省或抛错 → 原样 history（与加预算之前完全一致，绝不阻断生成）。
+         */
+        const messagesFor = async (aggressive?: 1 | 2): Promise<ChatMessage[]> => {
+          let rows: ChatMessage[] = history;
+          if (deps.prepareHistory) {
+            try {
+              rows =
+                aggressive === undefined
+                  ? await deps.prepareHistory(history, m.agentId)
+                  : await deps.prepareHistory(history, m.agentId, { aggressive });
+            } catch {
+              rows = history; // 压缩失败不阻断生成：回落原样历史
+            }
+          }
+          const prepared: ChatMessage[] = [...rows, { role: "user", content: userText }];
+          if (prompt) prepared.unshift({ role: "system", content: prompt });
+          return prepared;
+        };
+        /**
+         * 一次尝试。只有第 1 次尝试上行 chunk / onLocalDelta——重试若重复上行，
+         * 接收端按 streamId 累积会出现重复文本（最终文本以 finish 为准）。
+         */
+        const once = async (aggressive?: 1 | 2) => {
+          local = "";
+          await deps.streamChat(profile, await messagesFor(aggressive), {
             signal: controller.signal,
             onDelta: (d) => {
+              local += d;
+              if (aggressive !== undefined) return; // 重试：只本地累积，不上行
               acc += d;
               deps.onLocalDelta(streamId, acc);
               deps.send({
@@ -138,27 +197,55 @@ export function runAgentMentions(
               });
             },
           });
+        };
+        try {
+          /** 溢出重试（设计 §3.4）：首次 → aggressive 1 → 2，两次仍失败即交给下面的既有失败收口。 */
+          let failure: Error | null = null;
+          for (let attempt = 0; attempt <= MAX_CONTEXT_RETRIES; attempt++) {
+            try {
+              await once(attempt === 0 ? undefined : (attempt as 1 | 2));
+              failure = null;
+              break;
+            } catch (e) {
+              failure = e as Error;
+              const retriable =
+                attempt < MAX_CONTEXT_RETRIES &&
+                deps.prepareHistory !== undefined &&
+                isContextOverflow(failure, aborted || controller.signal.aborted);
+              if (!retriable) break;
+              // 重试对用户不可见，只在触发端控制台留痕（设计 §3.4）
+              console.warn(
+                `上下文超限：按 aggressive=${attempt + 1} 收紧预算重试`,
+                failure.message,
+              );
+            }
+          }
+          if (failure) throw failure;
+          // 成功文本取本次尝试的全文（重试成功时不含首次尝试的失败文本）
+          const text = local || acc;
           deps.send({
             type: "agent_finish",
             conversationId,
             agentId: m.agentId,
             streamId,
-            text: acc,
+            text,
           });
-          notifyTurnComplete(deps, m.agentId, userText, acc, "ok");
+          notifyTurnComplete(deps, m.agentId, userText, text, "ok");
         } catch (e) {
           const err = e as Error;
-          // finish-partial：服务端拒空文本（F2），acc 为空则只报 error
-          if (acc) {
+          // finish-partial：服务端拒空文本（F2），partial 为空则只报 error。
+          // 文本优先取「已上行」的累积（与接收端所见一致），重试一字未上行时回落本次尝试的本地累积。
+          const partial = acc || local;
+          if (partial) {
             deps.send({
               type: "agent_finish",
               conversationId,
               agentId: m.agentId,
               streamId,
-              text: acc,
+              text: partial,
             });
             // 中断/失败：只写工作记忆（partial），不沉淀长期记忆（设计 §3）
-            notifyTurnComplete(deps, m.agentId, userText, acc, "partial");
+            notifyTurnComplete(deps, m.agentId, userText, partial, "partial");
           }
           deps.send({
             type: "agent_error",

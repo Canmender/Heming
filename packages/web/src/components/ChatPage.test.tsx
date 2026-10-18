@@ -10,6 +10,7 @@ import { streamChat } from "../lib/llmClient.js";
 import { connectWs, type WsHandlers, type WsHandle } from "../lib/ws.js";
 import { memoryStore } from "../lib/memory/index.js";
 import { skillPool } from "../lib/skills/index.js";
+import { CONTEXT_KEYS, type ContextSettings } from "../lib/agentContext/index.js";
 
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
 // 流式打底走本机 streamChat：模块 mock（保留 testConnection/buildRequest 真实现），
@@ -165,6 +166,16 @@ describe("ChatPage", () => {
     // 本批新增用例（本 describe 末尾）按需临时打开。
     memoryStore.updateSettings({ enabled: false });
     for (const s of skillPool.list()) skillPool.setEnabled(s.id, false);
+    // 本批新增接线（上下文预算 · Task B）：@ 触发会把历史交给 prepareHistory 压缩，而
+    // `heming.context.v1` 缺省即「开启」（预算 6000 / 保留 8 轮）——既有 fetchHistory 断言
+    // （如 I3 的 30 轮原文、撤回剔除用例的逐条内容）会被压缩改写。故此处把本机设置显式置为
+    // 「关闭 = 原样发送」（回到加预算之前的行为），既有断言一字不改；本批新增用例按需打开。
+    // 摘要缓存键一并清掉，防跨用例命中（本文件内的用例共用 c1）。
+    localStorage.setItem(
+      CONTEXT_KEYS.settings,
+      JSON.stringify({ enabled: false, budgetTokens: 6000, keepRecentTurns: 8, llmSummary: true }),
+    );
+    localStorage.removeItem(CONTEXT_KEYS.summaries);
   });
 
   afterEach(() => {
@@ -2507,6 +2518,136 @@ describe("ChatPage", () => {
     );
     await waitFor(() => expect(screen.getByText(/你好/)).toBeInTheDocument()); // 打字机正常
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "agent_error" })); // 写入异常不上行
+  });
+
+  // —— 上下文预算接线（Task B）：只验证接线本身，不重复 agentContext 内部逻辑 ——
+
+  /** 本机上下文设置（@ 触发链路读 `heming.context.v1`）：缺省关 LLM 摘要 → 零额外请求的确定性摘要。 */
+  function setContextSettings(patch: Partial<ContextSettings>) {
+    localStorage.setItem(
+      CONTEXT_KEYS.settings,
+      JSON.stringify({
+        enabled: true,
+        budgetTokens: 6000,
+        keepRecentTurns: 8,
+        llmSummary: false,
+        ...patch,
+      }),
+    );
+    localStorage.removeItem(CONTEXT_KEYS.summaries);
+  }
+
+  /** 长历史群会话底座（count 条「历史N」+ 已绑定「和小鸣」），返回 ws send。 */
+  async function setupLongHistoryChat(count = 6) {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    const history = Array.from({ length: count }, (_, i) =>
+      msg(`m${i + 1}`, `历史${i + 1}`, `2026-10-14T01:00:${String(i).padStart(2, "0")}.000Z`),
+    );
+    mockMessagesFetch(history, undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+    return send;
+  }
+
+  /** 某类上行事件（断言「只发一次」「完全没有」）。 */
+  const framesOf = (send: ReturnType<typeof vi.fn>, type: string) =>
+    send.mock.calls.map((c) => c[0]).filter((e) => e.type === type);
+
+  it("上下文预算开启：历史按预算切分，早期对话以摘要 system 段前置（确定性摘要 = 零额外请求）", async () => {
+    await setupLongHistoryChat(6);
+    setContextSettings({ keepRecentTurns: 2 }); // 只保留近 2 轮：历史1..4 进 older
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 查下上下文");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    expect(streamChat).toHaveBeenCalledTimes(1); // 确定性摘要不发额外请求
+    expect(seen).toHaveLength(5); // 系统提示词 + 摘要 system 段 + 近 2 轮 + 本条 user 轮
+    expect(seen![0]).toEqual({ role: "system", content: "你是和小鸣" });
+    expect(seen![1].role).toBe("system");
+    expect(seen![1].content).toContain("【早期对话摘要】");
+    expect(seen![1].content).toContain("意图：历史1；历史2；历史3");
+    expect(seen![2]).toEqual({ role: "user", content: "历史5" });
+    expect(seen![3]).toEqual({ role: "user", content: "历史6" });
+    expect(seen![4]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
+    expect(seen!.map((r) => r.content)).not.toContain("历史4"); // 早期原文不直发
+  });
+
+  it("LLM 摘要：用该 agent 绑定的 profile 调 streamChat（提示词为摘要骨架），结果作背景段且不上行", async () => {
+    const send = await setupLongHistoryChat(6);
+    setContextSettings({ keepRecentTurns: 2, llmSummary: true });
+
+    const calls: { profile: LlmProfile; messages: Parameters<typeof streamChat>[1] }[] = [];
+    vi.mocked(streamChat).mockImplementation(async (profile, messages, o) => {
+      calls.push({ profile, messages });
+      if (messages[0].content.includes("压缩成背景摘要")) {
+        // 摘要请求（非 event-stream 分支整段返回）：只输出三段骨架
+        return "【早期对话摘要】\n意图：模型摘要意图\n结论：模型摘要结论\n待办：（未提及）";
+      }
+      o.onDelta("好");
+      return "好";
+    });
+
+    await pickAndSend("@和小鸣 查下上下文");
+    await waitFor(() => expect(calls).toHaveLength(2)); // 先摘要、再主请求
+
+    expect(calls[0].profile).toEqual(testProfile); // 摘要走该 agent 绑定的连接（Key 不出设备）
+    expect(calls[0].messages[0].content).toContain("压缩成背景摘要");
+    expect(calls[0].messages[1].content).toContain("用户：历史1");
+
+    const main = calls[1].messages;
+    expect(main[0]).toEqual({ role: "system", content: "你是和小鸣" });
+    expect(main[1].role).toBe("system");
+    expect(main[1].content).toContain("【早期对话摘要】");
+    expect(main[1].content).toContain("意图：模型摘要意图");
+
+    // 摘要不落 WS：chunk / finish 各一次（都是主请求的），也没有错误上行
+    await waitFor(() => expect(framesOf(send, "agent_finish")).toHaveLength(1));
+    expect(framesOf(send, "agent_chunk")).toHaveLength(1);
+    expect(framesOf(send, "agent_error")).toHaveLength(0);
+  });
+
+  it("溢出重试接线：首次 400 上下文超限 → 用收紧后的设置重装历史，重试成功只 finish 一次", async () => {
+    const send = await setupLongHistoryChat(12);
+    setContextSettings({ keepRecentTurns: 8 });
+
+    const seen: Parameters<typeof streamChat>[1][] = [];
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages, o) => {
+      seen.push(messages);
+      if (seen.length === 1) {
+        o.onDelta("半"); // 首次尝试的部分文本（已上行）
+        throw new Error("provider_error: HTTP 400 maximum context length exceeded");
+      }
+      o.onDelta("好");
+      return "好";
+    });
+
+    await pickAndSend("@和小鸣 查下上下文");
+
+    await waitFor(() => expect(framesOf(send, "agent_finish")).toHaveLength(1));
+    expect(seen).toHaveLength(2);
+    // 首次：保留 8 轮（摘要段 + 近 8 轮 + 系统提示词 + 本条 user 轮）
+    expect(seen[0]).toHaveLength(11);
+    // 重试：aggressive=1 收紧（预算减半、保留轮数 8→4），系统提示词重新前置
+    expect(seen[1]).toHaveLength(7);
+    expect(seen[1][0]).toEqual({ role: "system", content: "你是和小鸣" });
+    expect(seen[1][1].role).toBe("system");
+    expect(seen[1].at(-1)).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
+    // 重试期间不重复上行 chunk；finish 只发一次且是重试成功的全文（无首次尝试的「半」）
+    expect(framesOf(send, "agent_chunk")).toHaveLength(1);
+    expect(framesOf(send, "agent_chunk")[0]).toMatchObject({ text: "半" });
+    expect(framesOf(send, "agent_finish")[0]).toMatchObject({ text: "好" });
+    expect(framesOf(send, "agent_error")).toHaveLength(0);
   });
 });
 

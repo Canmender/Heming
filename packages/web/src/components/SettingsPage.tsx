@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
 import { LlmSettingsCard } from "./LlmSettingsCard.js";
+import { ContextSettingsCard } from "./ContextSettingsCard.js";
 
 /**
  * 头像文件上限：449_000 字节 → base64 data URL 约 598_700 字符，
@@ -121,6 +122,8 @@ export function SettingsPage() {
       </section>
 
       <LlmSettingsCard />
+
+      <ContextSettingsCard />
     </div>
   );
 }

@@ -153,10 +153,24 @@ describe("SettingsPage 个人资料", () => {
     expect(screen.getByText("个人资料")).toBeInTheDocument();
     expect(screen.getByText("LLM 连接")).toBeInTheDocument();
     expect(screen.getByText(/还没有 LLM 连接/)).toBeInTheDocument();
-    // 两卡次序：个人资料在前、LLM 在后
+    // 三卡次序：个人资料 → LLM 连接 → 上下文预算
     const sections = document.querySelectorAll("section");
-    expect(sections).toHaveLength(2);
+    expect(sections).toHaveLength(3);
     expect(sections[0].textContent).toContain("个人资料");
     expect(sections[1].textContent).toContain("LLM 连接");
+    expect(sections[2].textContent).toContain("上下文预算");
+  });
+
+  it("LLM 连接卡之后挂载上下文预算卡：默认值回填、改动即时落盘", () => {
+    render(<SettingsPage />);
+    expect(screen.getByText("上下文预算")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "启用上下文预算" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByLabelText("预算")).toHaveValue("6000");
+
+    fireEvent.click(screen.getByRole("switch", { name: "用模型生成早期摘要" }));
+    expect(JSON.parse(localStorage.getItem("heming.context.v1") as string).llmSummary).toBe(false);
   });
 });

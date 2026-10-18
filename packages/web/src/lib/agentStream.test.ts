@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { runAgentMentions, newStreamId } from "./agentStream.js";
+import type { ChatMessage } from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
 
 const profile: LlmProfile = { id: "p1", label: "l", provider: "openai", apiKey: "k", model: "m" };
@@ -283,5 +284,241 @@ describe("runAgentMentions 运行时接线", () => {
 
     expect(buildSystemPrompt).not.toHaveBeenCalled();
     expect(onTurnComplete).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Task B 增量接线（设计 §4 / §3.4）：上下文压缩注入（`prepareHistory`）+ 供应商 400
+ * 上下文超限的收紧重试。字段缺省时，上面全部既有用例的行为必须逐字不变。
+ */
+describe("runAgentMentions 上下文预算接线", () => {
+  /** 原始历史（触发前由 fetchHistory 给出）。 */
+  const history = [{ role: "user" as const, content: "早前消息" }];
+  /** 供应商 400 上下文超限（OpenAI 措辞）：命中「maximum context」且带 400。 */
+  const overflow = () =>
+    new Error(
+      "provider_error: HTTP 400 {\"error\":{\"message\":\"This model's maximum context length is 8192 tokens. Please reduce the length of the messages.\"}}",
+    );
+  /** 第 n 次尝试收到的 messages。 */
+  const attemptMessages = (deps: { streamChat: unknown }, n: number): ChatMessage[] =>
+    (deps.streamChat as ReturnType<typeof vi.fn>).mock.calls[n][1] as ChatMessage[];
+  /** 某类上行事件（断言「只发一次」「完全没有」）。 */
+  const framesOf = (send: ReturnType<typeof vi.fn>, type: string) =>
+    send.mock.calls.map((c) => c[0]).filter((e) => e.type === type);
+
+  it("缺省 prepareHistory：不调用、messages 与今天逐字一致", async () => {
+    const { send, deps } = makeDeps();
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(attemptMessages(deps, 0)).toEqual([
+      { role: "system", content: "你是和小鸣" },
+      ...history,
+      { role: "user", content: "hi" },
+    ]);
+    expect(framesOf(send, "agent_finish")).toHaveLength(1);
+    expect(framesOf(send, "agent_error")).toHaveLength(0);
+  });
+
+  it("prepareHistory 抛错 → 回落原 history，生成照常收口（不上行错误）", async () => {
+    const prepareHistory = vi.fn(async () => {
+      throw new Error("压缩爆炸");
+    });
+    const { send, deps } = makeDeps({ prepareHistory });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(prepareHistory).toHaveBeenCalledTimes(1);
+    expect(attemptMessages(deps, 0)).toEqual([
+      { role: "system", content: "你是和小鸣" },
+      ...history,
+      { role: "user", content: "hi" },
+    ]);
+    expect(framesOf(send, "agent_finish")).toHaveLength(1);
+    expect(framesOf(send, "agent_error")).toHaveLength(0);
+  });
+
+  it("正常路径：以 (history, agentId) 调用一次，压缩结果夹在系统提示词与本条 user 轮之间", async () => {
+    const prepared: ChatMessage[] = [
+      { role: "system", content: "【早期对话摘要】\n意图：早期" },
+      { role: "user", content: "近两轮" },
+    ];
+    const prepareHistory = vi.fn(
+      async (_rows: ChatMessage[], _agentId: string, _opts?: { aggressive?: 1 | 2 }) => prepared,
+    );
+    const { deps } = makeDeps({ prepareHistory });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(prepareHistory).toHaveBeenCalledTimes(1);
+    expect(prepareHistory.mock.calls[0]).toHaveLength(2); // 正常路径不传 opts
+    expect(prepareHistory.mock.calls[0][0]).toEqual(history);
+    expect(prepareHistory.mock.calls[0][1]).toBe("a1");
+    expect(attemptMessages(deps, 0)).toEqual([
+      { role: "system", content: "你是和小鸣" },
+      ...prepared,
+      { role: "user", content: "hi" },
+    ]);
+  });
+
+  it("溢出重试：最多 2 次（aggressive 1→2）重新组装，重试不上行 chunk，成功只 finish 一次", async () => {
+    const prepareHistory = vi.fn(
+      async (rows: ChatMessage[], _agentId: string, opts?: { aggressive?: 1 | 2 }) => [
+        ...(opts?.aggressive
+          ? [{ role: "system" as const, content: `摘要${opts.aggressive}` }]
+          : []),
+        ...rows,
+      ],
+    );
+    let n = 0;
+    const streamChat = vi.fn(
+      async (_p: unknown, _m: ChatMessage[], o: { onDelta: (t: string) => void }) => {
+        n += 1;
+        if (n === 1) {
+          o.onDelta("半");
+          throw overflow();
+        }
+        if (n === 2) {
+          o.onDelta("再");
+          throw overflow();
+        }
+        o.onDelta("好");
+        return "好";
+      },
+    );
+    const onTurnComplete = vi.fn();
+    const { send, onLocalDelta, deps } = makeDeps({ prepareHistory, streamChat, onTurnComplete });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    // 三次尝试：原始 → aggressive 1 → aggressive 2
+    expect(streamChat).toHaveBeenCalledTimes(3);
+    expect(prepareHistory.mock.calls.map((c) => c[2])).toEqual([
+      undefined,
+      { aggressive: 1 },
+      { aggressive: 2 },
+    ]);
+    // 每次尝试都重新前置系统提示词、重挂本条 user 轮，并用该次 aggressive 的重装结果
+    const expectedSecond: ChatMessage[] = [
+      { role: "user", content: "早前消息" },
+      { role: "system", content: "摘要1" },
+      { role: "system", content: "摘要2" },
+    ];
+    for (let i = 0; i < 3; i++) {
+      const messages = attemptMessages(deps, i);
+      expect(messages[0]).toEqual({ role: "system", content: "你是和小鸣" });
+      expect(messages[1]).toEqual(expectedSecond[i]);
+      expect(messages.at(-1)).toEqual({ role: "user", content: "hi" });
+    }
+    // 重试期间不重复上行 chunk：chunk 只有第 1 次尝试的那一帧
+    const chunks = framesOf(send, "agent_chunk");
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({ text: "半" });
+    expect(onLocalDelta).toHaveBeenCalledTimes(1);
+    // 成功收口：finish 只发一次，且是重试成功的全文
+    const finishes = framesOf(send, "agent_finish");
+    expect(finishes).toHaveLength(1);
+    expect(finishes[0]).toMatchObject({ text: "好" });
+    expect(framesOf(send, "agent_error")).toHaveLength(0);
+    expect(onTurnComplete).toHaveBeenCalledTimes(1);
+    expect(onTurnComplete).toHaveBeenCalledWith("a1", "hi", "好", "ok");
+  });
+
+  it("非超限错误不重试：401 与「不含超限特征的 400」都只调一次 streamChat", async () => {
+    for (const message of [
+      "provider_error: HTTP 401 bad key",
+      "provider_error: HTTP 400 invalid model id",
+    ]) {
+      const prepareHistory = vi.fn(async (rows: ChatMessage[]) => rows);
+      const streamChat = vi.fn(
+        async (_p: unknown, _m: ChatMessage[], o: { onDelta: (t: string) => void }) => {
+          o.onDelta("半");
+          throw new Error(message);
+        },
+      );
+      const { send, deps } = makeDeps({ prepareHistory, streamChat });
+
+      await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+      expect(streamChat).toHaveBeenCalledTimes(1);
+      expect(prepareHistory).toHaveBeenCalledTimes(1);
+      expect(framesOf(send, "agent_finish")).toHaveLength(1);
+      expect(framesOf(send, "agent_error")).toHaveLength(1);
+      expect(framesOf(send, "agent_error")[0]).toMatchObject({ code: "provider_error" });
+      expect(send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "agent_error", code: "aborted" }),
+      );
+    }
+  });
+
+  it("abort 不重试：中断后即便错误文本像超限也走既有 aborted 分支", async () => {
+    const prepareHistory = vi.fn(async (rows: ChatMessage[]) => rows);
+    const { send, onLocalDelta, deps } = makeDeps({
+      prepareHistory,
+      streamChat: vi.fn(
+        (_p: unknown, _m: unknown, o: { signal: AbortSignal; onDelta: (t: string) => void }) =>
+          new Promise<string>((_res, rej) => {
+            const abort = () =>
+              rej(
+                new DOMException(
+                  "provider_error: HTTP 400 maximum context length exceeded",
+                  "AbortError",
+                ),
+              );
+            if (o.signal.aborted) return abort();
+            o.onDelta("半");
+            o.signal.addEventListener("abort", abort);
+          }),
+      ),
+    });
+
+    const run = runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    await vi.waitFor(() => expect(onLocalDelta).toHaveBeenCalledWith(expect.any(String), "半"));
+    run.abortAll();
+    await run;
+
+    expect(deps.streamChat).toHaveBeenCalledTimes(1); // 未重试
+    expect(prepareHistory).toHaveBeenCalledTimes(1);
+    expect(framesOf(send, "agent_error")).toHaveLength(1);
+    expect(framesOf(send, "agent_error")[0]).toMatchObject({ code: "aborted" });
+    expect(framesOf(send, "agent_finish")[0]).toMatchObject({ text: "半" });
+  });
+
+  it("两次重试仍超限 → 不无限重试，走既有 finish-partial + agent_error", async () => {
+    const prepareHistory = vi.fn(async (rows: ChatMessage[]) => rows);
+    let n = 0;
+    const streamChat = vi.fn(
+      async (_p: unknown, _m: ChatMessage[], o: { onDelta: (t: string) => void }) => {
+        n += 1;
+        o.onDelta(`半${n}`);
+        throw overflow();
+      },
+    );
+    const onTurnComplete = vi.fn();
+    const { send, deps } = makeDeps({ prepareHistory, streamChat, onTurnComplete });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(streamChat).toHaveBeenCalledTimes(3); // 首次 + 两次收紧
+    // partial = 已上行文本（与接收端按 streamId 累积的 chunk 一致）
+    const finishes = framesOf(send, "agent_finish");
+    expect(finishes).toHaveLength(1);
+    expect(finishes[0]).toMatchObject({ text: "半1" });
+    expect(framesOf(send, "agent_chunk")).toHaveLength(1);
+    expect(framesOf(send, "agent_error")).toHaveLength(1);
+    expect(framesOf(send, "agent_error")[0]).toMatchObject({ code: "provider_error" });
+    expect(onTurnComplete).toHaveBeenCalledWith("a1", "hi", "半1", "partial");
+  });
+
+  it("缺省 prepareHistory 时溢出错误不重试（无收紧手段）：只走既有失败收口", async () => {
+    const streamChat = vi.fn(async () => {
+      throw overflow();
+    });
+    const { send, deps } = makeDeps({ streamChat });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(streamChat).toHaveBeenCalledTimes(1);
+    expect(framesOf(send, "agent_error")).toHaveLength(1);
   });
 });

@@ -8,6 +8,11 @@ import { fetchMessages, fetchMembers, uploadFile, fetchFileBlobUrl } from "../li
 import { streamChat } from "../lib/llmClient.js";
 import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
 import { buildAgentContext } from "../lib/agentRuntime/context.js";
+import {
+  loadContextSettings,
+  prepareHistory as prepareAgentHistory,
+  summaryCache,
+} from "../lib/agentContext/index.js";
 import { memoryStore } from "../lib/memory/index.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
@@ -384,6 +389,42 @@ export function ChatPage() {
           }
         } catch {
           /* 记忆失败静默降级 */
+        }
+      },
+      // 上下文预算（设计 §4）：agentStream 在 fetchHistory 之后调用——按本机设置做 token
+      // 预算切分与早期对话压缩（摘要置于历史之前）；溢出重试带 aggressive 重新调用。
+      // LLM 摘要用该 agent 绑定的 profile 走 streamChat（非 event-stream 分支整段返回），
+      // 不落库、不上行 WS、失败返回 null（回落确定性摘要）；异常一律返回原 rows。
+      prepareHistory: async (rows, agentId, opts) => {
+        try {
+          const profile = resolveProfile(agentId);
+          return await prepareAgentHistory(rows, {
+            settings: loadContextSettings(),
+            cache: summaryCache,
+            conversationId: convId,
+            aggressive: opts?.aggressive,
+            summarize: profile
+              ? async (messages) => {
+                  if (!messages.length) return null;
+                  try {
+                    let collected = "";
+                    // 摘要请求独立于本次生成的中断（生成尚未开始）；只读不改：不落库
+                    const text = await streamChat(profile, messages, {
+                      signal: new AbortController().signal,
+                      maxTokens: 400,
+                      onDelta: (d) => {
+                        collected += d;
+                      },
+                    });
+                    return text || collected || null;
+                  } catch {
+                    return null; // 摘要失败 → 回落零成本的确定性摘要
+                  }
+                }
+              : undefined,
+          });
+        } catch {
+          return rows; // 压缩失败不阻断生成：按原样发送
         }
       },
     };
