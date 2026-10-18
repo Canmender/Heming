@@ -13,6 +13,9 @@ import { acceptFriend, resolveUrl } from "../lib/api.js";
 import { Avatar } from "./Avatar.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
 
+/** 构建时注入的版本号（vite define __APP_VERSION__，file:// 桌面端无法 fetch package.json）。 */
+declare const __APP_VERSION__: string;
+
 /** 底部通栏「最新资讯」：静态产品介绍常量（非虚构统计数据）。 */
 const NEWS: { source: string; title: string; summary: string; date: string }[] = [
   {
@@ -61,17 +64,18 @@ function fmtTime(iso: string): string {
 
 export function HomePage() {
   const user = useAuthStore((s) => s.user);
-  const { conversations, friends, incoming, messages, loadWorkspace } = useChatStore();
+  const { conversations, friends, incoming, messages, loadWorkspace, agents, agentsRoster, loadAgentsRoster } = useChatStore();
   const openConversation = useUiStore((s) => s.openConversation);
   const { quota, records } = useTokenUsageStore();
   const [tab, setTab] = useState<"me" | "team" | "date">("me");
   const [openDay, setOpenDay] = useState<string | null>(null);
   const [cloud, setCloud] = useState<"检测中" | "正常" | "失败">("检测中");
 
-  // 真实数据优先：挂载时加载工作区数据与云端健康探测
+  // 真实数据优先：挂载时加载工作区数据、云端健康探测与智能体名册
   useEffect(() => {
     void loadWorkspace().catch((err) => console.warn("工作区数据加载失败", err));
-  }, [loadWorkspace]);
+    void loadAgentsRoster().catch(() => {});
+  }, [loadWorkspace, loadAgentsRoster]);
 
   useEffect(() => {
     let alive = true;
@@ -117,6 +121,8 @@ export function HomePage() {
   const pct = quota > 0 ? Math.min(100, Math.round((monthSummary.total / quota) * 100)) : 0;
   const modelRows = Object.entries(monthSummary.byModel).sort((a, b) => b[1] - a[1]);
   const recent = conversations.slice(0, 6);
+  // 智能体动态：优先群内已挂载的，空时回退名册全量（用户可能只自建未入群）
+  const displayAgents = (agents.length > 0 ? agents : agentsRoster).slice(0, 3);
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-6">
@@ -131,7 +137,7 @@ export function HomePage() {
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2 pt-1">
           <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 text-[11px] text-muted">
-            版本 v0.1.0
+            版本 v{__APP_VERSION__}
           </span>
           <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 text-[11px] text-muted">
             今日已用 {todayTotal}
@@ -143,7 +149,7 @@ export function HomePage() {
       <div className="grid grid-cols-4 gap-2.5">
         <StatCard title="会话总数" value={String(conversations.length)} sub="含群聊" />
         <StatCard title="好友数" value={String(friends.length)} sub="可拉群聊" />
-        <StatCard title="我的智能体" value="0" sub="M3 开放创建" />
+        <StatCard title="我的智能体" value={String(agentsRoster.length)} sub="含系统预设" />
         <div className="col-span-4 rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
           <div className="flex items-center">
             <div className="text-[11px] font-bold text-[#777]">Token 用量 · {monthKey}</div>
@@ -326,7 +332,21 @@ export function HomePage() {
           {/* 4. 智能体动态 */}
           <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
             <div className="mb-1.5 text-[12px] font-bold text-[#777]">智能体动态</div>
-            <div className="py-1.5 text-[12px] text-muted">M3 创建智能体后，动态显示在这里</div>
+            {displayAgents.length === 0 ? (
+              <div className="py-1.5 text-[12px] text-muted">暂无智能体，可在工作区创建</div>
+            ) : (
+              displayAgents.map((a) => (
+                <div key={a.id} className="flex items-center gap-2 py-1">
+                  <Avatar user={{ displayName: a.name, avatar: a.avatar ?? undefined }} size={22} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12px] font-medium">{a.name}</span>
+                    {a.description && (
+                      <span className="block truncate text-[10px] text-muted">{a.description}</span>
+                    )}
+                  </span>
+                </div>
+              ))
+            )}
           </section>
 
           {/* 5. 待处理：真实好友申请 */}

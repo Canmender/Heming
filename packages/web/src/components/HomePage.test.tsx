@@ -12,6 +12,11 @@ const peer: User = { id: "u2", username: "bob", displayName: "鲍勃" };
 // conversations 为联合类型（M2）：direct 夹具补 unreadCount
 const conv = (id: string) => ({ id, type: "direct" as const, peer: user, unreadCount: 0 });
 
+const AGENT_ROSTER = [
+  { id: "a1", owner_id: "u1", name: "我的智能体甲", avatar: null, description: "帮我写代码" },
+  { id: "a2", owner_id: null, name: "和小鸣", avatar: null, description: "和鸣官方预设" },
+];
+
 const now = new Date();
 const at = (day: number, hour = 12) =>
   new Date(now.getFullYear(), now.getMonth(), day, hour).toISOString();
@@ -94,7 +99,7 @@ describe("HomePage", () => {
     expect(screen.queryByText("知识库文档")).not.toBeInTheDocument(); // v7 移除该卡
 
     // 徽标：版本静态 + 今日已用来自真实日志
-    expect(screen.getByText("版本 v0.1.0")).toBeInTheDocument();
+    expect(screen.getByText(`版本 v${__APP_VERSION__}`)).toBeInTheDocument();
     expect(screen.getByText(/今日已用 700/)).toBeInTheDocument();
   });
 
@@ -293,13 +298,84 @@ describe("HomePage", () => {
     expect(screen.getByText("近 30 日用量")).toBeInTheDocument();
   });
 
-  it("右栏智能体动态空态、系统状态三行与资讯三卡", async () => {
+  it("统计卡「我的智能体」接名册真实数量", async () => {
+    mockFetch();
+    useChatStore.setState({
+      conversations: [],
+      friends: [],
+      incoming: [],
+      messages: {},
+      agentsRoster: AGENT_ROSTER,
+      agents: [AGENT_ROSTER[0]],
+    });
+    render(<HomePage />);
+    await act(async () => {});
+
+    // 名册 2 个（含系统预设）→ 统计卡显示 2
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("我的智能体")).toBeInTheDocument();
+    expect(screen.getByText("含系统预设")).toBeInTheDocument();
+    expect(screen.queryByText("M3 开放创建")).not.toBeInTheDocument();
+  });
+
+  it("智能体动态：群内已挂载的显示名+描述", async () => {
+    mockFetch();
+    useChatStore.setState({
+      conversations: [],
+      friends: [],
+      incoming: [],
+      messages: {},
+      agentsRoster: AGENT_ROSTER,
+      agents: [AGENT_ROSTER[0]],
+    });
+    render(<HomePage />);
+    await act(async () => {});
+
+    expect(screen.getByText("智能体动态")).toBeInTheDocument();
+    expect(screen.getByText("我的智能体甲")).toBeInTheDocument();
+    expect(screen.getByText("帮我写代码")).toBeInTheDocument();
+  });
+
+  it("智能体动态：名册非空但群内无挂载时回退名册全量", async () => {
+    mockFetch();
+    useChatStore.setState({
+      conversations: [],
+      friends: [],
+      incoming: [],
+      messages: {},
+      agentsRoster: AGENT_ROSTER,
+      agents: [],
+    });
+    render(<HomePage />);
+    await act(async () => {});
+
+    // 回退名册全量 → 显示前 3 个
+    expect(screen.getByText("我的智能体甲")).toBeInTheDocument();
+    expect(screen.getByText("和小鸣")).toBeInTheDocument();
+  });
+
+  it("智能体动态：名册空时显示引导文案", async () => {
+    mockFetch();
+    useChatStore.setState({
+      conversations: [],
+      friends: [],
+      incoming: [],
+      messages: {},
+      agentsRoster: [],
+      agents: [],
+    });
+    render(<HomePage />);
+    await act(async () => {});
+
+    expect(screen.getByText("智能体动态")).toBeInTheDocument();
+    expect(screen.getByText("暂无智能体，可在工作区创建")).toBeInTheDocument();
+    expect(screen.queryByText("M3 创建智能体后，动态显示在这里")).not.toBeInTheDocument();
+  });
+
+  it("右栏系统状态三行与资讯三卡", async () => {
     mockFetch();
     render(<HomePage />);
     await act(async () => {}); // 冲刷挂载时 health/工作区加载的异步状态更新
-
-    expect(screen.getByText("智能体动态")).toBeInTheDocument();
-    expect(screen.getByText("M3 创建智能体后，动态显示在这里")).toBeInTheDocument();
 
     expect(screen.getByText("待处理")).toBeInTheDocument();
     expect(screen.getByText("没有待处理申请")).toBeInTheDocument();
