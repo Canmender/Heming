@@ -16,6 +16,32 @@ export interface TriggerDeps {
    */
   onStart?: (streamId: string, mention: { agentId: string; name: string }) => void;
   /**
+   * E2E 流式片封条（Task 4，设计 §5.3）：把一片 delta 封成信封（cipher/chainKid/n）。
+   * 返回 null/undefined 视为「当前无法加密」→ 该片**跳过不发**（绝不降级明文片）；
+   * 抛错同跳过。未注入 = 明文 legacy 路径（测试/旧端）。
+   */
+  sealChunk?: (
+    streamId: string,
+    index: number,
+    text: string,
+  ) => Promise<{ cipher: string; chainKid?: string; n?: number } | null | undefined>;
+  /**
+   * E2E finish 封条：全文进信封（text 置空上行，服务端按信封入库）。
+   * 加密失败（抛错/null）→ 不发明文 finish，改报 agent_error(bad_event) 收口。
+   */
+  sealFinish?: (
+    text: string,
+  ) => Promise<{ cipher: string; chainKid?: string; n?: number } | null | undefined>;
+  /**
+   * E2E 错误封条（fix I2）：agent_error 的正文可回显供应商请求片段 → 同款信封
+   * （message 置空、全文进 cipher，AAD 由接线层按 errorAad(convId, streamId) 绑定）。
+   * 加密失败（抛错/null）→ 回退通用明文文案（不含原文），绝不发明文错误正文。
+   */
+  sealError?: (
+    streamId: string,
+    message: string,
+  ) => Promise<{ cipher: string; chainKid?: string; n?: number } | null | undefined>;
+  /**
    * 异步系统提示词构建（设计 §6）：存在时优先于 `getPrompt`（每次 mention 在流启动前 await），
    * 抛错则回落 `getPrompt`。触发端在此拼装「原提示词 + 记忆 + 技能」。
    */
@@ -60,6 +86,9 @@ function isContextOverflow(err: Error | null | undefined, aborted: boolean): boo
   const message = String(err?.message ?? "");
   return message.includes("400") && CONTEXT_OVERFLOW_RE.test(message);
 }
+
+/** 错误信封加密失败时的通用回退文案（不含错误原文；chat store 降级口径同其 E2E_ERROR_FALLBACK）。 */
+export const GENERIC_SEAL_FALLBACK = "生成出错（内容无法解密）";
 
 /** 一次触发的句柄：中断按钮调用后，进行中的各流 abort → catch 走 finish-partial + agent_error(aborted)。 */
 export interface AgentRunHandle {
@@ -123,16 +152,51 @@ export function runAgentMentions(
       mentions.map(async (m) => {
         const streamId = newStreamId();
         deps.onStart?.(streamId, m);
-        const profile = deps.getProfile(m.agentId);
-        if (!profile) {
-          deps.send({
-            type: "agent_error",
+        // E2E 串行闸与错误上行（fix I2）——先于 profile 判定定义：无绑定分支也要发信封错误
+        let idx = 0;
+        // 片/错误上行串行闸：seal 读写会话链文件跨 await 交错会撞 n（同 n 密文被收端去重
+        // 误杀），乱序上行还会让收端 index 与发送序错位——依次过闸再 send。
+        let sealTail: Promise<void> = Promise.resolve();
+        const enqueue = (job: () => Promise<void>) => {
+          sealTail = sealTail.then(job, job);
+        };
+        /** 错误上行：注入 sealError → message 置空带信封；封失败只发通用文案（不发明文原文）。 */
+        const sendError = async (code: string, message: string) => {
+          const base = {
+            type: "agent_error" as const,
             conversationId,
             agentId: m.agentId,
             streamId,
-            code: "provider_error",
-            message: "未绑定 LLM 连接",
+            code,
+          };
+          if (!deps.sealError) {
+            deps.send({ ...base, message }); // legacy 明文路径（测试/未注入）
+            return;
+          }
+          await enqueue(async () => {
+            let sealed: Awaited<ReturnType<NonNullable<TriggerDeps["sealError"]>>> = null;
+            try {
+              sealed = await deps.sealError!(streamId, message);
+            } catch {
+              sealed = null;
+            }
+            if (sealed) {
+              deps.send({
+                ...base,
+                message: "",
+                cipher: sealed.cipher,
+                ...(sealed.chainKid !== undefined ? { chainKid: sealed.chainKid } : {}),
+                ...(sealed.n !== undefined ? { n: sealed.n } : {}),
+              });
+            } else {
+              deps.send({ ...base, message: GENERIC_SEAL_FALLBACK }); // 无敏感正文，code 保留
+            }
           });
+          await sealTail;
+        };
+        const profile = deps.getProfile(m.agentId);
+        if (!profile) {
+          await sendError("provider_error", "未绑定 LLM 连接");
           return;
         }
         // 系统提示词：deps.buildSystemPrompt 存在时优先（触发端在此拼装记忆/技能），
@@ -175,6 +239,31 @@ export function runAgentMentions(
           if (prompt) prepared.unshift({ role: "system", content: prompt });
           return prepared;
         };
+        const sealChunkHook = deps.sealChunk;
+        /** finish 上行：注入 sealFinish → 信封（text 置空）；加密失败返回 false（调用方收口）。 */
+        const sendFinish = async (text: string): Promise<boolean> => {
+          if (!deps.sealFinish) {
+            deps.send({ type: "agent_finish", conversationId, agentId: m.agentId, streamId, text });
+            return true;
+          }
+          try {
+            const sealed = await deps.sealFinish(text);
+            if (!sealed) return false; // 无法加密 → 不发明文 finish（绝不降级）
+            deps.send({
+              type: "agent_finish",
+              conversationId,
+              agentId: m.agentId,
+              streamId,
+              text: "",
+              cipher: sealed.cipher,
+              ...(sealed.chainKid !== undefined ? { chainKid: sealed.chainKid } : {}),
+              ...(sealed.n !== undefined ? { n: sealed.n } : {}),
+            });
+            return true;
+          } catch {
+            return false;
+          }
+        };
         /**
          * 一次尝试。只有第 1 次尝试上行 chunk / onLocalDelta——重试若重复上行，
          * 接收端按 streamId 累积会出现重复文本（最终文本以 finish 为准）。
@@ -188,12 +277,36 @@ export function runAgentMentions(
               if (aggressive !== undefined) return; // 重试：只本地累积，不上行
               acc += d;
               deps.onLocalDelta(streamId, acc);
-              deps.send({
-                type: "agent_chunk",
-                conversationId,
-                agentId: m.agentId,
-                streamId,
-                text: d,
+              if (!sealChunkHook) {
+                deps.send({
+                  type: "agent_chunk",
+                  conversationId,
+                  agentId: m.agentId,
+                  streamId,
+                  text: d,
+                });
+                return;
+              }
+              const index = idx++;
+              enqueue(async () => {
+                let sealed: Awaited<ReturnType<typeof sealChunkHook>> = null;
+                try {
+                  sealed = await sealChunkHook(streamId, index, d);
+                } catch {
+                  return; // 封失败：跳过该片（finish 全文信封兜底展示，绝不发明文片）
+                }
+                if (!sealed) return;
+                deps.send({
+                  type: "agent_chunk",
+                  conversationId,
+                  agentId: m.agentId,
+                  streamId,
+                  text: "",
+                  index,
+                  cipher: sealed.cipher,
+                  ...(sealed.chainKid !== undefined ? { chainKid: sealed.chainKid } : {}),
+                  ...(sealed.n !== undefined ? { n: sealed.n } : {}),
+                });
               });
             },
           });
@@ -221,40 +334,26 @@ export function runAgentMentions(
             }
           }
           if (failure) throw failure;
+          await sealTail; // 片全部落闸后再 finish（同一发送链推进有序）
           // 成功文本取本次尝试的全文（重试成功时不含首次尝试的失败文本）
           const text = local || acc;
-          deps.send({
-            type: "agent_finish",
-            conversationId,
-            agentId: m.agentId,
-            streamId,
-            text,
-          });
-          notifyTurnComplete(deps, m.agentId, userText, text, "ok");
+          if (await sendFinish(text)) {
+            notifyTurnComplete(deps, m.agentId, userText, text, "ok");
+          } else {
+            await sendError("bad_event", "端到端加密失败，回复未发送");
+          }
         } catch (e) {
           const err = e as Error;
-          // finish-partial：服务端拒空文本（F2），partial 为空则只报 error。
-          // 文本优先取「已上行」的累积（与接收端所见一致），重试一字未上行时回落本次尝试的本地累积。
+          await sealTail.catch(() => undefined);
+          // finish-partial：服务端拒空文本（F2），partial 为空则只报 error；
+          // 文本优先取「已上行」的累积（与接收端所见一致），重试一字未上行时回落本次尝试的本地累积；
+          // 加密失败时 sendFinish 返回 false——仍走下方 error 收口（明文不外发）
           const partial = acc || local;
-          if (partial) {
-            deps.send({
-              type: "agent_finish",
-              conversationId,
-              agentId: m.agentId,
-              streamId,
-              text: partial,
-            });
+          if (partial && (await sendFinish(partial))) {
             // 中断/失败：只写工作记忆（partial），不沉淀长期记忆（设计 §3）
             notifyTurnComplete(deps, m.agentId, userText, partial, "partial");
           }
-          deps.send({
-            type: "agent_error",
-            conversationId,
-            agentId: m.agentId,
-            streamId,
-            code: err.name === "AbortError" ? "aborted" : "provider_error",
-            message: err.message.slice(0, 300),
-          });
+          await sendError(err.name === "AbortError" ? "aborted" : "provider_error", err.message.slice(0, 300));
         } finally {
           controllers.delete(controller);
         }

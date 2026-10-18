@@ -9,6 +9,8 @@ import {
   CreateFileBodySchema,
   AgentBodySchema,
   AttachAgentBodySchema,
+  PutE2eKeysBodySchema,
+  ReencryptBodySchema,
   type SharedFileMeta,
 } from "@heming/shared";
 import type { Store } from "./store.js";
@@ -370,6 +372,50 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     }
     store.detachAgentFromGroup(req.params.id, req.params.agentId);
     res.status(204).end();
+  });
+
+  // —— E2E Task 2：设备公钥分发（设计 §3.1）与明文重封装（§7）——
+
+  /** 登录可读全部用户设备公钥：{[userId]: devices[]}（X3DH 发起侧取对端 IK/SPK 用）。 */
+  app.get("/api/e2e/keys", authOnly, (_req, res) => {
+    res.json(store.listE2eKeys());
+  });
+
+  /** 登记本人设备（仅 upsert 到登录账号名下——body 无 userId 位，夹带字段被 Zod 剥除）。 */
+  app.put("/api/e2e/keys", authOnly, (req, res) => {
+    const parsed = PutE2eKeysBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    store.upsertE2eDevice(userId(req), parsed.data);
+    res.status(204).end();
+  });
+
+  /**
+   * 明文消息重加密（设计 §7）：本人把 plain 消息原子重封为 e2e 信封。
+   * 语义：400 body 非法 / 401 未登录 / 403 非 sender / 404 消息不存在 /
+   * 409 已是 e2e（或并发下先到者已换）/ 200 更新后消息。
+   */
+  app.put("/api/messages/:id/reencrypt", authOnly, (req, res) => {
+    const parsed = ReencryptBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.reencryptMessage(req.params.id, userId(req), {
+      cipher: parsed.data.cipher,
+      ...(parsed.data.chainKid !== undefined ? { chainKid: parsed.data.chainKid } : {}),
+      ...(parsed.data.n !== undefined ? { n: parsed.data.n } : {}),
+    });
+    if (!result.ok) {
+      const status = result.reason === "not_found" ? 404 : result.reason === "forbidden" ? 403 : 409;
+      const error =
+        result.reason === "not_found" ? "not found" : result.reason === "forbidden" ? "forbidden" : "already encrypted";
+      res.status(status).json({ error });
+      return;
+    }
+    res.json(result.message);
   });
 
   return app;

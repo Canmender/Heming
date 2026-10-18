@@ -7,8 +7,8 @@
     "dev": "electron .",
     "start": "electron .",
     "dist": "electron-builder --win nsis",
-    "typecheck": "node --check main.js && node --check window-state.js && node --check preload.js",
-    "test": "node --check main.js && node --check window-state.js && node --check preload.js && node --test"
+    "typecheck": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check preload.js",
+    "test": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check preload.js && node --test"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -20,6 +20,7 @@
     "files": [
       "main.js",
       "window-state.js",
+      "secure-origins.js",
       "preload.js"
     ],
     "directories": {

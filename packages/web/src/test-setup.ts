@@ -1,4 +1,14 @@
 import "@testing-library/jest-dom/vitest";
+import { webcrypto } from "node:crypto";
+
+/**
+ * jsdom 不实现 crypto.subtle（E2E 加密核心的 HKDF/ECDH/AES-GCM 全依赖它），
+ * 注入 node:crypto 的 webcrypto（同为 W3C 标准实现）。真实浏览器/Electron 已有
+ * subtle（规格 §2.1：http 非安全上下文缺 subtle 是产品横幅问题，不走此分支）。
+ */
+if (!globalThis.crypto?.subtle) {
+  Object.defineProperty(globalThis, "crypto", { value: webcrypto });
+}
 
 /**
  * jsdom 25 的 Blob/File 未实现 arrayBuffer()（浏览器原生有），附件上传（uploadFile）的

@@ -158,6 +158,7 @@ describe("HomePage", () => {
       replyTo: null,
       createdAt: now.toISOString(),
       recalledAt: null,
+      enc: "plain" as const,
     };
     // c1 有头像 → 圆形 <img>；c2 无头像 → 首字回退（替代人形图标）
     const convWithAvatar = {
@@ -206,6 +207,7 @@ describe("HomePage", () => {
       replyTo: null,
       createdAt: now.toISOString(),
       recalledAt: null,
+      enc: "plain" as const,
     };
     useChatStore.setState({
       conversations: [conv("c1"), conv("c2")],
@@ -232,6 +234,7 @@ describe("HomePage", () => {
       replyTo: null,
       createdAt: now.toISOString(),
       recalledAt: "2026-10-17T00:00:00.000Z",
+      enc: "plain" as const,
     };
     useChatStore.setState({
       conversations: [conv("c1")],
@@ -256,7 +259,7 @@ describe("HomePage", () => {
       conversations: rows,
       friends: [],
       incoming: [],
-      messages: { c1: [{ id: "m0", conversationId: "c1", senderType: "user", senderId: "u1", payload: { text: "c1 有历史" }, replyTo: null, createdAt: now.toISOString(), recalledAt: null }] },
+      messages: { c1: [{ id: "m0", conversationId: "c1", senderType: "user", senderId: "u1", payload: { text: "c1 有历史" }, replyTo: null, createdAt: now.toISOString(), recalledAt: null, enc: "plain" }] },
     });
     mockFetch({ conversations: rows });
 

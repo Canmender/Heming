@@ -237,7 +237,9 @@ describe("ws", () => {
     wsB.close();
   });
 
-  it("react_message：成员 toggle 广播 message_updated（payload 带 reactions），非成员收 error", async () => {
+  it("react_message 已废（E2E Task 2）：事件拒收 bad_event，不入库、不广播、不误触 mark_read", async () => {
+    // 设计 §4：表情回应改为 kind=reaction 的 e2e 信封消息（按普通 send_message 入库），
+    // react_message 客户端事件从 shared 契约移除 → parse 失败回 bad_event。
     const a = store.createUser(`rx-a-${Date.now()}`, "h", "甲");
     const b = store.createUser(`rx-b-${Date.now()}`, "h", "乙");
     store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
@@ -246,44 +248,92 @@ describe("ws", () => {
     const wsA = await connect(issueToken(a.id));
     const wsB = await connect(issueToken(b.id));
 
-    // 消息不存在：成员收 bad_event，不广播（wsB 保持安静，先测此例避免混入后续广播帧）
-    const notFound = nextEvent(wsA);
-    wsA.send(JSON.stringify({ type: "react_message", conversationId: conv.id, messageId: "nope", emoji: "👍" }));
-    const nfEv = await notFound;
-    expect(nfEv.type).toBe("error");
-    if (nfEv.type === "error") expect(nfEv.code).toBe("bad_event");
-    expect(store.listMessages(conv.id)[0].payload.reactions).toBeUndefined(); // 未落库
-
-    // 非成员：error（不改库、不广播）
-    const stranger = store.createUser(`rx-c-${Date.now()}`, "h", "丙");
-    const s = await connect(issueToken(stranger.id));
-    const waitErr = nextEvent(s);
-    s.send(JSON.stringify({ type: "react_message", conversationId: conv.id, messageId: m.id, emoji: "🎉" }));
-    const errEv = await waitErr;
-    expect(errEv.type).toBe("error");
+    const aErr = nextEvent(wsA);
+    // 用**真实**消息 id：若服务端仍按旧 toggle 处理会改 payload 并广播——以下断言即红
+    wsA.send(JSON.stringify({ type: "react_message", conversationId: conv.id, messageId: m.id, emoji: "👍" }));
+    const ev = await aErr;
+    expect(ev.type).toBe("error");
+    if (ev.type === "error") expect(ev.code).toBe("bad_event");
+    // 不入库（reactions 无落点）
     expect(store.listMessages(conv.id)[0].payload.reactions).toBeUndefined();
-
-    // 成员 toggle：b 收 message_updated（payload.reactions 带 a），并已持久化
-    const bWait = nextEvent(wsB);
-    wsA.send(JSON.stringify({ type: "react_message", conversationId: conv.id, messageId: m.id, emoji: "👍" }));
-    const ev = await bWait;
-    expect(ev.type).toBe("message_updated");
-    if (ev.type === "message_updated") {
-      expect(ev.message.id).toBe(m.id);
-      expect(ev.message.payload.reactions).toEqual([{ emoji: "👍", userIds: [a.id] }]);
-    }
-    expect(store.listMessages(conv.id)[0].payload.reactions).toEqual([{ emoji: "👍", userIds: [a.id] }]);
-
-    // 再次 toggle（同一 emoji 同一人）→ 取消：reactions 回落空数组
-    const bWait2 = nextEvent(wsB);
-    wsA.send(JSON.stringify({ type: "react_message", conversationId: conv.id, messageId: m.id, emoji: "👍" }));
-    const ev2 = await bWait2;
-    expect(ev2.type).toBe("message_updated");
-    if (ev2.type === "message_updated") expect(ev2.message.payload.reactions).toEqual([]);
+    // 对端静默：既无任何广播，也未落入 mark_read 兜底广播 read_update
+    const raced = await Promise.race([
+      nextEvent(wsB).then(() => "got" as const),
+      new Promise((r) => setTimeout(() => r("none" as const), 100)),
+    ]);
+    expect(raced).toBe("none");
+    expect(store.listReads(conv.id)).toHaveLength(0); // mark_read 未被误执行
 
     wsA.close();
     wsB.close();
-    s.close();
+  });
+
+  it("enc=e2e send_message：跳过内容校验直接信封入库并广播（服务端不落 payload/replyTo）", async () => {
+    const a = store.createUser(`e2-a-${Date.now()}`, "h", "甲");
+    const b = store.createUser(`e2-b-${Date.now()}`, "h", "乙");
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const conv = store.createDirectConversation(a.id, b.id).id;
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+
+    const wait = nextEvent(wsB);
+    wsA.send(
+      JSON.stringify({
+        type: "send_message",
+        conversationId: conv,
+        // 明文字段故意带内容与 replyTo：e2e 路径不读不落（内容与回复指向只进密文）
+        payload: { text: "服务端不该存我" },
+        replyTo: "reply-target-should-stay-in-cipher",
+        enc: "e2e",
+        cipher: "Q2lwaGVyZGF0YQ==",
+        chainKid: "kid1",
+        n: 3,
+      }),
+    );
+    const ev = await wait;
+    expect(ev.type).toBe("message_new");
+    if (ev.type === "message_new") {
+      expect(ev.message.enc).toBe("e2e");
+      expect(ev.message.cipher).toBe("Q2lwaGVyZGF0YQ==");
+      expect(ev.message.chainKid).toBe("kid1");
+      expect(ev.message.n).toBe(3);
+      expect(ev.message.payload.text).toBe(""); // 服务端只见信封
+      expect(ev.message.replyTo).toBeNull();
+      expect(ev.message.senderId).toBe(a.id);
+    }
+    const stored = store.listMessages(conv);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      enc: "e2e",
+      cipher: "Q2lwaGVyZGF0YQ==",
+      chainKid: "kid1",
+      n: 3,
+      replyTo: null,
+    });
+    expect(stored[0].payload.text).toBe("");
+    wsA.close();
+    wsB.close();
+  });
+
+  it("e2e 缺 cipher / 空 cipher 与 plain 夹带 cipher 均拒（bad_event）不入库", async () => {
+    const a = store.createUser(`e2-c-${Date.now()}`, "h", "甲");
+    const conv = store.createGroup(a.id, "信封校验群", []).id;
+    const wsA = await connect(issueToken(a.id));
+    const cases: Array<Record<string, unknown>> = [
+      { enc: "e2e" }, // 缺 cipher
+      { enc: "e2e", cipher: "" }, // 空 cipher
+      { cipher: "Q2lwaGVy" }, // 缺 enc 默认 plain + 夹 cipher
+      { enc: "plain", cipher: "Q2lwaGVy" }, // 显式 plain + cipher
+    ];
+    for (const extra of cases) {
+      const wait = nextEvent(wsA);
+      wsA.send(JSON.stringify({ type: "send_message", conversationId: conv, payload: { text: "x" }, ...extra }));
+      const ev = await wait;
+      expect(ev.type).toBe("error");
+      if (ev.type === "error") expect(ev.code).toBe("bad_event");
+    }
+    expect(store.listMessages(conv)).toHaveLength(0);
+    wsA.close();
   });
 
   it("协议错误帧不崩溃 server，后续连接仍可用", async () => {
@@ -511,6 +561,156 @@ describe("agent streaming", () => {
     const msgs = store.listMessages(conv);
     expect(msgs).toHaveLength(1);
     expect(msgs[0].payload.forward).toEqual({ from: "爱丽丝", source: "评审组" });
+    wsA.close();
+    wsB.close();
+  });
+
+  // —— E2E Task 4：agent 流式信封（chunk 广播透传 / finish 按信封入库）——
+
+  it("密文 agent_chunk：广播透传 cipher/chainKid/n/index（text 空串），不入库", async () => {
+    const a = store.createUser(`ch-${Date.now()}`, "h", "A");
+    const b = store.createUser(`ci-${Date.now()}`, "h", "B");
+    seedPreset(store); // 只为登记 system-assistant 名册元数据（预设群不复用——其消息序列跨用例污染断言）
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const g = store.createGroup(a.id, "密文chunk群", [b.id]);
+    store.attachAgentToGroup(g.id, "system-assistant");
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+
+    const wait = nextEvent(wsB);
+    wsA.send(
+      JSON.stringify({
+        type: "agent_chunk",
+        conversationId: g.id,
+        agentId: "system-assistant",
+        streamId: "sc1",
+        text: "",
+        cipher: "Q2lwaGVyZGF0YQ==",
+        chainKid: "k1",
+        n: 7,
+        index: 0,
+      }),
+    );
+    const ev = await wait;
+    expect(ev.type).toBe("agent_chunk");
+    if (ev.type === "agent_chunk") {
+      expect(ev.text).toBe("");
+      expect(ev.cipher).toBe("Q2lwaGVyZGF0YQ==");
+      expect(ev.chainKid).toBe("k1");
+      expect(ev.n).toBe(7);
+      expect(ev.index).toBe(0);
+    }
+    expect(store.listMessages(g.id)).toHaveLength(0); // chunk 不入库（同明文路径）
+    wsA.close();
+    wsB.close();
+  });
+
+  it("密文 agent_finish：text 空串过 F2 拒收，按 e2e 信封入库并广播 message_new", async () => {
+    const a = store.createUser(`cj-${Date.now()}`, "h", "A");
+    const b = store.createUser(`ck-${Date.now()}`, "h", "B");
+    seedPreset(store);
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const g = store.createGroup(a.id, "密文finish群", [b.id]);
+    store.attachAgentToGroup(g.id, "system-assistant");
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+
+    const wait = nextEvent(wsB);
+    wsA.send(
+      JSON.stringify({
+        type: "agent_finish",
+        conversationId: g.id,
+        agentId: "system-assistant",
+        streamId: "sf1",
+        text: "",
+        cipher: "ZmluaXNoLWNpcGhlcg==",
+        chainKid: "k1",
+        n: 8,
+      }),
+    );
+    const ev = await wait;
+    expect(ev.type).toBe("message_new");
+    if (ev.type === "message_new") {
+      expect(ev.message.enc).toBe("e2e");
+      expect(ev.message.cipher).toBe("ZmluaXNoLWNpcGhlcg==");
+      expect(ev.message.chainKid).toBe("k1");
+      expect(ev.message.n).toBe(8);
+      expect(ev.message.payload.text).toBe(""); // 服务端只见信封
+      expect(ev.message.senderType).toBe("agent");
+      expect(ev.streamId).toBe("sf1");
+    }
+    const msgs = store.listMessages(g.id);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ enc: "e2e", cipher: "ZmluaXNoLWNpcGhlcg==", payload: { text: "" } });
+    wsA.close();
+    wsB.close();
+  });
+
+  it("密文 agent_finish 缺 chainKid/n 与夹明文 text 均拒（bad_event）不入库", async () => {
+    const a = store.createUser(`cl-${Date.now()}`, "h", "A");
+    seedPreset(store);
+    const g = store.createGroup(a.id, "密文finish拒收群", []);
+    store.attachAgentToGroup(g.id, "system-assistant");
+    const wsA = await connect(issueToken(a.id));
+    const cases: Array<Record<string, unknown>> = [
+      { text: "", cipher: "Qw==" }, // 缺 chainKid/n
+      { text: "", cipher: "Qw==", chainKid: "k1" }, // 缺 n
+      { text: "", cipher: "Qw==", n: 0 }, // 缺 chainKid
+      { text: "明文", cipher: "Qw==", chainKid: "k1", n: 0 }, // 夹明文
+      { text: "", cipher: "", chainKid: "k1", n: 0 }, // 空 cipher
+    ];
+    for (const extra of cases) {
+      const wait = nextEvent(wsA);
+      wsA.send(
+        JSON.stringify({
+          type: "agent_finish",
+          conversationId: g.id,
+          agentId: "system-assistant",
+          streamId: "sf2",
+          ...extra,
+        }),
+      );
+      const ev = await wait;
+      expect(ev.type).toBe("error");
+      if (ev.type === "error") expect(ev.code).toBe("bad_event");
+    }
+    expect(store.listMessages(g.id)).toHaveLength(0);
+    wsA.close();
+  });
+  it("密文 agent_error：广播透传 cipher/chainKid/n（message 空串），不入库", async () => {
+    const a = store.createUser(`cm-${Date.now()}`, "h", "A");
+    const b = store.createUser(`cn-${Date.now()}`, "h", "B");
+    seedPreset(store);
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const g = store.createGroup(a.id, "密文error群", [b.id]);
+    store.attachAgentToGroup(g.id, "system-assistant");
+    const wsA = await connect(issueToken(a.id));
+    const wsB = await connect(issueToken(b.id));
+
+    const wait = nextEvent(wsB);
+    wsA.send(
+      JSON.stringify({
+        type: "agent_error",
+        conversationId: g.id,
+        agentId: "system-assistant",
+        streamId: "se1",
+        code: "provider_error",
+        message: "",
+        cipher: "ZXJyb3ItY2lwaGVy",
+        chainKid: "k1",
+        n: 3,
+      }),
+    );
+    const ev = await wait;
+    expect(ev.type).toBe("agent_error");
+    if (ev.type === "agent_error") {
+      expect(ev.message).toBe("");
+      expect(ev.cipher).toBe("ZXJyb3ItY2lwaGVy");
+      expect(ev.chainKid).toBe("k1");
+      expect(ev.n).toBe(3);
+      expect(ev.code).toBe("provider_error"); // code 非敏感，明文保留（收端降级文案拼接用）
+    }
+    expect(store.listMessages(g.id)).toHaveLength(0);
     wsA.close();
     wsB.close();
   });

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import type { Member, Message, ReadState, User, WsClientEvent } from "@heming/shared";
-import { ChatPage, renderTextWithMentions } from "./ChatPage.js";
+import { ChatPage, renderTextWithMentions, aggregateChips } from "./ChatPage.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
@@ -11,8 +11,37 @@ import { connectWs, type WsHandlers, type WsHandle } from "../lib/ws.js";
 import { memoryStore } from "../lib/memory/index.js";
 import { skillPool } from "../lib/skills/index.js";
 import { CONTEXT_KEYS, type ContextSettings } from "../lib/agentContext/index.js";
+import { hasSubtle, toB64, fromB64 } from "../lib/e2eCrypto.js";
+import { sealMessage } from "../lib/e2eSession.js";
 
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
+// E2E Task 4：hasSubtle 桩（默认 true，无 subtle 用例按例翻转）；
+// sealMessage 桩——cipher 内直接 JSON 明文（形状同真信封，断言可解），
+// 真封解密路径由 e2eSession.test 覆盖，组件面只测「经 seal → 发信封」的接线。
+vi.mock("../lib/e2eCrypto.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/e2eCrypto.js")>();
+  return { ...actual, hasSubtle: vi.fn(() => true) };
+});
+vi.mock("../lib/e2eSession.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/e2eSession.js")>();
+  return { ...actual, sealMessage: vi.fn() };
+});
+
+/** 桩 cipher 解码：btoa(UTF8 JSON) 的逆（seal 桩实现见 beforeEach）。 */
+const decodePlain = (cipher: string): Record<string, unknown> =>
+  JSON.parse(decodeURIComponent(escape(atob(cipher))));
+
+/** 桩封条：明文 JSON 直接 base64（不含任何真实密码学）。 */
+let sealN = 0;
+const stubSeal = async (conv: { id: string }, plain: unknown, _deps?: unknown) => ({
+  type: "send_message" as const,
+  conversationId: conv.id,
+  payload: { text: "" },
+  enc: "e2e" as const,
+  cipher: btoa(unescape(encodeURIComponent(JSON.stringify(plain)))),
+  chainKid: "test-kid",
+  n: sealN++,
+});
 // 流式打底走本机 streamChat：模块 mock（保留 testConnection/buildRequest 真实现），
 // 默认立即回空串——mention 发送用例不至于把 fetch 打到供应商端点
 vi.mock("../lib/llmClient.js", async (importOriginal) => {
@@ -32,6 +61,7 @@ const msg = (id: string, text: string, createdAt: string): Message => ({
   replyTo: null,
   createdAt,
   recalledAt: null,
+  enc: "plain",
 });
 
 function jsonRes(body: unknown, status = 200): Response {
@@ -39,6 +69,28 @@ function jsonRes(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+/**
+ * E2E Task 5 测试侧附件密文构造（与 api.ts 的 FILE_ENC_AAD +「12B IV 前置」同口径）：
+ * 生产实现改口径而测试没改 → 解密必失败，渲染用例即红（两处常量的可执行锁）。
+ */
+async function sealAttachment(keyB64: string, plaintext: string): Promise<Blob> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ck = await crypto.subtle.importKey("raw", fromB64(keyB64).buffer as ArrayBuffer, { name: "AES-GCM" }, false, [
+    "encrypt",
+  ]);
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: new TextEncoder().encode("heming.e2e.file.v1") },
+      ck,
+      new TextEncoder().encode(plaintext),
+    ),
+  );
+  const sealed = new Uint8Array(iv.length + ct.length);
+  sealed.set(iv, 0);
+  sealed.set(ct, iv.length);
+  return new Blob([sealed]);
 }
 
 /**
@@ -68,6 +120,26 @@ function mockMessagesFetch(
     if (/^\/api\/conversations\/[^/]+\/members$/.test(url)) {
       return Promise.resolve(jsonRes(pick(conv.members, k++)));
     }
+    if (url === "/api/e2e/keys") {
+      return Promise.resolve(jsonRes({})); // 公钥上云 PUT/拉取 GET：成功即可（无设备登记）
+    }
+    const reenc = /^\/api\/messages\/([^/]+)\/reencrypt$/.exec(url);
+    if (reenc) {
+      // 存量自迁移 PUT：回 e2e 形态（保留原消息身份字段，payload 按服务端语义清占位——
+      // migrate 会用本地已知明文经 plainById 回填渲染）
+      const orig = first.find((m) => m.id === reenc[1]);
+      return Promise.resolve(
+        jsonRes({
+          ...(orig ?? msg(reenc[1], "", "2026-10-17T00:00:00.000Z")),
+          payload: { text: "" },
+          replyTo: null,
+          enc: "e2e",
+          cipher: "QQ==",
+          chainKid: "test-kid",
+          n: 0,
+        }),
+      );
+    }
     if (/^\/api\/files\/[^/]+\/content$/.test(url)) {
       if (conv.contentFail) return Promise.resolve(jsonRes({ error: "unauthorized" }, 401));
       return Promise.resolve({
@@ -85,6 +157,36 @@ function lastHandlers(): WsHandlers {
   const calls = vi.mocked(connectWs).mock.calls;
   expect(calls.length).toBeGreaterThan(0);
   return calls[calls.length - 1][0];
+}
+
+/**
+ * 等最后一条 send_message 落帧并断言其为 e2e 信封（enc/cipher/chainKid/n、payload 占位），
+ * 返回解出的明文（桩 cipher = base64(UTF8 JSON)）。E2E Task 4：全部发送路径共用此断言面。
+ */
+async function lastSealed(send: { mock: { calls: unknown[][] } }): Promise<Record<string, unknown>> {
+  await waitFor(() =>
+    expect(
+      send.mock.calls.some((c) => (c[0] as { type?: string } | undefined)?.type === "send_message"),
+    ).toBe(true),
+  );
+  const ev = send.mock.calls
+    .map((c) => c[0] as Record<string, unknown>)
+    .filter((e) => e.type === "send_message")
+    .at(-1)!;
+  expect(ev.enc).toBe("e2e");
+  expect(typeof ev.cipher).toBe("string");
+  expect(typeof ev.chainKid).toBe("string");
+  expect(typeof ev.n).toBe("number");
+  expect(ev.payload).toEqual({ text: "" }); // 服务端 e2e 路径不读 payload
+  return decodePlain(ev.cipher as string);
+}
+
+/** 取 send 里指定 type 的全部密文事件并解出明文（agent_chunk/finish 的信封形态）。 */
+function sealedOf(send: { mock: { calls: unknown[][] } }, type: string): Record<string, unknown>[] {
+  return send.mock.calls
+    .map((c) => c[0] as Record<string, unknown>)
+    .filter((e) => e.type === type && typeof e.cipher === "string")
+    .map((e) => ({ ...e, plain: decodePlain(e.cipher as string) }));
 }
 
 /** 本会话群 members 行（@ 候选唯一数据源）：默认含人类 u1 + agent「和小鸣」。 */
@@ -131,6 +233,12 @@ describe("ChatPage", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    // E2E 存储按 convId 复用：清 msgCache/链/暂挂（cache-first 会跨用例读到旧明文）
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith("heming.msgCache.") || k.startsWith("heming.e2e.")) {
+        localStorage.removeItem(k);
+      }
+    }
     // jsdom 未实现 scrollIntoView
     Element.prototype.scrollIntoView = vi.fn();
     // 附件气泡：createObjectURL 给可区分伪地址，revoke 留给卸载断言（jsdom 原生缺，由 test-setup 补桩）
@@ -139,6 +247,9 @@ describe("ChatPage", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     vi.mocked(connectWs).mockReset();
     vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() });
+    vi.mocked(hasSubtle).mockReturnValue(true);
+    vi.mocked(sealMessage).mockReset();
+    vi.mocked(sealMessage).mockImplementation(stubSeal as never);
     // 流式管道复位：streamChat 回空串；llm 绑定默认清空（无绑定 → 发送前拦截路径）；
     // chat store 的 streaming/streamOwner 跨用例不残留
     vi.mocked(streamChat).mockReset();
@@ -159,6 +270,8 @@ describe("ChatPage", () => {
       reads: {},
       streaming: {},
       streamOwner: {},
+      plainById: {},
+      pendingE2e: {},
     });
     // 本批新增接线：@ 触发会注入记忆/技能段，从而改写系统提示词。既有用例只验证
     // 「原提示词 + 历史」链路（如 I3 的 system 内容严格相等），故把两个模块级单例
@@ -264,12 +377,12 @@ describe("ChatPage", () => {
     fireEvent.change(input, { target: { value: "你好" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(send).toHaveBeenCalledWith({
-      type: "send_message",
-      conversationId: "c1",
-      payload: { text: "你好" },
-    });
-    expect(input).toHaveValue("");
+    const plain = await lastSealed(send);
+    expect(plain).toEqual({ kind: "text", text: "你好" });
+    const ev = send.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(ev.conversationId).toBe("c1");
+    expect(JSON.stringify(ev)).not.toContain("你好"); // 明文不落帧
+    await waitFor(() => expect(input).toHaveValue("")); // 封发异步：等落帧后断言清空
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
@@ -501,15 +614,13 @@ describe("ChatPage", () => {
     fireEvent.change(input, { target: { value: "@和小鸣 帮我看下" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(send).toHaveBeenCalledWith({
-      type: "send_message",
-      conversationId: "c1",
-      payload: {
-        text: "@和小鸣 帮我看下",
-        mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
-      },
+    const plain = await lastSealed(send);
+    expect(plain).toEqual({
+      kind: "text",
+      text: "@和小鸣 帮我看下",
+      mentions: [{ agentId: "system-assistant", name: "和小鸣" }], // mentions 进密文
     });
-    expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument(); // 发送成功清 chip
+    await waitFor(() => expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument()); // 发送成功清 chip
     expect(input).toHaveValue("");
     // 冲刷发送后启动的本机流（fetchHistory → streamChat → finish 上行），
     // 否则挂起的异步链会漂到下一条用例才落定，污染其 store 断言
@@ -531,11 +642,9 @@ describe("ChatPage", () => {
     const input = screen.getByPlaceholderText("输入消息…");
     fireEvent.change(input, { target: { value: "这版先不提" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
-    expect(send).toHaveBeenCalledWith({
-      type: "send_message",
-      conversationId: "c1",
-      payload: { text: "这版先不提" },
-    });
+    const plain = await lastSealed(send);
+    expect(plain).toEqual({ kind: "text", text: "这版先不提" }); // 无 mentions 键
+    expect(plain).not.toHaveProperty("mentions");
   });
 
   it("键入 @ 触发选择器过滤，选中后文字保持原样且 token 不再重弹", async () => {
@@ -658,15 +767,17 @@ describe("ChatPage", () => {
 
     await pickAndSend("@和小鸣 打个招呼");
 
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_chunk", text: "你" })),
-    );
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "agent_chunk", text: "好" }),
-    );
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "agent_finish", text: "你好" }),
-    );
+    // E2E 流式（硬验收④）：chunk/finish 均为密文信封（text 置空 + cipher/index）
+    await waitFor(() => expect(sealedOf(send, "agent_chunk")).toHaveLength(2));
+    const chunks = sealedOf(send, "agent_chunk");
+    expect(chunks[0]).toMatchObject({ text: "", index: 0, chainKid: "test-kid" });
+    expect(chunks[0].plain).toMatchObject({ kind: "chunk", text: "你" });
+    expect(chunks[1]).toMatchObject({ text: "", index: 1 });
+    expect(chunks[1].plain).toMatchObject({ kind: "chunk", text: "好" });
+    await waitFor(() => expect(sealedOf(send, "agent_finish")).toHaveLength(1));
+    const fin = sealedOf(send, "agent_finish")[0];
+    expect(fin.text).toBe("");
+    expect(fin.plain).toMatchObject({ kind: "text", text: "你好" }); // 全文进信封入库
 
     // 打字机气泡（累积文本 + 光标）与输入栏上方「生成中」提示行
     await waitFor(() => expect(screen.getByText(/你好/)).toBeInTheDocument());
@@ -718,14 +829,22 @@ describe("ChatPage", () => {
 
     await pickAndSend("@和小鸣 帮我看下");
 
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_finish", text: "半" })),
-    );
+    await waitFor(() => expect(sealedOf(send, "agent_finish")).toHaveLength(1));
+    expect(sealedOf(send, "agent_finish")[0].plain).toMatchObject({ kind: "text", text: "半" }); // partial 也走信封
+    // fix I2：错误正文也信封化（message 置空 + cipher，code 明文保留）
     const errEv = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_error");
-    expect(errEv).toMatchObject({ type: "agent_error", code: "provider_error" });
+    expect(errEv).toMatchObject({
+      type: "agent_error",
+      code: "provider_error",
+      message: "",
+      chainKid: "test-kid",
+    });
+    expect(typeof (errEv as { cipher: string }).cipher).toBe("string");
     const streamId = (errEv as { streamId: string }).streamId;
 
-    // 服务端按序回声：partial 入库的 message_new → agent_error 广播（同帧转发）
+    // 服务端按序回声：partial 入库的 message_new → agent_error 广播（同帧转发）。
+    // agent_error 回声必须走**真实密文信封形态**（服务端广播的就是触发端上行的信封）——
+    // 本机自己触发的错误没有 recv 链，只能靠 sealError 登记的出站箱还原原文（fix round 2）。
     act(() => {
       lastHandlers().onEvent({
         type: "message_new",
@@ -738,10 +857,11 @@ describe("ChatPage", () => {
       });
     });
     act(() => {
-      lastHandlers().onEvent(errEv);
+      lastHandlers().onEvent(errEv); // 密文回声（含 cipher/chainKid/n）
     });
 
-    expect(screen.getByText(/HTTP 401/)).toBeInTheDocument(); // 错误原因行
+    // 密文回声经出站箱还原原文（异步解密链 → waitFor）
+    await waitFor(() => expect(screen.getByText(/HTTP 401/)).toBeInTheDocument()); // 错误原因行
     expect(screen.getByText("半")).toBeInTheDocument(); // partial 消息仍在列表
 
     // 重试 = 对该 mention 重新跑一遍流
@@ -773,13 +893,16 @@ describe("ChatPage", () => {
         expect.objectContaining({ type: "agent_error", code: "aborted" }),
       ),
     );
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_finish", text: "半" }));
+    await waitFor(() => expect(sealedOf(send, "agent_finish")).toHaveLength(1));
+    expect(sealedOf(send, "agent_finish")[0].plain).toMatchObject({ kind: "text", text: "半" });
 
     const errEv = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_error");
+    expect(errEv).toMatchObject({ code: "aborted", message: "" }); // fix I2：message 进密文
     act(() => {
-      lastHandlers().onEvent(errEv); // 本机流回声 → 错误态供重试
+      lastHandlers().onEvent(errEv); // 密文回声：本机经出站箱还原原文（fix round 2）
     });
-    expect(screen.getByText(/AbortError/)).toBeInTheDocument();
+    // 密文回声经出站箱还原原文（异步解密链 → waitFor）
+    await waitFor(() => expect(screen.getByText(/AbortError/)).toBeInTheDocument());
     expect(screen.getByText("重试")).toBeInTheDocument();
     expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 不再生成中
   });
@@ -860,9 +983,7 @@ describe("ChatPage", () => {
     view.unmount(); // cleanup：WS effect 先排期延迟 close，随后 abort effect 中止进行中流
 
     await waitFor(() => expect(close).toHaveBeenCalled());
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "agent_finish", text: "半" }),
-    );
+    expect(sealedOf(send, "agent_finish")[0]?.plain).toMatchObject({ kind: "text", text: "半" });
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({ type: "agent_error", code: "aborted" }),
     );
@@ -1136,6 +1257,7 @@ describe("ChatPage", () => {
       const url = String(input);
       if (/\/messages$/.test(url)) return Promise.resolve(jsonRes([m]));
       if (/\/(reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      if (url === "/api/e2e/keys") return Promise.resolve(jsonRes({}));
       if (/\/files\/[^/]+\/content$/.test(url)) return pending;
       return Promise.resolve(jsonRes({ error: "not found" }, 404));
     });
@@ -1184,6 +1306,113 @@ describe("ChatPage", () => {
   });
 
   /**
+   * 会话历史 + 自定义附件 content 的 fetch 面（E2E Task 5 渲染组）：
+   * content 返回什么字节由用例决定（密文/明文/坏字节），其余端点与 mockMessagesFetch 同口径。
+   */
+  function mockAttachmentFetch(messages: Message[], content: () => Blob) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (/\/messages$/.test(url)) return Promise.resolve(jsonRes(messages));
+      if (/\/(reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      if (url === "/api/e2e/keys") return Promise.resolve(jsonRes({}));
+      if (/\/files\/[^/]+\/content$/.test(url)) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          blob: async () => content(),
+        } as unknown as Response);
+      }
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+  }
+
+  /** objectURL 桩最近一次喂进去的 Blob 字节（断言「渲染的是解密明文还是服务端原字节」）。 */
+  async function servedBytes(index = 0): Promise<string> {
+    const calls = vi.mocked(URL.createObjectURL).mock.calls;
+    const blob = calls.at(-(index + 1))![0] as Blob;
+    return new TextDecoder().decode(await blob.arrayBuffer());
+  }
+
+  // —— E2E Task 5：附件解密渲染 ——
+
+  it("带 key 的图片附件：解密后渲染 img，objectURL 拿到的是解密明文", async () => {
+    const plaintext = "PNG-FAKE-BYTES-端到端附件";
+    const key = toB64(crypto.getRandomValues(new Uint8Array(32)));
+    const cipher = await sealAttachment(key, plaintext);
+    const m: Message = {
+      ...msg("m1", "看这张图", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "看这张图",
+        file: { id: "f1", name: "图.png", mime: "image/png", size: 48, key },
+      },
+    };
+    mockAttachmentFetch([m], () => cipher);
+
+    render(<ChatPage />);
+    const img = await screen.findByRole("img", { name: "图.png" });
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
+    expect(img).toHaveAttribute("src", "blob:mock-1");
+    expect(await servedBytes()).toBe(plaintext); // 解密回原文，而非服务端密文字节
+    expect(await servedBytes()).not.toBe(new TextDecoder().decode(await cipher.arrayBuffer()));
+  });
+
+  it("带 key 的音频附件：AudioBubble 解密后渲染播放器", async () => {
+    const plaintext = "audio-bytes";
+    const key = toB64(crypto.getRandomValues(new Uint8Array(32)));
+    const cipher = await sealAttachment(key, plaintext);
+    const m: Message = {
+      ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "",
+        file: { id: "f-a", name: "语音.webm", mime: "audio/webm", size: 11, key },
+      },
+    };
+    mockAttachmentFetch([m], () => cipher);
+
+    render(<ChatPage />);
+    const audio = (await screen.findByTestId("audio-bubble")) as HTMLAudioElement;
+    expect(audio).toHaveAttribute("src", "blob:mock-1");
+    expect(await servedBytes()).toBe(plaintext);
+    expect(screen.queryByRole("link", { name: /语音\.webm/ })).not.toBeInTheDocument();
+  });
+
+  it("带 key 但密钥不匹配：解密失败给「加载失败」占位，不建 objectURL不出断链", async () => {
+    const good = toB64(crypto.getRandomValues(new Uint8Array(32)));
+    const wrong = toB64(crypto.getRandomValues(new Uint8Array(32)));
+    const cipher = await sealAttachment(good, "解不开的内容");
+    const m: Message = {
+      ...msg("m1", "", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "",
+        file: { id: "f1", name: "图.png", mime: "image/png", size: 48, key: wrong },
+      },
+    };
+    mockAttachmentFetch([m], () => cipher);
+
+    render(<ChatPage />);
+    expect(await screen.findByText("加载失败")).toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("无 key 的 legacy 明文附件照旧显示：服务端原字节直通 objectURL（不走解密）", async () => {
+    const plain = "LEGACY-PLAIN-BYTES";
+    const m: Message = {
+      ...msg("m1", "旧附件", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "旧附件",
+        file: { id: "f-old", name: "旧.pdf", mime: "application/pdf", size: 18 },
+      },
+    };
+    mockAttachmentFetch([m], () => new Blob([plain], { type: "application/pdf" }));
+
+    render(<ChatPage />);
+    const link = await screen.findByRole("link", { name: /旧\.pdf/ });
+    expect(link).toHaveAttribute("href", "blob:mock-1");
+    expect(await servedBytes()).toBe(plain); // 原样直通：没有 key 就没有解密步骤
+  });
+
+  /**
    * 工具行选文件走 document.createElement("input") 弹系统选择器（jsdom 无文件 UI）：
    * 拦下创建的 input、塞 files、手动触 onchange，等价于「用户选中了文件」。
    */
@@ -1219,11 +1448,13 @@ describe("ChatPage", () => {
       const url = String(input);
       if (url === "/api/files") return Promise.resolve(jsonRes(meta, 201));
       if (/\/(messages|reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      if (url === "/api/e2e/keys") return Promise.resolve(jsonRes({}));
+
       return Promise.resolve(jsonRes({ error: "not found" }, 404));
     });
   }
 
-  it("选中文件 → 上传共享库 → 发纯附件消息（text 空串 + payload.file）", async () => {
+  it("选中文件 → 密文上传共享库 → 发纯附件消息（file.key 随密文，POST 体非明文）", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     const fetchSpy = mockUploadFetch();
@@ -1231,21 +1462,39 @@ describe("ChatPage", () => {
     render(<ChatPage />);
     await act(async () => {});
 
-    captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
-
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith({
-        type: "send_message",
-        conversationId: "c1",
-        payload: {
-          text: "",
-          file: { id: "f1", name: "a.txt", mime: "text/plain", size: 2 },
-        },
-      }),
+    captureFilePicker().pick(
+      undefined,
+      new File(["HEMING-SECRET"], "a.txt", { type: "text/plain" }),
     );
-    expect(
-      fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files" && c[1]?.method === "POST"),
-    ).toBe(true); // 附件已落共享库
+
+    const plain = await lastSealed(send);
+    // 消息侧保留原名/原 mime（气泡按它路由与展示），密钥 key 随明文进密文
+    expect(plain).toEqual({
+      kind: "file",
+      text: "",
+      file: {
+        id: "f1",
+        name: "a.txt",
+        mime: "text/plain",
+        size: 13, // 原文件字节数（f.size），非服务端密文长度
+        key: expect.any(String),
+      },
+    });
+    expect(fromB64((plain.file as { key: string }).key)).toHaveLength(32);
+    const post = fetchSpy.mock.calls.find(
+      (c) => String(c[0]) === "/api/files" && c[1]?.method === "POST",
+    );
+    expect(post).toBeDefined(); // 附件已落共享库
+    const body = JSON.parse(String((post![1] as RequestInit).body)) as {
+      name: string;
+      mime: string;
+      contentBase64: string;
+    };
+    // 服务端只见密文：mime 降级 octet-stream、name 加 .enc 前缀、正文无原文字节
+    expect(body.mime).toBe("application/octet-stream");
+    expect(body.name).toBe(".enca.txt");
+    const raw = fromB64(body.contentBase64);
+    expect(String.fromCharCode(...raw.subarray(12))).not.toContain("HEMING-SECRET");
     expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 成功路径不报错
   });
 
@@ -1275,6 +1524,8 @@ describe("ChatPage", () => {
       const url = String(input);
       if (url === "/api/files") return Promise.resolve(jsonRes({ error: "too large" }, 413));
       if (/\/(messages|reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      if (url === "/api/e2e/keys") return Promise.resolve(jsonRes({}));
+
       return Promise.resolve(jsonRes({ error: "not found" }, 404));
     });
 
@@ -1299,6 +1550,8 @@ describe("ChatPage", () => {
       const url = String(input);
       if (url === "/api/files") return pending;
       if (/\/(messages|reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      if (url === "/api/e2e/keys") return Promise.resolve(jsonRes({}));
+
       return Promise.resolve(jsonRes({ error: "not found" }, 404));
     });
 
@@ -1354,15 +1607,16 @@ describe("ChatPage", () => {
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
     expect(useUiStore.getState().pendingAttachment).toEqual({ conversationId: "c2", file });
 
-    // 切到目标会话 → 消费槽，经 WS 发出纯附件消息（text 空串 + payload.file）
+    // 切到目标会话 → 消费槽，封 e2e 信封发出（file 进密文，事件 conversationId=target）
     act(() => {
       useUiStore.setState({ activeConversationId: "c2" });
     });
-    expect(send).toHaveBeenCalledWith({
-      type: "send_message",
-      conversationId: "c2",
-      payload: { text: "", file },
-    });
+    const plain = await lastSealed(send);
+    expect(plain).toMatchObject({ kind: "file", file });
+    // 规格 §2.4 文件边界：右栏 FileTree 的上传与投递保持明文——不带 key、不走附件加密
+    expect((plain.file as { key?: string }).key).toBeUndefined();
+    const ev = send.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(ev.conversationId).toBe("c2");
     expect(useUiStore.getState().pendingAttachment).toBeNull();
   });
 
@@ -1515,14 +1769,14 @@ describe("ChatPage", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "我来回复" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    // replyTo 是 send_message 事件的顶层键（shared WsClientEventSchema），塞 payload 会被 zod 剥掉
-    expect(send).toHaveBeenCalledWith({
-      type: "send_message",
-      conversationId: "c1",
-      replyTo: "m1",
-      payload: { text: "我来回复" },
-    });
-    expect(screen.queryByLabelText("取消回复")).not.toBeInTheDocument(); // 发送成功清预览条
+    // E2E：replyTo 不再是事件顶层键——进密文（服务端 e2e 路径不读 replyTo）
+    const plain = await lastSealed(send);
+    expect(plain).toEqual({ kind: "text", text: "我来回复", replyTo: "m1" });
+    const ev = send.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(ev).not.toHaveProperty("replyTo");
+    await waitFor(() =>
+      expect(screen.queryByLabelText("取消回复")).not.toBeInTheDocument(),
+    ); // 发送成功清预览条
   });
 
   it("气泡渲染 replyTo 引用小卡且点引用滚动到原消息", async () => {
@@ -1563,11 +1817,9 @@ describe("ChatPage", () => {
 
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "先不引用了" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
-    expect(send).toHaveBeenCalledWith({
-      type: "send_message",
-      conversationId: "c1",
-      payload: { text: "先不引用了" }, // 精确形状：无 replyTo 键
-    });
+    const plain = await lastSealed(send);
+    expect(plain).toEqual({ kind: "text", text: "先不引用了" }); // 精确形状：无 replyTo 键
+    expect(plain).not.toHaveProperty("replyTo");
   });
 
   it("已撤回消息不出回复钮；被撤回的原消息不渲染引用小卡", async () => {
@@ -1687,17 +1939,18 @@ describe("ChatPage", () => {
     expect(screen.getByText("群A")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("群A"));
-    // 转发 = 原 text + 原 file，剥离 mentions，带 forward（from=我，source=源会话名）
-    expect(send).toHaveBeenCalledWith({
-      type: "send_message",
-      conversationId: "gA",
-      payload: {
-        text: "@和小鸣 看下这版",
-        file: { id: "f1", name: "方案.png", mime: "image/png", size: 10 },
-        forward: { from: "我", source: "评审组" },
-      },
+    // 转发 = 原 text + 原 file 进密文，剥离 mentions，带 forward（from=我，source=源会话名）
+    const plain = await lastSealed(send);
+    expect(plain).toEqual({
+      kind: "forward",
+      text: "@和小鸣 看下这版",
+      file: { id: "f1", name: "方案.png", mime: "image/png", size: 10 },
+      forward: { from: "我", source: "评审组" },
     });
-    expect(screen.queryByText("转发到")).not.toBeInTheDocument(); // 发送后浮层关闭
+    const ev = send.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(ev.conversationId).toBe("gA");
+    expect(plain).not.toHaveProperty("mentions");
+    await waitFor(() => expect(screen.queryByText("转发到")).not.toBeInTheDocument()); // 发送后浮层关闭
     expect(screen.getByRole("status")).toHaveTextContent("已转发到 群A"); // 目标≠当前会话给提示
   });
 
@@ -1851,16 +2104,21 @@ describe("ChatPage", () => {
       now += 2000; // 录满 2 秒（越过 <1s 拒发线）
       fireEvent.click(screen.getByLabelText("停止录音"));
       // 上传链含 FileReader 宏任务（jsdom setImmediate 两跳）：单次 act 冲不干净，waitFor 到 send 落定
-      await waitFor(() =>
-        expect(send).toHaveBeenCalledWith({
-          type: "send_message",
-          conversationId: "c1",
-          payload: {
-            text: "",
-            file: { id: "f-a", name: "语音.webm", mime: "audio/webm", size: 11 },
-          },
-        }),
-      );
+      const plain = await lastSealed(send);
+      // payload 保留录音原名/原 mime（AudioBubble 按 audio/* 路由），key 随密文；
+      // 服务端存的则是 .enc 名 + octet-stream 密文（见下方 body 断言）
+      expect(plain).toEqual({
+        kind: "file",
+        text: "",
+        file: {
+          id: "f-a",
+          name: expect.stringMatching(/^语音-\d{6}\.webm$/),
+          mime: "audio/webm",
+          size: 11, // fake 录音字节（"audio-bytes"）
+          key: expect.any(String),
+        },
+      });
+      expect(fromB64((plain.file as { key: string }).key)).toHaveLength(32);
       const post = fetchSpy.mock.calls.find(
         (c) => String(c[0]) === "/api/files" && c[1]?.method === "POST",
       );
@@ -1869,8 +2127,8 @@ describe("ChatPage", () => {
         name: string;
         mime: string;
       };
-      expect(body.mime).toBe("audio/webm"); // 上传体带录音 mime
-      expect(body.name).toMatch(/^语音-\d{6}\.webm$/); // 文件名 HHMMSS 格式
+      expect(body.mime).toBe("application/octet-stream"); // 语音同样密文上传，不落 audio/webm
+      expect(body.name).toMatch(/^\.enc语音-\d{6}\.webm$/); // .enc 前缀 + 原文件名
       expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 录音态退出、无错误提示
       expect(media.trackStop).toHaveBeenCalledTimes(1); // 停录必停麦克风轨
     } finally {
@@ -1961,14 +2219,27 @@ describe("ChatPage", () => {
       });
       // 上传链的 file.arrayBuffer() 走 jsdom FileReader 的两跳 setImmediate（被假时钟接管）：
       // runAllTimersAsync 冲刷这两跳 + 其后的微任务，否则 send 永远到不了（假 setImmediate 不会被 await act 冲掉）
+      // crypto.subtle 走 I/O 阶段（非微任务），假时钟下不自动完成 → 切回真时钟让 WebCrypto 落地
       await act(async () => {
         await vi.runAllTimersAsync();
       });
+      vi.useRealTimers();
+      await act(async () => {});
 
-      expect(send).toHaveBeenCalledWith({
-        type: "send_message",
-        conversationId: "c1",
-        payload: { text: "", file: { id: "f-b", name: "语音.webm", mime: "audio/webm", size: 11 } },
+      const ev = send.mock.calls
+        .map((c) => c[0] as Record<string, unknown>)
+        .find((e) => e.type === "send_message");
+      expect(ev).toBeDefined();
+      expect(ev!.enc).toBe("e2e"); // 假时钟下 runAllTimersAsync 已冲刷封发链
+      expect(decodePlain(ev!.cipher as string)).toMatchObject({
+        kind: "file",
+        file: {
+          id: "f-b",
+          name: expect.stringMatching(/^语音-\d{6}\.webm$/),
+          mime: "audio/webm",
+          size: 11,
+          key: expect.any(String),
+        },
       });
       expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 录音态已退出
       expect(media.trackStop).toHaveBeenCalledTimes(1);
@@ -2151,58 +2422,90 @@ describe("ChatPage", () => {
 
   // —— 二期 IM Task 6：表情回应 UI ——
 
-  it("表情回应：点「添加表情回应」出浮排，点 emoji 发 react_message；收到 message_updated 出 chips，点自己的 chip 取消", async () => {
+  it("表情回应事件化：kind=reaction 不画气泡、chips 按 target 聚合、浮排/chip 发 op add/remove", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([msg("m1", "求回应", "2026-10-14T01:00:00.000Z")]); // senderId u2
+    const m1 = msg("m1", "求回应", "2026-10-14T01:00:00.000Z"); // senderId u2
+    const r1: Message = {
+      ...msg("r1", "", "2026-10-14T01:01:00.000Z"),
+      senderId: "u1", // 我加的 👍
+      enc: "e2e",
+      cipher: "Qw==",
+      chainKid: "k1",
+      n: 1,
+    };
+    const r2: Message = {
+      ...msg("r2", "", "2026-10-14T01:02:00.000Z"),
+      senderId: "u2", // 对方加的 👍
+      enc: "e2e",
+      cipher: "Qw==",
+      chainKid: "k1",
+      n: 2,
+    };
+    const legacy: Message = {
+      ...msg("m0", "带存量回应", "2026-10-14T00:59:00.000Z"),
+      payload: { text: "带存量回应", reactions: [{ emoji: "❤️", userIds: ["u2"] }] },
+    };
+    mockMessagesFetch([legacy, m1, r1, r2]);
+    // plainById 预置 = store 已解密态（真解密路径由 e2eSession/chat store 测试覆盖）
+    useChatStore.setState({
+      plainById: {
+        c1: {
+          r1: { kind: "reaction", reaction: { target: "m1", emoji: "👍", op: "add" } },
+          r2: { kind: "reaction", reaction: { target: "m1", emoji: "👍", op: "add" } },
+        },
+      },
+    });
 
     render(<ChatPage />);
     await waitFor(() => expect(screen.getByText("求回应")).toBeInTheDocument());
-    expect(screen.queryByLabelText(/^表情回应 /)).not.toBeInTheDocument(); // 未回应前无 chips
+    // 事件消息不画气泡：全页只有一条「求回应」（r1/r2 被过滤），且不显占位
+    expect(screen.queryAllByText("求回应")).toHaveLength(1);
+    expect(screen.queryByText("无法解密（密钥缺失）")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText("添加表情回应"));
-    expect(screen.getByRole("button", { name: "🎉" })).toBeInTheDocument(); // 浮排：12 个常用 emoji
+    // chips 聚合：m1 的 👍 由两个事件合成（u1+u2），m0 的存量 ❤️ 照常渲染
+    const chip = screen.getByRole("button", { name: "表情回应 👍 2" });
+    expect(chip).toHaveClass("bg-ink"); // 我参与 → 高亮可点
+    const legacyChip = screen.getByRole("button", { name: "表情回应 ❤️ 1" });
+    expect(legacyChip).not.toHaveClass("bg-ink");
+
+    const sealCalls = () => vi.mocked(sealMessage).mock.calls.length;
+    // 浮排入口按目标气泡圈定（legacy m0 也有一枚「添加表情回应」，全页 query 撞多匹配）
+    const m1Bubble = within(document.getElementById("msg-m1")!);
+    // 浮排：已参与 👍 → op remove（toggle 语义）
+    fireEvent.click(m1Bubble.getByLabelText("添加表情回应"));
+    const before1 = sealCalls();
     fireEvent.click(screen.getByRole("button", { name: "👍" }));
-    expect(send).toHaveBeenCalledWith({
-      type: "react_message",
-      conversationId: "c1",
-      messageId: "m1",
-      emoji: "👍",
+    await waitFor(() => expect(sealCalls()).toBe(before1 + 1));
+    expect(vi.mocked(sealMessage).mock.calls.at(-1)![1]).toEqual({
+      kind: "reaction",
+      reaction: { target: "m1", emoji: "👍", op: "remove" },
     });
-    expect(screen.queryByRole("button", { name: "🎉" })).not.toBeInTheDocument(); // 点选即关浮排
+    expect(screen.queryByRole("button", { name: "🎉" })).not.toBeInTheDocument(); // 点选即关
 
-    // 服务端回声 message_updated（自己参与）→ chip 出现且高亮
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_updated",
-        message: {
-          ...msg("m1", "求回应", "2026-10-14T01:00:00.000Z"),
-          payload: { text: "求回应", reactions: [{ emoji: "👍", userIds: ["u1"] }] },
-        },
-      });
+    // 浮排：未参与 🎉 → op add
+    fireEvent.click(m1Bubble.getByLabelText("添加表情回应"));
+    const before2 = sealCalls();
+    fireEvent.click(screen.getByRole("button", { name: "🎉" }));
+    await waitFor(() => expect(sealCalls()).toBe(before2 + 1));
+    expect(vi.mocked(sealMessage).mock.calls.at(-1)![1]).toEqual({
+      kind: "reaction",
+      reaction: { target: "m1", emoji: "🎉", op: "add" },
     });
-    const chip = screen.getByRole("button", { name: "表情回应 👍 1" });
-    expect(chip).toHaveTextContent("👍 1");
-    expect(chip).toHaveClass("bg-ink"); // 自己参与的 chip 高亮
 
-    // 再点自己的 chip → 取消（toggle）发送
+    // 点自己参与的 chip → op remove；他人参与的 chip 仅展示（点击不发送）
+    const before3 = sealCalls();
     fireEvent.click(chip);
-    expect(send.mock.calls.filter((c) => c[0]?.type === "react_message")).toHaveLength(2);
-
-    // 仅他人参与的 chip 只展示：点击不发送
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_updated",
-        message: {
-          ...msg("m1", "求回应", "2026-10-14T01:00:00.000Z"),
-          payload: { text: "求回应", reactions: [{ emoji: "❤️", userIds: ["u2"] }] },
-        },
-      });
+    await waitFor(() => expect(sealCalls()).toBe(before3 + 1));
+    expect(vi.mocked(sealMessage).mock.calls.at(-1)![1]).toEqual({
+      kind: "reaction",
+      reaction: { target: "m1", emoji: "👍", op: "remove" },
     });
-    const otherChip = screen.getByRole("button", { name: "表情回应 ❤️ 1" });
-    expect(otherChip).not.toHaveClass("bg-ink");
-    fireEvent.click(otherChip);
-    expect(send.mock.calls.filter((c) => c[0]?.type === "react_message")).toHaveLength(2); // 未增加
+    const before4 = sealCalls();
+    fireEvent.click(legacyChip);
+    expect(sealCalls()).toBe(before4); // no-op
+    // react_message 已从契约删除：任何路径都不再发该事件
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "react_message" }));
   });
 
   it("表情回应浮排 Esc 关闭且不发送；切换会话关浮排", async () => {
@@ -2509,13 +2812,16 @@ describe("ChatPage", () => {
     });
 
     await pickAndSend("@和小鸣 打个招呼");
+    // E2E 合入后发送与三事件上行都要先封信封（异步 sealAndSend → sealMessage），
+    // 故先冲刷一次微任务队列再断言（本文件既有风格）
+    await act(async () => {});
 
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" })); // 消息照发
     await waitFor(() => expect(seen).toBeDefined());
     expect(seen![0]).toEqual({ role: "system", content: "你是和小鸣" }); // 组装失败 → 原提示词（零注入）
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_finish", text: "你好" })),
-    );
+    // finish 同走信封（帧上 text 置空），故按信封内明文断言「回复全文已上行」
+    await waitFor(() => expect(sealedOf(send, "agent_finish")).toHaveLength(1));
+    expect(sealedOf(send, "agent_finish")[0].plain).toMatchObject({ kind: "text", text: "你好" });
     await waitFor(() => expect(screen.getByText(/你好/)).toBeInTheDocument()); // 打字机正常
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "agent_error" })); // 写入异常不上行
   });
@@ -2643,11 +2949,318 @@ describe("ChatPage", () => {
     expect(seen[1][0]).toEqual({ role: "system", content: "你是和小鸣" });
     expect(seen[1][1].role).toBe("system");
     expect(seen[1].at(-1)).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
-    // 重试期间不重复上行 chunk；finish 只发一次且是重试成功的全文（无首次尝试的「半」）
-    expect(framesOf(send, "agent_chunk")).toHaveLength(1);
-    expect(framesOf(send, "agent_chunk")[0]).toMatchObject({ text: "半" });
-    expect(framesOf(send, "agent_finish")[0]).toMatchObject({ text: "好" });
+    // 重试期间不重复上行 chunk；finish 只发一次且是重试成功的全文（无首次尝试的「半」）。
+    // E2E 合入后 chunk/finish 帧是信封（帧上 text 置空、正文进 cipher），故帧数查形状、
+    // 正文按「被封的明文」断言意图（sealMessage 桩的入参即明文）。
+    const sealedTexts = (kind: string) =>
+      vi
+        .mocked(sealMessage)
+        .mock.calls.map((c) => c[1] as { kind?: string; text?: string })
+        .filter((p) => p.kind === kind)
+        .map((p) => p.text);
+    expect(framesOf(send, "agent_chunk")).toHaveLength(1); // 只有首次尝试的片上行
+    expect(sealedTexts("chunk")).toEqual(["半"]);
+    expect(framesOf(send, "agent_finish")).toHaveLength(1); // finish 只发一次
+    expect(sealedTexts("text")).toEqual(["@和小鸣 查下上下文", "好"]); // 本条 user 轮 + 重试成功全文
     expect(framesOf(send, "agent_error")).toHaveLength(0);
+  });
+
+  // —— E2E Task 4：无 subtle 拦截 / 公钥上云 / 无法解密占位 ——
+
+  it("无 subtle：输入区常驻横幅 + 文本/附件发送拦截（不发不降级，草稿保留）", async () => {
+    vi.mocked(hasSubtle).mockReturnValue(false);
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockMessagesFetch([]);
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 常驻横幅（硬验收⑤ / 设计 §2.1）
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "当前环境不支持端到端加密，请使用桌面端或 HTTPS",
+    );
+
+    // 文本发送拦截：不发帧、给提示、草稿保留
+    const input = screen.getByPlaceholderText("输入消息…");
+    fireEvent.change(input, { target: { value: "偷偷发" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+    expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持端到端加密");
+    expect(input).toHaveValue("偷偷发");
+
+    // 附件发送拦截：上传前即拦（不 POST /api/files、不发帧）
+    captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
+    await act(async () => {});
+    expect(
+      fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files" && c[1]?.method === "POST"),
+    ).toBe(false);
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+  });
+
+  it("挂载即上云身份公钥 PUT /api/e2e/keys（硬验收①：对端 fetchPeerKeys 依赖）", async () => {
+    const fetchSpy = mockMessagesFetch([]);
+    render(<ChatPage />);
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some(
+          (c) => String(c[0]) === "/api/e2e/keys" && (c[1] as RequestInit | undefined)?.method === "PUT",
+        ),
+      ).toBe(true),
+    );
+    // 公钥体 = exportOwnDeviceKeys 形状（双公钥 + 签名预键）
+    const put = fetchSpy.mock.calls.find(
+      (c) => String(c[0]) === "/api/e2e/keys" && (c[1] as RequestInit | undefined)?.method === "PUT",
+    )!;
+    const body = JSON.parse(String((put[1] as RequestInit).body)) as Record<string, unknown>;
+    expect(typeof body.ikEcdh).toBe("string");
+    expect(typeof body.ikSign).toBe("string");
+    expect(body.spk).toMatchObject({ pub: expect.any(String), sig: expect.any(String) });
+    expect(typeof (body.spk as { createdAt: unknown }).createdAt).toBe("number"); // epoch ms 约定
+  });
+
+  it("解不开的 e2e 信封渲染「无法解密」占位（不吞不崩，pending 等 chaindist）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    // 无 chaindist 的孤儿信封：真 handler → 缺链 defer → 占位（渲染面断言）
+    const sealed: Message = {
+      ...msg("e-orphan", "", "2026-10-14T01:00:00.000Z"),
+      senderId: "u2",
+      enc: "e2e",
+      cipher: btoa(JSON.stringify({ v: 1, nonce: "AA==", data: "BB==" })),
+      chainKid: "no-such-chain",
+      n: 0,
+    };
+    mockMessagesFetch([sealed]);
+
+    render(<ChatPage />);
+    await waitFor(() =>
+      expect(screen.getByText("无法解密（密钥缺失）")).toBeInTheDocument(),
+    );
+    // 挂起等待 chaindist（硬验收③场景的前半段；重试补齐由 chat store 测试覆盖）
+    expect(useChatStore.getState().pendingE2e.c1).toEqual(["e-orphan"]);
+  });
+
+  it("fetchHistory：解不开的 e2e 信封不进 LLM 提示词（硬验收⑤），明文照常入 prompt", async () => {
+    const send = await setupGroupChat();
+    bindAssistant();
+    const undecryptable: Message = {
+      ...msg("e-x", "", "2026-10-14T01:00:00.000Z"),
+      senderId: "u2",
+      enc: "e2e",
+      cipher: btoa(JSON.stringify({ v: 1, nonce: "AA==", data: "BB==" })),
+      chainKid: "no-such-chain",
+      n: 0,
+    };
+    mockMessagesFetch([
+      msg("m1", "明文历史", "2026-10-14T00:59:00.000Z"),
+      undecryptable, // 缺链信封 → handler defer → 占位（payload 恒空）
+    ]);
+
+    await pickAndSend("@和小鸣 看历史");
+    await waitFor(() => expect(vi.mocked(streamChat)).toHaveBeenCalled());
+    const rows = vi.mocked(streamChat).mock.calls.at(-1)![1];
+    const contents = rows.map((r) => r.content);
+    expect(contents).toContain("明文历史");
+    expect(contents).toContain("@和小鸣 看历史");
+    expect(contents).not.toContain(""); // 占位行（空 content）被过滤，不外发模型供应商
+    // 本地渲染面同步出占位（提示词与 UI 两面口径一致）
+    expect(screen.getByText("无法解密（密钥缺失）")).toBeInTheDocument();
+  });
+
+  it("挂载后台自迁移：本会话自己 plain 消息 PUT reencrypt，成功后换 e2e 形态且明文仍可渲染", async () => {
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
+    const mine: Message = {
+      ...msg("mig-w", "旧明文待重封", "2026-10-14T01:00:00.000Z"),
+      senderId: "u1",
+    };
+    const fetchSpy = mockMessagesFetch([mine]);
+
+    render(<ChatPage />);
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some((c) => String(c[0]).includes("/api/messages/mig-w/reencrypt")),
+      ).toBe(true),
+    );
+    // 本地替换为 e2e 形态 + 明文回填（plainById/缓存，见 store migrate 实现）
+    await waitFor(() =>
+      expect(useChatStore.getState().messages.c1?.find((m) => m.id === "mig-w")?.enc).toBe("e2e"),
+    );
+    expect(screen.getByText("旧明文待重封")).toBeInTheDocument(); // 不退化成占位
+    expect(useChatStore.getState().plainById.c1?.["mig-w"]).toMatchObject({ text: "旧明文待重封" });
+  });
+
+  it("fix I2：密文 agent_error 回声解不开 → 降级通用文案 + code 保留（原文不显示）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "agent_error",
+        conversationId: "c1",
+        agentId: "system-assistant",
+        streamId: "s-err",
+        code: "provider_error",
+        message: "",
+        cipher: btoa(unescape(encodeURIComponent(JSON.stringify({ kind: "error", text: "供应商把请求片段吐出来了" })))),
+        chainKid: "test-kid",
+        n: 0,
+      });
+    });
+    // 桩 cipher 非真信封：真 openMessage 走缺链 defer → handler 非 ok → 通用降级文案
+    await waitFor(() =>
+      expect(screen.getByText("生成出错（内容无法解密）")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/供应商把请求片段吐出来了/)).not.toBeInTheDocument();
+    expect(useChatStore.getState().streaming["s-err"]).toMatchObject({
+      status: "error",
+      errorMessage: "生成出错（内容无法解密）",
+    });
+  });
+
+  it("硬验收②：他设备的定向 chaindist 经 isForMe 过滤——不入列不占位不报错", async () => {
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 外层带 ek/to 的定向信封（to 指向他人身份指纹）：isForMe → skip
+    const foreign = btoa(
+      JSON.stringify({ v: 1, ek: "BBB", ik: "CCC", to: "someone-else-kid", nonce: "AAA", data: "DDD" }),
+    );
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: {
+          ...msg("dist-x", "", "2026-10-14T01:00:00.000Z"),
+          senderId: "u2",
+          enc: "e2e",
+          cipher: foreign,
+          chainKid: "someone-else-kid",
+          n: 0,
+        },
+      });
+    });
+    await act(async () => {});
+    expect(useChatStore.getState().messages.c1 ?? []).toHaveLength(0); // 不入列
+    expect(useChatStore.getState().pendingE2e.c1 ?? []).toHaveLength(0); // 不挂起
+    expect(screen.queryByText("无法解密（密钥缺失）")).not.toBeInTheDocument(); // 不占位
+  });
+
+  it("硬验收③：同一信封 echo 重放——(chainKid,n) 去重经出站箱/缓存补齐，不重复入列", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "只出一条" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    const plain = await lastSealed(send);
+    expect(plain).toEqual({ kind: "text", text: "只出一条" });
+    const ev = send.mock.calls.at(-1)![0] as { cipher: string; chainKid: string; n: number };
+    const echo = {
+      type: "message_new" as const,
+      message: {
+        ...msg("m-replay", "", "2026-10-14T01:10:00.000Z"),
+        senderId: "u1",
+        enc: "e2e" as const,
+        cipher: ev.cipher,
+        chainKid: ev.chainKid,
+        n: ev.n,
+      },
+    };
+    act(() => {
+      lastHandlers().onEvent(echo);
+    });
+    await waitFor(() => expect(screen.getByText("只出一条")).toBeInTheDocument());
+    act(() => {
+      lastHandlers().onEvent(echo); // 服务端重放同一条信封
+    });
+    await act(async () => {});
+    expect(screen.queryAllByText("只出一条")).toHaveLength(1); // 仍只一条气泡
+    expect(useChatStore.getState().messages.c1).toHaveLength(1);
+  });
+
+  it("自己发送的 e2e 消息：echo 走出站箱自解渲染并落明文缓存（自发消息无 recv 链）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "自发密文" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    const plain = await lastSealed(send);
+    expect(plain).toEqual({ kind: "text", text: "自发密文" });
+    const ev = send.mock.calls.at(-1)![0] as { cipher: string; chainKid: string; n: number };
+
+    // 服务端回声（信封形态）：自己没有 recv 链 → openMessage 必 defer，须由出站箱接住
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: {
+          ...msg("m-mine", "", "2026-10-14T01:10:00.000Z"),
+          senderId: "u1",
+          enc: "e2e",
+          cipher: ev.cipher,
+          chainKid: ev.chainKid,
+          n: ev.n,
+        },
+      });
+    });
+    await waitFor(() => expect(screen.getByText("自发密文")).toBeInTheDocument());
+    expect(screen.queryByText("无法解密（密钥缺失）")).not.toBeInTheDocument();
+    expect(useChatStore.getState().plainById.c1!["m-mine"]).toMatchObject({ text: "自发密文" });
+    // §6 明文缓存落盘：重载后无出站箱也能靠缓存优先自解
+    const cached = JSON.parse(localStorage.getItem("heming.msgCache.c1") ?? "[]") as {
+      plain: { text?: string };
+    }[];
+    expect(cached.some((c) => c.plain.text === "自发密文")).toBe(true);
+  });
+});
+
+describe("aggregateChips（fix I4 记忆化聚合）", () => {
+  it("legacy+事件聚合/ remove 生效 / 空集剔除；同引用输入返回同一结果对象（不重复计算）", () => {
+    const target = msg("m1", "求回应", "2026-10-14T01:00:00.000Z"); // senderId u2
+    const legacy: Message = {
+      ...msg("m0", "存量", "2026-10-14T00:59:00.000Z"),
+      payload: { text: "存量", reactions: [{ emoji: "❤️", userIds: ["u2"] }] },
+    };
+    const evAddU1: Message = {
+      ...msg("r1", "", "2026-10-14T01:01:00.000Z"),
+      senderId: "u1",
+      enc: "e2e",
+      cipher: "Qw==",
+      chainKid: "k1",
+      n: 1,
+    };
+    const evAddU2: Message = { ...evAddU1, id: "r2", n: 2, senderId: "u2" };
+    const evRemoveU1: Message = { ...evAddU1, id: "r3", n: 3 };
+    const plainOf = {
+      r1: { kind: "reaction" as const, reaction: { target: "m1", emoji: "👍", op: "add" as const } },
+      r2: { kind: "reaction" as const, reaction: { target: "m1", emoji: "👍", op: "add" as const } },
+      r3: {
+        kind: "reaction" as const,
+        reaction: { target: "m1", emoji: "👍", op: "remove" as const },
+      },
+    };
+    const messages = [legacy, target, evAddU1, evAddU2, evRemoveU1];
+
+    const a = aggregateChips(messages, plainOf);
+    const b = aggregateChips(messages, plainOf);
+    expect(b).toBe(a); // 同引用 → 进程内缓存命中，零重算（I4 断言）
+    // 聚合：m1 的 👍 add u1、add u2、remove u1 → 仅剩 u2；m0 存量 ❤️ 原样
+    expect(a.get("m1")).toEqual([{ emoji: "👍", userIds: ["u2"] }]);
+    expect(a.get("m0")).toEqual([{ emoji: "❤️", userIds: ["u2"] }]);
+
+    // 新数组引用 → 重算，但同内容聚合结果深等（「聚合结果不变」）
+    const c = aggregateChips([...messages], plainOf);
+    expect(c).not.toBe(a);
+    expect(c.get("m1")).toEqual(a.get("m1"));
   });
 });
 

@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { Agent, Member, Message, User, WsServerEvent } from "@heming/shared";
 import { useChatStore } from "./chat.js";
-import { api, fetchMembers } from "../lib/api.js";
+import { api, fetchMembers, fetchMessages, reencryptMessage } from "../lib/api.js";
 import { listAgents } from "../lib/agentsApi.js";
 
 // createGroup 走 api()、loadAgents 走 fetchMembers：模块级 mock（其余导出保持真实）
 vi.mock("../lib/api.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api.js")>();
-  return { ...actual, api: vi.fn(), fetchMembers: vi.fn() };
+  return { ...actual, api: vi.fn(), fetchMembers: vi.fn(), fetchMessages: vi.fn(), reencryptMessage: vi.fn() };
 });
 // loadAgentsRoster 走 listAgents：同款模块级 mock
 vi.mock("../lib/agentsApi.js", async (importOriginal) => {
@@ -27,6 +27,7 @@ const msg = (id: string, text: string): Message => ({
   replyTo: null,
   createdAt: "2026-10-13T00:00:00.000Z",
   recalledAt: null,
+  enc: "plain",
 });
 
 const msgAt = (id: string, text: string, createdAt: string): Message => ({
@@ -48,6 +49,9 @@ describe("chat store", () => {
       reads: {},
       streaming: {},
       streamOwner: {},
+      openHandler: null,
+      plainById: {},
+      pendingE2e: {},
     });
   });
 
@@ -391,44 +395,6 @@ describe("chat store", () => {
     expect(list[0].recalledAt).toBeNull();
   });
 
-  // —— 二期 IM Task 6：message_updated 处理（按 id 整条替换，列表长度不变）——
-
-  it("onWsEvent message_updated：按 id 整条替换（含 reactions），其余消息不动", () => {
-    useChatStore.getState().appendMessage(msg("m1", "一"));
-    useChatStore.getState().appendMessage(msg("m2", "二"));
-    useChatStore.getState().onWsEvent({
-      type: "message_updated",
-      message: {
-        ...msg("m1", "一"),
-        payload: { text: "一", reactions: [{ emoji: "👍", userIds: ["u2"] }] },
-      },
-    });
-    const list = useChatStore.getState().messages["c1"];
-    expect(list).toHaveLength(2); // 整条替换，不追加/不移除
-    expect(list.find((m) => m.id === "m1")?.payload.reactions).toEqual([
-      { emoji: "👍", userIds: ["u2"] },
-    ]);
-    expect(list.find((m) => m.id === "m2")?.payload.reactions).toBeUndefined(); // 其余不动
-  });
-
-  it("onWsEvent message_updated：未知会话/未知消息静默忽略（不抛不建空表）", () => {
-    useChatStore.getState().appendMessage(msg("m1", "一"));
-    expect(() =>
-      useChatStore.getState().onWsEvent({
-        type: "message_updated",
-        message: { ...msg("m1", "一"), conversationId: "ghost" },
-      }),
-    ).not.toThrow();
-    expect(useChatStore.getState().messages["ghost"]).toBeUndefined();
-    useChatStore.getState().onWsEvent({
-      type: "message_updated",
-      message: { ...msg("nope", "改我"), payload: { text: "改我", reactions: [] } },
-    });
-    const list = useChatStore.getState().messages["c1"];
-    expect(list).toHaveLength(1);
-    expect(list[0].payload.reactions).toBeUndefined();
-  });
-
   // —— 二期 IM Task 7：他机流 watchdog（长时间无收尾 → error 行供手动重试）——
 
   it("sweepStaleStreams：超时流置 error，新鲜流与已完成流不动", () => {
@@ -522,5 +488,326 @@ describe("chat store", () => {
     expect(s.status).toBe("streaming");
     expect(s.errorMessage).toBeUndefined(); // 显式清（否则合并会留旧值）
     expect(s.text).toBe("半续");
+  });
+
+  // —— E2E Task 4：收信解密注入（setOpenHandler）· agent chunk 密文 · 存量自迁移 ——
+
+  /** e2e 信封消息固件：enc=e2e + 信封四件套（内容在 cipher，payload 恒空——服务端形态）。 */
+  const e2eMsg = (id: string, over: Partial<Message> = {}): Message => ({
+    ...msg(id, ""),
+    enc: "e2e",
+    cipher: "Q2lwaGVy",
+    chainKid: "kid-1",
+    n: 1,
+    ...over,
+  });
+
+  /** 冲刷 appendMessage → handler 的异步链（void promise + .then 应用）。 */
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  it("setOpenHandler：e2e message_new 经 handler 解密后以明文形态入列（payload/replyTo 来自密文）", async () => {
+    const handler = vi.fn(async (_env: { id: string }) => ({
+      status: "ok" as const,
+      plain: {
+        kind: "text" as const,
+        text: "解密后的正文",
+        replyTo: "m0",
+        mentions: [{ agentId: "a1", name: "和小鸣" }],
+      },
+    }));
+    useChatStore.getState().setOpenHandler(handler);
+
+    useChatStore.getState().appendMessage(e2eMsg("m1"));
+    await flush();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0][0]).toMatchObject({
+      conversationId: "c1",
+      id: "m1",
+      cipher: "Q2lwaGVy",
+      chainKid: "kid-1",
+      n: 1,
+      senderId: "u1",
+    });
+    const list = useChatStore.getState().messages.c1!;
+    expect(list).toHaveLength(1);
+    expect(list[0].payload.text).toBe("解密后的正文");
+    expect(list[0].payload.mentions).toEqual([{ agentId: "a1", name: "和小鸣" }]);
+    expect(list[0].replyTo).toBe("m0");
+    expect(list[0].enc).toBe("e2e"); // 形态仍标信封（plain 自迁移扫描依赖 enc 判别）
+    expect(useChatStore.getState().plainById.c1!.m1.kind).toBe("text");
+    expect(useChatStore.getState().pendingE2e.c1 ?? []).toHaveLength(0);
+  });
+
+  it("defer 挂起出占位与 pending；chaindist 解开后自动重试补齐内容", async () => {
+    let opened = false;
+    const handler = vi.fn(async (env: { id: string }) => {
+      if (env.id === "m-chain") {
+        opened = true;
+        return {
+          status: "ok" as const,
+          plain: { kind: "chaindist" as const, dist: { kid: "k1", ck: "c-k", n: 0, createdAt: 1 } },
+        };
+      }
+      if (opened) return { status: "ok" as const, plain: { kind: "text" as const, text: "补发内容" } };
+      return { status: "defer" as const };
+    });
+    useChatStore.getState().setOpenHandler(handler);
+
+    useChatStore.getState().appendMessage(e2eMsg("m1"));
+    await flush();
+    // 挂起：占位入列（渲染层按「enc=e2e 且无明文」显示无法解密）+ pending 登记
+    expect(useChatStore.getState().messages.c1!).toHaveLength(1);
+    expect(useChatStore.getState().messages.c1![0].payload.text).toBe("");
+    expect(useChatStore.getState().pendingE2e.c1).toEqual(["m1"]);
+
+    // chaindist 到达 → handler 解开（接线层在此 await sweepDeferred）→ 自动重试 pending
+    useChatStore.getState().appendMessage(e2eMsg("m-chain", { n: 0 }));
+    await flush();
+
+    const list = useChatStore.getState().messages.c1!;
+    expect(list).toHaveLength(1); // chaindist 不入列（控制消息）
+    expect(list[0].id).toBe("m1");
+    expect(list[0].payload.text).toBe("补发内容"); // 占位被明文替换
+    expect(useChatStore.getState().plainById.c1!.m1.kind).toBe("text");
+    expect(useChatStore.getState().pendingE2e.c1 ?? []).toHaveLength(0);
+    expect(handler.mock.calls.map((c) => c[0].id)).toEqual(["m1", "m-chain", "m1"]);
+  });
+
+  it("解不开（failed）→ 占位入列且不进 pending；skip → 完全不入列", async () => {
+    const handler = vi.fn(async (env: { id: string }) => {
+      if (env.id === "m-bad") return { status: "failed" as const };
+      return { status: "skip" as const };
+    });
+    useChatStore.getState().setOpenHandler(handler);
+
+    useChatStore.getState().appendMessage(e2eMsg("m-bad"));
+    useChatStore.getState().appendMessage(e2eMsg("m-skip"));
+    await flush();
+
+    const ids = useChatStore.getState().messages.c1!.map((m) => m.id);
+    expect(ids).toEqual(["m-bad"]); // failed → 占位；skip → 丢弃
+    expect(useChatStore.getState().plainById.c1?.["m-bad"]).toBeUndefined(); // 无明文 → 渲染层「无法解密」
+    expect(useChatStore.getState().pendingE2e.c1 ?? []).toHaveLength(0); // 永久失败不挂 pending
+    expect(ids).not.toContain("m-skip");
+  });
+
+  it("agent_chunk 密文：解密成功累积进打字机；失败/无 handler 跳过该片不崩", async () => {
+    let mode: "ok" | "fail" = "ok";
+    const handler = vi.fn(
+      async (_env: { id: string }, _ctx?: { streamId: string; kind?: string; index?: number }) =>
+        mode === "ok"
+          ? ({ status: "ok" as const, plain: { kind: "chunk" as const, text: "你" } })
+          : ({ status: "failed" as const }),
+    );
+    useChatStore.getState().setOpenHandler(handler);
+
+    useChatStore.getState().onWsEvent({
+      type: "agent_chunk",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "s9",
+      text: "",
+      cipher: "Q2lwaGVy",
+      chainKid: "kid-1",
+      n: 1,
+      index: 0,
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["s9"]?.text).toBe("你");
+    expect(handler.mock.calls[0][1]).toEqual({ kind: "chunk", streamId: "s9", index: 0 }); // AAD 上下文注入
+    expect(handler.mock.calls[0][0]).toMatchObject({ chainKid: "kid-1", n: 1, cipher: "Q2lwaGVy" });
+
+    // 解不开 → 跳过该片（流式容错：不崩、不追加乱码）
+    mode = "fail";
+    useChatStore.getState().onWsEvent({
+      type: "agent_chunk",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "s9",
+      text: "",
+      cipher: "Q2lwaGVy2",
+      chainKid: "kid-1",
+      n: 2,
+      index: 1,
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["s9"]?.text).toBe("你");
+    expect(useChatStore.getState().streaming["s9"]?.status).toBe("streaming"); // 不置错、不抛
+
+    // 无 handler（未注入）→ 同样静默跳过
+    useChatStore.getState().setOpenHandler(null);
+    useChatStore.getState().onWsEvent({
+      type: "agent_chunk",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "s9",
+      text: "",
+      cipher: "Q2lwaGVy3",
+      chainKid: "kid-1",
+      n: 3,
+      index: 2,
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["s9"]?.text).toBe("你");
+  });
+
+  it("loadMessages：信封经 handler 合并明文，chaindist/skip 过滤出列表，defer 留占位挂 pending", async () => {
+    vi.mocked(fetchMessages).mockResolvedValue([
+      msg("p1", "明文旧消息"),
+      e2eMsg("e1"),
+      e2eMsg("e2"),
+      e2eMsg("e-chain"),
+      e2eMsg("e-skip"),
+    ]);
+    const handler = vi.fn(async (env: { id: string }) => {
+      if (env.id === "e1") return { status: "ok" as const, plain: { kind: "text" as const, text: "已解密" } };
+      if (env.id === "e-chain")
+        return {
+          status: "ok" as const,
+          plain: { kind: "chaindist" as const, dist: { kid: "k1", ck: "c-k", n: 0, createdAt: 1 } },
+        };
+      if (env.id === "e-skip") return { status: "skip" as const };
+      return { status: "defer" as const };
+    });
+    useChatStore.getState().setOpenHandler(handler);
+
+    const list = await useChatStore.getState().loadMessages("c1");
+    expect(list.map((m) => m.id)).toEqual(["p1", "e1", "e2"]); // chaindist 与 skip 不进列表
+    expect(list[1].payload.text).toBe("已解密");
+    expect(list[2].payload.text).toBe(""); // defer 占位
+    expect(useChatStore.getState().pendingE2e.c1).toEqual(["e2"]);
+    expect(useChatStore.getState().plainById.c1!.e1.kind).toBe("text");
+    // 与 store 状态一致（渲染面从 store 读）
+    expect(useChatStore.getState().messages.c1!.map((m) => m.id)).toEqual(["p1", "e1", "e2"]);
+  });
+
+  it("migrateOwnPlain：本人 plain 消息封信封 PUT reencrypt（20/s 节流），他人/已 e2e 不动", async () => {
+    useChatStore.setState({
+      messages: {
+        c1: [
+          msg("mig-a", "旧明文一"), // senderId u1（本人）
+          msg("mig-b", "旧明文二"),
+          { ...msg("mig-o", "别人的明文"), senderId: "u2" },
+          e2eMsg("mig-e"),
+        ],
+      },
+    });
+    const deps = {
+      fetchPeerKeys: vi.fn(async () => null),
+      sendRaw: vi.fn(),
+      now: () => Date.now(),
+    };
+    const attempted = new Set<string>();
+
+    // 节流断言取「相邻 PUT 的真实时间间隔 ≥45ms」：seal 是真 crypto（线程池回调），
+    // 假时钟 advanceTimersByTimeAsync 驱不动它——用实测间隔锁 20/s 语义更稳。
+    const putAt: number[] = [];
+    vi.mocked(reencryptMessage).mockImplementation(async (id, body) => {
+      putAt.push(Date.now());
+      return { ...e2eMsg(id, { cipher: body.cipher, chainKid: body.chainKid, n: body.n }), payload: { text: "" } };
+    });
+
+    await useChatStore.getState().migrateOwnPlain("c1", ["u1", "u2"], deps, attempted, "u1");
+
+    expect(reencryptMessage).toHaveBeenCalledTimes(2);
+    expect(putAt.length).toBe(2);
+    expect(putAt[1] - putAt[0]).toBeGreaterThanOrEqual(45); // 20/s 节流（50ms 间隔，容 5ms 抖动）
+
+    const calls = vi.mocked(reencryptMessage).mock.calls;
+    expect(calls.map((c) => c[0])).toEqual(["mig-a", "mig-b"]); // 他人 plain 与已 e2e 不重封
+    const body = calls[0][1];
+    expect(body.enc).toBe("e2e");
+    expect(typeof body.cipher).toBe("string");
+    expect(body.cipher.length).toBeGreaterThan(0); // 真 seal（非桩）产出的密文
+    expect(typeof body.chainKid).toBe("string");
+    expect(typeof body.n).toBe("number");
+    // 成功后本地替换为 e2e 形态（服务端返回值）——明文已知，payload 就地回填不落占位
+    const after = useChatStore.getState().messages.c1!.find((m) => m.id === "mig-a");
+    expect(after!.enc).toBe("e2e");
+    expect(after!.payload.text).toBe("旧明文一");
+    expect(useChatStore.getState().plainById.c1!["mig-a"]).toMatchObject({ text: "旧明文一" });
+    // attempted 去重：再跑一遍不重复 PUT
+    await useChatStore.getState().migrateOwnPlain("c1", ["u1"], deps, attempted, "u1");
+    expect(reencryptMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("agent_error 密文（fix I2）：解密得 message；解不开/无 handler 降级通用文案（code 保留）", async () => {
+    let mode: "ok" | "fail" = "ok";
+    const handler = vi.fn(
+      async (_env: { id: string }, _ctx?: { streamId: string; kind?: string; index?: number }) =>
+        mode === "ok"
+          ? ({ status: "ok" as const, plain: { kind: "error" as const, text: "供应商 401 bad key" } })
+          : ({ status: "failed" as const }),
+    );
+    useChatStore.getState().setOpenHandler(handler);
+
+    useChatStore.getState().onWsEvent({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "sE1",
+      code: "provider_error",
+      message: "",
+      cipher: "Qw==",
+      chainKid: "kid-1",
+      n: 1,
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["sE1"]).toMatchObject({
+      status: "error",
+      errorMessage: "供应商 401 bad key", // 密文解开的错误正文
+    });
+    expect(handler.mock.calls[0][1]).toEqual({ kind: "error", streamId: "sE1" }); // AAD 上下文
+
+    // 解不开 → 通用降级文案（不显示密文乱码、不崩），code 语义保留
+    mode = "fail";
+    useChatStore.getState().onWsEvent({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "sE2",
+      code: "provider_error",
+      message: "",
+      cipher: "Qw==2",
+      chainKid: "kid-1",
+      n: 2,
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["sE2"]).toMatchObject({
+      status: "error",
+      errorMessage: "生成出错（内容无法解密）",
+    });
+
+    // 无 handler → 同样降级（绝不把密文当正文显示）
+    useChatStore.getState().setOpenHandler(null);
+    useChatStore.getState().onWsEvent({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "sE3",
+      code: "aborted",
+      message: "",
+      cipher: "Qw==3",
+      chainKid: "kid-1",
+      n: 3,
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["sE3"]).toMatchObject({
+      status: "error",
+      errorMessage: "生成出错（内容无法解密）",
+    });
+
+    // 明文 legacy 路径不变（服务端自产 forbidden / 旧端）
+    useChatStore.getState().onWsEvent({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "sE4",
+      code: "forbidden",
+      message: "not a member",
+    });
+    await flush();
+    expect(useChatStore.getState().streaming["sE4"]?.errorMessage).toBe("not a member");
   });
 });

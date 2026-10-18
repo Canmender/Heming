@@ -66,6 +66,7 @@ describe("ContactDetail", () => {
             replyTo: null,
             createdAt: new Date().toISOString(),
             recalledAt: "2026-10-17T00:00:00.000Z",
+            enc: "plain",
           },
         ],
       },

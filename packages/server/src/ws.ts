@@ -83,6 +83,16 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
             agentId: event.agentId,
             streamId: event.streamId,
             text: event.text,
+            // E2E 流式信封（Task 4，设计 §5.3）：密文 chunk 原样透传——服务端不读内容，
+            // 收端按 cipher/chainKid/n/index 开信封（明文 legacy chunk 无这些字段）。
+            ...(event.cipher !== undefined
+              ? {
+                  cipher: event.cipher,
+                  ...(event.chainKid !== undefined ? { chainKid: event.chainKid } : {}),
+                  ...(event.n !== undefined ? { n: event.n } : {}),
+                  ...(event.index !== undefined ? { index: event.index } : {}),
+                }
+              : {}),
           });
         } else {
           // agent_error：校验成员后广播原事件，不入库。
@@ -91,8 +101,10 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
         return;
       }
       if (event.type === "agent_finish") {
-        // F2：shared 的 finish text 保持宽松入站（无 min），服务端拒收 trim 空串。
-        if (event.text.trim() === "") {
+        // F2：shared 的 finish text 保持宽松入站（无 min），服务端拒收 trim 空串——
+        // 密文 finish（Task 4）text 恒为空、全文在 cipher 里，跳过该拒收（schema 层已
+        // 保证 cipher 非空且夹带明文会被拒，服务端对信封只存不读）。
+        if (event.text.trim() === "" && event.cipher === undefined) {
           send(ws, {
             type: "agent_error",
             conversationId: event.conversationId,
@@ -127,13 +139,30 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
           });
           return;
         }
-        const message = store.addMessage(
-          event.conversationId,
-          "agent",
-          event.agentId,
-          { text: event.text },
-          event.replyTo ?? null,
-        );
+        // 密文 finish 按信封入库（内容在 cipher，payload 落 {text:""} 占位、replyTo 置空——
+        // 与 send_message e2e 路径同口径，服务端不见内容）；明文 finish 保持原样。
+        const message =
+          event.cipher !== undefined
+            ? store.addMessage(
+                event.conversationId,
+                "agent",
+                event.agentId,
+                { text: "" },
+                null,
+                {
+                  enc: "e2e",
+                  cipher: event.cipher,
+                  ...(event.chainKid !== undefined ? { chainKid: event.chainKid } : {}),
+                  ...(event.n !== undefined ? { n: event.n } : {}),
+                },
+              )
+            : store.addMessage(
+                event.conversationId,
+                "agent",
+                event.agentId,
+                { text: event.text },
+                event.replyTo ?? null,
+              );
         broadcastToConversation(event.conversationId, { type: "message_new", message, streamId: event.streamId });
         return;
       }
@@ -141,9 +170,10 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
         send(ws, { type: "error", code: "forbidden", message: "not a member" });
         return;
       }
-      // recall/react 独立成支（成员校验已在上方统一做过）；mark_read 保持 else 兜底——
-      // 只有「非 send、非 recall、非 react」的剩余事件（= mark_read，agent_* 已在上方 return）会走到，
-      // 防撤回/发送/回应被误当已读广播 read_update。
+      // recall 独立成支（成员校验已在上方统一做过）；mark_read 保持 else 兜底——
+      // 只有「非 send、非 recall」的剩余事件（= mark_read；agent_* 已在上方 return，
+      // react_message 已从 shared 契约移除→上面 parse 即 bad_event）会走到，
+      // 防撤回/发送被误当已读广播 read_update。
       if (event.type === "recall_message") {
         const m = store.recallMessage(event.conversationId, event.messageId, userId);
         if (!m) {
@@ -157,30 +187,41 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
           messageId: event.messageId,
           at: m.recalledAt!,
         });
-      } else if (event.type === "react_message") {
-        // 表情回应 toggle：store 返回更新后消息即广播 message_updated（整条替换）；
-        // null = 消息不存在（非成员已在上方拦下），回 bad_event 与 recall 的区分口径一致。
-        const updated = store.reactMessage(event.conversationId, event.messageId, userId, event.emoji);
-        if (!updated) {
-          send(ws, { type: "error", code: "bad_event", message: "message not found" });
-          return;
-        }
-        broadcastToConversation(event.conversationId, { type: "message_updated", message: updated });
       } else if (event.type === "send_message") {
-        const message = store.addMessage(
-          event.conversationId,
-          "user",
-          userId,
-          // mentions / file / forward 原样透传入库（内存存引用、sqlite JSON.stringify——两实现均无 shape 校验）。
-          {
-            text: event.payload.text,
-            ...(event.payload.mentions ? { mentions: event.payload.mentions } : {}),
-            ...(event.payload.file ? { file: event.payload.file } : {}),
-            ...(event.payload.forward ? { forward: event.payload.forward } : {}),
-          },
-          event.replyTo ?? null,
-        );
-        broadcastToConversation(event.conversationId, { type: "message_new", message });
+        if (event.enc === "e2e") {
+          // E2E 信封路径（设计 §4）：服务端只见信封——不读 payload 内容、不落 replyTo
+          // （正文/回复指向都在密文里），直接入库并广播 message_new。schema 层已保证
+          // cipher 必带非空（superRefine），此处只搬信封字段。
+          const message = store.addMessage(
+            event.conversationId,
+            "user",
+            userId,
+            { text: "" }, // 占位 payload：内容不落库
+            null,
+            {
+              enc: "e2e",
+              cipher: event.cipher!,
+              ...(event.chainKid !== undefined ? { chainKid: event.chainKid } : {}),
+              ...(event.n !== undefined ? { n: event.n } : {}),
+            },
+          );
+          broadcastToConversation(event.conversationId, { type: "message_new", message });
+        } else {
+          // 明文路径保持现校验（schema 形状 + mentions/file/forward 原样透传）
+          const message = store.addMessage(
+            event.conversationId,
+            "user",
+            userId,
+            {
+              text: event.payload.text,
+              ...(event.payload.mentions ? { mentions: event.payload.mentions } : {}),
+              ...(event.payload.file ? { file: event.payload.file } : {}),
+              ...(event.payload.forward ? { forward: event.payload.forward } : {}),
+            },
+            event.replyTo ?? null,
+          );
+          broadcastToConversation(event.conversationId, { type: "message_new", message });
+        }
       } else {
         const at = new Date().toISOString();
         store.markRead(event.conversationId, userId);
