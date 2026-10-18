@@ -21,7 +21,7 @@
 | 项 | 状态 |
 |---|---|
 | main | 见 `git log -1`（工作区干净） |
-| 测试 | shared 63 / server 169 / web 617 / desktop 19 全绿（`pnpm -r test`） |
+| 测试 | shared 73 / server 186 / web 659 / desktop 19 全绿（`pnpm -r test`） |
 | 线上 | `http://47.92.39.184` 已部署最新版（`docker compose -p heming`） |
 | 安装包 | `packages/desktop/release/和鸣 Setup 0.0.1.exe`（78.3 MB，含全部功能） |
 | 账号 | `admin/admin`、`zhoukang/zhoukang`（服务端 `/root/heming/.env` 的 `HEMING_SEED_USERS` 播种；注册功能默认关闭） |
@@ -36,6 +36,7 @@
 6. **二期 IM**：消息撤回（含四处内容旁路屏蔽）、回复引用、消息转发、语音消息、表情回应（事件化）；遗留收尾（他机流 watchdog、重连补已读、群消息头像）；导航图标列垂直居中。
 7. **E2E 端到端加密**（前向保密棘轮）：P-256 ECDH + HKDF 链 + AES-256-GCM（零依赖 WebCrypto）；信封入库、服务端内容逻辑客户端化（回应=加密事件消息）、本地明文缓存、明文存量自迁移、附件加密、Electron 安全上下文白名单。
 8. **智能体记忆/技能/上下文**（另一会话交付）：三层记忆（Working/Episodic/Semantic，本机 localStorage）、技能池（4 内置技能 + 导入导出 + 路由预览）、上下文预算与早期对话压缩（供应商上下文超限自动收紧重试 ≤2 次）。入口：**记忆区 Alt+4**、设置区「上下文预算」卡片。
+9. **语音通话**：Mesh WebRTC（1:1 + 群聊），信令复用现有 WS 通道（`voice_call_invite/accept/reject/hangup/ice` 五事件，服务端定向单播 + 内存 `activeCalls` 跟踪，30s ringing 超时兜底）；媒体流 DTLS-SRTP 点对点、服务端不碰媒体；仅桌面端（网页端收 invite 自动拒绝并提示）；Electron 注入 ICE 配置（`GET /api/ice-servers` 读 `HEMING_STUN` / `HEMING_TURN_*`）、窗口最小化与来电系统通知 + 任务栏闪烁。
 
 ## 3. 仓库结构与关键文件
 
@@ -44,17 +45,20 @@ packages/
 ├── shared/src/schemas.ts     # 协议单一真源：Message（enc/cipher/chainKid/n/recalledAt）、
 │                             #   MessagePayload（text/mentions/file/forward/reactions）、WS 事件（双向）
 ├── server/src/               # Express5 + ws + node:sqlite
-│   ├── app.ts                # REST：auth/profile/agents/conversations/files(+usage)/e2e keys/reencrypt
+│   ├── app.ts                # REST：auth/profile/agents/conversations/files(+usage)/e2e keys/reencrypt/ice-servers
 │   ├── ws.ts                 # send_message(明文|e2e)/mark_read/recall_message/agent_chunk|finish|error
+│   │                         #   + 语音通话信令 voice_call_*（sendToUser 定向单播 + activeCalls + 30s 超时兜底）
 │   ├── store.ts + sqliteStore.ts  # Store 双实现（契约测试双跑）；幂等 ALTER 迁移在 db.ts
 │   └── db.ts                 # CREATE TABLE IF NOT EXISTS + PRAGMA 检查后 ALTER
 ├── web/src/
 │   ├── lib/e2eCrypto.ts      # 密码核心：HKDF 棘轮/X3DH/GCM（纯函数，向量测试）
 │   ├── lib/e2eSession.ts     # 会话层：链管理/封解密/乱序队列/本地明文缓存/去重
 │   ├── lib/agentStream.ts    # @ 触发编排：TriggerDeps 6 可选钩子（seal×3 + buildSystemPrompt/onTurnComplete/prepareHistory）
+│   ├── lib/voiceCall.ts      # 语音通话状态机 useVoiceCall（call/accept/reject/hangup/toggleMute/handleServerEvent）
 │   ├── lib/agentContext/     # 上下文预算与压缩（另一会话交付）
 │   ├── lib/{memory,skills,agentRuntime}/  # 三层记忆/技能池（另一会话交付）
-│   ├── components/ChatPage.tsx   # 聊天主页面（收发/流式/撤回/回复/转发/语音/表情/加密）
+│   ├── components/ChatPage.tsx   # 聊天主页面（收发/流式/撤回/回复/转发/语音/表情/加密/通话入口）
+│   ├── components/VoiceCallPanel.tsx  # 全屏通话面板（参与者/计时器/静音/挂断/接听）
 │   ├── components/{RadarContacts,ContactColumn,ContactDetail}.tsx  # 通讯录
 │   └── store/{chat,ui,llm,auth,tokenUsage}.ts
 └── desktop/                  # Electron 壳：main.js + secure-origins.js（HTTP 源安全上下文白名单）
@@ -82,6 +86,7 @@ packages/
 6. **群管理**：成员删减/踢人 UI、群主权限。
 
 **技术债/遗留**（各批次终审均裁定「可留后续」，详见对应计划文件与账本注释）：
+- **语音通话**（终审批准延期）：ICE failed 后的自动重连、`disconnected` 状态提示、WS 断连重新协商、本地流断开重取（规格 §5.4 仅实现「failed 5s 挂断」）；通话中邀请新成员后期加入（§5.5）；通话中底部横幅条与「回到通话」（§6.4）；群面板逐成员在线状态（§6.2）；群聊「超过 6 人」提示（§6.4）；E2E 双标签真机通话测试（§8.5，建议云端真机验证替代）；`GET /api/ice-servers` 无鉴权——配置 TURN 时凭据对未登录者可读，属部署层风险（与规格 §7.3 一致）。
 - 撤回时限与「撤回占位原文」；表情回应种类数封顶（服务端未限 20 种）；语音消息转文字；转发嵌套深度限制；上传进度条；会话级文件 ACL；CSP；Electron safeStorage（密钥落盘加密）；网页端 HTTPS 化。
 - 已知语义变化：**新入群成员只能解密加入之后的消息**（无密钥恢复模型的必然结果）；**旧客户端/纯浏览器（HTTP）无法发送**（安全上下文要求，桌面端经白名单解决）。
 
