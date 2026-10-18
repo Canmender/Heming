@@ -63,6 +63,8 @@ pnpm typecheck   # 等价于 pnpm -r build && pnpm -r typecheck
 
 设计文档：`docs/superpowers/specs/2026-10-13-heming-platform-design.md`
 
+智能体（记忆/技能池/上下文预算）设计与交接：`docs/superpowers/specs/2026-10-17-agent-memory-skills-design.md`、`docs/superpowers/specs/2026-10-17-agent-context-budget-design.md`、`docs/superpowers/2026-10-18-agent-handoff.md`
+
 ## 数据
 
 服务端数据（账号、会话、消息、已读状态）持久化在 SQLite：
@@ -70,3 +72,5 @@ pnpm typecheck   # 等价于 pnpm -r build && pnpm -r typecheck
 - 库文件路径由 `HEMING_DB_PATH` 指定，缺省 `./data/heming.db`（相对进程工作目录）。
 - Docker 部署（见 `docs/deploy.md`）注入 `HEMING_DB_PATH=/data/heming.db`，`/data` 挂 named volume `heming-data`——容器重启、镜像重建、回滚都不丢数据；备份/恢复针对该卷（`docs/deploy.md` §6）。
 - 本地开发默认落 `./data/heming.db`，已在 `.gitignore` 排除（`data/`），不进版本库、不进部署包。
+
+> 智能体的**三层记忆、技能池与上下文预算**不在此库中：它们只存触发设备本机的 `localStorage`（键名见 `docs/superpowers/2026-10-18-agent-handoff.md` §5），不上云、不进消息、不进部署包；换设备或清浏览器数据即丢失（可在记忆区导出/导入 JSON）。
