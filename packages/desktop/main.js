@@ -144,8 +144,10 @@ if (!gotLock) {
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data && data.iceServers) {
+          // contextBridge.exposeInMainWorld 暴露的属性是只读的，
+          // 直接赋值会静默失败，必须通过 setter 函数写入闭包变量。
           win.webContents.executeJavaScript(
-            `window.__heming_ice_servers = ${JSON.stringify(data.iceServers)}`,
+            `window.__heming_voice_call.setIceServers(${JSON.stringify(data.iceServers)})`,
           );
         }
       })

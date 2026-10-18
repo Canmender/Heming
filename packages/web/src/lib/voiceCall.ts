@@ -51,8 +51,8 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
 
 function getIceServers(): RTCIceServer[] {
   if (typeof window === "undefined") return DEFAULT_ICE_SERVERS;
-  const injected = (window as unknown as { __heming_ice_servers?: RTCIceServer[] })
-    .__heming_ice_servers;
+  const injected = (window as unknown as { __heming_ice_servers_get?: () => RTCIceServer[] })
+    .__heming_ice_servers_get?.();
   return injected && injected.length > 0 ? injected : DEFAULT_ICE_SERVERS;
 }
 
