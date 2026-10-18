@@ -23,11 +23,13 @@ test("preload 暴露 platform（既有）", () => {
 
 // 行为测试：stub electron 模块的 contextBridge，真实执行 preload.js，
 // 验证 contextBridge 暴露的对象上 __onBootReady/__startBootWave 为可调用函数。
+// 注：preload.js 会多次调用 exposeInMainWorld（heming / __heming_ice_servers_get /
+// __heming_voice_call），此处按 key 收集而非「最后一次即 heming」。
 function loadHeming() {
-  let exposed = null;
+  const exposed = {};
   const stubBridge = {
     exposeInMainWorld: (key, api) => {
-      exposed = { key, api };
+      exposed[key] = api;
     }
   };
   const originalLoad = Module._load;
@@ -43,8 +45,8 @@ function loadHeming() {
   } finally {
     Module._load = originalLoad;
   }
-  assert.equal(exposed.key, "heming");
-  return exposed.api;
+  assert.ok(exposed.heming, "preload 应暴露 heming");
+  return exposed.heming;
 }
 
 test("暴露的 __onBootReady/__startBootWave 是可调用函数", () => {

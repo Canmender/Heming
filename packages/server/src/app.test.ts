@@ -894,3 +894,54 @@ describe("PUT /api/messages/:id/reencrypt", () => {
     expect(store.listMessages(convId)[0].enc).toBe("plain"); // 校验失败不改库
   });
 });
+
+describe("GET /api/ice-servers（语音通话 ICE 配置）", () => {
+  const ENVS = ["HEMING_STUN", "HEMING_TURN_URL", "HEMING_TURN_USERNAME", "HEMING_TURN_CREDENTIAL"];
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = {};
+    for (const e of ENVS) {
+      saved[e] = process.env[e];
+      delete process.env[e];
+    }
+  });
+  afterEach(() => {
+    for (const e of ENVS) {
+      if (saved[e] === undefined) delete process.env[e];
+      else process.env[e] = saved[e];
+    }
+  });
+
+  it("缺省返回公共 STUN，无 TURN", async () => {
+    const app = createApp(createMemoryStore());
+    const res = await request(app).get("/api/ice-servers");
+    expect(res.status).toBe(200);
+    expect(res.body.iceServers).toEqual([{ urls: "stun:stun.miwifi.com:3478" }]);
+  });
+
+  it("HEMING_STUN 覆盖默认 STUN", async () => {
+    process.env.HEMING_STUN = "stun:stun.example.com:3478";
+    const app = createApp(createMemoryStore());
+    const res = await request(app).get("/api/ice-servers");
+    expect(res.body.iceServers).toEqual([{ urls: "stun:stun.example.com:3478" }]);
+  });
+
+  it("配置 HEMING_TURN_* 时追加 TURN（带凭据）", async () => {
+    process.env.HEMING_TURN_URL = "turn:turn.example.com:3478";
+    process.env.HEMING_TURN_USERNAME = "user";
+    process.env.HEMING_TURN_CREDENTIAL = "pass";
+    const app = createApp(createMemoryStore());
+    const res = await request(app).get("/api/ice-servers");
+    expect(res.body.iceServers).toEqual([
+      { urls: "stun:stun.miwifi.com:3478" },
+      { urls: "turn:turn.example.com:3478", username: "user", credential: "pass" },
+    ]);
+  });
+
+  it("无鉴权即可访问（公共基础设施，供渲染层建连前拉取）", async () => {
+    const app = createApp(createMemoryStore());
+    const res = await request(app).get("/api/ice-servers");
+    expect(res.status).toBe(200);
+  });
+});

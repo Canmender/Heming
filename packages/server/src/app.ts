@@ -418,5 +418,22 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.json(result.message);
   });
 
+  // —— 语音通话：ICE 服务器配置（STUN/TURN，从环境变量读取，不入库）——
+  // 无鉴权：STUN/TURN 地址为公共基础设施，TURN 凭据由部署方按环境注入；
+  // 客户端在建立 PeerConnection 前拉取，缺省回退公共 STUN。
+  app.get("/api/ice-servers", (_req, res) => {
+    const iceServers: { urls: string; username?: string; credential?: string }[] = [
+      { urls: process.env.HEMING_STUN ?? "stun:stun.miwifi.com:3478" },
+    ];
+    if (process.env.HEMING_TURN_URL) {
+      iceServers.push({
+        urls: process.env.HEMING_TURN_URL,
+        username: process.env.HEMING_TURN_USERNAME ?? "",
+        credential: process.env.HEMING_TURN_CREDENTIAL ?? "",
+      });
+    }
+    res.json({ iceServers });
+  });
+
   return app;
 }

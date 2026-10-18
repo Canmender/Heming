@@ -647,3 +647,109 @@ describe("agent_chunk/agent_finish 信封（E2E Task 4）", () => {
   });
 });
 
+describe("voice_call 契约", () => {
+  it("接受合法 voice_call_invite", () => {
+    const r = WsClientEventSchema.safeParse({
+      type: "voice_call_invite",
+      conversationId: "c1",
+      callId: "call-1",
+      sdp: "v=0\r\no=- 123 2 IN IP4 0.0.0.0\r\n...",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("拒绝缺 callId 的 voice_call_invite", () => {
+    const r = WsClientEventSchema.safeParse({
+      type: "voice_call_invite",
+      conversationId: "c1",
+      sdp: "v=0",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("接受合法 voice_call_accept", () => {
+    const r = WsClientEventSchema.safeParse({
+      type: "voice_call_accept",
+      conversationId: "c1",
+      callId: "call-1",
+      sdp: "v=0\r\no=- 456 2 IN IP4 0.0.0.0\r\n...",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("接受合法 voice_call_reject（枚举 reason）", () => {
+    expect(WsClientEventSchema.safeParse({
+      type: "voice_call_reject", conversationId: "c1", callId: "call-1", reason: "busy",
+    }).success).toBe(true);
+    expect(WsClientEventSchema.safeParse({
+      type: "voice_call_reject", conversationId: "c1", callId: "call-1", reason: "decline",
+    }).success).toBe(true);
+    expect(WsClientEventSchema.safeParse({
+      type: "voice_call_reject", conversationId: "c1", callId: "call-1", reason: "timeout",
+    }).success).toBe(true);
+    expect(WsClientEventSchema.safeParse({
+      type: "voice_call_reject", conversationId: "c1", callId: "call-1", reason: "other",
+    }).success).toBe(false);
+  });
+
+  it("接受合法 voice_call_hangup", () => {
+    const r = WsClientEventSchema.safeParse({
+      type: "voice_call_hangup",
+      conversationId: "c1",
+      callId: "call-1",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("接受合法 voice_call_ice", () => {
+    const r = WsClientEventSchema.safeParse({
+      type: "voice_call_ice",
+      conversationId: "c1",
+      callId: "call-1",
+      candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("拒绝空 candidate 的 voice_call_ice", () => {
+    const r = WsClientEventSchema.safeParse({
+      type: "voice_call_ice",
+      conversationId: "c1",
+      callId: "call-1",
+      candidate: "",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("服务端事件镜像：voice_call_invite / accept / reject / hangup / ice 均可解析", () => {
+    const base = { conversationId: "c1", callId: "call-1" };
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_invite", ...base, sdp: "v=0", fromUserId: "u1" }).success).toBe(true);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_accept", ...base, sdp: "v=0", fromUserId: "u2" }).success).toBe(true);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_reject", ...base, reason: "busy" }).success).toBe(true);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_hangup", ...base }).success).toBe(true);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_ice", ...base, candidate: "c:1", fromUserId: "u1" }).success).toBe(true);
+  });
+
+  it("服务端 voice_call_invite / accept / ice 必带 fromUserId（Mesh 对端路由防伪造）", () => {
+    const base = { conversationId: "c1", callId: "call-1" };
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_invite", ...base, sdp: "v=0" }).success).toBe(false);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_accept", ...base, sdp: "v=0" }).success).toBe(false);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_ice", ...base, candidate: "c:1" }).success).toBe(false);
+  });
+
+  it("客户端 voice_call_invite / accept / ice 不带 fromUserId（带也被 strip）", () => {
+    const base = { conversationId: "c1", callId: "call-1" };
+    for (const type of ["voice_call_invite", "voice_call_accept", "voice_call_ice"] as const) {
+      const r = WsClientEventSchema.safeParse({
+        type,
+        ...base,
+        sdp: "v=0",
+        candidate: "c:1",
+        fromUserId: "spoofed",
+      });
+      expect(r.success).toBe(true);
+      expect(r.success && (r.data as Record<string, unknown>).fromUserId).toBeUndefined();
+    }
+  });
+});
+

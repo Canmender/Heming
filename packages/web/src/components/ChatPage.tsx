@@ -39,12 +39,14 @@ import {
 import { memoryStore } from "../lib/memory/index.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
-import { ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon } from "./icons.js";
+import { ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon } from "./icons.js";
 import { Avatar } from "./Avatar.js";
 import { MentionPicker, type MentionItem } from "./MentionPicker.js";
 import { AgentStreamBubble } from "./AgentStreamBubble.js";
 import { ChatInfoCard } from "./ChatInfoCard.js";
 import { EmojiPicker } from "./EmojiPicker.js";
+import { VoiceCallPanel } from "./VoiceCallPanel.js";
+import { useVoiceCall } from "../lib/voiceCall.js";
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
 export const NO_E2E_NOTICE = "当前环境不支持端到端加密，请使用桌面端或 HTTPS";
@@ -54,6 +56,24 @@ const NO_PLAIN: Record<string, PlainEnvelope> = {};
 
 /** 单条消息的回应 chip（emoji + 参与 userIds）。 */
 export type ReactionChip = { emoji: string; userIds: string[] };
+
+/**
+ * Electron preload 暴露的语音通话桥接面（仅桌面端存在；网页端为 undefined）。
+ * 各方法均可选：老版本 preload 可能未提供某些方法，渲染层需守卫降级。
+ */
+interface VoiceCallBridge {
+  /** 订阅最小化事件；返回取消订阅函数（卸载时清理，防监听器累积）。 */
+  onMinimize?: (callback: () => void) => (() => void) | void;
+  /** 请求主进程弹系统通知（主进程一并闪烁任务栏）。 */
+  notify?: (title: string, body: string) => void;
+}
+
+declare global {
+  interface Window {
+    /** Electron preload 注入的语音通话桥接面（网页端不存在）。 */
+    __heming_voice_call?: VoiceCallBridge;
+  }
+}
 
 /** aggregateChips 结果里「无 chips」的稳定空表。 */
 const NO_CHIPS: ReactionChip[] = [];
@@ -528,6 +548,76 @@ export function ChatPage() {
       : `${conv.name}（${conv.memberCount} 人）`
     : "会话";
   const isGroup = conv?.type === "group";
+
+  // —— 语音通话（Task 4/5）：useVoiceCall 状态机；信令复用当前 WS 通道 ——
+  // 仅 Electron 桌面端支持通话：以 preload 暴露的桥接 API 是否存在为判定依据。
+  const voiceBridge =
+    typeof window !== "undefined"
+      ? (window as unknown as { __heming_voice_call?: VoiceCallBridge }).__heming_voice_call
+      : undefined;
+  const isElectron = voiceBridge !== undefined;
+  /** C1 群聊发起通话确认弹窗开关（null=关；非空=显示确认）。 */
+  const [groupCallConfirm, setGroupCallConfirm] = useState(false);
+  const voiceCall = useVoiceCall({
+    send: (e) => wsHandleRef.current?.send(e),
+    myUserId: me?.id ?? "",
+    isDesktop: isElectron,
+  });
+
+  /** 通话对端名映射（1:1 用 conv.peer.displayName）；ringing 横幅与面板共用。 */
+  const voicePeerNames = useMemo(() => {
+    const map = new Map<string, string>();
+    if (conv?.type === "direct" && conv.peer) {
+      map.set(conv.peer.id, conv.peer.displayName);
+    }
+    for (const [id, info] of Object.entries(groupMembers?.byId ?? {})) {
+      map.set(id, info.name);
+    }
+    return map;
+  }, [conv, groupMembers]);
+
+  /**
+   * C1 群聊 Mesh 通话：从群成员快照取「其他人类成员」作为通话 peer。
+   * 只认本群（groupMembers.convId === convId）；agent 无设备公钥不参与通话。
+   */
+  const groupCallPeerIds = useMemo(() => {
+    if (!isGroup || groupMembers?.convId !== convId) return [];
+    return groupMembers.userIds.filter((id) => id !== me?.id);
+  }, [isGroup, groupMembers, convId, me?.id]);
+  /** C1 确认弹窗是否可发起：群聊 + idle + 桌面端 + 成员已加载。 */
+  const canInitiateGroupCall =
+    isGroup && voiceCall.state.status === "idle" && isElectron && groupMembers?.convId === convId;
+
+  // —— 语音通话桌面通知接线（Task 5 fix）：仅桌面端生效，网页端（桥接缺失）静默跳过 ——
+  // 通话状态存 ref：onMinimize 回调挂载期订阅一次，需读取最新状态避免闭包过期。
+  const voiceStatusRef = useRef(voiceCall.state.status);
+  useEffect(() => {
+    voiceStatusRef.current = voiceCall.state.status;
+  }, [voiceCall.state.status]);
+
+  // 窗口最小化 → 若仍在通话中则系统通知「通话中」（任务栏不可见时提示用户）。
+  // onMinimize 返回取消订阅函数：卸载/桥接变化时退订，防监听器累积（老版本 preload 不返回时降级）。
+  useEffect(() => {
+    if (!voiceBridge?.onMinimize) return;
+    const off = voiceBridge.onMinimize(() => {
+      if (voiceStatusRef.current === "active") {
+        voiceBridge.notify?.("和鸣", "通话中");
+      }
+    });
+    return typeof off === "function" ? off : undefined;
+  }, [voiceBridge]);
+
+  // 来电（被叫 ringing）→ 系统通知（主进程一并闪烁任务栏）；同一 callId 仅通知一次（ref 去重）。
+  const notifiedCallRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!voiceBridge) return;
+    if (voiceCall.state.status !== "ringing" || voiceCall.state.role !== "callee") return;
+    const callId = voiceCall.state.callId;
+    if (!callId || notifiedCallRef.current === callId) return;
+    notifiedCallRef.current = callId;
+    voiceBridge.notify?.("和鸣", "语音来电");
+  }, [voiceBridge, voiceCall.state.status, voiceCall.state.role, voiceCall.state.callId]);
+
   /** 消息署名（气泡/引用卡/引用预览共用）：自己「我」；direct 对方名；群内成员映射名（缺失回退 undefined 由调用方处理）。 */
   const displaySenderName = (m: Message) =>
     m.senderId === me?.id
@@ -902,6 +992,8 @@ export function ChatPage() {
       onEvent: (e) => {
         // 流式三事件收口（chunk 累积/message_new{streamId} 移除/agent_error 分态）在 store 统一处理
         useChatStore.getState().onWsEvent(e);
+        // 语音通话信令（voice_call_*）转交 useVoiceCall 状态机
+        voiceCall.handleServerEvent(e);
         if (e.type === "message_new" && e.message.conversationId === convId) {
           appendMessage(e.message);
           // 会话内正在看的新消息即时标记已读：否则退出后 loadWorkspace 会把已读内容算作未读
@@ -1380,16 +1472,83 @@ export function ChatPage() {
         )}
         <span className="text-[14px] font-bold">{headerTitle}</span>
         <span className="text-[12px] text-muted">{connected ? "已连接" : "连接中…"}</span>
+        {conv?.type === "direct" && voiceCall.state.status === "idle" && (
+          <button
+            type="button"
+            aria-label="发起通话"
+            className="ml-auto rounded-lg p-1.5 hover:bg-[#f3f3f3]"
+            onClick={() => {
+              if (conv?.type === "direct") {
+                void voiceCall.call(conv.id, [conv.peer.id]);
+              }
+            }}
+          >
+            <PhoneIcon width={17} height={17} />
+          </button>
+        )}
+        {canInitiateGroupCall && (
+          <button
+            type="button"
+            aria-label="发起群通话"
+            className="rounded-lg p-1.5 hover:bg-[#f3f3f3]"
+            onClick={() => setGroupCallConfirm(true)}
+          >
+            <PhoneIcon width={17} height={17} />
+          </button>
+        )}
+        {groupCallConfirm && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+            onClick={() => setGroupCallConfirm(false)}
+          >
+            <div
+              className="w-[280px] rounded-xl border border-[#ececec] bg-white p-3 shadow-card"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 text-[13px] font-bold">邀请 {groupCallPeerIds.length} 人加入通话？</div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                  onClick={() => setGroupCallConfirm(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+                  onClick={() => {
+                    setGroupCallConfirm(false);
+                    void voiceCall.call(convId, groupCallPeerIds);
+                  }}
+                >
+                  确认
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <button
           type="button"
           aria-label="会话信息"
-          className={`ml-auto rounded-lg p-1.5 hover:bg-[#f3f3f3]${infoOpen ? " bg-[#f3f3f3]" : ""}`}
+          className={`rounded-lg p-1.5 hover:bg-[#f3f3f3]${infoOpen ? " bg-[#f3f3f3]" : ""}${conv?.type === "direct" && voiceCall.state.status === "idle" && !canInitiateGroupCall ? "" : " ml-auto"}`}
           onClick={() => setInfoOpen((v) => !v)}
         >
           <MenuIcon width={17} height={17} />
         </button>
         {infoOpen && conv && <ChatInfoCard conv={conv} onClose={() => setInfoOpen(false)} />}
       </header>
+      {/* 来电横幅（ringing 状态时显示）。
+          接听/拒绝按钮不在此渲染：VoiceCallPanel 根节点为 fixed inset-0 z-50，
+          横幅（普通静态流节点、无 z-index）被面板完全遮挡，按钮不可见不可点。
+          按钮已移入面板内的 callee ringing 分支，此横幅仅保留可见的来电提示文案。 */}
+      {voiceCall.state.status === "ringing" && (
+        <div className="flex items-center justify-between gap-3 border-b border-line-soft bg-[#1a1a2e] px-5 py-2.5 text-white">
+          <span className="text-[13px]">
+            {voiceCall.state.role === "caller" ? "正在呼叫…" : "来电"}
+          </span>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {visibleMessages.map((m) => {
           const mine = m.senderId === me?.id;
@@ -1840,6 +1999,25 @@ export function ChatPage() {
           </div>
         </div>
       )}
+      {/* 语音通话全屏面板（ringing + active 状态）
+          onAccept/onReject 仅在 callee ringing 分支内渲染为可见可点的接听/拒绝按钮
+          （面板 fixed inset-0 z-50 覆盖全屏，横幅内的按钮会被遮挡） */}
+      <VoiceCallPanel
+        state={voiceCall.state}
+        peerNames={voicePeerNames}
+        onHangup={voiceCall.hangup}
+        onToggleMute={voiceCall.toggleMute}
+        onAccept={
+          voiceCall.state.incoming
+            ? () => void voiceCall.accept(voiceCall.state.incoming!.callId)
+            : undefined
+        }
+        onReject={
+          voiceCall.state.incoming
+            ? () => voiceCall.reject(voiceCall.state.incoming!.callId, "decline")
+            : undefined
+        }
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, Menu, dialog, shell, screen } = require("electron");
+const { app, BrowserWindow, Menu, dialog, shell, screen, ipcMain, Notification } = require("electron");
 const path = require("node:path");
 const { loadWindowState, saveWindowState } = require("./window-state");
 const { shouldShowSplash, splashWindowOptions } = require("./splash-config");
@@ -188,9 +188,48 @@ if (!gotLock) {
 
     // 先挂 splash 再 loadURL：确保 did-finish-load/did-fail-load 监听器不会漏掉极快的首次加载
     createSplashWindow(win);
+
+    // 来电时停止任务栏闪烁（窗口获得焦点 = 用户已看到来电）
+    win.on("focus", () => {
+      win.flashFrame(false);
+    });
+
     win.loadURL(appUrl);
+
+    // 语音通话：拉取服务端 ICE 配置（STUN/TURN）并注入渲染层。
+    // 用 HEMING_API_BASE 指定 API 源；缺省与加载页同源（appUrl 去尾斜杠）。
+    // 拉取失败静默——渲染层有公共 STUN 兜底，不阻塞窗口启动。
+    const iceBase = process.env.HEMING_API_BASE || appUrl.replace(/\/$/, "");
+    fetch(`${iceBase}/api/ice-servers`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && data.iceServers) {
+          // contextBridge.exposeInMainWorld 暴露的属性是只读的，
+          // 直接赋值会静默失败，必须通过 setter 函数写入闭包变量。
+          win.webContents.executeJavaScript(
+            `window.__heming_voice_call.setIceServers(${JSON.stringify(data.iceServers)})`,
+          );
+        }
+      })
+      .catch(() => {});
+
+    // 窗口最小化时通知渲染层（渲染层据此弹系统通知，来电不丢）
+    win.on("minimize", () => {
+      win.webContents.send("voice-call:minimized");
+    });
+
     return win;
   }
+
+  // 语音通话系统通知 + 任务栏闪烁（渲染层经 preload 的 __heming_voice_call.notify 请求）
+  ipcMain.on("voice-call:notify", (_event, title, body) => {
+    if (Notification.isSupported()) {
+      new Notification({ title, body }).show();
+    }
+    // 任务栏闪烁（Windows/Linux；窗口聚焦时自动停止，见 createWindow 的 focus 处理）
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isFocused()) win.flashFrame(true);
+  });
 
   function setupMenu() {
     const isDev = !app.isPackaged;
