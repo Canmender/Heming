@@ -38,9 +38,16 @@ describe("BootWave", () => {
     expect(onDone).toHaveBeenCalled();
   });
 
-  it("注入 __onBootReady 到 window.heming", () => {
+  it("调用 preload 的 __onBootReady 注册回调（不注入、不覆盖 heming）", () => {
+    const heming: any = { __onBootReady: vi.fn() };
+    (window as any).heming = heming;
     render(<BootWave onDone={vi.fn()} />);
-    expect((window as any).heming?.__onBootReady).toBeDefined();
+    // 组件「调用」preload 注册接口并传入回调；window.heming 原对象未被覆盖
+    expect(heming.__onBootReady).toHaveBeenCalledTimes(1);
+    expect(typeof heming.__onBootReady.mock.calls[0][0]).toBe("function");
+    expect((window as any).heming).toBe(heming);
+    // 未收到启动信号前不渲染波纹
+    expect(document.querySelector(".boot-wave")).toBeNull();
   });
 
   it("__startBootWave 触发已注册回调", async () => {
@@ -57,13 +64,14 @@ describe("BootWave", () => {
   });
 
   // 回归：真实 Electron 下 window.heming 由 contextBridge 暴露，对象被冻结、属性不可写。
-  // 组件注入默认实现会抛 TypeError（严格模式），必须容错并走兜底直接开播，不得崩溃。
+  // 组件只「调用」__onBootReady（不注入），故冻结对象不崩溃；此处 __onBootReady 为 null
+  //（无可用信号通道）时走兜底直接开播。
   it("contextBridge 冻结对象（不可写）不崩溃且兜底开播", () => {
     const frozen = Object.freeze({ platform: "win32", __onBootReady: null, __startBootWave: null });
     (window as any).heming = frozen;
     const onDone = vi.fn();
     expect(() => render(<BootWave onDone={onDone} />)).not.toThrow();
-    // 无可用外部通道 → 直接开播，波纹渲染
+    // 无可用信号通道 → 直接开播，波纹渲染
     expect(document.querySelector(".boot-wave .ripple")).toBeTruthy();
   });
 });

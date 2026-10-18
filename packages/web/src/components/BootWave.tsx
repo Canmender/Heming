@@ -10,10 +10,9 @@ interface BootWaveProps {
  * 时长 1.3s，与 splash 粒子聚拢段（1.5s）+ 静默（0.2s）组成完整约 3s 启动动画。
  * 启动信号由主进程 did-finish-load 后通过 window.heming.__startBootWave() 触发。
  *
- * 挂载时向 window.heming 注入 __onBootReady / __startBootWave 的默认实现
- * （preload 暴露的同名键初始为 null，主进程只负责调用 __startBootWave）；
- * 若外部已提供可用的同名函数（如测试注入）则保留不覆盖。
- * 无可用外部信号通道（浏览器直接打开，或 contextBridge 冻结致注入未生效）时直接开播兜底。
+ * 挂载时调用 preload 暴露的 window.heming.__onBootReady(cb) 注册启动回调，
+ * 主进程 did-finish-load 后调用 window.heming.__startBootWave() 触发播放。
+ * 无 preload（浏览器直接打开）时无外部信号源，直接开播兜底。
  */
 export function BootWave({ onDone }: BootWaveProps) {
   const [started, setStarted] = useState(false);
@@ -21,31 +20,6 @@ export function BootWave({ onDone }: BootWaveProps) {
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const existing = (window as any).heming;
-    const heming = existing ?? {};
-    // 判定挂载前是否存在「可用的外部信号通道」：
-    // 仅当 window.heming.__onBootReady 已是函数（测试注入 / 修复后的 preload）才等待外部信号。
-    // 真实 Electron 下 window.heming 由 contextBridge 暴露（contextIsolation + sandbox），
-    // 对象被冻结、属性不可写——严格模式下赋值会抛 TypeError，故注入必须 best-effort。
-    const externalReady = typeof heming.__onBootReady === "function";
-
-    // 仅在缺失时注入默认实现（避免覆盖外部注入的同名函数）；冻结对象上注入失败可忽略
-    try {
-      if (!externalReady) {
-        heming.__onBootReady = (cb: () => void) => {
-          heming.__bootCallback = cb;
-        };
-      }
-      if (typeof heming.__startBootWave !== "function") {
-        heming.__startBootWave = () => {
-          if (heming.__bootCallback) heming.__bootCallback();
-        };
-      }
-      (window as any).heming = heming;
-    } catch {
-      /* contextBridge 冻结对象不可写：无可用外部通道，走兜底直接开播 */
-    }
-
     // jsdom 未实现 matchMedia；真实浏览器/Electron 有。缺失时按未开启减弱动态处理。
     const reduced =
       typeof window.matchMedia === "function" &&
@@ -55,13 +29,15 @@ export function BootWave({ onDone }: BootWaveProps) {
       return;
     }
 
-    if (externalReady) {
-      // 有可用外部信号通道：注册回调，等待主进程调用 __startBootWave
+    // preload 通过 contextBridge 暴露 __onBootReady/__startBootWave（对象被冻结，
+    // 渲染进程只读、不可注入），故此处只「调用」而非注入。
+    const heming = (window as any).heming;
+    if (typeof heming?.__onBootReady === "function") {
       heming.__onBootReady(() => {
         startAnimation();
       });
     } else {
-      // 兜底：无可用外部信号通道（浏览器直接打开，或 contextBridge 冻结致注入未生效）直接开播
+      // 兜底：无可用信号通道（浏览器直接打开）时直接开播
       startAnimation();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
