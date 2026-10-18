@@ -35,6 +35,40 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
     }
   }
 
+  function sendToUser(userId: string, event: WsServerEvent): void {
+    const sockets = socketsByUser.get(userId);
+    if (!sockets) return;
+    for (const ws of sockets) send(ws, event);
+  }
+
+  // —— 语音通话信令：内存状态跟踪（不持久化）——
+  interface CallState {
+    conversationId: string;
+    initiatorId: string;
+    peerIds: string[];
+    state: "ringing" | "active";
+    startedAt: number;
+  }
+  const activeCalls = new Map<string, CallState>();
+
+  function cleanupCallsForUser(userId: string): void {
+    for (const [callId, call] of activeCalls) {
+      if (call.initiatorId === userId || call.peerIds.includes(userId)) {
+        const otherParticipants = [call.initiatorId, ...call.peerIds].filter(
+          (id) => id !== userId,
+        );
+        for (const otherId of otherParticipants) {
+          sendToUser(otherId, {
+            type: "voice_call_hangup",
+            conversationId: call.conversationId,
+            callId,
+          });
+        }
+        activeCalls.delete(callId);
+      }
+    }
+  }
+
   // 注：@types/ws 的 "connection" 特化重载只声明 2 参（websocket, request），
   // 本实现经 wss.emit("connection", ws, req, userId) 传入第三参 userId，
   // 会落到 EventEmitter 的泛型重载，_req 需显式注解以通过 strict 检查（零运行时影响）。
@@ -60,6 +94,106 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
         return;
       }
       const event = parsed.data;
+      // 语音通话信令（Task 2）：invite/accept/reject/hangup/ice 五种事件定向投递，
+      // 不走广播、不入库；通话状态仅在内存 activeCalls，断开连接时 cleanupCallsForUser
+      // 向其他参与者补发 hangup。成员校验口径与下方通用分支一致。
+      if (
+        event.type === "voice_call_invite" ||
+        event.type === "voice_call_accept" ||
+        event.type === "voice_call_reject" ||
+        event.type === "voice_call_hangup" ||
+        event.type === "voice_call_ice"
+      ) {
+        if (!store.isMember(event.conversationId, userId)) {
+          send(ws, { type: "error", code: "forbidden", message: "not a member" });
+          return;
+        }
+        const call = activeCalls.get(event.callId);
+        if (event.type === "voice_call_invite") {
+          // 同 callId 重复 invite 覆盖旧状态（发起方重拨语义）
+          const members = store.listMembers(event.conversationId);
+          const peerIds = members
+            .filter((m) => m.kind === "user" && m.id !== userId)
+            .map((m) => m.id);
+          activeCalls.set(event.callId, {
+            conversationId: event.conversationId,
+            initiatorId: userId,
+            peerIds,
+            state: "ringing",
+            startedAt: Date.now(),
+          });
+          for (const peerId of peerIds) {
+            sendToUser(peerId, {
+              type: "voice_call_invite",
+              conversationId: event.conversationId,
+              callId: event.callId,
+              sdp: event.sdp,
+            });
+          }
+        } else if (event.type === "voice_call_accept") {
+          if (!call || !call.peerIds.includes(userId)) {
+            send(ws, { type: "error", code: "forbidden", message: "not in call" });
+            return;
+          }
+          call.state = "active";
+          sendToUser(call.initiatorId, {
+            type: "voice_call_accept",
+            conversationId: event.conversationId,
+            callId: event.callId,
+            sdp: event.sdp,
+          });
+        } else if (event.type === "voice_call_reject") {
+          if (!call || (call.initiatorId !== userId && !call.peerIds.includes(userId))) {
+            send(ws, { type: "error", code: "forbidden", message: "not in call" });
+            return;
+          }
+          activeCalls.delete(event.callId);
+          const otherParticipants = [call.initiatorId, ...call.peerIds].filter(
+            (id) => id !== userId,
+          );
+          for (const otherId of otherParticipants) {
+            sendToUser(otherId, {
+              type: "voice_call_reject",
+              conversationId: event.conversationId,
+              callId: event.callId,
+              reason: event.reason,
+            });
+          }
+        } else if (event.type === "voice_call_hangup") {
+          if (!call || (call.initiatorId !== userId && !call.peerIds.includes(userId))) {
+            send(ws, { type: "error", code: "forbidden", message: "not in call" });
+            return;
+          }
+          activeCalls.delete(event.callId);
+          const otherParticipants = [call.initiatorId, ...call.peerIds].filter(
+            (id) => id !== userId,
+          );
+          for (const otherId of otherParticipants) {
+            sendToUser(otherId, {
+              type: "voice_call_hangup",
+              conversationId: event.conversationId,
+              callId: event.callId,
+            });
+          }
+        } else if (event.type === "voice_call_ice") {
+          if (!call || (call.initiatorId !== userId && !call.peerIds.includes(userId))) {
+            send(ws, { type: "error", code: "forbidden", message: "not in call" });
+            return;
+          }
+          const otherParticipants = [call.initiatorId, ...call.peerIds].filter(
+            (id) => id !== userId,
+          );
+          for (const otherId of otherParticipants) {
+            sendToUser(otherId, {
+              type: "voice_call_ice",
+              conversationId: event.conversationId,
+              callId: event.callId,
+              candidate: event.candidate,
+            });
+          }
+        }
+        return;
+      }
       // 流式三事件（chunk/finish/error）统一在此截获，排在下方通用 isMember 与
       // send_message/mark_read 二分之前：否则 chunk/finish 会落入 else 被误当
       // mark_read 广播 read_update（Task 1 handoff），非成员收到的也会是通用
@@ -237,6 +371,7 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
     ws.on("close", () => {
       sockets!.delete(ws);
       if (sockets!.size === 0) socketsByUser.delete(userId);
+      cleanupCallsForUser(userId);
     });
 
     ws.on("error", () => { /* 连接级错误忽略，避免未捕获异常崩溃进程 */ });

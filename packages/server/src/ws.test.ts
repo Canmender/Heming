@@ -352,6 +352,131 @@ describe("ws", () => {
     a.close();
     b.close();
   });
+
+  // —— 语音通话信令（Task 2）——
+
+  it("voice_call_invite 定向投递给 peer（非全群广播）", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: convId,
+      callId: "call-test-1",
+      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
+    }));
+    const event = await bWait;
+    expect(event.type).toBe("voice_call_invite");
+    if (event.type === "voice_call_invite") {
+      expect(event.callId).toBe("call-test-1");
+      expect(event.sdp).toContain("v=0");
+    }
+    a.close();
+    b.close();
+  });
+
+  it("voice_call_accept 定向投递给 initiator", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    // 先 invite 建立通话状态
+    const bInviteWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: convId,
+      callId: "call-test-3",
+      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
+    }));
+    await bInviteWait;
+    // b accept → a 收到 accept
+    const aWait = nextEvent(a);
+    b.send(JSON.stringify({
+      type: "voice_call_accept",
+      conversationId: convId,
+      callId: "call-test-3",
+      sdp: "v=0\r\no=- 2 2 IN IP4 0.0.0.0",
+    }));
+    const event = await aWait;
+    expect(event.type).toBe("voice_call_accept");
+    if (event.type === "voice_call_accept") {
+      expect(event.callId).toBe("call-test-3");
+    }
+    a.close();
+    b.close();
+  });
+
+  it("voice_call_hangup 定向投递给其他参与者", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    // 先 invite 建立通话状态
+    const bInviteWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: convId,
+      callId: "call-test-4",
+      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
+    }));
+    await bInviteWait;
+    // a hangup → b 收到 hangup
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_hangup",
+      conversationId: convId,
+      callId: "call-test-4",
+    }));
+    const event = await bWait;
+    expect(event.type).toBe("voice_call_hangup");
+    if (event.type === "voice_call_hangup") {
+      expect(event.callId).toBe("call-test-4");
+    }
+    a.close();
+    b.close();
+  });
+
+  it("voice_call_ice 定向投递给其他参与者", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    // 先 invite 建立通话状态
+    const bInviteWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: convId,
+      callId: "call-test-5",
+      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
+    }));
+    await bInviteWait;
+    // a ice → b 收到 ice
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_ice",
+      conversationId: convId,
+      callId: "call-test-5",
+      candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
+    }));
+    const event = await bWait;
+    expect(event.type).toBe("voice_call_ice");
+    if (event.type === "voice_call_ice") {
+      expect(event.callId).toBe("call-test-5");
+      expect(event.candidate).toContain("candidate:1");
+    }
+    a.close();
+    b.close();
+  });
+
+  it("非成员发 voice_call_invite 收 forbidden", async () => {
+    const stranger = store.createUser("eve2", "h", "夏娃2");
+    const s = await connect(issueToken(stranger.id));
+    const wait = nextEvent(s);
+    s.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: convId,
+      callId: "call-test-6",
+      sdp: "v=0",
+    }));
+    const event = await wait;
+    expect(event.type).toBe("error");
+    if (event.type === "error") expect(event.code).toBe("forbidden");
+    s.close();
+  });
 });
 
 describe("agent streaming", () => {
