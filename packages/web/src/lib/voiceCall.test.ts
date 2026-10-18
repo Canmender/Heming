@@ -80,6 +80,19 @@ function sendByType(send: ReturnType<typeof vi.fn>, type: string) {
   return send.mock.calls.filter((c: unknown[]) => (c[0] as { type: string }).type === type);
 }
 
+/** useVoiceCall 的 idle 快照基线（与模块内 IDLE_STATE 保持一致） */
+const IDLE_STATE_EXPECT = {
+  callId: null,
+  conversationId: null,
+  role: null,
+  status: "idle",
+  peerIds: [],
+  startedAt: null,
+  muted: false,
+  error: null,
+  incoming: null,
+};
+
 describe("useVoiceCall", () => {
   let media: ReturnType<typeof installMediaStubs>;
 
@@ -226,6 +239,36 @@ describe("useVoiceCall", () => {
       callId: "call-z",
       reason: "decline",
     });
+    expect(result.current.state.status).toBe("idle");
+  });
+
+  it("reject() 后状态完整复位到 idle，面板不卡在 ringing", () => {
+    const onIncomingCall = vi.fn();
+    const send = vi.fn();
+    const { result } = renderHook(() =>
+      useVoiceCall({ send, myUserId: "u1", onIncomingCall }),
+    );
+
+    act(() => {
+      result.current.handleServerEvent({
+        type: "voice_call_invite",
+        conversationId: "c1",
+        callId: "call-reject-state",
+        sdp: "v=0 mock-offer",
+      } as WsServerEvent);
+    });
+    expect(result.current.state).toMatchObject({
+      callId: "call-reject-state",
+      role: "callee",
+      status: "ringing",
+      incoming: expect.objectContaining({ callId: "call-reject-state" }),
+    });
+
+    act(() => {
+      result.current.reject("call-reject-state", "decline");
+    });
+
+    expect(result.current.state).toEqual(IDLE_STATE_EXPECT);
   });
 
   it("收到 accept 进入 active 状态", async () => {
@@ -318,7 +361,7 @@ describe("useVoiceCall", () => {
     expect(result.current.state.status).toBe("ringing");
   });
 
-  it("网页端收到 invite 自动拒绝（busy）并提示", () => {
+  it("网页端收到 invite 自动拒绝（busy）并设置 error 提示", () => {
     const send = vi.fn();
     const { result } = renderHook(() =>
       useVoiceCall({ send, myUserId: "u1", isDesktop: false }),
@@ -335,7 +378,99 @@ describe("useVoiceCall", () => {
 
     const rejects = sendByType(send, "voice_call_reject");
     expect(rejects).toHaveLength(1);
+    expect(rejects[0][0]).toMatchObject({
+      type: "voice_call_reject",
+      callId: "call-web",
+      reason: "busy",
+    });
+    expect(result.current.state.error).toBe("仅桌面端支持语音通话");
     expect(result.current.state.status).toBe("idle");
+  });
+
+  it("网页端发起 call() 直接报错，不发送信令", async () => {
+    const send = vi.fn();
+    const { result } = renderHook(() =>
+      useVoiceCall({ send, myUserId: "u1", isDesktop: false }),
+    );
+
+    await act(async () => {
+      await result.current.call("c1", ["u2"]);
+    });
+
+    expect(result.current.state.error).toBe("仅桌面端支持语音通话");
+    expect(result.current.state.status).toBe("idle");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("call() 失败后清理资源，后续 call() 不被旧 callId 挡住", async () => {
+    const origDesc = Object.getOwnPropertyDescriptor(MockRTCPeerConnection.prototype, "createOffer");
+    const proto = MockRTCPeerConnection.prototype;
+    let failOnce = true;
+    proto.createOffer = vi.fn(() => {
+      if (failOnce) {
+        failOnce = false;
+        return Promise.reject(new Error("boom"));
+      }
+      return Promise.resolve({ type: "offer", sdp: "v=0 mock-offer" });
+    });
+    try {
+      const send = vi.fn();
+      const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+
+      await act(async () => {
+        await result.current.call("c1", ["u2"]);
+      });
+      expect(result.current.state.error).toBe("语音通话不可用");
+
+      // 第二次 call() 不应报「已有通话进行中」；邀请仍应发送
+      await act(async () => {
+        await result.current.call("c1", ["u2"]);
+      });
+      const invites = sendByType(send, "voice_call_invite");
+      expect(invites).toHaveLength(1);
+
+      // 麦克风流必须已停止
+      expect(media.trackStop).toHaveBeenCalled();
+    } finally {
+      if (origDesc) {
+        Object.defineProperty(proto, "createOffer", origDesc);
+      }
+    }
+  });
+
+  it("accept 前收到的远端 ICE candidate 被暂存并在 accept 后 flush", async () => {
+    const send = vi.fn();
+    const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+
+    act(() => {
+      result.current.handleServerEvent({
+        type: "voice_call_invite",
+        conversationId: "c1",
+        callId: "call-pending-ice",
+        sdp: "v=0 mock-offer",
+      } as WsServerEvent);
+    });
+
+    // 被叫尚未 accept，peersRef 为空 → candidate 应被暂存而非丢弃
+    await act(async () => {
+      await result.current.handleServerEvent({
+        type: "voice_call_ice",
+        conversationId: "c1",
+        callId: "call-pending-ice",
+        candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
+      } as WsServerEvent);
+    });
+    expect(MockRTCPeerConnection.instances).toHaveLength(0);
+
+    await act(async () => {
+      await result.current.accept("call-pending-ice");
+    });
+
+    const pc = MockRTCPeerConnection.instances[0];
+    expect(pc.candidates).toHaveLength(1);
+    expect(pc.candidates[0]).toMatchObject({
+      candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
+    });
   });
 
   it("getUserMedia 失败设置 error", async () => {

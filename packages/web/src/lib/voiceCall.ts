@@ -83,6 +83,13 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, PeerConn>>(new Map());
   const pendingInvitesRef = useRef<Map<string, IncomingCallInfo & { sdp: string }>>(new Map());
+  /**
+   * 被叫 accept 之前收到的远端 ICE candidate 暂存区（按 callId 分组）。
+   * 发起方在 setLocalDescription 后立即 trickle host candidates，此时被叫可能
+   * 尚未点「接听」、peersRef 仍为空；若直接丢弃会导致媒体通道迟迟建不起来。
+   * accept() 建好 PC 并 setRemoteDescription(offer) 后再 flush。
+   */
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const callIdRef = useRef<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
 
@@ -90,6 +97,7 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
   const cleanupResources = useCallback(() => {
     for (const [, peer] of peersRef.current) peer.pc.close();
     peersRef.current.clear();
+    pendingCandidatesRef.current.clear();
     if (localStreamRef.current) {
       for (const track of localStreamRef.current.getTracks()) track.stop();
       localStreamRef.current = null;
@@ -188,10 +196,14 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
           incoming: null,
         });
       } catch (err) {
+        // getUserMedia 成功后若 createOffer/setLocalDescription 抛错，
+        // callIdRef/localStreamRef 已写入，必须回滚，否则后续 call() 会被
+        // 「已有通话进行中」挡住且本地流泄漏。
+        cleanupResources();
         setState((s) => ({ ...s, error: mapMediaError(err) }));
       }
     },
-    [isDesktop, send, createPeerConnection],
+    [isDesktop, send, createPeerConnection, cleanupResources],
   );
 
   /** 接听来电：获取本地流 → 创建 PC → setRemoteDescription(offer) → createAnswer → 发送 accept */
@@ -213,6 +225,12 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
         });
         for (const track of stream.getTracks()) pc.addTrack(track, stream);
         await pc.setRemoteDescription({ type: "offer", sdp: invite.sdp });
+        // flush accept 之前缓存的远端 candidates（此时 PC 已就绪）
+        const pending = pendingCandidatesRef.current.get(callId);
+        if (pending) {
+          for (const cand of pending) pc.addIceCandidate(cand).catch(() => {});
+          pendingCandidatesRef.current.delete(callId);
+        }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send({
@@ -240,7 +258,7 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
     [send, createPeerConnection],
   );
 
-  /** 拒接来电：发送 reject 信令 */
+  /** 拒接来电：发送 reject 信令并回到 idle */
   const reject = useCallback(
     (callId: string, reason: "busy" | "decline" | "timeout") => {
       const invite = pendingInvitesRef.current.get(callId);
@@ -252,9 +270,12 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
         reason,
       });
       pendingInvitesRef.current.delete(callId);
-      setState((s) => ({ ...s, incoming: s.incoming?.callId === callId ? null : s.incoming }));
+      // 收到 invite 时已把 status=ringing / callId / role=callee 写入 state，
+      // 拒接后必须整体复位，否则 UI 面板会卡在 ringing。
+      cleanupResources();
+      setState(IDLE_STATE);
     },
-    [send],
+    [send, cleanupResources],
   );
 
   /** 静音切换 */
@@ -271,13 +292,14 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
       switch (event.type) {
         case "voice_call_invite": {
           if (!isDesktop) {
-            // 网页端不支持通话，自动拒绝
+            // 网页端不支持通话，自动拒绝并提示用户
             send({
               type: "voice_call_reject",
               conversationId: event.conversationId,
               callId: event.callId,
               reason: "busy",
             });
+            setState((s) => ({ ...s, error: "仅桌面端支持语音通话" }));
             return;
           }
           if (callIdRef.current) {
@@ -296,6 +318,9 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
             initiatorId: "",
           };
           pendingInvitesRef.current.set(event.callId, { ...info, sdp: event.sdp });
+          // 记下 callId：accept 之前若先收到远端 ICE（caller 已 trickle），
+          // voice_call_ice 分支据此判定属于本次来电并缓存；hangup-before-accept 也依赖它。
+          callIdRef.current = event.callId;
           onIncomingCall?.(info);
           setState((s) => ({
             ...s,
@@ -312,9 +337,10 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
           break;
         }
         case "voice_call_accept": {
-          // 对方接听，将 answer SDP 设为本端 PC 的远端描述
-          // 1:1 精确；mesh 中 answer 不携带对端标识，应用到所有 connecting PC，
-          // 不匹配的 setRemoteDescription 会被浏览器拒绝（catch 兜底）
+          // 对方接听，将 answer SDP 设为本端 PC 的远端描述。
+          // 限制：voice_call_accept 无 peerId/initiatorId，mesh 场景会把同一条 answer
+          // 应用到所有 connecting PC，导致 setRemoteDescription 错配（catch 兜底后该 PC
+          // 永久停在 connecting）。根治需 Task 1 在契约中为 accept/ice 增加 initiatorId。
           for (const [, peer] of peersRef.current) {
             if (peer.state === "connecting") {
               peer.pc
@@ -349,7 +375,17 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
           break;
         }
         case "voice_call_ice": {
-          // 添加 ICE candidate 到所有 PC（1:1 精确；mesh 有歧义，try/catch 兜底）
+          if (event.callId !== callIdRef.current) break;
+          if (peersRef.current.size === 0) {
+            // 被叫尚未 accept（peersRef 为空）：缓存 candidate，accept() 建 PC 后 flush。
+            const buf = pendingCandidatesRef.current.get(event.callId) ?? [];
+            buf.push({ candidate: event.candidate });
+            pendingCandidatesRef.current.set(event.callId, buf);
+            break;
+          }
+          // 添加 ICE candidate 到所有 PC。
+          // 限制：1:1 精确；mesh 场景 candidate 不携带对端标识，会广播到所有 PC
+          //（与 voice_call_accept 同源问题，需 Task 1 契约补充 initiatorId 才能根治）。
           for (const [, peer] of peersRef.current) {
             peer.pc.addIceCandidate({ candidate: event.candidate }).catch(() => {});
           }
