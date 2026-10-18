@@ -145,6 +145,36 @@ const WsClientEventUnion = z.discriminatedUnion("type", [
     chainKid: z.string().max(64).optional(),
     n: z.number().int().min(0).optional(),
   }),
+  // —— 语音通话信令事件（客户端 → 服务端）——
+  z.object({
+    type: z.literal("voice_call_invite"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+    sdp: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("voice_call_accept"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+    sdp: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("voice_call_reject"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+    reason: z.enum(["busy", "decline", "timeout"]),
+  }),
+  z.object({
+    type: z.literal("voice_call_hangup"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("voice_call_ice"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+    candidate: z.string().min(1),
+  }),
 ]);
 
 /**
@@ -322,6 +352,36 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     cipher: z.string().max(262144).optional(),
     chainKid: z.string().max(64).optional(),
     n: z.number().int().min(0).optional(),
+  }),
+  // —— 语音通话信令事件（服务端 → 客户端广播镜像）——
+  z.object({
+    type: z.literal("voice_call_invite"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+    sdp: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("voice_call_accept"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+    sdp: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("voice_call_reject"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+    reason: z.enum(["busy", "decline", "timeout"]),
+  }),
+  z.object({
+    type: z.literal("voice_call_hangup"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("voice_call_ice"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+    candidate: z.string().min(1),
   }),
 ]);
 export type WsServerEvent = z.infer<typeof WsServerEventSchema>;
