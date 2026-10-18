@@ -52,6 +52,37 @@ function displayWorkAreas() {
   }
 }
 
+// 启动动画 splash：无边框透明置顶窗口，加载 splash.html（粒子聚拢 1.5s）。
+// HEMING_NO_SPLASH=1 时跳过（E2E/无头环境）。主窗口 did-finish-load 后关闭 splash，
+// 并通知 web 端开始声波扩散段（window.heming.__startBootWave，Task 3 提供）。
+function createSplashWindow(mainWin) {
+  if (process.env.HEMING_NO_SPLASH === "1") return;
+  const splash = new BrowserWindow({
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    webPreferences: { offscreen: false },
+  });
+  splash.loadFile(path.join(__dirname, "splash.html"));
+
+  // 主窗口加载完成后：关闭 splash + 通知 web 端开始 BootWave
+  mainWin.webContents.once("did-finish-load", () => {
+    setTimeout(() => {
+      if (!splash.isDestroyed()) splash.close();
+      // 通知 web 端开始声波扩散段
+      mainWin.webContents
+        .executeJavaScript(
+          "if (window.heming && window.heming.__startBootWave) window.heming.__startBootWave()"
+        )
+        .catch(() => {});
+    }, 200); // 200ms 静默间隔（粒子聚拢 1.5s + 静默 0.2s）
+  });
+}
+
 // 单例锁：拿不到锁直接退出；second-instance 时聚焦已存在窗口
 const gotLock = app.requestSingleInstanceLock();
 
@@ -135,6 +166,7 @@ if (!gotLock) {
     }
 
     win.loadURL(appUrl);
+    createSplashWindow(win);
     return win;
   }
 
