@@ -2,6 +2,7 @@
 const { app, BrowserWindow, Menu, dialog, shell, screen } = require("electron");
 const path = require("node:path");
 const { loadWindowState, saveWindowState } = require("./window-state");
+const { shouldShowSplash, splashWindowOptions } = require("./splash-config");
 
 const pkg = require("./package.json");
 const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins");
@@ -52,27 +53,29 @@ function displayWorkAreas() {
   }
 }
 
-// 启动动画 splash：无边框透明置顶窗口，加载 splash.html（粒子聚拢 1.5s）。
+// 启动动画 splash：无边框透明置顶窗口，铺满主显示器工作区，加载 splash.html（粒子聚拢 1.5s）。
 // HEMING_NO_SPLASH=1 时跳过（E2E/无头环境）。主窗口 did-finish-load 后关闭 splash，
 // 并通知 web 端开始声波扩散段（window.heming.__startBootWave，Task 3 提供）。
+// 主窗口加载失败（did-fail-load，如远程不可达）时兜底关闭 splash，避免其永久遮挡错误页。
 function createSplashWindow(mainWin) {
-  if (process.env.HEMING_NO_SPLASH === "1") return;
-  const splash = new BrowserWindow({
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    skipTaskbar: true,
-    webPreferences: { offscreen: false },
+  if (!shouldShowSplash()) return;
+  const splash = new BrowserWindow(
+    splashWindowOptions(screen.getPrimaryDisplay().workAreaSize)
+  );
+
+  // show:false 创建，加载完成后再 show()，避免白屏闪烁
+  splash.loadFile(path.join(__dirname, "splash.html")).then(() => {
+    if (!splash.isDestroyed()) splash.show();
   });
-  splash.loadFile(path.join(__dirname, "splash.html"));
+
+  const closeSplash = () => {
+    if (!splash.isDestroyed()) splash.close();
+  };
 
   // 主窗口加载完成后：关闭 splash + 通知 web 端开始 BootWave
   mainWin.webContents.once("did-finish-load", () => {
     setTimeout(() => {
-      if (!splash.isDestroyed()) splash.close();
+      closeSplash();
       // 通知 web 端开始声波扩散段
       mainWin.webContents
         .executeJavaScript(
@@ -80,6 +83,12 @@ function createSplashWindow(mainWin) {
         )
         .catch(() => {});
     }, 200); // 200ms 静默间隔（粒子聚拢 1.5s + 静默 0.2s）
+  });
+
+  // 兜底：主窗口主 frame 加载失败时关闭 splash，让（错误页）主窗口可见
+  mainWin.webContents.once("did-fail-load", (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return;
+    closeSplash();
   });
 }
 
