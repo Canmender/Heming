@@ -13,7 +13,7 @@ interface BootWaveProps {
  * 挂载时向 window.heming 注入 __onBootReady / __startBootWave 的默认实现
  * （preload 暴露的同名键初始为 null，主进程只负责调用 __startBootWave）；
  * 若外部已提供可用的同名函数（如测试注入）则保留不覆盖。
- * 无 preload（浏览器直接打开）时无外部信号源，直接开播。
+ * 无可用外部信号通道（浏览器直接打开，或 contextBridge 冻结致注入未生效）时直接开播兜底。
  */
 export function BootWave({ onDone }: BootWaveProps) {
   const [started, setStarted] = useState(false);
@@ -22,22 +22,29 @@ export function BootWave({ onDone }: BootWaveProps) {
 
   useEffect(() => {
     const existing = (window as any).heming;
-    // 挂载前是否已有外部信号源（preload 注入的 window.heming）
-    const hadExternal = !!existing;
     const heming = existing ?? {};
+    // 判定挂载前是否存在「可用的外部信号通道」：
+    // 仅当 window.heming.__onBootReady 已是函数（测试注入 / 修复后的 preload）才等待外部信号。
+    // 真实 Electron 下 window.heming 由 contextBridge 暴露（contextIsolation + sandbox），
+    // 对象被冻结、属性不可写——严格模式下赋值会抛 TypeError，故注入必须 best-effort。
+    const externalReady = typeof heming.__onBootReady === "function";
 
-    // 仅在外部未提供可用实现时注入默认实现，避免覆盖外部（如测试）注入的同名函数
-    if (typeof heming.__onBootReady !== "function") {
-      heming.__onBootReady = (cb: () => void) => {
-        heming.__bootCallback = cb;
-      };
+    // 仅在缺失时注入默认实现（避免覆盖外部注入的同名函数）；冻结对象上注入失败可忽略
+    try {
+      if (!externalReady) {
+        heming.__onBootReady = (cb: () => void) => {
+          heming.__bootCallback = cb;
+        };
+      }
+      if (typeof heming.__startBootWave !== "function") {
+        heming.__startBootWave = () => {
+          if (heming.__bootCallback) heming.__bootCallback();
+        };
+      }
+      (window as any).heming = heming;
+    } catch {
+      /* contextBridge 冻结对象不可写：无可用外部通道，走兜底直接开播 */
     }
-    if (typeof heming.__startBootWave !== "function") {
-      heming.__startBootWave = () => {
-        if (heming.__bootCallback) heming.__bootCallback();
-      };
-    }
-    (window as any).heming = heming;
 
     // jsdom 未实现 matchMedia；真实浏览器/Electron 有。缺失时按未开启减弱动态处理。
     const reduced =
@@ -48,15 +55,15 @@ export function BootWave({ onDone }: BootWaveProps) {
       return;
     }
 
-    if (!hadExternal) {
-      // 兜底：无 preload（如浏览器直接打开）无外部启动信号，直接开播
+    if (externalReady) {
+      // 有可用外部信号通道：注册回调，等待主进程调用 __startBootWave
+      heming.__onBootReady(() => {
+        startAnimation();
+      });
+    } else {
+      // 兜底：无可用外部信号通道（浏览器直接打开，或 contextBridge 冻结致注入未生效）直接开播
       startAnimation();
-      return;
     }
-    // 有 preload：注册回调，等待主进程调用 __startBootWave
-    heming.__onBootReady(() => {
-      startAnimation();
-    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

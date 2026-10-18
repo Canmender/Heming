@@ -55,4 +55,15 @@ describe("BootWave", () => {
     // 波纹应该出现
     expect(document.querySelector(".boot-wave .ripple")).toBeTruthy();
   });
+
+  // 回归：真实 Electron 下 window.heming 由 contextBridge 暴露，对象被冻结、属性不可写。
+  // 组件注入默认实现会抛 TypeError（严格模式），必须容错并走兜底直接开播，不得崩溃。
+  it("contextBridge 冻结对象（不可写）不崩溃且兜底开播", () => {
+    const frozen = Object.freeze({ platform: "win32", __onBootReady: null, __startBootWave: null });
+    (window as any).heming = frozen;
+    const onDone = vi.fn();
+    expect(() => render(<BootWave onDone={onDone} />)).not.toThrow();
+    // 无可用外部通道 → 直接开播，波纹渲染
+    expect(document.querySelector(".boot-wave .ripple")).toBeTruthy();
+  });
 });
