@@ -78,6 +78,14 @@ function createSplashWindow(mainWin) {
     clearTimer: clearTimeout,
   });
 
+  // 减弱动态偏好只有渲染进程能查到（matchMedia）。这里异步回填给生命周期：
+  // 开启时 splash 只是个静止画面，那 3.2s 可见地板没有意义 —— 查到就立刻收尾，
+  // 别让这类用户对着静止画面干等（did-finish-load 先到时由 setReducedMotion 就地提前触发）。
+  splash.webContents
+    .executeJavaScript("matchMedia('(prefers-reduced-motion: reduce)').matches")
+    .then((isReduced) => lifecycle.setReducedMotion(isReduced === true))
+    .catch(() => {});
+
   // show:false 创建，加载完成后再 show()，避免白屏闪烁；加载失败（splash.html 缺失等）
   // 则直接收尾，避免留下一块没人管的全屏空白置顶层。
   splash

@@ -30,15 +30,17 @@ const BOOT_WAVE_SNIPPET =
  * @param {() => number} deps.now       当前时间（ms）
  * @param {(fn: Function, ms: number) => any} deps.setTimer
  * @param {(id: any) => void} deps.clearTimer
- * @returns {{ abort: () => void }}
+ * @param {boolean} [deps.reducedMotion] 系统是否开启「减弱动态效果」（初值，通常随后由 setReducedMotion 校正）
+ * @returns {{ abort: () => void, setReducedMotion: (v: boolean) => void }}
  */
-function attachSplashLifecycle({ splash, mainWin, now, setTimer, clearTimer }) {
+function attachSplashLifecycle({ splash, mainWin, now, setTimer, clearTimer, reducedMotion = false }) {
   // 第一段动画从 splash 创建即开始计时（splash.html 加载完成后立刻自播）。
   const splashStartedAt = now();
   let closeTimer = null;
   let watchdog = null;
   // 只表示「splash 何时关」已定，与「是否发启动信号」无关（后者每次加载都要发）。
   let splashSettled = false;
+  let reduced = !!reducedMotion;
 
   const clearTimers = () => {
     if (closeTimer !== null) {
@@ -83,7 +85,25 @@ function attachSplashLifecycle({ splash, mainWin, now, setTimer, clearTimer }) {
       closeTimer = null;
       closeSplash();
       signalBootWave();
-    }, splashCloseDelayMs(now() - splashStartedAt));
+    }, reduced ? 0 : splashCloseDelayMs(now() - splashStartedAt));
+  }
+
+  /**
+   * 校正「减弱动态」偏好（主进程异步查询 splash 渲染进程后回填）。
+   *
+   * 开启减弱动态时 splash.html 不播任何动画（只留一个静止墨点），此时那 3.2s 可见
+   * 地板就没有意义 —— 反而让这类用户对着静止画面干等。查到为 true 后立刻收尾。
+   * 若关闭定时器已经排上（did-finish-load 先于查询结果到达），就地提前触发一次。
+   */
+  function setReducedMotion(value) {
+    if (!value || reduced) return;
+    reduced = true;
+    if (splashSettled && closeTimer !== null) {
+      clearTimer(closeTimer);
+      closeTimer = null;
+      closeSplash();
+      signalBootWave();
+    }
   }
 
   // 兜底路径（加载失败 / 看门狗超时）：无动画可播，直接露出主窗口
@@ -117,7 +137,7 @@ function attachSplashLifecycle({ splash, mainWin, now, setTimer, clearTimer }) {
   // 它随主窗口销毁一并回收。
   splash.once("closed", clearTimers);
 
-  return { abort: abortSplash };
+  return { abort: abortSplash, setReducedMotion };
 }
 
 module.exports = { attachSplashLifecycle, BOOT_WAVE_SNIPPET };

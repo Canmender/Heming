@@ -166,3 +166,16 @@ test("main.js：splash 定位仍需要 getBounds（取当前屏幕，不是还�
   // 上面的断言只约束落盘路径；getDisplayMatching 用 getBounds 是对的（要当前实际位置）
   assert.ok(mainSrc.includes("screen.getDisplayMatching(mainWin.getBounds())"));
 });
+
+// 减弱动态偏好只有渲染进程能查到（matchMedia）；查到后回填给生命周期收紧关闭时机，
+// 否则这类用户要对着静止画面等满 3.2s 可见地板。
+test("main.js：查询减弱动态偏好并回填给 splash 生命周期", () => {
+  assert.ok(
+    mainSrc.includes("prefers-reduced-motion"),
+    "main.js 应向 splash 渲染进程查询 prefers-reduced-motion"
+  );
+  assert.ok(
+    /lifecycle\.setReducedMotion\(/.test(mainSrc),
+    "查到后必须回填 setReducedMotion，否则查询没有意义"
+  );
+});

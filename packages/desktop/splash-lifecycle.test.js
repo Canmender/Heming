@@ -136,8 +136,8 @@ function fakeClock() {
   };
 }
 
-/** 建好一套假环境并完成接线。 */
-function setup() {
+/** 建好一套假环境并完成接线。reducedMotion 可选（默认关闭）。 */
+function setup(opts = {}) {
   const clock = fakeClock();
   const mainWin = fakeWindow();
   const splash = fakeSplash();
@@ -147,6 +147,7 @@ function setup() {
     now: clock.now,
     setTimer: clock.setTimer,
     clearTimer: clock.clearTimer,
+    reducedMotion: opts.reducedMotion === true,
   });
   return { clock, mainWin, splash, lifecycle };
 }
@@ -380,4 +381,54 @@ test("abort() 幂等：重复调用只收尾一次且不抛", () => {
   assert.equal(mainWin.visible, true);
   assert.doesNotThrow(() => lifecycle.abort());
   assert.equal(splash.closeCalls, 1);
+});
+
+// ── 减弱动态（prefers-reduced-motion） ──
+// 开启时 splash.html 不播任何动画（只留一个静止墨点），3.2s 可见地板失去意义；
+// 不让这类用户对着静止画面干等。
+
+test("减弱动态：did-finish-load 后立刻收尾，不等 3.2s 地板", () => {
+  const { clock, mainWin, splash } = setup({ reducedMotion: true });
+  mainWin.webContents.emit("did-finish-load");
+
+  clock.advance(0); // 无动画可播，下一个 tick 就应关掉
+  assert.equal(splash.destroyed, true, "减弱动态下不该等满地板");
+  assert.equal(mainWin.visible, true);
+  assert.deepEqual(mainWin.webContents.jsCalls, [BOOT_WAVE_SNIPPET], "仍要发信号让 BootWave 立即揭开");
+});
+
+test("减弱动态：偏好查询晚于 did-finish-load 到达时就地提前收尾", () => {
+  const { clock, mainWin, splash, lifecycle } = setup();
+  mainWin.webContents.emit("did-finish-load");
+
+  // 已按常规排上 3.2s 定时器
+  clock.advance(100);
+  assert.equal(splash.destroyed, false, "此刻还没到常规关闭时刻");
+
+  lifecycle.setReducedMotion(true);
+  assert.equal(splash.destroyed, true, "查到减弱动态后应立即收尾");
+  assert.equal(mainWin.visible, true);
+  assert.equal(mainWin.webContents.jsCalls.length, 1);
+  assert.equal(clock.pendingCount(), 0, "不应残留定时器");
+});
+
+test("减弱动态：false 不改变常规时序（不会误伤普通用户）", () => {
+  const { clock, mainWin, splash, lifecycle } = setup();
+  lifecycle.setReducedMotion(false);
+  mainWin.webContents.emit("did-finish-load");
+
+  clock.advance(SPLASH_VISIBLE_MS - 1);
+  assert.equal(splash.destroyed, false, "普通路径仍须播满地板");
+  clock.advance(1);
+  assert.equal(splash.destroyed, true);
+});
+
+test("减弱动态：重复调用幂等（查询结果多次回填不会重复收尾）", () => {
+  const { clock, mainWin, splash, lifecycle } = setup();
+  mainWin.webContents.emit("did-finish-load");
+  lifecycle.setReducedMotion(true);
+  lifecycle.setReducedMotion(true);
+  clock.advance(SPLASH_VISIBLE_MS * 2);
+  assert.equal(splash.closeCalls, 1, "只应收尾一次");
+  assert.equal(mainWin.webContents.jsCalls.length, 1, "信号也不应重复发");
 });
