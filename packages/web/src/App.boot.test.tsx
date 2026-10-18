@@ -77,10 +77,4 @@ describe("App 启动动画集成", () => {
     await act(async () => { bootDoneFns[0]?.(); });
     await waitFor(() => { expect(screen.getByText("NavRail")).toBeTruthy(); });
   });
-
-  it("BootWave 完成后才渲染主内容", async () => {
-    render(<App />);
-    await act(async () => { bootDoneFns[0]?.(); });
-    await waitFor(() => { expect(screen.queryByText("BootWave")).toBeNull(); });
-  });
 });

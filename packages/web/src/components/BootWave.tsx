@@ -13,11 +13,17 @@ interface BootWaveProps {
  * 挂载时调用 preload 暴露的 window.heming.__onBootReady(cb) 注册启动回调，
  * 主进程 did-finish-load 后调用 window.heming.__startBootWave() 触发播放。
  * 无 preload（浏览器直接打开）时无外部信号源，直接开播兜底。
+ *
+ * 防御性兜底：即使有信号通道，也设 1700ms 兜底定时器——若主进程信号迟迟不到
+ * （如远程加载极慢导致 did-finish-load 晚于 App 门禁翻转），仍会自动开播，
+ * 避免 BootWave 停在 null（无波纹）。信号到达时清掉兜底定时器。
  */
 export function BootWave({ onDone }: BootWaveProps) {
   const [started, setStarted] = useState(false);
   const [phase, setPhase] = useState<"idle" | "playing" | "done">("idle");
   const timerRef = useRef<number | null>(null);
+  const fallbackRef = useRef<number | null>(null);
+  const startedRef = useRef(false);
 
   useEffect(() => {
     // jsdom 未实现 matchMedia；真实浏览器/Electron 有。缺失时按未开启减弱动态处理。
@@ -40,10 +46,22 @@ export function BootWave({ onDone }: BootWaveProps) {
       // 兜底：无可用信号通道（浏览器直接打开）时直接开播
       startAnimation();
     }
+
+    // 防御性兜底：信号通道存在但信号迟迟不到时，1700ms 后自动开播（与 Task-4 草图一致）。
+    // 已开播时 startAnimation 会清除该定时器，故真实信号与兜底互斥。
+    fallbackRef.current = window.setTimeout(() => {
+      startAnimation();
+    }, 1700);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function startAnimation() {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    if (fallbackRef.current !== null) {
+      window.clearTimeout(fallbackRef.current);
+      fallbackRef.current = null;
+    }
     playSound();
     setStarted(true);
     setPhase("playing");
@@ -56,6 +74,7 @@ export function BootWave({ onDone }: BootWaveProps) {
   useEffect(() => {
     return () => {
       if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      if (fallbackRef.current !== null) window.clearTimeout(fallbackRef.current);
     };
   }, []);
 

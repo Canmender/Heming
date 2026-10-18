@@ -74,4 +74,45 @@ describe("BootWave", () => {
     // 无可用信号通道 → 直接开播，波纹渲染
     expect(document.querySelector(".boot-wave .ripple")).toBeTruthy();
   });
+
+  // 回归：信号通道存在但主进程迟迟不发信号（如远程加载极慢、did-finish-load 晚于门禁翻转）
+  // 时，防御性兜底定时器（1700ms）自动开播，避免 BootWave 停在 null。
+  it("有信号通道但信号未到：1700ms 兜底定时器自动开播（不再空等）", () => {
+    vi.useFakeTimers();
+    try {
+      // __onBootReady 是函数（信号通道存在），但测试从不调用回调 → 模拟信号迟迟不到
+      (window as any).heming = { __onBootReady: vi.fn(), __startBootWave: vi.fn() };
+      const onDone = vi.fn();
+      render(<BootWave onDone={onDone} />);
+      // 信号未到前不渲染波纹
+      expect(document.querySelector(".boot-wave")).toBeNull();
+      // 推进到兜底窗口边界：自动开播，波纹出现
+      act(() => { vi.advanceTimersByTime(1700); });
+      expect(document.querySelector(".boot-wave .ripple")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // 回归：真实信号到达时清掉兜底定时器，两者互斥，不会重复开播。
+  it("信号到达时清掉兜底定时器，随后再推进时间不重复开播", () => {
+    vi.useFakeTimers();
+    try {
+      let callback: (() => void) | null = null;
+      (window as any).heming = {
+        __onBootReady: (cb: () => void) => { callback = cb; },
+        __startBootWave: () => { callback?.(); },
+      };
+      const onDone = vi.fn();
+      render(<BootWave onDone={onDone} />);
+      // 信号先到（<1700ms），开播
+      act(() => { (window as any).heming.__startBootWave(); });
+      expect(document.querySelector(".boot-wave .ripple")).toBeTruthy();
+      // 兜底定时器已被清除：继续推进远超 1700ms，onDone 只应被调用一次
+      act(() => { vi.advanceTimersByTime(5000); });
+      expect(onDone).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
