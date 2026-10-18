@@ -41,6 +41,9 @@ test("splash 窗口配置：无边框透明置顶 + 铺满主显示器", () => {
   // 先隐藏创建，避免白屏闪烁
   assert.equal(cfg.show, false);
   assert.equal(cfg.backgroundColor, "#ffffff");
+  // 关掉后台节流：splash 是覆盖整个工作区的 alwaysOnTop 窗口，开启节流会让它的
+  // rAF/定时器被暂停，粒子聚拢动画卡死
+  assert.equal(cfg.webPreferences.backgroundThrottling, false);
 });
 
 test("多显示器：主屏不在原点时使用 workArea 的 x/y", () => {
@@ -119,4 +122,15 @@ test("main.js：有启动动画时主窗口 show:false（避免先闪白底主�
 test("main.js：splash 覆盖主窗口所在显示器（多显示器）", () => {
   assert.ok(mainSrc.includes("screen.getDisplayMatching(mainWin.getBounds())"));
   assert.ok(!mainSrc.includes("screen.getPrimaryDisplay()"));
+});
+
+// 主窗口在启动动画期间被 splash 全覆盖，Chromium 会判定其被遮挡；开着节流则 web 端
+// BootWave 的 rAF/定时器一起被暂停 → 揭示推不动、白遮罩永久盖住界面（真机复现过）。
+test("main.js：主窗口关闭后台节流（遮挡时 rAF/定时器不被暂停）", () => {
+  const m = mainSrc.match(/webPreferences:\s*\{[\s\S]*?\n {6}\}/);
+  assert.ok(m, "未找到主窗口 webPreferences");
+  assert.ok(
+    m[0].includes("backgroundThrottling: false"),
+    "主窗口 webPreferences 必须含 backgroundThrottling: false"
+  );
 });

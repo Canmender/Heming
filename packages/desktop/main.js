@@ -131,6 +131,10 @@ if (!gotLock) {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        // backgroundThrottling:false —— 启动动画期间 splash 覆盖整个工作区，主窗口会被
+        // Chromium 判定为被遮挡；开启节流会让 web 端 BootWave 的 rAF/定时器一起被暂停，
+        // 揭示永远推不动、白遮罩永久盖住界面。关掉节流保证声波段照常播放。
+        backgroundThrottling: false,
       },
     });
 

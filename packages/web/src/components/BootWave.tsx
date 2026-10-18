@@ -4,6 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const WAVE_MS = 1300;
 
 /**
+ * 保证完成的余量：定时器比动画时长多等 80ms，让最后一帧 rAF 有机会先落地
+ * （正常路径下由 rAF 收尾，定时器只是「rAF 被暂停时」的保险丝）。
+ */
+const COMPLETE_SLACK_MS = 80;
+
+/**
  * 兜底开播时限。真实信号由主进程 did-finish-load + 静默间隔后送达，远端慢时可能远超 1s，
  * 所以兜底只覆盖「信号永远不会来」（主进程异常），必须放得足够宽：
  * 定得太小会让波纹在 splash 还开着的时候就播完（用户只看到白屏）。
@@ -77,6 +83,7 @@ export function BootWave({ onDone }: BootWaveProps) {
   const [started, setStarted] = useState(false);
 
   const rafRef = useRef<number | null>(null);
+  const timerRef = useRef<number | null>(null);
   const fallbackRef = useRef<number | null>(null);
   const startedRef = useRef(false); // rAF/回调里的即时判重（state 更新是异步的）
   const finishedRef = useRef(false);
@@ -92,13 +99,17 @@ export function BootWave({ onDone }: BootWaveProps) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     if (fallbackRef.current !== null) {
       window.clearTimeout(fallbackRef.current);
       fallbackRef.current = null;
     }
   }, []);
 
-  /** 收尾：停掉所有定时器并回调 onDone（多次触发只有一次生效）。 */
+  /** 收尾：停掉所有定时器并回调 onDone（rAF 与兜底定时器双触发，只有一次生效）。 */
   const finish = useCallback(() => {
     if (finishedRef.current) return;
     finishedRef.current = true;
@@ -116,6 +127,12 @@ export function BootWave({ onDone }: BootWaveProps) {
     }
     playSound();
     setStarted(true);
+
+    // 完成不能只依赖 rAF：splash 是覆盖整个工作区的 alwaysOnTop 窗口，Chromium 可能据此
+    // 判定主窗口被遮挡并暂停其 rAF（连同渲染）。那样揭示永远停在 0%、遮罩永不卸载，
+    // 主界面会被永久盖住。故用定时器兜底完成（多加 80ms 让最后一帧 rAF 先落地）；
+    // 视觉平滑仍由 rAF 负责，finishedRef 保证两者不会重复回调。
+    timerRef.current = window.setTimeout(finish, WAVE_MS + COMPLETE_SLACK_MS);
 
     // 时间基准取 rAF 自身的时间戳（同一时钟源，无需 performance.now）
     let t0: number | null = null;

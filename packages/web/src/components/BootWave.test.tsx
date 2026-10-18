@@ -284,6 +284,54 @@ describe("BootWave", () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
+  // 回归（真机复现）：splash 是覆盖整个工作区的 alwaysOnTop 窗口，Chromium 可能据此
+  // 判定主窗口被遮挡并暂停其 rAF。若完成只依赖 rAF，揭示会永远停在 0%、遮罩永不卸载，
+  // 主界面被永久盖住 —— 此时必须由定时器兜底完成。
+  it("rAF 被暂停（从不回调）时仍由定时器完成，遮罩不会永久盖住界面", () => {
+    useWaveFakeTimers();
+    const channel = installSignalChannel();
+    const onDone = vi.fn();
+    // rAF 一帧都不给：模拟渲染进程被节流
+    const rafSpy = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const cancelSpy = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+
+    render(<BootWave onDone={onDone} />);
+    channel.fire();
+    expect(document.querySelectorAll(".boot-wave .ripple")).toHaveLength(3);
+
+    // rAF 从未跑过：揭示仍停在 0%（遮罩完全不透明）
+    expect(revealValue()).toBe("");
+
+    // 定时器兜底：动画时长 + 余量之后必须收尾
+    act(() => {
+      vi.advanceTimersByTime(WAVE_MS + 80);
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+
+    // 再推进也不会重复回调
+    act(() => {
+      vi.advanceTimersByTime(FALLBACK_MS * 2);
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+
+    rafSpy.mockRestore();
+    cancelSpy.mockRestore();
+  });
+
+  it("rAF 正常时不依赖兜底定时器（定时器被清掉，只回调一次）", () => {
+    useWaveFakeTimers();
+    const channel = installSignalChannel();
+    const onDone = vi.fn();
+    render(<BootWave onDone={onDone} />);
+    channel.fire();
+
+    act(() => {
+      vi.advanceTimersByTime(WAVE_MS + 200);
+    });
+    expect(revealValue()).toBe("100.00%");
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
   it("卸载时停掉 rAF/定时器，不再回调 onDone", () => {
     useWaveFakeTimers();
     const channel = installSignalChannel();

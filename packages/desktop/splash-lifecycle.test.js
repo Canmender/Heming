@@ -212,6 +212,45 @@ test("主窗口已可见时不重复 show（不抢焦点）", () => {
   assert.equal(mainWin.showCalls, 0);
 });
 
+// 启动信号必须在 splash 关闭之后派发：splash 是覆盖整个工作区的 alwaysOnTop 窗口，
+// 还在屏幕上时主渲染进程被遮挡（Chromium 会暂停其 rAF/定时器），声波段会被卡住。
+test("启动信号在 splash 关闭之后才派发（主渲染进程不再被遮挡）", () => {
+  const clock = fakeClock();
+  const mainWin = fakeWindow();
+  const splash = fakeSplash();
+  const order = [];
+
+  const origSplashClose = splash.close.bind(splash);
+  splash.close = () => {
+    if (!splash.destroyed) order.push("close-splash");
+    origSplashClose();
+  };
+  const origExec = mainWin.webContents.executeJavaScript.bind(mainWin.webContents);
+  mainWin.webContents.executeJavaScript = (src) => {
+    order.push("signal");
+    return origExec(src);
+  };
+  const origShow = mainWin.show.bind(mainWin);
+  mainWin.show = () => {
+    order.push("show-main");
+    origShow();
+  };
+
+  attachSplashLifecycle({
+    splash,
+    mainWin,
+    now: clock.now,
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
+  });
+
+  mainWin.webContents.emit("did-finish-load");
+  clock.advance(SPLASH_VISIBLE_MS);
+
+  assert.deepEqual(order, ["close-splash", "show-main", "signal"]);
+  assert.ok(order.indexOf("close-splash") < order.indexOf("signal"), "先关 splash 再发信号");
+});
+
 // ── R2：重载（视图 → 重新加载 / Ctrl+R）必须重发启动信号 ──
 // 渲染进程是全新文档：preload 的 bootStarted 归零、BootWave 重新挂载等待信号。
 // 若信号只在首次加载发，重载后 BootWave 只能等 5s 兜底，白遮罩会盖住界面 ~6.3s。

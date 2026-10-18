@@ -62,7 +62,9 @@ function splashWindowOptions(workArea) {
     minimizable: false,
     maximizable: false,
     skipTaskbar: true,
-    webPreferences: { offscreen: false },
+    // backgroundThrottling:false —— splash 是覆盖整个工作区的 alwaysOnTop 窗口，
+    // 开启节流时它自身会被判定为「不可见」而暂停 rAF/定时器，粒子聚拢动画直接卡住。
+    webPreferences: { offscreen: false, backgroundThrottling: false },
   };
 }
 
