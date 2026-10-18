@@ -142,13 +142,20 @@ if (!gotLock) {
       },
     });
 
-    // 窗口位置尺寸记忆：resize/move 后 debounce 500ms 落盘，关闭时立即落盘
+    // 启动默认最大化：铺满屏幕但保留自定义标题栏与原生窗口控件（不用 fullscreen，
+    // 真全屏会把标题栏一起隐藏）。
+    win.maximize();
+
+    // 窗口位置尺寸记忆：resize/move 后 debounce 500ms 落盘，关闭时立即落盘。
+    // 用 getNormalBounds() 而非 getBounds()——最大化时 getBounds() 返回屏幕尺寸，
+    // 直接存会把用户偏好的窗口尺寸覆盖掉；getNormalBounds() 取还原态尺寸，
+    // 最大化/还原往返才正确。
     let saveTimer = null;
     const scheduleSave = () => {
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
         saveTimer = null;
-        saveWindowState(windowStateFile(), win.getBounds());
+        saveWindowState(windowStateFile(), win.getNormalBounds());
       }, 500);
     };
     win.on("resize", scheduleSave);
@@ -158,7 +165,7 @@ if (!gotLock) {
         clearTimeout(saveTimer);
         saveTimer = null;
       }
-      saveWindowState(windowStateFile(), win.getBounds());
+      saveWindowState(windowStateFile(), win.getNormalBounds());
     });
 
     // window.open / target=_blank 一律交给系统浏览器，主窗口不开新页

@@ -1,18 +1,20 @@
 "use strict";
 
-// 启动动画时间轴（不可跳过，总长约 3s）：
-//   0 ──1500ms──> 粒子聚拢段（splash.html 自播）
-//   1500 ──200ms──> 静默间隔
-//   1700 ──1300ms──> 声波扩散段（web 端 BootWave 揭示主界面）
-//                      3000ms
+// 启动动画时间轴（不可跳过，总长约 4.5s）：
+//   0 ──1500ms──> 手写段「Heming」（splash.html 自播）
+//   1500 ──1500ms──> 粒子聚拢段（splash.html 自播）
+//   3000 ──200ms──> 静默间隔
+//   3200 ──1300ms──> 声波扩散段（web 端 BootWave 揭示主界面）
+//                      4500ms
+const WRITE_MS = 1500;
 const SPLASH_MS = 1500;
 const GAP_MS = 200;
 const WAVE_MS = 1300;
-const BOOT_TOTAL_MS = SPLASH_MS + GAP_MS + WAVE_MS;
+const BOOT_TOTAL_MS = WRITE_MS + SPLASH_MS + GAP_MS + WAVE_MS;
 
 // 主窗口 did-finish-load 之后还需等多久才关闭 splash。
-// 远端可能在 ~86ms 就加载完，若立刻关闭会截断粒子聚拢段（用户几乎看不到第一段动画），
-// 故以「splash 已可见时长」倒推剩余等待：保证 splash 至少完整播满 SPLASH_MS + GAP_MS。
+// 远端可能在 ~86ms 就加载完，若立刻关闭会截断手写段与粒子段（用户几乎看不到前两段动画），
+// 故以「splash 已可见时长」倒推剩余等待：保证 splash 至少完整播满前两段 + 静默。
 // 下限 200ms：远端加载本就慢（已等够）时也留一小段静默，避免 splash 与波纹硬切。
 const SPLASH_CLOSE_MIN_MS = 200;
 function splashCloseDelayMs(elapsedMs) {
@@ -69,6 +71,7 @@ function splashWindowOptions(workArea) {
 }
 
 module.exports = {
+  WRITE_MS,
   SPLASH_MS,
   GAP_MS,
   WAVE_MS,

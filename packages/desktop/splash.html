@@ -11,6 +11,22 @@
     overflow: hidden;
   }
   .scene { position: relative; width: 100%; height: 100%; }
+
+  /* 手写段：居中，宽度自适应但不超 46vw */
+  .wordmark {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(420px, 46vw);
+    height: auto;
+    opacity: 1;
+    fill: none;
+    stroke: #1a1a1a;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .wordmark.fading { opacity: 0; transition: opacity 200ms ease; }
+
   .particle {
     position: absolute;
     width: 2px; height: 2px;
@@ -26,7 +42,7 @@
     border-radius: 50%;
     transform: translate(-50%, -50%) scale(0);
     /* 无 transition-delay：.visible 在 DURATION-100ms 才加上，若再叠 1.4s 延迟，
-       核心圆点要到 2.8s 才起放大，而 splash 在 ~1.7s 就被主进程关闭——永远看不见。 */
+       核心圆点要到 2.8s 才起放大，而 splash 在 ~3.2s 就被主进程关闭——看不见。 */
     transition: transform 0.4s ease;
     box-shadow: 0 0 20px rgba(26,26,26,.3);
   }
@@ -35,20 +51,106 @@
 </head>
 <body>
 <div class="scene" id="scene">
+  <!-- 手写「Heming」：path 数据与 packages/web/src/components/wordmarkGlyphs.ts 逐字节一致
+       （wordmark-drift.test.js 断言）。桌面端原生页要求自包含，故内嵌一份。 -->
+  <svg class="wordmark" id="wordmark" viewBox="0 0 400 150" aria-hidden="true">
+    <path d="M 32 26 C 30 50, 25 78, 21 102" />
+    <path d="M 86 26 C 84 50, 79 78, 75 102" />
+    <path d="M 26 68 C 40 65, 62 63, 78 62" />
+    <path d="M 142 85 C 130 86, 118 87, 108 85 C 102 82, 104 71, 114 67 C 126 61, 141 65, 142 77 C 143 88, 134 99, 120 100 C 108 101, 99 95, 99 89" />
+    <path d="M 164 104 C 164 86, 164 74, 166 68" />
+    <path d="M 166 68 C 170 58, 184 59, 186 70 L 186 104" />
+    <path d="M 186 104 L 186 70 C 190 60, 204 61, 206 72 L 206 104" />
+    <path d="M 206 104 L 206 72 C 210 62, 224 63, 226 74 L 226 104" />
+    <path d="M 246 68 C 245 80, 244 92, 243 104" />
+    <path d="M 246 52 L 246 56" />
+    <path d="M 272 104 C 272 86, 272 74, 274 68" />
+    <path d="M 274 68 C 278 58, 292 59, 294 70 L 294 104" />
+    <path d="M 317 68 C 325 58, 343 60, 344 74 C 345 88, 333 98, 321 96 C 312 94, 310 86, 314 80" />
+    <path d="M 344 74 C 346 92, 346 110, 341 122 C 335 134, 319 132, 321 120 C 323 110, 335 108, 343 114" />
+  </svg>
   <div class="core" id="core"></div>
 </div>
 <script>
   var PARTICLE_COUNT = 24;
-  var DURATION = 1500;
+  var DURATION = 1500;      // 粒子聚拢段时长（与 splash-config.js 的 SPLASH_MS 一致）
 
-  // 沿边均匀铺开：t ∈ [0,1] 是该边上的归一化位置，含两端（端点贴 margin 内缩框）。
-  // 抽成纯函数便于单测直接验证真实铺开效果（不是字符串匹配）。
+  /* ---- 手写段时序 ----
+     WRITE_SEGMENT_MS 是留给手写段的整段（与 splash-config.js 的 WRITE_MS 一致）；
+     其中 DRAW_MS 用于真正运笔，其余用于写完后的停顿与淡出。
+     运笔时间里再扣掉字母间的抬手间隔，剩下的按笔画长度分配 → 笔尖速度均匀。 */
+  var WRITE_SEGMENT_MS = 1500;
+  var DRAW_MS = 1250;       // 写完的时刻
+  var HOLD_MS = 150;        // 写完停顿
+  var LETTER_GAP_MS = 55;   // 字母之间抬手
+
+  /* ---- 字形：按书写顺序，与 wordmark.ts 一致 ---- */
+  var STROKE_LETTERS = [
+    'H', 'H', 'H',
+    'e',
+    'm', 'm', 'm', 'm',
+    'i', 'i',
+    'n', 'n',
+    'g', 'g',
+  ];
+
+  /** 为每笔算出 [startMs, endMs]：按长度分配运笔时间、按字母插入抬手间隔。 */
+  function buildSchedule(lengths, totalMs, gapMs) {
+    var sumLen = lengths.reduce(function (a, b) { return a + b; }, 0) || 1;
+    var gaps = 0;
+    for (var i = 1; i < STROKE_LETTERS.length; i++) {
+      if (STROKE_LETTERS[i] !== STROKE_LETTERS[i - 1]) gaps += gapMs;
+    }
+    var drawBudget = Math.max(1, totalMs - gaps);
+    var out = [];
+    var cursor = 0;
+    for (var j = 0; j < lengths.length; j++) {
+      if (j > 0 && STROKE_LETTERS[j] !== STROKE_LETTERS[j - 1]) cursor += gapMs;
+      var dur = (lengths[j] / sumLen) * drawBudget;
+      out.push({ start: cursor, end: cursor + dur, len: lengths[j] });
+      cursor += dur;
+    }
+    return out;
+  }
+
+  function runWrite(onDone) {
+    var paths = Array.prototype.slice.call(document.querySelectorAll('#wordmark path'));
+    var lengths = paths.map(function (p) { return p.getTotalLength(); });
+    var schedule = buildSchedule(lengths, DRAW_MS, LETTER_GAP_MS);
+    paths.forEach(function (p, i) {
+      p.style.strokeDasharray = String(lengths[i]);
+      p.style.strokeDashoffset = String(lengths[i]);
+    });
+    var t0 = null;
+    function tick(now) {
+      if (t0 === null) t0 = now;
+      var t = now - t0;
+      for (var i = 0; i < paths.length; i++) {
+        var s = schedule[i];
+        var prog = t <= s.start ? 0 : t >= s.end ? 1 : (t - s.start) / (s.end - s.start);
+        paths[i].style.strokeDashoffset = String(s.len * (1 - prog));
+      }
+      if (t < DRAW_MS) requestAnimationFrame(tick);
+      else onDone();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  /** 写完停顿 HOLD_MS 后淡出，交棒粒子段。 */
+  function fadeOutWordmark() {
+    setTimeout(function () {
+      document.getElementById('wordmark').classList.add('fading');
+    }, HOLD_MS);
+  }
+
+  /* ---- 粒子段 ---- */
+
+  /** 粒子在边上的位置：t∈[0,1] 沿该边铺满，端点恰好落在 margin 内缩框上。 */
   function particlePosition(side, t, w, h, margin) {
-    var spanX = w - 2 * margin, spanY = h - 2 * margin;
-    if (side === 0) return { x: t * spanX + margin, y: margin };
-    if (side === 1) return { x: w - margin, y: t * spanY + margin };
-    if (side === 2) return { x: t * spanX + margin, y: h - margin };
-    return { x: margin, y: t * spanY + margin };
+    if (side === 0) return { x: t * (w - 2 * margin) + margin, y: margin };
+    if (side === 1) return { x: w - margin, y: t * (h - 2 * margin) + margin };
+    if (side === 2) return { x: t * (w - 2 * margin) + margin, y: h - margin };
+    return { x: margin, y: t * (h - 2 * margin) + margin };
   }
 
   function createParticles() {
@@ -61,9 +163,9 @@
       var p = document.createElement('div');
       p.className = 'particle';
       var side = i % 4;
-      // 除以 perSide - 1：t 覆盖 0..1（含两端），末个粒子落在 w - margin。
-      // 旧实现除以 perSide 使 t 只到 5/6，每条边末端 1/6 永远没有粒子。
-      var t = counts[side] / (perSide - 1);
+      // t 取 i/(perSide-1) 而非 counts/perSide：后者只到 (perSide-1)/perSide，
+      // 每条边末端 1/6 永远没有粒子
+      var t = perSide > 1 ? counts[side] / (perSide - 1) : 0;
       counts[side]++;
       var pos = particlePosition(side, t, w, h, margin);
       p.style.left = pos.x + 'px';
@@ -87,7 +189,10 @@
     }, DURATION - 100);
   }
 
-  function playSound() {
+  /* ---- 音效 ---- */
+
+  /** 音效1：粒子段「聚集」音（300Hz 正弦，淡入 0.2s 持续 1.2s）。 */
+  function playGatherSound() {
     try {
       var ctx = new (window.AudioContext || window.webkitAudioContext)();
       // 浏览器自动播放策略：AudioContext 创建后可能处于 suspended，需 resume
@@ -111,16 +216,69 @@
     } catch (e) { /* 音频不可用静默 */ }
   }
 
+  /** 音效3：手写段「起笔」音（220→440Hz 上滑 + 笔尖落纸的极短噪声爆）。 */
+  function playWriteSound() {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var start = ctx.resume().then(function () {
+        return ctx;
+      }).catch(function () {
+        return null;
+      });
+      start.then(function (c) {
+        if (!c) return;
+        var now = c.currentTime;
+
+        // 上滑正弦：比另两个音更轻（峰值 0.08），避免开场过响
+        var osc = c.createOscillator(), gain = c.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.linearRampToValueAtTime(440, now + 1.2);
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.08, now + 0.15);
+        gain.gain.linearRampToValueAtTime(0, now + 1.2);
+        osc.connect(gain); gain.connect(c.destination);
+        osc.start(now);
+        osc.stop(now + 1.2);
+
+        // 笔尖落纸：8ms 低通噪声爆
+        var len = Math.floor(c.sampleRate * 0.008);
+        var buf = c.createBuffer(1, len, c.sampleRate);
+        var data = buf.getChannelData(0);
+        for (var i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+        var src = c.createBufferSource();
+        src.buffer = buf;
+        var lp = c.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 2400;
+        var ng = c.createGain();
+        ng.gain.value = 0.035;
+        src.connect(lp); lp.connect(ng); ng.connect(c.destination);
+        src.start(now);
+      });
+    } catch (e) { /* 音频不可用静默 */ }
+  }
+
+  /* ---- 编排 ---- */
+
   var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (reduced) {
-    // 减弱动态：直接显示核心圆点（无延迟）
+    // 减弱动态：不播任何一段，直接显示核心圆点（无延迟）；主进程按可见地板关窗
     var core = document.getElementById('core');
     core.style.transition = 'none';
     core.classList.add('visible');
+    document.getElementById('wordmark').style.display = 'none';
   } else {
-    var particles = createParticles();
-    playSound();
-    animateParticles(particles);
+    // 手写段：起笔音 → 运笔（DRAW_MS）→ 停顿 → 淡出 → 粒子段
+    playWriteSound();
+    runWrite(function () {
+      fadeOutWordmark();
+      // 粒子段从 WRITE_SEGMENT_MS 起（与 splash-config.js 的 WRITE_MS 对齐）
+      setTimeout(function () {
+        playGatherSound();
+        animateParticles(createParticles());
+      }, Math.max(0, WRITE_SEGMENT_MS - DRAW_MS));
+    });
   }
 </script>
 </body>

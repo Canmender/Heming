@@ -69,4 +69,47 @@ describe("LoginPage", () => {
     expect(s.status).toBe("error");
     expect(localStorage.getItem("heming.token")).toBeNull();
   });
+
+  // ── 左右分栏（左卡右字样） ──
+
+  it("宽屏左右分栏：两栏等宽，左栏放卡片、右栏放字样", () => {
+    const { container } = render(<LoginPage />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("min-[900px]:flex-row");
+
+    const cols = [...root.children] as HTMLElement[];
+    expect(cols).toHaveLength(2);
+    for (const c of cols) expect(c.className).toContain("flex-1");
+
+    // 左栏是登录卡片，右栏是字样（不是反过来）
+    expect(cols[0].querySelector("form")).not.toBeNull();
+    expect(cols[0].querySelector('svg[aria-label="Heming"]')).toBeNull();
+    expect(cols[1].querySelector('svg[aria-label="Heming"]')).not.toBeNull();
+  });
+
+  it("右栏字样窄屏隐藏（<900px 退化为单栏，避免两块都被挤扁）", () => {
+    render(<LoginPage />);
+    const svg = screen.getByRole("img", { name: "Heming" });
+    const brandCol = svg.closest("div") as HTMLElement;
+    expect(brandCol.className).toContain("hidden");
+    expect(brandCol.className).toContain("min-[900px]:flex");
+    expect(brandCol.className).toContain("items-center");
+    expect(brandCol.className).toContain("justify-center");
+  });
+
+  it("卡片与字样都垂直居中（各自栏内）", () => {
+    const { container } = render(<LoginPage />);
+    const cols = [...(container.firstElementChild as HTMLElement).children] as HTMLElement[];
+    for (const c of cols) {
+      expect(c.className).toContain("items-center");
+      expect(c.className).toContain("justify-center");
+    }
+  });
+
+  it("卡片文案不变（标题「和鸣」+ 副标题仍在卡内）", () => {
+    const { container } = render(<LoginPage />);
+    const form = container.querySelector("form")!;
+    expect(form.textContent).toContain("和鸣");
+    expect(form.textContent).toContain("登录你的账号");
+  });
 });

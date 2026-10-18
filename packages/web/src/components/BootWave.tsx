@@ -13,8 +13,12 @@ const COMPLETE_SLACK_MS = 80;
  * 兜底开播时限。真实信号由主进程 did-finish-load + 静默间隔后送达，远端慢时可能远超 1s，
  * 所以兜底只覆盖「信号永远不会来」（主进程异常），必须放得足够宽：
  * 定得太小会让波纹在 splash 还开着的时候就播完（用户只看到白屏）。
+ *
+ * 取 7000ms：splash 覆盖前两段 + 静默（WRITE 1500 + SPLASH 1500 + GAP 200 = 3200ms），
+ * 正常路径信号在 ~3200ms 到达；7000 给了一倍余量。真正的「信号永不到来」只在主进程
+ * 出 bug 时发生，那时多等几秒也胜过把主界面永久挡在白遮罩后。
  */
-const FALLBACK_MS = 5000;
+const FALLBACK_MS = 7000;
 
 /** ease-out cubic：揭示进度的缓出曲线（0→1）。 */
 export function easeOutCubic(p: number): number {

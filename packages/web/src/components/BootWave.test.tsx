@@ -4,7 +4,7 @@ import { BootWave, easeOutCubic } from "./BootWave.js";
 
 /** 与 splash-config.js 的 WAVE_MS / FALLBACK_MS 语义对齐的测试常量。 */
 const WAVE_MS = 1300;
-const FALLBACK_MS = 5000;
+const FALLBACK_MS = 7000;
 
 /**
  * rAF 揭示循环需要 requestAnimationFrame + 时钟一起被伪造才能确定性推进：
@@ -236,7 +236,7 @@ describe("BootWave", () => {
 
   // 回归：真实信号是 did-finish-load + 静默间隔后才到，远端慢时可远超 1s。
   // 兜底必须足够宽，否则波纹会在 splash 还开着时就播完（用户只看到白屏）。
-  it("有信号通道但信号 5s 内不到：遮罩保持不透明，第 5s 才兜底开播", () => {
+  it("有信号通道但信号 7s 内不到：遮罩保持不透明，第 7s 才兜底开播", () => {
     useWaveFakeTimers();
     installSignalChannel(); // 通道存在，但测试从不 fire
     const onDone = vi.fn();

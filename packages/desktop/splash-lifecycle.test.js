@@ -2,7 +2,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { attachSplashLifecycle, BOOT_WAVE_SNIPPET } = require("./splash-lifecycle");
-const { SPLASH_MS, GAP_MS, LOAD_WATCHDOG_MS, ERR_ABORTED } = require("./splash-config");
+const { WRITE_MS, SPLASH_MS, GAP_MS, LOAD_WATCHDOG_MS, ERR_ABORTED } = require("./splash-config");
 
 // 真实驱动 splash-lifecycle.js（注入假窗口 + 假计时器），覆盖关闭时机与启动信号的所有路径。
 
@@ -151,7 +151,8 @@ function setup() {
   return { clock, mainWin, splash, lifecycle };
 }
 
-const SPLASH_VISIBLE_MS = SPLASH_MS + GAP_MS; // 1700ms
+// 手写 1500 + 粒子 1500 + 静默 200 = 3200ms（splash 的可见地板）
+const SPLASH_VISIBLE_MS = WRITE_MS + SPLASH_MS + GAP_MS;
 
 // ── 正常路径：首次加载 ──
 
@@ -164,7 +165,7 @@ test("首次 did-finish-load：不立即发信号，等满粒子段后关 splash
   assert.equal(splash.destroyed, false);
 
   clock.advance(SPLASH_VISIBLE_MS - 1);
-  assert.equal(splash.destroyed, false, "splash 必须完整播满 1.7s");
+  assert.equal(splash.destroyed, false, "splash 必须完整播满 3.2s");
 
   clock.advance(1);
   assert.equal(splash.destroyed, true);
@@ -172,7 +173,7 @@ test("首次 did-finish-load：不立即发信号，等满粒子段后关 splash
   assert.deepEqual(mainWin.webContents.jsCalls, [BOOT_WAVE_SNIPPET]);
 });
 
-test("云端极快加载（86ms）仍播满 1.7s：不截断粒子聚拢段", () => {
+test("云端极快加载（86ms）仍播满 3.2s：不截断手写段与粒子段", () => {
   const { clock, mainWin, splash } = setup();
   clock.advance(86); // 远端页面 86ms 就加载完
   mainWin.webContents.emit("did-finish-load");
@@ -184,7 +185,7 @@ test("云端极快加载（86ms）仍播满 1.7s：不截断粒子聚拢段", ()
   assert.equal(mainWin.webContents.jsCalls.length, 1);
 });
 
-test("加载已超过 1.7s：保底 200ms 静默仍保留", () => {
+test("加载已超过 3.2s：保底 200ms 静默仍保留", () => {
   const { clock, mainWin, splash } = setup();
   clock.advance(5000);
   mainWin.webContents.emit("did-finish-load");

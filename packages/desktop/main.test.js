@@ -8,6 +8,7 @@ const {
   splashWindowOptions,
   splashCloseDelayMs,
   isFatalLoadFailure,
+  WRITE_MS,
   SPLASH_MS,
   GAP_MS,
   WAVE_MS,
@@ -55,42 +56,48 @@ test("多显示器：主屏不在原点时使用 workArea 的 x/y", () => {
   assert.equal(cfg.height, 1040);
 });
 
-// ── 启动动画时间轴：总时长必须恰好 3000ms（粒子 1500 + 静默 200 + 声波 1300） ──
-test("启动动画总时长 3000ms（1.5s 粒子 + 0.2s 静默 + 1.3s 声波）", () => {
+// ── 启动动画时间轴：总时长必须恰好 4500ms
+//    （手写 1500 + 粒子 1500 + 静默 200 + 声波 1300） ──
+test("启动动画总时长 4500ms（1.5s 手写 + 1.5s 粒子 + 0.2s 静默 + 1.3s 声波）", () => {
+  assert.equal(WRITE_MS, 1500);
   assert.equal(SPLASH_MS, 1500);
   assert.equal(GAP_MS, 200);
   assert.equal(WAVE_MS, 1300);
-  assert.equal(BOOT_TOTAL_MS, 3000);
-  assert.equal(BOOT_TOTAL_MS, SPLASH_MS + GAP_MS + WAVE_MS);
+  assert.equal(BOOT_TOTAL_MS, 4500);
+  assert.equal(BOOT_TOTAL_MS, WRITE_MS + SPLASH_MS + GAP_MS + WAVE_MS);
 });
 
 test("加载看门狗硬上限 8s（既不 finish 也不 fail 时兜底收掉 splash）", () => {
   assert.equal(LOAD_WATCHDOG_MS, 8000);
 });
 
-// ── splashCloseDelayMs：远端 ~86ms 就加载完时不能立刻关 splash（会截断第一段动画） ──
-test("云端极快加载（86ms）不截断粒子段：仍需等满 1.5s + 0.2s", () => {
+// ── splashCloseDelayMs：远端 ~86ms 就加载完时不能立刻关 splash（会截断前两段动画） ──
+test("云端极快加载（86ms）不截断手写段与粒子段：仍需等满 1.5 + 1.5 + 0.2s", () => {
   const delay = splashCloseDelayMs(86);
-  assert.equal(delay, BOOT_TOTAL_MS - WAVE_MS - 86); // 1614ms，非常量兜底
-  assert.equal(delay + 86, SPLASH_MS + GAP_MS); // splash 实际可见 1700ms
+  assert.equal(delay, BOOT_TOTAL_MS - WAVE_MS - 86); // 3114ms，非常量兜底
+  assert.equal(delay + 86, WRITE_MS + SPLASH_MS + GAP_MS); // splash 实际可见 3200ms
   assert.ok(delay > 200, "不能被 200ms 下限吃掉");
 });
 
-test("加载在 1.5s 内完成时，splash 恰好可见 1.7s（任意 elapsed）", () => {
-  for (const elapsed of [0, 1, 50, 300, 1000, 1500]) {
-    assert.equal(elapsed + splashCloseDelayMs(elapsed), SPLASH_MS + GAP_MS, `elapsed=${elapsed}`);
+test("加载在 3.2s 内完成时，splash 恰好可见 3.2s（任意 elapsed）", () => {
+  for (const elapsed of [0, 1, 50, 300, 1000, 1500, 3000]) {
+    assert.equal(
+      elapsed + splashCloseDelayMs(elapsed),
+      WRITE_MS + SPLASH_MS + GAP_MS,
+      `elapsed=${elapsed}`
+    );
   }
 });
 
-test("任意加载耗时下 splash 可见时长都不会低于 1.7s（不可截断）", () => {
-  for (const elapsed of [0, 86, 900, 1500, 1699, 1700, 3000, 7900]) {
+test("任意加载耗时下 splash 可见时长都不会低于 3.2s（不可截断）", () => {
+  for (const elapsed of [0, 86, 900, 1500, 3199, 3200, 5000, 7900]) {
     const visible = elapsed + splashCloseDelayMs(elapsed);
-    assert.ok(visible >= SPLASH_MS + GAP_MS, `elapsed=${elapsed} 只可见 ${visible}ms`);
+    assert.ok(visible >= WRITE_MS + SPLASH_MS + GAP_MS, `elapsed=${elapsed} 只可见 ${visible}ms`);
   }
 });
 
-test("加载耗时超过 1.7s 时保留下限 200ms（静默间隔不消失）", () => {
-  assert.equal(splashCloseDelayMs(1700), 200);
+test("加载耗时超过 3.2s 时保留下限 200ms（静默间隔不消失）", () => {
+  assert.equal(splashCloseDelayMs(3200), 200);
   assert.equal(splashCloseDelayMs(5000), 200);
   // 负数/非法输入（时钟回拨等）按 0 处理，不会给出负等待
   assert.equal(splashCloseDelayMs(-100), BOOT_TOTAL_MS - WAVE_MS);
@@ -133,4 +140,29 @@ test("main.js：主窗口关闭后台节流（遮挡时 rAF/定时器不被暂�
     m[0].includes("backgroundThrottling: false"),
     "主窗口 webPreferences 必须含 backgroundThrottling: false"
   );
+});
+
+// ── 启动默认最大化 ──
+test("main.js：主窗口创建后 maximize()（铺满屏幕但保留标题栏与窗口控件）", () => {
+  assert.ok(mainSrc.includes("win.maximize()"), "启动应最大化主窗口");
+  // 不用 fullscreen：真全屏会把自定义标题栏与原生窗口控件一起隐藏
+  assert.ok(!/fullscreen:\s*true/.test(mainSrc), "不应使用 fullscreen:true");
+});
+
+// 最大化时 getBounds() 返回屏幕尺寸，直接落盘会把用户偏好的窗口尺寸覆盖掉；
+// 必须用 getNormalBounds() 取还原态尺寸，最大化/还原往返才正确。
+test("main.js：窗口尺寸落盘用 getNormalBounds（最大化时不覆盖用户偏好尺寸）", () => {
+  const saveCalls = [...mainSrc.matchAll(/saveWindowState\(windowStateFile\(\),\s*win\.(\w+)\(\)\)/g)].map(
+    (m) => m[1]
+  );
+  assert.ok(saveCalls.length >= 2, `应有多处落盘（debounce + close），实际 ${saveCalls.length}`);
+  assert.ok(
+    saveCalls.every((fn) => fn === "getNormalBounds"),
+    `所有落盘都必须用 getNormalBounds，实际：${saveCalls.join(", ")}`
+  );
+});
+
+test("main.js：splash 定位仍需要 getBounds（取当前屏幕，不是还原态）", () => {
+  // 上面的断言只约束落盘路径；getDisplayMatching 用 getBounds 是对的（要当前实际位置）
+  assert.ok(mainSrc.includes("screen.getDisplayMatching(mainWin.getBounds())"));
 });
