@@ -56,10 +56,11 @@ test("splash.html 内嵌字形与 wordmarkGlyphs.ts 逐字节一致（顺序也�
   }
 });
 
-test("字形数据非空：六个字母、十四个笔画都在", () => {
+test("字形数据非空：六个字母、十个笔画都在", () => {
   const fromSource = sourcePaths();
-  // H=3（左竖/右竖/横），e=1，m=4（左竖+三拱），i=2（竖+点），n=2（竖+拱），g=2（碗+下伸）
-  assert.equal(fromSource.length, 14, "笔画总数应为 14");
+  // H=3（左竖/右竖/横），e=1（一笔写完），m=1（一笔写完，三拱），i=2（竖+点），
+  // n=1（一笔写完，单拱），g=2（碗+下伸）
+  assert.equal(fromSource.length, 10, "笔画总数应为 10");
   assert.ok(
     fromSource.every((d) => d.startsWith("M ")),
     "每条 path 都应以绝对 M 开头"
