@@ -21,7 +21,7 @@
 | 项 | 状态 |
 |---|---|
 | main | 见 `git log -1`（工作区干净） |
-| 测试 | shared 63 / server 169 / web 617 / desktop 19 全绿（`pnpm -r test`） |
+| 测试 | shared 63 / server 169 / web 649 / desktop 79 全绿（`pnpm -r test`） |
 | 线上 | `http://47.92.39.184` 已部署最新版（`docker compose -p heming`） |
 | 安装包 | `packages/desktop/release/和鸣 Setup 0.0.1.exe`（78.3 MB，含全部功能） |
 | 账号 | `admin/admin`、`zhoukang/zhoukang`（服务端 `/root/heming/.env` 的 `HEMING_SEED_USERS` 播种；注册功能默认关闭） |
@@ -36,6 +36,10 @@
 6. **二期 IM**：消息撤回（含四处内容旁路屏蔽）、回复引用、消息转发、语音消息、表情回应（事件化）；遗留收尾（他机流 watchdog、重连补已读、群消息头像）；导航图标列垂直居中。
 7. **E2E 端到端加密**（前向保密棘轮）：P-256 ECDH + HKDF 链 + AES-256-GCM（零依赖 WebCrypto）；信封入库、服务端内容逻辑客户端化（回应=加密事件消息）、本地明文缓存、明文存量自迁移、附件加密、Electron 安全上下文白名单。
 8. **智能体记忆/技能/上下文**（另一会话交付）：三层记忆（Working/Episodic/Semantic，本机 localStorage）、技能池（4 内置技能 + 导入导出 + 路由预览）、上下文预算与早期对话压缩（供应商上下文超限自动收紧重试 ≤2 次）。入口：**记忆区 Alt+4**、设置区「上下文预算」卡片。
+9. **主页真实数据化**：主页硬编码项全部换成真实数据源——「我的智能体」接名册（`agentsRoster`，含系统预设）、智能体动态区接群内已挂载（空时回退名册）前 3 个、版本徽标读构建期注入的 `__APP_VERSION__`。规格见 `docs/superpowers/specs/2026-10-18-home-page-real-data-design.md`。
+10. **桌面窗口视觉 + 启动动画**（美术会话交付）：
+    - **自定义标题栏**：隐藏系统栏（`titleBarStyle: "hidden"`）+ 保留原生窗口控件（`titleBarOverlay`，配色随应用 `#fafafa`/`#666`、高 38px）；拖拽带用 `env(titlebar-area-*)` 自适应、宽度自动避让窗口控件；窗口背景改 `#fafafa` 消除启动白闪。浏览器端不渲染（靠 `window.heming` 区分）。规格见 `docs/superpowers/specs/2026-10-18-window-chrome-design.md`。
+    - **启动动画**：3 秒双段式（splash 粒子聚拢 1.5s → BootWave 声波扩散 1.3s），不可跳过，尊重 `prefers-reduced-motion`；动画期间后台恢复登录态。
 
 ## 3. 仓库结构与关键文件
 
@@ -56,8 +60,14 @@ packages/
 │   ├── lib/{memory,skills,agentRuntime}/  # 三层记忆/技能池（另一会话交付）
 │   ├── components/ChatPage.tsx   # 聊天主页面（收发/流式/撤回/回复/转发/语音/表情/加密）
 │   ├── components/{RadarContacts,ContactColumn,ContactDetail}.tsx  # 通讯录
+│   ├── components/{TitleBar,BootWave}.tsx  # 桌面窗口标题栏拖拽带 / 启动动画声波段
 │   └── store/{chat,ui,llm,auth,tokenUsage}.ts
-└── desktop/                  # Electron 壳：main.js + secure-origins.js（HTTP 源安全上下文白名单）
+└── desktop/                  # Electron 壳
+    ├── main.js               # 窗口创建（含 titleBarOptions 接线）+ 菜单 + 导航白名单 + splash 生命周期
+    ├── title-bar.js          # 自定义标题栏平台分支（纯函数，node:test 可测）
+    ├── secure-origins.js     # HTTP 源安全上下文白名单
+    ├── splash.html           # 启动动画·粒子聚拢段（无 preload，自包含）
+    └── preload.js            # contextBridge 暴露 window.heming（platform + 启动动画信号）
 ```
 
 **本机存储键**（localStorage）：`heming.token` · `heming.llmConfigs` · `heming.agentLlm` · `heming.agentPrompts` · `heming.tokenUsage` · `heming.e2e.*`（身份/链/去重/新鲜度） · `heming.msgCache.*`（明文缓存） · `heming.memory.*` / `heming.skills` / `heming.skillBindings` / `heming.context*`（记忆/技能）。
@@ -68,10 +78,16 @@ packages/
 - **子代理驱动执行**（superpowers:subagent-driven-development）：每任务一个实现者 → 任务评审（规格+质量）→ 修复轮（≤5）→ 整分支终审 → 合并。账本在 `.superpowers/sdd/<plan>/`（gitignored）。
 - **测试门禁**：`pnpm -r build && pnpm -r test` 全绿才提交；shared 改契约后先 `pnpm --filter @heming/shared build`。
 - **视觉规范**：无 emoji 图标（细线 SVG 1.5px，emoji 仅作消息内容）；分割线浅灰 `#e6e6e6`/`#ececec`；界面 chrome 不显示产品名「和鸣」；中文文案。
+- **`skipLibCheck: true` 的坑**：`tsconfig.base.json` 开了 `skipLibCheck`，**.d.ts 内部的重复/冲突声明会被静默跳过**。2026-10-18 两个会话各写了一份 `window.heming` 全局声明，类型不一致触发 TS2717 却全量门禁照绿，靠人工复核才发现。**新增 `declare global` / `interface Window` 前先 `grep -rn "interface Window" packages/web/src`**；怀疑类型问题时用 `tsc -p packages/web/tsconfig.json --noEmit --skipLibCheck false` 复验。
 - **部署流程**：见 `docs/deploy.md`；本地 tar（排除 node_modules/.git/.superpowers/dist/.worktrees/data/release/.claude/@hemingdesktop）→ 上传 `/root/heming` → `docker compose -p heming build && up -d` → 冒烟验证。SSH 脚本在 `.superpowers/*.py`（gitignored，含凭据）。
 - **`@hemingdesktop/`**：electron-builder 偶发落在仓库根的产物目录（已 gitignore；被系统句柄占用时删不掉，重启后可删）。
 
 ## 5. 下一步候选（未完成工作）
+
+> **⚠ 本批（窗口标题栏 + 启动动画）只过了自动化门禁，真机与浏览器端尚未验证**——这类改动只有跑起来才看得出观感对不对：
+> 1. **真机验证**：`pnpm --filter @heming/desktop dist` 重打包 → 安装 → 确认标题栏高度/配色/拖拽手感/与窗口控件的避让/Win11 贴靠布局；顺带确认启动动画 3 秒节奏与音效。
+> 2. **浏览器端无回归**：标题栏只在 Electron 渲染，但 `LoginPage` 的 `h-full` 与背景改 `#fafafa` 对浏览器同样生效——需在 `http://47.92.39.184` 扫一眼登录页与主壳。
+> 3. **线上部署**：上述两项通过后再走 `docs/deploy.md` 流程。
 
 **二期主线**（总规格 `2026-10-13-heming-platform-design.md` §9）：
 1. **MCP 接口区**：stdio/HTTP transport、命名空间前缀注册、渐进发现、白名单外危险操作 HITL 确认（参考调研报告 §3）。
@@ -85,7 +101,17 @@ packages/
 - 撤回时限与「撤回占位原文」；表情回应种类数封顶（服务端未限 20 种）；语音消息转文字；转发嵌套深度限制；上传进度条；会话级文件 ACL；CSP；Electron safeStorage（密钥落盘加密）；网页端 HTTPS 化。
 - 已知语义变化：**新入群成员只能解密加入之后的消息**（无密钥恢复模型的必然结果）；**旧客户端/纯浏览器（HTTP）无法发送**（安全上下文要求，桌面端经白名单解决）。
 
-**跨会话协作**（另一会话正在做记忆/技能方向）：约定边界为「不改 shared/server/WS/消息契约」；其 worktree 在 `D:\Heming\.claude\worktrees\xenodochial-aryabhata-24defe`。若新工作要动 `TriggerDeps`/`ChatPage`/`agentStream`，先对齐接口（当前 TriggerDeps 共 6 个可选钩子）。
+**跨会话协作**（2026-10-18 实况）：本项目**多个会话并行**，共用 `D:\Heming` 主检出并**直接提交到 main**（各会话的 `worktree` 反而多为闲置）。当日落 main 的三条线程：**主页真实数据**、**桌面窗口自定义标题栏**、**启动动画**（后两者由「美术会话」交付并合并）。
+
+已知仍在推进的其他线程（`git worktree list` 可查）：
+
+| worktree | 分支 | 方向 |
+|---|---|---|
+| `xenodochial-aryabhata-24defe` | `claude/awesome-franklin-4be1ab` | 记忆/技能 → 已扩展到 1:1 会话 / MCP / 上下文进阶 / 记忆工具化 / RAG |
+| `confident-lamport-72aff7` | `claude/confident-lamport-72aff7` | 通话系统通知 + 任务栏闪烁 |
+| `upbeat-proskuriakova-3e48d0` | `claude/upbeat-proskuriakova-3e48d0` | 启动动画（已合入 main，worktree 待回收） |
+
+> **并行编辑的代价（本批真实踩到）**：两个会话先后在 `main.js` 顶部插了同一行 `require("./title-bar")`，叠成重复 `const` 声明（**SyntaxError，桌面端会直接启动失败**）。**在主检出改共享文件前，先 `git status` + 看目标文件当前位置是否有在途改动**；小步提交，别把改动长时间留在工作区。
 
 ## 6. 快速上手命令
 

@@ -2,7 +2,7 @@
 
 - 日期：2026-10-18
 - 范围：`packages/desktop`（窗口配置）+ `packages/web`（标题栏渲染）
-- 状态：待实施
+- 状态：**已实施并合入 main**（提交 `07a1c67`）；**真机验证待做**（见 §11）
 
 ---
 
@@ -130,3 +130,50 @@ boot-animation 会话（`docs/superpowers/plans/2026-10-18-boot-animation.md`）
 | 标题栏文字 | 遵循「chrome 不显示产品名」；导航轨已指示当前页 |
 
 **已知限制**：Win10 无自动圆角（`roundedCorners` 仅 macOS）；`titleBarOverlay` 在 Linux 上不受支持（当前只构建 Win 安装包，无影响）。
+
+---
+
+## 11. 实施记录（2026-10-18）
+
+### 已落地
+
+| 提交 | 内容 |
+|---|---|
+| `07a1c67` | 本设计全部实现（由美术/启动动画会话代为提交，因其需先落 main 才能合并启动动画分支） |
+| `7207da2` | 启动动画分支合并进 main（与本设计共存） |
+| `7ebc721` | 修复合并引入的重复全局声明（见下） |
+
+落点与设计一致：`title-bar.js`（平台分支纯函数）、`main.js`（展开 `titleBarOptions` + `WINDOW_BACKGROUND`）、`TitleBar.tsx`、`index.css` 的 `.desktop-titlebar`、`App.tsx` 主壳与登录页两处装配、`LoginPage` 的 `h-full` / `#fafafa`。
+
+**与启动动画的共存**：`TitleBar` 在壳顶部参与布局，`BootWave` 是 `position: fixed` 全屏遮罩，二者互不干扰（启动动画期间标题栏被遮罩覆盖，原生窗口控件由系统绘制在其上，符合预期）。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| `pnpm -r build` | 全绿（含 web 的 `tsc --noEmit`） |
+| `pnpm -r test` | 退出码 0；shared 63 / server 169 / web 649 / desktop 79 |
+| 本设计新增测试 | `title-bar.test.js` 5 个 + `TitleBar.test.tsx` 3 个 + `App.test.tsx` 装配断言 3 个 |
+| 真机 / 打包验证 | **未做**（见 §11 待办） |
+
+### 合并中修掉的一个真问题：重复全局声明
+
+启动动画分支新增 `packages/web/src/types/heming.d.ts` 也声明了 `Window.heming`，与本设计在 `vite-env.d.ts` 的声明**类型不一致** → `TS2717: Subsequent property declarations must have the same type`。
+
+**为什么构建没拦住**：`tsconfig.base.json` 的 `skipLibCheck: true` 会跳过 `.d.ts` 内部的这类冲突。已用最小复现确认该规则确实触发，并在真实项目上验证：
+
+```bash
+node node_modules/.pnpm/typescript@*/node_modules/typescript/lib/tsc.js \
+  -p packages/web/tsconfig.json --noEmit --skipLibCheck false
+# 修复前：TS2717，退出码 2；修复后：退出码 0
+```
+
+**修法**：以 `types/heming.d.ts` 为正本（更完整、含 preload API 文档），删除 `vite-env.d.ts` 的重复块。
+
+> **教训（给后续会话）**：本项目 `skipLibCheck: true`，**重复的 `declare global` 会静默通过**。新增全局声明前先 `grep -rn "interface Window" packages/web/src`。
+
+### 待办
+
+1. **真机验证**：`pnpm --filter @heming/desktop dist` 重打包 → 安装 → 确认标题栏观感（高度/配色/拖拽/控件避让/Win11 贴靠布局）。
+2. **浏览器端无回归确认**：`TitleBar` 在浏览器渲染 `null`，但 `LoginPage` 的 `h-full` 与背景改色对浏览器同样生效，需在 `http://47.92.39.184` 上扫一眼登录页与主壳。
+3. `07a1c67` 的提交信息含一句不实描述「左侧设置按钮由 titleBarOptions 按平台控制」——代码中不存在该按钮，实为 macOS `trafficLightPosition` 分支（左侧红绿灯）的描述串行。**代码无需改动**，仅说明文字有误。
