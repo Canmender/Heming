@@ -15,11 +15,13 @@ let _iceServers = [];
 contextBridge.exposeInMainWorld("__heming_ice_servers_get", () => _iceServers);
 
 contextBridge.exposeInMainWorld("__heming_voice_call", {
-  /** 窗口最小化事件订阅（主进程 voice-call:minimized → 渲染层回调）。 */
+  /** 窗口最小化事件订阅（主进程 voice-call:minimized → 渲染层回调）。返回取消订阅函数。 */
   onMinimize: (callback) => {
-    ipcRenderer.on("voice-call:minimized", callback);
+    const listener = (_event, ...args) => callback(...args);
+    ipcRenderer.on("voice-call:minimized", listener);
+    return () => ipcRenderer.removeListener("voice-call:minimized", listener);
   },
-  /** 请求主进程发系统通知（来电等场景，窗口最小化时仍可见）。 */
+  /** 请求主进程发系统通知（来电/通话中场景，窗口最小化时仍可见；主进程一并闪烁任务栏）。 */
   notify: (title, body) => {
     ipcRenderer.send("voice-call:notify", title, body);
   },

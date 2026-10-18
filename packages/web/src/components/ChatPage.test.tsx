@@ -3303,3 +3303,159 @@ describe("renderTextWithMentions", () => {
     ]);
   });
 });
+
+describe("语音通话桌面通知接线（Task 5 fix）", () => {
+  /** 设置 __heming_voice_call 桥接 mock（jsdom 无 preload，测试内手动挂载）。 */
+  function installVoiceBridge() {
+    const notify = vi.fn();
+    const off = vi.fn();
+    const onMinimize = vi.fn((_cb: () => void) => off);
+    const bridge = { notify, onMinimize };
+    Object.defineProperty(window, "__heming_voice_call", {
+      configurable: true,
+      writable: true,
+      value: bridge,
+    });
+    return { bridge, notify, onMinimize, off };
+  }
+
+  afterEach(() => {
+    delete (window as unknown as { __heming_voice_call?: unknown }).__heming_voice_call;
+  });
+
+  it("来电（被叫 ringing）：系统通知「语音来电」", async () => {
+    const { notify } = installVoiceBridge();
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 模拟收到 voice_call_invite（直接会话 c1 = peer 鲍勃）
+    act(() => {
+      lastHandlers().onEvent({
+        type: "voice_call_invite",
+        conversationId: "c1",
+        callId: "call-1",
+        sdp: "v=0",
+      });
+    });
+    await act(async () => {});
+
+    expect(notify).toHaveBeenCalledWith("和鸣", "语音来电");
+  });
+
+  it("来电去重：同一 callId 的重复渲染不重复通知", async () => {
+    const { notify } = installVoiceBridge();
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "voice_call_invite",
+        conversationId: "c1",
+        callId: "call-1",
+        sdp: "v=0",
+      });
+    });
+    // 再次触发一次渲染（无关状态更新），status/role/callId 未变
+    act(() => {
+      lastHandlers().onEvent({
+        type: "voice_call_ice",
+        conversationId: "c1",
+        callId: "call-1",
+        candidate: "candidate:1",
+      });
+    });
+    await act(async () => {});
+
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it("窗口最小化 + 通话中：系统通知「通话中」", async () => {
+    const { notify, onMinimize } = installVoiceBridge();
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 先进入通话中（active）
+    act(() => {
+      lastHandlers().onEvent({
+        type: "voice_call_accept",
+        conversationId: "c1",
+        callId: "call-x",
+        sdp: "v=0",
+      });
+    });
+    await act(async () => {});
+    // 再模拟窗口最小化回调
+    act(() => {
+      const cb = onMinimize.mock.calls[0]?.[0] as (() => void) | undefined;
+      cb?.();
+    });
+    await act(async () => {});
+
+    expect(notify).toHaveBeenCalledWith("和鸣", "通话中");
+  });
+
+  it("窗口最小化 + 未在通话：不触发系统通知", async () => {
+    const { notify, onMinimize } = installVoiceBridge();
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 空闲状态时窗口最小化
+    act(() => {
+      const cb = onMinimize.mock.calls[0]?.[0] as (() => void) | undefined;
+      cb?.();
+    });
+    await act(async () => {});
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("卸载时调用 onMinimize 返回的取消函数（防监听器累积）", async () => {
+    const { off } = installVoiceBridge();
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    const { unmount } = render(<ChatPage />);
+    await act(async () => {});
+
+    unmount();
+
+    expect(off).toHaveBeenCalledTimes(1);
+  });
+
+  it("网页端（无桥接）：来电不抛错、不调用通知", async () => {
+    // 不安装 __heming_voice_call —— 桥接缺失，网页端降级
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 网页端收到 invite：自动拒绝（不触发通知）
+    expect(() => {
+      act(() => {
+        lastHandlers().onEvent({
+          type: "voice_call_invite",
+          conversationId: "c1",
+          callId: "call-web",
+          sdp: "v=0",
+        });
+      });
+    }).not.toThrow();
+    // 自动拒绝发出 voice_call_reject
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "voice_call_reject", reason: "busy" }),
+    );
+  });
+});

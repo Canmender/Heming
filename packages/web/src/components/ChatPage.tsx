@@ -57,6 +57,24 @@ const NO_PLAIN: Record<string, PlainEnvelope> = {};
 /** 单条消息的回应 chip（emoji + 参与 userIds）。 */
 export type ReactionChip = { emoji: string; userIds: string[] };
 
+/**
+ * Electron preload 暴露的语音通话桥接面（仅桌面端存在；网页端为 undefined）。
+ * 各方法均可选：老版本 preload 可能未提供某些方法，渲染层需守卫降级。
+ */
+interface VoiceCallBridge {
+  /** 订阅最小化事件；返回取消订阅函数（卸载时清理，防监听器累积）。 */
+  onMinimize?: (callback: () => void) => (() => void) | void;
+  /** 请求主进程弹系统通知（主进程一并闪烁任务栏）。 */
+  notify?: (title: string, body: string) => void;
+}
+
+declare global {
+  interface Window {
+    /** Electron preload 注入的语音通话桥接面（网页端不存在）。 */
+    __heming_voice_call?: VoiceCallBridge;
+  }
+}
+
 /** aggregateChips 结果里「无 chips」的稳定空表。 */
 const NO_CHIPS: ReactionChip[] = [];
 
@@ -533,9 +551,11 @@ export function ChatPage() {
 
   // —— 语音通话（Task 4/5）：useVoiceCall 状态机；信令复用当前 WS 通道 ——
   // 仅 Electron 桌面端支持通话：以 preload 暴露的桥接 API 是否存在为判定依据。
-  const isElectron =
-    typeof window !== "undefined" &&
-    (window as unknown as { __heming_voice_call?: unknown }).__heming_voice_call !== undefined;
+  const voiceBridge =
+    typeof window !== "undefined"
+      ? (window as unknown as { __heming_voice_call?: VoiceCallBridge }).__heming_voice_call
+      : undefined;
+  const isElectron = voiceBridge !== undefined;
   const voiceCall = useVoiceCall({
     send: (e) => wsHandleRef.current?.send(e),
     myUserId: me?.id ?? "",
@@ -553,6 +573,36 @@ export function ChatPage() {
     }
     return map;
   }, [conv, groupMembers]);
+
+  // —— 语音通话桌面通知接线（Task 5 fix）：仅桌面端生效，网页端（桥接缺失）静默跳过 ——
+  // 通话状态存 ref：onMinimize 回调挂载期订阅一次，需读取最新状态避免闭包过期。
+  const voiceStatusRef = useRef(voiceCall.state.status);
+  useEffect(() => {
+    voiceStatusRef.current = voiceCall.state.status;
+  }, [voiceCall.state.status]);
+
+  // 窗口最小化 → 若仍在通话中则系统通知「通话中」（任务栏不可见时提示用户）。
+  // onMinimize 返回取消订阅函数：卸载/桥接变化时退订，防监听器累积（老版本 preload 不返回时降级）。
+  useEffect(() => {
+    if (!voiceBridge?.onMinimize) return;
+    const off = voiceBridge.onMinimize(() => {
+      if (voiceStatusRef.current === "active") {
+        voiceBridge.notify?.("和鸣", "通话中");
+      }
+    });
+    return typeof off === "function" ? off : undefined;
+  }, [voiceBridge]);
+
+  // 来电（被叫 ringing）→ 系统通知（主进程一并闪烁任务栏）；同一 callId 仅通知一次（ref 去重）。
+  const notifiedCallRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!voiceBridge) return;
+    if (voiceCall.state.status !== "ringing" || voiceCall.state.role !== "callee") return;
+    const callId = voiceCall.state.callId;
+    if (!callId || notifiedCallRef.current === callId) return;
+    notifiedCallRef.current = callId;
+    voiceBridge.notify?.("和鸣", "语音来电");
+  }, [voiceBridge, voiceCall.state.status, voiceCall.state.role, voiceCall.state.callId]);
 
   /** 消息署名（气泡/引用卡/引用预览共用）：自己「我」；direct 对方名；群内成员映射名（缺失回退 undefined 由调用方处理）。 */
   const displaySenderName = (m: Message) =>

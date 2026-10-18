@@ -134,6 +134,11 @@ if (!gotLock) {
       });
     }
 
+    // 来电时停止任务栏闪烁（窗口获得焦点 = 用户已看到来电）
+    win.on("focus", () => {
+      win.flashFrame(false);
+    });
+
     win.loadURL(appUrl);
 
     // 语音通话：拉取服务端 ICE 配置（STUN/TURN）并注入渲染层。
@@ -161,11 +166,14 @@ if (!gotLock) {
     return win;
   }
 
-  // 语音通话系统通知（渲染层经 preload 的 __heming_voice_call.notify 请求）
+  // 语音通话系统通知 + 任务栏闪烁（渲染层经 preload 的 __heming_voice_call.notify 请求）
   ipcMain.on("voice-call:notify", (_event, title, body) => {
     if (Notification.isSupported()) {
       new Notification({ title, body }).show();
     }
+    // 任务栏闪烁（Windows/Linux；窗口聚焦时自动停止，见 createWindow 的 focus 处理）
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isFocused()) win.flashFrame(true);
   });
 
   function setupMenu() {
