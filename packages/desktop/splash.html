@@ -43,11 +43,14 @@
     var scene = document.getElementById('scene');
     var w = window.innerWidth, h = window.innerHeight, margin = 20;
     var perSide = Math.ceil(PARTICLE_COUNT / 4);
+    var counts = [0, 0, 0, 0];
     var particles = [];
     for (var i = 0; i < PARTICLE_COUNT; i++) {
       var p = document.createElement('div');
       p.className = 'particle';
-      var side = i % 4, t = (i % perSide) / perSide;
+      var side = i % 4;
+      var t = counts[side] / perSide;
+      counts[side]++;
       var x, y;
       if (side === 0) { x = t * w; y = margin; }
       else if (side === 1) { x = w - margin; y = t * h; }
@@ -77,22 +80,33 @@
   function playSound() {
     try {
       var ctx = new (window.AudioContext || window.webkitAudioContext)();
-      var osc = ctx.createOscillator(), gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 300;
-      gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.2);
-      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.2);
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 1.2);
+      // 浏览器自动播放策略：AudioContext 创建后可能处于 suspended，需 resume
+      var start = ctx.resume().then(function () {
+        return ctx;
+      }).catch(function () {
+        return null;
+      });
+      start.then(function (c) {
+        if (!c) return;
+        var osc = c.createOscillator(), gain = c.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 300;
+        gain.gain.setValueAtTime(0, c.currentTime);
+        gain.gain.linearRampToValueAtTime(0.15, c.currentTime + 0.2);
+        gain.gain.linearRampToValueAtTime(0, c.currentTime + 1.2);
+        osc.connect(gain); gain.connect(c.destination);
+        osc.start(c.currentTime);
+        osc.stop(c.currentTime + 1.2);
+      });
     } catch (e) { /* 音频不可用静默 */ }
   }
 
   var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (reduced) {
-    // 减弱动态：直接显示核心圆点
-    document.getElementById('core').classList.add('visible');
+    // 减弱动态：直接显示核心圆点（无延迟）
+    var core = document.getElementById('core');
+    core.style.transition = 'none';
+    core.classList.add('visible');
   } else {
     var particles = createParticles();
     playSound();
