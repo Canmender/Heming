@@ -114,3 +114,30 @@ export const DownloadIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M5 19.5h14" />
   </svg>
 );
+export const PhoneIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+  </svg>
+);
+export const PhoneOffIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72" />
+    <path d="M16.72 10.58a16 16 0 0 0-1.8-2.28M12.02 8.14A12.84 12.84 0 0 1 13.5 6.5a2 2 0 0 1 2 1.72" />
+    <path d="M2 2l20 20" />
+  </svg>
+);
+export const MicOffIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6" />
+    <path d="M5 10a7 7 0 0 0 11.9 4.9M19 10a7 7 0 0 1-.11 1.23" />
+    <path d="M12 19v3" />
+    <path d="M2 2l20 20" />
+  </svg>
+);
+export const VolumeIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M11 5 6 9H2v6h4l5 4z" />
+    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+  </svg>
+);
