@@ -21,7 +21,7 @@
 | 项 | 状态 |
 |---|---|
 | main | 见 `git log -1`（工作区干净） |
-| 测试 | shared 73 / server 186 / web 705 / desktop 89 全绿（`pnpm -r test`） |
+| 测试 | shared 73 / server 186 / web 705 / desktop 110 全绿（`pnpm -r test`） |
 | 线上 | `http://47.92.39.184` 已部署最新版（`docker compose -p heming`） |
 | 安装包 | `packages/desktop/release/和鸣 Setup 0.0.1.exe`（78.3 MB，含全部功能） |
 | 账号 | `admin/admin`、`zhoukang/zhoukang`（服务端 `/root/heming/.env` 的 `HEMING_SEED_USERS` 播种；注册功能默认关闭） |
@@ -44,6 +44,7 @@
     - **登录页左右分栏**：宽屏左卡右字样，窄于 900px 退化为单栏。
     - **启动默认最大化**：`maximize()`（保留自定义标题栏与窗口控件，不用 fullscreen）；尺寸落盘改用 `getNormalBounds()`，最大化时不覆盖用户偏好尺寸。
 11. **语音通话**：Mesh WebRTC（1:1 + 群聊），信令复用现有 WS 通道（`voice_call_invite/accept/reject/hangup/ice` 五事件，服务端定向单播 + 内存 `activeCalls` 跟踪，30s ringing 超时兜底）；媒体流 DTLS-SRTP 点对点、服务端不碰媒体；仅桌面端（网页端收 invite 自动拒绝并提示）；Electron 注入 ICE 配置（`GET /api/ice-servers` 读 `HEMING_STUN` / `HEMING_TURN_*`）、窗口最小化与来电系统通知 + 任务栏闪烁。
+12. **web 界面嵌入桌面客户端**（美术会话交付）：web 构建产物打进安装包，用自定义协议 `app://heming` 本地加载；API 与 WS 仍走云端。**不能用 `file://`** —— 它不是安全上下文，`crypto.subtle` 不可用会让 E2E 失效；`app://` 注册为 privileged + secure 后实测 `isSecureContext=true` 且明文 `ws://` 仍可连（**未放宽任何安全开关**）。产物由 `scripts/build-desktop-web.mjs` 构建（注入 `VITE_API_BASE`）落到 `packages/desktop/web-dist/`，经 `extraResources` 进 `resources/web`。规格与实施记录见 `docs/superpowers/specs/2026-10-18-embed-web-in-client-design.md`；发布方式变化见 `docs/deploy.md` §10。
 
 ## 3. 仓库结构与关键文件
 
@@ -77,8 +78,11 @@ packages/
     ├── secure-origins.js     # HTTP 源安全上下文白名单
     ├── splash-config.js      # 启动动画时序常量 + 纯净判定（shouldShowSplash / splashWindowOptions / isFatalLoadFailure）
     ├── splash-lifecycle.js   # splash 窗口生命周期（关闭地板 / 8s 加载看门狗 / 失败兜底；注入窗口故可单测）
+    ├── app-protocol.js      # app:// 本地加载的资源解析（纯函数：路径/穿越防护/MIME/SPA 回落）
+    ├── web-dist/            # 嵌入的 web 产物（gitignored；由 scripts/build-desktop-web.mjs 生成）
     ├── splash.html           # 启动动画·粒子聚拢段（无 preload，自包含）
     └── preload.js            # contextBridge 暴露 window.heming（platform + 启动动画信号；回调登记在隔离世界闭包）
+scripts/build-desktop-web.mjs # 构建桌面端嵌入的 web 产物（注入 VITE_API_BASE）
 ```
 
 **本机存储键**（localStorage）：`heming.token` · `heming.llmConfigs` · `heming.agentLlm` · `heming.agentPrompts` · `heming.tokenUsage` · `heming.e2e.*`（身份/链/去重/新鲜度） · `heming.msgCache.*`（明文缓存） · `heming.memory.*` / `heming.skills` / `heming.skillBindings` / `heming.context*`（记忆/技能）。
@@ -100,6 +104,7 @@ packages/
 > 2. **启动动画 + 手写段**：逻辑与 DOM 层**已验**（粒子铺满 `20→1260`、遮罩揭示、`inert` + `pointer-events`、登录态与动画并行、rAF 被节流时遮罩仍按时卸载、减弱动态不再等满地板——见启动动画设计文档 §9 与字样设计文档 §11），字形几何也有回归测试；但**观感未真机过目**（字形经用户在预览页过目一轮并已按反馈重画）。需**重打安装包**后看 4.5s 四段衔接、笔迹质感、音效音量。
 > 3. **标题栏 + 默认最大化**：**完全未真机验证**——高度/配色/拖拽手感/与窗口控件避让/Win11 贴靠布局/最大化与还原往返。
 > 4. **浏览器端窄屏**：把窗口拖窄到 900px 以下，登录页右栏字样应隐藏、卡片居中。
+> 5. **嵌入客户端后的真机验证**（端到端已在真实 Electron 里验过：`isSecureContext=true`、`crypto.subtle` 存在、跨域 REST 200、WS OPEN、React 渲染出登录页——见嵌入设计文档 §10）：装包后**断网启动**应仍能进登录页（这是嵌入的主要收益），恢复联网后登录与实时消息正常。
 
 **二期主线**（总规格 `2026-10-13-heming-platform-design.md` §9）：
 1. **MCP 接口区**：stdio/HTTP transport、命名空间前缀注册、渐进发现、白名单外危险操作 HITL 确认（参考调研报告 §3）。
@@ -110,6 +115,7 @@ packages/
 6. **群管理**：成员删减/踢人 UI、群主权限。
 
 **技术债/遗留**（各批次终审均裁定「可留后续」，详见对应计划文件与账本注释）：
+- **嵌入客户端**（用户已确认另开一批）：**无自动更新**——已装客户端拿不到新 UI，需重装；设置页也没有「当前 UI 版本 vs 云端版本」的对照，排查「为什么我这没有新功能」时得靠问。发布变成两处（云端 + 桌面端），只发一处会版本不一致。
 - **语音通话**（终审批准延期）：ICE failed 后的自动重连、`disconnected` 状态提示、WS 断连重新协商、本地流断开重取（规格 §5.4 仅实现「failed 5s 挂断」）；通话中邀请新成员后期加入（§5.5）；通话中底部横幅条与「回到通话」（§6.4）；群面板逐成员在线状态（§6.2）；群聊「超过 6 人」提示（§6.4）；E2E 双标签真机通话测试（§8.5，建议云端真机验证替代）；`GET /api/ice-servers` 无鉴权——配置 TURN 时凭据对未登录者可读，属部署层风险（与规格 §7.3 一致）。
 - **启动动画 + 手写字样**（终审后有 3 轮修复，见启动动画设计文档 §9 与字样设计文档 §11）：四角 2px 粒子重合；规格 §4 圆点「轻微呼吸缩放」未实现（圆点 1.4s 起放大、1.8s 满尺寸，而 splash 3.2s 关闭——可用的静止窗口很短，呼吸基本看不出来）；`WAVE_MS` 在 web 与 desktop 各写一份无跨包断言（字形已加 drift 守卫，时序常量还没）；`backgroundThrottling: false` 覆盖窗口整个生命周期（被遮挡/最小化时不再省电）；纯浏览器直开时每次加载都播 1.3s 声波段；手写段无「收笔笔锋/墨迹渐干」细节，是干净的单线描边收尾。
 - 撤回时限与「撤回占位原文」；表情回应种类数封顶（服务端未限 20 种）；语音消息转文字；转发嵌套深度限制；上传进度条；会话级文件 ACL；CSP；Electron safeStorage（密钥落盘加密）；网页端 HTTPS 化。
@@ -130,9 +136,12 @@ packages/
 ## 6. 快速上手命令
 
 ```bash
-pnpm -r build && pnpm -r test      # 全量门禁
-pnpm --filter @heming/web dev      # 本地前端（:5173，代理到本地 server）
-pnpm --filter @heming/desktop dist # 重打安装包
+pnpm -r build && pnpm -r test       # 全量门禁
+pnpm --filter @heming/web dev       # 本地前端（:5173，代理到本地 server）
+pnpm -w run dist:desktop            # 重打安装包（会先构建嵌入的 web 产物，注入 VITE_API_BASE）
+pnpm --filter @heming/desktop dev   # 直接跑桌面壳（连 HEMING_DEV_URL 时用于本地联调）
 ```
+
+**改了 web 代码要两处分别发布**：云端（`docs/deploy.md` §2–§3，浏览器访问用）+ 桌面端（重打安装包，嵌入产物随包）。只发一处会出现「浏览器是新的、已装客户端是旧的」。详见 `docs/deploy.md` §10。
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。
