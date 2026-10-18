@@ -13,6 +13,7 @@ import { RadarContacts } from "./components/RadarContacts.js";
 import { HomePage } from "./components/HomePage.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { MemoryPage } from "./components/MemoryPage.js";
+import { BootWave } from "./components/BootWave.js";
 
 /** Alt+1–Alt+5 目标页（1 主页、2 工作区、3 接口区、4 记忆区、5 设置区）。 */
 const SHORTCUT_PAGES: Page[] = [
@@ -30,6 +31,19 @@ function fmtBytes(n: number): string {
 }
 
 export function App() {
+  // 启动动画：BootWave 完成前只显示波纹，完成后才挂载登录页/主界面（避免启动帧闪一下真实 UI）。
+  const [bootDone, setBootDone] = useState(false);
+  const handleBootDone = useCallback(() => setBootDone(true), []);
+
+  if (!bootDone) {
+    return <BootWave onDone={handleBootDone} />;
+  }
+
+  return <AppShell />;
+}
+
+/** 登录页/主界面内容：由 App 在启动动画完成后渲染。 */
+function AppShell() {
   const authStatus = useAuthStore((s) => s.status);
   const authUser = useAuthStore((s) => s.user);
   const restore = useAuthStore((s) => s.restore);
@@ -40,6 +54,7 @@ export function App() {
 
   const [files, setFiles] = useState<SharedFileMeta[]>([]);
   const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
+
   /** 右栏文件行 hover「预览」的目标文件（null = 模态关闭）。 */
   const [previewFile, setPreviewFile] = useState<SharedFileMeta | null>(null);
   const refreshFiles = useCallback(() => {

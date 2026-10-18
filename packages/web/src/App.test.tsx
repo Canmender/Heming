@@ -1,9 +1,19 @@
+import { useEffect } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { App } from "./App.js";
 import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
 import { setToken, fetchFileBlobText } from "./lib/api.js";
+
+// 启动动画集成：BootWave 以「挂载即 onDone」桩替换，动画完成后 App 路由到登录页/主界面。
+// 自动完成的 BootWave 桩让既有用例聚焦认证/右栏/导航行为；完整的门禁路由用例见 App.boot.test.tsx。
+vi.mock("./components/BootWave.js", () => ({
+  BootWave: ({ onDone }: { onDone: () => void }) => {
+    useEffect(() => { onDone(); }, [onDone]);
+    return null;
+  },
+}));
 
 // 预览接线用：文件内容取纯文本走独立函数（其余 api 保持真实实现）
 vi.mock("./lib/api.js", async (importOriginal) => {
