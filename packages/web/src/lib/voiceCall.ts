@@ -159,6 +159,7 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
         setState((s) => ({ ...s, error: "仅桌面端支持语音通话" }));
         return;
       }
+      if (peerIds.length === 0) return;
       if (callIdRef.current) {
         setState((s) => ({ ...s, error: "已有通话进行中" }));
         return;
@@ -225,7 +226,8 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
         });
         for (const track of stream.getTracks()) pc.addTrack(track, stream);
         await pc.setRemoteDescription({ type: "offer", sdp: invite.sdp });
-        // flush accept 之前缓存的远端 candidates（此时 PC 已就绪）
+        // C2：flush accept 之前缓存的远端 candidates（此时 PC 已就绪）。
+        // 按对端精确：只把属于本对端的 candidate 加进本 PC。
         const pending = pendingCandidatesRef.current.get(callId);
         if (pending) {
           for (const cand of pending) pc.addIceCandidate(cand).catch(() => {});
@@ -312,10 +314,11 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
             });
             return;
           }
+          // C2：invite 带 fromUserId（服务端从认证身份填，防伪造）——被叫此刻即知对端身份
           const info: IncomingCallInfo = {
             callId: event.callId,
             conversationId: event.conversationId,
-            initiatorId: "",
+            initiatorId: event.fromUserId,
           };
           pendingInvitesRef.current.set(event.callId, { ...info, sdp: event.sdp });
           // 记下 callId：accept 之前若先收到远端 ICE（caller 已 trickle），
@@ -328,10 +331,9 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
             conversationId: event.conversationId,
             role: "callee",
             status: "ringing",
-            // 被叫此时不知道对端是谁（invite 不携带发起方 ID），peerIds 留空；
-            // 面板据此不渲染参与者列表（否则 peerNames.get("") 落空、只剩灰点）。
-            // accept() 之后才用 invite.initiatorId 填充真实 peer。
-            peerIds: [],
+            // C2：invite 带 fromUserId → peerIds 填 [fromUserId]（面板可显示对端名）；
+            // accept() 之后用 invite.initiatorId 覆盖，保证多对端场景精确。
+            peerIds: [event.fromUserId],
             startedAt: null,
             muted: false,
             error: null,
@@ -340,11 +342,14 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
           break;
         }
         case "voice_call_accept": {
-          // 对方接听，将 answer SDP 设为本端 PC 的远端描述。
-          // 限制：voice_call_accept 无 peerId/initiatorId，mesh 场景会把同一条 answer
-          // 应用到所有 connecting PC，导致 setRemoteDescription 错配（catch 兜底后该 PC
-          // 永久停在 connecting）。根治需 Task 1 在契约中为 accept/ice 增加 initiatorId。
-          for (const [, peer] of peersRef.current) {
+          // 对方接听，将 answer SDP 设为对端 PC 的远端描述。
+          // C2：accept 带 fromUserId → 只把 answer 应用到该对端的 PC（Mesh 精确路由，
+          // 不再广播到所有 connecting PC——旧实现会把 answer 错配到其他 peer）。
+          // 无匹配 PC 的异常时序兜底全量应用，避免对端永久卡 connecting。
+          const peers = [...peersRef.current.values()];
+          const matched = peers.filter((p) => p.userId === event.fromUserId);
+          const targets = matched.length > 0 ? matched : peers;
+          for (const peer of targets) {
             if (peer.state === "connecting") {
               peer.pc
                 .setRemoteDescription({ type: "answer", sdp: event.sdp })
@@ -386,11 +391,15 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
             pendingCandidatesRef.current.set(event.callId, buf);
             break;
           }
-          // 添加 ICE candidate 到所有 PC。
-          // 限制：1:1 精确；mesh 场景 candidate 不携带对端标识，会广播到所有 PC
-          //（与 voice_call_accept 同源问题，需 Task 1 契约补充 initiatorId 才能根治）。
-          for (const [, peer] of peersRef.current) {
+          // C2：ice 带 fromUserId → 只加入该对端的 PC（Mesh 精确路由）。
+          // 未知对端（尚未 accept/未在 peersRef）的 candidate 缓存待 accept 后 flush。
+          const peer = peersRef.current.get(event.fromUserId);
+          if (peer) {
             peer.pc.addIceCandidate({ candidate: event.candidate }).catch(() => {});
+          } else {
+            const buf = pendingCandidatesRef.current.get(event.callId) ?? [];
+            buf.push({ candidate: event.candidate });
+            pendingCandidatesRef.current.set(event.callId, buf);
           }
           break;
         }

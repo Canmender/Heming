@@ -3304,21 +3304,24 @@ describe("renderTextWithMentions", () => {
   });
 });
 
-describe("语音通话桌面通知接线（Task 5 fix）", () => {
-  /** 设置 __heming_voice_call 桥接 mock（jsdom 无 preload，测试内手动挂载）。 */
-  function installVoiceBridge() {
-    const notify = vi.fn();
-    const off = vi.fn();
-    const onMinimize = vi.fn((_cb: () => void) => off);
-    const bridge = { notify, onMinimize };
-    Object.defineProperty(window, "__heming_voice_call", {
-      configurable: true,
-      writable: true,
-      value: bridge,
-    });
-    return { bridge, notify, onMinimize, off };
-  }
+/**
+ * 设置 __heming_voice_call 桥接 mock（jsdom 无 preload，测试内手动挂载）。
+ * 提升到模块级：群聊发起通话测试（C1）与桌面通知测试共用。
+ */
+function installVoiceBridge() {
+  const notify = vi.fn();
+  const off = vi.fn();
+  const onMinimize = vi.fn((_cb: () => void) => off);
+  const bridge = { notify, onMinimize };
+  Object.defineProperty(window, "__heming_voice_call", {
+    configurable: true,
+    writable: true,
+    value: bridge,
+  });
+  return { bridge, notify, onMinimize, off };
+}
 
+describe("语音通话桌面通知接线（Task 5 fix）", () => {
   afterEach(() => {
     delete (window as unknown as { __heming_voice_call?: unknown }).__heming_voice_call;
   });
@@ -3338,6 +3341,7 @@ describe("语音通话桌面通知接线（Task 5 fix）", () => {
         conversationId: "c1",
         callId: "call-1",
         sdp: "v=0",
+        fromUserId: "u2",
       });
     });
     await act(async () => {});
@@ -3359,6 +3363,7 @@ describe("语音通话桌面通知接线（Task 5 fix）", () => {
         conversationId: "c1",
         callId: "call-1",
         sdp: "v=0",
+        fromUserId: "u2",
       });
     });
     // 再次触发一次渲染（无关状态更新），status/role/callId 未变
@@ -3368,6 +3373,7 @@ describe("语音通话桌面通知接线（Task 5 fix）", () => {
         conversationId: "c1",
         callId: "call-1",
         candidate: "candidate:1",
+        fromUserId: "u2",
       });
     });
     await act(async () => {});
@@ -3390,6 +3396,7 @@ describe("语音通话桌面通知接线（Task 5 fix）", () => {
         conversationId: "c1",
         callId: "call-x",
         sdp: "v=0",
+        fromUserId: "u2",
       });
     });
     await act(async () => {});
@@ -3450,6 +3457,7 @@ describe("语音通话桌面通知接线（Task 5 fix）", () => {
           conversationId: "c1",
           callId: "call-web",
           sdp: "v=0",
+          fromUserId: "u2",
         });
       });
     }).not.toThrow();
@@ -3457,5 +3465,163 @@ describe("语音通话桌面通知接线（Task 5 fix）", () => {
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({ type: "voice_call_reject", reason: "busy" }),
     );
+  });
+});
+
+describe("语音通话群聊发起入口（C1）", () => {
+  let restoreMedia: (() => void) | undefined;
+
+  beforeEach(() => {
+    // 外层 ChatPage describe 的 store/mock 初始化（C1 为独立 describe，需复制必要设置）
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:mock`);
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.mocked(connectWs).mockReset();
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() });
+    vi.mocked(hasSubtle).mockReturnValue(true);
+    vi.mocked(sealMessage).mockReset();
+    vi.mocked(sealMessage).mockImplementation(stubSeal as never);
+    vi.mocked(streamChat).mockReset();
+    vi.mocked(streamChat).mockResolvedValue("");
+    useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
+    useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
+    useUiStore.setState({
+      page: "chat",
+      navCollapsed: true,
+      activeConversationId: "c1",
+      pendingAttachment: null,
+    });
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
+      friends: [],
+      incoming: [],
+      messages: {},
+      reads: {},
+      streaming: {},
+      streamOwner: {},
+      plainById: {},
+      pendingE2e: {},
+    });
+    memoryStore.updateSettings({ enabled: false });
+    for (const s of skillPool.list()) skillPool.setEnabled(s.id, false);
+
+    // WebRTC / getUserMedia 桩
+    class MockPC {
+      static instances: MockPC[] = [];
+      localDescription: RTCSessionDescription | null = null;
+      remoteDescription: RTCSessionDescription | null = null;
+      iceGatheringState = "complete";
+      iceConnectionState = "new";
+      connectionState = "new";
+      closed = false;
+      candidates: unknown[] = [];
+      constructor(public config: RTCConfiguration) {
+        MockPC.instances.push(this);
+      }
+      createOffer() {
+        return Promise.resolve({ type: "offer", sdp: "v=0 mock-offer" });
+      }
+      createAnswer() {
+        return Promise.resolve({ type: "answer", sdp: "v=0 mock-answer" });
+      }
+      setLocalDescription(desc: RTCSessionDescriptionInit) {
+        this.localDescription = desc as RTCSessionDescription;
+        return Promise.resolve();
+      }
+      setRemoteDescription(desc: RTCSessionDescriptionInit) {
+        this.remoteDescription = desc as RTCSessionDescription;
+        return Promise.resolve();
+      }
+      addIceCandidate(candidate: RTCIceCandidateInit) {
+        this.candidates.push(candidate);
+        return Promise.resolve();
+      }
+      addTrack() {
+        return { track: null } as RTCRtpSender;
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+    vi.stubGlobal("RTCPeerConnection", MockPC);
+    const trackStop = vi.fn();
+    const stream = {
+      getTracks: () => [{ stop: trackStop }],
+      getAudioTracks: () => [{ stop: trackStop, enabled: true }],
+    };
+    const orig = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream), enumerateDevices: vi.fn().mockResolvedValue([]) },
+    });
+    restoreMedia = () => {
+      if (orig) Object.defineProperty(navigator, "mediaDevices", orig);
+      else Reflect.deleteProperty(navigator, "mediaDevices");
+    };
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (window as unknown as { __heming_voice_call?: unknown }).__heming_voice_call;
+    restoreMedia?.();
+  });
+
+  it("群聊渲染电话按钮（aria-label=发起群通话）", async () => {
+    installVoiceBridge();
+    const send = await setupGroupChat();
+    expect(send).toBeDefined();
+    expect(screen.getByLabelText("发起群通话")).toBeInTheDocument();
+  });
+
+  it("点击群通话按钮弹确认「邀请 0 人加入通话？」，确认后不发 invite（0 peer）", async () => {
+    installVoiceBridge();
+    const send = await setupGroupChat();
+
+    fireEvent.click(screen.getByLabelText("发起群通话"));
+    expect(screen.getByText("邀请 0 人加入通话？")).toBeInTheDocument();
+
+    // 群成员含 u1（自己）与 agent（system-assistant），人类仅 u1 → 0 个可邀 peer → 不发起
+    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("群聊含其他人类成员时，确认后发出 invite 并带 peerIds", async () => {
+    installVoiceBridge();
+    const other: Member = { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer };
+    const send = await setupGroupChat([...inGroupMembers, other]);
+
+    fireEvent.click(screen.getByLabelText("发起群通话"));
+    expect(screen.getByText("邀请 1 人加入通话？")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "voice_call_invite",
+          conversationId: "c1",
+          callId: expect.any(String),
+          sdp: expect.any(String),
+        }),
+      ),
+    );
+  });
+
+  it("确认弹窗可取消，取消后不发 invite", async () => {
+    installVoiceBridge();
+    const other: Member = { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer };
+    const send = await setupGroupChat([...inGroupMembers, other]);
+
+    fireEvent.click(screen.getByLabelText("发起群通话"));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByText("邀请 1 人加入通话？")).not.toBeInTheDocument();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("非群聊（direct）不渲染「发起群通话」按钮", async () => {
+    installVoiceBridge();
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+    expect(screen.queryByLabelText("发起群通话")).not.toBeInTheDocument();
   });
 });

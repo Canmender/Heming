@@ -354,17 +354,21 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     n: z.number().int().min(0).optional(),
   }),
   // —— 语音通话信令事件（服务端 → 客户端广播镜像）——
+  // fromUserId 仅存在于服务端事件：Mesh 通话用于标识对端（invite 发起方 / accept 应答方 /
+  // ice 发送方），由服务端从认证身份填，客户端不可见不可伪造（Zod strip 兜底）。
   z.object({
     type: z.literal("voice_call_invite"),
     conversationId: z.string().min(1),
     callId: z.string().min(1),
     sdp: z.string().min(1),
+    fromUserId: z.string().min(1),
   }),
   z.object({
     type: z.literal("voice_call_accept"),
     conversationId: z.string().min(1),
     callId: z.string().min(1),
     sdp: z.string().min(1),
+    fromUserId: z.string().min(1),
   }),
   z.object({
     type: z.literal("voice_call_reject"),
@@ -382,6 +386,7 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     conversationId: z.string().min(1),
     callId: z.string().min(1),
     candidate: z.string().min(1),
+    fromUserId: z.string().min(1),
   }),
 ]);
 export type WsServerEvent = z.infer<typeof WsServerEventSchema>;

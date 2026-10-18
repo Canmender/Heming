@@ -171,6 +171,7 @@ describe("useVoiceCall", () => {
         conversationId: "c1",
         callId: "call-x",
         sdp: "v=0 mock-offer-from-u2",
+        fromUserId: "u2",
       } as WsServerEvent);
     });
 
@@ -182,9 +183,10 @@ describe("useVoiceCall", () => {
       conversationId: "c1",
       role: "callee",
       status: "ringing",
+      // C2：invite 带 fromUserId → peerIds 填 [fromUserId]（面板可显示对端名）
+      peerIds: ["u2"],
+      incoming: { callId: "call-x", conversationId: "c1", initiatorId: "u2" },
     });
-    // 被叫在 accept 前不知道对端是谁：peerIds 必须为空（面板据此不渲染空名灰点）
-    expect(result.current.state.peerIds).toEqual([]);
   });
 
   it("accept() 应答来电：创建 PC、setRemoteDescription(offer)、发送 accept", async () => {
@@ -197,6 +199,7 @@ describe("useVoiceCall", () => {
         conversationId: "c1",
         callId: "call-y",
         sdp: "v=0 mock-offer",
+        fromUserId: "u2",
       } as WsServerEvent);
     });
 
@@ -227,6 +230,7 @@ describe("useVoiceCall", () => {
         conversationId: "c1",
         callId: "call-z",
         sdp: "v=0",
+        fromUserId: "u2",
       } as WsServerEvent);
     });
 
@@ -257,6 +261,7 @@ describe("useVoiceCall", () => {
         conversationId: "c1",
         callId: "call-reject-state",
         sdp: "v=0 mock-offer",
+        fromUserId: "u2",
       } as WsServerEvent);
     });
     expect(result.current.state).toMatchObject({
@@ -286,6 +291,7 @@ describe("useVoiceCall", () => {
         conversationId: "c1",
         callId: result.current.state.callId!,
         sdp: "v=0 mock-answer",
+        fromUserId: "u2",
       } as WsServerEvent);
     });
 
@@ -326,6 +332,7 @@ describe("useVoiceCall", () => {
         conversationId: "c1",
         callId: result.current.state.callId!,
         candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
+        fromUserId: "u2",
       } as WsServerEvent);
     });
 
@@ -349,6 +356,7 @@ describe("useVoiceCall", () => {
         conversationId: "c9",
         callId: "call-other",
         sdp: "v=0",
+        fromUserId: "u9",
       } as WsServerEvent);
     });
 
@@ -375,6 +383,7 @@ describe("useVoiceCall", () => {
         conversationId: "c1",
         callId: "call-web",
         sdp: "v=0",
+        fromUserId: "u2",
       } as WsServerEvent);
     });
 
@@ -450,6 +459,7 @@ describe("useVoiceCall", () => {
         conversationId: "c1",
         callId: "call-pending-ice",
         sdp: "v=0 mock-offer",
+        fromUserId: "u2",
       } as WsServerEvent);
     });
 
@@ -460,6 +470,7 @@ describe("useVoiceCall", () => {
         conversationId: "c1",
         callId: "call-pending-ice",
         candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
+        fromUserId: "u2",
       } as WsServerEvent);
     });
     expect(MockRTCPeerConnection.instances).toHaveLength(0);
@@ -504,5 +515,73 @@ describe("useVoiceCall", () => {
       result.current.toggleMute();
     });
     expect(result.current.state.muted).toBe(false);
+  });
+
+  it("带 fromUserId 的 invite → incoming.initiatorId 为该 id", () => {
+    const send = vi.fn();
+    const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+
+    act(() => {
+      result.current.handleServerEvent({
+        type: "voice_call_invite",
+        conversationId: "c1",
+        callId: "call-ini",
+        sdp: "v=0",
+        fromUserId: "u2",
+      } as WsServerEvent);
+    });
+
+    expect(result.current.state.incoming).toMatchObject({
+      callId: "call-ini",
+      conversationId: "c1",
+      initiatorId: "u2",
+    });
+  });
+
+  it("accept 只对 fromUserId 匹配的 PC 设 answer（Mesh 多对端精确路由）", async () => {
+    const send = vi.fn();
+    const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+    await act(async () => {
+      await result.current.call("c1", ["u2", "u3"]);
+    });
+
+    act(() => {
+      result.current.handleServerEvent({
+        type: "voice_call_accept",
+        conversationId: "c1",
+        callId: result.current.state.callId!,
+        sdp: "v=0 mock-answer-from-u2",
+        fromUserId: "u2",
+      } as WsServerEvent);
+    });
+
+    const [pcU2, pcU3] = MockRTCPeerConnection.instances;
+    expect(pcU2.remoteDescription).toMatchObject({ type: "answer", sdp: "v=0 mock-answer-from-u2" });
+    expect(pcU3.remoteDescription).toBeNull();
+    expect(result.current.state.status).toBe("active");
+  });
+
+  it("带 fromUserId 的 ice 只加入匹配 PC，其他 PC 不收", async () => {
+    const send = vi.fn();
+    const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+    await act(async () => {
+      await result.current.call("c1", ["u2", "u3"]);
+    });
+
+    const cand = "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host";
+    await act(async () => {
+      await result.current.handleServerEvent({
+        type: "voice_call_ice",
+        conversationId: "c1",
+        callId: result.current.state.callId!,
+        candidate: cand,
+        fromUserId: "u3",
+      } as WsServerEvent);
+    });
+
+    const [pcU2, pcU3] = MockRTCPeerConnection.instances;
+    expect(pcU2.candidates).toHaveLength(0);
+    expect(pcU3.candidates).toHaveLength(1);
+    expect(pcU3.candidates[0]).toMatchObject({ candidate: cand });
   });
 });

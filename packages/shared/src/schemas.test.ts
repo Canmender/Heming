@@ -723,11 +723,33 @@ describe("voice_call 契约", () => {
 
   it("服务端事件镜像：voice_call_invite / accept / reject / hangup / ice 均可解析", () => {
     const base = { conversationId: "c1", callId: "call-1" };
-    expect(WsServerEventSchema.safeParse({ type: "voice_call_invite", ...base, sdp: "v=0" }).success).toBe(true);
-    expect(WsServerEventSchema.safeParse({ type: "voice_call_accept", ...base, sdp: "v=0" }).success).toBe(true);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_invite", ...base, sdp: "v=0", fromUserId: "u1" }).success).toBe(true);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_accept", ...base, sdp: "v=0", fromUserId: "u2" }).success).toBe(true);
     expect(WsServerEventSchema.safeParse({ type: "voice_call_reject", ...base, reason: "busy" }).success).toBe(true);
     expect(WsServerEventSchema.safeParse({ type: "voice_call_hangup", ...base }).success).toBe(true);
-    expect(WsServerEventSchema.safeParse({ type: "voice_call_ice", ...base, candidate: "c:1" }).success).toBe(true);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_ice", ...base, candidate: "c:1", fromUserId: "u1" }).success).toBe(true);
+  });
+
+  it("服务端 voice_call_invite / accept / ice 必带 fromUserId（Mesh 对端路由防伪造）", () => {
+    const base = { conversationId: "c1", callId: "call-1" };
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_invite", ...base, sdp: "v=0" }).success).toBe(false);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_accept", ...base, sdp: "v=0" }).success).toBe(false);
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_ice", ...base, candidate: "c:1" }).success).toBe(false);
+  });
+
+  it("客户端 voice_call_invite / accept / ice 不带 fromUserId（带也被 strip）", () => {
+    const base = { conversationId: "c1", callId: "call-1" };
+    for (const type of ["voice_call_invite", "voice_call_accept", "voice_call_ice"] as const) {
+      const r = WsClientEventSchema.safeParse({
+        type,
+        ...base,
+        sdp: "v=0",
+        candidate: "c:1",
+        fromUserId: "spoofed",
+      });
+      expect(r.success).toBe(true);
+      expect(r.success && (r.data as Record<string, unknown>).fromUserId).toBeUndefined();
+    }
   });
 });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import net from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,9 +19,9 @@ let groupId: string;
 // 独占临时库：默认 ./data/heming.db 会跨文件并行锁冲突、跨次运行 alice 撞 UNIQUE（"username taken"）。
 let dbDir: string;
 
-function connect(token: string): Promise<WebSocket> {
+function connect(token: string, port?: number): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${ctx.port}/api/ws?token=${token}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port ?? ctx.port}/api/ws?token=${token}`);
     ws.once("open", () => resolve(ws));
     ws.once("error", reject);
   });
@@ -477,6 +477,128 @@ describe("ws", () => {
     if (event.type === "error") expect(event.code).toBe("forbidden");
     s.close();
   });
+
+  it("voice_call_invite 定向投递带 fromUserId=发起方（Mesh 对端路由）", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: convId,
+      callId: "call-from-1",
+      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
+    }));
+    const event = await bWait;
+    expect(event.type).toBe("voice_call_invite");
+    if (event.type === "voice_call_invite") {
+      expect(event.fromUserId).toBe(aliceId);
+    }
+    a.close();
+    b.close();
+  });
+
+  it("voice_call_accept 定向投递带 fromUserId=接收方", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bInviteWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: convId,
+      callId: "call-from-2",
+      sdp: "v=0",
+    }));
+    await bInviteWait;
+    const aWait = nextEvent(a);
+    b.send(JSON.stringify({
+      type: "voice_call_accept",
+      conversationId: convId,
+      callId: "call-from-2",
+      sdp: "v=0",
+    }));
+    const event = await aWait;
+    expect(event.type).toBe("voice_call_accept");
+    if (event.type === "voice_call_accept") {
+      expect(event.fromUserId).toBe(bobId);
+    }
+    a.close();
+    b.close();
+  });
+
+  it("voice_call_ice 定向投递带 fromUserId=发送方", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bInviteWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: convId,
+      callId: "call-from-3",
+      sdp: "v=0",
+    }));
+    await bInviteWait;
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_ice",
+      conversationId: convId,
+      callId: "call-from-3",
+      candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
+    }));
+    const event = await bWait;
+    expect(event.type).toBe("voice_call_ice");
+    if (event.type === "voice_call_ice") {
+      expect(event.fromUserId).toBe(aliceId);
+    }
+    a.close();
+    b.close();
+  });
+
+  it("群聊 voice_call_invite 投递给所有其他成员（非发起方），各带 fromUserId", async () => {
+    // groupId：alice（发起方）+ bob。alice 发 invite → bob 收到且 fromUserId=alice。
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: groupId,
+      callId: "call-group-1",
+      sdp: "v=0",
+    }));
+    const event = await bWait;
+    expect(event.type).toBe("voice_call_invite");
+    if (event.type === "voice_call_invite") {
+      expect(event.conversationId).toBe(groupId);
+      expect(event.fromUserId).toBe(aliceId);
+    }
+    a.close();
+    b.close();
+  });
+
+  it("群聊 voice_call_ice 投递给其他参与者（非发起方）", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bInviteWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: groupId,
+      callId: "call-group-2",
+      sdp: "v=0",
+    }));
+    await bInviteWait;
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_ice",
+      conversationId: groupId,
+      callId: "call-group-2",
+      candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
+    }));
+    const event = await bWait;
+    expect(event.type).toBe("voice_call_ice");
+    if (event.type === "voice_call_ice") {
+      expect(event.conversationId).toBe(groupId);
+      expect(event.fromUserId).toBe(aliceId);
+    }
+    a.close();
+    b.close();
+  });
 });
 
 describe("agent streaming", () => {
@@ -915,5 +1037,52 @@ describe("voice_call 多连接清理（T2 评审修复）", () => {
     }
 
     b.close();
+  });
+});
+
+describe("ringing 超时兜底（C3）", () => {
+  it("超时未接听的通话自动向双方补发 reject(timeout) 并清理 activeCalls", async () => {
+    // 用独立 server 实例注入短超时（200ms）+ 短扫描间隔（50ms），避免 fake timers 破坏 WS 连接
+    const { createServer } = await import("node:http");
+    const { attachWs } = await import("./ws.js");
+    const httpServer = createServer();
+    attachWs(httpServer, store, { ringTimeoutMs: 200, ringSweepIntervalMs: 50 });
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const address = httpServer.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+
+    const a = await connect(issueToken(aliceId), port);
+    const b = await connect(issueToken(bobId), port);
+
+    const aReject = nextEvent(a);
+    const bInvite = nextEvent(b);
+    a.send(
+      JSON.stringify({
+        type: "voice_call_invite",
+        conversationId: convId,
+        callId: "call-timeout-1",
+        sdp: "v=0",
+      }),
+    );
+    // 被叫先收到 invite（不清，模拟无人接听）
+    await bInvite;
+
+    // 超时后：发起方收到 reject(timeout)，被叫收到 hangup
+    const bHangup = nextEvent(b);
+    const aEvent = await aReject;
+    expect(aEvent.type).toBe("voice_call_reject");
+    if (aEvent.type === "voice_call_reject") {
+      expect(aEvent.callId).toBe("call-timeout-1");
+      expect(aEvent.reason).toBe("timeout");
+    }
+    const bEvent = await bHangup;
+    expect(bEvent.type).toBe("voice_call_hangup");
+    if (bEvent.type === "voice_call_hangup") {
+      expect(bEvent.callId).toBe("call-timeout-1");
+    }
+
+    a.close();
+    b.close();
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
   });
 });

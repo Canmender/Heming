@@ -556,6 +556,8 @@ export function ChatPage() {
       ? (window as unknown as { __heming_voice_call?: VoiceCallBridge }).__heming_voice_call
       : undefined;
   const isElectron = voiceBridge !== undefined;
+  /** C1 群聊发起通话确认弹窗开关（null=关；非空=显示确认）。 */
+  const [groupCallConfirm, setGroupCallConfirm] = useState(false);
   const voiceCall = useVoiceCall({
     send: (e) => wsHandleRef.current?.send(e),
     myUserId: me?.id ?? "",
@@ -573,6 +575,18 @@ export function ChatPage() {
     }
     return map;
   }, [conv, groupMembers]);
+
+  /**
+   * C1 群聊 Mesh 通话：从群成员快照取「其他人类成员」作为通话 peer。
+   * 只认本群（groupMembers.convId === convId）；agent 无设备公钥不参与通话。
+   */
+  const groupCallPeerIds = useMemo(() => {
+    if (!isGroup || groupMembers?.convId !== convId) return [];
+    return groupMembers.userIds.filter((id) => id !== me?.id);
+  }, [isGroup, groupMembers, convId, me?.id]);
+  /** C1 确认弹窗是否可发起：群聊 + idle + 桌面端 + 成员已加载。 */
+  const canInitiateGroupCall =
+    isGroup && voiceCall.state.status === "idle" && isElectron && groupMembers?.convId === convId;
 
   // —— 语音通话桌面通知接线（Task 5 fix）：仅桌面端生效，网页端（桥接缺失）静默跳过 ——
   // 通话状态存 ref：onMinimize 回调挂载期订阅一次，需读取最新状态避免闭包过期。
@@ -1472,10 +1486,52 @@ export function ChatPage() {
             <PhoneIcon width={17} height={17} />
           </button>
         )}
+        {canInitiateGroupCall && (
+          <button
+            type="button"
+            aria-label="发起群通话"
+            className="rounded-lg p-1.5 hover:bg-[#f3f3f3]"
+            onClick={() => setGroupCallConfirm(true)}
+          >
+            <PhoneIcon width={17} height={17} />
+          </button>
+        )}
+        {groupCallConfirm && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+            onClick={() => setGroupCallConfirm(false)}
+          >
+            <div
+              className="w-[280px] rounded-xl border border-[#ececec] bg-white p-3 shadow-card"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 text-[13px] font-bold">邀请 {groupCallPeerIds.length} 人加入通话？</div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                  onClick={() => setGroupCallConfirm(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+                  onClick={() => {
+                    setGroupCallConfirm(false);
+                    void voiceCall.call(convId, groupCallPeerIds);
+                  }}
+                >
+                  确认
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <button
           type="button"
           aria-label="会话信息"
-          className={`rounded-lg p-1.5 hover:bg-[#f3f3f3]${infoOpen ? " bg-[#f3f3f3]" : ""}${conv?.type === "direct" && voiceCall.state.status === "idle" ? "" : " ml-auto"}`}
+          className={`rounded-lg p-1.5 hover:bg-[#f3f3f3]${infoOpen ? " bg-[#f3f3f3]" : ""}${conv?.type === "direct" && voiceCall.state.status === "idle" && !canInitiateGroupCall ? "" : " ml-auto"}`}
           onClick={() => setInfoOpen((v) => !v)}
         >
           <MenuIcon width={17} height={17} />

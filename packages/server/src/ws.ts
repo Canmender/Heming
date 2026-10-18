@@ -4,7 +4,24 @@ import { WsClientEventSchema, type WsServerEvent } from "@heming/shared";
 import type { Store } from "./store.js";
 import { userIdFromToken } from "./auth.js";
 
-export function attachWs(server: HttpServer, store: Store): WebSocketServer {
+/** ringing 超时兜底（规格 §4.5）：30s 未接听的通话自动收尾，防 activeCalls 无界增长。 */
+export const RING_TIMEOUT_MS = 30_000;
+const RING_SWEEP_INTERVAL_MS = 5_000;
+
+export interface AttachWsOptions {
+  /** 自定义超时阈值（测试注入用，默认 RING_TIMEOUT_MS）。 */
+  ringTimeoutMs?: number;
+  /** 自定义扫描间隔（测试注入用，默认 RING_SWEEP_INTERVAL_MS）。 */
+  ringSweepIntervalMs?: number;
+}
+
+export function attachWs(
+  server: HttpServer,
+  store: Store,
+  opts: AttachWsOptions = {},
+): WebSocketServer {
+  const ringTimeoutMs = opts.ringTimeoutMs ?? RING_TIMEOUT_MS;
+  const ringSweepIntervalMs = opts.ringSweepIntervalMs ?? RING_SWEEP_INTERVAL_MS;
   const wss = new WebSocketServer({ noServer: true });
   const socketsByUser = new Map<string, Set<WebSocket>>();
 
@@ -69,6 +86,34 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
     }
   }
 
+  // ringing 超时兜底（C3）：超过 RING_TIMEOUT_MS 仍在 ringing 的通话 → 向所有参与者
+  // 补发 voice_call_reject(timeout) 并移除状态。避免被叫离线/未接听时对端永久卡在
+  // 「正在呼叫…」。定时器 .unref() 不阻塞进程退出；wss close 时清除（兜底）。
+  const ringTimeoutTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [callId, call] of activeCalls) {
+      if (call.state === "ringing" && now - call.startedAt > ringTimeoutMs) {
+        // 通知发起方被叫超时
+        sendToUser(call.initiatorId, {
+          type: "voice_call_reject",
+          conversationId: call.conversationId,
+          callId,
+          reason: "timeout",
+        });
+        // 通知被叫方通话已取消
+        for (const peerId of call.peerIds) {
+          sendToUser(peerId, {
+            type: "voice_call_hangup",
+            conversationId: call.conversationId,
+            callId,
+          });
+        }
+        activeCalls.delete(callId);
+      }
+    }
+  }, ringSweepIntervalMs);
+  if (typeof ringTimeoutTimer.unref === "function") ringTimeoutTimer.unref();
+
   // 注：@types/ws 的 "connection" 特化重载只声明 2 参（websocket, request），
   // 本实现经 wss.emit("connection", ws, req, userId) 传入第三参 userId，
   // 会落到 EventEmitter 的泛型重载，_req 需显式注解以通过 strict 检查（零运行时影响）。
@@ -128,6 +173,7 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
               conversationId: event.conversationId,
               callId: event.callId,
               sdp: event.sdp,
+              fromUserId: userId,
             });
           }
         } else if (event.type === "voice_call_accept") {
@@ -141,6 +187,7 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
             conversationId: event.conversationId,
             callId: event.callId,
             sdp: event.sdp,
+            fromUserId: userId,
           });
         } else if (event.type === "voice_call_reject") {
           if (!call || (call.initiatorId !== userId && !call.peerIds.includes(userId))) {
@@ -189,6 +236,7 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
               conversationId: event.conversationId,
               callId: event.callId,
               candidate: event.candidate,
+              fromUserId: userId,
             });
           }
         }
@@ -379,6 +427,11 @@ export function attachWs(server: HttpServer, store: Store): WebSocketServer {
     });
 
     ws.on("error", () => { /* 连接级错误忽略，避免未捕获异常崩溃进程 */ });
+  });
+
+  // wss 关闭时清除 ringing 超时扫描（unref 已保证不阻塞退出，此处为显式兜底）。
+  wss.on("close", () => {
+    clearInterval(ringTimeoutTimer);
   });
 
   return wss;
