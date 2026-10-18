@@ -108,9 +108,8 @@ HEMING_DEV_URL（本地开发，热更新）
 | `packages/desktop/app-protocol.js` | 新增 | 协议服务纯函数（路径解析/穿越防护/MIME/SPA 回落） |
 | `packages/desktop/app-protocol.test.js` | 新增 | 上述纯函数单测（含穿越攻击用例） |
 | `packages/desktop/main.js` | 修改 | 注册 privileged scheme；`protocol.handle`；地址解析与导航白名单；`extraResources` 路径 |
-| `packages/desktop/package.json` | 修改 | `dist` 前置 web 构建；`extraResources` 加 `web-dist`→`web` |
-| `packages/web/package.json` | 修改 | 新增 `build:desktop`（注入 `VITE_API_BASE`） |
-| `scripts/build-desktop-web.mjs` | 新增 | 构建并把 web 产物拷进 `packages/desktop/web-dist`（含 `VITE_API_BASE` 取值与拷贝清理） |
+| `packages/desktop/package.json` | 修改 | `dist` 前置 web 构建；`extraResources` 加 `web-dist`→`web`；`node --check` 列表加 `app-protocol.js` |
+| `scripts/build-desktop-web.mjs` | 新增 | 构建并把 web 产物拷进 `packages/desktop/web-dist`（含 `VITE_API_BASE` 取值与拷贝清理）。**不改 web 的 package.json**——脚本直接调 vite，避免给 web 包加一个只有桌面端用的脚本 |
 | `packages/desktop/main.test.js` | 修改 | 地址优先级、导航白名单、scheme 注册时机断言 |
 | `.gitignore` | 修改 | 忽略 `packages/desktop/web-dist/` |
 | `docs/deploy.md` | 修改 | 补「桌面端嵌入」一节：两套产物、更新方式变化 |

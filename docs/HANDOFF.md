@@ -23,7 +23,7 @@
 | main | 见 `git log -1`（工作区干净） |
 | 测试 | shared 73 / server 186 / web 705 / desktop 110 全绿（`pnpm -r test`） |
 | 线上 | `http://47.92.39.184` 已部署最新版（`docker compose -p heming`） |
-| 安装包 | `packages/desktop/release/和鸣 Setup 0.0.1.exe`（78.3 MB，含全部功能） |
+| 安装包 | `packages/desktop/release/和鸣 Setup 0.0.1.exe`（78.4 MB，含全部功能 + 嵌入的 web 产物） |
 | 账号 | `admin/admin`、`zhoukang/zhoukang`（服务端 `/root/heming/.env` 的 `HEMING_SEED_USERS` 播种；注册功能默认关闭） |
 
 ### 已完成里程碑
