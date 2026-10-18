@@ -1428,36 +1428,15 @@ export function ChatPage() {
         </button>
         {infoOpen && conv && <ChatInfoCard conv={conv} onClose={() => setInfoOpen(false)} />}
       </header>
-      {/* 来电接听横幅（ringing 状态时显示；接听后切全屏面板） */}
+      {/* 来电横幅（ringing 状态时显示）。
+          接听/拒绝按钮不在此渲染：VoiceCallPanel 根节点为 fixed inset-0 z-50，
+          横幅（普通静态流节点、无 z-index）被面板完全遮挡，按钮不可见不可点。
+          按钮已移入面板内的 callee ringing 分支，此横幅仅保留可见的来电提示文案。 */}
       {voiceCall.state.status === "ringing" && (
         <div className="flex items-center justify-between gap-3 border-b border-line-soft bg-[#1a1a2e] px-5 py-2.5 text-white">
           <span className="text-[13px]">
             {voiceCall.state.role === "caller" ? "正在呼叫…" : "来电"}
           </span>
-          {voiceCall.state.incoming && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                aria-label="接听"
-                className="rounded-lg bg-[#4ade80] px-3 py-1.5 text-[12px] font-bold text-white hover:bg-[#22c55e]"
-                onClick={() => {
-                  void voiceCall.accept(voiceCall.state.incoming!.callId);
-                }}
-              >
-                接听
-              </button>
-              <button
-                type="button"
-                aria-label="拒绝"
-                className="rounded-lg bg-[#ef4444] px-3 py-1.5 text-[12px] font-bold text-white hover:bg-[#dc2626]"
-                onClick={() => {
-                  voiceCall.reject(voiceCall.state.incoming!.callId, "decline");
-                }}
-              >
-                拒绝
-              </button>
-            </div>
-          )}
         </div>
       )}
       <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -1910,12 +1889,24 @@ export function ChatPage() {
           </div>
         </div>
       )}
-      {/* 语音通话全屏面板（ringing + active 状态） */}
+      {/* 语音通话全屏面板（ringing + active 状态）
+          onAccept/onReject 仅在 callee ringing 分支内渲染为可见可点的接听/拒绝按钮
+          （面板 fixed inset-0 z-50 覆盖全屏，横幅内的按钮会被遮挡） */}
       <VoiceCallPanel
         state={voiceCall.state}
         peerNames={voicePeerNames}
         onHangup={voiceCall.hangup}
         onToggleMute={voiceCall.toggleMute}
+        onAccept={
+          voiceCall.state.incoming
+            ? () => void voiceCall.accept(voiceCall.state.incoming!.callId)
+            : undefined
+        }
+        onReject={
+          voiceCall.state.incoming
+            ? () => voiceCall.reject(voiceCall.state.incoming!.callId, "decline")
+            : undefined
+        }
       />
     </div>
   );

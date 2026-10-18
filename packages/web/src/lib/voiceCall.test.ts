@@ -183,6 +183,8 @@ describe("useVoiceCall", () => {
       role: "callee",
       status: "ringing",
     });
+    // 被叫在 accept 前不知道对端是谁：peerIds 必须为空（面板据此不渲染空名灰点）
+    expect(result.current.state.peerIds).toEqual([]);
   });
 
   it("accept() 应答来电：创建 PC、setRemoteDescription(offer)、发送 accept", async () => {

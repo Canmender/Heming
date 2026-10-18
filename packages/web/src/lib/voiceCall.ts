@@ -328,7 +328,10 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
             conversationId: event.conversationId,
             role: "callee",
             status: "ringing",
-            peerIds: [""],
+            // 被叫此时不知道对端是谁（invite 不携带发起方 ID），peerIds 留空；
+            // 面板据此不渲染参与者列表（否则 peerNames.get("") 落空、只剩灰点）。
+            // accept() 之后才用 invite.initiatorId 填充真实 peer。
+            peerIds: [],
             startedAt: null,
             muted: false,
             error: null,
