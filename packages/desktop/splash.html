@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>和鸣</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; }
+  body {
+    background: #ffffff;
+    overflow: hidden;
+  }
+  .scene { position: relative; width: 100%; height: 100%; }
+  .particle {
+    position: absolute;
+    width: 2px; height: 2px;
+    background: #1a1a1a;
+    border-radius: 50%;
+    transition: transform 1.5s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .core {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 40px; height: 40px;
+    background: #1a1a1a;
+    border-radius: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    /* 无 transition-delay：.visible 在 DURATION-100ms 才加上，若再叠 1.4s 延迟，
+       核心圆点要到 2.8s 才起放大，而 splash 在 ~1.7s 就被主进程关闭——永远看不见。 */
+    transition: transform 0.4s ease;
+    box-shadow: 0 0 20px rgba(26,26,26,.3);
+  }
+  .core.visible { transform: translate(-50%, -50%) scale(1); }
+</style>
+</head>
+<body>
+<div class="scene" id="scene">
+  <div class="core" id="core"></div>
+</div>
+<script>
+  var PARTICLE_COUNT = 24;
+  var DURATION = 1500;
+
+  // 沿边均匀铺开：t ∈ [0,1] 是该边上的归一化位置，含两端（端点贴 margin 内缩框）。
+  // 抽成纯函数便于单测直接验证真实铺开效果（不是字符串匹配）。
+  function particlePosition(side, t, w, h, margin) {
+    var spanX = w - 2 * margin, spanY = h - 2 * margin;
+    if (side === 0) return { x: t * spanX + margin, y: margin };
+    if (side === 1) return { x: w - margin, y: t * spanY + margin };
+    if (side === 2) return { x: t * spanX + margin, y: h - margin };
+    return { x: margin, y: t * spanY + margin };
+  }
+
+  function createParticles() {
+    var scene = document.getElementById('scene');
+    var w = window.innerWidth, h = window.innerHeight, margin = 20;
+    var perSide = Math.ceil(PARTICLE_COUNT / 4);
+    var counts = [0, 0, 0, 0];
+    var particles = [];
+    for (var i = 0; i < PARTICLE_COUNT; i++) {
+      var p = document.createElement('div');
+      p.className = 'particle';
+      var side = i % 4;
+      // 除以 perSide - 1：t 覆盖 0..1（含两端），末个粒子落在 w - margin。
+      // 旧实现除以 perSide 使 t 只到 5/6，每条边末端 1/6 永远没有粒子。
+      var t = counts[side] / (perSide - 1);
+      counts[side]++;
+      var pos = particlePosition(side, t, w, h, margin);
+      p.style.left = pos.x + 'px';
+      p.style.top = pos.y + 'px';
+      scene.appendChild(p);
+      particles.push({ el: p, x: pos.x, y: pos.y });
+    }
+    return particles;
+  }
+
+  function animateParticles(particles) {
+    var w = window.innerWidth, h = window.innerHeight;
+    var cx = w / 2, cy = h / 2;
+    requestAnimationFrame(function () {
+      particles.forEach(function (p) {
+        p.el.style.transform = 'translate(' + (cx - p.x) + 'px,' + (cy - p.y) + 'px)';
+      });
+    });
+    setTimeout(function () {
+      document.getElementById('core').classList.add('visible');
+    }, DURATION - 100);
+  }
+
+  function playSound() {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      // 浏览器自动播放策略：AudioContext 创建后可能处于 suspended，需 resume
+      var start = ctx.resume().then(function () {
+        return ctx;
+      }).catch(function () {
+        return null;
+      });
+      start.then(function (c) {
+        if (!c) return;
+        var osc = c.createOscillator(), gain = c.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 300;
+        gain.gain.setValueAtTime(0, c.currentTime);
+        gain.gain.linearRampToValueAtTime(0.15, c.currentTime + 0.2);
+        gain.gain.linearRampToValueAtTime(0, c.currentTime + 1.2);
+        osc.connect(gain); gain.connect(c.destination);
+        osc.start(c.currentTime);
+        osc.stop(c.currentTime + 1.2);
+      });
+    } catch (e) { /* 音频不可用静默 */ }
+  }
+
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) {
+    // 减弱动态：直接显示核心圆点（无延迟）
+    var core = document.getElementById('core');
+    core.style.transition = 'none';
+    core.classList.add('visible');
+  } else {
+    var particles = createParticles();
+    playSound();
+    animateParticles(particles);
+  }
+</script>
+</body>
+</html>

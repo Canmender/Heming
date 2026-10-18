@@ -2,6 +2,8 @@
 const { app, BrowserWindow, Menu, dialog, shell, screen } = require("electron");
 const path = require("node:path");
 const { loadWindowState, saveWindowState } = require("./window-state");
+const { shouldShowSplash, splashWindowOptions } = require("./splash-config");
+const { attachSplashLifecycle } = require("./splash-lifecycle");
 
 const pkg = require("./package.json");
 const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins");
@@ -53,6 +55,44 @@ function displayWorkAreas() {
   }
 }
 
+// 启动动画 splash：无边框透明置顶窗口，覆盖**主窗口所在显示器**的工作区，
+// 加载 splash.html（粒子聚拢 1.5s）。HEMING_NO_SPLASH=1 时跳过（E2E/无头环境）。
+//
+// 关闭时机 + 启动信号的事件接线在 splash-lifecycle.js（与 Electron 解耦、可单测）：
+//   did-finish-load 首次 → 等满粒子段 → 关 splash + 发信号；之后每次加载 → 只重发信号；
+//   did-fail-load（非 ERR_ABORTED 主 frame）/ 8s 看门狗 / 主窗口 closed → 兜底关闭。
+function createSplashWindow(mainWin) {
+  if (!shouldShowSplash()) return;
+
+  // 多显示器：主窗口可能被 window-state 恢复到副屏，splash 跟随主窗口所在显示器，
+  // 否则副屏用户只能看到主屏上一块无关的白板。
+  const splash = new BrowserWindow(
+    splashWindowOptions(screen.getDisplayMatching(mainWin.getBounds()).workArea)
+  );
+
+  const lifecycle = attachSplashLifecycle({
+    splash,
+    mainWin,
+    now: Date.now,
+    setTimer: setTimeout,
+    clearTimer: clearTimeout,
+  });
+
+  // show:false 创建，加载完成后再 show()，避免白屏闪烁；加载失败（splash.html 缺失等）
+  // 则直接收尾，避免留下一块没人管的全屏空白置顶层。
+  splash
+    .loadFile(path.join(__dirname, "splash.html"))
+    .then(() => {
+      if (splash.isDestroyed()) return;
+      splash.show();
+      // splash 已在最上层可见，此刻再 show 主窗口，用户看到的是 splash 而非白底主窗口
+      if (!mainWin.isDestroyed() && !mainWin.isVisible()) mainWin.show();
+    })
+    .catch(() => {
+      lifecycle.abort();
+    });
+}
+
 // 单例锁：拿不到锁直接退出；second-instance 时聚焦已存在窗口
 const gotLock = app.requestSingleInstanceLock();
 
@@ -78,11 +118,16 @@ if (!gotLock) {
   function createWindow() {
     const appUrl = resolveAppUrl();
     const bounds = loadWindowState(windowStateFile(), displayWorkAreas());
+    // 有启动动画时不显示主窗口：默认 show:true 会在 splash 之前先把白底主窗口画出来
+    // （白闪）。改由 createSplashWindow 在 splash 可见后再 show()。
+    const withSplash = shouldShowSplash();
 
     const win = new BrowserWindow({
       ...bounds,
       // 自定义标题栏（设计 §3/§4）：隐藏系统栏 + 保留原生控件，内容延伸到窗口顶部
       ...titleBarOptions(process.platform),
+      // 有启动动画时不显示主窗口（见上）：splash 可见后再 show()，避免 splash 之前白闪
+      show: !withSplash,
       backgroundColor: WINDOW_BACKGROUND,
       title: "和鸣",
       webPreferences: {
@@ -90,6 +135,10 @@ if (!gotLock) {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        // backgroundThrottling:false —— 启动动画期间 splash 覆盖整个工作区，主窗口会被
+        // Chromium 判定为被遮挡；开启节流会让 web 端 BootWave 的 rAF/定时器一起被暂停，
+        // 揭示永远推不动、白遮罩永久盖住界面。关掉节流保证声波段照常播放。
+        backgroundThrottling: false,
       },
     });
 
@@ -137,6 +186,8 @@ if (!gotLock) {
       });
     }
 
+    // 先挂 splash 再 loadURL：确保 did-finish-load/did-fail-load 监听器不会漏掉极快的首次加载
+    createSplashWindow(win);
     win.loadURL(appUrl);
     return win;
   }
