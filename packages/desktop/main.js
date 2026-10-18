@@ -60,13 +60,16 @@ function displayWorkAreas() {
 function createSplashWindow(mainWin) {
   if (!shouldShowSplash()) return;
   const splash = new BrowserWindow(
-    splashWindowOptions(screen.getPrimaryDisplay().workAreaSize)
+    splashWindowOptions(screen.getPrimaryDisplay().workArea)
   );
 
-  // show:false 创建，加载完成后再 show()，避免白屏闪烁
-  splash.loadFile(path.join(__dirname, "splash.html")).then(() => {
-    if (!splash.isDestroyed()) splash.show();
-  });
+  // show:false 创建，加载完成后再 show()，避免白屏闪烁；加载失败静默（splash.html 缺失等）
+  splash
+    .loadFile(path.join(__dirname, "splash.html"))
+    .then(() => {
+      if (!splash.isDestroyed()) splash.show();
+    })
+    .catch(() => {});
 
   const closeSplash = () => {
     if (!splash.isDestroyed()) splash.close();

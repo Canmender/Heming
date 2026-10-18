@@ -22,12 +22,19 @@ test("splash 窗口配置：无边框透明置顶 + 铺满主显示器", () => {
   assert.equal(cfg.transparent, true);
   assert.equal(cfg.alwaysOnTop, true);
   assert.equal(cfg.skipTaskbar, true);
-  // 铺满主显示器工作区，原点归零
-  assert.equal(cfg.x, 0);
-  assert.equal(cfg.y, 0);
+  // 铺满主显示器工作区
   assert.equal(cfg.width, 1920);
   assert.equal(cfg.height, 1040);
   // 先隐藏创建，避免白屏闪烁
   assert.equal(cfg.show, false);
   assert.equal(cfg.backgroundColor, "#ffffff");
+});
+
+test("多显示器：主屏不在原点时使用 workArea 的 x/y", () => {
+  // 主屏位于右侧副屏（非 0,0 原点）
+  const cfg = splashWindowOptions({ x: 1920, y: 0, width: 1920, height: 1040 });
+  assert.equal(cfg.x, 1920);
+  assert.equal(cfg.y, 0);
+  assert.equal(cfg.width, 1920);
+  assert.equal(cfg.height, 1040);
 });
