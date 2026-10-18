@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { App } from "./App.js";
 import { useAuthStore } from "./store/auth.js";
@@ -403,5 +403,50 @@ describe("App 导航快捷键与隐藏态", () => {
     fireEvent.click(screen.getByRole("button", { name: "呼出导航" }));
     expect(useUiStore.getState().navCollapsed).toBe(false);
     expect(await screen.findByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
+  });
+});
+
+describe("App 桌面窗口标题栏", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+    setToken(null);
+    useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
+    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+    delete (window as unknown as { heming?: unknown }).heming;
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { heming?: unknown }).heming;
+  });
+
+  it("桌面端（window.heming 存在）：主壳顶部渲染拖拽带", async () => {
+    setToken("t1");
+    mockFetch();
+    (window as unknown as { heming: unknown }).heming = { platform: "win32" };
+
+    const { container } = render(<App />);
+    await screen.findByRole("button", { name: "主页 Alt1" });
+
+    expect(container.querySelector(".desktop-titlebar")).not.toBeNull();
+  });
+
+  it("桌面端：登录页顶部渲染拖拽带", () => {
+    (window as unknown as { heming: unknown }).heming = { platform: "win32" };
+
+    const { container } = render(<App />);
+
+    expect(screen.getByText("登录你的账号")).toBeInTheDocument();
+    expect(container.querySelector(".desktop-titlebar")).not.toBeNull();
+  });
+
+  it("浏览器端（无 window.heming）：不渲染拖拽带，布局与原先一致", async () => {
+    setToken("t1");
+    mockFetch();
+
+    const { container } = render(<App />);
+    await screen.findByRole("button", { name: "主页 Alt1" });
+
+    expect(container.querySelector(".desktop-titlebar")).toBeNull();
   });
 });

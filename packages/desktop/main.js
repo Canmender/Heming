@@ -5,6 +5,7 @@ const { loadWindowState, saveWindowState } = require("./window-state");
 
 const pkg = require("./package.json");
 const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins");
+const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
 
 // 加载地址优先级：HEMING_DEV_URL（本地开发）> HEMING_WEB_URL > 默认远程（云端中心化）
 function resolveAppUrl(env) {
@@ -80,7 +81,9 @@ if (!gotLock) {
 
     const win = new BrowserWindow({
       ...bounds,
-      backgroundColor: "#ffffff",
+      // 自定义标题栏（设计 §3/§4）：隐藏系统栏 + 保留原生控件，内容延伸到窗口顶部
+      ...titleBarOptions(process.platform),
+      backgroundColor: WINDOW_BACKGROUND,
       title: "和鸣",
       webPreferences: {
         preload: path.join(__dirname, "preload.js"),

@@ -13,6 +13,7 @@ import { RadarContacts } from "./components/RadarContacts.js";
 import { HomePage } from "./components/HomePage.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { MemoryPage } from "./components/MemoryPage.js";
+import { TitleBar } from "./components/TitleBar.js";
 
 /** Alt+1–Alt+5 目标页（1 主页、2 工作区、3 接口区、4 记忆区、5 设置区）。 */
 const SHORTCUT_PAGES: Page[] = [
@@ -100,10 +101,20 @@ export function App() {
   }, [authUser, navCollapsed, setNavCollapsed, setPage]);
 
   if (!authUser) {
-    return authStatus === "pending" && getToken() ? (
-      <div className="flex h-screen items-center justify-center text-muted">加载中…</div>
-    ) : (
-      <LoginPage />
+    return (
+      <div className="flex h-screen flex-col overflow-hidden">
+        {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
+        <TitleBar />
+        <div className="flex min-h-0 flex-1">
+          {authStatus === "pending" && getToken() ? (
+            <div className="flex h-full w-full items-center justify-center text-muted">
+              加载中…
+            </div>
+          ) : (
+            <LoginPage />
+          )}
+        </div>
+      </div>
     );
   }
 
@@ -135,49 +146,53 @@ export function App() {
     );
 
   return (
-    <div className="flex h-screen overflow-hidden border border-line bg-white">
-      {navCollapsed ? <NavPeek /> : <NavRail />}
-      <main className="flex min-w-0 flex-1 flex-col">{view}</main>
-      <aside className="flex w-[240px] shrink-0 flex-col border-l border-line-soft">
-        <div className="flex items-center justify-between border-b border-line-soft px-3 py-2">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-muted">目录</span>
-          {usage && (
-            <span className="text-[10px] text-muted">
-              {fmtBytes(usage.used)} / {fmtBytes(usage.quota)}
-            </span>
+    <div className="flex h-screen flex-col overflow-hidden border border-line bg-white">
+      {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
+      <TitleBar />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {navCollapsed ? <NavPeek /> : <NavRail />}
+        <main className="flex min-w-0 flex-1 flex-col">{view}</main>
+        <aside className="flex w-[240px] shrink-0 flex-col border-l border-line-soft">
+          <div className="flex items-center justify-between border-b border-line-soft px-3 py-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-muted">目录</span>
+            {usage && (
+              <span className="text-[10px] text-muted">
+                {fmtBytes(usage.used)} / {fmtBytes(usage.quota)}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => void onUpload()}
+              className="rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card"
+            >
+              上传
+            </button>
+          </div>
+          <div className="min-h-0 flex-1">
+            <FileTree
+              items={files}
+              localPaths={[]}
+              onPreview={setPreviewFile}
+              onSendToConversation={(item) => {
+                const { page, activeConversationId } = useUiStore.getState();
+                if (page !== "chat" || !activeConversationId) {
+                  window.alert("先打开一个会话，再从目录发送文件");
+                  return;
+                }
+                useUiStore.getState().sendFileToConversation(activeConversationId, {
+                  id: item.id,
+                  name: item.name,
+                  mime: item.mime,
+                  size: item.size,
+                });
+              }}
+            />
+          </div>
+          {previewFile && (
+            <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
           )}
-          <button
-            type="button"
-            onClick={() => void onUpload()}
-            className="rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card"
-          >
-            上传
-          </button>
-        </div>
-        <div className="min-h-0 flex-1">
-          <FileTree
-            items={files}
-            localPaths={[]}
-            onPreview={setPreviewFile}
-            onSendToConversation={(item) => {
-              const { page, activeConversationId } = useUiStore.getState();
-              if (page !== "chat" || !activeConversationId) {
-                window.alert("先打开一个会话，再从目录发送文件");
-                return;
-              }
-              useUiStore.getState().sendFileToConversation(activeConversationId, {
-                id: item.id,
-                name: item.name,
-                mime: item.mime,
-                size: item.size,
-              });
-            }}
-          />
-        </div>
-        {previewFile && (
-          <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
-        )}
-      </aside>
+        </aside>
+      </div>
     </div>
   );
 }
