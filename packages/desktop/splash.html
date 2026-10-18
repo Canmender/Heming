@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>和鸣</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; }
+  body {
+    background: #ffffff;
+    overflow: hidden;
+  }
+  .scene { position: relative; width: 100%; height: 100%; }
+  .particle {
+    position: absolute;
+    width: 2px; height: 2px;
+    background: #1a1a1a;
+    border-radius: 50%;
+    transition: transform 1.5s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .core {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 40px; height: 40px;
+    background: #1a1a1a;
+    border-radius: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    transition: transform 0.4s ease 1.4s;
+    box-shadow: 0 0 20px rgba(26,26,26,.3);
+  }
+  .core.visible { transform: translate(-50%, -50%) scale(1); }
+</style>
+</head>
+<body>
+<div class="scene" id="scene">
+  <div class="core" id="core"></div>
+</div>
+<script>
+  var PARTICLE_COUNT = 24;
+  var DURATION = 1500;
+
+  function createParticles() {
+    var scene = document.getElementById('scene');
+    var w = window.innerWidth, h = window.innerHeight, margin = 20;
+    var perSide = Math.ceil(PARTICLE_COUNT / 4);
+    var particles = [];
+    for (var i = 0; i < PARTICLE_COUNT; i++) {
+      var p = document.createElement('div');
+      p.className = 'particle';
+      var side = i % 4, t = (i % perSide) / perSide;
+      var x, y;
+      if (side === 0) { x = t * w; y = margin; }
+      else if (side === 1) { x = w - margin; y = t * h; }
+      else if (side === 2) { x = t * w; y = h - margin; }
+      else { x = margin; y = t * h; }
+      p.style.left = x + 'px';
+      p.style.top = y + 'px';
+      scene.appendChild(p);
+      particles.push({ el: p, x: x, y: y });
+    }
+    return particles;
+  }
+
+  function animateParticles(particles) {
+    var w = window.innerWidth, h = window.innerHeight;
+    var cx = w / 2, cy = h / 2;
+    requestAnimationFrame(function () {
+      particles.forEach(function (p) {
+        p.el.style.transform = 'translate(' + (cx - p.x) + 'px,' + (cy - p.y) + 'px)';
+      });
+    });
+    setTimeout(function () {
+      document.getElementById('core').classList.add('visible');
+    }, DURATION - 100);
+  }
+
+  function playSound() {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 300;
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.2);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.2);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 1.2);
+    } catch (e) { /* 音频不可用静默 */ }
+  }
+
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) {
+    // 减弱动态：直接显示核心圆点
+    document.getElementById('core').classList.add('visible');
+  } else {
+    var particles = createParticles();
+    playSound();
+    animateParticles(particles);
+  }
+</script>
+</body>
+</html>
