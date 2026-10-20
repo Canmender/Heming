@@ -2,6 +2,10 @@
 
 原生电脑端智能体应用平台（云端中心化）：IM + 多 Agent 混合框架。
 
+> **当前版本**：`d.18.1.5.0`　查看最新：`node scripts/version.mjs`（或 `pnpm version:show`）
+> **版本号规则**：5 段 `d.特性.破坏性.修订.构建`，**每次修改/修复都要 bump** —— 见 [docs/VERSION-MANAGEMENT.md](docs/VERSION-MANAGEMENT.md)
+> 改动记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 > 接手开发先读 **[docs/HANDOFF.md](docs/HANDOFF.md)**（现状 / 架构红线 / 工作方式约定 / 下一步候选）。
 
 ## 能力
