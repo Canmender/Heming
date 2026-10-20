@@ -35,8 +35,15 @@ export const MemoryIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M12 4a4 4 0 0 0-4 4 3.5 3.5 0 0 0-1 6.8V17a3 3 0 0 0 5 2.2A3 3 0 0 0 17 17v-2.2A3.5 3.5 0 0 0 16 8a4 4 0 0 0-4-4z" />
   </svg>
 );
-export const GearIcon = (p: SVGProps<SVGSVGElement>) => (
+/** 归档：一个带盖子的收纳盒——比「文件夹」更能表达「收起来但还在」。 */
+export const ArchiveIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="4" rx="1" />
+    <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+    <path d="M10 12h4" />
+  </svg>
+);
+export const GearIcon = (p: SVGProps<SVGSVGElement>) => (  <svg {...base(p)}>
     <circle cx="12" cy="12" r="3" />
     <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z" />
   </svg>
@@ -139,5 +146,22 @@ export const VolumeIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M11 5 6 9H2v6h4l5 4z" />
     <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
     <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+  </svg>
+);
+
+/** 技能：层叠方块 + 星点，区别于记忆（层）与接口（插头）。 */
+export const SkillsIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 8.5 10.5 5 17 8.5v7L10.5 19 4 15.5z" />
+    <path d="M10.5 12v7" />
+    <path d="M4 8.5 10.5 12 17 8.5" />
+  </svg>
+);
+
+/** 视频通话：摄像机轮廓 + 取景框。 */
+export const VideoIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="7" width="12" height="10" rx="2.5" />
+    <path d="M15 11l5-3v8l-5-3z" />
   </svg>
 );
