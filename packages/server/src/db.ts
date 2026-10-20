@@ -83,4 +83,15 @@ export function initSchema(db: DatabaseSyncType): void {
   if (!cols.some((c) => c.name === "n")) {
     db.exec("ALTER TABLE messages ADD COLUMN n INTEGER");
   }
+
+  // 归档：**按成员存**而不是按会话存。
+  // 群聊里 A 归档了不该影响 B——归档是「我不想再在列表里看到它」，
+  // 属于个人视图偏好，跟会话本身的状态无关。
+  // 存成 conversations 的列会让全群一起被归档，那是错的。
+  const memberCols = db.prepare("PRAGMA table_info(conversation_members)").all() as Array<{
+    name: string;
+  }>;
+  if (!memberCols.some((c) => c.name === "archived_at")) {
+    db.exec("ALTER TABLE conversation_members ADD COLUMN archived_at TEXT");
+  }
 }

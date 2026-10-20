@@ -260,6 +260,59 @@ for (const f of factories) {
       expect(() => store.deleteAgent("system-assistant", a.id)).toThrow("forbidden");
     });
 
+    // —— 智能体一对一：双实现同语义（幂等、权限、列表投影、agent 删除后消失）——
+
+    it("createAgentConversation 建私聊并幂等：重复调用返回同一会话 id", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const agent = store.createAgent(a.id, { name: "架构师", description: "画图的" });
+      const first = store.createAgentConversation(a.id, agent.id);
+      expect(first.type).toBe("agent");
+      expect(first.agent.id).toBe(agent.id);
+      const second = store.createAgentConversation(a.id, agent.id);
+      expect(second.id).toBe(first.id); // 幂等：不新建第二个会话
+      // 会话列表里只出现一条，且带完整 agent 元数据
+      const convs = store.listConversations(a.id);
+      expect(convs.filter((c) => c.type === "agent")).toHaveLength(1);
+      const listed = convs.find((c) => c.type === "agent")!;
+      expect(listed.type === "agent" && listed.agent.name).toBe("架构师");
+    });
+
+    it("agent 私聊权限：自建仅属主可开，系统 agent 谁都能开", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const mine = store.createAgent(a.id, { name: "架构师", description: "" });
+      // 别人的自建 agent：拒绝
+      expect(() => store.createAgentConversation(b.id, mine.id)).toThrow("not your agent");
+      // 系统 agent（owner_id 为 null）：任何人都能私聊
+      store.ensurePresetGroup("和鸣交流群", [a.id], "system-assistant");
+      const sysConv = store.createAgentConversation(b.id, "system-assistant");
+      expect(sysConv.type).toBe("agent");
+      expect(sysConv.id).toBeTruthy();
+    });
+
+    it("agent 不存在时报错；agent 被删后该会话从列表消失", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      expect(() => store.createAgentConversation(a.id, "ghost-agent")).toThrow("agent not found");
+      const agent = store.createAgent(a.id, { name: "临时工", description: "" });
+      store.createAgentConversation(a.id, agent.id);
+      expect(store.listConversations(a.id).some((c) => c.type === "agent")).toBe(true);
+      store.deleteAgent(agent.id, a.id);
+      // agent 已删 → 宁可不显示，也不给前端一个没有 agent 字段的半截会话
+      expect(store.listConversations(a.id).some((c) => c.type === "agent")).toBe(false);
+    });
+
+    it("agent 私聊的成员与消息链路与普通会话一致", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const agent = store.createAgent(a.id, { name: "架构师", description: "" });
+      const conv = store.createAgentConversation(a.id, agent.id);
+      expect(store.isMember(conv.id, a.id)).toBe(true);
+      const msg = store.addMessage(conv.id, "user", a.id, { text: "在吗" }, null);
+      expect(msg.conversationId).toBe(conv.id);
+      expect(store.listMessages(conv.id)).toHaveLength(1);
+      const reply = store.addMessage(conv.id, "agent", agent.id, { text: "在" }, null);
+      expect(reply.senderType).toBe("agent");
+    });
+
     // —— M3 I2：attach/detach 双实现同语义（幂等、缺失会话同拒、名册 join 生效）——
 
     it("attach/detach 幂等：listAgentIds 与 listMembers 一致联动", () => {
@@ -476,6 +529,86 @@ for (const f of factories) {
 
       it("listE2eKeys 未登记时为空对象", () => {
         expect(store.listE2eKeys()).toEqual({});
+      });
+    });
+
+    describe("会话归档", () => {
+      /** 建两个好友 + 一条 direct 会话，返回双方 id 与会话 id（归档要验证「各人独立」）。 */
+      function directPair(): { aId: string; bId: string; convId: string } {
+        store.createUser("alice", "h", "爱丽丝");
+        store.createUser("bob", "h", "鲍勃");
+        const a = store.findUserByUsername("alice")!.user;
+        const b = store.findUserByUsername("bob")!.user;
+        befriend(a.id, "bob", b.id);
+        const conv = store.createDirectConversation(a.id, b.id);
+        return { aId: a.id, bId: b.id, convId: conv.id };
+      }
+
+      const archivedOf = (userId: string, convId: string) =>
+        store.listConversations(userId).find((c) => c.id === convId)?.archivedAt ?? null;
+
+      it("默认未归档", () => {
+        const { aId, convId } = directPair();
+        expect(archivedOf(aId, convId)).toBeNull();
+      });
+
+      it("归档后带时间，取消归档后回到 null", () => {
+        const { aId, convId } = directPair();
+        store.setConversationArchived(convId, aId, true);
+        const at = archivedOf(aId, convId);
+        expect(at).toBeTruthy();
+        expect(typeof at).toBe("string");
+
+        store.setConversationArchived(convId, aId, false);
+        expect(archivedOf(aId, convId)).toBeNull();
+      });
+
+      it("按成员独立：A 归档不影响 B（群聊/私聊都不该被别人的视图偏好改动）", () => {
+        const { aId, bId, convId } = directPair();
+        store.setConversationArchived(convId, aId, true);
+        expect(archivedOf(aId, convId)).toBeTruthy();
+        expect(archivedOf(bId, convId)).toBeNull();
+      });
+
+      it("重复归档幂等，不抛错", () => {
+        const { aId, convId } = directPair();
+        store.setConversationArchived(convId, aId, true);
+        expect(() => store.setConversationArchived(convId, aId, true)).not.toThrow();
+        expect(archivedOf(aId, convId)).toBeTruthy();
+      });
+
+      it("重复归档保留首次时间，不刷新成现在", () => {
+        const { aId, convId } = directPair();
+        store.setConversationArchived(convId, aId, true);
+        const first = archivedOf(aId, convId);
+
+        // 先确认时钟已推进到下一毫秒，否则两次时间戳可能相同、测不出差异。
+        const before = Date.now();
+        while (Date.now() === before) {
+          /* 忙等到毫秒推进 */
+        }
+        store.setConversationArchived(convId, aId, true);
+
+        // 归档页按归档时间倒序：若重复归档刷新时间，用户多点一次归档，
+        // 条目就会在列表里跳位——看起来像坏了。
+        expect(archivedOf(aId, convId)).toBe(first);
+      });
+
+      it("取消未归档的会话也不抛错", () => {
+        const { aId, convId } = directPair();
+        expect(() => store.setConversationArchived(convId, aId, false)).not.toThrow();
+      });
+
+      it("非成员不能归档（防越权改别人的视图）", () => {
+        const { convId } = directPair();
+        store.createUser("carol", "h", "卡罗尔");
+        const c = store.findUserByUsername("carol")!.user;
+        expect(() => store.setConversationArchived(convId, c.id, true)).toThrow();
+      });
+
+      it("不存在的会话抛错", () => {
+        const { aId } = directPair();
+        expect(() => store.setConversationArchived("no-such-conv", aId, true)).toThrow();
       });
     });
   });

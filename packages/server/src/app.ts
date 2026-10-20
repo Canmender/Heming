@@ -11,6 +11,7 @@ import {
   AttachAgentBodySchema,
   PutE2eKeysBodySchema,
   ReencryptBodySchema,
+  ArchiveConversationBodySchema,
   type SharedFileMeta,
 } from "@heming/shared";
 import type { Store } from "./store.js";
@@ -187,6 +188,15 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
         res.status(201).json(store.createDirectConversation(userId(req), parsed.data.peerId));
         return;
       }
+      if ("agentId" in parsed.data) {
+        // 智能体一对一：与 direct 同入口，靠 body 形状区分（union 分支）。
+        // 创建响应按 listConversations 的行再取一次，保证 unreadCount 等字段齐备
+        // ——直接返回 store 的创建结果会缺 unreadCount，前端入列时得自己补，两处易漂移。
+        const created = store.createAgentConversation(userId(req), parsed.data.agentId);
+        const row = store.listConversations(userId(req)).find((c) => c.id === created.id);
+        res.status(201).json(row ?? { ...created, unreadCount: 0 });
+        return;
+      }
       const g = store.createGroup(userId(req), parsed.data.name, parsed.data.memberIds);
       const row = store.listConversations(userId(req)).find((c) => c.id === g.id);
       res.status(201).json(row ?? { ...g, memberCount: parsed.data.memberIds.length + 1, unreadCount: 0 });
@@ -195,8 +205,29 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     }
   });
 
-  app.get("/api/conversations/:id/messages", authOnly, (req, res) => {
-    if (!store.isMember(req.params.id, userId(req))) {
+  /**
+   * 归档 / 取消归档（按成员独立，见 store.setConversationArchived）。
+   *
+   * 用 PATCH 而不是 POST/DELETE 成对：归档是「改一个状态位」，
+   * 不是创建或销毁资源——两个方向一个接口，前端也不必判两次。
+   */
+  app.patch("/api/conversations/:id/archive", authOnly, (req, res) => {
+    const parsed = ArchiveConversationBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid body" });
+      return;
+    }
+    try {
+      store.setConversationArchived(req.params.id, userId(req), parsed.data.archived);
+      res.status(204).end();
+    } catch {
+      // store 对「不存在」与「不是成员」抛同一种错：不区分是刻意的，
+      // 免得把「这个会话存在但你不在里面」泄露给无关的人。
+      res.status(403).json({ error: "forbidden" });
+    }
+  });
+
+  app.get("/api/conversations/:id/messages", authOnly, (req, res) => {    if (!store.isMember(req.params.id, userId(req))) {
       res.status(403).json({ error: "forbidden" });
       return;
     }
