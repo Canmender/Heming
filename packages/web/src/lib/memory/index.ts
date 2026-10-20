@@ -9,6 +9,9 @@ export * from "./extract.js";
 export * from "./store.js";
 export * from "./recall.js";
 export * from "./format.js";
+export * from "./agentPrefs.js";
+export * from "./kb.js";
+export * from "./review.js";
 
 import { MemoryStore } from "./store.js";
 

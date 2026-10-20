@@ -48,3 +48,15 @@ if (typeof URL !== "undefined" && typeof URL.createObjectURL !== "function") {
     value: () => {},
   });
 }
+
+/**
+ * jsdom 未实现 Element.scrollIntoView（浏览器原生有）。
+ *
+ * 放全局而不是各测试文件自己打桩：消息列表、引用跳转、工具轮都可能在
+ * 任何一轮 effect 里调它，漏掉一个文件就会在某个用例里抛
+ * "scrollIntoView is not a function"，而报错点与真正的缺口相隔很远，很难定位。
+ * 真实浏览器不走此分支。
+ */
+if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+}

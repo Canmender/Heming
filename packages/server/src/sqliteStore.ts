@@ -17,6 +17,26 @@ function rowToUser(r: { id: string; username: string; display_name: string; avat
   };
 }
 
+/** agents 表行（列名 snake_case，永不 SELECT system_prompt——它是部署侧内部字段）。 */
+type AgentRow = {
+  id: string;
+  owner_id: string | null;
+  name: string;
+  avatar: string | null;
+  description: string;
+};
+
+/** agents 行 → Agent。avatar 为 null 时不写字段（与 AgentSchema 可选语义一致）。 */
+function rowToAgent(r: AgentRow): Agent {
+  return {
+    id: r.id,
+    owner_id: r.owner_id,
+    name: r.name,
+    avatar: r.avatar ?? null,
+    description: r.description,
+  };
+}
+
 export function createSqliteStore(dbPath: string): SqliteStore {
   const db: DatabaseSync = openDb(dbPath);
 
@@ -204,6 +224,42 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       for (const m of ids) ins.run(id, m);
       return { id, type: "group", name };
     },
+    setConversationArchived(conversationId, userId, archived) {
+      if (!archived) {
+        const cleared = db
+          .prepare("UPDATE conversation_members SET archived_at = NULL WHERE conv_id = ? AND member_id = ?")
+          .run(conversationId, userId);
+        if (Number(cleared.changes) === 0) {
+          throw new Error("conversation not found or not a member");
+        }
+        return;
+      }
+      // 归档：**保留首次归档时间**。
+      //
+      // 不用「先读再判断再写」：那是两次往返，且中间可能被并发改写。
+      // 直接用一条带条件的 UPDATE ——只有当前**未归档**的行会被写入，
+      // 已归档的行 changes=0，正好表示「无需改动」。
+      //
+      // 为什么必须保留首次时间：归档页按它倒序。若每次都刷新成现在，
+      // 用户重复点归档会让条目在列表里跳位——看起来像坏了。
+      //
+      // 但「已归档」本身也要校验成员身份，所以分两步：
+      // 第一步无条件写（未归档才生效），第二步用影响行数区分
+      // 「不是成员」与「已是归档态」。
+      const result = db
+        .prepare(
+          `UPDATE conversation_members SET archived_at = ?
+           WHERE conv_id = ? AND member_id = ? AND archived_at IS NULL`,
+        )
+        .run(new Date().toISOString(), conversationId, userId);
+      if (Number(result.changes) > 0) return;
+
+      // 没改动：要么不是成员，要么已经是归档态。用一次存在性查询区分。
+      const row = db
+        .prepare("SELECT 1 AS ok FROM conversation_members WHERE conv_id = ? AND member_id = ?")
+        .get(conversationId, userId) as { ok: number } | undefined;
+      if (!row) throw new Error("conversation not found or not a member");
+    },
     isMember(conversationId, userId) {
       const row = db
         .prepare("SELECT 1 AS x FROM conversation_members WHERE conv_id = ? AND member_id = ?")
@@ -343,10 +399,10 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     listConversations(userId) {
       const convs = db
         .prepare(
-          `SELECT c.id, c.kind, c.name FROM conversations c
+          `SELECT c.id, c.kind, c.name, m.archived_at FROM conversations c
            JOIN conversation_members m ON m.conv_id = c.id WHERE m.member_id = ?`,
         )
-        .all(userId) as { id: string; kind: string; name: string | null }[];
+        .all(userId) as { id: string; kind: string; name: string | null; archived_at: string | null }[];
       const unreadOf = (convId: string): number => {
         const read = db
           .prepare("SELECT read_at FROM message_reads WHERE conv_id = ? AND user_id = ?")
@@ -374,12 +430,38 @@ export function createSqliteStore(dbPath: string): SqliteStore {
             name: c.name ?? "未命名群",
             memberCount: Number(mc.n),
             unreadCount: unreadOf(c.id),
+            archivedAt: c.archived_at,
           });
+        } else if (c.kind === "agent") {
+          // 智能体一对一：对方是名册 agent，复用 conversation_agents 关联行存对方 id。
+          // INNER JOIN agents——agent 已删则不出这条会话（宁可不显示，也不给半截对象）。
+          const agent = db
+            .prepare(
+              `SELECT a.id, a.owner_id, a.name, a.avatar, a.description
+               FROM conversation_agents ca JOIN agents a ON a.id = ca.agent_id
+               WHERE ca.conv_id = ? LIMIT 1`,
+            )
+            .get(c.id) as AgentRow | undefined;
+          if (agent)
+            out.push({
+              id: c.id,
+              type: "agent",
+              agent: rowToAgent(agent),
+              unreadCount: unreadOf(c.id),
+              archivedAt: c.archived_at,
+            });
         } else {
           const peer = db
             .prepare("SELECT member_id FROM conversation_members WHERE conv_id = ? AND member_id != ?")
             .get(c.id, userId) as { member_id: string } | undefined;
-          if (peer) out.push({ id: c.id, type: "direct", peer: mustUser(peer.member_id), unreadCount: unreadOf(c.id) });
+          if (peer)
+            out.push({
+              id: c.id,
+              type: "direct",
+              peer: mustUser(peer.member_id),
+              unreadCount: unreadOf(c.id),
+              archivedAt: c.archived_at,
+            });
         }
       }
       return out;
@@ -463,6 +545,33 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       ).run(agentId, meta.name, meta.avatar, meta.description, meta.systemPrompt);
       db.prepare("INSERT INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(id, agentId);
       return id;
+    },
+    createAgentConversation(userId, agentId) {
+      mustUser(userId);
+      const row = db
+        .prepare("SELECT id, owner_id, name, avatar, description FROM agents WHERE id = ?")
+        .get(agentId) as AgentRow | undefined;
+      if (!row) throw new Error("agent not found");
+      // 与内存实现同口径：系统预设 agent（owner_id 为 null）谁都能私聊，
+      // 自建 agent 仅属主可开——否则能拿别人的 agent 当自己的聊天对象。
+      if (row.owner_id !== null && row.owner_id !== userId) throw new Error("not your agent");
+      const agent = rowToAgent(row);
+      // 幂等：同用户与同 agent 只留一个会话。conversation_agents 存「会话挂了哪些 agent」，
+      // agent 一对一恰好只挂一个，据此反查即可，不必另建映射表。
+      const existing = db
+        .prepare(
+          `SELECT c.id FROM conversations c
+           JOIN conversation_members m ON m.conv_id = c.id AND m.member_id = ?
+           JOIN conversation_agents ca ON ca.conv_id = c.id AND ca.agent_id = ?
+           WHERE c.kind = 'agent'`,
+        )
+        .get(userId, agentId) as { id: string } | undefined;
+      if (existing) return { id: existing.id, type: "agent", agent };
+      const id = randomUUID();
+      db.prepare("INSERT INTO conversations (id, kind) VALUES (?, 'agent')").run(id);
+      db.prepare("INSERT INTO conversation_members (conv_id, member_id) VALUES (?, ?)").run(id, userId);
+      db.prepare("INSERT OR IGNORE INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(id, agentId);
+      return { id, type: "agent", agent };
     },
     listAgentIds(conversationId) {
       const rows = db.prepare("SELECT agent_id FROM conversation_agents WHERE conv_id = ?").all(conversationId) as {

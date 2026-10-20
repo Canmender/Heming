@@ -236,3 +236,86 @@ g  ← 起笔 → 上弧 → 回环 → 下伸尾
 - 四角 2px 粒子重合（沿用启动动画批次的遗留）。
 - `WAVE_MS` 在 web 与 desktop 各写一份，仍无跨包断言（本设计新增的字形已加 drift 守卫，时序常量还没）。
 - 手写段没有「写完后的笔锋收势/墨迹渐干」这类细节，是干净的单线描边收尾。
+
+---
+
+## 12. 追加修复记录（2026-10-18，用户真机反馈「动画和登录卡片全挤在左侧」）
+
+用户反馈：「开屏动画依旧存在问题，动画和登录卡片全部集中在左侧；正确流程是手写完整『heming』→ 接后续动画 → 左卡右字样。」查下来是**一个布局塌陷 + 一个开发模式专属卡死**，手写段本身没有问题。
+
+### 12.1 「集中在左侧」＝登录页根节点宽度塌陷（主因）
+
+| 项 | 内容 |
+|---|---|
+| 根因 | `LoginPage` 根 div 是 `App.tsx` 登录分支 `<div class="flex min-h-0 flex-1">`（**row** 方向 flex 容器）的 flex 子项，却没有 `w-full`/`flex-1`。flex 子项 `flex-basis:auto` 使其宽度按 max-content 收缩 |
+| 实测（CDP，1440 视口） | `login @ 0..758`、左栏 `0..390`、字样 `414..734`、右侧 `758→1418` 全空 |
+| 观感成因 | 宽屏分栏其实生效了（`min-[900px]:flex-row` 是视口断点），但两栏被挤在窗口左半的一条里 → 用户看到「卡片和字样全在左边」；开屏波纹以屏幕中心揭开、而内容只在左半边，于是连动画都像「在左侧」 |
+| 修法 | 根节点 `+ w-full min-w-0`（`min-w-0` 抵消 flex 子项默认 `min-width:auto`，窄窗口不被内容反撑出横向滚动） |
+| 修后实测 | 1440×900：卡片 `190..530`（中心 = 1440/4）、字样 `920..1240`（中心 = 3/4）、`scrollWidth=1440`；800×700：单栏、卡片居中 `230..570`、字样 `display:none`、`scrollWidth=800` |
+| 回归守卫 | `LoginPage.test.tsx` 新增用例：根节点必须同时带 `w-full`/`min-w-0`/`min-[900px]:flex-row`/`flex-col`（jsdom 无布局，只能断言 class 语义，用例注释写清「删掉就退回塌陷」） |
+
+顺带确认：`splash.html` 手写段**本来就是居中的**——CDP 逐帧实测 1440×900 下字样 bbox `499..919`（正中），10 笔在 ~1400ms 内写完整个「Heming」，1700ms 淡出交棒粒子段。此项**未改动**。
+
+### 12.2 开发模式下白遮罩永不揭开（同批发现）
+
+| 项 | 内容 |
+|---|---|
+| 现象 | `vite` dev 打开页面后整页白屏：`.boot-wave` 常驻、`--reveal` 从未写入（`unset`）、`#root > div` 仍带 `inert`；同一份代码 `vite build` + `preview` 正常 |
+| 根因 | `main.tsx` 开着 `React.StrictMode`，dev 下 effect 会跑两遍：第一轮 `startAnimation()` 置 `startedRef=true` 并挂上 rAF + 收尾定时器 → cleanup 的 `stopTimers()` 全取消 → 第二轮 `startAnimation()` 命中 `if (startedRef.current \|\| finishedRef.current) return` 静默早退。没有任何东西再推进 `--reveal`，`finish()` 永不调用 |
+| 修法 | cleanup 复位 `startedRef`（使第二轮能重播）与揭示进度，**不复位 `finishedRef`**（它是「`onDone` 只回调一次」的跨轮次事实）；波纹容器改用递增 `runId` 作 `key`，重播时重新挂载才让 CSS keyframes 从 0 重跑；起播音效加 `soundPlayedRef` 防双跑叠加变响 |
+| 回归守卫 | `BootWave.test.tsx` 新增 2 例（`<StrictMode>` 下渲染）：① 双跑后仍能推进到 `100.00%` 且 `onDone` 恰好 1 次；② 减弱动态下首轮已 `finish` 时第二轮既不重复回调也不重新开播。**两例都用修复前的代码验过确实失败** |
+| 影响面 | 仅开发/预览环境（生产构建不双跑 effect），但 dev 白屏会挡住所有本地联调 |
+
+### 12.3 验证
+
+| 项 | 结果 |
+|---|---|
+| 门禁 | `pnpm --filter @heming/web test` = **48 文件 / 708 用例全绿**（基线 706，+2） |
+| 真实浏览器（CDP） | 生产产物与 dev 均实测：遮罩正常揭开（`bootMaskAlive=false`、`inert=false`）、宽屏左右各半、窄屏单栏 |
+| 手写段 | 逐帧实测 10 笔全画完、字样居中（未改动） |
+| 真机（装包） | **未做**——需重打安装包 |
+
+### 12.4 待办
+
+1. 重打安装包（web 产物需重新 `vite build` 后再打包），装包看一遍三段衔接。
+2. 若仍走云端页面（`http://47.92.39.184`），登录页分栏修复要重新部署才对浏览器端生效。
+3. `LoginPage` 这类「flex 子项忘记撑满」在该项目不是孤例风险——新增页面时建议统一在根节点写 `w-full`（当前 `App.tsx` 的「加载中」分支已有此意识，登录页漏了）。
+
+---
+
+## 13. 手写段下沉到 web 层（2026-10-18，用户第二次反馈「应该有一个写字的动画」）
+
+### 13.1 问题：写字只在 Electron 的 splash 里
+
+手写段此前**只存在于 `splash.html`**（splash 窗口自播）。而 splash 窗口只有桌面壳会创建：
+
+| 环境 | 有没有 splash 窗口 | 能不能看到写字 |
+|---|---|---|
+| 打包的桌面端 | 有 | 能（实测 10 笔在 ~1.2s 内写完） |
+| `vite dev` / 浏览器 / 预览面板 | **没有** | **不能**——只剩 BootWave 的白遮罩 + 波纹 |
+
+于是「在预览/浏览器里看」的人会觉得写字动画丢了。用户反馈的正是这个（此前一度以为是桌面端也丢了，实测打包程序仍在逐笔写字：`drawn` 从 0 → 5 → 8 → 10，`prefers-reduced-motion=false`）。
+
+### 13.2 做法：web 层补一段同样的手写，但桌面端不重复播
+
+- 新增 `packages/web/src/components/WordmarkWrite.tsx`：复用 `wordmarkGlyphs.ts` 的字形数据，逐笔 `stroke-dashoffset` 描出（速度按笔画长度均分、字母间 55ms 抬手，与 splash 同一套算法），写完停 150ms → 200ms 淡出 → 回调。
+- `BootWave` 新增 `writeFirst?: boolean`：为 true 时先把手写段铺在白遮罩上播完，再开声波段。
+- `App.tsx` 用 `HAS_NATIVE_SPLASH = typeof window.heming?.__onBootReady === "function"` 判定：
+  - 桌面端（有 preload 信号通道）→ `writeFirst=false`，手写由 splash 负责，**不重复播**；
+  - 浏览器/预览 → `writeFirst=true`，web 层自己写。
+- 时序：写字 `WRITE_DRAW_MS 1250 + HOLD 150 + FADE 200`，之后接声波 `WAVE_MS 1300`，浏览器端总时长 ≈ 2.9s。
+- 尊重 `prefers-reduced-motion`：直接跳过整段（与既有行为一致）。
+
+### 13.3 验证
+
+| 项 | 结果 |
+|---|---|
+| 单测 | `WordmarkWrite` 10 例（时长分配、抬手、进度曲线、逐笔描出、淡出与 onDone 只一次）+ `BootWave` 3 例（writeFirst 先写后波、减弱动态直通、桌面端不重复写） |
+| 门禁 | web **49 文件 / 721 用例全绿**（原 708 + 13），`typecheck` 通过 |
+| 浏览器实测（CDP 逐帧） | t=443ms 起写、t=1245ms 已 8 笔、t=1647ms 10 笔写完 → 声波 `--reveal` 0% → 92% → 卸载；登录页左卡右字样 |
+| 桌面端实测 | splash 窗口仍逐笔写字；主窗口 `.wordmark-write` **不存在**（未重复播） |
+
+### 13.4 已知取舍
+
+- 同一套算法在 `splash.html` 与 `WordmarkWrite.tsx` 各有一份（前者要求自包含）。计时常量（`WRITE_DRAW_MS` / `WRITE_MS`）目前靠注释对齐，**没有跨包断言**，与 `WAVE_MS` 是同一类技术债。
+- 浏览器端手写段结束到声波段之间没有「粒子聚拢」段（那是 splash 独有的），节奏比桌面端略短。

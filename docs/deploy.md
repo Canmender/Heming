@@ -38,10 +38,17 @@ api 服务本身**不向公网发布端口**（compose 内网互通）；对外�
 #   web-dist        —— GNU tar 的 `--exclude=dist` 只匹配名为 dist 的路径段，
 #                      不会连带排掉 packages/desktop/web-dist（嵌入客户端用的产物，约 380KB）
 #   @hemingdesktop  —— electron-builder 偶发落在仓库根的产物目录（约 260MB！）
+#   .tmp            —— 本地临时目录（缓存/部署包/截图，含 electron 与 builder 缓存，可达 GB级）
+#   .workbuddy      —— 本地项目记忆目录，属机器本地状态，不需要上云
+#   packages/desktop/runtime —— 内置 Python + MCP 运行时（约 378MB），
+#                     只打进安装包，云端构建镜像完全不需要它。
+#                     **必须写完整路径**：`--exclude=runtime` 匹配不到它
+#                     （tar 的 --exclude 只匹配路径段名与 glob，不含父目录上下文）
 tar --exclude=node_modules --exclude=.git --exclude=.superpowers \
     --exclude=dist --exclude=web-dist --exclude=@hemingdesktop \
     --exclude=.worktrees --exclude=data \
-    --exclude=release --exclude=.claude \
+    --exclude=release --exclude=.claude --exclude=.tmp --exclude=.workbuddy \
+    --exclude='packages/desktop/runtime' \
     -czf heming.tar.gz .
 scp heming.tar.gz root@47.92.39.184:~/
 
@@ -51,8 +58,11 @@ mkdir -p ~/heming && tar -xzf ~/heming.tar.gz -C ~/heming && cd ~/heming
 ```
 
 > **打包后必做洁净度校验**（曾经因为漏排 `@hemingdesktop` 把上传包从 0.7MB 变成 111MB）：
-> `tar -tzf heming.tar.gz | grep -cE "web-dist|node_modules|\.superpowers|@hemingdesktop"` 应为 `0`；
+> `tar -tzf heming.tar.gz | grep -cE "web-dist|node_modules|\.superpowers|@hemingdesktop|release/|\.tmp/|\.workbuddy"` 应为 `0`；
 > 包体积应在 1MB 量级。
+>
+> 校验返回非0 时**先看具体是哪几行**再决定：`tar -tzf heming.tar.gz | grep -E "……"`。
+> 目录名命中不等于有问题（例如 `.workbuddy/` 只是几个 md），关键是**别漏排大体积产物**。
 
 ## 3. 构建与启动
 
@@ -222,3 +232,54 @@ HEMING_DEV_URL（本地开发，热更新）
 ```
 
 开发时仍走 `HEMING_DEV_URL` 连本地 vite，**热更新不受影响**。
+
+## 11. 自动更新源（客户端升级）
+
+### 拓扑
+
+```
+客户端（安装版）
+  └─ 查 http://47.92.39.184/updates/latest.yml
+       ├─ version / sha512 → 判断要不要更新
+       └─ path + .blockmap → 下载（优先差分包）
+```
+
+nginx 把 `/opt/heming/updates`（宿主目录，只读挂载）映射到 `/updates/`。
+**不用子域名、不用 HTTPS**：更新清单与安装包都没有机密性要求，
+而 HTTPS 需要证书与自动续期，对当前规模是额外运维负担。
+代价是首次安装包必须用户手动下载一次（明文链路可被篡改）——
+之后所有更新都从已装好的客户端发起，且清单里有 sha512 校验。
+
+### 发版流程
+
+```bash
+# 1) 出包（会自动生成 latest.yml，见下）
+node scripts/build-desktop-web.mjs
+node scripts/build-desktop.mjs --win nsis
+
+# 2) 上传到云端
+export HEMING_SSH_PWD='***'
+bash scripts/publish-update.sh --dry-run   # 先看要传什么
+bash scripts/publish-update.sh             # 真传
+
+# 3) 验证
+curl -sI http://47.92.39.184/updates/latest.yml | head -3
+curl -s  http://47.92.39.184/updates/latest.yml | head -8
+```
+
+### 两个必须知道的坑
+
+1. **`latest.yml` 不会自动生成。** electron-builder 默认不产出更新元数据，
+   少了它客户端永远提示「已是最新」——**界面上与正常无差别，无法靠肉眼发现**。
+   `build-desktop.mjs` 已默认注入 `--publish always`，
+   产物目录里必须能看到 `latest.yml` 才算打包成功。
+
+2. **`/updates/` 必须排在 nginx `location /` 之前。** 否则 `try_files`
+   会把 `latest.yml` 回落成 `index.html`，客户端拿到 HTML 报「解析失败」。
+   该顺序已固化在 `docker/web-nginx.conf`，改动时别调换。
+
+### 回滚
+
+把 `/opt/heming/updates/latest.yml` 换回上一版的（连同安装包与 blockmap）即可。
+已安装的客户端下次检查会回到旧版本——**这正是要的效果**。
+旧包别急着删：回滚依赖它。

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Agent, Conversation } from "@heming/shared";
-import { useChatStore } from "../store/chat.js";
+import { activeConversationsOf, useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { requestFriend, acceptFriend } from "../lib/api.js";
@@ -37,6 +37,49 @@ function slotOf(i: number): readonly [number, number] {
  * 扇区落位：给定 items 输出与之一一对应的 {x,y,far}（px 偏移，坐标系 y 向下 = CSS top 方向）。
  * 角度用屏幕约定（0°=正右，顺时针；上=270，左下=150，右下=30）。纯函数、无随机。
  */
+/** 雷达缩放：默认 1，可 0.6–1.8 倍；节点/环线整体缩放，信息卡不跟着缩。 */
+export const RADAR_ZOOM_MIN = 0.6;
+export const RADAR_ZOOM_MAX = 1.8;
+export const RADAR_ZOOM_STEP = 0.1;
+
+/**
+ * 雷达内容半径（像素）：最外圈环直径 374 → 半径 187，留 3px 余量。
+ * 平移夹取要用它算「内容比可视区多出来多少」，否则会拖出一片空白。
+ */
+export const RADAR_CONTENT_R = 190;
+
+/** 拖动超过这个距离（CSS 像素）就认为是在平移，不再触发节点点击。 */
+export const RADAR_DRAG_THRESHOLD = 4;
+
+/**
+ * 夹住平移量：内容放大后比可视区多出来的部分，才允许挪。
+ *
+ * - 放大不足（内容半径 < 可视区半宽/半高）→ 允许位移 0（没什么可看的，别拖出空白）；
+ * - 反之允许 |pan| ≤ 内容半径×zoom − 可视区半宽/半高，即「内容边缘刚好贴到容器边缘」。
+ */
+export function clampRadarPan(
+  pan: { x: number; y: number },
+  zoom: number,
+  viewW: number,
+  viewH: number,
+): { x: number; y: number } {
+  const scaled = RADAR_CONTENT_R * Math.max(1, zoom);
+  const allowX = Math.max(0, scaled - viewW / 2);
+  const allowY = Math.max(0, scaled - viewH / 2);
+  const clamp = (v: number, allow: number) => Math.min(allow, Math.max(-allow, v));
+  return {
+    x: Number.isFinite(pan.x) ? clamp(pan.x, allowX) : 0,
+    y: Number.isFinite(pan.y) ? clamp(pan.y, allowY) : 0,
+  };
+}
+
+/** 夹住缩放倍数并消除浮点误差（按钮/滚轮共用）。 */
+export function clampRadarZoom(z: number): number {
+  if (!Number.isFinite(z)) return 1;
+  const clamped = Math.min(RADAR_ZOOM_MAX, Math.max(RADAR_ZOOM_MIN, z));
+  return Math.round(clamped * 10) / 10;
+}
+
 export function layoutSector(
   centerDeg: number,
   items: readonly unknown[],
@@ -74,8 +117,10 @@ interface RadarNode {
   convId?: string;
   /** 人类好友尚无直聊：点击时先 openDirect。 */
   peerId?: string;
-  /** 智能体（M2 无 1:1 会话）：仅展示信息卡，发消息/历史会话禁用。 */
+  /** 智能体：一对一 / 群内 @ 对话（用户要求「做好智能体一对一聊天」，故 agent 会话已开放）。 */
   agent?: boolean;
+  /** 智能体节点的会话入口：已有 agent 一对一会话则给 convId，否则点击时现开。 */
+  agentId?: string;
   /** 名册行（owner 悬浮卡据此渲染「编辑」入口）。 */
   agentData?: Agent;
   /** roster.owner_id === me.id：名册项属主。 */
@@ -98,7 +143,8 @@ function fmtWhen(iso: string): string {
 // ---------- 组件 ----------
 
 export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
-  const conversations = useChatStore((s) => s.conversations);
+  // 归档会话不进主列表（只在归档页出现）
+  const conversations = activeConversationsOf(useChatStore((s) => s.conversations));
   const friends = useChatStore((s) => s.friends);
   const incoming = useChatStore((s) => s.incoming);
   const agentsRoster = useChatStore((s) => s.agentsRoster);
@@ -108,6 +154,7 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
   const loadAgents = useChatStore((s) => s.loadAgents);
   const loadAgentsRoster = useChatStore((s) => s.loadAgentsRoster);
   const openDirect = useChatStore((s) => s.openDirect);
+  const openAgent = useChatStore((s) => s.openAgent);
   const me = useAuthStore((s) => s.user);
   const openConversation = useUiStore((s) => s.openConversation);
   const hideContacts = useUiStore((s) => s.hideContacts);
@@ -134,6 +181,82 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
    */
   const [show, setShow] = useState(true);
   const radarRef = useRef<HTMLDivElement | null>(null);
+  /** 雷达缩放倍数（0.6–1.8）：节点与环线整体缩放，便于小窗口里看清密集扇区。 */
+  const [zoom, setZoom] = useState(1);
+  /** 拖动平移量（像素）：放大后可以把内容拖到想看的位置。 */
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [panning, setPanning] = useState(false);
+  /** 拖动起点与「本次按下是否已拖动」：拖过就不算点击。 */
+  const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const draggedRef = useRef(false);
+
+  /** 缩放变化时按新倍数重夹一次平移（缩小后原先的偏移可能已越界）。 */
+  useEffect(() => {
+    const el = radarRef.current;
+    if (!el) return;
+    setPan((p) => clampRadarPan(p, zoom, el.clientWidth, el.clientHeight));
+  }, [zoom]);
+
+  /** 滚轮回调里读不到最新 state，用 ref 兜住当前倍数。 */
+  const currentZoomRef = useRef(1);
+  currentZoomRef.current = zoom;
+  const zoomBy = (delta: number) => setZoom((z) => clampRadarZoom(z + delta));
+
+  /** 复位：缩放回 100%、平移归零。 */
+  const resetView = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  const onPanStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (zoom <= 1 || e.button !== 0) return; // 没放大时没什么可拖的
+    draggedRef.current = false;
+    dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+    setPanning(true);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  const onPanMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    const el = radarRef.current;
+    if (!d || !el) return;
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    if (!draggedRef.current && Math.hypot(dx, dy) > RADAR_DRAG_THRESHOLD) {
+      draggedRef.current = true;
+    }
+    setPan(clampRadarPan({ x: d.panX + dx, y: d.panY + dy }, zoom, el.clientWidth, el.clientHeight));
+  };
+
+  const onPanEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    setPanning(false);
+    // 拖动结束后再放开捕获，否则 click 会被吞掉
+    try {
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+    } catch {
+      /* 已释放 */
+    }
+  };
+
+  // Ctrl/⌘ + 滚轮缩放（普通滚轮不劫持，避免影响触控板滚动）；React 根上 wheel 是 passive，
+  // 故用原生监听器 + passive:false 才能 preventDefault。
+  useEffect(() => {
+    const el = radarRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const next = clampRadarZoom(
+        (radarRef.current ? currentZoomRef.current : 1) + (e.deltaY > 0 ? -RADAR_ZOOM_STEP : RADAR_ZOOM_STEP),
+      );
+      currentZoomRef.current = next;
+      setZoom(next);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const hideTimerRef = useRef<number | null>(null);
 
@@ -224,23 +347,30 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
 
   const agentNodes: RadarNode[] = displayAgents
     .filter((a) => match(a.name))
-    .map((a) => ({
-      key: a.id,
-      name: a.name,
-      avatar: a.avatar ?? undefined,
-      // 状态文案随 I2（自建 agent 可入群）区分：未入群的自有项给的是「怎么入群」而非
-      // 一概「仅群内可对话」（后者对无群 agent 读起来像已入群，属误导）
-      status: agentIdsInGroups.has(a.id)
-        ? "智能体 · 群内 @ 对话"
-        : "智能体 · 未入群，可在新建群时勾选",
-      typeLabel: "智能体",
-      unread: 0,
-      agent: true,
-      agentData: a,
-      agentOwned: me != null && a.owner_id === me.id,
-      avatarCls: "!bg-[#dce6f0] !text-[#5b7899]",
-      ...lastOf(undefined),
-    }));
+    .map((a) => {
+      // 已有的一对一会话：unread/最近消息取它，否则显示「暂无消息」
+      const direct = conversations.find((c) => c.type === "agent" && c.agent.id === a.id);
+      return {
+        key: a.id,
+        name: a.name,
+        avatar: a.avatar ?? undefined,
+        status: direct
+          ? "智能体 · 一对一对话"
+          : agentIdsInGroups.has(a.id)
+            ? "智能体 · 一对一 / 群内 @ 对话"
+            : "智能体 · 未入群，可一对一私聊",
+        typeLabel: "智能体",
+        unread: direct?.unreadCount ?? 0,
+        agent: true,
+        // agentId 用于点击时现开会话；convId 命中已有会话则直接进
+        agentId: a.id,
+        convId: direct?.id,
+        agentData: a,
+        agentOwned: me != null && a.owner_id === me.id,
+        avatarCls: "!bg-[#dce6f0] !text-[#5b7899]",
+        ...lastOf(direct?.id),
+      };
+    });
 
   const sectors = [
     { ...SECTORS[0], nodes: groupNodes },
@@ -251,12 +381,23 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
   // ---- 交互 ----
 
   const enter = (n: RadarNode) => {
-    if (n.agent) return; // 智能体：仅展示卡（M2 不假装能聊）
     setOpenErr("");
     hideContacts();
     if (n.convId) {
       openConversation(n.convId);
-    } else if (n.peerId) {
+      return;
+    }
+    if (n.agentId) {
+      // 智能体一对一：服务端幂等，重复点进同一个 agent 只会拿到同一会话
+      void openAgent(n.agentId)
+        .then(openConversation)
+        .catch(() => {
+          showContacts();
+          setOpenErr(`无法打开与 ${n.name} 的会话，请稍后重试`);
+        });
+      return;
+    }
+    if (n.peerId) {
       void openDirect(n.peerId)
         .then(openConversation)
         .catch(() => {
@@ -384,7 +525,28 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
       )}
 
       {/* 雷达区：环 / 扇区分隔 / 扫描线 / 圆心 / 节点 / 信息卡 */}
-      <div className="radar" ref={radarRef}>
+      <div
+        className="radar"
+        ref={radarRef}
+        role="application"
+        aria-label="雷达图，可缩放与拖动"
+        data-zoomed={zoom > 1 ? "on" : "off"}
+        data-panning={panning ? "on" : "off"}
+        onPointerDown={onPanStart}
+        onPointerMove={onPanMove}
+        onPointerUp={onPanEnd}
+        onPointerCancel={onPanEnd}
+        onDoubleClick={resetView}
+      >
+        {/* 缩放舞台：环线/扇区/扫描/圆心/节点统一缩放；信息卡与缩放控件留在舞台外（不被缩放） */}
+        <div
+          className="radar-stage"
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            // 拖动时关掉过渡，否则会「粘手」
+            transition: panning ? "none" : undefined,
+          }}
+        >
         <div className="radar-ring" style={{ width: 150, height: 150 }} />
         <div className="radar-ring solid" style={{ width: 262, height: 262 }} />
         <div className="radar-ring" style={{ width: 374, height: 374 }} />
@@ -441,6 +603,11 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
                 }}
                 onMouseLeave={scheduleHide}
                 onClick={() => {
+                  // 刚刚是在拖动雷达（不是点节点）→ 忽略这次点击
+                  if (draggedRef.current) {
+                    draggedRef.current = false;
+                    return;
+                  }
                   setCard(null);
                   // 仅 overlay（聊天页呼出层）点节点直进会话；工作区主视图点节点开详情页
                   if (overlay) {
@@ -465,6 +632,25 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
             );
           });
         })}
+        </div>
+
+        {/* 缩放控件：− / 百分比（点击复位）/ ＋；Ctrl+滚轮同样可缩放 */}
+        <div className="radar-zoom">
+          <button type="button" aria-label="缩小雷达" onClick={() => zoomBy(-RADAR_ZOOM_STEP)}>
+            −
+          </button>
+          <button
+            type="button"
+            aria-label="复位雷达缩放"
+            className="radar-zoom-pct"
+            onClick={resetView}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button type="button" aria-label="放大雷达" onClick={() => zoomBy(RADAR_ZOOM_STEP)}>
+            ＋
+          </button>
+        </div>
 
         {card && (
           <div
@@ -508,9 +694,12 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
               <button
                 type="button"
                 className="pri"
-                disabled={!!card.node.agent}
-                title={card.node.agent ? "M3 开放对话" : undefined}
                 onClick={() => {
+                  // 刚刚是在拖动雷达（不是点节点）→ 忽略这次点击
+                  if (draggedRef.current) {
+                    draggedRef.current = false;
+                    return;
+                  }
                   setCard(null);
                   enter(card.node);
                 }}
@@ -519,9 +708,12 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
               </button>
               <button
                 type="button"
-                disabled={!!card.node.agent}
-                title={card.node.agent ? "M3 开放对话" : undefined}
                 onClick={() => {
+                  // 刚刚是在拖动雷达（不是点节点）→ 忽略这次点击
+                  if (draggedRef.current) {
+                    draggedRef.current = false;
+                    return;
+                  }
                   setCard(null);
                   enter(card.node);
                 }}
@@ -581,6 +773,15 @@ const STYLE = `
 .toperr { padding:6px 14px; font-size:11.5px; color:#b42318; background:#fdf3f2; border-bottom:1px solid #f1f1f1; }
 
 .radar { position:relative; flex:1; overflow:hidden; }
+.radar-stage { position:absolute; inset:0; transform-origin:center center; transition:transform .15s ease; }
+/* 放大后才可拖动：光标给抓手提示；拖动中变握拳；触摸时禁掉页面滚动 */
+.radar[data-zoomed="on"] { cursor: grab; touch-action: none; }
+.radar[data-panning="on"] { cursor: grabbing; }
+.radar[data-zoomed="on"] .node { cursor: pointer; }
+.radar-zoom { position:absolute; right:12px; bottom:12px; z-index:30; display:flex; align-items:center; gap:2px; background:#fff; border:1px solid #e6e6e6; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.08); padding:2px; }
+.radar-zoom button { border:none; background:none; cursor:pointer; color:#666; font-size:12px; line-height:1; padding:4px 6px; border-radius:5px; }
+.radar-zoom button:hover { background:#f3f3f3; color:#1a1a1a; }
+.radar-zoom .radar-zoom-pct { font-size:10px; color:#888; min-width:34px; }
 .radar-ring { position:absolute; border-radius:50%; border:1px dashed #e8e8e8; left:50%; top:50%; transform:translate(-50%,-50%); }
 .radar-ring.solid { border-color:#f0f0f0; }
 .scan { position:absolute; left:50%; top:50%; width:2px; height:172px; background:linear-gradient(#1a1a1a00,#1a1a1a22 40%,#1a1a1a44); transform-origin:top center; animation:scan 10s linear infinite; z-index:2; }

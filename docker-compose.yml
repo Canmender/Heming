@@ -43,6 +43,11 @@ services:
       dockerfile: docker/web.Dockerfile
     ports:
       - "80:80"
+    volumes:
+      # 自动更新源：安装包与 latest.yml 放这里（见 scripts/publish-update.sh）。
+      # 刻意用宿主挂载而不是打进镜像——安装包 450MB 且每次发版都换，
+      # 放进镜像会让构建缓存彻底失效。
+      - /opt/heming/updates:/usr/share/nginx/updates:ro
     depends_on:
       api:
         condition: service_healthy

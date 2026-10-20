@@ -35,7 +35,24 @@ export interface Store {
   listFriends(userId: string): { id: string; user: User }[];
   listIncomingRequests(userId: string): { id: string; from: User }[];
   createDirectConversation(aId: string, bId: string): { id: string; type: "direct"; peer: User };
+  /**
+   * 建智能体一对一会话（幂等，已存在则返回原会话 id）。
+   * agent 必须存在于名册；自建 agent 仅属主可开，系统预设 agent 谁都能开。
+   */
+  createAgentConversation(
+    userId: string,
+    agentId: string,
+  ): { id: string; type: "agent"; agent: Agent };
   listConversations(userId: string): Conversation[];
+  /**
+   * 归档 / 取消归档一条会话（**按成员独立**）。
+   *
+   * 群聊里 A 归档不该影响 B——归档是「我不想在列表里看到它」，属于个人视图偏好。
+   * 存成会话级字段会让全群跟着被归档，那是错的。
+   *
+   * 非成员调用抛错（调用方转 403），与其它成员校验一致。
+   */
+  setConversationArchived(conversationId: string, userId: string, archived: boolean): void;
   isMember(conversationId: string, userId: string): boolean;
   addMessage(
     conversationId: string,
@@ -128,11 +145,19 @@ export function createMemoryStore(): Store {
     string,
     {
       members: string[];
-      kind: "direct" | "group";
+      /** agent = 智能体一对一（用户与某个名册 agent 的私聊，members 只含本人）。 */
+      kind: "direct" | "group" | "agent";
       name?: string;
+      /** 仅 kind="agent"：对方 agent id（sqlite 侧对应 conversation_agents 关联）。 */
+      agentPeerId?: string;
       agentIds?: string[];
       /** 仅用户自建群写入（createGroup）；预设群与 direct 会话不写 → undefined。 */
       createdBy?: string;
+      /**
+       * 成员 → 归档时间。没这个 key 就是未归档。
+       * 按成员存（而不是会话级）：群聊里各自归档互不影响。
+       */
+      archivedAt?: Map<string, string>;
     }
   >();
   const messages = new Map<string, Message[]>();
@@ -234,6 +259,26 @@ export function createMemoryStore(): Store {
       pairToConv.set(key, id);
       return { id, type: "direct", peer: mustUser(bId) };
     },
+    createAgentConversation(userId, agentId) {
+      const agent = agents.get(agentId);
+      if (!agent) throw new Error("agent not found");
+      // 只能和自己名下的智能体私聊：系统预设 agent（owner_id 为 null）属于公共资源，
+      // 允许任何人私聊；自建 agent 仅属主可开，避免拿别人的 agent 当自己的聊天对象。
+      if (agent.owner_id !== null && agent.owner_id !== userId) {
+        throw new Error("not your agent");
+      }
+      // 幂等：同一用户与同一 agent 只保留一个会话（复用 lookup，不另建 pairToConv——
+      // 那张表是 user↔user 好友对的键，agent 对混进去会污染 direct 的复用逻辑）
+      const found = [...conversations].find(
+        ([, c]) => c.kind === "agent" && c.agentPeerId === agentId && c.members.includes(userId),
+      );
+      if (found) return { id: found[0], type: "agent", agent };
+      const id = randomUUID();
+      conversations.set(id, { members: [userId], kind: "agent", agentPeerId: agentId });
+      messages.set(id, []);
+      reads.set(id, new Map());
+      return { id, type: "agent", agent };
+    },
     listConversations(userId) {
       const unread = (convId: string): number => {
         const readAt = reads.get(convId)?.get(userId);
@@ -251,18 +296,49 @@ export function createMemoryStore(): Store {
             name: conv.name!,
             memberCount: conv.members.length,
             unreadCount: unread(id),
+            archivedAt: conv.archivedAt?.get(userId) ?? null,
           });
+        } else if (conv.kind === "agent") {
+          // 智能体一对一：对方是名册项而非 users 行，取不到（agent 被删）就不出这条会话——
+          // 宁可不显示，也不给前端一个没有 agent 字段的半截对象。
+          const agent = conv.agentPeerId ? agents.get(conv.agentPeerId) : undefined;
+          if (agent)
+            out.push({ id, type: "agent", agent, unreadCount: unread(id), archivedAt: conv.archivedAt?.get(userId) ?? null });
         } else {
           const peerId = conv.members.find((m) => m !== userId);
-          if (peerId) out.push({ id, type: "direct", peer: mustUser(peerId), unreadCount: unread(id) });
+          if (peerId)
+            out.push({
+              id,
+              type: "direct",
+              peer: mustUser(peerId),
+              unreadCount: unread(id),
+              archivedAt: conv.archivedAt?.get(userId) ?? null,
+            });
         }
       }
       return out;
     },
+    setConversationArchived(conversationId, userId, archived) {
+      const conv = conversations.get(conversationId);
+      // 非成员一律拒绝：与其它接口的成员校验同语义，不能让外人改别人的视图
+      if (!conv || !conv.members.includes(userId)) {
+        throw new Error("conversation not found or not a member");
+      }
+      if (archived) {
+        // **保留首次归档时间**：重复点归档不该把时间刷新成现在。
+        // 归档页按归档时间倒序，刷新会让「刚收起来的会话」在列表里跳位——
+        // 用户点了两次归档，条目就换了位置，看起来像坏了。
+        conv.archivedAt = conv.archivedAt ?? new Map();
+        if (!conv.archivedAt.has(userId)) {
+          conv.archivedAt.set(userId, new Date().toISOString());
+        }
+      } else {
+        conv.archivedAt?.delete(userId);
+      }
+    },
     isMember(conversationId, userId) {
       return conversations.get(conversationId)?.members.includes(userId) ?? false;
-    },
-    addMessage(conversationId, senderType, senderId, payload, replyTo, envelope) {
+    },    addMessage(conversationId, senderType, senderId, payload, replyTo, envelope) {
       if (!conversations.has(conversationId)) throw new Error("conversation not found");
       const msg: Message = {
         id: randomUUID(),

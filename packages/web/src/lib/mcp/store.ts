@@ -1,0 +1,431 @@
+import type { StorageLike } from "../memory/types.js";
+import type { McpServerConfig, McpTool, McpToolRef, McpTransport } from "./types.js";
+import { DEFAULT_PRESET_SERVERS, presetServerId } from "./presets.js";
+
+/** 存储键（带版本，便于将来迁移）。 */
+export const MCP_SERVERS_KEY = "heming.mcp.servers.v1";
+export const MCP_TOOLS_KEY = "heming.mcp.tools.v1";
+/** 已启用的工具（`serverId::toolName`），**默认不启用**：工具可能有副作用，必须显式打开。 */
+export const MCP_ENABLED_TOOLS_KEY = "heming.mcp.enabledTools.v1";
+/**
+ * 被用户删掉过的预置服务 id（`heming.mcp.removedPresets.v1`）。
+ *
+ * 为什么需要单独记：删掉最后一条服务后列表为空，如果不记这个，
+ * 下次启动会被「存储为空 → 预置」的条件重新塞回来——用户就删不掉了。
+ * 所以删除预置时在此记一笔，预置逻辑见到记录就跳过。
+ */
+export const MCP_REMOVED_PRESETS_KEY = "heming.mcp.removedPresets.v1";
+/**
+ * 用户明确关掉过的预置工具（`heming.mcp.userDisabled.v1`）：
+ * `{ [serverId]: string[] }`。
+ *
+ * 存在的理由：预置服务会自动启用只读工具，但用户可能不想让模型看屏幕。
+ * enabled 集合里「没有」既可能是从未启用、也可能是用户主动关掉——
+ * 不额外记一份，就会被自动启用逻辑当成前者而重新打开，等于静默推翻用户的选择。
+ */
+export const MCP_USER_DISABLED_KEY = "heming.mcp.userDisabled.v1";
+
+function defaultStorage(): StorageLike {
+  return {
+    getItem: (k) => {
+      try {
+        return window.localStorage.getItem(k);
+      } catch {
+        return null;
+      }
+    },
+    setItem: (k, v) => {
+      try {
+        window.localStorage.setItem(k, v);
+      } catch {
+        /* 配额/隐私模式：只影响持久化，不影响本次会话 */
+      }
+    },
+    removeItem: (k) => {
+      try {
+        window.localStorage.removeItem(k);
+      } catch {
+        /* 同上 */
+      }
+    },
+  };
+}
+
+/** 工具唯一键：`serverId::toolName`。 */
+export function toolKey(serverId: string, toolName: string): string {
+  return `${serverId}::${toolName}`;
+}
+
+const TRANSPORTS: McpTransport[] = ["http", "stdio"];
+
+function coerceServer(raw: unknown, now: string): McpServerConfig | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string" || !r.id) return null;
+  if (typeof r.name !== "string" || !r.name) return null;
+  const transport = TRANSPORTS.includes(r.transport as McpTransport)
+    ? (r.transport as McpTransport)
+    : "http";
+  const headers: Record<string, string> = {};
+  if (r.headers && typeof r.headers === "object") {
+    for (const [k, v] of Object.entries(r.headers as Record<string, unknown>)) {
+      if (typeof v === "string" && k) headers[k] = v;
+    }
+  }
+  return {
+    id: r.id,
+    name: r.name,
+    transport,
+    url: typeof r.url === "string" ? r.url : undefined,
+    command: typeof r.command === "string" ? r.command : undefined,
+    args: Array.isArray(r.args) ? r.args.filter((a): a is string => typeof a === "string") : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
+    enabled: r.enabled !== false,
+    createdAt: typeof r.createdAt === "string" ? r.createdAt : now,
+    updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : now,
+  };
+}
+
+function coerceTool(raw: unknown): McpTool | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.name !== "string" || !r.name) return null;
+  return {
+    name: r.name,
+    description: typeof r.description === "string" ? r.description : undefined,
+    inputSchema:
+      r.inputSchema && typeof r.inputSchema === "object"
+        ? (r.inputSchema as McpTool["inputSchema"])
+        : undefined,
+  };
+}
+
+/**
+ * MCP 服务与工具的本地注册表（单一实例挂在 `mcpRegistry`）。
+ *
+ * 只做「配置 + 工具清单 + 启用开关」的持久化；**连接与调用**在 `httpClient.ts`，
+ * 二者分离后本类可在 node 环境直接单测（注入内存 StorageLike）。
+ */
+export class McpRegistry {
+  private readonly storage: StorageLike;
+  private readonly now: () => string;
+  private serverList: McpServerConfig[];
+  private toolMap: Record<string, McpTool[]>;
+  private enabled: Set<string>;
+
+  constructor(storage: StorageLike = defaultStorage(), now: () => string = () => new Date().toISOString()) {
+    this.storage = storage;
+    this.now = now;
+    this.serverList = this.readServers();
+    this.toolMap = this.readTools();
+    this.enabled = this.readEnabled();
+    this.seedDefaults();
+  }
+
+  /**
+   * 首次使用时预置默认服务（用户要求「默认接入」Windows 桌面控制）。
+   *
+   * 两条守卫，缺一不可：
+   * 1. 只在**存储里完全没有 MCP 服务**时执行——用户已经配过就别插手；
+   * 2. 跳过被用户**删过**的预置（见 MCP_REMOVED_PRESETS_KEY）——
+   *    只靠条件 1 的话，删掉最后一条服务会让列表变空，下次启动又被塞回来，
+   *    用户就永远删不掉它了。
+   */
+  private seedDefaults(): void {
+    if (this.serverList.length > 0) return;
+    const removed = this.readRemovedPresets();
+    const at = this.now();
+    let changed = false;
+    for (const preset of DEFAULT_PRESET_SERVERS) {
+      // 每条预置有各自的固定 id（删除记录、isPreset 判定都按 id 走）
+      const id = presetServerId(preset.id);
+      if (removed.has(id)) continue;
+      this.serverList.push({
+        id,
+        name: preset.name,
+        transport: preset.transport,
+        url: preset.url,
+        command: preset.command,
+        args: preset.args ? [...preset.args] : undefined,
+        enabled: true,
+        createdAt: at,
+        updatedAt: at,
+      });
+      changed = true;
+    }
+    if (changed) this.saveServers();
+  }
+
+  private readRemovedPresets(): Set<string> {
+    const raw = this.storage.getItem(MCP_REMOVED_PRESETS_KEY);
+    if (!raw) return new Set();
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed)
+        ? new Set(parsed.filter((x): x is string => typeof x === "string"))
+        : new Set();
+    } catch {
+      return new Set();
+    }
+  }
+
+  private writeRemovedPresets(set: Set<string>): void {
+    this.storage.setItem(MCP_REMOVED_PRESETS_KEY, JSON.stringify([...set]));
+  }
+
+  /**
+   * 预置服务发现完工具后，把只读那批自动启用（见 McpPreset.safeTools）。
+   *
+   * **用户关掉的不再打开**：enabled 是「已启用集合」，关掉的工具不在里面，
+   * 只按 `has(key)` 判重会把它当成「从未配置」而重新启用——
+   * 等于用户的选择被静默推翻。所以这里额外查 `disabledPresets`：一旦用户
+   * 明确关过某工具，就记下来，之后不再自动开（要恢复得他再手动勾一次）。
+   */
+  autoEnableSafeTools(serverId: string, tools: McpTool[]): string[] {
+    // 非预置服务一律不自动启用：第三方服务的工具名可能与白名单撞名
+    // （比如人家也有个叫 Screenshot 的），开错等于给了没预期的权限。
+    if (!this.isPreset(serverId)) return [];
+    // 按**服务 id**反查所属预设：不同预置的白名单不同
+    // （Windows-MCP 是 Screenshot/Snapshot，Scrapling 是 make_request 那一批）。
+    const preset = DEFAULT_PRESET_SERVERS.find((p) => presetServerId(p.id) === serverId);
+    const safe = new Set(preset?.safeTools ?? []);
+    if (!safe.size) return [];
+    const userOff = this.readUserDisabled(serverId);
+    const enabled: string[] = [];
+    for (const tool of tools) {
+      if (!safe.has(tool.name)) continue;
+      const key = toolKey(serverId, tool.name);
+      if (this.enabled.has(key) || userOff.has(tool.name)) continue;
+      this.enabled.add(key);
+      enabled.push(tool.name);
+    }
+    if (enabled.length) this.saveEnabled();
+    return enabled;
+  }
+
+  /** 读「用户明确关掉过」的只读工具（serverId + 工具名）。 */
+  private readUserDisabled(serverId: string): Set<string> {
+    const raw = this.storage.getItem(MCP_USER_DISABLED_KEY);
+    if (!raw) return new Set();
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      const list =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? ((parsed as Record<string, unknown>)[serverId] as unknown)
+          : null;
+      return Array.isArray(list)
+        ? new Set(list.filter((x): x is string => typeof x === "string"))
+        : new Set();
+    } catch {
+      return new Set();
+    }
+  }
+
+  private writeUserDisabled(serverId: string, names: Set<string>): void {
+    try {
+      const raw = JSON.parse(this.storage.getItem(MCP_USER_DISABLED_KEY) ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      if (names.size) raw[serverId] = [...names];
+      else delete raw[serverId];
+      this.storage.setItem(MCP_USER_DISABLED_KEY, JSON.stringify(raw));
+    } catch {
+      /* 存不下只影响「记住关掉」这件事，不影响本次生效 */
+    }
+  }
+
+  /** 该服务是否属于预置（界面据此标注「默认接入」）。 */
+  isPreset(serverId: string): boolean {
+    return DEFAULT_PRESET_SERVERS.some((p) => presetServerId(p.id) === serverId);
+  }
+
+  private readServers(): McpServerConfig[] {
+    const raw = this.storage.getItem(MCP_SERVERS_KEY);
+    if (!raw) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((x) => coerceServer(x, this.now())).filter((x): x is McpServerConfig => !!x);
+    } catch {
+      return [];
+    }
+  }
+
+  private readTools(): Record<string, McpTool[]> {
+    const raw = this.storage.getItem(MCP_TOOLS_KEY);
+    if (!raw) return {};
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const out: Record<string, McpTool[]> = {};
+      for (const [serverId, list] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!Array.isArray(list)) continue;
+        const tools = list.map(coerceTool).filter((t): t is McpTool => !!t);
+        // 空清单也记下来：`if (tools.length)` 会让「连上了但一个工具都没有」
+        // 与「还没连过」在读回后无法区分，界面会把前者显示成「未连接」，
+        // 用户于是又得点一次连接——正好是自动连接想省掉的那一步。
+        out[serverId] = tools;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  private readEnabled(): Set<string> {
+    const raw = this.storage.getItem(MCP_ENABLED_TOOLS_KEY);
+    if (!raw) return new Set();
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return new Set();
+      return new Set(parsed.filter((x): x is string => typeof x === "string"));
+    } catch {
+      return new Set();
+    }
+  }
+
+  private saveServers(): void {
+    this.storage.setItem(MCP_SERVERS_KEY, JSON.stringify(this.serverList));
+  }
+
+  private saveTools(): void {
+    this.storage.setItem(MCP_TOOLS_KEY, JSON.stringify(this.toolMap));
+  }
+
+  private saveEnabled(): void {
+    this.storage.setItem(MCP_ENABLED_TOOLS_KEY, JSON.stringify([...this.enabled]));
+  }
+
+  servers(): McpServerConfig[] {
+    return this.serverList.map((s) => ({ ...s, headers: s.headers ? { ...s.headers } : undefined }));
+  }
+
+  get(id: string): McpServerConfig | undefined {
+    return this.servers().find((s) => s.id === id);
+  }
+
+  add(
+    input: Omit<McpServerConfig, "createdAt" | "updatedAt" | "id" | "enabled"> & {
+      id?: string;
+      enabled?: boolean;
+    },
+  ): McpServerConfig {
+    const at = this.now();
+    const name = input.name.trim();
+    if (!name) throw new Error("请填写服务名称");
+    if (input.transport === "http" && !/^https?:\/\//.test(input.url ?? "")) {
+      throw new Error("HTTP 传输的地址必须以 http:// 或 https:// 开头");
+    }
+    if (input.transport === "stdio" && !(input.command ?? "").trim()) {
+      throw new Error("stdio 传输需要填写启动命令");
+    }
+    const server: McpServerConfig = {
+      id: input.id?.trim() || `mcp-${at}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      transport: input.transport,
+      url: input.url?.trim() || undefined,
+      command: input.command?.trim() || undefined,
+      args: input.args?.filter((a) => a.trim()),
+      headers: input.headers,
+      enabled: input.enabled !== false,
+      createdAt: at,
+      updatedAt: at,
+    };
+    this.serverList = [...this.serverList, server];
+    this.saveServers();
+    return { ...server };
+  }
+
+  update(id: string, patch: Partial<Omit<McpServerConfig, "id" | "createdAt">>): McpServerConfig {
+    const idx = this.serverList.findIndex((s) => s.id === id);
+    if (idx < 0) throw new Error("MCP 服务不存在");
+    const next: McpServerConfig = {
+      ...this.serverList[idx],
+      ...patch,
+      id,
+      updatedAt: this.now(),
+    };
+    this.serverList = this.serverList.map((s, i) => (i === idx ? next : s));
+    this.saveServers();
+    return { ...next };
+  }
+
+  remove(id: string): void {
+    this.serverList = this.serverList.filter((s) => s.id !== id);
+    delete this.toolMap[id];
+    for (const key of [...this.enabled]) {
+      if (key.startsWith(`${id}::`)) this.enabled.delete(key);
+    }
+    // 删掉的是预置服务 → 记一笔，否则下次启动会因「列表为空」被重新预置
+    if (this.isPreset(id)) {
+      const removed = this.readRemovedPresets();
+      removed.add(id);
+      this.writeRemovedPresets(removed);
+    }
+    this.saveServers();
+    this.saveTools();
+    this.saveEnabled();
+  }
+
+  /** 缓存某台服务的最新工具清单（刷新时整表替换）。 */
+  setTools(serverId: string, tools: McpTool[]): void {
+    this.toolMap[serverId] = tools.map((t) => ({ ...t }));
+    this.saveTools();
+  }
+
+  tools(serverId: string): McpTool[] {
+    return (this.toolMap[serverId] ?? []).map((t) => ({ ...t }));
+  }
+
+  /**
+   * 该服务是否**已经发现过工具**（哪怕清单是空的）。
+   *
+   * 界面据此区分「已连接但零工具」与「还没连过」：前者显示已连接，
+   * 否则用户会以为要再点一次连接，而自动连接正是为了省掉这一步。
+   */
+  hasDiscovered(serverId: string): boolean {
+    return Object.prototype.hasOwnProperty.call(this.toolMap, serverId);
+  }
+
+  /** 全部服务的工具（带服务名，便于展示与命名空间化）。 */
+  allTools(): McpToolRef[] {
+    const out: McpToolRef[] = [];
+    for (const server of this.serverList) {
+      for (const tool of this.toolMap[server.id] ?? []) {
+        out.push({ serverId: server.id, serverName: server.name, tool: { ...tool } });
+      }
+    }
+    return out;
+  }
+
+  isToolEnabled(serverId: string, toolName: string): boolean {
+    return this.enabled.has(toolKey(serverId, toolName));
+  }
+
+  setToolEnabled(serverId: string, toolName: string, on: boolean): void {
+    const key = toolKey(serverId, toolName);
+    if (on) this.enabled.add(key);
+    else this.enabled.delete(key);
+    // 预置服务的只读工具：用户关掉时记一笔，之后自动启用逻辑不再打开它。
+    // 再打开时撤掉记录，让「显式开启」优先于「曾被关过」。
+    if (this.isPreset(serverId)) {
+      const off = this.readUserDisabled(serverId);
+      if (on) off.delete(toolName);
+      else off.add(toolName);
+      this.writeUserDisabled(serverId, off);
+    }
+    this.saveEnabled();
+  }
+
+  /** 只需要「启用的 + 所属服务也启用的」工具（注入给模型的那一份）。 */
+  enabledTools(): McpToolRef[] {
+    const activeServers = new Set(this.serverList.filter((s) => s.enabled).map((s) => s.id));
+    return this.allTools().filter(
+      (ref) => activeServers.has(ref.serverId) && this.enabled.has(toolKey(ref.serverId, ref.tool.name)),
+    );
+  }
+}
+
+/** 全局单例（浏览器 localStorage）。测试请自行 new McpRegistry(内存存储)。 */
+export const mcpRegistry = new McpRegistry();

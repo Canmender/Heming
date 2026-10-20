@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, type MockInstance } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { Agent, User } from "@heming/shared";
-import { RadarContacts, layoutSector } from "./RadarContacts.js";
+import { RadarContacts, layoutSector , clampRadarZoom, clampRadarPan } from "./RadarContacts.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -24,7 +24,6 @@ function seedStore() {
   useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
   useUiStore.setState({
     page: "workspace",
-    navCollapsed: false,
     activeConversationId: null,
     contactsHidden: false,
     detailContact: null,
@@ -55,7 +54,11 @@ function spyEffects() {
   const loadAgentsRoster = vi
     .spyOn(useChatStore.getState(), "loadAgentsRoster")
     .mockResolvedValue(undefined);
-  return { loadWorkspace, loadAgents, loadAgentsRoster };
+  // 智能体一对一：点智能体走 openAgent（服务端幂等），打桩避免真发请求
+  const openAgent = vi
+    .spyOn(useChatStore.getState(), "openAgent")
+    .mockResolvedValue("ca1");
+  return { loadWorkspace, loadAgents, loadAgentsRoster, openAgent };
 }
 
 describe("layoutSector 扇区落位（纯函数、无随机）", () => {
@@ -256,19 +259,19 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(s.activeConversationId).toBeNull();
   });
 
-  it("智能体节点：点开发消息按钮 disabled（title「M3 开放对话」）", async () => {
+  it("智能体节点：「发消息」可用，点开进入一对一（agent 会话已开放）", async () => {
     render(<RadarContacts />);
     await screen.findByText("和小鸣");
     fireEvent.mouseOver(screen.getByText("和小鸣"));
     const send = await screen.findByRole("button", { name: "发消息" });
-    expect(send).toBeDisabled();
-    expect(send).toHaveAttribute("title", "M3 开放对话");
-    // 卡片打开后名称两处（节点 + 卡片）：点节点本体（DOM 在前）
-    fireEvent.click(screen.getAllByText("和小鸣")[0]);
-    // 点击智能体不进入会话、不隐藏通讯录，打开智能体详情
-    expect(useUiStore.getState().page).toBe("workspace");
-    expect(useUiStore.getState().contactsHidden).toBe(false);
-    expect(useUiStore.getState().detailContact).toEqual({ kind: "agent", id: "a1" });
+    // 智能体一对一已开放：按钮不再禁用，也没有「M3 开放对话」这类占位提示
+    expect(send).not.toBeDisabled();
+    expect(send).not.toHaveAttribute("title", "M3 开放对话");
+    fireEvent.click(send);
+    // openAgent 成功后进入该智能体的一对一会话
+    await waitFor(() => {
+      expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("a1");
+    });
   });
 
   it("overlay 模式：点群节点隐藏后「呼出」按钮拉回（不改页）", async () => {
@@ -338,7 +341,8 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(await screen.findByText("编辑智能体")).toBeInTheDocument();
     expect(screen.getByDisplayValue("架构师")).toBeInTheDocument();
     fireEvent.mouseOver(screen.getByText("和小鸣"));
-    expect(screen.getByRole("button", { name: "发消息" })).toBeDisabled();
+    // 系统 agent 没有「编辑」入口（owner 不是我）；但「发消息」可用——一对一已开放
+    expect(screen.getByRole("button", { name: "发消息" })).not.toBeDisabled();
     expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
   });
 
@@ -362,18 +366,129 @@ describe("RadarContacts 雷达通讯录", () => {
     expect(screen.getByText("架构师")).toBeInTheDocument();
   });
 
-  it("I7 状态文案按入群与否区分：已入群「群内 @ 对话」、未入群提示可在新建群时勾选", async () => {
+  it("智能体状态文案：已有一对一会话 / 已入群 / 未入群三态区分", async () => {
     useChatStore.setState({
       agentsRoster: [xiaoMing, mine],
       agentIdsInGroups: new Set(["a1"]), // a1 已入群、a2（自有）未入群
+      // a1 额外有一个已存在的一对一会话 → 文案应优先显示「一对一」
+      conversations: [
+        { id: "ca1", type: "agent", agent: xiaoMing, unreadCount: 0 },
+      ] as never,
     });
     render(<RadarContacts />);
     await screen.findByText("和小鸣");
 
     fireEvent.mouseOver(screen.getByText("和小鸣"));
-    expect(await screen.findByText("智能体 · 群内 @ 对话")).toBeInTheDocument();
+    expect(await screen.findByText("智能体 · 一对一对话")).toBeInTheDocument();
 
     fireEvent.mouseOver(screen.getAllByText("架构师")[0]);
-    expect(await screen.findByText("智能体 · 未入群，可在新建群时勾选")).toBeInTheDocument();
+    expect(await screen.findByText("智能体 · 未入群，可一对一私聊")).toBeInTheDocument();
+  });
+});
+
+describe("雷达缩放（clampRadarZoom）", () => {
+  it("夹在 0.6–1.8 之间，四舍五入到 0.1", () => {
+    expect(clampRadarZoom(1)).toBe(1);
+    expect(clampRadarZoom(0.1)).toBe(0.6);
+    expect(clampRadarZoom(5)).toBe(1.8);
+    expect(clampRadarZoom(1.24)).toBe(1.2);
+    expect(clampRadarZoom(1.26)).toBe(1.3);
+  });
+
+  it("非法输入回落 1 倍", () => {
+    expect(clampRadarZoom(Number.NaN)).toBe(1);
+  });
+});
+
+/**
+ * jsdom 没有 PointerEvent，testing-library 会退化成普通 Event —— button/clientX 全丢，
+ * 指针拖动就测不了。这里用 MouseEvent 顶替（类型名仍是 pointerdown，React 能收到）。
+ */
+if (typeof window !== "undefined" && typeof (window as unknown as { PointerEvent?: unknown }).PointerEvent === "undefined") {
+  (window as unknown as { PointerEvent: unknown }).PointerEvent = MouseEvent;
+}
+
+describe("雷达拖动平移（clampRadarPan）", () => {
+  it("未放大或内容比可视区小：不允许位移（免得拖出空白）", () => {
+    expect(clampRadarPan({ x: 80, y: 60 }, 1, 800, 600)).toEqual({ x: 0, y: 0 });
+    // 放大 1.2 倍但可视区仍大于内容 → 依旧锁死
+    expect(clampRadarPan({ x: 50, y: 50 }, 1.2, 900, 800)).toEqual({ x: 0, y: 0 });
+  });
+
+  it("放大到内容超出可视区：按超出量夹取", () => {
+    // 内容半径 190 × 1.8 = 342；可视区半宽 250 → 允许 92
+    const out = clampRadarPan({ x: 400, y: -400 }, 1.8, 500, 500);
+    expect(out.x).toBeCloseTo(92, 5);
+    expect(out.y).toBeCloseTo(-92, 5);
+    // 反方向同理
+    const back = clampRadarPan({ x: -400, y: 400 }, 1.8, 500, 500);
+    expect(back.x).toBeCloseTo(-92, 5);
+    expect(back.y).toBeCloseTo(92, 5);
+  });
+
+  it("宽扁容器按各轴分别夹（横向能挪、纵向锁死）", () => {
+    const out = clampRadarPan({ x: 999, y: 999 }, 1.8, 400, 900);
+    expect(out.x).toBeCloseTo(190 * 1.8 - 200, 5);
+    expect(out.y).toBe(0);
+  });
+
+  it("非法输入回落 0，不产出 NaN transform", () => {
+    expect(clampRadarPan({ x: Number.NaN, y: Number.POSITIVE_INFINITY }, 1.8, 400, 400)).toEqual({
+      x: 0,
+      y: 0,
+    });
+  });
+});
+
+describe("雷达缩放 + 拖动交互", () => {
+  it("放大后可拖动：舞台 transform 跟着位移，双击复位", () => {
+    render(<RadarContacts />);
+    const radar = document.querySelector(".radar") as HTMLElement;
+    // jsdom 没有布局，给容器一个确定尺寸以便夹取计算
+    Object.defineProperty(radar, "clientWidth", { value: 400, configurable: true });
+    Object.defineProperty(radar, "clientHeight", { value: 400, configurable: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "放大雷达" }));
+    fireEvent.click(screen.getByRole("button", { name: "放大雷达" }));
+    expect(radar.dataset.zoomed).toBe("on");
+
+    fireEvent.pointerDown(radar, { clientX: 200, clientY: 200, button: 0, pointerId: 1 });
+    fireEvent.pointerMove(radar, { clientX: 240, clientY: 220, pointerId: 1 });
+    expect(radar.dataset.panning).toBe("on");
+    const stage = document.querySelector(".radar-stage") as HTMLElement;
+    // 横向被夹到上限：内容半径 190×1.2=228 − 可视区半宽 200 = 28（纵向 228−200 同样是 28，取 20）
+    expect(stage.style.transform).toContain("translate(28px, 20px)");
+
+    fireEvent.pointerUp(radar, { clientX: 240, clientY: 220, pointerId: 1 });
+    expect(radar.dataset.panning).toBe("off");
+
+    fireEvent.doubleClick(radar);
+    expect(stage.style.transform).toContain("translate(0px, 0px)");
+  });
+
+  it("未放大时不进入拖动态（点击节点照常生效）", () => {
+    render(<RadarContacts />);
+    const radar = document.querySelector(".radar") as HTMLElement;
+    expect(radar.dataset.zoomed).toBe("off");
+    fireEvent.pointerDown(radar, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    fireEvent.pointerMove(radar, { clientX: 160, clientY: 140, pointerId: 1 });
+    expect(radar.dataset.panning).toBe("off");
+    const stage = document.querySelector(".radar-stage") as HTMLElement;
+    expect(stage.style.transform).toBe("translate(0px, 0px) scale(1)");
+  });
+
+  it("百分比按钮复位缩放与位移", () => {
+    render(<RadarContacts />);
+    const radar = document.querySelector(".radar") as HTMLElement;
+    Object.defineProperty(radar, "clientWidth", { value: 400, configurable: true });
+    Object.defineProperty(radar, "clientHeight", { value: 400, configurable: true });
+    fireEvent.click(screen.getByRole("button", { name: "放大雷达" }));
+    fireEvent.pointerDown(radar, { clientX: 200, clientY: 200, button: 0, pointerId: 2 });
+    fireEvent.pointerMove(radar, { clientX: 260, clientY: 240, pointerId: 2 });
+    fireEvent.pointerUp(radar, { clientX: 260, clientY: 240, pointerId: 2 });
+
+    fireEvent.click(screen.getByRole("button", { name: "复位雷达缩放" }));
+    const stage = document.querySelector(".radar-stage") as HTMLElement;
+    expect(stage.style.transform).toBe("translate(0px, 0px) scale(1)");
   });
 });

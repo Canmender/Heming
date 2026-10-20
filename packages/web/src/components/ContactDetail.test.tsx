@@ -12,7 +12,6 @@ describe("ContactDetail", () => {
   beforeEach(() => {
     useUiStore.setState({
       page: "workspace",
-      navCollapsed: false,
       activeConversationId: null,
       contactsHidden: false,
       detailContact: null,

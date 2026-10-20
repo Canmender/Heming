@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import { App } from "./App.js";
+import { App, clampAsideWidth, ASIDE_MIN, ASIDE_MAX } from "./App.js";
 import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
 import { setToken, fetchFileBlobText } from "./lib/api.js";
@@ -66,7 +66,7 @@ describe("App 认证门禁", () => {
     vi.restoreAllMocks();
     setToken(null);
     useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
-    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+    useUiStore.setState({ page: "home", activeConversationId: null });
   });
 
   it("无 token 渲染登录页而非三栏壳", () => {
@@ -134,7 +134,7 @@ describe("App 右栏云端共享", () => {
     vi.restoreAllMocks();
     setToken(null);
     useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
-    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+    useUiStore.setState({ page: "home", activeConversationId: null });
   });
 
   it("登录后拉取共享文件并渲染上传按钮与根级行", async () => {
@@ -292,10 +292,10 @@ describe("App 记忆区接线", () => {
     vi.restoreAllMocks();
     setToken(null);
     useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
-    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+    useUiStore.setState({ page: "home", activeConversationId: null });
   });
 
-  it("page=memory 渲染记忆区（分段 + 智能体选择器），不再落到占位页", async () => {
+  it("page=memory 渲染记忆区（三分区 + 智能体选择器），不再落到占位页", async () => {
     setToken("t1");
     mockFetch({
       agents: [{ id: "a1", owner_id: "u1", name: "阿和", avatar: null, description: "" }],
@@ -304,11 +304,15 @@ describe("App 记忆区接线", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "记忆" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "技能池" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "记忆区" })).toBeInTheDocument();
+    for (const label of ["智能体", "数据库", "个人知识库"]) {
+      expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
+    }
     expect(await screen.findByRole("option", { name: "阿和" })).toBeInTheDocument();
     expect(screen.queryByText("占位页面")).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "语义记忆" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "数据库" }));
+    expect(screen.getByRole("group", { name: "语义记忆条目" })).toBeInTheDocument();
   });
 });
 
@@ -318,10 +322,10 @@ describe("App 导航快捷键与隐藏态", () => {
     vi.restoreAllMocks();
     setToken(null);
     useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
-    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+    useUiStore.setState({ page: "home", activeConversationId: null });
   });
 
-  it("Alt+1–5 直接切页，Ctrl+\ 切换导航显隐；Ctrl+数字 不再切页", async () => {
+  it("Alt+1–6 直接切页（含技能区），导航常驻；Ctrl+数字 不再切页", async () => {
     setToken("t1");
     mockFetch();
     render(<App />);
@@ -329,8 +333,12 @@ describe("App 导航快捷键与隐藏态", () => {
 
     fireEvent.keyDown(window, { key: "2", altKey: true });
     expect(useUiStore.getState().page).toBe("workspace");
-    fireEvent.keyDown(window, { key: "4", altKey: true });
+    fireEvent.keyDown(window, { key: "3", altKey: true });
+    expect(useUiStore.getState().page).toBe("skills");
+    fireEvent.keyDown(window, { key: "5", altKey: true });
     expect(useUiStore.getState().page).toBe("memory");
+    fireEvent.keyDown(window, { key: "6", altKey: true });
+    expect(useUiStore.getState().page).toBe("settings");
     fireEvent.keyDown(window, { key: "1", altKey: true });
     expect(useUiStore.getState().page).toBe("home");
 
@@ -340,13 +348,9 @@ describe("App 导航快捷键与隐藏态", () => {
     fireEvent.keyDown(window, { key: "3", metaKey: true });
     expect(useUiStore.getState().page).toBe("home");
 
+    // 导航轨常驻：Ctrl+\ 不再折叠导航，主导航始终在
     fireEvent.keyDown(window, { key: "\\", ctrlKey: true });
-    expect(useUiStore.getState().navCollapsed).toBe(true);
-    expect(await screen.findByRole("button", { name: "呼出导航" })).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
-
-    fireEvent.keyDown(window, { key: "\\", ctrlKey: true });
-    expect(useUiStore.getState().navCollapsed).toBe(false);
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
   });
 
@@ -360,10 +364,10 @@ describe("App 导航快捷键与隐藏态", () => {
     const probe = document.createElement("input");
     container.appendChild(probe);
     probe.focus();
-    fireEvent.keyDown(probe, { key: "3", altKey: true });
+    fireEvent.keyDown(probe, { key: "4", altKey: true });
     expect(useUiStore.getState().page).toBe("home");
     probe.remove();
-    fireEvent.keyDown(window, { key: "3", altKey: true });
+    fireEvent.keyDown(window, { key: "4", altKey: true });
     expect(useUiStore.getState().page).toBe("interfaces");
 
     // 未登录：App 走登录页分支，快捷键静默不改 page
@@ -378,7 +382,7 @@ describe("App 导航快捷键与隐藏态", () => {
     expect(screen.getAllByText("登录你的账号").length).toBeGreaterThan(0);
   });
 
-  it("输入框聚焦时：Ctrl+\\ 仍切换导航折叠（聊天高频操作不拦截），Alt+数字 仍被过滤", async () => {
+  it("输入框聚焦时：Alt+数字 仍被过滤，导航常驻不被键盘改动", async () => {
     setToken("t1");
     mockFetch();
     const { container } = render(<App />);
@@ -392,27 +396,27 @@ describe("App 导航快捷键与隐藏态", () => {
     fireEvent.keyDown(probe, { key: "2", altKey: true });
     expect(useUiStore.getState().page).toBe("home");
 
-    // Ctrl+\ 在输入框内也生效（无冲突组合，聊天中收放导航是高频操作）
+    // 导航常驻：Ctrl+\ 不再折叠，主导航仍在
     fireEvent.keyDown(probe, { key: "\\", ctrlKey: true });
-    expect(useUiStore.getState().navCollapsed).toBe(true);
-    fireEvent.keyDown(probe, { key: "\\", ctrlKey: true });
-    expect(useUiStore.getState().navCollapsed).toBe(false);
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     probe.remove();
   });
 
-  it("导航收起态（如进入会话后）左缘呼出提示可点击展开", async () => {
+  it("进入会话后左侧导航仍常驻（不再收起、不再有呼出条）", async () => {
     setToken("t1");
     mockFetch();
-    // 模拟 openConversation 后的状态（page/chat 由 store 测试覆盖，这里只验证壳的导航显隐）
-    useUiStore.setState({ page: "home", navCollapsed: true, activeConversationId: null });
     render(<App />);
+    await screen.findByRole("button", { name: "主页 Alt1" });
 
-    await screen.findByRole("button", { name: "呼出导航" });
-    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+    // jsdom 未实现 scrollIntoView（ChatPage 滚到底部用），进入会话前补个空实现
+    Element.prototype.scrollIntoView = vi.fn();
+    act(() => {
+      useUiStore.getState().openConversation("c1");
+    });
 
-    fireEvent.click(screen.getByRole("button", { name: "呼出导航" }));
-    expect(useUiStore.getState().navCollapsed).toBe(false);
-    expect(await screen.findByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
+    expect(useUiStore.getState().page).toBe("chat");
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "呼出导航" })).not.toBeInTheDocument();
   });
 });
 
@@ -422,7 +426,7 @@ describe("App 桌面窗口标题栏", () => {
     vi.restoreAllMocks();
     setToken(null);
     useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
-    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+    useUiStore.setState({ page: "home", activeConversationId: null });
     delete (window as unknown as { heming?: unknown }).heming;
   });
 
@@ -458,5 +462,55 @@ describe("App 桌面窗口标题栏", () => {
     await screen.findByRole("button", { name: "主页 Alt1" });
 
     expect(container.querySelector(".desktop-titlebar")).toBeNull();
+  });
+});
+
+describe("右侧工作目录栏：绑定按钮与拖动调宽", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+    delete (window as unknown as { heming?: unknown }).heming;
+    setToken("t1");
+    mockFetch();
+  });
+
+  it("目录栏头部有「绑定」与「上传」两个入口", async () => {
+    render(<App />);
+    await screen.findByRole("button", { name: "主页 Alt1" });
+    expect(screen.getByRole("button", { name: "绑定本地文件到会话" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上传" })).toBeInTheDocument();
+  });
+
+  it("没有打开会话时点绑定给出提示（不静默失败）", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    render(<App />);
+    await screen.findByRole("button", { name: "主页 Alt1" });
+    fireEvent.click(screen.getByRole("button", { name: "绑定本地文件到会话" }));
+    expect(alertSpy).toHaveBeenCalledWith("先打开一个会话，再绑定文件");
+  });
+
+  it("拖动手柄可改变目录栏宽度并落盘", async () => {
+    const { container } = render(<App />);
+    await screen.findByRole("button", { name: "主页 Alt1" });
+    const handle = screen.getByRole("separator", { name: "调整目录栏宽度" });
+    const aside = container.querySelector("aside.flex.shrink-0") as HTMLElement;
+
+    // jsdom 不实现 PointerEvent（typeof undefined），fireEvent.pointerDown 造出的事件
+    // React 认不出来、onPointerDown 不触发。这里用 MouseEvent 顶替——它同样带
+    // clientX 且冒泡，足够驱动本组件的指针拖动逻辑（同 RadarContacts 测试的做法）。
+    fireEvent(handle, new MouseEvent("pointerdown", { bubbles: true, clientX: 0, button: 0 }));
+    fireEvent(window, new MouseEvent("pointermove", { bubbles: true, clientX: 80 }));
+    expect(aside.style.width).toBe("320px"); // 默认 240 + 拖动 80
+    fireEvent(window, new MouseEvent("pointerup", { bubbles: true }));
+
+    // 松手后宽度落盘，下次启动沿用
+    expect(localStorage.getItem("heming.asideWidth.v1")).toBe("320");
+  });
+
+  it("clampAsideWidth：夹在上下限之间，非法值回落默认", () => {
+    expect(clampAsideWidth(100)).toBe(ASIDE_MIN);
+    expect(clampAsideWidth(9999)).toBe(ASIDE_MAX);
+    expect(clampAsideWidth(Number.NaN)).toBe(240);
+    expect(clampAsideWidth(300)).toBe(300);
   });
 });

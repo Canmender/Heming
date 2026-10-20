@@ -18,3 +18,58 @@ body {
   -webkit-app-region: drag;
 }
 
+
+/*
+ * 主题色（设置区可改）：既有界面 60+ 处用 bg-ink / text-ink，
+ * 这里只让「填充色」跟随 --heming-accent，一处生效全局生效；
+ * 正文颜色不动——换主题色不该把所有文字染成同一个颜色。
+ * 前景色由 lib/theme.ts 按背景亮度算好写进 --heming-on-accent，保证按钮上的字读得清。
+ */
+:root {
+  --heming-accent: #1a1a1a;
+  --heming-on-accent: #ffffff;
+}
+.bg-ink {
+  background-color: var(--heming-accent);
+  color: var(--heming-on-accent);
+}
+
+/*
+ * 自定义滚动条（用户要求：细长、简约好看）。
+ *
+ * 为什么不用浏览器默认：Windows 上默认滚动条又宽又灰，在这个几乎全是留白的
+ * 浅色界面里非常扎眼。这里统一收成 6px 细条，滑块用低对比灰，
+ * hover 时才稍微加深——不抢内容视线，但滚到哪儿一眼可见。
+ *
+ * `scrollbar-width: thin` 给 Firefox，`::-webkit-scrollbar` 给 Chromium/Electron，
+ * 两条都要写：Electron 是 Chromium，只认后者；浏览器预览走 Firefox 时靠前者。
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d0d0d0 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #d0d0d0;
+  border-radius: 999px;
+  /* 上下各留 2px：滑块不顶到轨道两端，细条看着更利落 */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #a8a8a8;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}

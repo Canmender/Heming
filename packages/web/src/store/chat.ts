@@ -5,6 +5,7 @@ import {
   fetchFriends,
   fetchIncomingRequests,
   createConversation,
+  createAgentConversation,
   fetchMessages,
   fetchMembers,
   reencryptMessage,
@@ -106,10 +107,27 @@ function joinRoster(roster: Agent[], ids: Set<string>): Agent[] {
 }
 
 /** 单条流式生成的打字机状态（key=streamId）。 */
+/** 一次工具调用的可视化轨迹（只在前端展示，不落库、不上行）。 */
+export interface ToolTrace {
+  id: string;
+  name: string;
+  /** 模型给的原始参数 JSON 字符串。 */
+  args: string;
+  status: "running" | "ok" | "error";
+  /** 工具返回文本（截断由 UI 负责）。 */
+  result?: string;
+  startedAt: number;
+  endedAt?: number;
+}
+
 export interface AgentStreamState {
   agentId: string;
   conversationId: string;
   text: string;
+  /** 模型的思考过程（reasoning/thinking 增量累积）；不支持该能力的模型为空。 */
+  reasoning?: string;
+  /** 本轮发生的工具调用（按发生顺序）。 */
+  tools?: ToolTrace[];
   status: "streaming" | "error";
   errorMessage?: string;
   /** 最后一次写入（含文本累积/事件到达）的毫秒时间戳；他机流 watchdog 据此判「长时间无响应」。 */
@@ -156,6 +174,8 @@ interface ChatState {
   pendingE2e: Record<string, string[]>;
   loadWorkspace: () => Promise<void>;
   openDirect: (peerId: string) => Promise<string>;
+  /** 开智能体一对一会话（幂等，服务端已存在则复用），返回会话 id。 */
+  openAgent: (agentId: string) => Promise<string>;
   createGroup: (name: string, memberIds: string[]) => Promise<string>;
   /** 把名册 agent 挂到会话（POST /api/conversations/:id/agents，幂等；权限在服务端路由层）。 */
   attachAgentToGroup: (convId: string, agentId: string) => Promise<void>;
@@ -209,6 +229,19 @@ interface ChatState {
    * STREAM_STALE_MS 未刷新者置 error（长时间无响应，生成可能已中断）。由 ChatPage 定时器调用。
    */
   sweepStaleStreams: (now: number) => void;
+}
+
+/**
+ * 未归档的会话（主列表用）。
+ *
+ * 归档的会话不该出现在工作区雷达、联系人列、转发目标里——
+ * 那正是「归档」的意义。它们只在归档页出现，且随时可恢复。
+ *
+ * 抽成函数而不是在每个组件里各写一遍 `.filter(c => !c.archivedAt)`：
+ * 判断依据只有一处，将来若归档语义变化（比如加「暂缓」状态）也只改这里。
+ */
+export function activeConversationsOf(list: Conversation[]): Conversation[] {
+  return list.filter((c) => !c.archivedAt);
 }
 
 export const useChatStore = create<ChatState>((set, get) => {
@@ -322,6 +355,13 @@ export const useChatStore = create<ChatState>((set, get) => {
     if (!get().conversations.some((c) => c.id === conv.id)) {
       set({ conversations: [...get().conversations, { ...conv, unreadCount: 0 }] });
     }
+    await get().loadWorkspace();
+    return conv.id;
+  },
+  async openAgent(agentId) {
+    const conv = await createAgentConversation(agentId);
+    // 服务端幂等：已存在则返回原会话。这里仍走一次全量刷新而不是就地插入——
+    // 就地插入要自己补 unreadCount 等字段，与服务端口径容易漂移。
     await get().loadWorkspace();
     return conv.id;
   },

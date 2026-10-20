@@ -11,7 +11,7 @@ import { setToken, fetchMe } from "./lib/api.js";
 // 组件自身的揭示行为见 components/BootWave.test.tsx。
 vi.mock("./components/LoginPage.js", () => ({ LoginPage: () => <div>LoginPage</div> }));
 vi.mock("./components/NavRail.js", () => ({
-  NavRail: () => <div>NavRail</div>, NavPeek: () => <div>NavPeek</div>,
+  NavRail: () => <div>NavRail</div>,
 }));
 vi.mock("./components/HomePage.js", () => ({ HomePage: () => <div>HomePage</div> }));
 vi.mock("./components/WorkspacePage.js", () => ({ WorkspacePage: () => <div>WorkspacePage</div> }));
@@ -57,7 +57,7 @@ describe("App 启动动画集成", () => {
     vi.mocked(fetchMe).mockResolvedValue(alice);
     useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
     useUiStore.setState({
-      page: "home", navCollapsed: false, activeConversationId: null,
+      page: "home", activeConversationId: null,
       contactsHidden: false, detailContact: null, pendingAttachment: null,
     });
   });

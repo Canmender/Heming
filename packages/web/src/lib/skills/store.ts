@@ -9,12 +9,23 @@ import {
   MAX_POOL_CHARS,
   SKILLS_KEY,
   SKILL_BINDINGS_KEY,
+  SKILL_ASSIGNMENTS_KEY,
   DEFAULT_ROUTE_BUDGET,
   DEFAULT_ROUTE_TOP_K,
 } from "./types.js";
 import { buildBuiltinSkills } from "./builtins.js";
 import { routeSkills } from "./router.js";
 import { parseImportText, skillToMarkdown } from "./markdown.js";
+
+/** 技能名上限（与类型注释一致）；沉淀副本加后缀后仍需满足。 */
+const MAX_SKILL_NAME = 32;
+const DISTILL_SUFFIX = "（沉淀）";
+
+/** 沉淀副本命名：加「（沉淀）」后缀并按 32 字截断原名，避免与原件并排时混淆。 */
+function distilledName(name: string): string {
+  const room = MAX_SKILL_NAME - DISTILL_SUFFIX.length;
+  return `${name.length > room ? name.slice(0, room) : name}${DISTILL_SUFFIX}`;
+}
 
 /**
  * 技能池（设计 §5、§8）：技能与智能体绑定分两键存本机 localStorage。
@@ -75,7 +86,13 @@ function coerceSkill(raw: unknown, fallbackAt: string): SkillDefinition | null {
   const id = typeof r.id === "string" ? r.id.trim() : "";
   const name = typeof r.name === "string" ? r.name.trim() : "";
   if (!id || !name) return null;
-  const source = r.source === "builtin" || r.source === "user" || r.source === "imported" ? r.source : "user";
+  const source =
+    r.source === "builtin" ||
+    r.source === "user" ||
+    r.source === "imported" ||
+    r.source === "distilled"
+      ? r.source
+      : "user";
   return {
     id,
     name,
@@ -101,6 +118,8 @@ export class SkillPool {
   private readonly now: () => number;
   private data: PoolData;
   private bindingMap: Record<string, SkillBinding>;
+  /** 智能体 → 已分配技能 id（无记录 = 默认内置全部分配）。 */
+  private assignmentMap: Record<string, string[]>;
 
   constructor(storage?: StorageLike, now?: () => number) {
     this.storage = storage ?? defaultStorage();
@@ -108,6 +127,7 @@ export class SkillPool {
     const raw = this.read(SKILLS_KEY);
     this.data = this.parsePool(raw);
     this.bindingMap = this.parseBindings(this.read(SKILL_BINDINGS_KEY));
+    this.assignmentMap = this.parseAssignments(this.read(SKILL_ASSIGNMENTS_KEY));
     if (raw === null) {
       // 首启：写入内置技能并打 seeded 标记（此后删空也不复活）
       this.data = {
@@ -182,6 +202,74 @@ export class SkillPool {
 
   setEnabled(id: string, enabled: boolean): void {
     this.update(id, { enabled });
+  }
+
+  /**
+   * 沉淀：把已验证好用的技能复制成 `source: "distilled"` 的独立条目（原件保留）。
+   * - 副本名加「（沉淀）」后缀，便于与原技能并排区分；
+   * - 副本默认启用：能被沉淀即视为已验证可用；
+   * - 同名沉淀已存在时原地刷新内容（重复沉淀不会产生重复条目）。
+   */
+  distill(id: string): SkillDefinition {
+    const src = this.data.skills.find((s) => s.id === id);
+    if (!src) throw new Error(`技能不存在：${id}`);
+    const name = distilledName(src.name);
+    const existing = this.data.skills.find((s) => s.source === "distilled" && s.name === name);
+    if (existing) {
+      return this.update(existing.id, {
+        description: src.description,
+        instructions: src.instructions,
+        triggers: [...src.triggers],
+        tags: [...src.tags],
+        version: src.version,
+        enabled: true,
+      });
+    }
+    return this.create({
+      name,
+      description: src.description,
+      instructions: src.instructions,
+      triggers: [...src.triggers],
+      tags: [...src.tags],
+      enabled: true,
+      version: src.version,
+      source: "distilled",
+    });
+  }
+
+  /** 使用统计只读快照（技能池列表的「使用次数 / 最近使用」列）。 */
+  usages(): Record<string, SkillUsage> {
+    const out: Record<string, SkillUsage> = {};
+    for (const [id, stat] of Object.entries(this.data.usage)) out[id] = { ...stat };
+    return out;
+  }
+
+  /**
+   * 该智能体已分配的技能 id（保持存储顺序，并过滤已被删除的技能）。
+   * 没有显式记录时返回全部内置技能 —— 新智能体开箱即可用内置技能，其余需手动添加。
+   */
+  assigned(agentId: string): string[] {
+    const known = new Set(this.data.skills.map((s) => s.id));
+    const saved = this.assignmentMap[agentId];
+    if (saved) return uniq(saved).filter((id) => known.has(id));
+    return this.data.skills.filter((s) => s.builtin).map((s) => s.id);
+  }
+
+  /** 给智能体分配一个技能（幂等；已分配则原样返回）。 */
+  assign(agentId: string, skillId: string): string[] {
+    if (!this.data.skills.some((s) => s.id === skillId)) return this.assigned(agentId);
+    const next = uniq([...this.assigned(agentId), skillId]);
+    this.assignmentMap[agentId] = next;
+    this.saveAssignments();
+    return next;
+  }
+
+  /** 取消分配（幂等）。 */
+  unassign(agentId: string, skillId: string): string[] {
+    const next = this.assigned(agentId).filter((id) => id !== skillId);
+    this.assignmentMap[agentId] = next;
+    this.saveAssignments();
+    return next;
   }
 
   bindings(agentId: string): SkillBinding {
@@ -331,6 +419,26 @@ export class SkillPool {
       // 损坏数据回退空池：标记 seeded，避免误判为首启而复活内置技能
       return emptyPool(true);
     }
+  }
+
+  private parseAssignments(raw: string | null): Record<string, string[]> {
+    if (!raw) return {};
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const out: Record<string, string[]> = {};
+      for (const [agentId, ids] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!agentId || !Array.isArray(ids)) continue;
+        out[agentId] = uniq(ids.filter((id): id is string => typeof id === "string"));
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  private saveAssignments(): void {
+    this.write(SKILL_ASSIGNMENTS_KEY, JSON.stringify(this.assignmentMap));
   }
 
   private parseBindings(raw: string | null): Record<string, SkillBinding> {

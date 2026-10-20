@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import type { Member, Message, ReadState, User, WsClientEvent } from "@heming/shared";
-import { ChatPage, renderTextWithMentions, aggregateChips } from "./ChatPage.js";
+import { ChatPage, renderTextWithMentions, aggregateChips , clampComposerHeight } from "./ChatPage.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
@@ -9,6 +9,8 @@ import { useLlmStore, type LlmProfile } from "../store/llm.js";
 import { streamChat } from "../lib/llmClient.js";
 import { connectWs, type WsHandlers, type WsHandle } from "../lib/ws.js";
 import { memoryStore } from "../lib/memory/index.js";
+import { maybeRunReview } from "../lib/memory/reviewRunner.js";
+import { mcpRegistry } from "../lib/mcp/store.js";
 import { skillPool } from "../lib/skills/index.js";
 import { CONTEXT_KEYS, type ContextSettings } from "../lib/agentContext/index.js";
 import { hasSubtle, toB64, fromB64 } from "../lib/e2eCrypto.js";
@@ -22,6 +24,26 @@ vi.mock("../lib/e2eCrypto.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/e2eCrypto.js")>();
   return { ...actual, hasSubtle: vi.fn(() => true) };
 });
+// MCP 工具执行桩：本文件只用它验证「工具轮的可视化接线」，协议细节由 lib/mcp 自测覆盖。
+// 桩客户端的 callTool 返回固定文本，让断言聚焦 DOM 上出现思考过程 / 工具轨迹 / 最终答案。
+vi.mock("../lib/mcp/httpClient.js", () => ({
+  createHttpMcpClient: () => ({
+    sessionId: "sess-1",
+    initialize: async () => ({ serverName: "echo-svc", protocolVersion: "2024-11-05" }),
+    listTools: async () => [],
+    callTool: async (_name: string, args: Record<string, unknown>) => ({
+      text: `回声：${String(args.text ?? "")}`,
+      isError: false,
+      content: [],
+    }),
+  }),
+}));
+// 复盘分身接线：这里只验证「成功轮次收尾会触发一次复盘」，复盘本身的行为由
+// lib/memory/review.test.ts 覆盖，故把 runner 打桩。
+vi.mock("../lib/memory/reviewRunner.js", () => ({
+  maybeRunReview: vi.fn(),
+}));
+
 vi.mock("../lib/e2eSession.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/e2eSession.js")>();
   return { ...actual, sealMessage: vi.fn() };
@@ -258,7 +280,6 @@ describe("ChatPage", () => {
     useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
     useUiStore.setState({
       page: "chat",
-      navCollapsed: true,
       activeConversationId: "c1",
       pendingAttachment: null,
     });
@@ -419,8 +440,8 @@ describe("ChatPage", () => {
     render(<ChatPage />);
     expect(await screen.findByText("已读")).toBeInTheDocument();
     // 逐条判断：m1 早于对方读点 → 已读；m2 晚于读点 → 不显示
-    expect(screen.getByText("我 10:00 发的")).toHaveTextContent("已读");
-    expect(screen.getByText("我 10:03 发的")).not.toHaveTextContent("已读");
+    expect(screen.getByText("我 10:00 发的").closest("[data-message-bubble]")).toHaveTextContent("已读");
+    expect(screen.getByText("我 10:03 发的").closest("[data-message-bubble]")).not.toHaveTextContent("已读");
     expect(screen.getAllByText("已读")).toHaveLength(1);
   });
 
@@ -781,7 +802,7 @@ describe("ChatPage", () => {
 
     // 打字机气泡（累积文本 + 光标）与输入栏上方「生成中」提示行
     await waitFor(() => expect(screen.getByText(/你好/)).toBeInTheDocument());
-    expect(screen.getByText("▌")).toBeInTheDocument();
+    expect(document.body.textContent).toContain("▌");
     expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument();
 
     const finish = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_finish");
@@ -885,7 +906,7 @@ describe("ChatPage", () => {
 
     await pickAndSend("@和小鸣 写段文字");
     await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
-    expect(screen.getByText("▌")).toBeInTheDocument();
+    expect(document.body.textContent).toContain("▌");
 
     fireEvent.click(screen.getByText("中断"));
     await waitFor(() =>
@@ -1055,6 +1076,80 @@ describe("ChatPage", () => {
     expect(seen![1]).toEqual({ role: "user", content: "历史6" });
     expect(seen![30]).toEqual({ role: "user", content: "历史35" }); // 第 31 条之前的末轮历史
     expect(seen![31]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
+  });
+
+  it("附件文本进提示词：模型能看到文件内容，且带清晰边界", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    // 一条带解析文本的附件消息（模拟已上传成功的 PDF/DOCX 解析结果）
+    const withDoc: Message = {
+      ...msg("m1", "帮我总结这份报告", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "帮我总结这份报告",
+        file: {
+          id: "f1",
+          name: "季度报告.pdf",
+          mime: "application/pdf",
+          size: 2048,
+          text: "本季度营收 1580 万元，同比增长 23%。",
+        },
+      },
+    };
+    mockMessagesFetch([withDoc], undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 那增长主要来自哪");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    const withAttachment = seen!.find((m) => m.content.includes("季度报告.pdf"));
+    expect(withAttachment, "附件文本必须出现在提示词里").toBeDefined();
+    // 正文在前、附件块在后；文件名要出现，内容是解析出来的文字
+    expect(withAttachment!.content).toContain("帮我总结这份报告");
+    expect(withAttachment!.content).toContain("本季度营收 1580 万元");
+    expect(withAttachment!.content).toContain("【附件结束】");
+    // 角色仍是发起人，不能因为带附件就变成 assistant
+    expect(withAttachment!.role).toBe("user");
+  });
+
+  it("没有解析文本的附件不污染提示词（只有正文，不出现空附件块）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    const noText: Message = {
+      ...msg("m1", "看下这个", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "看下这个",
+        file: { id: "f2", name: "photo.png", mime: "image/png", size: 900 },
+      },
+    };
+    mockMessagesFetch([noText], undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+    await pickAndSend("@和小鸣 这是什么");
+    await waitFor(() => expect(seen).toBeDefined());
+    const row = seen!.find((m) => m.content.includes("看下这个"));
+    expect(row!.content).toBe("看下这个");
+    expect(row!.content).not.toContain("【附件");
   });
 
   it("I2 雷达@链路：attach 后（本群 members 出现自建 agent 行）该 agent 进入 @ 候选并可选", async () => {
@@ -1478,6 +1573,8 @@ describe("ChatPage", () => {
         mime: "text/plain",
         size: 13, // 原文件字节数（f.size），非服务端密文长度
         key: expect.any(String),
+        // 文档解析：txt 直接读出原文，随密文上行供模型使用
+        text: "HEMING-SECRET",
       },
     });
     expect(fromB64((plain.file as { key: string }).key)).toHaveLength(32);
@@ -2958,8 +3055,11 @@ describe("ChatPage", () => {
         .mock.calls.map((c) => c[1] as { kind?: string; text?: string })
         .filter((p) => p.kind === kind)
         .map((p) => p.text);
-    expect(framesOf(send, "agent_chunk")).toHaveLength(1); // 只有首次尝试的片上行
-    expect(sealedTexts("chunk")).toEqual(["半"]);
+    // 工具轮下首次尝试的文字**不上行**（它是「我这就去查」这类中间话术的候选，
+    // 失败了也未必是答案）。重试成功后 finish 全文是干净的「好」，
+    // 用户不会先看到半截话再被覆盖——这比无工具路径更干净。
+    expect(framesOf(send, "agent_chunk")).toHaveLength(0);
+    expect(sealedTexts("chunk")).toEqual([]);
     expect(framesOf(send, "agent_finish")).toHaveLength(1); // finish 只发一次
     expect(sealedTexts("text")).toEqual(["@和小鸣 查下上下文", "好"]); // 本条 user 轮 + 重试成功全文
     expect(framesOf(send, "agent_error")).toHaveLength(0);
@@ -3487,7 +3587,6 @@ describe("语音通话群聊发起入口（C1）", () => {
     useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
     useUiStore.setState({
       page: "chat",
-      navCollapsed: true,
       activeConversationId: "c1",
       pendingAttachment: null,
     });
@@ -3587,6 +3686,9 @@ describe("语音通话群聊发起入口（C1）", () => {
 
   it("群聊含其他人类成员时，确认后发出 invite 并带 peerIds", async () => {
     installVoiceBridge();
+    // 通话现在优先开独立窗口；jsdom 没有 window.open，打桩返回 null 走「回退页内」分支，
+    // 这样既覆盖了回退逻辑，也能继续断言 invite 正常发出。
+    vi.spyOn(window, "open").mockReturnValue(null);
     const other: Member = { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer };
     const send = await setupGroupChat([...inGroupMembers, other]);
 
@@ -3623,5 +3725,292 @@ describe("语音通话群聊发起入口（C1）", () => {
     render(<ChatPage />);
     await act(async () => {});
     expect(screen.queryByLabelText("发起群通话")).not.toBeInTheDocument();
+  });
+});
+
+describe("输入栏高度（clampComposerHeight）", () => {
+  it("默认 132，夹在 72–360 之间并取整", () => {
+    expect(clampComposerHeight(Number.NaN)).toBe(132);
+    expect(clampComposerHeight(10)).toBe(72);
+    expect(clampComposerHeight(999)).toBe(360);
+    expect(clampComposerHeight(150.6)).toBe(151);
+  });
+});
+
+
+describe("ChatPage 工具轮可视化接线", () => {
+  /**
+   * 自给自足的公共设置：这个 describe 之前**没有** beforeEach，靠前一个 describe
+   * 残留的 store 状态才跑得通（activeConversationId / hasSubtle 等）。
+   * 那些残留一旦被前面的用例清掉，本组就整个塌（找不到「提及智能体」——
+   * 因为 isGroup 为假，输入栏少渲染一个按钮）。这里补齐，不再依赖执行顺序。
+   */
+  beforeEach(() => {
+    useUiStore.setState({ page: "chat", activeConversationId: "c1", contactsHidden: true });
+    vi.mocked(hasSubtle).mockReturnValue(true);
+    // 每次清掉上一个用例可能留下的 MCP 服务（含预置的），保证 armEchoServer 独占
+    for (const s of [...mcpRegistry.servers()]) mcpRegistry.remove(s.id);
+  });
+
+  /** 与 ChatPage describe 内同名助手等价（那个是块内私有，这里用局部版）。 */
+  async function pickAndSend(text: string) {
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    fireEvent.click(screen.getByText("和小鸣"));
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+  }
+
+  /** 起一个已连接、工具已授权的 MCP 服务（用完即删，避免污染其他用例）。 */
+  function armEchoServer() {
+    const server = mcpRegistry.add({
+      id: "srv-viz",
+      name: "echo-svc",
+      transport: "http",
+      url: "http://127.0.0.1:9/mcp",
+    });
+    mcpRegistry.setTools(server.id, [{ name: "echo", description: "回声工具" }]);
+    mcpRegistry.setToolEnabled(server.id, "echo", true);
+    return () => mcpRegistry.remove(server.id);
+  }
+
+  it("工具轮：思考过程与工具轨迹进流气泡，最终答案照常上行", async () => {
+    const dispose = armEchoServer();
+    try {
+      const send = vi.fn();
+      vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+      useChatStore.setState({
+        conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+      });
+      mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+      render(<ChatPage />);
+      // 等 WS 句柄就绪：输入栏与「提及智能体」按钮在 connected 之后才渲染。
+      // 单次 act 可能不足以冲掉队列里的连接回调，故显式等它出现。
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "提及智能体" })).toBeInTheDocument(),
+      );
+      bindAssistant();
+
+      // 第 1 轮：只思考 + 要工具（无正文）；第 2 轮：给答案
+      let round = 0;
+      vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+        if (round++ === 0) {
+          o.onReasoning?.("先确认要查什么");
+          o.onToolCalls?.([
+            {
+              id: "call-1",
+              type: "function",
+              function: { name: "echo-svc__echo", arguments: '{"text":"hi"}' },
+            },
+          ]);
+          return "";
+        }
+        o.onDelta("回声：hi");
+        return "回声：hi";
+      });
+
+      await pickAndSend("@和小鸣 用 echo 查一下");
+
+      // 思考过程即时可见
+      await waitFor(() => expect(screen.getByText("思考过程")).toBeInTheDocument());
+      expect(screen.getByText("先确认要查什么")).toBeInTheDocument();
+
+      // 工具轨迹：命名空间化工具名 + 成功态
+      await waitFor(() => expect(screen.getByText("echo-svc__echo")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("完成")).toBeInTheDocument());
+
+      // 工具结果与最终答案都出现（同一句文本，故用 getAllByText）
+      await waitFor(() => expect(screen.getAllByText(/回声：hi/).length).toBeGreaterThanOrEqual(2));
+
+      // 工具轮的中间话术没有上行，最终只发答案
+      // （密文会话下 finish 的 text 置空、内容在 cipher 里，两种都收）
+      const finishes = send.mock.calls
+        .map(([e]) => e as { type: string; text?: string; cipher?: string })
+        .filter((e) => e.type === "agent_finish");
+      expect(finishes.length).toBeGreaterThan(0);
+      const last = finishes[finishes.length - 1];
+      const finalText = last.text || (last.cipher ? String(decodePlain(last.cipher).text) : "");
+      expect(finalText).toBe("回声：hi");
+    } finally {
+      dispose();
+    }
+  });
+
+  /** 取出指定类型的上行帧（主 describe 里的同名助手是块内私有，这里用局部版）。 */
+  const framesOf = (send: ReturnType<typeof vi.fn>, type: string) =>
+    send.mock.calls.map((c) => c[0]).filter((e) => e.type === type);
+
+  it("工具轮下最终答案仍逐片上行（打字机效果不丢）", async () => {
+    // 回归：工具轮曾把模型输出拼成一整段再发，用户看到的是「文字突然整块蹦出来」。
+    // 现在按片攒、按片发，chunk 数与模型的分片数一致。
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    const callsBefore = vi.mocked(streamChat).mock.calls.length;
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      o.onDelta("你");
+      o.onDelta("好");
+      return "你好";
+    });
+
+    await pickAndSend("@和小鸣 打个招呼");
+    await waitFor(() => expect(screen.getByText(/你好/)).toBeInTheDocument());
+
+    const mine = vi.mocked(streamChat).mock.calls.slice(callsBefore);
+    expect(mine.length).toBeGreaterThan(0);
+    // 确实带了 tools（走的是工具轮路径）
+    const tools = (mine[0][2] as { tools?: unknown[] }).tools ?? [];
+    expect(tools.length).toBeGreaterThan(0);
+    // 但文本仍逐片上行：两片 → 两个 chunk
+    await waitFor(() => expect(framesOf(send, "agent_chunk")).toHaveLength(2));
+  });
+
+  it("工具轮中断时已产出的文字不丢（partial 兜底）", async () => {
+    // 回归：工具轮里模型的输出先进缓冲、不上行；中断时若不兜底，
+    // 用户一个字都看不到（模型明明已经吐了「半」）。
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    vi.mocked(streamChat).mockImplementation(
+      (_p, _m, o) =>
+        new Promise<string>((_res, rej) => {
+          o.onDelta("半");
+          o.signal.addEventListener("abort", () =>
+            rej(new DOMException("AbortError", "AbortError")),
+          );
+        }),
+    );
+
+    await pickAndSend("@和小鸣 写段文字");
+    await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("中断"));
+
+    await waitFor(() => expect(framesOf(send, "agent_finish")).toHaveLength(1));
+    const sealedTexts = (kind: string) =>
+      vi
+        .mocked(sealMessage)
+        .mock.calls.map((c) => c[1] as { kind?: string; text?: string })
+        .filter((p) => p.kind === kind)
+        .map((p) => p.text);
+    // partial 里带着「半」——一个字都没丢
+    expect(sealedTexts("text")).toContain("半");
+  });
+
+  it("未授权自我优化时不注入 self 工具，但 chart 工具照常在（两者授权是独立的）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    // 记录窗口起点：上一个用例的触发是即发即忘，收尾可能落在本用例里
+    const callsBefore = vi.mocked(streamChat).mock.calls.length;
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      o.onDelta("直接回答");
+      return "直接回答";
+    });
+
+    await pickAndSend("@和小鸣 打个招呼");
+    await waitFor(() => expect(screen.getByText(/直接回答/)).toBeInTheDocument());
+
+    // 只看本用例窗口内的调用：上一个用例的触发是「即发即忘」，其收尾可能落在本用例里
+    const mine = vi.mocked(streamChat).mock.calls.slice(callsBefore);
+    expect(mine.length).toBeGreaterThan(0);
+    const namesOf = (call: (typeof mine)[number]): string[] =>
+      ((call[2] as { tools?: { function?: { name?: string } }[] }).tools ?? []).map(
+        (t) => t.function?.name ?? "",
+      );
+    for (const call of mine) {
+      const names = namesOf(call);
+      // 自我优化未授权 → 一个 self_* 工具都不该出现
+      expect(names.filter((n) => n.startsWith("self_"))).toEqual([]);
+      // 图表工具是内容产出、无副作用，默认提供
+      expect(names.filter((n) => n.startsWith("chart_")).length).toBeGreaterThan(0);
+    }
+    expect(screen.queryByText("思考过程")).not.toBeInTheDocument();
+    expect(screen.queryByText("调用中")).not.toBeInTheDocument();
+  });
+});
+
+
+describe("ChatPage 复盘分身接线", () => {
+  /** 与文件内既有的群会话底座一致：本群含「和小鸣」，绑定 LLM 后 @ 可触发。 */
+  async function setup() {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+    return send;
+  }
+
+  async function pickAndSendLocal(text: string) {
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    fireEvent.click(screen.getByText("和小鸣"));
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+  }
+
+  it("成功轮次收尾后触发一次复盘，并带上本轮内容与工具调用数", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.mocked(maybeRunReview).mockClear();
+    memoryStore.updateSettings({ enabled: true }); // 前面的用例关过总开关，这里显式复原
+    await setup();
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      o.onDelta("跑完了");
+      return "跑完了";
+    });
+
+    await pickAndSendLocal("帮我生成周报");
+    await waitFor(() => expect(vi.mocked(maybeRunReview)).toHaveBeenCalledTimes(1));
+
+    const payload = vi.mocked(maybeRunReview).mock.calls[0][0];
+    expect(payload.agentId).toBe("system-assistant");
+    expect(payload.userText).toContain("帮我生成周报");
+    expect(payload.assistantText).toContain("跑完了");
+    expect(payload.conversationId).toBe("c1");
+    expect(payload.toolCallCount).toBe(0);
+    // 复盘素材带上最近若干轮工作记忆
+    expect(Array.isArray(payload.recentTurns)).toBe(true);
+    expect(payload.profile?.id).toBe("p1");
+  });
+
+  it("记忆总开关关着：不触发复盘", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.mocked(maybeRunReview).mockClear();
+    await setup();
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      o.onDelta("跑完了");
+      return "跑完了";
+    });
+    memoryStore.updateSettings({ enabled: false });
+    try {
+      await pickAndSendLocal("再跑一次");
+      await waitFor(() => expect(screen.getByText(/跑完了/)).toBeInTheDocument());
+      expect(vi.mocked(maybeRunReview)).not.toHaveBeenCalled();
+    } finally {
+      memoryStore.updateSettings({ enabled: true });
+    }
   });
 });

@@ -653,3 +653,140 @@ describe("runAgentMentions 上下文预算接线", () => {
     expect(framesOf(send, "agent_error")).toHaveLength(1);
   });
 });
+
+describe("runAgentMentions 工具调用（MCP 桥）", () => {
+  it("先执行工具并把结果回灌，中间话术不上行，只上行最终答案", async () => {
+    const executed: { name: string; arguments: string }[] = [];
+    const rounds = [
+      {
+        text: "我先查一下",
+        calls: [
+          {
+            id: "call_1",
+            type: "function" as const,
+            function: { name: "srv__echo", arguments: '{"q":"hi"}' },
+          },
+        ],
+      },
+      { text: "查到了：hi", calls: [] as never[] },
+    ];
+    let round = 0;
+    const streamChat = vi.fn(async (_p: unknown, _m: ChatMessage[], o: {
+      onDelta: (t: string) => void;
+      onToolCalls?: (c: unknown[]) => void;
+    }) => {
+      const r = rounds[round++];
+      if (r.calls.length) o.onToolCalls?.(r.calls);
+      if (r.text) o.onDelta(r.text);
+      return r.text;
+    });
+    const { send, deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__echo" } }],
+        execute: async (call) => {
+          executed.push(call);
+          return { text: "工具说：hi", ok: true };
+        },
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    // 工具被真正执行了一次
+    expect(executed).toEqual([{ name: "srv__echo", arguments: '{"q":"hi"}' }]);
+    // 第二轮请求里带上了 assistant(tool_calls) + tool 结果
+    const second = streamChat.mock.calls[1][1];
+    expect(second.some((m) => m.role === "assistant" && m.tool_calls?.length === 1)).toBe(true);
+    expect(second.some((m) => m.role === "tool" && m.content === "工具说：hi")).toBe(true);
+
+    // 上行给用户的只有最终答案（工具轮的「我先查一下」被丢弃）
+    const chunks = (send.mock.calls as unknown[][])
+      .map(([e]) => e as { type: string; text?: string })
+      .filter((e) => e.type === "agent_chunk")
+      .map((e) => e.text ?? "")
+      .join("");
+    expect(chunks).toBe("查到了：hi");
+    const finish = (send.mock.calls as unknown[][])
+      .map(([e]) => e as { type: string; text?: string })
+      .find((e) => e.type === "agent_finish");
+    expect(finish?.text).toBe("查到了：hi");
+  });
+
+  it("没有工具时不注入 tools、不缓冲（行为与旧版一致）", async () => {
+    const streamChat = vi.fn(async (_p: unknown, _m: ChatMessage[], o: { onDelta: (t: string) => void }) => {
+      o.onDelta("好");
+      return "好";
+    });
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => null,
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const opts = streamChat.mock.calls[0][2] as { tools?: unknown };
+    expect(opts.tools).toBeUndefined();
+  });
+});
+
+describe("runAgentMentions 可视化（思考过程 / 工具轨迹）", () => {
+  it("思考过程累积后回传全文，工具 start/end 各一次且带结果", async () => {
+    const reasoningEvents: string[] = [];
+    const toolEvents: { phase: string; name: string; ok?: boolean; result?: string }[] = [];
+    const rounds = [
+      {
+        text: "",
+        calls: [
+          { id: "c1", type: "function" as const, function: { name: "srv__echo", arguments: '{"q":1}' } },
+        ],
+      },
+      { text: "答", calls: [] as never[] },
+    ];
+    let round = 0;
+    const streamChat = vi.fn(async (_p: unknown, _m: ChatMessage[], o: {
+      onDelta: (t: string) => void;
+      onToolCalls?: (c: unknown[]) => void;
+      onReasoning?: (t: string) => void;
+    }) => {
+      const r = rounds[round++];
+      if (round === 1) {
+        o.onReasoning?.("先想");
+        o.onReasoning?.("一下");
+      }
+      if (r.calls.length) o.onToolCalls?.(r.calls);
+      if (r.text) o.onDelta(r.text);
+      return r.text;
+    });
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__echo" } }],
+        execute: async () => ({ text: "工具结果", ok: true }),
+      }),
+      onReasoning: (_id, text) => reasoningEvents.push(text),
+      onToolTrace: (_id, e) => toolEvents.push(e),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    // 思考过程是累积全文（UI 直接替换显示）
+    expect(reasoningEvents).toEqual(["先想", "先想一下"]);
+    // 工具轨迹：一次 start + 一次 end，end 带 ok 与结果
+    expect(toolEvents.map((e) => e.phase)).toEqual(["start", "end"]);
+    expect(toolEvents[0].name).toBe("srv__echo");
+    expect(toolEvents[1].ok).toBe(true);
+    expect(toolEvents[1].result).toBe("工具结果");
+  });
+
+  it("没有工具/思考能力时不产生任何可视化事件", async () => {
+    const onReasoning = vi.fn();
+    const onToolTrace = vi.fn();
+    const streamChat = vi.fn(async (_p: unknown, _m: ChatMessage[], o: { onDelta: (t: string) => void }) => {
+      o.onDelta("好");
+      return "好";
+    });
+    const { deps } = makeDeps({ streamChat: streamChat as never, onReasoning, onToolTrace });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    expect(onReasoning).not.toHaveBeenCalled();
+    expect(onToolTrace).not.toHaveBeenCalled();
+  });
+});

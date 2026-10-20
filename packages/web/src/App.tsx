@@ -1,29 +1,77 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useUiStore, type Page } from "./store/ui.js";
+import { initTheme } from "./store/theme.js";
 import { useAuthStore } from "./store/auth.js";
 import { getToken, fetchFiles, fetchFileUsage, uploadFile } from "./lib/api.js";
 import type { SharedFileMeta } from "@heming/shared";
 import { LoginPage } from "./components/LoginPage.js";
-import { NavRail, NavPeek } from "./components/NavRail.js";
+import { NavRail } from "./components/NavRail.js";
 import { FileTree } from "./components/FileTree.js";
 import { FilePreviewModal } from "./components/FilePreviewModal.js";
 import { WorkspacePage } from "./components/WorkspacePage.js";
 import { ChatPage } from "./components/ChatPage.js";
+import { ConversationTabs } from "./components/ConversationTabs.js";
+import { ChatConvStrip } from "./components/ChatConvStrip.js";
 import { RadarContacts } from "./components/RadarContacts.js";
 import { HomePage } from "./components/HomePage.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { MemoryPage } from "./components/MemoryPage.js";
+import { ArchivePage } from "./components/ArchivePage.js";
+import { CommandPalette } from "./components/CommandPalette.js";
+import { InterfacesPage } from "./components/InterfacesPage.js";
+import { SkillsPage } from "./components/SkillsPage.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
+import { autoConnectAll } from "./lib/mcp/runtime.js";
 
-/** Alt+1–Alt+5 目标页（1 主页、2 工作区、3 接口区、4 记忆区、5 设置区）。 */
+/**
+ * Alt+1–Alt+7 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档。
+ *
+ * 顺序必须与 NavRail 的 `digit` 严格对应——那边是快捷键提示的唯一来源，
+ * 两边错位就会出现「界面写着 Alt+6、按下去却去了别的页」。
+ * 新页追加到**末尾**：改动老页的序号等于换掉用户肌肉记忆里的快捷键。
+ */
 const SHORTCUT_PAGES: Page[] = [
   "home",
   "workspace",
+  "skills",
   "interfaces",
   "memory",
   "settings",
+  "archive",
 ];
+
+/** 右侧目录栏宽度上下限（像素）：太窄放不下文件名，太宽会挤掉主内容。 */
+export const ASIDE_MIN = 180;
+export const ASIDE_MAX = 560;
+const ASIDE_DEFAULT = 240;
+
+/** 夹住目录栏宽度；非法值回落到默认宽。 */
+export function clampAsideWidth(n: number): number {
+  if (!Number.isFinite(n)) return ASIDE_DEFAULT;
+  return Math.min(ASIDE_MAX, Math.max(ASIDE_MIN, Math.round(n)));
+}
+
+const ASIDE_WIDTH_KEY = "heming.asideWidth.v1";
+
+/** 读上次调好的目录栏宽度；缺失/损坏 → 默认 240。 */
+function readAsideWidth(): number {
+  try {
+    const raw = window.localStorage.getItem(ASIDE_WIDTH_KEY);
+    return raw ? clampAsideWidth(Number(raw)) : ASIDE_DEFAULT;
+  } catch {
+    return ASIDE_DEFAULT;
+  }
+}
+
+/** 宽度落盘；存不下（隐私模式）时只在本次会话生效。 */
+function persistAsideWidth(n: number): void {
+  try {
+    window.localStorage.setItem(ASIDE_WIDTH_KEY, String(n));
+  } catch {
+    /* 忽略 */
+  }
+}
 
 function fmtBytes(n: number): string {
   if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}MB`;
@@ -42,10 +90,34 @@ function fmtBytes(n: number): string {
  * BootWave 的遮罩以中心透明洞向外揭示主界面，因此「先挂载、后揭开」在视觉上
  * 等于「主界面从中心向外渐次显现」，不会提前暴露真实 UI。
  */
+/**
+ * 桌面端（preload 暴露了启动信号通道）的手写段由 splash 窗口负责，
+ * web 层不能再写一遍；浏览器/预览环境没有 splash，才由 BootWave 自己播手写段。
+ */
+const HAS_NATIVE_SPLASH = typeof window.heming?.__onBootReady === "function";
+
 export function App() {
+  // 首帧之前就把主题色写进 CSS 变量，避免刷新时闪回默认墨色
+  initTheme();
+
   const [bootDone, setBootDone] = useState(false);
   const handleBootDone = useCallback(() => setBootDone(true), []);
   const shellRef = useRef<HTMLDivElement>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // 全局搜索：Ctrl/⌘+K。启动动画期间不响应（与 Alt+N 同一套纪律：
+  // 遮罩后面看不见的界面不该接受输入）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!bootDone) return;
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [bootDone]);
 
   // 动画期间主界面不可交互（规格 §7：动画不可跳过，不响应点击/键盘）。
   // 遮罩挡住了画面，但 AppShell 早已挂载且活着——不加 inert 的话点击会落在看不见的
@@ -61,7 +133,9 @@ export function App() {
       <div ref={shellRef}>
         <AppShell />
       </div>
-      {!bootDone && <BootWave onDone={handleBootDone} />}
+      {!bootDone && <BootWave onDone={handleBootDone} writeFirst={!HAS_NATIVE_SPLASH} />}
+      {/* 全局加一层除了命令面板之外的空壳：面板自己带着遮罩，不需要外层容器 */}
+      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
     </>
   );
 }
@@ -75,6 +149,21 @@ function AppShell() {
   useEffect(() => {
     void restore();
   }, [restore]);
+
+  /**
+   * 登录成功后自动连接 MCP 服务并发现工具（用户要求：不要每次手动点）。
+   *
+   * 只在已登录时做：登录前拉起 MCP 子进程纯属浪费（用户可能压根不用）。
+   * 失败静默——MCP 不可用不该挡住进主界面，用户在接口区能看到具体原因。
+   */
+  const [mcpReady, setMcpReady] = useState(false);
+  useEffect(() => {
+    if (!authUser || mcpReady) return;
+    setMcpReady(true); // 早于 await 设位：避免 restore 抖动导致重复连接
+    void autoConnectAll().catch(() => {
+      /* 失败由接口区呈现，不打扰主流程 */
+    });
+  }, [authUser, mcpReady]);
 
   const [files, setFiles] = useState<SharedFileMeta[]>([]);
   const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
@@ -109,9 +198,36 @@ function AppShell() {
   };
 
   const page = useUiStore((s) => s.page);
-  const navCollapsed = useUiStore((s) => s.navCollapsed);
-  const setNavCollapsed = useUiStore((s) => s.setNavCollapsed);
   const setPage = useUiStore((s) => s.setPage);
+
+  // 右侧目录栏宽度：可拖动调节，落盘后下次启动保持（用户要求「支持拖动改变大小」）
+  const [asideWidth, setAsideWidth] = useState(() => readAsideWidth());
+  const onResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    // 宽度变化只跟水平位移；竖向位移忽略，避免拖出边界后卡住
+    const startX = e.clientX;
+    const startW = asideWidthRef.current;
+    const move = (ev: PointerEvent) => {
+      // 往右拖 = 变宽，故用 startX 减当前 x
+      setAsideWidth(clampAsideWidth(startW + (ev.clientX - startX)));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    // 拖动期禁用光标选择与默认选中，否则会顺带把文件文字全刷成选中态
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }, []);
+  // 回调里读不到最新 state，用 ref 兜住当前宽度（与 RadarContacts 的 zoom 兜法一致）
+  const asideWidthRef = useRef(asideWidth);
+  asideWidthRef.current = asideWidth;
+  useEffect(() => {
+    persistAsideWidth(asideWidth);
+  }, [asideWidth]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -120,23 +236,18 @@ function AppShell() {
       const inText =
         !!t &&
         (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-      // Alt+1–5 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应
-      if (e.altKey && !e.metaKey && !e.ctrlKey && ["1", "2", "3", "4", "5"].includes(e.key)) {
+      // Alt+1–7 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应
+      if (e.altKey && !e.metaKey && !e.ctrlKey && ["1", "2", "3", "4", "5", "6", "7"].includes(e.key)) {
         if (inText) return;
         e.preventDefault();
-        setPage(SHORTCUT_PAGES["12345".indexOf(e.key)]);
+        setPage(SHORTCUT_PAGES["1234567".indexOf(e.key)]);
         return;
       }
       if (!e.metaKey && !e.ctrlKey) return;
-      // ⌘/Ctrl+\ 收放导航：无冲突组合，输入框内也生效（聊天中高频操作）
-      if (e.key === "\\") {
-        e.preventDefault();
-        setNavCollapsed(!navCollapsed);
-      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [authUser, navCollapsed, setNavCollapsed, setPage]);
+  }, [authUser, setPage]);
 
   if (!authUser) {
     return (
@@ -161,26 +272,36 @@ function AppShell() {
       <HomePage />
     ) : page === "chat" ? (
       // 会话态：ChatPage 常驻底层（保持 WS/草稿状态）；雷达覆盖层按 contactsHidden
-      // 滑出/呼出（面板自身管理 transform，隐藏时平移出容器并由 overflow 裁切）
-      <div className="relative h-full min-h-0 w-full overflow-hidden">
-        <div className="absolute inset-0 flex flex-col">
-          <ChatPage />
+      // 滑出/呼出（面板自身管理 transform，隐藏时平移出容器并由 overflow 裁切）。
+      // 行布局：左侧头像缩略列（快速切会话） → 中间列（上方横向标签页 + ChatPage）
+      <div className="relative flex h-full min-h-0 w-full overflow-hidden">
+        <div className="flex min-w-0 flex-1">
+          <ChatConvStrip />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <ConversationTabs />
+            <div className="relative min-h-0 flex-1">
+              <div className="absolute inset-0 flex flex-col">
+                <ChatPage />
+              </div>
+              <RadarContacts overlay />
+            </div>
+          </div>
         </div>
-        <RadarContacts overlay />
       </div>
     ) : page === "workspace" ? (
       <WorkspacePage />
+    ) : page === "skills" ? (
+      <SkillsPage />
     ) : page === "memory" ? (
       // 记忆区：三层记忆 + 技能池（全部数据只在本机 localStorage）
       <MemoryPage />
+    ) : page === "archive" ? (
+      // 归档处：收起来的历史会话，可按名字检索后恢复
+      <ArchivePage />
     ) : page === "settings" ? (
       <SettingsPage />
     ) : (
-      // 仅剩接口区未落地（记忆区已升级为 MemoryPage）
-      <div className="p-6">
-        <h1 className="text-lg font-extrabold">占位页面</h1>
-        <p className="mt-2 text-[13px] text-muted">接口区（MCP/工具）二期开放</p>
-      </div>
+      <InterfacesPage />
     );
 
   return (
@@ -188,20 +309,44 @@ function AppShell() {
       {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
       <TitleBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {navCollapsed ? <NavPeek /> : <NavRail />}
+        <NavRail />
         <main className="flex min-w-0 flex-1 flex-col">{view}</main>
-        <aside className="flex w-[240px] shrink-0 flex-col border-l border-line-soft">
-          <div className="flex items-center justify-between border-b border-line-soft px-3 py-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted">目录</span>
+        {/* 右侧工作目录：可拖动左边缘改宽度（手柄整条 6px 宽，好抓）。
+            绑定按钮把本地文件绑到当前会话，通话/协作里点目录就能带上文件。 */}
+        <aside className="relative flex shrink-0 flex-col border-l border-line-soft" style={{ width: asideWidth }}>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整目录栏宽度"
+            onPointerDown={onResizeStart}
+            className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize hover:bg-[#1a1a1a]/10"
+          />
+          <div className="flex items-center justify-between gap-1 border-b border-line-soft px-3 py-2">
+            <span className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-muted">目录</span>
             {usage && (
-              <span className="text-[10px] text-muted">
+              <span className="min-w-0 flex-1 truncate text-[10px] text-muted">
                 {fmtBytes(usage.used)} / {fmtBytes(usage.quota)}
               </span>
             )}
+            {/* 绑定：把本地文件绑进当前会话。没有会话时提示先开一个——不静默失败 */}
+            <button
+              type="button"
+              aria-label="绑定本地文件到会话"
+              onClick={() => {
+                if (!useUiStore.getState().activeConversationId) {
+                  window.alert("先打开一个会话，再绑定文件");
+                  return;
+                }
+                void onUpload();
+              }}
+              className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
+            >
+              绑定
+            </button>
             <button
               type="button"
               onClick={() => void onUpload()}
-              className="rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card"
+              className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
             >
               上传
             </button>

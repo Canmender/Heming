@@ -1,41 +1,24 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useUiStore } from "./ui.js";
+import { useUiStore, DEFAULT_NAV_ORDER, normalizeNavOrder, readStoredNavOrder } from "./ui.js";
 
-describe("ui store 导航显隐", () => {
+describe("ui store 页面与会话状态", () => {
   beforeEach(() => {
     useUiStore.setState({
       page: "home",
-      navCollapsed: false,
       activeConversationId: null,
       contactsHidden: false,
     });
   });
 
-  it("默认主页且导航展开", () => {
-    const s = useUiStore.getState();
-    expect(s.page).toBe("home");
-    expect(s.navCollapsed).toBe(false);
+  it("默认主页", () => {
+    expect(useUiStore.getState().page).toBe("home");
   });
 
-  it("打开会话时导航完全收起", () => {
+  it("打开会话：进入 chat 并记录当前会话（导航轨不再折叠）", () => {
     useUiStore.getState().openConversation("c1");
     const s = useUiStore.getState();
     expect(s.page).toBe("chat");
-    expect(s.navCollapsed).toBe(true);
     expect(s.activeConversationId).toBe("c1");
-  });
-
-  it("切回非聊天页时恢复展开", () => {
-    useUiStore.getState().openConversation("c1");
-    useUiStore.getState().setPage("home");
-    expect(useUiStore.getState().navCollapsed).toBe(false);
-  });
-
-  it("可手动收起/展开", () => {
-    useUiStore.getState().setNavCollapsed(true);
-    expect(useUiStore.getState().navCollapsed).toBe(true);
-    useUiStore.getState().setNavCollapsed(false);
-    expect(useUiStore.getState().navCollapsed).toBe(false);
   });
 
   it("打开会话同时隐藏通讯录（contactsHidden → true）", () => {
@@ -59,7 +42,6 @@ describe("ui store 导航显隐", () => {
     expect(s.contactsHidden).toBe(false);
     expect(s.page).toBe("chat");
     expect(s.activeConversationId).toBe("c1");
-    expect(s.navCollapsed).toBe(true);
   });
 
   it("hideContacts 仅隐藏、不改页", () => {
@@ -101,5 +83,78 @@ describe("ui store 导航显隐", () => {
       .sendFileToConversation("c1", { id: "f1", name: "a", mime: "text/plain", size: 1 });
     useUiStore.getState().setPage("home");
     expect(useUiStore.getState().pendingAttachment).toBeNull();
+  });
+});
+
+describe("ui store 导航顺序", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
+  });
+
+  it("默认顺序与 Alt+1–7 的固定映射一致", () => {
+    expect(useUiStore.getState().navOrder).toEqual([
+      "home",
+      "workspace",
+      "skills",
+      "interfaces",
+      "memory",
+      "archive",
+      "settings",
+    ]);
+  });
+
+  it("moveNav 上移/下移生效并落盘", () => {
+    useUiStore.getState().moveNav("memory", -1);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(3);
+    useUiStore.getState().moveNav("memory", 1);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(4);
+    expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
+      useUiStore.getState().navOrder,
+    );
+  });
+
+  it("到顶/到底与未知页为 no-op（不写盘）", () => {
+    const before = useUiStore.getState().navOrder;
+    useUiStore.getState().moveNav("home", -1);
+    useUiStore.getState().moveNav("settings", 1);
+    useUiStore.getState().moveNav("chat" as never, 1);
+    expect(useUiStore.getState().navOrder).toEqual(before);
+  });
+
+  it("恢复默认", () => {
+    useUiStore.getState().setNavOrder(["settings", "memory", "home"]);
+    expect(useUiStore.getState().navOrder[0]).toBe("settings");
+    useUiStore.getState().resetNavOrder();
+    expect(useUiStore.getState().navOrder).toEqual([...DEFAULT_NAV_ORDER]);
+  });
+});
+
+describe("normalizeNavOrder / readStoredNavOrder", () => {
+  it("去重、剔除未知页、缺失项补在末尾", () => {
+    expect(normalizeNavOrder(["memory", "memory", "chat", 42, "home"])).toEqual([
+      "memory",
+      "home",
+      "workspace",
+      "skills",
+      "interfaces",
+      "archive",
+      "settings",
+    ]);
+  });
+
+  it("非数组/损坏 JSON → 默认顺序", () => {
+    expect(normalizeNavOrder("不是数组")).toEqual([...DEFAULT_NAV_ORDER]);
+    expect(readStoredNavOrder({ getItem: () => "坏 JSON" })).toEqual([...DEFAULT_NAV_ORDER]);
+    expect(readStoredNavOrder({ getItem: () => '["settings","home"]' })).toEqual([
+      "settings",
+      "home",
+      "workspace",
+      "skills",
+      "interfaces",
+      "memory",
+      "archive",
+    ]);
+    expect(readStoredNavOrder(null)).toEqual([...DEFAULT_NAV_ORDER]);
   });
 });

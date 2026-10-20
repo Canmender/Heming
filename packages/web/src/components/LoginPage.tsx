@@ -21,7 +21,15 @@ export function LoginPage() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-[#fafafa] min-[900px]:flex-row">
+    /*
+     * w-full 必须显式写：本节点的父容器（App.tsx 登录分支的 <div class="flex min-h-0 flex-1">）
+     * 是 row 方向的 flex 容器，本节点是它的 flex 子项。flex 子项默认 flex-basis:auto →
+     * 宽度按 max-content 收缩，于是整页只会占窗口左侧一条（1440 宽下实测仅 758px），
+     * 右半屏全空、宽屏分栏看起来「根本没生效」。w-full 把 basis 撑到父容器 100% 宽。
+     * min-w-0 抵消 flex 子项默认的 min-width:auto，避免窗口偏窄时被内容反撑出横向滚动。
+     * 请勿删除——删掉就退回「卡片和字样全挤在左边」的状态（已有回归用例守护）。
+     */
+    <div className="flex h-full w-full min-w-0 flex-col bg-[#fafafa] min-[900px]:flex-row">
       {/* 左：登录卡片垂直居中 */}
       <div className="flex flex-1 items-center justify-center p-6">
         <form

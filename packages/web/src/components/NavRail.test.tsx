@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { NavRail, NavPeek } from "./NavRail.js";
-import { useUiStore } from "../store/ui.js";
+import { NavRail } from "./NavRail.js";
+import { useUiStore, DEFAULT_NAV_ORDER } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 
 describe("NavRail 图标轨（A 方案）", () => {
   beforeEach(() => {
-    useUiStore.setState({ page: "home", navCollapsed: false, activeConversationId: null });
+    useUiStore.setState({ page: "home", activeConversationId: null });
     // 角标用例注入未读会话：逐例清零，避免泄漏到「无角标」断言
     useChatStore.setState({ conversations: [] });
     useAuthStore.setState({
@@ -18,9 +18,16 @@ describe("NavRail 图标轨（A 方案）", () => {
     });
   });
 
-  it("渲染 5 个带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键）", () => {
+  it("渲染 6 个带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键）", () => {
     render(<NavRail />);
-    for (const name of ["主页 Alt1", "工作区 Alt2", "接口区 Alt3", "记忆区 Alt4", "设置区 Alt5"]) {
+    for (const name of [
+      "主页 Alt1",
+      "工作区 Alt2",
+      "技能区 Alt3",
+      "接口区 Alt4",
+      "记忆区 Alt5",
+      "设置区 Alt6",
+    ]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
   });
@@ -70,10 +77,10 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(homeBtn.className).toContain("bg-ink");
     expect(homeBtn.className).toContain("text-white");
 
-    fireEvent.click(screen.getByRole("button", { name: "接口区 Alt3" }));
+    fireEvent.click(screen.getByRole("button", { name: "接口区 Alt4" }));
     expect(useUiStore.getState().page).toBe("interfaces");
 
-    const intfBtn = screen.getByRole("button", { name: "接口区 Alt3" });
+    const intfBtn = screen.getByRole("button", { name: "接口区 Alt4" });
     expect(intfBtn.className).toContain("bg-ink");
     expect(intfBtn.className).toContain("text-white");
     expect(screen.getByRole("button", { name: "主页 Alt1" }).className).not.toContain("bg-ink");
@@ -132,7 +139,14 @@ describe("NavRail 图标轨（A 方案）", () => {
   it("图标列包在垂直居中容器内，头像在容器外", () => {
     render(<NavRail />);
     const nav = screen.getByLabelText("主导航");
-    const items = ["主页 Alt1", "工作区 Alt2", "接口区 Alt3", "记忆区 Alt4", "设置区 Alt5"].map(
+    const items = [
+      "主页 Alt1",
+      "工作区 Alt2",
+      "技能区 Alt3",
+      "接口区 Alt4",
+      "记忆区 Alt5",
+      "设置区 Alt6",
+    ].map(
       (l) => screen.getByLabelText(l),
     );
     const wrapper = items[0].closest("div")!.parentElement!;
@@ -144,22 +158,34 @@ describe("NavRail 图标轨（A 方案）", () => {
   });
 });
 
-describe("NavPeek 会话隐藏态呼出提示", () => {
+
+describe("NavRail 导航顺序可自定义", () => {
   beforeEach(() => {
-    useUiStore.setState({ page: "home", navCollapsed: true, activeConversationId: null });
+    useUiStore.setState({ page: "home", navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("窄条 + 呼出按钮，点击展开回图标轨", () => {
-    render(<NavPeek />);
-    expect(screen.queryByRole("button", { name: "主页 Alt1" })).not.toBeInTheDocument();
-    const btn = screen.getByRole("button", { name: "呼出导航" });
-    fireEvent.click(btn);
-    expect(useUiStore.getState().navCollapsed).toBe(false);
+  it("按 store.navOrder 渲染，且快捷键徽标仍绑页本身", () => {
+    useUiStore.setState({
+      navOrder: ["settings", "home", "workspace", "skills", "interfaces", "memory"],
+    });
+    render(<NavRail />);
+    const labels = screen
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label"))
+      .filter((l): l is string => Boolean(l?.startsWith("主页") || l?.startsWith("工作区") || l?.startsWith("技能区") || l?.startsWith("接口区") || l?.startsWith("记忆区") || l?.startsWith("设置区")));
+    // 顺序跟着 store 走
+    expect(labels[0]).toContain("设置区");
+    expect(labels[1]).toContain("主页");
+    // 但 Alt 键位仍按页固定：设置区永远是 Alt6、主页永远是 Alt1
+    expect(labels[0]).toContain("Alt6");
+    expect(labels[1]).toContain("Alt1");
   });
 
-  it("呼出提示内不出现产品名文字", () => {
-    render(<NavPeek />);
-    expect(screen.getByRole("button", { name: "呼出导航" })).toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/和鸣|Heming/);
+  it("存储里缺项时自动补齐，不漏渲染任何导航", () => {
+    useUiStore.setState({ navOrder: ["memory", "home", "workspace", "skills", "interfaces"] });
+    render(<NavRail />);
+    for (const name of ["主页", "工作区", "技能区", "接口区", "记忆区", "设置区"]) {
+      expect(screen.getAllByRole("button", { name: new RegExp(name) }).length).toBeGreaterThan(0);
+    }
   });
 });

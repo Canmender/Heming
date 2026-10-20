@@ -119,11 +119,32 @@ export const fetchIncomingRequests = () =>
 export const acceptFriend = (id: string) =>
   api(`/api/friends/${id}/accept`, { method: "POST", body: "{}" });
 export const fetchConversations = () => api<Conversation[]>("/api/conversations");
+/**
+ * 归档 / 取消归档一条会话。
+ *
+ * 服务端按**成员**存这个状态，所以群聊里各人归档互不影响——
+ * 前端不要把它当成会话本身的属性去做全局缓存。
+ */
+export const archiveConversation = (convId: string, archived: boolean) =>
+  api<void>(`/api/conversations/${convId}/archive`, {
+    method: "PATCH",
+    body: JSON.stringify({ archived }),
+  });
 /** 建直聊会话：服务端该响应体不带 unreadCount（store.createDirectConversation 原样返回），由调用方补 0。 */
 export const createConversation = (peerId: string) =>
   api<{ id: string; type: "direct"; peer: User }>("/api/conversations", {
     method: "POST",
     body: JSON.stringify({ peerId }),
+  });
+/**
+ * 建智能体一对一会话（幂等：服务端已存在则返回原会话）。
+ * 走同一个 POST /api/conversations，靠 body 的 agentId 分支区分——不新开路由，
+ * 免得「会话列表刷新后新会话不在其中」这类口径分叉。
+ */
+export const createAgentConversation = (agentId: string) =>
+  api<Conversation>("/api/conversations", {
+    method: "POST",
+    body: JSON.stringify({ agentId }),
   });
 export const fetchMessages = (convId: string) =>
   api<Message[]>(`/api/conversations/${convId}/messages`);
