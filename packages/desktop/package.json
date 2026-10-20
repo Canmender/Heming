@@ -6,13 +6,16 @@
   "scripts": {
     "dev": "electron .",
     "start": "electron .",
-    "dist": "node ../../scripts/build-desktop-web.mjs && electron-builder --win nsis",
-    "typecheck": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check app-protocol.js && node --check title-bar.js && node --check preload.js",
-    "test": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check app-protocol.js && node --check title-bar.js && node --check preload.js && node --test"
+    "dist": "node ../../scripts/build-desktop-web.mjs && node ../../scripts/build-desktop.mjs --win nsis",
+    "typecheck": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check app-protocol.js && node --check title-bar.js && node --check call-window.js && node --check mcp-stdio.js && node --check app-version.js && node --check auto-update.js && node --check bundled-runtime.js && node --check wiki-fs.js && node --check chart-fs.js && node --check preload.js",
+    "test": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check app-protocol.js && node --check title-bar.js && node --check call-window.js && node --check mcp-stdio.js && node --check app-version.js && node --check auto-update.js && node --check bundled-runtime.js && node --check wiki-fs.js && node --check chart-fs.js && node --check preload.js && node --test app-protocol.test.js && node --test app-version.test.js && node --test auto-update.test.js && node --test bundled-runtime.test.js && node --test call-window.test.js && node --test changelog-sync.test.js && node --test chart-fs.test.js && node --test main.test.js && node --test mcp-stdio.test.js && node --test preload.test.js && node --test secure-origins.test.js && node --test splash-lifecycle.test.js && node --test splash.test.js && node --test title-bar.test.js && node --test version-sync.test.js && node --test window-state.test.js && node --test wordmark-drift.test.js"
   },
   "devDependencies": {
     "electron": "^31.0.0",
     "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   },
   "build": {
     "appId": "com.heming.app",
@@ -26,17 +29,38 @@
       "app-protocol.js",
       "splash.html",
       "title-bar.js",
+      "call-window.js",
+      "mcp-stdio.js",
+      "app-version.js",
+      "auto-update.js",
+      "bundled-runtime.js",
+      "wiki-fs.js",
+      "chart-fs.js",
       "preload.js"
     ],
     "extraResources": [
       {
         "from": "web-dist",
         "to": "web"
+      },
+      {
+        "from": "runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*",
+          "!**/*.pyc.tmp"
+        ]
       }
     ],
     "directories": {
       "output": "release"
     },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://47.92.39.184/updates"
+      }
+    ],
     "win": {
       "target": [
         "nsis"
@@ -46,10 +70,13 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "和鸣",
+      "artifactName": "和鸣 Setup ${env.HEMING_APP_VERSION}.exe",
+      "uninstallDisplayName": "和鸣 ${env.HEMING_APP_VERSION}",
       "installerLanguages": [
         "zh_CN"
       ],
-      "language": "2052"
+      "language": "2052",
+      "differentialPackage": true
     }
   },
   "hemingVersion": "d.18.1.5.0",

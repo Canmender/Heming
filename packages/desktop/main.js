@@ -6,10 +6,15 @@ const { loadWindowState, saveWindowState } = require("./window-state");
 const { shouldShowSplash, splashWindowOptions } = require("./splash-config");
 const { attachSplashLifecycle } = require("./splash-lifecycle");
 const { resolveRequest, contentTypeFor, INDEX_FILE } = require("./app-protocol");
+const { isCallWindowUrl, callWindowOptions } = require("./call-window");
+const { appVersion } = require("./app-version");
+const { createStdioBridge } = require("./mcp-stdio");
 
 const pkg = require("./package.json");
 const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins");
 const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
+const { registerWikiIpc } = require("./wiki-fs");
+const { registerChartIpc } = require("./chart-fs");
 
 // ── web 界面嵌入（设计 §4）──────────────────────────────────────────────
 // 产物打进安装包、用自定义协议本地加载，摆脱「UI 必须部署云端才可见」与「启动依赖网络」。
@@ -260,8 +265,15 @@ if (!gotLock) {
       saveWindowState(windowStateFile(), win.getNormalBounds());
     });
 
-    // window.open / target=_blank 一律交给系统浏览器，主窗口不开新页
+    // window.open / target=_blank 默认交给系统浏览器；**唯一例外**是通话窗口
+    // （同源 + `?hemingWindow=call`）：它必须留在应用内，才能共享 localStorage 的登录态
+    // 与 WS 信令。其余一律 deny，保持「主窗口不开新页」的既有约束。
+    const appOriginForWindows = EMBEDDED_ORIGIN === originOf(appUrl) ? EMBEDDED_ORIGIN : appUrl;
     win.webContents.setWindowOpenHandler(({ url }) => {
+      if (isCallWindowUrl(url, appOriginForWindows) || isCallWindowUrl(url, EMBEDDED_ORIGIN)) {
+        console.log("[heming] 打开通话窗口:", url);
+        return { action: "allow", overrideBrowserWindowOptions: callWindowOptions() };
+      }
       console.log("[heming] 新窗口请求转系统浏览器打开:", url);
       openInSystemBrowser(url);
       return { action: "deny" };
@@ -319,6 +331,88 @@ if (!gotLock) {
 
     return win;
   }
+
+  // —— MCP stdio 传输（桌面端才有）——
+  // 渲染进程没有 child_process 权限，故由主进程拉起 MCP 服务子进程并用换行分隔的
+  // JSON-RPC 通信；渲染层经 preload 的 __mcp_stdio.request 逐条调用。
+  const mcpStdio = createStdioBridge({
+    spawn: require("node:child_process").spawn,
+    log: (line) => console.log(line),
+  });
+
+  /** 首次用到某服务时先握手（initialize → notifications/initialized）。 */
+  const ensureStdioReady = async (serverId, config) => {
+    if (mcpStdio.running().includes(serverId)) return true;
+    await mcpStdio.request(serverId, config, "initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "heming", version: "1.0.0" },
+    });
+    mcpStdio.notify(serverId, config, "notifications/initialized");
+    return true;
+  };
+
+  ipcMain.handle("mcp:stdio:request", async (_event, payload) => {
+    const { serverId, config, method, params } = payload || {};
+    if (typeof serverId !== "string" || !serverId) throw new Error("缺少 serverId");
+    if (typeof method !== "string" || !method) throw new Error("缺少 method");
+    const fresh = !mcpStdio.running().includes(serverId);
+    if (fresh && method !== "initialize") await ensureStdioReady(serverId, config);
+    const result = await mcpStdio.request(serverId, config, method, params);
+    if (fresh && method === "initialize") {
+      mcpStdio.notify(serverId, config, "notifications/initialized");
+    }
+    return result;
+  });
+
+  ipcMain.handle("mcp:stdio:stop", (_event, serverId) => mcpStdio.stop(String(serverId)));
+
+  app.on("will-quit", () => mcpStdio.disposeAll());
+
+  /* ------------------------------------------------------- 自动更新 */
+
+  // 延后 require：electron-updater 依赖 electron 的 app 对象，
+  // 在模块顶层 require 会在某些测试环境里触发「app未就绪」。
+  const { createUpdater } = require("./auto-update");
+  const { autoUpdater } = require("electron-updater");
+
+  // 开发态（electron .）不检查更新：那里没有真实安装包，
+  // 拉到的 latest.yml 只会指向线上包，调试时看到误导性的提示。
+  if (!app.isPackaged) {
+    console.log("[heming] 开发模式，跳过自动更新初始化");
+  } else {
+    // 把 electron-updater 的内部日志接到 console：更新失败时
+    // 用户只会看到「没更新」，看不到原因，日志是唯一的排查线索。
+    // 不用 electron-log —— 那是额外依赖，而这里只需要输出到已有日志通道。
+    autoUpdater.logger = {
+      info: (message) => console.log("[updater]", message),
+      warn: (message) => console.warn("[updater]", message),
+      error: (message) => console.error("[updater]", message),
+      debug: (message) => console.debug("[updater]", message),
+    };
+  }
+
+  const updater = createUpdater({ autoUpdater, app, log: (line) => console.log(line) });
+
+  /** 把状态推给渲染进程（设置区的更新区、启动提示条）。 */
+  const pushUpdateState = (state) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send("update:state", state);
+    }
+  };
+  updater.subscribe(pushUpdateState);
+
+  ipcMain.handle("update:check", () => updater.check());
+  ipcMain.handle("update:download", () => updater.download());
+  ipcMain.handle("update:install", () => updater.quitAndInstall());
+  ipcMain.handle("update:state", () => updater.getState());
+
+  // 启动后延迟一小会儿再检查：冷启动时不必和界面抢网络，
+  // 也不至于让用户等更新检查才看到首屏。
+  setTimeout(() => {
+    void updater.check({ silent: true });
+    updater.scheduleCheck();
+  }, 8_000);
 
   // 语音通话系统通知 + 任务栏闪烁（渲染层经 preload 的 __heming_voice_call.notify 请求）
   ipcMain.on("voice-call:notify", (_event, title, body) => {
@@ -420,10 +514,16 @@ if (!gotLock) {
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }
 
-  app.whenReady().then(() => {
+  console.log("[heming] 版本", appVersion());
+
+app.whenReady().then(() => {
     // 自定义协议处理器须在创建窗口之前装好，否则首次 loadURL 会拿到空响应
     installAppProtocol();
     setupMenu();
+    // 个人知识库文件桥（卡帕西 LLM Wiki 标准）：必须在窗口创建前注册
+    registerWikiIpc(ipcMain);
+    // 图表导出桥：把生成的图表写到 ~/Heming/charts
+    registerChartIpc(ipcMain);
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
