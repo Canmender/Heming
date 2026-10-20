@@ -6,6 +6,7 @@ import type {
   StorageLike,
   WorkingTurn,
 } from "./types.js";
+import { GLOBAL_AGENT_ID } from "./types.js";
 import {
   KEY_SIZE_LIMIT,
   MEMORY_KEYS,
@@ -410,6 +411,15 @@ export class MemoryStore {
     return entry;
   }
 
+  /** 清空单个会话的短期记忆（记忆页「清空当前会话」）。 */
+  clearConversation(conversationId: string): void {
+    if (!(conversationId in this.data.working)) return;
+    const next = { ...this.data.working };
+    delete next[conversationId];
+    this.data.working = next;
+    this.saveWorking();
+  }
+
   removeEpisodic(agentId: string, id: string): void {
     const list = (this.data.episodic[agentId] ?? []).filter((e) => e.id !== id);
     const next = { ...this.data.episodic };
@@ -421,12 +431,46 @@ export class MemoryStore {
 
   /* ------------------------------------------------------------- semantic */
 
-  /** 语义记忆：pinned 在前，其余按更新时间倒序。 */
+  /**
+   * 语义记忆：pinned 在前，其余按更新时间倒序。
+   *
+   * **含全局共用条目**（用户要求「长期记忆所有智能体公用」）：把 `GLOBAL_AGENT_ID`
+   * 桶与本智能体桶合并返回。全局条目排前面——它们是被全体共用的既定事实，
+   * 比某个智能体的私有观察更值得优先占据提示词预算。
+   */
   semantic(agentId: string): SemanticEntry[] {
-    return [...(this.data.semantic[agentId] ?? [])].sort((a, b) => {
+    const own = this.data.semantic[agentId] ?? [];
+    const shared = agentId === GLOBAL_AGENT_ID ? [] : this.data.semantic[GLOBAL_AGENT_ID] ?? [];
+    return [...shared, ...own].sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
     });
+  }
+
+  /** 只取全局共用桶（记忆区「数据库」标签展示用——那里看到的就是全部智能体的公用记忆）。 */
+  semanticGlobal(): SemanticEntry[] {
+    return [...(this.data.semantic[GLOBAL_AGENT_ID] ?? [])].sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+    });
+  }
+
+  /** 该条目是否属于全局共用桶（界面标注「公用」用）。 */
+  static isGlobal(entry: SemanticEntry): boolean {
+    return entry.agentId === GLOBAL_AGENT_ID;
+  }
+
+  /**
+   * 按（归一后的）主题键查一条语义记忆：外部模块判断「是更新还是新增」时用它，
+   * 避免各自复制一份键归一逻辑导致口径漂移（复盘写入就靠它避免重复占额度）。
+   */
+  findSemantic(agentId: string, key: string): SemanticEntry | undefined {
+    const normalized = normalizeKey(key) || "未命名";
+    // 先查本智能体桶再查全局桶：同名 key 以更具体的那个为准
+    return (this.data.semantic[String(agentId ?? "")] ?? []).find((e) => e.key === normalized)
+      ?? (agentId === GLOBAL_AGENT_ID
+        ? undefined
+        : (this.data.semantic[GLOBAL_AGENT_ID] ?? []).find((e) => e.key === normalized));
   }
 
   /**
@@ -441,12 +485,20 @@ export class MemoryStore {
     source: SemanticEntry["source"];
     confidence?: number;
     scope?: SemanticEntry["scope"];
+    /** 显式指定落哪个桶；省略即落全局共用桶（用户要求长期记忆所有智能体公用）。 */
+    bucket?: string;
   }): SemanticEntry {
-    const agentId = String(input.agentId ?? "");
+    // 两个概念必须分开：
+    // - bucket：这条数据**存在哪个桶**（省略=全局共用桶）
+    // - agentId：这条数据**是谁写的**（始终是真实智能体 id，界面要显示、clearAgent 要按它清理）
+    // 早先把两者混为一谈，会让全局桶里的条目 agentId 也变成 "__global__"，
+    // 于是既看不出是谁沉淀的，清空某个智能体时也清不掉它。
+    const bucket = String(input.bucket ?? GLOBAL_AGENT_ID);
+    const ownerId = String(input.agentId ?? "");
     const key = normalizeKey(input.key) || "未命名";
     const value = String(input.value ?? "").slice(0, 500);
     const nowIso = new Date(this.now()).toISOString();
-    const list = this.data.semantic[agentId] ?? [];
+    const list = this.data.semantic[bucket] ?? [];
     const existing = list.find((e) => e.key === key);
 
     let entry: SemanticEntry;
@@ -464,7 +516,7 @@ export class MemoryStore {
     } else {
       entry = {
         id: newId("s", this.now()),
-        agentId,
+        agentId: ownerId,
         key,
         value,
         scope: input.scope ?? "user",
@@ -490,9 +542,25 @@ export class MemoryStore {
       next = next.filter((e) => !drop.has(e.id));
     }
 
-    this.data.semantic = { ...this.data.semantic, [agentId]: next };
+    this.data.semantic = { ...this.data.semantic, [bucket]: next };
     this.saveSemantic();
     return entry;
+  }
+
+  /** 在一个桶内按 id 找条目，返回 [桶名, 下标]。找不到返回 null。 */
+  private locateSemantic(id: string, preferred: string): [string, number] | null {
+    const preferredList = this.data.semantic[preferred] ?? [];
+    const inPreferred = preferredList.findIndex((e) => e.id === id);
+    if (inPreferred >= 0) return [preferred, inPreferred];
+    // 语义记忆默认落全局桶，调用方传的 agentId 可能不是它所在的桶。
+    // id 是全局唯一的，因此可以安全地扫一遍其余桶——只有全局与本智能体两个候选，
+    // 直接显式查这两处即可，不必全表遍历。
+    for (const bucket of [GLOBAL_AGENT_ID, preferred]) {
+      const list = this.data.semantic[bucket] ?? [];
+      const index = list.findIndex((e) => e.id === id);
+      if (index >= 0) return [bucket, index];
+    }
+    return null;
   }
 
   updateSemantic(
@@ -500,9 +568,11 @@ export class MemoryStore {
     id: string,
     patch: Partial<Pick<SemanticEntry, "key" | "value" | "pinned" | "confidence">>,
   ): void {
-    const list = this.data.semantic[agentId] ?? [];
-    const index = list.findIndex((e) => e.id === id);
-    if (index < 0) return;
+    // 条目可能在全局桶（默认落点），不保证在传入的 agentId 桶里
+    const found = this.locateSemantic(id, String(agentId ?? ""));
+    if (!found) return;
+    const [bucket, index] = found;
+    const list = this.data.semantic[bucket] ?? [];
     const current = list[index];
     const updated: SemanticEntry = {
       ...current,
@@ -514,15 +584,19 @@ export class MemoryStore {
     };
     const next = [...list];
     next[index] = updated;
-    this.data.semantic = { ...this.data.semantic, [agentId]: next };
+    // 写回所在的那个桶（可能是全局桶），不是传入的 agentId
+    this.data.semantic = { ...this.data.semantic, [bucket]: next };
     this.saveSemantic();
   }
 
   removeSemantic(agentId: string, id: string): void {
-    const list = (this.data.semantic[agentId] ?? []).filter((e) => e.id !== id);
+    const found = this.locateSemantic(id, String(agentId ?? ""));
+    if (!found) return;
+    const [bucket] = found;
+    const list = (this.data.semantic[bucket] ?? []).filter((e) => e.id !== id);
     const next = { ...this.data.semantic };
-    if (list.length) next[agentId] = list;
-    else delete next[agentId];
+    if (list.length) next[bucket] = list;
+    else delete next[bucket];
     this.data.semantic = next;
     this.saveSemantic();
   }
@@ -540,6 +614,12 @@ export class MemoryStore {
     const semantic = { ...this.data.semantic };
     delete episodic[agentId];
     delete semantic[agentId];
+    // 全局桶里的条目也是这个智能体写的，一并清掉——
+    // 否则「清空该智能体的记忆」后，它沉淀的公用长期记忆还留着，说不清是谁的。
+    // 条件是 `!==`（保留**别的**智能体写的），不是 `===`。
+    const globalLeft = (semantic[GLOBAL_AGENT_ID] ?? []).filter((e) => e.agentId !== agentId);
+    if (globalLeft.length) semantic[GLOBAL_AGENT_ID] = globalLeft;
+    else delete semantic[GLOBAL_AGENT_ID];
     this.pending.clear();
     this.data = { ...this.data, working, episodic, semantic };
     this.saveWorking();

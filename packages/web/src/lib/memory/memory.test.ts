@@ -260,12 +260,45 @@ describe("MemoryStore：Semantic 去重与上限", () => {
     expect(pinned.value).toBe("繁体中文");
   });
 
-  it("每个 agent 各自独立存储", () => {
+  it("语义记忆默认落全局桶，所有智能体共享（用户要求长期记忆公用）", () => {
     const store = newStore();
+    // 不传 bucket → 落全局
     store.upsertSemantic({ agentId: "agent-1", key: "称呼", value: "阿和", source: "manual" });
-    store.upsertSemantic({ agentId: "agent-2", key: "称呼", value: "小鸣", source: "manual" });
-    expect(store.semantic("agent-1")[0].value).toBe("阿和");
-    expect(store.semantic("agent-2")[0].value).toBe("小鸣");
+    // 另一个智能体召回时也能看到同一条
+    const seenBy2 = store.semantic("agent-2");
+    expect(seenBy2.some((e) => e.value === "阿和")).toBe(true);
+    expect(store.semanticGlobal()).toHaveLength(1);
+    // 反过来往指定桶写：只该智能体可见，其他人不受影响
+    store.upsertSemantic({ agentId: "agent-1", key: "称呼", value: "阿和", source: "manual", bucket: "agent-1" });
+    expect(store.semantic("agent-1").filter((e) => e.value === "阿和")).toHaveLength(2);
+    expect(store.semantic("agent-2").filter((e) => e.value === "阿和")).toHaveLength(1);
+  });
+
+  it("findSemantic 跨桶查找：先本智能体再全局，同名以更具体的为准", () => {
+    const store = newStore();
+    store.upsertSemantic({ agentId: "x", key: "偏好-语言", value: "全局值", source: "manual" });
+    store.upsertSemantic({ agentId: "x", key: "偏好-语言", value: "私有值", source: "manual", bucket: "agent-x" });
+    expect(store.findSemantic("agent-x", "偏好-语言")?.value).toBe("私有值");
+    // 没有私有那份时，回落到全局
+    store.upsertSemantic({ agentId: "y", key: "偏好-语言", value: "全局值", source: "manual" });
+    expect(store.findSemantic("agent-y", "偏好-语言")?.value).toBe("全局值");
+  });
+
+  it("显式指定 bucket 时同桶内 upsert 而非新增", () => {
+    const store = newStore();
+    store.upsertSemantic({ agentId: "a", key: "称呼", value: "第一次", source: "manual", bucket: "b1" });
+    store.upsertSemantic({ agentId: "a", key: "称呼", value: "第二次", source: "manual", bucket: "b1" });
+    const list = store.semantic("b1").filter((e) => e.key === "称呼");
+    expect(list).toHaveLength(1);
+    expect(list[0].value).toBe("第二次");
+  });
+
+  it("全局桶条目在 semantic(agentId) 里排在本智能体条目之前", () => {
+    const store = newStore();
+    store.upsertSemantic({ agentId: "a", key: "私有", value: "p", source: "manual", bucket: "agent-a" });
+    store.upsertSemantic({ agentId: "a", key: "公用", value: "g", source: "manual" });
+    const ids = store.semantic("agent-a").map((e) => e.key);
+    expect(ids.indexOf("公用")).toBeLessThan(ids.indexOf("私有"));
   });
 
   it("超过 300 条时淘汰 confidence × recency 最低的非 pinned 条目", () => {
@@ -273,12 +306,13 @@ describe("MemoryStore：Semantic 去重与上限", () => {
     const seeded: SemanticEntry[] = [semanticFixture("pin", "置顶", { pinned: true, confidence: 0.01, updatedAt: new Date(T0 - 300 * DAY).toISOString() })];
     for (let i = 0; i < 298; i++) seeded.push(semanticFixture(`s${i}`, `键${i}`));
     seeded.push(semanticFixture("weak", "低置信", { confidence: 0.03 }));
-    storage.write(MEMORY_KEYS.semantic, { "agent-1": seeded });
+    storage.write(MEMORY_KEYS.semantic, { "__global__": seeded });
 
     const store = new MemoryStore(storage, () => T0);
     store.upsertSemantic({ agentId: "agent-1", key: "新键", value: "新值", source: "manual" });
 
-    const kept = storage.read<Record<string, SemanticEntry[]>>(MEMORY_KEYS.semantic)!["agent-1"];
+    // 默认写全局桶，故淘汰也发生在全局桶里
+    const kept = storage.read<Record<string, SemanticEntry[]>>(MEMORY_KEYS.semantic)!["__global__"];
     expect(kept).toHaveLength(SEMANTIC_LIMIT);
     expect(kept.some((e) => e.id === "weak")).toBe(false);
     expect(kept.some((e) => e.id === "pin")).toBe(true);
@@ -318,8 +352,18 @@ describe("MemoryStore：Semantic 去重与上限", () => {
     store.clearAgent("agent-1");
     expect(store.working("conv-1")).toEqual([]);
     expect(store.episodic("agent-1")).toEqual([]);
+    // 全局桶里那条也是 agent-1 写的，应一并清掉
     expect(store.semantic("agent-1")).toEqual([]);
     expect(storage.read<Record<string, WorkingTurn[]>>(MEMORY_KEYS.working)).toEqual({});
+  });
+
+  it("clearAgent 只清自己的全局条目，别人的公用记忆保留", () => {
+    const store = newStore();
+    store.upsertSemantic({ agentId: "agent-1", key: "我的偏好", value: "中文", source: "manual" });
+    store.upsertSemantic({ agentId: "agent-2", key: "他的偏好", value: "英文", source: "manual" });
+    store.clearAgent("agent-1");
+    const left = store.semanticGlobal();
+    expect(left.map((e) => e.value)).toEqual(["英文"]);
   });
 
   it("updateSemantic 传未知 id 不抛错（静默）", () => {
