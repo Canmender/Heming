@@ -1,6 +1,8 @@
+import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act } from "@testing-library/react";
-import { BootWave, easeOutCubic } from "./BootWave.js";
+import { render, act, waitFor } from "@testing-library/react";
+import { BootWave, easeOutCubic, revealMaskImage } from "./BootWave.js";
+import { WRITE_DRAW_MS, WRITE_TOTAL_MS } from "./WordmarkWrite.js";
 
 /** 与 splash-config.js 的 WAVE_MS / FALLBACK_MS 语义对齐的测试常量。 */
 const WAVE_MS = 1300;
@@ -98,10 +100,11 @@ describe("BootWave", () => {
     const css = document.querySelector(".boot-wave style")!.textContent!;
     expect(css).toContain("position: fixed");
     expect(css).toContain("inset: 0");
-    // 白底 + 由 --reveal 驱动的中心透明洞
+    // 白底 + 中心透明洞；洞沿有羽化带（内容随扩散渐显，不是硬边跳变）
     expect(css).toContain("background: #ffffff");
-    expect(css).toContain("mask-image: radial-gradient(circle at 50% 50%, transparent var(--reveal, 0%)");
-    expect(css).toContain("-webkit-mask-image: radial-gradient(circle at 50% 50%, transparent var(--reveal, 0%)");
+    expect(css).toContain("mask-image: var(--reveal-mask, radial-gradient(circle at 50% 50%, transparent 0%");
+    expect(css).toContain("-webkit-mask-image: var(--reveal-mask, radial-gradient(circle at 50% 50%, transparent 0%");
+    expect(css).toContain(".boot-wave-front");
     // 关键：开播前没有任何 --reveal 内联值 → 回落到 0% → 完全遮住主界面
     expect(revealValue()).toBe("");
     // 未开播也不渲染波纹（避免信号没来时白板上漂着几圈线）
@@ -123,7 +126,9 @@ describe("BootWave", () => {
     );
     const css = document.querySelector(".boot-wave style")!.textContent!;
     expect(css).toContain("pointer-events: auto");
-    expect(css).not.toContain("pointer-events: none");
+    // 只有装饰用的波前光晕显式退出命中测试，遮罩本身仍吞事件
+    expect(css.match(/pointer-events: none/g)).toHaveLength(1);
+    expect(css).toMatch(/\.boot-wave-front \{[^}]*pointer-events: none/);
     expect(overlay()!.nextSibling).toBeNull(); // 遮罩是最后一个节点 → 叠在最上层
     channel.fire();
   });
@@ -356,5 +361,214 @@ describe("BootWave", () => {
     expect(container.querySelectorAll(".boot-wave-reveal")).toHaveLength(1);
     expect(container.querySelectorAll(".boot-wave .ripple")).toHaveLength(0);
     channel.fire();
+  });
+});
+
+/**
+ * 回归（真机复现）：React 18 StrictMode 在开发模式下会把 effect 跑两遍
+ * （挂载 → cleanup → 再挂载）。现象：`vite` 开发模式下白遮罩永不卸载——
+ * `--reveal` 从未被写入、`#root > div` 仍带 inert、整页白屏；而同一份代码
+ * `vite build` + `vite preview` 完全正常（生产不双跑 effect）。
+ *
+ * 根因：第一轮 startAnimation() 置 startedRef=true 并挂上 rAF + 收尾定时器；
+ * cleanup 的 stopTimers() 把它们全取消；第二轮 startAnimation() 命中
+ * `if (startedRef.current || finishedRef.current) return;` 直接早退
+ * → 没有任何东西再推进 --reveal，finish() 永远不会被调用，遮罩永久停在 0%。
+ *
+ * 修复方向：cleanup 复位「本轮已开播」的即时标记（startedRef）使第二轮能重播，
+ * 但不复位 finishedRef（它保证 onDone 只回调一次）。
+ */
+describe("BootWave（React.StrictMode 双跑 effect）", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    window.heming = undefined;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("StrictMode 双跑后仍能开播并推进到 100%，onDone 恰好调用 1 次", () => {
+    useWaveFakeTimers();
+    const onDone = vi.fn();
+    render(
+      <StrictMode>
+        <BootWave onDone={onDone} />
+      </StrictMode>,
+    );
+
+    // 无信号通道 → 直接开播；双跑后波纹仍在（第二轮必须重新开播，而不是静默早退）
+    expect(document.querySelectorAll(".boot-wave .ripple")).toHaveLength(3);
+
+    // 推进定时器与帧：揭示必须真的往前走（修复前这里永远停在 ""，即 0%）
+    act(() => {
+      vi.advanceTimersByTime(WAVE_MS / 2);
+    });
+    expect(parseFloat(revealValue())).toBeGreaterThan(0);
+
+    act(() => {
+      vi.advanceTimersByTime(WAVE_MS);
+    });
+    expect(revealValue()).toBe("100.00%");
+    expect(onDone).toHaveBeenCalledTimes(1);
+
+    // 继续推进：不会重复回调
+    act(() => {
+      vi.advanceTimersByTime(FALLBACK_MS * 2);
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("StrictMode 下首轮已 finish（减弱动态）时，第二轮不重复回调 onDone 也不重新开播", () => {
+    useWaveFakeTimers();
+    vi.spyOn(window, "matchMedia").mockReturnValue({
+      matches: true,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList);
+    const onDone = vi.fn();
+    render(
+      <StrictMode>
+        <BootWave onDone={onDone} />
+      </StrictMode>,
+    );
+
+    // finishedRef 不随 cleanup 复位 → 第二轮（及后续）不会再回调
+    expect(onDone).toHaveBeenCalledTimes(1);
+    // 已完成就不再开播：白遮罩上没有波纹，也没有揭示进度
+    expect(document.querySelectorAll(".boot-wave .ripple")).toHaveLength(0);
+    expect(revealValue()).toBe("");
+  });
+});
+
+/**
+ * 手写段（`writeFirst`）：桌面端由 splash 窗口写字，浏览器/预览没有 splash，
+ * 必须由 BootWave 自己在遮罩上先写「Heming」再进入声波揭示——否则网页上看到的是
+ * 「一上来就是白屏 + 波纹」，用户会以为写字动画丢了（2026-10-18 用户反馈）。
+ */
+describe("BootWave 手写段（浏览器/预览：无 splash 窗口）", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    window.heming = undefined;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("writeFirst：先逐笔写字，写完才进入声波揭示", () => {
+    useWaveFakeTimers();
+    const onDone = vi.fn();
+    render(<BootWave onDone={onDone} writeFirst />);
+
+    // 手写段已挂载，声波段尚未开始（--reveal 未写入 = 遮罩全白）
+    expect(document.querySelector(".wordmark-write")).toBeTruthy();
+    expect(revealValue()).toBe("");
+    expect(document.querySelectorAll(".boot-wave .ripple")).toHaveLength(0);
+
+    // 运笔中：仍是手写段，遮罩没动
+    act(() => {
+      vi.advanceTimersByTime(WRITE_DRAW_MS / 2);
+    });
+    expect(document.querySelector(".wordmark-write")).toBeTruthy();
+    expect(revealValue()).toBe("");
+
+    // 手写段整段结束 → 手写层卸载、声波段开播（+300ms 余量吸收 rAF 帧对齐误差）
+    act(() => {
+      vi.advanceTimersByTime(WRITE_TOTAL_MS + 300);
+    });
+    expect(document.querySelector(".wordmark-write")).toBeNull();
+    expect(document.querySelectorAll(".boot-wave .ripple")).toHaveLength(3);
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(parseFloat(revealValue())).toBeGreaterThan(0);
+
+    // 声波段收尾：onDone 恰好一次
+    act(() => {
+      vi.advanceTimersByTime(WAVE_MS + 200);
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("writeFirst 且减弱动态：不播手写段也不播声波，立刻完成", () => {
+    useWaveFakeTimers();
+    vi.spyOn(window, "matchMedia").mockReturnValue({
+      matches: true,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList);
+    const onDone = vi.fn();
+    render(<BootWave onDone={onDone} writeFirst />);
+
+    expect(document.querySelector(".wordmark-write")).toBeNull();
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("默认（桌面端 splash 已写字）不播手写段，直接声波揭示", () => {
+    useWaveFakeTimers();
+    installSignalChannel();
+    const onDone = vi.fn();
+    render(<BootWave onDone={onDone} />);
+
+    expect(document.querySelector(".wordmark-write")).toBeNull();
+  });
+});
+
+describe("revealMaskImage（波前羽化：内容随扩散渐显）", () => {
+  it("洞内透明、带内 alpha 递增、带外不透明 —— 而不是硬边跳变", () => {
+    const css = revealMaskImage(40);
+    expect(css.startsWith("radial-gradient(circle at 50% 50%")).toBe(true);
+    expect(css).toContain("transparent 40.00%"); // 洞内：完全露出主界面
+    // 羽化带：alpha 由 0 递增到 1，位置在洞沿之后
+    expect(css).toContain("rgba(0, 0, 0, 0) 40.00%");
+    expect(css).toContain("rgba(0, 0, 0, 0.35)");
+    expect(css).toContain("rgba(0, 0, 0, 0.7)");
+    expect(css).toContain("rgba(0, 0, 0, 1) 62.00%");
+    expect(css.endsWith("#000 100%)")).toBe(true); // 带外完全不透明，白板收尾
+  });
+
+  it("羽化带宽度固定（FEATHER_SPAN_PCT），推进时整体平移", () => {
+    const a = revealMaskImage(0);
+    const b = revealMaskImage(50);
+    expect(a).toContain("rgba(0, 0, 0, 1) 22.00%");
+    expect(b).toContain("rgba(0, 0, 0, 1) 72.00%");
+  });
+
+  it("越界输入夹到 [0,100]，不会产出非法渐变", () => {
+    expect(revealMaskImage(-10)).toContain("transparent 0.00%");
+    expect(revealMaskImage(999)).toContain("transparent 100.00%");
+  });
+});
+
+describe("BootWave 波前渐显接线", () => {
+  it("开播推进时遮罩含羽化带，并驱动波前的缩放与淡出", () => {
+    useWaveFakeTimers();
+    const channel = installSignalChannel();
+    render(<BootWave onDone={vi.fn()} />);
+    channel.fire();
+
+    act(() => {
+      vi.advanceTimersByTime(WAVE_MS / 2);
+    });
+
+    const reveal = revealLayer();
+    // 遮罩是一条带 alpha 渐变的渐变（内容随之渐显），不再是 0.5% 硬边
+    expect(reveal.style.getPropertyValue("--reveal-mask")).toContain("rgba(0, 0, 0, 0.35)");
+    expect(reveal.style.getPropertyValue("--reveal-mask")).not.toContain("+ 0.5%");
+    // 波前跟着推进：缩放值已离开 0，透明度随推进下降
+    const scale = Number(reveal.style.getPropertyValue("--reveal-scale"));
+    expect(scale).toBeGreaterThan(0);
+    const frontOpacity = Number(reveal.style.getPropertyValue("--reveal-front-opacity"));
+    expect(frontOpacity).toBeGreaterThan(0);
+    expect(frontOpacity).toBeLessThan(0.9);
+    expect(document.querySelector(".boot-wave-front")).toBeTruthy();
   });
 });

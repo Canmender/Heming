@@ -92,7 +92,12 @@ export function skillToMarkdown(skill: SkillDefinition): string {
   return `${frontmatter}\n\n${skill.instructions.trim()}\n`;
 }
 
-const SOURCES: readonly SkillDefinition["source"][] = ["builtin", "user", "imported"];
+const SOURCES: readonly SkillDefinition["source"][] = [
+  "builtin",
+  "user",
+  "imported",
+  "distilled",
+];
 
 function toStringList(raw: unknown): string[] | undefined {
   if (raw === undefined || raw === null) return undefined;

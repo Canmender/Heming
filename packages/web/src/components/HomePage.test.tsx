@@ -98,8 +98,8 @@ describe("HomePage", () => {
     expect(screen.getByText("1")).toBeInTheDocument(); // 好友数 = 注入的一条
     expect(screen.queryByText("知识库文档")).not.toBeInTheDocument(); // v7 移除该卡
 
-    // 徽标：版本静态 + 今日已用来自真实日志
-    expect(screen.getByText(`版本 v${__APP_VERSION__}`)).toBeInTheDocument();
+    // 徽标：应用版本（5 段，构建期注入）+ 今日已用来自真实日志
+    expect(screen.getByText(`版本 ${__APP_VERSION__}`)).toBeInTheDocument();
     expect(screen.getByText(/今日已用 700/)).toBeInTheDocument();
   });
 

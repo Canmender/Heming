@@ -1,5 +1,5 @@
 import type { Conversation } from "@heming/shared";
-import { useChatStore } from "../store/chat.js";
+import { activeConversationsOf, useChatStore } from "../store/chat.js";
 import { useUiStore, type ContactKind } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { Avatar } from "./Avatar.js";
@@ -9,7 +9,8 @@ import { Avatar } from "./Avatar.js";
  * 头像逐项 rollIn 错峰滚入。点头像切 detailContact（右侧详情卡随动）。
  */
 export function ContactColumn() {
-  const conversations = useChatStore((s) => s.conversations);
+  // 归档会话不进主列表（只在归档页出现）
+  const conversations = activeConversationsOf(useChatStore((s) => s.conversations));
   const friends = useChatStore((s) => s.friends);
   const agentsRoster = useChatStore((s) => s.agentsRoster);
   const agentIdsInGroups = useChatStore((s) => s.agentIdsInGroups);

@@ -23,7 +23,6 @@ describe("WorkspacePage（薄容器 → 雷达）", () => {
     useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
     useUiStore.setState({
       page: "workspace",
-      navCollapsed: false,
       activeConversationId: null,
       contactsHidden: false,
       detailContact: null,

@@ -8,6 +8,7 @@ import {
   parseSkillMarkdown,
   skillToMarkdown,
   MAX_POOL_CHARS,
+  DEFAULT_ROUTE_BUDGET,
   SKILLS_KEY,
   SKILL_BINDINGS_KEY,
   type SkillDefinition,
@@ -61,10 +62,16 @@ const BUILTIN_IDS = [
   "builtin-writing",
   "builtin-code-review",
   "builtin-meeting-notes",
+  "builtin-data-viz",
+  "builtin-web-scrape",
+  "builtin-less-ai-tone",
 ];
 
+/** 内置技能条数（改用常量算，避免每加一条技能要改一堆硬编码数字）。 */
+const BUILTIN_COUNT = BUILTIN_SKILLS.length;
+
 describe("技能池 · 首启种子与容错", () => {
-  it("首启写入 4 个内置技能并记录 seeded 标记", () => {
+  it("首启写入全部内置技能并记录 seeded 标记", () => {
     const { pool, map } = freshPool();
     const skills = pool.list();
     expect(skills.map((s) => s.id)).toEqual(BUILTIN_IDS);
@@ -77,8 +84,8 @@ describe("技能池 · 首启种子与容错", () => {
     const { storage } = makeStorage();
     const first = new SkillPool(storage, clock());
     const second = new SkillPool(storage, clock());
-    expect(first.list()).toHaveLength(4);
-    expect(second.list()).toHaveLength(4);
+    expect(first.list()).toHaveLength(BUILTIN_COUNT);
+    expect(second.list()).toHaveLength(BUILTIN_COUNT);
   });
 
   it("内置技能长度符合设计上限（name ≤ 32 / description ≤ 200 / instructions ≤ 8000）", () => {
@@ -91,13 +98,28 @@ describe("技能池 · 首启种子与容错", () => {
     }
   });
 
+  it("每条内置技能单独注入都不超单轮预算（超了会被整条丢弃）", () => {
+    // DEFAULT_ROUTE_BUDGET 是 1600：一条技能若比它还长，路由时会被静默丢掉，
+    // 表现为「技能明明存在却从不生效」——很难从界面上看出来。
+    // 格式开销（标题行 + 空行）也算在内，故按 formatSkillSection 实测而不是量正文长度。
+    for (const seed of BUILTIN_SKILLS) {
+      const section = formatSkillSection([
+        { skill: { ...seed } as never, score: 1, reason: "测试" },
+      ]);
+      expect(
+        section.length,
+        `内置技能「${seed.name}」注入后 ${section.length} 字符，超出单轮预算 ${DEFAULT_ROUTE_BUDGET}`,
+      ).toBeLessThanOrEqual(DEFAULT_ROUTE_BUDGET);
+    }
+  });
+
   it("删除内置技能后重建不复活", () => {
     const { storage } = makeStorage();
     const pool = new SkillPool(storage, clock());
     pool.remove("builtin-writing");
     const reopened = new SkillPool(storage, clock());
     expect(reopened.list().map((s) => s.id)).not.toContain("builtin-writing");
-    expect(reopened.list()).toHaveLength(3);
+    expect(reopened.list()).toHaveLength(BUILTIN_COUNT - 1);
   });
 
   it("技能键损坏 → 回退空池且不复活内置（不回退到种子）", () => {
@@ -114,7 +136,7 @@ describe("技能池 · 首启种子与容错", () => {
     const pool = new SkillPool(storage, clock());
     map.set(SKILL_BINDINGS_KEY, "][");
     const reopened = new SkillPool(storage, clock());
-    expect(reopened.list()).toHaveLength(4);
+    expect(reopened.list()).toHaveLength(BUILTIN_COUNT);
     expect(reopened.bindings("a1")).toEqual({ agentId: "a1", pinned: [], disabled: [] });
   });
 
@@ -127,9 +149,9 @@ describe("技能池 · 首启种子与容错", () => {
       removeItem: () => {},
     };
     const pool = new SkillPool(failing, clock());
-    expect(pool.list()).toHaveLength(4);
+    expect(pool.list()).toHaveLength(BUILTIN_COUNT);
     expect(() => createSkill(pool, "写入失败技能")).not.toThrow();
-    expect(pool.list()).toHaveLength(5);
+    expect(pool.list()).toHaveLength(BUILTIN_COUNT + 1);
   });
 });
 
@@ -137,7 +159,7 @@ describe("技能池 · CRUD 与绑定", () => {
   it("create/get/update/remove 完整闭环，update 保留 id 与 createdAt", () => {
     const { pool } = freshPool();
     const created = createSkill(pool, "翻译助手", { triggers: ["翻译"], tags: ["语言"] });
-    expect(pool.list()).toHaveLength(5);
+    expect(pool.list()).toHaveLength(BUILTIN_COUNT + 1);
     expect(pool.get(created.id)?.name).toBe("翻译助手");
 
     const updated = pool.update(created.id, { name: "翻译润色", triggers: ["翻译", "笔译"] });
@@ -148,7 +170,7 @@ describe("技能池 · CRUD 与绑定", () => {
 
     pool.remove(created.id);
     expect(pool.get(created.id)).toBeUndefined();
-    expect(pool.list()).toHaveLength(4);
+    expect(pool.list()).toHaveLength(BUILTIN_COUNT);
   });
 
   it("update 未知 id 抛中文错误；exportOne 未知 id 同样抛错", () => {
@@ -385,12 +407,12 @@ describe("技能池 · SKILL.md 与 JSON 导入导出", () => {
     const bundle = pool.exportAll();
     const parsed = JSON.parse(bundle) as { version: number; skills: unknown[] };
     expect(parsed.version).toBe(1);
-    expect(parsed.skills).toHaveLength(5);
+    expect(parsed.skills).toHaveLength(BUILTIN_COUNT + 1);
 
     const { pool: target } = freshPool();
     // 4 个内置按 id 命中更新，私有技能为新增
-    expect(target.importText(bundle)).toEqual({ added: 1, updated: 4 });
-    expect(target.list()).toHaveLength(5);
+    expect(target.importText(bundle)).toEqual({ added: 1, updated: BUILTIN_COUNT });
+    expect(target.list()).toHaveLength(BUILTIN_COUNT + 1);
     expect(target.list().find((s) => s.name === "私有技能")?.source).toBe("user");
   });
 
@@ -401,7 +423,7 @@ describe("技能池 · SKILL.md 与 JSON 导入导出", () => {
     map.set(SKILLS_KEY, "坏数据");
     const empty = new SkillPool(storage, clock());
     expect(empty.list()).toEqual([]);
-    expect(empty.importText(bundle)).toEqual({ added: 4, updated: 0 });
+    expect(empty.importText(bundle)).toEqual({ added: BUILTIN_COUNT, updated: 0 });
     expect(empty.list().map((s) => s.id).sort()).toEqual([...BUILTIN_IDS].sort());
     expect(empty.list()[0].builtin).toBe(true);
   });
@@ -511,5 +533,68 @@ describe("技能池 · 配额守卫", () => {
       { pinned: string[] }
     >;
     expect(persisted["agent-a"].pinned).toEqual([]);
+  });
+});
+
+describe("SkillPool 按智能体分配技能", () => {
+  it("默认分配全部内置技能；自定义/已装需显式添加", () => {
+    const { pool } = freshPool();
+    const builtinIds = pool.list().filter((s) => s.builtin).map((s) => s.id);
+    expect([...pool.assigned("a1")].sort()).toEqual([...builtinIds].sort());
+
+    const created = pool.create({
+      name: "自定义技能",
+      description: "x",
+      instructions: "y",
+      triggers: [],
+      tags: [],
+      enabled: true,
+      version: "1.0.0",
+    });
+    expect(pool.assigned("a1")).not.toContain(created.id);
+  });
+
+  it("assign / unassign 幂等，并按智能体隔离、落盘可重水合", () => {
+    const { storage } = freshPool();
+    const pool = new SkillPool(storage, clock());
+    const custom = pool.create({
+      name: "自定义技能",
+      description: "x",
+      instructions: "y",
+      triggers: [],
+      tags: [],
+      enabled: true,
+      version: "1.0.0",
+    });
+
+    pool.assign("a1", custom.id);
+    pool.assign("a1", custom.id);
+    expect(pool.assigned("a1").filter((id) => id === custom.id)).toHaveLength(1);
+    expect(pool.assigned("a2")).not.toContain(custom.id);
+
+    pool.unassign("a1", custom.id);
+    pool.unassign("a1", custom.id);
+    expect(pool.assigned("a1")).not.toContain(custom.id);
+
+    pool.assign("a2", custom.id);
+    const reloaded = new SkillPool(storage, clock());
+    expect(reloaded.assigned("a2")).toContain(custom.id);
+    expect(reloaded.assigned("a1")).not.toContain(custom.id);
+  });
+
+  it("分配已删除的技能会被过滤掉", () => {
+    const { pool } = freshPool();
+    const custom = pool.create({
+      name: "临时技能",
+      description: "x",
+      instructions: "y",
+      triggers: [],
+      tags: [],
+      enabled: true,
+      version: "1.0.0",
+    });
+    pool.assign("a1", custom.id);
+    pool.remove(custom.id);
+    expect(pool.assigned("a1")).not.toContain(custom.id);
   });
 });

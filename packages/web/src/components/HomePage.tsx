@@ -137,7 +137,7 @@ export function HomePage() {
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2 pt-1">
           <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 text-[11px] text-muted">
-            版本 v{__APP_VERSION__}
+            版本 {__APP_VERSION__}
           </span>
           <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 text-[11px] text-muted">
             今日已用 {todayTotal}
@@ -295,9 +295,19 @@ export function HomePage() {
                   ? "消息已撤回"
                   : last.payload.text || "(附件)"
                 : "暂无消息";
-              // conversations 联合类型（M2）：direct 显 peer、group 显群名
-              const title = c.type === "direct" ? c.peer.displayName : c.name;
-              const avatarUser = c.type === "direct" ? c.peer : { displayName: c.name };
+              // 三态会话（direct / agent 一对一 / group）各自的显示名与头像
+              const title =
+                c.type === "direct"
+                  ? c.peer.displayName
+                  : c.type === "agent"
+                    ? c.agent.name
+                    : c.name;
+              const avatarUser =
+                c.type === "direct"
+                  ? c.peer
+                  : c.type === "agent"
+                    ? { displayName: c.agent.name, avatar: c.agent.avatar ?? undefined }
+                    : { displayName: c.name };
               return (
                 <button
                   key={c.id}

@@ -1,14 +1,32 @@
 import type { LlmProfile } from "../store/llm.js";
 
+/** 模型发起的一次工具调用（OpenAI 兼容格式）。 */
+export interface ToolCall {
+  id: string;
+  type?: "function";
+  function: { name: string; arguments: string };
+}
+
 export interface ChatMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  /** assistant 消息里带的工具调用（回灌历史时原样带回，模型才知道自己调过什么）。 */
+  tool_calls?: ToolCall[];
+  /** role=tool 时对应哪次调用。 */
+  tool_call_id?: string;
+  /** role=tool 时的工具名（部分供应商要求）。 */
+  name?: string;
 }
 
 export interface BuildRequestOpts {
   stream: boolean;
   /** anthropic 的 max_tokens 覆盖（openai 分支忽略，保持最小 body） */
   maxTokens?: number;
+  /**
+   * 工具声明（OpenAI 格式的 `{type:"function",...}` 数组）。
+   * 仅 OpenAI 兼容供应商注入；为空/未传时请求体与旧版完全一致。
+   */
+  tools?: unknown[];
 }
 
 /**
@@ -47,6 +65,7 @@ export function buildRequest(
         messages: messages
           .filter((m) => m.role !== "system")
           .map((m) => ({ role: m.role, content: m.content })),
+        ...(opts.tools?.length ? { tools: opts.tools } : {}),
       }),
     };
   }
@@ -59,6 +78,8 @@ export function buildRequest(
       stream: opts.stream,
       temperature: profile.temperature,
       messages,
+      // 工具调用只对 OpenAI 兼容协议开放（anthropic 的消息结构不同，另行适配）
+      ...(opts.tools?.length ? { tools: opts.tools, tool_choice: "auto" } : {}),
     }),
   };
 }
@@ -94,6 +115,18 @@ export interface StreamChatOpts {
   onDelta: (text: string) => void;
   /** anthropic max_tokens 覆盖（openai 分支忽略） */
   maxTokens?: number;
+  /** 工具声明（OpenAI 格式）；为空则请求体与旧版一致。 */
+  tools?: unknown[];
+  /**
+   * 本轮结束时的工具调用（OpenAI 的 delta.tool_calls 逐片拼装后回调整）。
+   * 不传 = 不需要工具能力，行为与旧版完全一致。
+   */
+  onToolCalls?: (calls: ToolCall[]) => void;
+  /**
+   * 思考过程增量（reasoning/thinking）：DeepSeek 的 `reasoning_content`、
+   * 部分网关的 `reasoning`、Anthropic 的 `thinking_delta`。不支持时不会回调。
+   */
+  onReasoning?: (text: string) => void;
 }
 
 /**
@@ -110,11 +143,47 @@ export async function streamChat(
   opts: StreamChatOpts,
 ): Promise<string> {
   // 同步抛出（如缺 scheme 的 baseUrl 守卫）自然向上传播，不转 provider_error
-  const req = buildRequest(profile, messages, { stream: true, maxTokens: opts.maxTokens });
+  const req = buildRequest(profile, messages, {
+    stream: true,
+    maxTokens: opts.maxTokens,
+    tools: opts.tools,
+  });
 
   const toAbortError = () => new DOMException("AbortError", "AbortError");
   const toProviderError = (e: unknown) =>
     new Error(`provider_error: ${e instanceof Error ? e.message : String(e)}`);
+
+  /** 工具调用累加：OpenAI 按 index 分片下发（id/name 只在首片，arguments 分多片）。 */
+  const toolCalls = new Map<number, { id: string; name: string; args: string }>();
+  const collectToolCalls = (list: unknown) => {
+    if (!Array.isArray(list)) return;
+    for (const raw of list) {
+      if (!raw || typeof raw !== "object") continue;
+      const c = raw as {
+        index?: number;
+        id?: string;
+        function?: { name?: string; arguments?: string };
+      };
+      const index = typeof c.index === "number" ? c.index : toolCalls.size;
+      const cur = toolCalls.get(index) ?? { id: "", name: "", args: "" };
+      if (typeof c.id === "string" && c.id) cur.id = c.id;
+      if (typeof c.function?.name === "string" && c.function.name) cur.name += c.function.name;
+      if (typeof c.function?.arguments === "string") cur.args += c.function.arguments;
+      toolCalls.set(index, cur);
+    }
+  };
+  const flushToolCalls = () => {
+    if (!toolCalls.size) return;
+    const calls: ToolCall[] = [...toolCalls.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .filter(([, v]) => v.name)
+      .map(([, v]) => ({
+        id: v.id || `call_${Math.random().toString(36).slice(2, 10)}`,
+        type: "function" as const,
+        function: { name: v.name, arguments: v.args },
+      }));
+    if (calls.length) opts.onToolCalls?.(calls);
+  };
 
   let res: Response;
   try {
@@ -137,7 +206,9 @@ export async function streamChat(
   if (!ctype.includes("event-stream")) {
     // 非流式兼容：供应商未跟随 stream 开关（如本地代理），整段读出单次回调
     let json: {
-      choices?: { message?: { content?: string } }[];
+      choices?: {
+        message?: { content?: string; tool_calls?: unknown; reasoning_content?: string; reasoning?: string };
+      }[];
       content?: { text?: string }[];
     };
     try {
@@ -150,6 +221,10 @@ export async function streamChat(
       profile.provider === "anthropic"
         ? (json.content?.[0]?.text ?? "")
         : (json.choices?.[0]?.message?.content ?? "");
+    collectToolCalls(json.choices?.[0]?.message?.tool_calls);
+    flushToolCalls();
+    const reasoning = json.choices?.[0]?.message?.reasoning_content ?? json.choices?.[0]?.message?.reasoning;
+    if (reasoning) opts.onReasoning?.(reasoning);
     if (text) {
       // 非流式兼容：整段可能远超 agent_chunk 单帧上限（shared max(4000)）——
       // 按 ≤3000 字符切片循环回调，既保证每帧合法、也不至于每片都顶格
@@ -169,9 +244,18 @@ export async function streamChat(
     let delta = "";
     try {
       const parsed = JSON.parse(data) as {
-        choices?: { delta?: { content?: string } }[];
-        delta?: { text?: string };
+        choices?: {
+          delta?: { content?: string; tool_calls?: unknown; reasoning_content?: string; reasoning?: string };
+        }[];
+        delta?: { text?: string; thinking?: string; type?: string };
       };
+      collectToolCalls(parsed.choices?.[0]?.delta?.tool_calls);
+      // 思考过程：不同供应商字段不同，统一喂给 onReasoning（不参与正文累积）
+      const reasoningDelta =
+        parsed.choices?.[0]?.delta?.reasoning_content ??
+        parsed.choices?.[0]?.delta?.reasoning ??
+        (parsed.delta?.type === "thinking_delta" ? parsed.delta.thinking : undefined);
+      if (reasoningDelta) opts.onReasoning?.(reasoningDelta);
       delta =
         profile.provider === "anthropic"
           ? (parsed.delta?.text ?? "")
@@ -197,6 +281,7 @@ export async function streamChat(
       }
     }
     if (buffer.trim()) handleLine(buffer.trim());
+    flushToolCalls();
   } catch (e) {
     if (opts.signal.aborted || (e as { name?: string })?.name === "AbortError") throw toAbortError();
     throw toProviderError(e);

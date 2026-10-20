@@ -4,7 +4,53 @@
  * 调用方必须按可选处理（BootWave 即靠此区分「有主进程信号」与「无信号兜底」）。
  */
 declare global {
+  /** 自动更新状态（主进程 → 渲染层）。 */
+  interface UpdateState {
+    /** idle / checking / up-to-date / available / downloading / downloaded / error */
+    status: "idle" | "checking" | "up-to-date" | "available" | "downloading" | "downloaded" | "error";
+    /** 本机当前 5 段版本。 */
+    currentVersion: string;
+    /** 待更新的版本；无更新时为 null。 */
+    available: { version: string; path?: string; sha512?: string } | null;
+    /** 上次检查时间戳（毫秒）；从未检查为 null。 */
+    lastCheckedAt: number | null;
+    /** 最近一次错误信息；无错误为 null。 */
+    lastError: string | null;
+    /** 是否允许下载（打包后为 true，开发态为 false）。 */
+    canDownload: boolean;
+  }
+
   interface Window {
+    /** 内部：桌面端 5 段版本号（preload 暴露；浏览器里 undefined）。 */
+    __heming_version?: string;
+    /**
+     * 内部：自动更新桥（preload 暴露）。
+     *
+     * 只有**安装版**存在——开发态主进程不初始化更新器，
+     * 所以调用方要按可选处理，且界面必须能在拿不到它时正常显示。
+     */
+    __heming_update?: {
+      /** 主动检查一次，返回最新状态。 */
+      check: () => Promise<UpdateState>;
+      /** 下载已发现的更新，返回最新状态。 */
+      download: () => Promise<UpdateState>;
+      /** 退出并安装；仅在状态为 downloaded 时有效。 */
+      install: () => Promise<boolean>;
+      /** 读当前状态，不触发检查。 */
+      state: () => Promise<UpdateState>;
+      /** 订阅状态变化，返回取消订阅函数。 */
+      subscribe: (callback: (state: UpdateState) => void) => () => void;
+    };
+    /** 内部：桌面端 MCP stdio 桥（preload 暴露；浏览器里 undefined）。 */
+    __mcp_stdio?: {
+      request: (
+        serverId: string,
+        config: { command: string; args?: string[] },
+        method: string,
+        params?: unknown,
+      ) => Promise<unknown>;
+      stop: (serverId: string) => Promise<boolean>;
+    };
     heming?: {
       /** 运行平台（process.platform），如 "win32" / "darwin"。 */
       platform?: string;

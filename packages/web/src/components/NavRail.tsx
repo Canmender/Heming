@@ -1,14 +1,31 @@
-import { HomeIcon, ChatIcon, PlugIcon, MemoryIcon, GearIcon, ChevronIcon, UserIcon } from "./icons.js";
-import { useUiStore, type Page } from "../store/ui.js";
+import {
+  HomeIcon,
+  ChatIcon,
+  PlugIcon,
+  MemoryIcon,
+  ArchiveIcon,
+  GearIcon,
+  UserIcon,
+  SkillsIcon,
+} from "./icons.js";
+import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 
-const ITEMS: { page: Page; label: string; icon: JSX.Element; digit: string }[] = [
+/**
+ * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
+ * 而 digit 固定绑定页本身——所以排序后 Alt+N 快捷键不变。
+ */
+const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit: string }[] = [
   { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
   { page: "workspace", label: "工作区", icon: <ChatIcon width={17} height={17} />, digit: "2" },
-  { page: "interfaces", label: "接口区", icon: <PlugIcon width={17} height={17} />, digit: "3" },
-  { page: "memory", label: "记忆区", icon: <MemoryIcon width={17} height={17} />, digit: "4" },
-  { page: "settings", label: "设置区", icon: <GearIcon width={17} height={17} />, digit: "5" },
+  { page: "skills", label: "技能区", icon: <SkillsIcon width={17} height={17} />, digit: "3" },
+  { page: "interfaces", label: "接口区", icon: <PlugIcon width={17} height={17} />, digit: "4" },
+  { page: "memory", label: "记忆区", icon: <MemoryIcon width={17} height={17} />, digit: "5" },
+  // 归档是新页，拿 7；设置区保持 6 不动——digit 绑定页面不随显示顺序变，
+  // 改老页的编号等于把用户肌肉记忆里的快捷键换掉。
+  { page: "archive", label: "归档", icon: <ArchiveIcon width={17} height={17} />, digit: "7" },
+  { page: "settings", label: "设置区", icon: <GearIcon width={17} height={17} />, digit: "6" },
 ];
 
 /** 悬停黑色胶囊浮签：淡入 + 轻微左移进入（group-hover，150ms）。 */
@@ -29,6 +46,8 @@ function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
 export function NavRail() {
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
+  // 渲染前再规整一次：手改过 localStorage 或旧版本残留时，缺项也会被补齐，绝不漏掉某个入口
+  const navOrder = normalizeNavOrder(useUiStore((s) => s.navOrder));
   const displayName = useAuthStore((s) => s.user?.displayName);
   const avatar = useAuthStore((s) => s.user?.avatar);
   // 全局未读总和（direct+group）：数据由登录后已有挂载加载（HomePage/RadarContacts 的 loadWorkspace），此处纯读取
@@ -41,7 +60,10 @@ export function NavRail() {
       className="flex w-[54px] shrink-0 flex-col items-center border-r border-line-soft bg-[#fafafa] py-3"
     >
       <div className="flex flex-1 flex-col items-center justify-center gap-1.5">
-        {ITEMS.map((it) => {
+        {navOrder
+          .map((navPage) => ITEMS.find((it) => it.page === navPage))
+          .filter((it): it is (typeof ITEMS)[number] => Boolean(it))
+          .map((it) => {
           const active = page === it.page || (it.page === "workspace" && page === "chat");
           const shortcut = `Alt${it.digit}`;
           // 工作区按钮承载全局未读角标：>0 时 aria-label 追加「N 条未读」
@@ -85,22 +107,5 @@ export function NavRail() {
         <Tip label={`${who} · 在线`} />
       </div>
     </nav>
-  );
-}
-
-/** 会话隐藏态（navCollapsed=true）左缘的可发现呼出提示。 */
-export function NavPeek() {
-  const setNavCollapsed = useUiStore((s) => s.setNavCollapsed);
-  return (
-    <div className="flex w-[8px] shrink-0 flex-col items-center border-r border-line-soft bg-[#fafafa] pt-3">
-      <button
-        type="button"
-        aria-label="呼出导航"
-        onClick={() => setNavCollapsed(false)}
-        className="rounded p-0.5 text-[#999] transition-colors duration-150 hover:bg-[#f0f0f0] hover:text-ink"
-      >
-        <ChevronIcon width={12} height={12} />
-      </button>
-    </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLlmStore, type LlmProfile, type LlmProvider } from "../store/llm.js";
 import { testConnection } from "../lib/llmClient.js";
+import { LLM_PRESETS, findPreset } from "../lib/llmPresets.js";
 
 /** 设置区 · LLM 连接：本机 CRUD + 连通性测试；Key 只落 localStorage 不出设备。 */
 
@@ -70,6 +71,18 @@ export function LlmSettingsCard() {
     setOpen(true);
   };
 
+  /** 点预设：填好协议 / Base URL / 模型，并展开表单（用户仍可继续改）。 */
+  const applyPreset = (presetId: string) => {
+    const preset = findPreset(presetId);
+    if (!preset) return;
+    setProvider(preset.provider);
+    setBaseUrl(preset.baseUrl);
+    setModel(preset.model);
+    if (!label.trim()) setLabel(preset.label);
+    setError(null);
+    setOpen(true);
+  };
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!label.trim() || !model.trim() || !apiKey.trim()) {
@@ -135,6 +148,23 @@ export function LlmSettingsCard() {
         )}
       </div>
       <div className="mt-1 text-[11px] text-muted">API Key 仅存本机浏览器，不上传和鸣服务端</div>
+
+      {/* 常用服务商：一点填好协议/地址/模型；私有部署仍可手填，预设不限制 */}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-muted">常用服务商</span>
+        {LLM_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            aria-label={`套用预设 ${preset.label}`}
+            title={preset.note}
+            onClick={() => applyPreset(preset.id)}
+            className={btnGhost}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
 
       {profiles.length === 0 && !open && (
         <div className="mt-3 text-[12px] text-muted">还没有 LLM 连接</div>

@@ -1,8 +1,19 @@
 import type { WsClientEvent } from "@heming/shared";
 import type { LlmProfile } from "../store/llm.js";
-import { streamChat, type ChatMessage } from "./llmClient.js";
+import { streamChat, type ChatMessage, type ToolCall } from "./llmClient.js";
+
+/** 工具调用最多允许的连续轮次（防止模型陷入「调工具→再调」死循环）。 */
+export const MAX_TOOL_ROUNDS = 3;
 
 /** 触发编排的依赖注入面：stores/WS/流式适配器由 ChatPage 组装，本模块保持纯逻辑可测。 */
+/** 工具桥：把「给模型的工具声明」与「执行一次调用」交给编排层（本模块不认识 MCP）。 */
+export interface ToolBridge {
+  /** OpenAI 格式的 tools 数组；空数组 = 本轮没有可用工具。 */
+  tools: unknown[];
+  /** 执行一个工具调用（永不抛：失败也在结果里带 ok=false 与原因）。 */
+  execute: (call: { name: string; arguments: string }) => Promise<{ text: string; ok: boolean }>;
+}
+
 export interface TriggerDeps {
   getProfile: (agentId: string) => LlmProfile | undefined;
   getPrompt: (agentId: string) => string;
@@ -46,6 +57,31 @@ export interface TriggerDeps {
    * 抛错则回落 `getPrompt`。触发端在此拼装「原提示词 + 记忆 + 技能」。
    */
   buildSystemPrompt?: (agentId: string, userText: string) => Promise<string>;
+  /**
+   * 工具桥（MCP 等）：返回 null 表示本轮不启用工具，行为与未接入时完全一致。
+   * 有工具时每轮会**缓冲**文本，只有真正产出答案的最后一轮才上行，避免
+   * 「我准备调用工具…」这类中间话术刷屏。
+   */
+  getTools?: (agentId: string) => ToolBridge | null;
+  /**
+   * 思考过程增量（reasoning/thinking）：`text` 是**累积全文**，UI 直接替换即可。
+   * 只做本机展示，不上行（不参与 E2E 信封，也不进最终消息文本）。
+   */
+  onReasoning?: (streamId: string, text: string) => void;
+  /**
+   * 工具调用轨迹事件：start（即将调用）→ end（拿到结果）。同样是本机展示用。
+   */
+  onToolTrace?: (
+    streamId: string,
+    event: {
+      phase: "start" | "end";
+      id: string;
+      name: string;
+      args: string;
+      ok?: boolean;
+      result?: string;
+    },
+  ) => void;
   /**
    * 轮次收尾回调（设计 §3/§6）：成功 finish 记 `"ok"`；中断/失败但已有部分文本记 `"partial"`
    * （触发端据此只写工作记忆，不沉淀长期记忆）；完全无文本不回调。
@@ -219,11 +255,26 @@ export function runAgentMentions(
         /** 当前尝试的本地累积：成功即 finish 全文，故每次尝试归零。 */
         let local = "";
         /**
+         * 工具轮里已收到但尚未上行的文本。
+         *
+         * 工具轮的文本要先攒着（可能是「我这就去查」这类中间话术），
+         * 所以它们既不在 acc 也不在 local 里。两处要用它：
+         * - 本轮确定没有工具调用 → 逐片上行（这是答案）；
+         * - 中断/失败 → 作为 partial 兜底（这些字用户一个字都没看到）。
+         *
+         * **跨尝试保留**：溢出重试会重新调 once，若这里归零，
+         * 首次尝试产出的文字就会被重试悄悄吞掉。
+         */
+        let buffered = "";
+        /**
          * 组装一次尝试的 messages（设计 §4）：系统提示词 → 准备好的历史 → 本条 user 轮。
          * 历史每次都重新走 `prepareHistory`（溢出重试据此用收紧后的预算重切分并重新前置系统提示词）；
          * 缺省或抛错 → 原样 history（与加预算之前完全一致，绝不阻断生成）。
          */
-        const messagesFor = async (aggressive?: 1 | 2): Promise<ChatMessage[]> => {
+        const messagesFor = async (
+          aggressive?: 1 | 2,
+          extra: ChatMessage[] = [],
+        ): Promise<ChatMessage[]> => {
           let rows: ChatMessage[] = history;
           if (deps.prepareHistory) {
             try {
@@ -235,7 +286,7 @@ export function runAgentMentions(
               rows = history; // 压缩失败不阻断生成：回落原样历史
             }
           }
-          const prepared: ChatMessage[] = [...rows, { role: "user", content: userText }];
+          const prepared: ChatMessage[] = [...rows, { role: "user", content: userText }, ...extra];
           if (prompt) prepared.unshift({ role: "system", content: prompt });
           return prepared;
         };
@@ -268,48 +319,140 @@ export function runAgentMentions(
          * 一次尝试。只有第 1 次尝试上行 chunk / onLocalDelta——重试若重复上行，
          * 接收端按 streamId 累积会出现重复文本（最终文本以 finish 为准）。
          */
+        /** 把一片文本按既有规则上行（本地累积 + 流式回调 + 可选的 E2E 封条）。 */
+        const emitDelta = (d: string, aggressive?: 1 | 2) => {
+          local += d;
+          if (aggressive !== undefined) return; // 重试：只本地累积，不上行
+          acc += d;
+          deps.onLocalDelta(streamId, acc);
+          if (!sealChunkHook) {
+            deps.send({
+              type: "agent_chunk",
+              conversationId,
+              agentId: m.agentId,
+              streamId,
+              text: d,
+            });
+            return;
+          }
+          const index = idx++;
+          enqueue(async () => {
+            let sealed: Awaited<ReturnType<typeof sealChunkHook>> = null;
+            try {
+              sealed = await sealChunkHook(streamId, index, d);
+            } catch {
+              return; // 封失败：跳过该片（finish 全文信封兜底展示，绝不发明文片）
+            }
+            if (!sealed) return;
+            deps.send({
+              type: "agent_chunk",
+              conversationId,
+              agentId: m.agentId,
+              streamId,
+              text: "",
+              index,
+              cipher: sealed.cipher,
+              ...(sealed.chainKid !== undefined ? { chainKid: sealed.chainKid } : {}),
+              ...(sealed.n !== undefined ? { n: sealed.n } : {}),
+            });
+          });
+        };
+
+        /**
+         * 一次尝试。只有第 1 次尝试上行 chunk / onLocalDelta——重试若重复上行，
+         * 接收端按 streamId 累积会出现重复文本（最终文本以 finish 为准）。
+         *
+         * 工具轮：`getTools` 返回工具时，本轮文本先缓冲；拿到 tool_calls 就执行并把
+         * 结果回灌，最多 MAX_TOOL_ROUNDS 轮；只有「不调用工具」的那轮文本才上行。
+         */
         const once = async (aggressive?: 1 | 2) => {
           local = "";
-          await deps.streamChat(profile, await messagesFor(aggressive), {
-            signal: controller.signal,
-            onDelta: (d) => {
-              local += d;
-              if (aggressive !== undefined) return; // 重试：只本地累积，不上行
-              acc += d;
-              deps.onLocalDelta(streamId, acc);
-              if (!sealChunkHook) {
-                deps.send({
-                  type: "agent_chunk",
-                  conversationId,
-                  agentId: m.agentId,
-                  streamId,
-                  text: d,
-                });
-                return;
-              }
-              const index = idx++;
-              enqueue(async () => {
-                let sealed: Awaited<ReturnType<typeof sealChunkHook>> = null;
-                try {
-                  sealed = await sealChunkHook(streamId, index, d);
-                } catch {
-                  return; // 封失败：跳过该片（finish 全文信封兜底展示，绝不发明文片）
+          const bridge = deps.getTools?.(m.agentId) ?? null;
+          const useTools =
+            !!bridge && bridge.tools.length > 0 && profile.provider !== "anthropic" && !aborted;
+          let extra: ChatMessage[] = [];
+          let reasoning = "";
+          for (let round = 0; ; round++) {
+            // 工具轮的文本先攒着（可能是「我这就去查」这类中间话术，等工具结果回来再决定是否上行）。
+            // 但要**按片攒**而不是拼成一个字符串——最终答案逐片发出才能保住打字机效果。
+            // 拼成整段会让用户看到「文字突然整块蹦出来」，与无工具路径的表现不一致。
+            const roundChunks: string[] = [];
+            let roundText = "";
+            let calls: ToolCall[] = [];
+            await deps.streamChat(profile, await messagesFor(aggressive, extra), {
+              signal: controller.signal,
+              ...(useTools ? { tools: bridge!.tools } : {}),
+              onToolCalls: (c) => {
+                calls = c;
+              },
+              onReasoning: (t) => {
+                reasoning += t;
+                deps.onReasoning?.(streamId, reasoning);
+              },
+              onDelta: (d) => {
+                if (!useTools) {
+                  emitDelta(d, aggressive);
+                  return;
                 }
-                if (!sealed) return;
-                deps.send({
-                  type: "agent_chunk",
-                  conversationId,
-                  agentId: m.agentId,
-                  streamId,
-                  text: "",
-                  index,
-                  cipher: sealed.cipher,
-                  ...(sealed.chainKid !== undefined ? { chainKid: sealed.chainKid } : {}),
-                  ...(sealed.n !== undefined ? { n: sealed.n } : {}),
-                });
+                roundChunks.push(d); // 工具轮先攒着：可能是「我这就去查」这类中间话术
+                roundText += d;
+                buffered += d; // 兜底用：中断时这些字还没上行，不能丢
+              },
+            });
+
+            if (!useTools) return;
+            // 没有工具调用 = 这一轮就是答案，逐片补发文本后结束。
+            // 逐片而非整段：保住打字机效果，与无工具路径表现一致。
+            if (calls.length === 0) {
+              for (const chunk of roundChunks) emitDelta(chunk, aggressive);
+              return;
+            }
+            // 到上限还在要工具：把已有文本给用户，不再无限循环
+            if (round >= MAX_TOOL_ROUNDS) {
+              for (const chunk of roundChunks) emitDelta(chunk, aggressive);
+              console.warn(`工具调用超过 ${MAX_TOOL_ROUNDS} 轮，已停止继续调用`);
+              return;
+            }
+            // 调用前先播一条 start（UI 立刻能看到「正在调用 X」）
+            for (const call of calls) {
+              deps.onToolTrace?.(streamId, {
+                phase: "start",
+                id: call.id,
+                name: call.function.name,
+                args: call.function.arguments,
               });
-            },
-          });
+            }
+            const results = await Promise.all(
+              calls.map((call) =>
+                bridge!.execute({
+                  name: call.function.name,
+                  arguments: call.function.arguments,
+                }),
+              ),
+            );
+            // 拿到结果后补 end（成功/失败 + 文本）
+            calls.forEach((call, i) => {
+              const outcome = results[i] ?? { text: "", ok: false };
+              deps.onToolTrace?.(streamId, {
+                phase: "end",
+                id: call.id,
+                name: call.function.name,
+                args: call.function.arguments,
+                ok: outcome.ok,
+                result: outcome.text,
+              });
+            });
+            extra = [
+              ...extra,
+              { role: "assistant", content: roundText, tool_calls: calls },
+              ...calls.map((call, i) => ({
+                role: "tool" as const,
+                tool_call_id: call.id,
+                name: call.function.name,
+                content: results[i]?.text ?? "",
+              })),
+            ];
+          }
         };
         try {
           /** 溢出重试（设计 §3.4）：首次 → aggressive 1 → 2，两次仍失败即交给下面的既有失败收口。 */
@@ -348,7 +491,10 @@ export function runAgentMentions(
           // finish-partial：服务端拒空文本（F2），partial 为空则只报 error；
           // 文本优先取「已上行」的累积（与接收端所见一致），重试一字未上行时回落本次尝试的本地累积；
           // 加密失败时 sendFinish 返回 false——仍走下方 error 收口（明文不外发）
-          const partial = acc || local;
+          // acc = 已上行（用户看得到）；local = 本次尝试的本地累积（含未上行的重试轮）；
+          // buffered = 工具轮里收到但还没上行的字——中断时它既不在 acc 也不在 local 里，
+          // 不兜底就会丢掉模型已经吐出的内容。
+          const partial = acc || local || buffered;
           if (partial && (await sendFinish(partial))) {
             // 中断/失败：只写工作记忆（partial），不沉淀长期记忆（设计 §3）
             notifyTurnComplete(deps, m.agentId, userText, partial, "partial");

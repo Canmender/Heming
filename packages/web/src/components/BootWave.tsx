@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { WordmarkWrite } from "./WordmarkWrite.js";
 
 /** 声波扩散段时长；与 packages/desktop/splash-config.js 的 WAVE_MS 保持一致。 */
 const WAVE_MS = 1300;
@@ -20,6 +21,30 @@ const COMPLETE_SLACK_MS = 80;
  */
 const FALLBACK_MS = 7000;
 
+/**
+ * 波前羽化带（占半径百分比）：内容在这条带里由全白遮罩渐变到全透，
+ * 于是主界面是「随扩散一起渐显」，而不是被硬边洞口一下子切出来。
+ */
+export const FEATHER_BANDS = [0, 0.35, 0.7, 1] as const;
+export const FEATHER_SPAN_PCT = 22;
+
+/**
+ * 生成遮罩用的 radial-gradient。
+ *
+ * 关键：CSS 遮罩按 **alpha** 取值——`transparent`（alpha 0）是洞（露出主界面），
+ * `#000`（alpha 1）是完整白底。中间插入若干 alpha 递增的色标即形成羽化带，
+ * 波前经过时遮罩逐渐变透明，内容随之渐显。
+ */
+export function revealMaskImage(revealPct: number): string {
+  const r = Math.min(100, Math.max(0, revealPct));
+  const stops = FEATHER_BANDS.map((alpha, i) => {
+    const at = r + (FEATHER_SPAN_PCT * i) / (FEATHER_BANDS.length - 1);
+    return `rgba(0, 0, 0, ${alpha}) ${Math.min(100, at).toFixed(2)}%`;
+  });
+  // 洞内全透明；带内 alpha 爬升；带外完全不透明白底
+  return `radial-gradient(circle at 50% 50%, transparent ${r.toFixed(2)}%, ${stops.join(", ")}, #000 100%)`;
+}
+
 /** ease-out cubic：揭示进度的缓出曲线（0→1）。 */
 export function easeOutCubic(p: number): number {
   const t = p <= 0 ? 0 : p >= 1 ? 1 : p;
@@ -29,6 +54,13 @@ export function easeOutCubic(p: number): number {
 interface BootWaveProps {
   /** 动画完成回调（遮罩已完全揭开，可卸载）。只调用一次。 */
   onDone: () => void;
+  /**
+   * 在声波段之前先播「逐笔写出 Heming」的手写段。
+   *
+   * 桌面端由 splash 窗口负责手写段（那边还接着粒子聚拢），所以传 false，避免写两遍；
+   * 浏览器 / 预览环境没有 splash 窗口，传 true 才能看到写字动画。
+   */
+  writeFirst?: boolean;
 }
 
 /** 组件自带的样式：遮罩揭示靠 CSS 变量 `--reveal`（由 rAF 逐帧写入，不依赖 @property）。 */
@@ -41,17 +73,29 @@ const STYLES = `
     cursor: default;
     overflow: hidden;
   }
-  /* 白底揭示层：以中心为圆心的透明洞从 0% 涨到 100%，洞经过的地方露出下面的主界面。
+  /* 白底揭示层：以中心为圆心的透明洞从 0% 涨到 100%。
+     洞沿有一段 alpha 渐变的**羽化带**（见 revealMaskImage），
+     主界面内容随波前经过而渐显，不是硬边切出来。
      --reveal 未写入时回落到 0% —— 即「信号到达前完全不透明」。 */
   .boot-wave-reveal {
     position: absolute; inset: 0;
     background: #ffffff;
-    mask-image: radial-gradient(circle at 50% 50%, transparent var(--reveal, 0%), #000 calc(var(--reveal, 0%) + 0.5%));
-    -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent var(--reveal, 0%), #000 calc(var(--reveal, 0%) + 0.5%));
+    mask-image: var(--reveal-mask, radial-gradient(circle at 50% 50%, transparent 0%, #000 22%));
+    -webkit-mask-image: var(--reveal-mask, radial-gradient(circle at 50% 50%, transparent 0%, #000 22%));
     mask-repeat: no-repeat;
     -webkit-mask-repeat: no-repeat;
     mask-size: 100% 100%;
     -webkit-mask-size: 100% 100%;
+  }
+  /* 波前光晕：跟着洞沿走，给「扩散」一个可看见的锋面（纯装饰，不参与遮罩）。 */
+  .boot-wave-front {
+    position: absolute; left: 50%; top: 50%;
+    width: 24px; height: 24px; margin: -12px 0 0 -12px;
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(circle, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.04) 55%, rgba(0,0,0,0) 72%);
+    transform: scale(var(--reveal-scale, 1));
+    opacity: var(--reveal-front-opacity, 0);
   }
   /* 3 圈细线波纹叠在揭示层之上（不参与遮罩，否则会被中心洞吃掉） */
   .boot-wave .ripple {
@@ -82,15 +126,31 @@ const STYLES = `
  *
  * 无 preload（浏览器直接打开）时无外部信号源，直接开播兜底。
  */
-export function BootWave({ onDone }: BootWaveProps) {
+export function BootWave({ onDone, writeFirst = false }: BootWaveProps) {
   const revealRef = useRef<HTMLDivElement | null>(null);
-  const [started, setStarted] = useState(false);
+
+  /** 手写段是否正在播（仅 writeFirst 且无 preload 信号通道时才会为 true）。 */
+  const [writing, setWriting] = useState(false);
+
+  /**
+   * 播放轮次：0 = 尚未开播；每次（重）开播 +1。
+   * 它同时兼任波纹容器的 key —— key 变化才会让 3 圈波纹**重新挂载**，
+   * CSS keyframes 动画才会从 0 重播（仅复位布尔量时 React 复用同一节点，
+   * 动画会停在已扩散完的透明状态）。
+   */
+  const [runId, setRunId] = useState(0);
 
   const rafRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
   const fallbackRef = useRef<number | null>(null);
   const startedRef = useRef(false); // rAF/回调里的即时判重（state 更新是异步的）
   const finishedRef = useRef(false);
+  /**
+   * 开播音效只播一次：StrictMode 双跑 effect 时 startAnimation 会连开两轮，
+   * 不守这一道的话两路振荡器会几乎同时叠加（gain 翻倍、听起来更响）。
+   * 与 finishedRef 同属「跨轮次事实」，cleanup 不复位。
+   */
+  const soundPlayedRef = useRef(false);
   const onDoneRef = useRef(onDone);
 
   // onDone 每次渲染可能是新函数；用 ref 持有最新值，避免把动画生命周期绑到它上面。
@@ -129,8 +189,12 @@ export function BootWave({ onDone }: BootWaveProps) {
       window.clearTimeout(fallbackRef.current);
       fallbackRef.current = null;
     }
-    playSound();
-    setStarted(true);
+    if (!soundPlayedRef.current) {
+      soundPlayedRef.current = true;
+      playSound();
+    }
+    // 轮次 +1：波纹容器换 key → 重新挂载 → CSS 动画从 0 重播（StrictMode 重播时必需）
+    setRunId((n) => n + 1);
 
     // 完成不能只依赖 rAF：splash 是覆盖整个工作区的 alwaysOnTop 窗口，Chromium 可能据此
     // 判定主窗口被遮挡并暂停其 rAF（连同渲染）。那样揭示永远停在 0%、遮罩永不卸载，
@@ -143,7 +207,14 @@ export function BootWave({ onDone }: BootWaveProps) {
     const tick = (now: number) => {
       if (t0 === null) t0 = now;
       const eased = easeOutCubic((now - t0) / WAVE_MS);
-      revealRef.current?.style.setProperty("--reveal", `${(eased * 100).toFixed(2)}%`);
+      const pct = eased * 100;
+      const el = revealRef.current;
+      // 遮罩（含羽化带）整条写进 --reveal-mask：内容随之渐显，而不是硬边洞口
+      el?.style.setProperty("--reveal-mask", revealMaskImage(pct));
+      el?.style.setProperty("--reveal", `${pct.toFixed(2)}%`);
+      // 波前：半径按洞的比例放大（70vmax 铺满全屏），透明度随推进淡出
+      el?.style.setProperty("--reveal-scale", (pct / 100 / 0.7).toFixed(4));
+      el?.style.setProperty("--reveal-front-opacity", (0.9 * (1 - eased)).toFixed(3));
       if (eased >= 1) {
         rafRef.current = null;
         finish();
@@ -170,22 +241,58 @@ export function BootWave({ onDone }: BootWaveProps) {
       heming.__onBootReady(() => startAnimation());
       // 兜底：信号通道存在但信号永远不来时自动开播，否则白底遮罩会永久挡住界面
       fallbackRef.current = window.setTimeout(startAnimation, FALLBACK_MS);
+    } else if (writeFirst) {
+      // 浏览器/预览：没有 splash 窗口，手写段改在遮罩上自己播，播完再进声波段
+      setWriting(true);
     } else {
-      // 无可用信号通道（浏览器直接打开）时直接开播
+      // 无可用信号通道（浏览器直接打开）且不需要手写段时直接开播
       startAnimation();
     }
 
     return () => {
       stopTimers();
+      setWriting(false);
+      /*
+       * 兜底：React 18 StrictMode 在开发模式下会把 effect 跑两遍
+       * （挂载 → cleanup → 再挂载）。cleanup 已经取消了 rAF 和收尾定时器，
+       * 若不同时复位 startedRef，第二轮 startAnimation() 会命中开头的
+       * `if (startedRef.current || finishedRef.current) return;` 静默早退 ——
+       * 结果没有任何东西再推进 --reveal、finish() 永不被调用，白遮罩永久停在 0%，
+       * 主界面被永久盖住（vite dev 下整页白屏；vite build 因不双跑 effect 而正常）。
+       *
+       * 只复位 startedRef / 揭示进度，**不复位 finishedRef**：
+       * finishedRef 的职责是「onDone 只回调一次」（遮罩已揭开，不能重复通知宿主），
+       * 它是跨轮次的事实，一旦为 true 就必须一直为 true。这样即便第一轮已经 finish()，
+       * 第二轮也只会走到开头的早退分支：既不会重复回调 onDone，也不会重新开播。
+       */
+      startedRef.current = false;
+      if (!finishedRef.current) {
+        // 未完成即被取消（重播）：把洞收回 0%，让下一轮从完全不透明的白板重新播放
+        const el = revealRef.current;
+        el?.style.setProperty("--reveal", "0%");
+        el?.style.setProperty("--reveal-mask", revealMaskImage(0));
+        el?.style.setProperty("--reveal-scale", "0");
+        el?.style.setProperty("--reveal-front-opacity", "0");
+      }
     };
-  }, [finish, startAnimation, stopTimers]);
+  }, [finish, startAnimation, stopTimers, writeFirst]);
 
   return (
     <div className="boot-wave" aria-hidden="true">
       <style>{STYLES}</style>
-      <div className="boot-wave-reveal" ref={revealRef} />
-      {started && (
-        <div className="boot-wave-ripples">
+      <div className="boot-wave-reveal" ref={revealRef}>
+        <div className="boot-wave-front" />
+      </div>
+      {writing && (
+        <WordmarkWrite
+          onDone={() => {
+            setWriting(false);
+            startAnimation();
+          }}
+        />
+      )}
+      {runId > 0 && (
+        <div className="boot-wave-ripples" key={runId}>
           <div className="ripple" />
           <div className="ripple" />
           <div className="ripple" />

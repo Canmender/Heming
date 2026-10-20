@@ -72,6 +72,23 @@ describe("LoginPage", () => {
 
   // ── 左右分栏（左卡右字样） ──
 
+  it("根节点显式占满父容器宽度（w-full）：父容器是 row flex，缺它整页会塌到左侧", () => {
+    const { container } = render(<LoginPage />);
+    const root = container.firstElementChild as HTMLElement;
+
+    // 防回归断言：LoginPage 的父容器（App.tsx 登录分支 <div class="flex min-h-0 flex-1">）
+    // 是 row 方向的 flex 容器，根节点作为其 flex 子项默认 flex-basis:auto，
+    // 宽度按 max-content 收缩 → 根节点若退回 shrink-to-fit，整页会塌到左侧、右半屏空白
+    // （曾经发生过：1440 宽下登录页仅占 0..758）。jsdom 不做真实布局，只能断言 class 语义。
+    expect(root.className).toContain("w-full");
+    // min-width:auto 会让 flex 子项无法收缩到内容宽度以下，配 min-w-0 兜住窄窗口
+    expect(root.className).toContain("min-w-0");
+    // 同一节点必须保留宽屏分栏语义（否则 w-full 撑开的仍是一整条单栏）
+    expect(root.className).toContain("min-[900px]:flex-row");
+    // 窄屏基线仍是纵向单栏
+    expect(root.className).toContain("flex-col");
+  });
+
   it("宽屏左右分栏：两栏等宽，左栏放卡片、右栏放字样", () => {
     const { container } = render(<LoginPage />);
     const root = container.firstElementChild as HTMLElement;

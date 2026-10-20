@@ -40,6 +40,8 @@ interface PeerConn {
 export interface UseVoiceCallOptions {
   send: (event: WsClientEvent) => void;
   myUserId: string;
+  /** 通话类型：语音（默认）或视频（视频时同时采集摄像头，远端视频轨一并接收）。 */
+  mode?: "voice" | "video";
   /** 是否桌面端；网页端不支持通话，默认 true（由 Task 5 注入后精确判定） */
   isDesktop?: boolean;
   onIncomingCall?: (info: IncomingCallInfo) => void;
@@ -54,6 +56,13 @@ function getIceServers(): RTCIceServer[] {
   const injected = (window as unknown as { __heming_ice_servers_get?: () => RTCIceServer[] })
     .__heming_ice_servers_get?.();
   return injected && injected.length > 0 ? injected : DEFAULT_ICE_SERVERS;
+}
+
+/** 媒体约束：视频通话同时采集摄像头；音频恒定。 */
+function mediaConstraints(mode: "voice" | "video"): MediaStreamConstraints {
+  return mode === "video"
+    ? { audio: true, video: { width: 640, height: 480, facingMode: "user" } }
+    : { audio: true };
 }
 
 function mapMediaError(err: unknown): string {
@@ -77,8 +86,14 @@ const IDLE_STATE: VoiceCallState = {
 };
 
 export function useVoiceCall(opts: UseVoiceCallOptions) {
-  const { send, myUserId, isDesktop = true, onIncomingCall } = opts;
+  const { send, myUserId, isDesktop = true, onIncomingCall, mode = "voice" } = opts;
   const [state, setState] = useState<VoiceCallState>(IDLE_STATE);
+  /**
+   * 本地/远端媒体流（视频窗口用）：ref 负责生命周期清理，state 负责触发重渲染。
+   * 语音通话下它们只用于「有没有流」的判断，不渲染画面。
+   */
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, PeerConn>>(new Map());
@@ -102,6 +117,8 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
       for (const track of localStreamRef.current.getTracks()) track.stop();
       localStreamRef.current = null;
     }
+    setLocalStream(null);
+    setRemoteStreams({});
     callIdRef.current = null;
     conversationIdRef.current = null;
   }, []);
@@ -136,6 +153,8 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
           peer.stream = e.streams[0];
           peer.state = "connected";
         }
+        const incoming = e.streams[0];
+        if (incoming) setRemoteStreams((prev) => ({ ...prev, [peerId]: incoming }));
       };
       pc.oniceconnectionstatechange = () => {
         if (pc.iceConnectionState === "failed") {
@@ -165,8 +184,9 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints(mode));
         localStreamRef.current = stream;
+        setLocalStream(stream);
         const callId = crypto.randomUUID();
         callIdRef.current = callId;
         conversationIdRef.current = conversationId;
@@ -213,8 +233,9 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
       const invite = pendingInvitesRef.current.get(callId);
       if (!invite) return;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints(mode));
         localStreamRef.current = stream;
+        setLocalStream(stream);
         callIdRef.current = callId;
         conversationIdRef.current = invite.conversationId;
 
@@ -420,6 +441,8 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
 
   return {
     state,
+    localStream,
+    remoteStreams,
     call,
     accept,
     reject,

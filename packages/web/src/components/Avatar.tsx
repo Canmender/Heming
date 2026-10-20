@@ -16,13 +16,17 @@ export function Avatar({
   className = "",
 }: {
   user: AvatarUser;
-  /** 雷达节点/悬浮卡用到 38/40；29 为外圈 far 节点小号。 */
-  size?: 22 | 28 | 29 | 32 | 38 | 40;
+  /**
+   * 雷达节点/悬浮卡用到 38/40；29 为外圈 far 节点小号；
+   * 26 为聊天气泡旁的头像（比旧值 22 大一号，配更窄的气泡比例）；
+   * 15 为会话标签栏里的小头像。
+   */
+  size?: 15 | 22 | 26 | 28 | 29 | 32 | 38 | 40;
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
   const initial = user.displayName.trim().charAt(0) || "?";
-  const fontSize = size >= 38 ? 15 : size >= 32 ? 14 : size >= 28 ? 12 : 11;
+  const fontSize = size >= 38 ? 15 : size >= 32 ? 14 : size >= 26 ? 12 : 11;
 
   if (user.avatar && !failed) {
     return (
