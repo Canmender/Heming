@@ -9,6 +9,23 @@ export const UserSchema = z.object({
 });
 export type User = z.infer<typeof UserSchema>;
 
+/**
+ * 智能体名册项。
+ *
+ * 位置说明（原本定义在文件末尾的 AgentBodySchema 之前，现移到此处）：
+ * ConversationSchema 的 agent 分支要引用它，而 `const` 有 TDZ——
+ * 若 AgentSchema 定义在后面，模块初始化时构造 discriminatedUnion 会撞
+ * "Cannot access 'AgentSchema' before initialization"。
+ */
+export const AgentSchema = z.object({
+  id: z.string().min(1),
+  owner_id: z.string().nullable(),
+  name: z.string().min(1).max(32),
+  avatar: z.string().max(600_000).nullable(),
+  description: z.string().max(500),
+});
+export type Agent = z.infer<typeof AgentSchema>;
+
 export const MessagePayloadSchema = z.object({
   // 上限 20000：与 agent_finish.text 对齐（agent 回复经 finish 直接入库，两处不齐会「入库即违规」）
   text: z.string().max(20000),
@@ -27,6 +44,10 @@ export const MessagePayloadSchema = z.object({
       mime: z.string().min(1).max(128),
       size: z.number().int().min(0),
       key: z.string().min(1).max(128).optional(),
+      // 文档解析出的文本（PDF/Office 在前端解析，随消息重新加密上行）。
+      // 上限与正文 text 对齐：它是给模型的上下文，过大只会挤掉对话本身。
+      // 客户端解析时已截断到 16000，这里留余量到 20000。
+      text: z.string().max(20000).optional(),
     })
     .optional(),
   // 转发来源（二期 IM Task 4）：发送者展示名 + 源会话名；转发时剥离 mentions、保留 text/file
@@ -419,6 +440,20 @@ export const ConversationSchema = z.discriminatedUnion("type", [
     id: z.string().min(1),
     peer: UserSchema,
     unreadCount: z.number().int().min(0),
+    /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
+    archivedAt: z.string().nullable().optional(),
+  }),
+  z.object({
+    // 智能体一对一（用户要求「做好智能体一对一聊天」）：
+    // 与 direct 平行而非复用——对方不是 users 里的用户，而是 agents 名册项，
+    // 复用 direct 会逼服务端伪造一个 User（id/username/密码位全是假的），
+    // 前端也会把它当真人渲染出「@用户名 · 好友」这类不存在的信息。
+    type: z.literal("agent"),
+    id: z.string().min(1),
+    agent: AgentSchema,
+    unreadCount: z.number().int().min(0),
+    /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
+    archivedAt: z.string().nullable().optional(),
   }),
   z.object({
     type: z.literal("group"),
@@ -427,19 +462,28 @@ export const ConversationSchema = z.discriminatedUnion("type", [
     // 口径裁决（计划 Task 4 写死）：memberIds 允许空数组（单人群，creator 自动入群）→ memberCount 下限 1
     memberCount: z.number().int().min(1),
     unreadCount: z.number().int().min(0),
+    /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
+    archivedAt: z.string().nullable().optional(),
   }),
 ]);
 export type Conversation = z.infer<typeof ConversationSchema>;
 
 export const DirectConversationBodySchema = z.object({ peerId: z.string().min(1) });
+/** 建智能体一对一：agentId 指向名册项，owner 校验在服务端做（schema 只管形状）。 */
+export const AgentConversationBodySchema = z.object({ agentId: z.string().min(1) });
 export const GroupConversationBodySchema = z.object({
   name: z.string().min(1).max(32),
   memberIds: z.array(z.string().min(1)).max(200),
 });
 export const CreateConversationBodySchema = z.union([
   DirectConversationBodySchema,
+  AgentConversationBodySchema,
   GroupConversationBodySchema,
 ]);
+
+/** 归档 / 取消归档：body 只带目标状态，会话 id 在路径里。 */
+export const ArchiveConversationBodySchema = z.object({ archived: z.boolean() });
+export type ArchiveConversationBody = z.infer<typeof ArchiveConversationBodySchema>;
 
 export const ReadStateSchema = z.object({ userId: z.string().min(1), at: z.string() });
 export type ReadState = z.infer<typeof ReadStateSchema>;
@@ -472,15 +516,6 @@ export const CreateFileBodySchema = z.object({
   contentBase64: z.string().max(4_000_000),
 });
 export type CreateFileBody = z.infer<typeof CreateFileBodySchema>;
-
-export const AgentSchema = z.object({
-  id: z.string().min(1),
-  owner_id: z.string().nullable(),
-  name: z.string().min(1).max(32),
-  avatar: z.string().max(600_000).nullable(),
-  description: z.string().max(500),
-});
-export type Agent = z.infer<typeof AgentSchema>;
 
 export const AgentBodySchema = z.object({
   name: z.string().min(1).max(32),
