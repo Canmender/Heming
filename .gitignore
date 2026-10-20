@@ -13,3 +13,18 @@ data/
 
 # 桌面端要嵌入的 web 产物（scripts/build-desktop-web.mjs 生成，打包时打进 resources/web）
 packages/desktop/web-dist/
+
+# 内置运行时（380MB：Python 3.12 + 200+ 个 MCP 服务包）
+# 由 scripts/prepare-runtime.mjs 构建、scripts/build-desktop.mjs 打进安装包。
+# 属于**本机构建产物**，不入版本库：
+#   - 体积太大（单个 .pyc 就够撑爆仓库）
+#   - 内容是第三方包，与源码无关，变了也不该产生 diff
+# 需要重建时跑 prepare-runtime.mjs（见 docs/VERSION-MANAGEMENT.md）
+packages/desktop/runtime/
+
+# 本机项目记忆（WorkBuddy 的项目级日志，属机器本地状态）
+.workbuddy/
+
+# 临时脚本与缓存（截图、探测页、构建缓存）
+.tmp/
+.tmp-bench*/
