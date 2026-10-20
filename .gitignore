@@ -28,3 +28,7 @@ packages/desktop/runtime/
 # 临时脚本与缓存（截图、探测页、构建缓存）
 .tmp/
 .tmp-bench*/
+
+# vite / vitest 运行时在包目录里留下的临时文件
+*.timestamp-*.mjs
+_tmp_*
