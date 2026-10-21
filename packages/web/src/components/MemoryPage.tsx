@@ -32,6 +32,8 @@ import {
 } from "../lib/memory/reviewRunner.js";
 import { fetchFiles } from "../lib/api.js";
 import { PlusIcon, TrashIcon } from "./icons.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
+import { useModalA11y } from "./useModalA11y.js";
 
 /**
  * 记忆区：短期记忆 / 数据库记忆 / 个人知识库三个分区，外加智能体记忆开关。
@@ -316,11 +318,20 @@ function Modal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalA11y(panelRef, onClose);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+      onClick={onClose}
+    >
       <div
+        ref={panelRef}
         role="dialog"
+        aria-modal="true"
         aria-label={label}
+        onClick={(e) => e.stopPropagation()}
         className="max-h-[86vh] w-[min(460px,92vw)] overflow-y-auto rounded-xl border border-line bg-white p-5 shadow-card"
       >
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -604,6 +615,13 @@ export function MemoryPage({
   const [manualCopy, setManualCopy] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
+  const [importConfirm, setImportConfirm] = useState(false);
+  const [clearTarget, setClearTarget] = useState<{
+    conversationId: string;
+    label: string;
+  } | null>(null);
+  const [pendingSemantic, setPendingSemantic] = useState<SemanticEntry | null>(null);
+  const [pendingEpisodic, setPendingEpisodic] = useState<EpisodicEntry | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<{
     id: string;
@@ -671,9 +689,15 @@ export function MemoryPage({
     return [...map.values()];
   }, [agents, manualAgents, prefs, tick]);
 
-  const onClearConversation = (conversationId: string) => {
-    const label = conversationId || "未命名会话";
-    memory.clearConversation(conversationId);
+  const onClearConversation = (conversationId: string, label: string) => {
+    setClearTarget({ conversationId, label: conversationId || label || "未命名会话" });
+  };
+
+  const confirmClearConversation = () => {
+    if (!clearTarget) return;
+    memory.clearConversation(clearTarget.conversationId);
+    const label = clearTarget.label;
+    setClearTarget(null);
     bump();
     setShortMsg(`已清空会话 ${label} 的短期记忆`);
   };
@@ -690,6 +714,12 @@ export function MemoryPage({
   };
 
   const onImportMemory = () => {
+    if (!importText.trim()) return;
+    setImportConfirm(true);
+  };
+
+  const confirmImportMemory = () => {
+    setImportConfirm(false);
     const result = memory.importAll(importText);
     if (!result.ok) {
       setMemoryMsg({ kind: "error", text: `导入失败：${result.error}` });
@@ -842,7 +872,7 @@ export function MemoryPage({
                 <button
                   type="button"
                   aria-label={`清空会话 ${key}`}
-                  onClick={() => onClearConversation(group.conversationId)}
+                  onClick={() => onClearConversation(group.conversationId, key)}
                   className={btnGhostSm}
                 >
                   清空
@@ -1156,10 +1186,7 @@ export function MemoryPage({
                       <button
                         type="button"
                         aria-label={`删除记忆 ${entry.key}`}
-                        onClick={() => {
-                          memory.removeSemantic(entry.agentId, entry.id);
-                          bump();
-                        }}
+                        onClick={() => setPendingSemantic(entry)}
                         className={btnDangerSm}
                       >
                         <TrashIcon width={13} height={13} />
@@ -1192,10 +1219,7 @@ export function MemoryPage({
                 <button
                   type="button"
                   aria-label={`删除情景 ${entry.summary.slice(0, 12)}`}
-                  onClick={() => {
-                    memory.removeEpisodic(entry.agentId, entry.id);
-                    bump();
-                  }}
+                  onClick={() => setPendingEpisodic(entry)}
                   className={btnDangerSm}
                 >
                   <TrashIcon width={13} height={13} />
@@ -1267,6 +1291,103 @@ export function MemoryPage({
           </div>
         )}
       </section>
+
+      {pendingSemantic && (
+        <ConfirmDialog
+          title="删除记忆"
+          onCancel={() => setPendingSemantic(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setPendingSemantic(null)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  memory.removeSemantic(pendingSemantic.agentId, pendingSemantic.id);
+                  setPendingSemantic(null);
+                  bump();
+                  setMemoryMsg({ kind: "ok", text: `已删除记忆：${pendingSemantic.key}` });
+                }}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            删除记忆「{pendingSemantic.key}」？删除后智能体不会再召回这条，操作不可撤销。
+          </p>
+          <p className="mt-1 break-words text-[12px] text-muted">{pendingSemantic.value}</p>
+        </ConfirmDialog>
+      )}
+
+      {pendingEpisodic && (
+        <ConfirmDialog
+          title="删除情景记忆"
+          onCancel={() => setPendingEpisodic(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setPendingEpisodic(null)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  memory.removeEpisodic(pendingEpisodic.agentId, pendingEpisodic.id);
+                  setPendingEpisodic(null);
+                  bump();
+                  setMemoryMsg({ kind: "ok", text: "已删除一条情景记忆" });
+                }}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">删除这条情景记忆？删除后不会参与召回。</p>
+          <p className="mt-1 break-words text-[12px] text-muted">{pendingEpisodic.summary}</p>
+        </ConfirmDialog>
+      )}
+
+      {importConfirm && (
+        <ConfirmDialog
+          title="导入记忆"
+          onCancel={() => setImportConfirm(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setImportConfirm(false)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={confirmImportMemory}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                替换并导入
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            导入会整体替换本机三层记忆与设置，当前记忆不会保留。建议先导出备份，操作不可撤销。
+          </p>
+        </ConfirmDialog>
+      )}
 
       <AddMemoryModal
         open={addOpen}
@@ -1653,6 +1774,36 @@ export function MemoryPage({
         {tab === "database" && databasePanel}
         {tab === "wiki" && <WikiPanel />}
       </div>
+
+      {clearTarget && (
+        <ConfirmDialog
+          title="清空短期记忆"
+          onCancel={() => setClearTarget(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setClearTarget(null)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={confirmClearConversation}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                清空
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            清空会话「{clearTarget.label}」的短期记忆？长期记忆与已发送的聊天记录不受影响，但这段短期上下文清空后无法恢复。
+          </p>
+        </ConfirmDialog>
+      )}
+
     </div>
   );
 }

@@ -13,8 +13,9 @@
  * - 不使用 shell 拼接参数（shell:false）。
 //   ★ 不要按旧注释的「Windows 下 .cmd 由调用方写成 npx.cmd」去做——实测那样会 EINVAL：
 //     Node ≥18.20.2（CVE-2024-27980）对 shell:false 的 .cmd/.bat 直接拒绝执行。
-//     正确做法是见下方 resolveExecutable：按 PATHEXT 解析出真实文件名；
-//     且解析与「能否执行」是两件事，不要在这里顺手开 shell。
+//     正确做法是由 main.js 注入 local-runtime.js 的 planStdioSpawn，把 `npx` 翻译成
+//     `node <npm>/bin/npx-cli.js`；解析（resolveExecutable）与「能否执行」是两件事，
+//     不要在这里顺手开 shell。
  * - 子进程 stderr 只记录不解析（MCP 规范里 stdout 只放 JSON-RPC）。
  */
 
@@ -162,6 +163,20 @@ function buildChildEnv(base) {
  * @returns {string|null} 实际可执行文件名；找不到返回 null
  */
 function resolveExecutable(cmd, pathEntries, existsFn) {
+  const full = resolveExecutablePath(cmd, pathEntries, existsFn);
+  return full ? path.basename(full) : null;
+}
+
+/**
+ * 同上，但返回**绝对路径**。
+ *
+ * 为什么还要多这一个：Windows 上 libuv 查找可执行文件用的是**父进程**的 PATH
+ * （`options.env` 里补的那些目录不参与搜索）。`buildChildEnv` 补全的 PATH 只影响
+ * 子进程内部再调用工具时能不能找到，对我们自己 spawn 的那一条命令没用。
+ * 所以「按补全后的 PATH 找到了」这件事必须落成绝对路径才算数——
+ * 见 local-runtime.js 的 planStdioSpawn。
+ */
+function resolveExecutablePath(cmd, pathEntries, existsFn) {
   const exists = existsFn || ((p) => fs.existsSync(p));
   if (!cmd || typeof cmd !== "string") return null;
   // 顺序固定：.exe → .cmd → .bat → 原名（★ 原名放最后，见上方说明）
@@ -171,7 +186,7 @@ function resolveExecutable(cmd, pathEntries, existsFn) {
     for (const name of candidates) {
       const full = path.join(dir, name);
       try {
-        if (exists(full)) return name;
+        if (exists(full)) return full;
       } catch {
         /* 单个路径探测失败就跳过，不影响其它目录 */
       }
@@ -188,8 +203,18 @@ function resolveExecutable(cmd, pathEntries, existsFn) {
  * @param {number} [deps.timeoutMs] 单次请求超时
  * @param {() => number} [deps.now] 注入时钟（测试用）
  * @param {(...args: any[]) => void} [deps.log]
+ * @param {(plan: {command:string, args:string[], env:object}) => {command?:string, args?:string[]}} [deps.planSpawn]
+ *   把逻辑命令（`npx`/`uvx`）翻译成本机真正能执行的形态。★ 由 main.js 注入
+ *   `local-runtime.planStdioSpawn` 而不是在这里直接 require —— 那边依赖本文件的
+ *   `resolveExecutable`，互相 require 会成循环。
  */
-function createStdioBridge({ spawn, timeoutMs = 30_000, now = () => Date.now(), log = () => {} }) {
+function createStdioBridge({
+  spawn,
+  timeoutMs = 30_000,
+  now = () => Date.now(),
+  log = () => {},
+  planSpawn = null,
+}) {
   /** serverId → { child, buffer, nextId, pending } */
   const servers = new Map();
 
@@ -217,17 +242,29 @@ function createStdioBridge({ spawn, timeoutMs = 30_000, now = () => Date.now(), 
     if (!isValidCommand(effective?.command)) throw new Error("stdio 启动命令不合法");
     if (!isValidArgs(effective?.args)) throw new Error("stdio 启动参数不合法");
 
-    const child = spawn(effective.command, effective.args ?? [], {
+    // bundledEnv 把内置运行时目录加进 PATH——
+    // MCP 服务内部再调 python/uv 时用的也是包内那份，版本才不会漂。
+    //
+    // buildChildEnv 仍然照跑：它补的是 uv/npx/python 这类**系统工具**的位置。
+    // 内置服务虽然用不到它们，但 Registry 装来的本地包服务（npx / uvx 起的）需要。
+    // 省下那几次 existsSync 只有几毫秒，不值得为它加分支。
+    const env = buildChildEnv(bundledEnv({ ...process.env, ...(effective.env ?? {}) }));
+
+    // 翻译启动形态：Windows 上 npx 的真身是 .cmd，shell:false 下无法直接执行，
+    // 必须换成 `node <npm>/bin/npx-cli.js …`。放在 env 之后是因为探测要看补全后的 PATH。
+    // planSpawn 抛出的错误文案直接面向用户（「本机未找到 …」），这里不再包装。
+    const plan = planSpawn ? planSpawn({ command: effective.command, args: effective.args ?? [], env }) : null;
+    const command = plan?.command ?? effective.command;
+    const args = plan?.args ?? effective.args ?? [];
+
+    if (!isValidCommand(command)) throw new Error("stdio 启动命令不合法");
+    if (!isValidArgs(args)) throw new Error("stdio 启动参数不合法");
+
+    const child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
       shell: false,
       windowsHide: true,
-      // bundledEnv 把内置运行时目录加进 PATH——
-      // MCP 服务内部再调python/uv 时用的也是包内那份，版本才不会漂。
-      //
-      // buildChildEnv 仍然照跑：它补的是 uv/npx/python 这类**系统工具**的位置。
-      // 内置服务虽然用不到它们，但用户自己在接口区加的 stdio 服务（如 npx 起的
-      // filesystem）需要。省下那几次 existsSync 只有几毫秒，不值得为它加分支。
-      env: buildChildEnv(bundledEnv({ ...process.env, ...(effective.env ?? {}) })),
+      env,
     });
     const entry = { child, buffer: "", nextId: 1, pending: new Map() };
     servers.set(serverId, entry);
@@ -326,4 +363,13 @@ function createStdioBridge({ spawn, timeoutMs = 30_000, now = () => Date.now(), 
   return { start, request, notify, stop, disposeAll, running };
 }
 
-module.exports = { createStdioBridge, encodeMessage, extractMessages, isValidCommand, isValidArgs, resolveExecutable };
+module.exports = {
+  buildChildEnv,
+  createStdioBridge,
+  encodeMessage,
+  extractMessages,
+  isValidCommand,
+  isValidArgs,
+  resolveExecutable,
+  resolveExecutablePath,
+};

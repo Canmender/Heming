@@ -131,6 +131,11 @@ describe("WikiPanel 三视图", () => {
     fireEvent.click(await screen.findByRole("tab", { name: "目录" }));
     fireEvent.click(screen.getByText("孤立"));
     fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "删除页面" })).getByRole("button", {
+        name: "删除",
+      }),
+    );
     await waitFor(() => expect(bridge.files.has("wiki/notes/lonely.md")).toBe(false));
     expect(bridge.files.get("log.md")).toContain("] delete |");
   });

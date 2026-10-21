@@ -315,6 +315,26 @@ export function summarizeArgs(argsJson: string): string {
 }
 
 /**
+ * 规则匹配用的资源标识（不做脱敏展示，但会避开密钥并将其判成通配）。
+ *
+ * 与 `summarizeArgs` 的区别：摘要是给人看的（敏感值一律 `***`），
+ * 规则要能精确匹配，所以取原始值；但**敏感字段不落规则**——
+ * 把疑似密钥写进 `localStorage` 只为了让规则匹配，不值得。
+ * URL 仍剥掉 userinfo；路径统一成正斜杠，避免 Windows / POSIX 写法不一致。
+ */
+export function ruleResource(argsJson: string): string {
+  const args = parseArgs(argsJson);
+  for (const field of SUMMARY_FIELDS) {
+    const value = args[field];
+    if (typeof value !== "string" || !value.trim()) continue;
+    if (isSensitive(field, value)) return "*";
+    const raw = field === "url" ? maskUrlUserinfo(value.trim()) : value.trim();
+    return raw.replace(/\\/g, "/").slice(0, 200);
+  }
+  return "*";
+}
+
+/**
  * 分类一个工具调用，产出完整的 `HitlCall`。
  *
  * @param name OpenAI 格式工具名

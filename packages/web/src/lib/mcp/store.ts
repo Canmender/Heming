@@ -88,6 +88,9 @@ function coerceServer(raw: unknown, now: string): McpServerConfig | null {
       ? r.origin
       : "manual",
     registryName: typeof r.registryName === "string" && r.registryName ? r.registryName : undefined,
+    // 本地包台账（d.25）：同样是白名单字段，不写就会被丢掉。
+    registryType: typeof r.registryType === "string" && r.registryType ? r.registryType : undefined,
+    registryVersion: typeof r.registryVersion === "string" && r.registryVersion ? r.registryVersion : undefined,
     createdAt: typeof r.createdAt === "string" ? r.createdAt : now,
     updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : now,
   };
@@ -349,6 +352,14 @@ export class McpRegistry {
       args: input.args?.filter((a) => a.trim()),
       headers: input.headers,
       enabled: input.enabled !== false,
+      // 来源字段必须显式带过：`add()` 是字段白名单，不写就会被丢掉，
+      // Registry 装出来的服务会退化成「手填」，界面也就无法判「已安装」。
+      // 缺省按「手填」定死，否则内存里 origin=undefined、重启后读回 manual，
+      // 同一个服务在重启前后长得都不一样。
+      origin: input.origin ?? "manual",
+      registryName: input.registryName,
+      registryType: input.registryType,
+      registryVersion: input.registryVersion,
       createdAt: at,
       updatedAt: at,
     };

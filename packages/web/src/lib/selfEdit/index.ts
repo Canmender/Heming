@@ -7,4 +7,5 @@
  * - `guards.ts`：护栏（敏感信息、单轮上限、变更留痕、开关），两条通道共用判据。
  */
 export * from "./guards.js";
+export * from "./snapshots.js";
 export * from "./tools.js";

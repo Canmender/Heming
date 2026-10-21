@@ -87,8 +87,10 @@ export const MCP_PRESETS: McpPreset[] = [
   //   而它的 `args` 里还硬编码了本机路径 `D:/Heming`——装到别的机器上必然是错的。
   //
   //   **一个必然失败的入口不只是「没用」，它在降低用户对整个功能的信任。**
-  //   真正需要文件 MCP 的用户可以在接口区自己加
-  //   （npx 启动的问题由 MCP Registry 批次一并解决）。
+  //   真正需要文件 MCP 的用户可以在接口区自己加，或从 Registry 装本地包
+  //   （npx 在本机起不来的问题已在 d.25 解决：桌面端 `planStdioSpawn` 把 `npx`
+  //   翻译成 `node <npm>/bin/npx-cli.js`，仍然 `shell:false`；
+  //   但这条预置不该再放回来——`args` 里硬编码本机路径是另一个独立原因）。
   //   我们自带的文件能力（`self_mcp_*` + wiki-fs.js + chart-fs.js）不依赖它。
 ];
 

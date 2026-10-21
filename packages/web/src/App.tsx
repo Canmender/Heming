@@ -9,6 +9,7 @@ import { NavRail } from "./components/NavRail.js";
 import { FileTree } from "./components/FileTree.js";
 import { FilePreviewModal } from "./components/FilePreviewModal.js";
 import { WorkspacePage } from "./components/WorkspacePage.js";
+import { TaskAreaPage } from "./components/TaskAreaPage.js";
 import { ChatPage } from "./components/ChatPage.js";
 import { ConversationTabs } from "./components/ConversationTabs.js";
 import { ChatConvStrip } from "./components/ChatConvStrip.js";
@@ -19,13 +20,14 @@ import { MemoryPage } from "./components/MemoryPage.js";
 import { ArchivePage } from "./components/ArchivePage.js";
 import { CommandPalette } from "./components/CommandPalette.js";
 import { InterfacesPage } from "./components/InterfacesPage.js";
+import { RegistryInstallCard } from "./components/RegistryInstallCard.js";
 import { SkillsPage } from "./components/SkillsPage.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
 
 /**
- * Alt+1–Alt+7 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档。
+ * Alt+1–Alt+8 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档、8 任务区。
  *
  * 顺序必须与 NavRail 的 `digit` 严格对应——那边是快捷键提示的唯一来源，
  * 两边错位就会出现「界面写着 Alt+6、按下去却去了别的页」。
@@ -39,6 +41,7 @@ const SHORTCUT_PAGES: Page[] = [
   "memory",
   "settings",
   "archive",
+  "tasks",
 ];
 
 /** 右侧目录栏宽度上下限（像素）：太窄放不下文件名，太宽会挤掉主内容。 */
@@ -236,11 +239,11 @@ function AppShell() {
       const inText =
         !!t &&
         (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-      // Alt+1–7 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应
-      if (e.altKey && !e.metaKey && !e.ctrlKey && ["1", "2", "3", "4", "5", "6", "7"].includes(e.key)) {
+      // Alt+1–8 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应
+      if (e.altKey && !e.metaKey && !e.ctrlKey && ["1", "2", "3", "4", "5", "6", "7", "8"].includes(e.key)) {
         if (inText) return;
         e.preventDefault();
-        setPage(SHORTCUT_PAGES["1234567".indexOf(e.key)]);
+        setPage(SHORTCUT_PAGES["12345678".indexOf(e.key)]);
         return;
       }
       if (!e.metaKey && !e.ctrlKey) return;
@@ -290,6 +293,9 @@ function AppShell() {
       </div>
     ) : page === "workspace" ? (
       <WorkspacePage />
+    ) : page === "tasks" ? (
+      // 任务区：左侧任务列表 + 嵌入式 ChatPage + 右侧确定性汇总
+      <TaskAreaPage />
     ) : page === "skills" ? (
       <SkillsPage />
     ) : page === "memory" ? (
@@ -376,6 +382,9 @@ function AppShell() {
           )}
         </aside>
       </div>
+      {/* 安装确认是全局的：从接口区发起，但用户可能立刻切页；
+          挂在根节点上，pending 在第几页都能弹出来。 */}
+      <RegistryInstallCard />
     </div>
   );
 }

@@ -7,15 +7,59 @@ export interface ToolCall {
   function: { name: string; arguments: string };
 }
 
+/**
+ * 多模态消息的一段内容。图片统一存 base64（不带 `data:` 前缀），
+ * 由两个供应商分支各自组装成对方要的形状——`data:` URL 只属于 OpenAI。
+ */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image"; mime: string; data: string };
+
+export type MessageContent = string | ContentPart[];
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  /**
+   * 多模态内容片（图片等）。存在时**覆盖** `content` 作为发给供应商的内容，
+   * `content` 仍保留纯文本——上下文预算、摘要、日志都按字符串处理，
+   * 不必为了图片把整条链路改成联合类型。
+   */
+  contentParts?: ContentPart[];
   /** assistant 消息里带的工具调用（回灌历史时原样带回，模型才知道自己调过什么）。 */
   tool_calls?: ToolCall[];
   /** role=tool 时对应哪次调用。 */
   tool_call_id?: string;
   /** role=tool 时的工具名（部分供应商要求）。 */
   name?: string;
+}
+
+/** 取消息实际要发的纯文本（无内容片时）。 */
+export function messageText(message: ChatMessage): string {
+  return message.content;
+}
+
+/** OpenAI 兼容：图片走 `image_url` + data URL。 */
+function toOpenAiContent(content: MessageContent): unknown {
+  if (typeof content === "string") return content;
+  return content.map((part) =>
+    part.type === "text"
+      ? { type: "text", text: part.text }
+      : { type: "image_url", image_url: { url: `data:${part.mime};base64,${part.data}` } },
+  );
+}
+
+/** Anthropic：图片走 base64 source，不是 data URL。 */
+function toAnthropicContent(content: MessageContent): unknown {
+  if (typeof content === "string") return content;
+  return content.map((part) =>
+    part.type === "text"
+      ? { type: "text", text: part.text }
+      : {
+          type: "image",
+          source: { type: "base64", media_type: part.mime, data: part.data },
+        },
+  );
 }
 
 export interface BuildRequestOpts {
@@ -60,11 +104,14 @@ export function buildRequest(
         system:
           messages
             .filter((m) => m.role === "system")
-            .map((m) => m.content)
+            .map((m) => messageText(m))
             .join("\n") || undefined,
         messages: messages
           .filter((m) => m.role !== "system")
-          .map((m) => ({ role: m.role, content: m.content })),
+          .map((m) => ({
+            role: m.role,
+            content: toAnthropicContent(m.contentParts ?? m.content),
+          })),
         ...(opts.tools?.length ? { tools: opts.tools } : {}),
       }),
     };
@@ -77,7 +124,11 @@ export function buildRequest(
       model: profile.model,
       stream: opts.stream,
       temperature: profile.temperature,
-      messages,
+      // 字符串内容原样保留（老路径逐字不变）；只有多模态内容片才转成 image_url 片。
+      messages: messages.map(({ contentParts, ...m }) => ({
+        ...m,
+        content: contentParts ? toOpenAiContent(contentParts) : m.content,
+      })),
       // 工具调用只对 OpenAI 兼容协议开放（anthropic 的消息结构不同，另行适配）
       ...(opts.tools?.length ? { tools: opts.tools, tool_choice: "auto" } : {}),
     }),

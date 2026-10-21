@@ -79,6 +79,37 @@ describe("ToolApprovalModal", () => {
     ]);
   });
 
+  it("「记住」默认不勾（一次决定不能悄悄变成长期规则）", () => {
+    render(<ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={vi.fn()} />);
+    expect(screen.getByLabelText("记住本次选择")).not.toBeChecked();
+  });
+
+  it("勾选「记住」后：主动允许的项带 remember，没勾的项只算未选、不记规则", () => {
+    const onDecide = vi.fn();
+    render(<ToolApprovalModal requestId="req-1" calls={[writeCall, dangerCall]} onDecide={onDecide} />);
+
+    fireEvent.click(screen.getByLabelText("记住本次选择"));
+    fireEvent.click(screen.getByLabelText("允许 写文件"));
+    fireEvent.click(screen.getByRole("button", { name: "仅本次允许" }));
+
+    expect(onDecide).toHaveBeenCalledWith([
+      { callId: "w1", decision: "allow", remember: true },
+      { callId: "d1", decision: "deny", reason: "未勾选" },
+    ]);
+  });
+
+  it("勾选「记住」后点拒绝：每一项都带 remember（拒绝规则）", () => {
+    const onDecide = vi.fn();
+    render(<ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={onDecide} />);
+
+    fireEvent.click(screen.getByLabelText("记住本次选择"));
+    fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
+
+    expect(onDecide).toHaveBeenCalledWith([
+      { callId: "w1", decision: "deny", reason: "用户拒绝", remember: true },
+    ]);
+  });
+
   it("Esc = 拒绝全部", () => {
     const onDecide = vi.fn();
     render(<ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={onDecide} />);
@@ -145,6 +176,47 @@ describe("ToolApprovalModal", () => {
     fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
 
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "仅本次允许" }));
+  });
+
+  it("写文件：折叠展示变更预览（增删数 + 路径）", () => {
+    const call: HitlCall = {
+      ...writeCall,
+      argsJson: JSON.stringify({ path: "notes/a.md", content: "第一行\n第二行" }),
+    };
+    render(<ToolApprovalModal requestId="req-1" calls={[call]} onDecide={vi.fn()} />);
+
+    expect(screen.getByText(/查看变更（\+2 −0）/)).toBeInTheDocument();
+    expect(screen.getByText(/notes\/a\.md/)).toBeInTheDocument();
+    expect(screen.getByText("+ 第一行")).toBeInTheDocument();
+  });
+
+  it("非文件写入的参数不显示预览（不猜着展示敏感字段）", () => {
+    const call: HitlCall = {
+      ...writeCall,
+      argsJson: JSON.stringify({ env: { TOKEN: "secret" } }),
+    };
+    render(<ToolApprovalModal requestId="req-1" calls={[call]} onDecide={vi.fn()} />);
+
+    expect(screen.queryByText(/查看变更/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
+  });
+
+  it("跨会话请求标明归属，并可回到发起会话", () => {
+    const onOpen = vi.fn();
+    render(
+      <ToolApprovalModal
+        requestId="req-1"
+        calls={[writeCall]}
+        agentName="文档助手"
+        conversationLabel="周报整理"
+        onOpenConversation={onOpen}
+        onDecide={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("请求来自会话「周报整理」")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "回到该会话" }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
   it("没有待确认项时不崩", () => {

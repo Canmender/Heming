@@ -126,6 +126,13 @@ describe("UpdateCard", () => {
     await act(async () => {
       fireEvent.click(button);
     });
+    // 会终止进程：先弹确认，确认后才真正安装
+    expect(h.calls.install).toBe(0);
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "重启并安装", hidden: false }) as HTMLButtonElement,
+      );
+    });
     expect(h.calls.install).toBe(1);
   });
 

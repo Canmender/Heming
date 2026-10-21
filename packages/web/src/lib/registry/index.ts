@@ -22,6 +22,7 @@ export {
 export {
   validatePackage,
   runnerFor,
+  pinnedSpec,
   buildOption,
   buildRemoteOptions,
   isInstallable,
@@ -30,6 +31,19 @@ export {
   toEntry,
   type RejectReason,
 } from "./map.js";
+
+export {
+  runtimeBridge,
+  probeLocalRuntime,
+  runtimeRequirementFor,
+  missingRuntimeReason,
+  blockedReason,
+  installableWithRuntime,
+  RUNTIME_LABEL,
+  type LocalRuntimeStatus,
+  type RuntimeBridgeApi,
+  type RuntimeKey,
+} from "./runtime.js";
 
 export {
   rateInstall,
@@ -56,3 +70,11 @@ export {
   type InstallTransport,
   type FetchResult,
 } from "./types.js";
+
+export {
+  buildInstallPreview,
+  sanitizeHeaders,
+  type InstallDecision,
+  type InstallPreviewRow,
+  type RegistryInstallPreview,
+} from "./preview.js";

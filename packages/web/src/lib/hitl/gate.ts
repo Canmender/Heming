@@ -18,7 +18,7 @@
 
 import type { GateOutcome, HitlBatch, HitlCall, HitlVerdict } from "./types.js";
 import type { HitlPolicyStore } from "./policy.js";
-import { toHitlCall, type RawToolCall } from "./classify.js";
+import { ruleResource, toHitlCall, type RawToolCall } from "./classify.js";
 
 /** 闸门的依赖（全部可注入，便于测试）。 */
 export interface HitlGateDeps {
@@ -74,16 +74,39 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
       const auto: HitlCall[] = [];
 
       batch.calls.forEach((call, index) => {
+        const fp = fingerprint(batch.streamId, call.name, call.argsJson);
+        // 落盘的记忆规则优先于档位：显式拒绝最高优先级，其次显式允许。
+        // `ruleFor` 内部已保证 allow 不覆盖 danger（危险操作始终会问）。
+        const rule = policy.ruleFor(call, batch.agentId);
+        if (rule === "deny") {
+          outcomes[index] = {
+            kind: "deny",
+            call,
+            reason: "命中此前记住的拒绝规则",
+            cause: "rule",
+          };
+          denied.add(fp);
+          return;
+        }
+        if (rule === "allow") {
+          auto.push(call);
+          outcomes[index] = { kind: "allow", call };
+          return;
+        }
         const verdict = policy.allowed(call, current, batch.agentId);
         if (verdict === "pass") {
           auto.push(call);
           outcomes[index] = { kind: "allow", call };
           return;
         }
-        const fp = fingerprint(batch.streamId, call.name, call.argsJson);
         // 同指纹已拒过：不再打扰用户，直接拒。
         if (denied.has(fp)) {
-          outcomes[index] = { kind: "deny", call, reason: "本轮已拒绝过相同调用" };
+          outcomes[index] = {
+            kind: "deny",
+            call,
+            reason: "本轮已拒绝过相同调用",
+            cause: "user",
+          };
           return;
         }
         pending.push({ index, call });
@@ -94,11 +117,18 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
         // 与下面「没被明确确认的项绝不执行」是同一条口径——
         // 任何「不确定」都往「不执行」的方向倒，绝不往「执行」倒。
         return outcomes.map((o, i) =>
-          o ?? { kind: "deny", call: batch.calls[i], reason: "未收到确认结果" },
+          o ?? {
+            kind: "deny",
+            call: batch.calls[i],
+            reason: "未收到确认结果",
+            cause: "gate",
+          },
         );
       }
 
       let verdicts: HitlVerdict[] = [];
+      /** 本批是否因 UI 异常而被迫补 deny——回灌文案要据此区分「用户拒绝」。 */
+      let gateFailed = false;
       try {
         verdicts = await ask({
           streamId: batch.streamId,
@@ -120,6 +150,7 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
         // 兜底是 allow 时下标写错就是「误放行」，**静默且不可见**。
         // 而 UI 恰恰是在这种「坏了」的时刻最不该让危险操作裸奔。
         console.warn("HITL 确认失败，按拒绝处理", e);
+        gateFailed = true;
         verdicts = pending.map((p) => ({
           callId: p.call.id,
           decision: "deny" as const,
@@ -136,19 +167,43 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
       for (const { index, call } of pending) {
         const v = byCallId.get(call.id);
         if (!v) {
-          // 没被明确确认的项绝不执行。
-          outcomes[index] = { kind: "deny", call, reason: "未收到确认结果" };
+          // 没被明确确认的项绝不执行。缺项来自 UI 返回不完整，按闸门异常处理。
+          outcomes[index] = {
+            kind: "deny",
+            call,
+            reason: "未收到确认结果",
+            cause: "gate",
+          };
           denied.add(fingerprint(batch.streamId, call.name, call.argsJson));
           continue;
         }
         if (v.decision === "deny") {
-          outcomes[index] = { kind: "deny", call, ...(v.reason ? { reason: v.reason } : {}) };
+          outcomes[index] = {
+            kind: "deny",
+            call,
+            ...(v.reason ? { reason: v.reason } : {}),
+            cause: gateFailed ? "gate" : "user",
+          };
           denied.add(fingerprint(batch.streamId, call.name, call.argsJson));
+          // UI 异常时 v.remember 没有意义（不是用户点的），不得落规则。
+          if (v.remember && !gateFailed) {
+            policy.rememberRule(call.name, ruleResource(call.argsJson), "deny", {
+              id: batch.agentId,
+              name: batch.agentName,
+            });
+          }
           continue;
         }
         if (v.decision === "allow-session") {
           // 本会话授权：记进内存（进程退出即失效，绝不落盘）。
           policy.grant(batch.agentId, call.name, current.scope);
+        }
+        // 「记住允许」只对 read/write 生效；danger 由 ruleFor 拒绝，故这里不落盘。
+        if (v.remember && !gateFailed && call.risk !== "danger") {
+          policy.rememberRule(call.name, ruleResource(call.argsJson), "allow", {
+            id: batch.agentId,
+            name: batch.agentName,
+          });
         }
         outcomes[index] = { kind: "allow", call };
       }
@@ -157,7 +212,12 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
       // 与上面「没被明确确认的项绝不执行」是同一条口径——
       // 任何「不确定」都往「不执行」的方向倒，绝不往「执行」倒。
       return outcomes.map((o, i) =>
-        o ?? { kind: "deny", call: batch.calls[i], reason: "未收到确认结果" },
+        o ?? {
+          kind: "deny",
+          call: batch.calls[i],
+          reason: "未收到确认结果",
+          cause: "gate",
+        },
       );
     },
   };

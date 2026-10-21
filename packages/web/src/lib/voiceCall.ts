@@ -28,13 +28,22 @@ export interface VoiceCallState {
   muted: boolean;
   error: string | null;
   incoming: IncomingCallInfo | null;
+  /**
+   * 当前链路不稳定、正在做 ICE 重连的对端数量（d.25）。
+   * 用数量而不是布尔：群聊里 1 路断开不该把整通电话染成「全部重连」。
+   */
+  reconnecting: number;
 }
 
 interface PeerConn {
   userId: string;
   pc: RTCPeerConnection;
   stream?: MediaStream;
-  state: "connecting" | "connected" | "disconnected";
+  state: "connecting" | "connected" | "disconnected" | "reconnecting";
+  /** 已发起的 ICE 重启次数；超过上限即放弃这条链路（挂断），不再无限重试。 */
+  restarts: number;
+  /** disconnected 观察期定时器：期间恢复就取消，持续中断才真的重启 ICE。 */
+  probe: ReturnType<typeof setTimeout> | null;
 }
 
 export interface UseVoiceCallOptions {
@@ -83,7 +92,14 @@ const IDLE_STATE: VoiceCallState = {
   muted: false,
   error: null,
   incoming: null,
+  reconnecting: 0,
 };
+
+/** ICE 重启观察期与上限（d.25 断线重连）。 */
+export const RECONNECT_PROBE_MS = 3000;
+export const RECONNECT_MAX_RESTARTS = 2;
+/** ICE 彻底失败后的宽限期：给对端一次立即重启的机会，仍不通才收线。 */
+export const ICE_GIVEUP_MS = 5000;
 
 export function useVoiceCall(opts: UseVoiceCallOptions) {
   const { send, myUserId, isDesktop = true, onIncomingCall, mode = "voice" } = opts;
@@ -110,7 +126,10 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
 
   /** 清理所有 PC 与本地流（不发信令） */
   const cleanupResources = useCallback(() => {
-    for (const [, peer] of peersRef.current) peer.pc.close();
+    for (const [, peer] of peersRef.current) {
+      if (peer.probe) clearTimeout(peer.probe);
+      peer.pc.close();
+    }
     peersRef.current.clear();
     pendingCandidatesRef.current.clear();
     if (localStreamRef.current) {
@@ -134,6 +153,68 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
     setState(IDLE_STATE);
   }, [send, cleanupResources]);
 
+  /** 把「几路链路正在重连」同步到对外状态（UI 只看数量，不碰 RTCPeerConnection）。 */
+  const syncReconnecting = useCallback(() => {
+    const bad = [...peersRef.current.values()].filter(
+      (peer) => peer.state === "disconnected" || peer.state === "reconnecting",
+    ).length;
+    setState((s) => (s.reconnecting === bad ? s : { ...s, reconnecting: bad }));
+  }, []);
+
+  /** 放弃重连：先正常收线（让对端也结束），再留一条能看懂的错误文案。 */
+  const giveUp = useCallback(() => {
+    hangup();
+    setState({ ...IDLE_STATE, error: "连接已断开，请重新呼叫" });
+  }, [hangup]);
+
+  /**
+   * ICE 重启：给这条链路换一套 ICE 凭据重新协商（`iceRestart: true` 的新 offer 经
+   * `voice_call_reconnect` 送出，对端回 answer，候选照常走 `voice_call_ice`）。
+   *
+   * 为什么不用 invite/accept 复用：那两条带振铃与接听语义，通话中途重发会让对端
+   * 再弹一次来电、并把服务端 call 状态打回 ringing。
+   *
+   * 群聊取舍：某一路彻底救不回来时整通收线，而不是把那个对端悄悄摘掉——
+   * 摘掉只对自己生效，对端仍以为四人在会，比全体散会更难解释。
+   */
+  const restartPeer = useCallback(
+    async (peer: PeerConn) => {
+      if (peer.probe) {
+        clearTimeout(peer.probe);
+        peer.probe = null;
+      }
+      const cid = callIdRef.current;
+      const convId = conversationIdRef.current;
+      if (!cid || !convId) return; // 通话已结束：迟到的 ICE 回调直接忽略
+      if (peer.restarts >= RECONNECT_MAX_RESTARTS) {
+        giveUp();
+        return;
+      }
+      peer.restarts += 1;
+      peer.state = "reconnecting";
+      syncReconnecting();
+      try {
+        const offer = await peer.pc.createOffer({ iceRestart: true });
+        const sdp = offer.sdp ?? "";
+        if (!sdp) {
+          giveUp();
+          return;
+        }
+        await peer.pc.setLocalDescription(offer);
+        send({
+          type: "voice_call_reconnect",
+          conversationId: convId,
+          callId: cid,
+          sdp,
+          sdpType: "offer",
+        });
+      } catch {
+        giveUp();
+      }
+    },
+    [send, syncReconnecting, giveUp],
+  );
+
   const createPeerConnection = useCallback(
     (peerId: string): RTCPeerConnection => {
       const pc = new RTCPeerConnection({ iceServers: getIceServers() });
@@ -152,24 +233,65 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
         if (peer) {
           peer.stream = e.streams[0];
           peer.state = "connected";
+          syncReconnecting();
         }
         const incoming = e.streams[0];
         if (incoming) setRemoteStreams((prev) => ({ ...prev, [peerId]: incoming }));
       };
       pc.oniceconnectionstatechange = () => {
-        if (pc.iceConnectionState === "failed") {
-          // ICE 失败 5s 后重连，仍失败则挂断
-          setTimeout(() => {
-            if (callIdRef.current && pc.iceConnectionState === "failed") {
-              hangup();
-            }
-          }, 5000);
+        const peer = peersRef.current.get(peerId);
+        if (!peer || !callIdRef.current) return; // 已挂断/未建联：忽略关闭中的回调
+        const ice = pc.iceConnectionState;
+        if (ice === "connected" || ice === "completed") {
+          if (peer.probe) {
+            clearTimeout(peer.probe);
+            peer.probe = null;
+          }
+          peer.restarts = 0; // 链路恢复即重置重连预算
+          peer.state = "connected";
+          syncReconnecting();
+          return;
+        }
+        if (ice === "disconnected") {
+          // 抖动很常见（切 Wi-Fi、NAT 超时），先观察 3s 再决定是否真的重启 ICE
+          if (peer.probe || peer.state === "reconnecting") return;
+          peer.state = "disconnected";
+          syncReconnecting();
+          peer.probe = setTimeout(() => {
+            peer.probe = null;
+            void restartPeer(peer);
+          }, RECONNECT_PROBE_MS);
+          return;
+        }
+        if (ice === "failed") {
+          if (peer.probe) {
+            clearTimeout(peer.probe);
+            peer.probe = null;
+          }
+          if (peer.restarts < RECONNECT_MAX_RESTARTS) {
+            void restartPeer(peer);
+            return;
+          }
+          // 预算用尽：再给 5s 宽限（链路可能自己爬回来），仍不通就收线
+          peer.probe = setTimeout(() => {
+            peer.probe = null;
+            if (pc.iceConnectionState === "failed") giveUp();
+          }, ICE_GIVEUP_MS);
         }
       };
       return pc;
     },
-    [send, hangup],
+    [send, syncReconnecting, restartPeer, giveUp],
   );
+
+  /** PeerConn 出厂态（`restarts`/`probe` 是重连账本，两处建 PC 都要带上）。 */
+  const makePeer = (userId: string, pc: RTCPeerConnection): PeerConn => ({
+    userId,
+    pc,
+    state: "connecting",
+    restarts: 0,
+    probe: null,
+  });
 
   /** 发起通话：获取本地流 → 为每个 peer 创建 PC → createOffer → 发送 invite */
   const call = useCallback(
@@ -193,7 +315,7 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
 
         for (const peerId of peerIds) {
           const pc = createPeerConnection(peerId);
-          peersRef.current.set(peerId, { userId: peerId, pc, state: "connecting" });
+          peersRef.current.set(peerId, makePeer(peerId, pc));
           for (const track of stream.getTracks()) pc.addTrack(track, stream);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
@@ -215,6 +337,7 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
           muted: false,
           error: null,
           incoming: null,
+          reconnecting: 0,
         });
       } catch (err) {
         // getUserMedia 成功后若 createOffer/setLocalDescription 抛错，
@@ -240,11 +363,7 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
         conversationIdRef.current = invite.conversationId;
 
         const pc = createPeerConnection(invite.initiatorId);
-        peersRef.current.set(invite.initiatorId, {
-          userId: invite.initiatorId,
-          pc,
-          state: "connecting",
-        });
+        peersRef.current.set(invite.initiatorId, makePeer(invite.initiatorId, pc));
         for (const track of stream.getTracks()) pc.addTrack(track, stream);
         await pc.setRemoteDescription({ type: "offer", sdp: invite.sdp });
         // C2：flush accept 之前缓存的远端 candidates（此时 PC 已就绪）。
@@ -273,6 +392,7 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
           muted: false,
           error: null,
           incoming: null,
+          reconnecting: 0,
         });
       } catch (err) {
         setState((s) => ({ ...s, error: mapMediaError(err) }));
@@ -359,6 +479,7 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
             muted: false,
             error: null,
             incoming: info,
+            reconnecting: 0,
           }));
           break;
         }
@@ -382,6 +503,7 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
             ...s,
             status: "active",
             startedAt: s.startedAt ?? Date.now(),
+            reconnecting: 0,
           }));
           break;
         }
@@ -424,6 +546,41 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
           }
           break;
         }
+        case "voice_call_reconnect": {
+          // ICE 重启的重新协商（d.25）：对端发来 offer → 本端答 answer；
+          // 收到 answer → 直接作为远端描述应用。candidate 仍走 voice_call_ice 老通道。
+          if (event.callId !== callIdRef.current) break;
+          const peer = peersRef.current.get(event.fromUserId);
+          // 首屏协商还没完成（connecting）时不接受第二次 offer——会把还在飞的
+          // 初始协商搞乱；此时链路本来就还没通过 ICE，重连由对端自己负责。
+          if (!peer || peer.state === "connecting") break;
+          void (async () => {
+            try {
+              if (event.sdpType === "offer") {
+                await peer.pc.setRemoteDescription({ type: "offer", sdp: event.sdp });
+                const answer = await peer.pc.createAnswer();
+                await peer.pc.setLocalDescription(answer);
+                const cid = callIdRef.current;
+                const convId = conversationIdRef.current;
+                const sdp = answer.sdp ?? "";
+                if (cid && convId && sdp) {
+                  send({
+                    type: "voice_call_reconnect",
+                    conversationId: convId,
+                    callId: cid,
+                    sdp,
+                    sdpType: "answer",
+                  });
+                }
+              } else {
+                await peer.pc.setRemoteDescription({ type: "answer", sdp: event.sdp });
+              }
+            } catch {
+              /* 重连窗口内本端可能正在收线：SDP 应用失败无需额外处理，ICE 回调会收尾 */
+            }
+          })();
+          break;
+        }
       }
     },
     [isDesktop, send, cleanupResources, onIncomingCall],
@@ -432,7 +589,10 @@ export function useVoiceCall(opts: UseVoiceCallOptions) {
   // 组件卸载时清理所有资源
   useEffect(() => {
     return () => {
-      for (const [, peer] of peersRef.current) peer.pc.close();
+      for (const [, peer] of peersRef.current) {
+        if (peer.probe) clearTimeout(peer.probe);
+        peer.pc.close();
+      }
       if (localStreamRef.current) {
         for (const track of localStreamRef.current.getTracks()) track.stop();
       }

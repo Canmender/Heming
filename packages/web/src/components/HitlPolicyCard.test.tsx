@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { HitlPolicyStore, HITL_KEY } from "../lib/hitl/policy.js";
 import { appendAudit, type StorageLike } from "../lib/selfEdit/guards.js";
@@ -114,5 +114,28 @@ describe("HitlPolicyCard", () => {
     render(<HitlPolicyCard policyStore={store} storage={storage} />);
 
     expect(screen.getByText("还没有确认记录。")).toBeInTheDocument();
+    expect(screen.getByText(/还没有记住的规则/)).toBeInTheDocument();
+  });
+
+  it("展示记住的规则，并可一键清空", () => {
+    store.rememberRule("fs__write_file", "notes/a.md", "allow");
+    store.rememberRule("fs__delete_file", "*", "deny");
+    render(<HitlPolicyCard policyStore={store} storage={storage} />);
+
+    expect(screen.getByText("notes/a.md")).toBeInTheDocument();
+    expect(screen.getByText("所有调用")).toBeInTheDocument();
+    expect(screen.getByText("fs__write_file")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "清空记住的规则" }));
+    // 清空不可撤销：先确认
+    expect(store.rules().length).toBeGreaterThan(0);
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "清空记住的规则" })).getByRole("button", {
+        name: "清空",
+      }),
+    );
+
+    expect(store.rules()).toEqual([]);
+    expect(screen.queryByText("notes/a.md")).not.toBeInTheDocument();
   });
 });

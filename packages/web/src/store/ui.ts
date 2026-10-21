@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type Page =
   | "home"
   | "workspace"
+  | "tasks"
   | "skills"
   | "interfaces"
   | "memory"
@@ -16,10 +17,11 @@ export type ContactKind = "group" | "human" | "agent";
 /** 导航项（可排序的六个主页；chat 是覆盖层，不参与排序）。 */
 export type NavPage = Exclude<Page, "chat">;
 
-/** 导航默认顺序，也是 Alt+1–6 快捷键的固定映射（显示顺序改了不影响快捷键）。 */
+/** 导航默认顺序；快捷键数字由 App/NavRail 按页面固定绑定（显示顺序改了不影响快捷键）。 */
 export const DEFAULT_NAV_ORDER: NavPage[] = [
   "home",
   "workspace",
+  "tasks",
   "skills",
   "interfaces",
   "memory",
@@ -59,6 +61,20 @@ export function readStoredNavOrder(storage: Pick<Storage, "getItem"> | null): Na
   }
 }
 
+/**
+ * 任务区「新建任务」的一次性投递槽：任务记录已建档，等 ChatPage 挂载后自动执行。
+ *
+ * 为什么要经 UI store 转一手：任务区复用 ChatPage（消息/流式/E2E 全在那边），
+ * 而创建任务发生在侧栏弹窗——把「发什么、@谁、算哪个任务」显式投递过去，
+ * 比在页面间复制一套发送逻辑更不容易漏掉 E2E 与附件路径。
+ */
+export interface TaskDraft {
+  taskId: string;
+  conversationId: string;
+  text: string;
+  mentions: { agentId: string; name: string }[];
+}
+
 /** 右栏目录投递的单文件槽：文件已在共享库，直接经 WS 发 payload.file，不再走上传。 */
 export interface PendingAttachment {
   conversationId: string;
@@ -83,8 +99,25 @@ interface UiState {
   detailContact: { kind: ContactKind; id: string } | null;
   /** 右栏「发送到会话」待投递单槽（null=无）。切页时清空；ChatPage 命中目标会话即消费。 */
   pendingAttachment: PendingAttachment | null;
+  /** 任务区待执行的任务（null=无）。切页/开普通会话时清空；ChatPage 命中会话即消费并自动发送。 */
+  taskDraft: TaskDraft | null;
+  /**
+   * 通知中心跳转任务区时要选中的任务（null=无）。
+   * 只到「进入任务区」为止：TaskAreaPage 命中该 id 即选中并消费，避免残留导致来回跳。
+   */
+  taskFocusId: string | null;
   setPage: (page: Page) => void;
   openConversation: (id: string) => void;
+  /**
+   * 聚焦某会话但**不切到聊天页**（任务区嵌 ChatPage 用）：
+   * 标签与 activeConversationId 与 openConversation 同口径，page 保持当前值。
+   */
+  focusConversation: (id: string) => void;
+  setTaskDraft: (draft: TaskDraft) => void;
+  consumeTaskDraft: () => void;
+  /** 从通知中心跳到任务区的某条任务（连带聚焦它的会话）。 */
+  focusTask: (taskId: string, conversationId?: string) => void;
+  consumeTaskFocus: () => void;
   leaveConversation: () => void;
   /** 关闭某个标签页：当前会话则退回上一个标签（非空时）否则离开聊天页。 */
   closeConversationTab: (id: string) => void;
@@ -134,6 +167,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   contactsHidden: false,
   detailContact: null,
   pendingAttachment: null,
+  taskDraft: null,
+  taskFocusId: null,
   setPage: (page) =>
     set({
       page,
@@ -143,6 +178,9 @@ export const useUiStore = create<UiState>((set, get) => ({
       contactsHidden: false,
       detailContact: null,
       pendingAttachment: null,
+      // 未消费的任务投递跟着离开：切页后再自动发送会让用户莫名其妙多一条消息。
+      taskDraft: null,
+      taskFocusId: null,
     }),
   openConversation: (id) =>
     // 导航轨常驻：进入会话不再收起左侧导航（用户要求「左侧导航栏应该常驻，不应该移动」）
@@ -150,12 +188,42 @@ export const useUiStore = create<UiState>((set, get) => ({
       page: "chat",
       activeConversationId: id,
       contactsHidden: true,
+      taskDraft: null,
       // 已在标签里则移到最前（用户刚点过它，理应成为当前标签位），否则追加
       openTabs: [
         ...state.openTabs.filter((t) => t !== id),
         id,
       ].slice(-TABS_MAX),
     })),
+  focusConversation: (id) =>
+    set((state) => ({
+      activeConversationId: id,
+      contactsHidden: true,
+      openTabs: [
+        ...state.openTabs.filter((t) => t !== id),
+        id,
+      ].slice(-TABS_MAX),
+    })),
+  setTaskDraft: (draft) => set({ taskDraft: draft }),
+  consumeTaskDraft: () => set({ taskDraft: null }),
+  focusTask: (taskId, conversationId) =>
+    set((state) => ({
+      page: "tasks",
+      taskFocusId: taskId,
+      taskDraft: null,
+      pendingAttachment: null,
+      detailContact: null,
+      ...(conversationId
+        ? {
+            activeConversationId: conversationId,
+            openTabs: [
+              ...state.openTabs.filter((t) => t !== conversationId),
+              conversationId,
+            ].slice(-TABS_MAX),
+          }
+        : {}),
+    })),
+  consumeTaskFocus: () => set({ taskFocusId: null }),
   leaveConversation: () => get().setPage("workspace"),
 closeConversationTab: (id) => {
       const { openTabs, activeConversationId } = get();

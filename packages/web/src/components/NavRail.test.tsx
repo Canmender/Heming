@@ -71,11 +71,12 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(nav.textContent).not.toMatch(/和鸣|Heming/);
   });
 
-  it("点击切页，选中项为 ink 底反白", () => {
+  it("点击切页，选中项为 ink 底反白并标记 aria-current", () => {
     render(<NavRail />);
     const homeBtn = screen.getByRole("button", { name: "主页 Alt1" });
     expect(homeBtn.className).toContain("bg-ink");
     expect(homeBtn.className).toContain("text-white");
+    expect(homeBtn).toHaveAttribute("aria-current", "page");
 
     fireEvent.click(screen.getByRole("button", { name: "接口区 Alt4" }));
     expect(useUiStore.getState().page).toBe("interfaces");
@@ -83,7 +84,9 @@ describe("NavRail 图标轨（A 方案）", () => {
     const intfBtn = screen.getByRole("button", { name: "接口区 Alt4" });
     expect(intfBtn.className).toContain("bg-ink");
     expect(intfBtn.className).toContain("text-white");
+    expect(intfBtn).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "主页 Alt1" }).className).not.toContain("bg-ink");
+    expect(screen.getByRole("button", { name: "主页 Alt1" })).not.toHaveAttribute("aria-current");
   });
 
   it("悬停浮签内容常驻 DOM（名称 + 快捷键徽标，opacity 0 → group-hover 淡入）", () => {

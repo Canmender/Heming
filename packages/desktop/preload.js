@@ -68,6 +68,15 @@ contextBridge.exposeInMainWorld("__mcp_stdio", {
   stop: (serverId) => ipcRenderer.invoke("mcp:stdio:stop", serverId),
 });
 
+// —— 本机运行时探测（仅桌面端）——
+// Registry 的本地包（npm/pypi）服务能不能装，取决于这台机器有没有 npx / uvx。
+// 渲染层没有 fs，只能问主进程；浏览器端没有这个桥，前端据此把本地包一律标记为
+// 「无法探测」而不是猜测。
+contextBridge.exposeInMainWorld("__heming_runtime", {
+  /** 返回 { platform, npm, pypi, note, ... }；只读探测，不执行任何命令。 */
+  probe: () => ipcRenderer.invoke("runtime:probe"),
+});
+
 // —— 版本号 ——
 // 展示与更新比较都用 5 段版本（d.特性.破坏性.修订.构建），不在渲染层重复读 package.json。
 contextBridge.exposeInMainWorld("__heming_version", appVersion());

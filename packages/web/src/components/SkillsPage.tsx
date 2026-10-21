@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listAgents } from "../lib/agentsApi.js";
 import { SelfEditCard } from "./SelfEditCard.js";
 import { ToneCard } from "./ToneCard.js";
 import { PlusIcon } from "./icons.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
+import { useModalA11y } from "./useModalA11y.js";
 import {
   skillPool,
   type SkillDefinition,
   type SkillPool,
 } from "../lib/skills/index.js";
+import { memoryStore } from "../lib/memory/index.js";
+import { mcpRegistry } from "../lib/mcp/index.js";
 
 /**
  * 技能区：技能（四类分组）/ 技能池（全量表格）两个视图。
@@ -158,20 +162,24 @@ function SkillDetailDrawer({
   onClose: () => void;
   onDelete: () => void;
 }) {
+  const panelRef = useRef<HTMLElement>(null);
+  useModalA11y(panelRef, onClose);
+
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`技能详情 ${skill.name}`}
-      className="fixed inset-0 z-50 flex justify-end"
-    >
+    <div className="fixed inset-0 z-50 flex justify-end">
       <button
         type="button"
         aria-label="关闭技能详情"
         onClick={onClose}
         className="absolute inset-0 bg-black/10"
       />
-      <aside className="relative flex h-full w-[380px] max-w-[92vw] flex-col border-l border-line bg-white shadow-card">
+      <aside
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`技能详情 ${skill.name}`}
+        className="relative flex h-full w-[380px] max-w-[92vw] flex-col border-l border-line bg-white shadow-card"
+      >
         <div className="flex items-start justify-between gap-3 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">
             <h2 className="truncate text-[14px] font-extrabold">{skill.name}</h2>
@@ -235,6 +243,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
   const [tick, setTick] = useState(0);
   const [query, setQuery] = useState("");
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<SkillDefinition | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -243,6 +252,9 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
   const [agentId, setAgentId] = useState<string>("");
   /** 「＋ 添加技能」浮层：当前要往哪个分类里加（null = 关闭）。 */
   const [addFor, setAddFor] = useState<SkillCategory | null>(null);
+  const addPanelRef = useRef<HTMLDivElement>(null);
+  const closeAddPanel = () => setAddFor(null);
+  useModalA11y(addPanelRef, closeAddPanel, { active: !!addFor });
 
   useEffect(() => {
     let cancelled = false;
@@ -315,8 +327,15 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
   };
 
   const removeSkill = (skill: SkillDefinition) => {
+    setRemoveTarget(skill);
+  };
+
+  const confirmRemoveSkill = () => {
+    if (!removeTarget) return;
+    const skill = removeTarget;
     skills.remove(skill.id);
     if (detailId === skill.id) setDetailId(null);
+    setRemoveTarget(null);
     bump();
     setMsg({ kind: "ok", text: `已删除技能：${skill.name}` });
   };
@@ -713,7 +732,9 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
           onClick={() => setAddFor(null)}
         >
           <div
+            ref={addPanelRef}
             role="dialog"
+            aria-modal="true"
             aria-label="添加技能"
             className="w-[440px] max-w-full rounded-xl border border-line bg-white p-4 shadow-card"
             onClick={(e) => e.stopPropagation()}
@@ -770,7 +791,11 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
       <ToneCard />
 
       {/* 自我优化：让智能体改自己的记忆/技能/MCP。与「技能」同属能力配置，故放这里 */}
-      <SelfEditCard agents={agents} agentId={agentId} />
+      <SelfEditCard
+        agents={agents}
+        agentId={agentId}
+        targets={{ memory: memoryStore, skills, mcp: mcpRegistry }}
+      />
 
       {detail && (
         <SkillDetailDrawer
@@ -778,6 +803,36 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
           onClose={() => setDetailId(null)}
           onDelete={() => removeSkill(detail)}
         />
+      )}
+
+      {removeTarget && (
+        <ConfirmDialog
+          title="删除技能"
+          onCancel={() => setRemoveTarget(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setRemoveTarget(null)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={confirmRemoveSkill}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            删除技能「{removeTarget.name}」？技能定义、使用统计和所有智能体上的分配都会被移除，
+            此操作不可恢复。
+          </p>
+        </ConfirmDialog>
       )}
     </div>
   );

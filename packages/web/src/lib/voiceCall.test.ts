@@ -19,12 +19,15 @@ class MockRTCPeerConnection {
   onconnectionstatechange: (() => void) | null = null;
   candidates: unknown[] = [];
   addedTracks: { track: unknown; stream: unknown }[] = [];
+  /** createOffer 的入参记录：ICE 重连必须带 iceRestart，否则对端拿不到新 ufrag。 */
+  offerOptions: (RTCOfferOptions | undefined)[] = [];
 
   constructor(public config: RTCConfiguration) {
     MockRTCPeerConnection.instances.push(this);
   }
 
-  createOffer(): Promise<RTCSessionDescriptionInit> {
+  createOffer(options?: RTCOfferOptions): Promise<RTCSessionDescriptionInit> {
+    this.offerOptions.push(options);
     return Promise.resolve({ type: "offer", sdp: "v=0 mock-offer" });
   }
   createAnswer(): Promise<RTCSessionDescriptionInit> {
@@ -50,6 +53,12 @@ class MockRTCPeerConnection {
     this.closed = true;
     this.iceConnectionState = "closed";
     this.connectionState = "closed";
+  }
+
+  /** 模拟 ICE 状态迁移（jsdom 不会自己触发；重连逻辑全靠这个回调）。 */
+  setIceState(state: RTCIceConnectionState): void {
+    this.iceConnectionState = state;
+    this.oniceconnectionstatechange?.();
   }
 }
 
@@ -91,6 +100,7 @@ const IDLE_STATE_EXPECT = {
   muted: false,
   error: null,
   incoming: null,
+  reconnecting: 0,
 };
 
 describe("useVoiceCall", () => {
@@ -103,6 +113,7 @@ describe("useVoiceCall", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     media.restore();
   });
@@ -583,5 +594,163 @@ describe("useVoiceCall", () => {
     expect(pcU2.candidates).toHaveLength(0);
     expect(pcU3.candidates).toHaveLength(1);
     expect(pcU3.candidates[0]).toMatchObject({ candidate: cand });
+  });
+
+  // ── d.25 断线重连：ICE 抖动先观察、真断了才重启，重启两次仍不通才收线 ──
+
+  it("ICE disconnected 持续 3s 后重启：offer 带 iceRestart 且走 reconnect 信令", async () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+    await act(async () => {
+      await result.current.call("c1", ["u2"]);
+    });
+    const pc = MockRTCPeerConnection.instances[0];
+
+    await act(async () => {
+      pc.setIceState("disconnected");
+    });
+    expect(result.current.state.reconnecting).toBe(1);
+    expect(sendByType(send, "voice_call_reconnect")).toHaveLength(0); // 观察期内先不动
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    const reconnects = sendByType(send, "voice_call_reconnect");
+    expect(reconnects).toHaveLength(1);
+    expect(reconnects[0][0]).toMatchObject({
+      type: "voice_call_reconnect",
+      conversationId: "c1",
+      sdpType: "offer",
+      sdp: expect.stringContaining("mock-offer"),
+    });
+    expect(pc.offerOptions.some((o) => o?.iceRestart === true)).toBe(true);
+    // 重连只改链路健康度，不改通话阶段（否则面板会退回「正在呼叫…」）
+    expect(result.current.state.status).toBe("ringing");
+    expect(result.current.state.reconnecting).toBe(1);
+  });
+
+  it("观察期内链路自己爬回来就不重启，重连计数归零", async () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+    await act(async () => {
+      await result.current.call("c1", ["u2"]);
+    });
+    const pc = MockRTCPeerConnection.instances[0];
+
+    await act(async () => {
+      pc.setIceState("disconnected");
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    await act(async () => {
+      pc.setIceState("connected");
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(sendByType(send, "voice_call_reconnect")).toHaveLength(0);
+    expect(result.current.state.reconnecting).toBe(0);
+  });
+
+  it("ICE failed 直接重启，两次预算用尽后收线并留下可读原因", async () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+    await act(async () => {
+      await result.current.call("c1", ["u2"]);
+    });
+    const pc = MockRTCPeerConnection.instances[0];
+
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        pc.setIceState("failed");
+      });
+    }
+    expect(sendByType(send, "voice_call_reconnect")).toHaveLength(2); // 只重启两次
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(result.current.state).toMatchObject({ status: "idle", error: "连接已断开，请重新呼叫" });
+    expect(sendByType(send, "voice_call_hangup")).toHaveLength(1);
+    expect(pc.closed).toBe(true);
+  });
+
+  it("收到对端 reconnect offer：应用新 offer 并回 answer", async () => {
+    const send = vi.fn();
+    const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+    await act(async () => {
+      await result.current.call("c1", ["u2"]);
+    });
+    const pc = MockRTCPeerConnection.instances[0];
+    await act(async () => {
+      pc.setIceState("connected");
+    });
+
+    await act(async () => {
+      result.current.handleServerEvent({
+        type: "voice_call_reconnect",
+        conversationId: "c1",
+        callId: result.current.state.callId!,
+        sdp: "v=0 restart-offer",
+        sdpType: "offer",
+        fromUserId: "u2",
+      } as WsServerEvent);
+    });
+    expect(pc.remoteDescription).toMatchObject({ type: "offer", sdp: "v=0 restart-offer" });
+    const answers = sendByType(send, "voice_call_reconnect");
+    expect(answers).toHaveLength(1);
+    expect(answers[0][0]).toMatchObject({
+      type: "voice_call_reconnect",
+      sdpType: "answer",
+      sdp: expect.stringContaining("mock-answer"),
+    });
+  });
+
+  it("首屏还没协商完（connecting）时不接受第二次 offer，避免打断在飞的初始协商", async () => {
+    const send = vi.fn();
+    const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+    await act(async () => {
+      await result.current.call("c1", ["u2"]);
+    });
+    const pc = MockRTCPeerConnection.instances[0];
+
+    await act(async () => {
+      result.current.handleServerEvent({
+        type: "voice_call_reconnect",
+        conversationId: "c1",
+        callId: result.current.state.callId!,
+        sdp: "v=0 restart-offer",
+        sdpType: "offer",
+        fromUserId: "u2",
+      } as WsServerEvent);
+    });
+    expect(pc.remoteDescription).toBeNull();
+    expect(sendByType(send, "voice_call_reconnect")).toHaveLength(0);
+  });
+
+  it("挂断后迟到的 ICE 回调不再触发重连", async () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const { result } = renderHook(() => useVoiceCall({ send, myUserId: "u1" }));
+    await act(async () => {
+      await result.current.call("c1", ["u2"]);
+    });
+    const pc = MockRTCPeerConnection.instances[0];
+
+    await act(async () => {
+      pc.setIceState("disconnected");
+    });
+    act(() => {
+      result.current.hangup();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(sendByType(send, "voice_call_reconnect")).toHaveLength(0);
+    expect(result.current.state.reconnecting).toBe(0);
   });
 });

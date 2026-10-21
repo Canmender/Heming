@@ -110,6 +110,13 @@ export function VoiceCallPanel({
                 {state.role === "caller" ? "正在呼叫…" : "来电"}
               </span>
             )}
+            {/* ICE 重连提示：链路断了但还在救（不弹错误条，避免用户以为已经挂断） */}
+            {state.status === "active" && state.reconnecting > 0 && (
+              <span role="status" className="flex items-center gap-2 text-[14px] text-[#fbbf24]">
+                <span className="h-2 w-2 rounded-full bg-[#fbbf24] animate-pulse" />
+                {`连接中断，正在重连…（${state.reconnecting} 路）`}
+              </span>
+            )}
           </div>
         )}
         {/* 被叫 ringing：面板内直接给接听/拒绝（全屏 z-50 之上，可见可点） */}

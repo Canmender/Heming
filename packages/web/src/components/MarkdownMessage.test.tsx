@@ -114,4 +114,14 @@ describe("MarkdownMessage", () => {
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toContain("noopener");
   });
+
+  it("行内公式与块级公式渲染为 KaTeX，而不是裸源码", () => {
+    const { container } = render(
+      <MarkdownMessage text={"质能方程 $E=mc^2$\n\n$$\n\\int_0^1 x^2 dx\n$$"} />,
+    );
+    expect(container.querySelectorAll(".katex").length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelector(".katex-display")).toBeTruthy();
+    // 原始 $ 标记不应出现在可见文本里
+    expect(container.textContent).not.toContain("$E=mc^2$");
+  });
 });

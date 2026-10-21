@@ -155,7 +155,7 @@ export function rateInstall(entry: RegistryEntry, option: InstallOption): Instal
     return { level: "low", message: note.join(""), detail: entry.repoUrl };
   }
 
-  note.push("本机进程运行：该服务装上后可以读写文件、执行命令，等于把本机权限交给它的作者。");
+  note.push("安装后该服务以本机进程运行，可读写文件、执行命令，等于把本机权限交给它的作者。");
   if (repoLooksMismatched(entry.key, entry.repoUrl)) {
     note.push(`另外，注册来源（${registryDomain(entry.key)}）与仓库地址看起来不一致，可自行核对。`);
   }

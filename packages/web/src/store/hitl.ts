@@ -48,6 +48,13 @@ export interface ConfirmDecision {
   verdicts: HitlVerdict[];
   /** 整体拒绝时的理由。 */
   reason?: string;
+  /**
+   * 非工具调用场景的返回值（如安装确认：是否同意 + 用户填的请求头）。
+   *
+   * ★ 有值时 `decide` 就 resolve 它，而不是 `verdicts`——因为这类确认没有
+   * 「逐项工具裁决」的语义，硬塞进 `HitlVerdict` 只能靠字段名暗示，迟早被误读。
+   */
+  data?: unknown;
 }
 
 interface HitlState {
@@ -77,6 +84,14 @@ interface HitlState {
   decide: (decision: ConfirmDecision) => void;
   /** 全部取消（如用户按了停止）：所有等待者按拒绝收口。 */
   cancelAll: (reason: string) => void;
+  /**
+   * 只取消某个会话的待确认请求。
+   *
+   * 用户切走会话后，原会话的确认弹窗既看不到归属也不该占着单槽——
+   * 一直挂着就是闸门永远等不到裁决；直接收口成「空裁决」（全部拒绝）最安全。
+   * 其他会话的请求不受影响，队列顺序保持。
+   */
+  cancelForConversation: (conversationId: string) => void;
 }
 
 /**
@@ -148,7 +163,8 @@ export const useHitlStore = create<HitlState>((set, get) => ({
     if (!resolve) return;
     waiters.delete(decision.requestId);
     set({ pending: null });
-    resolve(decision.verdicts);
+    // `data` 是「非工具调用」场景的返回值；没有就沿用工具裁决。
+    resolve(decision.data !== undefined ? decision.data : decision.verdicts);
 
     // 队列头成为新的 pending。
     const next = queue.shift();
@@ -172,6 +188,29 @@ export const useHitlStore = create<HitlState>((set, get) => ({
     queue.length = 0;
     set({ pending: null });
     void reason;
+  },
+
+  cancelForConversation: (conversationId) => {
+    // 先从队列里摘掉同会话的请求并收口（倒序遍历，删除时下标不漂）。
+    for (let i = queue.length - 1; i >= 0; i -= 1) {
+      if (queue[i].ctx.conversationId !== conversationId) continue;
+      const [item] = queue.splice(i, 1);
+      item.resolve([]);
+    }
+
+    const current = get().pending;
+    if (!current || current.conversationId !== conversationId) return;
+    const resolve = waiters.get(current.requestId);
+    waiters.delete(current.requestId);
+    set({ pending: null });
+    resolve?.([]);
+
+    // 当前槽空出来了：按原顺序把下一个请求顶上。
+    const next = queue.shift();
+    if (!next) return;
+    const requestId = newRequestId();
+    waiters.set(requestId, next.resolve);
+    set({ pending: toPending(requestId, next) });
   },
 }));
 

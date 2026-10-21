@@ -17,6 +17,7 @@ import {
   type WikiBridge,
 } from "../lib/wiki/index.js";
 import { WikiGraphView } from "./WikiGraphView.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 
 /**
  * 个人知识库面板（卡帕西 LLM Wiki 标准的落地界面）。
@@ -145,8 +146,15 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
     [],
   );
 
-  const removePage = useCallback(
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
+
+  const removePage = useCallback((path: string) => {
+    setRemoveTarget(path);
+  }, []);
+
+  const confirmRemovePage = useCallback(
     async (path: string) => {
+      setRemoveTarget(null);
       setBusy(true);
       try {
         await bridge.remove(path);
@@ -342,6 +350,35 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
           </div>
         )}
       </div>
+
+      {removeTarget && (
+        <ConfirmDialog
+          title="删除页面"
+          onCancel={() => setRemoveTarget(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setRemoveTarget(null)}
+                className={btnGhost}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmRemovePage(removeTarget)}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[11px] font-medium text-white"
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            删除页面「{removeTarget}」？文件会从本机知识库移除，指向它的 [[双链]] 将变成悬空链接，操作不可撤销。
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

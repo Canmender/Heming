@@ -27,6 +27,8 @@
 | `self_mcp_list` | 读 MCP 服务与工具启用状态 |
 | `self_mcp_enable` / `self_mcp_disable` | 启用/停用工具（`serverId::toolName`） |
 | `self_mcp_add_server` / `update_server` / `remove_server` | 增改删 MCP 服务 |
+| `self_snapshot_list` | 列出可回滚的修改（只读） |
+| `self_rollback` | 回滚一条修改（danger，走 HITL） |
 
 **形状对齐既有 MCP 工具**（OpenAI 的 `{type:"function",…}` + `{name, arguments}`），
 所以模型不需要学新协议，`agentStream` 的工具循环也不用改。两个桥由
@@ -58,6 +60,22 @@
 `self_skill_update` 遇到 `builtin` 技能会拒绝并提示改用 `self_skill_create`。
 内置技能是所有智能体的公共基线，让单个智能体改它会影响别人；
 真要调整就沉淀一条自己的技能，来源是 `distilled`，归属清楚。
+
+## 快照与回滚（`lib/selfEdit/snapshots.ts`）
+
+留痕只回答「改了什么」，回不了退；快照补上「**改之前是什么**」。
+
+- 每次**成功**的记忆 / 技能 / MCP 变更记一条反向操作（记忆写入前的原条目、技能更新前的
+  完整定义、被删服务的配置等），**不是整库复制**——localStorage 只有几 MB，
+  整库复制几次就会挤掉用户自己的数据
+- 上限 50 条（`heming.selfEdit.snapshots.v1`），超出丢最旧的；快照与审计分开存，
+  清空快照不影响留痕
+- `self_rollback` 按**快照所属域**走 HITL（改 MCP 的回滚同样是危险操作），
+  成功后移除该快照并留痕 `other/rollback`；失败保留快照并说明原因，便于重试或手工处理
+- 回滚**永不抛**：目标可能已被用户手工改动或删除，此时返回可读原因而不是崩掉本轮对话
+- 快照按智能体隔离：A 智能体看不到、也回滚不了 B 的快照；技能区「自我优化」卡
+  只列出当前智能体的可回滚项
+- 已知代价：记忆条目回滚后内部 id 会变（内容、key、置顶状态照旧），且不覆盖审计记录本身
 
 ## 开关接线
 

@@ -229,10 +229,13 @@ export async function fetchPage(
 /** 搜索（实测 `?search=` 可用，是 name 的子串匹配；未传时按 name 字母序返回）。 */
 export async function search(
   query: string,
-  deps: FetchDeps & { limit?: number } = {},
+  deps: FetchDeps & { limit?: number; cursor?: string } = {},
 ): Promise<FetchResult<RegistryEntry[]>> {
   const q = query.trim();
-  return requestEntries({ limit: String(deps.limit ?? REGISTRY_PAGE_SIZE), search: q || undefined }, deps);
+  return requestEntries(
+    { limit: String(deps.limit ?? REGISTRY_PAGE_SIZE), search: q || undefined, cursor: deps.cursor },
+    deps,
+  );
 }
 
 /** JSON 解析 + 基本形状校验。**垃圾输入返回 null 而不是抛**。 */

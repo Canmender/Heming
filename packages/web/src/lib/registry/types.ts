@@ -220,6 +220,9 @@ export interface RegistryEntry {
   /** 官网（实测大量 null，无则不显示）。 */
   websiteUrl?: string;
 
+  /** 图标地址（只接受 http(s)，无则不显示）。仅展示。 */
+  iconUrl?: string;
+
   /** 官方状态（实测几乎全是 active）。**只用于「要不要展示」，不参与风险评级。** */
   status: string;
 

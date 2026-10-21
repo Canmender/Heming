@@ -74,6 +74,32 @@ export type HitlSource = "mcp" | "self" | "chart" | "tone" | "unknown";
  */
 export type PolicyOutcome = "pass" | "ask";
 
+/**
+ * 记住的规则效果。
+ *
+ * `deny` 优先于 `allow`：同一工具/资源上两类规则同时存在时，按拒绝处理。
+ * `allow` 只对 `read`/`write` 生效——`danger` 永远会问，
+ * 否则「按资源记住」就成了事实上的全放行。
+ */
+export type RuleEffect = "allow" | "deny";
+
+/** 一条落盘的授权规则：工具 + 资源 + 效果。资源为 `*` 表示该工具的所有调用。 */
+export interface HitlRule {
+  tool: string;
+  resource: string;
+  effect: RuleEffect;
+  at: string;
+  /**
+   * 规则归属的智能体。缺省 = 历史遗留的全局规则（对所有智能体生效）。
+   *
+   * 为什么要分作用域：群聊里 A 智能体被拒绝的写操作，不该让 B 智能体的同一工具
+   * 也永久免问/永久被拒。新规则一律带 agentId，旧规则保持全局以兼容既有存储。
+   */
+  agentId?: string;
+  /** 智能体名快照：设置区展示用，避免为了显示名字再去查名册。 */
+  agentName?: string;
+}
+
 /** 一个待确认的工具调用（已分类、已生成参数摘要）。 */
 export interface HitlCall {
   /** 模型给的 tool_call id（回灌 tool 消息时用它对齐）。 */
@@ -117,7 +143,18 @@ export interface HitlVerdict {
   decision: Exclude<Decision, "pass">;
   /** 拒绝理由 / 说明（可选）。 */
   reason?: string;
+  /** 是否把本次裁决记成规则（按工具 + 资源落盘）。缺省 false。 */
+  remember?: boolean;
 }
+
+/**
+ * 拒绝原因分类。
+ *
+ * - `user`：用户当场拒绝（或在同一轮里拒绝过同一调用）；
+ * - `rule`：命中了用户此前记住的拒绝规则；
+ * - `gate`：闸门/UI 异常，**不是用户拒绝**——回灌文案不能写「用户拒绝了」。
+ */
+export type DenyCause = "user" | "rule" | "gate";
 
 /**
  * 闸门给出的最终结果：一个 tool_call 对一条。
@@ -127,4 +164,4 @@ export interface HitlVerdict {
  */
 export type GateOutcome =
   | { kind: "allow"; call: HitlCall }
-  | { kind: "deny"; call: HitlCall; reason?: string };
+  | { kind: "deny"; call: HitlCall; reason?: string; cause?: DenyCause };

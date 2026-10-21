@@ -10,6 +10,7 @@ const {
   isValidCommand,
   isValidArgs,
   resolveExecutable,
+  resolveExecutablePath,
 } = require("./mcp-stdio");
 
 /** 假子进程：记录写入 stdin 的行，可手动 emit stdout/exit。 */
@@ -156,6 +157,75 @@ test("disposeAll 停掉全部服务", () => {
   assert.deepEqual(bridge.running(), []);
 });
 
+/* ================================================================== planSpawn（本机运行时翻译） */
+
+test("planSpawn · spawn 收到翻译后的命令与参数，且仍然 shell:false", () => {
+  const calls = [];
+  const { child } = fakeChild();
+  const bridge = createStdioBridge({
+    spawn: (command, args, opts) => {
+      calls.push({ command, args, opts });
+      return child;
+    },
+    planSpawn: ({ command, args }) =>
+      command === "npx"
+        ? { command: path.join("C:", "nodejs", "node.exe"), args: [path.join("C:", "nodejs", "npx-cli.js"), ...args] }
+        : { command, args },
+  });
+  bridge.request("s1", { command: "npx", args: ["-y", "pkg"] }, "tools/list", {}).catch(() => {});
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, path.join("C:", "nodejs", "node.exe"));
+  assert.deepEqual(calls[0].args, [path.join("C:", "nodejs", "npx-cli.js"), "-y", "pkg"]);
+  assert.equal(calls[0].opts.shell, false);
+});
+
+test("planSpawn · 拿到的是补全过的 PATH（否则探测结果与启动环境会自相矛盾）", () => {
+  const calls = [];
+  const { child } = fakeChild();
+  const bridge = createStdioBridge({
+    spawn: () => child,
+    planSpawn: (plan) => {
+      calls.push(plan);
+      return { command: plan.command, args: plan.args };
+    },
+  });
+  bridge.request("s1", { command: "x" }, "tools/list", {}).catch(() => {});
+  assert.equal(calls.length, 1);
+  const pathKey = Object.keys(calls[0].env).find((k) => k.toLowerCase() === "path");
+  assert.equal(typeof calls[0].env[pathKey], "string");
+  assert.ok(calls[0].env[pathKey].length > 0);
+  assert.deepEqual(calls[0].args, []);
+});
+
+test("planSpawn 抛错（本机缺运行时）→ 不 spawn，文案原样冒泡", () => {
+  let spawned = 0;
+  const bridge = createStdioBridge({
+    spawn: () => {
+      spawned++;
+      return fakeChild().child;
+    },
+    planSpawn: () => {
+      throw new Error("本机未找到 uv/uvx（pypi 包需要 uv），无法运行该服务");
+    },
+  });
+  assert.throws(() => bridge.request("s1", { command: "uvx" }, "tools/list", {}), /本机未找到 uv\/uvx/);
+  assert.equal(spawned, 0);
+  assert.deepEqual(bridge.running(), []);
+});
+
+test("planSpawn 返回非法命令时仍然被拦住（不因翻译绕过校验）", () => {
+  let spawned = 0;
+  const bridge = createStdioBridge({
+    spawn: () => {
+      spawned++;
+      return fakeChild().child;
+    },
+    planSpawn: () => ({ command: "bad\ncmd", args: [] }),
+  });
+  assert.throws(() => bridge.request("s1", { command: "npx" }, "tools/list", {}), /命令不合法/);
+  assert.equal(spawned, 0);
+});
+
 /* ================================================================== resolveExecutable */
 
 /**
@@ -239,4 +309,34 @@ test("resolveExecutable · 命令为空或非字符串时返回 null", () => {
 test("resolveExecutable · 不带 existsFn 时走真实文件系统（不抛）", () => {
   const r = resolveExecutable("definitely-not-a-real-cmd-xyz", ["C:////nope"]);
   assert.ok(r === null || typeof r === "string");
+});
+
+/* ================================================================== resolveExecutablePath */
+
+test("resolveExecutablePath · 返回命中目录下的绝对路径（spawn 只认绝对路径）", () => {
+  const exists = (p) => p === path.join("C:////bin", "uvx.exe");
+  assert.equal(resolveExecutablePath("uvx", ["C:////bin"], exists), path.join("C:////bin", "uvx.exe"));
+});
+
+test("resolveExecutablePath · 候选顺序与 resolveExecutable 一致（.exe -> .cmd -> .bat -> 原名）", () => {
+  const seen = [];
+  resolveExecutablePath("npx", ["C:////bin"], (p) => {
+    seen.push(path.basename(p));
+    return false;
+  });
+  assert.deepEqual(seen, ["npx.exe", "npx.cmd", "npx.bat", "npx"]);
+});
+
+test("resolveExecutablePath · 找不到 / 命令非法时返回 null", () => {
+  assert.equal(resolveExecutablePath("npx", ["C:////bin"], () => false), null);
+  assert.equal(resolveExecutablePath("", ["C:////bin"], () => true), null);
+  assert.equal(resolveExecutablePath(undefined, ["C:////bin"], () => true), null);
+});
+
+test("resolveExecutable · 与 resolveExecutablePath 只差一层 basename（不会漂移）", () => {
+  const exists = (p) => p === path.join("C:////bin", "npx.cmd");
+  assert.equal(
+    resolveExecutable("npx", ["C:////bin"], exists),
+    path.basename(resolveExecutablePath("npx", ["C:////bin"], exists)),
+  );
 });

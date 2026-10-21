@@ -1,19 +1,69 @@
 import type { WsClientEvent } from "@heming/shared";
 import type { LlmProfile } from "../store/llm.js";
 import { streamChat, type ChatMessage, type ToolCall } from "./llmClient.js";
-import type { GateOutcome, RiskLevel } from "./hitl/types.js";
-import { deniedText } from "./hitl/text.js";
+import type { DenyCause, GateOutcome, RiskLevel } from "./hitl/types.js";
+import { toHitlCall } from "./hitl/classify.js";
+import { deniedText, notExecutedText, ruleDeniedText } from "./hitl/text.js";
+import { supportsKind } from "./capabilityNotice.js";
 
 /** 工具调用最多允许的连续轮次（防止模型陷入「调工具→再调」死循环）。 */
 export const MAX_TOOL_ROUNDS = 3;
 
 /** 触发编排的依赖注入面：stores/WS/流式适配器由 ChatPage 组装，本模块保持纯逻辑可测。 */
+/** 一次流（单个 mention）的终态：成功 / 中断 / 失败，每次流恰好一次。 */
+export interface RunSettled {
+  status: "ok" | "aborted" | "error";
+  /** 成功或中断时的最终文本（中断时为已产生的部分文本）。 */
+  finalText?: string;
+  /** 失败原因（status="error" 时有值）。 */
+  error?: string;
+}
+
+/** 工具结果里附带的一条来源（如知识库页面）。 */
+export interface ToolSource {
+  /** 稳定标识（wiki 页面路径）。 */
+  id: string;
+  /** 展示标题。 */
+  title: string;
+  /** 可选的补充定位信息（类别、片段）。 */
+  detail?: string;
+}
+
+/** 答案末尾来源脚注最多列几条（再多用户也不会看）。 */
+export const MAX_SOURCES = 8;
+
+/**
+ * 把工具带回的来源拼成确定性脚注。
+ *
+ * 为什么由编排层拼而不是让模型自己写：模型会漏、会编、会改标题；
+ * 脚注只在**工具真的返回过该来源**时出现，按首次出现顺序去重，
+ * 与模型是否在正文里引用无关——它至少保证「用了知识库就有可点核的来源」。
+ */
+export function sourceFooter(sources: ToolSource[]): string {
+  const seen = new Set<string>();
+  const uniq: ToolSource[] = [];
+  for (const s of sources) {
+    const id = String(s?.id ?? "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    uniq.push({ ...s, id });
+    if (uniq.length >= MAX_SOURCES) break;
+  }
+  if (!uniq.length) return "";
+  const line = (s: ToolSource) =>
+    `- ${String(s.title ?? s.id).replace(/\s+/g, " ").slice(0, 120)}（${s.id.replace(/[\r\n]+/g, " ")}）`;
+  return `\n\n---\n来源（来自本机知识库）：\n${uniq.map(line).join("\n")}`;
+}
+
 /** 工具桥：把「给模型的工具声明」与「执行一次调用」交给编排层（本模块不认识 MCP）。 */
 export interface ToolBridge {
   /** OpenAI 格式的 tools 数组；空数组 = 本轮没有可用工具。 */
   tools: unknown[];
   /** 执行一个工具调用（永不抛：失败也在结果里带 ok=false 与原因）。 */
-  execute: (call: { name: string; arguments: string }) => Promise<{ text: string; ok: boolean }>;
+  execute: (call: {
+    name: string;
+    arguments: string;
+  }) => Promise<{ text: string; ok: boolean; sources?: ToolSource[] }>;
   /**
    * 工具的风险元数据（可选）：闸门用它判断该调用该不该问用户。
    *
@@ -26,7 +76,11 @@ export interface ToolBridge {
 export interface TriggerDeps {
   getProfile: (agentId: string) => LlmProfile | undefined;
   getPrompt: (agentId: string) => string;
-  fetchHistory: () => Promise<{ role: "system" | "user" | "assistant"; content: string }[]>;
+  /**
+   * 历史（按调用方给的 profile 组装）：视觉模型才会把图片片附进历史，
+   * 因此这里把 profile 透传下去，而不是先取一份与模型无关的历史。
+   */
+  fetchHistory: (profile: LlmProfile) => Promise<ChatMessage[]>;
   send: (e: WsClientEvent) => void;
   streamChat: typeof streamChat;
   onLocalDelta: (streamId: string, chunk: string) => void;
@@ -93,13 +147,29 @@ export interface TriggerDeps {
       ok?: boolean;
       result?: string;
       denied?: boolean;
+      /** 本调用成功返回的来源（仅 ok=true 时带；任务区汇总来源用）。 */
+      sources?: ToolSource[];
+      /** 被拒原因（denied=true 时带：用户当场拒绝 / 命中记住的规则 / 闸门异常）。 */
+      denyCause?: DenyCause;
     },
   ) => void;
   /**
+   * 一次流（单个 mention）的**终态**回调：成功 / 中断 / 失败，每次流恰好一次。
+   *
+   * 与 `onTurnComplete` 的区别：后者只关心「有没有可记忆的文本」，
+   * 完全无文本的失败不回调；任务区需要**每个流都有终态**——
+   * 否则失败的流会永远停在「进行中」。
+   * 回调异常一律吞掉，绝不影响三事件上行。
+   */
+  onRunSettled?: (streamId: string, result: RunSettled) => void;
+  /**
    * 工具执行前的**人工确认闸门**（HITL）：返回的数组**长度与顺序必须与 calls 一致**。
    *
-   * 抛错 / 条数对不上 → 一律按全放行处理（闸门故障不得阻断生成）；
+   * 抛错 / 条数对不上 → 一律按**拒绝**处理（补 deny，不是放行）；
    * 缺省 → 全放行（行为与未接入时逐字等价）。
+   *
+   * 「闸门故障不得阻断生成」= 模型总能收到一条 `tool` 消息，
+   * 不等于「工具总能执行」。兜底往执行倒，UI 一坏就是危险操作静默放行。
    *
    * 判定为「拒绝」的项**不会被执行**——编排层改回一段明确声明「未修改」的文案，
    * 让模型知道这次调用没有落地（否则它会以为写了一半）。
@@ -187,12 +257,21 @@ function notifyTurnComplete(
   }
 }
 
+/** 终态回调：任务区/日志等副作用失败不得反噬流的收口。 */
+function notifyRunSettled(deps: TriggerDeps, streamId: string, result: RunSettled): void {
+  try {
+    deps.onRunSettled?.(streamId, result);
+  } catch {
+    /* 终态记录失败不影响三事件上行 */
+  }
+}
+
 /**
  * 闸门调用：把一批 tool_calls 交给接线层裁决，返回与 calls **等长同序**的放行/拒绝结果。
  *
- * 两条降级口径（都是「宁可放行也不阻断这一轮对话」）：
- * - 钩子抛错 → 全部放行；
- * - 返回条数与 calls 不一致 → 全部放行（下游按下标对齐，对不上就不能信）。
+ * 两条降级口径（都是「宁可拒绝也不误放行」）：
+ * - 钩子抛错 → 全部拒绝；
+ * - 返回条数与 calls 不一致 → 全部拒绝（下游按下标对齐，对不上就不能信）。
  *
  * 未注入钩子时**不产生任何额外对象**，直接沿用原来的执行路径——
  * 这是向后兼容铁律：没接闸门时行为与接入之前逐字等价。
@@ -203,18 +282,19 @@ async function confirmToolCalls(
   ctx: { agentId: string; agentName: string; streamId: string; conversationId: string },
 ): Promise<GateOutcome[] | null> {
   if (!deps.confirmToolCalls) return null;
-  let outcomes: GateOutcome[];
   try {
-    outcomes = await deps.confirmToolCalls(calls, ctx);
+    const outcomes = await deps.confirmToolCalls(calls, ctx);
+    if (Array.isArray(outcomes) && outcomes.length === calls.length) return outcomes;
+    console.warn("HITL 闸门返回条数与工具调用数不一致，本轮按拒绝处理");
   } catch (e) {
-    console.warn("HITL 闸门异常，本轮工具调用按放行处理", e);
-    return null;
+    console.warn("HITL 闸门异常，本轮按拒绝处理", e);
   }
-  if (!Array.isArray(outcomes) || outcomes.length !== calls.length) {
-    console.warn("HITL 闸门返回条数与工具调用数不一致，本轮按放行处理");
-    return null;
-  }
-  return outcomes;
+  return calls.map((call) => ({
+    kind: "deny" as const,
+    call: toHitlCall(call),
+    reason: "确认流程异常，本次调用未执行",
+    cause: "gate" as const,
+  }));
 }
 
 /**
@@ -239,11 +319,17 @@ export function runAgentMentions(
     for (const c of controllers) c.abort();
   };
   const done = (async (): Promise<AgentRunHandle> => {
-    const history = await deps.fetchHistory();
     await Promise.all(
       mentions.map(async (m) => {
         const streamId = newStreamId();
         deps.onStart?.(streamId, m);
+        /** 终态恰好一次：成功/中断/失败与「无绑定」「读历史失败」等早退路径共用此闸。 */
+        let settled = false;
+        const settle = (result: RunSettled) => {
+          if (settled) return;
+          settled = true;
+          notifyRunSettled(deps, streamId, result);
+        };
         // E2E 串行闸与错误上行（fix I2）——先于 profile 判定定义：无绑定分支也要发信封错误
         let idx = 0;
         // 片/错误上行串行闸：seal 读写会话链文件跨 await 交错会撞 n（同 n 密文被收端去重
@@ -288,8 +374,20 @@ export function runAgentMentions(
         };
         const profile = deps.getProfile(m.agentId);
         if (!profile) {
+          settle({ status: "error", error: "未绑定 LLM 连接" });
           await sendError("provider_error", "未绑定 LLM 连接");
           return;
+        }
+        // 历史按本智能体的模型能力组装（视觉模型才带图片片）；取历史放在绑定判定之后，
+        // 无绑定分支不再白读一次消息。
+        // 读历史失败发生在主 try 之外（原有行为：整轮 reject，触发端提示启动失败），
+        // 但任务区仍需要一个终态，否则该任务会一直停在「进行中」。
+        let history: ChatMessage[];
+        try {
+          history = await deps.fetchHistory(profile);
+        } catch (e) {
+          settle({ status: "error", error: (e as Error)?.message?.slice(0, 300) || "读取历史失败" });
+          throw e;
         }
         // 系统提示词：deps.buildSystemPrompt 存在时优先（触发端在此拼装记忆/技能），
         // 抛错回落 getPrompt 的原提示词——上下文组装失败不影响生成
@@ -424,10 +522,22 @@ export function runAgentMentions(
         const once = async (aggressive?: 1 | 2) => {
           local = "";
           const bridge = deps.getTools?.(m.agentId) ?? null;
+          // 工具需要两个条件：桥形状是 OpenAI tools（Anthropic 的 content blocks 不兼容），
+          // 且能力表认定该模型支持函数调用——不支持时给了也没用，反而让模型胡言「我去查一下」。
           const useTools =
-            !!bridge && bridge.tools.length > 0 && profile.provider !== "anthropic" && !aborted;
+            !!bridge &&
+            bridge.tools.length > 0 &&
+            supportsKind(profile, "tools") &&
+            !aborted;
           let extra: ChatMessage[] = [];
           let reasoning = "";
+          /** 本轮尝试里工具实际返回过的来源（被拒/失败的不算）。 */
+          const sources: ToolSource[] = [];
+          /** 把来源脚注补在答案末尾（无来源时不发）。 */
+          const emitFooter = () => {
+            const footer = sourceFooter(sources);
+            if (footer) emitDelta(footer, aggressive);
+          };
           for (let round = 0; ; round++) {
             // 工具轮的文本先攒着（可能是「我这就去查」这类中间话术，等工具结果回来再决定是否上行）。
             // 但要**按片攒**而不是拼成一个字符串——最终答案逐片发出才能保住打字机效果。
@@ -461,11 +571,13 @@ export function runAgentMentions(
             // 逐片而非整段：保住打字机效果，与无工具路径表现一致。
             if (calls.length === 0) {
               for (const chunk of roundChunks) emitDelta(chunk, aggressive);
+              emitFooter();
               return;
             }
             // 到上限还在要工具：把已有文本给用户，不再无限循环
             if (round >= MAX_TOOL_ROUNDS) {
               for (const chunk of roundChunks) emitDelta(chunk, aggressive);
+              emitFooter();
               console.warn(`工具调用超过 ${MAX_TOOL_ROUNDS} 轮，已停止继续调用`);
               return;
             }
@@ -492,7 +604,16 @@ export function runAgentMentions(
                 if (outcome?.kind === "deny") {
                   // 被拒：回一段明确声明「未修改」的文案，让模型知道这次没落地。
                   // ok=false 也会让轨迹显示成失败态，UI 另行标「已拒绝」。
-                  return { text: deniedText(outcome.call, outcome.reason), ok: false };
+                  //
+                  // 文案按原因分流：闸门异常 / 命中记住的规则 / 用户当场拒绝，
+                  // 三者对模型的含义不同，尤其异常不能被说成「用户拒绝了」。
+                  const text =
+                    outcome.cause === "gate"
+                      ? notExecutedText(outcome.call, outcome.reason)
+                      : outcome.cause === "rule"
+                        ? ruleDeniedText(outcome.call, outcome.reason)
+                        : deniedText(outcome.call, outcome.reason);
+                  return { text, ok: false };
                 }
                 return bridge!.execute({
                   name: call.function.name,
@@ -500,18 +621,27 @@ export function runAgentMentions(
                 });
               }),
             );
+            // 按调用顺序收集来源（不按 Promise 完成顺序），脚注顺序才可复现。
+            // 被拒/失败的结果不算「引用过」——它们根本没读到内容。
+            for (const result of results) {
+              if (result.ok && result.sources?.length) sources.push(...result.sources);
+            }
             // 拿到结果后补 end（成功/失败 + 文本）
             calls.forEach((call, i) => {
-              const outcome = results[i] ?? { text: "", ok: false };
-              const denied = outcomes?.[i]?.kind === "deny";
+              const result = results[i] ?? { text: "", ok: false };
+              const gate = outcomes?.[i];
+              const denied = gate?.kind === "deny";
               deps.onToolTrace?.(streamId, {
                 phase: "end",
                 id: call.id,
                 name: call.function.name,
                 args: call.function.arguments,
-                ok: outcome.ok,
-                result: outcome.text,
+                ok: result.ok,
+                result: result.text,
                 ...(denied ? { denied: true } : {}),
+                // 只有真正执行且成功的结果才算「引用过」——被拒/失败没读到内容。
+                ...(result.ok && result.sources?.length ? { sources: result.sources } : {}),
+                ...(denied && gate?.cause ? { denyCause: gate.cause } : {}),
               });
             });
             extra = [
@@ -554,7 +684,9 @@ export function runAgentMentions(
           const text = local || acc;
           if (await sendFinish(text)) {
             notifyTurnComplete(deps, m.agentId, userText, text, "ok");
+            settle({ status: "ok", finalText: text });
           } else {
+            settle({ status: "error", error: "端到端加密失败，回复未发送" });
             await sendError("bad_event", "端到端加密失败，回复未发送");
           }
         } catch (e) {
@@ -567,11 +699,23 @@ export function runAgentMentions(
           // buffered = 工具轮里收到但还没上行的字——中断时它既不在 acc 也不在 local 里，
           // 不兜底就会丢掉模型已经吐出的内容。
           const partial = acc || local || buffered;
-          if (partial && (await sendFinish(partial))) {
-            // 中断/失败：只写工作记忆（partial），不沉淀长期记忆（设计 §3）
-            notifyTurnComplete(deps, m.agentId, userText, partial, "partial");
+          // 中断判定同时看错误名与两个标志：controller.abort() 在部分适配器里
+          // 被包装成普通 Error，只看 name 会把用户主动中断记成失败。
+          const abortedRun = err.name === "AbortError" || aborted || controller.signal.aborted;
+          try {
+            if (partial && (await sendFinish(partial))) {
+              // 中断/失败：只写工作记忆（partial），不沉淀长期记忆（设计 §3）
+              notifyTurnComplete(deps, m.agentId, userText, partial, "partial");
+            }
+            await sendError(abortedRun ? "aborted" : "provider_error", err.message.slice(0, 300));
+          } finally {
+            // 终态先于异常传播落定：sendError 抛错（发送链异常）时任务区也要收口。
+            settle({
+              status: abortedRun ? "aborted" : "error",
+              ...(partial ? { finalText: partial } : {}),
+              ...(abortedRun ? {} : { error: err.message.slice(0, 300) }),
+            });
           }
-          await sendError(err.name === "AbortError" ? "aborted" : "provider_error", err.message.slice(0, 300));
         } finally {
           controllers.delete(controller);
         }

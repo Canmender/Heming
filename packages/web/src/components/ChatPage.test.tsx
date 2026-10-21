@@ -6,11 +6,16 @@ import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore, type LlmProfile } from "../store/llm.js";
+import { setNotificationStorage, useNotificationStore } from "../store/notifications.js";
+import { createMemoryStorage } from "../lib/memory/storage.js";
+import { TASKS_KEY, useTaskStore } from "../lib/tasks/store.js";
 import { streamChat } from "../lib/llmClient.js";
+import { visionImageDataUrl } from "../lib/vision/history.js";
 import { connectWs, type WsHandlers, type WsHandle } from "../lib/ws.js";
 import { memoryStore } from "../lib/memory/index.js";
 import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { mcpRegistry } from "../lib/mcp/store.js";
+import { MODEL_CAPS_KEY, setOverride } from "../lib/modelCaps.js";
 import { skillPool } from "../lib/skills/index.js";
 import { CONTEXT_KEYS, type ContextSettings } from "../lib/agentContext/index.js";
 import { hasSubtle, toB64, fromB64 } from "../lib/e2eCrypto.js";
@@ -44,9 +49,40 @@ vi.mock("../lib/memory/reviewRunner.js", () => ({
   maybeRunReview: vi.fn(),
 }));
 
+// 历史图片解密桩：解密/转 base64 的纯逻辑由 lib/vision/history.test.ts 覆盖，
+// 组件面只验证「视觉模型才附内容片、非视觉模型不附」的接线。
+vi.mock("../lib/vision/history.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/vision/history.js")>();
+  return { ...actual, visionImageDataUrl: vi.fn(async () => "aW1n") };
+});
+
 vi.mock("../lib/e2eSession.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/e2eSession.js")>();
   return { ...actual, sealMessage: vi.fn() };
+});
+
+/**
+ * 闸门故障注入：ChatPage 的 confirmToolCalls 自带 catch，
+ * 只有让 `hitlGate.review` 抛错才能覆盖「异常按拒绝」的接线层路径。
+ */
+const gateState = vi.hoisted(() => ({ failReview: false }));
+vi.mock("../lib/hitl/gate.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/hitl/gate.js")>();
+  return {
+    ...actual,
+    createHitlGate: (deps: Parameters<typeof actual.createHitlGate>[0]) => {
+      const gate = actual.createHitlGate(deps);
+      return {
+        review: async (batch: Parameters<typeof gate.review>[0]) => {
+          if (gateState.failReview) {
+            gateState.failReview = false;
+            throw new Error("确认通道断开");
+          }
+          return gate.review(batch);
+        },
+      };
+    },
+  };
 });
 
 /** 桩 cipher 解码：btoa(UTF8 JSON) 的逆（seal 桩实现见 beforeEach）。 */
@@ -276,6 +312,8 @@ describe("ChatPage", () => {
     // chat store 的 streaming/streamOwner 跨用例不残留
     vi.mocked(streamChat).mockReset();
     vi.mocked(streamChat).mockResolvedValue("");
+    vi.mocked(visionImageDataUrl).mockReset();
+    vi.mocked(visionImageDataUrl).mockResolvedValue("aW1n");
     useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
     useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
     useUiStore.setState({
@@ -315,6 +353,191 @@ describe("ChatPage", () => {
   afterEach(() => {
     vi.unstubAllGlobals(); // Task 5 的 MediaRecorder 桩不跨用例
     if (vi.isFakeTimers()) vi.useRealTimers(); // 录音 60s 上限用例即便中途失败也不泄漏假时钟
+  });
+
+  it("会话内搜索：命中明文、前后跳转并高亮当前消息", async () => {
+    const m1 = msg("m1", "第一条 发布计划", "2026-10-14T01:00:00.000Z");
+    const m2 = msg("m2", "第二条 无关", "2026-10-14T01:01:00.000Z");
+    const m3 = msg("m3", "第三条 发布复盘", "2026-10-14T01:02:00.000Z");
+    mockMessagesFetch([m1, m2, m3]);
+
+    render(<ChatPage />);
+    expect(await screen.findByText("第一条 发布计划")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "搜索会话" }));
+    const input = screen.getByLabelText("搜索本会话");
+    fireEvent.change(input, { target: { value: "发布" } });
+
+    expect(await screen.findByText("1/2")).toBeInTheDocument();
+    expect(document.getElementById("msg-m1")?.className).toContain("ring-[#f0d58c]");
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("2/2")).toBeInTheDocument();
+    expect(document.getElementById("msg-m3")?.className).toContain("ring-[#f0d58c]");
+
+    // 再按一次循环回第一条
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByLabelText("搜索本会话")).not.toBeInTheDocument();
+  });
+
+  it("空会话：显示引导文案而不是整片空白", async () => {
+    mockMessagesFetch([]);
+
+    render(<ChatPage />);
+
+    expect(await screen.findByText("还没有消息")).toBeInTheDocument();
+    expect(screen.getByText("发送第一条消息，开始这段对话。")).toBeInTheDocument();
+  });
+
+  it("导出会话：本机明文生成 Markdown 并触发下载", async () => {
+    const m1 = msg("m1", "第一条", "2026-10-14T01:00:00.000Z");
+    const m2 = { ...msg("m2", "回答", "2026-10-14T01:01:00.000Z"), senderType: "agent" as const };
+    mockMessagesFetch([m1, m2]);
+    let clicked: HTMLAnchorElement | null = null;
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clicked = this;
+      });
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("第一条")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "导出会话" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "导出 Markdown" }));
+
+    expect(clickSpy).toHaveBeenCalled();
+    expect(clicked!.download).toMatch(/^和鸣-鲍勃-.*\.md$/);
+    const urlArg = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
+    const content = new TextDecoder().decode(await urlArg.arrayBuffer());
+    expect(content).toContain("# 会话：鲍勃");
+    expect(content).toContain("第一条");
+    expect(content).toContain("回答");
+    expect(await screen.findByText(/已导出 2 条消息/)).toBeInTheDocument();
+  });
+
+  it("多选导出：只导出勾选的那几条，未勾选的不进文件", async () => {
+    const m1 = msg("m1", "要留的", "2026-10-14T01:00:00.000Z");
+    const m2 = { ...msg("m2", "不要的", "2026-10-14T01:01:00.000Z"), senderType: "agent" as const };
+    mockMessagesFetch([m1, m2]);
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("要留的")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "选择消息导出" }));
+    const boxes = screen.getAllByRole("checkbox");
+    expect(boxes).toHaveLength(2);
+    fireEvent.click(boxes[0]);
+
+    expect(screen.getByText("已选 1 条")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "导出所选 Markdown" }));
+
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    const blob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
+    const content = new TextDecoder().decode(await blob.arrayBuffer());
+    expect(content).toContain("要留的");
+    expect(content).not.toContain("不要的");
+    expect(content).toContain("- 消息数：1");
+    expect(await screen.findByText(/已导出 1 条消息/)).toBeInTheDocument();
+  });
+
+  it("多选导出：全选后导出 JSON，退出选择后勾选态清空", async () => {
+    mockMessagesFetch([
+      msg("m1", "第一条", "2026-10-14T01:00:00.000Z"),
+      { ...msg("m2", "第二条", "2026-10-14T01:01:00.000Z"), senderType: "agent" as const },
+    ]);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("第一条")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "选择消息导出" }));
+    fireEvent.click(screen.getByRole("button", { name: "全选" }));
+    expect(screen.getByText("已选 2 条")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "导出所选 JSON" }));
+    const blob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
+    const doc = JSON.parse(new TextDecoder().decode(await blob.arrayBuffer()));
+    expect(doc.messages.map((x: { text: string }) => x.text)).toEqual(["第一条", "第二条"]);
+
+    // 勾选保留（同一次选择里可能还要导另一种格式），退出选择才清
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "退出选择" }));
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByText("已选 2 条")).not.toBeInTheDocument();
+  });
+
+  it("多选导出：一条没勾时导出按钮禁用；清空撤掉全部勾选", async () => {
+    mockMessagesFetch([msg("m1", "第一条", "2026-10-14T01:00:00.000Z")]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("第一条")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "选择消息导出" }));
+
+    expect(screen.getByRole("button", { name: "导出所选 Markdown" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "清空" })).toBeDisabled();
+
+    fireEvent.click(screen.getAllByRole("checkbox")[0]);
+    expect(screen.getByRole("button", { name: "导出所选 Markdown" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "清空" }));
+    expect(screen.getByText("已选 0 条")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出所选 Markdown" })).toBeDisabled();
+  });
+
+  it("他会话的新消息进通知中心；正在看的会话与自己的消息不进", async () => {
+    setNotificationStorage(createMemoryStorage());
+    useNotificationStore.setState({ items: [] });
+    mockMessagesFetch([msg("m1", "第一条", "2026-10-14T01:00:00.000Z")]);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("第一条")).toBeInTheDocument());
+
+    // 当前会话（c1）的新消息：直接进消息列表，不该再提醒一次
+    act(() => {
+      lastHandlers().onEvent({ type: "message_new", message: msg("m2", "眼前的", "2026-10-14T01:05:00.000Z") });
+    });
+    expect(useNotificationStore.getState().items).toEqual([]);
+
+    // 自己发的消息（senderId 与当前用户相同）也不提醒
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: { ...msg("m3", "我发的", "2026-10-14T01:06:00.000Z"), senderId: "u1" },
+      });
+    });
+    expect(useNotificationStore.getState().items).toEqual([]);
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: { ...msg("m4", "别处的消息", "2026-10-14T01:07:00.000Z"), conversationId: "c2" },
+      });
+    });
+    const items = useNotificationStore.getState().items;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: "message",
+      key: "message:m4",
+      body: "别处的消息",
+      conversationId: "c2",
+      read: false,
+    });
+
+    // 同一消息重投（WS 补档/重复事件）不产生第二条通知
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: { ...msg("m4", "别处的消息", "2026-10-14T01:07:00.000Z"), conversationId: "c2" },
+      });
+    });
+    expect(useNotificationStore.getState().items).toHaveLength(1);
   });
 
   it("挂载后收到 message_new：append 到消息列表", async () => {
@@ -1152,6 +1375,77 @@ describe("ChatPage", () => {
     expect(row!.content).not.toContain("【附件");
   });
 
+  it("视觉模型：历史图片转成内容片，正文同条保留", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    const withImage: Message = {
+      ...msg("m1", "这是什么", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "这是什么",
+        file: { id: "f9", name: "cat.png", mime: "image/png", size: 900, key: "k9" },
+      },
+    };
+    mockMessagesFetch([withImage], undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    useLlmStore.setState({
+      profiles: [{ ...testProfile, model: "gpt-4o" }],
+      bindings: { "system-assistant": "p1" },
+      prompts: { "system-assistant": "你是和小鸣" },
+    });
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 你再看一遍");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    const row = seen!.find((m) => m.content === "这是什么");
+    expect(row?.contentParts).toEqual([
+      { type: "text", text: "这是什么" },
+      { type: "image", mime: "image/png", data: "aW1n" },
+    ]);
+    // 只有声明支持视觉的模型才会去解密读图
+    expect(visionImageDataUrl).toHaveBeenCalledWith(expect.objectContaining({ id: "f9" }));
+  });
+
+  it("非视觉模型：历史图片不附内容片，也不解密读图", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    const withImage: Message = {
+      ...msg("m1", "看看图", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "看看图",
+        file: { id: "f9", name: "cat.png", mime: "image/png", size: 900, key: "k9" },
+      },
+    };
+    mockMessagesFetch([withImage], undefined, { members: [inGroupMembers], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant(); // 未知模型 m → 保守判定为不支持视觉
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 这是什么");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    expect(seen!.some((m) => m.contentParts)).toBe(false);
+    expect(visionImageDataUrl).not.toHaveBeenCalled();
+  });
+
   it("I2 雷达@链路：attach 后（本群 members 出现自建 agent 行）该 agent 进入 @ 候选并可选", async () => {
     await setupGroupChat([
       ...inGroupMembers,
@@ -1612,6 +1906,177 @@ describe("ChatPage", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("文件需小于 6MB");
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
     expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false); // 未发起上传
+  });
+
+  it("非视觉模型发图片：照常发送，但当场提示「模型读不到内容」", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: {
+            id: "system-assistant",
+            owner_id: null,
+            name: "和小鸣",
+            avatar: null,
+            description: "官方",
+          },
+          unreadCount: 0,
+        },
+      ],
+    });
+    mockUploadFetch({
+      id: "f9",
+      owner: "alice",
+      name: "cat.png",
+      mime: "image/png",
+      size: 4,
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant(); // model "m" → 能力未知，按不支持视觉处理
+
+    captureFilePicker().pick("image/*", new File(["img"], "cat.png", { type: "image/png" }));
+
+    const status = await screen.findByText(/不支持图片输入/);
+    expect(status).toHaveTextContent("绑定的模型不支持图片输入");
+    expect(status).toHaveTextContent("和小鸣");
+    // 图片照常发出（只是模型读不到），不是拦截
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" })),
+    );
+  });
+
+  it("视觉模型发图片：不出现「不支持图片输入」提示", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: {
+            id: "system-assistant",
+            owner_id: null,
+            name: "和小鸣",
+            avatar: null,
+            description: "官方",
+          },
+          unreadCount: 0,
+        },
+      ],
+    });
+    mockUploadFetch({
+      id: "f9",
+      owner: "alice",
+      name: "cat.png",
+      mime: "image/png",
+      size: 4,
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+    useLlmStore.setState({
+      profiles: [{ ...testProfile, model: "gpt-4o" }],
+      bindings: { "system-assistant": "p1" },
+      prompts: { "system-assistant": "你是和小鸣" },
+    });
+
+    captureFilePicker().pick("image/*", new File(["img"], "cat.png", { type: "image/png" }));
+
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" })),
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("已授权工具但绑定的模型不会调工具：输入区当场说明这次不调工具", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: {
+            id: "system-assistant",
+            owner_id: null,
+            name: "和小鸣",
+            avatar: null,
+            description: "官方",
+          },
+          unreadCount: 0,
+        },
+      ],
+    });
+    for (const srv of [...mcpRegistry.servers()]) mcpRegistry.remove(srv.id);
+    const server = mcpRegistry.add({
+      id: "srv-notice",
+      name: "echo-svc",
+      transport: "http",
+      url: "http://127.0.0.1:9/mcp",
+    });
+    mcpRegistry.setTools(server.id, [{ name: "echo", description: "回声工具" }]);
+    mcpRegistry.setToolEnabled(server.id, "echo", true);
+    mockMessagesFetch([]);
+    // 能力表 + 覆盖层是判定唯一来源：这里用覆盖层模拟「模型不支持函数调用」
+    setOverride("openai", "m", { supportsTools: false });
+
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    expect(await screen.findByText(/不支持工具调用（和小鸣）/)).toBeInTheDocument();
+    // 覆盖层是全局 localStorage：不清掉会串到别的用例（那里默认按支持工具算）
+    localStorage.removeItem(MODEL_CAPS_KEY);
+    mcpRegistry.remove(server.id);
+  });
+
+  it("模型支持工具时，输入区不出现工具降级提示", async () => {
+    localStorage.removeItem(MODEL_CAPS_KEY);
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: {
+            id: "system-assistant",
+            owner_id: null,
+            name: "和小鸣",
+            avatar: null,
+            description: "官方",
+          },
+          unreadCount: 0,
+        },
+      ],
+    });
+    for (const srv of [...mcpRegistry.servers()]) mcpRegistry.remove(srv.id);
+    const server = mcpRegistry.add({
+      id: "srv-notice2",
+      name: "echo-svc",
+      transport: "http",
+      url: "http://127.0.0.1:9/mcp",
+    });
+    mcpRegistry.setTools(server.id, [{ name: "echo", description: "回声工具" }]);
+    mcpRegistry.setToolEnabled(server.id, "echo", true);
+    mockMessagesFetch([]);
+
+    render(<ChatPage />);
+    await act(async () => {});
+    // 绑定要包在 act 里：不冲刷的话，提示仍按「无绑定 → 能力未知」算，负向断言会假阴
+    await act(async () => {
+      bindAssistant();
+    });
+
+    expect(screen.queryByText(/不支持工具调用/)).not.toBeInTheDocument();
+    mcpRegistry.remove(server.id);
   });
 
   it("上传失败：提示上传失败原因，不发消息", async () => {
@@ -3845,6 +4310,59 @@ describe("ChatPage 工具轮可视化接线", () => {
     }
   });
 
+  it("闸门异常：不弹确认框、工具不执行，回灌文案不说「用户拒绝」", async () => {
+    const dispose = armEchoServer();
+    try {
+      const send = vi.fn();
+      vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+      useChatStore.setState({
+        conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+      });
+      mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+      render(<ChatPage />);
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "提及智能体" })).toBeInTheDocument(),
+      );
+      bindAssistant();
+
+      gateState.failReview = true;
+      const seen: { role: string; content: unknown }[][] = [];
+      let round = 0;
+      vi.mocked(streamChat).mockImplementation(async (_p, messages, o) => {
+        seen.push(messages as { role: string; content: unknown }[]);
+        if (round++ === 0) {
+          o.onToolCalls?.([
+            {
+              id: "call-err",
+              type: "function",
+              function: { name: "echo-svc__echo", arguments: '{"text":"hi"}' },
+            },
+          ]);
+          return "";
+        }
+        o.onDelta("好的");
+        return "好的";
+      });
+
+      await pickAndSend("@和小鸣 用 echo 查一下");
+
+      // 闸门抛错 → UI 不应弹窗（用户根本没被问到）
+      await waitFor(() => expect(streamChat).toHaveBeenCalledTimes(2));
+      expect(screen.queryByRole("dialog", { name: /请求调用工具/ })).not.toBeInTheDocument();
+
+      // 第二轮请求里必须有等长的 tool 消息，且文案说明「确认流程异常」而非「用户拒绝」
+      const toolMsg = seen[1]?.find((m) => m.role === "tool");
+      expect(toolMsg?.content).toContain("确认流程异常");
+      expect(String(toolMsg?.content)).not.toContain("用户拒绝");
+
+      // 轨迹显式标「已拒绝」，对话本身继续（第二轮请求已断言）
+      await waitFor(() => expect(screen.getByText("已拒绝")).toBeInTheDocument());
+    } finally {
+      gateState.failReview = false;
+      dispose();
+    }
+  });
+
   /** 取出指定类型的上行帧（主 describe 里的同名助手是块内私有，这里用局部版）。 */
   const framesOf = (send: ReturnType<typeof vi.fn>, type: string) =>
     send.mock.calls.map((c) => c[0]).filter((e) => e.type === type);
@@ -4022,5 +4540,106 @@ describe("ChatPage 复盘分身接线", () => {
     } finally {
       memoryStore.updateSettings({ enabled: true });
     }
+  });
+});
+
+describe("ChatPage 任务区接线", () => {
+  const agentConv = {
+    id: "c1",
+    type: "agent",
+    agent: { id: "system-assistant", owner_id: null, name: "和小鸣", avatar: null, description: "官方" },
+    unreadCount: 0,
+  };
+
+  // 本 describe 在主 describe 之外，不继承它的 beforeEach：封条/WS/流式桩各就位。
+  beforeEach(() => {
+    localStorage.removeItem(TASKS_KEY);
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.mocked(sealMessage).mockReset();
+    vi.mocked(sealMessage).mockImplementation(stubSeal as never);
+    vi.mocked(hasSubtle).mockReturnValue(true);
+    vi.mocked(connectWs).mockReset();
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() });
+    vi.mocked(streamChat).mockReset();
+    vi.mocked(streamChat).mockResolvedValue("");
+    useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
+    useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
+    useTaskStore.setState({ tasks: [] });
+    useChatStore.setState({
+      conversations: [agentConv] as never,
+      messages: {},
+      reads: {},
+      streaming: {},
+      streamOwner: {},
+      plainById: {},
+      pendingE2e: {},
+    });
+    useUiStore.setState({ page: "tasks", activeConversationId: "c1", taskDraft: null });
+    setNotificationStorage(createMemoryStorage());
+    useNotificationStore.setState({ items: [] });
+    bindAssistant();
+    mockMessagesFetch([], undefined, { reads: [[]] });
+  });
+
+  it("任务投递：自动发送目标、工具步骤落档、完成时收口 done", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    // 第 1 轮要一个只读工具（chart_types 默认可放行），第 2 轮给最终答案
+    let round = 0;
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      if (round++ === 0) {
+        o.onToolCalls?.([
+          {
+            id: "call-t1",
+            type: "function",
+            function: { name: "chart_types", arguments: "{}" },
+          },
+        ]);
+        return "";
+      }
+      o.onDelta("任务完成");
+      return "任务完成";
+    });
+
+    const taskId = useTaskStore.getState().create({
+      conversationId: "c1",
+      agentId: "system-assistant",
+      agentName: "和小鸣",
+      prompt: "看看有哪些图表",
+    });
+    useUiStore.getState().setTaskDraft({
+      taskId,
+      conversationId: "c1",
+      text: "看看有哪些图表",
+      mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+    // 首次挂载 connected 为 false，任务投递要等 WS 就绪
+    act(() => lastHandlers().onOpen?.());
+
+    await waitFor(() =>
+      expect(send.mock.calls.some(([e]) => (e as { type?: string }).type === "send_message")).toBe(
+        true,
+      ),
+    );
+    // 目标走 e2e 密文，payload 只留占位
+    expect(await lastSealed(send)).toMatchObject({ kind: "text", text: "看看有哪些图表" });
+
+    await waitFor(() => {
+      expect(useTaskStore.getState().tasks.find((t) => t.id === taskId)?.status).toBe("done");
+    });
+    const task = useTaskStore.getState().tasks.find((t) => t.id === taskId)!;
+    expect(task.steps).toHaveLength(1);
+    expect(task.steps[0]).toMatchObject({ name: "chart_types", status: "ok" });
+    expect(task.result).toContain("任务完成");
+    expect(useUiStore.getState().taskDraft).toBeNull();
+    // 任务收尾进通知中心：发起后切去别处的用户回来能在铃铛看到结果
+    const notes = useNotificationStore.getState().items;
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ kind: "task", taskId, conversationId: "c1" });
+    expect(notes[0].title).toContain("已完成");
+    expect(notes[0].body).toContain("任务完成");
   });
 });

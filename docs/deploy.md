@@ -203,7 +203,7 @@ docker compose down            # 停（保留 heming-data 卷）
 | 命令 | `docker compose build`（镜像内构建） | `node scripts/build-desktop-web.mjs` 预构建 |
 | `VITE_API_BASE` | **不注入**（同源相对路径） | **注入**云端绝对地址（跨域，靠服务端 CORS `*`） |
 | 产物落点 | web 镜像内 nginx 目录 | `packages/desktop/web-dist/` → 打包进 `resources/web` |
-| 更新方式 | 部署一次，**所有客户端立刻生效** | **必须重发安装包**（自动更新另开一批） |
+| 更新方式 | 部署一次，**所有客户端立刻生效** | **重发安装包**；之后由自动更新源（§11）分发 |
 
 `VITE_API_BASE` 取值：`HEMING_WEB_URL` 环境变量 > 默认 `http://47.92.39.184`（与 `secure-origins.js` 的 `APP_DEFAULT_URL` 同源，避免两处常量漂移）。
 
@@ -218,6 +218,7 @@ ssh root@47.92.39.184 'cd ~/heming && docker compose -p heming build && docker c
 
 # 2) 桌面端（嵌入产物随安装包）
 pnpm -w run dist:desktop                  # 内部先跑 scripts/build-desktop-web.mjs
+bash scripts/publish-update.sh            # 把安装包 + latest.yml 传到 /updates（§11）
 ```
 
 **只发其中一处会出现版本不一致**：浏览器端看云端、已装客户端看包内。排查「为什么我这没有新功能」时先确认客户端版本。

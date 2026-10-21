@@ -188,6 +188,106 @@ describe("HITL 闸门", () => {
   });
 });
 
+describe("HITL 闸门：记住的规则", () => {
+  let policy: HitlPolicyStore;
+  const callAt = (id: string, name: string, path: string, risk: HitlCall["risk"] = "write"): HitlCall => ({
+    ...makeCall(id, name, risk),
+    argsJson: JSON.stringify({ path }),
+  });
+
+  beforeEach(() => {
+    policy = new HitlPolicyStore(new FakeStorage());
+  });
+
+  it("命中允许规则：不弹窗，直接放行", async () => {
+    const call = callAt("w1", "fs__write_file", "notes/a.md");
+    policy.rememberRule(call.name, "notes/a.md", "allow");
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => []);
+    const gate = createHitlGate({ policy, ask });
+
+    const outcomes = await gate.review(batchOf([call]));
+
+    expect(ask).not.toHaveBeenCalled();
+    expect(outcomes[0].kind).toBe("allow");
+  });
+
+  it("命中拒绝规则：不弹窗，直接拒绝且 cause=rule", async () => {
+    const call = callAt("w1", "fs__write_file", "notes/a.md");
+    policy.rememberRule(call.name, "notes/a.md", "deny");
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => []);
+    const gate = createHitlGate({ policy, ask });
+
+    const outcomes = await gate.review(batchOf([call]));
+
+    expect(ask).not.toHaveBeenCalled();
+    expect(outcomes[0].kind).toBe("deny");
+    expect(outcomes[0].kind === "deny" && outcomes[0].cause).toBe("rule");
+  });
+
+  it("裁决带 remember：允许/拒绝都落成规则，下次同资源不再问", async () => {
+    const allowCall = callAt("w1", "fs__write_file", "notes/a.md");
+    const denyCall = callAt("w2", "fs__write_file", "notes/b.md");
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => [
+      { callId: "w1", decision: "allow", remember: true },
+      { callId: "w2", decision: "deny", reason: "别动这个", remember: true },
+    ]);
+    const gate = createHitlGate({ policy, ask });
+
+    await gate.review(batchOf([allowCall, denyCall], "s1"));
+    expect(policy.ruleFor(allowCall, "a1")).toBe("allow");
+    expect(policy.ruleFor(denyCall, "a1")).toBe("deny");
+
+    const again = await gate.review(batchOf([allowCall, denyCall], "s2"));
+    expect(again.map((o) => o.kind)).toEqual(["allow", "deny"]);
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
+
+  it("记住的规则只作用于当前智能体：换个智能体仍会问", async () => {
+    const call = callAt("w1", "fs__write_file", "notes/a.md");
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => [
+      { callId: "w1", decision: "allow", remember: true },
+    ]);
+    const gate = createHitlGate({ policy, ask });
+
+    await gate.review(batchOf([call], "s1"));
+    const rule = policy.rules()[0];
+    expect(rule).toMatchObject({ agentId: "a1", agentName: "架构师" });
+    expect(policy.ruleFor(call, "a1")).toBe("allow");
+    expect(policy.ruleFor(call, "a2")).toBeNull();
+
+    // 另一个智能体（a2）不受这条规则影响，仍要弹窗
+    const otherBatch = { ...batchOf([call], "s2"), agentId: "a2", agentName: "写手" };
+    await gate.review(otherBatch);
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
+  it("危险操作即使勾了记住允许，也不落规则（下次仍问）", async () => {
+    const danger = callAt("d1", "fs__delete_file", "C:/data/a.txt", "danger");
+    const ask = vi.fn(async (): Promise<HitlVerdict[]> => [
+      { callId: "d1", decision: "allow", remember: true },
+    ]);
+    const gate = createHitlGate({ policy, ask });
+
+    const first = await gate.review(batchOf([danger], "s1"));
+    expect(first[0].kind).toBe("allow");
+    expect(policy.rules()).toEqual([]);
+
+    await gate.review(batchOf([danger], "s2"));
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
+  it("闸门异常补的 deny 标记 cause=gate（不能被说成用户拒绝）", async () => {
+    const ask = vi.fn(async () => {
+      throw new Error("UI 崩了");
+    });
+    const gate = createHitlGate({ policy, ask });
+
+    const outcomes = await gate.review(batchOf([writeCall]));
+    expect(outcomes[0].kind).toBe("deny");
+    expect(outcomes[0].kind === "deny" && outcomes[0].cause).toBe("gate");
+  });
+});
+
 describe("toHitlBatch", () => {
   it("把模型的 tool_call 转成分类好的批次", () => {
     const batch = toHitlBatch(

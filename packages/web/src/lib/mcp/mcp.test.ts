@@ -211,6 +211,39 @@ describe("注册表（服务 + 工具 + 启用开关）", () => {
     reg.update(s.id, { enabled: false });
     expect(reg.enabledTools()).toHaveLength(0);
   });
+
+  it("★ Registry 本地包台账能穿过存储往返（丢了就看不出装的是什么）", () => {
+    const storage = memStorage();
+    const reg = new McpRegistry(storage);
+    const s = reg.add({
+      name: "fetch",
+      transport: "stdio",
+      command: "uvx",
+      args: ["mcp-server-fetch==0.6.2"],
+      origin: "registry",
+      registryName: "io.github.a/fetch",
+      registryType: "pypi",
+      registryVersion: "0.6.2",
+    });
+
+    const again = new McpRegistry(storage);
+    const saved = again.get(s.id);
+    expect(saved?.origin).toBe("registry");
+    expect(saved?.registryName).toBe("io.github.a/fetch");
+    expect(saved?.registryType).toBe("pypi");
+    expect(saved?.registryVersion).toBe("0.6.2");
+    // 台账只是账本，改别的（开关）不该把它洗掉
+    again.update(s.id, { enabled: false });
+    expect(again.get(s.id)?.registryVersion).toBe("0.6.2");
+  });
+
+  it("手填服务不会凭空长出 Registry 台账", () => {
+    const reg = new McpRegistry(memStorage());
+    const s = reg.add({ name: "Demo", transport: "http", url: "https://x/mcp" });
+    expect(s.origin).toBe("manual");
+    expect(s.registryType).toBeUndefined();
+    expect(s.registryVersion).toBeUndefined();
+  });
 });
 
 describe("工具桥接（命名空间 + 执行）", () => {

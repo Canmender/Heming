@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi, type Mock } from "vitest";
 import { createStdioMcpClient, hasStdioBridge } from "./stdioClient.js";
+import { resetClient, stopStdioServer } from "./runtime.js";
 import type { McpServerConfig } from "./types.js";
 
 const SERVER: McpServerConfig = {
@@ -85,5 +86,30 @@ describe("stdio 客户端", () => {
   it("缺命令直接抛错（不把空命令交给主进程）", () => {
     installBridge();
     expect(() => createStdioMcpClient({ ...SERVER, command: "" })).toThrow(/启动命令/);
+  });
+});
+
+describe("stdio 子进程回收（删除服务时）", () => {
+  it("★ 删除路径调 stop，并把 serverId 传给主进程", async () => {
+    const bridge = installBridge();
+    await expect(stopStdioServer("s1")).resolves.toBeUndefined();
+    expect(bridge.stop).toHaveBeenCalledWith("s1");
+  });
+
+  it("★ 重连（resetClient）不碰进程：否则「刷新一次」= 重启一次（冷启动实测 5.4s）", () => {
+    const bridge = installBridge();
+    resetClient(SERVER.id);
+    expect(bridge.stop).not.toHaveBeenCalled();
+  });
+
+  it("浏览器里没有桥 → 空转不抛", async () => {
+    delete (window as unknown as { __mcp_stdio?: Bridge }).__mcp_stdio;
+    await expect(stopStdioServer("s1")).resolves.toBeUndefined();
+  });
+
+  it("★ 进程已经自己退出（桥抛错）也不抛：删除不该被回收失败阻断", async () => {
+    const bridge = installBridge();
+    bridge.stop.mockRejectedValueOnce(new Error("no such process"));
+    await expect(stopStdioServer("s1")).resolves.toBeUndefined();
   });
 });

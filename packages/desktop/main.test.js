@@ -167,6 +167,16 @@ test("main.js：splash 定位仍需要 getBounds（取当前屏幕，不是还�
   assert.ok(mainSrc.includes("screen.getDisplayMatching(mainWin.getBounds())"));
 });
 
+// ── 本地包安装的运行时接线（d.25）──
+test("main.js：stdio 桥接注入 planSpawn，并暴露 runtime:probe", () => {
+  assert.ok(mainSrc.includes("planSpawn: planStdioSpawn"), "spawn 前必须翻译逻辑命令（Windows 的 npx 是 .cmd）");
+  assert.ok(mainSrc.includes('ipcMain.handle("runtime:probe"'), "渲染层要能探测本机运行时");
+  // 探测用的 PATH 必须与真正 spawn 时一致，否则界面说「没有」而启动成功（或反之）
+  assert.ok(/probeLocalRuntime\(\{[\s\S]{0,120}buildChildEnv\(/.test(mainSrc), "探测应使用补全后的 PATH");
+  // shell:false 的约束在 mcp-stdio 里，main.js 不允许出现 shell:true
+  assert.ok(!/shell:\s*true/.test(mainSrc), "禁止任何 shell:true");
+});
+
 // 减弱动态偏好只有渲染进程能查到（matchMedia）；查到后回填给生命周期收紧关闭时机，
 // 否则这类用户要对着静止画面等满 3.2s 可见地板。
 test("main.js：查询减弱动态偏好并回填给 splash 生命周期", () => {

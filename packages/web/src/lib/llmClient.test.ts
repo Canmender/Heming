@@ -65,6 +65,41 @@ describe("buildRequest", () => {
   });
 });
 
+describe("buildRequest：多模态内容片", () => {
+  const withImage: ChatMessage[] = [
+    {
+      role: "user",
+      content: "看图",
+      contentParts: [
+        { type: "text", text: "看图" },
+        { type: "image", mime: "image/png", data: "aW1n" },
+      ],
+    },
+  ];
+
+  it("openai：image_url + data URL，且不把 contentParts 漏进请求体", () => {
+    const body = JSON.parse(buildRequest(openai, withImage, { stream: true }).body);
+    expect(body.messages[0].content).toEqual([
+      { type: "text", text: "看图" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,aW1n" } },
+    ]);
+    expect(body.messages[0]).not.toHaveProperty("contentParts");
+  });
+
+  it("anthropic：base64 source（不是 data URL）", () => {
+    const body = JSON.parse(buildRequest(anthropic, withImage, { stream: false }).body);
+    expect(body.messages[0].content).toEqual([
+      { type: "text", text: "看图" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "aW1n" } },
+    ]);
+  });
+
+  it("纯文本消息逐字不变（无内容片时走老路径）", () => {
+    const body = JSON.parse(buildRequest(openai, msgs, { stream: false }).body);
+    expect(body.messages).toEqual(msgs);
+  });
+});
+
 describe("testConnection", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

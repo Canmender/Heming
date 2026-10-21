@@ -92,10 +92,11 @@ describe("ui store 导航顺序", () => {
     useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("默认顺序与 Alt+1–7 的固定映射一致", () => {
+  it("默认顺序与 Alt+1–8 的固定映射一致", () => {
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
       "workspace",
+      "tasks",
       "skills",
       "interfaces",
       "memory",
@@ -106,9 +107,9 @@ describe("ui store 导航顺序", () => {
 
   it("moveNav 上移/下移生效并落盘", () => {
     useUiStore.getState().moveNav("memory", -1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(3);
-    useUiStore.getState().moveNav("memory", 1);
     expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(4);
+    useUiStore.getState().moveNav("memory", 1);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(5);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
       useUiStore.getState().navOrder,
     );
@@ -136,6 +137,7 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "memory",
       "home",
       "workspace",
+      "tasks",
       "skills",
       "interfaces",
       "archive",
@@ -150,6 +152,7 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "settings",
       "home",
       "workspace",
+      "tasks",
       "skills",
       "interfaces",
       "memory",

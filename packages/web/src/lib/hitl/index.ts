@@ -6,15 +6,18 @@
  */
 export type {
   Decision,
+  DenyCause,
   GateOutcome,
   HitlBatch,
   HitlCall,
   HitlMode,
+  HitlRule,
   HitlSource,
   HitlVerdict,
   PolicyOutcome,
   PolicyScope,
   RiskLevel,
+  RuleEffect,
 } from "./types.js";
 export {
   RISK_ORDER,
@@ -22,17 +25,27 @@ export {
   displayNameOf,
   resolveRisk,
   riskOfName,
+  ruleResource,
   sourceOf,
   summarizeArgs,
   toHitlCall,
   type HitlRiskHints,
   type RawToolCall,
 } from "./classify.js";
-export { GIT_UNCHANGED, MUST_CONTAIN, allowedText, deniedText } from "./text.js";
+export {
+  GIT_UNCHANGED,
+  MUST_CONTAIN,
+  allowedText,
+  deniedText,
+  notExecutedText,
+  ruleDeniedText,
+} from "./text.js";
 export { appendToolAudit, type ToolAuditEntry } from "./audit.js";
 export {
   DEFAULT_HITL_POLICY,
   HITL_KEY,
+  HITL_RULES_KEY,
+  MAX_HITL_RULES,
   HitlPolicyStore,
   type HitlPolicy,
 } from "./policy.js";

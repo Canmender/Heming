@@ -102,7 +102,7 @@ export function ConversationTabs() {
                 e.stopPropagation();
                 void doArchive(id, name);
               }}
-              className="shrink-0 rounded px-1 text-[11px] leading-none text-[#c4c4c4] opacity-0 transition-opacity hover:bg-[#eaeaea] hover:text-[#666] group-hover:opacity-100"
+              className="shrink-0 rounded px-1 text-[11px] leading-none text-[#c4c4c4] opacity-0 transition-opacity hover:bg-[#eaeaea] hover:text-[#666] focus:opacity-100 group-hover:opacity-100"
             >
               ↓
             </button>
@@ -114,7 +114,7 @@ export function ConversationTabs() {
                 e.stopPropagation();
                 closeConversationTab(id);
               }}
-              className="shrink-0 rounded px-1 text-[13px] leading-none text-[#c4c4c4] opacity-0 transition-opacity hover:bg-[#eaeaea] hover:text-[#666] group-hover:opacity-100"
+              className="shrink-0 rounded px-1 text-[13px] leading-none text-[#c4c4c4] opacity-0 transition-opacity hover:bg-[#eaeaea] hover:text-[#666] focus:opacity-100 group-hover:opacity-100"
             >
               ×
             </button>

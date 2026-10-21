@@ -33,6 +33,23 @@ export interface McpServerConfig {
   origin?: ServerOrigin;
   /** 从 Registry 装时，Registry 里的 `server.name`（反向域名）。**用于判「是否已安装」。** */
   registryName?: string;
+  /**
+   * 从 Registry 装的本地包类型（`npm` / `pypi`）。
+   *
+   * ★ 这是**台账字段**，不参与任何执行决策——真正跑什么由 `command`/`args` 决定，
+   * 而本机运行时缺不缺由桌面端探测（`lib/registry/runtime.ts`）。
+   * 存它的理由：界面上要说清「这条 stdio 服务是 Registry 装来的 npm 包」，
+   * 而不是用户手填的一行命令。
+   */
+  registryType?: string;
+  /**
+   * 安装时**钉住**的包版本（如 `0.6.2`）。
+   *
+   * 为什么重要：`args` 里钉的是 `<包>@<版本>`，上游发新版不影响本机跑的这份；
+   * 没有这个字段，界面上就看不出台账里这台服务对应哪个版本，
+   * 「该升级了」与「已被人改过配置」都无从判断。
+   */
+  registryVersion?: string;
 }
 
 /**

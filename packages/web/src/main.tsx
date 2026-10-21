@@ -4,6 +4,7 @@ import { App } from "./App.js";
 import { CallWindow } from "./components/CallWindow.js";
 import { parseCallWindowParams } from "./lib/callWindow.js";
 import "./index.css";
+import "katex/dist/katex.min.css";
 
 /**
  * 独立通话窗口（`?hemingWindow=call`）：只渲染通话面板，不挂整个 App。

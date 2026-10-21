@@ -25,7 +25,13 @@ export {
   type ToolCatalogEntry,
   type ToolExecutionDeps,
 } from "./bridge.js";
-export { buildToolBridge, clientFor, refreshServerTools, resetClient } from "./runtime.js";
+export {
+  buildToolBridge,
+  clientFor,
+  refreshServerTools,
+  resetClient,
+  stopStdioServer,
+} from "./runtime.js";
 export { MCP_PRESETS, findMcpPreset } from "./presets.js";
 export type { McpPreset } from "./presets.js";
 export {

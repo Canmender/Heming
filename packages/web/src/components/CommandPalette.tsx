@@ -5,6 +5,7 @@ import { useUiStore } from "../store/ui.js";
 import { skillPool } from "../lib/skills/index.js";
 import { convLabel } from "./ChatPage.js";
 import { Avatar } from "./Avatar.js";
+import { useModalA11y } from "./useModalA11y.js";
 
 /**
  * 全局搜索（Ctrl/⌘+K）。
@@ -86,13 +87,12 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   const results = useMemo(() => searchAll(query, conversations), [query, conversations]);
 
-  // 唤起即聚焦：命令面板的整个意义就是「键盘打字开始找」
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+  // 唤起即聚焦 + Tab 困在面板内：命令面板的整个意义就是「键盘打字开始找」
+  useModalA11y(panelRef, onClose, { closeOnEscape: false, initialFocusRef: inputRef });
 
   // 结果集变化时把光标收回第一项，避免停在一个已经不存在的位置
   useEffect(() => {
@@ -140,6 +140,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       role="presentation"
     >
       <div
+        ref={panelRef}
         className="w-[520px] max-w-[92vw] overflow-hidden rounded-xl border border-line bg-white shadow-[0_12px_40px_rgba(0,0,0,0.18)]"
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"

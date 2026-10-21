@@ -157,10 +157,23 @@ describe("InterfacesPage", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/结果：\{"q":"hi"\}/));
   });
 
-  it("删除服务后该条消失（其余服务不受影响）", () => {
+  it("删除服务需二次确认：先弹确认框，取消不删", () => {
+    registry.add({ name: "Demo", transport: "http", url: "https://x/mcp" });
+    render(<InterfacesPage registry={registry} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "删除 Demo" }));
+    expect(screen.getByRole("dialog", { name: "删除 MCP 服务" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(registry.servers().some((s) => s.name === "Demo")).toBe(true);
+  });
+
+  it("确认删除后该条消失（其余服务不受影响）", () => {
     registry.add({ name: "Demo", transport: "http", url: "https://x/mcp" });
     render(<InterfacesPage registry={registry} />);
     fireEvent.click(screen.getByRole("button", { name: "删除 Demo" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    expect(registry.servers().some((s) => s.name === "Demo")).toBe(false);
     expect(screen.queryByText("Demo")).not.toBeInTheDocument();
     // 预置/已有的服务还在，所以不是空态
     expect(screen.getByRole("region", { name: "MCP 服务 已存在的服务" })).toBeInTheDocument();

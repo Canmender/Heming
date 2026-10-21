@@ -1,4 +1,5 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import { useModalA11y } from "./useModalA11y.js";
 
 /**
  * 确认弹窗骨架：遮罩、Esc、焦点陷阱、打开落点。
@@ -28,10 +29,6 @@ export interface ConfirmDialogProps {
   initialFocusRef?: React.RefObject<HTMLElement>;
 }
 
-/** 弹窗内可聚焦元素的选择器。 */
-const FOCUSABLE =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 export function ConfirmDialog({
   title,
   children,
@@ -40,45 +37,7 @@ export function ConfirmDialog({
   initialFocusRef,
 }: ConfirmDialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-
-  // 打开时把焦点移进弹窗（否则键盘用户的焦点还留在背景上）。
-  useEffect(() => {
-    const panel = panelRef.current;
-    if (!panel) return;
-    const target = initialFocusRef?.current ?? panel.querySelector<HTMLElement>(FOCUSABLE);
-    target?.focus();
-  }, [initialFocusRef]);
-
-  // Esc = 拒绝；Tab 在弹窗内循环（焦点跑出去就等于放开了背景，键盘用户会迷路）。
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onCancel();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const panel = panelRef.current;
-      if (!panel) return;
-      // 只按「是否可聚焦」筛，不按可见性筛：
-      // `offsetParent` 在 fixed 定位的祖先里恒为 null，用它筛会把元素全滤掉。
-      const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-        (el) => !el.hasAttribute("hidden") && el.getAttribute("aria-hidden") !== "true",
-      );
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [onCancel]);
+  useModalA11y(panelRef, onCancel, { initialFocusRef });
 
   return (
     <div

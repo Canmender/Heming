@@ -95,41 +95,35 @@ export function validatePackage(pkg: RegistryPackage): RejectReason | null {
   return null;
 }
 
-/* -------------------------------------------------------------- 本地包（★ 本轮不装） */
+/* -------------------------------------------------------------- 本地包（stdio） */
 
 /**
- * ★ 本轮**不做本地包安装**（2026-10-22 主理人拍板）。
- *
- * 理由是**零依赖承诺**：我们的内置运行时里既没有 Node 也没有 uv
- * （`resources/runtime/mcp-env/Scripts/` 只有 `uvicorn.exe`，与 uv 无关）。
- * npm 类要 `npx`（用户机器上未必有 Node）、pypi 类要 `uvx`（没有 uv）。
- * 做它们等于要向用户说「请自己装 Node/uv」——这打破了本项目「零依赖内置运行时」的承诺。
- *
- * 而 Registry 实测 **82% 是 remote-only**（只有 `remotes`，没有 `packages`），
- * **只做 remote 分支就已经覆盖了绝大多数服务器**。
- *
- * 下轮放开本地包时要做的事（已确认可行）：npm 走
- * `node <npm>/bin/npx-cli.js -y <pkg>`（绕开 `.cmd`，完全不涉及 shell）；
- * pypi 需要把 uv 打进包（+30MB，需重新评估）。
- *
- * **为什么保留 `validatePackage`**：白名单是对的，下轮直接用。
- * 而且**白名单校验独立于「支不支持」**——不支持的类型直接标 unsupported（不查白名单），
- * 支持的类型才走白名单。下轮放开时只需改 `LOCAL_PACKAGES_SUPPORTED` 一个常量。
+ * 本地包能装的类型。**白名单而不是「除未知皆可」**：
+ * Registry 里还有 oci / nuget / mcpb 等类型，我们不知道该怎么起它们，
+ * 猜一个命令去执行等于把未知输入当可信输入。
  */
-export const LOCAL_PACKAGES_SUPPORTED = false;
+const LOCAL_TYPES = ["npm", "pypi"] as const;
 
-/** 唯一一条白名单相关的对外说明，供 UI 显示「为什么装不了」。 */
-export const LOCAL_UNSUPPORTED_REASON = "暂不支持本地包类型（该功能需要本机有 Node/uv，和鸣不内置）";
+/**
+ * 把包钉到具体版本。
+ *
+ * npm 用 `pkg@1.2.3`，pypi 用 `pkg==1.2.3`（PEP 508 的写法，`uvx` 认它；
+ * 用 `@` 会被 uv 当成不当的 requirement 串）。
+ */
+export function pinnedSpec(registryType: string, identifier: string, version?: string): string {
+  if (!version) return identifier;
+  return `${identifier}${registryType === "pypi" ? "==" : "@"}${version}`;
+}
 
 /**
  * Registry 包类型 → **逻辑命令名**。
  *
- * ★ **本轮没有调用方**（本地包不装，见上）。保留下轮放开时用。
- *
- * 只给**逻辑名**，不是 Windows 上的真实文件名——实际文件名由桌面端
- * `mcp-stdio.js` 的 `resolveExecutable` 按 PATHEXT 解析，**不能反过来**：
- * 解析顺序必须是 `.exe` → `.cmd` → `.bat` → 原名（兜底），
- * 因为实测 `npx`（无扩展名）是 **2073 字节的 shell 脚本**，Windows 跑不了。
+ * 只给**逻辑名**，不是本机真正执行的那个文件——渲染层不知道用户机器长什么样。
+ * 实际形态由桌面端 `packages/desktop/local-runtime.js` 的 `planStdioSpawn` 决定：
+ * Windows 上 `npx` 的真身是 `.cmd`（实测 `npx` 无扩展名是 2073 字节的 shell 脚本，
+ * `npx.cmd` 才是能被找到的那个），而我们的 stdio 桥恒定 `shell:false`，
+ * 所以会翻译成 `node <npm>/bin/npx-cli.js -y <包>`。
+ * ★ 不要在这里改写成 `npx.cmd`：Node ≥18.20.2 对 .cmd 直接 EINVAL（CVE-2024-27980）。
  */
 export function runnerFor(registryType: string): string {
   if (registryType === "npm") return "npx";
@@ -143,64 +137,41 @@ export function runnerFor(registryType: string): string {
  * **返回带 `unsupported` 而不是 `null`**：这样 UI 能显示「为什么装不了 + 具体哪个值不合法」，
  * 而不是静默隐藏（用户会以为自己错过了什么）。
  *
- * ★ **`packageArguments` 与 `environmentVariables` 本轮直接丢弃**，不映射进 args/env。
+ * ★ **`packageArguments` 与 `environmentVariables` 一律丢弃**，不映射进 args/env。
  * 理由见 `types.ts` 里这两个字段的注释。
  */
 export function buildOption(pkg: RegistryPackage): InstallOption {
-  const spec = pkg.version ? `${pkg.identifier}@${pkg.version}` : pkg.identifier;
+  const spec = pinnedSpec(pkg.registryType, pkg.identifier, pkg.version);
   const label = `${pkg.registryType} · ${spec}`;
+  const base = {
+    kind: "stdio" as const,
+    label,
+    registryType: pkg.registryType,
+    version: pkg.version,
+  };
 
-  // ★ 本轮所有本地包都标 unsupported（不生成 command/args）。
-  //   注意顺序：**先判「支不支持」，再判白名单** —— 不支持的类型没必要查白名单，
-  //   白名单留给下轮放开的类型用（见 LOCAL_PACKAGES_SUPPORTED 的说明）。
-  if (!LOCAL_PACKAGES_SUPPORTED) {
-    return {
-      kind: "stdio",
-      label,
-      registryType: pkg.registryType,
-      version: pkg.version,
-      unsupported: LOCAL_UNSUPPORTED_REASON,
-    };
-  }
-
-  // ↓↓↓ 以下分支本轮走不到，但保留：下轮把 LOCAL_PACKAGES_SUPPORTED 打开即可用。
-  //     白名单校验的位置很关键——它在生成 command **之前**，不合法的包名拿不到可执行文件。
-  if (!["npm", "pypi"].includes(pkg.registryType)) {
+  // 顺序：**先判支不支持，再查白名单**——不认识的类型连命令都没有，查白名单无意义。
+  if (!(LOCAL_TYPES as readonly string[]).includes(pkg.registryType)) {
     // 字段名写错（如 snake_case 的 registry_type）会让 registryType 为 undefined。
-    // ★ 这种情况下**绝不能**当默认类型处理 —— 一个「认不出来」的包必须被拒，
-    //   猜一个类型去执行它等于把未知输入当可信输入。
+    // ★ 这种情况下**绝不能**当默认类型处理。
     const shown = pkg.registryType ? `${pkg.registryType} 类型` : "类型（包类型字段缺失或无法识别）";
-    return {
-      kind: "stdio",
-      label,
-      registryType: pkg.registryType,
-      version: pkg.version,
-      unsupported: `暂不支持${shown}的包`,
-    };
+    return { ...base, unsupported: `暂不支持${shown}的包` };
   }
 
   const bad = validatePackage(pkg);
-  if (bad) {
-    return {
-      kind: "stdio",
-      label,
-      registryType: pkg.registryType,
-      version: pkg.version,
-      unsupported: `${bad.reason}：${bad.value}`,
-    };
+  if (bad) return { ...base, unsupported: `${bad.reason}：${bad.value}` };
+
+  // ★ **必须有钉死的版本**。浮动版本（`npx -y some-pkg`）意味着同一条命令
+  //   每次可能装到不同的代码——用户确认的是这一次，跑的可能是下一次。
+  //   Registry 实测每条 packages 都带 version，缺 version 属于数据异常，宁可不装。
+  if (!pkg.version) {
+    return { ...base, unsupported: "该包没有提供固定版本，为避免装到变动的代码暂不安装（可改用远程服务，或在接口区手动配置）" };
   }
 
   const command = runnerFor(pkg.registryType);
-  // npx 需要 -y 跳过安装提示；uvx 不需要（也没有这个参数）。
+  // npx 需要 -y 跳过「首次下载要不要确认」的交互提示；uvx 没有这个参数。
   const args = pkg.registryType === "npm" ? ["-y", spec] : [spec];
-  return {
-    kind: "stdio",
-    command,
-    args,
-    registryType: pkg.registryType,
-    version: pkg.version,
-    label,
-  };
+  return { ...base, command, args };
 }
 
 /* -------------------------------------------------------------- 远程选项 */
@@ -282,6 +253,11 @@ export function toServerConfig(
     enabled: true,
     origin: "registry",
     registryName: entry.key,
+    // ★ 本地包的台账：记下「装的是哪一类、哪个版本」。
+    //   界面据此显示 v1.2.3，上游发新版时也能看出来本机跑的是旧的钉死版本。
+    //   远程装法两个字段都为 undefined（没有本机包）。
+    registryType: option.kind === "stdio" ? option.registryType : undefined,
+    registryVersion: option.kind === "stdio" ? option.version : undefined,
     createdAt: at,
     updatedAt: at,
   };
@@ -308,6 +284,11 @@ export function toEntry(item: RegistryItem): RegistryEntry {
     repoUrl: server.repository?.url,
     repoSource: server.repository?.source,
     websiteUrl: server.websiteUrl ?? undefined,
+    // 图标是外部 URL：只接 http(s)，避免把 data:/javascript: 塞进 <img src>。
+    iconUrl: (() => {
+      const src = server.icons?.find((i) => typeof i?.src === "string")?.src;
+      return src && /^https?:\/\//i.test(src) ? src : undefined;
+    })(),
     status: typeof meta?.status === "string" ? meta.status : "unknown",
     options,
     latestVersion: server.version,

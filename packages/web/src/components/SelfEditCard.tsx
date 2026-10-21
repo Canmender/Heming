@@ -5,6 +5,13 @@ import {
   type AuditEntry,
   type StorageLike,
 } from "../lib/selfEdit/guards.js";
+import {
+  SelfSnapshotStore,
+  rollbackSnapshot,
+  type SelfSnapshot,
+  type SnapshotTargets,
+} from "../lib/selfEdit/snapshots.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 
 /**
  * 自我修改设置卡（挂在技能区）：
@@ -19,14 +26,22 @@ export function SelfEditCard({
   agentId,
   storage,
   policyStore,
+  snapshotStore,
+  targets,
 }: {
   agents: { id: string; name: string }[];
   agentId: string;
   storage?: StorageLike;
   policyStore?: SelfEditStore;
+  /** 回滚快照的仓库（测试注入；默认与开关/留痕共用同一份存储）。 */
+  snapshotStore?: SelfSnapshotStore;
+  /** 回滚要写回的三个存储；缺省时只能看列表、不能点回滚。 */
+  targets?: SnapshotTargets;
 }) {
   const policy = policyStore ?? new SelfEditStore(storage);
   const [tick, setTick] = useState(0);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const [rollbackTarget, setRollbackTarget] = useState<SelfSnapshot | null>(null);
   const bump = useCallback(() => setTick((n) => n + 1), []);
 
   // 留痕与开关都直接从存储读，不需要额外的同步 effect——
@@ -37,6 +52,26 @@ export function SelfEditCard({
   const store = storage ?? browserStorage();
   const audit = readAudit(store, agentId || undefined).slice(0, 20);
   const enabled = agentId ? policy.allowed(agentId) : true;
+  const snapshots = snapshotStore ?? new SelfSnapshotStore(store);
+  const snaps = agentId ? snapshots.list(agentId).slice(0, 20) : [];
+
+  const rollback = (snap: SelfSnapshot) => {
+    if (!targets) {
+      setNotice({ ok: false, text: "当前页面没有接入记忆/技能/MCP 存储，只能查看不能回滚。" });
+      return;
+    }
+    setRollbackTarget(snap);
+  };
+
+  const confirmRollback = () => {
+    if (!rollbackTarget || !targets) return;
+    const snap = rollbackTarget;
+    setRollbackTarget(null);
+    const result = rollbackSnapshot(snap, targets);
+    if (result.ok) snapshots.remove(snap.id);
+    setNotice(result);
+    bump();
+  };
 
   return (
     <section aria-label="自我优化" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
@@ -91,6 +126,77 @@ export function SelfEditCard({
           </ul>
         )}
       </div>
+
+      <div className="mt-3 border-t border-line-soft pt-2">
+        <div className="text-[11px] font-bold text-[#999]">
+          可回滚的修改{snaps.length ? `（${snaps.length} 条）` : ""}
+        </div>
+        <div className="mt-0.5 text-[11px] text-[#aaa]">
+          回滚只还原这一项（记忆内容 / 技能定义 / MCP 配置），不撤销之后的其它改动。
+        </div>
+        {!agentId ? (
+          <div className="mt-1 text-[11px] text-muted">选择智能体后显示。</div>
+        ) : snaps.length === 0 ? (
+          <div className="mt-1 text-[11px] text-muted">还没有可回滚的修改。</div>
+        ) : (
+          <ul className="mt-1 flex flex-col gap-1">
+            {snaps.map((snap) => (
+              <li
+                key={snap.id}
+                className="flex flex-wrap items-center gap-1.5 rounded border border-line-soft px-2 py-1 text-[11px]"
+              >
+                <span className="text-[#aaa]">{snap.at.slice(0, 16).replace("T", " ")}</span>
+                <span className="min-w-0 flex-1 truncate text-[#555]">{snap.label}</span>
+                <button
+                  type="button"
+                  aria-label={`回滚 ${snap.label}`}
+                  className="rounded border border-line px-1.5 py-0.5 text-[#555] hover:bg-[#f7f7f7]"
+                  onClick={() => rollback(snap)}
+                >
+                  回滚
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {notice && (
+          <div
+            role="status"
+            className={`mt-1 text-[11px] ${notice.ok ? "text-[#15803d]" : "text-[#b45309]"}`}
+          >
+            {notice.text}
+          </div>
+        )}
+      </div>
+      {rollbackTarget && (
+        <ConfirmDialog
+          title="回滚这一项改动"
+          onCancel={() => setRollbackTarget(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setRollbackTarget(null)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={confirmRollback}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                回滚
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            把「{rollbackTarget.label}」还原为改动前的内容？如果这条之后又被改过（人工或智能体），
+            那些改动会被这次回滚覆盖，且不会留下可再回滚的快照。
+          </p>
+        </ConfirmDialog>
+      )}
     </section>
   );
 }
@@ -113,6 +219,7 @@ const ACTION_LABEL: Record<string, string> = {
   add_server: "新增服务",
   update_server: "改服务",
   remove_server: "删服务",
+  rollback: "回滚",
   reject: "已拒绝",
 };
 

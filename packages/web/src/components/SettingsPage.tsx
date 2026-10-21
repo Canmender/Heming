@@ -45,6 +45,7 @@ function InlineText({ text }: { text: string }) {
 const NAV_LABELS: Record<NavPage, string> = {
   home: "主页",
   workspace: "工作区",
+  tasks: "任务区",
   skills: "技能区",
   interfaces: "接口区",
   memory: "记忆区",
@@ -323,7 +324,7 @@ function NavigationSection() {
         </button>
       </div>
       <div className="mt-1 text-[11px] text-muted">
-        只改左侧导航的显示顺序，Alt+1–6 快捷键保持原位
+        只改左侧导航的显示顺序，Alt+1–8 快捷键保持原位
       </div>
       <ul className="mt-2 flex flex-col gap-1">
         {navOrder.map((page, index) => (

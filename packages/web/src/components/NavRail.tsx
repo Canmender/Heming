@@ -7,10 +7,12 @@ import {
   GearIcon,
   UserIcon,
   SkillsIcon,
+  TaskIcon,
 } from "./icons.js";
 import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
+import { NotificationCenter } from "./NotificationCenter.js";
 
 /**
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
@@ -19,6 +21,8 @@ import { useChatStore } from "../store/chat.js";
 const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit: string }[] = [
   { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
   { page: "workspace", label: "工作区", icon: <ChatIcon width={17} height={17} />, digit: "2" },
+  // 任务区是新页，拿 8（老页编号不动，见设置区的注释）
+  { page: "tasks", label: "任务区", icon: <TaskIcon width={17} height={17} />, digit: "8" },
   { page: "skills", label: "技能区", icon: <SkillsIcon width={17} height={17} />, digit: "3" },
   { page: "interfaces", label: "接口区", icon: <PlugIcon width={17} height={17} />, digit: "4" },
   { page: "memory", label: "记忆区", icon: <MemoryIcon width={17} height={17} />, digit: "5" },
@@ -73,6 +77,7 @@ export function NavRail() {
               <button
                 type="button"
                 aria-label={`${it.label} ${shortcut}${showUnread ? ` ${unread} 条未读` : ""}`}
+                aria-current={active ? "page" : undefined}
                 onClick={() => setPage(it.page)}
                 className={`relative flex h-[34px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
                   active ? "bg-ink text-white" : "text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
@@ -89,6 +94,10 @@ export function NavRail() {
             </div>
           );
         })}
+      </div>
+
+      <div className="mb-1 flex flex-col items-center gap-1.5">
+        <NotificationCenter />
       </div>
 
       <div className="group relative">

@@ -7,7 +7,9 @@ import {
   type E2eOpenOutcome,
   type ToolTrace,
 } from "../store/chat.js";
-import { useUiStore } from "../store/ui.js";
+import { useUiStore, type TaskDraft } from "../store/ui.js";
+import { useNotificationStore } from "../store/notifications.js";
+import { useTaskStore } from "../lib/tasks/store.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
 import {
@@ -35,6 +37,14 @@ import {
   type SealedEnvelope,
 } from "../lib/e2eSession.js";
 import { streamChat } from "../lib/llmClient.js";
+import { resolveCapability } from "../lib/modelCaps.js";
+import {
+  attachImageParts,
+  isVisionImage,
+  visionImageDataUrl,
+  type HistoryRow,
+  type VisionImageSlot,
+} from "../lib/vision/history.js";
 import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
 import { buildAgentContext } from "../lib/agentRuntime/context.js";
 import {
@@ -46,7 +56,8 @@ import { memoryStore } from "../lib/memory/index.js";
 import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
-import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon } from "./icons.js";
+import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon, ChatIcon } from "./icons.js";
+import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import { Avatar } from "./Avatar.js";
 import { MentionPicker, type MentionItem } from "./MentionPicker.js";
 import { AgentStreamBubble } from "./AgentStreamBubble.js";
@@ -55,6 +66,13 @@ import { EmojiPicker } from "./EmojiPicker.js";
 import { VoiceCallPanel } from "./VoiceCallPanel.js";
 import { useVoiceCall } from "../lib/voiceCall.js";
 import { buildToolBridge } from "../lib/mcp/index.js";
+import {
+  buildConversationJson,
+  buildConversationMarkdown,
+  conversationFileName,
+  type ExportMessage,
+} from "../lib/export/conversation.js";
+import { buildWikiToolBridge } from "../lib/wiki/tools.js";
 import { autoConnectAll } from "../lib/mcp/runtime.js";
 import {
   SelfEditBudget,
@@ -76,6 +94,8 @@ import { ChatChart } from "./ChatChart.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 import { mcpRegistry } from "../lib/mcp/store.js";
 import { openCallWindow } from "../lib/callWindow.js";
+import { useModalA11y } from "./useModalA11y.js";
+import { capabilityNotice } from "../lib/capabilityNotice.js";
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
 export const NO_E2E_NOTICE = "当前环境不支持端到端加密，请使用桌面端或 HTTPS";
@@ -173,6 +193,15 @@ declare global {
 
 /** aggregateChips 结果里「无 chips」的稳定空表。 */
 const NO_CHIPS: ReactionChip[] = [];
+
+/** 会话标题（与 header 同口径；通知列表按此显示来源）。 */
+function convTitleOf(conv: Conversation): string {
+  return conv.type === "direct"
+    ? conv.peer.displayName
+    : conv.type === "agent"
+      ? conv.agent.name
+      : `${conv.name}（${conv.memberCount} 人）`;
+}
 
 /** 进程内聚合缓存（fix I4）：同 (messages, plainOf) 引用 → 返回同一结果对象（可断言「不重复计算」）。 */
 let chipAggCache: {
@@ -419,9 +448,15 @@ function AudioBubble({
   ) : null;
 }
 
-export function ChatPage() {
+/**
+ * @param embedded 任务区嵌入态：隐藏「返回工作区」按钮（返回会切页并卸载
+ *   ChatPage，等于中断正在跑的任务）；其余行为与聊天页完全一致。
+ */
+export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
   const convId = useUiStore((s) => s.activeConversationId)!;
   const leave = useUiStore((s) => s.leaveConversation);
+  const taskDraft = useUiStore((s) => s.taskDraft);
+  const consumeTaskDraft = useUiStore((s) => s.consumeTaskDraft);
   const conversations = useChatStore((s) => s.conversations);
   const messages = useChatStore((s) => s.messages[convId] ?? []);
   const plainById = useChatStore((s) => s.plainById);
@@ -439,6 +474,19 @@ export function ChatPage() {
   const me = useAuthStore((s) => s.user);
   const [draft, setDraft] = useState("");
   const [sendNotice, setSendNotice] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  /**
+   * 多选导出：勾出若干条，只导出这些。
+   * 选择状态是本会话的临时视图状态（切会话即清），不落盘——
+   * 导出的原料（明文消息）本来就在本机，没必要再存一份勾选。
+   */
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /** 会话内搜索：只在打开时占用 header 下方一条，不常驻挤压消息区。 */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchHitId, setSearchHitId] = useState<string | null>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
   /** 会话信息卡（三横线弹出）开关。 */
   const [infoOpen, setInfoOpen] = useState(false);
@@ -501,6 +549,10 @@ export function ChatPage() {
   const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
   /** 本机流元数据（streamId → 触发上下文）：onLocalDelta 回填 agentId、重试取原触发文本。 */
   const streamMeta = useRef<Record<string, { agentId: string; name: string; text: string }>>({});
+  /** 任务区的流归属（streamId → taskId）：工具步骤与终态写进对应任务记录。 */
+  const streamTaskRef = useRef<Record<string, string>>({});
+  /** 从任务区投递进来、等连接就绪后自动发送的任务（一次消费一条）。 */
+  const [autoTask, setAutoTask] = useState<TaskDraft | null>(null);
   /** 存量自迁移已尝试集（组件生命周期内）：跨 messages.length 变化的 effect 批次去重。 */
   const migratedRef = useRef<Set<string>>(new Set());
   /**
@@ -668,6 +720,16 @@ export function ChatPage() {
   const isElectron = voiceBridge !== undefined;
   /** C1 群聊发起通话确认弹窗开关（null=关；非空=显示确认）。 */
   const [groupCallConfirm, setGroupCallConfirm] = useState(false);
+  const groupCallPanelRef = useRef<HTMLDivElement | null>(null);
+  const forwardPanelRef = useRef<HTMLDivElement | null>(null);
+  useModalA11y(groupCallPanelRef, () => setGroupCallConfirm(false), {
+    active: groupCallConfirm,
+    autoFocus: false,
+  });
+  useModalA11y(forwardPanelRef, () => setForwardMsg(null), {
+    active: forwardMsg !== null,
+    autoFocus: false,
+  });
   const voiceCall = useVoiceCall({
     send: (e) => wsHandleRef.current?.send(e),
     myUserId: me?.id ?? "",
@@ -789,6 +851,143 @@ export function ChatPage() {
     const info = memberInfoById?.[m.senderId];
     return info?.avatar ? { displayName: info.name, avatar: info.avatar } : undefined;
   };
+  /**
+   * 导出（本机生成）：只导出本机已解密的明文，解不开的信封直接跳过，
+   * 不用占位符冒充内容。附件只带元信息，避免把文档正文再抄一份。
+   *
+   * @param onlyIds 传入时只导出这些消息（多选导出）；不传导出整段会话。
+   */
+  const exportConversation = (format: "md" | "json", onlyIds?: string[]) => {
+    const source = onlyIds
+      ? messages.filter((m) => onlyIds.includes(m.id))
+      : messages;
+    const rows: ExportMessage[] = [];
+    for (const m of source) {
+      let text = "";
+      let file: { id?: string; name: string; mime: string; size: number } | undefined;
+      if (m.enc === "e2e") {
+        const p = plainOf[m.id];
+        if (!p) {
+          // 解不开的信封：撤回消息仍保留「已撤回」记录，其余直接跳过
+          if (!m.recalledAt) continue;
+        } else {
+          if (p.kind !== "text" && p.kind !== "file" && p.kind !== "forward") continue; // reaction/chunk/...
+          text = p.text ?? "";
+          file = p.file;
+        }
+      } else {
+        text = m.payload.text;
+        file = m.payload.file;
+      }
+      if (m.recalledAt) {
+        text = "";
+        file = undefined;
+      }
+      if (!text && !file && !m.recalledAt) continue;
+      rows.push({
+        id: m.id,
+        role: m.senderType === "user" ? "user" : "assistant",
+        sender: displaySenderName(m) || "成员",
+        at: m.createdAt,
+        text,
+        ...(m.recalledAt ? { recalled: true } : {}),
+        ...(file
+          ? {
+              attachment: {
+                ...(file.id ? { id: file.id } : {}),
+                name: file.name,
+                mime: file.mime,
+                size: file.size,
+              },
+            }
+          : {}),
+      });
+    }
+
+    if (rows.length === 0) {
+      setSendNotice(onlyIds ? "所选消息里没有可导出的明文" : "没有可导出的明文消息");
+      setExportOpen(false);
+      return;
+    }
+    const input = {
+      id: convId,
+      title: headerTitle,
+      exportedAt: Date.now(),
+      messages: rows,
+    };
+    const content =
+      format === "md" ? buildConversationMarkdown(input) : buildConversationJson(input);
+    const name = conversationFileName(headerTitle, input.exportedAt, format);
+    try {
+      const url = URL.createObjectURL(
+        new Blob([content], {
+          type: format === "md" ? "text/markdown;charset=utf-8" : "application/json;charset=utf-8",
+        }),
+      );
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+      setSendNotice(`已导出 ${rows.length} 条消息（仅本机明文）`);
+    } catch {
+      setSendNotice("导出失败，请检查浏览器下载权限");
+    }
+    setExportOpen(false);
+  };
+
+  /**
+   * 通知：他会话的新消息进通知中心。
+   *
+   * 只有 ChatPage 挂着 WS，所以「应用开着时收到他才提醒」是这套结构的既成事实：
+   * 系统级推送需要服务端与桌面通知权限，本机时间线不做那件事。
+   * E2E 消息此刻还没解密，正文留空（绝不把密文写进通知）。
+   */
+  const notifyIncomingMessage = (m: Message) => {
+    if (m.senderId === me?.id) return;
+    // 经 getState 读：WS 回调闭包只随 convId 建立，列表快照会过期
+    const conv = useChatStore.getState().conversations.find((c) => c.id === m.conversationId);
+    useNotificationStore.getState().push({
+      kind: "message",
+      key: `message:${m.id}`,
+      title: conv ? convTitleOf(conv) : "新消息",
+      ...(m.enc === "e2e" ? {} : m.payload.text ? { body: m.payload.text } : {}),
+      conversationId: m.conversationId,
+    });
+  };
+
+  /** 通知：任务收尾进通知中心（用户常在发起任务后切去别处）。 */
+  const notifyTaskSettled = (
+    taskId: string,
+    status: "done" | "failed" | "cancelled",
+    detail: string,
+  ) => {
+    const task = useTaskStore.getState().tasks.find((t) => t.id === taskId);
+    const label =
+      status === "done" ? "已完成" : status === "failed" ? "执行失败" : "已中断";
+    useNotificationStore.getState().push({
+      kind: "task",
+      key: `task:${taskId}:${status}`,
+      title: `${task?.title ?? "任务"}${label}`,
+      ...(detail ? { body: detail } : {}),
+      taskId,
+      ...(task ? { conversationId: task.conversationId } : {}),
+    });
+  };
+
+  // 导出菜单的「点外面关闭」：临时监听器只在打开时挂，避免常驻。
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (!exportRef.current?.contains(e.target as Node)) setExportOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [exportOpen]);
+
   /** 选择器条目：剔除已选（防重复 chip）+ 按 token query 过滤（空串=全量）。 */
   const pickerItems = mentionCandidates.filter(
     (a) =>
@@ -811,6 +1010,27 @@ export function ChatPage() {
       : [...selectedMentions, auto];
   }, [conv, selectedMentions]);
 
+  /**
+   * 能力降级的当场提示（工具）：模型不支持函数调用时编排层会静默丢掉 tools，
+   * 用户只会觉得「智能体没去查资料」。这里把降级说破，附带该改绑模型的指引。
+   * 只提示**已经授权给模型的工具存在**的情况——一个工具都没开时不谈降级。
+   */
+  const llmProfiles = useLlmStore((s) => s.profiles);
+  const llmBindings = useLlmStore((s) => s.bindings);
+  const toolsNotice = useMemo(() => {
+    if (mcpRegistry.enabledTools().length === 0) return null;
+    return capabilityNotice(
+      "tools",
+      effectiveMentions.map((m) => ({
+        name: m.name,
+        profile: (() => {
+          const pid = llmBindings[m.agentId];
+          return pid ? llmProfiles.find((x) => x.id === pid) : undefined;
+        })(),
+      })),
+    );
+  }, [effectiveMentions, llmBindings, llmProfiles]);
+
   /** agentId → LLM 连接（绑定表解析）：无绑定/连接已删都归为 undefined（发送前拦截与触发共用）。 */
   const resolveProfile = (agentId: string) => {
     const llm = useLlmStore.getState();
@@ -831,14 +1051,17 @@ export function ChatPage() {
     // 描述不长，默认注入。与 self.* 不同——后者是 13 个带写操作的长描述工具，
     // 才需要用户显式开启才给。
     const toneBridge = buildToneToolBridge();
+    // wiki_search / wiki_read：只读，默认注入；回答末尾的来源脚注由编排层拼。
+    const wikiBridge = buildWikiToolBridge();
     if (!selfEditRef.current!.policy.configured(agentId)) {
-      // 没开过自我优化 → 只给 MCP、图表与去 AI 味工具，self.* 保持不注入
-      return mergeToolBridges(mcpBridge, chartBridge, toneBridge);
+      // 没开过自我优化 → 只给 MCP、图表、去 AI 味与知识库工具，self.* 保持不注入
+      return mergeToolBridges(mcpBridge, chartBridge, toneBridge, wikiBridge);
     }
     return mergeToolBridges(
       mcpBridge,
       chartBridge,
       toneBridge,
+      wikiBridge,
       buildSelfToolBridge(
         {
           memory: memoryStore,
@@ -865,6 +1088,23 @@ export function ChatPage() {
 
   /** HITL 待确认请求（工具调用确认弹窗的数据源）。 */
   const pendingHitl = useHitlStore((s) => s.pending);
+  /**
+   * 跨会话的待确认请求：后台会话的流仍可能在跑，弹窗出现在当前会话里时
+   * 必须标出归属，否则用户会把 A 会话的工具调用当成 B 会话的动作。
+   */
+  const pendingElsewhere = Boolean(pendingHitl && pendingHitl.conversationId !== convId);
+  const pendingConv = pendingElsewhere
+    ? conversations.find((c) => c.id === pendingHitl!.conversationId)
+    : undefined;
+  const pendingConvLabel = pendingElsewhere
+    ? pendingConv
+      ? pendingConv.type === "direct"
+        ? pendingConv.peer.displayName
+        : pendingConv.type === "agent"
+          ? pendingConv.agent.name
+          : pendingConv.name
+      : pendingHitl!.conversationId
+    : undefined;
 
   /** 流气泡署名：本会话 members 映射名优先，其次名册，兜底「智能体」。 */
   const nameOf = (agentId: string) =>
@@ -884,6 +1124,52 @@ export function ChatPage() {
   const visibleMessages = messages.filter(
     (m) => !(m.enc === "e2e" && plainOf[m.id]?.kind === "reaction"),
   );
+  /** 多选：勾/去勾一条（顺序按点击顺序记录，导出仍按消息原始顺序取）。 */
+  const toggleSelected = (id: string) =>
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const selectAllVisible = () => setSelectedIds(visibleMessages.map((m) => m.id));
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds([]);
+  };
+  /**
+   * 会话内搜索的数据源：只取本机明文。未解开的信封不参与——
+   * 搜索需要展示/跳转原文，而密文既搜不到也不该被当成空消息。
+   */
+  const searchableMessages = useMemo(() => {
+    const out: { id: string; text: string; recalled?: boolean }[] = [];
+    for (const m of visibleMessages) {
+      const payload = m.enc === "e2e" ? plainOf[m.id] : m.payload;
+      const text = payload && typeof payload.text === "string" ? payload.text : "";
+      if (text) out.push({ id: m.id, text, recalled: m.recalledAt != null });
+    }
+    return out;
+  }, [visibleMessages, plainOf]);
+  const searchHits = useMemo(
+    () => findMessageHits(searchableMessages, searchQuery),
+    [searchableMessages, searchQuery],
+  );
+  const searchIndex = hitPosition(searchHits, searchHitId);
+  const activeSearchHit = searchHits[searchIndex >= 0 ? searchIndex : 0] ?? null;
+  const activeSearchId = activeSearchHit?.id ?? null;
+
+  useEffect(() => {
+    if (!searchOpen || !activeSearchId) return;
+    document.getElementById(`msg-${activeSearchId}`)?.scrollIntoView({ block: "center" });
+  }, [searchOpen, activeSearchId]);
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchHitId(null);
+  };
+
+  const goSearch = (delta: 1 | -1) => {
+    // 用「当前高亮」而不是 searchHitId：首次输入时还没有显式选中，
+    // 高亮的是第一条，按「下一个」应当去第二条而不是原地不动。
+    const next = stepHit(searchHits, activeSearchId, delta);
+    if (next) setSearchHitId(next.id);
+  };
   // 回应 chips 聚合（fix I4）：useMemo 按 messages/plainOf 引用单次聚合——
   // 原实现每渲染对每条消息全量扫 reaction 事件（O(n²)）
   const chipsByMsgId = useMemo(() => aggregateChips(messages, plainOf), [messages, plainOf]);
@@ -893,7 +1179,11 @@ export function ChatPage() {
    * deps 全部从 stores + WS 句柄组装；fetchHistory 映射 role 并剔掉刚发出的这条
    * （服务端很可能已入库，否则当前 user 轮会在提示词里出现两遍）。
    */
-  const startRun = (mentions: { agentId: string; name: string }[], text: string) => {
+  const startRun = (
+    mentions: { agentId: string; name: string }[],
+    text: string,
+    taskId?: string,
+  ) => {
     // 无 subtle：触发端无法封 chunk/finish——拦截不启动（硬验收⑤：不降级明文回复）
     if (!hasSubtle()) {
       setSendNotice(NO_E2E_NOTICE);
@@ -902,41 +1192,45 @@ export function ChatPage() {
     const deps: TriggerDeps = {
       getProfile: resolveProfile,
       getPrompt: (agentId) => useLlmStore.getState().prompts[agentId] ?? "",
-      fetchHistory: async () => {
+      fetchHistory: async (historyProfile) => {
         // spec §3：提示词只带近 30 条历史；已撤回跳过；E2E 信封经 loadMessages 合并
         // （缓存优先 → handler 解密 → 占位）——**解不开的不进提示词**（硬验收⑤），
         // reaction/chaindist 控制消息同样不进。
         const msgs = (await useChatStore.getState().loadMessages(convId)).slice(-30);
         const plainOf = useChatStore.getState().plainById[convId] ?? {};
-        const rows = msgs
-          .filter((m) => {
-            if (m.recalledAt != null) return false;
-            if (m.enc === "e2e") {
-              const p = plainOf[m.id];
-              if (!p) return false; // 占位（无法解密）→ 不外发模型供应商
-              if (p.kind !== "text" && p.kind !== "file" && p.kind !== "forward") return false;
-            }
-            return true;
-          })
-          .map((m) => {
-            // 附件文本要拼进 content，否则模型看不到文件内容——
-            // 此前 `content: m.payload.text` 把附件完全忽略了，
-            // 用户传了文件、模型却只能说「我看不到文件」。
-            //
-            // 拼在正文之后：先让用户的话完整呈现，再跟上文件内容，
-            // 模型更容易把「问题」和「参考资料」区分开。
-            const docText = m.payload.file?.text;
-            const content = docText
-              ? `${m.payload.text}\n\n${docFileBlock(m.payload.file!.name, docText)}`
-              : m.payload.text;
-            return {
-              role: m.senderType === "user" ? ("user" as const) : ("assistant" as const),
-              content,
-            };
+        // 视觉能力按**本智能体绑定的模型**判定：群里两个智能体可能一个能看图、一个不能。
+        const vision = resolveCapability(historyProfile).supportsVision;
+        const rows: HistoryRow[] = [];
+        const images: VisionImageSlot[] = [];
+        for (const m of msgs) {
+          if (m.recalledAt != null) continue;
+          if (m.enc === "e2e") {
+            const p = plainOf[m.id];
+            if (!p) continue; // 占位（无法解密）→ 不外发模型供应商
+            if (p.kind !== "text" && p.kind !== "file" && p.kind !== "forward") continue;
+          }
+          // 附件文本要拼进 content，否则模型看不到文件内容——
+          // 此前 `content: m.payload.text` 把附件完全忽略了，
+          // 用户传了文件、模型却只能说「我看不到文件」。
+          //
+          // 拼在正文之后：先让用户的话完整呈现，再跟上文件内容，
+          // 模型更容易把「问题」和「参考资料」区分开。
+          const docText = m.payload.file?.text;
+          const content = docText
+            ? `${m.payload.text}\n\n${docFileBlock(m.payload.file!.name, docText)}`
+            : m.payload.text;
+          // 图片不进正文文本，而是作为内容片（供应商各要各的形状）。
+          if (vision && isVisionImage(m.payload.file)) {
+            images.push({ rowIndex: rows.length, file: m.payload.file });
+          }
+          rows.push({
+            role: m.senderType === "user" ? "user" : "assistant",
+            content,
           });
+        }
         const last = rows[rows.length - 1];
         if (last && last.role === "user" && last.content === text) rows.pop();
-        return rows;
+        return attachImageParts(rows, images, visionImageDataUrl);
       },
       send: (e) => wsHandleRef.current?.send(e),
       streamChat,
@@ -997,6 +1291,10 @@ export function ChatPage() {
       },
       onStart: (streamId, mention) => {
         streamMeta.current[streamId] = { ...mention, text };
+        if (taskId) {
+          streamTaskRef.current[streamId] = taskId;
+          useTaskStore.getState().bindStream(taskId, streamId);
+        }
         resetToolTrace(streamId);
         turnToolCountRef.current = 0;
         // 新一轮开始：重置自我修改的单轮预算（上轮用掉的次数不该拖累这一轮）
@@ -1043,6 +1341,7 @@ export function ChatPage() {
       onToolTrace: (streamId, e) => {
         const meta = streamMeta.current[streamId];
         if (!meta) return;
+        const taskId = streamTaskRef.current[streamId];
         const list = (toolTraceRef.current[streamId] ??= []);
         const idx = list.findIndex((t) => t.id === e.id);
         if (e.phase === "start") {
@@ -1056,15 +1355,27 @@ export function ChatPage() {
           };
           if (idx >= 0) list[idx] = entry;
           else list.push(entry);
+          if (taskId) {
+            useTaskStore.getState().stepStart(taskId, { id: e.id, name: e.name, args: e.args });
+          }
         } else if (idx >= 0) {
+          const status = e.denied ? "denied" : e.ok ? "ok" : "error";
           list[idx] = {
             ...list[idx],
             // 「已拒绝」与「失败」分开：被拒的工具**根本没执行**，
             // 混成失败用户会以为「我拒了，但它还是跑了」。
-            status: e.denied ? "denied" : e.ok ? "ok" : "error",
+            status,
             result: e.result,
             endedAt: Date.now(),
           };
+          if (taskId) {
+            useTaskStore.getState().stepEnd(taskId, e.id, {
+              status,
+              ...(e.result === undefined ? {} : { result: e.result }),
+              ...(e.sources?.length ? { sources: e.sources } : {}),
+              ...(e.denyCause ? { denyCause: e.denyCause } : {}),
+            });
+          }
         }
         upsertStream(streamId, {
           agentId: meta.agentId,
@@ -1120,6 +1431,7 @@ export function ChatPage() {
               source: "unknown" as const,
             },
             reason: "确认流程异常，本次调用未执行",
+            cause: "gate" as const,
           }));
         }
       },
@@ -1155,6 +1467,21 @@ export function ChatPage() {
         } catch {
           /* 记忆失败静默降级 */
         }
+      },
+      // 任务区终态：每个流恰好一次。只有从任务区发起的流带 taskId；
+      // 普通聊天流不建档，任务区列表也不会被日常对话刷屏。
+      onRunSettled: (streamId, result) => {
+        const taskId = streamTaskRef.current[streamId];
+        if (!taskId) return;
+        delete streamTaskRef.current[streamId];
+        const status =
+          result.status === "ok" ? "done" : result.status === "aborted" ? "cancelled" : "failed";
+        useTaskStore.getState().settle(taskId, {
+          status,
+          ...(result.finalText === undefined ? {} : { result: result.finalText }),
+          ...(result.error === undefined ? {} : { error: result.error }),
+        });
+        notifyTaskSettled(taskId, status, result.error ?? result.finalText ?? "");
       },
       // 上下文预算（设计 §4）：agentStream 在 fetchHistory 之后调用——按本机设置做 token
       // 预算切分与早期对话压缩（摘要置于历史之前）；溢出重试带 aggressive 重新调用。
@@ -1221,9 +1548,15 @@ export function ChatPage() {
   const retryStream = (streamId: string) => {
     const meta = streamMeta.current[streamId];
     if (!meta) return;
+    // 任务区的流重试：任务记录跟着回到「进行中」，否则重试成功也不会更新汇总
+    const taskId =
+      streamTaskRef.current[streamId] ??
+      useTaskStore.getState().tasks.find((t) => t.streamId === streamId)?.id;
+    if (taskId) useTaskStore.getState().reopen(taskId);
     removeStream(streamId);
     delete streamMeta.current[streamId];
-    startRun([{ agentId: meta.agentId, name: meta.name }], meta.text);
+    delete streamTaskRef.current[streamId];
+    startRun([{ agentId: meta.agentId, name: meta.name }], meta.text, taskId);
   };
 
   // 切会话清 @ 选择态 + 输入区浮层：chip/picker/锁/表情/语音都是会话级（ChatPage 常驻不重挂），
@@ -1249,6 +1582,9 @@ export function ChatPage() {
     setReactFor(null);
     // 发送提示也是会话级：A 会话的「上传失败/不支持语音」不得带进 B 会话
     setSendNotice(null);
+    // 多选状态同为会话级：A 会话勾的 id 在 B 会话里不存在，留着只会导出空文件
+    setSelectMode(false);
+    setSelectedIds([]);
   }, [convId]);
 
   // E2E Task 4：会话初始化 + 解密 handler 注入 + 身份公钥上云（硬验收①——不上云则
@@ -1345,6 +1681,9 @@ export function ChatPage() {
           if (e.message.senderId !== useAuthStore.getState().user?.id) {
             wsHandleRef.current?.send({ type: "mark_read", conversationId: convId });
           }
+        } else if (e.type === "message_new") {
+          // 他会话的新消息：进通知中心（正在看的这条不提醒，避免自己给自己发通知）
+          notifyIncomingMessage(e.message);
         } else if (e.type === "read_update" && e.conversationId === convId) {
           // 事件只带 userId/at：整表重拉（读数很小），direct 气泡「已读」随动；他会话忽略
           void loadReads(convId).catch(() => {
@@ -1437,6 +1776,16 @@ export function ChatPage() {
     [],
   );
 
+  // 切走会话：原会话的待确认请求不能再占着弹窗（单槽且看不到归属）。
+  // 只收口「上一个会话」的请求——后台新会话的请求留给下一次切换处理。
+  const prevConvRef = useRef(convId);
+  useEffect(() => {
+    const previous = prevConvRef.current;
+    if (previous === convId) return;
+    prevConvRef.current = convId;
+    useHitlStore.getState().cancelForConversation(previous);
+  }, [convId]);
+
   /** 右栏目录「发送到会话」投递：单槽命中本会话即封 e2e 信封经 WS 发送并清槽。 */
   const pendingAttachment = useUiStore((s) => s.pendingAttachment);
   useEffect(() => {
@@ -1527,16 +1876,6 @@ export function ChatPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, [infoOpen]);
 
-  /** Esc 关转发浮层（文档级，与信息卡同口径）。 */
-  useEffect(() => {
-    if (!forwardMsg) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setForwardMsg(null);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [forwardMsg]);
-
   /** Esc 关语音双选项浮层（文档级，与信息卡/转发浮层同口径）。 */
   useEffect(() => {
     if (!voiceMenu) return;
@@ -1571,10 +1910,20 @@ export function ChatPage() {
     }
   };
 
-  const send = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = draft.trim();
-    if (!text) return;
+  /**
+   * 发送一条文本消息（聊天输入栏与任务区自动执行共用）。
+   *
+   * 返回失败原因而不是只设提示：任务区自动执行失败时要把任务收口成「失败」，
+   * 光靠 sendNotice 的异步 state 拿不到。
+   */
+  const submitMessage = async (
+    rawText: string,
+    mentions: { agentId: string; name: string }[],
+    replyTo: Message | null,
+    taskId?: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const text = rawText.trim();
+    if (!text) return { ok: false, error: "消息为空" };
     /**
      * MCP 懒预检（用户要求：工具要自动识别并加载）。
      *
@@ -1600,38 +1949,82 @@ export function ChatPage() {
     // 硬验收⑤：无 subtle 先拦（保留草稿与已选 mention），绝不降级明文发送
     if (!hasSubtle()) {
       setSendNotice(NO_E2E_NOTICE);
-      return;
+      return { ok: false, error: NO_E2E_NOTICE };
     }
     // 发送前拦截：@ 到的智能体没绑 LLM 连接 → 不发消息，本地提示去设置页配置（草稿/chip 保留）
-    const unbound = effectiveMentions.find((m) => !resolveProfile(m.agentId));
+    const unbound = mentions.find((m) => !resolveProfile(m.agentId));
     if (unbound) {
-      setSendNotice(`${unbound.name} 未绑定 LLM 连接，请先在设置页配置`);
-      return;
+      const error = `${unbound.name} 未绑定 LLM 连接，请先在设置页配置`;
+      setSendNotice(error);
+      return { ok: false, error };
     }
-    const handle = wsHandleRef.current;
-    if (!handle) {
+    if (!wsHandleRef.current) {
       // 保留草稿与已选 mention，给出可见提示（不静默丢弃）
-      setSendNotice("连接未就绪，消息未发送");
-      return;
+      const error = "连接未就绪，消息未发送";
+      setSendNotice(error);
+      return { ok: false, error };
     }
-    const mentions = effectiveMentions;
     // 正文/mentions/replyTo 全进密文（§3.3），事件 payload 只留 {text:""} 占位
     const plain: PlainEnvelope = {
       kind: "text",
       text,
       ...(mentions.length ? { mentions } : {}),
-      ...(replyTarget ? { replyTo: replyTarget.id } : {}),
+      ...(replyTo ? { replyTo: replyTo.id } : {}),
     };
-    if (!(await sealAndSend(plain))) return; // 拦截/封失败：草稿与浮层状态原样保留
+    // 拦截/封失败：草稿与浮层状态原样保留
+    if (!(await sealAndSend(plain))) return { ok: false, error: "消息发送失败" };
+    // 发送成功即触发各 mention 的本机流式生成（失败/中断由 WS 三事件回声收口）
+    if (mentions.length) startRun(mentions, text, taskId);
+    return { ok: true };
+  };
+
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const result = await submitMessage(draft, effectiveMentions, replyTarget);
+    if (!result.ok) return;
     setDraft("");
     setSelectedMentions([]);
     setPicker(null);
     setTokenLock(false);
     setSendNotice(null);
     setReplyTarget(null);
-    // 发送成功即触发各 mention 的本机流式生成（失败/中断由 WS 三事件回声收口）
-    if (mentions.length) startRun(mentions, text);
   };
+
+  // 任务区投递：把目标写进输入区并排队自动发送（连接可能还没就绪，见下一个 effect）。
+  // 命中会话才消费——投递槽是单条，别的会话的草稿不该在这里被吃掉。
+  useEffect(() => {
+    if (!taskDraft || taskDraft.conversationId !== convId) return;
+    consumeTaskDraft();
+    setDraft(taskDraft.text);
+    setSelectedMentions(taskDraft.mentions);
+    setPicker(null);
+    setTokenLock(false);
+    setSendNotice(null);
+    setAutoTask(taskDraft);
+  }, [taskDraft, convId, consumeTaskDraft]);
+
+  // 自动执行：等 WS 连接就绪再发（首次打开会话时 connected 还是 false）。
+  // 失败只收口任务记录并保留用户写的目标——不静默丢，也不误标成功。
+  useEffect(() => {
+    if (!autoTask || !connected) return;
+    const pending = autoTask;
+    setAutoTask(null);
+    void (async () => {
+      const result = await submitMessage(pending.text, pending.mentions, null, pending.taskId);
+      if (!result.ok) {
+        useTaskStore.getState().settle(pending.taskId, { status: "failed", error: result.error });
+        notifyTaskSettled(pending.taskId, "failed", result.error);
+        return;
+      }
+      setDraft("");
+      setSelectedMentions([]);
+      setPicker(null);
+      setTokenLock(false);
+      setSendNotice(null);
+    })();
+    // submitMessage 每帧重建；本 effect 只该在「投递到达 / 连接就绪」时跑一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTask, connected]);
 
   /**
    * 转发（Task 4）：原 text + 原 file 原样带走，**剥离 mentions**（@ 语境属于源会话），
@@ -1700,6 +2093,13 @@ export function ChatPage() {
       // 闪一下反而干扰；更要紧的是 status 那个位置要留给真正的错误
       //（上传失败 / 内容提取失败），被占住会让错误提示延后出现。
       const mime = f.type || "application/octet-stream";
+      // 图片能被模型读到的前提是绑定的模型支持视觉（能力表）；不支持时照常发送，
+      // 但要当场说明「模型看不到内容」，而不是让用户等一句「我看不到图片」。
+      // 文案与工具降级共用 capabilityNotice，两处口径一致。
+      const visionNotice = capabilityNotice(
+        "vision",
+        effectiveMentions.map((m) => ({ name: m.name, profile: resolveProfile(m.agentId) })),
+      );
       const doc = isDocumentLike(f.name, mime) ? await parseDocument(f, f.name) : null;
 
       const meta = await uploadEncryptedFile(f);
@@ -1725,9 +2125,11 @@ export function ChatPage() {
         },
       });
       if (ok) {
+        // 图片没有文档文本，成功时保留「模型不支持视觉」的提示——
+        // 这一条比「已发送」更有用，用户据此决定要不要换模型或改问法。
         setSendNotice(
           !doc
-            ? null
+            ? visionNotice
             : doc.ok
               ? doc.truncated
                 ? `已发送；内容较长，模型只读到前 ${doc.chars} 字`
@@ -1888,14 +2290,16 @@ export function ChatPage() {
   return (
     <div className="flex h-full flex-col">
       <header className="relative flex items-center gap-2.5 border-b border-line-soft px-5 py-3">
-        <button
-          type="button"
-          aria-label="返回"
-          className="rounded p-1 text-muted hover:bg-[#f3f3f3]"
-          onClick={leave}
-        >
-          <ChevronIcon width={15} height={15} className="rotate-180" />
-        </button>
+        {!embedded && (
+          <button
+            type="button"
+            aria-label="返回"
+            className="rounded p-1 text-muted hover:bg-[#f3f3f3]"
+            onClick={leave}
+          >
+            <ChevronIcon width={15} height={15} className="rotate-180" />
+          </button>
+        )}
         {conv && (
           <Avatar
             user={
@@ -1917,7 +2321,7 @@ export function ChatPage() {
             <button
               type="button"
               aria-label="发起语音通话"
-              className="ml-auto rounded-lg p-1.5 hover:bg-[#f3f3f3]"
+              className="rounded-lg p-1.5 hover:bg-[#f3f3f3]"
               onClick={() => {
                 if (conv?.type !== "direct") return;
                 const opened = openCallWindow({
@@ -1966,12 +2370,85 @@ export function ChatPage() {
             <PhoneIcon width={17} height={17} />
           </button>
         )}
+        {/* 会话内搜索：在已解密明文里找关键词，跳转并高亮命中的消息。 */}
+        <button
+          type="button"
+          aria-label="搜索会话"
+          aria-pressed={searchOpen}
+          className={`ml-auto rounded-lg p-1.5 hover:bg-[#f3f3f3]${searchOpen ? " bg-[#f3f3f3]" : ""}`}
+          onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+        >
+          <SearchIcon width={17} height={17} />
+        </button>
+        {/* 多选导出：进入勾选态后，消息行左侧出复选框，header 下方出工具条。 */}
+        <button
+          type="button"
+          aria-label="选择消息导出"
+          aria-pressed={selectMode}
+          className={`rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3]${
+            selectMode ? " bg-[#f3f3f3] text-ink" : ""
+          }`}
+          onClick={() => {
+            if (selectMode) {
+              exitSelectMode();
+            } else {
+              setSelectMode(true);
+              setSelectedIds([]);
+            }
+          }}
+        >
+          <SelectIcon width={17} height={17} />
+        </button>
+        {/* 导出：只读本机已解密密文，生成 Markdown / JSON 下载（不经过服务端）。 */}
+        <div ref={exportRef} className="relative">
+          <button
+            type="button"
+            aria-label="导出会话"
+            aria-haspopup="menu"
+            aria-expanded={exportOpen}
+            className="rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3]"
+            onClick={() => setExportOpen((v) => !v)}
+          >
+            <DownloadIcon width={17} height={17} />
+          </button>
+          {exportOpen && (
+            <div
+              role="menu"
+              aria-label="导出会话"
+              className="absolute right-0 top-full z-30 mt-1 w-[180px] rounded-xl border border-[#ececec] bg-white p-1 shadow-card"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[#f7f7f7]"
+                onClick={() => exportConversation("md")}
+              >
+                导出 Markdown
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[#f7f7f7]"
+                onClick={() => exportConversation("json")}
+              >
+                导出 JSON
+              </button>
+              <p className="px-2 pb-1 pt-0.5 text-[10px] leading-4 text-[#999]">
+                仅包含本机可解密的明文
+              </p>
+            </div>
+          )}
+        </div>
         {groupCallConfirm && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
             onClick={() => setGroupCallConfirm(false)}
           >
             <div
+              ref={groupCallPanelRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label="发起群通话确认"
               className="w-[280px] rounded-xl border border-[#ececec] bg-white p-3 shadow-card"
               onClick={(e) => e.stopPropagation()}
             >
@@ -2021,6 +2498,110 @@ export function ChatPage() {
         </button>
         {infoOpen && conv && <ChatInfoCard conv={conv} onClose={() => setInfoOpen(false)} />}
       </header>
+      {searchOpen && (
+        <div className="flex items-center gap-2 border-b border-line-soft bg-[#fafafa] px-5 py-2">
+          <SearchIcon width={14} height={14} className="shrink-0 text-[#999]" />
+          <input
+            autoFocus
+            aria-label="搜索本会话"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setSearchHitId(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                goSearch(e.shiftKey ? -1 : 1);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                closeSearch();
+              }
+            }}
+            placeholder="在本会话中搜索…"
+            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-[#bbb]"
+          />
+          <span className="shrink-0 text-[11px] text-muted">
+            {searchQuery.trim()
+              ? searchHits.length
+                ? `${(searchIndex >= 0 ? searchIndex : 0) + 1}/${searchHits.length}`
+                : "无匹配"
+              : ""}
+          </span>
+          <button
+            type="button"
+            aria-label="上一个匹配"
+            disabled={searchHits.length === 0}
+            onClick={() => goSearch(-1)}
+            className="rounded px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0] disabled:text-[#ccc]"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            aria-label="下一个匹配"
+            disabled={searchHits.length === 0}
+            onClick={() => goSearch(1)}
+            className="rounded px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0] disabled:text-[#ccc]"
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            aria-label="关闭搜索"
+            onClick={closeSearch}
+            className="rounded px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0]"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {/* 多选导出工具条：与搜索条同层（header 下方一条），不常驻挤压消息区。 */}
+      {selectMode && (
+        <div className="flex items-center gap-2 border-b border-line-soft bg-[#fafafa] px-5 py-2 text-[12px]">
+          <span className="shrink-0 text-muted">已选 {selectedIds.length} 条</span>
+          <button
+            type="button"
+            onClick={selectAllVisible}
+            className="shrink-0 rounded-lg border border-line bg-white px-2 py-1 hover:bg-[#f3f3f3]"
+          >
+            全选
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds([])}
+            disabled={selectedIds.length === 0}
+            className="shrink-0 rounded-lg border border-line bg-white px-2 py-1 hover:bg-[#f3f3f3] disabled:opacity-40"
+          >
+            清空
+          </button>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => exportConversation("md", selectedIds)}
+              disabled={selectedIds.length === 0}
+              className="rounded-lg border border-line bg-white px-2.5 py-1 hover:bg-[#f3f3f3] disabled:opacity-40"
+            >
+              导出所选 Markdown
+            </button>
+            <button
+              type="button"
+              onClick={() => exportConversation("json", selectedIds)}
+              disabled={selectedIds.length === 0}
+              className="rounded-lg border border-line bg-white px-2.5 py-1 hover:bg-[#f3f3f3] disabled:opacity-40"
+            >
+              导出所选 JSON
+            </button>
+            <button
+              type="button"
+              onClick={exitSelectMode}
+              className="rounded-lg px-2 py-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            >
+              退出选择
+            </button>
+          </div>
+        </div>
+      )}
       {/* 来电横幅（ringing 状态时显示）。
           接听/拒绝按钮不在此渲染：VoiceCallPanel 根节点为 fixed inset-0 z-50，
           横幅（普通静态流节点、无 z-index）被面板完全遮挡，按钮不可见不可点。
@@ -2036,6 +2617,15 @@ export function ChatPage() {
           上窄下宽的 py 差是刻意留的「呼吸位」——完全等距时第一条消息会顶着 header 底线，
           视觉上像被切掉一截。 */}
       <div className="flex-1 overflow-y-auto px-8 pb-5 pt-6">
+        {visibleMessages.length === 0 && streamEntries.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <div className="rounded-2xl border border-line-soft bg-white p-3 text-[#999]">
+              <ChatIcon width={22} height={22} />
+            </div>
+            <div className="mt-3 text-[13px] font-bold text-[#555]">还没有消息</div>
+            <div className="mt-1 text-[11px] text-muted">发送第一条消息，开始这段对话。</div>
+          </div>
+        ) : null}
         {visibleMessages.map((m) => {
           const mine = m.senderId === me?.id;
           // 已撤回：正文/附件/已读一律不渲染，只出一行灰字（头像与署名结构保留）
@@ -2065,8 +2655,27 @@ export function ChatPage() {
             <div
               key={m.id}
               id={`msg-${m.id}`}
-              className={`mb-5 flex items-start gap-2.5 ${mine ? "justify-end" : ""}`}
+              className={`mb-5 flex items-start gap-2.5 ${mine ? "justify-end" : ""}${
+                searchOpen && activeSearchId === m.id
+                  ? " rounded-lg bg-[#fff9e6] ring-1 ring-[#f0d58c]"
+                  : ""
+              }`}
             >
+              {/* 多选态：勾选列放在最左（含自己的消息），保证一列对齐、好连点 */}
+              {selectMode && (
+                <label
+                  className="mt-1.5 flex shrink-0 cursor-pointer items-center justify-center"
+                  title="选择这条消息"
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={`选择这条消息（${senderName || (mine ? "我" : "对方")}）`}
+                    checked={selectedIds.includes(m.id)}
+                    onChange={() => toggleSelected(m.id)}
+                    className="h-3.5 w-3.5 cursor-pointer accent-[#1a1a1a]"
+                  />
+                </label>
+              )}
               {/* 对方消息：头像贴左缘但与气泡留 gap-2.5，mt-1 让它略低于气泡顶（见上方说明） */}
               {!mine && senderAvatarUser && (
                 <Avatar user={senderAvatarUser} size={26} className="mt-1 shrink-0" />
@@ -2332,6 +2941,12 @@ export function ChatPage() {
             </p>
           )
         )}
+        {/* 能力降级提示：与发送后的错误提示分开——这是「发之前就知道」的信息 */}
+        {toolsNotice && (
+          <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
+            {toolsNotice}
+          </p>
+        )}
         {/* 引用预览条：回复目标署名 + 原文片段 + × 取消（会话切换/发送成功自动清） */}
         {replyTarget && (
           <div className="mx-5 mt-2 flex items-center gap-2 rounded-lg border-l-2 border-ink bg-[#f7f7f7] px-3 py-1.5 text-[11px]">
@@ -2520,6 +3135,10 @@ export function ChatPage() {
           onClick={() => setForwardMsg(null)}
         >
           <div
+            ref={forwardPanelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="转发消息"
             className="w-[280px] rounded-xl border border-[#ececec] bg-white p-3 shadow-card"
             onClick={(e) => e.stopPropagation()}
           >
@@ -2575,6 +3194,12 @@ export function ChatPage() {
           calls={pendingHitl.calls}
           auto={pendingHitl.auto}
           agentName={pendingHitl.agentName}
+          conversationLabel={pendingConvLabel}
+          onOpenConversation={
+            pendingElsewhere
+              ? () => useUiStore.getState().openConversation(pendingHitl.conversationId)
+              : undefined
+          }
           onDecide={(verdicts) => {
             // 留痕：批准与拒绝都记一笔（安全功能不留痕等于没做）。
             for (const v of verdicts) {

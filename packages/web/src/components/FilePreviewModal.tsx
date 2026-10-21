@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useModalA11y } from "./useModalA11y.js";
 import type { SharedFileMeta } from "@heming/shared";
 import { fetchFileBlobText, fetchFileBlobUrl } from "../lib/api.js";
 
@@ -110,6 +111,8 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalA11y(panelRef, onClose);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,9 +189,16 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div
+        ref={panelRef}
         role="dialog"
+        aria-modal="true"
         aria-label={`预览 ${file.name}`}
         className="flex max-h-[80vh] w-[min(560px,92vw)] flex-col overflow-hidden rounded-xl border border-[#ececec] bg-white shadow-card"
       >

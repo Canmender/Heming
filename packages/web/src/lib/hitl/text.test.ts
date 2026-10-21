@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { GIT_UNCHANGED, MUST_CONTAIN, allowedText, deniedText } from "./text.js";
+import {
+  GIT_UNCHANGED,
+  MUST_CONTAIN,
+  allowedText,
+  deniedText,
+  notExecutedText,
+  ruleDeniedText,
+} from "./text.js";
 import type { HitlCall } from "./types.js";
 
 const call: HitlCall = {
@@ -57,5 +64,24 @@ describe("放行文案", () => {
     const text = allowedText(call, "allow");
     expect(text).toContain("用户已允许本次工具调用");
     expect(text).not.toContain("用户已授权本次调用");
+  });
+});
+
+describe("闸门异常 / 规则拒绝文案", () => {
+  it("闸门异常绝不能说成「用户拒绝了」", () => {
+    const text = notExecutedText(call, "确认流程异常");
+    expect(text).not.toContain("用户拒绝");
+    expect(text).toContain("未执行（确认流程异常）");
+    expect(text).toContain(GIT_UNCHANGED);
+    expect(text).toContain("这不是用户的选择");
+    expect(text).toContain("确认流程异常");
+  });
+
+  it("规则拒绝说明是「此前记住的规则」，并指向清空入口", () => {
+    const text = ruleDeniedText(call, "命中此前记住的拒绝规则");
+    expect(text).not.toContain("用户拒绝了本次工具调用");
+    expect(text).toContain("此前记住的拒绝规则");
+    expect(text).toContain("设置区清空该规则");
+    expect(text).toContain(GIT_UNCHANGED);
   });
 });

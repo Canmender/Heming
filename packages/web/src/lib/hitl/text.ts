@@ -51,6 +51,38 @@ export function deniedText(call: HitlCall, reason?: string): string {
 }
 
 /**
+ * 闸门异常导致「未执行」时回给模型的文案。
+ *
+ * 与 `deniedText` 的区别只有一处，但很关键：**不能说「用户拒绝了」**。
+ * 用户可能根本没看到弹窗（UI 崩了、钩子抛错、裁决条数对不上），
+ * 把系统故障说成用户的决定，会让模型在后续对话里错误归因。
+ */
+export function notExecutedText(call: HitlCall, reason?: string): string {
+  const lines = [
+    `本次工具调用未执行（确认流程异常）：${call.displayName}`,
+    GIT_UNCHANGED,
+    "不存在部分写入或中间状态，该调用没有产生任何副作用。",
+    "这不是用户的选择。不要重试同一调用；如需继续，请先向用户说明情况。",
+  ];
+  if (call.summary) lines.push(`本次调用参数：${call.summary}`);
+  if (reason) lines.push(`异常说明：${reason}`);
+  return lines.join("\n");
+}
+
+/** 命中用户此前记住的拒绝规则时回给模型的文案。 */
+export function ruleDeniedText(call: HitlCall, reason?: string): string {
+  const lines = [
+    `该工具调用与用户此前记住的拒绝规则匹配，未执行：${call.displayName}`,
+    GIT_UNCHANGED,
+    "不存在部分写入或中间状态，该调用没有产生任何副作用。",
+    "不要重试同一调用。若用户改变主意，需要用户先在设置区清空该规则。",
+  ];
+  if (call.summary) lines.push(`本次调用参数：${call.summary}`);
+  if (reason) lines.push(`规则说明：${reason}`);
+  return lines.join("\n");
+}
+
+/**
  * 放行后回给 tool 消息的内容。
  *
  * 仅在「本会话内允许」时追加授权提示——让模型知道用户已经授权，

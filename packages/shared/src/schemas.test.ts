@@ -751,5 +751,46 @@ describe("voice_call 契约", () => {
       expect(r.success && (r.data as Record<string, unknown>).fromUserId).toBeUndefined();
     }
   });
+
+  // —— d.25 ICE 重连（voice_call_reconnect）——
+
+  it("接受带 sdpType 的 voice_call_reconnect，拒绝非法 sdpType", () => {
+    const offer = WsClientEventSchema.safeParse({
+      type: "voice_call_reconnect",
+      conversationId: "c1",
+      callId: "call-1",
+      sdp: "v=0 restart",
+      sdpType: "offer",
+    });
+    expect(offer.success).toBe(true);
+    expect(
+      WsClientEventSchema.safeParse({
+        type: "voice_call_reconnect",
+        conversationId: "c1",
+        callId: "call-1",
+        sdp: "v=0 restart",
+        sdpType: "pranswer",
+      }).success,
+    ).toBe(false);
+    expect(
+      WsClientEventSchema.safeParse({
+        type: "voice_call_reconnect",
+        conversationId: "c1",
+        callId: "call-1",
+        sdp: "",
+        sdpType: "answer",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("服务端 voice_call_reconnect 必带 fromUserId，客户端事件剥离该字段", () => {
+    const base = { conversationId: "c1", callId: "call-1", sdp: "v=0 restart", sdpType: "answer" };
+    expect(WsServerEventSchema.safeParse({ type: "voice_call_reconnect", ...base }).success).toBe(false);
+    expect(
+      WsServerEventSchema.safeParse({ type: "voice_call_reconnect", ...base, fromUserId: "u2" }).success,
+    ).toBe(true);
+    const r = WsClientEventSchema.safeParse({ ...base, type: "voice_call_reconnect", fromUserId: "spoofed" });
+    expect(r.success && (r.data as Record<string, unknown>).fromUserId).toBeUndefined();
+  });
 });
 

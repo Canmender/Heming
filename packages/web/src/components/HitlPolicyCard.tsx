@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { HitlPolicyStore, type HitlPolicy } from "../lib/hitl/policy.js";
 import type { HitlMode, PolicyScope, RiskLevel } from "../lib/hitl/types.js";
 import { readAudit, type AuditEntry, type StorageLike } from "../lib/selfEdit/guards.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 
 /**
  * HITL 策略卡（挂在设置区）：档位选择 + 免问下限 + 确认留痕。
@@ -23,9 +24,11 @@ export function HitlPolicyCard({
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
   void tick;
+  const [confirmClearRules, setConfirmClearRules] = useState(false);
 
   const store2 = storage ?? browserStorage();
   const audit = readAudit(store2).filter((e) => e.scope === "tool").slice(0, 20);
+  const rules = store.rules();
 
   const update = (patch: Partial<HitlPolicy>) => {
     const next = { ...policy, ...patch };
@@ -95,7 +98,7 @@ export function HitlPolicyCard({
         </select>
       </label>
 
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => {
@@ -106,7 +109,58 @@ export function HitlPolicyCard({
         >
           清空本会话授权
         </button>
+        {rules.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setConfirmClearRules(true)}
+            className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
+          >
+            清空记住的规则
+          </button>
+        )}
         <span className="text-[11px] text-muted">会话授权只存在内存里，退出应用即失效。</span>
+      </div>
+
+      <div className="mt-3 border-t border-line-soft pt-2">
+        <div className="text-[11px] font-bold text-[#999]">
+          记住的规则{rules.length ? `（${rules.length} 条）` : ""}
+        </div>
+        {rules.length === 0 ? (
+          <div className="mt-1 text-[11px] text-muted">
+            还没有记住的规则。在确认弹窗里勾选「记住本次选择」即可按工具与资源记住。
+          </div>
+        ) : (
+          <ul className="mt-1 flex flex-col gap-1">
+            {rules.map((rule) => (
+              <li
+                key={`${rule.tool}-${rule.resource}-${rule.at}`}
+                className="flex flex-wrap items-baseline gap-1.5 rounded border border-line-soft px-2 py-1 text-[11px]"
+              >
+                <span
+                  className={`rounded px-1 ${
+                    rule.effect === "deny"
+                      ? "bg-[#fdf0ef] text-[#b42318]"
+                      : "bg-[#eef6f0] text-[#1d6b3a]"
+                  }`}
+                >
+                  {rule.effect === "deny" ? "拒绝" : "允许"}
+                </span>
+                <span className="font-mono text-[#555]">{rule.tool}</span>
+                <span className="min-w-0 flex-1 truncate text-[#999]" title={rule.resource}>
+                  {rule.resource === "*" ? "所有调用" : rule.resource}
+                </span>
+                <span className="shrink-0 text-[10px] text-[#aaa]">
+                  {rule.agentName || rule.agentId ? rule.agentName || "指定智能体" : "全部智能体"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {rules.length > 0 && (
+          <div className="mt-1 text-[10px] text-[#aaa]">
+            拒绝规则优先于允许规则；记住的允许对危险操作不生效。新规则只对当前智能体生效。
+          </div>
+        )}
       </div>
 
       <div className="mt-3 border-t border-line-soft pt-2">
@@ -123,6 +177,39 @@ export function HitlPolicyCard({
           </ul>
         )}
       </div>
+
+      {confirmClearRules && (
+        <ConfirmDialog
+          title="清空记住的规则"
+          onCancel={() => setConfirmClearRules(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmClearRules(false)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  store.clearRules();
+                  setConfirmClearRules(false);
+                  bump();
+                }}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                清空
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            清空全部 {rules.length} 条记住的规则？之后同类工具会重新询问；拒绝规则与允许规则都会被移除，操作不可撤销。
+          </p>
+        </ConfirmDialog>
+      )}
     </section>
   );
 }

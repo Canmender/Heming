@@ -7,11 +7,14 @@ import {
   refreshServerTools,
   hasStdioBridge,
   resetClient,
+  stopStdioServer,
   type McpConnState,
   type McpRegistry,
   type McpServerConfig,
 } from "../lib/mcp/index.js";
 import { PlusIcon, TrashIcon } from "./icons.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
+import { RegistryPage } from "./RegistryPage.js";
 import { MCP_PRESETS } from "../lib/mcp/presets.js";
 
 /**
@@ -26,6 +29,8 @@ import { MCP_PRESETS } from "../lib/mcp/presets.js";
  */
 export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegistry }) {
   const [tick, setTick] = useState(0);
+  const [discover, setDiscover] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<McpServerConfig | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState("");
   const [transport, setTransport] = useState<"http" | "stdio">("http");
@@ -132,8 +137,18 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
   };
 
   const removeServer = (server: McpServerConfig) => {
+    setRemoveTarget(server);
+  };
+
+  const confirmRemoveServer = () => {
+    if (!removeTarget) return;
+    const server = removeTarget;
     registry.remove(server.id);
     resetClient(server.id);
+    // stdio 的子进程活在主进程里、按 serverId 复用：不显式回收就会出现
+    // 「界面上已删除、进程还在读写本机」。stopStdioServer 永不抛，不阻断删除。
+    if (server.transport === "stdio") void stopStdioServer(server.id);
+    setRemoveTarget(null);
     bump();
     setMsg({ kind: "ok", text: `已删除 MCP 服务：${server.name}` });
   };
@@ -155,6 +170,19 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
     }
   };
 
+  if (discover) {
+    return (
+      <RegistryPage
+        onBack={() => {
+          setDiscover(false);
+          // 安装/删除都可能改过服务列表，回列表时重新读一次。
+          bump();
+        }}
+        onInstalled={bump}
+      />
+    );
+  }
+
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -165,17 +193,29 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
             工具默认关闭，需要逐个授权。
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setFormOpen((v) => !v);
-            setMsg(null);
-          }}
-          className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
-        >
-          <PlusIcon width={13} height={13} />
-          添加 MCP 服务
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setDiscover(true);
+              setMsg(null);
+            }}
+            className="rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
+          >
+            从 Registry 发现
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFormOpen((v) => !v);
+              setMsg(null);
+            }}
+            className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
+          >
+            <PlusIcon width={13} height={13} />
+            添加 MCP 服务
+          </button>
+        </div>
       </div>
 
       {msg && (
@@ -350,6 +390,15 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                   <span className="rounded-full border border-line px-2 py-0.5 text-[10px] text-muted">
                     {server.transport === "http" ? "HTTP" : "stdio"}
                   </span>
+                  {/* 从 Registry 装的本地包：把「哪类包、钉的哪个版本」摊出来。
+                      界面据此能看出本机跑的是钉死版本，不是上游最新版。 */}
+                  {server.origin === "registry" && (
+                    <span className="rounded-full border border-line bg-[#f6f6f6] px-2 py-0.5 text-[10px] text-muted">
+                      {`Registry${server.registryType ? ` · ${server.registryType}` : ""}${
+                        server.registryVersion ? ` · v${server.registryVersion}` : ""
+                      }`}
+                    </span>
+                  )}
                   <span
                     className={`rounded-full px-2 py-0.5 text-[10px] ${
                       state === "ready"
@@ -517,6 +566,36 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
       <p className="mt-2 text-[11px] text-muted">
         工具调用在本地执行：模型返回调用意图 → 本机调用 MCP 服务 → 结果回灌模型，全程不经过云端。
       </p>
+
+      {removeTarget && (
+        <ConfirmDialog
+          title="删除 MCP 服务"
+          onCancel={() => setRemoveTarget(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setRemoveTarget(null)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={confirmRemoveServer}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            删除 MCP 服务「{removeTarget.name}」？这条配置、缓存的工具清单与逐个工具的授权开关都会被移除；
+            需要时得重新添加或从发现页安装。删除不会卸载本机的第三方包。
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

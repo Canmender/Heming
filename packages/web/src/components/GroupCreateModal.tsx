@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useModalA11y } from "./useModalA11y.js";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 
@@ -23,6 +24,8 @@ export function GroupCreateModal({ open, onClose }: { open: boolean; onClose: ()
   // 同步提交互斥：state 闭包在同帧双击下仍是旧值（真实浏览器已复现二次 POST），
   // ref 在渲染外即时翻转，与 ChatPage 的 wsHandleRef 同一模式
   const pendingRef = useRef(false);
+  const panelRef = useRef<HTMLFormElement>(null);
+  useModalA11y(panelRef, onClose, { active: open });
   if (!open) return null;
 
   // 源 = 名册全量中 owner 是我的项（雷达/弹窗共用同一 GET /api/agents 结果）
@@ -75,8 +78,17 @@ export function GroupCreateModal({ open, onClose }: { open: boolean; onClose: ()
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <form
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="新建群聊"
         onSubmit={submit}
         className="w-[320px] rounded-xl border border-line bg-white p-5 shadow-card"
       >

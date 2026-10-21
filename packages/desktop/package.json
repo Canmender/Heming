@@ -1,14 +1,14 @@
 {
   "name": "@heming/desktop",
-  "version": "19.1.5",
+  "version": "25.1.6",
   "private": true,
   "main": "main.js",
   "scripts": {
     "dev": "electron .",
     "start": "electron .",
     "dist": "node ../../scripts/build-desktop-web.mjs && node ../../scripts/build-desktop.mjs --win nsis",
-    "typecheck": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check app-protocol.js && node --check title-bar.js && node --check call-window.js && node --check mcp-stdio.js && node --check app-version.js && node --check auto-update.js && node --check bundled-runtime.js && node --check wiki-fs.js && node --check chart-fs.js && node --check preload.js",
-    "test": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check app-protocol.js && node --check title-bar.js && node --check call-window.js && node --check mcp-stdio.js && node --check app-version.js && node --check auto-update.js && node --check bundled-runtime.js && node --check wiki-fs.js && node --check chart-fs.js && node --check preload.js && node --test app-protocol.test.js && node --test app-version.test.js && node --test auto-update.test.js && node --test bundled-runtime.test.js && node --test call-window.test.js && node --test changelog-sync.test.js && node --test chart-fs.test.js && node --test main.test.js && node --test mcp-stdio.test.js && node --test preload.test.js && node --test secure-origins.test.js && node --test splash-lifecycle.test.js && node --test splash.test.js && node --test title-bar.test.js && node --test version-sync.test.js && node --test window-state.test.js && node --test wordmark-drift.test.js"
+    "typecheck": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check app-protocol.js && node --check title-bar.js && node --check call-window.js && node --check mcp-stdio.js && node --check app-version.js && node --check auto-update.js && node --check bundled-runtime.js && node --check local-runtime.js && node --check wiki-fs.js && node --check chart-fs.js && node --check preload.js",
+    "test": "node --check main.js && node --check window-state.js && node --check secure-origins.js && node --check splash-config.js && node --check splash-lifecycle.js && node --check app-protocol.js && node --check title-bar.js && node --check call-window.js && node --check mcp-stdio.js && node --check app-version.js && node --check auto-update.js && node --check bundled-runtime.js && node --check local-runtime.js && node --check wiki-fs.js && node --check chart-fs.js && node --check preload.js && node --test app-protocol.test.js && node --test app-version.test.js && node --test auto-update.test.js && node --test bundled-runtime.test.js && node --test call-window.test.js && node --test changelog-sync.test.js && node --test chart-fs.test.js && node --test main.test.js && node --test local-runtime.test.js && node --test mcp-stdio.test.js && node --test preload.test.js && node --test secure-origins.test.js && node --test splash-lifecycle.test.js && node --test splash.test.js && node --test title-bar.test.js && node --test version-sync.test.js && node --test window-state.test.js && node --test wordmark-drift.test.js"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -34,6 +34,7 @@
       "app-version.js",
       "auto-update.js",
       "bundled-runtime.js",
+      "local-runtime.js",
       "wiki-fs.js",
       "chart-fs.js",
       "preload.js"
@@ -79,7 +80,7 @@
       "differentialPackage": true
     }
   },
-  "hemingVersion": "d.19.1.5.0",
-  "shortVersion": "19.1.5.0",
-  "shortVersionWindows": "19.1.5.0"
+  "hemingVersion": "d.25.1.6.0",
+  "shortVersion": "25.1.6.0",
+  "shortVersionWindows": "25.1.6.0"
 }

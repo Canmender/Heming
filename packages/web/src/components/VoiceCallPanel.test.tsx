@@ -13,6 +13,7 @@ const baseState: VoiceCallState = {
   muted: false,
   error: null,
   incoming: null,
+  reconnecting: 0,
 };
 
 describe("VoiceCallPanel", () => {
@@ -53,6 +54,19 @@ describe("VoiceCallPanel", () => {
     // 用 testid 而非 getByText 正则：文本节点可能带空白/换行，
     // /^\d{2}:\d{2}$/ 对原始节点不稳（依赖 testing-library 的空白归一化）
     expect(screen.getByTestId("call-duration")).toHaveTextContent(/^\d{2}:\d{2}$/);
+  });
+
+  it("reconnecting 大于 0 时给出重连提示（不弹错误条）", () => {
+    render(
+      <VoiceCallPanel
+        state={{ ...baseState, status: "active", startedAt: Date.now(), reconnecting: 1 }}
+        peerNames={new Map([["u2", "李四"]])}
+        onHangup={vi.fn()}
+        onToggleMute={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("连接中断，正在重连…");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("挂断按钮触发 onHangup", () => {

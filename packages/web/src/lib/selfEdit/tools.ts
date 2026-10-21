@@ -32,6 +32,14 @@ import {
   appendAudit,
   type StorageLike,
 } from "./guards.js";
+import {
+  SelfSnapshotStore,
+  rollbackSnapshot,
+  type SelfSnapshot,
+  type SnapshotPatch,
+  type SnapshotScope,
+  type SnapshotTargets,
+} from "./snapshots.js";
 
 /** self.* 工具的依赖。全部可注入，便于测试与多实例。 */
 export interface SelfToolDeps {
@@ -245,6 +253,28 @@ export const SELF_TOOLS: ToolSpec[] = [
       required: ["id"],
     },
   },
+  // —— 回滚 ——
+  {
+    name: "self_snapshot_list",
+    riskHint: "read",
+    description:
+      "列出自己最近的修改快照（可回滚的变更）。发现自己改错了，先看这里拿到快照 id，再调 self_rollback。",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    name: "self_rollback",
+    riskHint: "danger",
+    description:
+      "按快照 id 回滚一次自己的修改（恢复记忆内容、技能定义或 MCP 配置）。危险操作，会先请用户确认。",
+    parameters: {
+      type: "object",
+      properties: {
+        id: prop("快照 id，可先调 self_snapshot_list 查看。"),
+        reason: prop("为什么要回滚（可选）。"),
+      },
+      required: ["id"],
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------ 工具桥 */
@@ -263,6 +293,8 @@ export function buildSelfToolBridge(
   const policy = deps.policy ?? new SelfEditStore(storage);
   const budget = deps.budget ?? new SelfEditBudget();
   const now = deps.now ?? (() => Date.now());
+  const snapshots = new SelfSnapshotStore(storage, now);
+  const targets: SnapshotTargets = { memory: deps.memory, skills: deps.skills, mcp: deps.mcp };
 
   const enabled = policy.allowed(ctx.agentId);
 
@@ -360,6 +392,16 @@ export function buildSelfToolBridge(
           gate,
           audit: (scope, action, target, rejected) =>
             audit(storage, now, ctx, scope, action, target, args, rejected),
+          snapshot: (scope, action, target, label, patch) => {
+            snapshots.record({ agentId: ctx.agentId, scope, action, target, label, patch });
+          },
+          listSnapshots: () => snapshots.list(ctx.agentId).slice(0, 20),
+          findSnapshot: (id) => {
+            const snap = snapshots.get(id);
+            return snap && snap.agentId === ctx.agentId ? snap : undefined;
+          },
+          dropSnapshot: (id) => snapshots.remove(id),
+          rollback: (snap) => rollbackSnapshot(snap, targets),
         });
       } catch (e) {
         // 永不抛：工具失败应当让模型看到原因并换策略，而不是中断整轮
@@ -389,6 +431,19 @@ interface RunDeps {
     target: string,
     rejected?: string,
   ) => void;
+  /** 记一条可回滚快照（变更成功后调用）。 */
+  snapshot: (
+    scope: SnapshotScope,
+    action: string,
+    target: string,
+    label: string,
+    patch: SnapshotPatch,
+  ) => void;
+  /** 当前智能体的快照（最新在前）。 */
+  listSnapshots: () => SelfSnapshot[];
+  findSnapshot: (id: string) => SelfSnapshot | undefined;
+  dropSnapshot: (id: string) => void;
+  rollback: (snap: SelfSnapshot) => { ok: boolean; text: string };
 }
 
 const ok = (text: string) => ({ text, ok: true as const });
@@ -425,8 +480,9 @@ export async function runSelfTool(
       if (!key || !value) return fail("key 与 value 都不能为空。");
       const g = deps.gate("memory", key, args);
       if (!g.ok) return fail(g.text);
-      const existed = Boolean(deps.memory.findSemantic("", key));
-      deps.memory.upsertSemantic({
+      const prior = deps.memory.findSemantic("", key);
+      const existed = Boolean(prior);
+      const created = deps.memory.upsertSemantic({
         agentId: "",
         key,
         value,
@@ -435,6 +491,12 @@ export async function runSelfTool(
         confidence: 0.7,
       });
       deps.audit("memory", existed ? "update" : "write", key);
+      deps.snapshot("memory", existed ? "update" : "write", key, `记忆「${key}」`, {
+        kind: "memory-upsert",
+        key,
+        prior: prior ? { ...prior } : null,
+        createdId: created.id,
+      });
       return ok(existed ? `已更新记忆「${key}」。` : `已记住「${key}」。`);
     }
     case "self_memory_remove": {
@@ -444,8 +506,13 @@ export async function runSelfTool(
       if (!existing) return fail(`没有找到记忆「${key}」，无需删除。`);
       const g = deps.gate("memory", key, args);
       if (!g.ok) return fail(g.text);
+      const prior = { ...existing };
       deps.memory.removeSemantic("", existing.id);
       deps.audit("memory", "remove", key);
+      deps.snapshot("memory", "remove", key, `删除记忆「${key}」`, {
+        kind: "memory-remove",
+        entry: prior,
+      });
       return ok(`已删除记忆「${key}」。`);
     }
 
@@ -489,6 +556,10 @@ export async function runSelfTool(
         source: "distilled",
       });
       deps.audit("skill", "create", created.name);
+      deps.snapshot("skill", "create", created.name, `新建技能「${created.name}」`, {
+        kind: "skill-create",
+        id: created.id,
+      });
       return ok(`已沉淀技能「${created.name}」，下次遇到同类任务会自动路由到它。`);
     }
     case "self_skill_update": {
@@ -507,6 +578,11 @@ export async function runSelfTool(
       }
       const g = deps.gate("skill", skillName, args);
       if (!g.ok) return fail(g.text);
+      const prior = {
+        ...existing,
+        triggers: [...existing.triggers],
+        tags: [...existing.tags],
+      };
       const updated = deps.skills.update(existing.id, {
         ...(typeof args.instructions === "string" && args.instructions.trim()
           ? { instructions: args.instructions.trim().slice(0, 8000) }
@@ -517,6 +593,11 @@ export async function runSelfTool(
         ...(Array.isArray(args.triggers) ? { triggers: strArray(args.triggers, 12) } : {}),
       });
       deps.audit("skill", "update", updated.name);
+      deps.snapshot("skill", "update", updated.name, `更新技能「${updated.name}」`, {
+        kind: "skill-update",
+        id: updated.id,
+        prior,
+      });
       return ok(`已更新技能「${updated.name}」。`);
     }
 
@@ -551,8 +632,15 @@ export async function runSelfTool(
       const on = name === "self_mcp_enable";
       const g = deps.gate("mcp", key, args);
       if (!g.ok) return fail(g.text);
+      const prior = deps.mcp.isToolEnabled(serverId, toolName);
       deps.mcp.setToolEnabled(serverId, toolName, on);
       deps.audit("mcp", on ? "enable" : "disable", key);
+      deps.snapshot("mcp", on ? "enable" : "disable", key, `${on ? "启用" : "停用"} ${key}`, {
+        kind: "mcp-tool",
+        serverId,
+        toolName,
+        prior,
+      });
       return ok(on ? `已启用 ${key}。` : `已停用 ${key}。`);
     }
     case "self_mcp_add_server": {
@@ -577,6 +665,10 @@ export async function runSelfTool(
         headers: recordOf(args.headers),
       });
       deps.audit("mcp", "add_server", created.id);
+      deps.snapshot("mcp", "add_server", created.id, `新增 MCP「${created.name}」`, {
+        kind: "mcp-add-server",
+        id: created.id,
+      });
       return ok(
         `已新增 MCP 服务「${created.name}」（id=${created.id}）。` +
           `需在接口区点一次「发现工具」拉取它暴露的工具，再启用需要的那些。`,
@@ -588,6 +680,11 @@ export async function runSelfTool(
       if (!server) return fail(`找不到服务 ${id}。`);
       const g = deps.gate("mcp", id, args);
       if (!g.ok) return fail(g.text);
+      const prior = {
+        ...server,
+        args: server.args ? [...server.args] : undefined,
+        headers: server.headers ? { ...server.headers } : undefined,
+      };
       deps.mcp.update(id, {
         ...(typeof args.name === "string" && args.name.trim() ? { name: args.name.trim() } : {}),
         ...(typeof args.url === "string" && args.url.trim() ? { url: args.url.trim() } : {}),
@@ -599,16 +696,59 @@ export async function runSelfTool(
         ...(typeof args.enabled === "boolean" ? { enabled: args.enabled } : {}),
       });
       deps.audit("mcp", "update_server", id);
+      deps.snapshot("mcp", "update_server", id, `修改 MCP「${prior.name}」`, {
+        kind: "mcp-update-server",
+        id,
+        prior,
+      });
       return ok(`已更新服务 ${id}。`);
     }
     case "self_mcp_remove_server": {
       const id = str(args.id, 64);
-      if (!id || !deps.mcp.get(id)) return fail(`找不到服务 ${id}。`);
+      const server = id ? deps.mcp.get(id) : undefined;
+      if (!server) return fail(`找不到服务 ${id}。`);
       const g = deps.gate("mcp", id, args);
       if (!g.ok) return fail(g.text);
+      const prior = {
+        ...server,
+        args: server.args ? [...server.args] : undefined,
+        headers: server.headers ? { ...server.headers } : undefined,
+      };
       deps.mcp.remove(id);
       deps.audit("mcp", "remove_server", id);
+      deps.snapshot("mcp", "remove_server", id, `删除 MCP「${prior.name}」`, {
+        kind: "mcp-remove-server",
+        prior,
+      });
       return ok(`已删除服务 ${id}。`);
+    }
+
+    /* ---------------------------------------------------------- 回滚 */
+    case "self_snapshot_list": {
+      const list = deps.listSnapshots();
+      if (!list.length) return ok("当前没有可回滚的修改。");
+      return ok(
+        `可回滚的修改（${list.length} 条，最新在前）：\n` +
+          list
+            .map((s) => `- [${s.id}] ${s.at.slice(0, 16).replace("T", " ")} ${s.label}`)
+            .join("\n"),
+      );
+    }
+    case "self_rollback": {
+      const id = str(args.id, 80);
+      if (!id) return fail("id 不能为空，可先调 self_snapshot_list 查看。");
+      const snap = deps.findSnapshot(id);
+      if (!snap) return fail(`没有找到快照 ${id}（可能已回滚或被清理）。`);
+      const g = deps.gate(snap.scope, snap.target, args);
+      if (!g.ok) return fail(g.text);
+      const result = deps.rollback(snap);
+      if (!result.ok) {
+        deps.audit("other", "reject", snap.target, result.text);
+        return fail(result.text);
+      }
+      deps.dropSnapshot(snap.id);
+      deps.audit("other", "rollback", snap.target);
+      return ok(`${result.text}。该快照已移除。`);
     }
 
     default:

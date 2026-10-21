@@ -1,7 +1,7 @@
 import type { ToolBridge } from "../agentStream.js";
 import { buildToolCatalog, executeToolCall, toOpenAiTools } from "./bridge.js";
 import { createHttpMcpClient, type HttpMcpClient } from "./httpClient.js";
-import { createStdioMcpClient, hasStdioBridge } from "./stdioClient.js";
+import { createStdioMcpClient, hasStdioBridge, stdioBridge } from "./stdioClient.js";
 import { mcpRegistry, type McpRegistry } from "./store.js";
 import type { McpServerConfig, McpTool } from "./types.js";
 
@@ -24,6 +24,28 @@ export function clientFor(server: McpServerConfig): HttpMcpClient {
 /** 重建客户端（改了 URL/请求头之后必须重建，否则还连着旧地址）。 */
 export function resetClient(serverId: string): void {
   clients.delete(serverId);
+}
+
+/**
+ * 回收某台 stdio 服务在本机的子进程（删除服务时必调）。
+ *
+ * ★ 为什么不能只靠 `resetClient`：客户端对象在渲染层，子进程活在**主进程**里，
+ * 按 serverId 复用。删了配置不 stop 进程，就会出现「界面已经删除、进程还在读写本机」——
+ * 而且下次同 id 的服务还会复用那个旧进程。
+ *
+ * 只在删除路径调用，不放 `resetClient` 里：`refreshServerTools` 每次都 resetClient，
+ * 一并 kill 会让「重连一次」变成「重启一次进程」（实测 Windows-MCP 冷启动 5.4s）。
+ *
+ * **永不抛**：进程可能已经自己退出，删除动作不该被回收失败阻断。
+ */
+export async function stopStdioServer(serverId: string): Promise<void> {
+  const bridge = stdioBridge();
+  if (!bridge) return;
+  try {
+    await bridge.stop(serverId);
+  } catch {
+    /* 已经退出或主进程侧异常：配置已删，没有可恢复的动作 */
+  }
 }
 
 /**

@@ -73,3 +73,10 @@ body {
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* 公式块：长公式允许横向滚动，不把消息气泡撑破（其余排版交给 KaTeX 自带样式）。 */
+.markdown-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}

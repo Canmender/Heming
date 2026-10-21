@@ -462,6 +462,77 @@ describe("ws", () => {
     b.close();
   });
 
+  it("voice_call_reconnect 定向转发给其他参与者并补 fromUserId，call 状态不受影响", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bInviteWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_invite",
+      conversationId: convId,
+      callId: "call-test-reconnect",
+      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
+    }));
+    await bInviteWait;
+    // b 的 ICE 断了 → 重启后把新 offer 转给 a
+    const aWait = nextEvent(a);
+    b.send(JSON.stringify({
+      type: "voice_call_reconnect",
+      conversationId: convId,
+      callId: "call-test-reconnect",
+      sdp: "v=0 restart-offer",
+      sdpType: "offer",
+    }));
+    const event = await aWait;
+    expect(event.type).toBe("voice_call_reconnect");
+    if (event.type === "voice_call_reconnect") {
+      expect(event.callId).toBe("call-test-reconnect");
+      expect(event.sdp).toBe("v=0 restart-offer");
+      expect(event.sdpType).toBe("offer");
+      expect(event.fromUserId).toBe(bobId);
+    }
+    // a 回 answer 给 b
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_reconnect",
+      conversationId: convId,
+      callId: "call-test-reconnect",
+      sdp: "v=0 restart-answer",
+      sdpType: "answer",
+    }));
+    const back = await bWait;
+    expect(back.type).toBe("voice_call_reconnect");
+    if (back.type === "voice_call_reconnect") {
+      expect(back.sdpType).toBe("answer");
+      expect(back.fromUserId).toBe(aliceId);
+    }
+    // 重连后照常 hangup 说明服务端 call 还在（重连不该把通话状态清掉）
+    const hangWait = nextEvent(b);
+    a.send(JSON.stringify({
+      type: "voice_call_hangup",
+      conversationId: convId,
+      callId: "call-test-reconnect",
+    }));
+    expect((await hangWait).type).toBe("voice_call_hangup");
+    a.close();
+    b.close();
+  });
+
+  it("未知 callId 的 voice_call_reconnect 回 forbidden（不给陌生通话搭车）", async () => {
+    const a = await connect(issueToken(aliceId));
+    const wait = nextEvent(a);
+    a.send(JSON.stringify({
+      type: "voice_call_reconnect",
+      conversationId: convId,
+      callId: "call-nope",
+      sdp: "v=0",
+      sdpType: "offer",
+    }));
+    const event = await wait;
+    expect(event.type).toBe("error");
+    if (event.type === "error") expect(event.code).toBe("forbidden");
+    a.close();
+  });
+
   it("非成员发 voice_call_invite 收 forbidden", async () => {
     const stranger = store.createUser("eve2", "h", "夏娃2");
     const s = await connect(issueToken(stranger.id));

@@ -8,7 +8,8 @@ const { attachSplashLifecycle } = require("./splash-lifecycle");
 const { resolveRequest, contentTypeFor, INDEX_FILE } = require("./app-protocol");
 const { isCallWindowUrl, callWindowOptions } = require("./call-window");
 const { appVersion } = require("./app-version");
-const { createStdioBridge } = require("./mcp-stdio");
+const { buildChildEnv, createStdioBridge } = require("./mcp-stdio");
+const { planStdioSpawn, probeLocalRuntime } = require("./local-runtime");
 
 const pkg = require("./package.json");
 const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins");
@@ -338,6 +339,7 @@ if (!gotLock) {
   const mcpStdio = createStdioBridge({
     spawn: require("node:child_process").spawn,
     log: (line) => console.log(line),
+    planSpawn: planStdioSpawn,
   });
 
   /** 首次用到某服务时先握手（initialize → notifications/initialized）。 */
@@ -366,6 +368,16 @@ if (!gotLock) {
   });
 
   ipcMain.handle("mcp:stdio:stop", (_event, serverId) => mcpStdio.stop(String(serverId)));
+
+  // —— 本机运行时探测（d.25 本地包安装）——
+  // Registry 的 npm / pypi 服务要在用户机器上拉起 npx / uvx。装之前必须先知道
+  // 「这台机器跑不跑得起来」，否则用户只会在连接阶段看到一条莫名其妙的失败。
+  // 只回传能力布尔与解析到的路径，不执行任何命令、不写任何东西。
+  // PATH 用 buildChildEnv 补全过的那份：与真正 spawn 时的查找范围一致，
+  // 不然会出现「探测说没有、启动却成功了」这种自相矛盾的界面。
+  ipcMain.handle("runtime:probe", () =>
+    probeLocalRuntime({ env: buildChildEnv({ ...process.env }), execPath: process.execPath }),
+  );
 
   app.on("will-quit", () => mcpStdio.disposeAll());
 

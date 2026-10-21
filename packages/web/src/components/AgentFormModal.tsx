@@ -6,13 +6,15 @@ import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { createAgent, updateAgent, deleteAgent } from "../lib/agentsApi.js";
 import { Avatar } from "./Avatar.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
+import { useModalA11y } from "./useModalA11y.js";
 
 /**
  * 智能体创建/编辑弹窗：
  * - 名册字段（名称/头像/简介）走云端 REST（agentsApi）；
  * - 本地字段（系统提示词、绑定连接）只写本机 localStorage（store/llm.ts），
  *   系统提示词绝不经云端 API（响应也永不含 system_prompt）；
- * - 删除仅 owner 可见（roster.owner_id === me.id），confirm 后 DELETE。
+ * - 删除仅 owner 可见（roster.owner_id === me.id），应用内确认后 DELETE。
  * open=false 时所有 hooks 已先执行完毕再早返回（hooks 规则，同 GroupCreateModal）。
  */
 
@@ -46,8 +48,11 @@ export function AgentFormModal({
   const [error, setError] = useState("");
   const [fileError, setFileError] = useState("");
   const [pending, setPending] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // 同步提交互斥：state 闭包在同帧双击下仍是旧值（与 GroupCreateModal 同模式）
   const pendingRef = useRef(false);
+  const panelRef = useRef<HTMLFormElement>(null);
+  useModalA11y(panelRef, onClose, { active: open });
 
   // 打开（或换 agent/mode 复用挂载实例）时从 props 重置表单；
   // prompts/bindings 用 getState() 取初值，不进 deps——避免打字期间被外部刷新覆盖
@@ -59,6 +64,7 @@ export function AgentFormModal({
     setError("");
     setFileError("");
     setPending(false);
+    setConfirmDelete(false);
     pendingRef.current = false;
     const { prompts, bindings } = useLlmStore.getState();
     setPromptText(agent ? (prompts[agent.id] ?? "") : "");
@@ -129,7 +135,7 @@ export function AgentFormModal({
 
   const onDelete = async () => {
     if (!agent || pendingRef.current) return;
-    if (!window.confirm(`确认删除智能体「${agent.name}」？此操作不可恢复。`)) return;
+    setConfirmDelete(false);
     pendingRef.current = true;
     setPending(true);
     setError("");
@@ -149,8 +155,17 @@ export function AgentFormModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <form
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={mode === "create" ? "新建智能体" : "编辑智能体"}
         onSubmit={submit}
         className="max-h-[90vh] w-[360px] overflow-y-auto rounded-xl border border-line bg-white p-5 shadow-card"
       >
@@ -251,7 +266,7 @@ export function AgentFormModal({
           {mode === "edit" && isOwner && (
             <button
               type="button"
-              onClick={() => void onDelete()}
+              onClick={() => setConfirmDelete(true)}
               disabled={pending}
               className="mr-auto rounded-lg border border-[#e3b6b2] px-3 py-1.5 text-[13px] text-[#b42318] disabled:opacity-60"
             >
@@ -267,6 +282,35 @@ export function AgentFormModal({
           </button>
         </div>
       </form>
+      {confirmDelete && agent && (
+        <ConfirmDialog
+          title="删除智能体"
+          onCancel={() => setConfirmDelete(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => void onDelete()}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            删除智能体「{agent.name}」？此操作不可恢复；已发送的聊天记录不受影响。
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

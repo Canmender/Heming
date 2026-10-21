@@ -139,15 +139,16 @@ export function attachWs(
         return;
       }
       const event = parsed.data;
-      // 语音通话信令（Task 2）：invite/accept/reject/hangup/ice 五种事件定向投递，
-      // 不走广播、不入库；通话状态仅在内存 activeCalls，断开连接时 cleanupCallsForUser
-      // 向其他参与者补发 hangup。成员校验口径与下方通用分支一致。
+      // 语音通话信令（Task 2 + d.25 重连）：invite/accept/reject/hangup/ice/reconnect
+      // 六种事件定向投递，不走广播、不入库；通话状态仅在内存 activeCalls，
+      // 断开连接时 cleanupCallsForUser 向其他参与者补发 hangup。成员校验口径与下方通用分支一致。
       if (
         event.type === "voice_call_invite" ||
         event.type === "voice_call_accept" ||
         event.type === "voice_call_reject" ||
         event.type === "voice_call_hangup" ||
-        event.type === "voice_call_ice"
+        event.type === "voice_call_ice" ||
+        event.type === "voice_call_reconnect"
       ) {
         if (!store.isMember(event.conversationId, userId)) {
           send(ws, { type: "error", code: "forbidden", message: "not a member" });
@@ -236,6 +237,26 @@ export function attachWs(
               conversationId: event.conversationId,
               callId: event.callId,
               candidate: event.candidate,
+              fromUserId: userId,
+            });
+          }
+        } else if (event.type === "voice_call_reconnect") {
+          // ICE 重启的重新协商：只转发 SDP，不动 activeCalls 状态（通话早已 active，
+          // 重连是链路层面的事，振铃超时兜底与 hangup 语义都不该被它重置）。
+          if (!call || (call.initiatorId !== userId && !call.peerIds.includes(userId))) {
+            send(ws, { type: "error", code: "forbidden", message: "not in call" });
+            return;
+          }
+          const otherParticipants = [call.initiatorId, ...call.peerIds].filter(
+            (id) => id !== userId,
+          );
+          for (const otherId of otherParticipants) {
+            sendToUser(otherId, {
+              type: "voice_call_reconnect",
+              conversationId: event.conversationId,
+              callId: event.callId,
+              sdp: event.sdp,
+              sdpType: event.sdpType,
               fromUserId: userId,
             });
           }

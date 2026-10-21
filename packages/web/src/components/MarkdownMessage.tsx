@@ -1,6 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { highlightCode } from "../lib/markdown/highlight.js";
 
 /**
@@ -215,7 +217,11 @@ export const MarkdownMessage = memo(function MarkdownMessage({
 
   return (
     <div className="markdown-body break-words">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={components}
+      >
         {text}
       </ReactMarkdown>
     </div>

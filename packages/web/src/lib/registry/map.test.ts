@@ -3,13 +3,12 @@ import {
   buildOption,
   buildRemoteOptions,
   isInstallable,
+  pinnedSpec,
   registryServerId,
   runnerFor,
   toEntry,
   toServerConfig,
   validatePackage,
-  LOCAL_PACKAGES_SUPPORTED,
-  LOCAL_UNSUPPORTED_REASON,
 } from "./map.js";
 import { titleOf, type RegistryItem, type RegistryPackage } from "./types.js";
 import { slugPart } from "../mcp/bridge.js";
@@ -96,7 +95,7 @@ describe("validatePackage · 白名单", () => {
 
 /* ================================================================== 装法构造 */
 
-describe("runnerFor · 逻辑命令名（★ 本轮无调用方，保留下轮用）", () => {
+describe("runnerFor · 逻辑命令名（本机真实形态由桌面端翻译）", () => {
   it("npm → npx，pypi → uvx", () => {
     expect(runnerFor("npm")).toBe("npx");
     expect(runnerFor("pypi")).toBe("uvx");
@@ -109,50 +108,70 @@ describe("runnerFor · 逻辑命令名（★ 本轮无调用方，保留下轮�
   });
 });
 
-describe("★ 本轮只做 remote 分支（npm/pypi 标不支持）", () => {
-  it("常量：本轮不支持本地包", () => {
-    expect(LOCAL_PACKAGES_SUPPORTED).toBe(false);
+describe("pinnedSpec · 把包钉到具体版本", () => {
+  it("npm 用 @，pypi 用 ==（PEP 508，uvx 认这个写法）", () => {
+    expect(pinnedSpec("npm", "@scope/pkg", "1.2.3")).toBe("@scope/pkg@1.2.3");
+    expect(pinnedSpec("pypi", "mcp-server-fetch", "0.6.2")).toBe("mcp-server-fetch==0.6.2");
   });
 
-  it("npm / pypi 都标 unsupported 且不生成命令", () => {
-    for (const t of ["npm", "pypi"]) {
-      const o = buildOption(pkg({ registryType: t }));
-      expect(o.unsupported).toBe(LOCAL_UNSUPPORTED_REASON);
-      expect(o.command).toBeUndefined();
-      expect(o.args).toBeUndefined();
-      expect(isInstallable(o)).toBe(false);
-    }
-  });
-
-  it("不支持的说明里要讲清是「需要本机有 Node/uv」", () => {
-    // 用户看到「暂不支持」会以为产品坏了 —— 理由要说清是环境不具备。
-    expect(LOCAL_UNSUPPORTED_REASON).toContain("Node");
-    expect(LOCAL_UNSUPPORTED_REASON).toContain("uv");
-    expect(LOCAL_UNSUPPORTED_REASON).toContain("不内置");
-  });
-
-  it("★ 白名单校验独立于「支不支持」——下轮放开即可用", () => {
-    // 本轮不查白名单（不生成命令）；但 validatePackage 本身仍然可用且严格。
-    expect(validatePackage(pkg({ identifier: "evil;id" }))).not.toBeNull();
-    expect(validatePackage(pkg({ identifier: "@scope/ok" }))).toBeNull();
+  it("没有版本时不编造", () => {
+    expect(pinnedSpec("npm", "pkg", undefined)).toBe("pkg");
   });
 });
 
-describe("buildOption · 本轮全部标不支持", () => {
-  it("npm 也不生成命令（★ 本轮零依赖承诺，不要求用户装 Node）", () => {
+describe("buildOption · 本地包（stdio）", () => {
+  it("npm → npx -y 钉死版本", () => {
     const o = buildOption(pkg());
     expect(o.kind).toBe("stdio");
-    expect(o.command).toBeUndefined();
-    expect(o.args).toBeUndefined();
-    expect(o.unsupported).toBe(LOCAL_UNSUPPORTED_REASON);
+    expect(o.command).toBe("npx");
+    expect(o.args).toEqual(["-y", "@scope/pkg-name@1.2.3"]);
+    expect(o.registryType).toBe("npm");
+    expect(o.version).toBe("1.2.3");
+    expect(isInstallable(o)).toBe(true);
   });
 
-  it("oci / nuget / mcpb 同样不支持", () => {
-    for (const t of ["oci", "nuget", "mcpb"]) {
+  it("pypi → uvx，不带 -y（npx 才有的交互跳过参数）", () => {
+    const o = buildOption(pkg({ registryType: "pypi", identifier: "mcp-server-fetch", version: "0.6.2" }));
+    expect(o.command).toBe("uvx");
+    expect(o.args).toEqual(["mcp-server-fetch==0.6.2"]);
+  });
+
+  it("★ Windows 上真实执行形态由桌面端翻译：这里只存逻辑命令", () => {
+    // 不能写成 npx.cmd / npx.exe：Node ≥18.20.2 对 .cmd 直接 EINVAL（CVE-2024-27980），
+    // 而渲染层也不知道用户机器长什么样。
+    expect(buildOption(pkg()).command).toBe("npx");
+  });
+
+  it("★ 没有固定版本的包不生成命令", () => {
+    // 浮动版本 = 用户确认的这一次和实际跑的那一次可能不是同一份代码。
+    const o = buildOption(pkg({ version: undefined }));
+    expect(o.command).toBeUndefined();
+    expect(o.args).toBeUndefined();
+    expect(o.unsupported).toContain("固定版本");
+    expect(isInstallable(o)).toBe(false);
+  });
+
+  it("oci / nuget / mcpb / 未知类型标不支持", () => {
+    for (const t of ["oci", "nuget", "mcpb", ""]) {
       const o = buildOption(pkg({ registryType: t }));
       expect(o.unsupported).toBeTruthy();
+      expect(o.command).toBeUndefined();
       expect(isInstallable(o)).toBe(false);
     }
+  });
+
+  it("★ 包类型字段缺失时按未知处理，绝不猜一个命令去执行", () => {
+    const o = buildOption({ identifier: "pkg", version: "1.0.0" } as RegistryPackage);
+    expect(o.unsupported).toContain("无法识别");
+    expect(o.command).toBeUndefined();
+  });
+
+  it("★ 白名单在生成命令之前拦截：恶意包名拿不到可执行文件", () => {
+    const o = buildOption(pkg({ identifier: "pkg; rm -rf /" }));
+    expect(o.command).toBeUndefined();
+    expect(o.args).toBeUndefined();
+    expect(o.unsupported).toContain("包名含不允许的字符");
+    expect(o.unsupported).toContain("pkg; rm -rf /");
   });
 
   it("★ packageArguments 与 environmentVariables 绝不出现在产物里", () => {
@@ -333,6 +352,21 @@ describe("toServerConfig", () => {
   it("没填 headers 时为 undefined（不留空对象）", () => {
     const cfg = toServerConfig(entry, { kind: "http", label: "x", url: "https://a" }, undefined, {});
     expect(cfg.headers).toBeUndefined();
+  });
+
+  it("★ 本地包写入台账字段（registryType / registryVersion）", () => {
+    const cfg = toServerConfig(
+      entry,
+      { kind: "stdio", label: "npm · p@1.2.3", command: "npx", args: ["-y", "p@1.2.3"], registryType: "npm", version: "1.2.3" },
+    );
+    expect(cfg.registryType).toBe("npm");
+    expect(cfg.registryVersion).toBe("1.2.3");
+  });
+
+  it("远程装法没有本机包，两个台账字段都为空", () => {
+    const cfg = toServerConfig(entry, { kind: "http", label: "x", url: "https://a", registryType: undefined });
+    expect(cfg.registryType).toBeUndefined();
+    expect(cfg.registryVersion).toBeUndefined();
   });
 });
 

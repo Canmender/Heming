@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { runAgentMentions, newStreamId } from "./agentStream.js";
+import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES } from "./agentStream.js";
 import type { ChatMessage } from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
+import { toHitlCall } from "./hitl/classify.js";
 
 const profile: LlmProfile = { id: "p1", label: "l", provider: "openai", apiKey: "k", model: "m" };
 
@@ -729,7 +730,181 @@ describe("runAgentMentions 工具调用（MCP 桥）", () => {
 });
 
 /**
- * HITL 闸门（设计 §4.3）：工具执行**之前**问用户。
+ * 知识库来源脚注（R6）：工具真的返回过哪些页面，由编排层拼在答案末尾。
+ *
+ * 三条约束：
+ * 1. 只统计**执行成功**且带回 sources 的调用（被拒/失败不算引用）；
+ * 2. 按调用顺序去重，同一页面只列一次；
+ * 3. 没来源就不加脚注——绝不让模型或编排层凭空造一条「来源」。
+ */
+describe("sourceFooter", () => {
+  it("去重、封顶、压掉标题换行（不让来源破坏 markdown 结构）", () => {
+    const many = Array.from({ length: MAX_SOURCES + 4 }, (_, i) => ({
+      id: `wiki/${i}.md`,
+      title: `页\n${i}`,
+    }));
+    const footer = sourceFooter([{ id: "wiki/0.md", title: "重复" }, ...many]);
+    expect(footer.match(/^- /gm)).toHaveLength(MAX_SOURCES);
+    expect(footer).not.toContain("\n\n- 页");
+    expect(footer).toContain("页 1");
+    expect(footer).toContain("来源（来自本机知识库）");
+  });
+
+  it("无来源时返回空串（调用方据此决定不发脚注）", () => {
+    expect(sourceFooter([])).toBe("");
+    expect(sourceFooter([{ id: "  ", title: "空" }])).toBe("");
+  });
+});
+
+describe("runAgentMentions 来源脚注", () => {
+  function twoRounds(calls: unknown[]) {
+    const rounds = [
+      { text: "我先查一下", calls },
+      { text: "答案是 42", calls: [] as never[] },
+    ];
+    let round = 0;
+    return vi.fn(async (_p: unknown, _m: ChatMessage[], o: {
+      onDelta: (t: string) => void;
+      onToolCalls?: (c: unknown[]) => void;
+    }) => {
+      const r = rounds[round++];
+      if (r.calls.length) o.onToolCalls?.(r.calls);
+      if (r.text) o.onDelta(r.text);
+      return r.text;
+    });
+  }
+
+  const call = (id: string, name: string) => ({
+    id,
+    type: "function" as const,
+    function: { name, arguments: "{}" },
+  });
+
+  it("工具带回 sources → 最终答案末尾附脚注，chunk 拼接与 finish 一致", async () => {
+    const streamChat = twoRounds([call("c1", "wiki_search")]);
+    const { send, deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "wiki_search" } }],
+        execute: async () => ({
+          text: "找到页面",
+          ok: true,
+          sources: [{ id: "wiki/entities/heming.md", title: "和鸣" }],
+        }),
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const events = send.mock.calls.map((c) => c[0] as { type: string; text?: string });
+    const chunks = events.filter((e) => e.type === "agent_chunk").map((e) => e.text ?? "").join("");
+    const finish = events.find((e) => e.type === "agent_finish");
+    expect(chunks).toContain("来源（来自本机知识库）");
+    expect(chunks).toContain("wiki/entities/heming.md");
+    expect(finish?.text).toBe(chunks);
+    // 工具轮的「我先查一下」仍不上行
+    expect(chunks).not.toContain("我先查一下");
+  });
+
+  it("同一页面被多次读到只列一次（按调用顺序去重）", async () => {
+    const streamChat = twoRounds([call("c1", "wiki_search"), call("c2", "wiki_read")]);
+    const { send, deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [
+          { type: "function", function: { name: "wiki_search" } },
+          { type: "function", function: { name: "wiki_read" } },
+        ],
+        execute: async (c) => ({
+          text: c.name,
+          ok: true,
+          sources: [{ id: "wiki/entities/heming.md", title: "和鸣" }],
+        }),
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const finish = (send.mock.calls as unknown[][])
+      .map(([e]) => e as { type: string; text?: string })
+      .find((e) => e.type === "agent_finish");
+    const occurrences = finish?.text?.split("wiki/entities/heming.md").length ?? 0;
+    expect(occurrences - 1).toBe(1);
+  });
+
+  it("调用被拒绝 → 不计来源、不加脚注", async () => {
+    const execute = vi.fn(async () => ({
+      text: "读到",
+      ok: true,
+      sources: [{ id: "wiki/a.md", title: "A" }],
+    }));
+    const streamChat = twoRounds([call("c1", "wiki_search")]);
+    const { send, deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "wiki_search" } }],
+        execute,
+      }),
+      confirmToolCalls: async (calls) =>
+        calls.map((c) => ({
+          kind: "deny" as const,
+          call: toHitlCall(c),
+          reason: "用户拒绝",
+        })),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(execute).not.toHaveBeenCalled();
+    const finish = (send.mock.calls as unknown[][])
+      .map(([e]) => e as { type: string; text?: string })
+      .find((e) => e.type === "agent_finish");
+    expect(finish?.text).toBe("答案是 42");
+    expect(finish?.text).not.toContain("来源");
+  });
+
+  it("执行失败（ok=false）即便带了 sources 也不计入", async () => {
+    const streamChat = twoRounds([call("c1", "wiki_read")]);
+    const { send, deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "wiki_read" } }],
+        execute: async () => ({
+          text: "读了一半",
+          ok: false,
+          sources: [{ id: "wiki/a.md", title: "A" }],
+        }),
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const finish = (send.mock.calls as unknown[][])
+      .map(([e]) => e as { type: string; text?: string })
+      .find((e) => e.type === "agent_finish");
+    expect(finish?.text).not.toContain("来源");
+  });
+
+  it("没有工具来源的普通回答不出现脚注", async () => {
+    const streamChat = twoRounds([call("c1", "wiki_search")]);
+    const { send, deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "wiki_search" } }],
+        execute: async () => ({ text: "没有匹配", ok: true }),
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const finish = (send.mock.calls as unknown[][])
+      .map(([e]) => e as { type: string; text?: string })
+      .find((e) => e.type === "agent_finish");
+    expect(finish?.text).toBe("答案是 42");
+  });
+});
+
+/** HITL 闸门（设计 §4.3）：工具执行**之前**问用户。
  *
  * 三条硬约束在这里逐条被钉死：
  * 1. 被拒的项**绝不**调用 bridge.execute；
@@ -915,7 +1090,7 @@ describe("runAgentMentions HITL 闸门", () => {
     expect(messages[1].content).toContain("未被修改");
   });
 
-  it("闸门抛错：按放行处理（闸门故障不得让整轮对话失败）", async () => {
+  it("闸门抛错：按拒绝处理（工具不执行，但仍回灌 tool 消息）", async () => {
     const executed: string[] = [];
     const streamChat = twoRounds(oneCall);
     const { deps } = makeDeps({
@@ -934,10 +1109,17 @@ describe("runAgentMentions HITL 闸门", () => {
 
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
 
-    expect(executed).toEqual(["fs__write_file"]);
+    // 兜底方向是 deny：闸门坏掉的时刻最不该让危险操作裸奔。
+    expect(executed).toEqual([]);
+    const messages = toolMessages(streamChat);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toContain("未被修改");
+    // 异常 ≠ 用户拒绝：模型不能把系统故障归因成用户的选择。
+    expect(messages[0].content).toContain("确认流程异常");
+    expect(messages[0].content).not.toContain("用户拒绝");
   });
 
-  it("闸门返回条数与调用数不一致：按放行处理（对不上就不能信）", async () => {
+  it("闸门返回条数与调用数不一致：按拒绝处理（对不上就不能信）", async () => {
     const executed: string[] = [];
     const streamChat = twoRounds(oneCall);
     const { deps } = makeDeps({
@@ -954,11 +1136,14 @@ describe("runAgentMentions HITL 闸门", () => {
 
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
 
-    expect(executed).toEqual(["fs__write_file"]);
+    expect(executed).toEqual([]);
+    const messages = toolMessages(streamChat);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toContain("未被修改");
   });
 
   it("被拒的项在工具轨迹里标为「已拒绝」（用户要能确认自己真的拒了）", async () => {
-    const toolEvents: { phase: string; denied?: boolean }[] = [];
+    const toolEvents: { phase: string; denied?: boolean; denyCause?: string }[] = [];
     const streamChat = twoRounds(oneCall);
     const { deps } = makeDeps({
       streamChat: streamChat as never,
@@ -978,6 +1163,7 @@ describe("runAgentMentions HITL 闸门", () => {
             summary: "",
             source: "mcp" as const,
           },
+          cause: "rule" as const,
         })),
       onToolTrace: (_id, e) => toolEvents.push(e),
     });
@@ -986,6 +1172,36 @@ describe("runAgentMentions HITL 闸门", () => {
 
     const end = toolEvents.find((e) => e.phase === "end");
     expect(end?.denied).toBe(true);
+    // 拒绝原因随轨迹带出：任务汇总要能区分「用户拒」与「规则拒/闸门异常」
+    expect(end?.denyCause).toBe("rule");
+  });
+
+  it("工具轨迹 end 带成功来源与被拒原因（任务区汇总依赖这两个字段）", async () => {
+    const toolEvents: {
+      phase: string;
+      denied?: boolean;
+      sources?: { id: string; title: string }[];
+      denyCause?: string;
+    }[] = [];
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } }],
+        execute: async () => ({
+          text: "读到了",
+          ok: true,
+          sources: [{ id: "wiki/a", title: "页面 A" }],
+        }),
+      }),
+      onToolTrace: (_id, e) => toolEvents.push(e),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const end = toolEvents.find((e) => e.phase === "end");
+    expect(end?.sources).toEqual([{ id: "wiki/a", title: "页面 A" }]);
+    expect(end?.denyCause).toBeUndefined();
   });
 
   it("★ 拒绝后模型若再要工具，会**再次**被问（不因为上轮被拒就一路放行）", async () => {
@@ -1145,5 +1361,98 @@ describe("runAgentMentions 可视化（思考过程 / 工具轨迹）", () => {
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
     expect(onReasoning).not.toHaveBeenCalled();
     expect(onToolTrace).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 任务区终态（onRunSettled）：每个流恰好一次。
+ *
+ * 与 onTurnComplete 的分工：后者只管「有没有可记忆的文本」，完全无文本的失败
+ * 不回调；任务记录需要每条流都有终态，否则会永远停在「进行中」。
+ */
+describe("runAgentMentions onRunSettled", () => {
+  it("成功 → ok + 全文，且只回调一次", async () => {
+    const onRunSettled = vi.fn();
+    const { deps } = makeDeps({ onRunSettled });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    expect(onRunSettled).toHaveBeenCalledTimes(1);
+    expect(onRunSettled).toHaveBeenCalledWith(expect.any(String), {
+      status: "ok",
+      finalText: "你好",
+    });
+  });
+
+  it("无绑定 → error（不进供应商，但任务必须有终态）", async () => {
+    const onRunSettled = vi.fn();
+    const { deps } = makeDeps({ getProfile: () => undefined, onRunSettled });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    expect(onRunSettled).toHaveBeenCalledTimes(1);
+    expect(onRunSettled).toHaveBeenCalledWith(expect.any(String), {
+      status: "error",
+      error: "未绑定 LLM 连接",
+    });
+  });
+
+  it("供应商失败 → error + 原因（有部分文本时一并带出）", async () => {
+    const onRunSettled = vi.fn();
+    const { deps } = makeDeps({
+      onRunSettled,
+      streamChat: vi.fn(async (_p, _m, o: { onDelta: (t: string) => void }) => {
+        o.onDelta("半");
+        throw new Error("HTTP 500");
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    expect(onRunSettled).toHaveBeenCalledTimes(1);
+    expect(onRunSettled).toHaveBeenCalledWith(expect.any(String), {
+      status: "error",
+      finalText: "半",
+      error: "HTTP 500",
+    });
+  });
+
+  it("中止 → aborted + 已产生的文本（不记成失败）", async () => {
+    const onRunSettled = vi.fn();
+    const onLocalDelta = vi.fn();
+    const { deps } = makeDeps({
+      onRunSettled,
+      onLocalDelta,
+      streamChat: vi.fn(
+        (_p: unknown, _m: unknown, o: { signal: AbortSignal; onDelta: (t: string) => void }) =>
+          new Promise<string>((_res, rej) => {
+            o.onDelta("半");
+            o.signal.addEventListener("abort", () =>
+              rej(new DOMException("AbortError", "AbortError")),
+            );
+          }),
+      ),
+    });
+    const run = runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    await vi.waitFor(() => expect(onLocalDelta).toHaveBeenCalledWith(expect.any(String), "半"));
+    run.abortAll();
+    await run;
+    expect(onRunSettled).toHaveBeenCalledTimes(1);
+    expect(onRunSettled).toHaveBeenCalledWith(expect.any(String), {
+      status: "aborted",
+      finalText: "半",
+    });
+  });
+
+  it("读历史失败 → 整轮仍 reject（原行为），但终态先落定为 error", async () => {
+    const onRunSettled = vi.fn();
+    const { deps } = makeDeps({
+      onRunSettled,
+      fetchHistory: async () => {
+        throw new Error("历史读取失败");
+      },
+    });
+    await expect(
+      runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps),
+    ).rejects.toThrow("历史读取失败");
+    expect(onRunSettled).toHaveBeenCalledTimes(1);
+    expect(onRunSettled).toHaveBeenCalledWith(expect.any(String), {
+      status: "error",
+      error: "历史读取失败",
+    });
   });
 });

@@ -241,6 +241,31 @@ describe("SkillsPage 技能区", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("删除技能要二次确认：取消不删，确认后从技能池移除", async () => {
+    await renderReady();
+    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
+    fireEvent.click(screen.getByRole("button", { name: "导入 SKILL.md" }));
+    fireEvent.change(screen.getByLabelText("导入技能内容"), { target: { value: SKILL_MD } });
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+
+    const remove = await screen.findByRole("button", { name: "池中删除 财报速读" });
+
+    fireEvent.click(remove);
+    const dialog = screen.getByRole("dialog", { name: "删除技能" });
+    expect(within(dialog).getByText(/此操作不可恢复/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(pool.list().some((k) => k.name === "财报速读")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "池中删除 财报速读" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "删除技能" })).getByRole("button", {
+        name: "删除",
+      }),
+    );
+    expect(pool.list().some((k) => k.name === "财报速读")).toBe(false);
+    expect(screen.getByRole("status")).toHaveTextContent("已删除技能：财报速读");
+  });
+
   it("四组皆空时给出「该智能体还没有这类技能」空态", async () => {
     map.set(
       SKILLS_KEY,

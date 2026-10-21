@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 
 /**
  * 自动更新卡（桌面安装版专属）。
@@ -58,6 +59,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
   const bridge = typeof window !== "undefined" ? window.__heming_update : undefined;
   const [state, setState] = useState<UpdateState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmInstall, setConfirmInstall] = useState(false);
 
   // 订阅主进程推送的状态；组件卸载时务必退订，否则会向已销毁的组件 setState。
   useEffect(() => {
@@ -78,7 +80,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
     // 已下载完成 → 这一步是「重启并安装」，会终止当前进程，
     // 所以不再 setBusy：进程马上就没了，等下状态反而是错的。
     if (state.status === "downloaded") {
-      await bridge.install();
+      setConfirmInstall(true);
       return;
     }
     setBusy(true);
@@ -127,6 +129,38 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
       >
         {buttonLabel(state, busy)}
       </button>
+      {confirmInstall && (
+        <ConfirmDialog
+          title="重启并安装更新"
+          onCancel={() => setConfirmInstall(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmInstall(false)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                稍后
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmInstall(false);
+                  void bridge.install();
+                }}
+                className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+              >
+                重启并安装
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            安装会关闭并重启应用，正在输入的内容、运行中的智能体任务与通话会中断。请先保存工作，再继续。
+          </p>
+        </ConfirmDialog>
+      )}
+
     </section>
   );
 }

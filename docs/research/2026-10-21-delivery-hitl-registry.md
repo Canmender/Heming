@@ -33,6 +33,9 @@ agentStream.ts:483   confirmToolCalls(deps, calls, ctx)      ← 唯一接线点
 - 装法只支持 remote：`buildRemoteOptions` 只做 URL 合法性检查
 - npm/pypi 类返回 `unsupported`（`LOCAL_PACKAGES_SUPPORTED = false`）——
   下轮放开只需改这一个常量
+  ★ **实际放开于 d.25**，且不是改一个常量：常量已删除，改为包类型白名单（`LOCAL_TYPES`）、
+  必须有钉死版本、本机运行时探测（`lib/registry/runtime.ts` + `desktop/local-runtime.js`）与
+  `shell:false` 下的启动翻译。口径见 `docs/superpowers/specs/2026-10-21-local-package-runtime-policy.md`
 - `remotes[]` 里带 `headers` 的（实测 13%）会转成 `headerHints`，
   用户填的值经第四个参数进 `McpServerConfig.headers`
 

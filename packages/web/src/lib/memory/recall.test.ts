@@ -11,6 +11,7 @@ import type {
   StorageLike,
   WorkingTurn,
 } from "./types.js";
+import { GLOBAL_AGENT_ID } from "./types.js";
 
 class FakeStorage implements StorageLike {
   readonly map = new Map<string, string>();
@@ -70,12 +71,18 @@ function working(id: string, userText: string, assistantText: string, offsetMs =
 function storeOf(seed: {
   episodic?: EpisodicEntry[];
   semantic?: SemanticEntry[];
+  semanticGlobal?: SemanticEntry[];
   working?: WorkingTurn[];
   settings?: Partial<MemorySettings>;
 }): MemoryStore {
   const storage = new FakeStorage();
   if (seed.episodic?.length) storage.write(MEMORY_KEYS.episodic, { "agent-1": seed.episodic });
-  if (seed.semantic?.length) storage.write(MEMORY_KEYS.semantic, { "agent-1": seed.semantic });
+  if (seed.semantic?.length || seed.semanticGlobal?.length) {
+    storage.write(MEMORY_KEYS.semantic, {
+      ...(seed.semantic?.length ? { "agent-1": seed.semantic } : {}),
+      ...(seed.semanticGlobal?.length ? { [GLOBAL_AGENT_ID]: seed.semanticGlobal } : {}),
+    });
+  }
   if (seed.working?.length) storage.write(MEMORY_KEYS.working, { "conv-1": seed.working });
   if (seed.settings) storage.write(MEMORY_KEYS.settings, { enabled: true, autoCapture: true, retentionDays: 90, ...seed.settings });
   return new MemoryStore(storage, () => NOW);
@@ -202,6 +209,74 @@ describe("recallMemory：情景层", () => {
     });
     const { episodic: hit } = recall(store, "发布计划");
     expect(hit[0].id).toBe("high");
+  });
+});
+
+describe("recallMemory：时效覆盖与多样性重排", () => {
+  it("同主题键只注入最新那条：全局桶与本智能体桶不会各带一份", () => {
+    const store = storeOf({
+      semantic: [semantic("local", "称呼", "用户希望被称为「老王」", { updatedAt: iso(30 * DAY) })],
+      semanticGlobal: [
+        semantic("shared", "称呼", "用户希望被称为「王总」", {
+          agentId: GLOBAL_AGENT_ID,
+          updatedAt: iso(DAY),
+        }),
+      ],
+    });
+    const { semantic: hit } = recall(store, "称呼是什么");
+    expect(hit.map((e) => e.id)).toEqual(["shared"]);
+  });
+
+  it("同一桶里的历史重复条目同样被最新值覆盖（老版本数据不留双份）", () => {
+    const store = storeOf({
+      semantic: [
+        semantic("old", "称呼", "用户希望被称为「老王」", { updatedAt: iso(30 * DAY) }),
+        semantic("new", "称呼", "用户希望被称为「王总」", { updatedAt: iso(DAY) }),
+      ],
+    });
+    const { semantic: hit } = recall(store, "称呼是什么");
+    expect(hit.map((e) => e.id)).toEqual(["new"]);
+  });
+
+  it("置顶的是主题而不是那一版内容：同键有更新条目时由它继承置顶位", () => {
+    const store = storeOf({
+      semantic: [
+        semantic("old", "称呼", "老王", { pinned: true, updatedAt: iso(30 * DAY) }),
+        semantic("new", "称呼", "王总", { updatedAt: iso(DAY) }),
+      ],
+    });
+    // 查询与记忆内容毫无重合——非置顶条目本该一条都不带，这里只验证「主题仍必带」且带的是新版
+    const { semantic: hit } = recall(store, "今天天气怎么样");
+    expect(hit.map((e) => e.id)).toEqual(["new"]);
+  });
+
+  it("置信度与 90 天半衰期共同决定排序：久远的强相关事实压过刚写的弱相关事实", () => {
+    const store = storeOf({
+      semantic: [
+        semantic("old-fact", "发布计划", "每次发布计划都安排在周四", {
+          confidence: 0.95,
+          updatedAt: iso(150 * DAY),
+        }),
+        semantic("recent-weak", "计划", "今天有个会", { confidence: 0.6, updatedAt: iso() }),
+      ],
+    });
+    const { semantic: hit } = recall(store, "发布计划");
+    expect(hit.map((e) => e.id)).toEqual(["old-fact", "recent-weak"]);
+  });
+
+  it("情景层近似重复的摘要只占一个名额，其余名额让给不同内容", () => {
+    const store = storeOf({
+      episodic: [
+        episodic("dup-a", "讨论了发布计划与回归", 0),
+        episodic("dup-b", "讨论了发布计划与回归", 0),
+        episodic("other-a", "发布计划与回归都已确认", 0),
+        episodic("other-b", "发布计划与回归的最终排期", 0),
+      ],
+    });
+    const { episodic: hit } = recall(store, "发布计划与回归");
+    expect(hit).toHaveLength(3);
+    const dups = hit.filter((e) => e.id === "dup-a" || e.id === "dup-b");
+    expect(dups).toHaveLength(1); // 完全同文的两条不会一起挤进注入预算
   });
 });
 

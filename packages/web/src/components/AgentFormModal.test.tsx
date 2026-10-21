@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { AgentFormModal } from "./AgentFormModal.js";
 import { useLlmStore } from "../store/llm.js";
 import { useAuthStore } from "../store/auth.js";
@@ -45,13 +45,13 @@ describe("AgentFormModal", () => {
     expect(screen.queryByText("删除智能体")).not.toBeInTheDocument();
   });
 
-  it("owner 编辑：预填名称/提示词，删除走 confirm 后调 deleteAgent", async () => {
+  it("owner 编辑：预填名称/提示词，删除走应用内确认后调 deleteAgent", async () => {
     useLlmStore.setState({
       prompts: { a1: "旧提示" },
       bindings: {},
       profiles: [],
     });
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const confirmSpy = vi.spyOn(window, "confirm");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(null, { status: 204 }),
     );
@@ -66,14 +66,37 @@ describe("AgentFormModal", () => {
     );
     expect(screen.getByLabelText("名称")).toHaveValue("架构师");
     expect(screen.getByLabelText("系统提示词（仅本机）")).toHaveValue("旧提示");
-    expect(screen.getByText("删除智能体")).toBeInTheDocument();
+
     fireEvent.click(screen.getByText("删除智能体"));
-    expect(confirmSpy).toHaveBeenCalled();
+    // 不弹系统框；确认之前不发请求
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "删除智能体" });
+    expect(within(dialog).getByText(/此操作不可恢复/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const [url, init] = fetchSpy.mock.calls[0];
     expect(String(url)).toContain("/api/agents/a1");
     expect(init?.method).toBe("DELETE");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("应用内确认点「取消」：弹窗关闭，不删除", () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    render(
+      <AgentFormModal
+        open
+        mode="edit"
+        agent={{ id: "a1", owner_id: "u1", name: "架构师", avatar: null, description: "" }}
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText("删除智能体"));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "删除智能体" })).getByRole("button", { name: "取消" }));
+
+    expect(screen.queryByRole("dialog", { name: "删除智能体" })).not.toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("名称为空不提交", () => {

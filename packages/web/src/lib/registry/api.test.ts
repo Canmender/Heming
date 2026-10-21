@@ -198,11 +198,12 @@ describe("toEntries", () => {
     expect(e!.options[0].unsupported).not.toContain("undefined");
   });
 
-  it("★ 本轮所有本地包都标不支持（不生成命令）", () => {
+  it("★ 恶意包名在映射阶段就被拒（不生成命令，且说清是哪个值）", () => {
     const e = toEntries(raw).find((x) => x.key === "com.evil/inject");
     expect(e!.options[0].command).toBeUndefined();
     expect(e!.options[0].args).toBeUndefined();
-    expect(e!.options[0].unsupported).toContain("Node");
+    expect(e!.options[0].unsupported).toContain("包名含不允许的字符");
+    expect(e!.options[0].unsupported).toContain("pkg; rm -rf /");
   });
 
   it("oci / nuget 标不支持", () => {

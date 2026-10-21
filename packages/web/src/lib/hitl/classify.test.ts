@@ -4,6 +4,7 @@ import {
   displayNameOf,
   resolveRisk,
   riskOfName,
+  ruleResource,
   sourceOf,
   summarizeArgs,
   toHitlCall,
@@ -146,5 +147,27 @@ describe("classifyCall", () => {
     const call = toHitlCall({ id: "call_1", function: { name: "srv__get_file", arguments: "{}" } });
     expect(call.id).toBe("call_1");
     expect(call.risk).toBe("read");
+  });
+});
+
+describe("规则资源标识", () => {
+  it("取首个已知字段，路径统一正斜杠、不做展示脱敏", () => {
+    expect(ruleResource('{"path":"notes\\\\a.md"}')).toBe("notes/a.md");
+    expect(ruleResource('{"url":"https://bob:pw@example.com/x"}')).toBe(
+      "https://***@example.com/x",
+    );
+  });
+
+  it("敏感字段不落规则（退化成通配）", () => {
+    expect(ruleResource('{"query":"token=abcdefghijklmnop"}')).toBe("*");
+  });
+
+  it("没有可识别字段时是通配", () => {
+    expect(ruleResource("{}")).toBe("*");
+    expect(ruleResource("{ 不是 json")).toBe("*");
+  });
+
+  it("超长资源截断，避免把长文本写进 localStorage", () => {
+    expect(ruleResource(JSON.stringify({ path: "a".repeat(500) }))).toHaveLength(200);
   });
 });

@@ -59,6 +59,13 @@ export const FolderIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
   </svg>
 );
+export const SearchIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="10.5" cy="10.5" r="6" />
+    <path d="M15 15l4 4" />
+  </svg>
+);
+
 export const ChevronIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M9 6l6 6-6 6" />
@@ -158,10 +165,28 @@ export const SkillsIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+/** 任务区：带勾选的清单——表达「一串待执行/已执行的事」，区别于聊天气泡。 */
+export const TaskIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="5" y="4" width="14" height="17" rx="2" />
+    <path d="M9 4.5V3h6v1.5" />
+    <path d="m8.5 10 1.5 1.5 2.5-2.5" />
+    <path d="M14.5 11h3M8.5 16h9" />
+  </svg>
+);
+
 /** 视频通话：摄像机轮廓 + 取景框。 */
 export const VideoIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <rect x="3" y="7" width="12" height="10" rx="2.5" />
     <path d="M15 11l5-3v8l-5-3z" />
+  </svg>
+);
+
+/** 多选：方框内一个勾——区别于「任务清单」，这里只表达「挑出若干条」。 */
+export const SelectIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="4" y="4" width="16" height="16" rx="3" />
+    <path d="m8.5 12 2.5 2.5 5-5" />
   </svg>
 );

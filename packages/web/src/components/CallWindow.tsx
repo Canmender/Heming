@@ -107,7 +107,9 @@ export function CallWindow() {
         ? "正在呼叫…"
         : "来电振铃中…"
       : voice.state.status === "active"
-        ? "通话中"
+        ? voice.state.reconnecting > 0
+          ? "连接中断，正在重连…"
+          : "通话中"
         : connected
           ? "正在建立连接…"
           : "连接中…");

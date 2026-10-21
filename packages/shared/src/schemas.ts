@@ -196,6 +196,15 @@ const WsClientEventUnion = z.discriminatedUnion("type", [
     callId: z.string().min(1),
     candidate: z.string().min(1),
   }),
+  // ICE 重启用的重新协商（d.25）：SDP 双向都走这一条，sdpType 区分 offer/answer，
+  // 不复用 invite/accept——那两条带振铃与接听语义，重连时会让对端再弹一次来电。
+  z.object({
+    type: z.literal("voice_call_reconnect"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+    sdp: z.string().min(1),
+    sdpType: z.enum(["offer", "answer"]),
+  }),
 ]);
 
 /**
@@ -376,7 +385,7 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
   }),
   // —— 语音通话信令事件（服务端 → 客户端广播镜像）——
   // fromUserId 仅存在于服务端事件：Mesh 通话用于标识对端（invite 发起方 / accept 应答方 /
-  // ice 发送方），由服务端从认证身份填，客户端不可见不可伪造（Zod strip 兜底）。
+  // ice 发送方 / reconnect 重连发起方），由服务端从认证身份填，客户端不可见不可伪造（Zod strip 兜底）。
   z.object({
     type: z.literal("voice_call_invite"),
     conversationId: z.string().min(1),
@@ -407,6 +416,14 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     conversationId: z.string().min(1),
     callId: z.string().min(1),
     candidate: z.string().min(1),
+    fromUserId: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("voice_call_reconnect"),
+    conversationId: z.string().min(1),
+    callId: z.string().min(1),
+    sdp: z.string().min(1),
+    sdpType: z.enum(["offer", "answer"]),
     fromUserId: z.string().min(1),
   }),
 ]);

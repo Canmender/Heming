@@ -180,6 +180,13 @@ describe("MemoryPage 短期记忆", () => {
 
     // 清空 c2 只影响该会话
     fireEvent.click(screen.getByRole("button", { name: "清空会话 c2" }));
+    // 清空需二次确认：确认前不动数据
+    expect(memory.working("c2")).toHaveLength(1);
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "清空短期记忆" })).getByRole("button", {
+        name: "清空",
+      }),
+    );
     expect(memory.working("c2")).toHaveLength(0);
     expect(screen.queryByRole("group", { name: "会话 c2" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("已清空会话 c2 的短期记忆");
@@ -242,11 +249,21 @@ describe("MemoryPage 数据库记忆", () => {
 
     fireEvent.change(screen.getByLabelText("检索记忆"), { target: { value: "" } });
     fireEvent.click(within(semanticList()).getByRole("button", { name: "删除记忆 称呼" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "删除记忆" })).getByRole("button", {
+        name: "删除",
+      }),
+    );
     expect(memory.semanticGlobal()).toHaveLength(1);
     expect(within(semanticList()).queryByText("称呼")).not.toBeInTheDocument();
 
     fireEvent.click(
       within(episodicList()).getByRole("button", { name: /删除情景 用户：部署端口是多少/ }),
+    );
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "删除情景记忆" })).getByRole("button", {
+        name: "删除",
+      }),
     );
     expect(memory.episodic("a1")).toHaveLength(0);
     expect(within(episodicList()).getByText("暂无条目")).toBeInTheDocument();
@@ -340,6 +357,7 @@ describe("MemoryPage 数据库记忆", () => {
     fireEvent.click(screen.getByRole("button", { name: "导入" }));
     fireEvent.change(screen.getByLabelText("导入记忆 JSON"), { target: { value: "{不是 JSON" } });
     fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    fireEvent.click(screen.getByRole("button", { name: "替换并导入" }));
     expect(screen.getByText(/JSON 解析失败/)).toBeInTheDocument();
 
     const payload = JSON.stringify({
@@ -369,6 +387,7 @@ describe("MemoryPage 数据库记忆", () => {
     });
     fireEvent.change(screen.getByLabelText("导入记忆 JSON"), { target: { value: payload } });
     fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    fireEvent.click(screen.getByRole("button", { name: "替换并导入" }));
 
     expect(await screen.findByText(/导入成功/)).toBeInTheDocument();
     await pickAgent();
