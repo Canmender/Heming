@@ -150,6 +150,8 @@ export function buildChartToolBridge(): ToolBridge {
       type: "function" as const,
       function: { name: t.name, description: t.description, parameters: t.parameters },
     })),
+    // HITL 闸门用：chart.* 不写任何存储、不留痕，纯粹是把数据变成图 → 只读免问。
+    meta: (name) => (name.startsWith(CHART_TOOL_PREFIX) ? { risk: "read" as const } : undefined),
     execute: async (call) => {
       let args: Record<string, unknown> = {};
       try {

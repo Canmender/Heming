@@ -3,6 +3,7 @@ import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
 import { LlmSettingsCard } from "./LlmSettingsCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
+import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { useUiStore, type NavPage } from "../store/ui.js";
 import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
 import { CHANGELOG, logOpenState, parseInline, stripInline, toggleLog } from "../lib/changelog.js";
@@ -113,6 +114,8 @@ export function SettingsPage() {
           <>
             <LlmSettingsCard />
             <ContextSettingsCard />
+            {/* 工具调用确认（安全设置）：与模型设置同组——两者都是「生成行为」的边界 */}
+            <HitlPolicyCard />
           </>
         )}
         {tab === "appearance" && <AppearanceSection />}

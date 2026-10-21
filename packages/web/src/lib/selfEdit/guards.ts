@@ -27,7 +27,12 @@ export const SENSITIVE_PATTERNS: RegExp[] = [
   /(ghp_[A-Za-z0-9]{20,})/,
   /(AKIA[0-9A-Z]{12,})/,
   /(-----BEGIN [A-Z ]*PRIVATE KEY-----)/,
-  /(bearer\s+[A-Za-z0-9._-]{16,})/,
+  // ★ 必须带 `i` 标志：`Bearer` 是 HTTP 认证头的标准写法（首字母大写），
+  //   小写匹配漏掉的恰恰是**最常见的那种**。
+  //   本轮实测：`Bearer abcdefghijklmnopqrst` 原本漏检（只匹配全小写）。
+  //   这条在 HITL 的参数摘要里是**泄露路径**——摘要要显示参数，不掩码就等于
+  //   把用户的 token 摆在确认弹窗上。
+  /(bearer\s+[A-Za-z0-9._-]{16,})/i,
   /((?:api[_ -]?key|token|secret|password|passwd|密码|口令|密钥)\s*[:=：]\s*\S{6,})/i,
   // 中文里密钥与取值之间常不用「:=」而用「是/为」，例如「我的密码是 hunter2000」。
   // 少了这条，最常见的中文写法反而漏检——而这恰恰是本项目主要的使用语言。
@@ -63,8 +68,13 @@ export const AUDIT_KEY = "heming.selfAudit.v1";
 export interface AuditEntry {
   at: string;
   agentId: string;
-  /** 受影响的面：记忆 / 技能 / MCP / 提示词… */
-  scope: "memory" | "skill" | "mcp" | "other";
+  /**
+   * 受影响的面：记忆 / 技能 / MCP / 工具调用确认 / 提示词…
+   *
+   * `tool` 是 HITL 闸门加的：工具调用的批准与拒绝同样要留痕——
+   * 安全功能不留痕等于没做（用户事后无从查证「刚才那次到底批没批」）。
+   */
+  scope: "memory" | "skill" | "mcp" | "tool" | "other";
   /** 动作：write / update / remove / enable / disable / create */
   action: string;
   /** 被改对象的可读标识（记忆 key、技能名、工具键）。 */

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
+import { useLlmStore } from "../store/llm.js";
 
 /** 本机键（设计 §5）：卡片读写都走它，测试直接查 localStorage 断言落盘。 */
 const KEY = "heming.context.v1";
@@ -17,6 +18,7 @@ describe("ContextSettingsCard 上下文预算", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
+    useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
   });
 
   it("localStorage 为空：回填默认值（6000 / 8 / 两开关为开），未交互不落盘", () => {
@@ -123,5 +125,29 @@ describe("ContextSettingsCard 上下文预算", () => {
     expect(screen.getByLabelText("保留轮数")).toHaveValue("6");
     expect(stored().budgetTokens).toBe(5000);
     expect(stored().keepRecentTurns).toBe(6);
+  });
+
+  // —— 预算按模型上下文窗口钳制（T05）——
+
+  it("已知模型：显示当前预算与模型上限，超限的选项不再列出", () => {
+    useLlmStore.setState({
+      profiles: [{ id: "p1", label: "小窗", provider: "openai", apiKey: "k", model: "moonshot-v1-8k" }],
+    });
+    render(<ContextSettingsCard />);
+    // moonshot-v1-8k 窗口 8192 → 60% = 4915 → 4000 可选，6000 以上超限
+    expect(screen.getByText(/当前预算 4915 \/ 模型上限 4915 token/)).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "6000 token" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "4000 token" })).toBeInTheDocument();
+    // 超限时给出提示
+    expect(screen.getByText("已超出上限，下面的选择会被收敛到上限")).toBeInTheDocument();
+  });
+
+  it("未知模型：不做钳制（不猜窗口），照常列出全部预设", () => {
+    useLlmStore.setState({
+      profiles: [{ id: "p1", label: "私有", provider: "openai", apiKey: "k", model: "my-private-model" }],
+    });
+    render(<ContextSettingsCard />);
+    expect(screen.getByRole("option", { name: "12000 token" })).toBeInTheDocument();
+    expect(screen.queryByText(/模型上限/)).not.toBeInTheDocument();
   });
 });

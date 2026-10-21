@@ -2,12 +2,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
+const path = require("node:path");
 const {
   createStdioBridge,
   encodeMessage,
   extractMessages,
   isValidCommand,
   isValidArgs,
+  resolveExecutable,
 } = require("./mcp-stdio");
 
 /** 假子进程：记录写入 stdin 的行，可手动 emit stdout/exit。 */
@@ -152,4 +154,89 @@ test("disposeAll 停掉全部服务", () => {
   assert.equal(kids.length, 2);
   assert.ok(kids.every((k) => k.killedByUs));
   assert.deepEqual(bridge.running(), []);
+});
+
+/* ================================================================== resolveExecutable */
+
+/**
+ * 命令名解析的四个分支。
+ *
+ * 存在这个函数的理由（实测，Node v22.22.2，`shell:false`）：
+ *   spawn("npx")     → ENOENT
+ *   spawn("npx.cmd") → EINVAL（Node >=18.20.2 对 .cmd/.bat 直接拒绝，CVE-2024-27980）
+ *   spawn("uvx")     → OK（uvx 是 .exe，Node 自己补 PATHEXT）
+ * 所以命令得先解析出**真实文件名**，否则根本谈不上执行。
+ *
+ * `existsFn` 可注入，所以这些用例不碰真实文件系统。
+ */
+test("resolveExecutable · 只有原名存在时用它（Linux 场景兜底）", () => {
+  const exists = (p) => p === path.join("C:////bin", "uvx");
+  assert.equal(resolveExecutable("uvx", ["C:////bin"], exists), "uvx");
+});
+
+test("resolveExecutable · 只有 .exe 时返回 .exe", () => {
+  const exists = (p) => p === path.join("C:////bin", "uvx.exe");
+  assert.equal(resolveExecutable("uvx", ["C:////bin"], exists), "uvx.exe");
+});
+
+test("resolveExecutable · ★ .exe 与原名都在时优先 .exe（原名放最后）", () => {
+  // 实测：npx（无扩展名）是 2073 字节的 shell 脚本，Windows 跑不了；
+  // 原名优先会选中那个跑不了的脚本。所以 .exe/.cmd 必须排在原名之前。
+  const both = (p) => p === path.join("C:////bin", "npx") || p === path.join("C:////bin", "npx.cmd");
+  assert.equal(resolveExecutable("npx", ["C:////bin"], both), "npx.cmd");
+});
+
+test("resolveExecutable · 只有 .cmd 时返回 .cmd（npx 的真实情况）", () => {
+  const exists = (p) => p === path.join("C:////npm", "npx.cmd");
+  assert.equal(resolveExecutable("npx", ["C:////npm"], exists), "npx.cmd");
+});
+
+test("resolveExecutable · .exe 优先于 .cmd", () => {
+  const both = (p) => p === path.join("C:////bin", "x.exe") || p === path.join("C:////bin", "x.cmd");
+  assert.equal(resolveExecutable("x", ["C:////bin"], both), "x.exe");
+});
+
+test("resolveExecutable · ★ 候选顺序是 .exe -> .cmd -> .bat -> 原名（原名最后）", () => {
+  const seen = [];
+  resolveExecutable("npx", ["C:////bin"], (p) => {
+    seen.push(path.basename(p));
+    return false;
+  });
+  assert.deepEqual(seen, ["npx.exe", "npx.cmd", "npx.bat", "npx"]);
+});
+
+test("resolveExecutable · 找不到时返回 null（调用方据此提示「需要安装 Node.js」）", () => {
+  assert.equal(resolveExecutable("npx", ["C:////bin"], () => false), null);
+  assert.equal(resolveExecutable("npx", [], () => false), null);
+});
+
+test("resolveExecutable · 按目录顺序找（先命中的目录胜出）", () => {
+  const exists = (p) => p === path.join("C:////second", "npx.cmd");
+  assert.equal(resolveExecutable("npx", ["C:////first", "C:////second"], exists), "npx.cmd");
+});
+
+test("resolveExecutable · 跳过空目录项（不因 undefined 崩）", () => {
+  const exists = (p) => p === path.join("C:////bin", "npx.cmd");
+  assert.equal(resolveExecutable("npx", [null, undefined, "", "C:////bin"], exists), "npx.cmd");
+});
+
+test("resolveExecutable · 单个探测抛错不影响其它目录", () => {
+  let calls = 0;
+  const flaky = (p) => {
+    calls += 1;
+    if (calls <= 4) throw new Error("EPERM");       // 第一目录的四个候选都失败
+    return p === path.join("C:////bin", "npx.cmd");
+  };
+  assert.equal(resolveExecutable("npx", ["C:////a", "C:////bin"], flaky), "npx.cmd");
+});
+
+test("resolveExecutable · 命令为空或非字符串时返回 null", () => {
+  assert.equal(resolveExecutable("", ["C:////bin"], () => true), null);
+  assert.equal(resolveExecutable(null, ["C:////bin"], () => true), null);
+  assert.equal(resolveExecutable(123, ["C:////bin"], () => true), null);
+});
+
+test("resolveExecutable · 不带 existsFn 时走真实文件系统（不抛）", () => {
+  const r = resolveExecutable("definitely-not-a-real-cmd-xyz", ["C:////nope"]);
+  assert.ok(r === null || typeof r === "string");
 });

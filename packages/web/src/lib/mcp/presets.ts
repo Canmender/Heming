@@ -79,16 +79,17 @@ export const MCP_PRESETS: McpPreset[] = [
       "list_sessions",
     ],
   },
-  {
-    id: "filesystem",
-    name: "文件系统（官方示例）",
-    transport: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "D:/Heming"],
-    hint: "读写指定目录下的文件。路径请改成你真正想开放的目录——该工具按字面路径授予权限。",
-    verified: false,
-    // 不预置任何自动启用：FileSystem 能删文件，默认打开不合适。
-  },
+  // ★ 「文件系统（官方示例）」这条已删除。
+  //
+  //   它从来没跑通过：Windows 上 `npx` 是 shell 脚本（实测 2073 字节），
+  //   `spawn("npx")` 直接 ENOENT、`spawn("npx.cmd")` 抛 EINVAL
+  //   （Node ≥18.20.2 对 shell:false 的 .cmd/.bat 直接拒绝执行）。
+  //   而它的 `args` 里还硬编码了本机路径 `D:/Heming`——装到别的机器上必然是错的。
+  //
+  //   **一个必然失败的入口不只是「没用」，它在降低用户对整个功能的信任。**
+  //   真正需要文件 MCP 的用户可以在接口区自己加
+  //   （npx 启动的问题由 MCP Registry 批次一并解决）。
+  //   我们自带的文件能力（`self_mcp_*` + wiki-fs.js + chart-fs.js）不依赖它。
 ];
 
 /** 按 id 找预设；未知 id 返回 null（界面据此忽略点击）。 */
@@ -122,11 +123,12 @@ export function presetServerId(presetId: string): string {
 /**
  * 首次使用时预置的服务（用户要求「默认接入」）。
  *
- * 预置两条：Windows 桌面控制与网页抓取（Scrapling）——
+ * 预置只有两条：Windows 桌面控制与网页抓取（Scrapling）——
  * 都是与和鸣桌面端同平台、且在本机实测可用的服务。
  *
- * 文件系统那条**不预置**——它带 `D:/Heming` 这样的具体路径，
- * 对不同用户是错的，留在预设里让人自己选目录更合适。
+ * 原来的「文件系统（官方示例）」已删除（见上面 MCP_PRESETS 里的说明）：
+ * 它在 Windows 上从来跑不通，且路径硬编码了本机目录。
+ * 真正需要文件 MCP 的用户在接口区自己加。
  */
 export const DEFAULT_PRESET_SERVERS: McpPreset[] = MCP_PRESETS.filter(
   (p) => p.id === "windows-desktop" || p.id === "scrapling",

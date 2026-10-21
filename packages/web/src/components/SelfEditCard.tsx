@@ -99,6 +99,7 @@ const SCOPE_LABEL: Record<AuditEntry["scope"], string> = {
   memory: "记忆",
   skill: "技能",
   mcp: "MCP",
+  tool: "工具调用",
   other: "其它",
 };
 

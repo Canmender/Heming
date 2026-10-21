@@ -3815,7 +3815,17 @@ describe("ChatPage 工具轮可视化接线", () => {
       expect(screen.getByText("先确认要查什么")).toBeInTheDocument();
 
       // 工具轨迹：命名空间化工具名 + 成功态
-      await waitFor(() => expect(screen.getByText("echo-svc__echo")).toBeInTheDocument());
+      //（HITL 闸门会先弹确认框，同一工具名在框里也出现一次，故用 getAllByText）
+      await waitFor(() =>
+        expect(screen.getAllByText("echo-svc__echo").length).toBeGreaterThanOrEqual(1),
+      );
+      // 确认框出现 = 未知工具按 write 处理、必问（设计 T01「未知工具 = write」）
+      await waitFor(() =>
+        expect(screen.getByRole("dialog", { name: /请求调用工具/ })).toBeInTheDocument(),
+      );
+      // 放行：只有勾上的项才执行
+      fireEvent.click(screen.getByLabelText("允许 外部工具"));
+      fireEvent.click(screen.getByRole("button", { name: "仅本次允许" }));
       await waitFor(() => expect(screen.getByText("完成")).toBeInTheDocument());
 
       // 工具结果与最终答案都出现（同一句文本，故用 getAllByText）

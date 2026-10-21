@@ -81,6 +81,13 @@ function coerceServer(raw: unknown, now: string): McpServerConfig | null {
     args: Array.isArray(r.args) ? r.args.filter((a): a is string => typeof a === "string") : undefined,
     headers: Object.keys(headers).length ? headers : undefined,
     enabled: r.enabled !== false,
+    // 来源与 Registry 名：缺省视为手填（兼容旧数据）。
+    // ★ 这两个字段必须在这里显式透传——coerceServer 做的是字段白名单，
+    //   不写就会**被直接丢掉**，Registry 装的服务会退化成「手填」而看不出是哪来的。
+    origin: r.origin === "preset" || r.origin === "manual" || r.origin === "registry"
+      ? r.origin
+      : "manual",
+    registryName: typeof r.registryName === "string" && r.registryName ? r.registryName : undefined,
     createdAt: typeof r.createdAt === "string" ? r.createdAt : now,
     updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : now,
   };
@@ -90,6 +97,9 @@ function coerceTool(raw: unknown): McpTool | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   if (typeof r.name !== "string" || !r.name) return null;
+  // annotations 必须原样带过：HITL 闸门靠它判只读/危险，
+  // 读回时丢了这个字段，服务端明明声明了「只读」也会被当成 write 多问一次。
+  const ann = r.annotations as Record<string, unknown> | undefined;
   return {
     name: r.name,
     description: typeof r.description === "string" ? r.description : undefined,
@@ -97,6 +107,16 @@ function coerceTool(raw: unknown): McpTool | null {
       r.inputSchema && typeof r.inputSchema === "object"
         ? (r.inputSchema as McpTool["inputSchema"])
         : undefined,
+    ...(ann && typeof ann === "object"
+      ? {
+          annotations: {
+            ...(typeof ann.readOnlyHint === "boolean" ? { readOnlyHint: ann.readOnlyHint } : {}),
+            ...(typeof ann.destructiveHint === "boolean"
+              ? { destructiveHint: ann.destructiveHint }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 

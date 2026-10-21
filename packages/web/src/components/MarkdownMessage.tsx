@@ -43,10 +43,19 @@ function CodeBlock({
       return;
     }
     let alive = true;
-    void highlightCode(code, lang).then((result) => {
-      // 组件已卸载或内容已变——丢弃这次结果，避免把旧高亮盖到新内容上
-      if (alive) setHtml(result);
-    });
+    // ★ 必须带 catch：高亮会加载语法包，可能失败（网络、语法文件缺失、内存不足）。
+    //   没有 catch 时拒绝会变成 **unhandled rejection**——
+    //   在 Electron 渲染进程里这是未捕获错误，会干扰全局错误处理。
+    //   失败时的正确行为是**降级成纯文本**（html 保持 null，组件会走无高亮分支）。
+    void highlightCode(code, lang)
+      .then((result) => {
+        // 组件已卸载或内容已变——丢弃这次结果，避免把旧高亮盖到新内容上
+        if (alive) setHtml(result);
+      })
+      .catch((err: unknown) => {
+        // 降级不报错：语法高亮是锦上添花，代码块本身仍要能读
+        console.warn("代码高亮失败，降级为纯文本", err);
+      });
     return () => {
       alive = false;
     };

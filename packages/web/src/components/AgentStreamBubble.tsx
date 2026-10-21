@@ -127,7 +127,9 @@ function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
                 <div className="mt-1 text-[10px] text-[#999]">结果</div>
                 <pre
                   className={`mt-0.5 max-h-[140px] overflow-auto whitespace-pre-wrap break-words rounded px-1.5 py-1 font-mono text-[10px] ${
-                    t.status === "error" ? "bg-[#fef3f2] text-[#b42318]" : "bg-[#f7f7f7] text-[#555]"
+                    t.status === "error" || t.status === "denied"
+                      ? "bg-[#fef3f2] text-[#b42318]"
+                      : "bg-[#f7f7f7] text-[#555]"
                   }`}
                 >
                   {t.result || "（无返回）"}
@@ -143,7 +145,13 @@ function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
 
 function StatusDot({ status }: { status: ToolTrace["status"] }) {
   const color =
-    status === "running" ? "bg-[#c98a00]" : status === "ok" ? "bg-[#1d6b3a]" : "bg-[#b42318]";
+    status === "running"
+      ? "bg-[#c98a00]"
+      : status === "ok"
+        ? "bg-[#1d6b3a]"
+        : status === "denied"
+          ? "bg-[#b42318]"
+          : "bg-[#b42318]";
   return (
     <span
       aria-hidden="true"
@@ -155,9 +163,14 @@ function StatusDot({ status }: { status: ToolTrace["status"] }) {
 }
 
 function statusLabel(status: ToolTrace["status"]): string {
-  return status === "running" ? "调用中" : status === "ok" ? "完成" : "失败";
+  if (status === "running") return "调用中";
+  if (status === "ok") return "完成";
+  if (status === "denied") return "已拒绝";
+  return "失败";
 }
 
 function statusColor(status: ToolTrace["status"]): string {
-  return status === "running" ? "text-[#c98a00]" : status === "ok" ? "text-[#1d6b3a]" : "text-[#b42318]";
+  if (status === "running") return "text-[#c98a00]";
+  if (status === "ok") return "text-[#1d6b3a]";
+  return "text-[#b42318]";
 }

@@ -10,7 +10,11 @@
  * 安全约束：
  * - 只在桌面壳里可用（preload 暴露的通道）；
  * - 命令与参数由用户显式填写，落库前经过校验；这里再做一次类型/长度校验；
- * - 不使用 shell 拼接参数（shell:false），Windows 下 `.cmd` 由调用方写成 `npx.cmd` 之类；
+ * - 不使用 shell 拼接参数（shell:false）。
+//   ★ 不要按旧注释的「Windows 下 .cmd 由调用方写成 npx.cmd」去做——实测那样会 EINVAL：
+//     Node ≥18.20.2（CVE-2024-27980）对 shell:false 的 .cmd/.bat 直接拒绝执行。
+//     正确做法是见下方 resolveExecutable：按 PATHEXT 解析出真实文件名；
+//     且解析与「能否执行」是两件事，不要在这里顺手开 shell。
  * - 子进程 stderr 只记录不解析（MCP 规范里 stdout 只放 JSON-RPC）。
  */
 
@@ -127,6 +131,53 @@ function buildChildEnv(base) {
   });
 
   return additions.length ? { ...base, [pathKey]: [...current, ...additions].join(path.delimiter) } : base;
+}
+
+/**
+ * 按 PATHEXT 的顺序解析可执行文件名：依次试 `.exe` → `.cmd` → `.bat` → **原名（兜底）**。
+ *
+ * ★ **原名必须放最后**（实测数据）：`npx`（无扩展名）是 **2073 字节的 shell 脚本**，
+ * Windows 根本跑不了；真正的 `npx.cmd` 只有 538 字节。
+ * 若按「原名优先」，找到的会是那个跑不了的脚本，然后报一个莫名其妙的错。
+ * 所以顺序是：能被 Windows 执行的形态优先，原名只作最后兜底（Linux 上原名本身就是可执行文件）。
+ *
+ * 存在的理由（实测，Node v22.22.2，`shell:false`）：
+ * ```
+ * spawn("npx")     → ENOENT   （PATH 里没有无扩展名的可执行文件）
+ * spawn("npx.cmd") → EINVAL   （Node ≥18.20.2 对 .cmd/.bat 直接拒绝执行，CVE-2024-27980 加固）
+ * spawn("uvx")     → OK       （uvx 是 .exe，Node 自己补 PATHEXT）
+ * spawn("uvx.exe") → OK
+ * ```
+ * 也就是说 `npx` 这种**真身是 .cmd 批处理**的命令，在 Windows 上必须先找到真实的
+ * `npx.cmd` 才能谈得上怎么执行。
+ *
+ * ★ 本函数**只负责「找到正确的文件名」，不负责「能不能执行」**——
+ * 解析出 `.cmd` 之后能否 spawn 是调用方与运行平台的事。
+ * 把这两件事耦合在一起，后人手一滑就会把 `shell:true` 打开，
+ * 而 Registry 装的是任意第三方包，开 shell 等于打开命令注入面。
+ *
+ * @param {string} cmd 逻辑命令名，如 `npx` / `uvx`
+ * @param {string[]} pathEntries PATH 的各段
+ * @param {(p: string) => boolean} [existsFn] 可注入的存在性判断（测试用）
+ * @returns {string|null} 实际可执行文件名；找不到返回 null
+ */
+function resolveExecutable(cmd, pathEntries, existsFn) {
+  const exists = existsFn || ((p) => fs.existsSync(p));
+  if (!cmd || typeof cmd !== "string") return null;
+  // 顺序固定：.exe → .cmd → .bat → 原名（★ 原名放最后，见上方说明）
+  const candidates = [`${cmd}.exe`, `${cmd}.cmd`, `${cmd}.bat`, cmd];
+  for (const dir of pathEntries) {
+    if (!dir) continue;
+    for (const name of candidates) {
+      const full = path.join(dir, name);
+      try {
+        if (exists(full)) return name;
+      } catch {
+        /* 单个路径探测失败就跳过，不影响其它目录 */
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -275,4 +326,4 @@ function createStdioBridge({ spawn, timeoutMs = 30_000, now = () => Date.now(), 
   return { start, request, notify, stop, disposeAll, running };
 }
 
-module.exports = { createStdioBridge, encodeMessage, extractMessages, isValidCommand, isValidArgs };
+module.exports = { createStdioBridge, encodeMessage, extractMessages, isValidCommand, isValidArgs, resolveExecutable };

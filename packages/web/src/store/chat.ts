@@ -113,7 +113,13 @@ export interface ToolTrace {
   name: string;
   /** 模型给的原始参数 JSON 字符串。 */
   args: string;
-  status: "running" | "ok" | "error";
+  /**
+   * 轨迹状态。
+   *
+   * `denied` 与 `error` 分开：前者是**用户主动拒绝**（工具根本没执行），
+   * 后者是工具跑了但失败。混在一起用户会以为「我拒绝了，但它还是跑了」。
+   */
+  status: "running" | "ok" | "error" | "denied";
   /** 工具返回文本（截断由 UI 负责）。 */
   result?: string;
   startedAt: number;

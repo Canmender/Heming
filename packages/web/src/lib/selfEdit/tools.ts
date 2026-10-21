@@ -22,6 +22,7 @@ import type { MemoryStore } from "../memory/store.js";
 import type { SkillPool } from "../skills/store.js";
 import type { McpRegistry } from "../mcp/store.js";
 import type { McpTransport } from "../mcp/types.js";
+import type { RiskLevel } from "../hitl/types.js";
 import { toolKey } from "../mcp/store.js";
 import {
   SELF_EDIT_MAX_PER_TURN,
@@ -54,10 +55,18 @@ export interface SelfToolContext {
 
 /* ------------------------------------------------------------------ 工具声明 */
 
-interface ToolSpec {
+/** 工具声明。`riskHint` 供 HITL 闸门判风险（缺省按 write 处理）。 */
+export interface ToolSpec {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+  /**
+   * 风险标注：HITL 闸门据此决定该问用户还是免问。
+   *
+   * 缺省按 write 处理（安全默认）；`self_mcp_*` 五个必须显式标 danger——
+   * 它们能改自己的执行环境，出错的代价远高于「多问一次」。
+   */
+  riskHint?: RiskLevel;
 }
 
 /** JSON Schema 里描述一个字符串参数（与下面的取值助手 str 同名易混，故叫 prop）。 */
@@ -73,12 +82,14 @@ export const SELF_TOOLS: ToolSpec[] = [
   // —— 记忆 ——
   {
     name: "self_memory_list",
+    riskHint: "read",
     description:
       "列出自己当前的长期语义记忆（所有智能体共用的那一份）。发现自己记错了、或要更新某条认知时，先读这里确认现状。",
     parameters: { type: "object", properties: {} },
   },
   {
     name: "self_memory_write",
+    riskHint: "write",
     description:
       "写入或更新一条长期记忆。key 是主题（如「偏好-语言」），value 是事实内容。相同 key 会覆盖更新，不会重复新增。",
     parameters: {
@@ -93,6 +104,7 @@ export const SELF_TOOLS: ToolSpec[] = [
   },
   {
     name: "self_memory_remove",
+    riskHint: "write",
     description: "删除一条自己的长期记忆。记错了、或事实已过期时用。",
     parameters: {
       type: "object",
@@ -106,11 +118,13 @@ export const SELF_TOOLS: ToolSpec[] = [
   // —— 技能 ——
   {
     name: "self_skill_list",
+    riskHint: "read",
     description: "列出自己已分配的技能及其完整定义（指令正文）。",
     parameters: { type: "object", properties: {} },
   },
   {
     name: "self_skill_update",
+    riskHint: "write",
     description:
       "改进一条已有技能（同名即更新）：补充指令正文、调整触发词或描述。当发现某类任务总要走同一套步骤时，把它固化成技能。",
     parameters: {
@@ -127,6 +141,7 @@ export const SELF_TOOLS: ToolSpec[] = [
   },
   {
     name: "self_skill_create",
+    riskHint: "write",
     description:
       "沉淀一条新技能：把这次摸索出的可复用流程写下来，下次遇到同类任务直接调用。",
     parameters: {
@@ -145,12 +160,14 @@ export const SELF_TOOLS: ToolSpec[] = [
   // —— MCP ——
   {
     name: "self_mcp_list",
+    riskHint: "read",
     description:
       "列出 MCP 服务与各自暴露的工具，以及当前哪些工具已启用。发现缺少能力时可以据此新增服务。",
     parameters: { type: "object", properties: {} },
   },
   {
     name: "self_mcp_enable",
+    riskHint: "danger",
     description: "启用某个 MCP 工具（格式 serverId::toolName）。启用后下一轮即可调用它。",
     parameters: {
       type: "object",
@@ -163,6 +180,7 @@ export const SELF_TOOLS: ToolSpec[] = [
   },
   {
     name: "self_mcp_disable",
+    riskHint: "danger",
     description: "停用某个 MCP 工具。工具没用、有副作用或拖慢响应时用。",
     parameters: {
       type: "object",
@@ -175,6 +193,7 @@ export const SELF_TOOLS: ToolSpec[] = [
   },
   {
     name: "self_mcp_add_server",
+    riskHint: "danger",
     description:
       "新增一台 MCP 服务。transport=http 填 url；transport=stdio 填 command（仅桌面端可用，可跑任意本机命令）。",
     parameters: {
@@ -196,6 +215,7 @@ export const SELF_TOOLS: ToolSpec[] = [
   },
   {
     name: "self_mcp_update_server",
+    riskHint: "danger",
     description: "修改某台 MCP 服务的配置（地址、命令、请求头、启用状态）。",
     parameters: {
       type: "object",
@@ -214,6 +234,7 @@ export const SELF_TOOLS: ToolSpec[] = [
   },
   {
     name: "self_mcp_remove_server",
+    riskHint: "danger",
     description: "删除一台 MCP 及其启用记录。确认某服务不再需要时用。",
     parameters: {
       type: "object",
@@ -321,6 +342,11 @@ export function buildSelfToolBridge(
 
   return {
     tools,
+    // HITL 闸门用：self.* 的风险由作者显式声明（riskHint），不靠名字猜。
+    meta: (name) => {
+      const spec = SELF_TOOLS.find((s) => s.name === name);
+      return spec?.riskHint ? { risk: spec.riskHint } : undefined;
+    },
     execute: async (call) => {
       if (!enabled) {
         return { text: "自我修改已被用户关闭。", ok: false };

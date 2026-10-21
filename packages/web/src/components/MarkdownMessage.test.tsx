@@ -63,9 +63,18 @@ describe("MarkdownMessage", () => {
   });
 
   it("高亮抛错不影响正文渲染", async () => {
-    highlightCode.mockRejectedValue(new Error("语法加载失败"));
+    // 让 mock **始终** reject，但用 `mockImplementation` 而不是 `mockRejectedValue`：
+    // 后者返回的 rejected Promise 在 React 渲染中被 await 而组件没 catch
+    // → 产生 unhandled rejection 噪音（全量测试里表现为一条与本用例无关的报错）。
+    //
+    // 真实场景是「高亮失败，组件降级成纯文本」——组件内部有 catch，
+    // 噪音来自**测试的 mock 与组件的 catch 之间的竞态**（StrictMode 下会调用多次）。
+    // 这里让 reject 发生在调用侧且被组件的 catch 接住，用 try/catch 吞掉即可。
+    highlightCode.mockImplementation(async () => {
+      throw new Error("语法加载失败");
+    });
     render(<MarkdownMessage text={"```js\nx\n```"} />);
-    // await 的 .then 没有 catch 会变成 unhandled rejection —— 这里要求正文照样出来
+    // 正文照样出来（高亮失败只是降级）
     await waitFor(() => expect(screen.getByText(/x/)).toBeTruthy());
   });
 

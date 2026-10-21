@@ -71,4 +71,37 @@ describe("LlmSettingsCard", () => {
     expect(useLlmStore.getState().bindings["agent-1"]).toBeUndefined();
     expect(JSON.parse(localStorage.getItem("heming.agentLlm")!)).not.toHaveProperty("agent-1");
   });
+
+  // —— 模型能力元数据（T05）——
+
+  it("已知模型显示能力徽标与上下文窗口", () => {
+    useLlmStore.getState().addProfile({ id: "p1", label: "DS", provider: "openai", apiKey: "k", model: "deepseek-chat" });
+    render(<LlmSettingsCard />);
+    expect(screen.getByText("🎯 函数调用")).toBeInTheDocument();
+    expect(screen.getByText(/上下文 64K/)).toBeInTheDocument();
+  });
+
+  it("未知模型显示「能力未知」并给手动填写入口", () => {
+    useLlmStore.getState().addProfile({ id: "p1", label: "私有", provider: "openai", apiKey: "k", model: "my-private-model" });
+    render(<LlmSettingsCard />);
+    expect(screen.getByText("能力未知")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "手动填写" })).toBeInTheDocument();
+  });
+
+  it("手动填写上下文窗口后落盘并刷新徽标", async () => {
+    useLlmStore.getState().addProfile({ id: "p1", label: "私有", provider: "openai", apiKey: "k", model: "my-private-model" });
+    render(<LlmSettingsCard />);
+    fireEvent.click(screen.getByRole("button", { name: "手动填写" }));
+    fireEvent.change(screen.getByLabelText("上下文窗口（token）"), { target: { value: "128000" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(screen.getByText(/上下文 128K/)).toBeInTheDocument());
+    const raw = JSON.parse(localStorage.getItem("heming.modelCaps.v1") as string) as Record<string, unknown>;
+    expect(raw["openai:my-private-model"]).toMatchObject({ contextWindow: 128000 });
+  });
+
+  it("有定价时标注「参考价，以服务商账单为准」", () => {
+    useLlmStore.getState().addProfile({ id: "p1", label: "DS", provider: "openai", apiKey: "k", model: "deepseek-chat" });
+    render(<LlmSettingsCard />);
+    expect(screen.getByText("参考价，以服务商账单为准")).toBeInTheDocument();
+  });
 });

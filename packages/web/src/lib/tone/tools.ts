@@ -38,6 +38,8 @@ export function buildToneToolBridge(): ToolBridge {
         },
       },
     ],
+    // HITL 闸门用：tone_detect 只做统计检测，不改任何东西 → 只读免问。
+    meta: (name) => (name.startsWith(TONE_TOOL_PREFIX) ? { risk: "read" as const } : undefined),
     execute: async (call) => {
       if (call.name !== TONE_DETECT_TOOL.name) {
         return { text: `未知工具 ${call.name}`, ok: false };

@@ -2,6 +2,13 @@ import { useState } from "react";
 import { useLlmStore, type LlmProfile, type LlmProvider } from "../store/llm.js";
 import { testConnection } from "../lib/llmClient.js";
 import { LLM_PRESETS, findPreset } from "../lib/llmPresets.js";
+import {
+  PRICING_DISCLAIMER,
+  capabilityBadges,
+  clearOverride,
+  lookupCapability,
+  setOverride,
+} from "../lib/modelCaps.js";
 
 /** 设置区 · LLM 连接：本机 CRUD + 连通性测试；Key 只落 localStorage 不出设备。 */
 
@@ -40,6 +47,31 @@ export function LlmSettingsCard() {
   const [error, setError] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, TestState>>({});
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  /** 手动填写能力的模型 id（key = `${provider}:${model}`）。 */
+  const [editingCaps, setEditingCaps] = useState<string | null>(null);
+  /** 手动填写的上下文窗口（token）。 */
+  const [capsWindow, setCapsWindow] = useState("");
+
+  /** 某个连接的能力：查不到时返回 null（界面显示「能力未知」）。 */
+  const capsOf = (p: LlmProfile) => lookupCapability(p.provider, p.model);
+
+  /** 打开手动填写：回填当前已知的窗口。 */
+  const openCapsEditor = (p: LlmProfile) => {
+    setEditingCaps(`${p.provider}:${p.model}`);
+    const known = capsOf(p);
+    setCapsWindow(known ? String(known.contextWindow) : "");
+  };
+
+  /** 保存手动填写的能力（只改上下文窗口这一项）。 */
+  const saveCaps = (p: LlmProfile) => {
+    const n = Number(capsWindow);
+    if (Number.isFinite(n) && n >= 1) {
+      setOverride(p.provider, p.model, { contextWindow: Math.floor(n) });
+    } else {
+      clearOverride(p.provider, p.model);
+    }
+    setEditingCaps(null);
+  };
 
   const resetForm = () => {
     setOpen(false);
@@ -172,6 +204,9 @@ export function LlmSettingsCard() {
 
       {profiles.map((p) => {
         const t = tests[p.id];
+        // 能力：查不到就是「能力未知」（不猜——猜错会让供应商 400）
+        const caps = capsOf(p);
+        const badges = caps ? capabilityBadges(caps) : [];
         return (
           <div key={p.id} className="mt-3 rounded-lg border border-line p-3">
             <div className="flex items-center justify-between gap-2">
@@ -180,6 +215,54 @@ export function LlmSettingsCard() {
                 <div className="mt-0.5 truncate text-[12px] text-muted">
                   {p.provider} · {p.model} · ••••{p.apiKey.slice(-4)}
                 </div>
+                {/* 能力徽标：函数调用 / 视觉 / 思考。查不到就说「能力未知」并给手填入口 */}
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  {!caps ? (
+                    <>
+                      <span className="text-[11px] text-[#b45309]">能力未知</span>
+                      <button
+                        type="button"
+                        onClick={() => openCapsEditor(p)}
+                        className="rounded border border-line px-1.5 py-0.5 text-[11px] hover:bg-[#fafafa] "
+                      >
+                        手动填写
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {badges.length === 0 ? (
+                        <span className="text-[11px] text-muted">纯文本模型</span>
+                      ) : (
+                        badges.map((b) => (
+                          <span
+                            key={b}
+                            className="rounded bg-[#f3f3f3] px-1 text-[10px] text-[#666] "
+                          >
+                            {b}
+                          </span>
+                        ))
+                      )}
+                      <span className="text-[10px] text-[#aaa]">
+                        上下文 {Math.round(caps.contextWindow / 1000)}K
+                      </span>
+                      {caps.pricing ? (
+                        <span className="text-[10px] text-[#aaa]">
+                          ¥{caps.pricing.input}/¥{caps.pricing.output} 每百万 token
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => openCapsEditor(p)}
+                        className="rounded border border-line px-1.5 py-0.5 text-[11px] hover:bg-[#fafafa] "
+                      >
+                        修改
+                      </button>
+                    </>
+                  )}
+                </div>
+                {caps?.pricing ? (
+                  <div className="mt-0.5 text-[10px] text-[#bbb]">{PRICING_DISCLAIMER}</div>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <button type="button" onClick={() => void onTest(p)} className={btnGhost}>
@@ -208,6 +291,32 @@ export function LlmSettingsCard() {
                 {t.status === "pending" && "测试中…"}
                 {t.status === "ok" && "测试通过"}
                 {t.status === "fail" && `测试失败${t.detail ? `：${t.detail}` : ""}`}
+              </div>
+            )}
+
+            {editingCaps === `${p.provider}:${p.model}` && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-[#fafafa] px-3 py-2">
+                <label className="text-[12px]">
+                  上下文窗口（token）
+                  <input
+                    type="number"
+                    min={1}
+                    aria-label="上下文窗口（token）"
+                    value={capsWindow}
+                    onChange={(e) => setCapsWindow(e.target.value)}
+                    className="ml-2 w-[140px] rounded-lg border border-line px-2 py-1 text-[12px] outline-none focus:border-[#bbb]"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => saveCaps(p)}
+                  className="rounded-lg bg-ink px-3 py-1 text-[12px] font-bold text-white"
+                >
+                  保存
+                </button>
+                <button type="button" onClick={() => setEditingCaps(null)} className={btnGhost}>
+                  取消
+                </button>
               </div>
             )}
 

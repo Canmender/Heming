@@ -1,0 +1,68 @@
+%% HITL 批量确认主路径（guarded 档，一轮 2 个调用：1 只读 + 1 写入）
+sequenceDiagram
+    participant M as LLM 供应商
+    participant AS as agentStream.once()
+    participant CB as ChatPage(deps)
+    participant G as hitl.gate.review
+    participant P as hitl.policy
+    participant S as hitlStore(Zustand)
+    participant U as ToolApprovalModal
+
+    M-->>AS: tool_calls[2] (Screenshot, Move_File)
+    AS->>AS: 现有逻辑：onToolTrace(start) x 2
+    AS->>CB: confirmToolCalls(batch)
+    CB->>G: review(batch)
+    G->>G: classify 逐项分类 + summarize
+    G->>P: allowed(read)? -> auto 放行<br/>allowed(write)? -> 否
+    G->>S: enqueue(剩余待确认项)
+    S->>U: pending 变更
+    U->>U: 只读项折叠默认勾选<br/>写操作项默认不勾
+    U-->>S: decide(requestId, verdicts)
+    S-->>CB: resolve(verdicts)
+    CB-->>AS: HitlVerdict[]
+    AS->>AS: gateOutcome = allow/deny 分流
+    Note over AS: 放行项：bridge.execute<br/>拒绝项：不执行，content = deniedText()
+    AS->>AS: 组装 extra：assistant(tool_calls) + N 条 tool 消息（条数必须 = N）
+    AS->>M: 下一轮 messages
+    M-->>AS: 最终答案
+    AS->>AS: agent_finish 上行
+
+%% 拒绝路径
+sequenceDiagram
+    participant AS as agentStream.once()
+    participant CB as ChatPage(deps)
+    participant G as hitl.gate.review
+    participant S as hitlStore
+    participant U as Modal
+
+    AS->>CB: confirmToolCalls(batch[write])
+    CB->>G: review(batch)
+    G->>S: enqueue
+    S->>U: pending
+    U-->>S: decide(deny)
+    S-->>CB: verdict[deny]
+    CB-->>AS: [deny]
+    AS->>AS: content = deniedText(call)<br/>绝不调用 bridge.execute
+    AS->>AS: extra += assistant + tool(deniedText)
+    Note over AS: 同 tool 名+参数指纹本轮已拒<br/>后续同指纹不再弹窗（直接 deny）
+    AS->>AS: 继续下一轮，模型收到明确「未修改」信号
+
+%% 中断路径
+sequenceDiagram
+    participant U as 用户（按停止）
+    participant CB as ChatPage
+    participant S as hitlStore
+    participant G as gate.review
+    participant AS as agentStream
+
+    AS->>CB: confirmToolCalls(batch[write])
+    CB->>G: review(batch)
+    G->>S: enqueue
+    U->>CB: 点击停止 -> run.abortAll()
+    CB->>S: cancelAll("用户中断")
+    S->>S: 所有 pending -> deny(reason=用户中断)
+    S-->>G: resolve
+    G-->>CB: verdicts 全 deny
+    CB-->>AS: verdicts
+    AS->>AS: 组装 deny 消息后 controller.signal 已 aborted
+    AS->>AS: 既有 catch 走 finish-partial + agent_error(aborted)

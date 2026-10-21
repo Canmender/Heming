@@ -41,6 +41,19 @@ describe("敏感信息检测（与复盘分身共用同一份判据）", () => {
     expect(containsSensitive("-----BEGIN RSA PRIVATE KEY-----")).toBe(true);
   });
 
+  it("★ Bearer 认证头按 HTTP 标准写法（首字母大写）也拦得住", () => {
+    // 原来的正则 `/bearer\s+.../` **没有 i 标志**，只匹配全小写——
+    // 而 `Bearer <token>` 才是 HTTP 认证头的标准写法，恰恰漏掉了。
+    //
+    // 这条在 HITL 的参数摘要里是**泄露路径**：摘要要显示参数给用户看，
+    // 漏掩码就等于把用户的 token 摆在确认弹窗上。
+    expect(containsSensitive("Bearer abcdefghijklmnopqrst")).toBe(true);
+    expect(containsSensitive("BEARER abcdefghijklmnopqrst")).toBe(true);
+    expect(containsSensitive("bearer abcdefghijklmnopqrst")).toBe(true);
+    // 取值太短不算（避免把普通词误判）
+    expect(containsSensitive("Bearer short")).toBe(false);
+  });
+
   it("中文自然表述也拦得住：取值前用「是/为」而不是「:=」", () => {
     expect(containsSensitive("我的密码是 hunter2000")).toBe(true);
     expect(containsSensitive("登录口令为 qwerty88")).toBe(true);

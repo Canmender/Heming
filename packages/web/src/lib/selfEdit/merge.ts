@@ -19,6 +19,9 @@ export const SELF_TOOL_PREFIX = "self_";
  * execute 直接按「谁声明了这个名字」来路由——self.* 只会在 self 桥里声明，
  * MCP 工具名形如 `服务__工具` 不会撞前缀，所以先 self 后 MCP 的顺序天然正确；
  * 都不声明时给模型一句清楚的话，而不是抛异常。
+ *
+ * meta 用**同一套查找**路由：命中哪个桥就问哪个桥要风险标注，
+ * 否则闸门拿到的风险与实际执行者对不上（问错了桥 = 问错人）。
  */
 export function mergeToolBridges(...bridges: (ToolBridge | null)[]): ToolBridge | null {
   const usable = bridges.filter(
@@ -34,6 +37,10 @@ export function mergeToolBridges(...bridges: (ToolBridge | null)[]): ToolBridge 
       const owner = usable.find((b) => listsName(b, call.name));
       if (owner) return owner.execute(call);
       return { text: `未知工具 ${call.name}`, ok: false };
+    },
+    meta: (name) => {
+      const owner = usable.find((b) => listsName(b, name));
+      return owner?.meta?.(name);
     },
   };
 }

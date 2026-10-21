@@ -1,0 +1,69 @@
+classDiagram
+    class HitlRequest {
+        +string requestId
+        +HitlCall[] calls
+        +string agentId
+        +string conversationId
+        +string streamId
+        +string agentName
+        +HitlVerdict[] verdicts
+    }
+    class HitlCall {
+        +string id
+        +string name
+        +string argsJson
+        +string displayName
+        +RiskLevel risk
+        +string summary
+        +string source
+    }
+    class HitlVerdict {
+        +string callId
+        +Decision decision
+        +string reason
+    }
+    class HitlPolicy {
+        +HitlMode mode
+        +RiskLevel floor
+        +PolicyScope scope
+    }
+    class HitlPolicyStore {
+        -StorageLike storage
+        -Map~string,SessionGrant~ session
+        +get() HitlPolicy
+        +set(policy) void
+        +mode() HitlMode
+        +granted(toolKey) boolean
+        +grant(toolKey) void
+        +revokeAll() void
+        +allowed(call, policy) Decision
+    }
+    class ToolClassifier {
+        +classify(name, argsJson) HitlCall
+        +summarize(argsJson) string
+    }
+    class HitlGate {
+        -HitlPolicyStore policy
+        -ToolClassifier classifier
+        +review(batch) Promise~GateOutcome[]~
+    }
+    class ToolBridge {
+        <<interface>>
+        +unknown[] tools
+        +execute(call) Promise~ToolResult~
+        +meta(name) ToolMeta
+    }
+    class ToolApprovalStore {
+        +HitlRequest|null pending
+        +enqueue(batch) Promise~HitlVerdict[]~
+        +decide(requestId, verdicts) void
+        +cancelAll(reason) void
+    }
+
+    HitlGate --> HitlPolicyStore : 查策略与会话授权
+    HitlGate --> ToolClassifier : 风险分类与参数摘要
+    HitlRequest --> HitlCall : 批次含 N 项
+    HitlRequest --> HitlVerdict : 回填 N 项
+    ToolApprovalStore --> HitlRequest : 持有当前批次
+    HitlPolicyStore ..> ToolApprovalStore : 不依赖（由 ChatPage 缝合）
+    HitlGate ..> ToolApprovalStore : 不依赖（由 ChatPage 缝合）

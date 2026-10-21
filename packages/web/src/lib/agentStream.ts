@@ -1,6 +1,8 @@
 import type { WsClientEvent } from "@heming/shared";
 import type { LlmProfile } from "../store/llm.js";
 import { streamChat, type ChatMessage, type ToolCall } from "./llmClient.js";
+import type { GateOutcome, RiskLevel } from "./hitl/types.js";
+import { deniedText } from "./hitl/text.js";
 
 /** 工具调用最多允许的连续轮次（防止模型陷入「调工具→再调」死循环）。 */
 export const MAX_TOOL_ROUNDS = 3;
@@ -12,6 +14,13 @@ export interface ToolBridge {
   tools: unknown[];
   /** 执行一个工具调用（永不抛：失败也在结果里带 ok=false 与原因）。 */
   execute: (call: { name: string; arguments: string }) => Promise<{ text: string; ok: boolean }>;
+  /**
+   * 工具的风险元数据（可选）：闸门用它判断该调用该不该问用户。
+   *
+   * 缺省按 `risk=write` 处理——**这是安全默认**：认不出来的工具宁可多问一次，
+   * 也不要把一个没见过的工具当成只读放过去。
+   */
+  meta?: (name: string) => { risk?: RiskLevel; displayName?: string } | undefined;
 }
 
 export interface TriggerDeps {
@@ -70,6 +79,9 @@ export interface TriggerDeps {
   onReasoning?: (streamId: string, text: string) => void;
   /**
    * 工具调用轨迹事件：start（即将调用）→ end（拿到结果）。同样是本机展示用。
+   *
+   * `denied` 只在「用户拒绝了这次调用」时为真：轨迹里必须让用户看得见
+   * 「我真的拒绝了」——否则用户会以为工具真的执行过了。
    */
   onToolTrace?: (
     streamId: string,
@@ -80,8 +92,22 @@ export interface TriggerDeps {
       args: string;
       ok?: boolean;
       result?: string;
+      denied?: boolean;
     },
   ) => void;
+  /**
+   * 工具执行前的**人工确认闸门**（HITL）：返回的数组**长度与顺序必须与 calls 一致**。
+   *
+   * 抛错 / 条数对不上 → 一律按全放行处理（闸门故障不得阻断生成）；
+   * 缺省 → 全放行（行为与未接入时逐字等价）。
+   *
+   * 判定为「拒绝」的项**不会被执行**——编排层改回一段明确声明「未修改」的文案，
+   * 让模型知道这次调用没有落地（否则它会以为写了一半）。
+   */
+  confirmToolCalls?: (
+    calls: ToolCall[],
+    ctx: { agentId: string; agentName: string; streamId: string; conversationId: string },
+  ) => Promise<GateOutcome[]>;
   /**
    * 轮次收尾回调（设计 §3/§6）：成功 finish 记 `"ok"`；中断/失败但已有部分文本记 `"partial"`
    * （触发端据此只写工作记忆，不沉淀长期记忆）；完全无文本不回调。
@@ -159,6 +185,36 @@ function notifyTurnComplete(
   } catch {
     /* 记忆/技能回调失败不影响三事件上行 */
   }
+}
+
+/**
+ * 闸门调用：把一批 tool_calls 交给接线层裁决，返回与 calls **等长同序**的放行/拒绝结果。
+ *
+ * 两条降级口径（都是「宁可放行也不阻断这一轮对话」）：
+ * - 钩子抛错 → 全部放行；
+ * - 返回条数与 calls 不一致 → 全部放行（下游按下标对齐，对不上就不能信）。
+ *
+ * 未注入钩子时**不产生任何额外对象**，直接沿用原来的执行路径——
+ * 这是向后兼容铁律：没接闸门时行为与接入之前逐字等价。
+ */
+async function confirmToolCalls(
+  deps: TriggerDeps,
+  calls: ToolCall[],
+  ctx: { agentId: string; agentName: string; streamId: string; conversationId: string },
+): Promise<GateOutcome[] | null> {
+  if (!deps.confirmToolCalls) return null;
+  let outcomes: GateOutcome[];
+  try {
+    outcomes = await deps.confirmToolCalls(calls, ctx);
+  } catch (e) {
+    console.warn("HITL 闸门异常，本轮工具调用按放行处理", e);
+    return null;
+  }
+  if (!Array.isArray(outcomes) || outcomes.length !== calls.length) {
+    console.warn("HITL 闸门返回条数与工具调用数不一致，本轮按放行处理");
+    return null;
+  }
+  return outcomes;
 }
 
 /**
@@ -422,17 +478,32 @@ export function runAgentMentions(
                 args: call.function.arguments,
               });
             }
+            // HITL 闸门：执行**之前**问用户。被拒的项绝不调用 bridge.execute。
+            // 未注入闸门时 outcomes 为 null，走原来的执行路径（逐字等价）。
+            const outcomes = await confirmToolCalls(deps, calls, {
+              agentId: m.agentId,
+              agentName: m.name,
+              streamId,
+              conversationId,
+            });
             const results = await Promise.all(
-              calls.map((call) =>
-                bridge!.execute({
+              calls.map(async (call, i) => {
+                const outcome = outcomes?.[i];
+                if (outcome?.kind === "deny") {
+                  // 被拒：回一段明确声明「未修改」的文案，让模型知道这次没落地。
+                  // ok=false 也会让轨迹显示成失败态，UI 另行标「已拒绝」。
+                  return { text: deniedText(outcome.call, outcome.reason), ok: false };
+                }
+                return bridge!.execute({
                   name: call.function.name,
                   arguments: call.function.arguments,
-                }),
-              ),
+                });
+              }),
             );
             // 拿到结果后补 end（成功/失败 + 文本）
             calls.forEach((call, i) => {
               const outcome = results[i] ?? { text: "", ok: false };
+              const denied = outcomes?.[i]?.kind === "deny";
               deps.onToolTrace?.(streamId, {
                 phase: "end",
                 id: call.id,
@@ -440,6 +511,7 @@ export function runAgentMentions(
                 args: call.function.arguments,
                 ok: outcome.ok,
                 result: outcome.text,
+                ...(denied ? { denied: true } : {}),
               });
             });
             extra = [

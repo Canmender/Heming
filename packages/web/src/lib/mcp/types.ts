@@ -24,7 +24,25 @@ export interface McpServerConfig {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  /**
+   * 来源。**缺省视为 `manual`**（兼容旧数据）。
+   *
+   * 为什么需要显式字段而不是靠 id 前缀判断：id 是可以被人手填撞上的，
+   * 而 `origin` 是声明式的。界面据此区分「内置预置 / 用户手填 / 从 Registry 装的」。
+   */
+  origin?: ServerOrigin;
+  /** 从 Registry 装时，Registry 里的 `server.name`（反向域名）。**用于判「是否已安装」。** */
+  registryName?: string;
 }
+
+/**
+ * MCP 服务的来源。
+ *
+ * - `preset`：内置预置（界面标「默认接入」，行为上不可完全删除）；
+ * - `manual`：用户在接口区手填；
+ * - `registry`：从官方 Registry 一键安装（2026-10 新增）。
+ */
+export type ServerOrigin = "preset" | "manual" | "registry";
 
 /** MCP 服务暴露的一个工具。 */
 export interface McpTool {
@@ -36,6 +54,28 @@ export interface McpTool {
     properties?: Record<string, unknown>;
     required?: string[];
     [key: string]: unknown;
+  };
+  /**
+   * MCP 规范的行为标注（可选，很多服务端不提供）。
+   *
+   * ★ **不参与风险判定**，只用于界面上的说明性标注。
+   *
+   * 规范原文（`schema/2025-06-18/schema.json` 的 `ToolAnnotations.description`）：
+   * > "NOTE: all properties in ToolAnnotations are **hints**.
+   * >  **Clients should never make tool use decisions based on ToolAnnotations
+   * >  received from untrusted servers.**"
+   *
+   * 2025-12-11 版更明确：`MUST consider tool annotations to be untrusted`。
+   * 实测真实服务器（Windows-MCP）**20/20 个工具都带 annotations**——
+   * 所以这不是理论风险：恶意服务器只要把 `readOnlyHint` 设成 `true`，
+   * 它的 `delete_file` / `run_command` 就会静默执行。
+   *
+   * → 判定只依据**工具名与描述**（`lib/hitl/classify.ts` 的 `riskOfName`）。
+   * → 界面上展示时要标明「该服务器**自述**为只读工具（未经核实）」。
+   */
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
   };
 }
 

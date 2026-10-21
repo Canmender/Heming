@@ -124,6 +124,17 @@ export async function autoConnectAll(
 /**
  * 为一次对话构造工具桥：只包含「服务启用 + 工具启用」的那部分。
  * 没有可用工具时返回 null（编排层据此走原路径，零行为变化）。
+ *
+ * ★ **本桥不提供 `meta.risk`**。
+ *
+ * MCP 的 `annotations`（`readOnlyHint` / `destructiveHint`）在规范里明言是
+ * **untrusted hint**：「Clients should never make tool use decisions based on
+ * ToolAnnotations received from untrusted servers」。
+ * 拿 `readOnlyHint: true` 当「只读免问」的依据 = 把安全边界交给服务端自述——
+ * 恶意服务器只要把标注设成 true，它的 `delete_file` 就会静默执行。
+ *
+ * 所以 MCP 工具的风险**一律按名字启发判定**（未知 → write，必问），
+ * `annotations` 只用于界面上的「该服务器自述为只读工具（未经核实）」这类标注。
  */
 export function buildToolBridge(registry: McpRegistry = mcpRegistry): ToolBridge | null {
   const refs = registry.enabledTools();

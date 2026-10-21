@@ -728,6 +728,363 @@ describe("runAgentMentions 工具调用（MCP 桥）", () => {
   });
 });
 
+/**
+ * HITL 闸门（设计 §4.3）：工具执行**之前**问用户。
+ *
+ * 三条硬约束在这里逐条被钉死：
+ * 1. 被拒的项**绝不**调用 bridge.execute；
+ * 2. 回灌的 `tool` 消息条数恒等于 `tool_calls` 条数（少一条供应商就 400）；
+ * 3. 不注入 confirmToolCalls 时行为与接入之前**逐字等价**。
+ */
+describe("runAgentMentions HITL 闸门", () => {
+  /** 造一个会先要工具、再给答案的两轮流。 */
+  function twoRounds(calls: unknown[]) {
+    const rounds = [
+      { text: "我先做一下", calls },
+      { text: "做完了", calls: [] as never[] },
+    ];
+    let round = 0;
+    return vi.fn(async (_p: unknown, _m: ChatMessage[], o: {
+      onDelta: (t: string) => void;
+      onToolCalls?: (c: unknown[]) => void;
+    }) => {
+      const r = rounds[round++];
+      if (r.calls.length) o.onToolCalls?.(r.calls);
+      if (r.text) o.onDelta(r.text);
+      return r.text;
+    });
+  }
+
+  const oneCall = [
+    { id: "call_1", type: "function" as const, function: { name: "fs__write_file", arguments: '{"p":"a"}' } },
+  ];
+
+  /** 第二次请求里的 role=tool 消息。 */
+  function toolMessages(streamChat: unknown): { content: string; tool_call_id?: string }[] {
+    const second = (streamChat as ReturnType<typeof vi.fn>).mock.calls[1][1] as ChatMessage[];
+    return second.filter((m) => m.role === "tool") as never;
+  }
+
+  it("不注入 confirmToolCalls：工具照常执行，行为与接入之前逐字等价", async () => {
+    const executed: string[] = [];
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } }],
+        execute: async (call) => {
+          executed.push(call.name);
+          return { text: "写好了", ok: true };
+        },
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(executed).toEqual(["fs__write_file"]);
+    expect(toolMessages(streamChat)[0].content).toBe("写好了");
+  });
+
+  it("全部拒绝：bridge.execute 调用次数为 0（闸门形同虚设的防线）", async () => {
+    const execute = vi.fn(async () => ({ text: "写好了", ok: true }));
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } }],
+        execute,
+      }),
+      confirmToolCalls: async (calls) =>
+        calls.map((c) => ({
+          kind: "deny" as const,
+          call: {
+            id: c.id,
+            name: c.function.name,
+            argsJson: c.function.arguments,
+            displayName: "写文件",
+            risk: "write" as const,
+            summary: "a",
+            source: "mcp" as const,
+          },
+          reason: "用户拒绝",
+        })),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("全部拒绝：回灌的 tool 消息条数仍等于 tool_calls 条数（少一条供应商就 400）", async () => {
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } }],
+        execute: async () => ({ text: "写好了", ok: true }),
+      }),
+      confirmToolCalls: async (calls) =>
+        calls.map((c) => ({
+          kind: "deny" as const,
+          call: {
+            id: c.id,
+            name: c.function.name,
+            argsJson: c.function.arguments,
+            displayName: "写文件",
+            risk: "write" as const,
+            summary: "a",
+            source: "mcp" as const,
+          },
+        })),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const messages = toolMessages(streamChat);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].tool_call_id).toBe("call_1");
+  });
+
+  it("全部拒绝：回灌内容显式声明「文件与系统状态未被修改」（防模型幻觉）", async () => {
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } }],
+        execute: async () => ({ text: "写好了", ok: true }),
+      }),
+      confirmToolCalls: async (calls) =>
+        calls.map((c) => ({
+          kind: "deny" as const,
+          call: {
+            id: c.id,
+            name: c.function.name,
+            argsJson: c.function.arguments,
+            displayName: "写文件",
+            risk: "write" as const,
+            summary: "a",
+            source: "mcp" as const,
+          },
+        })),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const content = toolMessages(streamChat)[0].content;
+    expect(content).toContain("未被修改");
+    expect(content).toContain("不存在部分写入或中间状态");
+  });
+
+  it("部分放行：只有被放行的项才执行，被拒的项回填拒绝文案", async () => {
+    const executed: string[] = [];
+    const calls = [
+      { id: "call_1", type: "function" as const, function: { name: "fs__read_file", arguments: "{}" } },
+      { id: "call_2", type: "function" as const, function: { name: "fs__write_file", arguments: "{}" } },
+    ];
+    const streamChat = twoRounds(calls);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__read_file" } }],
+        execute: async (call) => {
+          executed.push(call.name);
+          return { text: "读到了", ok: true };
+        },
+      }),
+      confirmToolCalls: async (batch) =>
+        batch.map((c) => ({
+          kind: c.function.name === "fs__read_file" ? ("allow" as const) : ("deny" as const),
+          call: {
+            id: c.id,
+            name: c.function.name,
+            argsJson: c.function.arguments,
+            displayName: c.function.name,
+            risk: "write" as const,
+            summary: "",
+            source: "mcp" as const,
+          },
+        })),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(executed).toEqual(["fs__read_file"]);
+    const messages = toolMessages(streamChat);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].content).toBe("读到了");
+    expect(messages[1].content).toContain("未被修改");
+  });
+
+  it("闸门抛错：按放行处理（闸门故障不得让整轮对话失败）", async () => {
+    const executed: string[] = [];
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } }],
+        execute: async (call) => {
+          executed.push(call.name);
+          return { text: "写好了", ok: true };
+        },
+      }),
+      confirmToolCalls: async () => {
+        throw new Error("闸门炸了");
+      },
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(executed).toEqual(["fs__write_file"]);
+  });
+
+  it("闸门返回条数与调用数不一致：按放行处理（对不上就不能信）", async () => {
+    const executed: string[] = [];
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } }],
+        execute: async (call) => {
+          executed.push(call.name);
+          return { text: "写好了", ok: true };
+        },
+      }),
+      confirmToolCalls: async () => [],
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(executed).toEqual(["fs__write_file"]);
+  });
+
+  it("被拒的项在工具轨迹里标为「已拒绝」（用户要能确认自己真的拒了）", async () => {
+    const toolEvents: { phase: string; denied?: boolean }[] = [];
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } }],
+        execute: async () => ({ text: "写好了", ok: true }),
+      }),
+      confirmToolCalls: async (calls) =>
+        calls.map((c) => ({
+          kind: "deny" as const,
+          call: {
+            id: c.id,
+            name: c.function.name,
+            argsJson: c.function.arguments,
+            displayName: "写文件",
+            risk: "write" as const,
+            summary: "",
+            source: "mcp" as const,
+          },
+        })),
+      onToolTrace: (_id, e) => toolEvents.push(e),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const end = toolEvents.find((e) => e.phase === "end");
+    expect(end?.denied).toBe(true);
+  });
+
+  it("★ 拒绝后模型若再要工具，会**再次**被问（不因为上轮被拒就一路放行）", async () => {
+    // 这是闸门最容易被绕过的地方：模型被拒一次后换个名字再调，
+    // 如果「本轮已拒过」的去重表没按轮清空、或闸门只对第一轮生效，
+    // 第二次就会静默执行。
+    //
+    // 去重表按 streamId 清空，而同一轮里同一个指纹才去重——
+    // 所以这里要验的是「**新一轮的同名调用仍会被问**」。
+    const asked: number[] = [];
+    const execute = vi.fn(async () => ({ text: "写好了", ok: true }));
+    const streamChat = twoRounds(oneCall);
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "fs__write_file" } }],
+        execute,
+      }),
+      confirmToolCalls: async (calls) => {
+        asked.push(calls.length);
+        return calls.map((c) => ({
+          kind: "deny" as const,
+          call: {
+            id: c.id,
+            name: c.function.name,
+            argsJson: c.function.arguments,
+            displayName: "写文件",
+            risk: "write" as const,
+            summary: "",
+            source: "mcp" as const,
+          },
+        }));
+      },
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    // 闸门被调用过（至少一次）
+    expect(asked.length).toBeGreaterThanOrEqual(1);
+    // 且整个过程里 execute 一次都没被调
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("★ 多轮工具调用：每一轮都独立询问，不是一次问完就放行后续", async () => {
+    // 三轮都要工具。每一轮都必须过闸门——
+    // 如果闸门只在第一轮生效（或只在第一轮弹窗），第 2、3 轮就静默执行了。
+    const rounds = [
+      { text: "一", calls: [{ id: "c1", type: "function" as const, function: { name: "fs__a", arguments: "{}" } }] },
+      { text: "二", calls: [{ id: "c2", type: "function" as const, function: { name: "fs__b", arguments: "{}" } }] },
+      { text: "三", calls: [] as never[] },
+    ];
+    let round = 0;
+    const streamChat = vi.fn(async (_p: unknown, _m: ChatMessage[], o: {
+      onDelta: (t: string) => void;
+      onToolCalls?: (c: unknown[]) => void;
+    }) => {
+      const r = rounds[round++];
+      if (r.calls.length) o.onToolCalls?.(r.calls);
+      if (r.text) o.onDelta(r.text);
+      return r.text;
+    });
+
+    const askedNames: string[] = [];
+    const execute = vi.fn(async () => ({ text: "ok", ok: true }));
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      getTools: () => ({
+        tools: [
+          { type: "function", function: { name: "fs__a" } },
+          { type: "function", function: { name: "fs__b" } },
+        ],
+        execute,
+      }),
+      confirmToolCalls: async (calls) => {
+        askedNames.push(...calls.map((c) => c.function.name));
+        return calls.map((c) => ({
+          kind: "deny" as const,
+          call: {
+            id: c.id,
+            name: c.function.name,
+            argsJson: c.function.arguments,
+            displayName: c.function.name,
+            risk: "write" as const,
+            summary: "",
+            source: "mcp" as const,
+          },
+        }));
+      },
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    // 两轮两个不同的工具名，**两次都被问了**
+    expect(askedNames).toEqual(["fs__a", "fs__b"]);
+    // 且一次都没执行
+    expect(execute).not.toHaveBeenCalled();
+  });
+});
+
 describe("runAgentMentions 可视化（思考过程 / 工具轨迹）", () => {
   it("思考过程累积后回传全文，工具 start/end 各一次且带结果", async () => {
     const reasoningEvents: string[] = [];

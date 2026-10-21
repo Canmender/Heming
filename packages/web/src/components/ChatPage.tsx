@@ -62,6 +62,12 @@ import {
   buildSelfToolBridge,
 } from "../lib/selfEdit/index.js";
 import { mergeToolBridges } from "../lib/selfEdit/merge.js";
+import { createHitlGate, toHitlBatch } from "../lib/hitl/gate.js";
+import { HitlPolicyStore } from "../lib/hitl/policy.js";
+import { useHitlStore, type PendingConfirm } from "../store/hitl.js";
+import { ToolApprovalModal } from "./ToolApprovalModal.js";
+import { appendToolAudit } from "../lib/hitl/audit.js";
+import type { StorageLike } from "../lib/memory/types.js";
 import { buildChartToolBridge } from "../lib/charts/tools.js";
 import { buildToneToolBridge } from "../lib/tone/tools.js";
 import { extractCharts, stripChartFences } from "../lib/charts/spec.js";
@@ -73,6 +79,60 @@ import { openCallWindow } from "../lib/callWindow.js";
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
 export const NO_E2E_NOTICE = "当前环境不支持端到端加密，请使用桌面端或 HTTPS";
+
+/**
+ * HITL 闸门（工具执行前人工确认）的**模块级单例**。
+ *
+ * 为什么必须在组件外创建：闸门持有「本会话内允许此工具」的授权表
+ * （`HitlPolicyStore` 里的内存 Map）。若每次渲染新建一份，
+ * 用户刚点下的「本会话内允许」会立刻失效——授权就等于没给。
+ */
+const hitlPolicy = new HitlPolicyStore();
+
+/** 工具确认留痕的存储（与策略同在本机 localStorage）。 */
+const hitlAuditStorage: StorageLike = {
+  getItem: (k) => {
+    try {
+      return window.localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (k, v) => {
+    try {
+      window.localStorage.setItem(k, v);
+    } catch {
+      /* 隐私模式：留痕失败不影响确认本身 */
+    }
+  },
+  removeItem: (k) => {
+    try {
+      window.localStorage.removeItem(k);
+    } catch {
+      /* 同上 */
+    }
+  },
+};
+
+/**
+ * 闸门本体。
+ *
+ * `ask` 注入的是 store 的 enqueue：闸门把待确认项交给它，
+ * 它在 UI 侧排队，用户决定后 resolve 回裁决。
+ */
+const hitlGate = createHitlGate({
+  policy: hitlPolicy,
+  ask: (batch) =>
+    useHitlStore.getState().enqueue(
+      { kind: "tool-call", payload: batch.calls, auto: batch.auto },
+      {
+        agentId: batch.agentId,
+        conversationId: batch.conversationId,
+        streamId: batch.streamId,
+        agentName: batch.agentName,
+      },
+    ),
+});
 
 /**
  * 会话 → 显示名与头像（转发目标选择、通话标题、标签栏等多处共用）。
@@ -758,6 +818,54 @@ export function ChatPage() {
     return pid ? llm.getProfile(pid) : undefined;
   };
 
+  /**
+   * 构造某个智能体这一轮的工具桥。
+   *
+   * 抽成函数而不是内联在 deps 里：HITL 闸门也要按工具名查风险元数据，
+   * 桥必须**是同一个**——查的不是实际执行者的桥 = 问错了人。
+   */
+  const buildToolsFor = (agentId: string) => {
+    const mcpBridge = buildToolBridge();
+    const chartBridge = buildChartToolBridge();
+    // tone_detect：单个只读工具（算子定位 AI 痕迹，不改任何东西），
+    // 描述不长，默认注入。与 self.* 不同——后者是 13 个带写操作的长描述工具，
+    // 才需要用户显式开启才给。
+    const toneBridge = buildToneToolBridge();
+    if (!selfEditRef.current!.policy.configured(agentId)) {
+      // 没开过自我优化 → 只给 MCP、图表与去 AI 味工具，self.* 保持不注入
+      return mergeToolBridges(mcpBridge, chartBridge, toneBridge);
+    }
+    return mergeToolBridges(
+      mcpBridge,
+      chartBridge,
+      toneBridge,
+      buildSelfToolBridge(
+        {
+          memory: memoryStore,
+          skills: skillPool,
+          mcp: mcpRegistry,
+          policy: selfEditRef.current!.policy,
+          budget: selfEditRef.current!.budget,
+        },
+        { agentId, conversationId: convId },
+      ),
+    );
+  };
+
+  /**
+   * 按工具名取风险元数据（闸门分类用）。
+   *
+   * 只认**我们自己写的桥**的显式声明（self.* 的 riskHint、chart.* / tone.* 的只读）；
+   * MCP 桥不提供——它的 `annotations` 是 untrusted hint，服务端自述不算数。
+   */
+  const toolMetaOf = (name: string, agentId: string) => {
+    const bridge = buildToolsFor(agentId);
+    return bridge?.meta?.(name);
+  };
+
+  /** HITL 待确认请求（工具调用确认弹窗的数据源）。 */
+  const pendingHitl = useHitlStore((s) => s.pending);
+
   /** 流气泡署名：本会话 members 映射名优先，其次名册，兜底「智能体」。 */
   const nameOf = (agentId: string) =>
     memberInfoById?.[agentId]?.name ?? agentsRoster.find((a) => a.id === agentId)?.name ?? "智能体";
@@ -951,7 +1059,9 @@ export function ChatPage() {
         } else if (idx >= 0) {
           list[idx] = {
             ...list[idx],
-            status: e.ok ? "ok" : "error",
+            // 「已拒绝」与「失败」分开：被拒的工具**根本没执行**，
+            // 混成失败用户会以为「我拒了，但它还是跑了」。
+            status: e.denied ? "denied" : e.ok ? "ok" : "error",
             result: e.result,
             endedAt: Date.now(),
           };
@@ -975,32 +1085,43 @@ export function ChatPage() {
       //
       // chart.* 只有 2 个工具、描述短，且不写任何存储、无副作用（只是把数据变成图），
       // 所以默认注入——用户随时可能让智能体画图，不该先去设置里开开关。
-      getTools: (agentId: string) => {
-        const mcpBridge = buildToolBridge();
-        const chartBridge = buildChartToolBridge();
-        // tone_detect：单个只读工具（算子定位 AI 痕迹，不改任何东西），
-        // 描述不长，默认注入。与 self.* 不同——后者是 13 个带写操作的长描述工具，
-        // 才需要用户显式开启才给。
-        const toneBridge = buildToneToolBridge();
-        if (!selfEditRef.current!.policy.configured(agentId)) {
-          // 没开过自我优化 → 只给 MCP、图表与去 AI 味工具，self.* 保持不注入
-          return mergeToolBridges(mcpBridge, chartBridge, toneBridge);
-        }
-        return mergeToolBridges(
-          mcpBridge,
-          chartBridge,
-          toneBridge,
-          buildSelfToolBridge(
-            {
-              memory: memoryStore,
-              skills: skillPool,
-              mcp: mcpRegistry,
-              policy: selfEditRef.current!.policy,
-              budget: selfEditRef.current!.budget,
+      getTools: (agentId: string) => buildToolsFor(agentId),
+      // HITL 闸门（设计 §4.3）：工具执行**之前**问用户同不同意。
+      //
+      // 这是整个 HITL 层的**唯一接线点**：agentStream 在拿到 tool_calls 之后、
+      // 调 bridge.execute 之前调它一次。被拒的项不会被执行——
+      // 闸门把结果原样带回来，编排层据此改回「未执行」的文案。
+      //
+      // ★ 闸门异常一律按**拒绝**处理。
+      //
+      // 「闸门异常不得让整轮对话失败」= 模型总能收到一条 tool 消息，
+      // **不是「工具总能执行」**——工具不执行时模型照样收到「未执行」的消息，对话继续。
+      // 反过来若这里放行，闸门一坏就等于所有危险工具静默执行，
+      // 而那恰恰是最不该放行的时刻。
+      //
+      // 兜底方向的选择比索引正确性更关键：兜底是 deny 时出错只会「误拒」
+      //（用户立刻发现并报告）；兜底是 allow 时出错就是「误放行」，**静默且不可见**。
+      confirmToolCalls: async (calls, ctx) => {
+        try {
+          return await hitlGate.review(
+            toHitlBatch(calls, ctx, (name) => toolMetaOf(name, ctx.agentId)),
+          );
+        } catch (e) {
+          console.warn("HITL 闸门异常，按拒绝处理", e);
+          return calls.map((call) => ({
+            kind: "deny" as const,
+            call: {
+              id: call.id,
+              name: call.function.name,
+              argsJson: call.function.arguments,
+              displayName: call.function.name,
+              risk: "write" as const,
+              summary: "",
+              source: "unknown" as const,
             },
-            { agentId, conversationId: convId },
-          ),
-        );
+            reason: "确认流程异常，本次调用未执行",
+          }));
+        }
       },
       // 轮次收尾写记忆（设计 §3）：成功轮次走 recordTurn（Working + 显式抽取 + 6 轮沉淀）；
       // 中断/失败只记 Working 并标 partial，不沉淀长期记忆。全程静默，绝不影响发送与流式渲染。
@@ -1091,6 +1212,9 @@ export function ChatPage() {
   /** 中断当前会话全部进行中流：abort → 各流 catch 走 finish-partial + agent_error(aborted)。 */
   const abortRuns = () => {
     for (const h of runsRef.current[convId] ?? []) h.abortAll();
+    // 确认弹窗也要收掉：否则用户按了停止，弹窗还杵在屏幕上，
+    // 闸门的 await 永不 resolve → 整轮挂死（设计 §4.4）。
+    useHitlStore.getState().cancelAll("用户中断");
   };
 
   /** 错误行重试：清掉旧项，按原触发文本重新跑该单个 mention（新 streamId 重新登记）。 */
@@ -1304,6 +1428,9 @@ export function ChatPage() {
       for (const set of Object.values(runsRef.current)) {
         for (const h of set) h.abortAll();
       }
+      // 离开聊天页时确认弹窗也要收：闸门在等用户的裁决，
+      // 不收就是整轮挂死（设计 §4.4）。
+      useHitlStore.getState().cancelAll("页面离开");
       recRef.current?.stop();
       voiceRecCancelRef.current?.();
     },
@@ -2439,6 +2566,34 @@ export function ChatPage() {
             : undefined
         }
       />
+      {/* HITL 工具确认弹窗（设计 §4.3）：
+          智能体要调有副作用的工具时，先问用户同不同意。
+          弹窗由 store 驱动（pending 单槽 + 队列），这里只负责渲染与回传裁决。 */}
+      {pendingHitl && pendingHitl.kind === "tool-call" && (
+        <ToolApprovalModal
+          requestId={pendingHitl.requestId}
+          calls={pendingHitl.calls}
+          auto={pendingHitl.auto}
+          agentName={pendingHitl.agentName}
+          onDecide={(verdicts) => {
+            // 留痕：批准与拒绝都记一笔（安全功能不留痕等于没做）。
+            for (const v of verdicts) {
+              const call = pendingHitl.calls.find((c) => c.id === v.callId);
+              if (!call) continue;
+              appendToolAudit(hitlAuditStorage, {
+                agentId: pendingHitl.agentId,
+                action: v.decision,
+                target: `${call.displayName}（${call.name}）`,
+                ...(v.decision === "deny" ? { rejected: v.reason ?? "用户拒绝" } : {}),
+              });
+            }
+            useHitlStore.getState().decide({
+              requestId: pendingHitl.requestId,
+              verdicts,
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
