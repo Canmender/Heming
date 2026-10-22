@@ -3,3 +3,7 @@
 docker/** text eol=lf
 docker-compose.yml text eol=lf
 .dockerignore text eol=lf
+
+# 裸机部署资产同理，而且后果更直接：bash 遇到 `set -o pipefail\r` 会当场语法错，
+# systemd 遇到 `ExecStart=...\r` 会把 \r 当成参数的一部分。
+deploy/** text eol=lf

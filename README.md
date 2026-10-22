@@ -99,8 +99,8 @@ pnpm typecheck   # 等价于 pnpm -r build && pnpm -r typecheck
 
 服务端数据（账号、会话、消息、已读状态）持久化在 SQLite：
 
-- 库文件路径由 `HEMING_DB_PATH` 指定，缺省 `./data/heming.db`（相对进程工作目录）。
-- Docker 部署（见 `docs/deploy.md`）注入 `HEMING_DB_PATH=/data/heming.db`，`/data` 挂 named volume `heming-data`——容器重启、镜像重建、回滚都不丢数据；备份/恢复针对该卷（`docs/deploy.md` §6）。
+- 库文件路径由 `HEMING_DB_PATH` 指定，缺省 `./data/heming.db`（相对进程工作目录）。用的是 Node 24 内置 `node:sqlite`，没有原生依赖。
+- 云端裸机部署（见 `docs/deploy.md`）注入 `HEMING_DB_PATH=/var/lib/heming/heming.db`，该目录是 api 进程唯一的写入点；systemd 重启、重发版、回滚都不动它，备份/恢复针对该目录（`docs/deploy.md` §6）。
 - 本地开发默认落 `./data/heming.db`，已在 `.gitignore` 排除（`data/`），不进版本库、不进部署包。
 
 > 智能体的**三层记忆、技能池、上下文预算、HITL 策略、自我修改留痕**不在此库中：它们只存触发设备本机的 `localStorage`；LLM Key 与 MCP 配置也只在本机。Wiki 知识库在桌面端写真实 Markdown 文件。上述数据不上云、不进消息、不进部署包；换设备或清浏览器数据会丢失（记忆/技能支持导出导入）。

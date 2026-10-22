@@ -1,56 +1,56 @@
-# 和鸣部署（Docker，单机）
+# 和鸣部署（裸机，单机）
 
-目标机：`47.92.39.184`（阿里云 Linux x86_64）。架构：**api 容器**（Node 进程，Express + ws 同端口 8787，仅 compose 内网可达）+ **web 容器**（nginx 托管静态资源并反代 `/api` 与 WS，对外发布 80）。
+目标机：`47.92.39.184`（阿里云轻量应用服务器，Ubuntu 24.04，2 vCPU / 1613MB / 40GB）。
 
-## 0. 前置：服务器装 Docker
+架构：**宿主机 nginx（对外唯一端口 80）+ 一个 node 进程（systemd 托管，只绑 127.0.0.1:8787）**。没有 Docker、没有镜像、**云端不构建任何东西**——本地门禁产物是什么，线上跑的就是什么。
 
-```bash
-# 最省事（官方脚本，自动识别阿里云 Linux / CentOS 系）
-curl -fsSL https://get.docker.com | sh
-sudo systemctl enable --now docker
+为什么去掉 Docker：见 `docs/superpowers/specs/2026-10-22-bare-metal-deploy.md`。一句话：dockerd + containerd + buildkit 常驻约 500MB，叠上构建峰值把这台 1613MB 的机器整机冻住过两次。
 
-# 验证
-docker --version
-docker compose version
-```
+脚本都在 `deploy/`（**必须 LF**，已由 `.gitattributes` 的 `deploy/** text eol=lf` 钉住；CRLF 会让 bash 报语法错误、让 systemd 把 `\r` 当成参数的一部分）：
 
-- 阿里云控制台**安全组**只放行 80（HTTP）；需要预览实例时临时放行 8788。
-- 非 root 使用 docker：`sudo usermod -aG docker $USER`（重新登录生效）；或全程 sudo。
+| 文件 | 跑几次 | 干什么 |
+|---|---|---|
+| `deploy/provision.sh` | 装机时一次 | apt 包、2G swap（写 fstab）、Node 24 + pnpm、`heming` 账号与目录、`/etc/heming/api.env` |
+| `deploy/install-app.sh` | **每次发版** | 存档 → 解包校验 → 装生产依赖 → 落 nginx 站点与 systemd 单元 → 起服务 → 自检 |
+| `deploy/nginx-heming.conf` | 随包落地 | 站点：静态页 + `/api` 反代 + WS + `/updates/` |
+| `deploy/heming-api.service` | 随包落地 | api 进程：`User=heming`、`MemoryMax=512M`、只写 `/var/lib/heming` |
 
-## 1. 端口表
+## 1. 端口与落点
 
 | 端口 | 归属 | 说明 |
 | --- | --- | --- |
-| 80/tcp | web 容器 | **对外唯一端口**：静态页 + `/api` 反代 + WS |
-| 127.0.0.1:8787 | api 容器（compose 回环映射） | 宿主机回环维护口（**有意发布**，仅本机可达，SSH 隧道调试用；若与宿主进程冲突可整体删除该行，维护改用 `docker compose exec api wget -qO- http://127.0.0.1:8787/api/health`） |
-| 8788/tcp | preview 容器（profile） | 更新验证用，`docker compose --profile preview up -d` 才启动，平时不运行 |
-| 9090/tcp | （预留） | 监控端口，本套件**不发布**任何监控服务，表内仅作占位说明 |
+| 80/tcp | 宿主 nginx | **对外唯一端口**：静态页 + `/api` 反代 + WS + `/updates/` |
+| 127.0.0.1:8787 | `heming-api.service` | 只绑回环（`HOST=127.0.0.1`），公网不可达；调试走 SSH 隧道 |
 
-api 服务本身**不向公网发布端口**（compose 内网互通）；对外流量一律走 80 → nginx。
+阿里云控制台**安全组只放行 80**。api 进程不对公网发布端口，对外流量一律走 80 → nginx。
 
-## 2. 上传代码（本地打包 → 服务器解包）
+| 落点 | 内容 |
+|---|---|
+| `/opt/heming/app` | 解包后的仓库（含 `node_modules` 与 `packages/*/dist`） |
+| `/opt/heming/updates` | 自动更新源：安装包 + `latest.yml` + `.blockmap`（§9） |
+| `/opt/heming/keep` | **每一版的原始部署包**——裸机没有镜像 tag，回滚靠它 |
+| `/var/lib/heming` | `heming.db`（唯一需备份的路径；附件是库内 base64，没有独立文件目录） |
+| `/etc/heming/api.env` | 环境变量，`chmod 640`，provision 只在缺失时创建（§4） |
 
-本地（排除依赖与版本库；**前端产物也在本地构建好一起上传**，理由见 §12）：
+## 2. 打包上传（本地）
+
+云端不跑 vite，**前端产物必须在本地先出**，忘跑就得到一个空站点：
 
 ```bash
-# 1) 先出前端产物——web 镜像现在只是 nginx + 静态文件，云端不再跑 vite
-pnpm --filter @heming/web build      # 产出 packages/web/dist（约 12MB）
+# 1) 产物 = 门禁产物：web 给 nginx，shared/server 给 node 进程
+pnpm -r build
 
-# 2) 打包
-# 在仓库根目录（data/ 是本地开发库，不上传——服务器用数据卷）
+# 2) 打包（在仓库根目录；data/ 是本机开发库，不上云）
 #
 # 排除表**逐项写全路径**，别再用裸 `--exclude=dist`：
-#   tar 的 --exclude 只匹配路径段名，`--exclude=dist` 会把唯一必须上传的
-#   `packages/web/dist` 一起排掉（云端就得到一个空站点），
-#   而它本来要排的 `packages/desktop/web-dist` 反倒排不掉。
+#   tar 的 --exclude 只匹配路径段名，`--exclude=dist` 会把必须上传的
+#   `packages/web/dist` 与 `packages/{shared,server}/dist` 一起排掉。
 # 其余几个易漏的大体积产物：
-#   packages/desktop/web-dist —— 桌面壳嵌入用产物（构建时注入了 VITE_API_BASE，
-#                     绝不能进云端镜像）
-#   packages/desktop/runtime —— 内置 Python + MCP 运行时（约 378MB），
-#                     只打进安装包，云端不需要；`--exclude=runtime` 匹配不到它
-#   @hemingdesktop  —— electron-builder 偶发落在仓库根的产物目录（约 260MB！）
-#   .tmp            —— 本地临时目录（缓存/部署包/截图，可达 GB级）
-#   .workbuddy      —— 本地项目记忆目录，属机器本地状态，不需要上云
+#   packages/desktop/web-dist —— 桌面壳嵌入用产物（注入了 VITE_API_BASE，绝不能上云）
+#   packages/desktop/runtime —— 内置 Python + MCP 运行时（约 378MB），只打进安装包
+#   release —— 桌面安装包产物
+#   @hemingdesktop —— electron-builder 偶发落在仓库根的产物目录（约 260MB！）
+#   data .tmp .workbuddy —— 本机开发库 / 临时目录 / 项目记忆
 #
 # 产物**写到树外**（/tmp）：`-czf heming.tar.gz .` 会把正在增长的 tar 自己
 # 卷进归档，GNU tar 报 `tar: .: file changed as we read it` 并以 exit 1 结束。
@@ -59,159 +59,116 @@ tar --exclude=node_modules --exclude=.git --exclude=.superpowers \
     --exclude=release --exclude=.claude --exclude=.tmp --exclude=.workbuddy \
     --exclude='packages/desktop/runtime' \
     --exclude='packages/desktop/web-dist' \
-    --exclude='packages/server/dist' --exclude='packages/shared/dist' \
     -czf /tmp/heming.tar.gz .
-scp /tmp/heming.tar.gz root@47.92.39.184:~/
 
-# 服务器解包
-ssh root@47.92.39.184
-mkdir -p ~/heming && tar -xzf ~/heming.tar.gz -C ~/heming && cd ~/heming
+# 3) 两条校验，一条都不能省
+# ① 不该有的东西：结果必须为 0（曾经漏排 @hemingdesktop，把包从 0.7MB 撑成 111MB）
+tar -tzf /tmp/heming.tar.gz | grep -cE \
+  "node_modules|\.superpowers|@hemingdesktop|release/|\.tmp/|\.workbuddy|packages/desktop/(runtime|web-dist)"
+# ② 必须有的东西：结果必须 ≥1（空站点/缺 dist 不报错，只会线上白屏——比缺文件更难查）
+tar -tzf /tmp/heming.tar.gz | grep -c "packages/web/dist/index.html"
+tar -tzf /tmp/heming.tar.gz | grep -c "packages/server/dist/"
 ```
 
-> **打包后必做两条校验**（曾经因为漏排 `@hemingdesktop` 把上传包从 0.7MB 变成 111MB）：
->
-> ```bash
-> # ① 不该有的东西：结果必须为 0
-> tar -tzf /tmp/heming.tar.gz | grep -cE \
->   "node_modules|\.superpowers|@hemingdesktop|release/|\.tmp/|\.workbuddy|packages/desktop/(runtime|web-dist)|packages/(server|shared)/dist"
-> # ② 必须有的东西：结果必须为 1（空 web 镜像不会报错，只会线上白屏——比缺文件更难查）
-> tar -tzf /tmp/heming.tar.gz | grep -c "packages/web/dist/index.html"
-> ```
->
-> 包体积从过去的 1MB 量级变成 **5MB 量级**（多了前端产物），这是预期的。
->
-> ①返回非 0 时**先看具体是哪几行**再决定：`tar -tzf /tmp/heming.tar.gz | grep -E "……"`。
-> 目录名命中不等于有问题（例如 `.workbuddy/` 只是几个 md），关键是**别漏排大体积产物**。
+①返回非 0 时**先看具体是哪几行**再决定：`tar -tzf /tmp/heming.tar.gz | grep -E "……"`。目录名命中不等于有问题（例如 `.workbuddy/` 只是几个 md），关键是**别漏排大体积产物**。包体积 **5MB 量级**（含前端产物）是预期的，变成几十 MB 就是排除表漏了。
 
-## 3. 构建与启动
+上传：本机没有 `sshpass`/`plink`，密码认证只能走 paramiko。`.superpowers/deploy-bare.py` 是分步编排（凭据从同目录 `deploy-d21.py` 读，不入库、不回显），各步可单独重跑：
 
 ```bash
-cd ~/heming
-docker compose build       # api 仍在云端构建；web 只是 COPY 产物，秒级
-docker compose up -d
-docker compose ps          # api healthy、web running 即就绪
+python -u .superpowers/deploy-bare.py probe      # 机器现状
+python -u .superpowers/deploy-bare.py upload "<本地 tar 的绝对路径>"
 ```
 
-验证：
+## 3. 装机与发版（服务器）
 
 ```bash
-curl -s http://127.0.0.1/api/health          # {"ok":true}
+# 一次性装机（幂等；已装好的 Node 不会重下）
+bash /root/provision.sh            # 结尾打印 PROVISION DONE
+
+# 每次发版
+mkdir -p /opt/heming/app /opt/heming/keep
+bash /root/install-app.sh /root/heming-<版本>.tar.gz <版本>   # 结尾打印 INSTALL DONE: <版本>
+```
+
+`install-app.sh` 做的事：把原始包存档到 `/opt/heming/keep/heming-<版本>.tar.gz` → 解包并校验（包内 `hemingVersion` 与参数一致，`web/dist/index.html`、`server/dist/index.js`、`shared/dist/index.js` 缺一即停）→ `pnpm install --frozen-lockfile --prod --filter @heming/server...`（实测 67 个包、3 秒）→ `chown -R heming` + `chmod -R a+rX packages/web/dist`（nginx worker 是 www-data，要能遍历并读取）→ 落站点与单元 → 轮询 `/api/health` 30 秒。
+
+**nginx 站点的落地方式**：先把 Ubuntu 默认站点移到 `/root/nginx-default-site.bak`（两份 `default_server` 会让 `nginx -t` 直接失败），`nginx -t` 通过才 reload；校验失败会把默认站点放回原处再退出，不会留下半套配置。
+
+浏览器打开 `http://47.92.39.184`，用预设账号 `admin / admin` 登录。验证：
+
+```bash
+curl -s http://127.0.0.1:8787/api/health          # {"ok":true}
+curl -s http://127.0.0.1/api/health               # 经 nginx
 curl -s -i -X OPTIONS http://127.0.0.1/api/auth/login | head -5   # 204 + CORS 头
+journalctl -u heming-api -n 30 --no-pager         # "heming server listening on http://127.0.0.1:8787"
+nginx -T | grep -c 'location /updates/'           # 站点配置真的生效了
 ```
 
-浏览器打开 `http://47.92.39.184`，用预设账号 `admin / admin` 登录。
+**WS 别用 curl 验**：`/api/ws` 缺 `token` 查询串时后端**直接 destroy socket**（`packages/server/src/ws.ts:36`），nginx 于是报 `502 upstream prematurely closed`——看着像反代坏了，其实正常。要验就带真 token 完成一次握手，例如用 `websockets` 连 `ws://47.92.39.184/api/ws?token=…`，收到服务端回执（哪怕是不认识的事件报 `bad_event`）就说明握手与事件管线都通。
 
-**nginx 配置无法在本机静态验证**——首次启动务必看日志确认无报错：
+## 4. 环境变量与预设账号
 
-```bash
-docker compose logs web | tail -50   # 期望无 [emerg]/[error]，只有 "start worker process"
-docker compose logs api  | tail -50   # 期望 "heming server listening on http://0.0.0.0:8787"
-```
-
-## 4. 增加预设账号
-
-改 `HEMING_SEED_USERS`（逗号分隔 `用户名:密码`）后重新 up（环境变量变化会自动重建 api 容器）：
+全部配置在 `/etc/heming/api.env`（改完 `systemctl restart heming-api` 生效）：
 
 ```bash
-HEMING_SEED_USERS="admin:admin,alice:alice123,bob:bob1" docker compose up -d
-```
-
-或在仓库根目录放一个 `.env`（docker compose 会自动读取，不含在上传包内）：
-
-```bash
-HEMING_SEED_USERS=admin:admin,alice:alice123
+NODE_ENV=production
+HOST=127.0.0.1            # 只绑回环，对外一律经 nginx:80
+PORT=8787
+HEMING_DB_PATH=/var/lib/heming/heming.db
+HEMING_SEED_USERS=admin:admin
 # HEMING_ALLOW_REGISTER=1   # 取消注释才放开公开注册（默认关，403）
-# HEMING_DB_PATH=/data/heming.db   # 容器内缺省已是此值（见 §4 注意），仅需改动时覆盖
 # HEMING_FILE_QUOTA_MB=200   # 每用户共享文件存储配额（MB），超限上传 413 quota_exceeded
+# HEMING_STUN / HEMING_TURN_URL / HEMING_TURN_USERNAME / HEMING_TURN_CREDENTIAL   # 语音通话需公网 TURN 时才配
 ```
 
-注意：
+服务端读到的环境变量就这些（`HOST`、`PORT`、`NODE_ENV`、`HEMING_DB_PATH`、`HEMING_SEED_USERS`、`HEMING_ALLOW_REGISTER`、`HEMING_FILE_QUOTA_MB`、`HEMING_STUN`、`HEMING_TURN_*`）。
 
-- 播种只在进程启动时执行。数据已由 SQLite 持久化（卷 `heming_heming-data`，容器内 `/data`），容器重启、重建不丢运行期产生的账号、会话与消息（见 §6 备份）。
-- 预设群「和鸣交流群」成员在**每次服务启动时补入当前全部账号**（B 语义，幂等）：`HEMING_SEED_USERS` 新增的账号在下一次启动后自动入群；用户自建同名群不会遮蔽预设群（预设匹配只认服务端播种的群）。M3 群管理开放后可调整。
-- `HEMING_DB_PATH`：SQLite 库文件路径，缺省 `./data/heming.db`；compose 已注入容器内 `HEMING_DB_PATH=/data/heming.db`（named volume `heming-data` → `/data`），一般无需改动。
-- `HEMING_FILE_QUOTA_MB`：每用户共享文件存储配额（MB，缺省 200，解析失败/≤0 回退 200）；超限上传返回 413 `quota_exceeded`，前端右栏目录头部显示已用/总量。
+加预设账号直接编辑该文件的 `HEMING_SEED_USERS`（逗号分隔 `用户名:密码`）后重启。注意：
 
-## 5. 更新流程与回滚
+- **`provision.sh` 只在 `/etc/heming/api.env` 不存在时创建它**——里面可能已被手工改过，重装不覆盖。
+- 播种只在进程启动时执行。数据由 SQLite 持久化在 `/var/lib/heming`，重启与重发版都不丢运行期产生的账号、会话与消息（备份见 §6）。
+- 预设群「和鸣交流群」成员在**每次服务启动时补入当前全部账号**（B 语义，幂等）：`HEMING_SEED_USERS` 新增的账号在下一次重启后自动入群；用户自建同名群不会遮蔽预设群（预设匹配只认服务端播种的群）。群管理开放后可调整。
+- `HEMING_FILE_QUOTA_MB`：每用户共享文件配额（MB，缺省 200，解析失败/≤0 回退 200）；超限上传 413 `quota_exceeded`，前端右栏目录头部显示已用/总量。
 
-更新（数据卷不动，即持久）：整个流程只重建镜像与容器，`heming-data` 卷从不删除，SQLite 数据（账号/会话/消息/已读状态）原样保留：
+## 5. 回滚
 
 ```bash
-# 本地重新打包上传解包（§2）
-cd ~/heming
-docker compose build
-docker compose up -d
+# 拿上一版的原始包重放即可（每版都留在 keep/ 里）
+ls -la /opt/heming/keep
+bash /opt/heming/app/deploy/install-app.sh /opt/heming/keep/heming-<旧版本>.tar.gz <旧版本>
 ```
 
-端口冲突排查：若 `up -d` 报 `bind: address already in use`（通常是 127.0.0.1:8787 维护口被宿主进程占用），按 §1 端口表该行的说明整体删除端口映射行即可，**不影响 80 对外服务**，维护改走 `docker compose exec api ...`。
-
-回滚（二选一）：
-
-```bash
-# A. 代码回退后重建（上传旧版本包，或服务器上 git 管理时）
-git checkout <上一个提交> && docker compose build && docker compose up -d
-
-# B. 镜像 tag 回滚（更新前先打 tag，推荐生产用）
-docker tag heming-api:latest heming-api:prev
-docker tag heming-web:latest heming-web:prev
-# 出问题后：把 compose 的 image 字段指到 heming-api:prev / heming-web:prev，再 up -d
-```
-
-数据卷 `heming-data` 在整个过程中不删除、不重建，回滚安全。
-
-镜像名（`heming-api` / `heming-web`）与卷名（`heming_heming-data`）依赖 compose 项目名，**默认等于仓库目录名**；若目录名不是 `heming`、或要在别的路径下操作，统一加 `-p heming` 固定项目名（`docker compose -p heming build/up/tag ...`），否则镜像 tag、§6 备份里的卷名会对不上。
+`/var/lib/heming` 全程不动，回滚不涉及数据。旧包别删：回滚依赖它（40G 磁盘、包 5MB，留得起）。
 
 ## 6. 备份
 
-数据（SQLite 库 `heming.db`）落在 named volume `heming_heming-data`（容器内 `/data`）。**备份 = 打包该卷**，与代码/镜像无关：
+要备份的只有 `/var/lib/heming`（`heming.db` 与其 `-wal`/`-shm`）：
 
 ```bash
-# 备份（在 /root/heming 执行；文件名带日期）
-docker run --rm -v heming_heming-data:/d -v "$PWD":/backup \
-  alpine tar czf /backup/heming-data-$(date +%F).tar.gz -C /d .
+systemctl stop heming-api
+tar czf /root/heming-data-$(date +%F).tar.gz -C /var/lib/heming .
+systemctl start heming-api
 
-# 恢复：停服务 → 解包回卷 → 起服务
-cd ~/heming && docker compose -p heming stop api
-docker run --rm -v heming_heming-data:/d -v "$PWD":/backup \
-  alpine tar xzf /backup/heming-data-<日期>.tar.gz -C /d
-docker compose -p heming start api
+# 恢复（覆盖前把现库改名留档）
+systemctl stop heming-api
+tar xzf /root/heming-data-<日期>.tar.gz -C /var/lib/heming
+chown -R heming:heming /var/lib/heming
+systemctl start heming-api
 ```
 
-卷不删不重建时数据一直在：`docker compose down` 默认保留卷，回滚/更新见 §5。
+停进程是为了拿到一致快照：WAL 在进程存活时可能尚未合并，热拷贝容易只拷走 `.db`、把最近的写入留在 `-wal` 里。
+
+> **2026-10-22 的教训**：实例重置（换系统）把 SQLite 库连同放在 `/root/heming` 的卷备份一起清掉了，本机没有库的副本，线上只剩预设账号。备份必须**落到本机或对象存储**，别只留在服务器磁盘上。
 
 ## 7. CORS 与同源决策
 
-- **同源（默认，Docker 部署）**：浏览器访问 `http://47.92.39.184` 时，页面（nginx:80）与 API（nginx 反代 `/api` → api:8787）**同源**，WS 走 `ws://47.92.39.184/api/ws` 同样被 nginx 反代。因此**本地构建 web 产物时不注入 `VITE_API_BASE`**（留空 = 同源相对路径），配置最少、不依赖任何跨域。
-- **CORS 兜底**：服务端仍带最小 CORS 头（`Allow-Origin: *`、预检 `OPTIONS` 直接 204），用于直连场景（如本机开发的 web 连远程 api、或桌面壳 file:// 页面）。鉴权是 Bearer token 而非 cookie，`*` 不带来凭据风险；未引入 `cors` 依赖，10 行手写。
-- **`VITE_API_BASE` 只服务桌面壳**（`file://` 无同源可用），给桌面打包时单独注入绝对地址即可，与本套 Docker 部署互不影响。
+- **同源（默认）**：浏览器访问 `http://47.92.39.184` 时，页面（nginx:80）与 API（反代 `/api` → 127.0.0.1:8787）**同源**，WS 走 `ws://47.92.39.184/api/ws` 同样被反代。因此**本地构建 web 产物时不注入 `VITE_API_BASE`**（留空 = 同源相对路径），配置最少、不依赖任何跨域。
+- **CORS 兜底**：服务端仍带最小 CORS 头（`Allow-Origin: *`、预检 `OPTIONS` 直接 204），用于直连场景（本机开发的 web 连远程 api、桌面壳 `app://` 页面）。鉴权是 Bearer token 而非 cookie，`*` 不带来凭据风险；未引入 `cors` 依赖，10 行手写。
+- **`VITE_API_BASE` 只服务桌面壳**，给桌面打包时单独注入绝对地址即可，与云端部署互不影响。
 
-## 8. 预览实例（更新验证）
+## 8. 桌面端嵌入的 web 产物（与云端发布的关系）
 
-```bash
-docker compose --profile preview up -d     # 启动与 web 同镜像的 preview，端口 8788
-curl -s http://127.0.0.1:8788/api/health   # 走同一 api 实例
-docker compose --profile preview down      # 验证完关掉
-```
-
-用法：新代码上线前先 `docker compose build` 再起 preview，浏览器开 `http://47.92.39.184:8788`（安全组需临时放行 8788）确认无误，再 `docker compose up -d` 切正式 web。
-
-## 9. 资源与运维参考
-
-- 内存上限：api 512M、web/preview 各 128M（compose `deploy.resources.limits`）。
-- 重启策略：`unless-stopped`（宿主机重启后自动拉起）。
-- 健康检查：api 每 30s `wget http://127.0.0.1:8787/api/health`；web `depends_on` api healthy 后才启动。
-- 常用命令：
-
-```bash
-docker compose ps
-docker compose logs -f api
-docker compose restart web
-docker compose down            # 停（保留 heming-data 卷）
-```
-
-## 10. 桌面端嵌入的 web 产物（与云端构建的关系）
-
-桌面客户端**不再从云端加载界面**——web 构建产物打进安装包，用自定义协议 `app://heming` 本地加载；API 与 WS 仍走云端。设计见 `docs/superpowers/specs/2026-10-18-embed-web-in-client-design.md`。
+桌面客户端**不从云端加载界面**——web 构建产物打进安装包，用自定义协议 `app://heming` 本地加载；API 与 WS 仍走云端。设计见 `docs/superpowers/specs/2026-10-18-embed-web-in-client-design.md`。
 
 **为什么用自定义协议而不是 `file://`**：`file://` 不是安全上下文，`crypto.subtle` 不可用会让 E2E 加密失效（红线：无安全上下文拒绝发送）。`app://` 注册为 privileged + secure 后实测 `isSecureContext === true`、明文 `ws://` 仍可连、且**不需要** `allowRunningInsecureContent` 之类放宽。
 
@@ -219,10 +176,10 @@ docker compose down            # 停（保留 heming-data 卷）
 
 | | 云端（本文件 §2–§3） | 桌面嵌入（`pnpm -w run dist:desktop`） |
 |---|---|---|
-| 命令 | `pnpm --filter @heming/web build` 出产物 → `docker compose build`（只 COPY，不在云端跑 vite，见 §12） | `node scripts/build-desktop-web.mjs` 预构建 |
+| 命令 | `pnpm -r build` 出产物 → 打进 tar → `install-app.sh` 摆文件 | `node scripts/build-desktop-web.mjs` 预构建 |
 | `VITE_API_BASE` | **不注入**（同源相对路径） | **注入**云端绝对地址（跨域，靠服务端 CORS `*`） |
-| 产物落点 | `packages/web/dist` → 打进 web 镜像的 nginx 目录 | `packages/desktop/web-dist/` → 打包进 `resources/web` |
-| 更新方式 | 部署一次，**所有客户端立刻生效** | **重发安装包**；之后由自动更新源（§11）分发 |
+| 产物落点 | `packages/web/dist` → nginx `root` | `packages/desktop/web-dist/` → 打包进 `resources/web` |
+| 更新方式 | 部署一次，**所有浏览器用户立刻生效** | **重发安装包**；之后由自动更新源（§9）分发 |
 
 `VITE_API_BASE` 取值：`HEMING_WEB_URL` 环境变量 > 默认 `http://47.92.39.184`（与 `secure-origins.js` 的 `APP_DEFAULT_URL` 同源，避免两处常量漂移）。
 
@@ -231,17 +188,17 @@ docker compose down            # 停（保留 heming-data 卷）
 改了 web 代码要**两处分别发布**：
 
 ```bash
-# 1) 云端（浏览器访问 + 旧客户端仍是远程加载）
-pnpm --filter @heming/web build            # 产物必须本地先出（§2）
-tar ... -czf /tmp/heming.tar.gz . && scp ...   # 见 §2
-ssh root@47.92.39.184 'cd ~/heming && docker compose -p heming build && docker compose -p heming up -d'
+# 1) 云端（浏览器端 + 尚未升级的用户）
+pnpm -r build && tar ... -czf /tmp/heming.tar.gz .              # §2
+python -u .superpowers/deploy-bare.py upload "<tar>"
+python -u .superpowers/deploy-bare.py install                   # provision 之后的日常路径
 
 # 2) 桌面端（嵌入产物随安装包）
 pnpm -w run dist:desktop                  # 内部先跑 scripts/build-desktop-web.mjs
-bash scripts/publish-update.sh            # 把安装包 + latest.yml 传到 /updates（§11）
+bash scripts/publish-update.sh            # 安装包 + latest.yml → /updates（§9）
 ```
 
-**只发其中一处会出现版本不一致**：浏览器端看云端、已装客户端看包内。排查「为什么我这没有新功能」时先确认客户端版本。
+**只发其中一处会出现新旧界面并存**：浏览器看云端、已装客户端看包内。排查「为什么我这没有新功能」时先确认客户端版本。
 
 ### 地址优先级（`main.js` 的 `resolveAppUrl`）
 
@@ -254,7 +211,7 @@ HEMING_DEV_URL（本地开发，热更新）
 
 开发时仍走 `HEMING_DEV_URL` 连本地 vite，**热更新不受影响**。
 
-## 11. 自动更新源（客户端升级）
+## 9. 自动更新源（客户端升级）
 
 ### 拓扑
 
@@ -265,20 +222,18 @@ HEMING_DEV_URL（本地开发，热更新）
        └─ path + .blockmap → 下载（优先差分包）
 ```
 
-nginx 把 `/opt/heming/updates`（宿主目录，只读挂载）映射到 `/updates/`。
-**不用子域名、不用 HTTPS**：更新清单与安装包都没有机密性要求，
-而 HTTPS 需要证书与自动续期，对当前规模是额外运维负担。
-代价是首次安装包必须用户手动下载一次（明文链路可被篡改）——
-之后所有更新都从已装好的客户端发起，且清单里有 sha512 校验。
+nginx 的 `location /updates/` 直接 `alias /opt/heming/updates/`（裸机上这就是宿主目录本尊，没有挂载）。
+**不用子域名、不用 HTTPS**：更新清单与安装包都没有机密性要求，而 HTTPS 需要证书与自动续期，对当前规模是额外运维负担。
+代价是首次安装包必须用户手动下载一次（明文链路可被篡改）——之后所有更新都从已装好的客户端发起，且清单里有 sha512 校验。
 
 ### 发版流程
 
 ```bash
-# 1) 出包（会自动生成 latest.yml，见下）
+# 1) 出包（build-desktop.mjs 已默认注入 --publish always，产物里必须有 latest.yml）
 node scripts/build-desktop-web.mjs
 node scripts/build-desktop.mjs --win nsis
 
-# 2) 上传到云端
+# 2) 上传（密码只走环境变量，不落盘；脚本内部用 paramiko）
 export HEMING_SSH_PWD='***'
 bash scripts/publish-update.sh --dry-run   # 先看要传什么
 bash scripts/publish-update.sh             # 真传
@@ -288,63 +243,63 @@ curl -sI http://47.92.39.184/updates/latest.yml | head -3
 curl -s  http://47.92.39.184/updates/latest.yml | head -8
 ```
 
-### 两个必须知道的坑
+**产物不在默认目录时要给 `HEMING_RELEASE_DIR`**。本轮因 `win-unpacked` 被 `app.asar` 的 EBUSY 锁住（见 HANDOFF §5 待办），改用 `--config.directories.output=…/release/r25` 出包，发布时就得指过去：
 
-1. **`latest.yml` 不会自动生成。** electron-builder 默认不产出更新元数据，
-   少了它客户端永远提示「已是最新」——**界面上与正常无差别，无法靠肉眼发现**。
-   `build-desktop.mjs` 已默认注入 `--publish always`，
-   产物目录里必须能看到 `latest.yml` 才算打包成功。
+```bash
+HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r25 bash scripts/publish-update.sh --dry-run
+```
 
-2. **`/updates/` 必须排在 nginx `location /` 之前。** 否则 `try_files`
-   会把 `latest.yml` 回落成 `index.html`，客户端拿到 HTML 报「解析失败」。
-   该顺序已固化在 `docker/web-nginx.conf`，改动时别调换。
+### 三个必须知道的坑
+
+1. **`latest.yml` 不会自动生成。** electron-builder 默认不产出更新元数据，少了它客户端永远提示「已是最新」——**界面上与正常无差别，无法靠肉眼发现**。`build-desktop.mjs` 已默认注入 `--publish always`，产物目录里必须能看到 `latest.yml` 才算打包成功。
+2. **`/updates/` 必须排在 nginx `location /` 之前。** 否则 `try_files` 会把 `latest.yml` 回落成 `index.html`，客户端拿到 HTML 报「解析更新信息失败」。该顺序已固化在 `deploy/nginx-heming.conf`，改动时别调换。
+3. **上传后要比字节数。** `publish-update.sh` 会 `stat -c '%s|%n'` 校验远端安装包大小——Git Bash 的 MSYS 路径转换能让「上传成功」变成只写到本机磁盘，日志一切正常、云端目录里没文件。所以脚本开头 `export MSYS_NO_PATHCONV=1`，并在远端目录不是绝对 POSIX 路径时立刻停下。
+
+上线后务必确认清单**不是 HTML**，并且支持断点续传：
+
+```bash
+curl -sI http://47.92.39.184/updates/latest.yml | grep -E 'HTTP|Content-Type|Content-Length'
+# 期望 200 + application/octet-stream + 352 字节（不是 text/html）
+curl -sI -H 'Range: bytes=0-16' "http://47.92.39.184/updates/<URL 编码后的安装包名>" | head -3
+# 期望 206 Partial Content（差分更新靠它）
+```
 
 ### 回滚
 
-把 `/opt/heming/updates/latest.yml` 换回上一版的（连同安装包与 blockmap）即可。
-已安装的客户端下次检查会回到旧版本——**这正是要的效果**。
-旧包别急着删：回滚依赖它。
+把 `/opt/heming/updates/latest.yml` 换回上一版的（连同安装包与 blockmap）即可。已安装的客户端下次检查会回到旧版本——**这正是要的效果**。旧包别急着删：回滚依赖它。
 
-## 12. 小内存机器：为什么前端不在云端构建
+## 10. 资源与运维参考
 
-目标机是**阿里云轻量应用服务器：2 vCPU / 1.8GB 内存 / 40GB 磁盘、无 swap**。
-
-### 实测结论
-
-`pnpm --filter @heming/web build`（tsc + vite）峰值 1.0–1.4GB。宿主 + docker daemon + buildkit 常驻已吃掉 ~500MB，
-两者相加正好越界。表现不是「构建失败」而是**整机失联**，这轮部署连撞两次：
-
-- ICMP 仍回包（29ms、TTL 50）——云平台的网络层活着；
-- TCP 22/80 能完成握手，但 60 秒收不到一个字节（sshd 的 worker 不再干活）；
-- **异网探针（两个独立公网出口）拿到 `522`**——排除「只是我这侧 IP 被封」；
-- 容器与数据卷没事：控制台重启后 `unless-stopped` 自动拉起**旧镜像 + 原数据**，服务当场恢复。
-
-所以判断标准记牢：**能 ping 通、能连上、不回数据 = 用户态冻住**，不是网络问题，也不是安全组。
-
-### 现在的做法（已落地）
-
-前端在开发机 build，产物随部署包上传，`docker/web.Dockerfile` 只剩 `nginx:alpine` + 两个 `COPY`。
-云端 web 构建从「分钟级、1GB+ 内存」变成秒级零内存压力；api 镜像仍在云端构建（它装依赖 + tsc，实测扛得住）。
-
-代价两条，都是明确的取舍：
-
-1. **发布多一步本地构建**，忘跑就得到一个空站点（`COPY packages/web/dist` 找不到 `index.html` 才报错，不会静默出半成品）；
-2. **镜像不再自足**——源码包里的 `dist` 才是界面真身。回滚仍然靠 `heming-web:prev` tag（§5），不受影响。
-
-### 两件常备小事
+- 内存上限：`heming-api.service` 的 `MemoryHigh=384M` / `MemoryMax=512M`。**这是护栏不是功能**：真正的保护是「云端不构建」；触顶时进程被 systemd 杀掉、3 秒后重启，表现为掉线一下。
+- swap：2G `/swapfile` **写在 `/etc/fstab` 里**（裸机部署中它属于配置，不再是一次性临时兜底），`vm.swappiness=15` 只设运行时、不落 `/etc/sysctl.d/`——它不是正确性依赖，只是让回收更早开始。实测本轮部署全程 swap 用量 < 1MB。
+- Node 版本：`v24.18.0`，npmmirror 二进制包解到 `/usr/local/lib/nodejs/`，软链进 `/usr/local/bin`。不用 apt 的 `nodejs`：Ubuntu 24.04 给的是 18.x，而根 `package.json` 要求 `engines.node >= 24`。`pnpm@10.33.2` 与 `docker/*.Dockerfile` 钉同一代（lockfileVersion 9.0）。
+- 不需要 `build-essential`：服务端依赖树里没有需编译的原生模块（SQLite 用 Node 24 内置的 `node:sqlite`，express/ws/zod 是纯 JS）。
+- 开机自启：`systemctl enable nginx heming-api`（provision / install 已做）。
+- 磁盘：包 5MB + 生产依赖 67 个包 + `keep/` 历史包，40G 用不到零头。
 
 ```bash
-# ① 临时 swap：兜住 api 镜像里的 pnpm install / tsc 峰值。
-#    刻意不写 /etc/fstab——重启即失效，属于本机变更而非服务器配置变更；
-#    想长期留着再追加：echo '/swapfile none swap sw 0 0' >> /etc/fstab
-fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
-sysctl -w vm.swappiness=15
-
-# ② 清 buildkit 缓存（40GB 盘 + 内存双占）
-docker builder prune -f
+systemctl status heming-api --no-pager | head -12
+journalctl -u heming-api -f
+systemctl restart heming-api
+tail -50 /var/log/nginx/error.log
+free -m | head -3; swapon --show
 ```
 
-> **别在这台机上跑 `docker builder du` / `docker system df`。**
-> 它们要遍历几十小时的层缓存，2GB 内存无 swap 时自己就能把机器压失联——
-> 本轮第二次宕机就是这条诊断命令造成的，当时机器并没有在构建。
-> 确实要看占用，先把 swap 挂上再跑。
+> **失联判据（记牢）**：能 ping 通、TCP 能握手、60 秒不回一个字节 = **用户态冻住**，不是网络问题、不是安全组。这台机两次事故都长这样，第二次甚至只是跑了 `docker builder du`（当时并没有在构建）。裸机方案下若再出现，先看 `dmesg | tail` 与 `free -m`；**别猛连 22 端口**——云盾的爆破防护会封源 IP，届时 80 正常而 SSH 一直 `Error reading SSH protocol banner`，只能等冷却或换出口。
+
+## 11. 旧 Docker 路径（已停用）
+
+`docker/`（`api.Dockerfile`、`web.Dockerfile`、`web-nginx.conf`）与 `docker-compose.yml` **保留但不再使用**：机器已重置且没有装 Docker，发版一律走 §2–§3。
+
+保留的理由只有一条：`docker/web-nginx.conf` 与 §9 坑 2 的顺序约束互为出处，两份 nginx 配置（宿主版与容器版）必须同时满足「`/updates/` 排在 `location /` 之前」「WS 用 HTTP/1.1 + Upgrade 且 `= /api/ws` 精确匹配」。确认不再回退 Docker 时，连同 compose 文件一起清理，别只删一半。
+
+那套流程里的旧做法在裸机方案各有替代，别再按 Docker 时代的命令操作线上：
+
+| Docker 时代 | 现在 |
+|---|---|
+| `docker compose build && up -d`（api 仍在云端构建） | `install-app.sh`，云端零构建 |
+| 镜像 tag `heming-api:prev` 回滚 | `/opt/heming/keep` 里旧包重放 |
+| named volume `heming_heming-data`（容器内 `/data`） | `/var/lib/heming` 目录（§6） |
+| compose `deploy.resources.limits` | 单元里的 `MemoryHigh` / `MemoryMax` |
+| `--profile preview` 起 8788 验证实例 | 已取消：预发靠本地门禁 + `install-app.sh` 自检。要独立预发就另开机器，别再往这台 2C2G 上叠进程 |
+| `docker builder prune -f` 清缓存 | 没有缓存可清了（也别在这台机上跑任何要遍历镜像层的诊断命令） |

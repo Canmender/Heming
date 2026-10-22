@@ -9,7 +9,7 @@
 | [../README.md](../README.md) | 项目定位、启动、打包、结构、数据边界 |
 | [HANDOFF.md](HANDOFF.md) | 新会话接手：现状、架构红线、工作约定、下一步 |
 | [VERSION-MANAGEMENT.md](VERSION-MANAGEMENT.md) | 5 段版本号、bump 脚本、发布顺序、打包坑 |
-| [deploy.md](deploy.md) | Docker 部署、两套产物、自动更新源、备份回滚 |
+| [deploy.md](deploy.md) | 裸机部署（已去 Docker）、两套产物、自动更新源、备份回滚 |
 
 ## 2. 功能说明（用户/维护者视角）
 
@@ -27,6 +27,7 @@
 | 文档 | 主题 |
 |---|---|
 | [specs/2026-10-13-heming-platform-design.md](superpowers/specs/2026-10-13-heming-platform-design.md) | 总设计、数据模型、里程碑、二期范围 |
+| [specs/2026-10-22-bare-metal-deploy.md](superpowers/specs/2026-10-22-bare-metal-deploy.md) | 云端去 Docker：2C2G 上的裸机 nginx + systemd，云端零构建 |
 | [specs/2026-10-16-m3-agents-design.md](superpowers/specs/2026-10-16-m3-agents-design.md) | 智能体名册与群内 @ |
 | [specs/2026-10-17-e2e-encryption-design.md](superpowers/specs/2026-10-17-e2e-encryption-design.md) | 端到端加密：棘轮、信封、迁移 |
 | [specs/2026-10-18-voice-call-design.md](superpowers/specs/2026-10-18-voice-call-design.md) | Mesh WebRTC 语音/视频通话 |

@@ -1,0 +1,36 @@
+# 和鸣 API（IM 桥梁 + 智能体名册）· systemd 单元
+# 装到 /etc/systemd/system/heming-api.service，由 deploy/install-app.sh 复制并重启。
+#
+# 只监听 127.0.0.1:8787（HOST 见 /etc/heming/api.env），对外流量一律走 nginx:80。
+# 需要绑 80 之类特权端口时才用 AmbientCapabilities，现在不需要。
+
+[Unit]
+Description=Heming API (IM bridge)
+Documentation=file:///opt/heming/app/docs/deploy.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=heming
+Group=heming
+WorkingDirectory=/opt/heming/app
+EnvironmentFile=/etc/heming/api.env
+ExecStart=/usr/local/bin/node /opt/heming/app/packages/server/dist/index.js
+
+Restart=always
+RestartSec=3
+# 1.6G 物理内存的机器上，单进程给个硬上限，避免它把宿主拖死（本轮事故的形态之一）
+MemoryHigh=384M
+MemoryMax=512M
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+# SQLite 库与上传文件都落在这里（HEMING_DB_PATH 的目录）
+ReadWritePaths=/var/lib/heming
+
+[Install]
+WantedBy=multi-user.target
