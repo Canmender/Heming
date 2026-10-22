@@ -41,7 +41,7 @@
 pnpm -r build
 ```
 
-> ★ **同一轮里既出安装包又上云时的顺序陷阱**：`scripts/build-desktop-web.mjs` 会**就地重写 `packages/web/dist`**（注入 `VITE_API_BASE=http://47.92.39.184`），再拷进 `packages/desktop/web-dist`。所以先跑桌面打包、后跑上面的 tar，上云的就是那份写死绝对地址的产物——今天云端恰好就是这个 IP，看不出问题；换成域名 + HTTPS 那天就会变成前端打不开。两处都发时：**云端 tar 用 `pnpm -r build` 之后立刻打**，或者打完桌面包后重跑一次 `pnpm --filter @heming/web build` 再打 tar。校验口径：云端产物与安装包内嵌产物**主 bundle 文件名应当不同**（d.28.1.7.0 实测云端 `index-DmBMBsmK.js` vs 安装包 `index-DKY2FFMG.js`；打完包重跑云端口径构建会**复现出与线上同名同字节**的 bundle，可据此确认没有误传注入版）。
+> ★ **同一轮里既出安装包又上云时的顺序陷阱**：`scripts/build-desktop-web.mjs` 会**就地重写 `packages/web/dist`**（注入 `VITE_API_BASE=http://47.92.39.184`），再拷进 `packages/desktop/web-dist`。所以先跑桌面打包、后跑上面的 tar，上云的就是那份写死绝对地址的产物——今天云端恰好就是这个 IP，看不出问题；换成域名 + HTTPS 那天就会变成前端打不开。两处都发时：**云端 tar 用 `pnpm -r build` 之后立刻打**，或者打完桌面包后重跑一次 `pnpm --filter @heming/web build` 再打 tar。校验口径：云端产物与安装包内嵌产物**主 bundle 文件名应当不同**（d.29.1.7.0 实测云端 `index-BkxsQKsv.js` 1436951 字节 vs 安装包 `index-ChSMGDkh.js` 1436970 字节，多出的 19 字节正好等于注入的 `http://47.92.39.184` 字面量长度，grep 该 IP 在安装包多命中一次；打完包重跑云端口径构建会**复现出与线上同名同字节**的 bundle，可据此确认没有误传注入版——本轮 14:59 重跑后本机 `packages/web/dist` 正是 1436951 字节，与线上一致）。
 
 ```bash
 # 2) 打包（在仓库根目录；data/ 是本机开发库，不上云）
@@ -164,7 +164,7 @@ systemctl start heming-api
 
 > **2026-10-22 的教训**：实例重置（换系统）把 SQLite 库连同放在 `/root/heming` 的卷备份一起清掉了，本机没有库的副本，线上只剩预设账号。备份必须**落到本机或对象存储**，别只留在服务器磁盘上。
 
-所以**每次发版前先备份，而且当场拷回本机**——只跑上面那段 tar 不算备份。`.superpowers/deploy-bare.py backup` 一次做完：停服务 → tar → 起服务 → SFTP 取回本机 `.tmp/backups/` → 校验本机文件非空 + `/api/health` 仍是 `{"ok":true"}`。库只有几十 KB，别省这一步。
+所以**每次发版前先备份，而且当场拷回本机**——只跑上面那段 tar 不算备份。`.superpowers/deploy-bare.py backup` 一次做完：停服务 → tar → 起服务 → SFTP 取回本机 `.tmp/backups/` → 校验本机文件非空 + `/api/health` 仍是 `{"ok":true"}`。库只有几十 KB，别省这一步。两个已知的操作细节：备份文件名只带日期，**同一天发第二版会盖掉第一版**，要在跑下一版 `backup` 前把上一份改名留档；脚本修正前（`__file__` 未 resolve、少算一层 parent）落点是 `.superpowers/.tmp/backups/`，那儿若有旧档别当丢了，现在起统一是仓库根 `.tmp/backups/`。
 
 ## 7. CORS 与同源决策
 
@@ -249,11 +249,11 @@ curl -sI http://47.92.39.184/updates/latest.yml | head -3
 curl -s  http://47.92.39.184/updates/latest.yml | head -8
 ```
 
-**产物不在默认目录时要给 `HEMING_RELEASE_DIR`**。`dist:desktop` 反复在 `win-unpacked/resources/app.asar` 上撞 `EBUSY`（根因未查，见 HANDOFF §5 待办），**已固化成惯例：每版换一个新的输出目录**——r25 打 d.25.1.7.0、r26/r27/r28 依次到 **r29 打 d.28.1.7.0（均一次通过）**，下一版 **d.29 用 `release/r30`**。打包与发布两处必须指同一目录（`build-desktop.mjs` 与 `publish-update.sh` 都读 `HEMING_RELEASE_DIR`）：
+**产物不在默认目录时要给 `HEMING_RELEASE_DIR`**。`dist:desktop` 反复在 `win-unpacked/resources/app.asar` 上撞 `EBUSY`（根因未查，见 HANDOFF §5 待办），**已固化成惯例：每版换一个新的输出目录**——r25 打 d.25.1.7.0、r26/r27/r28 依次到 r29 打 d.28.1.7.0、**r30 打 d.29.1.7.0（均一次通过）**，下一版 **d.30 用 `release/r31`**。打包与发布两处必须指同一目录（`build-desktop.mjs` 与 `publish-update.sh` 都读 `HEMING_RELEASE_DIR`）：
 
 ```bash
-HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r29 node scripts/build-desktop.mjs --win nsis
-HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r29 bash scripts/publish-update.sh --dry-run
+HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r30 node scripts/build-desktop.mjs --win nsis
+HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r30 bash scripts/publish-update.sh --dry-run
 ```
 
 ### 三个必须知道的坑

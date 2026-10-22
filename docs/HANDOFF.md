@@ -1,8 +1,8 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-10-22
-- 当前版本：`d.28.1.7.0`
-- 当前 main：以 `git log -1` 为准（`915d19c`/`365c4e7` 记忆召回的可观测性与发布收口 → `9e27d5e` 记忆个性化权重；本轮 d.28.1.7.0 **云端与安装包两处均已发布**，下一笔收口提交记证据）
+- 当前版本：`d.29.1.7.0`
+- 当前 main：以 `git log -1` 为准（`9e27d5e`/`449dad6` 个性化权重与发布收口 → `7d13525` 冷清单覆盖面与计数一致性 → 本轮收口 docs 提交；d.29.1.7.0 **云端与 `/updates` 两处均已发布**，证据见 §2）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
@@ -21,12 +21,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 版本 | `d.28.1.7.0`（5 段，五包同步） |
-| main | `204a592`（d.25.1.6.0 功能批次）→ `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ `94e6d77`（d.25.1.7.0 发布收口）→ `3956d23`（d.26.1.7.0 弹窗屏蔽背景 + 焦点归还 + 首帧状态）→ `915d19c`（d.27.1.7.0 记忆召回的可观测性）→ `9e27d5e`（d.28.1.7.0 记忆个性化权重） |
-| 测试 | 2026-10-22 实跑（收口前在最终工作区重跑，exit 0）：`pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿；web 110 文件 / 1732 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 17 个 `node --test` 文件 / 225 例。本轮新增 30 例集中在记忆与运行链路：`usage 16`／`recall +7`／`context +3`／`MemoryPage +4`，相关 11 个文件 204 例 |
-| 线上 | **`d.28.1.7.0` 已发布（裸机，云端零构建）**：发版前备份落本机 `.superpowers/.tmp/backups/heming-data-2026-10-22.tar.gz`（3719 字节，14:27，含 `heming.db`/`-wal`/`-shm`）；部署包 `/tmp/heming-d28.tar.gz` 5527150 字节、远端/本机 MD5 同为 `b83b798405459cd8…`；`INSTALL DONE: d.28.1.7.0`，`/api/health` 返回 `{"ok":true}`、`/` 经 nginx 200。线上主 bundle 外部取回 `assets/index-DmBMBsmK.js`（200，**1433883 字节**），grep 命中 `heming.memory.usage.v1`×2 与「长期未被引用」×1；发版后重跑 `pnpm --filter @heming/web build` 复现出**同名同字节**的 bundle，确认线上跑的就是云端口径产物 |
-| 安装包 | **`和鸣 Setup d.28.1.7.0.exe`（178850365 字节，`release/r29/`）已发布到 `/updates`**——脚本复核远端字节数与本地一致（178850365），`latest.yml` 352 字节读到 `version: 28.1.7`，Range 请求返回 206 + `bytes 0-16/178850365`。安装包内嵌注入 `VITE_API_BASE` 的产物（`index-DKY2FFMG.js`），与云端站点产物（`index-DmBMBsmK.js`）**不同名即不同源**，这是预期；打完包已重跑 `pnpm --filter @heming/web build` 把本机 `packages/web/dist` 恢复成云端口径，避免下一轮误传注入版 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落），当前指向 `28.1.7`；`/updates/` 目录现存 d.25.1.6.0 至 d.28.1.7.0 各版本包（回滚依赖旧包，别删） |
+| 版本 | `d.29.1.7.0`（5 段，五包同步） |
+| main | `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ `94e6d77`（d.25.1.7.0 收口）→ `3956d23`（d.26.1.7.0 弹窗屏蔽背景 + 焦点归还）→ `915d19c`（d.27.1.7.0 召回可观测性）→ `9e27d5e`（d.28.1.7.0 个性化权重）→ `7d13525`（d.29.1.7.0 冷清单覆盖面 + 计数一致性） |
+| 测试 | 2026-10-22 实跑（d.29 门禁，exit 0）：`pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿；web 110 文件 / 1735 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 17 个 `node --test` 文件 / 225 例。记忆链路（`lib/memory` + `agentRuntime/context` + `MemoryPage`）11 个文件 207 例 |
+| 线上 | **`d.29.1.7.0` 已上线（裸机，云端零构建）**：发版前备份落本机（3719 字节，14:53，写作 `heming-data-2026-10-22-d29.tar.gz`；**同日 d.28 那份已改名 `heming-data-2026-10-22-d28.tar.gz`**，两份连同上午那份都在 `.tmp/backups/`，md5 与脚本产物逐字节一致，见 §5 #1）；部署包 `/tmp/heming-d29.tar.gz` 5535187 字节、远端/本机 MD5 同为 `0f5bc6568def6e17…`；`INSTALL DONE: d.29.1.7.0`，`/api/health` `{"ok":true}`，`/` 经 nginx 200。线上主 bundle `assets/index-BkxsQKsv.js`（200，**1436951 字节**）与本机门禁产物**同名同字节**；bundle 内 grep 命中 `heming.memory.usage.v1`×2、「长期未被引用」×5、「的对话沉淀」×1（最后一项是 d.29 新增文案，证明确实是新版） |
+| 安装包 | **`和鸣 Setup d.29.1.7.0.exe`（178851512 字节，`release/r30/`）已发布到 `/updates`**——本机 sha512 重算与 `latest.yml` 逐字一致（`rU/rRiBF…`，`size` 字段与实际字节相符），远端 Range 请求返回 206 + `bytes 0-16/178851512`，即远端字节数与本地一致。安装包内嵌注入 `VITE_API_BASE` 的产物（`index-ChSMGDkh.js` 1436970 字节），与云端站点产物（`index-BkxsQKsv.js` 1436951 字节）**不同名即不同源**，这是预期；打完包已重跑 `pnpm --filter @heming/web build` 把本机 `packages/web/dist` 恢复成云端口径（14:59 复核 1436951 字节 = 线上），避免下一轮误传注入版 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落），当前指向 `29.1.7`；`/opt/heming/updates/` 实测 13 个文件：d.25.1.6.0 至 d.29.1.7.0 共 6 版安装包 + 6 份 blockmap + `latest.yml`（回滚依赖旧包，别删） |
 | 账号 | 只有 `admin/admin`（`HEMING_SEED_USERS` 播种；注册默认关闭）。**重置把旧库连同 `zhoukang` 等账号一起清掉了**，历史会话/消息不可恢复 |
 
 ### 已完成里程碑
@@ -55,6 +55,7 @@
 22. **弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态（d.26.1.7.0）**：`useModalA11y` 补上「打开期间屏蔽背景、关闭后归还焦点」。因本仓弹窗**无 portal**，采用**遮罩根起的兄弟逐个 `inert`**（只挂 inert 不补 aria-hidden）、**模块级引用计数**支持嵌套、`data-a11y-keep` 保留常驻通话浮层可点、非模态浮层（通知中心）传 `blockBackground:false` 保住「点外面关」；焦点归还有条件（焦点确实丢失才还，不抢关闭方主动安排的焦点）。`loadWorkspace` 加 `workspaceReady`/`workspaceError`，HomePage 首帧未落地显示加载骨架、失败显示「加载失败 + 重试」，**后台刷新失败不推翻已就绪**。文档见 `docs/superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md`。
 23. **记忆召回的可观测性（d.27.1.7.0）**：把「召回 ≠ 注入」做成一等公民。新增注入旁路 `MemoryObservability`（`injected`／`dropped`+原因／`scores`／`superseded`／`counts`），**差集只在 `summarizeInjection` 算**（只有格式化层同时知道候选与注入清单，散到各 UI 写一遍偏一次）；`truncated`（注入了一半）与 `budget`（整条没进）分开，同键旧值单独标注「被覆盖，不是漏召回」。引用判定 `matchUsage` 是**字符串级词重合、零额外模型调用**（`USAGE_MIN_HITS=2`、单词需长到 3 字符、跳过工作层与 `focus`、比对**截断后**的文本；判据保守 ⇒ 界面只写「疑似引用」）。留档走**独立键** `heming.memory.recallLog.v1`（40 档／256KB／注入留 120 字／首档无条件保留，**不参与记忆导出**，也不污染 `selfAudit` 回滚时间线与任务区 `TaskRecord`）；`RecallRecorder` 用 `agentId::userText` 作键，把「两个钩子都拿不到 streamId」的两端接上，全程静默。记忆区：预览结论行 `召回 N 条 → 注入 M 条 · 预算占用 X/1200`、逐条带打分与状态、新增「召回记录」区（默认最近 3 档、明细可看引用与未注入原文、清除二次确认）、语义卡注脚「最近注入／疑似引用」。文档见 `docs/superpowers/specs/2026-10-22-memory-recall-observability.md`。
 24. **记忆个性化权重（d.28.1.7.0）**：把 d.27 的归因从「看得见」变成「有用」——被引用过的记忆排前面，长期没被引用的列出来给人删。账本走**独立键** `heming.memory.usage.v1`（不挂召回日志：日志是环形 40 档，聊多了滚掉会让权重「无故变差」），按条目 id 累加 `注入/疑似引用`，**一档只计一次**、跳过工作层与 `focus`、`used` 夹在 `[0, injected]`、400 条容量按 `lastAt` 淘汰最旧、64KB 护栏、坏 JSON 回退空表、**不参与记忆导出**。因子 `1 + 25% × used/(used+3)`：**只提权不降权**（降权等于系统替用户判定这条没用，而判据只是词重合、偏保守），平滑项 + 封顶防「热门通吃」。接口 `UsageView { boostOf(id) }` 把公式与排序解耦，缺省 `NEUTRAL_USAGE` ⇒ 与 d.27 **逐字相同**（用例钉死 deep-equal）；`MemoryObservability.boosts` 只收 `>1`。接线：`RecallRecorder.settle` 只有日志真落盘才累加（同进同退，绝不留「有权重无档案」），ChatPage/记忆页预览共用同一份账本，删记忆 `forgetUsage`、清记录日志与账本同清。UI：语义/情景卡注脚 `累计注入 6 次 · 疑似引用 6 次 · 个性化加权 ×1.1667`（没计数整行不出现，不显示「×1」），预览逐行标乘子，新增「长期未被引用」清单（注入 ≥6 且引用 0，**只列不自动淘汰**）。文档见 `docs/superpowers/specs/2026-10-22-memory-personalization-weights.md`。
+25. **冷清单覆盖面 + 计数一致性（d.29.1.7.0）**：d.28 的「长期未被引用」只看公用桶，而召回读的是「全局桶 + 该智能体私有」，情景条目一条都没列——最该被看见的两类条目恰好看不见。清单输入换成 `layers.semantic` + `layers.episodic`，**按注入次数降序**（给人逐条删，「挡了多少预算」是唯一有用的排序依据），每行标层名与归属，删除复用既有两条确认流、不新造口径；判据与「不自动降权不自动删」一字未动。同时修掉一处会咬人的不一致：**删情景条目原先不清用量账本**，孤儿 id 白占 400 条容量、把还在用的有效计数挤掉（表现为权重无故退回 ×1 且无法解释），现在与删语义条目同口径 `forgetUsage`。顺带清理发布后自检的三处技术债（无人调用的账本单例、恒真的二次 `score > 0` 过滤、两条早退共享同一个空结果对象）。新增 3 例，记忆链路 11 文件 207 例。文档见 `docs/superpowers/specs/2026-10-22-cold-memory-coverage.md`。
 
 ## 3. 仓库结构与关键文件
 
@@ -123,7 +124,7 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 **当前直接待办**：
 
-1. **备份纪律已经落成脚本，但要每次真跑**：`deploy-bare.py backup` 做「停服 → tar → 起服 → SFTP 拷回本机 `.tmp/backups/` → 本机文件非空 + `/api/health` 复核」，d.25.1.7.0 发版前已实跑（3.7KB，含 `heming.db` 与 `-wal`）。剩下的不是开发项，是操作纪律：**没把库拷回本机就不许 install**（`docs/deploy.md` §6）。注意备份名按日期生成，**同一天二次发版会覆盖上一份**（d.28 实测：14:27 那份盖掉了上午的），一天内要多发几版就手动改名留档。
+1. **备份纪律已经落成脚本，但要每次真跑**：`deploy-bare.py backup` 做「停服 → tar → 起服 → SFTP 拷回本机 `.tmp/backups/` → 本机文件非空 + `/api/health` 复核」，d.25.1.7.0 发版前已实跑（3.7KB，含 `heming.db` 与 `-wal`）。剩下的不是开发项，是操作纪律：**没把库拷回本机就不许 install**（`docs/deploy.md` §6）。两个已修的坑：① 备份名按日期生成，**同一天二次发版会覆盖上一份**（d.28 实测：14:27 那份盖掉了上午的），一天内要多发几版就在覆盖前手动改名留档（d.29 已按此办理：14:53 这份写作 `heming-data-2026-10-22-d29.tar.gz`）；② 脚本原先用未 resolve 的 `__file__` 且少算一层 parent，**实际把备份落在 `.superpowers/.tmp/backups/`**，与 §6 写的 `.tmp/backups/` 不符（文件确实在本机，只是不在文档指的地方）——已改 `pathlib.Path(__file__).resolve()` + `parent.parent`，实测常量解析为 `D:\Heming\.tmp\backups`；d.28/d.29 两份已按原 md5 复制到 `.tmp/backups/`。
 2. **弹窗屏蔽背景的读屏软件实测**：`inert` 屏蔽、焦点归还、非模态退出、首帧骨架与失败重试条**都已在真实 Chromium 里实测通过**（证据见 `docs/superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md` §5：弹窗开着时对背景按钮调 `.focus()` 焦点不动）。**只剩 NVDA / VoiceOver 那一层**——需要装读屏的机器，属验证项不属实现项。
 3. **语音重连的真机验证**：状态机与信令有单测，缺弱网 / TURN 环境证据。新裸机上 `HEMING_TURN_*` 尚未配置，群通话只有 STUN 路径可验。
 4. **记忆个性化权重已落地（d.28.1.7.0）**：`heming.memory.usage.v1` 账本按条目累加「注入 / 疑似引用」次数，
@@ -132,10 +133,9 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
    下一步空间（都要保持这个前提）：权重只作用于语义/情景两层，工作层不参与；`used` 只看最终回答正文，
    工具调用里引用了但没复述的不算（冷清单会误列）；上限 25%／平滑 3／冷门槛 6 次都是导出常量，**没有真机反馈前不调**；
    串档边界仍在（`agentId::userText` 配对，严格化要等钩子带上 streamId）。
-   设计见 `docs/superpowers/specs/2026-10-22-memory-personalization-weights.md`。
-5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 打 d.25.1.7.0 → r27 打 d.26.1.7.0 → r28 打 d.27.1.7.0 → **r29 打 d.28.1.7.0，均一次通过**），下次继续递增目录（**d.29 用 `release/r30`**）；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
+   设计见 `docs/superpowers/specs/2026-10-22-memory-personalization-weights.md`；覆盖面与计数一致性在 d.29.1.7.0 补齐，见 `docs/superpowers/specs/2026-10-22-cold-memory-coverage.md`。
+5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 打 d.25.1.7.0 → r27 打 d.26.1.7.0 → r28 打 d.27.1.7.0 → r29 打 d.28.1.7.0 → **r30 打 d.29.1.7.0，均一次通过**），下次继续递增目录（**d.30 用 `release/r31`**）；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
 6. **`docker/` 与 `docker-compose.yml` 已停用但未清理**：机器已重置且没装 Docker，发版走 `deploy/`。两处 nginx 配置仍互为出处（`/updates/` 顺序、WS 的 `= /api/ws`），要清理就一起清，见 `docs/deploy.md` §11。
-7. **d.28 发布后自检发现的三处非行为性清理，刻意留到 d.29**（改完就得当天再发一版，而「已发布产物 == 提交代码」优先）：① `usage.ts` 末尾的 `usageLedger` 模块级单例**没有任何调用方**（真正在用的是 `RecallRecorder` 构造参数里的账本实例），注释「与 recallRecorder 配对」是错的，应删；② `recall.ts` 两条排序在乘完分数后的 `.filter(item => item.score > 0)` **恒真**（`base > 0` 已过滤、乘子 ≥1），应删；③ `recallMemory` 的 `empty` 对象在「未启用」与「异常」两条返回路径间**共享同一份引用**，目前没有调用方改它，但仍应改为每次新建。取证方式：回退后重跑 `pnpm --filter @heming/web build` 复现出与线上同名同字节的 `index-DmBMBsmK.js`（1433883），证明工作区与已发布产物逐字一致。
 
 **二期主线**：
 
