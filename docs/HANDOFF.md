@@ -2,7 +2,7 @@
 
 - 日期：2026-10-22
 - 当前版本：`d.29.1.8.0`
-- 当前 main：以 `git log -1` 为准（`7d13525`/`08285f4` d.29.1.7.0 冷清单与发布收口 → 本轮 d.29.1.8.0 模态门禁；**d.29.1.8.0 尚未发布**，两处发布后回写 §2 的线上/安装包行）
+- 当前 main：以 `git log -1` 为准（`9e27d5e`/`449dad6` 个性化权重与发布收口 → `7d13525` 冷清单覆盖面与计数一致性 → `df85bbb` 模态门禁 → 本轮收口 docs 提交；d.29.1.8.0 **云端与 `/updates` 两处均已发布**，证据见 §2）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
@@ -24,9 +24,9 @@
 | 版本 | `d.29.1.8.0`（5 段，五包同步；**修订位 +1 不是特性位**：本轮只补 d.26 遗留的键盘穿透缺陷，没有新能力，按 `docs/VERSION-MANAGEMENT.md`「只有修复没有新功能 → 修订位 +1」走） |
 | main | `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ `94e6d77`（d.25.1.7.0 收口）→ `3956d23`（d.26.1.7.0 弹窗屏蔽背景 + 焦点归还）→ `915d19c`（d.27.1.7.0 召回可观测性）→ `9e27d5e`（d.28.1.7.0 个性化权重）→ `7d13525`/`08285f4`（d.29.1.7.0 冷清单覆盖面 + 计数一致性与两处发布收口）→ 本轮 d.29.1.8.0 模态门禁 |
 | 测试 | 2026-10-22 实跑（d.29.1.8.0 门禁，`pnpm -r build && pnpm -r --workspace-concurrency=1 test` exit 0）：web 110 文件 / **1738** 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 17 个 `node --test` 文件 / 225 例（0 失败）。本轮 +3：`useModalA11y` 11→13、`App` 21→22。**注**：首次合并跑时 server 以 `3221226505` 崩过一次，分包单跑 9/212 全绿——是上一轮被中止的构建残留进程抢资源，不是用例问题；重跑门禁 exit 0 |
-| 线上 | **当前线上是 `d.29.1.7.0`；`d.29.1.8.0` 待发布**（裸机，云端零构建）：发版前备份落本机（3719 字节，14:53，写作 `heming-data-2026-10-22-d29.tar.gz`；**同日 d.28 那份已改名 `heming-data-2026-10-22-d28.tar.gz`**，两份连同上午那份都在 `.tmp/backups/`，md5 与脚本产物逐字节一致，见 §5 #1）；部署包 `/tmp/heming-d29.tar.gz` 5535187 字节、远端/本机 MD5 同为 `0f5bc6568def6e17…`；`INSTALL DONE: d.29.1.7.0`，`/api/health` `{"ok":true}`，`/` 经 nginx 200。线上主 bundle `assets/index-BkxsQKsv.js`（200，**1436951 字节**）与本机门禁产物**同名同字节**；bundle 内 grep 命中 `heming.memory.usage.v1`×2、「长期未被引用」×5、「的对话沉淀」×1（最后一项是 d.29 新增文案，证明确实是新版） |
-| 安装包 | **`和鸣 Setup d.29.1.7.0.exe`（178851512 字节，`release/r30/`）已发布到 `/updates`**——本机 sha512 重算与 `latest.yml` 逐字一致（`rU/rRiBF…`，`size` 字段与实际字节相符），远端 Range 请求返回 206 + `bytes 0-16/178851512`，即远端字节数与本地一致。安装包内嵌注入 `VITE_API_BASE` 的产物（`index-ChSMGDkh.js` 1436970 字节），与云端站点产物（`index-BkxsQKsv.js` 1436951 字节）**不同名即不同源**，这是预期；打完包已重跑 `pnpm --filter @heming/web build` 把本机 `packages/web/dist` 恢复成云端口径（14:59 复核 1436951 字节 = 线上），避免下一轮误传注入版 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落），当前指向 `29.1.7`；`/opt/heming/updates/` 实测 13 个文件：d.25.1.6.0 至 d.29.1.7.0 共 6 版安装包 + 6 份 blockmap + `latest.yml`（回滚依赖旧包，别删） |
+| 线上 | **线上是 `d.29.1.8.0`（2026-10-22 15:17 部署，裸机、云端零构建）**：发版前备份已拷回本机 `.tmp/backups/heming-data-2026-10-22.tar.gz`（3719 字节，15:17；同日 d.28/d.29 两份改名 `…-d28.tar.gz`/`…-d29.tar.gz` 留档，加上午那份共 4 份，见 §5 #1）；部署包 `/tmp/heming.tar.gz` 5544788 字节 → 远端 `/root/heming-d.29.1.8.0.tar.gz` 同大小、MD5 逐字一致（`fd2173b7ba3994dcb51bb6b687671ab2`）；`/root/install.log` 尾部 `INSTALL DONE: d.29.1.8.0`，`/api/health` `{"ok":true}`，`/` 经 nginx 200。**最硬的一条证据**：`curl` 下来的线上主 bundle `assets/index-Dx-9oEL6.js`（1439212 字节）与本机 `pnpm --filter @heming/web build` 产物 **md5 相同**（`29fe78dea19bc26929d3064f6eff61d8`），bundle 内命中本轮新日志标题「弹窗开着时，键盘不该还能翻页面」×1 |
+| 安装包 | **`和鸣 Setup d.29.1.8.0.exe`（178852374 字节，`release/r32/`）已发布到 `/updates`**：本机 `certutil` SHA-512 转 base64 与 `latest.yml` 的 `sha512` 逐字一致（`OvppxxSwaVKtadlZ…`，`size` 与实际字节相符）；远端 Range 请求 206 + `bytes 0-16/178852374`，即远端字节数与本地一致。内嵌产物是注入 `VITE_API_BASE` 的那份（`resources/web/assets/index-BZWAOsNB.js` 1439231 字节，比云端 `index-Dx-9oEL6.js` 1439212 多 19 字节 = 注入字面量长度；grep 该 IP 安装包命中 2 次、云端 1 次）。★ **本轮踩过一个大坑**：先用 `node scripts/build-desktop.mjs` 单跑的 r31 内嵌了**上一轮（d.29.1.7.0）的旧前端**——文件名/版本号/latest.yml 全对、只有内容是旧的；r31 作废（未发布），改用 `pnpm --filter @heming/desktop dist` 重打 r32 并核对内嵌 bundle 名与版本串后才上传，详见 `docs/deploy.md` §9 坑 #4。打完包已重跑 `pnpm --filter @heming/web build` 把本机 `packages/web/dist` 恢复成云端口径（15:25 复核 1439212 字节 = 线上），避免下一轮误传注入版 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落），当前指向 `29.1.8`；`/opt/heming/updates/` 实测 15 个文件：d.25.1.6.0 至 d.29.1.8.0 共 7 版安装包 + 7 份 blockmap + `latest.yml`（回滚依赖旧包，别删） |
 | 账号 | 只有 `admin/admin`（`HEMING_SEED_USERS` 播种；注册默认关闭）。**重置把旧库连同 `zhoukang` 等账号一起清掉了**，历史会话/消息不可恢复 |
 
 ### 已完成里程碑
@@ -135,7 +135,7 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
    工具调用里引用了但没复述的不算（冷清单会误列）；上限 25%／平滑 3／冷门槛 6 次都是导出常量，**没有真机反馈前不调**；
    串档边界仍在（`agentId::userText` 配对，严格化要等钩子带上 streamId）。
    设计见 `docs/superpowers/specs/2026-10-22-memory-personalization-weights.md`；覆盖面与计数一致性在 d.29.1.7.0 补齐，见 `docs/superpowers/specs/2026-10-22-cold-memory-coverage.md`。
-5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 打 d.25.1.7.0 → r27 打 d.26.1.7.0 → r28 打 d.27.1.7.0 → r29 打 d.28.1.7.0 → **r30 打 d.29.1.7.0，均一次通过**），下次继续递增目录（**d.30 用 `release/r31`**）；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
+5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 → r27 → r28 → r29 → r30 打 d.29.1.7.0，均一次通过；**r31 是 d.29.1.8.0 的一次废尝试**——单跑 `build-desktop.mjs` 嵌了旧前端、没发布就作废，r32 才是本轮正式包），下次继续递增目录（**d.30 用 `release/r33`**）；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。★ 真正的坑不是 EBUSY 而是**出包入口**：只有 `pnpm --filter @heming/desktop dist` 会先跑 `build-desktop-web.mjs` 刷新嵌入产物，单跑 `build-desktop.mjs` 打出的是**上一轮的旧前端**且一切指标看着都正常——出包后必须核对内嵌 bundle 名与版本串（`docs/deploy.md` §9 坑 #4）。
 6. **`docker/` 与 `docker-compose.yml` 已停用但未清理**：机器已重置且没装 Docker，发版走 `deploy/`。两处 nginx 配置仍互为出处（`/updates/` 顺序、WS 的 `= /api/ws`），要清理就一起清，见 `docs/deploy.md` §11。
 
 **二期主线**：

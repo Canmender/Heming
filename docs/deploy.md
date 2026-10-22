@@ -41,7 +41,7 @@
 pnpm -r build
 ```
 
-> ★ **同一轮里既出安装包又上云时的顺序陷阱**：`scripts/build-desktop-web.mjs` 会**就地重写 `packages/web/dist`**（注入 `VITE_API_BASE=http://47.92.39.184`），再拷进 `packages/desktop/web-dist`。所以先跑桌面打包、后跑上面的 tar，上云的就是那份写死绝对地址的产物——今天云端恰好就是这个 IP，看不出问题；换成域名 + HTTPS 那天就会变成前端打不开。两处都发时：**云端 tar 用 `pnpm -r build` 之后立刻打**，或者打完桌面包后重跑一次 `pnpm --filter @heming/web build` 再打 tar。校验口径：云端产物与安装包内嵌产物**主 bundle 文件名应当不同**（d.29.1.7.0 实测云端 `index-BkxsQKsv.js` 1436951 字节 vs 安装包 `index-ChSMGDkh.js` 1436970 字节，多出的 19 字节正好等于注入的 `http://47.92.39.184` 字面量长度，grep 该 IP 在安装包多命中一次；打完包重跑云端口径构建会**复现出与线上同名同字节**的 bundle，可据此确认没有误传注入版——本轮 14:59 重跑后本机 `packages/web/dist` 正是 1436951 字节，与线上一致）。
+> ★ **同一轮里既出安装包又上云时的顺序陷阱**：`scripts/build-desktop-web.mjs` 会**就地重写 `packages/web/dist`**（注入 `VITE_API_BASE=http://47.92.39.184`），再拷进 `packages/desktop/web-dist`。所以先跑桌面打包、后跑上面的 tar，上云的就是那份写死绝对地址的产物——今天云端恰好就是这个 IP，看不出问题；换成域名 + HTTPS 那天就会变成前端打不开。两处都发时：**云端 tar 用 `pnpm -r build` 之后立刻打**，或者打完桌面包后重跑一次 `pnpm --filter @heming/web build` 再打 tar。校验口径：云端产物与安装包内嵌产物**主 bundle 文件名应当不同**（d.29.1.8.0 实测云端 `index-Dx-9oEL6.js` 1439212 字节 vs 安装包 `index-BZWAOsNB.js` 1439231 字节，多出的 19 字节正好等于注入的 `http://47.92.39.184` 字面量长度，grep 该 IP 云端命中 1 次、安装包命中 2 次；打完包重跑云端口径构建会**复现出与线上同名同字节**的 bundle，可据此确认没有误传注入版——本轮 15:25 重跑后本机 `packages/web/dist` 正是 1439212 字节，`curl` 线上同名文件也是 1439212 字节）。
 
 ```bash
 # 2) 打包（在仓库根目录；data/ 是本机开发库，不上云）
@@ -236,8 +236,7 @@ nginx 的 `location /updates/` 直接 `alias /opt/heming/updates/`（裸机上�
 
 ```bash
 # 1) 出包（build-desktop.mjs 已默认注入 --publish always，产物里必须有 latest.yml）
-node scripts/build-desktop-web.mjs
-node scripts/build-desktop.mjs --win nsis
+pnpm --filter @heming/desktop dist     # = build-desktop-web.mjs（注入地址 + 拷 web-dist）→ build-desktop.mjs --win nsis
 
 # 2) 上传（密码只走环境变量，不落盘；脚本内部用 paramiko）
 export HEMING_SSH_PWD='***'
@@ -249,18 +248,19 @@ curl -sI http://47.92.39.184/updates/latest.yml | head -3
 curl -s  http://47.92.39.184/updates/latest.yml | head -8
 ```
 
-**产物不在默认目录时要给 `HEMING_RELEASE_DIR`**。`dist:desktop` 反复在 `win-unpacked/resources/app.asar` 上撞 `EBUSY`（根因未查，见 HANDOFF §5 待办），**已固化成惯例：每版换一个新的输出目录**——r25 打 d.25.1.7.0、r26/r27/r28 依次到 r29 打 d.28.1.7.0、**r30 打 d.29.1.7.0（均一次通过）**，下一版 **d.30 用 `release/r31`**。打包与发布两处必须指同一目录（`build-desktop.mjs` 与 `publish-update.sh` 都读 `HEMING_RELEASE_DIR`）：
+**产物不在默认目录时要给 `HEMING_RELEASE_DIR`**。`dist:desktop` 反复在 `win-unpacked/resources/app.asar` 上撞 `EBUSY`（根因未查，见 HANDOFF §5 待办），**已固化成惯例：每版换一个新的输出目录**——r25 打 d.25.1.7.0、r26/r27/r28 依次到 r29 打 d.28.1.7.0、r30 打 d.29.1.7.0（均一次通过）、**r31 是一次被中止的尝试（产出的安装包内嵌旧产物，没发布就废掉了）、r32 打 d.29.1.8.0**，下一版 **d.30 用 `release/r33`**。打包与发布两处必须指同一目录（`build-desktop.mjs` 与 `publish-update.sh` 都读 `HEMING_RELEASE_DIR`）：
 
 ```bash
-HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r30 node scripts/build-desktop.mjs --win nsis
-HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r30 bash scripts/publish-update.sh --dry-run
+HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r33 pnpm --filter @heming/desktop dist
+HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r33 bash scripts/publish-update.sh --dry-run
 ```
 
-### 三个必须知道的坑
+### 四个必须知道的坑
 
 1. **`latest.yml` 不会自动生成。** electron-builder 默认不产出更新元数据，少了它客户端永远提示「已是最新」——**界面上与正常无差别，无法靠肉眼发现**。`build-desktop.mjs` 已默认注入 `--publish always`，产物目录里必须能看到 `latest.yml` 才算打包成功。
 2. **`/updates/` 必须排在 nginx `location /` 之前。** 否则 `try_files` 会把 `latest.yml` 回落成 `index.html`，客户端拿到 HTML 报「解析更新信息失败」。该顺序已固化在 `deploy/nginx-heming.conf`，改动时别调换。
 3. **上传后要比字节数。** `publish-update.sh` 会 `stat -c '%s|%n'` 校验远端安装包大小——Git Bash 的 MSYS 路径转换能让「上传成功」变成只写到本机磁盘，日志一切正常、云端目录里没文件。所以脚本开头 `export MSYS_NO_PATHCONV=1`，并在远端目录不是绝对 POSIX 路径时立刻停下。
+4. **`node scripts/build-desktop.mjs` 单独跑会打进上一轮的旧嵌入产物。** 注入并拷贝 `packages/desktop/web-dist` 的那一步在 `scripts/build-desktop-web.mjs` 里，`build-desktop.mjs` 不会替你跑它——于是安装包里的前端还是上一版，`latest.yml`、版本号、文件名全是对的，**只有内容是旧的**（d.29.1.8.0 实测：r31 那份 178MB 的安装包内嵌 `index-ChSMGDkh.js`，grep 到的是 `d.29.1.7.0`，整个 r31 作废重打）。入口因此只能是 `pnpm --filter @heming/desktop dist`（= 两步串起来）。出包后**核对一眼再传**：`grep -c "<新版本号>" packages/desktop/release/<rNN>/win-unpacked/resources/web/assets/index-*.js` 应当命中，且文件名与 `packages/desktop/web-dist/assets/` 里那个一致。
 
 上线后务必确认清单**不是 HTML**，并且支持断点续传：
 
