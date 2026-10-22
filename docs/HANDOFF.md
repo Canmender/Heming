@@ -2,7 +2,7 @@
 
 - 日期：2026-10-22
 - 当前版本：`d.27.1.7.0`
-- 当前 main：以 `git log -1` 为准（`d5dbdca` 裸机部署链路 → `3956d23` 弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态（d.26.1.7.0 两处已发布）→ 本轮「记忆召回的可观测性」d.27.1.7.0）
+- 当前 main：以 `git log -1` 为准（`3956d23` 弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态 → `915d19c` 记忆召回的可观测性；本轮 d.27.1.7.0 **云端与安装包两处均已发布**）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
@@ -24,9 +24,9 @@
 | 版本 | `d.27.1.7.0`（5 段，五包同步） |
 | main | `204a592`（d.25.1.6.0 功能批次）→ `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ `94e6d77`（d.25.1.7.0 发布收口）→ `3956d23`（d.26.1.7.0 弹窗屏蔽背景 + 焦点归还 + 首帧状态）→ 本轮「记忆召回的可观测性」（d.27.1.7.0） |
 | 测试 | 2026-10-22 实跑：`pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿（exit 0）；web 109 文件 / 1702 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 2 例（node:test）全通过 |
-| 线上 | **`d.27.1.7.0` 待发布**。裸机链路已固化（实例重置为 Ubuntu 24.04 后去 Docker：宿主 nginx + systemd + node，云端零构建）；上一版 `d.26.1.7.0` 实测通过：部署包远端/本机 MD5 一致、外部取回的 `assets/index-CNMyJF7I.js` 与本机 dist 同名、`/api/health` 返回 `{"ok":true}`、`/api/ws` 带 token 握手成功并对非法会话回 `error: not a member` |
-| 安装包 | **`d.27.1.7.0` 待发布（输出目录递增到 `release/r28`）**。上一版 `和鸣 Setup d.26.1.7.0.exe`（178843410 字节，`release/r27/`）已发布到 `/updates`：远端字节数与本地一致、`latest.yml` 352 字节读到 `version: 26.1.7`、Range 请求 206。安装包内嵌注入 `VITE_API_BASE` 的产物（`index-DM0QlkiE.js`），与云端站点产物（`index-CNMyJF7I.js`）**不同名即不同源**，这是预期 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落），当前指向 `26.1.7`（待发 `27.1.7`） |
+| 线上 | **`d.27.1.7.0` 已发布（裸机，云端零构建）**：发版前备份落本机 `.superpowers/.tmp/backups/heming-data-2026-10-22.tar.gz`（3719 字节，含 `heming.db` 与 `-wal`）；部署包远端/本机 MD5 同为 `ee145532878442a1…`；`INSTALL DONE: d.27.1.7.0`，外部取回的 `assets/index-Bx6Ec6at.js` 与本机门禁产物同名（200，1425859 字节）、`/api/health` 返回 `{"ok":true}`、`/` 经 nginx 200，内存 444/1613MB、磁盘 5.8G/40G |
+| 安装包 | **`和鸣 Setup d.27.1.7.0.exe`（178848062 字节，`release/r28/`）已发布到 `/updates`**——脚本复核远端字节数与本地一致，`latest.yml` 352 字节读到 `version: 27.1.7`，Range 请求返回 206。安装包内嵌注入 `VITE_API_BASE` 的产物（`index-Da_7nZwd.js`），与云端站点产物（`index-Bx6Ec6at.js`）**不同名即不同源**，这是预期；打完包已重跑 `pnpm --filter @heming/web build` 把本机 `packages/web/dist` 恢复成云端口径，避免下一轮误传注入版 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落），当前指向 `27.1.7` |
 | 账号 | 只有 `admin/admin`（`HEMING_SEED_USERS` 播种；注册默认关闭）。**重置把旧库连同 `zhoukang` 等账号一起清掉了**，历史会话/消息不可恢复 |
 
 ### 已完成里程碑
@@ -126,7 +126,7 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 2. **弹窗屏蔽背景的读屏软件实测**：`inert` 屏蔽、焦点归还、非模态退出、首帧骨架与失败重试条**都已在真实 Chromium 里实测通过**（证据见 `docs/superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md` §5：弹窗开着时对背景按钮调 `.focus()` 焦点不动）。**只剩 NVDA / VoiceOver 那一层**——需要装读屏的机器，属验证项不属实现项。
 3. **语音重连的真机验证**：状态机与信令有单测，缺弱网 / TURN 环境证据。新裸机上 `HEMING_TURN_*` 尚未配置，群通话只有 STUN 路径可验。
 4. **记忆个性化权重（可观测性已在 d.27 落地）**：归因链路已有（注入清单 + 打分 + 疑似引用 + 本机留档），下一步是在此之上调权重/淘汰策略。**前提仍是确定性规则**——`USAGE_MIN_HITS` 这类判据可以调，但不要变成「问模型你用了哪条」。已知边界：疑似引用只看最终回答正文（工具调用里引用了但没复述的不算）；旁路按 `agentId::userText` 配对，同智能体同一句在两处同时在飞会串档（要严格化需等钩子带上 streamId）。
-5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 打 d.25.1.7.0 → r27 打 d.26.1.7.0，均一次通过），**本轮 d.27.1.7.0 用 `release/r28`**；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
+5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 打 d.25.1.7.0 → r27 打 d.26.1.7.0 → **r28 打 d.27.1.7.0，均一次通过**），下次继续递增目录（**d.28 用 `release/r29`**）；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
 6. **`docker/` 与 `docker-compose.yml` 已停用但未清理**：机器已重置且没装 Docker，发版走 `deploy/`。两处 nginx 配置仍互为出处（`/updates/` 顺序、WS 的 `= /api/ws`），要清理就一起清，见 `docs/deploy.md` §11。
 
 **二期主线**：

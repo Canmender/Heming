@@ -41,7 +41,7 @@
 pnpm -r build
 ```
 
-> ★ **同一轮里既出安装包又上云时的顺序陷阱**：`scripts/build-desktop-web.mjs` 会**就地重写 `packages/web/dist`**（注入 `VITE_API_BASE=http://47.92.39.184`），再拷进 `packages/desktop/web-dist`。所以先跑桌面打包、后跑上面的 tar，上云的就是那份写死绝对地址的产物——今天云端恰好就是这个 IP，看不出问题；换成域名 + HTTPS 那天就会变成前端打不开。两处都发时：**云端 tar 用 `pnpm -r build` 之后立刻打**，或者打完桌面包后重跑一次 `pnpm --filter @heming/web build` 再打 tar。校验口径：云端产物与安装包内嵌产物**主 bundle 文件名应当不同**（本轮 `index-CNMyJF7I.js` vs `index-DM0QlkiE.js`）。
+> ★ **同一轮里既出安装包又上云时的顺序陷阱**：`scripts/build-desktop-web.mjs` 会**就地重写 `packages/web/dist`**（注入 `VITE_API_BASE=http://47.92.39.184`），再拷进 `packages/desktop/web-dist`。所以先跑桌面打包、后跑上面的 tar，上云的就是那份写死绝对地址的产物——今天云端恰好就是这个 IP，看不出问题；换成域名 + HTTPS 那天就会变成前端打不开。两处都发时：**云端 tar 用 `pnpm -r build` 之后立刻打**，或者打完桌面包后重跑一次 `pnpm --filter @heming/web build` 再打 tar。校验口径：云端产物与安装包内嵌产物**主 bundle 文件名应当不同**（d.27.1.7.0 实测 `index-Bx6Ec6at.js` vs `index-Da_7nZwd.js`）。
 
 ```bash
 # 2) 打包（在仓库根目录；data/ 是本机开发库，不上云）
