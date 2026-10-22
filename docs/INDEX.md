@@ -44,6 +44,7 @@
 | [specs/2026-10-22-memory-recall-observability.md](superpowers/specs/2026-10-22-memory-recall-observability.md) | 召回可观测性：召回 ≠ 注入、确定性引用判定、本机召回日志 |
 | [specs/2026-10-22-memory-personalization-weights.md](superpowers/specs/2026-10-22-memory-personalization-weights.md) | 个性化权重：引用计数反哺排序（封顶 +25%、只提权不降权）、用量账本、冷记忆清单 |
 | [specs/2026-10-22-cold-memory-coverage.md](superpowers/specs/2026-10-22-cold-memory-coverage.md) | 冷清单覆盖面：含私有语义与情景条目、按注入次数排序、删除同步摘掉用量计数 |
+| [specs/2026-10-22-modal-shortcut-gate.md](superpowers/specs/2026-10-22-modal-shortcut-gate.md) | 模态门禁：弹窗开着时 `Alt+1–8`/`Ctrl+K` 不穿透，判据复用 `openDialogs` |
 | [specs/2026-10-17-agent-context-budget-design.md](superpowers/specs/2026-10-17-agent-context-budget-design.md) | 上下文预算与早期对话压缩 |
 | [specs/2026-10-19-mcp-tool-calling.md](superpowers/specs/2026-10-19-mcp-tool-calling.md) | MCP 工具调用、stdio、过程可视化 |
 | [specs/2026-10-22-atomic-image-send.md](superpowers/specs/2026-10-22-atomic-image-send.md) | 图片 + 文字同发：本轮附件走当前 user 轮，不依赖历史回声 |

@@ -25,6 +25,7 @@ import { SkillsPage } from "./components/SkillsPage.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
+import { hasOpenModal } from "./components/useModalA11y.js";
 
 /**
  * Alt+1–Alt+8 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档、8 任务区。
@@ -109,12 +110,14 @@ export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   // 全局搜索：Ctrl/⌘+K。启动动画期间不响应（与 Alt+N 同一套纪律：
-  // 遮罩后面看不见的界面不该接受输入）。
+  // 遮罩后面看不见的界面不该接受输入）。模态弹窗开着时同样不响应：面板与弹窗
+  // 在 DOM 里不是嵌套关系，面板的屏蔽会把弹窗一起 inert 掉，Esc 归属随之错位。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!bootDone) return;
       if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        if (hasOpenModal()) return;
         setPaletteOpen((v) => !v);
       }
     };
@@ -243,6 +246,9 @@ function AppShell() {
       if (e.altKey && !e.metaKey && !e.ctrlKey && ["1", "2", "3", "4", "5", "6", "7", "8"].includes(e.key)) {
         if (inText) return;
         e.preventDefault();
+        // 模态弹窗开着时只吞键不切页：切走的子树里还留着那个弹窗，
+        // 焦点归还、Esc 归属与 inert 计数全落在已经不属于当前视图的 DOM 上。
+        if (hasOpenModal()) return;
         setPage(SHORTCUT_PAGES["12345678".indexOf(e.key)]);
         return;
       }

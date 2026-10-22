@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useRef, useState } from "react";
-import { useModalA11y } from "./useModalA11y.js";
+import { useModalA11y, hasOpenModal } from "./useModalA11y.js";
 
 /** 只测行为：Esc 关掉当前这层、Tab 困在面板里、嵌套时外层不被误关。 */
 function Panel({
@@ -218,5 +218,53 @@ describe("useModalA11y", () => {
     next.focus();
     fireEvent.click(screen.getByRole("button", { name: "关闭弹窗" }));
     expect(document.activeElement).toBe(next);
+  });
+
+  it("hasOpenModal：模态弹窗开着为真、卸载回假，非模态浮层与 active=false 都不算", () => {
+    function Popover() {
+      const ref = useRef<HTMLDivElement>(null);
+      useModalA11y(ref, () => {}, { blockBackground: false });
+      return (
+        <div ref={ref} role="dialog" aria-modal="false" aria-label="浮层" tabIndex={-1}>
+          <button type="button">内部</button>
+        </div>
+      );
+    }
+    expect(hasOpenModal()).toBe(false);
+
+    const modal = render(<Panel onClose={() => {}} label="弹窗" />);
+    expect(hasOpenModal()).toBe(true);
+    modal.unmount();
+    expect(hasOpenModal()).toBe(false);
+
+    const popover = render(<Popover />);
+    expect(hasOpenModal()).toBe(false); // 通知抽屉那种：允许用户直接去别的页面
+    popover.unmount();
+
+    const dormant = render(<Panel onClose={() => {}} label="弹窗" active={false} />);
+    expect(hasOpenModal()).toBe(false); // 常驻挂载但没打开，不入栈
+    dormant.unmount();
+  });
+
+  it("hasOpenModal：嵌套时内层卸载仍为真（外层还开着）", () => {
+    function Harness() {
+      const [inner, setInner] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setInner(false)}>
+            卸载内层
+          </button>
+          <Panel onClose={() => {}} label="外层">
+            {inner && <Panel onClose={() => {}} label="内层" />}
+          </Panel>
+        </>
+      );
+    }
+    const { unmount } = render(<Harness />);
+    expect(hasOpenModal()).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "卸载内层" }));
+    expect(hasOpenModal()).toBe(true);
+    unmount();
+    expect(hasOpenModal()).toBe(false);
   });
 });

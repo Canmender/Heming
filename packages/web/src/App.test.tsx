@@ -386,6 +386,41 @@ describe("App 导航快捷键与隐藏态", () => {
     expect(screen.getAllByText("登录你的账号").length).toBeGreaterThan(0);
   });
 
+  it("模态弹窗开着时 Alt+N 不切页、Ctrl+K 不开面板，关掉后两者恢复", async () => {
+    setToken("t1");
+    mockFetch({
+      files: [
+        {
+          id: "f1",
+          owner: "alice",
+          name: "需求草案.md",
+          mime: "text/markdown",
+          size: 18,
+          updatedAt: "2026-10-13T00:00:00.000Z",
+        },
+      ],
+    });
+    vi.mocked(fetchFileBlobText).mockResolvedValue("# 内容\n正文");
+    render(<App />);
+    await screen.findByRole("button", { name: "主页 Alt1" });
+
+    fireEvent.click(await screen.findByLabelText("预览 需求草案.md"));
+    await screen.findByLabelText("关闭预览");
+
+    // inert 挡得住点击，挡不住挂在 window 上的 keydown：这里必须显式拦
+    fireEvent.keyDown(window, { key: "5", altKey: true });
+    expect(useUiStore.getState().page).toBe("home");
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.queryByRole("dialog", { name: "全局搜索" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("关闭预览")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("关闭预览"));
+    fireEvent.keyDown(window, { key: "5", altKey: true });
+    expect(useUiStore.getState().page).toBe("memory");
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(await screen.findByRole("dialog", { name: "全局搜索" })).toBeInTheDocument();
+  });
+
   it("输入框聚焦时：Alt+数字 仍被过滤，导航常驻不被键盘改动", async () => {
     setToken("t1");
     mockFetch();

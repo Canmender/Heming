@@ -10,8 +10,23 @@ const FOCUSABLE =
  * Esc 会把两层一起关掉（React 的子组件 effect 先执行，注册顺序还和直觉相反）。
  * 按 DOM 嵌套判定「谁里面没有别的弹窗」，才是真正该退出的那一层。
  */
-type DialogEntry = { token: symbol; panel: () => HTMLElement | null };
+type DialogEntry = { token: symbol; panel: () => HTMLElement | null; modal: boolean };
 const openDialogs: DialogEntry[] = [];
+
+/**
+ * 是否有「屏蔽背景的模态弹窗」正开着。给 App 的全局快捷键当门禁。
+ *
+ * 为什么 inert 不够：`inert` 只挡点击与焦点，挡不住挂在 window 上的 `keydown`。
+ * 弹窗开着时按 Alt+3 仍然切页，而切走的子树里还留着那个弹窗——焦点归还、Esc
+ * 归属、`inert` 计数全都落在一个不再属于当前视图的 DOM 上。
+ *
+ * 只统计模态弹窗：通知抽屉这类 `blockBackground:false` 的常驻浮层本来就允许
+ * 用户直接去别的页面，拦它等于把「点外面就关」的轻量浮层升级成模态。
+ * 面板未挂载（ref 为空）也不算，与 `topToken` 同一套存活判定。
+ */
+export function hasOpenModal(): boolean {
+  return openDialogs.some((entry) => entry.modal && entry.panel() !== null);
+}
 
 function topToken(): symbol | null {
   const live = openDialogs
@@ -139,13 +154,17 @@ export function useModalA11y(
 
   useEffect(() => {
     if (!active) return;
-    const entry: DialogEntry = { token: token.current, panel: readPanel.current };
+    const entry: DialogEntry = {
+      token: token.current,
+      panel: readPanel.current,
+      modal: blockBackground,
+    };
     openDialogs.push(entry);
     return () => {
       const index = openDialogs.indexOf(entry);
       if (index >= 0) openDialogs.splice(index, 1);
     };
-  }, [active]);
+  }, [active, blockBackground]);
 
   // 声明顺序即执行顺序：必须排在下面的聚焦 effect 之前，
   // 否则记录到的「触发元素」已经是弹窗里的按钮了。
