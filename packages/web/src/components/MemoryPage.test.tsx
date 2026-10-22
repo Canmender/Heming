@@ -810,4 +810,79 @@ describe("MemoryPage 召回可观测性", () => {
     expect(ledger[before.id]).toBeUndefined();
     expect(Object.keys(ledger).length).toBe(1); // 只剩「部署目录」那条的计数
   });
+
+  /**
+   * 冷清单的覆盖面（d.29）。召回读的是「全局桶 + 该智能体私有」，
+   * 清单若只看全局桶，私有条目和情景沉淀白占预算也永远列不出来。
+   */
+  it("「长期未被引用」覆盖私有语义与情景条目，按注入次数排，删除时连计数一起摘", async () => {
+    mockApi({ agents: AGENTS });
+    const shared = memory.upsertSemantic({ agentId: "a1", key: "灰度批次", value: "灰度先放五个用户", source: "manual" });
+    const priv = memory.upsertSemantic({
+      agentId: "a1",
+      key: "内网网段",
+      value: "内网固定 10.20.0.0/16",
+      source: "manual",
+      bucket: "a1",
+    });
+    const epi = memory.addEpisodic({
+      agentId: "a1",
+      conversationId: "c9",
+      summary: "上周确认灰度先放五个用户",
+      sourceTurns: 6,
+    });
+    logMap.set(
+      USAGE_KEY,
+      JSON.stringify({
+        [shared.id]: { injected: 9, used: 0, lastAt: ISO },
+        [priv.id]: { injected: 7, used: 0, lastAt: ISO },
+        [epi.id]: { injected: 6, used: 0, lastAt: ISO },
+      }),
+    );
+    const rec = makeRecorder();
+    renderWith(rec, memory);
+    await pickAgent();
+    openTab("数据库");
+
+    const cold = screen.getByRole("list", { name: "长期未被引用的记忆" });
+    const rows = within(cold).getAllByRole("listitem");
+    expect(rows).toHaveLength(3);
+    // 注入次数多的在前：这份清单是给人逐条删的，「挡了多少预算」就是排序依据
+    expect(rows[0]).toHaveTextContent("灰度批次");
+    expect(rows[1]).toHaveTextContent("内网网段");
+    expect(rows[2]).toHaveTextContent("上周确认灰度先放五个用户");
+    // 层名必须标出来：情景条目没有 key，只写日期人看不出那是对话沉淀
+    expect(within(rows[0]).getByText(/语义/)).toBeInTheDocument();
+    expect(within(rows[2]).getByText(/情景/)).toBeInTheDocument();
+    expect(within(rows[0]).getByText(/累计注入 9 次 · 未被引用/)).toBeInTheDocument();
+
+    fireEvent.click(within(rows[2]).getByRole("button", { name: /删除冷记忆 情景/ }));
+    const dialog = screen.getByRole("dialog", { name: "删除情景记忆" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+
+    const after = JSON.parse(logMap.get(USAGE_KEY) as string) as Record<string, unknown>;
+    expect(after[epi.id]).toBeUndefined();
+    expect(after[shared.id]).toBeDefined();
+    expect(screen.getByRole("list", { name: "长期未被引用的记忆" })).not.toHaveTextContent("上周确认灰度");
+  });
+
+  it("未选中智能体时冷清单标出条目归属（私有条目跨智能体混排，不写来源看不出是谁的）", async () => {
+    mockApi({ agents: AGENTS });
+    const priv = memory.upsertSemantic({
+      agentId: "a2",
+      key: "小码的构建参数",
+      value: "小码用 pnpm -r build",
+      source: "manual",
+      bucket: "a2",
+    });
+    logMap.set(USAGE_KEY, JSON.stringify({ [priv.id]: { injected: 8, used: 0, lastAt: ISO } }));
+    const rec = makeRecorder();
+    renderWith(rec, memory);
+    openTab("数据库");
+
+    const cold = screen.getByRole("list", { name: "长期未被引用的记忆" });
+    // 「全部智能体」视角：layers.semantic 是所有桶的并集，私有条目同样进清单
+    expect(within(cold).getByText("小码的构建参数")).toBeInTheDocument();
+    expect(within(cold).getAllByText(/小码/).length).toBeGreaterThan(0);
+  });
 });

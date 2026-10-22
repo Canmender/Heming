@@ -189,8 +189,5 @@ export class UsageLedger implements UsageView {
   }
 }
 
-/** 模块级单例：与 recallRecorder 配对，写入端（settle）与读取端（召回/记忆页）共用一份计数。 */
-export const usageLedger = new UsageLedger();
-
 /** 零提权视图（测试与「未接用量」的调用方用）。 */
 export const NEUTRAL_USAGE: UsageView = { boostOf: () => 1 };

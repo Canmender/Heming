@@ -955,10 +955,36 @@ export function MemoryPage({
   /**
    * 冷门线索：注入 ≥ `COLD_MIN_INJECTED` 次、一次都没被疑似引用。
    *
+   * 读的是**召回集**而不是公用桶：`layers.semantic` = 全局桶 + 该智能体私有
+   * （未选智能体时是所有桶），`layers.episodic` 同口径。d.28 只看了 `globalSemantic`，
+   * 于是私有条目与情景条目即使白占预算也永远进不了清单——那正是这个清单要解决的问题。
+   *
    * 刻意只做「列出来 + 让人删」，不做自动淘汰：判据是词重合，本来就偏保守
    * （工具调用里用了但正文没复述的不算），把漏判变成删数据是拿用户资产冒险。
    */
-  const coldEntries = layers.globalSemantic.filter((entry) => isColdUsage(usage[entry.id]));
+  const coldRows = [
+    ...layers.semantic
+      .filter((entry) => isColdUsage(usage[entry.id]))
+      .map((entry) => ({
+        layer: "语义",
+        id: entry.id,
+        agentId: entry.agentId,
+        title: entry.key,
+        body: entry.value,
+        pending: () => setPendingSemantic(entry),
+      })),
+    ...layers.episodic
+      .filter((entry) => isColdUsage(usage[entry.id]))
+      .map((entry) => ({
+        layer: "情景",
+        id: entry.id,
+        agentId: entry.agentId,
+        title: `${entry.at.slice(0, 10)} 的对话沉淀`,
+        body: entry.summary,
+        pending: () => setPendingEpisodic(entry),
+      })),
+    // 最占预算的排前面：这份清单是给人逐条删的，注入次数就是「它挡了多少地方」
+  ].sort((a, b) => (usage[b.id]?.injected ?? 0) - (usage[a.id]?.injected ?? 0));
 
 
   const onAddManualAgent = () => {
@@ -1565,29 +1591,33 @@ export function MemoryPage({
         )}
       </section>
 
-      {coldEntries.length > 0 && (
+      {coldRows.length > 0 && (
         <section className={`${cardCls} mt-3`}>
-          <div className="text-[12px] font-bold text-[#777]">长期未被引用（{coldEntries.length}）</div>
+          <div className="text-[12px] font-bold text-[#777]">长期未被引用（{coldRows.length}）</div>
           <div className={`mt-1 ${hintCls}`}>
-            近 {COLD_MIN_INJECTED} 次以上被注入、却一次都没被判为「疑似引用」的记忆。
-            系统不会因为「冷」自动降权或删除它们——这只是一条线索：判据是词重合，偏保守，
-            也有可能其实被用到了只是正文没复述。要不要清掉由你定。
+            被注入 {COLD_MIN_INJECTED} 次以上、却一次都没被判为「疑似引用」的记忆（含公用与私有的长期记忆、以及情景沉淀），
+            按注入次数从多到少排。系统不会因为「冷」自动降权或删除它们——这只是一条线索：
+            判据是词重合，偏保守，也有可能其实被用到了只是正文没复述。要不要清掉由你定。
           </div>
           <ul aria-label="长期未被引用的记忆" className="mt-3 space-y-2">
-            {coldEntries.map((entry) => (
+            {coldRows.map((row) => (
               <li
-                key={entry.id}
+                key={row.id}
                 className="flex items-start justify-between gap-2 rounded-lg border border-line p-2.5"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-[12px] font-bold">{entry.key}</div>
-                  <div className="mt-0.5 break-words text-[12px] text-[#555]">{entry.value}</div>
-                  <div className="mt-0.5 text-[10px] text-muted">{personalNote(usage[entry.id])}</div>
+                  <div className="truncate text-[12px] font-bold">{row.title}</div>
+                  <div className="mt-0.5 break-words text-[12px] text-[#555]">{row.body}</div>
+                  <div className="mt-0.5 text-[10px] text-muted">
+                    {row.layer}
+                    {!agentId && ` · ${agentName(row.agentId)}`}
+                    {` · ${personalNote(usage[row.id])}`}
+                  </div>
                 </div>
                 <button
                   type="button"
-                  aria-label={`删除冷记忆 ${entry.key}`}
-                  onClick={() => setPendingSemantic(entry)}
+                  aria-label={`删除冷记忆 ${row.layer} ${row.title}`}
+                  onClick={row.pending}
                   className={`${btnDangerSm} shrink-0`}
                 >
                   <TrashIcon width={13} height={13} />
@@ -1691,6 +1721,9 @@ export function MemoryPage({
                 type="button"
                 onClick={() => {
                   memory.removeEpisodic(pendingEpisodic.agentId, pendingEpisodic.id);
+                  // 与删除语义条目同口径：条目没了，它的注入/引用计数一起清掉，
+                  // 否则账本里留一个谁也查不到的 id，还白占 400 条容量。
+                  recorder.forgetUsage([pendingEpisodic.id]);
                   setPendingEpisodic(null);
                   bump();
                   setMemoryMsg({ kind: "ok", text: "已删除一条情景记忆" });

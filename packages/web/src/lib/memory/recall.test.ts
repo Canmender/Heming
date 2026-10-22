@@ -316,6 +316,16 @@ describe("recallMemory：工作层与总开关", () => {
     });
   });
 
+  it("空结果每次都是新表：早退路径共用一个对象会让调用方改一次影响下一次", () => {
+    const store = storeOf({ semantic: [semantic("s", "称呼", "阿和")], settings: { enabled: false } });
+    const first = recall(store, "讨论发布计划");
+    first.scores.leak = 1;
+    first.boosts.leak = 1;
+    const second = recall(store, "讨论发布计划");
+    expect(second.scores).toEqual({});
+    expect(second.boosts).toEqual({});
+  });
+
   it("空库召回为空，格式化为空串（零注入）", () => {
     const store = storeOf({});
     expect(formatMemorySection(recall(store, "任何问题"))).toBe("");

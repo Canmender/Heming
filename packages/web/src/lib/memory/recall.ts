@@ -216,8 +216,7 @@ function rankSemantic(
       .filter((item) => item.base > 0)
       // 个性化只在这一步改顺序：命中数与衰减相同的老记忆，被引用过的那条排前面。
       .map((item) => ({ ...item, score: item.base * boostOf(item.entry.id) }))
-      .sort((a, b) => b.score - a.score)
-      .filter((item) => item.score > 0);
+      .sort((a, b) => b.score - a.score);
     // 入选集合按原排序回填，保证分数并列时结果稳定（不随桶顺序漂移）
     const chosen = pickDiverse(scored, SEMANTIC_TOP);
     const fromRest = scored.filter((item) => chosen.has(item.entry.id)).map((item) => item.entry);
@@ -269,8 +268,7 @@ function rankEpisodic(
     }))
     .filter((item) => item.base > 0)
     .map((item) => ({ ...item, score: item.base * boostOf(item.entry.id) }))
-    .sort((a, b) => b.score - a.score)
-    .filter((item) => item.score > 0);
+    .sort((a, b) => b.score - a.score);
   const chosen = pickDiverse(scored, EPISODIC_TOP);
   const picked = scored.filter((item) => chosen.has(item.entry.id)).map((item) => item.entry);
   for (const item of scored) if (chosen.has(item.entry.id)) settle(item.entry, item.base);
@@ -302,16 +300,11 @@ export function recallMemory(
   boosts: Record<string, number>;
   superseded: SupersededInfo[];
 } {
-  const empty = {
-    semantic: [] as SemanticEntry[],
-    episodic: [] as EpisodicEntry[],
-    working: [] as WorkingTurn[],
-    scores: {} as Record<string, number>,
-    boosts: {} as Record<string, number>,
-    superseded: [] as SupersededInfo[],
-  };
+  // 两条早退各回一份新表：共用一个对象会让调用方改一次影响下一次。
   try {
-    if (!store.getSettings().enabled) return empty;
+    if (!store.getSettings().enabled) {
+      return { semantic: [], episodic: [], working: [], scores: {}, boosts: {}, superseded: [] };
+    }
     const nowMs = store.nowMs();
     const queryTokens = tokenize(input.query ?? "");
     const semantic = rankSemantic(store.semantic(input.agentId), queryTokens, nowMs, usage);
@@ -325,6 +318,6 @@ export function recallMemory(
       superseded: semantic.superseded,
     };
   } catch {
-    return empty;
+    return { semantic: [], episodic: [], working: [], scores: {}, boosts: {}, superseded: [] };
   }
 }
