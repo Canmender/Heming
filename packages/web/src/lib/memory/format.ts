@@ -162,6 +162,12 @@ export interface MemoryObservability {
   dropped: MemoryDrop[];
   /** 条目 id → 召回打分（语义 + 情景合并）。 */
   scores: Record<string, number>;
+  /**
+   * 条目 id → 个性化乘子（d.28），**只收录 >1 的那些**。
+   * 与 `scores` 的关系：`scores` 已经是乘完之后的最终分，这里给的是「其中提了多少」，
+   * UI 用它解释「为什么这条排在前面」，不重新参与排序。
+   */
+  boosts: Record<string, number>;
   /** 被同主题键新值覆盖掉的旧语义条目。 */
   superseded: SupersededInfo[];
   /** 三层召回条数（注入前）——与 `injected.length` 可以不相等。 */
@@ -184,7 +190,11 @@ export interface MemoryDrop {
  * 把差集留给调用方算，等于把「召回 ≠ 注入」这个口径散落到每个 UI 里各写一遍。
  */
 export function summarizeInjection(
-  recalled: Recalled & { scores?: Record<string, number>; superseded?: SupersededInfo[] },
+  recalled: Recalled & {
+    scores?: Record<string, number>;
+    boosts?: Record<string, number>;
+    superseded?: SupersededInfo[];
+  },
 ): MemoryTrace & { observability: MemoryObservability } {
   const trace = formatMemorySectionWithTrace(recalled);
   const semantic = recalled.semantic ?? [];
@@ -217,6 +227,7 @@ export function summarizeInjection(
       injected: trace.injected,
       dropped,
       scores: recalled.scores ?? {},
+      boosts: recalled.boosts ?? {},
       superseded,
       counts: { semantic: semantic.length, episodic: episodic.length, working: working.length },
     },

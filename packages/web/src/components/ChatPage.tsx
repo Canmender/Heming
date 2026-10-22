@@ -1352,6 +1352,8 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
             basePrompt,
             memory: memoryStore,
             skills: skillPool,
+            // 个性化加权（d.28）：被疑似引用过的记忆在同等相关度下排前面；读不到账本就退化成不加权。
+            usage: recallRecorder.usageView,
           });
           // 登记本次注入旁路，供轮次收尾时写召回日志（可观测性；零注入不留档）。
           recallRecorder.capture(agentId, convId, text, built.recallTrace);

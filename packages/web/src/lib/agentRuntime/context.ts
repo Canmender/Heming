@@ -1,6 +1,7 @@
 import { recallMemory } from "../memory/recall.js";
 import { summarizeInjection } from "../memory/format.js";
 import type { MemoryObservability } from "../memory/format.js";
+import type { UsageView } from "../memory/usage.js";
 import type { EpisodicEntry, SemanticEntry, WorkingTurn } from "../memory/types.js";
 import type { MemoryStore } from "../memory/store.js";
 import { formatSkillSection } from "../skills/router.js";
@@ -32,6 +33,11 @@ export interface BuildContextInput {
   memory?: MemoryStore;
   /** 缺省表示不接技能池（零注入）；池内无命中同样零注入。 */
   skills?: SkillPool;
+  /**
+   * 个性化加权视图（d.28）。缺省 = 全 ×1，召回顺序与分数和 d.27 完全一致；
+   * 传账本实例时，被疑似引用过的条目在**同等相关度**下排前面（上限 +25%，不降权）。
+   */
+  usage?: UsageView;
 }
 
 /** 三层召回明细（供记忆页预览/调试；原样透传 recallMemory 的结果）。 */
@@ -69,6 +75,7 @@ function emptyObservability(): MemoryObservability {
     injected: [],
     dropped: [],
     scores: {},
+    boosts: {},
     superseded: [],
     counts: { semantic: 0, episodic: 0, working: 0 },
   };
@@ -99,7 +106,7 @@ function collectMemory(
       agentId: input.agentId,
       conversationId: input.conversationId,
       query: recallQuery(memory, input),
-    });
+    }, input.usage);
     const { text, observability } = summarizeInjection(found);
     return {
       section: text,

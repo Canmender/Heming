@@ -4,6 +4,8 @@ import { MEMORY_KEYS } from "./storage.js";
 import { bm25Score, recallMemory } from "./recall.js";
 import { MEMORY_CHAR_BUDGET, formatMemorySection, summarizeInjection } from "./format.js";
 import { tokenize } from "./tokenize.js";
+import { USAGE_BOOST_MAX, UsageLedger, isColdUsage } from "./usage.js";
+import type { UsageView } from "./usage.js";
 import type {
   EpisodicEntry,
   MemorySettings,
@@ -88,8 +90,8 @@ function storeOf(seed: {
   return new MemoryStore(storage, () => NOW);
 }
 
-const recall = (store: MemoryStore, query: string) =>
-  recallMemory(store, { agentId: "agent-1", conversationId: "conv-1", query });
+const recall = (store: MemoryStore, query: string, usage?: UsageView) =>
+  recallMemory(store, { agentId: "agent-1", conversationId: "conv-1", query }, usage);
 
 describe("tokenize：ASCII 词 + 中文 bigram", () => {
   it("中文按相邻二字切分", () => {
@@ -309,6 +311,7 @@ describe("recallMemory：工作层与总开关", () => {
       episodic: [],
       working: [],
       scores: {},
+      boosts: {},
       superseded: [],
     });
   });
@@ -521,5 +524,99 @@ describe("summarizeInjection：召回 ≠ 注入", () => {
     expect(observability.injected[0]).toMatchObject({ id: "s1", content: "称呼：阿和", truncated: false });
     expect(observability.injected[1].truncated).toBe(true);
     for (const item of observability.injected) expect(text).toContain(`- ${item.content}`);
+  });
+});
+
+describe("个性化加权（d.28）", () => {
+  /** 只给「这条值多少倍」的假视图：与 UsageLedger 同一接口，把公式与排序解耦开测。 */
+  const viewOf = (map: Record<string, number>): UsageView => ({ boostOf: (id) => map[id] ?? 1 });
+
+  /** 两条与「部署」同等相关（命中数、更新时间、置信度全同），差别只能由个性化决定。 */
+  const tieStore = () =>
+    storeOf({
+      semantic: [semantic("sA", "部署端口", "8787"), semantic("sB", "部署目录", "/var/lib/heming")],
+    });
+
+  it("不传 usage 与显式 ×1 视图结果逐字相同（个性化是叠加层，不动既有口径）", () => {
+    const store = tieStore();
+    const neutral = recall(store, "部署");
+    expect(neutral).toEqual(recall(store, "部署", viewOf({})));
+    expect(neutral.boosts).toEqual({});
+    // 不相关的一条根本不进候选（乘子救不了零命中）
+    expect(neutral.semantic.map((entry) => entry.id)).toEqual(["sA", "sB"]);
+    expect(neutral.scores).toEqual({ sA: 1.3, sB: 1.3 });
+  });
+
+  it("同等相关度里被疑似引用过的那条排前面，分数与旁路都带上乘子", () => {
+    const boosted = recall(tieStore(), "部署", viewOf({ sB: 1.125 }));
+    expect(boosted.semantic.map((entry) => entry.id)).toEqual(["sB", "sA"]);
+    expect(boosted.scores).toEqual({ sB: 1.4625, sA: 1.3 });
+    expect(boosted.boosts).toEqual({ sB: 1.125 });
+  });
+
+  it("提权封顶改不了明显的质量差：90 天前的老值最多加到 ×1.25 仍输给今天那条", () => {
+    const store = storeOf({
+      semantic: [
+        semantic("sNew", "部署端口", "8787"),
+        // 换键（同键会被时效覆盖，那样比的是覆盖不是加权）
+        semantic("sOld", "部署目录", "opt", { updatedAt: iso(90 * DAY) }),
+      ],
+    });
+    const result = recall(store, "部署", viewOf({ sOld: 1 + USAGE_BOOST_MAX }));
+    expect(result.semantic.map((entry) => entry.id)).toEqual(["sNew", "sOld"]);
+    expect(result.scores.sOld).toBeLessThan(result.scores.sNew);
+  });
+
+  it("pinned 项同样吃乘子（它必带，但分数仍要如实反映最终值）", () => {
+    const store = storeOf({ semantic: [semantic("p", "称呼", "阿和", { pinned: true })] });
+    const result = recall(store, "部署", viewOf({ p: 1.25 }));
+    expect(result.scores.p).toBe(1.625);
+    expect(result.boosts).toEqual({ p: 1.25 });
+  });
+
+  it("从没被引用的记忆不会因此被降权：冷只进清单，不改分数", () => {
+    const storage = new FakeStorage();
+    const ledger = new UsageLedger(storage, () => NOW);
+    const run = {
+      id: "rr-1",
+      at: new Date(NOW).toISOString(),
+      agentId: "agent-1",
+      conversationId: "conv-1",
+      query: "部署",
+      recalled: { semantic: 2, episodic: 0, working: 0 },
+      injected: [
+        { id: "sA", layer: "semantic" as const, content: "部署端口：8787", truncated: false },
+        { id: "sB", layer: "semantic" as const, content: "部署目录：/var/lib/heming", truncated: false },
+      ],
+      dropped: [],
+      used: [],
+    };
+    for (let i = 0; i < 8; i++) ledger.apply(run);
+    const store = tieStore();
+    const result = recall(store, "部署", ledger);
+    expect(result.scores).toEqual(recall(store, "部署").scores);
+    expect(result.boosts).toEqual({});
+    // 但清单上有它：8 次注入 0 次引用 = 冷
+    expect(isColdUsage(ledger.get("sA"))).toBe(true);
+  });
+
+  it("情景层同样生效：BM25 打平时靠乘子决定谁进 top3", () => {
+    const store = storeOf({
+      episodic: [episodic("eA", "讨论了部署端口"), episodic("eB", "讨论了部署目录")],
+    });
+    expect(recall(store, "部署").episodic.map((e) => e.id)).toEqual(["eA", "eB"]);
+    const boosted = recall(store, "部署", viewOf({ eB: 1.2 }));
+    expect(boosted.episodic.map((e) => e.id)).toEqual(["eB", "eA"]);
+    expect(boosted.boosts).toEqual({ eB: 1.2 });
+  });
+
+  it("summarizeInjection 原样带出乘子，缺省为空表", () => {
+    const withBoost = summarizeInjection({
+      semantic: [semantic("s1", "称呼", "阿和")],
+      scores: { s1: 1.4625 },
+      boosts: { s1: 1.125 },
+    });
+    expect(withBoost.observability.boosts).toEqual({ s1: 1.125 });
+    expect(summarizeInjection({ semantic: [] }).observability.boosts).toEqual({});
   });
 });

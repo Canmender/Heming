@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { RecallRecorder } from "./runRecorder.js";
 import { RecallLog } from "./recallLog.js";
+import { UsageLedger } from "./usage.js";
 import type { MemoryObservability } from "./format.js";
 import type { StorageLike } from "./types.js";
 
@@ -23,6 +24,7 @@ function trace(overrides: Partial<MemoryObservability> = {}): MemoryObservabilit
     injected: [{ id: "s1", layer: "semantic", content: "部署端口：默认 8787", truncated: false }],
     dropped: [{ id: "s2", layer: "semantic", reason: "budget" }],
     scores: { s1: 0.8765 },
+    boosts: {},
     superseded: [{ key: "称呼", loserId: "s9", winnerId: "s1" }],
     counts: { semantic: 2, episodic: 0, working: 0 },
     ...overrides,
@@ -37,10 +39,16 @@ function clampClock(times: number[]): () => number {
   return () => times[Math.min(i++, times.length - 1)];
 }
 
-function make(now: () => number): { recorder: RecallRecorder; log: RecallLog; storage: FakeStorage } {
+function make(now: () => number): {
+  recorder: RecallRecorder;
+  log: RecallLog;
+  usage: UsageLedger;
+  storage: FakeStorage;
+} {
   const storage = new FakeStorage();
   const log = new RecallLog(storage, now);
-  return { recorder: new RecallRecorder(log, now), log, storage };
+  const usage = new UsageLedger(storage, now);
+  return { recorder: new RecallRecorder(log, now, usage), log, usage, storage };
 }
 
 describe("RecallRecorder：把注入旁路接到轮次收尾", () => {
@@ -128,8 +136,11 @@ describe("RecallRecorder：把注入旁路接到轮次收尾", () => {
       },
       removeItem: () => {},
     };
-    const recorder = new RecallRecorder(new RecallLog(boom, () => base), () => base);
+    const usage = new UsageLedger(boom, () => base);
+    const recorder = new RecallRecorder(new RecallLog(boom, () => base), () => base, usage);
     recorder.capture("a1", "c1", "端口", trace());
     expect(recorder.settle({ agentId: "a1", conversationId: "c1", userText: "端口", assistantText: "8787" })).toBeNull();
+    // 日志没落盘 → 权重也不累加：账本与日志同进同退，不留「有权重无档案」的状态
+    expect(usage.get("s1")).toBeUndefined();
   });
 });

@@ -2,6 +2,8 @@ import type { EpisodicEntry, SemanticEntry, WorkingTurn } from "./types.js";
 import type { MemoryStore } from "./store.js";
 import { recencyScore } from "./store.js";
 import { tokenize } from "./tokenize.js";
+import type { UsageView } from "./usage.js";
+import { NEUTRAL_USAGE } from "./usage.js";
 
 /**
  * 记忆召回（设计 §4）：三层各自独立打分，只负责「取什么」，
@@ -10,6 +12,9 @@ import { tokenize } from "./tokenize.js";
  * 两条重排规则（d.25）：
  * - **时效覆盖**：语义层同主题键只保留最新更新的那条（旧值视为已被推翻）；
  * - **多样性重排**：语义/情景都按 MMR 贪心选名额，近似重复的条目不会一起占满预算。
+ *
+ * 第三条（d.28）：**个性化加权**。`usage` 给出「这条被疑似引用过几次」的乘子，
+ * 在既有分数上乘一次。不给 `usage` 时所有乘子为 1，分数与 d.27 逐字相同。
  */
 
 /** 语义层非 pinned 条目的召回上限。 */
@@ -167,7 +172,7 @@ function supersedeSemantic(entries: SemanticEntry[]): {
 }
 
 /**
- * 语义层：先按主题键做时效覆盖，再分 pinned（全带）／其余（重合度 × recency × 置信度）
+ * 语义层：先按主题键做时效覆盖，再分 pinned（全带）／其余（重合度 × recency × 置信度 × 个性化）
  * 经多样性重排取 top5。查询为空时退回 pinned + 最近更新 5 条。
  *
  * 分数一并带出（d.27 可观测性）：pinned 项没有「查询重合度」（它必带），
@@ -177,57 +182,80 @@ function rankSemantic(
   entries: SemanticEntry[],
   queryTokens: string[],
   nowMs: number,
-): { picked: SemanticEntry[]; scores: Record<string, number>; superseded: SupersededInfo[] } {
+  usage: UsageView,
+): { picked: SemanticEntry[]; scores: Record<string, number>; boosts: Record<string, number>; superseded: SupersededInfo[] } {
   const { live, superseded } = supersedeSemantic(entries);
   const pinned = live.filter((entry) => entry.pinned);
   const rest = live.filter((entry) => !entry.pinned);
   const querySet = new Set(queryTokens);
+  const boostOf = (id: string) => usage.boostOf(id);
   const decayed = (entry: SemanticEntry) =>
     recencyScore(entry.updatedAt, nowMs, SEMANTIC_HALF_LIFE_DAYS) *
     (CONFIDENCE_FLOOR + entry.confidence);
   const scores: Record<string, number> = {};
-  for (const entry of pinned) scores[entry.id] = roundScore(decayed(entry));
+  const boosts: Record<string, number> = {};
+  const settle = (entry: SemanticEntry, base: number) => {
+    const factor = boostOf(entry.id);
+    scores[entry.id] = roundScore(base * factor);
+    if (factor > 1) boosts[entry.id] = factor;
+  };
+  for (const entry of pinned) settle(entry, decayed(entry));
 
   let picked: SemanticEntry[];
   if (!querySet.size) {
     picked = [...pinned, ...rest.slice(0, SEMANTIC_TOP)];
-    for (const entry of picked) if (!(entry.id in scores)) scores[entry.id] = roundScore(decayed(entry));
+    for (const entry of picked) if (!(entry.id in scores)) settle(entry, decayed(entry));
   } else {
     const scored = rest
       .map((entry) => {
         const tokens = new Set(tokenize(`${entry.key} ${entry.value}`));
         let hits = 0;
         for (const token of querySet) if (tokens.has(token)) hits += 1;
-        return { entry, tokens, score: (hits / querySet.size) * decayed(entry) };
+        return { entry, tokens, base: (hits / querySet.size) * decayed(entry) };
       })
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score);
+      .filter((item) => item.base > 0)
+      // 个性化只在这一步改顺序：命中数与衰减相同的老记忆，被引用过的那条排前面。
+      .map((item) => ({ ...item, score: item.base * boostOf(item.entry.id) }))
+      .sort((a, b) => b.score - a.score)
+      .filter((item) => item.score > 0);
     // 入选集合按原排序回填，保证分数并列时结果稳定（不随桶顺序漂移）
     const chosen = pickDiverse(scored, SEMANTIC_TOP);
     const fromRest = scored.filter((item) => chosen.has(item.entry.id)).map((item) => item.entry);
     picked = [...pinned, ...fromRest];
-    for (const item of scored) if (chosen.has(item.entry.id)) scores[item.entry.id] = roundScore(item.score);
+    for (const item of scored) if (chosen.has(item.entry.id)) settle(item.entry, item.base);
   }
-  return { picked, scores, superseded };
+  return { picked, scores, boosts, superseded };
 }
 
 /**
- * 情景层：bigram BM25 × 14 天半衰期 × importance 加权，再经多样性重排取 top3
+ * 情景层：bigram BM25 × 14 天半衰期 × importance 加权 × 个性化，再经多样性重排取 top3
  * （同一段对话沉淀出的近似摘要只占一个名额，其余名额让给更有区分度的情景）。
  */
 function rankEpisodic(
   entries: EpisodicEntry[],
   queryTokens: string[],
   nowMs: number,
-): { picked: EpisodicEntry[]; scores: Record<string, number> } {
+  usage: UsageView,
+): { picked: EpisodicEntry[]; scores: Record<string, number>; boosts: Record<string, number> } {
+  const boostOf = (id: string) => usage.boostOf(id);
   const weight = (entry: EpisodicEntry) =>
     recencyScore(entry.at, nowMs) * (IMPORTANCE_FLOOR + entry.importance);
   const scores: Record<string, number> = {};
-  if (!entries.length) return { picked: [], scores };
+  const boosts: Record<string, number> = {};
+  const settle = (entry: EpisodicEntry, base: number) => {
+    const factor = boostOf(entry.id);
+    scores[entry.id] = roundScore(base * factor);
+    if (factor > 1) boosts[entry.id] = factor;
+  };
+  if (!entries.length) return { picked: [], scores, boosts };
   if (!queryTokens.length) {
-    const picked = [...entries].sort((a, b) => weight(b) - weight(a)).slice(0, EPISODIC_TOP);
-    for (const entry of picked) scores[entry.id] = roundScore(weight(entry));
-    return { picked, scores };
+    const picked = [...entries]
+      .map((entry) => ({ entry, score: weight(entry) * boostOf(entry.id) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, EPISODIC_TOP)
+      .map((item) => item.entry);
+    for (const entry of picked) settle(entry, weight(entry));
+    return { picked, scores, boosts };
   }
   const bm25 = bm25Score(
     queryTokens,
@@ -237,14 +265,16 @@ function rankEpisodic(
     .map((entry, i) => ({
       entry,
       tokens: new Set(tokenize(entry.summary)),
-      score: bm25[i] * weight(entry),
+      base: bm25[i] * weight(entry),
     }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .filter((item) => item.base > 0)
+    .map((item) => ({ ...item, score: item.base * boostOf(item.entry.id) }))
+    .sort((a, b) => b.score - a.score)
+    .filter((item) => item.score > 0);
   const chosen = pickDiverse(scored, EPISODIC_TOP);
   const picked = scored.filter((item) => chosen.has(item.entry.id)).map((item) => item.entry);
-  for (const item of scored) if (chosen.has(item.entry.id)) scores[item.entry.id] = roundScore(item.score);
-  return { picked, scores };
+  for (const item of scored) if (chosen.has(item.entry.id)) settle(item.entry, item.base);
+  return { picked, scores, boosts };
 }
 
 /**
@@ -255,33 +285,46 @@ function rankEpisodic(
  * `scores` / `superseded` 是给「召回可观测性」用的旁路信息（d.27）：
  * 排序口径原本算完即丢，用户只能看到「注入了哪几条」看不到「凭什么这几条」，
  * 也看不到某条旧事实是被同键新值覆盖掉的（不是没召回）。两者都不参与排序本身。
+ *
+ * `usage`（d.28）是个性化加权视图：只改「同命中度之间谁排前面」和分数，
+ * 不改取什么、不改预算，也不省略任何一层。缺省为 `NEUTRAL_USAGE`（全 ×1），
+ * 此时 `scores` 与 d.27 逐字一致、`boosts` 为空表。
  */
 export function recallMemory(
   store: MemoryStore,
   input: { agentId: string; conversationId: string; query: string },
+  usage: UsageView = NEUTRAL_USAGE,
 ): {
   semantic: SemanticEntry[];
   episodic: EpisodicEntry[];
   working: WorkingTurn[];
   scores: Record<string, number>;
+  boosts: Record<string, number>;
   superseded: SupersededInfo[];
 } {
+  const empty = {
+    semantic: [] as SemanticEntry[],
+    episodic: [] as EpisodicEntry[],
+    working: [] as WorkingTurn[],
+    scores: {} as Record<string, number>,
+    boosts: {} as Record<string, number>,
+    superseded: [] as SupersededInfo[],
+  };
   try {
-    if (!store.getSettings().enabled) {
-      return { semantic: [], episodic: [], working: [], scores: {}, superseded: [] };
-    }
+    if (!store.getSettings().enabled) return empty;
     const nowMs = store.nowMs();
     const queryTokens = tokenize(input.query ?? "");
-    const semantic = rankSemantic(store.semantic(input.agentId), queryTokens, nowMs);
-    const episodic = rankEpisodic(store.episodic(input.agentId), queryTokens, nowMs);
+    const semantic = rankSemantic(store.semantic(input.agentId), queryTokens, nowMs, usage);
+    const episodic = rankEpisodic(store.episodic(input.agentId), queryTokens, nowMs, usage);
     return {
       semantic: semantic.picked,
       episodic: episodic.picked,
       working: store.working(input.conversationId, input.agentId).slice(-WORKING_TOP),
       scores: { ...semantic.scores, ...episodic.scores },
+      boosts: { ...semantic.boosts, ...episodic.boosts },
       superseded: semantic.superseded,
     };
   } catch {
-    return { semantic: [], episodic: [], working: [], scores: {}, superseded: [] };
+    return empty;
   }
 }

@@ -10,9 +10,11 @@ import {
   KnowledgeBase,
   MEMORY_KEYS,
   RECALL_LOG_KEY,
+  USAGE_KEY,
   MemoryStore,
   RecallLog,
   RecallRecorder,
+  UsageLedger,
   recallMemory,
   summarizeInjection,
   type StorageLike,
@@ -558,22 +560,21 @@ describe("MemoryPage 召回可观测性", () => {
 
   function makeRecorder() {
     clock = { at: T0 };
+    const storage: StorageLike = {
+      getItem: (key) => (logMap.has(key) ? (logMap.get(key) as string) : null),
+      setItem: (key, value) => logMap.set(key, value),
+      removeItem: (key) => logMap.delete(key),
+    };
     return new RecallRecorder(
-      new RecallLog(
-        {
-          getItem: (key) => (logMap.has(key) ? (logMap.get(key) as string) : null),
-          setItem: (key, value) => logMap.set(key, value),
-          removeItem: (key) => logMap.delete(key),
-        },
-        () => clock.at,
-      ),
+      new RecallLog(storage, () => clock.at),
       () => clock.at,
+      new UsageLedger(storage, () => clock.at),
     );
   }
 
   /** 复刻聊天页那一轮：召回 → 注入旁路 → 收尾落档。 */
   function recordTurn(rec: RecallRecorder, mem: MemoryStore, query: string, answer: string) {
-    const recalled = recallMemory(mem, { agentId: "a1", conversationId: "c1", query });
+    const recalled = recallMemory(mem, { agentId: "a1", conversationId: "c1", query }, rec.usageView);
     const { observability } = summarizeInjection(recalled);
     rec.capture("a1", "c1", query, observability);
     clock.at += 60_000;
@@ -712,5 +713,101 @@ describe("MemoryPage 召回可观测性", () => {
     expect(logMap.has(RECALL_LOG_KEY)).toBe(false);
     expect(within(card).queryByText(/最近注入/)).not.toBeInTheDocument();
     expect(screen.getByText(/还没有留档/)).toBeInTheDocument();
+  });
+
+  /**
+   * 个性化加权（d.28）。两条与「部署」同等相关（命中数、置信度、更新时间全同）的记忆，
+   * 只有正文里复述过词的那条提权：
+   * A 的注入文本与回答共有 部署/署端/端口/8787 四个词 → 判为疑似引用；
+   * B 只共享「部署」这一个二字词（不足 2 个词、长度也不到 3）→ 永远不算被引用。
+   */
+  const seedTwin = () => {
+    memory.upsertSemantic({ agentId: "a1", key: "部署目录", value: "生产放在 /var/www", source: "manual" });
+    memory.upsertSemantic({ agentId: "a1", key: "部署端口", value: "8787", source: "manual" });
+  };
+  const RECORDS = 6;
+
+  it("被引用过的记忆带加权注脚；反复注入却没被引用的进「长期未被引用」清单", async () => {
+    mockApi({ agents: AGENTS });
+    seedTwin();
+    const rec = makeRecorder();
+    for (let i = 0; i < RECORDS; i++) recordTurn(rec, memory, "部署", "部署端口 8787 保持不变");
+    renderWith(rec, memory);
+    await pickAgent();
+    openTab("数据库");
+
+    const card = semanticList();
+    // ×(1 + 25% × 6/(6+3)) = 1.1667：手算得出来，不是「模型觉得它有用」
+    expect(within(card).getByText(/累计注入 6 次 · 疑似引用 6 次 · 个性化加权 ×1\.1667/)).toBeInTheDocument();
+    expect(within(card).getByText(/累计注入 6 次 · 未被引用/)).toBeInTheDocument();
+
+    const cold = screen.getByRole("list", { name: "长期未被引用的记忆" });
+    expect(within(cold).getByText("部署目录")).toBeInTheDocument();
+    expect(within(cold).queryByText("部署端口")).not.toBeInTheDocument();
+    // 措辞必须讲清「不会自动删」，否则用户以为系统在偷偷清他的记忆
+    expect(screen.getByText(/系统不会因为「冷」自动降权或删除/)).toBeInTheDocument();
+  });
+
+  it("召回预览标出乘子，并把提权的那条排到同等相关度的另一条之前", async () => {
+    mockApi({ agents: AGENTS });
+    seedTwin();
+    const rec = makeRecorder();
+    for (let i = 0; i < RECORDS; i++) recordTurn(rec, memory, "部署", "部署端口 8787 保持不变");
+    renderWith(rec, memory);
+    await pickAgent();
+    openTab("数据库");
+
+    fireEvent.change(screen.getByLabelText("召回预览输入"), { target: { value: "部署" } });
+    fireEvent.click(screen.getByRole("button", { name: "预览召回" }));
+    const out = screen.getByRole("group", { name: "召回预览结果" });
+    const lines = within(out).getAllByText(/^部署(端口|目录)：/) as HTMLElement[];
+    expect(lines[0].textContent).toContain("部署端口：");
+    expect(within(out).getAllByText(/加权 ×1\.1667/).length).toBeGreaterThan(0);
+    // 冷的那条一分没变：没有乘子标注
+    expect(lines[1].textContent).not.toContain("加权");
+  });
+
+  it("清除召回记录把加权账本一起清零（不留「有权重、无档案」）", async () => {
+    mockApi({ agents: AGENTS });
+    seedTwin();
+    const rec = makeRecorder();
+    recordTurn(rec, memory, "部署", "部署端口 8787 保持不变");
+    renderWith(rec, memory);
+    await pickAgent();
+    openTab("数据库");
+
+    const card = semanticList();
+    expect(within(card).getByText(/累计注入 1 次 · 疑似引用 1 次 · 个性化加权 ×1\.0625/)).toBeInTheDocument();
+    expect(logMap.has(USAGE_KEY)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "清除记录" }));
+    const dialog = screen.getByRole("dialog", { name: "清除召回记录" });
+    expect(within(dialog).getByText(/个性化加权回到起点/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "清除" }));
+    expect(logMap.has(RECALL_LOG_KEY)).toBe(false);
+    expect(logMap.has(USAGE_KEY)).toBe(false);
+    // 注脚随账本一起消失：视图必须跟着这次清除重算，不能停在旧快照上
+    expect(within(card).queryByText(/累计注入/)).not.toBeInTheDocument();
+  });
+
+  it("删除记忆后它的计数从账本里摘掉，不留孤儿 id", async () => {
+    mockApi({ agents: AGENTS });
+    seedTwin();
+    const rec = makeRecorder();
+    for (let i = 0; i < RECORDS; i++) recordTurn(rec, memory, "部署", "部署端口 8787 保持不变");
+    const before = memory
+      .semantic("a1")
+      .find((entry) => entry.key === "部署端口") as { id: string };
+    renderWith(rec, memory);
+    await pickAgent();
+    openTab("数据库");
+
+    fireEvent.click(screen.getByRole("button", { name: "删除记忆 部署端口" }));
+    const dialog = screen.getByRole("dialog", { name: "删除记忆" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+
+    const ledger = JSON.parse(logMap.get(USAGE_KEY) as string) as Record<string, unknown>;
+    expect(ledger[before.id]).toBeUndefined();
+    expect(Object.keys(ledger).length).toBe(1); // 只剩「部署目录」那条的计数
   });
 });

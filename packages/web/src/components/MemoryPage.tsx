@@ -2,19 +2,23 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { Agent, SharedFileMeta } from "@heming/shared";
 import { WikiPanel } from "./WikiPanel.js";
 import {
+  COLD_MIN_INJECTED,
   MEMORY_CHAR_BUDGET,
   RECALL_LOG_MAX,
   WORKING_TTL_MS,
   agentPrefsStore,
   buildTouchIndex,
   extractExplicitMemory,
+  isColdUsage,
   knowledgeBase,
   memoryStore,
   normalizeKey,
   recallMemory,
   summarizeInjection,
+  usageBoost,
   type AgentMemoryPrefs,
   type AgentPrefsStore,
+  type EntryUsage,
   type EpisodicEntry,
   type KnowledgeBase,
   type KnowledgeEntry,
@@ -520,6 +524,8 @@ function KnowledgeModal({
 interface RecallLine {
   text: string;
   score?: number;
+  /** 个性化乘子（d.28，仅 >1 时有值）：解释这个分数里有多少是「用得多吃到的加成」。 */
+  boost?: number;
   injected: boolean;
   truncated: boolean;
   /** 未注入的原因（预算裁掉／被同键新值覆盖）。 */
@@ -545,6 +551,23 @@ function touchNote(touch: { injectedAt: string; usedAt: string } | undefined): s
 }
 
 /**
+ * 个性化加权注脚（d.28）：这条记忆在本机被注入过几次、其中几次疑似被引用，
+ * 因此下次召回带多少乘子。
+ *
+ * 单独成行而不是接在 `touchNote` 后面：日期说的是「最近一次」，计数说的是「累计」，
+ * 两个口径挤一行用户读不懂。没有任何计数（新记忆/清过诊断数据）时整行不出现，
+ * 免得「×1」这种「其实没加权」的数字被当成一个特性。
+ */
+function personalNote(usage: EntryUsage | undefined): string {
+  if (!usage || !usage.injected) return "";
+  const factor = usageBoost(usage);
+  const cited = usage.used
+    ? `累计注入 ${usage.injected} 次 · 疑似引用 ${usage.used} 次`
+    : `累计注入 ${usage.injected} 次 · 未被引用`;
+  return factor > 1 ? `${cited} · 个性化加权 ×${factor}` : cited;
+}
+
+/**
  * 把候选与注入旁路对在一起（召回 ≠ 注入）：同一条既可能「召回了但被预算裁掉」，
  * 也可能「注入了还被截断」。只列召回清单会让用户以为全都进了提示词。
  */
@@ -560,6 +583,7 @@ function traceLines(
     return {
       text: label,
       ...(trace.scores[id] !== undefined ? { score: trace.scores[id] } : {}),
+      ...(trace.boosts[id] !== undefined ? { boost: trace.boosts[id] } : {}),
       injected: !!hit,
       truncated: !!hit?.truncated,
       ...(drop ? { reason: drop.reason } : {}),
@@ -595,6 +619,7 @@ function RecallGroup({ title, lines }: { title: string; lines: RecallLine[] }) {
               {line.text}
               <span className="ml-1 text-[10px] text-muted">
                 {line.score !== undefined && `· 打分 ${line.score.toFixed(3)} `}
+                {line.boost !== undefined && `· 加权 ×${line.boost} `}
                 {line.injected
                   ? line.truncated
                     ? "· 注入（超预算已截断）"
@@ -902,7 +927,9 @@ export function MemoryPage({
     // 工作记忆按会话召回：取当前选中智能体最近一轮所在会话
     const conversationId =
       layers.working.find((turn) => !agentId || turn.agentId === agentId)?.conversationId ?? "";
-    const recalled = recallMemory(memory, { agentId, conversationId, query: recallQuery });
+    // 预览与真实生成走同一条路：把个性化账本一起传进去，
+    // 否则「预览里看到的排序」和「实际注入的排序」会是两套（体感缺口）。
+    const recalled = recallMemory(memory, { agentId, conversationId, query: recallQuery }, recorder.usageView);
     const { text, observability } = summarizeInjection(recalled);
     setRecall({ ...recalled, text, trace: observability });
   };
@@ -922,6 +949,16 @@ export function MemoryPage({
   );
   /** 条目 id → 最后一次注入/引用：数据库卡的「最近注入」与「疑似引用过」都从这里取。 */
   const touches = useMemo(() => buildTouchIndex(runs), [runs]);
+  /** 条目 id → 累计注入/引用计数（d.28）：卡片的加权注脚与冷门清单都来自这份账本。 */
+  const usage = useMemo(() => recorder.usageSnapshot(), [tick, recorder]);
+
+  /**
+   * 冷门线索：注入 ≥ `COLD_MIN_INJECTED` 次、一次都没被疑似引用。
+   *
+   * 刻意只做「列出来 + 让人删」，不做自动淘汰：判据是词重合，本来就偏保守
+   * （工具调用里用了但正文没复述的不算），把漏判变成删数据是拿用户资产冒险。
+   */
+  const coldEntries = layers.globalSemantic.filter((entry) => isColdUsage(usage[entry.id]));
 
 
   const onAddManualAgent = () => {
@@ -1312,6 +1349,11 @@ export function MemoryPage({
                         {SOURCE_LABEL[entry.source]} · 置信度 {entry.confidence.toFixed(2)}
                         {touchNote(touches.get(entry.id))}
                       </div>
+                      {personalNote(usage[entry.id]) && (
+                        <div className="mt-0.5 break-words text-[10px] text-muted">
+                          {personalNote(usage[entry.id])}
+                        </div>
+                      )}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <button
@@ -1372,6 +1414,11 @@ export function MemoryPage({
                     {!agentId && ` · ${agentName(entry.agentId)}`} · {entry.sourceTurns} 轮
                   </div>
                   <div className="mt-0.5 break-words text-[12px] text-[#555]">{entry.summary}</div>
+                  {personalNote(usage[entry.id]) && (
+                    <div className="mt-0.5 break-words text-[10px] text-muted">
+                      {personalNote(usage[entry.id])}
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -1476,6 +1523,7 @@ export function MemoryPage({
             <div className={`mt-1 ${hintCls}`}>
               本机最近 {RECALL_LOG_MAX} 次「带记忆的生成」留档：召回几条、真注入几条、哪些被预算裁掉，
               以及回答里疑似用到了哪条（判据是词重合，不是模型自述）。只存本机，不参与记忆导出。
+              累计的注入/引用次数还用于个性化加权（被引用过的记忆在同等相关度下最多提权 25%）。
             </div>
           </div>
           {runs.length > 0 && (
@@ -1517,6 +1565,39 @@ export function MemoryPage({
         )}
       </section>
 
+      {coldEntries.length > 0 && (
+        <section className={`${cardCls} mt-3`}>
+          <div className="text-[12px] font-bold text-[#777]">长期未被引用（{coldEntries.length}）</div>
+          <div className={`mt-1 ${hintCls}`}>
+            近 {COLD_MIN_INJECTED} 次以上被注入、却一次都没被判为「疑似引用」的记忆。
+            系统不会因为「冷」自动降权或删除它们——这只是一条线索：判据是词重合，偏保守，
+            也有可能其实被用到了只是正文没复述。要不要清掉由你定。
+          </div>
+          <ul aria-label="长期未被引用的记忆" className="mt-3 space-y-2">
+            {coldEntries.map((entry) => (
+              <li
+                key={entry.id}
+                className="flex items-start justify-between gap-2 rounded-lg border border-line p-2.5"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-[12px] font-bold">{entry.key}</div>
+                  <div className="mt-0.5 break-words text-[12px] text-[#555]">{entry.value}</div>
+                  <div className="mt-0.5 text-[10px] text-muted">{personalNote(usage[entry.id])}</div>
+                </div>
+                <button
+                  type="button"
+                  aria-label={`删除冷记忆 ${entry.key}`}
+                  onClick={() => setPendingSemantic(entry)}
+                  className={`${btnDangerSm} shrink-0`}
+                >
+                  <TrashIcon width={13} height={13} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {clearRunsOpen && (
         <ConfirmDialog
           title="清除召回记录"
@@ -1537,6 +1618,9 @@ export function MemoryPage({
                   setClearRunsOpen(false);
                   setRuns([]);
                   setExpandedRuns(new Set());
+                  // 账本也被清了，必须重算：`usage` 只跟着 tick 走，不 bump 的话
+                  // 卡片上的「累计注入 / 加权」会停清除前的旧快照上（用户看到已清零的权重）。
+                  bump();
                 }}
                 className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
               >
@@ -1547,6 +1631,7 @@ export function MemoryPage({
         >
           <p className="text-[12px] leading-6">
             清除全部 {runs.length} 条召回记录？记忆本身不受影响，只是看不到历史注入与引用轨迹了。
+            累计的注入/引用次数一并清零，个性化加权回到起点（下次召回从「谁都没被引用过」重新开始）。
           </p>
         </ConfirmDialog>
       )}
@@ -1568,6 +1653,9 @@ export function MemoryPage({
                 type="button"
                 onClick={() => {
                   memory.removeSemantic(pendingSemantic.agentId, pendingSemantic.id);
+                  // 条目没了，它的注入/引用计数一起清掉：否则同一份账本里留着一个
+                  // 谁也查不到的 id，冷门清单下次也读不到这条（已经删了）。
+                  recorder.forgetUsage([pendingSemantic.id]);
                   setPendingSemantic(null);
                   bump();
                   setMemoryMsg({ kind: "ok", text: `已删除记忆：${pendingSemantic.key}` });

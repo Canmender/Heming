@@ -4,6 +4,7 @@ import { MemoryStore } from "../memory/store.js";
 import type { MemoryStore as MemoryStoreType } from "../memory/store.js";
 import { createMemoryStorage, MEMORY_KEYS } from "../memory/storage.js";
 import { SkillPool } from "../skills/store.js";
+import type { UsageView } from "../memory/usage.js";
 import type { SkillPool as SkillPoolType } from "../skills/store.js";
 
 /**
@@ -294,6 +295,7 @@ describe("buildAgentContext：注入旁路（可观测性）", () => {
     injected: [],
     dropped: [],
     scores: {},
+    boosts: {},
     superseded: [],
     counts: { semantic: 0, episodic: 0, working: 0 },
   };
@@ -397,5 +399,58 @@ describe("buildAgentContext：注入旁路（可观测性）", () => {
     expect(out.systemPrompt).toContain("称呼：王总");
     expect(out.recallTrace.superseded).toEqual([{ key: "称呼", loserId: "old", winnerId: "new" }]);
     expect(out.recallTrace.injected[0].id).toBe("new");
+  });
+});
+
+describe("buildAgentContext 个性化加权（d.28）", () => {
+  /** 两条与「部署」同等相关的记忆：命中数、置信度、更新时间全同，先后只能由权重决定。 */
+  function tiedMemory() {
+    const memory = makeMemory();
+    const a = memory.upsertSemantic({ agentId: "a1", key: "部署端口", value: "8787", source: "manual" });
+    const b = memory.upsertSemantic({
+      agentId: "a1",
+      key: "部署目录",
+      value: "生产放在 /var/www",
+      source: "manual",
+    });
+    return { memory, a: a.id, b: b.id };
+  }
+
+  const build = (memory: MemoryStoreType, usage?: UsageView) =>
+    buildAgentContext({
+      agentId: "a1",
+      conversationId: "c1",
+      userText: "部署",
+      basePrompt: BASE,
+      memory,
+      skills: emptySkills(),
+      usage,
+    });
+
+  it("不传 usage → boosts 为空表，顺序与写入顺序一致（既有拼装口径零变化）", () => {
+    const { memory, a, b } = tiedMemory();
+    const out = build(memory);
+    expect(out.recallTrace.boosts).toEqual({});
+    expect(out.recallTrace.injected.map((item) => item.id)).toEqual([a, b]);
+  });
+
+  it("被疑似引用过的那条进提示词时排前面，旁路带出乘子与最终分数", () => {
+    const { memory, a, b } = tiedMemory();
+    const base = build(memory).recallTrace.scores[b];
+    const out = build(memory, { boostOf: (id) => (id === b ? 1.2 : 1) });
+    expect(out.recallTrace.injected.map((item) => item.id)).toEqual([b, a]);
+    expect(out.recallTrace.boosts).toEqual({ [b]: 1.2 });
+    expect(out.recallTrace.scores[b]).toBeCloseTo(base * 1.2, 4);
+    // 注入文本真的换了顺序（不是只有旁路数字变了）
+    expect(out.systemPrompt.indexOf("部署目录")).toBeLessThan(out.systemPrompt.indexOf("部署端口"));
+  });
+
+  it("权重只改顺序，不改取用：条数、层名额与候选集合都照旧", () => {
+    const { memory, a, b } = tiedMemory();
+    const neutral = build(memory);
+    const boosted = build(memory, { boostOf: (id) => (id === b ? 1.25 : 1) });
+    expect(boosted.recallTrace.counts).toEqual(neutral.recallTrace.counts);
+    expect(boosted.recallTrace.injected.map((item) => item.id)).toEqual([b, a]);
+    expect(neutral.recallTrace.injected.map((item) => item.id)).toEqual([a, b]);
   });
 });

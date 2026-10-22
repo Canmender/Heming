@@ -11,6 +11,7 @@ export * from "./recall.js";
 export * from "./format.js";
 export * from "./attribution.js";
 export * from "./recallLog.js";
+export * from "./usage.js";
 export * from "./runRecorder.js";
 export * from "./agentPrefs.js";
 export * from "./kb.js";

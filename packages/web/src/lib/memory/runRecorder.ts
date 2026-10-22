@@ -2,6 +2,8 @@ import { matchUsage } from "./attribution.js";
 import type { MemoryObservability } from "./format.js";
 import { RecallLog } from "./recallLog.js";
 import type { RecallRun, RecallRunItem } from "./recallLog.js";
+import { UsageLedger } from "./usage.js";
+import type { EntryUsage, UsageView } from "./usage.js";
 
 /**
  * 召回档案登记器（可观测性，d.27）：把「拼装提示词时算出的注入旁路」接到「轮次收尾」上。
@@ -34,6 +36,8 @@ export class RecallRecorder {
   constructor(
     private log: RecallLog = new RecallLog(),
     private now: () => number = () => Date.now(),
+    /** 个性化权重账本（d.28）：settle 判完引用就顺手累加，不再另开一次判定。 */
+    private usage: UsageLedger = new UsageLedger(),
   ) {}
 
   /** 提示词拼装完成后登记本次注入旁路；零注入（无记忆）不留档，收尾端据此不记日志。 */
@@ -82,7 +86,7 @@ export class RecallRecorder {
       truncated: item.truncated,
     }));
     try {
-      return this.log.record({
+      const run = this.log.record({
         agentId: input.agentId,
         conversationId: input.conversationId,
         query: input.userText,
@@ -91,6 +95,10 @@ export class RecallRecorder {
         dropped: trace.dropped,
         used,
       });
+      // 日志没落盘就不累加权重：账本与日志必须同进同退，
+      // 否则记忆页会出现「有权重却查不到任何一次引用的原始档案」，没法解释。
+      if (run) this.usage.apply(run);
+      return run;
     } catch {
       return null;
     }
@@ -105,8 +113,36 @@ export class RecallRecorder {
     }
   }
 
+  /** 个性化权重视图（d.28）：召回侧拿它调顺序，记忆页拿它显示「×1.18」与冷门清单。 */
+  get usageView(): UsageView {
+    return this.usage;
+  }
+
+  /** 全表快照（记忆页一次读全，别逐条读）：条目 id → 注入/引用计数。 */
+  usageSnapshot(): Record<string, EntryUsage> {
+    try {
+      return this.usage.snapshot();
+    } catch {
+      return {};
+    }
+  }
+
+  /** 记忆条目被删除时清掉它的计数（不留孤儿 id）。 */
+  forgetUsage(ids: Iterable<string>): void {
+    try {
+      this.usage.forget(ids);
+    } catch {
+      /* 静默：计数清不掉不影响删除本身 */
+    }
+  }
+
+  /**
+   * 清除诊断数据：召回日志 + 权重账本一起清（两者同属「本机诊断数据，不是用户记忆」），
+   * 三层记忆本身不受影响。
+   */
   clearLog(): void {
     this.log.clear();
+    this.usage.clear();
   }
 
   /** 测试/调试：当前待收尾档数。 */
