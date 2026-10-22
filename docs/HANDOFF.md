@@ -2,7 +2,7 @@
 
 - 日期：2026-10-22
 - 当前版本：`d.26.1.7.0`
-- 当前 main：以 `git log -1` 为准（`204a592` 功能批次 → `d5dbdca` 裸机部署链路 → `94e6d77` 发布收口；本轮 d.26.1.7.0 是「弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态」，云端与安装包需**两处重发**）
+- 当前 main：以 `git log -1` 为准（`204a592` 功能批次 → `d5dbdca` 裸机部署链路 → `3956d23` 弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态；本轮 d.26.1.7.0 **云端与安装包两处均已发布**）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
@@ -24,9 +24,9 @@
 | 版本 | `d.26.1.7.0`（5 段，五包同步） |
 | main | `204a592`（d.25.1.6.0 功能批次）→ `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ `94e6d77`（d.25.1.7.0 发布收口）→ 本轮「弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态」 |
 | 测试 | 2026-10-22 实跑：`pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿（exit 0）；web 106 文件 / 1659 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 18 文件全通过 |
-| 线上 | **2026-10-22 裸机重新上线 `d.25.1.6.0`**（实例被重置为 Ubuntu 24.04 → 去 Docker；宿主机 nginx + systemd + node，云端零构建）。**`d.25.1.7.0` 已发布**：`/`（外部取回的 `assets/index-DmsRMu09.js` 与本机 dist 逐字同名）、`/api/health`、`/api/ws`（带 token 握手并收到 `error` 回执）全部实测通过。**`d.26.1.7.0` 待重发**（先 `deploy-bare.py backup`） |
-| 安装包 | `和鸣 Setup d.25.1.7.0.exe`（178841844 字节，`r26/`）已发布到 `/updates`——远端字节数与本地一致，`latest.yml` 读到 `version: 25.1.7`，Range 请求返回 206（`bytes 0-1023/178841844`）。**`d.26.1.7.0` 待重出包**（输出目录用 `release/r27`，见 §5 #4） |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落） |
+| 线上 | **2026-10-22 裸机重新上线**（实例被重置为 Ubuntu 24.04 → 去 Docker；宿主机 nginx + systemd + node，云端零构建）。**`d.26.1.7.0` 已发布**：部署包远端/本机 MD5 同为 `b0a737b89c4f…`，外部取回的 `assets/index-CNMyJF7I.js` 与本机 dist 逐字同名（`d063bc4bbb64…`）、`/api/health` 返回 `{"ok":true}`、`/api/ws` 带 token 握手成功并对非法会话回 `error: not a member`（上一版 `d.25.1.7.0` 同样实测通过） |
+| 安装包 | **`和鸣 Setup d.26.1.7.0.exe`（178843410 字节，`release/r27/`）已发布到 `/updates`**——远端字节数与本地一致，`latest.yml` 352 字节且读到 `version: 26.1.7`，Range 请求返回 206（`bytes 0-1023/178843410`）。安装包内嵌的是注入 `VITE_API_BASE` 的产物（`index-DM0QlkiE.js`），与云端站点产物（`index-CNMyJF7I.js`）**不同名即不同源**，这是预期 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落），当前指向 `26.1.7` |
 | 账号 | 只有 `admin/admin`（`HEMING_SEED_USERS` 播种；注册默认关闭）。**重置把旧库连同 `zhoukang` 等账号一起清掉了**，历史会话/消息不可恢复 |
 
 ### 已完成里程碑
@@ -125,7 +125,7 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 2. **弹窗屏蔽背景的真机读屏验证**：`inert` 屏蔽与焦点归还已实现并有属性/`activeElement` 层面的单测，但 **NVDA / VoiceOver 下的真实行为未验证**（jsdom 不实现 `inert`，测不出读屏是否真的跳过背景）。这是验证项，不是实现项。
 3. **语音重连的真机验证**：状态机与信令有单测，缺弱网 / TURN 环境证据。新裸机上 `HEMING_TURN_*` 尚未配置，群通话只有 STUN 路径可验。
 4. **记忆召回的可观测性**：先能归因「哪条被注入后模型用了 / 用了错的」，再谈个性化权重（现在只有可解释的确定性规则）。
-5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 打 d.25.1.7.0，一次通过；本轮用 `release/r27`），下次继续递增目录；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
+5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 打 d.25.1.7.0 → r27 打 d.26.1.7.0，均一次通过），下次继续递增目录；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
 6. **`docker/` 与 `docker-compose.yml` 已停用但未清理**：机器已重置且没装 Docker，发版走 `deploy/`。两处 nginx 配置仍互为出处（`/updates/` 顺序、WS 的 `= /api/ws`），要清理就一起清，见 `docs/deploy.md` §11。
 
 **二期主线**：
