@@ -58,7 +58,7 @@ UI：`recent.length===0` / `incoming.length===0` 时先看 `workspaceReady`—�
 ## 3. 明确不做
 
 - **不做 portal 改造**。把弹窗统一挂到 `body` 能让屏蔽简单一层，但要动 10 个调用点的挂载位置、z-index 与祖先样式继承，收益不抵风险；兄弟屏蔽已经覆盖同样的语义。
-- **不做读屏实测**。`inert` 与焦点归还的行为在 jsdom 里只能断言属性与 `activeElement`，真实 NVDA/VoiceOver 表现未验证——这条留在 HANDOFF §5 作为验证项，不是实现项。
+- **不做读屏实测**。`inert` 与焦点归还的行为在 jsdom 里只能断言属性与 `activeElement`，真实 NVDA/VoiceOver 表现未验证——这条留在 HANDOFF §5 作为验证项，不是实现项。**浏览器层面的行为已经真机验过**（见 §5），剩下的只是 AT 软件那一层。
 - **不加焦点环样式**。归还后的可见焦点依赖既有的 `focus-visible` 样式。
 - **不动全局快捷键**。弹窗打开时 `Alt+1–8`、`Ctrl+\` 仍然生效（监听挂在 `window` 上，`inert` 不影响 JS 事件）。这与本特性正交，另议。
 
@@ -76,3 +76,28 @@ UI：`recent.length===0` / `incoming.length===0` 时先看 `workspaceReady`—�
 `store/chat.test.ts`（新增 2 例）：首帧失败写 `workspaceError` 且 rejection 交回调用方；成功后 `ready`、清空错误，后台刷新再失败不推翻已就绪。
 
 `HomePage.test.tsx`（新增 2 例）：首帧未落地显示加载骨架而非「暂无会话」；首帧失败显示重试条，重试成功后回到正常空态。
+
+## 5. 真实浏览器验证（2026-10-22，线上 d.26.1.7.0 + 本机桩）
+
+jsdom 不实现 `inert`，上面的单测只证明了「属性挂上了/摘掉了」，证明不了浏览器是否真的因此跳过这些元素。
+用 Chromium（browser-use）补了一轮，两条都是**只有真浏览器能给的证据**：
+
+**线上 `http://47.92.39.184`（d.26.1.7.0）**
+
+| 检查 | 结果 |
+|---|---|
+| 打开「新建群聊」弹窗 | 5 个背景元素带 `inert`（`NAV[主导航]`、雷达图、侧栏 `ASIDE` 等），弹窗自己 `aria-modal=true` 且不带 `inert` |
+| 弹窗开着时对背景按钮调 `.focus()` | **焦点没有移动**（`document.activeElement` 仍在弹窗内）——这才是 `inert` 的真语义，jsdom 测不出来 |
+| Esc 关闭后 | `inert` 计数归 0，焦点回到触发按钮「＋ 新建群」 |
+| 通知中心（`blockBackground:false`） | 弹窗存在但 `inert` 计数为 0，背景按钮仍可聚焦；面板外 `pointerdown` 正常关闭 |
+
+**本机临时桩（`packages/web/dist` + 可控 `/api`，只跑验证用的一次性脚本，验完已删）**
+
+| 检查 | 结果 |
+|---|---|
+| 首帧请求在飞（把 `/api/{conversations,friends,friends/requests}` 拖 25s） | 两个 `role="status"[aria-label="正在加载"]` 骨架（3 行 / 2 行），页面上**没有**「暂无会话，从工作区开始」 |
+| 首帧失败（同一批接口返回 500 `云端不可达`） | 两处各一条「加载失败：云端不可达」+「重试」按钮，空态文案不出现 |
+| 点「重试」（接口恢复 200） | 错误条消失，回到正常空态 |
+| 已就绪后后台刷新再失败（切页触发 `loadWorkspace`） | **不塌回重试态**：既无错误条也无骨架，原列表继续显示 |
+
+仍未验证的只剩**真实读屏软件**（NVDA / VoiceOver 是否播报、Tab 序列的实际手感）——需要装读屏的那台机器，不是代码问题。
