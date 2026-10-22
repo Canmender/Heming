@@ -24,8 +24,8 @@
 | 版本 | `d.25.1.7.0`（5 段，五包同步） |
 | main | `204a592`（d.25.1.6.0 功能批次）→ `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ 本轮「图片 + 文字同发」 |
 | 测试 | 2026-10-22 实跑：`pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿（exit 0）；web 106 文件 / 1648 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 18 文件全通过 |
-| 线上 | **2026-10-22 裸机重新上线 `d.25.1.6.0`**（实例被重置为 Ubuntu 24.04 → 去 Docker；宿主机 nginx + systemd + node，云端零构建）。`/`、`/api/health`、`/api/ws`（带 token 握手 101）全部实测通过；**d.25.1.7.0 待重发** |
-| 安装包 | `和鸣 Setup d.25.1.6.0.exe`（171MB，在 `packages/desktop/release/r25/`）+ `latest.yml` + blockmap，**已发布到 `/updates`**（远端字节数校验一致，Range 请求返回 206）；**d.25.1.7.0 待重出包** |
+| 线上 | **2026-10-22 裸机重新上线 `d.25.1.6.0`**（实例被重置为 Ubuntu 24.04 → 去 Docker；宿主机 nginx + systemd + node，云端零构建）。**`d.25.1.7.0` 已发布**：`/`（外部取回的 `assets/index-DmsRMu09.js` 与本机 dist 逐字同名）、`/api/health`、`/api/ws`（带 token 握手并收到 `error` 回执）全部实测通过 |
+| 安装包 | `和鸣 Setup d.25.1.6.0.exe`（171MB，在 `packages/desktop/release/r25/`）；**`和鸣 Setup d.25.1.7.0.exe`（178841844 字节，`r26/`）已发布到 `/updates`**——远端字节数与本地一致，`latest.yml` 读到 `version: 25.1.7`，Range 请求返回 206（`bytes 0-1023/178841844`） |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落） |
 | 账号 | 只有 `admin/admin`（`HEMING_SEED_USERS` 播种；注册默认关闭）。**重置把旧库连同 `zhoukang` 等账号一起清掉了**，历史会话/消息不可恢复 |
 
@@ -120,11 +120,11 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 **当前直接待办**：
 
-1. **建立备份纪律**：`/var/lib/heming/heming.db` 目前**只有服务器上那一份**。2026-10-22 的实例重置把库和放在 `/root/heming` 的备份一起清了，线上从此是空库。每次发版前把库拷到本机（`docs/deploy.md` §6），这是流程的一部分，不是可选项。
+1. **备份纪律已经落成脚本，但要每次真跑**：`deploy-bare.py backup` 做「停服 → tar → 起服 → SFTP 拷回本机 `.tmp/backups/` → 本机文件非空 + `/api/health` 复核」，d.25.1.7.0 发版前已实跑（3.7KB，含 `heming.db` 与 `-wal`）。剩下的不是开发项，是操作纪律：**没把库拷回本机就不许 install**（`docs/deploy.md` §6）。
 2. **弹窗背景 `inert` + 关闭后焦点归还**：骨架（`useModalA11y`）已到位，缺的是屏蔽背景与把焦点还回触发元素；需要先能实测读屏行为。`loadWorkspace` 的加载与失败态仍未展示。
 3. **语音重连的真机验证**：状态机与信令有单测，缺弱网 / TURN 环境证据。新裸机上 `HEMING_TURN_*` 尚未配置，群通话只有 STUN 路径可验。
 4. **记忆召回的可观测性**：先能归因「哪条被注入后模型用了 / 用了错的」，再谈个性化权重（现在只有可解释的确定性规则）。
-5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。当前只是换输出目录绕过（`release/r25`），根因未查——下次打包若复用 `release/` 会再撞上。发布时记得给 `publish-update.sh` 指 `HEMING_RELEASE_DIR`。
+5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → `release/r26` 打 d.25.1.7.0，一次通过），下次继续递增目录；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
 6. **`docker/` 与 `docker-compose.yml` 已停用但未清理**：机器已重置且没装 Docker，发版走 `deploy/`。两处 nginx 配置仍互为出处（`/updates/` 顺序、WS 的 `= /api/ws`），要清理就一起清，见 `docs/deploy.md` §11。
 
 **二期主线**：
