@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createHitlGate, toHitlBatch } from "./gate.js";
 import { HitlPolicyStore, type HitlPolicy } from "./policy.js";
-import type { HitlBatch, HitlCall, HitlVerdict } from "./types.js";
+import type { HitlBatch, HitlCall, HitlMode, HitlVerdict, RiskLevel } from "./types.js";
 
 /** 内存存储：每个测试一份，互不干扰。 */
 class FakeStorage {
@@ -31,6 +31,7 @@ function makeCall(id: string, name: string, risk: HitlCall["risk"] = "write"): H
 
 const readCall = makeCall("r1", "srv__get_file", "read");
 const writeCall = makeCall("w1", "fs__write_file");
+const dangerCall = makeCall("d1", "fs__delete_file", "danger");
 
 function batchOf(calls: HitlCall[], streamId = "s1") {
   return {
@@ -185,6 +186,40 @@ describe("HITL 闸门", () => {
 
     expect(ask).not.toHaveBeenCalled();
     expect(outcomes[0].kind).toBe("allow");
+  });
+
+  it("任何策略组合下危险操作都进确认队列（不被免问）", async () => {
+    // ★ 这是「没有全部放行档」这条红线在**闸门层**的护栏。
+    // 免问下限最高只能取到 write（danger 严格高于 write），
+    // 所以哪怕用户把下限调到最宽、哪怕档位是 trusted，危险操作也必须弹窗。
+    //
+    // ★ 矩阵里**故意带上 "danger"**：它已经不是合法的下限值，
+    // 但把它喂进去正是这条护栏的用处——
+    // 如果有人把 `danger` 重新加回 `FLOORS`，`policy.set` 就会原样存下它，
+    // 判定式「风险不高于下限 ⇒ 免问」随即对 danger 恒真 ⇒ 危险操作被静默放行，
+    // 这条用例会当场失败。
+    const modes: HitlMode[] = ["strict", "guarded", "trusted"];
+    const floors: RiskLevel[] = ["read", "write", "danger"];
+
+    for (const mode of modes) {
+      for (const floor of floors) {
+        policy.set({ mode, floor, scope: "global" });
+        // mock 带上 batch 参数（与 `ask` 的签名一致），
+        // 这样 `mock.calls[0][0]` 的类型才是 `HitlBatch` 而不是 `undefined`。
+        const ask = vi.fn(async (_b: HitlBatch): Promise<HitlVerdict[]> => [
+          { callId: "d1", decision: "allow" },
+        ]);
+        const gate = createHitlGate({ policy, ask });
+
+        await gate.review(batchOf([dangerCall]));
+
+        expect(ask, `${mode} + floor=${floor} 应当问用户`).toHaveBeenCalledTimes(1);
+        const asked = ask.mock.calls[0][0] as HitlBatch;
+        expect(asked.calls.map((c) => c.id)).toEqual(["d1"]);
+        // 危险项绝不能出现在「已自动放行」里
+        expect(asked.auto ?? []).toEqual([]);
+      }
+    }
   });
 });
 

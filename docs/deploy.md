@@ -108,7 +108,17 @@ journalctl -u heming-api -n 30 --no-pager         # "heming server listening on 
 nginx -T | grep -c 'location /updates/'           # 站点配置真的生效了
 ```
 
-**WS 别用 curl 验**：`/api/ws` 缺 `token` 查询串时后端**直接 destroy socket**（`packages/server/src/ws.ts:36`），nginx 于是报 `502 upstream prematurely closed`——看着像反代坏了，其实正常。要验就带真 token 完成一次握手，例如用 `websockets` 连 `ws://47.92.39.184/api/ws?token=…`，收到服务端回执（哪怕是不认识的事件报 `bad_event`）就说明握手与事件管线都通。
+**WS 别用 curl 验**：握手不靠 URL 里的 token，而是连上后**首帧**发 `{type:"auth",token}`。
+连上但不发 auth 帧时，服务端会在超时后主动断开（d.30 起），
+nginx 可能报 `502 upstream prematurely closed`——看着像反代坏了，其实正常。
+要验就带真 token 完成一次握手，例如用 `websockets` 连 `ws://47.92.39.184/api/ws`，
+再发一帧 `{"type":"auth","token":"…"}`，收到服务端回执（哪怕是不认识的事件报 `bad_event`）就说明握手与事件管线都通。
+
+> **d.30 的鉴权口径**：新客户端一律走首帧 auth，**URL 里不再带 token**
+> （query 会进 nginx access_log 与任何中间代理日志）。
+> 服务端**仍兼容** `?token=`（旧版桌面安装包在服务端升级后仍能连），
+> 该兼容路径要等所有在网客户端都升级后再删。
+> 站点配置已给 `= /api/ws` 加 `access_log off`，兜住「握手 URL 可能带 token」这件事。
 
 ## 4. 环境变量与预设账号
 
@@ -133,6 +143,10 @@ HEMING_SEED_USERS=admin:admin
 - 播种只在进程启动时执行。数据由 SQLite 持久化在 `/var/lib/heming`，重启与重发版都不丢运行期产生的账号、会话与消息（备份见 §6）。
 - 预设群「和鸣交流群」成员在**每次服务启动时补入当前全部账号**（B 语义，幂等）：`HEMING_SEED_USERS` 新增的账号在下一次重启后自动入群；用户自建同名群不会遮蔽预设群（预设匹配只认服务端播种的群）。群管理开放后可调整。
 - `HEMING_FILE_QUOTA_MB`：每用户共享文件配额（MB，缺省 200，解析失败/≤0 回退 200）；超限上传 413 `quota_exceeded`，前端右栏目录头部显示已用/总量。
+- `HEMING_TURN_*`：**d.30 起 `/api/ice-servers` 已加鉴权**（未带 token 一律 401）。
+  TURN 凭据不再对未登录者可读，但前提是**客户端带 token 去拉**——渲染层登录后自动拉一次（`packages/web/src/lib/iceServers.ts`）。
+  旧版桌面安装包（d.29 及以前）由主进程代拉、无 token，会拿不到 ICE 而回落公共 STUN；
+  自动更新到 d.30 后即恢复正常。TURN 配不配都不影响登录与聊天。
 
 ## 5. 回滚
 

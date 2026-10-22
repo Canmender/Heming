@@ -8,11 +8,16 @@ import { userIdFromToken } from "./auth.js";
 export const RING_TIMEOUT_MS = 30_000;
 const RING_SWEEP_INTERVAL_MS = 5_000;
 
+/** 首帧鉴权超时（d.30 · P0-3）：连上后 10s 内没等到 auth 帧 → 服务端主动断开。 */
+export const AUTH_TIMEOUT_MS = 10_000;
+
 export interface AttachWsOptions {
   /** 自定义超时阈值（测试注入用，默认 RING_TIMEOUT_MS）。 */
   ringTimeoutMs?: number;
   /** 自定义扫描间隔（测试注入用，默认 RING_SWEEP_INTERVAL_MS）。 */
   ringSweepIntervalMs?: number;
+  /** 自定义鉴权超时阈值（测试注入用，默认 AUTH_TIMEOUT_MS）。 */
+  authTimeoutMs?: number;
 }
 
 export function attachWs(
@@ -22,6 +27,7 @@ export function attachWs(
 ): WebSocketServer {
   const ringTimeoutMs = opts.ringTimeoutMs ?? RING_TIMEOUT_MS;
   const ringSweepIntervalMs = opts.ringSweepIntervalMs ?? RING_SWEEP_INTERVAL_MS;
+  const authTimeoutMs = opts.authTimeoutMs ?? AUTH_TIMEOUT_MS;
   const wss = new WebSocketServer({ noServer: true });
   const socketsByUser = new Map<string, Set<WebSocket>>();
 
@@ -31,13 +37,16 @@ export function attachWs(
       socket.destroy();
       return;
     }
-    const userId = userIdFromToken(url.searchParams.get("token") ?? "");
-    if (!userId) {
-      socket.destroy();
-      return;
-    }
+    // 首帧鉴权（d.30 · P0-3）：token 不再走 query（query 会进 nginx access_log
+    // 与任何中间代理日志），改由连接建立后的第一帧 {type:"auth", token} 送出。
+    //
+    // ★ query token 兼容路径**本轮保留**：已发布的旧桌面包仍把 token 拼在 query 上，
+    //   服务端升级后不能断链。query token 有效 ⇒ 直接视为已鉴权；无效/没有 ⇒
+    //   **不再 destroy 连接**，而是放它建起来等首帧 auth（鉴权失败由 connection
+    //   回调回 error(unauthorized) 并关闭）。待所有在网客户端升级后再删这条路径。
+    const queryUserId = userIdFromToken(url.searchParams.get("token") ?? "");
     wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req, userId);
+      wss.emit("connection", ws, req, queryUserId ?? "");
     });
   });
 
@@ -117,28 +126,94 @@ export function attachWs(
   // 注：@types/ws 的 "connection" 特化重载只声明 2 参（websocket, request），
   // 本实现经 wss.emit("connection", ws, req, userId) 传入第三参 userId，
   // 会落到 EventEmitter 的泛型重载，_req 需显式注解以通过 strict 检查（零运行时影响）。
-  wss.on("connection", (ws: WebSocket, _req: IncomingMessage, userId: string) => {
-    let sockets = socketsByUser.get(userId);
-    if (!sockets) {
-      sockets = new Set();
-      socketsByUser.set(userId, sockets);
+  wss.on("connection", (ws: WebSocket, _req: IncomingMessage, queryUserId: string) => {
+    // —— 首帧鉴权（d.30 · P0-3）——
+    // query token 有效 ⇒ 直接视为已鉴权（旧桌面包兼容路径，本轮不删）；
+    // 否则保持未鉴权，等第一帧 {type:"auth", token}。
+    let userId = queryUserId;
+    let authed = queryUserId !== "";
+    /** 本连接登记进 socketsByUser 的那个 Set；未鉴权时为 undefined（从未登记）。 */
+    let registered: Set<WebSocket> | undefined;
+
+    function register(uid: string): void {
+      let set = socketsByUser.get(uid);
+      if (!set) {
+        set = new Set();
+        socketsByUser.set(uid, set);
+      }
+      set.add(ws);
+      registered = set;
     }
-    sockets.add(ws);
+
+    if (authed) register(userId);
+
+    // 鉴权超时：连上后 authTimeoutMs 内没等到 auth 帧 → 服务端主动断开。
+    // 定时器 .unref() 不阻塞进程退出（与 ringTimeoutTimer 同模式）。
+    let authTimer: NodeJS.Timeout | undefined;
+    if (!authed) {
+      authTimer = setTimeout(() => {
+        if (authed) return;
+        send(ws, { type: "error", code: "unauthorized", message: "auth timeout" });
+        ws.close();
+      }, authTimeoutMs);
+      if (typeof authTimer.unref === "function") authTimer.unref();
+    }
 
     ws.on("message", (raw) => {
       let json: unknown;
       try {
         json = JSON.parse(raw.toString());
       } catch {
+        // 未鉴权连接发来的不是合法 auth 帧 → 按未授权处理并断开
+        if (!authed) {
+          send(ws, { type: "error", code: "unauthorized", message: "auth required" });
+          ws.close();
+          return;
+        }
         send(ws, { type: "error", code: "bad_event", message: "invalid json" });
         return;
       }
       const parsed = WsClientEventSchema.safeParse(json);
       if (!parsed.success) {
+        if (!authed) {
+          send(ws, { type: "error", code: "unauthorized", message: "auth required" });
+          ws.close();
+          return;
+        }
         send(ws, { type: "error", code: "bad_event", message: "invalid event" });
         return;
       }
       const event = parsed.data;
+
+      // —— auth 帧：未鉴权状态下唯一允许发送的事件（d.30 · P0-3）——
+      if (event.type === "auth") {
+        // 已鉴权（走的是 query 兼容路径）时忽略重复的 auth 帧，不做身份切换。
+        if (authed) return;
+        const uid = userIdFromToken(event.token);
+        if (!uid) {
+          send(ws, { type: "error", code: "unauthorized", message: "invalid token" });
+          ws.close();
+          return;
+        }
+        userId = uid;
+        authed = true;
+        if (authTimer) {
+          clearTimeout(authTimer);
+          authTimer = undefined;
+        }
+        register(userId);
+        return;
+      }
+
+      // 未鉴权时收到任何其它事件 → 回 error(unauthorized) 并断开。
+      // 注：「未鉴权的连接收不到任何业务事件」是**结构性**保证，不靠这里的 if：
+      // 未鉴权的 socket 从未登记进 socketsByUser，而广播路径
+      // （broadcastToConversation / sendToUser）只遍历 socketsByUser。
+      if (!authed) {
+        send(ws, { type: "error", code: "unauthorized", message: "auth required" });
+        ws.close();
+        return;
+      }
       // 语音通话信令（Task 2 + d.25 重连）：invite/accept/reject/hangup/ice/reconnect
       // 六种事件定向投递，不走广播、不入库；通话状态仅在内存 activeCalls，
       // 断开连接时 cleanupCallsForUser 向其他参与者补发 hangup。成员校验口径与下方通用分支一致。
@@ -438,10 +513,15 @@ export function attachWs(
     });
 
     ws.on("close", () => {
-      sockets!.delete(ws);
+      // 未鉴权就断开的 socket 从未登记进 socketsByUser —— 安全跳过，别抛。
+      if (!registered) {
+        if (authTimer) clearTimeout(authTimer);
+        return;
+      }
+      registered.delete(ws);
       // 仅在用户最后一个连接断开时才清理通话：多设备/多标签页在线时，
       // 单个连接断开不应误断正在进行通话（T2 评审遗留项）。
-      if (sockets!.size === 0) {
+      if (registered.size === 0) {
         socketsByUser.delete(userId);
         cleanupCallsForUser(userId);
       }

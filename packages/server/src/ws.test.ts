@@ -27,6 +27,29 @@ function connect(token: string, port?: number): Promise<WebSocket> {
   });
 }
 
+/**
+ * 连上但**不带** query token —— 新客户端路径：连接建立后等首帧 {type:"auth", token}。
+ * d.30 · P0-3 起 upgrade 阶段不再因 token 缺失/无效而 destroy 连接。
+ */
+function connectWithoutToken(port?: number): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port ?? ctx.port}/api/ws`);
+    ws.once("open", () => resolve(ws));
+    ws.once("error", reject);
+  });
+}
+
+/** 等服务端关闭连接（ws.close() → 客户端收到 close 帧）。 */
+function waitClose(ws: WebSocket): Promise<void> {
+  return new Promise((resolve) => {
+    if (ws.readyState === WebSocket.CLOSED) {
+      resolve();
+      return;
+    }
+    ws.once("close", () => resolve());
+  });
+}
+
 function nextEvent(ws: WebSocket): Promise<WsServerEvent> {
   return new Promise((resolve, reject) => {
     ws.once("message", (data) => resolve(JSON.parse(data.toString())));
@@ -91,8 +114,20 @@ afterAll(async () => {
 });
 
 describe("ws", () => {
-  it("非法 token 拒绝连接", async () => {
-    await expect(connect("bad-token")).rejects.toThrow();
+  it("query token 非法不再拒绝握手：连接建起来等首帧鉴权", async () => {
+    // d.30 · P0-3：upgrade 阶段不再因 token 无效就 destroy 连接。
+    // 旧行为是握手直接失败（rejects.toThrow），现在改为「连上 → 首帧鉴权失败 → error + 关闭」。
+    const ws = await new Promise<WebSocket>((resolve, reject) => {
+      const s = new WebSocket(`ws://127.0.0.1:${ctx.port}/api/ws?token=bad-token`);
+      s.once("open", () => resolve(s));
+      s.once("error", reject);
+    });
+    const wait = nextEvent(ws);
+    ws.send(JSON.stringify({ type: "auth", token: "bad-token" }));
+    const event = await wait;
+    expect(event.type).toBe("error");
+    if (event.type === "error") expect(event.code).toBe("unauthorized");
+    await waitClose(ws);
   });
 
   it("发送消息广播给会话成员并持久化", async () => {
@@ -1155,5 +1190,104 @@ describe("ringing 超时兜底（C3）", () => {
     a.close();
     b.close();
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+  });
+});
+
+describe("WS 首帧鉴权（d.30 · P0-3）", () => {
+  it("首帧 auth 成功后业务事件正常（mark_read → read_update）", async () => {
+    const a = await connectWithoutToken();
+    const b = await connectWithoutToken();
+    // 双方先各自鉴权
+    a.send(JSON.stringify({ type: "auth", token: issueToken(aliceId) }));
+    b.send(JSON.stringify({ type: "auth", token: issueToken(bobId) }));
+
+    // 等 b 真正登记进 socketsByUser：b 自己发一条 mark_read，广播只发给**已登记**的
+    // socket —— b 收到自己这条 read_update 即证明登记完成（不靠 sleep 猜时序）。
+    const bSelf = nextEvent(b);
+    b.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
+    expect((await bSelf).type).toBe("read_update");
+
+    // a 的 mark_read → b 收到 read_update（userId = a）
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
+    const event = await bWait;
+    expect(event.type).toBe("read_update");
+    if (event.type === "read_update") {
+      expect(event.conversationId).toBe(convId);
+      expect(event.userId).toBe(aliceId);
+    }
+    a.close();
+    b.close();
+  });
+
+  it("auth 失败（错 token）→ 收到 error(unauthorized) 且连接被关闭", async () => {
+    const ws = await connectWithoutToken();
+    const wait = nextEvent(ws);
+    ws.send(JSON.stringify({ type: "auth", token: "not-a-valid-token" }));
+    const event = await wait;
+    expect(event.type).toBe("error");
+    if (event.type === "error") {
+      expect(event.code).toBe("unauthorized");
+    }
+    await waitClose(ws);
+    expect(ws.readyState).toBe(WebSocket.CLOSED);
+  });
+
+  it("未鉴权时发业务事件 → 收不到任何业务事件，且连接被关闭", async () => {
+    // 结构性保证：未鉴权 socket 从未登记进 socketsByUser ⇒ 广播路径够不着它。
+    const ws = await connectWithoutToken();
+    const events: WsServerEvent[] = [];
+    ws.on("message", (d) => events.push(JSON.parse(d.toString())));
+
+    ws.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
+    await waitClose(ws);
+
+    // 没有任何业务事件（read_update 不来），只有未授权错误
+    expect(events.some((e) => e.type === "read_update")).toBe(false);
+    expect(events.some((e) => e.type === "message_new")).toBe(false);
+    expect(events.length).toBe(1);
+    expect(events[0].type).toBe("error");
+    if (events[0].type === "error") expect(events[0].code).toBe("unauthorized");
+  });
+
+  it("超时未鉴权 → 服务端主动断开连接", async () => {
+    // 用独立 server 实例注入短鉴权超时（200ms），避免等默认 10s
+    const { createServer } = await import("node:http");
+    const { attachWs } = await import("./ws.js");
+    const httpServer = createServer();
+    attachWs(httpServer, store, { authTimeoutMs: 200 });
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const address = httpServer.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+
+    const ws = await connectWithoutToken(port);
+    const events: WsServerEvent[] = [];
+    ws.on("message", (d) => events.push(JSON.parse(d.toString())));
+
+    // 不发 auth 帧 → 超时后服务端关闭
+    await waitClose(ws);
+    expect(ws.readyState).toBe(WebSocket.CLOSED);
+    expect(events.length).toBe(1);
+    expect(events[0].type).toBe("error");
+    if (events[0].type === "error") expect(events[0].code).toBe("unauthorized");
+
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+  });
+
+  it("query token（旧客户端路径）仍能连并正常工作", async () => {
+    // 兼容位：已发布的旧桌面包把 token 拼在 query 上，服务端升级后不能断链。
+    // 这条路径**本轮不删**（要等所有在网客户端升级后再删）。
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
+    const event = await bWait;
+    expect(event.type).toBe("read_update");
+    if (event.type === "read_update") {
+      expect(event.conversationId).toBe(convId);
+      expect(event.userId).toBe(aliceId);
+    }
+    a.close();
+    b.close();
   });
 });

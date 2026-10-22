@@ -1,8 +1,39 @@
 import { useCallback, useState } from "react";
-import { HitlPolicyStore, type HitlPolicy } from "../lib/hitl/policy.js";
+import { FLOORS, HITL_KEY, HitlPolicyStore, type HitlPolicy } from "../lib/hitl/policy.js";
 import type { HitlMode, PolicyScope, RiskLevel } from "../lib/hitl/types.js";
 import { readAudit, type AuditEntry, type StorageLike } from "../lib/selfEdit/guards.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+
+/**
+ * 免问下限的选项文案。
+ *
+ * ★ 键必须与 `policy.ts` 导出的 `FLOORS` 一一对应——下拉选项**从 `FLOORS` 渲染**，
+ * 不另写一份。理由：两份各写各的就会漂移。
+ * 界面多给一个选项，策略层又把它夹掉，用户点下去会发现值没变；
+ * 界面少给一个，用户以为自己有更宽的档，实际上没有。
+ */
+const FLOOR_LABELS: Record<string, string> = {
+  read: "只读（风险不高于只读的操作不问）",
+  write: "写入（风险不高于写入的操作不问）",
+};
+
+/**
+ * 旧存储里是不是存过 `floor:"danger"`？
+ *
+ * 用来判断「这次是不是刚把红线值夹下来了」，以便在界面上提示一次。
+ * 只读不写——提示是给人看的，不是数据迁移。
+ */
+function hadClampedFloor(storage: StorageLike): boolean {
+  try {
+    const raw = storage.getItem(HITL_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { floor?: unknown };
+    return parsed?.floor === "danger";
+  } catch {
+    /* 存储坏了读不出来：按「没夹过」处理，不提示 */
+    return false;
+  }
+}
 
 /**
  * HITL 策略卡（挂在设置区）：档位选择 + 免问下限 + 确认留痕。
@@ -30,10 +61,24 @@ export function HitlPolicyCard({
   const audit = readAudit(store2).filter((e) => e.scope === "tool").slice(0, 20);
   const rules = store.rules();
 
+  /*
+   * ★ 一次性提示：旧存储里存着 `floor:"danger"` 的用户，这次打开设置区时
+   * 免问下限已经被夹成「写入」了——这**改变了他的实际行为**（危险操作开始会问），
+   * 属于「静默降级」，所以要在界面上说清楚一次。
+   *
+   * 为什么不是每次都提示：提示状态只活在本次挂载里，
+   * 用户看完改完设置就走了，下次进来不再啰嗦。
+   *
+   * 为什么读原始存储而不是只看 `policy.floor`：`policy.floor` 已经被夹成 `write`，
+   * 光看它分不清「本来就没有 danger」与「刚刚把 danger 夹掉了」。
+   */
+  const [clampedNotice, setClampedNotice] = useState<boolean>(() => hadClampedFloor(store2));
+
   const update = (patch: Partial<HitlPolicy>) => {
     const next = { ...policy, ...patch };
     store.set(next);
     setPolicy(store.get());
+    setClampedNotice(false);
     bump();
   };
 
@@ -73,17 +118,39 @@ export function HitlPolicyCard({
 
       <label className="mt-3 block text-[12px]">
         免问下限
+        {/*
+          ★ 这里**没有**「危险（全部不问）」选项。
+          免问下限的语义是「风险**不高于**此值的操作不问」，
+          下限取到 danger 时 danger 本身也被包进去 ⇒ 所有档位恒真
+          ⇒ 等于一个设置页里的「全部放行」，与「没有全放行档」的红线冲突。
+          「危险恒问」的正确表达是下限取「写入」（danger 严格高于写入，不在免问范围内）。
+          读侧同样夹住（`policy.ts` 的 `normalizePolicy`），
+          所以旧存储里的 `danger` 会被回落成「写入」，不会原样放行。
+        */}
         <select
           aria-label="免问下限"
           value={policy.floor}
           onChange={(e) => update({ floor: e.target.value as RiskLevel })}
           className="mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
         >
-          <option value="read">只读（风险不高于只读的操作不问）</option>
-          <option value="write">写入（只问危险操作）</option>
-          <option value="danger">危险（全部不问）</option>
+          {/*
+            选项**从 `FLOORS` 渲染**（策略层的唯一权威列表），不另写一份。
+            这样「界面给了但策略层不认」的漂移在结构上就不可能发生。
+          */}
+          {FLOORS.map((f) => (
+            <option key={f} value={f}>
+              {FLOOR_LABELS[f] ?? f}
+            </option>
+          ))}
         </select>
       </label>
+
+      {clampedNotice && (
+        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 text-[11px] text-muted">
+          免问下限已从「危险」下调为「写入」：危险操作现在都会先问你。
+          <span className="text-[#999]">（原先「危险」那一档等同于不设边界，已移除。）</span>
+        </div>
+      )}
 
       <label className="mt-3 block text-[12px]">
         授权作用域

@@ -13,6 +13,18 @@ export const MEMORY_KEYS = {
   settings: "heming.memory.settings.v1",
 } as const;
 
+/**
+ * 沉淀节奏计数器键：**计数器**，不是记忆内容。
+ *
+ * 形状是 `{ [会话键]: 累计轮次 }`，会话键形如 `${agentId}\u0000${conversationId}`
+ * （分隔符是 NUL，与 store.ts 里 `recordTurn` 的拼法一致）。
+ *
+ * 为什么独立成键、而不并进 working 键：
+ * - working 键有 1.2MB 上限与淘汰逻辑，计数器混进去会被那些逻辑误伤；
+ * - working 是「内容」，pending 是「计数器」——混在一起会让导出/导入把计数器当内容搬走。
+ */
+export const MEMORY_PENDING_KEY = "heming.memory.pending.v1";
+
 /** 单键 JSON 上限 1.2MB（设计 §8）：超限先淘汰，仍写不下就放弃落盘（仅内存可用）。 */
 export const KEY_SIZE_LIMIT = Math.floor(1.2 * 1024 * 1024);
 

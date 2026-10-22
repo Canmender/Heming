@@ -85,17 +85,29 @@ describe("connectWs", () => {
     setToken(null);
   });
 
-  it("带 token 建连；未连接时 send 入队，onopen 后冲刷", () => {
+  it("URL 不带 token：token 走首帧，不进 query（query 会进 nginx access_log）", () => {
+    connectWs({ onEvent: () => {} });
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeWebSocket.instances[0].url).toContain("/api/ws");
+    expect(FakeWebSocket.instances[0].url).not.toContain("token=");
+  });
+
+  it("带 token 建连；未连接时 send 入队，onopen 后**先发 auth 帧**再冲刷业务帧", () => {
     const handle = connectWs({ onEvent: () => {} });
     expect(FakeWebSocket.instances).toHaveLength(1);
-    expect(FakeWebSocket.instances[0].url).toContain("/api/ws?token=t1");
 
     handle.send({ type: "mark_read", conversationId: "c1" });
     expect(FakeWebSocket.instances[0].sent).toHaveLength(0);
 
     FakeWebSocket.instances[0].open();
-    expect(FakeWebSocket.instances[0].sent).toHaveLength(1);
+    expect(FakeWebSocket.instances[0].sent).toHaveLength(2);
+    // 第一帧必须是 auth：服务端在收到它之前不登记 socket，业务帧先到会被当成未鉴权事件拒掉
     expect(JSON.parse(FakeWebSocket.instances[0].sent[0])).toEqual({
+      type: "auth",
+      token: "t1",
+    });
+    // 业务帧在 auth 之后冲刷
+    expect(JSON.parse(FakeWebSocket.instances[0].sent[1])).toEqual({
       type: "mark_read",
       conversationId: "c1",
     });
@@ -106,7 +118,12 @@ describe("connectWs", () => {
     const handle = connectWs({ onEvent: () => {} });
     FakeWebSocket.instances[0].open();
     handle.send({ type: "send_message", conversationId: "c1", payload: { text: "hi" } });
-    expect(FakeWebSocket.instances[0].sent).toHaveLength(1);
+    // 1 帧 auth + 1 帧业务
+    expect(FakeWebSocket.instances[0].sent).toHaveLength(2);
+    expect(JSON.parse(FakeWebSocket.instances[0].sent[1])).toMatchObject({
+      type: "send_message",
+      conversationId: "c1",
+    });
     handle.close();
   });
 
@@ -159,12 +176,81 @@ describe("connectWs", () => {
     expect(events).toEqual([err]);
   });
 
-  it("无 token 时不建连，send 保留在队列", () => {
+  // ── d.30 · P1-8：无 token 不挂死 + 离线队列上限 ──
+
+  it("无 token 时不建连；send 直接报错并**不入队**（排队等于假装它还在路上）", () => {
+    setToken(null);
+    const onSendError = vi.fn();
+    const handle = connectWs({ onEvent: () => {}, onSendError });
+    expect(FakeWebSocket.instances).toHaveLength(0);
+
+    handle.send({ type: "mark_read", conversationId: "c1" });
+    expect(onSendError).toHaveBeenCalledTimes(1);
+    expect(String(onSendError.mock.calls[0][0])).toMatch(/未登录|未发送/);
+
+    // 之后补上 token 并连上：队列里**不该**有那一帧（它压根没入队）
+    setToken("t1");
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances.length).toBeGreaterThan(0);
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    ws.open();
+    // 只有 auth 帧，没有 mark_read
+    expect(ws.sent).toHaveLength(1);
+    expect(JSON.parse(ws.sent[0])).toEqual({ type: "auth", token: "t1" });
+    handle.close();
+  });
+
+  it("无 token 时安排退避重试：token 后来到位就会自动连上", () => {
     setToken(null);
     const handle = connectWs({ onEvent: () => {} });
     expect(FakeWebSocket.instances).toHaveLength(0);
-    handle.send({ type: "mark_read", conversationId: "c1" });
-    expect(FakeWebSocket.instances).toHaveLength(0);
+
+    // 没有退避定时器的话，推进时间也不会有任何动作
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances).toHaveLength(0); // 仍无 token ⇒ 不建连
+
+    // token 到位后，下一次退避到期即建连（证明重试定时器一直在跑）
+    setToken("t1");
+    vi.advanceTimersByTime(2000);
+    expect(FakeWebSocket.instances.length).toBeGreaterThan(0);
+    handle.close();
+  });
+
+  it("队列超过 100 帧 → 触发 onSendError，队列长度有界（丢最旧的帧）", () => {
+    const onSendError = vi.fn();
+    const handle = connectWs({ onEvent: () => {}, onSendError });
+
+    for (let i = 0; i < 101; i++) {
+      handle.send({ type: "mark_read", conversationId: `c${i}` });
+    }
+    expect(onSendError).toHaveBeenCalledTimes(1);
+    expect(String(onSendError.mock.calls[0][0])).toMatch(/队列已满|丢弃/);
+
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+    // 1 帧 auth + 最多 100 帧业务
+    expect(ws.sent).toHaveLength(101);
+    // 丢的是**最旧**的那帧（c0），保留最新的一帧
+    const business = ws.sent.slice(1).map((f) => JSON.parse(f));
+    expect(business).toHaveLength(100);
+    expect(business[0].conversationId).toBe("c1");
+    expect(business[99].conversationId).toBe("c100");
+    handle.close();
+  });
+
+  it("队列字节上限：帧总字节超 4MB 时旧帧被丢弃并报错（字节口径先到者为准）", () => {
+    const onSendError = vi.fn();
+    const handle = connectWs({ onEvent: () => {}, onSendError });
+
+    // 每帧 ~1.2MB ⇒ 第 4 帧触发字节上限（累计 > 4MB）
+    const big = "x".repeat(1_200_000);
+    for (let i = 0; i < 4; i++) {
+      handle.send({ type: "send_message", conversationId: "c1", payload: { text: big } });
+    }
+    expect(onSendError).toHaveBeenCalled();
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+    expect(ws.sent.length).toBeLessThanOrEqual(4); // auth + 少量业务帧
     handle.close();
   });
 });

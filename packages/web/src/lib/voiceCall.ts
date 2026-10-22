@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WsClientEvent, WsServerEvent } from "@heming/shared";
+import { getIceServers } from "./iceServers.js";
 
 /**
  * 语音通话状态机 hook（Task 3）。
@@ -54,17 +55,6 @@ export interface UseVoiceCallOptions {
   /** 是否桌面端；网页端不支持通话，默认 true（由 Task 5 注入后精确判定） */
   isDesktop?: boolean;
   onIncomingCall?: (info: IncomingCallInfo) => void;
-}
-
-const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.miwifi.com:3478" },
-];
-
-function getIceServers(): RTCIceServer[] {
-  if (typeof window === "undefined") return DEFAULT_ICE_SERVERS;
-  const injected = (window as unknown as { __heming_ice_servers_get?: () => RTCIceServer[] })
-    .__heming_ice_servers_get?.();
-  return injected && injected.length > 0 ? injected : DEFAULT_ICE_SERVERS;
 }
 
 /** 媒体约束：视频通话同时采集摄像头；音频恒定。 */

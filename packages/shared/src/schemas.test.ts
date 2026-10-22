@@ -41,6 +41,25 @@ describe("WsClientEventSchema", () => {
   });
 });
 
+describe("WsClientEventSchema auth 首帧鉴权（d.30 · P0-3）", () => {
+  it("接受带 token 的 auth 帧", () => {
+    const r = WsClientEventSchema.safeParse({ type: "auth", token: "t1" });
+    expect(r.success).toBe(true);
+  });
+  it("拒绝缺 token / 空 token 的 auth 帧", () => {
+    expect(WsClientEventSchema.safeParse({ type: "auth" }).success).toBe(false);
+    expect(WsClientEventSchema.safeParse({ type: "auth", token: "" }).success).toBe(false);
+  });
+  it("拒绝超长 token（512 上限）", () => {
+    expect(WsClientEventSchema.safeParse({ type: "auth", token: "x".repeat(513) }).success).toBe(
+      false,
+    );
+  });
+  it("auth 不出现在服务端事件契约里（服务端不回 auth 帧）", () => {
+    expect(WsServerEventSchema.safeParse({ type: "auth", token: "t1" }).success).toBe(false);
+  });
+});
+
 describe("MessageSchema", () => {
   it("要求 replyTo 字段可为 null", () => {
     const r = MessageSchema.safeParse({

@@ -19,6 +19,15 @@ const {
 // 直接引用生产代码（splash-config.js 由 main.js require），避免平行实现。
 const mainSrc = fs.readFileSync(path.join(__dirname, "main.js"), "utf8");
 
+// 剥掉注释后的源码：下面这些断言靠「字符串首次出现的位置」判断接线顺序，
+// 而注释里只要提到 app.whenReady( 就会污染这个位置判断（main.js 里没有正则字面量，
+// 所以按行剥注释是安全的）。断言的是**代码**，注释说什么不算。
+const mainCode = mainSrc
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .split(/\r?\n/)
+  .filter((line) => !/^\s*\/\//.test(line))
+  .join("\n");
+
 test("默认环境显示 splash", () => {
   assert.equal(shouldShowSplash({}), true);
   assert.equal(shouldShowSplash(undefined), true);
@@ -123,18 +132,18 @@ test("isFatalLoadFailure：ERR_ABORTED(-3) 不算失败（导航被主动取消�
 // 关闭时机 / 启动信号 / 失败兜底 / 看门狗 / 主窗口关闭等行为在 splash-lifecycle.test.js
 // 用假窗口真实驱动，不在这里做字符串断言。
 test("main.js：有启动动画时主窗口 show:false（避免先闪白底主窗口）", () => {
-  assert.ok(mainSrc.includes("show: !withSplash"));
+  assert.ok(mainCode.includes("show: !withSplash"));
 });
 
 test("main.js：splash 覆盖主窗口所在显示器（多显示器）", () => {
-  assert.ok(mainSrc.includes("screen.getDisplayMatching(mainWin.getBounds())"));
-  assert.ok(!mainSrc.includes("screen.getPrimaryDisplay()"));
+  assert.ok(mainCode.includes("screen.getDisplayMatching(mainWin.getBounds())"));
+  assert.ok(!mainCode.includes("screen.getPrimaryDisplay()"));
 });
 
 // 主窗口在启动动画期间被 splash 全覆盖，Chromium 会判定其被遮挡；开着节流则 web 端
 // BootWave 的 rAF/定时器一起被暂停 → 揭示推不动、白遮罩永久盖住界面（真机复现过）。
 test("main.js：主窗口关闭后台节流（遮挡时 rAF/定时器不被暂停）", () => {
-  const m = mainSrc.match(/webPreferences:\s*\{[\s\S]*?\n {6}\}/);
+  const m = mainCode.match(/webPreferences:\s*\{[\s\S]*?\n {6}\}/);
   assert.ok(m, "未找到主窗口 webPreferences");
   assert.ok(
     m[0].includes("backgroundThrottling: false"),
@@ -144,15 +153,15 @@ test("main.js：主窗口关闭后台节流（遮挡时 rAF/定时器不被暂�
 
 // ── 启动默认最大化 ──
 test("main.js：主窗口创建后 maximize()（铺满屏幕但保留标题栏与窗口控件）", () => {
-  assert.ok(mainSrc.includes("win.maximize()"), "启动应最大化主窗口");
+  assert.ok(mainCode.includes("win.maximize()"), "启动应最大化主窗口");
   // 不用 fullscreen：真全屏会把自定义标题栏与原生窗口控件一起隐藏
-  assert.ok(!/fullscreen:\s*true/.test(mainSrc), "不应使用 fullscreen:true");
+  assert.ok(!/fullscreen:\s*true/.test(mainCode), "不应使用 fullscreen:true");
 });
 
 // 最大化时 getBounds() 返回屏幕尺寸，直接落盘会把用户偏好的窗口尺寸覆盖掉；
 // 必须用 getNormalBounds() 取还原态尺寸，最大化/还原往返才正确。
 test("main.js：窗口尺寸落盘用 getNormalBounds（最大化时不覆盖用户偏好尺寸）", () => {
-  const saveCalls = [...mainSrc.matchAll(/saveWindowState\(windowStateFile\(\),\s*win\.(\w+)\(\)\)/g)].map(
+  const saveCalls = [...mainCode.matchAll(/saveWindowState\(windowStateFile\(\),\s*win\.(\w+)\(\)\)/g)].map(
     (m) => m[1]
   );
   assert.ok(saveCalls.length >= 2, `应有多处落盘（debounce + close），实际 ${saveCalls.length}`);
@@ -164,28 +173,28 @@ test("main.js：窗口尺寸落盘用 getNormalBounds（最大化时不覆盖用
 
 test("main.js：splash 定位仍需要 getBounds（取当前屏幕，不是还原态）", () => {
   // 上面的断言只约束落盘路径；getDisplayMatching 用 getBounds 是对的（要当前实际位置）
-  assert.ok(mainSrc.includes("screen.getDisplayMatching(mainWin.getBounds())"));
+  assert.ok(mainCode.includes("screen.getDisplayMatching(mainWin.getBounds())"));
 });
 
 // ── 本地包安装的运行时接线（d.25）──
 test("main.js：stdio 桥接注入 planSpawn，并暴露 runtime:probe", () => {
-  assert.ok(mainSrc.includes("planSpawn: planStdioSpawn"), "spawn 前必须翻译逻辑命令（Windows 的 npx 是 .cmd）");
-  assert.ok(mainSrc.includes('ipcMain.handle("runtime:probe"'), "渲染层要能探测本机运行时");
+  assert.ok(mainCode.includes("planSpawn: planStdioSpawn"), "spawn 前必须翻译逻辑命令（Windows 的 npx 是 .cmd）");
+  assert.ok(mainCode.includes('ipcMain.handle("runtime:probe"'), "渲染层要能探测本机运行时");
   // 探测用的 PATH 必须与真正 spawn 时一致，否则界面说「没有」而启动成功（或反之）
-  assert.ok(/probeLocalRuntime\(\{[\s\S]{0,120}buildChildEnv\(/.test(mainSrc), "探测应使用补全后的 PATH");
+  assert.ok(/probeLocalRuntime\(\{[\s\S]{0,120}buildChildEnv\(/.test(mainCode), "探测应使用补全后的 PATH");
   // shell:false 的约束在 mcp-stdio 里，main.js 不允许出现 shell:true
-  assert.ok(!/shell:\s*true/.test(mainSrc), "禁止任何 shell:true");
+  assert.ok(!/shell:\s*true/.test(mainCode), "禁止任何 shell:true");
 });
 
 // 减弱动态偏好只有渲染进程能查到（matchMedia）；查到后回填给生命周期收紧关闭时机，
 // 否则这类用户要对着静止画面等满 3.2s 可见地板。
 test("main.js：查询减弱动态偏好并回填给 splash 生命周期", () => {
   assert.ok(
-    mainSrc.includes("prefers-reduced-motion"),
+    mainCode.includes("prefers-reduced-motion"),
     "main.js 应向 splash 渲染进程查询 prefers-reduced-motion"
   );
   assert.ok(
-    /lifecycle\.setReducedMotion\(/.test(mainSrc),
+    /lifecycle\.setReducedMotion\(/.test(mainCode),
     "查到后必须回填 setReducedMotion，否则查询没有意义"
   );
 });
@@ -193,7 +202,7 @@ test("main.js：查询减弱动态偏好并回填给 splash 生命周期", () =>
 // ── web 界面嵌入（app:// 本地加载） ──
 
 test("main.js：app:// 注册为 privileged + secure（E2E 依赖安全上下文）", () => {
-  const m = mainSrc.match(/registerSchemesAsPrivileged\(\[[\s\S]*?\]\)/);
+  const m = mainCode.match(/registerSchemesAsPrivileged\(\[[\s\S]*?\]\)/);
   assert.ok(m, "未找到 registerSchemesAsPrivileged 调用");
   assert.ok(m[0].includes('scheme: EMBEDDED_SCHEME'), "注册的应是 EMBEDDED_SCHEME");
   assert.ok(m[0].includes("secure: true"), "必须 secure: true，否则 crypto.subtle 不可用、E2E 失效");
@@ -201,14 +210,14 @@ test("main.js：app:// 注册为 privileged + secure（E2E 依赖安全上下文
 });
 
 test("main.js：scheme 注册在 app ready 之前（否则拿不到 secure 语义）", () => {
-  const reg = mainSrc.indexOf("registerSchemesAsPrivileged(");
-  const ready = mainSrc.indexOf("app.whenReady(");
+  const reg = mainCode.indexOf("registerSchemesAsPrivileged(");
+  const ready = mainCode.indexOf("app.whenReady(");
   assert.ok(reg > 0 && ready > 0);
   assert.ok(reg < ready, "registerSchemesAsPrivileged 必须出现在 app.whenReady 之前");
 });
 
 test("main.js：地址优先级为 dev > 显式远程 > 嵌入式 > 兜底远程", () => {
-  const fn = mainSrc.match(/function resolveAppUrl\(env\) \{[\s\S]*?\n\}/);
+  const fn = mainCode.match(/function resolveAppUrl\(env\) \{[\s\S]*?\n\}/);
   assert.ok(fn, "未找到 resolveAppUrl");
   const body = fn[0];
   const iDev = body.indexOf("HEMING_DEV_URL");
@@ -220,25 +229,56 @@ test("main.js：地址优先级为 dev > 显式远程 > 嵌入式 > 兜底远程
 });
 
 test("main.js：嵌入产物缺失时退回远程（老包/构建异常不至于打不开）", () => {
-  assert.ok(mainSrc.includes("hasEmbeddedWeb()"), "应存在嵌入产物可用性判定");
-  assert.ok(/hasEmbeddedWeb\(\)\s*\)\s*return EMBEDDED_URL/.test(mainSrc) ||
-    /if \(hasEmbeddedWeb\(\)\) return EMBEDDED_URL/.test(mainSrc),
+  assert.ok(mainCode.includes("hasEmbeddedWeb()"), "应存在嵌入产物可用性判定");
+  assert.ok(/hasEmbeddedWeb\(\)\s*\)\s*return EMBEDDED_URL/.test(mainCode) ||
+    /if \(hasEmbeddedWeb\(\)\) return EMBEDDED_URL/.test(mainCode),
     "只有产物存在时才用 app:// 地址");
 });
 
 test("main.js：导航白名单放行 app://（originOf 对自定义 scheme 会得到 null，必须按前缀判）", () => {
-  assert.ok(mainSrc.includes("EMBEDDED_ORIGIN + \"/\""), "应按前缀判定嵌入式源");
+  assert.ok(mainCode.includes("EMBEDDED_ORIGIN + \"/\""), "应按前缀判定嵌入式源");
 });
 
 test("main.js：系统浏览器白名单不放行 app://（否则页面链接会把自己导航走）", () => {
-  const fn = mainSrc.match(/function isSafeExternalUrl\(url\) \{[\s\S]*?\n\}/);
+  const fn = mainCode.match(/function isSafeExternalUrl\(url\) \{[\s\S]*?\n\}/);
   assert.ok(fn, "未找到 isSafeExternalUrl");
   assert.ok(!fn[0].includes("app:"), "isSafeExternalUrl 只应放行 http/https/mailto");
 });
 
 test("main.js：协议处理器在创建窗口之前装好", () => {
-  const install = mainSrc.indexOf("installAppProtocol();");
-  const create = mainSrc.indexOf("createWindow();", mainSrc.indexOf("app.whenReady("));
+  const install = mainCode.indexOf("installAppProtocol();");
+  const create = mainCode.indexOf("createWindow();", mainCode.indexOf("app.whenReady("));
   assert.ok(install > 0 && create > 0);
   assert.ok(install < create, "installAppProtocol 必须在 createWindow 之前调用");
+});
+
+// ── 崩溃兜底（d.30 · P0-4）──
+// 此前主进程零兜底：抛未捕获异常直接静默退出，用户只看到「应用莫名其妙没了」，
+// 而本机没有任何日志可查。这几条钉住「装上了、装在早处、且不再自己拉 ICE」。
+test("main.js：装上崩溃兜底，且在 app.whenReady 之前（启动早期抛也要留日志）", () => {
+  assert.ok(mainCode.includes('require("./crash-log")'), "主进程必须接上 crash-log 模块");
+  assert.ok(mainCode.includes("installCrashHandlers("), "必须装 uncaughtException / unhandledRejection 兜底");
+  const install = mainCode.indexOf("installCrashHandlers(");
+  const ready = mainCode.indexOf("app.whenReady(");
+  assert.ok(install > 0 && ready > 0);
+  assert.ok(install < ready, "崩溃兜底必须在 app.whenReady 之前装上");
+});
+
+test("main.js：渲染进程崩溃接兜底（写日志 + 只重载一次）", () => {
+  assert.ok(
+    mainCode.includes('attachRenderCrashRecovery(win.webContents'),
+    "主窗口 webContents 必须接渲染崩溃兜底"
+  );
+});
+
+test("main.js：主进程不再自己拉 ICE（改由渲染层自取，主进程没有 token）", () => {
+  // 服务端给 /api/ice-servers 加了鉴权，主进程裸 fetch 必然 401；
+  // 而要让它继续工作就得把 token 搬进主进程（新增暴露面），所以整段删掉。
+  assert.ok(!/iceBase/.test(mainCode), "主进程不应再有 iceBase 变量");
+  assert.ok(!/\/api\/ice-servers/.test(mainCode), "主进程不应再请求 /api/ice-servers");
+  assert.ok(!/HEMING_API_BASE/.test(mainCode), "主进程不应再有 HEMING_API_BASE 分支");
+  // preload 的兼容位保留不动（web 侧仍按可选链读它）
+  const preloadSrc = fs.readFileSync(path.join(__dirname, "preload.js"), "utf8");
+  assert.ok(preloadSrc.includes("__heming_ice_servers_get"), "preload 的 ICE 兼容位应保留");
+  assert.ok(preloadSrc.includes("setIceServers"), "preload 的 setIceServers 应保留");
 });

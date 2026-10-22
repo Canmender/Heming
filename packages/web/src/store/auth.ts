@@ -7,6 +7,7 @@ import {
   getToken,
   setOnUnauthorized,
 } from "../lib/api.js";
+import { fetchIceServers } from "../lib/iceServers.js";
 import type { User } from "@heming/shared";
 
 interface AuthState {
@@ -32,6 +33,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       const { token, user } = await apiLogin(username, password);
       setToken(token);
       set({ token, user, status: "authed" });
+      // 登录成功后拉一次 ICE 配置（d.30 · P0-2）。
+      // 为什么在登录后拉而不是启动时拉：`/api/ice-servers` 现在要鉴权，
+      // 没有 token 服务端直接 401，启动时拉必然拿不到。
+      // 时序天然成立：必须登录才能进会话，而通话发生在进会话之后。
+      // 不 await、不阻塞：拉取失败静默回落公共 STUN，ICE 弱一点不该阻断登录。
+      void fetchIceServers();
     } catch (e) {
       set({ status: "error", error: (e as Error).message });
     }
@@ -51,6 +58,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const user = await fetchMe();
       set({ user, token: getToken(), status: "authed" });
+      // 与 login() 同理：恢复会话成功也算「已登录」⇒ 拉一次 ICE 配置。
+      // 桌面端重启后走的是这条路径（token 已在 localStorage，不经过 login()），
+      // 不在这里拉的话 TURN 永远拿不到，等于「配了 TURN 等于没配」。
+      void fetchIceServers();
     } catch {
       setToken(null);
       set({ token: null, user: null, status: "idle" });

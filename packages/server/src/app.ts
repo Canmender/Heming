@@ -450,9 +450,10 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   });
 
   // —— 语音通话：ICE 服务器配置（STUN/TURN，从环境变量读取，不入库）——
-  // 无鉴权：STUN/TURN 地址为公共基础设施，TURN 凭据由部署方按环境注入；
-  // 客户端在建立 PeerConnection 前拉取，缺省回退公共 STUN。
-  app.get("/api/ice-servers", (_req, res) => {
+  // 需鉴权（d.30 · P0-2）：STUN 地址虽属公共基础设施，但 TURN 的 username/credential
+  // 是部署方的凭据——一旦配了 HEMING_TURN_*，无鉴权就等于把凭据送给任何未登录者。
+  // 客户端改由渲染层带 Bearer 头自取（web 的 api() 本来就带 token）。
+  app.get("/api/ice-servers", authOnly, (_req, res) => {
     const iceServers: { urls: string; username?: string; credential?: string }[] = [
       { urls: process.env.HEMING_STUN ?? "stun:stun.miwifi.com:3478" },
     ];

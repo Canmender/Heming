@@ -10,6 +10,7 @@ import { GLOBAL_AGENT_ID } from "./types.js";
 import {
   KEY_SIZE_LIMIT,
   MEMORY_KEYS,
+  MEMORY_PENDING_KEY,
   createDefaultStorage,
   isPlainObject,
   readJson,
@@ -47,6 +48,14 @@ export const DEFAULT_SETTINGS: MemorySettings = {
 };
 
 const DAY_MS = 86_400_000;
+/**
+ * 沉淀计数表用的会话键分隔符：NUL。
+ *
+ * 为什么用 NUL 而不是空格或冒号：agentId / conversationId 都是自由文本，
+ * 只有 NUL 不可能出现在用户数据里 ⇒ 拼接后可以无歧义地拆回去，
+ * 也让「按 agentId 前缀清」「按 conversationId 后缀清」不会互相误伤。
+ */
+const SESSION_KEY_SEP = "\u0000";
 let idSeq = 0;
 
 function newId(prefix: string, nowMs: number): string {
@@ -147,6 +156,7 @@ function pickSemantic(raw: unknown, nowMs: number): Record<string, SemanticEntry
         continue;
       }
       const now = new Date(nowMs).toISOString();
+      const updatedAt = typeof item.updatedAt === "string" ? item.updatedAt : now;
       items.push({
         id: item.id,
         agentId: item.agentId,
@@ -160,7 +170,10 @@ function pickSemantic(raw: unknown, nowMs: number): Record<string, SemanticEntry
             ? item.source
             : "manual",
         createdAt: typeof item.createdAt === "string" ? item.createdAt : now,
-        updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : now,
+        updatedAt,
+        // 老数据没有 metaUpdatedAt：以 updatedAt 顶替，**不填成"现在"**。
+        // 填成现在会凭空造出一批「刚刚整理过」的假象；顶替最稳（不迁移、不报错）。
+        metaUpdatedAt: typeof item.metaUpdatedAt === "string" ? item.metaUpdatedAt : updatedAt,
       });
     }
     if (items.length) out[key] = items;
@@ -241,6 +254,24 @@ function guardScoredSize<T extends { id: string }>(
   return out;
 }
 
+/* --------------------------------------------------------------- 沉淀计数 */
+
+/**
+ * 沉淀计数表的水合：`{ [会话键]: 计数 }`。
+ *
+ * 容错：坏 JSON → 空表；非对象 → 空表；单条值不是有限非负整数 → **只丢这一条**（其余保留）。
+ * 单条容错是刻意的：一个会话的计数坏了，不该连累别的会话的沉淀节奏。
+ */
+function pickPending(raw: unknown): Map<string, number> {
+  const out = new Map<string, number>();
+  if (!isPlainObject(raw)) return out;
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) continue;
+    out.set(key, Math.floor(value));
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------- Store */
 
 /**
@@ -251,13 +282,24 @@ export class MemoryStore {
   private readonly storage: StorageLike;
   private readonly now: () => number;
   private data: MemoryData;
-  /** 会话 → 距上次沉淀已累计的成功轮次（仅本实例内存态，不落盘）。 */
+  /**
+   * 会话 → 距上次沉淀已累计的成功轮次。
+   *
+   * **落盘**（`heming.memory.pending.v1`）：以前只在内存里，刷新页面/重启客户端就归零，
+   * 于是「每 6 轮沉淀一次」的阈值永远攒不满 ⇒ 长会话永远沉淀不出来。
+   * 落盘后计数能跨会话存活，才谈得上「节奏」。
+   */
   private readonly pending = new Map<string, number>();
 
   constructor(storage?: StorageLike, now?: () => number) {
     this.storage = storage ?? createDefaultStorage();
     this.now = now ?? (() => Date.now());
     this.data = this.load();
+    // 坏 JSON / 非对象都在 pickPending 里回落成空表（读侧容错，坏计数器不该挡住启动）
+    const rawPending = readJson<unknown>(this.storage, MEMORY_PENDING_KEY, null);
+    for (const [key, count] of pickPending(rawPending)) {
+      this.pending.set(key, count);
+    }
   }
 
   private load(): MemoryData {
@@ -346,9 +388,11 @@ export class MemoryStore {
       const turns = (this.pending.get(key) ?? 0) + 1;
       if (turns < SEDIMENT_EVERY) {
         this.pending.set(key, turns);
+        this.savePending();
         return;
       }
       this.pending.set(key, 0);
+      this.savePending();
       const window = this.working(conversationId, agentId).slice(-SEDIMENT_EVERY);
       if (!window.length) return;
       this.addEpisodic({
@@ -413,6 +457,8 @@ export class MemoryStore {
 
   /** 清空单个会话的短期记忆（记忆页「清空当前会话」）。 */
   clearConversation(conversationId: string): void {
+    // 沉淀计数也要清：会话都没了，攒着的轮次不该继续算进下一次沉淀。
+    this.clearPendingForConversation(conversationId);
     if (!(conversationId in this.data.working)) return;
     const next = { ...this.data.working };
     delete next[conversationId];
@@ -477,6 +523,9 @@ export class MemoryStore {
    * 同 agentId + key 更新而非追加：保留 id/createdAt/pinned，
    * 刷新 value/updatedAt（scope/confidence/source 以本次入参为准）。
    * 超 300 条时淘汰 confidence × recency 最低的非 pinned 条目。
+   *
+   * **updatedAt 与 metaUpdatedAt 一起刷**：upsert 总是覆盖 value（内容变了），
+   * 而 source/confidence 也可能变 ⇒ 两个时间都算「刚动过」。
    */
   upsertSemantic(input: {
     agentId: string;
@@ -511,6 +560,7 @@ export class MemoryStore {
         confidence: input.confidence ?? existing.confidence,
         source: input.source,
         updatedAt: nowIso,
+        metaUpdatedAt: nowIso,
       };
       next = list.map((e) => (e.id === existing.id ? entry : e));
     } else {
@@ -525,6 +575,7 @@ export class MemoryStore {
         source: input.source,
         createdAt: nowIso,
         updatedAt: nowIso,
+        metaUpdatedAt: nowIso,
       };
       next = [...list, entry];
     }
@@ -563,6 +614,17 @@ export class MemoryStore {
     return null;
   }
 
+  /**
+   * 局部改一条语义记忆。
+   *
+   * **updatedAt / metaUpdatedAt 分开刷**（d.30 P1-3）：
+   * - `value` 或 `key` 真的变了 → 两个时间都刷新（内容变了）；
+   * - 只改 `pinned` / `confidence` → **只刷 metaUpdatedAt**，`updatedAt` 原样保留。
+   *
+   * 为什么：recency 与淘汰打分都吃 `updatedAt`。早先把两者绑死，用户改一个错别字
+   * 就会让这条记忆在系统眼里「刚刚更新过」⇒ recency 满血、冷门判定失效。
+   * 「给人看的时效」与「机器用的时效」必须能分开。
+   */
   updateSemantic(
     agentId: string,
     id: string,
@@ -574,13 +636,27 @@ export class MemoryStore {
     const [bucket, index] = found;
     const list = this.data.semantic[bucket] ?? [];
     const current = list[index];
+    const nextKey = patch.key !== undefined ? normalizeKey(patch.key) || current.key : current.key;
+    const nextValue = patch.value !== undefined ? String(patch.value).slice(0, 500) : current.value;
+    // 内容是否真的变了：key/value 任一不同即算内容变更（去掉「传了但值一样」的情况）。
+    const contentChanged = nextKey !== current.key || nextValue !== current.value;
+    // 元数据是否被动了：patch 里带了 pinned / confidence 即算「被人动过」。
+    const metaTouched = patch.pinned !== undefined || patch.confidence !== undefined;
+    const nowIso = new Date(this.now()).toISOString();
     const updated: SemanticEntry = {
       ...current,
-      ...(patch.key !== undefined ? { key: normalizeKey(patch.key) || current.key } : {}),
-      ...(patch.value !== undefined ? { value: String(patch.value).slice(0, 500) } : {}),
+      ...(patch.key !== undefined ? { key: nextKey } : {}),
+      ...(patch.value !== undefined ? { value: nextValue } : {}),
       ...(patch.pinned !== undefined ? { pinned: !!patch.pinned } : {}),
       ...(patch.confidence !== undefined ? { confidence: patch.confidence } : {}),
-      updatedAt: new Date(this.now()).toISOString(),
+      // 内容变了 → updatedAt 与 metaUpdatedAt 一起刷新；
+      // 只动元数据 → 只刷 metaUpdatedAt，updatedAt 原样保留（recency 不受影响）；
+      // 什么都没变 → 两个时间都不动。
+      ...(contentChanged
+        ? { updatedAt: nowIso, metaUpdatedAt: nowIso }
+        : metaTouched
+          ? { metaUpdatedAt: nowIso }
+          : {}),
     };
     const next = [...list];
     next[index] = updated;
@@ -620,7 +696,8 @@ export class MemoryStore {
     const globalLeft = (semantic[GLOBAL_AGENT_ID] ?? []).filter((e) => e.agentId !== agentId);
     if (globalLeft.length) semantic[GLOBAL_AGENT_ID] = globalLeft;
     else delete semantic[GLOBAL_AGENT_ID];
-    this.pending.clear();
+    // 只清这个 agent 名下的会话计数：别的 agent 还在攒轮次，不能连坐。
+    this.clearPendingForAgent(agentId);
     this.data = { ...this.data, working, episodic, semantic };
     this.saveWorking();
     this.saveEpisodic();
@@ -668,7 +745,7 @@ export class MemoryStore {
       semantic: pickSemantic(data.semantic, nowMs),
       settings: pickSettings(data.settings),
     };
-    this.pending.clear();
+    this.clearPendingAll();
     this.saveWorking();
     this.saveEpisodic();
     this.saveSemantic();
@@ -677,6 +754,49 @@ export class MemoryStore {
   }
 
   /* ---------------------------------------------------------------- 落盘 */
+
+  /**
+   * 沉淀计数落盘（`heming.memory.pending.v1`）。
+   *
+   * 每次计数变化写一次——这是低频操作（每轮对话一次），不值得为它做节流。
+   * 写入失败静默：计数器丢了只会退回「重新开始攒」，不该影响聊天主链路。
+   */
+  private savePending(): void {
+    const table: Record<string, number> = {};
+    for (const [key, count] of this.pending) table[key] = count;
+    writeJson(this.storage, MEMORY_PENDING_KEY, table);
+  }
+
+  /** 清掉某个会话在所有 agent 名下的计数（会话键形如 `${agentId}\u0000${conversationId}`）。 */
+  private clearPendingForConversation(conversationId: string): void {
+    let changed = false;
+    for (const key of [...this.pending.keys()]) {
+      // 用后缀匹配会话 id：agentId 里含同样文字时不会误伤（分隔符是 NUL，agentId 不含它）
+      if (key.endsWith(SESSION_KEY_SEP + conversationId)) {
+        this.pending.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) this.savePending();
+  }
+
+  /** 清掉某个 agent 名下所有会话的计数。 */
+  private clearPendingForAgent(agentId: string): void {
+    let changed = false;
+    for (const key of [...this.pending.keys()]) {
+      if (key.startsWith(agentId + SESSION_KEY_SEP)) {
+        this.pending.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) this.savePending();
+  }
+
+  /** 全清（导入全量时用）。 */
+  private clearPendingAll(): void {
+    this.pending.clear();
+    this.savePending();
+  }
 
   private saveWorking(): void {
     const guarded = guardWorkingSize(this.data.working, KEY_SIZE_LIMIT);

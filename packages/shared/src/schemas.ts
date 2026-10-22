@@ -99,6 +99,16 @@ export interface MessageEnvelope {
 }
 
 const WsClientEventUnion = z.discriminatedUnion("type", [
+  // —— 首帧鉴权（d.30 · P0-3）——
+  // 连接建立后**第一帧**必须是这个：token 走消息体，不再走 URL query
+  // （query 会进 nginx access_log 与任何中间代理日志）。
+  //
+  // 约定：auth 帧是**唯一**允许在未鉴权状态下发送的事件；服务端在收到它之前
+  // 不登记 socket，因此未鉴权连接收不到任何业务事件。
+  z.object({
+    type: z.literal("auth"),
+    token: z.string().min(1).max(512),
+  }),
   z.object({
     type: z.literal("send_message"),
     conversationId: z.string().min(1),

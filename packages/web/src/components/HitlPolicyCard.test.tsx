@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
-import { HitlPolicyStore, HITL_KEY } from "../lib/hitl/policy.js";
+import { HitlPolicyStore, FLOORS, HITL_KEY } from "../lib/hitl/policy.js";
 import { appendAudit, type StorageLike } from "../lib/selfEdit/guards.js";
 
 /** 内存存储：每个测试一份，互不干扰。 */
@@ -65,6 +65,52 @@ describe("HitlPolicyCard", () => {
     render(<HitlPolicyCard policyStore={store} storage={storage} />);
 
     expect(screen.queryByRole("radio", { name: /全部放行/ })).not.toBeInTheDocument();
+  });
+
+  it("免问下限没有「危险」选项（那等于一个设置页里的「全部放行」）", () => {
+    render(<HitlPolicyCard policyStore={store} storage={storage} />);
+
+    const select = screen.getByLabelText("免问下限") as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(["read", "write"]);
+    expect(values).not.toContain("danger");
+  });
+
+  it("下拉选项与策略层的合法下限列表一致（不许各写一份而漂移）", () => {
+    // ★ 界面选项**从 `policy.ts` 的 `FLOORS` 渲染**——这条断言把两者钉在一起。
+    // 两份各写各的就会漂移：界面多给一个选项，策略层又把它夹掉，
+    // 用户点下去会发现值没变；界面少给一个，用户以为自己有更宽的档。
+    render(<HitlPolicyCard policyStore={store} storage={storage} />);
+
+    const select = screen.getByLabelText("免问下限") as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(FLOORS);
+    expect(FLOORS).not.toContain("danger");
+  });
+
+  it("界面文案里没有「全部不问」", () => {
+    render(<HitlPolicyCard policyStore={store} storage={storage} />);
+
+    expect(screen.queryByText(/全部不问/)).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("全部不问");
+  });
+
+  it("旧存储里的 floor:danger：打开设置区提示一次（不是静默降级）", () => {
+    storage.setItem(
+      HITL_KEY,
+      JSON.stringify({ mode: "guarded", floor: "danger", scope: "global" }),
+    );
+    render(<HitlPolicyCard policyStore={store} storage={storage} />);
+
+    // 下拉显示的是夹下来的「写入」
+    expect((screen.getByLabelText("免问下限") as HTMLSelectElement).value).toBe("write");
+    // 并且明确告诉用户发生了什么（危险操作现在会问了）
+    expect(screen.getByText(/免问下限已从/)).toBeInTheDocument();
+  });
+
+  it("没有存过 danger 时不提示（不啰嗦）", () => {
+    render(<HitlPolicyCard policyStore={store} storage={storage} />);
+
+    expect(screen.queryByText(/免问下限已从/)).not.toBeInTheDocument();
   });
 
   it("清空本会话授权：授权表清空", () => {

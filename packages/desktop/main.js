@@ -16,6 +16,7 @@ const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins")
 const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
 const { registerWikiIpc } = require("./wiki-fs");
 const { registerChartIpc } = require("./chart-fs");
+const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
 
 // ── web 界面嵌入（设计 §4）──────────────────────────────────────────────
 // 产物打进安装包、用自定义协议本地加载，摆脱「UI 必须部署云端才可见」与「启动依赖网络」。
@@ -26,6 +27,24 @@ const EMBEDDED_SCHEME = "app";
 const EMBEDDED_HOST = "heming";
 const EMBEDDED_ORIGIN = `${EMBEDDED_SCHEME}://${EMBEDDED_HOST}`;
 const EMBEDDED_URL = `${EMBEDDED_ORIGIN}/${INDEX_FILE}`;
+
+// ── 崩溃兜底（d.30 · P0-4）─────────────────────────────────────────────
+// 此前主进程零兜底：抛一个未捕获异常就直接静默退出，用户只看到「应用莫名其妙没了」，
+// 而本机没有任何日志可查。装上兜底后，未捕获异常/未处理的 promise 拒绝都会在
+// ~/Heming/logs/ 留一份日志（版本号 + UTC 时间 + 异常信息），排查有据可依。
+//
+// ★ 必须在 app.whenReady() 之前装：启动早期（协议注册、单例锁、依赖加载）就可能抛，
+//   装晚了会漏掉最需要排查的那一段。
+//
+// ★ 崩溃日志只写本机文件、绝不外发：日志里可能混着用户输入片段（异常 message 常带
+//   用户数据），上报等于把个人数据送出设备。代价是拿不到崩溃遥测——个人工具不是
+//   商业产品，可接受。详见 crash-log.js 文件头。
+const CRASH_LOG_DIR = crashLogDir();
+installCrashHandlers({
+  appVersion: appVersion(),
+  logDir: CRASH_LOG_DIR,
+});
+console.log("[heming] 崩溃日志目录:", CRASH_LOG_DIR);
 
 // 必须在 app ready 之前注册，否则自定义协议拿不到 secure 语义。
 protocol.registerSchemesAsPrivileged([
@@ -308,22 +327,23 @@ if (!gotLock) {
 
     win.loadURL(appUrl);
 
-    // 语音通话：拉取服务端 ICE 配置（STUN/TURN）并注入渲染层。
-    // 用 HEMING_API_BASE 指定 API 源；缺省与加载页同源（appUrl 去尾斜杠）。
-    // 拉取失败静默——渲染层有公共 STUN 兜底，不阻塞窗口启动。
-    const iceBase = process.env.HEMING_API_BASE || appUrl.replace(/\/$/, "");
-    fetch(`${iceBase}/api/ice-servers`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data && data.iceServers) {
-          // contextBridge.exposeInMainWorld 暴露的属性是只读的，
-          // 直接赋值会静默失败，必须通过 setter 函数写入闭包变量。
-          win.webContents.executeJavaScript(
-            `window.__heming_voice_call.setIceServers(${JSON.stringify(data.iceServers)})`,
-          );
-        }
-      })
-      .catch(() => {});
+    // 渲染进程崩溃兜底：写一条崩溃日志 + 自动重载**一次**。
+    // 只重载一次：崩溃循环（每次加载都崩）会把机器刷爆，重载后还崩说明问题不在这一次
+    // 渲染，剩下的事是让人看到日志，而不是让机器一直重启。
+    // 详见 crash-log.js。
+    attachRenderCrashRecovery(win.webContents, {
+      appVersion: appVersion(),
+      logDir: CRASH_LOG_DIR,
+    });
+
+    // ICE 服务器列表（STUN/TURN）**改由渲染层自己拉**（web/src/lib/iceServers.ts）。
+    // 原来这里是主进程裸 fetch 服务端的 /api/ice-servers 再注入渲染层，但本轮服务端给
+    // 该路由加了鉴权（未带 token → 401），而主进程拿不到 web 的 token。
+    // 要让它继续工作就得把 token 从渲染层搬进主进程 → 主进程开始持有用户凭据，
+    // 这是新增的暴露面（主进程内存会被 dump、崩溃日志可能带出）。
+    // 渲染层本来就持有 token，且桌面页 app://heming 是 secure origin，跨域也通。
+    // preload.js 的 __heming_ice_servers_get / setIceServers 保留不动，
+    // web 侧仍按可选链读它作为兼容位（当前已无注入方）。
 
     // 窗口最小化时通知渲染层（渲染层据此弹系统通知，来电不丢）
     win.on("minimize", () => {

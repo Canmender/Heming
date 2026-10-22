@@ -3,10 +3,12 @@ import {
   DEFAULT_SETTINGS,
   EPISODIC_LIMIT,
   MemoryStore,
+  recencyScore,
+  SEDIMENT_EVERY,
   SEMANTIC_LIMIT,
   WORKING_LIMIT,
 } from "./store.js";
-import { KEY_SIZE_LIMIT, MEMORY_KEYS, utf8Length, writeJson } from "./storage.js";
+import { KEY_SIZE_LIMIT, MEMORY_KEYS, MEMORY_PENDING_KEY, utf8Length, writeJson } from "./storage.js";
 import type { EpisodicEntry, SemanticEntry, StorageLike, WorkingTurn } from "./types.js";
 
 /** 假存储：既能断言落盘，也能模拟配额爆掉（setItem 抛错）。 */
@@ -523,5 +525,251 @@ describe("MemoryStore：导出与导入", () => {
     expect(emptyShape.ok).toBe(false);
 
     expect(store.semantic("agent-1")).toHaveLength(1);
+  });
+});
+
+/**
+ * d.30 P1-3：`updatedAt`（内容时效）与 `metaUpdatedAt`（元数据时效）拆分。
+ *
+ * 背景：recency 与淘汰打分都吃 `updatedAt`。早先把两者绑死，用户改个错别字
+ * 也会让这条记忆「刚刚更新过」⇒ recency 满血、冷门判定失效。
+ */
+describe("MemoryStore：updatedAt 与 metaUpdatedAt 拆分", () => {
+  it("只改 pinned：updatedAt 不变，recency 得分不变", () => {
+    const clock = makeClock();
+    const store = new MemoryStore(new FakeStorage(), clock.now);
+    const entry = store.upsertSemantic({ agentId: "agent-1", key: "称呼", value: "阿和", source: "manual" });
+    const before = store.semantic("agent-1")[0];
+    expect(before.updatedAt).toBe(new Date(T0).toISOString());
+
+    clock.advance(10 * DAY);
+    store.updateSemantic("agent-1", entry.id, { pinned: true });
+
+    const after = store.semantic("agent-1")[0];
+    expect(after.pinned).toBe(true);
+    // 内容没变 ⇒ 内容时效原样保留
+    expect(after.updatedAt).toBe(before.updatedAt);
+    // recency 打分只吃 updatedAt ⇒ 结果不变
+    expect(recencyScore(after.updatedAt, T0 + 10 * DAY)).toBe(
+      recencyScore(before.updatedAt, T0 + 10 * DAY),
+    );
+    // 元数据时效刷新了（「这条被人动过」）
+    expect(after.metaUpdatedAt).toBe(new Date(T0 + 10 * DAY).toISOString());
+  });
+
+  it("只改 confidence：updatedAt 不变，recency 得分不变", () => {
+    const clock = makeClock();
+    const store = new MemoryStore(new FakeStorage(), clock.now);
+    const entry = store.upsertSemantic({ agentId: "agent-1", key: "称呼", value: "阿和", source: "manual" });
+    const before = store.semantic("agent-1")[0];
+
+    clock.advance(10 * DAY);
+    store.updateSemantic("agent-1", entry.id, { confidence: 0.9 });
+
+    const after = store.semantic("agent-1")[0];
+    expect(after.confidence).toBe(0.9);
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(recencyScore(after.updatedAt, T0 + 10 * DAY)).toBe(
+      recencyScore(before.updatedAt, T0 + 10 * DAY),
+    );
+    expect(after.metaUpdatedAt).toBe(new Date(T0 + 10 * DAY).toISOString());
+  });
+
+  it("改 value：updatedAt 与 metaUpdatedAt 都刷新", () => {
+    const clock = makeClock();
+    const store = new MemoryStore(new FakeStorage(), clock.now);
+    const entry = store.upsertSemantic({ agentId: "agent-1", key: "称呼", value: "阿和", source: "manual" });
+    const before = store.semantic("agent-1")[0];
+
+    clock.advance(10 * DAY);
+    store.updateSemantic("agent-1", entry.id, { value: "阿禾" });
+
+    const after = store.semantic("agent-1")[0];
+    expect(after.value).toBe("阿禾");
+    expect(after.updatedAt).toBe(new Date(T0 + 10 * DAY).toISOString());
+    expect(after.updatedAt).not.toBe(before.updatedAt);
+    expect(after.metaUpdatedAt).toBe(new Date(T0 + 10 * DAY).toISOString());
+    // 内容时效刷新 ⇒ recency 得分变化（这才是内容真的动了）
+    expect(recencyScore(after.updatedAt, T0 + 10 * DAY)).toBeGreaterThan(
+      recencyScore(before.updatedAt, T0 + 10 * DAY),
+    );
+  });
+
+  it("改 key：updatedAt 与 metaUpdatedAt 都刷新", () => {
+    const clock = makeClock();
+    const store = new MemoryStore(new FakeStorage(), clock.now);
+    const entry = store.upsertSemantic({ agentId: "agent-1", key: "称呼", value: "阿和", source: "manual" });
+    const before = store.semantic("agent-1")[0];
+
+    clock.advance(10 * DAY);
+    store.updateSemantic("agent-1", entry.id, { key: "昵称" });
+
+    const after = store.semantic("agent-1")[0];
+    expect(after.key).toBe("昵称");
+    expect(after.updatedAt).not.toBe(before.updatedAt);
+    expect(after.metaUpdatedAt).toBe(new Date(T0 + 10 * DAY).toISOString());
+  });
+
+  it("缺 metaUpdatedAt 的老数据：水合后以 updatedAt 顶替（不填成现在）", () => {
+    const storage = new FakeStorage();
+    const oldIso = new Date(T0 - 30 * DAY).toISOString();
+    // 故意不带 metaUpdatedAt —— 模拟老版本落下的数据
+    storage.write(MEMORY_KEYS.semantic, {
+      "agent-1": [
+        {
+          id: "s-old",
+          agentId: "agent-1",
+          key: "称呼",
+          value: "老王",
+          scope: "user",
+          confidence: 0.5,
+          pinned: false,
+          source: "manual",
+          createdAt: oldIso,
+          updatedAt: oldIso,
+        },
+      ],
+    });
+
+    const store = new MemoryStore(storage, () => T0);
+    const entry = store.semantic("agent-1")[0];
+    // 顶替成 updatedAt，而不是「现在」——填现在会凭空造出一批「刚刚整理过」的假象
+    expect(entry.metaUpdatedAt).toBe(oldIso);
+    expect(entry.metaUpdatedAt).toBe(entry.updatedAt);
+  });
+
+  it("upsertSemantic 总是覆盖 value ⇒ updatedAt 与 metaUpdatedAt 一起刷新", () => {
+    const clock = makeClock();
+    const store = new MemoryStore(new FakeStorage(), clock.now);
+    const created = store.upsertSemantic({ agentId: "agent-1", key: "称呼", value: "阿和", source: "manual" });
+    expect(created.updatedAt).toBe(new Date(T0).toISOString());
+    expect(created.metaUpdatedAt).toBe(new Date(T0).toISOString());
+
+    clock.advance(60_000);
+    const updated = store.upsertSemantic({
+      agentId: "agent-1",
+      key: "称呼",
+      value: "阿禾",
+      source: "explicit",
+      confidence: 0.9,
+    });
+    expect(updated.updatedAt).toBe(new Date(T0 + 60_000).toISOString());
+    expect(updated.metaUpdatedAt).toBe(new Date(T0 + 60_000).toISOString());
+  });
+});
+
+/**
+ * d.30 P1-4：沉淀节奏计数落盘。
+ *
+ * 背景：计数以前只在内存里 ⇒ 刷新页面/重启客户端就归零 ⇒ 每 6 轮沉淀一次的阈值
+ * 永远攒不满 ⇒ 长会话永远沉淀不出来。
+ */
+describe("MemoryStore：沉淀计数落盘", () => {
+  /** 会话键的形状与 store 内一致：`${agentId} ${conversationId}`（分隔符是 NUL）。 */
+  const pendingKey = (agentId: string, conversationId: string) =>
+    `${agentId}\u0000${conversationId}`;
+
+  it("新实例能读回计数，并按阈值触发沉淀", () => {
+    const storage = new FakeStorage();
+    const store = new MemoryStore(storage, () => T0);
+    // 先攒到差一轮
+    for (let i = 0; i < SEDIMENT_EVERY - 1; i++) {
+      store.recordTurn("agent-1", "conv-1", `第 ${i + 1} 问`, `第 ${i + 1} 答`);
+    }
+    expect(store.episodic("agent-1")).toEqual([]);
+
+    // 计数已落盘
+    const saved = storage.read<Record<string, number>>(MEMORY_PENDING_KEY)!;
+    expect(saved[pendingKey("agent-1", "conv-1")]).toBe(SEDIMENT_EVERY - 1);
+
+    // 换个实例（模拟刷新页面/重启客户端）：计数仍在 ⇒ 这一轮就能沉淀
+    const fresh = new MemoryStore(storage, () => T0);
+    fresh.recordTurn("agent-1", "conv-1", "最后一问", "最后一答");
+    expect(fresh.episodic("agent-1")).toHaveLength(1);
+    expect(fresh.episodic("agent-1")[0].sourceTurns).toBe(SEDIMENT_EVERY);
+  });
+
+  it("计数按会话各自独立，落盘后互不串", () => {
+    const storage = new FakeStorage();
+    const store = new MemoryStore(storage, () => T0);
+    store.recordTurn("agent-1", "conv-1", "问", "答");
+    store.recordTurn("agent-1", "conv-2", "问", "答");
+    const saved = storage.read<Record<string, number>>(MEMORY_PENDING_KEY)!;
+    expect(saved[pendingKey("agent-1", "conv-1")]).toBe(1);
+    expect(saved[pendingKey("agent-1", "conv-2")]).toBe(1);
+  });
+
+  it("clearConversation 清掉该会话的计数", () => {
+    const storage = new FakeStorage();
+    const store = new MemoryStore(storage, () => T0);
+    store.recordTurn("agent-1", "conv-1", "问", "答");
+    store.recordTurn("agent-1", "conv-2", "问", "答");
+    expect(storage.read<Record<string, number>>(MEMORY_PENDING_KEY)![pendingKey("agent-1", "conv-1")]).toBe(1);
+
+    store.clearConversation("conv-1");
+
+    const saved = storage.read<Record<string, number>>(MEMORY_PENDING_KEY)!;
+    expect(saved[pendingKey("agent-1", "conv-1")]).toBeUndefined();
+    // 别的会话不该被连坐
+    expect(saved[pendingKey("agent-1", "conv-2")]).toBe(1);
+  });
+
+  it("clearAgent 只清该 agent 的计数，别人的会话节奏保留", () => {
+    const storage = new FakeStorage();
+    const store = new MemoryStore(storage, () => T0);
+    store.recordTurn("agent-1", "conv-1", "问", "答");
+    store.recordTurn("agent-2", "conv-1", "问", "答");
+    store.clearAgent("agent-1");
+    const saved = storage.read<Record<string, number>>(MEMORY_PENDING_KEY)!;
+    expect(saved[pendingKey("agent-1", "conv-1")]).toBeUndefined();
+    expect(saved[pendingKey("agent-2", "conv-1")]).toBe(1);
+  });
+
+  it("pending 键坏 JSON：回落空表、不抛", () => {
+    const storage = new FakeStorage();
+    storage.map.set(MEMORY_PENDING_KEY, "{oops");
+    expect(() => new MemoryStore(storage, () => T0)).not.toThrow();
+    const store = new MemoryStore(storage, () => T0);
+    // 计数从零起，等价于「重新开始攒」，比现状（永远攒不满）好
+    expect(storage.getItem(MEMORY_PENDING_KEY)).toBe("{oops");
+    store.recordTurn("agent-1", "conv-1", "问", "答");
+    // 坏表被新一轮的正常写入覆盖 ⇒ 能继续攒
+    const saved = storage.read<Record<string, number>>(MEMORY_PENDING_KEY)!;
+    expect(saved[pendingKey("agent-1", "conv-1")]).toBe(1);
+  });
+
+  it("pending 键不是对象（数组/字符串）：回落空表", () => {
+    const storage = new FakeStorage();
+    storage.map.set(MEMORY_PENDING_KEY, "[1,2,3]");
+    const store = new MemoryStore(storage, () => T0);
+    store.recordTurn("agent-1", "conv-1", "问", "答");
+    expect(storage.read<Record<string, number>>(MEMORY_PENDING_KEY)![pendingKey("agent-1", "conv-1")]).toBe(1);
+  });
+
+  it("pending 单条值非法：只丢该条，其余保留", () => {
+    const storage = new FakeStorage();
+    storage.write(MEMORY_PENDING_KEY, {
+      [pendingKey("agent-1", "conv-bad")]: -3,
+      [pendingKey("agent-1", "conv-nan")]: "不是数字",
+      [pendingKey("agent-1", "conv-good")]: 4,
+    });
+    const store = new MemoryStore(storage, () => T0);
+    store.recordTurn("agent-1", "conv-good", "问", "答");
+    const saved = storage.read<Record<string, number>>(MEMORY_PENDING_KEY)!;
+    expect(saved[pendingKey("agent-1", "conv-bad")]).toBeUndefined();
+    expect(saved[pendingKey("agent-1", "conv-nan")]).toBeUndefined();
+    // 好条目保留 ⇒ 攒到 5，再一轮就沉淀
+    expect(saved[pendingKey("agent-1", "conv-good")]).toBe(5);
+  });
+
+  it("写入失败静默：storage 抛配额错误时不炸、内存态仍可用", () => {
+    const storage = new FakeStorage();
+    storage.failWrites = true;
+    const store = new MemoryStore(storage, () => T0);
+    expect(() => {
+      for (let i = 0; i < SEDIMENT_EVERY; i++) store.recordTurn("agent-1", "conv-1", "问", "答");
+    }).not.toThrow();
+    // 计数器写不进去，但沉淀本身照做（内存态够用）
+    expect(store.episodic("agent-1")).toHaveLength(1);
   });
 });

@@ -56,7 +56,22 @@ export interface SemanticEntry {
   /** manual=手动添加；explicit=用户明说「记住…」；consolidate=规则沉淀；review=复盘分身自评写入。 */
   source: "manual" | "explicit" | "consolidate" | "review";
   createdAt: string;
+  /**
+   * **内容**变更时间：只在 `value` / `key` 真的变了时刷新。
+   *
+   * 机器用的时效（recency 打分、淘汰打分）只吃这个字段。
+   * 拆出 `metaUpdatedAt` 是因为「给人看的时效」和「机器用的时效」不能绑死：
+   * 人改一个错别字不该让这条记忆在系统眼里变成「刚刚更新过」，
+   * 否则 recency 满血、冷门判定失效。
+   */
   updatedAt: string;
+  /**
+   * **元数据**变更时间（`pinned` / `confidence` / `scope` / `source`）。
+   *
+   * 可选：老 localStorage 里没有这个键，水合时以 `updatedAt` 顶替（不迁移、不报错）。
+   * 只用于「这条被人动过」的展示，不参与任何打分。
+   */
+  metaUpdatedAt?: string;
 }
 
 /**

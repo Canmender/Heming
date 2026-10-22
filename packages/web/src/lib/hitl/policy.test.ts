@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { DEFAULT_HITL_POLICY, HITL_KEY, HitlPolicyStore, type HitlPolicy } from "./policy.js";
+import { DEFAULT_HITL_POLICY, FLOORS, HITL_KEY, HitlPolicyStore, type HitlPolicy } from "./policy.js";
 import type { HitlCall, HitlMode } from "./types.js";
 
 /** 内存存储：每个测试一份，互不干扰。 */
@@ -55,9 +55,46 @@ describe("策略存储", () => {
   it("字段类型不对时逐字段回落默认（好字段照样用）", () => {
     storage.setItem(
       HITL_KEY,
-      JSON.stringify({ mode: "不存在的档位", floor: "danger", scope: "global" }),
+      JSON.stringify({ mode: "不存在的档位", floor: "read", scope: "global" }),
     );
-    expect(store.get()).toEqual({ mode: "guarded", floor: "danger", scope: "global" });
+    expect(store.get()).toEqual({ mode: "guarded", floor: "read", scope: "global" });
+  });
+
+  it("旧存储里的 floor:danger → 读回是 write（danger 不是合法的下限值）", () => {
+    // ★ 这条是**读侧红线**的护栏，不只是功能测试：
+    // 界面上早就该没有「危险（全部不问）」这个选项了，但旧 localStorage 里
+    // 存着 floor:"danger" 的用户仍会被原样放行——
+    // 判定式是「风险不高于下限 ⇒ 免问」，下限=danger 时所有档位恒真
+    // ⇒ 等于一个设置页里的「全部放行」。
+    // 所以读回时必须夹住：danger 不是合法的 floor 值。
+    storage.setItem(
+      HITL_KEY,
+      JSON.stringify({ mode: "guarded", floor: "danger", scope: "global" }),
+    );
+    expect(store.get().floor).toBe("write");
+    expect(store.get()).toEqual({ mode: "guarded", floor: "write", scope: "global" });
+  });
+
+  it("非法的 floor 值回落 write 而不是 read（不把用户的偏好悄悄改严）", () => {
+    // 回落 read 是「整个策略的默认值」，但对**这个字段**来说太严：
+    // 用户当初选 danger 就是想少被打扰，夹回 read 等于替他重选了最严的一档。
+    // 回落 write = 该字段可表达的最宽安全值：尊重意图，又没打开全放行。
+    storage.setItem(HITL_KEY, JSON.stringify({ mode: "guarded", floor: "别乱写", scope: "global" }));
+    expect(store.get().floor).toBe("write");
+  });
+
+  it("set 写入 floor:danger 时落盘的也是 write（写侧同样被夹）", () => {
+    store.set({ mode: "guarded", floor: "danger", scope: "global" });
+
+    expect(JSON.parse(storage.getItem(HITL_KEY) as string).floor).toBe("write");
+    expect(store.get().floor).toBe("write");
+  });
+
+  it("合法下限列表里没有 danger（这是红线本身，导出给界面共用）", () => {
+    // ★ 这条断言是**安全护栏**：FLOORS 是免问下限的唯一权威列表，
+    // 界面也从它渲染。把 "danger" 加回来 = 把「全部放行」加回来。
+    expect(FLOORS).toEqual(["read", "write"]);
+    expect(FLOORS).not.toContain("danger");
   });
 
   it("写入策略后可读回", () => {
@@ -106,6 +143,16 @@ describe("档位判定", () => {
     const policy: HitlPolicy = { mode: "guarded", floor: "write", scope: "global" };
     expect(store.allowed(readCall, policy, "a1")).toBe("pass");
     expect(store.allowed(writeCall, policy, "a1")).toBe("pass");
+    expect(store.allowed(dangerCall, policy, "a1")).toBe("ask");
+  });
+
+  it("floor=write 时危险操作恒要问（不因「不高于 write」而被免问）", () => {
+    // ★ 这条钉的是「危险恒问」这个语义本身。
+    // 判定式 `RISK_ORDER[risk] <= RISK_ORDER[floor]` 的 `<=` 不动，
+    // 被夹的是**下限的取值范围**：danger 严格高于 write ⇒ 恒不在免问范围内。
+    // 换句话说，「危险恒问」是用 floor=write 精确表达的，
+    // 不需要（也不允许）加第四个下限值。
+    const policy: HitlPolicy = { mode: "guarded", floor: "write", scope: "global" };
     expect(store.allowed(dangerCall, policy, "a1")).toBe("ask");
   });
 

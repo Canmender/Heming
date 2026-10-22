@@ -1743,6 +1743,9 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
         if (unread > 0) handle?.send({ type: "mark_read", conversationId: convId });
       },
       onClose: () => setConnected(false),
+      // d.30 · P1-8：离线队列溢出/无 token 发送失败 → 复用既有 setSendNotice 提示，
+      // 不新造组件（规格 §5）。静默丢帧的话用户永远不知道有东西没发出去。
+      onSendError: (reason) => setSendNotice(`发送失败：${reason}`),
     });
     wsHandleRef.current = handle;
     // 进会话即报已读（有未读才发；send 在未连通时入队，连接后随首帧冲刷）。

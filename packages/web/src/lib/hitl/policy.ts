@@ -44,6 +44,11 @@ export const DEFAULT_HITL_POLICY: HitlPolicy = {
  * - `mode`：档位（见 `HitlMode`）；
  * - `floor`：免问下限——**风险不高于**此值的调用一律不问（`guarded` 下即 `read`）；
  * - `scope`：会话授权的作用域（按智能体 / 全局共用）。
+ *
+ * ★ `floor` 的**类型**仍是 `RiskLevel`（`danger` 是合法的风险等级），
+ * 但它的**合法取值**比 `RiskLevel` 窄：只有 `read` / `write`。
+ * 这条收窄由 `normalizePolicy` 在运行时强制（读侧与写侧都过这一道），
+ * 类型上没有再往窄收，是为了不把「风险等级」与「下限取值」两个概念混成一个类型。
  */
 export interface HitlPolicy {
   mode: HitlMode;
@@ -53,8 +58,41 @@ export interface HitlPolicy {
 
 /** 合法档位（读回时逐字段校验，非法值回落默认）。★ 只有三档，没有「全放行」档。 */
 const MODES: HitlMode[] = ["strict", "guarded", "trusted"];
-/** 合法免问下限。 */
-const FLOORS: RiskLevel[] = ["read", "write", "danger"];
+
+/**
+ * 合法免问下限。★ **没有 `danger`**。
+ *
+ * 为什么 `danger` 不能当下限：判定式是「风险**不高于**下限 ⇒ 免问」，
+ * 下限取 `danger` 时，「不高于 danger」把 `danger` 本身也包了进去
+ * ⇒ 所有档位恒真 ⇒ 等于一个设置页里的「全部放行」，
+ * 与「没有全放行档」的红线冲突（见 `types.ts` 里 `HitlMode` 的注释）。
+ *
+ * ★ 注意区分两个概念：`danger` **仍是合法的 `RiskLevel`**
+ * （分类、审计、界面文案都要用它），它只是**不是合法的下限值**。
+ * 要表达「危险恒问」，正确的取值是 `write`——
+ * `danger` 严格高于 `write`，不在免问范围内。
+ *
+ * ★ 导出给界面用：设置页的下拉选项**必须**与这份列表一致。
+ * 两者各写一份就会漂移——界面多给一个选项，策略层又把它夹掉，
+ * 用户点下去却发现值没变（或者反过来，界面少给一个，用户以为自己有更宽的档）。
+ * 测试里有一条断言把两者钉在一起。
+ */
+export const FLOORS: RiskLevel[] = ["read", "write"];
+
+/**
+ * 免问下限的回落值（读到的值非法时用）。
+ *
+ * ★ 回落 `write` 而不是回落默认值 `read`：
+ * - 回落 `read` 会把用户的既有偏好**悄悄改严**。旧 localStorage 里存着 `danger` 的用户
+ *   当初选它就是想少被打扰，夹回 `read` 等于替他重新选了最严的那一档，而且没征求过他；
+ * - 回落 `write` 是「该字段可表达的最宽安全值」：既尊重了「别问那么多」的意图，
+ *   又没打开全放行（`danger` 仍严格高于 `write`，恒要问）。
+ *
+ * 也就是说：`write` 是**这个字段**的回落值，不是**整个策略**的默认值——
+ * 整个策略的默认值仍是 `DEFAULT_HITL_POLICY`（`floor: "read"`）。
+ */
+const FALLBACK_FLOOR: RiskLevel = "write";
+
 /** 合法作用域。 */
 const SCOPES: PolicyScope[] = ["per-agent", "global"];
 
@@ -85,7 +123,15 @@ function defaultStorage(): StorageLike {
   };
 }
 
-/** 逐字段规整：类型/取值不符的字段回落默认（好字段照样用）。 */
+/**
+ * 逐字段规整：类型/取值不符的字段回落（好字段照样用）。
+ *
+ * ★ `floor` 的回落值是 `FALLBACK_FLOOR`（`write`），**不是** `DEFAULT_HITL_POLICY.floor`（`read`）——
+ * 理由见 `FALLBACK_FLOOR` 的注释：回落 `read` 会把用户「少被打扰」的偏好悄悄改严。
+ *
+ * 这道校验是**读侧的红线**：只删界面上的 `danger` 选项不够，
+ * 旧 localStorage 里存着 `floor:"danger"` 的用户仍会被放行，必须在这里夹住。
+ */
 function normalizePolicy(raw: unknown): HitlPolicy {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ...DEFAULT_HITL_POLICY };
@@ -93,9 +139,7 @@ function normalizePolicy(raw: unknown): HitlPolicy {
   const r = raw as Record<string, unknown>;
   return {
     mode: MODES.includes(r.mode as HitlMode) ? (r.mode as HitlMode) : DEFAULT_HITL_POLICY.mode,
-    floor: FLOORS.includes(r.floor as RiskLevel)
-      ? (r.floor as RiskLevel)
-      : DEFAULT_HITL_POLICY.floor,
+    floor: FLOORS.includes(r.floor as RiskLevel) ? (r.floor as RiskLevel) : FALLBACK_FLOOR,
     scope: SCOPES.includes(r.scope as PolicyScope)
       ? (r.scope as PolicyScope)
       : DEFAULT_HITL_POLICY.scope,
@@ -157,7 +201,13 @@ export class HitlPolicyStore {
     }
   }
 
-  /** 写策略：存储抛错静默（本次会话内仍按内存态生效）。 */
+  /**
+   * 写策略：存储抛错静默（本次会话内仍按内存态生效）。
+   *
+   * ★ 落盘前也过 `normalizePolicy`，所以**写侧同样被夹**：
+   * `set({ floor: "danger" })` 存下去的是 `write`，不会把红线值写进 localStorage。
+   * （只夹读侧不够——那样旧的 `danger` 会被原样留在存储里，下次读回才夹，等于放过一次。）
+   */
   set(policy: HitlPolicy): void {
     try {
       this.storage.setItem(HITL_KEY, JSON.stringify(normalizePolicy(policy)));
@@ -196,6 +246,11 @@ export class HitlPolicyStore {
    *
    * 注意是「不高于」而不是「低于」：`floor=read` 时只读免问，
    * 写与危险仍要问——这正是 `guarded` 的语义。
+   *
+   * ★ 判定式（`<=`）**不动**，被夹的是下限的**取值范围**（见 `FLOORS`）：
+   * `floor=write` ⇒ 只读与写入免问，**危险严格高于 write ⇒ 恒要问**。
+   * 换句话说，「危险恒问」是用 `floor=write` 精确表达的，
+   * 不需要（也不允许）再加第四个下限值。
    */
   private underFloor(call: HitlCall, policy: HitlPolicy): boolean {
     return RISK_ORDER[call.risk] <= RISK_ORDER[policy.floor];

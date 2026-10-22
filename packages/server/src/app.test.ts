@@ -3,6 +3,7 @@ import request from "supertest";
 import type { Conversation } from "@heming/shared";
 import { createMemoryStore } from "./store.js";
 import { createApp } from "./app.js";
+import { issueToken } from "./auth.js";
 
 type App = ReturnType<typeof createApp>;
 
@@ -913,9 +914,21 @@ describe("GET /api/ice-servers（语音通话 ICE 配置）", () => {
     }
   });
 
+  /**
+   * 带鉴权头拉 ICE 配置（d.30 · P0-2 起该路由需登录）。
+   * 直接建用户 + issueToken：不走注册接口，避免受 HEMING_ALLOW_REGISTER 开关影响。
+   */
+  async function getIceServers(app: App): Promise<request.Response> {
+    const store = createMemoryStore();
+    const user = store.createUser(`ice-${Math.random().toString(36).slice(2)}`, "h", "ICE");
+    return request(app)
+      .get("/api/ice-servers")
+      .set("Authorization", `Bearer ${issueToken(user.id)}`);
+  }
+
   it("缺省返回公共 STUN，无 TURN", async () => {
     const app = createApp(createMemoryStore());
-    const res = await request(app).get("/api/ice-servers");
+    const res = await getIceServers(app);
     expect(res.status).toBe(200);
     expect(res.body.iceServers).toEqual([{ urls: "stun:stun.miwifi.com:3478" }]);
   });
@@ -923,7 +936,7 @@ describe("GET /api/ice-servers（语音通话 ICE 配置）", () => {
   it("HEMING_STUN 覆盖默认 STUN", async () => {
     process.env.HEMING_STUN = "stun:stun.example.com:3478";
     const app = createApp(createMemoryStore());
-    const res = await request(app).get("/api/ice-servers");
+    const res = await getIceServers(app);
     expect(res.body.iceServers).toEqual([{ urls: "stun:stun.example.com:3478" }]);
   });
 
@@ -932,16 +945,45 @@ describe("GET /api/ice-servers（语音通话 ICE 配置）", () => {
     process.env.HEMING_TURN_USERNAME = "user";
     process.env.HEMING_TURN_CREDENTIAL = "pass";
     const app = createApp(createMemoryStore());
-    const res = await request(app).get("/api/ice-servers");
+    const res = await getIceServers(app);
     expect(res.body.iceServers).toEqual([
       { urls: "stun:stun.miwifi.com:3478" },
       { urls: "turn:turn.example.com:3478", username: "user", credential: "pass" },
     ]);
   });
 
-  it("无鉴权即可访问（公共基础设施，供渲染层建连前拉取）", async () => {
+  it("未鉴权 → 401（TURN 凭据不外泄）", async () => {
+    process.env.HEMING_TURN_URL = "turn:turn.example.com:3478";
+    process.env.HEMING_TURN_USERNAME = "user";
+    process.env.HEMING_TURN_CREDENTIAL = "pass";
     const app = createApp(createMemoryStore());
     const res = await request(app).get("/api/ice-servers");
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: "unauthorized" });
+    // 凭据不随 401 响应泄出
+    expect(JSON.stringify(res.body)).not.toContain("turn.example.com");
+  });
+
+  it("带 Bearer token → 200，且 iceServers 结构与鉴权前完全一致", async () => {
+    process.env.HEMING_TURN_URL = "turn:turn.example.com:3478";
+    process.env.HEMING_TURN_USERNAME = "user";
+    process.env.HEMING_TURN_CREDENTIAL = "pass";
+    const app = createApp(createMemoryStore());
+    const res = await getIceServers(app);
     expect(res.status).toBe(200);
+    // 结构不变：仍是 { iceServers: [...] }，TURN 的 username/credential 照旧透传
+    expect(Object.keys(res.body)).toEqual(["iceServers"]);
+    expect(res.body.iceServers).toEqual([
+      { urls: "stun:stun.miwifi.com:3478" },
+      { urls: "turn:turn.example.com:3478", username: "user", credential: "pass" },
+    ]);
+  });
+
+  it("token 无效 → 401", async () => {
+    const app = createApp(createMemoryStore());
+    const res = await request(app)
+      .get("/api/ice-servers")
+      .set("Authorization", "Bearer not-a-real-token");
+    expect(res.status).toBe(401);
   });
 });
