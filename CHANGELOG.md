@@ -2,6 +2,35 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.26.1.7.0（2026-10-22）— 弹窗真的挡住背景，首帧不再拿「暂无数据」骗人
+
+上一轮把弹窗骨架统一成 `useModalA11y`（Esc 栈顶独占、Tab 循环、打开落焦），但只做了一半：
+背景照旧可点可 Tab，关掉后焦点掉回 `<body>`，而 `loadWorkspace` 的加载态与失败态根本没上屏。
+
+### 屏蔽背景：兄弟屏蔽，不是 shell 屏蔽
+
+- 本仓弹窗**没有 portal**，直接 `inert` 最外层会把弹窗自己也屏蔽掉（点不动、读屏也读不到）
+  → 从「遮罩根」往上走，每一层只屏蔽不在通往 panel 那条链上的兄弟，走到 `body` 为止
+- 起点用遮罩根而不是 panel：技能详情抽屉的关闭遮罩是 panel 的**兄弟**，从 panel 起屏蔽会把它一起 inert 掉，点遮罩就关不上
+- 只挂 `inert`，不补 `aria-hidden`：inert 子树本身不进可访问性树，重复是噪音，而 jsdom 里 `aria-hidden` 真生效、`inert` 不生效，挂了会把一堆无关用例拖进改动面
+- **嵌套用模块级引用计数**：React 先跑子 effect ⇒ 内层先屏蔽，各自记原值再还原会让内层解除外层的屏蔽、外层再还原变永久锁死
+- 逃生门 `data-a11y-keep`：通话面板是常驻全屏浮层，HITL 框压在它上面时也必须能点挂断/静音
+- 非模态浮层退出：通知中心靠「点面板外关闭」收拢，背景被 inert 后 pointerdown 落不到背景 ⇒ 传 `blockBackground: false`
+
+### 焦点归还：只在焦点确实无处可去时还
+
+记录激活时的 `document.activeElement`（不在 panel 内才算触发元素），关闭时**仅当焦点已丢失**（`body`／null／已不在文档）才归还。
+条件不是多余：关闭方常自己安排焦点（跳会话、开下一个弹窗），无条件归还会抢掉刚放好的；触发元素自己被卸载时也不还，硬 focus 只会静默失败。
+
+### 工作区首帧：ready 与 error，不管后台刷新
+
+- store 加 `workspaceReady` / `workspaceError`，`loadWorkspace` **只在首帧**动这两个字段
+- **后台刷新失败不推翻已就绪**：WS 事件、建会话后都会再调 `loadWorkspace`，为一次后台失败把整页打回重试态是倒退，旧列表继续可用比「页面塌了」好
+- UI：未就绪渲染 `WorkspaceFallback`（骨架条 `role="status"`；失败则「加载失败：原因」+ 重试按钮），就绪才渲染原来的「暂无会话／没有待处理申请」
+- 智能体动态那一栏不改：它的数据来自 `loadAgentsRoster`，用 `workspaceReady` 判加载态是另一套口径
+
+设计见 `docs/superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md`。
+
 ## d.25.1.7.0（2026-10-22）— 图片 + 文字同发：这一轮就让模型看到图
 
 上一轮缺口审计里留着的一条（HANDOFF §5 #2）：**本轮新上传的图片要等下一轮才进模型**。

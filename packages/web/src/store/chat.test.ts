@@ -52,6 +52,8 @@ describe("chat store", () => {
       openHandler: null,
       plainById: {},
       pendingE2e: {},
+      workspaceReady: false,
+      workspaceError: null,
     });
   });
 
@@ -138,6 +140,47 @@ describe("chat store", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ name: "评审组", memberIds: ["u2", "u3"] });
     expect(loadWorkspace).toHaveBeenCalledTimes(1);
     loadWorkspace.mockRestore();
+  });
+
+  it("loadWorkspace 首帧失败：写 workspaceError 并把 rejection 交回调用方", async () => {
+    // 走真实 fetch 层：api 模块的 mock 只替换 `api` 导出，
+    // fetchConversations 内部用的还是模块内绑定的真 api，所以拦 fetch 才管用
+    const spy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("网络中断"));
+    await expect(useChatStore.getState().loadWorkspace()).rejects.toThrow("网络中断");
+    spy.mockRestore();
+    const s = useChatStore.getState();
+    expect(s.workspaceReady).toBe(false);
+    expect(s.workspaceError).toBe("网络中断");
+  });
+
+  it("loadWorkspace 成功后置 ready 并清空错误；后台刷新再失败不推翻已就绪", async () => {
+    const json = (body: unknown, status = 200) =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    let fail = false;
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      if (fail) return Promise.reject(new Error("网关超时"));
+      const url = String(input);
+      if (url === "/api/conversations") return json([]);
+      if (url === "/api/friends") return json([]);
+      if (url === "/api/friends/requests") return json([]);
+      return json({ error: "not found" }, 404);
+    });
+    await useChatStore.getState().loadWorkspace();
+    expect(useChatStore.getState().workspaceReady).toBe(true);
+    expect(useChatStore.getState().workspaceError).toBeNull();
+
+    fail = true;
+    await expect(useChatStore.getState().loadWorkspace()).rejects.toThrow("网关超时");
+    spy.mockRestore();
+    // 已经拿到过数据就不该把整页打回重试态：旧列表继续可用，错误也不上报
+    const s = useChatStore.getState();
+    expect(s.workspaceReady).toBe(true);
+    expect(s.workspaceError).toBeNull();
   });
 
   it("loadAgents：逐群拉 members，kind=agent 按 id 去重并 join 名册（owner/description 来自 roster）", async () => {

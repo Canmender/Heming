@@ -78,6 +78,7 @@ export function VoiceCallPanel({
       return (
         <div
           role="alert"
+          data-a11y-keep=""
           className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-lg border border-[#e6e6e6] bg-white px-4 py-2 text-[13px] text-[#b42318] shadow-card"
         >
           {state.error}
@@ -88,7 +89,9 @@ export function VoiceCallPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1a1a2e]">
+    // data-a11y-keep：弹窗（HITL 确认等）叠在通话之上时不屏蔽这一层，
+    // 否则「挂断」按钮点不动，用户被锁在通话里。见 useModalA11y 的逃生门。
+    <div data-a11y-keep className="fixed inset-0 z-50 flex items-center justify-center bg-[#1a1a2e]">
       <div className="flex flex-col items-center gap-8 text-white">
         <div className="text-[12px] text-gray-400">语音通话</div>
 

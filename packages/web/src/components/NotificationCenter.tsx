@@ -46,7 +46,9 @@ export function NotificationCenter() {
   const [confirmClear, setConfirmClear] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  useModalA11y(panelRef, () => setOpen(false), { active: open });
+  // 非模态浮层（aria-modal=false）：不屏蔽背景。屏蔽会把铃铛自己一起 inert 掉，
+  // 「点面板外关闭」就失效了——背景可点、Esc 可关才是这个浮层的契约。
+  useModalA11y(panelRef, () => setOpen(false), { active: open, blockBackground: false });
 
   // 点面板外关闭：与导出菜单同一个口径（pointerdown，不用遮罩也能收）
   useEffect(() => {

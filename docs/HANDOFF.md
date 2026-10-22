@@ -1,8 +1,8 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-10-22
-- 当前版本：`d.25.1.7.0`
-- 当前 main：以 `git log -1` 为准（`204a592` 功能批次 → `d5dbdca` 裸机部署链路；本轮 d.25.1.7.0 是「图片 + 文字同发」，云端与安装包需**两处重发**）
+- 当前版本：`d.26.1.7.0`
+- 当前 main：以 `git log -1` 为准（`204a592` 功能批次 → `d5dbdca` 裸机部署链路 → `94e6d77` 发布收口；本轮 d.26.1.7.0 是「弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态」，云端与安装包需**两处重发**）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
@@ -21,11 +21,11 @@
 
 | 项 | 状态 |
 |---|---|
-| 版本 | `d.25.1.7.0`（5 段，五包同步） |
-| main | `204a592`（d.25.1.6.0 功能批次）→ `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ 本轮「图片 + 文字同发」 |
-| 测试 | 2026-10-22 实跑：`pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿（exit 0）；web 106 文件 / 1648 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 18 文件全通过 |
-| 线上 | **2026-10-22 裸机重新上线 `d.25.1.6.0`**（实例被重置为 Ubuntu 24.04 → 去 Docker；宿主机 nginx + systemd + node，云端零构建）。**`d.25.1.7.0` 已发布**：`/`（外部取回的 `assets/index-DmsRMu09.js` 与本机 dist 逐字同名）、`/api/health`、`/api/ws`（带 token 握手并收到 `error` 回执）全部实测通过 |
-| 安装包 | `和鸣 Setup d.25.1.6.0.exe`（171MB，在 `packages/desktop/release/r25/`）；**`和鸣 Setup d.25.1.7.0.exe`（178841844 字节，`r26/`）已发布到 `/updates`**——远端字节数与本地一致，`latest.yml` 读到 `version: 25.1.7`，Range 请求返回 206（`bytes 0-1023/178841844`） |
+| 版本 | `d.26.1.7.0`（5 段，五包同步） |
+| main | `204a592`（d.25.1.6.0 功能批次）→ `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ `94e6d77`（d.25.1.7.0 发布收口）→ 本轮「弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态」 |
+| 测试 | 2026-10-22 实跑：`pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿（exit 0）；web 106 文件 / 1659 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 18 文件全通过 |
+| 线上 | **2026-10-22 裸机重新上线 `d.25.1.6.0`**（实例被重置为 Ubuntu 24.04 → 去 Docker；宿主机 nginx + systemd + node，云端零构建）。**`d.25.1.7.0` 已发布**：`/`（外部取回的 `assets/index-DmsRMu09.js` 与本机 dist 逐字同名）、`/api/health`、`/api/ws`（带 token 握手并收到 `error` 回执）全部实测通过。**`d.26.1.7.0` 待重发**（先 `deploy-bare.py backup`） |
+| 安装包 | `和鸣 Setup d.25.1.7.0.exe`（178841844 字节，`r26/`）已发布到 `/updates`——远端字节数与本地一致，`latest.yml` 读到 `version: 25.1.7`，Range 请求返回 206（`bytes 0-1023/178841844`）。**`d.26.1.7.0` 待重出包**（输出目录用 `release/r27`，见 §5 #4） |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落） |
 | 账号 | 只有 `admin/admin`（`HEMING_SEED_USERS` 播种；注册默认关闭）。**重置把旧库连同 `zhoukang` 等账号一起清掉了**，历史会话/消息不可恢复 |
 
@@ -52,6 +52,7 @@
 19. **全量缺口审计**：HITL 确认前变更预览（edit diff / write 行数 / delete 路径，不读文件）；待确认弹窗显示来源会话并可跳转，切会话按拒绝收口；会话内搜索（循环跳转、高亮）；聊天空态；任务 JSON 导出（`version: 1`）；智能体删除改应用内确认；导航 `aria-current`、会话标签按钮键盘可见、`line-soft` token 统一、Alt+1–8 提示校正。
 20. **补齐上轮暂缓项（d.25）**：Registry **本地包（npm/pypi）**（不内置运行时→挂载即探测、缺什么直说、必须钉版本、Windows 上翻译为 `node npx-cli.js` 且恒定 `shell:false`、删除回收子进程）；**记忆召回**同主题时效覆盖 + MMR 去重名额（确定性、无学习权重、不加模型字段）；**通话逐路 ICE restart**（2 次预算、新信令 `voice_call_reconnect`、不重新响铃）；**应用内通知中心**（消息/任务收尾，去重、50 条上限、只存本机）；**弹窗骨架** `useModalA11y`（Esc 栈顶独占、焦点循环）+ 技能/接口/记忆/Wiki/HITL 规则等破坏性操作统一应用内确认；**模型能力降级提示**（判定与丢弃同源）；**任务模板**（名称+目标，填回输入框仍可编辑）；**消息多选导出**（与整会话导出同契约、纯本机 Blob）。文档见 `docs/superpowers/specs/2026-10-21-*.md` 三篇与审计文档 §2。
 21. **图片 + 文字同发（d.25.1.7.0）**：输入框有正文时选文件 → 发**一条 `text + file` 消息**并当场触发；本轮附件不走历史，由 `TriggerDeps.buildUserTurn` 拼进当前 user 行（图片内容片 / 文档块），`fetchHistory` 按 `file.id` 去重；未绑定 LLM 的拦截提前到上传前；重试沿用本轮附件。能力闸、4 张 / 4MB 上限、E2E 不降级全部原样。文档见 `docs/superpowers/specs/2026-10-22-atomic-image-send.md`。
+22. **弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态（d.26.1.7.0）**：`useModalA11y` 补上「打开期间屏蔽背景、关闭后归还焦点」。因本仓弹窗**无 portal**，采用**遮罩根起的兄弟逐个 `inert`**（只挂 inert 不补 aria-hidden）、**模块级引用计数**支持嵌套、`data-a11y-keep` 保留常驻通话浮层可点、非模态浮层（通知中心）传 `blockBackground:false` 保住「点外面关」；焦点归还有条件（焦点确实丢失才还，不抢关闭方主动安排的焦点）。`loadWorkspace` 加 `workspaceReady`/`workspaceError`，HomePage 首帧未落地显示加载骨架、失败显示「加载失败 + 重试」，**后台刷新失败不推翻已就绪**。文档见 `docs/superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md`。
 
 ## 3. 仓库结构与关键文件
 
@@ -121,10 +122,10 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 **当前直接待办**：
 
 1. **备份纪律已经落成脚本，但要每次真跑**：`deploy-bare.py backup` 做「停服 → tar → 起服 → SFTP 拷回本机 `.tmp/backups/` → 本机文件非空 + `/api/health` 复核」，d.25.1.7.0 发版前已实跑（3.7KB，含 `heming.db` 与 `-wal`）。剩下的不是开发项，是操作纪律：**没把库拷回本机就不许 install**（`docs/deploy.md` §6）。
-2. **弹窗背景 `inert` + 关闭后焦点归还**：骨架（`useModalA11y`）已到位，缺的是屏蔽背景与把焦点还回触发元素；需要先能实测读屏行为。`loadWorkspace` 的加载与失败态仍未展示。
+2. **弹窗屏蔽背景的真机读屏验证**：`inert` 屏蔽与焦点归还已实现并有属性/`activeElement` 层面的单测，但 **NVDA / VoiceOver 下的真实行为未验证**（jsdom 不实现 `inert`，测不出读屏是否真的跳过背景）。这是验证项，不是实现项。
 3. **语音重连的真机验证**：状态机与信令有单测，缺弱网 / TURN 环境证据。新裸机上 `HEMING_TURN_*` 尚未配置，群通话只有 STUN 路径可验。
 4. **记忆召回的可观测性**：先能归因「哪条被注入后模型用了 / 用了错的」，再谈个性化权重（现在只有可解释的确定性规则）。
-5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → `release/r26` 打 d.25.1.7.0，一次通过），下次继续递增目录；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
+5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 打 d.25.1.7.0，一次通过；本轮用 `release/r27`），下次继续递增目录；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
 6. **`docker/` 与 `docker-compose.yml` 已停用但未清理**：机器已重置且没装 Docker，发版走 `deploy/`。两处 nginx 配置仍互为出处（`/updates/` 顺序、WS 的 `= /api/ws`），要清理就一起清，见 `docs/deploy.md` §11。
 
 **二期主线**：
@@ -144,7 +145,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 - **视觉附件**：历史图片与**本轮同发的图片**都进提示词（同发不再依赖 WS 回声时机）；一次最多 4 张历史图 + 本轮 1 张、单张 ≤4MB。图片解密依赖本地 E2E 密钥，换设备/清缓存后旧图读不到。空草稿单发附件仍不触发生成（刻意）。
 - **Anthropic 不支持工具调用**：消息结构（content blocks）与 OpenAI 不同，绑 Anthropic 的智能体用不了 MCP/图表/self 工具。
 - **语音通话**：**断线重连已做**（逐路 ICE restart，`RECONNECT_MAX_RESTARTS=2`、`disconnected` 先观察 3s、新信令 `voice_call_reconnect`、状态仍是 active 加路数提示）；★ **真机弱网与 TURN 环境仍未验证**，预算数字是工程判断不是测量结果；群通话任一路彻底断开即整通结束（刻意）；通话中邀请新成员、群成员在线状态等未做；`GET /api/ice-servers` 无鉴权，配置 TURN 时凭据对未登录者可读。
-- **弹窗无障碍**：`useModalA11y` 已覆盖 Esc（嵌套栈顶独占）、焦点循环、打开即聚焦；★ **背景 `inert`/`aria-hidden` 与关闭后焦点归还原触发元素仍未做**——需要真实读屏验证，不凭代码猜。
+- **弹窗无障碍**：`useModalA11y` 覆盖 Esc（嵌套栈顶独占）、焦点循环、打开即聚焦、**打开期间屏蔽背景**（无 portal ⇒ 遮罩根起的兄弟逐个 `inert` + 模块级引用计数支持嵌套 + `data-a11y-keep` 保留常驻通话浮层 + 非模态浮层 `blockBackground:false`）、**关闭后焦点归还触发元素**（只在焦点确实丢失时还）。★ **未做 portal 改造**（要动 10 个挂载点与 z-index 继承，收益不抵风险）；★ **真实读屏（NVDA/VoiceOver）行为仍未验证**；弹窗打开时全局快捷键（`Alt+1–8`、`Ctrl+\`）仍生效——`inert` 不拦 JS 事件，与本特性正交、另议。
+- **主页首帧**：`workspaceReady`/`workspaceError` 只管**首帧**，加载骨架与失败重试条已上屏；后台刷新失败刻意不推翻已就绪（旧列表继续可用优于整页塌回重试态）。智能体动态一栏的数据来自 `loadAgentsRoster`，不共用这套口径。
 - **通知中心**：只做应用内（`heming.notifications.v1`，50 条 / 64KB 上限、无 TTL）；系统通知权限、免打扰、跨窗口聚合未做；HITL 待确认**不产生通知**，仍只在确认弹窗里等裁决。
 - **分发**：自动更新源是 HTTP（清单有 sha512，但首次安装包可被篡改）；无 CSP；未用 Electron `safeStorage` 加密落盘密钥；网页端未 HTTPS 化。
 - **数据边界**：记忆/技能/HITL 策略只在本机，换设备不跟随；新入群成员只能解密加入之后的消息。

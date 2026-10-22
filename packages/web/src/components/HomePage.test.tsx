@@ -63,6 +63,8 @@ describe("HomePage", () => {
       friends: [],
       incoming: [],
       messages: {},
+      workspaceReady: false,
+      workspaceError: null,
     });
   });
 
@@ -288,6 +290,41 @@ describe("HomePage", () => {
     render(<HomePage />);
     await act(async () => {}); // 冲刷挂载时 health/工作区加载的异步状态更新
     expect(screen.getByText("暂无会话，从工作区开始")).toBeInTheDocument();
+  });
+
+  it("首帧未落地时显示加载骨架，不拿「暂无会话」冒充没数据", () => {
+    // 三路请求全部挂住：workspaceReady 还是 false
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}));
+    render(<HomePage />);
+    expect(screen.getAllByRole("status", { name: "正在加载" }).length).toBeGreaterThan(0);
+    expect(screen.queryByText("暂无会话，从工作区开始")).not.toBeInTheDocument();
+    expect(screen.queryByText("没有待处理申请")).not.toBeInTheDocument();
+  });
+
+  it("首帧失败显示重试条；重试成功后回到正常空态", async () => {
+    let fail = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
+      if (fail) return Promise.reject(new Error("网络中断"));
+      if (url === "/api/conversations") return Promise.resolve(jsonRes([]));
+      if (url === "/api/friends") return Promise.resolve(jsonRes([]));
+      if (url === "/api/friends/requests") return Promise.resolve(jsonRes([]));
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+    render(<HomePage />);
+    await act(async () => {});
+
+    // 同一份首帧状态贴在两个区块上（最近会话 / 待处理），所以文案会重复出现
+    expect(screen.getAllByText("加载失败：网络中断").length).toBeGreaterThan(0);
+    expect(screen.queryByText("暂无会话，从工作区开始")).not.toBeInTheDocument();
+
+    fail = false;
+    fireEvent.click(screen.getAllByRole("button", { name: "重试" })[0]);
+    await act(async () => {});
+    expect(screen.queryByText("加载失败：网络中断")).not.toBeInTheDocument();
+    expect(screen.getByText("暂无会话，从工作区开始")).toBeInTheDocument();
+    expect(screen.getByText("没有待处理申请")).toBeInTheDocument();
   });
 
   it("主页含近 30 日用量热力图卡", async () => {

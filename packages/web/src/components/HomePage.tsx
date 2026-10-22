@@ -62,9 +62,51 @@ function fmtTime(iso: string): string {
     : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
 }
 
+/**
+ * 工作区首帧的两种非数据态：加载骨架 / 失败重试。
+ *
+ * 为什么单独一个组件：会话、智能体、待处理三块原来在 `[]` 上统一渲染「暂无 X」，
+ * 而首帧还没落地或首帧失败时列表同样是 `[]`——于是「正在加载」和「加载失败」
+ * 都伪装成了「你还没有数据」。空态文案只该在真的拿到过数据之后出现。
+ */
+function WorkspaceFallback({ error, onRetry, rows = 3 }: { error: string | null; onRetry: () => void; rows?: number }) {
+  if (error) {
+    return (
+      <div className="flex items-center justify-between gap-2 py-1.5 text-[12px]">
+        <span className="min-w-0 truncate text-[#b42318]">{`加载失败：${error}`}</span>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="shrink-0 rounded-md border border-[#e6e6e6] px-2 py-0.5 text-[11px] hover:bg-[#f7f7f7]"
+        >
+          重试
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div role="status" aria-label="正在加载" className="flex flex-col gap-2 py-1.5">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="h-7 animate-pulse rounded-lg bg-[#f4f4f4]" />
+      ))}
+    </div>
+  );
+}
+
 export function HomePage() {
   const user = useAuthStore((s) => s.user);
-  const { conversations, friends, incoming, messages, loadWorkspace, agents, agentsRoster, loadAgentsRoster } = useChatStore();
+  const {
+    conversations,
+    friends,
+    incoming,
+    messages,
+    loadWorkspace,
+    agents,
+    agentsRoster,
+    loadAgentsRoster,
+    workspaceReady,
+    workspaceError,
+  } = useChatStore();
   const openConversation = useUiStore((s) => s.openConversation);
   const { quota, records } = useTokenUsageStore();
   const [tab, setTab] = useState<"me" | "team" | "date">("me");
@@ -76,6 +118,11 @@ export function HomePage() {
     void loadWorkspace().catch((err) => console.warn("工作区数据加载失败", err));
     void loadAgentsRoster().catch(() => {});
   }, [loadWorkspace, loadAgentsRoster]);
+
+  // 重试只由失败条上的按钮触发：错误已经写进 store，这里吞掉 rejection 即可
+  const retryWorkspace = () => {
+    void loadWorkspace().catch(() => {});
+  };
 
   useEffect(() => {
     let alive = true;
@@ -283,7 +330,11 @@ export function HomePage() {
         <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
           <div className="mb-1.5 text-[12px] font-bold text-[#777]">最近会话</div>
           {recent.length === 0 ? (
-            <div className="py-3 text-[12px] text-muted">暂无会话，从工作区开始</div>
+            !workspaceReady ? (
+              <WorkspaceFallback error={workspaceError} onRetry={retryWorkspace} />
+            ) : (
+              <div className="py-3 text-[12px] text-muted">暂无会话，从工作区开始</div>
+            )
           ) : (
             recent.map((c) => {
               const list = messages[c.id] ?? [];
@@ -363,7 +414,11 @@ export function HomePage() {
           <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
             <div className="mb-1.5 text-[12px] font-bold text-[#777]">待处理</div>
             {incoming.length === 0 ? (
-              <div className="text-[12px] text-muted">没有待处理申请</div>
+              !workspaceReady ? (
+                <WorkspaceFallback error={workspaceError} onRetry={retryWorkspace} rows={2} />
+              ) : (
+                <div className="text-[12px] text-muted">没有待处理申请</div>
+              )
             ) : (
               incoming.map((r) => (
                 <div key={r.id} className="flex items-center gap-2 py-1 text-[12px]">

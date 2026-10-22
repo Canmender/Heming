@@ -178,6 +178,13 @@ interface ChatState {
   plainById: Record<string, Record<string, PlainEnvelope>>;
   /** 解不开（defer）的 e2e 消息 id：chaindist 到达/重新注入 handler 后重试。 */
   pendingE2e: Record<string, string[]>;
+  /**
+   * 工作区首帧是否成功拉到过。加载失败时列表就是空的，而空列表原本只渲染
+   * 「暂无会话」——把失败说成没数据，用户不知道该重试还是该去建会话。
+   */
+  workspaceReady: boolean;
+  /** 首帧失败原因（服务端/网络错误原文）；成功一次后清空。后台刷新失败不写这里。 */
+  workspaceError: string | null;
   loadWorkspace: () => Promise<void>;
   openDirect: (peerId: string) => Promise<string>;
   /** 开智能体一对一会话（幂等，服务端已存在则复用），返回会话 id。 */
@@ -347,13 +354,25 @@ export const useChatStore = create<ChatState>((set, get) => {
   openHandler: null,
   plainById: {},
   pendingE2e: {},
+  workspaceReady: false,
+  workspaceError: null,
   async loadWorkspace() {
-    const [conversations, friends, incoming] = await Promise.all([
-      fetchConversations(),
-      fetchFriends(),
-      fetchIncomingRequests(),
-    ]);
-    set({ conversations, friends, incoming });
+    // 首帧才管状态：之后的每次刷新（WS 事件、建会话后）都只更新数据，
+    // 失败也保留旧列表——为一次后台刷新失败把整页打回重试态是倒退。
+    const first = !get().workspaceReady;
+    try {
+      const [conversations, friends, incoming] = await Promise.all([
+        fetchConversations(),
+        fetchFriends(),
+        fetchIncomingRequests(),
+      ]);
+      set({ conversations, friends, incoming, workspaceReady: true, workspaceError: null });
+    } catch (err) {
+      if (first) {
+        set({ workspaceError: err instanceof Error && err.message ? err.message : "网络异常" });
+      }
+      throw err;
+    }
   },
   async openDirect(peerId) {
     const conv = await createConversation(peerId);
