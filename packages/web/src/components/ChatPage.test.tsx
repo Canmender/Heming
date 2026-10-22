@@ -160,7 +160,13 @@ async function sealAttachment(keyB64: string, plaintext: string): Promise<Blob> 
 function mockMessagesFetch(
   first: Message[],
   second?: Message[],
-  conv: { reads?: ReadState[][]; members?: Member[][]; contentFail?: boolean } = {},
+  conv: {
+    reads?: ReadState[][];
+    members?: Member[][];
+    contentFail?: boolean;
+    /** 附件上传（POST /api/files）的返回体；不配则维持 404（多数用例不上传）。 */
+    uploadMeta?: unknown;
+  } = {},
 ) {
   let m = 0;
   let r = 0;
@@ -206,6 +212,8 @@ function mockMessagesFetch(
         blob: async () => new Blob(["bin"]),
       } as unknown as Response);
     }
+    if (url === "/api/files" && conv.uploadMeta !== undefined)
+      return Promise.resolve(jsonRes(conv.uploadMeta, 201));
     return Promise.resolve(jsonRes({ error: "not found" }, 404));
   });
 }
@@ -1444,6 +1452,76 @@ describe("ChatPage", () => {
 
     expect(seen!.some((m) => m.contentParts)).toBe(false);
     expect(visionImageDataUrl).not.toHaveBeenCalled();
+  });
+
+  it("图片 + 文字同发：一条消息带正文与附件，模型当轮就看到图", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
+    });
+    // 回声抢在前面落库的同一张图（同 id）：同发后它不该再作为独立历史行重复送模型
+    const echoed: Message = {
+      ...msg("m9", "@和小鸣 这张图里有什么", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "@和小鸣 这张图里有什么",
+        file: { id: "f9", name: "cat.png", mime: "image/png", size: 4, key: "k9" },
+      },
+    };
+    mockMessagesFetch([echoed], undefined, {
+      members: [inGroupMembers],
+      reads: [[]],
+      uploadMeta: {
+        id: "f9",
+        owner: "alice",
+        name: "cat.png",
+        mime: "image/png",
+        size: 4,
+        updatedAt: "2026-10-17T00:00:00.000Z",
+      },
+    });
+    render(<ChatPage />);
+    await act(async () => {});
+    useLlmStore.setState({
+      profiles: [{ ...testProfile, model: "gpt-4o" }],
+      bindings: { "system-assistant": "p1" },
+      prompts: { "system-assistant": "你是和小鸣" },
+    });
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    fireEvent.click(screen.getByText("和小鸣"));
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
+      target: { value: "@和小鸣 这张图里有什么" },
+    });
+    captureFilePicker().pick("image/*", new File(["img"], "cat.png", { type: "image/png" }));
+
+    // ① 同发 = 一条消息同时带正文与附件（不是「正文一条 + 附件一条」两步）
+    const plain = await lastSealed(send);
+    expect(plain.kind).toBe("file");
+    expect(plain.text).toBe("@和小鸣 这张图里有什么");
+    expect((plain.file as { id: string }).id).toBe("f9");
+
+    // ② 模型这一轮就读到图：当前 user 行自带内容片
+    await waitFor(() => expect(seen).toBeDefined());
+    expect(seen!.at(-1)).toEqual({
+      role: "user",
+      content: "@和小鸣 这张图里有什么",
+      contentParts: [
+        { type: "text", text: "@和小鸣 这张图里有什么" },
+        { type: "image", mime: "image/png", data: "aW1n" },
+      ],
+    });
+    // ③ 同一轮不因「回声已入库」而重复出现
+    expect(seen!.filter((r) => r.content.includes("这张图里有什么"))).toHaveLength(1);
+    // ④ 同发即发送：草稿与 @ chip 一并清空
+    expect(screen.getByPlaceholderText("输入消息…")).toHaveValue("");
+    expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument();
   });
 
   it("I2 雷达@链路：attach 后（本群 members 出现自建 agent 行）该 agent 进入 @ 候选并可选", async () => {

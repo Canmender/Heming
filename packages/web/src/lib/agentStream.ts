@@ -81,6 +81,13 @@ export interface TriggerDeps {
    * 因此这里把 profile 透传下去，而不是先取一份与模型无关的历史。
    */
   fetchHistory: (profile: LlmProfile) => Promise<ChatMessage[]>;
+  /**
+   * 本轮 user 行的组装（可选）：图片/文档与正文同发时，触发端在这一行里带上文档文本
+   * 与图片内容片——刚上传的附件还没进历史（回声未到），不这样就得等下一轮。
+   * profile 决定图片能不能附（视觉能力按本智能体绑定的模型判定）。
+   * 缺省或抛错 → 纯文本 user 行，与没有本钩子时逐字等价。
+   */
+  buildUserTurn?: (text: string, profile: LlmProfile) => Promise<ChatMessage>;
   send: (e: WsClientEvent) => void;
   streamChat: typeof streamChat;
   onLocalDelta: (streamId: string, chunk: string) => void;
@@ -440,7 +447,16 @@ export function runAgentMentions(
               rows = history; // 压缩失败不阻断生成：回落原样历史
             }
           }
-          const prepared: ChatMessage[] = [...rows, { role: "user", content: userText }, ...extra];
+          /** 本轮 user 行：触发端可附文档文本与图片内容片；缺省/抛错回落纯文本行。 */
+          let userTurn: ChatMessage = { role: "user", content: userText };
+          if (deps.buildUserTurn) {
+            try {
+              userTurn = await deps.buildUserTurn(userText, profile);
+            } catch {
+              /* 当前轮附件组装失败不阻断生成：按纯文本行发 */
+            }
+          }
+          const prepared: ChatMessage[] = [...rows, userTurn, ...extra];
           if (prompt) prepared.unshift({ role: "system", content: prompt });
           return prepared;
         };

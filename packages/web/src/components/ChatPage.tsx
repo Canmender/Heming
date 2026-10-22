@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import type { Conversation, Message } from "@heming/shared";
+import type { Conversation, Message, MessagePayload } from "@heming/shared";
 import {
   activeConversationsOf,
   useChatStore,
@@ -36,7 +36,7 @@ import {
   type PlainEnvelope,
   type SealedEnvelope,
 } from "../lib/e2eSession.js";
-import { streamChat } from "../lib/llmClient.js";
+import { streamChat, type ChatMessage } from "../lib/llmClient.js";
 import { resolveCapability } from "../lib/modelCaps.js";
 import {
   attachImageParts,
@@ -99,6 +99,9 @@ import { capabilityNotice } from "../lib/capabilityNotice.js";
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
 export const NO_E2E_NOTICE = "当前环境不支持端到端加密，请使用桌面端或 HTTPS";
+
+/** 与正文同发的本轮附件：图片转内容片、文档拼正文，重试时按它复原同一轮。 */
+type TurnAttachment = NonNullable<MessagePayload["file"]>;
 
 /**
  * HITL 闸门（工具执行前人工确认）的**模块级单例**。
@@ -547,8 +550,10 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   /** 触发句柄（convId → 集合）：「中断」只 abort 当前会话的流；卸载时全部中止（关页不空烧 token）。 */
   const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
-  /** 本机流元数据（streamId → 触发上下文）：onLocalDelta 回填 agentId、重试取原触发文本。 */
-  const streamMeta = useRef<Record<string, { agentId: string; name: string; text: string }>>({});
+  /** 本机流元数据（streamId → 触发上下文）：onLocalDelta 回填 agentId、重试取原触发文本与本轮附件。 */
+  const streamMeta = useRef<
+    Record<string, { agentId: string; name: string; text: string; attachment?: TurnAttachment }>
+  >({});
   /** 任务区的流归属（streamId → taskId）：工具步骤与终态写进对应任务记录。 */
   const streamTaskRef = useRef<Record<string, string>>({});
   /** 从任务区投递进来、等连接就绪后自动发送的任务（一次消费一条）。 */
@@ -1178,11 +1183,14 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
    * 启动一次 mention 触发（发送成功 / 错误行重试共用）：
    * deps 全部从 stores + WS 句柄组装；fetchHistory 映射 role 并剔掉刚发出的这条
    * （服务端很可能已入库，否则当前 user 轮会在提示词里出现两遍）。
+   * `attachment`：与正文同发的本轮附件——它不进历史，而是直接拼进当前 user 轮
+   * （图片内容片 / 文档文本），否则刚上传的附件要等下一轮才进模型。
    */
   const startRun = (
     mentions: { agentId: string; name: string }[],
     text: string,
     taskId?: string,
+    attachment?: TurnAttachment,
   ) => {
     // 无 subtle：触发端无法封 chunk/finish——拦截不启动（硬验收⑤：不降级明文回复）
     if (!hasSubtle()) {
@@ -1204,6 +1212,9 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
         const images: VisionImageSlot[] = [];
         for (const m of msgs) {
           if (m.recalledAt != null) continue;
+          // 本轮同发的附件不进历史：它由 buildUserTurn 拼在当前 user 轮上，
+          // 回声若已入库会在这里出现第二份（同一张图发两遍）。
+          if (attachment && m.payload.file?.id === attachment.id) continue;
           if (m.enc === "e2e") {
             const p = plainOf[m.id];
             if (!p) continue; // 占位（无法解密）→ 不外发模型供应商
@@ -1231,6 +1242,26 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
         const last = rows[rows.length - 1];
         if (last && last.role === "user" && last.content === text) rows.pop();
         return attachImageParts(rows, images, visionImageDataUrl);
+      },
+      // 本轮附件拼进当前 user 轮（与历史行的口径一致：文档文本跟在正文后、图片走内容片）。
+      // 附件此刻多半还没进历史（WS 回声未到），走历史就得等下一轮才让模型看到图。
+      buildUserTurn: async (turnText, profile) => {
+        if (!attachment) return { role: "user", content: turnText };
+        const docText = attachment.text;
+        const content = docText
+          ? `${turnText}\n\n${docFileBlock(attachment.name, docText)}`
+          : turnText;
+        const row: ChatMessage = { role: "user", content };
+        // 与历史同一条能力闸：非视觉模型不解密读图（判定与丢弃同源）。
+        if (resolveCapability(profile).supportsVision && isVisionImage(attachment)) {
+          const data = await visionImageDataUrl(attachment);
+          if (data)
+            row.contentParts = [
+              { type: "text", text: content },
+              { type: "image", mime: attachment.mime, data },
+            ];
+        }
+        return row;
       },
       send: (e) => wsHandleRef.current?.send(e),
       streamChat,
@@ -1290,7 +1321,7 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
         });
       },
       onStart: (streamId, mention) => {
-        streamMeta.current[streamId] = { ...mention, text };
+        streamMeta.current[streamId] = { ...mention, text, attachment };
         if (taskId) {
           streamTaskRef.current[streamId] = taskId;
           useTaskStore.getState().bindStream(taskId, streamId);
@@ -1556,7 +1587,7 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
     removeStream(streamId);
     delete streamMeta.current[streamId];
     delete streamTaskRef.current[streamId];
-    startRun([{ agentId: meta.agentId, name: meta.name }], meta.text, taskId);
+    startRun([{ agentId: meta.agentId, name: meta.name }], meta.text, taskId, meta.attachment);
   };
 
   // 切会话清 @ 选择态 + 输入区浮层：chip/picker/锁/表情/语音都是会话级（ChatPage 常驻不重挂），
@@ -1911,7 +1942,7 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
   };
 
   /**
-   * 发送一条文本消息（聊天输入栏与任务区自动执行共用）。
+   * 发送一条消息（聊天输入栏与任务区自动执行共用；附件入口带 attachment 走同一条）。
    *
    * 返回失败原因而不是只设提示：任务区自动执行失败时要把任务收口成「失败」，
    * 光靠 sendNotice 的异步 state 拿不到。
@@ -1921,6 +1952,7 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
     mentions: { agentId: string; name: string }[],
     replyTo: Message | null,
     taskId?: string,
+    attachment?: TurnAttachment,
   ): Promise<{ ok: true } | { ok: false; error: string }> => {
     const text = rawText.trim();
     if (!text) return { ok: false, error: "消息为空" };
@@ -1966,15 +1998,16 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
     }
     // 正文/mentions/replyTo 全进密文（§3.3），事件 payload 只留 {text:""} 占位
     const plain: PlainEnvelope = {
-      kind: "text",
+      kind: attachment ? "file" : "text",
       text,
+      ...(attachment ? { file: attachment } : {}),
       ...(mentions.length ? { mentions } : {}),
       ...(replyTo ? { replyTo: replyTo.id } : {}),
     };
     // 拦截/封失败：草稿与浮层状态原样保留
     if (!(await sealAndSend(plain))) return { ok: false, error: "消息发送失败" };
     // 发送成功即触发各 mention 的本机流式生成（失败/中断由 WS 三事件回声收口）
-    if (mentions.length) startRun(mentions, text, taskId);
+    if (mentions.length) startRun(mentions, text, taskId, attachment);
     return { ok: true };
   };
 
@@ -2072,7 +2105,9 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
     input.click();
   };
 
-  /** 附件发送：先传共享库拿 meta，再封 file 信封经 WS 发（text 空串，气泡只渲染附件段）。
+  /** 附件发送：先传共享库拿 meta，再封 file 信封经 WS 发（无正文时 text 空串，气泡只渲染附件段）。
+   *  **输入框里有正文就同发**：一条消息带 text + file，并当场触发 @ 到的智能体——
+   *  拆成两条会让刚上传的图片只落到历史里，等下一轮才进模型，这一轮的提问也就问给了空气。
    *  无 subtle 在上传前拦截——不白跑一次上传（硬验收⑤：附件/语音全路径不降级）。 */
   const sendFile = async (f: File) => {
     if (!hasSubtle()) {
@@ -2087,6 +2122,16 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
     if (f.size > MAX_UPLOAD) {
       setSendNotice("文件需小于 6MB");
       return;
+    }
+    const draftText = draft.trim();
+    // 同发前先把「@ 了没绑模型的智能体」拦在上传之前：上传要几秒，
+    // 传完才被 submitMessage 拦下等于白传一个占配额又发不出去的孤儿文件。
+    if (draftText) {
+      const unbound = effectiveMentions.find((m) => !resolveProfile(m.agentId));
+      if (unbound) {
+        setSendNotice(`${unbound.name} 未绑定 LLM 连接，请先在设置页配置`);
+        return;
+      }
     }
     try {
       // 解析不放"正在读取"这类提示：它通常几百毫秒就完，
@@ -2109,34 +2154,46 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
         setSendNotice("已切换会话，文件未发送");
         return;
       }
-      const ok = await sealAndSend({
-        kind: "file",
-        text: "",
-        // 消息侧保留原名/原 mime/原大小（气泡按它路由与展示），fileKey 随消息进密文；
-        // meta 是服务端密文形态（.enc 名 + octet-stream），仅取 id。
-        // text：解析出的文档内容，随文件一起进密文——服务端始终拿不到明文。
-        file: {
-          id: meta.id,
-          name: f.name,
-          mime,
-          size: f.size,
-          key: meta.key,
-          ...(doc?.ok && doc.text ? { text: doc.text } : {}),
-        },
-      });
-      if (ok) {
-        // 图片没有文档文本，成功时保留「模型不支持视觉」的提示——
-        // 这一条比「已发送」更有用，用户据此决定要不要换模型或改问法。
-        setSendNotice(
-          !doc
-            ? visionNotice
-            : doc.ok
-              ? doc.truncated
-                ? `已发送；内容较长，模型只读到前 ${doc.chars} 字`
-                : null
-              : `已发送；内容未能提取：${doc.error ?? "未知原因"}`,
+      // 消息侧保留原名/原 mime/原大小（气泡按它路由与展示），fileKey 随消息进密文；
+      // meta 是服务端密文形态（.enc 名 + octet-stream），仅取 id。
+      // text：解析出的文档内容，随文件一起进密文——服务端始终拿不到明文。
+      const file: TurnAttachment = {
+        id: meta.id,
+        name: f.name,
+        mime,
+        size: f.size,
+        key: meta.key,
+        ...(doc?.ok && doc.text ? { text: doc.text } : {}),
+      };
+      // 解析/能力提示与发送结果共用一条口径：图片没有文档文本，成功时保留
+      // 「模型不支持视觉」的提示——这一条比「已发送」更有用，用户据此决定要不要换模型或改问法。
+      const notice = !doc
+        ? visionNotice
+        : doc.ok
+          ? doc.truncated
+            ? `已发送；内容较长，模型只读到前 ${doc.chars} 字`
+            : null
+          : `已发送；内容未能提取：${doc.error ?? "未知原因"}`;
+      if (draftText) {
+        // 同发：正文 + 附件进同一条 file 消息，走文本消息的全套拦截与触发路径
+        const result = await submitMessage(
+          draftText,
+          effectiveMentions,
+          replyTarget,
+          undefined,
+          file,
         );
+        if (!result.ok) return; // submitMessage 已给可见提示，草稿原样保留
+        setDraft("");
+        setSelectedMentions([]);
+        setPicker(null);
+        setTokenLock(false);
+        setReplyTarget(null);
+        setSendNotice(notice);
+        return;
       }
+      const ok = await sealAndSend({ kind: "file", text: "", file });
+      if (ok) setSendNotice(notice);
     } catch (err) {
       setSendNotice(`上传失败：${(err as Error).message}`);
     }

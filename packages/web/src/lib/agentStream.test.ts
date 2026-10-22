@@ -51,6 +51,43 @@ describe("runAgentMentions", () => {
     expect(prompts.at(-1)).toEqual({ role: "user", content: "hi" });
   });
 
+  it("buildUserTurn：当前 user 行由触发端组装（本轮附件带内容片进这一行）", async () => {
+    const { deps } = makeDeps({
+      buildUserTurn: async (text) => ({
+        role: "user",
+        content: text,
+        contentParts: [
+          { type: "text", text },
+          { type: "image", mime: "image/png", data: "aW1n" },
+        ],
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "看下这张图", deps);
+    const prompts = (deps.streamChat as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(prompts.at(-1)).toEqual({
+      role: "user",
+      content: "看下这张图",
+      contentParts: [
+        { type: "text", text: "看下这张图" },
+        { type: "image", mime: "image/png", data: "aW1n" },
+      ],
+    });
+  });
+
+  it("buildUserTurn 抛错 → 回落纯文本 user 行，不阻断生成", async () => {
+    const { send, deps } = makeDeps({
+      buildUserTurn: async () => {
+        throw new Error("附件读不了");
+      },
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    const prompts = (deps.streamChat as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(prompts.at(-1)).toEqual({ role: "user", content: "hi" });
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agent_finish", text: "你好" }),
+    );
+  });
+
   it("生成失败但已有部分 → finish(partial) + error(aborted/provider_error)", async () => {
     const { send, deps } = makeDeps({
       streamChat: vi.fn(async (_p, _m, o: { onDelta: (t: string) => void }) => {
