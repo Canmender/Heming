@@ -63,6 +63,7 @@ tar --exclude=node_modules --exclude=.git --exclude=.superpowers \
     --exclude=release --exclude=.claude --exclude=.tmp --exclude=.workbuddy \
     --exclude='packages/desktop/runtime' \
     --exclude='packages/desktop/web-dist' \
+    --exclude='@hemingdesktop' \
     -czf /tmp/heming.tar.gz .
 
 # 3) 两条校验，一条都不能省
@@ -75,6 +76,12 @@ tar -tzf /tmp/heming.tar.gz | grep -c "packages/server/dist/"
 ```
 
 ①返回非 0 时**先看具体是哪几行**再决定：`tar -tzf /tmp/heming.tar.gz | grep -E "……"`。目录名命中不等于有问题（例如 `.workbuddy/` 只是几个 md），关键是**别漏排大体积产物**。包体积 **5MB 量级**（含前端产物）是预期的，变成几十 MB 就是排除表漏了。
+
+> ★ **排除项必须用裸段名，不能带 `./` 前缀**（d.30 实测踩过）：
+> `--exclude='./node_modules'` 这种写法**一条都不生效**——tar 的 `--exclude` 匹配的是路径段名，
+> 不认 `./` 前缀。包会从 5.6MB 撑到 **2.19GB**（把 `packages/desktop/release` 里的历史安装包全卷进去），
+> 而上传命令照样「成功」，要等远端解包才炸。
+> 打完先看体积：5MB 量级才对；几十 MB 以上先查排除表，别急着上传。
 
 上传：本机没有 `sshpass`/`plink`，密码认证只能走 paramiko。`.superpowers/deploy-bare.py` 是分步编排（凭据从同目录 `deploy-d21.py` 读，不入库、不回显），各步可单独重跑：
 
@@ -262,12 +269,20 @@ curl -sI http://47.92.39.184/updates/latest.yml | head -3
 curl -s  http://47.92.39.184/updates/latest.yml | head -8
 ```
 
-**产物不在默认目录时要给 `HEMING_RELEASE_DIR`**。`dist:desktop` 反复在 `win-unpacked/resources/app.asar` 上撞 `EBUSY`（根因未查，见 HANDOFF §5 待办），**已固化成惯例：每版换一个新的输出目录**——r25 打 d.25.1.7.0、r26/r27/r28 依次到 r29 打 d.28.1.7.0、r30 打 d.29.1.7.0（均一次通过）、**r31 是一次被中止的尝试（产出的安装包内嵌旧产物，没发布就废掉了）、r32 打 d.29.1.8.0**，下一版 **d.30 用 `release/r33`**。打包与发布两处必须指同一目录（`build-desktop.mjs` 与 `publish-update.sh` 都读 `HEMING_RELEASE_DIR`）：
+**产物不在默认目录时要给 `HEMING_RELEASE_DIR`**。`dist:desktop` 反复在 `win-unpacked/resources/app.asar` 上撞 `EBUSY`（根因未查，见 HANDOFF §5 待办），**已固化成惯例：每版换一个新的输出目录**——r25 打 d.25.1.7.0、r26/r27/r28 依次到 r29 打 d.28.1.7.0、r30 打 d.29.1.7.0（均一次通过）、**r31 是一次被中止的尝试（产出的安装包内嵌旧产物，没发布就废掉了）、r32 打 d.29.1.8.0、r33 打 d.30.1.8.0（一次通过）**，下一版 **d.31 用 `release/r34`**。打包与发布两处必须指同一目录（`build-desktop.mjs` 与 `publish-update.sh` 都读 `HEMING_RELEASE_DIR`）：
 
 ```bash
-HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r33 pnpm --filter @heming/desktop dist
-HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r33 bash scripts/publish-update.sh --dry-run
+HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r34 pnpm --filter @heming/desktop dist
+HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r34 bash scripts/publish-update.sh --dry-run
 ```
+
+> **d.30 实测的两个坑**：
+> ① `tar --exclude=./node_modules` 这种带 `./` 前缀的写法**全部失效**（GNU tar 的 `--exclude` 匹配路径段名，
+>    不认 `./` 前缀）——包会从 5.6MB 撑到 **2.19GB**（把 `packages/desktop/release` 的历史安装包全卷进去）。
+>    必须用**裸段名**（`--exclude=node_modules --exclude=release …`），并额外排掉 `@hemingdesktop`。
+>    打完先跑 deploy.md §2 的两条校验（体积与清单）再上传。
+> ② 同日二次发版会覆盖上午那份备份（备份名按日期生成）——发版前先把新备份改名留档
+>    （本轮存为 `heming-data-2026-10-22-d30.tar.gz`）。
 
 ### 四个必须知道的坑
 
