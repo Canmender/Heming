@@ -2,7 +2,7 @@
 
 - 日期：2026-10-21
 - 当前版本：`d.25.1.6.0`
-- 当前 main：以 `git log -1` 为准（2026-10-21 校准为 `2a61677`）
+- 当前 main：以 `git log -1` 为准（2026-10-21 校准为 `204a592`）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
@@ -22,10 +22,10 @@
 | 项 | 状态 |
 |---|---|
 | 版本 | `d.25.1.6.0`（5 段，五包同步） |
-| main | `2a61677`；工作区含 d.22 任务区、d.23/d.24/d.25 缺口补全未提交改动 |
+| main | `204a592`（d.25.1.6.0，含 d.22 任务区与 d.23/d.24/d.25 缺口补全，150 文件已提交，工作区干净） |
 | 测试 | 2026-10-21 实跑：`pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿（exit 0）；web 106 文件 / 1645 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 18 文件全通过 |
 | 线上 | `http://47.92.39.184/api/health` 返回 `{"ok":true}`；交付记录称 d.19 尚未重新部署，部署前先确认线上版本 |
-| 安装包 | 磁盘最新为 `和鸣 Setup d.21.1.6.0.exe`（170MB，10-21 13:17）；**d.22–d.25 均未出包**，界面与本地包能力要随包分发得重新 `dist:desktop` |
+| 安装包 | 磁盘最新为 `和鸣 Setup d.25.1.6.0.exe`（171MB，10-21 23:27，在 `packages/desktop/release/r25/`）+ `latest.yml` + blockmap，**尚未发布到 `/updates`**；`release/` 根目录里的 d.21 包是上一版 |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` 可访问（HTTP 200） |
 | 账号 | `admin/admin`、`zhoukang/zhoukang`（服务端 `HEMING_SEED_USERS` 播种；注册默认关闭） |
 
@@ -105,7 +105,7 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 - **版本门禁**：每次修改/修复/重构都要 bump；`node scripts/bump-version.mjs auto <fix|feature|breaking|build>` 一次同步五个 `package.json`；补 CHANGELOG 后跑 `node scripts/build-changelog.mjs`。版本号只增不减。
 - **视觉规范**：无 emoji 图标（细线 SVG 1.5px，emoji 仅作消息内容）；分割线浅灰 `#e6e6e6`/`#ececec`；界面 chrome 不显示产品名「和鸣」；中文文案。
 - **`skipLibCheck: true` 的坑**：`.d.ts` 内重复/冲突声明会被静默跳过。新增 `declare global` / `interface Window` 前先 `grep -rn "interface Window" packages/web/src`；怀疑类型问题时用 `tsc -p packages/web/tsconfig.json --noEmit --skipLibCheck false` 复验。
-- **部署流程**：见 `docs/deploy.md`；本地 tar（排除 node_modules/.git/.superpowers/dist/.worktrees/data/release/.claude/@hemingdesktop/.tmp/packages/desktop/runtime）→ 上传 `/root/heming` → `docker compose -p heming build && up -d` → 冒烟验证。SSH 脚本在 `.superpowers/*.py`（gitignored，含凭据）。
+- **部署流程**：见 `docs/deploy.md`；**前端先在本地 `pnpm --filter @heming/web build`，产物随包上传**（云端 2C2G 跑不动 vite，见 §12），本地 tar（排除 node_modules/.git/.superpowers/.worktrees/data/release/.claude/.tmp/.workbuddy/packages/desktop/{runtime,web-dist}/packages/{server,shared}/dist，**没有裸 `--exclude=dist`**）→ 上传 `/root/heming` → `docker compose -p heming build && up -d` → 冒烟验证。SSH 脚本在 `.superpowers/*.py`（gitignored，含凭据）。
 - **发布是两处**：云端（浏览器）与桌面端（嵌入产物随安装包）。只发一处会出现新旧界面并存；桌面端之后由自动更新分发。
 - **并行会话**：本项目多个会话并行，共用 `D:\Heming` 主检出并直接提交 main。改共享文件前先 `git status` + 看目标文件是否有在途改动；小步提交，别把改动长时间留在工作区。
 
@@ -113,12 +113,13 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 **当前直接待办**：
 
-1. **云端部署 d.25**：本轮改动影响前端展示，需要重新部署（桌面端还需重新出包，否则嵌入产物仍是旧界面）。部署动作会改动共享服务器，执行前需用户确认。
-2. **重打安装包**：`pnpm -w run dist:desktop`（会先构建嵌入 web 产物）。
-3. **视觉附件补完**：当前只把历史消息里的图片带进提示词；本轮新上传的图片需等下一轮才进模型，可考虑「图片 + 文字同发」的原子发送。
-4. **弹窗背景 `inert` + 关闭后焦点归还**：骨架（`useModalA11y`）已到位，缺的是屏蔽背景与把焦点还回触发元素；需要先能实测读屏行为。`loadWorkspace` 的加载与失败态仍未展示。
-5. **语音重连的真机验证**：状态机与信令有单测，缺弱网 / TURN 环境证据。
-6. **记忆召回的可观测性**：先能归因「哪条被注入后模型用了 / 用了错的」，再谈个性化权重（现在只有可解释的确定性规则）。
+1. **发布更新源**：d.25 安装包已在本机（见 §2「安装包」），还差 `bash scripts/publish-update.sh`（需 `HEMING_SSH_PWD`，先 `--dry-run`）。
+2. **视觉附件补完**：当前只把历史消息里的图片带进提示词；本轮新上传的图片需等下一轮才进模型，可考虑「图片 + 文字同发」的原子发送。
+3. **弹窗背景 `inert` + 关闭后焦点归还**：骨架（`useModalA11y`）已到位，缺的是屏蔽背景与把焦点还回触发元素；需要先能实测读屏行为。`loadWorkspace` 的加载与失败态仍未展示。
+4. **语音重连的真机验证**：状态机与信令有单测，缺弱网 / TURN 环境证据。
+5. **记忆召回的可观测性**：先能归因「哪条被注入后模型用了 / 用了错的」，再谈个性化权重（现在只有可解释的确定性规则）。
+6. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。当前只是换输出目录绕过（`release/r25`），根因未查——下次打包若复用 `release/` 会再撞上。
+7. **轻量服务器的内存上限**：2C2G 无 swap，`docker builder du` / `docker system df` 都能把机器压失联（本轮实测两次，只能控制台重启）。要么常备 swap，要么走 `docs/deploy.md` §12 的「本机构建镜像 + `docker save | docker load`」路线把 api 也移出云端。
 
 **二期主线**：
 

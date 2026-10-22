@@ -1,39 +1,17 @@
 # syntax=docker/dockerfile:1
-# 和鸣 Web 镜像：构建阶段跑 vite build，运行阶段用 nginx 托管静态页并反代 /api。
-# 构建上下文 = 仓库根目录（docker-compose.yml: context: . + dockerfile: docker/web.Dockerfile）。
-
-# ---------------------------------------------------------------------------
-# build
-# ---------------------------------------------------------------------------
-FROM node:24-alpine AS build
-
-# 版本与 api.Dockerfile 保持一致（理由见该文件注释）
-RUN npm install -g pnpm@10.33.2
-
-WORKDIR /app
-
-# 清单先拷以命中层缓存；package.json 全带，配合 --frozen-lockfile 校验
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
-COPY packages/shared/package.json packages/shared/package.json
-COPY packages/server/package.json packages/server/package.json
-COPY packages/web/package.json packages/web/package.json
-COPY packages/desktop/package.json packages/desktop/package.json
-
-# web 连同其工作区依赖（shared）安装；vite/tsc 等 devDependencies 必须保留
-RUN pnpm install --frozen-lockfile --filter @heming/web...
-
-# 不注入 VITE_API_BASE：浏览器访问 http://47.92.39.184 时页面与 API 同源
-# （都经 nginx:80），空 base 即走同源相对路径 + nginx 反代；只有桌面壳
-# （file://）才需要绝对地址，见 docs/deploy.md「同源决策」。
-COPY packages/shared packages/shared
-COPY packages/web packages/web
-RUN pnpm --filter @heming/shared build \
- && pnpm --filter @heming/web build
-
-# ---------------------------------------------------------------------------
-# run：nginx 托管静态文件 + 反代 /api 与 WS
-# ---------------------------------------------------------------------------
-FROM nginx:alpine AS run
+# 和鸣 Web 镜像：**这里不构建前端**。
+#
+# 为什么不构建（实测代价）：目标机是 2 核 2G 的轻量服务器，`pnpm --filter @heming/web build`
+# （tsc + vite）峰值 1.0–1.4G，加上宿主、docker daemon 与 buildkit 已占的 ~500M，
+# 就是「勉强能过、随时翻车」。2026-10-21 部署 d.25 时连撞两次：机器整机失联
+# （ICMP 通、TCP 能连但 60 秒不回一个字节，异网探针 522），只能控制台重启。
+#
+# 所以现在由开发机跑 `pnpm --filter @heming/web build`，产物 `packages/web/dist`
+# 随部署包一起上传，本镜像只做 nginx 托管——云端构建从分钟级降到秒级，且不吃内存。
+# 打包步骤与排除表见 docs/deploy.md §2 与 §12。
+#
+# 缺 dist 时 `COPY` 直接失败并指出路径，不会静默产出空站点镜像。
+FROM nginx:alpine
 
 COPY docker/web-nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/packages/web/dist /usr/share/nginx/html
+COPY packages/web/dist /usr/share/nginx/html

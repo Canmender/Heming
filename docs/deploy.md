@@ -30,45 +30,64 @@ api 服务本身**不向公网发布端口**（compose 内网互通）；对外�
 
 ## 2. 上传代码（本地打包 → 服务器解包）
 
-本地（排除依赖与版本库，镜像内会重建依赖）：
+本地（排除依赖与版本库；**前端产物也在本地构建好一起上传**，理由见 §12）：
 
 ```bash
+# 1) 先出前端产物——web 镜像现在只是 nginx + 静态文件，云端不再跑 vite
+pnpm --filter @heming/web build      # 产出 packages/web/dist（约 12MB）
+
+# 2) 打包
 # 在仓库根目录（data/ 是本地开发库，不上传——服务器用数据卷）
-# 注意：tar 不认 .gitignore，必须逐个排除构建产物。两个易漏的：
-#   web-dist        —— GNU tar 的 `--exclude=dist` 只匹配名为 dist 的路径段，
-#                      不会连带排掉 packages/desktop/web-dist（嵌入客户端用的产物，约 380KB）
-#   @hemingdesktop  —— electron-builder 偶发落在仓库根的产物目录（约 260MB！）
-#   .tmp            —— 本地临时目录（缓存/部署包/截图，含 electron 与 builder 缓存，可达 GB级）
-#   .workbuddy      —— 本地项目记忆目录，属机器本地状态，不需要上云
+#
+# 排除表**逐项写全路径**，别再用裸 `--exclude=dist`：
+#   tar 的 --exclude 只匹配路径段名，`--exclude=dist` 会把唯一必须上传的
+#   `packages/web/dist` 一起排掉（云端就得到一个空站点），
+#   而它本来要排的 `packages/desktop/web-dist` 反倒排不掉。
+# 其余几个易漏的大体积产物：
+#   packages/desktop/web-dist —— 桌面壳嵌入用产物（构建时注入了 VITE_API_BASE，
+#                     绝不能进云端镜像）
 #   packages/desktop/runtime —— 内置 Python + MCP 运行时（约 378MB），
-#                     只打进安装包，云端构建镜像完全不需要它。
-#                     **必须写完整路径**：`--exclude=runtime` 匹配不到它
-#                     （tar 的 --exclude 只匹配路径段名与 glob，不含父目录上下文）
+#                     只打进安装包，云端不需要；`--exclude=runtime` 匹配不到它
+#   @hemingdesktop  —— electron-builder 偶发落在仓库根的产物目录（约 260MB！）
+#   .tmp            —— 本地临时目录（缓存/部署包/截图，可达 GB级）
+#   .workbuddy      —— 本地项目记忆目录，属机器本地状态，不需要上云
+#
+# 产物**写到树外**（/tmp）：`-czf heming.tar.gz .` 会把正在增长的 tar 自己
+# 卷进归档，GNU tar 报 `tar: .: file changed as we read it` 并以 exit 1 结束。
 tar --exclude=node_modules --exclude=.git --exclude=.superpowers \
-    --exclude=dist --exclude=web-dist --exclude=@hemingdesktop \
     --exclude=.worktrees --exclude=data \
     --exclude=release --exclude=.claude --exclude=.tmp --exclude=.workbuddy \
     --exclude='packages/desktop/runtime' \
-    -czf heming.tar.gz .
-scp heming.tar.gz root@47.92.39.184:~/
+    --exclude='packages/desktop/web-dist' \
+    --exclude='packages/server/dist' --exclude='packages/shared/dist' \
+    -czf /tmp/heming.tar.gz .
+scp /tmp/heming.tar.gz root@47.92.39.184:~/
 
 # 服务器解包
 ssh root@47.92.39.184
 mkdir -p ~/heming && tar -xzf ~/heming.tar.gz -C ~/heming && cd ~/heming
 ```
 
-> **打包后必做洁净度校验**（曾经因为漏排 `@hemingdesktop` 把上传包从 0.7MB 变成 111MB）：
-> `tar -tzf heming.tar.gz | grep -cE "web-dist|node_modules|\.superpowers|@hemingdesktop|release/|\.tmp/|\.workbuddy"` 应为 `0`；
-> 包体积应在 1MB 量级。
+> **打包后必做两条校验**（曾经因为漏排 `@hemingdesktop` 把上传包从 0.7MB 变成 111MB）：
 >
-> 校验返回非0 时**先看具体是哪几行**再决定：`tar -tzf heming.tar.gz | grep -E "……"`。
+> ```bash
+> # ① 不该有的东西：结果必须为 0
+> tar -tzf /tmp/heming.tar.gz | grep -cE \
+>   "node_modules|\.superpowers|@hemingdesktop|release/|\.tmp/|\.workbuddy|packages/desktop/(runtime|web-dist)|packages/(server|shared)/dist"
+> # ② 必须有的东西：结果必须为 1（空 web 镜像不会报错，只会线上白屏——比缺文件更难查）
+> tar -tzf /tmp/heming.tar.gz | grep -c "packages/web/dist/index.html"
+> ```
+>
+> 包体积从过去的 1MB 量级变成 **5MB 量级**（多了前端产物），这是预期的。
+>
+> ①返回非 0 时**先看具体是哪几行**再决定：`tar -tzf /tmp/heming.tar.gz | grep -E "……"`。
 > 目录名命中不等于有问题（例如 `.workbuddy/` 只是几个 md），关键是**别漏排大体积产物**。
 
 ## 3. 构建与启动
 
 ```bash
 cd ~/heming
-docker compose build
+docker compose build       # api 仍在云端构建；web 只是 COPY 产物，秒级
 docker compose up -d
 docker compose ps          # api healthy、web running 即就绪
 ```
@@ -162,7 +181,7 @@ docker compose -p heming start api
 
 ## 7. CORS 与同源决策
 
-- **同源（默认，Docker 部署）**：浏览器访问 `http://47.92.39.184` 时，页面（nginx:80）与 API（nginx 反代 `/api` → api:8787）**同源**，WS 走 `ws://47.92.39.184/api/ws` 同样被 nginx 反代。因此 **web 镜像构建时不注入 `VITE_API_BASE`**（留空 = 同源相对路径），配置最少、不依赖任何跨域。
+- **同源（默认，Docker 部署）**：浏览器访问 `http://47.92.39.184` 时，页面（nginx:80）与 API（nginx 反代 `/api` → api:8787）**同源**，WS 走 `ws://47.92.39.184/api/ws` 同样被 nginx 反代。因此**本地构建 web 产物时不注入 `VITE_API_BASE`**（留空 = 同源相对路径），配置最少、不依赖任何跨域。
 - **CORS 兜底**：服务端仍带最小 CORS 头（`Allow-Origin: *`、预检 `OPTIONS` 直接 204），用于直连场景（如本机开发的 web 连远程 api、或桌面壳 file:// 页面）。鉴权是 Bearer token 而非 cookie，`*` 不带来凭据风险；未引入 `cors` 依赖，10 行手写。
 - **`VITE_API_BASE` 只服务桌面壳**（`file://` 无同源可用），给桌面打包时单独注入绝对地址即可，与本套 Docker 部署互不影响。
 
@@ -200,9 +219,9 @@ docker compose down            # 停（保留 heming-data 卷）
 
 | | 云端（本文件 §2–§3） | 桌面嵌入（`pnpm -w run dist:desktop`） |
 |---|---|---|
-| 命令 | `docker compose build`（镜像内构建） | `node scripts/build-desktop-web.mjs` 预构建 |
+| 命令 | `pnpm --filter @heming/web build` 出产物 → `docker compose build`（只 COPY，不在云端跑 vite，见 §12） | `node scripts/build-desktop-web.mjs` 预构建 |
 | `VITE_API_BASE` | **不注入**（同源相对路径） | **注入**云端绝对地址（跨域，靠服务端 CORS `*`） |
-| 产物落点 | web 镜像内 nginx 目录 | `packages/desktop/web-dist/` → 打包进 `resources/web` |
+| 产物落点 | `packages/web/dist` → 打进 web 镜像的 nginx 目录 | `packages/desktop/web-dist/` → 打包进 `resources/web` |
 | 更新方式 | 部署一次，**所有客户端立刻生效** | **重发安装包**；之后由自动更新源（§11）分发 |
 
 `VITE_API_BASE` 取值：`HEMING_WEB_URL` 环境变量 > 默认 `http://47.92.39.184`（与 `secure-origins.js` 的 `APP_DEFAULT_URL` 同源，避免两处常量漂移）。
@@ -213,7 +232,8 @@ docker compose down            # 停（保留 heming-data 卷）
 
 ```bash
 # 1) 云端（浏览器访问 + 旧客户端仍是远程加载）
-tar ... -czf heming.tar.gz . && scp ...   # 见 §2
+pnpm --filter @heming/web build            # 产物必须本地先出（§2）
+tar ... -czf /tmp/heming.tar.gz . && scp ...   # 见 §2
 ssh root@47.92.39.184 'cd ~/heming && docker compose -p heming build && docker compose -p heming up -d'
 
 # 2) 桌面端（嵌入产物随安装包）
@@ -284,3 +304,47 @@ curl -s  http://47.92.39.184/updates/latest.yml | head -8
 把 `/opt/heming/updates/latest.yml` 换回上一版的（连同安装包与 blockmap）即可。
 已安装的客户端下次检查会回到旧版本——**这正是要的效果**。
 旧包别急着删：回滚依赖它。
+
+## 12. 小内存机器：为什么前端不在云端构建
+
+目标机是**阿里云轻量应用服务器：2 vCPU / 1.8GB 内存 / 40GB 磁盘、无 swap**。
+
+### 实测结论
+
+`pnpm --filter @heming/web build`（tsc + vite）峰值 1.0–1.4GB。宿主 + docker daemon + buildkit 常驻已吃掉 ~500MB，
+两者相加正好越界。表现不是「构建失败」而是**整机失联**，这轮部署连撞两次：
+
+- ICMP 仍回包（29ms、TTL 50）——云平台的网络层活着；
+- TCP 22/80 能完成握手，但 60 秒收不到一个字节（sshd 的 worker 不再干活）；
+- **异网探针（两个独立公网出口）拿到 `522`**——排除「只是我这侧 IP 被封」；
+- 容器与数据卷没事：控制台重启后 `unless-stopped` 自动拉起**旧镜像 + 原数据**，服务当场恢复。
+
+所以判断标准记牢：**能 ping 通、能连上、不回数据 = 用户态冻住**，不是网络问题，也不是安全组。
+
+### 现在的做法（已落地）
+
+前端在开发机 build，产物随部署包上传，`docker/web.Dockerfile` 只剩 `nginx:alpine` + 两个 `COPY`。
+云端 web 构建从「分钟级、1GB+ 内存」变成秒级零内存压力；api 镜像仍在云端构建（它装依赖 + tsc，实测扛得住）。
+
+代价两条，都是明确的取舍：
+
+1. **发布多一步本地构建**，忘跑就得到一个空站点（`COPY packages/web/dist` 找不到 `index.html` 才报错，不会静默出半成品）；
+2. **镜像不再自足**——源码包里的 `dist` 才是界面真身。回滚仍然靠 `heming-web:prev` tag（§5），不受影响。
+
+### 两件常备小事
+
+```bash
+# ① 临时 swap：兜住 api 镜像里的 pnpm install / tsc 峰值。
+#    刻意不写 /etc/fstab——重启即失效，属于本机变更而非服务器配置变更；
+#    想长期留着再追加：echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+sysctl -w vm.swappiness=15
+
+# ② 清 buildkit 缓存（40GB 盘 + 内存双占）
+docker builder prune -f
+```
+
+> **别在这台机上跑 `docker builder du` / `docker system df`。**
+> 它们要遍历几十小时的层缓存，2GB 内存无 swap 时自己就能把机器压失联——
+> 本轮第二次宕机就是这条诊断命令造成的，当时机器并没有在构建。
+> 确实要看占用，先把 swap 挂上再跑。
