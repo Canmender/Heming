@@ -35,6 +35,17 @@ const BM25_K1 = 1.2;
 const BM25_B = 0.75;
 
 /**
+ * 一条语义旧值被同键新值推翻的记录（可观测性用）。
+ * 记 `winnerId` 而不是只记「这条没召回」——用户要看的是「谁顶替了它」。
+ */
+export type SupersededInfo = { key: string; loserId: string; winnerId: string };
+
+/** 分数只用于展示与相对排序，保留 4 位小数避免 UI 出现 0.3247109382471093 这种长串。 */
+function roundScore(n: number): number {
+  return Number.isFinite(n) ? Math.round(n * 1e4) / 1e4 : 0;
+}
+
+/**
  * 简化 BM25：docs 为已分词文档（词项可重复，重复即词频）。
  * IDF = ln(1 + (N - df + 0.5) / (df + 0.5))；无重叠词返回 0。
  */
@@ -124,59 +135,101 @@ function pickDiverse(
  *
  * pinned 的含义是「这个主题必带」而不是「这一版内容必带」：若同键存在更新的条目，
  * 让最新那条继承置顶位（因此置顶项也可能被换掉，但主题不会丢）。
+ *
+ * 顺带产出**被覆盖清单**（可观测性）：旧条没进注入不是「召回坏了」，而是被同键新值
+ * 推翻——这个原因原来算完就丢，用户在记忆区只能看到「这条没命中」，看不到为什么。
  */
-function supersedeSemantic(entries: SemanticEntry[]): SemanticEntry[] {
+function supersedeSemantic(entries: SemanticEntry[]): {
+  live: SemanticEntry[];
+  superseded: SupersededInfo[];
+} {
   const winners = new Map<string, SemanticEntry>();
+  const losers: SupersededInfo[] = [];
   const pinnedKeys = new Set<string>();
   for (const entry of entries) {
     const current = winners.get(entry.key);
-    if (!current || atMs(entry.updatedAt) > atMs(current.updatedAt)) winners.set(entry.key, entry);
+    if (!current) {
+      winners.set(entry.key, entry);
+    } else if (atMs(entry.updatedAt) > atMs(current.updatedAt)) {
+      winners.set(entry.key, entry);
+      losers.push({ key: entry.key, loserId: current.id, winnerId: entry.id });
+    } else {
+      losers.push({ key: current.key, loserId: entry.id, winnerId: current.id });
+    }
     if (entry.pinned) pinnedKeys.add(entry.key);
   }
-  return [...winners.values()].map((entry) =>
-    pinnedKeys.has(entry.key) && !entry.pinned ? { ...entry, pinned: true } : entry,
-  );
+  return {
+    live: [...winners.values()].map((entry) =>
+      pinnedKeys.has(entry.key) && !entry.pinned ? { ...entry, pinned: true } : entry,
+    ),
+    superseded: losers,
+  };
 }
 
 /**
  * 语义层：先按主题键做时效覆盖，再分 pinned（全带）／其余（重合度 × recency × 置信度）
  * 经多样性重排取 top5。查询为空时退回 pinned + 最近更新 5 条。
+ *
+ * 分数一并带出（d.27 可观测性）：pinned 项没有「查询重合度」（它必带），
+ * 给它衰减分 × 置信度这一半，口径与非 pinned 可比。
  */
-function rankSemantic(entries: SemanticEntry[], queryTokens: string[], nowMs: number): SemanticEntry[] {
-  const live = supersedeSemantic(entries);
+function rankSemantic(
+  entries: SemanticEntry[],
+  queryTokens: string[],
+  nowMs: number,
+): { picked: SemanticEntry[]; scores: Record<string, number>; superseded: SupersededInfo[] } {
+  const { live, superseded } = supersedeSemantic(entries);
   const pinned = live.filter((entry) => entry.pinned);
   const rest = live.filter((entry) => !entry.pinned);
   const querySet = new Set(queryTokens);
-  if (!querySet.size) return [...pinned, ...rest.slice(0, SEMANTIC_TOP)];
-
   const decayed = (entry: SemanticEntry) =>
-    recencyScore(entry.updatedAt, nowMs, SEMANTIC_HALF_LIFE_DAYS) * (CONFIDENCE_FLOOR + entry.confidence);
-  const scored = rest
-    .map((entry) => {
-      const tokens = new Set(tokenize(`${entry.key} ${entry.value}`));
-      let hits = 0;
-      for (const token of querySet) if (tokens.has(token)) hits += 1;
-      return { entry, tokens, score: (hits / querySet.size) * decayed(entry) };
-    })
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score);
-  // 入选集合按原排序回填，保证分数并列时结果稳定（不随桶顺序漂移）
-  const chosen = pickDiverse(scored, SEMANTIC_TOP);
-  return [...pinned, ...scored.filter((item) => chosen.has(item.entry.id)).map((item) => item.entry)];
+    recencyScore(entry.updatedAt, nowMs, SEMANTIC_HALF_LIFE_DAYS) *
+    (CONFIDENCE_FLOOR + entry.confidence);
+  const scores: Record<string, number> = {};
+  for (const entry of pinned) scores[entry.id] = roundScore(decayed(entry));
+
+  let picked: SemanticEntry[];
+  if (!querySet.size) {
+    picked = [...pinned, ...rest.slice(0, SEMANTIC_TOP)];
+    for (const entry of picked) if (!(entry.id in scores)) scores[entry.id] = roundScore(decayed(entry));
+  } else {
+    const scored = rest
+      .map((entry) => {
+        const tokens = new Set(tokenize(`${entry.key} ${entry.value}`));
+        let hits = 0;
+        for (const token of querySet) if (tokens.has(token)) hits += 1;
+        return { entry, tokens, score: (hits / querySet.size) * decayed(entry) };
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score);
+    // 入选集合按原排序回填，保证分数并列时结果稳定（不随桶顺序漂移）
+    const chosen = pickDiverse(scored, SEMANTIC_TOP);
+    const fromRest = scored.filter((item) => chosen.has(item.entry.id)).map((item) => item.entry);
+    picked = [...pinned, ...fromRest];
+    for (const item of scored) if (chosen.has(item.entry.id)) scores[item.entry.id] = roundScore(item.score);
+  }
+  return { picked, scores, superseded };
 }
 
 /**
  * 情景层：bigram BM25 × 14 天半衰期 × importance 加权，再经多样性重排取 top3
  * （同一段对话沉淀出的近似摘要只占一个名额，其余名额让给更有区分度的情景）。
  */
-function rankEpisodic(entries: EpisodicEntry[], queryTokens: string[], nowMs: number): EpisodicEntry[] {
+function rankEpisodic(
+  entries: EpisodicEntry[],
+  queryTokens: string[],
+  nowMs: number,
+): { picked: EpisodicEntry[]; scores: Record<string, number> } {
   const weight = (entry: EpisodicEntry) =>
     recencyScore(entry.at, nowMs) * (IMPORTANCE_FLOOR + entry.importance);
-  if (!entries.length) return [];
+  const scores: Record<string, number> = {};
+  if (!entries.length) return { picked: [], scores };
   if (!queryTokens.length) {
-    return [...entries].sort((a, b) => weight(b) - weight(a)).slice(0, EPISODIC_TOP);
+    const picked = [...entries].sort((a, b) => weight(b) - weight(a)).slice(0, EPISODIC_TOP);
+    for (const entry of picked) scores[entry.id] = roundScore(weight(entry));
+    return { picked, scores };
   }
-  const scores = bm25Score(
+  const bm25 = bm25Score(
     queryTokens,
     entries.map((entry) => tokenize(entry.summary)),
   );
@@ -184,33 +237,51 @@ function rankEpisodic(entries: EpisodicEntry[], queryTokens: string[], nowMs: nu
     .map((entry, i) => ({
       entry,
       tokens: new Set(tokenize(entry.summary)),
-      score: scores[i] * weight(entry),
+      score: bm25[i] * weight(entry),
     }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
   const chosen = pickDiverse(scored, EPISODIC_TOP);
-  return scored.filter((item) => chosen.has(item.entry.id)).map((item) => item.entry);
+  const picked = scored.filter((item) => chosen.has(item.entry.id)).map((item) => item.entry);
+  for (const item of scored) if (chosen.has(item.entry.id)) scores[item.entry.id] = roundScore(item.score);
+  return { picked, scores };
 }
 
 /**
  * 三层召回入口：语义（同键时效覆盖 → pinned + top5）／情景（top3，多样性重排）／
  * 工作（最近 6 轮，按时间先后）。
  * 记忆总开关关闭、或任何异常 → 三层皆空（调用侧据此零注入）。
+ *
+ * `scores` / `superseded` 是给「召回可观测性」用的旁路信息（d.27）：
+ * 排序口径原本算完即丢，用户只能看到「注入了哪几条」看不到「凭什么这几条」，
+ * 也看不到某条旧事实是被同键新值覆盖掉的（不是没召回）。两者都不参与排序本身。
  */
 export function recallMemory(
   store: MemoryStore,
   input: { agentId: string; conversationId: string; query: string },
-): { semantic: SemanticEntry[]; episodic: EpisodicEntry[]; working: WorkingTurn[] } {
+): {
+  semantic: SemanticEntry[];
+  episodic: EpisodicEntry[];
+  working: WorkingTurn[];
+  scores: Record<string, number>;
+  superseded: SupersededInfo[];
+} {
   try {
-    if (!store.getSettings().enabled) return { semantic: [], episodic: [], working: [] };
+    if (!store.getSettings().enabled) {
+      return { semantic: [], episodic: [], working: [], scores: {}, superseded: [] };
+    }
     const nowMs = store.nowMs();
     const queryTokens = tokenize(input.query ?? "");
+    const semantic = rankSemantic(store.semantic(input.agentId), queryTokens, nowMs);
+    const episodic = rankEpisodic(store.episodic(input.agentId), queryTokens, nowMs);
     return {
-      semantic: rankSemantic(store.semantic(input.agentId), queryTokens, nowMs),
-      episodic: rankEpisodic(store.episodic(input.agentId), queryTokens, nowMs),
+      semantic: semantic.picked,
+      episodic: episodic.picked,
       working: store.working(input.conversationId, input.agentId).slice(-WORKING_TOP),
+      scores: { ...semantic.scores, ...episodic.scores },
+      superseded: semantic.superseded,
     };
   } catch {
-    return { semantic: [], episodic: [], working: [] };
+    return { semantic: [], episodic: [], working: [], scores: {}, superseded: [] };
   }
 }

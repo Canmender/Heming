@@ -53,6 +53,7 @@ import {
   summaryCache,
 } from "../lib/agentContext/index.js";
 import { memoryStore } from "../lib/memory/index.js";
+import { recallRecorder } from "../lib/memory/runRecorder.js";
 import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
@@ -1344,14 +1345,17 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
       buildSystemPrompt: async (agentId, text) => {
         const basePrompt = useLlmStore.getState().prompts[agentId] ?? "";
         try {
-          return buildAgentContext({
+          const built = buildAgentContext({
             agentId,
             conversationId: convId,
             userText: text,
             basePrompt,
             memory: memoryStore,
             skills: skillPool,
-          }).systemPrompt;
+          });
+          // 登记本次注入旁路，供轮次收尾时写召回日志（可观测性；零注入不留档）。
+          recallRecorder.capture(agentId, convId, text, built.recallTrace);
+          return built.systemPrompt;
         } catch {
           return basePrompt;
         }
@@ -1474,6 +1478,8 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
           if (!memoryStore.getSettings().enabled) return;
           if (status === "ok") {
             memoryStore.recordTurn(agentId, convId, userText, assistantText);
+            // 召回日志：本轮真注入了记忆才留档（判据与写入见 memory/runRecorder.ts）。
+            recallRecorder.settle({ agentId, conversationId: convId, userText, assistantText });
             // 复盘分身：任务结束后后台自评「有什么值得长期记住」，即发即忘、不阻塞流式。
             // 三道闸门（记忆总开关 / 长期记忆开关 / 有绑定的 LLM 连接）都在 runner 内判断。
             maybeRunReview({

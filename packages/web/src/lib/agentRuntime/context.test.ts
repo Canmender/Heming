@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { buildAgentContext } from "./context.js";
 import { MemoryStore } from "../memory/store.js";
 import type { MemoryStore as MemoryStoreType } from "../memory/store.js";
-import { createMemoryStorage } from "../memory/storage.js";
+import { createMemoryStorage, MEMORY_KEYS } from "../memory/storage.js";
 import { SkillPool } from "../skills/store.js";
 import type { SkillPool as SkillPoolType } from "../skills/store.js";
 
@@ -286,5 +286,116 @@ describe("buildAgentContext", () => {
     // 当前文本 + 最近 2 轮 → 命中橙色/蓝色；仅第 1 轮出现的紫色不召回
     expect(out.recalled.semantic.map((e) => e.key).sort()).toEqual(["橙色", "蓝色"]);
     expect(out.recalled.working).toHaveLength(3);
+  });
+});
+
+describe("buildAgentContext：注入旁路（可观测性）", () => {
+  const EMPTY_TRACE = {
+    injected: [],
+    dropped: [],
+    scores: {},
+    superseded: [],
+    counts: { semantic: 0, episodic: 0, working: 0 },
+  };
+
+  it("未接记忆 / 记忆关闭 / 记忆抛错 → 旁路为空档（与零注入一致）", () => {
+    expect(
+      buildAgentContext({ agentId: "a1", conversationId: "c1", userText: "hi", basePrompt: BASE }).recallTrace,
+    ).toEqual(EMPTY_TRACE);
+
+    const memory = makeMemory();
+    memory.updateSettings({ enabled: false });
+    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    expect(
+      buildAgentContext({
+        agentId: "a1",
+        conversationId: "c1",
+        userText: "称呼是什么",
+        basePrompt: BASE,
+        memory,
+      }).recallTrace,
+    ).toEqual(EMPTY_TRACE);
+  });
+
+  it("注入了什么就在旁路里：分数、层级、文本三者对得上提示词", () => {
+    const memory = makeMemory();
+    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "用户希望被称为「阿和」", source: "explicit" });
+    memory.addEpisodic({ agentId: "a1", conversationId: "c1", summary: "确认了部署端口与备份策略" });
+
+    const out = buildAgentContext({
+      agentId: "a1",
+      conversationId: "c1",
+      userText: "我的称呼是什么？顺便看下部署端口",
+      basePrompt: BASE,
+      memory,
+      skills: emptySkills(),
+    });
+    const layers = out.recallTrace.injected.map((item) => item.layer);
+    expect(layers).toEqual(["semantic", "episodic"]);
+    for (const item of out.recallTrace.injected) {
+      expect(out.systemPrompt).toContain(`- ${item.content}`);
+      expect(out.recallTrace.scores[item.id]).toBeGreaterThan(0);
+    }
+    expect(out.recallTrace.counts).toEqual({ semantic: 1, episodic: 1, working: 0 });
+    expect(out.recallTrace.dropped).toEqual([]);
+  });
+
+  it("召回 ≠ 注入：被预算裁掉的候选进 dropped，绝不进 injected", () => {
+    const memory = makeMemory();
+    // 6 条 200 字的长事实，语义层额度（约 460 字）吃不下
+    for (let i = 0; i < 6; i++) {
+      memory.upsertSemantic({ agentId: "a1", key: `长文${i}`, value: "值".repeat(200), source: "manual" });
+    }
+    const out = buildAgentContext({
+      agentId: "a1",
+      conversationId: "c1",
+      userText: "长文",
+      basePrompt: BASE,
+      memory,
+    });
+    expect(out.recallTrace.counts.semantic).toBeGreaterThan(out.recallTrace.injected.length);
+    expect(out.recallTrace.injected.length).toBeGreaterThan(0);
+    const injectedIds = new Set(out.recallTrace.injected.map((item) => item.id));
+    expect(out.recallTrace.dropped.length).toBe(
+      out.recallTrace.counts.semantic - injectedIds.size,
+    );
+    for (const drop of out.recallTrace.dropped) {
+      expect(injectedIds.has(drop.id)).toBe(false);
+      expect(drop.reason).toBe("budget");
+    }
+  });
+
+  it("同键旧值被覆盖时旁路给出 loser→winner，供记忆区解释", () => {
+    // 直接塞两条同键条目（upsertSemantic 会就地合并，只有历史/多桶数据才会真的撞键）
+    const storage = createMemoryStorage();
+    const iso = new Date(NOW).toISOString();
+    const entry = (id: string, value: string, updatedAt: string) => ({
+      id,
+      agentId: "a1",
+      key: "称呼",
+      value,
+      scope: "user",
+      confidence: 0.8,
+      pinned: false,
+      source: "manual",
+      createdAt: iso,
+      updatedAt,
+    });
+    storage.setItem(
+      MEMORY_KEYS.semantic,
+      JSON.stringify({
+        a1: [entry("old", "老王", new Date(NOW - 30 * 86_400_000).toISOString()), entry("new", "王总", iso)],
+      }),
+    );
+    const out = buildAgentContext({
+      agentId: "a1",
+      conversationId: "c1",
+      userText: "称呼是什么",
+      basePrompt: BASE,
+      memory: new MemoryStore(storage, () => NOW),
+    });
+    expect(out.systemPrompt).toContain("称呼：王总");
+    expect(out.recallTrace.superseded).toEqual([{ key: "称呼", loserId: "old", winnerId: "new" }]);
+    expect(out.recallTrace.injected[0].id).toBe("new");
   });
 });

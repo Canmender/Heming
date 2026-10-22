@@ -5,10 +5,16 @@ import { MemoryPage } from "./MemoryPage.js";
 import {
   AGENT_PREFS_KEY,
   AgentPrefsStore,
+  GLOBAL_AGENT_ID,
   KB_KEY,
   KnowledgeBase,
   MEMORY_KEYS,
+  RECALL_LOG_KEY,
   MemoryStore,
+  RecallLog,
+  RecallRecorder,
+  recallMemory,
+  summarizeInjection,
   type StorageLike,
 } from "../lib/memory/index.js";
 
@@ -96,8 +102,8 @@ beforeEach(() => {
   prefs = new AgentPrefsStore(makeStorage(prefsMap));
 });
 
-function renderPage() {
-  return render(<MemoryPage memory={memory} kb={kb} prefs={prefs} />);
+function renderPage(mem: MemoryStore = memory) {
+  return render(<MemoryPage memory={mem} kb={kb} prefs={prefs} />);
 }
 
 /** 等名册到位后选中智能体（未选中时写操作被禁用）。 */
@@ -534,5 +540,177 @@ describe("记忆区 · 复盘沉淀卡", () => {
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent(/请先在上方选择一个智能体|还没有可复盘的对话/),
     );
+  });
+});
+
+/**
+ * 召回可观测性（d.27）：预览区要能区分「召回」与「注入」，记忆区要有本机留档。
+ * 日志走注入的 recorder（内存 StorageLike），不碰真 localStorage，也不依赖聊天页。
+ */
+describe("MemoryPage 召回可观测性", () => {
+  /** 每条 ~170 字：语义层额度 480 字，3 条多一点就到顶，「预算外」才有得看。 */
+  const FILLER = "服务挂在网关后面要保留原始请求头与客户端地址回滚时先摘流量再执行迁移脚本要能重入";
+  const longValue = (index: number) =>
+    `部署方案${index}：${FILLER}${FILLER}${FILLER}${FILLER}`;
+
+  let logMap: Map<string, string>;
+  let clock: { at: number };
+
+  function makeRecorder() {
+    clock = { at: T0 };
+    return new RecallRecorder(
+      new RecallLog(
+        {
+          getItem: (key) => (logMap.has(key) ? (logMap.get(key) as string) : null),
+          setItem: (key, value) => logMap.set(key, value),
+          removeItem: (key) => logMap.delete(key),
+        },
+        () => clock.at,
+      ),
+      () => clock.at,
+    );
+  }
+
+  /** 复刻聊天页那一轮：召回 → 注入旁路 → 收尾落档。 */
+  function recordTurn(rec: RecallRecorder, mem: MemoryStore, query: string, answer: string) {
+    const recalled = recallMemory(mem, { agentId: "a1", conversationId: "c1", query });
+    const { observability } = summarizeInjection(recalled);
+    rec.capture("a1", "c1", query, observability);
+    clock.at += 60_000;
+    rec.settle({ agentId: "a1", conversationId: "c1", userText: query, assistantText: answer });
+  }
+
+  function renderWith(rec: RecallRecorder, mem: MemoryStore) {
+    return render(
+      <MemoryPage memory={mem} kb={kb} prefs={prefs} recorder={rec} fetchSharedFiles={async () => []} />,
+    );
+  }
+
+  beforeEach(() => {
+    logMap = new Map();
+  });
+
+  it("预览逐条标注打分，且「注入」与「预算外未注入」分开显示", async () => {
+    mockApi({ agents: AGENTS });
+    for (let i = 0; i < 5; i++) {
+      memory.upsertSemantic({ agentId: "a1", key: `部署方案${i}`, value: longValue(i), source: "manual" });
+    }
+    renderPage();
+    await pickAgent();
+    openTab("数据库");
+
+    fireEvent.change(screen.getByLabelText("召回预览输入"), { target: { value: "部署" } });
+    fireEvent.click(screen.getByRole("button", { name: "预览召回" }));
+
+    const out = screen.getByRole("group", { name: "召回预览结果" });
+    expect(within(out).getByText("语义（5）")).toBeInTheDocument();
+    // 打分来自召回旁路（保留 4 位，UI 显示 3 位）
+    expect(within(out).getAllByText(/打分 \d\.\d{3}/).length).toBeGreaterThan(0);
+    expect(within(out).getAllByText(/· 注入/).length).toBeGreaterThan(0);
+    expect(within(out).getAllByText(/· 预算外，未注入/).length).toBeGreaterThan(0);
+    // 召回 ≠ 注入：结论行两个数字必须不相等
+    const summary = within(out).getByText(/→ 注入/).textContent ?? "";
+    const matched = summary.match(/召回\s*(\d+)\s*条[\s\S]*?注入\s*(\d+)\s*条/);
+    expect(matched).not.toBeNull();
+    expect(Number(matched?.[2])).toBeLessThan(Number(matched?.[1]));
+    // 截断行必须说明原因，否则用户以为整条都进了提示词
+    expect(within(out).getAllByText(/· 注入（超预算已截断）/).length).toBeGreaterThan(0);
+  });
+
+  it("同键旧值不显示成漏召回，而是标注「被同键新值覆盖」", async () => {
+    mockApi({ agents: AGENTS });
+    const winner = memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "王总", source: "manual" });
+    // 手工再灌一条同键旧条目：upsertSemantic 会按键合并，历史脏数据只能这样造
+    const raw = JSON.parse(memoryMap.get(MEMORY_KEYS.semantic) as string);
+    const oldIso = new Date(T0 - 30 * 86_400_000).toISOString();
+    raw[GLOBAL_AGENT_ID] = [{ ...winner, id: "sem-old", value: "老王", createdAt: oldIso, updatedAt: oldIso }, ...raw[GLOBAL_AGENT_ID]];
+    memoryMap.set(MEMORY_KEYS.semantic, JSON.stringify(raw));
+    const seeded = new MemoryStore(makeStorage(memoryMap), () => T0);
+
+    renderPage(seeded);
+    await pickAgent();
+    openTab("数据库");
+
+    fireEvent.change(screen.getByLabelText("召回预览输入"), { target: { value: "称呼" } });
+    fireEvent.click(screen.getByRole("button", { name: "预览召回" }));
+
+    const out = screen.getByRole("group", { name: "召回预览结果" });
+    expect(within(out).getByText("称呼：王总")).toBeInTheDocument();
+    expect(within(out).queryByText("称呼：老王")).not.toBeInTheDocument();
+    expect(within(out).getByText(/1 条旧值被同主题键的新值覆盖/)).toBeInTheDocument();
+  });
+
+  it("没有留档时给出可操作的空态，且不出现清除按钮", async () => {
+    mockApi({ agents: AGENTS });
+    renderWith(makeRecorder(), memory);
+    await pickAgent();
+    openTab("数据库");
+
+    expect(screen.getByText(/还没有留档/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "清除记录" })).not.toBeInTheDocument();
+  });
+
+  it("召回记录默认只列最近 3 条，展开明细可见注入/未注入/疑似引用", async () => {
+    mockApi({ agents: AGENTS });
+    for (let i = 0; i < 4; i++) {
+      memory.upsertSemantic({ agentId: "a1", key: `部署方案${i}`, value: longValue(i), source: "manual" });
+    }
+    const rec = makeRecorder();
+    for (let i = 0; i < 4; i++) {
+      recordTurn(rec, memory, `部署方案 ${i}`, `部署方案 ${i} 已确认，重启即可`);
+    }
+    renderWith(rec, memory);
+    await pickAgent();
+    openTab("数据库");
+
+    const rows = () => screen.getByRole("list", { name: "召回记录列表" });
+    expect(within(rows()).getAllByRole("listitem")).toHaveLength(3);
+    // 最近优先
+    expect(within(rows()).getAllByRole("listitem")[0]).toHaveTextContent("部署方案 3");
+    fireEvent.click(screen.getByRole("button", { name: "展开全部 4 条" }));
+    expect(within(rows()).getAllByRole("listitem")).toHaveLength(4);
+    fireEvent.click(screen.getByRole("button", { name: "只看最近 3 条" }));
+    expect(within(rows()).getAllByRole("listitem")).toHaveLength(3);
+
+    const row = within(rows()).getAllByRole("listitem")[0];
+    expect(within(row).getByText(/召回 语义\d+\/情景\d+\/短期\d+ → 注入 \d+ 条/)).toBeInTheDocument();
+    expect(within(row).getByText(/未注入 \d+ 条/)).toBeInTheDocument();
+    expect(within(row).getByText(/疑似引用 \d+ 条/)).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "明细" })).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(within(row).getByRole("button", { name: "明细" }));
+    expect(within(row).getByRole("button", { name: "收起" })).toHaveAttribute("aria-expanded", "true");
+    // 注入行带层名与打分；引用行另有标记
+    expect(within(row).getAllByText(/▪ 引用/).length).toBeGreaterThan(0);
+    // 被预算裁掉的行也带原文，不能只给一个 id
+    expect(within(row).getByText(/预算外，未注入：部署方案/)).toBeInTheDocument();
+  });
+
+  it("语义卡带「最近注入 / 疑似引用」注脚，清除记录后注脚与留档一起消失", async () => {
+    mockApi({ agents: AGENTS });
+    memory.upsertSemantic({
+      agentId: "a1",
+      key: "线上端口",
+      value: "线上监听 8787 端口",
+      source: "manual",
+    });
+    const rec = makeRecorder();
+    recordTurn(rec, memory, "线上端口", "线上监听 8787 端口，重启即可");
+    renderWith(rec, memory);
+    await pickAgent();
+    openTab("数据库");
+
+    const card = semanticList();
+    expect(
+      within(card).getByText(/最近注入 2026-10-17 · 疑似引用 2026-10-17/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "清除记录" }));
+    const dialog = screen.getByRole("dialog", { name: "清除召回记录" });
+    expect(within(dialog).getByText(/清除全部 1 条召回记录？/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "清除" }));
+    expect(logMap.has(RECALL_LOG_KEY)).toBe(false);
+    expect(within(card).queryByText(/最近注入/)).not.toBeInTheDocument();
+    expect(screen.getByText(/还没有留档/)).toBeInTheDocument();
   });
 });

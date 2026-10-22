@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { MemoryStore } from "./store.js";
 import { MEMORY_KEYS } from "./storage.js";
 import { bm25Score, recallMemory } from "./recall.js";
-import { MEMORY_CHAR_BUDGET, formatMemorySection } from "./format.js";
+import { MEMORY_CHAR_BUDGET, formatMemorySection, summarizeInjection } from "./format.js";
 import { tokenize } from "./tokenize.js";
 import type {
   EpisodicEntry,
@@ -304,7 +304,13 @@ describe("recallMemory：工作层与总开关", () => {
       working: [working("w", "问", "答")],
       settings: { enabled: false },
     });
-    expect(recall(store, "讨论发布计划")).toEqual({ semantic: [], episodic: [], working: [] });
+    expect(recall(store, "讨论发布计划")).toEqual({
+      semantic: [],
+      episodic: [],
+      working: [],
+      scores: {},
+      superseded: [],
+    });
   });
 
   it("空库召回为空，格式化为空串（零注入）", () => {
@@ -382,5 +388,138 @@ describe("formatMemorySection：注入格式与预算", () => {
     const out = formatMemorySection({ semantic: [], episodic: [episodic("e1", "讨论了发布计划")], working: [] });
     expect(out).toContain("## 相关情景记忆");
     expect(out).not.toContain("## 当前会话焦点");
+  });
+});
+
+describe("recallMemory：打分与覆盖旁路（可观测性）", () => {
+  it("每个入选条目都带分数，且分数随重合度单调", () => {
+    const store = storeOf({
+      semantic: [
+        semantic("strong", "部署端口", "默认 8787，端口不可改"),
+        semantic("weak", "爱好", "偶尔看看部署相关的书"),
+      ],
+      episodic: [episodic("e1", "讨论了发布计划的回归范围")],
+    });
+    const found = recall(store, "部署端口与发布计划");
+    expect(found.scores.strong).toBeGreaterThan(found.scores.weak);
+    expect(Object.keys(found.scores).sort()).toEqual(["e1", "strong", "weak"]);
+    // 分数保留 4 位：UI 直接展示，不能出现 0.3247109382471093
+    for (const value of Object.values(found.scores)) expect(value).toBe(Math.round(value * 1e4) / 1e4);
+  });
+
+  it("pinned 也带分数（口径为衰减分 × 置信度，与是否命中查询无关）", () => {
+    const store = storeOf({ semantic: [semantic("pin", "称呼", "阿和", { pinned: true })] });
+    const found = recall(store, "今天天气怎么样"); // 与记忆毫无重合
+    expect(found.semantic.map((e) => e.id)).toEqual(["pin"]);
+    expect(found.scores.pin).toBeGreaterThan(0);
+  });
+
+  it("未入选的条目没有分数：空位就是空位，不填 0 冒充「算过」", () => {
+    const store = storeOf({ semantic: [semantic("s1", "部署端口", "8787"), semantic("s2", "爱好", "爬山")] });
+    const found = recall(store, "部署端口");
+    expect(found.scores.s1).toBeGreaterThan(0);
+    expect(found.scores.s2).toBeUndefined();
+  });
+
+  it("同键覆盖留下 loser→winner 的记录，供记忆区解释「为什么没带这条」", () => {
+    const store = storeOf({
+      semantic: [
+        semantic("old", "称呼", "老王", { updatedAt: iso(30 * DAY) }),
+        semantic("new", "称呼", "王总", { updatedAt: iso(DAY) }),
+        semantic("solo", "端口", "8787"),
+      ],
+    });
+    const found = recall(store, "称呼");
+    expect(found.superseded).toEqual([{ key: "称呼", loserId: "old", winnerId: "new" }]);
+  });
+
+  it("全局桶与本智能体桶撞键时同样记录覆盖来源", () => {
+    const store = storeOf({
+      semantic: [semantic("local", "称呼", "老王", { updatedAt: iso(30 * DAY) })],
+      semanticGlobal: [
+        semantic("shared", "称呼", "王总", { agentId: GLOBAL_AGENT_ID, updatedAt: iso(DAY) }),
+      ],
+    });
+    expect(recall(store, "称呼").superseded).toEqual([
+      { key: "称呼", loserId: "local", winnerId: "shared" },
+    ]);
+  });
+});
+
+describe("summarizeInjection：召回 ≠ 注入", () => {
+  it("预算裁掉的候选只在 dropped 里出现，不算注入", () => {
+    const store = storeOf({
+      semantic: Array.from({ length: 5 }, (_, i) => semantic(`s${i}`, `问题${i}`, "值".repeat(200))),
+    });
+    const found = recall(store, "问题");
+    const { text, observability } = summarizeInjection(found);
+    expect(text).toBe(formatMemorySection(found)); // 文本口径与老封装逐字一致
+    expect(observability.counts.semantic).toBe(found.semantic.length);
+    expect(observability.injected.length).toBeLessThan(found.semantic.length);
+    const injectedIds = new Set(observability.injected.map((item) => item.id));
+    for (const drop of observability.dropped) {
+      expect(injectedIds.has(drop.id)).toBe(false);
+      expect(drop.reason).toBe("budget");
+    }
+    expect(observability.dropped.map((d) => d.id)).toEqual(
+      found.semantic.filter((entry) => !injectedIds.has(entry.id)).map((entry) => entry.id),
+    );
+  });
+
+  it("被同键新值覆盖的旧条目归因为 superseded，不与预算裁剪混在一起", () => {
+    const found = recall(
+      storeOf({
+        semantic: [
+          semantic("old", "称呼", "老王", { updatedAt: iso(30 * DAY) }),
+          semantic("new", "称呼", "王总", { updatedAt: iso(DAY) }),
+        ],
+      }),
+      "称呼是什么",
+    );
+    // 覆盖发生在排序之前：loser 根本没进候选，所以它出现在 superseded 而不是 dropped
+    expect(found.superseded).toEqual([{ key: "称呼", loserId: "old", winnerId: "new" }]);
+    const { observability } = summarizeInjection(found);
+    expect(observability.superseded).toEqual(found.superseded);
+    expect(observability.dropped).toEqual([]);
+  });
+
+  it("同一 id 既没注入又被标为覆盖时按覆盖归因（覆盖优先于预算，两种原因不重复计）", () => {
+    const { observability } = summarizeInjection({
+      // 第一条把语义层额度吃满，第二条进不去 → 它既是 dropped 又已被同键新值推翻
+      semantic: [semantic("a", "长文", "值".repeat(500)), semantic("b", "称呼", "老王")],
+      episodic: [],
+      working: [],
+      superseded: [{ key: "称呼", loserId: "b", winnerId: "c" }],
+    });
+    expect(observability.dropped).toEqual([
+      { id: "b", layer: "semantic", reason: "superseded", content: "称呼：老王" },
+    ]);
+  });
+
+  it("未注入项也带上原文本：只给 id 用户看不出「哪条被裁了」", () => {
+    const { observability } = summarizeInjection({
+      semantic: [semantic("a", "长文", "值".repeat(500)), semantic("b", "称呼", "老王")],
+    });
+    expect(observability.dropped[0].content).toBe("称呼：老王");
+  });
+
+  it("零召回时既无文本也无清单", () => {
+    const { text, observability } = summarizeInjection({ semantic: [], episodic: [], working: [] });
+    expect(text).toBe("");
+    expect(observability.injected).toEqual([]);
+    expect(observability.dropped).toEqual([]);
+    expect(observability.counts).toEqual({ semantic: 0, episodic: 0, working: 0 });
+  });
+
+  it("注入清单里的文本就是真进了提示词的那段（含截断标记）", () => {
+    const { text, observability } = summarizeInjection({
+      semantic: [semantic("s1", "称呼", "阿和"), semantic("s2", "端口", "8".repeat(1000))],
+      episodic: [],
+      working: [],
+    });
+    expect(observability.injected.map((item) => item.layer)).toEqual(["semantic", "semantic"]);
+    expect(observability.injected[0]).toMatchObject({ id: "s1", content: "称呼：阿和", truncated: false });
+    expect(observability.injected[1].truncated).toBe(true);
+    for (const item of observability.injected) expect(text).toContain(`- ${item.content}`);
   });
 });

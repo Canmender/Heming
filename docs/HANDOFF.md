@@ -1,8 +1,8 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-10-22
-- 当前版本：`d.26.1.7.0`
-- 当前 main：以 `git log -1` 为准（`204a592` 功能批次 → `d5dbdca` 裸机部署链路 → `3956d23` 弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态；本轮 d.26.1.7.0 **云端与安装包两处均已发布**）
+- 当前版本：`d.27.1.7.0`
+- 当前 main：以 `git log -1` 为准（`d5dbdca` 裸机部署链路 → `3956d23` 弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态（d.26.1.7.0 两处已发布）→ 本轮「记忆召回的可观测性」d.27.1.7.0）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
@@ -21,12 +21,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 版本 | `d.26.1.7.0`（5 段，五包同步） |
-| main | `204a592`（d.25.1.6.0 功能批次）→ `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ `94e6d77`（d.25.1.7.0 发布收口）→ 本轮「弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态」 |
-| 测试 | 2026-10-22 实跑：`pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿（exit 0）；web 106 文件 / 1659 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 18 文件全通过 |
-| 线上 | **2026-10-22 裸机重新上线**（实例被重置为 Ubuntu 24.04 → 去 Docker；宿主机 nginx + systemd + node，云端零构建）。**`d.26.1.7.0` 已发布**：部署包远端/本机 MD5 同为 `b0a737b89c4f…`，外部取回的 `assets/index-CNMyJF7I.js` 与本机 dist 逐字同名（`d063bc4bbb64…`）、`/api/health` 返回 `{"ok":true}`、`/api/ws` 带 token 握手成功并对非法会话回 `error: not a member`（上一版 `d.25.1.7.0` 同样实测通过） |
-| 安装包 | **`和鸣 Setup d.26.1.7.0.exe`（178843410 字节，`release/r27/`）已发布到 `/updates`**——远端字节数与本地一致，`latest.yml` 352 字节且读到 `version: 26.1.7`，Range 请求返回 206（`bytes 0-1023/178843410`）。安装包内嵌的是注入 `VITE_API_BASE` 的产物（`index-DM0QlkiE.js`），与云端站点产物（`index-CNMyJF7I.js`）**不同名即不同源**，这是预期 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落），当前指向 `26.1.7` |
+| 版本 | `d.27.1.7.0`（5 段，五包同步） |
+| main | `204a592`（d.25.1.6.0 功能批次）→ `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ `94e6d77`（d.25.1.7.0 发布收口）→ `3956d23`（d.26.1.7.0 弹窗屏蔽背景 + 焦点归还 + 首帧状态）→ 本轮「记忆召回的可观测性」（d.27.1.7.0） |
+| 测试 | 2026-10-22 实跑：`pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿（exit 0）；web 109 文件 / 1702 例，server 9 文件 / 212 例，shared 2 文件 / 75 例，desktop 2 例（node:test）全通过 |
+| 线上 | **`d.27.1.7.0` 待发布**。裸机链路已固化（实例重置为 Ubuntu 24.04 后去 Docker：宿主 nginx + systemd + node，云端零构建）；上一版 `d.26.1.7.0` 实测通过：部署包远端/本机 MD5 一致、外部取回的 `assets/index-CNMyJF7I.js` 与本机 dist 同名、`/api/health` 返回 `{"ok":true}`、`/api/ws` 带 token 握手成功并对非法会话回 `error: not a member` |
+| 安装包 | **`d.27.1.7.0` 待发布（输出目录递增到 `release/r28`）**。上一版 `和鸣 Setup d.26.1.7.0.exe`（178843410 字节，`release/r27/`）已发布到 `/updates`：远端字节数与本地一致、`latest.yml` 352 字节读到 `version: 26.1.7`、Range 请求 206。安装包内嵌注入 `VITE_API_BASE` 的产物（`index-DM0QlkiE.js`），与云端站点产物（`index-CNMyJF7I.js`）**不同名即不同源**，这是预期 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落），当前指向 `26.1.7`（待发 `27.1.7`） |
 | 账号 | 只有 `admin/admin`（`HEMING_SEED_USERS` 播种；注册默认关闭）。**重置把旧库连同 `zhoukang` 等账号一起清掉了**，历史会话/消息不可恢复 |
 
 ### 已完成里程碑
@@ -53,6 +53,7 @@
 20. **补齐上轮暂缓项（d.25）**：Registry **本地包（npm/pypi）**（不内置运行时→挂载即探测、缺什么直说、必须钉版本、Windows 上翻译为 `node npx-cli.js` 且恒定 `shell:false`、删除回收子进程）；**记忆召回**同主题时效覆盖 + MMR 去重名额（确定性、无学习权重、不加模型字段）；**通话逐路 ICE restart**（2 次预算、新信令 `voice_call_reconnect`、不重新响铃）；**应用内通知中心**（消息/任务收尾，去重、50 条上限、只存本机）；**弹窗骨架** `useModalA11y`（Esc 栈顶独占、焦点循环）+ 技能/接口/记忆/Wiki/HITL 规则等破坏性操作统一应用内确认；**模型能力降级提示**（判定与丢弃同源）；**任务模板**（名称+目标，填回输入框仍可编辑）；**消息多选导出**（与整会话导出同契约、纯本机 Blob）。文档见 `docs/superpowers/specs/2026-10-21-*.md` 三篇与审计文档 §2。
 21. **图片 + 文字同发（d.25.1.7.0）**：输入框有正文时选文件 → 发**一条 `text + file` 消息**并当场触发；本轮附件不走历史，由 `TriggerDeps.buildUserTurn` 拼进当前 user 行（图片内容片 / 文档块），`fetchHistory` 按 `file.id` 去重；未绑定 LLM 的拦截提前到上传前；重试沿用本轮附件。能力闸、4 张 / 4MB 上限、E2E 不降级全部原样。文档见 `docs/superpowers/specs/2026-10-22-atomic-image-send.md`。
 22. **弹窗屏蔽背景 + 焦点归还 + 工作区首帧状态（d.26.1.7.0）**：`useModalA11y` 补上「打开期间屏蔽背景、关闭后归还焦点」。因本仓弹窗**无 portal**，采用**遮罩根起的兄弟逐个 `inert`**（只挂 inert 不补 aria-hidden）、**模块级引用计数**支持嵌套、`data-a11y-keep` 保留常驻通话浮层可点、非模态浮层（通知中心）传 `blockBackground:false` 保住「点外面关」；焦点归还有条件（焦点确实丢失才还，不抢关闭方主动安排的焦点）。`loadWorkspace` 加 `workspaceReady`/`workspaceError`，HomePage 首帧未落地显示加载骨架、失败显示「加载失败 + 重试」，**后台刷新失败不推翻已就绪**。文档见 `docs/superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md`。
+23. **记忆召回的可观测性（d.27.1.7.0）**：把「召回 ≠ 注入」做成一等公民。新增注入旁路 `MemoryObservability`（`injected`／`dropped`+原因／`scores`／`superseded`／`counts`），**差集只在 `summarizeInjection` 算**（只有格式化层同时知道候选与注入清单，散到各 UI 写一遍偏一次）；`truncated`（注入了一半）与 `budget`（整条没进）分开，同键旧值单独标注「被覆盖，不是漏召回」。引用判定 `matchUsage` 是**字符串级词重合、零额外模型调用**（`USAGE_MIN_HITS=2`、单词需长到 3 字符、跳过工作层与 `focus`、比对**截断后**的文本；判据保守 ⇒ 界面只写「疑似引用」）。留档走**独立键** `heming.memory.recallLog.v1`（40 档／256KB／注入留 120 字／首档无条件保留，**不参与记忆导出**，也不污染 `selfAudit` 回滚时间线与任务区 `TaskRecord`）；`RecallRecorder` 用 `agentId::userText` 作键，把「两个钩子都拿不到 streamId」的两端接上，全程静默。记忆区：预览结论行 `召回 N 条 → 注入 M 条 · 预算占用 X/1200`、逐条带打分与状态、新增「召回记录」区（默认最近 3 档、明细可看引用与未注入原文、清除二次确认）、语义卡注脚「最近注入／疑似引用」。文档见 `docs/superpowers/specs/2026-10-22-memory-recall-observability.md`。
 
 ## 3. 仓库结构与关键文件
 
@@ -124,8 +125,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 1. **备份纪律已经落成脚本，但要每次真跑**：`deploy-bare.py backup` 做「停服 → tar → 起服 → SFTP 拷回本机 `.tmp/backups/` → 本机文件非空 + `/api/health` 复核」，d.25.1.7.0 发版前已实跑（3.7KB，含 `heming.db` 与 `-wal`）。剩下的不是开发项，是操作纪律：**没把库拷回本机就不许 install**（`docs/deploy.md` §6）。
 2. **弹窗屏蔽背景的读屏软件实测**：`inert` 屏蔽、焦点归还、非模态退出、首帧骨架与失败重试条**都已在真实 Chromium 里实测通过**（证据见 `docs/superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md` §5：弹窗开着时对背景按钮调 `.focus()` 焦点不动）。**只剩 NVDA / VoiceOver 那一层**——需要装读屏的机器，属验证项不属实现项。
 3. **语音重连的真机验证**：状态机与信令有单测，缺弱网 / TURN 环境证据。新裸机上 `HEMING_TURN_*` 尚未配置，群通话只有 STUN 路径可验。
-4. **记忆召回的可观测性**：先能归因「哪条被注入后模型用了 / 用了错的」，再谈个性化权重（现在只有可解释的确定性规则）。
-5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 打 d.25.1.7.0 → r27 打 d.26.1.7.0，均一次通过），下次继续递增目录；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
+4. **记忆个性化权重（可观测性已在 d.27 落地）**：归因链路已有（注入清单 + 打分 + 疑似引用 + 本机留档），下一步是在此之上调权重/淘汰策略。**前提仍是确定性规则**——`USAGE_MIN_HITS` 这类判据可以调，但不要变成「问模型你用了哪条」。已知边界：疑似引用只看最终回答正文（工具调用里引用了但没复述的不算）；旁路按 `agentId::userText` 配对，同智能体同一句在两处同时在飞会串档（要严格化需等钩子带上 streamId）。
+5. **`release/win-unpacked/resources/app.asar` 打不开**：`dist:desktop` 连续两次 `EBUSY`（文件被某进程占住，`openfiles` 查不到持有者、树内无相关进程）。根因仍未查，**绕过方式已固化成惯例**：每版换一个新的输出目录（r25 → r26 打 d.25.1.7.0 → r27 打 d.26.1.7.0，均一次通过），**本轮 d.27.1.7.0 用 `release/r28`**；打包与发布两处都要指同一目录（`HEMING_RELEASE_DIR`，`build-desktop.mjs` 与 `publish-update.sh` 都读它）。
 6. **`docker/` 与 `docker-compose.yml` 已停用但未清理**：机器已重置且没装 Docker，发版走 `deploy/`。两处 nginx 配置仍互为出处（`/updates/` 顺序、WS 的 `= /api/ws`），要清理就一起清，见 `docs/deploy.md` §11。
 
 **二期主线**：
@@ -148,6 +149,7 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 - **弹窗无障碍**：`useModalA11y` 覆盖 Esc（嵌套栈顶独占）、焦点循环、打开即聚焦、**打开期间屏蔽背景**（无 portal ⇒ 遮罩根起的兄弟逐个 `inert` + 模块级引用计数支持嵌套 + `data-a11y-keep` 保留常驻通话浮层 + 非模态浮层 `blockBackground:false`）、**关闭后焦点归还触发元素**（只在焦点确实丢失时还）。真实 Chromium 已实测：弹窗开着时对背景按钮 `.focus()` 焦点不动、Esc 后 `inert` 归零且焦点回到触发按钮、通知中心背景仍可点。★ **未做 portal 改造**（要动 10 个挂载点与 z-index 继承，收益不抵风险）；★ **NVDA/VoiceOver 仍未验**（要装读屏的机器）。弹窗打开时全局快捷键（`Alt+1–8`、`Ctrl+\`）仍生效——`inert` 不拦 JS 事件，与本特性正交、另议。
 - **主页首帧**：`workspaceReady`/`workspaceError` 只管**首帧**，加载骨架与失败重试条已上屏并在真实浏览器里验过（拖住接口看到骨架、500 看到「加载失败：原因」+ 重试、重试后回正常空态）；后台刷新失败刻意不推翻已就绪（已验：切页触发失败也不塌）。智能体动态一栏的数据来自 `loadAgentsRoster`，不共用这套口径。
 - **通知中心**：只做应用内（`heming.notifications.v1`，50 条 / 64KB 上限、无 TTL）；系统通知权限、免打扰、跨窗口聚合未做；HITL 待确认**不产生通知**，仍只在确认弹窗里等裁决。
+- **召回可观测性**：注入旁路与召回日志都只在本机（`heming.memory.recallLog.v1`，40 档 / 256KB，**不参与记忆导出**）。「疑似引用」是提示层与回答层的**词重合指标，不是因果证明**：只看最终回答正文（工具调用里用了但没复述就不算），判据保守（宁漏报不误报），界面措辞固定为「疑似引用」。零注入的轮次不留档；`capture`/`settle` 任何异常都只是「这一档没记上」，绝不影响发送与流式。配对键是 `agentId::userText`（两个钩子都拿不到 streamId），同一智能体在两处同时在飞同一句话会串档——刻意接受的低概率代价。打分只展示数值，未拆「重合度／衰减／置信度」三项归因。
 - **分发**：自动更新源是 HTTP（清单有 sha512，但首次安装包可被篡改）；无 CSP；未用 Electron `safeStorage` 加密落盘密钥；网页端未 HTTPS 化。
 - **数据边界**：记忆/技能/HITL 策略只在本机，换设备不跟随；新入群成员只能解密加入之后的消息。
 - **启动动画/标题栏**：逻辑与 DOM 已验，观感仍需真机过目；`WAVE_MS` 在 web 与 desktop 各写一份，无跨包断言。

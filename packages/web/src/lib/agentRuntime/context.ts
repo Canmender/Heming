@@ -1,5 +1,6 @@
 import { recallMemory } from "../memory/recall.js";
-import { formatMemorySection } from "../memory/format.js";
+import { summarizeInjection } from "../memory/format.js";
+import type { MemoryObservability } from "../memory/format.js";
 import type { EpisodicEntry, SemanticEntry, WorkingTurn } from "../memory/types.js";
 import type { MemoryStore } from "../memory/store.js";
 import { formatSkillSection } from "../skills/router.js";
@@ -40,16 +41,37 @@ export interface RecalledMemory {
   working: WorkingTurn[];
 }
 
+/**
+ * 一次记忆注入的可观测旁路（d.27）。
+ *
+ * 核心口径：**召回 ≠ 注入**。`counts`/`recalled` 是排序后取到的候选，
+ * `injected` 才是真进了提示词的行——预算裁掉的那几条只在 `dropped` 里出现。
+ * 数据结构与算法都归 memory/format.ts（差集只有格式化那一层算得准），这里只是转发给调用方。
+ */
+export type { MemoryObservability };
+
 export interface BuiltContext {
   /** 最终系统提示词：basePrompt + 记忆段 + 技能段（无注入时严格等于 basePrompt）。 */
   systemPrompt: string;
   recalled: RecalledMemory;
   /** 本次注入的技能（含命中理由/分数），空数组表示未注入。 */
   skills: SkillMatch[];
+  /** 记忆注入旁路；未接记忆/零注入时为 `injected: []` 的空档。 */
+  recallTrace: MemoryObservability;
 }
 
 function emptyRecalled(): RecalledMemory {
   return { semantic: [], episodic: [], working: [] };
+}
+
+function emptyObservability(): MemoryObservability {
+  return {
+    injected: [],
+    dropped: [],
+    scores: {},
+    superseded: [],
+    counts: { semantic: 0, episodic: 0, working: 0 },
+  };
 }
 
 /** 召回查询：当前文本 + 最近 2 轮用户文本（读工作记忆失败就只用当前文本）。 */
@@ -66,21 +88,26 @@ function recallQuery(memory: MemoryStore, input: BuildContextInput): string {
   }
 }
 
-/** 记忆段：召回 → 格式化为可追加的三段文本；任何异常都降级为「无记忆」。 */
+/** 记忆段：召回 → 格式化（含注入旁路）；任何异常都降级为「无记忆」。 */
 function collectMemory(
   input: BuildContextInput,
   memory: MemoryStore | undefined,
-): { section: string; recalled: RecalledMemory } {
-  if (!memory) return { section: "", recalled: emptyRecalled() };
+): { section: string; recalled: RecalledMemory; trace: MemoryObservability } {
+  if (!memory) return { section: "", recalled: emptyRecalled(), trace: emptyObservability() };
   try {
     const found = recallMemory(memory, {
       agentId: input.agentId,
       conversationId: input.conversationId,
       query: recallQuery(memory, input),
     });
-    return { section: formatMemorySection(found), recalled: found };
+    const { text, observability } = summarizeInjection(found);
+    return {
+      section: text,
+      recalled: { semantic: found.semantic, episodic: found.episodic, working: found.working },
+      trace: observability,
+    };
   } catch {
-    return { section: "", recalled: emptyRecalled() };
+    return { section: "", recalled: emptyRecalled(), trace: emptyObservability() };
   }
 }
 
@@ -120,11 +147,17 @@ export function buildAgentContext(input: BuildContextInput): BuiltContext {
   const skills = collectSkills(input, input.skills);
 
   if (!memory.section && !skills.section) {
-    return { systemPrompt: base, recalled: memory.recalled, skills: skills.matches };
+    return {
+      systemPrompt: base,
+      recalled: memory.recalled,
+      skills: skills.matches,
+      recallTrace: memory.trace,
+    };
   }
   return {
     systemPrompt: [base, memory.section, skills.section].filter(Boolean).join(SECTION_SEPARATOR),
     recalled: memory.recalled,
     skills: skills.matches,
+    recallTrace: memory.trace,
   };
 }

@@ -3,24 +3,29 @@ import type { Agent, SharedFileMeta } from "@heming/shared";
 import { WikiPanel } from "./WikiPanel.js";
 import {
   MEMORY_CHAR_BUDGET,
+  RECALL_LOG_MAX,
   WORKING_TTL_MS,
   agentPrefsStore,
+  buildTouchIndex,
   extractExplicitMemory,
-  formatMemorySection,
   knowledgeBase,
   memoryStore,
   normalizeKey,
   recallMemory,
+  summarizeInjection,
   type AgentMemoryPrefs,
   type AgentPrefsStore,
   type EpisodicEntry,
   type KnowledgeBase,
   type KnowledgeEntry,
   type MemoryData,
+  type MemoryObservability,
   type MemoryStore,
+  type RecallRun,
   type SemanticEntry,
   type WorkingTurn,
 } from "../lib/memory/index.js";
+import { recallRecorder, type RecallRecorder } from "../lib/memory/runRecorder.js";
 import { listAgents } from "../lib/agentsApi.js";
 import { useLlmStore } from "../store/llm.js";
 import {
@@ -48,6 +53,8 @@ export interface MemoryPageProps {
   memory?: MemoryStore;
   kb?: KnowledgeBase;
   prefs?: AgentPrefsStore;
+  /** 召回日志登记器（可观测性）；缺省用模块级单例，测试可注入内存实现。 */
+  recorder?: RecallRecorder;
   fetchSharedFiles?: () => Promise<SharedFileMeta[]>;
 }
 
@@ -69,6 +76,8 @@ const btnPrimary = "rounded-lg bg-ink px-4 py-1.5 text-sm font-bold text-white d
 const btnPrimarySm =
   "rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-40";
 const hintCls = "text-[11px] text-muted";
+/** 召回记录默认只列最近 3 次，其余按需展开。 */
+const RECALL_RUNS_PREVIEW = 3;
 const errorCls = "text-[12px] text-red-600";
 const okCls = "text-[12px] text-muted";
 const badgeCls =
@@ -507,7 +516,71 @@ function KnowledgeModal({
   );
 }
 
-function RecallGroup({ title, lines }: { title: string; lines: string[] }) {
+/** 一行召回候选的展示数据：文本 + 打分 + 「这次到底有没有进提示词」。 */
+interface RecallLine {
+  text: string;
+  score?: number;
+  injected: boolean;
+  truncated: boolean;
+  /** 未注入的原因（预算裁掉／被同键新值覆盖）。 */
+  reason?: "budget" | "superseded";
+}
+
+const DROP_REASON_LABEL = {
+  budget: "预算外，未注入",
+  superseded: "被同键新值覆盖",
+} as const;
+
+/**
+ * 记忆卡上的注入/引用注脚。
+ * 「注入过」和「回答疑似用到」是两件事，措辞必须分开：后者只是词重合判定，不能写成「已使用」。
+ */
+function touchNote(touch: { injectedAt: string; usedAt: string } | undefined): string {
+  if (!touch) return "";
+  const parts = [
+    touch.injectedAt && `最近注入 ${touch.injectedAt.slice(0, 10)}`,
+    touch.usedAt && `疑似引用 ${touch.usedAt.slice(0, 10)}`,
+  ].filter(Boolean);
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+
+/**
+ * 把候选与注入旁路对在一起（召回 ≠ 注入）：同一条既可能「召回了但被预算裁掉」，
+ * 也可能「注入了还被截断」。只列召回清单会让用户以为全都进了提示词。
+ */
+function traceLines(
+  items: { id: string; label: string }[],
+  trace: MemoryObservability,
+): RecallLine[] {
+  const injected = new Map(trace.injected.map((item) => [item.id, item]));
+  const dropped = new Map(trace.dropped.map((item) => [item.id, item]));
+  return items.map(({ id, label }) => {
+    const hit = injected.get(id);
+    const drop = dropped.get(id);
+    return {
+      text: label,
+      ...(trace.scores[id] !== undefined ? { score: trace.scores[id] } : {}),
+      injected: !!hit,
+      truncated: !!hit?.truncated,
+      ...(drop ? { reason: drop.reason } : {}),
+    };
+  });
+}
+
+/**
+ * 短期记忆的展示行按文本对齐注入清单（这些行没有独立 id：焦点行是跨轮聚合，
+ * 一轮还会拆成「用户/助手」两行）。截断行的文本是原行的前缀，故「以截断段开头」也算注入了。
+ */
+function workingTraceLines(labels: string[], trace: MemoryObservability): RecallLine[] {
+  const hits = trace.injected.filter((item) => item.layer === "working");
+  return labels.map((text) => {
+    const exact = hits.find((item) => item.content === text);
+    const cut = exact ? undefined : hits.find((item) => text.startsWith(item.content.replace(/…$/, "")));
+    return { text, injected: !!(exact || cut), truncated: !!cut };
+  });
+}
+
+function RecallGroup({ title, lines }: { title: string; lines: RecallLine[] }) {
   return (
     <div>
       <div className="text-[11px] font-bold text-[#777]">
@@ -516,10 +589,18 @@ function RecallGroup({ title, lines }: { title: string; lines: string[] }) {
       {lines.length === 0 ? (
         <div className="mt-0.5 text-[11px] text-muted">无命中</div>
       ) : (
-        <ul className="mt-0.5 space-y-0.5">
+        <ul className="mt-0.5 space-y-1">
           {lines.map((line, i) => (
             <li key={i} className="break-words text-[11px] text-[#555]">
-              {line}
+              {line.text}
+              <span className="ml-1 text-[10px] text-muted">
+                {line.score !== undefined && `· 打分 ${line.score.toFixed(3)} `}
+                {line.injected
+                  ? line.truncated
+                    ? "· 注入（超预算已截断）"
+                    : "· 注入"
+                  : `· ${line.reason ? DROP_REASON_LABEL[line.reason] : "未注入"}`}
+              </span>
             </li>
           ))}
         </ul>
@@ -528,8 +609,51 @@ function RecallGroup({ title, lines }: { title: string; lines: string[] }) {
   );
 }
 
-/* ------------------------------------------------------------------ 页面 */
+/** 一次生成的召回档案行：默认只看结论，展开看逐条注入/未注入/疑似引用。 */
+function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: boolean; onToggle: () => void }) {
+  const used = new Set(run.used);
+  return (
+    <li className="rounded-lg border border-line px-3 py-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="break-words text-[12px] text-[#555]">{clip(run.query, 60) || "（空提问）"}</div>
+          <div className="mt-0.5 text-[10px] text-muted">
+            {run.at.slice(0, 10)} {run.at.slice(11, 16)} · 召回 语义{run.recalled.semantic}/情景{run.recalled.episodic}/短期
+            {run.recalled.working} → 注入 {run.injected.length} 条
+            {run.dropped.length > 0 && ` · 未注入 ${run.dropped.length} 条`}
+            {used.size > 0 && ` · 疑似引用 ${used.size} 条`}
+          </div>
+        </div>
+        <button type="button" onClick={onToggle} className={btnGhostSm} aria-expanded={expanded}>
+          {expanded ? "收起" : "明细"}
+        </button>
+      </div>
+      {expanded && (
+        <div className="mt-2 space-y-1 border-t border-[#ececec] pt-2">
+          {run.injected.map((item) => (
+            <div key={`${item.layer}-${item.id}`} className="break-words text-[11px] text-[#555]">
+              <span className="text-muted">
+                {item.layer === "semantic" ? "语义" : item.layer === "episodic" ? "情景" : "短期"}
+                {item.score !== undefined && ` ${item.score.toFixed(3)}`}
+                {item.truncated && " 截断"}
+                {used.has(item.id) ? " ▪ 引用" : " ·"}{" "}
+              </span>
+              {item.content}
+            </div>
+          ))}
+          {run.dropped.map((item) => (
+            <div key={`drop-${item.layer}-${item.id}`} className="break-words text-[11px] text-muted">
+              <span className="text-[#bbb]">✕ </span>
+              {DROP_REASON_LABEL[item.reason]}：{item.content ?? item.id}
+            </div>
+          ))}
+        </div>
+      )}
+    </li>
+  );
+}
 
+/* ------------------------------------------------------------------ 页面 */
 /**
  * 三个标签（用户 2026-10-20 重新划分）：
  * - agents 智能体：这个智能体的记忆相关设置与短期记忆（原「短期记忆」+ 原页面下方的偏好/复盘卡）
@@ -554,6 +678,7 @@ export function MemoryPage({
   memory = memoryStore,
   kb = knowledgeBase,
   prefs = agentPrefsStore,
+  recorder = recallRecorder,
   fetchSharedFiles = fetchFiles,
 }: MemoryPageProps = {}) {
   const [tab, setTab] = useState<TabKey>("agents");
@@ -637,7 +762,12 @@ export function MemoryPage({
     episodic: EpisodicEntry[];
     working: WorkingTurn[];
     text: string;
+    trace: MemoryObservability;
   } | null>(null);
+  const [runs, setRuns] = useState<RecallRun[]>([]);
+  const [runsOpen, setRunsOpen] = useState(false);
+  const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
+  const [clearRunsOpen, setClearRunsOpen] = useState(false);
 
   useEffect(() => {
     setRetentionDraft(String(settings.retentionDays));
@@ -759,13 +889,39 @@ export function MemoryPage({
     bump();
   };
 
+  const toggleRun = (id: string) => {
+    setExpandedRuns((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const onRecall = () => {
     // 工作记忆按会话召回：取当前选中智能体最近一轮所在会话
     const conversationId =
       layers.working.find((turn) => !agentId || turn.agentId === agentId)?.conversationId ?? "";
     const recalled = recallMemory(memory, { agentId, conversationId, query: recallQuery });
-    setRecall({ ...recalled, text: formatMemorySection(recalled) });
+    const { text, observability } = summarizeInjection(recalled);
+    setRecall({ ...recalled, text, trace: observability });
   };
+
+  // 召回日志随 tick 刷新（bump() 之后能看到刚记上的档）；失败回退空表。
+  useEffect(() => {
+    setRuns(recorder.list());
+  }, [tick, recorder]);
+
+  /** 日志按时间升序存，展示要最近优先。 */
+  const visibleRuns = useMemo(
+    () =>
+      (runsOpen ? runs : runs.slice(-RECALL_RUNS_PREVIEW))
+        .slice()
+        .reverse(),
+    [runs, runsOpen],
+  );
+  /** 条目 id → 最后一次注入/引用：数据库卡的「最近注入」与「疑似引用过」都从这里取。 */
+  const touches = useMemo(() => buildTouchIndex(runs), [runs]);
 
 
   const onAddManualAgent = () => {
@@ -1154,6 +1310,7 @@ export function MemoryPage({
                       </div>
                       <div className="mt-1 text-[10px] text-muted">
                         {SOURCE_LABEL[entry.source]} · 置信度 {entry.confidence.toFixed(2)}
+                        {touchNote(touches.get(entry.id))}
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
@@ -1265,19 +1422,39 @@ export function MemoryPage({
             className="mt-3 rounded-lg border border-line p-3"
           >
             <div className={hintCls}>
-              预算占用 {recall.text.length} / {MEMORY_CHAR_BUDGET} 字符
+              召回 {recall.trace.counts.semantic + recall.trace.counts.episodic + recall.trace.counts.working} 条
+              → 注入 {recall.trace.injected.length} 条 · 预算占用 {recall.text.length} /{" "}
+              {MEMORY_CHAR_BUDGET} 字符
             </div>
             <div className="mt-2 grid gap-3 md:grid-cols-3">
               <RecallGroup
                 title="语义"
-                lines={recall.semantic.map((entry) => `${entry.key}：${entry.value}`)}
+                lines={traceLines(
+                  recall.semantic.map((entry) => ({ id: entry.id, label: `${entry.key}：${entry.value}` })),
+                  recall.trace,
+                )}
               />
               <RecallGroup
                 title="情景"
-                lines={recall.episodic.map((entry) => `${entry.at.slice(0, 10)}：${entry.summary}`)}
+                lines={traceLines(
+                  recall.episodic.map((entry) => ({
+                    id: entry.id,
+                    label: `${entry.at.slice(0, 10)}：${entry.summary}`,
+                  })),
+                  recall.trace,
+                )}
               />
-              <RecallGroup title="短期" lines={workingPreviewLines(recall.working)} />
+              <RecallGroup
+                title="短期"
+                lines={workingTraceLines(workingPreviewLines(recall.working), recall.trace)}
+              />
             </div>
+            {recall.trace.superseded.length > 0 && (
+              <div className={`mt-2 ${hintCls}`}>
+                另有 {recall.trace.superseded.length} 条旧值被同主题键的新值覆盖：它们不参与注入，
+                这不是漏召回。
+              </div>
+            )}
             {recall.text ? (
               <textarea
                 readOnly
@@ -1291,6 +1468,88 @@ export function MemoryPage({
           </div>
         )}
       </section>
+
+      <section className={`${cardCls} mt-3`}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-[12px] font-bold text-[#777]">召回记录</div>
+            <div className={`mt-1 ${hintCls}`}>
+              本机最近 {RECALL_LOG_MAX} 次「带记忆的生成」留档：召回几条、真注入几条、哪些被预算裁掉，
+              以及回答里疑似用到了哪条（判据是词重合，不是模型自述）。只存本机，不参与记忆导出。
+            </div>
+          </div>
+          {runs.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setClearRunsOpen(true)}
+              className={`${btnGhostSm} shrink-0`}
+            >
+              清除记录
+            </button>
+          )}
+        </div>
+        {runs.length === 0 ? (
+          <div className={`mt-2 ${hintCls}`}>
+            还没有留档：在聊天里 @ 智能体说一句话（记忆开关为开、且本轮召回到了东西）就会记下。
+          </div>
+        ) : (
+          <>
+            <ul aria-label="召回记录列表" className="mt-3 space-y-2">
+              {visibleRuns.map((run) => (
+                <RecallRunRow
+                  key={run.id}
+                  run={run}
+                  expanded={expandedRuns.has(run.id)}
+                  onToggle={() => toggleRun(run.id)}
+                />
+              ))}
+            </ul>
+            {runs.length > RECALL_RUNS_PREVIEW && (
+              <button
+                type="button"
+                onClick={() => setRunsOpen((open) => !open)}
+                className={`${btnGhostSm} mt-2`}
+              >
+                {runsOpen ? `只看最近 ${RECALL_RUNS_PREVIEW} 条` : `展开全部 ${runs.length} 条`}
+              </button>
+            )}
+          </>
+        )}
+      </section>
+
+      {clearRunsOpen && (
+        <ConfirmDialog
+          title="清除召回记录"
+          onCancel={() => setClearRunsOpen(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setClearRunsOpen(false)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  recorder.clearLog();
+                  setClearRunsOpen(false);
+                  setRuns([]);
+                  setExpandedRuns(new Set());
+                }}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                清除
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            清除全部 {runs.length} 条召回记录？记忆本身不受影响，只是看不到历史注入与引用轨迹了。
+          </p>
+        </ConfirmDialog>
+      )}
 
       {pendingSemantic && (
         <ConfirmDialog
