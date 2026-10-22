@@ -83,6 +83,7 @@
 | [research/2026-10-21-task-area.md](research/2026-10-21-task-area.md) | 任务区：Codex / Claude Code 等产品的任务模型对照与和鸣落地口径 |
 | [research/2026-10-21-gap-closure.md](research/2026-10-21-gap-closure.md) | 缺口补全：功能 / 视觉 / 体感三张清单与规则作用域、导出、公式的落地口径 |
 | [research/2026-10-21-all-feature-gap-audit.md](research/2026-10-21-all-feature-gap-audit.md) | 全功能缺口审计：d.24 已落地 10 项 + 暂缓项的 d.25 处置（8 项已补做，附未做部分与理由） |
+| [research/2026-10-22-deep-audit-followup-plan.md](research/2026-10-22-deep-audit-followup-plan.md) | 深度调研与后续完善计划：P0 红线口子 / P1 数据一致性 / P2 体感 / P3 功能 / P4 工程，逐条带 `file:line` 证据与 d.30… 分轮排期 |
 
 ## 5. 历史计划
 

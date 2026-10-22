@@ -15,7 +15,7 @@
 - **架构红线（不可违背）**：智能体**本地驱动**（本机系统提示词 + 本机 LLM Key 直连供应商 + 本机执行），云端**只是 IM 桥梁**；个人数据（Key/记忆/知识库/本地文件）**不出设备**。
 - **E2E 红线**：消息与附件端到端加密，服务端只见信封；无安全上下文时**拒绝发送，绝不降级明文**。
 - 参考项目：`D:\MultiAgent`（合鸣 Ensemble）——借鉴架构，不复用代码；调研见 `docs/superpowers/research/2026-10-17-multiagent-study.md`。
-- 文档总入口：`docs/INDEX.md`；竞品与许可证调研：`docs/research/2026-10-20-competitive-analysis-v2.md`；同功能异同与优化建议：`docs/research/2026-10-21-feature-parity-and-optimization.md`；缺口清单：`docs/research/2026-10-21-gap-closure.md`、`docs/research/2026-10-21-all-feature-gap-audit.md`。
+- 文档总入口：`docs/INDEX.md`；竞品与许可证调研：`docs/research/2026-10-20-competitive-analysis-v2.md`；同功能异同与优化建议：`docs/research/2026-10-21-feature-parity-and-optimization.md`；缺口清单：`docs/research/2026-10-21-gap-closure.md`、`docs/research/2026-10-21-all-feature-gap-audit.md`；**深度调研与分轮完善计划（含逐条 `file:line` 证据）：`docs/research/2026-10-22-deep-audit-followup-plan.md`**。
 
 ## 2. 当前状态
 
@@ -123,6 +123,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 ## 5. 下一步候选
 
+**总入口（本轮新增）**：`docs/research/2026-10-22-deep-audit-followup-plan.md` —— 四路代码勘察 + 逐条复核后的分级清单（P0 红线口子 / P1 数据一致性与「空账」/ P2 体感 / P3 功能 / P4 工程发布链），每条带 `file:line` 证据、修法与验收形态，并给出 **d.30…d.36 的分轮范围**。下面 6 条是那份文档之外的操作纪律与验证项，不重复列计划内容。**下一轮 d.30 的范围已定**：HITL「免问下限」去掉 `danger`（读侧也夹回）、`/api/ice-servers` 补鉴权、WS token 出 query（改首帧鉴权 + 队列上限）、桌面主进程崩溃兜底、记忆 `updatedAt` 拆分与沉淀计数落盘。
+
 **当前直接待办**：
 
 1. **备份纪律已经落成脚本，但要每次真跑**：`deploy-bare.py backup` 做「停服 → tar → 起服 → SFTP 拷回本机 `.tmp/backups/` → 本机文件非空 + `/api/health` 复核」，d.25.1.7.0 发版前已实跑（3.7KB，含 `heming.db` 与 `-wal`）。剩下的不是开发项，是操作纪律：**没把库拷回本机就不许 install**（`docs/deploy.md` §6）。两个已修的坑：① 备份名按日期生成，**同一天二次发版会覆盖上一份**（d.28 实测：14:27 那份盖掉了上午的），一天内要多发几版就在覆盖前手动改名留档（d.29 已按此办理：14:53 这份写作 `heming-data-2026-10-22-d29.tar.gz`）；② 脚本原先用未 resolve 的 `__file__` 且少算一层 parent，**实际把备份落在 `.superpowers/.tmp/backups/`**，与 §6 写的 `.tmp/backups/` 不符（文件确实在本机，只是不在文档指的地方）——已改 `pathlib.Path(__file__).resolve()` + `parent.parent`，实测常量解析为 `D:\Heming\.tmp\backups`；d.28/d.29 两份已按原 md5 复制到 `.tmp/backups/`。
@@ -150,16 +152,18 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 ## 6. 技术债与已知风险
 
 - **Registry**：发现页与安装流已接线（接口区二级面板）；本地包（npm/pypi）**已支持但需本机运行时**（不内置：探测缺 Node/uv 就标「缺运行时」，浏览器标「需桌面版」），oci/nuget/mcpb 仍显式不支持；包名走字符白名单、**必须有钉死版本**、`packageArguments`/`environmentVariables` 一律丢弃；安装确认**始终询问**且不提供「本次会话都允许」；列表缓存在 `heming.mcpRegistry.v1`（6h TTL），离线降级并标注 stale；台账字段 `registryType`/`registryVersion` 只作账本不作执行输入；删除 stdio 服务会调 `stopStdioServer` 回收子进程。
-- **HITL**：没有“全部放行”档（刻意）；`annotations` 不参与判定（untrusted hint）；闸门异常按 deny；会话授权只在内存。规则记忆已落盘（deny 优先、danger 不记允许），新规则按智能体隔离、旧规则保持全局；规则不跨设备跟随，ChatPage 接线层已有拒绝/异常路径断言。确认前预览只读调用参数、不读目标文件；切换会话取消待确认按拒绝收口。
+- **HITL**：没有“全部放行”档（刻意）；`annotations` 不参与判定（untrusted hint）；闸门异常按 deny；会话授权只在内存。规则记忆已落盘（deny 优先、danger 不记允许），新规则按智能体隔离、旧规则保持全局；规则不跨设备跟随，ChatPage 接线层已有拒绝/异常路径断言。确认前预览只读调用参数、不读目标文件；切换会话取消待确认按拒绝收口。★ **但设置页的「免问下限」有一个实质全放行的口子**：`HitlPolicyCard.tsx:84` 允许把下限选到 `danger`（文案就叫「全部不问」），而判定是 `hitl/policy.ts:201` 的 `RISK_ORDER[risk] <= RISK_ORDER[floor]` —— `floor=danger` 时**所有档位恒真**。这与「绝不新增全部放行档」冲突，已在 d.30 排期里要**读侧一并夹回**（只删 UI 不够，旧 localStorage 里的 `danger` 仍会生效）。见计划 P0-1。
 - **会话导出**：只导出已加载且本机可解密的消息；换设备/清缓存后旧消息解不开会被跳过；附件只带元信息，不导出字节；不支持 PDF 或分享链接（避免明文上云）。
 - **视觉附件**：历史图片与**本轮同发的图片**都进提示词（同发不再依赖 WS 回声时机）；一次最多 4 张历史图 + 本轮 1 张、单张 ≤4MB。图片解密依赖本地 E2E 密钥，换设备/清缓存后旧图读不到。空草稿单发附件仍不触发生成（刻意）。
 - **Anthropic 不支持工具调用**：消息结构（content blocks）与 OpenAI 不同，绑 Anthropic 的智能体用不了 MCP/图表/self 工具。
-- **语音通话**：**断线重连已做**（逐路 ICE restart，`RECONNECT_MAX_RESTARTS=2`、`disconnected` 先观察 3s、新信令 `voice_call_reconnect`、状态仍是 active 加路数提示）；★ **真机弱网与 TURN 环境仍未验证**，预算数字是工程判断不是测量结果；群通话任一路彻底断开即整通结束（刻意）；通话中邀请新成员、群成员在线状态等未做；`GET /api/ice-servers` 无鉴权，配置 TURN 时凭据对未登录者可读。
+- **语音通话**：**断线重连已做**（逐路 ICE restart，`RECONNECT_MAX_RESTARTS=2`、`disconnected` 先观察 3s、新信令 `voice_call_reconnect`、状态仍是 active 加路数提示）；★ **真机弱网与 TURN 环境仍未验证**，预算数字是工程判断不是测量结果；群通话任一路彻底断开即整通结束（刻意）；通话中邀请新成员、群成员在线状态等未做；`GET /api/ice-servers` 无鉴权，配置 TURN 时凭据对未登录者可读（已排进 d.30，见 `docs/research/2026-10-22-deep-audit-followup-plan.md` P0-2）。★ **措辞纠正**：里程碑 11 与本节标题写的「Mesh」与实现不符——主叫给每个 `peerId` 建 PC（`voiceCall.ts:316`），但被叫只连主叫一路（`:390`/`:477`），**3 人以上实际是星型（中心=主叫）**；`voiceCall.ts:8` 的文件注释同样写错。处置方案（承认星型 vs 补真 Mesh）见同一份计划 P2-3。
 - **弹窗无障碍**：`useModalA11y` 覆盖 Esc（嵌套栈顶独占）、焦点循环、打开即聚焦、**打开期间屏蔽背景**（无 portal ⇒ 遮罩根起的兄弟逐个 `inert` + 模块级引用计数支持嵌套 + `data-a11y-keep` 保留常驻通话浮层 + 非模态浮层 `blockBackground:false`）、**关闭后焦点归还触发元素**（只在焦点确实丢失时还）。真实 Chromium 已实测：弹窗开着时对背景按钮 `.focus()` 焦点不动、Esc 后 `inert` 归零且焦点回到触发按钮、通知中心背景仍可点。★ **未做 portal 改造**（要动 10 个挂载点与 z-index 继承，收益不抵风险）；★ **NVDA/VoiceOver 仍未验**（要装读屏的机器）。弹窗开着时的全局快捷键已在 d.29.1.8.0 收口：`Alt+1–8` 与 `Ctrl/⌘+K` 在有模态弹窗时吞键不做事（`inert` 只挡点击与焦点，挡不住挂在 window 上的 `keydown`），判据是 `useModalA11y` 导出的 `hasOpenModal()`，非模态浮层与语音通话常驻层不拦。
 - **主页首帧**：`workspaceReady`/`workspaceError` 只管**首帧**，加载骨架与失败重试条已上屏并在真实浏览器里验过（拖住接口看到骨架、500 看到「加载失败：原因」+ 重试、重试后回正常空态）；后台刷新失败刻意不推翻已就绪（已验：切页触发失败也不塌）。智能体动态一栏的数据来自 `loadAgentsRoster`，不共用这套口径。
 - **通知中心**：只做应用内（`heming.notifications.v1`，50 条 / 64KB 上限、无 TTL）；系统通知权限、免打扰、跨窗口聚合未做；HITL 待确认**不产生通知**，仍只在确认弹窗里等裁决。
 - **召回可观测性**：注入旁路与召回日志都只在本机（`heming.memory.recallLog.v1`，40 档 / 256KB，**不参与记忆导出**）。「疑似引用」是提示层与回答层的**词重合指标，不是因果证明**：只看最终回答正文（工具调用里用了但没复述就不算），判据保守（宁漏报不误报），界面措辞固定为「疑似引用」。零注入的轮次不留档；`capture`/`settle` 任何异常都只是「这一档没记上」，绝不影响发送与流式。配对键是 `agentId::userText`（两个钩子都拿不到 streamId），同一智能体在两处同时在飞同一句话会串档——刻意接受的低概率代价。打分只展示数值，未拆「重合度／衰减／置信度」三项归因。
-- **分发**：自动更新源是 HTTP（清单有 sha512，但首次安装包可被篡改）；无 CSP；未用 Electron `safeStorage` 加密落盘密钥；网页端未 HTTPS 化。
+- **分发**：自动更新源是 HTTP（清单有 sha512，但首次安装包可被篡改）；无 CSP（web/server/desktop 三处 grep 均 0 命中）；未用 Electron `safeStorage` 加密落盘密钥（`packages/desktop/**` 0 命中 ⇒ apiKey、MCP 请求头、E2E 导出的 JWK 私钥**全明文 localStorage**）；网页端未 HTTPS 化。已排期：计划 P0-5（safeStorage + 一次性迁移）、P0-6（桌面壳 CSP）、P4-6（更新源签名与 HTTPS，**需用户拍板**）。
+- **本机存储只有一个 ~5MB 的同源配额，而键位设计的最坏情况超它一个量级**：记忆 4 键各 1.2MB（`memory/storage.ts:10-17`）+ 任务 1.1MB（`tasks/store.ts:39`）+ 召回日志 256KB + 用量账本 64KB + 通知 64KB + **每会话 500 条、会话数不设上限**的 `heming.msgCache.<convId>`。各处 `*BYTE_LIMIT` 各自为政、互不知情，溢出后的兜底是「回退空表 / 静默不落」，表现为**权重无故退回 ×1、任务记录消失**这类无法解释的降级，界面上没有任何水位。修复口径与验收见计划 P1-1（下一轮 d.31）。
+- **有账无埋点**：`heming.tokenUsage` 的 `record()` 在生产代码里**零调用点**（只有测试在写），而首页统计卡与 30 天热力图已经在把它当事实展示；沉淀节奏计数 `MemoryStore.pending` 只在内存（`memory/store.ts:254` 自陈），刷新即归零 ⇒ 长会话永远攒不满一次沉淀。两条都在计划里（P1-2、P1-4），后者排 d.30。
 - **数据边界**：记忆/技能/HITL 策略只在本机，换设备不跟随；新入群成员只能解密加入之后的消息。
 - **启动动画/标题栏**：逻辑与 DOM 已验，观感仍需真机过目；`WAVE_MS` 在 web 与 desktop 各写一份，无跨包断言。
 - **测试口径**：安全功能的测试要看断言方向，不只“全绿”；历史上有过把 `readOnlyHint:true` 的 `delete_file` 断言成 `read` 的漏洞。
