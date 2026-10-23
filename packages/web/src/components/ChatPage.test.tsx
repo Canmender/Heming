@@ -20,6 +20,7 @@ import { skillPool } from "../lib/skills/index.js";
 import { CONTEXT_KEYS, type ContextSettings } from "../lib/agentContext/index.js";
 import { hasSubtle, toB64, fromB64 } from "../lib/e2eCrypto.js";
 import { sealMessage } from "../lib/e2eSession.js";
+import { DEFAULT_WINDOW } from "../lib/messageWindow.js";
 
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
 // E2E Task 4：hasSubtle 桩（默认 true，无 subtle 用例按例翻转）；
@@ -394,6 +395,90 @@ describe("ChatPage", () => {
 
     fireEvent.keyDown(input, { key: "Escape" });
     expect(screen.queryByLabelText("搜索本会话")).not.toBeInTheDocument();
+  });
+
+  /**
+   * d.33 · P2-2：消息列表窗口化。
+   *
+   * 主判据是**渲染出的消息节点数**（确定性），不是耗时——vitest 里的计时断言在
+   * 不同机器上极不稳定，只能当粗粒度冒烟。
+   */
+  it("长会话只渲染初始窗口，点按钮才追加更早的消息（d.33）", async () => {
+    const many = Array.from({ length: 200 }, (_, i) =>
+      msg(`w${i}`, `第 ${i} 条`, `2026-10-14T0${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}:00.000Z`),
+    );
+    mockMessagesFetch(many);
+
+    const { container } = render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("第 199 条")).toBeInTheDocument());
+
+    const rows = () => container.querySelectorAll('[id^="msg-w"]');
+    expect(rows()).toHaveLength(DEFAULT_WINDOW);
+    // 窗口贴着最新消息：最早的几条没渲染
+    expect(screen.queryByText("第 0 条")).not.toBeInTheDocument();
+    expect(screen.getByText("第 199 条")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /加载更早的消息/ }));
+    expect(rows()).toHaveLength(DEFAULT_WINDOW * 2);
+  });
+
+  it("滚到顶部自动追加一窗历史（d.33）", async () => {
+    const many = Array.from({ length: 200 }, (_, i) =>
+      msg(`r${i}`, `行 ${i}`, `2026-10-14T0${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}:00.000Z`),
+    );
+    mockMessagesFetch(many);
+
+    const { container } = render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("行 199")).toBeInTheDocument());
+    const rows = () => container.querySelectorAll('[id^="msg-r"]');
+    expect(rows()).toHaveLength(DEFAULT_WINDOW);
+
+    const scroller = screen.getByTestId("message-list");
+    scroller.scrollTop = 0; // 贴顶
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => expect(rows()).toHaveLength(DEFAULT_WINDOW * 2));
+  });
+
+  it("会话内搜索命中窗口外的老消息：自动扩窗后高亮（d.33）", async () => {
+    const many = Array.from({ length: 200 }, (_, i) =>
+      msg(
+        `s${i}`,
+        i === 5 ? "老消息 目标命中" : `条目 ${i}`,
+        `2026-10-14T0${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}:00.000Z`,
+      ),
+    );
+    mockMessagesFetch(many);
+
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("条目 199")).toBeInTheDocument());
+    // 窗口外：目标消息一开始没渲染
+    expect(screen.queryByText("老消息 目标命中")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "搜索会话" }));
+    fireEvent.change(screen.getByLabelText("搜索本会话"), { target: { value: "目标命中" } });
+
+    // 扩窗后节点出现且被高亮
+    expect(await screen.findByText("老消息 目标命中")).toBeInTheDocument();
+    expect(document.getElementById("msg-s5")?.className).toContain("ring-[#f0d58c]");
+  });
+
+  it("切会话后窗口回到初始值（d.33）", async () => {
+    const many = Array.from({ length: 200 }, (_, i) =>
+      msg(`c${i}`, `切 ${i}`, `2026-10-14T0${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}:00.000Z`),
+    );
+    mockMessagesFetch(many);
+
+    const { container } = render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("切 199")).toBeInTheDocument());
+    const rows = () => container.querySelectorAll('[id^="msg-c"]');
+    fireEvent.click(screen.getByRole("button", { name: /加载更早的消息/ }));
+    expect(rows()).toHaveLength(DEFAULT_WINDOW * 2);
+
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" });
+    });
+    await waitFor(() => expect(rows().length).toBeLessThanOrEqual(DEFAULT_WINDOW));
   });
 
   it("空会话：显示引导文案而不是整片空白", async () => {

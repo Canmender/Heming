@@ -1,4 +1,12 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { Conversation, Message, MessagePayload } from "@heming/shared";
 import {
   activeConversationsOf,
@@ -10,6 +18,12 @@ import {
 import { useUiStore, type TaskDraft } from "../store/ui.js";
 import { useNotificationStore } from "../store/notifications.js";
 import { clearDraft, getDraft, setDraft as saveDraft } from "../lib/drafts.js";
+import {
+  DEFAULT_WINDOW,
+  countToInclude,
+  expandCount,
+  shouldLoadMore,
+} from "../lib/messageWindow.js";
 import { useTaskStore } from "../lib/tasks/store.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
@@ -1178,9 +1192,49 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
    * 表情回应事件消息（kind="reaction" 的 e2e 消息）不画气泡——渲染前过滤，
    * 由 chipsFor 聚合进目标消息的 chips（设计 §5.4）。未解密的事件暂以占位显示。
    */
-  const visibleMessages = messages.filter(
-    (m) => !(m.enc === "e2e" && plainOf[m.id]?.kind === "reaction"),
+  // 表情回应（reaction）是「事件」不是「消息」，不进消息流。
+  // 用 useMemo 是为了让引用稳定：窗口化与搜索跳转的 effect 都拿它当依赖，
+  // 每次渲染都新建数组会让那些 effect 反复触发（尤其是 scrollIntoView）。
+  const visibleMessages = useMemo(
+    () => messages.filter((m) => !(m.enc === "e2e" && plainOf[m.id]?.kind === "reaction")),
+    [messages, plainOf],
   );
+  /**
+   * 消息列表窗口化（d.33 · P2-2）：只渲染最近 `windowCount` 条。
+   *
+   * 数据仍全量加载（服务端一次给全、E2E 解密也在数据层），这里只限制同时挂多少
+   * DOM 节点——800 条消息 × 每条带引用卡/chips/图表的开销是线性增长的首屏成本。
+   * 窗口**只增不减**：往上翻过的历史不因新消息到达被收回（收回去会让阅读位置跳走）。
+   */
+  const [windowCount, setWindowCount] = useState(DEFAULT_WINDOW);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  /** 追加历史前的 scrollHeight：渲染完成后据它补偿 scrollTop，避免内容整体下移一屏。 */
+  const prevScrollHeightRef = useRef<number | null>(null);
+  const windowedMessages = useMemo(
+    () => visibleMessages.slice(-windowCount),
+    [visibleMessages, windowCount],
+  );
+  /** 向更早的方向追加一窗（滚到顶或点「加载更早的消息」）。 */
+  const loadEarlierMessages = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || windowCount >= visibleMessages.length) return;
+    prevScrollHeightRef.current = el.scrollHeight;
+    setWindowCount((count) => expandCount(count, visibleMessages.length));
+  }, [windowCount, visibleMessages.length]);
+  // 切会话：窗口回到初始值（回到该会话时从最近的一窗开始看）。
+  useEffect(() => {
+    setWindowCount(DEFAULT_WINDOW);
+    prevScrollHeightRef.current = null;
+  }, [convId]);
+  // 追加后补偿滚动位置：上方长出来的高度要加回 scrollTop，否则正在看的内容会跳走。
+  // 用 useLayoutEffect 是为了在绘制前完成补偿，避免看到一帧跳动。
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const prev = prevScrollHeightRef.current;
+    if (!el || prev === null) return;
+    prevScrollHeightRef.current = null;
+    el.scrollTop += el.scrollHeight - prev;
+  }, [windowCount]);
   /** 多选：勾/去勾一条（顺序按点击顺序记录，导出仍按消息原始顺序取）。 */
   const toggleSelected = (id: string) =>
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -1212,8 +1266,18 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   useEffect(() => {
     if (!searchOpen || !activeSearchId) return;
+    // 命中可能在窗口之外（那条消息没渲染）——先把窗口扩到包含它（留两条上下文），
+    // 扩窗后本 effect 会因 windowCount 变化再跑一次，那时节点已在 DOM 里。
+    const index = visibleMessages.findIndex((m) => m.id === activeSearchId);
+    if (index >= 0) {
+      const needed = countToInclude(index, visibleMessages.length, windowCount);
+      if (needed > windowCount) {
+        setWindowCount(needed);
+        return;
+      }
+    }
     document.getElementById(`msg-${activeSearchId}`)?.scrollIntoView({ block: "center" });
-  }, [searchOpen, activeSearchId]);
+  }, [searchOpen, activeSearchId, visibleMessages, windowCount]);
 
   const closeSearch = () => {
     setSearchOpen(false);
@@ -2755,7 +2819,31 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
       {/* 消息区：px-8 给头像列留出外边距（头像不贴屏幕边），py-5 让首行不顶边。
           上窄下宽的 py 差是刻意留的「呼吸位」——完全等距时第一条消息会顶着 header 底线，
           视觉上像被切掉一截。 */}
-      <div className="flex-1 overflow-y-auto px-8 pb-5 pt-6">
+      <div
+        ref={scrollRef}
+        data-testid="message-list"
+        onScroll={() => {
+          const el = scrollRef.current;
+          if (!el) return;
+          if (shouldLoadMore(el.scrollTop, visibleMessages.length, windowCount)) {
+            loadEarlierMessages();
+          }
+        }}
+        className="flex-1 overflow-y-auto px-8 pb-5 pt-6"
+      >
+        {/* 窗口之外还有历史时给一个显式入口：滚到顶会自动加载，
+            但触控板/滚轮行为在部分设备上不可靠，按钮是兜底，也让人知道「上面还有」。 */}
+        {visibleMessages.length > windowCount && (
+          <div className="mb-3 flex justify-center">
+            <button
+              type="button"
+              onClick={loadEarlierMessages}
+              className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted shadow-card hover:bg-[#fafafa]"
+            >
+              加载更早的消息（还有 {visibleMessages.length - windowCount} 条）
+            </button>
+          </div>
+        )}
         {visibleMessages.length === 0 && streamEntries.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div className="rounded-2xl border border-line-soft bg-white p-3 text-[#999]">
@@ -2765,7 +2853,7 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="mt-1 text-[11px] text-muted">发送第一条消息，开始这段对话。</div>
           </div>
         ) : null}
-        {visibleMessages.map((m) => {
+        {windowedMessages.map((m) => {
           const mine = m.senderId === me?.id;
           // 已撤回：正文/附件/已读一律不渲染，只出一行灰字（头像与署名结构保留）
           const recalled = m.recalledAt != null;
