@@ -159,3 +159,44 @@ describe("useNotificationStore", () => {
     expect(items.some((n) => n.key === "k0")).toBe(false);
   });
 });
+
+describe("approval 通知与 removeByKey（d.34）", () => {
+  it("approval 能落盘并原样读回（新 kind 不被归一化丢掉）", () => {
+    const id = useNotificationStore.getState().push({
+      kind: "approval",
+      key: "approval:req-1",
+      title: "小鸣 请求调用工具",
+      body: "写文件（fs__write_file）（等待确认）",
+      conversationId: "c9",
+    });
+    expect(id).not.toBeNull();
+
+    const again = readNotifications(storage);
+    expect(again).toHaveLength(1);
+    expect(again[0].kind).toBe("approval");
+    expect(again[0].conversationId).toBe("c9");
+  });
+
+  it("removeByKey 只删指定 key，其它通知不动", () => {
+    useNotificationStore.setState({
+      items: [
+        makeItem({ key: "approval:req-1", kind: "approval", title: "待确认" }),
+        makeItem({ key: "message:m1", kind: "message", title: "消息" }),
+        makeItem({ key: "task:t1", kind: "task", title: "任务" }),
+      ],
+    });
+
+    useNotificationStore.getState().removeByKey("approval:req-1");
+
+    const keys = useNotificationStore.getState().items.map((n) => n.key);
+    expect(keys).toEqual(["message:m1", "task:t1"]);
+    // 落盘同步
+    expect(readNotifications(storage).map((n) => n.key)).toEqual(["message:m1", "task:t1"]);
+  });
+
+  it("removeByKey 对不存在的 key 是 no-op（不触发多余写盘）", () => {
+    useNotificationStore.setState({ items: [makeItem({ key: "a" })] });
+    useNotificationStore.getState().removeByKey("不存在");
+    expect(useNotificationStore.getState().items).toHaveLength(1);
+  });
+});

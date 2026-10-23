@@ -31,6 +31,8 @@ export function formatRelativeTime(at: number, now: number): string {
 const KIND_LABEL: Record<AppNotification["kind"], string> = {
   message: "消息",
   task: "任务",
+  // d.34：等待裁决的工具确认——点开跳回来源会话，弹窗在那儿等着。
+  approval: "确认",
 };
 
 export function NotificationCenter() {

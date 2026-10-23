@@ -28,7 +28,15 @@ export const MAX_BODY_CHARS = 200;
 /** 单键字节上限。 */
 export const NOTIFICATIONS_BYTE_LIMIT = Math.floor(64 * 1024);
 
-export type NotificationKind = "message" | "task";
+/**
+ * 通知类型：
+ * - `message`：别处会话的新消息；
+ * - `task`：任务收尾；
+ * - `approval`：**等待用户裁决**的工具调用确认（d.34）。
+ *   它与前两种的区别是「还没发生」而不是「已经发生」——点开是回到待确认的会话，
+ *   不是去读一条历史。
+ */
+export type NotificationKind = "message" | "task" | "approval";
 
 export interface AppNotification {
   id: string;
@@ -70,7 +78,7 @@ export function normalizeNotification(raw: unknown): AppNotification | null {
   if (!isPlainObject(raw)) return null;
   if (typeof raw.id !== "string" || !raw.id) return null;
   if (typeof raw.key !== "string" || !raw.key) return null;
-  if (raw.kind !== "message" && raw.kind !== "task") return null;
+  if (raw.kind !== "message" && raw.kind !== "task" && raw.kind !== "approval") return null;
   const title = oneLine(typeof raw.title === "string" ? raw.title : "");
   if (!title) return null;
   return {
@@ -138,6 +146,11 @@ interface NotificationState {
   markRead: (id: string) => void;
   markAllRead: () => void;
   remove: (id: string) => void;
+  /**
+   * 按去重键删除（d.34）：确认请求裁决/超时后，把对应那条 approval 通知摘掉，
+   * 免得用户点开一个已经处理完的「待确认」。
+   */
+  removeByKey: (key: string) => void;
   /** 清空全部（含未读）：破坏性操作，UI 侧必须先经确认弹窗。 */
   clearAll: () => void;
 }
@@ -198,6 +211,12 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   remove: (id) => {
     const next = get().items.filter((n) => n.id !== id);
+    if (next.length === get().items.length) return;
+    set({ items: persist(next) });
+  },
+
+  removeByKey: (key) => {
+    const next = get().items.filter((n) => n.key !== key);
     if (next.length === get().items.length) return;
     set({ items: persist(next) });
   },

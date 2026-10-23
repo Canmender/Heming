@@ -7,6 +7,7 @@ import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore, type LlmProfile } from "../store/llm.js";
 import { setNotificationStorage, useNotificationStore } from "../store/notifications.js";
+import { useHitlStore } from "../store/hitl.js";
 import { createMemoryStorage } from "../lib/memory/storage.js";
 import { TASKS_KEY, useTaskStore } from "../lib/tasks/store.js";
 import { streamChat } from "../lib/llmClient.js";
@@ -311,6 +312,9 @@ describe("ChatPage", () => {
         localStorage.removeItem(k);
       }
     }
+    // 通知与待确认队列跨用例不残留（d.34 起确认会推通知，泄漏会串到别的断言）。
+    useNotificationStore.setState({ items: [] });
+    useHitlStore.getState().cancelAll("测试隔离");
     // jsdom 未实现 scrollIntoView
     Element.prototype.scrollIntoView = vi.fn();
     // 附件气泡：createObjectURL 给可区分伪地址，revoke 留给卸载断言（jsdom 原生缺，由 test-setup 补桩）
@@ -4576,6 +4580,152 @@ describe("ChatPage 工具轮可视化接线", () => {
       await waitFor(() => expect(screen.getByText("已拒绝")).toBeInTheDocument());
     } finally {
       gateState.failReview = false;
+      dispose();
+    }
+  });
+
+  /**
+   * d.34：待确认不再「切会话 = 拒绝」，且跨会话请求进通知中心。
+   */
+  it("待确认属于其他会话时进通知中心；切回后弹窗仍在（d.34）", async () => {
+    const dispose = armEchoServer();
+    try {
+      const send = vi.fn();
+      vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+      useChatStore.setState({
+        conversations: [
+          { id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 },
+          { id: "c2", type: "group", name: "另一个群", memberCount: 3, unreadCount: 0 },
+        ],
+      });
+      mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+      render(<ChatPage />);
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "提及智能体" })).toBeInTheDocument(),
+      );
+      bindAssistant();
+
+      let round = 0;
+      vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+        if (round++ === 0) {
+          o.onToolCalls?.([
+            {
+              id: "call-n1",
+              type: "function",
+              function: { name: "echo-svc__echo", arguments: '{"text":"hi"}' },
+            },
+          ]);
+          return "";
+        }
+        o.onDelta("好的");
+        return "好的";
+      });
+
+      await pickAndSend("@和小鸣 用 echo 查一下");
+      await waitFor(() =>
+        expect(screen.getByRole("dialog", { name: /请求调用工具/ })).toBeInTheDocument(),
+      );
+
+      // 当前会话的请求不推通知：弹窗就在眼前，再来一条只是噪音。
+      expect(
+        useNotificationStore.getState().items.filter((n) => n.kind === "approval"),
+      ).toHaveLength(0);
+
+      // 切走：请求保持待定（**不再**按拒绝收口），并出现在通知中心。
+      act(() => {
+        useUiStore.setState({ activeConversationId: "c2" });
+      });
+      await waitFor(() => {
+        const approvals = useNotificationStore
+          .getState()
+          .items.filter((n) => n.kind === "approval");
+        expect(approvals).toHaveLength(1);
+        expect(approvals[0].conversationId).toBe("c1");
+        expect(approvals[0].title).toContain("请求调用工具");
+      });
+      expect(useHitlStore.getState().pending?.conversationId).toBe("c1");
+      expect(screen.getByRole("dialog", { name: /请求调用工具/ })).toBeInTheDocument();
+
+      // 切回来：裁决仍在等它。
+      act(() => {
+        useUiStore.setState({ activeConversationId: "c1" });
+      });
+      expect(useHitlStore.getState().pending?.conversationId).toBe("c1");
+
+      // 善后：点「拒绝」走真实裁决路径（顺带覆盖「裁决后摘掉待确认通知」）。
+      fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
+      await waitFor(() => expect(useHitlStore.getState().pending).toBeNull());
+      expect(
+        useNotificationStore.getState().items.some((n) => n.key.startsWith("approval:")),
+      ).toBe(false);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("确认超时 → 按拒绝收口、审计写明「超时未确认」、通知换成超时提示（d.34）", async () => {
+    localStorage.removeItem("heming.selfAudit.v1");
+    const dispose = armEchoServer();
+    try {
+      const send = vi.fn();
+      vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+      useChatStore.setState({
+        conversations: [
+          { id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 },
+          { id: "c2", type: "group", name: "另一个群", memberCount: 3, unreadCount: 0 },
+        ],
+      });
+      mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+      // 超时注入成极短值：生产 60 分钟，测试没必要等。
+      render(<ChatPage hitlTimeoutMs={60} />);
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "提及智能体" })).toBeInTheDocument(),
+      );
+      bindAssistant();
+
+      let round = 0;
+      vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+        if (round++ === 0) {
+          o.onToolCalls?.([
+            {
+              id: "call-t1",
+              type: "function",
+              function: { name: "echo-svc__echo", arguments: '{"text":"hi"}' },
+            },
+          ]);
+          return "";
+        }
+        o.onDelta("好的");
+        return "好的";
+      });
+
+      await pickAndSend("@和小鸣 用 echo 查一下");
+      await waitFor(() =>
+        expect(screen.getByRole("dialog", { name: /请求调用工具/ })).toBeInTheDocument(),
+      );
+
+      // 不点任何按钮，等它超时。
+      await waitFor(
+        () =>
+          expect(
+            screen.queryByRole("dialog", { name: /请求调用工具/ }),
+          ).not.toBeInTheDocument(),
+        { timeout: 3000 },
+      );
+
+      // 审计：拒绝 + 原因写明超时（与用户手动拒绝可区分）。
+      const audit = JSON.parse(localStorage.getItem("heming.selfAudit.v1") ?? "[]") as {
+        action: string;
+        rejected?: string;
+      }[];
+      expect(audit.some((e) => e.action === "deny" && e.rejected === "超时未确认")).toBe(true);
+
+      // 通知：原来的「待确认」被替换成超时提示（不会留一个已经结束的请求）。
+      const keys = useNotificationStore.getState().items.map((n) => n.key);
+      expect(keys.some((k) => k.startsWith("approval:"))).toBe(false);
+      expect(keys.some((k) => k.startsWith("approval-timeout:"))).toBe(true);
+      await act(async () => {});
+    } finally {
       dispose();
     }
   });

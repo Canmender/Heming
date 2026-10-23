@@ -85,6 +85,26 @@ describe("通知中心面板", () => {
     expect(screen.queryByRole("dialog", { name: "通知中心" })).not.toBeInTheDocument();
   });
 
+  it("确认通知：标签显示「确认」，点进去跳回来源会话（d.34）", () => {
+    const item = makeItem({
+      kind: "approval",
+      key: "approval:req-1",
+      title: "小鸣 请求调用工具",
+      body: "写文件（fs__write_file）（等待确认）",
+      conversationId: "c7",
+    });
+    useNotificationStore.setState({ items: [item] });
+    render(<NotificationCenter />);
+
+    fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
+    const dialog = screen.getByRole("dialog", { name: "通知中心" });
+    expect(within(dialog).getByText("确认")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "打开通知：小鸣 请求调用工具" }));
+    expect(useUiStore.getState().page).toBe("chat");
+    expect(useUiStore.getState().activeConversationId).toBe("c7");
+  });
+
   it("任务通知点进去：进任务区并投递要选中的任务", () => {
     const item = makeItem({
       kind: "task",

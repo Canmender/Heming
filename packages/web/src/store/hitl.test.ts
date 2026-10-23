@@ -102,48 +102,6 @@ describe("HITL 待确认 store", () => {
     expect(useHitlStore.getState().pending).toBeNull();
   });
 
-  it("cancelForConversation：只拒绝该会话，其他会话的请求顶上下一个槽", async () => {
-    const a = useHitlStore.getState().enqueue({ kind: "tool-call", payload: [makeCall("a1")] }, ctx);
-    const b = useHitlStore.getState().enqueue(
-      { kind: "tool-call", payload: [makeCall("b1")] },
-      { ...ctx, conversationId: "c2", streamId: "s2" },
-    );
-
-    expect(useHitlStore.getState().pending?.conversationId).toBe("c1");
-    useHitlStore.getState().cancelForConversation("c1");
-
-    await expect(a).resolves.toEqual([]); // 空裁决 = 全部拒绝
-    await Promise.resolve();
-    expect(useHitlStore.getState().pending?.conversationId).toBe("c2");
-    expect(useHitlStore.getState().pending?.calls.map((c) => c.id)).toEqual(["b1"]);
-
-    useHitlStore.getState().decide({
-      requestId: useHitlStore.getState().pending!.requestId,
-      verdicts: [{ callId: "b1", decision: "allow" }],
-    });
-    await expect(b).resolves.toEqual([{ callId: "b1", decision: "allow" }]);
-  });
-
-  it("cancelForConversation：排队中的同会话请求一并移除，不影响队首其他会话", async () => {
-    const b = useHitlStore.getState().enqueue(
-      { kind: "tool-call", payload: [makeCall("b1")] },
-      { ...ctx, conversationId: "c2", streamId: "s2" },
-    );
-    const a = useHitlStore.getState().enqueue({ kind: "tool-call", payload: [makeCall("a1")] }, ctx);
-
-    useHitlStore.getState().cancelForConversation("c1");
-
-    await expect(a).resolves.toEqual([]);
-    // c2 仍是当前 pending，未被误取消
-    expect(useHitlStore.getState().pending?.conversationId).toBe("c2");
-
-    useHitlStore.getState().decide({
-      requestId: useHitlStore.getState().pending!.requestId,
-      verdicts: [],
-    });
-    await b;
-  });
-
   it("自动放行的只读项与待确认项分开（UI 不能把要问的藏起来）", async () => {
     const p = useHitlStore.getState().enqueue(
       {

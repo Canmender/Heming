@@ -102,6 +102,7 @@ import { HitlPolicyStore } from "../lib/hitl/policy.js";
 import { useHitlStore, type PendingConfirm } from "../store/hitl.js";
 import { ToolApprovalModal } from "./ToolApprovalModal.js";
 import { appendToolAudit } from "../lib/hitl/audit.js";
+import type { HitlVerdict } from "../lib/hitl/types.js";
 import type { StorageLike } from "../lib/memory/types.js";
 import { buildChartToolBridge } from "../lib/charts/tools.js";
 import { buildToneToolBridge } from "../lib/tone/tools.js";
@@ -153,6 +154,15 @@ const hitlAuditStorage: StorageLike = {
     }
   },
 };
+
+/**
+ * 待确认的超时时长（d.34）：60 分钟。
+ *
+ * 从请求**成为当前待定项**开始计时（排队中的请求等排到再计）。
+ * 短了会把「用户去开个会」变成误拒；长了会让一轮对话无限挂起。
+ * 超时按拒绝收口，并在审计里写明原因——与用户手动拒绝可区分。
+ */
+export const HITL_APPROVAL_TIMEOUT_MS = 60 * 60 * 1000;
 
 /**
  * 闸门本体。
@@ -472,7 +482,12 @@ function AudioBubble({
  * @param embedded 任务区嵌入态：隐藏「返回工作区」按钮（返回会切页并卸载
  *   ChatPage，等于中断正在跑的任务）；其余行为与聊天页完全一致。
  */
-export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
+export function ChatPage({
+  embedded = false,
+  // 待确认超时可注入：生产用 60 分钟，测试用它把「超时 → 拒绝 + 留痕」跑到，
+  // 不必依赖 fake timers（那会与流式/等待逻辑互相打架）。
+  hitlTimeoutMs = HITL_APPROVAL_TIMEOUT_MS,
+}: { embedded?: boolean; hitlTimeoutMs?: number } = {}) {
   const convId = useUiStore((s) => s.activeConversationId)!;
   const leave = useUiStore((s) => s.leaveConversation);
   const taskDraft = useUiStore((s) => s.taskDraft);
@@ -1176,6 +1191,84 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
           : pendingConv.name
       : pendingHitl!.conversationId
     : undefined;
+
+  /**
+   * 收口一次工具确认的**唯一路径**（d.34）：写审计 → 按 key 清通知 → decide。
+   *
+   * 用户点击与超时都走这里——两条路径各自写一遍审计，迟早会分叉（超时那条忘记留痕）。
+   * 审计口径不变：批准与拒绝都记一笔。
+   */
+  const resolveToolApproval = useCallback(
+    (
+      pending: PendingConfirm,
+      verdicts: HitlVerdict[],
+      timeoutNotice?: { title: string; body?: string },
+    ) => {
+      for (const v of verdicts) {
+        const call = pending.calls.find((c) => c.id === v.callId);
+        if (!call) continue;
+        appendToolAudit(hitlAuditStorage, {
+          agentId: pending.agentId,
+          action: v.decision,
+          target: `${call.displayName}（${call.name}）`,
+          ...(v.decision === "deny" ? { rejected: v.reason ?? "用户拒绝" } : {}),
+        });
+      }
+      // 处理完的那条「待确认」通知要摘掉，否则用户会点开一个已经结束的请求。
+      useNotificationStore.getState().removeByKey(`approval:${pending.requestId}`);
+      if (timeoutNotice) {
+        // 超时也是一次「替他做了决定」，必须让人知道（否则工具悄悄没执行）。
+        useNotificationStore.getState().push({
+          kind: "approval",
+          key: `approval-timeout:${pending.requestId}`,
+          title: timeoutNotice.title,
+          body: timeoutNotice.body ?? "",
+          conversationId: pending.conversationId,
+        });
+      }
+      useHitlStore.getState().decide({ requestId: pending.requestId, verdicts });
+    },
+    [],
+  );
+
+  // 待确认**属于其他会话**时进通知中心（d.34）：用户可能正在别的页面，弹窗未必在视野里。
+  // 当前会话的请求不推——弹窗就在眼前，再来一条只是噪音。
+  useEffect(() => {
+    if (!pendingHitl || pendingHitl.kind !== "tool-call") return;
+    if (pendingHitl.conversationId === convId) return;
+    useNotificationStore.getState().push({
+      kind: "approval",
+      key: `approval:${pendingHitl.requestId}`,
+      title: `${pendingHitl.agentName} 请求调用工具`,
+      body: `${pendingHitl.calls.map((c) => c.displayName).join("、")}（等待确认）`,
+      conversationId: pendingHitl.conversationId,
+    });
+    // 去重键兜底：切回再切走时重复触发也不会重复推。
+  }, [pendingHitl?.requestId, pendingHitl?.conversationId, pendingHitl?.agentName, convId]);
+
+  // 超时按拒绝收口（d.34）：60 分钟没人裁决，逐项 deny 并留痕。
+  useEffect(() => {
+    if (!pendingHitl || pendingHitl.kind !== "tool-call") return;
+    const requestId = pendingHitl.requestId;
+    const timer = setTimeout(() => {
+      // 读**当前** pending：排队顶上的可能是另一个请求，requestId 对不上就跳过。
+      const current = useHitlStore.getState().pending;
+      if (!current || current.kind !== "tool-call" || current.requestId !== requestId) return;
+      resolveToolApproval(
+        current,
+        current.calls.map((c) => ({
+          callId: c.id,
+          decision: "deny" as const,
+          reason: "超时未确认",
+        })),
+        {
+          title: "工具确认已超时（已按拒绝处理）",
+          body: current.calls.map((c) => c.displayName).join("、"),
+        },
+      );
+    }, hitlTimeoutMs);
+    return () => clearTimeout(timer);
+  }, [pendingHitl?.requestId, pendingHitl?.kind, resolveToolApproval, hitlTimeoutMs]);
 
   /** 流气泡署名：本会话 members 映射名优先，其次名册，兜底「智能体」。 */
   const nameOf = (agentId: string) =>
@@ -1939,15 +2032,9 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
     [],
   );
 
-  // 切走会话：原会话的待确认请求不能再占着弹窗（单槽且看不到归属）。
-  // 只收口「上一个会话」的请求——后台新会话的请求留给下一次切换处理。
-  const prevConvRef = useRef(convId);
-  useEffect(() => {
-    const previous = prevConvRef.current;
-    if (previous === convId) return;
-    prevConvRef.current = convId;
-    useHitlStore.getState().cancelForConversation(previous);
-  }, [convId]);
+  // 切走会话**不再**替用户拒绝（d.34）：待确认请求保持待定，弹窗标注来源会话，
+  // 用户切回来还能裁决。闸门在裁决到达前不会执行工具（兜底方向是「不执行」），
+  // 所以「保持待定」是安全的；反过来「用户没同意却被记成拒绝」才是不对的。
 
   /** 右栏目录「发送到会话」投递：单槽命中本会话即封 e2e 信封经 WS 发送并清槽。 */
   const pendingAttachment = useUiStore((s) => s.pendingAttachment);
@@ -3433,21 +3520,8 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
               : undefined
           }
           onDecide={(verdicts) => {
-            // 留痕：批准与拒绝都记一笔（安全功能不留痕等于没做）。
-            for (const v of verdicts) {
-              const call = pendingHitl.calls.find((c) => c.id === v.callId);
-              if (!call) continue;
-              appendToolAudit(hitlAuditStorage, {
-                agentId: pendingHitl.agentId,
-                action: v.decision,
-                target: `${call.displayName}（${call.name}）`,
-                ...(v.decision === "deny" ? { rejected: v.reason ?? "用户拒绝" } : {}),
-              });
-            }
-            useHitlStore.getState().decide({
-              requestId: pendingHitl.requestId,
-              verdicts,
-            });
+            // 留痕、清通知、decide 都在同一个收口里（与超时路径共用）。
+            resolveToolApproval(pendingHitl, verdicts);
           }}
         />
       )}

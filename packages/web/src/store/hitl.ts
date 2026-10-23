@@ -84,14 +84,6 @@ interface HitlState {
   decide: (decision: ConfirmDecision) => void;
   /** 全部取消（如用户按了停止）：所有等待者按拒绝收口。 */
   cancelAll: (reason: string) => void;
-  /**
-   * 只取消某个会话的待确认请求。
-   *
-   * 用户切走会话后，原会话的确认弹窗既看不到归属也不该占着单槽——
-   * 一直挂着就是闸门永远等不到裁决；直接收口成「空裁决」（全部拒绝）最安全。
-   * 其他会话的请求不受影响，队列顺序保持。
-   */
-  cancelForConversation: (conversationId: string) => void;
 }
 
 /**
@@ -190,28 +182,6 @@ export const useHitlStore = create<HitlState>((set, get) => ({
     void reason;
   },
 
-  cancelForConversation: (conversationId) => {
-    // 先从队列里摘掉同会话的请求并收口（倒序遍历，删除时下标不漂）。
-    for (let i = queue.length - 1; i >= 0; i -= 1) {
-      if (queue[i].ctx.conversationId !== conversationId) continue;
-      const [item] = queue.splice(i, 1);
-      item.resolve([]);
-    }
-
-    const current = get().pending;
-    if (!current || current.conversationId !== conversationId) return;
-    const resolve = waiters.get(current.requestId);
-    waiters.delete(current.requestId);
-    set({ pending: null });
-    resolve?.([]);
-
-    // 当前槽空出来了：按原顺序把下一个请求顶上。
-    const next = queue.shift();
-    if (!next) return;
-    const requestId = newRequestId();
-    waiters.set(requestId, next.resolve);
-    set({ pending: toPending(requestId, next) });
-  },
 }));
 
 /** 队列项 → UI 侧持有的 pending。 */
