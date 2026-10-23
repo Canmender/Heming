@@ -12,6 +12,7 @@
 
 import type { ToolBridge, ToolSource } from "../agentStream.js";
 import type { RiskLevel } from "../hitl/types.js";
+import { matchTerm, tokenizeQuery, type QueryTerm } from "./query.js";
 import {
   KIND_LABEL,
   parseFrontmatter,
@@ -82,8 +83,12 @@ export interface WikiSearchHit {
 }
 
 /**
- * 纯函数检索：所有关键词都命中才入选（AND），标题命中权重最高。
+ * 纯函数检索：所有查询词都命中才入选（AND），标题命中权重最高。
  * 排序固定为「得分 → 标题 → 路径」，同一份库同一句 query 每次结果一致。
+ *
+ * ★ 中文分词（d.35 · P1-5）：query 按空白/标点切段，CJK 长词展开成相邻二元组，
+ * 允许「覆盖率达标」算命中——否则「预算风险」在文档写作「预算与风险」时就是 0 命中。
+ * ASCII 词仍是整词匹配，行为与旧版逐字一致。分词逻辑在 `query.ts`（纯函数、可单测）。
  */
 export function searchPages(
   pages: WikiPage[],
@@ -92,22 +97,32 @@ export function searchPages(
 ): WikiSearchHit[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
-  const terms = q.split(/\s+/).filter(Boolean);
+  const terms = tokenizeQuery(q);
+  if (!terms.length) return [];
   const hits: WikiSearchHit[] = [];
   for (const page of pages) {
     const title = page.title.toLowerCase();
     const tags = page.tags.join(" ").toLowerCase();
     const body = page.body.toLowerCase();
-    const hay = `${title}\n${tags}\n${body}`;
-    if (!terms.every((t) => hay.includes(t))) continue;
     let score = 0;
-    for (const t of terms) {
-      if (title.includes(t)) score += 6;
-      if (tags.includes(t)) score += 3;
-      if (body.includes(t)) score += 1;
+    let matchedAll = true;
+    for (const term of terms) {
+      const inTitle = matchTerm(term, title);
+      const inTags = matchTerm(term, tags);
+      const inBody = matchTerm(term, body);
+      // AND 语义不变：任何一个词三个位置都没命中 ⇒ 整页不入选。
+      // 强度参与打分：整词命中 1 > 覆盖率命中（0.6..1）。
+      if (inTitle === 0 && inTags === 0 && inBody === 0) {
+        matchedAll = false;
+        break;
+      }
+      score += inTitle * 6 + inTags * 3 + inBody * 1;
     }
+    if (!matchedAll) continue;
+    // 整句（去空白后）出现在标题里的额外加成分，保留旧口径。
     if (title.includes(q)) score += 5;
-    hits.push({ page, score, snippet: snippetAround(page.body, terms[0]) });
+    const firstText = terms[0].text;
+    hits.push({ page, score, snippet: snippetAround(page.body, firstText, terms[0]) });
   }
   hits.sort(
     (a, b) =>
@@ -123,11 +138,23 @@ function clampLimit(n: unknown): number {
   return Math.min(WIKI_SEARCH_MAX, Math.max(1, value));
 }
 
-/** 命中词附近的一小段正文（压成单行，便于列表里读）。 */
-function snippetAround(body: string, term: string): string {
+/**
+ * 命中词附近的一小段正文（压成单行，便于列表里读）。
+ *
+ * 整词找不到时（覆盖率命中）退到第一个出现的二元组——否则摘要会莫名其妙地
+ * 从正文开头截，看起来像「没命中却列出来了」。
+ */
+function snippetAround(body: string, term: string, parsed?: QueryTerm): string {
   const flat = body.replace(/\s+/g, " ").trim();
   if (!flat) return "";
-  const at = flat.toLowerCase().indexOf(term);
+  const lower = flat.toLowerCase();
+  let at = lower.indexOf(term);
+  if (at < 0 && parsed) {
+    for (const unit of parsed.units) {
+      at = lower.indexOf(unit);
+      if (at >= 0) break;
+    }
+  }
   if (at < 0) return flat.slice(0, 120);
   const start = Math.max(0, at - 50);
   const text = flat.slice(start, start + 140);

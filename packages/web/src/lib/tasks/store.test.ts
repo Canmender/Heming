@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createMemoryStorage } from "../memory/storage.js";
+import { useNotificationStore } from "../../store/notifications.js";
 import type { StorageLike } from "../memory/types.js";
 import {
   MAX_STEPS,
@@ -225,7 +226,7 @@ describe("pruneTasks 容量控制", () => {
         })),
       }),
     );
-    const pruned = pruneTasks(tasks);
+    const { tasks: pruned } = pruneTasks(tasks);
     expect(pruned).toHaveLength(MAX_TASKS);
     expect(pruned[0].id).toBe(`t${MAX_TASKS + 4}`);
     expect(pruned[0].steps).toHaveLength(MAX_STEPS);
@@ -236,9 +237,73 @@ describe("pruneTasks 容量控制", () => {
     const tasks = Array.from({ length: 4 }, (_, i) =>
       makeTask({ id: `t${i}`, createdAt: i, prompt: "字".repeat(400) }),
     );
-    const pruned = pruneTasks(tasks, 2500);
+    const { tasks: pruned } = pruneTasks(tasks, 2500);
     expect(pruned.length).toBeLessThan(4);
     expect(pruned[0].id).toBe("t3");
+  });
+
+  /**
+   * d.35 · P1-6：淘汰不再一刀切按创建时间。
+   */
+  it("条数超限时只摘已结束的，最早的 running 必须留下", () => {
+    // 60 条已结束 + 1 条创建最早的 running = 61 条
+    const ended = Array.from({ length: MAX_TASKS }, (_, i) =>
+      makeTask({ id: `e${i}`, createdAt: 1_000 + i, status: "done" }),
+    );
+    const running = makeTask({ id: "run-old", createdAt: 1, status: "running" });
+
+    const { tasks: pruned, droppedRunning } = pruneTasks([...ended, running]);
+
+    expect(pruned).toHaveLength(MAX_TASKS);
+    expect(pruned.some((t) => t.id === "run-old")).toBe(true); // 进行中仍在
+    expect(pruned.some((t) => t.id === "e0")).toBe(false); // 最旧的已结束被摘
+    expect(droppedRunning).toEqual([]); // 没动进行中 ⇒ 没有需要通知的
+  });
+
+  it("running 自己就超上限时摘最旧的，并放进 droppedRunning", () => {
+    const tasks = Array.from({ length: MAX_TASKS + 1 }, (_, i) =>
+      makeTask({ id: `r${i}`, createdAt: i, status: "running" }),
+    );
+
+    const { tasks: pruned, droppedRunning } = pruneTasks(tasks);
+
+    expect(pruned).toHaveLength(MAX_TASKS);
+    expect(pruned.some((t) => t.id === "r0")).toBe(false);
+    expect(droppedRunning.map((t) => t.id)).toEqual(["r0"]);
+  });
+
+  it("字节超限时优先摘已结束的，进行中最后才动", () => {
+    const running = makeTask({ id: "keep-run", createdAt: 9, status: "running", prompt: "字".repeat(400) });
+    const ended = Array.from({ length: 3 }, (_, i) =>
+      makeTask({ id: `old${i}`, createdAt: i, status: "done", prompt: "字".repeat(400) }),
+    );
+
+    const { tasks: pruned } = pruneTasks([running, ...ended], 2000);
+
+    expect(pruned.some((t) => t.id === "keep-run")).toBe(true);
+    expect(pruned.length).toBeLessThan(4);
+  });
+
+  it("被迫摘进行中时推一条通知（不静默丢）", () => {
+    useNotificationStore.setState({ items: [] });
+    // 先塞满 60 条 running，再 create 一条触发淘汰
+    const full = Array.from({ length: MAX_TASKS }, (_, i) =>
+      makeTask({ id: `r${i}`, createdAt: i, status: "running" }),
+    );
+    useTaskStore.setState({ tasks: full });
+
+    useTaskStore.getState().create({
+      conversationId: "c1",
+      agentId: "a1",
+      agentName: "和小鸣",
+      prompt: "新任务",
+      now: 10_000,
+    });
+
+    const notices = useNotificationStore.getState().items;
+    const evicted = notices.filter((n) => n.key.startsWith("task-evicted:"));
+    expect(evicted).toHaveLength(1);
+    expect(evicted[0].title).toContain("任务记录被清理");
   });
 });
 

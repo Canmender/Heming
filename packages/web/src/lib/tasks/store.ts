@@ -9,6 +9,7 @@ import {
   writeJson,
 } from "../memory/storage.js";
 import type { StorageLike } from "../memory/types.js";
+import { useNotificationStore } from "../../store/notifications.js";
 
 /**
  * 任务区数据层（本机）：一次「发起任务 → 智能体执行 → 汇总结果」的完整记录。
@@ -341,11 +342,51 @@ export function markStaleTasks(
   return changed ? next : tasks;
 }
 
-/** 按字节上限淘汰最旧任务；单条任务自身超限时逐步截结果，仍不行才丢弃。 */
-export function pruneTasks(tasks: TaskRecord[], limit = TASKS_BYTE_LIMIT): TaskRecord[] {
-  let next = [...tasks]
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, MAX_TASKS)
+/**
+ * 淘汰结果：保留下来的任务 + **被迫摘掉的进行中任务**（d.35 · P1-6）。
+ *
+ * 为什么要把 `droppedRunning` 单独交出去：进行中的任务被摘掉意味着
+ * 「任务悄悄消失且报告缺失」，调用方必须先发通知再落盘——不静默丢是 d.24 定的口径。
+ */
+export interface PruneResult {
+  tasks: TaskRecord[];
+  /** 因条数/字节上限被迫摘掉的 running 任务（正常情况下应为空）。 */
+  droppedRunning: TaskRecord[];
+}
+
+/**
+ * 按条数上限（`MAX_TASKS`）与字节上限淘汰任务。
+ *
+ * ★ 淘汰**只从已结束的任务里摘**（d.35 · P1-6）：原实现按 `createdAt` 一刀切，
+ * 会把创建最早、跑得最久的 `running` 任务挤掉，随后 `onRunSettled` 无处可写
+ * ——任务悄悄消失且报告缺失。
+ * 只有当 running 自己就超过上限（或字节超限且只剩 running）时才会动它，
+ * 且被摘的会放进 `droppedRunning` 由调用方先通知。
+ */
+export function pruneTasks(tasks: TaskRecord[], limit = TASKS_BYTE_LIMIT): PruneResult {
+  const droppedRunning: TaskRecord[] = [];
+  const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt);
+  const running = sorted.filter((t) => t.status === "running");
+  const ended = sorted.filter((t) => t.status !== "running");
+
+  // ① 条数上限：ended 让位，running 全保；running 自己超额时才动它（保上限）。
+  let keptRunning = running;
+  if (running.length > MAX_TASKS) {
+    const overflow = running.length - MAX_TASKS;
+    // running 已按 createdAt 降序 ⇒ 尾部是最旧的
+    droppedRunning.push(...running.slice(running.length - overflow));
+    keptRunning = running.slice(0, MAX_TASKS);
+  }
+  const room = Math.max(0, MAX_TASKS - keptRunning.length);
+  // ★ 只**筛选**不重排：保留原列表的相对顺序（按 createdAt 倒序，等时间戳时保持输入序）。
+  // 早先的实现把 running 提到前面过——那会让列表顺序在每次落盘后跳动，是行为变更，
+  // 与「淘汰谁」这件事无关。
+  const keptIds = new Set([
+    ...keptRunning.map((t) => t.id),
+    ...ended.slice(0, room).map((t) => t.id),
+  ]);
+  let next = sorted
+    .filter((task) => keptIds.has(task.id))
     .map((task) => ({
       ...task,
       steps: task.steps.slice(-MAX_STEPS),
@@ -353,9 +394,21 @@ export function pruneTasks(tasks: TaskRecord[], limit = TASKS_BYTE_LIMIT): TaskR
       prompt: clip(task.prompt, MAX_PROMPT_CHARS),
     }));
 
+  // ② 字节上限：优先摘**最旧的已结束**；只剩 running 时才动 running（并记录）。
   let bytes = utf8Length(JSON.stringify(next));
   while (bytes > limit && next.length > 1) {
-    next.pop();
+    let victim = -1;
+    // 从尾部扫（列表按时间降序）⇒ 先找到的就是最旧的 ended
+    for (let i = next.length - 1; i >= 0; i -= 1) {
+      if (next[i].status !== "running") {
+        victim = i;
+        break;
+      }
+    }
+    // 全是 running：只能摘最旧的，记录后由调用方通知。
+    if (victim === -1) victim = next.length - 1;
+    const [removed] = next.splice(victim, 1);
+    if (removed.status === "running") droppedRunning.push(removed);
     bytes = utf8Length(JSON.stringify(next));
   }
   if (bytes > limit && next.length === 1) {
@@ -372,9 +425,12 @@ export function pruneTasks(tasks: TaskRecord[], limit = TASKS_BYTE_LIMIT): TaskR
         })),
       },
     ];
-    if (utf8Length(JSON.stringify(next)) > limit) next = [];
+    if (utf8Length(JSON.stringify(next)) > limit) {
+      if (only.status === "running") droppedRunning.push(only);
+      next = [];
+    }
   }
-  return next;
+  return { tasks: next, droppedRunning };
 }
 
 /* ------------------------------------------------------------------ 水合 */
@@ -453,7 +509,7 @@ export function readTasks(storage: StorageLike = createDefaultStorage()): TaskRe
   return readJson(storage, TASKS_KEY, [] as TaskRecord[], (raw) => {
     if (!Array.isArray(raw)) return [];
     const items = raw.map(pickTask).filter((t): t is TaskRecord => t !== null);
-    return pruneTasks(items);
+    return pruneTasks(items).tasks;
   });
 }
 
@@ -522,7 +578,22 @@ export function setTaskStorage(next: StorageLike | null): void {
 }
 
 function persist(tasks: TaskRecord[]): TaskRecord[] {
-  const pruned = pruneTasks(tasks);
+  const { tasks: pruned, droppedRunning } = pruneTasks(tasks);
+  // 被迫摘掉进行中的任务 = 任务会悄悄消失且报告缺失（d.24「不静默丢」）。
+  // 先通知、再落盘：用户至少知道「有一条跑着的任务被清理了」，而不是事后发现没了。
+  for (const task of droppedRunning) {
+    try {
+      useNotificationStore.getState().push({
+        kind: "task",
+        key: `task-evicted:${task.id}`,
+        title: "任务记录被清理",
+        body: `${task.title}（进行中的任务因存储上限被移除，报告可能缺失）`,
+        ...(task.conversationId ? { conversationId: task.conversationId } : {}),
+      });
+    } catch {
+      /* 通知失败不影响落盘 */
+    }
+  }
   writeJson(getStorage(), TASKS_KEY, pruned, TASKS_BYTE_LIMIT);
   return pruned;
 }

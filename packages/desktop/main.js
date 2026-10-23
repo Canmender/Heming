@@ -16,6 +16,7 @@ const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins")
 const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
 const { registerWikiIpc } = require("./wiki-fs");
 const { registerChartIpc } = require("./chart-fs");
+const { registerExportIpc } = require("./export-fs");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
 
 // ── web 界面嵌入（设计 §4）──────────────────────────────────────────────
@@ -556,6 +557,8 @@ app.whenReady().then(() => {
     registerWikiIpc(ipcMain);
     // 图表导出桥：把生成的图表写到 ~/Heming/charts
     registerChartIpc(ipcMain);
+    // 记忆导出文件桥（d.35）：把记忆 JSON 写到 ~/Heming/exports
+    registerExportIpc(ipcMain);
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

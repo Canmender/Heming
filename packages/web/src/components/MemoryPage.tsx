@@ -30,6 +30,8 @@ import {
   type WorkingTurn,
 } from "../lib/memory/index.js";
 import { recallRecorder, type RecallRecorder } from "../lib/memory/runRecorder.js";
+import { buildMemoryExport } from "../lib/memory/exportBundle.js";
+import { hasDesktopExportBridge, saveExportFile } from "../lib/export/file.js";
 import { listAgents } from "../lib/agentsApi.js";
 import { useLlmStore } from "../store/llm.js";
 import {
@@ -762,6 +764,8 @@ export function MemoryPage({
   // 数据库记忆
   const [query, setQuery] = useState("");
   const [memoryMsg, setMemoryMsg] = useState<Message | null>(null);
+  /** 是否在本次导出里附上辅助账本（用量/召回记录）；默认关，且不持久化——避免下次误带。 */
+  const [includeAux, setIncludeAux] = useState(false);
   const [manualCopy, setManualCopy] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
@@ -865,6 +869,39 @@ export function MemoryPage({
     } else {
       setManualCopy(json);
       setMemoryMsg({ kind: "error", text: "复制失败，请手动复制下方内容" });
+    }
+  };
+
+  /**
+   * 导出到文件（d.35）：桌面端落盘到 ~/Heming/exports，浏览器回退下载。
+   * 勾选「附上辅助账本」时把用量账本与召回日志一并带上（只导出、不导入）；
+   * 不勾选时输出与 `memory.exportAll()` 逐字节一致。
+   */
+  const onExportMemoryFile = async () => {
+    const json = buildMemoryExport(
+      {
+        exportAll: () => memory.exportAll(),
+        usageSnapshot: () => recorder.usageSnapshot(),
+        recallRuns: () => recorder.list(),
+      },
+      { includeAux },
+    );
+    const stamp = new Date(memory.nowMs()).toISOString().slice(0, 10);
+    const fileName = `记忆导出-${stamp}.json`;
+    try {
+      const result = await saveExportFile(fileName, json);
+      setMemoryMsg({
+        kind: "ok",
+        text:
+          result.via === "desktop"
+            ? `已导出到文件：${result.path ?? fileName}`
+            : `已开始下载：${fileName}`,
+      });
+    } catch (err) {
+      setMemoryMsg({
+        kind: "error",
+        text: `导出失败：${err instanceof Error ? err.message : String(err)}`,
+      });
     }
   };
 
@@ -1220,6 +1257,18 @@ export function MemoryPage({
             自动记忆关闭后不再自动沉淀情景与语义（短期记忆仍记录），手动添加不受影响
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            <label className="flex cursor-pointer select-none items-center gap-1.5 text-[12px] text-muted">
+              <input
+                type="checkbox"
+                checked={includeAux}
+                onChange={(e) => setIncludeAux(e.target.checked)}
+                className="accent-[#1f1f1f]"
+              />
+              附上辅助账本（用量/召回记录，可再生）
+            </label>
+            <button type="button" onClick={() => void onExportMemoryFile()} className={btnGhost}>
+              {hasDesktopExportBridge() ? "导出到文件" : "下载 JSON"}
+            </button>
             <button type="button" onClick={() => void onExportMemory()} className={btnGhost}>
               导出
             </button>

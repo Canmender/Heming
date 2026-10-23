@@ -51,6 +51,19 @@ declare global {
       ) => Promise<unknown>;
       stop: (serverId: string) => Promise<boolean>;
     };
+    /**
+     * 内部：桌面端导出文件桥（preload 暴露；浏览器里 undefined）。
+     *
+     * 有它时 `saveExportFile` 写到 `~/Heming/exports`；没有则回退 Blob 下载。
+     * 写失败也会以 `{ ok:false, error }` 返回（IPC 边界不抛）。
+     */
+    __heming_exports?: {
+      write: (
+        fileName: string,
+        content: string,
+      ) => Promise<{ ok: boolean; path?: string; name?: string; error?: string }>;
+      info: () => Promise<{ dir: string; exists: boolean }>;
+    };
     heming?: {
       /** 运行平台（process.platform），如 "win32" / "darwin"。 */
       platform?: string;

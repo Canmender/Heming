@@ -137,3 +137,12 @@ contextBridge.exposeInMainWorld("__heming_chart", {
   /** 用系统默认程序打开。 */
   open: (fileName) => ipcRenderer.invoke("chart:open", fileName),
 });
+
+// —— 记忆导出文件桥（d.35）——
+// 把记忆导出 JSON 写到 ~/Heming/exports。只暴露「写一个 .json + 问目录」两件事，
+// 路径白名单与目录固定由主进程 export-fs.js 兜；浏览器端没有这个桥，
+// web 侧会回退为 Blob 下载（见 lib/export/file.ts）。
+contextBridge.exposeInMainWorld("__heming_exports", {
+  write: (fileName, content) => ipcRenderer.invoke("export:write", fileName, content),
+  info: () => ipcRenderer.invoke("export:info"),
+});

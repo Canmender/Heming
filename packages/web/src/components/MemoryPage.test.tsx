@@ -17,8 +17,20 @@ import {
   UsageLedger,
   recallMemory,
   summarizeInjection,
+  type RecallRun,
   type StorageLike,
 } from "../lib/memory/index.js";
+
+// 导出落盘是唯一会离开页面的动作：mock 掉桥接层，只断言页面交给它的内容。
+const { saveExportFileMock, hasDesktopExportBridgeMock } = vi.hoisted(() => ({
+  saveExportFileMock: vi.fn(),
+  hasDesktopExportBridgeMock: vi.fn(() => false),
+}));
+
+vi.mock("../lib/export/file.js", () => ({
+  hasDesktopExportBridge: hasDesktopExportBridgeMock,
+  saveExportFile: saveExportFileMock,
+}));
 
 /**
  * 记忆区 UI 用例：三块分区（短期 / 数据库 / 个人知识库）+ 智能体记忆开关。
@@ -884,5 +896,110 @@ describe("MemoryPage 召回可观测性", () => {
     // 「全部智能体」视角：layers.semantic 是所有桶的并集，私有条目同样进清单
     expect(within(cold).getByText("小码的构建参数")).toBeInTheDocument();
     expect(within(cold).getAllByText(/小码/).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 导出到文件（d.35）：默认不附辅助账本（与 exportAll 逐字节一致）；
+ * 勾选后附加用量/召回日志，但 data 不变（免得导入端看到两套数据）。
+ */
+describe("MemoryPage 导出到文件", () => {
+  const AUX_RUN: RecallRun = {
+    id: "rr-1",
+    at: ISO,
+    agentId: "a1",
+    conversationId: "c1",
+    query: "部署端口",
+    recalled: { semantic: 1, episodic: 0, working: 0 },
+    injected: [{ id: "s1", layer: "semantic", content: "部署端口：8787", truncated: false }],
+    dropped: [],
+    used: ["s1"],
+  };
+  const AUX_USAGE = { s1: { injected: 3, used: 2, lastAt: ISO } };
+
+  /** 页面只读 list/usageSnapshot 两个读口；其余能力本组用例用不到。 */
+  function auxRecorder(): RecallRecorder {
+    return {
+      list: () => [AUX_RUN],
+      usageSnapshot: () => AUX_USAGE,
+    } as unknown as RecallRecorder;
+  }
+
+  function renderWithAux() {
+    return render(
+      <MemoryPage
+        memory={memory}
+        kb={kb}
+        prefs={prefs}
+        recorder={auxRecorder()}
+        fetchSharedFiles={async () => []}
+      />,
+    );
+  }
+
+  beforeEach(() => {
+    hasDesktopExportBridgeMock.mockReturnValue(false);
+    saveExportFileMock.mockReset();
+    saveExportFileMock.mockResolvedValue({ via: "download" });
+  });
+
+  it("默认不附辅助账本：导出内容与 exportAll() 逐字节一致", async () => {
+    mockApi({ agents: AGENTS });
+    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    renderWithAux();
+    openTab("数据库");
+
+    const box = screen.getByRole("checkbox", { name: "附上辅助账本（用量/召回记录，可再生）" });
+    expect(box).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "下载 JSON" }));
+    await waitFor(() => expect(saveExportFileMock).toHaveBeenCalledTimes(1));
+
+    const [fileName, content] = saveExportFileMock.mock.calls[0] as [string, string];
+    expect(fileName).toBe("记忆导出-2026-10-17.json");
+    expect(content).toBe(memory.exportAll());
+    expect(JSON.parse(content)).not.toHaveProperty("aux");
+    expect(await screen.findByText(/已开始下载：记忆导出-2026-10-17\.json/)).toBeInTheDocument();
+  });
+
+  it("勾选后导出内容含 aux（usage/recallLog/note），data 不变", async () => {
+    mockApi({ agents: AGENTS });
+    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    renderWithAux();
+    openTab("数据库");
+
+    const box = screen.getByRole("checkbox", { name: "附上辅助账本（用量/召回记录，可再生）" });
+    fireEvent.click(box);
+    expect(box).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "下载 JSON" }));
+    await waitFor(() => expect(saveExportFileMock).toHaveBeenCalledTimes(1));
+
+    const [, content] = saveExportFileMock.mock.calls[0] as [string, string];
+    const doc = JSON.parse(content) as {
+      data: unknown;
+      aux: { note: string; usage: unknown; recallLog: unknown };
+    };
+    expect(doc.data).toEqual(JSON.parse(memory.exportAll()).data);
+    expect(doc.aux.usage).toEqual(AUX_USAGE);
+    expect(doc.aux.recallLog).toEqual([AUX_RUN]);
+    expect(doc.aux.note).toContain("可再生数据");
+    expect(doc.aux.note).toContain("不参与导入");
+  });
+
+  it("有桌面桥时按钮为「导出到文件」，成功提示带落盘路径", async () => {
+    hasDesktopExportBridgeMock.mockReturnValue(true);
+    saveExportFileMock.mockResolvedValue({
+      via: "desktop",
+      path: "C:\\Users\\u\\Heming\\exports\\记忆导出-2026-10-17.json",
+    });
+    mockApi({ agents: AGENTS });
+    renderWithAux();
+    openTab("数据库");
+
+    fireEvent.click(screen.getByRole("button", { name: "导出到文件" }));
+    await waitFor(() => expect(saveExportFileMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/已导出到文件/)).toBeInTheDocument();
+    expect(screen.getByText(/Heming\\exports/)).toBeInTheDocument();
   });
 });

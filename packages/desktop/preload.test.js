@@ -27,6 +27,12 @@ test("preload 暴露 __mcp_stdio 与 __heming_runtime（stdio 传输与运行时
   assert.ok(src.includes('invoke("runtime:probe")'));
 });
 
+test("preload 暴露 __heming_exports（记忆导出落盘桥）", () => {
+  assert.ok(src.includes('exposeInMainWorld("__heming_exports"'));
+  assert.ok(src.includes('invoke("export:write"'));
+  assert.ok(src.includes('invoke("export:info"'));
+});
+
 // 行为测试：stub electron 模块的 contextBridge，真实执行 preload.js，
 // 验证 contextBridge 暴露的对象上 __onBootReady/__startBootWave 为可调用函数。
 // 注：preload.js 会多次调用 exposeInMainWorld（heming / __heming_ice_servers_get /

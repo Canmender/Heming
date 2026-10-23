@@ -71,6 +71,39 @@ describe("wiki 检索（纯函数）", () => {
     expect(searchPages(pages, "部署 回滚").map((h) => h.page.path)).toEqual(["wiki/a.md"]);
   });
 
+  /**
+   * d.35 · P1-5：中文查询不再退化成整串 includes。
+   */
+  it("中文长词：文档写作「预算与风险」时，查询「预算风险」也能命中", () => {
+    const pages = [
+      page({ path: "wiki/a.md", title: "季度复盘", body: "本季的预算与风险要一起看" }),
+      // 只有「预算」，覆盖不足（1/3）——不该被拉进来
+      page({ path: "wiki/b.md", title: "预算说明", body: "预算已批复" }),
+    ];
+    expect(searchPages(pages, "预算风险").map((h) => h.page.path)).toEqual(["wiki/a.md"]);
+  });
+
+  it("中文空格查询行为不变（AND 仍成立）", () => {
+    const pages = [
+      page({ path: "wiki/a.md", title: "部署流程", body: "回滚要小心" }),
+      page({ path: "wiki/b.md", title: "部署", body: "与发布无关" }),
+    ];
+    expect(searchPages(pages, "部署 回滚").map((h) => h.page.path)).toEqual(["wiki/a.md"]);
+  });
+
+  it("ASCII 查询回归锁：整词 AND 语义与旧版逐条一致", () => {
+    const pages = [
+      page({ path: "wiki/a.md", title: "Deploy flow", body: "always rollback first" }),
+      page({ path: "wiki/b.md", title: "Deploy", body: "no undo info here" }),
+      page({ path: "wiki/c.md", title: "Notes", body: "deployment and rollback" }),
+    ];
+    // 两个词都要出现；b 缺 rollback 不入选
+    expect(searchPages(pages, "deploy rollback").map((h) => h.page.path)).toEqual([
+      "wiki/a.md",
+      "wiki/c.md",
+    ]);
+  });
+
   it("结果确定：同分时按标题、再按路径排序", () => {
     const pages = [
       page({ path: "wiki/z.md", title: "B", body: "k" }),
