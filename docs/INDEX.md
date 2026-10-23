@@ -71,6 +71,21 @@
 | [specs/2026-10-21-local-package-runtime-policy.md](superpowers/specs/2026-10-21-local-package-runtime-policy.md) | 本地包（npm/pypi）运行时策略：探测、`shell:false` 翻译链、台账与进程回收 |
 | [research/2026-10-21-delivery-hitl-registry.md](research/2026-10-21-delivery-hitl-registry.md) | HITL + Registry 本轮交付与踩坑 |
 
+### d.30–d.36 安全与数据收口（2026-10-22 → ）
+
+按 `research/2026-10-22-deep-audit-followup-plan.md` 的分轮表推进；每轮一份规格、一次门禁、两处发布。
+
+| 文档 | 主题 |
+|---|---|
+| [specs/2026-10-22-d30-security-redlines-and-silent-degradation.md](superpowers/specs/2026-10-22-d30-security-redlines-and-silent-degradation.md) | d.30：HITL 免问下限夹回 `write`、ICE/WS 鉴权、桌面崩溃兜底、记忆 `updatedAt` 拆分与沉淀计数落盘、WS 队列上限 |
+| [specs/2026-10-22-d31-storage-budget-and-drafts.md](superpowers/specs/2026-10-22-d31-storage-budget-and-drafts.md) | d.31：本机存储水位（按模块分组 + 实测配额 + 可再生清理）、`msgCache` 会话数 LRU、草稿按会话持久 |
+| [specs/2026-10-23-d32-token-usage-and-capability-matrix.md](superpowers/specs/2026-10-23-d32-token-usage-and-capability-matrix.md) | d.32：token 用量埋点（未上报 ≠ 0）、能力矩阵补并行/结构化两维、徽标去 emoji |
+| [specs/2026-10-23-d33-message-windowing.md](superpowers/specs/2026-10-23-d33-message-windowing.md) | d.33：消息列表窗口化（默认 60 条、滚动补偿、搜索扩窗） |
+| [specs/2026-10-23-d34-hitl-approval-notifications.md](superpowers/specs/2026-10-23-d34-hitl-approval-notifications.md) | d.34：待确认进通知中心、不再「切会话 = 拒绝」、60 分钟超时留痕 |
+| [specs/2026-10-23-d35-wiki-tasks-export.md](superpowers/specs/2026-10-23-d35-wiki-tasks-export.md) | d.35：wiki 中文二元组检索、任务淘汰护进行中、导出附块与桌面落盘 |
+| [specs/2026-10-23-d36-safestorage.md](superpowers/specs/2026-10-23-d36-safestorage.md) | d.36（待实施）：三把钥匙改走 `safeStorage` 就地信封 + 懒迁移；明确未覆盖 msgCache/chains |
+| [research/2026-10-23-rounds-after-d36.md](research/2026-10-23-rounds-after-d36.md) | d.36 之后的开工备忘：CSP 基线、`release.sh` 顺序、docker 清理、需拍板项与建议轮次 |
+
 ## 4. 调研
 
 | 文档 | 主题 |
