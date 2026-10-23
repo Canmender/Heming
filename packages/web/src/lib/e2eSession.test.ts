@@ -20,6 +20,9 @@ import {
   deferredCount,
   recvChainOwners,
   msgCache,
+  MAX_CACHE_CONVERSATIONS,
+  MSG_CACHE_LRU_KEY,
+  resetMsgCacheLru,
   exportOwnDeviceKeys,
   chunkAad,
   errorAad,
@@ -704,5 +707,86 @@ describe("e2eSession 会话层", () => {
       }),
     );
     expect(plain).toEqual({ kind: "error", text: "供应商 401" });
+  });
+});
+
+/**
+ * d.31 · P1-1 ②：明文缓存的**会话数**上限（LRU）。
+ *
+ * `CACHE_CAP` 管的是「每会话多少条」，但会话数原本不设上限 ⇒ N 个会话就是 N × 500 条，
+ * 这是全仓最大的无上限块。超配额时 `setItem` 抛错、兜底静默不落，
+ * 用户看到的是「解密过的消息渲染不出来」——完全没有解释。
+ */
+describe("msgCache 会话数上限（LRU，d.31）", () => {
+  const CACHED = (convId: string) => `heming.msgCache.${convId}`;
+  const cachedMsg = (id: string): { id: string; senderId: string; at: number; plain: { kind: "text"; text: string } } => ({
+    id,
+    senderId: "alice",
+    at: Date.now(),
+    plain: { kind: "text", text: id },
+  });
+
+  beforeEach(() => {
+    // 每个用例从干净的账本与缓存开始：账本是模块级内存态，不 reset 会跨用例串。
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("heming.msgCache.")) localStorage.removeItem(key);
+    }
+    resetMsgCacheLru();
+  });
+
+  it("会话数超过上限时，淘汰最久未使用的那个会话的整份缓存", () => {
+    // 依次写 MAX+1 个会话；第 1 个是最久未使用的。
+    for (let i = 0; i <= MAX_CACHE_CONVERSATIONS; i += 1) {
+      msgCache.append(`conv-${i}`, cachedMsg(`m-${i}`));
+    }
+
+    expect(localStorage.getItem(CACHED("conv-0"))).toBeNull(); // 被淘汰
+    expect(localStorage.getItem(CACHED("conv-1"))).not.toBeNull(); // 仍在
+    expect(localStorage.getItem(CACHED(`conv-${MAX_CACHE_CONVERSATIONS}`))).not.toBeNull();
+
+    const lru = JSON.parse(localStorage.getItem(MSG_CACHE_LRU_KEY) as string) as Record<string, number>;
+    expect(Object.keys(lru)).not.toContain("conv-0");
+    expect(Object.keys(lru)).toHaveLength(MAX_CACHE_CONVERSATIONS);
+  });
+
+  it("list 也算一次使用：看过旧的会话，它就不会先被淘汰", () => {
+    for (let i = 0; i <= MAX_CACHE_CONVERSATIONS; i += 1) {
+      msgCache.append(`conv-${i}`, cachedMsg(`m-${i}`));
+    }
+    // 此时 conv-0 已被淘汰。再写一个新会话，conv-1 应成为最旧。
+    msgCache.append("conv-late", cachedMsg("m-late"));
+    expect(localStorage.getItem(CACHED("conv-1"))).toBeNull();
+    expect(localStorage.getItem(CACHED("conv-2"))).not.toBeNull();
+  });
+
+  it("账本坏 JSON → 不抛，退化为「没有历史记录」", () => {
+    localStorage.setItem(MSG_CACHE_LRU_KEY, "{ 不是 json");
+    resetMsgCacheLru();
+
+    expect(() => msgCache.append("conv-a", cachedMsg("m-a"))).not.toThrow();
+    expect(msgCache.list("conv-a")).toHaveLength(1);
+  });
+
+  it("账本里的陈旧项（缓存键已不存在）会被清掉，不占名额", () => {
+    const stale = "conv-stale";
+    localStorage.setItem(
+      MSG_CACHE_LRU_KEY,
+      JSON.stringify({ [stale]: Date.now() - 10_000 }),
+    );
+    resetMsgCacheLru();
+
+    // 写一个新会话：陈旧项应被顺手清掉（它没有缓存键）。
+    msgCache.append("conv-new", cachedMsg("m-new"));
+
+    const lru = JSON.parse(localStorage.getItem(MSG_CACHE_LRU_KEY) as string) as Record<string, number>;
+    expect(Object.keys(lru)).not.toContain(stale);
+    expect(Object.keys(lru)).toContain("conv-new");
+  });
+
+  it("每会话 500 条的截尾行为保持不变", () => {
+    for (let i = 0; i < 501; i += 1) msgCache.append("conv-many", cachedMsg(`m-${i}`));
+    expect(msgCache.list("conv-many")).toHaveLength(500);
+    // 留下的是最新的 500 条
+    expect(msgCache.list("conv-many")[0].id).toBe("m-1");
   });
 });

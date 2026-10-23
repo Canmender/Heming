@@ -922,8 +922,129 @@ export const msgCache: MsgCache = {
     const next = list.length > CACHE_CAP ? list.slice(-CACHE_CAP) : list;
     writeJson(key, next);
     cacheView.set(key, { raw: localStorage.getItem(key), parsed: next });
+    // 往某会话写 ⇒ 它在用。写盘是低频路径（每来一条消息一次），顺手把账本落盘。
+    touchCacheConversation(convId, true);
   },
   list(convId) {
+    // 「这个会话被看了」——但 list 是热路径（接收路径每个信封都 list），
+    // 每次都写 localStorage 等于每解一个信封写一次盘。所以这里只更新内存账本，
+    // 落盘走 60s 节流（`touchCacheConversation` 内部）。
+    touchCacheConversation(convId, false);
     return viewCached(MSGCACHE_PREFIX + convId);
   },
 };
+
+// —— MsgCache 的会话数上限（d.31 · P1-1 ②）——
+
+/**
+ * 明文缓存保留的**会话数**上限。
+ *
+ * `CACHE_CAP` 管的是「每会话多少条」，但会话数原本不设上限 ⇒ N 个会话就是 N × 500 条，
+ * 这是全仓最大的无上限块，超配额时表现为「解密过的消息渲染不出来」。
+ *
+ * 为什么是 20：覆盖绝大多数人的活跃范围；再多是拿存储换不来体验的。
+ */
+export const MAX_CACHE_CONVERSATIONS = 20;
+
+/** LRU 账本的键：convId → 最后使用时间（毫秒）。 */
+export const MSG_CACHE_LRU_KEY = "heming.msgCache.lru.v1";
+
+/** 内存账本（懒加载；`null` = 还没读过盘）。 */
+let cacheLru: Record<string, number> | null = null;
+/** 上次把账本写盘的时间：`list` 是热路径，不能每次 touch 都写。 */
+let cacheLruPersistedAt = 0;
+/** `list` 触发的账本落盘节流窗口。 */
+const LRU_PERSIST_INTERVAL_MS = 60_000;
+
+/** 列出当前实际存在的明文缓存键（**排除账本键自身**——它也以 `heming.msgCache.` 开头）。 */
+function listMsgCacheKeys(): string[] {
+  const out: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(MSGCACHE_PREFIX) && key !== MSG_CACHE_LRU_KEY) out.push(key);
+    }
+  } catch {
+    /* 隐私模式：列不出来就当没有 */
+  }
+  return out;
+}
+
+/** 读账本：坏 JSON / 形状不符 → 空表；账本缺失时用**现有的缓存键**重建。 */
+function loadCacheLru(): Record<string, number> {
+  if (cacheLru) return cacheLru;
+  const stored = readJson<unknown>(MSG_CACHE_LRU_KEY);
+  const lru: Record<string, number> = {};
+  if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+    for (const [convId, at] of Object.entries(stored as Record<string, unknown>)) {
+      if (typeof at === "number" && Number.isFinite(at) && at >= 0) lru[convId] = at;
+    }
+  }
+  if (Object.keys(lru).length === 0) {
+    // 老用户没有这个键（或被清过）：用当前已有的缓存键重建，时间统一记 0（最旧），
+    // 保证它们之后能被正常淘汰，而不是永远不进候选。
+    for (const key of listMsgCacheKeys()) lru[key.slice(MSGCACHE_PREFIX.length)] = 0;
+  }
+  cacheLru = lru;
+  return lru;
+}
+
+/** 删掉某会话的明文缓存（连同进程内视图），不动账本。 */
+function dropCachedConversation(convId: string): void {
+  const key = MSGCACHE_PREFIX + convId;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* 删不掉也只能这样 */
+  }
+  cacheView.delete(key);
+}
+
+/**
+ * 记一次使用并做 LRU 淘汰。
+ *
+ * @param forcePersist 是否立刻把账本写盘。`append` 传 true（低频），`list` 传 false（热路径，走节流）。
+ */
+function touchCacheConversation(convId: string, forcePersist: boolean): void {
+  const lru = loadCacheLru();
+  // 先清掉账本里的**陈旧项**：缓存键已经不存在（别处清过/上次淘汰过），
+  // 留着它们会白占名额，把真正还在用的会话挤掉。
+  for (const id of Object.keys(lru)) {
+    if (id !== convId && !hasCachedConversation(id)) delete lru[id];
+  }
+  lru[convId] = Date.now();
+
+  const ids = Object.keys(lru);
+  if (ids.length > MAX_CACHE_CONVERSATIONS) {
+    // 淘汰最久未使用的；刚被 touch 的这个永远不在候选里。
+    const victims = ids
+      .filter((id) => id !== convId)
+      .sort((a, b) => lru[a] - lru[b])
+      .slice(0, ids.length - MAX_CACHE_CONVERSATIONS);
+    for (const id of victims) {
+      delete lru[id];
+      dropCachedConversation(id);
+    }
+  }
+
+  const now = Date.now();
+  if (forcePersist || now - cacheLruPersistedAt >= LRU_PERSIST_INTERVAL_MS) {
+    cacheLruPersistedAt = now;
+    writeJson(MSG_CACHE_LRU_KEY, lru);
+  }
+}
+
+/** 某会话的缓存键是否存在（只查键，不解析值）。 */
+function hasCachedConversation(convId: string): boolean {
+  try {
+    return localStorage.getItem(MSGCACHE_PREFIX + convId) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** 测试隔离：清掉内存账本，让下一次访问重新读盘。 */
+export function resetMsgCacheLru(): void {
+  cacheLru = null;
+  cacheLruPersistedAt = 0;
+}

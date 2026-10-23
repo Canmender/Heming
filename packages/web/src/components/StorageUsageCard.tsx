@@ -1,0 +1,520 @@
+import { useCallback, useState, type SVGProps } from "react";
+import { ConfirmDialog } from "./ConfirmDialog.js";
+import {
+  DEFAULT_QUOTA_BYTES,
+  measureStorageUsage,
+  probeOfStorage,
+} from "../lib/storageUsage.js";
+import type { StorageLike } from "../lib/memory/types.js";
+
+/**
+ * 本机存储水位卡（d.31 · P1-1 ①「水位可见」+ ②b「一键清理」）。
+ *
+ * 为什么要有这张卡：本机存储（localStorage）是**一条单源预算**（Chromium 同源约 5MB），
+ * 而各模块各自为政地写、各自为政地设上限——超配额时 `setItem` 抛 `QuotaExceededError`，
+ * 各处的兜底都是「回退空表 / 静默不落」。用户看到的是「记忆权重无故退回 ×1」
+ * 「任务记录消失」这类无法解释的降级，界面上却连一条水位都没有。
+ *
+ * ★ 统计只读**键名**与**字节数**，不读内容也不留内容：
+ * 明文缓存（`heming.msgCache.*`）里是解密后的消息正文，统计不该把它复制到别处。
+ * 所以每个键只 `getItem` 一次，算出字节数就丢。
+ *
+ * ★ 只给数字不给出口等于让用户对着一个数字发愁，所以这张卡同时给清理入口——
+ * 但**只给可再生的**（明文缓存、任务记录）删：记忆条目是用户资产，
+ * E2E 私钥与棘轮丢了就是永久丢，这两类绝不提供删除入口。
+ */
+
+/** 保守配额估计：Chromium 同源配额下限 5MB。实测前用它，并在界面上标明「估算」。 */
+const ESTIMATED_QUOTA_BYTES = DEFAULT_QUOTA_BYTES;
+
+/** 探测配额时用的临时键前缀（写完立即删；统计时也跳过，避免探测途中污染读数）。 */
+const PROBE_KEY_PREFIX = "heming.storageQuota.probe";
+
+/** 探测步长：64KB。够细（探测误差 < 64KB），又不至于写太多次。 */
+const PROBE_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * 探测上限：配额跟着磁盘走（Chromium 取磁盘的 10%），大机器上可能远大于 5MB。
+ * 不设上限就可能往盘里灌几十 GB，所以封顶 32MB：
+ * 触顶还没写满 ⇒ 已知配额**大于** 32MB，用 32MB 当**下限**展示（占比会偏保守地高估）。
+ */
+const PROBE_CAP_BYTES = 32 * 1024 * 1024;
+
+/** 水位阈值：≥80% 变黄，≥95% 变红。 */
+const WARN_RATIO = 0.8;
+const DANGER_RATIO = 0.95;
+
+/**
+ * 可枚举的存储接口。
+ *
+ * 为什么不用现成的 `StorageLike`：统计要「列出全部键名」，
+ * 而 `StorageLike` 只有 get/set/remove——没有 `length` / `key(i)`，
+ * 也就没法知道本机一共存了多少键。
+ */
+export interface EnumerableStorage extends StorageLike {
+  readonly length: number;
+  key(index: number): string | null;
+}
+
+/** 一个模块的占用。 */
+export interface StorageModuleUsage {
+  /** 模块中文名。 */
+  name: string;
+  /** 该模块占用的 UTF-8 字节数。 */
+  bytes: number;
+  /** 该模块占用的键数。 */
+  keys: number;
+}
+
+/** 一次统计的快照。 */
+export interface StorageUsageSnapshot {
+  /** 全部键的 UTF-8 字节总和。 */
+  totalBytes: number;
+  /** 按模块分组、**按字节数降序**（用户先看到最占地方的那个）。 */
+  modules: StorageModuleUsage[];
+  /** 键总数。 */
+  keyCount: number;
+}
+
+/** 配额信息。 */
+export interface QuotaInfo {
+  /** 配额字节数。 */
+  bytes: number;
+  /** true = 保守估计（尚未实测）；false = 实测值。 */
+  estimated: boolean;
+  /** 实测触顶了没（配额比探测上限还大）。 */
+  capped?: boolean;
+}
+
+/**
+ * 遍历键名统计字节数。
+ *
+ * ★ 模块分组与字节口径**单一真源在 `lib/storageUsage.ts`**：那张前缀表曾经在
+ * 这里另抄过一份，很快就和主模块分了岔（通知该归哪组、`memory.usage` 算记忆还是账本）。
+ * 统计口径只能有一处，界面只负责把结果排版。
+ *
+ * ★ 每个键只读一次值（`getItem` 一次即丢），不解析、不留副本——
+ * 明文缓存里是解密后的消息正文，统计不该把它带出存储层。
+ * ★ 坏数据不许抛：某个键读不出来（隐私模式、配额异常）就当它占 0 字节继续，
+ * 统计失败不该让整个设置区打不开。
+ */
+export function readStorageUsage(storage: EnumerableStorage): StorageUsageSnapshot {
+  const usage = measureStorageUsage(probeOfStorage(storage as unknown as Storage));
+  return {
+    totalBytes: usage.totalBytes,
+    keyCount: usage.totalKeys,
+    modules: usage.entries.map((entry) => ({
+      name: entry.module,
+      bytes: entry.bytes,
+      keys: entry.keys,
+    })),
+  };
+}
+
+/**
+ * 实测配额：往临时键写数据，写到 `QuotaExceededError` 为止。
+ *
+ * ★ 绝不抛：探测失败（隐私模式、配额已满到连探针都写不进）就回落到 5MB 估算值。
+ * ★ 写完把临时键删干净——探测是一次性的脚手架，不能留在用户数据里。
+ * ★ 只能在用户点了「重新检测」时调用：探测要写入几 MB，
+ * 打开设置区就自动探测等于擅自占满用户的盘。
+ */
+export function probeStorageQuota(storage: EnumerableStorage, usedBytes: number): QuotaInfo {
+  const tempKeys: string[] = [];
+  const chunk = "x".repeat(PROBE_CHUNK_BYTES);
+  let written = 0;
+  let hitCap = false;
+
+  try {
+    for (let i = 0; written < PROBE_CAP_BYTES; i++) {
+      const key = `${PROBE_KEY_PREFIX}.${i}`;
+      try {
+        storage.setItem(key, chunk);
+      } catch {
+        // 写不进去了：已写入的字节数 ≈ 剩余可用空间
+        break;
+      }
+      tempKeys.push(key);
+      written += PROBE_CHUNK_BYTES;
+      if (written >= PROBE_CAP_BYTES) hitCap = true;
+    }
+  } catch {
+    /* 探测本身抛了：当作测不出来 */
+  } finally {
+    // 无论成败都清掉临时键
+    for (const key of tempKeys) {
+      try {
+        storage.removeItem(key);
+      } catch {
+        /* 删不掉就只能留着，下次统计会跳过它 */
+      }
+    }
+  }
+
+  if (written === 0) {
+    // 一个 64KB 都写不进去：多半是隐私模式或配额已满，测不出来。
+    return { bytes: ESTIMATED_QUOTA_BYTES, estimated: true };
+  }
+  // 配额是「同源总量」：应用自己占的那部分也在里面，所以要把已用加回去。
+  const total = written + usedBytes;
+  if (hitCap) {
+    // 没触顶就写满了上限：只知道配额 > 32MB，用上限当**下限**展示。
+    return { bytes: Math.max(total, PROBE_CAP_BYTES), estimated: false, capped: true };
+  }
+  return { bytes: total, estimated: false };
+}
+
+/** 字节数 → 人类可读（KB/MB 保留两位小数，字节以下原样）。 */
+export function formatBytes(bytes: number): string {
+  const n = Math.max(0, Math.round(bytes));
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/** 精确字节数（千分位）：用户要能对上「多少字节」这个数本身。 */
+export function formatExactBytes(bytes: number): string {
+  return String(Math.max(0, Math.round(bytes))).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/** 清空目标：只列**可再生**的两类。 */
+type ClearTarget = {
+  kind: "cache" | "tasks";
+  /** 按钮与确认框用的名字。 */
+  label: string;
+  /** 该目标落在哪个模块（用来算释放了多少）。 */
+  module: string;
+  /** 键名匹配。 */
+  match: (key: string) => boolean;
+  /** 确认框里说清楚「删了什么、能不能回来」。 */
+  explain: string;
+};
+
+const CLEAR_TARGETS: Record<ClearTarget["kind"], ClearTarget> = {
+  cache: {
+    kind: "cache",
+    label: "明文缓存",
+    module: "明文缓存",
+    match: (key) => key.startsWith("heming.msgCache."),
+    explain:
+      "会删除本机保存的解密后明文消息（每个会话一份）。消息正文在服务端还在，重新拉取并解密即可恢复，只是首次打开旧会话要等一会儿重新解密。",
+  },
+  tasks: {
+    kind: "tasks",
+    label: "任务记录",
+    module: "任务",
+    match: (key) => key === "heming.tasks.v1",
+    explain:
+      "会删除本机的任务流水记录。任务记录只是本机流水，重新投递一次任务就能重建历史。",
+  },
+};
+
+/**
+ * 存储图标：细线 1.5px，与 `icons.tsx` 同一套画法。
+ *
+ * 为什么内联而不是加进 `icons.tsx`：那个文件不在本轮改动范围内，
+ * 改它会与并行改动撞在一起；内联一份同规格的更省事。
+ */
+function StorageIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <ellipse cx="12" cy="6" rx="7" ry="3" />
+      <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
+      <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+    </svg>
+  );
+}
+
+/** localStorage 适配：访问 `window.localStorage` 本身就可能抛（隐私模式）。 */
+function browserStorage(): EnumerableStorage {
+  try {
+    const ls = window.localStorage;
+    if (ls) {
+      // 探针：确认可写可删（隐私模式下 setItem 会抛）
+      const probe = `${PROBE_KEY_PREFIX}.probe`;
+      ls.setItem(probe, "1");
+      ls.removeItem(probe);
+      return ls;
+    }
+  } catch {
+    /* 隐私模式等 → 走空存储兜底 */
+  }
+  return emptyStorage();
+}
+
+/** 空存储兜底：localStorage 完全不可用时保证界面不炸（读数恒为 0）。 */
+function emptyStorage(): EnumerableStorage {
+  const map = new Map<string, string>();
+  return {
+    get length() {
+      return map.size;
+    },
+    key: (index) => [...map.keys()][index] ?? null,
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => {
+      map.set(k, v);
+    },
+    removeItem: (k) => {
+      map.delete(k);
+    },
+  };
+}
+
+/**
+ * 本机存储水位卡。
+ *
+ * `storage` 可注入：便于测试用假存储构造极端读数（超 95% 之类），
+ * 生产环境走 `window.localStorage`。
+ */
+export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
+  // 用 useState 惰性初始化而不是 useMemo：拿存储这一步会做「写探针再删」的探测
+  // （判断 localStorage 是否可写），属副作用，不该在每次渲染里重跑。
+  const [store] = useState<EnumerableStorage>(() => storage ?? browserStorage());
+  const [usage, setUsage] = useState<StorageUsageSnapshot>(() => readStorageUsage(store));
+  const [quota, setQuota] = useState<QuotaInfo>({
+    bytes: ESTIMATED_QUOTA_BYTES,
+    estimated: true,
+  });
+  const [probing, setProbing] = useState(false);
+  const [pending, setPending] = useState<ClearTarget["kind"] | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    setUsage(readStorageUsage(store));
+  }, [store]);
+
+  const ratio = quota.bytes > 0 ? usage.totalBytes / quota.bytes : 0;
+  const percent = ratio * 100;
+  const level: "ok" | "warn" | "danger" =
+    ratio >= DANGER_RATIO ? "danger" : ratio >= WARN_RATIO ? "warn" : "ok";
+
+  const barColor =
+    level === "danger" ? "bg-[#b42318]" : level === "warn" ? "bg-[#d97706]" : "bg-muted";
+  const statusColor =
+    level === "danger" ? "text-[#b42318]" : level === "warn" ? "text-[#b45309]" : "text-muted";
+  const statusText =
+    level === "danger"
+      ? "本机存储快满了。继续写入很可能失败，记忆权重、任务记录会悄悄回退或消失，请立刻清理。"
+      : level === "warn"
+        ? "本机存储已用掉八成以上。再涨下去新数据可能写不进去（各处会静默不落），建议先清理可再生的内容。"
+        : "本机存储还有余量，暂不需要清理。";
+
+  /** 重新检测配额：实测 + 刷新读数（探测可能顺带改变了占用）。 */
+  const onProbe = () => {
+    setProbing(true);
+    try {
+      const info = probeStorageQuota(store, usage.totalBytes);
+      setQuota(info);
+      setNotice(
+        info.estimated
+          ? "实测失败（浏览器可能处于隐私模式，或配额已满到探针都写不进去），已回落到 5.00 MB 估算值。"
+          : info.capped
+            ? `实测已达探测上限，配额不低于 ${formatBytes(info.bytes)}（真实配额可能更大）。`
+            : `配额已实测：${formatBytes(info.bytes)}（${formatExactBytes(info.bytes)} 字节）。`,
+      );
+      refresh();
+    } finally {
+      setProbing(false);
+    }
+  };
+
+  /** 执行清理：只删可再生的键，然后重新统计刷新显示。 */
+  const runClear = (kind: ClearTarget["kind"]) => {
+    const target = CLEAR_TARGETS[kind];
+    const before = usage.modules.find((m) => m.name === target.module)?.bytes ?? 0;
+
+    // 先把键名收齐再删：边遍历边删会让索引错位，漏删后面的键。
+    let count = 0;
+    try {
+      count = store.length;
+    } catch {
+      count = 0;
+    }
+    const victims: string[] = [];
+    for (let i = 0; i < count; i++) {
+      let key: string | null = null;
+      try {
+        key = store.key(i);
+      } catch {
+        continue;
+      }
+      if (key && target.match(key)) victims.push(key);
+    }
+    for (const key of victims) {
+      try {
+        store.removeItem(key);
+      } catch {
+        /* 删不掉（配额/权限）：跳过，不影响其余键 */
+      }
+    }
+
+    const next = readStorageUsage(store);
+    setUsage(next);
+    setPending(null);
+    const after = next.modules.find((m) => m.name === target.module)?.bytes ?? 0;
+    const freed = Math.max(0, before - after);
+    setNotice(
+      freed > 0
+        ? `已清理${target.label} ${victims.length} 项，释放约 ${formatBytes(freed)}。`
+        : `已清理${target.label} ${victims.length} 项（本次没有可释放的空间）。`,
+    );
+  };
+
+  return (
+    <section aria-label="本机存储" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
+      <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#777]">
+        <StorageIcon className="text-[#999]" />
+        本机存储
+      </div>
+      <div className="mt-1 text-[11px] text-muted">
+        本机存储（浏览器配额）是一条单源预算，写满后新数据会静默丢失。这条水位告诉你还剩多少、是谁占的。
+      </div>
+
+      {/* 水位条 */}
+      <div className="mt-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-[11px] text-muted">
+          <span>
+            已用 {formatBytes(usage.totalBytes)}（{formatExactBytes(usage.totalBytes)} 字节）
+          </span>
+          <span>
+            配额 {formatBytes(quota.bytes)}（{formatExactBytes(quota.bytes)} 字节）
+            {quota.estimated ? " · 估算" : " · 实测"}
+          </span>
+        </div>
+        <div
+          role="progressbar"
+          aria-label="本机存储用量"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(percent)}
+          aria-valuetext={`已用 ${formatExactBytes(usage.totalBytes)} 字节（${formatBytes(
+            usage.totalBytes,
+          )}），占配额 ${Math.round(percent)}%（配额 ${formatExactBytes(quota.bytes)} 字节）`}
+          className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[#eee]"
+        >
+          <div
+            className={`h-full rounded-full ${barColor}`}
+            style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+          />
+        </div>
+        <div role="status" aria-label="存储水位" className={`mt-1 text-[11px] ${statusColor}`}>
+          {statusText}
+          <span className="text-[#999]">（{Math.round(percent)}%）</span>
+        </div>
+      </div>
+
+      {/* 明细：按字节数降序 */}
+      <div className="mt-3 border-t border-line-soft pt-2">
+        <div className="text-[11px] font-bold text-[#999]">
+          按模块{usage.keyCount ? `（${usage.keyCount} 个键）` : ""}
+        </div>
+        {usage.modules.length === 0 ? (
+          <div className="mt-1 text-[11px] text-muted">本机还没有存储内容。</div>
+        ) : (
+          <ul className="mt-1 flex flex-col gap-1">
+            {usage.modules.map((m) => (
+              <li
+                key={m.name}
+                className="flex items-baseline justify-between gap-2 border-b border-line-soft pb-1 text-[11px] last:border-b-0"
+              >
+                <span className="min-w-0 truncate text-[#555]">
+                  {m.name}
+                  <span className="ml-1 text-[10px] text-[#aaa]">{m.keys} 键</span>
+                </span>
+                <span className="shrink-0 font-mono text-[#777]">
+                  {formatBytes(m.bytes)}
+                  <span className="ml-1 text-[10px] text-[#aaa]">{formatExactBytes(m.bytes)} 字节</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* 清理入口：只给可再生的 */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setNotice(null);
+            setPending("cache");
+          }}
+          className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
+        >
+          清理明文缓存
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setNotice(null);
+            setPending("tasks");
+          }}
+          className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
+        >
+          清理任务记录
+        </button>
+        <button
+          type="button"
+          onClick={onProbe}
+          disabled={probing}
+          className="rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa] disabled:opacity-60"
+        >
+          {probing ? "检测中…" : "重新检测"}
+        </button>
+        <span className="text-[11px] text-muted">
+          「重新检测」会临时写入最多约 32MB 以实测配额，写完即删。
+        </span>
+      </div>
+
+      {/* 不可再生的东西不给入口——这里说清楚为什么，否则用户会以为漏了功能。 */}
+      <div className="mt-2 text-[11px] text-[#999]">
+        记忆条目与加密会话的私钥、棘轮不可再生（丢了就是永久丢），所以不提供清理入口；
+        上面两个按钮只清理能重新生成的内容。
+      </div>
+
+      {notice && (
+        <div role="status" aria-label="操作结果" className="mt-2 text-[11px] text-muted">
+          {notice}
+        </div>
+      )}
+
+      {pending && (
+        <ConfirmDialog
+          title={`清理${CLEAR_TARGETS[pending].label}`}
+          onCancel={() => setPending(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setPending(null)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => runClear(pending)}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                清理
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">{CLEAR_TARGETS[pending].explain}</p>
+        </ConfirmDialog>
+      )}
+    </section>
+  );
+}

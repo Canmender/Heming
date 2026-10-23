@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, Message, MessagePayload } from "@heming/shared";
 import {
   activeConversationsOf,
@@ -9,6 +9,7 @@ import {
 } from "../store/chat.js";
 import { useUiStore, type TaskDraft } from "../store/ui.js";
 import { useNotificationStore } from "../store/notifications.js";
+import { clearDraft, getDraft, setDraft as saveDraft } from "../lib/drafts.js";
 import { useTaskStore } from "../lib/tasks/store.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
@@ -477,6 +478,55 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
   const agentsRoster = useChatStore((s) => s.agentsRoster);
   const me = useAuthStore((s) => s.user);
   const [draft, setDraft] = useState("");
+  /**
+   * 草稿持久化（d.31 · P2-1）：`ChatPage` 常驻（切会话不卸载），草稿却是组件态 ⇒
+   * 上一个会话写一半的字会串进下一个会话，刷新还全丢。按会话存盘后各归各位。
+   *
+   * 写盘做 300ms 节流（每敲一个字写一次 localStorage 没必要），
+   * 但切会话 / 发送成功 / 卸载时**立即落盘或清除**，不丢最后几百毫秒的输入。
+   */
+  const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftSavePending = useRef<{ convId: string; text: string } | null>(null);
+  /** 把待写草稿立刻落盘（并清掉定时器）。 */
+  const flushDraftSave = useCallback(() => {
+    if (draftSaveTimer.current) {
+      clearTimeout(draftSaveTimer.current);
+      draftSaveTimer.current = null;
+    }
+    const pending = draftSavePending.current;
+    draftSavePending.current = null;
+    if (pending) saveDraft(pending.convId, pending.text);
+  }, []);
+  /** 安排一次节流写盘（同一会话连续输入只写最后一次）。 */
+  const scheduleDraftSave = useCallback(
+    (cid: string, text: string) => {
+      draftSavePending.current = { convId: cid, text };
+      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+      draftSaveTimer.current = setTimeout(() => {
+        draftSaveTimer.current = null;
+        flushDraftSave();
+      }, 300);
+    },
+    [flushDraftSave],
+  );
+  /** 丢弃待写草稿（发送成功后用：否则几百毫秒前的旧文本会被重新写回去）。 */
+  const cancelDraftSave = useCallback(() => {
+    if (draftSaveTimer.current) {
+      clearTimeout(draftSaveTimer.current);
+      draftSaveTimer.current = null;
+    }
+    draftSavePending.current = null;
+  }, []);
+  // 切会话：先把**上一个会话**还没落盘的草稿写掉（pending 里记的是旧 convId），
+  // 再读当前会话的。★ 不能靠卸载重置——ChatPage 常驻是刻意的（保持 WS 与流式状态）。
+  useEffect(() => {
+    flushDraftSave();
+    setDraft(getDraft(convId));
+    return () => {
+      // 切走/卸载时把最后几百毫秒的输入补上，别丢字
+      flushDraftSave();
+    };
+  }, [convId, flushDraftSave]);
   const [sendNotice, setSendNotice] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   /**
@@ -1886,6 +1936,7 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   const onDraftChange = (value: string) => {
     setDraft(value);
+    scheduleDraftSave(convId, value);
     if (!isGroup) return;
     const token = /@([^\s@]*)$/.exec(value);
     if (token) {
@@ -2027,6 +2078,8 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
     const result = await submitMessage(draft, effectiveMentions, replyTarget);
     if (!result.ok) return;
     setDraft("");
+    cancelDraftSave();
+    clearDraft(convId);
     setSelectedMentions([]);
     setPicker(null);
     setTokenLock(false);
@@ -2040,6 +2093,8 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
     if (!taskDraft || taskDraft.conversationId !== convId) return;
     consumeTaskDraft();
     setDraft(taskDraft.text);
+    // 投递来的目标也要落盘：否则刷新一下这段文本就没了
+    saveDraft(convId, taskDraft.text);
     setSelectedMentions(taskDraft.mentions);
     setPicker(null);
     setTokenLock(false);
@@ -2061,6 +2116,8 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
         return;
       }
       setDraft("");
+      cancelDraftSave();
+      clearDraft(convId);
       setSelectedMentions([]);
       setPicker(null);
       setTokenLock(false);
@@ -2196,6 +2253,8 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
         );
         if (!result.ok) return; // submitMessage 已给可见提示，草稿原样保留
         setDraft("");
+        cancelDraftSave();
+        clearDraft(convId);
         setSelectedMentions([]);
         setPicker(null);
         setTokenLock(false);
@@ -2248,7 +2307,12 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
       if (recRef.current !== rec) return;
       let t = "";
       for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-      setDraft((d) => (d ? `${d}${t}` : t));
+      setDraft((d) => {
+        const next = d ? `${d}${t}` : t;
+        // 语音回填也要落盘（StrictMode 下 updater 可能被调两次，写入同一份文本，幂等）
+        scheduleDraftSave(convId, next);
+        return next;
+      });
     };
     rec.onend = () => {
       if (recRef.current !== rec) return;
@@ -3104,7 +3168,12 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
           {emojiOpen && (
             <EmojiPicker
               onPick={(e) => {
-                setDraft((d) => d + e);
+                setDraft((d) => {
+                  const next = d + e;
+                  // 表情回填也要落盘（同语音回填的幂等约定）
+                  scheduleDraftSave(convId, next);
+                  return next;
+                });
                 setEmojiOpen(false);
               }}
             />

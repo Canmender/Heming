@@ -299,9 +299,14 @@ describe("ChatPage", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    // E2E 存储按 convId 复用：清 msgCache/链/暂挂（cache-first 会跨用例读到旧明文）
+    // E2E 存储按 convId 复用：清 msgCache/链/暂挂（cache-first 会跨用例读到旧明文）；
+    // 草稿同样按 convId 持久（d.31），不清理会把上一个用例的半截输入带进来。
     for (const k of Object.keys(localStorage)) {
-      if (k.startsWith("heming.msgCache.") || k.startsWith("heming.e2e.")) {
+      if (
+        k.startsWith("heming.msgCache.") ||
+        k.startsWith("heming.e2e.") ||
+        k.startsWith("heming.draft.")
+      ) {
         localStorage.removeItem(k);
       }
     }
@@ -636,6 +641,55 @@ describe("ChatPage", () => {
     expect(JSON.stringify(ev)).not.toContain("你好"); // 明文不落帧
     await waitFor(() => expect(input).toHaveValue("")); // 封发异步：等落帧后断言清空
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("草稿按会话持久：切走再回来各自的字还在，不串会话（d.31）", async () => {
+    mockMessagesFetch([]);
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
+      target: { value: "给 A 的草稿" },
+    });
+
+    // 切到 c2：切会话时会把待写草稿**立即**落盘（不等 300ms 节流），再读 c2 的草稿
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" });
+    });
+    await waitFor(() => expect(screen.getByPlaceholderText("输入消息…")).toHaveValue(""));
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
+      target: { value: "给 B 的草稿" },
+    });
+
+    // 切回 c1：A 的字回来了——这正是「ChatPage 常驻不卸载」下最容易串的地方
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c1" });
+    });
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("输入消息…")).toHaveValue("给 A 的草稿"),
+    );
+  });
+
+  it("发送成功后清掉落盘的草稿（d.31）", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    // 预置一条已落盘的草稿（模拟节流窗口已过）
+    localStorage.setItem("heming.draft.c1", JSON.stringify({ text: "你好", at: 1 }));
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const input = screen.getByPlaceholderText("输入消息…");
+    await waitFor(() => expect(input).toHaveValue("你好")); // 挂载时读回草稿
+
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await lastSealed(send);
+
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(localStorage.getItem("heming.draft.c1")).toBeNull(); // 盘上的那份也清了
   });
 
   it("对方消息显示对方头像（无头像首字回退），自己的消息不显示头像", async () => {
