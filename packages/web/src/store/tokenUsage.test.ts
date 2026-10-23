@@ -63,9 +63,14 @@ describe("tokenUsage：按天/按月重算，不存累计总值", () => {
     ];
     const rows = dailyTotals(records, "2026-10");
     expect(rows).toHaveLength(31);
-    expect(rows[0]).toEqual({ day: "2026-10-01", total: 100, byModel: { a: 100 } });
-    expect(rows[1]).toEqual({ day: "2026-10-02", total: 0, byModel: {} });
-    expect(rows[2]).toEqual({ day: "2026-10-03", total: 46, byModel: { a: 40, b: 6 } });
+    expect(rows[0]).toEqual({ day: "2026-10-01", total: 100, byModel: { a: 100 }, missing: 0 });
+    expect(rows[1]).toEqual({ day: "2026-10-02", total: 0, byModel: {}, missing: 0 });
+    expect(rows[2]).toEqual({
+      day: "2026-10-03",
+      total: 46,
+      byModel: { a: 40, b: 6 },
+      missing: 0,
+    });
   });
 
   it("持久化写入 records 数组", () => {
@@ -114,5 +119,58 @@ describe("heatLevel", () => {
     expect(heatLevel(51, 100)).toBe(3);
     expect(heatLevel(75, 100)).toBe(3);
     expect(heatLevel(76, 100)).toBe(4);
+  });
+});
+
+/**
+ * 未上报（tokens:null）：既不参与求和，也不能被当成 0 悄悄吞掉——
+ * 聚合结果单独给 missing 计数，界面才有素材说「未上报」。
+ */
+describe("tokenUsage：未上报（tokens:null）", () => {
+  const missingRec = (model: string, at: string) => ({ model, tokens: null, at });
+  const at = (day: number, hour = 12) => new Date(2026, 9, day, hour).toISOString();
+
+  beforeEach(() => {
+    localStorage.removeItem("heming.tokenUsage");
+    useTokenUsageStore.getState().reset();
+  });
+
+  it("recordUnreported 写 tokens:null 并持久化", () => {
+    useTokenUsageStore.getState().recordUnreported("claude-sonnet-5", at(13, 8));
+    const s = useTokenUsageStore.getState();
+    expect(s.records).toHaveLength(1);
+    expect(s.records[0].tokens).toBeNull();
+    expect(s.records[0].model).toBe("claude-sonnet-5");
+    const saved = JSON.parse(localStorage.getItem("heming.tokenUsage")!);
+    expect(saved.records[0].tokens).toBeNull();
+  });
+
+  it("summarizeMonth：total 不含 null，missing 单独计数", () => {
+    const records = [
+      rec("a", 100, at(1)),
+      missingRec("a", at(2)),
+      missingRec("b", at(3)),
+      rec("b", 50, at(4)),
+      missingRec("a", new Date(2026, 8, 30, 23).toISOString()), // 上月，不计
+    ];
+    const s = summarizeMonth(records, "2026-10");
+    expect(s.total).toBe(150);
+    expect(s.byModel).toEqual({ a: 100, b: 50 });
+    expect(s.missing).toBe(2);
+  });
+
+  it("dailyTotals：当天只有未上报 → total 0 且 missing 计数", () => {
+    const records = [rec("a", 10, at(1)), missingRec("a", at(1, 13)), missingRec("a", at(2))];
+    const rows = dailyTotals(records, "2026-10");
+    expect(rows[0]).toEqual({ day: "2026-10-01", total: 10, byModel: { a: 10 }, missing: 1 });
+    expect(rows[1]).toEqual({ day: "2026-10-02", total: 0, byModel: {}, missing: 1 });
+  });
+
+  it("last30DaysTotals：null 不产生热度，只计 missing", () => {
+    const now = new Date(2026, 9, 17, 12);
+    const rows = last30DaysTotals([missingRec("a", at(17, 1)), rec("a", 10, at(16, 1))], now);
+    expect(rows[29]).toEqual({ day: "2026-10-17", total: 0, missing: 1 });
+    expect(rows[28]).toEqual({ day: "2026-10-16", total: 10, missing: 0 });
+    expect(heatLevel(rows[29].total, 10)).toBe(0);
   });
 });

@@ -1493,3 +1493,78 @@ describe("runAgentMentions onRunSettled", () => {
     });
   });
 });
+
+/**
+ * Token 用量记账（d.32）：一次运行可能多轮 streamChat，usage 累加后成功收口只记一次；
+ * 一次都没拿到记 null（未上报）；失败/中止不记（没跑完的用量口径不清）。
+ */
+describe("runAgentMentions token 用量记账（d.32）", () => {
+  type Usage = { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+
+  it("多轮工具调用 usage 累加，成功收口时只记一次", async () => {
+    const rounds = [
+      {
+        text: "我先查一下",
+        usage: { totalTokens: 100 } as Usage,
+        calls: [
+          {
+            id: "call_1",
+            type: "function" as const,
+            function: { name: "srv__echo", arguments: "{}" },
+          },
+        ],
+      },
+      { text: "查到了", usage: { inputTokens: 40, outputTokens: 10 } as Usage, calls: [] as never[] },
+    ];
+    let round = 0;
+    const streamChat = vi.fn(async (_p: unknown, _m: ChatMessage[], o: {
+      onDelta: (t: string) => void;
+      onToolCalls?: (c: unknown[]) => void;
+      onUsage?: (u: Usage) => void;
+    }) => {
+      const r = rounds[round++];
+      if (r.calls.length) o.onToolCalls?.(r.calls);
+      o.onUsage?.(r.usage);
+      if (r.text) o.onDelta(r.text);
+      return r.text;
+    });
+    const recordUsage = vi.fn();
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      recordUsage,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__echo" } }],
+        execute: async () => ({ text: "工具说", ok: true }),
+      }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(streamChat).toHaveBeenCalledTimes(2); // 工具轮 + 答案轮
+    expect(recordUsage).toHaveBeenCalledTimes(1);
+    // 100（totalTokens）+ 40+10（没有 total 时用 input+output）
+    expect(recordUsage).toHaveBeenCalledWith(profile.model, 150);
+  });
+
+  it("一次都没拿到 usage → 记 null（未上报），不记 0", async () => {
+    const recordUsage = vi.fn();
+    const { deps } = makeDeps({ recordUsage });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    expect(recordUsage).toHaveBeenCalledTimes(1);
+    expect(recordUsage).toHaveBeenCalledWith(profile.model, null);
+  });
+
+  it("失败/中止的运行不记账", async () => {
+    const recordUsage = vi.fn();
+    const { deps } = makeDeps({
+      recordUsage,
+      streamChat: vi.fn(async (_p, _m, o: { onDelta: (t: string) => void; onUsage?: (u: Usage) => void }) => {
+        o.onUsage?.({ totalTokens: 99 }); // 即便半途拿到过 usage，没跑完也不记
+        o.onDelta("半");
+        throw new Error("provider_error: HTTP 500");
+      }) as never,
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    expect(recordUsage).not.toHaveBeenCalled();
+  });
+});

@@ -27,4 +27,15 @@ describe("TokenHeatmap", () => {
     expect(today.getAttribute("data-total")).toBe("50");
     expect((today as HTMLElement).style.backgroundColor).not.toBe("rgb(241, 244, 247)");
   });
+
+  it("当天只有未上报 → title 说「未上报」，不是「0 tokens」", () => {
+    const todayKey = dayKeyOf(new Date().toISOString());
+    useTokenUsageStore.setState({
+      records: [{ model: "m", tokens: null, at: new Date().toISOString() }],
+    });
+    render(<TokenHeatmap />);
+    const today = screen.getByRole("img", { name: "近 30 日 token 用量" }).querySelectorAll("[data-day]")[29];
+    expect(today.getAttribute("title")).toBe(`${todayKey} · 未上报`);
+    expect(today.getAttribute("data-total")).toBe("0"); // 数字口径仍是 0（null 不产生热度）
+  });
 });

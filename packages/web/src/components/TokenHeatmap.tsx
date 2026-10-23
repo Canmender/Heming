@@ -13,10 +13,16 @@ export function TokenHeatmap() {
     <div className="flex items-center gap-[3px]" role="img" aria-label="近 30 日 token 用量">
       {days.map((d, i) => {
         const level = heatLevel(d.total, max);
+        // 当天只有未上报记录：标题说「未上报」，不拿「0 tokens」冒充真实用量。
+        // 有数字时仍以数字为准（未上报只是附加事实，不抢主信息）。
+        const title =
+          d.total === 0 && d.missing > 0
+            ? `${d.day} · 未上报`
+            : `${d.day} · ${d.total} tokens（${LEVEL_LABEL[level]}）`;
         return (
           <span
             key={d.day}
-            title={`${d.day} · ${d.total} tokens（${LEVEL_LABEL[level]}）`}
+            title={title}
             data-day={d.day}
             data-total={d.total}
             style={{ backgroundColor: LEVEL_BG[level] }}

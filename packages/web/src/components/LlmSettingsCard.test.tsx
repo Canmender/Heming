@@ -77,8 +77,10 @@ describe("LlmSettingsCard", () => {
   it("已知模型显示能力徽标与上下文窗口", () => {
     useLlmStore.getState().addProfile({ id: "p1", label: "DS", provider: "openai", apiKey: "k", model: "deepseek-chat" });
     render(<LlmSettingsCard />);
-    expect(screen.getByText("🎯 函数调用")).toBeInTheDocument();
+    expect(screen.getByText("函数调用")).toBeInTheDocument();
     expect(screen.getByText(/上下文 64K/)).toBeInTheDocument();
+    // 徽标旁标明「选型参考」，与真正驱动行为的工具/视觉两维区分开
+    expect(screen.getByText("模型能力（选型参考）")).toBeInTheDocument();
   });
 
   it("未知模型显示「能力未知」并给手动填写入口", () => {

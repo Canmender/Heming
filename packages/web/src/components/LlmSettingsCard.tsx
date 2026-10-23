@@ -215,8 +215,11 @@ export function LlmSettingsCard() {
                 <div className="mt-0.5 truncate text-[12px] text-muted">
                   {p.provider} · {p.model} · ••••{p.apiKey.slice(-4)}
                 </div>
-                {/* 能力徽标：函数调用 / 视觉 / 思考。查不到就说「能力未知」并给手填入口 */}
+                {/* 能力徽标：函数调用 / 视觉 / 思考 / 长上下文 / 并行工具 / 结构化输出。
+                    查不到就说「能力未知」并给手填入口。
+                    这几维只是选型参考；真正驱动「判定 → 丢弃」的只有工具与视觉两维。 */}
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] text-[#aaa]">模型能力（选型参考）</span>
                   {!caps ? (
                     <>
                       <span className="text-[11px] text-[#b45309]">能力未知</span>

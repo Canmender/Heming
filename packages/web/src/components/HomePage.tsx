@@ -152,10 +152,22 @@ export function HomePage() {
       todayKey: dayKeyOf(d.toISOString()),
     };
   }, []);
-  const todayTotal = useMemo(
-    () => records.reduce((sum, r) => (dayKeyOf(r.at) === todayKey ? sum + r.tokens : sum), 0),
-    [records, todayKey],
-  );
+  // 今日用量：已上报的数字求和；未上报的单独计数（null 不是 0，不能混进求和）
+  const todayUsage = useMemo(() => {
+    let total = 0;
+    let reported = 0;
+    let missing = 0;
+    for (const r of records) {
+      if (dayKeyOf(r.at) !== todayKey) continue;
+      if (typeof r.tokens === "number") {
+        total += r.tokens;
+        reported++;
+      } else {
+        missing++;
+      }
+    }
+    return { total, reported, missing };
+  }, [records, todayKey]);
 
   const greeting = (() => {
     const h = new Date().getHours();
@@ -187,7 +199,12 @@ export function HomePage() {
             版本 {__APP_VERSION__}
           </span>
           <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 text-[11px] text-muted">
-            今日已用 {todayTotal}
+            {/* 有数字优先；今天只有未上报 → 明说未上报，别用「0」冒充真实用量 */}
+            {todayUsage.reported > 0
+              ? `今日已用 ${todayUsage.total}`
+              : todayUsage.missing > 0
+                ? "今日用量未上报"
+                : "今日已用 0"}
           </span>
         </div>
       </div>
@@ -238,6 +255,10 @@ export function HomePage() {
                 <div className="mt-1 h-1 w-[140px] overflow-hidden rounded bg-[#f0f0f0]">
                   <div className="h-full bg-ink" style={{ width: `${pct}%` }} />
                 </div>
+                {/* 未上报单独提示（灰字，不抢主数字）：null 不是 0，不能被总量悄悄吞掉 */}
+                {monthSummary.missing > 0 && (
+                  <div className="mt-1 text-[10px] text-muted">{monthSummary.missing} 轮未上报</div>
+                )}
               </div>
               <div className="flex-1 border-l border-[#f1f1f1] pl-4">
                 {modelRows.length === 0 ? (

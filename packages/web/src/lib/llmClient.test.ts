@@ -268,4 +268,152 @@ describe("streamChat", () => {
       }),
     ).rejects.toThrow(/AbortError|aborted/i);
   });
+
+  describe("stream_options 与 usage（d.32）", () => {
+    type Usage = { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+
+    it("buildRequest：OpenAI 流式默认带 stream_options，includeUsage=false 或非流式不带，anthropic 不带", () => {
+      const streamBody = JSON.parse(
+        buildRequest(openaiProfile, userMsg, { stream: true }).body,
+      );
+      expect(streamBody.stream_options).toEqual({ include_usage: true });
+
+      const offBody = JSON.parse(
+        buildRequest(openaiProfile, userMsg, { stream: true, includeUsage: false }).body,
+      );
+      expect(offBody).not.toHaveProperty("stream_options");
+
+      const nonStream = JSON.parse(buildRequest(openaiProfile, userMsg, { stream: false }).body);
+      expect(nonStream).not.toHaveProperty("stream_options");
+
+      // Anthropic 本来就带 usage，不需要也不认 stream_options
+      const anthropicBody = JSON.parse(
+        buildRequest(anthropicProfile, userMsg, { stream: true }).body,
+      );
+      expect(anthropicBody).not.toHaveProperty("stream_options");
+    });
+
+    it("OpenAI 流式尾包 usage → onUsage 回调一次且数值正确", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        sseResponse([
+          'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
+          'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+      const usages: Usage[] = [];
+      const text = await streamChat(openaiProfile, userMsg, {
+        signal: new AbortController().signal,
+        onDelta: () => {},
+        onUsage: (u) => usages.push(u),
+      });
+      expect(text).toBe("好");
+      expect(usages).toEqual([{ inputTokens: 5, outputTokens: 7, totalTokens: 12 }]);
+    });
+
+    it("Anthropic message_start + message_delta 合并后只回调一次", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        sseResponse([
+          'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":1}}}\n\n',
+          'event: content_block_delta\ndata: {"delta":{"text":"和"}}\n\n',
+          'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":34}}\n\n',
+          "event: message_stop\ndata: {}\n\n",
+        ]),
+      );
+      const usages: Usage[] = [];
+      const text = await streamChat(anthropicProfile, userMsg, {
+        signal: new AbortController().signal,
+        onDelta: () => {},
+        onUsage: (u) => usages.push(u),
+      });
+      expect(text).toBe("和");
+      // output_tokens 是累计值：message_delta 的 34 覆盖 message_start 的 1
+      expect(usages).toEqual([{ inputTokens: 12, outputTokens: 34 }]);
+    });
+
+    it("带 stream_options 的请求 400 → 去掉该参数重试一次并成功", async () => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response("unknown field: stream_options", { status: 400 }))
+        .mockResolvedValueOnce(
+          sseResponse([
+            'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
+            "data: [DONE]\n\n",
+          ]),
+        );
+      const text = await streamChat(openaiProfile, userMsg, {
+        signal: new AbortController().signal,
+        onDelta: () => {},
+      });
+      expect(text).toBe("好");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const firstBody = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+      expect(firstBody.stream_options).toEqual({ include_usage: true });
+      const secondBody = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
+      expect(secondBody).not.toHaveProperty("stream_options");
+      expect(secondBody.stream).toBe(true); // 除该参数外其余请求不变
+    });
+
+    it("两次都 400 → 抛第二个错误，且只重试一次（共两次 fetch）", async () => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response("unknown field: stream_options", { status: 400 }))
+        .mockResolvedValueOnce(new Response("还是不行", { status: 400 }));
+      await expect(
+        streamChat(openaiProfile, userMsg, {
+          signal: new AbortController().signal,
+          onDelta: () => {},
+        }),
+      ).rejects.toThrow(/HTTP 400 还是不行/);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("非流式 json.usage 直接读", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "整段" } }],
+            usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+      const usages: Usage[] = [];
+      await streamChat(openaiProfile, userMsg, {
+        signal: new AbortController().signal,
+        onDelta: () => {},
+        onUsage: (u) => usages.push(u),
+      });
+      expect(usages).toEqual([{ inputTokens: 3, outputTokens: 4, totalTokens: 7 }]);
+    });
+
+    it("没有 usage → 不回调（不回调 0）", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        sseResponse([
+          'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+      const onUsage = vi.fn();
+      await streamChat(openaiProfile, userMsg, {
+        signal: new AbortController().signal,
+        onDelta: () => {},
+        onUsage,
+      });
+      expect(onUsage).not.toHaveBeenCalled();
+    });
+
+    it("Anthropic 400 不做降级重试（它本来就没带 stream_options）", async () => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response("bad request", { status: 400 }));
+      await expect(
+        streamChat(anthropicProfile, userMsg, {
+          signal: new AbortController().signal,
+          onDelta: () => {},
+        }),
+      ).rejects.toThrow(/HTTP 400/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });

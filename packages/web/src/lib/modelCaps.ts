@@ -1,5 +1,5 @@
 /**
- * 模型能力元数据表（上下文窗口 / 是否支持函数调用 / 视觉 / 思考 / 定价）。
+ * 模型能力元数据表（上下文窗口 / 函数调用 / 视觉 / 思考 / 函数并行 / 结构化输出 / 定价）。
  *
  * 为什么要有这张表：
  * - **上下文窗口**决定历史预算能开多大（超了供应商就 400）；
@@ -35,6 +35,18 @@ export interface ModelCapability {
   supportsVision: boolean;
   /** 是否输出思考过程。 */
   supportsReasoning: boolean;
+  /**
+   * 是否支持**函数并行**（一轮里同时发起多个工具调用）。
+   *
+   * ★ 当前**不驱动任何行为**（见 `capabilityBadges` 上方的说明），只作选型参考。
+   */
+  supportsParallelTools: boolean;
+  /**
+   * 是否支持**结构化输出**（JSON 模式 / `response_format`）。
+   *
+   * ★ 当前**不驱动任何行为**（见 `capabilityBadges` 上方的说明），只作选型参考。
+   */
+  supportsStructuredOutput: boolean;
   /** 定价：每百万 token，单位「元」。 */
   pricing?: { input: number; output: number };
 }
@@ -45,14 +57,29 @@ export type ModelCapabilityOverride = Partial<ModelCapability>;
 /** 覆盖层：key = `provider:model` → 用户手改的字段。 */
 export type ModelCapsOverrides = Record<string, ModelCapabilityOverride>;
 
-/** 未知模型时的保守缺省：窗口小、只支持文本与工具。 */
+/** 未知模型时的保守缺省：窗口小、只支持文本与工具；并行/结构化一律不认。 */
 export const DEFAULT_CAPABILITY: ModelCapability = {
   contextWindow: 8192,
   maxOutput: 4096,
   supportsTools: true,
   supportsVision: false,
   supportsReasoning: false,
+  supportsParallelTools: false,
+  supportsStructuredOutput: false,
 };
+
+/** 「长上下文」门槛（token）。 */
+export const LONG_CONTEXT_TOKENS = 128_000;
+
+/**
+ * 是否算「长上下文」模型——**派生**而非存字段。
+ *
+ * ★ 为什么不存成字段：上下文窗口已经是唯一事实源，再存一个布尔就是两个真源；
+ *   用户手改窗口而忘了改布尔时两边会打架。派生永远和窗口一致。
+ */
+export function supportsLongContext(caps: ModelCapability): boolean {
+  return caps.contextWindow >= LONG_CONTEXT_TOKENS;
+}
 
 /**
  * 静态表：精确模型 id → 能力。
@@ -68,6 +95,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: false,
+    supportsParallelTools: true,
+    supportsStructuredOutput: true,
     pricing: { input: 2, output: 8 },
   },
   "deepseek-reasoner": {
@@ -76,6 +105,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: true,
+    supportsParallelTools: true,
+    supportsStructuredOutput: true,
     pricing: { input: 4, output: 16 },
   },
   // —— Kimi / Moonshot ——
@@ -85,6 +116,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: false,
+    supportsParallelTools: false,
+    supportsStructuredOutput: false,
     pricing: { input: 12, output: 12 },
   },
   "moonshot-v1-32k": {
@@ -93,6 +126,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: false,
+    supportsParallelTools: false,
+    supportsStructuredOutput: false,
     pricing: { input: 12, output: 12 },
   },
   // —— 智谱 GLM ——
@@ -102,6 +137,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: false,
+    supportsParallelTools: false,
+    supportsStructuredOutput: false,
     pricing: { input: 0.5, output: 5 },
   },
   "glm-4-plus": {
@@ -110,6 +147,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: true,
     supportsReasoning: false,
+    supportsParallelTools: false,
+    supportsStructuredOutput: false,
     pricing: { input: 4, output: 12 },
   },
   // —— 通义千问 ——
@@ -119,6 +158,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: false,
+    supportsParallelTools: false,
+    supportsStructuredOutput: false,
     pricing: { input: 0.8, output: 2 },
   },
   "qwen-max": {
@@ -127,6 +168,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: false,
+    supportsParallelTools: false,
+    supportsStructuredOutput: false,
     pricing: { input: 2.4, output: 9.6 },
   },
   "qwen-turbo": {
@@ -135,6 +178,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: false,
+    supportsParallelTools: false,
+    supportsStructuredOutput: false,
     pricing: { input: 0.3, output: 0.6 },
   },
   "qwen2.5-vl-7b-instruct": {
@@ -143,6 +188,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: true,
     supportsReasoning: false,
+    supportsParallelTools: false,
+    supportsStructuredOutput: false,
   },
   // —— 本地 / 私有部署 ——
   "Qwen/Qwen2.5-7B-Instruct": {
@@ -151,6 +198,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: false,
+    supportsParallelTools: false,
+    supportsStructuredOutput: false,
   },
   "qwen2.5:7b": {
     contextWindow: 32768,
@@ -158,6 +207,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: false,
+    supportsParallelTools: false,
+    supportsStructuredOutput: false,
   },
   // —— Anthropic ——
   "claude-sonnet-5": {
@@ -166,6 +217,9 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: true,
     supportsReasoning: true,
+    // Anthropic 协议：并行工具是默认行为（无 parallel_tool_calls 开关）；结构化输出不走 response_format
+    supportsParallelTools: true,
+    supportsStructuredOutput: false,
     pricing: { input: 21, output: 105 },
   },
   "claude-opus-5": {
@@ -174,6 +228,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: true,
     supportsReasoning: true,
+    supportsParallelTools: true,
+    supportsStructuredOutput: false,
     pricing: { input: 105, output: 525 },
   },
   // —— OpenAI 兼容端点常见的几个 ——
@@ -183,6 +239,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: true,
     supportsReasoning: false,
+    supportsParallelTools: true,
+    supportsStructuredOutput: true,
     pricing: { input: 18, output: 72 },
   },
   "gpt-4o-mini": {
@@ -191,6 +249,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: true,
     supportsReasoning: false,
+    supportsParallelTools: true,
+    supportsStructuredOutput: true,
     pricing: { input: 1.1, output: 4.3 },
   },
   "o3-mini": {
@@ -199,6 +259,8 @@ const EXACT: Record<string, ModelCapability> = {
     supportsTools: true,
     supportsVision: false,
     supportsReasoning: true,
+    supportsParallelTools: true,
+    supportsStructuredOutput: true,
     pricing: { input: 11, output: 44 },
   },
 };
@@ -400,11 +462,22 @@ export function resolveCapability(
   return lookupCapability(profile.provider, profile.model, storage) ?? DEFAULT_CAPABILITY;
 }
 
-/** 能力徽标（界面用）。 */
+/**
+ * 能力徽标（界面用）：纯文字标签，**不用 emoji**（本仓视觉规范：图标一律细线 SVG）。
+ *
+ * ★ 这几维里，**只有「函数调用」与「视觉」真正驱动行为**——它们走 `capabilityNotice`
+ *   参与「判定 → 丢弃」（不支持就不发 tools / 图片）。其余各维（思考 / 长上下文 /
+ *   并行工具 / 结构化输出）在本仓请求里**没有对应开关**（`buildRequest` 从不发
+ *   `parallel_tool_calls` / `response_format`），只是**选型参考**，不参与任何降级判定。
+ *   别把「并行工具 / 结构化输出」当成已经接线——它们现在不改变发出的请求。
+ */
 export function capabilityBadges(caps: ModelCapability): string[] {
   const out: string[] = [];
-  if (caps.supportsTools) out.push("🎯 函数调用");
-  if (caps.supportsVision) out.push("👁 视觉");
-  if (caps.supportsReasoning) out.push("💭 思考");
+  if (caps.supportsTools) out.push("函数调用");
+  if (caps.supportsVision) out.push("视觉");
+  if (caps.supportsReasoning) out.push("思考");
+  if (supportsLongContext(caps)) out.push("长上下文");
+  if (caps.supportsParallelTools) out.push("并行工具");
+  if (caps.supportsStructuredOutput) out.push("结构化输出");
   return out;
 }

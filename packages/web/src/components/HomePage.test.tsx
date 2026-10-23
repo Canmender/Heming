@@ -492,4 +492,26 @@ describe("HomePage", () => {
       expect(warnSpy).toHaveBeenCalledWith("接受好友申请失败", expect.any(Error)),
     );
   });
+
+  it("今日只有未上报 → 徽标说「今日用量未上报」而不是 0，本月卡补「N 轮未上报」", async () => {
+    mockFetch();
+    useTokenUsageStore.getState().recordUnreported("claude-sonnet-5", now.toISOString());
+    render(<HomePage />);
+    await act(async () => {});
+
+    expect(screen.getByText("今日用量未上报")).toBeInTheDocument();
+    expect(screen.queryByText(/今日已用 0/)).not.toBeInTheDocument();
+    expect(screen.getByText("1 轮未上报")).toBeInTheDocument();
+  });
+
+  it("今日有数字又有未上报 → 数字优先，未上报只作补充", async () => {
+    mockFetch();
+    useTokenUsageStore.getState().record("claude-sonnet-5", 500, now.toISOString());
+    useTokenUsageStore.getState().recordUnreported("claude-sonnet-5", now.toISOString());
+    render(<HomePage />);
+    await act(async () => {});
+
+    expect(screen.getByText("今日已用 500")).toBeInTheDocument();
+    expect(screen.getByText("1 轮未上报")).toBeInTheDocument();
+  });
 });

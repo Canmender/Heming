@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   DEFAULT_CAPABILITY,
+  LONG_CONTEXT_TOKENS,
   MODEL_CAPS_KEY,
+  capabilityBadges,
   clearOverride,
   lookupCapability,
   resolveCapability,
   setOverride,
+  supportsLongContext,
   type ModelCapsOverrides,
 } from "./modelCaps.js";
 import { LLM_PRESETS } from "./llmPresets.js";
@@ -96,5 +99,64 @@ describe("模型能力表", () => {
     expect(caps).toEqual(DEFAULT_CAPABILITY);
     // 缺省窗口刻意保守：宁可少发历史，也不撞供应商上限
     expect(caps.contextWindow).toBe(8192);
+  });
+
+  // —— d.32：能力矩阵补两维（函数并行 / 结构化输出）——
+
+  it("静态表补齐新两维：已知事实照填，不确定的保守为 false", () => {
+    const deepseek = lookupCapability("openai", "deepseek-chat", storage)!;
+    expect(deepseek.supportsParallelTools).toBe(true);
+    expect(deepseek.supportsStructuredOutput).toBe(true);
+
+    const gpt = lookupCapability("openai", "gpt-4o", storage)!;
+    expect(gpt.supportsParallelTools).toBe(true);
+    expect(gpt.supportsStructuredOutput).toBe(true);
+
+    // Anthropic 协议如实标：并行是默认行为（无开关），结构化不走 response_format
+    const claude = lookupCapability("anthropic", "claude-sonnet-5", storage)!;
+    expect(claude.supportsParallelTools).toBe(true);
+    expect(claude.supportsStructuredOutput).toBe(false);
+
+    // 不确定的一律 false（宁保守不吹牛）
+    const glm = lookupCapability("openai", "glm-4-flash", storage)!;
+    expect(glm.supportsParallelTools).toBe(false);
+    expect(glm.supportsStructuredOutput).toBe(false);
+    expect(DEFAULT_CAPABILITY.supportsParallelTools).toBe(false);
+    expect(DEFAULT_CAPABILITY.supportsStructuredOutput).toBe(false);
+  });
+
+  it("supportsLongContext 是派生：窗口 ≥ 128K 即为长上下文（边界精确）", () => {
+    expect(LONG_CONTEXT_TOKENS).toBe(128000);
+    expect(supportsLongContext({ ...DEFAULT_CAPABILITY, contextWindow: 128000 })).toBe(true);
+    expect(supportsLongContext({ ...DEFAULT_CAPABILITY, contextWindow: 127999 })).toBe(false);
+    // 与内置表一致：deepseek-chat 64K 不算长上下文，qwen-turbo 1M 算
+    expect(supportsLongContext(lookupCapability("openai", "deepseek-chat", storage)!)).toBe(false);
+    expect(supportsLongContext(lookupCapability("openai", "qwen-turbo", storage)!)).toBe(true);
+  });
+
+  it("覆盖层能改新字段（通用 Partial，无需额外逻辑）", () => {
+    setOverride("openai", "自定义模型", { supportsParallelTools: true }, storage);
+    const caps = lookupCapability("openai", "自定义模型", storage)!;
+    expect(caps.supportsParallelTools).toBe(true);
+    // 未覆盖的字段仍来自保守缺省
+    expect(caps.supportsStructuredOutput).toBe(false);
+  });
+
+  it("未知模型仍返回 null（新字段不改变「不猜」原则）", () => {
+    expect(lookupCapability("openai", "未知模型-abc", storage)).toBeNull();
+  });
+
+  it("能力徽标不含 emoji，按固定顺序给纯中文标签", () => {
+    const badges = capabilityBadges({
+      ...DEFAULT_CAPABILITY,
+      contextWindow: 200_000,
+      supportsVision: true,
+      supportsReasoning: true,
+      supportsParallelTools: true,
+      supportsStructuredOutput: true,
+    });
+    expect(badges).toEqual(["函数调用", "视觉", "思考", "长上下文", "并行工具", "结构化输出"]);
+    // 每个徽标只由中文组成：emoji（🎯👁💭…）任何字符都混不进来
+    for (const b of badges) expect(b).toMatch(/^[一-鿿]+$/);
   });
 });

@@ -13,6 +13,7 @@ import { clearDraft, getDraft, setDraft as saveDraft } from "../lib/drafts.js";
 import { useTaskStore } from "../lib/tasks/store.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
+import { useTokenUsageStore } from "../store/tokenUsage.js";
 import {
   fetchMembers,
   uploadEncryptedFile,
@@ -1316,6 +1317,12 @@ export function ChatPage({ embedded = false }: { embedded?: boolean } = {}) {
       },
       send: (e) => wsHandleRef.current?.send(e),
       streamChat,
+      // Token 用量记账（d.32）：编排层在成功收口前调用一次；
+      // null = 供应商一次都没上报 → 记「未上报」，而不是写 0 冒充真实用量。
+      recordUsage: (model, tokens) =>
+        tokens === null
+          ? useTokenUsageStore.getState().recordUnreported(model)
+          : useTokenUsageStore.getState().record(model, tokens),
       // E2E 流式（硬验收④）：chunk 走 chunkAad（convId+streamId+index）信封、
       // finish 全文进信封——由 agentStream 统一串行上行，加密失败跳过/报错不发明文。
       sealChunk: async (streamId, index, delta) => {

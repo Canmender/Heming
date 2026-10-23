@@ -71,6 +71,19 @@ export interface BuildRequestOpts {
    * 仅 OpenAI 兼容供应商注入；为空/未传时请求体与旧版完全一致。
    */
   tools?: unknown[];
+  /**
+   * OpenAI 流式请求是否带 `stream_options: {include_usage:true}`（尾包才会回 usage）。
+   * 缺省带；显式 false 不带——部分第三方兼容网关不认这个参数会 400，
+   * streamChat 据此在 400 时关掉它重试一次。Anthropic 分支始终不加（它本来就带 usage）。
+   */
+  includeUsage?: boolean;
+}
+
+/** 一次请求里供应商上报的用量（拿不到字段就留 undefined，绝不补 0）。 */
+export interface UsageTotals {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
 }
 
 /**
@@ -131,6 +144,11 @@ export function buildRequest(
       })),
       // 工具调用只对 OpenAI 兼容协议开放（anthropic 的消息结构不同，另行适配）
       ...(opts.tools?.length ? { tools: opts.tools, tool_choice: "auto" } : {}),
+      // 流式默认要 usage（尾包才给）；includeUsage=false 时整段不出现——
+      // 某些兼容网关不认这个参数会直接 400，缺省值因此必须是「带」而不是「不带」。
+      ...(opts.stream && opts.includeUsage !== false
+        ? { stream_options: { include_usage: true } }
+        : {}),
     }),
   };
 }
@@ -178,6 +196,12 @@ export interface StreamChatOpts {
    * 部分网关的 `reasoning`、Anthropic 的 `thinking_delta`。不支持时不会回调。
    */
   onReasoning?: (text: string) => void;
+  /**
+   * 本轮供应商上报的用量：流内多处下发时（Anthropic 的 message_start/message_delta）
+   * 先合并，结束时**恰好回调一次**。拿不到就**不回调**（不回调 0——0 是「真的用了 0」，
+   * 与「没上报」是两件事，界面必须能区分）。
+   */
+  onUsage?: (u: UsageTotals) => void;
 }
 
 /**
@@ -194,15 +218,56 @@ export async function streamChat(
   opts: StreamChatOpts,
 ): Promise<string> {
   // 同步抛出（如缺 scheme 的 baseUrl 守卫）自然向上传播，不转 provider_error
-  const req = buildRequest(profile, messages, {
-    stream: true,
-    maxTokens: opts.maxTokens,
-    tools: opts.tools,
-  });
+  const build = (includeUsage: boolean) =>
+    buildRequest(profile, messages, {
+      stream: true,
+      maxTokens: opts.maxTokens,
+      tools: opts.tools,
+      includeUsage,
+    });
+  // 首次带 stream_options；400 时用 build(false) 重建（buildRequest 是纯函数，不复制 body）
+  let req = build(true);
 
   const toAbortError = () => new DOMException("AbortError", "AbortError");
   const toProviderError = (e: unknown) =>
     new Error(`provider_error: ${e instanceof Error ? e.message : String(e)}`);
+
+  /**
+   * 供应商 usage → 统一口径（OpenAI 的 prompt/completion、Anthropic 的 input/output）。
+   * 只认数字字段：全空返回 null（= 这个包没上报），绝不用 0 冒充。
+   */
+  const readUsage = (raw: unknown): UsageTotals | null => {
+    if (!raw || typeof raw !== "object") return null;
+    const r = raw as {
+      prompt_tokens?: unknown;
+      completion_tokens?: unknown;
+      total_tokens?: unknown;
+      input_tokens?: unknown;
+      output_tokens?: unknown;
+    };
+    const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
+    const u: UsageTotals = {
+      inputTokens: num(r.prompt_tokens) ?? num(r.input_tokens),
+      outputTokens: num(r.completion_tokens) ?? num(r.output_tokens),
+      totalTokens: num(r.total_tokens),
+    };
+    return u.inputTokens !== undefined || u.outputTokens !== undefined || u.totalTokens !== undefined
+      ? u
+      : null;
+  };
+  /** 流内多处 usage 合并（Anthropic 的 output_tokens 是累计值 ⇒ 后到的覆盖先到的）。 */
+  const usage: UsageTotals = {};
+  const mergeUsage = (raw: unknown): void => {
+    const u = readUsage(raw);
+    if (!u) return;
+    if (u.inputTokens !== undefined) usage.inputTokens = u.inputTokens;
+    if (u.outputTokens !== undefined) usage.outputTokens = u.outputTokens;
+    if (u.totalTokens !== undefined) usage.totalTokens = u.totalTokens;
+  };
+  /** 本轮是否拿到过 usage；结束时恰好回调一次（Anthropic 两个事件合并后）。 */
+  const emitUsage = (): void => {
+    if (opts.onUsage && Object.keys(usage).length > 0) opts.onUsage({ ...usage });
+  };
 
   /** 工具调用累加：OpenAI 按 index 分片下发（id/name 只在首片，arguments 分多片）。 */
   const toolCalls = new Map<number, { id: string; name: string; args: string }>();
@@ -236,17 +301,26 @@ export async function streamChat(
     if (calls.length) opts.onToolCalls?.(calls);
   };
 
-  let res: Response;
-  try {
-    res = await fetch(req.url, {
-      method: "POST",
-      headers: req.headers,
-      body: req.body,
-      signal: opts.signal,
-    });
-  } catch (e) {
-    if (opts.signal.aborted || (e as { name?: string })?.name === "AbortError") throw toAbortError();
-    throw toProviderError(e);
+  const doFetch = async (r: typeof req): Promise<Response> => {
+    try {
+      return await fetch(r.url, {
+        method: "POST",
+        headers: r.headers,
+        body: r.body,
+        signal: opts.signal,
+      });
+    } catch (e) {
+      if (opts.signal.aborted || (e as { name?: string })?.name === "AbortError") throw toAbortError();
+      throw toProviderError(e);
+    }
+  };
+
+  let res = await doFetch(req);
+  // stream_options 自动降级（方案 §2.1）：部分第三方兼容网关不认该参数，直接 400。
+  // 只重试一次（第二次不带该参数）；第二次仍失败就抛第二个错误——不掩盖真实问题、不无限重试。
+  if (!res.ok && res.status === 400 && profile.provider !== "anthropic") {
+    req = build(false);
+    res = await doFetch(req);
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -261,6 +335,7 @@ export async function streamChat(
         message?: { content?: string; tool_calls?: unknown; reasoning_content?: string; reasoning?: string };
       }[];
       content?: { text?: string }[];
+      usage?: unknown;
     };
     try {
       json = (await res.json()) as typeof json;
@@ -281,6 +356,9 @@ export async function streamChat(
       // 按 ≤3000 字符切片循环回调，既保证每帧合法、也不至于每片都顶格
       for (let i = 0; i < text.length; i += 3000) opts.onDelta(text.slice(i, i + 3000));
     }
+    // 非流式兼容分支：usage 直接在整段 json 上
+    mergeUsage(json.usage);
+    emitUsage();
     return text;
   }
 
@@ -299,7 +377,13 @@ export async function streamChat(
           delta?: { content?: string; tool_calls?: unknown; reasoning_content?: string; reasoning?: string };
         }[];
         delta?: { text?: string; thinking?: string; type?: string };
+        /** OpenAI 尾包（choices 可能为空）的 usage */
+        usage?: unknown;
+        /** Anthropic message_start 的 message.usage（input_tokens 在这里） */
+        message?: { usage?: unknown };
       };
+      // usage 可能分多处下发（Anthropic message_start 给 input、message_delta 给 output）
+      mergeUsage(parsed.usage ?? parsed.message?.usage);
       collectToolCalls(parsed.choices?.[0]?.delta?.tool_calls);
       // 思考过程：不同供应商字段不同，统一喂给 onReasoning（不参与正文累积）
       const reasoningDelta =
@@ -333,6 +417,9 @@ export async function streamChat(
     }
     if (buffer.trim()) handleLine(buffer.trim());
     flushToolCalls();
+    // 整条流读完才回调：Anthropic 的 usage 分散在多个事件里，合并后只报一次。
+    // 中止/网络错的路径走上面的 catch 抛出，不回调（没跑完的用量口径不清）。
+    emitUsage();
   } catch (e) {
     if (opts.signal.aborted || (e as { name?: string })?.name === "AbortError") throw toAbortError();
     throw toProviderError(e);

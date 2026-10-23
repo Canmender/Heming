@@ -206,6 +206,14 @@ export interface TriggerDeps {
     agentId: string,
     opts?: { aggressive?: 1 | 2 },
   ) => Promise<ChatMessage[]>;
+  /**
+   * 本轮运行的 token 用量记账（d.32）：成功收口前调用**恰好一次**。
+   * - `tokens` = 本次运行各轮累加的用量（优先 totalTokens，没有则 input+output）；
+   * - `null` = 供应商一次都没上报（**不是 0**——「未上报」与「真的用了 0」必须能区分）；
+   * - 失败/中止的运行**不调用**：没跑完的用量口径不清，记了反而误导。
+   * 走注入而不是直接 import store：本模块保持纯逻辑可测。
+   */
+  recordUsage?: (model: string, tokens: number | null) => void;
 }
 
 /**
@@ -428,6 +436,13 @@ export function runAgentMentions(
          */
         let buffered = "";
         /**
+         * Token 用量累加（d.32）：一次运行可能有多轮工具调用（每轮一次 streamChat），
+         * 每轮拿到多少就加多少。每次尝试开始时归零——溢出重试的失败尝试没跑完，
+         * 不并入最终口径（失败/中止的运行整体不记账）。
+         */
+        let usageTotal = 0;
+        let usageSeen = false;
+        /**
          * 组装一次尝试的 messages（设计 §4）：系统提示词 → 准备好的历史 → 本条 user 轮。
          * 历史每次都重新走 `prepareHistory`（溢出重试据此用收紧后的预算重切分并重新前置系统提示词）；
          * 缺省或抛错 → 原样 history（与加预算之前完全一致，绝不阻断生成）。
@@ -537,6 +552,8 @@ export function runAgentMentions(
          */
         const once = async (aggressive?: 1 | 2) => {
           local = "";
+          usageTotal = 0;
+          usageSeen = false;
           const bridge = deps.getTools?.(m.agentId) ?? null;
           // 工具需要两个条件：桥形状是 OpenAI tools（Anthropic 的 content blocks 不兼容），
           // 且能力表认定该模型支持函数调用——不支持时给了也没用，反而让模型胡言「我去查一下」。
@@ -570,6 +587,17 @@ export function runAgentMentions(
               onReasoning: (t) => {
                 reasoning += t;
                 deps.onReasoning?.(streamId, reasoning);
+              },
+              onUsage: (u) => {
+                // 优先总用量；没有就 input+output；两者都缺 = 这个包没上报（不按 0 计）。
+                const t =
+                  u.totalTokens ??
+                  (u.inputTokens !== undefined || u.outputTokens !== undefined
+                    ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0)
+                    : undefined);
+                if (t === undefined) return;
+                usageSeen = true;
+                usageTotal += t;
               },
               onDelta: (d) => {
                 if (!useTools) {
@@ -700,6 +728,13 @@ export function runAgentMentions(
           const text = local || acc;
           if (await sendFinish(text)) {
             notifyTurnComplete(deps, m.agentId, userText, text, "ok");
+            // 用量记账：成功收口前恰好一次；一次都没拿到就记 null（未上报）。
+            // 记账是旁路副作用，失败不得反噬收口（与 onRunSettled 同口径吞掉）。
+            try {
+              deps.recordUsage?.(profile.model, usageSeen ? usageTotal : null);
+            } catch {
+              /* 记账失败不影响三事件上行 */
+            }
             settle({ status: "ok", finalText: text });
           } else {
             settle({ status: "error", error: "端到端加密失败，回复未发送" });
