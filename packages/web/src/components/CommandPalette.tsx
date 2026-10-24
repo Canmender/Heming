@@ -47,11 +47,18 @@ function convResult(c: Conversation): SearchResult {
  * 排序规则：前缀命中优先于包含命中——打「张三」时，叫「张三」的会话
  * 应该排在「张三李四群」前面，而不是靠数据顺序碰运气。
  */
-export function searchAll(keyword: string, conversations: Conversation[]): SearchResult[] {
-  const q = keyword.trim().toLowerCase();
-  if (!q) return [];
+export interface SearchOutcome {
+  /** 截断后实际展示的结果（会话最多 8、技能最多 5）。 */
+  results: SearchResult[];
+  /** 命中总数（含被上限截掉的），用于「还有 N 条」提示。 */
+  total: number;
+}
 
-  const convs = conversations
+export function searchAllDetailed(keyword: string, conversations: Conversation[]): SearchOutcome {
+  const q = keyword.trim().toLowerCase();
+  if (!q) return { results: [], total: 0 };
+
+  const convMatches = conversations
     .map(convResult)
     .filter((r) => r.name.toLowerCase().includes(q))
     .sort((a, b) => {
@@ -65,10 +72,9 @@ export function searchAll(keyword: string, conversations: Conversation[]): Searc
       return a.name.localeCompare(b.name, "zh");
     });
 
-  const skills: SearchResult[] = skillPool
+  const skillMatches: SearchResult[] = skillPool
     .list()
     .filter((s) => s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q))
-    .slice(0, 5)
     .map((s) => ({
       kind: "skill" as const,
       id: s.id,
@@ -76,7 +82,12 @@ export function searchAll(keyword: string, conversations: Conversation[]): Searc
       detail: s.description ? s.description.slice(0, 40) : "技能",
     }));
 
-  return [...convs.slice(0, 8), ...skills];
+  const results = [...convMatches.slice(0, 8), ...skillMatches.slice(0, 5)];
+  return { results, total: convMatches.length + skillMatches.length };
+}
+
+export function searchAll(keyword: string, conversations: Conversation[]): SearchResult[] {
+  return searchAllDetailed(keyword, conversations).results;
 }
 
 export function CommandPalette({ onClose }: { onClose: () => void }) {
@@ -89,7 +100,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
-  const results = useMemo(() => searchAll(query, conversations), [query, conversations]);
+  const { results, total } = useMemo(() => searchAllDetailed(query, conversations), [query, conversations]);
+  const hidden = total - results.length;
 
   // 唤起即聚焦 + Tab 困在面板内：命令面板的整个意义就是「键盘打字开始找」
   useModalA11y(panelRef, onClose, { closeOnEscape: false, initialFocusRef: inputRef });
@@ -143,6 +155,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         ref={panelRef}
         className="w-[520px] max-w-[92vw] overflow-hidden rounded-xl border border-line bg-white shadow-[0_12px_40px_rgba(0,0,0,0.18)]"
         onMouseDown={(e) => e.stopPropagation()}
+        // 键盘约定挂在面板容器上而不是输入框：焦点移到结果按钮后（Tab/方向键），
+        // Esc 与上下选择仍然生效，不需要先把焦点移回输入框。
+        onKeyDown={onKeyDown}
         role="dialog"
         aria-modal="true"
         aria-label="全局搜索"
@@ -152,7 +167,6 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           aria-label="搜索会话与技能"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={onKeyDown}
           placeholder="搜索会话、技能…"
           className="w-full border-b border-line-soft px-3.5 py-2.5 text-[13px] outline-none placeholder:text-[#bbb]"
         />
@@ -197,6 +211,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                 ) : null}
               </button>
             ))
+          )}
+          {hidden > 0 && (
+            <div className="border-t border-line-soft px-3.5 py-1.5 text-[11px] text-muted">
+              还有 {hidden} 条
+            </div>
           )}
         </div>
 

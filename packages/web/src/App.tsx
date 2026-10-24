@@ -137,7 +137,7 @@ export function App() {
     <>
       {/* 包一层仅为挂 inert：不加样式，AppShell 根节点自身的 h-screen 决定布局 */}
       <div ref={shellRef}>
-        <AppShell />
+        <AppShell onOpenSearch={() => setPaletteOpen(true)} />
       </div>
       {!bootDone && <BootWave onDone={handleBootDone} writeFirst={!HAS_NATIVE_SPLASH} />}
       {/* 全局加一层除了命令面板之外的空壳：面板自己带着遮罩，不需要外层容器 */}
@@ -147,7 +147,7 @@ export function App() {
 }
 
 /** 登录页/主界面内容：与启动动画并行挂载（动画仅作遮罩），不做时序门禁。 */
-function AppShell() {
+function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
   const authStatus = useAuthStore((s) => s.status);
   const authUser = useAuthStore((s) => s.user);
   const restore = useAuthStore((s) => s.restore);
@@ -321,7 +321,7 @@ function AppShell() {
       {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
       <TitleBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <NavRail />
+        <NavRail onOpenSearch={onOpenSearch} />
         <main className="flex min-w-0 flex-1 flex-col">{view}</main>
         {/* 右侧工作目录：可拖动左边缘改宽度（手柄整条 6px 宽，好抓）。
             绑定按钮把本地文件绑到当前会话，通话/协作里点目录就能带上文件。 */}

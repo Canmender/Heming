@@ -22,6 +22,7 @@ import { CONTEXT_KEYS, type ContextSettings } from "../lib/agentContext/index.js
 import { hasSubtle, toB64, fromB64 } from "../lib/e2eCrypto.js";
 import { sealMessage } from "../lib/e2eSession.js";
 import { DEFAULT_WINDOW } from "../lib/messageWindow.js";
+import { formatClock, formatDayClock } from "../lib/formatTime.js";
 
 vi.mock("../lib/ws.js", () => ({ connectWs: vi.fn() }));
 // E2E Task 4：hasSubtle 桩（默认 true，无 subtle 用例按例翻转）；
@@ -345,6 +346,8 @@ describe("ChatPage", () => {
       incoming: [],
       messages: {},
       reads: {},
+      messagesLoading: {},
+      messagesError: {},
       streaming: {},
       streamOwner: {},
       plainById: {},
@@ -707,7 +710,7 @@ describe("ChatPage", () => {
     fireEvent.change(input, { target: { value: "还没发出去的话" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(screen.getByRole("status")).toHaveTextContent("连接未就绪，消息未发送");
+    expect(await screen.findByRole("alert")).toHaveTextContent("连接未就绪，消息未发送");
     expect(input).toHaveValue("还没发出去的话"); // 草稿未被清空
   });
 
@@ -1143,7 +1146,7 @@ describe("ChatPage", () => {
     await pickAndSend("@和小鸣 帮我看下");
 
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(await screen.findByRole("alert")).toHaveTextContent(
       "和小鸣 未绑定 LLM 连接，请先在设置页配置",
     );
     expect(screen.getByPlaceholderText("输入消息…")).toHaveValue("@和小鸣 帮我看下"); // 草稿保留
@@ -1259,9 +1262,9 @@ describe("ChatPage", () => {
     await waitFor(() => expect(screen.getByText(/HTTP 401/)).toBeInTheDocument()); // 错误原因行
     expect(screen.getByText("半")).toBeInTheDocument(); // partial 消息仍在列表
 
-    // 重试 = 对该 mention 重新跑一遍流
+    // 重试 = 对该 mention 重新跑一遍流（错误行动作按 A2 统一为「继续生成」）
     vi.mocked(streamChat).mockClear();
-    fireEvent.click(screen.getByText("重试"));
+    fireEvent.click(screen.getByText("继续生成"));
     await waitFor(() => expect(streamChat).toHaveBeenCalledTimes(1));
   });
 
@@ -1296,9 +1299,9 @@ describe("ChatPage", () => {
     act(() => {
       lastHandlers().onEvent(errEv); // 密文回声：本机经出站箱还原原文（fix round 2）
     });
-    // 密文回声经出站箱还原原文（异步解密链 → waitFor）
-    await waitFor(() => expect(screen.getByText(/AbortError/)).toBeInTheDocument());
-    expect(screen.getByText("重试")).toBeInTheDocument();
+    // 密文回声经出站箱还原原文（异步解密链 → waitFor）；中断文案已中文化（A2）
+    await waitFor(() => expect(screen.getByText(/已中断，可继续生成/)).toBeInTheDocument());
+    expect(screen.getByText("继续生成")).toBeInTheDocument();
     expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 不再生成中
   });
 
@@ -2124,7 +2127,7 @@ describe("ChatPage", () => {
       size: 7 * 1024 * 1024,
     } as unknown as File);
 
-    expect(await screen.findByRole("status")).toHaveTextContent("文件需小于 6MB");
+    expect(await screen.findByRole("alert")).toHaveTextContent("文件需小于 6MB");
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
     expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false); // 未发起上传
   });
@@ -2317,7 +2320,7 @@ describe("ChatPage", () => {
 
     captureFilePicker().pick(undefined, new File(["ab"], "a.txt", { type: "text/plain" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("上传失败：too large");
+    expect(await screen.findByRole("alert")).toHaveTextContent("上传失败：too large");
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
   });
 
@@ -2365,7 +2368,7 @@ describe("ChatPage", () => {
 
     // 旧闭包的 convId/handle 都过期：不得把附件发进 B 会话
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("已切换会话，文件未发送");
+    expect(await screen.findByRole("alert")).toHaveTextContent("已切换会话，文件未发送");
   });
 
   it("消费 pendingAttachment：切到目标会话后经 WS 发送 file 消息", async () => {
@@ -2934,7 +2937,7 @@ describe("ChatPage", () => {
       fireEvent.click(screen.getByLabelText("停止录音")); // 开始后立即停：真实时差远小于 1s
       await act(async () => {});
 
-      expect(screen.getByRole("status")).toHaveTextContent("录音太短，未发送");
+      expect(screen.getByRole("alert")).toHaveTextContent("录音太短，未发送");
       expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
       expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false);
       expect(media.trackStop).toHaveBeenCalledTimes(1); // 拒发也停轨
@@ -3073,7 +3076,7 @@ describe("ChatPage", () => {
       fireEvent.click(screen.getByRole("button", { name: "语音消息（录音）" }));
       await act(async () => {});
 
-      expect(screen.getByRole("status")).toHaveTextContent("无法访问麦克风");
+      expect(screen.getByRole("alert")).toHaveTextContent("无法访问麦克风");
       expect(screen.queryByText(/录音中/)).not.toBeInTheDocument();
       expect(media.instances).toHaveLength(0); // 未创建 recorder，也无需停轨
     } finally {
@@ -3767,12 +3770,12 @@ describe("ChatPage", () => {
       "当前环境不支持端到端加密，请使用桌面端或 HTTPS",
     );
 
-    // 文本发送拦截：不发帧、给提示、草稿保留
+    // 文本发送拦截：不发帧、草稿保留；不再叠第二条同文案提示（横幅已是 role=alert）
     const input = screen.getByPlaceholderText("输入消息…");
     fireEvent.change(input, { target: { value: "偷偷发" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
-    expect(screen.getByRole("status")).toHaveTextContent("当前环境不支持端到端加密");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(input).toHaveValue("偷偷发");
 
     // 附件发送拦截：上传前即拦（不 POST /api/files、不发帧）
@@ -4006,6 +4009,377 @@ describe("ChatPage", () => {
       plain: { text?: string };
     }[];
     expect(cached.some((c) => c.plain.text === "自发密文")).toBe(true);
+  });
+
+  // —— d.35.1.9.0 UX 修补 · A 路（聊天主界面）行为用例 ——
+
+  it("A1 历史三态：加载中出骨架；失败给「加载失败+重试」；重试成功渲染消息", async () => {
+    let attempt = 0;
+    let releaseRetry: ((r: Response) => void) | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (/^\/api\/conversations\/[^/]+\/messages$/.test(url)) {
+        attempt += 1;
+        if (attempt === 1) return Promise.reject(new Error("网络中断"));
+        if (attempt === 2) return new Promise<Response>((r) => (releaseRetry = r));
+        return Promise.resolve(jsonRes([msg("m1", "重试后回来", "2026-10-14T01:00:00.000Z")]));
+      }
+      if (/\/(reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      if (url === "/api/e2e/keys") return Promise.resolve(jsonRes({}));
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+
+    render(<ChatPage />);
+    // 首屏：历史没回来时是骨架，不是「还没有消息」
+    expect(screen.getByTestId("messages-skeleton")).toBeInTheDocument();
+    expect(await screen.findByText(/加载失败：网络中断/)).toBeInTheDocument();
+    expect(screen.queryByText("还没有消息")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(screen.getByTestId("messages-skeleton")).toBeInTheDocument(); // 重试期间回到加载态
+    expect(releaseRetry).not.toBeNull();
+    act(() => releaseRetry!(jsonRes([msg("m1", "重试后回来", "2026-10-14T01:00:00.000Z")])));
+    expect(await screen.findByText("重试后回来")).toBeInTheDocument();
+    expect(screen.queryByTestId("messages-skeleton")).not.toBeInTheDocument();
+  });
+
+  it("A1 真空态：只有「加载成功且为空」才显示「还没有消息」", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    expect(screen.getByTestId("messages-skeleton")).toBeInTheDocument();
+    expect(await screen.findByText("还没有消息")).toBeInTheDocument();
+    expect(screen.queryByTestId("messages-skeleton")).not.toBeInTheDocument();
+  });
+
+  it("A3 贴底跟随、上滑不拽底：浮动「↓ 新消息」点回底部", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    scrollSpy.mockClear();
+
+    // 贴底（默认）时新消息继续跟随
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: msg("m8", "贴底新消息", "2026-10-14T01:00:00.000Z"),
+      });
+    });
+    expect(await screen.findByText("贴底新消息")).toBeInTheDocument();
+    expect(scrollSpy).toHaveBeenCalled();
+
+    // 用户上滑：距底 500px（>80）→ 不再贴在底部
+    const list = screen.getByTestId("message-list");
+    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    list.scrollTop = 100;
+    fireEvent.scroll(list);
+    scrollSpy.mockClear();
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: msg("m9", "离底新消息", "2026-10-14T02:00:00.000Z"),
+      });
+    });
+    expect(await screen.findByText("离底新消息")).toBeInTheDocument();
+    expect(scrollSpy).not.toHaveBeenCalled(); // 不强行拽底
+    const jump = screen.getByRole("button", { name: "滚动到最新消息" });
+
+    fireEvent.click(jump);
+    expect(scrollSpy).toHaveBeenCalled(); // 点浮动按钮才回到底部
+    expect(screen.queryByRole("button", { name: "滚动到最新消息" })).not.toBeInTheDocument();
+  });
+
+  it("A4 气泡时间戳：每条带 HH:mm；间隔 ≥5 分钟插分隔、连续消息不插", async () => {
+    const m1 = msg("m1", "第一条", "2026-10-14T01:00:00.000Z");
+    const m2 = msg("m2", "第二条", "2026-10-14T01:02:00.000Z");
+    const m3 = msg("m3", "第三条", "2026-10-14T02:00:00.000Z");
+    mockMessagesFetch([m1, m2, m3]);
+
+    render(<ChatPage />);
+    await screen.findByText("第三条");
+    // 气泡内时间（HH:mm / 跨天 MM-DD HH:mm 的口径由 formatClock 决定）
+    expect(screen.getAllByText(formatClock(m1.createdAt)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(formatClock(m3.createdAt)).length).toBeGreaterThan(0);
+    // 首条插分隔；m2 距 m1 2 分钟不插；m3 距 m2 58 分钟再插
+    expect(screen.getByText(formatDayClock(m1.createdAt))).toBeInTheDocument();
+    expect(screen.queryByText(formatDayClock(m2.createdAt))).not.toBeInTheDocument();
+    expect(screen.getByText(formatDayClock(m3.createdAt))).toBeInTheDocument();
+  });
+
+  it("A5 复制整条消息：写剪贴板并短暂显示「已复制」", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    mockMessagesFetch([msg("m1", "要复制的内容", "2026-10-14T01:00:00.000Z")]);
+
+    render(<ChatPage />);
+    await screen.findByText("要复制的内容");
+    fireEvent.click(screen.getByLabelText("复制消息"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("要复制的内容"));
+    expect(await screen.findByText("已复制")).toBeInTheDocument();
+  });
+
+  it("A6 图片附件点击放大：lightbox 显示原图，Esc 关闭", async () => {
+    const m: Message = {
+      ...msg("m1", "看这张图", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "看这张图",
+        file: { id: "f9", name: "a.png", mime: "image/png", size: 1024 },
+      },
+    };
+    mockMessagesFetch([m]);
+
+    render(<ChatPage />);
+    await screen.findByRole("img", { name: "a.png" });
+    fireEvent.click(screen.getByRole("button", { name: "查看图片 a.png" }));
+
+    const dialog = screen.getByRole("dialog", { name: "查看图片" });
+    const big = within(dialog).getByTestId("image-lightbox") as HTMLImageElement;
+    expect(big).toHaveAttribute("src", "blob:mock-1");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "查看图片" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("A7 粘贴截图：走 sendFile 同一套上传与 file 消息发送", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const fetchSpy = mockUploadFetch({
+      id: "f-paste",
+      owner: "alice",
+      name: "shot.png",
+      mime: "image/png",
+      size: 3,
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const input = screen.getByPlaceholderText("输入消息…");
+    fireEvent.paste(input, {
+      clipboardData: { files: [new File(["img"], "shot.png", { type: "image/png" })] },
+    });
+
+    const plain = await lastSealed(send);
+    expect(plain).toMatchObject({
+      kind: "file",
+      file: { id: "f-paste", name: "shot.png", mime: "image/png" },
+    });
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(true);
+  });
+
+  it("A7 拖拽文件到消息区：即上传并发送", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockUploadFetch({
+      id: "f-drop",
+      owner: "alice",
+      name: "拖入.txt",
+      mime: "text/plain",
+      size: 2,
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const input = screen.getByPlaceholderText("输入消息…");
+    fireEvent.keyDown(input, { key: "Escape" }); // 焦点无关，仅确保页面稳定
+    fireEvent.drop(screen.getByTestId("message-list"), {
+      dataTransfer: {
+        types: ["Files"],
+        files: [new File(["ab"], "拖入.txt", { type: "text/plain" })],
+      },
+    });
+
+    const plain = await lastSealed(send);
+    expect(plain).toMatchObject({ kind: "file", file: { id: "f-drop", name: "拖入.txt" } });
+  });
+
+  it("A8 上传中：图片/文件/语音/发送禁用并提示「上传中…（≤6MB）」，完成后恢复", async () => {
+    let releaseUpload: ((r: Response) => void) | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url === "/api/files") return new Promise<Response>((r) => (releaseUpload = r));
+      if (/\/(messages|reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      if (url === "/api/e2e/keys") return Promise.resolve(jsonRes({}));
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
+      target: { value: "一起传" },
+    });
+    captureFilePicker().pick("image/*", new File(["img"], "cat.png", { type: "image/png" }));
+
+    expect(await screen.findByText("上传中…（≤6MB）")).toBeInTheDocument();
+    expect(screen.getByLabelText("图片")).toBeDisabled();
+    expect(screen.getByLabelText("文件")).toBeDisabled();
+    expect(screen.getByLabelText("语音输入")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+    expect(screen.getByLabelText("图片").getAttribute("title")).toContain("6MB");
+    await waitFor(() => expect(releaseUpload).not.toBeNull()); // 等加密/上传真正发起
+
+    act(() =>
+      releaseUpload!(
+        jsonRes(
+          {
+            id: "f1",
+            owner: "alice",
+            name: "cat.png",
+            mime: "image/png",
+            size: 3,
+            updatedAt: "2026-10-17T00:00:00.000Z",
+          },
+          201,
+        ),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("上传中…（≤6MB）")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("图片")).not.toBeDisabled();
+  });
+
+  it("A9 文本发送失败：红色 alert + 「重试」；重试成功后清空草稿", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    vi.mocked(sealMessage).mockRejectedValueOnce(new Error("封条失败"));
+
+    render(<ChatPage />);
+    await act(async () => {});
+    const input = screen.getByPlaceholderText("输入消息…");
+    fireEvent.change(input, { target: { value: "发不出去的话" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("消息发送失败");
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+
+    const plain = await lastSealed(send);
+    expect(plain).toMatchObject({ kind: "text", text: "发不出去的话" });
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("A9 info 提示 3 秒自动消失", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "导出会话" }));
+    fireEvent.click(screen.getByText("导出 Markdown"));
+    expect(screen.getByRole("status")).toHaveTextContent("没有可导出的明文消息");
+
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("A10 空草稿发送禁用；无浮层无草稿时 Esc 停止生成", async () => {
+    const send = await setupGroupChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockImplementation(
+      (_p, _m, o) =>
+        new Promise<string>((_res, rej) => {
+          o.onDelta("半");
+          o.signal.addEventListener("abort", () =>
+            rej(new DOMException("AbortError", "AbortError")),
+          );
+        }),
+    );
+
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled(); // 空草稿
+
+    await pickAndSend("@和小鸣 写段文字");
+    await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
+
+    fireEvent.keyDown(document, { key: "Escape" }); // 无浮层、草稿已清空
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "agent_error", code: "aborted" }),
+      ),
+    );
+  });
+
+  it("A11 选择器键盘导航（↓/Enter），输入框有 aria-label", async () => {
+    await setupGroupChat([
+      ...inGroupMembers,
+      { kind: "agent", id: "a-arch", name: "架构师", avatar: null, user: null },
+    ]);
+
+    expect(screen.getByLabelText("消息输入框")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
+    const input = screen.getByPlaceholderText("输入消息…");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    // 高亮移到第二项（键盘可达）
+    expect(screen.getByRole("button", { name: "架构师" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("@架构师")).toBeInTheDocument();
+    expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument();
+  });
+
+  it("A12 未读准确：他会话新消息 +1（自己发的不算），read_update(我) 清零", async () => {
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 0 },
+        { id: "c2", type: "group", name: "别处", memberCount: 2, unreadCount: 0 },
+      ],
+    });
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const otherConv = (id: string, text: string, senderId: string): Message => ({
+      ...msg(id, text, "2026-10-14T01:00:00.000Z"),
+      conversationId: "c2",
+      senderId,
+    });
+    const unreadOf = (id: string) =>
+      useChatStore.getState().conversations.find((c) => c.id === id)?.unreadCount;
+
+    act(() =>
+      lastHandlers().onEvent({ type: "message_new", message: otherConv("n1", "他说的", "u2") }),
+    );
+    expect(unreadOf("c2")).toBe(1);
+
+    act(() =>
+      lastHandlers().onEvent({ type: "message_new", message: otherConv("n2", "我发的", "u1") }),
+    );
+    expect(unreadOf("c2")).toBe(1); // 自己发的不涨
+
+    act(() =>
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: { ...msg("n3", "当前会话", "2026-10-14T01:01:00.000Z"), senderId: "u2" },
+      }),
+    );
+    expect(unreadOf("c1")).toBe(0); // 正在看的会话不加未读
+
+    act(() =>
+      lastHandlers().onEvent({
+        type: "read_update",
+        conversationId: "c2",
+        userId: "u1",
+        at: "2026-10-14T01:02:00.000Z",
+      }),
+    );
+    expect(unreadOf("c2")).toBe(0); // 自己在别处读过 → 清零
   });
 });
 
@@ -4282,6 +4656,8 @@ describe("语音通话群聊发起入口（C1）", () => {
       incoming: [],
       messages: {},
       reads: {},
+      messagesLoading: {},
+      messagesError: {},
       streaming: {},
       streamOwner: {},
       plainById: {},
@@ -4842,6 +5218,7 @@ describe("ChatPage 工具轮可视化接线", () => {
     expect(screen.queryByText("思考过程")).not.toBeInTheDocument();
     expect(screen.queryByText("调用中")).not.toBeInTheDocument();
   });
+
 });
 
 
@@ -4936,6 +5313,8 @@ describe("ChatPage 任务区接线", () => {
       conversations: [agentConv] as never,
       messages: {},
       reads: {},
+      messagesLoading: {},
+      messagesError: {},
       streaming: {},
       streamOwner: {},
       plainById: {},

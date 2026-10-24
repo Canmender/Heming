@@ -61,7 +61,7 @@ export function AgentStreamBubble({
                 className="mt-1 rounded border border-line px-2 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
                 onClick={onRetry}
               >
-                重试
+                继续生成
               </button>
             ) : null}
           </>

@@ -25,7 +25,8 @@ export function GroupCreateModal({ open, onClose }: { open: boolean; onClose: ()
   // ref 在渲染外即时翻转，与 ChatPage 的 wsHandleRef 同一模式
   const pendingRef = useRef(false);
   const panelRef = useRef<HTMLFormElement>(null);
-  useModalA11y(panelRef, onClose, { active: open });
+  // 提交中不允许 Esc 关闭；遮罩点击同样按 ref 拦截（与 AgentFormModal 同口径）。
+  useModalA11y(panelRef, onClose, { active: open, closeOnEscape: !pending });
   if (!open) return null;
 
   // 源 = 名册全量中 owner 是我的项（雷达/弹窗共用同一 GET /api/agents 结果）
@@ -81,7 +82,7 @@ export function GroupCreateModal({ open, onClose }: { open: boolean; onClose: ()
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !pendingRef.current) onClose();
       }}
     >
       <form
@@ -92,7 +93,14 @@ export function GroupCreateModal({ open, onClose }: { open: boolean; onClose: ()
         onSubmit={submit}
         className="w-[320px] rounded-xl border border-line bg-white p-5 shadow-card"
       >
-        <h3 className="mb-3 text-[14px] font-bold">新建群聊</h3>
+        <div className="mb-3 flex items-baseline gap-2">
+          <h3 className="text-[14px] font-bold">新建群聊</h3>
+          {pending && (
+            <span role="status" className="text-[11px] text-muted">
+              提交中…
+            </span>
+          )}
+        </div>
         <input
           className="mb-3 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
           placeholder="群名称"
@@ -141,7 +149,8 @@ export function GroupCreateModal({ open, onClose }: { open: boolean; onClose: ()
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px]"
+            disabled={pending}
+            className="rounded-lg border border-line px-3 py-1.5 text-[13px] disabled:opacity-60"
           >
             取消
           </button>

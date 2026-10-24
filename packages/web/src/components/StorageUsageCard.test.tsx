@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { StorageUsageCard, type EnumerableStorage } from "./StorageUsageCard.js";
 import { utf8Length } from "../lib/memory/storage.js";
 
@@ -296,7 +296,7 @@ describe("StorageUsageCard", () => {
     expect(screen.getByRole("button", { name: "清理任务记录" })).toBeInTheDocument();
   });
 
-  it("重新检测：实测配额，探针临时键写完即删", () => {
+  it("重新检测：实测配额，探针临时键写完即删", async () => {
     storage.put("heming.tasks.v1", "b".repeat(1000));
     storage.quotaBytes = 200_000; // 只放得下 3 个 64KB 块
 
@@ -306,21 +306,36 @@ describe("StorageUsageCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "重新检测" }));
 
     // 实测值：3 块 × 64KB + 已用 1000 = 197,608 字节 = 193.0 KB
-    expect(leafTexts(/实测/).length).toBeGreaterThan(0);
+    await waitFor(() => expect(leafTexts(/实测/).length).toBeGreaterThan(0));
     expect(leafTexts(/配额已实测/).join(" ")).toContain("193.0 KB");
     expect(leafTexts(/配额已实测/).join(" ")).toContain("197,608 字节");
     // 探针键没留下
     expect(storage.length).toBe(keysBefore);
   });
 
-  it("重新检测：写不进去（隐私模式）⇒ 回落到估算值且不抛", () => {
+  it("重新检测：先渲染「检测中…」再探测（阻塞的探测不再吞掉中间态）", async () => {
+    storage.put("heming.tasks.v1", "b".repeat(1000));
+    storage.quotaBytes = 200_000;
+
+    render(<StorageUsageCard storage={storage} />);
+    fireEvent.click(screen.getByRole("button", { name: "重新检测" }));
+
+    // 探测被推迟到下一轮事件循环：此刻按钮必须已经显示进行态
+    const busy = screen.getByRole("button", { name: "检测中…" });
+    expect(busy).toBeDisabled();
+
+    await waitFor(() => expect(leafTexts(/配额已实测/).length).toBeGreaterThan(0));
+    expect(screen.getByRole("button", { name: "重新检测" })).toBeEnabled();
+  });
+
+  it("重新检测：写不进去（隐私模式）⇒ 回落到估算值且不抛", async () => {
     storage.put("heming.tasks.v1", "b".repeat(1000));
     storage.alwaysFailWrite = true;
 
     render(<StorageUsageCard storage={storage} />);
 
     expect(() => fireEvent.click(screen.getByRole("button", { name: "重新检测" }))).not.toThrow();
-    expect(leafTexts(/实测失败/).join(" ")).toContain("5.00 MB");
+    await waitFor(() => expect(leafTexts(/实测失败/).join(" ")).toContain("5.00 MB"));
     expect(leafTexts(/估算/).length).toBeGreaterThan(0);
   });
 

@@ -162,6 +162,19 @@ describe("通知中心面板", () => {
     expect(useNotificationStore.getState().items).toEqual([]);
   });
 
+  it("面板向上展开（bottom-0）：铃铛在导航轨底部时不再被窗口下缘裁掉", () => {
+    useNotificationStore.setState({ items: [makeItem()] });
+    render(<NotificationCenter />);
+    fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
+    const panel = screen.getByRole("dialog", { name: "通知中心" });
+    expect(panel.className).toContain("bottom-0");
+    expect(panel.className).not.toContain("top-0");
+    // 面板内滚动保留：外层限高，列表区自身 overflow-y-auto
+    expect(panel.className).toContain("max-h-[70vh]");
+    expect(panel.className).toContain("overflow-hidden");
+    expect(panel.querySelector(".overflow-y-auto")).not.toBeNull();
+  });
+
   it("Esc 关闭面板（焦点陷阱由弹窗骨架统一负责）", () => {
     useNotificationStore.setState({ items: [makeItem()] });
     render(<NotificationCenter />);

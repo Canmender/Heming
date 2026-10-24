@@ -151,6 +151,8 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
   const agentIdsInGroups = useChatStore((s) => s.agentIdsInGroups);
   const messages = useChatStore((s) => s.messages);
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
+  const workspaceReady = useChatStore((s) => s.workspaceReady);
+  const workspaceError = useChatStore((s) => s.workspaceError);
   const loadAgents = useChatStore((s) => s.loadAgents);
   const loadAgentsRoster = useChatStore((s) => s.loadAgentsRoster);
   const openDirect = useChatStore((s) => s.openDirect);
@@ -267,6 +269,13 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
       .catch((err) => console.warn("通讯录数据加载失败", err));
   }, [loadWorkspace, loadAgents, loadAgentsRoster]);
 
+  /** 首帧失败后的重试：工作区是权威数据，名册跟着重拉一次（两者 join 出雷达节点）。 */
+  const retryWorkspace = () => {
+    void loadWorkspace()
+      .then(() => Promise.all([loadAgentsRoster(), loadAgents()]))
+      .catch(() => {});
+  };
+
   // 面板可见态跟随 contactsHidden：初值 true，挂载后的首个 effect 同步——
   // 从工作区点节点进会话时，overlay 面板先以可见态挂载再滑出（380ms），复刻定稿的左滑揭示
   useEffect(() => {
@@ -377,6 +386,7 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
     { ...SECTORS[1], nodes: humanNodes },
     { ...SECTORS[2], nodes: agentNodes },
   ];
+  const matchCount = groupNodes.length + humanNodes.length + agentNodes.length;
 
   // ---- 交互 ----
 
@@ -524,6 +534,25 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
         </div>
       )}
 
+      {/* 首帧的两种非数据态：加载中 / 失败可重试。缺了这层，拉取失败会伪装成「一个联系人都没有」 */}
+      {!workspaceReady &&
+        (workspaceError ? (
+          <div className="toperr flex items-center gap-2" role="alert">
+            <span className="min-w-0 flex-1 truncate">加载失败：{workspaceError}</span>
+            <button
+              type="button"
+              onClick={retryWorkspace}
+              className="shrink-0 rounded border border-[#e6e6e6] bg-white px-2 py-0.5 text-[11px] text-[#555] hover:bg-[#f7f7f7]"
+            >
+              重试
+            </button>
+          </div>
+        ) : (
+          <div className="wshint" role="status">
+            正在加载通讯录…
+          </div>
+        ))}
+
       {/* 雷达区：环 / 扇区分隔 / 扫描线 / 圆心 / 节点 / 信息卡 */}
       <div
         className="radar"
@@ -633,6 +662,22 @@ export function RadarContacts({ overlay = false }: { overlay?: boolean }) {
           });
         })}
         </div>
+
+        {/* 搜索词没有任何节点命中：给出明确的「没有匹配」与一键清除，而不是一张看起来坏掉的空雷达 */}
+        {q && matchCount === 0 && workspaceReady && (
+          <div className="search-empty" role="status">
+            <span>没有匹配「{search.trim()}」的联系人</span>
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setCard(null);
+              }}
+            >
+              清除
+            </button>
+          </div>
+        )}
 
         {/* 缩放控件：− / 百分比（点击复位）/ ＋；Ctrl+滚轮同样可缩放 */}
         <div className="radar-zoom">
@@ -771,6 +816,10 @@ const STYLE = `
 .top .addpop-send { border:none; background:#1a1a1a; color:#fff; border-radius:6px; font-size:12px; padding:4px 10px; cursor:pointer; }
 .top .addpop-hint { margin-top:4px; font-size:12px; color:#888; }
 .toperr { padding:6px 14px; font-size:11.5px; color:#b42318; background:#fdf3f2; border-bottom:1px solid #f1f1f1; }
+.wshint { padding:6px 14px; font-size:11.5px; color:#888; background:#fafafa; border-bottom:1px solid #f1f1f1; }
+.search-empty { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:8; display:flex; flex-direction:column; align-items:center; gap:8px; max-width:260px; font-size:12px; color:#888; text-align:center; }
+.search-empty button { border:1px solid #e6e6e6; background:#fff; border-radius:6px; font-size:11px; padding:3px 10px; color:#555; cursor:pointer; }
+.search-empty button:hover { background:#f7f7f7; }
 
 .radar { position:relative; flex:1; overflow:hidden; }
 .radar-stage { position:absolute; inset:0; transform-origin:center center; transition:transform .15s ease; }

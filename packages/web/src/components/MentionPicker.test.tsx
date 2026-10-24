@@ -13,4 +13,21 @@ describe("MentionPicker", () => {
     render(<MentionPicker items={[]} onPick={() => {}} />);
     expect(screen.getByText(/群内暂无智能体/)).toBeInTheDocument();
   });
+  it("activeIndex 高亮键盘当前项（aria-current）", () => {
+    render(
+      <MentionPicker
+        items={[
+          { id: "a1", name: "和小鸣" },
+          { id: "a2", name: "架构师" },
+        ]}
+        onPick={() => {}}
+        activeIndex={1}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "架构师" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "和小鸣" })).not.toHaveAttribute("aria-current");
+  });
 });

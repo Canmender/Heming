@@ -130,4 +130,27 @@ describe("GroupCreateModal", () => {
     // 名称已清空：避免在错误提示下重提造成重复建群
     expect(screen.getByPlaceholderText("群名称")).toHaveValue("");
   });
+
+  it("提交中：标题旁显示「提交中…」，Esc 与点遮罩都不关闭", async () => {
+    let resolveCreate: ((id: string) => void) | undefined;
+    vi.spyOn(useChatStore.getState(), "createGroup").mockImplementation(
+      () => new Promise<string>((res) => {
+        resolveCreate = res;
+      }),
+    );
+    const onClose = vi.fn();
+    render(<GroupCreateModal open onClose={onClose} />);
+    fireEvent.change(screen.getByPlaceholderText("群名称"), { target: { value: "评审组" } });
+    fireEvent.click(screen.getByText("创建"));
+
+    expect(await screen.findByText("提交中…")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "新建群聊" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.mouseDown(dialog.parentElement as HTMLElement);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
+
+    resolveCreate!("g1");
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
 });

@@ -106,4 +106,24 @@ describe("AgentFormModal", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(screen.getByText(/请输入名称/)).toBeInTheDocument();
   });
+
+  it("提交中：标题旁显示「提交中…」，Esc 与点遮罩都不关闭", async () => {
+    // 请求挂着不返回：模拟真实网络里的 pending 窗口
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
+    const onClose = vi.fn();
+    render(<AgentFormModal open mode="create" onClose={onClose} />);
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "架构师" } });
+    fireEvent.click(screen.getByText("创建"));
+
+    expect(await screen.findByText("提交中…")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "新建智能体" });
+    const overlay = dialog.parentElement as HTMLElement;
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.mouseDown(overlay);
+
+    expect(onClose).not.toHaveBeenCalled();
+    // 取消按钮同样不可用：此刻关掉只会让用户以为没提交
+    expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
+  });
 });

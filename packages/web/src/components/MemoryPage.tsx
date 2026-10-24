@@ -42,7 +42,7 @@ import {
   setReviewSettings,
 } from "../lib/memory/reviewRunner.js";
 import { fetchFiles } from "../lib/api.js";
-import { PlusIcon, TrashIcon } from "./icons.js";
+import { ChevronIcon, PlusIcon, TrashIcon, XIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useModalA11y } from "./useModalA11y.js";
 
@@ -355,9 +355,9 @@ function Modal({
             type="button"
             aria-label="关闭"
             onClick={onClose}
-            className="shrink-0 rounded p-1 text-[15px] leading-none text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            className="shrink-0 rounded p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
           >
-            ×
+            <XIcon width={16} height={16} aria-hidden="true" />
           </button>
         </div>
         {children}
@@ -669,9 +669,16 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
             </div>
           ))}
           {run.dropped.map((item) => (
-            <div key={`drop-${item.layer}-${item.id}`} className="break-words text-[11px] text-muted">
-              <span className="text-[#bbb]">✕ </span>
-              {DROP_REASON_LABEL[item.reason]}：{item.content ?? item.id}
+            <div key={`drop-${item.layer}-${item.id}`} className="flex items-baseline gap-1 break-words text-[11px] text-muted">
+              <XIcon
+                width={10}
+                height={10}
+                aria-hidden="true"
+                className="shrink-0 translate-y-[1px] text-[#bbb]"
+              />
+              <span>
+                {DROP_REASON_LABEL[item.reason]}：{item.content ?? item.id}
+              </span>
             </div>
           ))}
         </div>
@@ -784,7 +791,10 @@ export function MemoryPage({
     value: string;
   } | null>(null);
   const [retentionDraft, setRetentionDraft] = useState(String(settings.retentionDays));
-  const [retentionMsg, setRetentionMsg] = useState("");
+  const [retentionMsg, setRetentionMsg] = useState<{
+    kind: "ok" | "error";
+    text: string;
+  } | null>(null);
   const [recallQuery, setRecallQuery] = useState("");
   const [recall, setRecall] = useState<{
     semantic: SemanticEntry[];
@@ -942,12 +952,12 @@ export function MemoryPage({
 
   const onSaveRetention = () => {
     if (!retentionValid) {
-      setRetentionMsg("保留天数需为 1–3650 之间的整数");
+      setRetentionMsg({ kind: "error", text: "保留天数需为 1–3650 之间的整数" });
       return;
     }
     const days = Math.round(retentionDays);
     memory.updateSettings({ retentionDays: days });
-    setRetentionMsg(`已保存：情景记忆保留 ${days} 天`);
+    setRetentionMsg({ kind: "ok", text: `已保存：情景记忆保留 ${days} 天` });
     bump();
   };
 
@@ -1114,8 +1124,12 @@ export function MemoryPage({
                   onClick={() => toggleGroup(key)}
                   className="flex min-w-0 items-center gap-1.5 text-left text-[12px] font-bold"
                 >
-                  <span aria-hidden="true" className="text-[10px] text-muted">
-                    {open ? "▾" : "▸"}
+                  <span aria-hidden="true" className="text-muted">
+                    <ChevronIcon
+                      width={11}
+                      height={11}
+                      className={`transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+                    />
                   </span>
                   <span className="truncate">会话 {clip(key, 24)}</span>
                 </button>
@@ -1204,7 +1218,7 @@ export function MemoryPage({
               value={retentionDraft}
               onChange={(e) => {
                 setRetentionDraft(e.target.value);
-                setRetentionMsg("");
+                setRetentionMsg(null);
               }}
               className={inputSmCls}
             />
@@ -1212,7 +1226,9 @@ export function MemoryPage({
           <button
             type="button"
             onClick={onSaveRetention}
-            disabled={!retentionDirty}
+            // 非法输入时保持可点：让用户点得到「为什么不能保存」，
+            // 而不是对着一个灰按钮猜（校验失败用错误色提示）。
+            disabled={retentionValid && !retentionDirty}
             className={btnGhost}
           >
             保存
@@ -1221,8 +1237,11 @@ export function MemoryPage({
             情景记忆超过保留天数后不再参与召回；语义记忆长期保留
           </span>
           {retentionMsg && (
-            <span role="status" className={`${okCls} pb-1.5`}>
-              {retentionMsg}
+            <span
+              role={retentionMsg.kind === "error" ? "alert" : "status"}
+              className={`${retentionMsg.kind === "error" ? errorCls : okCls} pb-1.5`}
+            >
+              {retentionMsg.text}
             </span>
           )}
         </div>

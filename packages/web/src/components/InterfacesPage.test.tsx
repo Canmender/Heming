@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { InterfacesPage } from "./InterfacesPage.js";
-import { McpRegistry, MCP_SERVERS_KEY, type McpServerConfig } from "../lib/mcp/index.js";
+import {
+  McpRegistry,
+  MCP_SERVERS_KEY,
+  clientFor,
+  refreshServerTools,
+  type McpServerConfig,
+} from "../lib/mcp/index.js";
 import type { StorageLike } from "../lib/memory/types.js";
 
 /**
@@ -177,5 +183,56 @@ describe("InterfacesPage", () => {
     expect(screen.queryByText("Demo")).not.toBeInTheDocument();
     // 预置/已有的服务还在，所以不是空态
     expect(screen.getByRole("region", { name: "MCP 服务 已存在的服务" })).toBeInTheDocument();
+  });
+
+  it("连接进行中：连接按钮禁用并显示「连接中…」", async () => {
+    registry.add({ name: "Demo", transport: "http", url: "https://x/mcp" });
+    let resolveTools: ((tools: unknown[]) => void) | undefined;
+    vi.mocked(refreshServerTools).mockImplementationOnce(
+      () => new Promise((res) => {
+        resolveTools = res as (tools: unknown[]) => void;
+      }),
+    );
+    render(<InterfacesPage registry={registry} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "连接 Demo" }));
+
+    const busy = screen.getByRole("button", { name: "连接 Demo" });
+    expect(busy).toBeDisabled();
+    expect(busy).toHaveTextContent("连接中…");
+
+    await act(async () => {
+      resolveTools?.([]);
+    });
+    expect(screen.getByRole("button", { name: "连接 Demo" })).toBeEnabled();
+  });
+
+  it("执行工具进行中：按钮禁用并显示「执行中…」，完成后能再次执行", async () => {
+    registry.add({ name: "Demo", transport: "http", url: "https://x/mcp" });
+    const added = registry.servers()[0];
+    registry.setTools(added.id, [{ name: "echo", description: "回声工具" }]);
+    let resolveCall: ((value: unknown) => void) | undefined;
+    vi.mocked(clientFor).mockReturnValueOnce({
+      sessionId: "sess",
+      initialize: async () => ({}),
+      listTools: async () => [],
+      callTool: () =>
+        new Promise((res) => {
+          resolveCall = res;
+        }),
+    } as never);
+    render(<InterfacesPage registry={registry} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "测试 echo" }));
+    fireEvent.click(screen.getByRole("button", { name: "执行" }));
+
+    const busy = await screen.findByRole("button", { name: "执行中…" });
+    expect(busy).toBeDisabled();
+
+    await act(async () => {
+      resolveCall?.({ text: "完成", isError: false, content: [] });
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("完成");
+    expect(screen.getByRole("button", { name: "执行" })).toBeEnabled();
   });
 });

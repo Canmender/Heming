@@ -53,6 +53,8 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
   const [testFor, setTestFor] = useState<string | null>(null);
   const [testArgs, setTestArgs] = useState("{}");
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
+  /** 正在执行的手动调用（`serverId::toolName`）；进行中禁用按钮，防重复执行。 */
+  const [testRunning, setTestRunning] = useState<string | null>(null);
 
   const bump = () => setTick((n) => n + 1);
   /** stdio 需要桌面端：浏览器里只能登记配置，连接会失败。 */
@@ -154,6 +156,9 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
   };
 
   const runTest = async (server: McpServerConfig, toolName: string) => {
+    const key = `${server.id}::${toolName}`;
+    if (testRunning) return;
+    setTestRunning(key);
     setTestResult(null);
     try {
       const parsed: unknown = testArgs.trim() ? JSON.parse(testArgs) : {};
@@ -167,6 +172,8 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
       setTestResult({ ok: !result.isError, text: result.text || "（工具没有返回文本）" });
     } catch (err) {
       setTestResult({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTestRunning(null);
     }
   };
 
@@ -432,9 +439,14 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                       type="button"
                       aria-label={`连接 ${server.name}`}
                       onClick={() => void connect(server)}
-                      className="rounded-lg border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa]"
+                      disabled={state === "connecting"}
+                      className="rounded-lg border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa] disabled:opacity-60"
                     >
-                      {tools.length ? "刷新工具" : "连接"}
+                      {state === "connecting"
+                        ? "连接中…"
+                        : tools.length
+                          ? "刷新工具"
+                          : "连接"}
                     </button>
                     <button
                       type="button"
@@ -534,9 +546,10 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                           <button
                             type="button"
                             onClick={() => void runTest(server, testFor.split("::")[1])}
-                            className="rounded-lg bg-ink px-3 py-1 text-[11px] font-bold text-white"
+                            disabled={testRunning === testFor}
+                            className="rounded-lg bg-ink px-3 py-1 text-[11px] font-bold text-white disabled:opacity-60"
                           >
-                            执行
+                            {testRunning === testFor ? "执行中…" : "执行"}
                           </button>
                           <span className="text-[11px] text-muted">参数按工具 inputSchema 填 JSON 对象</span>
                         </div>

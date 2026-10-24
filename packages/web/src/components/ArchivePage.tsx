@@ -39,6 +39,8 @@ function archiveDay(iso: string): string {
 export function ArchivePage() {
   const conversations = useChatStore((s) => s.conversations);
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
+  const workspaceReady = useChatStore((s) => s.workspaceReady);
+  const workspaceError = useChatStore((s) => s.workspaceError);
   const openConversation = useUiStore((s) => s.openConversation);
 
   const [query, setQuery] = useState("");
@@ -47,11 +49,15 @@ export function ArchivePage() {
 
   // 自己拉一次：归档页不依赖「先经过主页」这个前提。
   // 别人可能在另一台设备归档过，每次进入都以服务端为准。
-  // 失败静默——空状态会显示「还没有归档的会话」，
-  // 而真正的网络错误在顶部导航之外的地方（主页健康探测）已经报过。
+  // 失败不再静默：store 的 workspaceReady/workspaceError 会驱动下面的重试条，
+  // 否则「拉取失败」和「确实没有归档」会长得一模一样。
   useEffect(() => {
     void loadWorkspace().catch(() => {});
   }, [loadWorkspace]);
+
+  const retryWorkspace = () => {
+    void loadWorkspace().catch(() => {});
+  };
 
   const archived = useMemo(() => {
     const rows = conversations
@@ -87,7 +93,7 @@ export function ArchivePage() {
         <div className="flex items-baseline gap-2">
           <span className="text-[13px] font-bold">归档</span>
           <span className="text-[11px] text-muted">
-            {total > 0 ? `${total} 个已归档会话` : "暂无归档"}
+            {!workspaceReady ? "加载中…" : total > 0 ? `${total} 个已归档会话` : "暂无归档"}
           </span>
         </div>
         <input
@@ -106,7 +112,26 @@ export function ArchivePage() {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
-        {archived.length === 0 ? (
+        {!workspaceReady ? (
+          workspaceError ? (
+            <div role="alert" className="mt-16 flex flex-col items-center gap-2 text-center text-[12px]">
+              <p className="text-[#b42318]">加载失败：{workspaceError}</p>
+              <button
+                type="button"
+                onClick={retryWorkspace}
+                className="rounded-md border border-[#e6e6e6] px-2.5 py-1 text-[11px] hover:bg-[#f7f7f7]"
+              >
+                重试
+              </button>
+            </div>
+          ) : (
+            <div role="status" aria-label="正在加载归档" className="flex flex-col gap-2 py-1.5">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-12 animate-pulse rounded-lg bg-[#f4f4f4]" />
+              ))}
+            </div>
+          )
+        ) : archived.length === 0 ? (
           <div className="mt-16 text-center text-[12px] text-muted">
             {total === 0 ? (
               <>

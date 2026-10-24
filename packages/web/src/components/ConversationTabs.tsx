@@ -59,13 +59,16 @@ export function ConversationTabs() {
       aria-label="已打开的会话"
     >
       {openTabs.map((id) => {
-        const { name, avatar } = labelOf(conversations.find((c) => c.id === id));
+        const conv = conversations.find((c) => c.id === id);
+        const { name, avatar } = labelOf(conv);
+        const unread = conv?.unreadCount ?? 0;
         const active = id === activeId;
         return (
           <div
             key={id}
             role="tab"
             aria-selected={active}
+            aria-label={`${name}${unread > 0 ? ` ${unread} 条未读` : ""}`}
             tabIndex={active ? 0 : -1}
             onKeyDown={(e) => {
               // 左右方向键在标签间移动焦点（标准 tablist 键盘约定）
@@ -93,6 +96,14 @@ export function ConversationTabs() {
             >
               <Avatar user={{ displayName: name, avatar }} size={15} className="shrink-0" />
               <span className="truncate">{name}</span>
+              {unread > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="min-w-[15px] shrink-0 rounded-full bg-ink px-1 text-center text-[9px] font-semibold leading-[14px] text-white"
+                >
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              )}
             </button>
             <button
               type="button"

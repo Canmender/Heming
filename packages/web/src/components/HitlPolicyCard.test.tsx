@@ -113,13 +113,46 @@ describe("HitlPolicyCard", () => {
     expect(screen.queryByText(/免问下限已从/)).not.toBeInTheDocument();
   });
 
-  it("清空本会话授权：授权表清空", () => {
+  it("清空本会话授权：先确认，确认后清空并报出条数", () => {
+    store.grant("a1", "fs__write_file", "global");
+    store.grant("a2", "fs__delete_file", "global");
+    render(<HitlPolicyCard policyStore={store} storage={storage} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "清空本会话授权" }));
+    // 破坏性操作先确认：确认前授权仍在
+    const dialog = screen.getByRole("dialog", { name: "清空本会话授权" });
+    expect(screen.getByText(/已授权的工具将重新逐一询问/)).toBeInTheDocument();
+    expect(store.granted("a1", "fs__write_file", "global")).toBe(true);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "清空授权" }));
+
+    expect(store.granted("a1", "fs__write_file", "global")).toBe(false);
+    expect(store.granted("a2", "fs__delete_file", "global")).toBe(false);
+    expect(screen.getByRole("status")).toHaveTextContent("已清空 2 条本会话授权");
+  });
+
+  it("取消清空授权：授权表不动", () => {
     store.grant("a1", "fs__write_file", "global");
     render(<HitlPolicyCard policyStore={store} storage={storage} />);
 
     fireEvent.click(screen.getByRole("button", { name: "清空本会话授权" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "清空本会话授权" })).getByRole("button", {
+        name: "取消",
+      }),
+    );
 
-    expect(store.granted("a1", "fs__write_file", "global")).toBe(false);
+    expect(store.granted("a1", "fs__write_file", "global")).toBe(true);
+  });
+
+  it("改动后给「已保存」状态，底部有统一的生效说明", () => {
+    render(<HitlPolicyCard policyStore={store} storage={storage} />);
+    expect(screen.queryByText("已保存")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "严格" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("已保存");
+    expect(screen.getByText("改动即时生效，仅作用于本机，无需重启。")).toBeInTheDocument();
   });
 
   it("审计列表能读出批准与拒绝记录（只显示 tool 作用域的）", () => {

@@ -124,4 +124,16 @@ describe("MarkdownMessage", () => {
     // 原始 $ 标记不应出现在可见文本里
     expect(container.textContent).not.toContain("$E=mc^2$");
   });
+
+  it("图片点击打开 lightbox 显示原图，Esc 关闭", async () => {
+    render(<MarkdownMessage text={"![猫](https://example.com/cat.png)"} />);
+    fireEvent.click(screen.getByRole("button", { name: "查看图片 猫" }));
+    const dialog = screen.getByRole("dialog", { name: "查看大图" });
+    expect(dialog).toBeTruthy();
+    const img = screen.getByTestId("markdown-lightbox-image") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("https://example.com/cat.png");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "查看大图" })).toBeNull());
+  });
 });

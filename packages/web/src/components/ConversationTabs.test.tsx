@@ -103,6 +103,15 @@ describe("ConversationTabs 横向标签栏", () => {
     expect(screen.getByRole("tab", { name: /已失效会话/ })).toBeInTheDocument();
   });
 
+  it("横向标签补未读角标：数字可见，tab 的 aria-label 带「N 条未读」", () => {
+    render(<ConversationTabs />);
+    const tab = screen.getByRole("tab", { name: "评审组 2 条未读" });
+    expect(tab.textContent).toContain("2");
+    // 无未读的标签不加多余文案
+    expect(screen.getByRole("tab", { name: "李四" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "和小鸣" })).toBeInTheDocument();
+  });
+
   it("当前会话的标签带 aria-selected，点标签切会话", () => {
     render(<ConversationTabs />);
     expect(screen.getByRole("tab", { name: /李四/ })).toHaveAttribute("aria-selected", "true");
@@ -128,7 +137,7 @@ describe("ChatConvStrip 左侧头像缩略列", () => {
   it("每个打开过的会话一个头像，点一下即切换", () => {
     render(<ChatConvStrip />);
     const lisi = screen.getByRole("button", { name: "切换到 李四" });
-    const group = screen.getByRole("button", { name: "切换到 评审组" });
+    const group = screen.getByRole("button", { name: "切换到 评审组 2 条未读" });
     expect(lisi).toHaveAttribute("aria-current", "true");
     fireEvent.click(group);
     expect(useUiStore.getState().activeConversationId).toBe("g1");
@@ -136,7 +145,7 @@ describe("ChatConvStrip 左侧头像缩略列", () => {
 
   it("未读数显示为角标（取会话 unreadCount）", () => {
     render(<ChatConvStrip />);
-    const group = screen.getByRole("button", { name: "切换到 评审组" });
+    const group = screen.getByRole("button", { name: "切换到 评审组 2 条未读" });
     expect(group.textContent).toContain("2");
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useModalA11y } from "./useModalA11y.js";
+import { XIcon } from "./icons.js";
 import type { SharedFileMeta } from "@heming/shared";
 import { fetchFileBlobText, fetchFileBlobUrl } from "../lib/api.js";
 
@@ -208,9 +209,9 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
             type="button"
             aria-label="关闭预览"
             onClick={onClose}
-            className="shrink-0 rounded p-1 text-[15px] leading-none text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            className="shrink-0 rounded p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
           >
-            ×
+            <XIcon width={16} height={16} aria-hidden="true" />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">{body}</div>

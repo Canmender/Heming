@@ -310,23 +310,33 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
         ? "本机存储已用掉八成以上。再涨下去新数据可能写不进去（各处会静默不落），建议先清理可再生的内容。"
         : "本机存储还有余量，暂不需要清理。";
 
-  /** 重新检测配额：实测 + 刷新读数（探测可能顺带改变了占用）。 */
+  /**
+   * 重新检测配额：实测 + 刷新读数（探测可能顺带改变了占用）。
+   *
+   * ★ 先让「检测中…」渲染出来，再跑探测：探测是同步写最多 32MB 的阻塞操作，
+   * 同一次事件里 setProbing(true) 后紧跟着 setProbing(false)，浏览器根本来不及画中间帧——
+   * 用户看到的是「按钮点了没反应」。推迟到下一轮事件循环，文案才真的可见。
+   * 探测算法本身不动（见 `probeStorageQuota`）。
+   */
   const onProbe = () => {
+    if (probing) return;
     setProbing(true);
-    try {
-      const info = probeStorageQuota(store, usage.totalBytes);
-      setQuota(info);
-      setNotice(
-        info.estimated
-          ? "实测失败（浏览器可能处于隐私模式，或配额已满到探针都写不进去），已回落到 5.00 MB 估算值。"
-          : info.capped
-            ? `实测已达探测上限，配额不低于 ${formatBytes(info.bytes)}（真实配额可能更大）。`
-            : `配额已实测：${formatBytes(info.bytes)}（${formatExactBytes(info.bytes)} 字节）。`,
-      );
-      refresh();
-    } finally {
-      setProbing(false);
-    }
+    setTimeout(() => {
+      try {
+        const info = probeStorageQuota(store, usage.totalBytes);
+        setQuota(info);
+        setNotice(
+          info.estimated
+            ? "实测失败（浏览器可能处于隐私模式，或配额已满到探针都写不进去），已回落到 5.00 MB 估算值。"
+            : info.capped
+              ? `实测已达探测上限，配额不低于 ${formatBytes(info.bytes)}（真实配额可能更大）。`
+              : `配额已实测：${formatBytes(info.bytes)}（${formatExactBytes(info.bytes)} 字节）。`,
+        );
+        refresh();
+      } finally {
+        setProbing(false);
+      }
+    }, 0);
   };
 
   /** 执行清理：只删可再生的键，然后重新统计刷新显示。 */

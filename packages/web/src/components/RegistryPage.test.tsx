@@ -190,4 +190,29 @@ describe("RegistryPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("503");
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
+
+  it("刷新进行中：按钮禁用并显示「刷新中…」", async () => {
+    let resolveSecond: ((value: unknown) => void) | undefined;
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response({ servers: [item("io.github.a/remote")] }))
+      .mockImplementationOnce(
+        () => new Promise((res) => {
+          resolveSecond = res;
+        }),
+      );
+    const { store } = makeStore([], fetchImpl as never);
+    render(<RegistryPage store={store} />);
+
+    expect(await screen.findByText("remote")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+
+    const busy = screen.getByRole("button", { name: "刷新中…" });
+    expect(busy).toBeDisabled();
+
+    await act(async () => {
+      resolveSecond?.({ ok: true, status: 200, text: async () => JSON.stringify({ servers: [] }) });
+    });
+    expect(screen.getByRole("button", { name: "刷新" })).toBeEnabled();
+  });
 });

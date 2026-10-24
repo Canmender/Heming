@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listAgents } from "../lib/agentsApi.js";
 import { SelfEditCard } from "./SelfEditCard.js";
 import { ToneCard } from "./ToneCard.js";
-import { PlusIcon } from "./icons.js";
+import { PlusIcon, XIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useModalA11y } from "./useModalA11y.js";
 import {
@@ -288,8 +288,19 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
   );
 
   /** 「技能」页只列已分配给当前智能体的技能；「技能池」才是全量。 */
+  const keyword = query.trim().toLowerCase();
+  /** 搜索词命中名称 / 描述 / 标签（分组与技能池共用同一口径）。 */
+  const matchesKeyword = (skill: SkillDefinition): boolean =>
+    !keyword ||
+    [skill.name, skill.description, ...skill.tags].some((text) =>
+      text.toLowerCase().includes(keyword),
+    );
+
   const byCategory = (key: SkillCategory): SkillDefinition[] =>
-    list.filter((skill) => categorizeSkill(skill) === key && assignedIds.has(skill.id));
+    list.filter(
+      (skill) =>
+        categorizeSkill(skill) === key && assignedIds.has(skill.id) && matchesKeyword(skill),
+    );
 
   /** 某分类下「还没分配给当前智能体」的技能（＋ 面板用）。 */
   const addableIn = (key: SkillCategory): SkillDefinition[] =>
@@ -310,14 +321,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
   };
 
   const enabledCount = list.filter((skill) => skill.enabled).length;
-  const keyword = query.trim().toLowerCase();
-  const filtered = keyword
-    ? list.filter((skill) =>
-        [skill.name, skill.description, ...skill.tags].some((text) =>
-          text.toLowerCase().includes(keyword),
-        ),
-      )
-    : list;
+  const filtered = list.filter(matchesKeyword);
 
   const detail = detailId ? list.find((skill) => skill.id === detailId) : undefined;
 
@@ -415,9 +419,11 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
             </div>
             {items.length === 0 ? (
               <div className={`mt-2 ${hintCls}`}>
-                {agentId
-                  ? `「${agentName}」还没有这类技能，点上方 ＋ 添加。`
-                  : group.empty}
+                {keyword
+                  ? `没有匹配「${query.trim()}」的技能`
+                  : agentId
+                    ? `「${agentName}」还没有这类技能，点上方 ＋ 添加。`
+                    : group.empty}
               </div>
             ) : (
               <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -450,7 +456,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                       <TagList items={skill.tags} empty="暂无标签" />
                     </div>
 
-                    <div className="mt-3 flex items-center gap-1.5 border-t border-line-soft pt-2 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
+                    <div className="mt-3 flex items-center gap-1.5 border-t border-line-soft pt-2 opacity-70 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100">
                       <button
                         type="button"
                         aria-label={`详情 ${skill.name}`}
@@ -494,13 +500,6 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
     <>
       <section className={`${cardCls} mt-3`}>
         <div className="flex flex-wrap items-center gap-2">
-          <input
-            aria-label="搜索技能"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="按名称、描述或标签搜索"
-            className={`${inputSmCls} min-w-[180px] flex-1`}
-          />
           <button
             type="button"
             onClick={() => {
@@ -712,6 +711,24 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
         </div>
       </div>
 
+      {/* 搜索提到页头：分组视图与技能池共用同一个搜索词（此前分组视图完全忽略它）。 */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <input
+          aria-label="搜索技能"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="按名称、描述或标签搜索"
+          className={`${inputSmCls} min-w-[180px] max-w-[320px] flex-1`}
+        />
+        <span className={hintCls}>
+          {keyword
+            ? tab === "groups"
+              ? `分组内匹配 ${GROUPS.reduce((n, g) => n + byCategory(g.key).length, 0)} 个`
+              : `匹配 ${filtered.length} 个`
+            : "搜索同时作用于分组与技能池"}
+        </span>
+      </div>
+
       {msg && (
         <div role="status" className={`mt-2 ${msg.kind === "error" ? errorCls : okCls}`}>
           {msg.text}
@@ -747,9 +764,9 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                 type="button"
                 aria-label="关闭添加面板"
                 onClick={() => setAddFor(null)}
-                className="ml-auto rounded px-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
+                className="ml-auto rounded p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
               >
-                ×
+                <XIcon width={14} height={14} aria-hidden="true" />
               </button>
             </div>
             <div className="mt-2 max-h-[320px] overflow-y-auto">

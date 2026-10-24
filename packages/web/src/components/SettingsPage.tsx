@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
 import { LlmSettingsCard } from "./LlmSettingsCard.js";
@@ -20,6 +20,9 @@ const MAX_AVATAR_BYTES = 449_000;
 
 const btnGhost =
   "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
+
+/** 设置卡统一的生效说明：与 LLM 连接卡、工具调用确认卡同一句。 */
+const EFFECT_NOTE = "改动即时生效，仅作用于本机，无需重启。";
 
 /** 行内标记渲染：`**粗体**` 加粗、`` `代码` `` 等宽（无 markdown 依赖）。 */
 function InlineText({ text }: { text: string }) {
@@ -247,6 +250,10 @@ function ProfileSection() {
           )}
         </div>
       </form>
+
+      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-[#999]">
+        {EFFECT_NOTE}
+      </div>
     </section>
   );
 }
@@ -257,13 +264,42 @@ function AppearanceSection() {
   const setAccent = useThemeStore((t) => t.setAccent);
   const resetAccent = useThemeStore((t) => t.resetAccent);
   const [accentError, setAccentError] = useState<string | null>(null);
+  // 受控输入：值以 store 为准做本地镜像。此前用 defaultValue + 受控外写，
+  // 保存后输入框会回退到旧值（闭包里的 accent 还没更新），恢复默认也不刷新。
+  const [custom, setCustom] = useState(accent);
+  const [applied, setApplied] = useState(false);
+
+  useEffect(() => {
+    setCustom(accent);
+  }, [accent]);
+
+  const applyCustom = (raw: string) => {
+    const value = raw.trim();
+    if (!value) {
+      setCustom(accent);
+      return;
+    }
+    if (!setAccent(value)) {
+      setAccentError("请输入十六进制色，如 #2f5bd7");
+      return;
+    }
+    setAccentError(null);
+    setApplied(true);
+  };
 
   return (
     <section
       aria-label="页面颜色"
       className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
     >
-      <div className="text-[12px] font-bold text-[#777]">页面颜色</div>
+      <div className="flex items-center gap-2">
+        <span className="text-[12px] font-bold text-[#777]">页面颜色</span>
+        {applied && (
+          <span role="status" className="text-[11px] text-muted">
+            已生效
+          </span>
+        )}
+      </div>
       <div className="mt-1 text-[11px] text-muted">
         作用于选中项、主按钮等填充色；文字颜色不变，保证长文可读
       </div>
@@ -275,7 +311,11 @@ function AppearanceSection() {
             aria-label={`主题色 ${p.name}`}
             aria-pressed={accent === p.color}
             title={p.name}
-            onClick={() => setAccent(p.color)}
+            onClick={() => {
+              setAccent(p.color);
+              setAccentError(null);
+              setApplied(true);
+            }}
             className={`h-6 w-6 rounded-full border border-black/10 shadow-card ${
               accent === p.color ? "ring-2 ring-offset-2 ring-[#1a1a1a]" : ""
             }`}
@@ -286,26 +326,33 @@ function AppearanceSection() {
           自定义
           <input
             aria-label="自定义主题色"
-            defaultValue={accent}
+            value={custom}
             placeholder="#2f5bd7"
-            onBlur={(e) => {
-              const raw = e.target.value.trim();
-              if (!raw) return;
-              if (!setAccent(raw)) {
-                setAccentError("请输入十六进制色，如 #2f5bd7");
-                return;
-              }
+            onChange={(e) => {
+              setCustom(e.target.value);
               setAccentError(null);
-              e.target.value = accent;
             }}
+            onBlur={(e) => applyCustom(e.target.value)}
             className="w-[92px] rounded-lg border border-line px-2 py-1 text-[12px] outline-none focus:border-[#bbb]"
           />
         </label>
-        <button type="button" aria-label="恢复默认颜色" onClick={resetAccent} className={btnGhost}>
+        <button
+          type="button"
+          aria-label="恢复默认颜色"
+          onClick={() => {
+            resetAccent();
+            setAccentError(null);
+            setApplied(true);
+          }}
+          className={btnGhost}
+        >
           恢复默认
         </button>
       </div>
       {accentError && <div className="mt-2 text-[12px] text-red-600">{accentError}</div>}
+      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-[#999]">
+        {EFFECT_NOTE}
+      </div>
     </section>
   );
 }

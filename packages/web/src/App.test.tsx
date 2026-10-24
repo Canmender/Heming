@@ -1,9 +1,10 @@
 import { useEffect } from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { App, clampAsideWidth, ASIDE_MIN, ASIDE_MAX } from "./App.js";
 import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
+import { useChatStore } from "./store/chat.js";
 import { setToken, fetchFileBlobText } from "./lib/api.js";
 
 // 启动动画集成：BootWave 以「挂载即 onDone」桩替换，动画完成后 App 路由到登录页/主界面。
@@ -439,6 +440,58 @@ describe("App 导航快捷键与隐藏态", () => {
     fireEvent.keyDown(probe, { key: "\\", ctrlKey: true });
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     probe.remove();
+  });
+
+  it("导航轨搜索按钮打开命令面板；焦点在结果按钮上按 Esc 也能关闭", async () => {
+    setToken("t1");
+    mockFetch({
+      conversations: [
+        {
+          id: "c1",
+          type: "direct",
+          peer: { id: "u2", username: "bob", displayName: "张三" },
+          unreadCount: 0,
+        },
+      ],
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: "全局搜索 Ctrl K" });
+    await waitFor(() => expect(useChatStore.getState().conversations).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "全局搜索 Ctrl K" }));
+    const dialog = await screen.findByRole("dialog", { name: "全局搜索" });
+    fireEvent.change(within(dialog).getByLabelText("搜索会话与技能"), {
+      target: { value: "张三" },
+    });
+
+    // 焦点不在输入框（在结果按钮上）：Esc 由面板容器接住
+    const result = within(dialog).getByRole("button", { name: "选择 张三" });
+    result.focus();
+    fireEvent.keyDown(result, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "全局搜索" })).not.toBeInTheDocument();
+  });
+
+  it("命令面板结果超过上限时提示「还有 N 条」", async () => {
+    setToken("t1");
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      id: `cx${i}`,
+      type: "direct" as const,
+      peer: { id: `ux${i}`, username: `ux${i}`, displayName: `候选${i}` },
+      unreadCount: 0,
+    }));
+    mockFetch({ conversations: many });
+    render(<App />);
+    await screen.findByRole("button", { name: "全局搜索 Ctrl K" });
+    await waitFor(() => expect(useChatStore.getState().conversations).toHaveLength(12));
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const dialog = await screen.findByRole("dialog", { name: "全局搜索" });
+    fireEvent.change(within(dialog).getByLabelText("搜索会话与技能"), {
+      target: { value: "候选" },
+    });
+    // 会话最多展示 8 条 → 12 − 8 = 4
+    expect(within(dialog).getByText("还有 4 条")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("button", { name: /^选择 候选/ })).toHaveLength(8);
   });
 
   it("进入会话后左侧导航仍常驻（不再收起、不再有呼出条）", async () => {

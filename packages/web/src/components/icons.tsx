@@ -71,6 +71,13 @@ export const ChevronIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M9 6l6 6-6 6" />
   </svg>
 );
+
+/** 关闭：两条细线交叉。替代文本字形「× / ✕」（字号与线条随 currentColor 一致）。 */
+export const XIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </svg>
+);
 export const UserIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <circle cx="12" cy="8" r="4" />

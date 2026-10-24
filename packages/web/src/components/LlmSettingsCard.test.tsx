@@ -13,7 +13,7 @@ describe("LlmSettingsCard", () => {
   it("空态提示 + 打开表单提交后列表出现连接", async () => {
     render(<LlmSettingsCard />);
     expect(screen.getByText(/还没有 LLM 连接/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText("＋ 新建连接"));
+    fireEvent.click(screen.getByRole("button", { name: "新建连接" }));
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "我的模型" } });
     fireEvent.change(screen.getByLabelText("模型"), { target: { value: "deepseek-chat" } });
     fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-test" } });
@@ -36,7 +36,7 @@ describe("LlmSettingsCard", () => {
   // Interfaces 契约补充：baseUrl placeholder 随 provider 切换；列表展示 key 末 4 位；删除提示绑定失联
   it("provider 切换时 baseUrl placeholder 跟随官方端点", () => {
     render(<LlmSettingsCard />);
-    fireEvent.click(screen.getByText("＋ 新建连接"));
+    fireEvent.click(screen.getByRole("button", { name: "新建连接" }));
     const baseUrl = screen.getByLabelText("Base URL");
     expect(baseUrl).toHaveAttribute("placeholder", "https://api.openai.com/v1");
     fireEvent.change(screen.getByLabelText("服务商"), { target: { value: "anthropic" } });
@@ -46,7 +46,7 @@ describe("LlmSettingsCard", () => {
   // F1 红线：缺 scheme 的 baseUrl 保存被拦在表单层（不写 store、不发请求）
   it("baseUrl 缺 http(s):// 时保存被拦截并提示", async () => {
     render(<LlmSettingsCard />);
-    fireEvent.click(screen.getByText("＋ 新建连接"));
+    fireEvent.click(screen.getByRole("button", { name: "新建连接" }));
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "deepseek" } });
     fireEvent.change(screen.getByLabelText("模型"), { target: { value: "deepseek-chat" } });
     fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-test" } });
@@ -105,5 +105,41 @@ describe("LlmSettingsCard", () => {
     useLlmStore.getState().addProfile({ id: "p1", label: "DS", provider: "openai", apiKey: "k", model: "deepseek-chat" });
     render(<LlmSettingsCard />);
     expect(screen.getByText("参考价，以服务商账单为准")).toBeInTheDocument();
+  });
+
+  it("测试连接进行中：按钮禁用并显示「测试中…」，不重复发请求", async () => {
+    useLlmStore.getState().addProfile({ id: "p1", label: "慢连接", provider: "openai", apiKey: "k", model: "m" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
+    render(<LlmSettingsCard />);
+
+    fireEvent.click(screen.getByRole("button", { name: "测试" }));
+
+    const busy = await screen.findByRole("button", { name: "测试中…" });
+    expect(busy).toBeDisabled();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // 禁用后再点不产生第二次「连通性测试」
+    fireEvent.click(busy);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("保存连接后给「已保存」状态，底部统一生效说明", async () => {
+    render(<LlmSettingsCard />);
+    fireEvent.click(screen.getByRole("button", { name: "新建连接" }));
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "我的模型" } });
+    fireEvent.change(screen.getByLabelText("模型"), { target: { value: "deepseek-chat" } });
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-test" } });
+    fireEvent.click(screen.getByText("保存"));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(screen.getByText("改动即时生效，仅作用于本机，无需重启。")).toBeInTheDocument();
+  });
+
+  it("「确认删除」与其它页面一致：红底破坏性按钮", () => {
+    useLlmStore.getState().addProfile({ id: "p1", label: "DS", provider: "openai", apiKey: "k", model: "m" });
+    render(<LlmSettingsCard />);
+    fireEvent.click(screen.getByText("删除"));
+    const confirm = screen.getByRole("button", { name: "确认删除" });
+    expect(confirm.className).toContain("bg-[#b42318]");
+    expect(confirm.className).not.toContain("bg-ink");
   });
 });

@@ -115,10 +115,13 @@ describe("WikiPanel 三视图", () => {
     );
   });
 
-  it("「＋概念」新建空白页，保存后进列表", async () => {
+  it("「新建概念」用细线 SVG 而不是文本「＋」，保存后进列表", async () => {
     const bridge = seeded();
     render(<WikiPanel bridge={bridge} />);
-    fireEvent.click(await screen.findByRole("button", { name: "＋概念" }));
+    const create = await screen.findByRole("button", { name: "新建概念" });
+    expect(create.textContent).not.toContain("＋");
+    expect(create.querySelector("svg")).toBeTruthy();
+    fireEvent.click(create);
     fireEvent.change(await screen.findByLabelText("页面标题"), { target: { value: "新概念" } });
     fireEvent.change(screen.getByLabelText("页面正文"), { target: { value: "内容" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));

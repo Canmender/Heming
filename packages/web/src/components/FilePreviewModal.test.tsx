@@ -53,12 +53,15 @@ describe("FilePreviewModal", () => {
     expect(container.querySelector("script")).toBeNull();
   });
 
-  it("关闭按钮触发 onClose", async () => {
+  it("关闭按钮触发 onClose，且用细线 SVG 而不是文本「×」", async () => {
     vi.mocked(fetchFileBlobText).mockResolvedValue("正文");
     const onClose = vi.fn();
     render(<FilePreviewModal file={file} onClose={onClose} />);
     await screen.findByText("正文");
-    fireEvent.click(screen.getByLabelText("关闭预览"));
+    const close = screen.getByLabelText("关闭预览");
+    expect(close.textContent).not.toContain("×");
+    expect(close.querySelector("svg")).toBeTruthy();
+    fireEvent.click(close);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

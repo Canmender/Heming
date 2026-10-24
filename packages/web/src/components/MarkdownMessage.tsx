@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { highlightCode } from "../lib/markdown/highlight.js";
+import { useModalA11y } from "./useModalA11y.js";
 
 /**
  * 消息正文的 markdown 渲染。
@@ -132,6 +133,50 @@ function InlineCode({ children }: { children?: React.ReactNode }) {
 }
 
 /**
+ * markdown 图片（A6）：气泡里保持受约束尺寸，点击打开 lightbox 看原图。
+ * 遮罩 + 原图 + Esc/点遮罩关闭；焦点循环与背景屏蔽复用全仓统一的 useModalA11y。
+ */
+function MarkdownImage({ src, alt }: { src?: string; alt: string }) {
+  const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useModalA11y(panelRef, () => setOpen(false), { active: open, autoFocus: false });
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={`查看图片 ${alt || "图片"}`}
+        className="my-1 block max-w-full cursor-zoom-in"
+        onClick={() => setOpen(true)}
+      >
+        <img src={src} alt={alt} className="max-w-full rounded" />
+      </button>
+      {open && src ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-6"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="查看大图"
+            className="flex max-h-full max-w-full items-center justify-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={src}
+              alt={alt}
+              className="max-h-[88vh] max-w-[88vw] rounded object-contain"
+              data-testid="markdown-lightbox-image"
+            />
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
  * 正文渲染器。
  *
  * `streaming` 只影响代码块是否高亮；其余结构（列表、表格）随时可渲染——
@@ -205,8 +250,8 @@ export const MarkdownMessage = memo(function MarkdownMessage({
         <td className="border border-line-soft px-1.5 py-1 align-top">{children}</td>
       ),
       img: ({ src, alt }: any) => (
-        // 图片在气泡里限制最大尺寸，避免大图把布局撑破
-        <img src={src} alt={alt ?? ""} className="my-1 max-w-full rounded" />
+        // 图片在气泡里限制最大尺寸，避免大图把布局撑破；点击放大见 MarkdownImage
+        <MarkdownImage src={typeof src === "string" ? src : undefined} alt={alt ?? ""} />
       ),
     }),
     [streaming],

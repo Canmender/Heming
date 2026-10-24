@@ -18,6 +18,7 @@ import {
 } from "../lib/wiki/index.js";
 import { WikiGraphView } from "./WikiGraphView.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { PlusIcon } from "./icons.js";
 
 /**
  * 个人知识库面板（卡帕西 LLM Wiki 标准的落地界面）。
@@ -218,8 +219,15 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
             规约
           </button>
           {WIKI_KINDS.map((k) => (
-            <button key={k} type="button" onClick={() => createPage(k)} className={btnGhost}>
-              ＋{KIND_LABEL[k]}
+            <button
+              key={k}
+              type="button"
+              aria-label={`新建${KIND_LABEL[k]}`}
+              onClick={() => createPage(k)}
+              className={`inline-flex items-center gap-1 ${btnGhost}`}
+            >
+              <PlusIcon width={11} height={11} aria-hidden="true" />
+              {KIND_LABEL[k]}
             </button>
           ))}
         </div>
@@ -259,7 +267,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
             />
             {shown.length === 0 ? (
               <div className="text-[12px] text-muted">
-                {query ? "无匹配页面" : "还没有页面。用右上角「＋」新建一页。"}
+                {query ? "无匹配页面" : "还没有页面。用右上角「新建」新建一页。"}
               </div>
             ) : (
               <ul className="min-h-0 flex-1 overflow-y-auto">
@@ -344,7 +352,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
               </>
             ) : (
               <div className="flex items-center justify-center text-[12px] text-muted">
-                从图谱或目录里选一个页面，或用右上角「＋」新建。
+                从图谱或目录里选一个页面，或用右上角「新建」新建。
               </div>
             )}
           </div>

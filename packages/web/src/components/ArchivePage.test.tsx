@@ -44,8 +44,14 @@ function directConv(id: string, name: string, archivedAt?: string | null): Conve
   } as Conversation;
 }
 
-function prime(convs: Conversation[]) {
-  useChatStore.setState({ conversations: convs, loadWorkspace });
+function prime(convs: Conversation[], state: Partial<ReturnType<typeof useChatStore.getState>> = {}) {
+  useChatStore.setState({
+    conversations: convs,
+    loadWorkspace,
+    workspaceReady: true,
+    workspaceError: null,
+    ...state,
+  });
 }
 
 describe("ArchivePage", () => {
@@ -63,6 +69,29 @@ describe("ArchivePage", () => {
     render(<ArchivePage />);
     expect(screen.getByText("还没有归档的会话。")).toBeTruthy();
     expect(screen.getByText(/在会话标签上点「归档」/)).toBeTruthy();
+  });
+
+  it("首帧加载中显示骨架，不拿「还没有归档」冒充没数据", () => {
+    prime([], { workspaceReady: false, workspaceError: null });
+    render(<ArchivePage />);
+    expect(screen.getByRole("status", { name: "正在加载归档" })).toBeTruthy();
+    expect(screen.queryByText("还没有归档的会话。")).toBeNull();
+    expect(screen.getByText("加载中…")).toBeTruthy();
+  });
+
+  it("首帧失败显示「加载失败 + 重试」，重试成功后回到正常空态", async () => {
+    prime([], { workspaceReady: false, workspaceError: "网络中断" });
+    render(<ArchivePage />);
+    expect(screen.getByRole("alert")).toHaveTextContent("加载失败：网络中断");
+    expect(screen.queryByText("还没有归档的会话。")).toBeNull();
+
+    loadWorkspace.mockImplementationOnce(async () => {
+      useChatStore.setState({ workspaceReady: true, workspaceError: null });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(loadWorkspace).toHaveBeenCalledTimes(2); // 挂载一次 + 重试一次
+    await waitFor(() => expect(screen.getByText("还没有归档的会话。")).toBeTruthy());
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("只列出已归档的会话", () => {

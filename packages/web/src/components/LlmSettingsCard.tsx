@@ -9,6 +9,10 @@ import {
   lookupCapability,
   setOverride,
 } from "../lib/modelCaps.js";
+import { PlusIcon } from "./icons.js";
+
+/** 设置卡统一的生效说明：与工具调用确认卡、个人资料卡同一句。 */
+const EFFECT_NOTE = "改动即时生效，仅作用于本机，无需重启。";
 
 /** 设置区 · LLM 连接：本机 CRUD + 连通性测试；Key 只落 localStorage 不出设备。 */
 
@@ -51,6 +55,8 @@ export function LlmSettingsCard() {
   const [editingCaps, setEditingCaps] = useState<string | null>(null);
   /** 手动填写的上下文窗口（token）。 */
   const [capsWindow, setCapsWindow] = useState("");
+  /** 最近一次保存是否成功（表单保存 / 能力保存）；打开编辑时复位。 */
+  const [saved, setSaved] = useState(false);
 
   /** 某个连接的能力：查不到时返回 null（界面显示「能力未知」）。 */
   const capsOf = (p: LlmProfile) => lookupCapability(p.provider, p.model);
@@ -71,6 +77,7 @@ export function LlmSettingsCard() {
       clearOverride(p.provider, p.model);
     }
     setEditingCaps(null);
+    setSaved(true);
   };
 
   const resetForm = () => {
@@ -87,10 +94,12 @@ export function LlmSettingsCard() {
 
   const openCreate = () => {
     resetForm();
+    setSaved(false);
     setOpen(true);
   };
 
   const openEdit = (p: LlmProfile) => {
+    setSaved(false);
     setEditingId(p.id);
     setLabel(p.label);
     setProvider(p.provider);
@@ -145,6 +154,7 @@ export function LlmSettingsCard() {
     if (editingId) updateProfile(editingId, data);
     else addProfile({ id: newId(), ...data });
     resetForm();
+    setSaved(true);
   };
 
   const onTest = async (p: LlmProfile) => {
@@ -172,10 +182,23 @@ export function LlmSettingsCard() {
   return (
     <section className="mt-3 max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[12px] font-bold text-[#777]">LLM 连接</div>
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] font-bold text-[#777]">LLM 连接</span>
+          {saved && (
+            <span role="status" className="text-[11px] text-muted">
+              已保存
+            </span>
+          )}
+        </div>
         {!open && (
-          <button type="button" onClick={openCreate} className={btnGhost}>
-            ＋ 新建连接
+          <button
+            type="button"
+            aria-label="新建连接"
+            onClick={openCreate}
+            className={`inline-flex items-center gap-1 ${btnGhost}`}
+          >
+            <PlusIcon width={12} height={12} aria-hidden="true" />
+            新建连接
           </button>
         )}
       </div>
@@ -268,8 +291,13 @@ export function LlmSettingsCard() {
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <button type="button" onClick={() => void onTest(p)} className={btnGhost}>
-                  测试
+                <button
+                  type="button"
+                  onClick={() => void onTest(p)}
+                  disabled={t?.status === "pending"}
+                  className={`${btnGhost} disabled:opacity-60`}
+                >
+                  {t?.status === "pending" ? "测试中…" : "测试"}
                 </button>
                 <button type="button" onClick={() => openEdit(p)} className={btnGhost}>
                   编辑
@@ -332,7 +360,7 @@ export function LlmSettingsCard() {
                 <button
                   type="button"
                   onClick={() => onRemove(p.id)}
-                  className="rounded-lg bg-ink px-3 py-1 text-[12px] font-bold text-white"
+                  className="rounded-lg bg-[#b42318] px-3 py-1 text-[12px] font-bold text-white"
                 >
                   确认删除
                 </button>
@@ -432,6 +460,10 @@ export function LlmSettingsCard() {
           </div>
         </form>
       )}
+
+      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-[#999]">
+        {EFFECT_NOTE}
+      </div>
     </section>
   );
 }

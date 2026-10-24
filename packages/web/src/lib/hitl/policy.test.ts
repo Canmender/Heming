@@ -162,10 +162,12 @@ describe("档位判定", () => {
 
     store.grant("a1", writeCall.name, policy.scope);
     expect(store.granted("a1", writeCall.name, policy.scope)).toBe(true);
+    expect(store.grantCount()).toBe(1);
     expect(store.allowed(writeCall, policy, "a1")).toBe("pass");
 
     store.revokeAll();
     expect(store.granted("a1", writeCall.name, policy.scope)).toBe(false);
+    expect(store.grantCount()).toBe(0);
     expect(store.allowed(writeCall, policy, "a1")).toBe("ask");
   });
 

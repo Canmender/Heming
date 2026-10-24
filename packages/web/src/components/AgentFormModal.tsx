@@ -52,7 +52,9 @@ export function AgentFormModal({
   // 同步提交互斥：state 闭包在同帧双击下仍是旧值（与 GroupCreateModal 同模式）
   const pendingRef = useRef(false);
   const panelRef = useRef<HTMLFormElement>(null);
-  useModalA11y(panelRef, onClose, { active: open });
+  // 提交中不允许 Esc 关闭：请求已发出，关掉弹窗只会让用户以为「没提交」而重复提交。
+  // 遮罩点击在下面的事件里同样按 pendingRef 拦截（ref 与 state 同帧口径）。
+  useModalA11y(panelRef, onClose, { active: open, closeOnEscape: !pending });
 
   // 打开（或换 agent/mode 复用挂载实例）时从 props 重置表单；
   // prompts/bindings 用 getState() 取初值，不进 deps——避免打字期间被外部刷新覆盖
@@ -158,7 +160,7 @@ export function AgentFormModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !pendingRef.current) onClose();
       }}
     >
       <form
@@ -178,6 +180,11 @@ export function AgentFormModal({
           <h3 className="text-[14px] font-bold">
             {mode === "create" ? "新建智能体" : "编辑智能体"}
           </h3>
+          {pending && (
+            <span role="status" className="text-[11px] text-muted">
+              提交中…
+            </span>
+          )}
         </div>
 
         <label className={`${labelCls} mb-3`}>
@@ -259,7 +266,8 @@ export function AgentFormModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px]"
+            disabled={pending}
+            className="rounded-lg border border-line px-3 py-1.5 text-[13px] disabled:opacity-60"
           >
             取消
           </button>

@@ -164,6 +164,36 @@ describe("SkillsPage 技能区", () => {
     expect(screen.getByText("没有匹配「查无此技能」的技能")).toBeInTheDocument();
   });
 
+  it("搜索框在页头，并且同样过滤分组视图", async () => {
+    pool.importText(SKILL_MD);
+    const imported = pool.list().find((s) => s.name === "财报速读")!;
+    pool.assign("a1", imported.id);
+    await renderReady();
+
+    // 搜索框不属于任何分组卡（此前埋在「技能池」面板里）
+    const search = screen.getByLabelText("搜索技能");
+    expect(search.closest('[role="region"]')).toBeNull();
+
+    fireEvent.change(search, { target: { value: "现金流" } });
+    expect(
+      within(group("已装技能")).getByRole("group", { name: "技能卡 财报速读" }),
+    ).toBeInTheDocument();
+    // 不匹配的内置技能从分组里消失，并给出「没有匹配」而不是「还没有这类技能」
+    expect(
+      within(group("内置技能")).queryByRole("group", { name: "技能卡 记忆整理" }),
+    ).not.toBeInTheDocument();
+    expect(within(group("内置技能")).getByText("没有匹配「现金流」的技能")).toBeInTheDocument();
+  });
+
+  it("技能卡操作区常显（弱化而非 hover 才出现）", async () => {
+    await renderReady();
+    const card = within(group("内置技能")).getByRole("group", { name: "技能卡 记忆整理" });
+    const remove = within(card).getByRole("button", { name: "移除 记忆整理" });
+    const bar = remove.parentElement as HTMLElement;
+    expect(bar.className).not.toContain("opacity-0");
+    expect(bar.className).toContain("opacity-70");
+  });
+
   it("启用开关会调用 store 并立即反映到两个视图", async () => {
     await renderReady();
 

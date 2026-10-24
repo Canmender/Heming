@@ -241,6 +241,11 @@ export class HitlPolicyStore {
     this.session.clear();
   }
 
+  /** 当前会话授权条数。设置区「清空」前报数用；只读，不暴露 key 结构。 */
+  grantCount(): number {
+    return this.session.size;
+  }
+
   /**
    * 免问下限是否覆盖该风险（风险**不高于**下限 ⇒ 免问）。
    *

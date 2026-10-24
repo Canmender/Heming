@@ -241,6 +241,25 @@ describe("MemoryPage 数据库记忆", () => {
     expect(screen.getByText("已保存：情景记忆保留 30 天")).toBeInTheDocument();
   });
 
+  it("保留天数非法：保存仍可点，提示用错误色且不改设置", async () => {
+    mockApi({ agents: AGENTS });
+    renderPage();
+    openTab("数据库");
+
+    const overview = screen.getByRole("region", { name: "数据库记忆概览" });
+    const days = screen.getByLabelText("保留天数");
+    fireEvent.change(days, { target: { value: "0" } });
+
+    const save = within(overview).getByRole("button", { name: "保存" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("保留天数需为 1–3650 之间的整数");
+    expect(alert.className).toContain("text-red-600");
+    expect(memory.getSettings().retentionDays).toBe(90);
+  });
+
   it("检索过滤语义/情景条目，删除后条目消失", async () => {
     mockApi({ agents: AGENTS });
     memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });

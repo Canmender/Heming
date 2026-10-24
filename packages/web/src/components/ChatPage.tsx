@@ -114,6 +114,7 @@ import { mcpRegistry } from "../lib/mcp/store.js";
 import { openCallWindow } from "../lib/callWindow.js";
 import { useModalA11y } from "./useModalA11y.js";
 import { capabilityNotice } from "../lib/capabilityNotice.js";
+import { formatClock, formatDayClock, needsTimeSeparator } from "../lib/formatTime.js";
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
 export const NO_E2E_NOTICE = "当前环境不支持端到端加密，请使用桌面端或 HTTPS";
@@ -328,6 +329,18 @@ export function clampComposerHeight(n: number): number {
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🎉", "🔥", "✅", "👀", "🤔", "👏"];
 
 /**
+ * 「贴底」判定阈值（A3）：距底小于该值即视为正在看最新消息。
+ * 留 80px 余量是因为滚动条末端的 1~2px 抖动不该被当成「用户上滑了」。
+ */
+const STICK_BOTTOM_PX = 80;
+
+/**
+ * 输入区提示行（A9）：info 3 秒自动消失；error 用红色 + role="alert"，
+ * 纯文本发送失败时附带「重试」（附件场景不提供，避免重放一次上传）。
+ */
+type SendNotice = { kind: "info" | "error"; text: string; retry?: () => void };
+
+/**
  * 气泡文本 mentions 高亮（M3 Task 7）：按各 name 在 text 中的出现位置 split 拆分——
  * 命中段包浅蓝 chip span，其余段为 Fragment 纯文本节点（React 文本输出天然转义，防注入）。
  * 名字按长度降序参与 alternation，防「小鸣」吃掉「和小鸣」的前缀；无 mentions 时原样单节点。
@@ -368,6 +381,10 @@ function AttachmentPreview({
 }): JSX.Element | null {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  /** 图片放大（A6）：气泡内是受限缩略图，点击看原图；Esc/点遮罩关闭。 */
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const zoomPanelRef = useRef<HTMLDivElement | null>(null);
+  useModalA11y(zoomPanelRef, () => setZoomOpen(false), { active: zoomOpen, autoFocus: false });
 
   useEffect(() => {
     let alive = true;
@@ -406,7 +423,38 @@ function AttachmentPreview({
   }
   if (!url) return null; // 取 blob 期间不渲染，避免闪出断链
   return file.mime.startsWith("image/") ? (
-    <img src={url} alt={file.name} className="mt-1 max-h-40 rounded-md object-cover" />
+    <>
+      <button
+        type="button"
+        aria-label={`查看图片 ${file.name}`}
+        className="mt-1 block max-w-full cursor-zoom-in overflow-hidden rounded-md"
+        onClick={() => setZoomOpen(true)}
+      >
+        <img src={url} alt={file.name} className="max-h-40 rounded-md object-cover" />
+      </button>
+      {zoomOpen ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-6"
+          onClick={() => setZoomOpen(false)}
+        >
+          <div
+            ref={zoomPanelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="查看图片"
+            className="flex max-h-full max-w-full items-center justify-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={url}
+              alt={file.name}
+              className="max-h-[88vh] max-w-[88vw] rounded object-contain"
+              data-testid="image-lightbox"
+            />
+          </div>
+        </div>
+      ) : null}
+    </>
   ) : (
     <a
       href={url}
@@ -494,6 +542,11 @@ export function ChatPage({
   const consumeTaskDraft = useUiStore((s) => s.consumeTaskDraft);
   const conversations = useChatStore((s) => s.conversations);
   const messages = useChatStore((s) => s.messages[convId] ?? []);
+  /** A1：历史三态（加载中 / 失败 / 加载成功且为空）按会话分桶读。 */
+  const messagesLoading = useChatStore((s) => s.messagesLoading[convId] ?? false);
+  const messagesError = useChatStore((s) => s.messagesError[convId] ?? null);
+  /** 本会话是否已经完成过一次历史拉取（含失败）：首帧骨架与「真空态」的区分依据。 */
+  const [historyLoaded, setHistoryLoaded] = useState<Record<string, boolean>>({});
   const plainById = useChatStore((s) => s.plainById);
   const appendMessage = useChatStore((s) => s.appendMessage);
   const reads = useChatStore((s) => s.reads);
@@ -508,6 +561,11 @@ export function ChatPage({
   const agentsRoster = useChatStore((s) => s.agentsRoster);
   const me = useAuthStore((s) => s.user);
   const [draft, setDraft] = useState("");
+  /** 最新草稿的只读镜像：重试成功后判断「用户有没有在这期间改过字」。 */
+  const draftRef = useRef(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
   /**
    * 草稿持久化（d.31 · P2-1）：`ChatPage` 常驻（切会话不卸载），草稿却是组件态 ⇒
    * 上一个会话写一半的字会串进下一个会话，刷新还全丢。按会话存盘后各归各位。
@@ -557,7 +615,42 @@ export function ChatPage({
       flushDraftSave();
     };
   }, [convId, flushDraftSave]);
-  const [sendNotice, setSendNotice] = useState<string | null>(null);
+  const [sendNotice, setSendNoticeState] = useState<SendNotice | null>(null);
+  /** info 提示 3 秒自动消失的定时器（新提示/切换会话/卸载时清）。 */
+  const sendNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * 写提示行：text=null 清除；kind=info 3 秒后自动消失，error 保留到下一次操作。
+   * 与旧 setSendNotice(string) 调用面兼容（缺省 info）。
+   */
+  const setSendNotice = useCallback(
+    (text: string | null, kind: "info" | "error" = "info", retry?: () => void) => {
+      if (sendNoticeTimer.current) {
+        clearTimeout(sendNoticeTimer.current);
+        sendNoticeTimer.current = null;
+      }
+      if (text === null) {
+        setSendNoticeState(null);
+        return;
+      }
+      setSendNoticeState(retry ? { kind, text, retry } : { kind, text });
+      if (kind === "info") {
+        sendNoticeTimer.current = setTimeout(() => {
+          sendNoticeTimer.current = null;
+          setSendNoticeState(null);
+        }, 3000);
+      }
+    },
+    [],
+  );
+  useEffect(
+    () => () => {
+      if (sendNoticeTimer.current) clearTimeout(sendNoticeTimer.current);
+    },
+    [],
+  );
+  /** 附件上传进行中（A8）：四个入口禁用 + 提示行占位；ref 兜底防同帧连点。 */
+  const [uploading, setUploading] = useState(false);
+  const uploadingRef = useRef(false);
   const [exportOpen, setExportOpen] = useState(false);
   /**
    * 多选导出：勾出若干条，只导出这些。
@@ -629,6 +722,15 @@ export function ChatPage({
    */
   const voiceRecPendingRef = useRef<object | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  /** A3：最近一次滚动是否贴底（距底 <80px）。贴底才跟随新消息/流式文本。 */
+  const atBottomRef = useRef(true);
+  /** A3：用户上滑期间来了新内容 → 右下角浮动「↓ 新消息」。 */
+  const [newBelow, setNewBelow] = useState(false);
+  /** A5：刚复制过的消息 id（短暂显示「已复制」）。 */
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** A11：@ 选择器的键盘高亮项下标。 */
+  const [pickerIndex, setPickerIndex] = useState(0);
   /** 触发句柄（convId → 集合）：「中断」只 abort 当前会话的流；卸载时全部中止（关页不空烧 token）。 */
   const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
   /** 本机流元数据（streamId → 触发上下文）：onLocalDelta 回填 agentId、重试取原触发文本与本轮附件。 */
@@ -772,7 +874,7 @@ export function ChatPage({
       wsHandleRef.current?.send(ev);
       return true;
     } catch (err) {
-      setSendNotice(`发送失败：${(err as Error).message}`);
+      setSendNotice(`发送失败：${(err as Error).message}`, "error");
       return false;
     }
   };
@@ -1020,7 +1122,7 @@ export function ChatPage({
       setTimeout(() => URL.revokeObjectURL(url), 0);
       setSendNotice(`已导出 ${rows.length} 条消息（仅本机明文）`);
     } catch {
-      setSendNotice("导出失败，请检查浏览器下载权限");
+      setSendNotice("导出失败，请检查浏览器下载权限", "error");
     }
     setExportOpen(false);
   };
@@ -1315,9 +1417,13 @@ export function ChatPage({
     setWindowCount((count) => expandCount(count, visibleMessages.length));
   }, [windowCount, visibleMessages.length]);
   // 切会话：窗口回到初始值（回到该会话时从最近的一窗开始看）。
+  // A3：阅读位置也复位到最新消息——切进来先看到的是「现在」，不是上次翻到一半的位置。
   useEffect(() => {
     setWindowCount(DEFAULT_WINDOW);
     prevScrollHeightRef.current = null;
+    atBottomRef.current = true;
+    setNewBelow(false);
+    bottomRef.current?.scrollIntoView({ behavior: "auto" });
   }, [convId]);
   // 追加后补偿滚动位置：上方长出来的高度要加回 scrollTop，否则正在看的内容会跳走。
   // 用 useLayoutEffect 是为了在绘制前完成补偿，避免看到一帧跳动。
@@ -1784,7 +1890,7 @@ export function ChatPage({
         runs.delete(run);
         // fetchHistory 失败等启动期错误：生成未开始，可见提示而非静默
         console.warn("智能体生成启动失败", e);
-        setSendNotice("智能体生成启动失败，请稍后重试");
+        setSendNotice("智能体生成启动失败，请稍后重试", "error");
       },
     );
   };
@@ -1857,10 +1963,17 @@ export function ChatPage({
   }, [convId]);
 
   // 历史拉取走 store.loadMessages：plain 直通、信封经 handler 解密合并（§6 缓存优先），
-  // 解不开的留占位（渲染无法解密、不进提示词）；alive 挡卸载/切会话后的晚到写入
+  // 解不开的留占位（渲染无法解密、不进提示词）；alive 挡卸载/切会话后的晚到写入。
+  // A1：loadMessages 自己吞掉失败（落 messagesError），这里只记「本会话已完成过一次拉取」，
+  // 用于区分首帧骨架 / 真空态（成功且为空才是「还没有消息」）。
   useEffect(() => {
     let alive = true;
-    void useChatStore.getState().loadMessages(convId, () => alive);
+    void useChatStore
+      .getState()
+      .loadMessages(convId, () => alive)
+      .finally(() => {
+        if (alive) setHistoryLoaded((prev) => ({ ...prev, [convId]: true }));
+      });
     return () => {
       alive = false;
     };
@@ -1935,13 +2048,22 @@ export function ChatPage({
             wsHandleRef.current?.send({ type: "mark_read", conversationId: convId });
           }
         } else if (e.type === "message_new") {
-          // 他会话的新消息：进通知中心（正在看的这条不提醒，避免自己给自己发通知）
-          notifyIncomingMessage(e.message);
-        } else if (e.type === "read_update" && e.conversationId === convId) {
-          // 事件只带 userId/at：整表重拉（读数很小），direct 气泡「已读」随动；他会话忽略
-          void loadReads(convId).catch(() => {
-            /* 同挂载期降级：拉取失败保留旧读态 */
-          });
+          // 他会话的新消息：未读 +1（A12：自己发的不算）+ 进通知中心
+          if (e.message.senderId !== useAuthStore.getState().user?.id) {
+            useChatStore.getState().bumpUnread(e.message.conversationId);
+            notifyIncomingMessage(e.message);
+          }
+        } else if (e.type === "read_update") {
+          // A12：自己在别的端/页面读过 → 该会话未读清零（不只是当前会话）。
+          if (e.userId === useAuthStore.getState().user?.id) {
+            useChatStore.getState().clearUnread(e.conversationId);
+          }
+          if (e.conversationId === convId) {
+            // 事件只带 userId/at：整表重拉（读数很小），direct 气泡「已读」随动；他会话忽略
+            void loadReads(convId).catch(() => {
+              /* 同挂载期降级：拉取失败保留旧读态 */
+            });
+          }
         } else if (e.type === "error") {
           console.warn(`[${e.code}] ${e.message}`);
         }
@@ -1959,7 +2081,7 @@ export function ChatPage({
       onClose: () => setConnected(false),
       // d.30 · P1-8：离线队列溢出/无 token 发送失败 → 复用既有 setSendNotice 提示，
       // 不新造组件（规格 §5）。静默丢帧的话用户永远不知道有东西没发出去。
-      onSendError: (reason) => setSendNotice(`发送失败：${reason}`),
+      onSendError: (reason) => setSendNotice(`发送失败：${reason}`, "error"),
     });
     wsHandleRef.current = handle;
     // 进会话即报已读（有未读才发；send 在未连通时入队，连接后随首帧冲刷）。
@@ -1989,9 +2111,23 @@ export function ChatPage({
     };
   }, [convId, appendMessage, loadReads]);
 
+  /**
+   * A3 滚动贴底跟随：贴底时才跟着新消息与流式文本走；用户上滑后不再强行拽底，
+   * 改为在右下角亮起「↓ 新消息」。切会话由上面的 convId effect 强制回到底部。
+   *
+   * 用 `streamTick`（各流文本/思考长度之和）当依赖：流式每帧文本变化都会推进它，
+   * 而对象引用本身每次都变、不能直接进依赖。
+   */
+  const streamTick = streamEntries
+    .map(([, s]) => (s.text?.length ?? 0) + (s.reasoning?.length ?? 0))
+    .join(",");
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+    if (atBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    } else {
+      setNewBelow(true);
+    }
+  }, [messages.length, streamTick]);
 
   // I1 挂载清扫：上一轮卸载中止流后 socket 已关，finish/echo 收不到，store（整页刷新
   // 才会清空）里可能残留本会话的「生成中」孤儿项与 streamOwner 键。新挂载时 runsRef
@@ -2147,18 +2283,95 @@ export function ChatPage({
     return () => document.removeEventListener("keydown", onKey);
   }, [reactFor]);
 
+  /** A11：选择器查询变化/已选项变化时，键盘高亮回到第一项。 */
+  useEffect(() => {
+    setPickerIndex(0);
+  }, [picker?.query, picker?.via, selectedMentions.length]);
+
+  /**
+   * A10：无浮层、无草稿时 Esc 停止生成。
+   * 挂在文档级而不是输入框上：用户可能正把光标放在消息区/刚点过别处，
+   * 但只要没有正在编辑的内容、也没有任何浮层在等 Esc，Esc 的语义就是「停」。
+   */
+  useEffect(() => {
+    if (activeLocal.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (draft.trim() !== "") return;
+      if (
+        picker ||
+        emojiOpen ||
+        voiceMenu ||
+        reactFor !== null ||
+        forwardMsg ||
+        infoOpen ||
+        exportOpen ||
+        groupCallConfirm ||
+        searchOpen
+      ) {
+        return;
+      }
+      abortRuns();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // abortRuns 每帧重建；本 effect 只关心「是否该接 Esc」的门槛状态
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeLocal.length,
+    draft,
+    picker,
+    emojiOpen,
+    voiceMenu,
+    reactFor,
+    forwardMsg,
+    infoOpen,
+    exportOpen,
+    groupCallConfirm,
+    searchOpen,
+  ]);
+
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Escape" && picker) {
-      e.preventDefault();
-      setPicker(null);
-      setTokenLock(false); // Esc 关闭同步解锁：后续键入可重开（否则旧锁卡住 token 路径）
-      return;
+    if (picker) {
+      // A11：↑/↓ 移动、Enter 选中、Esc 关闭（焦点一直在输入框，按键在这里分派）
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setPickerIndex((i) => Math.max(0, Math.min(pickerItems.length - 1, i + 1)));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setPickerIndex((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+        const item = pickerItems[Math.min(pickerIndex, pickerItems.length - 1)];
+        if (item) {
+          e.preventDefault();
+          pickMention(item);
+          return;
+        }
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setPicker(null);
+        setTokenLock(false); // Esc 关闭同步解锁：后续键入可重开（否则旧锁卡住 token 路径）
+        return;
+      }
     }
     // 多行输入框：Enter 发送、Shift+Enter 换行（输入法组词中不拦，否则中文选词会被当成发送）
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       e.currentTarget.form?.requestSubmit();
     }
+  };
+
+  /** A7：粘贴截图/文件 → 走 sendFile 同一套校验（6MB、类型、E2E 拦截）。 */
+  const onComposerPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData?.files ?? []);
+    if (files.length === 0) return; // 纯文本粘贴不拦
+    e.preventDefault();
+    void sendFile(files[0]);
   };
 
   /**
@@ -2200,20 +2413,17 @@ export function ChatPage({
     }
     // 硬验收⑤：无 subtle 先拦（保留草稿与已选 mention），绝不降级明文发送
     if (!hasSubtle()) {
-      setSendNotice(NO_E2E_NOTICE);
       return { ok: false, error: NO_E2E_NOTICE };
     }
     // 发送前拦截：@ 到的智能体没绑 LLM 连接 → 不发消息，本地提示去设置页配置（草稿/chip 保留）
     const unbound = mentions.find((m) => !resolveProfile(m.agentId));
     if (unbound) {
       const error = `${unbound.name} 未绑定 LLM 连接，请先在设置页配置`;
-      setSendNotice(error);
       return { ok: false, error };
     }
     if (!wsHandleRef.current) {
       // 保留草稿与已选 mention，给出可见提示（不静默丢弃）
       const error = "连接未就绪，消息未发送";
-      setSendNotice(error);
       return { ok: false, error };
     }
     // 正文/mentions/replyTo 全进密文（§3.3），事件 payload 只留 {text:""} 占位
@@ -2231,10 +2441,8 @@ export function ChatPage({
     return { ok: true };
   };
 
-  const send = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const result = await submitMessage(draft, effectiveMentions, replyTarget);
-    if (!result.ok) return;
+  /** 发送成功后清空输入区（草稿 / @ chip / 回复引用 / 旧提示）。 */
+  const resetComposer = () => {
     setDraft("");
     cancelDraftSave();
     clearDraft(convId);
@@ -2243,6 +2451,49 @@ export function ChatPage({
     setTokenLock(false);
     setSendNotice(null);
     setReplyTarget(null);
+  };
+
+  /**
+   * A9：纯文本发送失败后的「重试」——重放失败时的那份内容（文本/mentions/引用），
+   * 不读当前草稿（用户可能已经改过字）；附件场景不提供重试（避免重放一次上传）。
+   * 失败仍在 → 继续挂重试入口，用户可再点。
+   */
+  const retryTextSend = async (
+    text: string,
+    mentions: { agentId: string; name: string }[],
+    replyTo: Message | null,
+  ) => {
+    const result = await submitMessage(text, mentions, replyTo);
+    if (!result.ok) {
+      setSendNotice(result.error, "error", () => void retryTextSend(text, mentions, replyTo));
+      return;
+    }
+    // 失败后用户可能已经改了草稿：只在「还是原来那份」时清空输入区，
+    // 否则保留他新写的字，只把提示换成成功态（避免重试把他刚输入的内容吞掉）。
+    if (draftRef.current === text) {
+      resetComposer();
+      return;
+    }
+    setSendNotice("已重新发送", "info");
+  };
+
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // 空草稿：按钮已 disabled；回车/表单提交也要兜住，不把「消息为空」当成错误弹红
+    if (!draft.trim()) return;
+    const text = draft;
+    const mentions = effectiveMentions;
+    const replyTo = replyTarget;
+    const result = await submitMessage(text, mentions, replyTo);
+    if (!result.ok) {
+      // 纯文本发送失败：红色 role=alert + 「重试」（附件路径见 sendFile，不给重试）。
+      // NO_E2E 例外：常驻横幅本身就是 role=alert，不再重复一条同样的红字。
+      if (result.error !== NO_E2E_NOTICE) {
+        setSendNotice(result.error, "error", () => void retryTextSend(text, mentions, replyTo));
+      }
+      return;
+    }
+    resetComposer();
   };
 
   // 任务区投递：把目标写进输入区并排队自动发送（连接可能还没就绪，见下一个 effect）。
@@ -2271,6 +2522,7 @@ export function ChatPage({
       if (!result.ok) {
         useTaskStore.getState().settle(pending.taskId, { status: "failed", error: result.error });
         notifyTaskSettled(pending.taskId, "failed", result.error);
+        setSendNotice(result.error, "error");
         return;
       }
       setDraft("");
@@ -2336,17 +2588,19 @@ export function ChatPage({
    *  拆成两条会让刚上传的图片只落到历史里，等下一轮才进模型，这一轮的提问也就问给了空气。
    *  无 subtle 在上传前拦截——不白跑一次上传（硬验收⑤：附件/语音全路径不降级）。 */
   const sendFile = async (f: File) => {
+    // A8：上传中防重入（入口按钮已禁用，这里兜住粘贴/拖拽/快捷键同帧连发）
+    if (uploadingRef.current) return;
     if (!hasSubtle()) {
-      setSendNotice(NO_E2E_NOTICE);
+      // 常驻横幅已说明原因（role=alert），这里不再叠第二条相同提示
       return;
     }
     const handle = wsHandleRef.current;
     if (!handle) {
-      setSendNotice("连接未就绪，消息未发送");
+      setSendNotice("连接未就绪，消息未发送", "error");
       return;
     }
     if (f.size > MAX_UPLOAD) {
-      setSendNotice("文件需小于 6MB");
+      setSendNotice("文件需小于 6MB", "error");
       return;
     }
     const draftText = draft.trim();
@@ -2355,10 +2609,12 @@ export function ChatPage({
     if (draftText) {
       const unbound = effectiveMentions.find((m) => !resolveProfile(m.agentId));
       if (unbound) {
-        setSendNotice(`${unbound.name} 未绑定 LLM 连接，请先在设置页配置`);
+        setSendNotice(`${unbound.name} 未绑定 LLM 连接，请先在设置页配置`, "error");
         return;
       }
     }
+    uploadingRef.current = true;
+    setUploading(true);
     try {
       // 解析不放"正在读取"这类提示：它通常几百毫秒就完，
       // 闪一下反而干扰；更要紧的是 status 那个位置要留给真正的错误
@@ -2377,7 +2633,7 @@ export function ChatPage({
       // await 后闭包已旧：切了会话或 socket 已换/已关则丢弃，防发错会话/向已关句柄静默发送
       const live = wsHandleRef.current;
       if (live !== handle || useUiStore.getState().activeConversationId !== convId) {
-        setSendNotice("已切换会话，文件未发送");
+        setSendNotice("已切换会话，文件未发送", "error");
         return;
       }
       // 消息侧保留原名/原 mime/原大小（气泡按它路由与展示），fileKey 随消息进密文；
@@ -2409,21 +2665,23 @@ export function ChatPage({
           undefined,
           file,
         );
-        if (!result.ok) return; // submitMessage 已给可见提示，草稿原样保留
-        setDraft("");
-        cancelDraftSave();
-        clearDraft(convId);
-        setSelectedMentions([]);
-        setPicker(null);
-        setTokenLock(false);
-        setReplyTarget(null);
+        if (!result.ok) {
+          // 附件场景不给「重试」：重放会再上传一次（A9 的取舍）
+          setSendNotice(result.error, "error");
+          return; // 草稿原样保留
+        }
+        resetComposer();
+        // resetComposer 已清 sendNotice；成功/能力提示要最后落（否则被清掉）
         setSendNotice(notice);
         return;
       }
       const ok = await sealAndSend({ kind: "file", text: "", file });
       if (ok) setSendNotice(notice);
     } catch (err) {
-      setSendNotice(`上传失败：${(err as Error).message}`);
+      setSendNotice(`上传失败：${(err as Error).message}`, "error");
+    } finally {
+      uploadingRef.current = false;
+      setUploading(false);
     }
   };
 
@@ -2479,7 +2737,7 @@ export function ChatPage({
     rec.onerror = () => {
       if (recRef.current !== rec) return;
       setListening(false);
-      setSendNotice("语音识别不可用");
+      setSendNotice("语音识别不可用", "error");
     };
     recRef.current = rec;
     rec.start();
@@ -2536,7 +2794,7 @@ export function ChatPage({
         const dur = Date.now() - voiceRecStartRef.current;
         const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
         if (dur < 1000) {
-          setSendNotice("录音太短，未发送");
+          setSendNotice("录音太短，未发送", "error");
           return;
         }
         const f = new File(
@@ -2556,7 +2814,7 @@ export function ChatPage({
       }, 60_000);
     } catch {
       if (stream) stream.getTracks().forEach((t) => t.stop()); // 半途失败（权限拒/无设备）不留活轨
-      if (!cancelled) setSendNotice("无法访问麦克风"); // 取消/切会话后的授权失败保持静默
+      if (!cancelled) setSendNotice("无法访问麦克风", "error"); // 取消/切会话后的授权失败保持静默
     } finally {
       // 本次启动未接续到录音（授权等待期被取消 / getUserMedia 失败）：清掉可能残留的 cancel 注册。
       // rec 非空时交给 onstop 收口，且不误清后一实例已注册的 cancel。
@@ -2577,8 +2835,80 @@ export function ChatPage({
     voiceRecCancelRef.current?.();
   };
 
+  // —— A3：滚动贴底与「↓ 新消息」 ——
+
+  /** 主动回到底部（浮动按钮/切会话用）：同时重置贴底状态，后续继续跟随。 */
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
+    atBottomRef.current = true;
+    setNewBelow(false);
+    bottomRef.current?.scrollIntoView({ behavior });
+  }, []);
+
+  /** 消息区滚动：更新贴底判定（<80px 视为贴底），顺带触发「加载更早」。 */
+  const onMessageScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distance < STICK_BOTTOM_PX;
+    atBottomRef.current = atBottom;
+    if (atBottom) setNewBelow(false); // 自己滚回底部即视为看过
+    if (shouldLoadMore(el.scrollTop, visibleMessages.length, windowCount)) {
+      loadEarlierMessages();
+    }
+  };
+
+  /** A7：拖拽拖入消息区 → 直接走 sendFile（同一套 6MB/类型/E2E 校验）。 */
+  const onMessagesDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) e.preventDefault();
+  };
+  const onMessagesDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length === 0) return;
+    e.preventDefault();
+    void (async () => {
+      for (const f of files) await sendFile(f); // 串行：上传状态与消息顺序都只走一个通道
+    })();
+  };
+
+  // —— A5：整条消息复制（clipboard + execCommand 兜底，短暂「已复制」） ——
+
+  const copyMessage = async (m: Message) => {
+    const text = m.payload.text ?? "";
+    let ok = true;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // 非安全上下文/权限缺失的退路：临时 textarea + execCommand（与代码块复制同款）
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      try {
+        ok = document.execCommand("copy");
+      } catch {
+        ok = false;
+      } finally {
+        document.body.removeChild(area);
+      }
+    }
+    if (!ok) return; // 两条路都失败就不装作成功
+    setCopiedMsgId(m.id);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopiedMsgId(null), 1600);
+  };
+  // 卸载时清掉复制态定时器（避免对已卸载组件 setState）
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    },
+    [],
+  );
+
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       <header className="relative flex items-center gap-2.5 border-b border-line-soft px-5 py-3">
         {!embedded && (
           <button
@@ -2909,13 +3239,9 @@ export function ChatPage({
       <div
         ref={scrollRef}
         data-testid="message-list"
-        onScroll={() => {
-          const el = scrollRef.current;
-          if (!el) return;
-          if (shouldLoadMore(el.scrollTop, visibleMessages.length, windowCount)) {
-            loadEarlierMessages();
-          }
-        }}
+        onScroll={onMessageScroll}
+        onDragOver={onMessagesDragOver}
+        onDrop={onMessagesDrop}
         className="flex-1 overflow-y-auto px-8 pb-5 pt-6"
       >
         {/* 窗口之外还有历史时给一个显式入口：滚到顶会自动加载，
@@ -2932,16 +3258,58 @@ export function ChatPage({
           </div>
         )}
         {visibleMessages.length === 0 && streamEntries.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-center">
-            <div className="rounded-2xl border border-line-soft bg-white p-3 text-[#999]">
-              <ChatIcon width={22} height={22} />
+          messagesLoading || !historyLoaded[convId] ? (
+            // A1 首屏骨架：历史还没回来时不能把「正在加载」画成空会话
+            <div
+              data-testid="messages-skeleton"
+              aria-busy="true"
+              aria-label="正在加载消息"
+              className="space-y-3"
+            >
+              {[0, 1, 2].map((i) => (
+                <div key={i} className={`flex ${i % 2 === 1 ? "justify-end" : ""}`}>
+                  <div className="h-9 w-[46%] animate-pulse rounded-xl bg-[#f0f0f0]" />
+                </div>
+              ))}
             </div>
-            <div className="mt-3 text-[13px] font-bold text-[#555]">还没有消息</div>
-            <div className="mt-1 text-[11px] text-muted">发送第一条消息，开始这段对话。</div>
-          </div>
+          ) : messagesError ? (
+            // A1 失败态：失败与「真的没有消息」必须长得不一样
+            <div className="flex h-full flex-col items-center justify-center text-center">
+              <div role="alert" className="text-[13px] font-bold text-[#b42318]">
+                加载失败：{messagesError}
+              </div>
+              <button
+                type="button"
+                className="mt-2 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] text-[#555] hover:bg-[#fafafa]"
+                onClick={() => {
+                  void useChatStore.getState().loadMessages(convId);
+                }}
+              >
+                重试
+              </button>
+            </div>
+          ) : (
+            // A1 真空态：只有「加载成功且确实为空」才走到这里
+            <div className="flex h-full flex-col items-center justify-center text-center">
+              <div className="rounded-2xl border border-line-soft bg-white p-3 text-[#999]">
+                <ChatIcon width={22} height={22} />
+              </div>
+              <div className="mt-3 text-[13px] font-bold text-[#555]">还没有消息</div>
+              <div className="mt-1 text-[11px] text-muted">发送第一条消息，开始这段对话。</div>
+            </div>
+          )
         ) : null}
-        {windowedMessages.map((m) => {
+        {windowedMessages.map((m, index) => {
           const mine = m.senderId === me?.id;
+          // A4：时间分隔——窗口首条也插（上方还有历史时它就是当前阅读段的起点）
+          const windowStart = visibleMessages.length - windowedMessages.length;
+          const prevMsg =
+            index > 0
+              ? windowedMessages[index - 1]
+              : windowStart > 0
+                ? visibleMessages[windowStart - 1]
+                : undefined;
+          const showSeparator = needsTimeSeparator(prevMsg?.createdAt, m.createdAt);
           // 已撤回：正文/附件/已读一律不渲染，只出一行灰字（头像与署名结构保留）
           const recalled = m.recalledAt != null;
           // 署名：自己「我」；direct 对方名；群内他人用挂载时拉到的成员映射名（缺失则不渲染署名行）
@@ -2963,18 +3331,26 @@ export function ChatPage({
             spec: c.spec,
           }));
           return (
-            // 消息行：气泡窄长条（max-w 收到 62%），行内 mb-5 留出消息间距。
-            // 对方头像用 mt-1「略低于气泡顶」而不是顶齐——顶齐时头像圆顶与气泡圆角顶边
-            // 平齐，看着像顶到了上边缘，很生硬；低一点更像气泡的「肩」。
-            <div
-              key={m.id}
-              id={`msg-${m.id}`}
-              className={`mb-5 flex items-start gap-2.5 ${mine ? "justify-end" : ""}${
-                searchOpen && activeSearchId === m.id
-                  ? " rounded-lg bg-[#fff9e6] ring-1 ring-[#f0d58c]"
-                  : ""
-              }`}
-            >
+            <Fragment key={m.id}>
+              {/* A4：间隔 ≥5 分钟或跨天的消息之间插一条时间分隔（首条渲染的消息也带，定位阅读段起点） */}
+              {showSeparator ? (
+                <div className="mb-3 flex justify-center">
+                  <span className="rounded-full bg-[#f3f3f3] px-2.5 py-0.5 text-[10px] text-muted">
+                    {formatDayClock(m.createdAt)}
+                  </span>
+                </div>
+              ) : null}
+              {/* 消息行：气泡窄长条（max-w 收到 62%），行内 mb-5 留出消息间距。
+                  对方头像用 mt-1「略低于气泡顶」而不是顶齐——顶齐时头像圆顶与气泡圆角顶边
+                  平齐，看着像顶到了上边缘，很生硬；低一点更像气泡的「肩」。 */}
+              <div
+                id={`msg-${m.id}`}
+                className={`mb-5 flex items-start gap-2.5 ${mine ? "justify-end" : ""}${
+                  searchOpen && activeSearchId === m.id
+                    ? " rounded-lg bg-[#fff9e6] ring-1 ring-[#f0d58c]"
+                    : ""
+                }`}
+              >
               {/* 多选态：勾选列放在最左（含自己的消息），保证一列对齐、好连点 */}
               {selectMode && (
                 <label
@@ -3008,8 +3384,19 @@ export function ChatPage({
                 }`}
               >
                 {senderName ? (
-                  <div className="mb-0.5 text-[10px] text-muted">{senderName}</div>
-                ) : null}
+                  <div className="mb-0.5 flex items-baseline gap-2 text-[10px] text-muted">
+                    <span>{senderName}</span>
+                    <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
+                      {formatClock(m.createdAt)}
+                    </time>
+                  </div>
+                ) : (
+                  <div className="mb-0.5 text-right text-[10px] text-muted">
+                    <time dateTime={m.createdAt} className="tabular-nums">
+                      {formatClock(m.createdAt)}
+                    </time>
+                  </div>
+                )}
                 {recalled ? (
                   <div className="text-muted">消息已撤回</div>
                 ) : m.enc === "e2e" && !plainOf[m.id] ? (
@@ -3110,7 +3497,7 @@ export function ChatPage({
                   <button
                     type="button"
                     aria-label="撤回消息"
-                    className="absolute -top-2 right-0 hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block"
+                    className="absolute -top-2 right-0 hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block"
                     onClick={() =>
                       wsHandleRef.current?.send({
                         type: "recall_message",
@@ -3129,7 +3516,7 @@ export function ChatPage({
                     aria-label="回复此消息"
                     className={`absolute -top-2 ${
                       mine ? "right-10" : "right-0"
-                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block`}
+                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
                     onClick={() => setReplyTarget(m)}
                   >
                     回复
@@ -3142,7 +3529,7 @@ export function ChatPage({
                     aria-label="转发消息"
                     className={`absolute -top-2 ${
                       mine ? "right-20" : "right-10"
-                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block`}
+                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
                     onClick={() => setForwardMsg(m)}
                   >
                     转发
@@ -3155,10 +3542,23 @@ export function ChatPage({
                     aria-label="添加表情回应"
                     className={`absolute -top-2 ${
                       mine ? "right-[120px]" : "right-[80px]"
-                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] leading-none text-muted shadow-card hover:text-ink group-hover:block`}
+                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] leading-none text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
                     onClick={() => setReactFor((v) => (v === m.id ? null : m.id))}
                   >
                     <SmileIcon width={12} height={12} />
+                  </button>
+                )}
+                {/* A5 整条复制：未撤回且有文本才出（附件只有元信息，复制结果没意义） */}
+                {!recalled && (m.payload.text?.length ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    aria-label="复制消息"
+                    className={`absolute -top-2 ${
+                      mine ? "right-[152px]" : "right-[112px]"
+                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
+                    onClick={() => void copyMessage(m)}
+                  >
+                    {copiedMsgId === m.id ? "已复制" : "复制"}
                   </button>
                 )}
                 {/* 表情回应浮排：点选即 toggle 并关闭；Esc / 切会话关闭（会话级 state） */}
@@ -3199,7 +3599,8 @@ export function ChatPage({
                   className="mt-1 shrink-0"
                 />
               )}
-            </div>
+              </div>
+            </Fragment>
           );
         })}
         {/* 流式打字机行（本机/他机）：渲染于消息列表尾部，finish 的 message_new 收口后移除 */}
@@ -3217,6 +3618,17 @@ export function ChatPage({
         ))}
         <div ref={bottomRef} />
       </div>
+      {/* A3：用户上滑期间来了新内容 —— 不拽底，只亮一个回到底部的入口 */}
+      {newBelow ? (
+        <button
+          type="button"
+          aria-label="滚动到最新消息"
+          className="absolute bottom-32 right-8 z-30 rounded-full border border-line bg-white px-3 py-1 text-[12px] text-[#555] shadow-card hover:bg-[#f7f7f7]"
+          onClick={() => scrollToLatest()}
+        >
+          ↓ 新消息
+        </button>
+      ) : null}
       <form onSubmit={send} className="relative border-t border-line-soft">
         {/* E2E 常驻横幅（硬验收⑤ / 设计 §2.1）：无 subtle 环境红字提示 + 全发送路径拦截 */}
         {!subtleOk && (
@@ -3248,13 +3660,35 @@ export function ChatPage({
               取消
             </button>
           </div>
-        ) : (
-          sendNotice && (
+        ) : uploading ? (
+          // A8：上传进行中占住提示位，四个入口已禁用
+          <p role="status" className="px-5 pt-2 text-[12px] text-muted">
+            上传中…（≤6MB）
+          </p>
+        ) : sendNotice ? (
+          // A9：error 红色 role=alert（纯文本发送失败带「重试」）；info 3 秒自动消失
+          sendNotice.kind === "error" ? (
+            <div
+              role="alert"
+              className="flex items-center gap-3 px-5 pt-2 text-[12px] text-[#b42318]"
+            >
+              <span>{sendNotice.text}</span>
+              {sendNotice.retry ? (
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-[#e6b3ae] px-2 py-0.5 hover:bg-[#fef3f2]"
+                  onClick={() => sendNotice.retry?.()}
+                >
+                  重试
+                </button>
+              ) : null}
+            </div>
+          ) : (
             <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
-              {sendNotice}
+              {sendNotice.text}
             </p>
           )
-        )}
+        ) : null}
         {/* 能力降级提示：与发送后的错误提示分开——这是「发之前就知道」的信息 */}
         {toolsNotice && (
           <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
@@ -3282,7 +3716,13 @@ export function ChatPage({
           </div>
         )}
         {/* @ 选择器：输入栏上方浮层（仅群会话；direct 无智能体可提及） */}
-        {isGroup && picker && <MentionPicker items={pickerItems} onPick={pickMention} />}
+        {isGroup && picker && (
+          <MentionPicker
+            items={pickerItems}
+            onPick={pickMention}
+            activeIndex={Math.min(pickerIndex, pickerItems.length - 1)}
+          />
+        )}
         {/* 「生成中」提示行（输入栏上方）：本机流署名 + 中断入口 */}
         {activeLocal.length > 0 && (
           <div className="flex items-center gap-3 px-5 pt-2 text-[12px] text-muted">
@@ -3309,7 +3749,9 @@ export function ChatPage({
           <button
             type="button"
             aria-label="图片"
-            className="rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3]"
+            title="发送图片（≤6MB）"
+            disabled={uploading}
+            className="rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3] disabled:cursor-not-allowed disabled:opacity-40"
             onClick={() => pickFile("image/*")}
           >
             <ImageIcon width={16} height={16} />
@@ -3317,7 +3759,9 @@ export function ChatPage({
           <button
             type="button"
             aria-label="文件"
-            className="rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3]"
+            title="发送文件（≤6MB）"
+            disabled={uploading}
+            className="rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3] disabled:cursor-not-allowed disabled:opacity-40"
             onClick={() => pickFile(undefined)}
           >
             <FileIcon width={16} height={16} />
@@ -3361,11 +3805,13 @@ export function ChatPage({
             />
           )}
           <textarea
+            aria-label="消息输入框"
             className="h-full w-full flex-1 resize-none rounded-lg border border-line px-3 py-2 text-sm leading-relaxed outline-none focus:border-[#bbb]"
             placeholder="输入消息…"
             value={draft}
             onChange={(e) => onDraftChange(e.target.value)}
             onKeyDown={onInputKeyDown}
+            onPaste={onComposerPaste}
           />
           {/* 语音双选项浮层：转文字（原 STT）/ 录音（MediaRecorder）；无该 API 时录音项禁用 */}
           {voiceMenu && (
@@ -3399,7 +3845,9 @@ export function ChatPage({
           <button
             type="button"
             aria-label="语音输入"
-            className={`rounded-lg border px-2.5 ${
+            title="语音输入"
+            disabled={uploading}
+            className={`rounded-lg border px-2.5 disabled:cursor-not-allowed disabled:opacity-40 ${
               listening
                 ? "border-ink bg-ink text-white"
                 : "border-line text-muted hover:bg-[#f3f3f3]"
@@ -3410,7 +3858,9 @@ export function ChatPage({
           </button>
           <button
             type="submit"
-            className="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white"
+            disabled={!draft.trim() || uploading}
+            title="发送"
+            className="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             发送
           </button>

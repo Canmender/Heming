@@ -150,6 +150,11 @@ describe("runAgentMentions", () => {
         expect.objectContaining({ type: "agent_error", code: "aborted" }),
       ),
     );
+    // A2：中断文案中文化——AbortError 这类内部实现细节不再出现在用户可见的错误行
+    const errFrame = send.mock.calls
+      .map((c) => c[0] as { type?: string; message?: string })
+      .find((e) => e.type === "agent_error");
+    expect(errFrame?.message).toBe("已中断，可继续生成");
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_finish", text: "半" }));
     await run; // 全部落定（promise 等全部流完成）
   });

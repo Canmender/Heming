@@ -42,6 +42,9 @@ function seedStore() {
     agentsRoster: [xiaoMing],
     agentIdsInGroups: new Set(["a1"]),
     messages: {},
+    // 已有数据：雷达正常渲染，不显示「正在加载/加载失败」条
+    workspaceReady: true,
+    workspaceError: null,
   });
 }
 
@@ -145,6 +148,41 @@ describe("RadarContacts 雷达通讯录", () => {
     fireEvent.change(screen.getByPlaceholderText("搜索联系人…"), { target: { value: "" } });
     expect(screen.getByText("评审组")).toBeInTheDocument();
     expect(screen.getByText("和小鸣")).toBeInTheDocument();
+  });
+
+  it("搜索无结果：说明「没有匹配「x」的联系人」并可一键清除", async () => {
+    render(<RadarContacts />);
+    await screen.findByText("评审组");
+    const input = screen.getByPlaceholderText("搜索联系人…") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "查无此人" } });
+    expect(screen.getByText("没有匹配「查无此人」的联系人")).toBeInTheDocument();
+    expect(screen.queryByText("评审组")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "清除" }));
+    expect(input.value).toBe("");
+    expect(screen.getByText("评审组")).toBeInTheDocument();
+    expect(screen.queryByText(/没有匹配/)).not.toBeInTheDocument();
+  });
+
+  it("首帧加载中显示「正在加载通讯录」，不冒充空通讯录", async () => {
+    useChatStore.setState({ workspaceReady: false, workspaceError: null });
+    render(<RadarContacts />);
+    expect(screen.getByRole("status")).toHaveTextContent("正在加载通讯录…");
+    await screen.findByText("评审组"); // 数据仍在时节点照常渲染，加载条只是状态提示
+  });
+
+  it("首帧失败显示「加载失败 + 重试」；重试重新拉取并恢复", async () => {
+    useChatStore.setState({ workspaceReady: false, workspaceError: "网络中断" });
+    render(<RadarContacts />);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("加载失败：网络中断");
+
+    effects.loadWorkspace.mockImplementationOnce(async () => {
+      useChatStore.setState({ workspaceReady: true, workspaceError: null });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(effects.loadWorkspace).toHaveBeenCalledTimes(2); // 挂载一次 + 重试一次
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
   it("鼠标悬浮节点弹出信息卡（名称/类型/最近消息/按钮）", async () => {

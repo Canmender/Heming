@@ -38,7 +38,7 @@ export function ChatConvStrip() {
           <button
             key={id}
             type="button"
-            aria-label={`切换到 ${name}`}
+            aria-label={`切换到 ${name}${unread > 0 ? ` ${unread} 条未读` : ""}`}
             aria-current={active || undefined}
             title={name}
             onClick={() => openConversation(id)}
@@ -52,7 +52,10 @@ export function ChatConvStrip() {
               className={active ? "ring-2 ring-ink ring-offset-1" : ""}
             />
             {unread > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 min-w-[14px] rounded-full bg-ink px-1 text-center text-[9px] font-bold leading-[14px] text-white">
+              <span
+                aria-hidden="true"
+                className="absolute -right-0.5 -top-0.5 min-w-[14px] rounded-full bg-ink px-1 text-center text-[9px] font-bold leading-[14px] text-white"
+              >
                 {unread > 99 ? "99+" : unread}
               </span>
             )}

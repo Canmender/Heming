@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { NavRail } from "./NavRail.js";
 import { useUiStore, DEFAULT_NAV_ORDER } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -100,17 +100,39 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(tip.className).toContain("translate-x-1");
   });
 
-  it("底部头像 aria-label 为「退出登录」，点击调 logout，浮签仍显示在线状态", () => {
+  it("底部头像点击先弹确认：取消不登出，确认才 logout；浮签不再写死「在线」", () => {
     render(<NavRail />);
-    const avatar = screen.getByRole("button", { name: "退出登录" });
-    expect(screen.getByText("爱丽丝 · 在线")).toBeInTheDocument(); // 悬停浮签（span）
+    const avatar = screen.getByRole("button", { name: "账户：爱丽丝 · 退出登录" });
+    expect(screen.getByText("爱丽丝 · 账户")).toBeInTheDocument(); // 悬停浮签（span）
+    expect(screen.queryByText(/在线/)).not.toBeInTheDocument();
     expect(useAuthStore.getState().user).not.toBeNull();
 
+    // 第一下只弹确认，不动登录态
     fireEvent.click(avatar);
+    expect(useAuthStore.getState().user).not.toBeNull();
+    const dialog = screen.getByRole("dialog", { name: "退出登录" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "退出登录" })).not.toBeInTheDocument();
+    expect(useAuthStore.getState().user).not.toBeNull();
+
+    // 确认后才真正登出
+    fireEvent.click(screen.getByRole("button", { name: "账户：爱丽丝 · 退出登录" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "退出登录" })).getByRole("button", { name: "退出登录" }),
+    );
     const s = useAuthStore.getState();
     expect(s.user).toBeNull();
     expect(s.token).toBeNull();
     expect(localStorage.getItem("heming.token")).toBeNull();
+  });
+
+  it("搜索按钮：浮签带 Ctrl K，点按调用外部打开命令面板", () => {
+    const onOpenSearch = vi.fn();
+    render(<NavRail onOpenSearch={onOpenSearch} />);
+    expect(screen.getByText("搜索")).toBeInTheDocument(); // 浮签名称
+    expect(screen.getByText("Ctrl K")).toBeInTheDocument(); // 快捷键徽标
+    fireEvent.click(screen.getByRole("button", { name: "全局搜索 Ctrl K" }));
+    expect(onOpenSearch).toHaveBeenCalledTimes(1);
   });
 
   it("有 user.avatar 时底部按钮渲染 <img>（圆形裁剪，src 为 data URL）", () => {
@@ -123,18 +145,18 @@ describe("NavRail 图标轨（A 方案）", () => {
       },
     });
     render(<NavRail />);
-    const btn = screen.getByRole("button", { name: "退出登录" });
+    const btn = screen.getByRole("button", { name: "账户：爱丽丝 · 退出登录" });
     const img = btn.querySelector("img");
     expect(img).not.toBeNull();
     expect(img!.getAttribute("src")).toBe("data:image/png;base64,AAA");
     expect(img!.className).toContain("rounded-full");
     expect(img!.className).toContain("object-cover");
-    expect(screen.getByText("爱丽丝 · 在线")).toBeInTheDocument();
+    expect(screen.getByText("爱丽丝 · 账户")).toBeInTheDocument();
   });
 
   it("无 user.avatar 时底部按钮显示默认人形图标（不渲染 img）", () => {
     render(<NavRail />);
-    const btn = screen.getByRole("button", { name: "退出登录" });
+    const btn = screen.getByRole("button", { name: "账户：爱丽丝 · 退出登录" });
     expect(btn.querySelector("img")).toBeNull();
     expect(btn.querySelector("svg")).not.toBeNull();
   });
@@ -156,7 +178,7 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(wrapper.className).toContain("flex-1");
     expect(wrapper.className).toContain("justify-center");
     for (const b of items) expect(wrapper.contains(b)).toBe(true);
-    expect(wrapper.contains(screen.getByLabelText("退出登录"))).toBe(false);
+    expect(wrapper.contains(screen.getByLabelText("账户：爱丽丝 · 退出登录"))).toBe(false);
     expect(nav.contains(wrapper)).toBe(true);
   });
 });

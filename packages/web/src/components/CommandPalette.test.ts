@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Conversation } from "@heming/shared";
-import { searchAll } from "./CommandPalette";
+import { searchAll, searchAllDetailed } from "./CommandPalette";
 
 /**
  * 全局搜索的排序与范围。
@@ -108,5 +108,26 @@ describe("searchAll", () => {
     // 内置技能池必然含「去 AI 味」，用它验证技能分支接上了
     const out = searchAll("AI", []);
     expect(out.some((r) => r.kind === "skill")).toBe(true);
+  });
+});
+
+describe("searchAllDetailed（超上限提示）", () => {
+  it("返回命中总数：展示被截断，但 total 反映全部命中", () => {
+    const many = Array.from({ length: 20 }, (_, i) => conv(`c${i}`, `测试${i}`));
+    const out = searchAllDetailed("测试", many);
+    expect(out.results).toHaveLength(8);
+    expect(out.total).toBe(20);
+    // UI 里的「还有 N 条」= total − results.length
+    expect(out.total - out.results.length).toBe(12);
+  });
+
+  it("未超上限时 total 等于展示条数（不提示还有）", () => {
+    const out = searchAllDetailed("张三", [conv("1", "张三")]);
+    expect(out.results).toHaveLength(1);
+    expect(out.total).toBe(1);
+  });
+
+  it("空关键词 total 为 0（与 results 一致，不触发提示）", () => {
+    expect(searchAllDetailed("", [conv("1", "张三")])).toEqual({ results: [], total: 0 });
   });
 });

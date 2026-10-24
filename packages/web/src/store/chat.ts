@@ -168,6 +168,13 @@ interface ChatState {
   agents: Agent[];
   /** 各会话已读状态（convId → [{userId, at}]；direct 气泡「已读」判定与 read_update 随动用）。 */
   reads: Record<string, ReadState[]>;
+  /** 各会话历史拉取进行中（ChatPage 首屏骨架的数据源；按 convId 分桶防切会话串态）。 */
+  messagesLoading: Record<string, boolean>;
+  /**
+   * 各会话最近一次历史拉取失败原因；成功后清空。
+   * 与「真的没有消息」分开，「失败」才给「加载失败 + 重试」。
+   */
+  messagesError: Record<string, string | null>;
   /** 流式生成打字机项（key=streamId；本机触发端本地累积写入，他机流由 WS 回声累积）。 */
   streaming: Record<string, AgentStreamState>;
   /** 本机发起的流（key=streamId）：自身 agent_chunk 回声跳过，agent_error 走可重试分支。 */
@@ -226,6 +233,10 @@ interface ChatState {
   ) => Promise<void>;
   setReads: (convId: string, reads: ReadState[]) => void;
   loadReads: (convId: string) => Promise<void>;
+  /** 未读清零（A12：收到 read_update 且 userId 是自己时调用）。 */
+  clearUnread: (convId: string) => void;
+  /** 未读 +1（A12：收到他会话 message_new 且不是自己发的时调用）。 */
+  bumpUnread: (convId: string) => void;
   upsertStream: (id: string, patch: AgentStreamPatch) => void;
   removeStream: (id: string) => void;
   markStreamOwner: (id: string) => void;
@@ -349,6 +360,8 @@ export const useChatStore = create<ChatState>((set, get) => {
   agentIdsInGroups: new Set<string>(),
   agents: [],
   reads: {},
+  messagesLoading: {},
+  messagesError: {},
   streaming: {},
   streamOwner: {},
   openHandler: null,
@@ -466,7 +479,28 @@ export const useChatStore = create<ChatState>((set, get) => {
     if (fn) for (const convId of Object.keys(get().pendingE2e)) void retryPending(convId);
   },
   async loadMessages(convId, alive) {
-    const fetched = await fetchMessages(convId);
+    // A1：加载中/失败是可见状态。只有「加载成功且为空」才该显示「还没有消息」。
+    set({
+      messagesLoading: { ...get().messagesLoading, [convId]: true },
+      messagesError: { ...get().messagesError, [convId]: null },
+    });
+    let fetched: Message[];
+    try {
+      fetched = await fetchMessages(convId);
+    } catch (err) {
+      // 自己吞异常并落错误（此前直接抛给未 await 的调用方 = unhandled rejection）。
+      // 组件卸载/切会话后的晚到失败不写（同下方 alive 口径），但仍把结果返回给调用方。
+      if (!alive || alive()) {
+        set({
+          messagesLoading: { ...get().messagesLoading, [convId]: false },
+          messagesError: {
+            ...get().messagesError,
+            [convId]: err instanceof Error && err.message ? err.message : "网络异常",
+          },
+        });
+      }
+      return get().messages[convId] ?? [];
+    }
     const h = get().openHandler;
     const resolved: Message[] = [];
     let landed = false; // 本次拉取里是否解开了 chaindist（落链 → 需重试占位）
@@ -509,6 +543,10 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
     if (alive && !alive()) return resolved; // 卸载/切会话后晚到：结果返回但不写 store
     get().setMessages(convId, resolved);
+    set({
+      messagesLoading: { ...get().messagesLoading, [convId]: false },
+      messagesError: { ...get().messagesError, [convId]: null },
+    });
     if (landed) void retryPending(convId);
     return resolved;
   },
@@ -557,6 +595,24 @@ export const useChatStore = create<ChatState>((set, get) => {
   async loadReads(convId) {
     const reads = await api<ReadState[]>(`/api/conversations/${convId}/reads`);
     get().setReads(convId, reads);
+  },
+  clearUnread(convId) {
+    const list = get().conversations;
+    if (!list.some((c) => c.id === convId && c.unreadCount !== 0)) return;
+    set({
+      conversations: list.map((c) =>
+        c.id === convId && c.unreadCount !== 0 ? { ...c, unreadCount: 0 } : c,
+      ),
+    });
+  },
+  bumpUnread(convId) {
+    const list = get().conversations;
+    if (!list.some((c) => c.id === convId)) return;
+    set({
+      conversations: list.map((c) =>
+        c.id === convId ? { ...c, unreadCount: (c.unreadCount ?? 0) + 1 } : c,
+      ),
+    });
   },
   upsertStream(id, patch) {
     const prev = get().streaming[id];

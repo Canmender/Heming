@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   HomeIcon,
   ChatIcon,
@@ -8,11 +9,13 @@ import {
   UserIcon,
   SkillsIcon,
   TaskIcon,
+  SearchIcon,
 } from "./icons.js";
 import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { NotificationCenter } from "./NotificationCenter.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 
 /**
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
@@ -47,7 +50,7 @@ function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
 }
 
 /** 图标轨（A 方案默认态）：约 54px 常驻左缘，无产品名文字。 */
-export function NavRail() {
+export function NavRail({ onOpenSearch }: { onOpenSearch?: () => void } = {}) {
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
   // 渲染前再规整一次：手改过 localStorage 或旧版本残留时，缺项也会被补齐，绝不漏掉某个入口
@@ -57,12 +60,26 @@ export function NavRail() {
   // 全局未读总和（direct+group）：数据由登录后已有挂载加载（HomePage/RadarContacts 的 loadWorkspace），此处纯读取
   const unread = useChatStore((s) => s.conversations.reduce((n, c) => n + c.unreadCount, 0));
   const who = displayName || "我";
+  // 退出是破坏性操作（会清掉会话态），先问一句再登出
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
   return (
     <nav
       aria-label="主导航"
       className="flex w-[54px] shrink-0 flex-col items-center border-r border-line-soft bg-[#fafafa] py-3"
     >
+      <div className="group relative mb-2">
+        <button
+          type="button"
+          aria-label="全局搜索 Ctrl K"
+          onClick={() => onOpenSearch?.()}
+          className="flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-[#666] transition-colors duration-150 hover:bg-[#f0f0f0] hover:text-ink"
+        >
+          <SearchIcon width={17} height={17} />
+        </button>
+        <Tip label="搜索" shortcut="Ctrl K" />
+      </div>
+
       <div className="flex flex-1 flex-col items-center justify-center gap-1.5">
         {navOrder
           .map((navPage) => ITEMS.find((it) => it.page === navPage))
@@ -103,8 +120,9 @@ export function NavRail() {
       <div className="group relative">
         <button
           type="button"
-          aria-label="退出登录"
-          onClick={() => useAuthStore.getState().logout()}
+          aria-label={`账户：${who} · 退出登录`}
+          title="退出登录"
+          onClick={() => setConfirmLogout(true)}
           className="flex h-[28px] w-[28px] items-center justify-center overflow-hidden rounded-full bg-[#ececec] text-[12px] font-bold text-[#555] transition-colors duration-150 hover:bg-[#f0f0f0]"
         >
           {avatar ? (
@@ -113,8 +131,38 @@ export function NavRail() {
             <UserIcon width={14} height={14} />
           )}
         </button>
-        <Tip label={`${who} · 在线`} />
+        <Tip label={`${who} · 账户`} />
       </div>
+
+      {confirmLogout && (
+        <ConfirmDialog
+          title="退出登录"
+          onCancel={() => setConfirmLogout(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmLogout(false)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmLogout(false);
+                  useAuthStore.getState().logout();
+                }}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#912018]"
+              >
+                退出登录
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">退出后需要重新登录才能继续使用和鸣。</p>
+        </ConfirmDialog>
+      )}
     </nav>
   );
 }

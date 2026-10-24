@@ -47,6 +47,8 @@ describe("chat store", () => {
       agentsRoster: [],
       agentIdsInGroups: new Set<string>(),
       reads: {},
+      messagesLoading: {},
+      messagesError: {},
       streaming: {},
       streamOwner: {},
       openHandler: null,
@@ -248,6 +250,43 @@ describe("chat store", () => {
     // 重算 join：a9 不在 roster 跳过，a1/a2 从名册带出
     expect(useChatStore.getState().agents.map((a) => a.id)).toEqual(["a1", "a2"]);
     expect(useChatStore.getState().agents[0].description).toBe("官方");
+  });
+
+  it("loadMessages 失败：自己吞异常、落 messagesError、loading 归 false（不再 unhandled）", async () => {
+    vi.mocked(fetchMessages).mockRejectedValue(new Error("网络中断"));
+    // 不 reject：调用方（ChatPage 挂载 effect / fetchHistory）不再产生 unhandled rejection
+    await expect(useChatStore.getState().loadMessages("c1")).resolves.toEqual([]);
+    const s = useChatStore.getState();
+    expect(s.messagesError.c1).toBe("网络中断");
+    expect(s.messagesLoading.c1).toBe(false);
+  });
+
+  it("loadMessages 成功：清空上次错误并结束 loading", async () => {
+    useChatStore.setState({ messagesError: { c1: "旧错误" } });
+    vi.mocked(fetchMessages).mockResolvedValue([msg("m1", "一")]);
+    await useChatStore.getState().loadMessages("c1");
+    const s = useChatStore.getState();
+    expect(s.messagesError.c1).toBeNull();
+    expect(s.messagesLoading.c1).toBe(false);
+    expect(s.messages.c1?.map((m) => m.id)).toEqual(["m1"]);
+  });
+
+  it("clearUnread / bumpUnread：按会话精确清零与 +1，其他会话不受影响", () => {
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "group", name: "A", memberCount: 2, unreadCount: 5 },
+        { id: "c2", type: "group", name: "B", memberCount: 2, unreadCount: 1 },
+      ],
+    });
+    useChatStore.getState().clearUnread("c1");
+    expect(useChatStore.getState().conversations.map((c) => c.unreadCount)).toEqual([0, 1]);
+
+    useChatStore.getState().bumpUnread("c1");
+    useChatStore.getState().bumpUnread("c1");
+    expect(useChatStore.getState().conversations.map((c) => c.unreadCount)).toEqual([2, 1]);
+
+    useChatStore.getState().bumpUnread("ghost"); // 未知会话：静默忽略
+    expect(useChatStore.getState().conversations.map((c) => c.unreadCount)).toEqual([2, 1]);
   });
 
   it("setReads 覆盖该会话已读状态（其他会话不受影响）", () => {

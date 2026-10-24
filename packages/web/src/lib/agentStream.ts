@@ -753,12 +753,14 @@ export function runAgentMentions(
           // 中断判定同时看错误名与两个标志：controller.abort() 在部分适配器里
           // 被包装成普通 Error，只看 name 会把用户主动中断记成失败。
           const abortedRun = err.name === "AbortError" || aborted || controller.signal.aborted;
+          // 中断收口正文固定在用户语言里（A2）：AbortError 是内部实现细节，不该出现在气泡上。
+          const errorText = abortedRun ? "已中断，可继续生成" : err.message.slice(0, 300);
           try {
             if (partial && (await sendFinish(partial))) {
               // 中断/失败：只写工作记忆（partial），不沉淀长期记忆（设计 §3）
               notifyTurnComplete(deps, m.agentId, userText, partial, "partial");
             }
-            await sendError(abortedRun ? "aborted" : "provider_error", err.message.slice(0, 300));
+            await sendError(abortedRun ? "aborted" : "provider_error", errorText);
           } finally {
             // 终态先于异常传播落定：sendError 抛错（发送链异常）时任务区也要收口。
             settle({

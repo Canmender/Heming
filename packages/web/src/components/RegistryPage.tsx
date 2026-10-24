@@ -151,9 +151,10 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
           <button
             type="button"
             onClick={() => void load(undefined, { force: true })}
-            className="rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
+            disabled={loading}
+            className="rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa] disabled:opacity-60"
           >
-            刷新
+            {loading ? "刷新中…" : "刷新"}
           </button>
           {onBack && (
             <button

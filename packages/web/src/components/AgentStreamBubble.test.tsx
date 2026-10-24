@@ -10,7 +10,7 @@ describe("AgentStreamBubble", () => {
     expect(document.body.textContent).toContain("▌");
   });
 
-  it("error 态显示原因与重试回调", () => {
+  it("error 态显示原因与继续生成回调", () => {
     const retry = vi.fn();
     render(
       <AgentStreamBubble
@@ -22,7 +22,8 @@ describe("AgentStreamBubble", () => {
       />,
     );
     expect(screen.getByText(/HTTP 401/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText("重试"));
+    // A2：错误行动作统一为「继续生成」
+    fireEvent.click(screen.getByText("继续生成"));
     expect(retry).toHaveBeenCalled();
   });
 });

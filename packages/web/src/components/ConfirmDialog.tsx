@@ -1,5 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import { useModalA11y } from "./useModalA11y.js";
+import { XIcon } from "./icons.js";
 
 /**
  * 确认弹窗骨架：遮罩、Esc、焦点陷阱、打开落点。
@@ -60,9 +61,9 @@ export function ConfirmDialog({
             type="button"
             aria-label="关闭并拒绝"
             onClick={onCancel}
-            className="shrink-0 rounded p-1 text-[15px] leading-none text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            className="shrink-0 rounded p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
           >
-            ×
+            <XIcon width={16} height={16} aria-hidden="true" />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>

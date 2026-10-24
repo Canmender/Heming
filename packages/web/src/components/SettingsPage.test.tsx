@@ -238,13 +238,31 @@ describe("设置区 · 页面颜色", () => {
     expect(screen.getByText(/请输入十六进制色/)).toBeInTheDocument();
   });
 
-  it("恢复默认 → 回墨色并清掉 DOM 变量", () => {
+  it("自定义颜色保存后输入框显示归一化后的新值，不回退旧值", () => {
+    render(<SettingsPage />);
+    goTab("外观");
+    const input = screen.getByLabelText("自定义主题色") as HTMLInputElement;
+    expect(input.value).toBe("#1a1a1a");
+
+    fireEvent.change(input, { target: { value: "#abc" } });
+    fireEvent.blur(input);
+
+    // 受控输入：值跟随 store 归一化结果，而不是闭包里未更新的旧 accent
+    expect(input.value).toBe("#aabbcc");
+    expect(screen.getByText("已生效")).toBeInTheDocument();
+  });
+
+  it("恢复默认 → 回墨色、清掉 DOM 变量，并刷新输入框", () => {
     useThemeStore.getState().setAccent("#2f5bd7");
     render(<SettingsPage />);
     goTab("外观");
+    const input = screen.getByLabelText("自定义主题色") as HTMLInputElement;
+    expect(input.value).toBe("#2f5bd7");
+
     fireEvent.click(screen.getByRole("button", { name: "恢复默认颜色" }));
     expect(useThemeStore.getState().accent).toBe("#1a1a1a");
     expect(document.documentElement.style.getPropertyValue("--heming-accent")).toBe("");
+    expect(input.value).toBe("#1a1a1a");
   });
 });
 

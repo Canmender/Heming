@@ -18,6 +18,12 @@ const FLOOR_LABELS: Record<string, string> = {
 };
 
 /**
+ * 设置卡统一的生效说明：与 LLM 连接卡、个人资料卡同一句。
+ * 这张卡的每次改动都直接落盘，没有「保存」按钮，所以更要说明清楚。
+ */
+const EFFECT_NOTE = "改动即时生效，仅作用于本机，无需重启。";
+
+/**
  * 旧存储里是不是存过 `floor:"danger"`？
  *
  * 用来判断「这次是不是刚把红线值夹下来了」，以便在界面上提示一次。
@@ -56,6 +62,9 @@ export function HitlPolicyCard({
   const bump = useCallback(() => setTick((n) => n + 1), []);
   void tick;
   const [confirmClearRules, setConfirmClearRules] = useState(false);
+  const [confirmClearSession, setConfirmClearSession] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [sessionMsg, setSessionMsg] = useState<{ kind: "ok" | "info"; text: string } | null>(null);
 
   const store2 = storage ?? browserStorage();
   const audit = readAudit(store2).filter((e) => e.scope === "tool").slice(0, 20);
@@ -79,6 +88,21 @@ export function HitlPolicyCard({
     store.set(next);
     setPolicy(store.get());
     setClampedNotice(false);
+    setSaved(true);
+    bump();
+  };
+
+  const clearSession = () => {
+    const count = store.grantCount();
+    store.revokeAll();
+    setConfirmClearSession(false);
+    setSessionMsg({
+      kind: count > 0 ? "ok" : "info",
+      text:
+        count > 0
+          ? `已清空 ${count} 条本会话授权，这些工具下次调用会重新逐一询问。`
+          : "本会话没有需要清空的授权。",
+    });
     bump();
   };
 
@@ -169,8 +193,8 @@ export function HitlPolicyCard({
         <button
           type="button"
           onClick={() => {
-            store.revokeAll();
-            bump();
+            setSessionMsg(null);
+            setConfirmClearSession(true);
           }}
           className="rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
         >
@@ -186,7 +210,23 @@ export function HitlPolicyCard({
           </button>
         )}
         <span className="text-[11px] text-muted">会话授权只存在内存里，退出应用即失效。</span>
+        {saved && (
+          <span role="status" className="text-[11px] text-muted">
+            已保存
+          </span>
+        )}
       </div>
+
+      {sessionMsg && (
+        <div
+          role="status"
+          className={`mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 text-[11px] ${
+            sessionMsg.kind === "ok" ? "text-[#1d6b3a]" : "text-muted"
+          }`}
+        >
+          {sessionMsg.text}
+        </div>
+      )}
 
       <div className="mt-3 border-t border-line-soft pt-2">
         <div className="text-[11px] font-bold text-[#999]">
@@ -277,6 +317,38 @@ export function HitlPolicyCard({
           </p>
         </ConfirmDialog>
       )}
+      {confirmClearSession && (
+        <ConfirmDialog
+          title="清空本会话授权"
+          onCancel={() => setConfirmClearSession(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmClearSession(false)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={clearSession}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                清空授权
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            清空后，本会话里已授权的工具将重新逐一询问。授权本来就只存在内存里，退出应用也会失效；此操作不可撤销。
+          </p>
+        </ConfirmDialog>
+      )}
+
+      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-[#999]">
+        {EFFECT_NOTE}
+      </div>
     </section>
   );
 }

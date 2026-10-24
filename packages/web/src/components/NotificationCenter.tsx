@@ -121,7 +121,7 @@ export function NotificationCenter() {
           role="dialog"
           aria-modal="false"
           aria-label="通知中心"
-          className="absolute left-full top-0 z-40 ml-2 flex max-h-[70vh] w-[320px] flex-col overflow-hidden rounded-xl border border-[#ececec] bg-white shadow-card"
+          className="absolute bottom-0 left-full z-40 ml-2 flex max-h-[70vh] w-[320px] flex-col overflow-hidden rounded-xl border border-[#ececec] bg-white shadow-card"
         >
           <div className="flex items-center justify-between gap-2 border-b border-line-soft px-3 py-2">
             <span className="text-[12px] font-bold">通知中心</span>
