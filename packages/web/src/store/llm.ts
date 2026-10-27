@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { secureGetItem, secureSetItem } from "../lib/secureStorage.js";
 
 /**
  * LLM 连接本机存储：Key/绑定/提示词三键只写 localStorage，绝不上传自有服务端
@@ -31,10 +32,16 @@ function loadJson<T>(key: string, fallback: T, pick: (raw: unknown) => T): T {
 }
 
 function loadProfiles(): LlmProfile[] {
-  return loadJson<LlmProfile[]>(KEY_CONFIGS, [], (raw) => {
-    const profiles = (raw as { profiles?: unknown }).profiles;
+  try {
+    // 只有 llmConfigs 是凭据（直连供应商的付费 Key），走系统安全存储；
+    // 绑定与提示词留在普通 localStorage——它们不是凭据，没必要过 IPC。
+    const raw = secureGetItem(KEY_CONFIGS);
+    if (!raw) return [];
+    const profiles = (JSON.parse(raw) as { profiles?: unknown }).profiles;
     return Array.isArray(profiles) ? (profiles as LlmProfile[]) : [];
-  });
+  } catch {
+    return []; // 损坏数据回退空（与 tokenUsage 同策略）
+  }
 }
 
 function loadRecord(key: string): Record<string, string> {
@@ -44,7 +51,7 @@ function loadRecord(key: string): Record<string, string> {
 }
 
 const saveProfiles = (profiles: LlmProfile[]): void => {
-  localStorage.setItem(KEY_CONFIGS, JSON.stringify({ profiles }));
+  secureSetItem(KEY_CONFIGS, JSON.stringify({ profiles }));
 };
 const saveRecord = (key: string, value: Record<string, string>): void => {
   localStorage.setItem(key, JSON.stringify(value));

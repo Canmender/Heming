@@ -6,6 +6,7 @@ const p: LlmProfile = { id: "p1", label: "我的 Claude", provider: "anthropic",
 describe("llm store", () => {
   beforeEach(() => {
     localStorage.clear();
+    delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
     useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
   });
   it("addProfile 落 localStorage", () => {
@@ -58,5 +59,39 @@ describe("llm store", () => {
     vi.resetModules();
     const fresh2 = await import("./llm.js");
     expect(fresh2.useLlmStore.getState().profiles).toEqual([]);
+  });
+
+  it("有桌面桥时 apiKey 以信封落盘，刷新后能解密水合", async () => {
+    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
+      available: true,
+      encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
+      decrypt: (data: string) =>
+        data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null,
+    };
+    vi.resetModules();
+    const fresh = await import("./llm.js");
+    fresh.useLlmStore.getState().addProfile(p);
+
+    const raw = localStorage.getItem("heming.llmConfigs")!;
+    expect(JSON.parse(raw).__hemingEnc).toBe("v1");
+    expect(raw).not.toContain("sk-ant-x");
+
+    vi.resetModules();
+    const again = await import("./llm.js");
+    expect(again.useLlmStore.getState().profiles).toEqual([p]);
+  });
+
+  it("绑定与提示词不是凭据：仍走普通 localStorage", () => {
+    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
+      available: true,
+      encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
+      decrypt: (data: string) =>
+        data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null,
+    };
+    useLlmStore.getState().setBinding("agent-1", "p1");
+    useLlmStore.getState().setPrompt("agent-1", "你是架构师");
+    expect(localStorage.getItem("heming.agentLlm")).not.toContain("__hemingEnc");
+    expect(localStorage.getItem("heming.agentPrompts")).not.toContain("__hemingEnc");
+    expect(JSON.parse(localStorage.getItem("heming.agentLlm")!)).toEqual({ "agent-1": "p1" });
   });
 });
