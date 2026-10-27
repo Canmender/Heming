@@ -5,6 +5,7 @@ import { useAuthStore } from "../store/auth.js";
 import { useThemeStore } from "../store/theme.js";
 import { DEFAULT_NAV_ORDER, useUiStore } from "../store/ui.js";
 import { setToken } from "../lib/api.js";
+import { resetSecureStorageState, secureSetItem } from "../lib/secureStorage.js";
 
 const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
 
@@ -185,6 +186,56 @@ describe("SettingsPage 个人资料", () => {
 
     fireEvent.click(screen.getByRole("switch", { name: "用模型生成早期摘要" }));
     expect(JSON.parse(localStorage.getItem("heming.context.v1") as string).llmSummary).toBe(false);
+  });
+});
+
+describe("设置区 密钥存储状态", () => {
+  function stubSecrets(opts: { available?: boolean; failEncrypt?: boolean } = {}) {
+    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
+      available: opts.available !== false,
+      encrypt: (plain: string) =>
+        opts.failEncrypt ? null : `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
+      decrypt: (data: string) =>
+        data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null,
+    };
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+    delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+    resetSecureStorageState();
+    setToken("t1");
+    useAuthStore.setState({ token: "t1", user: { ...alice }, status: "authed", error: null });
+  });
+
+  it("浏览器环境：如实说明不加密", () => {
+    render(<SettingsPage />);
+    goTab("模型");
+    expect(screen.getByText(/浏览器端不落安全存储/)).toBeInTheDocument();
+  });
+
+  it("桌面桥可用：显示已加密与平台名", () => {
+    stubSecrets();
+    render(<SettingsPage />);
+    goTab("模型");
+    expect(screen.getByText(/密钥已用系统安全存储加密/)).toBeInTheDocument();
+  });
+
+  it("桌面桥在但加密失败：点名明文保存的键", () => {
+    stubSecrets({ failEncrypt: true });
+    secureSetItem("heming.llmConfigs", "{}");
+    render(<SettingsPage />);
+    goTab("模型");
+    expect(screen.getByText(/以下密钥未能加密/)).toBeInTheDocument();
+    expect(screen.getByText(/模型连接密钥/)).toBeInTheDocument();
+  });
+
+  it("系统安全存储不可用：明示以明文保存", () => {
+    stubSecrets({ available: false });
+    render(<SettingsPage />);
+    goTab("模型");
+    expect(screen.getByText(/本机安全存储不可用，密钥以明文保存/)).toBeInTheDocument();
   });
 });
 

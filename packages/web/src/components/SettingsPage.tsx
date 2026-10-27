@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
 import { LlmSettingsCard } from "./LlmSettingsCard.js";
+import { KeyStorageCard } from "./KeyStorageCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
@@ -118,6 +119,7 @@ export function SettingsPage() {
         {tab === "model" && (
           <>
             <LlmSettingsCard />
+            <KeyStorageCard />
             <ContextSettingsCard />
             {/* 工具调用确认（安全设置）：与模型设置同组——两者都是「生成行为」的边界 */}
             <HitlPolicyCard />
