@@ -148,12 +148,17 @@ export function secureGetItem(key: string, base: StorageLike = browserStorage())
       try {
         base.setItem(key, envelopeOf(cipher));
         plaintextKeys.delete(key);
+        undecryptableKeys.delete(key);
       } catch {
         plaintextKeys.add(key);
       }
     } else {
       plaintextKeys.add(key);
     }
+  } else if (b) {
+    // 只读的明文也要进清单，否则降级不可见：启动时只读的键在磁盘上是明文，
+    // 状态卡若漏报就会让用户以为它已被加密。
+    plaintextKeys.add(key);
   }
   return raw;
 }
@@ -170,6 +175,8 @@ export function secureSetItem(
       try {
         base.setItem(key, envelopeOf(cipher));
         plaintextKeys.delete(key);
+        // 新值已覆盖旧信封，旧的「解不开」状态随之作废。
+        undecryptableKeys.delete(key);
         return;
       } catch {
         /* 配额：退回明文，至少这次会话的配置还在 */

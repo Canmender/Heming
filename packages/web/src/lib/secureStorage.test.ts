@@ -102,6 +102,25 @@ describe("secureStorage · 有桥（桌面路径）", () => {
     expect(secureStorageStatus().available).toBe(false);
   });
 
+  it("桥不可用且只读明文：也记入明文清单", () => {
+    localStorage.setItem("k", "v");
+    const calls = installBridge({ available: false });
+    expect(secureGetItem("k")).toBe("v");
+    expect(secureStorageStatus().plaintextKeys).toContain("k");
+    expect(calls.encrypt).toBe(0);
+  });
+
+  it("解不开的信封被新值覆盖后，状态不再报无法解密", () => {
+    const bad = JSON.stringify({ [ENVELOPE_MARK]: ENVELOPE_VERSION, data: "garbage" });
+    localStorage.setItem("k", bad);
+    installBridge();
+    expect(secureGetItem("k")).toBeNull();
+    expect(secureStorageStatus().undecryptableKeys).toContain("k");
+    secureSetItem("k", "fresh");
+    expect(secureStorageStatus().undecryptableKeys).not.toContain("k");
+    expect(secureGetItem("k")).toBe("fresh");
+  });
+
   it("损坏信封：不抛、返回 null、不改写原值", () => {
     const bad = JSON.stringify({ [ENVELOPE_MARK]: ENVELOPE_VERSION, data: "garbage" });
     localStorage.setItem("k", bad);
