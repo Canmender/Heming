@@ -56,7 +56,10 @@ export function KeyStorageCard() {
   if (!status.desktop) {
     mainLine = "浏览器端不落安全存储，密钥明文保存在浏览器本地";
   } else if (!status.available) {
-    mainLine = "注意：本机安全存储不可用，密钥以明文保存";
+    // 不可用时磁盘上可能既有明文、也有解不开的旧密文；文案必须只说「新写入」，
+    // 否则会和下面「密文仍在、本机解不开」的提示自相矛盾。
+    mainLine = "注意：本机安全存储不可用，新写入的密钥将以明文保存";
+    if (plaintext.length > 0) mainLine += `（当前以明文保存：${plaintext.join("、")}）`;
     tone = "text-amber-700";
   } else if (plaintext.length > 0) {
     mainLine = `注意：以下密钥未能加密，以明文保存：${plaintext.join("、")}`;

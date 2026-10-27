@@ -5,7 +5,7 @@ import { useAuthStore } from "../store/auth.js";
 import { useThemeStore } from "../store/theme.js";
 import { DEFAULT_NAV_ORDER, useUiStore } from "../store/ui.js";
 import { setToken } from "../lib/api.js";
-import { resetSecureStorageState, secureSetItem } from "../lib/secureStorage.js";
+import { resetSecureStorageState, secureGetItem, secureSetItem } from "../lib/secureStorage.js";
 
 const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
 
@@ -227,6 +227,8 @@ describe("设置区 密钥存储状态", () => {
     render(<SettingsPage />);
     goTab("模型");
     expect(screen.getByText(/密钥已用系统安全存储加密/)).toBeInTheDocument();
+    // jsdom 没有 window.heming.platform → 默认分支「系统密钥环」
+    expect(screen.getByText(/系统密钥环/)).toBeInTheDocument();
   });
 
   it("桌面桥在但加密失败：点名明文保存的键", () => {
@@ -238,11 +240,28 @@ describe("设置区 密钥存储状态", () => {
     expect(screen.getByText(/模型连接密钥/)).toBeInTheDocument();
   });
 
-  it("系统安全存储不可用：明示以明文保存", () => {
+  it("系统安全存储不可用：说明新写入将明文，并点名已落明文的键", () => {
     stubSecrets({ available: false });
+    secureSetItem("heming.mcp.servers.v1", "{}"); // 不可用 → 记入明文清单
     render(<SettingsPage />);
     goTab("模型");
-    expect(screen.getByText(/本机安全存储不可用，密钥以明文保存/)).toBeInTheDocument();
+    expect(screen.getByText(/本机安全存储不可用/)).toBeInTheDocument();
+    expect(screen.getByText(/新写入的密钥将以明文保存/)).toBeInTheDocument();
+    expect(screen.getByText(/MCP 服务请求头/)).toBeInTheDocument();
+  });
+
+  it("既有密文解不开时，与「新写入明文」的提示并存而不矛盾", () => {
+    stubSecrets({ available: false });
+    localStorage.setItem("heming.llmConfigs", JSON.stringify({ __hemingEnc: "v1", data: "x" }));
+    secureSetItem("heming.mcp.servers.v1", "{}");
+    // 模拟启动读取：真实应用启动时 store 初始化会读到这枚旧信封；
+    // 本文件里 store 在 import 期已初始化（早于本用例写入），故在此显式触发同一条读取路径。
+    secureGetItem("heming.llmConfigs");
+    render(<SettingsPage />);
+    goTab("模型");
+    expect(screen.getByText(/新写入的密钥将以明文保存/)).toBeInTheDocument();
+    expect(screen.getByText(/无法在本机解密/)).toBeInTheDocument();
+    expect(screen.getByText(/模型连接密钥/)).toBeInTheDocument();
   });
 });
 
