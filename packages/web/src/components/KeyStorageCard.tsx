@@ -50,6 +50,7 @@ export function KeyStorageCard() {
   const status = secureStorageStatus();
   const plaintext = status.plaintextKeys.map(labelOf);
   const undecryptable = status.undecryptableKeys.map(labelOf);
+  const backedUp = status.backedUpKeys.map(labelOf);
 
   let mainLine: string;
   let tone = "text-muted";
@@ -85,6 +86,12 @@ export function KeyStorageCard() {
         <div className="mt-1 text-[11px] text-amber-700">
           以下密钥无法在本机解密（密文仍在，可能来自其他设备或系统账户）：
           {undecryptable.join("、")}
+        </div>
+      )}
+      {backedUp.length > 0 && (
+        <div className="mt-1 text-[11px] text-amber-700">
+          以下密钥的旧密文无法在当前账户解密，已在本机原样备份：
+          {backedUp.join("、")}
         </div>
       )}
     </section>

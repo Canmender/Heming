@@ -263,6 +263,18 @@ describe("设置区 密钥存储状态", () => {
     expect(screen.getByText(/无法在本机解密/)).toBeInTheDocument();
     expect(screen.getByText(/模型连接密钥/)).toBeInTheDocument();
   });
+
+  it("旧密文被备份后，卡片明确告知用户可以找回", () => {
+    stubSecrets();
+    (window as unknown as { __heming_secrets: { decrypt: () => null } }).__heming_secrets.decrypt = () => null;
+    localStorage.setItem("heming.llmConfigs", JSON.stringify({ __hemingEnc: "v1", data: "x" }));
+    secureGetItem("heming.llmConfigs"); // 标记解不开
+    secureSetItem("heming.llmConfigs", "{}"); // 覆盖前备份
+    render(<SettingsPage />);
+    goTab("模型");
+    expect(screen.getByText(/已在本机原样备份/)).toBeInTheDocument();
+    expect(screen.getByText(/模型连接密钥/)).toBeInTheDocument();
+  });
 });
 
 describe("设置区版本展示", () => {
