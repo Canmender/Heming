@@ -4,6 +4,8 @@ import {
   createHttpMcpClient,
   executeToolCall,
   formatRpcError,
+  MCP_SERVERS_KEY,
+  MCP_TOOLS_KEY,
   McpRegistry,
   parseSseMessages,
   pickResponse,
@@ -15,6 +17,7 @@ import {
   type McpServerConfig,
 } from "./index.js";
 import type { StorageLike } from "../memory/types.js";
+import { resetSecureStorageState, secureStorageFor } from "../secureStorage.js";
 
 /** 内存存储（用例之间零污染）。 */
 function memStorage(): StorageLike & { map: Map<string, string> } {
@@ -243,6 +246,68 @@ describe("注册表（服务 + 工具 + 启用开关）", () => {
     expect(s.origin).toBe("manual");
     expect(s.registryType).toBeUndefined();
     expect(s.registryVersion).toBeUndefined();
+  });
+
+  it("服务配置走 secure 层：servers 键是信封、tools 键是普通 JSON，重开能解回请求头", () => {
+    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
+      available: true,
+      encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
+      decrypt: (data: string) =>
+        data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null,
+    };
+    resetSecureStorageState();
+    try {
+      const base = memStorage();
+      const reg = new McpRegistry(secureStorageFor(MCP_SERVERS_KEY, base));
+      const server = reg.add({
+        name: "带鉴权的服务",
+        transport: "http",
+        url: "https://example.test/mcp",
+        headers: { Authorization: "Bearer top-secret" },
+      });
+
+      const rawServers = base.map.get(MCP_SERVERS_KEY)!;
+      expect(JSON.parse(rawServers).__hemingEnc).toBe("v1");
+      expect(rawServers).not.toContain("top-secret");
+      expect(base.map.get(MCP_TOOLS_KEY) ?? "").not.toContain("__hemingEnc");
+
+      const again = new McpRegistry(secureStorageFor(MCP_SERVERS_KEY, base));
+      expect(again.get(server.id)?.headers?.Authorization).toBe("Bearer top-secret");
+    } finally {
+      delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+    }
+  });
+
+  it("默认存储：服务器配置写 localStorage 时走信封，工具清单仍是普通 JSON", () => {
+    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
+      available: true,
+      encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
+      decrypt: (data: string) =>
+        data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null,
+    };
+    resetSecureStorageState();
+    try {
+      const reg = new McpRegistry(); // 走 defaultStorage()
+      const server = reg.add({
+        name: "默认存储的鉴权服务",
+        transport: "http",
+        url: "https://example.test/default",
+        headers: { Authorization: "Bearer default-secret" },
+      });
+      reg.setTools(server.id, [{ name: "echo" }]);
+
+      const rawServers = localStorage.getItem(MCP_SERVERS_KEY)!;
+      expect(JSON.parse(rawServers).__hemingEnc).toBe("v1");
+      expect(rawServers).not.toContain("default-secret");
+      expect(localStorage.getItem(MCP_TOOLS_KEY) ?? "").not.toContain("__hemingEnc");
+
+      const again = new McpRegistry();
+      expect(again.get(server.id)?.headers?.Authorization).toBe("Bearer default-secret");
+    } finally {
+      localStorage.removeItem(MCP_SERVERS_KEY);
+      localStorage.removeItem(MCP_TOOLS_KEY);
+      delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+    }
   });
 });
 

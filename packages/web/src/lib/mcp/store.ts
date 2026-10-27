@@ -1,4 +1,5 @@
 import type { StorageLike } from "../memory/types.js";
+import { secureStorageFor } from "../secureStorage.js";
 import type { McpServerConfig, McpTool, McpToolRef, McpTransport } from "./types.js";
 import { DEFAULT_PRESET_SERVERS, presetServerId } from "./presets.js";
 
@@ -25,7 +26,8 @@ export const MCP_REMOVED_PRESETS_KEY = "heming.mcp.removedPresets.v1";
  */
 export const MCP_USER_DISABLED_KEY = "heming.mcp.userDisabled.v1";
 
-function defaultStorage(): StorageLike {
+/** 浏览器/桌面共用的 localStorage 适配：配额与隐私模式都不抛。 */
+function browserStorage(): StorageLike {
   return {
     getItem: (k) => {
       try {
@@ -49,6 +51,12 @@ function defaultStorage(): StorageLike {
       }
     },
   };
+}
+
+function defaultStorage(): StorageLike {
+  // 只加密服务配置（里面有用户自填的请求头 token）；
+  // 工具清单/启用状态不是凭据，直通 localStorage，避免无谓的 IPC。
+  return secureStorageFor(MCP_SERVERS_KEY, browserStorage());
 }
 
 /** 工具唯一键：`serverId::toolName`。 */
