@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { SettingsPage, appVersionLabel } from "./SettingsPage.js";
 import { useAuthStore } from "../store/auth.js";
@@ -168,6 +168,8 @@ describe("SettingsPage 个人资料", () => {
     goTab("模型");
     expect(screen.getByText("LLM 连接")).toBeInTheDocument();
     expect(screen.getByText(/还没有 LLM 连接/)).toBeInTheDocument();
+    // 文案与 d.36 一致：桌面端 Key 由系统安全存储加密保管，不再是「仅存浏览器」
+    expect(screen.getByText(/桌面端经系统安全存储加密/)).toBeInTheDocument();
     expect(screen.getByText("上下文预算")).toBeInTheDocument();
     // 切回「个人资料」后模型卡卸载（一次只渲染当前分组）
     goTab("个人资料");
@@ -207,6 +209,11 @@ describe("设置区 密钥存储状态", () => {
     resetSecureStorageState();
     setToken("t1");
     useAuthStore.setState({ token: "t1", user: { ...alice }, status: "authed", error: null });
+  });
+
+  afterEach(() => {
+    delete window.__heming_secrets;
+    resetSecureStorageState();
   });
 
   it("浏览器环境：如实说明不加密", () => {

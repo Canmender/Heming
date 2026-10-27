@@ -202,7 +202,9 @@ export function LlmSettingsCard() {
           </button>
         )}
       </div>
-      <div className="mt-1 text-[11px] text-muted">API Key 仅存本机浏览器，不上传和鸣服务端</div>
+      <div className="mt-1 text-[11px] text-muted">
+        API Key 仅存本机（桌面端经系统安全存储加密），不上传和鸣服务端
+      </div>
 
       {/* 常用服务商：一点填好协议/地址/模型；私有部署仍可手填，预设不限制 */}
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
