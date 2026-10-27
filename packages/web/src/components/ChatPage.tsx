@@ -1430,18 +1430,45 @@ export function ChatPage({
     () => visibleMessages.slice(-windowCount),
     [visibleMessages, windowCount],
   );
-  /** 未读分隔线：从后往前数「非自己发送」的第 count 条；不足则标记溢出。 */
-  const unreadDivider = useMemo(() => {
-    if (!unreadMarker || unreadMarker.convId !== convId) return { id: null, overflow: false };
+  /** 本次停留的未读锚点：解析一次后冻结（新消息不能让分隔线漂移/二次抢滚动）。 */
+  const [unreadAnchor, setUnreadAnchor] = useState<{
+    convId: string;
+    id: string | null;
+    overflow: boolean;
+  } | null>(null);
+  const anchorResolvedRef = useRef<string | null>(null);
+
+  // 切会话：清旧锚点（与未读快照的复位放在一起）
+  useEffect(() => {
+    anchorResolvedRef.current = null;
+    setUnreadAnchor(null);
+  }, [convId]);
+
+  useEffect(() => {
+    if (anchorResolvedRef.current === convId) return;
+    if (!unreadMarker || unreadMarker.convId !== convId) return;
+    if (messagesLoading) return; // 等历史落定再解析锚点
+    anchorResolvedRef.current = convId;
     let remaining = unreadMarker.count;
+    let id: string | null = null;
     for (let i = visibleMessages.length - 1; i >= 0; i -= 1) {
       const m = visibleMessages[i];
-      if (m.senderId === me?.id) continue; // 自己的消息不算未读（与服务端口径一致）
+      if (m.senderId === me?.id) continue;
       remaining -= 1;
-      if (remaining === 0) return { id: m.id, overflow: false };
+      if (remaining === 0) {
+        id = m.id;
+        break;
+      }
     }
-    return { id: visibleMessages[0]?.id ?? null, overflow: remaining > 0 };
-  }, [unreadMarker, convId, visibleMessages, me?.id]);
+    const overflow = remaining > 0;
+    if (overflow) id = visibleMessages[0]?.id ?? null;
+    setUnreadAnchor({ convId, id, overflow });
+  }, [convId, unreadMarker, messagesLoading, visibleMessages, me?.id]);
+
+  const unreadDivider =
+    unreadAnchor && unreadAnchor.convId === convId
+      ? unreadAnchor
+      : { convId, id: null, overflow: false };
 
   /** 分隔线只在第一次出现时定位一次；之后用户自己滚，不再抢滚动条。 */
   const dividerScrolledRef = useRef<string | null>(null);

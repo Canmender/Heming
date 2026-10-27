@@ -4136,6 +4136,30 @@ describe("ChatPage", () => {
     expect(await screen.findByText("有更多未读消息在上方")).toBeInTheDocument();
   });
 
+  it("分隔线定位后，新消息到达不再让它漂移或二次滚动", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 1 }],
+    });
+    mockMessagesFetch([
+      msg("m1", "旧消息", "2026-10-14T01:00:00.000Z"),
+      msg("m2", "未读消息", "2026-10-14T02:00:00.000Z"),
+    ]);
+    render(<ChatPage />);
+    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
+    expect(divider.compareDocumentPosition(document.getElementById("msg-m2")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    scrollSpy.mockClear();
+    act(() => {
+      useChatStore.getState().appendMessage(msg("m3", "刚来的新消息", "2026-10-14T03:00:00.000Z"));
+    });
+    // 分隔线仍在 m2 前，没有被 m3「往前挪」
+    const still = screen.getByRole("separator", { name: "以下是新消息" });
+    expect(still.compareDocumentPosition(document.getElementById("msg-m2")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scrollSpy).not.toHaveBeenCalledWith({ block: "start", behavior: "auto" });
+  });
+
   it("A4 气泡时间戳：每条带 HH:mm；间隔 ≥5 分钟插分隔、连续消息不插", async () => {
     const m1 = msg("m1", "第一条", "2026-10-14T01:00:00.000Z");
     const m2 = msg("m2", "第二条", "2026-10-14T01:02:00.000Z");
