@@ -103,7 +103,8 @@ for (const f of factories) {
       const g = store.createGroup(a.id, "群", [b.id]);
 
       const empty = store.listConversations(a.id).find((c) => c.id === g.id);
-      expect(empty?.lastMessageAt ?? null).toBeNull();
+      expect(empty?.lastMessageAt).toBeNull();
+      expect(empty).toHaveProperty("lastMessageAt", null);
 
       store.addMessage(g.id, "user", b.id, { text: "一" }, null);
       // 隔开 5ms，确保第二条时间严格更晚（避免同毫秒让「取最后一条」与「取第一条」不可区分）
