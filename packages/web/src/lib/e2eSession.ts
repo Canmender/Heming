@@ -308,6 +308,23 @@ function parseOuter(cipher: string): CipherOuter {
  */
 let identityInFlight: Promise<StoredIdentity> | null = null;
 
+/**
+ * 身份 kid 缓存：key 为原始存储值。
+ *
+ * `isForMe` 在**每个入站信封**（含流式 chunk）上被调用；直接走 secure 层会让每片
+ * chunk 都过一次 sendSync + DPAPI 解密——那是热路径。原始值不变时复用已算出的 kid；
+ * 身份被替换（测试快照 / 重新生成）时 raw 变化，缓存自然失效。
+ */
+let identityKidCache: { raw: string; kid: string | null } | null = null;
+
+function identityKidFor(raw: string): string | null {
+  if (identityKidCache && identityKidCache.raw === raw) return identityKidCache.kid;
+  const stored = readSecureJson<StoredIdentity>(IDENTITY_KEY);
+  const kid = stored?.kid ?? null;
+  identityKidCache = { raw, kid };
+  return kid;
+}
+
 async function ensureIdentity(): Promise<StoredIdentity> {
   const existing = readSecureJson<StoredIdentity>(IDENTITY_KEY);
   if (existing?.kid && existing.spk?.pub) return existing;
@@ -332,6 +349,7 @@ async function ensureIdentity(): Promise<StoredIdentity> {
       },
     };
     writeSecureJson(IDENTITY_KEY, stored);
+    identityKidCache = { raw: localStorage.getItem(IDENTITY_KEY) ?? "", kid: stored.kid };
     return stored;
   })();
   identityInFlight = gen;
@@ -391,9 +409,9 @@ export function isForMe(env: SealedEnvelope): boolean {
     if (!env.cipher) return false;
     const outer = parseOuter(env.cipher);
     if (outer.ek === undefined || outer.to === undefined) return true; // 正文信封无定向
-    const raw = secureGetItem(IDENTITY_KEY);
+    const raw = localStorage.getItem(IDENTITY_KEY); // 只读原始值：廉价，不过 IPC
     if (!raw) return false;
-    return (JSON.parse(raw) as StoredIdentity).kid === outer.to;
+    return identityKidFor(raw) === outer.to;
   } catch {
     // cipher 损坏（无法解析）：无法判定定向——返回 true 交 openMessage 判定
     // （坏密文 → e2e_decrypt_failed → 接线层按「无法解密」占位，而非静默丢弃；Minor）

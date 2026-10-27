@@ -26,6 +26,7 @@ import {
   exportOwnDeviceKeys,
   chunkAad,
   errorAad,
+  isForMe,
   type E2eDeps,
   type PeerKeys,
   type SealedEnvelope,
@@ -738,10 +739,24 @@ describe("e2eSession 会话层", () => {
       expect((JSON.parse(localStorage.getItem(IDENTITY_KEY)!) as { data: string }).data).toBe(envelope.data);
       expect(calls.encrypt).toBe(1);
 
+      // isForMe 热路径：原始存储值不变时复用 kid 缓存，逐信封零解密（流式 chunk 每片都过这里）
+      const stored = JSON.parse(
+        Buffer.from(envelope.data!.slice(4), "base64").toString("utf8"),
+      ) as { kid: string };
+      const envFor = (to: string) => ({
+        id: `m-${to}`,
+        cipher: toB64(new TextEncoder().encode(JSON.stringify({ v: 1, ek: "x", to }))),
+      });
+      const before = calls.decrypt;
+      expect(isForMe(envFor(stored.kid))).toBe(true);
+      expect(isForMe(envFor("other-device"))).toBe(false);
+      expect(calls.decrypt).toBe(before); // 身份写入时已缓存 ⇒ 热路径零解密
+
       const chainKey = Object.keys(localStorage).find((k) => k.startsWith("heming.e2e.chains."));
       expect(chainKey).toBeTruthy();
       expect(localStorage.getItem(chainKey!)).not.toContain("__hemingEnc");
     } finally {
+      localStorage.removeItem(IDENTITY_KEY); // 别把信封留给后续无桥用例（会被记成 undecryptable）
       delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
     }
   });
