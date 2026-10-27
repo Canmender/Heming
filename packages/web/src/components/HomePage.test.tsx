@@ -230,6 +230,9 @@ describe("HomePage", () => {
     // 有 lastMessageAt 但本机没加载消息 → 「点击查看消息」；真没消息 → 「暂无消息」
     expect(screen.getAllByText("点击查看消息")).toHaveLength(2);
     expect(screen.getByText("暂无消息")).toBeInTheDocument();
+    // 行尾时间回退 lastMessageAt：两条有消息的会话都显示时间，空会话不显示
+    // （同日显示 HH:mm，跨日显示 MM-DD HH:mm，两种情况都接受）
+    expect(screen.getAllByText(/^\d{2}(-\d{2})? \d{2}:\d{2}$/)).toHaveLength(2);
   });
 
   it("最近会话预览：纯附件消息（text 空串）显示「(附件)」，无消息仍「暂无消息」", async () => {

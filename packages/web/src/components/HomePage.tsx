@@ -404,7 +404,12 @@ export function HomePage() {
                     <span className="block truncate text-[11px] text-muted">{preview}</span>
                   </span>
                   <span className="shrink-0 text-[10px] text-muted">
-                    {last ? fmtTime(last.createdAt) : ""}
+                    {/* 消息未加载时回退服务端的最后消息时间，不让「点击查看消息」的行时间空白 */}
+                    {last
+                      ? fmtTime(last.createdAt)
+                      : c.lastMessageAt
+                        ? fmtTime(c.lastMessageAt)
+                        : ""}
                   </span>
                   {/* 未读角标（direct/group 一致，取服务端 unreadCount）：黑底白字圆角小徽标 */}
                   {c.unreadCount > 0 && (
