@@ -1395,6 +1395,27 @@ export function ChatPage({
     [messages, plainOf],
   );
   /**
+   * 本次停留的未读快照：切进会话时取一次服务端 unreadCount，之后只用于分隔线。
+   *
+   * 不能实时读 conversations.unreadCount：打开即发 mark_read，很快就会被清零。
+   */
+  const [unreadMarker, setUnreadMarker] = useState<{ convId: string; count: number } | null>(null);
+  const unreadCapturedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // 切会话先清旧快照；真正的捕获等 conversations 里有这条会话再做（首帧可能还没加载）。
+    unreadCapturedRef.current = null;
+    setUnreadMarker(null);
+  }, [convId]);
+
+  useEffect(() => {
+    if (unreadCapturedRef.current === convId) return;
+    const target = conversations.find((c) => c.id === convId);
+    if (!target) return; // 会话数据还没到，等下一次 conversations 变化
+    unreadCapturedRef.current = convId;
+    if (target.unreadCount > 0) setUnreadMarker({ convId, count: target.unreadCount });
+  }, [convId, conversations]);
+  /**
    * 消息列表窗口化（d.33 · P2-2）：只渲染最近 `windowCount` 条。
    *
    * 数据仍全量加载（服务端一次给全、E2E 解密也在数据层），这里只限制同时挂多少
@@ -1409,6 +1430,38 @@ export function ChatPage({
     () => visibleMessages.slice(-windowCount),
     [visibleMessages, windowCount],
   );
+  /** 未读分隔线：从后往前数「非自己发送」的第 count 条；不足则标记溢出。 */
+  const unreadDivider = useMemo(() => {
+    if (!unreadMarker || unreadMarker.convId !== convId) return { id: null, overflow: false };
+    let remaining = unreadMarker.count;
+    for (let i = visibleMessages.length - 1; i >= 0; i -= 1) {
+      const m = visibleMessages[i];
+      if (m.senderId === me?.id) continue; // 自己的消息不算未读（与服务端口径一致）
+      remaining -= 1;
+      if (remaining === 0) return { id: m.id, overflow: false };
+    }
+    return { id: visibleMessages[0]?.id ?? null, overflow: remaining > 0 };
+  }, [unreadMarker, convId, visibleMessages, me?.id]);
+
+  /** 分隔线只在第一次出现时定位一次；之后用户自己滚，不再抢滚动条。 */
+  const dividerScrolledRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!unreadDivider.id) return;
+    const el = scrollRef.current;
+    if (unreadDivider.overflow) {
+      // 未读多到超出已加载窗口：滚到顶，让「有更多未读消息在上方」的提示可见
+      if (el) el.scrollTop = 0;
+      atBottomRef.current = false;
+      return;
+    }
+    const key = `${convId}:${unreadDivider.id}`;
+    if (dividerScrolledRef.current === key) return;
+    dividerScrolledRef.current = key;
+    atBottomRef.current = false;
+    document
+      .getElementById("unread-divider")
+      ?.scrollIntoView({ block: "start", behavior: "auto" });
+  }, [convId, unreadDivider.id, unreadDivider.overflow]);
   /** 向更早的方向追加一窗（滚到顶或点「加载更早的消息」）。 */
   const loadEarlierMessages = useCallback(() => {
     const el = scrollRef.current;
@@ -1423,7 +1476,11 @@ export function ChatPage({
     prevScrollHeightRef.current = null;
     atBottomRef.current = true;
     setNewBelow(false);
-    bottomRef.current?.scrollIntoView({ behavior: "auto" });
+    const unreadAtSwitch =
+      useChatStore.getState().conversations.find((c) => c.id === convId)?.unreadCount ?? 0;
+    if (unreadAtSwitch === 0) {
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
+    }
   }, [convId]);
   // 追加后补偿滚动位置：上方长出来的高度要加回 scrollTop，否则正在看的内容会跳走。
   // 用 useLayoutEffect 是为了在绘制前完成补偿，避免看到一帧跳动。
@@ -3299,6 +3356,13 @@ export function ChatPage({
             </div>
           )
         ) : null}
+        {unreadDivider.overflow ? (
+          <div className="mb-3 flex justify-center">
+            <span className="rounded-full bg-[#fff7e6] px-2.5 py-0.5 text-[10px] text-[#b45309]">
+              有更多未读消息在上方
+            </span>
+          </div>
+        ) : null}
         {windowedMessages.map((m, index) => {
           const mine = m.senderId === me?.id;
           // A4：时间分隔——窗口首条也插（上方还有历史时它就是当前阅读段的起点）
@@ -3332,6 +3396,18 @@ export function ChatPage({
           }));
           return (
             <Fragment key={m.id}>
+              {unreadDivider.id === m.id ? (
+                <div
+                  id="unread-divider"
+                  role="separator"
+                  aria-label="以下是新消息"
+                  className="mb-3 flex items-center gap-2 text-[10px] text-[#b45309]"
+                >
+                  <span className="h-px flex-1 bg-[#f0d58c]" />
+                  <span>以下是新消息</span>
+                  <span className="h-px flex-1 bg-[#f0d58c]" />
+                </div>
+              ) : null}
               {/* A4：间隔 ≥5 分钟或跨天的消息之间插一条时间分隔（首条渲染的消息也带，定位阅读段起点） */}
               {showSeparator ? (
                 <div className="mb-3 flex justify-center">

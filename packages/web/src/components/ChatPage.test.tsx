@@ -4094,6 +4094,48 @@ describe("ChatPage", () => {
     expect(screen.queryByRole("button", { name: "滚动到最新消息" })).not.toBeInTheDocument();
   });
 
+  it("有未读时在第一条未读前插分隔线，并滚到分隔线而不是底部", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 2 }],
+    });
+    mockMessagesFetch([
+      msg("m1", "旧消息一", "2026-10-14T01:00:00.000Z"),
+      msg("m2", "旧消息二", "2026-10-14T01:01:00.000Z"),
+      msg("m3", "未读一", "2026-10-14T02:00:00.000Z"),
+      msg("m4", "未读二", "2026-10-14T02:01:00.000Z"),
+    ]);
+
+    render(<ChatPage />);
+    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
+    const firstUnread = document.getElementById("msg-m3")!;
+    expect(divider.compareDocumentPosition(firstUnread) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scrollSpy).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
+  });
+
+  it("没有未读时不插分隔线", async () => {
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
+    });
+    mockMessagesFetch([msg("m1", "普通消息", "2026-10-14T01:00:00.000Z")]);
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("普通消息")).toBeInTheDocument());
+    expect(screen.queryByRole("separator", { name: "以下是新消息" })).not.toBeInTheDocument();
+  });
+
+  it("未读数超过已加载消息：顶部提示还有更早的未读", async () => {
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 5 }],
+    });
+    mockMessagesFetch([
+      msg("m1", "仅有的旧消息", "2026-10-14T01:00:00.000Z"),
+      msg("m2", "仅有的新消息", "2026-10-14T02:00:00.000Z"),
+    ]);
+    render(<ChatPage />);
+    expect(await screen.findByText("有更多未读消息在上方")).toBeInTheDocument();
+  });
+
   it("A4 气泡时间戳：每条带 HH:mm；间隔 ≥5 分钟插分隔、连续消息不插", async () => {
     const m1 = msg("m1", "第一条", "2026-10-14T01:00:00.000Z");
     const m2 = msg("m2", "第二条", "2026-10-14T01:02:00.000Z");
