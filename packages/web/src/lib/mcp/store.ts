@@ -56,7 +56,14 @@ function browserStorage(): StorageLike {
 function defaultStorage(): StorageLike {
   // 只加密服务配置（里面有用户自填的请求头 token）；
   // 工具清单/启用状态不是凭据，直通 localStorage，避免无谓的 IPC。
-  return secureStorageFor(MCP_SERVERS_KEY, browserStorage());
+  // 安全键的写入失败必须冒泡给 secure 层（配额耗尽要如实标成明文），
+  // 其它键仍用吞错的 browserStorage，保持旧的容错行为。
+  const base = browserStorage();
+  return secureStorageFor(MCP_SERVERS_KEY, {
+    getItem: (k) => base.getItem(k),
+    setItem: (k, v) => window.localStorage.setItem(k, v),
+    removeItem: (k) => base.removeItem(k),
+  });
 }
 
 /** 工具唯一键：`serverId::toolName`。 */

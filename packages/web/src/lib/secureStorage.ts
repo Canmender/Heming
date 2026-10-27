@@ -16,6 +16,8 @@ import type { StorageLike } from "./memory/types.js";
 
 export const ENVELOPE_MARK = "__hemingEnc";
 export const ENVELOPE_VERSION = "v1";
+/** 解不开的旧密文备份键后缀：内容为**原密文**，不重新加密。 */
+export const UNDECRYPTABLE_BACKUP_SUFFIX = ".__heming_undecryptable";
 
 export interface SecretBridge {
   available: boolean;
@@ -32,10 +34,13 @@ export interface SecureStorageStatus {
   plaintextKeys: string[];
   /** 解不开的信封键：密文仍在磁盘，只是本机解不了（另一台设备/另一个系统账户）。 */
   undecryptableKeys: string[];
+  /** 旧密文曾解不开、已被原样备份的键（备份键 = 原键 + UNDECRYPTABLE_BACKUP_SUFFIX）。 */
+  backedUpKeys: string[];
 }
 
 const plaintextKeys = new Set<string>();
 const undecryptableKeys = new Set<string>();
+const backedUpKeys = new Set<string>();
 
 function bridge(): SecretBridge | undefined {
   if (typeof window === "undefined") return undefined;
@@ -64,11 +69,7 @@ function browserStorage(): StorageLike {
       }
     },
     setItem: (k, v) => {
-      try {
-        localStorage.setItem(k, v);
-      } catch {
-        /* 配额/隐私模式：只影响持久化，不影响本次会话 */
-      }
+      localStorage.setItem(k, v); // 异常交给 secureGetItem/secureSetItem 处理
     },
     removeItem: (k) => {
       try {
@@ -137,6 +138,7 @@ export function secureGetItem(key: string, base: StorageLike = browserStorage())
       return null;
     }
     undecryptableKeys.delete(key);
+    plaintextKeys.delete(key); // 成功读到密文 ⇒ 不再是明文键
     return plain;
   }
 
@@ -163,11 +165,38 @@ export function secureGetItem(key: string, base: StorageLike = browserStorage())
   return raw;
 }
 
+/**
+ * 覆盖「解不开的密文」之前先原样备份。
+ *
+ * 备份内容就是磁盘上的原始字符串（仍是密文），不重新加密——目标正是“换回原来的
+ * 系统账户还能解开”。同一键只保留一份备份，内容相同不重写（幂等）。
+ * 备份失败时保留 undecryptable 标记并继续写入：宁可状态多报一次，也不因备份失败卡死配置。
+ */
+function backupBeforeOverwrite(key: string, base: StorageLike): void {
+  if (!undecryptableKeys.has(key)) return;
+  let raw: string | null = null;
+  try {
+    raw = base.getItem(key);
+  } catch {
+    return;
+  }
+  if (!raw) return;
+  const backupKey = key + UNDECRYPTABLE_BACKUP_SUFFIX;
+  try {
+    if (base.getItem(backupKey) !== raw) base.setItem(backupKey, raw);
+  } catch {
+    return; // 备份没成功：不动 undecryptable 标记
+  }
+  undecryptableKeys.delete(key);
+  backedUpKeys.add(key);
+}
+
 export function secureSetItem(
   key: string,
   value: string,
   base: StorageLike = browserStorage(),
 ): void {
+  backupBeforeOverwrite(key, base);
   const b = bridge();
   if (b && b.available === true) {
     const cipher = b.encrypt(value);
@@ -186,7 +215,12 @@ export function secureSetItem(
   } else if (b) {
     plaintextKeys.add(key); // 桌面桥在、系统安全存储不可用
   }
-  base.setItem(key, value);
+  try {
+    base.setItem(key, value);
+  } catch {
+    // 明文也写不进去：至少不能谎报「已加密」
+    plaintextKeys.add(key);
+  }
 }
 
 export function secureRemoveItem(key: string, base: StorageLike = browserStorage()): void {
@@ -219,6 +253,7 @@ export function secureStorageStatus(): SecureStorageStatus {
     available: !!b && b.available === true,
     plaintextKeys: [...plaintextKeys].sort(),
     undecryptableKeys: [...undecryptableKeys].sort(),
+    backedUpKeys: [...backedUpKeys].sort(),
   };
 }
 
@@ -226,4 +261,5 @@ export function secureStorageStatus(): SecureStorageStatus {
 export function resetSecureStorageState(): void {
   plaintextKeys.clear();
   undecryptableKeys.clear();
+  backedUpKeys.clear();
 }
