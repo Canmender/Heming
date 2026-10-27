@@ -699,6 +699,28 @@ describe("ChatPage", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 无发送失败提示
   });
 
+  it("断线显示重连横幅，恢复后横幅消失并短暂提示已恢复", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+
+    act(() => {
+      lastHandlers().onClose?.();
+    });
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent("连接已断开");
+    expect(
+      screen.getByText("连接已断开，正在自动重连…消息会排队，恢复后自动补发"),
+    ).toBeInTheDocument();
+
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    expect(
+      screen.queryByText("连接已断开，正在自动重连…消息会排队，恢复后自动补发"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("已恢复连接")).toBeInTheDocument();
+    expect(screen.getByText("已连接")).toBeInTheDocument();
+  });
+
   it("连接句柄为 null 时发送：保留草稿并显示「连接未就绪，消息未发送」", async () => {
     vi.mocked(connectWs).mockReturnValue(null as unknown as WsHandle);
     mockMessagesFetch([]);

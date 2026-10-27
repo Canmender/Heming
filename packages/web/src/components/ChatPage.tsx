@@ -665,6 +665,19 @@ export function ChatPage({
   const [searchHitId, setSearchHitId] = useState<string | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
+  /** WS 三态：首次连接 / 已连接 / 已断开（用于标题与横幅，不用 connected 二元冒充）。 */
+  const [connState, setConnState] = useState<"connecting" | "open" | "closed">("connecting");
+  /** 断线后恢复的短暂提示（3 秒）。 */
+  const [recovered, setRecovered] = useState(false);
+  const recoveredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hadClosedRef = useRef(false);
+  // 卸载时清掉「已恢复连接」的 3 秒定时器，防对已卸载组件 setState
+  useEffect(
+    () => () => {
+      if (recoveredTimer.current) clearTimeout(recoveredTimer.current);
+    },
+    [],
+  );
   /** 会话信息卡（三横线弹出）开关。 */
   const [infoOpen, setInfoOpen] = useState(false);
   /** 表情选择器开关（输入区工具行左上角）。 */
@@ -2171,6 +2184,12 @@ export function ChatPage({
       },
       onOpen: () => {
         setConnected(true);
+        setConnState("open");
+        if (hadClosedRef.current) {
+          setRecovered(true);
+          if (recoveredTimer.current) clearTimeout(recoveredTimer.current);
+          recoveredTimer.current = setTimeout(() => setRecovered(false), 3000);
+        }
         // 断线重连成功：补拉断档消息（合并去重语义，幂等；信封同走解密合并）
         void useChatStore.getState().loadMessages(convId, () => alive);
         // Task 7：重连成功补齐「断线期间的已读」——仍有未读则补发 mark_read
@@ -2179,7 +2198,13 @@ export function ChatPage({
           useChatStore.getState().conversations.find((c) => c.id === convId)?.unreadCount ?? 0;
         if (unread > 0) handle?.send({ type: "mark_read", conversationId: convId });
       },
-      onClose: () => setConnected(false),
+      onClose: () => {
+        // 本端主动断开（切会话/卸载）不是「断线」：effect 已重连，别闪一条断线横幅。
+        if (!alive) return;
+        setConnected(false);
+        setConnState("closed");
+        hadClosedRef.current = true;
+      },
       // d.30 · P1-8：离线队列溢出/无 token 发送失败 → 复用既有 setSendNotice 提示，
       // 不新造组件（规格 §5）。静默丢帧的话用户永远不知道有东西没发出去。
       onSendError: (reason) => setSendNotice(`发送失败：${reason}`, "error"),
@@ -3034,7 +3059,24 @@ export function ChatPage({
           />
         )}
         <span className="text-[14px] font-bold">{headerTitle}</span>
-        <span className="text-[12px] text-muted">{connected ? "已连接" : "连接中…"}</span>
+        <span className="flex items-center gap-1 text-[12px] text-muted">
+          <span
+            aria-hidden="true"
+            className={`h-1.5 w-1.5 rounded-full ${
+              connState === "open"
+                ? "bg-[#12b76a]"
+                : connState === "closed"
+                  ? "bg-[#b45309]"
+                  : "bg-[#c4c4c4]"
+            }`}
+          />
+          {connState === "open" ? "已连接" : connState === "closed" ? "连接已断开" : "连接中…"}
+        </span>
+        {recovered && (
+          <span role="status" className="text-[11px] text-[#12b76a]">
+            已恢复连接
+          </span>
+        )}
         {conv?.type === "direct" && voiceCall.state.status === "idle" && (
           <>
             {/* 语音 / 视频通话都开独立窗口：面板不再盖住消息区，窗口可拖动/置顶。
@@ -3219,6 +3261,14 @@ export function ChatPage({
         </button>
         {infoOpen && conv && <ChatInfoCard conv={conv} onClose={() => setInfoOpen(false)} />}
       </header>
+      {connState === "closed" && (
+        <div
+          role="status"
+          className="border-b border-[#f0d58c] bg-[#fff7e6] px-5 py-1.5 text-[11px] text-[#b45309]"
+        >
+          连接已断开，正在自动重连…消息会排队，恢复后自动补发
+        </div>
+      )}
       {searchOpen && (
         <div className="flex items-center gap-2 border-b border-line-soft bg-[#fafafa] px-5 py-2">
           <SearchIcon width={14} height={14} className="shrink-0 text-[#999]" />
