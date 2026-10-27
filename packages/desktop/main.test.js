@@ -282,3 +282,12 @@ test("main.js：主进程不再自己拉 ICE（改由渲染层自取，主进程
   assert.ok(preloadSrc.includes("__heming_ice_servers_get"), "preload 的 ICE 兼容位应保留");
   assert.ok(preloadSrc.includes("setIceServers"), "preload 的 setIceServers 应保留");
 });
+
+// ── 本机密钥信封桥（d.36）──
+test("密钥信封桥在 createWindow 之前注册（preload 用 sendSync 问可用性）", () => {
+  const reg = mainCode.indexOf("registerSecretIpc(ipcMain)");
+  const create = mainCode.indexOf("createWindow();"); // 带分号：避开函数定义的 `function createWindow() {`
+  assert.ok(reg > 0, "main.js 应注册 secret IPC");
+  assert.ok(create > 0, "main.js 应调用 createWindow()");
+  assert.ok(reg < create, "注册必须早于窗口创建");
+});

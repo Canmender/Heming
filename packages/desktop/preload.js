@@ -146,3 +146,36 @@ contextBridge.exposeInMainWorld("__heming_exports", {
   write: (fileName, content) => ipcRenderer.invoke("export:write", fileName, content),
   info: () => ipcRenderer.invoke("export:info"),
 });
+
+// —— 本机密钥信封桥（d.36）——
+// 三个低频键（模型 Key、MCP 服务请求头、E2E 设备身份）在渲染层的读写经这里
+// 交给主进程的 safeStorage 加解密。sendSync 会阻塞渲染进程，只用于这三个
+// 「启动读一次 / 用户改配置写一次」的键；**绝不能用在高频路径（消息收发）上**。
+// 浏览器端没有这个桥，web 侧据此保持明文并把状态如实写进设置区。
+const secretsAvailable = (() => {
+  try {
+    return ipcRenderer.sendSync("secret:available") === true;
+  } catch {
+    return false; // 主进程尚未注册或通道异常：按不可用处理，不让 preload 挂掉
+  }
+})();
+
+contextBridge.exposeInMainWorld("__heming_secrets", {
+  available: secretsAvailable,
+  encrypt: (plain) => {
+    try {
+      const out = ipcRenderer.sendSync("secret:encrypt", plain);
+      return typeof out === "string" ? out : null;
+    } catch {
+      return null;
+    }
+  },
+  decrypt: (cipherB64) => {
+    try {
+      const out = ipcRenderer.sendSync("secret:decrypt", cipherB64);
+      return typeof out === "string" ? out : null;
+    } catch {
+      return null;
+    }
+  },
+});

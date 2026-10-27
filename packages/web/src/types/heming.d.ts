@@ -64,6 +64,16 @@ declare global {
       ) => Promise<{ ok: boolean; path?: string; name?: string; error?: string }>;
       info: () => Promise<{ dir: string; exists: boolean }>;
     };
+    /**
+     * 内部：桌面端本机密钥信封桥（preload 暴露；浏览器里 undefined）。
+     * 同步 API——只给三个低频键用（模型 Key / MCP 请求头 / E2E 身份），
+     * 不要用在消息收发热路径上。
+     */
+    __heming_secrets?: {
+      available: boolean;
+      encrypt: (plain: string) => string | null;
+      decrypt: (cipherB64: string) => string | null;
+    };
     heming?: {
       /** 运行平台（process.platform），如 "win32" / "darwin"。 */
       platform?: string;

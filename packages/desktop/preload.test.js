@@ -33,21 +33,28 @@ test("preload 暴露 __heming_exports（记忆导出落盘桥）", () => {
   assert.ok(src.includes('invoke("export:info"'));
 });
 
-// 行为测试：stub electron 模块的 contextBridge，真实执行 preload.js，
+// 行为测试：stub electron 模块的 contextBridge + ipcRenderer，真实执行 preload.js，
 // 验证 contextBridge 暴露的对象上 __onBootReady/__startBootWave 为可调用函数。
 // 注：preload.js 会多次调用 exposeInMainWorld（heming / __heming_ice_servers_get /
-// __heming_voice_call），此处按 key 收集而非「最后一次即 heming」。
-function loadHeming() {
+// __heming_voice_call / __heming_secrets），此处按 key 收集而非「最后一次即 heming」。
+// ipcRenderer.sendSync 必须在桩里存在：preload 顶层会同步问一次密钥桥可用性。
+function loadExposed(ipc = {}) {
   const exposed = {};
   const stubBridge = {
     exposeInMainWorld: (key, api) => {
       exposed[key] = api;
-    }
+    },
+  };
+  const stubIpc = {
+    sendSync: (channel, arg) => (typeof ipc[channel] === "function" ? ipc[channel](arg) : undefined),
+    invoke: async () => undefined,
+    on: () => {},
+    removeListener: () => {},
   };
   const originalLoad = Module._load;
   Module._load = function (request) {
     if (request === "electron") {
-      return { contextBridge: stubBridge };
+      return { contextBridge: stubBridge, ipcRenderer: stubIpc };
     }
     return originalLoad.apply(this, arguments);
   };
@@ -57,6 +64,11 @@ function loadHeming() {
   } finally {
     Module._load = originalLoad;
   }
+  return exposed;
+}
+
+function loadHeming() {
+  const exposed = loadExposed();
   assert.ok(exposed.heming, "preload 应暴露 heming");
   return exposed.heming;
 }
@@ -133,4 +145,39 @@ test("__onBootReady 收到非函数参数时忽略（不抛出、不污染已有
   // 已有回调未被非函数参数覆盖，仍能被信号触发
   heming.__startBootWave();
   assert.equal(called, 1);
+});
+
+// ── 本机密钥信封桥（d.36）──
+test("preload 暴露 __heming_secrets（密钥信封桥）", () => {
+  const exposed = loadExposed({ "secret:available": () => true });
+  const s = exposed.__heming_secrets;
+  assert.ok(s, "应暴露 __heming_secrets");
+  assert.equal(s.available, true);
+  assert.equal(typeof s.encrypt, "function");
+  assert.equal(typeof s.decrypt, "function");
+});
+
+test("可用性来自 sendSync；通道异常按不可用处理", () => {
+  assert.equal(loadExposed({ "secret:available": () => false }).__heming_secrets.available, false);
+  const broken = loadExposed({
+    "secret:available": () => {
+      throw new Error("no handler");
+    },
+  });
+  assert.equal(broken.__heming_secrets.available, false);
+});
+
+test("encrypt/decrypt 经 sendSync 转发；异常或非字符串回落 null", () => {
+  const exposed = loadExposed({
+    "secret:available": () => true,
+    "secret:encrypt": (plain) => `enc:${plain}`,
+    "secret:decrypt": (data) => (data.startsWith("enc:") ? data.slice(4) : null),
+  });
+  const s = exposed.__heming_secrets;
+  assert.equal(s.encrypt("x"), "enc:x");
+  assert.equal(s.decrypt("enc:y"), "y");
+
+  const failing = loadExposed({ "secret:available": () => true }); // encrypt 通道缺失 → undefined
+  assert.equal(failing.__heming_secrets.encrypt("x"), null);
+  assert.equal(failing.__heming_secrets.decrypt("y"), null);
 });

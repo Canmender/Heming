@@ -17,6 +17,7 @@ const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
 const { registerWikiIpc } = require("./wiki-fs");
 const { registerChartIpc } = require("./chart-fs");
 const { registerExportIpc } = require("./export-fs");
+const { registerSecretIpc } = require("./secret-store");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
 
 // ── web 界面嵌入（设计 §4）──────────────────────────────────────────────
@@ -559,6 +560,9 @@ app.whenReady().then(() => {
     registerChartIpc(ipcMain);
     // 记忆导出文件桥（d.35）：把记忆 JSON 写到 ~/Heming/exports
     registerExportIpc(ipcMain);
+    // 本机密钥信封桥（d.36）：preload 在页面加载时用 sendSync 问可用性，
+    // 所以必须早于 createWindow()。
+    registerSecretIpc(ipcMain);
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
