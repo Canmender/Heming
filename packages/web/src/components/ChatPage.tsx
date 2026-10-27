@@ -670,7 +670,6 @@ export function ChatPage({
   /** 断线后恢复的短暂提示（3 秒）。 */
   const [recovered, setRecovered] = useState(false);
   const recoveredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hadClosedRef = useRef(false);
   // 卸载时清掉「已恢复连接」的 3 秒定时器，防对已卸载组件 setState
   useEffect(
     () => () => {
@@ -2149,6 +2148,16 @@ export function ChatPage({
 
   useEffect(() => {
     let alive = true; // 挡卸载后晚到的补拉写入（同 loadMessages effect 口径）
+    /**
+     * 本连接的「断过再连」标记：必须放在 effect 内（每次切会话重建归零）。
+     * 放组件级 ref 会跨会话黏住——A 会话恢复过，B 会话首次 open 会误报「已恢复连接」。
+     */
+    let hadClosed = false;
+    // 新连接从「连接中…」起步：切会话时旧连接已关、新连接未 open，
+    // 不能沿用上一会话的「已断开」或恢复提示。
+    setConnected(false);
+    setConnState("connecting");
+    setRecovered(false);
     const handle = connectWs({
       onEvent: (e) => {
         // 流式三事件收口（chunk 累积/message_new{streamId} 移除/agent_error 分态）在 store 统一处理
@@ -2183,12 +2192,15 @@ export function ChatPage({
         }
       },
       onOpen: () => {
+        if (!alive) return; // 旧连接的晚到回调：新连接已接手，别拿旧状态覆盖
         setConnected(true);
         setConnState("open");
-        if (hadClosedRef.current) {
+        if (hadClosed) {
           setRecovered(true);
           if (recoveredTimer.current) clearTimeout(recoveredTimer.current);
           recoveredTimer.current = setTimeout(() => setRecovered(false), 3000);
+        } else {
+          setRecovered(false);
         }
         // 断线重连成功：补拉断档消息（合并去重语义，幂等；信封同走解密合并）
         void useChatStore.getState().loadMessages(convId, () => alive);
@@ -2201,9 +2213,15 @@ export function ChatPage({
       onClose: () => {
         // 本端主动断开（切会话/卸载）不是「断线」：effect 已重连，别闪一条断线横幅。
         if (!alive) return;
+        hadClosed = true;
         setConnected(false);
         setConnState("closed");
-        hadClosedRef.current = true;
+        // 恢复提示与断线横幅互斥：断开时立刻收起恢复提示并停掉它的计时。
+        setRecovered(false);
+        if (recoveredTimer.current) {
+          clearTimeout(recoveredTimer.current);
+          recoveredTimer.current = null;
+        }
       },
       // d.30 · P1-8：离线队列溢出/无 token 发送失败 → 复用既有 setSendNotice 提示，
       // 不新造组件（规格 §5）。静默丢帧的话用户永远不知道有东西没发出去。
@@ -3072,7 +3090,7 @@ export function ChatPage({
           />
           {connState === "open" ? "已连接" : connState === "closed" ? "连接已断开" : "连接中…"}
         </span>
-        {recovered && (
+        {recovered && connState === "open" && (
           <span role="status" className="text-[11px] text-[#12b76a]">
             已恢复连接
           </span>

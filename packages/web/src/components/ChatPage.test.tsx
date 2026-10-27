@@ -721,6 +721,97 @@ describe("ChatPage", () => {
     expect(screen.getByText("已连接")).toBeInTheDocument();
   });
 
+  it("首次连接不显示「已恢复连接」", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    expect(screen.getByText("已连接")).toBeInTheDocument();
+    expect(screen.queryByText("已恢复连接")).not.toBeInTheDocument();
+  });
+
+  it("恢复提示出现后再断线：提示立刻收起，断线横幅出现", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    act(() => {
+      lastHandlers().onClose?.();
+    });
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    expect(screen.getByText("已恢复连接")).toBeInTheDocument();
+
+    act(() => {
+      lastHandlers().onClose?.();
+    });
+    expect(screen.queryByText("已恢复连接")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("连接已断开，正在自动重连…消息会排队，恢复后自动补发"),
+    ).toBeInTheDocument();
+  });
+
+  it("切会话重建连接不误报「已恢复连接」（断线标记不跨会话黏住）", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    act(() => {
+      lastHandlers().onClose?.();
+    });
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    expect(screen.getByText("已恢复连接")).toBeInTheDocument();
+
+    // 切到 c2：WS effect 重建，新连接尚未 open → 回到「连接中…」，恢复提示清掉
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" });
+    });
+    expect(screen.getByText("连接中…")).toBeInTheDocument();
+    expect(screen.queryByText("已恢复连接")).not.toBeInTheDocument();
+
+    // c2 的连接首次 open 不算「恢复」
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    expect(screen.getByText("已连接")).toBeInTheDocument();
+    expect(screen.queryByText("已恢复连接")).not.toBeInTheDocument();
+  });
+
+  it("「已恢复连接」3 秒后自动消失", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        lastHandlers().onClose?.();
+      });
+      act(() => {
+        lastHandlers().onOpen?.();
+      });
+      expect(screen.getByText("已恢复连接")).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(2999);
+      });
+      expect(screen.getByText("已恢复连接")).toBeInTheDocument(); // 未满 3 秒仍在
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.queryByText("已恢复连接")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("连接句柄为 null 时发送：保留草稿并显示「连接未就绪，消息未发送」", async () => {
     vi.mocked(connectWs).mockReturnValue(null as unknown as WsHandle);
     mockMessagesFetch([]);
