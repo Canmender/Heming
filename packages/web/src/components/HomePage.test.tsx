@@ -201,6 +201,37 @@ describe("HomePage", () => {
     expect(screen.queryByLabelText(/条未读/)).not.toBeInTheDocument(); // unreadCount=0 → 不渲染角标
   });
 
+  it("最近会话按 lastMessageAt 排序；未加载的消息不冒充「暂无消息」", async () => {
+    const mkGroup = (id: string, name: string, lastMessageAt?: string) => ({
+      id,
+      type: "group" as const,
+      name,
+      memberCount: 2,
+      unreadCount: 0,
+      ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
+    });
+    const rows = [
+      mkGroup("g-old", "较旧的群", "2026-10-20T00:00:00.000Z"),
+      mkGroup("g-fresh", "最新的群", "2026-10-25T00:00:00.000Z"),
+      mkGroup("g-empty", "空群"),
+    ];
+    mockFetch({ conversations: rows });
+    useChatStore.setState({ conversations: rows, messages: {}, workspaceReady: true });
+
+    render(<HomePage />);
+    await act(async () => {});
+
+    const fresh = screen.getByText("最新的群").closest("button")!;
+    const old = screen.getByText("较旧的群").closest("button")!;
+    const empty = screen.getByText("空群").closest("button")!;
+    expect(fresh.compareDocumentPosition(old) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(old.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // 有 lastMessageAt 但本机没加载消息 → 「点击查看消息」；真没消息 → 「暂无消息」
+    expect(screen.getAllByText("点击查看消息")).toHaveLength(2);
+    expect(screen.getByText("暂无消息")).toBeInTheDocument();
+  });
+
   it("最近会话预览：纯附件消息（text 空串）显示「(附件)」，无消息仍「暂无消息」", async () => {
     const attachMsg = {
       id: "m1",

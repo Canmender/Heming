@@ -179,7 +179,16 @@ export function HomePage() {
 
   const pct = quota > 0 ? Math.min(100, Math.round((monthSummary.total / quota) * 100)) : 0;
   const modelRows = Object.entries(monthSummary.byModel).sort((a, b) => b[1] - a[1]);
-  const recent = conversations.slice(0, 6);
+  /**
+   * 最近会话：按最后消息时间降序（无消息排最后），取前 6。
+   *
+   * 之前直接 slice 数组——那是服务端的创建序，不是「最近」。
+   */
+  const recent = useMemo(() => {
+    return [...conversations]
+      .sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? ""))
+      .slice(0, 6);
+  }, [conversations]);
   // 智能体动态：优先群内已挂载的，空时回退名册全量（用户可能只自建未入群）
   const displayAgents = (agents.length > 0 ? agents : agentsRoster).slice(0, 3);
 
@@ -366,7 +375,9 @@ export function HomePage() {
                 ? last.recalledAt != null
                   ? "消息已撤回"
                   : last.payload.text || "(附件)"
-                : "暂无消息";
+                : c.lastMessageAt
+                  ? "点击查看消息" // 有消息但本机还没加载：不冒充「暂无消息」
+                  : "暂无消息";
               // 三态会话（direct / agent 一对一 / group）各自的显示名与头像
               const title =
                 c.type === "direct"
