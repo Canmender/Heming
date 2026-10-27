@@ -4111,6 +4111,8 @@ describe("ChatPage", () => {
     const divider = await screen.findByRole("separator", { name: "以下是新消息" });
     const firstUnread = document.getElementById("msg-m3")!;
     expect(divider.compareDocumentPosition(firstUnread) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 只有一次定位调用，且不是先平滑滚底再跳到分隔线
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
     expect(scrollSpy).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
   });
 
@@ -4134,6 +4136,7 @@ describe("ChatPage", () => {
     ]);
     render(<ChatPage />);
     expect(await screen.findByText("有更多未读消息在上方")).toBeInTheDocument();
+    expect(screen.getByTestId("message-list").scrollTop).toBe(0);
   });
 
   it("分隔线定位后，新消息到达不再让它漂移或二次滚动", async () => {
@@ -4157,7 +4160,44 @@ describe("ChatPage", () => {
     // 分隔线仍在 m2 前，没有被 m3「往前挪」
     const still = screen.getByRole("separator", { name: "以下是新消息" });
     expect(still.compareDocumentPosition(document.getElementById("msg-m2")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(scrollSpy).not.toHaveBeenCalledWith({ block: "start", behavior: "auto" });
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it("未读锚点落在初始窗口外时自动扩窗并定位（不静默失效）", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 70 }],
+    });
+    const many = Array.from({ length: 100 }, (_, i) =>
+      msg(
+        `x${i}`,
+        `第 ${i} 条`,
+        `2026-10-14T${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}:00.000Z`,
+      ),
+    );
+    mockMessagesFetch(many);
+
+    render(<ChatPage />);
+    // 从后往前第 70 条非自己消息 = x30（初始窗口只有后 60 条，x30 在窗口外）
+    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
+    const firstUnread = document.getElementById("msg-x30")!;
+    expect(firstUnread).not.toBeNull();
+    expect(divider.compareDocumentPosition(firstUnread) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("第 29 条")).not.toBeInTheDocument(); // 窗口没扩得更多
+    expect(scrollSpy).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
+  });
+
+  it("无未读时打开会话仍回到底部", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
+    });
+    mockMessagesFetch([msg("m1", "普通消息", "2026-10-14T01:00:00.000Z")]);
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("普通消息")).toBeInTheDocument());
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "auto" });
   });
 
   it("A4 气泡时间戳：每条带 HH:mm；间隔 ≥5 分钟插分隔、连续消息不插", async () => {

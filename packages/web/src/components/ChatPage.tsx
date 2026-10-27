@@ -1437,10 +1437,13 @@ export function ChatPage({
     overflow: boolean;
   } | null>(null);
   const anchorResolvedRef = useRef<string | null>(null);
+  /** 分隔线只在第一次出现时定位一次；之后用户自己滚，不再抢滚动条。 */
+  const dividerScrolledRef = useRef<string | null>(null);
 
-  // 切会话：清旧锚点（与未读快照的复位放在一起）
+  // 切会话：清旧锚点与定位去重（不跨停留保留，回到会话时重新定位）。
   useEffect(() => {
     anchorResolvedRef.current = null;
+    dividerScrolledRef.current = null;
     setUnreadAnchor(null);
   }, [convId]);
 
@@ -1470,25 +1473,38 @@ export function ChatPage({
       ? unreadAnchor
       : { convId, id: null, overflow: false };
 
-  /** 分隔线只在第一次出现时定位一次；之后用户自己滚，不再抢滚动条。 */
-  const dividerScrolledRef = useRef<string | null>(null);
+  // 锚点可能落在初始渲染窗口之外（未读数 > DEFAULT_WINDOW 时）：把窗口扩到包含它，
+  // 否则分隔线/提示/定位整条链路都匹配不到 DOM。扩窗不做滚动补偿——随后由分隔线定位接管。
+  useEffect(() => {
+    if (!unreadAnchor || unreadAnchor.convId !== convId) return;
+    if (unreadAnchor.overflow || !unreadAnchor.id) return;
+    if (windowedMessages.some((m) => m.id === unreadAnchor.id)) return;
+    const idx = visibleMessages.findIndex((m) => m.id === unreadAnchor.id);
+    if (idx < 0) return;
+    const needed = visibleMessages.length - idx;
+    if (needed > windowCount) {
+      prevScrollHeightRef.current = null;
+      setWindowCount(needed);
+    }
+  }, [unreadAnchor, convId, visibleMessages, windowedMessages, windowCount]);
+
   useLayoutEffect(() => {
-    if (!unreadDivider.id) return;
-    const el = scrollRef.current;
-    if (unreadDivider.overflow) {
+    if (!unreadAnchor || unreadAnchor.convId !== convId || !unreadAnchor.id) return;
+    const key = unreadAnchor.overflow ? `${convId}:overflow` : `${convId}:${unreadAnchor.id}`;
+    if (dividerScrolledRef.current === key) return;
+    atBottomRef.current = false;
+    if (unreadAnchor.overflow) {
       // 未读多到超出已加载窗口：滚到顶，让「有更多未读消息在上方」的提示可见
+      const el = scrollRef.current;
       if (el) el.scrollTop = 0;
-      atBottomRef.current = false;
+      dividerScrolledRef.current = key;
       return;
     }
-    const key = `${convId}:${unreadDivider.id}`;
-    if (dividerScrolledRef.current === key) return;
+    const el = document.getElementById("unread-divider");
+    if (!el) return; // 窗口还没包含锚点，等扩窗后的下一次提交再定位（不记「已定位」）
     dividerScrolledRef.current = key;
-    atBottomRef.current = false;
-    document
-      .getElementById("unread-divider")
-      ?.scrollIntoView({ block: "start", behavior: "auto" });
-  }, [convId, unreadDivider.id, unreadDivider.overflow]);
+    el.scrollIntoView({ block: "start", behavior: "auto" });
+  }, [convId, unreadAnchor, windowCount]);
   /** 向更早的方向追加一窗（滚到顶或点「加载更早的消息」）。 */
   const loadEarlierMessages = useCallback(() => {
     const el = scrollRef.current;
@@ -1497,14 +1513,15 @@ export function ChatPage({
     setWindowCount((count) => expandCount(count, visibleMessages.length));
   }, [windowCount, visibleMessages.length]);
   // 切会话：窗口回到初始值（回到该会话时从最近的一窗开始看）。
-  // A3：阅读位置也复位到最新消息——切进来先看到的是「现在」，不是上次翻到一半的位置。
+  // A3：阅读位置复位到最新消息——切进来先看到的是「现在」，不是上次翻到一半的位置。
+  // 例外：切进来的会话有未读 → 先不贴底，交给未读分隔线的定位 effect（否则 A3 会先平滑滚底）。
   useEffect(() => {
     setWindowCount(DEFAULT_WINDOW);
     prevScrollHeightRef.current = null;
-    atBottomRef.current = true;
-    setNewBelow(false);
     const unreadAtSwitch =
       useChatStore.getState().conversations.find((c) => c.id === convId)?.unreadCount ?? 0;
+    atBottomRef.current = unreadAtSwitch === 0; // 有未读时先别贴底，交给分隔线定位
+    setNewBelow(false);
     if (unreadAtSwitch === 0) {
       bottomRef.current?.scrollIntoView({ behavior: "auto" });
     }
