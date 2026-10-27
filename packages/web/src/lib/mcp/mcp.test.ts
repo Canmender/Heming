@@ -275,6 +275,30 @@ describe("注册表（服务 + 工具 + 启用开关）", () => {
       expect(again.get(server.id)?.headers?.Authorization).toBe("Bearer top-secret");
     } finally {
       delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+      resetSecureStorageState();
+    }
+  });
+
+  it("解不开的服务配置不会被启动预置覆盖", () => {
+    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
+      available: true,
+      encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
+      decrypt: () => null,
+    };
+    resetSecureStorageState();
+    try {
+      const base = memStorage();
+      const cipher = JSON.stringify({ __hemingEnc: "v1", data: "garbage" });
+      base.map.set(MCP_SERVERS_KEY, cipher);
+
+      const reg = new McpRegistry(secureStorageFor(MCP_SERVERS_KEY, base));
+
+      // 读不出来就当空表展示，但绝不能把磁盘上的密文换成预置的明文。
+      expect(reg.servers()).toEqual([]);
+      expect(base.map.get(MCP_SERVERS_KEY)).toBe(cipher);
+    } finally {
+      delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+      resetSecureStorageState();
     }
   });
 
@@ -307,6 +331,7 @@ describe("注册表（服务 + 工具 + 启用开关）", () => {
       localStorage.removeItem(MCP_SERVERS_KEY);
       localStorage.removeItem(MCP_TOOLS_KEY);
       delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+      resetSecureStorageState();
     }
   });
 });

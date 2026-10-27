@@ -1,5 +1,5 @@
 import type { StorageLike } from "../memory/types.js";
-import { secureStorageFor } from "../secureStorage.js";
+import { secureStorageFor, secureStorageStatus } from "../secureStorage.js";
 import type { McpServerConfig, McpTool, McpToolRef, McpTransport } from "./types.js";
 import { DEFAULT_PRESET_SERVERS, presetServerId } from "./presets.js";
 
@@ -164,6 +164,10 @@ export class McpRegistry {
    */
   private seedDefaults(): void {
     if (this.serverList.length > 0) return;
+    // 键存在但解不开（keyring 重置 / 换系统账户 / 密文损坏）时 readServers 只能
+    // 读出空表；此时若继续预置并落盘，会把用户原有服务与请求头**永久覆盖**。
+    // 宁可这一轮显示空，也不动磁盘上的密文——升级回原账户还能恢复。
+    if (secureStorageStatus().undecryptableKeys.includes(MCP_SERVERS_KEY)) return;
     const removed = this.readRemovedPresets();
     const at = this.now();
     let changed = false;
