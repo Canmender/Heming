@@ -39,6 +39,7 @@
       "chart-fs.js",
       "export-fs.js",
       "crash-log.js",
+      "secret-store.js",
       "preload.js"
     ],
     "extraResources": [
