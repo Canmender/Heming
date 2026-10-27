@@ -708,6 +708,43 @@ describe("e2eSession 会话层", () => {
     );
     expect(plain).toEqual({ kind: "error", text: "供应商 401" });
   });
+
+  it("桌面安全存储下设备身份加密落盘：可解、不二次加密，chains 仍是明文", async () => {
+    localStorage.clear();
+    registry = {};
+    const calls = { encrypt: 0, decrypt: 0 };
+    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
+      available: true,
+      encrypt: (plain: string) => {
+        calls.encrypt += 1;
+        // 密文必须看不出原文（base64），否则 not.toContain 类断言会假失败。
+        return `enc:${Buffer.from(plain, "utf8").toString("base64")}`;
+      },
+      decrypt: (data: string) => {
+        calls.decrypt += 1;
+        return data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null;
+      },
+    };
+    try {
+      await bootstrap("secure-a");
+      const raw = localStorage.getItem(IDENTITY_KEY)!;
+      const envelope = JSON.parse(raw) as { __hemingEnc?: string; data?: string };
+      expect(envelope.__hemingEnc).toBe("v1");
+      expect(raw).not.toContain("ikEcdh");
+
+      const keys = await exportOwnDeviceKeys();
+      expect(keys.spk.pub).toBeTruthy();
+      // 读信封只是解密，不会把密文再包一层
+      expect((JSON.parse(localStorage.getItem(IDENTITY_KEY)!) as { data: string }).data).toBe(envelope.data);
+      expect(calls.encrypt).toBe(1);
+
+      const chainKey = Object.keys(localStorage).find((k) => k.startsWith("heming.e2e.chains."));
+      expect(chainKey).toBeTruthy();
+      expect(localStorage.getItem(chainKey!)).not.toContain("__hemingEnc");
+    } finally {
+      delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+    }
+  });
 });
 
 /**

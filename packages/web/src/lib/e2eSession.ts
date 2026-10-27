@@ -30,6 +30,7 @@ import {
   toB64,
   fromB64,
 } from "./e2eCrypto.js";
+import { secureGetItem, secureSetItem } from "./secureStorage.js";
 
 // —— 存储键（导出供测试/接线层定位）——
 export const IDENTITY_KEY = "heming.e2e.identity";
@@ -190,6 +191,21 @@ function writeJson(key: string, value: unknown): void {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+/** 身份键走 secure 层（凭据）；chains/deferred/msgCache 仍在下面的普通 readJson 路径。 */
+function readSecureJson<T>(key: string): T | null {
+  const raw = secureGetItem(key);
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function writeSecureJson(key: string, value: unknown): void {
+  secureSetItem(key, JSON.stringify(value));
+}
+
 /** Uint8Array → ArrayBuffer（TS 5.9 BufferSource 要求 ArrayBuffer 背书，同 e2eCrypto）。 */
 function ab(u8: Uint8Array): ArrayBuffer {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
@@ -293,7 +309,7 @@ function parseOuter(cipher: string): CipherOuter {
 let identityInFlight: Promise<StoredIdentity> | null = null;
 
 async function ensureIdentity(): Promise<StoredIdentity> {
-  const existing = readJson<StoredIdentity>(IDENTITY_KEY);
+  const existing = readSecureJson<StoredIdentity>(IDENTITY_KEY);
   if (existing?.kid && existing.spk?.pub) return existing;
   if (identityInFlight) return identityInFlight; // 并发首启：共享同一生成
   // 生成/载入身份：IK 双键（ECDH 协商 + ECDSA 签名链）+ 签名预键 SPK（§3.1）
@@ -315,7 +331,7 @@ async function ensureIdentity(): Promise<StoredIdentity> {
         createdAt: Date.now(),
       },
     };
-    writeJson(IDENTITY_KEY, stored);
+    writeSecureJson(IDENTITY_KEY, stored);
     return stored;
   })();
   identityInFlight = gen;
@@ -375,7 +391,7 @@ export function isForMe(env: SealedEnvelope): boolean {
     if (!env.cipher) return false;
     const outer = parseOuter(env.cipher);
     if (outer.ek === undefined || outer.to === undefined) return true; // 正文信封无定向
-    const raw = localStorage.getItem(IDENTITY_KEY);
+    const raw = secureGetItem(IDENTITY_KEY);
     if (!raw) return false;
     return (JSON.parse(raw) as StoredIdentity).kid === outer.to;
   } catch {
