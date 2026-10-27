@@ -269,6 +269,10 @@ describe("注册表（服务 + 工具 + 启用开关）", () => {
       const rawServers = base.map.get(MCP_SERVERS_KEY)!;
       expect(JSON.parse(rawServers).__hemingEnc).toBe("v1");
       expect(rawServers).not.toContain("top-secret");
+      // tools 键必须真的被写过，否则「不是信封」的断言恒真
+      reg.setTools(server.id, [{ name: "echo" }]);
+      expect(base.map.get(MCP_TOOLS_KEY)).toBeTruthy();
+      expect(base.map.get(MCP_TOOLS_KEY)!).toContain("echo");
       expect(base.map.get(MCP_TOOLS_KEY) ?? "").not.toContain("__hemingEnc");
 
       const again = new McpRegistry(secureStorageFor(MCP_SERVERS_KEY, base));
@@ -296,6 +300,29 @@ describe("注册表（服务 + 工具 + 启用开关）", () => {
       // 读不出来就当空表展示，但绝不能把磁盘上的密文换成预置的明文。
       expect(reg.servers()).toEqual([]);
       expect(base.map.get(MCP_SERVERS_KEY)).toBe(cipher);
+    } finally {
+      delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+      resetSecureStorageState();
+    }
+  });
+
+  it("用户改动覆盖解不开的服务配置前先备份旧密文", () => {
+    const base = memStorage();
+    const original = JSON.stringify({ __hemingEnc: "v1", data: "garbage" });
+    base.map.set(MCP_SERVERS_KEY, original);
+    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
+      available: true,
+      encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
+      decrypt: (data: string) =>
+        data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null,
+    };
+    resetSecureStorageState();
+    try {
+      const reg = new McpRegistry(secureStorageFor(MCP_SERVERS_KEY, base));
+      expect(reg.servers()).toEqual([]); // 解不开
+      reg.add({ name: "新服务", transport: "http", url: "https://example.test" });
+      expect(base.map.get(MCP_SERVERS_KEY + ".__heming_undecryptable")).toBe(original);
+      expect(JSON.parse(base.map.get(MCP_SERVERS_KEY)!).__hemingEnc).toBe("v1");
     } finally {
       delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
       resetSecureStorageState();

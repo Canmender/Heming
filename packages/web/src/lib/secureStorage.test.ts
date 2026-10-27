@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { StorageLike } from "./memory/types.js";
 import {
   ENVELOPE_MARK,
   ENVELOPE_VERSION,
+  UNDECRYPTABLE_BACKUP_SUFFIX,
   secureGetItem,
   secureSetItem,
   secureStorageFor,
@@ -110,7 +112,7 @@ describe("secureStorage · 有桥（桌面路径）", () => {
     expect(calls.encrypt).toBe(0);
   });
 
-  it("解不开的信封被新值覆盖后，状态不再报无法解密", () => {
+  it("解不开的信封被新值覆盖后，状态不再报无法解密，且先原样备份", () => {
     const bad = JSON.stringify({ [ENVELOPE_MARK]: ENVELOPE_VERSION, data: "garbage" });
     localStorage.setItem("k", bad);
     installBridge();
@@ -118,8 +120,67 @@ describe("secureStorage · 有桥（桌面路径）", () => {
     expect(secureStorageStatus().undecryptableKeys).toContain("k");
     secureSetItem("k", "fresh");
     expect(secureStorageStatus().undecryptableKeys).not.toContain("k");
+    expect(secureStorageStatus().backedUpKeys).toContain("k");
     expect(secureGetItem("k")).toBe("fresh");
   });
+
+  it("覆盖解不开的信封前先原样备份，状态转入 backedUpKeys", () => {
+    const original = JSON.stringify({ [ENVELOPE_MARK]: ENVELOPE_VERSION, data: "garbage" });
+    localStorage.setItem("k", original);
+    installBridge(); // decrypt("garbage") → null；encrypt 正常
+    expect(secureGetItem("k")).toBeNull();
+    expect(secureStorageStatus().undecryptableKeys).toContain("k");
+
+    secureSetItem("k", "fresh");
+    expect(localStorage.getItem("k" + UNDECRYPTABLE_BACKUP_SUFFIX)).toBe(original);
+    expect(secureStorageStatus().undecryptableKeys).not.toContain("k");
+    expect(secureStorageStatus().backedUpKeys).toContain("k");
+    expect(secureGetItem("k")).toBe("fresh");
+    // 幂等：再覆盖一次不重写备份（备份内容仍是第一份旧密文）
+    const backup = localStorage.getItem("k" + UNDECRYPTABLE_BACKUP_SUFFIX);
+    secureSetItem("k", "fresh-2");
+    expect(localStorage.getItem("k" + UNDECRYPTABLE_BACKUP_SUFFIX)).toBe(backup);
+  });
+
+  it("默认存储层不吞配额异常：信封写失败时保留明文并如实标记，不谎报已加密", () => {
+    installBridge();
+    const realSetItem = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      k: string,
+      v: string,
+    ) {
+      // 只让信封写失败（配额语义）：明文兜底照常写入
+      if (v.startsWith("{")) throw new DOMException("QuotaExceededError", "QuotaExceededError");
+      realSetItem.call(this, k, v);
+    });
+    try {
+      secureSetItem("k", "v");
+      expect(secureStorageStatus().plaintextKeys).toContain("k");
+      expect(secureStorageStatus().backedUpKeys).not.toContain("k");
+      expect(localStorage.getItem("k")).toBe("v"); // 明文兜底真的落盘
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("信封与明文兜底都写不进（配额耗尽）时不抛，仍如实标记明文", () => {
+    const backing = new Map<string, string>();
+    const failing: StorageLike = {
+      getItem: (k) => backing.get(k) ?? null,
+      setItem: (_k, v) => {
+        if (v.startsWith("{")) throw new Error("QuotaExceededError"); // 只让信封写失败
+        throw new Error("QuotaExceededError"); // 明文也写不进
+      },
+      removeItem: (k) => void backing.delete(k),
+    };
+    installBridge();
+    expect(() => secureSetItem("k", "v", failing)).not.toThrow();
+    expect(secureStorageStatus().plaintextKeys).toContain("k");
+    expect(secureStorageStatus().backedUpKeys).not.toContain("k");
+    expect(secureGetItem("k", failing)).toBeNull();
+  });
+
 
   it("损坏信封：不抛、返回 null、不改写原值", () => {
     const bad = JSON.stringify({ [ENVELOPE_MARK]: ENVELOPE_VERSION, data: "garbage" });

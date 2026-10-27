@@ -31,6 +31,7 @@ import {
   type PeerKeys,
   type SealedEnvelope,
 } from "./e2eSession.js";
+import { resetSecureStorageState, secureStorageStatus } from "./secureStorage.js";
 
 type SendEvent = Extract<WsClientEvent, { type: "send_message" }>;
 
@@ -758,6 +759,32 @@ describe("e2eSession 会话层", () => {
     } finally {
       localStorage.removeItem(IDENTITY_KEY); // 别把信封留给后续无桥用例（会被记成 undecryptable）
       delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+    }
+  });
+
+  it("解不开的设备身份在被自动重建前原样备份", async () => {
+    localStorage.clear();
+    registry = {};
+    const original = JSON.stringify({ __hemingEnc: "v1", data: "garbage" });
+    localStorage.setItem(IDENTITY_KEY, original);
+    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
+      available: true,
+      encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
+      decrypt: (data: string) =>
+        data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null,
+    };
+    resetSecureStorageState();
+    try {
+      await initSession("backup-secure", makeDeps([])); // 读身份 → 解不开 → 生成新身份并写盘
+      expect(localStorage.getItem(IDENTITY_KEY)).not.toBe(original);
+      expect(localStorage.getItem(IDENTITY_KEY + ".__heming_undecryptable")).toBe(original);
+      expect(secureStorageStatus().backedUpKeys).toContain(IDENTITY_KEY);
+      expect(await exportOwnDeviceKeys()).toBeTruthy(); // 新身份可用
+    } finally {
+      delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+      localStorage.removeItem(IDENTITY_KEY);
+      localStorage.removeItem(IDENTITY_KEY + ".__heming_undecryptable");
+      resetSecureStorageState();
     }
   });
 });
