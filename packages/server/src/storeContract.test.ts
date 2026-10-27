@@ -94,6 +94,26 @@ for (const f of factories) {
       expect(after.unreadCount).toBe(0);
     });
 
+    it("listConversations 带 lastMessageAt：空会话 null，发消息后是最后一条时间", async () => {
+      store.createUser("alice", "h", "A");
+      store.createUser("bob", "h", "B");
+      const a = store.findUserByUsername("alice")!.user;
+      const b = store.findUserByUsername("bob")!.user;
+      befriend(a.id, "bob", b.id);
+      const g = store.createGroup(a.id, "群", [b.id]);
+
+      const empty = store.listConversations(a.id).find((c) => c.id === g.id);
+      expect(empty?.lastMessageAt ?? null).toBeNull();
+
+      store.addMessage(g.id, "user", b.id, { text: "一" }, null);
+      // 隔开 5ms，确保第二条时间严格更晚（避免同毫秒让「取最后一条」与「取第一条」不可区分）
+      await new Promise((r) => setTimeout(r, 5));
+      const last = store.addMessage(g.id, "user", a.id, { text: "二" }, null);
+
+      const conv = store.listConversations(a.id).find((c) => c.id === g.id);
+      expect(conv?.lastMessageAt).toBe(last.createdAt);
+    });
+
     it("自己发的消息不计自己的未读", () => {
       store.createUser("alice", "h", "A");
       store.createUser("bob", "h", "B");

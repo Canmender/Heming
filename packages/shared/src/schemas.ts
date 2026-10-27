@@ -467,6 +467,8 @@ export const ConversationSchema = z.discriminatedUnion("type", [
     id: z.string().min(1),
     peer: UserSchema,
     unreadCount: z.number().int().min(0),
+    /** 最后一条消息时间（ISO）；无消息为 null。可选：兼容旧服务端。 */
+    lastMessageAt: z.string().nullable().optional(),
     /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
     archivedAt: z.string().nullable().optional(),
   }),
@@ -479,6 +481,8 @@ export const ConversationSchema = z.discriminatedUnion("type", [
     id: z.string().min(1),
     agent: AgentSchema,
     unreadCount: z.number().int().min(0),
+    /** 最后一条消息时间（ISO）；无消息为 null。可选：兼容旧服务端。 */
+    lastMessageAt: z.string().nullable().optional(),
     /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
     archivedAt: z.string().nullable().optional(),
   }),
@@ -489,6 +493,8 @@ export const ConversationSchema = z.discriminatedUnion("type", [
     // 口径裁决（计划 Task 4 写死）：memberIds 允许空数组（单人群，creator 自动入群）→ memberCount 下限 1
     memberCount: z.number().int().min(1),
     unreadCount: z.number().int().min(0),
+    /** 最后一条消息时间（ISO）；无消息为 null。可选：兼容旧服务端。 */
+    lastMessageAt: z.string().nullable().optional(),
     /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
     archivedAt: z.string().nullable().optional(),
   }),

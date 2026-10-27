@@ -289,6 +289,7 @@ export function createMemoryStore(): Store {
       const out: Conversation[] = [];
       for (const [id, conv] of conversations) {
         if (!conv.members.includes(userId)) continue;
+        const lastMessageAt = messages.get(id)?.at(-1)?.createdAt ?? null;
         if (conv.kind === "group") {
           out.push({
             id,
@@ -296,6 +297,7 @@ export function createMemoryStore(): Store {
             name: conv.name!,
             memberCount: conv.members.length,
             unreadCount: unread(id),
+            lastMessageAt,
             archivedAt: conv.archivedAt?.get(userId) ?? null,
           });
         } else if (conv.kind === "agent") {
@@ -303,7 +305,7 @@ export function createMemoryStore(): Store {
           // 宁可不显示，也不给前端一个没有 agent 字段的半截对象。
           const agent = conv.agentPeerId ? agents.get(conv.agentPeerId) : undefined;
           if (agent)
-            out.push({ id, type: "agent", agent, unreadCount: unread(id), archivedAt: conv.archivedAt?.get(userId) ?? null });
+            out.push({ id, type: "agent", agent, unreadCount: unread(id), lastMessageAt, archivedAt: conv.archivedAt?.get(userId) ?? null });
         } else {
           const peerId = conv.members.find((m) => m !== userId);
           if (peerId)
@@ -312,6 +314,7 @@ export function createMemoryStore(): Store {
               type: "direct",
               peer: mustUser(peerId),
               unreadCount: unread(id),
+              lastMessageAt,
               archivedAt: conv.archivedAt?.get(userId) ?? null,
             });
         }
