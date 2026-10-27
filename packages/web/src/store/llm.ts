@@ -2,7 +2,8 @@ import { create } from "zustand";
 import { secureGetItem, secureSetItem } from "../lib/secureStorage.js";
 
 /**
- * LLM 连接本机存储：Key/绑定/提示词三键只写 localStorage，绝不上传自有服务端
+ * LLM 连接本机存储：Key 走系统安全存储（桌面端就地信封，见 lib/secureStorage.ts），
+ * 绑定/提示词仍在普通 localStorage；三键都只写本机，绝不上传自有服务端
  *（红线见 lib/llmClient.ts——请求目标只随 profile.baseUrl）。
  */
 export type LlmProvider = "openai" | "anthropic";
