@@ -241,6 +241,13 @@ describe("ws", () => {
     expect(err.type).toBe("error");
     if (err.type === "error") expect(err.code).toBe("forbidden");
 
+    // 超过 1 秒窗口后恢复转发（防「永久丢弃」回归）
+    await new Promise((r) => setTimeout(r, 1100));
+    const bWaitAgain = nextEvent(b);
+    a.send(JSON.stringify({ type: "typing", conversationId: convId }));
+    const again = await bWaitAgain;
+    expect(again).toMatchObject({ type: "typing", conversationId: convId, userId: aliceId });
+
     a.close();
     b.close();
     s.close();

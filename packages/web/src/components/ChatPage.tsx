@@ -2317,6 +2317,8 @@ export function ChatPage({
    * typing 过期清理（d.38）：每秒按 `Date.now()` 判一次 TTL——后台标签页定时器被节流时
    * 也不会把「停手很久」误判成还在输入；无变化返回原对象，不触发重渲染。
    */
+  // 刻意常驻：过期靠时间戳判定，定时器只负责刷新 UI。
+  // 测试侧请用有界推进（advanceTimersByTimeAsync），不要用 runAllTimers（永不收敛）。
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
@@ -2452,7 +2454,8 @@ export function ChatPage({
 
   const onDraftChange = (value: string) => {
     setDraft(value);
-    if (value.trim() !== "") {
+    // 智能体不参与「正在输入」（规格 §1C）：它与人的对话由流式气泡表达。
+    if (value.trim() !== "" && conv?.type !== "agent") {
       const now = Date.now();
       // 先拿到句柄再消费 2 秒窗口：connected 但句柄暂空时不该白烧一次节流
       const handle = wsHandleRef.current;

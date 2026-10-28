@@ -850,6 +850,28 @@ describe("ChatPage", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("智能体会话输入不发送 typing", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: { id: "system-assistant", owner_id: null, name: "和小鸣", avatar: null, description: "官方" },
+          unreadCount: 0,
+        },
+      ],
+    });
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    fireEvent.change(screen.getByLabelText("消息输入框"), { target: { value: "你好" } });
+    expect(send).not.toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
+  });
+
   it("收到他人 typing 显示名字；自己与别的会话忽略；3 秒后消失", async () => {
     vi.useFakeTimers();
     try {
@@ -883,6 +905,55 @@ describe("ChatPage", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("群聊 typing 显示成员名，多人时用「等 N 人」", async () => {
+    const carol: User = { id: "u3", username: "carol", displayName: "卡罗尔" };
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 4, unreadCount: 0 }],
+    });
+    mockMessagesFetch([], undefined, {
+      members: [
+        [
+          { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
+          { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer },
+          { kind: "user", id: "u3", name: "卡罗尔", avatar: null, user: carol },
+        ],
+      ],
+      reads: [[]],
+    });
+
+    render(<ChatPage />);
+    await act(async () => {}); // 等成员快照落定
+    act(() => {
+      lastHandlers().onOpen?.();
+      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
+    });
+    expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
+
+    act(() => {
+      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u3" });
+    });
+    expect(screen.getByText("鲍勃、卡罗尔 正在输入…")).toBeInTheDocument();
+
+    act(() => {
+      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u9" });
+    });
+    expect(screen.getByText("鲍勃 等 3 人正在输入…")).toBeInTheDocument();
+  });
+
+  it("群成员快照缺名字时回退「有人」", async () => {
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 4, unreadCount: 0 }],
+    });
+    mockMessagesFetch([], undefined, { members: [[{ kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me }]], reads: [[]] });
+    render(<ChatPage />);
+    await act(async () => {});
+    act(() => {
+      lastHandlers().onOpen?.();
+      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u9" });
+    });
+    expect(screen.getByText("有人 正在输入…")).toBeInTheDocument();
   });
 
   it("切会话后旧连接晚到的 typing 不污染新会话", async () => {
