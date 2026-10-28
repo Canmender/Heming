@@ -426,6 +426,12 @@ export function createSqliteStore(dbPath: string): SqliteStore {
           .get(convId) as { created_at: string } | undefined;
         return row?.created_at ?? null;
       };
+      const lastReadAtOf = (convId: string): string | null => {
+        const row = db
+          .prepare("SELECT read_at FROM message_reads WHERE conv_id = ? AND user_id = ?")
+          .get(convId, userId) as { read_at: string } | undefined;
+        return row?.read_at ?? null;
+      };
       const out: Conversation[] = [];
       for (const c of convs) {
         if (c.kind === "group") {
@@ -439,6 +445,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
             memberCount: Number(mc.n),
             unreadCount: unreadOf(c.id),
             lastMessageAt: lastMessageAtOf(c.id),
+            lastReadAt: lastReadAtOf(c.id),
             archivedAt: c.archived_at,
           });
         } else if (c.kind === "agent") {
@@ -458,6 +465,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
               agent: rowToAgent(agent),
               unreadCount: unreadOf(c.id),
               lastMessageAt: lastMessageAtOf(c.id),
+              lastReadAt: lastReadAtOf(c.id),
               archivedAt: c.archived_at,
             });
         } else {
@@ -471,6 +479,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
               peer: mustUser(peer.member_id),
               unreadCount: unreadOf(c.id),
               lastMessageAt: lastMessageAtOf(c.id),
+              lastReadAt: lastReadAtOf(c.id),
               archivedAt: c.archived_at,
             });
         }

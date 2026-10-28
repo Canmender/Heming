@@ -94,25 +94,42 @@ for (const f of factories) {
       expect(after.unreadCount).toBe(0);
     });
 
-    it("listConversations 带 lastMessageAt：空会话 null，发消息后是最后一条时间", async () => {
+    it("listConversations 带 lastMessageAt / lastReadAt：三种会话都填，已读后 lastReadAt 更新", async () => {
       store.createUser("alice", "h", "A");
       store.createUser("bob", "h", "B");
       const a = store.findUserByUsername("alice")!.user;
       const b = store.findUserByUsername("bob")!.user;
       befriend(a.id, "bob", b.id);
+
       const g = store.createGroup(a.id, "群", [b.id]);
+      const d = store.createDirectConversation(a.id, b.id);
+      // 智能体一对一：系统 agent 由 ensurePresetGroup 登记进名册（owner 为 null，人人可聊）
+      store.ensurePresetGroup("和鸣交流群", [a.id], "system-assistant");
+      const ag = store.createAgentConversation(a.id, "system-assistant");
 
-      const empty = store.listConversations(a.id).find((c) => c.id === g.id);
-      expect(empty?.lastMessageAt).toBeNull();
-      expect(empty).toHaveProperty("lastMessageAt", null);
+      for (const id of [g.id, d.id, ag.id]) {
+        const empty = store.listConversations(a.id).find((c) => c.id === id)!;
+        expect(empty.lastMessageAt ?? null).toBeNull();
+        expect(empty.lastReadAt ?? null).toBeNull();
+        // 字段必须存在（可选字段删掉会让上面的 ?? null 静默通过——这里锁死契约）
+        expect(empty).toHaveProperty("lastReadAt", null);
+      }
 
-      store.addMessage(g.id, "user", b.id, { text: "一" }, null);
-      // 隔开 5ms，确保第二条时间严格更晚（避免同毫秒让「取最后一条」与「取第一条」不可区分）
-      await new Promise((r) => setTimeout(r, 5));
-      const last = store.addMessage(g.id, "user", a.id, { text: "二" }, null);
+      const gm = store.addMessage(g.id, "user", b.id, { text: "群消息" }, null);
+      const dm = store.addMessage(d.id, "user", b.id, { text: "私聊" }, null);
+      const am = store.addMessage(ag.id, "user", a.id, { text: "自己发也算时间" }, null);
 
-      const conv = store.listConversations(a.id).find((c) => c.id === g.id);
-      expect(conv?.lastMessageAt).toBe(last.createdAt);
+      const gConv = store.listConversations(a.id).find((c) => c.id === g.id)!;
+      const dConv = store.listConversations(a.id).find((c) => c.id === d.id)!;
+      const aConv = store.listConversations(a.id).find((c) => c.id === ag.id)!;
+      expect(gConv.lastMessageAt).toBe(gm.createdAt);
+      expect(dConv.lastMessageAt).toBe(dm.createdAt);
+      expect(aConv.lastMessageAt).toBe(am.createdAt);
+
+      store.markRead(d.id, a.id);
+      const dRead = store.listConversations(a.id).find((c) => c.id === d.id)!;
+      expect(dRead.lastReadAt).not.toBeNull();
+      expect(dRead.lastReadAt! >= dm.createdAt).toBe(true);
     });
 
     it("自己发的消息不计自己的未读", () => {

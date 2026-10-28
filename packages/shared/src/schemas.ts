@@ -469,6 +469,8 @@ export const ConversationSchema = z.discriminatedUnion("type", [
     unreadCount: z.number().int().min(0),
     /** 最后一条消息时间（ISO）；无消息为 null。可选：兼容旧服务端。 */
     lastMessageAt: z.string().nullable().optional(),
+    /** 当前用户在该会话的最后已读时间（ISO）；从未已读为 null。可选：兼容旧服务端。 */
+    lastReadAt: z.string().nullable().optional(),
     /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
     archivedAt: z.string().nullable().optional(),
   }),
@@ -483,6 +485,8 @@ export const ConversationSchema = z.discriminatedUnion("type", [
     unreadCount: z.number().int().min(0),
     /** 最后一条消息时间（ISO）；无消息为 null。可选：兼容旧服务端。 */
     lastMessageAt: z.string().nullable().optional(),
+    /** 当前用户在该会话的最后已读时间（ISO）；从未已读为 null。可选：兼容旧服务端。 */
+    lastReadAt: z.string().nullable().optional(),
     /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
     archivedAt: z.string().nullable().optional(),
   }),
@@ -495,6 +499,8 @@ export const ConversationSchema = z.discriminatedUnion("type", [
     unreadCount: z.number().int().min(0),
     /** 最后一条消息时间（ISO）；无消息为 null。可选：兼容旧服务端。 */
     lastMessageAt: z.string().nullable().optional(),
+    /** 当前用户在该会话的最后已读时间（ISO）；从未已读为 null。可选：兼容旧服务端。 */
+    lastReadAt: z.string().nullable().optional(),
     /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
     archivedAt: z.string().nullable().optional(),
   }),
