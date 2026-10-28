@@ -7,7 +7,7 @@
 
 ## 1. 用例与结果
 
-新增 16 条用例全部为工作区增量（`git diff` 可见），按文件分组如下。首跑基线：`pnpm --filter @heming/web test` 2022 例中 1 例失败（C2）；服务端与 HomePage 用例通过。评审后补 C2c（旧会话 handler 晚到不清新会话），web 最终 2023 例。
+新增 16 条用例全部为相对 d.38.1.9.0 的测试增量，按文件分组如下。首跑基线：`pnpm --filter @heming/web test` 2022 例中 1 例失败（C2）；服务端与 HomePage 用例通过。评审后补 C2c（旧会话 handler 晚到不清新会话），web 最终 2023 例。
 
 ### 1.1 `packages/server/src/ws.test.ts`（5 条，全 PASS）
 
