@@ -251,8 +251,8 @@ describe("HomePage", () => {
     expect(screen.getByText("暂无消息")).toBeInTheDocument();
   });
 
-  it("K3：lastMessageAt 相同保持原数组顺序；缺省（null/undefined）排在最后", async () => {
-    const mk = (id: string, name: string, lastMessageAt?: string) => ({
+  it("K3：lastMessageAt 降序；等值保持原数组顺序；null/缺省置后且稳定（5 行不被截断）", async () => {
+    const mk = (id: string, name: string, lastMessageAt?: string | null) => ({
       id,
       type: "group" as const,
       name,
@@ -260,12 +260,15 @@ describe("HomePage", () => {
       unreadCount: 0,
       ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
     });
-    const same = "2026-10-25T00:00:00.000Z";
+    const t1 = "2026-10-25T00:00:00.000Z";
+    const t2 = "2026-10-26T00:00:00.000Z";
+    // 输入顺序刻意与期望输出不同：不排序时本用例必红。
     const rows = [
-      mk("k-a", "并列甲", same),
-      mk("k-b", "并列乙", same),
-      mk("k-c", "并列丙", same),
-      mk("k-null", "无时间的群"), // 缺省 lastMessageAt
+      mk("k-missing", "缺省时间的群"), // 无字段 → 与 null 同为「空」
+      mk("k-null", "空时间的群", null),
+      mk("k-a", "并列甲", t1),
+      mk("k-b", "并列乙", t1),
+      mk("k-c", "并列丙", t2),
     ];
     mockFetch({ conversations: rows });
     useChatStore.setState({ conversations: rows, messages: {}, workspaceReady: true });
@@ -273,13 +276,19 @@ describe("HomePage", () => {
     render(<HomePage />);
     await act(async () => {});
 
-    const a = screen.getByText("并列甲").closest("button")!;
-    const b = screen.getByText("并列乙").closest("button")!;
-    const c = screen.getByText("并列丙").closest("button")!;
-    const n = screen.getByText("无时间的群").closest("button")!;
-    expect(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(b.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(c.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 5 行都必须渲染（最近会话最多 6 行，不能被截掉）
+    for (const name of ["并列丙", "并列甲", "并列乙", "缺省时间的群", "空时间的群"]) {
+      expect(screen.getByText(name)).toBeInTheDocument();
+    }
+
+    // 期望 DOM 顺序：c(t2) → a(t1) → b(t1，等值保持原序) → missing("") → null(""，等值保持原序)
+    const btn = (name: string) => screen.getByText(name).closest("button")!;
+    const order = ["并列丙", "并列甲", "并列乙", "缺省时间的群", "空时间的群"].map(btn);
+    for (let i = 0; i < order.length - 1; i += 1) {
+      expect(
+        order[i].compareDocumentPosition(order[i + 1]) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
   });
 
   it("最近会话预览：纯附件消息（text 空串）显示「(附件)」，无消息仍「暂无消息」", async () => {

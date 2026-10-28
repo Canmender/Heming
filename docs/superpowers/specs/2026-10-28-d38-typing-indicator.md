@@ -75,4 +75,4 @@
 - 门禁：`pnpm --filter @heming/shared build && pnpm -r build && pnpm -r --workspace-concurrency=1 test` 全绿。
 - 人工复核：两个窗口（或两账号）互发时，对方输入框上方出现「正在输入…」，停手 3 秒后消失；
   群聊显示名字；自己输入不出现自己的提示。
-- 版本：`d.38.1.9.0`；CHANGELOG、HANDOFF、INDEX 同步。
+- 版本：`d.38.1.10.0`；CHANGELOG、HANDOFF、INDEX 同步。

@@ -1066,6 +1066,48 @@ describe("ChatPage", () => {
     expect(screen.getByText("卡罗尔 正在输入…")).toBeInTheDocument();
   });
 
+  it("C2c：旧会话 handler 晚到的消息不清新会话的输入态", async () => {
+    const carol: User = { id: "u3", username: "carol", displayName: "卡罗尔" };
+    const members: Member[] = [
+      { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
+      { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer },
+      { kind: "user", id: "u3", name: "卡罗尔", avatar: null, user: carol },
+    ];
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "group", name: "A 组", memberCount: 3, unreadCount: 0 },
+        { id: "c2", type: "group", name: "B 组", memberCount: 3, unreadCount: 0 },
+      ],
+    });
+    mockMessagesFetch([], undefined, { members: [members, members], reads: [[], []] });
+    render(<ChatPage />);
+    await act(async () => {}); // 等 c1 成员快照落定
+    const oldHandlers = lastHandlers(); // c1 的旧闭包（convId=c1）
+
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" });
+    });
+    await act(async () => {}); // 等 c2 成员快照落定
+    act(() => {
+      lastHandlers().onOpen?.();
+      lastHandlers().onEvent({ type: "typing", conversationId: "c2", userId: "u2" });
+    });
+    expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
+
+    // c1 旧 socket 晚到的消息：conversationId=c1，若只看闭包 convId 会误清新会话里 u2 的输入态
+    act(() => {
+      oldHandlers.onEvent({
+        type: "message_new",
+        message: {
+          ...msg("m-old", "旧会话的消息", "2026-10-14T02:00:00.000Z"),
+          conversationId: "c1",
+          senderId: "u2",
+        },
+      });
+    });
+    expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
+  });
+
   it("C3：切走再切回，旧的「正在输入」不跨会话残留", async () => {
     vi.useFakeTimers();
     try {
