@@ -74,6 +74,11 @@ declare global {
       encrypt: (plain: string) => string | null;
       decrypt: (cipherB64: string) => string | null;
     };
+    /** 内部：桌面端系统通知桥（preload 暴露；浏览器里 undefined）。 */
+    __heming_notify?: {
+      message: (payload: { title: string; body: string; conversationId?: string }) => void;
+      onOpen: (cb: (conversationId: string | null) => void) => () => void;
+    };
     heming?: {
       /** 运行平台（process.platform），如 "win32" / "darwin"。 */
       platform?: string;

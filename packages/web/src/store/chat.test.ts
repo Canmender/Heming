@@ -18,6 +18,9 @@ vi.mock("../lib/agentsApi.js", async (importOriginal) => {
 const rosterA1: Agent = { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "官方" };
 const rosterA2: Agent = { id: "a2", owner_id: "u1", name: "架构师", avatar: null, description: "d" };
 
+/** 直聊会话夹具（bumpUnread 新用例：conversation 联合类型要求 peer 齐全）。 */
+const peer: User = { id: "u2", username: "bob", displayName: "鲍勃" };
+
 const msg = (id: string, text: string): Message => ({
   id,
   conversationId: "c1",
@@ -287,6 +290,23 @@ describe("chat store", () => {
 
     useChatStore.getState().bumpUnread("ghost"); // 未知会话：静默忽略
     expect(useChatStore.getState().conversations.map((c) => c.unreadCount)).toEqual([2, 1]);
+  });
+
+  it("bumpUnread：同一条消息只计一次，带 at 更新 lastMessageAt", () => {
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0, lastMessageAt: null }],
+    });
+    expect(useChatStore.getState().bumpUnread("c1", "2026-10-28T01:00:00.000Z", "m1")).toBe(true);
+    expect(useChatStore.getState().bumpUnread("c1", "2026-10-28T01:00:00.000Z", "m1")).toBe(false);
+    const c = useChatStore.getState().conversations[0];
+    expect(c.unreadCount).toBe(1);
+    expect(c.lastMessageAt).toBe("2026-10-28T01:00:00.000Z");
+  });
+
+  it("bumpUnread：会话不在本地列表时仍返回「新消息」", () => {
+    useChatStore.setState({ conversations: [] });
+    expect(useChatStore.getState().bumpUnread("ghost", "2026-10-28T01:00:00.000Z", "m2")).toBe(true);
+    expect(useChatStore.getState().bumpUnread("ghost", "2026-10-28T01:00:00.000Z", "m2")).toBe(false);
   });
 
   it("clearUnread 带服务端 at：同时清零未读并刷新 lastReadAt；不传 at 不动 lastReadAt", () => {

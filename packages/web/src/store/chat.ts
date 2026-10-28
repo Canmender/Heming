@@ -235,8 +235,8 @@ interface ChatState {
   loadReads: (convId: string) => Promise<void>;
   /** 未读清零（A12：收到 read_update 且 userId 是自己时调用）；`at` 为服务端读点，带上则顺带刷新 `lastReadAt`。 */
   clearUnread: (convId: string, at?: string) => void;
-  /** 未读 +1（A12：收到他会话 message_new 且不是自己发的时调用）。 */
-  bumpUnread: (convId: string) => void;
+  /** 未读 +1（A12：收到他会话 message_new 且不是自己发的时调用）；返回「这条消息是否第一次被处理」（按 messageId 去重）。 */
+  bumpUnread: (convId: string, at?: string, messageId?: string) => boolean;
   upsertStream: (id: string, patch: AgentStreamPatch) => void;
   removeStream: (id: string) => void;
   markStreamOwner: (id: string) => void;
@@ -267,6 +267,10 @@ interface ChatState {
 export function activeConversationsOf(list: Conversation[]): Conversation[] {
   return list.filter((c) => !c.archivedAt);
 }
+
+/** 进程内已处理的入站消息 id（多连接/页面切换重叠时防止重复计未读）。 */
+const seenIncoming = new Set<string>();
+const SEEN_INCOMING_CAP = 500;
 
 export const useChatStore = create<ChatState>((set, get) => {
   // —— E2E Task 4 内部辅助（解密结果应用 / pending 重试）——
@@ -614,14 +618,29 @@ export const useChatStore = create<ChatState>((set, get) => {
     });
     if (changed) set({ conversations: next });
   },
-  bumpUnread(convId) {
+  bumpUnread(convId, at, messageId) {
+    if (messageId) {
+      if (seenIncoming.has(messageId)) return false;
+      seenIncoming.add(messageId);
+      if (seenIncoming.size > SEEN_INCOMING_CAP) {
+        const oldest = seenIncoming.values().next().value;
+        if (oldest !== undefined) seenIncoming.delete(oldest);
+      }
+    }
     const list = get().conversations;
-    if (!list.some((c) => c.id === convId)) return;
+    if (!list.some((c) => c.id === convId)) return true; // 列表未加载：交给 loadWorkspace 补未读
     set({
       conversations: list.map((c) =>
-        c.id === convId ? { ...c, unreadCount: (c.unreadCount ?? 0) + 1 } : c,
+        c.id === convId
+          ? {
+              ...c,
+              unreadCount: (c.unreadCount ?? 0) + 1,
+              ...(at !== undefined ? { lastMessageAt: at } : {}),
+            }
+          : c,
       ),
     });
+    return true;
   },
   upsertStream(id, patch) {
     const prev = get().streaming[id];

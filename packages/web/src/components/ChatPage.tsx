@@ -114,6 +114,7 @@ import { mcpRegistry } from "../lib/mcp/store.js";
 import { openCallWindow } from "../lib/callWindow.js";
 import { useModalA11y } from "./useModalA11y.js";
 import { capabilityNotice } from "../lib/capabilityNotice.js";
+import { notifyIncomingMessage } from "../lib/messageNotify.js";
 import { formatClock, formatDayClock, needsTimeSeparator } from "../lib/formatTime.js";
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
@@ -224,15 +225,6 @@ declare global {
 
 /** aggregateChips 结果里「无 chips」的稳定空表。 */
 const NO_CHIPS: ReactionChip[] = [];
-
-/** 会话标题（与 header 同口径；通知列表按此显示来源）。 */
-function convTitleOf(conv: Conversation): string {
-  return conv.type === "direct"
-    ? conv.peer.displayName
-    : conv.type === "agent"
-      ? conv.agent.name
-      : `${conv.name}（${conv.memberCount} 人）`;
-}
 
 /** 进程内聚合缓存（fix I4）：同 (messages, plainOf) 引用 → 返回同一结果对象（可断言「不重复计算」）。 */
 let chipAggCache: {
@@ -1174,26 +1166,6 @@ export function ChatPage({
       setSendNotice("导出失败，请检查浏览器下载权限", "error");
     }
     setExportOpen(false);
-  };
-
-  /**
-   * 通知：他会话的新消息进通知中心。
-   *
-   * 只有 ChatPage 挂着 WS，所以「应用开着时收到他才提醒」是这套结构的既成事实：
-   * 系统级推送需要服务端与桌面通知权限，本机时间线不做那件事。
-   * E2E 消息此刻还没解密，正文留空（绝不把密文写进通知）。
-   */
-  const notifyIncomingMessage = (m: Message) => {
-    if (m.senderId === me?.id) return;
-    // 经 getState 读：WS 回调闭包只随 convId 建立，列表快照会过期
-    const conv = useChatStore.getState().conversations.find((c) => c.id === m.conversationId);
-    useNotificationStore.getState().push({
-      kind: "message",
-      key: `message:${m.id}`,
-      title: conv ? convTitleOf(conv) : "新消息",
-      ...(m.enc === "e2e" ? {} : m.payload.text ? { body: m.payload.text } : {}),
-      conversationId: m.conversationId,
-    });
   };
 
   /** 通知：任务收尾进通知中心（用户常在发起任务后切去别处）。 */
@@ -2230,8 +2202,13 @@ export function ChatPage({
         } else if (e.type === "message_new") {
           // 他会话的新消息：未读 +1（A12：自己发的不算）+ 进通知中心
           if (e.message.senderId !== useAuthStore.getState().user?.id) {
-            useChatStore.getState().bumpUnread(e.message.conversationId);
-            notifyIncomingMessage(e.message);
+            if (
+              useChatStore
+                .getState()
+                .bumpUnread(e.message.conversationId, e.message.createdAt, e.message.id)
+            ) {
+              notifyIncomingMessage(e.message);
+            }
           }
         } else if (e.type === "read_update") {
           // A12：自己在别的端/页面读过 → 该会话未读清零（不只是当前会话）。
