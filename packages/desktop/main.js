@@ -18,6 +18,7 @@ const { registerWikiIpc } = require("./wiki-fs");
 const { registerChartIpc } = require("./chart-fs");
 const { registerExportIpc } = require("./export-fs");
 const { registerSecretIpc } = require("./secret-store");
+const { registerNotifyIpc } = require("./notify-bridge");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
 
 // ── web 界面嵌入（设计 §4）──────────────────────────────────────────────
@@ -563,6 +564,8 @@ app.whenReady().then(() => {
     // 本机密钥信封桥（d.36）：preload 在页面加载时用 sendSync 问可用性，
     // 所以必须早于 createWindow()。
     registerSecretIpc(ipcMain);
+    // 系统通知桥（d.39）：消息提醒只在窗口不在前台时由渲染层请求
+    registerNotifyIpc(ipcMain, { Notification, BrowserWindow });
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

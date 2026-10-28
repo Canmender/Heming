@@ -179,3 +179,18 @@ contextBridge.exposeInMainWorld("__heming_secrets", {
     }
   },
 });
+
+// —— 系统通知桥（d.39）——
+// 消息提醒：窗口不在前台时由渲染层请求主进程弹系统通知；点击主进程聚焦窗口并回传会话 id。
+contextBridge.exposeInMainWorld("__heming_notify", {
+  message: (payload) => {
+    ipcRenderer.send("notify:message", payload);
+  },
+  onOpen: (callback) => {
+    // 非函数参数不注册监听，返回空取消函数：渲染层传错时不能炸在 preload 里。
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, conversationId) => callback(conversationId ?? null);
+    ipcRenderer.on("notify:open", listener);
+    return () => ipcRenderer.removeListener("notify:open", listener);
+  },
+});

@@ -38,8 +38,12 @@ test("preload 暴露 __heming_exports（记忆导出落盘桥）", () => {
 // 注：preload.js 会多次调用 exposeInMainWorld（heming / __heming_ice_servers_get /
 // __heming_voice_call / __heming_secrets），此处按 key 收集而非「最后一次即 heming」。
 // ipcRenderer.sendSync 必须在桩里存在：preload 顶层会同步问一次密钥桥可用性。
-function loadExposed(ipc = {}) {
+// sink.listeners：channel → Set<listener>，用于断言订阅注册/取消；
+// sink.sent：ipcRenderer.send 的调用记录，用于断言 system 通知请求。
+function loadExposed(ipc = {}, sink = {}) {
   const exposed = {};
+  const listeners = sink.listeners || new Map();
+  const sent = sink.sent || [];
   const stubBridge = {
     exposeInMainWorld: (key, api) => {
       exposed[key] = api;
@@ -48,8 +52,17 @@ function loadExposed(ipc = {}) {
   const stubIpc = {
     sendSync: (channel, arg) => (typeof ipc[channel] === "function" ? ipc[channel](arg) : undefined),
     invoke: async () => undefined,
-    on: () => {},
-    removeListener: () => {},
+    send: (channel, ...args) => {
+      sent.push([channel, ...args]);
+    },
+    on: (channel, fn) => {
+      if (!listeners.has(channel)) listeners.set(channel, new Set());
+      listeners.get(channel).add(fn);
+    },
+    removeListener: (channel, fn) => {
+      const set = listeners.get(channel);
+      if (set) set.delete(fn);
+    },
   };
   const originalLoad = Module._load;
   Module._load = function (request) {
@@ -180,4 +193,42 @@ test("encrypt/decrypt 经 sendSync 转发；异常或非字符串回落 null", (
   const failing = loadExposed({ "secret:available": () => true }); // encrypt 通道缺失 → undefined
   assert.equal(failing.__heming_secrets.encrypt("x"), null);
   assert.equal(failing.__heming_secrets.decrypt("y"), null);
+});
+
+// ── 系统通知桥（d.39）──
+test("preload 暴露 __heming_notify（系统通知桥）并可取消订阅", () => {
+  const listeners = new Map();
+  const sent = [];
+  const exposed = loadExposed({}, { listeners, sent });
+  const bridge = exposed.__heming_notify;
+  assert.ok(bridge, "应暴露 __heming_notify");
+  assert.equal(typeof bridge.message, "function");
+  assert.equal(typeof bridge.onOpen, "function");
+
+  const payload = { title: "鲍勃", body: "你有一条新消息", conversationId: "c1" };
+  bridge.message(payload);
+  assert.deepEqual(sent[0], ["notify:message", payload]);
+
+  const received = [];
+  const off = bridge.onOpen((id) => received.push(id));
+  assert.equal(typeof off, "function");
+  const set = listeners.get("notify:open");
+  assert.ok(set && set.size === 1, "onOpen 应注册 notify:open 监听");
+  for (const fn of [...set]) fn({}, "c1");
+  for (const fn of [...set]) fn({}, undefined); // 主进程未带回会话 id 时回落 null
+  assert.deepEqual(received, ["c1", null]);
+
+  off();
+  assert.equal(listeners.get("notify:open").size, 0, "取消订阅应移除 notify:open 监听");
+});
+
+test("__heming_notify.onOpen 收到非函数回调时安全忽略", () => {
+  const listeners = new Map();
+  const bridge = loadExposed({}, { listeners }).__heming_notify;
+  assert.doesNotThrow(() => {
+    const off = bridge.onOpen(null);
+    assert.equal(typeof off, "function");
+    off();
+  });
+  assert.equal((listeners.get("notify:open") || new Set()).size, 0, "非函数回调不应注册监听");
 });
