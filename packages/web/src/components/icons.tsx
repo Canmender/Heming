@@ -197,3 +197,11 @@ export const SelectIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="m8.5 12 2.5 2.5 5-5" />
   </svg>
 );
+
+/** 铃铛：免打扰开关。 */
+export const BellIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+    <path d="M10.3 21a2 2 0 0 0 3.4 0" />
+  </svg>
+);

@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ChatInfoCard } from "./ChatInfoCard.js";
+import { isMuted, resetConvPrefsForTest } from "../lib/convPrefs.js";
 import type { Conversation } from "@heming/shared";
 
 const direct = {
@@ -28,5 +29,23 @@ describe("ChatInfoCard", () => {
     render(<ChatInfoCard conv={direct} onClose={onClose} />);
     fireEvent.click(screen.getByLabelText("关闭会话信息"));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("免打扰开关：读写本机偏好，aria-checked 与文案随动", () => {
+    localStorage.clear();
+    resetConvPrefsForTest();
+    const { unmount } = render(<ChatInfoCard conv={direct} onClose={() => {}} />);
+    const toggle = screen.getByRole("switch", { name: "免打扰" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("免打扰")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("已开启免打扰")).toBeInTheDocument();
+    expect(isMuted("c1")).toBe(true);
+
+    unmount();
+    resetConvPrefsForTest();
+    localStorage.clear();
   });
 });
