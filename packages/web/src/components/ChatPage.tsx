@@ -313,6 +313,11 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** 他机流 watchdog 清扫周期（Task 7）：15s 一次扫全局 streaming 的过期项（阈值在 store 内 60s）。 */
 const STREAM_SWEEP_INTERVAL_MS = 15_000;
 
+/** typing 发送节流：输入期间最多每 2 秒发一次（只传元数据）。 */
+export const TYPING_SEND_INTERVAL_MS = 2000;
+/** typing 接收端过期：3 秒没有新事件即视为停止输入。 */
+export const TYPING_TTL_MS = 3000;
+
 /** 表情回应浮排的常用 emoji（Task 6；emoji 仅作回应数据，不作图标）。 */
 /** 输入栏（文本行）高度：默认比单行大一些，用户可拖动上沿调整，写 localStorage 持久化。 */
 const COMPOSER_HEIGHT_KEY = "heming.chat.composerHeight.v1";
@@ -667,6 +672,10 @@ export function ChatPage({
   const [connected, setConnected] = useState(false);
   /** WS 三态：首次连接 / 已连接 / 已断开（用于标题与横幅，不用 connected 二元冒充）。 */
   const [connState, setConnState] = useState<"connecting" | "open" | "closed">("connecting");
+  /** 本会话正在输入的人：userId → 最后事件时间（毫秒）。 */
+  const [typingBy, setTypingBy] = useState<Record<string, number>>({});
+  /** 上次发送 typing 的时间（每会话重置）。 */
+  const typingSentAtRef = useRef(0);
   /** 断线后恢复的短暂提示（3 秒）。 */
   const [recovered, setRecovered] = useState(false);
   const recoveredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -910,6 +919,29 @@ export function ChatPage({
         : `${conv.name}（${conv.memberCount} 人）`
     : "会话";
   const isGroup = conv?.type === "group";
+  /**
+   * 正在输入提示（d.38）：direct 认对端名、group 认本会话成员快照（缺名字回退「有人」）；
+   * agent 会话不显示（智能体已有流式气泡）。名字去重后按 1 / 2 / 3+ 三种句式出文案。
+   */
+  const typingNames = Array.from(
+    new Set(
+      Object.keys(typingBy)
+        .map((id) => {
+          if (conv?.type === "direct") return conv.peer.id === id ? conv.peer.displayName : null;
+          if (conv?.type === "group") return memberInfoById?.[id]?.name ?? "有人";
+          return null;
+        })
+        .filter((name): name is string => !!name),
+    ),
+  );
+  const typingText =
+    typingNames.length === 0
+      ? ""
+      : typingNames.length === 1
+        ? `${typingNames[0]} 正在输入…`
+        : typingNames.length === 2
+          ? `${typingNames[0]}、${typingNames[1]} 正在输入…`
+          : `${typingNames[0]} 等 ${typingNames.length} 人正在输入…`;
 
   // —— 语音通话（Task 4/5）：useVoiceCall 状态机；信令复用当前 WS 通道 ——
   // 仅 Electron 桌面端支持通话：以 preload 暴露的桥接 API 是否存在为判定依据。
@@ -2062,6 +2094,9 @@ export function ChatPage({
     // 多选状态同为会话级：A 会话勾的 id 在 B 会话里不存在，留着只会导出空文件
     setSelectMode(false);
     setSelectedIds([]);
+    // 正在输入提示也是会话级：A 会话的提示不得带进 B 会话；发送节流也随会话重新计时
+    setTypingBy({});
+    typingSentAtRef.current = 0;
   }, [convId]);
 
   // E2E Task 4：会话初始化 + 解密 handler 注入 + 身份公钥上云（硬验收①——不上云则
@@ -2192,6 +2227,11 @@ export function ChatPage({
               /* 同挂载期降级：拉取失败保留旧读态 */
             });
           }
+        } else if (e.type === "typing") {
+          // 只认本会话他人的输入态：广播含发送者自己（多设备），自己一律忽略
+          if (e.conversationId === convId && e.userId !== useAuthStore.getState().user?.id) {
+            setTypingBy((prev) => ({ ...prev, [e.userId]: Date.now() }));
+          }
         } else if (e.type === "error") {
           console.warn(`[${e.code}] ${e.message}`);
         }
@@ -2259,6 +2299,26 @@ export function ChatPage({
       }
     };
   }, [convId, appendMessage, loadReads]);
+
+  /**
+   * typing 过期清理（d.38）：每秒按 `Date.now()` 判一次 TTL——后台标签页定时器被节流时
+   * 也不会把「停手很久」误判成还在输入；无变化返回原对象，不触发重渲染。
+   */
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setTypingBy((prev) => {
+        const next: Record<string, number> = {};
+        let changed = false;
+        for (const [id, at] of Object.entries(prev)) {
+          if (now - at < TYPING_TTL_MS) next[id] = at;
+          else changed = true;
+        }
+        return changed ? next : prev; // 没变化不触发重渲染
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   /**
    * A3 滚动贴底跟随：贴底时才跟着新消息与流式文本走；用户上滑后不再强行拽底，
@@ -2379,6 +2439,13 @@ export function ChatPage({
 
   const onDraftChange = (value: string) => {
     setDraft(value);
+    if (value.trim() !== "") {
+      const now = Date.now();
+      if (connected && now - typingSentAtRef.current >= TYPING_SEND_INTERVAL_MS) {
+        typingSentAtRef.current = now;
+        wsHandleRef.current?.send({ type: "typing", conversationId: convId });
+      }
+    }
     scheduleDraftSave(convId, value);
     if (!isGroup) return;
     const token = /@([^\s@]*)$/.exec(value);
@@ -3962,6 +4029,16 @@ export function ChatPage({
               @
             </button>
           )}
+        </div>
+        {/* 正在输入提示（d.38）：固定 h-4，出现/消失不推挤输入区。
+            常驻 aria-live 区域让「内容新增」被播报；role 只在有提示时挂上，
+            空行不冒充一个空的 status（规格 §1C：只在有输入提示时播报）。 */}
+        <div
+          role={typingText ? "status" : undefined}
+          aria-live="polite"
+          className="h-4 shrink-0 px-5 text-[10px] leading-4 text-muted"
+        >
+          {typingText}
         </div>
         {/* 拖动把手：上沿可拖，加高/压扁输入区（高度写 localStorage，下次进入沿用） */}
         <div

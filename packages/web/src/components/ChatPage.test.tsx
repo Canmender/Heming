@@ -812,6 +812,70 @@ describe("ChatPage", () => {
     }
   });
 
+  it("输入非空且已连接时发送 typing，2 秒内连续输入只发一次", async () => {
+    vi.useFakeTimers();
+    try {
+      const send = vi.fn();
+      vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+      mockMessagesFetch([]);
+      render(<ChatPage />);
+      act(() => {
+        lastHandlers().onOpen?.();
+      });
+
+      const input = screen.getByLabelText("消息输入框");
+      fireEvent.change(input, { target: { value: "你" } });
+      expect(send).toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
+
+      send.mockClear();
+      fireEvent.change(input, { target: { value: "你好" } });
+      expect(send).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(2001);
+      });
+      fireEvent.change(input, { target: { value: "你好呀" } });
+      expect(send).toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("未连接时不发 typing", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    fireEvent.change(screen.getByLabelText("消息输入框"), { target: { value: "你" } });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("收到他人 typing 显示名字；自己与别的会话忽略；3 秒后消失", async () => {
+    vi.useFakeTimers();
+    try {
+      mockMessagesFetch([]);
+      render(<ChatPage />);
+      act(() => {
+        lastHandlers().onOpen?.();
+        lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
+      });
+      expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
+
+      act(() => {
+        lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u1" }); // 自己
+        lastHandlers().onEvent({ type: "typing", conversationId: "c2", userId: "u2" }); // 别的会话
+      });
+      expect(screen.queryByText(/爱丽丝 正在输入/)).not.toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(4000); // TTL 3s + 清理定时器 1s
+      });
+      expect(screen.queryByText("鲍勃 正在输入…")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("连接句柄为 null 时发送：保留草稿并显示「连接未就绪，消息未发送」", async () => {
     vi.mocked(connectWs).mockReturnValue(null as unknown as WsHandle);
     mockMessagesFetch([]);
@@ -3117,10 +3181,12 @@ describe("ChatPage", () => {
         vi.advanceTimersByTime(60_000); // 60s 上限到点 → 自动 stop
       });
       // 上传链的 file.arrayBuffer() 走 jsdom FileReader 的两跳 setImmediate（被假时钟接管）：
-      // runAllTimersAsync 冲刷这两跳 + 其后的微任务，否则 send 永远到不了（假 setImmediate 不会被 await act 冲掉）
+      // 有界推进 10ms 冲刷这两跳 + 其后的微任务，否则 send 永远到不了（假 setImmediate 不会被 await act 冲掉）。
+      // d.38 起 ChatPage 常驻 1s 的 typing 过期 interval，runAllTimersAsync 会把它当成永不收敛的
+      // 循环（10000 次后中止）——故不用 runAllTimers，改用有界推进。
       // crypto.subtle 走 I/O 阶段（非微任务），假时钟下不自动完成 → 切回真时钟让 WebCrypto 落地
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(10);
       });
       vi.useRealTimers();
       await act(async () => {});
@@ -3129,7 +3195,7 @@ describe("ChatPage", () => {
         .map((c) => c[0] as Record<string, unknown>)
         .find((e) => e.type === "send_message");
       expect(ev).toBeDefined();
-      expect(ev!.enc).toBe("e2e"); // 假时钟下 runAllTimersAsync 已冲刷封发链
+      expect(ev!.enc).toBe("e2e"); // 有界推进 + 切回真时钟后封发链已冲刷
       expect(decodePlain(ev!.cipher as string)).toMatchObject({
         kind: "file",
         file: {
