@@ -251,6 +251,37 @@ describe("HomePage", () => {
     expect(screen.getByText("暂无消息")).toBeInTheDocument();
   });
 
+  it("K3：lastMessageAt 相同保持原数组顺序；缺省（null/undefined）排在最后", async () => {
+    const mk = (id: string, name: string, lastMessageAt?: string) => ({
+      id,
+      type: "group" as const,
+      name,
+      memberCount: 2,
+      unreadCount: 0,
+      ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
+    });
+    const same = "2026-10-25T00:00:00.000Z";
+    const rows = [
+      mk("k-a", "并列甲", same),
+      mk("k-b", "并列乙", same),
+      mk("k-c", "并列丙", same),
+      mk("k-null", "无时间的群"), // 缺省 lastMessageAt
+    ];
+    mockFetch({ conversations: rows });
+    useChatStore.setState({ conversations: rows, messages: {}, workspaceReady: true });
+
+    render(<HomePage />);
+    await act(async () => {});
+
+    const a = screen.getByText("并列甲").closest("button")!;
+    const b = screen.getByText("并列乙").closest("button")!;
+    const c = screen.getByText("并列丙").closest("button")!;
+    const n = screen.getByText("无时间的群").closest("button")!;
+    expect(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(b.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(c.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("最近会话预览：纯附件消息（text 空串）显示「(附件)」，无消息仍「暂无消息」", async () => {
     const attachMsg = {
       id: "m1",

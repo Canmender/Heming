@@ -1332,3 +1332,139 @@ describe("WS 首帧鉴权（d.30 · P0-3）", () => {
     b.close();
   });
 });
+
+// —— d.38 typing 对抗用例（adversarial QA 2026-10-28）——
+describe("typing 对抗（d.38）", () => {
+  /**
+   * 连上并确认服务端已把本 socket 登记进 socketsByUser：
+   * 用自身 mark_read 的回声（广播含发送者）当登记信号，避免 connect 后立即广播的登记竞态。
+   */
+  async function connectRegistered(userId: string, conversationId: string): Promise<WebSocket> {
+    const ws = await connect(issueToken(userId));
+    const self = nextEvent(ws);
+    ws.send(JSON.stringify({ type: "mark_read", conversationId }));
+    expect((await self).type).toBe("read_update");
+    return ws;
+  }
+
+  /** 每次用例独立三名用户 + 群（避开 1s 节流与既有会话的消息计数互相污染）。 */
+  function freshGroup() {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const a = store.createUser(`ty-a-${suffix}`, "h", "甲");
+    const b = store.createUser(`ty-b-${suffix}`, "h", "乙");
+    const c = store.createUser(`ty-c-${suffix}`, "h", "丙");
+    // createGroup 要求成员与创建者是好友（store 的成员校验口径）
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    store.acceptFriendRequest(store.createFriendRequest(a.id, c.username).id, c.id);
+    const g = store.createGroup(a.id, `输入群-${suffix}`, [b.id, c.id]);
+    return { a, b, c, g };
+  }
+
+  /** 每次用例独立私聊（两名成员）。 */
+  function freshDirect() {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const a = store.createUser(`td-a-${suffix}`, "h", "甲");
+    const b = store.createUser(`td-b-${suffix}`, "h", "乙");
+    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
+    const conv = store.createDirectConversation(a.id, b.id);
+    return { a, b, conv };
+  }
+
+  it("S1：群聊 typing 扇出给所有成员（bob 与 carol 都收到，userId=alice）", async () => {
+    const { a, b, c, g } = freshGroup();
+    const wsA = await connectRegistered(a.id, g.id);
+    const wsB = await connectRegistered(b.id, g.id);
+    const wsC = await connectRegistered(c.id, g.id);
+
+    const bWait = nextEvent(wsB);
+    const cWait = nextEvent(wsC);
+    wsA.send(JSON.stringify({ type: "typing", conversationId: g.id }));
+    const [eb, ec] = await Promise.all([bWait, cWait]);
+    expect(eb).toMatchObject({ type: "typing", conversationId: g.id, userId: a.id });
+    expect(ec).toMatchObject({ type: "typing", conversationId: g.id, userId: a.id });
+
+    wsA.close();
+    wsB.close();
+    wsC.close();
+  });
+
+  it("S2：typing 夹带 text/userId 等额外字段被剥离，userId 由服务端身份决定", async () => {
+    const { a, b, conv } = freshDirect();
+    const wsA = await connectRegistered(a.id, conv.id);
+    const wsB = await connectRegistered(b.id, conv.id);
+
+    const bWait = nextEvent(wsB);
+    wsA.send(
+      JSON.stringify({
+        type: "typing",
+        conversationId: conv.id,
+        text: "SECRET",
+        userId: "spoofed",
+      }),
+    );
+    const ev = await bWait;
+    // 精确相等：未知字段被 schema strip，userId 不可伪造
+    expect(ev).toEqual({ type: "typing", conversationId: conv.id, userId: a.id });
+    expect(Object.prototype.hasOwnProperty.call(ev, "text")).toBe(false);
+
+    wsA.close();
+    wsB.close();
+  });
+
+  it("S3：typing 缺 conversationId 回 bad_event 且不广播", async () => {
+    const { a, b, conv } = freshDirect();
+    const wsA = await connectRegistered(a.id, conv.id);
+    const wsB = await connectRegistered(b.id, conv.id);
+
+    const bEvents: WsServerEvent[] = [];
+    wsB.on("message", (d) => bEvents.push(JSON.parse(d.toString())));
+    const aErr = nextEvent(wsA);
+    wsA.send(JSON.stringify({ type: "typing" }));
+    const errEv = await aErr;
+    expect(errEv.type).toBe("error");
+    if (errEv.type === "error") expect(errEv.code).toBe("bad_event");
+
+    await new Promise((r) => setTimeout(r, 150));
+    expect(bEvents).toHaveLength(0);
+
+    wsA.close();
+    wsB.close();
+  });
+
+  it("S4：typing 不落库，也不被误当 mark_read 广播 read_update", async () => {
+    const { a, b, conv } = freshDirect();
+    const wsA = await connectRegistered(a.id, conv.id);
+    const wsB = await connectRegistered(b.id, conv.id);
+
+    const before = store.listMessages(conv.id).length;
+    const bWait = nextEvent(wsB);
+    wsA.send(JSON.stringify({ type: "typing", conversationId: conv.id }));
+    expect((await bWait).type).toBe("typing");
+    expect(store.listMessages(conv.id).length).toBe(before);
+
+    // 投递窗口内不得出现 read_update / message_new（typing 不能掉进 else 的已读分支）
+    const bAfter: WsServerEvent[] = [];
+    wsB.on("message", (d) => bAfter.push(JSON.parse(d.toString())));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(bAfter.filter((e) => e.type === "read_update" || e.type === "message_new")).toHaveLength(0);
+
+    wsA.close();
+    wsB.close();
+  });
+
+  it("S5：发送者自己的 socket 也会收到 typing 广播（客户端负责过滤自己）", async () => {
+    const { a, b, conv } = freshDirect();
+    const wsA = await connectRegistered(a.id, conv.id);
+    const wsB = await connectRegistered(b.id, conv.id);
+
+    const aWait = nextEvent(wsA);
+    const bWait = nextEvent(wsB);
+    wsA.send(JSON.stringify({ type: "typing", conversationId: conv.id }));
+    const [ea, eb] = await Promise.all([aWait, bWait]);
+    expect(ea).toMatchObject({ type: "typing", conversationId: conv.id, userId: a.id });
+    expect(eb).toMatchObject({ type: "typing", conversationId: conv.id, userId: a.id });
+
+    wsA.close();
+    wsB.close();
+  });
+});

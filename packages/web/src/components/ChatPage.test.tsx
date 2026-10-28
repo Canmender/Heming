@@ -980,6 +980,175 @@ describe("ChatPage", () => {
     expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
   });
 
+  // —— d.38 typing 对抗用例（adversarial QA 2026-10-28）——
+
+  it("C1：纯空白输入不发送 typing（节流窗口过后也不发）", async () => {
+    vi.useFakeTimers();
+    try {
+      const send = vi.fn();
+      vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+      mockMessagesFetch([]);
+      render(<ChatPage />);
+      act(() => {
+        lastHandlers().onOpen?.();
+      });
+
+      const input = screen.getByLabelText("消息输入框");
+      fireEvent.change(input, { target: { value: "   " } });
+      expect(send).not.toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
+
+      // 越过 2 秒节流窗口再输空白：仍不发（trim 判空在节流之前）
+      act(() => {
+        vi.advanceTimersByTime(2001);
+      });
+      fireEvent.change(input, { target: { value: " \t\n " } });
+      expect(send).not.toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("C2：同一发送者的消息到达后「正在输入」应立即消失（不等 3 秒 TTL）", async () => {
+    vi.useFakeTimers();
+    try {
+      mockMessagesFetch([]);
+      render(<ChatPage />);
+      act(() => {
+        lastHandlers().onOpen?.();
+      });
+
+      act(() => {
+        lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
+      });
+      expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
+
+      // 对方话已发出：输入态应当立刻收掉，而不是再挂 3 秒
+      act(() => {
+        lastHandlers().onEvent({
+          type: "message_new",
+          message: msg("m-arrive", "我来了", "2026-10-14T02:00:00.000Z"),
+        });
+      });
+      expect(screen.queryByText("鲍勃 正在输入…")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("C2b：他人消息到达不清除其他发送者的 typing（只清该发送者）", async () => {
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 4, unreadCount: 0 }],
+    });
+    mockMessagesFetch([], undefined, {
+      members: [
+        [
+          { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
+          { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer },
+          { kind: "user", id: "u3", name: "卡罗尔", avatar: null, user: { id: "u3", username: "carol", displayName: "卡罗尔" } },
+        ],
+      ],
+      reads: [[]],
+    });
+    render(<ChatPage />);
+    await act(async () => {});
+    act(() => {
+      lastHandlers().onOpen?.();
+      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u3" });
+    });
+    expect(screen.getByText("卡罗尔 正在输入…")).toBeInTheDocument();
+
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        message: { ...msg("m-bob", "鲍勃说话", "2026-10-14T02:00:00.000Z"), conversationId: "c1", senderId: "u2" },
+      });
+    });
+    expect(screen.getByText("卡罗尔 正在输入…")).toBeInTheDocument();
+  });
+
+  it("C3：切走再切回，旧的「正在输入」不跨会话残留", async () => {
+    vi.useFakeTimers();
+    try {
+      useChatStore.setState({
+        conversations: [
+          { id: "c1", type: "direct", peer, unreadCount: 0 },
+          { id: "c2", type: "group", name: "B 组", memberCount: 2, unreadCount: 0 },
+        ],
+      });
+      mockMessagesFetch([]);
+      render(<ChatPage />);
+      act(() => {
+        lastHandlers().onOpen?.();
+        lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
+      });
+      expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
+
+      act(() => {
+        useUiStore.setState({ activeConversationId: "c2" });
+      });
+      expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
+
+      act(() => {
+        useUiStore.setState({ activeConversationId: "c1" });
+      });
+      expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("C4：私聊里未知用户的 typing 不渲染提示", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+    act(() => {
+      lastHandlers().onOpen?.();
+      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u9" });
+    });
+    expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("C5：断线期间的输入不进队列，重连后不补发 typing", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    act(() => {
+      lastHandlers().onClose?.();
+    });
+
+    const input = screen.getByLabelText("消息输入框");
+    fireEvent.change(input, { target: { value: "断线时打的字" } });
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "typing" }));
+
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    // 重连本身不得冲刷出一帧迟到的 typing
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "typing" }));
+
+    // 反向对照：重连后继续输入应恢复发送（证明不是整条 typing 链路失效）
+    fireEvent.change(input, { target: { value: "断线时打的字，重连后继续" } });
+    expect(send).toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
+  });
+
+  it("C6：同一用户的重复 typing 事件只出一行提示", async () => {
+    mockMessagesFetch([]);
+    render(<ChatPage />);
+    await act(async () => {});
+    act(() => {
+      lastHandlers().onOpen?.();
+      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
+      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
+    });
+    expect(screen.getAllByText("鲍勃 正在输入…")).toHaveLength(1);
+  });
+
   it("连接句柄为 null 时发送：保留草稿并显示「连接未就绪，消息未发送」", async () => {
     vi.mocked(connectWs).mockReturnValue(null as unknown as WsHandle);
     mockMessagesFetch([]);
@@ -4409,6 +4578,50 @@ describe("ChatPage", () => {
     render(<ChatPage />);
     await waitFor(() => expect(screen.getByText("普通消息")).toBeInTheDocument());
     expect(screen.queryByRole("separator", { name: "以下是新消息" })).not.toBeInTheDocument();
+  });
+
+  // —— d.37 连续性对抗用例（adversarial QA 2026-10-28）——
+
+  it("K1：lastReadAt 与 m2.createdAt 相等时，分隔线严格落在 m3 前（不是 m2 前）", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 1, lastReadAt: "2026-10-14T02:00:00.000Z" },
+      ],
+    });
+    mockMessagesFetch([
+      msg("m1", "已读一", "2026-10-14T01:00:00.000Z"),
+      msg("m2", "边界那条（恰在 lastReadAt）", "2026-10-14T02:00:00.000Z"),
+      msg("m3", "未读那条", "2026-10-14T03:00:00.000Z"),
+    ]);
+    render(<ChatPage />);
+    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
+    const m2El = document.getElementById("msg-m2")!;
+    const m3El = document.getElementById("msg-m3")!;
+    // m2 在分隔线之前（边界那一秒算已读）
+    expect(m2El.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 分隔线在 m3 之前
+    expect(divider.compareDocumentPosition(m3El) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("K2：unreadCount=0 但带 lastReadAt → 不画分隔线并回到底部", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 0, lastReadAt: "2026-10-14T00:00:00.000Z" },
+      ],
+    });
+    mockMessagesFetch([
+      msg("m1", "读过的消息", "2026-10-14T01:00:00.000Z"),
+      msg("m2", "还是读过的", "2026-10-14T02:00:00.000Z"),
+    ]);
+    render(<ChatPage />);
+    await screen.findByText("还是读过的");
+    await waitFor(() =>
+      expect(screen.queryByRole("separator", { name: "以下是新消息" })).not.toBeInTheDocument(),
+    );
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "auto" });
   });
 
   it("未读只来自不渲染的控制行时，不画分隔线也不提示更多未读", async () => {

@@ -25,7 +25,8 @@
 ### B. 节流与过期
 
 - **发送端**：输入非空且已连接时，最多每 **2 秒**发一次 `typing`（`TYPING_SEND_INTERVAL_MS=2000`）。
-  空输入不发；发送消息后不额外发「停止」，由接收端过期。
+  空输入不发；发送消息后不额外发「停止」，由接收端收口：**收到该发送者的消息时立即清除其输入态**；
+  其余情况（停手、断线、事件丢失）由 3 秒 TTL 过期。
 - **服务端**：每个连接每秒最多转发一次（`TYPING_MIN_INTERVAL_MS=1000`），防恶意/故障客户端刷屏。
   超出静默丢弃（不报错、不回包）。
 - **接收端**：每个 `(conversationId, userId)` 记录最后事件时间；**3 秒**没有新事件即视为停止
@@ -66,7 +67,7 @@
 | 文件 | 覆盖 |
 |---|---|
 | `packages/server/src/ws.test.ts` | 成员发 typing → 同会话成员收到 `{type:"typing",userId}`；非成员收到 `error(forbidden)`；1 秒内第二条被静默丢弃；超过 1 秒窗口后恢复转发 |
-| `packages/web/src/components/ChatPage.test.tsx` | 输入非空 → 发 `{type:"typing",conversationId}`；2 秒内连续输入只发一次（fake timers）；未连接时不发；智能体会话不发；收到他人 typing 显示 direct 名；自己/别的会话忽略；3 秒后消失；切会话清空、旧连接晚到不污染；群聊显示成员名与 2/3+ 句式；缺名回退「有人」 |
+| `packages/web/src/components/ChatPage.test.tsx` | 输入非空 → 发 `{type:"typing",conversationId}`；2 秒内连续输入只发一次（fake timers）；未连接时不发；智能体会话不发；收到他人 typing 显示 direct 名；自己/别的会话忽略；3 秒后消失；**该发送者的消息到达即清除其输入态（不等 TTL），其他发送者不受影响**；切会话清空、旧连接晚到不污染；群聊显示成员名与 2/3+ 句式；缺名回退「有人」 |
 | shared schema | 类型编译由 server/web typecheck 兜 |
 
 ## 5. 验收

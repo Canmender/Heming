@@ -2212,6 +2212,14 @@ export function ChatPage({
         voiceCall.handleServerEvent(e);
         if (e.type === "message_new" && e.message.conversationId === convId) {
           appendMessage(e.message);
+          // 对方的话已到，其「正在输入」立即收口：只清该发送者，不等 3 秒 TTL，也不动其他输入者。
+          const senderId = e.message.senderId;
+          setTypingBy((prev) => {
+            if (!(senderId in prev)) return prev; // 没变不触发重渲染
+            const next = { ...prev };
+            delete next[senderId];
+            return next;
+          });
           // 会话内正在看的新消息即时标记已读：否则退出后 loadWorkspace 会把已读内容算作未读
           if (e.message.senderId !== useAuthStore.getState().user?.id) {
             wsHandleRef.current?.send({ type: "mark_read", conversationId: convId });
