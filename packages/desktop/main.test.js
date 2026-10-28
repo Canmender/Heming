@@ -291,3 +291,14 @@ test("密钥信封桥在 createWindow 之前注册（preload 用 sendSync 问可
   assert.ok(create > 0, "main.js 应调用 createWindow()");
   assert.ok(reg < create, "注册必须早于窗口创建");
 });
+
+// ── 系统通知桥（d.39）──
+test("main.js：接上系统通知桥，保持主窗口引用并用它聚焦", () => {
+  assert.ok(mainCode.includes('require("./notify-bridge")'), "主进程必须接上 notify-bridge");
+  assert.ok(mainCode.includes("registerNotifyIpc(ipcMain"), "必须注册 notify IPC");
+  assert.ok(mainCode.includes("mainWindow = win"), "createWindow 后必须记住主窗口");
+  assert.ok(
+    /registerNotifyIpc\(ipcMain,\s*\{[\s\S]{0,80}getMainWindow:\s*\(\)\s*=>\s*mainWindow/.test(mainCode),
+    "通知点击必须取主窗口，而不是 getAllWindows()[0]"
+  );
+});

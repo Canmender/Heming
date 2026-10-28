@@ -31,13 +31,18 @@ function registerNotifyIpc(ipcMain, { Notification, getMainWindow }) {
       if (!Notification.isSupported()) return;
       const notification = new Notification({ title, body });
       notification.on("click", () => {
-        // 显式取主窗口：多窗口（主窗口 + 独立通话窗口）时不能聚焦到通话窗口。
-        const win = getMainWindow();
-        if (!win || win.isDestroyed()) return;
-        if (win.isMinimized()) win.restore();
-        win.show();
-        win.focus();
-        if (conversationId) win.webContents.send("notify:open", conversationId);
+        // 点击回调异步执行：getMainWindow() 抛错或窗口瞬间销毁都不能让主进程未捕获。
+        try {
+          // 显式取主窗口：多窗口（主窗口 + 独立通话窗口）时不能聚焦到通话窗口。
+          const win = getMainWindow();
+          if (!win || win.isDestroyed()) return;
+          if (win.isMinimized()) win.restore();
+          win.show();
+          win.focus();
+          if (conversationId) win.webContents.send("notify:open", conversationId);
+        } catch {
+          /* 聚焦/跳转失败不影响消息主流程 */
+        }
       });
       notification.show();
     } catch {
