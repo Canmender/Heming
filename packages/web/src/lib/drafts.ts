@@ -123,6 +123,50 @@ function draftKey(convId: string): string {
   return `${DRAFT_PREFIX}${convId}`;
 }
 
+/**
+ * 草稿变更订阅：标签 / 缩略列 / 首页在草稿落盘后即时刷新，
+ * 而不是等其它状态变化顺带重渲染。
+ *
+ * 通知按**正文**比较（不比较 `at`）：`at` 每次写入都会刷新，
+ * 拿它比较会让 300ms 节流的每一次落盘都触发一轮全局重渲染。
+ */
+let version = 0;
+const listeners = new Set<() => void>();
+
+function notifyDraftsChanged(): void {
+  version += 1;
+  for (const listener of [...listeners]) {
+    try {
+      listener();
+    } catch {
+      /* 订阅者异常不影响其它订阅者 */
+    }
+  }
+}
+
+/** 当前版本号：给 `useSyncExternalStore` 做快照（变化即重渲染）。 */
+export function draftsVersion(): number {
+  return version;
+}
+
+/** 订阅草稿变更；返回取消订阅函数。 */
+export function subscribeDrafts(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/** 某会话是否有草稿（只看键是否存在，不解析内容）。 */
+export function hasDraft(convId: string): boolean {
+  if (!convId) return false;
+  try {
+    return getStorage().getItem(draftKey(convId)) !== null;
+  } catch {
+    return false;
+  }
+}
+
 /** 列出当前全部草稿键（只比较键名，不读值）。 */
 function listDraftKeys(): string[] {
   const store = getStorage();
@@ -163,13 +207,19 @@ export function setDraft(convId: string, text: string): void {
   if (!convId) return;
   try {
     const store = getStorage();
+    const key = draftKey(convId);
     if (!text.trim()) {
-      store.removeItem(draftKey(convId));
+      const had = store.getItem(key) !== null;
+      store.removeItem(key);
+      if (had) notifyDraftsChanged();
       return;
     }
+    // 只比正文：`at` 每次写入都变，拿它比较会每 300ms 通知一轮
+    const prevText = parseDraft(store.getItem(key))?.text ?? "";
     const clip = clipDraft(text);
     const value: StoredDraft = { text: clip, at: nextDraftAt() };
-    store.setItem(draftKey(convId), JSON.stringify(value));
+    store.setItem(key, JSON.stringify(value));
+    if (prevText !== value.text) notifyDraftsChanged();
     pruneDrafts();
   } catch {
     /* 配额满 / 隐私模式：草稿只在内存里（本次输入不丢，刷新会丢），不抛 */
@@ -180,7 +230,11 @@ export function setDraft(convId: string, text: string): void {
 export function clearDraft(convId: string): void {
   if (!convId) return;
   try {
-    getStorage().removeItem(draftKey(convId));
+    const store = getStorage();
+    const key = draftKey(convId);
+    const had = store.getItem(key) !== null;
+    store.removeItem(key);
+    if (had) notifyDraftsChanged();
   } catch {
     /* 删不掉也只能这样 */
   }
@@ -203,9 +257,12 @@ export function pruneDrafts(): void {
       at: parseDraft(store.getItem(key))?.at ?? 0,
     }));
     rows.sort((a, b) => a.at - b.at); // 最旧在前
+    let removed = 0;
     for (const row of rows.slice(0, rows.length - MAX_DRAFTS)) {
       store.removeItem(row.key);
+      removed += 1;
     }
+    if (removed > 0) notifyDraftsChanged();
   } catch {
     /* 清理失败不影响读写 */
   }

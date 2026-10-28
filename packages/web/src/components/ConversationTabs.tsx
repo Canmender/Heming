@@ -1,5 +1,7 @@
 import type { Conversation } from "@heming/shared";
+import { useSyncExternalStore } from "react";
 import { archiveConversation } from "../lib/api.js";
+import { draftsVersion, hasDraft, subscribeDrafts } from "../lib/drafts.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { Avatar } from "./Avatar.js";
@@ -32,6 +34,10 @@ export function ConversationTabs() {
   const openConversation = useUiStore((s) => s.openConversation);
   const closeConversationTab = useUiStore((s) => s.closeConversationTab);
 
+  // 草稿落盘后刷新标签（版本号变化触发重渲染；不订阅具体内容）。
+  // 必须在下面的 early return 之前调用——hooks 顺序不能因空标签而变。
+  useSyncExternalStore(subscribeDrafts, draftsVersion, () => 0);
+
   /**
    * 归档：从日常视野里收起来，可在「归档」页恢复。
    *
@@ -62,13 +68,14 @@ export function ConversationTabs() {
         const conv = conversations.find((c) => c.id === id);
         const { name, avatar } = labelOf(conv);
         const unread = conv?.unreadCount ?? 0;
+        const draft = hasDraft(id);
         const active = id === activeId;
         return (
           <div
             key={id}
             role="tab"
             aria-selected={active}
-            aria-label={`${name}${unread > 0 ? ` ${unread} 条未读` : ""}`}
+            aria-label={`${name}${unread > 0 ? ` ${unread} 条未读` : ""}${draft ? " 有草稿" : ""}`}
             tabIndex={active ? 0 : -1}
             onKeyDown={(e) => {
               // 左右方向键在标签间移动焦点（标准 tablist 键盘约定）
@@ -96,6 +103,13 @@ export function ConversationTabs() {
             >
               <Avatar user={{ displayName: name, avatar }} size={15} className="shrink-0" />
               <span className="truncate">{name}</span>
+              {draft && (
+                <span
+                  aria-hidden="true"
+                  title="有草稿"
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#b45309]"
+                />
+              )}
               {unread > 0 && (
                 <span
                   aria-hidden="true"

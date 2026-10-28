@@ -5,6 +5,7 @@ import { ConversationTabs } from "./ConversationTabs.js";
 import { ChatConvStrip } from "./ChatConvStrip.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore, TABS_MAX } from "../store/ui.js";
+import { clearDraft, setDraft } from "../lib/drafts.js";
 
 const me: User = { id: "u1", username: "alice", displayName: "爱丽丝" };
 const peer: User = { id: "u2", username: "li", displayName: "李四" };
@@ -147,5 +148,27 @@ describe("ChatConvStrip 左侧头像缩略列", () => {
     render(<ChatConvStrip />);
     const group = screen.getByRole("button", { name: "切换到 评审组 2 条未读" });
     expect(group.textContent).toContain("2");
+  });
+});
+
+describe("草稿标记（标签栏 + 缩略列）", () => {
+  it("有草稿的会话在标签与缩略列上都有标记", () => {
+    setDraft("c1", "没发完的话");
+    const view = render(
+      <>
+        <ConversationTabs />
+        <ChatConvStrip />
+      </>,
+    );
+    try {
+      // 标签（role=tab）与缩略列（button）各自在自己的无障碍名里带「有草稿」
+      expect(screen.getByRole("tab", { name: "李四 有草稿" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "切换到 李四 有草稿" })).toBeInTheDocument();
+      // 没有草稿的会话不带多余文案
+      expect(screen.getByRole("tab", { name: "评审组 2 条未读" })).toBeInTheDocument();
+    } finally {
+      view.unmount();
+      clearDraft("c1");
+    }
   });
 });

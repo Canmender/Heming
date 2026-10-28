@@ -5,6 +5,7 @@ import { HomePage } from "./HomePage.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useTokenUsageStore, monthKeyOf, daysOfMonth } from "../store/tokenUsage.js";
+import { clearDraft, setDraft } from "../lib/drafts.js";
 
 const user: User = { id: "u1", username: "alice", displayName: "测试阿丽" };
 const peer: User = { id: "u2", username: "bob", displayName: "鲍勃" };
@@ -547,5 +548,20 @@ describe("HomePage", () => {
 
     expect(screen.getByText("今日已用 500")).toBeInTheDocument();
     expect(screen.getByText("1 轮未上报")).toBeInTheDocument();
+  });
+
+  it("有草稿时首页预览显示「草稿：…」", async () => {
+    const row = { id: "c1", type: "direct" as const, peer, unreadCount: 0 };
+    mockFetch({ conversations: [row] });
+    useChatStore.setState({ conversations: [row], messages: {}, workspaceReady: true });
+    setDraft("c1", "还没发出去的一句话");
+    const view = render(<HomePage />);
+    try {
+      await act(async () => {});
+      expect(screen.getByText(/草稿：还没发出去的一句话/)).toBeInTheDocument();
+    } finally {
+      view.unmount();
+      clearDraft("c1");
+    }
   });
 });

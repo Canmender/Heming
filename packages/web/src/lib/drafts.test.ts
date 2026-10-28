@@ -6,9 +6,12 @@ import {
   clearDraft,
   clipDraft,
   createMemoryDraftStorage,
+  draftsVersion,
   getDraft,
+  hasDraft,
   pruneDrafts,
   setDraft,
+  subscribeDrafts,
   setDraftStorage,
   type DraftStorage,
 } from "./drafts.js";
@@ -134,5 +137,23 @@ describe("drafts（草稿按会话持久）", () => {
     expect(() => getDraft("conv-a")).not.toThrow();
     expect(() => clearDraft("conv-a")).not.toThrow();
     expect(() => pruneDrafts()).not.toThrow();
+  });
+
+  it("hasDraft 只看有没有草稿；set/clear 会通知订阅者", () => {
+    expect(hasDraft("conv-a")).toBe(false);
+    const calls: number[] = [];
+    const unsubscribe = subscribeDrafts(() => calls.push(draftsVersion()));
+
+    setDraft("conv-a", "写了点东西");
+    expect(hasDraft("conv-a")).toBe(true);
+    expect(calls.length).toBe(1);
+
+    setDraft("conv-a", "写了点东西"); // 同样内容不重复通知
+    expect(calls.length).toBe(1);
+
+    clearDraft("conv-a");
+    expect(hasDraft("conv-a")).toBe(false);
+    expect(calls.length).toBe(2);
+    unsubscribe();
   });
 });

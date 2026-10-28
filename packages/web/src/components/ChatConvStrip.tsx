@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+import { draftsVersion, hasDraft, subscribeDrafts } from "../lib/drafts.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { convLabel } from "./ChatPage.js";
@@ -18,6 +20,9 @@ export function ChatConvStrip() {
   const activeId = useUiStore((s) => s.activeConversationId);
   const openConversation = useUiStore((s) => s.openConversation);
 
+  // 草稿落盘后刷新缩略列；hooks 必须在 early return 之前。
+  useSyncExternalStore(subscribeDrafts, draftsVersion, () => 0);
+
   if (openTabs.length === 0) return null;
 
   return (
@@ -33,12 +38,13 @@ export function ChatConvStrip() {
         const name = label.name;
         const avatar = label.avatar;
         const unread = conv?.unreadCount ?? 0;
+        const draft = hasDraft(id);
         const active = id === activeId;
         return (
           <button
             key={id}
             type="button"
-            aria-label={`切换到 ${name}${unread > 0 ? ` ${unread} 条未读` : ""}`}
+            aria-label={`切换到 ${name}${unread > 0 ? ` ${unread} 条未读` : ""}${draft ? " 有草稿" : ""}`}
             aria-current={active || undefined}
             title={name}
             onClick={() => openConversation(id)}
@@ -51,6 +57,13 @@ export function ChatConvStrip() {
               size={26}
               className={active ? "ring-2 ring-ink ring-offset-1" : ""}
             />
+            {draft && (
+              <span
+                aria-hidden="true"
+                title="有草稿"
+                className="absolute -bottom-0.5 -left-0.5 h-2 w-2 rounded-full border border-white bg-[#b45309]"
+              />
+            )}
             {unread > 0 && (
               <span
                 aria-hidden="true"

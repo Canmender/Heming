@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
@@ -10,6 +10,7 @@ import {
   dayKeyOf,
 } from "../store/tokenUsage.js";
 import { acceptFriend, resolveUrl } from "../lib/api.js";
+import { draftsVersion, getDraft, hasDraft, subscribeDrafts } from "../lib/drafts.js";
 import { Avatar } from "./Avatar.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
 
@@ -108,6 +109,8 @@ export function HomePage() {
     workspaceError,
   } = useChatStore();
   const openConversation = useUiStore((s) => s.openConversation);
+  // 草稿落盘后刷新「最近会话」的预览（版本号变化触发重渲染）
+  useSyncExternalStore(subscribeDrafts, draftsVersion, () => 0);
   const { quota, records } = useTokenUsageStore();
   const [tab, setTab] = useState<"me" | "team" | "date">("me");
   const [openDay, setOpenDay] = useState<string | null>(null);
@@ -369,15 +372,17 @@ export function HomePage() {
             recent.map((c) => {
               const list = messages[c.id] ?? [];
               const last = list[list.length - 1];
-              // 纯附件消息 text=""（T1）：空串直渲染会空白，回退口径与 ContactDetail 对齐；
-              // 已撤回不泄漏原文，统一「消息已撤回」（与气泡文案一致）
-              const preview = last
-                ? last.recalledAt != null
-                  ? "消息已撤回"
-                  : last.payload.text || "(附件)"
-                : c.lastMessageAt
-                  ? "点击查看消息" // 有消息但本机还没加载：不冒充「暂无消息」
-                  : "暂无消息";
+              // 有草稿时预览优先显示草稿（没发出去的话比最后一条消息更「当下」）
+              const draftText = hasDraft(c.id) ? getDraft(c.id) : "";
+              const preview = draftText
+                ? `草稿：${[...draftText].slice(0, 40).join("")}${[...draftText].length > 40 ? "…" : ""}`
+                : last
+                  ? last.recalledAt != null
+                    ? "消息已撤回"
+                    : last.payload.text || "(附件)"
+                  : c.lastMessageAt
+                    ? "点击查看消息" // 有消息但本机还没加载：不冒充「暂无消息」
+                    : "暂无消息";
               // 三态会话（direct / agent 一对一 / group）各自的显示名与头像
               const title =
                 c.type === "direct"
