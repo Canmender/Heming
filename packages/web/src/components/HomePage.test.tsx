@@ -564,4 +564,48 @@ describe("HomePage", () => {
       clearDraft("c1");
     }
   });
+
+  it("挂载后写草稿：首页预览即时变成「草稿：…」，清掉后回到原预览", async () => {
+    const row = { id: "c1", type: "direct" as const, peer, unreadCount: 0 };
+    mockFetch({ conversations: [row] });
+    useChatStore.setState({
+      conversations: [row],
+      messages: {
+        c1: [
+          {
+            id: "m1",
+            conversationId: "c1",
+            senderType: "user" as const,
+            senderId: "u2",
+            payload: { text: "最后一条" },
+            replyTo: null,
+            createdAt: now.toISOString(),
+            recalledAt: null,
+            enc: "plain" as const,
+          },
+        ],
+      },
+      workspaceReady: true,
+    });
+
+    render(<HomePage />);
+    try {
+      await act(async () => {});
+      expect(screen.getByText("最后一条")).toBeInTheDocument();
+
+      act(() => {
+        setDraft("c1", "临时草稿");
+      });
+      expect(screen.getByText(/草稿：临时草稿/)).toBeInTheDocument();
+
+      act(() => {
+        clearDraft("c1");
+      });
+      expect(screen.getByText("最后一条")).toBeInTheDocument();
+    } finally {
+      act(() => {
+        clearDraft("c1"); // 断言中途失败也清掉，避免串用例
+      });
+    }
+  });
 });

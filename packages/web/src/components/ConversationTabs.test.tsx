@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import type { Agent, User } from "@heming/shared";
 import { ConversationTabs } from "./ConversationTabs.js";
 import { ChatConvStrip } from "./ChatConvStrip.js";
@@ -169,6 +169,34 @@ describe("草稿标记（标签栏 + 缩略列）", () => {
     } finally {
       view.unmount();
       clearDraft("c1");
+    }
+  });
+
+  it("挂载后写草稿：标签与缩略列的标记即时出现，清掉后消失", () => {
+    render(
+      <>
+        <ConversationTabs />
+        <ChatConvStrip />
+      </>,
+    );
+    try {
+      expect(screen.queryByRole("tab", { name: /李四.*有草稿/ })).not.toBeInTheDocument();
+
+      act(() => {
+        setDraft("c1", "临时草稿");
+      });
+      const tab = screen.getByRole("tab", { name: /李四.*有草稿/ });
+      expect(tab.querySelector('span[title="有草稿"]')).not.toBeNull(); // 可视圆点
+      expect(screen.getByRole("button", { name: /切换到 李四.*有草稿/ })).toBeInTheDocument();
+
+      act(() => {
+        clearDraft("c1");
+      });
+      expect(screen.queryByRole("tab", { name: /李四.*有草稿/ })).not.toBeInTheDocument();
+    } finally {
+      act(() => {
+        clearDraft("c1"); // 断言中途失败也清掉，避免串用例
+      });
     }
   });
 });
