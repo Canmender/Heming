@@ -12,7 +12,8 @@ const BODY_MAX = 160;
 
 function cleanText(value, max) {
   if (typeof value !== "string") return "";
-  return value.replace(/\s+/g, " ").trim().slice(0, max);
+  // 按码点切：UTF-16 slice 会把 emoji 劈成孤立代理项（显示为 �）。
+  return [...value.replace(/\s+/g, " ").trim()].slice(0, max).join("");
 }
 
 /**
@@ -28,6 +29,9 @@ function registerNotifyIpc(ipcMain, { Notification, getMainWindow }) {
         ? payload.conversationId
         : null;
     try {
+      // 渲染层的 document.hasFocus() 可能滞后；主进程再确认一次窗口确实不在前台。
+      const mainWin = getMainWindow();
+      if (mainWin && !mainWin.isDestroyed() && mainWin.isFocused()) return;
       if (!Notification.isSupported()) return;
       const notification = new Notification({ title, body });
       notification.on("click", () => {

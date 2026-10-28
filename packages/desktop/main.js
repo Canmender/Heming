@@ -21,6 +21,12 @@ const { registerSecretIpc } = require("./secret-store");
 const { registerNotifyIpc } = require("./notify-bridge");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
 
+// Windows 系统通知要求进程 AUMID 与安装快捷方式一致（electron-builder 使用 build.appId）。
+// 不设置时 Notification 可能静默不弹（本仓此前只有来电通知，未真机验证过）。
+if (process.platform === "win32") {
+  app.setAppUserModelId(pkg.build?.appId ?? "com.heming.app");
+}
+
 // ── web 界面嵌入（设计 §4）──────────────────────────────────────────────
 // 产物打进安装包、用自定义协议本地加载，摆脱「UI 必须部署云端才可见」与「启动依赖网络」。
 // 不能用 file://：它不是安全上下文，crypto.subtle 不可用会让 E2E 加密失效。

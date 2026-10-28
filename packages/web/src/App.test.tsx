@@ -715,7 +715,8 @@ describe("App 后台消息通道", () => {
     );
     // 首条是 App 壳的后台连接（任务区选中前打开），ChatPage 注册后必须被关闭；
     // 后一条是嵌入式 ChatPage 自己的连接，测试存活期间保持打开。
+    expect(handles.length).toBe(2);
     await waitFor(() => expect(handles[0]!.close).toHaveBeenCalled());
-    if (handles.length > 1) expect(handles[1]!.close).not.toHaveBeenCalled();
+    expect(handles[1]!.close).not.toHaveBeenCalled();
   });
 });

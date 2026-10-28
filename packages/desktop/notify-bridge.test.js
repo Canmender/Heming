@@ -11,6 +11,7 @@ function fakeEnv(opts = {}) {
   const win = {
     isDestroyed: () => opts.destroyed === true,
     isMinimized: () => opts.minimized === true,
+    isFocused: () => opts.focused === true,
     restore: () => { win.restored = true; },
     show: () => { win.shown = true; },
     focus: () => { win.focused = true; },
@@ -66,6 +67,18 @@ test("脏输入被清洗：缺标题用默认、超长截断、非字符串忽�
   assert.deepEqual(env.sent, []);
 });
 
+test("主窗口在前台 → 主进程不再弹系统通知；后台才弹", () => {
+  const focusedEnv = fakeEnv({ focused: true });
+  registerNotifyIpc(focusedEnv.ipcMain, focusedEnv.deps);
+  focusedEnv.ipcMain["notify:message"]({}, { title: "鲍勃", body: "你有一条新消息", conversationId: "c1" });
+  assert.equal(focusedEnv.shown.length, 0);
+
+  const backgroundEnv = fakeEnv({ focused: false });
+  registerNotifyIpc(backgroundEnv.ipcMain, backgroundEnv.deps);
+  backgroundEnv.ipcMain["notify:message"]({}, { title: "鲍勃", body: "你有一条新消息", conversationId: "c1" });
+  assert.equal(backgroundEnv.shown.length, 1);
+});
+
 test("主窗口已销毁 → 点击不崩、不发送", () => {
   const env = fakeEnv({ destroyed: true });
   registerNotifyIpc(env.ipcMain, env.deps);
@@ -83,6 +96,7 @@ test("多窗口（主窗口 + 通话窗口）：点击只聚焦主窗口，绝�
     const win = {
       isDestroyed: () => false,
       isMinimized: () => false,
+      isFocused: () => false,
       restore: () => { calls.restore++; },
       show: () => { calls.show++; },
       focus: () => { calls.focus++; },
@@ -117,13 +131,16 @@ test("多窗口（主窗口 + 通话窗口）：点击只聚焦主窗口，绝�
 
 test("getMainWindow 抛错时点击不崩（回调内兜底）", () => {
   const env = fakeEnv();
+  let windowGone = false;
   registerNotifyIpc(env.ipcMain, {
     Notification: env.deps.Notification,
     getMainWindow: () => {
-      throw new Error("window gone");
+      if (windowGone) throw new Error("window gone");
+      return env.win;
     },
   });
   env.ipcMain["notify:message"]({}, { title: "x", body: "y", conversationId: "c1" });
+  windowGone = true;
   assert.doesNotThrow(() => env.shown[0].handlers.click());
 });
 
@@ -142,7 +159,18 @@ test("超长标题/正文按上限截断（80 / 160）", () => {
   assert.equal(p.body, "文".repeat(160));
 });
 
+test("截断按码点：emoji 不被劈成孤立代理项", () => {
+  const env = fakeEnv();
+  registerNotifyIpc(env.ipcMain, env.deps);
+  env.ipcMain["notify:message"]({}, { title: "😀".repeat(100), body: "y" });
+  const title = env.shown[0].payload.title;
+  assert.equal([...title].length, 80);
+  assert.equal(title, "😀".repeat(80));
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(title), "不应有孤立代理项");
+});
+
 test("源码不引入任何网络能力（红线）", () => {
   const src = fs.readFileSync(path.join(__dirname, "notify-bridge.js"), "utf8");
-  assert.ok(!/require\(\s*["'](node:)?(http|https|net|dgram|tls)["']\s*\)/.test(src));
+  assert.ok(!/require\(\s*["'](node:)?(http|https|http2|net|dgram|tls|dns)["']\s*\)/.test(src));
+  assert.ok(!/\bfetch\s*\(/.test(src));
 });

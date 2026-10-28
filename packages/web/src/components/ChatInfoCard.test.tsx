@@ -27,6 +27,7 @@ describe("ChatInfoCard", () => {
   it("点关闭调用 onClose", () => {
     const onClose = vi.fn();
     render(<ChatInfoCard conv={direct} onClose={onClose} />);
+    expect(screen.getByText("关闭")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("关闭会话信息"));
     expect(onClose).toHaveBeenCalled();
   });
