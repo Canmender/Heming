@@ -11,6 +11,9 @@ const RING_SWEEP_INTERVAL_MS = 5_000;
 /** 首帧鉴权超时（d.30 · P0-3）：连上后 10s 内没等到 auth 帧 → 服务端主动断开。 */
 export const AUTH_TIMEOUT_MS = 10_000;
 
+/** typing 元数据的服务端兜底节流：每连接每秒最多转发一次（客户端另有 2s 节流）。 */
+export const TYPING_MIN_INTERVAL_MS = 1000;
+
 export interface AttachWsOptions {
   /** 自定义超时阈值（测试注入用，默认 RING_TIMEOUT_MS）。 */
   ringTimeoutMs?: number;
@@ -134,6 +137,8 @@ export function attachWs(
     let authed = queryUserId !== "";
     /** 本连接登记进 socketsByUser 的那个 Set；未鉴权时为 undefined（从未登记）。 */
     let registered: Set<WebSocket> | undefined;
+    /** 上一条 typing 的转发时间（每连接）：防故障/恶意客户端刷屏。 */
+    let lastTypingAt = 0;
 
     function register(uid: string): void {
       let set = socketsByUser.get(uid);
@@ -446,6 +451,19 @@ export function attachWs(
       }
       if (!store.isMember(event.conversationId, userId)) {
         send(ws, { type: "error", code: "forbidden", message: "not a member" });
+        return;
+      }
+      // typing（d.38）：成员校验后原样广播元数据、不落库；必须在下方 recall/send/else(mark_read)
+      // 二分之前截获，否则会掉进 else 被当成已读广播 read_update。
+      if (event.type === "typing") {
+        const now = Date.now();
+        if (now - lastTypingAt < TYPING_MIN_INTERVAL_MS) return; // 静默丢弃
+        lastTypingAt = now;
+        broadcastToConversation(event.conversationId, {
+          type: "typing",
+          conversationId: event.conversationId,
+          userId,
+        });
         return;
       }
       // recall 独立成支（成员校验已在上方统一做过）；mark_read 保持 else 兜底——

@@ -212,6 +212,40 @@ describe("ws", () => {
     b.close();
   });
 
+  it("typing：成员转发、非成员 forbidden、1 秒内第二条静默丢弃", async () => {
+    const a = await connect(issueToken(aliceId));
+    const b = await connect(issueToken(bobId));
+    const stranger = store.createUser(`typing-eve-${Date.now()}`, "h", "夏娃");
+    const s = await connect(issueToken(stranger.id));
+
+    const bWait = nextEvent(b);
+    a.send(JSON.stringify({ type: "typing", conversationId: convId }));
+    const event = await bWait;
+    expect(event).toMatchObject({ type: "typing", conversationId: convId, userId: aliceId });
+
+    // 1 秒内第二条：静默丢弃，不再转发
+    let extra = 0;
+    const count = () => {
+      extra += 1;
+    };
+    b.on("message", count);
+    a.send(JSON.stringify({ type: "typing", conversationId: convId }));
+    await new Promise((r) => setTimeout(r, 100));
+    b.off("message", count);
+    expect(extra).toBe(0);
+
+    // 非成员：走通用 forbidden，不广播
+    const sWait = nextEvent(s);
+    s.send(JSON.stringify({ type: "typing", conversationId: convId }));
+    const err = await sWait;
+    expect(err.type).toBe("error");
+    if (err.type === "error") expect(err.code).toBe("forbidden");
+
+    a.close();
+    b.close();
+    s.close();
+  });
+
   it("mark_read 持久化：广播后 REST reads 可见", async () => {
     const a = store.createUser(`alice-${Date.now()}`, "h", "A");
     const b = store.createUser(`bob-${Date.now()}`, "h", "B");

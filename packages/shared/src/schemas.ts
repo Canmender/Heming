@@ -124,6 +124,11 @@ const WsClientEventUnion = z.discriminatedUnion("type", [
     type: z.literal("mark_read"),
     conversationId: z.string().min(1),
   }),
+  // 正在输入（d.38）：只传元数据，不传内容。服务端成员校验后原样广播，不落库。
+  z.object({
+    type: z.literal("typing"),
+    conversationId: z.string().min(1),
+  }),
   // 消息撤回（仅发送者本人可撤；服务端校验后广播 message_recalled）
   z.object({
     type: z.literal("recall_message"),
@@ -355,6 +360,12 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     conversationId: z.string().min(1),
     userId: z.string().min(1),
     at: z.string(),
+  }),
+  // 正在输入广播（d.38）：userId 由服务端从认证身份填，客户端不可伪造。
+  z.object({
+    type: z.literal("typing"),
+    conversationId: z.string().min(1),
+    userId: z.string().min(1),
   }),
   z.object({
     type: z.literal("error"),
