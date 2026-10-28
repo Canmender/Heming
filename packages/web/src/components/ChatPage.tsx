@@ -73,6 +73,7 @@ import { recallRecorder } from "../lib/memory/runRecorder.js";
 import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
+import { registerChatSocket } from "../lib/chatSocketPresence.js";
 import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon, ChatIcon } from "./icons.js";
 import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import { Avatar } from "./Avatar.js";
@@ -2163,6 +2164,10 @@ export function ChatPage({
       alive = false;
     };
   }, [convId, conv?.type]);
+
+  // 有 ChatPage 实例时 App 壳不再开后台连接（任务区嵌入式 ChatPage 同理）：
+  // 页面名判断不了「任务区里也挂着一个 ChatPage」，必须按实例注册/注销。
+  useEffect(() => registerChatSocket(), []);
 
   useEffect(() => {
     let alive = true; // 挡卸载后晚到的补拉写入（同 loadMessages effect 口径）

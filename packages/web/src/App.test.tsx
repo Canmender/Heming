@@ -6,6 +6,11 @@ import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
 import { useChatStore } from "./store/chat.js";
 import { setToken, fetchFileBlobText } from "./lib/api.js";
+import {
+  chatSocketCount,
+  resetChatSocketPresenceForTest,
+} from "./lib/chatSocketPresence.js";
+import { useTaskStore } from "./lib/tasks/store.js";
 
 // 启动动画集成：BootWave 以「挂载即 onDone」桩替换，动画完成后 App 路由到登录页/主界面。
 // 自动完成的 BootWave 桩让既有用例聚焦认证/右栏/导航行为；完整的门禁路由用例见 App.boot.test.tsx。
@@ -617,9 +622,10 @@ describe("App 后台消息通道", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
+    resetChatSocketPresenceForTest();
     setToken(null);
     useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
-    useUiStore.setState({ page: "home", activeConversationId: null });
+    useUiStore.setState({ page: "home", activeConversationId: null, taskFocusId: null });
     delete (window as unknown as { __heming_notify?: unknown }).__heming_notify;
   });
 
@@ -659,7 +665,57 @@ describe("App 后台消息通道", () => {
 
     expect(useUiStore.getState().page).toBe("chat");
     expect(useUiStore.getState().activeConversationId).toBe("c9");
-    // 进入聊天页后后台连接必须关闭，交给 ChatPage 自己的连接
-    expect(backgroundHandle!.close).toHaveBeenCalled();
+    // ChatPage 已挂载（嵌入式/独立同口径）：存在实例即关闭后台连接，交给它自己的连接
+    await waitFor(() => expect(chatSocketCount()).toBeGreaterThan(0));
+    await waitFor(() => expect(backgroundHandle!.close).toHaveBeenCalled());
+  });
+
+  it("任务区嵌入 ChatPage 时后台连接让位（不与之并存处理同一条消息）", async () => {
+    const { connectWs } = await import("./lib/ws.js");
+    vi.mocked(connectWs).mockClear();
+
+    setToken("t1");
+    mockFetch({
+      me: alice,
+      conversations: [
+        {
+          id: "c1",
+          type: "direct",
+          peer: { id: "u2", username: "bob", displayName: "鲍勃" },
+          unreadCount: 0,
+        },
+      ],
+    });
+    useTaskStore.setState({
+      tasks: [
+        {
+          id: "t1",
+          conversationId: "c1",
+          agentId: "a1",
+          agentName: "阿和",
+          title: "任务一",
+          prompt: "做事",
+          status: "done",
+          createdAt: 1,
+          updatedAt: 2,
+          endedAt: 3,
+          steps: [],
+        },
+      ],
+    });
+    useUiStore.setState({ page: "tasks", activeConversationId: "c1", taskFocusId: "t1" });
+    Element.prototype.scrollIntoView = vi.fn();
+
+    render(<App />);
+
+    // 任务区选中任务 → 嵌入式 ChatPage 挂载并注册连接
+    await waitFor(() => expect(chatSocketCount()).toBeGreaterThan(0));
+    const handles = vi.mocked(connectWs).mock.results.map(
+      (r) => r.value as { close: () => void } | undefined,
+    );
+    // 首条是 App 壳的后台连接（任务区选中前打开），ChatPage 注册后必须被关闭；
+    // 后一条是嵌入式 ChatPage 自己的连接，测试存活期间保持打开。
+    await waitFor(() => expect(handles[0]!.close).toHaveBeenCalled());
+    if (handles.length > 1) expect(handles[1]!.close).not.toHaveBeenCalled();
   });
 });

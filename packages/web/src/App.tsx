@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useUiStore, type Page } from "./store/ui.js";
 import { initTheme } from "./store/theme.js";
 import { useAuthStore } from "./store/auth.js";
@@ -27,6 +27,11 @@ import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
 import { hasOpenModal } from "./components/useModalA11y.js";
 import { useBackgroundMessages } from "./lib/backgroundMessages.js";
+import {
+  chatSocketCount,
+  chatSocketVersion,
+  subscribeChatSocket,
+} from "./lib/chatSocketPresence.js";
 
 /**
  * Alt+1–Alt+8 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档、8 任务区。
@@ -207,15 +212,19 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
 
-  // 非聊天页时由 App 壳保持一条后台连接：离开聊天页也能收到未读与提醒。
-  useBackgroundMessages(Boolean(authUser) && page !== "chat");
+  // 没有 ChatPage 实例时由 App 壳保持一条后台连接：离开聊天页也能收到未读与提醒。
+  // 是否「有 ChatPage」按实例注册判断（任务区会嵌入一个 ChatPage，页面名判断不了）；
+  // useSyncExternalStore 让 ChatPage 挂载/卸载立刻触发本组件重算 active。
+  useSyncExternalStore(subscribeChatSocket, chatSocketVersion, () => 0);
+  useBackgroundMessages(Boolean(authUser) && chatSocketCount() === 0);
 
-  // 系统通知点击 → 主进程回传会话 id → 打开会话
+  // 系统通知点击 → 主进程回传会话 id → 打开会话（未登录时忽略，登录后再点即可）
   useEffect(() => {
     const bridge = typeof window !== "undefined" ? window.__heming_notify : undefined;
     if (!bridge?.onOpen) return;
     return bridge.onOpen((id) => {
-      if (id) useUiStore.getState().openConversation(id);
+      if (!id || !useAuthStore.getState().user) return;
+      useUiStore.getState().openConversation(id);
     });
   }, []);
 
