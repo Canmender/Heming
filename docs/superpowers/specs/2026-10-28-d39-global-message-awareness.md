@@ -68,6 +68,8 @@
 | 通知点击时窗口已关/不存在 | 主进程查找可用窗口，找不到就忽略 |
 | 后台连接在登录前建立 | 只在 `authUser` 存在时启用；未登录不建连 |
 
+**已知边界（d.39 修复轮补记）**：系统通知在平台不支持/被系统设置禁用时静默回退到应用内通知；Windows 依赖启动时设置的 `AppUserModelID`（与安装快捷方式一致，仍需真机验证）。后台不解密 ⇒ 无法区分 E2E 控制消息（表情回应 / 链分发），它们也可能触发一条无正文提醒。通知不合并：同一会话短时间多条消息会逐条提醒。页面切换的一帧重叠里，屏幕上正在看的会话可能被后台短暂计一次未读/提醒，随后由 `read_update` 自愈（消息 id 去重保证同一条不重复提醒）。
+
 ## 4. 测试计划
 
 | 文件 | 覆盖 |
@@ -78,7 +80,8 @@
 | `web/src/lib/backgroundMessages.test.ts` | 后台事件：非自己消息 → 未读+1/最近活跃/通知；自己消息忽略；read_update 清零并写 lastReadAt；重复 id 不重复提醒；未知会话触发刷新 |
 | `web/src/components/ChatInfoCard.test.tsx` | 免打扰开关读写、aria-checked、文案 |
 | `web/src/App.test.tsx` | 非聊天页启用后台连接、聊天页关闭（mock `connectWs`）；系统通知点击回跳会话 |
-| `desktop/notify-bridge.test.js` | 单测：合法通知、clamp、不支持时跳过、点击聚焦+回传 conversationId、无窗口时不崩 |
+| `desktop/notify-bridge.test.js` | 单测：合法通知、clamp（按码点，不劈 emoji）、不支持时跳过、窗口在前台不弹、点击聚焦+回传 conversationId、无窗口时不崩 |
+| `desktop/main.test.js` | Windows `AppUserModelID` 取自 `pkg.build.appId`（源断言） |
 | `desktop/preload.test.js` | `__heming_notify` 的形状与 onOpen 取消订阅 |
 
 ## 5. 验收
