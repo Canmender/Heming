@@ -1,6 +1,6 @@
 {
   "name": "@heming/desktop",
-  "version": "37.1.9",
+  "version": "38.1.9",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -83,7 +83,7 @@
       "differentialPackage": true
     }
   },
-  "hemingVersion": "d.37.1.9.0",
-  "shortVersion": "37.1.9.0",
-  "shortVersionWindows": "37.1.9.0"
+  "hemingVersion": "d.38.1.9.0",
+  "shortVersion": "38.1.9.0",
+  "shortVersionWindows": "38.1.9.0"
 }
