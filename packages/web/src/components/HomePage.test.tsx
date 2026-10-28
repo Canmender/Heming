@@ -211,10 +211,15 @@ describe("HomePage", () => {
       unreadCount: 0,
       ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
     });
+    // 7 行：第 1 行最旧、第 7 行（数组末尾）最新——排序必须发生在 slice(0, 6) 之前
     const rows = [
-      mkGroup("g-old", "较旧的群", "2026-10-20T00:00:00.000Z"),
+      mkGroup("g-1", "最旧的群", "2026-10-19T00:00:00.000Z"),
+      mkGroup("g-2", "第二旧的群", "2026-10-20T00:00:00.000Z"),
+      mkGroup("g-3", "第三的群", "2026-10-21T00:00:00.000Z"),
+      mkGroup("g-4", "第四的群", "2026-10-22T00:00:00.000Z"),
+      mkGroup("g-5", "第五的群", "2026-10-23T00:00:00.000Z"),
+      mkGroup("g-6", "次新的群", "2026-10-24T00:00:00.000Z"),
       mkGroup("g-fresh", "最新的群", "2026-10-25T00:00:00.000Z"),
-      mkGroup("g-empty", "空群"),
     ];
     mockFetch({ conversations: rows });
     useChatStore.setState({ conversations: rows, messages: {}, workspaceReady: true });
@@ -223,17 +228,21 @@ describe("HomePage", () => {
     await act(async () => {});
 
     const fresh = screen.getByText("最新的群").closest("button")!;
-    const old = screen.getByText("较旧的群").closest("button")!;
-    const empty = screen.getByText("空群").closest("button")!;
-    expect(fresh.compareDocumentPosition(old) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(old.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const second = screen.getByText("次新的群").closest("button")!;
+    expect(fresh.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 最旧的一条（原数组第 1 行）被截掉，而不是「最新一条落在末尾被截掉」
+    expect(screen.queryByText("最旧的群")).not.toBeInTheDocument();
+    expect(screen.getByText("第二旧的群")).toBeInTheDocument();
 
-    // 有 lastMessageAt 但本机没加载消息 → 「点击查看消息」；真没消息 → 「暂无消息」
-    expect(screen.getAllByText("点击查看消息")).toHaveLength(2);
-    expect(screen.getByText("暂无消息")).toBeInTheDocument();
-    // 行尾时间回退 lastMessageAt：两条有消息的会话都显示时间，空会话不显示
+    // 有 lastMessageAt 但本机没加载消息 → 「点击查看消息」，不冒充「暂无消息」
+    expect(screen.getAllByText("点击查看消息")).toHaveLength(6);
+    // 行尾时间回退 lastMessageAt：有时间的 6 行都显示时间
     // （同日显示 HH:mm，跨日显示 MM-DD HH:mm，两种情况都接受）
-    expect(screen.getAllByText(/^\d{2}(-\d{2})? \d{2}:\d{2}$/)).toHaveLength(2);
+    expect(screen.getAllByText(/^\d{2}(-\d{2})? \d{2}:\d{2}$/)).toHaveLength(6);
+
+    // 真无消息的会话仍显示「暂无消息」（单独一轮，避免被前 6 名截掉）
+    act(() => useChatStore.setState({ conversations: [mkGroup("g-empty", "空群")] }));
+    expect(await screen.findByText("暂无消息")).toBeInTheDocument();
   });
 
   it("最近会话预览：纯附件消息（text 空串）显示「(附件)」，无消息仍「暂无消息」", async () => {

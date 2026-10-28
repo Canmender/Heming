@@ -156,4 +156,14 @@ describe("drafts（草稿按会话持久）", () => {
     expect(calls.length).toBe(2);
     unsubscribe();
   });
+
+  it("纯空白草稿不算有草稿（不会在标签/首页点亮圆点）", () => {
+    setDraft("conv-a", "   ");
+    expect(hasDraft("conv-a")).toBe(false);
+    // 已有草稿被清成空白同样视为无草稿
+    setDraft("conv-a", "有内容");
+    expect(hasDraft("conv-a")).toBe(true);
+    setDraft("conv-a", "\n\t ");
+    expect(hasDraft("conv-a")).toBe(false);
+  });
 });

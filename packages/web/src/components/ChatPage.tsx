@@ -1407,11 +1407,20 @@ export function ChatPage({
     [messages, plainOf],
   );
   /**
-   * 本次停留的未读快照：切进会话时取一次服务端 unreadCount，之后只用于分隔线。
+   * 本次停留的未读快照：切进会话时取一次服务端 unreadCount / lastReadAt，之后只用于分隔线。
    *
    * 不能实时读 conversations.unreadCount：打开即发 mark_read，很快就会被清零。
+   * 分隔线按「最后已读时间」定位（服务端 unreadCount 把链分发/表情事件这类**不渲染**的
+   * 控制行也算进去，按条数往回数会让分隔线提前，甚至在小会话里误报「上方还有未读」）。
    */
-  const [unreadMarker, setUnreadMarker] = useState<{ convId: string; count: number } | null>(null);
+  const [unreadMarker, setUnreadMarker] = useState<{
+    convId: string;
+    count: number;
+    /** 服务端给的最后已读时间；null = 从未已读。 */
+    lastReadAt: string | null;
+    /** 旧服务端不返回该字段时为 false——此时不知道边界，不画分隔线（宁可没有，也不说谎）。 */
+    boundaryKnown: boolean;
+  } | null>(null);
   const unreadCapturedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1425,7 +1434,14 @@ export function ChatPage({
     const target = conversations.find((c) => c.id === convId);
     if (!target) return; // 会话数据还没到，等下一次 conversations 变化
     unreadCapturedRef.current = convId;
-    if (target.unreadCount > 0) setUnreadMarker({ convId, count: target.unreadCount });
+    if (target.unreadCount > 0) {
+      setUnreadMarker({
+        convId,
+        count: target.unreadCount,
+        lastReadAt: target.lastReadAt ?? null,
+        boundaryKnown: Object.prototype.hasOwnProperty.call(target, "lastReadAt"),
+      });
+    }
   }, [convId, conversations]);
   /**
    * 消息列表窗口化（d.33 · P2-2）：只渲染最近 `windowCount` 条。
@@ -1443,11 +1459,7 @@ export function ChatPage({
     [visibleMessages, windowCount],
   );
   /** 本次停留的未读锚点：解析一次后冻结（新消息不能让分隔线漂移/二次抢滚动）。 */
-  const [unreadAnchor, setUnreadAnchor] = useState<{
-    convId: string;
-    id: string | null;
-    overflow: boolean;
-  } | null>(null);
+  const [unreadAnchor, setUnreadAnchor] = useState<{ convId: string; id: string | null } | null>(null);
   const anchorResolvedRef = useRef<string | null>(null);
   /** 分隔线只在第一次出现时定位一次；之后用户自己滚，不再抢滚动条。 */
   const dividerScrolledRef = useRef<string | null>(null);
@@ -1462,34 +1474,36 @@ export function ChatPage({
   useEffect(() => {
     if (anchorResolvedRef.current === convId) return;
     if (!unreadMarker || unreadMarker.convId !== convId) return;
-    if (messagesLoading) return; // 等历史落定再解析锚点
+    if (messagesLoading || messagesError) return; // 等历史成功落定再解析锚点（失败重试成功后可再解析）
     anchorResolvedRef.current = convId;
-    let remaining = unreadMarker.count;
-    let id: string | null = null;
-    for (let i = visibleMessages.length - 1; i >= 0; i -= 1) {
-      const m = visibleMessages[i];
-      if (m.senderId === me?.id) continue;
-      remaining -= 1;
-      if (remaining === 0) {
-        id = m.id;
-        break;
-      }
+
+    if (!unreadMarker.boundaryKnown) {
+      // 旧服务端没有 lastReadAt：不猜边界，直接按「无未读」回到底部
+      setUnreadAnchor({ convId, id: null });
+      atBottomRef.current = true;
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
+      return;
     }
-    const overflow = remaining > 0;
-    if (overflow) id = visibleMessages[0]?.id ?? null;
-    setUnreadAnchor({ convId, id, overflow });
-  }, [convId, unreadMarker, messagesLoading, visibleMessages, me?.id]);
+
+    const boundary = unreadMarker.lastReadAt;
+    const first = visibleMessages.find(
+      (m) => m.senderId !== me?.id && (boundary === null || m.createdAt > boundary),
+    );
+    setUnreadAnchor({ convId, id: first?.id ?? null });
+    if (!first) {
+      // 未读只由不渲染的控制行（链分发 / 表情事件）构成：没有可定位的气泡，回到底部
+      atBottomRef.current = true;
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
+    }
+  }, [convId, unreadMarker, messagesLoading, messagesError, visibleMessages, me?.id]);
 
   const unreadDivider =
-    unreadAnchor && unreadAnchor.convId === convId
-      ? unreadAnchor
-      : { convId, id: null, overflow: false };
+    unreadAnchor && unreadAnchor.convId === convId ? unreadAnchor : { convId, id: null };
 
-  // 锚点可能落在初始渲染窗口之外（未读数 > DEFAULT_WINDOW 时）：把窗口扩到包含它，
-  // 否则分隔线/提示/定位整条链路都匹配不到 DOM。扩窗不做滚动补偿——随后由分隔线定位接管。
+  // 锚点可能落在初始渲染窗口之外（未读区间 > DEFAULT_WINDOW 时）：把窗口扩到包含它，
+  // 否则分隔线/定位整条链路都匹配不到 DOM。扩窗不做滚动补偿——随后由分隔线定位接管。
   useEffect(() => {
-    if (!unreadAnchor || unreadAnchor.convId !== convId) return;
-    if (unreadAnchor.overflow || !unreadAnchor.id) return;
+    if (!unreadAnchor || unreadAnchor.convId !== convId || !unreadAnchor.id) return;
     if (windowedMessages.some((m) => m.id === unreadAnchor.id)) return;
     const idx = visibleMessages.findIndex((m) => m.id === unreadAnchor.id);
     if (idx < 0) return;
@@ -1502,16 +1516,9 @@ export function ChatPage({
 
   useLayoutEffect(() => {
     if (!unreadAnchor || unreadAnchor.convId !== convId || !unreadAnchor.id) return;
-    const key = unreadAnchor.overflow ? `${convId}:overflow` : `${convId}:${unreadAnchor.id}`;
+    const key = `${convId}:${unreadAnchor.id}`;
     if (dividerScrolledRef.current === key) return;
     atBottomRef.current = false;
-    if (unreadAnchor.overflow) {
-      // 未读多到超出已加载窗口：滚到顶，让「有更多未读消息在上方」的提示可见
-      const el = scrollRef.current;
-      if (el) el.scrollTop = 0;
-      dividerScrolledRef.current = key;
-      return;
-    }
     const el = document.getElementById("unread-divider");
     if (!el) return; // 窗口还没包含锚点，等扩窗后的下一次提交再定位（不记「已定位」）
     dividerScrolledRef.current = key;
@@ -3467,13 +3474,6 @@ export function ChatPage({
               <div className="mt-1 text-[11px] text-muted">发送第一条消息，开始这段对话。</div>
             </div>
           )
-        ) : null}
-        {unreadDivider.overflow ? (
-          <div className="mb-3 flex justify-center">
-            <span className="rounded-full bg-[#fff7e6] px-2.5 py-0.5 text-[10px] text-[#b45309]">
-              有更多未读消息在上方
-            </span>
-          </div>
         ) : null}
         {windowedMessages.map((m, index) => {
           const mine = m.senderId === me?.id;

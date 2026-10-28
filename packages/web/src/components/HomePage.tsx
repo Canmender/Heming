@@ -189,7 +189,12 @@ export function HomePage() {
    */
   const recent = useMemo(() => {
     return [...conversations]
-      .sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? ""))
+      .sort((a, b) => {
+        // 纯 ISO 字符串比较（字典序即时间序）；localeCompare 受区域排序规则影响，不适合锁时间顺序
+        const ax = a.lastMessageAt ?? "";
+        const bx = b.lastMessageAt ?? "";
+        return ax === bx ? 0 : ax < bx ? 1 : -1;
+      })
       .slice(0, 6);
   }, [conversations]);
   // 智能体动态：优先群内已挂载的，空时回退名册全量（用户可能只自建未入群）

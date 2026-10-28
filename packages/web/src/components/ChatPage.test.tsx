@@ -4211,7 +4211,9 @@ describe("ChatPage", () => {
     Element.prototype.scrollIntoView = vi.fn();
     const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
     useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 2 }],
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 2, lastReadAt: "2026-10-14T01:01:00.000Z" },
+      ],
     });
     mockMessagesFetch([
       msg("m1", "旧消息一", "2026-10-14T01:00:00.000Z"),
@@ -4239,24 +4241,44 @@ describe("ChatPage", () => {
     expect(screen.queryByRole("separator", { name: "以下是新消息" })).not.toBeInTheDocument();
   });
 
-  it("未读数超过已加载消息：顶部提示还有更早的未读", async () => {
+  it("未读只来自不渲染的控制行时，不画分隔线也不提示更多未读", async () => {
     useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 5 }],
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 3, lastReadAt: "2026-10-14T02:00:00.000Z" },
+      ],
     });
+    mockMessagesFetch([msg("m1", "最后一条可见消息", "2026-10-14T01:00:00.000Z")]);
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("最后一条可见消息")).toBeInTheDocument());
+    expect(screen.queryByRole("separator", { name: "以下是新消息" })).not.toBeInTheDocument();
+    expect(screen.queryByText("有更多未读消息在上方")).not.toBeInTheDocument();
+  });
+
+  it("未读区间夹着自己的消息时，分隔线仍落在第一条他人未读前", async () => {
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 2, lastReadAt: "2026-10-14T01:00:00.000Z" },
+      ],
+    });
+    const mine = { ...msg("m2", "我自己插一句", "2026-10-14T02:00:00.000Z"), senderId: "u1" };
     mockMessagesFetch([
-      msg("m1", "仅有的旧消息", "2026-10-14T01:00:00.000Z"),
-      msg("m2", "仅有的新消息", "2026-10-14T02:00:00.000Z"),
+      msg("m1", "旧消息", "2026-10-14T00:30:00.000Z"),
+      mine,
+      msg("m3", "他人未读一", "2026-10-14T03:00:00.000Z"),
+      msg("m4", "他人未读二", "2026-10-14T03:01:00.000Z"),
     ]);
     render(<ChatPage />);
-    expect(await screen.findByText("有更多未读消息在上方")).toBeInTheDocument();
-    expect(screen.getByTestId("message-list").scrollTop).toBe(0);
+    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
+    expect(divider.compareDocumentPosition(document.getElementById("msg-m3")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("分隔线定位后，新消息到达不再让它漂移或二次滚动", async () => {
     Element.prototype.scrollIntoView = vi.fn();
     const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
     useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 1 }],
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 1, lastReadAt: "2026-10-14T01:00:00.000Z" },
+      ],
     });
     mockMessagesFetch([
       msg("m1", "旧消息", "2026-10-14T01:00:00.000Z"),
@@ -4280,7 +4302,9 @@ describe("ChatPage", () => {
     Element.prototype.scrollIntoView = vi.fn();
     const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
     useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 70 }],
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 70, lastReadAt: "2026-10-14T00:29:00.000Z" },
+      ],
     });
     const many = Array.from({ length: 100 }, (_, i) =>
       msg(
@@ -4292,7 +4316,7 @@ describe("ChatPage", () => {
     mockMessagesFetch(many);
 
     render(<ChatPage />);
-    // 从后往前第 70 条非自己消息 = x30（初始窗口只有后 60 条，x30 在窗口外）
+    // 最后已读时间 = x29 → 第一条更新的消息是 x30（初始窗口只有后 60 条，x30 在窗口外）
     const divider = await screen.findByRole("separator", { name: "以下是新消息" });
     const firstUnread = document.getElementById("msg-x30")!;
     expect(firstUnread).not.toBeNull();
