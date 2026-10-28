@@ -37,11 +37,13 @@
 
 - 切进会话时**先快照**该会话的 `unreadCount`（服务端事实），再照旧发 `mark_read`；
   快照只用于本次停留的分隔线，不新增服务端状态。
-- 在已加载消息中从后往前数「非自己发送」的消息，数到第 N 条处插入分隔线
-  **「以下是新消息」**（`role="separator"`）。
+- 在已加载消息中找到**第一条 `createdAt > lastReadAt` 的非自己消息**（`Conversation.lastReadAt`
+  为当前用户在该会话的最后已读时间；从未已读为 `null`），在它前面插入分隔线
+  **「以下是新消息」**（`role="separator"`）。不按条数往回数——服务端 `unreadCount` 把链分发 /
+  表情事件这类**不渲染的控制行**也算进去，按条数会让分隔线提前甚至误报。
 - 打开会话后滚到分隔线（`block:"start"`）；没有未读才保持原来的「跳到底部」。
-- 未读数大于已加载消息数 → 分隔线放在最上方，并在顶部提示
-  「有更多未读消息在上方」；不假装全部可见。
+- 未读只由不渲染的控制行构成（找不到可定位的气泡）时不画分隔线，直接回到底部。
+- 旧服务端缺 `lastReadAt` 字段时不猜边界：**不画分隔线、直接回到底部**（宁可没有，也不说谎）。
 - 分隔线在本次停留内保留；切走再回来时未读已被清掉，自然消失（不持久化）。
 - 流式/自己发送的新消息不改变分隔线位置。
 
@@ -79,7 +81,7 @@
 |---|---|
 | `lastMessageAt` 字段可选，旧客户端忽略；旧库首次查询为 null | 客户端把 null 排最后；无迁移 |
 | SQLite 每会话一条 MAX 查询（N+1） | 会话数是个位数到几十；ISO 字符串有索引再用，先不做过度优化 |
-| 分隔线数错（未读中包含 agent/系统消息、已撤回消息） | 计数口径与服务端一致：**所有非自己发送的消息**都算，撤回仍算未读（服务端也是这么数的） |
+| 分隔线数错（未读中包含不可见的链分发 / 表情事件控制行） | 改为**按 `lastReadAt` 时间边界定位**（第一条 `createdAt > lastReadAt` 的非自己消息）；旧服务端没有该字段时不画分隔线、直接回到底部 |
 | 快照时 `conversations` 尚未加载 | 用「未捕获过就继续等 conversations 变化」的 effect；只有拿到会话数据才写快照 |
 | 断线横幅反复闪 | 三态切换 + 恢复提示 3 秒；重连退避由 ws 层负责，UI 不抖动 |
 | 草稿订阅造成额外渲染 | 版本号只在草稿**实际变更**时 +1；订阅者仅 3 个轻组件 |
@@ -89,9 +91,9 @@
 | 文件 | 覆盖 |
 |---|---|
 | `shared` schema 无需新文件 | 类型编译通过由 web/server typecheck 兜 |
-| `server/src/storeContract.test.ts` | 两实现：空会话 `lastMessageAt=null`；发消息后等于消息 `createdAt`；再发更新；自己发也算（时间事实，不是未读） |
-| `web/src/components/HomePage.test.tsx` | 按 `lastMessageAt` 排序取前 6；有 lastMessageAt 但未加载 → 「点击查看消息」；真无消息 → 「暂无消息」；有草稿 → 预览「草稿：…」 |
-| `web/src/components/ChatPage.test.tsx` | 未读 2 条插分隔线且滚到分隔线；未读 0 不插；未读超过已加载 → 顶部提示；断线横幅出现/恢复提示出现 |
+| `server/src/storeContract.test.ts` | 两实现、三种会话（group / direct / agent）：空会话 `lastMessageAt=null`、`lastReadAt=null`；发消息后等于消息 `createdAt`；自己发也算（时间事实，不是未读）；`markRead` 后 `lastReadAt` 更新 |
+| `web/src/components/HomePage.test.tsx` | 7 行乱序输入按 `lastMessageAt` 降序取前 6（数组末尾最新排第一、最旧被截掉）；有 lastMessageAt 但未加载 → 「点击查看消息」；真无消息 → 「暂无消息」；有草稿 → 预览「草稿：…」 |
+| `web/src/components/ChatPage.test.tsx` | 按 `lastReadAt` 插分隔线且滚到分隔线（含夹自己消息）；未读 0 不插；未读只来自不渲染的控制行 → 不画也不提示；锚点窗口外自动扩窗；分隔线冻结不漂移；旧服务端缺字段不画分隔线；断线横幅出现/恢复提示出现 |
 | `web/src/components/ConversationTabs.test.tsx` | 有草稿的标签显示圆点与 aria-label「有草稿」；无草稿不显示 |
 | `web/src/components/ChatConvStrip.test.tsx` | 同上（若文件不存在则并入 ChatPage 的渲染断言或新建） |
 | `web/src/lib/drafts.test.ts` | `hasDraft` 真/假；set/clear 触发订阅；空串不误报 |
