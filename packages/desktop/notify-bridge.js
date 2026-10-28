@@ -17,9 +17,9 @@ function cleanText(value, max) {
 
 /**
  * @param ipcMain Electron ipcMain
- * @param {{Notification: any, BrowserWindow: any}} deps 注入以便纯 node 测试
+ * @param {{Notification: any, getMainWindow: () => any}} deps 注入以便纯 node 测试
  */
-function registerNotifyIpc(ipcMain, { Notification, BrowserWindow }) {
+function registerNotifyIpc(ipcMain, { Notification, getMainWindow }) {
   ipcMain.on("notify:message", (_event, payload) => {
     const title = cleanText(payload && payload.title, TITLE_MAX) || "新消息";
     const body = cleanText(payload && payload.body, BODY_MAX) || "你有一条新消息";
@@ -31,8 +31,9 @@ function registerNotifyIpc(ipcMain, { Notification, BrowserWindow }) {
       if (!Notification.isSupported()) return;
       const notification = new Notification({ title, body });
       notification.on("click", () => {
-        const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
-        if (!win) return;
+        // 显式取主窗口：多窗口（主窗口 + 独立通话窗口）时不能聚焦到通话窗口。
+        const win = getMainWindow();
+        if (!win || win.isDestroyed()) return;
         if (win.isMinimized()) win.restore();
         win.show();
         win.focus();

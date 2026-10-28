@@ -9,7 +9,7 @@ function fakeEnv(opts = {}) {
   const shown = [];
   const sent = [];
   const win = {
-    isDestroyed: () => false,
+    isDestroyed: () => opts.destroyed === true,
     isMinimized: () => opts.minimized === true,
     restore: () => { win.restored = true; },
     show: () => { win.shown = true; },
@@ -26,7 +26,7 @@ function fakeEnv(opts = {}) {
   return {
     shown, sent, win,
     ipcMain,
-    deps: { Notification: FakeNotification, BrowserWindow: { getAllWindows: () => (opts.noWindow ? [] : [win]) } },
+    deps: { Notification: FakeNotification, getMainWindow: () => (opts.noWindow ? null : win) },
   };
 }
 
@@ -63,6 +63,16 @@ test("脏输入被清洗：缺标题用默认、超长截断、非字符串忽�
   assert.equal(p.title, "新消息");
   assert.equal(p.body, "你有一条新消息");
   env.shown[0].handlers.click();
+  assert.deepEqual(env.sent, []);
+});
+
+test("主窗口已销毁 → 点击不崩、不发送", () => {
+  const env = fakeEnv({ destroyed: true });
+  registerNotifyIpc(env.ipcMain, env.deps);
+  env.ipcMain["notify:message"]({}, { title: "x", body: "y", conversationId: "c1" });
+  assert.doesNotThrow(() => env.shown[0].handlers.click());
+  assert.equal(env.win.shown, undefined);
+  assert.equal(env.win.focused, undefined);
   assert.deepEqual(env.sent, []);
 });
 

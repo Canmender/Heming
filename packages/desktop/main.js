@@ -213,6 +213,10 @@ function createSplashWindow(mainWin) {
     });
 }
 
+// 主窗口引用：系统通知点击必须回到主窗口，而不是多窗口里随便一个
+// （独立通话窗口由 window.open 创建，getAllWindows()[0] 不保证是主窗口）。
+let mainWindow = null;
+
 // 单例锁：拿不到锁直接退出；second-instance 时聚焦已存在窗口
 const gotLock = app.requestSingleInstanceLock();
 
@@ -265,6 +269,11 @@ if (!gotLock) {
     // 启动默认最大化：铺满屏幕但保留自定义标题栏与原生窗口控件（不用 fullscreen，
     // 真全屏会把标题栏一起隐藏）。
     win.maximize();
+
+    mainWindow = win;
+    win.on("closed", () => {
+      if (mainWindow === win) mainWindow = null;
+    });
 
     // 窗口位置尺寸记忆：resize/move 后 debounce 500ms 落盘，关闭时立即落盘。
     // 用 getNormalBounds() 而非 getBounds()——最大化时 getBounds() 返回屏幕尺寸，
@@ -564,8 +573,9 @@ app.whenReady().then(() => {
     // 本机密钥信封桥（d.36）：preload 在页面加载时用 sendSync 问可用性，
     // 所以必须早于 createWindow()。
     registerSecretIpc(ipcMain);
-    // 系统通知桥（d.39）：消息提醒只在窗口不在前台时由渲染层请求
-    registerNotifyIpc(ipcMain, { Notification, BrowserWindow });
+    // 系统通知桥（d.39）：消息提醒只在窗口不在前台时由渲染层请求；
+    // 点击通知显式聚焦主窗口（通话窗口不能截走通知跳转）。
+    registerNotifyIpc(ipcMain, { Notification, getMainWindow: () => mainWindow });
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
