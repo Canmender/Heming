@@ -676,6 +676,11 @@ export function ChatPage({
   const [typingBy, setTypingBy] = useState<Record<string, number>>({});
   /** 上次发送 typing 的时间（每会话重置）。 */
   const typingSentAtRef = useRef(0);
+  /**
+   * 当前会话 id 的同步镜像：WS 回调闭包里的 `convId` 是建立连接时的旧值，
+   * 切会话后旧 socket 晚到的事件仍会匹配旧闭包——typing 用它判「是不是眼前这个会话」。
+   */
+  const convIdRef = useRef(convId);
   /** 断线后恢复的短暂提示（3 秒）。 */
   const [recovered, setRecovered] = useState(false);
   const recoveredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2097,6 +2102,7 @@ export function ChatPage({
     // 正在输入提示也是会话级：A 会话的提示不得带进 B 会话；发送节流也随会话重新计时
     setTypingBy({});
     typingSentAtRef.current = 0;
+    convIdRef.current = convId;
   }, [convId]);
 
   // E2E Task 4：会话初始化 + 解密 handler 注入 + 身份公钥上云（硬验收①——不上云则
@@ -2228,8 +2234,15 @@ export function ChatPage({
             });
           }
         } else if (e.type === "typing") {
-          // 只认本会话他人的输入态：广播含发送者自己（多设备），自己一律忽略
-          if (e.conversationId === convId && e.userId !== useAuthStore.getState().user?.id) {
+          // 只认眼前会话他人的输入态：
+          // - 用 convIdRef 而非闭包 convId：切会话后旧 socket 晚到的事件不得污染新会话；
+          // - 广播含发送者自己（多设备），自己一律忽略；
+          // - agent 会话不展示「正在输入」（已有流式气泡）。
+          if (
+            e.conversationId === convIdRef.current &&
+            e.userId !== useAuthStore.getState().user?.id &&
+            conv?.type !== "agent"
+          ) {
             setTypingBy((prev) => ({ ...prev, [e.userId]: Date.now() }));
           }
         } else if (e.type === "error") {
@@ -2441,9 +2454,11 @@ export function ChatPage({
     setDraft(value);
     if (value.trim() !== "") {
       const now = Date.now();
-      if (connected && now - typingSentAtRef.current >= TYPING_SEND_INTERVAL_MS) {
+      // 先拿到句柄再消费 2 秒窗口：connected 但句柄暂空时不该白烧一次节流
+      const handle = wsHandleRef.current;
+      if (connected && handle && now - typingSentAtRef.current >= TYPING_SEND_INTERVAL_MS) {
         typingSentAtRef.current = now;
-        wsHandleRef.current?.send({ type: "typing", conversationId: convId });
+        handle.send({ type: "typing", conversationId: convId });
       }
     }
     scheduleDraftSave(convId, value);
@@ -4036,7 +4051,7 @@ export function ChatPage({
         <div
           role={typingText ? "status" : undefined}
           aria-live="polite"
-          className="h-4 shrink-0 px-5 text-[10px] leading-4 text-muted"
+          className="h-4 shrink-0 truncate whitespace-nowrap px-5 text-[10px] leading-4 text-muted"
         >
           {typingText}
         </div>

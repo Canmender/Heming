@@ -857,13 +857,22 @@ describe("ChatPage", () => {
       render(<ChatPage />);
       act(() => {
         lastHandlers().onOpen?.();
+      });
+
+      // 别的会话（c2）先发：此时没有任何提示，证明 conversationId 判断真实生效
+      // （若断言放在 c1 事件之后，u2 同一时间戳会让用例空过）。
+      act(() => {
+        lastHandlers().onEvent({ type: "typing", conversationId: "c2", userId: "u2" });
+      });
+      expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
+
+      act(() => {
         lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
       });
       expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
 
       act(() => {
         lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u1" }); // 自己
-        lastHandlers().onEvent({ type: "typing", conversationId: "c2", userId: "u2" }); // 别的会话
       });
       expect(screen.queryByText(/爱丽丝 正在输入/)).not.toBeInTheDocument();
 
@@ -874,6 +883,30 @@ describe("ChatPage", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("切会话后旧连接晚到的 typing 不污染新会话", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    mockMessagesFetch([]);
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "group", name: "A 组", memberCount: 3, unreadCount: 0 },
+        { id: "c2", type: "group", name: "B 组", memberCount: 3, unreadCount: 0 },
+      ],
+    });
+    render(<ChatPage />);
+    const oldHandlers = lastHandlers();
+
+    // 切到 c2：WS effect 重建，oldHandlers 是 c1 的旧闭包
+    act(() => {
+      useUiStore.setState({ activeConversationId: "c2" });
+    });
+    // 旧连接晚到的 c1 typing：u3 不在 c2 成员快照里，若未按当前会话过滤会显示「有人 正在输入…」
+    act(() => {
+      oldHandlers.onEvent({ type: "typing", conversationId: "c1", userId: "u3" });
+    });
+    expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
   });
 
   it("连接句柄为 null 时发送：保留草稿并显示「连接未就绪，消息未发送」", async () => {
