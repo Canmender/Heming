@@ -309,6 +309,17 @@ describe("chat store", () => {
     expect(useChatStore.getState().bumpUnread("ghost", "2026-10-28T01:00:00.000Z", "m2")).toBe(false);
   });
 
+  it("bumpUnread：消息 id 去重表有上限，最旧条目被淘汰后可再次处理", () => {
+    useChatStore.setState({ conversations: [] });
+    for (let i = 0; i < 501; i += 1) {
+      expect(useChatStore.getState().bumpUnread("ghost", undefined, `cap-${i}`)).toBe(true);
+    }
+    // 501 条已顶满上限：最早的 cap-0 被淘汰 → 可再次处理，cap-500 仍在去重表里
+    expect(useChatStore.getState().bumpUnread("ghost", undefined, "cap-0")).toBe(true);
+    expect(useChatStore.getState().bumpUnread("ghost", undefined, "cap-0")).toBe(false);
+    expect(useChatStore.getState().bumpUnread("ghost", undefined, "cap-500")).toBe(false);
+  });
+
   it("clearUnread 带服务端 at：同时清零未读并刷新 lastReadAt；不传 at 不动 lastReadAt", () => {
     useChatStore.setState({
       conversations: [

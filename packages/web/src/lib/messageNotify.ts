@@ -11,6 +11,7 @@ import { notifyDesktop } from "./desktopNotify.js";
  * - 免打扰：应用内与系统通知都不发；未读由调用方照常计数；
  * - 应用内通知按 `message:<id>` 去重（push 返回 null 即已存在）；
  * - 系统通知正文固定，不泄露消息内容（E2E 尤其如此）。
+ * - 调用契约：调用方必须先过滤自己发送的消息——本函数只负责提醒，不判断 sender。
  */
 export function notifyIncomingMessage(m: Message): void {
   if (isMuted(m.conversationId)) return;

@@ -65,6 +65,13 @@ describe("messageNotify", () => {
     expect(window.__heming_notify!.message).not.toHaveBeenCalled();
   });
 
+  it("同一条消息重复提醒：应用内仍 1 条，系统通知只弹一次", () => {
+    notifyIncomingMessage(msg());
+    notifyIncomingMessage(msg());
+    expect(useNotificationStore.getState().items).toHaveLength(1);
+    expect(window.__heming_notify!.message).toHaveBeenCalledTimes(1);
+  });
+
   it("窗口聚焦时不请求系统通知；桥缺失时静默", () => {
     vi.mocked(document.hasFocus).mockReturnValue(true);
     notifyIncomingMessage(msg());
