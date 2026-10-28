@@ -4337,6 +4337,71 @@ describe("ChatPage", () => {
     expect(scrollSpy).toHaveBeenCalledWith({ behavior: "auto" });
   });
 
+  it("自己已读后本地 lastReadAt 跟随 read_update，切走再来新消息时分隔线不倒退", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    useChatStore.setState({
+      conversations: [
+        { id: "c1", type: "direct", peer, unreadCount: 2, lastReadAt: "2026-10-14T00:00:00.000Z" },
+        { id: "c2", type: "direct", peer, unreadCount: 0, lastReadAt: null },
+      ],
+    });
+    mockMessagesFetch([
+      msg("m1", "早先消息", "2026-10-14T01:00:00.000Z"),
+      msg("m2", "读过的消息", "2026-10-14T02:00:00.000Z"),
+      msg("m3", "新到的消息", "2026-10-14T03:00:00.000Z"),
+    ]);
+    render(<ChatPage />);
+    await screen.findByText("早先消息");
+
+    // 自己在别处读过，服务端广播 read_update（at = m2 时间）→ 本地 lastReadAt 要跟着走
+    act(() => {
+      lastHandlers().onEvent({
+        type: "read_update",
+        conversationId: "c1",
+        userId: "u1",
+        at: "2026-10-14T02:00:00.000Z",
+      });
+    });
+    expect(useChatStore.getState().conversations.find((c) => c.id === "c1")?.lastReadAt).toBe(
+      "2026-10-14T02:00:00.000Z",
+    );
+
+    act(() => useUiStore.setState({ activeConversationId: "c2" }));
+    act(() => useChatStore.getState().bumpUnread("c1")); // A 来新消息
+    act(() => useUiStore.setState({ activeConversationId: "c1" }));
+
+    // 分隔线落在 m3（第一条晚于 at 的他人消息）前，而不是退回 m1 前
+    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
+    expect(
+      divider.compareDocumentPosition(document.getElementById("msg-m3")!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      document.getElementById("msg-m1")!.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(scrollSpy).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
+  });
+
+  it("旧服务端没有 lastReadAt 时不画分隔线并回到底部", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    // 消息对象刻意不带 lastReadAt 属性（旧服务端不会返回该字段）
+    useChatStore.setState({
+      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 2 }],
+    });
+    mockMessagesFetch([
+      msg("m1", "旧消息一", "2026-10-14T01:00:00.000Z"),
+      msg("m2", "旧消息二", "2026-10-14T02:00:00.000Z"),
+    ]);
+    render(<ChatPage />);
+    await screen.findByText("旧消息二");
+    await waitFor(() =>
+      expect(screen.queryByRole("separator", { name: "以下是新消息" })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("有更多未读消息在上方")).not.toBeInTheDocument();
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "auto" });
+  });
+
   it("A4 气泡时间戳：每条带 HH:mm；间隔 ≥5 分钟插分隔、连续消息不插", async () => {
     const m1 = msg("m1", "第一条", "2026-10-14T01:00:00.000Z");
     const m2 = msg("m2", "第二条", "2026-10-14T01:02:00.000Z");

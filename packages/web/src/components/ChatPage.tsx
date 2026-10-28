@@ -1415,7 +1415,6 @@ export function ChatPage({
    */
   const [unreadMarker, setUnreadMarker] = useState<{
     convId: string;
-    count: number;
     /** 服务端给的最后已读时间；null = 从未已读。 */
     lastReadAt: string | null;
     /** 旧服务端不返回该字段时为 false——此时不知道边界，不画分隔线（宁可没有，也不说谎）。 */
@@ -1437,7 +1436,6 @@ export function ChatPage({
     if (target.unreadCount > 0) {
       setUnreadMarker({
         convId,
-        count: target.unreadCount,
         lastReadAt: target.lastReadAt ?? null,
         boundaryKnown: Object.prototype.hasOwnProperty.call(target, "lastReadAt"),
       });
@@ -2186,7 +2184,7 @@ export function ChatPage({
         } else if (e.type === "read_update") {
           // A12：自己在别的端/页面读过 → 该会话未读清零（不只是当前会话）。
           if (e.userId === useAuthStore.getState().user?.id) {
-            useChatStore.getState().clearUnread(e.conversationId);
+            useChatStore.getState().clearUnread(e.conversationId, e.at);
           }
           if (e.conversationId === convId) {
             // 事件只带 userId/at：整表重拉（读数很小），direct 气泡「已读」随动；他会话忽略

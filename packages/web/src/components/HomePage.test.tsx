@@ -240,9 +240,15 @@ describe("HomePage", () => {
     // （同日显示 HH:mm，跨日显示 MM-DD HH:mm，两种情况都接受）
     expect(screen.getAllByText(/^\d{2}(-\d{2})? \d{2}:\d{2}$/)).toHaveLength(6);
 
-    // 真无消息的会话仍显示「暂无消息」（单独一轮，避免被前 6 名截掉）
-    act(() => useChatStore.setState({ conversations: [mkGroup("g-empty", "空群")] }));
-    expect(await screen.findByText("暂无消息")).toBeInTheDocument();
+    // 真无消息的会话仍显示「暂无消息」，且排在有时间的会话之后（单独一轮，避免被前 6 名截掉）
+    const empty = mkGroup("g-empty", "空群");
+    act(() => useChatStore.setState({ conversations: [empty, rows[6]] }));
+    const emptyBtn = screen.getByText("空群").closest("button")!;
+    const freshWithTime = screen.getByText("最新的群").closest("button")!;
+    expect(
+      freshWithTime.compareDocumentPosition(emptyBtn) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getByText("暂无消息")).toBeInTheDocument();
   });
 
   it("最近会话预览：纯附件消息（text 空串）显示「(附件)」，无消息仍「暂无消息」", async () => {

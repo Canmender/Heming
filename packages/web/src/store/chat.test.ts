@@ -289,6 +289,32 @@ describe("chat store", () => {
     expect(useChatStore.getState().conversations.map((c) => c.unreadCount)).toEqual([2, 1]);
   });
 
+  it("clearUnread 带服务端 at：同时清零未读并刷新 lastReadAt；不传 at 不动 lastReadAt", () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "group",
+          name: "A",
+          memberCount: 2,
+          unreadCount: 3,
+          lastReadAt: "2026-10-14T00:00:00.000Z",
+        },
+        { id: "c2", type: "group", name: "B", memberCount: 2, unreadCount: 1, lastReadAt: null },
+      ],
+    });
+    useChatStore.getState().clearUnread("c1", "2026-10-14T02:00:00.000Z");
+    const c1 = useChatStore.getState().conversations.find((c) => c.id === "c1")!;
+    expect(c1.unreadCount).toBe(0);
+    expect(c1.lastReadAt).toBe("2026-10-14T02:00:00.000Z");
+
+    // 不带 at（旧事件 / 旧服务端）：只清未读，lastReadAt 保持原样
+    useChatStore.getState().clearUnread("c2");
+    const c2 = useChatStore.getState().conversations.find((c) => c.id === "c2")!;
+    expect(c2.unreadCount).toBe(0);
+    expect(c2.lastReadAt).toBeNull();
+  });
+
   it("setReads 覆盖该会话已读状态（其他会话不受影响）", () => {
     useChatStore.getState().setReads("c2", [{ userId: "u9", at: "2026-10-13T00:00:00.000Z" }]);
     useChatStore.getState().setReads("c1", [{ userId: "u1", at: "2026-10-14T01:00:00.000Z" }]);

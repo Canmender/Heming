@@ -233,8 +233,8 @@ interface ChatState {
   ) => Promise<void>;
   setReads: (convId: string, reads: ReadState[]) => void;
   loadReads: (convId: string) => Promise<void>;
-  /** 未读清零（A12：收到 read_update 且 userId 是自己时调用）。 */
-  clearUnread: (convId: string) => void;
+  /** 未读清零（A12：收到 read_update 且 userId 是自己时调用）；`at` 为服务端读点，带上则顺带刷新 `lastReadAt`。 */
+  clearUnread: (convId: string, at?: string) => void;
   /** 未读 +1（A12：收到他会话 message_new 且不是自己发的时调用）。 */
   bumpUnread: (convId: string) => void;
   upsertStream: (id: string, patch: AgentStreamPatch) => void;
@@ -596,14 +596,23 @@ export const useChatStore = create<ChatState>((set, get) => {
     const reads = await api<ReadState[]>(`/api/conversations/${convId}/reads`);
     get().setReads(convId, reads);
   },
-  clearUnread(convId) {
+  clearUnread(convId, at) {
     const list = get().conversations;
-    if (!list.some((c) => c.id === convId && c.unreadCount !== 0)) return;
-    set({
-      conversations: list.map((c) =>
-        c.id === convId && c.unreadCount !== 0 ? { ...c, unreadCount: 0 } : c,
-      ),
+    let changed = false;
+    const next = list.map((c) => {
+      if (c.id !== convId) return c;
+      const needsUnread = c.unreadCount !== 0;
+      // 读点也要更新：否则「读 A → 切 B → A 来新消息 → 回 A」会把已读消息重新标成未读
+      const needsAt = at !== undefined && c.lastReadAt !== at;
+      if (!needsUnread && !needsAt) return c;
+      changed = true;
+      return {
+        ...c,
+        unreadCount: needsUnread ? 0 : c.unreadCount,
+        ...(at !== undefined ? { lastReadAt: at } : {}),
+      };
     });
+    if (changed) set({ conversations: next });
   },
   bumpUnread(convId) {
     const list = get().conversations;
