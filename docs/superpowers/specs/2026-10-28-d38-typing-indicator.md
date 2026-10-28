@@ -65,8 +65,8 @@
 
 | 文件 | 覆盖 |
 |---|---|
-| `packages/server/src/ws.test.ts` | 成员发 typing → 同会话成员收到 `{type:"typing",userId}`；非成员收到 `error(forbidden)`；1 秒内第二条被静默丢弃；不同会话互不影响 |
-| `packages/web/src/components/ChatPage.test.tsx` | 输入非空 → 发 `{type:"typing",conversationId}`；2 秒内连续输入只发一次（fake timers）；未连接时不发；收到他人 typing 显示「X 正在输入…」；自己/别的会话忽略；3 秒后消失；群名解析；切会话清空 |
+| `packages/server/src/ws.test.ts` | 成员发 typing → 同会话成员收到 `{type:"typing",userId}`；非成员收到 `error(forbidden)`；1 秒内第二条被静默丢弃；超过 1 秒窗口后恢复转发 |
+| `packages/web/src/components/ChatPage.test.tsx` | 输入非空 → 发 `{type:"typing",conversationId}`；2 秒内连续输入只发一次（fake timers）；未连接时不发；智能体会话不发；收到他人 typing 显示 direct 名；自己/别的会话忽略；3 秒后消失；切会话清空、旧连接晚到不污染；群聊显示成员名与 2/3+ 句式；缺名回退「有人」 |
 | shared schema | 类型编译由 server/web typecheck 兜 |
 
 ## 5. 验收
