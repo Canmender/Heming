@@ -22,6 +22,12 @@ vi.mock("./lib/api.js", async (importOriginal) => {
   return { ...actual, fetchFileBlobText: vi.fn() };
 });
 
+// App 壳在非聊天页会保持一条后台连接（useBackgroundMessages）：
+// 桩掉 connectWs，避免 jsdom 真去建 WebSocket；返回句柄供断言 close。
+vi.mock("./lib/ws.js", () => ({
+  connectWs: vi.fn(() => ({ send: vi.fn(), close: vi.fn() })),
+}));
+
 function jsonRes(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -604,5 +610,56 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽", () => {
     expect(clampAsideWidth(9999)).toBe(ASIDE_MAX);
     expect(clampAsideWidth(Number.NaN)).toBe(240);
     expect(clampAsideWidth(300)).toBe(300);
+  });
+});
+
+describe("App 后台消息通道", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+    setToken(null);
+    useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
+    useUiStore.setState({ page: "home", activeConversationId: null });
+    delete (window as unknown as { __heming_notify?: unknown }).__heming_notify;
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { __heming_notify?: unknown }).__heming_notify;
+  });
+
+  it("非聊天页启用后台连接；系统通知点击回跳到会话，并关闭后台连接", async () => {
+    const { connectWs } = await import("./lib/ws.js");
+    vi.mocked(connectWs).mockClear();
+
+    const onOpenCallbacks: Array<(id: string | null) => void> = [];
+    (window as unknown as { __heming_notify?: unknown }).__heming_notify = {
+      message: vi.fn(),
+      onOpen: (cb: (id: string | null) => void) => {
+        onOpenCallbacks.push(cb);
+        return () => {};
+      },
+    };
+    setToken("t1");
+    mockFetch({ me: alice });
+    // jsdom 未实现 scrollIntoView（聊天页滚到底部用），进入会话前补个空实现
+    Element.prototype.scrollIntoView = vi.fn();
+
+    render(<App />);
+    await waitFor(() => expect(vi.mocked(connectWs)).toHaveBeenCalled());
+
+    const backgroundHandle = vi.mocked(connectWs).mock.results[0]?.value as
+      | { send: unknown; close: () => void }
+      | undefined;
+    expect(backgroundHandle).toBeTruthy();
+
+    // 模拟主进程点击通知 → 回传会话 id
+    act(() => {
+      for (const cb of onOpenCallbacks) cb("c9");
+    });
+
+    expect(useUiStore.getState().page).toBe("chat");
+    expect(useUiStore.getState().activeConversationId).toBe("c9");
+    // 进入聊天页后后台连接必须关闭，交给 ChatPage 自己的连接
+    expect(backgroundHandle!.close).toHaveBeenCalled();
   });
 });

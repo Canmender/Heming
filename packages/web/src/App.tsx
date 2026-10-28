@@ -26,6 +26,7 @@ import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
 import { hasOpenModal } from "./components/useModalA11y.js";
+import { useBackgroundMessages } from "./lib/backgroundMessages.js";
 
 /**
  * Alt+1–Alt+8 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档、8 任务区。
@@ -205,6 +206,18 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
 
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
+
+  // 非聊天页时由 App 壳保持一条后台连接：离开聊天页也能收到未读与提醒。
+  useBackgroundMessages(Boolean(authUser) && page !== "chat");
+
+  // 系统通知点击 → 主进程回传会话 id → 打开会话
+  useEffect(() => {
+    const bridge = typeof window !== "undefined" ? window.__heming_notify : undefined;
+    if (!bridge?.onOpen) return;
+    return bridge.onOpen((id) => {
+      if (id) useUiStore.getState().openConversation(id);
+    });
+  }, []);
 
   // 右侧目录栏宽度：可拖动调节，落盘后下次启动保持（用户要求「支持拖动改变大小」）
   const [asideWidth, setAsideWidth] = useState(() => readAsideWidth());
