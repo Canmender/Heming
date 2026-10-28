@@ -35,8 +35,10 @@
 
 ### B. 未读分隔线 + 打开会话定位到第一条未读
 
-- 切进会话时**先快照**该会话的 `unreadCount`（服务端事实），再照旧发 `mark_read`；
+- 切进会话时**先快照**该会话的 `unreadCount` 与 `lastReadAt`（服务端事实），再照旧发 `mark_read`；
   快照只用于本次停留的分隔线，不新增服务端状态。
+- 自己已读的 `read_update` 把服务端读点 `at` 写回本地 `Conversation.lastReadAt`（不只清未读），
+  避免「读 A → 切 B → A 来新消息 → 回 A」把已读消息重新标成未读。
 - 在已加载消息中找到**第一条 `createdAt > lastReadAt` 的非自己消息**（`Conversation.lastReadAt`
   为当前用户在该会话的最后已读时间；从未已读为 `null`），在它前面插入分隔线
   **「以下是新消息」**（`role="separator"`）。不按条数往回数——服务端 `unreadCount` 把链分发 /
