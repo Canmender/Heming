@@ -15,6 +15,7 @@ import { ConversationTabs } from "./components/ConversationTabs.js";
 import { ChatConvStrip } from "./components/ChatConvStrip.js";
 import { RadarContacts } from "./components/RadarContacts.js";
 import { HomePage } from "./components/HomePage.js";
+import { ConversationsPage } from "./components/ConversationsPage.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { MemoryPage } from "./components/MemoryPage.js";
 import { ArchivePage } from "./components/ArchivePage.js";
@@ -34,7 +35,7 @@ import {
 } from "./lib/chatSocketPresence.js";
 
 /**
- * Alt+1–Alt+8 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档、8 任务区。
+ * Alt+1–Alt+9 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档、8 任务区、9 会话。
  *
  * 顺序必须与 NavRail 的 `digit` 严格对应——那边是快捷键提示的唯一来源，
  * 两边错位就会出现「界面写着 Alt+6、按下去却去了别的页」。
@@ -49,6 +50,7 @@ const SHORTCUT_PAGES: Page[] = [
   "settings",
   "archive",
   "tasks",
+  "conversations",
 ];
 
 /** 右侧目录栏宽度上下限（像素）：太窄放不下文件名，太宽会挤掉主内容。 */
@@ -133,7 +135,7 @@ export function App() {
 
   // 动画期间主界面不可交互（规格 §7：动画不可跳过，不响应点击/键盘）。
   // 遮罩挡住了画面，但 AppShell 早已挂载且活着——不加 inert 的话点击会落在看不见的
-  // 按钮上，全局快捷键（Alt+1–5 / Ctrl+\）也会在启动动画期间生效。
+  // 按钮上，全局快捷键（Alt+1–9 / Ctrl+K）也会在启动动画期间生效。
   // React 18 无 inert 属性类型，用原生 toggleAttribute 等价设置/移除（同 RadarContacts）。
   useEffect(() => {
     shellRef.current?.toggleAttribute("inert", !bootDone);
@@ -264,14 +266,14 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
       const inText =
         !!t &&
         (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-      // Alt+1–8 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应
-      if (e.altKey && !e.metaKey && !e.ctrlKey && ["1", "2", "3", "4", "5", "6", "7", "8"].includes(e.key)) {
+      // Alt+1–9 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应
+      if (e.altKey && !e.metaKey && !e.ctrlKey && ["1", "2", "3", "4", "5", "6", "7", "8", "9"].includes(e.key)) {
         if (inText) return;
         e.preventDefault();
         // 模态弹窗开着时只吞键不切页：切走的子树里还留着那个弹窗，
         // 焦点归还、Esc 归属与 inert 计数全落在已经不属于当前视图的 DOM 上。
         if (hasOpenModal()) return;
-        setPage(SHORTCUT_PAGES["12345678".indexOf(e.key)]);
+        setPage(SHORTCUT_PAGES["123456789".indexOf(e.key)]);
         return;
       }
       if (!e.metaKey && !e.ctrlKey) return;
@@ -321,6 +323,9 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
       </div>
     ) : page === "workspace" ? (
       <WorkspacePage />
+    ) : page === "conversations" ? (
+      // 会话中心：全部未归档会话的一站式列表（置顶/搜索/归档入口）
+      <ConversationsPage />
     ) : page === "tasks" ? (
       // 任务区：左侧任务列表 + 嵌入式 ChatPage + 右侧确定性汇总
       <TaskAreaPage />

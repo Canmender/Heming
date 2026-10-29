@@ -7,7 +7,7 @@
  */
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { App } from "../App.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
@@ -270,6 +270,7 @@ describe("F. 交接窗口与未知会话点击", () => {
     expect(useUiStore.getState().page).toBe("chat");
     expect(useUiStore.getState().activeConversationId).toBe("ghost-conv");
     // ChatPage 在缺少会话行时不崩，标题回落「会话」
-    expect(await screen.findByText("会话")).toBeInTheDocument();
+    // 限定在主内容区：左侧导航的「会话」浮签同名，全局查会命中多个。
+    expect(await within(screen.getByRole("main")).findByText("会话")).toBeInTheDocument();
   });
 });

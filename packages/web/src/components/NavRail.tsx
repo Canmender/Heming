@@ -10,6 +10,7 @@ import {
   SkillsIcon,
   TaskIcon,
   SearchIcon,
+  SessionsIcon,
 } from "./icons.js";
 import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -23,6 +24,8 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
  */
 const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit: string }[] = [
   { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
+  // 会话中心是新页，拿 9（老页编号不动，见设置区的注释）
+  { page: "conversations", label: "会话", icon: <SessionsIcon width={17} height={17} />, digit: "9" },
   { page: "workspace", label: "工作区", icon: <ChatIcon width={17} height={17} />, digit: "2" },
   // 任务区是新页，拿 8（老页编号不动，见设置区的注释）
   { page: "tasks", label: "任务区", icon: <TaskIcon width={17} height={17} />, digit: "8" },

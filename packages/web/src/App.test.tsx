@@ -337,7 +337,7 @@ describe("App 导航快捷键与隐藏态", () => {
     useUiStore.setState({ page: "home", activeConversationId: null });
   });
 
-  it("Alt+1–8 直接切页（含技能区/归档/任务区），导航常驻；Ctrl+数字 不再切页", async () => {
+  it("Alt+1–9 直接切页（含技能区/归档/任务区/会话），导航常驻；Ctrl+数字 不再切页", async () => {
     setToken("t1");
     mockFetch();
     render(<App />);
@@ -355,6 +355,10 @@ describe("App 导航快捷键与隐藏态", () => {
     expect(useUiStore.getState().page).toBe("archive");
     fireEvent.keyDown(window, { key: "8", altKey: true });
     expect(useUiStore.getState().page).toBe("tasks");
+    fireEvent.keyDown(window, { key: "9", altKey: true });
+    expect(useUiStore.getState().page).toBe("conversations");
+    // 路由真的落到会话页（而不是只改了 store.page）
+    expect(await screen.findByLabelText("搜索会话")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "1", altKey: true });
     expect(useUiStore.getState().page).toBe("home");
 

@@ -49,6 +49,7 @@ function InlineText({ text }: { text: string }) {
 /** 导航页中文名（排序卡片与校验共用，与 NavRail 的 aria-label 保持一致）。 */
 const NAV_LABELS: Record<NavPage, string> = {
   home: "主页",
+  conversations: "会话",
   workspace: "工作区",
   tasks: "任务区",
   skills: "技能区",
@@ -377,7 +378,7 @@ function NavigationSection() {
         </button>
       </div>
       <div className="mt-1 text-[11px] text-muted">
-        只改左侧导航的显示顺序，Alt+1–8 快捷键保持原位
+        只改左侧导航的显示顺序，Alt+1–9 快捷键保持原位
       </div>
       <ul className="mt-2 flex flex-col gap-1">
         {navOrder.map((page, index) => (

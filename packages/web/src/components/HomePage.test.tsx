@@ -4,6 +4,7 @@ import type { User } from "@heming/shared";
 import { HomePage } from "./HomePage.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
+import { useUiStore } from "../store/ui.js";
 import { useTokenUsageStore, monthKeyOf, daysOfMonth } from "../store/tokenUsage.js";
 import { clearDraft, setDraft } from "../lib/drafts.js";
 
@@ -380,6 +381,15 @@ describe("HomePage", () => {
     render(<HomePage />);
     await act(async () => {}); // 冲刷挂载时 health/工作区加载的异步状态更新
     expect(screen.getByText("暂无会话，从工作区开始")).toBeInTheDocument();
+  });
+
+  it("最近会话「全部会话」入口切到会话页", async () => {
+    mockFetch({ conversations: [conv("c1")] });
+    useChatStore.setState({ conversations: [conv("c1")], messages: {}, workspaceReady: true });
+    render(<HomePage />);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "全部会话" }));
+    expect(useUiStore.getState().page).toBe("conversations");
   });
 
   it("首帧未落地时显示加载骨架，不拿「暂无会话」冒充没数据", () => {

@@ -366,7 +366,16 @@ export function HomePage() {
       {/* 3/4/5/6. 两栏：左最近会话；右智能体动态 + 待处理 + 系统状态 */}
       <div className="grid grid-cols-[1.5fr_1fr] gap-3">
         <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
-          <div className="mb-1.5 text-[12px] font-bold text-[#777]">最近会话</div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <div className="text-[12px] font-bold text-[#777]">最近会话</div>
+            <button
+              type="button"
+              className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink"
+              onClick={() => useUiStore.getState().setPage("conversations")}
+            >
+              全部会话
+            </button>
+          </div>
           {recent.length === 0 ? (
             !workspaceReady ? (
               <WorkspaceFallback error={workspaceError} onRetry={retryWorkspace} />

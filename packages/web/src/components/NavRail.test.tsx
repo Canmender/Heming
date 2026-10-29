@@ -18,7 +18,7 @@ describe("NavRail 图标轨（A 方案）", () => {
     });
   });
 
-  it("渲染 6 个带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键）", () => {
+  it("渲染 9 个带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键）", () => {
     render(<NavRail />);
     for (const name of [
       "主页 Alt1",
@@ -27,6 +27,7 @@ describe("NavRail 图标轨（A 方案）", () => {
       "接口区 Alt4",
       "记忆区 Alt5",
       "设置区 Alt6",
+      "会话 Alt9",
     ]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
@@ -209,7 +210,7 @@ describe("NavRail 导航顺序可自定义", () => {
   it("存储里缺项时自动补齐，不漏渲染任何导航", () => {
     useUiStore.setState({ navOrder: ["memory", "home", "workspace", "skills", "interfaces"] });
     render(<NavRail />);
-    for (const name of ["主页", "工作区", "技能区", "接口区", "记忆区", "设置区"]) {
+    for (const name of ["主页", "工作区", "技能区", "接口区", "记忆区", "设置区", "会话"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(name) }).length).toBeGreaterThan(0);
     }
   });

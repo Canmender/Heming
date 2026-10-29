@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 export type Page =
   | "home"
+  | "conversations"
   | "workspace"
   | "tasks"
   | "skills"
@@ -14,12 +15,13 @@ export type Page =
 /** 联系人详情三类：群聊 / 人类好友 / 智能体（雷达扇区同口径）。 */
 export type ContactKind = "group" | "human" | "agent";
 
-/** 导航项（可排序的六个主页；chat 是覆盖层，不参与排序）。 */
+/** 导航项（可排序的主页；chat 是覆盖层，不参与排序）。 */
 export type NavPage = Exclude<Page, "chat">;
 
 /** 导航默认顺序；快捷键数字由 App/NavRail 按页面固定绑定（显示顺序改了不影响快捷键）。 */
 export const DEFAULT_NAV_ORDER: NavPage[] = [
   "home",
+  "conversations",
   "workspace",
   "tasks",
   "skills",

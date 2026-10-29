@@ -367,6 +367,7 @@ describe("设置区 · 导航顺序", () => {
     fireEvent.click(screen.getByRole("button", { name: "上移 技能区" }));
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
+      "conversations",
       "workspace",
       "skills",
       "tasks",
