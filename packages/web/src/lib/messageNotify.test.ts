@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Message } from "@heming/shared";
-import { notifyIncomingMessage } from "./messageNotify.js";
+import { notifyIncomingMessage, resetMessageNotifyForTest } from "./messageNotify.js";
 import { setMuted, resetConvPrefsForTest } from "./convPrefs.js";
 import { useChatStore } from "../store/chat.js";
 import { useNotificationStore } from "../store/notifications.js";
@@ -21,6 +21,7 @@ const msg = (over: Partial<Message> = {}): Message => ({
 beforeEach(() => {
   localStorage.clear();
   resetConvPrefsForTest();
+  resetMessageNotifyForTest();
   useNotificationStore.getState().clearAll();
   useChatStore.setState({
     conversations: [
@@ -79,5 +80,29 @@ describe("messageNotify", () => {
     delete (window as unknown as { __heming_notify?: unknown }).__heming_notify;
     vi.mocked(document.hasFocus).mockReturnValue(false);
     expect(() => notifyIncomingMessage(msg({ id: "m2" }))).not.toThrow();
+  });
+
+  it("系统通知按会话合并：5 秒内同一会话两条不同消息 → 1 次吐司、2 条应用内", () => {
+    notifyIncomingMessage(msg({ id: "m10" }));
+    notifyIncomingMessage(msg({ id: "m11" }));
+    expect(useNotificationStore.getState().items).toHaveLength(2);
+    expect(window.__heming_notify!.message).toHaveBeenCalledTimes(1);
+  });
+
+  it("不同会话各自弹系统通知（合并只按会话，不跨会话）", () => {
+    useChatStore.setState((s) => ({
+      conversations: [
+        ...s.conversations,
+        {
+          id: "c2",
+          type: "direct",
+          peer: { id: "u3", username: "carol", displayName: "卡罗尔" },
+          unreadCount: 0,
+        },
+      ],
+    }));
+    notifyIncomingMessage(msg({ id: "m20" }));
+    notifyIncomingMessage(msg({ id: "m21", conversationId: "c2" }));
+    expect(window.__heming_notify!.message).toHaveBeenCalledTimes(2);
   });
 });

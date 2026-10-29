@@ -581,7 +581,12 @@ app.whenReady().then(() => {
     registerSecretIpc(ipcMain);
     // 系统通知桥（d.39）：消息提醒只在窗口不在前台时由渲染层请求；
     // 点击通知显式聚焦主窗口（通话窗口不能截走通知跳转）。
-    registerNotifyIpc(ipcMain, { Notification, getMainWindow: () => mainWindow });
+    registerNotifyIpc(ipcMain, {
+      Notification,
+      getMainWindow: () => mainWindow,
+      // 任一应用窗口在前台（含独立通话窗口）就不弹系统通知。
+      getFocusedWindow: () => BrowserWindow.getFocusedWindow(),
+    });
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

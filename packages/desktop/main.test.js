@@ -301,6 +301,10 @@ test("main.js：接上系统通知桥，保持主窗口引用并用它聚焦", (
     /registerNotifyIpc\(ipcMain,\s*\{[\s\S]{0,80}getMainWindow:\s*\(\)\s*=>\s*mainWindow/.test(mainCode),
     "通知点击必须取主窗口，而不是 getAllWindows()[0]"
   );
+  assert.ok(
+    mainCode.includes("getFocusedWindow: () => BrowserWindow.getFocusedWindow()"),
+    "任一应用窗口（含通话窗口）在前台时不应弹系统通知"
+  );
   // Windows 系统通知要求进程 AUMID 与安装快捷方式一致，否则可能静默不弹。
   assert.ok(
     /process\.platform\s*===\s*["']win32["'][\s\S]{0,120}setAppUserModelId\(pkg\.build\?\.appId/.test(mainCode),

@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { registerNotifyIpc } = require("./notify-bridge");
+const { registerNotifyIpc, cleanText } = require("./notify-bridge");
 
 function fakeEnv(opts = {}) {
   const shown = [];
@@ -167,6 +167,73 @@ test("截断按码点：emoji 不被劈成孤立代理项", () => {
   assert.equal([...title].length, 80);
   assert.equal(title, "😀".repeat(80));
   assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(title), "不应有孤立代理项");
+});
+
+test("conversationId 跨进程校验：超长/控制符/注入字符不带，合法 UUID 通过", () => {
+  const env = fakeEnv();
+  registerNotifyIpc(env.ipcMain, env.deps);
+  env.ipcMain["notify:message"]({}, {
+    title: "t",
+    body: "b",
+    conversationId: "x".repeat(100000),
+  });
+  env.shown[0].handlers.click();
+  assert.deepEqual(env.sent, [], "100k 字符不应回传");
+
+  env.ipcMain["notify:message"]({}, {
+    title: "t",
+    body: "b",
+    conversationId: "c1\n;drop",
+  });
+  env.shown[1].handlers.click();
+  assert.deepEqual(env.sent, [], "注入字符不应回传");
+
+  env.ipcMain["notify:message"]({}, {
+    title: "t",
+    body: "b",
+    conversationId: "550e8400-e29b-41d4-a716-446655440000",
+  });
+  env.shown[2].handlers.click();
+  assert.deepEqual(env.sent, [["notify:open", "550e8400-e29b-41d4-a716-446655440000"]]);
+});
+
+test("标题/正文清洗：C0 控制符折叠为空格，孤立代理项换成 U+FFFD", () => {
+  const env = fakeEnv();
+  registerNotifyIpc(env.ipcMain, env.deps);
+  const ctrl = (code) => String.fromCharCode(code);
+  env.ipcMain["notify:message"]({}, {
+    title: `a${ctrl(0)}b${ctrl(7)}c`,
+    body: `x${ctrl(7)}${ctrl(0)}y`,
+  });
+  const p = env.shown[0].payload;
+  assert.equal(p.title, "a b c");
+  assert.equal(p.body, "x y");
+  // toWellFormed 会把孤立代理项换成 U+FFFD
+  assert.equal(cleanText(ctrl(0xd800), 10), ctrl(0xfffd));
+});
+
+test("点击回调重复触发只处理一次（不重复聚焦/回传）", () => {
+  const env = fakeEnv();
+  registerNotifyIpc(env.ipcMain, env.deps);
+  env.ipcMain["notify:message"]({}, { title: "t", body: "b", conversationId: "c1" });
+  env.shown[0].handlers.click();
+  env.shown[0].handlers.click();
+  assert.deepEqual(env.sent, [["notify:open", "c1"]]);
+});
+
+test("任一应用窗口在前台（含通话窗口）→ 不弹；无焦点窗口且主窗口在后台 → 弹", () => {
+  const main = fakeEnv({ focused: false });
+  registerNotifyIpc(main.ipcMain, {
+    ...main.deps,
+    getFocusedWindow: () => ({ isDestroyed: () => false }),
+  });
+  main.ipcMain["notify:message"]({}, { title: "t", body: "b", conversationId: "c1" });
+  assert.equal(main.shown.length, 0, "通话窗口在前台时不打扰");
+
+  const bg = fakeEnv({ focused: false });
+  registerNotifyIpc(bg.ipcMain, { ...bg.deps, getFocusedWindow: () => null });
+  bg.ipcMain["notify:message"]({}, { title: "t", body: "b", conversationId: "c1" });
+  assert.equal(bg.shown.length, 1);
 });
 
 test("源码不引入任何网络能力（红线）", () => {

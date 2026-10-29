@@ -6,6 +6,19 @@ import { conversationTitle } from "./conversationTitle.js";
 import { notifyDesktop } from "./desktopNotify.js";
 
 /**
+ * 同一会话的系统通知合并窗口：窗口内只弹第一声，避免消息风暴刷屏。
+ * 应用内通知仍逐条（按 `message:<id>` 去重），免打扰路径不变。
+ */
+const DESKTOP_NOTIFY_COALESCE_MS = 5000;
+/** 每个会话最近一次请求系统通知的时间（毫秒）。 */
+const lastDesktopAt = new Map<string, number>();
+
+/** 测试隔离：清空合并窗口记录（模块级状态跨用例存活）。 */
+export function resetMessageNotifyForTest(): void {
+  lastDesktopAt.clear();
+}
+
+/**
  * 新消息的唯一提醒入口（聊天页其它会话 / 后台连接共用）。
  *
  * - 免打扰：应用内与系统通知都不发；未读由调用方照常计数；
@@ -25,5 +38,9 @@ export function notifyIncomingMessage(m: Message): void {
     conversationId: m.conversationId,
   });
   if (!pushed) return; // 重复提醒已在通知中心存在
-  notifyDesktop({ title, body: "你有一条新消息", conversationId: m.conversationId });
+  const now = Date.now();
+  if (now - (lastDesktopAt.get(m.conversationId) ?? 0) >= DESKTOP_NOTIFY_COALESCE_MS) {
+    lastDesktopAt.set(m.conversationId, now);
+    notifyDesktop({ title, body: "你有一条新消息", conversationId: m.conversationId });
+  }
 }

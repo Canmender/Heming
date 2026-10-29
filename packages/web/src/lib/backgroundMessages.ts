@@ -3,6 +3,7 @@ import type { WsServerEvent } from "@heming/shared";
 import { connectWs } from "./ws.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
+import { useUiStore } from "../store/ui.js";
 import { notifyIncomingMessage } from "./messageNotify.js";
 import { chatSocketCount } from "./chatSocketPresence.js";
 
@@ -38,6 +39,15 @@ export function handleBackgroundEvent(e: WsServerEvent): void {
     const m = e.message;
     // 契约：notifyIncomingMessage 不判断 sender，自己发的必须先在这里过滤
     if (m.senderId === me) return;
+    // 后台→ChatPage 交接窗口：ChatPage 已挂载且该消息属于当前可见会话时，
+    // 会话由 ChatPage 自己 append / 标已读，后台再记未读或提醒就是伪未读。
+    // 其它会话照常处理（交接期间仍然要能感知到别处的新消息）。
+    if (
+      chatSocketCount() > 0 &&
+      useUiStore.getState().activeConversationId === m.conversationId
+    ) {
+      return;
+    }
     const fresh = useChatStore.getState().bumpUnread(m.conversationId, m.createdAt, m.id);
     if (fresh) notifyIncomingMessage(m);
     // 未知会话（工作区列表里还没有）：提醒照发，并整体刷新一次工作区补齐会话行
