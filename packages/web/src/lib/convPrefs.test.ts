@@ -3,8 +3,10 @@ import {
   CONV_PREFS_KEY,
   convPrefsVersion,
   isMuted,
+  isPinned,
   resetConvPrefsForTest,
   setMuted,
+  setPinned,
   subscribeConvPrefs,
 } from "./convPrefs.js";
 
@@ -33,5 +35,36 @@ describe("convPrefs（按会话免打扰）", () => {
     localStorage.setItem(CONV_PREFS_KEY, "{oops");
     resetConvPrefsForTest();
     expect(isMuted("c1")).toBe(false);
+  });
+
+  it("置顶与免打扰互不覆盖", () => {
+    setPinned("c1", true);
+    expect(isPinned("c1")).toBe(true);
+    expect(isMuted("c1")).toBe(false);
+
+    setMuted("c1", true);
+    expect(isPinned("c1")).toBe(true);
+    expect(isMuted("c1")).toBe(true);
+    expect(JSON.parse(localStorage.getItem(CONV_PREFS_KEY)!)).toEqual({
+      c1: { pinned: true, muted: true },
+    });
+
+    setPinned("c1", false);
+    expect(isPinned("c1")).toBe(false);
+    expect(isMuted("c1")).toBe(true);
+
+    setMuted("c1", false);
+    expect(JSON.parse(localStorage.getItem(CONV_PREFS_KEY)!)).toEqual({});
+  });
+
+  it("坏数据里的 pinned 只认 true", () => {
+    localStorage.setItem(
+      CONV_PREFS_KEY,
+      JSON.stringify({ a: { pinned: "yes" }, b: { pinned: true }, c: null }),
+    );
+    resetConvPrefsForTest();
+    expect(isPinned("a")).toBe(false);
+    expect(isPinned("b")).toBe(true);
+    expect(isPinned("c")).toBe(false);
   });
 });

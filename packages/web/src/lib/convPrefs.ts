@@ -1,13 +1,14 @@
 /**
- * 本机会话偏好（d.39）：目前只有「免打扰」。
+ * 本机会话偏好（d.39 免打扰，d.40 置顶）。
  *
- * 不跟设备、不上云：这是本机的提醒偏好，不是会话数据。
+ * 不跟设备、不上云：这是本机的整理与提醒偏好，不是会话数据。
  * 免打扰只抑制提醒，不抑制未读——消息照常计数，只是不响。
  */
 export const CONV_PREFS_KEY = "heming.convPrefs.v1";
 
 export interface ConvPref {
   muted?: boolean;
+  pinned?: boolean;
 }
 
 let cache: Record<string, ConvPref> | null = null;
@@ -30,9 +31,12 @@ function read(): Record<string, ConvPref> {
     const parsed: unknown = raw ? JSON.parse(raw) : null;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
-        if (value && typeof value === "object" && (value as ConvPref).muted === true) {
-          out[id] = { muted: true };
-        }
+        if (!value || typeof value !== "object") continue;
+        const src = value as ConvPref;
+        const pref: ConvPref = {};
+        if (src.muted === true) pref.muted = true;
+        if (src.pinned === true) pref.pinned = true;
+        if (pref.muted || pref.pinned) out[id] = pref;
       }
     }
   } catch {
@@ -63,12 +67,28 @@ export function isMuted(convId: string): boolean {
   return read()[convId]?.muted === true;
 }
 
-export function setMuted(convId: string, muted: boolean): void {
+export function isPinned(convId: string): boolean {
+  return read()[convId]?.pinned === true;
+}
+
+/** 只改一个字段：另一个字段原样保留，两个都没了才删键。 */
+function setFlag(convId: string, key: "muted" | "pinned", on: boolean): void {
   const current = read();
   const next = { ...current };
-  if (muted) next[convId] = { muted: true };
+  const entry: ConvPref = { ...(next[convId] ?? {}) };
+  if (on) entry[key] = true;
+  else delete entry[key];
+  if (entry.muted || entry.pinned) next[convId] = entry;
   else delete next[convId];
   persist(next);
+}
+
+export function setMuted(convId: string, muted: boolean): void {
+  setFlag(convId, "muted", muted);
+}
+
+export function setPinned(convId: string, pinned: boolean): void {
+  setFlag(convId, "pinned", pinned);
 }
 
 export function convPrefsVersion(): number {
