@@ -205,3 +205,30 @@ export const BellIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M10.3 21a2 2 0 0 0 3.4 0" />
   </svg>
 );
+
+/** 免打扰（铃铛加斜线）。 */
+export const BellOffIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M18 8a6 6 0 0 0-9.3-5" />
+    <path d="M6.3 6.3A6 6 0 0 0 6 8c0 7-3 7-3 9h12" />
+    <path d="M10.3 21a2 2 0 0 0 3.4 0" />
+    <path d="M3 3l18 18" />
+  </svg>
+);
+
+/** 置顶。 */
+export const PinIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M9 4h6l-1 6 3 3H7l3-3-1-6z" />
+    <path d="M12 13v7" />
+  </svg>
+);
+
+/** 会话中心：列表。 */
+export const SessionsIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 6h16" />
+    <path d="M4 12h16" />
+    <path d="M4 18h10" />
+  </svg>
+);
