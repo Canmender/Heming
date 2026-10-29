@@ -71,7 +71,7 @@
 | [specs/2026-10-21-local-package-runtime-policy.md](superpowers/specs/2026-10-21-local-package-runtime-policy.md) | 本地包（npm/pypi）运行时策略：探测、`shell:false` 翻译链、台账与进程回收 |
 | [research/2026-10-21-delivery-hitl-registry.md](research/2026-10-21-delivery-hitl-registry.md) | HITL + Registry 本轮交付与踩坑 |
 
-### d.30–d.39 安全与数据收口（2026-10-22 → ）
+### d.30–d.40 安全与数据收口（2026-10-22 → ）
 
 按 `research/2026-10-22-deep-audit-followup-plan.md` 的分轮表推进；每轮一份规格、一次门禁、两处发布。
 
@@ -88,6 +88,7 @@
 | [specs/2026-10-27-d37-conversation-continuity.md](superpowers/specs/2026-10-27-d37-conversation-continuity.md) | d.37：会话连续性——`lastMessageAt` 排序、未读分隔线定位、连接三态与断线横幅、草稿可见 |
 | [specs/2026-10-28-d38-typing-indicator.md](superpowers/specs/2026-10-28-d38-typing-indicator.md) | d.38：人类会话正在输入提示——`typing` 元数据事件、客户端 2s / 服务端 1s 节流、3s 过期；presence 未做 |
 | [specs/2026-10-28-d39-global-message-awareness.md](superpowers/specs/2026-10-28-d39-global-message-awareness.md) | d.39：全域消息感知——非聊天页后台通道（只感知不解密）、桌面系统通知（正文固定）、按会话免打扰、消息 id 去重；会话列表/全局搜索/presence/托盘未做 |
+| [specs/2026-10-29-d40-conversation-center.md](superpowers/specs/2026-10-29-d40-conversation-center.md) | d.40：会话中心——导航「会话」Alt+9、未归档全集、置顶 + 最近活跃排序、五级预览（只读本机缓存）、行内置顶/免打扰/归档、本机偏好；全局检索/分组/拖拽/服务端同步未做 |
 | [research/2026-10-28-d38-adversarial-qa.md](research/2026-10-28-d38-adversarial-qa.md) | d.38.1.10.0：对抗性自检 16 例（typing + 连续性），C2 暴露「消息到达不清理输入态」，已修 |
 | [research/2026-10-28-d39-deep-stress-testing.md](research/2026-10-28-d39-deep-stress-testing.md) | d.39.1.11.0：32 例深度对抗/压测（消息风暴、页面切换、通知桥模糊输入）+ 6 项修复（交接窗口、吐司合并、id 校验、文本清洗、点击幂等、通话窗焦点）；后台失败 UI 仍缺 |
 | [research/2026-10-23-rounds-after-d36.md](research/2026-10-23-rounds-after-d36.md) | d.36 之后的开工备忘：CSP 基线、`release.sh` 顺序、docker 清理、需拍板项与建议轮次 |
