@@ -116,6 +116,8 @@ export interface CachedMsg {
 
 export interface MsgCache {
   append(convId: string, m: CachedMsg): void;
+  /** 只读缓存视图：不触碰 LRU、不写盘、不淘汰任何会话（列表预览用）。 */
+  peek(convId: string): CachedMsg[];
   list(convId: string): CachedMsg[];
 }
 
@@ -958,6 +960,11 @@ export const msgCache: MsgCache = {
     cacheView.set(key, { raw: localStorage.getItem(key), parsed: next });
     // 往某会话写 ⇒ 它在用。写盘是低频路径（每来一条消息一次），顺手把账本落盘。
     touchCacheConversation(convId, true);
+  },
+  peek(convId) {
+    // 只读：列表预览会随每次 render/输入调用，不能借读刷 LRU（那会写盘、
+    // 账本超 20 时还会淘汰别的会话的明文缓存）。
+    return viewCached(MSGCACHE_PREFIX + convId);
   },
   list(convId) {
     // 「这个会话被看了」——但 list 是热路径（接收路径每个信封都 list），

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Conversation, Message } from "@heming/shared";
 import { archiveConversation } from "../lib/api.js";
 import { msgCache } from "../lib/e2eSession.js";
@@ -25,7 +25,8 @@ function clipPreview(text: string): string {
 
 /** 本机解密缓存里最后一条可展示消息；reaction/chaindist/chunk/error 不算。 */
 function cachedPreview(convId: string): { text: string; at: number } | null {
-  const list = msgCache.list(convId);
+  // peek 而非 list：预览在每次 render/输入时都会调用，不能顺手刷 LRU（会写盘、淘汰别的会话）
+  const list = msgCache.peek(convId);
   for (let i = list.length - 1; i >= 0; i -= 1) {
     const p = list[i].plain;
     if (p.kind === "text") return { text: p.text?.trim() || "(空消息)", at: list[i].at };
@@ -45,7 +46,9 @@ function previewOf(conv: Conversation, messages: Record<string, Message[]>): str
   if (draft) return `草稿：${clipPreview(draft)}`;
   const last = lastLoaded(messages, conv.id);
   if (last) {
-    return last.recalledAt != null ? "消息已撤回" : clipPreview(last.payload.text || "(附件)");
+    return last.recalledAt != null
+      ? "消息已撤回"
+      : clipPreview(last.payload.text?.trim() || "(附件)");
   }
   const cached = cachedPreview(conv.id);
   if (cached) return clipPreview(cached.text);
@@ -53,17 +56,24 @@ function previewOf(conv: Conversation, messages: Record<string, Message[]>): str
 }
 
 function timeOf(conv: Conversation, messages: Record<string, Message[]>): string {
-  const iso =
-    conv.lastMessageAt ??
-    (() => {
-      const last = lastLoaded(messages, conv.id);
-      if (last) return last.createdAt;
-      const cached = cachedPreview(conv.id);
-      return cached ? new Date(cached.at).toISOString() : null;
-    })();
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
+  // 依次尝试：会话最后消息时间 → 已加载最后一条 → 本机缓存。
+  // lastMessageAt 存在但非法（坏数据）时继续回退，而不是直接显示空字符串。
+  const candidates: (string | null | undefined)[] = [conv.lastMessageAt];
+  const last = lastLoaded(messages, conv.id);
+  if (last) candidates.push(last.createdAt);
+  const cached = cachedPreview(conv.id);
+  if (cached) candidates.push(new Date(cached.at).toISOString());
+
+  let d: Date | null = null;
+  for (const iso of candidates) {
+    if (!iso) continue;
+    const parsed = new Date(iso);
+    if (!Number.isNaN(parsed.getTime())) {
+      d = parsed;
+      break;
+    }
+  }
+  if (!d) return "";
   const now = new Date();
   const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   const sameDay =
@@ -89,14 +99,16 @@ export function ConversationsPage() {
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
   const openConversation = useUiStore((s) => s.openConversation);
 
-  // 偏好与草稿变化都要重算预览/排序；版本号同时进 useMemo 的 deps，
-  // 否则 useSyncExternalStore 只触发重渲染、memo 仍拿旧结果（置顶不生效）。
+  // 偏好与草稿变化都要重渲染：排序依赖置顶（prefsVersion 进 memo deps），
+  // 预览依赖草稿（订阅本身触发重渲染即可，不必进 memo deps——排序不依赖草稿）。
   const prefsVersion = useSyncExternalStore(subscribeConvPrefs, convPrefsVersion, () => 0);
-  const draftVersion = useSyncExternalStore(subscribeDrafts, draftsVersion, () => 0);
+  useSyncExternalStore(subscribeDrafts, draftsVersion, () => 0);
 
   const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** 同一 tick 连点两下时 state 尚未刷新，用 ref 立即拦住第二次归档。 */
+  const busyRef = useRef(false);
 
   useEffect(() => {
     void loadWorkspace().catch(() => {});
@@ -115,22 +127,28 @@ export function ConversationsPage() {
         const bx = b.lastMessageAt ?? "";
         return ax === bx ? 0 : ax < bx ? 1 : -1;
       });
-    // draftVersion/prefsVersion 是快照值，仅用于让 memo 在偏好/草稿变化时失效
-  }, [conversations, query, prefsVersion, draftVersion]);
+  }, [conversations, query, prefsVersion]);
 
   const active = conversations.filter((c) => !c.archivedAt);
   const unread = active.reduce((n, c) => n + (c.unreadCount ?? 0), 0);
 
   const archive = async (conv: Conversation) => {
-    if (busyId) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusyId(conv.id);
     setNotice(null);
     try {
       await archiveConversation(conv.id, true);
-      await loadWorkspace();
+      try {
+        await loadWorkspace();
+      } catch {
+        // 归档已成功，只是列表没刷出来：不能报「归档失败」误导用户重复操作
+        setNotice("已归档，但列表刷新失败");
+      }
     } catch (err) {
       setNotice(`归档失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
+      busyRef.current = false;
       setBusyId(null);
     }
   };
@@ -141,7 +159,7 @@ export function ConversationsPage() {
         <div className="flex items-baseline justify-between gap-3">
           <h1 className="text-[17px] font-extrabold">会话</h1>
           <span className="text-[11px] text-muted">
-            {active.length} 个会话{unread > 0 ? ` · ${unread} 条未读` : ""}
+            {rows.length} 个会话{unread > 0 ? ` · ${unread} 条未读` : ""}
           </span>
         </div>
         <div className="relative mt-3 max-w-[420px]">
@@ -159,7 +177,7 @@ export function ConversationsPage() {
           />
         </div>
         {notice && (
-          <div role="status" className="mt-2 text-[11px] text-red-600">
+          <div role="alert" className="mt-2 text-[11px] text-red-600">
             {notice}
           </div>
         )}
@@ -203,7 +221,7 @@ export function ConversationsPage() {
                 >
                   <button
                     type="button"
-                    aria-label={`打开会话 ${label.name}`}
+                    aria-label={`打开会话 ${label.name}${c.unreadCount > 0 ? ` ${c.unreadCount} 条未读` : ""}`}
                     onClick={() => openConversation(c.id)}
                     className="flex min-w-0 flex-1 items-center gap-3 text-left"
                   >
@@ -266,7 +284,7 @@ export function ConversationsPage() {
                       type="button"
                       aria-label={`归档 ${label.name}`}
                       title="归档"
-                      disabled={busyId === c.id}
+                      disabled={busyId !== null}
                       onClick={() => void archive(c)}
                       className="rounded p-1 text-muted hover:bg-[#f3f3f3] disabled:opacity-40"
                     >
