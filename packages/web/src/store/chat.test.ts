@@ -3,6 +3,7 @@ import type { Agent, Member, Message, User, WsServerEvent } from "@heming/shared
 import { useChatStore } from "./chat.js";
 import { api, fetchMembers, fetchMessages, reencryptMessage } from "../lib/api.js";
 import { listAgents } from "../lib/agentsApi.js";
+import { msgCache, type CachedMsg } from "../lib/e2eSession.js";
 
 // createGroup 走 api()、loadAgents 走 fetchMembers：模块级 mock（其余导出保持真实）
 vi.mock("../lib/api.js", async (importOriginal) => {
@@ -532,6 +533,42 @@ describe("chat store", () => {
     const list = useChatStore.getState().messages["c1"];
     expect(list).toHaveLength(1);
     expect(list[0].recalledAt).toBeNull();
+  });
+
+  it("onWsEvent message_recalled：本会话消息列表不存在也清本机明文缓存", () => {
+    localStorage.clear();
+    const cached: CachedMsg = {
+      id: "g1",
+      senderId: "u2",
+      at: Date.parse("2026-10-17T00:00:00.000Z"),
+      plain: { kind: "text", text: "撤回前的正文" },
+    };
+    msgCache.append("ghost", cached);
+    expect(msgCache.peek("ghost")).toHaveLength(1);
+
+    useChatStore.getState().onWsEvent({
+      type: "message_recalled",
+      conversationId: "ghost",
+      messageId: "g1",
+      at: "2026-10-17T01:00:00.000Z",
+    });
+    expect(msgCache.peek("ghost")).toEqual([]);
+    expect(useChatStore.getState().messages["ghost"]).toBeUndefined(); // 清缓存不建空表
+  });
+
+  it("setMessages：历史里 recalledAt 非空的消息清掉本机明文缓存", () => {
+    localStorage.clear();
+    msgCache.append("c-rec", {
+      id: "r1",
+      senderId: "u2",
+      at: Date.parse("2026-10-17T00:00:00.000Z"),
+      plain: { kind: "text", text: "撤回前的正文" },
+    });
+    useChatStore.getState().setMessages("c-rec", [
+      { ...msg("r1", "撤回前的正文"), conversationId: "c-rec", recalledAt: "2026-10-17T01:00:00.000Z" },
+      msg("r2", "保留"),
+    ]);
+    expect(msgCache.peek("c-rec").map((m) => m.id)).toEqual([]);
   });
 
   // —— 二期 IM Task 7：他机流 watchdog（长时间无收尾 → error 行供手动重试）——

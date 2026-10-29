@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Conversation, Message } from "@heming/shared";
 import { archiveConversation } from "../lib/api.js";
-import { msgCache } from "../lib/e2eSession.js";
+import { msgCache, type CachedMsg, type PlainEnvelope } from "../lib/e2eSession.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { hasDraft, getDraft, subscribeDrafts, draftsVersion } from "../lib/drafts.js";
@@ -23,15 +23,26 @@ function clipPreview(text: string): string {
   return chars.length > 60 ? `${chars.slice(0, 60).join("")}…` : chars.join("");
 }
 
-/** 本机解密缓存里最后一条可展示消息；reaction/chaindist/chunk/error 不算。 */
-function cachedPreview(convId: string): { text: string; at: number } | null {
-  // peek 而非 list：预览在每次 render/输入时都会调用，不能顺手刷 LRU（会写盘、淘汰别的会话）
-  const list = msgCache.peek(convId);
+/** 密文明文体 → 一行预览；控制/回应类返回 null（调用方继续往前找）。 */
+function plainPreview(plain: PlainEnvelope): string | null {
+  if (plain.kind === "text") return plain.text?.trim() || "(空消息)";
+  if (plain.kind === "file") return "(附件)";
+  if (plain.kind === "forward") return plain.text?.trim() || "(转发消息)";
+  return null;
+}
+
+/**
+ * 本机解密缓存里最后一条可展示消息。
+ *
+ * `list` 由调用方每行只 peek 一次后传入：预览与时间共用同一份数组，避免重复读缓存。
+ * reaction/chaindist/chunk/error 不算；坏条目（缺 plain、at 非数字）直接跳过。
+ */
+function cachedPreview(list: CachedMsg[]): { text: string; at: number | null } | null {
   for (let i = list.length - 1; i >= 0; i -= 1) {
-    const p = list[i].plain;
-    if (p.kind === "text") return { text: p.text?.trim() || "(空消息)", at: list[i].at };
-    if (p.kind === "file") return { text: "(附件)", at: list[i].at };
-    if (p.kind === "forward") return { text: p.text?.trim() || "(转发消息)", at: list[i].at };
+    const item = list[i];
+    const text = item?.plain ? plainPreview(item.plain) : null;
+    if (text === null || text === undefined) continue;
+    return { text, at: Number.isFinite(item.at) ? item.at : null };
   }
   return null;
 }
@@ -41,39 +52,51 @@ function lastLoaded(messages: Record<string, Message[]>, convId: string): Messag
   return list && list.length > 0 ? list[list.length - 1] : undefined;
 }
 
-function previewOf(conv: Conversation, messages: Record<string, Message[]>): string {
+/**
+ * 已加载消息的最后一条可展示预览；没有可展示条目时返回 null（回落到缓存）。
+ *
+ * e2e 信封的正文在 `plainById`：未解密（defer/failed/未注入 handler）显示「无法解密」；
+ * reaction/chaindist/chunk/error 不解密成气泡，继续往前找。撤回优先于一切（不回显）。
+ */
+function loadedPreview(
+  messages: Record<string, Message[]>,
+  plainById: Record<string, Record<string, PlainEnvelope>>,
+  convId: string,
+): string | null {
+  const list = messages[convId];
+  if (!list || list.length === 0) return null;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const m = list[i];
+    if (m.recalledAt != null) return "消息已撤回";
+    if (m.enc === "e2e") {
+      const plain = plainById[convId]?.[m.id];
+      if (!plain) return "无法解密";
+      const text = plainPreview(plain);
+      if (text !== null) return text;
+      continue; // 控制/回应类：不画气泡，继续往前找
+    }
+    return clipPreview(m.payload.text?.trim() || "(附件)");
+  }
+  return null;
+}
+
+function previewOf(
+  conv: Conversation,
+  messages: Record<string, Message[]>,
+  plainById: Record<string, Record<string, PlainEnvelope>>,
+  cacheList: CachedMsg[],
+): string {
   const draft = hasDraft(conv.id) ? getDraft(conv.id) : "";
   if (draft) return `草稿：${clipPreview(draft)}`;
-  const last = lastLoaded(messages, conv.id);
-  if (last) {
-    return last.recalledAt != null
-      ? "消息已撤回"
-      : clipPreview(last.payload.text?.trim() || "(附件)");
-  }
-  const cached = cachedPreview(conv.id);
+  const loaded = loadedPreview(messages, plainById, conv.id);
+  if (loaded !== null) return loaded;
+  const cached = cachedPreview(cacheList);
   if (cached) return clipPreview(cached.text);
   return conv.lastMessageAt ? "点击查看消息" : "暂无消息";
 }
 
-function timeOf(conv: Conversation, messages: Record<string, Message[]>): string {
-  // 依次尝试：会话最后消息时间 → 已加载最后一条 → 本机缓存。
-  // lastMessageAt 存在但非法（坏数据）时继续回退，而不是直接显示空字符串。
-  const candidates: (string | null | undefined)[] = [conv.lastMessageAt];
-  const last = lastLoaded(messages, conv.id);
-  if (last) candidates.push(last.createdAt);
-  const cached = cachedPreview(conv.id);
-  if (cached) candidates.push(new Date(cached.at).toISOString());
-
-  let d: Date | null = null;
-  for (const iso of candidates) {
-    if (!iso) continue;
-    const parsed = new Date(iso);
-    if (!Number.isNaN(parsed.getTime())) {
-      d = parsed;
-      break;
-    }
-  }
-  if (!d) return "";
+/** 时间格式：当天 HH:mm，其它 MM-DD HH:mm。 */
+function formatTime(d: Date): string {
   const now = new Date();
   const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   const sameDay =
@@ -85,6 +108,31 @@ function timeOf(conv: Conversation, messages: Record<string, Message[]>): string
     : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
 }
 
+function timeOf(
+  conv: Conversation,
+  messages: Record<string, Message[]>,
+  cacheList: CachedMsg[],
+): string {
+  // lastMessageAt 有效时直接用（最常见路径，不必解析缓存）。
+  if (conv.lastMessageAt) {
+    const direct = new Date(conv.lastMessageAt);
+    if (!Number.isNaN(direct.getTime())) return formatTime(direct);
+  }
+  // 缺失/非法：回退到已加载最后一条 → 本机缓存（at 必须是有效数字）。
+  const candidates: (string | null | undefined)[] = [];
+  const last = lastLoaded(messages, conv.id);
+  if (last) candidates.push(last.createdAt);
+  const cached = cachedPreview(cacheList);
+  if (cached && cached.at !== null) candidates.push(new Date(cached.at).toISOString());
+
+  for (const iso of candidates) {
+    if (!iso) continue;
+    const parsed = new Date(iso);
+    if (!Number.isNaN(parsed.getTime())) return formatTime(parsed);
+  }
+  return "";
+}
+
 /**
  * 会话中心：全部未归档会话的一站式列表（d.40）。
  *
@@ -94,6 +142,7 @@ function timeOf(conv: Conversation, messages: Record<string, Message[]>): string
 export function ConversationsPage() {
   const conversations = useChatStore((s) => s.conversations);
   const messages = useChatStore((s) => s.messages);
+  const plainById = useChatStore((s) => s.plainById);
   const workspaceReady = useChatStore((s) => s.workspaceReady);
   const workspaceError = useChatStore((s) => s.workspaceError);
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
@@ -129,8 +178,8 @@ export function ConversationsPage() {
       });
   }, [conversations, query, prefsVersion]);
 
-  const active = conversations.filter((c) => !c.archivedAt);
-  const unread = active.reduce((n, c) => n + (c.unreadCount ?? 0), 0);
+  // 顶部计数与列表同口径：搜索时只算过滤后的 rows（未读数同样只算可见行）。
+  const unread = rows.reduce((n, c) => n + (c.unreadCount ?? 0), 0);
 
   const archive = async (conv: Conversation) => {
     if (busyRef.current) return;
@@ -159,7 +208,7 @@ export function ConversationsPage() {
         <div className="flex items-baseline justify-between gap-3">
           <h1 className="text-[17px] font-extrabold">会话</h1>
           <span className="text-[11px] text-muted">
-            {rows.length} 个会话{unread > 0 ? ` · ${unread} 条未读` : ""}
+            {workspaceReady ? `${rows.length} 个会话${unread > 0 ? ` · ${unread} 条未读` : ""}` : ""}
           </span>
         </div>
         <div className="relative mt-3 max-w-[420px]">
@@ -211,8 +260,10 @@ export function ConversationsPage() {
               const label = convLabel(c);
               const pinned = isPinned(c.id);
               const muted = isMuted(c.id);
-              const preview = previewOf(c, messages);
-              const time = timeOf(c, messages);
+              // 每行只 peek 一次：预览与时间共用同一份缓存数组
+              const cacheList = msgCache.peek(c.id);
+              const preview = previewOf(c, messages, plainById, cacheList);
+              const time = timeOf(c, messages, cacheList);
               return (
                 <div
                   key={c.id}

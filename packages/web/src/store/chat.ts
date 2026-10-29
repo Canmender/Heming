@@ -475,6 +475,11 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (at === -1) merged.push(m);
       else merged.splice(at, 0, m);
     }
+    // 离线期间/非聊天页期间的撤回不会走 onWsEvent：历史里带 recalledAt 的条目
+    // 顺手清掉本机明文缓存，避免会话页预览回显已撤回正文。
+    for (const m of merged) {
+      if (m.recalledAt != null) msgCache.remove(convId, m.id);
+    }
     set({ messages: { ...get().messages, [convId]: merged } });
   },
   setOpenHandler(fn) {
@@ -689,7 +694,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       return;
     }
     if (e.type === "message_recalled") {
-      // 撤回不移除列表：按 messageId 置 recalledAt（气泡渲染层按它切换「消息已撤回」）
+      // 撤回不回显：先清本机明文缓存（会话页预览读缓存；离线的聊天列表可能根本没有这条），
+      // 再按 messageId 置 recalledAt（气泡渲染层按它切换「消息已撤回」）。
+      msgCache.remove(e.conversationId, e.messageId);
       const list = get().messages[e.conversationId];
       if (list) {
         set({

@@ -6,6 +6,7 @@ import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { useNotificationStore } from "../store/notifications.js";
 import { resetConvPrefsForTest } from "./convPrefs.js";
+import { msgCache } from "./e2eSession.js";
 import { resetMessageNotifyForTest } from "./messageNotify.js";
 import {
   registerChatSocket,
@@ -74,6 +75,28 @@ describe("backgroundMessages", () => {
     handleBackgroundEvent({ type: "message_new", message: msg("bg5", "你好") });
     expect(useChatStore.getState().messages).toEqual({});
     expect(useChatStore.getState().plainById).toEqual({});
+  });
+
+  it("message_recalled：只清本机明文缓存，不通知、不改未读", () => {
+    msgCache.append("c1", {
+      id: "bg-rec",
+      senderId: "u2",
+      at: Date.parse("2026-10-28T02:00:00.000Z"),
+      plain: { kind: "text", text: "撤回前的正文" },
+    });
+    expect(msgCache.peek("c1")).toHaveLength(1);
+
+    handleBackgroundEvent({
+      type: "message_recalled",
+      conversationId: "c1",
+      messageId: "bg-rec",
+      at: "2026-10-28T03:00:00.000Z",
+    });
+
+    expect(msgCache.peek("c1")).toEqual([]);
+    expect(useChatStore.getState().conversations[0].unreadCount).toBe(0);
+    expect(useNotificationStore.getState().items).toHaveLength(0);
+    expect(window.__heming_notify!.message).not.toHaveBeenCalled();
   });
 
   it("重复消息 id 不重复提醒；自己发的消息忽略", () => {

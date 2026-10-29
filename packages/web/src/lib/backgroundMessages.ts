@@ -5,6 +5,7 @@ import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { notifyIncomingMessage } from "./messageNotify.js";
+import { msgCache } from "./e2eSession.js";
 import { chatSocketCount } from "./chatSocketPresence.js";
 
 /**
@@ -56,6 +57,9 @@ export function handleBackgroundEvent(e: WsServerEvent): void {
     }
   } else if (e.type === "read_update") {
     if (e.userId === me) useChatStore.getState().clearUnread(e.conversationId, e.at);
+  } else if (e.type === "message_recalled") {
+    // 撤回不是新消息：不清未读、不提醒，只清本机明文缓存（避免会话页预览回显原文）。
+    msgCache.remove(e.conversationId, e.messageId);
   }
 }
 

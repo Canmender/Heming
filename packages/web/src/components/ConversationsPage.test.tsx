@@ -6,7 +6,7 @@ import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { resetConvPrefsForTest, setPinned } from "../lib/convPrefs.js";
 import { clearDraft, setDraft } from "../lib/drafts.js";
-import { msgCache } from "../lib/e2eSession.js";
+import { msgCache, type PlainEnvelope } from "../lib/e2eSession.js";
 import { archiveConversation } from "../lib/api.js";
 
 vi.mock("../lib/api.js", async (importOriginal) => {
@@ -47,6 +47,10 @@ const loadedMsg = (id: string, conversationId: string, text: string, createdAt: 
     enc: "plain",
   }) as Message;
 
+/** e2e 信封占位：列表里 payload 为空，真正的正文在 plainById。 */
+const e2eMsg = (id: string, conversationId: string, createdAt: string): Message =>
+  ({ ...loadedMsg(id, conversationId, "", createdAt), enc: "e2e" }) as Message;
+
 const cached = (id: string, text: string, kind: "text" | "reaction" | "chaindist" | "chunk" | "error" = "text") => ({
   id,
   senderId: "u2",
@@ -63,6 +67,7 @@ beforeEach(() => {
   useChatStore.setState({
     conversations: [],
     messages: {},
+    plainById: {},
     workspaceReady: true,
     workspaceError: null,
     loadWorkspace: vi.fn(async () => {}),
@@ -235,9 +240,98 @@ describe("ConversationsPage", () => {
     expect(within(badRow).getByText(expected)).toBeInTheDocument();
   });
 
-  it("msgCache.peek 只读返回缓存内容，且与 list 一致", () => {
-    msgCache.append("c-peek", cached("p1", "peek 正文"));
+  it("msgCache.peek 只读且与 list 一致；remove 按 id 删条", () => {
+    msgCache.append("c-peek", cached("p1", "一"));
+    msgCache.append("c-peek", cached("p2", "二"));
     expect(msgCache.peek("c-peek")).toEqual(msgCache.list("c-peek"));
     expect(msgCache.peek("c-missing")).toEqual([]);
+
+    msgCache.remove("c-peek", "p1");
+    expect(msgCache.peek("c-peek").map((m) => m.id)).toEqual(["p2"]);
+    expect(msgCache.list("c-peek")).toEqual(msgCache.peek("c-peek"));
+    msgCache.remove("c-peek", "no-such");
+    expect(msgCache.peek("c-peek").map((m) => m.id)).toEqual(["p2"]);
+  });
+
+  it("本机缓存被撤回清除后不再回显原文（回落点击查看消息/暂无消息）", () => {
+    msgCache.append("c-rec1", cached("r1", "撤回前的正文"));
+    msgCache.append("c-rec2", cached("r2", "撤回前的正文"));
+    useChatStore.setState({
+      conversations: [direct("c-rec1", "2026-10-25T00:00:00.000Z"), direct("c-rec2", null)],
+      messages: {},
+    });
+    const first = render(<ConversationsPage />);
+    expect(screen.getAllByText("撤回前的正文")).toHaveLength(2);
+    first.unmount();
+
+    // 模拟撤回已发生、重启后 store 无已加载消息：缓存已清 → 不再回显
+    msgCache.remove("c-rec1", "r1");
+    msgCache.remove("c-rec2", "r2");
+
+    const second = render(<ConversationsPage />);
+    expect(screen.queryByText("撤回前的正文")).toBeNull();
+    const row1 = second.container.querySelector('[data-conv-id="c-rec1"]') as HTMLElement;
+    const row2 = second.container.querySelector('[data-conv-id="c-rec2"]') as HTMLElement;
+    expect(within(row1).getByText("点击查看消息")).toBeInTheDocument();
+    expect(within(row2).getByText("暂无消息")).toBeInTheDocument();
+  });
+
+  it("已加载 e2e 消息按 plainById 预览：控制类跳过、未解密显示无法解密、附件/转发分型", () => {
+    const at = "2026-10-25T00:00:00.000Z";
+    const plainById: Record<string, Record<string, PlainEnvelope>> = {
+      "c-e2e": {
+        "e-old": { kind: "text", text: "e2e 正文" },
+        "e-react": { kind: "reaction", reaction: { target: "e-old", emoji: "👍", op: "add" } },
+      },
+      "c-file": {
+        "e-file": { kind: "file", file: { id: "f1", name: "a.png", mime: "image/png", size: 1 } },
+      },
+      "c-fwd": {
+        "e-fwd": { kind: "forward", text: "转发正文", forward: { from: "鲍勃", source: "群" } },
+      },
+    };
+    useChatStore.setState({
+      conversations: [
+        direct("c-e2e", at),
+        direct("c-nodec", at),
+        direct("c-file", at),
+        direct("c-fwd", at),
+      ],
+      messages: {
+        "c-e2e": [e2eMsg("e-old", "c-e2e", at), e2eMsg("e-react", "c-e2e", at)],
+        "c-nodec": [e2eMsg("e-nodec", "c-nodec", at)],
+        "c-file": [e2eMsg("e-file", "c-file", at)],
+        "c-fwd": [e2eMsg("e-fwd", "c-fwd", at)],
+      },
+      plainById,
+    });
+    render(<ConversationsPage />);
+    expect(screen.getByText("e2e 正文")).toBeInTheDocument();
+    expect(screen.getByText("无法解密")).toBeInTheDocument();
+    expect(screen.getByText("(附件)")).toBeInTheDocument();
+    expect(screen.getByText("转发正文")).toBeInTheDocument();
+  });
+
+  it("坏缓存（缺 plain / at 非数字）不抛，仍可取可展示正文", () => {
+    localStorage.setItem(
+      "heming.msgCache.c-badcache",
+      JSON.stringify([
+        { id: "b1", senderId: "u2", at: "oops", plain: null },
+        { id: "b2", senderId: "u2", at: null, plain: { kind: "text", text: "时间坏但正文可展示" } },
+      ]),
+    );
+    useChatStore.setState({ conversations: [direct("c-badcache", null)], messages: {} });
+    render(<ConversationsPage />);
+    expect(screen.getByText("时间坏但正文可展示")).toBeInTheDocument();
+  });
+
+  it("工作区未就绪时不显示顶部计数", () => {
+    useChatStore.setState({
+      conversations: [support("c1", "张三")],
+      messages: {},
+      workspaceReady: false,
+    });
+    render(<ConversationsPage />);
+    expect(screen.queryByText(/个会话/)).toBeNull();
   });
 });

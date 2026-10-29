@@ -118,6 +118,8 @@ export interface MsgCache {
   append(convId: string, m: CachedMsg): void;
   /** 只读缓存视图：不触碰 LRU、不写盘、不淘汰任何会话（列表预览用）。 */
   peek(convId: string): CachedMsg[];
+  /** 按消息 id 删一条（撤回时清明文，防止预览回显已撤回正文）；不触碰 LRU、不淘汰。 */
+  remove(convId: string, msgId: string): void;
   list(convId: string): CachedMsg[];
 }
 
@@ -965,6 +967,15 @@ export const msgCache: MsgCache = {
     // 只读：列表预览会随每次 render/输入调用，不能借读刷 LRU（那会写盘、
     // 账本超 20 时还会淘汰别的会话的明文缓存）。
     return viewCached(MSGCACHE_PREFIX + convId);
+  },
+  remove(convId, msgId) {
+    // 撤回是「这条内容不该再出现在本机」：只删这一条，不刷 LRU、不淘汰别的会话。
+    const key = MSGCACHE_PREFIX + convId;
+    const list = viewCached(key);
+    if (!list.some((m) => m.id === msgId)) return;
+    const next = list.filter((m) => m.id !== msgId);
+    writeJson(key, next);
+    cacheView.set(key, { raw: localStorage.getItem(key), parsed: next });
   },
   list(convId) {
     // 「这个会话被看了」——但 list 是热路径（接收路径每个信封都 list），
