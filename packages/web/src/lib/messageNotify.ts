@@ -40,7 +40,9 @@ export function notifyIncomingMessage(m: Message): void {
   if (!pushed) return; // 重复提醒已在通知中心存在
   const now = Date.now();
   if (now - (lastDesktopAt.get(m.conversationId) ?? 0) >= DESKTOP_NOTIFY_COALESCE_MS) {
-    lastDesktopAt.set(m.conversationId, now);
-    notifyDesktop({ title, body: "你有一条新消息", conversationId: m.conversationId });
+    // 只有真正弹出才计时：窗口聚焦等原因被 notifyDesktop 拦下时不吃掉冷却窗口。
+    if (notifyDesktop({ title, body: "你有一条新消息", conversationId: m.conversationId })) {
+      lastDesktopAt.set(m.conversationId, now);
+    }
   }
 }

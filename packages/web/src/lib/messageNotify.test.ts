@@ -105,4 +105,21 @@ describe("messageNotify", () => {
     notifyIncomingMessage(msg({ id: "m21", conversationId: "c2" }));
     expect(window.__heming_notify!.message).toHaveBeenCalledTimes(2);
   });
+
+  it("合并窗口只在真正弹出后计时：聚焦时收到 m1 不吞掉失焦后的 m2", () => {
+    // 窗口聚焦：notifyDesktop 返回 false，不应记入冷却窗口
+    vi.mocked(document.hasFocus).mockReturnValue(true);
+    notifyIncomingMessage(msg({ id: "m30" }));
+    expect(window.__heming_notify!.message).not.toHaveBeenCalled();
+
+    // 模拟失焦后 5s 内收到同会话下一条：旧实现会因聚焦时已计时而被吞掉
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    notifyIncomingMessage(msg({ id: "m31" }));
+    expect(window.__heming_notify!.message).toHaveBeenCalledTimes(1);
+    expect(window.__heming_notify!.message).toHaveBeenCalledWith({
+      title: "鲍勃",
+      body: "你有一条新消息",
+      conversationId: "c1",
+    });
+  });
 });

@@ -52,11 +52,11 @@
    `activeConversationId` 时直接返回，当前可见会话由 ChatPage 自己 append / 标已读；
    其它会话照常计未读与提醒。新增单测（presence 1 + active c1 → c1 静默、c2 照常）。
 2. **系统吐司合并**（`messageNotify.ts`）：按会话 5s 冷却（`DESKTOP_NOTIFY_COALESCE_MS`），
-   窗口内只弹第一声；应用内通知仍逐条按 `message:<id>` 去重。新增 `resetMessageNotifyForTest`。
+   窗口内只弹第一声，且只在真正弹出后计时；应用内通知仍逐条按 `message:<id>` 去重。新增 `resetMessageNotifyForTest`。
 3. **conversationId 校验**（`notify-bridge.js`）：只接受 `/^[A-Za-z0-9._:-]{1,128}$/`，
    非法值回传 null（点击只聚焦，不开幽灵会话）。
 4. **文本清洗**（`notify-bridge.js`）：`toWellFormed()` 处理孤立代理项（→ U+FFFD），
-   C0 控制符替换为空格后再折叠；码点截断保留（emoji 不劈）。
+   C0/C1 控制符替换为空格后再折叠；码点截断保留（emoji 不劈）。
 5. **点击幂等**（`notify-bridge.js`）：点击回调只处理第一次，避免重复聚焦与重复 `notify:open`。
 6. **通话窗口焦点**（`notify-bridge.js` + `main.js`）：新增 `getFocusedWindow` 依赖，
    任一应用窗口在前台即不弹；保留主窗口 `isFocused()` 二次复核。

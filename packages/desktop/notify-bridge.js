@@ -17,7 +17,7 @@ function cleanText(value, max) {
   // 孤立代理项先换成 U+FFFD，避免系统通知显示 �；C0/C1 控制符换成空格后再折叠空白。
   const well = typeof value.toWellFormed === "function" ? value.toWellFormed() : value;
   // 按码点切：UTF-16 slice 会把 emoji 劈成孤立代理项（显示为 �）。
-  return [...well.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim()]
+  return [...well.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ").replace(/\s+/g, " ").trim()]
     .slice(0, max)
     .join("");
 }

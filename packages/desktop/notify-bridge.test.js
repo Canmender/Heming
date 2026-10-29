@@ -197,17 +197,19 @@ test("conversationId 跨进程校验：超长/控制符/注入字符不带，合
   assert.deepEqual(env.sent, [["notify:open", "550e8400-e29b-41d4-a716-446655440000"]]);
 });
 
-test("标题/正文清洗：C0 控制符折叠为空格，孤立代理项换成 U+FFFD", () => {
+test("标题/正文清洗：C0/C1 控制符折叠为空格，孤立代理项换成 U+FFFD", () => {
   const env = fakeEnv();
   registerNotifyIpc(env.ipcMain, env.deps);
   const ctrl = (code) => String.fromCharCode(code);
   env.ipcMain["notify:message"]({}, {
     title: `a${ctrl(0)}b${ctrl(7)}c`,
-    body: `x${ctrl(7)}${ctrl(0)}y`,
+    body: `x${ctrl(0x85)}${ctrl(0)}y`,
   });
   const p = env.shown[0].payload;
   assert.equal(p.title, "a b c");
+  // U+0085（NEL，C1）也要折叠，不能原样进入通知
   assert.equal(p.body, "x y");
+  assert.equal(cleanText(`u${ctrl(0x85)}v`, 10), "u v");
   // toWellFormed 会把孤立代理项换成 U+FFFD
   assert.equal(cleanText(ctrl(0xd800), 10), ctrl(0xfffd));
 });
