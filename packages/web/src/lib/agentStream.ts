@@ -1,6 +1,6 @@
 import type { WsClientEvent } from "@heming/shared";
 import type { LlmProfile } from "../store/llm.js";
-import { streamChat, type ChatMessage, type ToolCall } from "./llmClient.js";
+import { streamChat, type ChatMessage, type RouteAttempt, type ToolCall } from "./llmClient.js";
 import type { DenyCause, GateOutcome, RiskLevel } from "./hitl/types.js";
 import { toHitlCall } from "./hitl/classify.js";
 import { deniedText, notExecutedText, ruleDeniedText } from "./hitl/text.js";
@@ -187,6 +187,11 @@ export interface TriggerDeps {
    */
   onRunSettled?: (streamId: string, result: RunSettled) => void;
   /**
+   * 逐候选留痕（d.48 路由组）：候选链每问一个候选回调一次，**只在本机展示**，绝不上行。
+   * 单连接（链长 1）时路由层直接透传，从不回调——与没有本钩子时逐字等价。
+   */
+  onAttempt?: (streamId: string, attempt: RouteAttempt) => void;
+  /**
    * 工具执行前的**人工确认闸门**（HITL）：返回的数组**长度与顺序必须与 calls 一致**。
    *
    * 抛错 / 条数对不上 → 一律按**拒绝**处理（补 deny，不是放行）；
@@ -229,8 +234,16 @@ export interface TriggerDeps {
    * - `null` = 供应商一次都没上报（**不是 0**——「未上报」与「真的用了 0」必须能区分）；
    * - 失败/中止的运行**不调用**：没跑完的用量口径不清，记了反而误导。
    * 走注入而不是直接 import store：本模块保持纯逻辑可测。
+   *
+   * `served`（d.48 路由组）：**真正答话的那个连接**。走候选链时 profile 是
+   * `route.<gid>` 合成档，按它记账会把「哪个 Key 花的钱」彻底糊掉（价目与额度都按 Key 走）；
+   * 单连接没有留痕时为 undefined，调用方按 profile.id 记即可。
    */
-  recordUsage?: (model: string, tokens: number | null) => void;
+  recordUsage?: (
+    model: string,
+    tokens: number | null,
+    served?: { profileId: string; profileLabel?: string; input?: number; output?: number },
+  ) => void;
 }
 
 /**
@@ -249,6 +262,18 @@ function isContextOverflow(err: Error | null | undefined, aborted: boolean): boo
   if (aborted || err?.name === "AbortError") return false;
   const message = String(err?.message ?? "");
   return message.includes("400") && CONTEXT_OVERFLOW_RE.test(message);
+}
+
+/**
+ * 最后一次「问成功」的候选 = 真正答话的那个（d.48 记账归属）。
+ *
+ * 工具循环会留多条成功留痕，但都指向同一候选；换过候选时**最后一条**才是
+ * 发出正文的那个——记在链首候选上等于把账记在别人头上。
+ * 没有留痕（单连接透传）返回 undefined，调用方回落到 profile 自身。
+ */
+function servingAttempt(attempts: RouteAttempt[]): RouteAttempt | undefined {
+  for (let i = attempts.length - 1; i >= 0; i--) if (attempts[i].ok) return attempts[i];
+  return undefined;
 }
 
 /** 错误信封加密失败时的通用回退文案（不含错误原文；chat store 降级口径同其 E2E_ERROR_FALLBACK）。 */
@@ -460,6 +485,22 @@ export function runAgentMentions(
         let usageTotal = 0;
         let usageSeen = false;
         /**
+         * 提示词/生成拆分累加（d.48 记账用）：口径与 usageTotal 一致（含前缀缓存的
+         * 读/写，两家对齐成「本轮提示词规模」），目的是按参考价估个上界——
+         * 缓存命中其实更便宜，估出来只会偏贵不会偏便宜。
+         */
+        let usageInput = 0;
+        let usageOutput = 0;
+        /** 报了 usage 的轮数 / 其中报了完整 input+output 的轮数（两者相等才敢给拆分）。 */
+        let usageRounds = 0;
+        let usageSplitRounds = 0;
+        /**
+         * 候选链留痕（d.48）：绑路由组时每次问候选都留一条，用于①气泡里显示「换了谁」
+         * ②失败收口时说清「都问过谁」（否则错误只说最后一个候选的状态码）。
+         * 单连接不回调，数组恒空。
+         */
+        const attempts: RouteAttempt[] = [];
+        /**
          * 组装一次尝试的 messages（设计 §4）：系统提示词 → 准备好的历史 → 本条 user 轮。
          * 历史每次都重新走 `prepareHistory`（溢出重试据此用收紧后的预算重切分并重新前置系统提示词）；
          * 缺省或抛错 → 原样 history（与加预算之前完全一致，绝不阻断生成）。
@@ -571,9 +612,14 @@ export function runAgentMentions(
           local = "";
           usageTotal = 0;
           usageSeen = false;
+          usageInput = 0;
+          usageOutput = 0;
+          usageRounds = 0;
+          usageSplitRounds = 0;
           const bridge = deps.getTools?.(m.agentId) ?? null;
-          // 工具需要两个条件：桥形状是 OpenAI tools（Anthropic 的 content blocks 不兼容），
-          // 且能力表认定该模型支持函数调用——不支持时给了也没用，反而让模型胡言「我去查一下」。
+          // 两个条件缺一不可：能力表认定该模型支持函数调用，且真的有工具可给。
+          // 不支持时给了也没用，反而让模型胡言「我去查一下」——所以在这里就丢掉（判定与丢弃同源）。
+          // 形状差异不必在这里管：`lib/llmAnthropic.ts` 在请求边缘把 OpenAI 形状转成 content blocks。
           const useTools =
             !!bridge &&
             bridge.tools.length > 0 &&
@@ -601,20 +647,35 @@ export function runAgentMentions(
               onToolCalls: (c) => {
                 calls = c;
               },
+              onAttempt: (a) => {
+                attempts.push(a);
+                deps.onAttempt?.(streamId, a);
+              },
               onReasoning: (t) => {
                 reasoning += t;
                 deps.onReasoning?.(streamId, reasoning);
               },
               onUsage: (u) => {
                 // 优先总用量；没有就 input+output；两者都缺 = 这个包没上报（不按 0 计）。
+                // ★ Anthropic 的 input_tokens **不含**被缓存的那段，而 OpenAI 的 prompt_tokens 含；
+                // 把缓存读/写补回求和，两家的数字才都表示「本轮提示词的 token 规模」。
+                const cached = (u.cacheReadTokens ?? 0) + (u.cacheWriteTokens ?? 0);
                 const t =
                   u.totalTokens ??
-                  (u.inputTokens !== undefined || u.outputTokens !== undefined
-                    ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0)
+                  (u.inputTokens !== undefined || u.outputTokens !== undefined || cached > 0
+                    ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0) + cached
                     : undefined);
                 if (t === undefined) return;
                 usageSeen = true;
                 usageTotal += t;
+                usageRounds++;
+                // 只收「两侧都报了」的轮：缺一侧的轮次宁可不进拆分，
+                // 也别让估算费用少算一整轮（少算比「按上界估」更骗人）。
+                if (u.inputTokens !== undefined && u.outputTokens !== undefined) {
+                  usageSplitRounds++;
+                  usageInput += u.inputTokens + cached;
+                  usageOutput += u.outputTokens;
+                }
               },
               onDelta: (d) => {
                 if (!useTools) {
@@ -713,6 +774,9 @@ export function runAgentMentions(
                 tool_call_id: call.id,
                 name: call.function.name,
                 content: results[i]?.text ?? "",
+                // 拒绝/失败都算工具报错：Anthropic 侧映射成 is_error，
+                // 模型看到的语义与 OpenAI 侧的文案一致，不必靠措辞去猜。
+                ...(results[i]?.ok === false ? { toolError: true } : {}),
               })),
             ];
           }
@@ -748,7 +812,20 @@ export function runAgentMentions(
             // 用量记账：成功收口前恰好一次；一次都没拿到就记 null（未上报）。
             // 记账是旁路副作用，失败不得反噬收口（与 onRunSettled 同口径吞掉）。
             try {
-              deps.recordUsage?.(profile.model, usageSeen ? usageTotal : null);
+              const served = servingAttempt(attempts);
+              const split =
+                usageRounds > 0 && usageSplitRounds === usageRounds
+                  ? { input: usageInput, output: usageOutput }
+                  : {};
+              deps.recordUsage?.(
+                served?.model ?? profile.model,
+                usageSeen ? usageTotal : null,
+                {
+                  profileId: served?.profileId ?? profile.id,
+                  profileLabel: served?.profileLabel ?? profile.label,
+                  ...split,
+                },
+              );
             } catch {
               /* 记账失败不影响三事件上行 */
             }

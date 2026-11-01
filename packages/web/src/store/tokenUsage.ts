@@ -12,6 +12,30 @@ export interface UsageRecord {
    */
   tokens: number | null;
   at: string;
+  /**
+   * 真正答话的那个连接（d.48 路由组）。缺省 = 记账时还不知道是谁答的
+   * （单连接旧记录、以及供应商没上报用量的运行）。
+   * 为什么要有：路由组下绑的是 `route.<gid>` 合成档，记在合成档上会把
+   * 「哪个 Key 花的钱」这件事彻底糊掉——Key 不同，价目与额度也不同。
+   */
+  profileId?: string;
+  /** 连接名快照（档案删了也认得出这条记录花在哪）。 */
+  profileLabel?: string;
+  /**
+   * 提示词规模（含前缀缓存的读/写部分）。有它才能按参考价计价；
+   * 供应商没拆出来就不写（估算宁可缺，不要拿总量猜比例）。
+   */
+  input?: number;
+  /** 生成部分（completion / output tokens）。 */
+  output?: number;
+}
+
+/** 记账时能附上的归属信息（都是可选：老调用方一个字都不用改）。 */
+export interface UsageMeta {
+  profileId?: string;
+  profileLabel?: string;
+  input?: number;
+  output?: number;
 }
 
 /** 是否已上报：只有数字才参与求和（老数据也都是数字）。 */
@@ -115,6 +139,62 @@ export function heatLevel(total: number, max: number): 0 | 1 | 2 | 3 | 4 {
   return 4;
 }
 
+/** 一个「连接×模型」在本期里的用量汇总（d.48 路由组的账本视图）。 */
+export interface ProfileUsage {
+  profileId: string;
+  profileLabel: string;
+  model: string;
+  total: number;
+  /** 提示词规模合计（只在供应商上报过拆分时才有值累进来）。 */
+  input: number;
+  output: number;
+  /** 记了多少轮（含未上报的轮）。 */
+  runs: number;
+  /** 其中未上报的轮数。 */
+  unreported: number;
+  lastAt: string;
+}
+
+/**
+ * 按「连接×模型」聚合用量。
+ *
+ * 只统计**写了 profileId** 的记录：路由组的账要落到具体 Key 上才有意义
+ * （不同 Key 价目与额度都不同），而单连接旧记录根本不知道是谁答的，归进去反而骗人。
+ * `monthKey` 缺省 = 全部历史。同一连接换了模型会分成两档（价目按模型查）。
+ */
+export function byProfileModel(
+  records: UsageRecord[],
+  monthKey?: string,
+): ProfileUsage[] {
+  const by = new Map<string, ProfileUsage>();
+  for (const r of records) {
+    if (!r.profileId) continue;
+    if (monthKey && monthKeyOf(r.at) !== monthKey) continue;
+    const key = `${r.profileId}\u0000${r.model}`;
+    const cur: ProfileUsage = by.get(key) ?? {
+      profileId: r.profileId,
+      profileLabel: r.profileLabel || r.profileId,
+      model: r.model,
+      total: 0,
+      input: 0,
+      output: 0,
+      runs: 0,
+      unreported: 0,
+      lastAt: r.at,
+    };
+    cur.profileLabel = r.profileLabel || cur.profileLabel;
+    cur.runs++;
+    const tokens = reportedTokens(r);
+    if (tokens === null) cur.unreported++;
+    else cur.total += tokens;
+    if (typeof r.input === "number") cur.input += r.input;
+    if (typeof r.output === "number") cur.output += r.output;
+    if (r.at > cur.lastAt) cur.lastAt = r.at;
+    by.set(key, cur);
+  }
+  return [...by.values()].sort((a, b) => b.total - a.total || a.profileLabel.localeCompare(b.profileLabel));
+}
+
 function load(): UsageRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -135,27 +215,28 @@ function save(records: UsageRecord[]): void {
 interface TokenState {
   quota: number;
   records: UsageRecord[];
-  /** 记一轮**已上报**的用量（签名不变：既有调用/测试不受影响）。 */
-  record: (model: string, tokens: number, at?: string) => void;
+  /** 记一轮**已上报**的用量（`meta` 可选：既有调用/测试不受影响）。 */
+  record: (model: string, tokens: number, at?: string, meta?: UsageMeta) => void;
   /** 记一轮**未上报**（`tokens:null`）：界面据此说「未上报」而不是「用了 0」。 */
-  recordUnreported: (model: string, at?: string) => void;
+  recordUnreported: (model: string, at?: string, meta?: UsageMeta) => void;
   reset: () => void;
 }
 
 export const useTokenUsageStore = create<TokenState>((set, get) => ({
   quota: 3_000_000,
   records: load(),
-  record(model, tokens, at) {
-    const next = [...get().records, { model, tokens, at: at ?? new Date().toISOString() }].slice(
-      -MAX_RECORDS,
-    );
+  record(model, tokens, at, meta) {
+    const next = [
+      ...get().records,
+      { model, tokens, at: at ?? new Date().toISOString(), ...(meta ?? {}) },
+    ].slice(-MAX_RECORDS);
     save(next);
     set({ records: next });
   },
-  recordUnreported(model, at) {
+  recordUnreported(model, at, meta) {
     const next = [
       ...get().records,
-      { model, tokens: null, at: at ?? new Date().toISOString() },
+      { model, tokens: null, at: at ?? new Date().toISOString(), ...(meta ?? {}) },
     ].slice(-MAX_RECORDS);
     save(next);
     set({ records: next });

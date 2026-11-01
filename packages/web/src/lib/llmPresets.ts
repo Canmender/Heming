@@ -73,6 +73,14 @@ export const LLM_PRESETS: LlmPreset[] = [
     model: "claude-sonnet-5",
     note: "Claude 官方，消息结构与 OpenAI 不同",
   },
+  {
+    id: "magpie",
+    label: "magpie 本地网关",
+    provider: "openai",
+    baseUrl: "http://127.0.0.1:3425/v1",
+    model: "gpt-4o",
+    note: "本机自跑 magpie（github.com/yetone/magpie）时的入口：订阅账号、多 Key 轮换与额度选路交给它，和鸣这边只填它发的网关 Key。模型名照 `magpie models` 改写（写作 provider/model），路由组写作 group/<id>",
+  },
 ];
 
 /** 按 id 找预设；未知 id 返回 null（设置区据此忽略点击）。 */

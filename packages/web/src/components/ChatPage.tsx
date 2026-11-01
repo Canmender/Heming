@@ -52,7 +52,8 @@ import {
   type PlainEnvelope,
   type SealedEnvelope,
 } from "../lib/e2eSession.js";
-import { streamChat, type ChatMessage } from "../lib/llmClient.js";
+import { type ChatMessage, type RouteAttempt } from "../lib/llmClient.js";
+import { resolveBoundProfile, streamChatRouted } from "../lib/llmRoute.js";
 import { resolveCapability } from "../lib/modelCaps.js";
 import {
   attachImageParts,
@@ -986,6 +987,8 @@ export function ChatPage({
   // 通话状态存 ref：onMinimize 回调挂载期订阅一次，需读取最新状态避免闭包过期。
   /** 本机流 → 工具调用轨迹（只用于 UI 展示，不进消息、不上行）。 */
   const toolTraceRef = useRef<Record<string, ToolTrace[]>>({});
+  /** 本机流 → 候选链留痕（d.48 路由组）：同样只用于 UI 展示，不进消息、不上行。 */
+  const routeTraceRef = useRef<Record<string, RouteAttempt[]>>({});
   /** 本轮工具调用次数（复盘判「复杂任务」用；onTurnComplete 拿不到 streamId，故按轮次累计）。 */
   const turnToolCountRef = useRef(0);
   /**
@@ -1234,11 +1237,11 @@ export function ChatPage({
   }, [effectiveMentions, llmBindings, llmProfiles]);
 
   /** agentId → LLM 连接（绑定表解析）：无绑定/连接已删都归为 undefined（发送前拦截与触发共用）。 */
-  const resolveProfile = (agentId: string) => {
-    const llm = useLlmStore.getState();
-    const pid = llm.bindings[agentId];
-    return pid ? llm.getProfile(pid) : undefined;
-  };
+  /**
+   * 智能体 → profile：绑定值既可以是连接 id，也可以是 `route.<组id>`
+   * （后者由路由层展开成候选链，见 lib/llmRoute.ts）。
+   */
+  const resolveProfile = resolveBoundProfile;
 
   /**
    * 构造某个智能体这一轮的工具桥。
@@ -1675,13 +1678,30 @@ export function ChatPage({
         return row;
       },
       send: (e) => wsHandleRef.current?.send(e),
-      streamChat,
+      // 路由层（d.48）：编排层不理解候选链，只在装配处换成 routed 版本；
+      // 智能体绑的是单连接时链长为 1，与旧的 streamChat 逐字等价。
+      streamChat: streamChatRouted,
       // Token 用量记账（d.32）：编排层在成功收口前调用一次；
       // null = 供应商一次都没上报 → 记「未上报」，而不是写 0 冒充真实用量。
-      recordUsage: (model, tokens) =>
+      recordUsage: (model, tokens, served) =>
         tokens === null
-          ? useTokenUsageStore.getState().recordUnreported(model)
-          : useTokenUsageStore.getState().record(model, tokens),
+          ? useTokenUsageStore.getState().recordUnreported(model, undefined, served)
+          : useTokenUsageStore.getState().record(model, tokens, undefined, served),
+      // 候选链留痕（d.48）：换候选这件事要在气泡上看得见，否则用户只看到「突然变慢」。
+      // 连接名是本机口径，只进 streaming 状态，绝不进消息体、绝不上行。
+      onAttempt: (streamId, attempt) => {
+        const meta = streamMeta.current[streamId];
+        if (!meta) return;
+        const list = (routeTraceRef.current[streamId] ??= []);
+        list.push(attempt);
+        upsertStream(streamId, {
+          agentId: meta.agentId,
+          conversationId: convId,
+          attempts: [...list],
+          status: "streaming",
+          lastAt: Date.now(),
+        });
+      },
       // E2E 流式（硬验收④）：chunk 走 chunkAad（convId+streamId+index）信封、
       // finish 全文进信封——由 agentStream 统一串行上行，加密失败跳过/报错不发明文。
       sealChunk: async (streamId, index, delta) => {
@@ -1744,6 +1764,7 @@ export function ChatPage({
           useTaskStore.getState().bindStream(taskId, streamId);
         }
         resetToolTrace(streamId);
+        routeTraceRef.current[streamId] = [];
         turnToolCountRef.current = 0;
         // 新一轮开始：重置自我修改的单轮预算（上轮用掉的次数不该拖累这一轮）
         selfEditRef.current!.budget.reset(mention.agentId, convId);
@@ -1940,7 +1961,7 @@ export function ChatPage({
       },
       // 上下文预算（设计 §4）：agentStream 在 fetchHistory 之后调用——按本机设置做 token
       // 预算切分与早期对话压缩（摘要置于历史之前）；溢出重试带 aggressive 重新调用。
-      // LLM 摘要用该 agent 绑定的 profile 走 streamChat（非 event-stream 分支整段返回），
+      // LLM 摘要用该 agent 绑定的 profile 走路由层（非 event-stream 分支整段返回），
       // 不落库、不上行 WS、失败返回 null（回落确定性摘要）；异常一律返回原 rows。
       prepareHistory: async (rows, agentId, opts) => {
         try {
@@ -1956,7 +1977,7 @@ export function ChatPage({
                   try {
                     let collected = "";
                     // 摘要请求独立于本次生成的中断（生成尚未开始）；只读不改：不落库
-                    const text = await streamChat(profile, messages, {
+                    const text = await streamChatRouted(profile, messages, {
                       signal: new AbortController().signal,
                       maxTokens: 400,
                       onDelta: (d) => {
@@ -3843,6 +3864,7 @@ export function ChatPage({
             text={s.text}
             reasoning={s.reasoning}
             tools={s.tools}
+            attempts={s.attempts}
             status={s.status}
             errorMessage={s.errorMessage}
             onRetry={streamOwner[id] && s.status === "error" ? () => retryStream(id) : undefined}

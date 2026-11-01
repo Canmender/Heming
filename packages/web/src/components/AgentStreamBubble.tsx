@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { RouteAttempt } from "../lib/llmClient.js";
 import type { ToolTrace } from "../store/chat.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 
@@ -18,6 +19,11 @@ export interface AgentStreamBubbleProps {
   reasoning?: string;
   /** 本轮发生过的工具调用（按时间顺序）。 */
   tools?: ToolTrace[];
+  /**
+   * 候选链留痕（d.48 路由组）：只有问过不止一个候选才有内容，且**只在本机**。
+   * 没有失败候选时这一行不显示（第一次就问对了没什么好解释的）。
+   */
+  attempts?: RouteAttempt[];
 }
 
 export function AgentStreamBubble({
@@ -28,6 +34,7 @@ export function AgentStreamBubble({
   onRetry,
   reasoning,
   tools,
+  attempts,
 }: AgentStreamBubbleProps) {
   const streaming = status === "streaming";
   return (
@@ -40,6 +47,7 @@ export function AgentStreamBubble({
 
         {reasoning ? <ReasoningBlock text={reasoning} streaming={streaming} /> : null}
         {tools && tools.length > 0 ? <ToolTraceList tools={tools} /> : null}
+        {attempts && attempts.length > 0 ? <RouteTraceLine attempts={attempts} /> : null}
 
         {streaming ? (
           // 光标拼进正文末尾而不是另起一行：markdown 渲染后块级元素会把尾随的
@@ -141,6 +149,38 @@ function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
       ))}
     </div>
   );
+}
+
+/**
+ * 候选链留痕（d.48）：一次运行问过哪些候选、各自为什么被换走。
+ * 全成功（没换过人）就不显示——用户不需要知道「第一次就问对了」这件事。
+ */
+function RouteTraceLine({ attempts }: { attempts: RouteAttempt[] }) {
+  if (!attempts.some((a) => !a.ok)) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+      <span className="shrink-0 text-[#999]">候选链</span>
+      {attempts.map((a, i) => (
+        <span
+          key={`${i}-${a.profileId}`}
+          title={a.error}
+          className={`max-w-[180px] truncate rounded border px-1 py-0.5 ${
+            a.ok
+              ? "border-[#cfe3cf] bg-[#f4faf4] text-[#1d6b3a]"
+              : "border-[#eadfc8] bg-[#fdfaf3] text-[#8a7a55]"
+          }`}
+        >
+          {a.profileLabel}
+          {a.ok ? " ✓" : ` · ${a.kind ?? "失败"}`}
+          {a.usage ? ` ${formatTokens(a.usage.totalTokens ?? 0)}` : ""}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function formatTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
 function StatusDot({ status }: { status: ToolTrace["status"] }) {

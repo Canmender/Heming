@@ -35,7 +35,10 @@ describe("buildRequest", () => {
     const body = JSON.parse(r.body);
     expect(body.max_tokens).toBe(1);
     expect(body.system).toBe("sys");
-    expect(body.messages).toEqual([{ role: "user", content: "hi" }]);
+    expect(body.messages).toEqual([
+      // d.49：消息内容统一成 block 数组（Anthropic 两种形态都收；tool_use/tool_result 只能是数组）
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+    ]);
     expect(body.stream).toBe(false);
   });
 
@@ -269,6 +272,191 @@ describe("streamChat", () => {
     ).rejects.toThrow(/AbortError|aborted/i);
   });
 
+  describe("Anthropic 原生工具调用与前缀缓存（d.49）", () => {
+    const bodyOf = (call: unknown): Record<string, unknown> =>
+      JSON.parse(String((call as [string, RequestInit])[1].body));
+
+    it("请求体带 Anthropic 形状 tools（name/description/input_schema），不发 tool_choice", () => {
+      const r = buildRequest(anthropic, msgs, {
+        stream: true,
+        tools: [
+          {
+            type: "function",
+            function: { name: "charts__bar", description: "画图", parameters: { type: "object" } },
+          },
+        ],
+      });
+      const body = JSON.parse(r.body);
+      expect(body.tools).toEqual([
+        {
+          name: "charts__bar",
+          description: "画图",
+          input_schema: { type: "object", properties: {} },
+        },
+      ]);
+      expect(body.tool_choice).toBeUndefined();
+      // 工具参数也计入输出：1024 会把长参数截成半个 JSON
+      expect(body.max_tokens).toBe(2048);
+    });
+
+    it("openai 分支仍按 OpenAI 形状发 tools（不受本次改造影响）", () => {
+      const body = JSON.parse(
+        buildRequest(openai, msgs, {
+          stream: true,
+          tools: [{ type: "function", function: { name: "a", parameters: { type: "object" } } }],
+        }).body,
+      );
+      expect(body.tools[0].function.name).toBe("a");
+      expect(body.tool_choice).toBe("auto");
+    });
+
+    it("护栏①（请求体层）：空 text block 绝不进 body", () => {
+      const body = JSON.parse(
+        buildRequest(anthropic, [{ role: "user", content: "" }] as ChatMessage[], { stream: true }).body,
+      );
+      expect(JSON.stringify(body.messages)).toContain("(empty)");
+      expect(body.messages[0].content[0].text).toBe("(empty)");
+    });
+
+    it("role:tool 不会原样发给供应商（Anthropic 没有这个角色）", () => {
+      const body = JSON.parse(
+        buildRequest(anthropic, [...msgs, { role: "tool", content: "结果", tool_call_id: "c1" }] as ChatMessage[], {
+          stream: true,
+        }).body,
+      );
+      expect(JSON.stringify(body.messages)).not.toContain('"role":"tool"');
+    });
+
+    it("content_block_start/delta 拼出 tool_calls，且只回调一次", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        sseResponse([
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"我查一下"}}\n\n',
+          'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"mcp__echo"}}\n\n',
+          'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"q\\""}}\n\n',
+          'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":":\\"hi\\"}"}}\n\n',
+          'data: {"type":"content_block_stop","index":1}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+      const deltas: string[] = [];
+      const calls: unknown[] = [];
+      await streamChat(anthropicProfile, userMsg, {
+        signal: new AbortController().signal,
+        onDelta: (t) => deltas.push(t),
+        onToolCalls: (c) => calls.push(c),
+      });
+      expect(deltas).toEqual(["我查一下"]); // input_json 不能混进正文
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toEqual([
+        { id: "toolu_1", type: "function", function: { name: "mcp__echo", arguments: '{"q":"hi"}' } },
+      ]);
+    });
+
+    it("多个 tool_use 按 index 分槽，顺序稳定", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        sseResponse([
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"a","name":"n1"}}\n\n',
+          'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"b","name":"n2"}}\n\n',
+          'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+      let got: { id: string }[] = [];
+      await streamChat(anthropicProfile, userMsg, {
+        signal: new AbortController().signal,
+        onDelta: () => {},
+        onToolCalls: (c) => (got = c as unknown as { id: string }[]),
+      });
+      expect(got.map((c) => c.id)).toEqual(["a", "b"]);
+    });
+
+    it("thinking_delta 走 onReasoning，不进正文累积", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        sseResponse([
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"想想"}}\n\n',
+          'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"结论"}}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+      const reasoning: string[] = [];
+      const deltas: string[] = [];
+      const text = await streamChat(anthropicProfile, userMsg, {
+        signal: new AbortController().signal,
+        onDelta: (t) => deltas.push(t),
+        onReasoning: (t) => reasoning.push(t),
+      });
+      expect(reasoning).toEqual(["想想"]);
+      expect(deltas).toEqual(["结论"]);
+      expect(text).toBe("结论");
+    });
+
+    it("usage 合并 cache 读写；input_tokens 保持供应商口径不换算", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        sseResponse([
+          'data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":900,"cache_creation_input_tokens":50}}}\n\n',
+          'data: {"type":"message_delta","usage":{"output_tokens":7}}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+      const usages: Record<string, number | undefined>[] = [];
+      await streamChat(anthropicProfile, userMsg, {
+        signal: new AbortController().signal,
+        onDelta: () => {},
+        onUsage: (u) => usages.push(u as Record<string, number | undefined>),
+      });
+      expect(usages).toHaveLength(1); // 分散在两个事件 ⇒ 合并后恰好回调一次
+      expect(usages[0]).toEqual({
+        inputTokens: 10,
+        outputTokens: 7,
+        cacheReadTokens: 900,
+        cacheWriteTokens: 50,
+      });
+    });
+
+    it("system 存在时默认打 cache_control，promptCache:off 时逐字回到旧形状", () => {
+      const on = JSON.parse(
+        buildRequest(anthropic, msgs, { stream: true, promptCache: "auto" }).body,
+      );
+      const off = JSON.parse(buildRequest(anthropic, msgs, { stream: true, promptCache: "off" }).body);
+      expect(JSON.stringify(on.system)).toContain("cache_control");
+      expect(off.system).toBe("sys");
+      expect(JSON.stringify(off)).not.toContain("cache_control");
+    });
+
+    it("非流式响应可读多个 text block 与 tool_use（旧版只取 content[0].text）", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            content: [
+              { type: "text", text: "一部" },
+              { type: "text", text: "二部" },
+              { type: "tool_use", id: "t1", name: "srv__echo", input: { a: 1 } },
+            ],
+            usage: { input_tokens: 3, output_tokens: 4 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+      const deltas: string[] = [];
+      let calls: { function: { name: string; arguments: string } }[] = [];
+      const text = await streamChat(anthropicProfile, userMsg, {
+        signal: new AbortController().signal,
+        onDelta: (t) => deltas.push(t),
+        onToolCalls: (c) => (calls = c as never),
+      });
+      expect(text).toBe("一部二部");
+      expect(calls[0]?.function).toEqual({ name: "srv__echo", arguments: '{"a":1}' });
+    });
+
+    it("缺省 maxTokens 且带 tools 时抬到 2048", () => {
+      const body = JSON.parse(
+        buildRequest(anthropic, msgs, { stream: true, tools: [{ function: { name: "t" } }] as never[] }).body,
+      );
+      expect(body.max_tokens).toBe(2048);
+    });
+  });
+
   describe("stream_options 与 usage（d.32）", () => {
     type Usage = { inputTokens?: number; outputTokens?: number; totalTokens?: number };
 
@@ -403,7 +591,25 @@ describe("streamChat", () => {
       expect(onUsage).not.toHaveBeenCalled();
     });
 
-    it("Anthropic 400 不做降级重试（它本来就没带 stream_options）", async () => {
+    it("Anthropic 400 降级一次：剥掉 cache_control 再试（d.49）", async () => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response("bad request", { status: 400 }));
+      await expect(
+        streamChat(anthropicProfile, [{ role: "system", content: "sys" }, ...userMsg], {
+          signal: new AbortController().signal,
+          onDelta: () => {},
+        }),
+      ).rejects.toThrow(/HTTP 400/);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const first = String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body);
+      const second = String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body);
+      // 第一次带标记，第二次不带——兼容网关不认 cache_control 时还有路可走
+      expect(first).toContain("cache_control");
+      expect(second).not.toContain("cache_control");
+    });
+
+    it("Anthropic 400：body 里没带可降级的字段时不重复请求", async () => {
       const fetchMock = vi
         .spyOn(globalThis, "fetch")
         .mockResolvedValue(new Response("bad request", { status: 400 }));
@@ -413,7 +619,45 @@ describe("streamChat", () => {
           onDelta: () => {},
         }),
       ).rejects.toThrow(/HTTP 400/);
+      // 没有 system/tools/事务 ⇒ 第一发就没带 cache_control，降级档与它逐字相同 ⇒ 不发
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("Anthropic 关缓存时 400 不重试（没有可降级的东西，重试只是掩盖真实错误）", async () => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response("bad request", { status: 400 }));
+      await expect(
+        streamChat(anthropicProfile, [{ role: "system", content: "sys" }, ...userMsg], {
+          signal: new AbortController().signal,
+          onDelta: () => {},
+          promptCache: "off",
+        }),
+      ).rejects.toThrow(/HTTP 400/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("Anthropic 带 tools 时 400 走完整降级链：先剥缓存、再丢 tools", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response("bad request", { status: 400 }));
+      await expect(
+        streamChat(anthropicProfile, [{ role: "system", content: "sys" }, ...userMsg], {
+          signal: new AbortController().signal,
+          onDelta: () => {},
+          tools: [{ type: "function", function: { name: "a__b", parameters: { type: "object" } } }],
+        }),
+      ).rejects.toThrow(/HTTP 400/);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const bodies = fetchMock.mock.calls.map((c) => String((c as [string, RequestInit])[1].body));
+      expect(bodies[0]).toContain("cache_control");
+      expect(bodies[1]).not.toContain("cache_control");
+      expect(bodies[1]).toContain('"tools"');
+      expect(bodies[2]).not.toContain('"tools"');
+      // 丢工具是行为级降级，必须留痕（剥标记只是省钱，不留痕）
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("不带工具"));
     });
   });
 });

@@ -12,6 +12,7 @@ import {
   api,
 } from "../lib/api.js";
 import { listAgents } from "../lib/agentsApi.js";
+import type { RouteAttempt } from "../lib/llmClient.js";
 import { sealMessage, msgCache, type E2eDeps, type PlainEnvelope } from "../lib/e2eSession.js";
 
 // —— E2E Task 4：收信解密注入面（store 不 import e2eSession 的 openMessage 实现，
@@ -134,6 +135,11 @@ export interface AgentStreamState {
   reasoning?: string;
   /** 本轮发生的工具调用（按发生顺序）。 */
   tools?: ToolTrace[];
+  /**
+   * 候选链留痕（d.48 路由组，仅本机）：绑路由组且真的换过候选才有内容。
+   * 连接名与失败原因是本机口径，**绝不上行**，所以不进消息体、不参与 E2E。
+   */
+  attempts?: RouteAttempt[];
   status: "streaming" | "error";
   errorMessage?: string;
   /** 最后一次写入（含文本累积/事件到达）的毫秒时间戳；他机流 watchdog 据此判「长时间无响应」。 */

@@ -34,7 +34,7 @@ describe("模型能力表", () => {
     storage = new FakeStorage();
   });
 
-  it("llmPresets 的 7 个预设模型全部命中非 null", () => {
+  it("llmPresets 的预设模型全部命中非 null（新增预设必须给一个表里查得到的示例模型）", () => {
     for (const preset of LLM_PRESETS) {
       const caps = lookupCapability(preset.provider, preset.model, storage);
       expect(caps, `预设 ${preset.label}（${preset.model}）应命中能力表`).not.toBeNull();

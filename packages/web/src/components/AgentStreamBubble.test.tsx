@@ -114,4 +114,52 @@ describe("AgentStreamBubble 可视化（思考过程 / 工具调用）", () => {
     expect(screen.queryByText("思考过程")).not.toBeInTheDocument();
     expect(screen.queryByText("调用中")).not.toBeInTheDocument();
   });
+
+  it("候选链：换过候选才显示，带上失败分类与这一次用量（d.48）", () => {
+    render(
+      <AgentStreamBubble
+        name="和小鸣"
+        text="你好"
+        status="streaming"
+        attempts={[
+          {
+            profileId: "p1",
+            profileLabel: "废 Key",
+            model: "m",
+            ok: false,
+            kind: "rate",
+            restedMs: 60_000,
+            error: "provider_error: HTTP 429",
+            hop: 0,
+          },
+          {
+            profileId: "p2",
+            profileLabel: "备用 Key",
+            model: "m",
+            ok: true,
+            restedMs: 0,
+            hop: 1,
+            usage: { totalTokens: 1200 },
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText("候选链")).toBeInTheDocument();
+    expect(screen.getByText(/废 Key\s*·\s*rate/)).toBeInTheDocument();
+    expect(screen.getByText(/备用 Key\s*✓\s*1\.2k/)).toBeInTheDocument();
+  });
+
+  it("第一次就问对（没有失败候选）→ 候选链这一行不占位", () => {
+    render(
+      <AgentStreamBubble
+        name="和小鸣"
+        text="你好"
+        status="streaming"
+        attempts={[
+          { profileId: "p1", profileLabel: "唯一候选", model: "m", ok: true, restedMs: 0, hop: 0 },
+        ]}
+      />,
+    );
+    expect(screen.queryByText("候选链")).not.toBeInTheDocument();
+  });
 });

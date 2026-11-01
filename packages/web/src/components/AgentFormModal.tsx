@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Agent } from "@heming/shared";
 import { useChatStore } from "../store/chat.js";
-import { useLlmStore } from "../store/llm.js";
+import { routeRef, useLlmStore } from "../store/llm.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { createAgent, updateAgent, deleteAgent } from "../lib/agentsApi.js";
@@ -35,6 +35,7 @@ export function AgentFormModal({
 }) {
   const me = useAuthStore((s) => s.user);
   const profiles = useLlmStore((s) => s.profiles);
+  const routes = useLlmStore((s) => s.routes);
   const setPrompt = useLlmStore((s) => s.setPrompt);
   const setBinding = useLlmStore((s) => s.setBinding);
   const setPage = useUiStore((s) => s.setPage);
@@ -251,6 +252,12 @@ export function AgentFormModal({
               onChange={(e) => setProfileId(e.target.value)}
             >
               <option value="">未绑定</option>
+              {/* 候选链排在单连接之前：绑定它=这个智能体自动获得失败换候选 */}
+              {routes.map((g) => (
+                <option key={g.id} value={routeRef(g.id)}>
+                  候选链 · {g.label}（{g.members.length} 个候选）
+                </option>
+              ))}
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label} · {p.model}

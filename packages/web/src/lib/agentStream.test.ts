@@ -1561,7 +1561,10 @@ describe("runAgentMentions token 用量记账（d.32）", () => {
     expect(streamChat).toHaveBeenCalledTimes(2); // 工具轮 + 答案轮
     expect(recordUsage).toHaveBeenCalledTimes(1);
     // 100（totalTokens）+ 40+10（没有 total 时用 input+output）
-    expect(recordUsage).toHaveBeenCalledWith(profile.model, 150);
+    expect(recordUsage).toHaveBeenCalledWith(profile.model, 150, {
+      profileId: "p1",
+      profileLabel: "l",
+    });
   });
 
   it("一次都没拿到 usage → 记 null（未上报），不记 0", async () => {
@@ -1569,7 +1572,10 @@ describe("runAgentMentions token 用量记账（d.32）", () => {
     const { deps } = makeDeps({ recordUsage });
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
     expect(recordUsage).toHaveBeenCalledTimes(1);
-    expect(recordUsage).toHaveBeenCalledWith(profile.model, null);
+    expect(recordUsage).toHaveBeenCalledWith(profile.model, null, {
+      profileId: "p1",
+      profileLabel: "l",
+    });
   });
 
   it("失败/中止的运行不记账", async () => {
@@ -1584,5 +1590,104 @@ describe("runAgentMentions token 用量记账（d.32）", () => {
     });
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
     expect(recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("各轮都报齐 input/output → 记账附上拆分（参考价估算用）", async () => {
+    const recordUsage = vi.fn();
+    const streamChat = vi.fn(
+      async (_p: unknown, _m: ChatMessage[], o: { onDelta: (t: string) => void; onUsage?: (u: Usage) => void }) => {
+        o.onUsage?.({ inputTokens: 30, outputTokens: 5 });
+        o.onDelta("好");
+        return "好";
+      },
+    );
+    const { deps } = makeDeps({ streamChat: streamChat as never, recordUsage });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    expect(recordUsage).toHaveBeenCalledWith(profile.model, 35, {
+      profileId: "p1",
+      profileLabel: "l",
+      input: 30,
+      output: 5,
+    });
+  });
+
+  it("有一轮没报拆分 → 宁可不给拆分，也不给少算一期的数字", async () => {
+    const recordUsage = vi.fn();
+    const rounds = [
+      { usage: { inputTokens: 30, outputTokens: 5 } as Usage, calls: [ { id: "c1", type: "function" as const, function: { name: "srv__echo", arguments: "{}" } } ] },
+      { usage: { totalTokens: 100 } as Usage, calls: [] as never[] },
+    ];
+    let round = 0;
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: {
+          onDelta: (t: string) => void;
+          onUsage?: (u: Usage) => void;
+          onToolCalls?: (c: unknown[]) => void;
+        },
+      ) => {
+        const r = rounds[round++];
+        if (r.calls.length) o.onToolCalls?.(r.calls);
+        o.onUsage?.(r.usage);
+        o.onDelta("好");
+        return "好";
+      },
+    );
+    const { deps } = makeDeps({
+      streamChat: streamChat as never,
+      recordUsage,
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__echo" } }],
+        execute: async () => ({ text: "工具说", ok: true }),
+      }),
+    });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    expect(streamChat).toHaveBeenCalledTimes(2);
+    // 总量照记 135，但拆分缺一轮 → 不写（写了就是把费用算少）
+    expect(recordUsage).toHaveBeenCalledWith(profile.model, 135, {
+      profileId: "p1",
+      profileLabel: "l",
+    });
+  });
+
+  it("候选链：按**答话的候选**记账，并把留痕逐条交给触发端（d.48）", async () => {
+    const recordUsage = vi.fn();
+    const onAttempt = vi.fn();
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _m: ChatMessage[],
+        o: {
+          onDelta: (t: string) => void;
+          onUsage?: (u: Usage) => void;
+          onAttempt?: (a: { profileId: string; profileLabel: string; model: string; ok: boolean; hop: number; kind?: string; usage?: Usage }) => void;
+        },
+      ) => {
+        o.onAttempt?.({ profileId: "p1", profileLabel: "废 Key", model: "m", ok: false, kind: "rate", hop: 0 });
+        o.onAttempt?.({
+          profileId: "p2",
+          profileLabel: "备用 Key",
+          model: "kimi-v1",
+          ok: true,
+          hop: 1,
+          usage: { inputTokens: 8, outputTokens: 2 },
+        });
+        o.onUsage?.({ inputTokens: 8, outputTokens: 2 });
+        o.onDelta("好");
+        return "好";
+      },
+    );
+    const { deps } = makeDeps({ streamChat: streamChat as never, recordUsage, onAttempt });
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+    expect(recordUsage).toHaveBeenCalledWith("kimi-v1", 10, {
+      profileId: "p2",
+      profileLabel: "备用 Key",
+      input: 8,
+      output: 2,
+    });
+    expect(onAttempt).toHaveBeenCalledTimes(2);
+    expect(onAttempt.mock.calls[0][1].profileId).toBe("p1");
   });
 });

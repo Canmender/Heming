@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
 import { LlmSettingsCard } from "./LlmSettingsCard.js";
+import { RouteGroupsCard } from "./RouteGroupsCard.js";
 import { KeyStorageCard } from "./KeyStorageCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
@@ -124,6 +125,8 @@ export function SettingsPage() {
         {tab === "model" && (
           <>
             <LlmSettingsCard />
+            {/* 候选链紧跟连接列表：先有连接，才谈得上把它们串成一条 failover 链 */}
+            <RouteGroupsCard />
             <KeyStorageCard />
             <ContextSettingsCard />
             {/* 工具调用确认（安全设置）：与模型设置同组——两者都是「生成行为」的边界 */}

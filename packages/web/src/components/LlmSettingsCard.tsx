@@ -9,6 +9,7 @@ import {
   lookupCapability,
   setOverride,
 } from "../lib/modelCaps.js";
+import { clearMaskLedger, maskLedger, maskWords, setMaskWords } from "../lib/llmMask.js";
 import { PlusIcon } from "./icons.js";
 
 /** 设置卡统一的生效说明：与工具调用确认卡、个人资料卡同一句。 */
@@ -48,6 +49,9 @@ export function LlmSettingsCard() {
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [temperature, setTemperature] = useState("");
+  /** 出站脱敏开关（d.48，按连接）：magpie 是全局隐私设置，这里逐家判断更合本仓红线。 */
+  const [mask, setMask] = useState(false);
+  const [words, setWords] = useState(() => maskWords().join(", "));
   const [error, setError] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, TestState>>({});
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -89,6 +93,7 @@ export function LlmSettingsCard() {
     setModel("");
     setApiKey("");
     setTemperature("");
+    setMask(false);
     setError(null);
   };
 
@@ -107,6 +112,7 @@ export function LlmSettingsCard() {
     setModel(p.model);
     setApiKey(p.apiKey);
     setTemperature(p.temperature === undefined ? "" : String(p.temperature));
+    setMask(!!p.mask);
     setError(null);
     setConfirmId(null);
     setOpen(true);
@@ -150,6 +156,7 @@ export function LlmSettingsCard() {
       model: model.trim(),
       apiKey: apiKey.trim(),
       temperature: temp,
+      mask: mask || undefined,
     };
     if (editingId) updateProfile(editingId, data);
     else addProfile({ id: newId(), ...data });
@@ -239,6 +246,7 @@ export function LlmSettingsCard() {
                 <div className="truncate text-[13px] font-bold">{p.label}</div>
                 <div className="mt-0.5 truncate text-[12px] text-muted">
                   {p.provider} · {p.model} · ••••{p.apiKey.slice(-4)}
+                  {p.mask ? " · 出站已脱敏" : ""}
                 </div>
                 {/* 能力徽标：函数调用 / 视觉 / 思考 / 长上下文 / 并行工具 / 结构化输出。
                     查不到就说「能力未知」并给手填入口。
@@ -447,6 +455,19 @@ export function LlmSettingsCard() {
                 className={inputCls}
               />
             </label>
+            <label className="flex items-start gap-1.5 text-[12px] text-muted">
+              <input
+                type="checkbox"
+                aria-label="出站脱敏"
+                checked={mask}
+                onChange={(e) => setMask(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                出站脱敏：请求发给服务商前，把对话里的 Key / 令牌 / 身份证号这类形状换成占位符。
+                只改发出去的副本，本机记录与界面文本照旧（见 lib/llmMask.ts）。
+              </span>
+            </label>
           </div>
           {error && <div className="mt-2 text-[12px] text-red-600">{error}</div>}
           <div className="mt-3 flex items-center gap-2">
@@ -462,6 +483,47 @@ export function LlmSettingsCard() {
           </div>
         </form>
       )}
+
+      {/* 脱敏的全局部分：自定义词与对照表（magpie 的 redactWords / redact.key）。
+          开关本身在每条连接上——「这家会不会存我数据」是逐家判断的。 */}
+      <div className="mt-3 rounded-lg border border-line bg-[#fcfcfc] p-3">
+        <div className="text-[12px] font-bold text-[#777]">出站脱敏 · 词表与对照表</div>
+        <label className="mt-1 block text-[12px] text-muted">
+          额外要隐去的词（逗号分隔）
+          <input
+            aria-label="额外隐去词"
+            value={words}
+            onChange={(e) => setWords(e.target.value)}
+            placeholder="公司名、项目代号、内部系统名…"
+            className={inputCls}
+          />
+        </label>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className={btnGhost}
+            onClick={() => {
+              setMaskWords(words.split(","));
+              setError(null);
+            }}
+          >
+            保存隐去词
+          </button>
+          <span className="text-[11px] text-muted">
+            对照表 {maskLedger().length} 条 · 原文只留在本机，绝不进任何请求
+          </span>
+          <button
+            type="button"
+            className={btnGhost}
+            onClick={() => {
+              clearMaskLedger();
+              setWords(maskWords().join(", "));
+            }}
+          >
+            清空对照表
+          </button>
+        </div>
+      </div>
 
       <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-[#999]">
         {EFFECT_NOTE}

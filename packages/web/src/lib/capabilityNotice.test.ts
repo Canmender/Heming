@@ -15,8 +15,16 @@ describe("supportsKind", () => {
     expect(supportsKind(undefined, "vision")).toBe(false);
   });
 
-  it("Anthropic 一律不支持工具（消息结构与 OpenAI tools 不兼容）", () => {
-    expect(supportsKind(profile("anthropic", "claude-sonnet-4-5"), "tools")).toBe(false);
+  it("Anthropic 不再一票否决工具（d.49：形状在边缘转换，能力交回能力表）", () => {
+    expect(supportsKind(profile("anthropic", "claude-sonnet-5"), "tools")).toBe(true);
+    // 视觉同样回到表上：claude-sonnet-5 支持图片输入
+    expect(supportsKind(profile("anthropic", "claude-sonnet-5"), "vision")).toBe(true);
+  });
+
+  it("Anthropic 连接的视觉仍按表判定（不再是全供应商一刀切）", () => {
+    // 说 Anthropic 协议的第三方端点：模型本身没视觉就判掉，有工具能力就放行
+    expect(supportsKind(profile("anthropic", "deepseek-chat"), "vision")).toBe(false);
+    expect(supportsKind(profile("anthropic", "deepseek-chat"), "tools")).toBe(true);
   });
 
   it("按能力表判定：纯文本模型不支持视觉，未知模型按保守缺省支持工具", () => {
@@ -41,6 +49,8 @@ describe("capabilityNotice", () => {
   });
 
   it("工具降级文案点出智能体名与「不会使用工具」的事实", () => {
+    // 表内没有「不支持函数调用」的模型，降级只可能来自用户覆盖层——这正是要提示的场景
+    setOverride("anthropic", "claude-sonnet-4-5", { supportsTools: false });
     const text = capabilityNotice("tools", [
       { name: "小鸣", profile: profile("anthropic", "claude-sonnet-4-5") },
       { name: "财报", profile: profile("openai", "deepseek-chat") },

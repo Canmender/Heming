@@ -8,6 +8,7 @@ import {
   dailyTotals,
   last30DaysTotals,
   heatLevel,
+  byProfileModel,
 } from "./tokenUsage.js";
 
 const rec = (model: string, tokens: number, at: string) => ({ model, tokens, at });
@@ -172,5 +173,86 @@ describe("tokenUsage：未上报（tokens:null）", () => {
     expect(rows[29]).toEqual({ day: "2026-10-17", total: 0, missing: 1 });
     expect(rows[28]).toEqual({ day: "2026-10-16", total: 10, missing: 0 });
     expect(heatLevel(rows[29].total, 10)).toBe(0);
+  });
+});
+
+/**
+ * 逐连接归属（d.48 路由组）：路由组下 profile 是 `route.<gid>` 合成档，
+ * 钱要落到具体 Key 才谈得上「哪个候选贵、哪个候选在烧额度」。
+ */
+describe("tokenUsage：逐连接用量（d.48）", () => {
+  const at = (day: number, hour = 12) => new Date(2026, 9, day, hour).toISOString();
+
+  beforeEach(() => {
+    localStorage.removeItem("heming.tokenUsage");
+    useTokenUsageStore.getState().reset();
+  });
+
+  it("record 带 meta → 归属与拆分入档并持久化；不带 meta 的老写法照旧", () => {
+    useTokenUsageStore
+      .getState()
+      .record("deepseek-chat", 300, at(13, 8), { profileId: "p2", profileLabel: "备用 Key", input: 240, output: 60 });
+    useTokenUsageStore.getState().record("gpt-old", 10, at(13, 9));
+    const s = useTokenUsageStore.getState();
+    expect(s.records[0]).toEqual({
+      model: "deepseek-chat",
+      tokens: 300,
+      at: at(13, 8),
+      profileId: "p2",
+      profileLabel: "备用 Key",
+      input: 240,
+      output: 60,
+    });
+    expect(s.records[1].profileId).toBeUndefined();
+    const saved = JSON.parse(localStorage.getItem("heming.tokenUsage")!);
+    expect(saved.records[0].profileId).toBe("p2");
+  });
+
+  it("byProfileModel：按 连接×模型 分档，未上报轮单独计数，老记录（无归属）不进账", () => {
+    const records = [
+      { model: "deepseek-chat", tokens: 100, at: at(1), profileId: "p1", profileLabel: "A", input: 80, output: 20 },
+      { model: "deepseek-chat", tokens: 50, at: at(2), profileId: "p1", profileLabel: "A", input: 40, output: 10 },
+      { model: "kimi", tokens: 70, at: at(3), profileId: "p2", profileLabel: "B", input: 60, output: 10 },
+      { model: "kimi", tokens: null, at: at(4), profileId: "p2", profileLabel: "B" },
+      { model: "x", tokens: 999, at: at(5) }, // 没有归属 = 归不到具体 Key，不进这份账
+      { model: "deepseek-chat", tokens: 1, at: new Date(2026, 8, 30).toISOString(), profileId: "p1" }, // 上月
+    ];
+    const rows = byProfileModel(records, "2026-10");
+    expect(rows).toEqual([
+      {
+        profileId: "p1",
+        profileLabel: "A",
+        model: "deepseek-chat",
+        total: 150,
+        input: 120,
+        output: 30,
+        runs: 2,
+        unreported: 0,
+        lastAt: at(2),
+      },
+      {
+        profileId: "p2",
+        profileLabel: "B",
+        model: "kimi",
+        total: 70,
+        input: 60,
+        output: 10,
+        runs: 2,
+        unreported: 1,
+        lastAt: at(4),
+      },
+    ]);
+  });
+
+  it("byProfileModel：缺省 monthKey = 全部历史；同连接换模型分两档（价目按模型查）", () => {
+    const rows = byProfileModel([
+      { model: "m1", tokens: 10, at: at(1), profileId: "p1", profileLabel: "A" },
+      { model: "m2", tokens: 20, at: at(2), profileId: "p1", profileLabel: "A" },
+      { model: "m1", tokens: 1, at: new Date(2026, 8, 1).toISOString(), profileId: "p1", profileLabel: "A" },
+    ]);
+    expect(rows.map((r) => [r.model, r.total])).toEqual([
+      ["m2", 20],
+      ["m1", 11],
+    ]);
   });
 });

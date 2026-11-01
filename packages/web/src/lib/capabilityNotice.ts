@@ -10,10 +10,15 @@ import { resolveCapability } from "./modelCaps.js";
  */
 export type CapabilityKind = "tools" | "vision";
 
-/** Anthropic 的消息结构与 OpenAI 不同，本项目的工具桥走 OpenAI tools 形状，因此单独判掉。 */
+/**
+ * 判定「这个连接能不能用某项能力」——**唯一**的判据源（判定与丢弃同源）。
+ *
+ * 曾经这里对 anthropic 一票否决（因为工具桥只发 OpenAI 形状）。现在形状转换在
+ * `lib/llmAnthropic.ts`，Anthropic 原生支持函数调用与视觉，判据交回能力表：
+ * 用户在模型能力矩阵里的显式改判仍然优先（`resolveCapability` 读覆盖层）。
+ */
 export function supportsKind(profile: LlmProfile | undefined, kind: CapabilityKind): boolean {
   if (!profile) return false;
-  if (profile.provider === "anthropic") return false;
   const caps = resolveCapability(profile);
   return kind === "tools" ? caps.supportsTools : caps.supportsVision;
 }
