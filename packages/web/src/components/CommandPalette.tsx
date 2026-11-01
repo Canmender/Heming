@@ -3,6 +3,14 @@ import type { Conversation } from "@heming/shared";
 import { activeConversationsOf, useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
 import { skillPool } from "../lib/skills/index.js";
+import {
+  callInfohub,
+  formatInfohubTime,
+  readInfohubConfig,
+  type InfohubSearchHit,
+  type InfohubSearchResult,
+} from "../lib/infohub/client.js";
+import { useInfohubStore } from "../lib/infohub/store.js";
 import { convLabel } from "./ChatPage.js";
 import { Avatar } from "./Avatar.js";
 import { useModalA11y } from "./useModalA11y.js";
@@ -25,7 +33,25 @@ import { useModalA11y } from "./useModalA11y.js";
 
 export type SearchResult =
   | { kind: "conversation"; id: string; name: string; avatar?: string; detail: string; archived: boolean }
-  | { kind: "skill"; id: string; name: string; detail: string };
+  | { kind: "skill"; id: string; name: string; detail: string }
+  | { kind: "archive"; id: string; name: string; detail: string; hit: InfohubSearchHit };
+
+/** 归档检索防抖与条数：命令面板是快速找东西，不要每敲一个字就打一次 FTS。 */
+const ARCHIVE_DEBOUNCE_MS = 250;
+const ARCHIVE_LIMIT = 5;
+
+function archiveResult(hit: InfohubSearchHit): SearchResult {
+  const text = (hit.content || hit.snippet || "").replace(/<<|>>/g, "").replace(/\s+/g, " ").trim();
+  const name = Array.from(text).slice(0, 48).join("") || "（空消息）";
+  const source = hit.source === "qq" ? "QQ" : hit.source === "wechat" ? "微信" : hit.source;
+  return {
+    kind: "archive",
+    id: `archive-${hit.id}`,
+    name,
+    detail: `${source} · ${hit.convName} · ${formatInfohubTime(hit.ts, true)}`,
+    hit,
+  };
+}
 
 /** 把会话翻成一条结果。 */
 function convResult(c: Conversation): SearchResult {
@@ -94,14 +120,51 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const conversations = useChatStore((s) => s.conversations);
   const openConversation = useUiStore((s) => s.openConversation);
   const setPage = useUiStore((s) => s.setPage);
+  const openInfohub = useUiStore((s) => s.openInfohub);
+  const infohubRunning = useInfohubStore((s) => s.running);
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
+  const [archiveHits, setArchiveHits] = useState<InfohubSearchHit[]>([]);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
-  const { results, total } = useMemo(() => searchAllDetailed(query, conversations), [query, conversations]);
-  const hidden = total - results.length;
+  // 归档全文检索：仅在桌面端已连接时启用；防抖 250ms，旧的词立刻清掉避免错配。
+  useEffect(() => {
+    const q = query.trim();
+    if (!q || !infohubRunning) {
+      setArchiveHits([]);
+      setArchiveBusy(false);
+      return;
+    }
+    let alive = true;
+    setArchiveHits([]);
+    const timer = window.setTimeout(() => {
+      setArchiveBusy(true);
+      callInfohub<InfohubSearchResult>("search", { query: q, limit: ARCHIVE_LIMIT }, readInfohubConfig())
+        .then((data) => {
+          if (alive) setArchiveHits(Array.isArray(data.items) ? data.items : []);
+        })
+        .catch(() => {
+          if (alive) setArchiveHits([]);
+        })
+        .finally(() => {
+          if (alive) setArchiveBusy(false);
+        });
+    }, ARCHIVE_DEBOUNCE_MS);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [query, infohubRunning]);
+
+  const base = useMemo(() => searchAllDetailed(query, conversations), [query, conversations]);
+  const results = useMemo(
+    () => [...base.results, ...archiveHits.map(archiveResult)],
+    [base, archiveHits],
+  );
+  const hidden = base.total - base.results.length;
 
   // 唤起即聚焦 + Tab 困在面板内：命令面板的整个意义就是「键盘打字开始找」
   useModalA11y(panelRef, onClose, { closeOnEscape: false, initialFocusRef: inputRef });
@@ -115,6 +178,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     if (!r) return;
     if (r.kind === "conversation") {
       openConversation(r.id);
+    } else if (r.kind === "archive") {
+      // 归档页自己会跑同词检索；这里只投递意图，不在面板里复制结果页
+      openInfohub({ tab: "search", query: query.trim() });
     } else {
       // 技能没有「详情页路由」，跳到技能区即可——比什么都不做强，
       // 而且用户在这个位置真正想做的是找那个技能，到了列表里一眼能认出来
@@ -174,13 +240,18 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         <div className="max-h-[46vh] overflow-y-auto py-1">
           {query.trim() === "" ? (
             <div className="px-3.5 py-3 text-[12px] text-muted">
-              输入关键词开始搜索。当前可搜：会话（含已归档）、技能。
+              输入关键词开始搜索。当前可搜：会话（含已归档）、技能
+              {infohubRunning ? "、本机归档" : ""}。
               <div className="mt-1 text-[11px] text-[#aaa]">
-                消息正文的全文检索尚未支持——它需要按会话逐条拉取与索引，是单独一项工作。
+                {infohubRunning
+                  ? "本机归档只在本机检索，不会上传。"
+                  : "连接信息中枢后，可在这里搜本机 QQ/微信历史消息。"}
               </div>
             </div>
           ) : results.length === 0 ? (
-            <div className="px-3.5 py-3 text-[12px] text-muted">没有匹配「{query}」的结果。</div>
+            <div className="px-3.5 py-3 text-[12px] text-muted">
+              {archiveBusy ? `正在检索本机归档「${query.trim()}」…` : `没有匹配「${query}」的结果。`}
+            </div>
           ) : (
             results.map((r, i) => (
               <button
@@ -197,7 +268,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                   <Avatar user={{ displayName: r.name, avatar: r.avatar }} size={22} />
                 ) : (
                   <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded bg-[#f0f0f0] text-[10px] text-muted">
-                    技
+                    {r.kind === "archive" ? "档" : "技"}
                   </span>
                 )}
                 <span className="min-w-0 flex-1">
@@ -208,10 +279,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                   <span className="shrink-0 rounded border border-line px-1 text-[10px] text-muted">
                     已归档
                   </span>
+                ) : r.kind === "archive" ? (
+                  <span className="shrink-0 rounded border border-line px-1 text-[10px] text-muted">本机</span>
                 ) : null}
               </button>
             ))
           )}
+          {archiveBusy && results.length > 0 ? (
+            <div className="px-3.5 py-1 text-[10px] text-muted">正在检索本机归档…</div>
+          ) : null}
           {hidden > 0 && (
             <div className="border-t border-line-soft px-3.5 py-1.5 text-[11px] text-muted">
               还有 {hidden} 条

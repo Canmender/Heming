@@ -71,7 +71,7 @@
 | [specs/2026-10-21-local-package-runtime-policy.md](superpowers/specs/2026-10-21-local-package-runtime-policy.md) | 本地包（npm/pypi）运行时策略：探测、`shell:false` 翻译链、台账与进程回收 |
 | [research/2026-10-21-delivery-hitl-registry.md](research/2026-10-21-delivery-hitl-registry.md) | HITL + Registry 本轮交付与踩坑 |
 
-### d.30–d.45 安全、数据收口与能力平台化（2026-10-22 → ）
+### d.30–d.48 安全、数据收口与能力平台化（2026-10-22 → ）
 
 按 `research/2026-10-22-deep-audit-followup-plan.md` 的分轮表推进；每轮一份规格、一次门禁、两处发布。
 
@@ -94,6 +94,9 @@
 | [specs/2026-11-01-d43-system-capability-plugins.md](superpowers/specs/2026-11-01-d43-system-capability-plugins.md) | d.43：系统能力包——清单 v2 声明技能 + 远程 MCP（https / 本机 http）、服务 id `plugin:<插件 id>:<key>`、安装/更新/停用/卸载同步服务并保留用户请求头与工具授权、接口区来源标记；不执行代码、不带密钥、不自动连接/授权 |
 | [specs/2026-11-01-d44-plugin-update-preview.md](superpowers/specs/2026-11-01-d44-plugin-update-preview.md) | d.44：插件更新差异——`preview()` 按实际技能池/注册表算新增/变更/不变/移除、冲突与数量上限禁用确认、能力详情弹窗只读展示技能与服务状态；不回滚、不联网探测、不持久化预览 |
 | [specs/2026-11-01-d45-infohub-local-sidecar.md](superpowers/specs/2026-11-01-d45-infohub-local-sidecar.md) | d.45：信息中枢——InfoHub Python 源码并入 `packages/infohub`，Electron stdio 拉起（不开端口/不走网络），只读 `mode=ro` 浏览/检索/议程、显式同步、配置脱敏、IPC 方法白名单；并修复 sandbox preload 不能 require 本地模块导致全部桌面桥失效 |
+| [specs/2026-11-01-d46-infohub-native-capability.md](superpowers/specs/2026-11-01-d46-infohub-native-capability.md) | d.46：信息中枢原生融入——归档工具提供者（检索/读会话/日程，重扫走 HITL）、共享运行态 store、首页归档卡、Ctrl+K 归档检索、跨页意图、归档来源脚注；只在桌面端且已连接时注入，不自动启动边车、不暴露 sync、不迁移数据 |
+| [specs/2026-11-01-d47-automation-center.md](superpowers/specs/2026-11-01-d47-automation-center.md) | d.47：自动化中心——本机任务（每天定时/按间隔，`heming.automations.v1`）、InfoHub 同步与日程重扫白名单、15s 串行调度、启动不补跑、未连接记 `skipped` 且绝不自动拉起边车；信息中枢「定时/保存为定时任务/定时重扫」预填；不执行脚本、不推送、不上云 |
+| [specs/2026-11-01-d48-staff-proactive-agent.md](superpowers/specs/2026-11-01-d48-staff-proactive-agent.md) | d.48：常驻幕僚——晨报 + 日程临期 + 任务异常三路只读巡检，规则优先、可选模型总结并强制补回紧急项，`heming.staff.*` 本机存储、去重账本、静默时段与预算；只递简报与跳转，不自动执行、不拉起 InfoHub、不巡检归档全文 |
 | [research/2026-10-28-d38-adversarial-qa.md](research/2026-10-28-d38-adversarial-qa.md) | d.38.1.10.0：对抗性自检 16 例（typing + 连续性），C2 暴露「消息到达不清理输入态」，已修 |
 | [research/2026-10-28-d39-deep-stress-testing.md](research/2026-10-28-d39-deep-stress-testing.md) | d.39.1.11.0：32 例深度对抗/压测（消息风暴、页面切换、通知桥模糊输入）+ 6 项修复（交接窗口、吐司合并、id 校验、文本清洗、点击幂等、通话窗焦点）；后台失败 UI 仍缺 |
 | [research/2026-10-23-rounds-after-d36.md](research/2026-10-23-rounds-after-d36.md) | d.36 之后的开工备忘：CSP 基线、`release.sh` 顺序、docker 清理、需拍板项与建议轮次 |

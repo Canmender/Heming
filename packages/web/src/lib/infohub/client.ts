@@ -128,6 +128,55 @@ export interface InfohubConfig {
   python?: string;
 }
 
+export interface InfohubConversationsResult {
+  items: InfohubConversation[];
+  total: number;
+  dbMissing?: boolean;
+}
+
+export interface InfohubMessagesResult {
+  conversation: InfohubConversation | null;
+  items: InfohubMessage[];
+  hasMore: boolean;
+  dbMissing?: boolean;
+}
+
+export interface InfohubSearchResult {
+  items: InfohubSearchHit[];
+  query: string;
+  dbMissing?: boolean;
+}
+
+export interface InfohubAgendaSummary {
+  overdue: number;
+  today: number;
+  week: number;
+  total: number;
+}
+
+export interface InfohubAgendaResult {
+  items: InfohubAgendaItem[];
+  summary: InfohubAgendaSummary;
+  dbMissing?: boolean;
+}
+
+export interface InfohubSyncReport {
+  source: string;
+  conversations: number;
+  added: number;
+  updated: number;
+  scannedFiles?: number;
+  skipped: number;
+  errors: string[];
+  elapsed: number;
+}
+
+export interface InfohubSyncResult {
+  reports: InfohubSyncReport[];
+  agenda: unknown;
+  kb: unknown;
+}
+
 type InfohubBridge = NonNullable<Window["__heming_infohub"]>;
 
 const HOME_KEY = "heming.infohub.home.v1";

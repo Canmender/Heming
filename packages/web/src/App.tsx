@@ -17,6 +17,8 @@ import { RadarContacts } from "./components/RadarContacts.js";
 import { HomePage } from "./components/HomePage.js";
 import { ConversationsPage } from "./components/ConversationsPage.js";
 import { InfohubPage } from "./components/InfohubPage.js";
+import { AutomationPage } from "./components/AutomationPage.js";
+import { StaffPage } from "./components/StaffPage.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { MemoryPage } from "./components/MemoryPage.js";
 import { ArchivePage } from "./components/ArchivePage.js";
@@ -28,6 +30,9 @@ import { PluginsPage } from "./components/PluginsPage.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
+import { useInfohubStore } from "./lib/infohub/store.js";
+import { useAutomationScheduler } from "./lib/automation/scheduler.js";
+import { useStaffLoop } from "./lib/staff/loop.js";
 import { hasOpenModal } from "./components/useModalA11y.js";
 import { useBackgroundMessages } from "./lib/backgroundMessages.js";
 import {
@@ -122,6 +127,11 @@ export function App() {
   const handleBootDone = useCallback(() => setBootDone(true), []);
   const shellRef = useRef<HTMLDivElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // 本机归档：只探测桥与运行态，不自动拉起 Python（拉起必须由用户点「连接」）。
+  useEffect(() => {
+    void useInfohubStore.getState().boot();
+  }, []);
 
   // 全局搜索：Ctrl/⌘+K。启动动画期间不响应（与 Alt+N 同一套纪律：
   // 遮罩后面看不见的界面不该接受输入）。模态弹窗开着时同样不响应：面板与弹窗
@@ -225,6 +235,10 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
   // useSyncExternalStore 让 ChatPage 挂载/卸载立刻触发本组件重算 active。
   useSyncExternalStore(subscribeChatSocket, chatSocketVersion, () => 0);
   useBackgroundMessages(Boolean(authUser) && chatSocketCount() === 0);
+  // 本机自动化：只在登录后的桌面端到点执行，不补跑、不自动拉起 InfoHub
+  useAutomationScheduler(Boolean(authUser));
+  // 常驻幕僚（d.48）：登录后巡检日程与任务，只读、只递简报
+  useStaffLoop(Boolean(authUser));
 
   // 系统通知点击 → 主进程回传会话 id → 打开会话（未登录时忽略，登录后再点即可）
   useEffect(() => {
@@ -332,9 +346,15 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
     ) : page === "conversations" ? (
       // 会话中心：全部未归档会话的一站式列表（置顶/搜索/归档入口）
       <ConversationsPage />
+    ) : page === "staff" ? (
+      // 幕僚：常驻主动简报（只读采集 + 一键跳转）
+      <StaffPage />
     ) : page === "infohub" ? (
       // 信息中枢：本机 QQ/微信归档（桌面端 Python 子进程，数据不出本机）
       <InfohubPage />
+    ) : page === "automations" ? (
+      // 自动化：本机定时同步/重扫，只在和鸣运行且信息中枢已连接时执行
+      <AutomationPage />
     ) : page === "tasks" ? (
       // 任务区：左侧任务列表 + 嵌入式 ChatPage + 右侧确定性汇总
       <TaskAreaPage />

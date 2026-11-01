@@ -368,7 +368,9 @@ describe("设置区 · 导航顺序", () => {
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
       "conversations",
+      "staff",
       "infohub",
+      "automations",
       "workspace",
       "skills",
       "tasks",

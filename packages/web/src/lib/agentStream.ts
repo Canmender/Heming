@@ -19,14 +19,19 @@ export interface RunSettled {
   error?: string;
 }
 
-/** 工具结果里附带的一条来源（如知识库页面）。 */
+/** 工具结果里附带的一条来源（如知识库页面、本机归档消息）。 */
 export interface ToolSource {
-  /** 稳定标识（wiki 页面路径）。 */
+  /** 稳定标识（wiki 页面路径、归档消息 id）。 */
   id: string;
   /** 展示标题。 */
   title: string;
   /** 可选的补充定位信息（类别、片段）。 */
   detail?: string;
+  /**
+   * 来源类型：脚注标题按它区分「本机知识库」与「本机归档」。
+   * 缺省按 wiki 处理，保持旧来源的行为不变。
+   */
+  kind?: "wiki" | "archive";
 }
 
 /** 答案末尾来源脚注最多列几条（再多用户也不会看）。 */
@@ -52,7 +57,10 @@ export function sourceFooter(sources: ToolSource[]): string {
   if (!uniq.length) return "";
   const line = (s: ToolSource) =>
     `- ${String(s.title ?? s.id).replace(/\s+/g, " ").slice(0, 120)}（${s.id.replace(/[\r\n]+/g, " ")}）`;
-  return `\n\n---\n来源（来自本机知识库）：\n${uniq.map(line).join("\n")}`;
+  const hasArchive = uniq.some((s) => s.kind === "archive");
+  const hasWiki = uniq.some((s) => s.kind !== "archive");
+  const label = hasArchive && hasWiki ? "来源（本机知识库与本机归档）" : hasArchive ? "来源（来自本机归档）" : "来源（来自本机知识库）";
+  return `\n\n---\n${label}：\n${uniq.map(line).join("\n")}`;
 }
 
 /** 工具来源分类：展示与归属用，**不参与** HITL 风险判定。 */

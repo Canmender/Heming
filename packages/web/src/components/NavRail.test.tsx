@@ -31,6 +31,8 @@ describe("NavRail 图标轨（A 方案）", () => {
     ]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
+    // 幕僚不占数字键：只有名称
+    expect(screen.getByRole("button", { name: "幕僚" })).toBeInTheDocument();
   });
 
   it("工作区按钮角标 = 会话未读总和，aria-label 追加「N 条未读」", () => {
@@ -210,7 +212,7 @@ describe("NavRail 导航顺序可自定义", () => {
   it("存储里缺项时自动补齐，不漏渲染任何导航", () => {
     useUiStore.setState({ navOrder: ["memory", "home", "workspace", "skills", "interfaces"] });
     render(<NavRail />);
-    for (const name of ["主页", "工作区", "技能区", "接口区", "记忆区", "设置区", "会话"]) {
+    for (const name of ["主页", "工作区", "技能区", "接口区", "记忆区", "设置区", "会话", "信息中枢", "自动化"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(name) }).length).toBeGreaterThan(0);
     }
   });

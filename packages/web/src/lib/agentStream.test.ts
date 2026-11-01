@@ -796,6 +796,19 @@ describe("sourceFooter", () => {
     expect(sourceFooter([])).toBe("");
     expect(sourceFooter([{ id: "  ", title: "空" }])).toBe("");
   });
+
+  it("归档来源单独标注；知识库与归档混用则两者都写", () => {
+    expect(sourceFooter([{ id: "infohub:message:1", title: "叶老师 · 免检单", kind: "archive" }])).toContain(
+      "来源（来自本机归档）",
+    );
+    const mixed = sourceFooter([
+      { id: "wiki/1.md", title: "知识库页" },
+      { id: "infohub:agenda:2", title: "补交材料", kind: "archive" },
+    ]);
+    expect(mixed).toContain("来源（本机知识库与本机归档）");
+    expect(mixed).toContain("知识库页");
+    expect(mixed).toContain("补交材料");
+  });
 });
 
 describe("runAgentMentions 来源脚注", () => {

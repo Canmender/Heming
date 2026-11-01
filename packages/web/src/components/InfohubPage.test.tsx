@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { InfohubPage } from "./InfohubPage.js";
+import { useUiStore } from "../store/ui.js";
+import { useInfohubStore } from "../lib/infohub/store.js";
 import type {
   InfohubAgendaItem,
   InfohubBridgeInfo,
@@ -159,6 +161,22 @@ describe("信息中枢页", () => {
   beforeEach(() => {
     localStorage.clear();
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
+    useUiStore.setState({
+      page: "home",
+      activeConversationId: null,
+      infohubIntent: null,
+      automationIntent: null,
+    });
+    useInfohubStore.setState({
+      available: false,
+      running: false,
+      booted: false,
+      info: null,
+      status: null,
+      agenda: null,
+      busy: "",
+      error: "",
+    });
   });
 
   afterEach(() => {
@@ -190,6 +208,9 @@ describe("信息中枢页", () => {
     // 配置区只显示「是否配置过」，不出现任何密钥值
     expect(screen.getByText(/推送：smtp（无凭据）/)).toBeInTheDocument();
     expect(screen.getByText(/模型：未设置（无 Key）/)).toBeInTheDocument();
+    // 页面状态同步到共享 store：首页卡与归档工具读的是同一份
+    await waitFor(() => expect(useInfohubStore.getState().status).not.toBeNull());
+    expect(useInfohubStore.getState().running).toBe(true);
   });
 
   it("检索：命中词高亮，点结果回到对应会话", async () => {
@@ -250,6 +271,7 @@ describe("信息中枢页", () => {
     fireEvent.click(screen.getByRole("button", { name: "断开" }));
     await waitFor(() => expect(bridge.stop).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: "连接" })).toBeInTheDocument();
+    expect(useInfohubStore.getState()).toMatchObject({ running: false, status: null, agenda: null });
   });
 
   it("连接失败：显示可读错误并可重试", async () => {
@@ -262,5 +284,102 @@ describe("信息中枢页", () => {
     fireEvent.click(screen.getByRole("button", { name: "连接" }));
     expect(await screen.findByText("未找到可用的 Python 解释器")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "连接" })).toBeInTheDocument();
+  });
+
+  it("跨页意图：带检索词进入页面后自动检索并消费意图", async () => {
+    localStorage.setItem("heming.infohub.home.v1", HOME);
+    const { call } = installBridge({
+      info: vi.fn(async () => bridgeInfo({ running: true, home: HOME })),
+    });
+    useUiStore.setState({
+      page: "infohub",
+      activeConversationId: null,
+      infohubIntent: { tab: "search", query: "免检单" },
+    });
+
+    render(<InfohubPage />);
+
+    await waitFor(() =>
+      expect(call).toHaveBeenCalledWith(
+        "search",
+        { query: "免检单", limit: 100 },
+        { home: HOME },
+      ),
+    );
+    expect(useUiStore.getState().infohubIntent).toBeNull();
+    expect(await screen.findByText("免检单")).toBeInTheDocument(); // 命中词高亮
+  });
+
+  it("定时：把当前同步选项带进自动化页的新建表单", async () => {
+    installBridge();
+    await connectPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建定时同步" }));
+
+    expect(useUiStore.getState().page).toBe("automations");
+    expect(useUiStore.getState().automationIntent).toEqual({
+      kind: "infohub.sync",
+      sync: { sources: ["qq", "wechat"], full: false, archive: false },
+    });
+  });
+
+  it("定时：同步面板里改过的来源与全量选项原样带过去", async () => {
+    installBridge();
+    await connectPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "同步" }));
+    fireEvent.click(screen.getByLabelText("微信"));
+    fireEvent.click(screen.getByLabelText("全量重扫"));
+    fireEvent.click(screen.getByRole("button", { name: "保存为定时任务" }));
+
+    expect(useUiStore.getState().automationIntent).toEqual({
+      kind: "infohub.sync",
+      sync: { sources: ["qq"], full: true, archive: false },
+    });
+  });
+
+  it("定时：一个来源都没选时不投递意图", async () => {
+    installBridge();
+    await connectPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "同步" }));
+    fireEvent.click(screen.getByLabelText("QQ"));
+    fireEvent.click(screen.getByLabelText("微信"));
+    fireEvent.click(screen.getByRole("button", { name: "保存为定时任务" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("至少选择一个采集来源");
+    expect(useUiStore.getState().automationIntent).toBeNull();
+    expect(useUiStore.getState().page).not.toBe("automations");
+  });
+
+  it("定时重扫：日程工具栏投递重扫意图", async () => {
+    installBridge();
+    await connectPage();
+
+    fireEvent.click(screen.getByRole("tab", { name: /日程/ }));
+    fireEvent.click(screen.getByRole("button", { name: "新建定时重扫" }));
+
+    expect(useUiStore.getState().page).toBe("automations");
+    expect(useUiStore.getState().automationIntent).toEqual({ kind: "infohub.agenda" });
+  });
+
+  it("跨页意图：日程意图直接落在日程页", async () => {
+    localStorage.setItem("heming.infohub.home.v1", HOME);
+    installBridge({
+      info: vi.fn(async () => bridgeInfo({ running: true, home: HOME })),
+    });
+    useUiStore.setState({
+      page: "infohub",
+      activeConversationId: null,
+      infohubIntent: { tab: "agenda" },
+    });
+
+    render(<InfohubPage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /日程/ })).toHaveAttribute("aria-selected", "true"),
+    );
+    expect(useUiStore.getState().infohubIntent).toBeNull();
+    expect(await screen.findByText("补交材料")).toBeInTheDocument();
   });
 });

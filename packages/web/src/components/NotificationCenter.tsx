@@ -33,6 +33,8 @@ const KIND_LABEL: Record<AppNotification["kind"], string> = {
   task: "任务",
   // d.34：等待裁决的工具确认——点开跳回来源会话，弹窗在那儿等着。
   approval: "确认",
+  // d.48：常驻幕僚的主动简报——点开去幕僚页看完整证据。
+  staff: "幕僚",
 };
 
 export function NotificationCenter() {
@@ -72,6 +74,10 @@ export function NotificationCenter() {
   const jump = (item: AppNotification) => {
     markRead(item.id);
     setOpen(false);
+    if (item.kind === "staff") {
+      useUiStore.getState().setPage("staff");
+      return;
+    }
     if (item.kind === "task" && item.taskId) {
       focusTask(item.taskId, item.conversationId);
       return;

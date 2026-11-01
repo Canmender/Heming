@@ -177,6 +177,20 @@ describe("approval 通知与 removeByKey（d.34）", () => {
     expect(again[0].conversationId).toBe("c9");
   });
 
+  it("staff 简报能落盘并原样读回（d.48）", () => {
+    const id = useNotificationStore.getState().push({
+      kind: "staff",
+      key: "staff:run-1",
+      title: "幕僚简报",
+      body: "有 2 条日程临期。",
+    });
+    expect(id).not.toBeNull();
+
+    const again = readNotifications(storage);
+    expect(again).toHaveLength(1);
+    expect(again[0].kind).toBe("staff");
+  });
+
   it("removeByKey 只删指定 key，其它通知不动", () => {
     useNotificationStore.setState({
       items: [

@@ -13,46 +13,26 @@ import {
   startInfohub,
   stopInfohub,
   writeInfohubConfig,
-  type InfohubAgendaItem,
+  type InfohubAgendaResult,
   type InfohubBridgeInfo,
   type InfohubConfig,
   type InfohubConversation,
+  type InfohubConversationsResult,
   type InfohubMessage,
+  type InfohubMessagesResult,
   type InfohubProgressEvent,
   type InfohubSearchHit,
+  type InfohubSearchResult,
   type InfohubStatus,
 } from "../lib/infohub/client.js";
+import { useInfohubStore } from "../lib/infohub/store.js";
+import { useUiStore, type InfohubIntent } from "../store/ui.js";
 
 /** 会话列表一次取多少：归档里几百个会话，一次拿全，筛选在本地做也能接受。 */
 const LIST_LIMIT = 1000;
 /** 单个会话默认加载的最近消息条数。 */
 const MESSAGE_LIMIT = 300;
 const SEARCH_LIMIT = 100;
-
-interface ConversationsResult {
-  items: InfohubConversation[];
-  total: number;
-  dbMissing?: boolean;
-}
-
-interface MessagesResult {
-  conversation: InfohubConversation | null;
-  items: InfohubMessage[];
-  hasMore: boolean;
-  dbMissing?: boolean;
-}
-
-interface SearchResult {
-  items: InfohubSearchHit[];
-  query: string;
-  dbMissing?: boolean;
-}
-
-interface AgendaResult {
-  items: InfohubAgendaItem[];
-  summary: { overdue: number; today: number; week: number; total: number };
-  dbMissing?: boolean;
-}
 
 type Phase = "idle" | "connecting" | "ready" | "error";
 type Tab = "conversations" | "search" | "agenda";
@@ -157,7 +137,7 @@ export function InfohubPage() {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<InfohubSearchHit[]>([]);
   const [searchedFor, setSearchedFor] = useState("");
-  const [agenda, setAgenda] = useState<AgendaResult | null>(null);
+  const [agenda, setAgenda] = useState<InfohubAgendaResult | null>(null);
 
   const [busy, setBusy] = useState("");
   const [syncOpen, setSyncOpen] = useState(false);
@@ -170,6 +150,12 @@ export function InfohubPage() {
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
 
+  /** 首页卡/命令面板投递的一次性意图：检索词或日程页。 */
+  const intent = useUiStore((s) => s.infohubIntent);
+  const consumeInfohubIntent = useUiStore((s) => s.consumeInfohubIntent);
+  const openAutomations = useUiStore((s) => s.openAutomations);
+  const pendingIntentRef = useRef<InfohubIntent | null>(null);
+
   /** 当前连接配置：未填目录时交给主进程用默认目录。 */
   function currentConfig(): InfohubConfig {
     const trimmedHome = home.trim();
@@ -181,7 +167,7 @@ export function InfohubPage() {
   }
 
   async function loadConversations(config: InfohubConfig, filter: SourceFilter, kw: string) {
-    const data = await callInfohub<ConversationsResult>(
+    const data = await callInfohub<InfohubConversationsResult>(
       "conversations",
       { ...(filter ? { source: filter } : {}), ...(kw.trim() ? { keyword: kw.trim() } : {}), limit: LIST_LIMIT },
       config,
@@ -193,7 +179,7 @@ export function InfohubPage() {
   async function loadMessages(config: InfohubConfig, conversationId: number, quiet = false) {
     if (!quiet) setLoadingMessages(true);
     try {
-      const data = await callInfohub<MessagesResult>(
+      const data = await callInfohub<InfohubMessagesResult>(
         "messages",
         { conversationId, limit: MESSAGE_LIMIT },
         config,
@@ -208,14 +194,17 @@ export function InfohubPage() {
   async function loadStatus(config: InfohubConfig) {
     const next = await callInfohub<InfohubStatus>("status", {}, config);
     setStatus(next);
+    // 首页卡与归档工具读共享 store：页面里刷新过的规模/连接态要立刻可见
+    useInfohubStore.setState({ status: next });
     return next;
   }
 
   async function loadAgenda(config: InfohubConfig) {
     setBusy("agenda");
     try {
-      const data = await callInfohub<AgendaResult>("agenda", { days: 14, overdue: 30 }, config);
+      const data = await callInfohub<InfohubAgendaResult>("agenda", { days: 14, overdue: 30 }, config);
       setAgenda(data);
+      useInfohubStore.setState({ agenda: data });
     } finally {
       setBusy("");
     }
@@ -229,6 +218,8 @@ export function InfohubPage() {
     try {
       const next = await startInfohub(config);
       setInfo(next);
+      useInfohubStore.getState().syncInfo(next);
+      if (next.running) void useInfohubStore.getState().refresh();
       if (next.home) setHome(next.home);
       if (next.python) setPython(next.python);
       writeInfohubConfig({ home: next.home ?? config.home, python: next.python ?? config.python });
@@ -236,7 +227,7 @@ export function InfohubPage() {
       await loadConversations(config, sourceFilter, keyword);
       setPhase("ready");
       if (st.hasDb) {
-        const first = await callInfohub<ConversationsResult>(
+        const first = await callInfohub<InfohubConversationsResult>(
           "conversations",
           { limit: 1 },
           config,
@@ -260,6 +251,8 @@ export function InfohubPage() {
         const bridgeInfo = await infohubInfo();
         if (cancelled) return;
         setInfo(bridgeInfo);
+        useInfohubStore.getState().syncInfo(bridgeInfo);
+        if (bridgeInfo.running) void useInfohubStore.getState().refresh();
         const saved = readInfohubConfig();
         if (!saved.home) setHome(bridgeInfo.home ?? "");
         if (bridgeInfo.running && bridgeInfo.home) {
@@ -271,7 +264,7 @@ export function InfohubPage() {
           await loadConversations(config, "", "");
           setPhase("ready");
           if (st.hasDb) {
-            const first = await callInfohub<ConversationsResult>("conversations", { limit: 1 }, config);
+            const first = await callInfohub<InfohubConversationsResult>("conversations", { limit: 1 }, config);
             const id = first.items?.[0]?.id;
             if (id) void loadMessages(config, id, true);
           }
@@ -297,6 +290,34 @@ export function InfohubPage() {
       if (event && event.event === "progress") setProgress(event);
     });
   }, [available]);
+
+  // 跨页意图：首页卡/命令面板投递检索词或日程页。未连接时先记住，连接就绪后再执行。
+  useEffect(() => {
+    if (!intent) return;
+    pendingIntentRef.current = intent;
+    consumeInfohubIntent();
+    setTab(intent.tab);
+    if (intent.tab === "search") setQuery(intent.query ?? "");
+    if (phase !== "ready") return;
+    const pending = pendingIntentRef.current;
+    pendingIntentRef.current = null;
+    if (pending?.tab === "search" && pending.query?.trim()) {
+      void runSearch(pending.query);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intent]);
+
+  useEffect(() => {
+    if (phase !== "ready") return;
+    const pending = pendingIntentRef.current;
+    if (!pending) return;
+    pendingIntentRef.current = null;
+    // 日程页由下面的 [phase, tab, agenda] effect 负责加载
+    if (pending.tab === "search" && pending.query?.trim()) {
+      void runSearch(pending.query);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   // 切到日程页且还没拉过时才请求，避免每次切页都重算。
   useEffect(() => {
@@ -330,6 +351,7 @@ export function InfohubPage() {
       /* 进程可能已经退出：断开仍然是「回到未连接状态」 */
     }
     setPhase("idle");
+    useInfohubStore.getState().markStopped();
     setStatus(null);
     setConversations([]);
     setMessages([]);
@@ -377,13 +399,14 @@ export function InfohubPage() {
     void loadMessages(currentConfig(), id).catch((err) => setError(describeInfohubError(err)));
   }
 
-  async function runSearch() {
-    const trimmed = query.trim();
+  async function runSearch(term?: string) {
+    const trimmed = (term ?? query).trim();
     if (!trimmed || phase !== "ready") return;
+    if (term !== undefined) setQuery(trimmed);
     setBusy("search");
     setError("");
     try {
-      const data = await callInfohub<SearchResult>(
+      const data = await callInfohub<InfohubSearchResult>(
         "search",
         { query: trimmed, limit: SEARCH_LIMIT },
         currentConfig(),
@@ -402,12 +425,13 @@ export function InfohubPage() {
     setBusy("rebuild");
     setError("");
     try {
-      const data = await callInfohub<AgendaResult>(
+      const data = await callInfohub<InfohubAgendaResult>(
         "agenda",
         { days: 14, overdue: 30, rebuild: true },
         currentConfig(),
       );
       setAgenda(data);
+      useInfohubStore.setState({ agenda: data });
     } catch (err) {
       setError(describeInfohubError(err));
     } finally {
@@ -435,6 +459,8 @@ export function InfohubPage() {
       await loadStatus(config);
       await loadConversations(config, sourceFilter, keyword);
       setAgenda(null);
+      // 同步会写归档：共享 store 的规模与日程立即重算，首页卡不显示旧数据
+      void useInfohubStore.getState().refresh();
       if (activeId) await loadMessages(config, activeId, true);
     } catch (err) {
       setError(describeInfohubError(err));
@@ -442,6 +468,21 @@ export function InfohubPage() {
       setSyncing(false);
       setProgress(null);
     }
+  }
+
+  /** 把当前同步选项带到自动化页的新建表单（不在这里复制任务状态）。 */
+  function scheduleSyncAutomation() {
+    const sources = [syncSources.qq ? "qq" : "", syncSources.wechat ? "wechat" : ""].filter(
+      (s): s is "qq" | "wechat" => Boolean(s),
+    );
+    if (sources.length === 0) {
+      setError("至少选择一个采集来源");
+      return;
+    }
+    openAutomations({
+      kind: "infohub.sync",
+      sync: { sources, full: syncFull, archive: syncArchive },
+    });
   }
 
   /* ---------------------------------------------------------------- 渲染 */
@@ -501,6 +542,15 @@ export function InfohubPage() {
                 className="rounded-md border border-line px-2.5 py-1 text-[11px] shadow-card hover:bg-[#fafafa]"
               >
                 {syncOpen ? "收起同步" : "同步"}
+              </button>
+              <button
+                type="button"
+                aria-label="新建定时同步"
+                title="把当前同步选项设为定时任务"
+                onClick={scheduleSyncAutomation}
+                className="rounded-md border border-line px-2.5 py-1 text-[11px] shadow-card hover:bg-[#fafafa]"
+              >
+                定时
               </button>
               <button
                 type="button"
@@ -685,6 +735,14 @@ export function InfohubPage() {
                   className="rounded-md bg-ink px-3 py-1 text-[11px] font-medium text-white hover:opacity-90 disabled:opacity-50"
                 >
                   {syncing ? "同步中…" : "开始同步"}
+                </button>
+                <button
+                  type="button"
+                  disabled={syncing}
+                  onClick={scheduleSyncAutomation}
+                  className="rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa] disabled:opacity-50"
+                >
+                  保存为定时任务
                 </button>
                 <span className="text-[10px] text-muted">同步会写入归档库；浏览与检索始终只读。</span>
               </div>
@@ -961,14 +1019,24 @@ export function InfohubPage() {
                     <span>本周 {agenda.summary.week}</span>
                   </span>
                 )}
-                <button
-                  type="button"
-                  disabled={busy === "rebuild"}
-                  onClick={() => void rebuildAgenda()}
-                  className="ml-auto rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa] disabled:opacity-50"
-                >
-                  {busy === "rebuild" ? "重扫中…" : "重扫议程"}
-                </button>
+                <div className="ml-auto flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={busy === "rebuild"}
+                    onClick={() => void rebuildAgenda()}
+                    className="rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa] disabled:opacity-50"
+                  >
+                    {busy === "rebuild" ? "重扫中…" : "重扫议程"}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="新建定时重扫"
+                    onClick={() => openAutomations({ kind: "infohub.agenda" })}
+                    className="rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa]"
+                  >
+                    定时重扫
+                  </button>
+                </div>
               </div>
               <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
                 {!agenda || agenda.items.length === 0 ? (

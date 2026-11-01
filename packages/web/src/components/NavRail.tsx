@@ -13,6 +13,8 @@ import {
   SearchIcon,
   SessionsIcon,
   InfoHubIcon,
+  AutomationIcon,
+  StaffIcon,
 } from "./icons.js";
 import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -28,8 +30,12 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
   { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
   // 会话中心是新页，拿 9（老页编号不动，见设置区的注释）
   { page: "conversations", label: "会话", icon: <SessionsIcon width={17} height={17} />, digit: "9" },
+  // 幕僚（d.48）：常驻主动简报，与信息中枢同口径，不占数字键
+  { page: "staff", label: "幕僚", icon: <StaffIcon width={17} height={17} /> },
   // 信息中枢（d.45）：1–9/0 已排满，新页不再占用快捷键，只从导航点开
   { page: "infohub", label: "信息中枢", icon: <InfoHubIcon width={17} height={17} /> },
+  // 自动化（d.47）：与信息中枢同口径，不占数字键
+  { page: "automations", label: "自动化", icon: <AutomationIcon width={17} height={17} /> },
   { page: "workspace", label: "工作区", icon: <ChatIcon width={17} height={17} />, digit: "2" },
   // 任务区是新页，拿 8（老页编号不动，见设置区的注释）
   { page: "tasks", label: "任务区", icon: <TaskIcon width={17} height={17} />, digit: "8" },

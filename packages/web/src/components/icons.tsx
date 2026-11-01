@@ -43,6 +43,23 @@ export const ArchiveIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M10 12h4" />
   </svg>
 );
+/** 自动化：时钟外圈 + 指针与顶部发条，表达「按时间自动发生」。 */
+export const AutomationIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12.5" r="7.5" />
+    <path d="M12 8.5v4.2l2.8 1.6" />
+    <path d="M12 5V3M9.5 3h5" />
+  </svg>
+);
+/** 幕僚：肩上的参谋——人形 + 一只小钟，表达「替你盯着」。 */
+export const StaffIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="9.5" cy="7.5" r="3" />
+    <path d="M4 20v-1.3a5 5 0 0 1 5-5h1" />
+    <circle cx="17.5" cy="17" r="3.2" />
+    <path d="M17.5 15.4V17l1 .7" />
+  </svg>
+);
 /** 信息中枢：本地归档库（三层圆盘）+ 一个小节点，区别于「归档」的收纳盒。 */
 export const InfoHubIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>

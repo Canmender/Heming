@@ -35,8 +35,9 @@ export const NOTIFICATIONS_BYTE_LIMIT = Math.floor(64 * 1024);
  * - `approval`：**等待用户裁决**的工具调用确认（d.34）。
  *   它与前两种的区别是「还没发生」而不是「已经发生」——点开是回到待确认的会话，
  *   不是去读一条历史。
+ * - `staff`：常驻幕僚的主动简报（d.48），点开去幕僚页。
  */
-export type NotificationKind = "message" | "task" | "approval";
+export type NotificationKind = "message" | "task" | "approval" | "staff";
 
 export interface AppNotification {
   id: string;
@@ -78,7 +79,14 @@ export function normalizeNotification(raw: unknown): AppNotification | null {
   if (!isPlainObject(raw)) return null;
   if (typeof raw.id !== "string" || !raw.id) return null;
   if (typeof raw.key !== "string" || !raw.key) return null;
-  if (raw.kind !== "message" && raw.kind !== "task" && raw.kind !== "approval") return null;
+  if (
+    raw.kind !== "message" &&
+    raw.kind !== "task" &&
+    raw.kind !== "approval" &&
+    raw.kind !== "staff"
+  ) {
+    return null;
+  }
   const title = oneLine(typeof raw.title === "string" ? raw.title : "");
   if (!title) return null;
   return {

@@ -92,11 +92,13 @@ describe("ui store 导航顺序", () => {
     useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("默认顺序（会话页紧随主页）", () => {
+  it("默认顺序（会话页紧随主页，幕僚在会话之后）", () => {
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
       "conversations",
+      "staff",
       "infohub",
+      "automations",
       "workspace",
       "tasks",
       "skills",
@@ -110,9 +112,9 @@ describe("ui store 导航顺序", () => {
 
   it("moveNav 上移/下移生效并落盘", () => {
     useUiStore.getState().moveNav("memory", -1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(7);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(9);
     useUiStore.getState().moveNav("memory", 1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(8);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(10);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
       useUiStore.getState().navOrder,
     );
@@ -140,7 +142,9 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "memory",
       "home",
       "conversations",
+      "staff",
       "infohub",
+      "automations",
       "workspace",
       "tasks",
       "skills",
@@ -158,7 +162,9 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "settings",
       "home",
       "conversations",
+      "staff",
       "infohub",
+      "automations",
       "workspace",
       "tasks",
       "skills",
@@ -168,5 +174,47 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "archive",
     ]);
     expect(readStoredNavOrder(null)).toEqual([...DEFAULT_NAV_ORDER]);
+  });
+});
+
+describe("ui store 自动化意图", () => {
+  beforeEach(() => {
+    useUiStore.setState({
+      page: "home",
+      activeConversationId: null,
+      infohubIntent: null,
+      automationIntent: null,
+    });
+  });
+
+  it("openAutomations 进入自动化页并清掉其他瞬态槽", () => {
+    useUiStore.getState().openConversation("c1");
+    useUiStore.getState().openInfohub({ tab: "agenda" });
+    useUiStore.getState().openAutomations({
+      kind: "infohub.sync",
+      sync: { sources: ["qq"], full: true, archive: false },
+    });
+
+    const s = useUiStore.getState();
+    expect(s.page).toBe("automations");
+    expect(s.activeConversationId).toBeNull();
+    expect(s.infohubIntent).toBeNull();
+    expect(s.automationIntent).toEqual({
+      kind: "infohub.sync",
+      sync: { sources: ["qq"], full: true, archive: false },
+    });
+
+    s.consumeAutomationIntent();
+    expect(useUiStore.getState().automationIntent).toBeNull();
+  });
+
+  it("不带意图进入或切页时，旧意图不会残留", () => {
+    useUiStore.getState().openAutomations({ kind: "infohub.agenda" });
+    useUiStore.getState().openAutomations();
+    expect(useUiStore.getState().automationIntent).toBeNull();
+
+    useUiStore.getState().openAutomations({ kind: "infohub.agenda" });
+    useUiStore.getState().setPage("home");
+    expect(useUiStore.getState().automationIntent).toBeNull();
   });
 });

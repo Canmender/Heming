@@ -50,7 +50,9 @@ function InlineText({ text }: { text: string }) {
 const NAV_LABELS: Record<NavPage, string> = {
   home: "主页",
   conversations: "会话",
+  staff: "幕僚",
   infohub: "信息中枢",
+  automations: "自动化",
   workspace: "工作区",
   tasks: "任务区",
   skills: "技能区",

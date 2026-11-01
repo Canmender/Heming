@@ -1,4 +1,5 @@
 import { buildChartToolBridge } from "../charts/tools.js";
+import { buildInfohubToolsIfConnected } from "../infohub/tools.js";
 import { buildToolBridge } from "../mcp/index.js";
 import { mcpRegistry } from "../mcp/store.js";
 import { memoryStore } from "../memory/index.js";
@@ -11,7 +12,7 @@ import type { CapabilityProvider } from "./types.js";
 /**
  * 内置能力提供者：原先散在 `ChatPage.buildToolsFor` 的五类来源。
  *
- * 顺序与改前一致（mcp → charts → tone → wiki → self）：工具名重复时前者胜出。
+ * 顺序与改前一致（mcp → charts → tone → wiki → infohub → self）：工具名重复时前者胜出。
  */
 
 export const mcpProvider: CapabilityProvider = {
@@ -36,6 +37,16 @@ export const wikiProvider: CapabilityProvider = {
   id: "wiki",
   origin: "builtin",
   build: () => buildWikiToolBridge(),
+};
+
+/**
+ * 本机归档工具：只在桌面端且用户已连接信息中枢时注入。
+ * 未连接时返回 null——绝不为了「能用」而替用户拉起 Python 进程。
+ */
+export const infohubProvider: CapabilityProvider = {
+  id: "infohub",
+  origin: "builtin",
+  build: () => buildInfohubToolsIfConnected(),
 };
 
 /**

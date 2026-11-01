@@ -12,6 +12,8 @@ import {
 import { acceptFriend, resolveUrl } from "../lib/api.js";
 import { draftsVersion, getDraft, hasDraft, subscribeDrafts } from "../lib/drafts.js";
 import { Avatar } from "./Avatar.js";
+import { InfohubHomeCard } from "./InfohubHomeCard.js";
+import { StaffHomeCard } from "./StaffHomeCard.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
 
 /** 构建时注入的版本号（vite define __APP_VERSION__，file:// 桌面端无法 fetch package.json）。 */
@@ -362,6 +364,12 @@ export function HomePage() {
         </div>
         <TokenHeatmap />
       </section>
+
+      {/* 2.6 本机归档：日程摘要与归档规模（仅桌面端渲染） */}
+      <InfohubHomeCard />
+
+      {/* 2.7 幕僚：最近一份主动简报（d.48） */}
+      <StaffHomeCard />
 
       {/* 3/4/5/6. 两栏：左最近会话；右智能体动态 + 待处理 + 系统状态 */}
       <div className="grid grid-cols-[1.5fr_1fr] gap-3">

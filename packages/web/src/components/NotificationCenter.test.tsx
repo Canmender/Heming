@@ -123,6 +123,21 @@ describe("通知中心面板", () => {
     expect(useUiStore.getState().activeConversationId).toBe("c1");
   });
 
+  it("幕僚简报点进去：进幕僚页（d.48）", () => {
+    const item = makeItem({
+      kind: "staff",
+      key: "staff:run-1",
+      title: "幕僚简报",
+      body: "有 2 条日程临期。",
+    });
+    useNotificationStore.setState({ items: [item] });
+    render(<NotificationCenter />);
+
+    fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开通知：幕僚简报" }));
+    expect(useUiStore.getState().page).toBe("staff");
+  });
+
   it("逐条已读 / 删除只影响那一条", () => {
     const a = makeItem({ title: "甲" });
     const b = makeItem({ title: "乙" });

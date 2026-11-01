@@ -61,6 +61,7 @@ export const STORAGE_MODULE_RULES: readonly StorageModuleRule[] = [
   { prefix: "heming.memory.", module: "记忆" },
   { prefix: "heming.tasks.", module: "任务" },
   { prefix: "heming.taskTemplates.", module: "任务" },
+  { prefix: "heming.staff.", module: "幕僚" },
   { prefix: "heming.e2e.", module: "加密会话" },
   { prefix: "heming.x3dh.", module: "加密会话" },
   { prefix: "heming.mcp.", module: "接口与 Registry" },
