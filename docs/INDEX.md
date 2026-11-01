@@ -71,7 +71,7 @@
 | [specs/2026-10-21-local-package-runtime-policy.md](superpowers/specs/2026-10-21-local-package-runtime-policy.md) | 本地包（npm/pypi）运行时策略：探测、`shell:false` 翻译链、台账与进程回收 |
 | [research/2026-10-21-delivery-hitl-registry.md](research/2026-10-21-delivery-hitl-registry.md) | HITL + Registry 本轮交付与踩坑 |
 
-### d.30–d.40 安全与数据收口（2026-10-22 → ）
+### d.30–d.45 安全、数据收口与能力平台化（2026-10-22 → ）
 
 按 `research/2026-10-22-deep-audit-followup-plan.md` 的分轮表推进；每轮一份规格、一次门禁、两处发布。
 
@@ -89,6 +89,11 @@
 | [specs/2026-10-28-d38-typing-indicator.md](superpowers/specs/2026-10-28-d38-typing-indicator.md) | d.38：人类会话正在输入提示——`typing` 元数据事件、客户端 2s / 服务端 1s 节流、3s 过期；presence 未做 |
 | [specs/2026-10-28-d39-global-message-awareness.md](superpowers/specs/2026-10-28-d39-global-message-awareness.md) | d.39：全域消息感知——非聊天页后台通道（只感知不解密）、桌面系统通知（正文固定）、按会话免打扰、消息 id 去重；会话列表/全局搜索/presence/托盘未做 |
 | [specs/2026-10-29-d40-conversation-center.md](superpowers/specs/2026-10-29-d40-conversation-center.md) | d.40：会话中心——导航「会话」Alt+9、未归档全集、置顶 + 最近活跃排序、五级预览（只读本机缓存）、行内置顶/免打扰/归档、本机偏好；全局检索/分组/拖拽/服务端同步未做 |
+| [specs/2026-11-01-d41-capability-kernel.md](superpowers/specs/2026-11-01-d41-capability-kernel.md) | d.41：能力内核——五类工具改为提供者注册（MCP/图表/去 AI 味/知识库/自我修改）、工具来源与提供者归属、技能分配成为真路由边界；插件包/可执行插件/共享契约上提未做 |
+| [specs/2026-11-01-d42-plugin-packages.md](superpowers/specs/2026-11-01-d42-plugin-packages.md) | d.42：插件包——`plugin.json` 只声明技能、物化为带 `pluginId` 的普通技能、安装/更新/启停/卸载、插件页 Alt+0、`heming.plugins.v1`；不执行第三方代码、不声明 MCP、无市场/签名 |
+| [specs/2026-11-01-d43-system-capability-plugins.md](superpowers/specs/2026-11-01-d43-system-capability-plugins.md) | d.43：系统能力包——清单 v2 声明技能 + 远程 MCP（https / 本机 http）、服务 id `plugin:<插件 id>:<key>`、安装/更新/停用/卸载同步服务并保留用户请求头与工具授权、接口区来源标记；不执行代码、不带密钥、不自动连接/授权 |
+| [specs/2026-11-01-d44-plugin-update-preview.md](superpowers/specs/2026-11-01-d44-plugin-update-preview.md) | d.44：插件更新差异——`preview()` 按实际技能池/注册表算新增/变更/不变/移除、冲突与数量上限禁用确认、能力详情弹窗只读展示技能与服务状态；不回滚、不联网探测、不持久化预览 |
+| [specs/2026-11-01-d45-infohub-local-sidecar.md](superpowers/specs/2026-11-01-d45-infohub-local-sidecar.md) | d.45：信息中枢——InfoHub Python 源码并入 `packages/infohub`，Electron stdio 拉起（不开端口/不走网络），只读 `mode=ro` 浏览/检索/议程、显式同步、配置脱敏、IPC 方法白名单；并修复 sandbox preload 不能 require 本地模块导致全部桌面桥失效 |
 | [research/2026-10-28-d38-adversarial-qa.md](research/2026-10-28-d38-adversarial-qa.md) | d.38.1.10.0：对抗性自检 16 例（typing + 连续性），C2 暴露「消息到达不清理输入态」，已修 |
 | [research/2026-10-28-d39-deep-stress-testing.md](research/2026-10-28-d39-deep-stress-testing.md) | d.39.1.11.0：32 例深度对抗/压测（消息风暴、页面切换、通知桥模糊输入）+ 6 项修复（交接窗口、吐司合并、id 校验、文本清洗、点击幂等、通话窗焦点）；后台失败 UI 仍缺 |
 | [research/2026-10-23-rounds-after-d36.md](research/2026-10-23-rounds-after-d36.md) | d.36 之后的开工备忘：CSP 基线、`release.sh` 顺序、docker 清理、需拍板项与建议轮次 |

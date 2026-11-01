@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "infohub"
+version = "0.1.0"
+description = "本地优先的 QQ / 微信信息采集与查看器"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6-Essentials>=6.6",
+    "wechatauto-replica>=1.2.8",
+    "zstandard>=0.22",
+    "Pillow>=10",
+    "sherpa-onnx>=1.10",
+    "pilk>=0.2.4",
+    "wecom-aibot-python-sdk>=1.0.2",
+]
+
+[tool.setuptools.packages.find]
+include = ["infohub*"]

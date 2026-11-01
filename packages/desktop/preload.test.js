@@ -44,6 +44,7 @@ function loadExposed(ipc = {}, sink = {}) {
   const exposed = {};
   const listeners = sink.listeners || new Map();
   const sent = sink.sent || [];
+  const invoked = sink.invoked || [];
   const stubBridge = {
     exposeInMainWorld: (key, api) => {
       exposed[key] = api;
@@ -51,7 +52,10 @@ function loadExposed(ipc = {}, sink = {}) {
   };
   const stubIpc = {
     sendSync: (channel, arg) => (typeof ipc[channel] === "function" ? ipc[channel](arg) : undefined),
-    invoke: async () => undefined,
+    invoke: async (channel, payload) => {
+      invoked.push([channel, payload]);
+      return undefined;
+    },
     send: (channel, ...args) => {
       sent.push([channel, ...args]);
     },
@@ -160,6 +164,17 @@ test("__onBootReady 收到非函数参数时忽略（不抛出、不污染已有
   assert.equal(called, 1);
 });
 
+// sandbox 的 preload 只能 require electron 与少数内置模块；一旦再写本地 require，
+// 整个 preload 会在真实 Electron 里加载失败，所有桥（含密钥/通知）一起消失。
+test("preload 不 require 本地模块（sandbox 约束）", () => {
+  assert.ok(!/require\(["']\.\.?\//.test(src), "sandbox preload 不允许本地 require");
+});
+
+test("版本号经主进程同步 IPC 获取；通道缺失回落到 0.0.0", () => {
+  assert.equal(loadExposed({ "app:version": () => "d.45.1.12.0" }).__heming_version, "d.45.1.12.0");
+  assert.equal(loadExposed().__heming_version, "0.0.0");
+});
+
 // ── 本机密钥信封桥（d.36）──
 test("preload 暴露 __heming_secrets（密钥信封桥）", () => {
   const exposed = loadExposed({ "secret:available": () => true });
@@ -231,4 +246,50 @@ test("__heming_notify.onOpen 收到非函数回调时安全忽略", () => {
     off();
   });
   assert.equal((listeners.get("notify:open") || new Set()).size, 0, "非函数回调不应注册监听");
+});
+
+// ── 信息中枢 · InfoHub 本机桥（d.45）──
+test("preload 暴露 __heming_infohub，call 只转发 home/python 两个配置字段", async () => {
+  const invoked = [];
+  const bridge = loadExposed({}, { invoked }).__heming_infohub;
+  assert.ok(bridge, "应暴露 __heming_infohub");
+  for (const fn of ["info", "start", "call", "stop", "pickHome", "pickPython", "onEvent"]) {
+    assert.equal(typeof bridge[fn], "function", `${fn} 应是函数`);
+  }
+
+  await bridge.call("conversations", { limit: 5 }, { home: "D:\\wohaolei", python: "D:\\py.exe", extra: "忽略" });
+  assert.deepEqual(invoked.at(-1), [
+    "infohub:call",
+    { method: "conversations", params: { limit: 5 }, home: "D:\\wohaolei", python: "D:\\py.exe" },
+  ]);
+
+  await bridge.call("status", null, null);
+  assert.deepEqual(invoked.at(-1), ["infohub:call", { method: "status", params: null, home: undefined, python: undefined }]);
+
+  await bridge.pickHome();
+  await bridge.pickPython();
+  await bridge.stop();
+  assert.deepEqual(
+    invoked.slice(-3).map(([channel]) => channel),
+    ["infohub:pick-home", "infohub:pick-python", "infohub:stop"]
+  );
+});
+
+test("__heming_infohub.onEvent 订阅可取消，非函数回调不注册", () => {
+  const listeners = new Map();
+  const bridge = loadExposed({}, { listeners }).__heming_infohub;
+  const received = [];
+  const off = bridge.onEvent((event) => received.push(event));
+  const set = listeners.get("infohub:event");
+  assert.ok(set && set.size === 1);
+  for (const fn of [...set]) fn({}, { event: "progress", phase: "sync", current: 1, total: 3 });
+  assert.deepEqual(received, [{ event: "progress", phase: "sync", current: 1, total: 3 }]);
+  off();
+  assert.equal(set.size, 0);
+
+  assert.doesNotThrow(() => {
+    const noop = bridge.onEvent("not a function");
+    noop();
+  });
+  assert.equal((listeners.get("infohub:event") || new Set()).size, 0);
 });

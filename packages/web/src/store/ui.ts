@@ -3,9 +3,11 @@ import { create } from "zustand";
 export type Page =
   | "home"
   | "conversations"
+  | "infohub"
   | "workspace"
   | "tasks"
   | "skills"
+  | "plugins"
   | "interfaces"
   | "memory"
   | "archive"
@@ -22,9 +24,11 @@ export type NavPage = Exclude<Page, "chat">;
 export const DEFAULT_NAV_ORDER: NavPage[] = [
   "home",
   "conversations",
+  "infohub",
   "workspace",
   "tasks",
   "skills",
+  "plugins",
   "interfaces",
   "memory",
   "archive",

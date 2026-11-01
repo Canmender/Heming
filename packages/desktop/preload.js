@@ -1,6 +1,16 @@
 "use strict";
 const { contextBridge, ipcRenderer } = require("electron");
-const { appVersion } = require("./app-version");
+
+// sandbox 模式下 preload 不能 require 本地模块（只允许 electron 与少数内置模块），
+// 所以版本号必须由主进程通过同步 IPC 提供；拿不到时退回占位值，界面仍可渲染。
+function readAppVersion() {
+  try {
+    const value = ipcRenderer.sendSync("app:version");
+    return typeof value === "string" && value ? value : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
 
 // BootWave 回调注册表：contextBridge 暴露的对象在 Electron 中被冻结，
 // web 端无法直接注入属性，因此回调保存在 preload 隔离世界的闭包中。
@@ -79,7 +89,7 @@ contextBridge.exposeInMainWorld("__heming_runtime", {
 
 // —— 版本号 ——
 // 展示与更新比较都用 5 段版本（d.特性.破坏性.修订.构建），不在渲染层重复读 package.json。
-contextBridge.exposeInMainWorld("__heming_version", appVersion());
+contextBridge.exposeInMainWorld("__heming_version", readAppVersion());
 
 // —— 自动更新 ——
 // 只有安装版有（开发态主进程不初始化）；渲染层据此判断要不要显示更新入口。
@@ -192,5 +202,38 @@ contextBridge.exposeInMainWorld("__heming_notify", {
     const listener = (_event, conversationId) => callback(conversationId ?? null);
     ipcRenderer.on("notify:open", listener);
     return () => ipcRenderer.removeListener("notify:open", listener);
+  },
+});
+
+// —— 信息中枢 · InfoHub 本机桥（d.45）——
+// 归档数据留在本机：主进程用 stdio 拉起 Python 桥，这里只转发白名单方法。
+// 浏览器端没有这个桥，页面据此显示「仅桌面端可用」，绝不回退到云端读归档。
+contextBridge.exposeInMainWorld("__heming_infohub", {
+  /** 静态信息：包目录、默认数据目录、内置解释器、当前进程状态。 */
+  info: () => ipcRenderer.invoke("infohub:info"),
+  /** 拉起（或复用）InfoHub 进程；config = { home?, python? }。 */
+  start: (config) => ipcRenderer.invoke("infohub:start", config),
+  /** 调一个白名单方法；未启动时自动拉起。config 用于切换数据目录/解释器。 */
+  call: (method, params, config) => {
+    const safe = config && typeof config === "object" ? config : {};
+    return ipcRenderer.invoke("infohub:call", {
+      method,
+      params,
+      home: safe.home,
+      python: safe.python,
+    });
+  },
+  /** 停止并回收进程（应用退出时主进程也会兜底）。 */
+  stop: () => ipcRenderer.invoke("infohub:stop"),
+  /** 选数据目录（用系统目录选择器，渲染层拿不到 fs）。 */
+  pickHome: () => ipcRenderer.invoke("infohub:pick-home"),
+  /** 选 Python 解释器（采集依赖通常只装在 InfoHub 的 venv 里）。 */
+  pickPython: () => ipcRenderer.invoke("infohub:pick-python"),
+  /** 订阅采集/导出进度事件。返回取消订阅函数。 */
+  onEvent: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("infohub:event", listener);
+    return () => ipcRenderer.removeListener("infohub:event", listener);
   },
 });

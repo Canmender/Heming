@@ -99,7 +99,7 @@ function coerceServer(raw: unknown, now: string): McpServerConfig | null {
     // 来源与 Registry 名：缺省视为手填（兼容旧数据）。
     // ★ 这两个字段必须在这里显式透传——coerceServer 做的是字段白名单，
     //   不写就会**被直接丢掉**，Registry 装的服务会退化成「手填」而看不出是哪来的。
-    origin: r.origin === "preset" || r.origin === "manual" || r.origin === "registry"
+    origin: r.origin === "preset" || r.origin === "manual" || r.origin === "registry" || r.origin === "plugin"
       ? r.origin
       : "manual",
     registryName: typeof r.registryName === "string" && r.registryName ? r.registryName : undefined,

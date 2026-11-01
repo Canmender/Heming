@@ -57,9 +57,10 @@ export interface McpServerConfig {
  *
  * - `preset`：内置预置（界面标「默认接入」，行为上不可完全删除）；
  * - `manual`：用户在接口区手填；
- * - `registry`：从官方 Registry 一键安装（2026-10 新增）。
+ * - `registry`：从官方 Registry 一键安装（2026-10 新增）；
+ * - `plugin`：随插件包安装（d.43），启停/卸载跟随插件。
  */
-export type ServerOrigin = "preset" | "manual" | "registry";
+export type ServerOrigin = "preset" | "manual" | "registry" | "plugin";
 
 /** MCP 服务暴露的一个工具。 */
 export interface McpTool {

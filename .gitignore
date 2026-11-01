@@ -32,3 +32,11 @@ packages/desktop/runtime/
 # vite / vitest 运行时在包目录里留下的临时文件
 *.timestamp-*.mjs
 _tmp_*
+
+# Python 字节码（InfoHub 随源码并入，但缓存不入库）
+__pycache__/
+*.pyc
+
+# InfoHub 的本机配置与归档只属于设备，不进仓库
+packages/infohub/config.json
+packages/infohub/data/

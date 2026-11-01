@@ -16,6 +16,7 @@ import { ChatConvStrip } from "./components/ChatConvStrip.js";
 import { RadarContacts } from "./components/RadarContacts.js";
 import { HomePage } from "./components/HomePage.js";
 import { ConversationsPage } from "./components/ConversationsPage.js";
+import { InfohubPage } from "./components/InfohubPage.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { MemoryPage } from "./components/MemoryPage.js";
 import { ArchivePage } from "./components/ArchivePage.js";
@@ -23,6 +24,7 @@ import { CommandPalette } from "./components/CommandPalette.js";
 import { InterfacesPage } from "./components/InterfacesPage.js";
 import { RegistryInstallCard } from "./components/RegistryInstallCard.js";
 import { SkillsPage } from "./components/SkillsPage.js";
+import { PluginsPage } from "./components/PluginsPage.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
@@ -35,7 +37,7 @@ import {
 } from "./lib/chatSocketPresence.js";
 
 /**
- * Alt+1–Alt+9 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档、8 任务区、9 会话。
+ * Alt+1–Alt+9、Alt+0 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档、8 任务区、9 会话、0 插件区。
  *
  * 顺序必须与 NavRail 的 `digit` 严格对应——那边是快捷键提示的唯一来源，
  * 两边错位就会出现「界面写着 Alt+6、按下去却去了别的页」。
@@ -51,7 +53,11 @@ const SHORTCUT_PAGES: Page[] = [
   "archive",
   "tasks",
   "conversations",
+  "plugins",
 ];
+
+/** 快捷键数字 → SHORTCUT_PAGES 下标（`0` 对应第 10 项）。 */
+const SHORTCUT_DIGITS = "1234567890";
 
 /** 右侧目录栏宽度上下限（像素）：太窄放不下文件名，太宽会挤掉主内容。 */
 export const ASIDE_MIN = 180;
@@ -266,14 +272,14 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
       const inText =
         !!t &&
         (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-      // Alt+1–9 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应
-      if (e.altKey && !e.metaKey && !e.ctrlKey && ["1", "2", "3", "4", "5", "6", "7", "8", "9"].includes(e.key)) {
+      // Alt+1–9 / Alt+0 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应
+      if (e.altKey && !e.metaKey && !e.ctrlKey && SHORTCUT_DIGITS.includes(e.key)) {
         if (inText) return;
         e.preventDefault();
         // 模态弹窗开着时只吞键不切页：切走的子树里还留着那个弹窗，
         // 焦点归还、Esc 归属与 inert 计数全落在已经不属于当前视图的 DOM 上。
         if (hasOpenModal()) return;
-        setPage(SHORTCUT_PAGES["123456789".indexOf(e.key)]);
+        setPage(SHORTCUT_PAGES[SHORTCUT_DIGITS.indexOf(e.key)]);
         return;
       }
       if (!e.metaKey && !e.ctrlKey) return;
@@ -326,11 +332,17 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
     ) : page === "conversations" ? (
       // 会话中心：全部未归档会话的一站式列表（置顶/搜索/归档入口）
       <ConversationsPage />
+    ) : page === "infohub" ? (
+      // 信息中枢：本机 QQ/微信归档（桌面端 Python 子进程，数据不出本机）
+      <InfohubPage />
     ) : page === "tasks" ? (
       // 任务区：左侧任务列表 + 嵌入式 ChatPage + 右侧确定性汇总
       <TaskAreaPage />
     ) : page === "skills" ? (
       <SkillsPage />
+    ) : page === "plugins" ? (
+      // 插件区：声明式能力包（plugin.json）的安装、启停与卸载
+      <PluginsPage />
     ) : page === "memory" ? (
       // 记忆区：三层记忆 + 技能池（全部数据只在本机 localStorage）
       <MemoryPage />

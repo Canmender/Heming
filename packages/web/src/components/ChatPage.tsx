@@ -83,21 +83,15 @@ import { ChatInfoCard } from "./ChatInfoCard.js";
 import { EmojiPicker } from "./EmojiPicker.js";
 import { VoiceCallPanel } from "./VoiceCallPanel.js";
 import { useVoiceCall } from "../lib/voiceCall.js";
-import { buildToolBridge } from "../lib/mcp/index.js";
+import { capabilityRegistry } from "../lib/capability/index.js";
 import {
   buildConversationJson,
   buildConversationMarkdown,
   conversationFileName,
   type ExportMessage,
 } from "../lib/export/conversation.js";
-import { buildWikiToolBridge } from "../lib/wiki/tools.js";
 import { autoConnectAll } from "../lib/mcp/runtime.js";
-import {
-  SelfEditBudget,
-  SelfEditStore,
-  buildSelfToolBridge,
-} from "../lib/selfEdit/index.js";
-import { mergeToolBridges } from "../lib/selfEdit/merge.js";
+import { SelfEditBudget, SelfEditStore } from "../lib/selfEdit/index.js";
 import { createHitlGate, toHitlBatch } from "../lib/hitl/gate.js";
 import { HitlPolicyStore } from "../lib/hitl/policy.js";
 import { useHitlStore, type PendingConfirm } from "../store/hitl.js";
@@ -105,8 +99,6 @@ import { ToolApprovalModal } from "./ToolApprovalModal.js";
 import { appendToolAudit } from "../lib/hitl/audit.js";
 import type { HitlVerdict } from "../lib/hitl/types.js";
 import type { StorageLike } from "../lib/memory/types.js";
-import { buildChartToolBridge } from "../lib/charts/tools.js";
-import { buildToneToolBridge } from "../lib/tone/tools.js";
 import { extractCharts, stripChartFences } from "../lib/charts/spec.js";
 import { docFileBlock, isDocumentLike, parseDocument } from "../lib/docs/parse.js";
 import { ChatChart } from "./ChatChart.js";
@@ -1254,36 +1246,12 @@ export function ChatPage({
    * 抽成函数而不是内联在 deps 里：HITL 闸门也要按工具名查风险元数据，
    * 桥必须**是同一个**——查的不是实际执行者的桥 = 问错了人。
    */
-  const buildToolsFor = (agentId: string) => {
-    const mcpBridge = buildToolBridge();
-    const chartBridge = buildChartToolBridge();
-    // tone_detect：单个只读工具（算子定位 AI 痕迹，不改任何东西），
-    // 描述不长，默认注入。与 self.* 不同——后者是 13 个带写操作的长描述工具，
-    // 才需要用户显式开启才给。
-    const toneBridge = buildToneToolBridge();
-    // wiki_search / wiki_read：只读，默认注入；回答末尾的来源脚注由编排层拼。
-    const wikiBridge = buildWikiToolBridge();
-    if (!selfEditRef.current!.policy.configured(agentId)) {
-      // 没开过自我优化 → 只给 MCP、图表、去 AI 味与知识库工具，self.* 保持不注入
-      return mergeToolBridges(mcpBridge, chartBridge, toneBridge, wikiBridge);
-    }
-    return mergeToolBridges(
-      mcpBridge,
-      chartBridge,
-      toneBridge,
-      wikiBridge,
-      buildSelfToolBridge(
-        {
-          memory: memoryStore,
-          skills: skillPool,
-          mcp: mcpRegistry,
-          policy: selfEditRef.current!.policy,
-          budget: selfEditRef.current!.budget,
-        },
-        { agentId, conversationId: convId },
-      ),
-    );
-  };
+  const buildToolsFor = (agentId: string) =>
+    capabilityRegistry.build({
+      agentId,
+      conversationId: convId,
+      selfEdit: selfEditRef.current!,
+    });
 
   /**
    * 按工具名取风险元数据（闸门分类用）。

@@ -406,6 +406,14 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                       }`}
                     </span>
                   )}
+                  {server.origin === "plugin" && (
+                    <span
+                      className="rounded-full border border-line bg-[#f6f6f6] px-2 py-0.5 text-[10px] text-muted"
+                      title="随插件安装；停用或卸载插件时同步"
+                    >
+                      插件
+                    </span>
+                  )}
                   <span
                     className={`rounded-full px-2 py-0.5 text-[10px] ${
                       state === "ready"

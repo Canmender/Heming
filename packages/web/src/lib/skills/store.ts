@@ -104,6 +104,7 @@ function coerceSkill(raw: unknown, fallbackAt: string): SkillDefinition | null {
     builtin: r.builtin === true,
     version: typeof r.version === "string" && r.version ? r.version : "1.0.0",
     source,
+    pluginId: typeof r.pluginId === "string" && r.pluginId ? r.pluginId : undefined,
     createdAt: typeof r.createdAt === "string" ? r.createdAt : fallbackAt,
     updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : fallbackAt,
   };
@@ -166,6 +167,7 @@ export class SkillPool {
       builtin: false,
       version: input.version || "1.0.0",
       source: input.source ?? "user",
+      pluginId: input.pluginId,
       createdAt: at,
       updatedAt: at,
     };
@@ -246,13 +248,30 @@ export class SkillPool {
 
   /**
    * 该智能体已分配的技能 id（保持存储顺序，并过滤已被删除的技能）。
-   * 没有显式记录时返回全部内置技能 —— 新智能体开箱即可用内置技能，其余需手动添加。
+   * 没有显式记录时返回全部内置技能与插件技能 —— 新智能体开箱即可用，
+   * 手工新建/导入的技能仍需显式分配。
    */
   assigned(agentId: string): string[] {
     const known = new Set(this.data.skills.map((s) => s.id));
     const saved = this.assignmentMap[agentId];
     if (saved) return uniq(saved).filter((id) => known.has(id));
-    return this.data.skills.filter((s) => s.builtin).map((s) => s.id);
+    return this.data.skills
+      .filter((s) => s.builtin || Boolean(s.pluginId))
+      .map((s) => s.id);
+  }
+
+  /**
+   * 把技能追加到所有已有显式分配记录的智能体（无记录者走默认分配，无需处理）。
+   * 插件安装后调用：装完即可用，不必逐台手动分配。
+   */
+  assignToAllWithAssignments(skillIds: string[]): void {
+    const known = new Set(this.data.skills.map((s) => s.id));
+    const add = uniq(skillIds).filter((id) => known.has(id));
+    if (add.length === 0) return;
+    for (const agentId of Object.keys(this.assignmentMap)) {
+      this.assignmentMap[agentId] = uniq([...this.assignmentMap[agentId], ...add]);
+    }
+    this.saveAssignments();
   }
 
   /** 给智能体分配一个技能（幂等；已分配则原样返回）。 */
@@ -290,6 +309,10 @@ export class SkillPool {
     this.saveBindings();
   }
 
+  /**
+   * 路由：带 `agentId` 时只能命中**已分配**的技能（分配是真边界，不只是技能页展示）。
+   * 没有分配记录时 `assigned()` 回落到全部内置技能，开箱即用语义不变。
+   */
   route(input: {
     query: string;
     agentId?: string;
@@ -301,6 +324,7 @@ export class SkillPool {
         skills: this.data.skills,
         usage: this.data.usage,
         binding: input.agentId ? this.bindingMap[input.agentId] : undefined,
+        allowed: input.agentId ? this.assigned(input.agentId) : undefined,
       },
       {
         query: input.query,

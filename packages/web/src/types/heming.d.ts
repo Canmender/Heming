@@ -79,6 +79,37 @@ declare global {
       message: (payload: { title: string; body: string; conversationId?: string }) => void;
       onOpen: (cb: (conversationId: string | null) => void) => () => void;
     };
+    /**
+     * 内部：桌面端 InfoHub 本机桥（preload 暴露；浏览器里 undefined）。
+     *
+     * 归档数据只在本机：主进程用 stdio 拉起 Python 子进程，不开端口、不走网络。
+     * 浏览器端没有它，信息中枢页必须显示「仅桌面端可用」而不是回退到云端。
+     */
+    __heming_infohub?: {
+      info: () => Promise<{
+        packageDir: string;
+        defaultHome: string;
+        bundledPython: string | null;
+        running: boolean;
+        pid: number | null;
+        home: string | null;
+        python: string | null;
+        pythonSource: string | null;
+        startedAt: number;
+        methods: string[];
+        hello?: { app: string; version: string; protocol: number } | null;
+      }>;
+      start: (config?: { home?: string; python?: string }) => Promise<unknown>;
+      call: (
+        method: string,
+        params?: Record<string, unknown>,
+        config?: { home?: string; python?: string },
+      ) => Promise<unknown>;
+      stop: () => Promise<boolean>;
+      pickHome: () => Promise<string | null>;
+      pickPython: () => Promise<string | null>;
+      onEvent: (cb: (event: unknown) => void) => () => void;
+    };
     heming?: {
       /** 运行平台（process.platform），如 "win32" / "darwin"。 */
       platform?: string;

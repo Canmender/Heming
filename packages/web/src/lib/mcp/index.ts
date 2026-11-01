@@ -48,4 +48,5 @@ export type {
   McpTool,
   McpToolRef,
   McpTransport,
+  ServerOrigin,
 } from "./types.js";

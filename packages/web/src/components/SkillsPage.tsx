@@ -184,7 +184,9 @@ function SkillDetailDrawer({
           <div className="min-w-0">
             <h2 className="truncate text-[14px] font-extrabold">{skill.name}</h2>
             <div className={`mt-0.5 ${hintCls}`}>
-              {SOURCE_LABEL[skill.source]} · v{skill.version} · {skill.enabled ? "已启用" : "未启用"}
+              {SOURCE_LABEL[skill.source]} · v{skill.version}
+              {skill.pluginId ? ` · 插件 ${skill.pluginId}` : ""} ·{" "}
+              {skill.enabled ? "已启用" : "未启用"}
             </div>
           </div>
           <button type="button" onClick={onClose} className={btnGhostSm}>

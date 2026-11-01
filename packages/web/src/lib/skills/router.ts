@@ -86,6 +86,12 @@ export interface RouteContext {
   skills: SkillDefinition[];
   usage?: Record<string, SkillUsage>;
   binding?: SkillBinding;
+  /**
+   * 该智能体**已分配**的技能 id（技能页的分配是真边界，不只是展示）。
+   * 缺省表示不限制——纯池路由（单测/预览）仍可对全量打分。
+   * 置顶不能绕过它：`pinned` 只是排序偏好，不是授权。
+   */
+  allowed?: ReadonlySet<string> | readonly string[];
 }
 
 export interface RouteInput {
@@ -99,9 +105,10 @@ export function routeSkills(ctx: RouteContext, input: RouteInput): SkillMatch[] 
   const charBudget = input.charBudget ?? DEFAULT_ROUTE_BUDGET;
   const disabled = new Set(ctx.binding?.disabled ?? []);
   const pinnedIds = ctx.binding?.pinned ?? [];
+  const allowed = ctx.allowed ? new Set(ctx.allowed) : null;
 
   const docs = ctx.skills
-    .filter((s) => s.enabled && !disabled.has(s.id))
+    .filter((s) => s.enabled && !disabled.has(s.id) && (!allowed || allowed.has(s.id)))
     .map((s) => buildDoc(s));
   if (docs.length === 0) return [];
 

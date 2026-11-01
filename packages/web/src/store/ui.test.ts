@@ -96,9 +96,11 @@ describe("ui store 导航顺序", () => {
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
       "conversations",
+      "infohub",
       "workspace",
       "tasks",
       "skills",
+      "plugins",
       "interfaces",
       "memory",
       "archive",
@@ -108,9 +110,9 @@ describe("ui store 导航顺序", () => {
 
   it("moveNav 上移/下移生效并落盘", () => {
     useUiStore.getState().moveNav("memory", -1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(5);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(7);
     useUiStore.getState().moveNav("memory", 1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(6);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(8);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
       useUiStore.getState().navOrder,
     );
@@ -138,9 +140,11 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "memory",
       "home",
       "conversations",
+      "infohub",
       "workspace",
       "tasks",
       "skills",
+      "plugins",
       "interfaces",
       "archive",
       "settings",
@@ -154,9 +158,11 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "settings",
       "home",
       "conversations",
+      "infohub",
       "workspace",
       "tasks",
       "skills",
+      "plugins",
       "interfaces",
       "memory",
       "archive",

@@ -55,6 +55,9 @@ export function sourceFooter(sources: ToolSource[]): string {
   return `\n\n---\n来源（来自本机知识库）：\n${uniq.map(line).join("\n")}`;
 }
 
+/** 工具来源分类：展示与归属用，**不参与** HITL 风险判定。 */
+export type ToolOrigin = "mcp" | "builtin" | "self" | "plugin";
+
 /** 工具桥：把「给模型的工具声明」与「执行一次调用」交给编排层（本模块不认识 MCP）。 */
 export interface ToolBridge {
   /** OpenAI 格式的 tools 数组；空数组 = 本轮没有可用工具。 */
@@ -70,7 +73,13 @@ export interface ToolBridge {
    * 缺省按 `risk=write` 处理——**这是安全默认**：认不出来的工具宁可多问一次，
    * 也不要把一个没见过的工具当成只读放过去。
    */
-  meta?: (name: string) => { risk?: RiskLevel; displayName?: string } | undefined;
+  meta?: (name: string) => {
+    risk?: RiskLevel;
+    displayName?: string;
+    /** 来源与提供者 id 由能力注册表统一补齐（见 lib/capability）。 */
+    origin?: ToolOrigin;
+    providerId?: string;
+  } | undefined;
 }
 
 export interface TriggerDeps {

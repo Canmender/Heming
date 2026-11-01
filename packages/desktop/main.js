@@ -1,6 +1,7 @@
 "use strict";
 const { app, BrowserWindow, Menu, dialog, shell, screen, ipcMain, Notification, protocol, net } = require("electron");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { loadWindowState, saveWindowState } = require("./window-state");
 const { shouldShowSplash, splashWindowOptions } = require("./splash-config");
@@ -9,6 +10,7 @@ const { resolveRequest, contentTypeFor, INDEX_FILE } = require("./app-protocol")
 const { isCallWindowUrl, callWindowOptions } = require("./call-window");
 const { appVersion } = require("./app-version");
 const { buildChildEnv, createStdioBridge } = require("./mcp-stdio");
+const { bundledPython } = require("./bundled-runtime");
 const { planStdioSpawn, probeLocalRuntime } = require("./local-runtime");
 
 const pkg = require("./package.json");
@@ -19,6 +21,8 @@ const { registerChartIpc } = require("./chart-fs");
 const { registerExportIpc } = require("./export-fs");
 const { registerSecretIpc } = require("./secret-store");
 const { registerNotifyIpc } = require("./notify-bridge");
+const { createInfohubBridge, registerInfohubIpc, resolveDefaultHome, resolveInfohubPackageDir } =
+  require("./infohub-bridge");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
 
 // Windows 系统通知要求进程 AUMID 与安装快捷方式一致（electron-builder 使用 build.appId）。
@@ -380,6 +384,12 @@ if (!gotLock) {
     planSpawn: planStdioSpawn,
   });
 
+  // —— InfoHub 本机进程桥（d.45 信息中枢）——
+  // 归档数据只留在本机：主进程用 stdio 拉起 Python 桥，不开端口、不走网络。
+  // 打包后 Python 包在 resources/infohub；开发态直接用 packages/infohub。
+  // 解释器默认用内置运行时（浏览/检索只需标准库）；采集依赖缺失时界面会提示改路径。
+  let infohubBridge = null;
+
   /** 首次用到某服务时先握手（initialize → notifications/initialized）。 */
   const ensureStdioReady = async (serverId, config) => {
     if (mcpStdio.running().includes(serverId)) return true;
@@ -407,6 +417,12 @@ if (!gotLock) {
 
   ipcMain.handle("mcp:stdio:stop", (_event, serverId) => mcpStdio.stop(String(serverId)));
 
+  // sandbox 的 preload 读不到本地 app-version.js，版本号改由这里同步提供。
+  // 必须在 createWindow() 之前注册：preload 顶层就会 sendSync 取一次。
+  ipcMain.on("app:version", (event) => {
+    event.returnValue = appVersion();
+  });
+
   // —— 本机运行时探测（d.25 本地包安装）——
   // Registry 的 npm / pypi 服务要在用户机器上拉起 npx / uvx。装之前必须先知道
   // 「这台机器跑不跑得起来」，否则用户只会在连接阶段看到一条莫名其妙的失败。
@@ -417,7 +433,10 @@ if (!gotLock) {
     probeLocalRuntime({ env: buildChildEnv({ ...process.env }), execPath: process.execPath }),
   );
 
-  app.on("will-quit", () => mcpStdio.disposeAll());
+  app.on("will-quit", () => {
+    mcpStdio.disposeAll();
+    infohubBridge?.dispose();
+  });
 
   /* ------------------------------------------------------- 自动更新 */
 
@@ -586,6 +605,29 @@ app.whenReady().then(() => {
       getMainWindow: () => mainWindow,
       // 任一应用窗口在前台（含独立通话窗口）就不弹系统通知。
       getFocusedWindow: () => BrowserWindow.getFocusedWindow(),
+    });
+    // 信息中枢（d.45）：IPC 只在本机进程桥之上转发，不直接暴露文件系统。
+    // 进度事件广播给所有窗口：采集可能在看别的页面时进行，回到页面即见最新阶段。
+    infohubBridge = createInfohubBridge({
+      spawn: require("node:child_process").spawn,
+      log: (line) => console.log(line),
+      packageDir: resolveInfohubPackageDir({
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        dirname: __dirname,
+      }),
+      defaultHome: resolveDefaultHome(path.join(os.homedir(), "Heming")),
+      bundledPythonPath: bundledPython(),
+    });
+    infohubBridge.onEvent((event) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send("infohub:event", event);
+      }
+    });
+    registerInfohubIpc(ipcMain, {
+      bridge: infohubBridge,
+      dialog,
+      windowFromEvent: (event) => BrowserWindow.fromWebContents(event.sender),
     });
     createWindow();
     app.on("activate", () => {

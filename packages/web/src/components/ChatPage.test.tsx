@@ -4038,6 +4038,8 @@ describe("ChatPage", () => {
       enabled: true,
       version: "1.0.0",
     });
+    // d.41 起分配是真路由边界：自建技能要先分配给该智能体才会注入。
+    skillPool.assign("system-assistant", skill.id);
     const usage = vi.spyOn(skillPool, "recordUsage");
 
     let seen: Parameters<typeof streamChat>[1] | undefined;

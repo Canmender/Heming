@@ -21,6 +21,8 @@ export interface SkillDefinition {
    * 与技能区的分组一一对应，见 SkillsPage.categorizeSkill。
    */
   source: "builtin" | "user" | "imported" | "distilled";
+  /** 插件归属：由 `plugin.json` 安装的技能带插件 id，卸载/停用按此归组。 */
+  pluginId?: string;
   createdAt: string;
   updatedAt: string;
 }

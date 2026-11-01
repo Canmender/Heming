@@ -8,9 +8,11 @@ import {
   GearIcon,
   UserIcon,
   SkillsIcon,
+  PackageIcon,
   TaskIcon,
   SearchIcon,
   SessionsIcon,
+  InfoHubIcon,
 } from "./icons.js";
 import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -22,14 +24,18 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
  * 而 digit 固定绑定页本身——所以排序后 Alt+N 快捷键不变。
  */
-const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit: string }[] = [
+const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }[] = [
   { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
   // 会话中心是新页，拿 9（老页编号不动，见设置区的注释）
   { page: "conversations", label: "会话", icon: <SessionsIcon width={17} height={17} />, digit: "9" },
+  // 信息中枢（d.45）：1–9/0 已排满，新页不再占用快捷键，只从导航点开
+  { page: "infohub", label: "信息中枢", icon: <InfoHubIcon width={17} height={17} /> },
   { page: "workspace", label: "工作区", icon: <ChatIcon width={17} height={17} />, digit: "2" },
   // 任务区是新页，拿 8（老页编号不动，见设置区的注释）
   { page: "tasks", label: "任务区", icon: <TaskIcon width={17} height={17} />, digit: "8" },
   { page: "skills", label: "技能区", icon: <SkillsIcon width={17} height={17} />, digit: "3" },
+  // 插件区是新页，拿 0（老页编号不动）；1–9 之外只剩这个键位空着
+  { page: "plugins", label: "插件区", icon: <PackageIcon width={17} height={17} />, digit: "0" },
   { page: "interfaces", label: "接口区", icon: <PlugIcon width={17} height={17} />, digit: "4" },
   { page: "memory", label: "记忆区", icon: <MemoryIcon width={17} height={17} />, digit: "5" },
   // 归档是新页，拿 7；设置区保持 6 不动——digit 绑定页面不随显示顺序变，
@@ -89,14 +95,14 @@ export function NavRail({ onOpenSearch }: { onOpenSearch?: () => void } = {}) {
           .filter((it): it is (typeof ITEMS)[number] => Boolean(it))
           .map((it) => {
           const active = page === it.page || (it.page === "workspace" && page === "chat");
-          const shortcut = `Alt${it.digit}`;
+          const shortcut = it.digit ? `Alt${it.digit}` : "";
           // 工作区按钮承载全局未读角标：>0 时 aria-label 追加「N 条未读」
           const showUnread = it.page === "workspace" && unread > 0;
           return (
             <div key={it.page} className="group relative">
               <button
                 type="button"
-                aria-label={`${it.label} ${shortcut}${showUnread ? ` ${unread} 条未读` : ""}`}
+                aria-label={`${it.label}${shortcut ? ` ${shortcut}` : ""}${showUnread ? ` ${unread} 条未读` : ""}`}
                 aria-current={active ? "page" : undefined}
                 onClick={() => setPage(it.page)}
                 className={`relative flex h-[34px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
@@ -110,7 +116,7 @@ export function NavRail({ onOpenSearch }: { onOpenSearch?: () => void } = {}) {
                   </span>
                 )}
               </button>
-              <Tip label={it.label} shortcut={shortcut} />
+              <Tip label={it.label} shortcut={shortcut || undefined} />
             </div>
           );
         })}

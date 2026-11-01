@@ -248,6 +248,21 @@ describe("注册表（服务 + 工具 + 启用开关）", () => {
     expect(s.registryVersion).toBeUndefined();
   });
 
+  it("插件来源的服务重启后仍标记为 plugin", () => {
+    const storage = memStorage();
+    const reg = new McpRegistry(storage);
+    const server = reg.add({
+      id: "plugin:acme.weather:weather",
+      name: "天气服务",
+      transport: "http",
+      url: "https://example.test/mcp",
+      origin: "plugin",
+    });
+
+    const again = new McpRegistry(storage);
+    expect(again.get(server.id)?.origin).toBe("plugin");
+  });
+
   it("服务配置走 secure 层：servers 键是信封、tools 键是普通 JSON，重开能解回请求头", () => {
     (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
       available: true,

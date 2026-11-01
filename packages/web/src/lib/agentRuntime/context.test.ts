@@ -28,7 +28,7 @@ function emptySkills(): SkillPool {
 }
 
 function addCodeReview(pool: SkillPool) {
-  return pool.create({
+  const skill = pool.create({
     name: "代码审查",
     description: "对代码变更做缺陷与可维护性审查",
     instructions: "先读变更意图，再逐处检查边界、并发与错误处理。",
@@ -37,6 +37,9 @@ function addCodeReview(pool: SkillPool) {
     enabled: true,
     version: "1.0.0",
   });
+  // d.41 起分配是真路由边界：自定义技能要先分配给该智能体，才会被注入。
+  pool.assign("a1", skill.id);
+  return skill;
 }
 
 const EMPTY_RECALLED = { semantic: [], episodic: [], working: [] };

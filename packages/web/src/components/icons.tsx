@@ -43,6 +43,16 @@ export const ArchiveIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M10 12h4" />
   </svg>
 );
+/** 信息中枢：本地归档库（三层圆盘）+ 一个小节点，区别于「归档」的收纳盒。 */
+export const InfoHubIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <ellipse cx="10" cy="6" rx="6" ry="2.5" />
+    <path d="M4 6v5c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V6" />
+    <path d="M4 11v5c0 1.4 2.7 2.5 6 2.5" />
+    <circle cx="18" cy="17" r="2.5" />
+    <path d="M16 15.5 12.5 13" />
+  </svg>
+);
 export const GearIcon = (p: SVGProps<SVGSVGElement>) => (  <svg {...base(p)}>
     <circle cx="12" cy="12" r="3" />
     <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z" />
@@ -169,6 +179,16 @@ export const SkillsIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M4 8.5 10.5 5 17 8.5v7L10.5 19 4 15.5z" />
     <path d="M10.5 12v7" />
     <path d="M4 8.5 10.5 12 17 8.5" />
+  </svg>
+);
+
+/** 插件区：打开的包裹箱——一个可整包装入/取出的能力包。 */
+export const PackageIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M21 8.5 12 4 3 8.5v7L12 20l9-4.5z" />
+    <path d="M3 8.5 12 13l9-4.5" />
+    <path d="M12 13v7" />
+    <path d="M7.5 6.2l4.5 2.3 4.5-2.3" />
   </svg>
 );
 

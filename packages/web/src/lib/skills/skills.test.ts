@@ -287,6 +287,35 @@ describe("技能池 · 路由", () => {
     );
   });
 
+  it("未分配的自定义技能不进入路由（分配是真边界）", () => {
+    const { pool } = freshPool();
+    const custom = createSkill(pool, "翻译助手", { triggers: ["翻译"], tags: ["语言"] });
+    // 没有分配记录 → 默认只有内置技能
+    expect(pool.route({ query: "翻译", agentId: "agent-a" }).map((m) => m.skill.id)).not.toContain(
+      custom.id,
+    );
+
+    pool.assign("agent-a", custom.id);
+    expect(pool.route({ query: "翻译", agentId: "agent-a" }).map((m) => m.skill.id)).toContain(
+      custom.id,
+    );
+  });
+
+  it("置顶不能绕过分配（pinned 只是排序偏好，不是授权）", () => {
+    const { pool } = freshPool();
+    const custom = createSkill(pool, "翻译助手", { triggers: ["翻译"] });
+    pool.setBinding("agent-a", { pinned: [custom.id] });
+    expect(pool.route({ query: "", agentId: "agent-a" }).map((m) => m.skill.id)).not.toContain(
+      custom.id,
+    );
+  });
+
+  it("无 agentId 的纯池路由不受分配限制（预览/单测口径）", () => {
+    const { pool } = freshPool();
+    const custom = createSkill(pool, "翻译助手", { triggers: ["翻译"] });
+    expect(pool.route({ query: "翻译" }).map((m) => m.skill.id)).toContain(custom.id);
+  });
+
   it("topK 限制普通命中数量（默认 top3）", () => {
     const { pool } = freshPool();
     for (let i = 0; i < 5; i += 1) {
@@ -326,6 +355,7 @@ describe("技能池 · 路由", () => {
       instructions: "长".repeat(2000),
       triggers: ["置顶测试"],
     });
+    pool.assign("agent-a", pinned.id);
     pool.setBinding("agent-a", { pinned: [pinned.id] });
     const matches = pool.route({ query: "置顶测试", agentId: "agent-a", charBudget: 300 });
     expect(matches).toHaveLength(1);
@@ -596,5 +626,43 @@ describe("SkillPool 按智能体分配技能", () => {
     pool.assign("a1", custom.id);
     pool.remove(custom.id);
     expect(pool.assigned("a1")).not.toContain(custom.id);
+  });
+
+  it("插件技能进入默认分配，并可追加到已有显式分配记录", () => {
+    const { pool } = freshPool();
+    const first = pool.create({
+      name: "插件技能一",
+      description: "",
+      instructions: "x",
+      triggers: [],
+      tags: [],
+      enabled: true,
+      version: "1.0.0",
+      source: "imported",
+      pluginId: "acme.demo",
+    });
+    expect(pool.assigned("a1")).toContain(first.id);
+
+    // 显式分配一旦存在就不再走默认集合，安装新插件技能要显式追加
+    const custom = createSkill(pool, "自定义技能");
+    pool.assign("a1", custom.id);
+    const second = pool.create({
+      name: "插件技能二",
+      description: "",
+      instructions: "y",
+      triggers: [],
+      tags: [],
+      enabled: true,
+      version: "1.0.0",
+      source: "imported",
+      pluginId: "acme.demo",
+    });
+    expect(pool.assigned("a1")).not.toContain(second.id);
+
+    pool.assignToAllWithAssignments([second.id]);
+    expect(pool.assigned("a1")).toContain(second.id);
+    // 没有显式记录的智能体仍由默认集合覆盖
+    expect(pool.assigned("a2")).toContain(second.id);
+    expect(pool.assigned("a2")).not.toContain(custom.id);
   });
 });

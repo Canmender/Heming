@@ -99,6 +99,19 @@ describe("InterfacesPage", () => {
     expect(screen.getByRole("region", { name: "MCP 服务 已存在的服务" })).toBeInTheDocument();
   });
 
+  it("插件来源的服务显示「插件」徽标", () => {
+    registry.add({
+      id: "plugin:acme.weather:weather",
+      name: "天气服务",
+      transport: "http",
+      url: "https://mcp.example.com/weather",
+      origin: "plugin",
+    });
+    render(<InterfacesPage registry={registry} />);
+    const card = screen.getByRole("region", { name: "MCP 服务 天气服务" });
+    expect(within(card).getByText("插件")).toBeInTheDocument();
+  });
+
   it("一条服务都没有时才显示引导文案（删光后的状态）", () => {
     const empty = new McpRegistry(memStorage(), () => new Date().toISOString());
     // 把预置清掉，构造真正的零服务状态

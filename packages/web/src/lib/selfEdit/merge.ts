@@ -45,8 +45,8 @@ export function mergeToolBridges(...bridges: (ToolBridge | null)[]): ToolBridge 
   };
 }
 
-/** 该桥的 tools 列表里是否含这个名字。 */
-function listsName(bridge: ToolBridge, name: string): boolean {
+/** 该桥的 tools 列表里是否含这个名字（能力注册表复用同一判据）。 */
+export function listsName(bridge: ToolBridge, name: string): boolean {
   return bridge.tools.some((t) => {
     const fn = (t as { function?: { name?: string } }).function;
     return fn?.name === name;
