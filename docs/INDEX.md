@@ -50,6 +50,8 @@
 | [specs/2026-10-22-atomic-image-send.md](superpowers/specs/2026-10-22-atomic-image-send.md) | 图片 + 文字同发：本轮附件走当前 user 轮，不依赖历史回声 |
 | [specs/2026-10-22-modal-inert-and-workspace-state.md](superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md) | 弹窗屏蔽背景（无 portal 下的兄弟屏蔽 + 引用计数）、焦点归还、工作区首帧加载/失败态 |
 | [superpowers/2026-10-18-agent-handoff.md](superpowers/2026-10-18-agent-handoff.md) | 智能体批次交接（键名、常量、边界） |
+| [specs/2026-11-02-d53-file-edit-primitive.md](superpowers/specs/2026-11-02-d53-file-edit-primitive.md) | 文件编辑原语 `file_patch`：上下文锚点补丁、可写根与路径收敛、三态安全判定、规则升级为路径前缀（**规格，未开工**） |
+| [specs/2026-11-02-d54-rollout-recovery-fork.md](superpowers/specs/2026-11-02-d54-rollout-recovery-fork.md) | 回合日志的回放/重跑/分叉：三个动作的边界、为什么不做断点续跑、`seq` 与配对校验、分叉前置条件（**规格，未开工**） |
 
 ### 桌面端
 
@@ -115,6 +117,7 @@
 | [research/2026-10-21-all-feature-gap-audit.md](research/2026-10-21-all-feature-gap-audit.md) | 全功能缺口审计：d.24 已落地 10 项 + 暂缓项的 d.25 处置（8 项已补做，附未做部分与理由） |
 | [research/2026-10-22-deep-audit-followup-plan.md](research/2026-10-22-deep-audit-followup-plan.md) | 深度调研与后续完善计划：P0 红线口子 / P1 数据一致性 / P2 体感 / P3 功能 / P4 工程，逐条带 `file:line` 证据与 d.30… 分轮排期 |
 | [research/2026-10-28-ai-im-ux-pain-points.md](research/2026-10-28-ai-im-ux-pain-points.md) | AI 工作台 / IM 体验痛点：后台失联、系统通知、会话列表、免打扰、全局搜索、presence、托盘（P0–P3，附本仓证据；d.39 取 P0 两项 + 免打扰） |
+| [research/2026-11-01-codex-vs-heming-agent.md](research/2026-11-01-codex-vs-heming-agent.md) | Codex 全量对比：15 维能力矩阵、六个缺口与逐条改法、可移植资产清单（Apache-2.0）、P0/P1/P2 路线；G1–G6 已于 d.50–d.52 落地 |
 
 ## 5. 历史计划
 
