@@ -89,38 +89,66 @@
 **克制原则**：`PET_POSES` 里只有「开心」配了进入动作。桌宠常驻桌面，
 每种状态都播一次动作很快会变成噪音；其余状态交给角标、口型、输入框这些视觉元素表达。
 
-### 4.3 让桌宠对平台事件做出反应（**已预留，暂无生产者**）
-
-通道已经打通，只差发送方：
+### 4.3 让桌宠对平台事件做出反应（**已接线：任务收尾 / 日程临期 / 幕僚简报**）
 
 ```
-主进程 petHost.pushEvent(payload)        // 主进程内部直接推
-   或 主窗口 window.__heming_pet.emit(payload)   // 主窗口发起，主进程校验来源后转发
+主进程 petHost.pushEvent(payload)             // 主进程内部直接推（不做 gating）
+   或 主窗口 window.__heming_pet.emit(payload) // 主窗口发起，主进程校验来源后转发
         ↓  IPC: pet:event
-桌宠 window.__heming_pet.onEvent(cb)     // PetWindow 已订阅并消费
+桌宠 window.__heming_pet.onEvent(cb)          // PetWindow 已订阅并消费
 ```
 
-事件契约在 `lib/petEvent.ts`，支持五种：
+事件契约在 `lib/petEvent.ts`，支持五种（`speak`/`task`/`schedule` 可带 `route` 用于点击直达）：
 
-| kind | 效果 | 典型来源 |
+| kind | 效果 | 现在的来源 |
 |---|---|---|
-| `pose` | 覆盖当前姿态（发送方负责用 `reset` 收尾） | 幕僚开始总结 |
-| `speak` | 气泡显示一句话，8 秒收回 | 晨报摘要 |
-| `task` | 「完成了：xxx / 没成功：xxx」 | 任务区收尾（d.51） |
-| `schedule` | 「19:00 晚自习」 | 日程临期（d.48） |
-| `reset` | 清掉外部姿态与文案 | 任何主动表达结束时 |
+| `pose` | 覆盖当前姿态 4 秒（显式表达，发送方负责语义） | 预留（暂无生产者） |
+| `speak` | 气泡显示一句话，**4 秒**收回 | 幕僚简报（无临期日程时） |
+| `task` | 「完成了：xxx / 没成功：xxx」 | 任务收尾（`ChatPage` 的 `onRunSettled` 与任务区落库，均经通知中心） |
+| `schedule` | 「19:00 晚自习」 | 日程临期（幕僚巡检触发、信息中枢议程里最紧急的一条） |
+| `reset` | 清掉外部姿态与文案 | 预留（事件自带过期，一般不需要） |
 
-**接入示例**（在任务收尾处）：
+**生产者怎么接的（零侵入）**：不改造任务/幕僚/信息中枢的代码。`lib/petEvent.ts` 的
+`startPetPresence()` 在 App 挂载时订阅**通知中心新增条目**，把「已经决定要让用户知道」的通知
+派生为桌宠事件：
+- `kind:"task"` 通知 → 剥掉「已完成 / 执行失败 / 已中断」后缀，只留任务标题；
+- `kind:"staff"` 通知 → 若有临期日程（复用 `staff/model.agendaBucket` 的 24h 判据）给
+  `schedule`（标题 + `HH:MM`），否则给 `speak`（「幕僚简报：<summary 截断>」）。
 
-```ts
-// 主窗口侧
-window.__heming_pet?.emit({ kind: "task", title: task.title, ok: task.status === "done" });
-```
+**谁来决定该不该开口（渠道互斥，单一判据）**：
+1. 主窗口在前台（`document.hasFocus()` + 可见）→ 只进通知中心，桌宠不冒泡（主进程 `pet:emit`
+   还会再用 `main.isFocused()` 判一次，跨进程边界不信任调用方）；
+2. 主窗口不在前台 → 桌宠冒泡；桌宠隐藏时事件**直接丢弃，不排队、不补发**；
+3. 同一事件 10 分钟内只冒泡一次，10 分钟内最多 3 次（批量任务收尾不刷屏）。
 
-注意三条现成约束：
-- payload 跨进程**一律不可信**，消费端已用 `parsePetEvent` 校验，畸形事件静默忽略；
-- 通道**单向**（主进程 → 桌宠）。桌宠要主窗口做事，走 `pet:open-conversation` / `pet:open-settings`；
-- 姿态不自动过期——发送方必须发 `reset` 或下一条 `pose`，因为只有它知道这条信息该显示多久。
+**三档打扰强度**（设置区 → 外观 → 桌宠 → 打扰强度，存 `heming.pet.presence.v1`，默认正常）：
+
+| 档位 | 行为 |
+|---|---|
+| 安静 | 只换姿态（成功=开心/失败与日程=提醒/简报=说话），不冒泡 |
+| 正常（默认） | 只冒泡 4 秒后收回，不动姿态 |
+| 积极 | 姿态 + 气泡；成功任务的「开心」会顺带播一次 TapBody（唯一带进入动作的姿态） |
+
+**点击气泡直达**：气泡带 `route` 时点击/回车会复用既有 `pet:open-settings` 通道并带 page，
+主进程白名单归一（settings/team/tasks/staff/infohub）后转给主窗口，App 按 page 切页。
+
+**边界**：payload 跨进程一律不可信，消费端先用 `parsePetEvent` 校验（畸形静默忽略）；
+气泡只带「类型 + 标题级信息」（任务标题 / 简报摘要 ≤60 字 / 日程标题+时刻），**不带结果正文、
+工具参数、会话名或发送人**；桌宠不写会话、不进消息列表、不落 msgCache；错过不补发。
+
+**包体口径（改依赖前后的必看项，别把这些预载当冗余删掉）**：
+
+- `lib/petEvent.ts` 是**桌宠事件协议层**，必须保持轻：它只该依赖纯数据/协议小模块
+  （`petPose`、`agendaBucket`、通知 store），**不要依赖幕僚/任务/信息中枢的业务模型**
+  （30KB 的 `staff/model` 曾把这块拖到 261KB raw / 82.8KB gzip）。
+- 测量方法：`pnpm --filter @heming/web exec vite build` 后看 `dist/assets/petEvent-*.js`；
+  gzip 用 **level 9** 实测（`zlib.gzipSync(buf, { level: 9 })`），不要只看 raw。
+  **2026-11 基准**：抽 `lib/agendaBucket.ts` 之后 261KB raw / 82.8KB gzip →
+  **6.5KB raw / 2.7KB gzip**（gzip −96.7%）。
+- **`pet.html` 预载 `petEvent` 是必须的**：桌宠窗口要解析事件；不要当冗余模块删掉或改懒加载。
+- **`index.html` 侧不预载**靠 App 启动后 `import()` 动态加载 `startPetPresence`；
+  不要把这条 import 改回顶层静态导入（改回去协议层会重新回到首屏预载）。
+- 想看真实预载列表就直接读 `dist/index.html` / `dist/pet.html` 的 `modulepreload` 行。
 
 ### 4.4 接语音
 

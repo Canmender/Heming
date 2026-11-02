@@ -17,6 +17,7 @@ const {
   petWindowSize,
   nextScale,
   normalizeScale,
+  normalizePetPage,
   draggedPosition,
   defaultPetPosition,
   petUrl,
@@ -361,6 +362,50 @@ function createPetHost(deps) {
     };
   }
 
+  /**
+   * 主窗口此刻是否在前台（用户能不能看到它）。
+   *
+   * 渠道互斥的**权威判据**：主窗口在前台时，平台事件已经在通知中心里，
+   * 桌宠不再开口（否则同一个事件会被说两遍）。渲染层也会用 `document.hasFocus()`
+   * 做同样判断以省一次 IPC；这里再判一次是跨进程边界不信任调用方。
+   */
+  function mainWindowForeground() {
+    const main = getMainWindow && getMainWindow();
+    if (!main || main.isDestroyed()) return false;
+    try {
+      return main.isVisible() === true && main.isMinimized() !== true && main.isFocused() === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 桌宠此刻是否真的在桌面上（隐藏/未创建 → 事件直接丢弃，**错过不补发**）。 */
+  function petVisible() {
+    if (!win || win.isDestroyed()) return false;
+    if (!state.visible) return false;
+    try {
+      return win.isVisible() === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 主窗口发起的事件 → 桌宠（带 gating）。
+   *
+   * 返回判定结果字符串，便于测试与日志：
+   * - `invalid`：载荷形状不对（连 kind 都没有），丢弃；
+   * - `suppressed-foreground`：主窗口在前台 → 只走通知中心，桌宠不说话；
+   * - `pet-hidden`：桌宠没显示 → 丢弃（不排队、不补发）；
+   * - `delivered` / `failed`：转发结果。
+   */
+  function deliverEventFromMain(payload) {
+    if (!payload || typeof payload !== "object" || typeof payload.kind !== "string") return "invalid";
+    if (mainWindowForeground()) return "suppressed-foreground";
+    if (!petVisible()) return "pet-hidden";
+    return pushEvent(payload) ? "delivered" : "failed";
+  }
+
   function registerIpc() {
     ipcMain.handle("pet:state", () => statePayload());
     ipcMain.handle("pet:set-scale", (event, payload) => {
@@ -404,10 +449,10 @@ function createPetHost(deps) {
     /**
      * 推送事件给桌宠（主进程 → 渲染进程）。
      *
-     * 这是**唯一**的反向通道：桌宠此前只能自己感知（WS），无法接收平台侧发生的事
-     * （任务收尾、日程临期、幕僚简报）。第三期这些都走这一条，不必再开新 IPC。
-     * 目前只有测试与「主窗口主动发起」在用，属于**显式预留**，不是死代码：
+     * 这是**唯一**的反向通道：任务收尾、日程临期、幕僚简报都走这一条，
      * 契约见 `packages/web/src/lib/petEvent.ts` 的 PetEventPayload。
+     * 主进程内部可直接 pushEvent（不做 gating）；主窗口发起的走 `deliverEventFromMain`
+     * （渠道互斥 + 桌宠隐藏时不补发）。
      */
     pushEvent = (payload) => {
       if (!win || win.isDestroyed()) return false;
@@ -420,20 +465,34 @@ function createPetHost(deps) {
       }
     };
 
-    // 主窗口也可以发起（例如未来的「把这条简报交给桌宠说」）；只认主窗口与桌宠窗口
+    // 主窗口也可以发起（例如「把这条简报交给桌宠说」）；只认主窗口与桌宠窗口。
+    // ★ 主窗口发起时先过渠道互斥：前台时只走通知中心，桌宠隐藏时丢弃（错过不补发）。
     ipcMain.on("pet:emit", (event, payload) => {
-      if (!fromPetWindow(event) && !fromMainWindow(event)) return;
-      pushEvent(payload);
+      if (fromPetWindow(event)) {
+        pushEvent(payload);
+        return;
+      }
+      if (!fromMainWindow(event)) return;
+      deliverEventFromMain(payload);
     });
 
-    ipcMain.on("pet:open-settings", (event) => {
+    /**
+     * 桌宠点气泡 → 主窗口直达对应页面。
+     *
+     * 复用既有通道名（不新增 IPC），载荷从「无参」升级为可选 page：
+     * page 经白名单归一化后原样转给主窗口（**字符串**，与 preload 的
+     * `onOpenSettings(cb: (page?: string) => void)` 口径一致）；旧调用/非法 page 转发 undefined，
+     * 主窗口按「打开设置」处理。
+     */
+    ipcMain.on("pet:open-settings", (event, payload) => {
       if (!fromPetWindow(event)) return;
+      const page = normalizePetPage(payload);
       const main = getMainWindow && getMainWindow();
       if (main && !main.isDestroyed()) {
         if (main.isMinimized()) main.restore();
         main.show();
         main.focus();
-        main.webContents.send("pet:open-settings");
+        main.webContents.send("pet:open-settings", page ?? undefined);
       }
     });
   }
@@ -515,6 +574,8 @@ function createPetHost(deps) {
     setInteractive,
     /** 反向通道：向桌宠推送事件（主进程 → 渲染）。见上方 pushEvent 的说明。 */
     pushEvent: (payload) => pushEvent(payload),
+    /** 主窗口发起的事件入口（带渠道互斥 / 隐藏丢弃）；返回判定字符串便于测试与诊断。 */
+    deliverEventFromMain: (payload) => deliverEventFromMain(payload),
     refreshTrayMenu,
     get window() {
       return win;

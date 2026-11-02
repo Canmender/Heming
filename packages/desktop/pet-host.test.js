@@ -40,6 +40,7 @@ function makeFakeElectron() {
     showInactive() { this._visible = true; this._inactiveShown = true; }
     hide() { this._visible = false; }
     focus() { this._focused = true; }
+    isFocused() { return this._focused === true; }
     restore() {}
     destroy() { this._destroyed = true; this._visible = false; }
     setIgnoreMouseEvents(v, o) { this._ignoreMouse = { v, o }; }
@@ -419,4 +420,119 @@ test("pushEvent：窗口销毁后返回 false", () => {
   host.show();
   host.destroy();
   assert.equal(host.pushEvent({ kind: "reset" }), false);
+});
+
+/* ────────────────────── 在场感：渠道互斥 / 错过不补发 / 来源校验 ────────────────────── */
+
+/** 带「主窗口」的宿主：渠道互斥要同时看主窗口状态与桌宠可见性。 */
+function makeHostWithMain() {
+  const fake = makeFakeElectron();
+  const mainWin = new fake.FakeBrowserWindow({ x: 0, y: 0, width: 800, height: 600 });
+  const host = createPetHost({
+    ...fake.electron,
+    app: { quit() {} },
+    stateFile: "/tmp/pet-state.json",
+    preloadPath: "/tmp/preload.js",
+    trayIconPath: "/tmp/pet-tray.png",
+    resolveAppUrl: () => "app://heming/index.html",
+    getMainWindow: () => mainWin,
+    readState: () => ({ visible: true }),
+    writeState: () => {},
+    log: () => {},
+    setTimeout: (fn) => {
+      fn();
+      return 1;
+    },
+    clearTimeout: () => {},
+  });
+  host.start();
+  const petWin = fake.created.find((w) => w !== mainWin);
+  const petEvents = () => petWin.webContents._sent.filter((m) => m.ch === "pet:event");
+  return { host, fake, mainWin, petWin, petEvents };
+}
+
+test("渠道互斥：主窗口在前台 → 事件被抑制，桌宠不冒泡", () => {
+  const { host, mainWin, petEvents } = makeHostWithMain();
+  mainWin.show();
+  mainWin.focus();
+
+  assert.equal(host.deliverEventFromMain({ kind: "task", title: "周报", ok: true }), "suppressed-foreground");
+  assert.equal(petEvents().length, 0);
+});
+
+test("渠道互斥：主窗口不在前台 + 桌宠可见 → 正常送达 pet:event", () => {
+  const { host, mainWin, petEvents } = makeHostWithMain();
+  mainWin.show();
+  // 未 focus：用户在看别处
+
+  assert.equal(host.deliverEventFromMain({ kind: "schedule", title: "晚自习", at: "19:00" }), "delivered");
+  assert.equal(petEvents().length, 1);
+  assert.deepEqual(petEvents()[0].payload, { kind: "schedule", title: "晚自习", at: "19:00" });
+});
+
+test("错过不补发：桌宠隐藏时事件直接丢弃，重新显示后也不会补出来", () => {
+  const { host, petEvents } = makeHostWithMain();
+  host.hide();
+
+  assert.equal(host.deliverEventFromMain({ kind: "speak", text: "早报来了" }), "pet-hidden");
+  host.show();
+  assert.equal(petEvents().length, 0, "隐藏期间的提醒不该在重新显示后复活");
+});
+
+test("畸形事件一律 invalid，不送进渲染层", () => {
+  const { host, petEvents } = makeHostWithMain();
+  for (const bad of [null, undefined, "x", 42, [], { noKind: 1 }, { kind: 7 }]) {
+    assert.equal(host.deliverEventFromMain(bad), "invalid", JSON.stringify(bad));
+  }
+  assert.equal(petEvents().length, 0);
+});
+
+test("来源校验：非主窗口/非桌宠窗口发来的 pet:emit 被忽略", () => {
+  const { fake, petEvents } = makeHostWithMain();
+  const stranger = new fake.FakeBrowserWindow({ x: 0, y: 0, width: 10, height: 10 });
+  fake.ons.get("pet:emit")({ sender: stranger.webContents }, { kind: "speak", text: "伪造" });
+  assert.equal(petEvents().length, 0);
+});
+
+test("主窗口经 pet:emit 发事件：同样过渠道互斥（前台抑制、后台送达）", () => {
+  const { fake, mainWin, petEvents } = makeHostWithMain();
+  const emit = fake.ons.get("pet:emit");
+
+  mainWin.show();
+  mainWin.focus();
+  emit({ sender: mainWin.webContents }, { kind: "speak", text: "前台" });
+  assert.equal(petEvents().length, 0);
+
+  mainWin._focused = false; // 用户切走
+  emit({ sender: mainWin.webContents }, { kind: "speak", text: "后台" });
+  assert.equal(petEvents().length, 1);
+  assert.equal(petEvents()[0].payload.text, "后台");
+});
+
+test("点气泡直达页面：合法 page 归一为字符串转发；非法 page 回落旧语义（打开设置）", () => {
+  const { fake, mainWin } = makeHostWithMain();
+  const openSettings = fake.ons.get("pet:open-settings");
+  const petWin = fake.created.find((w) => w !== mainWin);
+
+  // 转发的是字符串 page，与 preload 的 onOpenSettings(cb: (page?: string)) 口径一致
+  openSettings({ sender: petWin.webContents }, "tasks");
+  assert.deepEqual(mainWin.webContents._sent.at(-1), {
+    ch: "pet:open-settings",
+    payload: "tasks",
+  });
+
+  openSettings({ sender: petWin.webContents }, { page: "staff" });
+  assert.deepEqual(mainWin.webContents._sent.at(-1), {
+    ch: "pet:open-settings",
+    payload: "staff",
+  });
+
+  openSettings({ sender: petWin.webContents }, "evil://x");
+  assert.deepEqual(mainWin.webContents._sent.at(-1), { ch: "pet:open-settings", payload: undefined });
+
+  // 非桌宠窗口发来的导航请求被忽略
+  const stranger = new fake.FakeBrowserWindow({ x: 0, y: 0, width: 10, height: 10 });
+  const before = mainWin.webContents._sent.length;
+  openSettings({ sender: stranger.webContents }, "team");
+  assert.equal(mainWin.webContents._sent.length, before);
 });

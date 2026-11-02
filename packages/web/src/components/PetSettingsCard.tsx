@@ -7,6 +7,12 @@ import {
   savePetPrefs,
   type PetPrefs,
 } from "../lib/petPrefs.js";
+import {
+  loadPetPresencePrefs,
+  savePetPresencePrefs,
+  type PetPresenceIntensity,
+  type PetPresencePrefs,
+} from "../lib/petEvent.js";
 
 /**
  * 设置区「桌宠」卡（d.46）。
@@ -24,6 +30,21 @@ interface PetRuntimeState {
 
 const SCALE_OPTIONS = [0.6, 0.8, 1.0, 1.25, 1.5];
 
+/** 在场感三档打扰强度：文案与行为一一对应（安静不冒泡 / 正常冒泡 4 秒 / 积极加姿态与动作）。 */
+const INTENSITY_OPTIONS: ReadonlyArray<{
+  value: PetPresenceIntensity;
+  label: string;
+  hint: string;
+}> = [
+  { value: "quiet", label: "安静", hint: "只换姿态，不冒泡" },
+  { value: "normal", label: "正常", hint: "冒泡 4 秒后收回（默认）" },
+  { value: "eager", label: "积极", hint: "姿态 + 气泡 + 轻微动作" },
+];
+
+function intensityHint(value: PetPresenceIntensity): string {
+  return INTENSITY_OPTIONS.find((option) => option.value === value)?.hint ?? "";
+}
+
 function scaleLabel(s: number): string {
   return `${Math.round(s * 100)}%`;
 }
@@ -35,6 +56,7 @@ export function PetSettingsCard() {
 
   const [prefs, setPrefs] = useState<PetPrefs>(() => loadPetPrefs());
   const [runtime, setRuntime] = useState<PetRuntimeState | null>(null);
+  const [presence, setPresence] = useState<PetPresencePrefs>(() => loadPetPresencePrefs());
   const [modelDraft, setModelDraft] = useState(prefs.modelPath);
   const [modelError, setModelError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -65,6 +87,17 @@ export function PetSettingsCard() {
     setPrefs((prev) => {
       const next = { ...prev, ...patch };
       savePetPrefs(next);
+      return next;
+    });
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 1600);
+  }, []);
+
+  /** 打扰强度改完立即生效：桌宠每次收到事件都现读 localStorage，不必重载窗口。 */
+  const updateIntensity = useCallback((value: PetPresenceIntensity) => {
+    setPresence((prev) => {
+      const next: PetPresencePrefs = { ...prev, intensity: value };
+      savePetPresencePrefs(next);
       return next;
     });
     setSaved(true);
@@ -164,6 +197,35 @@ export function PetSettingsCard() {
             <span className="text-[11px] text-muted">
               {visible ? "当前显示中" : "当前已隐藏"}
             </span>
+          </div>
+
+          {/* 打扰强度（在场感三档） */}
+          <div className="mt-3.5">
+            <div className="text-[12px] font-bold text-[#777]">打扰强度</div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="打扰强度">
+              {INTENSITY_OPTIONS.map((option) => {
+                const active = presence.intensity === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => updateIntensity(option.value)}
+                    className={`rounded-lg border px-2.5 py-1 text-[11.5px] ${
+                      active
+                        ? "border-[var(--accent,#2f5bd7)] text-ink"
+                        : "border-line text-muted hover:text-ink"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1 text-[11px] text-muted">
+              {intensityHint(presence.intensity)}。任务收尾、日程临期与幕僚简报会让桌宠开口；
+              主窗口在前台时只进通知中心，桌宠不打扰。
+            </p>
           </div>
 
           {/* 缩放 */}

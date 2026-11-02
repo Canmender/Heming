@@ -474,3 +474,107 @@ export const TeamActivityWriteResultSchema = z.object({
   skipped: z.number().int().min(0),
 });
 export type TeamActivityWriteResult = z.infer<typeof TeamActivityWriteResultSchema>;
+
+// —— ②-3 团队用量：白名单摘要的服务端聚合 ——
+//
+// 隐私红线与团队动向同口径：请求体里**只有**「自然日 / 模型名 / 连接名 / token 数 /
+// 未上报轮数」五个维度——提示词、对话正文、工具参数、任务结果、文件都不在契约里，
+// 客户端无从夹带，服务端也无处接收。响应里的全站排行只给聚合数与显示名，**不给明细**。
+
+/**
+ * 自然日键 `YYYY-MM-DD`：由客户端按**本地时区**算好，服务端不猜时区（跨时区口径不会劈叉）。
+ * 形状之外还要过日历校验：`2026-13-01`、`2026-02-31` 这类滚月/滚日必须拒，
+ * 否则服务端会静默把它当成另一天去聚合。
+ */
+const DayKeySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "invalid day key")
+  .refine((v) => {
+    const [y, m, d] = v.split("-").map(Number);
+    const ms = Date.UTC(y, m - 1, d);
+    return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === v;
+  }, "invalid day key");
+
+export const TeamUsageInputSchema = z.object({
+  /** 自然日（本地日）。 */
+  date: DayKeySchema,
+  /** 模型名（供应商返回的原样名字）。 */
+  model: z.string().min(1).max(120),
+  /**
+   * 该 (date, model) 的**已上报** token 合计。
+   * `null` = 该日该模型一次都没上报（d.32 口径：未上报 ≠ 0）。
+   */
+  tokens: z.number().int().min(0).max(1_000_000_000_000).nullable(),
+  /** 未上报的轮数（与 tokens 同一维度）。 */
+  unreported: z.number().int().min(0).max(1_000_000).default(0),
+  /** 涉及的连接名（用户自命名，最多 5 个；超出由客户端先合并/截断）。 */
+  connections: z.array(z.string().min(1).max(64)).max(5).default([]),
+});
+export type TeamUsageInput = z.infer<typeof TeamUsageInputSchema>;
+
+/** 单次上报上限与团队动向一致（50 条）。 */
+export const CreateTeamUsageBodySchema = z.object({
+  items: z.array(TeamUsageInputSchema).min(1).max(50),
+});
+export type CreateTeamUsageBody = z.infer<typeof CreateTeamUsageBodySchema>;
+
+export const TeamUsageWriteResultSchema = z.object({
+  written: z.number().int().min(0),
+  /** 服务端实际存的（去重后的）行数：同一 (actor,date,model) 重复上报不增加行。 */
+  stored: z.number().int().min(0),
+});
+export type TeamUsageWriteResult = z.infer<typeof TeamUsageWriteResultSchema>;
+
+/** `DELETE /api/team/usage/mine` 的响应：删除条数（0 也表示「现在确实没有你的行」）。 */
+export const TeamUsageClearResultSchema = z.object({
+  deleted: z.number().int().min(0),
+});
+export type TeamUsageClearResult = z.infer<typeof TeamUsageClearResultSchema>;
+
+export const TeamUsageRangeSchema = z.enum(["7d", "30d"]);
+export type TeamUsageRange = z.infer<typeof TeamUsageRangeSchema>;
+
+/** 本人按模型的明细（含连接名快照；连接名是用户自命名的白名单字段）。 */
+export const TeamUsageByModelSchema = z.object({
+  model: z.string().min(1),
+  tokens: z.number().int().min(0),
+  unreported: z.number().int().min(0),
+  connections: z.array(z.string()),
+});
+export type TeamUsageByModel = z.infer<typeof TeamUsageByModelSchema>;
+
+export const TeamUsageByDaySchema = z.object({
+  date: z.string().min(1),
+  tokens: z.number().int().min(0),
+  unreported: z.number().int().min(0),
+});
+export type TeamUsageByDay = z.infer<typeof TeamUsageByDaySchema>;
+
+export const TeamUsageSelfSchema = z.object({
+  total: z.number().int().min(0),
+  unreported: z.number().int().min(0),
+  byModel: z.array(TeamUsageByModelSchema),
+  byDay: z.array(TeamUsageByDaySchema),
+});
+export type TeamUsageSelf = z.infer<typeof TeamUsageSelfSchema>;
+
+/** 全站排行一行：**只有聚合数与显示名**（连模型名都不给，避免反推明细）。 */
+export const TeamUsageRankRowSchema = z.object({
+  userId: z.string().min(1),
+  displayName: z.string().min(1),
+  tokens: z.number().int().min(0),
+  unreported: z.number().int().min(0),
+  /** 有数据的天数（不是条数）。 */
+  days: z.number().int().min(0),
+});
+export type TeamUsageRankRow = z.infer<typeof TeamUsageRankRowSchema>;
+
+export const TeamUsageResponseSchema = z.object({
+  range: TeamUsageRangeSchema,
+  /** 区间（自然日闭区间，YYYY-MM-DD）。 */
+  from: z.string().min(1),
+  to: z.string().min(1),
+  self: TeamUsageSelfSchema,
+  ranking: z.array(TeamUsageRankRowSchema),
+});
+export type TeamUsageResponse = z.infer<typeof TeamUsageResponseSchema>;

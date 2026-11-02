@@ -21,6 +21,8 @@ const {
   petUrl,
   draggedPosition,
   parsePetStateJson,
+  normalizePetPage,
+  PET_PAGE_ALLOWLIST,
 } = require("./pet-window");
 
 /* ────────────────────────────── 入口判定 ────────────────────────────── */
@@ -331,5 +333,20 @@ test("带 UTF-8 BOM 也能解析（被编辑器另存过的状态文件）", () 
 test("损坏 / 非字符串一律返回 null（交给 clampPetState 回落）", () => {
   for (const bad of ["", "{", "not json", "null", null, undefined, 42, {}]) {
     assert.equal(parsePetStateJson(bad), null, String(bad));
+  }
+});
+
+/* ────────────────────── 点气泡直达页面：page 白名单归一 ────────────────────── */
+
+test("normalizePetPage：字符串与 {page} 两种形状都认", () => {
+  for (const page of PET_PAGE_ALLOWLIST) {
+    assert.equal(normalizePetPage(page), page);
+    assert.equal(normalizePetPage({ page }), page);
+  }
+});
+
+test("normalizePetPage：不在白名单 / 旧无参调用 → null（调用方回落「打开设置」）", () => {
+  for (const bad of [undefined, null, "", "chat", "evil://x", 42, [], {}, { page: "chat" }, { page: 7 }]) {
+    assert.equal(normalizePetPage(bad), null, JSON.stringify(bad));
   }
 });

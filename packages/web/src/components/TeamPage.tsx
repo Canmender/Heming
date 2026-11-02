@@ -1,14 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { TeamActivity, TeamActivityKind, TeamMember } from "@heming/shared";
+import type {
+  TeamActivity,
+  TeamActivityKind,
+  TeamMember,
+  TeamUsageRange,
+  TeamUsageResponse,
+} from "@heming/shared";
 import {
   clearMyTeamActivities,
+  clearMyTeamUsage,
   fetchTeam,
   fetchTeamActivities,
+  fetchTeamUsage,
   uploadTeamActivities,
+  uploadTeamUsage,
 } from "../lib/api.js";
-import { collectCurrentTeamActivities, useTeamShareStore } from "../lib/team/share.js";
+import {
+  collectCurrentTeamActivities,
+  collectCurrentTeamUsage,
+  summarizeLocalUsage,
+  useTeamShareStore,
+} from "../lib/team/share.js";
+import { useInfohubStore } from "../lib/infohub/store.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
+import { dayKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
 import { Avatar } from "./Avatar.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 
@@ -72,6 +88,13 @@ function fmtLastSeen(iso: string | null): string {
   return `${Math.floor(diff / 86_400_000)} 天前活跃`;
 }
 
+/** token 数的紧凑写法：超过 1 万换成「万」，避免排行榜每行都是长数字。 */
+export function fmtTokens(n: number): string {
+  const v = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+  if (v < 10_000) return String(v);
+  return `${(v / 10_000).toFixed(1)} 万`;
+}
+
 export function TeamPage() {
   const me = useAuthStore((s) => s.user);
   const focusUserId = useUiStore((s) => s.teamFocusUserId);
@@ -95,6 +118,21 @@ export function TeamPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  /**
+   * 团队页三个视图互斥：动向（默认）/ 团队日程（只读）/ 用量。
+   * 挤在一屏会把「摘要流」和「排行」互相压扁，切 Tab 反而是最省事的读法。
+   */
+  const [tab, setTab] = useState<"feed" | "agenda" | "usage">("feed");
+  const [usageRange, setUsageRange] = useState<TeamUsageRange>("7d");
+  const [usage, setUsage] = useState<TeamUsageResponse | null>(null);
+  const [usageReady, setUsageReady] = useState(false);
+  const [usageError, setUsageError] = useState("");
+  const [usageSyncing, setUsageSyncing] = useState(false);
+  const [confirmClearUsage, setConfirmClearUsage] = useState(false);
+  const [clearingUsage, setClearingUsage] = useState(false);
+  const usageRecords = useTokenUsageStore((s) => s.records);
+  /** 信息中枢是否在本机运行：团队日程空态要区分「未连接」与「没有摘要」。 */
+  const infohubRunning = useInfohubStore((s) => s.running);
   // 翻页游标要读「当下最新的列表」，但列表进 loadFeed 依赖会让定时刷新反复重建：
   // 用 ref 兜住当前值，回调只认 selectedId 这一个请求口径。
   const activitiesRef = useRef<TeamActivity[]>([]);
@@ -198,6 +236,83 @@ export function TeamPage() {
     [members, selectedId],
   );
 
+  /* ------------------------------------------------------- ②-3 用量与团队日程 */
+
+  const rangeDays = usageRange === "7d" ? 7 : 30;
+  /** 本机用量（关闭共享时展示；纯本地计算，不产生任何请求）。 */
+  const localUsage = useMemo(
+    () => summarizeLocalUsage(usageRecords, rangeDays),
+    [usageRecords, rangeDays],
+  );
+
+  /**
+   * 用量同步：**只有开启 `usage` 共享才采集 + 上传 + 拉排行**。
+   *
+   * 关闭时直接返回：不上传、不采集——这是隐私红线，不是省流量的优化。
+   */
+  const syncUsage = useCallback(async () => {
+    const current = useTeamShareStore.getState().settings;
+    if (!current.usage) return;
+    setUsageSyncing(true);
+    try {
+      const items = collectCurrentTeamUsage(current);
+      if (items.length > 0) await uploadTeamUsage(items);
+      const data = await fetchTeamUsage({
+        range: usageRange,
+        to: dayKeyOf(new Date().toISOString()),
+      });
+      setUsage(data);
+      setUsageError("");
+      setUsageReady(true);
+      useTeamShareStore.getState().setLastSync(Date.now());
+    } catch (err) {
+      setUsageError(err instanceof Error && err.message ? err.message : "网络异常");
+      setUsageReady(true);
+    } finally {
+      setUsageSyncing(false);
+    }
+  }, [usageRange]);
+
+  useEffect(() => {
+    if (!share.usage) {
+      // 关闭共享：清空服务端返回的排行（不留在内存里），也不发任何用量请求。
+      setUsage(null);
+      setUsageReady(true);
+      return;
+    }
+    void syncUsage();
+  }, [share.usage, syncUsage]);
+
+  useEffect(() => {
+    if (!share.usage) return;
+    const timer = window.setInterval(() => void syncUsage(), FEED_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [share.usage, syncUsage]);
+
+  /**
+   * 清除本人已上传的用量（显式动作，不随「关共享」自动发生）。
+   *
+   * 关闭共享只停未来上传——旧行还在服务端、人还在排行里，那不是隐私口径。
+   * 删除后落一个本地水位：水位之前的用量不再重新上传，否则下一轮同步会把刚删的传回去。
+   */
+  const onClearUsage = async () => {
+    setClearingUsage(true);
+    try {
+      await clearMyTeamUsage();
+      useTeamShareStore.getState().setUsageClearedAt(Date.now());
+      setUsage(null);
+      setUsageReady(true);
+      setUsageError("");
+      // 仍开着共享时重拉一次：排行里应当已经没有自己
+      if (useTeamShareStore.getState().settings.usage) await syncUsage();
+    } catch (err) {
+      setUsageError(err instanceof Error && err.message ? err.message : "网络异常");
+    } finally {
+      setClearingUsage(false);
+      setConfirmClearUsage(false);
+    }
+  };
+
   const filteredMembers = useMemo(() => {
     const q = memberQuery.trim().toLowerCase();
     return members.filter((m) => {
@@ -220,6 +335,30 @@ export function TeamPage() {
     () => humanActivities.filter((a) => filter === "all" || a.kind === filter),
     [humanActivities, filter],
   );
+
+  /** 团队日程：只读，来源是既有 `agenda` 摘要通道（不新增任何上传）。升序 = 先到期的在前。 */
+  const agendaActivities = useMemo(
+    () =>
+      humanActivities
+        .filter((a) => a.kind === "agenda")
+        .sort((a, b) => (a.occurredAt < b.occurredAt ? -1 : a.occurredAt > b.occurredAt ? 1 : 0)),
+    [humanActivities],
+  );
+
+  /**
+   * 排行渲染顺序：服务端已按 token 降序返回，这里再排一次——
+   * 排序是展示口径，不该依赖「服务端一定排过」这种跨端约定。
+   */
+  const rankingRows = useMemo(
+    () =>
+      [...(usage?.ranking ?? [])].sort(
+        (a, b) => b.tokens - a.tokens || a.displayName.localeCompare(b.displayName, "zh-Hans-CN"),
+      ),
+    [usage],
+  );
+
+  /** 本人是否还有已上传的用量行（决定要不要给「清除我的用量」）。 */
+  const hasUploadedUsage = (usage?.self.byModel.length ?? 0) > 0;
 
   const todayCount = useMemo(
     () => humanActivities.filter((a) => sameLocalDay(a.occurredAt)).length,
@@ -249,7 +388,7 @@ export function TeamPage() {
     }
   };
 
-  const shareCount = [share.tasks, share.agenda].filter(Boolean).length;
+  const shareCount = [share.tasks, share.agenda, share.usage].filter(Boolean).length;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -262,14 +401,14 @@ export function TeamPage() {
           </p>
         </div>
         <span className="ml-auto rounded-md border border-line bg-[#fafafa] px-2 py-0.5 text-[11px] text-muted">
-          共享 {shareCount}/2
+          共享 {shareCount}/3
         </span>
       </header>
 
       <div className="border-b border-line-soft bg-[#fbfbfb] px-5 py-2 text-[11px]">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
           <span className="text-muted">
-            开启后团队成员可见你的任务与日程摘要（不含对话内容与智能体轨迹）
+            开启后团队成员可见你的任务/日程摘要与用量排行（不含提示词、对话内容、工具参数与结果）
           </span>
           <label className="flex items-center gap-1 text-[#555]">
             <input
@@ -288,6 +427,16 @@ export function TeamPage() {
               onChange={(e) => updateShare({ agenda: e.target.checked })}
             />
             日程
+          </label>
+          <label className="flex items-center gap-1 text-[#555]">
+            <input
+              type="checkbox"
+              aria-label="共享用量"
+              className="h-3.5 w-3.5 accent-[#1a1a1a]"
+              checked={share.usage}
+              onChange={(e) => updateShare({ usage: e.target.checked })}
+            />
+            用量
           </label>
           <span className="text-[#999]">
             {share.lastSyncAt ? `上次同步 ${fmtTime(new Date(share.lastSyncAt).toISOString())}` : "尚未同步"}
@@ -430,20 +579,48 @@ export function TeamPage() {
             </div>
           )}
 
-          <div className="flex items-center gap-1 border-b border-line-soft px-5 py-2">
-            {FILTERS.map((f) => (
+          {/* 三个视图互斥：动向（默认）/ 团队日程（只读）/ 用量（本机 + 开启共享后的排行） */}
+          <div
+            className="flex items-center gap-1 border-b border-line-soft px-5 py-2"
+            role="tablist"
+            aria-label="团队视图"
+          >
+            {[
+              { key: "feed" as const, label: "动向" },
+              { key: "agenda" as const, label: "团队日程" },
+              { key: "usage" as const, label: "用量" },
+            ].map((t) => (
               <button
-                key={f.key}
+                key={t.key}
                 type="button"
-                aria-pressed={filter === f.key}
-                onClick={() => setFilter(f.key)}
+                role="tab"
+                aria-selected={tab === t.key}
+                onClick={() => setTab(t.key)}
                 className={`rounded-lg px-2 py-1 text-[11px] ${
-                  filter === f.key ? "bg-ink text-white" : "text-muted hover:bg-[#f3f3f3]"
+                  tab === t.key ? "bg-ink text-white" : "text-muted hover:bg-[#f3f3f3]"
                 }`}
               >
-                {f.label}
+                {t.label}
               </button>
             ))}
+          </div>
+
+          {tab === "feed" && (
+            <>
+              <div className="flex items-center gap-1 border-b border-line-soft px-5 py-2">
+                {FILTERS.map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    aria-pressed={filter === f.key}
+                    onClick={() => setFilter(f.key)}
+                    className={`rounded-lg px-2 py-1 text-[11px] ${
+                      filter === f.key ? "bg-ink text-white" : "text-muted hover:bg-[#f3f3f3]"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
             <button
               type="button"
               className="ml-auto rounded-sm px-2 py-1 text-[11px] text-muted hover:bg-[#f3f3f3]"
@@ -526,6 +703,235 @@ export function TeamPage() {
               </div>
             )}
           </div>
+            </>
+          )}
+
+          {tab === "agenda" && (
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+              <p className="rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2 text-[11px] leading-5 text-muted">
+                团队日程只收成员自己开启共享的「日程」摘要（标题 + 到期档位），不含日程详情、证据或发送人；
+                不新增任何云端内容上传。
+              </p>
+              {!feedReady ? (
+                <p className="mt-3 text-[12px] text-muted">加载中…</p>
+              ) : agendaActivities.length === 0 ? (
+                <div className="py-10 text-center text-[12px] leading-6 text-muted">
+                  {!infohubRunning ? (
+                    <>
+                      <p className="font-medium text-[#555]">仅本机可见</p>
+                      <p className="mt-1">
+                        信息中枢未连接：团队日程不显示，本机日程也没有被采集。连接信息中枢并开启「日程」共享后，
+                        摘要才会同步给团队。
+                      </p>
+                      <p className="mt-1 text-[11px]">信息中枢只在本机运行，不会自动拉起。</p>
+                    </>
+                  ) : !share.agenda ? (
+                    <>
+                      <p>你还没有开启「日程」共享。</p>
+                      <p className="mt-1 text-[11px]">
+                        开启后，你的日程摘要（标题 + 到期档位）会出现在团队日程里。
+                      </p>
+                    </>
+                  ) : (
+                    <p>暂无日程摘要。信息中枢同步出临期日程后会自动出现。</p>
+                  )}
+                </div>
+              ) : (
+                <ul className="mt-2 space-y-1">
+                  {agendaActivities.map((a) => (
+                    <li
+                      key={a.id}
+                      className="flex items-start gap-2.5 rounded-xl px-2 py-2 hover:bg-[#fafafa]"
+                    >
+                      <Avatar user={avatarOf(a.actorId)} size={26} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="shrink-0 text-[12px] font-medium">
+                            {nameOf(a.actorId)}
+                          </span>
+                          <span className="truncate text-[12px]">{a.title}</span>
+                          <time
+                            dateTime={a.occurredAt}
+                            className="ml-auto shrink-0 text-[10px] text-muted"
+                          >
+                            {fmtTime(a.occurredAt)}
+                          </time>
+                        </div>
+                        {a.detail && (
+                          <p className="mt-0.5 truncate text-[11px] text-muted">{a.detail}</p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {tab === "usage" && (
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] leading-5 text-muted">
+                  只统计 token 数、模型名与连接名；提示词、对话内容、工具参数与结果都不出本机。
+                </span>
+                <div className="ml-auto flex items-center gap-1" role="group" aria-label="用量区间">
+                  {(["7d", "30d"] as TeamUsageRange[]).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      aria-pressed={usageRange === r}
+                      onClick={() => setUsageRange(r)}
+                      className={`rounded-lg px-2 py-1 text-[11px] ${
+                        usageRange === r ? "bg-ink text-white" : "text-muted hover:bg-[#f3f3f3]"
+                      }`}
+                    >
+                      {r === "7d" ? "近 7 天" : "近 30 天"}
+                    </button>
+                  ))}
+                  {share.usage && (
+                    <button
+                      type="button"
+                      disabled={usageSyncing}
+                      onClick={() => void syncUsage()}
+                      className="rounded-sm px-2 py-1 text-[11px] text-muted hover:bg-[#f3f3f3] disabled:opacity-40"
+                    >
+                      {usageSyncing ? "同步中…" : "刷新"}
+                    </button>
+                  )}
+                  {share.usage && hasUploadedUsage && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClearUsage(true)}
+                      className="rounded-sm border border-[#fecdca] px-2 py-1 text-[11px] text-[#b42318] hover:bg-[#fef3f2]"
+                    >
+                      清除我的用量
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {!share.usage ? (
+                <section className="mt-3" aria-label="本机用量">
+                  <h2 className="text-[12px] font-bold">本机用量（仅自己可见）</h2>
+                  <p className="mt-1 text-[11px] leading-5 text-muted">
+                    「用量」共享未开启：不上传、不采集，全站排行也不会显示。开启后会同步近 30 天的
+                    白名单摘要（自然日 / 模型 / 连接名 / token 数 / 未上报轮数）。
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-baseline gap-4 text-[12px]">
+                    <span>
+                      近 {rangeDays} 天合计{" "}
+                      <b className="tabular-nums">{fmtTokens(localUsage.total)}</b>
+                    </span>
+                    <span className="text-[11px] text-muted">未上报 {localUsage.unreported} 轮</span>
+                  </div>
+                  <ul className="mt-2 space-y-1 text-[11px] leading-5">
+                    {localUsage.byModel.map((m) => (
+                      <li key={m.model} className="flex items-baseline gap-2">
+                        <span className="truncate font-medium">{m.model}</span>
+                        <span className="ml-auto shrink-0 tabular-nums">{fmtTokens(m.tokens)}</span>
+                        {m.connections.length > 0 && (
+                          <span className="shrink-0 text-muted">{m.connections.join("、")}</span>
+                        )}
+                      </li>
+                    ))}
+                    {localUsage.byModel.length === 0 && (
+                      <li className="text-muted">近 {rangeDays} 天还没有用量记录。</li>
+                    )}
+                  </ul>
+                  <p className="mt-2 text-[10px] leading-4 text-muted">
+                    已停止上传；如需删除已上传记录，点
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClearUsage(true)}
+                      className="mx-0.5 underline underline-offset-2 hover:text-[#b42318]"
+                    >
+                      清除我的用量
+                    </button>
+                    （不会自动删除，避免误伤）。
+                  </p>
+                </section>
+              ) : !usageReady ? (
+                <p className="mt-3 text-[12px] text-muted">加载中…</p>
+              ) : usageError ? (
+                <div className="py-6 text-center text-[12px]">
+                  <p className="text-[#b42318]">用量加载失败：{usageError}</p>
+                  <button
+                    type="button"
+                    className="mt-2 rounded-sm border border-line px-2 py-0.5 text-[11px]"
+                    onClick={() => void syncUsage()}
+                  >
+                    重试
+                  </button>
+                </div>
+              ) : usage ? (
+                <>
+                  <section className="mt-3" aria-label="我的用量">
+                    <h2 className="text-[12px] font-bold">我的用量（近 {rangeDays} 天）</h2>
+                    <div className="mt-1 flex flex-wrap items-baseline gap-4 text-[12px]">
+                      <span>
+                        合计 <b className="tabular-nums">{fmtTokens(usage.self.total)}</b>
+                      </span>
+                      <span className="text-[11px] text-muted">
+                        未上报 {usage.self.unreported} 轮
+                      </span>
+                    </div>
+                    <ul className="mt-2 space-y-1 text-[11px] leading-5">
+                      {usage.self.byModel.map((m) => (
+                        <li key={m.model} className="flex items-baseline gap-2">
+                          <span className="truncate font-medium">{m.model}</span>
+                          <span className="ml-auto shrink-0 tabular-nums">
+                            {fmtTokens(m.tokens)}
+                          </span>
+                          {m.unreported > 0 && (
+                            <span className="shrink-0 text-muted">未上报 {m.unreported} 轮</span>
+                          )}
+                          {m.connections.length > 0 && (
+                            <span className="shrink-0 text-muted">{m.connections.join("、")}</span>
+                          )}
+                        </li>
+                      ))}
+                      {usage.self.byModel.length === 0 && (
+                        <li className="text-muted">这个区间还没有已同步的用量。</li>
+                      )}
+                    </ul>
+                  </section>
+
+                  <section className="mt-4" aria-label="团队用量排行">
+                    <h2 className="text-[12px] font-bold">团队排行（近 {rangeDays} 天）</h2>
+                    {usage.ranking.length === 0 ? (
+                      <p className="mt-1 text-[11px] text-muted">还没有成员共享用量。</p>
+                    ) : (
+                      <ol className="mt-1 space-y-1 text-[11px] leading-5">
+                        {rankingRows.map((row, i) => (
+                          <li key={row.userId} className="flex items-baseline gap-2">
+                            <span className="w-5 shrink-0 tabular-nums text-muted">{i + 1}.</span>
+                            <span
+                              className={`truncate ${
+                                row.userId === me?.id ? "font-bold" : "font-medium"
+                              }`}
+                            >
+                              {row.displayName}
+                              {row.userId === me?.id ? "（我）" : ""}
+                            </span>
+                            <span className="ml-auto shrink-0 tabular-nums">
+                              {fmtTokens(row.tokens)}
+                            </span>
+                            <span className="shrink-0 text-muted">
+                              {row.unreported > 0 ? `未上报 ${row.unreported} 轮 · ` : ""}
+                              {row.days} 天
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                    <p className="mt-2 text-[10px] leading-4 text-muted">
+                      排行只显示聚合数与显示名；模型名与连接名只在你自己的明细里。
+                    </p>
+                  </section>
+                </>
+              ) : null}
+            </div>
+          )}
         </main>
       </div>
 
@@ -555,6 +961,39 @@ export function TeamPage() {
         >
           <p className="text-[12px] leading-6">
             会删除你已上传到团队动向的全部摘要；共享开关保持不变，之后的新动向仍会继续同步。
+          </p>
+        </ConfirmDialog>
+      )}
+
+      {confirmClearUsage && (
+        <ConfirmDialog
+          title="清除我的用量"
+          onCancel={() => setConfirmClearUsage(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+                onClick={() => setConfirmClearUsage(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={clearingUsage}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#912018] disabled:opacity-50"
+                onClick={() => void onClearUsage()}
+              >
+                {clearingUsage ? "清除中…" : "清除"}
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            会删除你已上传到团队的用量记录（自然日 / 模型 / 连接名 / token 数），删除后你不再出现在
+            用量排行里；共享开关保持不变，之后新产生的用量仍会继续同步。
+            <br />
+            清除不会删除本机的 token 用量记录（本机「我的用量」仍显示历史，只是不再上传）。
           </p>
         </ConfirmDialog>
       )}

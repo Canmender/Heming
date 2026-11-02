@@ -318,6 +318,34 @@ function parsePetStateJson(raw) {
   }
 }
 
+/**
+ * 桌宠气泡点击可直达的主窗口页面（白名单）。
+ *
+ * 为什么在白名单里判而不是信任渲染层：`pet:open-settings` 是**复用**的既有通道，
+ * 主进程把 page 原样转给主窗口；不白名单就等于让桌宠窗口能驱动主窗口去任意路由。
+ */
+const PET_PAGE_ALLOWLIST = Object.freeze(["settings", "team", "tasks", "staff", "infohub"]);
+
+/**
+ * 归一化「打开哪一页」的载荷。
+ *
+ * 兼容三种形状：`undefined`/旧版无参调用（→ null，调用方按「打开设置」处理）、
+ * 字符串 page、`{ page }`；不在白名单里一律回落 null。
+ *
+ * @param {unknown} raw
+ * @returns {("settings"|"team"|"tasks"|"staff"|"infohub")|null}
+ */
+function normalizePetPage(raw) {
+  const value =
+    typeof raw === "string"
+      ? raw
+      : raw && typeof raw === "object" && !Array.isArray(raw)
+        ? raw.page
+        : undefined;
+  if (typeof value !== "string") return null;
+  return PET_PAGE_ALLOWLIST.includes(value) ? value : null;
+}
+
 module.exports = {
   PET_WINDOW_FLAG,
   PET_SCALES,
@@ -326,8 +354,10 @@ module.exports = {
   BASE_HEIGHT,
   EDGE_MARGIN,
   DEFAULT_MODEL_PATH,
+  PET_PAGE_ALLOWLIST,
   isSameAppOrigin,
   isPetWindowUrl,
+  normalizePetPage,
   normalizeScale,
   nextScale,
   petWindowSize,

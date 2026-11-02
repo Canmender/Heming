@@ -10,6 +10,11 @@ import type {
   TeamActivityList,
   TeamActivityWriteResult,
   TeamRoster,
+  TeamUsageInput,
+  TeamUsageRange,
+  TeamUsageResponse,
+  TeamUsageWriteResult,
+  TeamUsageClearResult,
 } from "@heming/shared";
 import { hasSubtle, toB64, fromB64 } from "./e2eCrypto.js";
 
@@ -155,6 +160,31 @@ export const uploadTeamActivities = (items: TeamActivityInput[]) =>
 /** 撤回本人已上传的全部动向。 */
 export const clearMyTeamActivities = () =>
   api<void>("/api/team/activities/mine", { method: "DELETE" });
+
+/**
+ * 团队用量（②-3）：只上报白名单摘要（自然日/模型名/连接名/token 数/未上报轮数），
+ * 按 `(actor, date, model)` 覆盖式幂等——重复同步同一份数据不会翻倍。
+ */
+export const uploadTeamUsage = (items: TeamUsageInput[]) =>
+  api<TeamUsageWriteResult>("/api/team/usage", {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  });
+
+/** 本人用量明细 + 全站排行；`to` 传本地今天（服务端不猜时区）。 */
+export const fetchTeamUsage = (
+  opts: { range?: TeamUsageRange; to?: string } = {},
+) => {
+  const q = new URLSearchParams();
+  if (opts.range) q.set("range", opts.range);
+  if (opts.to) q.set("to", opts.to);
+  const suffix = q.toString() ? `?${q.toString()}` : "";
+  return api<TeamUsageResponse>(`/api/team/usage${suffix}`);
+};
+
+/** 删除本人已上传的全部用量行（关闭共享不删数据，删除必须是显式动作）。 */
+export const clearMyTeamUsage = () =>
+  api<TeamUsageClearResult>("/api/team/usage/mine", { method: "DELETE" });
 
 /**
  * E2E 公钥分发与明文重加密（Task 2 契约，设计 §3.1/§7）：

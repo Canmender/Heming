@@ -19,6 +19,12 @@ import {
   CreateTeamActivitiesBodySchema,
   TeamRosterSchema,
   TeamActivityListSchema,
+  TeamUsageInputSchema,
+  CreateTeamUsageBodySchema,
+  TeamUsageRangeSchema,
+  TeamUsageResponseSchema,
+  TeamUsageRankRowSchema,
+  TeamUsageClearResultSchema,
 } from "./schemas.js";
 
 const iso = "2026-11-02T08:00:00.000Z";
@@ -267,5 +273,88 @@ describe("团队契约", () => {
         ],
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("②-3 团队用量契约", () => {
+  const item = {
+    date: "2026-11-02",
+    model: "gpt-x",
+    tokens: 100,
+    unreported: 0,
+    connections: ["主连接"],
+  };
+
+  it("白名单字段：缺省 unreported/connections 有默认；null token 合法（未上报 ≠ 0）", () => {
+    const parsed = TeamUsageInputSchema.safeParse({
+      date: "2026-11-02",
+      model: "gpt-x",
+      tokens: null,
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data).toEqual({
+        date: "2026-11-02",
+        model: "gpt-x",
+        tokens: null,
+        unreported: 0,
+        connections: [],
+      });
+    }
+  });
+
+  it("日期键必须是 YYYY-MM-DD；越界字段拒绝", () => {
+    expect(TeamUsageInputSchema.safeParse({ ...item, date: "2026-1-1" }).success).toBe(false);
+    expect(TeamUsageInputSchema.safeParse({ ...item, date: "2026-13-01" }).success).toBe(false);
+    expect(TeamUsageInputSchema.safeParse({ ...item, tokens: -1 }).success).toBe(false);
+    expect(TeamUsageInputSchema.safeParse({ ...item, tokens: 1.5 }).success).toBe(false);
+    expect(TeamUsageInputSchema.safeParse({ ...item, model: "" }).success).toBe(false);
+    expect(TeamUsageInputSchema.safeParse({ ...item, model: "x".repeat(121) }).success).toBe(false);
+    expect(
+      TeamUsageInputSchema.safeParse({ ...item, connections: Array.from({ length: 6 }, () => "c") })
+        .success,
+    ).toBe(false);
+  });
+
+  it("批量写入 1..50 条；range 只接受 7d/30d", () => {
+    expect(CreateTeamUsageBodySchema.safeParse({ items: [] }).success).toBe(false);
+    expect(CreateTeamUsageBodySchema.safeParse({ items: [item] }).success).toBe(true);
+    expect(
+      CreateTeamUsageBodySchema.safeParse({ items: Array.from({ length: 51 }, () => item) }).success,
+    ).toBe(false);
+    expect(TeamUsageRangeSchema.safeParse("7d").success).toBe(true);
+    expect(TeamUsageRangeSchema.safeParse("30d").success).toBe(true);
+    expect(TeamUsageRangeSchema.safeParse("90d").success).toBe(false);
+  });
+
+  it("响应形状：self 有明细，排行行只有聚合数与显示名", () => {
+    const response = {
+      range: "7d",
+      from: "2026-10-27",
+      to: "2026-11-02",
+      self: {
+        total: 100,
+        unreported: 1,
+        byModel: [{ model: "gpt-x", tokens: 100, unreported: 1, connections: ["主连接"] }],
+        byDay: [{ date: "2026-11-02", tokens: 100, unreported: 1 }],
+      },
+      ranking: [{ userId: "u1", displayName: "A", tokens: 100, unreported: 1, days: 1 }],
+    };
+    expect(TeamUsageResponseSchema.safeParse(response).success).toBe(true);
+    // 排行行即使被塞进明细字段也会被剥掉（契约里没有这些键）
+    const withDetail = TeamUsageRankRowSchema.safeParse({
+      ...response.ranking[0],
+      models: ["gpt-x"],
+      connections: ["主连接"],
+    });
+    expect(withDetail.success).toBe(true);
+    if (withDetail.success) expect(withDetail.data).not.toHaveProperty("models");
+  });
+
+  it("清除结果：deleted 为非负整数", () => {
+    expect(TeamUsageClearResultSchema.safeParse({ deleted: 0 }).success).toBe(true);
+    expect(TeamUsageClearResultSchema.safeParse({ deleted: 3 }).success).toBe(true);
+    expect(TeamUsageClearResultSchema.safeParse({ deleted: -1 }).success).toBe(false);
+    expect(TeamUsageClearResultSchema.safeParse({ deleted: 1.5 }).success).toBe(false);
   });
 });

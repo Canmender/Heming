@@ -39,12 +39,18 @@ test("preload 暴露 __heming_exports（记忆导出落盘桥）", () => {
 // 此处按 key 收集而非「最后一次即 heming」。
 // ipcRenderer.sendSync 必须在桩里存在：preload 顶层会同步问一次密钥桥可用性。
 // sink.listeners：channel → Set<listener>，用于断言订阅注册/取消；
-// sink.sent：ipcRenderer.send 的调用记录，用于断言 system 通知请求。
+// sink.sent：ipcRenderer.send 的调用记录，用于断言 system 通知请求；
+// sink.invokeResults：channel → fn(payload)，给异步通道（secret:bootstrap 等）返回结果；
+// sink.secretStorage：假 localStorage（启动预取要读三个白名单键的信封）。
 function loadExposed(ipc = {}, sink = {}) {
   const exposed = {};
   const listeners = sink.listeners || new Map();
   const sent = sink.sent || [];
   const invoked = sink.invoked || [];
+  const invokeResults = sink.invokeResults || {};
+  // preload 的启动预取需要读 localStorage（只读信封）；测试按用例注入。
+  const storage = sink.secretStorage || { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  globalThis.window = { localStorage: storage };
   const stubBridge = {
     exposeInMainWorld: (key, api) => {
       exposed[key] = api;
@@ -54,7 +60,8 @@ function loadExposed(ipc = {}, sink = {}) {
     sendSync: (channel, arg) => (typeof ipc[channel] === "function" ? ipc[channel](arg) : undefined),
     invoke: async (channel, payload) => {
       invoked.push([channel, payload]);
-      return undefined;
+      const handler = invokeResults[channel];
+      return typeof handler === "function" ? handler(payload) : undefined;
     },
     send: (channel, ...args) => {
       sent.push([channel, ...args]);
@@ -175,14 +182,19 @@ test("版本号经主进程同步 IPC 获取；通道缺失回落到 0.0.0", () 
   assert.equal(loadExposed().__heming_version, "0.0.0");
 });
 
-// ── 本机密钥信封桥（d.36）──
-test("preload 暴露 __heming_secrets（密钥信封桥）", () => {
+// ── 本机密钥信封桥（d.36；d.58 异步优先 + 预取缓存）──
+test("preload 暴露 __heming_secrets（密钥信封桥）与 d.58 异步/缓存接口", () => {
   const exposed = loadExposed({ "secret:available": () => true });
   const s = exposed.__heming_secrets;
   assert.ok(s, "应暴露 __heming_secrets");
   assert.equal(s.available, true);
   assert.equal(typeof s.encrypt, "function");
   assert.equal(typeof s.decrypt, "function");
+  // d.58：异步优先 + 预取缓存
+  for (const fn of ["availableAsync", "encryptAsync", "decryptAsync", "bootstrap", "cachedRead", "cacheSet", "cacheDelete"]) {
+    assert.equal(typeof s[fn], "function", `${fn} 应是函数`);
+  }
+  assert.ok(s.ready && typeof s.ready.then === "function", "ready 应是 Promise");
 });
 
 test("可用性来自 sendSync；通道异常按不可用处理", () => {
@@ -208,6 +220,126 @@ test("encrypt/decrypt 经 sendSync 转发；异常或非字符串回落 null", (
   const failing = loadExposed({ "secret:available": () => true }); // encrypt 通道缺失 → undefined
   assert.equal(failing.__heming_secrets.encrypt("x"), null);
   assert.equal(failing.__heming_secrets.decrypt("y"), null);
+});
+
+/** 造一个只读的假 localStorage（够 preload 启动预取使用）。 */
+function fakeStorage(entries) {
+  const map = new Map(Object.entries(entries));
+  return {
+    getItem: (key) => (map.has(key) ? map.get(key) : null),
+    setItem: (key, value) => {
+      map.set(key, value);
+    },
+    removeItem: (key) => {
+      map.delete(key);
+    },
+  };
+}
+
+const ASYNC_CAPS = {
+  "secret:capabilities": () => ({ mode: "async", sync: false, async: true }),
+  "secret:available": () => false,
+};
+
+test("启动预取：只把三个白名单键的**信封**送进批量通道，并把明文放进缓存", async () => {
+  const invoked = [];
+  const storage = fakeStorage({
+    "heming.llmConfigs": JSON.stringify({ __hemingEnc: "v1", data: "cipher-llm" }),
+    "heming.mcp.servers.v1": JSON.stringify({ __hemingEnc: "v1", data: "cipher-mcp" }),
+    // 以下都不该进批量通道：非白名单键 / 明文键 / 坏 JSON
+    "heming.e2e.chains.c1": JSON.stringify({ __hemingEnc: "v1", data: "cipher-chain" }),
+    "heming.e2e.identity": "明文身份（迁移期）",
+    "heming.msgCache.c1": "{ 不是 json",
+  });
+  const exposed = loadExposed(ASYNC_CAPS, {
+    invoked,
+    secretStorage: storage,
+    invokeResults: {
+      "secret:bootstrap": (payload) => ({
+        available: true,
+        mode: "async",
+        plaintexts: payload.entries.map((entry) => ({ key: entry.key, value: `plain-of-${entry.key}` })),
+      }),
+    },
+  });
+  const s = exposed.__heming_secrets;
+  const state = await s.ready;
+  assert.equal(state.hydrated, true);
+  assert.equal(state.available, true);
+  assert.equal(state.mode, "async");
+
+  const bootstrapCall = invoked.find(([channel]) => channel === "secret:bootstrap");
+  assert.ok(bootstrapCall, "应发起一次批量预取");
+  assert.deepEqual(
+    bootstrapCall[1].entries.map((entry) => entry.key).sort(),
+    ["heming.llmConfigs", "heming.mcp.servers.v1"],
+  );
+  assert.equal(s.cachedRead("heming.llmConfigs"), "plain-of-heming.llmConfigs");
+  assert.equal(s.cachedRead("heming.mcp.servers.v1"), "plain-of-heming.mcp.servers.v1");
+  // 未预取的键：undefined（= 未命中，回退同步桥），不是 null（= 解不开）
+  assert.equal(s.cachedRead("heming.e2e.identity"), undefined);
+});
+
+test("启动预取：批量通道失败/不可用时也 resolve（hydrated:false），不阻塞启动", async () => {
+  const exposed = loadExposed(ASYNC_CAPS, {
+    secretStorage: fakeStorage({
+      "heming.llmConfigs": JSON.stringify({ __hemingEnc: "v1", data: "cipher-llm" }),
+    }),
+    invokeResults: {
+      "secret:bootstrap": () => {
+        throw new Error("IPC 炸了");
+      },
+    },
+  });
+  const state = await exposed.__heming_secrets.ready;
+  assert.equal(state.hydrated, false);
+  assert.equal(exposed.__heming_secrets.cachedRead("heming.llmConfigs"), undefined);
+});
+
+test("启动预取：没有异步能力（旧版 Electron）时直接跳过，不发起批量 IPC", async () => {
+  const invoked = [];
+  const exposed = loadExposed(
+    { "secret:capabilities": () => ({ mode: "sync", sync: true, async: false }), "secret:available": () => true },
+    { invoked, secretStorage: fakeStorage({}) },
+  );
+  const state = await exposed.__heming_secrets.ready;
+  assert.equal(state.hydrated, false);
+  assert.equal(state.mode, "sync");
+  assert.equal(invoked.filter(([channel]) => channel === "secret:bootstrap").length, 0);
+});
+
+test("缓存写入/失效只对三个白名单键生效", () => {
+  const storage = fakeStorage({});
+  const exposed = loadExposed(ASYNC_CAPS, { secretStorage: storage });
+  const s = exposed.__heming_secrets;
+  s.cacheSet("heming.llmConfigs", "新值");
+  assert.equal(s.cachedRead("heming.llmConfigs"), "新值");
+  s.cacheSet("heming.e2e.chains.c1", "不该进缓存");
+  assert.equal(s.cachedRead("heming.e2e.chains.c1"), undefined);
+  s.cacheSet("heming.llmConfigs", 42); // 非字符串：忽略
+  assert.equal(s.cachedRead("heming.llmConfigs"), "新值");
+  s.cacheDelete("heming.llmConfigs");
+  assert.equal(s.cachedRead("heming.llmConfigs"), undefined);
+});
+
+test("异步 API 经 invoke 转发到对应通道", async () => {
+  const invoked = [];
+  const exposed = loadExposed(ASYNC_CAPS, {
+    invoked,
+    invokeResults: {
+      "secret:availableAsync": () => true,
+      "secret:encryptAsync": (plain) => `enc:${plain}`,
+      "secret:decryptAsync": (data) => `plain:${data}`,
+    },
+  });
+  const s = exposed.__heming_secrets;
+  assert.equal(await s.availableAsync(), true);
+  assert.equal(await s.encryptAsync("x"), "enc:x");
+  assert.equal(await s.decryptAsync("y"), "plain:y");
+  assert.deepEqual(
+    invoked.slice(-3).map(([channel]) => channel),
+    ["secret:availableAsync", "secret:encryptAsync", "secret:decryptAsync"],
+  );
 });
 
 // ── 系统通知桥（d.39）──
@@ -246,6 +378,17 @@ test("__heming_notify.onOpen 收到非函数回调时安全忽略", () => {
     off();
   });
   assert.equal((listeners.get("notify:open") || new Set()).size, 0, "非函数回调不应注册监听");
+});
+
+// ── 桌宠桥（d.46；d.58 起 openSettings 支持直达页面）──
+test("桌宠 openSettings 可带目标页面（page 可选，复用既有通道）", () => {
+  const sent = [];
+  const pet = loadExposed({}, { sent }).__heming_pet;
+  assert.ok(pet, "应暴露 __heming_pet");
+  pet.openSettings("chat");
+  assert.deepEqual(sent.at(-1), ["pet:open-settings", "chat"]);
+  pet.openSettings();
+  assert.deepEqual(sent.at(-1), ["pet:open-settings", undefined]);
 });
 
 // ── 信息中枢 · InfoHub 本机桥（d.45）──

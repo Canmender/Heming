@@ -93,3 +93,29 @@ export function poseMotion(pose: PetPose): string | null {
 export function poseDrivesMouth(pose: PetPose): boolean {
   return PET_POSES[pose]?.mouth === "text";
 }
+
+/**
+ * 平台事件 → 姿态（d.58 在场感）。
+ *
+ * 只在「安静 / 积极」两档由桌宠采用（正常档只冒泡、不动姿态）。
+ * 映射原则：任务成功给开心（唯一带进入动作的姿态，算「轻微动作」）、
+ * 失败与日程临期给 alerting（需要看一眼）、简报开口给 speaking（配口型）。
+ */
+export function poseForEvent(event: {
+  kind: string;
+  ok?: boolean;
+  pose?: PetPose;
+}): PetPose | null {
+  switch (event.kind) {
+    case "pose":
+      return event.pose ?? null;
+    case "speak":
+      return "speaking";
+    case "task":
+      return event.ok === true ? "happy" : "alerting";
+    case "schedule":
+      return "alerting";
+    default:
+      return null;
+  }
+}

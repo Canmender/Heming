@@ -66,12 +66,46 @@ declare global {
     };
     /**
      * 内部：桌面端本机密钥信封桥（preload 暴露；浏览器里 undefined）。
-     * 同步 API——只给三个低频键用（模型 Key / MCP 请求头 / E2E 身份），
+     *
+     * d.58 起是「异步优先 + 启动预取缓存 + 旧同步 API 兜底」：
+     * - `mode` / `asyncAvailable` / `ready` 描述当前 Electron 的能力与预取状态；
+     * - `cachedRead` / `cacheSet` / `cacheDelete` 是同步缓存（三个白名单低频键），
+     *   `bootstrap` 是启动预取的批量通道（主进程侧也是同一份白名单）；
+     * - `availableAsync` / `encryptAsync` / `decryptAsync` 是首选路径；
+     * - `available` / `encrypt` / `decrypt` 是**已弃用**的同步兜底（Electron 46 起失效）。
+     *
+     * 同步 API 只给三个低频键用（模型 Key / MCP 请求头 / E2E 身份），
      * 不要用在消息收发热路径上。
      */
     __heming_secrets?: {
+      /** 加解密口径：`"async"`（首选）/ `"sync"`（旧版兜底）/ `null`（不可用）。 */
+      mode?: "async" | "sync" | null;
+      /** 异步三件套是否可用。 */
+      asyncAvailable?: boolean;
+      /** 系统安全存储是否可用（同步探测）。 */
       available: boolean;
+      /** 启动预取完成信号（永不 reject）。 */
+      ready?: Promise<{ available: boolean; mode?: string | null; hydrated: boolean }>;
+      /** 同步读预取缓存：命中返回明文（解不开为 null），未命中 undefined。 */
+      cachedRead?: (key: string) => string | null | undefined;
+      /** 写盘后刷新缓存。 */
+      cacheSet?: (key: string, plain: string) => void;
+      /** 其它窗口改值后失效缓存。 */
+      cacheDelete?: (key: string) => void;
+      /** 批量解密（白名单三键）。 */
+      bootstrap?: (payload: {
+        entries: Array<{ key: string; data: string }>;
+      }) => Promise<{
+        available: boolean;
+        mode?: string | null;
+        plaintexts: Array<{ key: string; value: string | null }>;
+      }>;
+      availableAsync?: () => Promise<boolean>;
+      encryptAsync?: (plain: string) => Promise<string | null>;
+      decryptAsync?: (cipherB64: string) => Promise<string | null>;
+      /** @deprecated Electron 45 弃用、46 移除；仅作兜底。 */
       encrypt: (plain: string) => string | null;
+      /** @deprecated 同上。 */
       decrypt: (cipherB64: string) => string | null;
     };
     /** 内部：桌面端系统通知桥（preload 暴露；浏览器里 undefined）。 */
@@ -139,17 +173,20 @@ declare global {
       setClickThrough: (value: boolean) => void;
       /** 重新加载桌宠页面（换模型后让新配置生效）。 */
       reload: () => void;
-      /** 请求主窗口上前台并切到设置页（未配置模型连接时的出口）。 */
-      openSettings: () => void;
+      /**
+       * 请求主窗口上前台并切到指定页面（未配置模型连接时的出口）。
+       * @param page 可选页面 id（settings/team/tasks/staff/infohub），不传 = 设置页。
+       */
+      openSettings: (page?: string) => void;
       /**
        * 订阅主进程推来的事件（桌宠窗口用）。
-       * 契约见 `lib/petEvent.ts` 的 PetEventPayload。**目前无生产者**，是第三期预留。
+       * 契约见 `lib/petEvent.ts` 的 PetEventPayload。
        */
       onEvent: (cb: (payload: unknown) => void) => () => void;
       /** 主动发起一条推送（主窗口用；主进程校验来源后转发给桌宠）。 */
       emit: (payload: unknown) => void;
-      /** 主窗口侧：订阅「桌宠要打开设置」。返回取消订阅函数。 */
-      onOpenSettings: (cb: () => void) => () => void;
+      /** 主窗口侧：订阅「桌宠要切换页面」。回调收到 page（可能为 undefined，表示设置页）。 */
+      onOpenSettings: (cb: (page?: string) => void) => () => void;
     };
     heming?: {
       /** 运行平台（process.platform），如 "win32" / "darwin"。 */

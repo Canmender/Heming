@@ -1,28 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { useUiStore, type Page } from "./store/ui.js";
 import { initTheme } from "./store/theme.js";
 import { useAuthStore } from "./store/auth.js";
 import { getToken, fetchFiles, fetchFileUsage, uploadFile } from "./lib/api.js";
 import type { SharedFileMeta } from "@heming/shared";
+// 常驻壳与登录页保持同步导入：它们是首帧就要画出来的东西（标题栏/导航轨/登录表单），
+// 拆成异步反而会让首屏先闪一块占位。下面所有**页面**都改成路由级懒加载。
 import { LoginPage } from "./components/LoginPage.js";
 import { NavRail } from "./components/NavRail.js";
 import { FileTree } from "./components/FileTree.js";
-import { FilePreviewModal } from "./components/FilePreviewModal.js";
-import { TeamBoardPage } from "./components/TeamBoardPage.js";
-import { TaskAreaPage } from "./components/TaskAreaPage.js";
-import { TeamPage } from "./components/TeamPage.js";
-import { AssistantPage } from "./components/AssistantPage.js";
-import { HomePage } from "./components/HomePage.js";
-import { InfohubPage } from "./components/InfohubPage.js";
-import { AutomationPage } from "./components/AutomationPage.js";
-import { StaffPage } from "./components/StaffPage.js";
-import { SettingsPage } from "./components/SettingsPage.js";
-import { MemoryPage } from "./components/MemoryPage.js";
-import { CommandPalette } from "./components/CommandPalette.js";
-import { InterfacesPage } from "./components/InterfacesPage.js";
-import { RegistryInstallCard } from "./components/RegistryInstallCard.js";
-import { SkillsPage } from "./components/SkillsPage.js";
-import { PluginsPage } from "./components/PluginsPage.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
@@ -30,6 +16,75 @@ import { useInfohubStore } from "./lib/infohub/store.js";
 import { useAutomationScheduler } from "./lib/automation/scheduler.js";
 import { useStaffLoop } from "./lib/staff/loop.js";
 import { hasOpenModal } from "./components/useModalA11y.js";
+
+/**
+ * 路由级懒加载：每个页面单独成 chunk，首屏只下「壳」。
+ *
+ * 为什么用 `.then(m => ({ default: m.Xxx }))`：本仓组件都是**命名导出**，
+ * 而 `lazy()` 只认 default。这层包一下既满足契约，又不改任何组件的导出形态
+ * （改导出形态会波及全部引用与测试）。
+ *
+ * 为什么值得懒加载：设置区/任务区/信息中枢/记忆区这类重页面各自带着一坨只在
+ * 本页用得到的依赖（设置区还牵着桌宠偏好，实测把 242KB 的 petPrefs 块拖进了首屏）。
+ * 拆开后这些块只在第一次切到该页时下载，启动帧只付壳的成本。
+ */
+const HomePage = lazy(() => import("./components/HomePage.js").then((m) => ({ default: m.HomePage })));
+const TeamPage = lazy(() => import("./components/TeamPage.js").then((m) => ({ default: m.TeamPage })));
+const AssistantPage = lazy(() =>
+  import("./components/AssistantPage.js").then((m) => ({ default: m.AssistantPage })),
+);
+const TeamBoardPage = lazy(() =>
+  import("./components/TeamBoardPage.js").then((m) => ({ default: m.TeamBoardPage })),
+);
+const StaffPage = lazy(() => import("./components/StaffPage.js").then((m) => ({ default: m.StaffPage })));
+const InfohubPage = lazy(() =>
+  import("./components/InfohubPage.js").then((m) => ({ default: m.InfohubPage })),
+);
+const AutomationPage = lazy(() =>
+  import("./components/AutomationPage.js").then((m) => ({ default: m.AutomationPage })),
+);
+const TaskAreaPage = lazy(() =>
+  import("./components/TaskAreaPage.js").then((m) => ({ default: m.TaskAreaPage })),
+);
+const SkillsPage = lazy(() => import("./components/SkillsPage.js").then((m) => ({ default: m.SkillsPage })));
+const PluginsPage = lazy(() =>
+  import("./components/PluginsPage.js").then((m) => ({ default: m.PluginsPage })),
+);
+const MemoryPage = lazy(() => import("./components/MemoryPage.js").then((m) => ({ default: m.MemoryPage })));
+const SettingsPage = lazy(() =>
+  import("./components/SettingsPage.js").then((m) => ({ default: m.SettingsPage })),
+);
+const InterfacesPage = lazy(() =>
+  import("./components/InterfacesPage.js").then((m) => ({ default: m.InterfacesPage })),
+);
+// 下面三个是「按需出现」的全局浮层/卡片，同样不该进首屏：
+// 命令面板（Ctrl+K 才挂载）、文件预览模态（点预览才挂载）、安装确认卡（有 pending 才有内容）。
+const CommandPalette = lazy(() =>
+  import("./components/CommandPalette.js").then((m) => ({ default: m.CommandPalette })),
+);
+const FilePreviewModal = lazy(() =>
+  import("./components/FilePreviewModal.js").then((m) => ({ default: m.FilePreviewModal })),
+);
+const RegistryInstallCard = lazy(() =>
+  import("./components/RegistryInstallCard.js").then((m) => ({ default: m.RegistryInstallCard })),
+);
+
+/**
+ * 懒加载占位：父容器已经定高（h-full / flex-1），这里只放一行灰字，
+ * 不撑开也不塌陷布局。启动动画期间首屏加载页 chunk，用户实际看不到这一行。
+ */
+function PageFallback() {
+  return (
+    <div
+      // data-testid 是给测试用的稳定锚点：路由级懒加载后切页不再同步完成，
+      // 测试要能判断「目标页真的挂上了」，而不是靠猜几个微任务。它不参与样式与行为。
+      data-testid="page-fallback"
+      className="flex h-full w-full items-center justify-center text-[12px] text-muted"
+    >
+      加载中…
+    </div>
+  );
+}
 
 /**
  * Alt+数字键目标页：1 主页、2 团队看板、3 技能区、4 接口区、5 记忆区、
@@ -153,7 +208,11 @@ export function App() {
       </div>
       {!bootDone && <BootWave onDone={handleBootDone} writeFirst={!HAS_NATIVE_SPLASH} />}
       {/* 全局加一层除了命令面板之外的空壳：面板自己带着遮罩，不需要外层容器 */}
-      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
+      {paletteOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette onClose={() => setPaletteOpen(false)} />
+        </Suspense>
+      )}
     </>
   );
 }
@@ -288,13 +347,27 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
     });
   }, []);
 
-  // 桌宠的「去设置」出口 → 打开设置页并直达模型分组（未登录时忽略）
+  // 桌宠的「去设置 / 点气泡直达页面」出口（未登录时忽略）。
+  // 复用同一条通道：收到 page 时直达对应页面，无 page（旧的无参调用）仍落到设置页。
   useEffect(() => {
     const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
     if (!bridge?.onOpenSettings) return;
-    return bridge.onOpenSettings(() => {
-      useUiStore.getState().openSettings("model");
+    return bridge.onOpenSettings((page) => {
+      const ui = useUiStore.getState();
+      if (page === "team") ui.setPage("team");
+      else if (page === "tasks") ui.setPage("tasks");
+      else if (page === "staff") ui.setPage("staff");
+      else if (page === "infohub") ui.openInfohub();
+      else ui.openSettings("model");
     });
+  }, []);
+
+  // 桌宠在场感（第二波）：订阅通知中心新增条目；主窗口不在前台时才让桌宠开口。
+  // 动态导入而不是静态：petEvent 契约层当前静态依赖 staff/model（30KB 源码），
+  // 静态引入会把整块 82.8KB(gzip) 拖进首屏并被两个入口预载。改成挂载后再加载，
+  // 在场感订阅晚一个 tick 生效（用户无感），首屏直接省掉这块。
+  useEffect(() => {
+    void import("./lib/petEvent.js").then((m) => m.startPetPresence());
   }, []);
 
   // 右侧目录栏宽度：可拖动调节，落盘后下次启动保持（用户要求「支持拖动改变大小」）
@@ -424,7 +497,11 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
       <TitleBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <NavRail onOpenSearch={onOpenSearch} />
-        <main className="flex min-w-0 flex-1 flex-col">{view}</main>
+        <main className="flex min-w-0 flex-1 flex-col">
+          {/* 每个槽位各自 Suspense：只有当前页一块走占位，壳（标题栏/导航/目录栏）不动。
+              启动动画挂着时页面 chunk 已在后台加载，揭开时通常已经就绪。 */}
+          <Suspense fallback={<PageFallback />}>{view}</Suspense>
+        </main>
         {/* 右侧工作目录：可拖动左边缘改宽度（手柄整条 6px 宽，好抓）。
             绑定按钮把本地文件绑到当前会话，通话/协作里点目录就能带上文件。 */}
         <aside className="relative flex shrink-0 flex-col border-l border-line-soft" style={{ width: asideWidth }}>
@@ -486,13 +563,17 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
             />
           </div>
           {previewFile && (
-            <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+            <Suspense fallback={null}>
+              <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+            </Suspense>
           )}
         </aside>
       </div>
       {/* 安装确认是全局的：从接口区发起，但用户可能立刻切页；
           挂在根节点上，pending 在第几页都能弹出来。 */}
-      <RegistryInstallCard />
+      <Suspense fallback={null}>
+        <RegistryInstallCard />
+      </Suspense>
     </div>
   );
 }

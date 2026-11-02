@@ -127,7 +127,7 @@ node scripts/release.mjs --desktop --publish          # 再加：安装包 + lat
 | 6 | `node scripts/build-changelog.mjs` | 写 `packages/web/src/generated/changelog.ts`，并回查里面含当前版本串 |
 | 7 | 打包（`--desktop`） | `pnpm -w run dist:desktop`；核对 `latest.yml` 存在、sha512/size 与安装包一致、内嵌 web 产物含版本串且与 `web-dist` 同名 |
 | 8 | 备份 + 部署（`--deploy`） | **强制先 `backup`**，备份没落到本机就整轮中止；再打/校验 tar → `upload` → `install` → `smoke` |
-| 9 | 更新源（`--publish`） | `publish-update.sh --dry-run` → 真传 → 输出必须含「校验通过」 |
+| 9 | 更新源（`--publish`） | win32 走 `node scripts/publish-update.mjs`（不依赖 Git Bash），其它平台走 `bash scripts/publish-update.sh`；先 `--dry-run` → 真传 → 输出必须含「校验通过」（远端大小与 sha512 均与本地一致） |
 | 10 | 证据清单 | 每步退出码/耗时、产物路径与大小、待人工填写的校验项、可粘进 `docs/HANDOFF.md` §2 的 Markdown |
 
 安全边界：**部署、上传、删除默认全不做**，必须显式 `--deploy` / `--publish`；`--dry-run` 只打印十步计划，
@@ -149,8 +149,9 @@ node scripts/release.mjs --desktop --publish          # 再加：安装包 + lat
 2. **线上 `/api/health` 与主 bundle 的人工比对**：脚本能跑的是服务器本机 `127.0.0.1:8787/api/health`
    （由 `deploy-bare.py smoke` 完成）；公网那一次、以及线上 `index.html` 引用的 bundle 是否与本机云端产物
    同名同字节，仍要人看一眼。
-3. **安装包 sha512 的最终对照**：脚本已把本地 exe 与本地 `latest.yml` 的 sha512/size 对上，但「远端那份
-   `latest.yml` 里的 sha512」与「真上传上去的安装包」仍要人对一次（`publish-update.sh` 只比字节数）。
+3. **安装包 sha512 的最终对照**：脚本已把本地 exe 与本地 `latest.yml` 的 sha512/size 对上；上传后
+   `publish-update.mjs`（win32）/ `publish-update.sh` 也会在远端重算 sha512 并与本地核对。
+   但「远端那份 `latest.yml` 里的 sha512」与「真上传上去的安装包」仍是两份独立事实，可再人对一次。
 
 完整开关与退出码见 `node scripts/release.mjs --help`。
 

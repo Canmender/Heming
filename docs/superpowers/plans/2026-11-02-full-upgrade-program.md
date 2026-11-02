@@ -205,3 +205,16 @@
 **写入边界**：`App.tsx`/`main.tsx` 归 baseline；`TeamPage/TeamBoard` 归 rollout；`pet-host/main.js` 归 hotpath；`secret-store/preload/secureStorage/e2eSession` 归 filepatch；`scripts/` 与 `vite.config.ts` 归 baseline。版本号/CHANGELOG/HANDOFF/INDEX/提交/门禁/打包/部署仍归 Lead。
 
 **版本预期**：特性 57→59（桌宠在场感 + 团队能力两项新能力）、修订 18→19（性能/发布链/安全收口），即 `d.59.2.19.0`；若某项未完成则相应少加，发布前按实际落地项重算。
+
+### 第二波完成与发布准备（2026-11-02 20:35）
+
+| 轨 | 结果 |
+|---|---|
+| ③-1 首屏与包体 | ✅ 首屏 JS gzip 579.8→**119.7 KB（−79.4%）**，应用自有代码 −92%，chunk 28→62；`petEvent` 82.8→**2.7 KB gzip** 并移出 index 预载；两处工程发现（顶层 await 碎块、lazy 与 d39 断言）已入文档 |
+| 发布链修复 | ✅ `scripts/publish-update.mjs`（Node+paramiko，win32 直跑），`release.mjs` 第 9 步接线；自检上传/校验/删除通过，线上 latest.yml 未被覆盖 |
+| ②-4 桌宠在场感 | ✅ 90 web 例 + 67 desktop 例；零生产者改动、渠道互斥、三档强度即时生效、文案脱敏、错过不补发 |
+| ②-3 团队能力 | ✅ 39 例（server 双实现 + web）；用量排行白名单聚合、默认关、清除 + 水位、团队日程只读；隐私断言覆盖 |
+| 安全收口 | ✅ 47 例（desktop 22 / web 25）；safeStorage 异步迁移 + 批量白名单 + 300ms hydrate + P3 备份安全清理 + msgCache 全量迁移 |
+| 全量门禁 | ✅ 2026-11-02 20:31：4/4 包通过无重试；shared 29 / server 141 / web 181 文件 2762 例 / desktop 28 文件 474 例；三包 tsc 0 错误 |
+| 版本 | `d.59.2.19.0`（特性 57→59 两条新能力：桌宠在场感、团队能力；修订 18→19：首屏/发布链/安全收口） |
+| 待办 | 打包 r46 → 部署 → 发布更新源 → 回填 HANDOFF §2 与证据 |

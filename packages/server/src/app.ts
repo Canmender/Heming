@@ -10,11 +10,14 @@ import {
   PutE2eKeysBodySchema,
   ReencryptBodySchema,
   CreateTeamActivitiesBodySchema,
+  CreateTeamUsageBodySchema,
+  TeamUsageRangeSchema,
   type SharedFileMeta,
 } from "@heming/shared";
 import type { Store } from "./store.js";
 import { issueToken, userIdFromToken } from "./auth.js";
 import { presence } from "./presence.js";
+import { dayKeyUtc, parseDayKey, summarizeTeamUsage, usageRangeBounds } from "./teamUsage.js";
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -197,6 +200,68 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   app.delete("/api/team/activities/mine", authOnly, (req, res) => {
     store.clearTeamActivities(userId(req));
     res.status(204).end();
+  });
+
+  // —— ②-3 团队用量：白名单摘要的服务端聚合（不含任何正文/提示词/参数） ——
+
+  /**
+   * 上报本人用量摘要（≤50 条/次，按 `(actor, date, model)` 覆盖式幂等）。
+   *
+   * body 里只有「自然日 / 模型名 / 连接名 / token 数 / 未上报轮数」五类，
+   * schema 之外的字段会被剥掉——客户端即使误传正文也进不了库。
+   */
+  app.post("/api/team/usage", authOnly, (req, res) => {
+    const parsed = CreateTeamUsageBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    for (const item of parsed.data.items) store.upsertTeamUsage(userId(req), item);
+    // `written` = 本次提交条数；`stored` = 服务端该批去重后的行数（重复上报不增长）。
+    const stored = new Set(parsed.data.items.map((it) => `${it.date}\0${it.model}`)).size;
+    res.status(200).json({ written: parsed.data.items.length, stored });
+  });
+
+  /**
+   * 本人明细 + 全站排行。
+   *
+   * `range` 只接受 7d/30d；`to` 可选（客户端本地今天）——不传则用服务端 UTC 今天。
+   * 排行只回聚合数与显示名，模型/连接名等明细只在 `self` 里出现。
+   */
+  app.get("/api/team/usage", authOnly, (req, res) => {
+    const rawRange = typeof req.query.range === "string" ? req.query.range : "7d";
+    const parsedRange = TeamUsageRangeSchema.safeParse(rawRange);
+    if (!parsedRange.success) {
+      res.status(400).json({ error: "invalid range" });
+      return;
+    }
+    const rawTo = typeof req.query.to === "string" ? req.query.to : undefined;
+    if (rawTo !== undefined && parseDayKey(rawTo) === null) {
+      res.status(400).json({ error: "invalid to" });
+      return;
+    }
+    const bounds = usageRangeBounds(parsedRange.data, rawTo ?? dayKeyUtc());
+    const rows = store.listTeamUsage(bounds);
+    const names = new Map(store.listTeamMembers().map((m) => [m.user.id, m.user.displayName]));
+    res.json(
+      summarizeTeamUsage(rows, {
+        viewerId: userId(req),
+        range: parsedRange.data,
+        from: bounds.from,
+        to: bounds.to,
+        names,
+      }),
+    );
+  });
+
+  /**
+   * 清除本人已上传的全部用量行（对称团队动向的清除）。
+   *
+   * 为什么需要它：关闭共享只停「未来上传」，旧行仍在服务端、人仍出现在排行里——
+   * 删除必须由用户显式发起，不能拿「关开关」暗示「已删除」。
+   */
+  app.delete("/api/team/usage/mine", authOnly, (req, res) => {
+    res.json({ deleted: store.clearTeamUsage(userId(req)) });
   });
 
   app.get("/api/conversations", authOnly, (req, res) => {

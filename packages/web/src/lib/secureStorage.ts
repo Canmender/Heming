@@ -1,13 +1,27 @@
 /**
- * 本机密钥信封（d.36 · P0-5）。
+ * 本机密钥信封（d.36 · P0-5；d.58 起异步优先 + 启动预取缓存）。
  *
- * 桌面端把三把钥匙（模型 Key、MCP 请求头、E2E 设备身份）改成**就地信封**：
+ * 桌面端把三把钥匙（模型 Key、MCP 请求头、E2E 设备身份等**低频键**）改成**就地信封**：
  * 密文仍写原键位，只是值变成 `{"__hemingEnc":"v1","data":"<base64>"}`；
- * 加解密在主进程 `safeStorage` 里完成，渲染层只经 preload 的同步桥传字节。
+ * 加解密在主进程 `safeStorage` 里完成，渲染层只经 preload 的桥传字节。
  *
- * 为什么是同步桥：三个键都是「启动时读一次、用户改配置时写一次」，
- * 不在消息收发热路径上。**谁把这层用到高频路径，谁就得先改成批量/异步**——
- * sendSync 会阻塞渲染进程。
+ * ## d.58 的双轨口径（为什么不是纯异步）
+ *
+ * Electron 45 起 `safeStorage` 的**同步**三件套弃用、46 移除；但三个低频键在渲染层是
+ * **模块初始化时同步读**（`store/llm.ts` 的 `loadProfiles()`、`lib/mcp/store.ts` 的
+ * 默认存储、`e2eSession` 的 identity），消费方改造不在本轮范围。所以：
+ *
+ * - **异步优先**：`preload` 在页面脚本前用批量通道（`secret:bootstrap`）预取三个白名单键的
+ *   明文进缓存；`hydrateSecureStorage()` 等预取完成后，读路径命中的是缓存（零 IPC）；
+ * - **缓存只加速、不承担正确性**：缓存未命中时回退旧同步桥（Electron 45 可用）；
+ *   纯异步环境下未命中则由异步补取填充（消费方需由启动门禁保证已 hydrate）；
+ * - 写入：先更新缓存（保证「写后立即读」一致），再落盘——同步桥可用时照旧同步写，
+ *   否则走异步加密队列（纯异步环境）。
+ *
+ * ## P0-5b P3 清理
+ *
+ * `cleanupPlaintextBackups()`：迁移期明文备份键保留一个完整版本后清理——
+ * **幂等**（版本标记）、**清理前用新密文自解密校验**、**绝不删 `.__heming_undecryptable`**。
  *
  * 浏览器端（无桥）保持今天的明文形态：那个 origin 没有系统安全存储可用，
  * 明说比假装加密更诚实。
@@ -24,10 +38,54 @@ export const UNDECRYPTABLE_BACKUP_SUFFIX = ".__heming_undecryptable";
  */
 export const PLAINTEXT_BACKUP_SUFFIX = ".__heming_plaintext_backup";
 
+/**
+ * 启动预取白名单：三个低频键（与 `packages/desktop/secret-store.js` 的
+ * `BOOTSTRAP_ALLOWED_KEYS`、`preload.js` 的 `SECRET_BOOTSTRAP_KEYS` 保持一致）。
+ * 批量解密通道在主进程侧只认这三个键——多一个都不行，这是能力边界。
+ */
+export const SECRET_BOOTSTRAP_KEYS = Object.freeze([
+  "heming.llmConfigs",
+  "heming.mcp.servers.v1",
+  "heming.e2e.identity",
+]);
+const SECRET_BOOTSTRAP_SET = new Set(SECRET_BOOTSTRAP_KEYS);
+
+/** 明文备份清理的版本标记键（幂等：同一版本只清理一次）。 */
+export const BACKUP_CLEANUP_MARKER_KEY = "heming.secure.backupCleanup.v1";
+/** 清理策略版本：改了清理判据就 +1，让老标记失效。 */
+export const BACKUP_CLEANUP_VERSION = 1;
+/** 单次清理最多扫多少个备份键（防止 localStorage 被别人塞满时卡住启动）。 */
+export const BACKUP_CLEANUP_MAX_SCAN = 500;
+/** 校验 msgCache 容器「新密文可解」时最多验多少条（其余按「不确定」保留备份）。 */
+const CONTAINER_VERIFY_MAX = 200;
+
 export interface SecretBridge {
   available: boolean;
   encrypt(plain: string): string | null;
   decrypt(cipherB64: string): string | null;
+  /** 加解密口径（d.58）：`"async"` / `"sync"` / `null`。 */
+  mode?: "async" | "sync" | null;
+  /** 异步三件套是否可用。 */
+  asyncAvailable?: boolean;
+  /** 启动预取完成信号（永不 reject）。 */
+  ready?: Promise<{ available: boolean; mode?: string | null; hydrated: boolean }>;
+  /** 同步读预取缓存：命中返回明文（解不开为 null），未命中 undefined。 */
+  cachedRead?: (key: string) => string | null | undefined;
+  /** 写盘后刷新缓存。 */
+  cacheSet?: (key: string, plain: string) => void;
+  /** 失效缓存。 */
+  cacheDelete?: (key: string) => void;
+  /** 批量解密（白名单三键）。 */
+  bootstrap?: (payload: {
+    entries: Array<{ key: string; data: string }>;
+  }) => Promise<{
+    available: boolean;
+    mode?: string | null;
+    plaintexts: Array<{ key: string; value: string | null }>;
+  }>;
+  availableAsync?: () => Promise<boolean>;
+  encryptAsync?: (plain: string) => Promise<string | null>;
+  decryptAsync?: (cipherB64: string) => Promise<string | null>;
 }
 
 export interface SecureStorageStatus {
@@ -47,6 +105,28 @@ const plaintextKeys = new Set<string>();
 const undecryptableKeys = new Set<string>();
 const backedUpKeys = new Set<string>();
 
+/** 启动预取 / hydrate 的状态（异步，永不 reject）。 */
+export interface SecureHydration {
+  /** hydrate 是否已跑完（跑完后缓存即热、P3 清理已尝试）。 */
+  done: boolean;
+  /** preload 预取是否真的注入了缓存（false = 只能走同步兜底/异步补取）。 */
+  hydrated: boolean;
+  /** 系统安全存储是否可用（以预取结果为准；无桥为 false）。 */
+  available: boolean;
+  /** 加解密口径：`"async"`（首选）/ `"sync"`（旧版兜底）/ `null`（不可用）。 */
+  mode?: "async" | "sync" | null;
+  /** P3 清理结果（未跑则为 undefined）。 */
+  cleanup?: BackupCleanupResult;
+}
+
+let hydrationState: SecureHydration = { done: false, hydrated: false, available: false };
+let hydrationPromise: Promise<SecureHydration> | null = null;
+const hydratedSubscribers = new Set<(state: SecureHydration) => void>();
+/** 异步补取中的键：同一键并发读只发一个 IPC。 */
+const asyncFillInFlight = new Set<string>();
+/** storage 事件监听只装一次。 */
+let storageInvalidationInstalled = false;
+
 function bridge(): SecretBridge | undefined {
   if (typeof window === "undefined") return undefined;
   const b = window.__heming_secrets;
@@ -54,13 +134,114 @@ function bridge(): SecretBridge | undefined {
   return b;
 }
 
+/** 旧同步桥可用（Electron 45；46 起 `available` 会变 false）。 */
+function canSyncCrypto(b: SecretBridge | undefined): boolean {
+  return !!b && b.available === true && typeof b.encrypt === "function" && typeof b.decrypt === "function";
+}
+
+/** 异步桥可用（Electron 45+，且 preload 报告了异步能力）。 */
+function canAsyncCrypto(b: SecretBridge | undefined): boolean {
+  return (
+    !!b &&
+    b.asyncAvailable === true &&
+    typeof b.encryptAsync === "function" &&
+    typeof b.decryptAsync === "function"
+  );
+}
+
+/** 安全存储是否可用：同步桥优先，其次「已 hydrate 且预取报告可用」。 */
+function effectiveAvailable(b: SecretBridge | undefined = bridge()): boolean {
+  if (!b) return false;
+  if (b.available === true) return true;
+  return hydrationState.done && hydrationState.available === true;
+}
+
+/** 后台异步补解密（纯异步环境缓存未命中时用）：失败才标「解不开」。 */
+function scheduleAsyncFill(key: string, data: string): void {
+  const b = bridge();
+  if (!b || typeof b.decryptAsync !== "function") return;
+  if (asyncFillInFlight.has(key)) return;
+  asyncFillInFlight.add(key);
+  void b
+    .decryptAsync(data)
+    .then((plain) => {
+      asyncFillInFlight.delete(key);
+      if (typeof plain !== "string") {
+        undecryptableKeys.add(key);
+        return;
+      }
+      b.cacheSet?.(key, plain);
+      undecryptableKeys.delete(key);
+      plaintextKeys.delete(key);
+    })
+    .catch(() => {
+      asyncFillInFlight.delete(key);
+      undecryptableKeys.add(key);
+    });
+}
+
+/** 后台异步加密落盘（纯异步环境写路径）：失败退回明文，绝不丢配置。 */
+async function writeEnvelopeAsync(
+  key: string,
+  value: string,
+  base: StorageLike,
+  b: SecretBridge,
+): Promise<void> {
+  try {
+    const cipher = typeof b.encryptAsync === "function" ? await b.encryptAsync(value) : null;
+    if (!cipher) {
+      plaintextKeys.add(key);
+      base.setItem(key, value);
+      return;
+    }
+    base.setItem(key, envelopeOf(cipher));
+    plaintextKeys.delete(key);
+    undecryptableKeys.delete(key);
+    b.cacheSet?.(key, value);
+  } catch {
+    // 配额/加密失败：明文兜底（比丢配置好），并如实标记未加密
+    plaintextKeys.add(key);
+    try {
+      base.setItem(key, value);
+    } catch {
+      /* 明文也写不进：内存态由调用方保留 */
+    }
+  }
+}
+
+/**
+ * 装 storage 事件监听：别的窗口改了这三个低频键（或它们的备份）→ 失效本窗口预取缓存，
+ * 下一次读自动回退同步桥拿最新值。
+ *
+ * 为什么失效而不是异步刷新：同步读的调用方拿不到 await 的机会，
+ * 「缓存里保留旧值」比「回退到每次都读盘」更容易让用户困惑（改完 Key 不生效）。
+ */
+function installStorageInvalidation(): void {
+  if (storageInvalidationInstalled || typeof window === "undefined") return;
+  storageInvalidationInstalled = true;
+  try {
+    window.addEventListener("storage", (event) => {
+      const key = event.key;
+      if (typeof key !== "string" || !key) return;
+      if (!SECRET_BOOTSTRAP_SET.has(key) && !key.endsWith(PLAINTEXT_BACKUP_SUFFIX)) return;
+      bridge()?.cacheDelete?.(key);
+    });
+  } catch {
+    /* 极端环境没有 addEventListener：退化为「缓存不主动失效」 */
+  }
+}
+
 export function hasSecureBridge(): boolean {
   return bridge() !== undefined;
 }
 
 export function secureStorageAvailable(): boolean {
-  const b = bridge();
-  return !!b && b.available === true;
+  return effectiveAvailable();
+}
+
+/** 当前 hydrate 状态快照（供设置区/诊断用；不改变既有状态卡文案）。 */
+export function secureHydrationSnapshot(): SecureHydration {
+  return { ...hydrationState };
 }
 
 /** localStorage 安全适配：访问/写入本身都可能抛（配额、隐私模式）。 */
@@ -133,35 +314,74 @@ export function secureGetItem(key: string, base: StorageLike = browserStorage())
   }
   if (shape.kind === "envelope") {
     const b = bridge();
-    if (!b || b.available !== true) {
+    if (!b) {
       undecryptableKeys.add(key);
       return null;
     }
-    const plain = b.decrypt(shape.data);
-    if (plain === null) {
+    /*
+     * 读优先级（d.58）：
+     * 1. **预取缓存**（同步、零 IPC）——日常路径；
+     * 2. 旧同步桥（Electron 45 兜底）——缓存未命中时；
+     * 3. 纯异步环境的异步补取——本次同步读拿不到值（返回 null），
+     *    由启动门禁（`hydrateSecureStorage`）保证日常不会走到这一步。
+     */
+    const cached = b.cachedRead?.(key);
+    if (cached === undefined) {
+      if (canSyncCrypto(b)) {
+        const plain = b.decrypt(shape.data);
+        if (plain === null) {
+          undecryptableKeys.add(key);
+          return null;
+        }
+        b.cacheSet?.(key, plain);
+        undecryptableKeys.delete(key);
+        plaintextKeys.delete(key);
+        return plain;
+      }
+      scheduleAsyncFill(key, shape.data);
+      undecryptableKeys.add(key);
+      return null;
+    }
+    if (cached === null) {
       undecryptableKeys.add(key);
       return null;
     }
     undecryptableKeys.delete(key);
     plaintextKeys.delete(key); // 成功读到密文 ⇒ 不再是明文键
-    return plain;
+    return cached;
   }
 
   // 明文（旧数据）：桌面可用时就地懒迁移；失败保留明文，绝不丢配置。
   const b = bridge();
-  if (b && b.available === true) {
+  if (b && canSyncCrypto(b)) {
     const cipher = b.encrypt(raw);
     if (cipher) {
       try {
         base.setItem(key, envelopeOf(cipher));
         plaintextKeys.delete(key);
         undecryptableKeys.delete(key);
+        b.cacheSet?.(key, raw);
       } catch {
         plaintextKeys.add(key);
       }
     } else {
       plaintextKeys.add(key);
     }
+  } else if (b && canAsyncCrypto(b) && effectiveAvailable(b)) {
+    // 纯异步环境：后台迁移，本次仍返回明文（与旧行为一致：不阻塞读）。
+    plaintextKeys.add(key);
+    void (async () => {
+      try {
+        const cipher = typeof b.encryptAsync === "function" ? await b.encryptAsync(raw) : null;
+        if (!cipher) return;
+        base.setItem(key, envelopeOf(cipher));
+        plaintextKeys.delete(key);
+        undecryptableKeys.delete(key);
+        b.cacheSet?.(key, raw);
+      } catch {
+        /* 迁移失败：明文原样保留，下一轮再试 */
+      }
+    })();
   } else if (b) {
     // 只读的明文也要进清单，否则降级不可见：启动时只读的键在磁盘上是明文，
     // 状态卡若漏报就会让用户以为它已被加密。
@@ -203,7 +423,7 @@ export function secureSetItem(
 ): void {
   backupBeforeOverwrite(key, base);
   const b = bridge();
-  if (b && b.available === true) {
+  if (b && canSyncCrypto(b)) {
     const cipher = b.encrypt(value);
     if (cipher) {
       try {
@@ -211,12 +431,22 @@ export function secureSetItem(
         plaintextKeys.delete(key);
         // 新值已覆盖旧信封，旧的「解不开」状态随之作废。
         undecryptableKeys.delete(key);
+        // 写后立即读一致：同步桥写成功后刷新预取缓存。
+        b.cacheSet?.(key, value);
         return;
       } catch {
         /* 配额：退回明文，至少这次会话的配置还在 */
       }
     }
     plaintextKeys.add(key);
+  } else if (b && canAsyncCrypto(b) && effectiveAvailable(b)) {
+    /*
+     * 纯异步环境：先把新值写进缓存（本窗口「写后立即读」一致），再后台加密落盘。
+     * 落盘失败退回明文（`writeEnvelopeAsync` 内部处理），绝不丢配置。
+     */
+    b.cacheSet?.(key, value);
+    void writeEnvelopeAsync(key, value, base, b);
+    return;
   } else if (b) {
     plaintextKeys.add(key); // 桌面桥在、系统安全存储不可用
   }
@@ -231,6 +461,7 @@ export function secureSetItem(
 export function secureRemoveItem(key: string, base: StorageLike = browserStorage()): void {
   plaintextKeys.delete(key);
   undecryptableKeys.delete(key);
+  bridge()?.cacheDelete?.(key);
   base.removeItem(key);
 }
 
@@ -454,16 +685,377 @@ export function secureStorageStatus(): SecureStorageStatus {
   const b = bridge();
   return {
     desktop: !!b,
-    available: !!b && b.available === true,
+    // 「可用」按**实际能否加解密**判定：纯异步环境下 `b.available`（同步探测）会是 false，
+    // 但异步通路可用、用户看到的仍是「已加密」——用有效可用性才不会误报降级。
+    available: effectiveAvailable(b),
     plaintextKeys: [...plaintextKeys].sort(),
     undecryptableKeys: [...undecryptableKeys].sort(),
     backedUpKeys: [...backedUpKeys].sort(),
   };
 }
 
-/** 测试隔离：清掉进程内状态（不动 localStorage）。 */
+/** 测试隔离：清掉进程内状态（不动 localStorage；已注册的 hydrate 订阅保留）。 */
 export function resetSecureStorageState(): void {
   plaintextKeys.clear();
   undecryptableKeys.clear();
   backedUpKeys.clear();
+  asyncFillInFlight.clear();
+  hydrationState = { done: false, hydrated: false, available: false };
+  hydrationPromise = null;
+}
+
+/* ─────────────────────── d.58 · 启动 hydrate（预取缓存 + P3 清理） ─────────────────────── */
+
+/** 等一个 Promise，超时按失败处理（绝不让启动链被一个卡住的 IPC 拖死）。 */
+function withTimeout<T>(input: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), Math.max(1, timeoutMs));
+    input.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** 当前应用版本（5 段）；拿不到时给 `dev`（开发/测试环境每次都允许跑一次清理）。 */
+function currentAppVersion(): string {
+  try {
+    const v = typeof window !== "undefined" ? window.__heming_version : undefined;
+    return typeof v === "string" && v.trim() ? v.trim() : "0.0.0-dev";
+  } catch {
+    return "0.0.0-dev";
+  }
+}
+
+/** 枚举 localStorage 键（失败按空处理——隐私模式下清不了就下次再清）。 */
+function listLocalStorageKeys(): string[] {
+  try {
+    const out: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key) out.push(key);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** 清理时对某条密文做「能不能解开」的验证（同步桥优先，其次异步）。 */
+async function decryptForVerify(cipherB64: string): Promise<string | null> {
+  const b = bridge();
+  if (!b) return null;
+  if (canSyncCrypto(b)) {
+    try {
+      return b.decrypt(cipherB64);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof b.decryptAsync === "function") {
+    try {
+      return await b.decryptAsync(cipherB64);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** 与 `lib/e2e/cacheEnvelope.ts` 的 `MSG_CACHE_MARK` / `MSG_CACHE_VERSION` 保持一致。 */
+const MSG_CACHE_MARK = "__hemingMsgCache";
+const MSG_CACHE_VERSION = "v2";
+
+/**
+ * 校验 msgCache 的 v2 容器「新密文可解」：全部条目都是密文且每条都能解开才算通过。
+ *
+ * 不做循环 import：`cacheEnvelope.ts` 依赖本模块的常量，这里反向 import 会成环，
+ * 所以两处标记常量各自声明、由本注释互相指向（值相同，改一处必须改两处）。
+ */
+async function verifyMsgCacheContainer(raw: string): Promise<{ ok: boolean; reason: string }> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: "bad-data" };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, reason: "bad-data" };
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record[MSG_CACHE_MARK] !== MSG_CACHE_VERSION) return { ok: false, reason: "foreign-container" };
+  const items = record.items;
+  if (!Array.isArray(items)) return { ok: false, reason: "bad-data" };
+  if (items.length > CONTAINER_VERIFY_MAX) return { ok: false, reason: "too-many-entries" };
+  for (const item of items) {
+    if (!item || typeof item !== "object") return { ok: false, reason: "bad-data" };
+    const entry = item as Record<string, unknown>;
+    if (typeof entry.d === "string" && entry.d) {
+      const plain = await decryptForVerify(entry.d);
+      if (plain === null) return { ok: false, reason: "undecryptable" };
+    } else if (entry.m !== undefined) {
+      return { ok: false, reason: "still-plain" };
+    } else {
+      return { ok: false, reason: "bad-data" };
+    }
+  }
+  return { ok: true, reason: "ok" };
+}
+
+/** 主键是否已经是「可解的新形态」：信封能自解密，或 msgCache 容器全部条目可解。 */
+async function verifyNewForm(raw: string): Promise<{ ok: boolean; reason: string }> {
+  const shape = parseStored(raw);
+  if (shape.kind === "bad-envelope") return { ok: false, reason: "bad-envelope" };
+  if (shape.kind === "plain") {
+    // msgCache 容器不是 `__hemingEnc` 信封（parseStored 会当成明文），单独识别。
+    if (raw.includes(`"${MSG_CACHE_MARK}"`)) return verifyMsgCacheContainer(raw);
+    return { ok: false, reason: "still-plain" };
+  }
+  const plain = await decryptForVerify(shape.data);
+  return plain === null ? { ok: false, reason: "undecryptable" } : { ok: true, reason: "ok" };
+}
+
+export type BackupCleanupSkipReason = "already-clean" | "no-bridge" | "unavailable";
+
+/** P3 清理结果（设置区/诊断可据此说明「还留了哪些备份、为什么」）。 */
+export interface BackupCleanupResult {
+  /** 本次是否真的执行（同版本已清过 / 没有可用桥时为 false）。 */
+  ran: boolean;
+  /** 执行时的应用版本（版本标记的一部分）。 */
+  version: string;
+  /** 扫到的明文备份键数量。 */
+  scanned: number;
+  /** 被删掉的备份键（主键）。 */
+  deleted: string[];
+  /** 保留的备份键与原因（主键缺失/仍明文/新密文解不开…）。 */
+  kept: Array<{ key: string; reason: string }>;
+  reason?: BackupCleanupSkipReason;
+}
+
+function backupCleanupSkip(reason: BackupCleanupSkipReason, version: string): BackupCleanupResult {
+  return { ran: false, version, scanned: 0, deleted: [], kept: [], reason };
+}
+
+/**
+ * P0-5b P3：清理**迁移期明文备份键**（`<键>.__heming_plaintext_backup`）。
+ *
+ * 安全序（Lead 定稿，顺序不可调换）：
+ * 1. 只处理明文备份后缀；`.__heming_undecryptable`（唯一可恢复的旧密文）**永不删**；
+ * 2. 先看主键当前形态：缺失 → 保留（备份是唯一副本）；仍是明文 → 保留（还没迁完）；
+ * 3. 是信封/容器 → **先自解密校验**，全部能解才删备份；解不开就保留；
+ * 4. 幂等：用「应用版本 + 清理策略版本」标记，同一版本只跑一次（`force` 可强跑，测试用）；
+ * 5. 无桥 / 安全存储不可用 → 不跑也不写标记（等下一次可用时再清）。
+ *
+ * @param opts.keys 测试注入的键清单；缺省枚举 localStorage（有数量上限）。
+ */
+export async function cleanupPlaintextBackups(opts?: {
+  base?: StorageLike;
+  version?: string;
+  force?: boolean;
+  keys?: string[];
+}): Promise<BackupCleanupResult> {
+  const base = opts?.base ?? browserStorage();
+  const version = opts?.version ?? currentAppVersion();
+  const b = bridge();
+  if (!b) return backupCleanupSkip("no-bridge", version);
+  if (!effectiveAvailable(b)) return backupCleanupSkip("unavailable", version);
+
+  // 1) 幂等：同一版本只跑一次（标记读坏/策略版本变过 = 当作没跑过）
+  if (!opts?.force) {
+    try {
+      const raw = base.getItem(BACKUP_CLEANUP_MARKER_KEY);
+      if (raw) {
+        const marker = JSON.parse(raw) as { v?: unknown; version?: unknown };
+        if (marker && marker.v === BACKUP_CLEANUP_VERSION && marker.version === version) {
+          return backupCleanupSkip("already-clean", version);
+        }
+      }
+    } catch {
+      /* 标记坏了：当作没跑过，这次跑一遍 */
+    }
+  }
+
+  const allKeys = opts?.keys ?? listLocalStorageKeys();
+  const backupKeys = allKeys
+    .filter((key) => typeof key === "string" && key.endsWith(PLAINTEXT_BACKUP_SUFFIX))
+    .slice(0, BACKUP_CLEANUP_MAX_SCAN);
+
+  const deleted: string[] = [];
+  const kept: Array<{ key: string; reason: string }> = [];
+  for (const backupKey of backupKeys) {
+    const mainKey = backupKey.slice(0, -PLAINTEXT_BACKUP_SUFFIX.length);
+    let raw: string | null = null;
+    try {
+      raw = base.getItem(mainKey);
+    } catch {
+      kept.push({ key: mainKey, reason: "read-failed" });
+      continue;
+    }
+    if (raw === null || raw === "") {
+      kept.push({ key: mainKey, reason: "main-missing" });
+      continue;
+    }
+    const verdict = await verifyNewForm(raw);
+    if (!verdict.ok) {
+      kept.push({ key: mainKey, reason: verdict.reason });
+      continue;
+    }
+    try {
+      base.removeItem(backupKey);
+      deleted.push(mainKey);
+    } catch {
+      kept.push({ key: mainKey, reason: "remove-failed" });
+    }
+  }
+
+  // 2) 写版本标记（只标记「跑过」，不标记「清干净了」——保留项下个版本再试）
+  try {
+    base.setItem(
+      BACKUP_CLEANUP_MARKER_KEY,
+      JSON.stringify({ v: BACKUP_CLEANUP_VERSION, version, at: new Date().toISOString(), deleted: deleted.length }),
+    );
+  } catch {
+    /* 配额/隐私模式：标记写不进去只影响幂等，不影响本次清理结果 */
+  }
+
+  return { ran: true, version, scanned: backupKeys.length, deleted, kept };
+}
+
+/**
+ * 主动补一次批量预取（旧 preload 没有 `ready` 时的兜底；新 preload 自带预取）。
+ *
+ * 只认白名单三键，且只挑信封形态——明文/坏数据留给 `secureGetItem` 的既有逻辑。
+ */
+async function bootstrapNow(b: SecretBridge): Promise<{ available: boolean; hydrated: boolean; mode?: string | null }> {
+  if (typeof b.bootstrap !== "function" || typeof window === "undefined") {
+    return { available: b.available === true, hydrated: false };
+  }
+  const entries: Array<{ key: string; data: string }> = [];
+  for (const key of SECRET_BOOTSTRAP_KEYS) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as { data?: unknown };
+      if (parsed && typeof parsed.data === "string" && parsed.data) entries.push({ key, data: parsed.data });
+    } catch {
+      /* 单键坏数据不影响其它键 */
+    }
+  }
+  if (entries.length === 0) return { available: b.available === true, hydrated: true };
+  try {
+    const result = await b.bootstrap({ entries });
+    for (const item of result.plaintexts) {
+      if (item && typeof item.key === "string") {
+        if (typeof item.value === "string") b.cacheSet?.(item.key, item.value);
+      }
+    }
+    return { available: result.available === true, hydrated: true, mode: result.mode ?? b.mode ?? null };
+  } catch {
+    return { available: b.available === true, hydrated: false };
+  }
+}
+
+/**
+ * 启动 hydrate：等 preload 的批量预取完成 → 装 storage 失效监听 → 跑一次 P3 清理。
+ *
+ * **必须由应用启动点 await 后再渲染**（`main.tsx`，Baseline 接线）：这样缓存即热，
+ * 「缓存未命中回退同步桥」只是极端兜底，而不是日常路径；否则 Electron 46 一来
+ * 三个低频键的首次同步读会全部落到兜底上，等于没迁。单飞、永不 reject。
+ */
+export function hydrateSecureStorage(opts?: {
+  skipCleanup?: boolean;
+  base?: StorageLike;
+  timeoutMs?: number;
+}): Promise<SecureHydration> {
+  if (hydrationPromise) return hydrationPromise;
+  hydrationPromise = (async () => {
+    installStorageInvalidation();
+    const b = bridge();
+    const finish = (state: SecureHydration): SecureHydration => {
+      hydrationState = state;
+      for (const subscriber of hydratedSubscribers) {
+        try {
+          subscriber(state);
+        } catch {
+          /* 订阅者异常不能影响启动 */
+        }
+      }
+      return state;
+    };
+
+    if (!b) return finish({ done: true, hydrated: false, available: false });
+
+    let ready: { available: boolean; hydrated: boolean; mode?: string | null } | undefined;
+    try {
+      if (b.ready) {
+        const value = await withTimeout(b.ready, opts?.timeoutMs ?? 3000);
+        ready = {
+          available: value && value.available === true,
+          hydrated: value && value.hydrated === true,
+          mode: value && typeof value.mode === "string" ? value.mode : (b.mode ?? null),
+        };
+      } else {
+        ready = await bootstrapNow(b);
+      }
+      /*
+       * preload 的预取可能因为「页面脚本执行得太快 / preload 读不到 localStorage」而报
+       * `hydrated:false`；此处由渲染层自己补一次批量预取（渲染层一定能读 localStorage）。
+       * 只补一次，失败就走兜底——不能让启动挂在重试上。
+       */
+      if (ready && !ready.hydrated && (ready.mode === "async" || b.mode === "async")) {
+        const retried = await bootstrapNow(b);
+        if (retried.hydrated) ready = { ...retried, available: retried.available || ready.available };
+      }
+    } catch {
+      ready = undefined; // 预取超时/失败：走兜底，不让启动挂住
+    }
+
+    const rawMode = ready?.mode ?? b.mode;
+    const mode: "async" | "sync" | null =
+      rawMode === "async" || rawMode === "sync" ? rawMode : null;
+    const state: SecureHydration = {
+      done: true,
+      hydrated: ready?.hydrated === true,
+      available: ready ? ready.available === true : b.available === true,
+      mode,
+    };
+
+    if (!opts?.skipCleanup) {
+      try {
+        state.cleanup = await cleanupPlaintextBackups(opts?.base ? { base: opts.base } : undefined);
+      } catch {
+        /* 清理失败不影响启动：备份多留一个版本而已 */
+      }
+    }
+    return finish(state);
+  })();
+  return hydrationPromise;
+}
+
+/** 订阅 hydrate 完成（已完成后立即回调一次）。返回取消订阅函数。 */
+export function onSecureHydrated(callback: (state: SecureHydration) => void): () => void {
+  if (typeof callback !== "function") return () => {};
+  if (hydrationState.done) {
+    try {
+      callback({ ...hydrationState });
+    } catch {
+      /* 同上 */
+    }
+    return () => {};
+  }
+  hydratedSubscribers.add(callback);
+  return () => {
+    hydratedSubscribers.delete(callback);
+  };
+}
+
+/** hydrate 是否已完成（启动门禁的断言点）。 */
+export function secureStorageHydrated(): boolean {
+  return hydrationState.done;
 }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * E2E 会话层：链管理、封解密、乱序暂挂与本地明文缓存。
  * 规格：docs/superpowers/specs/2026-10-17-e2e-encryption-design.md §3.2/§5/§6。
  *
@@ -33,7 +33,7 @@ import {
   toB64,
   fromB64,
 } from "./e2eCrypto.js";
-import { secureGetItem, secureSetItem, secureBridge, secureSetItemVerified, readSecureValue, backupRawOnce, markSecureUndecryptable, PLAINTEXT_BACKUP_SUFFIX, UNDECRYPTABLE_BACKUP_SUFFIX } from "./secureStorage.js";
+import { secureGetItem, secureSetItem, secureBridge, secureSetItemVerified, readSecureValue, backupRawOnce, markSecureUndecryptable, onSecureHydrated, PLAINTEXT_BACKUP_SUFFIX, UNDECRYPTABLE_BACKUP_SUFFIX } from "./secureStorage.js";
 import {
   MIGRATE_BATCH,
   decodeEntries,
@@ -1357,6 +1357,64 @@ export function migrateMsgCache(convId: string): number {
   return before - pending(next);
 }
 
+/** 全量扫描迁移的结果（P3 兜底：给启动日志/诊断用，不渲染到界面）。 */
+export interface MsgCacheMigrationSummary {
+  /** 扫到的会话数（只统计真实存在的缓存键）。 */
+  conversations: number;
+  /** 本批迁成密文的条目数。 */
+  migrated: number;
+  /** 加密失败（fail-open 保留明文）的条目数。 */
+  failed: number;
+  /** 扫完仍在明文形态的条目数（等于 0 才算「全量迁完」）。 */
+  remainingPlaintext: number;
+}
+
+/**
+ * P0-5b P3 · msgCache 明文全量扫描兜底。
+ *
+ * 读侧懒迁移（`list` / `migrateMsgCache`）只覆盖「用户真的打开过的会话」；
+ * 没打开过的会话里的旧明文条目会一直躺在磁盘上。启动 hydrate 完成后跑一遍本函数，
+ * 把所有 `heming.msgCache.*` 逐会话迁到 v2 容器（每批 ≤`MIGRATE_BATCH` 条）。
+ *
+ * 幂等：已是密文的条目原样跳过（`migratePlainEntries` 保证绝不二次加密）；
+ * 加密失败保留明文并标记 `encrypt-failed`（fail-open，绝不丢消息）；
+ * 每会话最多跑 `maxBatchesPerConversation` 批，避免会话极多时拖慢启动
+ * （剩下的下一次启动继续迁，进度单调推进）。
+ */
+export function migrateAllMsgCaches(maxBatchesPerConversation = 20): MsgCacheMigrationSummary {
+  const summary: MsgCacheMigrationSummary = {
+    conversations: 0,
+    migrated: 0,
+    failed: 0,
+    remainingPlaintext: 0,
+  };
+  const crypto = cacheCrypto();
+  if (!crypto) return summary; // 无桥/不可用：保持明文，等可用时再迁
+
+  for (const key of listMsgCacheKeys()) {
+    const convId = key.slice(MSGCACHE_PREFIX.length);
+    let view = readCacheView(convId);
+    let migrated = 0;
+    let failed = 0;
+    for (let batchIndex = 0; batchIndex < maxBatchesPerConversation; batchIndex += 1) {
+      if (!view.entries.some((entry) => "m" in entry)) break;
+      const batch = migratePlainEntries(view.entries, crypto, MIGRATE_BATCH);
+      failed += batch.failed;
+      if (batch.migrated === 0) break;
+      view = writeCacheView(convId, view, batch.entries, view.messages, undefined);
+      cacheView.set(MSGCACHE_PREFIX + convId, view);
+      migrated += batch.migrated;
+      if (batch.migrated < MIGRATE_BATCH) break;
+    }
+    if (failed > 0) noteCacheIssue(convId, "encrypt-failed");
+    summary.conversations += 1;
+    summary.migrated += migrated;
+    summary.failed += failed;
+    summary.remainingPlaintext += view.entries.filter((entry) => "m" in entry).length;
+  }
+  return summary;
+}
+
 /**
  * 默认消息缓存实现（jsdom/浏览器共用；测试与接线层直接引用同一实例）。
  *
@@ -1555,3 +1613,15 @@ export function resetMsgCacheLru(): void {
   cacheLru = null;
   cacheLruPersistedAt = 0;
 }
+
+// —— P0-5b P3 兜底：hydrate 完成后全量迁一次 msgCache 明文（未打开过的会话也迁）——
+// 注册在模块层：`main.tsx` 的 `hydrateSecureStorage()` 完成后触发；无桥/不可用时跳过，
+// 明文原样保留（绝不因迁移失败丢消息），下一次可用时继续。
+onSecureHydrated((state) => {
+  if (!state.available) return;
+  try {
+    migrateAllMsgCaches();
+  } catch {
+    /* 全量迁移失败不影响启动 */
+  }
+});

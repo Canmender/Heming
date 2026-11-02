@@ -79,6 +79,16 @@ export function initSchema(db: DatabaseSyncType): void {
     );
     CREATE INDEX IF NOT EXISTS idx_team_activities_at ON team_activities(occurred_at DESC);
     CREATE INDEX IF NOT EXISTS idx_team_activities_actor ON team_activities(actor_id, occurred_at DESC);
+    -- ②-3 团队用量：按 (actor_id, date, model) 唯一聚合。
+    -- 只存数字与名称（模型名/用户自命名的连接名），**不存**提示词、正文、工具参数或结果；
+    -- tokens 允许 NULL：供应商一次都没上报时，「未上报」与「用了 0」必须能区分（d.32）。
+    CREATE TABLE IF NOT EXISTS team_usage (
+      actor_id TEXT NOT NULL, date TEXT NOT NULL, model TEXT NOT NULL,
+      tokens INTEGER, unreported INTEGER NOT NULL DEFAULT 0,
+      connections TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL,
+      PRIMARY KEY (actor_id, date, model)
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_usage_date ON team_usage(date);
   `);
   // 幂等列迁移：生产库已有无 recalled_at 列的 messages 表（CREATE IF NOT EXISTS 不会补列）；
   // E2E Task 2 同模式补 enc/cipher/chain_kid/n（enc 带非空默认值，SQLite ALTER 允许常量默认）。

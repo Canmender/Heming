@@ -12,7 +12,14 @@ import { classifyPointerUp, isInteractiveAt, shouldReportChange, type Rect } fro
 import { useLive2D } from "./useLive2D.js";
 import { usePetChat } from "./usePetChat.js";
 import { poseDrivesMouth, poseMotion, resolvePose, type PetPose } from "../../lib/petPose.js";
-import { parsePetEvent } from "../../lib/petEvent.js";
+import {
+  EMPTY_PET_PRESENCE,
+  loadPetPresencePrefs,
+  prunePetPresence,
+  reducePetEvent,
+  type PetEventRoute,
+  type PetPresenceVisual,
+} from "../../lib/petEvent.js";
 
 /**
  * 桌宠窗口（d.46）。
@@ -54,44 +61,58 @@ export function PetWindow() {
   const chat = usePetChat(prefs.agentId);
 
   /**
-   * 外部驱动（`pet:event`）：主进程推来的姿态与文案。
+   * 外部驱动（`pet:event`）：主进程/主窗口推来的姿态与文案（d.58 在场感）。
    *
-   * 目前**没有生产者**，是第三期的预留消费端——接上任意发送方即生效
-   * （任务收尾 d.51 / 日程临期与幕僚简报 d.48 / 自动化 d.47）。
-   * 姿态由发送方负责收尾（发 `reset` 或下一条 `pose`），不设自动过期：
-   * 桌宠无从判断「这条简报该显示多久」，交给知道上下文的一方决定。
+   * 事件一律先过归约（`reducePetEvent` 内部解析校验）：
+   * - 强度偏好（安静/正常/积极）决定「只换姿态 / 只冒泡 / 姿态+气泡+动作」；
+   * - 气泡 4 秒后自动收回（`prunePetPresence`），姿态同理，不会卡在某个状态；
+   * - 与用户对话（流式输出）期间新事件先排队，这一轮结束后再决定是否显示；
+   * - 排队超过 10 秒直接丢弃——「错过不补发」，十分钟前的提醒没有价值。
    */
-  const [externalPose, setExternalPose] = useState<PetPose | null>(null);
-  const [externalBubble, setExternalBubble] = useState<{ text: string; at: number } | null>(null);
+  const [presence, setPresence] = useState<PetPresenceVisual>({ ...EMPTY_PET_PRESENCE });
+  /** 对话进行中收到的事件：只留最近一条，且不持久化（错过不补发）。 */
+  const pendingPresenceRef = useRef<{ raw: unknown; at: number } | null>(null);
+  const chatBusyRef = useRef(false);
+  chatBusyRef.current = chat.streaming;
 
   useEffect(() => {
     const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
     if (!bridge?.onEvent) return;
     return bridge.onEvent((raw) => {
-      // 跨进程载荷一律不可信：畸形事件静默忽略（桌宠没有控制台可给用户看）
-      const ev = parsePetEvent(raw);
-      if (!ev) return;
-      if (ev.kind === "pose") {
-        setExternalPose(ev.pose);
-      } else if (ev.kind === "speak") {
-        setExternalBubble({ text: ev.text, at: Date.now() });
-      } else if (ev.kind === "task") {
-        setExternalBubble({ text: ev.ok ? `完成了：${ev.title}` : `没成功：${ev.title}`, at: Date.now() });
-      } else if (ev.kind === "schedule") {
-        setExternalBubble({ text: `${ev.at} ${ev.title}`, at: Date.now() });
-      } else if (ev.kind === "reset") {
-        setExternalPose(null);
-        setExternalBubble(null);
+      // 强度每次现读：设置区改完立即生效，不必重开桌宠。
+      const intensity = loadPetPresencePrefs().intensity;
+      if (chatBusyRef.current) {
+        pendingPresenceRef.current = { raw, at: Date.now() };
+        return;
       }
+      setPresence((prev) => reducePetEvent(prev, raw, { now: Date.now(), intensity }));
     });
   }, []);
 
-  // 外部文案 8 秒后收回（比未读提示长：简报通常不止一眼扫过）
+  // 一轮对话结束后，只有「还新鲜」的排队事件才显示（错过不补发）。
   useEffect(() => {
-    if (!externalBubble) return;
-    const timer = window.setTimeout(() => setExternalBubble(null), 8000);
+    if (chat.streaming) return;
+    const pending = pendingPresenceRef.current;
+    pendingPresenceRef.current = null;
+    if (!pending) return;
+    if (Date.now() - pending.at > 10_000) return;
+    const intensity = loadPetPresencePrefs().intensity;
+    setPresence((prev) => reducePetEvent(prev, pending.raw, { now: Date.now(), intensity }));
+  }, [chat.streaming]);
+
+  // 到期清理：气泡与外部姿态都带 until，统一由一个定时器收尾。
+  useEffect(() => {
+    const deadlines = [presence.bubble?.until ?? null, presence.poseUntil].filter(
+      (at): at is number => typeof at === "number",
+    );
+    if (deadlines.length === 0) return;
+    const delay = Math.max(0, Math.min(...deadlines) - Date.now());
+    const timer = window.setTimeout(
+      () => setPresence((prev) => prunePetPresence(prev, Date.now())),
+      delay + 10,
+    );
     return () => window.clearTimeout(timer);
-  }, [externalBubble]);
+  }, [presence]);
 
   /**
    * 「被摸」的短窗口。用对象而不是布尔：连点时要能刷新计时（布尔在 true→true 时不触发 effect）。
@@ -103,9 +124,9 @@ export function PetWindow() {
     return () => window.clearTimeout(timer);
   }, [celebrate]);
 
-  // 姿态：外部指定优先（第三期通道），否则由纯函数判定（见 petPose.ts）；
+  // 姿态：外部事件指定优先（且带过期），否则由纯函数判定（见 petPose.ts）；
   // 表现由映射表决定——渲染代码不再认识任何具体动作组名
-  const pose: PetPose = externalPose ?? resolvePose({
+  const pose: PetPose = presence.pose ?? resolvePose({
     hasError: Boolean(chat.error),
     streaming: chat.streaming,
     inputOpen,
@@ -363,9 +384,24 @@ export function PetWindow() {
     await chat.send(text);
   }, [chat, draft]);
 
+  /**
+   * 点击在场感气泡 → 叫起主窗口并直达对应页面。
+   *
+   * 复用 `pet:open-settings` 单条反向通道（带上 page，不新增 IPC）：主进程原样转发，
+   * 主窗口 App 的 handler 按 page 切页。旧 preload 不传 page 时退化为「打开设置」。
+   */
+  const openPresenceRoute = useCallback((route: PetEventRoute) => {
+    const pet = window.__heming_pet as unknown as
+      | { openSettings?: (page?: string) => void }
+      | undefined;
+    pet?.openSettings?.(route);
+  }, []);
+
   const bubbleText = chat.error
     ? chat.error
-    : chat.reply || (chat.streaming ? "…" : "") || externalBubble?.text || "";
+    : chat.reply || (chat.streaming ? "…" : "") || presence.bubble?.text || "";
+
+  const bubbleRoute = chat.error || chat.reply || chat.streaming ? undefined : presence.bubble?.route;
 
   const showBubbleHint = !chat.hasConnection && inputOpen;
 
@@ -391,6 +427,19 @@ export function PetWindow() {
           data-pet-ui="bubble"
           role="status"
           aria-live="polite"
+          onClick={bubbleRoute ? () => openPresenceRoute(bubbleRoute) : undefined}
+          onKeyDown={
+            bubbleRoute
+              ? (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openPresenceRoute(bubbleRoute);
+                  }
+                }
+              : undefined
+          }
+          tabIndex={bubbleRoute ? 0 : undefined}
+          title={bubbleRoute ? "点击打开对应页面" : undefined}
           style={{
             position: "absolute",
             top: 8,
@@ -410,6 +459,7 @@ export function PetWindow() {
             wordBreak: "break-word",
             maxHeight: 150,
             overflowY: "auto",
+            cursor: bubbleRoute ? "pointer" : undefined,
           }}
         >
           {showBubbleHint && !bubbleText ? (

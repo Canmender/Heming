@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   PET_POSES,
   poseDrivesMouth,
+  poseForEvent,
   poseMotion,
   resolvePose,
   type PetPose,
@@ -72,5 +73,26 @@ describe("姿态映射表", () => {
       const m = PET_POSES[p].enterMotion;
       if (m !== null) expect(m.length, p).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("平台事件 → 姿态（在场感）", () => {
+  it("任务成功 → 开心（唯一带动进入动作，算「轻微动作」）", () => {
+    expect(poseForEvent({ kind: "task", ok: true })).toBe("happy");
+  });
+
+  it("任务失败 / 日程临期 → 提醒态（需要看一眼）", () => {
+    expect(poseForEvent({ kind: "task", ok: false })).toBe("alerting");
+    expect(poseForEvent({ kind: "schedule" })).toBe("alerting");
+  });
+
+  it("幕僚开口 → 说话态（配口型）", () => {
+    expect(poseForEvent({ kind: "speak" })).toBe("speaking");
+  });
+
+  it("显式 pose 事件原样采用；reset/未知不产生姿态", () => {
+    expect(poseForEvent({ kind: "pose", pose: "thinking" })).toBe("thinking");
+    expect(poseForEvent({ kind: "reset" })).toBeNull();
+    expect(poseForEvent({ kind: "unknown" })).toBeNull();
   });
 });

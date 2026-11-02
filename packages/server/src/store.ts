@@ -9,7 +9,21 @@ import type {
   E2eDeviceKeys,
   TeamActivity,
   TeamActivityInput,
+  TeamUsageInput,
 } from "@heming/shared";
+
+/** 服务端存的一行团队用量（聚合前）：只有白名单维度与数字。 */
+export interface TeamUsageRow {
+  actorId: string;
+  /** 自然日 YYYY-MM-DD（客户端本地日）。 */
+  date: string;
+  model: string;
+  /** 已上报 token 合计；null = 未上报（不是 0）。 */
+  tokens: number | null;
+  unreported: number;
+  /** 连接名快照（用户自命名，白名单字段）。 */
+  connections: string[];
+}
 
 /** reencryptMessage 结果：ok 携更新后消息；否则三态 reason（app 层映射 404/403/409）。 */
 export type ReencryptResult =
@@ -115,6 +129,23 @@ export interface Store {
   listTeamActivities(opts?: { limit?: number; before?: string; actorId?: string }): TeamActivity[];
   /** 清空某位成员已上传的动向，返回删除条数。 */
   clearTeamActivities(actorId: string): number;
+  // —— ②-3 团队用量：白名单摘要的服务端聚合 ——
+  /**
+   * 幂等写入一天的聚合用量：同一 `(actorId, date, model)` **覆盖更新**。
+   *
+   * 客户端上报的是「该日该模型的累计值」，不是增量——所以重复上报同一份数据不会翻倍，
+   * 补报/修正也只覆盖那一格。用户不存在时抛 "user not found"（与动向同口径）。
+   */
+  upsertTeamUsage(actorId: string, input: TeamUsageInput): void;
+  /** 区间（自然日闭区间）内全部成员的用量行；排行/本人明细由调用方聚合。 */
+  listTeamUsage(opts: { from: string; to: string }): TeamUsageRow[];
+  /**
+   * 删除某位成员已上传的全部用量行，返回删除条数。
+   *
+   * 关闭共享只停「未来上传」，旧行还留在服务端、人仍出现在排行里——那不是隐私口径。
+   * 所以清除必须是一个显式动作（对称团队动向的 `clearTeamActivities`）。
+   */
+  clearTeamUsage(actorId: string): number;
   /** 幂等登记系统预设 agent（新库没有预设群后仍要能开「和小鸣」对话）。 */
   ensureSystemAgents(): void;
 }
@@ -147,6 +178,8 @@ export function createMemoryStore(): Store {
   const lastSeen = new Map<string, string>();
   const teamActivities: TeamActivity[] = [];
   const teamActivityKeys = new Set<string>();
+  /** 团队用量：键 = `actorId\0date\0model`（与 sqlite 主键同口径），值只有白名单维度。 */
+  const teamUsage = new Map<string, TeamUsageRow>();
 
   const mustUser = (id: string): User => {
     const row = users.get(id);
@@ -388,6 +421,37 @@ export function createMemoryStore(): Store {
         if (teamActivities[i].actorId !== actorId) continue;
         teamActivityKeys.delete(`${actorId}\0${teamActivities[i].sourceId}`);
         teamActivities.splice(i, 1);
+        removed += 1;
+      }
+      return removed;
+    },
+    upsertTeamUsage(actorId, input) {
+      mustUser(actorId);
+      teamUsage.set(`${actorId}\0${input.date}\0${input.model}`, {
+        actorId,
+        date: input.date,
+        model: input.model,
+        tokens: input.tokens,
+        unreported: input.unreported ?? 0,
+        connections: [...(input.connections ?? [])],
+      });
+    },
+    listTeamUsage({ from, to }) {
+      return [...teamUsage.values()]
+        .filter((row) => row.date >= from && row.date <= to)
+        .sort(
+          (a, b) =>
+            (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) ||
+            (a.actorId < b.actorId ? -1 : a.actorId > b.actorId ? 1 : 0) ||
+            (a.model < b.model ? -1 : a.model > b.model ? 1 : 0),
+        )
+        .map((row) => ({ ...row, connections: [...row.connections] }));
+    },
+    clearTeamUsage(actorId) {
+      let removed = 0;
+      for (const [key, row] of [...teamUsage.entries()]) {
+        if (row.actorId !== actorId) continue;
+        teamUsage.delete(key);
         removed += 1;
       }
       return removed;

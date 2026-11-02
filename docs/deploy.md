@@ -228,7 +228,8 @@ python -u .superpowers/deploy-bare.py install                   # provision 之�
 
 # 2) 桌面端（嵌入产物随安装包）
 pnpm -w run dist:desktop                  # 内部先跑 scripts/build-desktop-web.mjs
-bash scripts/publish-update.sh            # 安装包 + latest.yml → /updates（§9）
+node scripts/publish-update.mjs           # 安装包 + latest.yml → /updates（§9；win32 用这个）
+# 非 Windows 或无 Node 脚本时：bash scripts/publish-update.sh
 ```
 
 **只发其中一处会出现新旧界面并存**：浏览器看云端、已装客户端看包内。排查「为什么我这没有新功能」时先确认客户端版本。
@@ -267,19 +268,19 @@ pnpm --filter @heming/desktop dist     # = build-desktop-web.mjs（注入地址 
 
 # 2) 上传（密码只走环境变量，不落盘；脚本内部用 paramiko）
 export HEMING_SSH_PWD='***'
-bash scripts/publish-update.sh --dry-run   # 先看要传什么
-bash scripts/publish-update.sh             # 真传
+node scripts/publish-update.mjs --dry-run   # 先看要传什么（win32 用 Node 版；非 Windows 用 bash scripts/publish-update.sh）
+node scripts/publish-update.mjs             # 真传：大小与 sha512 都校验
 
 # 3) 验证
 curl -sI http://47.92.39.184/updates/latest.yml | head -3
 curl -s  http://47.92.39.184/updates/latest.yml | head -8
 ```
 
-**产物不在默认目录时要给 `HEMING_RELEASE_DIR`**。`dist:desktop` 反复在 `win-unpacked/resources/app.asar` 上撞 `EBUSY`（根因未查，见 HANDOFF §5 待办），**已固化成惯例：每版换一个新的输出目录**——r25 打 d.25.1.7.0、r26/r27/r28 依次到 r29 打 d.28.1.7.0、r30 打 d.29.1.7.0（均一次通过）、**r31 是一次被中止的尝试（产出的安装包内嵌旧产物，没发布就废掉了）、r32 打 d.29.1.8.0、r33 打 d.30.1.8.0（一次通过）**，下一版 **d.31 用 `release/r34`**。打包与发布两处必须指同一目录（`build-desktop.mjs` 与 `publish-update.sh` 都读 `HEMING_RELEASE_DIR`）：
+**产物不在默认目录时要给 `HEMING_RELEASE_DIR`**。`dist:desktop` 反复在 `win-unpacked/resources/app.asar` 上撞 `EBUSY`（根因未查，见 HANDOFF §5 待办），**已固化成惯例：每版换一个新的输出目录**——r25 打 d.25.1.7.0、r26/r27/r28 依次到 r29 打 d.28.1.7.0、r30 打 d.29.1.7.0（均一次通过）、**r31 是一次被中止的尝试（产出的安装包内嵌旧产物，没发布就废掉了）、r32 打 d.29.1.8.0、r33 打 d.30.1.8.0（一次通过）**，下一版 **d.31 用 `release/r34`**。打包与发布两处必须指同一目录（`build-desktop.mjs`、`publish-update.mjs` 与 `publish-update.sh` 都读 `HEMING_RELEASE_DIR`）：
 
 ```bash
 HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r34 pnpm --filter @heming/desktop dist
-HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r34 bash scripts/publish-update.sh --dry-run
+HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r34 node scripts/publish-update.mjs --dry-run
 ```
 
 > 这三步也可以一条命令串起来：`node scripts/release.mjs --desktop --publish`（先 `--dry-run` 看计划）。
@@ -300,7 +301,7 @@ HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r34 bash scripts/publish-u
 
 1. **`latest.yml` 不会自动生成。** electron-builder 默认不产出更新元数据，少了它客户端永远提示「已是最新」——**界面上与正常无差别，无法靠肉眼发现**。`build-desktop.mjs` 已默认注入 `--publish always`，产物目录里必须能看到 `latest.yml` 才算打包成功。
 2. **`/updates/` 必须排在 nginx `location /` 之前。** 否则 `try_files` 会把 `latest.yml` 回落成 `index.html`，客户端拿到 HTML 报「解析更新信息失败」。该顺序已固化在 `deploy/nginx-heming.conf`，改动时别调换。
-3. **上传后要比字节数。** `publish-update.sh` 会 `stat -c '%s|%n'` 校验远端安装包大小——Git Bash 的 MSYS 路径转换能让「上传成功」变成只写到本机磁盘，日志一切正常、云端目录里没文件。所以脚本开头 `export MSYS_NO_PATHCONV=1`，并在远端目录不是绝对 POSIX 路径时立刻停下。
+3. **上传后要比大小与 sha512。** 两个发布脚本都会在远端重算 sha512 并与本地逐字节核对：shell 版用 `stat -c '%s|%n'` 比大小，Node 版（`publish-update.mjs`）额外用 `sha512sum` 比哈希。这套对照不是形式主义——Git Bash 的 MSYS 路径转换能让「上传成功」变成只写到本机磁盘，日志一切正常、云端目录里没文件。shell 版因此在开头 `export MSYS_NO_PATHCONV=1`，并在远端目录不是绝对 POSIX 路径时立刻停下；**本机没有 Git Bash，win32 请直接用 Node 版**（`release.mjs --publish` 会自动优先它）。
 4. **`node scripts/build-desktop.mjs` 单独跑会打进上一轮的旧嵌入产物。** 注入并拷贝 `packages/desktop/web-dist` 的那一步在 `scripts/build-desktop-web.mjs` 里，`build-desktop.mjs` 不会替你跑它——于是安装包里的前端还是上一版，`latest.yml`、版本号、文件名全是对的，**只有内容是旧的**（d.29.1.8.0 实测：r31 那份 178MB 的安装包内嵌 `index-ChSMGDkh.js`，grep 到的是 `d.29.1.7.0`，整个 r31 作废重打）。入口因此只能是 `pnpm --filter @heming/desktop dist`（= 两步串起来）。出包后**核对一眼再传**：`grep -c "<新版本号>" packages/desktop/release/<rNN>/win-unpacked/resources/web/assets/index-*.js` 应当命中，且文件名与 `packages/desktop/web-dist/assets/` 里那个一致。
 
 上线后务必确认清单**不是 HTML**，并且支持断点续传：

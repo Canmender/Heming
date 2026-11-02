@@ -116,6 +116,18 @@ async function renderAuthed(): Promise<void> {
   );
 }
 
+/**
+ * 等「当前页真的挂上」。
+ *
+ * ③-1 把页面改成路由级懒加载（React.lazy）之后，切页不再同步完成：首次进入某页时
+ * 先挂 Suspense 占位（App 里 `data-testid="page-fallback"`），chunk 解析完才提交目标页。
+ * 本文件的意图是「切页会建连 / 离开会关」，不是「同步渲染」，所以这里等占位消失即可，
+ * 断言一条不改 —— 既不用给产品代码开后门，也不会把「切页会建连」测弱。
+ */
+async function settleRoutedPage(): Promise<void> {
+  await waitFor(() => expect(screen.queryByTestId("page-fallback")).toBeNull(), { timeout: 5000 });
+}
+
 describe("B3/B4. 登录态与通知点击", () => {
   function installBridge(): Array<(id: string | null) => void> {
     const cbs: Array<(id: string | null) => void> = [];
@@ -168,6 +180,9 @@ describe("E4. 100 次页面切换计时与配平", () => {
         if (i % 2 === 0) useUiStore.getState().openConversation("c1");
         else useUiStore.getState().setPage("home");
       });
+      // ③-1 之后页面是懒加载的：切页要等目标页真正挂上再进下一次，
+      // 否则「进助手页」的那半程根本没挂载，建连次数自然为 0。
+      await settleRoutedPage();
     }
     const total = performance.now() - t0;
     const hs = handles();

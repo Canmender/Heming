@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { PetWindow } from "./components/pet/PetWindow.js";
+import { hydrateSecureStorage } from "./lib/secureStorage.js";
 
 /**
  * 桌宠窗口的独立入口（`pet.html`，由 Vite 多入口产出）。
@@ -16,5 +17,19 @@ import { PetWindow } from "./components/pet/PetWindow.js";
  */
 const container = document.getElementById("root");
 if (container) {
-  createRoot(container).render(<PetWindow />);
+  /**
+   * 桌宠入口也要等安全存储预热：`usePetChat` 要读模型 Key，读不到会回退同步桥，
+   * 但先预取能省掉一次跨进程往返。同样是「短帽 + 继续」——桌宠是常驻窗口，
+   * 不该因为安全存储不可用而白等（内部超时是给失败兜底的）。
+   *
+   * 与 main.tsx 一样不用模块顶层 await：入口异步化会让 Rolldown 的切块变碎。
+   * 用 `.finally()` 挂渲染，语义等价。
+   */
+  const HYDRATE_CAP_MS = 300;
+  void Promise.race([
+    hydrateSecureStorage().catch(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, HYDRATE_CAP_MS)),
+  ]).finally(() => {
+    createRoot(container).render(<PetWindow />);
+  });
 }

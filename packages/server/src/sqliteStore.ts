@@ -10,8 +10,9 @@ import type {
   E2eDeviceKeys,
   TeamActivity,
   TeamActivityInput,
+  TeamUsageInput,
 } from "@heming/shared";
-import type { Store } from "./store.js";
+import type { Store, TeamUsageRow } from "./store.js";
 import { SYSTEM_AGENTS } from "./store.js";
 import { openDb } from "./db.js";
 
@@ -518,6 +519,64 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     },
     clearTeamActivities(actorId) {
       return Number(db.prepare("DELETE FROM team_activities WHERE actor_id = ?").run(actorId).changes);
+    },
+    upsertTeamUsage(actorId, input: TeamUsageInput) {
+      mustUser(actorId);
+      // 覆盖更新：客户端上报的是「该日该模型累计值」，不是增量（重复上报不会翻倍）。
+      db.prepare(
+        `INSERT INTO team_usage (actor_id, date, model, tokens, unreported, connections, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(actor_id, date, model) DO UPDATE SET
+           tokens = excluded.tokens,
+           unreported = excluded.unreported,
+           connections = excluded.connections,
+           updated_at = excluded.updated_at`,
+      ).run(
+        actorId,
+        input.date,
+        input.model,
+        input.tokens,
+        input.unreported ?? 0,
+        JSON.stringify(input.connections ?? []),
+        new Date().toISOString(),
+      );
+    },
+    listTeamUsage({ from, to }) {
+      const rows = db
+        .prepare(
+          `SELECT actor_id, date, model, tokens, unreported, connections
+           FROM team_usage WHERE date >= ? AND date <= ?
+           ORDER BY date ASC, actor_id ASC, model ASC`,
+        )
+        .all(from, to) as Array<{
+        actor_id: string;
+        date: string;
+        model: string;
+        tokens: number | null;
+        unreported: number;
+        connections: string;
+      }>;
+      return rows.map((r) => {
+        let connections: string[] = [];
+        try {
+          const parsed: unknown = JSON.parse(r.connections);
+          if (Array.isArray(parsed)) connections = parsed.filter((x): x is string => typeof x === "string");
+        } catch {
+          connections = []; // 坏数据不整段失败：连接名只是展示用
+        }
+        const row: TeamUsageRow = {
+          actorId: r.actor_id,
+          date: r.date,
+          model: r.model,
+          tokens: typeof r.tokens === "number" ? r.tokens : null,
+          unreported: Number(r.unreported) || 0,
+          connections,
+        };
+        return row;
+      });
+    },
+    clearTeamUsage(actorId) {
+      return Number(db.prepare("DELETE FROM team_usage WHERE actor_id = ?").run(actorId).changes);
     },
     ensureSystemAgents() {
       const upsert = db.prepare(

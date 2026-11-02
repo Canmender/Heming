@@ -222,7 +222,8 @@ const HELP_TEXT = `${USAGE_LINES}
                             任一步非 0 立即停止；backup 不通过绝不会走到 install
   --deploy-tar <path>       配合 --deploy：使用已打好的部署包，不再现场打 tar
   --publish                 把安装包 + latest.yml + .blockmap 发到更新源：
-                            bash scripts/publish-update.sh（需要 HEMING_SSH_PWD）
+                            win32 走 node scripts/publish-update.mjs（不依赖 Git Bash）；
+                            其它平台走 bash scripts/publish-update.sh（需要 HEMING_SSH_PWD）
   --release-dir <path>      指定打包与发布的产物目录（等价 HEMING_RELEASE_DIR；相对路径按仓库根解析）
   --release-r <NN>          shorthand：产物落到 <默认 release 目录>/rNN
   --skip-tests              跳过逐包测试（只跳过测试，不跳过 build；谨慎使用）
@@ -246,7 +247,8 @@ const HELP_TEXT = `${USAGE_LINES}
    6. 生成变更日志模块          node scripts/build-changelog.mjs → packages/web/src/generated/changelog.ts
    7. 打包安装包（可选）        pnpm -w run dist:desktop → <release dir>/；核对 latest.yml 与内嵌产物
    8. 备份 + 部署（可选）       deploy-bare.py backup → upload → install → smoke
-   9. 发布更新源（可选）        scripts/publish-update.sh（--dry-run 预览后真传，校验字节数）
+   9. 发布更新源（可选）        publish-update.mjs（win32）/ publish-update.sh：--dry-run 预览后真传，
+                                校验远端大小与 sha512
   10. 证据清单                 每步退出码 / 耗时 / 产物路径与大小 / 需要人工填写的校验项
 
 环境变量：
@@ -933,6 +935,7 @@ async function runPreflight(ctx) {
     "scripts/build-desktop-web.mjs",
     "scripts/build-desktop.mjs",
     "scripts/publish-update.sh",
+    "scripts/publish-update.mjs",
   ];
   const missing = required.filter((rel) => !existsSync(join(ROOT, rel)));
   if (missing.length) {
@@ -1709,16 +1712,36 @@ async function runDeploy(ctx) {
 
 /* ------------------------------ 9. 发布更新源 ------------------------------ */
 
+/**
+ * 第 9 步用哪个发布入口。
+ *
+ * - Windows：本机没有 Git Bash，`bash scripts/publish-update.sh` 会落到 WSL，
+ *   报 `0x8007054f`（找不到提供程序）——发布链因此断过，只能手工 Python 补。
+ *   优先走 Node 版 `scripts/publish-update.mjs`（同样用 python+paramiko 传，
+ *   语义与 shell 版一致：上传 → stat 大小 + sha512 校验 → 打印「校验通过」）。
+ * - 非 Windows：`publish-update.sh` 本来就能用，保留原路径，行为零变化。
+ * - Node 版缺失时才在 Windows 上回退 shell（并提示可能需要补文件）。
+ */
+function publishCommands() {
+  const nodeScript = join(ROOT, "scripts", "publish-update.mjs");
+  const useNode = process.platform === "win32" && existsSync(nodeScript);
+  const base = useNode ? "node scripts/publish-update.mjs" : "bash scripts/publish-update.sh";
+  return { via: useNode ? "node" : "shell", dry: `${base} --dry-run`, real: base };
+}
+
 function planPublish(ctx) {
   if (!ctx.opts.publish) {
     return { commands: [], preview: ["未指定 --publish：不发布到更新源"] };
   }
   const releaseDir = resolvePublishDir(ctx);
+  const pub = publishCommands();
   const preview = [
     `产物目录：${releaseDir}`,
     process.env.HEMING_SSH_PWD
       ? "HEMING_SSH_PWD 已设置（不会打印值）"
-      : "⚠ HEMING_SSH_PWD 未设置：真发布会拒绝（--dry-run 不受影响）",
+      : pub.via === "node"
+        ? "HEMING_SSH_PWD 未设置：Node 版会回落到本机 .superpowers/deploy-*.py 里的既有凭据"
+        : "⚠ HEMING_SSH_PWD 未设置：真发布会拒绝（--dry-run 不受影响）",
   ];
   const installers = findInstallers(releaseDir, ctx.version);
   preview.push(installers.length ? `安装包：${basename(installers[0])}` : "⚠ 该目录没有含当前版本号的安装包");
@@ -1726,16 +1749,16 @@ function planPublish(ctx) {
   return {
     commands: [
       {
-        cmd: "bash scripts/publish-update.sh --dry-run",
+        cmd: pub.dry,
         cwd: ROOT,
         writes: "（无，只打印要传什么）",
-        note: "然后才真传",
+        note: `${pub.via === "node" ? "Node 版发布脚本" : "shell 版发布脚本"}：然后才真传`,
       },
       {
-        cmd: "bash scripts/publish-update.sh",
+        cmd: pub.real,
         cwd: ROOT,
         writes: "服务器 /opt/heming/updates/{latest.yml,安装包,blockmap}",
-        note: "上传后 stat 校验远端字节数与本地一致；MSYS_NO_PATHCONV 已由脚本自己处理",
+        note: "上传后校验远端大小与 sha512；win32 走 Node 版，不再依赖 Git Bash",
       },
     ],
     preview,
@@ -1743,7 +1766,10 @@ function planPublish(ctx) {
 }
 
 async function runPublish(ctx) {
-  if (!process.env.HEMING_SSH_PWD) {
+  // shell 版只认环境变量；Node 版（win32）还能回落到本机 .superpowers 里的既有凭据，
+  // 所以「缺 HEMING_SSH_PWD」只对 shell 入口是硬错误。
+  const pub = publishCommands();
+  if (pub.via === "shell" && !process.env.HEMING_SSH_PWD) {
     throw new StepError("未设置 HEMING_SSH_PWD", {
       hint: "PowerShell：`$env:HEMING_SSH_PWD='***'`；bash：`export HEMING_SSH_PWD='***'`。密码只走环境变量，不落盘。",
     });
@@ -1768,8 +1794,9 @@ async function runPublish(ctx) {
   }
 
   const env = { HEMING_RELEASE_DIR: releaseDir };
+  print(`\n[9a] 发布预览（入口：${pub.via === "node" ? "node scripts/publish-update.mjs" : "bash scripts/publish-update.sh"}）`);
   const dry = await run(ctx, {
-    cmd: "bash scripts/publish-update.sh --dry-run",
+    cmd: pub.dry,
     cwd: ROOT,
     env,
     timeoutMs: ctx.opts.timeout || STEP_TIMEOUTS.publish,
@@ -1778,9 +1805,9 @@ async function runPublish(ctx) {
     throw new StepError("发布预览（--dry-run）失败：还没真传", { tail: dry.tail40 });
   }
 
-  print("\n[9b] 真传（字节数由脚本端校验）");
+  print("\n[9b] 真传（大小与 sha512 由脚本端校验）");
   const real = await run(ctx, {
-    cmd: "bash scripts/publish-update.sh",
+    cmd: pub.real,
     cwd: ROOT,
     env,
     timeoutMs: ctx.opts.timeout || STEP_TIMEOUTS.publish,
@@ -1790,7 +1817,7 @@ async function runPublish(ctx) {
   }
   if (!/校验通过/.test(real.output)) {
     throw new StepError("上传命令返回 0，但输出里没有「校验通过」", {
-      hint: "别当成功：远端可能没文件（MSYS 路径转换的老问题）。手工 ls -la /opt/heming/updates 核对。",
+      hint: "别当成功：远端可能没文件。手工 ls -la /opt/heming/updates 核对。",
       tail: real.tail40,
     });
   }
@@ -1803,7 +1830,7 @@ async function runPublish(ctx) {
   if (existsSync(blockmap)) artifacts.push(artifact("差分索引", blockmap));
   return {
     exitCode: 0,
-    notes: ["上传完成，远端字节数与本地一致（脚本内 stat 校验）"],
+    notes: ["上传完成，远端大小与 sha512 均与本地一致（脚本内校验）"],
     artifacts,
   };
 }

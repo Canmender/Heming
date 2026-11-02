@@ -132,11 +132,37 @@ contextBridge.exposeInMainWorld("__heming_exports", {
   info: () => ipcRenderer.invoke("export:info"),
 });
 
-// —— 本机密钥信封桥（d.36）——
+// —— 本机密钥信封桥（d.36 · P0-5；d.58 起异步优先）——
 // 三个低频键（模型 Key、MCP 服务请求头、E2E 设备身份）在渲染层的读写经这里
-// 交给主进程的 safeStorage 加解密。sendSync 会阻塞渲染进程，只用于这三个
-// 「启动读一次 / 用户改配置写一次」的键；**绝不能用在高频路径（消息收发）上**。
-// 浏览器端没有这个桥，web 侧据此保持明文并把状态如实写进设置区。
+// 交给主进程的 safeStorage 加解密。
+//
+// 为什么有两套 API（d.58）：
+// - Electron 45 起 safeStorage 的**同步**三件套已弃用、46 将移除，替代品是异步三件套；
+// - 但渲染层三个低频键是「模块初始化时同步读」，消费方改造不在本轮范围；
+// - 所以：**异步优先 + 启动预取缓存 + 旧同步 API 兜底**。
+//   页面脚本执行前先异步预取三个键的明文进本进程闭包缓存（一次批量 IPC），
+//   渲染层读缓存（同步、零 IPC）；缓存未命中时回退旧的同步桥（45 可用）。
+//   `ready` 让渲染层知道预取什么时候完成，`mode` 告诉它这套 Electron 还有没有同步 API。
+//
+// 缓存里是明文（与渲染层本来就能拿到的东西等价），但**只缓存这三个白名单键**：
+// 批量通道在主进程侧也是同一份白名单（见 secret-store.js 的 BOOTSTRAP_ALLOWED_KEYS）。
+const SECRET_BOOTSTRAP_KEYS = Object.freeze([
+  "heming.llmConfigs",
+  "heming.mcp.servers.v1",
+  "heming.e2e.identity",
+]);
+
+/** 能力探测（同步、无副作用）：失败按「无可用 API」处理，不让 preload 挂掉。 */
+const secretCapabilities = (() => {
+  try {
+    const value = ipcRenderer.sendSync("secret:capabilities");
+    if (value && typeof value === "object") return value;
+  } catch {
+    /* 主进程尚未注册：按不可用处理 */
+  }
+  return { mode: null, sync: false, async: false };
+})();
+
 const secretsAvailable = (() => {
   try {
     return ipcRenderer.sendSync("secret:available") === true;
@@ -145,8 +171,83 @@ const secretsAvailable = (() => {
   }
 })();
 
+/** 预取缓存：键 → 明文（`null` = 密文解不开；键不存在 = 还没预取到）。 */
+const secretCache = new Map();
+
+/**
+ * 启动预取：读 localStorage 里的信封 → 一次批量 IPC 换明文 → 填缓存。
+ *
+ * 失败 / 没有异步 API 时也 resolve（`hydrated:false`）：渲染层据此继续走同步兜底，
+ * 绝不能让「预取没成功」把启动链挂住。
+ */
+const secretsReady = (async () => {
+  const fallback = { available: secretsAvailable, mode: secretCapabilities.mode, hydrated: false };
+  if (secretCapabilities.mode !== "async") return fallback;
+  try {
+    const entries = [];
+    for (const key of SECRET_BOOTSTRAP_KEYS) {
+      try {
+        const raw = window.localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        // 只挑「信封」形态：明文/坏数据留给渲染层按既有逻辑处理（不在这里猜）。
+        if (parsed && typeof parsed === "object" && typeof parsed.data === "string" && parsed.data) {
+          entries.push({ key, data: parsed.data });
+        }
+      } catch {
+        /* 单键坏数据不影响其它键预取 */
+      }
+    }
+    if (entries.length === 0) return { ...fallback, hydrated: true };
+    const result = await ipcRenderer.invoke("secret:bootstrap", { entries });
+    const plaintexts = result && Array.isArray(result.plaintexts) ? result.plaintexts : [];
+    for (const item of plaintexts) {
+      if (!item || typeof item.key !== "string") continue;
+      secretCache.set(item.key, typeof item.value === "string" ? item.value : null);
+    }
+    return {
+      available: result && result.available === true,
+      mode: (result && result.mode) || secretCapabilities.mode,
+      hydrated: true,
+    };
+  } catch {
+    return fallback;
+  }
+})();
+
 contextBridge.exposeInMainWorld("__heming_secrets", {
+  /** 主进程报告的加解密口径：`"async"`（首选）/ `"sync"`（旧版兜底）/ `null`（不可用）。 */
+  mode: secretCapabilities.mode,
+  /** 异步 API 是否可用（决定渲染层走缓存还是纯同步兜底）。 */
+  asyncAvailable: secretCapabilities.async === true,
+  /** 系统安全存储是否可用（同步探测，兼容既有渲染层）。 */
   available: secretsAvailable,
+  /** 启动预取完成信号（永不 reject；`hydrated:false` 表示走同步兜底）。 */
+  ready: secretsReady,
+  /** 同步读预取缓存：命中返回明文（解不开为 null），未命中返回 undefined。 */
+  cachedRead: (key) => {
+    if (typeof key !== "string") return undefined;
+    if (!secretCache.has(key)) return undefined;
+    const value = secretCache.get(key);
+    return typeof value === "string" ? value : null;
+  },
+  /** 渲染层写盘后同步刷新缓存（保证「写后立即读」在缓存路径上一致）。 */
+  cacheSet: (key, plain) => {
+    if (typeof key !== "string" || typeof plain !== "string") return;
+    if (!SECRET_BOOTSTRAP_KEYS.includes(key)) return;
+    secretCache.set(key, plain);
+  },
+  /** 其它窗口改了值（storage 事件）时失效缓存，下一次读回退同步桥拿最新值。 */
+  cacheDelete: (key) => {
+    if (typeof key === "string") secretCache.delete(key);
+  },
+  /** 批量解密（白名单三键；主进程侧再次校验白名单）。 */
+  bootstrap: (payload) => ipcRenderer.invoke("secret:bootstrap", payload),
+  /** 异步三件套（首选路径）。 */
+  availableAsync: () => ipcRenderer.invoke("secret:availableAsync"),
+  encryptAsync: (plain) => ipcRenderer.invoke("secret:encryptAsync", plain),
+  decryptAsync: (cipherB64) => ipcRenderer.invoke("secret:decryptAsync", cipherB64),
+  /** 旧同步 API（弃用，Electron 46 起该通道自身会失效；仅作兜底）。 */
   encrypt: (plain) => {
     try {
       const out = ipcRenderer.sendSync("secret:encrypt", plain);
@@ -224,12 +325,15 @@ contextBridge.exposeInMainWorld("__heming_pet", {
   },
   /** 主动发起一条推送（主窗口用；主进程会校验来源）。 */
   emit: (payload) => ipcRenderer.send("pet:emit", payload),
-  /** 桌宠窗口请求把主窗口叫到前台并切到设置页（未配置模型时的出口）。 */
-  openSettings: () => ipcRenderer.send("pet:open-settings"),
-  /** 主窗口侧订阅「桌宠要打开设置」。返回取消订阅函数。 */
+  /**
+   * 桌宠窗口请求把主窗口叫到前台并切到设置页（未配置模型时的出口）。
+   * @param {string} [page] 桌宠直达页面，page 可选（不传 = 当前既有行为：设置页）。
+   */
+  openSettings: (page) => ipcRenderer.send("pet:open-settings", page),
+  /** 主窗口侧订阅「桌宠要切换页面」。返回取消订阅函数。payload 为 `{ page?: string }` 或字符串（旧调用）。 */
   onOpenSettings: (callback) => {
     if (typeof callback !== "function") return () => {};
-    const listener = () => callback();
+    const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("pet:open-settings", listener);
     return () => ipcRenderer.removeListener("pet:open-settings", listener);
   },

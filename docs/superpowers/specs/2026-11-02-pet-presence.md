@@ -1,7 +1,7 @@
 # 桌宠的在场感：它该知道什么、什么时候开口
 
 - 日期：2026-11-02
-- 状态：**设计稿，未开工**（代码侧通道与姿态抽象已就位，见 `docs/PET.md` §4.3）
+- 状态：**已实施（第二波，版本随 d.58.x 发布）**；实施记录见文末 §7
 - 版本号：**待定**。桌宠占用了 d.53，而 d.53/d.54 两个编号此前已被两份设计稿（文件编辑原语、
   回合日志分叉）用于计划；本文开工时按当时的实际排期再定号，不预先占用，避免编号继续漂移。
 - 前置：d.53 桌宠（透明窗 / Live2D / 点角色对话）、d.53.1.14.0 未读感知
@@ -115,3 +115,50 @@
 3. **桌宠隐藏时的事件**：直接丢弃（1.4 的立场）还是写入通知中心等用户打开？
    两者会改变"关掉桌宠"这个动作的语义。
 4. **是否允许用户手动触发**「让它说一句」（托盘菜单）？如果允许，它算不算预算？
+
+---
+
+## 7. 实施记录（第二波，d.58.x）
+
+### 7.1 §6 待定问题的落地选择
+
+| 问题 | 选择 | 理由 |
+|---|---|---|
+| 渠道互斥判据 | **主窗口是否前台**（`document.hasFocus()` + 可见），并在主进程 `pet:emit` 里用 `main.isFocused()` 再判一次 | 前台判据比「可见」更贴近「用户此刻能不能看到主窗口」；主进程复判是因为跨进程边界不信任渲染层。多显示器下副屏场景的误判可接受（最坏是多一次通知中心、少一次桌宠说话）。 |
+| 开口档一天上限 | **不做独立的每日开口预算**；沿用通知中心已定的静默时段/每日预算/去重账本，桌宠只加「同一事件 10 分钟一次 + 10 分钟最多 3 次」的频控 | spec §1.2 要求单一判据；再建一套预算必然出现「两边都发/两边都不发」。 |
+| 桌宠隐藏时的事件 | **直接丢弃**（不写通知中心、不排队） | 通知中心里本来就有这条事实，用户打开主窗口能看到；桌宠只是「当场」的提醒。 |
+| 托盘手动「让它说一句」 | 本轮不做（不在本期验收内） | 与「不做自主发起对话」一起留给后续。 |
+
+### 7.2 实现落点
+
+- `packages/web/src/lib/petEvent.ts`：事件契约扩展（`route`）、强度偏好（`heming.pet.presence.v1`）、
+  通知→事件派生（任务剥状态后缀 / 幕僚+临期日程→schedule / 否则 speak）、渠道互斥（`decidePresence`）、
+  频控闸门（`createPresenceGate`）、桌宠侧归约（`reducePetEvent` / `prunePetPresence`）、运行时
+  `startPetPresence()`（App 挂载时订阅通知中心新增条目）。
+- `packages/web/src/lib/petPose.ts`：`poseForEvent`（成功=happy 带 TapBody、失败/日程=alerting、开口=speaking）。
+- `packages/web/src/components/pet/PetWindow.tsx`：消费事件 → 气泡 4 秒 / 姿态到期回落 / 对话中的事件
+  排队 10 秒（超时丢弃）/ 点击气泡走既有 `pet:open-settings` 通道带 page。
+- `packages/web/src/components/PetSettingsCard.tsx`：三档打扰强度开关（安静/正常/积极，默认正常）。
+- `packages/web/src/App.tsx`：挂载 `startPetPresence()`；`onOpenSettings` 按 page 直达对应页面。
+- `packages/desktop/pet-window.js`：`normalizePetPage` 白名单归一。
+- `packages/desktop/pet-host.js`：渠道互斥权威判据（主窗口前台 → 抑制）、桌宠隐藏/未创建 → 丢弃、
+  来源校验（只认主窗口/桌宠窗口）、复用 `pet:open-settings` 转发 page（不新增 IPC）。
+- 未改：消息协议、WS、任务/幕僚/信息中枢生产者、`msgCache`/会话写入路径。
+
+### 7.3 测试与验收
+
+- web：`lib/petEvent.test.ts`（契约/净化/派生/互斥/频控/三档归约/运行时）、`lib/petPose.test.ts`
+  （事件→姿态）、`components/pet/PetWindow.presence.test.tsx`（三档渲染差异/4 秒收回/点击直达/畸形静默）、
+  `components/PetSettingsCard.test.tsx`（三档可选且落盘、提示文案不同）。
+- desktop：`pet-host.test.js`（前台抑制、后台送达、隐藏不补发、来源校验、page 白名单转发）、
+  `pet-window.test.js`（`normalizePetPage`）。
+- 手工验收口径（真机一次）：关主窗口 → 触发三类事件 → 桌宠气泡 4 秒、点击进对应页；
+  主窗口在前台时只有通知中心、桌宠不冒泡；隐藏桌宠期间产生的事件不补发。
+
+### 7.4 已知边界
+
+- 频率是否合适仍需真机试用校准（spec §5）：现有硬上限是「同事件 10 分钟一次 + 窗口内最多 3 次」。
+- 幕僚简报的 `speak` 文案来自 `summary`（规则模式是计数句、LLM 模式是模型总结），已截断到 ≤60 字；
+  若将来 summary 里出现正文级内容，属于 d.48 的净化问题，不在本轮重复处理。
+- 桌面系统通知仍由既有 `notifyDesktop`（主窗口失焦时）负责；桌宠与系统通知可以同时出现，
+  但比通知中心多了「同事件 10 分钟一次」的桌宠频控。

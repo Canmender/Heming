@@ -191,5 +191,43 @@ for (const f of factories) {
       expect(store.listTeamActivities().map((x) => x.actorId)).toEqual([b.id]);
       expect(() => store.addTeamActivity("nope", { ...base, sourceId: "x" })).toThrow("user not found");
     });
+
+    it("团队用量：(actor, date, model) 覆盖式幂等、区间读、未知用户抛错", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const base = {
+        date: "2026-11-02",
+        model: "gpt-x",
+        tokens: 100 as number | null,
+        unreported: 0,
+        connections: ["主连接"],
+      };
+      store.upsertTeamUsage(a.id, base);
+      // 同一 (actor, date, model) 再报一次是**覆盖**不是翻倍：客户端报的是该日累计。
+      store.upsertTeamUsage(a.id, { ...base, tokens: 250, connections: ["主连接", "备用"] });
+      store.upsertTeamUsage(a.id, { ...base, date: "2026-11-01", tokens: null, unreported: 2 });
+      store.upsertTeamUsage(b.id, { ...base, model: "claude-y", tokens: 900 });
+
+      const rows = store.listTeamUsage({ from: "2026-11-01", to: "2026-11-02" });
+      expect(rows).toHaveLength(3);
+      const aliceToday = rows.find((r) => r.actorId === a.id && r.date === "2026-11-02")!;
+      expect(aliceToday).toMatchObject({ model: "gpt-x", tokens: 250, connections: ["主连接", "备用"] });
+      // null 语义原样保留（未上报 ≠ 0），读回不能变成 0
+      expect(rows.find((r) => r.actorId === a.id && r.date === "2026-11-01")!.tokens).toBeNull();
+
+      // 区间是闭区间：只取 11-02 时 11-01 不在其中
+      expect(store.listTeamUsage({ from: "2026-11-02", to: "2026-11-02" })).toHaveLength(2);
+      expect(store.listTeamUsage({ from: "2026-10-01", to: "2026-10-31" })).toEqual([]);
+      expect(() =>
+        store.upsertTeamUsage("nope", { ...base, tokens: 1 }),
+      ).toThrow("user not found");
+
+      // 清除只删本人：返回删除条数，别人的行原样保留
+      expect(store.clearTeamUsage(a.id)).toBe(2);
+      expect(store.clearTeamUsage(a.id)).toBe(0);
+      const after = store.listTeamUsage({ from: "2026-11-01", to: "2026-11-02" });
+      expect(after.map((r) => r.actorId)).toEqual([b.id]);
+      expect(store.listTeamUsage({ from: "2026-11-02", to: "2026-11-02" })).toHaveLength(1);
+    });
   });
 }

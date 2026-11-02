@@ -182,3 +182,175 @@ describe("团队动向", () => {
     expect(all.body.activities[0].actorId).toBe(b.user.id);
   });
 });
+
+describe("团队用量（②-3）", () => {
+  let app: App;
+  let token: string;
+  let self: { id: string; username: string };
+  const TO = "2026-11-02";
+
+  function usage(over: Record<string, unknown> = {}) {
+    return {
+      date: TO,
+      model: "gpt-x",
+      tokens: 100,
+      unreported: 0,
+      connections: ["主连接"],
+      ...over,
+    };
+  }
+
+  async function post(items: unknown[], as = token) {
+    return request(app).post("/api/team/usage").set(auth(as)).send({ items });
+  }
+
+  beforeEach(async () => {
+    presence.reset();
+    app = createApp(createMemoryStore(), { allowRegister: true });
+    const a = await register(app, "alice", "爱丽丝");
+    token = a.token;
+    self = a.user;
+  });
+
+  it("未鉴权 401；上报与读取都要登录", async () => {
+    expect((await request(app).post("/api/team/usage").send({ items: [usage()] })).status).toBe(401);
+    expect((await request(app).get("/api/team/usage")).status).toBe(401);
+    expect((await request(app).delete("/api/team/usage/mine")).status).toBe(401);
+  });
+
+  it("上报返回 written/stored；同一份数据重复上报是幂等覆盖（不翻倍）", async () => {
+    const first = await post([usage(), usage({ model: "claude-y", tokens: 50 })]);
+    expect(first.status).toBe(200);
+    expect(first.body).toEqual({ written: 2, stored: 2 });
+
+    const again = await post([usage({ tokens: 100 })]);
+    expect(again.body).toEqual({ written: 1, stored: 1 });
+
+    const res = await request(app)
+      .get("/api/team/usage")
+      .query({ range: "7d", to: TO })
+      .set(auth(token));
+    expect(res.status).toBe(200);
+    expect(res.body.self.total).toBe(150); // 100 覆盖成 100（不是 200）+ 50
+    expect(res.body.self.byModel.map((m: { model: string }) => m.model).sort()).toEqual([
+      "claude-y",
+      "gpt-x",
+    ]);
+  });
+
+  it("排行按 token 降序、只给聚合数与显示名；本人明细只含自己", async () => {
+    const b = await register(app, "bob", "鲍勃");
+    await post([usage({ tokens: 100 })]);
+    await post([usage({ tokens: 900, model: "claude-y" })], b.token);
+    await post([usage({ tokens: null, unreported: 2 })], b.token);
+
+    const res = await request(app)
+      .get("/api/team/usage")
+      .query({ range: "7d", to: TO })
+      .set(auth(token));
+    expect(res.body.ranking.map((r: { displayName: string }) => r.displayName)).toEqual([
+      "鲍勃",
+      "爱丽丝",
+    ]);
+    const bobRow = res.body.ranking[0];
+    // 排行只给聚合数与显示名：没有任何明细字段
+    expect(Object.keys(bobRow).sort()).toEqual(
+      ["days", "displayName", "tokens", "unreported", "userId"].sort(),
+    );
+    expect(bobRow).toMatchObject({ tokens: 900, unreported: 2, days: 1 });
+    expect(JSON.stringify(bobRow)).not.toContain("claude-y");
+
+    // self 只含本人：模型名是 gpt-x，别人的模型与连接名都不出现
+    expect(res.body.self.byModel.map((m: { model: string }) => m.model)).toEqual(["gpt-x"]);
+    expect(JSON.stringify(res.body.self)).not.toContain("claude-y");
+  });
+
+  it("隐私断言：请求体与响应都不含正文类字段", async () => {
+    // 客户端模拟夹带：这些字段在 schema 里不存在，服务端剥掉后不会入库/回显
+    const smuggled = usage({
+      prompt: "不该上传的提示词",
+      text: "不该上传的正文",
+      args: "不该上传的参数",
+      result: "不该上传的结果",
+      content: "不该上传的内容",
+    });
+    const write = await post([smuggled]);
+    expect(write.status).toBe(200);
+
+    const res = await request(app)
+      .get("/api/team/usage")
+      .query({ range: "7d", to: TO })
+      .set(auth(token));
+    const body = JSON.stringify(res.body);
+    for (const forbidden of ["不该上传", "prompt", '"text"', "args", "result", '"content"']) {
+      expect(body).not.toContain(forbidden);
+    }
+    // 响应字段就是契约里那几个
+    expect(Object.keys(res.body).sort()).toEqual(["from", "range", "ranking", "self", "to"].sort());
+  });
+
+  it("日期边界：range 决定 from/to；to 可指定本地今天；区间外不计", async () => {
+    await post([usage({ date: "2026-11-02", tokens: 100 })]);
+    await post([usage({ date: "2026-10-26", tokens: 700 })]);
+    await post([usage({ date: "2026-10-05", tokens: 5000 })]);
+
+    const d7 = await request(app)
+      .get("/api/team/usage")
+      .query({ range: "7d", to: TO })
+      .set(auth(token));
+    expect(d7.body).toMatchObject({ range: "7d", from: "2026-10-27", to: TO });
+    expect(d7.body.self.total).toBe(100); // 10-26 在 7 天窗口外；10-05 也外
+
+    const d30 = await request(app)
+      .get("/api/team/usage")
+      .query({ range: "30d", to: TO })
+      .set(auth(token));
+    expect(d30.body).toMatchObject({ range: "30d", from: "2026-10-04" });
+    expect(d30.body.self.total).toBe(5800); // 100 + 700 + 5000
+  });
+
+  it("校验：range / to / 日期键 / 条数上限 / token 越界都返回 400", async () => {
+    expect(
+      (await request(app).get("/api/team/usage").query({ range: "90d" }).set(auth(token))).status,
+    ).toBe(400);
+    expect(
+      (await request(app).get("/api/team/usage").query({ to: "2026-13-01" }).set(auth(token))).status,
+    ).toBe(400);
+    expect((await post([usage({ date: "2026-1-1" })])).status).toBe(400);
+    expect((await post([usage({ model: "" })])).status).toBe(400);
+    expect((await post([usage({ tokens: -1 })])).status).toBe(400);
+    expect(
+      (await post(Array.from({ length: 51 }, (_, i) => usage({ model: `m${i}` })))).status,
+    ).toBe(400);
+    expect((await post([])).status).toBe(400);
+  });
+
+  it("清除我的用量：只删自己的行，返回 deleted，排行不再包含本人", async () => {
+    const b = await register(app, "bob", "鲍勃");
+    await post([usage({ tokens: 100 }), usage({ date: "2026-11-01", tokens: 50 })]);
+    await post([usage({ tokens: 900 })], b.token);
+
+    const res = await request(app).delete("/api/team/usage/mine").set(auth(token));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ deleted: 2 });
+    // 幂等：再清一次返回 0（不报错）
+    expect((await request(app).delete("/api/team/usage/mine").set(auth(token))).body).toEqual({
+      deleted: 0,
+    });
+
+    const after = await request(app)
+      .get("/api/team/usage")
+      .query({ range: "7d", to: TO })
+      .set(auth(token));
+    expect(after.body.self.total).toBe(0);
+    expect(after.body.self.byModel).toEqual([]);
+    expect(after.body.ranking.map((r: { displayName: string }) => r.displayName)).toEqual(["鲍勃"]);
+
+    // 别人的行没被动
+    const bobView = await request(app)
+      .get("/api/team/usage")
+      .query({ range: "7d", to: TO })
+      .set(auth(b.token));
+    expect(bobView.body.self.total).toBe(900);
+  });
+});

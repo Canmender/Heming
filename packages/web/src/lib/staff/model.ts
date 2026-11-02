@@ -12,6 +12,12 @@ export const STAFF_SETTINGS_KEY = "heming.staff.v1";
 export const STAFF_RUNS_KEY = "heming.staff.runs.v1";
 export const STAFF_SEEN_KEY = "heming.staff.seen.v1";
 
+// 日程临期判据与桌宠事件派生共用，已抽到 `lib/agendaBucket.ts`（避免 petEvent 拖进整个幕僚模型）。
+// 这里 re-export 保持既有导入路径不变：`import { agendaBucket } from "./model.js"` 仍可用。
+import { AGENDA_LOOKAHEAD_MS, agendaBucket, type AgendaBucket } from "../agendaBucket.js";
+export { AGENDA_LOOKAHEAD_MS, agendaBucket };
+export type { AgendaBucket };
+
 /** 保留的简报份数（超出按开始时间淘汰最旧）。 */
 export const MAX_STAFF_RUNS = 30;
 /** 历史单键字节上限：localStorage 同源约 5MB，给任务/记忆留余量。 */
@@ -19,8 +25,6 @@ export const STAFF_RUNS_BYTE_LIMIT = 192 * 1024;
 /** 去重账本每类上限（议程/任务各一份）。 */
 export const MAX_SEEN = 200;
 
-/** 日程「临期」窗口：24 小时。 */
-export const AGENDA_LOOKAHEAD_MS = 24 * 60 * 60 * 1000;
 /** 任务「卡住」阈值：与任务区 `TASK_STALE_MS` 同口径（10 分钟无更新）。 */
 export const TASK_STUCK_MS = 10 * 60 * 1000;
 /** 失败任务只在最近 24 小时内提醒。 */
@@ -48,7 +52,6 @@ export const MAX_DAILY_TOKEN_CAP = 1_000_000;
 export type StaffTrigger = "manual" | "daily" | "agenda" | "task";
 export type StaffRunMode = "rules" | "llm" | "fallback";
 export type StaffSeverity = "urgent" | "warn" | "info";
-export type AgendaBucket = "overdue" | "today" | "next24h";
 export type TaskIssue = "stuck" | "failed";
 
 export interface StaffSettings {
@@ -285,21 +288,6 @@ function lastEventRunAt(runs: StaffRun[]): number {
     if (run.trigger === "agenda" || run.trigger === "task") latest = Math.max(latest, run.startedAt);
   }
   return latest;
-}
-
-/** 本地时区里的日程分级：逾期 > 今天 > 24 小时内；更远返回 null。 */
-export function agendaBucket(dueTs: number, now: number): AgendaBucket | null {
-  if (!Number.isFinite(dueTs) || dueTs <= 0) return null;
-  if (dueTs < now) return "overdue";
-  const d = new Date(dueTs);
-  const n = new Date(now);
-  const sameDay =
-    d.getFullYear() === n.getFullYear() &&
-    d.getMonth() === n.getMonth() &&
-    d.getDate() === n.getDate();
-  if (sameDay) return "today";
-  if (dueTs <= now + AGENDA_LOOKAHEAD_MS) return "next24h";
-  return null;
 }
 
 export function agendaKey(fact: Pick<StaffAgendaFact, "agendaId" | "bucket">): string {
