@@ -926,6 +926,28 @@ async function runPreflight(ctx) {
     notes.push("工作区干净");
   }
 
+  // UTF-8 BOM 守卫（2026-11-02 实踩）：`deploy/nginx-heming.conf` 若带 BOM，
+  // 远端 nginx 会在第一行报 `unknown directive "﻿#"`，install-app.sh 随即恢复默认站点，
+  // 表现为「部署做到一半失败、站点回退到旧配置」。这类不可见字符在编辑器里看不出来，
+  // 只能在发版前用字节判：前 3 字节是 EF BB BF 就拒绝。
+  const deployTextFiles = [
+    "deploy/nginx-heming.conf",
+    "deploy/install-app.sh",
+    "deploy/heming-api.service",
+    "deploy/provision.sh",
+  ];
+  for (const rel of deployTextFiles) {
+    const abs = join(ROOT, rel);
+    if (!existsSync(abs)) continue;
+    const head = readFileSync(abs).subarray(0, 3);
+    if (head.length === 3 && head[0] === 0xef && head[1] === 0xbb && head[2] === 0xbf) {
+      throw new StepError(`部署文件带 UTF-8 BOM：${rel}`, {
+        hint: "用不带 BOM 的 UTF-8 重写该文件（PowerShell 5 的 Out-File 默认会加 BOM）。nginx 会在第一行报 unknown directive。",
+      });
+    }
+  }
+  notes.push("部署文件无 BOM");
+
   // 发版依赖的脚本/文件必须在（缺了后面几步会以更难懂的方式失败）
   const required = [
     "package.json",
