@@ -189,3 +189,19 @@
 | 发布链缺口 | ⚠ `release.mjs --publish` 调 `bash scripts/publish-update.sh`，但本机**没有 Git Bash**，`bash` 落到 WSL 并失败（`0x8007054f`）→ 本次用 `.tmp/publish-update.py`（paramiko）手工完成；**下一轮应把 publish 步骤改成 Node/Python 实现，或脚本内自动回退** |
 | 备份 | ✅ `.tmp/backups/heming-data-2026-11-02.tar.gz` 6.2KB（同名覆盖当天旧备份，见 HANDOFF 提醒） |
 | 提交 | `e8cb91f`（代码+文档），发布证据回填后再补一个 docs 提交 |
+
+## 7. 第二波（2026-11-02 20:00 起，目标 d.59.2.19.0）
+
+第一波已发布（d.57.2.18.0 上线 + r45 安装包与更新源已上传）。第二波四轨并行：
+
+| 轨 | 内容 | 负责人 | 关键文件 | 主要风险 |
+|---|---|---|---|---|
+| ③-1 性能与包体 | 文档解析/PDF 按需加载、主 bundle 路由级拆分、首屏 gzip 对比 | baseline | `vite.config.ts`、`App.tsx`、各页面 import | 懒加载边界错会导致运行时报错；需行为不变的证明 |
+| 发布链修复 | `scripts/publish-update.mjs` 替代依赖 Git Bash 的 shell 版；`release.mjs` 第 9 步改用它 | baseline | `scripts/` | 本次发布已踩坑（WSL bash 失败），必须修 |
+| ②-4 桌宠在场感 | 任务收尾/日程临期/幕僚简报 → `pet:event` → 姿态+气泡+点击直达；渠道互斥、三档打扰 | hotpath | `pet-host.js`、`lib/pet*`、`components/pet` | 主窗口前台互斥与文案脱敏 |
+| ②-3 团队能力 | 用量排行（服务端聚合、白名单摘要、默认只显示本人）+ 团队日程只读区 | rollout | `server/team.ts`、`TeamPage.tsx`、`shared` | 隐私红线（不含正文/提示词/参数）；新表幂等 |
+| 安全收口 | safeStorage 同步→异步迁移（Electron 46 前必须）+ P0-5b P3 备份键清理 | filepatch | `secret-store.js`、`preload.js`、`secureStorage.ts`、`e2eSession.ts` | 渲染层同步读改异步的时序风险；回退路径 |
+
+**写入边界**：`App.tsx`/`main.tsx` 归 baseline；`TeamPage/TeamBoard` 归 rollout；`pet-host/main.js` 归 hotpath；`secret-store/preload/secureStorage/e2eSession` 归 filepatch；`scripts/` 与 `vite.config.ts` 归 baseline。版本号/CHANGELOG/HANDOFF/INDEX/提交/门禁/打包/部署仍归 Lead。
+
+**版本预期**：特性 57→59（桌宠在场感 + 团队能力两项新能力）、修订 18→19（性能/发布链/安全收口），即 `d.59.2.19.0`；若某项未完成则相应少加，发布前按实际落地项重算。
