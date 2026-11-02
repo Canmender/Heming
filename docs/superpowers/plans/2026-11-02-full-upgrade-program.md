@@ -218,3 +218,15 @@
 | 全量门禁 | ✅ 2026-11-02 20:31：4/4 包通过无重试；shared 29 / server 141 / web 181 文件 2762 例 / desktop 28 文件 474 例；三包 tsc 0 错误 |
 | 版本 | `d.59.2.19.0`（特性 57→59 两条新能力：桌宠在场感、团队能力；修订 18→19：首屏/发布链/安全收口） |
 | 待办 | 打包 r46 → 部署 → 发布更新源 → 回填 HANDOFF §2 与证据 |
+
+### 第二波发布完成（2026-11-02 20:42）
+
+| 项 | 结果与证据 |
+|---|---|
+| 提交 | ✅ `032a8e1`（d.59.2.19.0，本波全部改动 + 文档） |
+| 门禁 | ✅ build 通过；逐包 4/4 无重试（shared 29 / server 141 / web 181 文件 2762 例 / desktop 28 文件 474 例）；三包 tsc 0 |
+| 安装包 | ✅ `release/r46/和鸣 Setup d.59.2.19.0.exe` 228,168,519 字节；sha512 三方一致；runtime 7371 文件 / 5026 `.py`；内嵌 `web/assets/main-BcTTEUM3.js` 仅 120,666 字节（首屏瘦身反映到包内） |
+| 云端部署 | ✅ `release.mjs` 8 步 OK（备份 → 上传 → install → smoke）；`/api/health` `{"ok":true}`；线上 `main-JIK5hIB3.js`（md5 `03BA7DD7…`），版本串在懒加载 chunk `SettingsPage-DnT0NC0q.js`（md5 与本地逐字一致 `D11B2584…`） |
+| 更新源 | ✅ `latest.yml` 355B/200/octet-stream，指向 59.2.19，与本地字节逐一相同（中文名未重编码）；安装包 Range 206；**发布脚本换成了 `publish-update.mjs`，不再依赖 Git Bash** |
+| 备份 | ✅ `.tmp/backups/heming-data-2026-11-02.tar.gz`（同名覆盖当天旧版，仍是待改的运维纪律） |
+| 第三波候选 | `task-9` CSP 基线（report-only 起步）、`task-10` 启动时序（hydrate 后 setState，Electron 46 前必须）、`task-11` 无障碍与错误态巡检、`task-12` pdfjs 6 评估 |
