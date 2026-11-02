@@ -12,6 +12,16 @@ vi.mock("../lib/api.js", async (importOriginal) => {
   return { ...actual, fetchTeam: vi.fn() };
 });
 
+// 本机三组（任务/记忆/插件）在面板挂载时读一次快照：单测里换成可控数据。
+// 只覆盖 readLocalSnapshot，检索函数仍走真实实现（searchLocal* 是纯函数）。
+const localSnapshot = vi.hoisted(() => ({
+  current: { tasks: [] as unknown[], memories: [] as unknown[], plugins: [] as unknown[] },
+}));
+vi.mock("../lib/palette/local.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/palette/local.js")>();
+  return { ...actual, readLocalSnapshot: () => localSnapshot.current };
+});
+
 /**
  * 命令面板 v2（d.60）的行为用例。
  *
@@ -307,5 +317,128 @@ describe("命令面板 v2 · 最近使用", () => {
     fireEvent.click(row);
     expect(localStorage.getItem(RECENT_KEY)).toBeNull();
     view.unmount();
+  });
+});
+
+describe("命令面板 · 本机三组（任务 / 记忆 / 插件）", () => {
+  const taskFixture = {
+    id: "t1",
+    conversationId: "c1",
+    agentId: "a1",
+    agentName: "阿和",
+    title: "整理周报",
+    prompt: "把本周材料整理成周报",
+    status: "done",
+    createdAt: 0,
+    updatedAt: 0,
+    result: "本周完成 3 项",
+    steps: [],
+  };
+  const memoryFixture = {
+    kind: "memory",
+    id: "m1",
+    name: "语义 · 称呼",
+    detail: "用户希望被称为阿和",
+    layer: "semantic",
+  };
+  const pluginFixture = {
+    manifest: {
+      schemaVersion: 2,
+      id: "acme.weather",
+      name: "天气能力包",
+      version: "1.0.0",
+      description: "出行天气建议与查询服务",
+      author: "Acme",
+      skills: [{ name: "出行建议", instructions: "x", triggers: [], tags: [], description: "" }],
+      mcpServers: [],
+    },
+    enabled: true,
+    skillIds: [],
+    serverIds: [],
+    installedAt: "",
+    updatedAt: "",
+  };
+
+  beforeEach(() => {
+    resetStores();
+    vi.mocked(fetchTeam).mockReset();
+    vi.mocked(fetchTeam).mockResolvedValue({ members: [], onlineCount: 0 });
+    useInfohubStore.setState({ available: false, running: false, booted: true, error: "" });
+    localSnapshot.current = {
+      tasks: [taskFixture],
+      memories: [memoryFixture],
+      plugins: [pluginFixture],
+    };
+  });
+  afterEach(() => {
+    cleanup();
+    localSnapshot.current = { tasks: [], memories: [], plugins: [] };
+  });
+
+  it("任务命中 → 结果出现「任务」组，点击切任务区并带上定位 id", () => {
+    const onClose = vi.fn();
+    render(<CommandPalette onClose={onClose} />);
+    fireEvent.change(searchBox(), { target: { value: "周报" } });
+    expect(screen.getByText("任务")).toBeInTheDocument();
+    fireEvent.click(OPTION("整理周报"));
+    const s = useUiStore.getState();
+    expect(s.page).toBe("tasks");
+    expect(s.taskFocusId).toBe("t1");
+    // 复用 focusTask 时会连带聚焦该任务的会话
+    expect(s.activeConversationId).toBe("c1");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("记忆命中 → 投 focus-memory 意图并切记忆区", () => {
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "阿和" } });
+    expect(screen.getByText("记忆")).toBeInTheDocument();
+    fireEvent.click(OPTION("语义 · 称呼"));
+    const s = useUiStore.getState();
+    expect(s.page).toBe("memory");
+    expect(s.paletteIntent).toMatchObject({ kind: "focus-memory", data: { memoryId: "m1", layer: "semantic" } });
+  });
+
+  it("插件命中 → 投 open-plugin 意图并切插件区", () => {
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "天气" } });
+    expect(screen.getByText("插件")).toBeInTheDocument();
+    fireEvent.click(OPTION("天气能力包"));
+    const s = useUiStore.getState();
+    expect(s.page).toBe("plugins");
+    expect(s.paletteIntent).toMatchObject({ kind: "open-plugin", data: { id: "acme.weather" } });
+  });
+
+  it("三组同屏时顺序固定：任务 → 记忆 → 插件", () => {
+    localSnapshot.current = {
+      tasks: [taskFixture],
+      memories: [{ ...memoryFixture, name: "语义 · 周报偏好", detail: "用户喜欢周报" }],
+      plugins: [{ ...pluginFixture, manifest: { ...pluginFixture.manifest, name: "周报工具包" } }],
+    };
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "周报" } });
+    const labels = ["任务", "记忆", "插件"].map((t) => screen.getByText(t));
+    // getByText 按文档顺序返回，这里断言三个标题在 DOM 里的相对顺序
+    const order = labels.map((el) => Array.from(el.parentElement!.parentElement!.children).indexOf(el.parentElement!));
+    expect(order[0]).toBeLessThan(order[1]);
+    expect(order[1]).toBeLessThan(order[2]);
+  });
+
+  it("本机命中超过上限时显示「还有 N 条」", () => {
+    localSnapshot.current = {
+      tasks: Array.from({ length: 8 }, (_, i) => ({ ...taskFixture, id: `t${i}`, title: `周报 ${i}` })),
+      memories: [],
+      plugins: [],
+    };
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "周报" } });
+    expect(screen.getByText("还有 3 条")).toBeInTheDocument(); // 8 - 5
+  });
+
+  it("本机结果不携带报告正文（面板项文本只到截断后的 detail）", async () => {
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "周报" } });
+    const row = await screen.findByRole("option", { name: "选择 整理周报" });
+    expect(row.textContent).not.toContain("本周完成 3 项");
   });
 });

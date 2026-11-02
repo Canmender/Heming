@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { SettingsPage, appVersionLabel } from "./SettingsPage.js";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { SettingsPage, SETTINGS_HIGHLIGHT_MS, appVersionLabel } from "./SettingsPage.js";
 import { useAuthStore } from "../store/auth.js";
 import { useThemeStore } from "../store/theme.js";
 import { DEFAULT_NAV_ORDER, useUiStore } from "../store/ui.js";
@@ -470,5 +470,110 @@ describe("设置区 · 更新日志卡", () => {
     const card = screen.getByRole("region", { name: "更新日志" });
     const current = card.querySelector("button[aria-label='更新日志 d.3.0.3.0']");
     expect(current?.textContent).toContain("当前");
+  });
+});
+
+/** 挂 scrollIntoView stubs 并清掉（jsdom 原生没有该方法）。 */
+function stubScrollIntoView(): ReturnType<typeof vi.fn> {
+  const spy = vi.fn();
+  (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = spy;
+  return spy;
+}
+
+describe("设置区 · 卡片搜索与定位（UX-E）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+    useThemeStore.setState({ accent: "#1a1a1a" });
+    document.documentElement.removeAttribute("style");
+    setToken("t1");
+    useAuthStore.setState({ token: "t1", user: { ...alice }, status: "authed", error: null });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  it("空查询回到普通分区视图（搜索框常驻，不显示结果面板）", () => {
+    render(<SettingsPage />);
+    expect(screen.getByLabelText("搜索设置项")).toHaveValue("");
+    expect(screen.queryByRole("region", { name: "设置搜索结果" })).toBeNull();
+    // 普通视图仍在：个人资料卡
+    expect(screen.getByLabelText("昵称")).toBeInTheDocument();
+  });
+
+  it("关键词跨分区命中：结果面板列出「卡片标题 · 分区」", () => {
+    render(<SettingsPage />);
+    fireEvent.change(screen.getByLabelText("搜索设置项"), { target: { value: "主题色" } });
+
+    const panel = screen.getByRole("region", { name: "设置搜索结果" });
+    expect(panel).toHaveTextContent("页面颜色");
+    expect(panel).toHaveTextContent("· 外观");
+    // 普通分区视图让位给结果面板
+    expect(screen.queryByLabelText("昵称")).toBeNull();
+  });
+
+  it("点结果：切到对应分区、滚动到卡片、高亮 2 秒后消失", async () => {
+    const scrollSpy = stubScrollIntoView();
+    render(<SettingsPage />);
+
+    // 用假 setTimeout 只为验证 2 秒淡出；rAF 保持真实（高亮在下一帧挂上）
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.change(screen.getByLabelText("搜索设置项"), { target: { value: "桌宠" } });
+    fireEvent.click(screen.getByRole("button", { name: /桌宠/ }));
+
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    // 切到「外观」分区且锚点存在、带 ink 描边高亮
+    expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
+    const anchor = document.querySelector<HTMLElement>('[data-settings-id="pet"]')!;
+    expect(anchor).not.toBeNull();
+    expect(anchor.className).toContain("outline-ink");
+    expect(scrollSpy).toHaveBeenCalled();
+    // 查询已清空（回到普通视图）
+    expect(screen.getByLabelText("搜索设置项")).toHaveValue("");
+
+    // 2 秒后自动消失
+    act(() => {
+      vi.advanceTimersByTime(SETTINGS_HIGHLIGHT_MS + 50);
+    });
+    expect(
+      document.querySelector<HTMLElement>('[data-settings-id="pet"]')!.className,
+    ).not.toContain("outline-ink");
+  });
+
+  it("Esc：关闭结果面板并清空输入，回到普通分区视图", () => {
+    render(<SettingsPage />);
+    const input = screen.getByLabelText("搜索设置项");
+    fireEvent.change(input, { target: { value: "更新" } });
+    expect(screen.getByRole("region", { name: "设置搜索结果" })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(input).toHaveValue("");
+    expect(screen.queryByRole("region", { name: "设置搜索结果" })).toBeNull();
+    expect(screen.getByLabelText("昵称")).toBeInTheDocument();
+  });
+
+  it("没有匹配时给可行动的提示（不静默空白）", () => {
+    render(<SettingsPage />);
+    fireEvent.change(screen.getByLabelText("搜索设置项"), { target: { value: "zzz不存在" } });
+    expect(screen.getByRole("region", { name: "设置搜索结果" })).toHaveTextContent(
+      "没有匹配的设置项",
+    );
+  });
+
+  it("点结果后再次输入会重新打开面板（状态不残留）", () => {
+    stubScrollIntoView();
+    render(<SettingsPage />);
+    const input = screen.getByLabelText("搜索设置项");
+    fireEvent.change(input, { target: { value: "桌宠" } });
+    fireEvent.click(screen.getByRole("button", { name: /桌宠/ }));
+    expect(screen.queryByRole("region", { name: "设置搜索结果" })).toBeNull();
+
+    fireEvent.change(input, { target: { value: "导航" } });
+    expect(screen.getByRole("region", { name: "设置搜索结果" })).toHaveTextContent("导航顺序");
   });
 });

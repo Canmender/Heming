@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   MAX_PLUGINS,
   pluginStore,
@@ -190,6 +190,31 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
   const [removeTarget, setRemoveTarget] = useState<InstalledPlugin | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
 
+  // d.61：命令面板「插件」结果跳转 —— 打开该插件详情并短暂高亮卡片。
+  // 意图消费即清空；token 变化才触发，不会反复打开。插件页是懒加载页，
+  // 钩子放在组件里，挂载晚一帧也能消费到。
+  const paletteIntent = useUiStore((s) => s.paletteIntent);
+  const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
+  const [highlightPluginId, setHighlightPluginId] = useState<string | null>(null);
+  useEffect(() => {
+    if (paletteIntent?.kind !== "open-plugin") return;
+    const id = paletteIntent.data?.id;
+    if (id) {
+      setDetailId(id); // 直接开详情：比只高亮卡片更接近「打开插件」的语义
+      setHighlightPluginId(id);
+    }
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent]);
+
+  // 高亮 2 秒后淡出，并把卡片滚进视野。
+  useEffect(() => {
+    if (!highlightPluginId) return;
+    const el = document.querySelector(`[data-plugin-id="${highlightPluginId}"]`);
+    el?.scrollIntoView?.({ block: "center" });
+    const timer = window.setTimeout(() => setHighlightPluginId(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [highlightPluginId]);
+
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeInstall = () => setInstallOpen(false);
   useModalA11y(dialogRef, closeInstall, { active: installOpen });
@@ -359,9 +384,12 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
             return (
               <section
                 key={manifest.id}
+                data-plugin-id={manifest.id}
                 role="region"
                 aria-label={`插件 ${manifest.name}`}
-                className={cardCls}
+                className={`${cardCls} ${
+                  highlightPluginId === manifest.id ? "ring-2 ring-[#1a1a1a]/25" : ""
+                }`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

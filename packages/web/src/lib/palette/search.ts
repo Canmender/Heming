@@ -7,6 +7,16 @@ import {
 import { PALETTE_ACTIONS, findPaletteAction, type PaletteActionId } from "./actions.js";
 import { PALETTE_PAGES, findPalettePage, type PalettePage } from "./pages.js";
 import { PALETTE_SETTINGS, findPaletteSetting, type PaletteSettingSection } from "./settings.js";
+import {
+  searchLocalMemories,
+  searchLocalPlugins,
+  searchLocalTasks,
+  type LocalLayerKind,
+  type LocalMemoryItem,
+  type LocalPluginItem,
+  type LocalSnapshot,
+  type LocalTaskItem,
+} from "./local.js";
 import type { RecentEntry } from "./recent.js";
 import type { Page } from "../../store/ui.js";
 
@@ -125,7 +135,16 @@ export function searchAll(keyword: string, members: TeamMember[]): SearchResult[
 
 /* ------------------------------ 新版分组检索 ------------------------------ */
 
-export type PaletteItemKind = "page" | "setting" | "action" | "member" | "skill" | "archive";
+export type PaletteItemKind =
+  | "page"
+  | "setting"
+  | "action"
+  | "task"
+  | "memory"
+  | "plugin"
+  | "member"
+  | "skill"
+  | "archive";
 
 /**
  * 一条面板结果。
@@ -145,6 +164,14 @@ export interface PaletteItem {
   tab?: string;
   /** action 项：动作 id。 */
   actionId?: PaletteActionId;
+  /** task 项：任务 id 与所属会话（跳转用）。 */
+  taskId?: string;
+  conversationId?: string;
+  /** memory 项：记忆条目 id 与所在层（定位用）。 */
+  memoryId?: string;
+  memoryLayer?: LocalLayerKind;
+  /** plugin 项：插件 id（定位用）。 */
+  pluginId?: string;
   /** page 项的 Alt 快捷键数字（无则 undefined）。 */
   digit?: string;
   /** member 项：成员 userId（执行时聚焦用）。 */
@@ -156,7 +183,17 @@ export interface PaletteItem {
   hit?: InfohubSearchHit;
 }
 
-export type PaletteGroupId = "recent" | "page" | "setting" | "action" | "member" | "skill" | "archive";
+export type PaletteGroupId =
+  | "recent"
+  | "page"
+  | "setting"
+  | "action"
+  | "task"
+  | "memory"
+  | "plugin"
+  | "member"
+  | "skill"
+  | "archive";
 
 export interface PaletteGroup {
   id: PaletteGroupId;
@@ -171,6 +208,9 @@ export const GROUP_LABELS: Record<PaletteGroupId, string> = {
   page: "页面跳转",
   setting: "设置",
   action: "常用动作",
+  task: "任务",
+  memory: "记忆",
+  plugin: "插件",
   member: "团队成员",
   skill: "技能",
   archive: "本机归档",
@@ -182,13 +222,26 @@ export const GROUP_LIMITS: Record<PaletteGroupId, number> = {
   page: 8,
   setting: 5,
   action: 4,
+  task: 5,
+  memory: 5,
+  plugin: 5,
   member: MEMBER_LIMIT,
   skill: SKILL_LIMIT,
   archive: ARCHIVE_LIMIT,
 };
 
 /** 检索结果的组顺序（空查询只用前三个：最近 / 页面 / 动作）。 */
-const SEARCH_ORDER: PaletteGroupId[] = ["page", "setting", "action", "member", "skill", "archive"];
+const SEARCH_ORDER: PaletteGroupId[] = [
+  "page",
+  "setting",
+  "action",
+  "task",
+  "memory",
+  "plugin",
+  "member",
+  "skill",
+  "archive",
+];
 const EMPTY_ORDER: PaletteGroupId[] = ["recent", "page", "action"];
 
 export function pageItem(p: PalettePage): PaletteItem {
@@ -249,6 +302,40 @@ export function archiveItem(hit: InfohubSearchHit): PaletteItem {
   return { kind: "archive", id: r.id, name: r.name, detail: r.detail, hit };
 }
 
+/* ---- 本机三组（任务 / 记忆 / 插件）：只带定位 id，不带任何正文快照 ---- */
+
+export function taskPaletteItem(t: LocalTaskItem): PaletteItem {
+  return {
+    kind: "task",
+    id: `task:${t.id}`,
+    name: t.name,
+    detail: t.detail,
+    taskId: t.id,
+    conversationId: t.conversationId,
+  };
+}
+
+export function memoryPaletteItem(m: LocalMemoryItem): PaletteItem {
+  return {
+    kind: "memory",
+    id: `memory:${m.id}`,
+    name: m.name,
+    detail: m.detail,
+    memoryId: m.id,
+    memoryLayer: m.layer,
+  };
+}
+
+export function pluginPaletteItem(p: LocalPluginItem): PaletteItem {
+  return {
+    kind: "plugin",
+    id: `plugin:${p.id}`,
+    name: p.name,
+    detail: p.detail,
+    pluginId: p.id,
+  };
+}
+
 /**
  * 空查询的分组：最近使用（≤5，本机记录）→ 页面跳转（13）→ 常用动作（4）。
  *
@@ -298,14 +385,19 @@ function rank<T extends { name: string }>(items: T[], q: string): T[] {
 }
 
 /**
- * 输入检索：页面名 + 页面描述、设置分区名（含关键词）、动作名、成员、技能、归档。
+ * 输入检索：页面名 + 页面描述、设置分区名（含关键词）、动作名、**任务 / 记忆 / 插件
+ * 三个本机来源**、成员、技能、归档。
  *
- * 分组顺序固定（页面 → 设置 → 动作 → 成员 → 技能 → 归档），**组间不混排**；
- * 空组直接不出现，避免一屏全是标题。
+ * 分组顺序固定（页面 → 设置 → 动作 → 任务 → 记忆 → 插件 → 成员 → 技能 → 归档），
+ * **组间不混排**；空组直接不出现，避免一屏全是标题。每组截断到上限，
+ * 未截断总数记在 `total` 上供面板显示「还有 N 条」。
+ *
+ * `ctx.local` 是本机快照（任务/记忆/插件）：不传时这三组为空，
+ * 现有成员/技能/归档行为与 d.60 完全一致。
  */
 export function searchPalette(
   keyword: string,
-  ctx: { members: TeamMember[]; archiveHits: InfohubSearchHit[] },
+  ctx: { members: TeamMember[]; archiveHits: InfohubSearchHit[]; local?: LocalSnapshot },
 ): PaletteGroup[] {
   const q = keyword.trim().toLowerCase();
   if (!q) return buildEmptyGroups([]);
@@ -346,11 +438,29 @@ export function searchPalette(
   })));
   found.set("archive", ctx.archiveHits.map(archiveItem));
 
+  // 本机三组：只在本机内存里匹配，不发网络请求（见 local.ts 顶部隐私边界）。
+  const local = ctx.local;
+  const taskRes = local
+    ? searchLocalTasks(q, local.tasks, GROUP_LIMITS.task)
+    : { hits: [] as LocalTaskItem[], total: 0 };
+  const memoryRes = local
+    ? searchLocalMemories(q, local.memories, GROUP_LIMITS.memory)
+    : { hits: [] as LocalMemoryItem[], total: 0 };
+  const pluginRes = local
+    ? searchLocalPlugins(q, local.plugins, GROUP_LIMITS.plugin)
+    : { hits: [] as LocalPluginItem[], total: 0 };
+  found.set("task", taskRes.hits.map(taskPaletteItem));
+  found.set("memory", memoryRes.hits.map(memoryPaletteItem));
+  found.set("plugin", pluginRes.hits.map(pluginPaletteItem));
+
   const groups: PaletteGroup[] = [];
   const totals: Partial<Record<PaletteGroupId, number>> = {
     page: PALETTE_PAGES.filter((p) => matches(q, p.label, p.description)).length,
     setting: PALETTE_SETTINGS.filter((s) => matches(q, s.label, s.description, s.keywords)).length,
     action: PALETTE_ACTIONS.filter((a) => matches(q, a.label, a.description, a.keywords)).length,
+    task: taskRes.total,
+    memory: memoryRes.total,
+    plugin: pluginRes.total,
     // 成员/技能的命中总数要自己数：`searchAllDetailed` 只给「成员+技能」合计，
     // 且它会把结果截断，不能反推每类各有多少。
     member: ctx.members.filter(

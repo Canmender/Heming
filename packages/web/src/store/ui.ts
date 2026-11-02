@@ -110,20 +110,37 @@ export interface AutomationIntent {
 }
 
 /**
- * 命令面板向「常驻组件」投递的一次性意图（d.60）。
+ * 命令面板向「常驻/懒加载页面」投递的一次性意图（d.60 起，d.61 扩三种）。
  *
- * 为什么需要它：新建智能体的弹窗在 `AssistantPage` 里、通知中心在 `NavRail` 的
- * `NotificationCenter` 里，两者的开关都是组件内局部 state，外部没有触发点。
+ * 为什么需要它：弹窗/高亮这类开关是组件内局部 state，外部没有触发点。
  * 这里只加一个**内存**意图槽给命令面板投递：
  * - 不落 localStorage —— 面板关掉就该忘掉，重启后残留一个「打开通知中心」很怪；
  * - `token` 自增，保证「同一种意图连点两次」也能各自消费一次（不会因为 kind 相同被合并）；
- * - 消费即清空，消费端以 `token` 为 effect 依赖，天然幂等、不会重复打开。
+ * - 消费即清空，消费端以 `token` 为 effect 依赖，天然幂等、不会重复打开；
+ * - `data` 只放跳转所需的定位信息（任务/记忆/插件 id），**不放任何内容正文**。
  */
-export type PaletteIntentKind = "agent-create" | "notifications";
+export type PaletteIntentKind =
+  | "agent-create"
+  | "notifications"
+  /** d.61：命令面板本机搜索 → 记忆条目定位。 */
+  | "focus-memory"
+  /** d.61：命令面板本机搜索 → 插件卡片定位。 */
+  | "open-plugin";
+
+/** 意图携带的定位信息（只含 id/层级，不含正文）。 */
+export interface PaletteIntentData {
+  /** open-plugin：插件 id。 */
+  id?: string;
+  /** focus-memory：记忆条目 id。 */
+  memoryId?: string;
+  /** focus-memory：条目所在层（三层记忆）。 */
+  layer?: "working" | "episodic" | "semantic";
+}
 
 export interface PaletteIntent {
   kind: PaletteIntentKind;
   token: number;
+  data?: PaletteIntentData;
 }
 
 interface UiState {
@@ -168,8 +185,8 @@ interface UiState {
   consumeSettingsTab: () => void;
   /** 命令面板投递的一次性意图（内存，消费即清）。 */
   paletteIntent: PaletteIntent | null;
-  /** 投递意图（token 自增）。 */
-  setPaletteIntent: (kind: PaletteIntentKind) => void;
+  /** 投递意图（token 自增；data 只携带定位 id，不含内容正文）。 */
+  setPaletteIntent: (kind: PaletteIntentKind, data?: PaletteIntentData) => void;
   /** 消费意图（消费端调用后立即清空）。 */
   consumePaletteIntent: () => void;
   /** 打开某个助手会话并进入助手页。 */
@@ -238,9 +255,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   automationIntent: null,
   settingsTab: null,
   paletteIntent: null,
-  setPaletteIntent: (kind) => {
+  setPaletteIntent: (kind, data) => {
     paletteIntentToken += 1;
-    set({ paletteIntent: { kind, token: paletteIntentToken } });
+    set({ paletteIntent: { kind, token: paletteIntentToken, ...(data ? { data } : {}) } });
   },
   consumePaletteIntent: () => set({ paletteIntent: null }),
   setPage: (page) =>

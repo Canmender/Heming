@@ -9,6 +9,7 @@ import {
   type InfohubSearchResult,
 } from "../lib/infohub/client.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
+import { readLocalSnapshot, type LocalSnapshot } from "../lib/palette/local.js";
 import { shortcutLabel } from "../lib/palette/pages.js";
 import { loadRecent, recordRecent, type RecentEntry } from "../lib/palette/recent.js";
 import {
@@ -62,6 +63,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const openInfohub = useUiStore((s) => s.openInfohub);
   const openSettings = useUiStore((s) => s.openSettings);
   const setPaletteIntent = useUiStore((s) => s.setPaletteIntent);
+  const focusTask = useUiStore((s) => s.focusTask);
   const infohubRunning = useInfohubStore((s) => s.running);
 
   const [query, setQuery] = useState("");
@@ -118,12 +120,16 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     };
   }, [query, infohubRunning]);
 
+  // 本机三组（任务/记忆/插件）：打开面板时读一次内存快照，之后的检索全在内存里做。
+  // 只读本机、不发请求、不写日志（隐私边界见 lib/palette/local.ts 顶部）。
+  const [local] = useState<LocalSnapshot>(() => readLocalSnapshot());
+
   const groups = useMemo<PaletteGroup[]>(
     () =>
       query.trim()
-        ? searchPalette(query, { members, archiveHits })
+        ? searchPalette(query, { members, archiveHits, local })
         : buildEmptyGroups(recent),
-    [query, members, archiveHits, recent],
+    [query, members, archiveHits, local, recent],
   );
   const items = useMemo(() => flattenGroups(groups), [groups]);
   const indexByKey = useMemo(() => {
@@ -217,6 +223,24 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       case "archive":
         // 归档页自己会跑同词检索；这里只投递意图，不复制结果页
         openInfohub({ tab: "search", query: query.trim() });
+        break;
+      case "task":
+        // 复用既有 focusTask：切任务区 + taskFocusId，任务区自己选中该记录并消费。
+        if (item.taskId) focusTask(item.taskId, item.conversationId);
+        break;
+      case "memory":
+        // 记忆页是懒加载页：先投定位意图再切页，挂载后由它消费并高亮该条。
+        if (item.memoryId) {
+          setPaletteIntent("focus-memory", { memoryId: item.memoryId, layer: item.memoryLayer });
+          setPage("memory");
+        }
+        break;
+      case "plugin":
+        // 插件页同理：投插件 id，挂载后打开该插件详情并高亮卡片。
+        if (item.pluginId) {
+          setPaletteIntent("open-plugin", { id: item.pluginId });
+          setPage("plugins");
+        }
         break;
       default:
         break;
@@ -399,6 +423,12 @@ function kindGlyph(kind: PaletteItem["kind"]): string {
       return "设";
     case "action":
       return "动";
+    case "task":
+      return "任";
+    case "memory":
+      return "忆";
+    case "plugin":
+      return "件";
     case "skill":
       return "技";
     case "archive":

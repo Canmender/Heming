@@ -165,6 +165,8 @@ describe("通知中心面板", () => {
     expect(confirmSpy).not.toHaveBeenCalled();
 
     const dialog = screen.getByRole("dialog", { name: "清空通知" });
+    // 文案必须写明不可恢复（应用内二次确认，不是浏览器 confirm）
+    expect(within(dialog).getByText(/不可恢复/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(useNotificationStore.getState().items).toHaveLength(2);
 
@@ -209,6 +211,67 @@ describe("通知中心面板", () => {
     const dialog = screen.getByRole("dialog", { name: "通知中心" });
     expect(within(dialog).getByText("在吗")).toBeInTheDocument();
     expect(within(dialog).getAllByRole("button", { name: "标记已读：有正文" })).toHaveLength(1);
+  });
+
+  /* ───────────── d.61 F 轨：类型筛选（筛选不改未读口径） ───────────── */
+
+  it("按类型筛选：任务 / 待确认 / 幕僚 / 全部，且筛选不改变未读数与角标", () => {
+    const task = makeItem({ kind: "task", title: "任务甲" });
+    const approval = makeItem({ kind: "approval", title: "确认乙" });
+    const staff = makeItem({ kind: "staff", title: "幕僚丙" });
+    useNotificationStore.setState({ items: [task, approval, staff] });
+    render(<NotificationCenter />);
+    fireEvent.click(screen.getByRole("button", { name: "通知中心 3 条未读" }));
+    const panel = () => screen.getByRole("dialog", { name: "通知中心" });
+
+    // 三个筛选按钮 + 全部；默认全部
+    const group = within(panel()).getByRole("group", { name: "按类型筛选通知" });
+    expect(within(group).getByRole("button", { name: "全部" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(within(group).getByRole("button", { name: "任务" }));
+    expect(within(panel()).getByText("任务甲")).toBeInTheDocument();
+    expect(within(panel()).queryByText("确认乙")).toBeNull();
+    expect(within(panel()).queryByText("幕僚丙")).toBeNull();
+    // 未读口径不变：铃铛仍按全部 3 条算
+    expect(screen.getByRole("button", { name: "通知中心 3 条未读" })).toBeInTheDocument();
+
+    fireEvent.click(within(group).getByRole("button", { name: "待确认" }));
+    expect(within(panel()).getByText("确认乙")).toBeInTheDocument();
+    expect(within(panel()).queryByText("任务甲")).toBeNull();
+    expect(screen.getByRole("button", { name: "通知中心 3 条未读" })).toBeInTheDocument();
+
+    fireEvent.click(within(group).getByRole("button", { name: "幕僚" }));
+    expect(within(panel()).getByText("幕僚丙")).toBeInTheDocument();
+    expect(within(panel()).queryByText("确认乙")).toBeNull();
+
+    fireEvent.click(within(group).getByRole("button", { name: "全部" }));
+    for (const title of ["任务甲", "确认乙", "幕僚丙"]) {
+      expect(within(panel()).getByText(title)).toBeInTheDocument();
+    }
+  });
+
+  it("筛选后没有该类型通知：显示「该类型暂无通知」（不是全空态文案）", () => {
+    useNotificationStore.setState({ items: [makeItem({ kind: "task", title: "只有任务" })] });
+    render(<NotificationCenter />);
+    fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
+    const panel = screen.getByRole("dialog", { name: "通知中心" });
+    fireEvent.click(within(panel).getByRole("button", { name: "幕僚" }));
+    expect(within(panel).getByText("该类型暂无通知")).toBeInTheDocument();
+    expect(within(panel).queryByText("只有任务")).toBeNull();
+    expect(within(panel).queryByText(/还没有通知/)).toBeNull();
+  });
+
+  it("「全部已读」不受筛选影响：筛选到任务也能清掉全部未读", () => {
+    useNotificationStore.setState({
+      items: [makeItem({ kind: "task", title: "任务甲" }), makeItem({ kind: "staff", title: "幕僚丙" })],
+    });
+    render(<NotificationCenter />);
+    fireEvent.click(screen.getByRole("button", { name: "通知中心 2 条未读" }));
+    const panel = screen.getByRole("dialog", { name: "通知中心" });
+    fireEvent.click(within(panel).getByRole("button", { name: "任务" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "全部已读" }));
+    expect(useNotificationStore.getState().items.every((n) => n.read)).toBe(true);
+    expect(screen.getByRole("button", { name: "通知中心" })).toBeInTheDocument();
   });
 });
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
 import { LlmSettingsCard } from "./LlmSettingsCard.js";
@@ -13,6 +13,13 @@ import { useUiStore, type NavPage } from "../store/ui.js";
 import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
 import { CHANGELOG, logOpenState, parseInline, stripInline, toggleLog } from "../lib/changelog.js";
 import { UpdateCard } from "./UpdateCard.js";
+import {
+  matchSettingsCards,
+  sectionLabelOf,
+  settingsCardById,
+  type SettingsCardMeta,
+} from "../lib/settings/registry.js";
+import { FOCUS_RING } from "../lib/a11y/focus.js";
 
 /**
  * 头像文件上限：449_000 字节 → base64 data URL 约 598_700 字符，
@@ -89,6 +96,16 @@ const SETTINGS_TABS = [
 
 type SettingsTabId = (typeof SETTINGS_TABS)[number]["id"];
 
+/** 搜索命中后的高亮时长（规格 §2.E：2 秒淡出；用既有 ink 描边，不新增配色）。 */
+export const SETTINGS_HIGHLIGHT_MS = 2_000;
+
+/** 卡片锚点的通用样式：高亮时给一圈 ink 描边，2 秒后自动消失。 */
+function anchorClass(highlighted: boolean): string {
+  return `rounded-xl transition-shadow ${
+    highlighted ? "outline outline-2 outline-offset-2 outline-ink" : ""
+  }`;
+}
+
 /** 只认已知分组：外部投递来的字符串可能是旧版本残留或拼错，不能直接喂给 setTab。 */
 function isSettingsTabId(value: unknown): value is SettingsTabId {
   return typeof value === "string" && SETTINGS_TABS.some((t) => t.id === value);
@@ -101,6 +118,14 @@ export function SettingsPage() {
   const [tab, setTab] = useState<SettingsTabId>(
     isSettingsTabId(settingsTab) ? settingsTab : "profile",
   );
+  /** 卡片内搜索（UX-E）：空查询 = 普通分区视图；有内容 = 跨分区结果面板。 */
+  const [query, setQuery] = useState("");
+  /** 命中后要滚动/高亮的卡片 id（滚动完立刻消费，避免下次进设置页又被拽走）。 */
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const highlightTimer = useRef<number | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const results = matchSettingsCards(query);
 
   // 外部请求直达某个分组（桌宠未配置模型时点「去设置」）：消费后立刻清空，
   // 否则下次手动进设置页会被这个残留值拽回同一个分组。
@@ -109,6 +134,58 @@ export function SettingsPage() {
     if (isSettingsTabId(settingsTab)) setTab(settingsTab);
     consumeSettingsTab();
   }, [settingsTab, consumeSettingsTab]);
+
+  // 点搜索结果：切分组 → 等那一帧渲染完 → 滚动到卡片 + 高亮 2 秒。
+  useEffect(() => {
+    if (!focusTarget) return;
+    let cancelled = false;
+    const raf = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      const el = document.querySelector<HTMLElement>(`[data-settings-id="${focusTarget}"]`);
+      // jsdom 没有 scrollIntoView：可选调用，测试里由用例自己打桩断言
+      el?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+      setHighlightId(focusTarget);
+      if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
+      highlightTimer.current = window.setTimeout(() => {
+        highlightTimer.current = null;
+        setHighlightId(null);
+      }, SETTINGS_HIGHLIGHT_MS);
+      setFocusTarget(null); // 消费掉，防重放
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+    };
+  }, [focusTarget]);
+
+  // Esc：关掉结果面板并清空输入（只在搜索态监听，普通视图不抢 Esc）
+  useEffect(() => {
+    if (!query.trim()) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setQuery("");
+      searchRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [query]);
+
+  useEffect(
+    () => () => {
+      if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
+    },
+    [],
+  );
+
+  /** 跳到某张卡片：清空查询、切分组、把滚动/高亮交给上面的 effect。 */
+  const jumpToCard = (card: SettingsCardMeta) => {
+    setQuery("");
+    setTab(card.section);
+    setFocusTarget(card.id);
+  };
+
+  const searching = query.trim().length > 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -124,7 +201,11 @@ export function SettingsPage() {
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => setTab(t.id)}
+                onClick={() => {
+                  setTab(t.id);
+                  // 手动切分组 = 结束这次搜索（回到普通分区视图）
+                  setQuery("");
+                }}
                 className={`-mb-px border-b-2 px-3.5 py-2 text-[12.5px] transition-colors ${
                   active
                     ? "border-b-ink font-bold text-ink"
@@ -136,37 +217,138 @@ export function SettingsPage() {
             );
           })}
         </div>
+        {/* 卡片内搜索：跨 5 个分区按「标题 + 关键词 + 分区名」匹配 */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            ref={searchRef}
+            type="search"
+            aria-label="搜索设置项"
+            placeholder="搜索设置项…（如 主题色 / 免问下限 / 桌宠）"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className={`w-full max-w-[420px] rounded-lg border border-line-strong px-3 py-1.5 text-[12px] outline-hidden focus:border-ink ${FOCUS_RING}`}
+          />
+          <span className="text-[11px] text-muted">
+            {searching ? `${results.length} 项匹配 · Esc 关闭` : "按标题、关键词或分区名搜索"}
+          </span>
+        </div>
       </div>
 
       {/* 内容区：一次只渲染当前分组，切换时不保留上一次的输入态（草稿本就一次性保存） */}
       <div className="min-h-0 flex-1 overflow-y-auto p-6 pt-5">
-        {tab === "profile" && <ProfileSection />}
-        {tab === "model" && (
+        {searching ? (
+          <section aria-label="设置搜索结果" className="max-w-[520px]">
+            {results.length === 0 ? (
+              <p className="text-[12px] leading-5 text-muted">
+                没有匹配的设置项。换个说法试试（如「主题色」「免问」「桌宠」「更新」）。
+              </p>
+            ) : (
+              <>
+                <p role="status" className="text-[11px] text-muted">
+                  找到 {results.length} 项，点击定位到卡片
+                </p>
+                <ul className="mt-2 flex flex-col gap-1">
+                  {results.map((card) => (
+                    <li key={card.id}>
+                      <button
+                        type="button"
+                        onClick={() => jumpToCard(card)}
+                        className={`flex w-full items-center gap-2 rounded-lg border border-line-soft bg-white px-3 py-2 text-left text-[12px] hover:border-line hover:bg-[#fafafa] ${FOCUS_RING}`}
+                      >
+                        <span className="min-w-0 flex-1 truncate">
+                          {settingsCardById(card.id)?.title ?? card.title}
+                        </span>
+                        <span className="shrink-0 text-[11px] text-muted">
+                          · {sectionLabelOf(card.section)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+        ) : (
           <>
-            <LlmSettingsCard />
-            {/* 候选链紧跟连接列表：先有连接，才谈得上把它们串成一条 failover 链 */}
-            <RouteGroupsCard />
-            <KeyStorageCard />
-            <ContextSettingsCard />
-            {/* 工具调用确认（安全设置）：与模型设置同组——两者都是「生成行为」的边界 */}
-            <HitlPolicyCard />
-            {/* 文件编辑：可写根是「智能体能改哪些文件」的唯一开关，
-                紧跟在工具调用确认之后——两者一起构成本机的写操作边界。 */}
-            <FileEditCard />
-            {/* 本机存储水位：紧跟在安全设置之后——两者都是「本机的边界」，
-                一条管「智能体会做什么」，一条管「本机还剩多少空间」。 */}
-            <StorageUsageCard />
+            {tab === "profile" && (
+              <div data-settings-id="profile" className={anchorClass(highlightId === "profile")}>
+                <ProfileSection />
+              </div>
+            )}
+            {tab === "model" && (
+              <>
+                <div
+                  data-settings-id="llm-connection"
+                  className={anchorClass(highlightId === "llm-connection")}
+                >
+                  <LlmSettingsCard />
+                </div>
+                {/* 候选链紧跟连接列表：先有连接，才谈得上把它们串成一条 failover 链 */}
+                <div
+                  data-settings-id="route-groups"
+                  className={anchorClass(highlightId === "route-groups")}
+                >
+                  <RouteGroupsCard />
+                </div>
+                <div
+                  data-settings-id="key-storage"
+                  className={anchorClass(highlightId === "key-storage")}
+                >
+                  <KeyStorageCard />
+                </div>
+                <div
+                  data-settings-id="context-budget"
+                  className={anchorClass(highlightId === "context-budget")}
+                >
+                  <ContextSettingsCard />
+                </div>
+                {/* 工具调用确认（安全设置）：与模型设置同组——两者都是「生成行为」的边界 */}
+                <div
+                  data-settings-id="hitl-policy"
+                  className={anchorClass(highlightId === "hitl-policy")}
+                >
+                  <HitlPolicyCard />
+                </div>
+                {/* 文件编辑：可写根是「智能体能改哪些文件」的唯一开关，
+                    紧跟在工具调用确认之后——两者一起构成本机的写操作边界。 */}
+                <div
+                  data-settings-id="file-edit"
+                  className={anchorClass(highlightId === "file-edit")}
+                >
+                  <FileEditCard />
+                </div>
+                {/* 本机存储水位：紧跟在安全设置之后——两者都是「本机的边界」，
+                    一条管「智能体会做什么」，一条管「本机还剩多少空间」。 */}
+                <div
+                  data-settings-id="storage-usage"
+                  className={anchorClass(highlightId === "storage-usage")}
+                >
+                  <StorageUsageCard />
+                </div>
+              </>
+            )}
+            {tab === "appearance" && (
+              <>
+                <div
+                  data-settings-id="accent-color"
+                  className={anchorClass(highlightId === "accent-color")}
+                >
+                  <AppearanceSection />
+                </div>
+                <div data-settings-id="pet" className={anchorClass(highlightId === "pet")}>
+                  <PetSettingsCard />
+                </div>
+              </>
+            )}
+            {tab === "navigation" && (
+              <div data-settings-id="nav-order" className={anchorClass(highlightId === "nav-order")}>
+                <NavigationSection />
+              </div>
+            )}
+            {tab === "about" && <AboutSection highlightedId={highlightId} />}
+            <p className="pt-1 text-[11px] text-muted">和鸣 {appVersionLabel()}</p>
           </>
         )}
-        {tab === "appearance" && (
-          <>
-            <AppearanceSection />
-            <PetSettingsCard />
-          </>
-        )}
-        {tab === "navigation" && <NavigationSection />}
-        {tab === "about" && <AboutSection />}
-        <p className="pt-1 text-[11px] text-muted">和鸣 {appVersionLabel()}</p>
       </div>
     </div>
   );
@@ -448,17 +630,20 @@ function NavigationSection() {
 }
 
 /** 关于分组：软件更新（仅安装版有桥，桥缺失时整卡不渲染）+ 更新日志。 */
-function AboutSection() {
+function AboutSection({ highlightedId }: { highlightedId: string | null }) {
   const [logState, setLogState] = useState<Record<string, boolean>>({});
 
   return (
     <div className="flex max-w-[520px] flex-col gap-3">
-      <UpdateCard currentVersion={appVersionLabel()} />
+      <div data-settings-id="update" className={anchorClass(highlightedId === "update")}>
+        <UpdateCard currentVersion={appVersionLabel()} />
+      </div>
 
-      <section
-        aria-label="更新日志"
-        className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
-      >
+      <div data-settings-id="changelog" className={anchorClass(highlightedId === "changelog")}>
+        <section
+          aria-label="更新日志"
+          className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
+        >
       <div className="flex items-center justify-between gap-3">
         <div className="text-[12px] font-bold text-muted">更新日志</div>
         <span className="text-[11px] text-muted">当前 {appVersionLabel()}</span>
@@ -521,7 +706,8 @@ function AboutSection() {
           );
         })}
       </ul>
-      </section>
+        </section>
+      </div>
     </div>
   );
 }

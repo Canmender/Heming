@@ -65,7 +65,13 @@ function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
 }
 
 /** 图标轨（A 方案默认态）：约 54px 常驻左缘，无产品名文字。 */
-export function NavRail({ onOpenSearch }: { onOpenSearch?: () => void } = {}) {
+export function NavRail({
+  onOpenSearch,
+  onOpenShortcuts,
+}: {
+  onOpenSearch?: () => void;
+  onOpenShortcuts?: () => void;
+} = {}) {
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
   // 渲染前再规整一次：手改过 localStorage 或旧版本残留时，缺项也会被补齐，绝不漏掉某个入口
@@ -93,6 +99,20 @@ export function NavRail({ onOpenSearch }: { onOpenSearch?: () => void } = {}) {
           <SearchIcon width={17} height={17} />
         </button>
         <Tip label="搜索" shortcut="Ctrl K" />
+      </div>
+
+      {/* 快捷键帮助：? 与搜索并排（不占导航页键位）。也可随时按 ? 或 Ctrl+/ 打开。 */}
+      <div className="group relative mb-2">
+        <button
+          type="button"
+          aria-label="快捷键帮助"
+          title="快捷键"
+          onClick={() => onOpenShortcuts?.()}
+          className="flex h-[26px] w-[34px] items-center justify-center rounded-[9px] text-[13px] font-bold text-[#666] transition-colors duration-150 hover:bg-[#f0f0f0] hover:text-ink"
+        >
+          ?
+        </button>
+        <Tip label="快捷键" shortcut="?" />
       </div>
 
       <div className="flex flex-1 flex-col items-center justify-center gap-1.5">

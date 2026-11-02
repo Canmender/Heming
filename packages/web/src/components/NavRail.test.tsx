@@ -108,6 +108,18 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(onOpenSearch).toHaveBeenCalledTimes(1);
   });
 
+  it("快捷键帮助按钮：浮签带 ?，点按调用外部打开帮助面板（d.61 F 轨）", () => {
+    const onOpenShortcuts = vi.fn();
+    render(<NavRail onOpenSearch={vi.fn()} onOpenShortcuts={onOpenShortcuts} />);
+    const btn = screen.getByRole("button", { name: "快捷键帮助" });
+    expect(btn).toHaveAttribute("title", "快捷键");
+    // 浮签：名称 + ? 徽标（按钮本身也写着 ?，所以这里用 getAllByText）
+    expect(screen.getByText("快捷键")).toBeInTheDocument();
+    expect(screen.getAllByText("?").length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(btn);
+    expect(onOpenShortcuts).toHaveBeenCalledTimes(1);
+  });
+
   it("有 user.avatar 时底部按钮渲染 <img>（圆形裁剪，src 为 data URL）", () => {
     useAuthStore.setState({
       user: {

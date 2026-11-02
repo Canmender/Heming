@@ -9,6 +9,7 @@ import type { SharedFileMeta } from "@heming/shared";
 import { LoginPage } from "./components/LoginPage.js";
 import { NavRail } from "./components/NavRail.js";
 import { FileTree } from "./components/FileTree.js";
+import { ShortcutsHelp } from "./components/ShortcutsHelp.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
@@ -195,6 +196,16 @@ function fmtBytes(n: number): string {
  */
 const HAS_NATIVE_SPLASH = typeof window.heming?.__onBootReady === "function";
 
+/** 键盘事件是否发生在可输入元素里：`?` / `Ctrl+/` 这类字符键在输入框内必须让给输入。 */
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== "string") return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (el.isContentEditable) return true;
+  return typeof el.closest === "function" && el.closest('[contenteditable="true"]') !== null;
+}
+
 export function App() {
   // 首帧之前就把主题色写进 CSS 变量，避免刷新时闪回默认墨色
   initTheme();
@@ -203,6 +214,7 @@ export function App() {
   const handleBootDone = useCallback(() => setBootDone(true), []);
   const shellRef = useRef<HTMLDivElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // 启动动画的圆环落位：登录页用右半区（clipped），其它页保持中心扩散。
   // 登录页第一屏就是登录卡；圆环从窗口中心扩散会横穿卡片，看起来像装饰压字。
@@ -218,6 +230,9 @@ export function App() {
   // 全局搜索：Ctrl/⌘+K。启动动画期间不响应（与 Alt+N 同一套纪律：
   // 遮罩后面看不见的界面不该接受输入）。模态弹窗开着时同样不响应：面板与弹窗
   // 在 DOM 里不是嵌套关系，面板的屏蔽会把弹窗一起 inert 掉，Esc 归属随之错位。
+  //
+  // 快捷键帮助：`?`（Shift+/）或 Ctrl/⌘+/ 打开同一面板。输入框内不响应——
+  // 用户是在打问号，不是在求帮助；Esc 由弹窗骨架（useModalA11y）负责只关自己。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!bootDone) return;
@@ -225,7 +240,16 @@ export function App() {
         e.preventDefault();
         if (hasOpenModal()) return;
         setPaletteOpen((v) => !v);
+        return;
       }
+      const helpKey =
+        (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) ||
+        ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === "/");
+      if (!helpKey) return;
+      if (isEditableTarget(e.target)) return;
+      e.preventDefault();
+      if (hasOpenModal()) return;
+      setShortcutsOpen(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -243,7 +267,10 @@ export function App() {
     <>
       {/* 包一层仅为挂 inert：不加样式，AppShell 根节点自身的 h-screen 决定布局 */}
       <div ref={shellRef}>
-        <AppShell onOpenSearch={() => setPaletteOpen(true)} />
+        <AppShell
+          onOpenSearch={() => setPaletteOpen(true)}
+          onOpenShortcuts={() => setShortcutsOpen(true)}
+        />
       </div>
       {!bootDone && (
         <BootWave
@@ -258,6 +285,8 @@ export function App() {
           <CommandPalette onClose={() => setPaletteOpen(false)} />
         </Suspense>
       )}
+      {/* 快捷键帮助：`?` / Ctrl+/ 或导航轨「?」打开；Esc 由 useModalA11y 只关自己 */}
+      {shortcutsOpen && <ShortcutsHelp onClose={() => setShortcutsOpen(false)} />}
     </>
   );
 }
@@ -307,7 +336,13 @@ function ReconnectPanel({
 }
 
 /** 登录页/主界面内容：与启动动画并行挂载（动画仅作遮罩），不做时序门禁。 */
-function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
+function AppShell({
+  onOpenSearch,
+  onOpenShortcuts,
+}: {
+  onOpenSearch: () => void;
+  onOpenShortcuts: () => void;
+}) {
   const authStatus = useAuthStore((s) => s.status);
   const authUser = useAuthStore((s) => s.user);
   const restoreError = useAuthStore((s) => s.restoreError);
@@ -541,7 +576,7 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
       {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
       <TitleBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <NavRail onOpenSearch={onOpenSearch} />
+        <NavRail onOpenSearch={onOpenSearch} onOpenShortcuts={onOpenShortcuts} />
         <main className="flex min-w-0 flex-1 flex-col">
           {/* 每个槽位各自 Suspense：只有当前页一块走占位，壳（标题栏/导航/目录栏）不动。
               启动动画挂着时页面 chunk 已在后台加载，揭开时通常已经就绪。 */}

@@ -36,6 +36,21 @@ const KIND_LABEL: Record<AppNotification["kind"], string> = {
   staff: "幕僚",
 };
 
+/**
+ * 类型筛选（d.61 · UX 第二轮 F 轨）：全部 / 任务 / 待确认 / 幕僚。
+ *
+ * 筛选只影响**列表展示**：铃铛未读数与「全部已读」始终按全部通知算——
+ * 筛选是「看哪一类」，不是「哪些算未读」。筛选状态只存组件内（不持久化）。
+ */
+type NotificationFilter = "all" | AppNotification["kind"];
+
+const FILTERS: { id: NotificationFilter; label: string }[] = [
+  { id: "all", label: "全部" },
+  { id: "task", label: "任务" },
+  { id: "approval", label: "待确认" },
+  { id: "staff", label: "幕僚" },
+];
+
 export function NotificationCenter() {
   const items = useNotificationStore((s) => s.items);
   const markRead = useNotificationStore((s) => s.markRead);
@@ -57,6 +72,7 @@ export function NotificationCenter() {
 
   const [open, setOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [filter, setFilter] = useState<NotificationFilter>("all");
   const panelRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   // 非模态浮层（aria-modal=false）：不屏蔽背景。屏蔽会把铃铛自己一起 inert 掉，
@@ -74,6 +90,8 @@ export function NotificationCenter() {
   }, [open]);
 
   const unread = unreadCount(items);
+  // 列表展示用（未读数仍按全部 items 算，见 FILTERS 注释）
+  const visible = filter === "all" ? items : items.filter((item) => item.kind === filter);
   // 时间基准取打开时一次：列表里「3 分钟前」不该每秒重排，重排交给下一次打开。
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -181,6 +199,31 @@ export function NotificationCenter() {
             </span>
           </div>
 
+          {items.length > 0 && (
+            <div
+              role="group"
+              aria-label="按类型筛选通知"
+              className="flex items-center gap-1 border-b border-line-soft px-2 py-1.5"
+            >
+              {FILTERS.map((f) => {
+                const active = filter === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setFilter(f.id)}
+                    className={`rounded-sm px-1.5 py-0.5 text-[11px] transition-colors duration-150 ${
+                      active ? "bg-ink text-white" : "text-muted hover:bg-[#f0f0f0] hover:text-ink"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="min-h-0 flex-1 overflow-y-auto">
             {items.length === 0 ? (
               <p className="px-3 py-6 text-center text-[12px] leading-5 text-muted">
@@ -188,9 +231,11 @@ export function NotificationCenter() {
                 <br />
                 任务收尾、待确认的工具调用与幕僚简报会在这里汇总。
               </p>
+            ) : visible.length === 0 ? (
+              <p className="px-3 py-6 text-center text-[12px] text-muted">该类型暂无通知</p>
             ) : (
               <ul className="divide-y divide-[#f0f0f0]">
-                {items.map((item) => (
+                {visible.map((item) => (
                   <li key={item.id} className={`px-3 py-2 ${item.read ? "" : "bg-[#fbfbfb]"}`}>
                     <div className="flex items-start gap-2">
                       <button
@@ -272,8 +317,8 @@ export function NotificationCenter() {
               }
             >
               <p className="text-[12px] leading-6">
-                清空全部 {items.length} 条通知？未读的也会一起清掉；
-                会话本身的消息与未读角标不受影响，通知只是提醒的副本。
+                清空全部 {items.length} 条通知？<strong className="font-bold">此操作不可恢复</strong>
+                ——未读的也会一起清掉。会话本身的消息与未读角标不受影响，通知只是提醒的副本。
               </p>
             </ConfirmDialog>
           )}

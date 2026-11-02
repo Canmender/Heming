@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useUiStore } from "../store/ui.js";
 import type { Agent, SharedFileMeta } from "@heming/shared";
 import { WikiPanel } from "./WikiPanel.js";
 import {
@@ -724,6 +725,33 @@ export function MemoryPage({
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
 
+  // d.61：命令面板「记忆」结果跳转 —— 切到「智能体」层视图（含各智能体条目），
+  // 定位并短暂高亮该条。意图消费即清空；token 变化才触发，不会反复高亮。
+  const paletteIntent = useUiStore((s) => s.paletteIntent);
+  const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
+  const [highlightMemoryId, setHighlightMemoryId] = useState<string | null>(null);
+  useEffect(() => {
+    if (paletteIntent?.kind !== "focus-memory") return;
+    const id = paletteIntent.data?.memoryId;
+    if (id) {
+      // 语义条目在「数据库」页签（全局公用桶）渲染，情景/短期在「智能体」页签，
+      // 所以按命中层选页签——否则切过去看不到那条。
+      setTab(paletteIntent.data?.layer === "semantic" ? "database" : "agents");
+      setAgentId(""); // 不限定智能体：命中的条目不论在哪个桶都看得见
+      setHighlightMemoryId(id);
+    }
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent]);
+
+  // 把命中条目滚进视野，并在 2 秒后淡出高亮（跳过来第一眼要看见它）。
+  useEffect(() => {
+    if (!highlightMemoryId) return;
+    const el = document.querySelector(`[data-memory-id="${highlightMemoryId}"]`);
+    el?.scrollIntoView?.({ block: "center" });
+    const timer = window.setTimeout(() => setHighlightMemoryId(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [highlightMemoryId]);
+
   useEffect(() => {
     let cancelled = false;
     listAgents()
@@ -1153,7 +1181,10 @@ export function MemoryPage({
                   {group.turns.map((turn) => (
                     <div
                       key={turn.id}
-                      className="rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2"
+                      data-memory-id={turn.id}
+                      className={`rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2 ${
+                        highlightMemoryId === turn.id ? "ring-2 ring-[#1a1a1a]/25" : ""
+                      }`}
                     >
                       <div className="text-[10px] text-muted">
                         {turn.at.slice(11, 16)}
@@ -1379,7 +1410,13 @@ export function MemoryPage({
             <div className={`mt-1 ${hintCls}`}>{query ? "无匹配条目" : "暂无条目"}</div>
           ) : (
             semanticShown.map((entry) => (
-              <div key={entry.id} className="mt-2 rounded-lg border border-line p-2.5">
+              <div
+                key={entry.id}
+                data-memory-id={entry.id}
+                className={`mt-2 rounded-lg border border-line p-2.5 ${
+                  highlightMemoryId === entry.id ? "ring-2 ring-[#1a1a1a]/25" : ""
+                }`}
+              >
                 {editing?.id === entry.id ? (
                   <div>
                     <label className="block text-[11px] text-muted">
@@ -1500,7 +1537,10 @@ export function MemoryPage({
             episodicShown.map((entry) => (
               <div
                 key={entry.id}
-                className="mt-2 flex items-start justify-between gap-2 rounded-lg border border-line p-2.5"
+                data-memory-id={entry.id}
+                className={`mt-2 flex items-start justify-between gap-2 rounded-lg border border-line p-2.5 ${
+                  highlightMemoryId === entry.id ? "ring-2 ring-[#1a1a1a]/25" : ""
+                }`}
               >
                 <div className="min-w-0">
                   <div className="text-[10px] text-muted">
