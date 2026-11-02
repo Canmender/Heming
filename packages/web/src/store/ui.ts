@@ -146,6 +146,15 @@ interface UiState {
   /** 跳到自动化页；带意图时打开预填的新建表单。 */
   openAutomations: (intent?: AutomationIntent) => void;
   consumeAutomationIntent: () => void;
+  /**
+   * 设置页要打开的分组（null=保持默认「个人资料」）。
+   * 桌宠未配置模型时的「去设置」用它直达「模型」分组，避免用户进来还要自己找。
+   * 一次性投递槽：SettingsPage 消费后立即清空，不从外面长期把设置页钉在某个分组。
+   */
+  settingsTab: string | null;
+  /** 打开设置页并可选直达某分组（复用 setPage 的清理语义）。 */
+  openSettings: (tab?: string) => void;
+  consumeSettingsTab: () => void;
   openConversation: (id: string) => void;
   /**
    * 聚焦某会话但**不切到聊天页**（任务区嵌 ChatPage 用）：
@@ -210,6 +219,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   taskFocusId: null,
   infohubIntent: null,
   automationIntent: null,
+  settingsTab: null,
   setPage: (page) =>
     set({
       page,
@@ -251,6 +261,11 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationIntent: intent ?? null,
     }),
   consumeAutomationIntent: () => set({ automationIntent: null }),
+  openSettings: (tab) => {
+    get().setPage("settings");
+    set({ settingsTab: tab ?? null });
+  },
+  consumeSettingsTab: () => set({ settingsTab: null }),
   openConversation: (id) =>
     // 导航轨常驻：进入会话不再收起左侧导航（用户要求「左侧导航栏应该常驻，不应该移动」）
     set((state) => ({

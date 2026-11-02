@@ -7,6 +7,7 @@ import { KeyStorageCard } from "./KeyStorageCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
+import { PetSettingsCard } from "./PetSettingsCard.js";
 import { useUiStore, type NavPage } from "../store/ui.js";
 import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
 import { CHANGELOG, logOpenState, parseInline, stripInline, toggleLog } from "../lib/changelog.js";
@@ -87,9 +88,26 @@ const SETTINGS_TABS = [
 
 type SettingsTabId = (typeof SETTINGS_TABS)[number]["id"];
 
+/** 只认已知分组：外部投递来的字符串可能是旧版本残留或拼错，不能直接喂给 setTab。 */
+function isSettingsTabId(value: unknown): value is SettingsTabId {
+  return typeof value === "string" && SETTINGS_TABS.some((t) => t.id === value);
+}
+
 /** 设置区 · 个人资料：头像（data URL）与昵称，保存走 PUT /api/me。 */
 export function SettingsPage() {
-  const [tab, setTab] = useState<SettingsTabId>("profile");
+  const settingsTab = useUiStore((s) => s.settingsTab);
+  const consumeSettingsTab = useUiStore((s) => s.consumeSettingsTab);
+  const [tab, setTab] = useState<SettingsTabId>(
+    isSettingsTabId(settingsTab) ? settingsTab : "profile",
+  );
+
+  // 外部请求直达某个分组（桌宠未配置模型时点「去设置」）：消费后立刻清空，
+  // 否则下次手动进设置页会被这个残留值拽回同一个分组。
+  useEffect(() => {
+    if (!settingsTab) return;
+    if (isSettingsTabId(settingsTab)) setTab(settingsTab);
+    consumeSettingsTab();
+  }, [settingsTab, consumeSettingsTab]);
 
   return (
     <div className="flex h-full flex-col">
@@ -136,7 +154,12 @@ export function SettingsPage() {
             <StorageUsageCard />
           </>
         )}
-        {tab === "appearance" && <AppearanceSection />}
+        {tab === "appearance" && (
+          <>
+            <AppearanceSection />
+            <PetSettingsCard />
+          </>
+        )}
         {tab === "navigation" && <NavigationSection />}
         {tab === "about" && <AboutSection />}
         <p className="pt-1 text-[11px] text-[#999]">和鸣 {appVersionLabel()}</p>

@@ -250,6 +250,17 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
     });
   }, []);
 
+  // 桌宠请求「去设置」→ 打开设置页并直达模型分组。
+  // 桌宠说话用的是本机模型连接，它唯一会缺的东西就在「模型」分组里，
+  // 把用户丢到设置首页还要自己找一遍，等于让这条路走不通。
+  useEffect(() => {
+    const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
+    if (!bridge?.onOpenSettings) return;
+    return bridge.onOpenSettings(() => {
+      useUiStore.getState().openSettings("model");
+    });
+  }, []);
+
   // 右侧目录栏宽度：可拖动调节，落盘后下次启动保持（用户要求「支持拖动改变大小」）
   const [asideWidth, setAsideWidth] = useState(() => readAsideWidth());
   const onResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {

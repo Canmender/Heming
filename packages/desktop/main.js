@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, Menu, dialog, shell, screen, ipcMain, Notification, protocol, net } = require("electron");
+const { app, BrowserWindow, Menu, Tray, nativeImage, dialog, shell, screen, ipcMain, Notification, protocol, net } = require("electron");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -8,6 +8,8 @@ const { shouldShowSplash, splashWindowOptions } = require("./splash-config");
 const { attachSplashLifecycle } = require("./splash-lifecycle");
 const { resolveRequest, contentTypeFor, INDEX_FILE } = require("./app-protocol");
 const { isCallWindowUrl, callWindowOptions } = require("./call-window");
+const { isPetWindowUrl, parsePetStateJson } = require("./pet-window");
+const { createPetHost } = require("./pet-host");
 const { appVersion } = require("./app-version");
 const { buildChildEnv, createStdioBridge } = require("./mcp-stdio");
 const { createChildReclaimer } = require("./child-kill");
@@ -228,6 +230,9 @@ function createSplashWindow(mainWin) {
 // （独立通话窗口由 window.open 创建，getAllWindows()[0] 不保证是主窗口）。
 let mainWindow = null;
 
+// 桌宠宿主（d.46）：独立透明置顶窗 + 托盘。浏览器端没有这个概念。
+let petHost = null;
+
 // 单例锁：拿不到锁直接退出；second-instance 时聚焦已存在窗口
 const gotLock = app.requestSingleInstanceLock();
 
@@ -248,6 +253,33 @@ if (!gotLock) {
 
   function windowStateFile() {
     return path.join(app.getPath("userData"), "window-state.json");
+  }
+
+  /* ── 桌宠状态文件（d.46）─────────────────────────────────────────────
+   * 与 window-state.json 分开放：桌宠有 scale / visible / clickThrough 三个
+   * 主窗口没有的字段，混在一个文件里迟早被对方的写入覆盖掉。
+   */
+  function petStateFile() {
+    return path.join(app.getPath("userData"), "pet-state.json");
+  }
+
+  function readPetState(file) {
+    try {
+      // 解析（含剥 BOM）在 pet-window.js 的纯函数里，有单测锁住：真机上踩过
+      // 「状态文件带 BOM → JSON.parse 抛错 → 桌宠静默不出现」的坑
+      return parsePetStateJson(fs.readFileSync(file, "utf8"));
+    } catch {
+      return null; // 缺文件：clampPetState 会回落默认落位
+    }
+  }
+
+  function writePetState(file, state) {
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n", "utf8");
+    } catch (err) {
+      console.log("[pet] 状态写入失败:", (err && err.message) || err);
+    }
   }
 
   function createWindow() {
@@ -308,11 +340,18 @@ if (!gotLock) {
       saveWindowState(windowStateFile(), win.getNormalBounds());
     });
 
-    // window.open / target=_blank 默认交给系统浏览器；**唯一例外**是通话窗口
-    // （同源 + `?hemingWindow=call`）：它必须留在应用内，才能共享 localStorage 的登录态
-    // 与 WS 信令。其余一律 deny，保持「主窗口不开新页」的既有约束。
+    // window.open / target=_blank 默认交给系统浏览器；**例外只有两个**：
+    // 通话窗口（同源 + `?hemingWindow=call`）与桌宠窗口（同源 + `?hemingWindow=pet`）。
+    // 其余一律 deny，保持「主窗口不开新页」的既有约束。
     const appOriginForWindows = EMBEDDED_ORIGIN === originOf(appUrl) ? EMBEDDED_ORIGIN : appUrl;
     win.webContents.setWindowOpenHandler(({ url }) => {
+      // 桌宠窗口由主进程自己建（需要透明穿透、位置记忆与单例），不走 window.open。
+      // 这里 deny 掉并转去 host，避免它被当成外部链接丢给系统浏览器。
+      if (isPetWindowUrl(url, appOriginForWindows) || isPetWindowUrl(url, EMBEDDED_ORIGIN)) {
+        console.log("[heming] 桌宠窗口请求改由主进程托管");
+        if (petHost) petHost.show();
+        return { action: "deny" };
+      }
       if (isCallWindowUrl(url, appOriginForWindows) || isCallWindowUrl(url, EMBEDDED_ORIGIN)) {
         console.log("[heming] 打开通话窗口:", url);
         return { action: "allow", overrideBrowserWindowOptions: callWindowOptions() };
@@ -450,6 +489,14 @@ if (!gotLock) {
     },
     onQuit: () => app.quit(),
     log: (line) => console.warn(line),
+  });
+
+  // 桌宠收口（d.53）：同步销毁窗口与托盘——托盘不销毁会在托盘区留下一个幽灵图标。
+  // **刻意不放进上面的回收闸**：桌宠没有子进程要等，塞进去会让「没有子进程时退出
+  // 零延迟」这条承诺在桌宠开启时失效。destroy 是幂等的，回收闸 preventDefault 后
+  // will-quit 会再触发一次，再调一遍也安全。
+  app.on("will-quit", () => {
+    petHost?.destroy();
   });
   app.on("will-quit", (event) => reclaimChildren(event));
 
@@ -645,6 +692,36 @@ app.whenReady().then(() => {
       windowFromEvent: (event) => BrowserWindow.fromWebContents(event.sender),
     });
     createWindow();
+
+    // ── 桌宠（d.46）──
+    // 独立透明置顶窗 + 托盘。**默认不显示**：持久化状态里 visible 为 false 时
+    // 就什么都不做，用户上次关掉的东西不该在重启后自己弹回来。
+    // 打开入口：设置区「桌宠」卡、托盘菜单、渲染层 __heming_pet.show()。
+    petHost = createPetHost({
+      BrowserWindow,
+      Tray,
+      Menu,
+      nativeImage,
+      screen,
+      ipcMain,
+      app,
+      stateFile: petStateFile(),
+      preloadPath: path.join(__dirname, "preload.js"),
+      // 图标在 asar 内也能被 nativeImage 读到（Electron 对 asar 路径做了透明处理）
+      trayIconPath: path.join(__dirname, "assets", "pet-tray.png"),
+      resolveAppUrl: () => resolveAppUrl(),
+      getMainWindow: () => mainWindow,
+      readState: readPetState,
+      writeState: writePetState,
+      log: (line) => console.log(line),
+    });
+    petHost.start();
+    // 启动状态只打一行：桌宠不出现时，第一个要回答的问题就是「它到底启没启、上次是不是显示状态」
+    console.log(
+      "[heming] 桌宠:",
+      JSON.stringify({ visible: petHost.state.visible, scale: petHost.state.scale }),
+    );
+
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

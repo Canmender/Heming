@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 import appPkg from "../desktop/package.json";
 
 // 缓存落工作区 .tmp：默认写系统临时目录在沙箱下会 EPERM（见 shared/server 同理）
@@ -24,6 +25,16 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": { target: "http://127.0.0.1:8787", changeOrigin: true, ws: true },
+    },
+  },
+  build: {
+    rollupOptions: {
+      // 两个入口：主应用与桌宠。桌宠独立成页，才能不把整个应用 bundle 拖进
+      // 那个常驻的 300×420 透明窗口（见 src/pet.tsx 顶部注释）。
+      input: {
+        main: resolve(__dirname, "index.html"),
+        pet: resolve(__dirname, "pet.html"),
+      },
     },
   },
   test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"] },

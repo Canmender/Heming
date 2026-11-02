@@ -205,6 +205,49 @@ contextBridge.exposeInMainWorld("__heming_notify", {
   },
 });
 
+// —— 桌宠桥（d.46）——
+// 桌宠是独立渲染进程：它自己画 Live2D、自己直连本机 LLM，主进程只负责
+// 「窗口在哪、要不要挡鼠标、显示还是隐藏」。这里因此只暴露这三类动作，
+// **不暴露任意窗口操作**（move/resize/setAlwaysOnTop 之类的通用入口）。
+//
+// ★ 坐标不上报：拖拽只发"按下/移动了/抬起"三个信号，位移由主进程按屏幕光标计算。
+//   渲染层的 clientX 会随窗口移动而失真，拿它算位置一定跑偏。
+contextBridge.exposeInMainWorld("__heming_pet", {
+  /** 读当前状态 { visible, scale, clickThrough, bounds }。 */
+  state: () => ipcRenderer.invoke("pet:state"),
+  /**
+   * 缩放。两种语义：
+   *   setScale({ dir: 1 })  相对切一档（1 = 放大，-1 = 缩小）
+   *   setScale(1.25)        设为该绝对档位
+   */
+  setScale: (payload) => ipcRenderer.invoke("pet:set-scale", payload),
+  /** 上报「光标此刻是否在可交互区」。只在值变化时调用（mousemove 是高频事件）。 */
+  setInteractive: (value) => {
+    ipcRenderer.send("pet:set-interactive", value === true);
+  },
+  dragStart: () => ipcRenderer.send("pet:drag-start"),
+  dragMove: () => ipcRenderer.send("pet:drag-move"),
+  dragEnd: () => ipcRenderer.send("pet:drag-end"),
+  show: () => ipcRenderer.send("pet:show"),
+  hide: () => ipcRenderer.send("pet:hide"),
+  toggle: () => ipcRenderer.send("pet:toggle"),
+  /** 鼠标穿透开关（设置区与托盘共用同一份状态）。 */
+  setClickThrough: (value) => {
+    ipcRenderer.send("pet:set-click-through", value === true);
+  },
+  /** 重新加载桌宠页面（换模型 / 换绑定智能体后让它重新读配置）。 */
+  reload: () => ipcRenderer.send("pet:reload"),
+  /** 桌宠窗口请求把主窗口叫到前台并切到设置页（未配置模型时的出口）。 */
+  openSettings: () => ipcRenderer.send("pet:open-settings"),
+  /** 主窗口侧订阅「桌宠要打开设置」。返回取消订阅函数。 */
+  onOpenSettings: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = () => callback();
+    ipcRenderer.on("pet:open-settings", listener);
+    return () => ipcRenderer.removeListener("pet:open-settings", listener);
+  },
+});
+
 // —— 信息中枢 · InfoHub 本机桥（d.45）——
 // 归档数据留在本机：主进程用 stdio 拉起 Python 桥，这里只转发白名单方法。
 // 浏览器端没有这个桥，页面据此显示「仅桌面端可用」，绝不回退到云端读归档。

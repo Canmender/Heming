@@ -48,6 +48,15 @@ if (!existsSync(join(WEB_DIST, "index.html"))) {
   process.exit(1);
 }
 
+// 桌宠是独立入口（d.46）：产不出 pet.html 时，桌宠窗口会打开一片空白，
+// 而主界面一切正常——这类缺页必须在这里报出来，不能等用户去看那块空窗。
+if (!existsSync(join(WEB_DIST, "pet.html"))) {
+  console.error(
+    `[build-desktop-web] 失败：${WEB_DIST} 里没有 pet.html（桌宠独立入口缺失，检查 vite.config.ts 的 build.rollupOptions.input）`,
+  );
+  process.exit(1);
+}
+
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 cpSync(WEB_DIST, OUT, { recursive: true });

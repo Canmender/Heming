@@ -110,6 +110,40 @@ declare global {
       pickPython: () => Promise<string | null>;
       onEvent: (cb: (event: unknown) => void) => () => void;
     };
+    /**
+     * 桌宠桥（d.46）：preload 暴露，只有桌面端存在。
+     *
+     * 桌宠窗口自己画 Live2D、自己直连本机 LLM，主进程只管「窗口在哪、
+     * 要不要挡鼠标、显示还是隐藏」。这里刻意**没有**通用的 move/resize/setAlwaysOnTop，
+     * 只给这一组语义明确的动作。
+     */
+    __heming_pet?: {
+      /** 当前状态。 */
+      state: () => Promise<{
+        visible: boolean;
+        scale: number;
+        clickThrough: boolean;
+        bounds: { x: number; y: number; width: number; height: number };
+      }>;
+      /** 缩放：`{dir:1}` 相对切档；数字为绝对档位。 */
+      setScale: (payload: { dir: number } | number) => Promise<number>;
+      /** 上报「光标此刻是否在可交互区」（仅在值变化时调用）。 */
+      setInteractive: (value: boolean) => void;
+      dragStart: () => void;
+      dragMove: () => void;
+      dragEnd: () => void;
+      show: () => void;
+      hide: () => void;
+      toggle: () => void;
+      /** 鼠标穿透开关（设置区与托盘共用同一份状态）。 */
+      setClickThrough: (value: boolean) => void;
+      /** 重新加载桌宠页面（换模型后让新配置生效）。 */
+      reload: () => void;
+      /** 请求主窗口上前台并切到设置页（未配置模型连接时的出口）。 */
+      openSettings: () => void;
+      /** 主窗口侧：订阅「桌宠要打开设置」。返回取消订阅函数。 */
+      onOpenSettings: (cb: () => void) => () => void;
+    };
     heming?: {
       /** 运行平台（process.platform），如 "win32" / "darwin"。 */
       platform?: string;
