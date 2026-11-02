@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { capabilityRegistry, infohubProvider, selfProvider } from "./index.js";
+﻿import { describe, it, expect } from "vitest";
+import { capabilityRegistry, filesProvider, infohubProvider, selfProvider } from "./index.js";
 import { SelfEditBudget, type SelfEditStore } from "../selfEdit/index.js";
 
 /** 只关心注册表的策略接口；自我修改的执行细节由 selfEdit 自己的用例覆盖。 */
@@ -14,9 +14,14 @@ describe("内置能力提供者", () => {
       ["charts", "builtin"],
       ["tone", "builtin"],
       ["wiki", "builtin"],
+      ["files", "builtin"],
       ["infohub", "builtin"],
       ["self", "self"],
     ]);
+  });
+
+  it("files 在桌面桥缺失或没有可写根时不注入（浏览器端不可见）", () => {
+    expect(filesProvider.build({ agentId: "a", conversationId: "c" })).toBeNull();
   });
 
   it("infohub 未连接（无桌面桥）时不注入归档工具", () => {

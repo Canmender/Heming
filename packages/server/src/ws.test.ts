@@ -20,9 +20,14 @@ let aliceToken: string;
 let bobToken: string;
 
 function connect(token: string, port?: number): Promise<WebSocket> {
+  // 首帧鉴权：连上后立刻发 {type:"auth",token}。WS send 有序，因此后续业务事件
+  // 一定排在 auth 帧之后被服务端处理。
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port ?? ctx.port}/api/ws?token=${token}`);
-    ws.once("open", () => resolve(ws));
+    const ws = new WebSocket(`ws://127.0.0.1:${port ?? ctx.port}/api/ws`);
+    ws.once("open", () => {
+      ws.send(JSON.stringify({ type: "auth", token }));
+      resolve(ws);
+    });
     ws.once("error", reject);
   });
 }
@@ -60,12 +65,12 @@ async function nextEventBeforeClose(ws: WebSocket): Promise<WsServerEvent> {
   });
 }
 
-function rawUpgrade(port: number, token: string): Promise<net.Socket> {
+function rawUpgrade(port: number): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const socket = net.connect(port, "127.0.0.1", () => {
       socket.write(
         [
-          `GET /api/ws?token=${token} HTTP/1.1`,
+          `GET /api/ws HTTP/1.1`,
           `Host: 127.0.0.1:${port}`,
           "Upgrade: websocket",
           "Connection: Upgrade",
@@ -117,10 +122,22 @@ afterAll(async () => {
 });
 
 describe("ws 基础与人类 IM 删除", () => {
-  it("query token 连接可用（旧客户端路径）", async () => {
-    const ws = await connect(aliceToken);
+  it("query token 不再鉴权（兼容路径已删除）", async () => {
+    // 连接照常建立，但服务端不读 query 里的 token：保持未鉴权。
+    const ws = new WebSocket(`ws://127.0.0.1:${ctx.port}/api/ws?token=${aliceToken}`);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
     expect(ws.readyState).toBe(WebSocket.OPEN);
-    ws.close();
+
+    // 未鉴权状态下发业务事件 → unauthorized 且连接被关闭，消息不入库。
+    const ev = nextEvent(ws);
+    ws.send(JSON.stringify({ type: "send_message", conversationId: convId, payload: { text: "query 旁路" } }));
+    const res = await ev;
+    expect(res).toMatchObject({ type: "error", code: "unauthorized" });
+    await waitClose(ws);
+    expect(store.listMessages(convId).every((m) => m.payload.text !== "query 旁路")).toBe(true);
   });
 
   it("发送消息广播给本人并持久化", async () => {
@@ -350,7 +367,7 @@ describe("WS 鉴权", () => {
   });
 
   it("协议错误帧不崩溃 server，后续连接仍可用", async () => {
-    const socket = await rawUpgrade(ctx.port, aliceToken);
+    const socket = await rawUpgrade(ctx.port);
     socket.write("this is not a websocket frame");
     socket.destroy();
     const ws = await connect(aliceToken);

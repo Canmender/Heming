@@ -18,7 +18,7 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
           key={e}
           type="button"
           aria-label={e}
-          className="rounded p-1 text-[17px] leading-none hover:bg-[#f3f3f3]"
+          className="rounded-sm p-1 text-[17px] leading-none hover:bg-[#f3f3f3]"
           onClick={() => onPick(e)}
         >
           {e}

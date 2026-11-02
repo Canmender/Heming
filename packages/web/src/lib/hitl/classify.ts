@@ -63,6 +63,9 @@ export interface HitlRiskHints {
  * → 改动 self 工具的风险等级时，两处一起改。
  */
 const EXACT_RISK: Record<string, RiskLevel> = {
+  // 文件编辑（d.55）：写盘与读盘，风险由桥的 meta 声明，这张表是「没有桥时」的兜底
+  file_patch: "write",
+  file_read: "read",
   // 记忆
   self_memory_list: "read",
   self_memory_write: "write",
@@ -147,6 +150,8 @@ const SOURCE_PREFIX: { prefix: string; source: HitlSource }[] = [
 
 /** 工具名 → 中文动作名（给人看）。 */
 const DISPLAY_NAMES: Record<string, string> = {
+  file_patch: "修改文件",
+  file_read: "读取文件",
   self_memory_list: "列出记忆",
   self_memory_write: "写入记忆",
   self_memory_remove: "删除记忆",
@@ -166,6 +171,7 @@ const DISPLAY_NAMES: Record<string, string> = {
 
 /** 前缀兜底的中文动作名。 */
 const PREFIX_DISPLAY: { prefix: string; label: string }[] = [
+  { prefix: "file_", label: "文件操作" },
   { prefix: "self_memory_", label: "记忆操作" },
   { prefix: "self_skill_", label: "技能操作" },
   { prefix: "self_mcp_", label: "MCP 配置操作" },
@@ -276,6 +282,30 @@ function maskUrlUserinfo(url: string): string {
 }
 
 /**
+ * 补丁类参数的摘要：只数操作、不回显内容。
+ *
+ * 为什么必须单独处理：`file_patch` 的 `patch` 字段是整份补丁，里面是用户的笔记原文。
+ * 走兜底的 JSON 摘要会把补丁开头 80 字符摆到确认弹窗与日志上——
+ * 既是隐私问题，也不是用户想看的信息（他要看的是「改哪几个文件」）。
+ */
+function patchSummary(args: Record<string, unknown>): string | null {
+  const patch = args.patch;
+  if (typeof patch !== "string" || !patch.includes("*** Begin Patch")) return null;
+  const count = (re: RegExp) => (patch.match(re) ?? []).length;
+  const added = count(/^\*\*\* Add File:/gm);
+  const deleted = count(/^\*\*\* Delete File:/gm);
+  const updated = count(/^\*\*\* Update File:/gm);
+  const moved = count(/^\*\*\* Move to:/gm);
+  const parts: string[] = [];
+  if (added) parts.push(`新增 ${added}`);
+  if (updated) parts.push(`修改 ${updated}`);
+  if (deleted) parts.push(`删除 ${deleted}`);
+  if (moved) parts.push(`改名 ${moved}`);
+  const root = typeof args.root === "string" && args.root.trim() ? `，根 ${args.root.trim()}` : "";
+  return `补丁（${parts.join("、") || "无操作"}${root}）`;
+}
+
+/**
  * 参数摘要（一行）。
  *
  * 规则：优先取 `path` / `file` / `url` / `query` / `name` / `server` 字段；
@@ -287,6 +317,9 @@ function maskUrlUserinfo(url: string): string {
  */
 export function summarizeArgs(argsJson: string): string {
   const args = parseArgs(argsJson);
+  // 补丁参数先单独处理：整份补丁既敏感又不是用户想看的信息
+  const patch = patchSummary(args);
+  if (patch) return patch;
   for (const field of SUMMARY_FIELDS) {
     const value = args[field];
     if (typeof value === "string" && value.trim()) {

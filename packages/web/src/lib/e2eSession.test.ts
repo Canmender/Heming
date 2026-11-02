@@ -31,7 +31,7 @@ import {
   type PeerKeys,
   type SealedEnvelope,
 } from "./e2eSession.js";
-import { resetSecureStorageState, secureStorageStatus } from "./secureStorage.js";
+import { PLAINTEXT_BACKUP_SUFFIX, resetSecureStorageState, secureStorageStatus } from "./secureStorage.js";
 
 type SendEvent = Extract<WsClientEvent, { type: "send_message" }>;
 
@@ -711,7 +711,7 @@ describe("e2eSession 会话层", () => {
     expect(plain).toEqual({ kind: "error", text: "供应商 401" });
   });
 
-  it("桌面安全存储下设备身份加密落盘：可解、不二次加密，chains 仍是明文", async () => {
+  it("桌面安全存储下设备身份与链状态加密落盘：可解、不二次加密，链带明文备份", async () => {
     localStorage.clear();
     registry = {};
     const calls = { encrypt: 0, decrypt: 0 };
@@ -728,6 +728,15 @@ describe("e2eSession 会话层", () => {
       },
     };
     try {
+      // 迁移前提：先放一条**旧明文**链文件，才能验证「先备份明文、再写信封」（Q3）。
+      const bootConv = "boot-secure-a";
+      const chainKey = "heming.e2e.chains." + bootConv;
+      const plaintextChains = JSON.stringify({
+        send: { kid: "legacy-kid", ck: "AAAA", n: 5, createdAt: 1, distFor: [] },
+        recv: { r1: { kid: "r1", ck: "BBBB", n: 2, createdAt: 2, from: "peer", msgKeys: {} } },
+      });
+      localStorage.setItem(chainKey, plaintextChains);
+
       await bootstrap("secure-a");
       const raw = localStorage.getItem(IDENTITY_KEY)!;
       const envelope = JSON.parse(raw) as { __hemingEnc?: string; data?: string };
@@ -738,7 +747,28 @@ describe("e2eSession 会话层", () => {
       expect(keys.spk.pub).toBeTruthy();
       // 读信封只是解密，不会把密文再包一层
       expect((JSON.parse(localStorage.getItem(IDENTITY_KEY)!) as { data: string }).data).toBe(envelope.data);
-      expect(calls.encrypt).toBe(1);
+      // 1 次是身份、1 次是 chains 首读迁移。
+      // ⚠ 旧断言写死 `toBe(1)` 的前提是「chains 仍是明文」；本轮起 chains 走 d.36 信封，
+      //   所以这里必须是 2——不是放宽断言，而是行为按设计变了（见下方反向断言）。
+      expect(calls.encrypt).toBe(2);
+
+      // —— 反向断言（取代旧「chains 仍是明文」）：信封形状 + 明文备份键 + 备份可解析回原链结构 ——
+      const chainsRaw = localStorage.getItem(chainKey)!;
+      expect((JSON.parse(chainsRaw) as { __hemingEnc?: string }).__hemingEnc).toBe("v1");
+      expect(chainsRaw).not.toContain("legacy-kid");
+      const backupRaw = localStorage.getItem(chainKey + PLAINTEXT_BACKUP_SUFFIX)!;
+      expect(backupRaw).toBe(plaintextChains); // 原样备份（幂等、只留第一份）
+      const backupChains = JSON.parse(backupRaw) as {
+        send: { kid: string; n: number };
+        recv: Record<string, { kid: string; from: string }>;
+      };
+      expect(backupChains.send.n).toBe(5);
+      expect(backupChains.recv.r1).toMatchObject({ kid: "r1", from: "peer" });
+
+      // 重复读不重复迁移（幂等）：recvChainOwners 命中内存视图/信封解密，不再加密
+      const encryptsAfterMigrate = calls.encrypt;
+      expect(recvChainOwners(bootConv)).toEqual({ r1: "peer" });
+      expect(calls.encrypt).toBe(encryptsAfterMigrate);
 
       // isForMe 热路径：原始存储值不变时复用 kid 缓存，逐信封零解密（流式 chunk 每片都过这里）
       const stored = JSON.parse(
@@ -752,12 +782,10 @@ describe("e2eSession 会话层", () => {
       expect(isForMe(envFor(stored.kid))).toBe(true);
       expect(isForMe(envFor("other-device"))).toBe(false);
       expect(calls.decrypt).toBe(before); // 身份写入时已缓存 ⇒ 热路径零解密
-
-      const chainKey = Object.keys(localStorage).find((k) => k.startsWith("heming.e2e.chains."));
-      expect(chainKey).toBeTruthy();
-      expect(localStorage.getItem(chainKey!)).not.toContain("__hemingEnc");
     } finally {
       localStorage.removeItem(IDENTITY_KEY); // 别把信封留给后续无桥用例（会被记成 undecryptable）
+      localStorage.removeItem("heming.e2e.chains.boot-secure-a");
+      localStorage.removeItem("heming.e2e.chains.boot-secure-a" + PLAINTEXT_BACKUP_SUFFIX);
       delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
     }
   });

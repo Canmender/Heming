@@ -1,5 +1,8 @@
 import {
   Fragment,
+  // React 19 的类型里全局 JSX 命名空间已移除，改为从 react 导出；
+  // 这里只引类型，运行时不产生任何导入。
+  type JSX,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -24,6 +27,7 @@ import {
   shouldLoadMore,
 } from "../lib/messageWindow.js";
 import { useTaskStore } from "../lib/tasks/store.js";
+import { resolveForkRun } from "../lib/tasks/forkTask.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
 import { useTokenUsageStore } from "../store/tokenUsage.js";
@@ -40,6 +44,7 @@ import {
   sealMessage,
   openMessage,
   msgCache,
+  migrateMsgCache,
   isForMe,
   sweepDeferred,
   recvChainOwners,
@@ -61,7 +66,7 @@ import {
   type VisionImageSlot,
 } from "../lib/vision/history.js";
 import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
-import { recordRollout } from "../lib/rollout/index.js";
+import { recordRollout, rolloutLog } from "../lib/rollout/index.js";
 import { buildAgentContext } from "../lib/agentRuntime/context.js";
 import {
   loadContextSettings,
@@ -103,6 +108,17 @@ import { mcpRegistry } from "../lib/mcp/store.js";
 import { useModalA11y } from "./useModalA11y.js";
 import { capabilityNotice } from "../lib/capabilityNotice.js";
 import { formatClock, formatDayClock, needsTimeSeparator } from "../lib/formatTime.js";
+
+/**
+ * 空消息列表的**稳定引用**。
+ *
+ * zustand 5 不再记忆化 selector 的返回值（v4 的 useSyncExternalStoreWithSelector 会缓存
+ * 上一次结果），所以 selector 里写 `?? []` 会在每次 getSnapshot 调用时造一个新数组，
+ * React 判定快照一直在变，报 “The result of getSnapshot should be cached” 并无限重渲染
+ * （实测：ChatPage 挂载即 Maximum update depth exceeded，103 个用例连坐）。
+ * 换成模块级常量后引用恒等，语义不变（下游只读不写）。
+ */
+const EMPTY_MESSAGES: Message[] = [];
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
 export const NO_E2E_NOTICE = "当前环境不支持端到端加密，请使用桌面端或 HTTPS";
@@ -307,7 +323,7 @@ function AttachmentPreview({
             <img
               src={url}
               alt={file.name}
-              className="max-h-[88vh] max-w-[88vw] rounded object-contain"
+              className="max-h-[88vh] max-w-[88vw] rounded-sm object-contain"
               data-testid="image-lightbox"
             />
           </div>
@@ -400,7 +416,7 @@ export function ChatPage({
   const taskDraft = useUiStore((s) => s.taskDraft);
   const consumeTaskDraft = useUiStore((s) => s.consumeTaskDraft);
   const conversations = useChatStore((s) => s.conversations);
-  const messages = useChatStore((s) => s.messages[convId] ?? []);
+  const messages = useChatStore((s) => s.messages[convId] ?? EMPTY_MESSAGES);
   /** A1：历史三态（加载中 / 失败 / 加载成功且为空）按会话分桶读。 */
   const messagesLoading = useChatStore((s) => s.messagesLoading[convId] ?? false);
   const messagesError = useChatStore((s) => s.messagesError[convId] ?? null);
@@ -473,6 +489,13 @@ export function ChatPage({
     };
   }, [convId, flushDraftSave]);
   const [sendNotice, setSendNoticeState] = useState<SendNotice | null>(null);
+  /**
+   * 分叉降级提示（d.56）：来源日志重建不出前缀时，本次按普通重跑执行。
+   *
+   * 为什么单独占一行、不并进 `sendNotice`：输入区提示会在发送成功后被清空，
+   * 而「这次其实没复用前缀」必须在整轮运行期间都看得见——否则用户会以为分叉生效了。
+   */
+  const [forkNotice, setForkNotice] = useState<string | null>(null);
   /** info 提示 3 秒自动消失的定时器（新提示/切换会话/卸载时清）。 */
   const sendNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
@@ -626,7 +649,8 @@ export function ChatPage({
       if (!isForMe(sealed)) return { status: "skip" };
       // 缓存优先（§6）：已解密过的（含重加密自发消息/本会话已开过的）直接取——
       // 也是 (chainKid,n) 重放/并发 sweep 抢先解开时的补齐路径（硬验收③）。
-      const cached = msgCache.list(conv).find((c) => c.id === env.id);
+      // P0-5b：定点取一条（内部同样 touch LRU），不再全量 list + find。
+      const cached = msgCache.get(conv, env.id);
       if (cached) return { status: "ok", plain: cached.plain };
       // 出站箱：自己的 echo 按链索引取回明文（对方能开、自己开不了），落缓存后返回
       const outKey =
@@ -663,7 +687,8 @@ export function ChatPage({
         );
         if (r === "defer") return { status: "defer" };
         if (r === "duplicate") {
-          const cached = msgCache.list(conv).find((c) => c.id === env.id);
+          // P0-5b：补齐路径同样走定点 get（全量 list 只留给显式迁移/调试入口）。
+          const cached = msgCache.get(conv, env.id);
           return cached ? { status: "ok", plain: cached.plain } : { status: "skip" };
         }
         if (r.kind === "chaindist") {
@@ -1160,6 +1185,27 @@ export function ChatPage({
       setSendNotice(NO_E2E_NOTICE);
       return;
     }
+    /**
+     * 分叉（d.56）：任务记录里的 `forkedFrom` 指向来源回合；这里从本机日志重建前缀
+     * （assistant.tool_calls + 等长同序 tool 结果），由 agentStream 接在真实历史之后。
+     *
+     * 三种情况**显式降级为普通重跑**（日志读不到 / 来源版本不兼容 / 前缀重建失败）：
+     * 不传 `forkPrefix`（不伪造复用），但仍传 `forkedFrom` 保留来源，并显示原因——
+     * 静默变成重跑会让用户以为前缀被复用了。
+     */
+    const forkTask = taskId
+      ? useTaskStore.getState().tasks.find((t) => t.id === taskId)
+      : undefined;
+    let forkView: ReturnType<typeof rolloutLog.readStream> | null = null;
+    if (forkTask?.forkedFrom) {
+      try {
+        forkView = rolloutLog.readStream(forkTask.forkedFrom.streamId);
+      } catch {
+        forkView = null;
+      }
+    }
+    const forkRun = resolveForkRun(forkTask, forkView);
+    setForkNotice(forkRun.notice ?? null);
     const deps: TriggerDeps = {
       getProfile: resolveProfile,
       getPrompt: (agentId) => useLlmStore.getState().prompts[agentId] ?? "",
@@ -1494,6 +1540,10 @@ export function ChatPage({
       // 回合事件日志（G6）：本机逐条记「开始/工具调用/结果/答案/终态」，
       // 崩溃或刷新后还能回看过程。只落本机、有上限、失败静默（记录器内部保证）。
       onRollout: recordRollout,
+      // 分叉（d.56）：来源始终带上（任务卡/日志能看出这是一次分叉）；
+      // 只有前缀重建成功才额外传 forkPrefix，降级时由上面的提示行说明原因。
+      ...(forkRun.forkedFrom ? { forkedFrom: forkRun.forkedFrom } : {}),
+      ...(forkRun.forkPrefix ? { forkPrefix: forkRun.forkPrefix } : {}),
       // 任务区终态：每个流恰好一次。只有从任务区发起的流带 taskId；
       // 普通聊天流不建档，任务区列表也不会被日常对话刷屏。
       onRunSettled: (streamId, result) => {
@@ -1632,6 +1682,18 @@ export function ChatPage({
       .loadMessages(convId, () => alive)
       .finally(() => {
         if (alive) setHistoryLoaded((prev) => ({ ...prev, [convId]: true }));
+        if (!alive) return;
+        /**
+         * 存量明文缓存迁移（P0-5b）：加密轨把「明文条目迁成密文」挂在全量读 `list()` 上，
+         * 而本页两处缓存读取已改成定点 `get()`——不补这一下，磁盘上的旧明文要等到
+         * 下一阶段全量清理才会迁。打开会话时补一批（每批 ≤50 条），失败静默：
+         * 迁移只影响存储形态，绝不能影响消息渲染与发送。
+         */
+        try {
+          migrateMsgCache(convId);
+        } catch {
+          /* 静默：下次打开会话再试 */
+        }
       });
     return () => {
       alive = false;
@@ -2399,7 +2461,7 @@ export function ChatPage({
           <button
             type="button"
             aria-label="返回"
-            className="rounded p-1 text-muted hover:bg-[#f3f3f3]"
+            className="rounded-sm p-1 text-muted hover:bg-[#f3f3f3]"
             onClick={leave}
           >
             <ChevronIcon width={15} height={15} className="rotate-180" />
@@ -2529,7 +2591,7 @@ export function ChatPage({
               }
             }}
             placeholder="在本会话中搜索…"
-            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-[#bbb]"
+            className="min-w-0 flex-1 bg-transparent text-[12px] outline-hidden placeholder:text-[#bbb]"
           />
           <span className="shrink-0 text-[11px] text-muted">
             {searchQuery.trim()
@@ -2543,7 +2605,7 @@ export function ChatPage({
             aria-label="上一个匹配"
             disabled={searchHits.length === 0}
             onClick={() => goSearch(-1)}
-            className="rounded px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0] disabled:text-[#ccc]"
+            className="rounded-sm px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0] disabled:text-[#ccc]"
           >
             ↑
           </button>
@@ -2552,7 +2614,7 @@ export function ChatPage({
             aria-label="下一个匹配"
             disabled={searchHits.length === 0}
             onClick={() => goSearch(1)}
-            className="rounded px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0] disabled:text-[#ccc]"
+            className="rounded-sm px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0] disabled:text-[#ccc]"
           >
             ↓
           </button>
@@ -2560,7 +2622,7 @@ export function ChatPage({
             type="button"
             aria-label="关闭搜索"
             onClick={closeSearch}
-            className="rounded px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0]"
+            className="rounded-sm px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0]"
           >
             ×
           </button>
@@ -2797,7 +2859,7 @@ export function ChatPage({
                     aria-label="复制消息"
                     className={`absolute -top-2 ${
                       mine ? "right-0" : "left-0"
-                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
+                    } hidden rounded-sm border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
                     onClick={() => void copyMessage(m)}
                   >
                     {copiedMsgId === m.id ? "已复制" : "复制"}
@@ -2860,7 +2922,7 @@ export function ChatPage({
             <button
               type="button"
               aria-label="停止录音"
-              className="rounded border border-line px-2 py-0.5 hover:bg-[#f3f3f3]"
+              className="rounded-sm border border-line px-2 py-0.5 hover:bg-[#f3f3f3]"
               onClick={stopRecording}
             >
               停止
@@ -2868,7 +2930,7 @@ export function ChatPage({
             <button
               type="button"
               aria-label="取消录音"
-              className="rounded border border-line px-2 py-0.5 text-muted hover:bg-[#f3f3f3]"
+              className="rounded-sm border border-line px-2 py-0.5 text-muted hover:bg-[#f3f3f3]"
               onClick={cancelRecording}
             >
               取消
@@ -2890,7 +2952,7 @@ export function ChatPage({
               {sendNotice.retry ? (
                 <button
                   type="button"
-                  className="shrink-0 rounded border border-[#e6b3ae] px-2 py-0.5 hover:bg-[#fef3f2]"
+                  className="shrink-0 rounded-sm border border-[#e6b3ae] px-2 py-0.5 hover:bg-[#fef3f2]"
                   onClick={() => sendNotice.retry?.()}
                 >
                   重试
@@ -2903,6 +2965,12 @@ export function ChatPage({
             </p>
           )
         ) : null}
+        {/* 分叉降级（d.56）：来源日志重建不出前缀，本次按普通重跑执行——整轮运行期间都显示 */}
+        {forkNotice && (
+          <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
+            {forkNotice}
+          </p>
+        )}
         {/* 能力降级提示：与发送后的错误提示分开——这是「发之前就知道」的信息 */}
         {toolsNotice && (
           <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
@@ -2915,7 +2983,7 @@ export function ChatPage({
             <span>生成中：{activeLocal.map(([, s]) => nameOf(s.agentId)).join("、")}</span>
             <button
               type="button"
-              className="rounded border border-line px-2 py-0.5 hover:bg-[#f3f3f3]"
+              className="rounded-sm border border-line px-2 py-0.5 hover:bg-[#f3f3f3]"
               onClick={abortRuns}
             >
               中断
@@ -2982,7 +3050,7 @@ export function ChatPage({
           )}
           <textarea
             aria-label="消息输入框"
-            className="h-full w-full flex-1 resize-none rounded-lg border border-line px-3 py-2 text-sm leading-relaxed outline-none focus:border-[#bbb]"
+            className="h-full w-full flex-1 resize-none rounded-lg border border-line px-3 py-2 text-sm leading-relaxed outline-hidden focus:border-[#bbb]"
             placeholder="输入消息…"
             value={draft}
             onChange={(e) => onDraftChange(e.target.value)}

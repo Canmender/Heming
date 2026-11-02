@@ -60,3 +60,33 @@ if (typeof URL !== "undefined" && typeof URL.createObjectURL !== "function") {
 if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = function scrollIntoView() {};
 }
+
+/**
+ * jsdom 未实现 window.matchMedia（浏览器/Electron 原生有），而 BootWave 的用例要
+ * `vi.spyOn(window, "matchMedia")` 来模拟「减弱动态」。
+ *
+ * 为什么升级后必须补：vitest 1.x 的 spyOn 遇到不存在的属性会**静默新建**一个再替换，
+ * 所以那 3 个用例一直能过；vitest 5 的 spyOn 收紧为「只能 spy 函数，收到 undefined 就抛」，
+ * 于是升级后立刻红。补一个基线桩即可让 spyOn 有东西可替换。
+ *
+ * 取值刻意是 `matches: false` —— 与「没有 matchMedia」时产品代码的回落分支
+ * （BootWave.tsx 里 `typeof window.matchMedia === "function" && …` 判假）**语义完全一致**，
+ * 不会让别的用例看到「开启了减弱动态」这种假的真分支。
+ */
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string): MediaQueryList =>
+      ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+  });
+}

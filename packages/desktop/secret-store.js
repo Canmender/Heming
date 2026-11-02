@@ -12,6 +12,21 @@
  *
  * 为什么是同步 IPC：渲染层那三个键都是同步读写（store 在模块初始化时读），
  * 改异步会牵动整条启动链。sendSync 的阻塞代价只落在这三个低频键上。
+ *
+ * ★ 弃用提示（Electron 45 起，d.55 升级时记录）：本文件用到的
+ *   `safeStorage.isEncryptionAvailable()` / `encryptString()` / `decryptString()`
+ *   **三个同步方法在 Electron 45 已被标记弃用，Electron 46 将移除**（上游随 Chromium
+ *   删掉同步 OSCrypt 后端）。45 上功能正常，所以本轮刻意**只升 Electron、不迁 Async**，
+ *   避免把「运行时大版本升级」和「加解密 API 迁移」两件事混在一起排障。
+ *
+ *   下一批待办（Electron 升 46 之前必须做完）：
+ *   - `isEncryptionAvailable()` → `await isAsyncEncryptionAvailable()`
+ *   - `encryptString(s)` → `await encryptStringAsync(s)`
+ *   - `decryptString(buf)` → `const { result } = await decryptStringAsync(buf)`
+ *     注意异步版返回值是 `{ result }` **对象**，不是裸 Buffer，解构写错会静默拿到 undefined。
+ *   - 连带影响：本文件的 IPC 是 `sendSync` 的同步通道，改异步后 preload 与渲染层的
+ *     三个低频键（heming.llmConfigs / heming.mcp.servers.v1 / heming.e2e.identity）
+ *     的读取时机都要跟着改成异步，需要单独一轮规格与迁移，不适合顺手改。
  */
 
 const ENVELOPE_VERSION = "v1";

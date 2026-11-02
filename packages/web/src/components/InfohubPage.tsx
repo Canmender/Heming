@@ -62,7 +62,7 @@ function Snippet({ text }: { text: string }) {
           return null;
         }
         return highlight ? (
-          <mark key={index} className="rounded bg-[#fff1a8] px-0.5 text-ink">
+          <mark key={index} className="rounded-sm bg-[#fff1a8] px-0.5 text-ink">
             {part}
           </mark>
         ) : (
@@ -472,8 +472,8 @@ export function InfohubPage() {
           <div className="mx-auto max-w-[620px] rounded-xl border border-line bg-white p-5 shadow-card">
             <h2 className="text-[14px] font-semibold">连接本机归档</h2>
             <p className="mt-1 text-[12px] leading-6 text-muted">
-              指向已有的 InfoHub 数据目录（里面有 <code className="rounded bg-[#f4f4f4] px-1">config.json</code> 和{" "}
-              <code className="rounded bg-[#f4f4f4] px-1">data/archive.db</code>）。
+              指向已有的 InfoHub 数据目录（里面有 <code className="rounded-sm bg-[#f4f4f4] px-1">config.json</code> 和{" "}
+              <code className="rounded-sm bg-[#f4f4f4] px-1">data/archive.db</code>）。
               首次使用也可以直接用默认目录，同步后自动建库。
             </p>
 
@@ -486,7 +486,7 @@ export function InfohubPage() {
                 value={home}
                 onChange={(e) => setHome(e.target.value)}
                 placeholder={info?.defaultHome ?? "例如 D:\\wohaolei"}
-                className="min-w-0 flex-1 rounded-md border border-line px-2.5 py-1.5 text-[12px] outline-none focus:border-[#bbb]"
+                className="min-w-0 flex-1 rounded-md border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
               />
               <button
                 type="button"
@@ -525,7 +525,7 @@ export function InfohubPage() {
                     value={python}
                     onChange={(e) => setPython(e.target.value)}
                     placeholder={info?.bundledPython ?? "内置运行时不可用，请选择 python.exe"}
-                    className="min-w-0 flex-1 rounded-md border border-line px-2.5 py-1.5 text-[12px] outline-none focus:border-[#bbb]"
+                    className="min-w-0 flex-1 rounded-md border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
                   />
                   <button
                     type="button"
@@ -704,7 +704,7 @@ export function InfohubPage() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="全文检索（FTS5 trigram）：人物、地点、单号…"
-                  className="min-w-0 flex-1 rounded-md border border-line px-3 py-1.5 text-[12px] outline-none focus:border-[#bbb]"
+                  className="min-w-0 flex-1 rounded-md border border-line px-3 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
                 />
                 <button
                   type="submit"
@@ -796,7 +796,7 @@ export function InfohubPage() {
                           className="flex items-start gap-3 rounded-lg border border-line-soft bg-white px-3 py-2"
                         >
                           <span
-                            className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
+                            className={`mt-0.5 shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
                               overdue ? "bg-[#fdecea] text-[#b42318]" : "bg-[#f2f2f2] text-[#555]"
                             }`}
                           >

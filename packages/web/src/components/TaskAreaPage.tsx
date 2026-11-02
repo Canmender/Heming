@@ -7,6 +7,7 @@ import {
   buildTaskReport,
   formatDuration,
   formatTaskTime,
+  taskForkNotice,
   taskSources,
   taskStats,
   taskStatusLabel,
@@ -22,6 +23,9 @@ import {
   useTemplateStore,
   type TaskTemplate,
 } from "../lib/tasks/templates.js";
+import { buildForkTaskPlan, type ForkTaskPlan } from "../lib/tasks/forkTask.js";
+import { rerunNoticeLines } from "../lib/tasks/rerun.js";
+import { rolloutLog, type ForkPreview } from "../lib/rollout/index.js";
 import { ChatPage } from "./ChatPage.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 import { RolloutTimeline } from "./RolloutTimeline.js";
@@ -306,7 +310,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
           aria-label="选择智能体"
           value={agentId}
           onChange={(e) => setAgentId(e.target.value)}
-          className="w-full rounded-lg border border-line bg-white px-2.5 py-2 text-[13px] outline-none focus:border-ink"
+          className="w-full rounded-lg border border-line bg-white px-2.5 py-2 text-[13px] outline-hidden focus:border-ink"
         >
           <option value="">请选择…</option>
           {agentsRoster.map((a) => {
@@ -343,7 +347,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
             aria-label="目标模板"
             value={templateId}
             onChange={(e) => applyTemplate(e.target.value)}
-            className="min-w-0 flex-1 rounded-lg border border-line bg-white px-2.5 py-2 text-[13px] outline-none focus:border-ink"
+            className="min-w-0 flex-1 rounded-lg border border-line bg-white px-2.5 py-2 text-[13px] outline-hidden focus:border-ink"
           >
             <option value="">不使用模板</option>
             {templates.map((t) => (
@@ -371,7 +375,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
           onChange={(e) => setText(e.target.value)}
           rows={6}
           placeholder="例如：梳理 packages/web/src/lib 下的模块依赖，列出耦合最重的三处并给出拆分建议"
-          className="w-full resize-y rounded-lg border border-line px-2.5 py-2 text-[13px] leading-5 outline-none focus:border-ink"
+          className="w-full resize-y rounded-lg border border-line px-2.5 py-2 text-[13px] leading-5 outline-hidden focus:border-ink"
         />
 
         <div className="mt-2 flex gap-2">
@@ -380,7 +384,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
             value={templateName}
             onChange={(e) => setTemplateName(e.target.value)}
             placeholder={text.trim() ? suggestTemplateName(text) : "给这个模板起个名字"}
-            className="min-w-0 flex-1 rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-none focus:border-ink"
+            className="min-w-0 flex-1 rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
           />
           <button
             type="button"
@@ -454,7 +458,8 @@ export function TaskAreaPage() {
   const tasks = useTaskStore((s) => s.tasks);
   const removeTask = useTaskStore((s) => s.remove);
   const clearFinished = useTaskStore((s) => s.clearFinished);
-  const reopenTask = useTaskStore((s) => s.reopen);
+  const rerunTask = useTaskStore((s) => s.rerun);
+  const forkFromTask = useTaskStore((s) => s.forkFrom);
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
   const loadAgentsRoster = useChatStore((s) => s.loadAgentsRoster);
   const conversations = useChatStore((s) => s.conversations);
@@ -468,6 +473,18 @@ export function TaskAreaPage() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [removeTarget, setRemoveTarget] = useState<TaskRecord | null>(null);
+  const [rerunTarget, setRerunTarget] = useState<TaskRecord | null>(null);
+  /** 分叉确认（P3 预览）：算好了代价才出这个框，用户点之前就看清复用/丢弃。 */
+  const [forkDraft, setForkDraft] = useState<{
+    task: TaskRecord;
+    plan: ForkTaskPlan;
+    preview: ForkPreview;
+  } | null>(null);
+  /** 分叉被拒：把原因列出来（前置条件同源于面板按钮的置灰判据）。 */
+  const [forkRejection, setForkRejection] = useState<{
+    task: TaskRecord;
+    messages: string[];
+  } | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [copied, setCopied] = useState<"md" | "json" | null>(null);
   const copiedTimer = useRef<number | null>(null);
@@ -536,15 +553,70 @@ export function TaskAreaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskFocusId]);
 
-  const retry = (task: TaskRecord) => {
-    reopenTask(task.id);
+  /**
+   * 重跑：**新建任务**（原任务保持原状态，留痕），复用投递槽自动发送同一条目标。
+   *
+   * 与旧「重新执行」（`reopen` 同一任务）的区别就在这里：旧做法会把上一轮的步骤与
+   * 结果覆盖掉，用户分不清「这次跑成什么样」和「上次跑到哪」。
+   */
+  const runRerun = (task: TaskRecord) => {
+    const newId = rerunTask(task.id);
+    setRerunTarget(null);
+    if (!newId) return;
+    setSelectedId(newId);
     focusConversation(task.conversationId);
-    // 复用投递槽：自动发送同一条目标，流与消息仍走 ChatPage 的完整链路
     setTaskDraft({
-      taskId: task.id,
+      taskId: newId,
       conversationId: task.conversationId,
       text: task.prompt,
       mentions: [{ agentId: task.agentId, name: task.agentName }],
+    });
+  };
+
+  /**
+   * 请求从某条工具结果之后分叉：先算前置条件与代价（P3），再弹确认框。
+   *
+   * 判定与面板按钮置灰**同源**（都走 `buildForkTaskPlan` → `checkFork`），
+   * 不会出现「面板说能分叉、点了报错」。
+   */
+  const requestFork = (task: TaskRecord, targetSeq: number) => {
+    if (!task.streamId) {
+      setForkRejection({ task, messages: ["该任务没有绑定回合日志，无法确定从哪里分叉。"] });
+      return;
+    }
+    let view: ReturnType<typeof rolloutLog.readStream>;
+    try {
+      view = rolloutLog.readStream(task.streamId);
+    } catch {
+      setForkRejection({ task, messages: ["读取本机回合日志失败，无法分叉。"] });
+      return;
+    }
+    const result = buildForkTaskPlan(task, view.items, {
+      targetSeq,
+      version: view.version,
+      running: task.status === "running",
+    });
+    if (!result.ok || !result.plan || !result.preview) {
+      setForkRejection({ task, messages: result.rejections.map((r) => r.message) });
+      return;
+    }
+    setForkDraft({ task, plan: result.plan, preview: result.preview });
+  };
+
+  /** 确认分叉：新建任务 + 投递原目标；前缀由 ChatPage 按任务的 forkedFrom 重建。 */
+  const confirmFork = () => {
+    if (!forkDraft) return;
+    const { task, plan } = forkDraft;
+    const newId = forkFromTask(task.id, plan.forkedFrom);
+    setForkDraft(null);
+    if (!newId) return;
+    setSelectedId(newId);
+    focusConversation(task.conversationId);
+    setTaskDraft({
+      taskId: newId,
+      conversationId: task.conversationId,
+      text: task.prompt,
+      mentions: plan.mentions,
     });
   };
 
@@ -576,7 +648,7 @@ export function TaskAreaPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="搜索运行记录…"
-          className="ml-2 w-[200px] rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-none focus:border-ink"
+          className="ml-2 w-[200px] rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
         />
         <div className="flex items-center gap-1" role="group" aria-label="按状态筛选">
           {FILTERS.map((f) => {
@@ -683,6 +755,7 @@ export function TaskAreaPage() {
                   </div>
                   <div className="mt-1 truncate text-[11px] text-muted">
                     {task.agentName} · {formatTaskTime(task.createdAt)}
+                    {task.forkedFrom ? " · 分叉" : ""}
                   </div>
                   <div className="mt-0.5 text-[11px] text-muted">
                     {task.steps.length} 个工具调用
@@ -742,7 +815,8 @@ export function TaskAreaPage() {
               sources={sources}
               copied={copied}
               onCopy={(format) => void copyTask(selected, format)}
-              onRetry={() => retry(selected)}
+              onRerun={() => setRerunTarget(selected)}
+              onFork={(seq) => requestFork(selected, seq)}
               onRemove={() => setRemoveTarget(selected)}
             />
           )}
@@ -814,6 +888,112 @@ export function TaskAreaPage() {
           </p>
         </ConfirmDialog>
       )}
+
+      {rerunTarget && (
+        <ConfirmDialog
+          title="重跑这次运行"
+          onCancel={() => setRerunTarget(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                onClick={() => setRerunTarget(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+                onClick={() => runRerun(rerunTarget)}
+              >
+                确认重跑
+              </button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-2 text-[12px] leading-6">
+            {rerunNoticeLines().map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+            <p className="text-muted">目标：{rerunTarget.title}</p>
+          </div>
+        </ConfirmDialog>
+      )}
+
+      {forkDraft && (
+        <ConfirmDialog
+          title="从这一步之后分叉"
+          onCancel={() => setForkDraft(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                onClick={() => setForkDraft(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+                onClick={confirmFork}
+              >
+                确认分叉
+              </button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-2 text-[12px] leading-6">
+            {forkDraft.plan.notices.map((line) => (
+              <p key={line} className="text-[#b45309]">
+                {line}
+              </p>
+            ))}
+            <div>
+              <p className="font-medium">
+                将复用 {forkDraft.preview.reuse.length} 条工具结果：
+              </p>
+              <ul className="mt-1 flex flex-col gap-0.5 text-[11px] leading-5 text-muted">
+                {forkDraft.preview.reuse.map((pair) => (
+                  <li key={`${pair.callSeq}-${pair.resultSeq}`} className="truncate">
+                    {pair.name || pair.id}
+                    {pair.denied ? "（已拒绝）" : pair.ok ? "" : "（失败）"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="font-medium">
+                将丢弃 {forkDraft.preview.discard.length} 条记录（这一步之后的步骤与结果）。
+              </p>
+            </div>
+            <p className="text-muted">任务：{forkDraft.task.title}</p>
+          </div>
+        </ConfirmDialog>
+      )}
+
+      {forkRejection && (
+        <ConfirmDialog
+          title="无法从这一步分叉"
+          onCancel={() => setForkRejection(null)}
+          footer={
+            <button
+              type="button"
+              className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#f7f7f7]"
+              onClick={() => setForkRejection(null)}
+            >
+              知道了
+            </button>
+          }
+        >
+          <div className="flex flex-col gap-2 text-[12px] leading-6">
+            {forkRejection.messages.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </div>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }
@@ -824,19 +1004,23 @@ function TaskSummary({
   sources,
   copied,
   onCopy,
-  onRetry,
+  onRerun,
+  onFork,
   onRemove,
 }: {
   task: TaskRecord;
   sources: { id: string; title: string; detail?: string }[];
   copied: "md" | "json" | null;
   onCopy: (format: "md" | "json") => void;
-  onRetry: () => void;
+  onRerun: () => void;
+  onFork: (targetSeq: number) => void;
   onRemove: () => void;
 }) {
   const running = task.status === "running";
   const now = useNow(running);
   const elapsedTo = task.endedAt ?? now;
+  /** 分叉任务的任务卡提示：与分叉确认框同一份口径（前缀重建、可能截断）。 */
+  const forkNotice = taskForkNotice(task);
   return (
     <div className="flex flex-col gap-3">
       <div>
@@ -846,6 +1030,11 @@ function TaskSummary({
           >
             {taskStatusLabel(task.status)}
           </span>
+          {task.forkedFrom && (
+            <span className="rounded-full border border-[#c7d2fe] bg-[#f5f8ff] px-1.5 py-0.5 text-[10px] text-[#3538cd]">
+              分叉
+            </span>
+          )}
           {running && <span className="text-[11px] text-muted">执行中…</span>}
           <span className="ml-auto text-[11px] tabular-nums text-muted">
             {formatDuration(elapsedTo - task.createdAt)}
@@ -857,11 +1046,28 @@ function TaskSummary({
         </div>
       </div>
 
+      {forkNotice && (
+        <p
+          role="status"
+          className="rounded-lg border border-[#fedf89] bg-[#fffaeb] px-2.5 py-2 text-[11px] leading-5 text-[#b45309]"
+        >
+          {forkNotice}
+        </p>
+      )}
+
       <dl className="grid grid-cols-[64px_1fr] gap-x-2 gap-y-1 text-[11px] leading-5">
         <dt className="text-muted">智能体</dt>
         <dd className="truncate">{task.agentName}</dd>
         <dt className="text-muted">创建</dt>
         <dd>{formatTaskTime(task.createdAt)}</dd>
+        {task.forkedFrom && (
+          <>
+            <dt className="text-muted">分叉来源</dt>
+            <dd className="truncate">
+              回合 {task.forkedFrom.streamId} · 第 {task.forkedFrom.seq} 条之后
+            </dd>
+          </>
+        )}
         {task.endedAt !== undefined && (
           <>
             <dt className="text-muted">用时</dt>
@@ -959,8 +1165,16 @@ function TaskSummary({
         )}
       </section>
 
-      {/* 过程日志：只读，只有绑定了流（从通用智能体发起）的记录才有 */}
-      {task.streamId && <RolloutTimeline streamId={task.streamId} active={running} />}
+      {/* 过程日志：只读，只有绑定了流（从通用智能体发起）的记录才有；
+          分叉入口挂在这里——每条 tool_result 的「从此处分叉」由 checkFork 决定能不能点 */}
+      {task.streamId && (
+        <RolloutTimeline
+          streamId={task.streamId}
+          active={running}
+          running={running}
+          onFork={onFork}
+        />
+      )}
 
       {sources.length > 0 && (
         <section>
@@ -996,10 +1210,11 @@ function TaskSummary({
         {!running && (
           <button
             type="button"
-            onClick={onRetry}
+            onClick={onRerun}
+            title="新建一次运行，原记录保留"
             className="rounded-lg border border-line px-2.5 py-1.5 text-[12px] hover:bg-[#fafafa]"
           >
-            重新执行
+            重跑
           </button>
         )}
         <button

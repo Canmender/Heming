@@ -1,7 +1,22 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
-import { StorageUsageCard, type EnumerableStorage } from "./StorageUsageCard.js";
+import { StorageUsageCard, encryptionStatusLine, type EnumerableStorage } from "./StorageUsageCard.js";
 import { utf8Length } from "../lib/memory/storage.js";
+import { resetMsgCacheState } from "../lib/e2eSession.js";
+
+/** 可控桥：密文 = `enc:` + base64（状态判定只看外壳，不需要真解密）。 */
+function installBridge(): void {
+  (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
+    available: true,
+    encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
+    decrypt: (data: string) =>
+      data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null,
+  };
+}
+
+function uninstallBridge(): void {
+  delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
+}
 
 /** 模拟浏览器抛的配额异常（构造带 name 的 Error，避免依赖 DOMException 全局）。 */
 function quotaError(): Error {
@@ -102,6 +117,13 @@ describe("StorageUsageCard", () => {
 
   beforeEach(() => {
     storage = new FakeStorage();
+    uninstallBridge();
+    resetMsgCacheState();
+  });
+
+  afterEach(() => {
+    uninstallBridge();
+    resetMsgCacheState();
   });
 
   it("渲染出用量条与模块明细", () => {
@@ -115,8 +137,8 @@ describe("StorageUsageCard", () => {
     expect(bar).toBeInTheDocument();
     expect(bar).toHaveAttribute("aria-valuenow", expect.stringMatching(/^\d+$/));
 
-    // 明细按字节数降序：记忆(3000) → 任务(2000) → 明文缓存(1000)
-    expect(moduleNames()).toEqual(["记忆", "任务", "明文缓存"]);
+    // 明细按字节数降序：记忆(3000) → 任务(2000) → 消息缓存(1000)
+    expect(moduleNames()).toEqual(["记忆", "任务", "消息缓存"]);
     // 具体数字要显示出来（不能只有条）
     expect(leafTexts(/3,000 字节/).length).toBeGreaterThan(0);
     expect(leafTexts(/已用/).join(" ")).toContain("6,000 字节");
@@ -190,11 +212,11 @@ describe("StorageUsageCard", () => {
     expect(() => render(<StorageUsageCard storage={storage} />)).not.toThrow();
 
     expect(screen.getByRole("progressbar", { name: "本机存储用量" })).toBeInTheDocument();
-    expect(moduleNames()).toContain("明文缓存");
+    expect(moduleNames()).toContain("消息缓存");
     expect(moduleNames()).toContain("其它");
   });
 
-  it("清理明文缓存：先弹确认框，确认后才删键并刷新数字", () => {
+  it("清理消息缓存：先弹确认框，确认后才删键并刷新数字", () => {
     storage.put("heming.msgCache.c1", "a".repeat(1000));
     storage.put("heming.msgCache.c2", "a".repeat(1000));
     storage.put("heming.tasks.v1", "b".repeat(2000));
@@ -202,10 +224,10 @@ describe("StorageUsageCard", () => {
     render(<StorageUsageCard storage={storage} />);
     const before = usedBytesFromBar();
 
-    fireEvent.click(screen.getByRole("button", { name: "清理明文缓存" }));
+    fireEvent.click(screen.getByRole("button", { name: "清理消息缓存" }));
 
     // 确认框先出来，此时一个键都还没删
-    const dialog = screen.getByRole("dialog", { name: "清理明文缓存" });
+    const dialog = screen.getByRole("dialog", { name: "清理消息缓存" });
     expect(dialog).toBeInTheDocument();
     expect(storage.has("heming.msgCache.c1")).toBe(true);
 
@@ -216,16 +238,16 @@ describe("StorageUsageCard", () => {
     // 界面数字更新
     expect(usedBytesFromBar()).toBeLessThan(before);
     expect(usedBytesFromBar()).toBe(2000);
-    expect(moduleNames()).not.toContain("明文缓存");
+    expect(moduleNames()).not.toContain("消息缓存");
   });
 
-  it("清理明文缓存：取消确认框则不删任何键", () => {
+  it("清理消息缓存：取消确认框则不删任何键", () => {
     storage.put("heming.msgCache.c1", "a".repeat(1000));
 
     render(<StorageUsageCard storage={storage} />);
-    fireEvent.click(screen.getByRole("button", { name: "清理明文缓存" }));
+    fireEvent.click(screen.getByRole("button", { name: "清理消息缓存" }));
     fireEvent.click(
-      within(screen.getByRole("dialog", { name: "清理明文缓存" })).getByRole("button", {
+      within(screen.getByRole("dialog", { name: "清理消息缓存" })).getByRole("button", {
         name: "取消",
       }),
     );
@@ -263,9 +285,9 @@ describe("StorageUsageCard", () => {
 
     render(<StorageUsageCard storage={storage} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "清理明文缓存" }));
+    fireEvent.click(screen.getByRole("button", { name: "清理消息缓存" }));
     fireEvent.click(
-      within(screen.getByRole("dialog", { name: "清理明文缓存" })).getByRole("button", {
+      within(screen.getByRole("dialog", { name: "清理消息缓存" })).getByRole("button", {
         name: "清理",
       }),
     );
@@ -292,7 +314,7 @@ describe("StorageUsageCard", () => {
     expect(document.body.textContent).toContain("不可再生");
     expect(document.body.textContent).toContain("私钥");
     // 只有两个清理按钮
-    expect(screen.getByRole("button", { name: "清理明文缓存" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "清理消息缓存" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "清理任务记录" })).toBeInTheDocument();
   });
 
@@ -306,7 +328,10 @@ describe("StorageUsageCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "重新检测" }));
 
     // 实测值：3 块 × 64KB + 已用 1000 = 197,608 字节 = 193.0 KB
-    await waitFor(() => expect(leafTexts(/实测/).length).toBeGreaterThan(0));
+    // 等**最终态**文案「配额已实测」，不能等 /实测/：卡片底部的说明文案
+    // 「…临时写入最多约 32MB 以实测配额…」是常驻静态文本，永远命中 /实测/，
+    // 会让 waitFor 在探测完成前就放行，后续断言随机拿到空串（jsdom 30 变慢后暴露）。
+    await waitFor(() => expect(leafTexts(/配额已实测/).length).toBeGreaterThan(0));
     expect(leafTexts(/配额已实测/).join(" ")).toContain("193.0 KB");
     expect(leafTexts(/配额已实测/).join(" ")).toContain("197,608 字节");
     // 探针键没留下
@@ -343,5 +368,93 @@ describe("StorageUsageCard", () => {
     render(<StorageUsageCard storage={storage} />);
 
     expect(document.body.textContent).toContain("临时写入");
+  });
+
+  it("清理说明如实写清可恢复边界（B1）：只有窗口内近期消息能重新解密", () => {
+    storage.put("heming.msgCache.c1", "a".repeat(1000));
+    render(<StorageUsageCard storage={storage} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "清理消息缓存" }));
+    const dialog = screen.getByRole("dialog", { name: "清理消息缓存" });
+    const text = dialog.textContent ?? "";
+    expect(text).toContain("窗口内");
+    expect(text).toContain("无法解密"); // 「更早的消息会永久显示为无法解密」
+    expect(text).toContain("不可再生"); // 自己发出的消息不可再生
+    // 旧口径「重新拉取并解密即可恢复」是错的，不能再出现
+    expect(text).not.toContain("重新拉取并解密即可恢复");
+  });
+
+  it("迁移期备份键不在清理入口里：主键删掉、备份原样留下", () => {
+    storage.put("heming.msgCache.c1", "a".repeat(1000));
+    storage.put("heming.msgCache.c1.__heming_plaintext_backup", "b".repeat(500));
+    storage.put("heming.msgCache.c2.__heming_undecryptable", "c".repeat(400));
+
+    render(<StorageUsageCard storage={storage} />);
+    fireEvent.click(screen.getByRole("button", { name: "清理消息缓存" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "清理消息缓存" })).getByRole("button", { name: "清理" }),
+    );
+
+    expect(storage.has("heming.msgCache.c1")).toBe(false); // 可再生主键被清
+    expect(storage.has("heming.msgCache.c1.__heming_plaintext_backup")).toBe(true); // 备份留着
+    expect(storage.has("heming.msgCache.c2.__heming_undecryptable")).toBe(true);
+    // 备份仍计入「消息缓存」组（它们确实占字节）
+    expect(moduleNames()).toContain("消息缓存");
+    expect(document.body.textContent).toContain("备份");
+  });
+
+  it("加密状态标注：磁盘是密文容器且桥可用 ⇒ 显示「已加密」", () => {
+    installBridge();
+    storage.put(
+      "heming.msgCache.c1",
+      JSON.stringify({ __hemingMsgCache: "v2", items: [{ id: "m-1", d: "cipher" }] }),
+    );
+
+    render(<StorageUsageCard storage={storage} />);
+
+    const status = screen.getByRole("status", { name: "消息缓存加密状态" });
+    expect(status.textContent).toContain("消息缓存已加密");
+    expect(status.textContent).not.toContain("未加密");
+  });
+
+  it("加密状态标注：浏览器无桥且磁盘是明文 ⇒ 如实说「未加密」+原因", () => {
+    storage.put(
+      "heming.msgCache.c1",
+      JSON.stringify([{ id: "m-1", senderId: "u", at: 1, plain: { kind: "text", text: "明文" } }]),
+    );
+
+    render(<StorageUsageCard storage={storage} />);
+
+    const status = screen.getByRole("status", { name: "消息缓存加密状态" });
+    expect(status.textContent).toContain("未加密");
+    expect(status.textContent).toContain("浏览器端没有可用的系统安全存储");
+  });
+
+  it("加密状态标注：密文外壳但本机解不开 ⇒ 说「无法解密」而不是「未加密」", () => {
+    storage.put("heming.msgCache.c1", "{ 这不是容器也不是明文数组");
+
+    render(<StorageUsageCard storage={storage} />);
+
+    const status = screen.getByRole("status", { name: "消息缓存加密状态" });
+    expect(status.textContent).toContain("无法解密");
+    expect(status.textContent).not.toContain("未加密");
+  });
+
+  it("加密状态文案：配额不足时按 Q2 明说「为保住消息，本次以明文保存」", () => {
+    const line = encryptionStatusLine([
+      {
+        convId: "c1",
+        state: {
+          desktop: true,
+          available: true,
+          form: "plaintext",
+          encrypted: false,
+          reason: "quota",
+        },
+      },
+    ]);
+    expect(line?.text).toContain("未加密");
+    expect(line?.text).toContain("配额不足");
+    expect(line?.text).toContain("为保住消息，本次以明文保存");
   });
 });

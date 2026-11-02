@@ -21,6 +21,7 @@ const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
 const { registerWikiIpc } = require("./wiki-fs");
 const { registerChartIpc } = require("./chart-fs");
 const { registerExportIpc } = require("./export-fs");
+const { registerFileIpc } = require("./file-fs");
 const { registerSecretIpc } = require("./secret-store");
 const { registerNotifyIpc } = require("./notify-bridge");
 const { createInfohubBridge, registerInfohubIpc, resolveDefaultHome, resolveInfohubPackageDir } =
@@ -620,6 +621,17 @@ app.whenReady().then(() => {
     registerChartIpc(ipcMain);
     // 记忆导出文件桥（d.35）：把记忆 JSON 写到 ~/Heming/exports
     registerExportIpc(ipcMain);
+    // 文件编辑桥（d.55 · file_patch）：只在用户显式添加的可写根内读写。
+    // 只接受**主窗口**的调用——桌宠窗口等其它渲染进程不能经这里改用户文件；
+    // 路径判定、软链/硬链拒绝、上限与 tmp+rename 原子写都在 file-fs.js 里兜底。
+    registerFileIpc(ipcMain, {
+      dialog,
+      getMainWindow: () => mainWindow,
+      isTrustedSender: (event) => {
+        if (!mainWindow) return false;
+        return BrowserWindow.fromWebContents(event.sender) === mainWindow;
+      },
+    });
     // 本机密钥信封桥（d.36）：preload 在页面加载时用 sendSync 问可用性，
     // 所以必须早于 createWindow()。
     registerSecretIpc(ipcMain);

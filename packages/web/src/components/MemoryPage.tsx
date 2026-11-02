@@ -68,9 +68,9 @@ export interface MemoryPageProps {
 
 const cardCls = "rounded-xl border border-line bg-white p-4 shadow-card";
 const inputCls =
-  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]";
+  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
 const inputSmCls =
-  "mt-1 block w-full rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-none focus:border-[#bbb]";
+  "mt-1 block w-full rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]";
 const labelCls = "block text-[12px] text-muted";
 const btnGhost =
   "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa] disabled:opacity-40";
@@ -87,7 +87,7 @@ const RECALL_RUNS_PREVIEW = 3;
 const errorCls = "text-[12px] text-red-600";
 const okCls = "text-[12px] text-muted";
 const badgeCls =
-  "rounded border border-line-soft bg-[#fafafa] px-1.5 py-0.5 text-[10px] text-muted";
+  "rounded-sm border border-line-soft bg-[#fafafa] px-1.5 py-0.5 text-[10px] text-muted";
 
 /* ---------------------------------------------------------------- 纯工具 */
 
@@ -355,7 +355,7 @@ function Modal({
             type="button"
             aria-label="关闭"
             onClick={onClose}
-            className="shrink-0 rounded p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
           >
             <XIcon width={16} height={16} aria-hidden="true" />
           </button>
@@ -1369,7 +1369,7 @@ export function MemoryPage({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="按关键词过滤条目"
-            className="w-[200px] rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-none focus:border-[#bbb]"
+            className="w-[200px] rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
           />
         </div>
 
@@ -1545,7 +1545,7 @@ export function MemoryPage({
             value={recallQuery}
             onChange={(e) => setRecallQuery(e.target.value)}
             placeholder="如：帮我把发布计划整理一下"
-            className="min-w-0 flex-1 rounded-lg border border-line px-3 py-1.5 text-[12px] outline-none focus:border-[#bbb]"
+            className="min-w-0 flex-1 rounded-lg border border-line px-3 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
           />
           <button
             type="button"
@@ -2157,7 +2157,7 @@ export function MemoryPage({
               aria-label="选择智能体"
               value={agentId}
               onChange={(e) => setAgentId(e.target.value)}
-              className="rounded-lg border border-line px-2 py-1.5 text-[12px] outline-none focus:border-[#bbb]"
+              className="rounded-lg border border-line px-2 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
             >
               <option value="">全部智能体</option>
               {[...agents, ...manualAgents].map((agent) => (

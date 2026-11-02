@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type JSX } from "react";
 import {
   HomeIcon,
   TeamIcon,
@@ -55,7 +55,7 @@ function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
     <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-1.5 whitespace-nowrap rounded-[7px] bg-ink px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-[0_2px_6px_rgba(0,0,0,0.25)] transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100">
       <span>{label}</span>
       {shortcut && (
-        <kbd className="rounded border border-[#666] px-1 text-[10px] font-normal text-[#ccc]">
+        <kbd className="rounded-sm border border-[#666] px-1 text-[10px] font-normal text-[#ccc]">
           {shortcut}
         </kbd>
       )}

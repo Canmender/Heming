@@ -147,7 +147,7 @@ export function TeamBoardPage() {
           <div className="flex items-center gap-2">
             <TeamIcon width={18} height={18} />
             <h1 className="text-[15px] font-extrabold">团队看板</h1>
-            <span className="rounded border border-line px-1 text-[9px] text-muted">全站一个团队</span>
+            <span className="rounded-sm border border-line px-1 text-[9px] text-muted">全站一个团队</span>
           </div>
           <p className="mt-0.5 text-[11px] text-muted">
             {members.length} 名真实成员 · {onlineCount} 人在线 · 今日 {todayCount} 条动向
@@ -242,7 +242,7 @@ export function TeamBoardPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索任务或日程…"
-            className="w-[200px] rounded-md border border-line px-2 py-1 text-[11px] outline-none focus:border-[#bbb]"
+            className="w-[200px] rounded-md border border-line px-2 py-1 text-[11px] outline-hidden focus:border-[#bbb]"
           />
           <span className="text-muted">
             {selectedMember ? `${selectedMember.user.displayName} · ` : ""}
@@ -267,7 +267,7 @@ export function TeamBoardPage() {
             <button
               type="button"
               onClick={() => void load()}
-              className="mt-2 rounded border border-line px-2 py-0.5 text-[11px]"
+              className="mt-2 rounded-sm border border-line px-2 py-0.5 text-[11px]"
             >
               重试
             </button>

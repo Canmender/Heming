@@ -16,6 +16,7 @@ import {
   readTasks,
   setTaskStorage,
   taskStats,
+  taskForkNotice,
   taskTitle,
   useTaskStore,
   type TaskRecord,
@@ -489,5 +490,87 @@ describe("taskStats / 水合", () => {
     const list = readTasks(storage);
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ id: "ok", title: "p", agentName: "a1" });
+  });
+});
+
+describe("重跑 / 分叉：保留原任务（d.56）", () => {
+  const now = 1_700_000_100_000;
+  const step = { id: "s1", name: "srv__read", args: "{}", status: "ok" as const, startedAt: 1, endedAt: 2 };
+
+  it("重跑新建任务；原任务的状态/步骤/结果/时间戳一个字都不变", () => {
+    const origin = makeTask({
+      id: "o1",
+      status: "failed",
+      streamId: "s-old",
+      result: "半截结果",
+      error: "断线",
+      endedAt: 9,
+      steps: [step],
+    });
+    useTaskStore.setState({ tasks: [origin] });
+    const snapshot = JSON.stringify(origin);
+
+    const newId = useTaskStore.getState().rerun("o1", now);
+
+    expect(newId).toBeTruthy();
+    const tasks = useTaskStore.getState().tasks;
+    expect(tasks).toHaveLength(2);
+    const created = tasks.find((t) => t.id === newId)!;
+    // 继承目标/智能体/会话，但状态全新、没有分叉来源
+    expect(created).toMatchObject({
+      conversationId: "c1",
+      agentId: "a1",
+      agentName: "和小鸣",
+      prompt: origin.prompt,
+      status: "running",
+      createdAt: now,
+      steps: [],
+    });
+    expect(created.forkedFrom).toBeUndefined();
+    // ★ 原任务不得被重跑改动（不 reopen、不追加步骤、不覆盖结果）
+    expect(JSON.stringify(tasks.find((t) => t.id === "o1"))).toBe(snapshot);
+  });
+
+  it("分叉新建任务并记录来源；原任务不变", () => {
+    const origin = makeTask({ id: "o2", status: "cancelled", streamId: "s1", steps: [step] });
+    useTaskStore.setState({ tasks: [origin] });
+    const snapshot = JSON.stringify(origin);
+
+    const newId = useTaskStore.getState().forkFrom(
+      "o2",
+      { streamId: "s1", seq: 4, truncatedResults: 2 },
+      now,
+    )!;
+
+    const created = useTaskStore.getState().tasks.find((t) => t.id === newId)!;
+    expect(created.forkedFrom).toEqual({ streamId: "s1", seq: 4, truncatedResults: 2 });
+    expect(created).toMatchObject({ status: "running", prompt: origin.prompt, agentId: "a1" });
+    expect(JSON.stringify(useTaskStore.getState().tasks.find((t) => t.id === "o2"))).toBe(snapshot);
+  });
+
+  it("任务不存在时返回 null（不静默造一个任务）", () => {
+    useTaskStore.setState({ tasks: [] });
+    expect(useTaskStore.getState().rerun("missing", now)).toBeNull();
+    expect(useTaskStore.getState().forkFrom("missing", { streamId: "s1", seq: 1 }, now)).toBeNull();
+    expect(useTaskStore.getState().tasks).toEqual([]);
+  });
+
+  it("forkedFrom 落盘可水合：刷新后任务卡仍能说明来源与截断代价", () => {
+    const origin = makeTask({ id: "o3", status: "cancelled", streamId: "s1" });
+    useTaskStore.setState({ tasks: [origin] });
+    useTaskStore.getState().forkFrom("o3", { streamId: "s1", seq: 4, truncatedResults: 1 }, now);
+
+    const hydrated = readTasks(storage).find((t) => t.forkedFrom);
+    expect(hydrated?.forkedFrom).toEqual({ streamId: "s1", seq: 4, truncatedResults: 1 });
+    // 任务卡提示与分叉确认框同一份口径：重建 + 截断
+    expect(taskForkNotice(hydrated!)).toContain("前缀由本机日志重建");
+    expect(taskForkNotice(hydrated!)).toContain("结果不完整");
+  });
+
+  it("导出里带 forkedFrom；普通任务不带（不制造 undefined 字段）", () => {
+    const forked = makeTask({ id: "o4", forkedFrom: { streamId: "s1", seq: 4 } });
+    expect(JSON.parse(buildTaskJson(forked)).task.forkedFrom).toEqual({ streamId: "s1", seq: 4 });
+    expect(JSON.parse(buildTaskJson(makeTask())).task.forkedFrom).toBeUndefined();
+    expect(taskForkNotice(makeTask())).toBeNull();
   });
 });

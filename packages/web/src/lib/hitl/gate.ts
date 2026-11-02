@@ -18,7 +18,8 @@
 
 import type { GateOutcome, HitlBatch, HitlCall, HitlVerdict } from "./types.js";
 import type { HitlPolicyStore } from "./policy.js";
-import { ruleResource, toHitlCall, type RawToolCall } from "./classify.js";
+import { toHitlCall, type RawToolCall } from "./classify.js";
+import { rememberDecision } from "../fileEdit/remember.js";
 
 /** 闸门的依赖（全部可注入，便于测试）。 */
 export interface HitlGateDeps {
@@ -187,7 +188,12 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
           denied.add(fingerprint(batch.streamId, call.name, call.argsJson));
           // UI 异常时 v.remember 没有意义（不是用户点的），不得落规则。
           if (v.remember && !gateFailed) {
-            policy.rememberRule(call.name, ruleResource(call.argsJson), "deny", {
+            /*
+             * 走 `rememberDecision` 而不是直接 `rememberRule`：
+             * 文件工具（file_patch）的规则必须是**按目录归纳的前缀**，
+             * 绝不能退化成「整个工具放行」（规格 §7 红线）。其它工具的行为与改前一致。
+             */
+            rememberDecision(policy, call, "deny", {
               id: batch.agentId,
               name: batch.agentName,
             });
@@ -200,7 +206,7 @@ export function createHitlGate(deps: HitlGateDeps): HitlGate {
         }
         // 「记住允许」只对 read/write 生效；danger 由 ruleFor 拒绝，故这里不落盘。
         if (v.remember && !gateFailed && call.risk !== "danger") {
-          policy.rememberRule(call.name, ruleResource(call.argsJson), "allow", {
+          rememberDecision(policy, call, "allow", {
             id: batch.agentId,
             name: batch.agentName,
           });

@@ -27,10 +27,18 @@ describe("moduleOf（键名 → 模块）", () => {
     expect(moduleOf("heming.tasks.v1")).toBe("任务");
     expect(moduleOf("heming.taskTemplates.v1")).toBe("任务");
     expect(moduleOf("heming.staff.v1")).toBe("幕僚");
-    expect(moduleOf("heming.msgCache.c1")).toBe("明文缓存");
+    expect(moduleOf("heming.msgCache.c1")).toBe("消息缓存");
     expect(moduleOf("heming.e2e.identity")).toBe("加密会话");
     expect(moduleOf("heming.hitl.v1")).toBe("HITL");
     expect(moduleOf("heming.notifications.v1")).toBe("通知");
+  });
+
+  it("消息缓存的迁移/不可解密备份键仍归「消息缓存」，不会被算成「其它」", () => {
+    // P0-5b：备份键与主键同前缀，统计上确实占字节，必须归到同一组；
+    // 只是清理入口会排除它们（见 StorageUsageCard）。
+    expect(moduleOf("heming.msgCache.c1.__heming_plaintext_backup")).toBe("消息缓存");
+    expect(moduleOf("heming.msgCache.c1.__heming_undecryptable")).toBe("消息缓存");
+    expect(moduleOf("heming.msgCache.lru.v1")).toBe("消息缓存");
   });
 
   it("未知键归「其它」", () => {
@@ -97,7 +105,7 @@ describe("measureStorageUsage（用量统计）", () => {
     expect(usage.totalBytes).toBe(6);
   });
 
-  it("每个键只读一次（明文缓存是解密后的正文，不该反复拉进内存）", () => {
+  it("每个键只读一次（消息缓存是解密后的正文，不该反复拉进内存）", () => {
     const getItem = vi.fn((k: string) => (k === "heming.msgCache.c1" ? "hello" : null));
     const probe = { keys: () => ["heming.msgCache.c1"], getItem };
 
@@ -105,6 +113,17 @@ describe("measureStorageUsage（用量统计）", () => {
 
     expect(getItem).toHaveBeenCalledTimes(1);
     expect(getItem).toHaveBeenCalledWith("heming.msgCache.c1");
+  });
+
+  it("onKey 旁路：同一次读取里把原始值交给调用方判断落盘形态，回调抛错不影响统计", () => {
+    const seen: Array<[string, string | null]> = [];
+    const usage = measureStorageUsage(probeFrom({ "heming.msgCache.c1": "hello" }), null, (key, raw) => {
+      seen.push([key, raw]);
+      if (key === "heming.msgCache.c1") throw new Error("回调坏了也不该影响统计");
+    });
+
+    expect(seen).toEqual([["heming.msgCache.c1", "hello"]]);
+    expect(usage.totalBytes).toBe(5); // 回调抛错没有把统计带崩
   });
 
   it("某个键读不出来（抛错）不影响其它键", () => {

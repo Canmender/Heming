@@ -226,7 +226,7 @@ describe("设置区 密钥存储状态", () => {
     stubSecrets();
     render(<SettingsPage />);
     goTab("模型");
-    expect(screen.getByText(/密钥已用系统安全存储加密/)).toBeInTheDocument();
+    expect(screen.getByText(/密钥与本地数据已用系统安全存储加密/)).toBeInTheDocument();
     // jsdom 没有 window.heming.platform → 默认分支「系统密钥环」
     expect(screen.getByText(/系统密钥环/)).toBeInTheDocument();
   });
@@ -236,7 +236,7 @@ describe("设置区 密钥存储状态", () => {
     secureSetItem("heming.llmConfigs", "{}");
     render(<SettingsPage />);
     goTab("模型");
-    expect(screen.getByText(/以下密钥未能加密/)).toBeInTheDocument();
+    expect(screen.getByText(/以下内容未能加密/)).toBeInTheDocument();
     expect(screen.getByText(/模型连接密钥/)).toBeInTheDocument();
   });
 
@@ -246,7 +246,7 @@ describe("设置区 密钥存储状态", () => {
     render(<SettingsPage />);
     goTab("模型");
     expect(screen.getByText(/本机安全存储不可用/)).toBeInTheDocument();
-    expect(screen.getByText(/新写入的密钥将以明文保存/)).toBeInTheDocument();
+    expect(screen.getByText(/新写入的密钥与本地数据将以明文保存/)).toBeInTheDocument();
     expect(screen.getByText(/MCP 服务请求头/)).toBeInTheDocument();
   });
 
@@ -259,7 +259,7 @@ describe("设置区 密钥存储状态", () => {
     secureGetItem("heming.llmConfigs");
     render(<SettingsPage />);
     goTab("模型");
-    expect(screen.getByText(/新写入的密钥将以明文保存/)).toBeInTheDocument();
+    expect(screen.getByText(/新写入的密钥与本地数据将以明文保存/)).toBeInTheDocument();
     expect(screen.getByText(/无法在本机解密/)).toBeInTheDocument();
     expect(screen.getByText(/模型连接密钥/)).toBeInTheDocument();
   });

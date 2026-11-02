@@ -18,7 +18,7 @@ import { PlusIcon } from "./icons.js";
 const EFFECT_NOTE = "改动即时生效，仅作用于本机，绝不上传和鸣服务端。";
 
 const inputCls =
-  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]";
+  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
 const btnGhost =
   "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
 

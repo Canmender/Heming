@@ -5,10 +5,13 @@
  * - 密码原语一律 import ./e2eCrypto.js（X3DH/hkdfChain/GCM，Task 1 已评审），本文件禁止重实现。
  * - 纯逻辑 + E2eDeps 注入（fetchPeerKeys/sendRaw/now），测试不碰真实网络。
  * - 持久化全在 localStorage（密钥不出设备、无备份无恢复）：
- *     heming.e2e.identity              设备身份（IK 双键 JWK + 签名预键 SPK）
- *     heming.e2e.chains.<convId>       会话链：我的发送链 + 收到的对端链
- *     heming.msgCache.<convId>         解密后明文缓存（截尾 500 条/会话）
- *     heming.e2e.deferred.<convId>     缺链/超窗暂挂信封（上限 50 条）
+ *     heming.e2e.identity              设备身份（IK 双键 JWK + 签名预键 SPK）——d.36 起走安全存储
+ *     heming.e2e.chains.<convId>       会话链：我的发送链 + 收到的对端链（P0-5b 起有桥时整值信封）
+ *     heming.msgCache.<convId>         解密后消息缓存（截尾 500 条/会话；P0-5b 起有桥时逐条密文容器）
+ *     heming.e2e.deferred.<convId>     缺链/超窗暂挂信封（上限 50 条，内容已是 E2E 密文，不加密）
+ *
+ * 加密口径（P0-5b）：桌面桥可用 → chains 走 d.36 信封 + 写入自校验、msgCache 走 v2 容器
+ * 逐条密文；浏览器（无桥）→ 两者都保持明文，行为与 P0-5b 之前**逐字等价**。
  *
  * 链分发（chaindist）走 X3DH 成对封装（§3.2「用对方 §3.1 会话加密」）：
  * 外层公参 ek/ik/to（服务端可见的引导材料），内层 GCM 密文装 {kind:"chaindist", dist}；
@@ -30,7 +33,23 @@ import {
   toB64,
   fromB64,
 } from "./e2eCrypto.js";
-import { secureGetItem, secureSetItem } from "./secureStorage.js";
+import { secureGetItem, secureSetItem, secureBridge, secureSetItemVerified, readSecureValue, backupRawOnce, markSecureUndecryptable, PLAINTEXT_BACKUP_SUFFIX, UNDECRYPTABLE_BACKUP_SUFFIX } from "./secureStorage.js";
+import {
+  MIGRATE_BATCH,
+  decodeEntries,
+  decodeEnvelopeItems,
+  decodeEntry,
+  encodeCacheContainer,
+  encryptEntry,
+  findEntryById,
+  isMsgCacheAuxKey,
+  migratePlainEntries,
+  parseCacheRaw,
+  toPlainEntries,
+  truncateEntries,
+  type EntryCrypto,
+  type RawEntry,
+} from "./e2e/cacheEnvelope.js";
 
 // —— 存储键（导出供测试/接线层定位）——
 export const IDENTITY_KEY = "heming.e2e.identity";
@@ -121,6 +140,11 @@ export interface MsgCache {
   /** 按消息 id 删一条（撤回时清明文，防止预览回显已撤回正文）；不触碰 LRU、不淘汰。 */
   remove(convId: string, msgId: string): void;
   list(convId: string): CachedMsg[];
+  /**
+   * 按消息 id 定点取一条明文（P0-5b：有桥时只解这一条，不做全量解密）。
+   * 语义等价于 `list(convId).find((m) => m.id === msgId) ?? null`；无桥时就是这条路径。
+   */
+  get(convId: string, msgId: string): CachedMsg | null;
 }
 
 /**
@@ -195,7 +219,10 @@ function writeJson(key: string, value: unknown): void {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
-/** 身份键走 secure 层（凭据）；chains/deferred/msgCache 仍在下面的普通 readJson 路径。 */
+/**
+ * 身份键走 secure 层（凭据，d.36）；chains 走 secure 层的 verified 写（P0-5b），
+ * deferred/lru 仍是普通 readJson 路径（内容已是 E2E 密文或纯元数据，不加密）。
+ */
 function readSecureJson<T>(key: string): T | null {
   const raw = secureGetItem(key);
   if (raw === null) return null;
@@ -241,12 +268,107 @@ async function kidOfSpki(spkiB64: string): Promise<string> {
   return b64url(await crypto.subtle.digest("SHA-256", ab(fromB64(spkiB64))));
 }
 
+// —— 链状态持久化（P0-5b P1：有桥 → d.36 整值信封 + 写入自校验；无桥 → 明文，行为不变）——
+
+interface ChainsViewEntry {
+  raw: string | null;
+  file: ChainsFile;
+}
+
+/**
+ * 链状态内存视图（同 `cacheView` 的 raw 比对模式）：key → {raw, file}。
+ *
+ * 为什么必须有：`loadChains` 在收发的每条消息上被调用（open/seal/dist/sweep），
+ * 有桥时每次从信封解密 = 每条消息多一次 sendSync + DPAPI；raw 不变时直接复用已解开的对象，
+ * 把读侧解密次数降到 0（设计稿 §2.1 M8）。
+ */
+const chainsView = new Map<string, ChainsViewEntry>();
+
+/** 测试隔离：清掉链状态内存视图，强制下次从磁盘重读。 */
+export function resetChainsView(): void {
+  chainsView.clear();
+}
+
+function readRaw(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null; // 隐私模式/存储异常：当作不存在，不打断收发
+  }
+}
+
+/** 链状态不可读：置标记（设置区可见）并留一条可诊断日志；密文/原文原样留在磁盘上。 */
+function markChainsUnreadable(key: string, reason: string): void {
+  markSecureUndecryptable(key);
+  console.warn(`[e2e] 链状态无法读取（${reason}），磁盘数据已保留，本次按空链继续：${key}`);
+}
+
+/** 解析链状态明文 JSON；坏 JSON 先原样备份再按空链继续（绝不让后续 save 静默覆盖原始数据）。 */
+function parseChainsValue(key: string, raw: string, source: "plain" | "envelope"): { file: ChainsFile; ok: boolean } {
+  try {
+    const parsed = JSON.parse(raw) as ChainsFile;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("bad shape");
+    if (!parsed.recv || typeof parsed.recv !== "object" || Array.isArray(parsed.recv)) parsed.recv = {};
+    return { file: parsed, ok: true };
+  } catch {
+    if (source === "plain") backupRawOnce(key, raw, UNDECRYPTABLE_BACKUP_SUFFIX);
+    markChainsUnreadable(key, "bad-json");
+    return { file: { recv: {} }, ok: false };
+  }
+}
+
 function loadChains(convId: string): ChainsFile {
-  return readJson<ChainsFile>(CHAINS_PREFIX + convId) ?? { recv: {} };
+  const key = CHAINS_PREFIX + convId;
+  const raw = readRaw(key);
+  const hit = chainsView.get(key);
+  if (hit && hit.raw === raw) return hit.file;
+
+  let file: ChainsFile = { recv: {} };
+  if (raw !== null) {
+    const read = readSecureValue(key);
+    if (read.kind === "plain") {
+      const parsed = parseChainsValue(key, read.raw, "plain");
+      file = parsed.file;
+      // 首读懒迁移：**先确认可解析**再加密（坏数据不包成密文，避免把垃圾锁进信封）。
+      if (parsed.ok && secureBridge()) {
+        const write = secureSetItemVerified(key, read.raw);
+        logChainsWrite(key, write);
+      }
+    } else if (read.kind === "envelope") {
+      file = parseChainsValue(key, read.value, "envelope").file;
+    } else if (read.kind === "unreadable") {
+      // readSecureValue 已置 undecryptableKeys：不静默当空链，但仍返回空链让收发继续（fail-open）。
+      markChainsUnreadable(key, read.reason);
+    }
+  }
+  chainsView.set(key, { raw: readRaw(key), file });
+  return file;
+}
+
+/** 链写入降级/失败的统一可诊断日志（不抛给用户；设置区靠 plaintextKeys/undecryptableKeys 点名）。 */
+function logChainsWrite(key: string, write: ReturnType<typeof secureSetItemVerified>): void {
+  if (write.reason === "verify-failed" || write.reason === "encrypt-failed") {
+    // 自校验失败：不写坏密文，fail-open 写明文新值（不回退旧盘值——回退会复用 msgKey）。
+    console.warn(`[e2e] 链状态加密自校验失败（${write.reason}），已 fail-open 按明文保存新值：${key}`);
+  } else if (write.reason === "quota") {
+    console.warn(`[e2e] 链状态因配额降级为明文（未加密）：${key}`);
+  } else if (!write.ok) {
+    console.warn(`[e2e] 链状态未能落盘（${write.reason}），内存态继续可用：${key}`);
+  }
 }
 
 function saveChains(convId: string, file: ChainsFile): void {
-  writeJson(CHAINS_PREFIX + convId, file);
+  const key = CHAINS_PREFIX + convId;
+  const value = JSON.stringify(file);
+  if (!secureBridge()) {
+    // 浏览器（无桥）：逐字保持今天的明文写盘路径（writeJson 内部 JSON.stringify 对象）。
+    writeJson(key, file);
+  } else {
+    logChainsWrite(key, secureSetItemVerified(key, value));
+  }
+  // 写失败时磁盘仍是旧值，但链状态是**单调推进**的：内存视图必须指向新值，
+  // 否则下一次 load 会复用已用过的 msgKey（比明文降级更危险）。下一次写入会再试。
+  chainsView.set(key, { raw: readRaw(key), file });
 }
 
 function loadDeferred(convId: string): SealedEnvelope[] {
@@ -933,56 +1055,380 @@ async function doSweep(convId: string): Promise<number> {
  * 刷新视图。外部直接改/清 localStorage（测试 setup 常见）经 raw 比对自动失效。
  * 返回的数组是缓存视图，调用方**只读**（本模块是唯一写入口）。
  */
-const cacheView = new Map<string, { raw: string | null; parsed: CachedMsg[] }>();
+const cacheView = new Map<string, CacheViewEntry>();
 
-function viewCached(key: string): CachedMsg[] {
-  const raw = localStorage.getItem(key);
-  const hit = cacheView.get(key);
-  if (hit && hit.raw === raw) return hit.parsed;
-  let parsed: CachedMsg[] = [];
-  if (raw !== null) {
-    try {
-      parsed = JSON.parse(raw) as CachedMsg[];
-    } catch {
-      parsed = [];
-    }
-  }
-  cacheView.set(key, { raw, parsed });
-  return parsed;
+/** 进程内视图：磁盘条目 + 已解明文（`messages === null` 表示尚未解码）。 */
+interface CacheViewEntry {
+  raw: string | null;
+  /** 磁盘条目：密文条目原样保留（含解不开的），重写时带回磁盘，绝不静默丢。 */
+  entries: RawEntry[];
+  /** 已解出的明文视图；null = 尚未解码（append 冷启动不为此解全量）。 */
+  messages: CachedMsg[] | null;
+  /** 解不开的条目 id（诊断用；条目本身仍留在 `entries` 里）。 */
+  unreadableIds: string[];
+  /** 磁盘外壳：决定无桥时回写哪种形态（无桥必须保持旧明文数组）。 */
+  shape: "empty" | "plaintext" | "container";
 }
 
-/** 默认明文缓存实现（jsdom/浏览器共用；测试与接线层直接引用同一实例）。 */
+/** 消息缓存未加密/降级的可见原因（Q1/Q2：界面要如实标注，不能假装加密）。 */
+export type MsgCacheEncryptionReason =
+  | "no-bridge"
+  | "unavailable"
+  | "encrypt-failed"
+  | "quota"
+  | "unreadable"
+  | "backup-failed"
+  /** 有桌面桥但磁盘上还是旧明文数组/明文条目，等读侧懒迁移。 */
+  | "pending-migration";
+
+/** 磁盘上消息缓存的形态（与「能不能解开」分开报，界面才不会把「已加密但本机解不开」说成未加密）。 */
+export type MsgCacheStorageForm = "encrypted" | "plaintext" | "unreadable" | "absent";
+
+export interface MsgCacheEncryptionState {
+  /** 是否存在桌面桥（浏览器 false）。 */
+  desktop: boolean;
+  /** 桌面桥是否报告系统安全存储可用。 */
+  available: boolean;
+  /** 磁盘形态：密文容器/信封 = encrypted；旧明文数组 = plaintext；坏数据/无桥读不了 = unreadable。 */
+  form: MsgCacheStorageForm;
+  /** 磁盘上是**可读的**密文形态（`form === "encrypted"` 且能解密）。 */
+  encrypted: boolean;
+  /** 未加密/降级/待迁移原因。 */
+  reason?: MsgCacheEncryptionReason;
+}
+
+const cacheEncryptionIssues = new Map<string, MsgCacheEncryptionReason>();
+
+/**
+ * 某会话消息缓存的落盘状态（供设置区/存储水位卡如实标注，**不谎报已加密**）。
+ *
+ * @param raw 该键的原始值（可选）。UI 统计时已在同一次 `getItem` 里拿到值，
+ *            传进来可避免再读一遍；不传则现读 localStorage。
+ *
+ * 状态判定（照设计稿 §4.4 的三态）：
+ * - 容器 / 整值信封 → 密文形态；桥不可用时是「无法解密」而不是「未加密」；
+ * - 明文数组 → 未加密（无桥 / 安全存储不可用 / 待迁移 / 最近一次写入降级）；
+ * - 坏 JSON / 未知版本 → 无法解密（原始数据已备份）。
+ */
+export function msgCacheEncryptionState(convId: string, raw?: string | null): MsgCacheEncryptionState {
+  const b = secureBridge();
+  const desktop = !!b;
+  const available = !!b && b.available === true;
+  const diskRaw = raw === undefined ? readRaw(MSGCACHE_PREFIX + convId) : raw;
+  const shape = parseCacheRaw(diskRaw);
+  const form: MsgCacheStorageForm =
+    shape.kind === "empty"
+      ? "absent"
+      : shape.kind === "plain"
+        ? "plaintext"
+        : shape.kind === "foreign"
+          ? "unreadable"
+          : "encrypted";
+
+  const tracked = cacheEncryptionIssues.get(convId);
+  let reason = tracked;
+  let encrypted = form === "encrypted";
+  if (form === "unreadable") {
+    reason = "unreadable";
+    encrypted = false;
+  } else if (form === "plaintext") {
+    encrypted = false;
+    // 最近一次写入的降级原因优先（配额/加密失败/备份失败），否则按能力推断。
+    reason = tracked ?? (!desktop ? "no-bridge" : !available ? "unavailable" : "pending-migration");
+  } else if (form === "encrypted" && !available) {
+    // 磁盘是密文但本机没有可用密钥（换设备/换系统账户/桥不可用）：能加密，但读不了。
+    reason = "unreadable";
+    encrypted = false;
+  }
+  return { desktop, available, form, encrypted, reason };
+}
+
+/**
+ * 本机所有会话消息缓存的状态（供存储水位卡逐会话标注）。
+ *
+ * @param raws 可选：键 → 原始值（来自同一次统计遍历）。不传则现读 localStorage。
+ *
+ * 只按**键名**枚举会话，不解析明文；辅助键（备份/账本）不参与。
+ */
+export function msgCacheEncryptionStates(
+  raws?: ReadonlyMap<string, string | null>,
+): Array<{ convId: string; state: MsgCacheEncryptionState }> {
+  const keys = raws ? [...raws.keys()] : listMsgCacheKeys();
+  const out: Array<{ convId: string; state: MsgCacheEncryptionState }> = [];
+  for (const key of keys) {
+    if (!key.startsWith(MSGCACHE_PREFIX) || key === MSG_CACHE_LRU_KEY || isMsgCacheAuxKey(key)) continue;
+    const convId = key.slice(MSGCACHE_PREFIX.length);
+    const raw = raws ? (raws.get(key) ?? null) : undefined;
+    out.push({ convId, state: msgCacheEncryptionState(convId, raw) });
+  }
+  // 稳定顺序：按会话 id 排，避免每次渲染行序抖动（测试与界面都好对）。
+  out.sort((a, b) => (a.convId < b.convId ? -1 : a.convId > b.convId ? 1 : 0));
+  return out;
+}
+
+/** 测试隔离：清掉消息缓存的内存视图与降级标记（不动 localStorage）。 */
+export function resetMsgCacheState(): void {
+  cacheView.clear();
+  cacheEncryptionIssues.clear();
+}
+
+function noteCacheIssue(convId: string, reason: MsgCacheEncryptionReason): void {
+  cacheEncryptionIssues.set(convId, reason);
+}
+
+/** 当前可用的逐条加解密能力；无桥 / 桥报不可用 → null（走明文路径，浏览器行为不变）。 */
+function cacheCrypto(): EntryCrypto | null {
+  const b = secureBridge();
+  if (!b || b.available !== true) return null;
+  return { encrypt: (plain) => b.encrypt(plain), decrypt: (cipherB64) => b.decrypt(cipherB64) };
+}
+
+/** 解整份视图（list/peek 才付这个成本；`get` 走定点解密）。 */
+function materializeMessages(view: CacheViewEntry, crypto: EntryCrypto | null): CachedMsg[] {
+  if (view.messages !== null) return view.messages;
+  if (crypto) {
+    const decoded = decodeEntries(view.entries, crypto);
+    view.messages = decoded.messages;
+    view.unreadableIds = decoded.unreadableIds;
+  } else {
+    // 无密钥时只有迁移期明文条目可读；密文条目跳过并原样留在 entries 里（不删、不覆盖）。
+    const messages: CachedMsg[] = [];
+    const unreadableIds: string[] = [];
+    for (const entry of view.entries) {
+      if ("m" in entry) messages.push(entry.m);
+      else unreadableIds.push(entry.id);
+    }
+    view.messages = messages;
+    view.unreadableIds = unreadableIds;
+  }
+  return view.messages;
+}
+
+/**
+ * 回写整份视图（**所有 msgCache 写路径的唯一入口**，保证 load→改→save 在一个同步块里）。
+ *
+ * 迁移非破坏性（需求 3）：只要会用密文容器覆盖「含明文」的旧值，先写
+ * `<键>.__heming_plaintext_backup`（幂等、只保留第一份）；备份失败就不覆盖旧值。
+ * 配额不足（Q2）：退回明文数组、**不截短、不删消息**，只如实标记「未加密」。
+ */
+function writeCacheView(
+  convId: string,
+  view: CacheViewEntry,
+  entries: RawEntry[],
+  messages: CachedMsg[] | null,
+  issue?: MsgCacheEncryptionReason,
+): CacheViewEntry {
+  const key = MSGCACHE_PREFIX + convId;
+  const crypto = cacheCrypto();
+  // 无桥且磁盘原本是容器：继续写容器（密文条目原样保留，不因无密钥而丢）。
+  const useContainer = crypto !== null || view.shape === "container";
+  const nextRaw = useContainer ? encodeCacheContainer(entries) : JSON.stringify(messages ?? []);
+  const unreadableIds = view.unreadableIds.filter((id) => entries.some((e) => e.id === id));
+
+  const hadPlaintext =
+    view.raw !== null && (view.shape === "plaintext" || view.entries.some((e) => "m" in e));
+  if (useContainer && hadPlaintext) {
+    if (!backupRawOnce(key, view.raw!, PLAINTEXT_BACKUP_SUFFIX)) {
+      // 备份失败：旧明文一个字节都不动，内存保留新值，等下一轮再迁（迁移可重试）。
+      noteCacheIssue(convId, "backup-failed");
+      return { ...view, entries, messages, unreadableIds };
+    }
+  }
+
+  try {
+    localStorage.setItem(key, nextRaw);
+    if (issue) noteCacheIssue(convId, issue);
+    else cacheEncryptionIssues.delete(convId);
+    return { raw: nextRaw, entries, messages, unreadableIds, shape: useContainer ? "container" : "plaintext" };
+  } catch {
+    // 配额：Q2 决定「保持明文、不截短缓存」。**有桥时**容器写不进就先退回明文数组（明文更小），
+    // 兜底会丢掉解不开的密文条目，所以覆盖前先把旧 raw 原样备份，绝不静默销毁。
+    // 无桥（拿不到明文）时不做这个兜底：写明文数组等于把还在的密文条目清空，只保留内存新值。
+    if (useContainer && crypto) {
+      const fallbackMessages = messages ?? decodeEntries(entries, crypto).messages;
+      const backedUp = view.raw === null || backupRawOnce(key, view.raw, UNDECRYPTABLE_BACKUP_SUFFIX);
+      if (backedUp) {
+        try {
+          const fallbackRaw = JSON.stringify(fallbackMessages);
+          localStorage.setItem(key, fallbackRaw);
+          noteCacheIssue(convId, "quota");
+          return {
+            raw: fallbackRaw,
+            entries: toPlainEntries(fallbackMessages),
+            messages: fallbackMessages,
+            unreadableIds: [],
+            shape: "plaintext",
+          };
+        } catch {
+          /* 明文也写不进：见下，磁盘保持旧值 */
+        }
+      }
+    }
+    // 仍写不进：磁盘保持旧值，内存保留新值（未落盘），只做可见标记。
+    noteCacheIssue(convId, "quota");
+    return { ...view, entries, messages, unreadableIds };
+  }
+}
+
+function readCacheView(convId: string): CacheViewEntry {
+  const key = MSGCACHE_PREFIX + convId;
+  const raw = readRaw(key);
+  const hit = cacheView.get(key);
+  if (hit && hit.raw === raw) return hit;
+
+  const crypto = cacheCrypto();
+  const shape = parseCacheRaw(raw);
+  let view: CacheViewEntry;
+  if (shape.kind === "empty") {
+    view = { raw: null, entries: [], messages: [], unreadableIds: [], shape: "empty" };
+  } else if (shape.kind === "plain") {
+    // 旧明文（本次读仍按明文返回；有桥时下面立刻迁一批密的）。
+    view = {
+      raw,
+      entries: toPlainEntries(shape.items),
+      messages: shape.items,
+      unreadableIds: [],
+      shape: "plaintext",
+    };
+  } else if (shape.kind === "container") {
+    view = { raw, entries: shape.entries, messages: null, unreadableIds: [], shape: "container" };
+  } else if (shape.kind === "envelope") {
+    // 兼容壳：整值信封解密后按明文条目处理，下次写盘升级为 v2 容器。
+    const items = crypto ? decodeEnvelopeItems(shape.data, crypto) : null;
+    if (items) {
+      view = {
+        raw,
+        entries: toPlainEntries(items),
+        messages: items,
+        unreadableIds: [],
+        shape: "plaintext",
+      };
+    } else {
+      if (raw !== null) backupRawOnce(key, raw, UNDECRYPTABLE_BACKUP_SUFFIX);
+      noteCacheIssue(convId, "unreadable");
+      view = { raw, entries: [], messages: [], unreadableIds: [], shape: "empty" };
+    }
+  } else {
+    // foreign（坏 JSON / 未知版本 / 结构不合法）：保留原始数据、返回空，绝不 throw。
+    if (raw !== null) {
+      backupRawOnce(key, raw, UNDECRYPTABLE_BACKUP_SUFFIX);
+      markSecureUndecryptable(key);
+      console.warn(`[e2e] 消息缓存无法识别（已原样备份），本次按空缓存继续：${key}`);
+    }
+    noteCacheIssue(convId, "unreadable");
+    view = { raw, entries: [], messages: [], unreadableIds: [], shape: "empty" };
+  }
+
+  cacheView.set(key, view);
+  return view;
+}
+
+/**
+ * 读侧懒迁移（设计稿 §4.2「打开会话读到明文条目 → 每批 ≤50 条」）。
+ *
+ * 只由 `list`（全量读）与显式入口 `migrateMsgCache` 触发，**不在 append/get 里做**：
+ * 前者要保证「append 一条只加密一条」（M1），后者要保证冷读按 id 只解一条（M2）。
+ * 返回迁移后的视图；无桥 / 无可迁条目时原样返回。
+ */
+function maybeMigrateCache(convId: string, view: CacheViewEntry): CacheViewEntry {
+  const crypto = cacheCrypto();
+  if (!crypto || !view.entries.some((e) => "m" in e)) return view;
+  const migrated = migratePlainEntries(view.entries, crypto, MIGRATE_BATCH);
+  let next = view;
+  if (migrated.migrated > 0) {
+    next = writeCacheView(convId, view, migrated.entries, view.messages, undefined);
+  }
+  if (migrated.failed > 0) noteCacheIssue(convId, "encrypt-failed");
+  if (next !== view) cacheView.set(MSGCACHE_PREFIX + convId, next);
+  return next;
+}
+
+/**
+ * 显式触发一次读侧迁移（≤`MIGRATE_BATCH` 条/次），返回本批迁成功的条数。
+ *
+ * 集成期若把 ChatPage 的 `list().find()` 全换成 `get()`，打开会话处应调一次本函数
+ * （或保留一次 `list`），否则明文条目会留到 P3 全量清理阶段才迁。
+ */
+export function migrateMsgCache(convId: string): number {
+  const view = readCacheView(convId);
+  const pending = (v: CacheViewEntry) => v.entries.filter((e) => "m" in e).length;
+  const before = pending(view);
+  const next = maybeMigrateCache(convId, view);
+  return before - pending(next);
+}
+
+/**
+ * 默认消息缓存实现（jsdom/浏览器共用；测试与接线层直接引用同一实例）。
+ *
+ * 有桥：v2 容器 + 逐条密文；无桥：旧明文数组（**逐字等价，行为零变化**）。
+ */
 export const msgCache: MsgCache = {
   append(convId, m) {
-    const key = MSGCACHE_PREFIX + convId;
-    const list = viewCached(key).slice(); // 复制后改：不污染已发布的视图数组
-    list.push(m);
-    const next = list.length > CACHE_CAP ? list.slice(-CACHE_CAP) : list;
-    writeJson(key, next);
-    cacheView.set(key, { raw: localStorage.getItem(key), parsed: next });
+    const view = readCacheView(convId);
+    const crypto = cacheCrypto();
+    let entry: RawEntry;
+    let issue: MsgCacheEncryptionReason | undefined;
+    if (crypto) {
+      // 只加密**新增这一条**；已有条目保持原密文不重加密（O(1)，M1/M8）。
+      const encrypted = encryptEntry(m, crypto);
+      entry = encrypted.entry;
+      if (!encrypted.ok) issue = "encrypt-failed"; // fail-open：这条以明文条目落盘并可见标记
+    } else {
+      entry = { id: m.id, m };
+      issue = secureBridge() ? "unavailable" : "no-bridge";
+    }
+    const entries = truncateEntries([...view.entries, entry], CACHE_CAP);
+    const keptIds = new Set(entries.map((e) => e.id));
+    let messages: CachedMsg[] | null = null;
+    if (view.messages !== null) {
+      // 视图已解码时同步刷新（不重解）；否则保持 null，下一次 list/peek 再解。
+      messages = [...view.messages.filter((x) => keptIds.has(x.id)), m].slice(-CACHE_CAP);
+    }
+    const nextView = writeCacheView(convId, view, entries, messages, issue);
+    cacheView.set(MSGCACHE_PREFIX + convId, nextView);
     // 往某会话写 ⇒ 它在用。写盘是低频路径（每来一条消息一次），顺手把账本落盘。
     touchCacheConversation(convId, true);
   },
   peek(convId) {
     // 只读：列表预览会随每次 render/输入调用，不能借读刷 LRU（那会写盘、
-    // 账本超 20 时还会淘汰别的会话的明文缓存）。
-    return viewCached(MSGCACHE_PREFIX + convId);
+    // 账本超 20 时还会淘汰别的会话的缓存）。
+    const view = readCacheView(convId);
+    return materializeMessages(view, cacheCrypto());
   },
   remove(convId, msgId) {
     // 撤回是「这条内容不该再出现在本机」：只删这一条，不刷 LRU、不淘汰别的会话。
-    const key = MSGCACHE_PREFIX + convId;
-    const list = viewCached(key);
-    if (!list.some((m) => m.id === msgId)) return;
-    const next = list.filter((m) => m.id !== msgId);
-    writeJson(key, next);
-    cacheView.set(key, { raw: localStorage.getItem(key), parsed: next });
+    const view = readCacheView(convId);
+    if (!view.entries.some((e) => e.id === msgId)) return;
+    const entries = view.entries.filter((e) => e.id !== msgId);
+    const messages = view.messages === null ? null : view.messages.filter((m) => m.id !== msgId);
+    const issue = cacheCrypto() ? undefined : secureBridge() ? "unavailable" : "no-bridge";
+    const nextView = writeCacheView(convId, view, entries, messages, issue);
+    cacheView.set(MSGCACHE_PREFIX + convId, nextView);
   },
   list(convId) {
     // 「这个会话被看了」——但 list 是热路径（接收路径每个信封都 list），
     // 每次都写 localStorage 等于每解一个信封写一次盘。所以这里只更新内存账本，
     // 落盘走 60s 节流（`touchCacheConversation` 内部）。
     touchCacheConversation(convId, false);
-    return viewCached(MSGCACHE_PREFIX + convId);
+    // 全量读是设计稿指定的迁移时机（「打开会话读到明文条目」，≤50 条/批）。
+    const view = maybeMigrateCache(convId, readCacheView(convId));
+    return materializeMessages(view, cacheCrypto());
+  },
+  get(convId, msgId) {
+    // 定点解密：视图未解码时只解命中的这一条（M2：冷读不解全量）。
+    touchCacheConversation(convId, false); // 「按 id 取」也算看过这个会话（60s 节流，不写盘）
+    const view = readCacheView(convId);
+    if (view.messages !== null) {
+      const hit = view.messages.find((m) => m.id === msgId);
+      if (hit) return hit;
+    }
+    const entry = findEntryById(view.entries, msgId);
+    if (!entry) return null;
+    if ("m" in entry) return entry.m; // 迁移期明文条目：直接可读
+    const crypto = cacheCrypto();
+    if (!crypto) return null;
+    const decoded = decodeEntry(entry, crypto);
+    return decoded.ok ? decoded.msg : null;
   },
 };
 
@@ -1008,13 +1454,21 @@ let cacheLruPersistedAt = 0;
 /** `list` 触发的账本落盘节流窗口。 */
 const LRU_PERSIST_INTERVAL_MS = 60_000;
 
-/** 列出当前实际存在的明文缓存键（**排除账本键自身**——它也以 `heming.msgCache.` 开头）。 */
+/**
+ * 列出当前实际存在的消息缓存键。
+ *
+ * 排除：账本键自身（它也以 `heming.msgCache.` 开头）+ 迁移/不可解密备份等辅助键。
+ * 辅助键（`<键>.__heming_plaintext_backup` / `.__heming_undecryptable`）若不排除，
+ * 会被当成「一个会话」污染 LRU、并可能被 `dropCachedConversation` 误删（设计稿 §4.7）。
+ */
 function listMsgCacheKeys(): string[] {
   const out: string[] = [];
   try {
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = localStorage.key(i);
-      if (key && key.startsWith(MSGCACHE_PREFIX) && key !== MSG_CACHE_LRU_KEY) out.push(key);
+      if (key && key.startsWith(MSGCACHE_PREFIX) && key !== MSG_CACHE_LRU_KEY && !isMsgCacheAuxKey(key)) {
+        out.push(key);
+      }
     }
   } catch {
     /* 隐私模式：列不出来就当没有 */
@@ -1041,7 +1495,7 @@ function loadCacheLru(): Record<string, number> {
   return lru;
 }
 
-/** 删掉某会话的明文缓存（连同进程内视图），不动账本。 */
+/** 删掉某会话的消息缓存（连同进程内视图），不动账本；备份键不在这里删（P3 清理）。 */
 function dropCachedConversation(convId: string): void {
   const key = MSGCACHE_PREFIX + convId;
   try {
@@ -1050,6 +1504,7 @@ function dropCachedConversation(convId: string): void {
     /* 删不掉也只能这样 */
   }
   cacheView.delete(key);
+  cacheEncryptionIssues.delete(convId);
 }
 
 /**

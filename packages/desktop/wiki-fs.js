@@ -22,6 +22,7 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
+const { resolveInsideRoot } = require("./path-guard");
 
 /** 根目录：环境变量优先，其次 %USERPROFILE%\Heming\wiki。 */
 function wikiRoot() {
@@ -37,19 +38,14 @@ const PAGE_KINDS = new Set(["entities", "concepts", "sources", "synthesis", "not
 
 /**
  * 把相对路径解析成根目录内的绝对路径；越界返回 null。
+ *
+ * ★ 判定口径已抽到 `path-guard.js`（`resolveInsideRoot`），与文件编辑桥 `file-fs.js` 共用：
+ * 两处各写一份的话，补 NUL 检查/改越界判据时只改一处，另一处就成了漏洞。
+ * 这里只负责把「wiki 根」传给共享函数，行为与抽取前逐字等价。
  * @param {string} rel 相对路径（形如 "wiki/concepts/foo.md"）
  */
 function resolveInside(rel) {
-  if (typeof rel !== "string" || !rel) return null;
-  // 反斜杠统一成 /，顺手挡掉 Windows 风格的绝对路径
-  const norm = rel.replace(/\\/g, "/").replace(/^\/+/, "");
-  if (norm.includes("\0")) return null;
-  const root = wikiRoot();
-  const abs = path.resolve(root, norm);
-  const relCheck = path.relative(root, abs);
-  // 越界判定：relative 出了根目录，或以 .. 开头，或就是根本身
-  if (relCheck === "" || relCheck.startsWith("..") || path.isAbsolute(relCheck)) return null;
-  return abs;
+  return resolveInsideRoot(wikiRoot(), rel);
 }
 
 /** 该相对路径是否属于允许操作的集合（白名单，见文件头）。 */

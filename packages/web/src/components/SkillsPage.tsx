@@ -79,8 +79,8 @@ const GROUPS: readonly GroupMeta[] = [
 
 const cardCls = "rounded-xl border border-line bg-white p-4 shadow-card";
 const cardInnerCls = "rounded-lg border border-line p-3";
-const chipCls = "rounded bg-[#f4f4f4] px-1.5 py-0.5 text-[10px] text-[#666]";
-const badgeCls = "rounded border border-line-soft bg-[#fafafa] px-1.5 py-0.5 text-[10px] text-muted";
+const chipCls = "rounded-sm bg-[#f4f4f4] px-1.5 py-0.5 text-[10px] text-[#666]";
+const badgeCls = "rounded-sm border border-line-soft bg-[#fafafa] px-1.5 py-0.5 text-[10px] text-muted";
 const btnGhost =
   "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa] disabled:opacity-40";
 const btnGhostSm =
@@ -90,7 +90,7 @@ const btnDangerSm =
 const btnPrimarySm =
   "rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-40";
 const inputSmCls =
-  "rounded-lg border border-line px-3 py-1.5 text-[12px] outline-none focus:border-[#bbb]";
+  "rounded-lg border border-line px-3 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]";
 const hintCls = "text-[11px] text-muted";
 const errorCls = "text-[12px] text-red-600";
 const okCls = "text-[12px] text-muted";
@@ -413,7 +413,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                   setMsg(null);
                   setAddFor(group.key);
                 }}
-                className="flex h-5 w-5 items-center justify-center rounded border border-line text-[#777] hover:bg-[#f3f3f3] disabled:opacity-40"
+                className="flex h-5 w-5 items-center justify-center rounded-sm border border-line text-[#777] hover:bg-[#f3f3f3] disabled:opacity-40"
               >
                 <PlusIcon width={12} height={12} />
               </button>
@@ -529,7 +529,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
                 placeholder="粘贴 SKILL.md（以 --- 开头）或技能 JSON；同名/同 id 走更新"
-                className="mt-1 block min-h-[110px] w-full resize-y rounded-lg border border-line px-3 py-2 font-mono text-[11px] outline-none focus:border-[#bbb]"
+                className="mt-1 block min-h-[110px] w-full resize-y rounded-lg border border-line px-3 py-2 font-mono text-[11px] outline-hidden focus:border-[#bbb]"
               />
             </label>
             <div className="mt-2 flex items-center gap-2">
@@ -766,7 +766,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                 type="button"
                 aria-label="关闭添加面板"
                 onClick={() => setAddFor(null)}
-                className="ml-auto rounded p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
+                className="ml-auto rounded-sm p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
               >
                 <XIcon width={14} height={14} aria-hidden="true" />
               </button>

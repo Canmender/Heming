@@ -198,7 +198,83 @@ interface RolloutTurnStartV2 {
 
 ---
 
-## 12. 需要你先定的两件事
+## 12. 需要你先定的两件事（已在「全面升级」轮拍板）
 
-1. **分叉落在哪**：新建任务（我推荐，不污染原汇总）还是留在原任务里开分支（更省一次导航，但汇总口径要改）。
-2. **重跑要不要保留原任务**：保留（留痕，我推荐）还是覆盖（列表干净）。
+1. **分叉落在哪** → **新建任务**。继承原任务的目标与智能体，`forkedFrom` 指向原 `streamId`；原任务的汇总、日志、状态一律不动。理由：分支结果与原任务的目标可能已经不同，混在一个汇总里会让「任务成功/失败」失去意义。
+2. **重跑要不要保留原任务** → **保留**（留痕）。重跑生成新任务、新 `streamId`，原任务保持原状态；任务列表按时间自然分开，不覆盖、不合并。
+3. **P3（分叉前预览「复用哪几条、丢弃哪些」）** → **做**。判据复用 `pairToolCalls` 的同一份结果，避免「面板说能分叉、点了却报错」。
+
+---
+
+## 13. 实施记录（d.56，负责人 rollout）
+
+### P0 纯逻辑层（已完成，UI 待 React 19 落地后接）
+
+- `lib/rollout/types.ts`：`ROLLOUT_VERSION = 2`；五种 item 统一带 `seq`（记录器分配）；
+  `turn_start` 加 `forkedFrom: { streamId, seq }`；新增 `RolloutStreamView`（版本/条目/最后时间）。
+- `lib/rollout/log.ts`：追加时分配单调递增 `seq`；读取端 v1 缺 `seq` 用数组下标补齐并强制递增；
+  新增 `readStream()` 暴露版本与条数；未来版本**只报数不解析**，且拒绝向其追加（不覆盖看不懂的数据）。
+  `MAX_ITEMS_PER_STREAM` 保持 200，不做批量迁移。
+- `lib/rollout/pair.ts`（新）：`pairToolCalls` 输出 `{ pairs, danglingCalls, orphanResults }`
+  （按数组序 + 同 id FIFO，重复 id 各配各的）；`turnCompletion` 给「缺 turn_end / 悬空调用」的未完成判定。
+  回放标注与分叉前置条件共用这一份判定。
+- `lib/rollout/fork.ts`（新）：`checkFork` 四条前置（有 assistant_final / 悬空 / denied / 未正常收尾，
+  崩溃回合需显式 `allowCrashed`；v1 与未来版本直接拒绝）；`previewFork` 出 P3 的复用/丢弃/截断计数；
+  `buildForkPrefix` 把前缀重建成合法请求形状（连续调用合成一条 assistant，跟等长同序 tool 消息，
+  非法 JSON 或悬空的调用整条跳过）；`forkNoticeLines` 给诚实的确认文案。
+- `lib/rollout/view.ts`（新）：相对时间（`+3.2s`）、四档类型筛选、悬停配对下标、单回合 JSON 导出
+  （与会话导出**不合并**）。
+- `lib/agentStream.ts`：`TriggerDeps` 新增 `forkedFrom`（写进 `turn_start`）与 `forkPrefix`
+  （接在真实历史之后、参与 `prepareHistory`，置后以免被早期压缩吃掉）。
+- `lib/tasks/store.ts`：`TaskRecord.forkedFrom`（含 `truncatedResults` 计数）持久化/导出；
+  `taskForkNotice` 给任务卡与报告同一份诚实提示。
+- 测试：rollout 62 例（配对 12 / 分叉 21 / 回放 14 / 日志 15）+ agentStream 分叉 2 例；新增 57 例。
+  覆盖悬空调用、孤立结果、同一 id 重复、v1 无 seq、未知版本、有 final 拒绝、denied 拒绝、崩溃回合、
+  「重建前缀喂给既有请求构造函数不抛且 tool_calls 与 tool 消息等长同序」。
+- 遗留：UI（RolloutTimeline / TaskAreaPage / ChatPage 的分叉执行接线）与 P1 重跑、P2 分叉入口、P3 预览
+  待 React 19 落地后实施；重跑按 §12.2 改为「新建任务 + 新 streamId，原任务不动」。
+
+### P0 UI 增强（已完成）
+
+`components/RolloutTimeline.tsx`：相对时间（`+3.2s`，绝对时钟留 `title`）、四档类型筛选、
+悬停配对高亮、未完成横幅（缺 `turn_end` / 悬空调用，并指出停在哪个调用）、导出本回合 JSON、
+每条 `tool_result` 的「从此处分叉」（禁用与否全由 `checkFork` 决定并显示原因）。
+新增可选 props `version / onFork / running`；未传 `onFork` 时面板保持纯只读。
+版本兜底：不传 `version` 且用本机日志时，组件自己用 `readStream()` 识别 v1 并置灰分叉。
+用例：组件 18 例（原 8 → 新增 10）。
+
+### P1 / P2 纯逻辑（已完成，UI 落点等 Tailwind 4 迁移后接）
+
+- `lib/tasks/rerun.ts`（新）：`rerunNoticeLines()` 固定「会重新执行一遍」「之前的写操作可能重复」
+  两句话 + 「原任务不变」；`canRerun`（运行中不可重跑）；`buildRerunPlan`（原样继承目标/智能体/会话）。
+- `lib/tasks/store.ts`：新增 `rerun(taskId)` / `forkFrom(taskId, forkedFrom)`——**新建任务**、
+  保留原任务；`reopen` API 保留但不再作为重跑入口。
+- `lib/tasks/forkTask.ts`（新）：`buildForkTaskPlan` 组合 `checkFork` + `previewFork` + `buildForkPrefix`，
+  产出新任务参数、`forkedFrom`（含 `truncatedResults`）、重建前缀、确认文案；前缀重建不出来
+  （参数被截断/没有可复用结果）时拒绝，而不是拼一个必然 400 的请求。
+- 用例：rerun 7 + forkTask 11 + store 新增 5（含「重跑/分叉后原任务 JSON 快照一字不差」、
+  `forkedFrom` 落盘水合、导出带 `forkedFrom`）。
+
+### P1 / P2 / P3 UI 收尾（已完成，Tailwind 4 落地后接线）
+
+- `components/TaskAreaPage.tsx`：「重新执行」→**「重跑」**（确认框用 `rerunNoticeLines` 的两句话，
+  确认后 `store.rerun` 新建任务、原任务不动）；`RolloutTimeline` 接 `onFork` → `buildForkTaskPlan`
+  → **P3 预览确认框**（将复用 N 条工具结果 / 将丢弃 M 条记录 / 诚实提示）→ `store.forkFrom`；
+  分叉被拒时弹「无法从这一步分叉」并列出原因；右列任务卡加「分叉」徽标、来源行与
+  `taskForkNotice`（前缀重建 + 截断代价），左侧列表行加「分叉」标记。
+- `components/ChatPage.tsx`：`startRun` 按 `taskId → task.forkedFrom` 读本机日志，经 `resolveForkRun`
+  把 `forkedFrom` / `forkPrefix` 传给 `TriggerDeps`；**三种情况显式降级为普通重跑**（来源日志读不到 /
+  v1 或未来版本 / 前缀重建失败）：不传 `forkPrefix`（不伪造复用）、仍保留 `forkedFrom`，
+  并在输入区上方用**独立一行**琥珀提示说明原因——不并进 `sendNotice`，因为那条提示在发送成功后
+  会被清空，会让用户误以为前缀被复用了。
+- `components/RolloutTimeline.tsx`：导出按钮改三态（idle/copied/**failed**）；剪贴板不可用时
+  显示「复制失败：浏览器未授权剪贴板。已展开 JSON 文本并选中，可直接复制。」并把 JSON 摊在
+  只读 textarea 里自动选中，不再静默失败。
+- 用例：组件层新增 10 例（RolloutTimeline 导出失败 1、TaskAreaPage 重跑/分叉/P3/任务卡 3 换 1、
+  ChatPage 分叉请求与前缀形状 1 + 降级 1、`resolveForkRun` 5）。累计本轮新增用例 100 例。
+- 验证：三个组件测试文件 140 例全绿；`tsc --noEmit` 全仓库 0 报错。
+- 仍未做（与规格 §11 一致）：断点续跑、跨设备回放、自动重试、用日志重建完整 transcript、
+  分叉回滚前缀写操作。
+
+
+

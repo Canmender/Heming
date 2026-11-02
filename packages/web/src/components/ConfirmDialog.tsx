@@ -26,8 +26,11 @@ export interface ConfirmDialogProps {
    *
    * 安全默认是**拒绝**按钮：用户手快按下回车时，误放行的代价
    * 远大于误拒绝——误拒绝用户会立刻发现，误放行则可能已经落盘。
+   *
+   * 类型里带 `| null`：React 19 的 `useRef<T>(null)` 返回 `RefObject<T | null>`
+   * （18 的类型谎报成 `RefObject<T>`），窄成 `RefObject<HTMLElement>` 会拒收调用方传进来的 ref。
    */
-  initialFocusRef?: React.RefObject<HTMLElement>;
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
 export function ConfirmDialog({
@@ -61,7 +64,7 @@ export function ConfirmDialog({
             type="button"
             aria-label="关闭并拒绝"
             onClick={onCancel}
-            className="shrink-0 rounded p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
           >
             <XIcon width={16} height={16} aria-hidden="true" />
           </button>

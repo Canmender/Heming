@@ -10,6 +10,7 @@ import { setNotificationStorage, useNotificationStore } from "../store/notificat
 import { useHitlStore } from "../store/hitl.js";
 import { createMemoryStorage } from "../lib/memory/storage.js";
 import { TASKS_KEY, useTaskStore } from "../lib/tasks/store.js";
+import { rolloutLog } from "../lib/rollout/index.js";
 import { streamChat } from "../lib/llmClient.js";
 import { visionImageDataUrl } from "../lib/vision/history.js";
 import { connectWs, type WsHandlers, type WsHandle } from "../lib/ws.js";
@@ -21,6 +22,7 @@ import { skillPool } from "../lib/skills/index.js";
 import { CONTEXT_KEYS, type ContextSettings } from "../lib/agentContext/index.js";
 import { hasSubtle, toB64, fromB64 } from "../lib/e2eCrypto.js";
 import { sealMessage } from "../lib/e2eSession.js";
+import { migrateMsgCache, msgCache, openMessage } from "../lib/e2eSession.js";
 import { DEFAULT_WINDOW } from "../lib/messageWindow.js";
 import { formatClock, formatDayClock } from "../lib/formatTime.js";
 
@@ -61,7 +63,14 @@ vi.mock("../lib/vision/history.js", async (importOriginal) => {
 
 vi.mock("../lib/e2eSession.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/e2eSession.js")>();
-  return { ...actual, sealMessage: vi.fn() };
+  // openMessage / migrateMsgCache 包成 vi.fn：默认走真实实现，个别用例可注入
+  // 「duplicate 补齐」「迁移抛错」等路径（P0-5b 接线验收）。
+  return {
+    ...actual,
+    sealMessage: vi.fn(),
+    openMessage: vi.fn(actual.openMessage),
+    migrateMsgCache: vi.fn(() => 0),
+  };
 });
 
 /**
@@ -3728,6 +3737,8 @@ describe("ChatPage 任务区接线", () => {
     vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() });
     vi.mocked(streamChat).mockReset();
     vi.mocked(streamChat).mockResolvedValue("");
+    vi.mocked(migrateMsgCache).mockReset();
+    vi.mocked(migrateMsgCache).mockReturnValue(0);
     useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
     useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
     useTaskStore.setState({ tasks: [] });
@@ -3808,5 +3819,194 @@ describe("ChatPage 任务区接线", () => {
     expect(notes[0]).toMatchObject({ kind: "task", taskId, conversationId: "c1" });
     expect(notes[0].title).toContain("已完成");
     expect(notes[0].body).toContain("任务完成");
+  });
+
+  it("分叉投递：来源回合的前缀被重建进请求（assistant.tool_calls + 等长 tool 结果）", async () => {
+    type WireMessage = {
+      role: string;
+      content: string;
+      tool_calls?: { id: string }[];
+      tool_call_id?: string;
+    };
+    const requests: WireMessage[][] = [];
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
+    vi.mocked(streamChat).mockImplementation(async (_p, messages, o) => {
+      requests.push(messages as unknown as WireMessage[]);
+      o.onDelta("继续");
+      return "继续";
+    });
+
+    // 来源回合（v2 日志）：一次工具调用 + 结果，然后被中断 → 可从那条结果之后分叉
+    const sourceStream = "s-fork-source";
+    rolloutLog.append({
+      type: "turn_start",
+      conversationId: "c1",
+      streamId: sourceStream,
+      agentId: "system-assistant",
+      userText: "梳理依赖",
+    });
+    rolloutLog.append({ type: "tool_call", streamId: sourceStream, id: "t1", name: "chart_types", args: "{}" });
+    rolloutLog.append({
+      type: "tool_result",
+      streamId: sourceStream,
+      id: "t1",
+      name: "chart_types",
+      ok: true,
+      text: "图表目录",
+    });
+    rolloutLog.append({ type: "turn_end", streamId: sourceStream, status: "aborted" });
+
+    const originId = useTaskStore.getState().create({
+      conversationId: "c1",
+      agentId: "system-assistant",
+      agentName: "和小鸣",
+      prompt: "梳理依赖",
+    });
+    useTaskStore.getState().bindStream(originId, sourceStream);
+    useTaskStore.getState().settle(originId, { status: "cancelled" });
+    const forkedId = useTaskStore
+      .getState()
+      .forkFrom(originId, { streamId: sourceStream, seq: 2 })!;
+    useUiStore.getState().setTaskDraft({
+      taskId: forkedId,
+      conversationId: "c1",
+      text: "梳理依赖",
+      mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+    act(() => lastHandlers().onOpen?.());
+
+    // 请求里带上了重建前缀，且形状合法：tool_calls 与 tool 消息等长同序、在 user 轮之前
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    const first = requests[0]!;
+    const toolCalls = first.flatMap((m) => m.tool_calls ?? []);
+    const toolMessages = first.filter((m) => m.role === "tool");
+    expect(toolCalls.map((c) => c.id)).toEqual(["t1"]);
+    expect(toolMessages.map((m) => m.tool_call_id)).toEqual(["t1"]);
+    expect(toolMessages[0]!.content).toBe("图表目录");
+    expect(first.findIndex((m) => m.role === "tool")).toBeLessThan(
+      first.findIndex((m) => m.role === "user"),
+    );
+
+    // 新回合的日志首条带上来源：任务卡与回放都能看出「这是从哪分叉出来的」
+    await waitFor(() =>
+      expect(useTaskStore.getState().tasks.find((t) => t.id === forkedId)?.streamId).toBeTruthy(),
+    );
+    const newStream = useTaskStore.getState().tasks.find((t) => t.id === forkedId)!.streamId!;
+    expect(rolloutLog.read(newStream)[0]).toMatchObject({
+      type: "turn_start",
+      forkedFrom: { streamId: sourceStream, seq: 2 },
+    });
+  });
+
+  it("分叉降级：来源日志读不到时按普通重跑执行，并显示原因（不静默）", async () => {
+    type WireMessage = { role: string; content: string; tool_calls?: { id: string }[] };
+    const requests: WireMessage[][] = [];
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
+    vi.mocked(streamChat).mockImplementation(async (_p, messages, o) => {
+      requests.push(messages as unknown as WireMessage[]);
+      o.onDelta("好的");
+      return "好的";
+    });
+
+    const originId = useTaskStore.getState().create({
+      conversationId: "c1",
+      agentId: "system-assistant",
+      agentName: "和小鸣",
+      prompt: "梳理依赖",
+    });
+    // 来源回合日志不存在（被清理/换设备）：分叉记录还在，但前缀重建不出来
+    useTaskStore.getState().bindStream(originId, "s-fork-missing");
+    useTaskStore.getState().settle(originId, { status: "cancelled" });
+    const forkedId = useTaskStore
+      .getState()
+      .forkFrom(originId, { streamId: "s-fork-missing", seq: 2 })!;
+    useUiStore.getState().setTaskDraft({
+      taskId: forkedId,
+      conversationId: "c1",
+      text: "梳理依赖",
+      mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+    act(() => lastHandlers().onOpen?.());
+
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    // 不伪造前缀：请求里没有任何 tool 消息
+    expect(requests[0]!.some((m) => m.role === "tool")).toBe(false);
+    expect(requests[0]!.some((m) => (m.tool_calls ?? []).length > 0)).toBe(false);
+    // 明确告知降级原因，而不是静默变成重跑
+    expect(screen.getByText(/本次按普通重跑执行/)).toBeInTheDocument();
+    // 来源仍如实记录（任务卡/日志表达「这是一次分叉尝试」）
+    await waitFor(() =>
+      expect(useTaskStore.getState().tasks.find((t) => t.id === forkedId)?.streamId).toBeTruthy(),
+    );
+    const newStream = useTaskStore.getState().tasks.find((t) => t.id === forkedId)!.streamId!;
+    expect(rolloutLog.read(newStream)[0]).toMatchObject({
+      forkedFrom: { streamId: "s-fork-missing", seq: 2 },
+    });
+  });
+
+  it("打开会话触发一次 msgCache 明文迁移（P0-5b 接线）", async () => {
+    render(<ChatPage />);
+    await act(async () => {});
+    expect(vi.mocked(migrateMsgCache)).toHaveBeenCalledWith("c1");
+    expect(vi.mocked(migrateMsgCache)).toHaveBeenCalledTimes(1);
+  });
+
+  it("迁移抛错不影响消息渲染与输入", async () => {
+    mockMessagesFetch([msg("m1", "历史消息", "2026-10-14T01:00:00.000Z")]);
+    vi.mocked(migrateMsgCache).mockImplementation(() => {
+      throw new Error("迁移失败");
+    });
+
+    render(<ChatPage />);
+    await act(async () => {});
+
+    expect(screen.getByText("历史消息")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument();
+  });
+
+  it("两处缓存读取都走定点 get，不再全量 list（P0-5b）", async () => {
+    render(<ChatPage />);
+    await act(async () => {});
+    const handler = useChatStore.getState().openHandler!;
+    expect(handler).toBeTruthy();
+
+    const cachedPlain = { kind: "text", text: "缓存命中", senderId: "u1", at: 0 } as never;
+    const getSpy = vi.spyOn(msgCache, "get");
+    const listSpy = vi.spyOn(msgCache, "list");
+    listSpy.mockClear(); // 忽略渲染期其它读，只看下面两条补齐路径
+
+    try {
+      // ① 缓存优先命中：只按 id 取一条
+      getSpy.mockReturnValueOnce({ id: "m-get", senderId: "u1", at: 0, plain: cachedPlain });
+      const hit = await handler(
+        { id: "m-get", senderId: "u1", cipher: "坏密文", chainKid: "k", n: 1 } as never,
+        undefined,
+      );
+      expect(hit).toMatchObject({ status: "ok" });
+      expect(getSpy).toHaveBeenCalledWith("c1", "m-get");
+
+      // ② duplicate 补齐分支：缓存 miss → openMessage 返回 duplicate → 再定点 get 一次
+      vi.mocked(openMessage).mockResolvedValueOnce("duplicate");
+      getSpy.mockReturnValueOnce(null);
+      getSpy.mockReturnValueOnce({ id: "m-dup", senderId: "u1", at: 0, plain: cachedPlain });
+      const dup = await handler(
+        { id: "m-dup", senderId: "u1", cipher: "坏密文", chainKid: "k", n: 2 } as never,
+        undefined,
+      );
+      expect(dup).toMatchObject({ status: "ok" });
+      expect(getSpy).toHaveBeenCalledWith("c1", "m-dup");
+
+      // 这两条路径不再全量读（list 只留给迁移/调试入口）
+      expect(listSpy.mock.calls.filter(([id]) => id === "c1")).toHaveLength(0);
+    } finally {
+      getSpy.mockRestore();
+      listSpy.mockRestore();
+    }
   });
 });

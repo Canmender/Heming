@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type JSX } from "react";
 import type { SharedFileMeta } from "@heming/shared";
 import { ChatIcon, ChevronIcon, EyeIcon, FileIcon, FolderIcon } from "./icons.js";
 
@@ -26,7 +26,7 @@ function Row({ label, depth, onClick, ariaLabel, expandable, expanded }: {
       type="button"
       aria-label={ariaLabel}
       onClick={onClick}
-      className="flex w-full items-center gap-1.5 rounded px-2 py-[3px] text-left text-[12px] text-[#444] hover:bg-[#f3f3f3]"
+      className="flex w-full items-center gap-1.5 rounded-sm px-2 py-[3px] text-left text-[12px] text-[#444] hover:bg-[#f3f3f3]"
       style={{ paddingLeft: 8 + depth * 14 }}
     >
       {expandable ? (
@@ -100,7 +100,7 @@ function SectionRows({
               <button
                 type="button"
                 aria-label={`发送到会话 ${item.name}`}
-                className="rounded p-0.5 text-muted hover:bg-[#ebebeb] hover:text-ink"
+                className="rounded-sm p-0.5 text-muted hover:bg-[#ebebeb] hover:text-ink"
                 onClick={(e) => {
                   e.stopPropagation();
                   onSendToConversation(item);
@@ -113,7 +113,7 @@ function SectionRows({
               <button
                 type="button"
                 aria-label={`预览 ${item.name}`}
-                className="rounded p-0.5 text-muted hover:bg-[#ebebeb] hover:text-ink"
+                className="rounded-sm p-0.5 text-muted hover:bg-[#ebebeb] hover:text-ink"
                 onClick={(e) => {
                   e.stopPropagation();
                   onPreview(item);

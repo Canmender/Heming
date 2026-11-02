@@ -264,7 +264,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="搜索成员、技能…"
-          className="w-full border-b border-line-soft px-3.5 py-2.5 text-[13px] outline-none placeholder:text-[#bbb]"
+          className="w-full border-b border-line-soft px-3.5 py-2.5 text-[13px] outline-hidden placeholder:text-[#bbb]"
         />
 
         <div className="max-h-[46vh] overflow-y-auto py-1">
@@ -299,7 +299,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                 {r.kind === "member" ? (
                   <Avatar user={{ displayName: r.name, avatar: r.avatar }} size={22} />
                 ) : (
-                  <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded bg-[#f0f0f0] text-[10px] text-muted">
+                  <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm bg-[#f0f0f0] text-[10px] text-muted">
                     {r.kind === "archive" ? "档" : "技"}
                   </span>
                 )}
@@ -308,11 +308,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                   <span className="block truncate text-[10px] text-muted">{r.detail}</span>
                 </span>
                 {r.kind === "member" ? (
-                  <span className="shrink-0 rounded border border-line px-1 text-[10px] text-muted">
+                  <span className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
                     团队
                   </span>
                 ) : r.kind === "archive" ? (
-                  <span className="shrink-0 rounded border border-line px-1 text-[10px] text-muted">本机</span>
+                  <span className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">本机</span>
                 ) : null}
               </button>
             ))

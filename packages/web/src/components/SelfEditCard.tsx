@@ -143,14 +143,14 @@ export function SelfEditCard({
             {snaps.map((snap) => (
               <li
                 key={snap.id}
-                className="flex flex-wrap items-center gap-1.5 rounded border border-line-soft px-2 py-1 text-[11px]"
+                className="flex flex-wrap items-center gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]"
               >
                 <span className="text-[#aaa]">{snap.at.slice(0, 16).replace("T", " ")}</span>
                 <span className="min-w-0 flex-1 truncate text-[#555]">{snap.label}</span>
                 <button
                   type="button"
                   aria-label={`回滚 ${snap.label}`}
-                  className="rounded border border-line px-1.5 py-0.5 text-[#555] hover:bg-[#f7f7f7]"
+                  className="rounded-sm border border-line px-1.5 py-0.5 text-[#555] hover:bg-[#f7f7f7]"
                   onClick={() => rollback(snap)}
                 >
                   回滚
@@ -226,9 +226,9 @@ const ACTION_LABEL: Record<string, string> = {
 function AuditRow({ entry }: { entry: AuditEntry }) {
   const time = entry.at.slice(0, 16).replace("T", " ");
   return (
-    <li className="flex flex-wrap items-baseline gap-1.5 rounded border border-line-soft px-2 py-1 text-[11px]">
+    <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]">
       <span className="text-[#aaa]">{time}</span>
-      <span className="rounded bg-[#f3f3f3] px-1 text-[#777]">
+      <span className="rounded-sm bg-[#f3f3f3] px-1 text-[#777]">
         {SCOPE_LABEL[entry.scope]}·{ACTION_LABEL[entry.action] ?? entry.action}
       </span>
       <span className="min-w-0 flex-1 truncate text-[#555]">{entry.target}</span>

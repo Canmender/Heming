@@ -103,7 +103,7 @@ function CodeBlock({
           type="button"
           aria-label="复制代码"
           onClick={() => void copy()}
-          className="rounded px-1.5 py-0.5 text-[10px] text-muted hover:bg-[#f0f0f0] hover:text-[#333]"
+          className="rounded-sm px-1.5 py-0.5 text-[10px] text-muted hover:bg-[#f0f0f0] hover:text-[#333]"
         >
           {copied ? "已复制" : "复制"}
         </button>
@@ -126,7 +126,7 @@ function CodeBlock({
 /** 内联代码：浅底等宽，与正文区分但不喧宾夺主。 */
 function InlineCode({ children }: { children?: React.ReactNode }) {
   return (
-    <code className="rounded bg-[#f2f2f2] px-1 py-[1px] font-mono text-[0.92em] text-[#c7254e]">
+    <code className="rounded-sm bg-[#f2f2f2] px-1 py-[1px] font-mono text-[0.92em] text-[#c7254e]">
       {children}
     </code>
   );
@@ -148,7 +148,7 @@ function MarkdownImage({ src, alt }: { src?: string; alt: string }) {
         className="my-1 block max-w-full cursor-zoom-in"
         onClick={() => setOpen(true)}
       >
-        <img src={src} alt={alt} className="max-w-full rounded" />
+        <img src={src} alt={alt} className="max-w-full rounded-sm" />
       </button>
       {open && src ? (
         <div
@@ -166,7 +166,7 @@ function MarkdownImage({ src, alt }: { src?: string; alt: string }) {
             <img
               src={src}
               alt={alt}
-              className="max-h-[88vh] max-w-[88vw] rounded object-contain"
+              className="max-h-[88vh] max-w-[88vw] rounded-sm object-contain"
               data-testid="markdown-lightbox-image"
             />
           </div>

@@ -40,14 +40,14 @@ export function LoginPage() {
           <p className="mb-5 text-[13px] text-muted">登录你的账号</p>
           <div className="flex flex-col gap-3">
             <input
-              className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
+              className="rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]"
               placeholder="用户名"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
             />
             <input
-              className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
+              className="rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]"
               placeholder="密码"
               type="password"
               value={password}

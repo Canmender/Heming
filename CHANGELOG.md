@@ -1,6 +1,64 @@
-# 更新日志 / Changelog
+﻿# 更新日志 / Changelog
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
+
+## d.57.2.18.0（2026-11-02）— 全面升级第一批：地基换代 + 文件编辑 + 回合日志 + 本地加密
+
+这一版是一次「多轨合并」的大版本：把压了两年的工程地基整体换掉，同时补上三个真正影响日常使用的能力——智能体能改文件了、回合过程能回放/重跑/分叉了、解密后的消息与加密链状态不再明文躺在 localStorage 里。四条轨在同一工作树并行开发、统一门禁、一次发布；每条的边界与「明确没做什么」都写在对应规格里。
+
+### 一、工程基线换代（不改变产品行为）
+
+- **依赖矩阵（升）**：构建链 `Vite 5.4 → 8.3`（换 Rolldown + Oxc）、`@vitejs/plugin-react 4.7 → 6.2`、`Vitest 1.6 → 5.0`、`jsdom 25 → 30`、`jest-dom 6 → 7`、`TypeScript` 收到 5.9.3（5.x 末版，只收紧 range）；运行时 `React 18.3 → 19.3`、`zustand 4.5 → 5.0`、`zod 3.25 → 4.6`（shared/server/web 三包同步）；样式链 `Tailwind 3.4 → 4.3`（PostCSS 插件改为 `@tailwindcss/postcss`，移除 `autoprefixer`）；桌面壳 `Electron 31.7 → 45.2`、`electron-builder 25.1 → 26.18`、`electron-updater 6.8.9 → 6.8.11`；katex / shiki / officeparser 补丁级。
+- **有证据的不升**：`pixi.js` 保持 6.5（`pixi-live2d-display` 最新版仍硬绑 `@pixi/* ^6`，升 8 等于桌宠渲染层全废）；`pdfjs-dist` 保持 4.x（v6 删掉 `Promise.try` 兜底，旧 Chromium 会崩在 worker；Electron 45 的 Chromium≥128 已满足条件，下一批再评估 + 真机 PDF 冒烟）；`officeparser` 钉在 8.4（8.5 要求 Node `>=24.22.1`）；TypeScript 6/7 与 `@types/node` 26 不跳（原生 Go 编译器 / 类型超前运行时，均属单独议题）。
+- **zustand 5 的一处真实语义修复（本版最需要知道的一条）**：`ChatPage` 里 `useChatStore((s) => s.messages[convId] ?? [])` 这类选择器每次调用都会造一个新数组。zustand 4 靠 `useSyncExternalStoreWithSelector` 记忆化掩盖了，5 直接走 `useSyncExternalStore`，React 判定快照恒定在变、报 “getSnapshot should be cached” 并无限重渲染（聊天页挂载即死）。改成模块级 `EMPTY_MESSAGES` 常量让引用恒等——这不是测试问题，是升级后才成立的运行时语义问题。
+- **React 19 / zod 4 的兼容改动都是类型与文案层**：React 19 移除全局 `JSX` 命名空间、`useRef<T>(null)` 返回带 null 的 `RefObject`，共 4 文件 6 处类型适配；zod 4 把 `required_error`/`invalid_type_error` 合并为 `error`，`plugins/manifest.ts` 用 `typeParams` 助手区分「字段缺失」与「类型不对」，**用户可见中文报错文案逐字未变**。踩坑一条：只升 zod 不重建 `shared/dist` 时，web 的 tsc 会读到旧 `.d.ts` 并报出一批看似 React 19 的错误。
+- **Tailwind 4 按「观感与 v3 逐像素一致」迁移**：`index.css` 三条 `@tailwind` 指令改为 `@import "tailwindcss"` + `@config`，`tailwind.config.js` 与自定义色板/阴影 token 名字取值一字未改；类名等价替换 `outline-none → outline-hidden` 55 处、裸 `rounded → rounded-sm` 108 处、裸 `blur → blur-sm` 4 处；base 层把 v4 改掉的默认边框色恢复成 v3 的 `#e5e7eb`。CSS 产物 70.4KB（迁移前 70.78KB）。批量替换曾误伤 4 处 JS API 方法名 `blur()`，被类型检查抓住后修回。
+- **Electron 45 的两条破坏点经核对不命中本仓**：45 移除沙箱 preload 的 `events`/`timers`/`url` shim 与 `Buffer`/`setImmediate` 全局，而本仓 `preload.js` 只用 `require("electron")` 与 `process.platform`；`app://` 走 `protocol.registerSchemesAsPrivileged` + `protocol.handle`（现代接口）。**注意**：`safeStorage` 三个同步方法在 45 弃用、46 将移除，弃用提示与 `*Async` 迁移清单已写在 `secret-store.js` 文件头，本轮刻意只升壳、不迁加解密 API。
+- **两个打包环境坑已固化进 `docs/VERSION-MANAGEMENT.md`**：`pnpm install` 不一定执行 electron 的 postinstall（`dist/` 为空，需 `ELECTRON_MIRROR` 后重跑 `node install.js`，打包前必须确认 `electron.exe` 存在）；`build-desktop.mjs` 的 `detectElectronDist()` 只取 `.pnpm` 下第一个 electron 目录，升级后残留旧版本会打出旧 Electron（先 `pnpm prune` 或显式 `--electronDist`，出包后核对包内 electron 文件版本）。
+
+### 二、文件编辑原语 `file_patch`（新能力）
+
+- **智能体第一次能改用户的文件**：新增 `file_patch`（多文件原子补丁）与 `file_read`（只读定点读），沿用 Codex 的**上下文锚点补丁协议**（`*** Begin Patch` / `Add/Update/Delete/Move` / `@@` 定位），不依赖行号。
+- **三级匹配**：精确 → 空白归一 → 标点归一（Unicode 连字符与弯引号互认）；**任一 hunk 匹配失败整份补丁不写盘**，返回「哪个文件、哪个块、期望的锚点」并建议先 `file_read` 再重试；保留原行尾（CRLF/LF）与 BOM。
+- **作用域由用户圈定**：设置区「文件编辑」卡显式添加可写根（不预置、拒绝盘符根）；路径判定沿用 `wiki-fs.js` 的 `resolveInside` 口径（抽成共享 `path-guard.js`，两处判定结论一致由用例钉死）；软链（含祖先）/硬链/`..`/NUL/Windows 保留名/二进制/超限一律拒绝；单文件 2MB、单次补丁 4MB、20 文件、单 hunk 200 行。
+- **写盘在桌面端两阶段**：先写 `.<name>.heming-tmp-<rand>` + `fsync`，全部成功后再统一 `rename`；写操作串行队列；rename 失败清理 tmp；不建父目录（不存在即拒绝）。
+- **三态安全判定 + HITL**：全在写根内 → 免问；只读根/越界 → 拒绝（越界文案直接指路「先在设置里加写根」）；含删除或改名 → 即使根内也弹窗；确认卡显示「将修改 N 个文件（A/M/D）」+ **行级 diff**（疑似密钥行隐藏、超 200 行截断）。**HITL 规则从精确路径升级为路径前缀**（`D:/笔记/` 这种目录授权），deny 优先、danger 永不记允许、通配 `*` 对 `file_patch` 无效；「记住本次选择」按目标目录归纳前缀写多条。
+- **明确不做**：shell/命令执行、全盘可写根、自动回滚/undo 栈、跨设备同步；不执行随包代码。
+- 测试：web 新增 211 例、desktop 新增 41 例（含「越界必须断言被拒绝且磁盘无变化」「软链/硬链/`..`/NUL/二进制/超限各独立用例」「wiki-fs 与 path-guard 判定一致」）。
+
+### 三、回合日志 v2：能回放、能重跑、能分叉（新能力）
+
+- **日志升到 v2**：新增单调 `seq`（同一毫秒内也能定序）与 `turn_start.forkedFrom`；读取端兼容 v1（缺 `seq` 用下标补齐，**v1 回合只读、不可分叉**）；不做批量迁移、不提高 200 条上限（日志本就是有损摘要）。
+- **回放增强**：相对时间「距开始 +3.2s」、四档筛选（全部/工具/失败/被拒）、悬停 `tool_result` 高亮对应 `tool_call`、**悬空调用与缺 `turn_end` 的回合标「未完成」并指出停在哪一步**、单回合 JSON 导出（剪贴板失败时摊开只读文本可手动复制）。
+- **`pairToolCalls` 一份判定两处用**：回放标注与分叉前置条件同源，避免「面板说能分叉、点了却报错」。
+- **重跑**：用同一目标新建任务 + 新 `streamId`，确认框写死「会重新执行一遍」「之前的写操作可能重复」；**原任务状态/步骤/结果/时间戳一字不动**（用例钉死）。
+- **分叉**：只允许从某个 `tool_result` 之后分叉，四条前置（之后无最终答案 / 回合正常收尾或用户确认崩溃 / 前缀无悬空调用 / 前缀无被拒调用）；前缀由本机日志**重建**成合法请求形状（连续调用合成一条 assistant + 等长同序 tool 消息），确认框如实写「前缀由本机日志重建；超过 2000 字符的工具结果已被截断」，有截断时升级为「结果不完整，后续可能需要重新读取」；重建失败（参数被截断/无可用配对）**直接拒绝**而不是拼一个必然 400 的请求。
+- **分叉/重跑都不是隔离会话**：新任务继承原目标与智能体，消息仍追加在原智能体会话里（分叉的前缀要接在真实历史之后才有意义），且不往消息流里插系统提示；P3 分叉前预览「将复用哪几条、丢弃哪些」。
+- 测试：新增 100 例（纯逻辑 90 + UI 10），覆盖 v1/未知版本/悬空/denied/有 final/崩溃确认/降级。
+
+### 四、本地热路径加密 P1：解密后的消息与加密链不再明文（新能力）
+
+- **威胁模型先说清**：这一版防的是**磁盘取证 / 整机拷贝 / 系统备份 / 换账户换机**（T1/T2/T7）；同源脚本、DevTools、进程内存与崩溃转储**只提高门槛、不承诺阻止**——不把安全承诺说大。
+- **`msgCache` 换成 v2 容器**：`{"__hemingMsgCache":"v2","items":[{id,d}...]}`，**逐条密文**、`id` 留明文做索引；`append` 只加密新增的那一条（不再整数组重加密），读侧按 id 定点解密（`msgCache.get`），冷读 0 次批量解密。
+- **`chains`（棘轮状态）走 d.36 整值信封 + 写入前自校验**：加密后立刻解密 deep-equal 比对，通过才覆盖；它是解密能力的唯一来源，写坏等于历史消息永久锁死。自校验失败按 **fail-open** 处理：写新明文值、内存继续可用、设置区点名「未加密」——不回退旧盘值（回退会导致 msgKey 重用，比明文降级更危险）。
+- **迁移非破坏性**：任何「密文覆盖明文」前先写 `<键>.__heming_plaintext_backup`（幂等、只保留第一份），备份失败不覆盖；旧明文按会话打开时空闲迁移（批 ≤50、可中断、幂等、不二次加密）；坏容器/未知版本/单条解不开 → 不 throw、不改写、原样备份到 `__heming_undecryptable`。
+- **配额不足按「保数据」处理**：退回明文数组、不截短不删消息，界面如实标「未加密（原因：配额不足——为保住消息，本次以明文保存）」；设置区「本机存储」卡把「明文缓存」改名「消息缓存」，清理说明改成诚实口径（只有链窗口内的近期消息可重新解密，更早的会永久无法解密，自发消息不可再生），迁移备份键不提供清理入口。
+- **无桌面桥（浏览器）行为逐字不变**：仍走明文路径，不做降级加密。
+- 测试：新增 46 例（容器 19 + 加密链路 16 + 统计/卡片/标签 11），含「有桥容器新建-追加-定点查-淘汰」「迁移幂等/备份只写一次/中途失败保留明文」「chains 自校验失败 fail-open 后下次读到新值」「无桥形态逐字等价」。
+- 已知边界：批量 IPC 通道与 P3（清理备份键/全量扫明文）未做；chains 写入遇配额失败时「内存领先磁盘」，若进程恰在此刻重启可能回退链状态（P2 再加固）；备份键仍在「消息缓存」组计字节，只是不可从清理入口删除。
+
+### 五、技术债与发布链
+
+- **WS `?token=` 兼容路径删除**：d.30 为兼容已发布旧桌面包保留的 query token 路径正式移除——服务端现在**只认首帧 `{type:"auth",token}`**，query 里带 token 也不读（连接照常建立但保持未鉴权，10s 内无合法 auth 帧即断开）。旧客户端（d.35 及更早）本就不兼容 d.54 起的服务端，保留只剩暴露面。新增用例断言「query token 不再鉴权且消息不入库」。
+- **`docker/` 与 `docker-compose.yml` 清理**：确认无脚本/构建引用后删除；容器版 nginx 的两条顺序约束（`/updates/` 在 `location /` 之前、WS 精确匹配 `= /api/ws`）已完整写在 `docs/deploy.md` §9 与宿主版 `deploy/nginx-heming.conf`，知识没有随文件丢。
+- **发布流水线 `scripts/release.mjs`**：把手工十步固化成一条命令（预检 → 构建 → 逐包测试含单包重试 → bump → CHANGELOG 校验 → 生成 changelog 模块 → 打包 → 部署（强制备份）→ 发更新源 → 证据清单）；危险动作默认全关，`--dry-run` 零副作用，失败立即停并打印最后 40 行与「下一步该做什么」。
+
+### 六、测试与验收
+
+- 全量门禁（本版发布前实跑，`release.mjs --only=build,tests`，4/4 包通过、无重试）：`shared` 2 文件 / 24 例、`server` 9 文件 / 122 例、`web` 176 文件 / 2678 例、`desktop` 28 个测试文件 / 443 例，全绿；三包 `tsc --noEmit` 零错误；`pnpm -r build` 通过（8.7s）。
+- 视觉回归：线上 `d.54.2.17.0` 生产包与升级后本地构建 13 页截图对照（登录后等启动动画结束再截），布局/文字/卡片/边框无结构漂移；差异集中在生产包与 dev 的字体抗锯齿。
+- 已知测试噪音：`ChatPage` 两条分叉用例在等待提示行渲染时会有 React `act(...)` 警告（非失败，既有同类用例也有）。
+- 回滚：本版是四条轨合并的一次发布，**没有逐轨回滚路径**，只能整体回退到 `d.54.2.17.0`；`msgCache`/`chains` 的加密迁移会在回退后仍以密文存在（旧版本读不出明文）——回退前必须先备份 `localStorage` 或先在设置区导出必要数据。
 
 ## d.54.2.17.0（2026-11-02）— 登录不再随重启与断网掉线
 

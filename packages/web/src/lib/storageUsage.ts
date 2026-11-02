@@ -54,7 +54,10 @@ export interface StorageModuleRule {
  * 则不受影响——它们互不为前缀。
  */
 export const STORAGE_MODULE_RULES: readonly StorageModuleRule[] = [
-  { prefix: "heming.msgCache.", module: "明文缓存" },
+  // 「消息缓存」= 解密后的消息内容（有桌面安全存储时是逐条密文，浏览器端是明文）。
+  // 迁移期备份键（`<键>.__heming_plaintext_backup` / `.__heming_undecryptable`）也以
+  // `heming.msgCache.` 开头，按同一组统计（它们确实占字节）——但清理入口会排除它们。
+  { prefix: "heming.msgCache.", module: "消息缓存" },
   { prefix: "heming.recallLog.", module: "辅助账本" },
   { prefix: "heming.memory.recallLog", module: "辅助账本" },
   { prefix: "heming.memory.usage", module: "辅助账本" },
@@ -197,10 +200,13 @@ export interface StorageUsage {
  *
  * @param probe 存储探针（默认用浏览器的 localStorage）。
  * @param quotaBytes 实测配额；传 null / 不传 ⇒ 用保守默认 5MB 并标 `quotaEstimated`。
+ * @param onKey 每个键读取后的回调（可选）：只为让调用方在**同一次读取**里判断落盘形态
+ *        （如消息缓存是容器还是明文数组），避免再 `getItem` 一遍。**不要缓存明文值**。
  */
 export function measureStorageUsage(
   probe?: StorageProbe,
   quotaBytes?: number | null,
+  onKey?: (key: string, raw: string | null) => void,
 ): StorageUsage {
   const p = probe ?? browserProbe();
   const buckets = new Map<string, { bytes: number; keys: number }>();
@@ -224,6 +230,11 @@ export function measureStorageUsage(
       raw = null;
     }
     const bytes = raw == null ? 0 : utf8Length(raw);
+    try {
+      onKey?.(key, raw);
+    } catch {
+      /* 回调是纯旁路：它出错不能影响统计 */
+    }
     const module = moduleOf(key);
     const bucket = buckets.get(module) ?? { bytes: 0, keys: 0 };
     bucket.bytes += bytes;

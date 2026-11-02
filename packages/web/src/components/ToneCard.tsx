@@ -73,7 +73,7 @@ export function ToneCard() {
           }}
           rows={4}
           placeholder="粘贴一段文字，试试哪些地方命中了规则"
-          className="w-full resize-y rounded-lg border border-line px-3 py-2 text-[12px] leading-relaxed outline-none focus:border-[#bbb]"
+          className="w-full resize-y rounded-lg border border-line px-3 py-2 text-[12px] leading-relaxed outline-hidden focus:border-[#bbb]"
         />
         <div className="flex flex-wrap items-center gap-2">
           <button

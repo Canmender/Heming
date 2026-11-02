@@ -5,6 +5,12 @@ import {
   measureStorageUsage,
   probeOfStorage,
 } from "../lib/storageUsage.js";
+import {
+  msgCacheEncryptionStates,
+  type MsgCacheEncryptionReason,
+  type MsgCacheEncryptionState,
+} from "../lib/e2eSession.js";
+import { isMsgCacheAuxKey } from "../lib/e2e/cacheEnvelope.js";
 import type { StorageLike } from "../lib/memory/types.js";
 
 /**
@@ -16,12 +22,14 @@ import type { StorageLike } from "../lib/memory/types.js";
  * 「任务记录消失」这类无法解释的降级，界面上却连一条水位都没有。
  *
  * ★ 统计只读**键名**与**字节数**，不读内容也不留内容：
- * 明文缓存（`heming.msgCache.*`）里是解密后的消息正文，统计不该把它复制到别处。
- * 所以每个键只 `getItem` 一次，算出字节数就丢。
+ * 消息缓存（`heming.msgCache.*`）里是解密后的消息正文（有桥时是逐条密文），
+ * 统计不该把它复制到别处。所以每个键只 `getItem` 一次，算出字节数就丢；
+ * 「消息缓存是否已加密」也复用这一次读取的结果（见 `readSnapshot`）。
  *
  * ★ 只给数字不给出口等于让用户对着一个数字发愁，所以这张卡同时给清理入口——
- * 但**只给可再生的**（明文缓存、任务记录）删：记忆条目是用户资产，
- * E2E 私钥与棘轮丢了就是永久丢，这两类绝不提供删除入口。
+ * 但**只给可再生的**（消息缓存、任务记录）删：记忆条目是用户资产，
+ * E2E 私钥与棘轮丢了就是永久丢，这两类绝不提供删除入口；
+ * 迁移期备份键（旧明文/旧密文）可能是唯一可恢复副本，也不提供清理入口。
  */
 
 /** 保守配额估计：Chromium 同源配额下限 5MB。实测前用它，并在界面上标明「估算」。 */
@@ -94,12 +102,15 @@ export interface QuotaInfo {
  * 统计口径只能有一处，界面只负责把结果排版。
  *
  * ★ 每个键只读一次值（`getItem` 一次即丢），不解析、不留副本——
- * 明文缓存里是解密后的消息正文，统计不该把它带出存储层。
+ * 消息缓存里是解密后的消息正文，统计不该把它带出存储层。
  * ★ 坏数据不许抛：某个键读不出来（隐私模式、配额异常）就当它占 0 字节继续，
  * 统计失败不该让整个设置区打不开。
  */
-export function readStorageUsage(storage: EnumerableStorage): StorageUsageSnapshot {
-  const usage = measureStorageUsage(probeOfStorage(storage as unknown as Storage));
+export function readStorageUsage(
+  storage: EnumerableStorage,
+  onKey?: (key: string, raw: string | null) => void,
+): StorageUsageSnapshot {
+  const usage = measureStorageUsage(probeOfStorage(storage as unknown as Storage), undefined, onKey);
   return {
     totalBytes: usage.totalBytes,
     keyCount: usage.totalKeys,
@@ -109,6 +120,26 @@ export function readStorageUsage(storage: EnumerableStorage): StorageUsageSnapsh
       keys: entry.keys,
     })),
   };
+}
+
+/** 一次渲染要用的快照：水位数字 + 消息缓存的落盘状态。 */
+interface UsageSnapshot {
+  usage: StorageUsageSnapshot;
+  cacheStates: Array<{ convId: string; state: MsgCacheEncryptionState }>;
+}
+
+/**
+ * 统计 + 消息缓存加密状态，**共用同一次 `getItem`**（不为了状态再读一遍缓存值）。
+ *
+ * 只把 `heming.msgCache.*` 的原始值暂存到局部 Map，交给 `msgCacheEncryptionStates`
+ * 判外壳（容器/明文/坏数据），算完即丢——不解析明文、不进 React state。
+ */
+function readSnapshot(storage: EnumerableStorage): UsageSnapshot {
+  const cacheRaws = new Map<string, string | null>();
+  const usage = readStorageUsage(storage, (key, raw) => {
+    if (key.startsWith("heming.msgCache.")) cacheRaws.set(key, raw);
+  });
+  return { usage, cacheStates: msgCacheEncryptionStates(cacheRaws) };
 }
 
 /**
@@ -193,11 +224,16 @@ type ClearTarget = {
 const CLEAR_TARGETS: Record<ClearTarget["kind"], ClearTarget> = {
   cache: {
     kind: "cache",
-    label: "明文缓存",
-    module: "明文缓存",
-    match: (key) => key.startsWith("heming.msgCache."),
+    label: "消息缓存",
+    module: "消息缓存",
+    // ★ 备份键（`.__heming_plaintext_backup` / `.__heming_undecryptable`）**不在清理范围**：
+    //   它们可能是唯一可恢复的旧明文/旧密文副本，删了就永久没了（与 d.31「不可再生不给入口」同口径）。
+    match: (key) => key.startsWith("heming.msgCache.") && !isMsgCacheAuxKey(key),
     explain:
-      "会删除本机保存的解密后明文消息（每个会话一份）。消息正文在服务端还在，重新拉取并解密即可恢复，只是首次打开旧会话要等一会儿重新解密。",
+      "会删除本机保存的消息缓存（每个会话一份；有桌面安全存储时是密文，浏览器端是明文）。" +
+      "注意：清理后**只有链窗口内的近期消息**能重新拉取并解密；更早的消息本机若已无缓存，会永久显示为「无法解密」——" +
+      "自己发出的消息尤其不可再生（发送链已推进，旧密钥无法再派生）。" +
+      "迁移期的旧明文/旧密文备份键不在本次清理范围内。",
   },
   tasks: {
     kind: "tasks",
@@ -208,6 +244,69 @@ const CLEAR_TARGETS: Record<ClearTarget["kind"], ClearTarget> = {
       "会删除本机的任务流水记录。任务记录只是本机流水，重新投递一次任务就能重建历史。",
   },
 };
+
+/** 系统安全存储的名字（与 d.36「密钥存储」卡同一口径，不写死某平台）。 */
+function secureStorageName(): string {
+  const platform = typeof window !== "undefined" ? window.heming?.platform : undefined;
+  if (platform === "win32") return "Windows DPAPI";
+  if (platform === "darwin") return "macOS 钥匙串";
+  return "系统安全存储";
+}
+
+/** 未加密原因的一句话口径（Q1/Q2：如实说明，不谎报）。 */
+function reasonText(reason: MsgCacheEncryptionReason | undefined): string {
+  switch (reason) {
+    case "no-bridge":
+      return "浏览器端没有可用的系统安全存储";
+    case "unavailable":
+      return "本机安全存储不可用";
+    case "encrypt-failed":
+      return "加密失败";
+    case "quota":
+      return "配额不足——为保住消息，本次以明文保存";
+    case "unreadable":
+      return "无法解密（密文仍在，可能来自其他设备或系统账户）";
+    case "backup-failed":
+      return "迁移备份写入失败，暂未加密";
+    case "pending-migration":
+      return "旧明文待迁移";
+    default:
+      return "原因未知";
+  }
+}
+
+/**
+ * 消息缓存加密状态行：**已加密 / 未加密（原因）/ 无法解密** 三种如实口径。
+ *
+ * 不能把「本机解不开」写成「未加密」——磁盘上确实是密文，用户换回原账户还能读。
+ */
+/** 纯函数版状态行（导出供单测直接钉文案口径，界面只负责排版）。 */
+export function encryptionStatusLine(
+  states: Array<{ convId: string; state: MsgCacheEncryptionState }>,
+): { text: string; tone: string } | null {
+  // 「读不到值」不是「未加密」：不算进任何一类，避免把存储异常说成明文缓存。
+  const visible = states.filter((s) => s.state.form !== "absent");
+  if (visible.length === 0) return null;
+  const encrypted = visible.filter((s) => s.state.encrypted).length;
+  const unreadable = visible.filter(
+    (s) => s.state.form === "unreadable" || s.state.reason === "unreadable",
+  ).length;
+  const plaintext = visible.filter(
+    (s) => !s.state.encrypted && s.state.form !== "unreadable" && s.state.reason !== "unreadable",
+  );
+  const reasons = [...new Set(plaintext.map((s) => s.state.reason))];
+
+  if (encrypted > 0 && unreadable === 0 && plaintext.length === 0) {
+    return { text: `消息缓存已加密（${secureStorageName()}），磁盘上是逐条密文。`, tone: "text-muted" };
+  }
+  const parts: string[] = [];
+  if (encrypted > 0) parts.push(`${encrypted} 个已加密`);
+  if (unreadable > 0) parts.push(`${unreadable} 个无法解密`);
+  if (plaintext.length > 0) {
+    parts.push(`${plaintext.length} 个未加密（原因：${reasons.map(reasonText).join("；")}）`);
+  }
+  return { text: `消息缓存：${parts.join("，")}。`, tone: "text-amber-700" };
+}
 
 /**
  * 存储图标：细线 1.5px，与 `icons.tsx` 同一套画法。
@@ -281,7 +380,9 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
   // 用 useState 惰性初始化而不是 useMemo：拿存储这一步会做「写探针再删」的探测
   // （判断 localStorage 是否可写），属副作用，不该在每次渲染里重跑。
   const [store] = useState<EnumerableStorage>(() => storage ?? browserStorage());
-  const [usage, setUsage] = useState<StorageUsageSnapshot>(() => readStorageUsage(store));
+  const [snapshot, setSnapshot] = useState<UsageSnapshot>(() => readSnapshot(store));
+  const usage = snapshot.usage;
+  const encryptionLine = encryptionStatusLine(snapshot.cacheStates);
   const [quota, setQuota] = useState<QuotaInfo>({
     bytes: ESTIMATED_QUOTA_BYTES,
     estimated: true,
@@ -291,7 +392,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
   const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    setUsage(readStorageUsage(store));
+    setSnapshot(readSnapshot(store));
   }, [store]);
 
   const ratio = quota.bytes > 0 ? usage.totalBytes / quota.bytes : 0;
@@ -369,10 +470,10 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
       }
     }
 
-    const next = readStorageUsage(store);
-    setUsage(next);
+    const next = readSnapshot(store);
+    setSnapshot(next);
     setPending(null);
-    const after = next.modules.find((m) => m.name === target.module)?.bytes ?? 0;
+    const after = next.usage.modules.find((m) => m.name === target.module)?.bytes ?? 0;
     const freed = Math.max(0, before - after);
     setNotice(
       freed > 0
@@ -450,6 +551,16 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             ))}
           </ul>
         )}
+        {/* 消息缓存的落盘形态（已加密 / 未加密+原因 / 无法解密）：不谎报、不把「解不开」说成「没加密」。 */}
+        {encryptionLine && (
+          <div
+            role="status"
+            aria-label="消息缓存加密状态"
+            className={`mt-2 text-[11px] ${encryptionLine.tone}`}
+          >
+            {encryptionLine.text}
+          </div>
+        )}
       </div>
 
       {/* 清理入口：只给可再生的 */}
@@ -462,7 +573,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
           }}
           className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
         >
-          清理明文缓存
+          清理消息缓存
         </button>
         <button
           type="button"
@@ -490,6 +601,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
       {/* 不可再生的东西不给入口——这里说清楚为什么，否则用户会以为漏了功能。 */}
       <div className="mt-2 text-[11px] text-[#999]">
         记忆条目与加密会话的私钥、棘轮不可再生（丢了就是永久丢），所以不提供清理入口；
+        迁移期的旧明文/旧密文备份键也不提供清理入口（它们可能是唯一的可恢复副本）；
         上面两个按钮只清理能重新生成的内容。
       </div>
 

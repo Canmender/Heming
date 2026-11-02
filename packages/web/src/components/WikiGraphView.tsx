@@ -230,7 +230,7 @@ export function WikiGraphView({
             type="button"
             aria-label="缩小图谱"
             onClick={() => zoomBy(-ZOOM_STEP)}
-            className="rounded px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
+            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
           >
             −
           </button>
@@ -238,7 +238,7 @@ export function WikiGraphView({
             type="button"
             aria-label="复位图谱"
             onClick={reset}
-            className="min-w-[38px] rounded px-1 py-0.5 text-[10px] text-muted hover:bg-[#f3f3f3]"
+            className="min-w-[38px] rounded-sm px-1 py-0.5 text-[10px] text-muted hover:bg-[#f3f3f3]"
           >
             {Math.round(zoom * 100)}%
           </button>
@@ -246,7 +246,7 @@ export function WikiGraphView({
             type="button"
             aria-label="放大图谱"
             onClick={() => zoomBy(ZOOM_STEP)}
-            className="rounded px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
+            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
           >
             ＋
           </button>

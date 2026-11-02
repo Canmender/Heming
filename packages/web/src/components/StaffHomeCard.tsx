@@ -10,7 +10,7 @@ import { useUiStore } from "../store/ui.js";
  */
 
 const CARD = "rounded-xl border border-[#ececec] bg-white p-3 shadow-card";
-const LINK = "rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink";
+const LINK = "rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink";
 
 export function StaffHomeCard() {
   const settings = useStaffStore((s) => s.settings);
@@ -23,7 +23,7 @@ export function StaffHomeCard() {
     <section className={CARD} aria-label="幕僚">
       <div className="mb-1.5 flex items-center gap-2">
         <div className="text-[12px] font-bold text-[#777]">幕僚</div>
-        <span className="rounded border border-line px-1.5 text-[10px] text-muted">
+        <span className="rounded-sm border border-line px-1.5 text-[10px] text-muted">
           {settings.enabled ? "常驻" : "未开启"}
         </span>
         <button type="button" className={`${LINK} ml-auto`} onClick={() => setPage("staff")}>

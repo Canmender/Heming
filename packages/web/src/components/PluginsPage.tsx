@@ -23,8 +23,8 @@ import { useUiStore } from "../store/ui.js";
 
 const cardCls = "rounded-xl border border-line bg-white p-4 shadow-card";
 const badgeCls =
-  "rounded border border-line-soft bg-[#fafafa] px-1.5 py-0.5 text-[10px] text-muted";
-const chipCls = "rounded bg-[#f4f4f4] px-1.5 py-0.5 text-[10px] text-[#666]";
+  "rounded-sm border border-line-soft bg-[#fafafa] px-1.5 py-0.5 text-[10px] text-muted";
+const chipCls = "rounded-sm bg-[#f4f4f4] px-1.5 py-0.5 text-[10px] text-[#666]";
 const hintCls = "text-[11px] text-muted";
 const errorCls = "text-[12px] text-red-600";
 const okCls = "text-[12px] text-muted";
@@ -91,7 +91,7 @@ function hostOf(url: string): string {
   }
 }
 
-const diffChipCls = "rounded border px-1.5 py-0.5 text-[10px]";
+const diffChipCls = "rounded-sm border px-1.5 py-0.5 text-[10px]";
 const diffTone = {
   add: "border-emerald-200 bg-emerald-50 text-emerald-700",
   change: "border-amber-200 bg-amber-50 text-amber-700",
@@ -472,7 +472,7 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
                 type="button"
                 aria-label="关闭安装面板"
                 onClick={closeInstall}
-                className="rounded p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
+                className="rounded-sm p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
               >
                 <XIcon width={14} height={14} aria-hidden="true" />
               </button>
@@ -486,7 +486,7 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   placeholder={`{\n  "schemaVersion": 2,\n  "id": "acme.finance",\n  "name": "财务助手包",\n  "version": "1.0.0",\n  "skills": [ ... ],\n  "mcpServers": [ { "key": "weather", "name": "天气服务", "url": "https://..." } ]\n}`}
-                  className="mt-1 block min-h-[160px] w-full resize-y rounded-lg border border-line px-3 py-2 font-mono text-[11px] outline-none focus:border-[#bbb]"
+                  className="mt-1 block min-h-[160px] w-full resize-y rounded-lg border border-line px-3 py-2 font-mono text-[11px] outline-hidden focus:border-[#bbb]"
                 />
               </label>
 
@@ -620,7 +620,7 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
                 type="button"
                 aria-label="关闭插件详情"
                 onClick={closeDetail}
-                className="rounded p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
+                className="rounded-sm p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
               >
                 <XIcon width={14} height={14} aria-hidden="true" />
               </button>

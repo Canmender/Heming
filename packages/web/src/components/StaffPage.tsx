@@ -27,7 +27,7 @@ import { StaffIcon } from "./icons.js";
 
 const CARD = "rounded-xl border border-[#ececec] bg-white p-3 shadow-card";
 const INPUT =
-  "rounded-md border border-line bg-white px-2 py-1 text-[12px] shadow-card outline-none focus:border-ink";
+  "rounded-md border border-line bg-white px-2 py-1 text-[12px] shadow-card outline-hidden focus:border-ink";
 const BTN =
   "rounded-md border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors hover:bg-[#fafafa] disabled:opacity-50";
 const BTN_PRIMARY =
@@ -70,7 +70,7 @@ function FindingRow({ finding }: { finding: StaffFinding }) {
           {finding.evidence.map((item) => (
             <span
               key={`${item.kind}:${item.refId}`}
-              className="rounded border border-line px-1.5 py-0.5 text-[9px] text-muted"
+              className="rounded-sm border border-line px-1.5 py-0.5 text-[9px] text-muted"
             >
               {item.label}
             </span>
@@ -92,11 +92,11 @@ function RunItem({ run }: { run: StaffRun }) {
     <li className="rounded-xl border border-line bg-white px-4 py-3 shadow-card">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] text-muted">{formatStaffTime(run.startedAt)}</span>
-        <span className="rounded border border-line px-1.5 py-0.5 text-[9px] text-[#555]">
+        <span className="rounded-sm border border-line px-1.5 py-0.5 text-[9px] text-[#555]">
           {triggerLabel(run.trigger)}
         </span>
         <span
-          className={`rounded border px-1.5 py-0.5 text-[9px] ${
+          className={`rounded-sm border px-1.5 py-0.5 text-[9px] ${
             run.mode === "fallback"
               ? "border-[#fecdca] bg-[#fef3f2] text-[#b42318]"
               : "border-line bg-panel text-muted"

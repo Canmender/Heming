@@ -19,7 +19,7 @@ import { useModalA11y } from "./useModalA11y.js";
  */
 
 const inputCls =
-  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]";
+  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
 const labelCls = "block text-[12px] text-muted";
 
 export function AgentFormModal({

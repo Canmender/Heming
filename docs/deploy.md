@@ -187,6 +187,12 @@ systemctl start heming-api
 
 所以**每次发版前先备份，而且当场拷回本机**——只跑上面那段 tar 不算备份。`.superpowers/deploy-bare.py backup` 一次做完：停服务 → tar → 起服务 → SFTP 取回本机 `.tmp/backups/` → 校验本机文件非空 + `/api/health` 仍是 `{"ok":true"}`。库只有几十 KB，别省这一步。两个已知的操作细节：备份文件名只带日期，**同一天发第二版会盖掉第一版**，要在跑下一版 `backup` 前把上一份改名留档；脚本修正前（`__file__` 未 resolve、少算一层 parent）落点是 `.superpowers/.tmp/backups/`，那儿若有旧档别当丢了，现在起统一是仓库根 `.tmp/backups/`。
 
+> **「备份不通过就不许 install」由脚本强制**：`node scripts/release.mjs --deploy` 先跑
+> `deploy-bare.py backup`，随后核对本机 `.tmp/backups/` 里确实多了**本次**的文件（非空、时间在本次运行内）；
+> 任一条件不满足就整轮中止，`upload` / `install` 根本不会被调用。
+> 打包与更新源上传各是独立开关（`--desktop` / `--publish`），默认全关；`--dry-run` 只打印十步计划，
+> 不连服务器。用法与它不替代的人工环节见 `docs/VERSION-MANAGEMENT.md` §「一条命令发版」。
+
 ## 7. CORS 与同源决策
 
 - **同源（默认）**：浏览器访问 `http://47.92.39.184` 时，页面（nginx:80）与 API（反代 `/api` → 127.0.0.1:8787）**同源**，WS 走 `ws://47.92.39.184/api/ws` 同样被反代。因此**本地构建 web 产物时不注入 `VITE_API_BASE`**（留空 = 同源相对路径），配置最少、不依赖任何跨域。
@@ -276,6 +282,12 @@ HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r34 pnpm --filter @heming/
 HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r34 bash scripts/publish-update.sh --dry-run
 ```
 
+> 这三步也可以一条命令串起来：`node scripts/release.mjs --desktop --publish`（先 `--dry-run` 看计划）。
+> 新目录用 `--release-r 45`，或整条路径用 `--release-dir D:/Heming/packages/desktop/release/r45`；
+> 脚本把 `HEMING_RELEASE_DIR` 同时注入打包与发布两处，不会再出现「打包进 r45、上传读默认目录」。
+> 部署那一路同理：`--deploy` 会强制先 `backup`（见 §6），中止时不碰线上。
+
+
 > **d.30 实测的两个坑**：
 > ① `tar --exclude=./node_modules` 这种带 `./` 前缀的写法**全部失效**（GNU tar 的 `--exclude` 匹配路径段名，
 >    不认 `./` 前缀）——包会从 5.6MB 撑到 **2.19GB**（把 `packages/desktop/release` 的历史安装包全卷进去）。
@@ -323,11 +335,11 @@ free -m | head -3; swapon --show
 
 > **失联判据（记牢）**：能 ping 通、TCP 能握手、60 秒不回一个字节 = **用户态冻住**，不是网络问题、不是安全组。这台机两次事故都长这样，第二次甚至只是跑了 `docker builder du`（当时并没有在构建）。裸机方案下若再出现，先看 `dmesg | tail` 与 `free -m`；**别猛连 22 端口**——云盾的爆破防护会封源 IP，届时 80 正常而 SSH 一直 `Error reading SSH protocol banner`，只能等冷却或换出口。
 
-## 11. 旧 Docker 路径（已停用）
+## 11. 旧 Docker 路径（已清理）
 
-`docker/`（`api.Dockerfile`、`web.Dockerfile`、`web-nginx.conf`）与 `docker-compose.yml` **保留但不再使用**：机器已重置且没有装 Docker，发版一律走 §2–§3。
+`docker/`（`api.Dockerfile`、`web.Dockerfile`、`web-nginx.conf`）与 `docker-compose.yml` 已在「全面升级」轮删除：机器已重置且没有装 Docker，发版一律走 §2–§3。
 
-保留的理由只有一条：`docker/web-nginx.conf` 与 §9 坑 2 的顺序约束互为出处，两份 nginx 配置（宿主版与容器版）必须同时满足「`/updates/` 排在 `location /` 之前」「WS 用 HTTP/1.1 + Upgrade 且 `= /api/ws` 精确匹配」。确认不再回退 Docker 时，连同 compose 文件一起清理，别只删一半。
+删除前确认过两件事：① 没有脚本/构建引用它们（只有本文件的历史说明）；② 容器版 nginx 配置里唯一的硬约束——「`/updates/` 排在 `location /` 之前」「WS 用 HTTP/1.1 + Upgrade 且 `= /api/ws` 精确匹配」——已完整写在 §9 坑 2，宿主版 `deploy/nginx-heming.conf` 继续满足，知识没有随文件一起丢。
 
 那套流程里的旧做法在裸机方案各有替代，别再按 Docker 时代的命令操作线上：
 

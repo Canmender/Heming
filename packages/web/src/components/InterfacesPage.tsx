@@ -248,7 +248,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="例如 本地工具服务"
-                className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-none focus:border-[#bbb]"
+                className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-hidden focus:border-[#bbb]"
               />
             </label>
             <label className="text-[12px] text-muted">
@@ -257,7 +257,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                 aria-label="传输方式"
                 value={transport}
                 onChange={(e) => setTransport(e.target.value as "http" | "stdio")}
-                className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-none focus:border-[#bbb]"
+                className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-hidden focus:border-[#bbb]"
               >
                 <option value="http">HTTP（浏览器/桌面通用）</option>
                 <option value="stdio">stdio（桌面端，本机进程）</option>
@@ -300,7 +300,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://example.com/mcp"
-                  className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-none focus:border-[#bbb]"
+                  className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-hidden focus:border-[#bbb]"
                 />
               </label>
             ) : (
@@ -312,7 +312,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                     value={command}
                     onChange={(e) => setCommand(e.target.value)}
                     placeholder="npx"
-                    className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-none focus:border-[#bbb]"
+                    className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-hidden focus:border-[#bbb]"
                   />
                 </label>
                 <label className="text-[12px] text-muted">
@@ -322,7 +322,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                     value={args}
                     onChange={(e) => setArgs(e.target.value)}
                     placeholder="-y @modelcontextprotocol/server-filesystem /tmp"
-                    className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-none focus:border-[#bbb]"
+                    className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-hidden focus:border-[#bbb]"
                   />
                 </label>
               </>
@@ -334,7 +334,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                 value={headersText}
                 onChange={(e) => setHeadersText(e.target.value)}
                 placeholder={'{"Authorization":"Bearer xxx"}'}
-                className="mt-1 block w-full rounded-lg border border-line px-3 py-2 font-mono text-[11px] text-ink outline-none focus:border-[#bbb]"
+                className="mt-1 block w-full rounded-lg border border-line px-3 py-2 font-mono text-[11px] text-ink outline-hidden focus:border-[#bbb]"
               />
             </label>
           </div>
@@ -528,7 +528,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                                     setTestArgs("{}");
                                     setTestResult(null);
                                   }}
-                                  className="rounded border border-line px-2 py-0.5 text-[11px] hover:bg-[#fafafa]"
+                                  className="rounded-sm border border-line px-2 py-0.5 text-[11px] hover:bg-[#fafafa]"
                                 >
                                   测试
                                 </button>
@@ -548,7 +548,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                           aria-label="测试参数"
                           value={testArgs}
                           onChange={(e) => setTestArgs(e.target.value)}
-                          className="mt-1 block min-h-[70px] w-full rounded-lg border border-line bg-white px-2 py-1.5 font-mono text-[11px] outline-none focus:border-[#bbb]"
+                          className="mt-1 block min-h-[70px] w-full rounded-lg border border-line bg-white px-2 py-1.5 font-mono text-[11px] outline-hidden focus:border-[#bbb]"
                         />
                         <div className="mt-2 flex items-center gap-2">
                           <button
@@ -564,7 +564,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                         {testResult && (
                           <pre
                             role="status"
-                            className={`mt-2 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded border px-2 py-1.5 text-[11px] ${
+                            className={`mt-2 max-h-[160px] overflow-auto whitespace-pre-wrap break-words rounded-sm border px-2 py-1.5 text-[11px] ${
                               testResult.ok
                                 ? "border-[#d7e9dc] bg-[#f2faf5] text-[#1d6b3a]"
                                 : "border-[#f3d2ce] bg-[#fef3f2] text-[#b42318]"

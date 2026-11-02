@@ -294,7 +294,7 @@ export function TeamPage() {
           </span>
           <button
             type="button"
-            className="ml-auto rounded border border-line bg-white px-2 py-0.5 text-[11px] text-muted hover:bg-[#f5f5f5]"
+            className="ml-auto rounded-sm border border-line bg-white px-2 py-0.5 text-[11px] text-muted hover:bg-[#f5f5f5]"
             onClick={() => setConfirmClear(true)}
           >
             清除我的共享记录
@@ -313,7 +313,7 @@ export function TeamPage() {
               onChange={(e) => setMemberQuery(e.target.value)}
               placeholder="搜索成员…"
               aria-label="搜索团队成员"
-              className="w-full rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-none focus:border-[#bbb]"
+              className="w-full rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
             />
             <div className="mt-1.5 flex items-center justify-between text-[11px]">
               <label className="flex items-center gap-1 text-muted">
@@ -349,7 +349,7 @@ export function TeamPage() {
                 <p className="text-[#b42318]">名册加载失败：{rosterError}</p>
                 <button
                   type="button"
-                  className="mt-1 rounded border border-line px-2 py-0.5 text-[11px]"
+                  className="mt-1 rounded-sm border border-line px-2 py-0.5 text-[11px]"
                   onClick={() => void loadRoster()}
                 >
                   重试
@@ -386,7 +386,7 @@ export function TeamPage() {
                           {m.user.displayName}
                         </span>
                         {m.user.id === me?.id && (
-                          <span className="shrink-0 rounded border border-line px-1 text-[9px] text-muted">
+                          <span className="shrink-0 rounded-sm border border-line px-1 text-[9px] text-muted">
                             我
                           </span>
                         )}
@@ -446,7 +446,7 @@ export function TeamPage() {
             ))}
             <button
               type="button"
-              className="ml-auto rounded px-2 py-1 text-[11px] text-muted hover:bg-[#f3f3f3]"
+              className="ml-auto rounded-sm px-2 py-1 text-[11px] text-muted hover:bg-[#f3f3f3]"
               onClick={() => void loadFeed(true)}
             >
               刷新
@@ -465,7 +465,7 @@ export function TeamPage() {
                 <p className="text-[#b42318]">动向加载失败：{feedError}</p>
                 <button
                   type="button"
-                  className="mt-2 rounded border border-line px-2 py-0.5 text-[11px]"
+                  className="mt-2 rounded-sm border border-line px-2 py-0.5 text-[11px]"
                   onClick={() => void loadFeed(true)}
                 >
                   重试
@@ -491,7 +491,7 @@ export function TeamPage() {
                         <span className="shrink-0 text-[12px] font-medium">
                           {nameOf(a.actorId)}
                         </span>
-                        <span className="shrink-0 rounded border border-[#ececec] px-1 text-[9px] text-muted">
+                        <span className="shrink-0 rounded-sm border border-[#ececec] px-1 text-[9px] text-muted">
                           {KIND_LABEL[a.kind]}
                         </span>
                         <span className="truncate text-[12px]">{a.title}</span>

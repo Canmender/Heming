@@ -136,7 +136,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
                     setError(null);
                   }}
                   placeholder={h.placeholder ?? (h.isSecret ? "敏感值，仅保存在本机" : "")}
-                  className="mt-1 block w-full rounded-lg border border-line px-3 py-2 font-mono text-[11px] text-ink outline-none focus:border-[#bbb]"
+                  className="mt-1 block w-full rounded-lg border border-line px-3 py-2 font-mono text-[11px] text-ink outline-hidden focus:border-[#bbb]"
                 />
                 {h.description && <span className="mt-0.5 block text-[10px] text-[#999]">{h.description}</span>}
               </label>

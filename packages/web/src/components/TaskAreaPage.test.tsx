@@ -12,6 +12,7 @@ import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useLlmStore } from "../store/llm.js";
 import { setOverride } from "../lib/modelCaps.js";
+import { rolloutLog } from "../lib/rollout/index.js";
 
 // 通用智能体页只负责「运行视图」：嵌入式 ChatPage 的消息/E2E/工具链路另有专门测试，
 // 这里替换成一个探针，验证传参（embedded）与选中后的挂载。
@@ -187,15 +188,96 @@ describe("通用智能体页面", () => {
     expect(screen.getByRole("button", { name: "复制 Markdown 报告" })).toBeInTheDocument();
   });
 
-  it("失败运行可重新执行：记录回到进行中并重新投递原目标", () => {
+  it("重跑：确认文案讲清副作用，确认后新建任务且原任务一字不变", () => {
     const id = seedTask({ prompt: "重跑我" });
     useTaskStore.getState().settle(id, { status: "failed", error: "断线" });
+    const before = JSON.stringify(useTaskStore.getState().tasks.find((t) => t.id === id));
+
     render(<TaskAreaPage />);
     fireEvent.click(screen.getByRole("button", { name: "运行 重跑我" }));
-    fireEvent.click(screen.getByRole("button", { name: "重新执行" }));
+    fireEvent.click(screen.getByRole("button", { name: "重跑" }));
 
-    expect(useTaskStore.getState().tasks[0].status).toBe("running");
-    expect(useUiStore.getState().taskDraft).toMatchObject({ taskId: id, text: "重跑我" });
+    // 确认框必须出现那两句：会重新执行一遍 / 之前的写操作可能重复
+    const dialog = screen.getByRole("dialog", { name: "重跑这次运行" });
+    expect(within(dialog).getByText(/会重新执行一遍/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/之前的写操作可能重复/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/原任务的记录、日志与状态保持不变/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认重跑" }));
+
+    const tasks = useTaskStore.getState().tasks;
+    expect(tasks).toHaveLength(2);
+    const created = tasks.find((t) => t.id !== id)!;
+    expect(created).toMatchObject({
+      status: "running",
+      prompt: "重跑我",
+      conversationId: "c1",
+      agentId: "a1",
+    });
+    expect(created.forkedFrom).toBeUndefined();
+    // ★ 原任务不被重跑改动（不 reopen、不追加步骤、不覆盖结果）
+    expect(JSON.stringify(tasks.find((t) => t.id === id))).toBe(before);
+    expect(useUiStore.getState().taskDraft).toMatchObject({
+      taskId: created.id,
+      text: "重跑我",
+      conversationId: "c1",
+    });
+  });
+
+  it("分叉：先看 P3 复用/丢弃清单，确认后新建任务且原任务不变", () => {
+    const id = seedTask({ prompt: "梳理模块依赖" });
+    useTaskStore.getState().bindStream(id, "s-fork");
+    useTaskStore.getState().settle(id, { status: "cancelled" });
+    // 本机日志：开始 → 读文件（有结果）→ 中断收尾；可分的点就是那条工具结果（seq=2）
+    rolloutLog.append({ type: "turn_start", conversationId: "c1", streamId: "s-fork", agentId: "a1", userText: "梳理模块依赖" });
+    rolloutLog.append({ type: "tool_call", streamId: "s-fork", id: "t1", name: "srv__read", args: '{"path":"a.md"}' });
+    rolloutLog.append({ type: "tool_result", streamId: "s-fork", id: "t1", name: "srv__read", ok: true, text: "a.md 内容" });
+    rolloutLog.append({ type: "turn_end", streamId: "s-fork", status: "aborted" });
+    const before = JSON.stringify(useTaskStore.getState().tasks.find((t) => t.id === id));
+
+    render(<TaskAreaPage />);
+    fireEvent.click(screen.getByRole("button", { name: "运行 梳理模块依赖" }));
+    fireEvent.click(screen.getByRole("button", { name: /从此处分叉/ }));
+
+    const dialog = screen.getByRole("dialog", { name: "从这一步之后分叉" });
+    // P3：点之前就看清复用哪几条、丢弃哪些
+    expect(within(dialog).getByText(/将复用 1 条工具结果/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/srv__read/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/将丢弃 1 条记录/)).toBeInTheDocument();
+    // 诚实提示：前缀是重建的、可能被截断
+    expect(within(dialog).getByText(/前缀由本机日志重建/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/写操作/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认分叉" }));
+
+    const tasks = useTaskStore.getState().tasks;
+    expect(tasks).toHaveLength(2);
+    const created = tasks.find((t) => t.id !== id)!;
+    expect(created).toMatchObject({
+      status: "running",
+      prompt: "梳理模块依赖",
+      conversationId: "c1",
+      agentId: "a1",
+      forkedFrom: { streamId: "s-fork", seq: 2 },
+    });
+    // 原任务日志/汇总/状态一律不动
+    expect(JSON.stringify(tasks.find((t) => t.id === id))).toBe(before);
+    expect(useUiStore.getState().taskDraft).toMatchObject({ taskId: created.id, text: "梳理模块依赖" });
+  });
+
+  it("分叉任务的任务卡如实标注来源与截断代价", () => {
+    const id = seedTask({
+      prompt: "分叉出来的任务",
+      forkedFrom: { streamId: "s1", seq: 4, truncatedResults: 1 },
+    });
+    render(<TaskAreaPage />);
+    fireEvent.click(screen.getByRole("button", { name: "运行 分叉出来的任务" }));
+
+    expect(screen.getByText(/回合 s1 · 第 4 条之后/)).toBeInTheDocument();
+    const notice = screen.getByText(/前缀由本机日志重建/);
+    expect(notice).toHaveTextContent(/结果不完整/);
+    expect(notice).toHaveTextContent(/有 1 条工具/);
+    expect(id).toBeTruthy();
   });
 
   it("搜索与状态筛选只影响列表，不丢数据", () => {

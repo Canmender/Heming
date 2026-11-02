@@ -97,6 +97,63 @@ node scripts/bump-version.mjs d.5.2.0.0      # 或直接指定（必须大于当
 4. `pnpm dist:desktop`（内部会先构建嵌入用的 web 产物）
 5. 需要时部署云端（见 `docs/deploy.md`）
 
+## 一条命令发版
+
+上面那串顺序（加上门禁、备份、部署与更新源上传）已固化成 `scripts/release.mjs`——
+Node ESM 实现，刻意不写 bash：Git Bash(MSYS) 会把 `/opt/x` 转成 `E:/...`，`publish-update.sh`
+已经为此加过 `MSYS_NO_PATHCONV=1`，再用 bash 编排只会放大同一类问题。
+
+```bash
+node scripts/release.mjs --dry-run                    # 先看它打算做什么（命令/目录/会写哪些文件，零副作用）
+node scripts/release.mjs --bump=fix                   # 门禁 → bump → 校验 CHANGELOG → 生成 changelog.ts
+node scripts/release.mjs --desktop                    # 再加：打包安装包（输出目录自动递增 rNN）
+node scripts/release.mjs --desktop --deploy           # 再加：备份 → 部署云端
+node scripts/release.mjs --desktop --publish          # 再加：安装包 + latest.yml 发到更新源
+```
+
+想「一条命令连 bump 一起跑通」：先 `--dry-run --bump=fix` 看它算出的目标版本，把 `CHANGELOG.md`
+顶部条目直接写成那个版本，再带 `--bump=fix` 正式跑——脚本是先 bump（第 4 步）再校验（第 5 步），
+条目写在目标版本上才能一次过；忘了写就会停在第 5 步，并明确告诉你「去掉 --bump 重跑」。
+
+十步（任何一步失败立即停止，打印失败步骤、最后 40 行输出与「下一步该做什么」）：
+
+| 步 | 做什么 | 关键约束 |
+|---|---|---|
+| 1 | 工作区与工具链预检 | `git status` 非空 → 拒绝（`--allow-dirty` 放行并记进证据）；Node ≥ 24；`deploy-bare.py` 的 `VERSION` 必须等于本轮目标版本（带 `--bump` 时是 bump 后的版本），不一致在预检就停 |
+| 2 | `pnpm -r build` | 云端口径：不注入 `VITE_API_BASE`；产物缺 `web/dist/index.html` 等直接失败 |
+| 3 | 逐包 `test` | 串行 `pnpm --filter <包> test`，**单包失败重试一次**（本机偶发 `0xC0000409`），连续两次失败即停 |
+| 4 | bump（`--bump`） | `bump-version.mjs auto <fix\|feature\|breaking\|build>`；数字只增不减 |
+| 5 | 校验 CHANGELOG 顶部条目 | 顶部标题的版本号必须等于当前 `hemingVersion`，且带日期与标题 |
+| 6 | `node scripts/build-changelog.mjs` | 写 `packages/web/src/generated/changelog.ts`，并回查里面含当前版本串 |
+| 7 | 打包（`--desktop`） | `pnpm -w run dist:desktop`；核对 `latest.yml` 存在、sha512/size 与安装包一致、内嵌 web 产物含版本串且与 `web-dist` 同名 |
+| 8 | 备份 + 部署（`--deploy`） | **强制先 `backup`**，备份没落到本机就整轮中止；再打/校验 tar → `upload` → `install` → `smoke` |
+| 9 | 更新源（`--publish`） | `publish-update.sh --dry-run` → 真传 → 输出必须含「校验通过」 |
+| 10 | 证据清单 | 每步退出码/耗时、产物路径与大小、待人工填写的校验项、可粘进 `docs/HANDOFF.md` §2 的 Markdown |
+
+安全边界：**部署、上传、删除默认全不做**，必须显式 `--deploy` / `--publish`；`--dry-run` 只打印十步计划，
+跑前跑后 `git status` 与 `packages/*/dist` 的修改时间都不变。
+
+顺带固化下来的两个顺序陷阱：
+
+- `--desktop` 与 `--deploy` 同时开时，脚本在打 tar 前**先重跑 `pnpm --filter @heming/web build`**，
+  把 `packages/web/dist` 从「注入 `VITE_API_BASE` 的桌面版」恢复成云端口径——否则上云的就是写死 IP 的那份
+  （`docs/deploy.md` §2 ★）。只打包不部署时该目录会停留在注入版，脚本会在第 7 步明确提示，
+  手工上云前记得重跑一次 web 构建。
+- 打包输出目录每版换一个新的 `release/rNN`（`--release-r 46` 可显式指定，`--release-dir` 可给整条路径），
+  且**打包与发布用同一个目录**：两边都读 `HEMING_RELEASE_DIR`，由脚本统一注入，不会再出现一边 r45、
+  一边默认目录。
+
+**它不替代的三件事**（脚本只打印待填项，不替你判断）：
+
+1. **CHANGELOG 正文由人写**：脚本只校验「顶部有条目且版本号等于当前版本」，文案与取舍是人写的。
+2. **线上 `/api/health` 与主 bundle 的人工比对**：脚本能跑的是服务器本机 `127.0.0.1:8787/api/health`
+   （由 `deploy-bare.py smoke` 完成）；公网那一次、以及线上 `index.html` 引用的 bundle 是否与本机云端产物
+   同名同字节，仍要人看一眼。
+3. **安装包 sha512 的最终对照**：脚本已把本地 exe 与本地 `latest.yml` 的 sha512/size 对上，但「远端那份
+   `latest.yml` 里的 sha512」与「真上传上去的安装包」仍要人对一次（`publish-update.sh` 只比字节数）。
+
+完整开关与退出码见 `node scripts/release.mjs --help`。
+
 ## 打包入口
 
 > ⚠️ **改了前端代码后必须先跑 `build-desktop-web.mjs`，否则打出来的包是旧界面。**
@@ -157,6 +214,51 @@ node scripts/build-desktop.mjs --win nsis --config.directories.output=release-ne
 2. 自动探测 `node_modules/.pnpm/electron@*/…/dist` 并传 `--config.electronDist`
    （本机为省 C 盘删掉了 electron 下载 zip，缺这一项时 electron-builder 会尝试联网重下并失败）；
 3. 其余参数原样透传。
+
+### electron 二进制与 electronDist 的两个坑（d.55 升 Electron 45 实测）
+
+这两条都不会让「打包命令」报错，但会让**打出来的包装着错误的 Electron**，或者干脆找不到 electronDist。
+
+**坑 1：`pnpm install` 不一定执行 electron 的 postinstall，`dist/` 可能是空的。**
+
+升级 Electron 大版本后遇到：`pnpm install` 成功退出、`node_modules/electron/package.json` 版本也对，
+但 `node_modules/electron/dist` 根本不存在（`path.txt` 也没有），`build-desktop.mjs` 因此探测不到
+electronDist。表现是打包报找不到 electron，或者 electron-builder 尝试联网重下再失败。
+
+```bash
+# 判定：没有 dist 就是没装成
+ls packages/desktop/node_modules/electron/dist/electron.exe   # 必须存在（约 238MB）
+
+# 修复：直连 GitHub Releases 可能 fetch failed，走镜像后重跑 install.js
+cd packages/desktop/node_modules/electron
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ node install.js
+# zip 会落到 %LOCALAPPDATA%\electron\Cache，之后 install 走缓存
+```
+
+**任何一次全新 `pnpm install` 之后都要确认 `packages/desktop/node_modules/electron/dist/electron.exe`
+存在再打包**；缺了就用上面那条命令补。
+
+**坑 2：`detectElectronDist()` 取的是「第一个」有 `dist/` 的 `electron@*`，残留旧版本会打错版本。**
+
+`build-desktop.mjs` 的实现是：列 `node_modules/.pnpm` 下所有 `electron@*`，挑出 `dist/` 存在的，
+**取 `candidates[0]`**。升级后如果旧版本的目录还留在 `.pnpm` 里（升级当时实测 `electron@31.7.7`
+与 `electron@45.2.1` 并存，且旧版本已不在 `pnpm-lock.yaml`），按目录序会先命中**旧版本**，
+于是打出来的是旧 Electron——日志里那句「使用本地已解包的 electron：…」会暴露它。
+
+```bash
+# 出包前二选一（推荐前者：顺带清掉所有不在 lockfile 里的残留包）
+pnpm prune
+# 或显式指定，绕过自动探测
+node scripts/build-desktop.mjs --win nsis --config.electronDist=<绝对路径>/node_modules/electron/dist
+```
+
+出包后**再核对一次包里真实带的 Electron 版本**，别只看日志：对 `release/rNN/win-unpacked/electron.exe`
+查文件版本（PowerShell `(Get-Item …).VersionInfo.FileVersion`），或直接看 `win-unpacked` 下
+`resources/` 与 electron 相关的版本串，确认与 `packages/desktop/package.json` 的 `electron` range 一致。
+
+> 顺带一条：用户级 `ELECTRON_CACHE` 可能指向**另一个 worktree** 的历史路径（升级当时它指向一个已不存在的
+> `…\Worktrees\Heming\main-*/\.tmp\cache\electron\Cache`）。按上面第 2 条 export 缓存变量之前先确认路径存在，
+> 否则改指向 `%LOCALAPPDATA%\electron\Cache`。
 
 ## 版本比较
 

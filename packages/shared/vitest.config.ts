@@ -9,5 +9,11 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   cacheDir: "../../.tmp/vite/shared",
-  test: { environment: "node" },
+  test: {
+    environment: "node",
+    // vitest 5 把 clearMocks 的默认值改成了 true（每例前清空所有 mock 的调用记录）。
+    // 本项目既有用例里存在「在 beforeAll / 模块顶层记录调用、在具体用例断言次数」的写法，
+    // 吃新默认值等于批量改语义。这里显式关掉，保持 vitest 1.x 的原有语义。
+    clearMocks: false,
+  },
 });

@@ -52,8 +52,8 @@
 | [specs/2026-10-22-atomic-image-send.md](superpowers/specs/2026-10-22-atomic-image-send.md) | 图片 + 文字同发：本轮附件走当前 user 轮，不依赖历史回声 |
 | [specs/2026-10-22-modal-inert-and-workspace-state.md](superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md) | 弹窗屏蔽背景（无 portal 下的兄弟屏蔽 + 引用计数）、焦点归还、工作区首帧加载/失败态 |
 | [superpowers/2026-10-18-agent-handoff.md](superpowers/2026-10-18-agent-handoff.md) | 智能体批次交接（键名、常量、边界） |
-| [specs/2026-11-02-d53-file-edit-primitive.md](superpowers/specs/2026-11-02-d53-file-edit-primitive.md) | 文件编辑原语 `file_patch`：上下文锚点补丁、可写根与路径收敛、三态安全判定、规则升级为路径前缀（**规格，未开工**；文件名中的 d.53 是暂用号，d.53 已被桌宠占用，开工顺延为 d.55） |
-| [specs/2026-11-02-d54-rollout-recovery-fork.md](superpowers/specs/2026-11-02-d54-rollout-recovery-fork.md) | 回合日志的回放/重跑/分叉：三个动作的边界、为什么不做断点续跑、`seq` 与配对校验、分叉前置条件（**规格，未开工**；d.54 已被团队系统占用，开工顺延为 d.56） |
+| [specs/2026-11-02-d53-file-edit-primitive.md](superpowers/specs/2026-11-02-d53-file-edit-primitive.md) | **d.55 文件编辑原语**：`file_patch` / `file_read`、上下文锚点协议与三级匹配、可写根、三态安全判定、HITL 路径前缀授权、确认卡行级 diff（文件名中的 d.53 是写作时暂用号） |
+| [specs/2026-11-02-d54-rollout-recovery-fork.md](superpowers/specs/2026-11-02-d54-rollout-recovery-fork.md) | 回合日志的回放/重跑/分叉（**d.56 已实施**）：`ROLLOUT_VERSION=2`（`seq` + `forkedFrom`）、v1 只读不可分叉、`pairToolCalls` 配对校验（回放标注与分叉前置同源）、重跑=新建任务且原任务不动、分叉=新任务 + 前缀由本机日志重建并如实标注截断、P3 分叉前预览；不做断点续跑、不做批量迁移、不提高 200 条上限 |
 
 ### 桌面端
 
@@ -105,6 +105,10 @@
 | [specs/2026-11-01-d46-desktop-pet.md](superpowers/specs/2026-11-01-d46-desktop-pet.md) | d.53（文件名为写作时编号）：桌宠——独立透明置顶窗（`pet.html` 独立入口，不背应用 bundle）、默认鼠标穿透 + 按可交互区动态关闭、Cubism Core 官方再分发文件 + Hiyori 示例模型、视线/点击/口型、点角色直接对话（复用 `streamChat` 直连本机 LLM）；不做语音/消息感知/模型市场 |
 | [plans/2026-11-01-d46-desktop-pet.md](superpowers/plans/2026-11-01-d46-desktop-pet.md) | d.53 实施计划：资源与依赖 → 窗口层纯函数 → 主进程接线 → 渲染层 → 对话与设置 → 门禁与真机验收 |
 | [specs/2026-11-02-pet-presence.md](superpowers/specs/2026-11-02-pet-presence.md) | 桌宠的在场感：事件由既有模块产出、渠道互斥（主窗口在前台则走通知中心）、三档打扰强度、错过不补发；**规格，未开工，版本号待定** |
+| [specs/2026-11-02-d53-file-edit-primitive.md](superpowers/specs/2026-11-02-d53-file-edit-primitive.md) | **d.55 文件编辑原语（已实施）**：`file_patch`/`file_read`、解析与三级匹配、原子应用、可写根与路径收敛（软链/硬链/大小/编码）、三态安全判定、HITL 路径前缀授权、确认卡行级 diff、桌面写盘桥 `file-fs.js` + `path-guard.js` |
+| [specs/2026-11-02-d54-rollout-recovery-fork.md](superpowers/specs/2026-11-02-d54-rollout-recovery-fork.md) | **d.56 回合日志回放/重跑/分叉（已实施）**：`ROLLOUT_VERSION=2` + `seq`/`forkedFrom`、`pairToolCalls` 同源、重跑保留原任务、分叉新建任务 + 重建前缀并标注截断、P3 预览；不做断点续跑与批量迁移 |
+| [specs/2026-11-02-p0-5b-hotpath-encryption.md](superpowers/specs/2026-11-02-p0-5b-hotpath-encryption.md) | **P0-5b 热路径加密（设计稿，P1 实施中）**：威胁模型与伪需求甄别、方案 A′（就地信封 + 逐条密文 + 内存视图）、chains 写前自校验、配额降级阶梯、非破坏性迁移；Q1/Q2/Q3 已拍板 |
+| [plans/2026-11-02-full-upgrade-program.md](superpowers/plans/2026-11-02-full-upgrade-program.md) | **全面升级计划（2026-11-02 起）**：④ 发布与文档收尾 → ① 工程基线升级（依赖/构建链/桌面壳/样式链）→ ② 功能与技术债（`file_patch`、回合日志回放/分叉、团队能力、桌宠在场感、P0-5b、CSP、`release.sh`、docker 清理）→ ③ 体验与安全加固；每批独立版本号/门禁/发布，进度台账在文内 §5 |
 | [research/2026-10-28-d38-adversarial-qa.md](research/2026-10-28-d38-adversarial-qa.md) | d.38.1.10.0：对抗性自检 16 例（typing + 连续性），C2 暴露「消息到达不清理输入态」，已修 |
 | [research/2026-10-28-d39-deep-stress-testing.md](research/2026-10-28-d39-deep-stress-testing.md) | d.39.1.11.0：32 例深度对抗/压测（消息风暴、页面切换、通知桥模糊输入）+ 6 项修复（交接窗口、吐司合并、id 校验、文本清洗、点击幂等、通话窗焦点）；后台失败 UI 仍缺 |
 | [research/2026-10-23-rounds-after-d36.md](research/2026-10-23-rounds-after-d36.md) | d.36 之后的开工备忘：CSP 基线、`release.sh` 顺序、docker 清理、需拍板项与建议轮次 |

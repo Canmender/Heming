@@ -48,8 +48,11 @@ function toLines(text: string): string[] {
  *
  * 不引入 diff 库：确认弹窗只需要「改了什么」的直觉，不需要最小编辑脚本；
  * 前缀/后缀剥离对「改几行」的常见场景已经足够准确，且结果完全确定。
+ *
+ * ★ 导出给 `lib/fileEdit/patchPreview.ts` 复用（file_patch 的多文件 diff 也走这一份），
+ * 不要再造第二套 diff——两套的截断/统计口径迟早会不一致。
  */
-function diffLines(
+export function diffLines(
   before: string[],
   after: string[],
 ): { lines: PreviewLine[]; added: number; removed: number } {

@@ -29,7 +29,7 @@ function newId(): string {
 }
 
 const inputCls =
-  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]";
+  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
 const labelCls = "block text-[12px] text-muted";
 const btnGhost =
   "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
@@ -259,7 +259,7 @@ export function LlmSettingsCard() {
                       <button
                         type="button"
                         onClick={() => openCapsEditor(p)}
-                        className="rounded border border-line px-1.5 py-0.5 text-[11px] hover:bg-[#fafafa] "
+                        className="rounded-sm border border-line px-1.5 py-0.5 text-[11px] hover:bg-[#fafafa] "
                       >
                         手动填写
                       </button>
@@ -272,7 +272,7 @@ export function LlmSettingsCard() {
                         badges.map((b) => (
                           <span
                             key={b}
-                            className="rounded bg-[#f3f3f3] px-1 text-[10px] text-[#666] "
+                            className="rounded-sm bg-[#f3f3f3] px-1 text-[10px] text-[#666] "
                           >
                             {b}
                           </span>
@@ -289,7 +289,7 @@ export function LlmSettingsCard() {
                       <button
                         type="button"
                         onClick={() => openCapsEditor(p)}
-                        className="rounded border border-line px-1.5 py-0.5 text-[11px] hover:bg-[#fafafa] "
+                        className="rounded-sm border border-line px-1.5 py-0.5 text-[11px] hover:bg-[#fafafa] "
                       >
                         修改
                       </button>
@@ -345,7 +345,7 @@ export function LlmSettingsCard() {
                     aria-label="上下文窗口（token）"
                     value={capsWindow}
                     onChange={(e) => setCapsWindow(e.target.value)}
-                    className="ml-2 w-[140px] rounded-lg border border-line px-2 py-1 text-[12px] outline-none focus:border-[#bbb]"
+                    className="ml-2 w-[140px] rounded-lg border border-line px-2 py-1 text-[12px] outline-hidden focus:border-[#bbb]"
                   />
                 </label>
                 <button

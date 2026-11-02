@@ -1,7 +1,7 @@
 {
   "name": "heming",
   "private": true,
-  "version": "54.2.17",
+  "version": "57.2.18",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r build && pnpm -r test",
@@ -18,5 +18,5 @@
       "electron"
     ]
   },
-  "hemingVersion": "d.54.2.17.0"
+  "hemingVersion": "d.57.2.18.0"
 }

@@ -3,7 +3,10 @@ import type { RolloutInput } from "./types.js";
 
 export * from "./types.js";
 export { ROLLOUT_INDEX_KEY, ROLLOUT_KEY_PREFIX, MAX_ITEMS_PER_STREAM, MAX_STREAMS, MAX_TEXT_CHARS } from "./log.js";
-export { createRolloutLog, type RolloutLog, type RolloutLogOptions } from "./log.js";
+export { createRolloutLog, normalizeItems, type RolloutLog, type RolloutLogOptions } from "./log.js";
+export * from "./pair.js";
+export * from "./fork.js";
+export * from "./view.js";
 
 /**
  * 本机默认日志（localStorage；不可用时降级为内存）。

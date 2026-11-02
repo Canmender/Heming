@@ -1,4 +1,7 @@
-import { defineConfig } from "vite";
+// 从 vitest/config 导 defineConfig：vitest 5 起不再给 vite 的 UserConfig 补 test 字段，
+// 继续从 "vite" 导会让 `test` 报 TS2769「'test' does not exist in type UserConfigExport」。
+// vitest 的 defineConfig 同时接受 vite 配置项（plugins/build/server 等），行为不变。
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 import appPkg from "../desktop/package.json";
@@ -42,5 +45,14 @@ export default defineConfig({
       },
     },
   },
-  test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"] },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test-setup.ts"],
+    // vitest 5 把 clearMocks 的默认值改成了 true（每例前清空所有 mock 的调用记录）。
+    // 本项目既有用例里存在「在 beforeAll / 模块顶层记录调用、在具体用例断言次数」的写法，
+    // 吃新默认值等于批量改语义。这里显式关掉，保持 vitest 1.x 的原有语义；
+    // 全仓 526 处 vi.fn 因此不需要为迁就新默认值而改。
+    clearMocks: false,
+  },
 });

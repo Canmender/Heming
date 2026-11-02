@@ -135,7 +135,7 @@ export function NotificationCenter() {
                 type="button"
                 onClick={markAllRead}
                 disabled={unread === 0}
-                className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f0f0f0] hover:text-ink disabled:opacity-40"
+                className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f0f0f0] hover:text-ink disabled:opacity-40"
               >
                 全部已读
               </button>
@@ -143,7 +143,7 @@ export function NotificationCenter() {
                 type="button"
                 onClick={() => setConfirmClear(true)}
                 disabled={items.length === 0}
-                className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f0f0f0] hover:text-ink disabled:opacity-40"
+                className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f0f0f0] hover:text-ink disabled:opacity-40"
               >
                 清空
               </button>
@@ -151,7 +151,7 @@ export function NotificationCenter() {
                 type="button"
                 aria-label="关闭通知中心"
                 onClick={() => setOpen(false)}
-                className="rounded px-1.5 py-0.5 text-[13px] leading-none text-muted hover:bg-[#f0f0f0] hover:text-ink"
+                className="rounded-sm px-1.5 py-0.5 text-[13px] leading-none text-muted hover:bg-[#f0f0f0] hover:text-ink"
               >
                 ×
               </button>
@@ -177,7 +177,7 @@ export function NotificationCenter() {
                         className="min-w-0 flex-1 text-left"
                       >
                         <div className="flex items-baseline gap-1.5">
-                          <span className="shrink-0 rounded border border-[#ececec] px-1 text-[10px] text-muted">
+                          <span className="shrink-0 rounded-sm border border-[#ececec] px-1 text-[10px] text-muted">
                             {KIND_LABEL[item.kind]}
                           </span>
                           <span
@@ -201,7 +201,7 @@ export function NotificationCenter() {
                             type="button"
                             aria-label={`标记已读：${item.title}`}
                             onClick={() => markRead(item.id)}
-                            className="rounded px-1 py-0.5 text-[10px] text-muted hover:bg-[#f0f0f0] hover:text-ink"
+                            className="rounded-sm px-1 py-0.5 text-[10px] text-muted hover:bg-[#f0f0f0] hover:text-ink"
                           >
                             已读
                           </button>
@@ -210,7 +210,7 @@ export function NotificationCenter() {
                           type="button"
                           aria-label={`删除通知：${item.title}`}
                           onClick={() => remove(item.id)}
-                          className="rounded px-1 py-0.5 text-[12px] leading-none text-muted hover:bg-[#f0f0f0] hover:text-ink"
+                          className="rounded-sm px-1 py-0.5 text-[12px] leading-none text-muted hover:bg-[#f0f0f0] hover:text-ink"
                         >
                           ×
                         </button>

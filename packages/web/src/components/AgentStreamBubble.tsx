@@ -66,7 +66,7 @@ export function AgentStreamBubble({
             {onRetry ? (
               <button
                 type="button"
-                className="mt-1 rounded border border-line px-2 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
+                className="mt-1 rounded-sm border border-line px-2 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
                 onClick={onRetry}
               >
                 继续生成
@@ -127,14 +127,14 @@ function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
           </summary>
           <div className="mt-1 border-t border-[#f1f1f1] pt-1">
             <div className="text-[10px] text-[#999]">参数</div>
-            <pre className="mt-0.5 max-h-[120px] overflow-auto whitespace-pre-wrap break-all rounded bg-[#fafafa] px-1.5 py-1 font-mono text-[10px] text-[#555]">
+            <pre className="mt-0.5 max-h-[120px] overflow-auto whitespace-pre-wrap break-all rounded-sm bg-[#fafafa] px-1.5 py-1 font-mono text-[10px] text-[#555]">
               {t.args || "{}"}
             </pre>
             {t.status !== "running" && (
               <>
                 <div className="mt-1 text-[10px] text-[#999]">结果</div>
                 <pre
-                  className={`mt-0.5 max-h-[140px] overflow-auto whitespace-pre-wrap break-words rounded px-1.5 py-1 font-mono text-[10px] ${
+                  className={`mt-0.5 max-h-[140px] overflow-auto whitespace-pre-wrap break-words rounded-sm px-1.5 py-1 font-mono text-[10px] ${
                     t.status === "error" || t.status === "denied"
                       ? "bg-[#fef3f2] text-[#b42318]"
                       : "bg-[#f7f7f7] text-[#555]"
@@ -164,7 +164,7 @@ function RouteTraceLine({ attempts }: { attempts: RouteAttempt[] }) {
         <span
           key={`${i}-${a.profileId}`}
           title={a.error}
-          className={`max-w-[180px] truncate rounded border px-1 py-0.5 ${
+          className={`max-w-[180px] truncate rounded-sm border px-1 py-0.5 ${
             a.ok
               ? "border-[#cfe3cf] bg-[#f4faf4] text-[#1d6b3a]"
               : "border-[#eadfc8] bg-[#fdfaf3] text-[#8a7a55]"

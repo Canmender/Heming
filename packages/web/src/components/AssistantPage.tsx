@@ -77,7 +77,7 @@ export function AssistantPage() {
         <header className="flex items-center gap-2 border-b border-line-soft px-3 py-2.5">
           <AssistantIcon width={17} height={17} />
           <span className="text-[13px] font-bold">智能体</span>
-          <span className="rounded border border-line px-1 text-[9px] text-muted">本机</span>
+          <span className="rounded-sm border border-line px-1 text-[9px] text-muted">本机</span>
           <span className="text-[10px] text-muted">{sortedAgents.length}</span>
           <button
             type="button"
@@ -135,7 +135,7 @@ export function AssistantPage() {
                     type="button"
                     aria-label={`编辑智能体：${agent.name}`}
                     onClick={() => setEditing(agent)}
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1 py-0.5 text-[10px] text-muted opacity-0 hover:bg-[#e9e9e9] hover:text-ink group-hover:opacity-100"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-sm px-1 py-0.5 text-[10px] text-muted opacity-0 hover:bg-[#e9e9e9] hover:text-ink group-hover:opacity-100"
                   >
                     编辑
                   </button>

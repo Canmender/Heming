@@ -1,6 +1,12 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HitlCall, HitlVerdict } from "../lib/hitl/types.js";
 import { buildChangePreview, changeCountLabel } from "../lib/hitl/preview.js";
+import {
+  PATCH_PREVIEW_MAX_LINES,
+  buildPatchPreview,
+  type PatchPreview,
+} from "../lib/fileEdit/patchPreview.js";
+import { canRememberCall, prefixesOfCall } from "../lib/fileEdit/remember.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 
 /**
@@ -34,6 +40,13 @@ export interface ToolApprovalModalProps {
   onOpenConversation?: () => void;
   /** 给出裁决。 */
   onDecide: (verdicts: HitlVerdict[]) => void;
+  /**
+   * 补丁预览器（缺省读桌面文件桥）。
+   *
+   * 抽成可注入的：确认卡的「行级 diff」要读用户的真实文件，
+   * 单测里用假实现就能覆盖渲染分支，不必在 jsdom 里搭一个假文件系统。
+   */
+  patchPreviewer?: (argsJson: string) => Promise<PatchPreview | null>;
 }
 
 const RISK_LABEL: Record<HitlCall["risk"], string> = {
@@ -50,12 +63,30 @@ export function ToolApprovalModal({
   conversationLabel,
   onOpenConversation,
   onDecide,
+  patchPreviewer,
 }: ToolApprovalModalProps) {
   // 默认不勾任何一项：默认动作是「什么都不做」。
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   // 「记住」默认关闭：它会把一次决定变成长期规则。
   const [remember, setRemember] = useState(false);
   const denyRef = useRef<HTMLButtonElement>(null);
+
+  /*
+   * 「记住本次选择」只对**能归纳出路径前缀**的文件补丁显示：
+   * 目标在可写根之外时记不了（也不该记成 `*`），此时藏掉复选框——
+   * 勾了没反应比不显示更糟。
+   */
+  const rememberable = calls.every((call) => canRememberCall(call));
+  /** 将要记住的目录前缀（文件工具），在复选框下面明确告诉用户。 */
+  const rememberPrefixes = rememberable
+    ? [...new Set(calls.flatMap((call) => prefixesOfCall(call)))]
+    : [];
+  /*
+   * 本批里有 file_patch 时不提供「本会话内允许此工具」：
+   * 那是**整个工具**的授权，而文件编辑只接受按目录前缀的授权（规格 §7）。
+   * 留着这个按钮就是「点了没反应」——比不显示更糟。
+   */
+  const hasPatch = calls.some((call) => call.name === "file_patch");
 
   const toggle = (id: string) =>
     setChecked((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -99,13 +130,15 @@ export function ToolApprovalModal({
       >
         拒绝
       </button>
-      <button
-        type="button"
-        onClick={() => allowChecked("allow-session")}
-        className="rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
-      >
-        本会话内允许此工具
-      </button>
+      {!hasPatch && (
+        <button
+          type="button"
+          onClick={() => allowChecked("allow-session")}
+          className="rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
+        >
+          本会话内允许此工具
+        </button>
+      )}
       <button
         type="button"
         onClick={() => allowChecked("allow")}
@@ -131,7 +164,7 @@ export function ToolApprovalModal({
               <button
                 type="button"
                 onClick={onOpenConversation}
-                className="rounded border border-line bg-white px-2 py-0.5 text-[10px] text-[#555] hover:bg-[#f5f5f5]"
+                className="rounded-sm border border-line bg-white px-2 py-0.5 text-[10px] text-[#555] hover:bg-[#f5f5f5]"
               >
                 回到该会话
               </button>
@@ -140,7 +173,8 @@ export function ToolApprovalModal({
         )}
         {calls.length === 0 && <div className="text-[13px] text-muted">没有待确认的调用。</div>}
         {calls.map((call) => {
-          const preview = buildChangePreview(call.name, call.argsJson);
+          const isPatch = call.name === "file_patch";
+          const preview = isPatch ? null : buildChangePreview(call.name, call.argsJson);
           return (
             <div
               key={call.id}
@@ -164,7 +198,7 @@ export function ToolApprovalModal({
                   >
                     <span className="text-[13px] font-bold">{call.displayName}</span>
                     <span
-                      className={`rounded px-1 text-[10px] ${
+                      className={`rounded-sm px-1 text-[10px] ${
                         call.risk === "danger"
                           ? "bg-[#b42318] text-white"
                           : call.risk === "write"
@@ -179,7 +213,9 @@ export function ToolApprovalModal({
                   {call.summary ? (
                     <div className="mt-0.5 break-all text-[11px] text-muted">{call.summary}</div>
                   ) : null}
-                  {preview && (
+                  {isPatch ? (
+                    <FilePatchPreviewPanel argsJson={call.argsJson} previewer={patchPreviewer} />
+                  ) : preview ? (
                     <details className="mt-1 rounded-md border border-line-soft bg-white">
                       <summary
                         className="cursor-pointer px-2 py-1 text-[10px] text-[#777]"
@@ -214,7 +250,7 @@ export function ToolApprovalModal({
                         </div>
                       )}
                     </details>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -237,22 +273,130 @@ export function ToolApprovalModal({
           </details>
         )}
 
-        <label className="mt-1 flex cursor-pointer items-start gap-2 text-[11px] text-muted">
-          <input
-            type="checkbox"
-            aria-label="记住本次选择"
-            checked={remember}
-            onChange={() => setRemember((v) => !v)}
-            className="mt-0.5"
-          />
-          <span>
-            记住本次选择（按工具与资源）
-            <span className="block text-[10px] text-[#aaa]">
-              危险操作不受记住的允许影响，仍会每次询问；可在设置区一键清空。
+        {/*
+          「记住本次选择」：
+          - 普通工具按「工具 + 资源」记；
+          - file_patch / file_read 只能按**目录前缀**记（整工具放行是红线），
+            且目标不在可写根内时**不显示**这个复选框——勾了也不会生效。
+        */}
+        {rememberable ? (
+          <label className="mt-1 flex cursor-pointer items-start gap-2 text-[11px] text-muted">
+            <input
+              type="checkbox"
+              aria-label="记住本次选择"
+              checked={remember}
+              onChange={() => setRemember((v) => !v)}
+              className="mt-0.5"
+            />
+            <span>
+              记住本次选择（按工具与资源）
+              {rememberPrefixes.length > 0 && (
+                <span className="block font-mono text-[10px] text-[#777]">
+                  将记住目录：{rememberPrefixes.join("、")}
+                </span>
+              )}
+              <span className="block text-[10px] text-[#aaa]">
+                文件编辑只按目录前缀授权，不会放行整个工具；危险操作不受记住的允许影响，
+                仍会每次询问；可在设置区一键清空。
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+        ) : (
+          <div className="mt-1 rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-1.5 text-[10px] text-muted">
+            这次改动无法按目录记住（目标不在可写根内），本次不会落任何授权规则。
+            想让某个目录以后都免问，请先到设置区「文件编辑」把它加成可写根。
+          </div>
+        )}
       </div>
     </ConfirmDialog>
+  );
+}
+
+/**
+ * 补丁预览面板：异步读盘 + 干跑，把「将修改 N 个文件（A/M/D）」与行级 diff 摆出来。
+ *
+ * 为什么异步：确认卡出现在**工具执行之前**，而 diff 需要文件当前内容。
+ * 读盘是只读操作，且失败只影响预览（用 error 行提示），不该阻塞审批。
+ *
+ * 脱敏与截断在 `buildPatchPreview` 里做（那边是纯逻辑，可单测）；
+ * 这里只负责渲染，不打印任何内容到控制台。
+ */
+function FilePatchPreviewPanel({
+  argsJson,
+  previewer,
+}: {
+  argsJson: string;
+  previewer?: (argsJson: string) => Promise<PatchPreview | null>;
+}) {
+  const [preview, setPreview] = useState<PatchPreview | null | undefined>(undefined);
+
+  useEffect(() => {
+    let alive = true;
+    setPreview(undefined);
+    const run = previewer ?? ((args: string) => buildPatchPreview(args));
+    run(argsJson)
+      .then((result) => {
+        if (alive) setPreview(result);
+      })
+      .catch(() => {
+        if (alive) setPreview(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [argsJson, previewer]);
+
+  if (preview === undefined) {
+    return <div className="mt-1 text-[10px] text-[#999]">正在生成变更预览…</div>;
+  }
+  if (preview === null) return null;
+  if (preview.error) {
+    return (
+      <div className="mt-1 rounded-md border border-[#f3c2bd] bg-[#fdf6f6] px-2 py-1 text-[10px] text-[#b42318]">
+        {preview.error}
+      </div>
+    );
+  }
+
+  return (
+    <details className="mt-1 rounded-md border border-line-soft bg-white" open>
+      <summary className="cursor-pointer px-2 py-1 text-[10px] text-[#777]">
+        查看变更（{preview.summary}）
+      </summary>
+      <div className="max-h-56 overflow-auto border-t border-line-soft px-2 py-1.5 font-mono text-[10px] leading-4">
+        {preview.files.map((file) => (
+          <div key={file.rel} className="mb-1 last:mb-0">
+            <div className="text-[#555]">
+              <span className="font-bold">{file.kind}</span> {file.rel}
+              {file.movedFrom ? `（由 ${file.movedFrom} 改名）` : ""}
+              <span className="ml-1 text-[#aaa]">
+                +{file.added} −{file.removed}
+              </span>
+            </div>
+            {file.lines.map((line, i) => (
+              <div
+                key={i}
+                className={
+                  line.kind === "add"
+                    ? "bg-[#f2fbf4] text-[#1d6b3a]"
+                    : line.kind === "del"
+                      ? "bg-[#fdf4f3] text-[#b42318]"
+                      : "text-[#999]"
+                }
+              >
+                {line.kind === "add" ? "+ " : line.kind === "del" ? "− " : "  "}
+                {line.text || " "}
+              </div>
+            ))}
+            {file.truncated && <div className="pt-0.5 text-[#aaa]">…（该文件预览已截断）</div>}
+          </div>
+        ))}
+        {preview.truncated && (
+          <div className="pt-1 text-[#aaa]">
+            …（预览超过 {PATCH_PREVIEW_MAX_LINES} 行，已截断；确认前可在设置区缩小改动范围）
+          </div>
+        )}
+      </div>
+    </details>
   );
 }

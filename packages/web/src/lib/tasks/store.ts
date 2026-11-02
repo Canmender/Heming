@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ToolSource } from "../agentStream.js";
 import type { DenyCause } from "../hitl/types.js";
+import { FORK_PREFIX_NOTICE, FORK_TRUNCATED_NOTICE } from "../rollout/fork.js";
 import {
   createDefaultStorage,
   isPlainObject,
@@ -81,11 +82,29 @@ export interface TaskRecord {
   endedAt?: number;
   /** 首次触发该任务的流 id（任务与流气泡据此对照）。 */
   streamId?: string;
+  /**
+   * 分叉来源（d.56）：本任务是从哪个回合的第 `seq` 条 item 之后接着执行的。
+   *
+   * 原任务的日志/汇总/状态一律不动（§12.1）：分叉是**新任务**，
+   * 这个字段只表达「从哪来」，不把两条任务的统计混在一起。
+   */
+  forkedFrom?: TaskForkedFrom;
   /** 最终回答（成功/中断时有值）。 */
   result?: string;
   /** 失败原因（失败时有值）。 */
   error?: string;
   steps: TaskStep[];
+}
+
+/** 分叉来源与「前缀重建代价」：任务卡要据此如实提示，不能暗示无损续跑。 */
+export interface TaskForkedFrom {
+  streamId: string;
+  seq: number;
+  /**
+   * 重建前缀时被截断的工具结果条数（>0 时任务卡必须提示「结果不完整」）。
+   * 日志单条文本上限 2000 字符，分叉复用的是**重建**出来的前缀，不是原始 transcript。
+   */
+  truncatedResults?: number;
 }
 
 /** 任务列表页头部的汇总数字（纯派生，不落盘）。 */
@@ -184,8 +203,7 @@ export function taskSources(task: TaskRecord): ToolSource[] {
   return out;
 }
 
-/** 轻量统计（页头/汇总卡用）。 */
-export function taskStats(tasks: TaskRecord[]): TaskStats {
+/** 轻量统计（页头/汇总卡用）。 */export function taskStats(tasks: TaskRecord[]): TaskStats {
   const stats: TaskStats = {
     total: tasks.length,
     running: 0,
@@ -211,6 +229,21 @@ export function taskStats(tasks: TaskRecord[]): TaskStats {
 }
 
 /**
+ * 分叉任务在任务卡上的诚实提示（与分叉确认框**同一份口径**）。
+ *
+ * 返回 null 表示不是分叉任务。措辞刻意不说「从第 N 步继续」——
+ * 前缀是本机日志重建出来的摘要，超过 2000 字符的结果已被截断。
+ */
+export function taskForkNotice(task: TaskRecord): string | null {
+  const forked = task.forkedFrom;
+  if (!forked) return null;
+  const truncated = forked.truncatedResults ?? 0;
+  return truncated > 0
+    ? `${FORK_PREFIX_NOTICE}有 ${truncated} 条工具${FORK_TRUNCATED_NOTICE}`
+    : FORK_PREFIX_NOTICE;
+}
+
+/**
  * 确定性汇总报告（Markdown）：同一份任务记录永远生成同一段文字，
  * 不调用模型、不含随机/时间性内容（时间取记录里的时间戳）。
  */
@@ -225,6 +258,13 @@ export function buildTaskReport(task: TaskRecord): string {
     lines.push(`- 用时：${formatDuration(task.endedAt - task.createdAt)}`);
   }
   lines.push(`- 会话：${task.conversationId}`, "");
+  if (task.forkedFrom) {
+    lines.push(
+      `- 来源：从回合 ${task.forkedFrom.streamId} 第 ${task.forkedFrom.seq} 条之后分叉`,
+      `- 提示：${taskForkNotice(task)}`,
+      "",
+    );
+  }
 
   lines.push("## 目标", "");
   lines.push(task.prompt.trim() || "（空）", "");
@@ -296,6 +336,7 @@ export function buildTaskJson(task: TaskRecord): string {
       updatedAt: task.updatedAt,
       ...(task.endedAt === undefined ? {} : { endedAt: task.endedAt }),
       ...(task.streamId === undefined ? {} : { streamId: task.streamId }),
+      ...(task.forkedFrom === undefined ? {} : { forkedFrom: task.forkedFrom }),
       ...(task.result === undefined ? {} : { result: task.result }),
       ...(task.error === undefined ? {} : { error: task.error }),
       steps: task.steps.map((step) => ({
@@ -469,6 +510,21 @@ function pickStep(raw: unknown): TaskStep | null {
   };
 }
 
+function pickForkedFrom(raw: unknown): TaskForkedFrom | null {
+  if (!isPlainObject(raw)) return null;
+  if (typeof raw.streamId !== "string" || !raw.streamId) return null;
+  if (typeof raw.seq !== "number" || !Number.isFinite(raw.seq) || raw.seq < 0) return null;
+  const truncated =
+    typeof raw.truncatedResults === "number" && Number.isFinite(raw.truncatedResults) && raw.truncatedResults > 0
+      ? Math.floor(raw.truncatedResults)
+      : undefined;
+  return {
+    streamId: raw.streamId,
+    seq: Math.floor(raw.seq),
+    ...(truncated ? { truncatedResults: truncated } : {}),
+  };
+}
+
 function pickTask(raw: unknown): TaskRecord | null {
   if (!isPlainObject(raw)) return null;
   if (
@@ -496,6 +552,7 @@ function pickTask(raw: unknown): TaskRecord | null {
     updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : createdAt,
     ...(typeof raw.endedAt === "number" ? { endedAt: raw.endedAt } : {}),
     ...(typeof raw.streamId === "string" ? { streamId: raw.streamId } : {}),
+    ...(pickForkedFrom(raw.forkedFrom) ? { forkedFrom: pickForkedFrom(raw.forkedFrom)! } : {}),
     ...(typeof raw.result === "string" ? { result: raw.result } : {}),
     ...(typeof raw.error === "string" ? { error: raw.error } : {}),
     steps: Array.isArray(raw.steps)
@@ -523,6 +580,8 @@ interface TaskState {
     agentId: string;
     agentName: string;
     prompt: string;
+    /** 分叉新建任务时带上来源；普通新建不传。 */
+    forkedFrom?: TaskForkedFrom;
     now?: number;
   }) => string;
   /** 绑定当前流（onStart 时调用；重试换新流后覆盖，任务详情据此找到最新一条）。 */
@@ -549,6 +608,21 @@ interface TaskState {
    * 新一轮的工具步骤按新 id 追加在后面。
    */
   reopen: (taskId: string, now?: number) => void;
+  /**
+   * 重跑（d.56）：**保留原任务**，新建一个任务（新 `streamId` 在触发时绑定）。
+   *
+   * 与 `reopen` 的区别：`reopen` 把同一任务拉回进行中（步骤追加在原任务里），
+   * 会让「这一轮跑成什么样」覆盖掉上一轮的留痕；重跑新建任务，两边互不影响。
+   * 返回新任务 id；原任务不存在时返回 null（不静默造一个）。
+   */
+  rerun: (taskId: string, now?: number) => string | null;
+  /**
+   * 分叉（d.56）：**保留原任务**，新建一个任务并记下 `forkedFrom`。
+   *
+   * 继承原任务的目标与智能体（§12.1）；原任务的日志、汇总、状态一律不动。
+   * 返回新任务 id；原任务不存在时返回 null。
+   */
+  forkFrom: (taskId: string, forkedFrom: TaskForkedFrom, now?: number) => string | null;
   /** 收尾（只对 running 生效：晚到的重复回调不得覆盖已结束状态）。 */
   settle: (
     taskId: string,
@@ -616,7 +690,7 @@ function patchTask(
 export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: markStaleTasks(readTasks(), Date.now()),
 
-  create: ({ conversationId, agentId, agentName, prompt, now = Date.now() }) => {
+  create: ({ conversationId, agentId, agentName, prompt, forkedFrom, now = Date.now() }) => {
     const id = newTaskId(now);
     const task: TaskRecord = {
       id,
@@ -628,6 +702,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       status: "running",
       createdAt: now,
       updatedAt: now,
+      ...(forkedFrom ? { forkedFrom } : {}),
       steps: [],
     };
     set({ tasks: persist([task, ...get().tasks]) });
@@ -686,6 +761,34 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         ),
       ),
     });
+  },
+
+  rerun: (taskId, now = Date.now()) => {
+    const origin = get().tasks.find((task) => task.id === taskId);
+    if (!origin) return null;
+    // 目标/智能体/会话原样继承：重跑不重新解读用户意图，也不换会话（消息仍在那条对话里）。
+    const id = get().create({
+      conversationId: origin.conversationId,
+      agentId: origin.agentId,
+      agentName: origin.agentName,
+      prompt: origin.prompt,
+      now,
+    });
+    return id;
+  },
+
+  forkFrom: (taskId, forkedFrom, now = Date.now()) => {
+    const origin = get().tasks.find((task) => task.id === taskId);
+    if (!origin) return null;
+    const id = get().create({
+      conversationId: origin.conversationId,
+      agentId: origin.agentId,
+      agentName: origin.agentName,
+      prompt: origin.prompt,
+      forkedFrom,
+      now,
+    });
+    return id;
   },
 
   settle: (taskId, { status, result, error, now = Date.now() }) => {

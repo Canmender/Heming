@@ -270,7 +270,7 @@ export function HomePage() {
                   </small>
                 </div>
                 <div className="text-[10px] text-muted">本月个人已用 {pct}%（读取时按日重算）</div>
-                <div className="mt-1 h-1 w-[140px] overflow-hidden rounded bg-[#f0f0f0]">
+                <div className="mt-1 h-1 w-[140px] overflow-hidden rounded-sm bg-[#f0f0f0]">
                   <div className="h-full bg-ink" style={{ width: `${pct}%` }} />
                 </div>
                 {/* 未上报单独提示（灰字，不抢主数字）：null 不是 0，不能被总量悄悄吞掉 */}
@@ -380,7 +380,7 @@ export function HomePage() {
             </div>
             <button
               type="button"
-              className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink"
+              className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink"
               onClick={() => setPage("team")}
             >
               进入团队
@@ -429,7 +429,7 @@ export function HomePage() {
                   />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline gap-1.5">
-                      <span className="shrink-0 rounded border border-line px-1 text-[10px] text-muted">
+                      <span className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
                         {KIND_LABEL[a.kind]}
                       </span>
                       <span className="truncate text-[13px] font-medium">{a.title}</span>
@@ -473,7 +473,7 @@ export function HomePage() {
               <div className="text-[12px] font-bold text-[#777]">在线成员</div>
               <button
                 type="button"
-                className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink"
+                className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink"
                 onClick={() => setPage("team")}
               >
                 全部名册
@@ -532,7 +532,7 @@ export function HomePage() {
           {NEWS.map((n) => (
             <article key={n.title} className="rounded-lg border border-line-soft bg-[#fafafa] p-2.5">
               <div className="flex items-center gap-1.5">
-                <span className="rounded border border-line bg-white px-1.5 py-px text-[10px] text-muted">
+                <span className="rounded-sm border border-line bg-white px-1.5 py-px text-[10px] text-muted">
                   {n.source}
                 </span>
                 <span className="text-[10px] text-muted">{n.date}</span>

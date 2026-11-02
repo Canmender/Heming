@@ -5,6 +5,7 @@ import { LlmSettingsCard } from "./LlmSettingsCard.js";
 import { RouteGroupsCard } from "./RouteGroupsCard.js";
 import { KeyStorageCard } from "./KeyStorageCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
+import { FileEditCard } from "./FileEditCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
 import { PetSettingsCard } from "./PetSettingsCard.js";
@@ -37,7 +38,7 @@ function InlineText({ text }: { text: string }) {
             {seg.text}
           </strong>
         ) : seg.kind === "code" ? (
-          <code key={i} className="rounded bg-[#f2f2f2] px-1 font-mono text-[11px]">
+          <code key={i} className="rounded-sm bg-[#f2f2f2] px-1 font-mono text-[11px]">
             {seg.text}
           </code>
         ) : (
@@ -149,6 +150,9 @@ export function SettingsPage() {
             <ContextSettingsCard />
             {/* 工具调用确认（安全设置）：与模型设置同组——两者都是「生成行为」的边界 */}
             <HitlPolicyCard />
+            {/* 文件编辑：可写根是「智能体能改哪些文件」的唯一开关，
+                紧跟在工具调用确认之后——两者一起构成本机的写操作边界。 */}
+            <FileEditCard />
             {/* 本机存储水位：紧跟在安全设置之后——两者都是「本机的边界」，
                 一条管「智能体会做什么」，一条管「本机还剩多少空间」。 */}
             <StorageUsageCard />
@@ -264,7 +268,7 @@ function ProfileSection() {
               setDisplayName(e.target.value);
               setSaved(false);
             }}
-            className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
+            className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]"
           />
         </label>
         {error && <div className="text-[12px] text-red-600">{error}</div>}
@@ -366,7 +370,7 @@ function AppearanceSection() {
               setAccentError(null);
             }}
             onBlur={(e) => applyCustom(e.target.value)}
-            className="w-[92px] rounded-lg border border-line px-2 py-1 text-[12px] outline-none focus:border-[#bbb]"
+            className="w-[92px] rounded-lg border border-line px-2 py-1 text-[12px] outline-hidden focus:border-[#bbb]"
           />
         </label>
         <button

@@ -10,7 +10,7 @@ import { useUiStore } from "../store/ui.js";
  */
 
 const CARD = "rounded-xl border border-[#ececec] bg-white p-3 shadow-card";
-const LINK = "rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink";
+const LINK = "rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink";
 
 export function InfohubHomeCard() {
   const available = useInfohubStore((s) => s.available);
@@ -34,7 +34,7 @@ export function InfohubHomeCard() {
       <section className={CARD} aria-label="本机归档">
         <div className="flex items-center gap-2">
           <div className="text-[12px] font-bold text-[#777]">本机归档</div>
-          <span className="rounded border border-line px-1.5 text-[10px] text-muted">未连接</span>
+          <span className="rounded-sm border border-line px-1.5 text-[10px] text-muted">未连接</span>
           <button
             type="button"
             disabled={busy === "connecting"}
@@ -60,7 +60,7 @@ export function InfohubHomeCard() {
     <section className={CARD} aria-label="本机归档">
       <div className="mb-1.5 flex items-center gap-2">
         <div className="text-[12px] font-bold text-[#777]">本机归档</div>
-        <span className="rounded border border-line bg-[#fafafa] px-1.5 text-[10px] text-muted">已连接</span>
+        <span className="rounded-sm border border-line bg-[#fafafa] px-1.5 text-[10px] text-muted">已连接</span>
         <div className="ml-auto flex items-center gap-1">
           <button type="button" className={LINK} onClick={() => openInfohub({ tab: "search" })}>
             检索归档

@@ -1,4 +1,5 @@
 import { buildChartToolBridge } from "../charts/tools.js";
+import { buildFileToolBridgeIfAvailable } from "../fileEdit/tools.js";
 import { buildInfohubToolsIfConnected } from "../infohub/tools.js";
 import { buildToolBridge } from "../mcp/index.js";
 import { mcpRegistry } from "../mcp/store.js";
@@ -37,6 +38,17 @@ export const wikiProvider: CapabilityProvider = {
   id: "wiki",
   origin: "builtin",
   build: () => buildWikiToolBridge(),
+};
+
+/**
+ * 文件编辑工具（d.55 · file_patch / file_read）：只在**桌面桥存在且至少有一条可写根**时注入。
+ * 浏览器端与未配置可写根时返回 null——绝不为了「能用」造一个内存假桥，
+ * 那会让用户在浏览器里以为文件真被改了（产品决策，见 lib/fileEdit/tools.ts）。
+ */
+export const filesProvider: CapabilityProvider = {
+  id: "files",
+  origin: "builtin",
+  build: () => buildFileToolBridgeIfAvailable(),
 };
 
 /**

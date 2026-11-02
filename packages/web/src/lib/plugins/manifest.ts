@@ -37,32 +37,40 @@ function dropBlankEntries<T extends z.ZodTypeAny>(schema: T) {
   }, schema);
 }
 
+/**
+ * zod 4 把 v3 的 `required_error` 与 `invalid_type_error` 合并成了单个 `error`。
+ * 传函数形式时可以按 `issue.input` 是否为 `undefined` 区分「字段缺失」与「类型不对」，
+ * 这里把原来的两套中文文案原样保留，保证界面上的报错与 zod 3 时期逐字一致。
+ */
+function typeParams(missing: string, wrongType?: string) {
+  return {
+    error: (issue: { input?: unknown }): string =>
+      issue.input === undefined ? missing : (wrongType ?? missing),
+  };
+}
+
 const SkillSpecSchema = z.object(
   {
-    name: z
-      .string({ required_error: "缺少技能名", invalid_type_error: "技能名必须是文本" })
+    name: z.string(typeParams("缺少技能名", "技能名必须是文本"))
       .trim()
       .min(1, "技能名不能为空")
       .max(SKILL_NAME_MAX, `技能名最多 ${SKILL_NAME_MAX} 字`),
-    description: z
-      .string({ invalid_type_error: "技能描述必须是文本" })
+    description: z.string(typeParams("技能描述必须是文本"))
       .trim()
       .max(SKILL_DESCRIPTION_MAX, `技能描述最多 ${SKILL_DESCRIPTION_MAX} 字`)
       .default(""),
-    instructions: z
-      .string({ required_error: "缺少技能指令", invalid_type_error: "技能指令必须是文本" })
+    instructions: z.string(typeParams("缺少技能指令", "技能指令必须是文本"))
       .trim()
       .min(1, "技能指令不能为空")
       .max(SKILL_INSTRUCTIONS_MAX, `技能指令最多 ${SKILL_INSTRUCTIONS_MAX} 字`),
     triggers: dropBlankEntries(
       z
         .array(
-          z
-            .string({ invalid_type_error: "触发词必须是文本" })
+          z.string(typeParams("触发词必须是文本"))
             .trim()
             .min(1, "触发词不能为空")
             .max(SKILL_TRIGGER_MAX, `单个触发词最多 ${SKILL_TRIGGER_MAX} 字`),
-          { invalid_type_error: "触发词必须是数组" },
+          typeParams("触发词必须是数组"),
         )
         .max(SKILL_TRIGGERS_MAX, `触发词最多 ${SKILL_TRIGGERS_MAX} 个`)
         .default([]),
@@ -70,47 +78,42 @@ const SkillSpecSchema = z.object(
     tags: dropBlankEntries(
       z
         .array(
-          z
-            .string({ invalid_type_error: "标签必须是文本" })
+          z.string(typeParams("标签必须是文本"))
             .trim()
             .min(1, "标签不能为空")
             .max(SKILL_TAG_MAX, `单个标签最多 ${SKILL_TAG_MAX} 字`),
-          { invalid_type_error: "标签必须是数组" },
+          typeParams("标签必须是数组"),
         )
         .max(SKILL_TAGS_MAX, `标签最多 ${SKILL_TAGS_MAX} 个`)
         .default([]),
     ),
   },
-  { invalid_type_error: "技能必须是 JSON 对象" },
+  typeParams("技能必须是 JSON 对象"),
 );
 
 const McpServerSpecSchema = z
   .object(
     {
-      key: z
-        .string({ required_error: "缺少服务 key", invalid_type_error: "服务 key 必须是文本" })
+      key: z.string(typeParams("缺少服务 key", "服务 key 必须是文本"))
         .trim()
         .regex(
           /^[a-z0-9][a-z0-9-]{0,31}$/,
           "服务 key 只能用小写字母、数字和连字符，且以字母或数字开头（≤32）",
         ),
-      name: z
-        .string({ required_error: "缺少服务名", invalid_type_error: "服务名必须是文本" })
+      name: z.string(typeParams("缺少服务名", "服务名必须是文本"))
         .trim()
         .min(1, "服务名不能为空")
         .max(MCP_SERVER_NAME_MAX, `服务名最多 ${MCP_SERVER_NAME_MAX} 字`),
-      url: z
-        .string({ required_error: "缺少服务地址", invalid_type_error: "服务地址必须是文本" })
+      url: z.string(typeParams("缺少服务地址", "服务地址必须是文本"))
         .trim()
         .min(1, "服务地址不能为空")
         .max(MCP_SERVER_URL_MAX, `服务地址最多 ${MCP_SERVER_URL_MAX} 字符`),
-      description: z
-        .string({ invalid_type_error: "服务描述必须是文本" })
+      description: z.string(typeParams("服务描述必须是文本"))
         .trim()
         .max(MCP_SERVER_DESCRIPTION_MAX, `服务描述最多 ${MCP_SERVER_DESCRIPTION_MAX} 字`)
         .default(""),
     },
-    { invalid_type_error: "MCP 服务必须是 JSON 对象" },
+    typeParams("MCP 服务必须是 JSON 对象"),
   )
   .superRefine((server, ctx) => {
     let url: URL;
@@ -141,45 +144,41 @@ const PluginManifestSchema = z
   .object(
     {
       schemaVersion: z.union([z.literal(1), z.literal(2)], {
-        errorMap: () => ({ message: `仅支持 schemaVersion: ${PLUGIN_SCHEMA_VERSIONS.join(" 或 ")}` }),
+        // zod 4 去掉了 errorMap，直接给一个字符串即覆盖这一层的所有报错文案。
+        error: `仅支持 schemaVersion: ${PLUGIN_SCHEMA_VERSIONS.join(" 或 ")}`,
       }),
-      id: z
-        .string({ required_error: "缺少插件 id", invalid_type_error: "插件 id 必须是文本" })
+      id: z.string(typeParams("缺少插件 id", "插件 id 必须是文本"))
         .trim()
         .regex(
           /^[a-z0-9][a-z0-9._-]{0,63}$/,
           "插件 id 只能用小写字母、数字、点、下划线和连字符，且以字母或数字开头（≤64）",
         ),
-      name: z
-        .string({ required_error: "缺少插件名", invalid_type_error: "插件名必须是文本" })
+      name: z.string(typeParams("缺少插件名", "插件名必须是文本"))
         .trim()
         .min(1, "插件名不能为空")
         .max(64, "插件名最多 64 字"),
-      version: z
-        .string({ required_error: "缺少版本号", invalid_type_error: "版本号必须是文本" })
+      version: z.string(typeParams("缺少版本号", "版本号必须是文本"))
         .trim()
         .min(1, "版本号不能为空")
         .max(32, "版本号最多 32 字"),
-      description: z
-        .string({ invalid_type_error: "插件描述必须是文本" })
+      description: z.string(typeParams("插件描述必须是文本"))
         .trim()
         .max(200, "插件描述最多 200 字")
         .default(""),
-      author: z
-        .string({ invalid_type_error: "作者名必须是文本" })
+      author: z.string(typeParams("作者名必须是文本"))
         .trim()
         .max(64, "作者名最多 64 字")
         .default(""),
       skills: z
-        .array(SkillSpecSchema, { invalid_type_error: "技能列表必须是数组" })
+        .array(SkillSpecSchema, typeParams("技能列表必须是数组"))
         .max(MAX_PLUGIN_SKILLS, `单个插件最多 ${MAX_PLUGIN_SKILLS} 个技能`)
         .default([]),
       mcpServers: z
-        .array(McpServerSpecSchema, { invalid_type_error: "MCP 服务列表必须是数组" })
+        .array(McpServerSpecSchema, typeParams("MCP 服务列表必须是数组"))
         .max(MAX_PLUGIN_MCP_SERVERS, `单个插件最多 ${MAX_PLUGIN_MCP_SERVERS} 台 MCP 服务`)
         .default([]),
     },
-    { invalid_type_error: "插件清单必须是 JSON 对象" },
+    typeParams("插件清单必须是 JSON 对象"),
   )
   .superRefine((manifest, ctx) => {
     if (manifest.schemaVersion === 1) {
@@ -243,11 +242,13 @@ export class PluginManifestError extends Error {
   }
 }
 
-function pathLabel(path: (string | number)[]): string {
+function pathLabel(path: readonly PropertyKey[]): string {
   let out = "";
   for (const part of path) {
     if (typeof part === "number") out += `[${part}]`;
-    else out += out ? `.${part}` : part;
+    // zod 4 把 issue.path 的类型从 (string | number)[] 放宽成了 PropertyKey[]（可能含 symbol）。
+    // 实际只会出现字符串与数字；这里用 String() 兜底，避免 symbol 拼接时直接抛 TypeError。
+    else out += out ? `.${String(part)}` : String(part);
   }
   return out;
 }

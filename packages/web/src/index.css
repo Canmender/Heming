@@ -1,6 +1,27 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+ * Tailwind v4 入口写法：
+ * - v3 的三条 @tailwind 指令（base/components/utilities）合并成一条 @import；
+ * - @config 把现有 tailwind.config.js 接回来，本仓自定义色板（line / line-soft / ink /
+ *   muted / panel）与阴影（card / float）因此保持**同名同值**，500+ 处 className 不用改；
+ * - 迁移目标是「观感与 v3 逐像素一致」，所以不改任何 token 取值。
+ */
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+/*
+ * v4 把默认边框色从 v3 的 gray-200 改成了 currentColor —— 所有没写颜色的 border
+ * 会从浅灰变成正文黑，观感差很多。这里在 base 层把默认值恢复成 v3 的 #e5e7eb；
+ * 显式颜色工具类（border-line / border-ink 等）在 utilities 层，优先级更高，不受影响。
+ */
+@layer base {
+  *,
+  ::before,
+  ::after,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: #e5e7eb;
+  }
+}
 
 body {
   @apply bg-white text-ink antialiased;

@@ -331,6 +331,60 @@ describe("回合事件日志（G6）", () => {
     await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
     expect(finishText(send)).toBe("答案");
   });
+
+  it("分叉回合：turn_start 带上 forkedFrom（从哪个回合哪一条之后来的）", async () => {
+    const items: { type: string; [k: string]: unknown }[] = [];
+    const { deps } = makeDeps([{ text: "答案", calls: [] }], {
+      execute: async () => ({ text: "ok", ok: true }),
+      rollout: (item) => items.push(item),
+    });
+    (deps as unknown as { forkedFrom?: { streamId: string; seq: number } }).forkedFrom = {
+      streamId: "src",
+      seq: 4,
+    };
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "继续", deps);
+
+    expect(items[0]).toMatchObject({
+      type: "turn_start",
+      forkedFrom: { streamId: "src", seq: 4 },
+    });
+    // 普通回合不带这个字段（不是分叉就别留来源）
+    expect(items[0]).not.toHaveProperty("forkedFrom", undefined);
+  });
+
+  it("分叉前缀接在真实历史之后、本轮 user 之前（压缩只动前面的历史）", async () => {
+    const prefix: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          { id: "t1", type: "function", function: { name: "srv__read", arguments: '{"path":"a.md"}' } },
+        ],
+      },
+      { role: "tool", content: "a.md 内容", tool_call_id: "t1", name: "srv__read" },
+    ];
+    const { deps, requests } = makeDeps([{ text: "答案", calls: [] }], {
+      execute: async () => ({ text: "ok", ok: true }),
+    });
+    let preparedInput: ChatMessage[] = [];
+    const withFork = deps as unknown as {
+      forkPrefix?: ChatMessage[];
+      prepareHistory?: (rows: ChatMessage[]) => Promise<ChatMessage[]>;
+    };
+    withFork.forkPrefix = prefix;
+    withFork.prepareHistory = async (rows) => {
+      preparedInput = rows;
+      return rows;
+    };
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "换个做法", deps);
+
+    // 前缀出现在 prepareHistory 的输入末尾（置后，才不会被早期对话压缩吃掉）
+    expect(preparedInput.slice(-2)).toEqual(prefix);
+    // 请求顺序：system → 历史 → 重建前缀 → 本轮 user
+    expect(requests[0]!.slice(-3)).toEqual([...prefix, { role: "user", content: "换个做法" }]);
+  });
 });
 
 describe("按需工具发现（tool_search）", () => {

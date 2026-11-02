@@ -157,7 +157,7 @@ export function AutomationPage() {
           <button
             type="button"
             onClick={() => openInfohub()}
-            className="rounded border border-[#e5d5a8] px-2 py-0.5 text-[10px] hover:bg-[#fff8e1]"
+            className="rounded-sm border border-[#e5d5a8] px-2 py-0.5 text-[10px] hover:bg-[#fff8e1]"
           >
             去连接
           </button>
@@ -239,7 +239,7 @@ export function AutomationPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-[13px] font-semibold">{task.name}</span>
-                        <span className="rounded border border-line px-1.5 py-0.5 text-[9px] text-[#555]">
+                        <span className="rounded-sm border border-line px-1.5 py-0.5 text-[9px] text-[#555]">
                           {actionLabel(task.kind)}
                         </span>
                       </div>
@@ -458,7 +458,7 @@ function AutomationEditor({
           <button
             type="button"
             onClick={onClose}
-            className="rounded px-2 py-0.5 text-[11px] text-muted hover:bg-[#f2f2f2] hover:text-ink"
+            className="rounded-sm px-2 py-0.5 text-[11px] text-muted hover:bg-[#f2f2f2] hover:text-ink"
           >
             关闭
           </button>
@@ -473,7 +473,7 @@ function AutomationEditor({
             ref={nameRef}
             value={draft.name}
             onChange={(e) => setDraft((current) => ({ ...current, name: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-line px-2.5 py-1.5 text-[12px] outline-none focus:border-[#bbb]"
+            className="mt-1 w-full rounded-md border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
           />
 
           <label className="mt-3 block text-[11px] font-medium text-[#555]" htmlFor="automation-kind">
@@ -488,7 +488,7 @@ function AutomationEditor({
                 kind: e.target.value === "infohub.agenda" ? "infohub.agenda" : "infohub.sync",
               }))
             }
-            className="mt-1 w-full rounded-md border border-line bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-[#bbb]"
+            className="mt-1 w-full rounded-md border border-line bg-white px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
           >
             <option value="infohub.sync">{actionLabel("infohub.sync")}</option>
             <option value="infohub.agenda">{actionLabel("infohub.agenda")}</option>
@@ -600,7 +600,7 @@ function AutomationEditor({
                         : current,
                     )
                   }
-                  className="rounded-md border border-line px-2 py-1 text-[12px] outline-none focus:border-[#bbb]"
+                  className="rounded-md border border-line px-2 py-1 text-[12px] outline-hidden focus:border-[#bbb]"
                 />
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -645,7 +645,7 @@ function AutomationEditor({
                       : current,
                   )
                 }
-                className="w-24 rounded-md border border-line px-2 py-1 text-[12px] outline-none focus:border-[#bbb]"
+                className="w-24 rounded-md border border-line px-2 py-1 text-[12px] outline-hidden focus:border-[#bbb]"
               />
               <span className="text-[10px] text-muted">
                 {MIN_INTERVAL_MINUTES}–{MAX_INTERVAL_MINUTES} 分钟

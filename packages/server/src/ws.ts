@@ -28,16 +28,15 @@ export function attachWs(
       socket.destroy();
       return;
     }
-    // 首帧鉴权（d.30 · P0-3）：token 不再走 query（query 会进 nginx access_log
-    // 与任何中间代理日志），改由连接建立后的第一帧 {type:"auth", token} 送出。
+    // 首帧鉴权（d.30 · P0-3）：token 只认连接建立后的第一帧 {type:"auth", token}。
     //
-    // ★ query token 兼容路径**本轮保留**：已发布的旧桌面包仍把 token 拼在 query 上，
-    //   服务端升级后不能断链。query token 有效 ⇒ 直接视为已鉴权；无效/没有 ⇒
-    //   **不再 destroy 连接**，而是放它建起来等首帧 auth（鉴权失败由 connection
-    //   回调回 error(unauthorized) 并关闭）。待所有在网客户端升级后再删这条路径。
-    const queryUserId = userIdFromToken(store, url.searchParams.get("token") ?? "");
+    // ★ query token 兼容路径已在「全面升级」轮删除：旧客户端曾把 token 拼在 query 上，
+    //   而 query 会进 nginx access_log 与任何中间代理日志。d.54 起人类 IM 已删除，
+    //   在网旧包（d.35.1.8.0）本就无法与本服务端配套使用，保留这条路径只剩暴露面。
+    //   现在 query 里即使带了 token 也不会被读取——连接照常建立，但保持未鉴权，
+    //   等首帧 auth；10s 内没有合法 auth 帧即断开。
     wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req, queryUserId ?? "");
+      wss.emit("connection", ws, req);
     });
   });
 
@@ -59,14 +58,12 @@ export function attachWs(
   }
 
   // 注：@types/ws 的 "connection" 特化重载只声明 2 参（websocket, request），
-  // 本实现经 wss.emit("connection", ws, req, userId) 传入第三参 userId，
-  // 会落到 EventEmitter 的泛型重载，_req 需显式注解以通过 strict 检查（零运行时影响）。
-  wss.on("connection", (ws: WebSocket, _req: IncomingMessage, queryUserId: string) => {
+  // 本实现经 wss.emit("connection", ws, req) 触发；_req 显式注解以通过 strict 检查。
+  wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
     // —— 首帧鉴权（d.30 · P0-3）——
-    // query token 有效 ⇒ 直接视为已鉴权（旧桌面包兼容路径，本轮不删）；
-    // 否则保持未鉴权，等第一帧 {type:"auth", token}。
-    let userId = queryUserId;
-    let authed = queryUserId !== "";
+    // 连接建立时一律未鉴权：只有收到合法 auth 帧才会登记进 socketsByUser。
+    let userId = "";
+    let authed = false;
     /** 本连接登记进 socketsByUser 的那个 Set；未鉴权时为 undefined（从未登记）。 */
     let registered: Set<WebSocket> | undefined;
 

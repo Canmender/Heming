@@ -1,6 +1,7 @@
 import { CapabilityRegistry } from "./registry.js";
 import {
   chartsProvider,
+  filesProvider,
   infohubProvider,
   mcpProvider,
   selfProvider,
@@ -8,12 +9,20 @@ import {
   wikiProvider,
 } from "./providers.js";
 
-/** 应用默认注册表：先注册内置能力；插件能力由 mcp 提供者统一承载。 */
+/**
+ * 应用默认注册表：先注册内置能力；插件能力由 mcp 提供者统一承载。
+ *
+ * 顺序即优先级（工具名重复时前者胜出），与改前一致并在 `files` 处插入：
+ * `mcp → charts → tone → wiki → files → infohub → self`。
+ * `files` 放在 wiki 之后：wiki 是知识库专用只读工具，名字不会撞；
+ * 放它在 infohub/self 之前，是因为文件编辑比「归档/自我修改」更常用。
+ */
 export const capabilityRegistry = new CapabilityRegistry()
   .register(mcpProvider)
   .register(chartsProvider)
   .register(toneProvider)
   .register(wikiProvider)
+  .register(filesProvider)
   .register(infohubProvider)
   .register(selfProvider);
 
@@ -21,6 +30,7 @@ export { CapabilityRegistry } from "./registry.js";
 export type { CapabilityContext, CapabilityProvider, ToolOrigin } from "./types.js";
 export {
   chartsProvider,
+  filesProvider,
   infohubProvider,
   mcpProvider,
   selfProvider,

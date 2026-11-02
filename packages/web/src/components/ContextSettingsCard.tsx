@@ -28,7 +28,7 @@ const BUDGET_RATIO = 0.6;
 
 const labelCls = "text-[12px] text-muted";
 const selectCls =
-  "mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]";
+  "mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
 const hintCls = "text-[11px] text-muted";
 
 function Switch({

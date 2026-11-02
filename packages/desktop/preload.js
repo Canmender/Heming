@@ -235,6 +235,20 @@ contextBridge.exposeInMainWorld("__heming_pet", {
   },
 });
 
+// —— 文件编辑桥（d.55 · file_patch）——
+// 只暴露三件事：读一个文件、写一批变更、让用户选一个可写根目录。
+// 路径判定（夹在根内、挡软链/硬链）、上限、tmp+rename 原子写全部由主进程
+// file-fs.js 兜底；渲染层传进来的只有「根清单 + 目标绝对路径 + 内容」。
+// 浏览器端没有这个桥，web 侧据此**不注入** file_patch / file_read（见 lib/fileEdit/bridge.ts）。
+contextBridge.exposeInMainWorld("__heming_files", {
+  /** 读一个文件；返回 { ok, content?, bytes?, code?, error? }。 */
+  read: (payload) => ipcRenderer.invoke("file:read", payload),
+  /** 批量写入/删除；返回 { ok, results?, written?, deleted?, error? }。 */
+  write: (payload) => ipcRenderer.invoke("file:write", payload),
+  /** 系统目录选择器；取消返回 null。 */
+  pickRoot: () => ipcRenderer.invoke("file:pick-root"),
+});
+
 // —— 信息中枢 · InfoHub 本机桥（d.45）——
 // 归档数据留在本机：主进程用 stdio 拉起 Python 桥，这里只转发白名单方法。
 // 浏览器端没有这个桥，页面据此显示「仅桌面端可用」，绝不回退到云端读归档。

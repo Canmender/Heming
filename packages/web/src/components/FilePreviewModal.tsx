@@ -29,7 +29,7 @@ function inline(src: string, key: string): ReactNode[] {
       m[1] !== undefined ? (
         <strong key={`${key}.${n}`}>{m[1]}</strong>
       ) : (
-        <code key={`${key}.${n}`} className="rounded bg-[#f0f0f0] px-1">
+        <code key={`${key}.${n}`} className="rounded-sm bg-[#f0f0f0] px-1">
           {m[2]}
         </code>
       ),
@@ -61,7 +61,7 @@ export function MarkdownLite({ text }: { text: string }) {
       while (i < lines.length && !lines[i].startsWith("```")) buf.push(lines[i++]);
       i += 1;
       out.push(
-        <pre key={`p${out.length}`} className="whitespace-pre-wrap rounded bg-[#f6f6f6] p-2 text-[12px]">{buf.join("\n")}</pre>,
+        <pre key={`p${out.length}`} className="whitespace-pre-wrap rounded-sm bg-[#f6f6f6] p-2 text-[12px]">{buf.join("\n")}</pre>,
       );
       continue;
     }
@@ -165,12 +165,12 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
       </div>
     );
   } else if (kind === "image") {
-    body = <img src={url} alt={file.name} className="mx-auto max-h-[64vh] max-w-full rounded" />;
+    body = <img src={url} alt={file.name} className="mx-auto max-h-[64vh] max-w-full rounded-sm" />;
   } else if (kind === "markdown") {
     body = <MarkdownLite text={text} />;
   } else if (kind === "text") {
     body = (
-      <pre className="whitespace-pre-wrap break-all rounded bg-[#f6f6f6] p-3 text-[12px]">
+      <pre className="whitespace-pre-wrap break-all rounded-sm bg-[#f6f6f6] p-3 text-[12px]">
         {text}
       </pre>
     );
@@ -209,7 +209,7 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
             type="button"
             aria-label="关闭预览"
             onClick={onClose}
-            className="shrink-0 rounded p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
           >
             <XIcon width={16} height={16} aria-hidden="true" />
           </button>

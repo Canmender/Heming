@@ -174,7 +174,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="搜索服务名，如 filesystem / github"
-          className="w-full max-w-[360px] rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-none focus:border-[#bbb]"
+          className="w-full max-w-[360px] rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-hidden focus:border-[#bbb]"
         />
         <div className="flex flex-wrap items-center gap-1">
           {FILTERS.map((f) => (
@@ -227,7 +227,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
           <button
             type="button"
             onClick={() => void load(undefined, { force: true })}
-            className="rounded border border-current px-2 py-0.5"
+            className="rounded-sm border border-current px-2 py-0.5"
           >
             重试
           </button>
@@ -306,7 +306,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
           <span className="text-[13px] font-bold">{entry.title}</span>
           {risk && (
             <span
-              className={`rounded px-1 text-[10px] ${
+              className={`rounded-sm px-1 text-[10px] ${
                 risk.level === "high"
                   ? "bg-[#fdf6f6] text-[#b42318]"
                   : risk.level === "medium"
@@ -319,7 +319,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
             </span>
           )}
           {installed && (
-            <span className="rounded bg-[#f0f0f0] px-1 text-[10px] text-[#666]">已安装</span>
+            <span className="rounded-sm bg-[#f0f0f0] px-1 text-[10px] text-[#666]">已安装</span>
           )}
         </div>
         <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{entry.description || "（无描述）"}</p>

@@ -155,7 +155,7 @@ export function HitlPolicyCard({
           aria-label="免问下限"
           value={policy.floor}
           onChange={(e) => update({ floor: e.target.value as RiskLevel })}
-          className="mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
+          className="mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]"
         >
           {/*
             选项**从 `FLOORS` 渲染**（策略层的唯一权威列表），不另写一份。
@@ -182,7 +182,7 @@ export function HitlPolicyCard({
           aria-label="授权作用域"
           value={policy.scope}
           onChange={(e) => update({ scope: e.target.value as PolicyScope })}
-          className="mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-[#bbb]"
+          className="mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]"
         >
           <option value="global">所有智能体共用</option>
           <option value="per-agent">按智能体分别授权</option>
@@ -241,10 +241,10 @@ export function HitlPolicyCard({
             {rules.map((rule) => (
               <li
                 key={`${rule.tool}-${rule.resource}-${rule.at}`}
-                className="flex flex-wrap items-baseline gap-1.5 rounded border border-line-soft px-2 py-1 text-[11px]"
+                className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]"
               >
                 <span
-                  className={`rounded px-1 ${
+                  className={`rounded-sm px-1 ${
                     rule.effect === "deny"
                       ? "bg-[#fdf0ef] text-[#b42318]"
                       : "bg-[#eef6f0] text-[#1d6b3a]"
@@ -391,10 +391,10 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
   const time = entry.at.slice(0, 16).replace("T", " ");
   const approved = entry.action !== "deny" && entry.action !== "reject";
   return (
-    <li className="flex flex-wrap items-baseline gap-1.5 rounded border border-line-soft px-2 py-1 text-[11px]">
+    <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]">
       <span className="text-[#aaa]">{time}</span>
       <span
-        className={`rounded px-1 text-[#777] ${approved ? "bg-[#eef6f0] text-[#1d6b3a]" : "bg-[#fdf0ef] text-[#b42318]"}`}
+        className={`rounded-sm px-1 text-[#777] ${approved ? "bg-[#eef6f0] text-[#1d6b3a]" : "bg-[#fdf0ef] text-[#b42318]"}`}
       >
         {approved ? "已允许" : "已拒绝"}
       </span>

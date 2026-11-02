@@ -18,6 +18,10 @@ import type {
   RuleEffect,
 } from "./types.js";
 import { RISK_ORDER, ruleResource } from "./classify.js";
+import { FILE_PATCH_TOOL, isFileEditTool, targetsOfCall } from "../fileEdit/ruleTargets.js";
+import { normalizeRuleResource, resourceCovers, type FileRoot } from "../fileEdit/paths.js";
+import { assessPatchSafety } from "../fileEdit/safety.js";
+import { fileRootsStore } from "../fileEdit/roots.js";
 
 /** 策略存储键（带版本后缀，便于将来迁移）。 */
 export const HITL_KEY = "heming.hitl.v1";
@@ -176,6 +180,18 @@ function normalizeRules(raw: unknown): HitlRule[] {
 }
 
 /**
+ * 策略存储的可选依赖（全部可注入，便于单测）。
+ *
+ * - `roots`：可写根清单。文件工具（`file_patch`）的规则匹配与「全在写根内免问」
+ *   都要它；不注入时读设置区的 `fileRootsStore`（localStorage）。
+ * - `outOfRoot`：目标越界时的处理（ask / reject）。
+ */
+export interface HitlPolicyDeps {
+  roots?: () => FileRoot[];
+  outOfRoot?: () => "ask" | "reject";
+}
+
+/**
  * 策略与会话授权的存储。
  *
  * 会话授权**只放内存**（`Map`）：落盘就等于把「本会话」变成了「永久」，
@@ -183,11 +199,22 @@ function normalizeRules(raw: unknown): HitlRule[] {
  */
 export class HitlPolicyStore {
   private readonly storage: StorageLike;
+  private readonly deps: HitlPolicyDeps;
   /** 会话授权：key = `${scope}:${agentId}:${toolName}`。 */
   private readonly session = new Map<string, number>();
 
-  constructor(storage?: StorageLike) {
+  constructor(storage?: StorageLike, deps?: HitlPolicyDeps) {
     this.storage = storage ?? defaultStorage();
+    this.deps = deps ?? {};
+  }
+
+  /** 当前根清单（读失败按「没有根」处理：宁可多问，不要误放行）。 */
+  private roots(): FileRoot[] {
+    try {
+      return this.deps.roots ? this.deps.roots() : fileRootsStore.roots();
+    } catch {
+      return [];
+    }
   }
 
   /** 读当前策略：缺键 / 损坏 / 存储抛错一律回落默认。 */
@@ -277,11 +304,39 @@ export class HitlPolicyStore {
    */
   allowed(call: HitlCall, policy: HitlPolicy, agentId = ""): PolicyOutcome {
     if (policy.mode === "strict") return "ask";
+    /*
+     * 文件补丁：全在可写根内且不含删除 → 免问（规格 §6 的 AutoApprove）。
+     *
+     * 只读根 / 越界不在这里「免问」，也不在这里拒绝——拒绝由工具层按原因给文案，
+     * 闸门这里只回答「免问」还是「问人」。
+     * 补丁解析不出来（格式错、路径越界）时也返回 pass：那种补丁一定写不进磁盘，
+     * 工具层会带着精确原因失败，没必要先弹一次窗。
+     */
+    if (call.name === "file_patch") {
+      return this.patchVerdict(call) === "auto" ? "pass" : "ask";
+    }
     if (this.underFloor(call, policy)) return "pass";
     if (policy.mode === "trusted" && this.granted(agentId, call.name, policy.scope)) {
       return "pass";
     }
     return "ask";
+  }
+
+  /**
+   * 文件补丁的三态安全判定（规格 §6）。
+   *
+   * 走纯函数 `assessPatchSafety`：判定逻辑与「确认卡上怎么解释」共用同一份实现。
+   */
+  private patchVerdict(call: HitlCall): "auto" | "ask" | "reject" {
+    const roots = this.roots();
+    const targets = targetsOfCall(call, roots);
+    if (!targets) return "auto"; // 解析不出来 ⇒ 工具层必定拒绝，不打扰用户
+    return assessPatchSafety({
+      targets: targets.absolute,
+      deletions: targets.deletions,
+      roots,
+      ...(this.deps.outOfRoot ? { outOfRoot: this.deps.outOfRoot() } : {}),
+    }).verdict;
   }
 
   /** 读回全部记住的规则（最坏情况下返回空数组，绝不抛错）。 */
@@ -310,7 +365,18 @@ export class HitlPolicyStore {
   ): void {
     const t = tool.trim().slice(0, 200);
     if (!t) return;
-    const r = (resource.trim() || RULE_WILDCARD).slice(0, 200);
+    /*
+     * 资源归一化与匹配共用 `normalizeRuleResource`（规格 §7）。
+     * 不共用的话会出现「写进去匹配不上」的幽灵规则：用户明明点了允许，
+     * 下次还是弹窗，而设置区里那条规则看着没毛病。
+     */
+    const r = normalizeRuleResource(resource.trim() || RULE_WILDCARD).slice(0, 200);
+    /*
+     * ★ 文件工具**不接受**「整个工具放行」（`*` 的 allow）。
+     * 它们天然是多文件写，只能按路径前缀授权；这条兜底与 `rememberDecision`
+     * 的分支一起挡住「某个调用方顺手传了 `*`」的情况。
+     */
+    if (effect === "allow" && r === RULE_WILDCARD && isFileEditTool(t)) return;
     const agentId = agent?.id.trim().slice(0, 200) || undefined;
     const next: HitlRule[] = [
       {
@@ -329,6 +395,59 @@ export class HitlPolicyStore {
       this.storage.setItem(HITL_RULES_KEY, JSON.stringify(next));
     } catch {
       /* 存不下退化为「仅本次生效」，不阻断对话 */
+    }
+  }
+
+  /**
+   * 一次写入多条规则（文件工具的「按目录前缀记住」）。
+   *
+   * 与 `rememberRule` 的区别：
+   * - 归一化后**去重**（同一目录前缀只存一条，大小写不敏感）；
+   * - **绝不写 `*`**：文件编辑只有路径前缀授权的形状（Lead 定稿）；
+   * - 一次读写完成，避免多目标补丁产生 N 次 localStorage 往返。
+   */
+  rememberRules(
+    tool: string,
+    resources: string[],
+    effect: RuleEffect,
+    agent?: { id: string; name?: string },
+  ): void {
+    const t = tool.trim().slice(0, 200);
+    if (!t) return;
+    const fresh: HitlRule[] = [];
+    const seen = new Set<string>();
+    const at = new Date().toISOString();
+    const agentId = agent?.id.trim().slice(0, 200) || undefined;
+    for (const raw of resources) {
+      const r = normalizeRuleResource(String(raw ?? "").trim()).slice(0, 200);
+      if (!r || r === RULE_WILDCARD) continue;
+      const key = r.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      fresh.push({
+        tool: t,
+        resource: r,
+        effect,
+        at,
+        ...(agentId ? { agentId } : {}),
+        ...(agentId && agent?.name ? { agentName: agent.name.slice(0, 200) } : {}),
+      });
+    }
+    if (fresh.length === 0) return;
+    const freshKeys = new Set(fresh.map((rule) => rule.resource.toLowerCase()));
+    const kept = this.rules().filter(
+      (rule) =>
+        !(
+          rule.tool === t &&
+          rule.agentId === agentId &&
+          freshKeys.has(rule.resource.toLowerCase())
+        ),
+    );
+    const next = [...fresh, ...kept].slice(0, MAX_HITL_RULES);
+    try {
+      this.storage.setItem(HITL_RULES_KEY, JSON.stringify(next));
+    } catch {
+      /* 同上：存不下只影响「记住」，不影响本次调用 */
     }
   }
 
@@ -353,19 +472,71 @@ export class HitlPolicyStore {
    * 那是显式、可见、可一键改回的全局设置。
    */
   ruleFor(call: HitlCall, agentId = ""): RuleEffect | null {
-    const resource = ruleResource(call.argsJson);
-    const rules = this.rules();
-    const match = (effect: RuleEffect) =>
-      rules.find(
-        (r) =>
-          r.effect === effect &&
-          r.tool === call.name &&
-          (r.resource === resource || r.resource === RULE_WILDCARD) &&
-          (!r.agentId || r.agentId === agentId),
-      );
-    if (match("deny")) return "deny";
+    // 规则按「工具 + 资源 + 作用域」三件事匹配：工具名对不上的一律不参与。
+    const rules = this.rules().filter(
+      (r) => r.tool === call.name && (!r.agentId || r.agentId === agentId),
+    );
+    const isPatch = call.name === FILE_PATCH_TOOL;
+    const patchTargets = isPatch ? targetsOfCall(call, this.roots()) : null;
+    const resources =
+      isPatch && patchTargets && patchTargets.absolute.length > 0
+        ? patchTargets.absolute
+        : this.resourcesOf(call);
+
+    /*
+     * 1. `deny` 永远优先。
+     *
+     * 文件补丁的规则是**路径前缀**：只要有一个目标命中拒绝规则，整份补丁就拒绝——
+     * 「补丁里一半在禁区、一半在外」时，按拒绝处理才是安全方向。
+     * 通配 deny（`*`）也照旧生效：用户显式说「这个工具全拒」，那是收紧而不是放宽。
+     */
+    const denyHit = rules.some(
+      (r) => r.effect === "deny" && resources.some((res) => resourceCovers(r.resource, res)),
+    );
+    if (denyHit) return "deny";
+
+    // 2. `danger` 不按规则放行（红线不变：按资源记住危险工具 = 永久放行口子）
     if (call.risk === "danger") return null;
-    if (match("allow")) return "allow";
+
+    const allows = rules.filter((r) => r.effect === "allow");
+    /*
+     * 3. 多目标写（file_patch）：**每个**目标都要被某条路径规则覆盖。
+     *
+     * 通配规则在这里不算数——「允许 file_patch 的所有调用」等于把整个工具放行，
+     * 与规格 §7 的红线冲突；只能按路径前缀授权。
+     *
+     * ★ 含删除/改名语义时**不吃任何允许规则**：删除不可逆，
+     *   用户当初记住「这个目录可以改」不会预期「删文件也不问」。
+     *   这类补丁照旧走闸门问一次（deny 规则仍然优先，见上面第 1 步）。
+     */
+    if (isPatch) {
+      if (!patchTargets || patchTargets.deletions > 0) return null;
+      const pathAllows = allows.filter((r) => r.resource !== RULE_WILDCARD);
+      if (resources.length === 0) return null;
+      return resources.every((res) => pathAllows.some((r) => resourceCovers(r.resource, res)))
+        ? "allow"
+        : null;
+    }
+
+    if (allows.some((r) => resourceCovers(r.resource, resources[0]))) return "allow";
     return null;
+  }
+
+  /**
+   * 本次调用用于规则匹配的资源清单。
+   *
+   * 文件工具用**解析后的绝对路径**（规则是按目录前缀写的，相对路径匹配不上）；
+   * 其余工具沿用 `ruleResource` 的老口径（参数摘要字段），行为与改前一致。
+   */
+  private resourcesOf(call: HitlCall): string[] {
+    if (isFileEditTool(call.name)) {
+      try {
+        const targets = targetsOfCall(call, this.roots());
+        if (targets && targets.absolute.length > 0) return targets.absolute;
+      } catch {
+        /* 解析失败回落老口径 */
+      }
+    }
+    return [ruleResource(call.argsJson)];
   }
 }

@@ -318,6 +318,22 @@ export interface TriggerDeps {
    * 回调异常一律吞掉——记录失败绝不能影响一次已经生成好的回答。
    */
   onRollout?: (item: RolloutInput) => void;
+  /**
+   * 分叉来源（d.56）：本回合从哪个回合的第 `seq` 条 item 之后接着执行。
+   *
+   * 只写进日志的 `turn_start`，不影响请求组装——服务端不知道「这是分叉」，
+   * 也不需要知道（§7：分叉是任务区的能力，不往消息流里塞系统提示）。
+   */
+  forkedFrom?: { streamId: string; seq: number };
+  /**
+   * 分叉前缀（d.56）：由 `buildForkPrefix` 从本机日志重建的 extra
+   * （`assistant.tool_calls` + `tool` 结果，等长同序）。
+   *
+   * 接在**真实会话历史之后**再走 `prepareHistory`：置后是刻意的——
+   * 早期对话压缩只动前面的历史，重建出来的前缀必须原样留给模型，
+   * 否则「分叉」会退化成「重跑」。
+   */
+  forkPrefix?: ChatMessage[];
 }
 
 /**
@@ -478,6 +494,7 @@ export function runAgentMentions(
           streamId,
           agentId: m.agentId,
           userText,
+          ...(deps.forkedFrom ? { forkedFrom: deps.forkedFrom } : {}),
         });
         // E2E 串行闸与错误上行（fix I2）——先于 profile 判定定义：无绑定分支也要发信封错误
         let idx = 0;
@@ -545,6 +562,14 @@ export function runAgentMentions(
           settle({ status: "error", error: (e as Error)?.message?.slice(0, 300) || "读取历史失败" });
           throw e;
         }
+        /**
+         * 分叉前缀（d.56）：重建出来的 extra 接在**真实历史之后**，
+         * 之后所有组装（含 prepareHistory 的压缩与溢出重试）都看这一份——
+         * 压缩只动前面，前缀原样保留；否则分叉会退化成重跑。
+         */
+        const historyWithFork: ChatMessage[] = deps.forkPrefix?.length
+          ? [...history, ...deps.forkPrefix]
+          : history;
         // 系统提示词：deps.buildSystemPrompt 存在时优先（触发端在此拼装记忆/技能），
         // 抛错回落 getPrompt 的原提示词——上下文组装失败不影响生成
         let prompt: string;
@@ -608,15 +633,15 @@ export function runAgentMentions(
           aggressive?: 1 | 2,
           extra: ChatMessage[] = [],
         ): Promise<ChatMessage[]> => {
-          let rows: ChatMessage[] = history;
+          let rows: ChatMessage[] = historyWithFork;
           if (deps.prepareHistory) {
             try {
               rows =
                 aggressive === undefined
-                  ? await deps.prepareHistory(history, m.agentId)
-                  : await deps.prepareHistory(history, m.agentId, { aggressive });
+                  ? await deps.prepareHistory(historyWithFork, m.agentId)
+                  : await deps.prepareHistory(historyWithFork, m.agentId, { aggressive });
             } catch {
-              rows = history; // 压缩失败不阻断生成：回落原样历史
+              rows = historyWithFork; // 压缩失败不阻断生成：回落原样历史
             }
           }
           /** 本轮 user 行：触发端可附文档文本与图片内容片；缺省/抛错回落纯文本行。 */
