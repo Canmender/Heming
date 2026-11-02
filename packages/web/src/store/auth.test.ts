@@ -3,9 +3,10 @@ import { useAuthStore } from "./auth.js";
 
 describe("auth store", () => {
   beforeEach(() => {
+    useAuthStore.getState().logout();
     localStorage.clear();
     vi.restoreAllMocks();
-    useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
+    useAuthStore.setState({ token: null, user: null, status: "idle", error: null, restoreError: null });
   });
 
   it("登录成功写入 token 与 user", async () => {
@@ -70,8 +71,7 @@ describe("auth store", () => {
     expect(init.method).toBe("PUT");
   });
 
-  it("运行中请求 401（onUnauthorized 已注册）→ logout 清会话", async () => {
-    // 模拟已登录会话
+  it("运行中请求 401（onUnauthorized 已注册）→ logout 清会话", async () => {    // 模拟已登录会话
     localStorage.setItem("heming.token", "t1");
     useAuthStore.setState({
       token: "t1",
@@ -98,6 +98,58 @@ describe("auth store", () => {
     expect(s.token).toBeNull();
     expect(s.status).toBe("idle");
     expect(localStorage.getItem("heming.token")).toBeNull();
+  });
+
+  it("恢复时网络失败：保留 token 并自动重试，恢复后回到 authed", async () => {
+    vi.useFakeTimers();
+    try {
+      localStorage.setItem("heming.token", "t1");
+      const { setToken } = await import("../lib/api.js");
+      setToken("t1");
+      const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(alice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+
+      await useAuthStore.getState().restore();
+
+      // 网络失败不是「登录失效」：token 必须留着，状态走重连面板
+      expect(useAuthStore.getState().status).toBe("pending");
+      expect(useAuthStore.getState().restoreError).toContain("网络异常");
+      expect(localStorage.getItem("heming.token")).toBe("t1");
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.waitFor(() => expect(useAuthStore.getState().status).toBe("authed"));
+      expect(useAuthStore.getState().user?.username).toBe("alice");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      useAuthStore.getState().logout();
+      vi.useRealTimers();
+    }
+  });
+
+  it("恢复时 5xx：同样保留 token，不当作登录失效", async () => {
+    localStorage.setItem("heming.token", "t1");
+    const { setToken } = await import("../lib/api.js");
+    setToken("t1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "bad gateway" }), {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await useAuthStore.getState().restore();
+
+    expect(useAuthStore.getState().status).toBe("pending");
+    expect(useAuthStore.getState().restoreError).toBe("bad gateway");
+    expect(localStorage.getItem("heming.token")).toBe("t1");
   });
 
   // 放在最后：resetModules 会重建模块注册表，放在前面会污染前面用例的动态 import

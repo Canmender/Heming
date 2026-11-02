@@ -11,7 +11,6 @@ import {
   PackageIcon,
   TaskIcon,
   SearchIcon,
-  FolderIcon,
   InfoHubIcon,
   AutomationIcon,
   StaffIcon,
@@ -37,9 +36,10 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
   { page: "infohub", label: "信息中枢", icon: <InfoHubIcon width={17} height={17} /> },
   // 自动化（d.47）：与信息中枢同口径，不占数字键
   { page: "automations", label: "自动化", icon: <AutomationIcon width={17} height={17} /> },
-  { page: "workspace", label: "工作区", icon: <FolderIcon width={17} height={17} />, digit: "2" },
-  // 任务区是新页，拿 8（老页编号不动，见设置区的注释）
-  { page: "tasks", label: "任务区", icon: <TaskIcon width={17} height={17} />, digit: "8" },
+  // 团队看板（原工作区）：真实成员的任务 / 日程摘要两列铺开
+  { page: "workspace", label: "团队看板", icon: <TeamIcon width={17} height={17} />, digit: "2" },
+  // 通用智能体（原任务区）：页内直接向智能体派活并运行
+  { page: "tasks", label: "通用智能体", icon: <TaskIcon width={17} height={17} />, digit: "8" },
   { page: "skills", label: "技能区", icon: <SkillsIcon width={17} height={17} />, digit: "3" },
   // 插件区是新页，拿 0（老页编号不动）；1–9 之外只剩这个键位空着
   { page: "plugins", label: "插件区", icon: <PackageIcon width={17} height={17} />, digit: "0" },

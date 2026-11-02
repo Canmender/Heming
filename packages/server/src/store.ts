@@ -31,6 +31,13 @@ export interface Store {
   createUser(username: string, passwordHash: string, displayName: string): User;
   findUserByUsername(username: string): { user: User; passwordHash: string } | null;
   findUserById(id: string): User | null;
+  /**
+   * 登录会话：只存 token 的 SHA-256 摘要（原文不落库）。
+   * 会话与用户数据同库持久化，服务重启后已登录设备无需重新登录。
+   */
+  addSession(tokenDigest: string, userId: string): void;
+  /** 按 token 摘要取 userId；不存在返回 null。 */
+  sessionUserId(tokenDigest: string): string | null;
   /** avatar 省略时保留原值。返回新 User 对象（见 createMemoryStore 内注释）。 */
   updateProfile(userId: string, patch: { displayName: string; avatar?: string }): User;
   /**
@@ -115,6 +122,8 @@ export interface Store {
 export function createMemoryStore(): Store {
   const users = new Map<string, { user: User; passwordHash: string }>();
   const usersByName = new Map<string, string>();
+  /** 登录会话（token 摘要 → userId）；进程内实现，sqlite 侧对应 sessions 表。 */
+  const sessions = new Map<string, string>();
   const conversations = new Map<
     string,
     {
@@ -158,6 +167,12 @@ export function createMemoryStore(): Store {
     },
     findUserById(id) {
       return users.get(id)?.user ?? null;
+    },
+    addSession(tokenDigest, userId) {
+      sessions.set(tokenDigest, userId);
+    },
+    sessionUserId(tokenDigest) {
+      return sessions.get(tokenDigest) ?? null;
     },
     updateProfile(userId, patch) {
       const row = users.get(userId);

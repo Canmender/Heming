@@ -52,7 +52,7 @@ function FindingRow({ finding }: { finding: StaffFinding }) {
     openInfohub({ tab: "agenda" });
   }
 
-  const actionLabel = finding.action?.kind === "open-task" ? "去任务区" : "看日程";
+  const actionLabel = finding.action?.kind === "open-task" ? "去通用智能体" : "看日程";
 
   return (
     <div className="flex flex-wrap items-start gap-2 rounded-lg border border-line-soft px-2.5 py-2">

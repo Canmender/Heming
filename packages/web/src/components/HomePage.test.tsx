@@ -241,7 +241,7 @@ describe("HomePage", () => {
     expect(screen.getByText("和小鸣")).toBeInTheDocument();
 
     act(() => useChatStore.setState({ agentsRoster: [] }));
-    expect(screen.getByText("暂无智能体，可在工作区创建")).toBeInTheDocument();
+    expect(screen.getByText("暂无智能体，可在智能体页创建")).toBeInTheDocument();
   });
 
   it("系统状态三行与最新资讯三卡", async () => {

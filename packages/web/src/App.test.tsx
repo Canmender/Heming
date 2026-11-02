@@ -34,6 +34,11 @@ function jsonRes(body: unknown, status = 200): Response {
   });
 }
 
+// 外层先清一次：网络失败用例会排自动重试定时器，避免跨用例泄漏
+beforeEach(() => {
+  useAuthStore.getState().logout();
+});
+
 const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
 
 /** 按 URL 分发：/api/me 返回用户，/api/files 返回共享文件列表，工作区/健康等返回空集合，其余 404。 */
@@ -117,7 +122,7 @@ describe("App 认证门禁", () => {
     );
   });
 
-  it("有 token 但 fetchMe 失败：清 token 回到登录页", async () => {
+  it("有 token 但服务端返回 401：清 token 回到登录页", async () => {
     setToken("stale-token");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ error: "unauthorized" }), {
@@ -132,6 +137,18 @@ describe("App 认证门禁", () => {
     expect(screen.queryByText("已登录")).not.toBeInTheDocument();
     expect(localStorage.getItem("heming.token")).toBeNull();
     expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it("有 token 但网络失败：保留 token 显示重连面板，不回落登录页", async () => {
+    setToken("keep-me");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+
+    render(<App />);
+
+    expect(await screen.findByText("登录状态已保留")).toBeInTheDocument();
+    expect(screen.queryByText("登录你的账号")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "立即重试" })).toBeInTheDocument();
+    expect(localStorage.getItem("heming.token")).toBe("keep-me");
   });
 });
 

@@ -132,12 +132,12 @@ describe("StaffPage", () => {
     expect(useStaffStore.getState().settings.profileId).toBeNull();
   });
 
-  it("finding 动作只跳转：任务 → 任务区，日程 → 信息中枢", () => {
+  it("finding 动作只跳转：任务 → 通用智能体，日程 → 信息中枢", () => {
     enabledSettings();
     useStaffStore.setState({ runs: [runWithActions()] });
     render(<StaffPage />);
 
-    fireEvent.click(screen.getByRole("button", { name: "去任务区" }));
+    fireEvent.click(screen.getByRole("button", { name: "去通用智能体" }));
     expect(useUiStore.getState().page).toBe("tasks");
     expect(useUiStore.getState().taskFocusId).toBe("t-1");
 

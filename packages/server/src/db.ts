@@ -28,6 +28,11 @@ export function initSchema(db: DatabaseSyncType): void {
       id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
       display_name TEXT NOT NULL, avatar TEXT
     );
+    -- 登录会话：token 只存 SHA-256 摘要，原文不落库。
+    -- 与 users 同库持久化，服务重启/发版不会把已登录设备踢回登录页。
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS friend_requests (
       id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL, status TEXT NOT NULL
     );

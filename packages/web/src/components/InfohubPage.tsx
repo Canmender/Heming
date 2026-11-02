@@ -16,10 +16,6 @@ import {
   type InfohubAgendaResult,
   type InfohubBridgeInfo,
   type InfohubConfig,
-  type InfohubConversation,
-  type InfohubConversationsResult,
-  type InfohubMessage,
-  type InfohubMessagesResult,
   type InfohubProgressEvent,
   type InfohubSearchHit,
   type InfohubSearchResult,
@@ -28,45 +24,16 @@ import {
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { useUiStore, type InfohubIntent } from "../store/ui.js";
 
-/** 会话列表一次取多少：归档里几百个会话，一次拿全，筛选在本地做也能接受。 */
-const LIST_LIMIT = 1000;
-/** 单个会话默认加载的最近消息条数。 */
-const MESSAGE_LIMIT = 300;
 const SEARCH_LIMIT = 100;
 
 type Phase = "idle" | "connecting" | "ready" | "error";
-type Tab = "conversations" | "search" | "agenda";
-type SourceFilter = "" | "qq" | "wechat";
+/** 去 IM 后只保留检索与日程：归档里的聊天会话不再提供浏览入口。 */
+type Tab = "search" | "agenda";
 
 function sourceLabel(source: string): string {
   if (source === "qq") return "QQ";
   if (source === "wechat") return "微信";
   return source || "未知";
-}
-
-function kindLabel(kind: string): string {
-  if (kind === "group") return "群聊";
-  if (kind === "private") return "私聊";
-  return kind || "会话";
-}
-
-/** 消息正文：正文为空时用类型标签兜底，附件用「[图片] / [语音]」提示。 */
-function messageText(message: InfohubMessage): string {
-  const text = (message.content ?? "").trim();
-  if (text) return text;
-  if (message.media) {
-    if (message.media.kind === "image") return "[图片]";
-    if (message.media.kind === "voice") return "[语音]";
-    return `[${message.media.name || message.media.kind}]`;
-  }
-  return message.type_label || "(空消息)";
-}
-
-function sourceChipClass(source: string, active: boolean): string {
-  const base =
-    "rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors duration-150 whitespace-nowrap";
-  if (active) return `${base} border-ink bg-ink text-white`;
-  return `${base} border-line text-[#666] hover:border-[#bbb] hover:text-ink`;
 }
 
 /** 一行统计块：数字大、标题小，扫一眼就能看到数据规模。 */
@@ -110,7 +77,7 @@ function Snippet({ text }: { text: string }) {
  * 信息中枢（d.45）：把 InfoHub 的本机 QQ/微信归档接进和鸣。
  *
  * 红线：
- * - 只读浏览：归档以 `mode=ro` 打开，翻消息/搜索不会写库；
+ * - 只读：归档以 `mode=ro` 打开，检索与重扫不会写库；
  * - 数据不出本机：不调用任何云端接口，浏览器环境直接显示「仅桌面端可用」；
  * - 不自动采集：进程由用户点「连接」拉起，同步由用户显式勾选来源后触发。
  */
@@ -124,16 +91,7 @@ export function InfohubPage() {
   const [error, setError] = useState("");
 
   const [status, setStatus] = useState<InfohubStatus | null>(null);
-  const [conversations, setConversations] = useState<InfohubConversation[]>([]);
-  const [total, setTotal] = useState(0);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("");
-  const [keyword, setKeyword] = useState("");
-
-  const [activeId, setActiveId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<InfohubMessage[]>([]);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-
-  const [tab, setTab] = useState<Tab>("conversations");
+  const [tab, setTab] = useState<Tab>("search");
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<InfohubSearchHit[]>([]);
   const [searchedFor, setSearchedFor] = useState("");
@@ -147,8 +105,6 @@ export function InfohubPage() {
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState<InfohubProgressEvent | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
-
-  const messageEndRef = useRef<HTMLDivElement | null>(null);
 
   /** 首页卡/命令面板投递的一次性意图：检索词或日程页。 */
   const intent = useUiStore((s) => s.infohubIntent);
@@ -164,31 +120,6 @@ export function InfohubPage() {
       ...(trimmedHome ? { home: trimmedHome } : {}),
       ...(trimmedPython ? { python: trimmedPython } : {}),
     };
-  }
-
-  async function loadConversations(config: InfohubConfig, filter: SourceFilter, kw: string) {
-    const data = await callInfohub<InfohubConversationsResult>(
-      "conversations",
-      { ...(filter ? { source: filter } : {}), ...(kw.trim() ? { keyword: kw.trim() } : {}), limit: LIST_LIMIT },
-      config,
-    );
-    setConversations(Array.isArray(data.items) ? data.items : []);
-    setTotal(Number(data.total) || 0);
-  }
-
-  async function loadMessages(config: InfohubConfig, conversationId: number, quiet = false) {
-    if (!quiet) setLoadingMessages(true);
-    try {
-      const data = await callInfohub<InfohubMessagesResult>(
-        "messages",
-        { conversationId, limit: MESSAGE_LIMIT },
-        config,
-      );
-      setActiveId(conversationId);
-      setMessages(Array.isArray(data.items) ? data.items : []);
-    } finally {
-      setLoadingMessages(false);
-    }
   }
 
   async function loadStatus(config: InfohubConfig) {
@@ -223,18 +154,8 @@ export function InfohubPage() {
       if (next.home) setHome(next.home);
       if (next.python) setPython(next.python);
       writeInfohubConfig({ home: next.home ?? config.home, python: next.python ?? config.python });
-      const st = await loadStatus(config);
-      await loadConversations(config, sourceFilter, keyword);
+      await loadStatus(config);
       setPhase("ready");
-      if (st.hasDb) {
-        const first = await callInfohub<InfohubConversationsResult>(
-          "conversations",
-          { limit: 1 },
-          config,
-        );
-        const id = first.items?.[0]?.id;
-        if (id) void loadMessages(config, id, true);
-      }
     } catch (err) {
       setPhase("error");
       setError(describeInfohubError(err));
@@ -260,14 +181,8 @@ export function InfohubPage() {
           if (bridgeInfo.python) setPython(bridgeInfo.python);
           setPhase("connecting");
           const config: InfohubConfig = { home: bridgeInfo.home };
-          const st = await loadStatus(config);
-          await loadConversations(config, "", "");
+          await loadStatus(config);
           setPhase("ready");
-          if (st.hasDb) {
-            const first = await callInfohub<InfohubConversationsResult>("conversations", { limit: 1 }, config);
-            const id = first.items?.[0]?.id;
-            if (id) void loadMessages(config, id, true);
-          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -326,18 +241,12 @@ export function InfohubPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, tab, agenda]);
 
-  useEffect(() => {
-    messageEndRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
-
   async function refresh() {
     if (phase !== "ready") return;
     setError("");
     try {
       const config = currentConfig();
       await loadStatus(config);
-      await loadConversations(config, sourceFilter, keyword);
-      if (activeId) await loadMessages(config, activeId, true);
       if (agenda) await loadAgenda(config);
     } catch (err) {
       setError(describeInfohubError(err));
@@ -353,9 +262,6 @@ export function InfohubPage() {
     setPhase("idle");
     useInfohubStore.getState().markStopped();
     setStatus(null);
-    setConversations([]);
-    setMessages([]);
-    setActiveId(null);
     setAgenda(null);
     setHits([]);
     setProgress(null);
@@ -377,26 +283,6 @@ export function InfohubPage() {
     } catch (err) {
       setError(describeInfohubError(err));
     }
-  }
-
-  function applySource(next: SourceFilter) {
-    setSourceFilter(next);
-    if (phase !== "ready") return;
-    void loadConversations(currentConfig(), next, keyword).catch((err) =>
-      setError(describeInfohubError(err)),
-    );
-  }
-
-  function applyKeyword() {
-    if (phase !== "ready") return;
-    void loadConversations(currentConfig(), sourceFilter, keyword).catch((err) =>
-      setError(describeInfohubError(err)),
-    );
-  }
-
-  function openConversation(id: number) {
-    setTab("conversations");
-    void loadMessages(currentConfig(), id).catch((err) => setError(describeInfohubError(err)));
   }
 
   async function runSearch(term?: string) {
@@ -457,11 +343,9 @@ export function InfohubPage() {
       );
       const config = currentConfig();
       await loadStatus(config);
-      await loadConversations(config, sourceFilter, keyword);
       setAgenda(null);
       // 同步会写归档：共享 store 的规模与日程立即重算，首页卡不显示旧数据
       void useInfohubStore.getState().refresh();
-      if (activeId) await loadMessages(config, activeId, true);
     } catch (err) {
       setError(describeInfohubError(err));
     } finally {
@@ -502,7 +386,6 @@ export function InfohubPage() {
   }
 
   const ready = phase === "ready";
-  const activeConversation = conversations.find((c) => c.id === activeId) ?? null;
   const lastMessageText = status?.lastMessageTs ? formatInfohubTime(status.lastMessageTs) : "";
 
   const statusLine = syncing
@@ -530,7 +413,7 @@ export function InfohubPage() {
             <span className="text-[11px] text-muted">{statusLine}</span>
           </div>
           <p className="mt-0.5 truncate text-[11px] text-muted">
-            {ready && status ? `${status.stats.conversations} 个会话 · ${formatInfohubBytes(status.dbBytes)}` : "QQ / 微信归档只在本机处理"}
+            {ready && status ? `${status.stats.conversations} 个归档会话 · ${formatInfohubBytes(status.dbBytes)}` : "QQ / 微信归档只在本机处理"}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
@@ -681,7 +564,7 @@ export function InfohubPage() {
       {ready && status && (
         <>
           <div className="flex gap-2 border-b border-line-soft px-5 py-2.5">
-            <Stat label="会话" value={String(status.stats.conversations)} />
+            <Stat label="归档会话" value={String(status.stats.conversations)} />
             <Stat label="消息" value={status.stats.messages.toLocaleString("zh-CN")} />
             <Stat label="日程" value={agenda ? String(agenda.summary.total) : "—"} />
             <Stat label="最后消息" value={lastMessageText || "—"} />
@@ -744,7 +627,7 @@ export function InfohubPage() {
                 >
                   保存为定时任务
                 </button>
-                <span className="text-[10px] text-muted">同步会写入归档库；浏览与检索始终只读。</span>
+                <span className="text-[10px] text-muted">同步会写入归档库；检索与日程始终只读。</span>
               </div>
               {syncing && (
                 <div className="mt-2">
@@ -769,7 +652,6 @@ export function InfohubPage() {
           <div role="tablist" className="flex items-center gap-1 border-b border-line-soft px-5 py-2">
             {(
               [
-                ["conversations", "会话"],
                 ["search", "检索"],
                 ["agenda", "日程"],
               ] as [Tab, string][]
@@ -805,142 +687,6 @@ export function InfohubPage() {
           {!status.hasDb && (
             <div className="border-b border-line-soft bg-[#fffdf5] px-5 py-2 text-[11px] text-[#8a6d3b]">
               该目录还没有归档库。先在「同步」里选择来源并开始采集；采集完成后这里会自动刷新。
-            </div>
-          )}
-
-          {tab === "conversations" && (
-            <div className="flex min-h-0 flex-1">
-              <div className="flex w-[320px] shrink-0 flex-col border-r border-line-soft">
-                <div className="flex flex-wrap items-center gap-1.5 border-b border-line-soft px-3 py-2">
-                  {(
-                    [
-                      ["", "全部"],
-                      ["qq", "QQ"],
-                      ["wechat", "微信"],
-                    ] as [SourceFilter, string][]
-                  ).map(([value, label]) => (
-                    <button
-                      key={value || "all"}
-                      type="button"
-                      onClick={() => applySource(value)}
-                      className={sourceChipClass(value, sourceFilter === value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                  <span className="ml-auto text-[10px] text-muted">{total} 个</span>
-                </div>
-                <form
-                  className="flex gap-1.5 border-b border-line-soft px-3 py-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    applyKeyword();
-                  }}
-                >
-                  <input
-                    aria-label="筛选会话"
-                    value={keyword}
-                    onChange={(e) => setKeyword(e.target.value)}
-                    placeholder="按会话名筛选"
-                    className="min-w-0 flex-1 rounded-md border border-line px-2 py-1 text-[11px] outline-none focus:border-[#bbb]"
-                  />
-                  <button
-                    type="submit"
-                    className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] hover:bg-[#fafafa]"
-                  >
-                    筛选
-                  </button>
-                </form>
-                <div className="min-h-0 flex-1 overflow-auto">
-                  {conversations.length === 0 ? (
-                    <p className="px-3 py-6 text-center text-[11px] text-muted">
-                      {status.hasDb ? "没有匹配的会话" : "归档库为空"}
-                    </p>
-                  ) : (
-                    conversations.map((conversation) => {
-                      const active = conversation.id === activeId;
-                      return (
-                        <button
-                          key={conversation.id}
-                          type="button"
-                          aria-current={active ? "true" : undefined}
-                          onClick={() => openConversation(conversation.id)}
-                          className={`flex w-full items-start gap-2 border-b border-line-soft px-3 py-2 text-left transition-colors ${
-                            active ? "bg-[#f4f4f4]" : "hover:bg-[#fafafa]"
-                          }`}
-                        >
-                          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#ececec] text-[11px] font-semibold text-[#555]">
-                            {[...(conversation.name || "?")][0]}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-1.5">
-                              <span className="truncate text-[12px] font-medium text-ink">{conversation.name}</span>
-                              <span className="shrink-0 text-[9px] text-muted">{sourceLabel(conversation.source)}</span>
-                            </span>
-                            <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted">
-                              <span className="truncate">{kindLabel(conversation.kind)}</span>
-                              {conversation.message_count ? <span>· {conversation.message_count} 条</span> : null}
-                              <span className="ml-auto shrink-0">{formatInfohubTime(conversation.last_ts)}</span>
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              <div className="flex min-w-0 flex-1 flex-col">
-                {activeConversation ? (
-                  <div className="flex items-center gap-2 border-b border-line-soft px-4 py-2">
-                    <span className="truncate text-[13px] font-semibold">{activeConversation.name}</span>
-                    <span className="rounded-full border border-line px-1.5 py-0.5 text-[9px] text-muted">
-                      {sourceLabel(activeConversation.source)} · {kindLabel(activeConversation.kind)}
-                    </span>
-                    <span className="ml-auto shrink-0 text-[10px] text-muted">只读 · 最近 {messages.length} 条</span>
-                  </div>
-                ) : (
-                  <div className="border-b border-line-soft px-4 py-2 text-[11px] text-muted">选择左侧会话查看消息</div>
-                )}
-                <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
-                  {loadingMessages ? (
-                    <p className="text-[11px] text-muted">加载消息…</p>
-                  ) : messages.length === 0 ? (
-                    <p className="text-[11px] text-muted">{activeId ? "这个会话还没有消息" : "还没有选中会话"}</p>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {messages.map((message) => (
-                        <div
-                          key={message.id}
-                          className={`flex flex-col ${message.is_self ? "items-end" : "items-start"}`}
-                        >
-                          <div className="flex max-w-[78%] items-baseline gap-1.5 text-[9px] text-muted">
-                            <span className="truncate">{message.is_self ? "我" : message.sender_name || "未知发送者"}</span>
-                            <span>{formatInfohubTime(message.ts, true)}</span>
-                          </div>
-                          <div
-                            className={`mt-0.5 max-w-[78%] whitespace-pre-wrap break-words rounded-lg px-2.5 py-1.5 text-[12px] leading-5 ${
-                              message.is_self ? "bg-ink text-white" : "border border-line-soft bg-panel text-ink"
-                            }`}
-                          >
-                            {messageText(message)}
-                          </div>
-                          {message.media && (
-                            <span className="mt-0.5 text-[9px] text-muted">
-                              {message.media.kind === "image" ? "图片" : message.media.kind === "voice" ? "语音" : message.media.kind}
-                              {message.media.width && message.media.height
-                                ? ` · ${message.media.width}×${message.media.height}`
-                                : ""}
-                              {message.media.size ? ` · ${formatInfohubBytes(message.media.size)}` : ""}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                      <div ref={messageEndRef} />
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
           )}
 
@@ -981,11 +727,7 @@ export function InfohubPage() {
                     <ul className="flex flex-col gap-1.5">
                       {hits.map((hit) => (
                         <li key={hit.id}>
-                          <button
-                            type="button"
-                            onClick={() => openConversation(hit.conversationId)}
-                            className="w-full rounded-lg border border-line-soft bg-white px-3 py-2 text-left transition-colors hover:border-[#ccc] hover:bg-[#fcfcfc]"
-                          >
+                          <div className="rounded-lg border border-line-soft bg-white px-3 py-2">
                             <div className="flex items-baseline gap-2 text-[10px] text-muted">
                               <span className="font-medium text-[#555]">{hit.convName}</span>
                               <span>{sourceLabel(hit.source)}</span>
@@ -995,7 +737,7 @@ export function InfohubPage() {
                               {hit.senderName ? <span className="text-muted">{hit.senderName}：</span> : null}
                               <Snippet text={hit.snippet || hit.content} />
                             </div>
-                          </button>
+                          </div>
                         </li>
                       ))}
                     </ul>

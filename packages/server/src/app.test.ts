@@ -3,7 +3,6 @@ import request from "supertest";
 import type { Conversation } from "@heming/shared";
 import { createMemoryStore } from "./store.js";
 import { createApp } from "./app.js";
-import { issueToken } from "./auth.js";
 
 type App = ReturnType<typeof createApp>;
 

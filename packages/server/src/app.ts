@@ -30,20 +30,6 @@ export function verifyPassword(password: string, stored: string): boolean {
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
 
-// 注：req 参数类型不能用默认的 Request（P=ParamsDictionary，值为 string|string[]），
-// 否则会作为 P 的推断候选把路由参数拖成 string|string[]，导致 req.params.id 类型报错。
-function authOnly(req: Request<{ [key: string]: string }>, res: Response, next: NextFunction): void {
-  const header = req.header("authorization") ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  const userId = userIdFromToken(token);
-  if (!userId) {
-    res.status(401).json({ error: "unauthorized" });
-    return;
-  }
-  (req as Request & { userId: string }).userId = userId;
-  next();
-}
-
 function userId(req: Request): string {
   return (req as Request & { userId: string }).userId;
 }
@@ -83,6 +69,21 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   app.use(cors);
   app.use(express.json({ limit: "8mb" }));
 
+  // 注：req 参数类型不能用默认的 Request（P=ParamsDictionary，值为 string|string[]），
+  // 否则会作为 P 的推断候选把路由参数拖成 string|string[]，导致 req.params.id 类型报错。
+  // 会话按 store 查（sqlite 侧持久化），服务重启后 token 仍有效。
+  function authOnly(req: Request<{ [key: string]: string }>, res: Response, next: NextFunction): void {
+    const header = req.header("authorization") ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    const authedUserId = userIdFromToken(store, token);
+    if (!authedUserId) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    (req as Request & { userId: string }).userId = authedUserId;
+    next();
+  }
+
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
   });
@@ -102,7 +103,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       const user = store.createUser(username, hashPassword(password), displayName);
       // 注册即视为一次活跃：名册「最近活跃」不应让刚注册的人显示为从未出现。
       store.touchUser(user.id);
-      res.status(201).json({ token: issueToken(user.id), user });
+      res.status(201).json({ token: issueToken(store, user.id), user });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }
@@ -120,7 +121,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     store.touchUser(row.user.id);
-    res.json({ token: issueToken(row.user.id), user: row.user });
+    res.json({ token: issueToken(store, row.user.id), user: row.user });
   });
 
   app.get("/api/me", authOnly, (req, res) => {

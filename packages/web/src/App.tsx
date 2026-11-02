@@ -8,7 +8,7 @@ import { LoginPage } from "./components/LoginPage.js";
 import { NavRail } from "./components/NavRail.js";
 import { FileTree } from "./components/FileTree.js";
 import { FilePreviewModal } from "./components/FilePreviewModal.js";
-import { WorkspacePage } from "./components/WorkspacePage.js";
+import { TeamBoardPage } from "./components/TeamBoardPage.js";
 import { TaskAreaPage } from "./components/TaskAreaPage.js";
 import { TeamPage } from "./components/TeamPage.js";
 import { AssistantPage } from "./components/AssistantPage.js";
@@ -32,8 +32,8 @@ import { useStaffLoop } from "./lib/staff/loop.js";
 import { hasOpenModal } from "./components/useModalA11y.js";
 
 /**
- * Alt+数字键目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、
- * 6 设置区、8 任务区、0 插件区。
+ * Alt+数字键目标页：1 主页、2 团队看板、3 技能区、4 接口区、5 记忆区、
+ * 6 设置区、8 通用智能体、0 插件区。
  *
  * 去 IM 时原「会话」的 Alt+9 与「归档」的 Alt+7 一并取消，其余编号不动——
  * 改动老页的序号等于换掉用户肌肉记忆里的快捷键。智能体/团队/幕僚/信息中枢/
@@ -158,14 +158,69 @@ export function App() {
   );
 }
 
+/**
+ * 登录恢复失败面板：凭证还在，只是此刻连不上服务端。
+ * 不把用户推回登录页，给出「立即重试 / 退出登录」两个明确出口。
+ */
+function ReconnectPanel({
+  message,
+  onRetry,
+  onLogout,
+}: {
+  message: string | null;
+  onRetry: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="flex h-full w-full items-center justify-center px-6">
+      <div className="w-full max-w-[380px] text-center">
+        <h1 className="text-[15px] font-extrabold">登录状态已保留</h1>
+        <p className="mt-2 text-[12px] text-[#555]">
+          {message ? `暂时连不上服务器：${message}` : "正在重新连接服务器…"}
+        </p>
+        <p className="mt-1 text-[11px] text-muted">
+          网络恢复后会自动重试，不需要重新登录。
+        </p>
+        <div className="mt-4 flex items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white"
+          >
+            立即重试
+          </button>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#fafafa]"
+          >
+            退出登录
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** 登录页/主界面内容：与启动动画并行挂载（动画仅作遮罩），不做时序门禁。 */
 function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
   const authStatus = useAuthStore((s) => s.status);
   const authUser = useAuthStore((s) => s.user);
+  const restoreError = useAuthStore((s) => s.restoreError);
   const restore = useAuthStore((s) => s.restore);
+  const logout = useAuthStore((s) => s.logout);
 
   useEffect(() => {
     void restore();
+  }, [restore]);
+
+  // 网络恢复时立刻再试一次，不必等退避到点
+  useEffect(() => {
+    const onOnline = () => {
+      if (getToken() && !useAuthStore.getState().user) void restore();
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
   }, [restore]);
 
   /**
@@ -297,15 +352,26 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
   }, [authUser, setPage]);
 
   if (!authUser) {
+    // token 仍在 = 只是暂时恢复不了（断网/服务重启）；显示重连面板而不是登录页，
+    // 避免一次网络抖动就把已登录用户踢回登录。401 会清 token，这里自然回落登录页。
+    const hasToken = Boolean(getToken());
     return (
       <div className="flex h-screen flex-col overflow-hidden">
         {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
         <TitleBar />
         <div className="flex min-h-0 flex-1">
-          {authStatus === "pending" && getToken() ? (
-            <div className="flex h-full w-full items-center justify-center text-muted">
-              加载中…
-            </div>
+          {hasToken ? (
+            authStatus === "pending" && !restoreError ? (
+              <div className="flex h-full w-full items-center justify-center text-muted">
+                正在恢复登录…
+              </div>
+            ) : (
+              <ReconnectPanel
+                message={restoreError}
+                onRetry={() => void restore()}
+                onLogout={logout}
+              />
+            )
           ) : (
             <LoginPage />
           )}
@@ -324,7 +390,8 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
       // 智能体（本机运行）：左侧智能体名册 + 右侧对话（复用 ChatPage）
       <AssistantPage />
     ) : page === "workspace" ? (
-      <WorkspacePage />
+      // 团队看板：真实成员的任务 / 日程摘要，按两列铺开
+      <TeamBoardPage />
     ) : page === "staff" ? (
       // 幕僚：常驻主动简报（只读采集 + 一键跳转）
       <StaffPage />
@@ -335,7 +402,7 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
       // 自动化：本机定时同步/重扫，只在和鸣运行且信息中枢已连接时执行
       <AutomationPage />
     ) : page === "tasks" ? (
-      // 任务区：左侧任务列表 + 嵌入式 ChatPage + 右侧确定性汇总
+      // 通用智能体：页内直接选智能体、写目标并运行；保留运行记录与结果汇总
       <TaskAreaPage />
     ) : page === "skills" ? (
       <SkillsPage />

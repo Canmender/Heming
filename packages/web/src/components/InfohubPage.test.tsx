@@ -6,40 +6,10 @@ import { useInfohubStore } from "../lib/infohub/store.js";
 import type {
   InfohubAgendaItem,
   InfohubBridgeInfo,
-  InfohubConversation,
-  InfohubMessage,
   InfohubStatus,
 } from "../lib/infohub/client.js";
 
 const HOME = "D:\\wohaolei";
-
-const conv: InfohubConversation = {
-  id: 25,
-  source: "qq",
-  account: "",
-  external_id: "qq:private:1",
-  name: "叶老师",
-  kind: "private",
-  avatar: "",
-  last_ts: 1800000100,
-  message_count: 2,
-  meta: {},
-};
-
-const message: InfohubMessage = {
-  id: 1,
-  conversation_id: 25,
-  external_id: "m1",
-  ts: 1800000100,
-  sender_id: "s1",
-  sender_name: "叶老师",
-  is_self: false,
-  type_code: 1,
-  type_label: "文本",
-  content: "免检单记得交",
-  imported_at: 1800000200,
-  media: null,
-};
 
 const status: InfohubStatus = {
   home: HOME,
@@ -97,7 +67,7 @@ function bridgeInfo(overrides: Partial<InfohubBridgeInfo> = {}): InfohubBridgeIn
     python: null,
     pythonSource: null,
     startedAt: 0,
-    methods: ["status", "conversations"],
+    methods: ["status", "search", "agenda"],
     ...overrides,
   };
 }
@@ -105,8 +75,6 @@ function bridgeInfo(overrides: Partial<InfohubBridgeInfo> = {}): InfohubBridgeIn
 function installBridge(overrides: Partial<Bridge> = {}) {
   const call = vi.fn(async (method: string) => {
     if (method === "status") return status;
-    if (method === "conversations") return { items: [conv], total: 1 };
-    if (method === "messages") return { conversation: conv, items: [message], hasMore: false };
     if (method === "search") {
       return {
         items: [
@@ -189,22 +157,21 @@ describe("信息中枢页", () => {
     expect(screen.queryByRole("button", { name: "连接" })).not.toBeInTheDocument();
   });
 
-  it("连接后展示规模、会话与消息", async () => {
+  it("连接后展示归档规模，不提供会话浏览入口", async () => {
     const { bridge, call } = installBridge();
     await connectPage();
 
     expect(bridge.start).toHaveBeenCalledWith({});
     expect(call).toHaveBeenCalledWith("status", {}, expect.anything());
-    expect(call).toHaveBeenCalledWith(
-      "conversations",
-      expect.objectContaining({ limit: 1000 }),
-      expect.anything(),
-    );
+    // 去 IM：连接时不再拉会话列表或消息
+    expect(call.mock.calls.some(([method]) => method === "conversations")).toBe(false);
+    expect(call.mock.calls.some(([method]) => method === "messages")).toBe(false);
 
-    expect(screen.getByText("1")).toBeInTheDocument(); // 会话数
+    expect(screen.getByText("1")).toBeInTheDocument(); // 归档会话数
     expect(screen.getByText("2")).toBeInTheDocument(); // 消息数
-    expect(screen.getAllByText("叶老师").length).toBeGreaterThan(0);
-    await waitFor(() => expect(screen.getByText("免检单记得交")).toBeInTheDocument());
+    expect(screen.queryByRole("tab", { name: "会话" })).not.toBeInTheDocument();
+    expect(screen.queryByText("群聊")).not.toBeInTheDocument();
+    expect(screen.queryByText("私聊")).not.toBeInTheDocument();
     // 配置区只显示「是否配置过」，不出现任何密钥值
     expect(screen.getByText(/推送：smtp（无凭据）/)).toBeInTheDocument();
     expect(screen.getByText(/模型：未设置（无 Key）/)).toBeInTheDocument();
@@ -213,7 +180,7 @@ describe("信息中枢页", () => {
     expect(useInfohubStore.getState().running).toBe(true);
   });
 
-  it("检索：命中词高亮，点结果回到对应会话", async () => {
+  it("检索：命中词高亮，结果只读展示、不再跳会话", async () => {
     installBridge();
     await connectPage();
 
@@ -223,8 +190,8 @@ describe("信息中枢页", () => {
 
     const mark = await screen.findByText("免检单");
     expect(mark.tagName).toBe("MARK");
-    fireEvent.click(mark.closest("button") as HTMLElement);
-    await waitFor(() => expect(screen.getByText("免检单记得交")).toBeInTheDocument());
+    expect(mark.closest("button")).toBeNull();
+    expect(screen.queryByText("免检单记得交")).not.toBeInTheDocument();
   });
 
   it("日程：展示逾期统计与事项，可手动重扫", async () => {

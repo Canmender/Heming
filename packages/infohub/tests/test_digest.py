@@ -163,13 +163,18 @@ class DigestTest(unittest.TestCase):
             event(4, "后天开会", until + 2 * 86400),
         ]
         text = digest.to_wecom_markdown(result)
-        self.assertIn("1. 10-", text)
+        # 日期展示取真实时钟，断言必须按同一时刻推导；写死 "10-" / "11-02" 只在 10-31 当天成立。
+        overdue = datetime.fromtimestamp(today0 - 3600)
+        future = datetime.fromtimestamp(today0 + 2 * 86400)
+        first = f"1. {overdue.month:02d}-{overdue.day:02d} "
+        fourth = f"4. {future.month:02d}-{future.day:02d} "
+        self.assertIn(first, text)
         self.assertIn("2. 12:10", text)
         self.assertIn("3. 12:00", text)
-        self.assertIn("4. 11-02", text)
-        self.assertLess(text.index("1. 10-"), text.index("2. 12:10"))
+        self.assertIn(fourth, text)
+        self.assertLess(text.index(first), text.index("2. 12:10"))
         self.assertLess(text.index("2. 12:10"), text.index("3. 12:00"))
-        self.assertLess(text.index("3. 12:00"), text.index("4. 11-02"))
+        self.assertLess(text.index("3. 12:00"), text.index(fourth))
 
     def test_wecom_drops_stale_overdue(self):
         result = digest.Digest(since=self.now - 3600, until=self.now, total=1)

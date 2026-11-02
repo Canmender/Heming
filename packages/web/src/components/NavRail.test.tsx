@@ -22,12 +22,12 @@ describe("NavRail 图标轨（A 方案）", () => {
     render(<NavRail />);
     for (const name of [
       "主页 Alt1",
-      "工作区 Alt2",
+      "团队看板 Alt2",
       "技能区 Alt3",
       "接口区 Alt4",
       "记忆区 Alt5",
       "设置区 Alt6",
-      "任务区 Alt8",
+      "通用智能体 Alt8",
       "插件区 Alt0",
     ]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
@@ -139,7 +139,7 @@ describe("NavRail 图标轨（A 方案）", () => {
     const nav = screen.getByLabelText("主导航");
     const items = [
       "主页 Alt1",
-      "工作区 Alt2",
+      "团队看板 Alt2",
       "技能区 Alt3",
       "接口区 Alt4",
       "记忆区 Alt5",
@@ -170,7 +170,7 @@ describe("NavRail 导航顺序可自定义", () => {
     const labels = screen
       .getAllByRole("button")
       .map((b) => b.getAttribute("aria-label"))
-      .filter((l): l is string => Boolean(l?.startsWith("主页") || l?.startsWith("工作区") || l?.startsWith("技能区") || l?.startsWith("接口区") || l?.startsWith("记忆区") || l?.startsWith("设置区")));
+      .filter((l): l is string => Boolean(l?.startsWith("主页") || l?.startsWith("团队看板") || l?.startsWith("技能区") || l?.startsWith("接口区") || l?.startsWith("记忆区") || l?.startsWith("设置区")));
     // 顺序跟着 store 走
     expect(labels[0]).toContain("设置区");
     expect(labels[1]).toContain("主页");
@@ -182,7 +182,7 @@ describe("NavRail 导航顺序可自定义", () => {
   it("存储里缺项时自动补齐，不漏渲染任何导航", () => {
     useUiStore.setState({ navOrder: ["memory", "home", "workspace", "skills", "interfaces"] });
     render(<NavRail />);
-    for (const name of ["主页", "团队", "智能体", "工作区", "技能区", "接口区", "记忆区", "设置区", "信息中枢", "自动化"]) {
+    for (const name of ["主页", "团队", "智能体", "团队看板", "技能区", "接口区", "记忆区", "设置区", "信息中枢", "自动化"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(name) }).length).toBeGreaterThan(0);
     }
   });

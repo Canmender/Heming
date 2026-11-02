@@ -269,7 +269,7 @@ export function buildTaskReport(task: TaskRecord): string {
     }
   }
 
-  lines.push("", "---", "由和鸣任务区本机生成，仅保存在当前设备。");
+  lines.push("", "---", "由和鸣通用智能体本机生成，仅保存在当前设备。");
   return lines.join("\n");
 }
 

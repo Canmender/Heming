@@ -35,7 +35,7 @@ export function attachWs(
     //   服务端升级后不能断链。query token 有效 ⇒ 直接视为已鉴权；无效/没有 ⇒
     //   **不再 destroy 连接**，而是放它建起来等首帧 auth（鉴权失败由 connection
     //   回调回 error(unauthorized) 并关闭）。待所有在网客户端升级后再删这条路径。
-    const queryUserId = userIdFromToken(url.searchParams.get("token") ?? "");
+    const queryUserId = userIdFromToken(store, url.searchParams.get("token") ?? "");
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req, queryUserId ?? "");
     });
@@ -127,7 +127,7 @@ export function attachWs(
       if (event.type === "auth") {
         // 已鉴权（走的是 query 兼容路径）时忽略重复的 auth 帧，不做身份切换。
         if (authed) return;
-        const uid = userIdFromToken(event.token);
+        const uid = userIdFromToken(store, event.token);
         if (!uid) {
           send(ws, { type: "error", code: "unauthorized", message: "invalid token" });
           ws.close();

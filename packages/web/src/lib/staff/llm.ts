@@ -92,7 +92,7 @@ export function refsOfFacts(facts: StaffFacts): Map<string, BriefRef> {
   }
   for (const item of facts.tasks) {
     map.set(item.refId, {
-      evidence: { label: "任务区", kind: "task", refId: item.refId },
+      evidence: { label: "通用智能体", kind: "task", refId: item.refId },
       taskId: item.taskId,
       conversationId: item.conversationId,
     });

@@ -462,7 +462,7 @@ function taskFinding(item: StaffTaskFact, now: number): StaffFinding {
       ? `已 ${minutes} 分钟无更新`
       : item.error
         ? `失败原因：${item.error}`
-        : "任务执行失败，可到任务区查看详情";
+        : "任务执行失败，可到通用智能体查看详情";
   return {
     id: `f-${item.refId}`,
     severity: "warn",
@@ -471,7 +471,7 @@ function taskFinding(item: StaffTaskFact, now: number): StaffFinding {
       MAX_FINDING_TITLE_CHARS,
     ),
     detail: clipText(detail, MAX_FINDING_DETAIL_CHARS),
-    evidence: [{ label: "任务区", kind: "task", refId: item.refId }],
+    evidence: [{ label: "通用智能体", kind: "task", refId: item.refId }],
     action: {
       kind: "open-task",
       targetId: item.taskId,

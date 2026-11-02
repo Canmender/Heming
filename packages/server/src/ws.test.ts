@@ -104,8 +104,8 @@ beforeAll(async () => {
   const bob = store.createUser("bob", "h", "鲍勃");
   aliceId = alice.id;
   bobId = bob.id;
-  aliceToken = issueToken(aliceId);
-  bobToken = issueToken(bobId);
+  aliceToken = issueToken(store, aliceId);
+  bobToken = issueToken(store, bobId);
   const agent = store.createAgent(aliceId, { name: "助手", description: "" });
   agentId = agent.id;
   convId = store.createAgentConversation(aliceId, agent.id).id;
@@ -363,7 +363,7 @@ describe("团队在线状态", () => {
   it("WS 连接登记在线，最后一个连接断开后下线", async () => {
     // 独立用户：其他用例的 socket 关闭是异步的，混用 alice 会让在线计数不确定。
     const carol = store.createUser("carol", "h", "卡萝");
-    const carolToken = issueToken(carol.id);
+    const carolToken = issueToken(store, carol.id);
     const readTeam = async () => {
       const res = await fetch(`http://127.0.0.1:${ctx.port}/api/team`, {
         headers: { Authorization: `Bearer ${carolToken}` },

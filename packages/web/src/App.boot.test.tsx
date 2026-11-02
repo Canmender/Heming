@@ -4,7 +4,7 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import { App } from "./App.js";
 import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
-import { setToken, fetchMe } from "./lib/api.js";
+import { setToken, fetchMe, ApiError } from "./lib/api.js";
 
 // 启动动画集成用例独立成文件：BootWave 换成可控桩（不自动完成），
 // 专注验证「主界面从 T=0 就挂载（动画只是遮罩）」与「登录态恢复在动画期间后台完成」。
@@ -14,7 +14,7 @@ vi.mock("./components/NavRail.js", () => ({
   NavRail: () => <div>NavRail</div>,
 }));
 vi.mock("./components/HomePage.js", () => ({ HomePage: () => <div>HomePage</div> }));
-vi.mock("./components/WorkspacePage.js", () => ({ WorkspacePage: () => <div>WorkspacePage</div> }));
+vi.mock("./components/TeamBoardPage.js", () => ({ TeamBoardPage: () => <div>TeamBoardPage</div> }));
 vi.mock("./components/ChatPage.js", () => ({ ChatPage: () => <div>ChatPage</div> }));
 vi.mock("./components/RadarContacts.js", () => ({ RadarContacts: () => <div>RadarContacts</div> }));
 vi.mock("./components/SettingsPage.js", () => ({ SettingsPage: () => <div>SettingsPage</div> }));
@@ -126,7 +126,7 @@ describe("App 启动动画集成", () => {
   it("恢复失败（token 失效）时：动画期间就已回落到登录页，结束后不会闪现加载态", async () => {
     setToken("stale");
     useAuthStore.setState({ token: "stale", user: null, status: "pending", error: null });
-    vi.mocked(fetchMe).mockRejectedValue(new Error("unauthorized"));
+    vi.mocked(fetchMe).mockRejectedValue(new ApiError(401, "unauthorized"));
 
     render(<App />);
     expect(screen.getByText("BootWave")).toBeTruthy();

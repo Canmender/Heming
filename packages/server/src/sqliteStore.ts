@@ -121,6 +121,17 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         | undefined;
       return row ? rowToUser(row) : null;
     },
+    addSession(tokenDigest, userId) {
+      db.prepare(
+        "INSERT OR REPLACE INTO sessions (token_hash, user_id, created_at) VALUES (?, ?, ?)",
+      ).run(tokenDigest, userId, new Date().toISOString());
+    },
+    sessionUserId(tokenDigest) {
+      const row = db
+        .prepare("SELECT user_id FROM sessions WHERE token_hash = ?")
+        .get(tokenDigest) as { user_id: string } | undefined;
+      return row?.user_id ?? null;
+    },
     updateProfile(userId, patch) {
       const existing = db.prepare("SELECT id, username, display_name, avatar FROM users WHERE id = ?").get(userId) as
         | { id: string; username: string; display_name: string; avatar: string | null }

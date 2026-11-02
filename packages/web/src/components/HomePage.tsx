@@ -451,7 +451,7 @@ export function HomePage() {
           <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
             <div className="mb-1.5 text-[12px] font-bold text-[#777]">智能体动态</div>
             {displayAgents.length === 0 ? (
-              <div className="py-1.5 text-[12px] text-muted">暂无智能体，可在工作区创建</div>
+              <div className="py-1.5 text-[12px] text-muted">暂无智能体，可在智能体页创建</div>
             ) : (
               displayAgents.map((a) => (
                 <div key={a.id} className="flex items-center gap-2 py-1">
