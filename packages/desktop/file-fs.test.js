@@ -477,3 +477,25 @@ test("findRoot：最长前缀优先（更具体的子目录规则覆盖外层根
   assert.equal(findRoot(roots, "D:/库/私人/b.md").name, "内层");
   assert.equal(findRoot(roots, "D:/别处/c.md"), null);
 });
+
+/* ───────────── ③-4 安全复审：零网络的结构性守卫 ───────────── */
+
+/** 剥掉 // 与 /* *\/ 注释，避免注释里的「网络」字样干扰判定（要求剥注释后 grep）。 */
+function stripComments(src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+test("源码（剥注释后）不含任何网络能力：fetch / http / https / net / dns / tls / WebSocket", () => {
+  const raw = fs.readFileSync(path.join(__dirname, "file-fs.js"), "utf8");
+  const src = stripComments(raw);
+  assert.ok(!/\bfetch\s*\(/.test(src), "file-fs.js 不应发起 fetch");
+  assert.ok(!/XMLHttpRequest/.test(src), "file-fs.js 不应使用 XMLHttpRequest");
+  assert.ok(!/\bnew\s+WebSocket\b/.test(src), "file-fs.js 不应建 WebSocket");
+  assert.ok(!/require\(\s*["'](?:node:)?(?:http|https|net|dgram|dns|tls)["']\s*\)/.test(src));
+  // require 白名单：只允许文件系统/路径/加密与共享路径判定
+  const required = [...src.matchAll(/require\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1]);
+  const allowed = new Set(["node:fs", "node:fs/promises", "node:path", "node:crypto", "./path-guard"]);
+  for (const mod of required) assert.ok(allowed.has(mod), `file-fs.js 引入了非白名单模块：${mod}`);
+});

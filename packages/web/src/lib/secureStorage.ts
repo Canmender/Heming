@@ -83,6 +83,9 @@ export interface SecretBridge {
     mode?: string | null;
     plaintexts: Array<{ key: string; value: string | null }>;
   }>;
+  /** 通用批量（E2E 热路径）：顺序敏感、失败位为 null、长度与入参一致。 */
+  encryptManyAsync?: (plains: string[]) => Promise<Array<string | null>>;
+  decryptManyAsync?: (ciphers: string[]) => Promise<Array<string | null>>;
   availableAsync?: () => Promise<boolean>;
   encryptAsync?: (plain: string) => Promise<string | null>;
   decryptAsync?: (cipherB64: string) => Promise<string | null>;
@@ -127,6 +130,81 @@ const asyncFillInFlight = new Set<string>();
 /** storage 事件监听只装一次。 */
 let storageInvalidationInstalled = false;
 
+/**
+ * 渲染层明文写穿缓存（d.59）：写路径默认异步后，「写后立即读」不能再依赖同步桥。
+ *
+ * 记录 `{ plain, raw }`：raw 是写完之后磁盘上的信封字符串。读时先比对 raw——
+ * 若磁盘值被别的窗口/别的身份快照改过（raw 不一致），缓存自然失效，
+ * 不会出现「换回另一个身份却读到上一个身份明文」。
+ *
+ * 只缓存写过的键（三把钥匙 + E2E 热路径）；解出来的大块消息走 e2eSession 的视图缓存。
+ */
+const plainCache = new Map<string, { plain: string; raw: string }>();
+/** 未落盘的异步写（`flushSecureWrites` 等待用：启动/测试需要「写已落盘」的时刻）。 */
+const pendingSecureWrites = new Set<Promise<void>>();
+/**
+ * 已入队但还没落盘的明文（「写后立即读一致」的兜底：异步桥下 `setItem` 还没发生，
+ * raw 还不存在，此时读必须命中这里的新值，而不是旧值/ null）。
+ *
+ * 每键带序号：后写的覆盖先写的，落盘完成后仅当序号仍是自己才清（不误删更新的一笔）。
+ */
+const pendingPlain = new Map<string, { plain: string; seq: number }>();
+let pendingPlainSeq = 0;
+
+function cachePlainAfterWrite(key: string, plain: string, base: StorageLike): void {
+  try {
+    const raw = base.getItem(key);
+    if (raw === null) return;
+    plainCache.set(key, { plain, raw });
+  } catch {
+    /* 读不回就只是没有缓存，不影响正确性 */
+  }
+}
+
+/** 读写穿缓存：raw 一致才命中（防身份/窗口切换后读到旧明文）。 */
+function cachedPlainFor(key: string, raw: string): string | undefined {
+  const hit = plainCache.get(key);
+  if (!hit) return undefined;
+  if (hit.raw !== raw) {
+    plainCache.delete(key);
+    return undefined;
+  }
+  return hit.plain;
+}
+
+/** 等所有异步写落盘（启动收尾/测试用；永不 reject）。 */
+export function flushSecureWrites(): Promise<void> {
+  const all = [...pendingSecureWrites];
+  if (all.length === 0) return Promise.resolve();
+  return Promise.allSettled(all).then(() => {
+    // 期间可能又冒出新的写：循环直到清空（每轮都有上限，不会无限）。
+    return pendingSecureWrites.size === 0 ? undefined : flushSecureWrites();
+  });
+}
+
+function trackSecureWrite(promise: Promise<void>): void {
+  pendingSecureWrites.add(promise);
+  void promise.finally(() => pendingSecureWrites.delete(promise));
+}
+
+/** 测试隔离：清掉写穿缓存与未落盘记录（不动 localStorage）。 */
+export function resetSecurePlainCache(): void {
+  plainCache.clear();
+  pendingSecureWrites.clear();
+  pendingPlain.clear();
+}
+
+/** 记一笔「已入队未落盘」的写，返回落盘后清理的收尾函数（只清自己那一笔）。 */
+function notePendingPlain(key: string, plain: string): () => void {
+  pendingPlainSeq += 1;
+  const seq = pendingPlainSeq;
+  pendingPlain.set(key, { plain, seq });
+  return () => {
+    const cur = pendingPlain.get(key);
+    if (cur && cur.seq === seq) pendingPlain.delete(key);
+  };
+}
+
 function bridge(): SecretBridge | undefined {
   if (typeof window === "undefined") return undefined;
   const b = window.__heming_secrets;
@@ -149,15 +227,21 @@ function canAsyncCrypto(b: SecretBridge | undefined): boolean {
   );
 }
 
-/** 安全存储是否可用：同步桥优先，其次「已 hydrate 且预取报告可用」。 */
+/** 安全存储是否可用：默认异步（46）> 旧同步桥（45）> hydrate 预取报告。 */
 function effectiveAvailable(b: SecretBridge | undefined = bridge()): boolean {
   if (!b) return false;
-  if (b.available === true) return true;
+  if (canAsyncCrypto(b)) return true; // d.59：异步 API 存在即视为可用（默认路径）
+  if (b.available === true) return true; // 旧版同步兜底
   return hydrationState.done && hydrationState.available === true;
 }
 
+/** 该桥是否应走「异步优先」路径（d.59：有异步 API 就默认异步，同步只用于旧版兜底）。 */
+function prefersAsync(b: SecretBridge | undefined): boolean {
+  return !!b && canAsyncCrypto(b);
+}
+
 /** 后台异步补解密（纯异步环境缓存未命中时用）：失败才标「解不开」。 */
-function scheduleAsyncFill(key: string, data: string): void {
+function scheduleAsyncFill(key: string, data: string, base: StorageLike = browserStorage()): void {
   const b = bridge();
   if (!b || typeof b.decryptAsync !== "function") return;
   if (asyncFillInFlight.has(key)) return;
@@ -171,6 +255,7 @@ function scheduleAsyncFill(key: string, data: string): void {
         return;
       }
       b.cacheSet?.(key, plain);
+      cachePlainAfterWrite(key, plain, base);
       undecryptableKeys.delete(key);
       plaintextKeys.delete(key);
     })
@@ -180,7 +265,12 @@ function scheduleAsyncFill(key: string, data: string): void {
     });
 }
 
-/** 后台异步加密落盘（纯异步环境写路径）：失败退回明文，绝不丢配置。 */
+/**
+ * 后台异步加密落盘（默认写路径）：**加密 → 立刻解密自校验 → 写信封**，失败才退回明文。
+ *
+ * 与旧同步路径的差别只有「异步」：语义仍是「绝不丢配置」——
+ * 加密失败 / 自校验失败 / 配额，都退回明文新值并如实标记（d.36 fail-open）。
+ */
 async function writeEnvelopeAsync(
   key: string,
   value: string,
@@ -189,23 +279,30 @@ async function writeEnvelopeAsync(
 ): Promise<void> {
   try {
     const cipher = typeof b.encryptAsync === "function" ? await b.encryptAsync(value) : null;
-    if (!cipher) {
-      plaintextKeys.add(key);
-      base.setItem(key, value);
-      return;
+    // 自校验：写进去的东西必须能读回来且逐 byte 一致（不写坏密文）。
+    const roundTrip =
+      cipher && typeof b.decryptAsync === "function" ? await b.decryptAsync(cipher) : null;
+    if (cipher && roundTrip === value) {
+      try {
+        base.setItem(key, envelopeOf(cipher));
+        b.cacheSet?.(key, value);
+        plaintextKeys.delete(key);
+        undecryptableKeys.delete(key);
+        cachePlainAfterWrite(key, value, base);
+        return;
+      } catch {
+        // 信封写不进去（配额）：明文兜底（比丢配置好），并如实标记未加密
+      }
     }
-    base.setItem(key, envelopeOf(cipher));
-    plaintextKeys.delete(key);
-    undecryptableKeys.delete(key);
-    b.cacheSet?.(key, value);
   } catch {
-    // 配额/加密失败：明文兜底（比丢配置好），并如实标记未加密
-    plaintextKeys.add(key);
-    try {
-      base.setItem(key, value);
-    } catch {
-      /* 明文也写不进：内存态由调用方保留 */
-    }
+    /* 加密/自校验抛错：按失败处理，走下面的明文兜底 */
+  }
+  plaintextKeys.add(key);
+  try {
+    base.setItem(key, value);
+    cachePlainAfterWrite(key, value, base);
+  } catch {
+    /* 明文也写不进：内存态由调用方保留 */
   }
 }
 
@@ -299,6 +396,9 @@ function envelopeOf(cipherB64: string): string {
 }
 
 export function secureGetItem(key: string, base: StorageLike = browserStorage()): string | null {
+  // 写穿（第一优先级）：本窗口刚发起、还没落盘的异步写——读必须立即看到新值。
+  const pending = pendingPlain.get(key);
+  if (pending) return pending.plain;
   let raw: string | null;
   try {
     raw = base.getItem(key);
@@ -319,41 +419,64 @@ export function secureGetItem(key: string, base: StorageLike = browserStorage())
       return null;
     }
     /*
-     * 读优先级（d.58）：
-     * 1. **预取缓存**（同步、零 IPC）——日常路径；
-     * 2. 旧同步桥（Electron 45 兜底）——缓存未命中时；
-     * 3. 纯异步环境的异步补取——本次同步读拿不到值（返回 null），
-     *    由启动门禁（`hydrateSecureStorage`）保证日常不会走到这一步。
+     * 读优先级（d.59）：
+     * 1. **渲染层写穿缓存**（写后立即读；raw 一致才命中）；
+     * 2. preload 启动预取缓存（三个白名单键）；
+     * 3. 异步 API → 后台补取，本次同步读返回 null（启动门禁/ensure 路径会先 await）；
+     * 4. 旧同步桥兜底（仅旧版 Electron / 无异步 API）。
      */
+    const writeThrough = cachedPlainFor(key, raw);
+    if (writeThrough !== undefined) return writeThrough;
     const cached = b.cachedRead?.(key);
-    if (cached === undefined) {
-      if (canSyncCrypto(b)) {
-        const plain = b.decrypt(shape.data);
-        if (plain === null) {
-          undecryptableKeys.add(key);
-          return null;
-        }
-        b.cacheSet?.(key, plain);
-        undecryptableKeys.delete(key);
-        plaintextKeys.delete(key);
-        return plain;
+    if (cached !== undefined) {
+      if (cached === null) {
+        undecryptableKeys.add(key);
+        return null;
       }
+      plaintextKeys.delete(key);
+      return cached;
+    }
+    if (b && prefersAsync(b)) {
       scheduleAsyncFill(key, shape.data);
-      undecryptableKeys.add(key);
-      return null;
+      return null; // 异步补取是后台的：本次同步读拿不到值（调用方走 ensure/重试）
     }
-    if (cached === null) {
-      undecryptableKeys.add(key);
-      return null;
+    if (canSyncCrypto(b)) {
+      const plain = b.decrypt(shape.data);
+      if (plain === null) {
+        undecryptableKeys.add(key);
+        return null;
+      }
+      b.cacheSet?.(key, plain);
+      undecryptableKeys.delete(key);
+      plaintextKeys.delete(key);
+      return plain;
     }
-    undecryptableKeys.delete(key);
-    plaintextKeys.delete(key); // 成功读到密文 ⇒ 不再是明文键
-    return cached;
+    scheduleAsyncFill(key, shape.data);
+    undecryptableKeys.add(key);
+    return null;
   }
 
-  // 明文（旧数据）：桌面可用时就地懒迁移；失败保留明文，绝不丢配置。
+  // 明文（旧数据）：默认就地异步迁移；失败保留明文，绝不丢配置。
   const b = bridge();
-  if (b && canSyncCrypto(b)) {
+  if (b && prefersAsync(b)) {
+    // 纯异步环境：后台迁移，本次仍返回明文（与旧行为一致：不阻塞读）。
+    plaintextKeys.add(key);
+    trackSecureWrite(
+      (async () => {
+        try {
+          const cipher = typeof b.encryptAsync === "function" ? await b.encryptAsync(raw) : null;
+          if (!cipher) return;
+          base.setItem(key, envelopeOf(cipher));
+          b.cacheSet?.(key, raw);
+          plaintextKeys.delete(key);
+          undecryptableKeys.delete(key);
+          cachePlainAfterWrite(key, raw, base);
+        } catch {
+          /* 迁移失败：明文原样保留，下一轮再试 */
+        }
+      })(),
+    );
+  } else if (b && canSyncCrypto(b)) {
     const cipher = b.encrypt(raw);
     if (cipher) {
       try {
@@ -367,21 +490,6 @@ export function secureGetItem(key: string, base: StorageLike = browserStorage())
     } else {
       plaintextKeys.add(key);
     }
-  } else if (b && canAsyncCrypto(b) && effectiveAvailable(b)) {
-    // 纯异步环境：后台迁移，本次仍返回明文（与旧行为一致：不阻塞读）。
-    plaintextKeys.add(key);
-    void (async () => {
-      try {
-        const cipher = typeof b.encryptAsync === "function" ? await b.encryptAsync(raw) : null;
-        if (!cipher) return;
-        base.setItem(key, envelopeOf(cipher));
-        plaintextKeys.delete(key);
-        undecryptableKeys.delete(key);
-        b.cacheSet?.(key, raw);
-      } catch {
-        /* 迁移失败：明文原样保留，下一轮再试 */
-      }
-    })();
   } else if (b) {
     // 只读的明文也要进清单，否则降级不可见：启动时只读的键在磁盘上是明文，
     // 状态卡若漏报就会让用户以为它已被加密。
@@ -423,44 +531,122 @@ export function secureSetItem(
 ): void {
   backupBeforeOverwrite(key, base);
   const b = bridge();
+  if (b && prefersAsync(b)) {
+    /*
+     * d.59 默认路径：**异步写优先，失败才明文**（不再先落一次明文）。
+     * 写后立即读靠「未落盘明文记录」+ 写穿缓存 + 预取缓存保证，不依赖同步桥。
+     */
+    b.cacheSet?.(key, value);
+    const clearPending = notePendingPlain(key, value);
+    trackSecureWrite(writeEnvelopeAsync(key, value, base, b).finally(clearPending));
+    return;
+  }
   if (b && canSyncCrypto(b)) {
+    // 旧版 Electron 兜底：同步桥还在时保持同步语义（45 行为与迁移前一致）。
     const cipher = b.encrypt(value);
     if (cipher) {
       try {
         base.setItem(key, envelopeOf(cipher));
         plaintextKeys.delete(key);
-        // 新值已覆盖旧信封，旧的「解不开」状态随之作废。
         undecryptableKeys.delete(key);
-        // 写后立即读一致：同步桥写成功后刷新预取缓存。
         b.cacheSet?.(key, value);
+        cachePlainAfterWrite(key, value, base);
         return;
       } catch {
         /* 配额：退回明文，至少这次会话的配置还在 */
       }
     }
     plaintextKeys.add(key);
-  } else if (b && canAsyncCrypto(b) && effectiveAvailable(b)) {
-    /*
-     * 纯异步环境：先把新值写进缓存（本窗口「写后立即读」一致），再后台加密落盘。
-     * 落盘失败退回明文（`writeEnvelopeAsync` 内部处理），绝不丢配置。
-     */
-    b.cacheSet?.(key, value);
-    void writeEnvelopeAsync(key, value, base, b);
-    return;
   } else if (b) {
     plaintextKeys.add(key); // 桌面桥在、系统安全存储不可用
   }
   try {
     base.setItem(key, value);
+    cachePlainAfterWrite(key, value, base);
   } catch {
     // 明文也写不进去：至少不能谎报「已加密」
     plaintextKeys.add(key);
   }
 }
 
+/**
+ * 异步写一个键（热路径用；调用方可以 `await` 到「确实落盘」）。
+ *
+ * 语义与 `secureSetItem` 相同（异步优先、失败才明文、可见标记），另外：
+ * - 加密后立刻解密自校验，**不通过绝不写坏密文**（fail-open 写新明文值）；
+ * - 写成功后同步回填写穿缓存，保证「写后立即读一致」。
+ */
+export async function secureSetItemAsync(
+  key: string,
+  value: string,
+  base: StorageLike = browserStorage(),
+): Promise<SecureWriteResult> {
+  backupBeforeOverwrite(key, base);
+  if (!backupPlaintextOnce(key, base)) {
+    return { ok: false, form: "none", reason: "backup-failed" };
+  }
+  const b = bridge();
+  if (b && prefersAsync(b)) {
+    let cipher: string | null = null;
+    try {
+      cipher = typeof b.encryptAsync === "function" ? await b.encryptAsync(value) : null;
+    } catch {
+      cipher = null;
+    }
+    let verified = false;
+    if (cipher && typeof b.decryptAsync === "function") {
+      try {
+        verified = (await b.decryptAsync(cipher)) === value;
+      } catch {
+        verified = false;
+      }
+    }
+    if (cipher && verified) {
+      try {
+        base.setItem(key, envelopeOf(cipher));
+        b.cacheSet?.(key, value);
+        plaintextKeys.delete(key);
+        undecryptableKeys.delete(key);
+        cachePlainAfterWrite(key, value, base);
+        return { ok: true, form: "envelope" };
+      } catch {
+        // 配额：信封更大，试明文兜底（更小）；写成了也如实标记未加密。
+        plaintextKeys.add(key);
+        try {
+          base.setItem(key, value);
+          cachePlainAfterWrite(key, value, base);
+          return { ok: true, form: "plaintext", reason: "quota" };
+        } catch {
+          return { ok: false, form: "none", reason: "quota" };
+        }
+      }
+    }
+    // 加密失败 / 自校验失败 → 明文新值（fail-open，可见降级）。
+    plaintextKeys.add(key);
+    try {
+      base.setItem(key, value);
+      cachePlainAfterWrite(key, value, base);
+      return { ok: true, form: "plaintext", reason: cipher ? "verify-failed" : "encrypt-failed" };
+    } catch {
+      return { ok: false, form: "none", reason: "quota" };
+    }
+  }
+  // 旧版同步桥 / 无桥：复用同步 verified 写（与旧行为一致）。
+  const sync = secureSetItemVerified(key, value, base);
+  if (sync.ok && sync.form === "envelope") cachePlainAfterWrite(key, value, base);
+  return sync;
+}
+
+/** 清理写穿缓存里某个键（值被外部改掉/删除时用）。 */
+export function dropSecurePlainCache(key: string): void {
+  plainCache.delete(key);
+}
+
 export function secureRemoveItem(key: string, base: StorageLike = browserStorage()): void {
   plaintextKeys.delete(key);
   undecryptableKeys.delete(key);
+  plainCache.delete(key);
+  pendingPlain.delete(key); // 删了就删了：别让未落盘的新值继续被读到
   bridge()?.cacheDelete?.(key);
   base.removeItem(key);
 }
@@ -509,7 +695,7 @@ export type SecureValueRead =
   | { kind: "absent" }
   | { kind: "plain"; raw: string }
   | { kind: "envelope"; value: string }
-  | { kind: "unreadable"; reason: "bad-envelope" | "no-bridge" | "decrypt-failed" };
+  | { kind: "unreadable"; reason: "bad-envelope" | "no-bridge" | "decrypt-failed" | "async-pending" };
 
 /**
  * 只读地读一个键（**不迁移、不写盘**），解不开时置 `undecryptableKeys`。
@@ -533,7 +719,28 @@ export function readSecureValue(key: string, base: StorageLike = browserStorage(
   }
   if (shape.kind === "envelope") {
     const b = bridge();
-    if (!b || b.available !== true) {
+    if (!b) {
+      undecryptableKeys.add(key);
+      return { kind: "unreadable", reason: "no-bridge" };
+    }
+    // 写穿缓存 / 预取缓存优先（同步、零 IPC）。
+    const writeThrough = cachedPlainFor(key, raw);
+    if (writeThrough !== undefined) return { kind: "envelope", value: writeThrough };
+    const cached = b.cachedRead?.(key);
+    if (cached !== undefined) {
+      if (cached === null) {
+        undecryptableKeys.add(key);
+        return { kind: "unreadable", reason: "decrypt-failed" };
+      }
+      plaintextKeys.delete(key);
+      return { kind: "envelope", value: cached };
+    }
+    if (b && prefersAsync(b)) {
+      // 默认异步：本次同步读拿不到值；调用方应先用 `readSecureValueAsync` 预热。
+      scheduleAsyncFill(key, shape.data);
+      return { kind: "unreadable", reason: "async-pending" };
+    }
+    if (!canSyncCrypto(b)) {
       undecryptableKeys.add(key);
       return { kind: "unreadable", reason: "no-bridge" };
     }
@@ -547,6 +754,184 @@ export function readSecureValue(key: string, base: StorageLike = browserStorage(
     return { kind: "envelope", value };
   }
   return { kind: "plain", raw };
+}
+
+/**
+ * 异步读一个键（d.59 热路径）：写穿缓存/预取缓存 → 异步解密 → 回填缓存。
+ *
+ * 每次读最多一次 IPC（缓存命中则零 IPC）；解不开/无桥返回 `unreadable`，**不抛**。
+ */
+export async function readSecureValueAsync(
+  key: string,
+  base: StorageLike = browserStorage(),
+): Promise<SecureValueRead> {
+  let raw: string | null;
+  try {
+    raw = base.getItem(key);
+  } catch {
+    return { kind: "absent" };
+  }
+  if (raw === null) return { kind: "absent" };
+
+  const shape = parseStored(raw);
+  if (shape.kind === "bad-envelope") {
+    undecryptableKeys.add(key);
+    return { kind: "unreadable", reason: "bad-envelope" };
+  }
+  if (shape.kind === "plain") return { kind: "plain", raw };
+
+  const b = bridge();
+  if (!b) {
+    undecryptableKeys.add(key);
+    return { kind: "unreadable", reason: "no-bridge" };
+  }
+  const writeThrough = cachedPlainFor(key, raw);
+  if (writeThrough !== undefined) return { kind: "envelope", value: writeThrough };
+  const cached = b.cachedRead?.(key);
+  if (cached !== undefined) {
+    if (cached === null) {
+      undecryptableKeys.add(key);
+      return { kind: "unreadable", reason: "decrypt-failed" };
+    }
+    plaintextKeys.delete(key);
+    return { kind: "envelope", value: cached };
+  }
+  if (typeof b.decryptAsync !== "function") {
+    // 旧版兜底：退回同步桥。
+    if (canSyncCrypto(b)) {
+      const value = b.decrypt(shape.data);
+      if (value === null) {
+        undecryptableKeys.add(key);
+        return { kind: "unreadable", reason: "decrypt-failed" };
+      }
+      return { kind: "envelope", value };
+    }
+    undecryptableKeys.add(key);
+    return { kind: "unreadable", reason: "no-bridge" };
+  }
+  try {
+    const value = await b.decryptAsync(shape.data);
+    if (typeof value !== "string") {
+      undecryptableKeys.add(key);
+      return { kind: "unreadable", reason: "decrypt-failed" };
+    }
+    b.cacheSet?.(key, value);
+    cachePlainAfterWrite(key, value, base);
+    undecryptableKeys.delete(key);
+    plaintextKeys.delete(key);
+    return { kind: "envelope", value };
+  } catch {
+    undecryptableKeys.add(key);
+    return { kind: "unreadable", reason: "decrypt-failed" };
+  }
+}
+
+/**
+ * 批量通道单个 IPC 的上限（条数/总字符）。
+ *
+ * 主进程那边还有硬上限（`BATCH_MAX_ITEMS`/`BATCH_MAX_CHARS`）做**安全边界**；
+ * 这里是**调用方的分片策略**：500 条消息缓存的明文迁移必须分批送，否则超出主进程上限
+ * 的尾部会被拒、表现为「迁了一半」。分片后每一片都远低于上限，且保持全局顺序。
+ */
+const ASYNC_BATCH_ITEMS = 128;
+const ASYNC_BATCH_CHARS = 1024 * 1024;
+
+/** 按条数+总字符切分批量请求（顺序保持；每片至少 1 条）。 */
+function splitAsyncBatches(items: string[]): Array<{ start: number; items: string[] }> {
+  const batches: Array<{ start: number; items: string[] }> = [];
+  let start = 0;
+  while (start < items.length) {
+    let end = start;
+    let chars = 0;
+    while (end < items.length && end - start < ASYNC_BATCH_ITEMS) {
+      const len = items[end].length;
+      if (end > start && chars + len > ASYNC_BATCH_CHARS) break;
+      chars += len;
+      end += 1;
+    }
+    batches.push({ start, items: items.slice(start, end) });
+    start = end;
+  }
+  return batches;
+}
+
+/**
+ * 批量解密（E2E 热路径：msgCache 容器逐条密文一次解完）。
+ *
+ * 顺序敏感、长度与入参一致、失败位 null；超过单次 IPC 上限时**自动分片**；
+ * 无异步批量能力时逐条 `decryptAsync` 兜底；再不行走旧同步桥；无桥返回全 null。**永不 reject**。
+ */
+export async function secureDecryptManyAsync(ciphers: string[]): Promise<Array<string | null>> {
+  if (!Array.isArray(ciphers) || ciphers.length === 0) return [];
+  const b = bridge();
+  if (!b) return ciphers.map(() => null);
+  if (typeof b.decryptManyAsync === "function") {
+    const out: Array<string | null> = new Array(ciphers.length).fill(null);
+    for (const batch of splitAsyncBatches(ciphers)) {
+      let part: Array<string | null> | null = null;
+      try {
+        part = await b.decryptManyAsync(batch.items);
+      } catch {
+        part = null;
+      }
+      batch.items.forEach((_, i) => {
+        const value = part && typeof part[i] === "string" ? part[i] : null;
+        out[batch.start + i] = value;
+      });
+    }
+    return out;
+  }
+  const out: Array<string | null> = [];
+  for (const cipher of ciphers) {
+    if (typeof b.decryptAsync !== "function") {
+      out.push(canSyncCrypto(b) ? b.decrypt(cipher) : null);
+      continue;
+    }
+    try {
+      const value = await b.decryptAsync(cipher);
+      out.push(typeof value === "string" ? value : null);
+    } catch {
+      out.push(null);
+    }
+  }
+  return out;
+}
+
+/** 批量加密（E2E 热路径：msgCache 容器里待落盘的明文条目）。顺序敏感、失败位 null、永不 reject。 */
+export async function secureEncryptManyAsync(plains: string[]): Promise<Array<string | null>> {
+  if (!Array.isArray(plains) || plains.length === 0) return [];
+  const b = bridge();
+  if (!b) return plains.map(() => null);
+  if (typeof b.encryptManyAsync === "function") {
+    const out: Array<string | null> = new Array(plains.length).fill(null);
+    for (const batch of splitAsyncBatches(plains)) {
+      let part: Array<string | null> | null = null;
+      try {
+        part = await b.encryptManyAsync(batch.items);
+      } catch {
+        part = null;
+      }
+      batch.items.forEach((_, i) => {
+        const value = part && typeof part[i] === "string" ? part[i] : null;
+        out[batch.start + i] = value;
+      });
+    }
+    return out;
+  }
+  const out: Array<string | null> = [];
+  for (const plain of plains) {
+    if (typeof b.encryptAsync !== "function") {
+      out.push(canSyncCrypto(b) ? b.encrypt(plain) : null);
+      continue;
+    }
+    try {
+      const value = await b.encryptAsync(plain);
+      out.push(typeof value === "string" ? value : null);
+    } catch {
+      out.push(null);
+    }
+  }
+  return out;
 }
 
 /** 加密 + 立刻解密比对（chains 自校验的核心；纯逻辑，可单测，不碰 localStorage）。 */
@@ -700,6 +1085,9 @@ export function resetSecureStorageState(): void {
   undecryptableKeys.clear();
   backedUpKeys.clear();
   asyncFillInFlight.clear();
+  plainCache.clear();
+  pendingSecureWrites.clear();
+  pendingPlain.clear();
   hydrationState = { done: false, hydrated: false, available: false };
   hydrationPromise = null;
 }

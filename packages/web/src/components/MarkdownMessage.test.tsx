@@ -136,4 +136,45 @@ describe("MarkdownMessage", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "查看大图" })).toBeNull());
   });
+
+  /* ───────────── ③-4 安全复审：注入面回归（markdown 是模型输出） ───────────── */
+
+  it("原始 HTML 一律按文本处理：script/img onerror 不会被解析成元素、也不会执行", () => {
+    const { container } = render(
+      <MarkdownMessage
+        text={'<script>window.__xss = 1</script>\n\n<img src="x" onerror="window.__xss = 2">'}
+      />,
+    );
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
+    expect((window as unknown as { __xss?: number }).__xss).toBeUndefined();
+    // 以文本形式可见（说明没有悄悄吞掉用户看到的原文）
+    expect(container.textContent).toContain("<script>");
+  });
+
+  it("危险协议的链接被清洗：javascript: 不会进 href", () => {
+    render(<MarkdownMessage text={"[点我](javascript:alert(1))"} />);
+    const link = screen.getByText("点我");
+    expect(link.getAttribute("href") ?? "").not.toMatch(/^\s*javascript:/i);
+  });
+
+  it("KaTeX 默认不信任 \\href/\\htmlClass：不产生 javascript: 链接", () => {
+    const { container } = render(
+      <MarkdownMessage text={"$\\href{javascript:alert(1)}{点我}$"} />,
+    );
+    const anchors = [...container.querySelectorAll("a")];
+    for (const a of anchors) {
+      expect(a.getAttribute("href") ?? "").not.toMatch(/javascript:/i);
+    }
+  });
+
+  it("代码块内容按文本渲染（shiki HTML 由本库转义生成）", async () => {
+    highlightCode.mockResolvedValue(
+      '<pre class="shiki"><code><span>&lt;img src=x onerror=alert(1)&gt;</span></code></pre>',
+    );
+    const { container } = render(<MarkdownMessage text={"```html\n<img src=x onerror=alert(1)>\n```"} />);
+    await waitFor(() => expect(container.querySelector(".shiki")).toBeTruthy());
+    // 代码块里只会有一个由 shiki 生成的 <span>，不会把内容解析成真实 img
+    expect(container.querySelector("img")).toBeNull();
+  });
 });

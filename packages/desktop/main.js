@@ -24,7 +24,7 @@ const { bundledPython } = require("./bundled-runtime");
 const { planStdioSpawn, probeLocalRuntime } = require("./local-runtime");
 
 const pkg = require("./package.json");
-const { APP_DEFAULT_URL, originOf, secureOrigins } = require("./secure-origins");
+const { APP_DEFAULT_URL, originOf, secureOrigins, guardIpc, makeSenderCheck } = require("./secure-origins");
 const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
 const { registerWikiIpc } = require("./wiki-fs");
 const { registerChartIpc } = require("./chart-fs");
@@ -51,6 +51,50 @@ const EMBEDDED_SCHEME = "app";
 const EMBEDDED_HOST = "heming";
 const EMBEDDED_ORIGIN = `${EMBEDDED_SCHEME}://${EMBEDDED_HOST}`;
 const EMBEDDED_URL = `${EMBEDDED_ORIGIN}/${INDEX_FILE}`;
+
+// ── IPC 来源守卫（③-4 安全复审）─────────────────────────────────────────
+// 只该由**主窗口**调用的通道清单：wiki/chart/export/file/secret/notify 这些
+// 「能碰本机文件、进程与密钥」的能力，桌宠窗口一律不该能调。桌宠窗口与主窗口
+// 同源、共用 preload 与 localStorage——它的 frame 一旦被导航到远端页面，远端脚本
+// 就等于拿到了这些桥。导航拦截（pet-host）是第一道，这里按通道再收一道。
+// 不在清单里的通道（如 `app:version` 是 preload 顶层 sendSync）原样透传。
+const TRUSTED_CHANNELS = [
+  "wiki:info",
+  "wiki:list",
+  "wiki:read",
+  "wiki:write",
+  "wiki:remove",
+  "wiki:log",
+  "chart:export",
+  "chart:list",
+  "chart:open",
+  "export:write",
+  "export:info",
+  "secret:available",
+  "secret:encrypt",
+  "secret:decrypt",
+  "secret:capabilities",
+  "secret:availableAsync",
+  "secret:encryptAsync",
+  "secret:decryptAsync",
+  "secret:bootstrap",
+  "secret:decryptMany",
+  "secret:encryptMany",
+  "notify:message",
+  "mcp:stdio:request",
+  "mcp:stdio:stop",
+  "runtime:probe",
+  "update:check",
+  "update:download",
+  "update:install",
+  "update:state",
+  "infohub:info",
+  "infohub:start",
+  "infohub:call",
+  "infohub:stop",
+  "infohub:pick-home",
+  "infohub:pick-python",
+];
 
 // ── 崩溃兜底（d.30 · P0-4）─────────────────────────────────────────────
 // 此前主进程零兜底：抛一个未捕获异常就直接静默退出，用户只看到「应用莫名其妙没了」，
@@ -345,6 +389,13 @@ let mainWindow = null;
 // 桌宠宿主（d.46）：独立透明置顶窗 + 托盘。浏览器端没有这个概念。
 let petHost = null;
 
+// ③-4 安全复审：只该由主窗口调用的通道统一收口（fail-closed）。
+// mainWindow 在 createWindow() 里赋值，闭包在调用时求值，此处只建门面。
+const secureIpc = guardIpc(ipcMain, {
+  isTrusted: makeSenderCheck(() => mainWindow),
+  channels: TRUSTED_CHANNELS,
+});
+
 // 单例锁：拿不到锁直接退出；second-instance 时聚焦已存在窗口
 const gotLock = app.requestSingleInstanceLock();
 
@@ -533,7 +584,7 @@ if (!gotLock) {
     return true;
   };
 
-  ipcMain.handle("mcp:stdio:request", async (_event, payload) => {
+  secureIpc.handle("mcp:stdio:request", async (_event, payload) => {
     const { serverId, config, method, params } = payload || {};
     if (typeof serverId !== "string" || !serverId) throw new Error("缺少 serverId");
     if (typeof method !== "string" || !method) throw new Error("缺少 method");
@@ -546,7 +597,7 @@ if (!gotLock) {
     return result;
   });
 
-  ipcMain.handle("mcp:stdio:stop", (_event, serverId) => mcpStdio.stop(String(serverId)));
+  secureIpc.handle("mcp:stdio:stop", (_event, serverId) => mcpStdio.stop(String(serverId)));
 
   // sandbox 的 preload 读不到本地 app-version.js，版本号改由这里同步提供。
   // 必须在 createWindow() 之前注册：preload 顶层就会 sendSync 取一次。
@@ -560,7 +611,7 @@ if (!gotLock) {
   // 只回传能力布尔与解析到的路径，不执行任何命令、不写任何东西。
   // PATH 用 buildChildEnv 补全过的那份：与真正 spawn 时的查找范围一致，
   // 不然会出现「探测说没有、启动却成功了」这种自相矛盾的界面。
-  ipcMain.handle("runtime:probe", () =>
+  secureIpc.handle("runtime:probe", () =>
     probeLocalRuntime({ env: buildChildEnv({ ...process.env }), execPath: process.execPath }),
   );
 
@@ -621,10 +672,10 @@ if (!gotLock) {
   };
   updater.subscribe(pushUpdateState);
 
-  ipcMain.handle("update:check", () => updater.check());
-  ipcMain.handle("update:download", () => updater.download());
-  ipcMain.handle("update:install", () => updater.quitAndInstall());
-  ipcMain.handle("update:state", () => updater.getState());
+  secureIpc.handle("update:check", () => updater.check());
+  secureIpc.handle("update:download", () => updater.download());
+  secureIpc.handle("update:install", () => updater.quitAndInstall());
+  secureIpc.handle("update:state", () => updater.getState());
 
   // 启动后延迟一小会儿再检查：冷启动时不必和界面抢网络，
   // 也不至于让用户等更新检查才看到首屏。
@@ -732,11 +783,11 @@ app.whenReady().then(() => {
     installAppProtocol();
     setupMenu();
     // 个人知识库文件桥（卡帕西 LLM Wiki 标准）：必须在窗口创建前注册
-    registerWikiIpc(ipcMain);
+    registerWikiIpc(secureIpc);
     // 图表导出桥：把生成的图表写到 ~/Heming/charts
-    registerChartIpc(ipcMain);
+    registerChartIpc(secureIpc);
     // 记忆导出文件桥（d.35）：把记忆 JSON 写到 ~/Heming/exports
-    registerExportIpc(ipcMain);
+    registerExportIpc(secureIpc);
     // 文件编辑桥（d.55 · file_patch）：只在用户显式添加的可写根内读写。
     // 只接受**主窗口**的调用——桌宠窗口等其它渲染进程不能经这里改用户文件；
     // 路径判定、软链/硬链拒绝、上限与 tmp+rename 原子写都在 file-fs.js 里兜底。
@@ -750,10 +801,10 @@ app.whenReady().then(() => {
     });
     // 本机密钥信封桥（d.36）：preload 在页面加载时用 sendSync 问可用性，
     // 所以必须早于 createWindow()。
-    registerSecretIpc(ipcMain);
+    registerSecretIpc(secureIpc);
     // 系统通知桥（d.39）：消息提醒只在窗口不在前台时由渲染层请求；
     // 点击通知显式聚焦主窗口（桌宠窗口不能截走通知跳转）。
-    registerNotifyIpc(ipcMain, {
+    registerNotifyIpc(secureIpc, {
       Notification,
       getMainWindow: () => mainWindow,
       // 任一应用窗口在前台（含桌宠窗口）就不弹系统通知。
@@ -777,7 +828,7 @@ app.whenReady().then(() => {
         if (!win.isDestroyed()) win.webContents.send("infohub:event", event);
       }
     });
-    registerInfohubIpc(ipcMain, {
+    registerInfohubIpc(secureIpc, {
       bridge: infohubBridge,
       dialog,
       windowFromEvent: (event) => BrowserWindow.fromWebContents(event.sender),
@@ -802,6 +853,8 @@ app.whenReady().then(() => {
       trayIconPath: path.join(__dirname, "assets", "pet-tray.png"),
       resolveAppUrl: () => resolveAppUrl(),
       getMainWindow: () => mainWindow,
+      // ③-4：桌宠窗口只允许停在应用自己的页面（导航到远端 = 远端脚本拿到 preload 桥）
+      isAllowedNavigation: (url) => isAllowedNavigation(url, resolveAppUrl()),
       readState: readPetState,
       writeState: writePetState,
       log: (line) => console.log(line),

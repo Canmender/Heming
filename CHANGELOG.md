@@ -2,6 +2,34 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.59.2.21.0（2026-11-02）— 全面升级第四批：安全复审与 Electron 46 就绪
+
+第四波把「加固」收尾：全仓安全复审修掉一个**越权 IPC** 的真问题，并把 Electron 46 升级前必须做完的三件事做掉。没有新功能入口，用户不可见变化是「更安全、升级 Electron 不再有明文窗口」。
+
+### 一、安全复审（③-4）：修掉一个越权 IPC 真问题
+
+- **F1 能力型 IPC 无来源校验（本轮最严重）**：复审前只有 `file-fs.js` 校验 sender，而 wiki/chart/export/secret/notify/mcp/update/infohub 的 IPC 对**任意渲染进程**开放；桌宠窗口与主窗口同源、共用 preload —— 一旦桌宠 frame 被导航到远端页面，远端脚本就能拉子进程、解密本机密钥、写文件。修法：新增 `secure-origins.js` 的 `guardIpc/makeSenderCheck`（**fail-closed，只认主窗口**），`main.js` 建 `secureIpc` 门面并接入全部能力模块（仅 `app:version` 例外放行）。
+- **F2 桌宠窗口无导航拦截**：`pet-host.js` 加 `will-navigate` 白名单（未接线 fail-closed）+ `window.open` deny，从源头断掉「frame 被导航到远端拿 preload 桥」。
+- **F3 `wiki-fs` 缺参数上限**：单文件 2MB、NUL 拒绝、`log` 的 kind/title/extra 规范化截断（防磁盘写满与日志行注入）。
+- **回归守卫**：`main.test.js` 新增「IPC 通道不变量」用例——裸 `ipcMain.handle/on` 只允许 `app:version`；`secureIpc` 注册通道必须在白名单（拼错=静默放行 → 红）；各模块注册的通道必须全在清单（新增通道忘登记 → 红）；preload 每个调用型通道必须受守卫/白名单/`file:*` 自守卫/`pet:*` 前缀。做过负向验证（临时注入 `debug:bypass` → 用例按预期变红）。
+- **其余四域结论**（报告 28 条，每条带 `file:line`）：E2E 四条红线实现完整（无安全上下文拒绝、附件密文、链写前自校验、公钥才上云）；本机存储 msgCache/chains/备份键/设置卡口径一致；五个保险类模块零网络均有源码守卫（file-fs 本轮补齐）；注入面 Markdown（无 rehype-raw）/KaTeX/图表转义/文件名/通知文案无 XSS 缺陷（+4 回归用例）。
+- **待修 4 条已入档**（写明原因与处置）：草稿 `heming.draft.*` 明文、`heming.token` 明文（登录链路，单独立项）、`file-fs` 可写根由渲染层逐次传入（下一波改主进程持久化根 + rootId）、服务端 `/api/files/:id/content` 缺 nosniff/固定 mime（下一波 server 修）。
+- 真机 Electron 冒烟 12/12：主窗口 wiki/exports/charts/update/secrets/version 全放行，桌宠窗口同一批桥**全部 `untrusted-sender`**。
+
+### 二、Electron 46 就绪（升级前必须做完的三件事）
+
+- **E2E 热路径不再逐条走同步 IPC**：选「预取 + 内存视图 + 异步落盘」而不是「把 E2E 搬主进程」（后者要跨进程重写链状态机、AAD 绑定、去重窗口与暂挂重扫，风险高一个数量级）。进会话前 `ensureE2eStorageReady()` 一次批量异步解密 chains/msgCache 进内存视图，之后读全部同步命中内存、零 IPC；写「内存先更新 + 加密落盘串行排队」，`initSession`/`sealMessage`/`openMessage`/`openX3dhDist` 返回前 `await flushChains`、`appendCache` await `flushMsgCache` —— **收到即可解密、链与缓存返回前已落盘**。安全细节：链落盘失败 fail-open 写**新**明文（绝不回退旧盘值，回退会复用 msgKey）、读超时不缓存空链（防空链当基准覆盖磁盘）、`handleChainDist` 未预热时先 ensure 再幂等重放。
+- **明文写窗口消除**：`secureSetItem` 改为异步写优先——加密 → 解密自校验 → 写信封；只有失败才写明文并进 `plaintextKeys` 可见标记。用例断言「调用返回时磁盘要么没写、要么是密文」。写后立即读一致由 `pendingPlain`（按 seq 防后写被旧写清理）+ `plainCache` 写穿缓存保证。
+- **同步桥降级为兜底**：有异步 API 即默认异步，同步三件套只在旧版 Electron / 无异步 API 时使用；`secret-store.js`/`preload.js` 的弃用措辞改为「已迁移，同步桥仅兜底（46 起上游移除）」。**同步桥保留未删**（45 回退仍可用）。
+- **Electron 46 升级检查清单**（写进 `specs/2026-11-02-safe-storage-async-migration.md` §12，8 步）：45 上先跑完全量迁移 → preload 能力自检 → 启动门禁（300ms 帽不变）→ 46 首启自检（无 undecryptable/新明文）→ E2E 双端互发+冷启动 → 同步桥确认不被命中 → 回退预案 → 门禁全绿再升。
+- **仍剩**（§11.3）：`migrateAllMsgCaches()` 在 46 上会跳过（依赖同步加密），所以清单第 1 步必须在 45 上完成；msgCache 首帧可能空一帧，UI 若在会话打开前渲染列表需自己 `await ensureE2eStorageReady(convId)`；真机 45→46 的 hydrate 晚到/失败/DPAPI 不可用三条路径仍需人工验证。
+
+### 三、测试与验收
+
+- 全量门禁（本版发布前实跑）：`shared` 2 文件 / 29 例、`server` 10 文件 / 141 例、`web` 188 文件 / 2815 例、`desktop` 29 个测试文件 / 518 例，全绿；三包 `tsc --noEmit` 零错误；`pnpm -r build` 通过；4/4 包无重试。
+- 安全复审专项：desktop 定向全绿（secure-origins 13、pet-host 33、wiki-fs 8、file-fs 31、main 36、preload 28、secret 24、notify 14、chart 8、export 12、infohub 20、path-guard 11）；web MarkdownMessage 16（+4 注入回归）、e2eSession 加密组 48。
+- 回滚：纯加固与内部时序改动，无数据格式变化；CSP 仍 report-only（`HEMING_CSP_MODE=off` 可关）。
+
 ## d.59.2.20.0（2026-11-02）— 全面升级第三批：CSP 基线、启动时序、无障碍与可读性、pdfjs 6
 
 第三波偏「加固与可维护性」：给交付形态套上 CSP 基线（先 report-only），把 Electron 46 前的启动时序收口，修掉 Tailwind 4 迁移留下的系统性焦点环回归并把可读性拉回 AA，最后凭 Electron 45 的 Chromium 156 把压了很久的 pdfjs 4 升到 6。没有新功能入口，用户能感知的是「弱化文字更清楚、表单框线看得见、键盘焦点环回来了」。

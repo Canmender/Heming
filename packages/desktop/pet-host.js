@@ -41,6 +41,7 @@ const SAVE_DEBOUNCE_MS = 400;
  * @param {string} deps.trayIconPath 托盘图标绝对路径
  * @param {function} deps.resolveAppUrl () => string 主窗口加载地址
  * @param {function} deps.getMainWindow () => BrowserWindow|null
+ * @param {function} [deps.isAllowedNavigation] (url) => boolean 导航白名单
  * @param {function} [deps.log]
  * @param {function} [deps.setTimeout]
  * @param {function} [deps.clearTimeout]
@@ -58,6 +59,7 @@ function createPetHost(deps) {
     trayIconPath,
     resolveAppUrl,
     getMainWindow,
+    isAllowedNavigation,
     log = () => {},
     setTimeout: setTimer = setTimeout,
     clearTimeout: clearTimer = clearTimeout,
@@ -204,6 +206,29 @@ function createPetHost(deps) {
     });
 
     win = new BrowserWindow(opts);
+
+    // ── 导航闸（③-4 安全复审）─────────────────────────────────────────
+    // 桌宠窗口也挂了 preload，而 preload 暴露的是**整份主进程桥**（__mcp_stdio
+    // 能拉起子进程、__heming_secrets 是解密预言机、__heming_files 能写文件）。
+    // 桌宠页与主窗口同源，一旦这个 frame 被导航到远端页面，远端脚本就等于拿到了
+    // 这些能力（且能读同源 localStorage）。所以桌宠窗口只允许停留在应用自己的页面，
+    // window.open 一律拒绝——需要外链时走主窗口的既有「转系统浏览器」路径。
+    // isAllowedNavigation 由 main.js 注入；没接线时按**拒绝**处理（fail-closed）。
+    const navAllowed = typeof isAllowedNavigation === "function" ? isAllowedNavigation : () => false;
+    const wc = win.webContents;
+    if (wc && typeof wc.on === "function") {
+      wc.on("will-navigate", (event, url) => {
+        if (navAllowed(url)) return;
+        log(`[pet] 拦截离开桌宠页面的导航：${url}`);
+        event.preventDefault();
+      });
+    }
+    if (wc && typeof wc.setWindowOpenHandler === "function") {
+      wc.setWindowOpenHandler(({ url }) => {
+        log(`[pet] 拦截桌宠窗口的新窗口请求：${url}`);
+        return { action: "deny" };
+      });
+    }
 
     // 首次打开就穿透：不能让一个 300×420 的透明层凭空挡住桌面点击
     applyMouseIgnore();

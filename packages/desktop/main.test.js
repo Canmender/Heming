@@ -179,7 +179,7 @@ test("main.js：splash 定位仍需要 getBounds（取当前屏幕，不是还�
 // ── 本地包安装的运行时接线（d.25）──
 test("main.js：stdio 桥接注入 planSpawn，并暴露 runtime:probe", () => {
   assert.ok(mainCode.includes("planSpawn: planStdioSpawn"), "spawn 前必须翻译逻辑命令（Windows 的 npx 是 .cmd）");
-  assert.ok(mainCode.includes('ipcMain.handle("runtime:probe"'), "渲染层要能探测本机运行时");
+  assert.ok(mainCode.includes('secureIpc.handle("runtime:probe"'), "渲染层要能探测本机运行时（经来源守卫注册）");
   // 探测用的 PATH 必须与真正 spawn 时一致，否则界面说「没有」而启动成功（或反之）
   assert.ok(/probeLocalRuntime\(\{[\s\S]{0,120}buildChildEnv\(/.test(mainCode), "探测应使用补全后的 PATH");
   // shell:false 的约束在 mcp-stdio 里，main.js 不允许出现 shell:true
@@ -299,9 +299,9 @@ test("main.js：语音通话整套桥已移除（ICE / 最小化 / 通话通知�
 
 // ── 本机密钥信封桥（d.36）──
 test("密钥信封桥在 createWindow 之前注册（preload 用 sendSync 问可用性）", () => {
-  const reg = mainCode.indexOf("registerSecretIpc(ipcMain)");
+  const reg = mainCode.indexOf("registerSecretIpc(secureIpc)");
   const create = mainCode.indexOf("createWindow();"); // 带分号：避开函数定义的 `function createWindow() {`
-  assert.ok(reg > 0, "main.js 应注册 secret IPC");
+  assert.ok(reg > 0, "main.js 应注册 secret IPC（经来源守卫）");
   assert.ok(create > 0, "main.js 应调用 createWindow()");
   assert.ok(reg < create, "注册必须早于窗口创建");
 });
@@ -309,10 +309,10 @@ test("密钥信封桥在 createWindow 之前注册（preload 用 sendSync 问可
 // ── 系统通知桥（d.39）──
 test("main.js：接上系统通知桥，保持主窗口引用并用它聚焦", () => {
   assert.ok(mainCode.includes('require("./notify-bridge")'), "主进程必须接上 notify-bridge");
-  assert.ok(mainCode.includes("registerNotifyIpc(ipcMain"), "必须注册 notify IPC");
+  assert.ok(mainCode.includes("registerNotifyIpc(secureIpc"), "必须注册 notify IPC（经来源守卫）");
   assert.ok(mainCode.includes("mainWindow = win"), "createWindow 后必须记住主窗口");
   assert.ok(
-    /registerNotifyIpc\(ipcMain,\s*\{[\s\S]{0,80}getMainWindow:\s*\(\)\s*=>\s*mainWindow/.test(mainCode),
+    /registerNotifyIpc\(secureIpc,\s*\{[\s\S]{0,80}getMainWindow:\s*\(\)\s*=>\s*mainWindow/.test(mainCode),
     "通知点击必须取主窗口，而不是 getAllWindows()[0]"
   );
   assert.ok(
@@ -326,3 +326,135 @@ test("main.js：接上系统通知桥，保持主窗口引用并用它聚焦", (
   );
 });
 
+
+// ── ③-4 安全复审：IPC 来源守卫接线 ──
+// 只该由主窗口调的通道（wiki/chart/export/secret/notify/mcp/update/infohub）必须
+// 经来源守卫注册；桌宠窗口与主窗口同源、共用 preload，不能被它越权调这些能力。
+test("main.js：受信通道清单覆盖能力型 IPC，且经 guardIpc 按主窗口来源收口", () => {
+  assert.ok(mainCode.includes("guardIpc(ipcMain"), "必须建来源守卫门面");
+  assert.ok(
+    /isTrusted:\s*makeSenderCheck\(\(\)\s*=>\s*mainWindow\)/.test(mainCode),
+    "受信来源必须是主窗口（fail-closed，取不到就拒绝）",
+  );
+  for (const ch of [
+    "wiki:write",
+    "chart:export",
+    "export:write",
+    "secret:decryptAsync",
+    "notify:message",
+    "mcp:stdio:request",
+    "update:install",
+    "infohub:start",
+  ]) {
+    assert.ok(mainCode.includes(`"${ch}"`), `受信通道清单应含 ${ch}`);
+  }
+  // 能力模块必须用守卫门面注册（而不是裸 ipcMain）
+  for (const reg of [
+    "registerWikiIpc(secureIpc)",
+    "registerChartIpc(secureIpc)",
+    "registerExportIpc(secureIpc)",
+    "registerSecretIpc(secureIpc)",
+    "registerNotifyIpc(secureIpc",
+    "registerInfohubIpc(secureIpc",
+  ]) {
+    assert.ok(mainCode.includes(reg), `应使用 secureIpc 注册：${reg}`);
+  }
+  // app:version 是 preload 顶层 sendSync，必须保持裸 ipcMain（否则非主窗口 preload 拿不到版本）
+  assert.ok(mainCode.includes('ipcMain.on("app:version"'), "app:version 不应被来源守卫拦");
+});
+
+// ── ③-4 安全复审：IPC 通道不变量（防新通道绕过 secureIpc 门面）──
+// 目标：任何「渲染层可调」的通道，要么在 TRUSTED_CHANNELS 里由 secureIpc 按主窗口来源收口，
+// 要么出现在显式白名单里并写明理由。新增通道忘了登记 → 这里变红。
+const IPC_UNGUARDED_BY_DESIGN = [
+  "app:version", // preload 顶层 sendSync 取版本：任何窗口的 preload 都要能问
+];
+const IPC_PET_PREFIX = "pet:"; // 桌宠控制通道由 pet-host.js 内部校验（emit/open-settings 有来源与白名单）
+// file-fs 的三个通道用自己的 `isTrustedSender`（fail-closed）收口，不走 secureIpc 门面；
+// 下面的断言同时钉住 file-fs 里确实还有那两道 sender 校验，防止重构时把守卫丢成裸 handler。
+const IPC_SELF_GUARDED = ["file:read", "file:write", "file:pick-root"];
+
+function channelsIn(source, pattern) {
+  const out = new Set();
+  for (const m of source.matchAll(pattern)) out.add(m[1]);
+  return [...out].sort();
+}
+
+test("main.js：IPC 通道不变量（新通道不能绕过 secureIpc 门面）", () => {
+  const registeredChannels = channelsIn(mainCode, /(?:ipcMain|secureIpc)\.(?:handle|on)\(\s*["']([^"']+)["']/g);
+  const securedChannels = channelsIn(mainCode, /secureIpc\.(?:handle|on)\(\s*["']([^"']+)["']/g);
+  const bareChannels = channelsIn(mainCode, /ipcMain\.(?:handle|on)\(\s*["']([^"']+)["']/g);
+
+  const trustedListMatch = mainCode.match(/const TRUSTED_CHANNELS = \[([\s\S]*?)\];/);
+  assert.ok(trustedListMatch, "main.js 必须有 TRUSTED_CHANNELS 清单");
+  const trustedChannels = channelsIn(trustedListMatch[1], /["']([^"']+)["']/g);
+
+  // 能力模块各自的注册通道：必须全在 TRUSTED_CHANNELS（新增通道忘了登记 → 红）
+  const moduleFiles = [
+    "wiki-fs.js",
+    "chart-fs.js",
+    "export-fs.js",
+    "secret-store.js",
+    "notify-bridge.js",
+    "infohub-bridge.js",
+  ];
+  const moduleChannels = new Set();
+  for (const file of moduleFiles) {
+    const fileSrc = fs.readFileSync(path.join(__dirname, file), "utf8");
+    for (const ch of channelsIn(fileSrc, /ipcMain\.(?:handle|on)\(\s*["']([^"']+)["']/g)) {
+      moduleChannels.add(ch);
+    }
+  }
+  for (const ch of moduleChannels) {
+    assert.ok(trustedChannels.includes(ch), `能力模块通道不在 TRUSTED_CHANNELS（会被绕过守卫）：${ch}`);
+  }
+
+  // main.js 里的裸 ipcMain 注册只允许显式白名单（目前只有 app:version）
+  for (const ch of bareChannels) {
+    assert.ok(
+      IPC_UNGUARDED_BY_DESIGN.includes(ch),
+      `main.js 的 IPC 通道必须经 secureIpc（或进显式白名单）：${ch}`,
+    );
+  }
+  // secureIpc 注册的通道必须在清单内（门面只对清单内通道生效，防拼错通道名变成静默放行）
+  for (const ch of securedChannels) {
+    assert.ok(trustedChannels.includes(ch), `secureIpc 注册了清单外通道（会静默放行）：${ch}`);
+  }
+  // 清单里每条都必须真的被注册过（防改名后清单残留、守卫变成空转）
+  for (const ch of trustedChannels) {
+    const registered = registeredChannels.includes(ch) || moduleChannels.has(ch);
+    assert.ok(registered, `TRUSTED_CHANNELS 里的通道没有任何注册点（改名残留？）：${ch}`);
+  }
+
+  // preload 暴露的每个「调用型」通道（invoke/sendSync/send）都必须受守卫或有显式理由。
+  // 这是最外层的防绕过：preload 是渲染层唯一的 IPC 入口，新增桥忘记登记 → 红。
+  const preloadSrc = fs.readFileSync(path.join(__dirname, "preload.js"), "utf8");
+  const preloadChannels = channelsIn(
+    preloadSrc,
+    /ipcRenderer\.(?:invoke|sendSync|send)\(\s*["'\`]([^"'\`]+)["'\`]/g,
+  );
+  for (const ch of preloadChannels) {
+    const ok =
+      trustedChannels.includes(ch) ||
+      IPC_UNGUARDED_BY_DESIGN.includes(ch) ||
+      IPC_SELF_GUARDED.includes(ch) ||
+      ch.startsWith(IPC_PET_PREFIX);
+    assert.ok(ok, `preload 暴露了既不在 TRUSTED_CHANNELS 也不在白名单的通道：${ch}`);
+  }
+
+  // file-fs 自守卫通道必须仍在 file-fs.js 里带 fail-closed 的 sender 校验（不是裸 handler）
+  const fileFsSrc = fs.readFileSync(path.join(__dirname, "file-fs.js"), "utf8");
+  for (const ch of IPC_SELF_GUARDED) {
+    assert.ok(fileFsSrc.includes(`"${ch}"`), `file-fs.js 应注册 ${ch}`);
+  }
+  assert.ok(
+    /isTrustedSender\s*=\s*\(deps\s*&&\s*deps\.isTrustedSender\)\s*\|\|\s*\(\(\)\s*=>\s*false\)/.test(fileFsSrc),
+    "file-fs.js 的 sender 校验必须保持 fail-closed 默认（没接线 = 拒绝）",
+  );
+
+  // 桌宠通道按设计不进能力守卫（由 pet-host 校验），但必须全部是 pet: 前缀，防止夹带别的能力
+  const petHostSrc = fs.readFileSync(path.join(__dirname, "pet-host.js"), "utf8");
+  for (const ch of channelsIn(petHostSrc, /ipcMain\.(?:handle|on)\(\s*["']([^"']+)["']/g)) {
+    assert.ok(ch.startsWith(IPC_PET_PREFIX), `pet-host 注册了非 pet: 通道：${ch}`);
+  }
+});

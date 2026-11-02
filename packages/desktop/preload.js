@@ -243,11 +243,14 @@ contextBridge.exposeInMainWorld("__heming_secrets", {
   },
   /** 批量解密（白名单三键；主进程侧再次校验白名单）。 */
   bootstrap: (payload) => ipcRenderer.invoke("secret:bootstrap", payload),
-  /** 异步三件套（首选路径）。 */
+  /** 异步三件套（默认路径：d.59 起渲染层默认走异步，同步仅旧版兜底）。 */
   availableAsync: () => ipcRenderer.invoke("secret:availableAsync"),
   encryptAsync: (plain) => ipcRenderer.invoke("secret:encryptAsync", plain),
   decryptAsync: (cipherB64) => ipcRenderer.invoke("secret:decryptAsync", cipherB64),
-  /** 旧同步 API（弃用，Electron 46 起该通道自身会失效；仅作兜底）。 */
+  /** 通用批量（E2E 热路径：chains/msgCache 冷启动预取与异步落盘；顺序敏感、失败位为 null）。 */
+  encryptManyAsync: (plains) => ipcRenderer.invoke("secret:encryptMany", plains),
+  decryptManyAsync: (ciphers) => ipcRenderer.invoke("secret:decryptMany", ciphers),
+  /** 旧同步 API（**已迁移**：仅「旧版 Electron / 无异步 API」时兜底；46 起上游移除）。 */
   encrypt: (plain) => {
     try {
       const out = ipcRenderer.sendSync("secret:encrypt", plain);

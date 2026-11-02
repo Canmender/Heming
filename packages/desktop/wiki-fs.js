@@ -37,6 +37,18 @@ const ROOT_FILES = new Set(["index.md", "log.md", "schema.md"]);
 const PAGE_KINDS = new Set(["entities", "concepts", "sources", "synthesis", "notes"]);
 
 /**
+ * 单个 markdown 文件上限（2MB，与 file-fs 的单文件上限同值）。
+ * 渲染层传什么内容主进程都必须再判一次长度：wiki 键是模型可写的（工具层），
+ * 不封顶等于给「一次工具调用把磁盘写满」留了口子。
+ */
+const MAX_WIKI_BYTES = 2 * 1024 * 1024;
+
+/** log.md 追加行的字段上限：kind 短标识、title 一行、extra 一小段。 */
+const LOG_KIND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+const LOG_TITLE_MAX = 120;
+const LOG_EXTRA_MAX = 4000;
+
+/**
  * 把相对路径解析成根目录内的绝对路径；越界返回 null。
  *
  * ★ 判定口径已抽到 `path-guard.js`（`resolveInsideRoot`），与文件编辑桥 `file-fs.js` 共用：
@@ -74,9 +86,12 @@ async function ensureDir(dir) {
 async function writeFileSafe(rel, content) {
   const abs = resolveInside(rel);
   if (!abs || !isAllowedRel(rel)) throw new Error("forbidden path");
+  const text = String(content ?? "");
+  if (text.includes("\0")) throw new Error("content contains NUL");
+  if (Buffer.byteLength(text, "utf8") > MAX_WIKI_BYTES) throw new Error("wiki file too large");
   await ensureDir(path.dirname(abs));
-  await fsp.writeFile(abs, String(content ?? ""), "utf8");
-  return { path: rel, bytes: Buffer.byteLength(String(content ?? ""), "utf8") };
+  await fsp.writeFile(abs, text, "utf8");
+  return { path: rel, bytes: Buffer.byteLength(text, "utf8") };
 }
 
 async function readFileSafe(rel) {
@@ -128,7 +143,14 @@ async function listFiles() {
 /** 追加一行到 log.md，标准要求每条以 `## [日期] 类型 | 标题` 开头（便于 grep 解析）。 */
 async function appendLog(kind, title, extra) {
   const today = new Date().toISOString().slice(0, 10);
-  const line = `\n## [${today}] ${kind} | ${String(title ?? "").replace(/\n/g, " ").slice(0, 120)}\n${extra ? `\n${extra}\n` : ""}`;
+  // kind 是模型/渲染层给的标识，只接受短小写标识；不合法就写成 note，避免
+  // 它变成任意文本（含换行）插进标题行、破坏 log.md 的 grep 契约。
+  const safeKind = typeof kind === "string" && LOG_KIND_PATTERN.test(kind) ? kind : "note";
+  const safeTitle = String(title ?? "")
+    .replace(/\n/g, " ")
+    .slice(0, LOG_TITLE_MAX);
+  const safeExtra = extra == null ? "" : String(extra).slice(0, LOG_EXTRA_MAX);
+  const line = `\n## [${today}] ${safeKind} | ${safeTitle}\n${safeExtra ? `\n${safeExtra}\n` : ""}`;
   const abs = resolveInside("log.md");
   if (!abs) throw new Error("forbidden path");
   await ensureDir(path.dirname(abs));

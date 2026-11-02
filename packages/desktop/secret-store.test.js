@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const {
+  BATCH_MAX_ITEMS,
   BOOTSTRAP_ALLOWED_KEYS,
   ENVELOPE_VERSION,
   bootstrapSecrets,
@@ -14,6 +15,8 @@ const {
   isAvailableAsync,
   encryptAsync,
   decryptAsync,
+  encryptMany,
+  decryptMany,
   registerSecretIpc,
 } = require("./secret-store");
 
@@ -305,6 +308,70 @@ test("IPC：批量通道对非对象 payload 不抛", async () => {
   const result = await ipc.handleHandlers["secret:bootstrap"]({}, null);
   assert.equal(result.available, true);
   assert.deepEqual(result.plaintexts, []);
+});
+
+/* ─────────────────── 通用批量热路径（E2E chains / msgCache） ─────────────────── */
+
+test("批量：encryptMany / decryptMany 顺序敏感（乱序索引不串位）", async () => {
+  const safe = fakeSafeAsync();
+  const plains = ["第一条", "第二条", "第三条"];
+  const ciphers = await encryptMany(plains, safe);
+  assert.equal(ciphers.length, 3);
+  const back = await decryptMany(ciphers, safe);
+  assert.deepEqual(back, plains);
+  // 显式逐位核对：位置 i 的密文解出的就是 plains[i]（批量热路径最怕串位）
+  for (let i = 0; i < plains.length; i += 1) {
+    assert.equal(await decryptAsync(ciphers[i], safe), plains[i]);
+  }
+});
+
+test("批量：单条失败位置为 null，其余条目不受影响", async () => {
+  const safe = fakeSafeAsync();
+  const good = await encryptAsync("ok", safe);
+  const out = await decryptMany([good, "不是密文", good], safe);
+  assert.equal(out[0], "ok");
+  assert.equal(out[1], null);
+  assert.equal(out[2], "ok");
+  // 加密侧：非字符串 / 空串位置为 null（调用方按 fail-open 保留明文）
+  const enc = await encryptMany(["", 42, "ok"], safe);
+  assert.equal(enc[0], null);
+  assert.equal(enc[1], null);
+  assert.equal(typeof enc[2], "string");
+});
+
+test("批量：超过条数上限只处理前 256 条（其余位置缺失 → 调用方 fail-open）", async () => {
+  const safe = fakeSafeAsync();
+  const plains = Array.from({ length: 300 }, (_, i) => `p${i}`);
+  const ciphers = await encryptMany(plains, safe);
+  assert.equal(ciphers.length, BATCH_MAX_ITEMS);
+  assert.equal(await decryptAsync(ciphers[0], safe), "p0");
+  assert.equal(await decryptAsync(ciphers[BATCH_MAX_ITEMS - 1], safe), `p${BATCH_MAX_ITEMS - 1}`);
+});
+
+test("批量：总字符超上限时整批返回 null（不部分处理，避免半加密状态）", async () => {
+  const safe = fakeSafeAsync();
+  const plains = Array.from({ length: BATCH_MAX_ITEMS }, () => "x".repeat(9000)); // 256 * 9KB ≈ 2.3MB > 2MB
+  const ciphers = await encryptMany(plains, safe);
+  assert.deepEqual(
+    ciphers,
+    Array.from({ length: BATCH_MAX_ITEMS }, () => null),
+  );
+});
+
+test("批量：非数组入参返回空数组（不抛）", async () => {
+  const safe = fakeSafeAsync();
+  assert.deepEqual(await encryptMany(null, safe), []);
+  assert.deepEqual(await decryptMany("no", safe), []);
+});
+
+test("IPC：secret:encryptMany / secret:decryptMany 通道往返（长度与顺序一致）", async () => {
+  const ipc = fakeIpcMain();
+  registerSecretIpc(ipc, fakeSafeAsync());
+  const plains = ["a", "b", "c"];
+  const ciphers = await ipc.handleHandlers["secret:encryptMany"]({}, plains);
+  assert.equal(ciphers.length, 3);
+  const back = await ipc.handleHandlers["secret:decryptMany"]({}, ciphers);
+  assert.deepEqual(back, plains);
 });
 
 /* ─────────────────────────── 红线 ─────────────────────────── */

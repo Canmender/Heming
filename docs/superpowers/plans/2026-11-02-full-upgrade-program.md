@@ -270,3 +270,22 @@
 | 更新源 | ✅ latest.yml 指向 59.2.20，sha512 与安装包一致，Range 206 |
 | 备份 | ✅ `heming-data-2026-11-02-d.59.2.20.0.tar.gz`（8.1KB）——**文件名带版本号已生效，不再同日覆盖** |
 | 第四波 | `task-13` ③-4 安全复审、`task-14` Electron 46 前置收尾（E2E 热路径异步化 / 明文写窗口 / 同步桥降级） |
+
+### 第四波完成（2026-11-02 22:15）
+
+| 轨 | 结果 |
+|---|---|
+| ③-4 安全复审 | ✅ 28 条结论（`research/2026-11-02-security-review.md`）；**修掉越权 IPC**（能力型 IPC 复审前对任意渲染进程开放，桌宠共用 preload 可越权）+ 桌宠导航闸 + wiki-fs 上限 + IPC 通道不变量守卫（负向验证过）；待修 4 条入档 |
+| Electron 46 就绪 | ✅ E2E 热路径「预取 + 内存视图 + 异步落盘」（零同步 IPC）；`secureSetItem` 异步写优先、明文窗口消除（用例断言返回时磁盘是密文或未写）；同步桥降级为 45 兜底；46 升级检查清单 8 步 |
+| 全量门禁 | ✅ shared 29 / server 141 / web 188 文件 2815 例 / desktop 29 文件 518 例，4/4 无重试；三包 tsc 0 |
+| 版本 | `d.59.2.21.0`（纯加固：修订 20→21） |
+
+### 「全面升级」目标完成情况（四批八轨全部落地）
+
+| 批次 | 内容 | 状态 |
+|---|---|---|
+| ④ 发布与文档收尾 | HANDOFF/INDEX 回填、安装包缺 runtime 修复、备份名版本化、BOM 守卫、旧 IM 数据 dry-run | ✅（旧 IM 真删待用户点头） |
+| ① 工程基线升级 | React 19 / zustand 5 / zod 4 / Vite 8 / Vitest 5 / Tailwind 4 / Electron 45 / pdfjs 6；pixi 与 TS6 有证据不升 | ✅ |
+| ② 功能与技术债 | `file_patch`、回合日志回放/重跑/分叉、团队用量/日程/清除、桌宠在场感、P0-5b 加密与清理、CSP、release.mjs + publish-update.mjs、docker 清理、WS `?token=` 删除 | ✅ |
+| ③ 体验与安全加固 | 首屏 −79.4%、无障碍 AA 与焦点环、错误态/离线巡检、safeStorage 异步迁移、安全复审（越权 IPC 修复） | ✅ |
+| 需用户决定的遗留 | ① `feat/team-system` 合并回 `main`（main 被 WorkBuddy 工作树占用）；② 线上旧 IM 数据是否真删（dry-run 仅 3 行）；③ CSP 何时从 report-only 切 enforce；④ NVDA 真机走查与桌宠/file_patch 手工联调；⑤ 安全复审待修 4 条（草稿/token 明文、可写根 rootId、files mime nosniff）排期 | 待定 |

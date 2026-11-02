@@ -18,14 +18,16 @@
  * （注意异步 decrypt 返回的是 `{result, shouldReEncrypt}` 对象，不是裸字符串——
  * 少解构一层会静默拿到 undefined）。
  *
- * 迁移策略是**异步优先 + 同步兜底，一层一层切**：
+ * 迁移策略是**异步优先 + 同步兜底，一层一层切**（d.58 起步，d.59 收口）：
  * - 新增异步通道 `secret:availableAsync` / `secret:encryptAsync` / `secret:decryptAsync`
  *   与**批量通道** `secret:bootstrap`（一次 IPC 处理多个键，启动预取用）；
- * - 旧的同步通道**保留一个版本**（`secret:available|encrypt|decrypt`），
- *   因为它们服务于「渲染层在模块初始化时同步读三个低频键」这条既有启动链，
- *   消费方改造不在本轮范围（见 `docs/superpowers/specs/2026-11-02-safe-storage-async-migration.md`）；
- * - `secret:capabilities` 告诉渲染层「这套 Electron 还有没有同步 API」，
- *   preload 据此决定「缓存预取 + 同步兜底」还是「纯异步 + 启动门禁」。
+ * - d.59 起**默认走异步**：渲染层写路径异步优先（失败才明文），E2E 热路径（chains/msgCache）
+ *   走「批量解密预取 + 内存视图 + 异步落盘」；同步三件套只在
+ *   「旧版 Electron / 没有异步 API」时兜底，Electron 45 上仍可回退；
+ * - `secret:capabilities` 告诉渲染层这套 Electron 还有没有同步 API；
+ * - d.59 新增通用批量通道 `secret:decryptMany` / `secret:encryptMany`：E2E 冷启动要一次解
+ *   几十到几百条（chains 整值 / msgCache 逐条），逐条 IPC 会把启动拖垮。能力边界与单条异步
+ *   API 相同（本来就能解任意密文），只是打包，不放大能力。
  *
  * 回退路径（Electron 46 前必须完成）：渲染层 `hydrateSecureStorage()` 接到应用启动
  * （`main.tsx` 一行）+ 三个消费 store 在 hydrate 后重新 setState。本轮把异步通路、
@@ -36,6 +38,10 @@ const ENVELOPE_VERSION = "v1";
 
 /** 批量通道单次最多处理多少个键（启动预取固定 3 个；留一点余量但绝不无限）。 */
 const BOOTSTRAP_MAX_ENTRIES = 8;
+/** 通用批量加解密（E2E 热路径预取/异步落盘）单次最多多少条。 */
+const BATCH_MAX_ITEMS = 256;
+/** 单次批量操作的总字符上限（防止渲染层一次塞进几 MB 把主进程卡住）。 */
+const BATCH_MAX_CHARS = 2 * 1024 * 1024;
 /** 单个密文/明文长度上限：密钥与配置 JSON 远小于此，超限一律拒绝（不信任渲染层）。 */
 const MAX_SECRET_CHARS = 512 * 1024;
 /** 批量通道总长度上限。 */
@@ -97,9 +103,14 @@ function cryptoMode(safeStorage = defaultSafeStorage()) {
   return null;
 }
 
-/* ─────────────────────────── 同步三件套（弃用，兜底） ─────────────────────────── */
+/* ─────────────────────────── 同步三件套（已迁移；仅旧版 Electron 兜底） ─────────────────────────── */
 
-/** 同步可用性（弃用口径：Electron 46 起恒 false）。 */
+/**
+ * 同步可用性。
+ *
+ * ★ d.59 起：**默认走异步**；同步三件套只在「旧版 Electron / 没有异步 API」时兜底。
+ * Electron 46 起这三件套会被上游移除，`hasSyncApi` 为 false，这里恒返回 false。
+ */
 function isAvailable(safeStorage = defaultSafeStorage()) {
   try {
     if (!hasSyncApi(safeStorage)) return false;
@@ -185,6 +196,44 @@ async function decryptAsync(cipherB64, safeStorage = defaultSafeStorage()) {
   return decrypt(cipherB64, safeStorage);
 }
 
+/* ─────────────────────────── 通用批量通道（E2E 热路径） ─────────────────────────── */
+
+/**
+ * 批量解密（顺序敏感：返回值与入参同长同序，失败位置为 null）。
+ *
+ * 用途：E2E 的 chains / msgCache 是**整值信封/逐条密文**，冷启动一次要解几十到几百条；
+ * 逐条 IPC 会把启动拖垮，所以给一条批量通道。能力边界与单条 `decryptAsync` 相同
+ *（它本来就能解任意密文），这里只是打包，不放大能力。
+ */
+async function decryptMany(items, safeStorage = defaultSafeStorage()) {
+  if (!Array.isArray(items)) return [];
+  const normalized = items
+    .slice(0, BATCH_MAX_ITEMS)
+    .map((item) => (typeof item === "string" && item.length <= MAX_SECRET_CHARS ? item : null));
+  const total = normalized.reduce((sum, item) => sum + (item ? item.length : 0), 0);
+  if (total > BATCH_MAX_CHARS) return normalized.map(() => null);
+  const out = [];
+  for (const item of normalized) {
+    out.push(item ? await decryptAsync(item, safeStorage) : null);
+  }
+  return out;
+}
+
+/** 批量加密（顺序敏感；失败位置为 null，调用方按 fail-open 保留明文）。 */
+async function encryptMany(items, safeStorage = defaultSafeStorage()) {
+  if (!Array.isArray(items)) return [];
+  const normalized = items
+    .slice(0, BATCH_MAX_ITEMS)
+    .map((item) => (typeof item === "string" && item && item.length <= MAX_SECRET_CHARS ? item : null));
+  const total = normalized.reduce((sum, item) => sum + (item ? item.length : 0), 0);
+  if (total > BATCH_MAX_CHARS) return normalized.map(() => null);
+  const out = [];
+  for (const item of normalized) {
+    out.push(item ? await encryptAsync(item, safeStorage) : null);
+  }
+  return out;
+}
+
 /* ─────────────────────────── 批量通道（启动预取） ─────────────────────────── */
 
 /**
@@ -228,9 +277,9 @@ async function bootstrapSecrets(entries, safeStorage = defaultSafeStorage()) {
   return { available, mode: cryptoMode(safeStorage), plaintexts };
 }
 
-/** 注册 IPC：同步通道（弃用兜底）+ 异步通道（首选）+ 批量通道 + 能力探测。 */
+/** 注册 IPC：异步通道（默认）+ 批量通道 + 能力探测；同步通道仅旧版 Electron 兜底。 */
 function registerSecretIpc(ipcMain, safeStorage = defaultSafeStorage()) {
-  // —— 同步通道（弃用；Electron 46 起不可用，渲染层须走异步）——
+  // —— 同步通道（已迁移：默认异步；仅「旧版 Electron / 无异步 API」兜底，46 起上游移除）——
   ipcMain.on("secret:available", (event) => {
     event.returnValue = isAvailable(safeStorage);
   });
@@ -261,6 +310,9 @@ function registerSecretIpc(ipcMain, safeStorage = defaultSafeStorage()) {
     const entries = payload && typeof payload === "object" ? payload.entries : undefined;
     return bootstrapSecrets(entries, safeStorage);
   });
+  /** 通用批量：E2E 热路径（chains/msgCache 整值/逐条密文）的预取与异步落盘。 */
+  ipcMain.handle("secret:decryptMany", async (_event, items) => decryptMany(items, safeStorage));
+  ipcMain.handle("secret:encryptMany", async (_event, items) => encryptMany(items, safeStorage));
 }
 
 module.exports = {
@@ -273,8 +325,11 @@ module.exports = {
   isAvailableAsync,
   encryptAsync,
   decryptAsync,
+  decryptMany,
+  encryptMany,
   bootstrapSecrets,
   registerSecretIpc,
   BOOTSTRAP_MAX_ENTRIES,
+  BATCH_MAX_ITEMS,
   MAX_SECRET_CHARS,
 };

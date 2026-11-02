@@ -25,7 +25,14 @@ function makeFakeElectron() {
       this._listeners = {};
       this.webContents = {
         _sent: [],
-        on: () => {},
+        _listeners: {},
+        _openHandler: null,
+        on: (ch, fn) => {
+          this.webContents._listeners[ch] = fn;
+        },
+        setWindowOpenHandler: (fn) => {
+          this.webContents._openHandler = fn;
+        },
         send: (ch, payload) => this.webContents._sent.push({ ch, payload }),
       };
       created.push(this);
@@ -106,6 +113,7 @@ function makeHost(overrides = {}) {
     trayIconPath: "/tmp/pet-tray.png",
     resolveAppUrl: () => "app://heming/index.html",
     getMainWindow: () => null,
+    isAllowedNavigation: overrides.isAllowedNavigation,
     readState: overrides.readState || (() => null),
     writeState: (file, s) => written.push({ file, s }),
     log: () => {},
@@ -535,4 +543,38 @@ test("点气泡直达页面：合法 page 归一为字符串转发；非法 page
   const before = mainWin.webContents._sent.length;
   openSettings({ sender: stranger.webContents }, "team");
   assert.equal(mainWin.webContents._sent.length, before);
+});
+
+/* ─────────────────── ③-4 安全复审：桌宠窗口导航闸 ─────────────────── */
+
+test("导航闸：桌宠窗口只允许应用自己的页面，远端 URL 被 preventDefault", () => {
+  const { host, created } = makeHost({
+    isAllowedNavigation: (url) => typeof url === "string" && url.startsWith("app://heming/"),
+  });
+  host.show();
+  const wc = created[0].webContents;
+  const willNavigate = wc._listeners["will-navigate"];
+  assert.equal(typeof willNavigate, "function", "必须挂 will-navigate 闸");
+
+  let prevented = 0;
+  const event = { preventDefault: () => { prevented += 1; } };
+
+  willNavigate(event, "app://heming/pet.html?hemingWindow=pet");
+  assert.equal(prevented, 0, "应用自己的页面放行");
+
+  willNavigate(event, "https://evil.example/x");
+  assert.equal(prevented, 1, "远端页面必须被拦住（否则远端脚本拿到 preload 桥）");
+
+  // 新窗口请求一律 deny（window.open / target=_blank）
+  const decision = wc._openHandler({ url: "https://evil.example/x" });
+  assert.deepEqual(decision, { action: "deny" });
+});
+
+test("导航闸：没注入 isAllowedNavigation 时 fail-closed（导航一律拦）", () => {
+  const { host, created } = makeHost(); // 不传 isAllowedNavigation
+  host.show();
+  const willNavigate = created[0].webContents._listeners["will-navigate"];
+  let prevented = 0;
+  willNavigate({ preventDefault: () => { prevented += 1; } }, "app://heming/pet.html");
+  assert.equal(prevented, 1);
 });

@@ -33,7 +33,7 @@ import {
   toB64,
   fromB64,
 } from "./e2eCrypto.js";
-import { secureGetItem, secureSetItem, secureBridge, secureSetItemVerified, readSecureValue, backupRawOnce, markSecureUndecryptable, hasSecureBridge, secureHydrationInFlight, whenSecureHydrated, onSecureHydrated, PLAINTEXT_BACKUP_SUFFIX, UNDECRYPTABLE_BACKUP_SUFFIX } from "./secureStorage.js";
+import { secureGetItem, secureSetItem, secureBridge, secureSetItemVerified, secureSetItemAsync, readSecureValue, readSecureValueAsync, secureDecryptManyAsync, secureEncryptManyAsync, backupRawOnce, markSecureUndecryptable, hasSecureBridge, secureHydrationInFlight, whenSecureHydrated, onSecureHydrated, PLAINTEXT_BACKUP_SUFFIX, UNDECRYPTABLE_BACKUP_SUFFIX } from "./secureStorage.js";
 import {
   MIGRATE_BATCH,
   decodeEntries,
@@ -42,6 +42,7 @@ import {
   encodeCacheContainer,
   encryptEntry,
   findEntryById,
+  isCachedMsgLike,
   isMsgCacheAuxKey,
   migratePlainEntries,
   parseCacheRaw,
@@ -237,6 +238,20 @@ function writeSecureJson(key: string, value: unknown): void {
   secureSetItem(key, JSON.stringify(value));
 }
 
+/**
+ * 异步写 JSON（默认异步桥路径；同步桥/无桥保持立即落盘语义）。
+ *
+ * 身份必须用它并 `await`：46 上 `secureSetItem` 只是排队，若首帧就上层公钥/收发，
+ * 「磁盘还没有身份」会让 `isForMe` 读不到 raw 而误丢定向 chaindist。
+ */
+async function writeSecureJsonAsync(key: string, value: unknown): Promise<void> {
+  if (!asyncFirstBridge()) {
+    writeSecureJson(key, value);
+    return;
+  }
+  await secureSetItemAsync(key, JSON.stringify(value));
+}
+
 /** Uint8Array → ArrayBuffer（TS 5.9 BufferSource 要求 ArrayBuffer 背书，同 e2eCrypto）。 */
 function ab(u8: Uint8Array): ArrayBuffer {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
@@ -297,6 +312,264 @@ function readRaw(key: string): string | null {
   }
 }
 
+// —— d.59 · E2E 收发热路径的「异步优先」适配层 ——
+//
+// 背景：Electron 46 移除了 safeStorage 同步三件套。E2E 的 chains/msgCache 是**热路径**，
+// 但完全异步化会牵动 ChatPage 的同步 `msgCache.get/append` 与 `recvChainOwners`。
+// 采用方案 (a)「预取 + 内存视图 + 异步落盘」：
+// - **读**：进入会话/消息时先 `ensureE2eStorageReady()`（异步批量解密一次），把明文装进
+//   chainsView/cacheView；此后所有同步读命中的都是内存视图，零 IPC；
+// - **写**：内存视图先更新（同步读永远拿到新值），加密落盘排队异步行；
+//   `sealMessage/openMessage` 在返回前 `await flush`，保证**链状态落盘不丢**；
+// - 旧版 Electron（有同步桥）路径保持原样，行为不变；浏览器无桥也原样。
+// 评估过方案 (b)（把 E2E 加解密搬主进程）：链状态机、AAD、去重窗口都要跨进程重写，
+// 风险与工期都高一个数量级；`safeStorage` 的同步限制只是「怎么落盘」，不该为此重写协议。
+
+/** 当前桥是否应走异步优先（有异步 API 即默认异步；旧同步桥只在无异步 API 时兜底）。 */
+function asyncFirstBridge(): boolean {
+  const b = secureBridge();
+  return !!b && b.asyncAvailable === true && typeof b.encryptAsync === "function";
+}
+
+/** 已预热过的会话（chains/msgCache 已装进内存视图）。 */
+const e2eReadyConvs = new Set<string>();
+/** 每个会话的 chains 异步落盘队列（同一会话串行，最后一次写赢）。 */
+const chainsPersistQueue = new Map<string, Promise<void>>();
+/** 每个会话的 msgCache 异步落盘队列。 */
+const cachePersistQueue = new Map<string, Promise<void>>();
+/** 每个会话最近一次排队落盘的代号：只有最新一轮完成才回填视图（旧写不覆盖新写）。 */
+const cacheWriteGeneration = new Map<string, number>();
+
+/** 测试隔离：清掉异步就绪标记与未完成队列（不动 localStorage/视图）。 */
+export function resetE2eAsyncState(): void {
+  e2eReadyConvs.clear();
+  chainsPersistQueue.clear();
+  cachePersistQueue.clear();
+  cacheWriteGeneration.clear();
+}
+
+/** chains 异步落盘写完（供 seal/open 在返回前 await：链状态不丢）。 */
+async function flushChains(convId: string): Promise<void> {
+  await (chainsPersistQueue.get(convId) ?? Promise.resolve());
+}
+
+/** msgCache 异步落盘写完（收到消息后调用：本机缓存不丢）。 */
+async function flushMsgCache(convId: string): Promise<void> {
+  await (cachePersistQueue.get(convId) ?? Promise.resolve());
+}
+
+/** 等一个异步读落定（最多 timeoutMs；永不 reject）。 */
+function withAsyncTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  return new Promise<T | null>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(null);
+    }, Math.max(1, timeoutMs));
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
+/** 把 chains 装进内存视图（异步一次；之后 loadChains 的同步读零 IPC）。
+ *
+ * 读超时/抛错时**不**缓存空视图：宁可下次再试，也不能把「没读到」当成「链是空的」——
+ * 后者会被后续 saveChains 当成基准覆盖磁盘（回滚接收链 = 前向保密 + 解不开后续消息）。
+ */
+async function ensureChainsViewAsync(convId: string): Promise<boolean> {
+  const key = CHAINS_PREFIX + convId;
+  const raw = readRaw(key);
+  const hit = chainsView.get(key);
+  if (hit && hit.raw === raw) return true;
+  if (raw === null) {
+    chainsView.set(key, { raw: null, file: { recv: {} } });
+    return true;
+  }
+  let file: ChainsFile = { recv: {} };
+  let readOk = false;
+  try {
+    const read = await withAsyncTimeout(readSecureValueAsync(key), 4000);
+    if (read === null) return false; // 超时：不缓存空链，调用方下次重试
+    readOk = true;
+    if (read.kind === "plain") {
+      const parsed = parseChainsValue(key, read.raw, "plain");
+      file = parsed.file;
+      if (parsed.ok && asyncFirstBridge()) {
+        // 旧明文就地异步迁移（先备份明文、再加密、再自校验；失败保留明文）。
+        logChainsWrite(key, await secureSetItemAsync(key, read.raw));
+      }
+    } else if (read.kind === "envelope") {
+      file = parseChainsValue(key, read.value, "envelope").file;
+    } else if (read.kind === "unreadable") {
+      markChainsUnreadable(key, read.reason);
+    }
+  } catch {
+    /* 读失败：不缓存空视图（同上），磁盘数据保留 */
+  }
+  if (readOk) chainsView.set(key, { raw: readRaw(key), file });
+  return readOk;
+}
+
+/** 把 msgCache 容器整份解进内存视图（异步批量一次；之后 list/get/append 都命中内存）。 */
+async function ensureCacheViewAsync(convId: string): Promise<void> {
+  const key = MSGCACHE_PREFIX + convId;
+  const raw = readRaw(key);
+  const hit = cacheView.get(key);
+  if (hit && hit.raw === raw) return;
+  const shape = parseCacheRaw(raw);
+
+  if (shape.kind === "empty") {
+    cacheView.set(key, { raw: null, entries: [], messages: [], unreadableIds: [], shape: "empty" });
+    return;
+  }
+  if (shape.kind === "plain") {
+    await migratePlainCacheViewAsync(convId, key, raw, shape.items);
+    return;
+  }
+  if (shape.kind === "container") {
+    await decodeContainerViewAsync(convId, key, raw, shape.entries);
+    return;
+  }
+  if (shape.kind === "envelope") {
+    const whole = await withAsyncTimeout(readSecureValueAsync(key), 4000);
+    if (whole?.kind === "envelope") {
+      try {
+        const parsed = JSON.parse(whole.value) as unknown;
+        if (Array.isArray(parsed) && parsed.every(isCachedMsgLike)) {
+          await migratePlainCacheViewAsync(convId, key, raw, parsed as CachedMsg[]);
+          return;
+        }
+      } catch {
+        /* 落到 unreadable */
+      }
+    }
+    if (raw !== null) backupRawOnce(key, raw, UNDECRYPTABLE_BACKUP_SUFFIX);
+    noteCacheIssue(convId, "unreadable");
+    cacheView.set(key, { raw, entries: [], messages: [], unreadableIds: [], shape: "empty" });
+    return;
+  }
+  // foreign：保留原始数据、按空缓存继续（与既有读侧一致）。
+  if (raw !== null) {
+    backupRawOnce(key, raw, UNDECRYPTABLE_BACKUP_SUFFIX);
+    markSecureUndecryptable(key);
+    console.warn(`[e2e] 消息缓存无法识别（已原样备份），本次按空缓存继续：${key}`);
+  }
+  noteCacheIssue(convId, "unreadable");
+  cacheView.set(key, { raw, entries: [], messages: [], unreadableIds: [], shape: "empty" });
+}
+
+/** 容器 → 明文视图：批量解密 `d` 条目；顺带把残留明文条目迁成密文并异步落盘。 */
+async function decodeContainerViewAsync(
+  convId: string,
+  key: string,
+  raw: string | null,
+  entries: RawEntry[],
+): Promise<void> {
+  const cipherPositions: number[] = [];
+  const ciphers: string[] = [];
+  entries.forEach((entry, index) => {
+    if ("d" in entry) {
+      cipherPositions.push(index);
+      ciphers.push(entry.d);
+    }
+  });
+  const plains = ciphers.length > 0 ? await secureDecryptManyAsync(ciphers) : [];
+  const plainByIndex = new Map<number, string | null>();
+  cipherPositions.forEach((index, i) => plainByIndex.set(index, plains[i] ?? null));
+
+  const messages: CachedMsg[] = [];
+  const unreadableIds: string[] = [];
+  entries.forEach((entry, index) => {
+    if ("m" in entry) {
+      messages.push(entry.m);
+      return;
+    }
+    const plain = plainByIndex.get(index);
+    if (typeof plain !== "string") {
+      unreadableIds.push(entry.id);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(plain) as unknown;
+      if (isCachedMsgLike(parsed)) messages.push(parsed);
+      else unreadableIds.push(entry.id);
+    } catch {
+      unreadableIds.push(entry.id);
+    }
+  });
+  const view: CacheViewEntry = {
+    raw,
+    entries,
+    messages,
+    unreadableIds,
+    shape: "container",
+  };
+  cacheView.set(key, view);
+
+  // 残留明文条目（迁移期/上次失败的写）→ 加密成密文并异步落盘。
+  if (entries.some((entry) => "m" in entry) && asyncFirstBridge()) {
+    const next = await writeCacheViewAsync(convId, view, entries, messages, undefined);
+    cacheView.set(key, next);
+  }
+}
+
+/** 旧明文数组 → 密文容器（首读异步迁移；失败保留明文 + 可见标记）。 */
+async function migratePlainCacheViewAsync(
+  convId: string,
+  key: string,
+  raw: string | null,
+  items: CachedMsg[],
+): Promise<void> {
+  const entries = toPlainEntries(items);
+  const view: CacheViewEntry = { raw, entries, messages: items, unreadableIds: [], shape: "plaintext" };
+  cacheView.set(key, view);
+  if (!asyncFirstBridge()) return; // 无桥/旧同步桥：留给既有同步迁移逻辑
+  const plains = entries.map((entry) => JSON.stringify((entry as { m: CachedMsg }).m));
+  const ciphers = await secureEncryptManyAsync(plains);
+  let failed = 0;
+  const encrypted: RawEntry[] = entries.map((entry, index) => {
+    const cipher = ciphers[index];
+    if (cipher) return { id: entry.id, d: cipher };
+    failed += 1;
+    return entry;
+  });
+  if (failed > 0) noteCacheIssue(convId, "encrypt-failed");
+  const next = await writeCacheViewAsync(convId, view, encrypted, items, failed > 0 ? "encrypt-failed" : undefined);
+  cacheView.set(key, next);
+}
+
+/**
+ * 预热一个会话的 E2E 存储（chains + msgCache）：**进入收发路径前 await 一次**。
+ *
+ * 已经预热过（或没有异步桥）时零成本；浏览器/旧同步桥路径完全跳过，行为不变。
+ */
+export async function ensureE2eStorageReady(convId: string): Promise<void> {
+  if (!asyncFirstBridge()) return; // 旧桥/无桥：同步路径照旧
+  if (e2eReadyConvs.has(convId)) {
+    // 视图可能被外部清空（测试/别的窗口）：raw 不一致时重新预热。
+    const chainsHit = chainsView.get(CHAINS_PREFIX + convId);
+    const cacheHit = cacheView.get(MSGCACHE_PREFIX + convId);
+    if (chainsHit && cacheHit) return;
+  }
+  const chainsOk = await ensureChainsViewAsync(convId);
+  await ensureCacheViewAsync(convId);
+  // 链没读到就不算预热完成：调用方（handleChainDist 等）据此重试，绝不拿空链当基准写盘。
+  if (chainsOk) e2eReadyConvs.add(convId);
+}
+
 /** 链状态不可读：置标记（设置区可见）并留一条可诊断日志；密文/原文原样留在磁盘上。 */
 function markChainsUnreadable(key: string, reason: string): void {
   markSecureUndecryptable(key);
@@ -330,15 +603,24 @@ function loadChains(convId: string): ChainsFile {
       const parsed = parseChainsValue(key, read.raw, "plain");
       file = parsed.file;
       // 首读懒迁移：**先确认可解析**再加密（坏数据不包成密文，避免把垃圾锁进信封）。
-      if (parsed.ok && secureBridge()) {
-        const write = secureSetItemVerified(key, read.raw);
-        logChainsWrite(key, write);
+      if (parsed.ok) {
+        if (asyncFirstBridge()) {
+          // 46：同步读路径里没有同步加密能力 → 排队异步迁移（失败保留明文 + 可见标记）。
+          enqueueChainsPersist(convId, read.raw);
+        } else if (secureBridge()) {
+          logChainsWrite(key, secureSetItemVerified(key, read.raw));
+        }
       }
     } else if (read.kind === "envelope") {
       file = parseChainsValue(key, read.value, "envelope").file;
     } else if (read.kind === "unreadable") {
-      // readSecureValue 已置 undecryptableKeys：不静默当空链，但仍返回空链让收发继续（fail-open）。
-      markChainsUnreadable(key, read.reason);
+      if (read.reason === "async-pending") {
+        // 46：值在后台异步解（不是坏数据）——不标记不可解，预热后本视图会被替换。
+        void ensureE2eStorageReady(convId);
+      } else {
+        // readSecureValue 已置 undecryptableKeys：不静默当空链，但仍返回空链让收发继续（fail-open）。
+        markChainsUnreadable(key, read.reason);
+      }
     }
   }
   chainsView.set(key, { raw: readRaw(key), file });
@@ -363,12 +645,44 @@ function saveChains(convId: string, file: ChainsFile): void {
   if (!secureBridge()) {
     // 浏览器（无桥）：逐字保持今天的明文写盘路径（writeJson 内部 JSON.stringify 对象）。
     writeJson(key, file);
+  } else if (asyncFirstBridge()) {
+    /*
+     * d.59 默认路径：内存视图先更新（同步读立即拿到新链状态），加密落盘排队异步。
+     * 磁盘在落盘完成前仍是旧值——seal/open 返回前会 `await flushChains` 保证不丢；
+     * 落盘失败同样 fail-open 写明文新值并标记（绝不回退旧盘值导致 msgKey 重用）。
+     */
+    chainsView.set(key, { raw: readRaw(key), file });
+    enqueueChainsPersist(convId, value);
+    return;
   } else {
     logChainsWrite(key, secureSetItemVerified(key, value));
   }
   // 写失败时磁盘仍是旧值，但链状态是**单调推进**的：内存视图必须指向新值，
   // 否则下一次 load 会复用已用过的 msgKey（比明文降级更危险）。下一次写入会再试。
   chainsView.set(key, { raw: readRaw(key), file });
+}
+
+/** chains 异步落盘排队（同会话串行：先写的先落盘，最后写的赢）。 */
+function enqueueChainsPersist(convId: string, value: string): void {
+  const key = CHAINS_PREFIX + convId;
+  const prev = chainsPersistQueue.get(convId) ?? Promise.resolve();
+  const run = prev
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        const write = await secureSetItemAsync(key, value);
+        logChainsWrite(key, write);
+      } catch {
+        /* 异步落盘失败：内存态继续可用，下一次写入会带上最新状态再试 */
+      }
+      // 视图 raw 跟磁盘对齐（内容仍是内存里最新的 file）。
+      const view = chainsView.get(key);
+      if (view) view.raw = readRaw(key);
+    });
+  chainsPersistQueue.set(convId, run);
+  void run.finally(() => {
+    if (chainsPersistQueue.get(convId) === run) chainsPersistQueue.delete(convId);
+  });
 }
 
 function loadDeferred(convId: string): SealedEnvelope[] {
@@ -492,7 +806,7 @@ async function ensureIdentity(): Promise<StoredIdentity> {
         createdAt: Date.now(),
       },
     };
-    writeSecureJson(IDENTITY_KEY, stored);
+    await writeSecureJsonAsync(IDENTITY_KEY, stored);
     identityKidCache = { raw: localStorage.getItem(IDENTITY_KEY) ?? "", kid: stored.kid };
     return stored;
   })();
@@ -571,6 +885,8 @@ export function isForMe(env: SealedEnvelope): boolean {
  */
 export async function initSession(convId: string, deps: E2eDeps): Promise<void> {
   depsByConv.set(convId, deps);
+  // d.59：有异步桥时先把 chains/msgCache 批量解进内存视图（此后同步读零 IPC）。
+  await ensureE2eStorageReady(convId);
   await ensureIdentity();
   const chains = loadChains(convId);
   if (!chains.send) {
@@ -578,6 +894,8 @@ export async function initSession(convId: string, deps: E2eDeps): Promise<void> 
     chains.send = { kid: await chainKidOf(ck), ck: toB64(ck), n: 0, createdAt: deps.now(), distFor: [] };
     saveChains(convId, chains);
   }
+  // 新会话首链必须落盘后再返回：否则首条 seal 前进程退出会丢链（收端永远解不开）。
+  await flushChains(convId);
 }
 
 // 模块级会话登记：convId → deps（接线层自动重发 init/chaindist 用）、convId → 明文缓存（sweep 用）
@@ -663,6 +981,9 @@ async function doSealMessage(
   send.ck = toB64(next);
   send.n += 1;
   saveChains(conv.id, chains);
+  // d.59：链状态必须**落盘后**才返回（异步桥下 saveChains 只是排队）。
+  // 否则进程在加密落盘前退出 → 下次启动 n 回退 → msgKey 重用（收端去重会把新消息当重放）。
+  await flushChains(conv.id);
   return ev;
 }
 
@@ -780,6 +1101,8 @@ export async function openMessage(
   opts?: { aad?: Uint8Array; noDefer?: boolean },
 ): Promise<OpenResult> {
   cacheByConv.set(conv.id, cache);
+  // d.59：先预热本会话 chains/msgCache 的内存视图（异步桥下同步读才有东西可命中）。
+  await ensureE2eStorageReady(conv.id);
   if (!env.cipher) throw new Error(DECRYPT_FAILED);
   let outer: CipherOuter;
   try {
@@ -880,7 +1203,9 @@ async function openChainMsg(
     saveChains(convId, chains);
   }
 
-  appendCache(conv, env, plain, cache);
+  await appendCache(conv, env, plain, cache);
+  // 解密成功推进了接收链（opened/msgKey 窗口）：落盘后再返回，防重放窗口回退。
+  await flushChains(convId);
   return plain;
 }
 
@@ -927,21 +1252,25 @@ async function openX3dhDist(
     const senderDev = await kidOfSpki(outer.ik);
     handleChainDist(conv.id, senderDev, plain.dist);
   }
-  appendCache(conv, env, plain, cache);
+  await appendCache(conv, env, plain, cache);
+  // 落链/入缓存都排队异步写：返回前刷掉，保证「收到就落盘、不丢」。
+  await flushChains(conv.id);
   return plain;
 }
 
-function appendCache(
+async function appendCache(
   conv: { id: string; memberIdOf: (chainKid: string) => string | undefined },
   env: SealedEnvelope,
   plain: PlainEnvelope,
   cache: MsgCache,
-): void {
+): Promise<void> {
   if (plain.kind === "chaindist" || plain.kind === "chunk") return; // 控制消息与流式增量不进渲染缓存
   const senderId =
     env.senderId ?? (env.chainKid !== undefined ? conv.memberIdOf(env.chainKid) : undefined) ?? "unknown";
   const at = env.createdAt ? Date.parse(env.createdAt) || Date.now() : Date.now();
   cache.append(conv.id, { id: env.id, senderId, at, plain });
+  // 异步桥下 append 只是「内存视图 + 排队落盘」：收消息要等缓存真落盘再返回（不丢）。
+  if (asyncFirstBridge()) await flushMsgCache(conv.id);
 }
 
 // —— handleChainDist ——
@@ -965,6 +1294,20 @@ export function handleChainDist(convId: string, from: string, dist: ChainDist): 
     !Number.isInteger(dist.n) ||
     !Number.isFinite(dist.createdAt)
   ) {
+    return;
+  }
+  /*
+   * d.59：异步桥下「没预热就读」会拿到空链，随后 saveChains 会把**磁盘上其它 recv 链**
+   * 覆盖掉（回滚 + 前向保密被破坏）。openMessage 内部路径一定已经 ensure 过；
+   * 外部手工调用（接线层/诊断）先在后台预热，再按同一入参幂等重放一次。
+   */
+  if (asyncFirstBridge() && !e2eReadyConvs.has(convId)) {
+    void ensureE2eStorageReady(convId)
+      .then(() => {
+        if (e2eReadyConvs.has(convId)) handleChainDist(convId, from, dist);
+        else console.warn(`[e2e] 链状态预热失败，本次 chaindist 暂不落链（下次消息到达会重试）：${convId}`);
+      })
+      .catch(() => undefined);
     return;
   }
   const chains = loadChains(convId);
@@ -1131,7 +1474,8 @@ const cacheEncryptionIssues = new Map<string, MsgCacheEncryptionReason>();
 export function msgCacheEncryptionState(convId: string, raw?: string | null): MsgCacheEncryptionState {
   const b = secureBridge();
   const desktop = !!b;
-  const available = !!b && b.available === true;
+  // 46：`available`（同步能力）恒 false，异步能力才是真的「系统安全存储可用」。
+  const available = !!b && (b.available === true || b.asyncAvailable === true);
   const diskRaw = raw === undefined ? readRaw(MSGCACHE_PREFIX + convId) : raw;
   const shape = parseCacheRaw(diskRaw);
   const form: MsgCacheStorageForm =
@@ -1236,6 +1580,8 @@ function writeCacheView(
   messages: CachedMsg[] | null,
   issue?: MsgCacheEncryptionReason,
 ): CacheViewEntry {
+  // d.59 默认路径：有异步桥时内存视图先更新、加密落盘排队（同步读零 IPC、不丢消息）。
+  if (asyncFirstBridge()) return writeCacheViewQueued(convId, view, entries, messages, issue);
   const key = MSGCACHE_PREFIX + convId;
   const crypto = cacheCrypto();
   // 无桥且磁盘原本是容器：继续写容器（密文条目原样保留，不因无密钥而丢）。
@@ -1321,6 +1667,11 @@ function readCacheView(convId: string): CacheViewEntry {
         unreadableIds: [],
         shape: "plaintext",
       };
+    } else if (!crypto && asyncFirstBridge()) {
+      // 46：同步路径没有解密能力——这是「还没解」而不是「解不开」，不备份、不标记；
+      // 先按未解码视图占位，后台预热把明文装进 messages（下一次 list 可见）。
+      view = { raw, entries: [], messages: null, unreadableIds: [], shape: "container" };
+      void ensureE2eStorageReady(convId);
     } else {
       if (raw !== null) backupRawOnce(key, raw, UNDECRYPTABLE_BACKUP_SUFFIX);
       noteCacheIssue(convId, "unreadable");
@@ -1339,6 +1690,183 @@ function readCacheView(convId: string): CacheViewEntry {
 
   cacheView.set(key, view);
   return view;
+}
+
+/** 批量解密视图里的密文条目（异步桥版的 `decodeEntries`，语义与失败位一致）。 */
+async function decodeEntriesAsync(entries: RawEntry[]): Promise<{ messages: CachedMsg[]; unreadableIds: string[] }> {
+  const cipherPositions: number[] = [];
+  const ciphers: string[] = [];
+  entries.forEach((entry, index) => {
+    if ("d" in entry) {
+      cipherPositions.push(index);
+      ciphers.push(entry.d);
+    }
+  });
+  const plains = ciphers.length > 0 ? await secureDecryptManyAsync(ciphers) : [];
+  const plainByIndex = new Map<number, string | null>();
+  cipherPositions.forEach((index, i) => plainByIndex.set(index, plains[i] ?? null));
+
+  const messages: CachedMsg[] = [];
+  const unreadableIds: string[] = [];
+  entries.forEach((entry, index) => {
+    if ("m" in entry) {
+      messages.push(entry.m);
+      return;
+    }
+    const plain = plainByIndex.get(index);
+    if (typeof plain !== "string") {
+      unreadableIds.push(entry.id);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(plain) as unknown;
+      if (isCachedMsgLike(parsed)) messages.push(parsed);
+      else unreadableIds.push(entry.id);
+    } catch {
+      unreadableIds.push(entry.id);
+    }
+  });
+  return { messages, unreadableIds };
+}
+
+/**
+ * 异步桥下的整份视图落盘（`writeCacheView` 的异步实现）。
+ *
+ * 唯一的异步点是**加密明文条目**（IPC 到主进程）；localStorage 写入本身仍是同步的，
+ * 所以「内存视图先更新、加密排队」是安全的：同步读永远命中内存。
+ * 失败口径与同步版逐条一致：备份失败 → 磁盘一个字节不动；加密失败 → 该条 fail-open
+ * 保留明文并标记 `encrypt-failed`；配额 → 退明文数组（先备份，绝不静默丢密文条目）。
+ */
+async function writeCacheViewAsync(
+  convId: string,
+  view: CacheViewEntry,
+  entries: RawEntry[],
+  messages: CachedMsg[] | null,
+  issue?: MsgCacheEncryptionReason,
+): Promise<CacheViewEntry> {
+  const key = MSGCACHE_PREFIX + convId;
+  let nextEntries = entries;
+  let nextIssue = issue;
+  if (entries.some((entry) => "m" in entry)) {
+    const positions: number[] = [];
+    const plains: string[] = [];
+    entries.forEach((entry, index) => {
+      if ("m" in entry) {
+        positions.push(index);
+        plains.push(JSON.stringify(entry.m));
+      }
+    });
+    const ciphers = await secureEncryptManyAsync(plains);
+    let failed = 0;
+    const replaced = [...entries];
+    positions.forEach((index, i) => {
+      const cipher = ciphers[i];
+      if (cipher) replaced[index] = { id: entries[index].id, d: cipher };
+      else failed += 1;
+    });
+    if (failed > 0) nextIssue = "encrypt-failed"; // fail-open：失败的条目留明文并可见标记
+    nextEntries = replaced;
+  }
+
+  const useContainer = view.shape === "container" || asyncFirstBridge();
+  const nextRaw = useContainer ? encodeCacheContainer(nextEntries) : JSON.stringify(messages ?? []);
+  const unreadableIds = view.unreadableIds.filter((id) => nextEntries.some((e) => e.id === id));
+
+  const hadPlaintext = view.raw !== null && (view.shape === "plaintext" || entries.some((e) => "m" in e));
+  if (useContainer && hadPlaintext) {
+    if (!backupRawOnce(key, view.raw!, PLAINTEXT_BACKUP_SUFFIX)) {
+      noteCacheIssue(convId, "backup-failed");
+      return { ...view, entries: nextEntries, messages, unreadableIds };
+    }
+  }
+
+  try {
+    localStorage.setItem(key, nextRaw);
+    if (nextIssue) noteCacheIssue(convId, nextIssue);
+    else cacheEncryptionIssues.delete(convId);
+    return {
+      raw: nextRaw,
+      entries: nextEntries,
+      messages,
+      unreadableIds,
+      shape: useContainer ? "container" : "plaintext",
+    };
+  } catch {
+    // 配额：优先退回明文数组（更小），覆盖前先把旧 raw 原样备份（与同步版一致）。
+    if (useContainer) {
+      const fallbackMessages = messages ?? (await decodeEntriesAsync(nextEntries)).messages;
+      const backedUp = view.raw === null || backupRawOnce(key, view.raw, UNDECRYPTABLE_BACKUP_SUFFIX);
+      if (backedUp) {
+        try {
+          const fallbackRaw = JSON.stringify(fallbackMessages);
+          localStorage.setItem(key, fallbackRaw);
+          noteCacheIssue(convId, "quota");
+          return {
+            raw: fallbackRaw,
+            entries: toPlainEntries(fallbackMessages),
+            messages: fallbackMessages,
+            unreadableIds: [],
+            shape: "plaintext",
+          };
+        } catch {
+          /* 明文也写不进：磁盘保持旧值 */
+        }
+      }
+    }
+    noteCacheIssue(convId, "quota");
+    return { ...view, entries: nextEntries, messages, unreadableIds };
+  }
+}
+
+/**
+ * 异步桥下 `writeCacheView` 的同步入口：**内存视图先更新**（同步 list/get 立即见新值），
+ * 加密+落盘按会话串行排队；`appendCache` 会在返回前 `await flushMsgCache` 保证不丢。
+ */
+function writeCacheViewQueued(
+  convId: string,
+  view: CacheViewEntry,
+  entries: RawEntry[],
+  messages: CachedMsg[] | null,
+  issue?: MsgCacheEncryptionReason,
+): CacheViewEntry {
+  const unreadableIds = view.unreadableIds.filter((id) => entries.some((e) => e.id === id));
+  const memory: CacheViewEntry = {
+    raw: view.raw,
+    entries,
+    messages,
+    unreadableIds,
+    shape: "container",
+  };
+  const key = MSGCACHE_PREFIX + convId;
+  cacheView.set(key, memory);
+
+  const generation = (cacheWriteGeneration.get(convId) ?? 0) + 1;
+  cacheWriteGeneration.set(convId, generation);
+  const prev = cachePersistQueue.get(convId) ?? Promise.resolve();
+  const run = prev
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        const next = await writeCacheViewAsync(convId, memory, entries, messages, issue);
+        if (cacheWriteGeneration.get(convId) === generation) {
+          cacheView.set(key, next);
+          touchCacheConversation(convId, false); // 视图刷新后账本无变化，不额外写盘
+        } else {
+          // 已有更新的一轮排队：磁盘已前进，视图内容由最新一轮负责（这里只对齐 raw 防重读）。
+          const cur = cacheView.get(key);
+          if (cur) cur.raw = readRaw(key);
+        }
+      } catch {
+        /* 落盘失败：内存态继续可用（下一轮写入会带上最新状态再试） */
+      }
+    });
+  cachePersistQueue.set(convId, run);
+  void run.finally(() => {
+    if (cachePersistQueue.get(convId) === run) cachePersistQueue.delete(convId);
+  });
+  // 往某会话写 ⇒ 它在用。写盘是低频路径（每来一条消息一次），顺手把账本落盘。
+  touchCacheConversation(convId, true);
+  return memory;
 }
 
 /**
@@ -1449,6 +1977,9 @@ export const msgCache: MsgCache = {
       const encrypted = encryptEntry(m, crypto);
       entry = encrypted.entry;
       if (!encrypted.ok) issue = "encrypt-failed"; // fail-open：这条以明文条目落盘并可见标记
+    } else if (asyncFirstBridge()) {
+      // d.59：异步桥下新增条目先以明文进内存视图，加密由排队落盘完成（加密失败才标记）。
+      entry = { id: m.id, m };
     } else {
       entry = { id: m.id, m };
       issue = secureBridge() ? "unavailable" : "no-bridge";
@@ -1469,6 +2000,10 @@ export const msgCache: MsgCache = {
     // 只读：列表预览会随每次 render/输入调用，不能借读刷 LRU（那会写盘、
     // 账本超 20 时还会淘汰别的会话的缓存）。
     const view = readCacheView(convId);
+    if (view.messages === null && asyncFirstBridge()) {
+      void ensureE2eStorageReady(convId); // 首帧还没预热：后台异步批量解码，下一次渲染可见
+      return [];
+    }
     return materializeMessages(view, cacheCrypto());
   },
   remove(convId, msgId) {
@@ -1477,7 +2012,7 @@ export const msgCache: MsgCache = {
     if (!view.entries.some((e) => e.id === msgId)) return;
     const entries = view.entries.filter((e) => e.id !== msgId);
     const messages = view.messages === null ? null : view.messages.filter((m) => m.id !== msgId);
-    const issue = cacheCrypto() ? undefined : secureBridge() ? "unavailable" : "no-bridge";
+    const issue = cacheCrypto() ? undefined : asyncFirstBridge() ? undefined : secureBridge() ? "unavailable" : "no-bridge";
     const nextView = writeCacheView(convId, view, entries, messages, issue);
     cacheView.set(MSGCACHE_PREFIX + convId, nextView);
   },
@@ -1488,6 +2023,11 @@ export const msgCache: MsgCache = {
     touchCacheConversation(convId, false);
     // 全量读是设计稿指定的迁移时机（「打开会话读到明文条目」，≤50 条/批）。
     const view = maybeMigrateCache(convId, readCacheView(convId));
+    if (view.messages === null && asyncFirstBridge()) {
+      // 46：没有同步解密能力，首帧靠 ensure 预热；这里后台补一次，下一次渲染可见。
+      void ensureE2eStorageReady(convId);
+      return [];
+    }
     return materializeMessages(view, cacheCrypto());
   },
   get(convId, msgId) {
@@ -1502,7 +2042,11 @@ export const msgCache: MsgCache = {
     if (!entry) return null;
     if ("m" in entry) return entry.m; // 迁移期明文条目：直接可读
     const crypto = cacheCrypto();
-    if (!crypto) return null;
+    if (!crypto) {
+      // 46：无同步解密能力 → 后台预热，下一次按 id 取命中内存视图。
+      if (asyncFirstBridge()) void ensureE2eStorageReady(convId);
+      return null;
+    }
     const decoded = decodeEntry(entry, crypto);
     return decoded.ok ? decoded.msg : null;
   },

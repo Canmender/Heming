@@ -1,4 +1,4 @@
-﻿# safeStorage 异步迁移与 P0-5b P3 清理（规格 + 实施记录，d.58）
+# safeStorage 异步迁移与 P0-5b P3 清理（规格 + 实施记录，d.58）
 
 - 日期：2026-11-02（第二波，发布位 `fix`）
 - 状态：**已实施**（主进程异步化 + 启动预取缓存 + P3 清理；渲染层启动门禁待 Baseline 接 `main.tsx`/`pet.tsx`）
@@ -237,3 +237,101 @@ hydrate 完成后的补读**只在一种情况下发生**，其余一律不覆�
   状态卡可见），下一次读后台自迁；要彻底消除需放开 async 写的 `effectiveAvailable` 门禁（与 task-8 一起做）；
 - **mcp 首帧短暂空表**：hydrate 完成前（≤300ms 帽内）服务列表可能为空，hydrate 后自动补，UI loading 态是 UX 候选；
 - **真机验证**：45→46 升级环境上手动验「hydrate 晚到 / 失败 / DPAPI 不可用」三条路径。
+
+## 11. task-14 收尾（d.59.2.20）· 已完成 / 仍剩
+
+### 11.1 E2E 收发热路径的方案选择
+
+对比两条路：
+
+- **(a) 预取 + 内存视图 + 异步落盘**（采用）：进入会话/解信封前 `ensureE2eStorageReady()`
+  一次性批量异步解密 chains/msgCache 进内存视图；此后所有同步读（`loadChains` / `msgCache.list/get` /
+  `recvChainOwners`）都命中内存，零 IPC；写路径「内存先更新、加密落盘排队」，`seal`/`open`/`chaindist`
+  在返回前 `await flush`，保证链状态与缓存都不丢。
+- **(b) 把 E2E 加解密搬进主进程**（否决）：链状态机、AAD 绑定、`(chainKid,n)` 去重窗口、暂挂重扫
+  都要跨进程重写；`safeStorage` 的同步限制只是「怎么落盘」，不该为它重写协议。风险与工期都高一个数量级。
+
+实现要点（`packages/web/src/lib/e2eSession.ts`）：
+
+- `ensureE2eStorageReady(convId)`：chains 走 `readSecureValueAsync` + 首读明文懒迁移（异步）；
+  msgCache 容器走批量 `secureDecryptManyAsync`；整值信封/明文数组按异步迁移处理。
+- `saveChains` 默认路径：内存视图先更新（同步读立即见新链状态）→ `enqueueChainsPersist` 同会话串行
+  异步落盘；落盘失败 fail-open 写新明文 + 可见标记，**绝不回退旧盘值**（回退会复用 msgKey）。
+- `initSession` / `doSealMessage` / `openChainMsg` / `openX3dhDist` 返回前 `await flushChains`；
+  `appendCache` 在异步桥下 `await flushMsgCache`（收到即落盘）。
+- `ensureIdentity` 用 `writeSecureJsonAsync` 把身份**异步写完再返回**：46 上 `isForMe` 依赖
+  「磁盘已有身份 raw」，否则首帧会误丢定向 chaindist。
+- `handleChainDist` 在「异步桥 + 未预热」时先后台 `ensure` 再幂等重放，防止空链覆盖磁盘上的其它 recv 链。
+- `loadChains` / `readCacheView` 对 `reason:"async-pending"` 与「46 无同步解密能力但值还在」的形态
+  **不**标记 `undecryptableKeys`、不备份——那是「还没解」而不是「解不开」。
+- `msgCacheEncryptionState().available` 纳入 `asyncAvailable`（46 上 `available` 恒 false）。
+- `msgCache.list/get/peek` 遇到「未预热、视图未解码」时后台补一次 `ensureE2eStorageReady` 并返回空
+  （下一帧命中内存视图），不阻塞渲染。
+
+### 11.2 已完成（本轮）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| `secureSetItem` 不再先落明文 | ✅ | 默认异步写：加密→自校验→写信封；失败才明文 + `plaintextKeys` 可见。新增 `pendingPlain`（已入队未落盘明文）+ `plainCache`（raw 写穿）保证「写后立即读一致」 |
+| 写后立即读一致 | ✅ | `secureGetItem` 读优先级：未落盘明文记录 → 写穿缓存（raw 一致）→ preload 预取缓存 → 异步补取/旧同步桥 |
+| 同步桥降级为兜底 | ✅ | `prefersAsync` 只在「有异步 API」时走异步；同步三件套仅在旧版 Electron / 无异步 API 时使用；`secret-store.js`/`preload.js` 注释已改为「已迁移，同步桥仅兜底」，同步桥**保留不删**（45 回退） |
+| 批量热路径 IPC | ✅ | `secret:encryptMany` / `secret:decryptMany`（主进程 `BATCH_MAX_ITEMS=256`、`BATCH_MAX_CHARS=2MB` 安全边界；web 侧 128 条/1MB 自动分片，顺序敏感、失败位 null） |
+| E2E 热路径异步化 | ✅ | 见 11.1；`chains`/`msgCache` 均在返回前落盘 |
+| 46 降级可见 | ✅ | 加密失败/不可用 → fail-open 明文 + `plaintextKeys` / `cacheEncryptionIssues` 标记，绝不静默假装加密 |
+| 定向用例 | ✅ | `secret-store.test.js` 批量 6 例；`secureStorage.async.test.ts` 9 例；`e2eSession.async46.test.ts` 4 例；既有 178 例定向回归全绿（见 11.4） |
+
+### 11.3 仍剩（46 升级前明确接受）
+
+1. **`migrateAllMsgCaches()` 在 46 上会跳过**：它依赖同步加密能力（`cacheCrypto()`），46 上返回
+   `{conversations:0}`。未打开过的旧明文缓存要等「打开该会话」时经 `ensureE2eStorageReady` 懒迁。
+   → **升级前必须在 45 上跑完一次全量迁移**（见 12.1）。
+2. **msgCache 首帧可能空一帧**：进会话前未 `ensure` 时 `list/get` 返回空并后台预热；
+   `initSession`/`openMessage` 入口已 await，UI 层若在会话打开前先渲染列表，需要自己 await
+   `ensureE2eStorageReady(convId)`（接线建议，非本轮范围）。
+3. **真机验证**：45→46 升级环境手动验「hydrate 晚到 / 失败 / DPAPI 不可用」三条路径。
+4. **agent 流式 chunk**：走 `openMessage(..., {noDefer:true})` 同一入口（已 ensure + flush），无独立风险；
+   未额外加「chunk 不落缓存」以外的异步分支。
+
+### 11.4 验证记录（本轮）
+
+```text
+node --test packages/desktop/secret-store.test.js packages/desktop/preload.test.js   → 58 passed
+pnpm --filter @heming/web exec tsc --noEmit                                          → clean
+pnpm --filter @heming/web test -- src/lib/secureStorage*.test.ts \
+  src/lib/e2eSession*.test.ts src/store/llm.test.ts src/lib/mcp                      → 16 files / 178 passed
+```
+
+新增用例分布：
+
+| 文件 | 例数 | 覆盖 |
+|---|---|---|
+| `packages/desktop/secret-store.test.js` | +6 | 批量顺序/失败位/256 条上限/2MB 上限/非数组/IPC 往返 |
+| `packages/web/src/lib/secureStorage.async.test.ts` | 9 | 明文窗口不存在、写后立即读一致、异步失败 fail-open 可见、46 不可用降级、45 同步桥兜底、批量分片 |
+| `packages/web/src/lib/e2eSession.async46.test.ts` | 4 | 冷启动 ensure 后同步读、收发往返（收即可解 + 链/缓存已落盘）、`isForMe` 身份时序、异步桥不可用降级 |
+
+## 12. Electron 46 升级检查清单（最终版）
+
+按顺序做，任何一步失败都先停下、不要升 46。
+
+1. **升级前（仍在 45 上）完成全量迁移**
+   - 正常打开应用一次，等启动的 `migrateAllMsgCaches()` 跑完（hydrate 后自动触发）；
+   - 「设置 → 存储」水质卡应无 `plaintextKeys` 提示；`msgCacheEncryptionState(convId).form` 全为
+     `encrypted`（或 `absent`），不应再有 `plaintext`；
+   - 抽查 `localStorage`：`heming.e2e.chains.*` 是 `{"__hemingEnc":"v1",...}` 信封，
+     `heming.msgCache.*` 是 `{"__hemingMsgCache":"v2","items":[...]}` 容器。
+2. **preload 能力自检**：`window.__heming_secrets.asyncAvailable === true` 且存在
+   `encryptAsync` / `decryptAsync` / `encryptManyAsync` / `decryptManyAsync`；
+   `secret:capabilities` 报 `{mode:"async", sync:false, async:true}`。
+3. **启动门禁**：`main.tsx` 仍 `await hydrateSecureStorage()`（300ms 帽）后再 render；
+   三个白名单键（`heming.llmConfigs` / `heming.mcp.servers.v1` / `heming.e2e.identity`）首帧读
+   不得落到「异步补取返回 null」。
+4. **46 首次启动自检**：设置-存储卡不应出现 `undecryptableKeys`（出现 = 新环境解不开旧密文，
+   先回退 45 导出/恢复）；不应出现新增 `plaintextKeys`。
+5. **E2E 自检**：双端各发一条消息 + 冷启动后历史消息可见；确认磁盘上 chains/msgCache 仍是密文形态；
+   确认收消息后 `msgCache.list()` 立即可见（不需要二次渲染）。
+6. **同步桥路径确认**：46 上 `secret:available` 返回 false；渲染层日志/代码不应命中同步
+   `encrypt`/`decrypt` 兜底（除旧版 Electron 分支）。同步桥代码保留，用于 45 回退。
+7. **回退预案**：若 46 上出现不可挽回的解密问题，回退到 45 构建即可（同步桥未删、数据格式向后兼容）；
+   不要手工删 `__heming_undecryptable` 备份键。
+8. **门禁**：`pnpm --filter @heming/web exec tsc --noEmit` + 11.4 的两条测试命令全绿后再升 46。
+
