@@ -38,9 +38,32 @@ export function createStdioMcpClient(server: McpServerConfig): HttpMcpClient {
   const config = { command, args: server.args ?? [] };
   let sessionId: string | null = null;
 
-  const call = async <T>(method: string, params?: unknown): Promise<T> => {
-    const result = await bridge.request(server.id, config, method, params);
-    return (result ?? {}) as T;
+  const call = async <T>(method: string, params?: unknown, signal?: AbortSignal): Promise<T> => {
+    const request = bridge.request(server.id, config, method, params);
+    if (!signal) return ((await request) ?? {}) as T;
+    if (signal.aborted) throw new Error("工具调用已中断");
+    /**
+     * stdio 侧的中断只能「**我方不再等**」：IPC 没有取消语义，主进程里的子进程
+     * 仍会把这次调用跑完。所以文案必须说清「子进程可能仍在运行」——
+     * 否则用户以为已经停了，实际副作用照旧发生。
+     */
+    return await new Promise<T>((resolve, reject) => {
+      const onAbort = () => {
+        signal.removeEventListener("abort", onAbort);
+        reject(new Error("工具调用已中断（子进程可能仍在运行）"));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      request.then(
+        (value) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve((value ?? {}) as T);
+        },
+        (err) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(err);
+        },
+      );
+    });
   };
 
   return {
@@ -64,11 +87,12 @@ export function createStdioMcpClient(server: McpServerConfig): HttpMcpClient {
       const result = await call<{ tools?: McpTool[] }>("tools/list", {});
       return (result.tools ?? []).map((t) => ({ ...t }));
     },
-    async callTool(name, args) {
-      const result = await call<{ content?: unknown[]; isError?: boolean }>("tools/call", {
-        name,
-        arguments: args,
-      });
+    async callTool(name, args, opts) {
+      const result = await call<{ content?: unknown[]; isError?: boolean }>(
+        "tools/call",
+        { name, arguments: args },
+        opts?.signal,
+      );
       const content = result.content ?? [];
       return { text: stringify(content), isError: result.isError === true, content };
     },

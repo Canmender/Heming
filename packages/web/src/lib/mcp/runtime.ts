@@ -165,13 +165,19 @@ export function buildToolBridge(registry: McpRegistry = mcpRegistry): ToolBridge
   const tools = toOpenAiTools(catalog);
   return {
     tools,
-    execute: (call) =>
-      executeToolCall(call, catalog, {
-        clientFor: (serverId) => {
-          const server = registry.get(serverId);
-          if (!server) throw new Error("MCP 服务已被删除");
-          return clientFor(server);
+    execute: (call, opts) =>
+      executeToolCall(
+        call,
+        catalog,
+        {
+          clientFor: (serverId) => {
+            const server = registry.get(serverId);
+            if (!server) throw new Error("MCP 服务已被删除");
+            return clientFor(server);
+          },
         },
-      }),
+        // 中断信号一路透传到 callTool：HTTP 立刻 abort，stdio 至少不再等。
+        opts,
+      ),
   };
 }

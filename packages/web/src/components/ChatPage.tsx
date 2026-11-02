@@ -63,6 +63,7 @@ import {
   type VisionImageSlot,
 } from "../lib/vision/history.js";
 import { runAgentMentions, type TriggerDeps } from "../lib/agentStream.js";
+import { recordRollout } from "../lib/rollout/index.js";
 import { buildAgentContext } from "../lib/agentRuntime/context.js";
 import {
   loadContextSettings,
@@ -1944,6 +1945,9 @@ export function ChatPage({
           /* 记忆失败静默降级 */
         }
       },
+      // 回合事件日志（G6）：本机逐条记「开始/工具调用/结果/答案/终态」，
+      // 崩溃或刷新后还能回看过程。只落本机、有上限、失败静默（记录器内部保证）。
+      onRollout: recordRollout,
       // 任务区终态：每个流恰好一次。只有从任务区发起的流带 taskId；
       // 普通聊天流不建档，任务区列表也不会被日常对话刷屏。
       onRunSettled: (streamId, result) => {

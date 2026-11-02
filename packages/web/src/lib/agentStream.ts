@@ -5,9 +5,26 @@ import type { DenyCause, GateOutcome, RiskLevel } from "./hitl/types.js";
 import { toHitlCall } from "./hitl/classify.js";
 import { deniedText, notExecutedText, ruleDeniedText } from "./hitl/text.js";
 import { supportsKind } from "./capabilityNotice.js";
+import { estimateTokens } from "./agentContext/tokens.js";
+import { foldToolResults } from "./agentContext/toolResults.js";
+import type { RolloutInput } from "./rollout/types.js";
 
-/** 工具调用最多允许的连续轮次（防止模型陷入「调工具→再调」死循环）。 */
-export const MAX_TOOL_ROUNDS = 3;
+/**
+ * 工具调用最多允许的连续轮次。
+ *
+ * 曾经是 3——真实任务（搜→读→改→验证）刚好第 4 步就被砍，而用户看不出是被截断的。
+ * 现在提到 12，只作为「防死循环」的兜底；真正的收敛条件是 `MAX_TURN_TOOL_TOKENS`
+ * 与 `MAX_TOOL_CONTEXT_TOKENS`（预算驱动，而不是轮次驱动）。
+ */
+export const MAX_TOOL_ROUNDS = 12;
+
+/**
+ * 单次运行里**回灌给模型的工具结果总量上限**（token）。
+ *
+ * 工具轮每轮都把「历史 + 已累积的全部工具结果」重发一遍，输入成本随轮次线性涨。
+ * 到这里就收口：把已有文本给用户，并明确告知「还能继续」，而不是悄悄停在半路。
+ */
+export const MAX_TURN_TOOL_TOKENS = 12_000;
 
 /** 触发编排的依赖注入面：stores/WS/流式适配器由 ChatPage 组装，本模块保持纯逻辑可测。 */
 /** 一次流（单个 mention）的终态：成功 / 中断 / 失败，每次流恰好一次。 */
@@ -70,11 +87,17 @@ export type ToolOrigin = "mcp" | "builtin" | "self" | "plugin";
 export interface ToolBridge {
   /** OpenAI 格式的 tools 数组；空数组 = 本轮没有可用工具。 */
   tools: unknown[];
-  /** 执行一个工具调用（永不抛：失败也在结果里带 ok=false 与原因）。 */
-  execute: (call: {
-    name: string;
-    arguments: string;
-  }) => Promise<{ text: string; ok: boolean; sources?: ToolSource[] }>;
+  /**
+   * 执行一个工具调用（永不抛：失败也在结果里带 ok=false 与原因）。
+   *
+   * `opts.signal` 是本次运行的 AbortSignal：用户点中断时，在途的工具调用应当尽快收手。
+   * 桥实现可以不支持取消（stdio 的 IPC 就没有取消语义），但**必须**在返回文案里说清
+   * 「可能仍在运行」，不能让用户以为已经停了。
+   */
+  execute: (
+    call: { name: string; arguments: string },
+    opts?: { signal?: AbortSignal },
+  ) => Promise<{ text: string; ok: boolean; sources?: ToolSource[] }>;
   /**
    * 工具的风险元数据（可选）：闸门用它判断该调用该不该问用户。
    *
@@ -244,6 +267,16 @@ export interface TriggerDeps {
     tokens: number | null,
     served?: { profileId: string; profileLabel?: string; input?: number; output?: number },
   ) => void;
+  /**
+   * 回合事件日志（G6）：每回合开始/每次工具调用与结果/最终答案/终态各回调一次。
+   *
+   * 与 `onToolTrace` 的区别：轨迹是**给本机界面看的瞬时展示**（含 args 原文、随组件卸载消失），
+   * 日志是**可回放的记录**（带时间戳、有上限、能读回来）。两者不合并：
+   * 展示层的字段说改就改，日志格式则要长期稳定。
+   *
+   * 回调异常一律吞掉——记录失败绝不能影响一次已经生成好的回答。
+   */
+  onRollout?: (item: RolloutInput) => void;
 }
 
 /**
@@ -387,6 +420,24 @@ export function runAgentMentions(
           settled = true;
           notifyRunSettled(deps, streamId, result);
         };
+        /**
+         * 回合日志：与 `settle` 同层的一次性副作用收集点。
+         * 单独包一层是因为**任何一条记录失败都不能影响对话**——包括 JSON 序列化爆栈这种。
+         */
+        const record = (item: RolloutInput) => {
+          try {
+            deps.onRollout?.(item);
+          } catch {
+            /* 日志失败静默：它只服务复盘，不服务本次生成 */
+          }
+        };
+        record({
+          type: "turn_start",
+          conversationId,
+          streamId,
+          agentId: m.agentId,
+          userText,
+        });
         // E2E 串行闸与错误上行（fix I2）——先于 profile 判定定义：无绑定分支也要发信封错误
         let idx = 0;
         // 片/错误上行串行闸：seal 读写会话链文件跨 await 交错会撞 n（同 n 密文被收端去重
@@ -431,6 +482,7 @@ export function runAgentMentions(
         };
         const profile = deps.getProfile(m.agentId);
         if (!profile) {
+          record({ type: "turn_end", streamId, status: "error", error: "未绑定 LLM 连接" });
           settle({ status: "error", error: "未绑定 LLM 连接" });
           await sendError("provider_error", "未绑定 LLM 连接");
           return;
@@ -443,6 +495,12 @@ export function runAgentMentions(
         try {
           history = await deps.fetchHistory(profile);
         } catch (e) {
+          record({
+            type: "turn_end",
+            streamId,
+            status: "error",
+            error: (e as Error)?.message?.slice(0, 300) || "读取历史失败",
+          });
           settle({ status: "error", error: (e as Error)?.message?.slice(0, 300) || "读取历史失败" });
           throw e;
         }
@@ -529,7 +587,17 @@ export function runAgentMentions(
               /* 当前轮附件组装失败不阻断生成：按纯文本行发 */
             }
           }
-          const prepared: ChatMessage[] = [...rows, userTurn, ...extra];
+          /**
+           * 工具结果回灌预算（G5）：组装请求**之前**折叠较早的工具结果。
+           *
+           * 为什么放在这一层而不是等供应商 400：工具轮每轮重发全部历史 + 全部工具结果，
+           * 超限是**结构性必然**而不是意外。等报错再收紧，用户已经白等两个来回。
+           * 折叠只动 `role=tool` 的正文，消息条数不变——删消息会让 tool_call 对不上，直接 400。
+           */
+          const folded = extra.length
+            ? foldToolResults(extra).rows
+            : extra;
+          const prepared: ChatMessage[] = [...rows, userTurn, ...folded];
           if (prompt) prepared.unshift({ role: "system", content: prompt });
           return prepared;
         };
@@ -627,6 +695,8 @@ export function runAgentMentions(
             !aborted;
           let extra: ChatMessage[] = [];
           let reasoning = "";
+          /** 本次尝试里已回灌的工具结果总量（token）：预算驱动的收敛条件，见 MAX_TURN_TOOL_TOKENS。 */
+          let toolTokens = 0;
           /** 本轮尝试里工具实际返回过的来源（被拒/失败的不算）。 */
           const sources: ToolSource[] = [];
           /** 把来源脚注补在答案末尾（无来源时不发）。 */
@@ -635,6 +705,21 @@ export function runAgentMentions(
             if (footer) emitDelta(footer, aggressive);
           };
           for (let round = 0; ; round++) {
+            /**
+             * 预算驱动收口（G1）：工具结果累计超过 `MAX_TURN_TOOL_TOKENS` 就不再开新一轮。
+             *
+             * 与「轮次到顶」的区别在**告知**：这里明确告诉用户「已达预算、可以继续」，
+             * 而不是静默停在半路——用户看不懂为什么话没说完，只会觉得模型变笨了。
+             */
+            if (round > 0 && toolTokens > MAX_TURN_TOOL_TOKENS) {
+              emitDelta(
+                `\n\n（本次工具返回的内容已达预算上限，先给出当前结论。回复「继续」可以接着做。）`,
+                aggressive,
+              );
+              emitFooter();
+              console.warn(`工具结果累计 ${toolTokens} token 超过预算 ${MAX_TURN_TOOL_TOKENS}`);
+              return;
+            }
             // 工具轮的文本先攒着（可能是「我这就去查」这类中间话术，等工具结果回来再决定是否上行）。
             // 但要**按片攒**而不是拼成一个字符串——最终答案逐片发出才能保住打字机效果。
             // 拼成整段会让用户看到「文字突然整块蹦出来」，与无工具路径的表现不一致。
@@ -696,9 +781,14 @@ export function runAgentMentions(
               emitFooter();
               return;
             }
-            // 到上限还在要工具：把已有文本给用户，不再无限循环
+            // 到上限还在要工具：把已有文本给用户，并**说明**为什么停在这里。
+            // 静默 return 是曾经的实现——用户只看到话没说完，不知道是被截断的。
             if (round >= MAX_TOOL_ROUNDS) {
               for (const chunk of roundChunks) emitDelta(chunk, aggressive);
+              emitDelta(
+                `\n\n（本次已连续调用 ${MAX_TOOL_ROUNDS} 轮工具，达到上限，先给出当前结论。回复「继续」可以接着做。）`,
+                aggressive,
+              );
               emitFooter();
               console.warn(`工具调用超过 ${MAX_TOOL_ROUNDS} 轮，已停止继续调用`);
               return;
@@ -707,6 +797,13 @@ export function runAgentMentions(
             for (const call of calls) {
               deps.onToolTrace?.(streamId, {
                 phase: "start",
+                id: call.id,
+                name: call.function.name,
+                args: call.function.arguments,
+              });
+              record({
+                type: "tool_call",
+                streamId,
                 id: call.id,
                 name: call.function.name,
                 args: call.function.arguments,
@@ -720,29 +817,57 @@ export function runAgentMentions(
               streamId,
               conversationId,
             });
-            const results = await Promise.all(
-              calls.map(async (call, i) => {
-                const outcome = outcomes?.[i];
-                if (outcome?.kind === "deny") {
-                  // 被拒：回一段明确声明「未修改」的文案，让模型知道这次没落地。
-                  // ok=false 也会让轨迹显示成失败态，UI 另行标「已拒绝」。
-                  //
-                  // 文案按原因分流：闸门异常 / 命中记住的规则 / 用户当场拒绝，
-                  // 三者对模型的含义不同，尤其异常不能被说成「用户拒绝了」。
-                  const text =
-                    outcome.cause === "gate"
-                      ? notExecutedText(outcome.call, outcome.reason)
-                      : outcome.cause === "rule"
-                        ? ruleDeniedText(outcome.call, outcome.reason)
-                        : deniedText(outcome.call, outcome.reason);
-                  return { text, ok: false };
-                }
-                return bridge!.execute({
-                  name: call.function.name,
-                  arguments: call.function.arguments,
-                });
+            /**
+             * 工具执行调度（G3）：只读并行，写/危险操作**串行且保序**。
+             *
+             * 曾经一律 `Promise.all`：同一轮里两个写同一个 key 的调用，最终值取决于谁先返回；
+             * 审批小心翼翼、执行却随机，这条不一致比「快几百毫秒」严重得多。
+             * 风险元数据直接复用 HITL 用的那份 `bridge.meta`，不另起一套判定——
+             * 缺省按 `write` 处理，与闸门的默认口径同源（认不出来就当会改状态）。
+             */
+            const riskOf = (name: string) => bridge?.meta?.(name)?.risk ?? "write";
+            const settled: ({ text: string; ok: boolean; sources?: ToolSource[] } | undefined)[] =
+              new Array(calls.length);
+            const runOne = async (call: ToolCall, i: number) => {
+              const outcome = outcomes?.[i];
+              if (outcome?.kind === "deny") {
+                // 被拒：回一段明确声明「未修改」的文案，让模型知道这次没落地。
+                // ok=false 也会让轨迹显示成失败态，UI 另行标「已拒绝」。
+                //
+                // 文案按原因分流：闸门异常 / 命中记住的规则 / 用户当场拒绝，
+                // 三者对模型的含义不同，尤其异常不能被说成「用户拒绝了」。
+                const text =
+                  outcome.cause === "gate"
+                    ? notExecutedText(outcome.call, outcome.reason)
+                    : outcome.cause === "rule"
+                      ? ruleDeniedText(outcome.call, outcome.reason)
+                      : deniedText(outcome.call, outcome.reason);
+                return { text, ok: false };
+              }
+              return bridge!.execute(
+                { name: call.function.name, arguments: call.function.arguments },
+                // 中断信号透传：用户点中断后，在途的 HTTP 请求立刻收手；
+                // stdio 侧只能「不再等」，返回文案会说明子进程可能仍在运行。
+                { signal: controller.signal },
+              );
+            };
+            let writeChain: Promise<void> = Promise.resolve();
+            await Promise.all(
+              calls.map((call, i) => {
+                const job = async () => {
+                  settled[i] = await runOne(call, i);
+                };
+                if (riskOf(call.function.name) === "read") return job();
+                const chained = writeChain.then(job, job);
+                // 链上任何一环失败都不能断链：失败已落在 settled 里，后续照常排队。
+                writeChain = chained.then(
+                  () => undefined,
+                  () => undefined,
+                );
+                return chained;
               }),
             );
+            const results = settled.map((r) => r ?? { text: "", ok: false });
             // 按调用顺序收集来源（不按 Promise 完成顺序），脚注顺序才可复现。
             // 被拒/失败的结果不算「引用过」——它们根本没读到内容。
             for (const result of results) {
@@ -765,6 +890,15 @@ export function runAgentMentions(
                 ...(result.ok && result.sources?.length ? { sources: result.sources } : {}),
                 ...(denied && gate?.cause ? { denyCause: gate.cause } : {}),
               });
+              record({
+                type: "tool_result",
+                streamId,
+                id: call.id,
+                name: call.function.name,
+                ok: result.ok,
+                ...(denied ? { denied: true } : {}),
+                text: result.text,
+              });
             });
             extra = [
               ...extra,
@@ -779,6 +913,11 @@ export function runAgentMentions(
                 ...(results[i]?.ok === false ? { toolError: true } : {}),
               })),
             ];
+            // 累计回灌量，供下一轮的预算收口判断（见 MAX_TURN_TOOL_TOKENS）
+            toolTokens += calls.reduce(
+              (sum, _call, i) => sum + estimateTokens(results[i]?.text ?? ""),
+              0,
+            );
           }
         };
         try {
@@ -808,6 +947,8 @@ export function runAgentMentions(
           // 成功文本取本次尝试的全文（重试成功时不含首次尝试的失败文本）
           const text = local || acc;
           if (await sendFinish(text)) {
+            record({ type: "assistant_final", streamId, text });
+            record({ type: "turn_end", streamId, status: "ok" });
             notifyTurnComplete(deps, m.agentId, userText, text, "ok");
             // 用量记账：成功收口前恰好一次；一次都没拿到就记 null（未上报）。
             // 记账是旁路副作用，失败不得反噬收口（与 onRunSettled 同口径吞掉）。
@@ -851,12 +992,19 @@ export function runAgentMentions(
           const errorText = abortedRun ? "已中断，可继续生成" : err.message.slice(0, 300);
           try {
             if (partial && (await sendFinish(partial))) {
+              record({ type: "assistant_final", streamId, text: partial });
               // 中断/失败：只写工作记忆（partial），不沉淀长期记忆（设计 §3）
               notifyTurnComplete(deps, m.agentId, userText, partial, "partial");
             }
             await sendError(abortedRun ? "aborted" : "provider_error", errorText);
           } finally {
             // 终态先于异常传播落定：sendError 抛错（发送链异常）时任务区也要收口。
+            record({
+              type: "turn_end",
+              streamId,
+              status: abortedRun ? "aborted" : "error",
+              ...(abortedRun ? {} : { error: err.message.slice(0, 300) }),
+            });
             settle({
               status: abortedRun ? "aborted" : "error",
               ...(partial ? { finalText: partial } : {}),

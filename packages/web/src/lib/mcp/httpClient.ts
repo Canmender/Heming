@@ -19,7 +19,15 @@ export interface HttpMcpClient {
   readonly sessionId: string | null;
   initialize(): Promise<{ serverName?: string; protocolVersion?: string }>;
   listTools(): Promise<McpTool[]>;
-  callTool(name: string, args: Record<string, unknown>): Promise<McpCallResult>;
+  /**
+   * 调用工具。`opts.signal` 来自上层（用户中断 / 整轮放弃）：一旦触发，
+   * 在途的 HTTP 请求立刻 abort，不必等内置超时。
+   */
+  callTool(
+    name: string,
+    args: Record<string, unknown>,
+    opts?: { signal?: AbortSignal },
+  ): Promise<McpCallResult>;
 }
 
 interface RpcEnvelope<T> {
@@ -45,9 +53,23 @@ export function createHttpMcpClient(
   let sessionId: string | null = null;
   let nextId = 1;
 
-  const post = async (body: string): Promise<{ messages: JsonRpcResponse[] }> => {
+  const post = async (
+    body: string,
+    external?: AbortSignal,
+  ): Promise<{ messages: JsonRpcResponse[] }> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), MCP_HTTP_TIMEOUT_MS);
+    /**
+     * 外部中断（用户点了「中断」）也要能打断这一次 POST。
+     *
+     * 两条信号合并：内置超时管「服务不回」，外部信号管「人不想要了」。
+     * 不做合并的话，用户中断后请求还会挂满 20s，期间结果没人收、副作用照旧发生。
+     */
+    const onExternalAbort = () => controller.abort();
+    if (external) {
+      if (external.aborted) controller.abort();
+      else external.addEventListener("abort", onExternalAbort, { once: true });
+    }
     try {
       const res = await fetchImpl(server.url as string, {
         method: "POST",
@@ -75,17 +97,21 @@ export function createHttpMcpClient(
       return { messages: Array.isArray(json) ? json : [json] };
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") {
+        // 外部中断与内置超时都表现为 AbortError：按哪个信号先触发来区分文案，
+        // 否则用户会看到「MCP 服务超时 20s」而实际上是他自己点了中断。
+        if (external?.aborted) throw new Error("工具调用已中断");
         throw new Error(`MCP 服务超时（${MCP_HTTP_TIMEOUT_MS / 1000}s 未响应）`);
       }
       throw err instanceof Error ? err : new Error(String(err));
     } finally {
       clearTimeout(timer);
+      external?.removeEventListener("abort", onExternalAbort);
     }
   };
 
-  const call = async <T>(method: string, params?: unknown): Promise<T> => {
+  const call = async <T>(method: string, params?: unknown, signal?: AbortSignal): Promise<T> => {
     const id = nextId++;
-    const { messages } = await post(rpcRequest(id, method, params));
+    const { messages } = await post(rpcRequest(id, method, params), signal);
     const found = pickResponse<T>(messages, id);
     if (!found) throw new Error(`MCP 服务的响应里没有 ${method} 的结果`);
     if (found.error) throw new Error(formatRpcError(found.error));
@@ -121,11 +147,11 @@ export function createHttpMcpClient(
       return (result.tools ?? []).map((t) => ({ ...t }));
     },
 
-    async callTool(name, args) {
+    async callTool(name, args, opts) {
       const result = await call<{
         content?: unknown[];
         isError?: boolean;
-      }>("tools/call", { name, arguments: args });
+      }>("tools/call", { name, arguments: args }, opts?.signal);
       const content = result.content ?? [];
       return { text: stringifyContent(content), isError: result.isError === true, content };
     },
