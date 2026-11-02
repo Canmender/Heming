@@ -7,6 +7,7 @@ import { deniedText, notExecutedText, ruleDeniedText } from "./hitl/text.js";
 import { supportsKind } from "./capabilityNotice.js";
 import { estimateTokens } from "./agentContext/tokens.js";
 import { foldToolResults } from "./agentContext/toolResults.js";
+import { discoverTools, searchTools } from "./mcp/discovery.js";
 import type { RolloutInput } from "./rollout/types.js";
 
 /**
@@ -25,6 +26,46 @@ export const MAX_TOOL_ROUNDS = 12;
  * 到这里就收口：把已有文本给用户，并明确告知「还能继续」，而不是悄悄停在半路。
  */
 export const MAX_TURN_TOOL_TOKENS = 12_000;
+
+/**
+ * 工具目录超过多少个就切到「按需发现」。
+ *
+ * 20 是经验值：十个以内的工具全部展示最省事（模型不需要多花一轮检索），
+ * 超过二十个之后提示词里光 schema 就上千 token，检索的收益开始覆盖多一轮的成本。
+ */
+export const TOOL_SEARCH_THRESHOLD = 20;
+
+/** 发现模式下默认展示多少个工具（其余靠检索）。 */
+export const MAX_VISIBLE_TOOLS = 20;
+
+/** 检索工具的名字（内部工具，不来自 MCP）。 */
+export const TOOL_SEARCH_NAME = "tool_search";
+
+/** 一次检索最多返回几个工具：太多等于把目录又塞回去了。 */
+export const TOOL_SEARCH_LIMIT = 8;
+
+/**
+ * 检索工具自身对模型的声明。
+ *
+ * 描述里必须说清「只返回名字与一句话」——否则模型会以为检索结果就是工具输出，
+ * 拿一句说明当答案回给用户。
+ */
+const TOOL_SEARCH_SPEC = {
+  type: "function",
+  function: {
+    name: TOOL_SEARCH_NAME,
+    description:
+      "按关键词检索本机可用的工具。工具数量较多时只展示了一部分，其余需要通过本工具检索；" +
+      "返回的是工具名与一句话说明（不是工具执行结果），命中后即可在同一轮后续调用里直接使用。",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "关键词，如服务名、动作名（天气、搜索、写入）" },
+      },
+      required: ["query"],
+    },
+  },
+};
 
 /** 触发编排的依赖注入面：stores/WS/流式适配器由 ChatPage 组装，本模块保持纯逻辑可测。 */
 /** 一次流（单个 mention）的终态：成功 / 中断 / 失败，每次流恰好一次。 */
@@ -693,6 +734,32 @@ export function runAgentMentions(
             bridge.tools.length > 0 &&
             supportsKind(profile, "tools") &&
             !aborted;
+          /**
+           * 工具目录超过阈值时改「按需发现」（对应 Codex 的 tool_search）。
+           *
+           * 为什么不是把全部工具塞进去：每个 function schema 都带完整 JSON Schema，
+           * 五六个 MCP 服务叠加后，光工具定义就吃掉可观的输入 token；而且模型在几十个
+           * 名字里挑，选错的概率明显上升。超过阈值后只暴露前 `MAX_VISIBLE_TOOLS` 个，
+           * 其余靠一次检索加入——多花一轮，换回稳定的选择质量与更小的提示词。
+           */
+          const allSpecs = useTools ? discoverTools(bridge!.tools) : [];
+          const useDiscovery = useTools && allSpecs.length > TOOL_SEARCH_THRESHOLD;
+          /** 当前可调用（模型看得见）的工具名。检索命中会往里加，下一轮即生效。 */
+          const visible = new Set<string>(
+            useDiscovery
+              ? allSpecs.slice(0, MAX_VISIBLE_TOOLS).map((t) => t.name)
+              : allSpecs.map((t) => t.name),
+          );
+          const toolSearchId = useDiscovery ? TOOL_SEARCH_NAME : "";
+          /** 本轮请求要带的 tools：发现模式下 = tool_search + 当前可见工具（按目录原序）。 */
+          const toolsForRequest = (): unknown[] => {
+            if (!useTools) return [];
+            if (!useDiscovery) return bridge!.tools;
+            return [
+              TOOL_SEARCH_SPEC,
+              ...allSpecs.filter((t) => visible.has(t.name)).map((t) => t.spec),
+            ];
+          };
           let extra: ChatMessage[] = [];
           let reasoning = "";
           /** 本次尝试里已回灌的工具结果总量（token）：预算驱动的收敛条件，见 MAX_TURN_TOOL_TOKENS。 */
@@ -728,7 +795,7 @@ export function runAgentMentions(
             let calls: ToolCall[] = [];
             await deps.streamChat(profile, await messagesFor(aggressive, extra), {
               signal: controller.signal,
-              ...(useTools ? { tools: bridge!.tools } : {}),
+              ...(useTools ? { tools: toolsForRequest() } : {}),
               onToolCalls: (c) => {
                 calls = c;
               },
@@ -809,14 +876,65 @@ export function runAgentMentions(
                 args: call.function.arguments,
               });
             }
-            // HITL 闸门：执行**之前**问用户。被拒的项绝不调用 bridge.execute。
-            // 未注入闸门时 outcomes 为 null，走原来的执行路径（逐字等价）。
-            const outcomes = await confirmToolCalls(deps, calls, {
-              agentId: m.agentId,
-              agentName: m.name,
-              streamId,
-              conversationId,
-            });
+            /**
+             * 内部检索调用（`tool_search`）：不发 MCP、不问用户、不产生副作用。
+             * 它只做一件事——把命中工具的 schema 加进 `visible`，下一轮请求即带上。
+             */
+            const searchIndexes = new Set<number>();
+            if (useDiscovery) {
+              calls.forEach((call, i) => {
+                if (call.function.name === toolSearchId) searchIndexes.add(i);
+              });
+            }
+            const runToolSearch = (call: ToolCall) => {
+              let query = "";
+              try {
+                const parsed = JSON.parse(call.function.arguments || "{}") as { query?: unknown };
+                if (typeof parsed.query === "string") query = parsed.query;
+              } catch {
+                /* 参数坏了按空查询处理：返回可解释的空结果，而不是让整轮失败 */
+              }
+              const matches = searchTools(allSpecs, query, {
+                exclude: visible,
+                limit: TOOL_SEARCH_LIMIT,
+              });
+              for (const match of matches) visible.add(match.name);
+              const text = matches.length
+                ? `已加入可调用工具（本轮后续即可调用）：\n${matches
+                    .map(
+                      (t) =>
+                        `- ${t.name}${t.description ? `：${t.description.replace(/\s+/g, " ").slice(0, 80)}` : ""}`,
+                    )
+                    .join("\n")}`
+                : `没有找到与「${query}」匹配的工具。换更通用的关键词（例如服务名）再试一次。`;
+              return { text, ok: matches.length > 0 };
+            };
+
+            /**
+             * HITL 闸门：**只问真正会执行的外部工具**。
+             *
+             * 检索是只读的内部动作，问「是否允许检索工具列表」只会制造确认疲劳——
+             * 而确认疲劳正是安全边界失效的开始（用户开始无脑点允许）。
+             * 裁决数组按**原始下标**回填，保证与 calls 等长同序。
+             */
+            let outcomes: (GateOutcome | undefined)[] | null = null;
+            if (calls.length > searchIndexes.size) {
+              const targets = calls
+                .map((call, index) => ({ call, index }))
+                .filter(({ index }) => !searchIndexes.has(index));
+              const decided = await confirmToolCalls(
+                deps,
+                targets.map((t) => t.call),
+                { agentId: m.agentId, agentName: m.name, streamId, conversationId },
+              );
+              if (decided) {
+                const aligned: (GateOutcome | undefined)[] = new Array(calls.length);
+                targets.forEach((target, k) => {
+                  aligned[target.index] = decided[k];
+                });
+                outcomes = aligned;
+              }
+            }
             /**
              * 工具执行调度（G3）：只读并行，写/危险操作**串行且保序**。
              *
@@ -829,6 +947,7 @@ export function runAgentMentions(
             const settled: ({ text: string; ok: boolean; sources?: ToolSource[] } | undefined)[] =
               new Array(calls.length);
             const runOne = async (call: ToolCall, i: number) => {
+              if (searchIndexes.has(i)) return runToolSearch(call);
               const outcome = outcomes?.[i];
               if (outcome?.kind === "deny") {
                 // 被拒：回一段明确声明「未修改」的文案，让模型知道这次没落地。
@@ -857,7 +976,8 @@ export function runAgentMentions(
                 const job = async () => {
                   settled[i] = await runOne(call, i);
                 };
-                if (riskOf(call.function.name) === "read") return job();
+                // 检索是纯内存操作，与只读工具一样并行，不占用写队列
+                if (searchIndexes.has(i) || riskOf(call.function.name) === "read") return job();
                 const chained = writeChain.then(job, job);
                 // 链上任何一环失败都不能断链：失败已落在 settled 里，后续照常排队。
                 writeChain = chained.then(

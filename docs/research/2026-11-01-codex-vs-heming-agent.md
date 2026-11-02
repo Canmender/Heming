@@ -59,7 +59,7 @@
 | 2 | 并行工具 | 同一轮全部 `Promise.all`（`agentStream.ts:654`） | `parallel_tool_calls: true`，但写操作由工具自身语义与审批串行化 | 落后（且不安全） |
 | 3 | 中断与超时 | 有超时（HTTP 20s / stdio 30s），但中断信号传不到执行层 | 工具调用有生命周期与取消（`tools/lifecycle.rs`） | 落后（已补中断透传） |
 | 4 | 工具结果治理 | 原样回灌，无截断 | 截断 + 「保留最近 N 条完整输出」白名单（`compact_retained_tool_outputs.rs`） | 落后 |
-| 5 | 工具发现 | 全量注入所有启用工具（`mcp/runtime.ts:161`） | `tool_search` + 增量工具（`build_prompt(..., incremental_tools)`） | 落后 |
+| 5 | 工具发现 | 超过 20 个切按需检索（`lib/mcp/discovery.ts`，d.52） | `tool_search` + 增量工具（`build_prompt(..., incremental_tools)`） | 持平（已实现） |
 | 6 | 编辑原语 | 无（`wiki_*` 只读，`self_*` 只改记忆/技能/MCP） | `apply_patch` 上下文锚点补丁协议 | 落后（但对我们不是刚需） |
 | 7 | 执行隔离 | 无沙箱，stdio MCP 走桌面桥 + `shell:false` | seatbelt / landlock / Windows 沙箱 + `exec-server` 独立进程 | 落后（暂不跟） |
 | 8 | 审批与安全 | 三档 × 三级风险 × 按智能体规则 × 三种拒绝原因，兜底倒向拒绝 | 四档 `AskForApproval` + `SafetyCheck` 三态 + 路径白名单判定 | **领先** |
@@ -281,6 +281,6 @@
 
 1. **常驻幕僚（d.48）不使用工具**：`staff/llm.ts`、`staff/runner.ts` 里没有 tool bridge，因此本轮的调度与超时改动不波及它，但反过来说它只能产出纯文本简报。若将来给幕僚开工具，必须复用同一套闸门、超时与结果封顶，不能另起执行路径。
 2. **版本账已补齐**：`505511f`（路由组 / d.49）与 `6e79fc6`（d.50）此前未 bump、未进 CHANGELOG，本轮合并为 `d.50.1.12.0` 一次性补记（特性 +2、修订 +1），不另造虚拟版本号。
-3. **仍然缺的**（不在本轮范围）：沙箱与执行隔离、`apply_patch` 编辑原语、按需工具发现（`tool_search` 式）、回合日志的恢复/分叉（只读面板已做）。
+3. **仍然缺的**（不在本轮范围）：沙箱与执行隔离、`apply_patch` 编辑原语、回合日志的恢复/分叉（只读面板已做）。按需工具发现已于 d.52 实现（`lib/mcp/discovery.ts`，阈值 20）。
 
 **复核口径**：以 `git diff 23a0c41..6e79fc6` 为界核对旧清单，再以本轮改动为准销账；行号会漂移，按符号名（`MAX_TOOL_ROUNDS`、`MAX_TURN_TOOL_TOKENS`、`executeToolCall`、`foldToolResults`、`createRolloutLog`）检索。
