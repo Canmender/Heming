@@ -275,12 +275,12 @@
 | G3 写操作并行 | **已关闭** | `agentStream.ts`：按 `bridge.meta.risk` 分组，`read` 并行、`write`/`danger` 保序串行 |
 | G4 Anthropic 工具 | **已关闭（`505511f`）** | `llmAnthropic.ts` 请求边缘转换；保留三条回归边界（见 §四 G4） |
 | G5 上下文只在 400 后治理 | **已关闭** | 新增 `agentContext/toolResults.ts`：采样前折叠较早工具结果（3000 token 预算，最近 3 条不折，条数不变） |
-| G6 回合无持久化 | **部分关闭** | 新增 `lib/rollout`：逐条记录开始/调用/结果/答案/终态，本机存储、有界、失败静默；**恢复界面与分叉未做** |
+| G6 回合无持久化 | **部分关闭** | 新增 `lib/rollout`：逐条记录开始/调用/结果/答案/终态，本机存储、有界、失败静默；只读面板已做（`components/RolloutTimeline.tsx`，接入任务区右列）；恢复与分叉未做 |
 
 **新增观察**
 
 1. **常驻幕僚（d.48）不使用工具**：`staff/llm.ts`、`staff/runner.ts` 里没有 tool bridge，因此本轮的调度与超时改动不波及它，但反过来说它只能产出纯文本简报。若将来给幕僚开工具，必须复用同一套闸门、超时与结果封顶，不能另起执行路径。
 2. **版本账已补齐**：`505511f`（路由组 / d.49）与 `6e79fc6`（d.50）此前未 bump、未进 CHANGELOG，本轮合并为 `d.50.1.12.0` 一次性补记（特性 +2、修订 +1），不另造虚拟版本号。
-3. **仍然缺的**（不在本轮范围）：沙箱与执行隔离、`apply_patch` 编辑原语、按需工具发现（`tool_search` 式）、回合日志的恢复界面。
+3. **仍然缺的**（不在本轮范围）：沙箱与执行隔离、`apply_patch` 编辑原语、按需工具发现（`tool_search` 式）、回合日志的恢复/分叉（只读面板已做）。
 
 **复核口径**：以 `git diff 23a0c41..6e79fc6` 为界核对旧清单，再以本轮改动为准销账；行号会漂移，按符号名（`MAX_TOOL_ROUNDS`、`MAX_TURN_TOOL_TOKENS`、`executeToolCall`、`foldToolResults`、`createRolloutLog`）检索。

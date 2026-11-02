@@ -24,6 +24,7 @@ import {
 } from "../lib/tasks/templates.js";
 import { ChatPage } from "./ChatPage.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
+import { RolloutTimeline } from "./RolloutTimeline.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useModalA11y } from "./useModalA11y.js";
 import { capabilityNotice } from "../lib/capabilityNotice.js";
@@ -963,6 +964,9 @@ function TaskSummary({
           </ol>
         )}
       </section>
+
+      {/* 过程日志：只读，只有绑定了流（从任务区发起）的记录才有 */}
+      {task.streamId && <RolloutTimeline streamId={task.streamId} active={running} />}
 
       {sources.length > 0 && (
         <section>
