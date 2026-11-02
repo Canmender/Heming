@@ -141,6 +141,10 @@ declare global {
       reload: () => void;
       /** 请求主窗口上前台并切到设置页（未配置模型连接时的出口）。 */
       openSettings: () => void;
+      /** 请求主窗口打开某个会话（未读角标被点时）。 */
+      openConversation: (conversationId: string) => void;
+      /** 主窗口侧：订阅「桌宠要打开某会话」。返回取消订阅函数。 */
+      onOpenConversation: (cb: (conversationId: string | null) => void) => () => void;
       /** 主窗口侧：订阅「桌宠要打开设置」。返回取消订阅函数。 */
       onOpenSettings: (cb: () => void) => () => void;
     };

@@ -261,6 +261,16 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
     });
   }, []);
 
+  // 桌宠的未读角标被点 → 打开对应会话（未登录时忽略）
+  useEffect(() => {
+    const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
+    if (!bridge?.onOpenConversation) return;
+    return bridge.onOpenConversation((id) => {
+      if (!id || !useAuthStore.getState().user) return;
+      useUiStore.getState().openConversation(id);
+    });
+  }, []);
+
   // 右侧目录栏宽度：可拖动调节，落盘后下次启动保持（用户要求「支持拖动改变大小」）
   const [asideWidth, setAsideWidth] = useState(() => readAsideWidth());
   const onResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {

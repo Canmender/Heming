@@ -11,6 +11,7 @@ import { loadPetPrefs, petModelUrl } from "../../lib/petPrefs.js";
 import { classifyPointerUp, isInteractiveAt, shouldReportChange, type Rect } from "./petInteraction.js";
 import { useLive2D } from "./useLive2D.js";
 import { usePetChat } from "./usePetChat.js";
+import { usePetUnread } from "../../lib/petUnread.js";
 
 /**
  * 桌宠窗口（d.46）。
@@ -46,10 +47,13 @@ export function PetWindow() {
    */
   const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null);
   const bubbleRef = useRef<HTMLDivElement | null>(null);
+  const badgeRef = useRef<HTMLButtonElement | null>(null);
   const inputRef = useRef<HTMLFormElement | null>(null);
   const inputElRef = useRef<HTMLInputElement | null>(null);
 
   const chat = usePetChat(prefs.agentId);
+  // 未读感知：桌宠窗口存在即订阅（未登录时 hook 内部不建连接）
+  const unread = usePetUnread(true);
 
   // 模型与 Core 都从当前页面的源取（app://heming 或部署站点），不联网。
   //
@@ -148,6 +152,20 @@ export function PetWindow() {
     replyLenRef.current = chat.reply.length;
   }, [chat.reply]);
 
+  /* ────────────── 未读：新消息到达时短暂提示 ────────────── */
+  const [unreadHint, setUnreadHint] = useState<string | null>(null);
+  const prevTotalRef = useRef(0);
+  useEffect(() => {
+    const prev = prevTotalRef.current;
+    prevTotalRef.current = unread.total;
+    if (unread.total <= prev) return; // 只在增加时提示（已读清零不提示）
+    setUnreadHint(
+      unread.total === 1 ? "来消息了" : `有 ${unread.total} 条未读消息`,
+    );
+    const timer = window.setTimeout(() => setUnreadHint(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [unread.total]);
+
   /* ────────────── 可交互区与穿透上报 ────────────── */
   const interactiveRef = useRef(false);
   const extraRects = useCallback((): Array<Rect | null> => {
@@ -157,7 +175,7 @@ export function PetWindow() {
       if (r.width <= 0 || r.height <= 0) return null;
       return { x: r.left, y: r.top, width: r.width, height: r.height };
     };
-    return [toRect(bubbleRef.current), toRect(inputRef.current)];
+    return [toRect(badgeRef.current), toRect(bubbleRef.current), toRect(inputRef.current)];
   }, []);
 
   useEffect(() => {
@@ -288,7 +306,7 @@ export function PetWindow() {
 
   const bubbleText = chat.error
     ? chat.error
-    : chat.reply || (chat.streaming ? "…" : "");
+    : chat.reply || (chat.streaming ? "…" : "") || unreadHint || "";
 
   const showBubbleHint = !chat.hasConnection && inputOpen;
 
@@ -307,6 +325,39 @@ export function PetWindow() {
         ref={setCanvasEl}
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }}
       />
+
+      {unread.total > 0 && (
+        <button
+          ref={badgeRef}
+          data-pet-ui="badge"
+          type="button"
+          onClick={() => {
+            const target = unread.latestConvId;
+            if (target) window.__heming_pet?.openConversation(target);
+          }}
+          title={`${unread.total} 条未读，点击打开`}
+          aria-label={`${unread.total} 条未读消息，点击打开`}
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            minWidth: 22,
+            height: 22,
+            padding: "0 6px",
+            border: "none",
+            borderRadius: 11,
+            background: "#b42318",
+            color: "#fff",
+            fontSize: 12,
+            fontWeight: 600,
+            lineHeight: "22px",
+            cursor: "pointer",
+            boxShadow: "0 2px 8px rgba(180,35,24,0.35)",
+          }}
+        >
+          {unread.total > 99 ? "99+" : unread.total}
+        </button>
+      )}
 
       {(bubbleText || showBubbleHint) && (
         <div

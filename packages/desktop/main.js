@@ -485,18 +485,15 @@ if (!gotLock) {
       // 用户几秒前点过停止，回收可能还在后台跑，这时退出照样要等它。
       if (!mcpStdio.idle()) list.push(() => mcpStdio.disposeAll());
       if (infohubBridge && !infohubBridge.idle()) list.push(() => infohubBridge.dispose());
+      // 桌宠：同步销毁窗口与托盘（托盘不销毁会在托盘区留下一个幽灵图标）。
+      // 它不是子进程，但同属「退出前必须收口」的资源；放在这里统一收口，
+      // 而不是再挂一个无 event 的 will-quit——那种处理器拦不住退出（见 main.test 的守卫）。
+      // 仅在桌宠真的被创建过时才入列：否则每次退出都白白多拦一次。
+      if (petHost) list.push(() => petHost.destroy());
       return list;
     },
     onQuit: () => app.quit(),
     log: (line) => console.warn(line),
-  });
-
-  // 桌宠收口（d.53）：同步销毁窗口与托盘——托盘不销毁会在托盘区留下一个幽灵图标。
-  // **刻意不放进上面的回收闸**：桌宠没有子进程要等，塞进去会让「没有子进程时退出
-  // 零延迟」这条承诺在桌宠开启时失效。destroy 是幂等的，回收闸 preventDefault 后
-  // will-quit 会再触发一次，再调一遍也安全。
-  app.on("will-quit", () => {
-    petHost?.destroy();
   });
   app.on("will-quit", (event) => reclaimChildren(event));
 

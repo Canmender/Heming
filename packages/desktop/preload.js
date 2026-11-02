@@ -239,6 +239,15 @@ contextBridge.exposeInMainWorld("__heming_pet", {
   reload: () => ipcRenderer.send("pet:reload"),
   /** 桌宠窗口请求把主窗口叫到前台并切到设置页（未配置模型时的出口）。 */
   openSettings: () => ipcRenderer.send("pet:open-settings"),
+  /** 桌宠窗口请求打开某个会话（未读角标被点时）。 */
+  openConversation: (conversationId) => ipcRenderer.send("pet:open-conversation", conversationId),
+  /** 主窗口侧订阅「桌宠要打开某会话」。返回取消订阅函数。 */
+  onOpenConversation: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, id) => callback(typeof id === "string" ? id : null);
+    ipcRenderer.on("pet:open-conversation", listener);
+    return () => ipcRenderer.removeListener("pet:open-conversation", listener);
+  },
   /** 主窗口侧订阅「桌宠要打开设置」。返回取消订阅函数。 */
   onOpenSettings: (callback) => {
     if (typeof callback !== "function") return () => {};
