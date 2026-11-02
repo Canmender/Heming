@@ -49,8 +49,6 @@ describe("LoginPage", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/auth/login");
     expect(init.body).toBe(JSON.stringify({ username: "alice", password: "secret123" }));
-    // 登录成功后还会拉一次 ICE 配置（d.30 · P0-2）：第二通请求是 /api/ice-servers
-    expect(fetchMock.mock.calls.map((c) => c[0])).toContain("/api/ice-servers");
   });
 
   it("登录失败显示错误文案、store 置 error 且不写 token", async () => {

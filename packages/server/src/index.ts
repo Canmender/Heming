@@ -3,7 +3,6 @@ import { createApp, envFlagEnabled } from "./app.js";
 import { resolveDbPath } from "./db.js";
 import { createSqliteStore, type SqliteStore } from "./sqliteStore.js";
 import { seedUsersFromEnv } from "./seed.js";
-import { seedPreset } from "./preset.js";
 import { attachWs } from "./ws.js";
 
 export interface ServerContext {
@@ -29,6 +28,8 @@ export async function startServer(
   const store = createSqliteStore(dbPath);
   // 播种在开始监听前完成，避免出现"已可登录但账号未就绪"的窗口。
   seedUsersFromEnv(store, process.env.HEMING_SEED_USERS);
+  // d.54：预设群删除后，系统助手（和小鸣）仍要幂等登记到名册，否则新库无法开对话。
+  store.ensureSystemAgents();
   if (
     !envFlagEnabled(process.env.HEMING_ALLOW_REGISTER) &&
     !process.env.HEMING_SEED_USERS?.trim()
@@ -69,9 +70,5 @@ if (isDirectRun) {
   const host = resolveHost();
   startServer(port, host).then((ctx) => {
     console.log(`heming server listening on http://${host}:${ctx.port}`);
-    // 预设播种只在直跑入口做，startServer 内不播种——persistence/契约测试不被污染。
-    // 无用户（未配 HEMING_SEED_USERS）时 seedPreset 返回 null，仅日志缺省不打。
-    const preset = seedPreset(ctx.store);
-    if (preset) console.log(`seed: preset group ${preset.groupId} ready`);
   });
 }

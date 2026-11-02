@@ -6,7 +6,6 @@ describe("ui store 页面与会话状态", () => {
     useUiStore.setState({
       page: "home",
       activeConversationId: null,
-      contactsHidden: false,
     });
   });
 
@@ -19,50 +18,6 @@ describe("ui store 页面与会话状态", () => {
     const s = useUiStore.getState();
     expect(s.page).toBe("chat");
     expect(s.activeConversationId).toBe("c1");
-  });
-
-  it("打开会话同时隐藏通讯录（contactsHidden → true）", () => {
-    useUiStore.getState().showContacts();
-    expect(useUiStore.getState().contactsHidden).toBe(false);
-    useUiStore.getState().openConversation("c1");
-    expect(useUiStore.getState().contactsHidden).toBe(true);
-  });
-
-  it("切到非聊天页复位通讯录可见（contactsHidden → false）", () => {
-    useUiStore.getState().openConversation("c1");
-    expect(useUiStore.getState().contactsHidden).toBe(true);
-    useUiStore.getState().setPage("workspace");
-    expect(useUiStore.getState().contactsHidden).toBe(false);
-  });
-
-  it("showContacts 仅恢复通讯录、不改页与当前会话", () => {
-    useUiStore.getState().openConversation("c1");
-    useUiStore.getState().showContacts();
-    const s = useUiStore.getState();
-    expect(s.contactsHidden).toBe(false);
-    expect(s.page).toBe("chat");
-    expect(s.activeConversationId).toBe("c1");
-  });
-
-  it("hideContacts 仅隐藏、不改页", () => {
-    useUiStore.getState().openConversation("c1");
-    useUiStore.getState().showContacts();
-    useUiStore.getState().hideContacts();
-    const s = useUiStore.getState();
-    expect(s.contactsHidden).toBe(true);
-    expect(s.page).toBe("chat");
-    expect(s.activeConversationId).toBe("c1");
-  });
-
-  it("openContactDetail/closeContactDetail 与 setPage 清空", () => {
-    const s = useUiStore.getState();
-    s.openContactDetail("human", "u1");
-    expect(useUiStore.getState().detailContact).toEqual({ kind: "human", id: "u1" });
-    useUiStore.getState().setPage("home");
-    expect(useUiStore.getState().detailContact).toBeNull();
-    useUiStore.getState().openContactDetail("agent", "a1");
-    useUiStore.getState().closeContactDetail();
-    expect(useUiStore.getState().detailContact).toBeNull();
   });
 
   it("sendFileToConversation/consumePendingAttachment 单槽语义", () => {
@@ -92,10 +47,11 @@ describe("ui store 导航顺序", () => {
     useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("默认顺序（会话页紧随主页，幕僚在会话之后）", () => {
+  it("默认顺序（团队页紧随主页，智能体页随后）", () => {
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
-      "conversations",
+      "team",
+      "chat",
       "staff",
       "infohub",
       "automations",
@@ -105,16 +61,15 @@ describe("ui store 导航顺序", () => {
       "plugins",
       "interfaces",
       "memory",
-      "archive",
       "settings",
     ]);
   });
 
   it("moveNav 上移/下移生效并落盘", () => {
     useUiStore.getState().moveNav("memory", -1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(9);
-    useUiStore.getState().moveNav("memory", 1);
     expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(10);
+    useUiStore.getState().moveNav("memory", 1);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(11);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
       useUiStore.getState().navOrder,
     );
@@ -124,7 +79,7 @@ describe("ui store 导航顺序", () => {
     const before = useUiStore.getState().navOrder;
     useUiStore.getState().moveNav("home", -1);
     useUiStore.getState().moveNav("settings", 1);
-    useUiStore.getState().moveNav("chat" as never, 1);
+    useUiStore.getState().moveNav("no-such-page" as never, 1);
     expect(useUiStore.getState().navOrder).toEqual(before);
   });
 
@@ -140,8 +95,9 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
   it("去重、剔除未知页、缺失项补在末尾", () => {
     expect(normalizeNavOrder(["memory", "memory", "chat", 42, "home"])).toEqual([
       "memory",
+      "chat",
       "home",
-      "conversations",
+      "team",
       "staff",
       "infohub",
       "automations",
@@ -150,7 +106,6 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "skills",
       "plugins",
       "interfaces",
-      "archive",
       "settings",
     ]);
   });
@@ -161,7 +116,8 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
     expect(readStoredNavOrder({ getItem: () => '["settings","home"]' })).toEqual([
       "settings",
       "home",
-      "conversations",
+      "team",
+      "chat",
       "staff",
       "infohub",
       "automations",
@@ -171,7 +127,6 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "plugins",
       "interfaces",
       "memory",
-      "archive",
     ]);
     expect(readStoredNavOrder(null)).toEqual([...DEFAULT_NAV_ORDER]);
   });

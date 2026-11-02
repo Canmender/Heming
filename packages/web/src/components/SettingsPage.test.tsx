@@ -367,7 +367,8 @@ describe("设置区 · 导航顺序", () => {
     fireEvent.click(screen.getByRole("button", { name: "上移 技能区" }));
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
-      "conversations",
+      "team",
+      "chat",
       "staff",
       "infohub",
       "automations",
@@ -377,7 +378,6 @@ describe("设置区 · 导航顺序", () => {
       "plugins",
       "interfaces",
       "memory",
-      "archive",
       "settings",
     ]);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(

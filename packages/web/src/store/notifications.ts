@@ -11,11 +11,7 @@ import type { StorageLike } from "../lib/memory/types.js";
 /**
  * 通知中心（本机）：把「不在当前视图里发生的事」收进一条时间线。
  *
- * 为什么只存本机：正文是会话明文的摘要（E2E 解密后的文本），
- * 与任务记录同口径——这类内容一律不上云。
- *
- * 与未读角标的分工：未读数是服务端事实（会话 unreadCount），
- * 通知是客户端视图（谁在什么时候发生了什么、我看过没有），两者可以不一致。
+ * 为什么只存本机：正文可能含会话摘要，与任务记录同口径——这类内容一律不上云。
  */
 
 export const NOTIFICATIONS_KEY = "heming.notifications.v1";
@@ -29,29 +25,27 @@ export const MAX_BODY_CHARS = 200;
 export const NOTIFICATIONS_BYTE_LIMIT = Math.floor(64 * 1024);
 
 /**
- * 通知类型：
- * - `message`：别处会话的新消息；
+ * 通知类型（d.54 去 IM 后不再有 `message`）：
  * - `task`：任务收尾；
  * - `approval`：**等待用户裁决**的工具调用确认（d.34）。
- *   它与前两种的区别是「还没发生」而不是「已经发生」——点开是回到待确认的会话，
- *   不是去读一条历史。
+ *   它的语义是「还没发生」——点开是回到待确认的智能体会话，不是去读一条历史。
  * - `staff`：常驻幕僚的主动简报（d.48），点开去幕僚页。
  */
-export type NotificationKind = "message" | "task" | "approval" | "staff";
+export type NotificationKind = "task" | "approval" | "staff";
 
 export interface AppNotification {
   id: string;
   kind: NotificationKind;
   /**
-   * 去重键：同一条消息（`message:<id>`）、同一个任务终态（`task:<id>:<status>`）
-   * 只记一次。WS 重连补投、重复事件都会撞同一个 key，不能变成刷屏。
+   * 去重键：同一个任务终态（`task:<id>:<status>`）等只记一次。
+   * WS 重连补投、重复事件都会撞同一个 key，不能变成刷屏。
    */
   key: string;
   title: string;
   body: string;
   createdAt: number;
   read: boolean;
-  /** 跳转目标：消息 → 会话；任务 → 任务（附带会话用于选中后聚焦）。 */
+  /** 跳转目标：审批 → 助手会话；任务 → 任务（附带会话用于选中后聚焦）。 */
   conversationId?: string;
   taskId?: string;
 }
@@ -79,12 +73,7 @@ export function normalizeNotification(raw: unknown): AppNotification | null {
   if (!isPlainObject(raw)) return null;
   if (typeof raw.id !== "string" || !raw.id) return null;
   if (typeof raw.key !== "string" || !raw.key) return null;
-  if (
-    raw.kind !== "message" &&
-    raw.kind !== "task" &&
-    raw.kind !== "approval" &&
-    raw.kind !== "staff"
-  ) {
+  if (raw.kind !== "task" && raw.kind !== "approval" && raw.kind !== "staff") {
     return null;
   }
   const title = oneLine(typeof raw.title === "string" ? raw.title : "");

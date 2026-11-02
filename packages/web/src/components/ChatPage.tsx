@@ -9,7 +9,6 @@ import {
 } from "react";
 import type { Conversation, Message, MessagePayload } from "@heming/shared";
 import {
-  activeConversationsOf,
   useChatStore,
   type E2eOpenHandler,
   type E2eOpenOutcome,
@@ -29,7 +28,6 @@ import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
 import { useTokenUsageStore } from "../store/tokenUsage.js";
 import {
-  fetchMembers,
   uploadEncryptedFile,
   fetchFileBlobUrl,
   downloadEncryptedFile,
@@ -79,12 +77,8 @@ import { registerChatSocket } from "../lib/chatSocketPresence.js";
 import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon, ChatIcon } from "./icons.js";
 import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import { Avatar } from "./Avatar.js";
-import { MentionPicker, type MentionItem } from "./MentionPicker.js";
 import { AgentStreamBubble } from "./AgentStreamBubble.js";
-import { ChatInfoCard } from "./ChatInfoCard.js";
 import { EmojiPicker } from "./EmojiPicker.js";
-import { VoiceCallPanel } from "./VoiceCallPanel.js";
-import { useVoiceCall } from "../lib/voiceCall.js";
 import { capabilityRegistry } from "../lib/capability/index.js";
 import {
   buildConversationJson,
@@ -106,10 +100,8 @@ import { docFileBlock, isDocumentLike, parseDocument } from "../lib/docs/parse.j
 import { ChatChart } from "./ChatChart.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 import { mcpRegistry } from "../lib/mcp/store.js";
-import { openCallWindow } from "../lib/callWindow.js";
 import { useModalA11y } from "./useModalA11y.js";
 import { capabilityNotice } from "../lib/capabilityNotice.js";
-import { notifyIncomingMessage } from "../lib/messageNotify.js";
 import { formatClock, formatDayClock, needsTimeSeparator } from "../lib/formatTime.js";
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
@@ -182,109 +174,24 @@ const hitlGate = createHitlGate({
 });
 
 /**
- * 会话 → 显示名与头像（转发目标选择、通话标题、标签栏等多处共用）。
- * 三种会话各取各的字段，集中在这里而不是散落各处写三元——
- * 加 agent 会话时只改这一处，漏改别处会在转发面板里显示成 undefined。
+ * 智能体会话 → 显示名与头像（标题栏、导出文件名、任务区嵌入态共用）。
+ * d.54 起会话只剩「用户 ↔ 智能体」一种，三态联合已成历史。
  */
 export function convLabel(c: Conversation): { name: string; avatar?: string; group: boolean } {
-  if (c.type === "direct") return { name: c.peer.displayName, avatar: c.peer.avatar, group: false };
-  if (c.type === "agent") {
-    return { name: c.agent.name, avatar: c.agent.avatar ?? undefined, group: false };
-  }
-  return { name: c.name, avatar: undefined, group: true };
+  return { name: c.agent.name, avatar: c.agent.avatar ?? undefined, group: false };
 }
 
 /** chips 空表的稳定引用（selector 兜底，防每次渲染新建 {} 触发多余重渲染）。 */
 const NO_PLAIN: Record<string, PlainEnvelope> = {};
 
-/** 单条消息的回应 chip（emoji + 参与 userIds）。 */
-export type ReactionChip = { emoji: string; userIds: string[] };
+/** 他机流 watchdog 清扫周期（Task 7）：15s 一次扫全局 streaming 的过期项（阈值在 store 内 60s）。 */
+const STREAM_SWEEP_INTERVAL_MS = 15_000;
 
-/**
- * Electron preload 暴露的语音通话桥接面（仅桌面端存在；网页端为 undefined）。
- * 各方法均可选：老版本 preload 可能未提供某些方法，渲染层需守卫降级。
- */
-interface VoiceCallBridge {
-  /** 订阅最小化事件；返回取消订阅函数（卸载时清理，防监听器累积）。 */
-  onMinimize?: (callback: () => void) => (() => void) | void;
-  /** 请求主进程弹系统通知（主进程一并闪烁任务栏）。 */
-  notify?: (title: string, body: string) => void;
-}
-
-declare global {
-  interface Window {
-    /** Electron preload 注入的语音通话桥接面（网页端不存在）。 */
-    __heming_voice_call?: VoiceCallBridge;
-  }
-}
-
-/** aggregateChips 结果里「无 chips」的稳定空表。 */
-const NO_CHIPS: ReactionChip[] = [];
-
-/** 进程内聚合缓存（fix I4）：同 (messages, plainOf) 引用 → 返回同一结果对象（可断言「不重复计算」）。 */
-let chipAggCache: {
-  messages: Message[];
-  plainOf: Record<string, PlainEnvelope>;
-  result: Map<string, ReactionChip[]>;
-} | null = null;
-
-/**
- * 聚合各消息的回应 chips（fix I4：原每渲染对每条消息全量扫 reaction 消息 = O(n²)）：
- * 存量 payload.reactions 打底，再按消息序叠加解密出的 kind=reaction 事件（add 进/remove 出），
- * 空集条目剔除。同引用输入命中进程内缓存；渲染层经 useMemo 只在 messages/plainOf 变化时调用。
- */
-export function aggregateChips(
-  messages: Message[],
-  plainOf: Record<string, PlainEnvelope>,
-): Map<string, ReactionChip[]> {
-  if (chipAggCache && chipAggCache.messages === messages && chipAggCache.plainOf === plainOf) {
-    return chipAggCache.result;
-  }
-  const acc = new Map<string, Map<string, Set<string>>>();
-  const bucket = (msgId: string, emoji: string): Set<string> => {
-    let byEmoji = acc.get(msgId);
-    if (!byEmoji) {
-      byEmoji = new Map();
-      acc.set(msgId, byEmoji);
-    }
-    let set = byEmoji.get(emoji);
-    if (!set) {
-      set = new Set();
-      byEmoji.set(emoji, set);
-    }
-    return set;
-  };
-  // 存量（服务端 toggle 时代）打底
-  for (const m of messages) {
-    for (const r of m.payload.reactions ?? []) {
-      const set = bucket(m.id, r.emoji);
-      for (const uid of r.userIds) set.add(uid);
-    }
-  }
-  // 解密出的 reaction 事件按消息序叠加
-  for (const ev of messages) {
-    if (ev.recalledAt != null || ev.enc !== "e2e") continue;
-    const p = plainOf[ev.id];
-    if (p?.kind !== "reaction" || !p.reaction) continue;
-    const set = bucket(p.reaction.target, p.reaction.emoji);
-    if (p.reaction.op === "add") set.add(ev.senderId);
-    else set.delete(ev.senderId);
-  }
-  const result = new Map<string, ReactionChip[]>();
-  for (const [msgId, byEmoji] of acc) {
-    const chips: ReactionChip[] = [];
-    for (const [emoji, set] of byEmoji) {
-      if (set.size > 0) chips.push({ emoji, userIds: [...set] });
-    }
-    if (chips.length) result.set(msgId, chips);
-  }
-  chipAggCache = { messages, plainOf, result };
-  return result;
-}
+/** 输入栏（文本行）高度：默认比单行大一些，用户可拖动上沿调整，写 localStorage 持久化。 */
 
 /**
  * E2E 公钥短缓存：seal 内逐成员调 fetchPeerKeys，不缓存会让一次 seal 打 N 次
- * GET /api/e2e/keys（群聊风暴）。3s TTL——新设备上云后最迟下次 seal 可见。
+ * GET /api/e2e/keys（多接收方风暴）。3s TTL——新设备上云后最迟下次 seal 可见。
  */
 let peerKeysCache: { at: number; data: Awaited<ReturnType<typeof fetchE2eKeys>> } | null = null;
 async function fetchPeerKeysCached(userId: string) {
@@ -294,19 +201,6 @@ async function fetchPeerKeysCached(userId: string) {
   return peerKeysCache.data[userId] ?? null;
 }
 
-/** 正则转义：mention 名按字面量匹配（名字可含 . * + 等元字符）。 */
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/** 他机流 watchdog 清扫周期（Task 7）：15s 一次扫全局 streaming 的过期项（阈值在 store 内 60s）。 */
-const STREAM_SWEEP_INTERVAL_MS = 15_000;
-
-/** typing 发送节流：输入期间最多每 2 秒发一次（只传元数据）。 */
-export const TYPING_SEND_INTERVAL_MS = 2000;
-/** typing 接收端过期：3 秒没有新事件即视为停止输入。 */
-export const TYPING_TTL_MS = 3000;
-
-/** 表情回应浮排的常用 emoji（Task 6；emoji 仅作回应数据，不作图标）。 */
-/** 输入栏（文本行）高度：默认比单行大一些，用户可拖动上沿调整，写 localStorage 持久化。 */
 const COMPOSER_HEIGHT_KEY = "heming.chat.composerHeight.v1";
 const DEFAULT_COMPOSER_HEIGHT = 132;
 const MIN_COMPOSER_HEIGHT = 72;
@@ -317,8 +211,6 @@ export function clampComposerHeight(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_COMPOSER_HEIGHT;
   return Math.min(MAX_COMPOSER_HEIGHT, Math.max(MIN_COMPOSER_HEIGHT, Math.round(n)));
 }
-
-const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🎉", "🔥", "✅", "👀", "🤔", "👏"];
 
 /**
  * 「贴底」判定阈值（A3）：距底小于该值即视为正在看最新消息。
@@ -331,31 +223,6 @@ const STICK_BOTTOM_PX = 80;
  * 纯文本发送失败时附带「重试」（附件场景不提供，避免重放一次上传）。
  */
 type SendNotice = { kind: "info" | "error"; text: string; retry?: () => void };
-
-/**
- * 气泡文本 mentions 高亮（M3 Task 7）：按各 name 在 text 中的出现位置 split 拆分——
- * 命中段包浅蓝 chip span，其余段为 Fragment 纯文本节点（React 文本输出天然转义，防注入）。
- * 名字按长度降序参与 alternation，防「小鸣」吃掉「和小鸣」的前缀；无 mentions 时原样单节点。
- */
-export function renderTextWithMentions(
-  text: string,
-  mentions?: { agentId: string; name: string }[],
-): JSX.Element[] {
-  const names = [...new Set((mentions ?? []).map((m) => m.name).filter((n) => n.length > 0))].sort(
-    (a, b) => b.length - a.length,
-  );
-  if (names.length === 0) return [<Fragment key="t0">{text}</Fragment>];
-  const re = new RegExp(`(${names.map(escapeRegExp).join("|")})`, "g");
-  return text.split(re).map((part, i) =>
-    part !== "" && names.includes(part) ? (
-      <span key={i} className="rounded bg-[#eef3f8] px-0.5">
-        {part}
-      </span>
-    ) : (
-      <Fragment key={i}>{part}</Fragment>
-    ),
-  );
-}
 
 /**
  * 附件气泡（图片缩略图 / 文件卡）：content 路由 authOnly，裸 src/href 会 401 →
@@ -541,8 +408,6 @@ export function ChatPage({
   const [historyLoaded, setHistoryLoaded] = useState<Record<string, boolean>>({});
   const plainById = useChatStore((s) => s.plainById);
   const appendMessage = useChatStore((s) => s.appendMessage);
-  const reads = useChatStore((s) => s.reads);
-  const loadReads = useChatStore((s) => s.loadReads);
   const streaming = useChatStore((s) => s.streaming);
   const streamOwner = useChatStore((s) => s.streamOwner);
   const upsertStream = useChatStore((s) => s.upsertStream);
@@ -659,13 +524,9 @@ export function ChatPage({
   const [connected, setConnected] = useState(false);
   /** WS 三态：首次连接 / 已连接 / 已断开（用于标题与横幅，不用 connected 二元冒充）。 */
   const [connState, setConnState] = useState<"connecting" | "open" | "closed">("connecting");
-  /** 本会话正在输入的人：userId → 最后事件时间（毫秒）。 */
-  const [typingBy, setTypingBy] = useState<Record<string, number>>({});
-  /** 上次发送 typing 的时间（每会话重置）。 */
-  const typingSentAtRef = useRef(0);
   /**
    * 当前会话 id 的同步镜像：WS 回调闭包里的 `convId` 是建立连接时的旧值，
-   * 切会话后旧 socket 晚到的事件仍会匹配旧闭包——typing 用它判「是不是眼前这个会话」。
+   * 切会话后旧 socket 晚到的事件仍会匹配旧闭包——用它判「是不是眼前这个会话」。
    */
   const convIdRef = useRef(convId);
   /** 断线后恢复的短暂提示（3 秒）。 */
@@ -678,8 +539,6 @@ export function ChatPage({
     },
     [],
   );
-  /** 会话信息卡（三横线弹出）开关。 */
-  const [infoOpen, setInfoOpen] = useState(false);
   /** 表情选择器开关（输入区工具行左上角）。 */
   const [emojiOpen, setEmojiOpen] = useState(false);
   /** 语音输入进行中（Web Speech API 可用时；不可用时 toggleVoice 给可见提示）。 */
@@ -688,31 +547,6 @@ export function ChatPage({
   const [voiceMenu, setVoiceMenu] = useState(false);
   /** MediaRecorder 录音进行中（录音态提示行与中止收尾共用）。 */
   const [recording, setRecording] = useState(false);
-  /** @ 选择器：null=关；via 区分按钮/键入 token（键入选中后锁到 token 消失，防草稿未变时每击键重弹）。 */
-  const [picker, setPicker] = useState<{ via: "button" | "token"; query: string } | null>(null);
-  /** 已选 mention（输入栏下 chip）：与草稿文本解耦，发送时非空才进 payload.mentions。 */
-  const [selectedMentions, setSelectedMentions] = useState<{ agentId: string; name: string }[]>(
-    [],
-  );
-  const [tokenLock, setTokenLock] = useState(false);
-  /** 回复引用目标（Task 3）：非空时输入区上方出引用预览条，发送带顶层 replyTo。 */
-  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
-  /** 转发目标源消息（Task 4）：非空时出会话选择浮层；null=关。 */
-  const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
-  /** 表情回应浮排当前打开的消息 id（Task 6）：null=关；点选 emoji 或 Esc 关闭。 */
-  const [reactFor, setReactFor] = useState<string | null>(null);
-  /**
-   * 群成员挂载快照（带 convId 防跨会话串数据）：
-   * byId = id→{名, 头像}（他人气泡署名与头像，M2 消息体无 senderName/avatar）；
-   * agents = kind=agent 行 → @ 选择器候选（**只认本会话群 members**，评审 F1——跨群 join 视图不作数）；
-   * userIds = kind=user 行 id → E2E chaindist 分发对象（agent 无设备公钥，不参与）。
-   */
-  const [groupMembers, setGroupMembers] = useState<{
-    convId: string;
-    byId: Record<string, { name: string; avatar?: string }>;
-    agents: MentionItem[];
-    userIds: string[];
-  } | null>(null);
   const wsHandleRef = useRef<WsHandle | null>(null);
   /** 语音识别器实例：切会话/卸载时 stop，避免后台继续识别回填草稿。 */
   const recRef = useRef<{ start(): void; stop(): void } | null>(null);
@@ -742,8 +576,6 @@ export function ChatPage({
   /** A5：刚复制过的消息 id（短暂显示「已复制」）。 */
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** A11：@ 选择器的键盘高亮项下标。 */
-  const [pickerIndex, setPickerIndex] = useState(0);
   /** 触发句柄（convId → 集合）：「中断」只 abort 当前会话的流；卸载时全部中止（关页不空烧 token）。 */
   const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
   /** 本机流元数据（streamId → 触发上下文）：onLocalDelta 回填 agentId、重试取原触发文本与本轮附件。 */
@@ -847,34 +679,23 @@ export function ChatPage({
   };
 
   /**
-   * seal 分发对象（硬验收①的对端集合）：direct=对端+自己；group=本群 user 行+自己
-   * （自己设备由 distributeChain 按公钥指纹自跳过，带上是为了多设备自同步）。
+   * seal 分发对象（硬验收①的对端集合）：d.54 起只剩「用户 ↔ 智能体」会话，
+   * 智能体没有设备公钥，分发对象只有用户自己的设备（多设备自同步）。
    */
-  const resolveMembers = async (target: string): Promise<string[]> => {
-    const mine = me ? [me.id] : [];
-    const targetConv = conversations.find((c) => c.id === target);
-    if (targetConv?.type === "direct") return [targetConv.peer.id, ...mine];
-    if (groupMembers?.convId === target) return [...groupMembers.userIds, ...mine];
-    try {
-      const list = await fetchMembers(target);
-      return [...list.filter((m) => m.kind === "user").map((m) => m.id), ...mine];
-    } catch {
-      return []; // 成员快照缺失：正文照封（chaindist 留待下次 seal 重试分发）
-    }
-  };
+  const resolveMembers = async (): Promise<string[]> => (me ? [me.id] : []);
 
   /**
    * E2E 统一封发：无 subtle 一律拦截给提示且不发送（硬验收⑤——绝不降级明文）；
    * sealMessage 内部先分发 chaindist 再封正文，事件自带 enc/cipher/chainKid/n。
    */
-  const sealAndSend = async (plain: PlainEnvelope, target: string = convId): Promise<boolean> => {
+  const sealAndSend = async (plain: PlainEnvelope): Promise<boolean> => {
     if (!hasSubtle()) {
       setSendNotice(NO_E2E_NOTICE);
       return false;
     }
     try {
-      const members = await resolveMembers(target);
-      const ev = await sealMessage({ id: target, members }, plain, e2eDeps());
+      const members = await resolveMembers();
+      const ev = await sealMessage({ id: convId, members }, plain, e2eDeps());
       if (ev.type === "send_message" && ev.cipher && ev.chainKid !== undefined && ev.n !== undefined) {
         // 出站箱登记（echo 自解用）：Map 插入序裁最旧
         const ob = outboxRef.current;
@@ -892,100 +713,10 @@ export function ChatPage({
     }
   };
 
-  // conversations 为联合类型（M2）：仅 direct 有 peer；群显群名+人数
+  // d.54：会话只剩「用户 ↔ 智能体」一种，标题恒为智能体名。
   const conv = conversations.find((c) => c.id === convId);
-  const peer = conv?.type === "direct" ? conv.peer : undefined;
-  const memberInfoById = groupMembers?.convId === convId ? groupMembers.byId : undefined;
-  /** 本会话群的 @ 候选：只认本群 members 的 agent 行（评审 F1；快照未落定/失败则空）。 */
-  const mentionCandidates = groupMembers?.convId === convId ? groupMembers.agents : [];
-  // 仅 direct 有「已读」：取对方（peer）在本会话的读点；ISO 时间戳同构（…Z），字符串比较即时间序
-  const peerReadAt =
-    conv?.type === "direct"
-      ? reads[convId]?.find((r) => r.userId === conv.peer.id)?.at
-      : undefined;
-  const headerTitle = conv
-    ? conv.type === "direct"
-      ? conv.peer.displayName
-      : conv.type === "agent"
-        ? conv.agent.name
-        : `${conv.name}（${conv.memberCount} 人）`
-    : "会话";
-  const isGroup = conv?.type === "group";
-  /**
-   * 正在输入提示（d.38）：direct 认对端名、group 认本会话成员快照（缺名字回退「有人」）；
-   * agent 会话不显示（智能体已有流式气泡）。名字去重后按 1 / 2 / 3+ 三种句式出文案。
-   */
-  const typingNames = Array.from(
-    new Set(
-      Object.keys(typingBy)
-        .map((id) => {
-          if (conv?.type === "direct") return conv.peer.id === id ? conv.peer.displayName : null;
-          if (conv?.type === "group") return memberInfoById?.[id]?.name ?? "有人";
-          return null;
-        })
-        .filter((name): name is string => !!name),
-    ),
-  );
-  const typingText =
-    typingNames.length === 0
-      ? ""
-      : typingNames.length === 1
-        ? `${typingNames[0]} 正在输入…`
-        : typingNames.length === 2
-          ? `${typingNames[0]}、${typingNames[1]} 正在输入…`
-          : `${typingNames[0]} 等 ${typingNames.length} 人正在输入…`;
+  const headerTitle = conv ? conv.agent.name : "会话";
 
-  // —— 语音通话（Task 4/5）：useVoiceCall 状态机；信令复用当前 WS 通道 ——
-  // 仅 Electron 桌面端支持通话：以 preload 暴露的桥接 API 是否存在为判定依据。
-  const voiceBridge =
-    typeof window !== "undefined"
-      ? (window as unknown as { __heming_voice_call?: VoiceCallBridge }).__heming_voice_call
-      : undefined;
-  const isElectron = voiceBridge !== undefined;
-  /** C1 群聊发起通话确认弹窗开关（null=关；非空=显示确认）。 */
-  const [groupCallConfirm, setGroupCallConfirm] = useState(false);
-  const groupCallPanelRef = useRef<HTMLDivElement | null>(null);
-  const forwardPanelRef = useRef<HTMLDivElement | null>(null);
-  useModalA11y(groupCallPanelRef, () => setGroupCallConfirm(false), {
-    active: groupCallConfirm,
-    autoFocus: false,
-  });
-  useModalA11y(forwardPanelRef, () => setForwardMsg(null), {
-    active: forwardMsg !== null,
-    autoFocus: false,
-  });
-  const voiceCall = useVoiceCall({
-    send: (e) => wsHandleRef.current?.send(e),
-    myUserId: me?.id ?? "",
-    isDesktop: isElectron,
-  });
-
-  /** 通话对端名映射（1:1 用 conv.peer.displayName）；ringing 横幅与面板共用。 */
-  const voicePeerNames = useMemo(() => {
-    const map = new Map<string, string>();
-    if (conv?.type === "direct" && conv.peer) {
-      map.set(conv.peer.id, conv.peer.displayName);
-    }
-    for (const [id, info] of Object.entries(groupMembers?.byId ?? {})) {
-      map.set(id, info.name);
-    }
-    return map;
-  }, [conv, groupMembers]);
-
-  /**
-   * C1 群聊 Mesh 通话：从群成员快照取「其他人类成员」作为通话 peer。
-   * 只认本群（groupMembers.convId === convId）；agent 无设备公钥不参与通话。
-   */
-  const groupCallPeerIds = useMemo(() => {
-    if (!isGroup || groupMembers?.convId !== convId) return [];
-    return groupMembers.userIds.filter((id) => id !== me?.id);
-  }, [isGroup, groupMembers, convId, me?.id]);
-  /** C1 确认弹窗是否可发起：群聊 + idle + 桌面端 + 成员已加载。 */
-  const canInitiateGroupCall =
-    isGroup && voiceCall.state.status === "idle" && isElectron && groupMembers?.convId === convId;
-
-  // —— 语音通话桌面通知接线（Task 5 fix）：仅桌面端生效，网页端（桥接缺失）静默跳过 ——
-  // 通话状态存 ref：onMinimize 回调挂载期订阅一次，需读取最新状态避免闭包过期。
   /** 本机流 → 工具调用轨迹（只用于 UI 展示，不进消息、不上行）。 */
   const toolTraceRef = useRef<Record<string, ToolTrace[]>>({});
   /** 本机流 → 候选链留痕（d.48 路由组）：同样只用于 UI 展示，不进消息、不上行。 */
@@ -1026,56 +757,13 @@ export function ChatPage({
   const resetToolTrace = (streamId: string) => {
     toolTraceRef.current[streamId] = [];
   };
-  const voiceStatusRef = useRef(voiceCall.state.status);
-  useEffect(() => {
-    voiceStatusRef.current = voiceCall.state.status;
-  }, [voiceCall.state.status]);
-
-  // 窗口最小化 → 若仍在通话中则系统通知「通话中」（任务栏不可见时提示用户）。
-  // onMinimize 返回取消订阅函数：卸载/桥接变化时退订，防监听器累积（老版本 preload 不返回时降级）。
-  useEffect(() => {
-    if (!voiceBridge?.onMinimize) return;
-    const off = voiceBridge.onMinimize(() => {
-      if (voiceStatusRef.current === "active") {
-        voiceBridge.notify?.("和鸣", "通话中");
-      }
-    });
-    return typeof off === "function" ? off : undefined;
-  }, [voiceBridge]);
-
-  // 来电（被叫 ringing）→ 系统通知（主进程一并闪烁任务栏）；同一 callId 仅通知一次（ref 去重）。
-  const notifiedCallRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!voiceBridge) return;
-    if (voiceCall.state.status !== "ringing" || voiceCall.state.role !== "callee") return;
-    const callId = voiceCall.state.callId;
-    if (!callId || notifiedCallRef.current === callId) return;
-    notifiedCallRef.current = callId;
-    voiceBridge.notify?.("和鸣", "语音来电");
-  }, [voiceBridge, voiceCall.state.status, voiceCall.state.role, voiceCall.state.callId]);
-
-  /** 消息署名（气泡/引用卡/引用预览共用）：自己「我」；direct 对方名；agent 会话为 agent 名；群内成员映射名（缺失回退 undefined 由调用方处理）。 */
+  /** 消息署名：自己「我」；智能体会话为智能体名。 */
   const displaySenderName = (m: Message) =>
-    m.senderId === me?.id
-      ? "我"
-      : conv?.type === "direct"
-        ? peer?.displayName
-        : conv?.type === "agent"
-          ? conv.agent.name
-          : memberInfoById?.[m.senderId]?.name;
-  /**
-   * 他人气泡左侧头像数据（Task 7）：direct 恒为 peer；agent 会话恒为该 agent 名册项
-   * （无 avatar 走首字回退）；group 仅当该 sender 在成员快照中带 avatar 时给出
-   * （无则不出头像元素，群内无头像不多占位）。
-   */
+    m.senderId === me?.id ? "我" : conv?.agent.name;
+  /** 智能体气泡左侧头像数据（无 avatar 走首字回退）。 */
   const bubbleAvatar = (m: Message): { displayName: string; avatar?: string } | undefined => {
     if (m.senderId === me?.id) return undefined;
-    if (conv?.type === "direct") return peer;
-    if (conv?.type === "agent") {
-      return { displayName: conv.agent.name, avatar: conv.agent.avatar ?? undefined };
-    }
-    const info = memberInfoById?.[m.senderId];
-    return info?.avatar ? { displayName: info.name, avatar: info.avatar } : undefined;
+    return conv ? { displayName: conv.agent.name, avatar: conv.agent.avatar ?? undefined } : undefined;
   };
   /**
    * 导出（本机生成）：只导出本机已解密的明文，解不开的信封直接跳过，
@@ -1093,30 +781,21 @@ export function ChatPage({
       let file: { id?: string; name: string; mime: string; size: number } | undefined;
       if (m.enc === "e2e") {
         const p = plainOf[m.id];
-        if (!p) {
-          // 解不开的信封：撤回消息仍保留「已撤回」记录，其余直接跳过
-          if (!m.recalledAt) continue;
-        } else {
-          if (p.kind !== "text" && p.kind !== "file" && p.kind !== "forward") continue; // reaction/chunk/...
-          text = p.text ?? "";
-          file = p.file;
-        }
+        if (!p) continue; // 解不开的信封：直接跳过，不用占位符冒充内容
+        if (p.kind !== "text" && p.kind !== "file") continue; // chaindist/chunk/error 等控制帧
+        text = p.text ?? "";
+        file = p.file;
       } else {
         text = m.payload.text;
         file = m.payload.file;
       }
-      if (m.recalledAt) {
-        text = "";
-        file = undefined;
-      }
-      if (!text && !file && !m.recalledAt) continue;
+      if (!text && !file) continue;
       rows.push({
         id: m.id,
         role: m.senderType === "user" ? "user" : "assistant",
         sender: displaySenderName(m) || "成员",
         at: m.createdAt,
         text,
-        ...(m.recalledAt ? { recalled: true } : {}),
         ...(file
           ? {
               attachment: {
@@ -1194,27 +873,13 @@ export function ChatPage({
     return () => document.removeEventListener("pointerdown", onDown);
   }, [exportOpen]);
 
-  /** 选择器条目：剔除已选（防重复 chip）+ 按 token query 过滤（空串=全量）。 */
-  const pickerItems = mentionCandidates.filter(
-    (a) =>
-      !selectedMentions.some((m) => m.agentId === a.id) &&
-      a.name.toLowerCase().includes((picker?.query ?? "").toLowerCase()),
-  );
-
   /**
-   * 本次要触发的智能体。
-   *
-   * 群聊 = 用户手动 @ 选中的（selectedMentions）；智能体一对一 = 固定 @ 对方那个 agent，
-   * 不需要（也不能）再手动选——一对一里「跟谁说话」已由会话本身确定，
-   * 让用户重复 @ 一遍是多余操作。已选中的会合并去重，避免两边同时指定时重复触发。
+   * 本次要触发的智能体：一对一里「跟谁说话」已由会话本身确定，固定为会话的 agent。
    */
-  const effectiveMentions = useMemo(() => {
-    if (conv?.type !== "agent") return selectedMentions;
-    const auto = { agentId: conv.agent.id, name: conv.agent.name };
-    return selectedMentions.some((m) => m.agentId === auto.agentId)
-      ? selectedMentions
-      : [...selectedMentions, auto];
-  }, [conv, selectedMentions]);
+  const effectiveMentions = useMemo(
+    () => (conv ? [{ agentId: conv.agent.id, name: conv.agent.name }] : []),
+    [conv],
+  );
 
   /**
    * 能力降级的当场提示（工具）：模型不支持函数调用时编排层会静默丢掉 tools，
@@ -1280,11 +945,7 @@ export function ChatPage({
     : undefined;
   const pendingConvLabel = pendingElsewhere
     ? pendingConv
-      ? pendingConv.type === "direct"
-        ? pendingConv.peer.displayName
-        : pendingConv.type === "agent"
-          ? pendingConv.agent.name
-          : pendingConv.name
+      ? pendingConv.agent.name
       : pendingHitl!.conversationId
     : undefined;
 
@@ -1366,63 +1027,25 @@ export function ChatPage({
     return () => clearTimeout(timer);
   }, [pendingHitl?.requestId, pendingHitl?.kind, resolveToolApproval, hitlTimeoutMs]);
 
-  /** 流气泡署名：本会话 members 映射名优先，其次名册，兜底「智能体」。 */
+  /** 流气泡署名：名册优先，兜底「智能体」。 */
   const nameOf = (agentId: string) =>
-    memberInfoById?.[agentId]?.name ?? agentsRoster.find((a) => a.id === agentId)?.name ?? "智能体";
+    (conv && conv.agent.id === agentId ? conv.agent.name : undefined) ??
+    agentsRoster.find((a) => a.id === agentId)?.name ??
+    "智能体";
 
   /** 本会话的打字机项（含他机流）：渲染在消息列表尾部。 */
   const streamEntries = Object.entries(streaming).filter(([, s]) => s.conversationId === convId);
   /** 「生成中」提示行只报本机流（他机流错误行短暂停留，不占中断入口）。 */
   const activeLocal = streamEntries.filter(([id, s]) => streamOwner[id] && s.status === "streaming");
 
-  /** 本会话已解密明文（占位判定与 reaction kind 判定的数据源；未解密消息无记录）。 */
+  /** 本会话已解密明文（占位判定；未解密消息无记录）。 */
   const plainOf = plainById[convId] ?? NO_PLAIN;
   /**
-   * 表情回应事件消息（kind="reaction" 的 e2e 消息）不画气泡——渲染前过滤，
-   * 由 chipsFor 聚合进目标消息的 chips（设计 §5.4）。未解密的事件暂以占位显示。
+   * 可渲染消息 = 消息列表本身。保留一层 useMemo 是为了让引用稳定：
+   * 窗口化与搜索跳转的 effect 都拿它当依赖，每次渲染都新建数组会让那些
+   * effect 反复触发（尤其是 scrollIntoView）。
    */
-  // 表情回应（reaction）是「事件」不是「消息」，不进消息流。
-  // 用 useMemo 是为了让引用稳定：窗口化与搜索跳转的 effect 都拿它当依赖，
-  // 每次渲染都新建数组会让那些 effect 反复触发（尤其是 scrollIntoView）。
-  const visibleMessages = useMemo(
-    () => messages.filter((m) => !(m.enc === "e2e" && plainOf[m.id]?.kind === "reaction")),
-    [messages, plainOf],
-  );
-  /**
-   * 本次停留的未读快照：切进会话时取一次服务端 unreadCount / lastReadAt，之后只用于分隔线。
-   *
-   * 不能实时读 conversations.unreadCount：打开即发 mark_read，很快就会被清零。
-   * 分隔线按「最后已读时间」定位（服务端 unreadCount 把链分发/表情事件这类**不渲染**的
-   * 控制行也算进去，按条数往回数会让分隔线提前，甚至在小会话里误报「上方还有未读」）。
-   */
-  const [unreadMarker, setUnreadMarker] = useState<{
-    convId: string;
-    /** 服务端给的最后已读时间；null = 从未已读。 */
-    lastReadAt: string | null;
-    /** 旧服务端不返回该字段时为 false——此时不知道边界，不画分隔线（宁可没有，也不说谎）。 */
-    boundaryKnown: boolean;
-  } | null>(null);
-  const unreadCapturedRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    // 切会话先清旧快照；真正的捕获等 conversations 里有这条会话再做（首帧可能还没加载）。
-    unreadCapturedRef.current = null;
-    setUnreadMarker(null);
-  }, [convId]);
-
-  useEffect(() => {
-    if (unreadCapturedRef.current === convId) return;
-    const target = conversations.find((c) => c.id === convId);
-    if (!target) return; // 会话数据还没到，等下一次 conversations 变化
-    unreadCapturedRef.current = convId;
-    if (target.unreadCount > 0) {
-      setUnreadMarker({
-        convId,
-        lastReadAt: target.lastReadAt ?? null,
-        boundaryKnown: Object.prototype.hasOwnProperty.call(target, "lastReadAt"),
-      });
-    }
-  }, [convId, conversations]);
+  const visibleMessages = useMemo(() => messages, [messages]);
   /**
    * 消息列表窗口化（d.33 · P2-2）：只渲染最近 `windowCount` 条。
    *
@@ -1438,72 +1061,6 @@ export function ChatPage({
     () => visibleMessages.slice(-windowCount),
     [visibleMessages, windowCount],
   );
-  /** 本次停留的未读锚点：解析一次后冻结（新消息不能让分隔线漂移/二次抢滚动）。 */
-  const [unreadAnchor, setUnreadAnchor] = useState<{ convId: string; id: string | null } | null>(null);
-  const anchorResolvedRef = useRef<string | null>(null);
-  /** 分隔线只在第一次出现时定位一次；之后用户自己滚，不再抢滚动条。 */
-  const dividerScrolledRef = useRef<string | null>(null);
-
-  // 切会话：清旧锚点与定位去重（不跨停留保留，回到会话时重新定位）。
-  useEffect(() => {
-    anchorResolvedRef.current = null;
-    dividerScrolledRef.current = null;
-    setUnreadAnchor(null);
-  }, [convId]);
-
-  useEffect(() => {
-    if (anchorResolvedRef.current === convId) return;
-    if (!unreadMarker || unreadMarker.convId !== convId) return;
-    if (messagesLoading || messagesError) return; // 等历史成功落定再解析锚点（失败重试成功后可再解析）
-    anchorResolvedRef.current = convId;
-
-    if (!unreadMarker.boundaryKnown) {
-      // 旧服务端没有 lastReadAt：不猜边界，直接按「无未读」回到底部
-      setUnreadAnchor({ convId, id: null });
-      atBottomRef.current = true;
-      bottomRef.current?.scrollIntoView({ behavior: "auto" });
-      return;
-    }
-
-    const boundary = unreadMarker.lastReadAt;
-    const first = visibleMessages.find(
-      (m) => m.senderId !== me?.id && (boundary === null || m.createdAt > boundary),
-    );
-    setUnreadAnchor({ convId, id: first?.id ?? null });
-    if (!first) {
-      // 未读只由不渲染的控制行（链分发 / 表情事件）构成：没有可定位的气泡，回到底部
-      atBottomRef.current = true;
-      bottomRef.current?.scrollIntoView({ behavior: "auto" });
-    }
-  }, [convId, unreadMarker, messagesLoading, messagesError, visibleMessages, me?.id]);
-
-  const unreadDivider =
-    unreadAnchor && unreadAnchor.convId === convId ? unreadAnchor : { convId, id: null };
-
-  // 锚点可能落在初始渲染窗口之外（未读区间 > DEFAULT_WINDOW 时）：把窗口扩到包含它，
-  // 否则分隔线/定位整条链路都匹配不到 DOM。扩窗不做滚动补偿——随后由分隔线定位接管。
-  useEffect(() => {
-    if (!unreadAnchor || unreadAnchor.convId !== convId || !unreadAnchor.id) return;
-    if (windowedMessages.some((m) => m.id === unreadAnchor.id)) return;
-    const idx = visibleMessages.findIndex((m) => m.id === unreadAnchor.id);
-    if (idx < 0) return;
-    const needed = visibleMessages.length - idx;
-    if (needed > windowCount) {
-      prevScrollHeightRef.current = null;
-      setWindowCount(needed);
-    }
-  }, [unreadAnchor, convId, visibleMessages, windowedMessages, windowCount]);
-
-  useLayoutEffect(() => {
-    if (!unreadAnchor || unreadAnchor.convId !== convId || !unreadAnchor.id) return;
-    const key = `${convId}:${unreadAnchor.id}`;
-    if (dividerScrolledRef.current === key) return;
-    atBottomRef.current = false;
-    const el = document.getElementById("unread-divider");
-    if (!el) return; // 窗口还没包含锚点，等扩窗后的下一次提交再定位（不记「已定位」）
-    dividerScrolledRef.current = key;
-    el.scrollIntoView({ block: "start", behavior: "auto" });
-  }, [convId, unreadAnchor, windowCount]);
   /** 向更早的方向追加一窗（滚到顶或点「加载更早的消息」）。 */
   const loadEarlierMessages = useCallback(() => {
     const el = scrollRef.current;
@@ -1513,17 +1070,12 @@ export function ChatPage({
   }, [windowCount, visibleMessages.length]);
   // 切会话：窗口回到初始值（回到该会话时从最近的一窗开始看）。
   // A3：阅读位置复位到最新消息——切进来先看到的是「现在」，不是上次翻到一半的位置。
-  // 例外：切进来的会话有未读 → 先不贴底，交给未读分隔线的定位 effect（否则 A3 会先平滑滚底）。
   useEffect(() => {
     setWindowCount(DEFAULT_WINDOW);
     prevScrollHeightRef.current = null;
-    const unreadAtSwitch =
-      useChatStore.getState().conversations.find((c) => c.id === convId)?.unreadCount ?? 0;
-    atBottomRef.current = unreadAtSwitch === 0; // 有未读时先别贴底，交给分隔线定位
+    atBottomRef.current = true;
     setNewBelow(false);
-    if (unreadAtSwitch === 0) {
-      bottomRef.current?.scrollIntoView({ behavior: "auto" });
-    }
+    bottomRef.current?.scrollIntoView({ behavior: "auto" });
   }, [convId]);
   // 追加后补偿滚动位置：上方长出来的高度要加回 scrollTop，否则正在看的内容会跳走。
   // 用 useLayoutEffect 是为了在绘制前完成补偿，避免看到一帧跳动。
@@ -1547,11 +1099,11 @@ export function ChatPage({
    * 搜索需要展示/跳转原文，而密文既搜不到也不该被当成空消息。
    */
   const searchableMessages = useMemo(() => {
-    const out: { id: string; text: string; recalled?: boolean }[] = [];
+    const out: { id: string; text: string }[] = [];
     for (const m of visibleMessages) {
       const payload = m.enc === "e2e" ? plainOf[m.id] : m.payload;
       const text = payload && typeof payload.text === "string" ? payload.text : "";
-      if (text) out.push({ id: m.id, text, recalled: m.recalledAt != null });
+      if (text) out.push({ id: m.id, text });
     }
     return out;
   }, [visibleMessages, plainOf]);
@@ -1590,10 +1142,6 @@ export function ChatPage({
     const next = stepHit(searchHits, activeSearchId, delta);
     if (next) setSearchHitId(next.id);
   };
-  // 回应 chips 聚合（fix I4）：useMemo 按 messages/plainOf 引用单次聚合——
-  // 原实现每渲染对每条消息全量扫 reaction 事件（O(n²)）
-  const chipsByMsgId = useMemo(() => aggregateChips(messages, plainOf), [messages, plainOf]);
-
   /**
    * 启动一次 mention 触发（发送成功 / 错误行重试共用）：
    * deps 全部从 stores + WS 句柄组装；fetchHistory 映射 role 并剔掉刚发出的这条
@@ -1616,24 +1164,22 @@ export function ChatPage({
       getProfile: resolveProfile,
       getPrompt: (agentId) => useLlmStore.getState().prompts[agentId] ?? "",
       fetchHistory: async (historyProfile) => {
-        // spec §3：提示词只带近 30 条历史；已撤回跳过；E2E 信封经 loadMessages 合并
-        // （缓存优先 → handler 解密 → 占位）——**解不开的不进提示词**（硬验收⑤），
-        // reaction/chaindist 控制消息同样不进。
+        // spec §3：提示词只带近 30 条历史；E2E 信封经 loadMessages 合并
+        // （缓存优先 → handler 解密 → 占位）——**解不开的不进提示词**（硬验收⑤）。
         const msgs = (await useChatStore.getState().loadMessages(convId)).slice(-30);
         const plainOf = useChatStore.getState().plainById[convId] ?? {};
-        // 视觉能力按**本智能体绑定的模型**判定：群里两个智能体可能一个能看图、一个不能。
+        // 视觉能力按**本智能体绑定的模型**判定。
         const vision = resolveCapability(historyProfile).supportsVision;
         const rows: HistoryRow[] = [];
         const images: VisionImageSlot[] = [];
         for (const m of msgs) {
-          if (m.recalledAt != null) continue;
           // 本轮同发的附件不进历史：它由 buildUserTurn 拼在当前 user 轮上，
           // 回声若已入库会在这里出现第二份（同一张图发两遍）。
           if (attachment && m.payload.file?.id === attachment.id) continue;
           if (m.enc === "e2e") {
             const p = plainOf[m.id];
             if (!p) continue; // 占位（无法解密）→ 不外发模型供应商
-            if (p.kind !== "text" && p.kind !== "file" && p.kind !== "forward") continue;
+            if (p.kind !== "text" && p.kind !== "file") continue;
           }
           // 附件文本要拼进 content，否则模型看不到文件内容——
           // 此前 `content: m.payload.text` 把附件完全忽略了，
@@ -1706,7 +1252,7 @@ export function ChatPage({
       // E2E 流式（硬验收④）：chunk 走 chunkAad（convId+streamId+index）信封、
       // finish 全文进信封——由 agentStream 统一串行上行，加密失败跳过/报错不发明文。
       sealChunk: async (streamId, index, delta) => {
-        const members = await resolveMembers(convId);
+        const members = await resolveMembers();
         const ev = await sealMessage(
           { id: convId, members },
           { kind: "chunk", text: delta },
@@ -1717,7 +1263,7 @@ export function ChatPage({
         return { cipher: ev.cipher, chainKid: ev.chainKid, n: ev.n };
       },
       sealFinish: async (full) => {
-        const members = await resolveMembers(convId);
+        const members = await resolveMembers();
         const plain: PlainEnvelope = { kind: "text", text: full };
         const ev = await sealMessage({ id: convId, members }, plain, e2eDeps());
         if (ev.type !== "send_message" || !ev.cipher) return null;
@@ -1731,7 +1277,7 @@ export function ChatPage({
       // fix round 2：登记出站箱——本机触发的错误经 WS 回声没有 recv 链可解，
       // 只能按链索引取回明文；不登记则回声恒降级为通用文案（丢失真实错误原因）。
       sealError: async (streamId, message) => {
-        const members = await resolveMembers(convId);
+        const members = await resolveMembers();
         const plain: PlainEnvelope = { kind: "error", text: message };
         const ev = await sealMessage(
           { id: convId, members },
@@ -2039,35 +1585,23 @@ export function ChatPage({
     startRun([{ agentId: meta.agentId, name: meta.name }], meta.text, taskId, meta.attachment);
   };
 
-  // 切会话清 @ 选择态 + 输入区浮层：chip/picker/锁/表情/语音都是会话级（ChatPage 常驻不重挂），
-  // 防跨会话带出 mentions 或把识别中的收尾状态留给新会话。语音必须真正 stop 旧识别器并清实例——
-  // 只复位 listening 标志的话，旧实例仍在后台识别：onresult 回填新会话草稿、晚到的 onend 误清新指示。
+  // 切会话清输入区浮层：表情/语音都是会话级（ChatPage 常驻不重挂）。
+  // 语音必须真正 stop 旧识别器并清实例——只复位 listening 标志的话，旧实例仍在后台
+  // 识别：onresult 回填新会话草稿、晚到的 onend 误清新指示。
   useEffect(() => {
     recRef.current?.stop();
     recRef.current = null;
-    setSelectedMentions([]);
-    setPicker(null);
-    setTokenLock(false);
     setEmojiOpen(false);
     setVoiceMenu(false);
     // 录音同为会话级：中止旧会话录音（置取消位 → stop，onstop 停轨且跳过发送），录音态即时退出
     setRecording(false);
     voiceRecCancelRef.current?.();
     setListening(false);
-    // 回复引用也是会话级：A 会话的引用目标不得带进 B 会话
-    setReplyTarget(null);
-    // 转发浮层同为会话级：A 会话选中的转发目标不得带进 B 会话
-    setForwardMsg(null);
-    // 表情回应浮排同为会话级：A 会话打开的回应对不得带进 B 会话
-    setReactFor(null);
     // 发送提示也是会话级：A 会话的「上传失败/不支持语音」不得带进 B 会话
     setSendNotice(null);
     // 多选状态同为会话级：A 会话勾的 id 在 B 会话里不存在，留着只会导出空文件
     setSelectMode(false);
     setSelectedIds([]);
-    // 正在输入提示也是会话级：A 会话的提示不得带进 B 会话；发送节流也随会话重新计时
-    setTypingBy({});
-    typingSentAtRef.current = 0;
     convIdRef.current = convId;
   }, [convId]);
 
@@ -2112,7 +1646,7 @@ export function ChatPage({
     if (!list.some((m) => m.enc === "plain" && m.senderId === me.id)) return;
     let alive = true;
     void (async () => {
-      const members = await resolveMembers(convId);
+      const members = await resolveMembers();
       if (!alive) return;
       await useChatStore
         .getState()
@@ -2123,40 +1657,6 @@ export function ChatPage({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [convId, messages.length, me?.id]);
-
-  // 挂载拉本会话已读态（direct 气泡「已读」依赖；失败不阻断会话）
-  useEffect(() => {
-    void loadReads(convId).catch(() => {
-      /* 已读是增强信息：拉取失败静默降级（无「已读」标记） */
-    });
-  }, [convId, loadReads]);
-
-  // 群会话挂载拉一次成员表：id→名（气泡署名）+ agent 行（@ 候选，本会话群口径）；direct 走 peer.displayName
-  useEffect(() => {
-    if (conv?.type !== "group") return;
-    let alive = true;
-    void fetchMembers(convId)
-      .then((list) => {
-        if (!alive) return;
-        setGroupMembers({
-          convId,
-          // Task 7：id→{名, 头像}（avatar 非空才带键）——署名与群内他人气泡头像共用此快照
-          byId: Object.fromEntries(
-            list.map((m) => [m.id, { name: m.name, ...(m.avatar ? { avatar: m.avatar } : {}) }]),
-          ),
-          agents: list
-            .filter((m) => m.kind === "agent")
-            .map((m) => ({ id: m.id, name: m.name, avatar: m.avatar })),
-          userIds: list.filter((m) => m.kind === "user").map((m) => m.id),
-        });
-      })
-      .catch(() => {
-        /* 成员缺失仅影响署名与 @ 候选，不阻断会话 */
-      });
-    return () => {
-      alive = false;
-    };
-  }, [convId, conv?.type]);
 
   // 有 ChatPage 实例时 App 壳不再开后台连接（任务区嵌入式 ChatPage 同理）：
   // 页面名判断不了「任务区里也挂着一个 ChatPage」，必须按实例注册/注销。
@@ -2178,59 +1678,8 @@ export function ChatPage({
       onEvent: (e) => {
         // 流式三事件收口（chunk 累积/message_new{streamId} 移除/agent_error 分态）在 store 统一处理
         useChatStore.getState().onWsEvent(e);
-        // 语音通话信令（voice_call_*）转交 useVoiceCall 状态机
-        voiceCall.handleServerEvent(e);
         if (e.type === "message_new" && e.message.conversationId === convId) {
           appendMessage(e.message);
-          // 对方的话已到，其「正在输入」立即收口：只清该发送者，不等 3 秒 TTL，也不动其他输入者。
-          // 用 convIdRef 而非闭包 convId：切会话后旧 socket 晚到的消息不得清新会话的输入态。
-          if (e.message.conversationId === convIdRef.current) {
-            const senderId = e.message.senderId;
-            setTypingBy((prev) => {
-              if (!Object.prototype.hasOwnProperty.call(prev, senderId)) return prev; // 没变不触发重渲染
-              const next = { ...prev };
-              delete next[senderId];
-              return next;
-            });
-          }
-          // 会话内正在看的新消息即时标记已读：否则退出后 loadWorkspace 会把已读内容算作未读
-          if (e.message.senderId !== useAuthStore.getState().user?.id) {
-            wsHandleRef.current?.send({ type: "mark_read", conversationId: convId });
-          }
-        } else if (e.type === "message_new") {
-          // 他会话的新消息：未读 +1（A12：自己发的不算）+ 进通知中心
-          if (e.message.senderId !== useAuthStore.getState().user?.id) {
-            if (
-              useChatStore
-                .getState()
-                .bumpUnread(e.message.conversationId, e.message.createdAt, e.message.id)
-            ) {
-              notifyIncomingMessage(e.message);
-            }
-          }
-        } else if (e.type === "read_update") {
-          // A12：自己在别的端/页面读过 → 该会话未读清零（不只是当前会话）。
-          if (e.userId === useAuthStore.getState().user?.id) {
-            useChatStore.getState().clearUnread(e.conversationId, e.at);
-          }
-          if (e.conversationId === convId) {
-            // 事件只带 userId/at：整表重拉（读数很小），direct 气泡「已读」随动；他会话忽略
-            void loadReads(convId).catch(() => {
-              /* 同挂载期降级：拉取失败保留旧读态 */
-            });
-          }
-        } else if (e.type === "typing") {
-          // 只认眼前会话他人的输入态：
-          // - 用 convIdRef 而非闭包 convId：切会话后旧 socket 晚到的事件不得污染新会话；
-          // - 广播含发送者自己（多设备），自己一律忽略；
-          // - agent 会话不展示「正在输入」（已有流式气泡）。
-          if (
-            e.conversationId === convIdRef.current &&
-            e.userId !== useAuthStore.getState().user?.id &&
-            conv?.type !== "agent"
-          ) {
-            setTypingBy((prev) => ({ ...prev, [e.userId]: Date.now() }));
-          }
         } else if (e.type === "error") {
           console.warn(`[${e.code}] ${e.message}`);
         }
@@ -2248,11 +1697,6 @@ export function ChatPage({
         }
         // 断线重连成功：补拉断档消息（合并去重语义，幂等；信封同走解密合并）
         void useChatStore.getState().loadMessages(convId, () => alive);
-        // Task 7：重连成功补齐「断线期间的已读」——仍有未读则补发 mark_read
-        // （与挂载逻辑同款读法；handle 取本 effect 闭包里的，非 ref，防重连期间句柄已换）
-        const unread =
-          useChatStore.getState().conversations.find((c) => c.id === convId)?.unreadCount ?? 0;
-        if (unread > 0) handle?.send({ type: "mark_read", conversationId: convId });
       },
       onClose: () => {
         // 本端主动断开（切会话/卸载）不是「断线」：effect 已重连，别闪一条断线横幅。
@@ -2272,14 +1716,6 @@ export function ChatPage({
       onSendError: (reason) => setSendNotice(`发送失败：${reason}`, "error"),
     });
     wsHandleRef.current = handle;
-    // 进会话即报已读（有未读才发；send 在未连通时入队，连接后随首帧冲刷）。
-    // 经 getState 读，避免把 conversations 放进依赖导致 WS 随列表刷新重连
-    const unread = useChatStore
-      .getState()
-      .conversations.find((c) => c.id === convId)?.unreadCount ?? 0;
-    if (unread > 0) {
-      handle?.send({ type: "mark_read", conversationId: convId });
-    }
     return () => {
       alive = false;
       // F1 回归：进行中流被卸载中止时，catch 要经此连接补发 finish(partial)+agent_error
@@ -2297,29 +1733,7 @@ export function ChatPage({
         wsHandleRef.current = null;
       }
     };
-  }, [convId, appendMessage, loadReads]);
-
-  /**
-   * typing 过期清理（d.38）：每秒按 `Date.now()` 判一次 TTL——后台标签页定时器被节流时
-   * 也不会把「停手很久」误判成还在输入；无变化返回原对象，不触发重渲染。
-   */
-  // 刻意常驻：过期靠时间戳判定，定时器只负责刷新 UI。
-  // 测试侧请用有界推进（advanceTimersByTimeAsync），不要用 runAllTimers（永不收敛）。
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const now = Date.now();
-      setTypingBy((prev) => {
-        const next: Record<string, number> = {};
-        let changed = false;
-        for (const [id, at] of Object.entries(prev)) {
-          if (now - at < TYPING_TTL_MS) next[id] = at;
-          else changed = true;
-        }
-        return changed ? next : prev; // 没变化不触发重渲染
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  }, [convId, appendMessage]);
 
   /**
    * A3 滚动贴底跟随：贴底时才跟着新消息与流式文本走；用户上滑后不再强行拽底，
@@ -2440,50 +1854,10 @@ export function ChatPage({
 
   const onDraftChange = (value: string) => {
     setDraft(value);
-    // 智能体不参与「正在输入」（规格 §1C）：它与人的对话由流式气泡表达。
-    if (value.trim() !== "" && conv?.type !== "agent") {
-      const now = Date.now();
-      // 先拿到句柄再消费 2 秒窗口：connected 但句柄暂空时不该白烧一次节流
-      const handle = wsHandleRef.current;
-      if (connected && handle && now - typingSentAtRef.current >= TYPING_SEND_INTERVAL_MS) {
-        typingSentAtRef.current = now;
-        handle.send({ type: "typing", conversationId: convId });
-      }
-    }
     scheduleDraftSave(convId, value);
-    if (!isGroup) return;
-    const token = /@([^\s@]*)$/.exec(value);
-    if (token) {
-      if (!tokenLock) setPicker({ via: "token", query: token[1] });
-    } else {
-      if (tokenLock) setTokenLock(false);
-      // token 触发的选择器随 token 消失关闭；按钮开的保留（靠 Esc/发送关）
-      setPicker((p) => (p?.via === "token" ? null : p));
-    }
   };
 
-  const pickMention = (item: MentionItem) => {
-    setSelectedMentions((prev) =>
-      prev.some((m) => m.agentId === item.id)
-        ? prev
-        : [...prev, { agentId: item.id, name: item.name }],
-    );
-    // 键入路径：草稿保持原样（@token 还在），锁住到 token 消失，否则继续输入会每击键重弹
-    if (picker?.via === "token") setTokenLock(true);
-    setPicker(null);
-  };
-
-  /** Esc 关信息卡（文档级：焦点不在输入框也能关；input 内 Esc 由 onInputKeyDown 管 picker）。 */
-  useEffect(() => {
-    if (!infoOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setInfoOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [infoOpen]);
-
-  /** Esc 关语音双选项浮层（文档级，与信息卡/转发浮层同口径）。 */
+  /** Esc 关语音双选项浮层（文档级）。 */
   useEffect(() => {
     if (!voiceMenu) return;
     const onKey = (e: KeyboardEvent) => {
@@ -2492,21 +1866,6 @@ export function ChatPage({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [voiceMenu]);
-
-  /** Esc 关表情回应浮排（文档级，与信息卡/转发/语音浮层同口径）。 */
-  useEffect(() => {
-    if (reactFor === null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setReactFor(null);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [reactFor]);
-
-  /** A11：选择器查询变化/已选项变化时，键盘高亮回到第一项。 */
-  useEffect(() => {
-    setPickerIndex(0);
-  }, [picker?.query, picker?.via, selectedMentions.length]);
 
   /**
    * A10：无浮层、无草稿时 Esc 停止生成。
@@ -2518,17 +1877,7 @@ export function ChatPage({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (draft.trim() !== "") return;
-      if (
-        picker ||
-        emojiOpen ||
-        voiceMenu ||
-        reactFor !== null ||
-        forwardMsg ||
-        infoOpen ||
-        exportOpen ||
-        groupCallConfirm ||
-        searchOpen
-      ) {
+      if (emojiOpen || voiceMenu || exportOpen || searchOpen) {
         return;
       }
       abortRuns();
@@ -2537,48 +1886,9 @@ export function ChatPage({
     return () => document.removeEventListener("keydown", onKey);
     // abortRuns 每帧重建；本 effect 只关心「是否该接 Esc」的门槛状态
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    activeLocal.length,
-    draft,
-    picker,
-    emojiOpen,
-    voiceMenu,
-    reactFor,
-    forwardMsg,
-    infoOpen,
-    exportOpen,
-    groupCallConfirm,
-    searchOpen,
-  ]);
+  }, [activeLocal.length, draft, emojiOpen, voiceMenu, exportOpen, searchOpen]);
 
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (picker) {
-      // A11：↑/↓ 移动、Enter 选中、Esc 关闭（焦点一直在输入框，按键在这里分派）
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setPickerIndex((i) => Math.max(0, Math.min(pickerItems.length - 1, i + 1)));
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setPickerIndex((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-        const item = pickerItems[Math.min(pickerIndex, pickerItems.length - 1)];
-        if (item) {
-          e.preventDefault();
-          pickMention(item);
-          return;
-        }
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setPicker(null);
-        setTokenLock(false); // Esc 关闭同步解锁：后续键入可重开（否则旧锁卡住 token 路径）
-        return;
-      }
-    }
     // 多行输入框：Enter 发送、Shift+Enter 换行（输入法组词中不拦，否则中文选词会被当成发送）
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
@@ -2603,7 +1913,6 @@ export function ChatPage({
   const submitMessage = async (
     rawText: string,
     mentions: { agentId: string; name: string }[],
-    replyTo: Message | null,
     taskId?: string,
     attachment?: TurnAttachment,
   ): Promise<{ ok: true } | { ok: false; error: string }> => {
@@ -2646,46 +1955,40 @@ export function ChatPage({
       const error = "连接未就绪，消息未发送";
       return { ok: false, error };
     }
-    // 正文/mentions/replyTo 全进密文（§3.3），事件 payload 只留 {text:""} 占位
+    // 正文/mentions 全进密文（§3.3），事件 payload 只留 {text:""} 占位
     const plain: PlainEnvelope = {
       kind: attachment ? "file" : "text",
       text,
       ...(attachment ? { file: attachment } : {}),
       ...(mentions.length ? { mentions } : {}),
-      ...(replyTo ? { replyTo: replyTo.id } : {}),
     };
     // 拦截/封失败：草稿与浮层状态原样保留
     if (!(await sealAndSend(plain))) return { ok: false, error: "消息发送失败" };
-    // 发送成功即触发各 mention 的本机流式生成（失败/中断由 WS 三事件回声收口）
+    // 发送成功即触发智能体的本机流式生成（失败/中断由 WS 三事件回声收口）
     if (mentions.length) startRun(mentions, text, taskId, attachment);
     return { ok: true };
   };
 
-  /** 发送成功后清空输入区（草稿 / @ chip / 回复引用 / 旧提示）。 */
+  /** 发送成功后清空输入区（草稿 / 旧提示）。 */
   const resetComposer = () => {
     setDraft("");
     cancelDraftSave();
     clearDraft(convId);
-    setSelectedMentions([]);
-    setPicker(null);
-    setTokenLock(false);
     setSendNotice(null);
-    setReplyTarget(null);
   };
 
   /**
-   * A9：纯文本发送失败后的「重试」——重放失败时的那份内容（文本/mentions/引用），
+   * A9：纯文本发送失败后的「重试」——重放失败时的那份内容（文本/mentions），
    * 不读当前草稿（用户可能已经改过字）；附件场景不提供重试（避免重放一次上传）。
    * 失败仍在 → 继续挂重试入口，用户可再点。
    */
   const retryTextSend = async (
     text: string,
     mentions: { agentId: string; name: string }[],
-    replyTo: Message | null,
   ) => {
-    const result = await submitMessage(text, mentions, replyTo);
+    const result = await submitMessage(text, mentions);
     if (!result.ok) {
-      setSendNotice(result.error, "error", () => void retryTextSend(text, mentions, replyTo));
+      setSendNotice(result.error, "error", () => void retryTextSend(text, mentions));
       return;
     }
     // 失败后用户可能已经改了草稿：只在「还是原来那份」时清空输入区，
@@ -2703,13 +2006,12 @@ export function ChatPage({
     if (!draft.trim()) return;
     const text = draft;
     const mentions = effectiveMentions;
-    const replyTo = replyTarget;
-    const result = await submitMessage(text, mentions, replyTo);
+    const result = await submitMessage(text, mentions);
     if (!result.ok) {
       // 纯文本发送失败：红色 role=alert + 「重试」（附件路径见 sendFile，不给重试）。
       // NO_E2E 例外：常驻横幅本身就是 role=alert，不再重复一条同样的红字。
       if (result.error !== NO_E2E_NOTICE) {
-        setSendNotice(result.error, "error", () => void retryTextSend(text, mentions, replyTo));
+        setSendNotice(result.error, "error", () => void retryTextSend(text, mentions));
       }
       return;
     }
@@ -2724,9 +2026,6 @@ export function ChatPage({
     setDraft(taskDraft.text);
     // 投递来的目标也要落盘：否则刷新一下这段文本就没了
     saveDraft(convId, taskDraft.text);
-    setSelectedMentions(taskDraft.mentions);
-    setPicker(null);
-    setTokenLock(false);
     setSendNotice(null);
     setAutoTask(taskDraft);
   }, [taskDraft, convId, consumeTaskDraft]);
@@ -2738,7 +2037,7 @@ export function ChatPage({
     const pending = autoTask;
     setAutoTask(null);
     void (async () => {
-      const result = await submitMessage(pending.text, pending.mentions, null, pending.taskId);
+      const result = await submitMessage(pending.text, pending.mentions, pending.taskId);
       if (!result.ok) {
         useTaskStore.getState().settle(pending.taskId, { status: "failed", error: result.error });
         notifyTaskSettled(pending.taskId, "failed", result.error);
@@ -2748,44 +2047,11 @@ export function ChatPage({
       setDraft("");
       cancelDraftSave();
       clearDraft(convId);
-      setSelectedMentions([]);
-      setPicker(null);
-      setTokenLock(false);
       setSendNotice(null);
     })();
     // submitMessage 每帧重建；本 effect 只该在「投递到达 / 连接就绪」时跑一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoTask, connected]);
-
-  /**
-   * 转发（Task 4）：原 text + 原 file 原样带走，**剥离 mentions**（@ 语境属于源会话），
-   * forward 来源进密文（§3.3）封 e2e 信封发到目标会话（server 只按 isMember 校验）。
-   * 无 subtle 拦截不发送（硬验收⑤：转发路径同样不降级）。转发到非当前会话时借
-   * sendNotice 给提示行（转发到当前会话则清提示）。
-   */
-  const doForward = async (target: Conversation) => {
-    if (!forwardMsg || !wsHandleRef.current) return;
-    if (!hasSubtle()) {
-      setSendNotice(NO_E2E_NOTICE);
-      return;
-    }
-    const src = conversations.find((x) => x.id === convId);
-    const plain: PlainEnvelope = {
-      kind: "forward",
-      text: forwardMsg.payload.text,
-      ...(forwardMsg.payload.file ? { file: forwardMsg.payload.file } : {}),
-      forward: {
-        from:
-          forwardMsg.senderId === me?.id
-            ? "我"
-            : (memberInfoById?.[forwardMsg.senderId]?.name ?? peer?.displayName ?? "未知"),
-        source: src ? convLabel(src).name : "未知会话",
-      },
-    };
-    if (!(await sealAndSend(plain, target.id))) return;
-    setForwardMsg(null);
-    setSendNotice(target.id === convId ? null : `已转发到 ${convLabel(target).name}`);
-  };
 
   /** 附件上限：服务端 json 体上限 8MB，base64 膨胀约 4/3 → 6MB 留余量（超限给可见提示）。 */
   const MAX_UPLOAD = 6 * 1024 * 1024;
@@ -2881,7 +2147,6 @@ export function ChatPage({
         const result = await submitMessage(
           draftText,
           effectiveMentions,
-          replyTarget,
           undefined,
           file,
         );
@@ -3142,13 +2407,7 @@ export function ChatPage({
         )}
         {conv && (
           <Avatar
-            user={
-              conv.type === "direct"
-                ? conv.peer
-                : conv.type === "agent"
-                  ? { displayName: conv.agent.name, avatar: conv.agent.avatar ?? undefined }
-                  : { displayName: conv.name }
-            }
+            user={{ displayName: conv.agent.name, avatar: conv.agent.avatar ?? undefined }}
             size={28}
           />
         )}
@@ -3170,62 +2429,6 @@ export function ChatPage({
           <span role="status" className="text-[11px] text-[#12b76a]">
             已恢复连接
           </span>
-        )}
-        {conv?.type === "direct" && voiceCall.state.status === "idle" && (
-          <>
-            {/* 语音 / 视频通话都开独立窗口：面板不再盖住消息区，窗口可拖动/置顶。
-                被浏览器拦截弹窗（或 Electron 未放行）时回退到页内面板，不丢功能。 */}
-            <button
-              type="button"
-              aria-label="发起语音通话"
-              className="rounded-lg p-1.5 hover:bg-[#f3f3f3]"
-              onClick={() => {
-                if (conv?.type !== "direct") return;
-                const opened = openCallWindow({
-                  conversationId: conv.id,
-                  peerIds: [conv.peer.id],
-                  mode: "voice",
-                  title: conv.peer.displayName,
-                });
-                if (!opened) {
-                  setSendNotice("通话窗口被拦截，已在当前窗口发起语音通话");
-                  void voiceCall.call(conv.id, [conv.peer.id]);
-                }
-              }}
-            >
-              <PhoneIcon width={17} height={17} />
-            </button>
-            <button
-              type="button"
-              aria-label="发起视频通话"
-              className="rounded-lg p-1.5 hover:bg-[#f3f3f3]"
-              onClick={() => {
-                if (conv?.type !== "direct") return;
-                const opened = openCallWindow({
-                  conversationId: conv.id,
-                  peerIds: [conv.peer.id],
-                  mode: "video",
-                  title: conv.peer.displayName,
-                });
-                if (!opened) {
-                  setSendNotice("通话窗口被拦截，已在当前窗口发起视频通话");
-                  void voiceCall.call(conv.id, [conv.peer.id]);
-                }
-              }}
-            >
-              <VideoIcon width={17} height={17} />
-            </button>
-          </>
-        )}
-        {canInitiateGroupCall && (
-          <button
-            type="button"
-            aria-label="发起群通话"
-            className="rounded-lg p-1.5 hover:bg-[#f3f3f3]"
-            onClick={() => setGroupCallConfirm(true)}
-          >
-            <PhoneIcon width={17} height={17} />
-          </button>
         )}
         {/* 会话内搜索：在已解密明文里找关键词，跳转并高亮命中的消息。 */}
         <button
@@ -3296,64 +2499,6 @@ export function ChatPage({
             </div>
           )}
         </div>
-        {groupCallConfirm && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
-            onClick={() => setGroupCallConfirm(false)}
-          >
-            <div
-              ref={groupCallPanelRef}
-              role="dialog"
-              aria-modal="true"
-              aria-label="发起群通话确认"
-              className="w-[280px] rounded-xl border border-[#ececec] bg-white p-3 shadow-card"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="mb-3 text-[13px] font-bold">邀请 {groupCallPeerIds.length} 人加入通话？</div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
-                  onClick={() => setGroupCallConfirm(false)}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
-                  onClick={() => {
-                    setGroupCallConfirm(false);
-                    const opened = openCallWindow({
-                      conversationId: convId,
-                      peerIds: groupCallPeerIds,
-                      mode: "voice",
-                      title: conv?.type === "group"
-                        ? conv.name
-                        : conv?.type === "agent"
-                          ? conv.agent.name
-                          : conv?.peer.displayName,
-                    });
-                    if (!opened) {
-                      setSendNotice("通话窗口被拦截，已在当前窗口发起群通话");
-                      void voiceCall.call(convId, groupCallPeerIds);
-                    }
-                  }}
-                >
-                  确认
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        <button
-          type="button"
-          aria-label="会话信息"
-          className={`rounded-lg p-1.5 hover:bg-[#f3f3f3]${infoOpen ? " bg-[#f3f3f3]" : ""}${conv?.type === "direct" && voiceCall.state.status === "idle" && !canInitiateGroupCall ? "" : " ml-auto"}`}
-          onClick={() => setInfoOpen((v) => !v)}
-        >
-          <MenuIcon width={17} height={17} />
-        </button>
-        {infoOpen && conv && <ChatInfoCard conv={conv} onClose={() => setInfoOpen(false)} />}
       </header>
       {connState === "closed" && (
         <div
@@ -3467,17 +2612,6 @@ export function ChatPage({
           </div>
         </div>
       )}
-      {/* 来电横幅（ringing 状态时显示）。
-          接听/拒绝按钮不在此渲染：VoiceCallPanel 根节点为 fixed inset-0 z-50，
-          横幅（普通静态流节点、无 z-index）被面板完全遮挡，按钮不可见不可点。
-          按钮已移入面板内的 callee ringing 分支，此横幅仅保留可见的来电提示文案。 */}
-      {voiceCall.state.status === "ringing" && (
-        <div className="flex items-center justify-between gap-3 border-b border-line-soft bg-[#1a1a2e] px-5 py-2.5 text-white">
-          <span className="text-[13px]">
-            {voiceCall.state.role === "caller" ? "正在呼叫…" : "来电"}
-          </span>
-        </div>
-      )}
       {/* 消息区：px-8 给头像列留出外边距（头像不贴屏幕边），py-5 让首行不顶边。
           上窄下宽的 py 差是刻意留的「呼吸位」——完全等距时第一条消息会顶着 header 底线，
           视觉上像被切掉一截。 */}
@@ -3555,20 +2689,10 @@ export function ChatPage({
                 ? visibleMessages[windowStart - 1]
                 : undefined;
           const showSeparator = needsTimeSeparator(prevMsg?.createdAt, m.createdAt);
-          // 已撤回：正文/附件/已读一律不渲染，只出一行灰字（头像与署名结构保留）
-          const recalled = m.recalledAt != null;
-          // 署名：自己「我」；direct 对方名；群内他人用挂载时拉到的成员映射名（缺失则不渲染署名行）
+          // 署名：自己「我」；智能体消息显示智能体名。
           const senderName = displaySenderName(m);
-          // 左侧头像（Task 7）：direct 恒为 peer；群内他人仅当成员快照带 avatar 时出（无则不出）
+          // 左侧头像：智能体回复固定用智能体头像。
           const senderAvatarUser = bubbleAvatar(m);
-          // 仅 direct：对方读点 ≥ 本条时间 → 已读（逐条判断；群 M2 不显示；已撤回不显示）
-          const readByPeer = mine && !recalled && !!peerReadAt && peerReadAt >= m.createdAt;
-          // 引用卡：回复消息且原消息仍在本会话历史中才渲染；原消息已撤回则不渲染（对齐撤回不回显语义）
-          const quoted = m.replyTo
-            ? messages.find((x) => x.id === m.replyTo && x.recalledAt == null)
-            : undefined;
-          // 回应 chips（存量 payload.reactions + 解密出的 reaction 事件聚合，记忆化）
-          const chips = chipsByMsgId.get(m.id) ?? NO_CHIPS;
           // 图表：正文里的 ```chart 围栏块。解析失败的块被跳过（不显示也不报错——
           // 模型偶尔会写出不合法的 JSON，那是它的问题，不该让整条消息看起来坏了）。
           const messageCharts = extractCharts(m.payload.text).map((c, i) => ({
@@ -3577,18 +2701,6 @@ export function ChatPage({
           }));
           return (
             <Fragment key={m.id}>
-              {unreadDivider.id === m.id ? (
-                <div
-                  id="unread-divider"
-                  role="separator"
-                  aria-label="以下是新消息"
-                  className="mb-3 flex items-center gap-2 text-[10px] text-[#b45309]"
-                >
-                  <span className="h-px flex-1 bg-[#f0d58c]" />
-                  <span>以下是新消息</span>
-                  <span className="h-px flex-1 bg-[#f0d58c]" />
-                </div>
-              ) : null}
               {/* A4：间隔 ≥5 分钟或跨天的消息之间插一条时间分隔（首条渲染的消息也带，定位阅读段起点） */}
               {showSeparator ? (
                 <div className="mb-3 flex justify-center">
@@ -3654,48 +2766,12 @@ export function ChatPage({
                     </time>
                   </div>
                 )}
-                {recalled ? (
-                  <div className="text-muted">消息已撤回</div>
-                ) : m.enc === "e2e" && !plainOf[m.id] ? (
+                {m.enc === "e2e" && !plainOf[m.id] ? (
                   // E2E Task 4 / 设计 §8：解不开的信封渲染占位（不吞不崩），且不进 LLM 提示词
                   <div className="text-muted">无法解密（密钥缺失）</div>
                 ) : (
                   <>
-                    {/* 转发来源行（Task 4）：有 forward 时置于正文/附件上方 */}
-                    {m.payload.forward ? (
-                      <div className="mb-0.5 text-[10px] text-muted">
-                        来自 {m.payload.forward.from} · {m.payload.forward.source}
-                      </div>
-                    ) : null}
-                    {quoted ? (
-                      <button
-                        type="button"
-                        className="mb-1 flex w-full cursor-pointer items-baseline gap-1 truncate rounded border-l-2 border-[#e6e6e6] bg-[#fafafa] px-1.5 py-0.5 text-left text-[10px] text-muted"
-                        onClick={() =>
-                          document
-                            .getElementById(`msg-${quoted.id}`)
-                            ?.scrollIntoView({ behavior: "smooth", block: "center" })
-                        }
-                      >
-                        <span className="shrink-0 font-medium">
-                          {displaySenderName(quoted) ?? "未知"}
-                        </span>
-                        <span className="min-w-0 truncate">
-                          {quoted.payload.text.slice(0, 60)}
-                        </span>
-                      </button>
-                    ) : null}
-                    {/* 正文：带 @提及 的消息走原渲染（高亮 @名字），
-                        其余走 markdown。分两条路是刻意的——
-                        mention 高亮是在纯文本上按名字切片实现的，
-                        塞进 markdown 管线需要自定义 remark 插件，成本与收益不成比例；
-                        而 mention 只出现在用户消息里（多为短句），
-                        代码块/表格这些真正需要 markdown 的内容来自智能体回复。 */}
-                    {m.payload.text
-                      ? m.payload.mentions && m.payload.mentions.length > 0
-                        ? renderTextWithMentions(stripChartFences(m.payload.text), m.payload.mentions)
-                        : <MarkdownMessage text={stripChartFences(m.payload.text)} />
-                      : null}
+                    <MarkdownMessage text={stripChartFences(m.payload.text)} />
                     {/* 图表：正文里的 ```chart 围栏块渲染成卡片（正文已剥离围栏） */}
                     {messageCharts.map((c) => (
                       <ChatChart key={c.key} spec={c.spec} />
@@ -3712,140 +2788,20 @@ export function ChatPage({
                         <AttachmentPreview file={m.payload.file} />
                       )
                     ) : null}
-                    {readByPeer ? (
-                      <div className="mt-0.5 text-right text-[9px] text-muted">已读</div>
-                    ) : null}
-                    {/* 表情回应 chips（Task 6 → E2E 事件化）：存量 reactions + kind=reaction
-                        事件聚合；自己参与的深底可点掉（发 op:remove 密文事件），
-                        他人参与的仅展示（点击 no-op）。已撤回消息整块不渲染（外层 recalled 分支）。 */}
-                    {chips.length ? (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {chips.map((r) => {
-                          const involvesMe = me != null && r.userIds.includes(me.id);
-                          return (
-                            <button
-                              key={r.emoji}
-                              type="button"
-                              aria-label={`表情回应 ${r.emoji} ${r.userIds.length}`}
-                              className={`rounded-full border px-1.5 py-0.5 text-[11px] ${
-                                involvesMe
-                                  ? "border-ink bg-ink text-white"
-                                  : "border-line bg-white text-[#555]"
-                              }`}
-                              onClick={() => {
-                                if (!involvesMe) return; // 只有自己参与的才能点掉（他人 chip 仅展示）
-                                // E2E Task 4：回应是密文事件消息（kind=reaction），不再发 react_message
-                                void sealAndSend({
-                                  kind: "reaction",
-                                  reaction: { target: m.id, emoji: r.emoji, op: "remove" },
-                                });
-                              }}
-                            >
-                              {r.emoji} {r.userIds.length}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : null}
                   </>
                 )}
-                {/* 撤回入口：仅自己的未撤回消息，hover 气泡时显出（测试按 aria-label 断言） */}
-                {mine && !recalled && (
-                  <button
-                    type="button"
-                    aria-label="撤回消息"
-                    className="absolute -top-2 right-0 hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block"
-                    onClick={() =>
-                      wsHandleRef.current?.send({
-                        type: "recall_message",
-                        conversationId: convId,
-                        messageId: m.id,
-                      })
-                    }
-                  >
-                    撤回
-                  </button>
-                )}
-                {/* 回复入口：自己/他人的未撤回消息皆可引用，hover 显出；与撤回钮同排错开位置 */}
-                {!recalled && (
-                  <button
-                    type="button"
-                    aria-label="回复此消息"
-                    className={`absolute -top-2 ${
-                      mine ? "right-10" : "right-0"
-                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
-                    onClick={() => setReplyTarget(m)}
-                  >
-                    回复
-                  </button>
-                )}
-                {/* 转发入口（Task 4）：所有未撤回消息（含他人）可转发，hover 显出；与撤回/回复钮同排继续错开 */}
-                {!recalled && (
-                  <button
-                    type="button"
-                    aria-label="转发消息"
-                    className={`absolute -top-2 ${
-                      mine ? "right-20" : "right-10"
-                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
-                    onClick={() => setForwardMsg(m)}
-                  >
-                    转发
-                  </button>
-                )}
-                {/* 表情回应入口（Task 6）：未撤回消息（含他人）皆可回应，hover 显出；与撤回/回复/转发同排继续错开 */}
-                {!recalled && (
-                  <button
-                    type="button"
-                    aria-label="添加表情回应"
-                    className={`absolute -top-2 ${
-                      mine ? "right-[120px]" : "right-[80px]"
-                    } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] leading-none text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
-                    onClick={() => setReactFor((v) => (v === m.id ? null : m.id))}
-                  >
-                    <SmileIcon width={12} height={12} />
-                  </button>
-                )}
-                {/* A5 整条复制：未撤回且有文本才出（附件只有元信息，复制结果没意义） */}
-                {!recalled && (m.payload.text?.length ?? 0) > 0 && (
+                {/* A5 整条复制：有文本才出（附件只有元信息，复制结果没意义） */}
+                {(m.payload.text?.length ?? 0) > 0 && (
                   <button
                     type="button"
                     aria-label="复制消息"
                     className={`absolute -top-2 ${
-                      mine ? "right-[152px]" : "right-[112px]"
+                      mine ? "right-0" : "left-0"
                     } hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
                     onClick={() => void copyMessage(m)}
                   >
                     {copiedMsgId === m.id ? "已复制" : "复制"}
                   </button>
-                )}
-                {/* 表情回应浮排：点选即 toggle 并关闭；Esc / 切会话关闭（会话级 state） */}
-                {!recalled && reactFor === m.id && (
-                  <div
-                    className={`absolute -top-9 z-20 flex gap-0.5 rounded-lg border border-line bg-white p-1 shadow-card ${
-                      mine ? "right-0" : "left-0"
-                    }`}
-                  >
-                    {QUICK_EMOJIS.map((e) => (
-                      <button
-                        key={e}
-                        type="button"
-                        className="rounded px-0.5 text-[15px] leading-none hover:bg-[#f3f3f3]"
-                        onClick={() => {
-                          // E2E 事件化 toggle：已在 chips 里的自己 → op remove，否则 add
-                          const involved =
-                            me != null &&
-                            (chips.find((c) => c.emoji === e)?.userIds.includes(me.id) ?? false);
-                          void sealAndSend({
-                            kind: "reaction",
-                            reaction: { target: m.id, emoji: e, op: involved ? "remove" : "add" },
-                          });
-                          setReactFor(null);
-                        }}
-                      >
-                        {e}
-                      </button>
-                    ))}
-                  </div>
                 )}
               </div>
               {/* 自己的消息：气泡在左、头像贴右缘，与对方左右镜像（同样 mt-1 低一点、gap-2.5 隔开） */}
@@ -3953,34 +2909,6 @@ export function ChatPage({
             {toolsNotice}
           </p>
         )}
-        {/* 引用预览条：回复目标署名 + 原文片段 + × 取消（会话切换/发送成功自动清） */}
-        {replyTarget && (
-          <div className="mx-5 mt-2 flex items-center gap-2 rounded-lg border-l-2 border-ink bg-[#f7f7f7] px-3 py-1.5 text-[11px]">
-            <span className="text-muted">回复</span>
-            <span className="shrink-0 font-medium">
-              {displaySenderName(replyTarget) ?? "未知"}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-muted">
-              {replyTarget.payload.text.slice(0, 60) || "（无文本）"}
-            </span>
-            <button
-              type="button"
-              aria-label="取消回复"
-              className="shrink-0 px-1 text-muted hover:text-ink"
-              onClick={() => setReplyTarget(null)}
-            >
-              ×
-            </button>
-          </div>
-        )}
-        {/* @ 选择器：输入栏上方浮层（仅群会话；direct 无智能体可提及） */}
-        {isGroup && picker && (
-          <MentionPicker
-            items={pickerItems}
-            onPick={pickMention}
-            activeIndex={Math.min(pickerIndex, pickerItems.length - 1)}
-          />
-        )}
         {/* 「生成中」提示行（输入栏上方）：本机流署名 + 中断入口 */}
         {activeLocal.length > 0 && (
           <div className="flex items-center gap-3 px-5 pt-2 text-[12px] text-muted">
@@ -3994,7 +2922,7 @@ export function ChatPage({
             </button>
           </div>
         )}
-        {/* 工具行：表情 / 图片 / 文件（左上角）；群会话保留 @ */}
+        {/* 工具行：表情 / 图片 / 文件（左上角） */}
         <div className="flex items-center gap-1 px-5 pt-2">
           <button
             type="button"
@@ -4024,26 +2952,6 @@ export function ChatPage({
           >
             <FileIcon width={16} height={16} />
           </button>
-          {isGroup && (
-            <button
-              type="button"
-              aria-label="提及智能体"
-              className="ml-1 rounded-lg border border-line px-2 text-sm text-muted hover:bg-[#f3f3f3]"
-              onClick={() => setPicker({ via: "button", query: "" })}
-            >
-              @
-            </button>
-          )}
-        </div>
-        {/* 正在输入提示（d.38）：固定 h-4，出现/消失不推挤输入区。
-            常驻 aria-live 区域让「内容新增」被播报；role 只在有提示时挂上，
-            空行不冒充一个空的 status（规格 §1C：只在有输入提示时播报）。 */}
-        <div
-          role={typingText ? "status" : undefined}
-          aria-live="polite"
-          className="h-4 shrink-0 truncate whitespace-nowrap px-5 text-[10px] leading-4 text-muted"
-        >
-          {typingText}
         </div>
         {/* 拖动把手：上沿可拖，加高/压扁输入区（高度写 localStorage，下次进入沿用） */}
         <div
@@ -4133,95 +3041,14 @@ export function ChatPage({
             发送
           </button>
         </div>
-        {/* 智能体一对一：明确告诉用户「发出去会自动 @ 这个 agent」，
-            否则他看不到任何 @ 选择器，却会收到回复，很难不怀疑消息发错了人。 */}
-        {conv?.type === "agent" && (
+        {/* 智能体一对一：明确告诉用户「发出去会自动交给这个智能体」 */}
+        {conv && (
           <div className="px-5 pb-2 text-[11px] text-muted">
             与 <span className="font-medium text-[#555]">{conv.agent.name}</span>{" "}
-            的对话 · 发送后自动 @
-          </div>
-        )}
-        {/* 已选 mention chip（输入栏下方）：× 移除；文本保持原样不注入草稿 */}
-        {selectedMentions.length > 0 && (
-          <div className="flex flex-wrap gap-2 px-5 pb-3">
-            {selectedMentions.map((m) => (
-              <span
-                key={m.agentId}
-                className="inline-flex items-center gap-1 rounded-full border border-line bg-[#f3f3f3] py-0.5 pl-2 pr-1 text-[12px]"
-              >
-                @{m.name}
-                <button
-                  type="button"
-                  aria-label={`移除 ${m.name}`}
-                  className="rounded-full px-1 text-muted hover:text-ink"
-                  onClick={() =>
-                    setSelectedMentions((prev) => prev.filter((x) => x.agentId !== m.agentId))
-                  }
-                >
-                  ×
-                </button>
-              </span>
-            ))}
+            的对话 · 发送后自动交给智能体
           </div>
         )}
       </form>
-      {/* 转发浮层（Task 4）：全会话列表（群+直聊），点选经当前 WS 连接发送；点遮罩/Esc 关闭 */}
-      {forwardMsg && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
-          onClick={() => setForwardMsg(null)}
-        >
-          <div
-            ref={forwardPanelRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="转发消息"
-            className="w-[280px] rounded-xl border border-[#ececec] bg-white p-3 shadow-card"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-2 text-[12px] font-bold">转发到</div>
-            <div className="max-h-[240px] overflow-y-auto">
-              {/* 归档会话不作为转发目标：它已被用户收起，不该再出现在选择列表里 */}
-              {activeConversationsOf(conversations).map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-[#f7f7f7]"
-                  onClick={() => doForward(c)}
-                >
-                  <Avatar
-                    user={{
-                      displayName: convLabel(c).name,
-                      avatar: convLabel(c).avatar,
-                    }}
-                    size={22}
-                  />
-                  <span className="truncate">{convLabel(c).name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-      {/* 语音通话全屏面板（ringing + active 状态）
-          onAccept/onReject 仅在 callee ringing 分支内渲染为可见可点的接听/拒绝按钮
-          （面板 fixed inset-0 z-50 覆盖全屏，横幅内的按钮会被遮挡） */}
-      <VoiceCallPanel
-        state={voiceCall.state}
-        peerNames={voicePeerNames}
-        onHangup={voiceCall.hangup}
-        onToggleMute={voiceCall.toggleMute}
-        onAccept={
-          voiceCall.state.incoming
-            ? () => void voiceCall.accept(voiceCall.state.incoming!.callId)
-            : undefined
-        }
-        onReject={
-          voiceCall.state.incoming
-            ? () => voiceCall.reject(voiceCall.state.incoming!.callId, "decline")
-            : undefined
-        }
-      />
       {/* HITL 工具确认弹窗（设计 §4.3）：
           智能体要调有副作用的工具时，先问用户同不同意。
           弹窗由 store 驱动（pending 单槽 + 队列），这里只负责渲染与回传裁决。 */}

@@ -29,9 +29,8 @@ export function formatRelativeTime(at: number, now: number): string {
 }
 
 const KIND_LABEL: Record<AppNotification["kind"], string> = {
-  message: "消息",
   task: "任务",
-  // d.34：等待裁决的工具确认——点开跳回来源会话，弹窗在那儿等着。
+  // d.34：等待裁决的工具确认——点开跳回来源智能体会话，弹窗在那儿等着。
   approval: "确认",
   // d.48：常驻幕僚的主动简报——点开去幕僚页看完整证据。
   staff: "幕僚",
@@ -164,7 +163,7 @@ export function NotificationCenter() {
               <p className="px-3 py-6 text-center text-[12px] leading-5 text-muted">
                 还没有通知。
                 <br />
-                新消息与任务收尾会在这里汇总。
+                任务收尾、待确认的工具调用与幕僚简报会在这里汇总。
               </p>
             ) : (
               <ul className="divide-y divide-[#f0f0f0]">

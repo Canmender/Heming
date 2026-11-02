@@ -67,7 +67,7 @@ describe("公开注册门控", () => {
   });
 });
 
-describe("auth + friends + conversations API", () => {
+describe("auth + team API", () => {
   let app: ReturnType<typeof createApp>;
   beforeEach(() => {
     app = createApp(createMemoryStore(), { allowRegister: true });
@@ -95,7 +95,7 @@ describe("auth + friends + conversations API", () => {
 
   it("无 token 访问受保护接口返回 401", async () => {
     expect((await request(app).get("/api/me")).status).toBe(401);
-    expect((await request(app).get("/api/friends")).status).toBe(401);
+    expect((await request(app).get("/api/team")).status).toBe(401);
   });
 
   it("重复用户名注册返回 400", async () => {
@@ -108,58 +108,38 @@ describe("auth + friends + conversations API", () => {
     expect(again.status).toBe(400);
   });
 
-  it("完整链路：加好友 → 接受 → 建会话 → 拉消息", async () => {
+  it("建智能体一对一会话并幂等复用", async () => {
     const a = await register(app, "alice");
-    const b = await register(app, "bob");
-    const req = await request(app)
-      .post("/api/friends/request")
+    const agent = await request(app)
+      .post("/api/agents")
       .set("Authorization", `Bearer ${a.token}`)
-      .send({ username: "bob" });
-    expect(req.status).toBe(201);
-
-    const incoming = await request(app)
-      .get("/api/friends/requests")
-      .set("Authorization", `Bearer ${b.token}`);
-    expect(incoming.body).toHaveLength(1);
-
-    await request(app)
-      .post(`/api/friends/${incoming.body[0].id}/accept`)
-      .set("Authorization", `Bearer ${b.token}`)
-      .send({});
+      .send({ name: "助手", description: "" });
+    expect(agent.status).toBe(201);
 
     const conv = await request(app)
       .post("/api/conversations")
       .set("Authorization", `Bearer ${a.token}`)
-      .send({ peerId: b.user.id });
+      .send({ agentId: agent.body.id });
     expect(conv.status).toBe(201);
-    expect(conv.body.peer.username).toBe("bob");
+    expect(conv.body.type).toBe("agent");
 
-    const convAgain = await request(app)
+    const again = await request(app)
       .post("/api/conversations")
-      .set("Authorization", `Bearer ${b.token}`)
-      .send({ peerId: a.user.id });
-    expect(convAgain.body.id).toBe(conv.body.id);
+      .set("Authorization", `Bearer ${a.token}`)
+      .send({ agentId: agent.body.id });
+    expect(again.body.id).toBe(conv.body.id);
 
     const mine = await request(app)
       .get("/api/conversations")
       .set("Authorization", `Bearer ${a.token}`);
     expect(mine.body).toHaveLength(1);
+    expect(mine.body[0].agent.name).toBe("助手");
 
     const msgs = await request(app)
       .get(`/api/conversations/${conv.body.id}/messages`)
       .set("Authorization", `Bearer ${a.token}`);
     expect(msgs.status).toBe(200);
     expect(msgs.body).toEqual([]);
-  });
-
-  it("非好友建会话返回 400", async () => {
-    const a = await register(app, "alice");
-    const b = await register(app, "bob");
-    const res = await request(app)
-      .post("/api/conversations")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ peerId: b.user.id });
-    expect(res.status).toBe(400);
   });
 });
 
@@ -416,113 +396,6 @@ describe("files API", () => {
   });
 });
 
-describe("group api", () => {
-  let app: App;
-  beforeEach(() => {
-    app = createApp(createMemoryStore(), { allowRegister: true });
-  });
-
-  it("创建群并列出（含 unreadCount/memberCount）", async () => {
-    const a = await register(app, "alice");
-    const b = await register(app, "bob");
-    const req = await request(app)
-      .post("/api/friends/request")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ username: "bob" });
-    expect(req.status).toBe(201);
-    const incoming = await request(app)
-      .get("/api/friends/requests")
-      .set("Authorization", `Bearer ${b.token}`);
-    await request(app)
-      .post(`/api/friends/${incoming.body[0].id}/accept`)
-      .set("Authorization", `Bearer ${b.token}`)
-      .send({});
-
-    const g = await request(app)
-      .post("/api/conversations")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "评审组", memberIds: [b.user.id] });
-    expect(g.status).toBe(201);
-    expect(g.body.type).toBe("group");
-    expect(g.body.name).toBe("评审组");
-    expect(g.body.memberCount).toBe(2);
-    expect(g.body.unreadCount).toBe(0);
-
-    const list = await request(app)
-      .get("/api/conversations")
-      .set("Authorization", `Bearer ${b.token}`);
-    const row = (list.body as Conversation[]).find((c) => c.id === g.body.id);
-    expect(row?.type).toBe("group");
-
-    const members = await request(app)
-      .get(`/api/conversations/${g.body.id}/members`)
-      .set("Authorization", `Bearer ${b.token}`);
-    expect(members.status).toBe(200);
-    expect(members.body).toHaveLength(2);
-    expect(members.body.map((m: { name: string }) => m.name)).toContain("BOB");
-  });
-
-  it("POST group 含非好友成员 → 400 not friends", async () => {
-    const a = await register(app, "alice");
-    const b = await register(app, "bob"); // 未加好友
-    const res = await request(app)
-      .post("/api/conversations")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "拉人", memberIds: [b.user.id] });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe("not friends");
-    // 会话未创建：列表无该群
-    const list = await request(app)
-      .get("/api/conversations")
-      .set("Authorization", `Bearer ${a.token}`);
-    expect((list.body as Conversation[]).filter((c) => c.type === "group")).toHaveLength(0);
-  });
-
-  it("非成员读成员列表 403", async () => {
-    const a = await register(app, "alice");
-    const c = await register(app, "carol");
-    const g = await request(app)
-      .post("/api/conversations")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "小群", memberIds: [] });
-    expect(g.status).toBe(201);
-    // F4（L1 口径锁）：memberIds:[] → creator 自动入群 → memberCount 1（min(1)）
-    expect(g.body.memberCount).toBe(1);
-    const res = await request(app)
-      .get(`/api/conversations/${g.body.id}/members`)
-      .set("Authorization", `Bearer ${c.token}`);
-    expect(res.status).toBe(403);
-  });
-
-  it("reads 端点返回已读列表", async () => {
-    const a = await register(app, "alice");
-    const g = await request(app)
-      .post("/api/conversations")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "单人群", memberIds: [] });
-    // memberIds:[] + creator 自动入群 → memberCount 1（口径：min(1)）
-    expect(g.body.memberCount).toBe(1);
-    const reads = await request(app)
-      .get(`/api/conversations/${g.body.id}/reads`)
-      .set("Authorization", `Bearer ${a.token}`);
-    expect(reads.status).toBe(200);
-    expect(Array.isArray(reads.body)).toBe(true);
-  });
-
-  it("非成员读 reads 端点 403", async () => {
-    const a = await register(app, "alice");
-    const c = await register(app, "carol");
-    const g = await request(app)
-      .post("/api/conversations")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "又一群", memberIds: [] });
-    const res = await request(app)
-      .get(`/api/conversations/${g.body.id}/reads`)
-      .set("Authorization", `Bearer ${c.token}`);
-    expect(res.status).toBe(403);
-  });
-});
-
 describe("CORS 兜底（浏览器直连场景，手写中间件无依赖）", () => {
   let app: App;
   beforeEach(() => {
@@ -571,8 +444,8 @@ describe("agents api", () => {
   it("注册用户可建/改/删自己的智能体，系统与他人 403", async () => {
     const a = await register(app, "alice");
     const b = await register(app, "bob");
-    // 播种系统 agent（同 sqlite ensurePreset upsert 口径），供「系统 403」断言
-    store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant");
+    // 播种系统 agent（同 sqlite ensureSystemAgents 口径），供「系统 403」断言
+    store.ensureSystemAgents();
 
     const created = await request(app).post("/api/agents")
       .set("Authorization", `Bearer ${a.token}`)
@@ -627,121 +500,6 @@ describe("agents api", () => {
       .set("Authorization", `Bearer ${a.token}`)
       .send({ name: "" });
     expect(bad.status).toBe(400);
-  });
-});
-
-describe("conversation agents attach/detach（M3 I2：自建智能体入群）", () => {
-  let app: App;
-  beforeEach(() => {
-    app = createApp(createMemoryStore(), { allowRegister: true });
-  });
-
-  /** 建用户 + 建群 + 建自建 agent，返回三者（attach 路由用例共用底座）。 */
-  async function setup() {
-    const a = await register(app, "alice");
-    const g = await request(app)
-      .post("/api/conversations")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "入群群", memberIds: [] });
-    expect(g.status).toBe(201);
-    const agent = await request(app)
-      .post("/api/agents")
-      .set("Authorization", `Bearer ${a.token}`)
-      .send({ name: "架构师", description: "画图" });
-    expect(agent.status).toBe(201);
-    return { token: a.token, userId: a.user.id, convId: g.body.id as string, agentId: agent.body.id as string };
-  }
-
-  it("成员挂载 201→幂等 200，members 出现 agent 行；卸载 204→再卸 204", async () => {
-    const { token, convId, agentId } = await setup();
-
-    const first = await request(app)
-      .post(`/api/conversations/${convId}/agents`)
-      .set("Authorization", `Bearer ${token}`)
-      .send({ agentId });
-    expect(first.status).toBe(201);
-    expect(first.body).toEqual({ conversationId: convId, agentId });
-
-    // 幂等：已挂再挂 200（不重复挂载）
-    const again = await request(app)
-      .post(`/api/conversations/${convId}/agents`)
-      .set("Authorization", `Bearer ${token}`)
-      .send({ agentId });
-    expect(again.status).toBe(200);
-
-    // listMembers join 出 agent 行 → @ 候选 / finish「agent in group」校验随之生效
-    const members = await request(app)
-      .get(`/api/conversations/${convId}/members`)
-      .set("Authorization", `Bearer ${token}`);
-    expect(members.status).toBe(200);
-    const agentRow = (members.body as { kind: string; id: string; name: string }[]).find(
-      (m) => m.kind === "agent",
-    );
-    expect(agentRow).toMatchObject({ id: agentId, name: "架构师" });
-
-    const del = await request(app)
-      .delete(`/api/conversations/${convId}/agents/${agentId}`)
-      .set("Authorization", `Bearer ${token}`);
-    expect(del.status).toBe(204);
-    const membersAfter = await request(app)
-      .get(`/api/conversations/${convId}/members`)
-      .set("Authorization", `Bearer ${token}`);
-    expect((membersAfter.body as { kind: string }[]).some((m) => m.kind === "agent")).toBe(false);
-
-    // 幂等卸载：未挂载再删仍 204
-    const delAgain = await request(app)
-      .delete(`/api/conversations/${convId}/agents/${agentId}`)
-      .set("Authorization", `Bearer ${token}`);
-    expect(delAgain.status).toBe(204);
-  });
-
-  it("非成员挂载/卸载 403；agent 不存在 404；非法 body 400；未鉴权 401", async () => {
-    const { token, convId, agentId } = await setup();
-    const stranger = await register(app, "carol");
-
-    const forbid = await request(app)
-      .post(`/api/conversations/${convId}/agents`)
-      .set("Authorization", `Bearer ${stranger.token}`)
-      .send({ agentId });
-    expect(forbid.status).toBe(403);
-    const forbidDel = await request(app)
-      .delete(`/api/conversations/${convId}/agents/${agentId}`)
-      .set("Authorization", `Bearer ${stranger.token}`);
-    expect(forbidDel.status).toBe(403);
-
-    const missing = await request(app)
-      .post(`/api/conversations/${convId}/agents`)
-      .set("Authorization", `Bearer ${token}`)
-      .send({ agentId: "no-such-agent" });
-    expect(missing.status).toBe(404);
-
-    const bad = await request(app)
-      .post(`/api/conversations/${convId}/agents`)
-      .set("Authorization", `Bearer ${token}`)
-      .send({ agentId: "" });
-    expect(bad.status).toBe(400);
-
-    expect(
-      (await request(app).post(`/api/conversations/${convId}/agents`).send({ agentId })).status,
-    ).toBe(401);
-  });
-
-  it("attach 后 deleteAgent：agents 行与会话关联一并清理，members 不再含该 agent", async () => {
-    const { token, convId, agentId } = await setup();
-    await request(app)
-      .post(`/api/conversations/${convId}/agents`)
-      .set("Authorization", `Bearer ${token}`)
-      .send({ agentId });
-
-    const del = await request(app)
-      .delete(`/api/agents/${agentId}`)
-      .set("Authorization", `Bearer ${token}`);
-    expect(del.status).toBe(204);
-
-    const members = await request(app)
-      .get(`/api/conversations/${convId}/members`)
-      .set("Authorization", `Bearer ${token}`);
-    expect((members.body as { id: string }[]).some((m) => m.id === agentId)).toBe(false);
   });
 });
 
@@ -840,17 +598,17 @@ describe("PUT /api/messages/:id/reencrypt", () => {
     app = createApp(store, { allowRegister: true });
     a = await register(app, "alice");
     b = await register(app, "bob");
-    store.acceptFriendRequest(store.createFriendRequest(a.user.id, "bob").id, b.user.id);
-    convId = store.createDirectConversation(a.user.id, b.user.id).id;
-    // 带正文 + 回复指向的明文行：重封后 GET 不得再见两者（fix round 1 Critical）
-    msgId = store.addMessage(convId, "user", a.user.id, { text: "旧明文" }, "r-old").id;
+    const agent = store.createAgent(a.user.id, { name: "助手", description: "" });
+    convId = store.createAgentConversation(a.user.id, agent.id).id;
+    // 带正文的明文行：重封后 GET 不得再见原文（fix round 1 Critical）
+    msgId = store.addMessage(convId, "user", a.user.id, { text: "旧明文" }).id;
   });
 
   const env = { enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 5 };
   const put = (token: string, id: string, body: object) =>
     request(app).put(`/api/messages/${id}/reencrypt`).set("Authorization", `Bearer ${token}`).send(body);
 
-  it("本人 plain → 200 换信封并可回读；明文 payload/reply_to 同一更新清空；再 PUT → 409", async () => {
+  it("本人 plain → 200 换信封并可回读；明文 payload 同一更新清空；再 PUT → 409", async () => {
     const ok = await put(a.token, msgId, env);
     expect(ok.status).toBe(200);
     expect(ok.body).toMatchObject({
@@ -860,24 +618,22 @@ describe("PUT /api/messages/:id/reencrypt", () => {
       chainKid: "kid1",
       n: 5,
     });
-    // 响应体（即出站消息形态）不得再含明文与回复指向
+    // 响应体（即出站消息形态）不得再含明文
     expect(ok.body.payload).toEqual({ text: "" });
-    expect(ok.body.replyTo).toBeNull();
 
-    // GET 对全体会员可见的正是该出站形态（原文明文/回复指向已不可读）
+    // GET 回读的正是该出站形态（原文已不可读）
     const msgs = await request(app)
       .get(`/api/conversations/${convId}/messages`)
       .set("Authorization", `Bearer ${a.token}`);
     expect(msgs.body[0]).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 5 });
     expect(msgs.body[0].payload).toEqual({ text: "" });
-    expect(msgs.body[0].replyTo).toBeNull();
 
     const again = await put(a.token, msgId, env);
     expect(again.status).toBe(409);
   });
 
   it("非 sender → 403；消息不存在 → 404；未登录 → 401", async () => {
-    // b 是会话成员但非 sender → 403（权限只看本人）
+    // b 不是 sender → 403（权限只看本人）
     expect((await put(b.token, msgId, env)).status).toBe(403);
     expect((await put(a.token, "no-such-id", env)).status).toBe(404);
     const anon = await request(app)
@@ -896,94 +652,3 @@ describe("PUT /api/messages/:id/reencrypt", () => {
   });
 });
 
-describe("GET /api/ice-servers（语音通话 ICE 配置）", () => {
-  const ENVS = ["HEMING_STUN", "HEMING_TURN_URL", "HEMING_TURN_USERNAME", "HEMING_TURN_CREDENTIAL"];
-  let saved: Record<string, string | undefined>;
-
-  beforeEach(() => {
-    saved = {};
-    for (const e of ENVS) {
-      saved[e] = process.env[e];
-      delete process.env[e];
-    }
-  });
-  afterEach(() => {
-    for (const e of ENVS) {
-      if (saved[e] === undefined) delete process.env[e];
-      else process.env[e] = saved[e];
-    }
-  });
-
-  /**
-   * 带鉴权头拉 ICE 配置（d.30 · P0-2 起该路由需登录）。
-   * 直接建用户 + issueToken：不走注册接口，避免受 HEMING_ALLOW_REGISTER 开关影响。
-   */
-  async function getIceServers(app: App): Promise<request.Response> {
-    const store = createMemoryStore();
-    const user = store.createUser(`ice-${Math.random().toString(36).slice(2)}`, "h", "ICE");
-    return request(app)
-      .get("/api/ice-servers")
-      .set("Authorization", `Bearer ${issueToken(user.id)}`);
-  }
-
-  it("缺省返回公共 STUN，无 TURN", async () => {
-    const app = createApp(createMemoryStore());
-    const res = await getIceServers(app);
-    expect(res.status).toBe(200);
-    expect(res.body.iceServers).toEqual([{ urls: "stun:stun.miwifi.com:3478" }]);
-  });
-
-  it("HEMING_STUN 覆盖默认 STUN", async () => {
-    process.env.HEMING_STUN = "stun:stun.example.com:3478";
-    const app = createApp(createMemoryStore());
-    const res = await getIceServers(app);
-    expect(res.body.iceServers).toEqual([{ urls: "stun:stun.example.com:3478" }]);
-  });
-
-  it("配置 HEMING_TURN_* 时追加 TURN（带凭据）", async () => {
-    process.env.HEMING_TURN_URL = "turn:turn.example.com:3478";
-    process.env.HEMING_TURN_USERNAME = "user";
-    process.env.HEMING_TURN_CREDENTIAL = "pass";
-    const app = createApp(createMemoryStore());
-    const res = await getIceServers(app);
-    expect(res.body.iceServers).toEqual([
-      { urls: "stun:stun.miwifi.com:3478" },
-      { urls: "turn:turn.example.com:3478", username: "user", credential: "pass" },
-    ]);
-  });
-
-  it("未鉴权 → 401（TURN 凭据不外泄）", async () => {
-    process.env.HEMING_TURN_URL = "turn:turn.example.com:3478";
-    process.env.HEMING_TURN_USERNAME = "user";
-    process.env.HEMING_TURN_CREDENTIAL = "pass";
-    const app = createApp(createMemoryStore());
-    const res = await request(app).get("/api/ice-servers");
-    expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "unauthorized" });
-    // 凭据不随 401 响应泄出
-    expect(JSON.stringify(res.body)).not.toContain("turn.example.com");
-  });
-
-  it("带 Bearer token → 200，且 iceServers 结构与鉴权前完全一致", async () => {
-    process.env.HEMING_TURN_URL = "turn:turn.example.com:3478";
-    process.env.HEMING_TURN_USERNAME = "user";
-    process.env.HEMING_TURN_CREDENTIAL = "pass";
-    const app = createApp(createMemoryStore());
-    const res = await getIceServers(app);
-    expect(res.status).toBe(200);
-    // 结构不变：仍是 { iceServers: [...] }，TURN 的 username/credential 照旧透传
-    expect(Object.keys(res.body)).toEqual(["iceServers"]);
-    expect(res.body.iceServers).toEqual([
-      { urls: "stun:stun.miwifi.com:3478" },
-      { urls: "turn:turn.example.com:3478", username: "user", credential: "pass" },
-    ]);
-  });
-
-  it("token 无效 → 401", async () => {
-    const app = createApp(createMemoryStore());
-    const res = await request(app)
-      .get("/api/ice-servers")
-      .set("Authorization", "Bearer not-a-real-token");
-    expect(res.status).toBe(401);
-  });
-});

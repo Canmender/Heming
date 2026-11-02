@@ -49,7 +49,6 @@ beforeEach(() => {
   useUiStore.setState({
     page: "tasks",
     activeConversationId: null,
-    openTabs: [],
     taskDraft: null,
   });
   useChatStore.setState({

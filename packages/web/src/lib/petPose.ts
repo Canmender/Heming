@@ -2,7 +2,7 @@
  * 桌宠的姿态（d.53 第三期预留）。
  *
  * 存在的理由：此前「现在该是什么状态」散在组件里用三元表达式拼
- * （`chat.error ? … : chat.reply ? … : unreadHint ? …`），动作组名也写死在调用点。
+ * （`chat.error ? … : chat.reply ? …`），动作组名也写死在调用点。
  * 这带来两个具体问题：
  *   1. 加一种表达（比如「被摸之后开心一下」）要改渲染逻辑，容易漏掉某条分支；
  *   2. 换个模型时，动作组名对不上只能改代码。
@@ -63,8 +63,6 @@ export interface PoseInput {
   streaming: boolean;
   /** 输入框是否打开 */
   inputOpen: boolean;
-  /** 未读总数 */
-  unreadTotal: number;
   /** 刚被点/摸（happy 的短窗口，由调用方计时） */
   celebrating: boolean;
 }
@@ -73,7 +71,7 @@ export interface PoseInput {
  * 判定当前姿态（纯函数）。
  *
  * 优先级是**表达准确性**而非"最新事件"：
- *   错误 > 说话 > 开心 > 等待输入 > 有未读 > 待机
+ *   错误 > 说话 > 开心 > 等待输入 > 待机
  *
  * 为什么说话排在开心前面：正在输出时被点一下就把嘴闭上、切到开心动作，
  * 用户看到的是「它说到一半不理我了」。反过来，开心只持续几百毫秒，等一下不影响。
@@ -83,7 +81,6 @@ export function resolvePose(input: PoseInput): PetPose {
   if (input.streaming) return "speaking";
   if (input.celebrating) return "happy";
   if (input.inputOpen) return "listening";
-  if (input.unreadTotal > 0) return "alerting";
   return "idle";
 }
 

@@ -58,7 +58,7 @@ describe("App 启动动画集成", () => {
     useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
     useUiStore.setState({
       page: "home", activeConversationId: null,
-      contactsHidden: false, detailContact: null, pendingAttachment: null,
+      pendingAttachment: null,
     });
   });
 

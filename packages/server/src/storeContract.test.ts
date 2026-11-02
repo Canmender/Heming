@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMemoryStore, type Store } from "./store.js";
 import { createSqliteStore } from "./sqliteStore.js";
-import type { SharedFileMeta } from "@heming/shared";
 
 type Factory = { name: string; create: () => Store & { close?: () => void } };
 const tmpDirs: string[] = [];
@@ -34,620 +33,163 @@ for (const f of factories) {
       store.close?.();
     });
 
-    /** 与 F3 口径配套：既有用例的成员须先是已接受好友。 */
-    function befriend(fromId: string, toUsername: string, toId: string): void {
-      store.acceptFriendRequest(store.createFriendRequest(fromId, toUsername).id, toId);
-    }
-
-    it("createGroup 幂等成员并列入群", () => {
-      store.createUser("alice", "h", "爱丽丝");
-      store.createUser("bob", "h", "鲍勃");
-      const a = store.findUserByUsername("alice")!.user;
-      const b = store.findUserByUsername("bob")!.user;
-      befriend(a.id, "bob", b.id);
-      const g = store.createGroup(a.id, "评审组", [b.id, a.id]);
-      expect(g.type).toBe("group");
-      const convs = store.listConversations(a.id);
-      const gconv = convs.find((c) => c.id === g.id);
-      expect(gconv?.type).toBe("group");
-      if (gconv?.type === "group") expect(gconv.memberCount).toBe(2);
-      const members = store.listMembers(g.id);
-      expect(members.map((m) => m.id).sort()).toEqual([a.id, b.id].sort());
-      expect(members.every((m) => m.kind === "user")).toBe(true);
-    });
-
-    it("createGroup 非好友成员拒绝（not friends），接受后可建", () => {
+    it("智能体名册 CRUD 与系统 agent 保护", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const b = store.createUser("bob", "h", "鲍勃");
-      expect(() => store.createGroup(a.id, "群", [b.id])).toThrow("not friends");
-      befriend(a.id, "bob", b.id);
-      const g = store.createGroup(a.id, "群", [b.id]);
-      expect(store.listMembers(g.id).filter((m) => m.kind === "user")).toHaveLength(2);
+      const agent = store.createAgent(a.id, { name: "助理", description: "d" });
+      expect(store.listAgents().map((x) => x.id)).toContain(agent.id);
+      expect(store.updateAgent(agent.id, a.id, { name: "新名" }).name).toBe("新名");
+      expect(() => store.updateAgent(agent.id, b.id, { name: "x" })).toThrow("forbidden");
+      expect(() => store.deleteAgent(agent.id, b.id)).toThrow("forbidden");
+
+      store.ensureSystemAgents();
+      const sys = store.listAgents().find((x) => x.id === "system-assistant")!;
+      expect(sys.name).toBe("和小鸣");
+      expect(() => store.updateAgent(sys.id, a.id, { name: "x" })).toThrow("forbidden");
+      expect(() => store.deleteAgent(sys.id, a.id)).toThrow("forbidden");
     });
 
-    it("createGroup 成员不存在抛错", () => {
-      store.createUser("alice", "h", "爱丽丝");
-      const a = store.findUserByUsername("alice")!.user;
-      expect(() => store.createGroup(a.id, "群", ["nope"])).toThrow();
-    });
-
-    it("createGroup creator 自带自身 + 去重：creator 不做好友校验", () => {
+    it("createAgentConversation 幂等；自建仅属主，系统 agent 谁都能开", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
-      const g = store.createGroup(a.id, "单人群", [a.id, a.id]);
-      expect(store.listMembers(g.id).filter((m) => m.kind === "user")).toHaveLength(1);
+      const b = store.createUser("bob", "h", "鲍勃");
+      const agent = store.createAgent(a.id, { name: "私房", description: "" });
+      const c1 = store.createAgentConversation(a.id, agent.id);
+      expect(store.createAgentConversation(a.id, agent.id).id).toBe(c1.id);
+      expect(() => store.createAgentConversation(b.id, agent.id)).toThrow("not your agent");
+
+      store.ensureSystemAgents();
+      const sys = store.listAgents().find((x) => x.id === "system-assistant")!;
+      expect(() => store.createAgentConversation(b.id, sys.id)).not.toThrow();
     });
 
-    it("群消息计入未读并可 markRead 清零", () => {
-      store.createUser("alice", "h", "A");
-      store.createUser("bob", "h", "B");
-      const a = store.findUserByUsername("alice")!.user;
-      const b = store.findUserByUsername("bob")!.user;
-      befriend(a.id, "bob", b.id);
-      const g = store.createGroup(a.id, "群", [b.id]);
-      store.addMessage(g.id, "user", b.id, { text: "hi" }, null);
-      const before = store.listConversations(a.id).find((c) => c.id === g.id);
-      if (before?.type !== "group") throw new Error("expected group");
-      expect(before.unreadCount).toBe(1);
-      store.markRead(g.id, a.id);
-      const after = store.listConversations(a.id).find((c) => c.id === g.id);
-      if (after?.type !== "group") throw new Error("expected group");
-      expect(after.unreadCount).toBe(0);
+    it("agent 不存在报错；agent 被删后该会话从列表消失", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      expect(() => store.createAgentConversation(a.id, "nope")).toThrow("agent not found");
+      const agent = store.createAgent(a.id, { name: "临时", description: "" });
+      store.createAgentConversation(a.id, agent.id);
+      store.deleteAgent(agent.id, a.id);
+      expect(store.listConversations(a.id)).toEqual([]);
     });
 
-    it("listConversations 带 lastMessageAt / lastReadAt：三种会话都填，已读后 lastReadAt 更新", async () => {
-      store.createUser("alice", "h", "A");
-      store.createUser("bob", "h", "B");
-      const a = store.findUserByUsername("alice")!.user;
-      const b = store.findUserByUsername("bob")!.user;
-      befriend(a.id, "bob", b.id);
-
-      const g = store.createGroup(a.id, "群", [b.id]);
-      const d = store.createDirectConversation(a.id, b.id);
-      // 智能体一对一：系统 agent 由 ensurePresetGroup 登记进名册（owner 为 null，人人可聊）
-      store.ensurePresetGroup("和鸣交流群", [a.id], "system-assistant");
-      const ag = store.createAgentConversation(a.id, "system-assistant");
-
-      for (const id of [g.id, d.id, ag.id]) {
-        const empty = store.listConversations(a.id).find((c) => c.id === id)!;
-        expect(empty.lastMessageAt ?? null).toBeNull();
-        expect(empty.lastReadAt ?? null).toBeNull();
-        // 字段必须存在（可选字段删掉会让上面的 ?? null 静默通过——这里锁死契约）
-        expect(empty).toHaveProperty("lastReadAt", null);
-      }
-
-      const gm = store.addMessage(g.id, "user", b.id, { text: "群消息" }, null);
-      const dm = store.addMessage(d.id, "user", b.id, { text: "私聊" }, null);
-      const am = store.addMessage(ag.id, "user", a.id, { text: "自己发也算时间" }, null);
-
-      const gConv = store.listConversations(a.id).find((c) => c.id === g.id)!;
-      const dConv = store.listConversations(a.id).find((c) => c.id === d.id)!;
-      const aConv = store.listConversations(a.id).find((c) => c.id === ag.id)!;
-      expect(gConv.lastMessageAt).toBe(gm.createdAt);
-      expect(dConv.lastMessageAt).toBe(dm.createdAt);
-      expect(aConv.lastMessageAt).toBe(am.createdAt);
-
-      store.markRead(d.id, a.id);
-      const dRead = store.listConversations(a.id).find((c) => c.id === d.id)!;
-      expect(dRead.lastReadAt).not.toBeNull();
-      expect(dRead.lastReadAt! >= dm.createdAt).toBe(true);
-    });
-
-    it("自己发的消息不计自己的未读", () => {
-      store.createUser("alice", "h", "A");
-      store.createUser("bob", "h", "B");
-      const a = store.findUserByUsername("alice")!.user;
-      const b = store.findUserByUsername("bob")!.user;
-      befriend(a.id, "bob", b.id);
-      const g = store.createGroup(a.id, "群", [b.id]);
-      store.addMessage(g.id, "user", a.id, { text: "self" }, null);
-      const conv = store.listConversations(a.id).find((c) => c.id === g.id);
-      if (conv?.type !== "group") throw new Error("expected group");
-      expect(conv.unreadCount).toBe(0);
-    });
-
-    it("direct 会话也带 unreadCount", () => {
-      store.createUser("alice", "h", "A");
-      store.createUser("bob", "h", "B");
-      const a = store.findUserByUsername("alice")!.user;
-      const b = store.findUserByUsername("bob")!.user;
-      store.acceptFriendRequest(store.createFriendRequest(a.id, "bob").id, b.id);
-      const d = store.createDirectConversation(a.id, b.id);
-      store.addMessage(d.id, "user", b.id, { text: "喂" }, null);
-      const conv = store.listConversations(a.id).find((c) => c.id === d.id);
-      if (conv?.type !== "direct") throw new Error("expected direct");
-      expect(conv.unreadCount).toBe(1);
-      store.markRead(d.id, a.id);
-      const conv2 = store.listConversations(a.id).find((c) => c.id === d.id);
-      if (conv2?.type !== "direct") throw new Error("expected direct");
-      expect(conv2.unreadCount).toBe(0);
-    });
-
-    it("listReads 返回已读状态；非成员 markRead 抛错", () => {
-      store.createUser("alice", "h", "A");
-      store.createUser("bob", "h", "B");
-      const a = store.findUserByUsername("alice")!.user;
-      const b = store.findUserByUsername("bob")!.user;
-      befriend(a.id, "bob", b.id);
-      const g = store.createGroup(a.id, "群", [b.id]);
-      store.markRead(g.id, a.id);
-      const reads = store.listReads(g.id);
-      expect(reads.find((r) => r.userId === a.id)).toBeTruthy();
-      expect(() => store.markRead(g.id, "stranger")).toThrow();
-    });
-
-    it("原 direct 好友链路回归（幂等会话）", () => {
-      store.createUser("alice", "h", "A");
-      store.createUser("bob", "h", "B");
-      const a = store.findUserByUsername("alice")!.user;
-      const b = store.findUserByUsername("bob")!.user;
-      store.acceptFriendRequest(store.createFriendRequest(a.id, "bob").id, b.id);
-      const c1 = store.createDirectConversation(a.id, b.id);
-      const c2 = store.createDirectConversation(b.id, a.id);
-      expect(c1.id).toBe(c2.id);
-    });
-
-    // —— 以下为任务实现时追加的双实现语义一致边界（brief 未覆盖，锁 memory/sqlite 不分叉）——
-
-    it("缺失会话边界一致：isMember false；listMessages/listMembers/markRead 抛 conversation not found", () => {
-      store.createUser("alice", "h", "A");
-      const a = store.findUserByUsername("alice")!.user;
-      expect(store.isMember("ghost", a.id)).toBe(false);
-      expect(() => store.listMessages("ghost")).toThrow("conversation not found");
-      expect(() => store.listMembers("ghost")).toThrow("conversation not found");
-      expect(() => store.markRead("ghost", a.id)).toThrow("conversation not found");
+    it("缺失会话边界一致：isMember false；listMessages 抛 conversation not found", () => {
+      expect(store.isMember("nope", "u")).toBe(false);
+      expect(store.conversationAgentId("nope")).toBeNull();
+      expect(() => store.listMessages("nope")).toThrow("conversation not found");
     });
 
     it("updateProfile 语义一致：改名 / 省略 avatar 保留 / 空串保留 / 未知用户抛错", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
-      const withAvatar = store.updateProfile(a.id, { displayName: "A", avatar: "data:image/png;base64,QQ==" });
-      expect(withAvatar.avatar).toBe("data:image/png;base64,QQ==");
-      const kept = store.updateProfile(a.id, { displayName: "B" });
-      expect(kept.avatar).toBe("data:image/png;base64,QQ==");
-      const cleared = store.updateProfile(a.id, { displayName: "C", avatar: "" });
-      expect(cleared.avatar).toBe("");
-      expect(store.findUserById(a.id)!.avatar).toBe("");
+      expect(store.updateProfile(a.id, { displayName: "新名" }).avatar).toBeUndefined();
+      store.updateProfile(a.id, { displayName: "A", avatar: "data:x" });
+      expect(store.updateProfile(a.id, { displayName: "B" }).avatar).toBe("data:x");
+      expect(store.updateProfile(a.id, { displayName: "C", avatar: "" }).avatar).toBe("");
       expect(() => store.updateProfile("nope", { displayName: "X" })).toThrow("user not found");
     });
 
-    it("ensurePresetGroup 幂等；无用户时 seedPreset 语义经 listUserIds 为空可判", () => {
-      expect(store.listUserIds()).toEqual([]);
-      store.createUser("alice", "h", "爱丽丝");
-      store.createUser("bob", "h", "鲍勃");
-      expect(store.listUserIds().sort()).toEqual(
-        [store.findUserByUsername("alice")!.user.id, store.findUserByUsername("bob")!.user.id].sort(),
-      );
-      const ids = store.listUserIds();
-      const g1 = store.ensurePresetGroup("和鸣交流群", ids, "system-assistant");
-      const g2 = store.ensurePresetGroup("和鸣交流群", ids, "system-assistant");
-      expect(g2).toBe(g1);
-      expect(store.listAgentIds(g1)).toEqual(["system-assistant"]);
-    });
-
-    it("listMembers 对挂 agent 的群尾部追加 agent 行；user 行不受影响", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      const g = store.createGroup(a.id, "普通群", []);
-      expect(store.listMembers(g.id).every((m) => m.kind === "user")).toBe(true);
-      const presetId = store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant");
-      const members = store.listMembers(presetId);
-      expect(members.filter((m) => m.kind === "user").map((m) => m.id)).toEqual([a.id]);
-      expect(members[members.length - 1]).toEqual({
-        kind: "agent",
-        id: "system-assistant",
-        name: "和小鸣",
-        avatar: null,
-        user: null,
-      });
-    });
-
-    // —— F1/F2（user ruling B）：预设群启动补成员 + 用户自建同名群不遮蔽 ——
-
-    it("F1 ensurePresetGroup B 语义：新用户启动补入预设群，groupId 不变且幂等", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      const g1 = store.ensurePresetGroup("和鸣交流群", [a.id], "system-assistant");
-      const newbie = store.createUser("newbie", "h", "新同学");
-      // 同 name/userIds 列表更新（播种每次传当前全部账号）
-      const g2 = store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant");
-      expect(g2).toBe(g1);
-      const users = store.listMembers(g1).filter((m) => m.kind === "user");
-      expect(users.map((m) => m.id).sort()).toEqual([a.id, newbie.id].sort());
-      // 幂等：再来一次不重复、不改 id
-      expect(store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant")).toBe(g1);
-      expect(store.listMembers(g1).filter((m) => m.kind === "user")).toHaveLength(2);
-    });
-
-    it("F2 用户自建同名群不遮蔽预设群：仍新建预设群，agent 挂预设群", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      const userG = store.createGroup(a.id, "和鸣交流群", []);
-      const presetId = store.ensurePresetGroup("和鸣交流群", [a.id], "system-assistant");
-      expect(presetId).not.toBe(userG.id);
-      expect(store.listAgentIds(presetId)).toEqual(["system-assistant"]);
-      expect(store.listAgentIds(userG.id)).toEqual([]);
-      // 用户群成员不受预设群补成员影响
-      expect(store.listMembers(userG.id).filter((m) => m.kind === "user")).toHaveLength(1);
-      // 再播种仍回到预设群（不会误匹配用户群）
-      expect(store.ensurePresetGroup("和鸣交流群", store.listUserIds(), "system-assistant")).toBe(presetId);
-    });
-
-    // —— M3 Task 2：智能体名册 CRUD（brief 裁决形态：工厂无预设前提，系统 agent 断言容忍缺省）——
-
-    it("agents CRUD 与系统 agent 保护", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      const mine = store.createAgent(a.id, { name: "架构师", description: "画图的" });
-      expect(mine.owner_id).toBe(a.id);
-      const all = store.listAgents();
-      expect(all.some((x) => x.id === mine.id)).toBe(true);
-      expect(all.some((x) => x.name === "架构师")).toBe(true);
-      const upd = store.updateAgent(mine.id, a.id, { description: "改了" });
-      expect(upd.description).toBe("改了");
-      // 系统 agent 未播种时 not found、已播种时 owner_id NULL → forbidden，均属拒绝口径
-      expect(() => store.updateAgent("system-assistant", a.id, { name: "改名" })).toThrow(/forbidden|not found/);
-      expect(() => store.updateAgent(mine.id, "someone-else", { name: "劫持" })).toThrow("forbidden");
-      store.deleteAgent(mine.id, a.id);
-      expect(store.listAgents().some((x) => x.id === mine.id)).toBe(false);
-      expect(() => store.deleteAgent("system-assistant", a.id)).toThrow(/forbidden|not found/);
-    });
-
-    it("ensurePresetGroup 播种后 listAgents 含系统 agent，且仍拒改/拒删", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      store.ensurePresetGroup("和鸣交流群", [a.id], "system-assistant");
-      const sys = store.listAgents().find((x) => x.id === "system-assistant");
-      expect(sys).toBeTruthy();
-      expect(sys!.owner_id).toBeNull();
-      expect(sys!.name).toBe("和小鸣");
-      expect(() => store.updateAgent("system-assistant", a.id, { name: "改名" })).toThrow("forbidden");
-      expect(() => store.deleteAgent("system-assistant", a.id)).toThrow("forbidden");
-    });
-
-    // —— 智能体一对一：双实现同语义（幂等、权限、列表投影、agent 删除后消失）——
-
-    it("createAgentConversation 建私聊并幂等：重复调用返回同一会话 id", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      const agent = store.createAgent(a.id, { name: "架构师", description: "画图的" });
-      const first = store.createAgentConversation(a.id, agent.id);
-      expect(first.type).toBe("agent");
-      expect(first.agent.id).toBe(agent.id);
-      const second = store.createAgentConversation(a.id, agent.id);
-      expect(second.id).toBe(first.id); // 幂等：不新建第二个会话
-      // 会话列表里只出现一条，且带完整 agent 元数据
-      const convs = store.listConversations(a.id);
-      expect(convs.filter((c) => c.type === "agent")).toHaveLength(1);
-      const listed = convs.find((c) => c.type === "agent")!;
-      expect(listed.type === "agent" && listed.agent.name).toBe("架构师");
-    });
-
-    it("agent 私聊权限：自建仅属主可开，系统 agent 谁都能开", () => {
+    it("消息信封：e2e 落 cipher/chainKid/n 并回读；reencrypt 三态", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const b = store.createUser("bob", "h", "鲍勃");
-      const mine = store.createAgent(a.id, { name: "架构师", description: "" });
-      // 别人的自建 agent：拒绝
-      expect(() => store.createAgentConversation(b.id, mine.id)).toThrow("not your agent");
-      // 系统 agent（owner_id 为 null）：任何人都能私聊
-      store.ensurePresetGroup("和鸣交流群", [a.id], "system-assistant");
-      const sysConv = store.createAgentConversation(b.id, "system-assistant");
-      expect(sysConv.type).toBe("agent");
-      expect(sysConv.id).toBeTruthy();
-    });
-
-    it("agent 不存在时报错；agent 被删后该会话从列表消失", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      expect(() => store.createAgentConversation(a.id, "ghost-agent")).toThrow("agent not found");
-      const agent = store.createAgent(a.id, { name: "临时工", description: "" });
-      store.createAgentConversation(a.id, agent.id);
-      expect(store.listConversations(a.id).some((c) => c.type === "agent")).toBe(true);
-      store.deleteAgent(agent.id, a.id);
-      // agent 已删 → 宁可不显示，也不给前端一个没有 agent 字段的半截会话
-      expect(store.listConversations(a.id).some((c) => c.type === "agent")).toBe(false);
-    });
-
-    it("agent 私聊的成员与消息链路与普通会话一致", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      const agent = store.createAgent(a.id, { name: "架构师", description: "" });
+      const agent = store.createAgent(a.id, { name: "助手", description: "" });
       const conv = store.createAgentConversation(a.id, agent.id);
-      expect(store.isMember(conv.id, a.id)).toBe(true);
-      const msg = store.addMessage(conv.id, "user", a.id, { text: "在吗" }, null);
-      expect(msg.conversationId).toBe(conv.id);
-      expect(store.listMessages(conv.id)).toHaveLength(1);
-      const reply = store.addMessage(conv.id, "agent", agent.id, { text: "在" }, null);
-      expect(reply.senderType).toBe("agent");
-    });
-
-    // —— M3 I2：attach/detach 双实现同语义（幂等、缺失会话同拒、名册 join 生效）——
-
-    it("attach/detach 幂等：listAgentIds 与 listMembers 一致联动", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      const g = store.createGroup(a.id, "入群群", []);
-      const mine = store.createAgent(a.id, { name: "架构师", description: "画图的" });
-
-      store.attachAgentToGroup(g.id, mine.id);
-      store.attachAgentToGroup(g.id, mine.id); // 幂等：重复挂载 no-op
-      expect(store.listAgentIds(g.id)).toEqual([mine.id]);
-      // 名册 join：挂载后 listMembers 尾部出现 agent 行（@ 候选 / finish 校验的数据源）
-      const agents = store.listMembers(g.id).filter((m) => m.kind === "agent");
-      expect(agents).toEqual([{ kind: "agent", id: mine.id, name: "架构师", avatar: null, user: null }]);
-
-      store.detachAgentFromGroup(g.id, mine.id);
-      store.detachAgentFromGroup(g.id, mine.id); // 幂等：未挂载再卸 no-op
-      expect(store.listAgentIds(g.id)).toEqual([]);
-      expect(store.listMembers(g.id).some((m) => m.kind === "agent")).toBe(false);
-    });
-
-    it("attach/detach 对不存在会话抛 conversation not found", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      const mine = store.createAgent(a.id, { name: "架构师", description: "" });
-      expect(() => store.attachAgentToGroup("ghost", mine.id)).toThrow("conversation not found");
-      expect(() => store.detachAgentFromGroup("ghost", mine.id)).toThrow("conversation not found");
-    });
-
-    it("attach 后 deleteAgent：会话关联同步清理，listMembers 不再含该 agent", () => {
-      const a = store.createUser("alice", "h", "爱丽丝");
-      const g = store.createGroup(a.id, "清理群", []);
-      const mine = store.createAgent(a.id, { name: "临时工", description: "" });
-      store.attachAgentToGroup(g.id, mine.id);
-      expect(store.listMembers(g.id).some((m) => m.id === mine.id)).toBe(true);
-
-      store.deleteAgent(mine.id, a.id);
-      expect(store.listAgentIds(g.id)).toEqual([]);
-      expect(store.listMembers(g.id).some((m) => m.id === mine.id)).toBe(false);
-    });
-
-    // —— 二期 IM Task 2：消息撤回（recallMessage 双实现同语义：权限 + 持久化）——
-
-    it("recallMessage 权限与持久化", () => {
-      const a = store.createUser("r1", "h", "甲");
-      const b = store.createUser("r2", "h", "乙");
-      // 直聊前置须为已接受好友（brief 片段省略，按既有口径补齐）
-      befriend(a.id, "r2", b.id);
-      const conv = store.createDirectConversation(a.id, b.id);
-      const m = store.addMessage(conv.id, "user", a.id, { text: "撤我" }, null);
-      expect(m.recalledAt).toBeNull(); // 新消息初值 null
-      expect(store.recallMessage(conv.id, m.id, b.id)).toBeNull();      // 非本人
-      expect(store.recallMessage(conv.id, "nope", a.id)).toBeNull();    // 不存在
-      const outsider = store.createUser("r3", "h", "丙");
-      expect(store.recallMessage(conv.id, m.id, outsider.id)).toBeNull(); // 非成员
-      const recalled = store.recallMessage(conv.id, m.id, a.id);
-      expect(recalled?.recalledAt).not.toBeNull();
-      expect(recalled?.payload.text).toBe("撤我"); // 返回更新后消息（内容不被清空）
-      expect(store.listMessages(conv.id)[0].recalledAt).not.toBeNull();
-    });
-
-    // —— M4 Task 1：共享文件落 Store（memory/sqlite 双实现持久化）——
-
-    describe("files", () => {
-      it("addFile/getFile/listFiles/deleteFile/userFileBytes", () => {
-        const u = store.createUser("fileu", "hash", "文件王");
-        const meta: SharedFileMeta = {
-          id: "f-1",
-          owner: "fileu",
-          name: "a.txt",
-          mime: "text/plain",
-          size: 5,
-          updatedAt: "2026-10-17T00:00:00.000Z",
-        };
-        store.addFile(meta, Buffer.from("hello").toString("base64"));
-        const got = store.getFile("f-1");
-        expect(got?.meta.name).toBe("a.txt");
-        expect(Buffer.from(got!.contentBase64, "base64").toString()).toBe("hello");
-        expect(store.listFiles().map((f) => f.id)).toContain("f-1");
-        expect(store.userFileBytes("fileu")).toBe(5);
-        expect(store.deleteFile("f-1")).toBe(true);
-        expect(store.getFile("f-1")).toBeNull();
-        expect(store.userFileBytes("fileu")).toBe(0);
-        void u;
+      const e2e = store.addMessage(conv.id, "user", a.id, { text: "" }, {
+        enc: "e2e",
+        cipher: "Q2lwaGVy",
+        chainKid: "kid1",
+        n: 2,
       });
-      it("getFile 不存在返回 null；deleteFile 不存在返回 false", () => {
-        expect(store.getFile("nope")).toBeNull();
-        expect(store.deleteFile("nope")).toBe(false);
+      expect(e2e).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 2 });
+
+      const plain = store.addMessage(conv.id, "user", a.id, { text: "旧明文" });
+      expect(store.reencryptMessage(plain.id, b.id, { cipher: "x" })).toEqual({
+        ok: false,
+        reason: "forbidden",
       });
-    });
-
-    // —— E2E Task 2：信封落库、明文重加密、公钥登记（memory/sqlite 双实现同语义）——
-
-    describe("e2e envelope", () => {
-      it("addMessage 信封参数：e2e 落 cipher/chainKid/n 并经 listMessages 回读；省略 envelope 缺省 plain", () => {
-        const a = store.createUser("e1", "h", "甲");
-        const g = store.createGroup(a.id, "信封群", []);
-        const e2e = store.addMessage(g.id, "user", a.id, { text: "" }, null, {
-          enc: "e2e",
-          cipher: "Q2lwaGVy",
-          chainKid: "kid1",
-          n: 7,
-        });
-        expect(e2e.enc).toBe("e2e");
-        expect(e2e.cipher).toBe("Q2lwaGVy");
-        expect(e2e.chainKid).toBe("kid1");
-        expect(e2e.n).toBe(7);
-
-        const plain = store.addMessage(g.id, "user", a.id, { text: "旧明文" }, null);
-        expect(plain.enc).toBe("plain");
-        expect(plain.cipher).toBeUndefined();
-        expect(plain.chainKid).toBeUndefined();
-        expect(plain.n).toBeUndefined();
-
-        const back = store.listMessages(g.id);
-        expect(back.find((m) => m.id === e2e.id)).toMatchObject({
-          enc: "e2e",
-          cipher: "Q2lwaGVy",
-          chainKid: "kid1",
-          n: 7,
-        });
-        expect(back.find((m) => m.id === plain.id)).toMatchObject({ enc: "plain" });
-        expect(back.find((m) => m.id === plain.id)?.cipher).toBeUndefined();
+      expect(store.reencryptMessage("nope", a.id, { cipher: "x" })).toEqual({
+        ok: false,
+        reason: "not_found",
       });
-
-      it("reencryptMessage 三态：本人 plain 成功换信封；非本人 forbidden；已 e2e conflict；不存在 not_found", () => {
-        const a = store.createUser("rr1", "h", "甲");
-        const b = store.createUser("rr2", "h", "乙");
-        befriend(a.id, "rr2", b.id);
-        const conv = store.createDirectConversation(a.id, b.id);
-        // 带正文 + 回复指向的明文行：重封须在同一次更新里把两者清掉（fix round 1 Critical）
-        const m = store.addMessage(conv.id, "user", a.id, { text: "旧明文" }, "r-old");
-
-        expect(store.reencryptMessage("ghost", a.id, { cipher: "Qw==" })).toEqual({
-          ok: false,
-          reason: "not_found",
-        });
-        // b 是会话成员但非 sender → forbidden（权限只看 senderId）
-        expect(store.reencryptMessage(m.id, b.id, { cipher: "Qw==" })).toEqual({
-          ok: false,
-          reason: "forbidden",
-        });
-
-        const ok = store.reencryptMessage(m.id, a.id, { cipher: "Q2lwaGVy", chainKid: "kid1", n: 2 });
-        expect(ok.ok).toBe(true);
-        if (ok.ok) {
-          // 原子替换信封四字段（enc/cipher/chain_kid/n）
-          expect(ok.message).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 2 });
-          // Critical（fix round 1）：同一更新内清明文——payload 空占位、reply_to 置 null
-          expect(ok.message.payload).toEqual({ text: "" });
-          expect(ok.message.replyTo).toBeNull();
-        }
-        // 二次重封 → conflict；持久化回读（出站 listMessages 对 e2e 不带任何明文）
-        expect(store.reencryptMessage(m.id, a.id, { cipher: "Qw==" })).toEqual({
-          ok: false,
-          reason: "conflict",
-        });
-        const listed = store.listMessages(conv.id)[0];
-        expect(listed).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy" });
-        expect(listed.payload).toEqual({ text: "" });
-        expect(listed.replyTo).toBeNull();
+      expect(store.reencryptMessage(e2e.id, a.id, { cipher: "x" })).toEqual({
+        ok: false,
+        reason: "conflict",
       });
-
-      it("reencryptMessage 对非 plain 初始消息（直接 e2e 入库）→ conflict", () => {
-        const a = store.createUser("rr3", "h", "甲");
-        const g = store.createGroup(a.id, "重封群", []);
-        const m = store.addMessage(g.id, "user", a.id, { text: "" }, null, {
-          enc: "e2e",
-          cipher: "AAA",
-        });
-        expect(store.reencryptMessage(m.id, a.id, { cipher: "BBB" })).toEqual({
-          ok: false,
-          reason: "conflict",
-        });
-      });
-    });
-
-    describe("e2e keys", () => {
-      it("upsertE2eDevice 按 ikEcdh upsert（SPK 轮换覆盖）；listE2eKeys 聚合多用户", () => {
-        const a = store.createUser("k1", "h", "甲");
-        const b = store.createUser("k2", "h", "乙");
-        const dev1 = {
-          ikEcdh: "AAAA",
-          ikSign: "BBBB",
-          spk: { pub: "CCCC", sig: "DDDD", createdAt: 1000 },
-        };
-        store.upsertE2eDevice(a.id, dev1);
-        // 同设备再登记（SPK 轮换）：不增行、覆盖字段
-        store.upsertE2eDevice(a.id, { ...dev1, spk: { pub: "EEEE", sig: "FFFF", createdAt: 2000 } });
-        // 第二台设备
-        store.upsertE2eDevice(a.id, {
-          ikEcdh: "GGGG",
-          ikSign: "HHHH",
-          spk: { pub: "IIII", sig: "JJJJ", createdAt: 3000 },
-        });
-        store.upsertE2eDevice(b.id, {
-          ikEcdh: "KKKK",
-          ikSign: "LLLL",
-          spk: { pub: "MMMM", sig: "NNNN", createdAt: 4000 },
-        });
-
-        const all = store.listE2eKeys();
-        expect(all[a.id]).toHaveLength(2);
-        expect(all[a.id].find((d) => d.ikEcdh === "AAAA")).toEqual({
-          ikEcdh: "AAAA",
-          ikSign: "BBBB",
-          spk: { pub: "EEEE", sig: "FFFF", createdAt: 2000 },
-        });
-        expect(all[a.id].find((d) => d.ikEcdh === "GGGG")).toMatchObject({ ikSign: "HHHH" });
-        expect(all[b.id]).toEqual([
-          { ikEcdh: "KKKK", ikSign: "LLLL", spk: { pub: "MMMM", sig: "NNNN", createdAt: 4000 } },
-        ]);
-        // 未登记用户不出现
-        expect(all).not.toHaveProperty("ghost");
-      });
-
-      it("listE2eKeys 未登记时为空对象", () => {
-        expect(store.listE2eKeys()).toEqual({});
-      });
-    });
-
-    describe("会话归档", () => {
-      /** 建两个好友 + 一条 direct 会话，返回双方 id 与会话 id（归档要验证「各人独立」）。 */
-      function directPair(): { aId: string; bId: string; convId: string } {
-        store.createUser("alice", "h", "爱丽丝");
-        store.createUser("bob", "h", "鲍勃");
-        const a = store.findUserByUsername("alice")!.user;
-        const b = store.findUserByUsername("bob")!.user;
-        befriend(a.id, "bob", b.id);
-        const conv = store.createDirectConversation(a.id, b.id);
-        return { aId: a.id, bId: b.id, convId: conv.id };
+      const ok = store.reencryptMessage(plain.id, a.id, { cipher: "Q2lwaGVy", chainKid: "k2", n: 9 });
+      expect(ok.ok).toBe(true);
+      if (ok.ok) {
+        expect(ok.message).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "k2", n: 9 });
+        expect(ok.message.payload).toEqual({ text: "" });
       }
+      expect(store.listMessages(conv.id).find((m) => m.id === plain.id)?.payload).toEqual({ text: "" });
+    });
 
-      const archivedOf = (userId: string, convId: string) =>
-        store.listConversations(userId).find((c) => c.id === convId)?.archivedAt ?? null;
+    it("e2e 设备公钥按 ikEcdh upsert，聚合多用户", () => {
+      const device = {
+        ikEcdh: "e1",
+        ikSign: "s1",
+        spk: { pub: "p1", sig: "sig1", createdAt: 1 },
+      };
+      store.upsertE2eDevice("u1", device);
+      store.upsertE2eDevice("u1", { ...device, ikSign: "s1b" });
+      store.upsertE2eDevice("u2", { ...device, ikEcdh: "e2" });
+      expect(store.listE2eKeys().u1).toHaveLength(1);
+      expect(store.listE2eKeys().u1[0].ikSign).toBe("s1b");
+      expect(store.listE2eKeys().u2[0].ikEcdh).toBe("e2");
+    });
 
-      it("默认未归档", () => {
-        const { aId, convId } = directPair();
-        expect(archivedOf(aId, convId)).toBeNull();
+    it("共享文件：增查列删与配额求和", () => {
+      store.createUser("alice", "h", "爱丽丝");
+      const meta = {
+        id: "f1",
+        owner: "alice",
+        name: "a.txt",
+        mime: "text/plain",
+        size: 2,
+        updatedAt: "2026-11-02T00:00:00.000Z",
+      };
+      expect(store.addFile(meta, "aGk=")).toEqual(meta);
+      expect(store.getFile("f1")?.contentBase64).toBe("aGk=");
+      expect(store.listFiles()).toHaveLength(1);
+      expect(store.userFileBytes("alice")).toBe(2);
+      expect(store.deleteFile("f1")).toBe(true);
+      expect(store.getFile("f1")).toBeNull();
+      expect(store.deleteFile("f1")).toBe(false);
+    });
+
+    it("团队名册：touchUser 刷新最近活跃，未活跃为 null", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      store.createUser("bob", "h", "鲍勃");
+      expect(store.listTeamMembers().every((m) => m.lastSeenAt === null)).toBe(true);
+      store.touchUser(a.id);
+      expect(store.listTeamMembers().find((m) => m.user.id === a.id)?.lastSeenAt).toBeTruthy();
+      store.touchUser("nope"); // 静默忽略
+    });
+
+    it("团队动向：(actorId, sourceId) 幂等、倒序、游标、actor 过滤与清空", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const base = {
+        kind: "task" as const,
+        title: "整理课程表",
+        occurredAt: "2026-11-01T08:00:00.000Z",
+      };
+      expect(store.addTeamActivity(a.id, { ...base, sourceId: "task:1" })).toBe(true);
+      expect(store.addTeamActivity(a.id, { ...base, sourceId: "task:1" })).toBe(false);
+      store.addTeamActivity(a.id, {
+        ...base,
+        title: "后一条",
+        sourceId: "task:2",
+        occurredAt: "2026-11-02T08:00:00.000Z",
       });
+      store.addTeamActivity(b.id, { ...base, sourceId: "task:1" });
 
-      it("归档后带时间，取消归档后回到 null", () => {
-        const { aId, convId } = directPair();
-        store.setConversationArchived(convId, aId, true);
-        const at = archivedOf(aId, convId);
-        expect(at).toBeTruthy();
-        expect(typeof at).toBe("string");
-
-        store.setConversationArchived(convId, aId, false);
-        expect(archivedOf(aId, convId)).toBeNull();
-      });
-
-      it("按成员独立：A 归档不影响 B（群聊/私聊都不该被别人的视图偏好改动）", () => {
-        const { aId, bId, convId } = directPair();
-        store.setConversationArchived(convId, aId, true);
-        expect(archivedOf(aId, convId)).toBeTruthy();
-        expect(archivedOf(bId, convId)).toBeNull();
-      });
-
-      it("重复归档幂等，不抛错", () => {
-        const { aId, convId } = directPair();
-        store.setConversationArchived(convId, aId, true);
-        expect(() => store.setConversationArchived(convId, aId, true)).not.toThrow();
-        expect(archivedOf(aId, convId)).toBeTruthy();
-      });
-
-      it("重复归档保留首次时间，不刷新成现在", () => {
-        const { aId, convId } = directPair();
-        store.setConversationArchived(convId, aId, true);
-        const first = archivedOf(aId, convId);
-
-        // 先确认时钟已推进到下一毫秒，否则两次时间戳可能相同、测不出差异。
-        const before = Date.now();
-        while (Date.now() === before) {
-          /* 忙等到毫秒推进 */
-        }
-        store.setConversationArchived(convId, aId, true);
-
-        // 归档页按归档时间倒序：若重复归档刷新时间，用户多点一次归档，
-        // 条目就会在列表里跳位——看起来像坏了。
-        expect(archivedOf(aId, convId)).toBe(first);
-      });
-
-      it("取消未归档的会话也不抛错", () => {
-        const { aId, convId } = directPair();
-        expect(() => store.setConversationArchived(convId, aId, false)).not.toThrow();
-      });
-
-      it("非成员不能归档（防越权改别人的视图）", () => {
-        const { convId } = directPair();
-        store.createUser("carol", "h", "卡罗尔");
-        const c = store.findUserByUsername("carol")!.user;
-        expect(() => store.setConversationArchived(convId, c.id, true)).toThrow();
-      });
-
-      it("不存在的会话抛错", () => {
-        const { aId } = directPair();
-        expect(() => store.setConversationArchived("no-such-conv", aId, true)).toThrow();
-      });
+      expect(store.listTeamActivities().map((x) => x.sourceId)).toEqual(["task:2", "task:1", "task:1"]);
+      expect(store.listTeamActivities({ actorId: b.id })).toHaveLength(1);
+      expect(
+        store.listTeamActivities({ before: "2026-11-02T00:00:00.000Z" }).map((x) => x.sourceId),
+      ).toEqual(["task:1", "task:1"]);
+      expect(store.listTeamActivities({ limit: 1 })).toHaveLength(1);
+      expect(store.clearTeamActivities(a.id)).toBe(2);
+      expect(store.listTeamActivities().map((x) => x.actorId)).toEqual([b.id]);
+      expect(() => store.addTeamActivity("nope", { ...base, sourceId: "x" })).toThrow("user not found");
     });
   });
 }

@@ -13,7 +13,6 @@ const base: PoseInput = {
   hasError: false,
   streaming: false,
   inputOpen: false,
-  unreadTotal: 0,
   celebrating: false,
 };
 
@@ -24,29 +23,21 @@ describe("姿态优先级", () => {
     expect(pose()).toBe("idle");
   });
 
-  it("出错最高优先：即便同时在说话/有未读，也报错态", () => {
+  it("出错最高优先：即便同时在说话，也报错态", () => {
     expect(pose({ hasError: true })).toBe("alerting");
-    expect(pose({ hasError: true, streaming: true, unreadTotal: 9 })).toBe("alerting");
+    expect(pose({ hasError: true, streaming: true })).toBe("alerting");
   });
 
   it("说话优先于开心（说到一半被点，不能闭嘴切动作）", () => {
     expect(pose({ streaming: true, celebrating: true })).toBe("speaking");
   });
 
-  it("开心优先于等待输入/未读（刚被摸的反馈要立刻给）", () => {
-    expect(pose({ celebrating: true, inputOpen: true, unreadTotal: 3 })).toBe("happy");
+  it("开心优先于等待输入（刚被摸的反馈要立刻给）", () => {
+    expect(pose({ celebrating: true, inputOpen: true })).toBe("happy");
   });
 
   it("输入框打开 → 等待输入", () => {
     expect(pose({ inputOpen: true })).toBe("listening");
-  });
-
-  it("有未读 → 提醒态", () => {
-    expect(pose({ unreadTotal: 1 })).toBe("alerting");
-  });
-
-  it("输入框打开且有未读：等待输入优先（人正在打字，别抢）", () => {
-    expect(pose({ inputOpen: true, unreadTotal: 5 })).toBe("listening");
   });
 });
 

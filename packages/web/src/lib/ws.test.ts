@@ -96,7 +96,7 @@ describe("connectWs", () => {
     const handle = connectWs({ onEvent: () => {} });
     expect(FakeWebSocket.instances).toHaveLength(1);
 
-    handle.send({ type: "mark_read", conversationId: "c1" });
+    handle.send({ type: "send_message", conversationId: "c1", payload: { text: "hi" } });
     expect(FakeWebSocket.instances[0].sent).toHaveLength(0);
 
     FakeWebSocket.instances[0].open();
@@ -108,8 +108,9 @@ describe("connectWs", () => {
     });
     // 业务帧在 auth 之后冲刷
     expect(JSON.parse(FakeWebSocket.instances[0].sent[1])).toEqual({
-      type: "mark_read",
+      type: "send_message",
       conversationId: "c1",
+      payload: { text: "hi" },
     });
     handle.close();
   });
@@ -184,7 +185,7 @@ describe("connectWs", () => {
     const handle = connectWs({ onEvent: () => {}, onSendError });
     expect(FakeWebSocket.instances).toHaveLength(0);
 
-    handle.send({ type: "mark_read", conversationId: "c1" });
+    handle.send({ type: "send_message", conversationId: "c1", payload: { text: "hi" } });
     expect(onSendError).toHaveBeenCalledTimes(1);
     expect(String(onSendError.mock.calls[0][0])).toMatch(/未登录|未发送/);
 
@@ -194,7 +195,7 @@ describe("connectWs", () => {
     expect(FakeWebSocket.instances.length).toBeGreaterThan(0);
     const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
     ws.open();
-    // 只有 auth 帧，没有 mark_read
+    // 只有 auth 帧，没有业务帧
     expect(ws.sent).toHaveLength(1);
     expect(JSON.parse(ws.sent[0])).toEqual({ type: "auth", token: "t1" });
     handle.close();
@@ -221,7 +222,7 @@ describe("connectWs", () => {
     const handle = connectWs({ onEvent: () => {}, onSendError });
 
     for (let i = 0; i < 101; i++) {
-      handle.send({ type: "mark_read", conversationId: `c${i}` });
+      handle.send({ type: "send_message", conversationId: `c${i}`, payload: { text: "x" } });
     }
     expect(onSendError).toHaveBeenCalledTimes(1);
     expect(String(onSendError.mock.calls[0][0])).toMatch(/队列已满|丢弃/);

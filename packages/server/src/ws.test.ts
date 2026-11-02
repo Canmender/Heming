@@ -1,13 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import net from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { createMemoryStore, Store } from "./store.js";
+import type { Store } from "./store.js";
 import { startServer } from "./index.js";
 import { issueToken } from "./auth.js";
-import { seedPreset } from "./preset.js";
 import type { WsServerEvent } from "@heming/shared";
 
 let ctx: Awaited<ReturnType<typeof startServer>>;
@@ -15,9 +14,10 @@ let store: Store;
 let aliceId: string;
 let bobId: string;
 let convId: string;
-let groupId: string;
-// 独占临时库：默认 ./data/heming.db 会跨文件并行锁冲突、跨次运行 alice 撞 UNIQUE（"username taken"）。
+let agentId: string;
 let dbDir: string;
+let aliceToken: string;
+let bobToken: string;
 
 function connect(token: string, port?: number): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
@@ -27,10 +27,6 @@ function connect(token: string, port?: number): Promise<WebSocket> {
   });
 }
 
-/**
- * 连上但**不带** query token —— 新客户端路径：连接建立后等首帧 {type:"auth", token}。
- * d.30 · P0-3 起 upgrade 阶段不再因 token 缺失/无效而 destroy 连接。
- */
 function connectWithoutToken(port?: number): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port ?? ctx.port}/api/ws`);
@@ -39,7 +35,6 @@ function connectWithoutToken(port?: number): Promise<WebSocket> {
   });
 }
 
-/** 等服务端关闭连接（ws.close() → 客户端收到 close 帧）。 */
 function waitClose(ws: WebSocket): Promise<void> {
   return new Promise((resolve) => {
     if (ws.readyState === WebSocket.CLOSED) {
@@ -57,7 +52,14 @@ function nextEvent(ws: WebSocket): Promise<WsServerEvent> {
   });
 }
 
-/** 用裸 TCP 完成合法 WS 升级握手（绕过 ws 客户端，以便随后发送非法协议帧）。 */
+/** 等服务端关闭连接前把已到的 error 帧取回来（鉴权失败路径）。 */
+async function nextEventBeforeClose(ws: WebSocket): Promise<WsServerEvent> {
+  return new Promise((resolve, reject) => {
+    ws.once("message", (data) => resolve(JSON.parse(data.toString())));
+    ws.once("error", reject);
+  });
+}
+
 function rawUpgrade(port: number, token: string): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const socket = net.connect(port, "127.0.0.1", () => {
@@ -88,7 +90,6 @@ function rawUpgrade(port: number, token: string): Promise<net.Socket> {
       }
     };
     socket.on("data", onData);
-    // 握手失败时 reject；握手成功后服务端按协议关闭导致的 RST 等也一并吞掉，避免测试进程未处理 error。
     socket.on("error", () => {
       reject(new Error("socket error during handshake"));
     });
@@ -103,9 +104,11 @@ beforeAll(async () => {
   const bob = store.createUser("bob", "h", "鲍勃");
   aliceId = alice.id;
   bobId = bob.id;
-  store.acceptFriendRequest(store.createFriendRequest(aliceId, "bob").id, bobId);
-  convId = store.createDirectConversation(aliceId, bobId).id;
-  groupId = store.createGroup(aliceId, "评审组", [bobId]).id;
+  aliceToken = issueToken(aliceId);
+  bobToken = issueToken(bobId);
+  const agent = store.createAgent(aliceId, { name: "助手", description: "" });
+  agentId = agent.id;
+  convId = store.createAgentConversation(aliceId, agent.id).id;
 });
 
 afterAll(async () => {
@@ -113,1358 +116,277 @@ afterAll(async () => {
   rmSync(dbDir, { recursive: true, force: true });
 });
 
-describe("ws", () => {
-  it("query token 非法不再拒绝握手：连接建起来等首帧鉴权", async () => {
-    // d.30 · P0-3：upgrade 阶段不再因 token 无效就 destroy 连接。
-    // 旧行为是握手直接失败（rejects.toThrow），现在改为「连上 → 首帧鉴权失败 → error + 关闭」。
-    const ws = await new Promise<WebSocket>((resolve, reject) => {
-      const s = new WebSocket(`ws://127.0.0.1:${ctx.port}/api/ws?token=bad-token`);
-      s.once("open", () => resolve(s));
-      s.once("error", reject);
-    });
-    const wait = nextEvent(ws);
-    ws.send(JSON.stringify({ type: "auth", token: "bad-token" }));
-    const event = await wait;
-    expect(event.type).toBe("error");
-    if (event.type === "error") expect(event.code).toBe("unauthorized");
-    await waitClose(ws);
+describe("ws 基础与人类 IM 删除", () => {
+  it("query token 连接可用（旧客户端路径）", async () => {
+    const ws = await connect(aliceToken);
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    ws.close();
   });
 
-  it("发送消息广播给会话成员并持久化", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({ type: "send_message", conversationId: convId, payload: { text: "你好 bob" } }));
-    const event = await bWait;
-    expect(event.type).toBe("message_new");
-    if (event.type === "message_new") {
-      expect(event.message.payload.text).toBe("你好 bob");
-      expect(event.message.senderId).toBe(aliceId);
-    }
-    expect(store.listMessages(convId)).toHaveLength(1);
-    a.close();
-    b.close();
+  it("发送消息广播给本人并持久化", async () => {
+    const ws = await connect(aliceToken);
+    const ev = nextEvent(ws);
+    ws.send(
+      JSON.stringify({
+        type: "send_message",
+        conversationId: convId,
+        payload: { text: "你好" },
+      }),
+    );
+    const msg = await ev;
+    expect(msg.type).toBe("message_new");
+    if (msg.type === "message_new") expect(msg.message.payload.text).toBe("你好");
+    expect(store.listMessages(convId).at(-1)?.payload.text).toBe("你好");
+    ws.close();
   });
 
   it("非成员发送被拒且不入库", async () => {
-    const stranger = store.createUser("eve", "h", "夏娃");
-    const s = await connect(issueToken(stranger.id));
-    const wait = nextEvent(s);
-    s.send(JSON.stringify({ type: "send_message", conversationId: convId, payload: { text: "x" } }));
-    const event = await wait;
-    expect(event.type).toBe("error");
-    s.close();
-    expect(store.listMessages(convId)).toHaveLength(1);
+    const ws = await connect(bobToken);
+    const ev = nextEvent(ws);
+    ws.send(JSON.stringify({ type: "send_message", conversationId: convId, payload: { text: "混进来" } }));
+    const res = await ev;
+    expect(res).toMatchObject({ type: "error", code: "forbidden" });
+    expect(store.listMessages(convId).every((m) => m.payload.text !== "混进来")).toBe(true);
+    ws.close();
   });
 
-  it("群聊：成员发送广播给其他成员并持久化", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({ type: "send_message", conversationId: groupId, payload: { text: "群消息" } }));
-    const event = await bWait;
-    expect(event.type).toBe("message_new");
-    if (event.type === "message_new") {
-      expect(event.message.conversationId).toBe(groupId);
-      expect(event.message.payload.text).toBe("群消息");
-      expect(event.message.senderId).toBe(aliceId);
+  it("mark_read / typing / recall_message / 语音等已删除事件一律拒收且不广播", async () => {
+    const ws = await connect(aliceToken);
+    for (const event of [
+      { type: "mark_read", conversationId: convId },
+      { type: "typing", conversationId: convId },
+      { type: "recall_message", conversationId: convId, messageId: "m" },
+      { type: "voice_call_invite", conversationId: convId, callId: "c", sdp: "s" },
+    ]) {
+      const ev = nextEvent(ws);
+      ws.send(JSON.stringify(event));
+      const res = await ev;
+      expect(res).toMatchObject({ type: "error", code: "bad_event" });
     }
-    expect(store.listMessages(groupId)).toHaveLength(1);
-    a.close();
-    b.close();
+    ws.close();
   });
 
-  it("群聊：非成员发送收 forbidden 且不入库", async () => {
-    const stranger = store.createUser("carol", "h", "卡罗尔");
-    const s = await connect(issueToken(stranger.id));
-    const wait = nextEvent(s);
-    s.send(JSON.stringify({ type: "send_message", conversationId: groupId, payload: { text: "x" } }));
-    const event = await wait;
-    expect(event.type).toBe("error");
-    if (event.type === "error") expect(event.code).toBe("forbidden");
-    s.close();
-    expect(store.listMessages(groupId)).toHaveLength(1);
-  });
-
-  it("非法事件回 error", async () => {
-    const a = await connect(issueToken(aliceId));
-    const wait = nextEvent(a);
-    a.send(JSON.stringify({ type: "boom" }));
-    const event = await wait;
-    expect(event.type).toBe("error");
-    if (event.type === "error") expect(event.code).toBe("bad_event");
-    a.close();
-  });
-
-  it("mark_read 广播 read_update", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
-    const event = await bWait;
-    expect(event.type).toBe("read_update");
-    // F5（L3 内容契约）：read_update 携带会话与读用户
-    if (event.type === "read_update") {
-      expect(event.conversationId).toBe(convId);
-      expect(event.userId).toBe(aliceId);
-    }
-    a.close();
-    b.close();
-  });
-
-  it("typing：成员转发、非成员 forbidden、1 秒内第二条静默丢弃", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const stranger = store.createUser(`typing-eve-${Date.now()}`, "h", "夏娃");
-    const s = await connect(issueToken(stranger.id));
-
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({ type: "typing", conversationId: convId }));
-    const event = await bWait;
-    expect(event).toMatchObject({ type: "typing", conversationId: convId, userId: aliceId });
-
-    // 1 秒内第二条：静默丢弃，不再转发
-    let extra = 0;
-    const count = () => {
-      extra += 1;
-    };
-    b.on("message", count);
-    a.send(JSON.stringify({ type: "typing", conversationId: convId }));
-    await new Promise((r) => setTimeout(r, 100));
-    b.off("message", count);
-    expect(extra).toBe(0);
-
-    // 非成员：走通用 forbidden，不广播
-    const sWait = nextEvent(s);
-    s.send(JSON.stringify({ type: "typing", conversationId: convId }));
-    const err = await sWait;
-    expect(err.type).toBe("error");
-    if (err.type === "error") expect(err.code).toBe("forbidden");
-
-    // 超过 1 秒窗口后恢复转发（防「永久丢弃」回归）
-    await new Promise((r) => setTimeout(r, 1100));
-    const bWaitAgain = nextEvent(b);
-    a.send(JSON.stringify({ type: "typing", conversationId: convId }));
-    const again = await bWaitAgain;
-    expect(again).toMatchObject({ type: "typing", conversationId: convId, userId: aliceId });
-
-    a.close();
-    b.close();
-    s.close();
-  });
-
-  it("mark_read 持久化：广播后 REST reads 可见", async () => {
-    const a = store.createUser(`alice-${Date.now()}`, "h", "A");
-    const b = store.createUser(`bob-${Date.now()}`, "h", "B");
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const conv = store.createDirectConversation(a.id, b.id);
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-    const wait = nextEvent(wsB);
-    wsA.send(JSON.stringify({ type: "mark_read", conversationId: conv.id }));
-    const ev = await wait;
-    expect(ev.type).toBe("read_update");
-    // F5（L3 内容契约）：read_update 携带会话与读用户
-    if (ev.type === "read_update") {
-      expect(ev.conversationId).toBe(conv.id);
-      expect(ev.userId).toBe(a.id);
-    }
-    expect(store.listReads(conv.id).some((r) => r.userId === a.id)).toBe(true);
-    wsA.close();
-    wsB.close();
-  });
-
-  it("recall_message：非发送者被拒（无广播），本人撤回广播 message_recalled", async () => {
-    const a = store.createUser(`rl-a-${Date.now()}`, "h", "甲");
-    const b = store.createUser(`rl-b-${Date.now()}`, "h", "乙");
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const conv = store.createDirectConversation(a.id, b.id);
-    const m = store.addMessage(conv.id, "user", a.id, { text: "撤我" }, null);
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-
-    // b 撤 a 的消息 → 错误帧回给发起者 b（forbidden），且不落库、不广播
-    const aSilent = nextEvent(wsA).then(() => "got" as const);
-    const bErr = nextEvent(wsB);
-    wsB.send(JSON.stringify({ type: "recall_message", conversationId: conv.id, messageId: m.id }));
-    const errEv = await bErr;
-    expect(errEv.type).toBe("error");
-    if (errEv.type === "error") expect(errEv.code).toBe("forbidden");
-    expect(store.listMessages(conv.id)[0].recalledAt).toBeNull(); // 未持久化
-    // a 未收到任何广播帧（message_recalled 不出现）
-    const raced = await Promise.race([
-      aSilent,
-      new Promise((r) => setTimeout(() => r("none" as const), 100)),
-    ]);
-    expect(raced).toBe("none");
-
-    // a 撤回自己的消息 → b 收到 message_recalled（messageId/会话匹配）
-    const bWait = nextEvent(wsB);
-    wsA.send(JSON.stringify({ type: "recall_message", conversationId: conv.id, messageId: m.id }));
-    const ev = await bWait;
-    expect(ev.type).toBe("message_recalled");
-    if (ev.type === "message_recalled") {
-      expect(ev.conversationId).toBe(conv.id);
-      expect(ev.messageId).toBe(m.id);
-      expect(ev.at).toBeTruthy();
-    }
-    expect(store.listMessages(conv.id)[0].recalledAt).not.toBeNull();
-    wsA.close();
-    wsB.close();
-  });
-
-  it("react_message 已废（E2E Task 2）：事件拒收 bad_event，不入库、不广播、不误触 mark_read", async () => {
-    // 设计 §4：表情回应改为 kind=reaction 的 e2e 信封消息（按普通 send_message 入库），
-    // react_message 客户端事件从 shared 契约移除 → parse 失败回 bad_event。
-    const a = store.createUser(`rx-a-${Date.now()}`, "h", "甲");
-    const b = store.createUser(`rx-b-${Date.now()}`, "h", "乙");
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const conv = store.createDirectConversation(a.id, b.id);
-    const m = store.addMessage(conv.id, "user", a.id, { text: "求回应" }, null);
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-
-    const aErr = nextEvent(wsA);
-    // 用**真实**消息 id：若服务端仍按旧 toggle 处理会改 payload 并广播——以下断言即红
-    wsA.send(JSON.stringify({ type: "react_message", conversationId: conv.id, messageId: m.id, emoji: "👍" }));
-    const ev = await aErr;
-    expect(ev.type).toBe("error");
-    if (ev.type === "error") expect(ev.code).toBe("bad_event");
-    // 不入库（reactions 无落点）
-    expect(store.listMessages(conv.id)[0].payload.reactions).toBeUndefined();
-    // 对端静默：既无任何广播，也未落入 mark_read 兜底广播 read_update
-    const raced = await Promise.race([
-      nextEvent(wsB).then(() => "got" as const),
-      new Promise((r) => setTimeout(() => r("none" as const), 100)),
-    ]);
-    expect(raced).toBe("none");
-    expect(store.listReads(conv.id)).toHaveLength(0); // mark_read 未被误执行
-
-    wsA.close();
-    wsB.close();
-  });
-
-  it("enc=e2e send_message：跳过内容校验直接信封入库并广播（服务端不落 payload/replyTo）", async () => {
-    const a = store.createUser(`e2-a-${Date.now()}`, "h", "甲");
-    const b = store.createUser(`e2-b-${Date.now()}`, "h", "乙");
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const conv = store.createDirectConversation(a.id, b.id).id;
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-
-    const wait = nextEvent(wsB);
-    wsA.send(
+  it("e2e send_message：只见信封直接入库并广播（payload 占位）", async () => {
+    const ws = await connect(aliceToken);
+    const ev = nextEvent(ws);
+    ws.send(
       JSON.stringify({
         type: "send_message",
-        conversationId: conv,
-        // 明文字段故意带内容与 replyTo：e2e 路径不读不落（内容与回复指向只进密文）
-        payload: { text: "服务端不该存我" },
-        replyTo: "reply-target-should-stay-in-cipher",
+        conversationId: convId,
+        payload: { text: "" },
         enc: "e2e",
-        cipher: "Q2lwaGVyZGF0YQ==",
+        cipher: "Q2lwaGVy",
         chainKid: "kid1",
-        n: 3,
+        n: 7,
       }),
     );
-    const ev = await wait;
-    expect(ev.type).toBe("message_new");
-    if (ev.type === "message_new") {
-      expect(ev.message.enc).toBe("e2e");
-      expect(ev.message.cipher).toBe("Q2lwaGVyZGF0YQ==");
-      expect(ev.message.chainKid).toBe("kid1");
-      expect(ev.message.n).toBe(3);
-      expect(ev.message.payload.text).toBe(""); // 服务端只见信封
-      expect(ev.message.replyTo).toBeNull();
-      expect(ev.message.senderId).toBe(a.id);
+    const res = await ev;
+    expect(res.type).toBe("message_new");
+    if (res.type === "message_new") {
+      expect(res.message).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 7 });
+      expect(res.message.payload).toEqual({ text: "" });
     }
-    const stored = store.listMessages(conv);
-    expect(stored).toHaveLength(1);
-    expect(stored[0]).toMatchObject({
-      enc: "e2e",
-      cipher: "Q2lwaGVyZGF0YQ==",
-      chainKid: "kid1",
-      n: 3,
-      replyTo: null,
-    });
-    expect(stored[0].payload.text).toBe("");
-    wsA.close();
-    wsB.close();
+    ws.close();
   });
 
-  it("e2e 缺 cipher / 空 cipher 与 plain 夹带 cipher 均拒（bad_event）不入库", async () => {
-    const a = store.createUser(`e2-c-${Date.now()}`, "h", "甲");
-    const conv = store.createGroup(a.id, "信封校验群", []).id;
-    const wsA = await connect(issueToken(a.id));
-    const cases: Array<Record<string, unknown>> = [
-      { enc: "e2e" }, // 缺 cipher
-      { enc: "e2e", cipher: "" }, // 空 cipher
-      { cipher: "Q2lwaGVy" }, // 缺 enc 默认 plain + 夹 cipher
-      { enc: "plain", cipher: "Q2lwaGVy" }, // 显式 plain + cipher
-    ];
-    for (const extra of cases) {
-      const wait = nextEvent(wsA);
-      wsA.send(JSON.stringify({ type: "send_message", conversationId: conv, payload: { text: "x" }, ...extra }));
-      const ev = await wait;
-      expect(ev.type).toBe("error");
-      if (ev.type === "error") expect(ev.code).toBe("bad_event");
-    }
-    expect(store.listMessages(conv)).toHaveLength(0);
-    wsA.close();
+  it("e2e 缺 cipher / plain 夹带 cipher 均拒（bad_event）", async () => {
+    const ws = await connect(aliceToken);
+    let ev = nextEvent(ws);
+    ws.send(JSON.stringify({ type: "send_message", conversationId: convId, payload: { text: "" }, enc: "e2e" }));
+    expect(await ev).toMatchObject({ type: "error", code: "bad_event" });
+    ev = nextEvent(ws);
+    ws.send(
+      JSON.stringify({
+        type: "send_message",
+        conversationId: convId,
+        payload: { text: "x" },
+        enc: "plain",
+        cipher: "Q2lwaGVy",
+      }),
+    );
+    expect(await ev).toMatchObject({ type: "error", code: "bad_event" });
+    ws.close();
   });
 
-  it("协议错误帧不崩溃 server，后续连接仍可用", async () => {
-    const raw = await rawUpgrade(ctx.port, issueToken(aliceId));
-    // 0xC1 0x00 = FIN + RSV1 + opcode text、无 mask：无 permessage-deflate 协商时
-    // 服务端 receiver 抛 ProtocolError → WebSocket 'error'（无监听器则进程级未捕获异常）。
-    raw.write(Buffer.from([0xc1, 0x00]));
-    raw.destroy();
-    // 断言 server 未崩溃：正常客户端仍可完成一轮广播回环。
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
-    const event = await bWait;
-    expect(event.type).toBe("read_update");
-    a.close();
-    b.close();
-  });
-
-  // —— 语音通话信令（Task 2）——
-
-  it("voice_call_invite 定向投递给 peer（非全群广播）", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: convId,
-      callId: "call-test-1",
-      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
-    }));
-    const event = await bWait;
-    expect(event.type).toBe("voice_call_invite");
-    if (event.type === "voice_call_invite") {
-      expect(event.callId).toBe("call-test-1");
-      expect(event.sdp).toContain("v=0");
-    }
-    a.close();
-    b.close();
-  });
-
-  it("voice_call_accept 定向投递给 initiator", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    // 先 invite 建立通话状态
-    const bInviteWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: convId,
-      callId: "call-test-3",
-      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
-    }));
-    await bInviteWait;
-    // b accept → a 收到 accept
-    const aWait = nextEvent(a);
-    b.send(JSON.stringify({
-      type: "voice_call_accept",
-      conversationId: convId,
-      callId: "call-test-3",
-      sdp: "v=0\r\no=- 2 2 IN IP4 0.0.0.0",
-    }));
-    const event = await aWait;
-    expect(event.type).toBe("voice_call_accept");
-    if (event.type === "voice_call_accept") {
-      expect(event.callId).toBe("call-test-3");
-    }
-    a.close();
-    b.close();
-  });
-
-  it("voice_call_hangup 定向投递给其他参与者", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    // 先 invite 建立通话状态
-    const bInviteWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: convId,
-      callId: "call-test-4",
-      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
-    }));
-    await bInviteWait;
-    // a hangup → b 收到 hangup
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_hangup",
-      conversationId: convId,
-      callId: "call-test-4",
-    }));
-    const event = await bWait;
-    expect(event.type).toBe("voice_call_hangup");
-    if (event.type === "voice_call_hangup") {
-      expect(event.callId).toBe("call-test-4");
-    }
-    a.close();
-    b.close();
-  });
-
-  it("voice_call_ice 定向投递给其他参与者", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    // 先 invite 建立通话状态
-    const bInviteWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: convId,
-      callId: "call-test-5",
-      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
-    }));
-    await bInviteWait;
-    // a ice → b 收到 ice
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_ice",
-      conversationId: convId,
-      callId: "call-test-5",
-      candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
-    }));
-    const event = await bWait;
-    expect(event.type).toBe("voice_call_ice");
-    if (event.type === "voice_call_ice") {
-      expect(event.callId).toBe("call-test-5");
-      expect(event.candidate).toContain("candidate:1");
-    }
-    a.close();
-    b.close();
-  });
-
-  it("voice_call_reconnect 定向转发给其他参与者并补 fromUserId，call 状态不受影响", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bInviteWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: convId,
-      callId: "call-test-reconnect",
-      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
-    }));
-    await bInviteWait;
-    // b 的 ICE 断了 → 重启后把新 offer 转给 a
-    const aWait = nextEvent(a);
-    b.send(JSON.stringify({
-      type: "voice_call_reconnect",
-      conversationId: convId,
-      callId: "call-test-reconnect",
-      sdp: "v=0 restart-offer",
-      sdpType: "offer",
-    }));
-    const event = await aWait;
-    expect(event.type).toBe("voice_call_reconnect");
-    if (event.type === "voice_call_reconnect") {
-      expect(event.callId).toBe("call-test-reconnect");
-      expect(event.sdp).toBe("v=0 restart-offer");
-      expect(event.sdpType).toBe("offer");
-      expect(event.fromUserId).toBe(bobId);
-    }
-    // a 回 answer 给 b
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_reconnect",
-      conversationId: convId,
-      callId: "call-test-reconnect",
-      sdp: "v=0 restart-answer",
-      sdpType: "answer",
-    }));
-    const back = await bWait;
-    expect(back.type).toBe("voice_call_reconnect");
-    if (back.type === "voice_call_reconnect") {
-      expect(back.sdpType).toBe("answer");
-      expect(back.fromUserId).toBe(aliceId);
-    }
-    // 重连后照常 hangup 说明服务端 call 还在（重连不该把通话状态清掉）
-    const hangWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_hangup",
-      conversationId: convId,
-      callId: "call-test-reconnect",
-    }));
-    expect((await hangWait).type).toBe("voice_call_hangup");
-    a.close();
-    b.close();
-  });
-
-  it("未知 callId 的 voice_call_reconnect 回 forbidden（不给陌生通话搭车）", async () => {
-    const a = await connect(issueToken(aliceId));
-    const wait = nextEvent(a);
-    a.send(JSON.stringify({
-      type: "voice_call_reconnect",
-      conversationId: convId,
-      callId: "call-nope",
-      sdp: "v=0",
-      sdpType: "offer",
-    }));
-    const event = await wait;
-    expect(event.type).toBe("error");
-    if (event.type === "error") expect(event.code).toBe("forbidden");
-    a.close();
-  });
-
-  it("非成员发 voice_call_invite 收 forbidden", async () => {
-    const stranger = store.createUser("eve2", "h", "夏娃2");
-    const s = await connect(issueToken(stranger.id));
-    const wait = nextEvent(s);
-    s.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: convId,
-      callId: "call-test-6",
-      sdp: "v=0",
-    }));
-    const event = await wait;
-    expect(event.type).toBe("error");
-    if (event.type === "error") expect(event.code).toBe("forbidden");
-    s.close();
-  });
-
-  it("voice_call_invite 定向投递带 fromUserId=发起方（Mesh 对端路由）", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: convId,
-      callId: "call-from-1",
-      sdp: "v=0\r\no=- 1 2 IN IP4 0.0.0.0",
-    }));
-    const event = await bWait;
-    expect(event.type).toBe("voice_call_invite");
-    if (event.type === "voice_call_invite") {
-      expect(event.fromUserId).toBe(aliceId);
-    }
-    a.close();
-    b.close();
-  });
-
-  it("voice_call_accept 定向投递带 fromUserId=接收方", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bInviteWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: convId,
-      callId: "call-from-2",
-      sdp: "v=0",
-    }));
-    await bInviteWait;
-    const aWait = nextEvent(a);
-    b.send(JSON.stringify({
-      type: "voice_call_accept",
-      conversationId: convId,
-      callId: "call-from-2",
-      sdp: "v=0",
-    }));
-    const event = await aWait;
-    expect(event.type).toBe("voice_call_accept");
-    if (event.type === "voice_call_accept") {
-      expect(event.fromUserId).toBe(bobId);
-    }
-    a.close();
-    b.close();
-  });
-
-  it("voice_call_ice 定向投递带 fromUserId=发送方", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bInviteWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: convId,
-      callId: "call-from-3",
-      sdp: "v=0",
-    }));
-    await bInviteWait;
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_ice",
-      conversationId: convId,
-      callId: "call-from-3",
-      candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
-    }));
-    const event = await bWait;
-    expect(event.type).toBe("voice_call_ice");
-    if (event.type === "voice_call_ice") {
-      expect(event.fromUserId).toBe(aliceId);
-    }
-    a.close();
-    b.close();
-  });
-
-  it("群聊 voice_call_invite 投递给所有其他成员（非发起方），各带 fromUserId", async () => {
-    // groupId：alice（发起方）+ bob。alice 发 invite → bob 收到且 fromUserId=alice。
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: groupId,
-      callId: "call-group-1",
-      sdp: "v=0",
-    }));
-    const event = await bWait;
-    expect(event.type).toBe("voice_call_invite");
-    if (event.type === "voice_call_invite") {
-      expect(event.conversationId).toBe(groupId);
-      expect(event.fromUserId).toBe(aliceId);
-    }
-    a.close();
-    b.close();
-  });
-
-  it("群聊 voice_call_ice 投递给其他参与者（非发起方）", async () => {
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bInviteWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_invite",
-      conversationId: groupId,
-      callId: "call-group-2",
-      sdp: "v=0",
-    }));
-    await bInviteWait;
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({
-      type: "voice_call_ice",
-      conversationId: groupId,
-      callId: "call-group-2",
-      candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
-    }));
-    const event = await bWait;
-    expect(event.type).toBe("voice_call_ice");
-    if (event.type === "voice_call_ice") {
-      expect(event.conversationId).toBe(groupId);
-      expect(event.fromUserId).toBe(aliceId);
-    }
-    a.close();
-    b.close();
+  it("附件随明文消息原样入库并广播", async () => {
+    const ws = await connect(aliceToken);
+    const ev = nextEvent(ws);
+    const file = { id: "f1", name: "a.txt", mime: "text/plain", size: 2 };
+    ws.send(JSON.stringify({ type: "send_message", conversationId: convId, payload: { text: "", file } }));
+    const res = await ev;
+    expect(res.type).toBe("message_new");
+    if (res.type === "message_new") expect(res.message.payload.file).toEqual(file);
+    ws.close();
   });
 });
 
-describe("agent streaming", () => {
-  it("chunk 转发不入库；finish 入库并带 streamId 的 message_new", async () => {
-    // 修正版首用例（brief）：先建两个用户再 seedPreset，使其自动入预设群（system-assistant 已挂）。
-    const a = store.createUser(`aa-${Date.now()}`, "h", "A");
-    const b = store.createUser(`bb-${Date.now()}`, "h", "B");
-    const seed = seedPreset(store);
-    if (!seed) throw new Error("seed failed");
-    const g = { id: seed.groupId };
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-
-    const chunkWait = nextEvent(wsB);
-    wsA.send(JSON.stringify({ type: "agent_chunk", conversationId: g.id, agentId: "system-assistant", streamId: "s1", text: "你" }));
-    const chunkEv = await chunkWait;
-    expect(chunkEv.type).toBe("agent_chunk");
-    expect(store.listMessages(g.id)).toHaveLength(0);
-
-    const finishWait = nextEvent(wsB);
-    wsA.send(JSON.stringify({ type: "agent_finish", conversationId: g.id, agentId: "system-assistant", streamId: "s1", text: "你好，我是和小鸣" }));
-    const finishEv = await finishWait;
-    expect(finishEv.type).toBe("message_new");
-    if (finishEv.type === "message_new") {
-      expect(finishEv.streamId).toBe("s1");
-      expect(finishEv.message.senderType).toBe("agent");
-      expect(finishEv.message.senderId).toBe("system-assistant");
-    }
-    const msgs = store.listMessages(g.id);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0].payload.text).toBe("你好，我是和小鸣");
-    wsA.close(); wsB.close();
-  });
-
-  it("agent 不在群内时 finish 被拒且不入库", async () => {
-    const a = store.createUser(`ac-${Date.now()}`, "h", "A");
-    const g2 = store.createGroup(a.id, "孤群", []);
-    const wsA = await connect(issueToken(a.id));
-    const wait = nextEvent(wsA);
-    wsA.send(JSON.stringify({ type: "agent_finish", conversationId: g2.id, agentId: "not-in-group-agent", streamId: "s2", text: "x" }));
-    const ev = await wait;
-    expect(ev.type).toBe("agent_error");
-    if (ev.type === "agent_error") expect(ev.code).toBe("forbidden");
-    expect(store.listMessages(g2.id)).toHaveLength(0);
-    wsA.close();
-  });
-
-  it("非成员 chunk 被拒", async () => {
-    const a = store.createUser(`ad-${Date.now()}`, "h", "A");
-    const c = store.createUser(`ae-${Date.now()}`, "h", "C");
-    const g3 = store.createGroup(a.id, "外群", []);
-    const wsC = await connect(issueToken(c.id));
-    const wait = nextEvent(wsC);
-    wsC.send(JSON.stringify({ type: "agent_chunk", conversationId: g3.id, agentId: "system-assistant", streamId: "s3", text: "x" }));
-    const ev = await wait;
-    expect(ev.type).toBe("agent_error");
-    wsC.close();
-  });
-
-  it("agent_error 成员广播不入库；非成员被拒回 forbidden", async () => {
-    // 设计 §3「双向广播」：触发端流失败时把 agent_error 广播给会话全员（不入库）。
-    // shared 的 WsClientEventSchema 暂未含该客户端类型（Task 1 遗漏），服务端按
-    // 服务端同形状 schema 直通校验——此用例锁广播与非成员拒绝行为。
-    const a = store.createUser(`af-${Date.now()}`, "h", "A");
-    const g4 = store.createGroup(a.id, "错群", []);
-    const wsA = await connect(issueToken(a.id));
-    const wait = nextEvent(wsA);
-    wsA.send(JSON.stringify({ type: "agent_error", conversationId: g4.id, agentId: "system-assistant", streamId: "s4", code: "provider_error", message: "401" }));
-    const ev = await wait;
-    expect(ev.type).toBe("agent_error");
-    if (ev.type === "agent_error") {
-      expect(ev.code).toBe("provider_error");
-      expect(ev.streamId).toBe("s4");
-    }
-    expect(store.listMessages(g4.id)).toHaveLength(0);
-    wsA.close();
-
-    const c = store.createUser(`ag-${Date.now()}`, "h", "C");
-    const wsC = await connect(issueToken(c.id));
-    const wait2 = nextEvent(wsC);
-    wsC.send(JSON.stringify({ type: "agent_error", conversationId: g4.id, agentId: "system-assistant", streamId: "s5", code: "aborted", message: "x" }));
-    const ev2 = await wait2;
-    expect(ev2.type).toBe("agent_error");
-    if (ev2.type === "agent_error") expect(ev2.code).toBe("forbidden");
-    expect(store.listMessages(g4.id)).toHaveLength(0);
-    wsC.close();
-  });
-
-  it("agent_finish 空文本被拒（bad_event）不入库", async () => {
-    // F2：shared 的 finish text 保持宽松入站（无 min），服务端对 trim 空串拒收。
-    const a = store.createUser(`aj-${Date.now()}`, "h", "A");
-    const g5 = store.createGroup(a.id, "空群", []);
-    const wsA = await connect(issueToken(a.id));
-    const wait = nextEvent(wsA);
-    wsA.send(JSON.stringify({ type: "agent_finish", conversationId: g5.id, agentId: "system-assistant", streamId: "s6", text: "   " }));
-    const ev = await wait;
-    expect(ev.type).toBe("agent_error");
-    if (ev.type === "agent_error") {
-      expect(ev.code).toBe("bad_event");
-      expect(ev.message).toBe("empty text");
-    }
-    expect(store.listMessages(g5.id)).toHaveLength(0);
-    wsA.close();
-  });
-
-  it("agent_finish 文本超 20000 被 shared schema 拒（bad_event）不入库", async () => {
-    // I4：finish.text 上限与 MessagePayloadSchema.text 对齐（防「schema 过了、入库即违规」）
-    const a = store.createUser(`ak-${Date.now()}`, "h", "A");
-    const g6 = store.createGroup(a.id, "超长群", []);
-    const wsA = await connect(issueToken(a.id));
-    const wait = nextEvent(wsA);
-    wsA.send(JSON.stringify({
-      type: "agent_finish",
-      conversationId: g6.id,
-      agentId: "system-assistant",
-      streamId: "s7",
-      text: "x".repeat(20001),
-    }));
-    const ev = await wait;
-    expect(ev.type).toBe("error");
-    if (ev.type === "error") expect(ev.code).toBe("bad_event");
-    expect(store.listMessages(g6.id)).toHaveLength(0);
-    wsA.close();
-  });
-
-  it("send_message 携带 mentions 落库并随 message_new 广播（无 streamId）", async () => {
-    // Task 1 concern#2/#3：payload.mentions 往返契约 + send_message 广播不带 streamId。
-    const a = store.createUser(`ah-${Date.now()}`, "h", "A");
-    const b = store.createUser(`ai-${Date.now()}`, "h", "B");
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const conv = store.createDirectConversation(a.id, b.id).id;
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-    const wait = nextEvent(wsB);
-    wsA.send(JSON.stringify({
-      type: "send_message",
-      conversationId: conv,
-      payload: { text: "@和小鸣 看下", mentions: [{ agentId: "system-assistant", name: "和小鸣" }] },
-    }));
-    const ev = await wait;
-    expect(ev.type).toBe("message_new");
-    if (ev.type === "message_new") {
-      expect(ev.message.payload.mentions).toEqual([{ agentId: "system-assistant", name: "和小鸣" }]);
-      expect(ev.streamId).toBeUndefined();
-    }
-    const msgs = store.listMessages(conv);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0].payload.mentions).toEqual([{ agentId: "system-assistant", name: "和小鸣" }]);
-    wsA.close();
-    wsB.close();
-  });
-
-  it("send_message 携带 file 原样入库并广播（text 空串纯附件）", async () => {
-    // UI 完善 Task 1：payload.file 往返契约，text 为空串（纯附件消息）也能过 shared schema 并落库。
-    const a = store.createUser(`am-${Date.now()}`, "h", "A");
-    const b = store.createUser(`an-${Date.now()}`, "h", "B");
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const conv = store.createDirectConversation(a.id, b.id).id;
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-    const wait = nextEvent(wsB);
-    wsA.send(JSON.stringify({
-      type: "send_message",
-      conversationId: conv,
-      payload: { text: "", file: { id: "f1", name: "a.png", mime: "image/png", size: 3 } },
-    }));
-    const ev = await wait;
-    expect(ev.type).toBe("message_new");
-    if (ev.type === "message_new") {
-      expect(ev.message.payload.text).toBe("");
-      expect(ev.message.payload.file).toEqual({ id: "f1", name: "a.png", mime: "image/png", size: 3 });
-    }
-    const msgs = store.listMessages(conv);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0].payload.text).toBe("");
-    expect(msgs[0].payload.file).toEqual({ id: "f1", name: "a.png", mime: "image/png", size: 3 });
-    wsA.close();
-    wsB.close();
-  });
-
-  it("send_message 携带 forward 落库并随 message_new 广播", async () => {
-    // 二期 IM Task 4：payload.forward 往返契约（同 mentions/file 透传断言模式）。
-    const a = store.createUser(`ao-${Date.now()}`, "h", "A");
-    const b = store.createUser(`ap-${Date.now()}`, "h", "B");
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const conv = store.createDirectConversation(a.id, b.id).id;
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-    const wait = nextEvent(wsB);
-    wsA.send(JSON.stringify({
-      type: "send_message",
-      conversationId: conv,
-      payload: {
-        text: "转发的正文",
-        mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
-        file: { id: "f1", name: "a.png", mime: "image/png", size: 3 },
-        forward: { from: "爱丽丝", source: "评审组" },
-      },
-    }));
-    const ev = await wait;
-    expect(ev.type).toBe("message_new");
-    if (ev.type === "message_new") {
-      expect(ev.message.payload.forward).toEqual({ from: "爱丽丝", source: "评审组" });
-      expect(ev.message.payload.text).toBe("转发的正文");
-      expect(ev.message.payload.file).toEqual({ id: "f1", name: "a.png", mime: "image/png", size: 3 });
-    }
-    const msgs = store.listMessages(conv);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0].payload.forward).toEqual({ from: "爱丽丝", source: "评审组" });
-    wsA.close();
-    wsB.close();
-  });
-
-  // —— E2E Task 4：agent 流式信封（chunk 广播透传 / finish 按信封入库）——
-
-  it("密文 agent_chunk：广播透传 cipher/chainKid/n/index（text 空串），不入库", async () => {
-    const a = store.createUser(`ch-${Date.now()}`, "h", "A");
-    const b = store.createUser(`ci-${Date.now()}`, "h", "B");
-    seedPreset(store); // 只为登记 system-assistant 名册元数据（预设群不复用——其消息序列跨用例污染断言）
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const g = store.createGroup(a.id, "密文chunk群", [b.id]);
-    store.attachAgentToGroup(g.id, "system-assistant");
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-
-    const wait = nextEvent(wsB);
-    wsA.send(
+describe("agent 流式", () => {
+  it("chunk 广播不入库；finish 入库并带 streamId", async () => {
+    const ws = await connect(aliceToken);
+    const chunkEv = nextEvent(ws);
+    ws.send(
       JSON.stringify({
         type: "agent_chunk",
-        conversationId: g.id,
-        agentId: "system-assistant",
-        streamId: "sc1",
+        conversationId: convId,
+        agentId,
+        streamId: "s1",
+        text: "半句",
+      }),
+    );
+    expect(await chunkEv).toEqual({
+      type: "agent_chunk",
+      conversationId: convId,
+      agentId,
+      streamId: "s1",
+      text: "半句",
+    });
+    expect(store.listMessages(convId).every((m) => m.payload.text !== "半句")).toBe(true);
+
+    const finishEv = nextEvent(ws);
+    ws.send(
+      JSON.stringify({
+        type: "agent_finish",
+        conversationId: convId,
+        agentId,
+        streamId: "s1",
+        text: "完整回复",
+      }),
+    );
+    const fin = await finishEv;
+    expect(fin).toMatchObject({ type: "message_new", streamId: "s1" });
+    if (fin.type === "message_new") expect(fin.message.payload.text).toBe("完整回复");
+    ws.close();
+  });
+
+  it("agentId 与会话助手不符时 finish 被拒且不入库", async () => {
+    const ws = await connect(aliceToken);
+    const ev = nextEvent(ws);
+    ws.send(
+      JSON.stringify({
+        type: "agent_finish",
+        conversationId: convId,
+        agentId: "other-agent",
+        streamId: "s2",
+        text: "冒名",
+      }),
+    );
+    expect(await ev).toMatchObject({ type: "agent_error", code: "forbidden" });
+    expect(store.listMessages(convId).every((m) => m.payload.text !== "冒名")).toBe(true);
+    ws.close();
+  });
+
+  it("非成员 chunk 被拒；空 finish 被拒", async () => {
+    const stranger = await connect(bobToken);
+    let ev = nextEvent(stranger);
+    stranger.send(
+      JSON.stringify({ type: "agent_chunk", conversationId: convId, agentId, streamId: "s3", text: "x" }),
+    );
+    expect(await ev).toMatchObject({ type: "agent_error", code: "forbidden" });
+    stranger.close();
+
+    const ws = await connect(aliceToken);
+    ev = nextEvent(ws);
+    ws.send(
+      JSON.stringify({ type: "agent_finish", conversationId: convId, agentId, streamId: "s4", text: "   " }),
+    );
+    expect(await ev).toMatchObject({ type: "agent_error", code: "bad_event" });
+    ws.close();
+  });
+
+  it("密文 chunk 透传 cipher/chainKid/n/index，不入库", async () => {
+    const ws = await connect(aliceToken);
+    const ev = nextEvent(ws);
+    ws.send(
+      JSON.stringify({
+        type: "agent_chunk",
+        conversationId: convId,
+        agentId,
+        streamId: "s5",
         text: "",
-        cipher: "Q2lwaGVyZGF0YQ==",
-        chainKid: "k1",
-        n: 7,
+        cipher: "Q2h1bms=",
+        chainKid: "kid1",
+        n: 1,
         index: 0,
       }),
     );
-    const ev = await wait;
-    expect(ev.type).toBe("agent_chunk");
-    if (ev.type === "agent_chunk") {
-      expect(ev.text).toBe("");
-      expect(ev.cipher).toBe("Q2lwaGVyZGF0YQ==");
-      expect(ev.chainKid).toBe("k1");
-      expect(ev.n).toBe(7);
-      expect(ev.index).toBe(0);
-    }
-    expect(store.listMessages(g.id)).toHaveLength(0); // chunk 不入库（同明文路径）
-    wsA.close();
-    wsB.close();
-  });
-
-  it("密文 agent_finish：text 空串过 F2 拒收，按 e2e 信封入库并广播 message_new", async () => {
-    const a = store.createUser(`cj-${Date.now()}`, "h", "A");
-    const b = store.createUser(`ck-${Date.now()}`, "h", "B");
-    seedPreset(store);
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const g = store.createGroup(a.id, "密文finish群", [b.id]);
-    store.attachAgentToGroup(g.id, "system-assistant");
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-
-    const wait = nextEvent(wsB);
-    wsA.send(
-      JSON.stringify({
-        type: "agent_finish",
-        conversationId: g.id,
-        agentId: "system-assistant",
-        streamId: "sf1",
-        text: "",
-        cipher: "ZmluaXNoLWNpcGhlcg==",
-        chainKid: "k1",
-        n: 8,
-      }),
-    );
-    const ev = await wait;
-    expect(ev.type).toBe("message_new");
-    if (ev.type === "message_new") {
-      expect(ev.message.enc).toBe("e2e");
-      expect(ev.message.cipher).toBe("ZmluaXNoLWNpcGhlcg==");
-      expect(ev.message.chainKid).toBe("k1");
-      expect(ev.message.n).toBe(8);
-      expect(ev.message.payload.text).toBe(""); // 服务端只见信封
-      expect(ev.message.senderType).toBe("agent");
-      expect(ev.streamId).toBe("sf1");
-    }
-    const msgs = store.listMessages(g.id);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]).toMatchObject({ enc: "e2e", cipher: "ZmluaXNoLWNpcGhlcg==", payload: { text: "" } });
-    wsA.close();
-    wsB.close();
-  });
-
-  it("密文 agent_finish 缺 chainKid/n 与夹明文 text 均拒（bad_event）不入库", async () => {
-    const a = store.createUser(`cl-${Date.now()}`, "h", "A");
-    seedPreset(store);
-    const g = store.createGroup(a.id, "密文finish拒收群", []);
-    store.attachAgentToGroup(g.id, "system-assistant");
-    const wsA = await connect(issueToken(a.id));
-    const cases: Array<Record<string, unknown>> = [
-      { text: "", cipher: "Qw==" }, // 缺 chainKid/n
-      { text: "", cipher: "Qw==", chainKid: "k1" }, // 缺 n
-      { text: "", cipher: "Qw==", n: 0 }, // 缺 chainKid
-      { text: "明文", cipher: "Qw==", chainKid: "k1", n: 0 }, // 夹明文
-      { text: "", cipher: "", chainKid: "k1", n: 0 }, // 空 cipher
-    ];
-    for (const extra of cases) {
-      const wait = nextEvent(wsA);
-      wsA.send(
-        JSON.stringify({
-          type: "agent_finish",
-          conversationId: g.id,
-          agentId: "system-assistant",
-          streamId: "sf2",
-          ...extra,
-        }),
-      );
-      const ev = await wait;
-      expect(ev.type).toBe("error");
-      if (ev.type === "error") expect(ev.code).toBe("bad_event");
-    }
-    expect(store.listMessages(g.id)).toHaveLength(0);
-    wsA.close();
-  });
-  it("密文 agent_error：广播透传 cipher/chainKid/n（message 空串），不入库", async () => {
-    const a = store.createUser(`cm-${Date.now()}`, "h", "A");
-    const b = store.createUser(`cn-${Date.now()}`, "h", "B");
-    seedPreset(store);
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const g = store.createGroup(a.id, "密文error群", [b.id]);
-    store.attachAgentToGroup(g.id, "system-assistant");
-    const wsA = await connect(issueToken(a.id));
-    const wsB = await connect(issueToken(b.id));
-
-    const wait = nextEvent(wsB);
-    wsA.send(
-      JSON.stringify({
-        type: "agent_error",
-        conversationId: g.id,
-        agentId: "system-assistant",
-        streamId: "se1",
-        code: "provider_error",
-        message: "",
-        cipher: "ZXJyb3ItY2lwaGVy",
-        chainKid: "k1",
-        n: 3,
-      }),
-    );
-    const ev = await wait;
-    expect(ev.type).toBe("agent_error");
-    if (ev.type === "agent_error") {
-      expect(ev.message).toBe("");
-      expect(ev.cipher).toBe("ZXJyb3ItY2lwaGVy");
-      expect(ev.chainKid).toBe("k1");
-      expect(ev.n).toBe(3);
-      expect(ev.code).toBe("provider_error"); // code 非敏感，明文保留（收端降级文案拼接用）
-    }
-    expect(store.listMessages(g.id)).toHaveLength(0);
-    wsA.close();
-    wsB.close();
+    expect(await ev).toMatchObject({
+      type: "agent_chunk",
+      cipher: "Q2h1bms=",
+      chainKid: "kid1",
+      n: 1,
+      index: 0,
+      text: "",
+    });
+    ws.close();
   });
 });
 
-
-describe("voice_call 多连接清理（T2 评审修复）", () => {
-  it("用户仍有其他连接时断开一个连接，不误断进行中的通话", async () => {
-    // 同一用户开两条连接（多设备/多标签页）：invite 建立通话后关掉其中一条，
-    // 对端不应收到 hangup（旧实现无条件 cleanupCallsForUser 会误断）。
-    // 用收集器而非 nextEvent 竞态：连接关闭后可能有其他事件，只断言窗口内
-    // 没有 voice_call_hangup 即可。
-    const a1 = await connect(issueToken(aliceId));
-    const a2 = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bEvents: WsServerEvent[] = [];
-    b.on("message", (d) => bEvents.push(JSON.parse(d.toString())));
-
-    const bInvite = nextEvent(b);
-    a1.send(
-      JSON.stringify({
-        type: "voice_call_invite",
-        conversationId: convId,
-        callId: "call-multiconn-1",
-        sdp: "v=0",
-      }),
-    );
-    await bInvite;
-
-    // 关掉 a1，但 a2 仍在线
-    a1.close();
-    await new Promise((r) => setTimeout(r, 200));
-
-    expect(bEvents.some((e) => e.type === "voice_call_hangup")).toBe(false);
-    // 通话仍在：a2 发 ice 应正常投递
-    bEvents.length = 0;
-    const bIce = nextEvent(b);
-    a2.send(
-      JSON.stringify({
-        type: "voice_call_ice",
-        conversationId: convId,
-        callId: "call-multiconn-1",
-        candidate: "candidate:1 1 udp 2130706431 1.2.3.4 9999 typ host",
-      }),
-    );
-    expect((await bIce).type).toBe("voice_call_ice");
-
-    a2.close();
-    b.close();
-  });
-
-  it("最后一个连接断开时才补发 hangup", async () => {
-    const a1 = await connect(issueToken(aliceId));
-    const a2 = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-
-    const bInvite = nextEvent(b);
-    a1.send(
-      JSON.stringify({
-        type: "voice_call_invite",
-        conversationId: convId,
-        callId: "call-multiconn-2",
-        sdp: "v=0",
-      }),
-    );
-    await bInvite;
-
-    a1.close();
-    a2.close();
-
-    // 两条都断开后，b 应收到补发的 hangup
-    const bHangup = nextEvent(b);
-    const event = await bHangup;
-    expect(event.type).toBe("voice_call_hangup");
-    if (event.type === "voice_call_hangup") {
-      expect(event.callId).toBe("call-multiconn-2");
-    }
-
-    b.close();
-  });
-});
-
-describe("ringing 超时兜底（C3）", () => {
-  it("超时未接听的通话自动向双方补发 reject(timeout) 并清理 activeCalls", async () => {
-    // 用独立 server 实例注入短超时（200ms）+ 短扫描间隔（50ms），避免 fake timers 破坏 WS 连接
-    const { createServer } = await import("node:http");
-    const { attachWs } = await import("./ws.js");
-    const httpServer = createServer();
-    attachWs(httpServer, store, { ringTimeoutMs: 200, ringSweepIntervalMs: 50 });
-    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
-    const address = httpServer.address();
-    const port = typeof address === "object" && address ? address.port : 0;
-
-    const a = await connect(issueToken(aliceId), port);
-    const b = await connect(issueToken(bobId), port);
-
-    const aReject = nextEvent(a);
-    const bInvite = nextEvent(b);
-    a.send(
-      JSON.stringify({
-        type: "voice_call_invite",
-        conversationId: convId,
-        callId: "call-timeout-1",
-        sdp: "v=0",
-      }),
-    );
-    // 被叫先收到 invite（不清，模拟无人接听）
-    await bInvite;
-
-    // 超时后：发起方收到 reject(timeout)，被叫收到 hangup
-    const bHangup = nextEvent(b);
-    const aEvent = await aReject;
-    expect(aEvent.type).toBe("voice_call_reject");
-    if (aEvent.type === "voice_call_reject") {
-      expect(aEvent.callId).toBe("call-timeout-1");
-      expect(aEvent.reason).toBe("timeout");
-    }
-    const bEvent = await bHangup;
-    expect(bEvent.type).toBe("voice_call_hangup");
-    if (bEvent.type === "voice_call_hangup") {
-      expect(bEvent.callId).toBe("call-timeout-1");
-    }
-
-    a.close();
-    b.close();
-    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-  });
-});
-
-describe("WS 首帧鉴权（d.30 · P0-3）", () => {
-  it("首帧 auth 成功后业务事件正常（mark_read → read_update）", async () => {
-    const a = await connectWithoutToken();
-    const b = await connectWithoutToken();
-    // 双方先各自鉴权
-    a.send(JSON.stringify({ type: "auth", token: issueToken(aliceId) }));
-    b.send(JSON.stringify({ type: "auth", token: issueToken(bobId) }));
-
-    // 等 b 真正登记进 socketsByUser：b 自己发一条 mark_read，广播只发给**已登记**的
-    // socket —— b 收到自己这条 read_update 即证明登记完成（不靠 sleep 猜时序）。
-    const bSelf = nextEvent(b);
-    b.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
-    expect((await bSelf).type).toBe("read_update");
-
-    // a 的 mark_read → b 收到 read_update（userId = a）
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
-    const event = await bWait;
-    expect(event.type).toBe("read_update");
-    if (event.type === "read_update") {
-      expect(event.conversationId).toBe(convId);
-      expect(event.userId).toBe(aliceId);
-    }
-    a.close();
-    b.close();
-  });
-
-  it("auth 失败（错 token）→ 收到 error(unauthorized) 且连接被关闭", async () => {
+describe("WS 鉴权", () => {
+  it("首帧 auth 成功后业务事件正常", async () => {
     const ws = await connectWithoutToken();
-    const wait = nextEvent(ws);
-    ws.send(JSON.stringify({ type: "auth", token: "not-a-valid-token" }));
-    const event = await wait;
-    expect(event.type).toBe("error");
-    if (event.type === "error") {
-      expect(event.code).toBe("unauthorized");
-    }
-    await waitClose(ws);
-    expect(ws.readyState).toBe(WebSocket.CLOSED);
+    ws.send(JSON.stringify({ type: "auth", token: aliceToken }));
+    // 鉴权成功本身不回执；发一条业务事件确认已登记
+    const ev = nextEvent(ws);
+    ws.send(JSON.stringify({ type: "send_message", conversationId: convId, payload: { text: "鉴权后" } }));
+    expect((await ev).type).toBe("message_new");
+    ws.close();
   });
 
-  it("未鉴权时发业务事件 → 收不到任何业务事件，且连接被关闭", async () => {
-    // 结构性保证：未鉴权 socket 从未登记进 socketsByUser ⇒ 广播路径够不着它。
+  it("auth 失败 → error(unauthorized) 且连接关闭", async () => {
     const ws = await connectWithoutToken();
-    const events: WsServerEvent[] = [];
-    ws.on("message", (d) => events.push(JSON.parse(d.toString())));
-
-    ws.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
+    const ev = nextEventBeforeClose(ws);
+    ws.send(JSON.stringify({ type: "auth", token: "bad-token" }));
+    expect(await ev).toMatchObject({ type: "error", code: "unauthorized" });
     await waitClose(ws);
-
-    // 没有任何业务事件（read_update 不来），只有未授权错误
-    expect(events.some((e) => e.type === "read_update")).toBe(false);
-    expect(events.some((e) => e.type === "message_new")).toBe(false);
-    expect(events.length).toBe(1);
-    expect(events[0].type).toBe("error");
-    if (events[0].type === "error") expect(events[0].code).toBe("unauthorized");
   });
 
-  it("超时未鉴权 → 服务端主动断开连接", async () => {
-    // 用独立 server 实例注入短鉴权超时（200ms），避免等默认 10s
-    const { createServer } = await import("node:http");
-    const { attachWs } = await import("./ws.js");
-    const httpServer = createServer();
-    attachWs(httpServer, store, { authTimeoutMs: 200 });
-    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
-    const address = httpServer.address();
-    const port = typeof address === "object" && address ? address.port : 0;
-
-    const ws = await connectWithoutToken(port);
-    const events: WsServerEvent[] = [];
-    ws.on("message", (d) => events.push(JSON.parse(d.toString())));
-
-    // 不发 auth 帧 → 超时后服务端关闭
+  it("未鉴权发业务事件 → 连接被关闭且不广播", async () => {
+    const ws = await connectWithoutToken();
+    const ev = nextEventBeforeClose(ws);
+    ws.send(JSON.stringify({ type: "send_message", conversationId: convId, payload: { text: "未鉴权" } }));
+    expect(await ev).toMatchObject({ type: "error", code: "unauthorized" });
     await waitClose(ws);
-    expect(ws.readyState).toBe(WebSocket.CLOSED);
-    expect(events.length).toBe(1);
-    expect(events[0].type).toBe("error");
-    if (events[0].type === "error") expect(events[0].code).toBe("unauthorized");
-
-    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    expect(store.listMessages(convId).every((m) => m.payload.text !== "未鉴权")).toBe(true);
   });
 
-  it("query token（旧客户端路径）仍能连并正常工作", async () => {
-    // 兼容位：已发布的旧桌面包把 token 拼在 query 上，服务端升级后不能断链。
-    // 这条路径**本轮不删**（要等所有在网客户端升级后再删）。
-    const a = await connect(issueToken(aliceId));
-    const b = await connect(issueToken(bobId));
-    const bWait = nextEvent(b);
-    a.send(JSON.stringify({ type: "mark_read", conversationId: convId }));
-    const event = await bWait;
-    expect(event.type).toBe("read_update");
-    if (event.type === "read_update") {
-      expect(event.conversationId).toBe(convId);
-      expect(event.userId).toBe(aliceId);
-    }
-    a.close();
-    b.close();
+  it("协议错误帧不崩溃 server，后续连接仍可用", async () => {
+    const socket = await rawUpgrade(ctx.port, aliceToken);
+    socket.write("this is not a websocket frame");
+    socket.destroy();
+    const ws = await connect(aliceToken);
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    ws.close();
   });
 });
 
-// —— d.38 typing 对抗用例（adversarial QA 2026-10-28）——
-describe("typing 对抗（d.38）", () => {
-  /**
-   * 连上并确认服务端已把本 socket 登记进 socketsByUser：
-   * 用自身 mark_read 的回声（广播含发送者）当登记信号，避免 connect 后立即广播的登记竞态。
-   */
-  async function connectRegistered(userId: string, conversationId: string): Promise<WebSocket> {
-    const ws = await connect(issueToken(userId));
-    const self = nextEvent(ws);
-    ws.send(JSON.stringify({ type: "mark_read", conversationId }));
-    expect((await self).type).toBe("read_update");
-    return ws;
-  }
+describe("团队在线状态", () => {
+  it("WS 连接登记在线，最后一个连接断开后下线", async () => {
+    // 独立用户：其他用例的 socket 关闭是异步的，混用 alice 会让在线计数不确定。
+    const carol = store.createUser("carol", "h", "卡萝");
+    const carolToken = issueToken(carol.id);
+    const readTeam = async () => {
+      const res = await fetch(`http://127.0.0.1:${ctx.port}/api/team`, {
+        headers: { Authorization: `Bearer ${carolToken}` },
+      });
+      return (await res.json()) as { members: { user: { id: string }; online: boolean }[]; onlineCount: number };
+    };
+    const ws1 = await connect(carolToken);
+    const ws2 = await connect(carolToken);
+    let team = await readTeam();
+    expect(team.members.find((m) => m.user.id === carol.id)?.online).toBe(true);
 
-  /** 每次用例独立三名用户 + 群（避开 1s 节流与既有会话的消息计数互相污染）。 */
-  function freshGroup() {
-    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const a = store.createUser(`ty-a-${suffix}`, "h", "甲");
-    const b = store.createUser(`ty-b-${suffix}`, "h", "乙");
-    const c = store.createUser(`ty-c-${suffix}`, "h", "丙");
-    // createGroup 要求成员与创建者是好友（store 的成员校验口径）
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    store.acceptFriendRequest(store.createFriendRequest(a.id, c.username).id, c.id);
-    const g = store.createGroup(a.id, `输入群-${suffix}`, [b.id, c.id]);
-    return { a, b, c, g };
-  }
-
-  /** 每次用例独立私聊（两名成员）。 */
-  function freshDirect() {
-    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const a = store.createUser(`td-a-${suffix}`, "h", "甲");
-    const b = store.createUser(`td-b-${suffix}`, "h", "乙");
-    store.acceptFriendRequest(store.createFriendRequest(a.id, b.username).id, b.id);
-    const conv = store.createDirectConversation(a.id, b.id);
-    return { a, b, conv };
-  }
-
-  it("S1：群聊 typing 扇出给所有成员（bob 与 carol 都收到，userId=alice）", async () => {
-    const { a, b, c, g } = freshGroup();
-    const wsA = await connectRegistered(a.id, g.id);
-    const wsB = await connectRegistered(b.id, g.id);
-    const wsC = await connectRegistered(c.id, g.id);
-
-    const bWait = nextEvent(wsB);
-    const cWait = nextEvent(wsC);
-    wsA.send(JSON.stringify({ type: "typing", conversationId: g.id }));
-    const [eb, ec] = await Promise.all([bWait, cWait]);
-    expect(eb).toMatchObject({ type: "typing", conversationId: g.id, userId: a.id });
-    expect(ec).toMatchObject({ type: "typing", conversationId: g.id, userId: a.id });
-
-    wsA.close();
-    wsB.close();
-    wsC.close();
-  });
-
-  it("S2：typing 夹带 text/userId 等额外字段被剥离，userId 由服务端身份决定", async () => {
-    const { a, b, conv } = freshDirect();
-    const wsA = await connectRegistered(a.id, conv.id);
-    const wsB = await connectRegistered(b.id, conv.id);
-
-    const bWait = nextEvent(wsB);
-    wsA.send(
-      JSON.stringify({
-        type: "typing",
-        conversationId: conv.id,
-        text: "SECRET",
-        userId: "spoofed",
-      }),
-    );
-    const ev = await bWait;
-    // 精确相等：未知字段被 schema strip，userId 不可伪造
-    expect(ev).toEqual({ type: "typing", conversationId: conv.id, userId: a.id });
-    expect(Object.prototype.hasOwnProperty.call(ev, "text")).toBe(false);
-
-    wsA.close();
-    wsB.close();
-  });
-
-  it("S3：typing 缺 conversationId 回 bad_event 且不广播", async () => {
-    const { a, b, conv } = freshDirect();
-    const wsA = await connectRegistered(a.id, conv.id);
-    const wsB = await connectRegistered(b.id, conv.id);
-
-    const bEvents: WsServerEvent[] = [];
-    wsB.on("message", (d) => bEvents.push(JSON.parse(d.toString())));
-    const aErr = nextEvent(wsA);
-    wsA.send(JSON.stringify({ type: "typing" }));
-    const errEv = await aErr;
-    expect(errEv.type).toBe("error");
-    if (errEv.type === "error") expect(errEv.code).toBe("bad_event");
-
-    await new Promise((r) => setTimeout(r, 150));
-    expect(bEvents).toHaveLength(0);
-
-    wsA.close();
-    wsB.close();
-  });
-
-  it("S4：typing 不落库，也不被误当 mark_read 广播 read_update", async () => {
-    const { a, b, conv } = freshDirect();
-    const wsA = await connectRegistered(a.id, conv.id);
-    const wsB = await connectRegistered(b.id, conv.id);
-
-    const before = store.listMessages(conv.id).length;
-    const bWait = nextEvent(wsB);
-    wsA.send(JSON.stringify({ type: "typing", conversationId: conv.id }));
-    expect((await bWait).type).toBe("typing");
-    expect(store.listMessages(conv.id).length).toBe(before);
-
-    // 投递窗口内不得出现 read_update / message_new（typing 不能掉进 else 的已读分支）
-    const bAfter: WsServerEvent[] = [];
-    wsB.on("message", (d) => bAfter.push(JSON.parse(d.toString())));
-    await new Promise((r) => setTimeout(r, 150));
-    expect(bAfter.filter((e) => e.type === "read_update" || e.type === "message_new")).toHaveLength(0);
-
-    wsA.close();
-    wsB.close();
-  });
-
-  it("S5：发送者自己的 socket 也会收到 typing 广播（客户端负责过滤自己）", async () => {
-    const { a, b, conv } = freshDirect();
-    const wsA = await connectRegistered(a.id, conv.id);
-    const wsB = await connectRegistered(b.id, conv.id);
-
-    const aWait = nextEvent(wsA);
-    const bWait = nextEvent(wsB);
-    wsA.send(JSON.stringify({ type: "typing", conversationId: conv.id }));
-    const [ea, eb] = await Promise.all([aWait, bWait]);
-    expect(ea).toMatchObject({ type: "typing", conversationId: conv.id, userId: a.id });
-    expect(eb).toMatchObject({ type: "typing", conversationId: conv.id, userId: a.id });
-
-    wsA.close();
-    wsB.close();
+    ws1.close();
+    await waitClose(ws1);
+    team = await readTeam();
+    expect(team.members.find((m) => m.user.id === carol.id)?.online).toBe(true); // 还有一条连接
+    ws2.close();
+    await waitClose(ws2);
+    // close 事件在服务端异步处理，轮询等待
+    for (let i = 0; i < 40; i++) {
+      team = await readTeam();
+      if (!team.members.find((m) => m.user.id === carol.id)?.online) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(team.members.find((m) => m.user.id === carol.id)?.online).toBe(false);
   });
 });

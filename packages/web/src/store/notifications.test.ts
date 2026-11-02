@@ -26,7 +26,7 @@ beforeEach(() => {
 function makeItem(overrides: Partial<AppNotification> = {}): AppNotification {
   return {
     id: `ntf-${Math.random().toString(36).slice(2, 8)}`,
-    kind: "message",
+    kind: "task",
     key: `message:${Math.random().toString(36).slice(2, 8)}`,
     title: "鲍勃",
     body: "在吗",
@@ -40,10 +40,10 @@ function makeItem(overrides: Partial<AppNotification> = {}): AppNotification {
 describe("normalizeNotification / pruneNotifications / readNotifications", () => {
   it("非对象、缺 id/key、未知 kind、无标题都丢弃", () => {
     expect(normalizeNotification(null)).toBeNull();
-    expect(normalizeNotification({ kind: "message", key: "k", title: "t" })).toBeNull();
-    expect(normalizeNotification({ id: "1", key: "", title: "t", kind: "message" })).toBeNull();
+    expect(normalizeNotification({ kind: "task", key: "k", title: "t" })).toBeNull();
+    expect(normalizeNotification({ id: "1", key: "", title: "t", kind: "task" })).toBeNull();
     expect(
-      normalizeNotification({ id: "1", key: "k", title: "   ", kind: "message", createdAt: 1 }),
+      normalizeNotification({ id: "1", key: "k", title: "   ", kind: "task", createdAt: 1 }),
     ).toBeNull();
     expect(normalizeNotification({ id: "1", key: "k", title: "t", kind: "sms", createdAt: 1 })).toBeNull();
   });
@@ -88,7 +88,7 @@ describe("normalizeNotification / pruneNotifications / readNotifications", () =>
 describe("useNotificationStore", () => {
   it("push 新条目为未读并落盘；同 key 再 push 返回 null 不重复", () => {
     const id = useNotificationStore.getState().push({
-      kind: "message",
+      kind: "task",
       key: "message:m1",
       title: "鲍勃",
       body: "在吗",
@@ -98,22 +98,22 @@ describe("useNotificationStore", () => {
     expect(unreadCount(useNotificationStore.getState().items)).toBe(1);
     expect(readNotifications(storage)).toHaveLength(1);
     expect(
-      useNotificationStore.getState().push({ kind: "message", key: "message:m1", title: "鲍勃" }),
+      useNotificationStore.getState().push({ kind: "task", key: "message:m1", title: "鲍勃" }),
     ).toBeNull();
     expect(useNotificationStore.getState().items).toHaveLength(1);
   });
 
   it("空 key / 空标题不入库", () => {
-    expect(useNotificationStore.getState().push({ kind: "message", key: "", title: "x" })).toBeNull();
+    expect(useNotificationStore.getState().push({ kind: "task", key: "", title: "x" })).toBeNull();
     expect(
-      useNotificationStore.getState().push({ kind: "message", key: "k", title: "  \n " }),
+      useNotificationStore.getState().push({ kind: "task", key: "k", title: "  \n " }),
     ).toBeNull();
     expect(useNotificationStore.getState().items).toEqual([]);
   });
 
   it("markRead 只动一条；重复调用不改变引用；markAllRead 清零未读", () => {
-    const a = useNotificationStore.getState().push({ kind: "message", key: "k1", title: "A" });
-    useNotificationStore.getState().push({ kind: "message", key: "k2", title: "B" });
+    const a = useNotificationStore.getState().push({ kind: "task", key: "k1", title: "A" });
+    useNotificationStore.getState().push({ kind: "task", key: "k2", title: "B" });
     useNotificationStore.getState().markRead(a as string);
     expect(unreadCount(useNotificationStore.getState().items)).toBe(1);
 
@@ -148,7 +148,7 @@ describe("useNotificationStore", () => {
       ),
     });
     useNotificationStore.getState().push({
-      kind: "message",
+      kind: "task",
       key: "newest",
       title: "最新",
       now: 9_000,
@@ -195,7 +195,7 @@ describe("approval 通知与 removeByKey（d.34）", () => {
     useNotificationStore.setState({
       items: [
         makeItem({ key: "approval:req-1", kind: "approval", title: "待确认" }),
-        makeItem({ key: "message:m1", kind: "message", title: "消息" }),
+        makeItem({ key: "message:m1", kind: "task", title: "消息" }),
         makeItem({ key: "task:t1", kind: "task", title: "任务" }),
       ],
     });

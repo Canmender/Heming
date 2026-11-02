@@ -1,15 +1,10 @@
 import { create } from "zustand";
-import type { Agent, Conversation, Member, Message, ReadState, User, WsServerEvent } from "@heming/shared";
+import type { Agent, Conversation, Message, WsServerEvent } from "@heming/shared";
 import {
   fetchConversations,
-  fetchFriends,
-  fetchIncomingRequests,
-  createConversation,
   createAgentConversation,
   fetchMessages,
-  fetchMembers,
   reencryptMessage,
-  api,
 } from "../lib/api.js";
 import { listAgents } from "../lib/agentsApi.js";
 import type { RouteAttempt } from "../lib/llmClient.js";
@@ -72,39 +67,26 @@ function toInput(m: Message): E2eOpenInput {
 }
 
 /**
- * 密文明文体 → 可渲染消息形态：payload 三件套（text/mentions/file/forward）与 replyTo
- * 全部来自密文（服务端库里的 payload 恒为 {text:""} 占位），enc 保持 "e2e"
- *（plain 自迁移扫描依赖 enc 判别，且渲染层据此找 plainById 占位）。
+ * 密文明文体 → 可渲染消息形态：payload 的 text/file 全部来自密文（服务端库里的
+ * payload 恒为 {text:""} 占位），enc 保持 "e2e"（plain 自迁移扫描依赖 enc 判别，
+ * 且渲染层据此找 plainById 占位）。
+ *
+ * d.54：人类 IM 已删除，密文体只剩 text / file 两类正文（mentions/forward/replyTo
+ * 随聊天功能一并下线；chaindist/chunk/error 是协议控制帧，不经此函数）。
  */
 function toRenderable(m: Message, plain: PlainEnvelope): Message {
   const payload: Message["payload"] = { text: plain.text ?? "" };
-  if (plain.mentions) payload.mentions = plain.mentions;
   if (plain.file) payload.file = plain.file;
-  if (plain.forward) payload.forward = plain.forward;
-  return { ...m, payload, replyTo: plain.replyTo ?? null };
+  return { ...m, payload };
 }
 
-/** plain 存量消息 → 重封用明文体（自迁移 §7：forward > file > text 判 kind，载荷全带）。 */
+/** plain 存量消息 → 重封用明文体（自迁移 §7：file > text 判 kind，载荷全带）。 */
 function plainOfExisting(m: Message): PlainEnvelope {
   return {
-    kind: m.payload.forward ? "forward" : m.payload.file ? "file" : "text",
+    kind: m.payload.file ? "file" : "text",
     ...(m.payload.text ? { text: m.payload.text } : {}),
-    ...(m.payload.mentions ? { mentions: m.payload.mentions } : {}),
     ...(m.payload.file ? { file: m.payload.file } : {}),
-    ...(m.payload.forward ? { forward: m.payload.forward } : {}),
-    ...(m.replyTo ? { replyTo: m.replyTo } : {}),
   };
-}
-
-/** 名册 join：群内 agentId 集合 × 名册全量 → Agent 行（roster 缺行的 id 跳过，不占位）。 */
-function joinRoster(roster: Agent[], ids: Set<string>): Agent[] {
-  const byId = new Map(roster.map((a) => [a.id, a]));
-  const out: Agent[] = [];
-  for (const id of ids) {
-    const a = byId.get(id);
-    if (a) out.push(a);
-  }
-  return out;
 }
 
 /** 单条流式生成的打字机状态（key=streamId）。 */
@@ -163,17 +145,9 @@ const STREAM_STALE_MS = 60_000;
 
 interface ChatState {
   conversations: Conversation[];
-  friends: { id: string; user: User }[];
-  incoming: { id: string; from: User }[];
   messages: Record<string, Message[]>;
-  /** 名册全量（GET /api/agents；雷达扇区 join 与编辑弹窗取 owner/description 用）。 */
+  /** 名册全量（GET /api/agents；智能体页列表与编辑弹窗取 owner/description 用）。 */
   agentsRoster: Agent[];
-  /** 跨群去重收集的智能体成员 id（雷达扇区「出现在我任一群 members」判定）。 */
-  agentIdsInGroups: Set<string>;
-  /** 群内出现过的 agentId × 名册 join 的视图（M3 起为 Agent 行，非 Member 行）。 */
-  agents: Agent[];
-  /** 各会话已读状态（convId → [{userId, at}]；direct 气泡「已读」判定与 read_update 随动用）。 */
-  reads: Record<string, ReadState[]>;
   /** 各会话历史拉取进行中（ChatPage 首屏骨架的数据源；按 convId 分桶防切会话串态）。 */
   messagesLoading: Record<string, boolean>;
   /**
@@ -199,15 +173,8 @@ interface ChatState {
   /** 首帧失败原因（服务端/网络错误原文）；成功一次后清空。后台刷新失败不写这里。 */
   workspaceError: string | null;
   loadWorkspace: () => Promise<void>;
-  openDirect: (peerId: string) => Promise<string>;
   /** 开智能体一对一会话（幂等，服务端已存在则复用），返回会话 id。 */
   openAgent: (agentId: string) => Promise<string>;
-  createGroup: (name: string, memberIds: string[]) => Promise<string>;
-  /** 把名册 agent 挂到会话（POST /api/conversations/:id/agents，幂等；权限在服务端路由层）。 */
-  attachAgentToGroup: (convId: string, agentId: string) => Promise<void>;
-  /** 会话卸载 agent（DELETE …/agents/:agentId，幂等 204）。 */
-  detachAgentFromGroup: (convId: string, agentId: string) => Promise<void>;
-  loadAgents: () => Promise<void>;
   loadAgentsRoster: () => Promise<void>;
   appendMessage: (m: Message) => void;
   setMessages: (convId: string, msgs: Message[]) => void;
@@ -237,12 +204,6 @@ interface ChatState {
     meId: string,
     alive?: () => boolean,
   ) => Promise<void>;
-  setReads: (convId: string, reads: ReadState[]) => void;
-  loadReads: (convId: string) => Promise<void>;
-  /** 未读清零（A12：收到 read_update 且 userId 是自己时调用）；`at` 为服务端读点，带上则顺带刷新 `lastReadAt`。 */
-  clearUnread: (convId: string, at?: string) => void;
-  /** 未读 +1（A12：收到他会话 message_new 且不是自己发的时调用）；返回「这条消息是否第一次被处理」（按 messageId 去重）。 */
-  bumpUnread: (convId: string, at?: string, messageId?: string) => boolean;
   upsertStream: (id: string, patch: AgentStreamPatch) => void;
   removeStream: (id: string) => void;
   markStreamOwner: (id: string) => void;
@@ -260,23 +221,6 @@ interface ChatState {
    */
   sweepStaleStreams: (now: number) => void;
 }
-
-/**
- * 未归档的会话（主列表用）。
- *
- * 归档的会话不该出现在工作区雷达、联系人列、转发目标里——
- * 那正是「归档」的意义。它们只在归档页出现，且随时可恢复。
- *
- * 抽成函数而不是在每个组件里各写一遍 `.filter(c => !c.archivedAt)`：
- * 判断依据只有一处，将来若归档语义变化（比如加「暂缓」状态）也只改这里。
- */
-export function activeConversationsOf(list: Conversation[]): Conversation[] {
-  return list.filter((c) => !c.archivedAt);
-}
-
-/** 进程内已处理的入站消息 id（多连接/页面切换重叠时防止重复计未读）。 */
-const seenIncoming = new Set<string>();
-const SEEN_INCOMING_CAP = 500;
 
 export const useChatStore = create<ChatState>((set, get) => {
   // —— E2E Task 4 内部辅助（解密结果应用 / pending 重试）——
@@ -363,13 +307,8 @@ export const useChatStore = create<ChatState>((set, get) => {
 
   return {
   conversations: [],
-  friends: [],
-  incoming: [],
   messages: {},
   agentsRoster: [],
-  agentIdsInGroups: new Set<string>(),
-  agents: [],
-  reads: {},
   messagesLoading: {},
   messagesError: {},
   streaming: {},
@@ -384,27 +323,14 @@ export const useChatStore = create<ChatState>((set, get) => {
     // 失败也保留旧列表——为一次后台刷新失败把整页打回重试态是倒退。
     const first = !get().workspaceReady;
     try {
-      const [conversations, friends, incoming] = await Promise.all([
-        fetchConversations(),
-        fetchFriends(),
-        fetchIncomingRequests(),
-      ]);
-      set({ conversations, friends, incoming, workspaceReady: true, workspaceError: null });
+      const conversations = await fetchConversations();
+      set({ conversations, workspaceReady: true, workspaceError: null });
     } catch (err) {
       if (first) {
         set({ workspaceError: err instanceof Error && err.message ? err.message : "网络异常" });
       }
       throw err;
     }
-  },
-  async openDirect(peerId) {
-    const conv = await createConversation(peerId);
-    // 服务端直聊创建响应不带 unreadCount：先补 0 入列，随后 loadWorkspace 全量刷新
-    if (!get().conversations.some((c) => c.id === conv.id)) {
-      set({ conversations: [...get().conversations, { ...conv, unreadCount: 0 }] });
-    }
-    await get().loadWorkspace();
-    return conv.id;
   },
   async openAgent(agentId) {
     const conv = await createAgentConversation(agentId);
@@ -413,42 +339,9 @@ export const useChatStore = create<ChatState>((set, get) => {
     await get().loadWorkspace();
     return conv.id;
   },
-  async createGroup(name, memberIds) {
-    const conv = await api<Conversation>("/api/conversations", {
-      method: "POST",
-      body: JSON.stringify({ name, memberIds }),
-    });
-    await get().loadWorkspace();
-    return conv.id;
-  },
-  async attachAgentToGroup(convId, agentId) {
-    await api(`/api/conversations/${convId}/agents`, {
-      method: "POST",
-      body: JSON.stringify({ agentId }),
-    });
-  },
-  async detachAgentFromGroup(convId, agentId) {
-    await api(`/api/conversations/${convId}/agents/${agentId}`, { method: "DELETE" });
-  },
-  async loadAgents() {
-    const groups = get().conversations.filter((c) => c.type === "group");
-    // 单群失败不拖垮全部（如中途被移出群 403）：该群按空列表处理
-    const lists = await Promise.all(
-      groups.map((g) => fetchMembers(g.id).catch(() => [] as Member[])),
-    );
-    const ids = new Set<string>();
-    for (const list of lists) {
-      for (const m of list) {
-        if (m.kind === "agent") ids.add(m.id);
-      }
-    }
-    // join 名册拿 owner/description（Member 行升级为名册全量行）；与 loadAgentsRoster 双向重算，
-    // 谁后完成谁用对方已落定的 state 再 join 一次，保证终态一致
-    set({ agentIdsInGroups: ids, agents: joinRoster(get().agentsRoster, ids) });
-  },
   async loadAgentsRoster() {
     const agentsRoster = await listAgents();
-    set({ agentsRoster, agents: joinRoster(agentsRoster, get().agentIdsInGroups) });
+    set({ agentsRoster });
   },
   appendMessage(m) {
     if (m.enc === "e2e") {
@@ -480,11 +373,6 @@ export const useChatStore = create<ChatState>((set, get) => {
       const at = merged.findIndex((x) => x.createdAt > m.createdAt);
       if (at === -1) merged.push(m);
       else merged.splice(at, 0, m);
-    }
-    // 离线期间/非聊天页期间的撤回不会走 onWsEvent：历史里带 recalledAt 的条目
-    // 顺手清掉本机明文缓存，避免会话页预览回显已撤回正文。
-    for (const m of merged) {
-      if (m.recalledAt != null) msgCache.remove(convId, m.id);
     }
     set({ messages: { ...get().messages, [convId]: merged } });
   },
@@ -567,7 +455,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   },
   async migrateOwnPlain(convId, members, deps, attempted, meId, alive) {
     const targets = (get().messages[convId] ?? []).filter(
-      (m) => m.enc === "plain" && m.senderId === meId && m.recalledAt == null,
+      (m) => m.enc === "plain" && m.senderId === meId,
     );
     let sent = 0;
     for (const m of targets) {
@@ -603,55 +491,6 @@ export const useChatStore = create<ChatState>((set, get) => {
         // 409（他端已重封）/网络/公钥校验失败：跳过该条继续（attempted 已挡本挂载重试）
       }
     }
-  },
-  setReads(convId, reads) {
-    set({ reads: { ...get().reads, [convId]: reads } });
-  },
-  async loadReads(convId) {
-    const reads = await api<ReadState[]>(`/api/conversations/${convId}/reads`);
-    get().setReads(convId, reads);
-  },
-  clearUnread(convId, at) {
-    const list = get().conversations;
-    let changed = false;
-    const next = list.map((c) => {
-      if (c.id !== convId) return c;
-      const needsUnread = c.unreadCount !== 0;
-      // 读点也要更新：否则「读 A → 切 B → A 来新消息 → 回 A」会把已读消息重新标成未读
-      const needsAt = at !== undefined && c.lastReadAt !== at;
-      if (!needsUnread && !needsAt) return c;
-      changed = true;
-      return {
-        ...c,
-        unreadCount: needsUnread ? 0 : c.unreadCount,
-        ...(at !== undefined ? { lastReadAt: at } : {}),
-      };
-    });
-    if (changed) set({ conversations: next });
-  },
-  bumpUnread(convId, at, messageId) {
-    if (messageId) {
-      if (seenIncoming.has(messageId)) return false;
-      seenIncoming.add(messageId);
-      if (seenIncoming.size > SEEN_INCOMING_CAP) {
-        const oldest = seenIncoming.values().next().value;
-        if (oldest !== undefined) seenIncoming.delete(oldest);
-      }
-    }
-    const list = get().conversations;
-    if (!list.some((c) => c.id === convId)) return true; // 列表未加载：交给 loadWorkspace 补未读
-    set({
-      conversations: list.map((c) =>
-        c.id === convId
-          ? {
-              ...c,
-              unreadCount: (c.unreadCount ?? 0) + 1,
-              ...(at !== undefined ? { lastMessageAt: at } : {}),
-            }
-          : c,
-      ),
-    });
-    return true;
   },
   upsertStream(id, patch) {
     const prev = get().streaming[id];
@@ -697,23 +536,6 @@ export const useChatStore = create<ChatState>((set, get) => {
     if (e.type === "message_new") {
       // agent_finish 入库后的收口：打字机项移除，正式消息由 ChatPage appendMessage 入列
       if (e.streamId) get().removeStream(e.streamId);
-      return;
-    }
-    if (e.type === "message_recalled") {
-      // 撤回不回显：先清本机明文缓存（会话页预览读缓存；离线的聊天列表可能根本没有这条），
-      // 再按 messageId 置 recalledAt（气泡渲染层按它切换「消息已撤回」）。
-      msgCache.remove(e.conversationId, e.messageId);
-      const list = get().messages[e.conversationId];
-      if (list) {
-        set({
-          messages: {
-            ...get().messages,
-            [e.conversationId]: list.map((m) =>
-              m.id === e.messageId ? { ...m, recalledAt: e.at } : m,
-            ),
-          },
-        });
-      }
       return;
     }
     if (e.type === "agent_chunk") {

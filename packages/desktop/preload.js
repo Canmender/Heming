@@ -37,31 +37,6 @@ contextBridge.exposeInMainWorld("heming", {
   // harness 桥接 API 在 M（二期）扩展
 });
 
-// —— 语音通话桥接（Task 5）——
-// ICE 服务器列表：主进程拉取 /api/ice-servers 后注入，渲染层在建立 PeerConnection 前读取。
-// 注意：contextBridge.exposeInMainWorld 暴露的属性只有 getter 没有 setter，
-// executeJavaScript 直接赋值会静默失败，因此使用闭包变量 + setter/getter 函数。
-let _iceServers = [];
-
-contextBridge.exposeInMainWorld("__heming_ice_servers_get", () => _iceServers);
-
-contextBridge.exposeInMainWorld("__heming_voice_call", {
-  /** 窗口最小化事件订阅（主进程 voice-call:minimized → 渲染层回调）。返回取消订阅函数。 */
-  onMinimize: (callback) => {
-    const listener = (_event, ...args) => callback(...args);
-    ipcRenderer.on("voice-call:minimized", listener);
-    return () => ipcRenderer.removeListener("voice-call:minimized", listener);
-  },
-  /** 请求主进程发系统通知（来电/通话中场景，窗口最小化时仍可见；主进程一并闪烁任务栏）。 */
-  notify: (title, body) => {
-    ipcRenderer.send("voice-call:notify", title, body);
-  },
-  /** 注入 ICE 服务器列表（主进程调用，渲染层通过 __heming_ice_servers_get 读取）。 */
-  setIceServers: (list) => {
-    _iceServers = list;
-  },
-});
-
 // —— MCP stdio 传输桥（仅桌面端）——
 // 渲染进程没有 child_process：所有 stdio MCP 调用都经这里转给主进程。
 // 只暴露「按 serverId 发一条 JSON-RPC」这一件事，不暴露任意命令执行入口。
@@ -251,15 +226,6 @@ contextBridge.exposeInMainWorld("__heming_pet", {
   emit: (payload) => ipcRenderer.send("pet:emit", payload),
   /** 桌宠窗口请求把主窗口叫到前台并切到设置页（未配置模型时的出口）。 */
   openSettings: () => ipcRenderer.send("pet:open-settings"),
-  /** 桌宠窗口请求打开某个会话（未读角标被点时）。 */
-  openConversation: (conversationId) => ipcRenderer.send("pet:open-conversation", conversationId),
-  /** 主窗口侧订阅「桌宠要打开某会话」。返回取消订阅函数。 */
-  onOpenConversation: (callback) => {
-    if (typeof callback !== "function") return () => {};
-    const listener = (_event, id) => callback(typeof id === "string" ? id : null);
-    ipcRenderer.on("pet:open-conversation", listener);
-    return () => ipcRenderer.removeListener("pet:open-conversation", listener);
-  },
   /** 主窗口侧订阅「桌宠要打开设置」。返回取消订阅函数。 */
   onOpenSettings: (callback) => {
     if (typeof callback !== "function") return () => {};

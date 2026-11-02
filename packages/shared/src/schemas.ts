@@ -29,11 +29,6 @@ export type Agent = z.infer<typeof AgentSchema>;
 export const MessagePayloadSchema = z.object({
   // 上限 20000：与 agent_finish.text 对齐（agent 回复经 finish 直接入库，两处不齐会「入库即违规」）
   text: z.string().max(20000),
-  // 单条消息 mentions 上限：@ 选择器为人工点选，50 已远超一屏；防契约无限扩张
-  mentions: z
-    .array(z.object({ agentId: z.string().min(1), name: z.string().min(1).max(64) }))
-    .max(50)
-    .optional(),
   // 消息附件（M4 前置）：引用共享库文件；text 可空串（纯附件消息）
   // E2E Task 5：key=附件密钥 base64（32B→44 字符），随消息进密文（PlainEnvelope.file.key 同源）；
   // legacy 明文附件无 key → 渲染层走明文 content 直通（规格 §2.4 文件边界）。空串/超长拒绝。
@@ -50,22 +45,6 @@ export const MessagePayloadSchema = z.object({
       text: z.string().max(20000).optional(),
     })
     .optional(),
-  // 转发来源（二期 IM Task 4）：发送者展示名 + 源会话名；转发时剥离 mentions、保留 text/file
-  forward: z
-    .object({ from: z.string().min(1).max(64), source: z.string().min(1).max(64) })
-    .optional(),
-  // 表情回应（二期 IM Task 6）：每条目一个 emoji + 参与该 emoji 的 userIds。
-  // emoji 上限 16（多码位组合 emoji 留余量）；种类上限 20（UI 浮排 12 个常用，仍留余量）；
-  // userIds 由服务端 toggle 维护（不去重上限），schema 上限 500 防单条 payload 炸库。
-  reactions: z
-    .array(
-      z.object({
-        emoji: z.string().min(1).max(16),
-        userIds: z.array(z.string().min(1)).max(500),
-      }),
-    )
-    .max(20)
-    .optional(),
 });
 export type MessagePayload = z.infer<typeof MessagePayloadSchema>;
 
@@ -75,10 +54,7 @@ export const MessageSchema = z.object({
   senderType: z.enum(["user", "agent"]),
   senderId: z.string().min(1),
   payload: MessagePayloadSchema,
-  replyTo: z.string().nullable(),
   createdAt: z.string(),
-  // 撤回时间（ISO）；null=未撤回。恒有字段（双端同步后缺字段即契约违规）
-  recalledAt: z.string().nullable(),
   // E2E 信封（Task 2，设计 §3.3）：enc 恒有；default 只作用于解析侧——
   // 存量 JSON（旧服务端/旧缓存）无 enc → 视为 plain，输出侧类型仍为必填。
   enc: z.enum(["plain", "e2e"]).default("plain"),
@@ -113,30 +89,12 @@ const WsClientEventUnion = z.discriminatedUnion("type", [
     type: z.literal("send_message"),
     conversationId: z.string().min(1),
     payload: MessagePayloadSchema,
-    replyTo: z.string().optional(),
     // 信封判别（Task 2）：enc 缺省 plain（旧客户端直发兼容）；cipher/chainKid/n 仅 e2e 用。
     enc: z.enum(["plain", "e2e"]).default("plain"),
     cipher: z.string().max(262144).optional(),
     chainKid: z.string().max(64).optional(),
     n: z.number().int().min(0).optional(),
   }),
-  z.object({
-    type: z.literal("mark_read"),
-    conversationId: z.string().min(1),
-  }),
-  // 正在输入（d.38）：只传元数据，不传内容。服务端成员校验后原样广播，不落库。
-  z.object({
-    type: z.literal("typing"),
-    conversationId: z.string().min(1),
-  }),
-  // 消息撤回（仅发送者本人可撤；服务端校验后广播 message_recalled）
-  z.object({
-    type: z.literal("recall_message"),
-    conversationId: z.string().min(1),
-    messageId: z.string().min(1),
-  }),
-  // 注：react_message 客户端事件已移除（E2E Task 2，设计 §4）——表情回应改为
-  // kind="reaction" 的 e2e 信封消息入库，服务端不再特判；旧客户端发来该事件 → bad_event。
   z.object({
     type: z.literal("agent_chunk"),
     conversationId: z.string().min(1),
@@ -160,7 +118,6 @@ const WsClientEventUnion = z.discriminatedUnion("type", [
     // 与 MessagePayloadSchema.text 同上限：finish 文本直接入 messages.payload（不改写），
     // 宽于 payload 会出现「schema 过了、入库即违规」的缝
     text: z.string().max(20000),
-    replyTo: z.string().optional(),
     // E2E（Task 4）：finish 也走信封——text 置空、全文进 cipher，服务端按信封入库（§5.3）
     cipher: z.string().max(262144).optional(),
     chainKid: z.string().max(64).optional(),
@@ -180,45 +137,6 @@ const WsClientEventUnion = z.discriminatedUnion("type", [
     cipher: z.string().max(262144).optional(),
     chainKid: z.string().max(64).optional(),
     n: z.number().int().min(0).optional(),
-  }),
-  // —— 语音通话信令事件（客户端 → 服务端）——
-  z.object({
-    type: z.literal("voice_call_invite"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-    sdp: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("voice_call_accept"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-    sdp: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("voice_call_reject"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-    reason: z.enum(["busy", "decline", "timeout"]),
-  }),
-  z.object({
-    type: z.literal("voice_call_hangup"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("voice_call_ice"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-    candidate: z.string().min(1),
-  }),
-  // ICE 重启用的重新协商（d.25）：SDP 双向都走这一条，sdpType 区分 offer/answer，
-  // 不复用 invite/accept——那两条带振铃与接听语义，重连时会让对端再弹一次来电。
-  z.object({
-    type: z.literal("voice_call_reconnect"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-    sdp: z.string().min(1),
-    sdpType: z.enum(["offer", "answer"]),
   }),
 ]);
 
@@ -356,28 +274,9 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     streamId: z.string().optional(),
   }),
   z.object({
-    type: z.literal("read_update"),
-    conversationId: z.string().min(1),
-    userId: z.string().min(1),
-    at: z.string(),
-  }),
-  // 正在输入广播（d.38）：userId 由服务端从认证身份填，客户端不可伪造。
-  z.object({
-    type: z.literal("typing"),
-    conversationId: z.string().min(1),
-    userId: z.string().min(1),
-  }),
-  z.object({
     type: z.literal("error"),
     code: z.string().min(1),
     message: z.string().min(1),
-  }),
-  // 撤回广播：消息不移除，接收端按 messageId 置 recalledAt（at = 撤回时间）
-  z.object({
-    type: z.literal("message_recalled"),
-    conversationId: z.string().min(1),
-    messageId: z.string().min(1),
-    at: z.string(),
   }),
   z.object({
     type: z.literal("agent_chunk"),
@@ -404,49 +303,6 @@ export const WsServerEventSchema = z.discriminatedUnion("type", [
     chainKid: z.string().max(64).optional(),
     n: z.number().int().min(0).optional(),
   }),
-  // —— 语音通话信令事件（服务端 → 客户端广播镜像）——
-  // fromUserId 仅存在于服务端事件：Mesh 通话用于标识对端（invite 发起方 / accept 应答方 /
-  // ice 发送方 / reconnect 重连发起方），由服务端从认证身份填，客户端不可见不可伪造（Zod strip 兜底）。
-  z.object({
-    type: z.literal("voice_call_invite"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-    sdp: z.string().min(1),
-    fromUserId: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("voice_call_accept"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-    sdp: z.string().min(1),
-    fromUserId: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("voice_call_reject"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-    reason: z.enum(["busy", "decline", "timeout"]),
-  }),
-  z.object({
-    type: z.literal("voice_call_hangup"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("voice_call_ice"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-    candidate: z.string().min(1),
-    fromUserId: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("voice_call_reconnect"),
-    conversationId: z.string().min(1),
-    callId: z.string().min(1),
-    sdp: z.string().min(1),
-    sdpType: z.enum(["offer", "answer"]),
-    fromUserId: z.string().min(1),
-  }),
 ]);
 export type WsServerEvent = z.infer<typeof WsServerEventSchema>;
 
@@ -472,83 +328,22 @@ export const UpdateProfileBodySchema = z.object({
 });
 export type UpdateProfileBody = z.infer<typeof UpdateProfileBodySchema>;
 
-export const ConversationSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("direct"),
-    id: z.string().min(1),
-    peer: UserSchema,
-    unreadCount: z.number().int().min(0),
-    /** 最后一条消息时间（ISO）；无消息为 null。可选：兼容旧服务端。 */
-    lastMessageAt: z.string().nullable().optional(),
-    /** 当前用户在该会话的最后已读时间（ISO）；从未已读为 null。可选：兼容旧服务端。 */
-    lastReadAt: z.string().nullable().optional(),
-    /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
-    archivedAt: z.string().nullable().optional(),
-  }),
-  z.object({
-    // 智能体一对一（用户要求「做好智能体一对一聊天」）：
-    // 与 direct 平行而非复用——对方不是 users 里的用户，而是 agents 名册项，
-    // 复用 direct 会逼服务端伪造一个 User（id/username/密码位全是假的），
-    // 前端也会把它当真人渲染出「@用户名 · 好友」这类不存在的信息。
-    type: z.literal("agent"),
-    id: z.string().min(1),
-    agent: AgentSchema,
-    unreadCount: z.number().int().min(0),
-    /** 最后一条消息时间（ISO）；无消息为 null。可选：兼容旧服务端。 */
-    lastMessageAt: z.string().nullable().optional(),
-    /** 当前用户在该会话的最后已读时间（ISO）；从未已读为 null。可选：兼容旧服务端。 */
-    lastReadAt: z.string().nullable().optional(),
-    /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
-    archivedAt: z.string().nullable().optional(),
-  }),
-  z.object({
-    type: z.literal("group"),
-    id: z.string().min(1),
-    name: z.string().min(1).max(64),
-    // 口径裁决（计划 Task 4 写死）：memberIds 允许空数组（单人群，creator 自动入群）→ memberCount 下限 1
-    memberCount: z.number().int().min(1),
-    unreadCount: z.number().int().min(0),
-    /** 最后一条消息时间（ISO）；无消息为 null。可选：兼容旧服务端。 */
-    lastMessageAt: z.string().nullable().optional(),
-    /** 当前用户在该会话的最后已读时间（ISO）；从未已读为 null。可选：兼容旧服务端。 */
-    lastReadAt: z.string().nullable().optional(),
-    /** 归档时间；null 或缺失表示未归档。按用户独立，群聊里各人互不影响。 */
-    archivedAt: z.string().nullable().optional(),
-  }),
-]);
+/**
+ * d.54 团队系统：人类私聊 / 群聊已删除，会话只剩「用户 ↔ 智能体」一种是聊天。
+ * 不再用 discriminatedUnion——保留 type 字段是为了旧缓存解析时的向后兼容。
+ */
+export const ConversationSchema = z.object({
+  type: z.literal("agent"),
+  id: z.string().min(1),
+  agent: AgentSchema,
+  unreadCount: z.number().int().min(0),
+  /** 最后一条消息时间（ISO）；无消息为 null。 */
+  lastMessageAt: z.string().nullable().optional(),
+});
 export type Conversation = z.infer<typeof ConversationSchema>;
 
-export const DirectConversationBodySchema = z.object({ peerId: z.string().min(1) });
 /** 建智能体一对一：agentId 指向名册项，owner 校验在服务端做（schema 只管形状）。 */
 export const AgentConversationBodySchema = z.object({ agentId: z.string().min(1) });
-export const GroupConversationBodySchema = z.object({
-  name: z.string().min(1).max(32),
-  memberIds: z.array(z.string().min(1)).max(200),
-});
-export const CreateConversationBodySchema = z.union([
-  DirectConversationBodySchema,
-  AgentConversationBodySchema,
-  GroupConversationBodySchema,
-]);
-
-/** 归档 / 取消归档：body 只带目标状态，会话 id 在路径里。 */
-export const ArchiveConversationBodySchema = z.object({ archived: z.boolean() });
-export type ArchiveConversationBody = z.infer<typeof ArchiveConversationBodySchema>;
-
-export const ReadStateSchema = z.object({ userId: z.string().min(1), at: z.string() });
-export type ReadState = z.infer<typeof ReadStateSchema>;
-export const ReadStateListSchema = z.array(ReadStateSchema);
-
-export const MemberSchema = z.object({
-  kind: z.enum(["user", "agent"]),
-  id: z.string().min(1),
-  name: z.string().min(1),
-  avatar: z.string().max(600_000).nullable(),
-  user: UserSchema.nullable(),
-});
-export type Member = z.infer<typeof MemberSchema>;
-
-export const CreateFriendRequestBodySchema = z.object({ username: z.string().min(3).max(32) });
 
 export const SharedFileMetaSchema = z.object({
   id: z.string().min(1),
@@ -573,10 +368,6 @@ export const AgentBodySchema = z.object({
   description: z.string().max(500).default(""),
 });
 export type AgentBody = z.infer<typeof AgentBodySchema>;
-
-/** POST /api/conversations/:id/agents：把名册 agent 挂到会话（幂等由服务端语义保证）。 */
-export const AttachAgentBodySchema = z.object({ agentId: z.string().min(1) });
-export type AttachAgentBody = z.infer<typeof AttachAgentBodySchema>;
 
 // —— E2E Task 2：公钥分发与明文重加密契约（设计 §3.1/§7）——
 
@@ -616,3 +407,70 @@ export const ReencryptBodySchema = z.object({
   n: z.number().int().min(0).optional(),
 });
 export type ReencryptBody = z.infer<typeof ReencryptBodySchema>;
+
+// —— d.54 团队系统（去 IM）：名册、在线状态与动向摘要 ——
+
+/** 动向类型：任务 / AI 对话 / 幕僚 / 日程里程碑 / 成员加入。 */
+export const TeamActivityKindSchema = z.enum(["task", "agent", "staff", "agenda", "join"]);
+export type TeamActivityKind = z.infer<typeof TeamActivityKindSchema>;
+
+/** ISO 时间字符串（允许带毫秒）；只做可解析性校验，不锁定时区写法。 */
+const IsoTimeSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine((v) => Number.isFinite(Date.parse(v)), { message: "invalid timestamp" });
+
+/**
+ * 客户端上报的动向摘要。
+ *
+ * 白名单字段是刻意的：正文、提示词、工具参数、任务结果、日程证据都不在契约里，
+ * 服务端无从接收，客户端也无处夹带。
+ */
+export const TeamActivityInputSchema = z.object({
+  kind: TeamActivityKindSchema,
+  title: z.string().min(1).max(200),
+  detail: z.string().max(500).optional(),
+  status: z.string().max(40).optional(),
+  /** 客户端确定性幂等键：同一 actor 下重复上报只入一条。 */
+  sourceId: z.string().min(1).max(200),
+  occurredAt: IsoTimeSchema,
+});
+export type TeamActivityInput = z.infer<typeof TeamActivityInputSchema>;
+
+export const TeamActivitySchema = TeamActivityInputSchema.extend({
+  id: z.string().min(1),
+  actorId: z.string().min(1),
+  createdAt: IsoTimeSchema,
+});
+export type TeamActivity = z.infer<typeof TeamActivitySchema>;
+
+export const CreateTeamActivitiesBodySchema = z.object({
+  items: z.array(TeamActivityInputSchema).min(1).max(50),
+});
+export type CreateTeamActivitiesBody = z.infer<typeof CreateTeamActivitiesBodySchema>;
+
+/** 名册成员：用户资料 + 最近活跃 + 当前是否在线（在线态只在服务端进程内，不落库）。 */
+export const TeamMemberSchema = z.object({
+  user: UserSchema,
+  lastSeenAt: z.string().nullable(),
+  online: z.boolean(),
+});
+export type TeamMember = z.infer<typeof TeamMemberSchema>;
+
+export const TeamRosterSchema = z.object({
+  members: z.array(TeamMemberSchema),
+  onlineCount: z.number().int().min(0),
+});
+export type TeamRoster = z.infer<typeof TeamRosterSchema>;
+
+export const TeamActivityListSchema = z.object({
+  activities: z.array(TeamActivitySchema),
+});
+export type TeamActivityList = z.infer<typeof TeamActivityListSchema>;
+
+export const TeamActivityWriteResultSchema = z.object({
+  inserted: z.number().int().min(0),
+  skipped: z.number().int().min(0),
+});
+export type TeamActivityWriteResult = z.infer<typeof TeamActivityWriteResultSchema>;

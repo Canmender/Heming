@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { CommandPalette } from "./CommandPalette.js";
-import { useChatStore } from "../store/chat.js";
+import type { TeamMember } from "@heming/shared";
 import { useUiStore } from "../store/ui.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import type { InfohubBridgeInfo, InfohubSearchHit } from "../lib/infohub/client.js";
+import { fetchTeam } from "../lib/api.js";
+
+// 面板挂载即预取团队名册；单测里给桩，避免去打真实网络。
+vi.mock("../lib/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/api.js")>();
+  return { ...actual, fetchTeam: vi.fn() };
+});
 
 /**
  * 命令面板的本机归档检索（d.46）。
@@ -63,7 +70,8 @@ describe("命令面板 · 本机归档检索", () => {
   beforeEach(() => {
     localStorage.clear();
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
-    useChatStore.setState({ conversations: [] });
+    vi.mocked(fetchTeam).mockReset();
+    vi.mocked(fetchTeam).mockResolvedValue({ members: [], onlineCount: 0 });
     useUiStore.setState({ page: "home", activeConversationId: null, infohubIntent: null });
     useInfohubStore.setState({ available: true, running: true, booted: true, error: "" });
   });
@@ -77,7 +85,7 @@ describe("命令面板 · 本机归档检索", () => {
     const onClose = vi.fn();
     render(<CommandPalette onClose={onClose} />);
 
-    fireEvent.change(screen.getByLabelText("搜索会话与技能"), {
+    fireEvent.change(screen.getByLabelText("搜索成员与技能"), {
       target: { value: "免检单" },
     });
 
@@ -106,7 +114,7 @@ describe("命令面板 · 本机归档检索", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(screen.getByText(/连接信息中枢后/)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("搜索会话与技能"), {
+    fireEvent.change(screen.getByLabelText("搜索成员与技能"), {
       target: { value: "免检单" },
     });
 
@@ -114,24 +122,18 @@ describe("命令面板 · 本机归档检索", () => {
     expect(screen.queryByText("请把免检单交上来")).not.toBeInTheDocument();
   });
 
-  it("归档检索失败不打断会话/技能结果", async () => {
+  it("归档检索失败不打断成员/技能结果", async () => {
     const { call } = installBridge();
     call.mockRejectedValue(new Error("归档库损坏"));
-    useChatStore.setState({
-      conversations: [
-        {
-          id: "c1",
-          type: "group",
-          name: "免检单讨论组",
-          memberCount: 2,
-          unreadCount: 0,
-          archivedAt: null,
-        } as never,
-      ],
-    });
+    const member: TeamMember = {
+      user: { id: "u9", username: "mianjian", displayName: "免检单讨论组" },
+      lastSeenAt: null,
+      online: true,
+    };
+    vi.mocked(fetchTeam).mockResolvedValue({ members: [member], onlineCount: 1 });
 
     render(<CommandPalette onClose={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("搜索会话与技能"), {
+    fireEvent.change(screen.getByLabelText("搜索成员与技能"), {
       target: { value: "免检单" },
     });
 

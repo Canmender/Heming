@@ -4,18 +4,17 @@ import {
   RegisterBodySchema,
   LoginBodySchema,
   UpdateProfileBodySchema,
-  CreateConversationBodySchema,
-  CreateFriendRequestBodySchema,
+  AgentConversationBodySchema,
   CreateFileBodySchema,
   AgentBodySchema,
-  AttachAgentBodySchema,
   PutE2eKeysBodySchema,
   ReencryptBodySchema,
-  ArchiveConversationBodySchema,
+  CreateTeamActivitiesBodySchema,
   type SharedFileMeta,
 } from "@heming/shared";
 import type { Store } from "./store.js";
 import { issueToken, userIdFromToken } from "./auth.js";
+import { presence } from "./presence.js";
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -101,6 +100,8 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     const { username, password, displayName } = parsed.data;
     try {
       const user = store.createUser(username, hashPassword(password), displayName);
+      // 注册即视为一次活跃：名册「最近活跃」不应让刚注册的人显示为从未出现。
+      store.touchUser(user.id);
       res.status(201).json({ token: issueToken(user.id), user });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
@@ -118,6 +119,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(401).json({ error: "invalid credentials" });
       return;
     }
+    store.touchUser(row.user.id);
     res.json({ token: issueToken(row.user.id), user: row.user });
   });
 
@@ -127,6 +129,7 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(401).json({ error: "unauthorized" });
       return;
     }
+    store.touchUser(user.id);
     res.json(user);
   });
 
@@ -143,111 +146,84 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     }
   });
 
-  app.get("/api/friends", authOnly, (req, res) => {
-    res.json(store.listFriends(userId(req)));
+  // —— d.54 团队系统：单团队名册 + 动向摘要（全站登录可见）——
+
+  app.get("/api/team", authOnly, (_req, res) => {
+    const members = store.listTeamMembers().map((m) => ({
+      ...m,
+      online: presence.isOnline(m.user.id),
+    }));
+    // 在线优先 → 最近活跃倒序 → 显示名；null 活跃时间排最后。
+    members.sort((a, b) => {
+      if (a.online !== b.online) return a.online ? -1 : 1;
+      if (a.lastSeenAt !== b.lastSeenAt) {
+        if (a.lastSeenAt === null) return 1;
+        if (b.lastSeenAt === null) return -1;
+        return a.lastSeenAt < b.lastSeenAt ? 1 : -1;
+      }
+      return a.user.displayName.localeCompare(b.user.displayName, "zh-Hans-CN");
+    });
+    res.json({ members, onlineCount: members.filter((m) => m.online).length });
   });
 
-  app.get("/api/friends/requests", authOnly, (req, res) => {
-    res.json(store.listIncomingRequests(userId(req)));
-  });
-
-  app.post("/api/friends/request", authOnly, (req, res) => {
-    const parsed = CreateFriendRequestBodySchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "invalid body" });
+  app.get("/api/team/activities", authOnly, (req, res) => {
+    const rawLimit = Number.parseInt(String(req.query.limit ?? ""), 10);
+    const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, rawLimit)) : 50;
+    const before = typeof req.query.before === "string" ? req.query.before : undefined;
+    const actorId = typeof req.query.actorId === "string" ? req.query.actorId : undefined;
+    if (before !== undefined && !Number.isFinite(Date.parse(before))) {
+      res.status(400).json({ error: "invalid before" });
       return;
     }
-    try {
-      const result = store.createFriendRequest(userId(req), parsed.data.username);
-      res.status(201).json(result);
-    } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
-    }
+    res.json({ activities: store.listTeamActivities({ limit, before, actorId }) });
   });
 
-  app.post("/api/friends/:id/accept", authOnly, (req, res) => {
-    try {
-      res.json(store.acceptFriendRequest(req.params.id, userId(req)));
-    } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
+  app.post("/api/team/activities", authOnly, (req, res) => {
+    const parsed = CreateTeamActivitiesBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
     }
+    let inserted = 0;
+    let skipped = 0;
+    for (const item of parsed.data.items) {
+      if (store.addTeamActivity(userId(req), item)) inserted += 1;
+      else skipped += 1;
+    }
+    res.status(inserted > 0 ? 201 : 200).json({ inserted, skipped });
+  });
+
+  app.delete("/api/team/activities/mine", authOnly, (req, res) => {
+    store.clearTeamActivities(userId(req));
+    res.status(204).end();
   });
 
   app.get("/api/conversations", authOnly, (req, res) => {
     res.json(store.listConversations(userId(req)));
   });
 
+  // d.54：人类私聊/群聊已删除，会话入口只剩「与某个助手的一对一」。
   app.post("/api/conversations", authOnly, (req, res) => {
-    const parsed = CreateConversationBodySchema.safeParse(req.body);
+    const parsed = AgentConversationBodySchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "invalid body" });
       return;
     }
     try {
-      if ("peerId" in parsed.data) {
-        res.status(201).json(store.createDirectConversation(userId(req), parsed.data.peerId));
-        return;
-      }
-      if ("agentId" in parsed.data) {
-        // 智能体一对一：与 direct 同入口，靠 body 形状区分（union 分支）。
-        // 创建响应按 listConversations 的行再取一次，保证 unreadCount 等字段齐备
-        // ——直接返回 store 的创建结果会缺 unreadCount，前端入列时得自己补，两处易漂移。
-        const created = store.createAgentConversation(userId(req), parsed.data.agentId);
-        const row = store.listConversations(userId(req)).find((c) => c.id === created.id);
-        res.status(201).json(row ?? { ...created, unreadCount: 0 });
-        return;
-      }
-      const g = store.createGroup(userId(req), parsed.data.name, parsed.data.memberIds);
-      const row = store.listConversations(userId(req)).find((c) => c.id === g.id);
-      res.status(201).json(row ?? { ...g, memberCount: parsed.data.memberIds.length + 1, unreadCount: 0 });
+      const created = store.createAgentConversation(userId(req), parsed.data.agentId);
+      const row = store.listConversations(userId(req)).find((c) => c.id === created.id);
+      res.status(201).json(row ?? { ...created, unreadCount: 0 });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }
   });
 
-  /**
-   * 归档 / 取消归档（按成员独立，见 store.setConversationArchived）。
-   *
-   * 用 PATCH 而不是 POST/DELETE 成对：归档是「改一个状态位」，
-   * 不是创建或销毁资源——两个方向一个接口，前端也不必判两次。
-   */
-  app.patch("/api/conversations/:id/archive", authOnly, (req, res) => {
-    const parsed = ArchiveConversationBodySchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "invalid body" });
-      return;
-    }
-    try {
-      store.setConversationArchived(req.params.id, userId(req), parsed.data.archived);
-      res.status(204).end();
-    } catch {
-      // store 对「不存在」与「不是成员」抛同一种错：不区分是刻意的，
-      // 免得把「这个会话存在但你不在里面」泄露给无关的人。
-      res.status(403).json({ error: "forbidden" });
-    }
-  });
-
-  app.get("/api/conversations/:id/messages", authOnly, (req, res) => {    if (!store.isMember(req.params.id, userId(req))) {
+  app.get("/api/conversations/:id/messages", authOnly, (req, res) => {
+    if (!store.isMember(req.params.id, userId(req))) {
       res.status(403).json({ error: "forbidden" });
       return;
     }
     res.json(store.listMessages(req.params.id));
-  });
-
-  app.get("/api/conversations/:id/members", authOnly, (req, res) => {
-    if (!store.isMember(req.params.id, userId(req))) {
-      res.status(403).json({ error: "forbidden" });
-      return;
-    }
-    res.json(store.listMembers(req.params.id));
-  });
-
-  app.get("/api/conversations/:id/reads", authOnly, (req, res) => {
-    if (!store.isMember(req.params.id, userId(req))) {
-      res.status(403).json({ error: "forbidden" });
-      return;
-    }
-    res.json(store.listReads(req.params.id));
   });
 
   // —— M4：共享文件从 app.ts 闭包 Map 迁入 Store（memory/sqlite 双实现持久化）——
@@ -373,38 +349,6 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     }
   });
 
-  // —— M3 I2：自建智能体入群（挂载/卸载）。权限在此层做（Store 不校验）：
-  // 非成员 403、agent 不存在 404；挂载幂等（首挂 201、已挂 200），卸载幂等 204。——
-
-  app.post("/api/conversations/:id/agents", authOnly, (req, res) => {
-    if (!store.isMember(req.params.id, userId(req))) {
-      res.status(403).json({ error: "forbidden" });
-      return;
-    }
-    const parsed = AttachAgentBodySchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
-      return;
-    }
-    const { agentId } = parsed.data;
-    if (!store.listAgents().some((a) => a.id === agentId)) {
-      res.status(404).json({ error: "agent not found" });
-      return;
-    }
-    const existed = store.listAgentIds(req.params.id).includes(agentId);
-    store.attachAgentToGroup(req.params.id, agentId);
-    res.status(existed ? 200 : 201).json({ conversationId: req.params.id, agentId });
-  });
-
-  app.delete("/api/conversations/:id/agents/:agentId", authOnly, (req, res) => {
-    if (!store.isMember(req.params.id, userId(req))) {
-      res.status(403).json({ error: "forbidden" });
-      return;
-    }
-    store.detachAgentFromGroup(req.params.id, req.params.agentId);
-    res.status(204).end();
-  });
-
   // —— E2E Task 2：设备公钥分发（设计 §3.1）与明文重封装（§7）——
 
   /** 登录可读全部用户设备公钥：{[userId]: devices[]}（X3DH 发起侧取对端 IK/SPK 用）。 */
@@ -449,23 +393,6 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.json(result.message);
   });
 
-  // —— 语音通话：ICE 服务器配置（STUN/TURN，从环境变量读取，不入库）——
-  // 需鉴权（d.30 · P0-2）：STUN 地址虽属公共基础设施，但 TURN 的 username/credential
-  // 是部署方的凭据——一旦配了 HEMING_TURN_*，无鉴权就等于把凭据送给任何未登录者。
-  // 客户端改由渲染层带 Bearer 头自取（web 的 api() 本来就带 token）。
-  app.get("/api/ice-servers", authOnly, (_req, res) => {
-    const iceServers: { urls: string; username?: string; credential?: string }[] = [
-      { urls: process.env.HEMING_STUN ?? "stun:stun.miwifi.com:3478" },
-    ];
-    if (process.env.HEMING_TURN_URL) {
-      iceServers.push({
-        urls: process.env.HEMING_TURN_URL,
-        username: process.env.HEMING_TURN_USERNAME ?? "",
-        credential: process.env.HEMING_TURN_CREDENTIAL ?? "",
-      });
-    }
-    res.json({ iceServers });
-  });
-
+  // d.54：语音/视频通话随人类 IM 一并删除，不再提供 ICE 配置接口。
   return app;
 }

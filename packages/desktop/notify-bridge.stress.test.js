@@ -216,21 +216,21 @@ test("D4: 点击回调触发两次 → 只聚焦并回传一次（click-once）"
   assert.equal(env.main.calls.focus, 1);
 });
 
-test("D5: 任一窗口在前台（含通话窗口）→ 不弹；无焦点窗且主窗口在后台 → 弹", () => {
+test("D5: 任一窗口在前台（含桌宠窗口）→ 不弹；无焦点窗且主窗口在后台 → 弹", () => {
   // 主窗口在前台 → 主进程不再弹（即便渲染层已请求）
   const mainFocused = makeWin({ focused: true });
   const e1 = makeEnv({ mainWin: mainFocused });
   e1.ipcMain["notify:message"]({}, { title: "t", body: "b", conversationId: "c1" });
   assert.equal(e1.shown.length, 0);
 
-  // 主窗口不在前台、通话窗口在前台 → 任一窗口在前台就不打扰
+  // 主窗口不在前台、桌宠窗口在前台 → 任一窗口在前台就不打扰
   const mainBg = makeWin({ focused: false });
   const callFg = makeWin({ focused: true });
   const e2 = makeEnv({ mainWin: mainBg, getFocusedWindow: () => callFg.win });
   e2.ipcMain["notify:message"]({}, { title: "t", body: "b", conversationId: "c1" });
   assert.equal(e2.shown.length, 0);
 
-  // 无焦点窗 + 主窗口在后台 → 正常弹；点击只聚焦主窗口，不碰通话窗口
+  // 无焦点窗 + 主窗口在后台 → 正常弹；点击只聚焦主窗口，不碰桌宠窗口
   const mainBg2 = makeWin({ focused: false });
   const e3 = makeEnv({ mainWin: mainBg2, getFocusedWindow: () => null });
   e3.ipcMain["notify:message"]({}, { title: "t", body: "b", conversationId: "c1" });
@@ -241,5 +241,5 @@ test("D5: 任一窗口在前台（含通话窗口）→ 不弹；无焦点窗且
   assert.deepEqual(mainBg2.calls.send, [["notify:open", "c1"]]);
   assert.equal(callFg.calls.show, 0);
   assert.equal(callFg.calls.focus, 0);
-  console.log("[D5] mainFocused->suppressed; callWindowFocused->suppressed; background-main->toast");
+  console.log("[D5] mainFocused->suppressed; petWindowFocused->suppressed; background-main->toast");
 });

@@ -9,7 +9,7 @@ import type { AppNotification } from "../store/notifications.js";
 function makeItem(overrides: Partial<AppNotification> = {}): AppNotification {
   return {
     id: `ntf-${Math.random().toString(36).slice(2, 8)}`,
-    kind: "message",
+    kind: "task",
     key: `k-${Math.random().toString(36).slice(2, 8)}`,
     title: "鲍勃",
     body: "在吗",
@@ -24,7 +24,7 @@ beforeEach(() => {
   localStorage.clear();
   setNotificationStorage(createMemoryStorage());
   useNotificationStore.setState({ items: [] });
-  useUiStore.setState({ page: "home", activeConversationId: null, openTabs: [], taskFocusId: null });
+  useUiStore.setState({ page: "home", activeConversationId: null, taskFocusId: null });
 });
 
 describe("formatRelativeTime", () => {

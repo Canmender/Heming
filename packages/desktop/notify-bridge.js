@@ -37,8 +37,8 @@ function registerNotifyIpc(ipcMain, { Notification, getMainWindow, getFocusedWin
     const body = cleanText(payload && payload.body, BODY_MAX) || "你有一条新消息";
     const conversationId = cleanConversationId(payload && payload.conversationId);
     try {
-      // 应用任一窗口在前台（含独立通话窗口）就不打扰：渲染层的 document.hasFocus()
-      // 只看主窗口，通话窗口在前台时主窗口不在前台，单看主窗口会误弹。
+      // 应用任一窗口在前台（含桌宠窗口）就不打扰：渲染层的 document.hasFocus()
+      // 只看主窗口，桌宠窗口在前台时主窗口不在前台，单看主窗口会误弹。
       const focused = getFocusedWindow?.();
       if (focused && !focused.isDestroyed()) return;
       // 渲染层的 document.hasFocus() 可能滞后；主进程再确认一次窗口确实不在前台。
@@ -53,7 +53,7 @@ function registerNotifyIpc(ipcMain, { Notification, getMainWindow, getFocusedWin
         clicked = true;
         // 点击回调异步执行：getMainWindow() 抛错或窗口瞬间销毁都不能让主进程未捕获。
         try {
-          // 显式取主窗口：多窗口（主窗口 + 独立通话窗口）时不能聚焦到通话窗口。
+          // 显式取主窗口：多窗口（主窗口 + 桌宠窗口）时不能聚焦到桌宠窗口。
           const win = getMainWindow();
           if (!win || win.isDestroyed()) return;
           if (win.isMinimized()) win.restore();

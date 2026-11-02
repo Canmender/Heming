@@ -18,7 +18,7 @@ describe("NavRail 图标轨（A 方案）", () => {
     });
   });
 
-  it("渲染 9 个带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键）", () => {
+  it("带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键），其余页只有名称", () => {
     render(<NavRail />);
     for (const name of [
       "主页 Alt1",
@@ -27,45 +27,15 @@ describe("NavRail 图标轨（A 方案）", () => {
       "接口区 Alt4",
       "记忆区 Alt5",
       "设置区 Alt6",
-      "会话 Alt9",
+      "任务区 Alt8",
+      "插件区 Alt0",
     ]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
-    // 幕僚不占数字键：只有名称
-    expect(screen.getByRole("button", { name: "幕僚" })).toBeInTheDocument();
-  });
-
-  it("工作区按钮角标 = 会话未读总和，aria-label 追加「N 条未读」", () => {
-    useChatStore.setState({
-      conversations: [
-        {
-          id: "c1",
-          type: "direct",
-          peer: { id: "u9", username: "bob", displayName: "鲍勃" },
-          unreadCount: 2,
-        },
-        { id: "g1", type: "group", name: "评审组", memberCount: 3, unreadCount: 5 },
-      ],
-    });
-    render(<NavRail />);
-
-    const btn = screen.getByRole("button", { name: "工作区 Alt2 7 条未读" });
-    const badge = btn.querySelector("span.bg-ink") as HTMLElement;
-    expect(badge).not.toBeNull();
-    expect(badge.textContent).toBe("7");
-    expect(badge.className).toContain("text-white");
-    // 其余按钮不受全局未读总和影响
-    expect(screen.getByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
-  });
-
-  it("无未读时工作区按钮无角标、aria-label 不带未读文案", () => {
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer: { id: "u9", username: "bob", displayName: "鲍勃" }, unreadCount: 0 }],
-    });
-    render(<NavRail />);
-
-    const btn = screen.getByRole("button", { name: "工作区 Alt2" });
-    expect(btn.querySelector("span.bg-ink")).toBeNull();
+    // 团队/智能体/幕僚/信息中枢/自动化不占数字键：只有名称
+    for (const name of ["团队", "智能体", "幕僚", "信息中枢", "自动化"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
   });
 
   it("导航区不出现产品名文字（A 方案无品牌位）", () => {
@@ -212,7 +182,7 @@ describe("NavRail 导航顺序可自定义", () => {
   it("存储里缺项时自动补齐，不漏渲染任何导航", () => {
     useUiStore.setState({ navOrder: ["memory", "home", "workspace", "skills", "interfaces"] });
     render(<NavRail />);
-    for (const name of ["主页", "工作区", "技能区", "接口区", "记忆区", "设置区", "会话", "信息中枢", "自动化"]) {
+    for (const name of ["主页", "团队", "智能体", "工作区", "技能区", "接口区", "记忆区", "设置区", "信息中枢", "自动化"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(name) }).length).toBeGreaterThan(0);
     }
   });

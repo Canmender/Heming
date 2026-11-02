@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Conversation } from "@heming/shared";
-import { activeConversationsOf, useChatStore } from "../store/chat.js";
+import type { TeamMember } from "@heming/shared";
+import { fetchTeam } from "../lib/api.js";
 import { useUiStore } from "../store/ui.js";
 import { skillPool } from "../lib/skills/index.js";
 import {
@@ -11,28 +11,21 @@ import {
   type InfohubSearchResult,
 } from "../lib/infohub/client.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
-import { convLabel } from "./ChatPage.js";
 import { Avatar } from "./Avatar.js";
 import { useModalA11y } from "./useModalA11y.js";
 
 /**
  * 全局搜索（Ctrl/⌘+K）。
  *
- * ## 为什么先做这几类
+ * ## 搜什么
  *
- * 搜的是**已经在内存里的东西**：会话与技能。不碰消息正文——
- * 那要先按会话逐个拉取（N+1 请求），还要本地建索引，是单独一件事。
- * 与其做一个点下去要转圈好几秒的「全局搜索」，不如先把「找会话」这个
- * 最高频场景做到瞬时响应，并在结果里明确说明当前搜的是哪几类。
- *
- * ## 归档会话也参与搜索
- *
- * 归档的含义是「不在列表里占位置」，不是「搜不到」。
- * 找不到的东西才会去归档，所以这里必须能找到它——结果里会标出「已归档」。
+ * 去 IM 后不再有会话可搜：成员（团队名册）、技能、以及（桌面端连接信息中枢时）
+ * 本机 QQ/微信归档。成员与技能已在内存/一次拉取中，输入即出结果；
+ * 归档走防抖的 FTS 检索，不在每次击键时打服务端。
  */
 
 export type SearchResult =
-  | { kind: "conversation"; id: string; name: string; avatar?: string; detail: string; archived: boolean }
+  | { kind: "member"; id: string; name: string; username: string; avatar?: string; detail: string }
   | { kind: "skill"; id: string; name: string; detail: string }
   | { kind: "archive"; id: string; name: string; detail: string; hit: InfohubSearchHit };
 
@@ -53,54 +46,73 @@ function archiveResult(hit: InfohubSearchHit): SearchResult {
   };
 }
 
-/** 把会话翻成一条结果。 */
-function convResult(c: Conversation): SearchResult {
-  const label = convLabel(c);
-  const type = label.group ? "群聊" : c.type === "agent" ? "智能体" : "好友";
+/** 相对活跃度：在线 › 最近活跃 › 从未登录。 */
+function presenceText(m: TeamMember): string {
+  if (m.online) return "在线";
+  if (!m.lastSeenAt) return "从未登录";
+  const diff = Math.max(0, Date.now() - Date.parse(m.lastSeenAt));
+  if (!Number.isFinite(diff)) return "最近活跃";
+  if (diff < 3_600_000) return `${Math.max(1, Math.floor(diff / 60_000))} 分钟前活跃`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前活跃`;
+  return `${Math.floor(diff / 86_400_000)} 天前活跃`;
+}
+
+/** 把成员翻成一条结果。 */
+function memberResult(m: TeamMember): SearchResult {
   return {
-    kind: "conversation",
-    id: c.id,
-    name: label.name,
-    avatar: label.avatar,
-    detail: c.archivedAt ? `${type} · 已归档` : type,
-    archived: Boolean(c.archivedAt),
+    kind: "member",
+    id: m.user.id,
+    name: m.user.displayName,
+    username: m.user.username,
+    avatar: m.user.avatar,
+    detail: `@${m.user.username} · ${presenceText(m)}`,
   };
 }
 
-/**
- * 纯函数版搜索，便于单测：输入关键词，出结果列表。
- *
- * 排序规则：前缀命中优先于包含命中——打「张三」时，叫「张三」的会话
- * 应该排在「张三李四群」前面，而不是靠数据顺序碰运气。
- */
 export interface SearchOutcome {
-  /** 截断后实际展示的结果（会话最多 8、技能最多 5）。 */
+  /** 截断后实际展示的结果（成员最多 8、技能最多 5）。 */
   results: SearchResult[];
   /** 命中总数（含被上限截掉的），用于「还有 N 条」提示。 */
   total: number;
 }
 
-export function searchAllDetailed(keyword: string, conversations: Conversation[]): SearchOutcome {
+/**
+ * 纯函数版搜索，便于单测：输入关键词，出成员 + 技能结果。
+ *
+ * 排序规则：前缀命中优先于包含命中；同前缀内在线成员优先——
+ * 找成员时「现在在线的那个人」通常就是要找的人。
+ */
+export function searchAllDetailed(keyword: string, members: TeamMember[]): SearchOutcome {
   const q = keyword.trim().toLowerCase();
   if (!q) return { results: [], total: 0 };
 
-  const convMatches = conversations
-    .map(convResult)
-    .filter((r) => r.name.toLowerCase().includes(q))
+  const memberMatches = members
+    .filter(
+      (m) =>
+        m.user.displayName.toLowerCase().includes(q) || m.user.username.toLowerCase().includes(q),
+    )
+    .map(memberResult)
     .sort((a, b) => {
-      const aPrefix = a.name.toLowerCase().startsWith(q) ? 0 : 1;
-      const bPrefix = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+      const aName = a.name.toLowerCase();
+      const bName = b.name.toLowerCase();
+      const aPrefix = aName.startsWith(q) ? 0 : 1;
+      const bPrefix = bName.startsWith(q) ? 0 : 1;
       if (aPrefix !== bPrefix) return aPrefix - bPrefix;
-      // 未归档的排前：更可能是当下要处理的
-      if (a.kind === "conversation" && b.kind === "conversation" && a.archived !== b.archived) {
-        return a.archived ? 1 : -1;
+      const aMember = members.find((m) => m.user.id === a.id);
+      const bMember = members.find((m) => m.user.id === b.id);
+      if (aMember && bMember && aMember.online !== bMember.online) {
+        return aMember.online ? -1 : 1;
       }
       return a.name.localeCompare(b.name, "zh");
     });
 
   const skillMatches: SearchResult[] = skillPool
     .list()
-    .filter((s) => s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q))
+    .filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        (s.description ?? "").toLowerCase().includes(q),
+    )
     .map((s) => ({
       kind: "skill" as const,
       id: s.id,
@@ -108,27 +120,46 @@ export function searchAllDetailed(keyword: string, conversations: Conversation[]
       detail: s.description ? s.description.slice(0, 40) : "技能",
     }));
 
-  const results = [...convMatches.slice(0, 8), ...skillMatches.slice(0, 5)];
-  return { results, total: convMatches.length + skillMatches.length };
+  const results = [...memberMatches.slice(0, 8), ...skillMatches.slice(0, 5)];
+  return { results, total: memberMatches.length + skillMatches.length };
 }
 
-export function searchAll(keyword: string, conversations: Conversation[]): SearchResult[] {
-  return searchAllDetailed(keyword, conversations).results;
+export function searchAll(keyword: string, members: TeamMember[]): SearchResult[] {
+  return searchAllDetailed(keyword, members).results;
 }
 
 export function CommandPalette({ onClose }: { onClose: () => void }) {
-  const conversations = useChatStore((s) => s.conversations);
-  const openConversation = useUiStore((s) => s.openConversation);
   const setPage = useUiStore((s) => s.setPage);
+  const focusTeamMember = useUiStore((s) => s.focusTeamMember);
   const openInfohub = useUiStore((s) => s.openInfohub);
   const infohubRunning = useInfohubStore((s) => s.running);
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [membersReady, setMembersReady] = useState(false);
   const [archiveHits, setArchiveHits] = useState<InfohubSearchHit[]>([]);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // 名册一次拉全：成员数量级很小，打开面板时取一次即可，不随击键重复请求。
+  useEffect(() => {
+    let alive = true;
+    fetchTeam()
+      .then((roster) => {
+        if (alive) setMembers(roster.members);
+      })
+      .catch(() => {
+        if (alive) setMembers([]);
+      })
+      .finally(() => {
+        if (alive) setMembersReady(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 归档全文检索：仅在桌面端已连接时启用；防抖 250ms，旧的词立刻清掉避免错配。
   useEffect(() => {
@@ -159,7 +190,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     };
   }, [query, infohubRunning]);
 
-  const base = useMemo(() => searchAllDetailed(query, conversations), [query, conversations]);
+  const base = useMemo(() => searchAllDetailed(query, members), [query, members]);
   const results = useMemo(
     () => [...base.results, ...archiveHits.map(archiveResult)],
     [base, archiveHits],
@@ -172,18 +203,17 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   // 结果集变化时把光标收回第一项，避免停在一个已经不存在的位置
   useEffect(() => {
     setCursor(0);
-  }, [query]);
+  }, [query, members]);
 
   const run = (r: SearchResult | undefined) => {
     if (!r) return;
-    if (r.kind === "conversation") {
-      openConversation(r.id);
+    if (r.kind === "member") {
+      focusTeamMember(r.id);
     } else if (r.kind === "archive") {
       // 归档页自己会跑同词检索；这里只投递意图，不在面板里复制结果页
       openInfohub({ tab: "search", query: query.trim() });
     } else {
-      // 技能没有「详情页路由」，跳到技能区即可——比什么都不做强，
-      // 而且用户在这个位置真正想做的是找那个技能，到了列表里一眼能认出来
+      // 技能没有「详情页路由」，跳到技能区即可——到了列表里一眼能认出来
       setPage("skills");
     }
     onClose();
@@ -230,17 +260,17 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       >
         <input
           ref={inputRef}
-          aria-label="搜索会话与技能"
+          aria-label="搜索成员与技能"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索会话、技能…"
+          placeholder="搜索成员、技能…"
           className="w-full border-b border-line-soft px-3.5 py-2.5 text-[13px] outline-none placeholder:text-[#bbb]"
         />
 
         <div className="max-h-[46vh] overflow-y-auto py-1">
           {query.trim() === "" ? (
             <div className="px-3.5 py-3 text-[12px] text-muted">
-              输入关键词开始搜索。当前可搜：会话（含已归档）、技能
+              输入关键词开始搜索。当前可搜：团队成员、技能
               {infohubRunning ? "、本机归档" : ""}。
               <div className="mt-1 text-[11px] text-[#aaa]">
                 {infohubRunning
@@ -248,6 +278,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                   : "连接信息中枢后，可在这里搜本机 QQ/微信历史消息。"}
               </div>
             </div>
+          ) : !membersReady ? (
+            <div className="px-3.5 py-3 text-[12px] text-muted">正在加载团队成员…</div>
           ) : results.length === 0 ? (
             <div className="px-3.5 py-3 text-[12px] text-muted">
               {archiveBusy ? `正在检索本机归档「${query.trim()}」…` : `没有匹配「${query}」的结果。`}
@@ -264,7 +296,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                   i === cursor ? "bg-[#f4f4f4]" : ""
                 }`}
               >
-                {r.kind === "conversation" ? (
+                {r.kind === "member" ? (
                   <Avatar user={{ displayName: r.name, avatar: r.avatar }} size={22} />
                 ) : (
                   <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded bg-[#f0f0f0] text-[10px] text-muted">
@@ -275,9 +307,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                   <span className="block truncate">{r.name}</span>
                   <span className="block truncate text-[10px] text-muted">{r.detail}</span>
                 </span>
-                {r.kind === "conversation" && r.archived ? (
+                {r.kind === "member" ? (
                   <span className="shrink-0 rounded border border-line px-1 text-[10px] text-muted">
-                    已归档
+                    团队
                   </span>
                 ) : r.kind === "archive" ? (
                   <span className="shrink-0 rounded border border-line px-1 text-[10px] text-muted">本机</span>

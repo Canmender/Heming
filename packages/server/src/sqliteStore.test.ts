@@ -20,10 +20,7 @@ const newDbPath = (): string => {
 };
 
 describe("sqlite 持久化专项", () => {
-  it("旧库（无信封列）幂等迁移后 reencrypt 同口径：明文 payload/reply_to 清空", () => {
-    // fix round 1 Critical「旧库行重加密后同口径」：以 E2E Task 2 之前的 messages 表
-    // 形状建库并预置一行带正文+回复指向的明文，再经 createSqliteStore（openDb→initSchema
-    // 的 PRAGMA/ALTER 迁移）打开、重封，断言出站口径与新装库一致。
+  it("旧库（无信封列）幂等迁移后 reencrypt 同口径：明文 payload 清空", () => {
     const dbPath = newDbPath();
     const legacy = new DatabaseSync(dbPath);
     legacy.exec(`
@@ -32,7 +29,7 @@ describe("sqlite 持久化专项", () => {
         id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, sender_type TEXT NOT NULL, sender_id TEXT NOT NULL,
         payload TEXT NOT NULL, reply_to TEXT, created_at TEXT NOT NULL, recalled_at TEXT
       );
-      INSERT INTO conversations (id, kind) VALUES ('c-legacy', 'direct');
+      INSERT INTO conversations (id, kind) VALUES ('c-legacy', 'agent');
       INSERT INTO messages (id, conv_id, sender_type, sender_id, payload, reply_to, created_at, recalled_at)
         VALUES ('m-legacy', 'c-legacy', 'user', 'u1', '{"text":"旧库明文"}', 'r-old', '2026-10-01T00:00:00.000Z', NULL);
     `);
@@ -41,8 +38,10 @@ describe("sqlite 持久化专项", () => {
     const s = createSqliteStore(dbPath);
     // 迁移后存量行：enc 按 DEFAULT 回填 plain，明文尚在（重封前口径）
     const before = s.listMessages("c-legacy")[0];
-    expect(before).toMatchObject({ enc: "plain", replyTo: "r-old" });
+    expect(before).toMatchObject({ enc: "plain" });
     expect(before.payload.text).toBe("旧库明文");
+    // d.54 契约不再有 replyTo 字段（DB 列保留但不再出站）
+    expect("replyTo" in before).toBe(false);
 
     const res = s.reencryptMessage("m-legacy", "u1", { cipher: "Q2lwaGVy", chainKid: "kid1", n: 0 });
     expect(res.ok).toBe(true);
@@ -50,38 +49,24 @@ describe("sqlite 持久化专项", () => {
     const after = s.listMessages("c-legacy")[0];
     expect(after).toMatchObject({ enc: "e2e", cipher: "Q2lwaGVy", chainKid: "kid1", n: 0 });
     expect(after.payload).toEqual({ text: "" }); // 明文占位清空（出站无原文）
-    expect(after.replyTo).toBeNull(); // 回复指向清空
     s.close();
   });
 
-  it("close 后重开同路径：用户/好友/会话/消息/未读/已读全量保留", () => {
+  it("close 后重开同路径：用户/智能体会话/消息全量保留", () => {
     const dbPath = newDbPath();
     const s1 = createSqliteStore(dbPath);
     const a = s1.createUser("alice", "hash-a", "爱丽丝");
-    const b = s1.createUser("bob", "hash-b", "鲍勃");
-    s1.acceptFriendRequest(s1.createFriendRequest(a.id, "bob").id, b.id);
-    const direct = s1.createDirectConversation(a.id, b.id);
-    s1.addMessage(direct.id, "user", b.id, { text: "在吗" }, null);
-    const group = s1.createGroup(a.id, "评审组", [b.id]);
-    s1.addMessage(group.id, "user", a.id, { text: "群消息" }, null);
-    s1.markRead(group.id, a.id);
+    const agent = s1.createAgent(a.id, { name: "助手", description: "" });
+    const conv = s1.createAgentConversation(a.id, agent.id);
+    s1.addMessage(conv.id, "user", a.id, { text: "重启后还在" });
     s1.close();
 
     const s2 = createSqliteStore(dbPath);
     expect(s2.findUserByUsername("alice")?.user.displayName).toBe("爱丽丝");
-    expect(s2.listFriends(a.id).map((f) => f.user.id)).toContain(b.id);
     const convs = s2.listConversations(a.id);
-    const d = convs.find((c) => c.id === direct.id);
-    if (d?.type !== "direct") throw new Error("expected direct after reopen");
-    expect(d.unreadCount).toBe(1);
-    expect(s2.listMessages(direct.id).map((m) => m.payload.text)).toEqual(["在吗"]);
-    const g = convs.find((c) => c.id === group.id);
-    if (g?.type !== "group") throw new Error("expected group after reopen");
-    expect(g.name).toBe("评审组");
-    expect(g.memberCount).toBe(2);
-    expect(g.unreadCount).toBe(0); // 自己发的消息 + 已读
-    expect(s2.listMembers(group.id).map((m) => m.id).sort()).toEqual([a.id, b.id].sort());
-    expect(s2.listReads(group.id).find((r) => r.userId === a.id)).toBeTruthy();
+    expect(convs).toHaveLength(1);
+    expect(convs[0]).toMatchObject({ type: "agent", unreadCount: 0 });
+    expect(s2.listMessages(conv.id).map((m) => m.payload.text)).toEqual(["重启后还在"]);
     s2.close();
   });
 
@@ -114,42 +99,46 @@ describe("sqlite 持久化专项", () => {
     }
   });
 
-  it("既有方法语义：username 冲突 / 好友申请去重 / 请求与好友列表", () => {
-    const s = createSqliteStore(newDbPath());
-    const a = s.createUser("alice", "h", "A");
-    expect(() => s.createUser("alice", "h", "A2")).toThrow("username taken");
-    s.createUser("bob", "h", "B");
-    const req = s.createFriendRequest(a.id, "bob");
-    expect(s.listIncomingRequests(s.findUserByUsername("bob")!.user.id)).toHaveLength(1);
-    expect(() => s.createFriendRequest(a.id, "bob")).toThrow("request already exists");
-    const b = s.findUserByUsername("bob")!.user;
-    s.acceptFriendRequest(req.id, b.id);
-    expect(s.listFriends(a.id).map((f) => f.user.username)).toEqual(["bob"]);
-    expect(s.listIncomingRequests(b.id)).toHaveLength(0);
-    s.close();
-  });
-
-  it("既有方法语义：updateProfile 语义 + listMessages limit 升序截断 + markRead 幂等", () => {
+  it("用户名冲突 / updateProfile / listMessages limit 升序截断", () => {
     const s = createSqliteStore(newDbPath());
     const a = s.createUser("alice", "h", "爱丽丝");
+    expect(() => s.createUser("alice", "h", "A2")).toThrow("username taken");
     const renamed = s.updateProfile(a.id, { displayName: "新名" });
     expect(renamed.displayName).toBe("新名");
     expect(renamed.avatar).toBeUndefined();
     expect(s.findUserById(a.id)!.displayName).toBe("新名");
     expect(() => s.updateProfile("nope", { displayName: "X" })).toThrow("user not found");
 
-    s.createUser("bob", "h", "B");
-    const b = s.findUserByUsername("bob")!.user;
-    s.acceptFriendRequest(s.createFriendRequest(a.id, "bob").id, b.id);
-    const conv = s.createDirectConversation(a.id, b.id);
-    s.addMessage(conv.id, "user", a.id, { text: "一" }, null);
-    s.addMessage(conv.id, "user", b.id, { text: "二" }, null);
-    s.addMessage(conv.id, "user", a.id, { text: "三" }, null);
+    const agent = s.createAgent(a.id, { name: "助手", description: "" });
+    const conv = s.createAgentConversation(a.id, agent.id);
+    s.addMessage(conv.id, "user", a.id, { text: "一" });
+    s.addMessage(conv.id, "user", a.id, { text: "二" });
+    s.addMessage(conv.id, "user", a.id, { text: "三" });
     expect(s.listMessages(conv.id, 2).map((m) => m.payload.text)).toEqual(["二", "三"]);
-
-    s.markRead(conv.id, a.id);
-    s.markRead(conv.id, a.id);
-    expect(s.listReads(conv.id).filter((r) => r.userId === a.id)).toHaveLength(1);
     s.close();
+  });
+
+  it("团队：最近活跃与动向持久化（重开后仍在，幂等键仍生效）", () => {
+    const dbPath = newDbPath();
+    const s1 = createSqliteStore(dbPath);
+    const a = s1.createUser("alice", "h", "爱丽丝");
+    s1.touchUser(a.id);
+    const item = {
+      kind: "task" as const,
+      title: "写周报",
+      occurredAt: "2026-11-02T08:00:00.000Z",
+      sourceId: "task:1",
+    };
+    expect(s1.addTeamActivity(a.id, item)).toBe(true);
+    expect(s1.addTeamActivity(a.id, item)).toBe(false);
+    s1.close();
+
+    const s2 = createSqliteStore(dbPath);
+    expect(s2.listTeamMembers().find((m) => m.user.id === a.id)?.lastSeenAt).toBeTruthy();
+    expect(s2.listTeamActivities()).toHaveLength(1);
+    expect(s2.addTeamActivity(a.id, item)).toBe(false);
+    expect(s2.clearTeamActivities(a.id)).toBe(1);
+    expect(s2.listTeamActivities()).toEqual([]);
+    s2.close();
   });
 });

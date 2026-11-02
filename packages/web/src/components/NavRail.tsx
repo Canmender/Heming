@@ -1,24 +1,23 @@
 import { useState } from "react";
 import {
   HomeIcon,
-  ChatIcon,
+  TeamIcon,
+  AssistantIcon,
   PlugIcon,
   MemoryIcon,
-  ArchiveIcon,
   GearIcon,
   UserIcon,
   SkillsIcon,
   PackageIcon,
   TaskIcon,
   SearchIcon,
-  SessionsIcon,
+  FolderIcon,
   InfoHubIcon,
   AutomationIcon,
   StaffIcon,
 } from "./icons.js";
 import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
-import { useChatStore } from "../store/chat.js";
 import { NotificationCenter } from "./NotificationCenter.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 
@@ -28,15 +27,17 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
  */
 const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }[] = [
   { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
-  // 会话中心是新页，拿 9（老页编号不动，见设置区的注释）
-  { page: "conversations", label: "会话", icon: <SessionsIcon width={17} height={17} />, digit: "9" },
+  // 团队（d.54）：名册 + 动向，去 IM 后的主入口；新页不占数字键
+  { page: "team", label: "团队", icon: <TeamIcon width={17} height={17} /> },
+  // 智能体（本机运行）：原 chat 页转正为导航页（仍不占数字键，沿用旧逻辑）
+  { page: "chat", label: "智能体", icon: <AssistantIcon width={17} height={17} /> },
   // 幕僚（d.48）：常驻主动简报，与信息中枢同口径，不占数字键
   { page: "staff", label: "幕僚", icon: <StaffIcon width={17} height={17} /> },
   // 信息中枢（d.45）：1–9/0 已排满，新页不再占用快捷键，只从导航点开
   { page: "infohub", label: "信息中枢", icon: <InfoHubIcon width={17} height={17} /> },
   // 自动化（d.47）：与信息中枢同口径，不占数字键
   { page: "automations", label: "自动化", icon: <AutomationIcon width={17} height={17} /> },
-  { page: "workspace", label: "工作区", icon: <ChatIcon width={17} height={17} />, digit: "2" },
+  { page: "workspace", label: "工作区", icon: <FolderIcon width={17} height={17} />, digit: "2" },
   // 任务区是新页，拿 8（老页编号不动，见设置区的注释）
   { page: "tasks", label: "任务区", icon: <TaskIcon width={17} height={17} />, digit: "8" },
   { page: "skills", label: "技能区", icon: <SkillsIcon width={17} height={17} />, digit: "3" },
@@ -44,9 +45,7 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
   { page: "plugins", label: "插件区", icon: <PackageIcon width={17} height={17} />, digit: "0" },
   { page: "interfaces", label: "接口区", icon: <PlugIcon width={17} height={17} />, digit: "4" },
   { page: "memory", label: "记忆区", icon: <MemoryIcon width={17} height={17} />, digit: "5" },
-  // 归档是新页，拿 7；设置区保持 6 不动——digit 绑定页面不随显示顺序变，
-  // 改老页的编号等于把用户肌肉记忆里的快捷键换掉。
-  { page: "archive", label: "归档", icon: <ArchiveIcon width={17} height={17} />, digit: "7" },
+  // digit 绑定页面不随显示顺序变：改老页的编号等于换掉用户肌肉记忆里的快捷键。
   { page: "settings", label: "设置区", icon: <GearIcon width={17} height={17} />, digit: "6" },
 ];
 
@@ -72,8 +71,6 @@ export function NavRail({ onOpenSearch }: { onOpenSearch?: () => void } = {}) {
   const navOrder = normalizeNavOrder(useUiStore((s) => s.navOrder));
   const displayName = useAuthStore((s) => s.user?.displayName);
   const avatar = useAuthStore((s) => s.user?.avatar);
-  // 全局未读总和（direct+group）：数据由登录后已有挂载加载（HomePage/RadarContacts 的 loadWorkspace），此处纯读取
-  const unread = useChatStore((s) => s.conversations.reduce((n, c) => n + c.unreadCount, 0));
   const who = displayName || "我";
   // 退出是破坏性操作（会清掉会话态），先问一句再登出
   const [confirmLogout, setConfirmLogout] = useState(false);
@@ -100,15 +97,13 @@ export function NavRail({ onOpenSearch }: { onOpenSearch?: () => void } = {}) {
           .map((navPage) => ITEMS.find((it) => it.page === navPage))
           .filter((it): it is (typeof ITEMS)[number] => Boolean(it))
           .map((it) => {
-          const active = page === it.page || (it.page === "workspace" && page === "chat");
+          const active = page === it.page;
           const shortcut = it.digit ? `Alt${it.digit}` : "";
-          // 工作区按钮承载全局未读角标：>0 时 aria-label 追加「N 条未读」
-          const showUnread = it.page === "workspace" && unread > 0;
           return (
             <div key={it.page} className="group relative">
               <button
                 type="button"
-                aria-label={`${it.label}${shortcut ? ` ${shortcut}` : ""}${showUnread ? ` ${unread} 条未读` : ""}`}
+                aria-label={`${it.label}${shortcut ? ` ${shortcut}` : ""}`}
                 aria-current={active ? "page" : undefined}
                 onClick={() => setPage(it.page)}
                 className={`relative flex h-[34px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
@@ -116,11 +111,6 @@ export function NavRail({ onOpenSearch }: { onOpenSearch?: () => void } = {}) {
                 }`}
               >
                 {it.icon}
-                {showUnread && (
-                  <span className="absolute -right-1 -top-1 min-w-[16px] rounded-full border border-white bg-ink px-1 text-center text-[9px] font-semibold leading-[14px] text-white">
-                    {unread}
-                  </span>
-                )}
               </button>
               <Tip label={it.label} shortcut={shortcut || undefined} />
             </div>

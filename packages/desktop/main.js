@@ -7,7 +7,6 @@ const { loadWindowState, saveWindowState } = require("./window-state");
 const { shouldShowSplash, splashWindowOptions } = require("./splash-config");
 const { attachSplashLifecycle } = require("./splash-lifecycle");
 const { resolveRequest, contentTypeFor, INDEX_FILE } = require("./app-protocol");
-const { isCallWindowUrl, callWindowOptions } = require("./call-window");
 const { isPetWindowUrl, parsePetStateJson } = require("./pet-window");
 const { createPetHost } = require("./pet-host");
 const { appVersion } = require("./app-version");
@@ -227,7 +226,7 @@ function createSplashWindow(mainWin) {
 }
 
 // 主窗口引用：系统通知点击必须回到主窗口，而不是多窗口里随便一个
-// （独立通话窗口由 window.open 创建，getAllWindows()[0] 不保证是主窗口）。
+// （桌宠是独立窗口时，getAllWindows()[0] 不保证是主窗口）。
 let mainWindow = null;
 
 // 桌宠宿主（d.46）：独立透明置顶窗 + 托盘。浏览器端没有这个概念。
@@ -340,9 +339,8 @@ if (!gotLock) {
       saveWindowState(windowStateFile(), win.getNormalBounds());
     });
 
-    // window.open / target=_blank 默认交给系统浏览器；**例外只有两个**：
-    // 通话窗口（同源 + `?hemingWindow=call`）与桌宠窗口（同源 + `?hemingWindow=pet`）。
-    // 其余一律 deny，保持「主窗口不开新页」的既有约束。
+    // window.open / target=_blank 默认交给系统浏览器；**例外只有桌宠窗口**
+    // （同源 + `?hemingWindow=pet`）。其余一律 deny，保持「主窗口不开新页」的既有约束。
     const appOriginForWindows = EMBEDDED_ORIGIN === originOf(appUrl) ? EMBEDDED_ORIGIN : appUrl;
     win.webContents.setWindowOpenHandler(({ url }) => {
       // 桌宠窗口由主进程自己建（需要透明穿透、位置记忆与单例），不走 window.open。
@@ -351,10 +349,6 @@ if (!gotLock) {
         console.log("[heming] 桌宠窗口请求改由主进程托管");
         if (petHost) petHost.show();
         return { action: "deny" };
-      }
-      if (isCallWindowUrl(url, appOriginForWindows) || isCallWindowUrl(url, EMBEDDED_ORIGIN)) {
-        console.log("[heming] 打开通话窗口:", url);
-        return { action: "allow", overrideBrowserWindowOptions: callWindowOptions() };
       }
       console.log("[heming] 新窗口请求转系统浏览器打开:", url);
       openInSystemBrowser(url);
@@ -383,10 +377,6 @@ if (!gotLock) {
     createSplashWindow(win);
 
     // 来电时停止任务栏闪烁（窗口获得焦点 = 用户已看到来电）
-    win.on("focus", () => {
-      win.flashFrame(false);
-    });
-
     win.loadURL(appUrl);
 
     // 渲染进程崩溃兜底：写一条崩溃日志 + 自动重载**一次**。
@@ -396,20 +386,6 @@ if (!gotLock) {
     attachRenderCrashRecovery(win.webContents, {
       appVersion: appVersion(),
       logDir: CRASH_LOG_DIR,
-    });
-
-    // ICE 服务器列表（STUN/TURN）**改由渲染层自己拉**（web/src/lib/iceServers.ts）。
-    // 原来这里是主进程裸 fetch 服务端的 /api/ice-servers 再注入渲染层，但本轮服务端给
-    // 该路由加了鉴权（未带 token → 401），而主进程拿不到 web 的 token。
-    // 要让它继续工作就得把 token 从渲染层搬进主进程 → 主进程开始持有用户凭据，
-    // 这是新增的暴露面（主进程内存会被 dump、崩溃日志可能带出）。
-    // 渲染层本来就持有 token，且桌面页 app://heming 是 secure origin，跨域也通。
-    // preload.js 的 __heming_ice_servers_get / setIceServers 保留不动，
-    // web 侧仍按可选链读它作为兼容位（当前已无注入方）。
-
-    // 窗口最小化时通知渲染层（渲染层据此弹系统通知，来电不丢）
-    win.on("minimize", () => {
-      win.webContents.send("voice-call:minimized");
     });
 
     return win;
@@ -542,16 +518,6 @@ if (!gotLock) {
     updater.scheduleCheck();
   }, 8_000);
 
-  // 语音通话系统通知 + 任务栏闪烁（渲染层经 preload 的 __heming_voice_call.notify 请求）
-  ipcMain.on("voice-call:notify", (_event, title, body) => {
-    if (Notification.isSupported()) {
-      new Notification({ title, body }).show();
-    }
-    // 任务栏闪烁（Windows/Linux；窗口聚焦时自动停止，见 createWindow 的 focus 处理）
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win && !win.isFocused()) win.flashFrame(true);
-  });
-
   function setupMenu() {
     const isDev = !app.isPackaged;
     const template = [];
@@ -658,11 +624,11 @@ app.whenReady().then(() => {
     // 所以必须早于 createWindow()。
     registerSecretIpc(ipcMain);
     // 系统通知桥（d.39）：消息提醒只在窗口不在前台时由渲染层请求；
-    // 点击通知显式聚焦主窗口（通话窗口不能截走通知跳转）。
+    // 点击通知显式聚焦主窗口（桌宠窗口不能截走通知跳转）。
     registerNotifyIpc(ipcMain, {
       Notification,
       getMainWindow: () => mainWindow,
-      // 任一应用窗口在前台（含独立通话窗口）就不弹系统通知。
+      // 任一应用窗口在前台（含桌宠窗口）就不弹系统通知。
       getFocusedWindow: () => BrowserWindow.getFocusedWindow(),
     });
     // 信息中枢（d.45）：IPC 只在本机进程桥之上转发，不直接暴露文件系统。

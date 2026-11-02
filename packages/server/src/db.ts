@@ -64,6 +64,16 @@ export function initSchema(db: DatabaseSyncType): void {
       PRIMARY KEY (user_id, ik_ecdh)
     );
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, created_at);
+    -- d.54 团队系统：动向摘要（不是消息，不含正文/提示词/工具参数）。
+    -- source_id 是客户端确定性幂等键，(actor_id, source_id) 唯一。
+    CREATE TABLE IF NOT EXISTS team_activities (
+      id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, kind TEXT NOT NULL,
+      title TEXT NOT NULL, detail TEXT, status TEXT, source_id TEXT NOT NULL,
+      occurred_at TEXT NOT NULL, created_at TEXT NOT NULL,
+      UNIQUE (actor_id, source_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_activities_at ON team_activities(occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_team_activities_actor ON team_activities(actor_id, occurred_at DESC);
   `);
   // 幂等列迁移：生产库已有无 recalled_at 列的 messages 表（CREATE IF NOT EXISTS 不会补列）；
   // E2E Task 2 同模式补 enc/cipher/chain_kid/n（enc 带非空默认值，SQLite ALTER 允许常量默认）。
@@ -93,5 +103,11 @@ export function initSchema(db: DatabaseSyncType): void {
   }>;
   if (!memberCols.some((c) => c.name === "archived_at")) {
     db.exec("ALTER TABLE conversation_members ADD COLUMN archived_at TEXT");
+  }
+
+  // d.54 团队：最近活跃时间。登录/WS 连接时刷新，不参与鉴权。
+  const userCols = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
+  if (!userCols.some((c) => c.name === "last_seen_at")) {
+    db.exec("ALTER TABLE users ADD COLUMN last_seen_at TEXT");
   }
 }

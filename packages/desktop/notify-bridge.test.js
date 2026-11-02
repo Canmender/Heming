@@ -89,7 +89,7 @@ test("主窗口已销毁 → 点击不崩、不发送", () => {
   assert.deepEqual(env.sent, []);
 });
 
-test("多窗口（主窗口 + 通话窗口）：点击只聚焦主窗口，绝不碰通话窗口", () => {
+test("多窗口（主窗口 + 桌宠窗口）：点击只聚焦主窗口，绝不碰桌宠窗口", () => {
   const shown = [];
   const makeWin = () => {
     const calls = { show: 0, focus: 0, restore: 0, send: [] };
@@ -116,7 +116,7 @@ test("多窗口（主窗口 + 通话窗口）：点击只聚焦主窗口，绝�
   registerNotifyIpc(ipcMain, {
     Notification: FakeNotification,
     getMainWindow: () => main.win,
-    // 若实现误改回 getAllWindows()[0]，这里第一个是通话窗口，用例会抓住。
+    // 若实现误改回 getAllWindows()[0]，这里第一个是桌宠窗口，用例会抓住。
     BrowserWindow: { getAllWindows: () => [call.win, main.win] },
   });
   ipcMain["notify:message"]({}, { title: "鲍勃", body: "你有一条新消息", conversationId: "c1" });
@@ -223,14 +223,14 @@ test("点击回调重复触发只处理一次（不重复聚焦/回传）", () =
   assert.deepEqual(env.sent, [["notify:open", "c1"]]);
 });
 
-test("任一应用窗口在前台（含通话窗口）→ 不弹；无焦点窗口且主窗口在后台 → 弹", () => {
+test("任一应用窗口在前台（含桌宠窗口）→ 不弹；无焦点窗口且主窗口在后台 → 弹", () => {
   const main = fakeEnv({ focused: false });
   registerNotifyIpc(main.ipcMain, {
     ...main.deps,
     getFocusedWindow: () => ({ isDestroyed: () => false }),
   });
   main.ipcMain["notify:message"]({}, { title: "t", body: "b", conversationId: "c1" });
-  assert.equal(main.shown.length, 0, "通话窗口在前台时不打扰");
+  assert.equal(main.shown.length, 0, "桌宠窗口在前台时不打扰");
 
   const bg = fakeEnv({ focused: false });
   registerNotifyIpc(bg.ipcMain, { ...bg.deps, getFocusedWindow: () => null });

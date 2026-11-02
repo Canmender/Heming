@@ -287,16 +287,14 @@ test("main.js：渲染进程崩溃接兜底（写日志 + 只重载一次）", (
   );
 });
 
-test("main.js：主进程不再自己拉 ICE（改由渲染层自取，主进程没有 token）", () => {
-  // 服务端给 /api/ice-servers 加了鉴权，主进程裸 fetch 必然 401；
-  // 而要让它继续工作就得把 token 搬进主进程（新增暴露面），所以整段删掉。
+test("main.js：语音通话整套桥已移除（ICE / 最小化 / 通话通知）", () => {
   assert.ok(!/iceBase/.test(mainCode), "主进程不应再有 iceBase 变量");
   assert.ok(!/\/api\/ice-servers/.test(mainCode), "主进程不应再请求 /api/ice-servers");
   assert.ok(!/HEMING_API_BASE/.test(mainCode), "主进程不应再有 HEMING_API_BASE 分支");
-  // preload 的兼容位保留不动（web 侧仍按可选链读它）
+  assert.ok(!/voice-call/.test(mainCode), "主进程不应再有 voice-call IPC");
   const preloadSrc = fs.readFileSync(path.join(__dirname, "preload.js"), "utf8");
-  assert.ok(preloadSrc.includes("__heming_ice_servers_get"), "preload 的 ICE 兼容位应保留");
-  assert.ok(preloadSrc.includes("setIceServers"), "preload 的 setIceServers 应保留");
+  assert.ok(!preloadSrc.includes("__heming_ice_servers_get"), "preload 不应再暴露 ICE");
+  assert.ok(!preloadSrc.includes("__heming_voice_call"), "preload 不应再暴露通话桥");
 });
 
 // ── 本机密钥信封桥（d.36）──
@@ -319,7 +317,7 @@ test("main.js：接上系统通知桥，保持主窗口引用并用它聚焦", (
   );
   assert.ok(
     mainCode.includes("getFocusedWindow: () => BrowserWindow.getFocusedWindow()"),
-    "任一应用窗口（含通话窗口）在前台时不应弹系统通知"
+    "任一应用窗口（含桌宠窗口）在前台时不应弹系统通知"
   );
   // Windows 系统通知要求进程 AUMID 与安装快捷方式一致，否则可能静默不弹。
   assert.ok(

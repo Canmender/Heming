@@ -24,7 +24,12 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": { target: "http://127.0.0.1:8787", changeOrigin: true, ws: true },
+      // 本机可能同时跑着别的服务（8787 被占时用 HEMING_DEV_API 指到临时端口自测）
+      "/api": {
+        target: process.env.HEMING_DEV_API ?? "http://127.0.0.1:8787",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   build: {

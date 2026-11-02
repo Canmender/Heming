@@ -23,18 +23,19 @@
 
 ## 3. 设计规格与实施记录
 
-### 平台与 IM
+### 平台与团队
 
 | 文档 | 主题 |
 |---|---|
-| [specs/2026-10-13-heming-platform-design.md](superpowers/specs/2026-10-13-heming-platform-design.md) | 总设计、数据模型、里程碑、二期范围 |
+| [specs/2026-10-13-heming-platform-design.md](superpowers/specs/2026-10-13-heming-platform-design.md) | 总设计、数据模型、里程碑、二期范围（IM 部分已被 d.54 取代） |
+| [specs/2026-11-02-team-system-design.md](superpowers/specs/2026-11-02-team-system-design.md) | **d.54 团队系统（去 IM）**：删除人类私聊/群聊与语音视频通话、保留 AI 助手、通讯录升级为全站名册、团队动向摘要（来源/白名单/幂等/隐私边界）、迁移脚本与验收 |
 | [specs/2026-10-22-bare-metal-deploy.md](superpowers/specs/2026-10-22-bare-metal-deploy.md) | 云端去 Docker：2C2G 上的裸机 nginx + systemd，云端零构建 |
-| [specs/2026-10-16-m3-agents-design.md](superpowers/specs/2026-10-16-m3-agents-design.md) | 智能体名册与群内 @ |
-| [specs/2026-10-17-e2e-encryption-design.md](superpowers/specs/2026-10-17-e2e-encryption-design.md) | 端到端加密：棘轮、信封、迁移 |
-| [specs/2026-10-18-voice-call-design.md](superpowers/specs/2026-10-18-voice-call-design.md) | Mesh WebRTC 语音/视频通话 |
-| [specs/2026-10-21-voice-call-reconnect.md](superpowers/specs/2026-10-21-voice-call-reconnect.md) | 通话断线重连：逐路 ICE restart、预算、新信令、明文面复核 |
-| [specs/2026-10-18-im-skills-memory-ui.md](superpowers/specs/2026-10-18-im-skills-memory-ui.md) | 导航常驻、技能区、记忆区、通话独立窗口 |
-| [specs/2026-10-18-home-page-real-data-design.md](superpowers/specs/2026-10-18-home-page-real-data-design.md) | 主页真实数据化 |
+| [specs/2026-10-16-m3-agents-design.md](superpowers/specs/2026-10-16-m3-agents-design.md) | 智能体名册与群内 @（群聊部分已被 d.54 删除） |
+| [specs/2026-10-17-e2e-encryption-design.md](superpowers/specs/2026-10-17-e2e-encryption-design.md) | 端到端加密：棘轮、信封、迁移（现服务于 AI 助手消息） |
+| [specs/2026-10-18-voice-call-design.md](superpowers/specs/2026-10-18-voice-call-design.md) | Mesh WebRTC 语音/视频通话（**d.54 已删除**，仅作历史） |
+| [specs/2026-10-21-voice-call-reconnect.md](superpowers/specs/2026-10-21-voice-call-reconnect.md) | 通话断线重连（**d.54 已删除**，仅作历史） |
+| [specs/2026-10-18-im-skills-memory-ui.md](superpowers/specs/2026-10-18-im-skills-memory-ui.md) | 导航常驻、技能区、记忆区、通话独立窗口（通话部分已删除） |
+| [specs/2026-10-18-home-page-real-data-design.md](superpowers/specs/2026-10-18-home-page-real-data-design.md) | 主页真实数据化（d.54 改为团队统计与动向卡） |
 
 ### 智能体运行时
 
@@ -51,8 +52,8 @@
 | [specs/2026-10-22-atomic-image-send.md](superpowers/specs/2026-10-22-atomic-image-send.md) | 图片 + 文字同发：本轮附件走当前 user 轮，不依赖历史回声 |
 | [specs/2026-10-22-modal-inert-and-workspace-state.md](superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md) | 弹窗屏蔽背景（无 portal 下的兄弟屏蔽 + 引用计数）、焦点归还、工作区首帧加载/失败态 |
 | [superpowers/2026-10-18-agent-handoff.md](superpowers/2026-10-18-agent-handoff.md) | 智能体批次交接（键名、常量、边界） |
-| [specs/2026-11-02-d53-file-edit-primitive.md](superpowers/specs/2026-11-02-d53-file-edit-primitive.md) | 文件编辑原语 `file_patch`：上下文锚点补丁、可写根与路径收敛、三态安全判定、规则升级为路径前缀（**规格，未开工**） |
-| [specs/2026-11-02-d54-rollout-recovery-fork.md](superpowers/specs/2026-11-02-d54-rollout-recovery-fork.md) | 回合日志的回放/重跑/分叉：三个动作的边界、为什么不做断点续跑、`seq` 与配对校验、分叉前置条件（**规格，未开工**） |
+| [specs/2026-11-02-d53-file-edit-primitive.md](superpowers/specs/2026-11-02-d53-file-edit-primitive.md) | 文件编辑原语 `file_patch`：上下文锚点补丁、可写根与路径收敛、三态安全判定、规则升级为路径前缀（**规格，未开工**；文件名中的 d.53 是暂用号，d.53 已被桌宠占用，开工顺延为 d.55） |
+| [specs/2026-11-02-d54-rollout-recovery-fork.md](superpowers/specs/2026-11-02-d54-rollout-recovery-fork.md) | 回合日志的回放/重跑/分叉：三个动作的边界、为什么不做断点续跑、`seq` 与配对校验、分叉前置条件（**规格，未开工**；d.54 已被团队系统占用，开工顺延为 d.56） |
 
 ### 桌面端
 
@@ -74,7 +75,7 @@
 | [specs/2026-10-21-local-package-runtime-policy.md](superpowers/specs/2026-10-21-local-package-runtime-policy.md) | 本地包（npm/pypi）运行时策略：探测、`shell:false` 翻译链、台账与进程回收 |
 | [research/2026-10-21-delivery-hitl-registry.md](research/2026-10-21-delivery-hitl-registry.md) | HITL + Registry 本轮交付与踩坑 |
 
-### d.30–d.53 安全、数据收口与能力平台化（2026-10-22 → ）
+### d.30–d.54 安全、数据收口与能力平台化（2026-10-22 → ）
 
 按 `research/2026-10-22-deep-audit-followup-plan.md` 的分轮表推进；每轮一份规格、一次门禁、两处发布。
 
@@ -100,6 +101,7 @@
 | [specs/2026-11-01-d46-infohub-native-capability.md](superpowers/specs/2026-11-01-d46-infohub-native-capability.md) | d.46：信息中枢原生融入——归档工具提供者（检索/读会话/日程，重扫走 HITL）、共享运行态 store、首页归档卡、Ctrl+K 归档检索、跨页意图、归档来源脚注；只在桌面端且已连接时注入，不自动启动边车、不暴露 sync、不迁移数据 |
 | [specs/2026-11-01-d47-automation-center.md](superpowers/specs/2026-11-01-d47-automation-center.md) | d.47：自动化中心——本机任务（每天定时/按间隔，`heming.automations.v1`）、InfoHub 同步与日程重扫白名单、15s 串行调度、启动不补跑、未连接记 `skipped` 且绝不自动拉起边车；信息中枢「定时/保存为定时任务/定时重扫」预填；不执行脚本、不推送、不上云 |
 | [specs/2026-11-01-d48-staff-proactive-agent.md](superpowers/specs/2026-11-01-d48-staff-proactive-agent.md) | d.48：常驻幕僚——晨报 + 日程临期 + 任务异常三路只读巡检，规则优先、可选模型总结并强制补回紧急项，`heming.staff.*` 本机存储、去重账本、静默时段与预算；只递简报与跳转，不自动执行、不拉起 InfoHub、不巡检归档全文 |
+| [specs/2026-11-02-team-system-design.md](superpowers/specs/2026-11-02-team-system-design.md) | d.54：去 IM——删除人类私聊/群聊/消息/已读/typing/撤回/转发/表情回应/语音消息与语音视频通话；保留 AI 助手对话与 E2E；`GET /api/team` 全站名册 + presence + `last_seen_at`；`/api/team/activities` 仅摘要、`(actor_id, source_id)` 幂等；团队页三类共享默认全关、主页团队卡、Ctrl+K 搜成员；`scripts/purge-im-data.mjs` 默认 dry-run |
 | [specs/2026-11-01-d46-desktop-pet.md](superpowers/specs/2026-11-01-d46-desktop-pet.md) | d.53（文件名为写作时编号）：桌宠——独立透明置顶窗（`pet.html` 独立入口，不背应用 bundle）、默认鼠标穿透 + 按可交互区动态关闭、Cubism Core 官方再分发文件 + Hiyori 示例模型、视线/点击/口型、点角色直接对话（复用 `streamChat` 直连本机 LLM）；不做语音/消息感知/模型市场 |
 | [plans/2026-11-01-d46-desktop-pet.md](superpowers/plans/2026-11-01-d46-desktop-pet.md) | d.53 实施计划：资源与依赖 → 窗口层纯函数 → 主进程接线 → 渲染层 → 对话与设置 → 门禁与真机验收 |
 | [specs/2026-11-02-pet-presence.md](superpowers/specs/2026-11-02-pet-presence.md) | 桌宠的在场感：事件由既有模块产出、渠道互斥（主窗口在前台则走通知中心）、三档打扰强度、错过不补发；**规格，未开工，版本号待定** |

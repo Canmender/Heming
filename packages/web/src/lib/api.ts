@@ -3,10 +3,13 @@ import type {
   SharedFileMeta,
   Message,
   Conversation,
-  Member,
   E2eKeysResponse,
   PutE2eKeysBody,
   ReencryptBody,
+  TeamActivityInput,
+  TeamActivityList,
+  TeamActivityWriteResult,
+  TeamRoster,
 } from "@heming/shared";
 import { hasSubtle, toB64, fromB64 } from "./e2eCrypto.js";
 
@@ -110,32 +113,7 @@ export const updateProfile = (displayName: string, avatar?: string) =>
     method: "PUT",
     body: JSON.stringify({ displayName, ...(avatar !== undefined ? { avatar } : {}) }),
   });
-export const fetchFriends = () =>
-  api<{ id: string; user: User }[]>("/api/friends");
-export const requestFriend = (username: string) =>
-  api("/api/friends/request", { method: "POST", body: JSON.stringify({ username }) });
-export const fetchIncomingRequests = () =>
-  api<{ id: string; from: User }[]>("/api/friends/requests");
-export const acceptFriend = (id: string) =>
-  api(`/api/friends/${id}/accept`, { method: "POST", body: "{}" });
 export const fetchConversations = () => api<Conversation[]>("/api/conversations");
-/**
- * 归档 / 取消归档一条会话。
- *
- * 服务端按**成员**存这个状态，所以群聊里各人归档互不影响——
- * 前端不要把它当成会话本身的属性去做全局缓存。
- */
-export const archiveConversation = (convId: string, archived: boolean) =>
-  api<void>(`/api/conversations/${convId}/archive`, {
-    method: "PATCH",
-    body: JSON.stringify({ archived }),
-  });
-/** 建直聊会话：服务端该响应体不带 unreadCount（store.createDirectConversation 原样返回），由调用方补 0。 */
-export const createConversation = (peerId: string) =>
-  api<{ id: string; type: "direct"; peer: User }>("/api/conversations", {
-    method: "POST",
-    body: JSON.stringify({ peerId }),
-  });
 /**
  * 建智能体一对一会话（幂等：服务端已存在则返回原会话）。
  * 走同一个 POST /api/conversations，靠 body 的 agentId 分支区分——不新开路由，
@@ -148,9 +126,35 @@ export const createAgentConversation = (agentId: string) =>
   });
 export const fetchMessages = (convId: string) =>
   api<Message[]>(`/api/conversations/${convId}/messages`);
-export const fetchMembers = (convId: string) =>
-  api<Member[]>(`/api/conversations/${convId}/members`);
 export const fetchFiles = () => api<SharedFileMeta[]>("/api/files");
+
+/** 团队名册：本实例全部注册用户 + 在线态 + 最近活跃。 */
+export const fetchTeam = () => api<TeamRoster>("/api/team");
+
+/** 团队动向流：默认 50 条，`before` 按 occurredAt 倒序翻页。 */
+export const fetchTeamActivities = (opts: {
+  limit?: number;
+  before?: string;
+  actorId?: string;
+} = {}) => {
+  const q = new URLSearchParams();
+  if (opts.limit !== undefined) q.set("limit", String(opts.limit));
+  if (opts.before) q.set("before", opts.before);
+  if (opts.actorId) q.set("actorId", opts.actorId);
+  const suffix = q.toString() ? `?${q.toString()}` : "";
+  return api<TeamActivityList>(`/api/team/activities${suffix}`);
+};
+
+/** 上报本机摘要（≤50 条/次，按 sourceId 幂等去重）。 */
+export const uploadTeamActivities = (items: TeamActivityInput[]) =>
+  api<TeamActivityWriteResult>("/api/team/activities", {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  });
+
+/** 撤回本人已上传的全部动向。 */
+export const clearMyTeamActivities = () =>
+  api<void>("/api/team/activities/mine", { method: "DELETE" });
 
 /**
  * E2E 公钥分发与明文重加密（Task 2 契约，设计 §3.1/§7）：

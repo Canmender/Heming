@@ -1,107 +1,75 @@
 import { describe, it, expect } from "vitest";
-import type { Conversation } from "@heming/shared";
+import type { TeamMember } from "@heming/shared";
 import { searchAll, searchAllDetailed } from "./CommandPalette";
 
 /**
- * 全局搜索的排序与范围。
+ * 全局搜索的排序与范围（团队系统版）。
  *
- * 抽成纯函数就是为了能这样测：不挂载 UI、不碰键盘事件，
- * 只验证「给一个关键词，出什么结果、按什么顺序」。
+ * 去 IM 后不再有会话可搜：输入关键词出「团队成员（名册）+ 内置技能」。
+ * 抽成纯函数就是为了能这样测：不挂载 UI、不碰键盘事件。
  */
 
-function conv(
+function member(
   id: string,
-  name: string,
-  archivedAt?: string | null,
-  type: "direct" | "group" | "agent" = "direct",
-): Conversation {
-  if (type === "group") {
-    return {
-      id,
-      type: "group",
-      name,
-      memberCount: 2,
-      unreadCount: 0,
-      archivedAt: archivedAt ?? null,
-    } as unknown as Conversation;
-  }
-  if (type === "agent") {
-    return {
-      id,
-      type: "agent",
-      agent: { id: `a-${id}`, owner_id: null, name, avatar: null, description: "" },
-      unreadCount: 0,
-      archivedAt: archivedAt ?? null,
-    } as unknown as Conversation;
-  }
+  displayName: string,
+  over: Partial<TeamMember> = {},
+): TeamMember {
   return {
-    id,
-    type: "direct",
-    peer: { id: `u-${id}`, username: `u-${id}`, displayName: name, avatar: undefined },
-    unreadCount: 0,
-    archivedAt: archivedAt ?? null,
-  } as unknown as Conversation;
+    user: { id, username: id, displayName },
+    lastSeenAt: null,
+    online: false,
+    ...over,
+  };
 }
 
 describe("searchAll", () => {
   it("空关键词不出结果（避免打开面板就倒一屏东西）", () => {
-    expect(searchAll("", [conv("1", "张三")])).toEqual([]);
-    expect(searchAll("   ", [conv("1", "张三")])).toEqual([]);
+    expect(searchAll("", [member("u1", "张三")])).toEqual([]);
+    expect(searchAll("   ", [member("u1", "张三")])).toEqual([]);
   });
 
-  it("按名字包含匹配", () => {
-    const out = searchAll("张", [conv("1", "张三"), conv("2", "李四")]);
-    expect(out.map((r) => r.name)).toEqual(["张三"]);
+  it("按显示名或用户名包含匹配", () => {
+    expect(searchAll("张", [member("u1", "张三"), member("u2", "李四")]).map((r) => r.name)).toEqual([
+      "张三",
+    ]);
+    expect(searchAll("lisi", [member("u1", "张三"), member("lisi", "李四")]).map((r) => r.name)).toEqual([
+      "李四",
+    ]);
   });
 
   it("前缀命中排在包含命中之前", () => {
     const out = searchAll("张三", [
-      conv("1", "群里的张三丰"), // 包含
-      conv("2", "张三"), // 前缀
+      member("u1", "群里的张三丰"), // 包含
+      member("u2", "张三"), // 前缀
     ]);
     expect(out[0].name).toBe("张三");
   });
 
-  it("未归档的排在已归档之前（当下要处理的优先）", () => {
-    const out = searchAll("评审", [
-      conv("1", "评审组-旧", "2026-10-01T00:00:00.000Z"),
-      conv("2", "评审组-新"),
+  it("同一前缀内，在线成员优先", () => {
+    const out = searchAll("王", [
+      member("u1", "王五", { lastSeenAt: "2026-10-01T00:00:00.000Z" }),
+      member("u2", "王六", { online: true }),
     ]);
-    expect(out[0].name).toBe("评审组-新");
+    expect(out[0].name).toBe("王六");
   });
 
-  it("已归档的会话**仍然搜得到**（归档不等于藏起来）", () => {
-    // 找不到的东西才会被归档，所以它必须能被搜到
-    const out = searchAll("老项目", [conv("1", "老项目", "2026-09-01T00:00:00.000Z")]);
-    expect(out).toHaveLength(1);
-    expect(out[0].kind).toBe("conversation");
-    if (out[0].kind === "conversation") {
-      expect(out[0].archived).toBe(true);
-      expect(out[0].detail).toContain("已归档");
-    }
-  });
+  it("结果带 @用户名与活跃度说明", () => {
+    const out = searchAll("张三", [member("u1", "张三", { online: true })]);
+    expect(out[0].kind).toBe("member");
+    expect(out[0].detail).toContain("@u1");
+    expect(out[0].detail).toContain("在线");
 
-  it("结果里区分类型（群聊/智能体/好友）", () => {
-    const out = searchAll("x", [
-      conv("1", "x群", null, "group"),
-      conv("2", "x助手", null, "agent"),
-      conv("3", "x好友", null, "direct"),
-    ]);
-    const details = out.map((r) => (r.kind === "conversation" ? r.detail : ""));
-    expect(details.some((d) => d.includes("群聊"))).toBe(true);
-    expect(details.some((d) => d.includes("智能体"))).toBe(true);
-    expect(details.some((d) => d.includes("好友"))).toBe(true);
+    const never = searchAll("张三", [member("u1", "张三")]);
+    expect(never[0].detail).toContain("从未登录");
   });
 
   it("大小写不敏感", () => {
-    const out = searchAll("alice", [conv("1", "Alice")]);
-    expect(out).toHaveLength(1);
+    expect(searchAll("alice", [member("alice", "Alice")])).toHaveLength(1);
   });
 
-  it("会话结果最多 8 条（不让一屏被同类结果占满）", () => {
-    const many = Array.from({ length: 20 }, (_, i) => conv(`c${i}`, `测试${i}`));
-    const out = searchAll("测试", many);
-    expect(out.length).toBeLessThanOrEqual(8);
+  it("成员结果最多 8 条（不让一屏被同类结果占满）", () => {
+    const many = Array.from({ length: 20 }, (_, i) => member(`u${i}`, `测试${i}`));
+    expect(searchAll("测试", many).length).toBeLessThanOrEqual(8);
   });
 
   it("能搜到内置技能（名称命中）", () => {
@@ -113,7 +81,7 @@ describe("searchAll", () => {
 
 describe("searchAllDetailed（超上限提示）", () => {
   it("返回命中总数：展示被截断，但 total 反映全部命中", () => {
-    const many = Array.from({ length: 20 }, (_, i) => conv(`c${i}`, `测试${i}`));
+    const many = Array.from({ length: 20 }, (_, i) => member(`u${i}`, `测试${i}`));
     const out = searchAllDetailed("测试", many);
     expect(out.results).toHaveLength(8);
     expect(out.total).toBe(20);
@@ -122,12 +90,12 @@ describe("searchAllDetailed（超上限提示）", () => {
   });
 
   it("未超上限时 total 等于展示条数（不提示还有）", () => {
-    const out = searchAllDetailed("张三", [conv("1", "张三")]);
+    const out = searchAllDetailed("张三", [member("u1", "张三")]);
     expect(out.results).toHaveLength(1);
     expect(out.total).toBe(1);
   });
 
   it("空关键词 total 为 0（与 results 一致，不触发提示）", () => {
-    expect(searchAllDetailed("", [conv("1", "张三")])).toEqual({ results: [], total: 0 });
+    expect(searchAllDetailed("", [member("u1", "张三")])).toEqual({ results: [], total: 0 });
   });
 });

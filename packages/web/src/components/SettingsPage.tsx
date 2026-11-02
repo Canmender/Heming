@@ -51,7 +51,8 @@ function InlineText({ text }: { text: string }) {
 /** 导航页中文名（排序卡片与校验共用，与 NavRail 的 aria-label 保持一致）。 */
 const NAV_LABELS: Record<NavPage, string> = {
   home: "主页",
-  conversations: "会话",
+  team: "团队",
+  chat: "智能体",
   staff: "幕僚",
   infohub: "信息中枢",
   automations: "自动化",
@@ -61,7 +62,6 @@ const NAV_LABELS: Record<NavPage, string> = {
   plugins: "插件区",
   interfaces: "接口区",
   memory: "记忆区",
-  archive: "归档",
   settings: "设置区",
 };
 

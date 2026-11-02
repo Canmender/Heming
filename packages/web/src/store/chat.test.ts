@@ -1,14 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { Agent, Member, Message, User, WsServerEvent } from "@heming/shared";
+import type { Agent, Message, WsServerEvent } from "@heming/shared";
 import { useChatStore } from "./chat.js";
-import { api, fetchMembers, fetchMessages, reencryptMessage } from "../lib/api.js";
+import { fetchMessages, reencryptMessage } from "../lib/api.js";
 import { listAgents } from "../lib/agentsApi.js";
-import { msgCache, type CachedMsg } from "../lib/e2eSession.js";
 
-// createGroup 走 api()、loadAgents 走 fetchMembers：模块级 mock（其余导出保持真实）
+// 会话/消息接口走模块级 mock（其余导出保持真实）
 vi.mock("../lib/api.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api.js")>();
-  return { ...actual, api: vi.fn(), fetchMembers: vi.fn(), fetchMessages: vi.fn(), reencryptMessage: vi.fn() };
+  return { ...actual, fetchMessages: vi.fn(), reencryptMessage: vi.fn() };
 });
 // loadAgentsRoster 走 listAgents：同款模块级 mock
 vi.mock("../lib/agentsApi.js", async (importOriginal) => {
@@ -19,18 +18,13 @@ vi.mock("../lib/agentsApi.js", async (importOriginal) => {
 const rosterA1: Agent = { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "官方" };
 const rosterA2: Agent = { id: "a2", owner_id: "u1", name: "架构师", avatar: null, description: "d" };
 
-/** 直聊会话夹具（bumpUnread 新用例：conversation 联合类型要求 peer 齐全）。 */
-const peer: User = { id: "u2", username: "bob", displayName: "鲍勃" };
-
 const msg = (id: string, text: string): Message => ({
   id,
   conversationId: "c1",
   senderType: "user",
   senderId: "u1",
   payload: { text },
-  replyTo: null,
   createdAt: "2026-10-13T00:00:00.000Z",
-  recalledAt: null,
   enc: "plain",
 });
 
@@ -41,16 +35,11 @@ const msgAt = (id: string, text: string, createdAt: string): Message => ({
 
 describe("chat store", () => {
   beforeEach(() => {
-    vi.clearAllMocks(); // 模块 mock（api/fetchMembers/listAgents）的调用历史逐例归零
+    vi.clearAllMocks(); // 模块 mock（fetchMessages/listAgents）的调用历史逐例归零
     useChatStore.setState({
       conversations: [],
-      friends: [],
-      incoming: [],
       messages: {},
-      agents: [],
       agentsRoster: [],
-      agentIdsInGroups: new Set<string>(),
-      reads: {},
       messagesLoading: {},
       messagesError: {},
       streaming: {},
@@ -116,38 +105,6 @@ describe("chat store", () => {
     expect(ids).toEqual(["m1", "m2", "m3"]);
   });
 
-  it("conversations 联合类型：group 行可读 name/memberCount/unreadCount", () => {
-    const peer: User = { id: "u1", username: "alice", displayName: "A" };
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 0 },
-        { id: "g1", type: "group", name: "评审组", memberCount: 3, unreadCount: 2 },
-      ],
-    });
-    const groups = useChatStore.getState().conversations.filter((c) => c.type === "group");
-    expect(groups[0].type === "group" && groups[0].name).toBe("评审组");
-    expect(groups[0].unreadCount).toBe(2);
-    const directs = useChatStore.getState().conversations.filter((c) => c.type === "direct");
-    expect(directs[0].type === "direct" && directs[0].peer.username).toBe("alice");
-  });
-
-  it("createGroup：POST /api/conversations 后 reload 并返回新 id", async () => {
-    vi.mocked(api).mockResolvedValue({ id: "g9", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 });
-    const loadWorkspace = vi
-      .spyOn(useChatStore.getState(), "loadWorkspace")
-      .mockResolvedValue(undefined);
-    const id = await useChatStore.getState().createGroup("评审组", ["u2", "u3"]);
-    expect(id).toBe("g9");
-    expect(api).toHaveBeenCalledWith(
-      "/api/conversations",
-      expect.objectContaining({ method: "POST" }),
-    );
-    const [, init] = vi.mocked(api).mock.calls[0];
-    expect(JSON.parse(String(init?.body))).toEqual({ name: "评审组", memberIds: ["u2", "u3"] });
-    expect(loadWorkspace).toHaveBeenCalledTimes(1);
-    loadWorkspace.mockRestore();
-  });
-
   it("loadWorkspace 首帧失败：写 workspaceError 并把 rejection 交回调用方", async () => {
     // 走真实 fetch 层：api 模块的 mock 只替换 `api` 导出，
     // fetchConversations 内部用的还是模块内绑定的真 api，所以拦 fetch 才管用
@@ -189,71 +146,12 @@ describe("chat store", () => {
     expect(s.workspaceError).toBeNull();
   });
 
-  it("loadAgents：逐群拉 members，kind=agent 按 id 去重并 join 名册（owner/description 来自 roster）", async () => {
-    const agentA: Member = { kind: "agent", id: "a1", name: "和小鸣", avatar: null, user: null };
-    const agentB: Member = { kind: "agent", id: "a2", name: "架构师", avatar: null, user: null };
-    const human: Member = {
-      kind: "user",
-      id: "u9",
-      name: "路人",
-      avatar: null,
-      user: { id: "u9", username: "passer", displayName: "路人" },
-    };
-    vi.mocked(fetchMembers).mockImplementation(async (convId) => {
-      // g1 与 g2 都含 a1（跨群重复）、g1 另含 a2 与一个人类成员（应被过滤）
-      if (convId === "g1") return [human, agentA, agentB];
-      return [agentA];
-    });
-    useChatStore.setState({
-      conversations: [
-        { id: "g1", type: "group", name: "预设群", memberCount: 4, unreadCount: 0 },
-        { id: "g2", type: "group", name: "评审组", memberCount: 2, unreadCount: 0 },
-      ],
-      agentsRoster: [rosterA1, rosterA2],
-      agents: [],
-    });
-    await useChatStore.getState().loadAgents();
-    expect(fetchMembers).toHaveBeenCalledWith("g1");
-    expect(fetchMembers).toHaveBeenCalledWith("g2");
-    expect(useChatStore.getState().agents.map((a) => a.id)).toEqual(["a1", "a2"]);
-    // join 拿到 roster 的 owner/description（Member 行升级为名册全量行）
-    expect(useChatStore.getState().agents[1].owner_id).toBe("u1");
-    expect(useChatStore.getState().agents[1].description).toBe("d");
-    expect(useChatStore.getState().agentIdsInGroups).toEqual(new Set(["a1", "a2"]));
-  });
-
-  it("loadAgents：群 members 拉取失败不炸（其余群照常收集）；roster 无此 id 时跳过不占位", async () => {
-    const agentA: Member = { kind: "agent", id: "a1", name: "和小鸣", avatar: null, user: null };
-    const agentGhost: Member = { kind: "agent", id: "a9", name: "幽灵", avatar: null, user: null };
-    vi.mocked(fetchMembers).mockImplementation(async (convId) => {
-      if (convId === "bad") throw new Error("forbidden");
-      return [agentA, agentGhost]; // a9 不在 roster → join 跳过
-    });
-    useChatStore.setState({
-      conversations: [
-        { id: "bad", type: "group", name: "坏群", memberCount: 1, unreadCount: 0 },
-        { id: "g2", type: "group", name: "好群", memberCount: 2, unreadCount: 0 },
-      ],
-      agentsRoster: [rosterA1],
-      agents: [],
-    });
-    await expect(useChatStore.getState().loadAgents()).resolves.toBeUndefined();
-    expect(useChatStore.getState().agents.map((a) => a.id)).toEqual(["a1"]);
-    expect(useChatStore.getState().agentIdsInGroups.has("a9")).toBe(true); // id 集合照收
-  });
-
-  it("loadAgentsRoster：GET /api/agents 全量入册并重算 join（已收集的群内 id 随 roster 刷新）", async () => {
+  it("loadAgentsRoster：GET /api/agents 全量入册", async () => {
     vi.mocked(listAgents).mockResolvedValue([rosterA1, rosterA2]);
-    useChatStore.setState({
-      agentIdsInGroups: new Set(["a1", "a2", "a9"]),
-      agents: [],
-    });
     await useChatStore.getState().loadAgentsRoster();
     expect(listAgents).toHaveBeenCalledTimes(1);
     expect(useChatStore.getState().agentsRoster.map((a) => a.id)).toEqual(["a1", "a2"]);
-    // 重算 join：a9 不在 roster 跳过，a1/a2 从名册带出
-    expect(useChatStore.getState().agents.map((a) => a.id)).toEqual(["a1", "a2"]);
-    expect(useChatStore.getState().agents[0].description).toBe("官方");
+    expect(useChatStore.getState().agentsRoster[0].description).toBe("官方");
   });
 
   it("loadMessages 失败：自己吞异常、落 messagesError、loading 归 false（不再 unhandled）", async () => {
@@ -273,96 +171,6 @@ describe("chat store", () => {
     expect(s.messagesError.c1).toBeNull();
     expect(s.messagesLoading.c1).toBe(false);
     expect(s.messages.c1?.map((m) => m.id)).toEqual(["m1"]);
-  });
-
-  it("clearUnread / bumpUnread：按会话精确清零与 +1，其他会话不受影响", () => {
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "group", name: "A", memberCount: 2, unreadCount: 5 },
-        { id: "c2", type: "group", name: "B", memberCount: 2, unreadCount: 1 },
-      ],
-    });
-    useChatStore.getState().clearUnread("c1");
-    expect(useChatStore.getState().conversations.map((c) => c.unreadCount)).toEqual([0, 1]);
-
-    useChatStore.getState().bumpUnread("c1");
-    useChatStore.getState().bumpUnread("c1");
-    expect(useChatStore.getState().conversations.map((c) => c.unreadCount)).toEqual([2, 1]);
-
-    useChatStore.getState().bumpUnread("ghost"); // 未知会话：静默忽略
-    expect(useChatStore.getState().conversations.map((c) => c.unreadCount)).toEqual([2, 1]);
-  });
-
-  it("bumpUnread：同一条消息只计一次，带 at 更新 lastMessageAt", () => {
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0, lastMessageAt: null }],
-    });
-    expect(useChatStore.getState().bumpUnread("c1", "2026-10-28T01:00:00.000Z", "m1")).toBe(true);
-    expect(useChatStore.getState().bumpUnread("c1", "2026-10-28T01:00:00.000Z", "m1")).toBe(false);
-    const c = useChatStore.getState().conversations[0];
-    expect(c.unreadCount).toBe(1);
-    expect(c.lastMessageAt).toBe("2026-10-28T01:00:00.000Z");
-  });
-
-  it("bumpUnread：会话不在本地列表时仍返回「新消息」", () => {
-    useChatStore.setState({ conversations: [] });
-    expect(useChatStore.getState().bumpUnread("ghost", "2026-10-28T01:00:00.000Z", "m2")).toBe(true);
-    expect(useChatStore.getState().bumpUnread("ghost", "2026-10-28T01:00:00.000Z", "m2")).toBe(false);
-  });
-
-  it("bumpUnread：消息 id 去重表有上限，最旧条目被淘汰后可再次处理", () => {
-    useChatStore.setState({ conversations: [] });
-    for (let i = 0; i < 501; i += 1) {
-      expect(useChatStore.getState().bumpUnread("ghost", undefined, `cap-${i}`)).toBe(true);
-    }
-    // 501 条已顶满上限：最早的 cap-0 被淘汰 → 可再次处理，cap-500 仍在去重表里
-    expect(useChatStore.getState().bumpUnread("ghost", undefined, "cap-0")).toBe(true);
-    expect(useChatStore.getState().bumpUnread("ghost", undefined, "cap-0")).toBe(false);
-    expect(useChatStore.getState().bumpUnread("ghost", undefined, "cap-500")).toBe(false);
-  });
-
-  it("clearUnread 带服务端 at：同时清零未读并刷新 lastReadAt；不传 at 不动 lastReadAt", () => {
-    useChatStore.setState({
-      conversations: [
-        {
-          id: "c1",
-          type: "group",
-          name: "A",
-          memberCount: 2,
-          unreadCount: 3,
-          lastReadAt: "2026-10-14T00:00:00.000Z",
-        },
-        { id: "c2", type: "group", name: "B", memberCount: 2, unreadCount: 1, lastReadAt: null },
-      ],
-    });
-    useChatStore.getState().clearUnread("c1", "2026-10-14T02:00:00.000Z");
-    const c1 = useChatStore.getState().conversations.find((c) => c.id === "c1")!;
-    expect(c1.unreadCount).toBe(0);
-    expect(c1.lastReadAt).toBe("2026-10-14T02:00:00.000Z");
-
-    // 不带 at（旧事件 / 旧服务端）：只清未读，lastReadAt 保持原样
-    useChatStore.getState().clearUnread("c2");
-    const c2 = useChatStore.getState().conversations.find((c) => c.id === "c2")!;
-    expect(c2.unreadCount).toBe(0);
-    expect(c2.lastReadAt).toBeNull();
-  });
-
-  it("setReads 覆盖该会话已读状态（其他会话不受影响）", () => {
-    useChatStore.getState().setReads("c2", [{ userId: "u9", at: "2026-10-13T00:00:00.000Z" }]);
-    useChatStore.getState().setReads("c1", [{ userId: "u1", at: "2026-10-14T01:00:00.000Z" }]);
-    expect(useChatStore.getState().reads["c1"]).toHaveLength(1);
-    expect(useChatStore.getState().reads["c1"][0].at).toBe("2026-10-14T01:00:00.000Z");
-    // c2 的既有读态保留（按会话分桶，不整表覆盖）
-    expect(useChatStore.getState().reads["c2"][0].userId).toBe("u9");
-  });
-
-  it("loadReads 拉取 GET /api/conversations/:id/reads 并写入该会话", async () => {
-    vi.mocked(api).mockResolvedValue([{ userId: "u2", at: "2026-10-14T01:00:00.000Z" }]);
-    await useChatStore.getState().loadReads("c1");
-    expect(api).toHaveBeenCalledWith("/api/conversations/c1/reads");
-    expect(useChatStore.getState().reads["c1"]).toEqual([
-      { userId: "u2", at: "2026-10-14T01:00:00.000Z" },
-    ]);
   });
 
   // —— M3 Task 8：流式管道收口（streaming/streamOwner/onWsEvent）——
@@ -479,98 +287,6 @@ describe("chat store", () => {
     expect(Object.keys(useChatStore.getState().streaming)).toEqual(["his-c2"]);
   });
 
-  it("attachAgentToGroup / detachAgentFromGroup：POST/DELETE 路径与 body", async () => {
-    vi.mocked(api).mockResolvedValue(undefined);
-    await useChatStore.getState().attachAgentToGroup("g1", "a1");
-    expect(api).toHaveBeenCalledWith(
-      "/api/conversations/g1/agents",
-      expect.objectContaining({ method: "POST" }),
-    );
-    const [, init] = vi.mocked(api).mock.calls[0];
-    expect(JSON.parse(String(init?.body))).toEqual({ agentId: "a1" });
-
-    await useChatStore.getState().detachAgentFromGroup("g1", "a1");
-    expect(api).toHaveBeenCalledWith(
-      "/api/conversations/g1/agents/a1",
-      expect.objectContaining({ method: "DELETE" }),
-    );
-  });
-
-  // —— 二期 IM Task 2：message_recalled 处理（置 recalledAt，列表不移除）——
-
-  it("onWsEvent message_recalled：对应消息置 recalledAt，其余与列表长度不变", () => {
-    useChatStore.getState().appendMessage(msg("m1", "一"));
-    useChatStore.getState().appendMessage(msg("m2", "二"));
-    useChatStore.getState().onWsEvent({
-      type: "message_recalled",
-      conversationId: "c1",
-      messageId: "m1",
-      at: "2026-10-17T01:00:00.000Z",
-    });
-    const list = useChatStore.getState().messages["c1"];
-    expect(list).toHaveLength(2); // 不移除
-    expect(list.find((m) => m.id === "m1")?.recalledAt).toBe("2026-10-17T01:00:00.000Z");
-    expect(list.find((m) => m.id === "m2")?.recalledAt).toBeNull(); // 其余不动
-  });
-
-  it("onWsEvent message_recalled：未知会话/未知消息静默忽略（不抛不建空表）", () => {
-    useChatStore.getState().appendMessage(msg("m1", "一"));
-    expect(() =>
-      useChatStore.getState().onWsEvent({
-        type: "message_recalled",
-        conversationId: "ghost",
-        messageId: "x",
-        at: "2026-10-17T01:00:00.000Z",
-      }),
-    ).not.toThrow();
-    expect(useChatStore.getState().messages["ghost"]).toBeUndefined();
-    useChatStore.getState().onWsEvent({
-      type: "message_recalled",
-      conversationId: "c1",
-      messageId: "nope",
-      at: "2026-10-17T01:00:00.000Z",
-    });
-    const list = useChatStore.getState().messages["c1"];
-    expect(list).toHaveLength(1);
-    expect(list[0].recalledAt).toBeNull();
-  });
-
-  it("onWsEvent message_recalled：本会话消息列表不存在也清本机明文缓存", () => {
-    localStorage.clear();
-    const cached: CachedMsg = {
-      id: "g1",
-      senderId: "u2",
-      at: Date.parse("2026-10-17T00:00:00.000Z"),
-      plain: { kind: "text", text: "撤回前的正文" },
-    };
-    msgCache.append("ghost", cached);
-    expect(msgCache.peek("ghost")).toHaveLength(1);
-
-    useChatStore.getState().onWsEvent({
-      type: "message_recalled",
-      conversationId: "ghost",
-      messageId: "g1",
-      at: "2026-10-17T01:00:00.000Z",
-    });
-    expect(msgCache.peek("ghost")).toEqual([]);
-    expect(useChatStore.getState().messages["ghost"]).toBeUndefined(); // 清缓存不建空表
-  });
-
-  it("setMessages：历史里 recalledAt 非空的消息清掉本机明文缓存", () => {
-    localStorage.clear();
-    msgCache.append("c-rec", {
-      id: "r1",
-      senderId: "u2",
-      at: Date.parse("2026-10-17T00:00:00.000Z"),
-      plain: { kind: "text", text: "撤回前的正文" },
-    });
-    useChatStore.getState().setMessages("c-rec", [
-      { ...msg("r1", "撤回前的正文"), conversationId: "c-rec", recalledAt: "2026-10-17T01:00:00.000Z" },
-      msg("r2", "保留"),
-    ]);
-    expect(msgCache.peek("c-rec").map((m) => m.id)).toEqual([]);
-  });
-
   // —— 二期 IM Task 7：他机流 watchdog（长时间无收尾 → error 行供手动重试）——
 
   it("sweepStaleStreams：超时流置 error，新鲜流与已完成流不动", () => {
@@ -681,15 +397,10 @@ describe("chat store", () => {
   /** 冲刷 appendMessage → handler 的异步链（void promise + .then 应用）。 */
   const flush = () => new Promise((r) => setTimeout(r, 0));
 
-  it("setOpenHandler：e2e message_new 经 handler 解密后以明文形态入列（payload/replyTo 来自密文）", async () => {
+  it("setOpenHandler：e2e message_new 经 handler 解密后以明文形态入列", async () => {
     const handler = vi.fn(async (_env: { id: string }) => ({
       status: "ok" as const,
-      plain: {
-        kind: "text" as const,
-        text: "解密后的正文",
-        replyTo: "m0",
-        mentions: [{ agentId: "a1", name: "和小鸣" }],
-      },
+      plain: { kind: "text" as const, text: "解密后的正文" },
     }));
     useChatStore.getState().setOpenHandler(handler);
 
@@ -708,8 +419,6 @@ describe("chat store", () => {
     const list = useChatStore.getState().messages.c1!;
     expect(list).toHaveLength(1);
     expect(list[0].payload.text).toBe("解密后的正文");
-    expect(list[0].payload.mentions).toEqual([{ agentId: "a1", name: "和小鸣" }]);
-    expect(list[0].replyTo).toBe("m0");
     expect(list[0].enc).toBe("e2e"); // 形态仍标信封（plain 自迁移扫描依赖 enc 判别）
     expect(useChatStore.getState().plainById.c1!.m1.kind).toBe("text");
     expect(useChatStore.getState().pendingE2e.c1 ?? []).toHaveLength(0);

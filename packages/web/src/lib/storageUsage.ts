@@ -73,6 +73,7 @@ export const STORAGE_MODULE_RULES: readonly StorageModuleRule[] = [
   { prefix: "heming.skillAssignments.", module: "技能" },
   { prefix: "heming.hitl.", module: "HITL" },
   { prefix: "heming.notifications.", module: "通知" },
+  { prefix: "heming.team.", module: "团队" },
   { prefix: "heming.convPrefs.", module: "通知" },
 ];
 

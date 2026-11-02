@@ -402,21 +402,6 @@ function createPetHost(deps) {
       if (win && !win.isDestroyed()) win.webContents.reload();
     });
     /**
-     * 桌宠的未读角标被点：把主窗口叫到前台并让它打开对应会话。
-     * 校验来源与 id 形状——这条通道会把一个字符串交给主窗口当路由目标。
-     */
-    ipcMain.on("pet:open-conversation", (event, conversationId) => {
-      if (!fromPetWindow(event)) return;
-      if (typeof conversationId !== "string" || !conversationId) return;
-      const main = getMainWindow && getMainWindow();
-      if (!main || main.isDestroyed()) return;
-      if (main.isMinimized()) main.restore();
-      main.show();
-      main.focus();
-      main.webContents.send("pet:open-conversation", conversationId);
-    });
-
-    /**
      * 推送事件给桌宠（主进程 → 渲染进程）。
      *
      * 这是**唯一**的反向通道：桌宠此前只能自己感知（WS），无法接收平台侧发生的事

@@ -1,20 +1,22 @@
 # 和鸣 · 新会话交接文档
 
 - 日期：2026-11-02
-- 当前版本：`d.53.1.15.0`
-- 本轮标签：d.53（桌宠：和鸣智能体的桌面 Live2D 化身 + 未读感知）
-- 当前 main：以 `git log -1` 为准（`a27ce40` 深度调研与分轮计划 → `b5a1348` d.30 四条红线口子 + 三处静默降级 → `793f608` d.30 两处发布收口 → `d.35.1.9.0` 体验修补 → `d.36.1.9.0` 三把钥匙改走系统安全存储 → `d.37.1.9.0` 会话连续性体验轮 → `d.38.1.9.0` 正在输入提示 → `d.38.1.10.0` 对抗性自检与输入提示收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → **d.48–d.52 见 CHANGELOG（本文件顶部未逐条回填）** → d.53.1.13.0 桌宠）
+- 当前版本：`d.54.2.16.0`
+- 本轮标签：d.54（去 IM：人类聊天与通话退场，通讯录升级为真实成员名册 + 团队动向；智能体页专注本机智能体）
+- 当前 main：以 `git log -1` 为准（`a27ce40` 深度调研与分轮计划 → `b5a1348` d.30 四条红线口子 + 三处静默降级 → `793f608` d.30 两处发布收口 → `d.35.1.9.0` 体验修补 → `d.36.1.9.0` 三把钥匙改走系统安全存储 → `d.37.1.9.0` 会话连续性体验轮 → `d.38.1.9.0` 正在输入提示 → `d.38.1.10.0` 对抗性自检与输入提示收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52 见 CHANGELOG（本文件顶部未逐条回填） → d.53.1.13.0 桌宠 → **d.54.2.16.0 团队系统（工作分支 `feat/team-system`，未合入 main）**）
 - 本文用途：给新开的协作会话快速接手——现状、约定、红线、下一步
 
 ---
 
 ## 1. 项目是什么
 
-**和鸣**：原生桌面端（Electron）智能体应用平台 = 云端服务器（IM 即时通讯 + 智能体名册）+ 桌面/网页客户端。
-定位：个人智能体工作台——与人类/智能体聊天协作，管理模型接口、工具接口与记忆知识库。
+**和鸣**：原生桌面端（Electron）智能体应用平台 = 云端服务器（**团队名册 + 团队动向**）+ 桌面/网页客户端。
+定位：个人智能体工作台 + 全站团队协作视图——与本机智能体对话，和真实团队成员共享任务/日程**摘要**；智能体的对话与轨迹只留在智能体侧，管理模型接口、工具接口与记忆知识库。
 
-- **架构红线（不可违背）**：智能体**本地驱动**（本机系统提示词 + 本机 LLM Key 直连供应商 + 本机执行），云端**只是 IM 桥梁**；个人数据（Key/记忆/知识库/本地文件）**不出设备**。
-- **E2E 红线**：消息与附件端到端加密，服务端只见信封；无安全上下文时**拒绝发送，绝不降级明文**。
+- **d.54 起没有人类 IM**：私聊、群聊、消息、已读、typing、撤回、转发、表情回应、语音消息与语音/视频通话全部删除；通讯录保留并升级为全站团队名册。恢复人类 IM 需要回退代码并从备份恢复数据。
+- **架构红线（不可违背）**：智能体**本地驱动**（本机系统提示词 + 本机 LLM Key 直连供应商 + 本机执行），云端**只负责名册、动向摘要与消息信封**；个人数据（Key/记忆/知识库/本地文件）**不出设备**。
+- **E2E 红线**：智能体消息与附件端到端加密，服务端只见信封；无安全上下文时**拒绝发送，绝不降级明文**。
+- **团队动向红线**：只上传白名单摘要（标题/状态/时间），对话正文、提示词、工具参数、任务结果、智能体轨迹与附件一律不出本机；任务 / 日程两类共享默认全关。团队页只列真实成员，智能体不是团队成员。
 - 参考项目：`D:\MultiAgent`（合鸣 Ensemble）——借鉴架构，不复用代码；调研见 `docs/superpowers/research/2026-10-17-multiagent-study.md`。
 - 文档总入口：`docs/INDEX.md`；竞品与许可证调研：`docs/research/2026-10-20-competitive-analysis-v2.md`；同功能异同与优化建议：`docs/research/2026-10-21-feature-parity-and-optimization.md`；缺口清单：`docs/research/2026-10-21-gap-closure.md`、`docs/research/2026-10-21-all-feature-gap-audit.md`；**深度调研与分轮完善计划（含逐条 `file:line` 证据）：`docs/research/2026-10-22-deep-audit-followup-plan.md`**。
 
@@ -22,9 +24,9 @@
 
 | 项 | 状态 |
 |---|---|
-| 版本 | `d.53.1.13.0`（5 段，五包同步；**特性位 +1**：d.53 桌宠——独立透明置顶窗（`pet.html` 独立入口，不载入主应用 bundle）、默认鼠标穿透 + 按模型包围盒动态关闭、Cubism Core + Hiyori 模型、视线/点击/口型、点角色直接对话（复用 `streamChat` 直连本机 LLM，不写会话）、托盘常驻） |
-| main | `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ `94e6d77`（d.25.1.7.0 收口）→ `3956d23`（d.26.1.7.0 弹窗屏蔽背景 + 焦点归还）→ `915d19c`（d.27.1.7.0 召回可观测性）→ `9e27d5e`（d.28.1.7.0 个性化权重）→ `7d13525`/`08285f4`（d.29.1.7.0 冷清单覆盖面与计数一致性）→ `df85bbb`（d.29.1.8.0 模态门禁）→ `a27ce40`（深度调研与分轮计划）→ `b5a1348`（d.30.1.8.0 四条红线口子 + 三处静默降级）→ `793f608`（d.30 两处发布收口）→ `285beae`（d.31.1.8.0 本机存储水位 + 草稿持久）→ `348e283`（d.31 收口）→ `9369707`（d.32.1.8.0 token 用量埋点 + 能力矩阵）→ `51aa1fe`（d.32 收口）→ `6927d5f`（d.33.1.8.0 消息列表窗口化）→ `7b19179`（d.33 收口）→ `8c4e469`（d.34.1.8.0 HITL 待确认进通知）→ `c628bc6`（d.34 收口）→ `a834849`（d.35.1.8.0 wiki 中文检索 / 任务淘汰 / 导出落盘）→ `0e293f3`（d.35 发布收口）→ d.36.1.9.0 三把钥匙加密 → d.37.1.9.0 会话连续性体验轮 → d.38.1.10.0 正在输入提示与对抗性自检收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52（见 CHANGELOG）→ d.53.1.13.0 桌宠 |
-| 测试 | 2026-11-02 实跑（d.53.1.13.0 门禁，`pnpm -r build` + 分包跑 `test`）：**server 8 文件 / 226 例，web 172 文件 / 2632 例，desktop 208 例**。本轮 +81 全在 web（`petWindow` 3 + `petPrefs` 13 + `petInteraction` 16 + `usePetChat` 11 + `petUnread` 15 + `petPose` 12 + `petEvent` 11），desktop 新增 `pet-window` 35 + `pet-host` 20。★ 两处**与本次改动无关**的环境噪音，在 `git worktree` 取的纯净 `origin/main` 上同样复现：① `shared` 的 `schemas.test.ts` 因工作区 fs 代理拦截临时目录写入（`EPERM …\Temp\…\ssr\…`）未执行，只剩 `index.test.ts` 1 例；② `desktop` 的 `infohub-bridge.test.js` 5 例报 `cancelledByParent`（`Promise resolution is still pending`）。 |
+| 版本 | `d.54.2.16.0`（5 段，五包同步；d.54 去 IM——人类私聊/群聊/消息/已读/typing/撤回/转发/表情回应/语音消息与语音视频通话全部移除；通讯录升级为全站团队名册（在线 presence + 最近活跃）；团队动向只收真实成员的任务 / 日程摘要；d.54.2.16 把「助手」页正名为「智能体」页并明确本机运行，智能体工作不再进入团队动向。智能体对话、E2E、附件、HITL、任务、记忆、技能、工具原样保留） |
+| main | `4107935`/`d5dbdca`（本地构建产物 + 裸机部署）→ `94e6d77`（d.25.1.7.0 收口）→ `3956d23`（d.26.1.7.0 弹窗屏蔽背景 + 焦点归还）→ `915d19c`（d.27.1.7.0 召回可观测性）→ `9e27d5e`（d.28.1.7.0 个性化权重）→ `7d13525`/`08285f4`（d.29.1.7.0 冷清单覆盖面与计数一致性）→ `df85bbb`（d.29.1.8.0 模态门禁）→ `a27ce40`（深度调研与分轮计划）→ `b5a1348`（d.30.1.8.0 四条红线口子 + 三处静默降级）→ `793f608`（d.30 两处发布收口）→ `285beae`（d.31.1.8.0 本机存储水位 + 草稿持久）→ `348e283`（d.31 收口）→ `9369707`（d.32.1.8.0 token 用量埋点 + 能力矩阵）→ `51aa1fe`（d.32 收口）→ `6927d5f`（d.33.1.8.0 消息列表窗口化）→ `7b19179`（d.33 收口）→ `8c4e469`（d.34.1.8.0 HITL 待确认进通知）→ `c628bc6`（d.34 收口）→ `a834849`（d.35.1.8.0 wiki 中文检索 / 任务淘汰 / 导出落盘）→ `0e293f3`（d.35 发布收口）→ d.36.1.9.0 三把钥匙加密 → d.37.1.9.0 会话连续性体验轮 → d.38.1.10.0 正在输入提示与对抗性自检收口 → d.39.1.10.0 全域消息感知 → d.39.1.11.0 深度压测修复轮 → d.40.1.11.0 会话中心 → d.41.1.11.0 能力内核 → d.42.1.11.0 插件包 → d.43.1.11.0 系统能力包 → d.44.1.11.0 插件更新差异预览 → d.45.1.11.0 信息中枢 → d.46.1.11.0 信息中枢原生融入 → d.47.1.11.0 自动化中心 → d.48–d.52（见 CHANGELOG）→ d.53.1.13.0 桌宠；**d.54.2.16.0 团队系统在 `feat/team-system` 工作分支，未合入 main** |
+| 测试 | 2026-11-02 实跑（d.54.2.16.0 门禁，`pnpm -r build` + `pnpm -r --workspace-concurrency=1 test`，退出码 0）：**shared 2 文件 / 24 例，server 9 文件 / 121 例，web 155 文件 / 2312 例，desktop 26 个 node:test 文件 / 402 例（401 pass + 1 skip）**。d.54 的收敛是全量往返改 agent-only 并新增团队链路：server 团队 API/名册/动向契约、web 团队页/共享采集/主页团队卡/命令面板成员搜索、desktop 通话桥移除守卫；旧的 IM 后台通道、会话中心、typing/已读/撤回/通话用例一并删除。d.54.2.16 新增 `lib/team/share.test.ts` 10 例（两类来源、旧 staff 字段丢弃、白名单、幂等、封顶、倒序）与主页「智能体/幕僚旧动向不露出」1 例。 |
 | 线上 | **线上仍是 `d.35.1.8.0`（2026-10-23 21:51 部署，裸机、云端零构建）；d.35.1.9.0 起的各轮（含 d.36–d.44）均未部署**。发版前备份已拷回本机 `.tmp/backups/heming-data-2026-10-23-d35.tar.gz`；部署包 `/tmp/heming.tar.gz` 5709881 字节 → 远端 `/root/heming-d.35.1.8.0.tar.gz` 同大小、MD5 逐字一致（`6d937accff2874bcfdac4a85837a9681`）；`/root/install.log` 尾部 `INSTALL DONE: d.35.1.8.0`，`/api/health` `{"ok":true}`。**最硬的一条证据**：`curl` 下来的线上主 bundle `assets/index-H3ErDykH.js` 与本机 `pnpm --filter @heming/web build` 产物 **md5 相同**（`4f865db50d72196ae8bf9836b91e60bf`）。打完桌面包已重跑该命令把本机 `packages/web/dist` 恢复成云端口径，避免下一轮误传注入版 |
 | 安装包 | **已发布的是 `和鸣 Setup d.35.1.8.0.exe`（178871235 字节，`release/r38/`）**：`openssl dgst -sha512 -binary` 转 base64 与 `latest.yml` 顶层 `sha512` 逐字一致（`hY7oCrMxdUGmXr1O…`），`size` 与实际字节相符；远端 Range 请求 206。内嵌产物是注入 `VITE_API_BASE` 的那份（`resources/web/assets/index-0Cz9nWnA.js`，与云端 `index-H3ErDykH.js` **文件名不同**——正是「两处产物来源不同」的预期形态）；内嵌 bundle 内 `d.35.1.8.0` 命中 1 次、`47.92.39.184` 命中 2 次（云端 1 次）。★ d.35.1.9.0 另在 `release/r39/` 重打过一份 d.35.1.8.0（sha512 `ISd4RWUx…`），并在 `release/r40/` 打出 **`和鸣 Setup d.35.1.9.0.exe`（178876007 字节，sha512 `U41dAUqL…`，与 `latest.yml` 逐字一致）**；r39/r40 **均只本地留档、未上传**；**d.36–d.44 未出包**。打完包已重跑 `pnpm --filter @heming/web build` 把本机 `web/dist` 恢复成云端口径（当前 `index-YhZskpbS.js`） |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` → 200 + `application/octet-stream` + 352 字节（不是 HTML 回落），当前指向 `35.1.8`（**仍指向 35.1.8；d.36–d.44 未上传**）；`/opt/heming/updates/` 现有 d.25.1.6.0 至 d.35.1.8.0 共 13 版安装包 + 13 份 blockmap + `latest.yml`（回滚依赖旧包，别删） |
@@ -91,6 +93,9 @@
 
 48. **桌宠：智能体的桌面化身（d.53.1.13.0）**：关掉主窗口智能体就从桌面消失，这一轮把它变成「一直在那儿」。**① 独立透明悬浮窗**：无边框 + 透明 + 置顶 + 不占任务栏，默认落主屏右下角 24px 边距，位置与缩放缓存 `userData/pet-state.json`（与 `window-state.json` 分开存：桌宠有 scale/visible/clickThrough 三个主窗口没有的字段）；`backgroundThrottling:false` 是硬要求——置顶窗被完全遮挡时 Chromium 会停 rAF，表现是「切走再回来角色卡在上一帧」（与 splash 同源问题）。**② 默认鼠标穿透**：创建即 `setIgnoreMouseEvents(true,{forward:true})`，只有光标落在角色/气泡/输入框上时才拦截；可交互区按模型 `getBounds()` 换算（不是整窗），`mousemove` 只在布尔值变化时发 IPC。★ `forward:true` 在部分平台不保证，所以托盘与设置区必须提供「关闭穿透」作为出口。**③ 独立渲染入口 `pet.html`**（Vite 多入口 + `src/pet.tsx`）：桌宠只带 pixi + Live2D，不下载整套应用 bundle——`main.tsx` 静态 import 了 `App`，走 query 分支仍会把聊天/Markdown/KaTeX 一起拉进这个常驻小窗。**④ 真实 Live2D**：`live2dcubismcore.min.js` 取自 Live2D 官方 CDN（`Core/RedistributableFiles.txt` 明确列为 Redistributable Code）+ `CubismWebSamples` 的 Hiyori（Free Material License），`public/pet/README.md` 写清授权与替换方式；`pixi.js@6.5.10` + `pixi-live2d-display@0.4.0` 走 `cubism4` ESM 入口，`Live2DModel.registerTicker` 接管更新（不污染全局 `PIXI`）；Core 是 UMD 全局脚本，必须先 `await` 它的 `<script>` onload 再 import 渲染库，否则 `CubismCore is not defined`。**⑤ 点它就能聊**：单击浮出输入框、气泡流式显示，复用同一个 `streamChat` 直连本机 LLM（Key 只进供应商请求头），**不写会话、不进消息列表、不落 msgCache**；口型由流式文字到达驱动 `ParamMouthOpenY` 衰减振荡。**⑥ 拖拽坐标系只有一份**：渲染层只上报「按下/移动/抬起」，位移在**主进程**用 `screen.getCursorScreenPoint()` 算——`clientX` 会随窗口移动而失真。**⑦ 绑定与兜底**：设置区「外观 · 桌宠」选智能体（用其绑定的模型连接，未绑定则第一个可用）；没连接时气泡直接说「还没有可用的模型连接」，点「去设置」经 `ui.openSettings("model")` 直达模型分组。桌面端新增 `pet-window.js`（35 例纯函数）与 `pet-host.js`（20 例编排），`preload` 只暴露显隐/缩放/穿透/拖拽四个动作、并校验 IPC 来源是桌宠窗口本身。**明确未做**：语音、消息感知（不建 WS）、模型市场、养成系统、独占全屏兼容、macOS 验证。**⑧ 未读感知（d.53.1.14.0）**：桌宠建**自己的**一条轻量 WS（`lib/petUnread.ts`）——不复用主窗口通道，因为主窗口关掉后它必须还在；只读 message 的 id/会话/发送者**不解密正文**、**不弹系统通知**（主窗口的 `notifyIncomingMessage` 已在提醒，重复即双份）；未读角标（>99 显示 99+）点击经 `pet:open-conversation` 叫起主窗口并打开该会话；`read_update` 清零对应会话，清掉的若是跳转目标则改指向剩余未读（保证「有红点就一定有去处」）；到达时气泡短提示 4 秒后收回。 **⑨ 扩展点（d.53.1.15.0）**：姿态判定抽成纯函数 `resolvePose` + 映射表 `PET_POSES`（加姿态不改渲染代码，且只有「开心」配动作——常驻窗口里每种状态都播一次就是噪音）；新增**反向事件通道** `pet:event`（主进程 `pushEvent` / 主窗口 `__heming_pet.emit` → 桌宠 `onEvent`，覆盖 `pose`/`speak`/`task`/`schedule`/`reset`），跨进程载荷经 `parsePetEvent` 校验后消费。★ 该通道**目前没有生产者**，是第三期的显式预留，不是死代码。文档补 `docs/PET.md`（怎么用/架构/数据边界/扩展指南/排查）与 `docs/superpowers/specs/2026-11-02-pet-presence.md`（在场感设计稿，未开工，版本号待定）。文档见 `docs/superpowers/specs/2026-11-01-d46-desktop-pet.md`、`docs/superpowers/plans/2026-11-01-d46-desktop-pet.md`。
 
+49. **去 IM：人类聊天退场，通讯录长成团队（d.54.2.15.0）**：用户要求删除 IM 与所有人类聊天系统、保留通讯录并改为可查看团队动向的团队系统。**① 边界（已拍板）**：保留与「和小鸣」及自建智能体的对话；删人类私聊/群聊；删语音/视频通话；全站一个团队，所有注册用户即成员；动向来源 = 任务与 AI 工作记录 + 在线/活跃 + 日程与里程碑，不做手动发动态。**② 服务端**：新增 `GET /api/team`（名册 + 在线 + `last_seen_at`）、`GET/POST /api/team/activities`、`DELETE /api/team/activities/mine`；`team_activities` 以 `(actor_id, source_id)` 唯一，只存六项摘要字段。presence 只在进程内（WS 连接），`users.last_seen_at` 用幂等 `ALTER` 补列。REST 会话入口只接受 agent；WS 只保留 `auth/send_message/agent_chunk/agent_finish/agent_error`；服务端读取固定 `kind='agent'`。**③ Web**：新增团队页（第 2 项导航）与 `lib/team/share.ts`——最初三类共享默认全关（d.54.2.16 收紧为任务 / 日程两类）、只采集白名单摘要、`sourceId` 确定性幂等、单次 50 条；主页「最近会话」换「团队动向」卡，统计卡改成员/在线/智能体/今日动向；Ctrl+K 改搜成员与技能；原聊天页改为智能体页（原名助手页），`ChatPage` 删除群成员、@、通话、typing、已读、撤回、转发、表情回应、未读上报与联系人浮层，发送前先校验 LLM 绑定。**④ 桌面端**：删除 `call-window.js`、ICE/最小化/通话通知整条语音桥与桌宠未读订阅；`main.test.js` 加源码守卫。**⑤ 迁移**：新增 `scripts/purge-im-data.mjs`，默认 dry-run，`--yes` 才在事务里删 `kind != 'agent'` 的会话及附属行；不碰 users / friend_requests / agents / shared_files / e2e_keys / team_activities；执行前必须备份。**⑥ 验证**：单元/组件/桌面门禁全绿；真实浏览器走完登录 → 主页团队卡 → 团队页共享/动向/筛选/清空 → 助手对话（未绑定提示）→ 工作区 → 命令面板成员 → 设置页，网络面板无 4xx/5xx（登录前 `/api/me` 401 除外），未发起真实模型调用。**明确未做**：团队用量排行（需服务端聚合）、成员手动发动态、团队级日程/里程碑对象（当前复用 InfoHub 议程摘要）、旧 IM 数据的自动清理。
+50. **团队只放真实成员，智能体专注本机任务（d.54.2.16.0）**：上一版团队页把「AI 工作 / 幕僚简报」也当成动向，看起来智能体像团队成员。这一版划清边界：**团队页只出现真实成员和他们的任务 / 日程**。共享开关从三个减为两个（任务 / 日程），「AI 工作」筛选与「幕僚」开关移除；`lib/team/share.ts` 删除幕僚来源，旧存储里的 `staff` 字段读回即丢弃。服务端契约仍接受更多 `kind`（兼容早期数据），但团队页与首页团队卡只渲染 `task` / `agenda`，`staff` / `agent` 摘要不出现、也不计入今日动向。智能体页同时正名：导航与标题改为「智能体」，加「本机」标记，文案写明「模型 Key、工具与记忆不出设备；消息不进团队动向」，空态改为「把任务交给本机智能体」；主页统计卡改为「我的智能体（本机运行）」，工作区入口同步改名。新增 `lib/team/share.test.ts` 10 例与主页旧动向隐藏 1 例。
+
 ★ **里程碑编号提示**：46/47 按轮次号 d.49 / d.50 顺序补齐，**中间没有 d.48**——并行会话的多供应商路由（`package.json` 已是 `48.1.11`）尚未写它的里程碑与版本表；它落笔时要么插为 46 并把本轮两条顺延，要么直接追加为 48，请由那一轮决定，本轮内容不因编号改动。
 
 ## 3. 仓库结构与关键文件
@@ -100,8 +105,8 @@ packages/
 ├── shared/src/schemas.ts       # 协议单一真源：Message（enc/cipher/chainKid/n/recalledAt）、
 │                               #   MessagePayload（text/mentions/file/forward/reactions）、WS 事件
 ├── server/src/
-│   ├── app.ts                  # REST：auth/profile/agents/conversations/files/archive/e2e/ice-servers
-│   ├── ws.ts                   # send_message/recall/agent_chunk|finish|error/voice_call_*
+│   ├── app.ts                  # REST：auth/profile/agents/agent conversations/files/team/team activities/e2e
+│   ├── ws.ts                   # auth/send_message/agent_chunk|finish|error（人类 IM 与通话信令已删）
 │   ├── store.ts + sqliteStore.ts  # Store 双实现（契约测试双跑）
 │   └── db.ts                   # CREATE TABLE IF NOT EXISTS + 幂等 ALTER 迁移
 ├── web/src/
@@ -119,10 +124,11 @@ packages/
 │   ├── lib/selfEdit/                          # self_* 工具与护栏
 │   ├── lib/tasks/ export/                     # 任务记录与报告、会话导出格式化
 │   ├── lib/charts/ tone/ wiki/ docs/          # 图表、去 AI 味、Wiki、文档解析
+│   ├── lib/team/                              # 团队共享设置与摘要采集（任务/日程两类、幂等 sourceId、隐私白名单，d.54）
 │   ├── store/{chat,ui,llm,auth,tokenUsage,hitl,registry}.ts
-│   └── components/                            # ChatPage、HomePage、SettingsPage、SkillsPage、
-│                                              #   PluginsPage、MemoryPage、InterfacesPage、RegistryPage、
-│                                              #   RegistryInstallCard、ArchivePage、InfohubPage、InfohubHomeCard、WikiPanel、
+│   └── components/                            # HomePage、TeamPage、ChatPage（智能体页）、SettingsPage、
+│                                              #   SkillsPage、PluginsPage、MemoryPage、InterfacesPage、
+│                                              #   RegistryPage、InfohubPage、InfohubHomeCard、WikiPanel、
 │                                              #   ToolApprovalModal、ConfirmDialog、AgentStreamBubble 等
 ├── infohub/                    # 本机归档边车（Python ≥3.11，d.45 源码并入）
 │   ├── infohub/bridge.py       # stdio JSON 协议：白名单方法、只读 Store、脱敏配置、进度事件
@@ -139,7 +145,6 @@ packages/
     ├── auto-update.js          # electron-updater 接线
     ├── bundled-runtime.js      # 内置运行时探测
     ├── wiki-fs.js / chart-fs.js # Wiki 与图表文件桥
-    ├── call-window.js          # 独立通话窗口
     ├── title-bar.js splash-*.js preload.js
     └── web-dist/               # 嵌入 web 产物（gitignored，由 scripts/build-desktop-web.mjs 生成）
 
@@ -150,7 +155,7 @@ deploy/                         # 裸机部署（云端已去 Docker，见 docs/
     └── heming-api.service      # systemd 单元：User=heming，只写 /var/lib/heming
 ```
 
-**本机存储键**（localStorage，除 Wiki 文件）：`heming.token` · `heming.llmConfigs` · `heming.agentLlm` · `heming.agentPrompts` · `heming.tokenUsage` · `heming.e2e.*` · `heming.msgCache.*` · `heming.memory.*` · `heming.skills` · `heming.skillAssignments.v1` · `heming.plugins.v1` · `heming.context*` · `heming.hitl.v1` · `heming.mcp.servers.v1` · `heming.mcpRegistry.v1` · `heming.selfEdit.v1` · `heming.kb.v1` · `heming.tasks.v1` · `heming.taskTemplates.v1` · `heming.notifications.v1` · `heming.convPrefs.v1` · `heming.navOrder.v1` · `heming.infohub.home.v1` · `heming.infohub.python.v1`。
+**本机存储键**（localStorage，除 Wiki 文件）：`heming.token` · `heming.llmConfigs` · `heming.agentLlm` · `heming.agentPrompts` · `heming.tokenUsage` · `heming.e2e.*` · `heming.msgCache.*` · `heming.memory.*` · `heming.skills` · `heming.skillAssignments.v1` · `heming.plugins.v1` · `heming.context*` · `heming.hitl.v1` · `heming.mcp.servers.v1` · `heming.mcpRegistry.v1` · `heming.selfEdit.v1` · `heming.kb.v1` · `heming.tasks.v1` · `heming.taskTemplates.v1` · `heming.staff.*` · `heming.automations.v1` · `heming.notifications.v1` · **`heming.team.share.v1`（团队两类共享开关：任务 / 日程，4KB）** · `heming.navOrder.v1` · `heming.infohub.home.v1` · `heming.infohub.python.v1`。`heming.convPrefs.v1` 是 d.54 前的会话偏好，已无代码读取，仅作旧数据统计。
 Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Heming/charts/`；InfoHub 归档默认在 `~/Heming/infohub/`，可改指已有目录（其 `config.json` 与 `data/` 仍只在本机，不进仓库）。
 
 ## 4. 工作方式约定
@@ -167,7 +172,7 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 ## 5. 下一步候选
 
-**总入口**：`docs/research/2026-10-22-deep-audit-followup-plan.md` —— 四路代码勘察 + 逐条复核后的分级清单（P0 红线口子 / P1 数据一致性与「空账」/ P2 体感 / P3 功能 / P4 工程发布链），每条带 `file:line` 证据、修法与验收形态，并给出 **d.30…d.36 的分轮范围**。下面 6 条是那份文档之外的操作纪律与验证项，不重复列计划内容。**d.30 已完成并两处发布**（P0-1…P0-4 + P1-3/P1-4/P1-8，见里程碑 27）。**d.31 已完成**（P1-1 的 ①② + P2-1，见里程碑 28；P1-1 的第 ③ 步「把最大块搬走」**仍未做**，见 §6）。**d.35 已完成**（P1-5/P1-6/P1-7，见里程碑 32）。**d.35.1.9.0 已完成全量自检后的体验修补**（聊天三态/滚动/常用操作、设置反馈、导航未读，见里程碑 33）；**d.36 已完成**（P0-5 `safeStorage` 三把钥匙加密 + 懒迁移 + 设置区四态，见里程碑 34）；**d.37 已完成**（会话连续性：最近会话排序、未读分隔线、连接三态与断线横幅、草稿可见，见里程碑 35）；**d.38 已完成**（人类会话正在输入提示：typing 元数据、双端节流、3 秒过期，见里程碑 36；presence 明确未做，待 WS 上提 App 壳）；**d.39 已完成**（全域消息感知：后台消息通道、桌面系统通知、按会话免打扰、消息 id 去重，见里程碑 37）；**d.40 已完成**（会话中心：会话页/排序/预览/行内操作、Alt+9、本机偏好，见里程碑 38）；**d.41 已完成**（能力内核：五类工具提供者注册、来源归属、技能分配真边界，见里程碑 39）；**d.42 已完成**（插件包：`plugin.json` 声明式清单、技能物化、安装/更新/启停/卸载、插件页 Alt+0，见里程碑 40）；**d.43 已完成**（系统能力包：清单 v2 声明远程 MCP、插件服务生命周期与来源标记，见里程碑 41）；**d.44 已完成**（插件更新差异预览：只读四分类 diff、冲突/上限前置、能力详情弹窗，见里程碑 42）；**d.45 已完成**（信息中枢：InfoHub Python 边车 + stdio 桥 + 只读归档浏览/检索/议程 + 显式同步 + 脱敏配置，并修复 sandbox preload 失效，见里程碑 43）；**d.46 已完成**（信息中枢原生融入：归档工具提供者 + 共享运行态 + 首页卡 + Ctrl+K 归档检索，仍不自动启动边车，见里程碑 44）；**d.47 已完成**（自动化中心：本机每天/间隔任务、InfoHub 同步与日程重扫白名单、15s 串行调度、不补跑、未连接只跳过不拉起进程，见里程碑 45）；**下一轮指向全局消息检索 + 会话分组**——在 d.40 会话页上做跨会话消息全文检索与会话分组/文件夹，检索只在已加载/已解密的本机消息上做，或另立服务端索引规格（不把正文上传）；**注意与 d.45 的信息中枢检索区分**：后者只检索 InfoHub 归档，不碰和鸣 E2E 消息；**P0-5b（`msgCache` / `e2e.chains` 加密）列为独立待设计项**；再往后从 `docs/research/2026-10-23-rounds-after-d36.md` 起（CSP / `release.sh` / docker 清理）。**d.50–d.52 已完成**（工具执行层：结果封顶 / 中断透传 / 写串行 / 预算驱动循环 / 采样前折叠 / 回合日志；任务区过程日志只读面板；工具超 20 个按需检索）。**d.53 / d.54 已出设计稿、未开工**：文件编辑原语 `file_patch`（`docs/superpowers/specs/2026-11-02-d53-file-edit-primitive.md`）与回合日志的回放/重跑/分叉（`docs/superpowers/specs/2026-11-02-d54-rollout-recovery-fork.md`），两份稿各在末尾列了需产品先定的问题。**信息中枢后续候选**：同步中取消/断点续跑（当前只有阶段进度，无取消）、失败阶段的可操作重试、源路径与多账号的图形化配置（当前只选数据目录与解释器，源配置仍读 `config.json`）、打包体积与内置 Python 依赖清单核对——前三项都要先确认不触碰「不自动同步/不改密钥」边界。
+**总入口**：`docs/research/2026-10-22-deep-audit-followup-plan.md` —— 四路代码勘察 + 逐条复核后的分级清单（P0 红线口子 / P1 数据一致性与「空账」/ P2 体感 / P3 功能 / P4 工程发布链），每条带 `file:line` 证据、修法与验收形态，并给出 **d.30…d.36 的分轮范围**。下面 6 条是那份文档之外的操作纪律与验证项，不重复列计划内容。**d.30 已完成并两处发布**（P0-1…P0-4 + P1-3/P1-4/P1-8，见里程碑 27）。**d.31 已完成**（P1-1 的 ①② + P2-1，见里程碑 28；P1-1 的第 ③ 步「把最大块搬走」**仍未做**，见 §6）。**d.35 已完成**（P1-5/P1-6/P1-7，见里程碑 32）。**d.35.1.9.0 已完成全量自检后的体验修补**（聊天三态/滚动/常用操作、设置反馈、导航未读，见里程碑 33）；**d.36 已完成**（P0-5 `safeStorage` 三把钥匙加密 + 懒迁移 + 设置区四态，见里程碑 34）；**d.37 已完成**（会话连续性：最近会话排序、未读分隔线、连接三态与断线横幅、草稿可见，见里程碑 35）；**d.38 已完成**（人类会话正在输入提示：typing 元数据、双端节流、3 秒过期，见里程碑 36；presence 明确未做，待 WS 上提 App 壳）；**d.39 已完成**（全域消息感知：后台消息通道、桌面系统通知、按会话免打扰、消息 id 去重，见里程碑 37）；**d.40 已完成**（会话中心：会话页/排序/预览/行内操作、Alt+9、本机偏好，见里程碑 38）；**d.41 已完成**（能力内核：五类工具提供者注册、来源归属、技能分配真边界，见里程碑 39）；**d.42 已完成**（插件包：`plugin.json` 声明式清单、技能物化、安装/更新/启停/卸载、插件页 Alt+0，见里程碑 40）；**d.43 已完成**（系统能力包：清单 v2 声明远程 MCP、插件服务生命周期与来源标记，见里程碑 41）；**d.44 已完成**（插件更新差异预览：只读四分类 diff、冲突/上限前置、能力详情弹窗，见里程碑 42）；**d.45 已完成**（信息中枢：InfoHub Python 边车 + stdio 桥 + 只读归档浏览/检索/议程 + 显式同步 + 脱敏配置，并修复 sandbox preload 失效，见里程碑 43）；**d.46 已完成**（信息中枢原生融入：归档工具提供者 + 共享运行态 + 首页卡 + Ctrl+K 归档检索，仍不自动启动边车，见里程碑 44）；**d.47 已完成**（自动化中心：本机每天/间隔任务、InfoHub 同步与日程重扫白名单、15s 串行调度、不补跑、未连接只跳过不拉起进程，见里程碑 45）；**d.54 已完成**（去 IM：人类聊天/通话删除、团队名册与动向、主页/智能体页/命令面板重做，见里程碑 49/50）。**下一轮候选转向团队能力**：团队用量排行（需服务端聚合）、成员手动发动态（当前明确不做，要另立隐私规格）、团队级日程/里程碑对象（当前复用 InfoHub 议程摘要）。原「全局消息检索 + 会话分组」随人类 IM 删除**不再成立**；检索仍可由任务/记忆/信息中枢各自提供。**P0-5b（`msgCache` / `e2e.chains` 加密）列为独立待设计项**；再往后从 `docs/research/2026-10-23-rounds-after-d36.md` 起（CSP / `release.sh` / docker 清理）。**d.50–d.52 已完成**（工具执行层：结果封顶 / 中断透传 / 写串行 / 预算驱动循环 / 采样前折叠 / 回合日志；任务区过程日志只读面板；工具超 20 个按需检索）。**两份待开工设计稿的编号已顺延**：文件编辑原语 `file_patch`（`docs/superpowers/specs/2026-11-02-d53-file-edit-primitive.md`）与回合日志的回放/重跑/分叉（`docs/superpowers/specs/2026-11-02-d54-rollout-recovery-fork.md`）仍是**未开工规格**，文件名的 d.53/d.54 是写作时的暂用号；d.53 已被桌宠占用、d.54 已被团队系统占用，开工时顺延为 d.55 / d.56，稿内末尾的产品问题仍待拍板。**信息中枢后续候选**：同步中取消/断点续跑（当前只有阶段进度，无取消）、失败阶段的可操作重试、源路径与多账号的图形化配置（当前只选数据目录与解释器，源配置仍读 `config.json`）、打包体积与内置 Python 依赖清单核对——前三项都要先确认不触碰「不自动同步/不改密钥」边界。
 
 **后续轮次的规格已经写好，可以直接开工**：
 - **d.36 = P0-5 `safeStorage`（已完成）**：`docs/superpowers/specs/2026-10-23-d36-safestorage.md`
@@ -217,7 +222,7 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 1. **备份纪律已经落成脚本，但要每次真跑**：`deploy-bare.py backup` 做「停服 → tar → 起服 → SFTP 拷回本机 `.tmp/backups/` → 本机文件非空 + `/api/health` 复核」，**d.30.1.8.0 发版前已实跑**（3718 字节，22:28，含 `heming.db` 与 `-wal`；拷回后改名留档为 `heming-data-2026-10-22-d30.tar.gz`，md5 `073bb273b62082e4b6c51c22986ca3c1`）。剩下的不是开发项，是操作纪律：**没把库拷回本机就不许 install**（`docs/deploy.md` §6）。两个已修的坑：① 备份名按日期生成，**同一天二次发版会覆盖上一份**（d.28 实测：14:27 那份盖掉了上午的；**d.30 又踩到一次**——22:28 那份盖掉了上午 09:50 的，已改名留档），一天内要多发几版就在覆盖前手动改名留档；② 脚本原先用未 resolve 的 `__file__` 且少算一层 parent，**实际把备份落在 `.superpowers/.tmp/backups/`**，与 §6 写的 `.tmp/backups/` 不符（文件确实在本机，只是不在文档指的地方）——已改 `pathlib.Path(__file__).resolve()` + `parent.parent`，实测常量解析为 `D:\Heming\.tmp\backups`；d.28/d.29/d.30 三份已按原 md5 复制到 `.tmp/backups/`（现有 5 份）。
 2. **弹窗屏蔽背景的读屏软件实测**：`inert` 屏蔽、焦点归还、非模态退出、首帧骨架与失败重试条**都已在真实 Chromium 里实测通过**（证据见 `docs/superpowers/specs/2026-10-22-modal-inert-and-workspace-state.md` §5：弹窗开着时对背景按钮调 `.focus()` 焦点不动）。**只剩 NVDA / VoiceOver 那一层**——需要装读屏的机器，属验证项不属实现项。
-3. **语音重连的真机验证**：状态机与信令有单测，缺弱网 / TURN 环境证据。新裸机上 `HEMING_TURN_*` 尚未配置，群通话只有 STUN 路径可验。
+3. ~~**语音重连的真机验证**~~：d.54 已连同语音/视频通话一并删除，此项作废。若未来恢复通话，需重新设计而不是翻旧账。旧 IM 数据的清理改为**发版后的显式运维动作**：备份 `heming.db` → `node scripts/purge-im-data.mjs --db <path>` 看 dry-run 计数 → 加 `--yes` 执行；代码不会自动删数据。
 4. **记忆个性化权重已落地（d.28.1.7.0）**：`heming.memory.usage.v1` 账本按条目累加「注入 / 疑似引用」次数，
    召回时乘 `1 + 25% × used/(used+3)` 的因子（**只提权不降权**、不传账本时与 d.27 逐字一致），
    记忆页给加权注脚、预览标 `· 加权 ×1.1667`、另列「长期未被引用」清单**由人删、不自动淘汰**。判据仍是确定性字符串统计，没有加任何模型调用。
@@ -235,10 +240,14 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 2. **本地包的安装体验**：探测与翻译链已落；剩下是运行时补全目录清单（装在非常规路径仍可能探不到）、可选的「一键检查/修复」引导，以及包更新（现在钉死版本、不自动跟进）。
 3. **harness 桥接**：本机 CLI 探测 + `spawn(shell:false)` + Windows 进程树清理 + 危险命令三层围栏。
 4. **Token 团队视图 / 按日期跨端汇总**：需服务端汇总。
-5. **群管理**：成员删减/踢人 UI、群主权限。
+5. **团队能力**：团队用量排行（服务端聚合、按连接×模型落账）、成员手动动态（需先定隐私与审核边界）、团队级日程/里程碑对象（当前只有 InfoHub 议程摘要）——人类群管理随 d.54 删除，不再列入。
 6. **多模型同题对比**：竞品调研中价值较高、改动集中；对话导出与 LaTeX 已在 d.23 落地。
 
 ## 6. 技术债与已知风险
+
+> **d.54 存档提示**：人类 IM、会话中心、typing、已读、撤回、语音/视频通话已从代码里删除。下面提到这些功能的条目是**历史边界记录**，只在回退旧版本或查旧数据时有用；当前版本不存在对应入口与协议。
+
+- **团队动向的边界（d.54）**：只上传白名单摘要（`kind/title/detail/status/sourceId/occurredAt`），**不含对话正文、提示词、工具参数、任务结果、附件或文件名**；任务/日程两类共享默认全关，只存本机 `heming.team.share.v1`（4KB），关闭的来源不采集也不补传历史；`sourceId` 由来源 + 更新时间确定性生成，重复同步在服务端按 `(actor_id, source_id)` 幂等跳过。在线态是**进程内 presence**（服务端重启后全部离线，等下一个 WS 连接恢复），最近活跃落 `users.last_seen_at`；「在线」只代表有一条已鉴权 WS 连接，不代表正在操作。动向流按 `occurredAt` 倒序、每页 50 条，成员筛选与类型筛选都在客户端对已拉取页做过滤（翻页后不会自动重拉全量）。**清除只删自己已上传的摘要**，不删他人、不改开关。团队查询对全站登录用户可见——本实例即一个团队，没有多团队隔离。★ 任务/日程的摘要采集发生在团队页（60 秒同步一次），页面不开就不会产生新动向；「今日动向」按本机时区算自然日。
 
 - **Registry**：发现页与安装流已接线（接口区二级面板）；本地包（npm/pypi）**已支持但需本机运行时**（不内置：探测缺 Node/uv 就标「缺运行时」，浏览器标「需桌面版」），oci/nuget/mcpb 仍显式不支持；包名走字符白名单、**必须有钉死版本**、`packageArguments`/`environmentVariables` 一律丢弃；安装确认**始终询问**且不提供「本次会话都允许」；列表缓存在 `heming.mcpRegistry.v1`（6h TTL），离线降级并标注 stale；台账字段 `registryType`/`registryVersion` 只作账本不作执行输入；删除 stdio 服务会调 `stopStdioServer` 回收子进程。
 - **HITL**：没有“全部放行”档（刻意）；`annotations` 不参与判定（untrusted hint）；闸门异常按 deny；会话授权只在内存。规则记忆已落盘（deny 优先、danger 不记允许），新规则按智能体隔离、旧规则保持全局；规则不跨设备跟随，ChatPage 接线层已有拒绝/异常路径断言。确认前预览只读调用参数、不读目标文件；★ **d.34 起切换会话不再取消待确认**（此前是「切会话 = 替用户拒绝」）：请求跨会话保持、后台会话的确认会进通知中心（`kind:"approval"`），60 分钟无人裁决才按拒绝收口并在审计里写明「超时未确认」。★ **d.30 已把「免问下限」的全放行口子堵上（读侧 + 写侧都夹）**：`danger` 不再是合法的 floor 值（旧 localStorage 里的 `danger` 读回夹成 `write`），判定式 `<=` 语义未动 ⇒ `floor=write` 时**危险操作恒要问**。
@@ -278,6 +287,8 @@ HEMING_DEV_URL=http://localhost:5173 pnpm --filter @heming/desktop dev
 pnpm -w run dist:desktop                                   # 构建嵌入 web + 打安装包
 node scripts/bump-version.mjs auto fix                     # 修 bug / 小改
 node scripts/build-changelog.mjs                           # 同步设置区更新日志
+node scripts/purge-im-data.mjs --db data/heming.db         # dry-run：统计旧 IM 行数
+node scripts/purge-im-data.mjs --db data/heming.db --yes   # 真删（务必先备份）
 ```
 
 线上验证：`curl -s http://47.92.39.184/api/health`；登录 `POST /api/auth/login {"username":"admin","password":"admin"}`。

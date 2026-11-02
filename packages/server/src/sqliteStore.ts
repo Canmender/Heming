@@ -1,6 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { User, Message, Conversation, Member, ReadState, Agent, SharedFileMeta, MessageEnvelope, E2eDeviceKeys } from "@heming/shared";
+import type {
+  User,
+  Message,
+  Conversation,
+  Agent,
+  SharedFileMeta,
+  MessageEnvelope,
+  E2eDeviceKeys,
+  TeamActivity,
+  TeamActivityInput,
+} from "@heming/shared";
 import type { Store } from "./store.js";
 import { SYSTEM_AGENTS } from "./store.js";
 import { openDb } from "./db.js";
@@ -40,16 +50,14 @@ function rowToAgent(r: AgentRow): Agent {
 export function createSqliteStore(dbPath: string): SqliteStore {
   const db: DatabaseSync = openDb(dbPath);
 
-  /** messages 行 → Message（listMessages 与 recallMessage 回读共用，防映射口径漂移）。 */
+  /** messages 行 → Message（listMessages 与 reencrypt 回读共用，防映射口径漂移）。 */
   function rowToMessage(r: {
     id: string;
     conv_id: string;
     sender_type: string;
     sender_id: string;
     payload: string;
-    reply_to: string | null;
     created_at: string;
-    recalled_at?: string | null;
     // E2E 信封列（Task 2）：enc 迁移列恒有（DEFAULT 'plain'）；cipher/chain_kid/n 可空
     enc?: string | null;
     cipher?: string | null;
@@ -62,10 +70,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       senderType: r.sender_type as "user" | "agent",
       senderId: r.sender_id,
       payload: JSON.parse(r.payload),
-      replyTo: r.reply_to,
       createdAt: r.created_at,
-      // 老库迁移来的行 recalled_at 为 NULL → 恒有字段按 null 出
-      recalledAt: r.recalled_at ?? null,
       // enc 迁移列 NOT NULL DEFAULT 'plain'：老行回读恒 plain；信封可空列 → 缺省不带键
       enc: (r.enc as "plain" | "e2e" | null | undefined) ?? "plain",
       ...(r.cipher != null ? { cipher: r.cipher } : {}),
@@ -130,143 +135,19 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         ...(nextAvatar != null ? { avatar: nextAvatar } : {}),
       };
     },
-    createFriendRequest(fromId, toUsername) {
-      mustUser(fromId);
-      const to = this.findUserByUsername(toUsername);
-      if (!to) throw new Error("peer not found");
-      if (to.user.id === fromId) throw new Error("cannot friend self");
-      const dup = db
-        .prepare(
-          `SELECT id FROM friend_requests WHERE status = 'pending' AND
-            ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))`,
-        )
-        .get(fromId, to.user.id, to.user.id, fromId);
-      if (dup) throw new Error("request already exists");
-      const id = randomUUID();
-      db.prepare("INSERT INTO friend_requests (id, from_id, to_id, status) VALUES (?, ?, ?, 'pending')").run(
-        id,
-        fromId,
-        to.user.id,
-      );
-      return { id, from: mustUser(fromId), to: to.user, status: "pending" as const };
-    },
-    acceptFriendRequest(requestId, userId) {
-      const row = db.prepare("SELECT id, from_id, to_id, status FROM friend_requests WHERE id = ?").get(requestId) as
-        | { id: string; from_id: string; to_id: string; status: string }
-        | undefined;
-      if (!row) throw new Error("request not found");
-      if (row.to_id !== userId) throw new Error("not request recipient");
-      db.prepare("UPDATE friend_requests SET status = 'accepted' WHERE id = ?").run(requestId);
-      return { id: row.id, user: mustUser(row.from_id) };
-    },
-    listFriends(userId) {
-      const rows = db
-        .prepare(
-          `SELECT id, from_id, to_id FROM friend_requests WHERE status = 'accepted' AND (from_id = ? OR to_id = ?)`,
-        )
-        .all(userId, userId) as { id: string; from_id: string; to_id: string }[];
-      return rows.map((r) => ({ id: r.id, user: mustUser(r.from_id === userId ? r.to_id : r.from_id) }));
-    },
-    listIncomingRequests(userId) {
-      const rows = db
-        .prepare(`SELECT id, from_id FROM friend_requests WHERE status = 'pending' AND to_id = ?`)
-        .all(userId) as { id: string; from_id: string }[];
-      return rows.map((r) => ({ id: r.id, from: mustUser(r.from_id) }));
-    },
-    createDirectConversation(aId, bId) {
-      mustUser(aId);
-      mustUser(bId);
-      const friends = db
-        .prepare(
-          `SELECT 1 FROM friend_requests WHERE status = 'accepted' AND
-            ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))`,
-        )
-        .get(aId, bId, bId, aId);
-      if (!friends) throw new Error("not friends");
-      const found = db
-        .prepare(
-          `SELECT c.id FROM conversations c
-           JOIN conversation_members m1 ON m1.conv_id = c.id AND m1.member_id = ?
-           JOIN conversation_members m2 ON m2.conv_id = c.id AND m2.member_id = ?
-           WHERE c.kind = 'direct'`,
-        )
-        .get(aId, bId) as { id: string } | undefined;
-      if (found) return { id: found.id, type: "direct", peer: mustUser(bId) };
-      const id = randomUUID();
-      db.prepare("INSERT INTO conversations (id, kind) VALUES (?, 'direct')").run(id);
-      const ins = db.prepare("INSERT INTO conversation_members (conv_id, member_id) VALUES (?, ?)");
-      ins.run(id, aId);
-      ins.run(id, bId);
-      return { id, type: "direct", peer: mustUser(bId) };
-    },
-    createGroup(creatorId, name, memberIds) {
-      mustUser(creatorId);
-      const ids = [...new Set([creatorId, ...memberIds])];
-      for (const id of ids) mustUser(id);
-      // 口径同 createDirectConversation：除 creator 自身外，入群者须与 creator 已接受好友
-      for (const id of ids) {
-        if (id === creatorId) continue;
-        const friends = db
-          .prepare(
-            `SELECT 1 FROM friend_requests WHERE status = 'accepted' AND
-              ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))`,
-          )
-          .get(creatorId, id, id, creatorId);
-        if (!friends) throw new Error("not friends");
-      }
-      const id = randomUUID();
-      db.prepare("INSERT INTO conversations (id, kind, name, created_by) VALUES (?, 'group', ?, ?)").run(
-        id,
-        name,
-        creatorId,
-      );
-      const ins = db.prepare("INSERT INTO conversation_members (conv_id, member_id) VALUES (?, ?)");
-      for (const m of ids) ins.run(id, m);
-      return { id, type: "group", name };
-    },
-    setConversationArchived(conversationId, userId, archived) {
-      if (!archived) {
-        const cleared = db
-          .prepare("UPDATE conversation_members SET archived_at = NULL WHERE conv_id = ? AND member_id = ?")
-          .run(conversationId, userId);
-        if (Number(cleared.changes) === 0) {
-          throw new Error("conversation not found or not a member");
-        }
-        return;
-      }
-      // 归档：**保留首次归档时间**。
-      //
-      // 不用「先读再判断再写」：那是两次往返，且中间可能被并发改写。
-      // 直接用一条带条件的 UPDATE ——只有当前**未归档**的行会被写入，
-      // 已归档的行 changes=0，正好表示「无需改动」。
-      //
-      // 为什么必须保留首次时间：归档页按它倒序。若每次都刷新成现在，
-      // 用户重复点归档会让条目在列表里跳位——看起来像坏了。
-      //
-      // 但「已归档」本身也要校验成员身份，所以分两步：
-      // 第一步无条件写（未归档才生效），第二步用影响行数区分
-      // 「不是成员」与「已是归档态」。
-      const result = db
-        .prepare(
-          `UPDATE conversation_members SET archived_at = ?
-           WHERE conv_id = ? AND member_id = ? AND archived_at IS NULL`,
-        )
-        .run(new Date().toISOString(), conversationId, userId);
-      if (Number(result.changes) > 0) return;
-
-      // 没改动：要么不是成员，要么已经是归档态。用一次存在性查询区分。
-      const row = db
-        .prepare("SELECT 1 AS ok FROM conversation_members WHERE conv_id = ? AND member_id = ?")
-        .get(conversationId, userId) as { ok: number } | undefined;
-      if (!row) throw new Error("conversation not found or not a member");
-    },
     isMember(conversationId, userId) {
       const row = db
         .prepare("SELECT 1 AS x FROM conversation_members WHERE conv_id = ? AND member_id = ?")
         .get(conversationId, userId);
       return !!row;
     },
-    addMessage(conversationId, senderType, senderId, payload, replyTo, envelope) {
+    conversationAgentId(conversationId) {
+      const row = db
+        .prepare("SELECT agent_id FROM conversation_agents WHERE conv_id = ? LIMIT 1")
+        .get(conversationId) as { agent_id: string } | undefined;
+      return row?.agent_id ?? null;
+    },
+    addMessage(conversationId, senderType, senderId, payload, envelope) {
       const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
       if (!conv) throw new Error("conversation not found");
       const msg: Message = {
@@ -275,9 +156,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         senderType,
         senderId,
         payload,
-        replyTo,
         createdAt: new Date().toISOString(),
-        recalledAt: null,
         // 信封（E2E Task 2）：省略 envelope → plain；列值与回读映射同口径
         enc: envelope?.enc ?? "plain",
         ...(envelope?.cipher !== undefined ? { cipher: envelope.cipher } : {}),
@@ -293,7 +172,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         senderType,
         senderId,
         JSON.stringify(payload),
-        replyTo,
+        null,
         msg.createdAt,
         msg.enc,
         envelope?.cipher ?? null,
@@ -315,23 +194,10 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       const ordered = limit ? [...rows].reverse() : rows;
       return ordered.map(rowToMessage);
     },
-    recallMessage(conversationId, messageId, userId) {
-      // 权限口径同 memory：非成员/消息不存在 → 0 changes → null；UPDATE 带 sender_id 限定
-      // 使「非本人」也不落库（changes=0 → null），单一语句完成鉴权与持久化。
-      if (!this.isMember(conversationId, userId)) return null;
-      const res = db
-        .prepare("UPDATE messages SET recalled_at = ? WHERE id = ? AND conv_id = ? AND sender_id = ?")
-        .run(new Date().toISOString(), messageId, conversationId, userId);
-      if (res.changes === 0) return null;
-      const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as
-        | Parameters<typeof rowToMessage>[0]
-        | undefined;
-      return row ? rowToMessage(row) : null;
-    },
     reencryptMessage(messageId, userId, envelope) {
       // 单条件 UPDATE 完成鉴权与写入（sender + enc='plain'）→ 原子替换信封四字段，
       // 并在**同一条 UPDATE** 内清明文：payload 置 {"text":""} 占位（列 NOT NULL 不能
-      // 置 NULL）、reply_to 置 NULL——出站 listMessages 对 e2e 不再含原文/回复指向。
+      // 置 NULL）、reply_to 置 NULL——出站 listMessages 对 e2e 不再含原文。
       // changes=0 时回读分类三态（sender 先于 enc 判，与内存实现同优先级）。
       const res = db
         .prepare(
@@ -399,172 +265,39 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     listConversations(userId) {
       const convs = db
         .prepare(
-          `SELECT c.id, c.kind, c.name, m.archived_at FROM conversations c
-           JOIN conversation_members m ON m.conv_id = c.id WHERE m.member_id = ?`,
+          `SELECT c.id FROM conversations c
+           JOIN conversation_members m ON m.conv_id = c.id
+           WHERE m.member_id = ? AND c.kind = 'agent'`,
         )
-        .all(userId) as { id: string; kind: string; name: string | null; archived_at: string | null }[];
-      const unreadOf = (convId: string): number => {
-        const read = db
-          .prepare("SELECT read_at FROM message_reads WHERE conv_id = ? AND user_id = ?")
-          .get(convId, userId) as { read_at: string } | undefined;
-        if (read) {
-          const row = db
-            .prepare("SELECT COUNT(*) AS n FROM messages WHERE conv_id = ? AND sender_id != ? AND created_at > ?")
-            .get(convId, userId, read.read_at) as { n: number };
-          return Number(row.n);
-        }
-        const row = db
-          .prepare("SELECT COUNT(*) AS n FROM messages WHERE conv_id = ? AND sender_id != ?")
-          .get(convId, userId) as { n: number };
-        return Number(row.n);
-      };
+        .all(userId) as { id: string }[];
       const lastMessageAtOf = (convId: string): string | null => {
         const row = db
-          .prepare(
-            "SELECT created_at FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1",
-          )
+          .prepare("SELECT created_at FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1")
           .get(convId) as { created_at: string } | undefined;
         return row?.created_at ?? null;
       };
-      const lastReadAtOf = (convId: string): string | null => {
-        const row = db
-          .prepare("SELECT read_at FROM message_reads WHERE conv_id = ? AND user_id = ?")
-          .get(convId, userId) as { read_at: string } | undefined;
-        return row?.read_at ?? null;
-      };
       const out: Conversation[] = [];
       for (const c of convs) {
-        if (c.kind === "group") {
-          const mc = db
-            .prepare("SELECT COUNT(*) AS n FROM conversation_members WHERE conv_id = ?")
-            .get(c.id) as { n: number };
+        // 智能体一对一：对方是名册 agent，复用 conversation_agents 关联行存对方 id。
+        // INNER JOIN agents——agent 已删则不出这条会话（宁可不显示，也不给半截对象）。
+        const agent = db
+          .prepare(
+            `SELECT a.id, a.owner_id, a.name, a.avatar, a.description
+             FROM conversation_agents ca JOIN agents a ON a.id = ca.agent_id
+             WHERE ca.conv_id = ? LIMIT 1`,
+          )
+          .get(c.id) as AgentRow | undefined;
+        if (agent)
           out.push({
             id: c.id,
-            type: "group",
-            name: c.name ?? "未命名群",
-            memberCount: Number(mc.n),
-            unreadCount: unreadOf(c.id),
+            type: "agent",
+            agent: rowToAgent(agent),
+            // 智能体会话没有「别人发来」的概念，未读恒为 0（读状态随人类 IM 一起删除）。
+            unreadCount: 0,
             lastMessageAt: lastMessageAtOf(c.id),
-            lastReadAt: lastReadAtOf(c.id),
-            archivedAt: c.archived_at,
           });
-        } else if (c.kind === "agent") {
-          // 智能体一对一：对方是名册 agent，复用 conversation_agents 关联行存对方 id。
-          // INNER JOIN agents——agent 已删则不出这条会话（宁可不显示，也不给半截对象）。
-          const agent = db
-            .prepare(
-              `SELECT a.id, a.owner_id, a.name, a.avatar, a.description
-               FROM conversation_agents ca JOIN agents a ON a.id = ca.agent_id
-               WHERE ca.conv_id = ? LIMIT 1`,
-            )
-            .get(c.id) as AgentRow | undefined;
-          if (agent)
-            out.push({
-              id: c.id,
-              type: "agent",
-              agent: rowToAgent(agent),
-              unreadCount: unreadOf(c.id),
-              lastMessageAt: lastMessageAtOf(c.id),
-              lastReadAt: lastReadAtOf(c.id),
-              archivedAt: c.archived_at,
-            });
-        } else {
-          const peer = db
-            .prepare("SELECT member_id FROM conversation_members WHERE conv_id = ? AND member_id != ?")
-            .get(c.id, userId) as { member_id: string } | undefined;
-          if (peer)
-            out.push({
-              id: c.id,
-              type: "direct",
-              peer: mustUser(peer.member_id),
-              unreadCount: unreadOf(c.id),
-              lastMessageAt: lastMessageAtOf(c.id),
-              lastReadAt: lastReadAtOf(c.id),
-              archivedAt: c.archived_at,
-            });
-        }
       }
       return out;
-    },
-    listMembers(conversationId) {
-      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
-      if (!conv) throw new Error("conversation not found");
-      const rows = db.prepare("SELECT member_id FROM conversation_members WHERE conv_id = ?").all(conversationId) as {
-        member_id: string;
-      }[];
-      const out: Member[] = rows.map((r) => {
-        const u = mustUser(r.member_id);
-        return { kind: "user" as const, id: r.member_id, name: u.displayName, avatar: u.avatar ?? null, user: u };
-      });
-      // agent 行尾部追加：conversation_agents JOIN agents 取元数据（INNER JOIN——
-      // agents 行缺失即丢行，与内存实现「未知 agentId 跳过」同语义）。
-      const agentRows = db
-        .prepare(
-          `SELECT a.id, a.name, a.avatar FROM conversation_agents ca
-           JOIN agents a ON a.id = ca.agent_id WHERE ca.conv_id = ?`,
-        )
-        .all(conversationId) as { id: string; name: string; avatar: string | null }[];
-      for (const a of agentRows) {
-        out.push({ kind: "agent", id: a.id, name: a.name, avatar: a.avatar, user: null });
-      }
-      return out;
-    },
-    markRead(conversationId, userId) {
-      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
-      if (!conv) throw new Error("conversation not found");
-      if (!this.isMember(conversationId, userId)) throw new Error("not a member");
-      db.prepare(
-        `INSERT INTO message_reads (conv_id, user_id, read_at) VALUES (?, ?, ?)
-         ON CONFLICT(conv_id, user_id) DO UPDATE SET read_at = excluded.read_at`,
-      ).run(conversationId, userId, new Date().toISOString());
-    },
-    listReads(conversationId) {
-      const rows = db.prepare("SELECT user_id, read_at FROM message_reads WHERE conv_id = ?").all(conversationId) as {
-        user_id: string;
-        read_at: string;
-      }[];
-      return rows.map((r) => ({ userId: r.user_id, at: r.read_at }));
-    },
-    listUserIds() {
-      const rows = db.prepare("SELECT id FROM users").all() as { id: string }[];
-      return rows.map((r) => r.id);
-    },
-    ensurePresetGroup(name, userIds, agentId) {
-      // B 语义（防劫持 + 启动补成员）：只匹配预设群（created_by IS NULL——用户自建同名群
-      // 由 createGroup 写 creator id，不参与匹配）；命中则把 userIds 中尚未入群的用户
-      // INSERT OR IGNORE 补入（幂等），返回同一 id。
-      const existing = db
-        .prepare("SELECT id FROM conversations WHERE kind = 'group' AND name = ? AND created_by IS NULL")
-        .get(name) as { id: string } | undefined;
-      if (existing) {
-        const hasMember = db.prepare("SELECT 1 FROM conversation_members WHERE conv_id = ? AND member_id = ?");
-        const ins = db.prepare("INSERT OR IGNORE INTO conversation_members (conv_id, member_id) VALUES (?, ?)");
-        for (const u of new Set(userIds)) {
-          if (hasMember.get(existing.id, u)) continue;
-          mustUser(u);
-          ins.run(existing.id, u);
-        }
-        return existing.id;
-      }
-      const meta = SYSTEM_AGENTS[agentId];
-      if (!meta) throw new Error(`unknown system agent: ${agentId}`);
-      if (userIds.length === 0) throw new Error("preset group requires at least one user");
-      const ids = [...new Set(userIds)];
-      for (const id of ids) mustUser(id);
-      const id = randomUUID();
-      db.prepare("INSERT INTO conversations (id, kind, name, created_by) VALUES (?, 'group', ?, NULL)").run(id, name);
-      const ins = db.prepare("INSERT INTO conversation_members (conv_id, member_id) VALUES (?, ?)");
-      for (const m of ids) ins.run(id, m);
-      // 登记 agent（upsert——已存在则保留既有 name/avatar 等行数据？不：预设 agent 元数据
-      // 以 SYSTEM_AGENTS 为准，DO UPDATE 保证幂等后元数据仍一致）
-      db.prepare(
-        `INSERT INTO agents (id, owner_id, name, avatar, description, system_prompt)
-         VALUES (?, NULL, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar,
-           description = excluded.description, system_prompt = excluded.system_prompt`,
-      ).run(agentId, meta.name, meta.avatar, meta.description, meta.systemPrompt);
-      db.prepare("INSERT INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(id, agentId);
-      return id;
     },
     createAgentConversation(userId, agentId) {
       mustUser(userId);
@@ -593,32 +326,9 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       db.prepare("INSERT OR IGNORE INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(id, agentId);
       return { id, type: "agent", agent };
     },
-    listAgentIds(conversationId) {
-      const rows = db.prepare("SELECT agent_id FROM conversation_agents WHERE conv_id = ?").all(conversationId) as {
-        agent_id: string;
-      }[];
-      return rows.map((r) => r.agent_id);
-    },
-    attachAgentToGroup(conversationId, agentId) {
-      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
-      if (!conv) throw new Error("conversation not found");
-      // 幂等：PRIMARY KEY (conv_id, agent_id) 冲突即 no-op（与内存 includes 判断同语义）
-      db.prepare("INSERT OR IGNORE INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(
-        conversationId,
-        agentId,
-      );
-    },
-    detachAgentFromGroup(conversationId, agentId) {
-      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
-      if (!conv) throw new Error("conversation not found");
-      db.prepare("DELETE FROM conversation_agents WHERE conv_id = ? AND agent_id = ?").run(
-        conversationId,
-        agentId,
-      );
-    },
     listAgents() {
       // 永不 SELECT system_prompt：系统提示词是部署侧内部字段，名册 API 契约不含它。
-      // 系统 agent 由 ensurePresetGroup upsert 落行，此处直接读表即自然出现。
+      // 系统 agent 由 ensureSystemAgents upsert 落行，此处直接读表即自然出现。
       const rows = db
         .prepare("SELECT id, owner_id, name, avatar, description FROM agents")
         .all() as {
@@ -714,6 +424,100 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         .prepare("SELECT COALESCE(SUM(size), 0) AS total FROM shared_files WHERE owner = ?")
         .get(ownerUsername) as { total: number };
       return row.total;
+    },
+    touchUser(userId) {
+      db.prepare("UPDATE users SET last_seen_at = ? WHERE id = ?").run(new Date().toISOString(), userId);
+    },
+    listTeamMembers() {
+      const rows = db
+        .prepare(
+          `SELECT id, username, display_name, avatar, last_seen_at FROM users
+           ORDER BY last_seen_at IS NULL, last_seen_at DESC, display_name COLLATE NOCASE`,
+        )
+        .all() as Array<{
+        id: string;
+        username: string;
+        display_name: string;
+        avatar: string | null;
+        last_seen_at: string | null;
+      }>;
+      return rows.map((r) => ({ user: rowToUser(r), lastSeenAt: r.last_seen_at ?? null }));
+    },
+    addTeamActivity(actorId, input: TeamActivityInput) {
+      mustUser(actorId);
+      const now = new Date().toISOString();
+      const res = db
+        .prepare(
+          `INSERT OR IGNORE INTO team_activities
+             (id, actor_id, kind, title, detail, status, source_id, occurred_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          randomUUID(),
+          actorId,
+          input.kind,
+          input.title,
+          input.detail ?? null,
+          input.status ?? null,
+          input.sourceId,
+          input.occurredAt,
+          now,
+        );
+      return res.changes > 0;
+    },
+    listTeamActivities(opts = {}) {
+      const limit = Math.min(100, Math.max(1, opts.limit ?? 50));
+      const where: string[] = [];
+      const params: string[] = [];
+      if (opts.before) {
+        where.push("occurred_at < ?");
+        params.push(opts.before);
+      }
+      if (opts.actorId) {
+        where.push("actor_id = ?");
+        params.push(opts.actorId);
+      }
+      const sql = `SELECT id, actor_id, kind, title, detail, status, source_id, occurred_at, created_at
+                   FROM team_activities
+                   ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+                   ORDER BY occurred_at DESC, created_at DESC
+                   LIMIT ?`;
+      const rows = db.prepare(sql).all(...params, limit) as Array<{
+        id: string;
+        actor_id: string;
+        kind: TeamActivity["kind"];
+        title: string;
+        detail: string | null;
+        status: string | null;
+        source_id: string;
+        occurred_at: string;
+        created_at: string;
+      }>;
+      return rows.map((r) => ({
+        id: r.id,
+        actorId: r.actor_id,
+        kind: r.kind,
+        title: r.title,
+        ...(r.detail != null ? { detail: r.detail } : {}),
+        ...(r.status != null ? { status: r.status } : {}),
+        sourceId: r.source_id,
+        occurredAt: r.occurred_at,
+        createdAt: r.created_at,
+      }));
+    },
+    clearTeamActivities(actorId) {
+      return Number(db.prepare("DELETE FROM team_activities WHERE actor_id = ?").run(actorId).changes);
+    },
+    ensureSystemAgents() {
+      const upsert = db.prepare(
+        `INSERT INTO agents (id, owner_id, name, avatar, description, system_prompt)
+         VALUES (?, NULL, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar,
+           description = excluded.description, system_prompt = excluded.system_prompt`,
+      );
+      for (const [id, meta] of Object.entries(SYSTEM_AGENTS)) {
+        upsert.run(id, meta.name, meta.avatar, meta.description, meta.systemPrompt);
+      }
     },
   };
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
-import type { Member, Message, ReadState, User, WsClientEvent } from "@heming/shared";
-import { ChatPage, renderTextWithMentions, aggregateChips , clampComposerHeight } from "./ChatPage.js";
+import type { Message, User, WsClientEvent } from "@heming/shared";
+import { ChatPage, clampComposerHeight } from "./ChatPage.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
@@ -119,9 +119,7 @@ const msg = (id: string, text: string, createdAt: string): Message => ({
   senderType: "user",
   senderId: "u2",
   payload: { text },
-  replyTo: null,
   createdAt,
-  recalledAt: null,
   enc: "plain",
 });
 
@@ -164,28 +162,16 @@ function mockMessagesFetch(
   first: Message[],
   second?: Message[],
   conv: {
-    reads?: ReadState[][];
-    members?: Member[][];
     contentFail?: boolean;
     /** 附件上传（POST /api/files）的返回体；不配则维持 404（多数用例不上传）。 */
     uploadMeta?: unknown;
   } = {},
 ) {
   let m = 0;
-  let r = 0;
-  let k = 0;
-  const pick = <T,>(seq: T[][] | undefined, i: number): T[] =>
-    seq ? seq[Math.min(i, seq.length - 1)] : [];
   return vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = String(input);
     if (/^\/api\/conversations\/[^/]+\/messages$/.test(url)) {
       return Promise.resolve(jsonRes(m++ === 0 ? first : (second ?? first)));
-    }
-    if (/^\/api\/conversations\/[^/]+\/reads$/.test(url)) {
-      return Promise.resolve(jsonRes(pick(conv.reads, r++)));
-    }
-    if (/^\/api\/conversations\/[^/]+\/members$/.test(url)) {
-      return Promise.resolve(jsonRes(pick(conv.members, k++)));
     }
     if (url === "/api/e2e/keys") {
       return Promise.resolve(jsonRes({})); // 公钥上云 PUT/拉取 GET：成功即可（无设备登记）
@@ -199,7 +185,6 @@ function mockMessagesFetch(
         jsonRes({
           ...(orig ?? msg(reenc[1], "", "2026-10-17T00:00:00.000Z")),
           payload: { text: "" },
-          replyTo: null,
           enc: "e2e",
           cipher: "QQ==",
           chainKid: "test-kid",
@@ -258,13 +243,7 @@ function sealedOf(send: { mock: { calls: unknown[][] } }, type: string): Record<
     .map((e) => ({ ...e, plain: decodePlain(e.cipher as string) }));
 }
 
-/** 本会话群 members 行（@ 候选唯一数据源）：默认含人类 u1 + agent「和小鸣」。 */
-const inGroupMembers: Member[] = [
-  { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
-  { kind: "agent", id: "system-assistant", name: "和小鸣", avatar: null, user: null },
-];
-
-/** 本机 LLM 连接（Key 不出设备）：绑定到「和小鸣」后 mention 发送才不被拦截。 */
+/** 本机 LLM 连接（Key 不出设备）：绑定到会话智能体后发送才会真正触发流式生成。 */
 const testProfile: LlmProfile = {
   id: "p1",
   label: "l",
@@ -281,18 +260,18 @@ function bindAssistant() {
 }
 
 /**
- * @ 选择器用例共用底座：群会话 c1 + members 响应（默认本群含「和小鸣」）+ 可断言的 ws send。
- * 不预置 store 跨群 join 视图（agents）——候选必须来自本会话 members（评审 F1 锁死口径）。
+ * 助手会话底座：默认 beforeEach 已挂 c1（agent 会话），这里只接 WS 句柄与历史。
+ * 一对一里「跟谁说话」由会话本身确定，普通发送即触发会话绑定的智能体。
  */
-async function setupGroupChat(rows: Member[] = inGroupMembers) {
+async function setupAgentChat(
+  history: Message[] = [],
+  conv: { contentFail?: boolean; uploadMeta?: unknown } = {},
+) {
   const send = vi.fn();
   vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-  useChatStore.setState({
-    conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-  });
-  mockMessagesFetch([], undefined, { members: [rows], reads: [[]] });
+  mockMessagesFetch(history, undefined, conv);
   render(<ChatPage />);
-  await act(async () => {}); // 冲刷挂载 effects（fetchMessages/loadReads/fetchMembers 落定）
+  await act(async () => {}); // 冲刷挂载 effects（fetchMessages 落定）
   return send;
 }
 
@@ -341,11 +320,21 @@ describe("ChatPage", () => {
       pendingAttachment: null,
     });
     useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
-      friends: [],
-      incoming: [],
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: {
+            id: "system-assistant",
+            name: "和小鸣",
+            avatar: null,
+            owner_id: null,
+            description: "",
+          },
+          unreadCount: 0,
+        },
+      ],
       messages: {},
-      reads: {},
       messagesLoading: {},
       messagesError: {},
       streaming: {},
@@ -515,10 +504,10 @@ describe("ChatPage", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "导出 Markdown" }));
 
     expect(clickSpy).toHaveBeenCalled();
-    expect(clicked!.download).toMatch(/^和鸣-鲍勃-.*\.md$/);
+    expect(clicked!.download).toMatch(/^和鸣-和小鸣-.*\.md$/);
     const urlArg = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
     const content = new TextDecoder().decode(await urlArg.arrayBuffer());
-    expect(content).toContain("# 会话：鲍勃");
+    expect(content).toContain("# 会话：和小鸣");
     expect(content).toContain("第一条");
     expect(content).toContain("回答");
     expect(await screen.findByText(/已导出 2 条消息/)).toBeInTheDocument();
@@ -596,54 +585,6 @@ describe("ChatPage", () => {
     expect(screen.getByRole("button", { name: "导出所选 Markdown" })).toBeDisabled();
   });
 
-  it("他会话的新消息进通知中心；正在看的会话与自己的消息不进", async () => {
-    setNotificationStorage(createMemoryStorage());
-    useNotificationStore.setState({ items: [] });
-    mockMessagesFetch([msg("m1", "第一条", "2026-10-14T01:00:00.000Z")]);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("第一条")).toBeInTheDocument());
-
-    // 当前会话（c1）的新消息：直接进消息列表，不该再提醒一次
-    act(() => {
-      lastHandlers().onEvent({ type: "message_new", message: msg("m2", "眼前的", "2026-10-14T01:05:00.000Z") });
-    });
-    expect(useNotificationStore.getState().items).toEqual([]);
-
-    // 自己发的消息（senderId 与当前用户相同）也不提醒
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_new",
-        message: { ...msg("m3", "我发的", "2026-10-14T01:06:00.000Z"), senderId: "u1" },
-      });
-    });
-    expect(useNotificationStore.getState().items).toEqual([]);
-
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_new",
-        message: { ...msg("m4", "别处的消息", "2026-10-14T01:07:00.000Z"), conversationId: "c2" },
-      });
-    });
-    const items = useNotificationStore.getState().items;
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({
-      kind: "message",
-      key: "message:m4",
-      body: "别处的消息",
-      conversationId: "c2",
-      read: false,
-    });
-
-    // 同一消息重投（WS 补档/重复事件）不产生第二条通知
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_new",
-        message: { ...msg("m4", "别处的消息", "2026-10-14T01:07:00.000Z"), conversationId: "c2" },
-      });
-    });
-    expect(useNotificationStore.getState().items).toHaveLength(1);
-  });
 
   it("挂载后收到 message_new：append 到消息列表", async () => {
     mockMessagesFetch([msg("m1", "第一条", "2026-10-14T01:00:00.000Z")]);
@@ -812,390 +753,19 @@ describe("ChatPage", () => {
     }
   });
 
-  it("输入非空且已连接时发送 typing，2 秒内连续输入只发一次", async () => {
-    vi.useFakeTimers();
-    try {
-      const send = vi.fn();
-      vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-      mockMessagesFetch([]);
-      render(<ChatPage />);
-      act(() => {
-        lastHandlers().onOpen?.();
-      });
 
-      const input = screen.getByLabelText("消息输入框");
-      fireEvent.change(input, { target: { value: "你" } });
-      expect(send).toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
 
-      send.mockClear();
-      fireEvent.change(input, { target: { value: "你好" } });
-      expect(send).not.toHaveBeenCalled();
 
-      act(() => {
-        vi.advanceTimersByTime(2001);
-      });
-      fireEvent.change(input, { target: { value: "你好呀" } });
-      expect(send).toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
 
-  it("未连接时不发 typing", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    fireEvent.change(screen.getByLabelText("消息输入框"), { target: { value: "你" } });
-    expect(send).not.toHaveBeenCalled();
-  });
 
-  it("智能体会话输入不发送 typing", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [
-        {
-          id: "c1",
-          type: "agent",
-          agent: { id: "system-assistant", owner_id: null, name: "和小鸣", avatar: null, description: "官方" },
-          unreadCount: 0,
-        },
-      ],
-    });
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    act(() => {
-      lastHandlers().onOpen?.();
-    });
-    fireEvent.change(screen.getByLabelText("消息输入框"), { target: { value: "你好" } });
-    expect(send).not.toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
-  });
 
-  it("收到他人 typing 显示名字；自己与别的会话忽略；3 秒后消失", async () => {
-    vi.useFakeTimers();
-    try {
-      mockMessagesFetch([]);
-      render(<ChatPage />);
-      act(() => {
-        lastHandlers().onOpen?.();
-      });
-
-      // 别的会话（c2）先发：此时没有任何提示，证明 conversationId 判断真实生效
-      // （若断言放在 c1 事件之后，u2 同一时间戳会让用例空过）。
-      act(() => {
-        lastHandlers().onEvent({ type: "typing", conversationId: "c2", userId: "u2" });
-      });
-      expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
-
-      act(() => {
-        lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
-      });
-      expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
-
-      act(() => {
-        lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u1" }); // 自己
-      });
-      expect(screen.queryByText(/爱丽丝 正在输入/)).not.toBeInTheDocument();
-
-      act(() => {
-        vi.advanceTimersByTime(4000); // TTL 3s + 清理定时器 1s
-      });
-      expect(screen.queryByText("鲍勃 正在输入…")).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("群聊 typing 显示成员名，多人时用「等 N 人」", async () => {
-    const carol: User = { id: "u3", username: "carol", displayName: "卡罗尔" };
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 4, unreadCount: 0 }],
-    });
-    mockMessagesFetch([], undefined, {
-      members: [
-        [
-          { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
-          { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer },
-          { kind: "user", id: "u3", name: "卡罗尔", avatar: null, user: carol },
-        ],
-      ],
-      reads: [[]],
-    });
-
-    render(<ChatPage />);
-    await act(async () => {}); // 等成员快照落定
-    act(() => {
-      lastHandlers().onOpen?.();
-      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
-    });
-    expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
-
-    act(() => {
-      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u3" });
-    });
-    expect(screen.getByText("鲍勃、卡罗尔 正在输入…")).toBeInTheDocument();
-
-    act(() => {
-      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u9" });
-    });
-    expect(screen.getByText("鲍勃 等 3 人正在输入…")).toBeInTheDocument();
-  });
-
-  it("群成员快照缺名字时回退「有人」", async () => {
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 4, unreadCount: 0 }],
-    });
-    mockMessagesFetch([], undefined, { members: [[{ kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me }]], reads: [[]] });
-    render(<ChatPage />);
-    await act(async () => {});
-    act(() => {
-      lastHandlers().onOpen?.();
-      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u9" });
-    });
-    expect(screen.getByText("有人 正在输入…")).toBeInTheDocument();
-  });
-
-  it("切会话后旧连接晚到的 typing 不污染新会话", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "group", name: "A 组", memberCount: 3, unreadCount: 0 },
-        { id: "c2", type: "group", name: "B 组", memberCount: 3, unreadCount: 0 },
-      ],
-    });
-    render(<ChatPage />);
-    const oldHandlers = lastHandlers();
-
-    // 切到 c2：WS effect 重建，oldHandlers 是 c1 的旧闭包
-    act(() => {
-      useUiStore.setState({ activeConversationId: "c2" });
-    });
-    // 旧连接晚到的 c1 typing：u3 不在 c2 成员快照里，若未按当前会话过滤会显示「有人 正在输入…」
-    act(() => {
-      oldHandlers.onEvent({ type: "typing", conversationId: "c1", userId: "u3" });
-    });
-    expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
-  });
-
-  // —— d.38 typing 对抗用例（adversarial QA 2026-10-28）——
-
-  it("C1：纯空白输入不发送 typing（节流窗口过后也不发）", async () => {
-    vi.useFakeTimers();
-    try {
-      const send = vi.fn();
-      vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-      mockMessagesFetch([]);
-      render(<ChatPage />);
-      act(() => {
-        lastHandlers().onOpen?.();
-      });
-
-      const input = screen.getByLabelText("消息输入框");
-      fireEvent.change(input, { target: { value: "   " } });
-      expect(send).not.toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
-
-      // 越过 2 秒节流窗口再输空白：仍不发（trim 判空在节流之前）
-      act(() => {
-        vi.advanceTimersByTime(2001);
-      });
-      fireEvent.change(input, { target: { value: " \t\n " } });
-      expect(send).not.toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("C2：同一发送者的消息到达后「正在输入」应立即消失（不等 3 秒 TTL）", async () => {
-    vi.useFakeTimers();
-    try {
-      mockMessagesFetch([]);
-      render(<ChatPage />);
-      act(() => {
-        lastHandlers().onOpen?.();
-      });
-
-      act(() => {
-        lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
-      });
-      expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
-
-      // 对方话已发出：输入态应当立刻收掉，而不是再挂 3 秒
-      act(() => {
-        lastHandlers().onEvent({
-          type: "message_new",
-          message: msg("m-arrive", "我来了", "2026-10-14T02:00:00.000Z"),
-        });
-      });
-      expect(screen.queryByText("鲍勃 正在输入…")).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("C2b：他人消息到达不清除其他发送者的 typing（只清该发送者）", async () => {
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 4, unreadCount: 0 }],
-    });
-    mockMessagesFetch([], undefined, {
-      members: [
-        [
-          { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
-          { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer },
-          { kind: "user", id: "u3", name: "卡罗尔", avatar: null, user: { id: "u3", username: "carol", displayName: "卡罗尔" } },
-        ],
-      ],
-      reads: [[]],
-    });
-    render(<ChatPage />);
-    await act(async () => {});
-    act(() => {
-      lastHandlers().onOpen?.();
-      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u3" });
-    });
-    expect(screen.getByText("卡罗尔 正在输入…")).toBeInTheDocument();
-
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_new",
-        message: { ...msg("m-bob", "鲍勃说话", "2026-10-14T02:00:00.000Z"), conversationId: "c1", senderId: "u2" },
-      });
-    });
-    expect(screen.getByText("卡罗尔 正在输入…")).toBeInTheDocument();
-  });
-
-  it("C2c：旧会话 handler 晚到的消息不清新会话的输入态", async () => {
-    const carol: User = { id: "u3", username: "carol", displayName: "卡罗尔" };
-    const members: Member[] = [
-      { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
-      { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer },
-      { kind: "user", id: "u3", name: "卡罗尔", avatar: null, user: carol },
-    ];
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "group", name: "A 组", memberCount: 3, unreadCount: 0 },
-        { id: "c2", type: "group", name: "B 组", memberCount: 3, unreadCount: 0 },
-      ],
-    });
-    mockMessagesFetch([], undefined, { members: [members, members], reads: [[], []] });
-    render(<ChatPage />);
-    await act(async () => {}); // 等 c1 成员快照落定
-    const oldHandlers = lastHandlers(); // c1 的旧闭包（convId=c1）
-
-    act(() => {
-      useUiStore.setState({ activeConversationId: "c2" });
-    });
-    await act(async () => {}); // 等 c2 成员快照落定
-    act(() => {
-      lastHandlers().onOpen?.();
-      lastHandlers().onEvent({ type: "typing", conversationId: "c2", userId: "u2" });
-    });
-    expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
-
-    // c1 旧 socket 晚到的消息：conversationId=c1，若只看闭包 convId 会误清新会话里 u2 的输入态
-    act(() => {
-      oldHandlers.onEvent({
-        type: "message_new",
-        message: {
-          ...msg("m-old", "旧会话的消息", "2026-10-14T02:00:00.000Z"),
-          conversationId: "c1",
-          senderId: "u2",
-        },
-      });
-    });
-    expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
-  });
-
-  it("C3：切走再切回，旧的「正在输入」不跨会话残留", async () => {
-    vi.useFakeTimers();
-    try {
-      useChatStore.setState({
-        conversations: [
-          { id: "c1", type: "direct", peer, unreadCount: 0 },
-          { id: "c2", type: "group", name: "B 组", memberCount: 2, unreadCount: 0 },
-        ],
-      });
-      mockMessagesFetch([]);
-      render(<ChatPage />);
-      act(() => {
-        lastHandlers().onOpen?.();
-        lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
-      });
-      expect(screen.getByText("鲍勃 正在输入…")).toBeInTheDocument();
-
-      act(() => {
-        useUiStore.setState({ activeConversationId: "c2" });
-      });
-      expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
-
-      act(() => {
-        useUiStore.setState({ activeConversationId: "c1" });
-      });
-      expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("C4：私聊里未知用户的 typing 不渲染提示", async () => {
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-    act(() => {
-      lastHandlers().onOpen?.();
-      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u9" });
-    });
-    expect(screen.queryByText(/正在输入/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("C5：断线期间的输入不进队列，重连后不补发 typing", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-    act(() => {
-      lastHandlers().onOpen?.();
-    });
-    act(() => {
-      lastHandlers().onClose?.();
-    });
-
-    const input = screen.getByLabelText("消息输入框");
-    fireEvent.change(input, { target: { value: "断线时打的字" } });
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "typing" }));
-
-    act(() => {
-      lastHandlers().onOpen?.();
-    });
-    // 重连本身不得冲刷出一帧迟到的 typing
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "typing" }));
-
-    // 反向对照：重连后继续输入应恢复发送（证明不是整条 typing 链路失效）
-    fireEvent.change(input, { target: { value: "断线时打的字，重连后继续" } });
-    expect(send).toHaveBeenCalledWith({ type: "typing", conversationId: "c1" });
-  });
-
-  it("C6：同一用户的重复 typing 事件只出一行提示", async () => {
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-    act(() => {
-      lastHandlers().onOpen?.();
-      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
-      lastHandlers().onEvent({ type: "typing", conversationId: "c1", userId: "u2" });
-    });
-    expect(screen.getAllByText("鲍勃 正在输入…")).toHaveLength(1);
-  });
 
   it("连接句柄为 null 时发送：保留草稿并显示「连接未就绪，消息未发送」", async () => {
     vi.mocked(connectWs).mockReturnValue(null as unknown as WsHandle);
     mockMessagesFetch([]);
 
     render(<ChatPage />);
+    bindAssistant(); // 新版发送先过「绑定检查」，再检查 socket 句柄
     await act(async () => {});
 
     const input = screen.getByPlaceholderText("输入消息…");
@@ -1207,6 +777,7 @@ describe("ChatPage", () => {
   });
 
   it("句柄就绪时发送：走 handle.send，清空草稿且无失败提示", async () => {
+    bindAssistant();
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     mockMessagesFetch([]);
@@ -1219,7 +790,7 @@ describe("ChatPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
     const plain = await lastSealed(send);
-    expect(plain).toEqual({ kind: "text", text: "你好" });
+    expect(plain).toMatchObject({ kind: "text", text: "你好" }); // 另带会话绑定的 mentions
     const ev = send.mock.calls.at(-1)![0] as Record<string, unknown>;
     expect(ev.conversationId).toBe("c1");
     expect(JSON.stringify(ev)).not.toContain("你好"); // 明文不落帧
@@ -1257,6 +828,7 @@ describe("ChatPage", () => {
   });
 
   it("发送成功后清掉落盘的草稿（d.31）", async () => {
+    bindAssistant();
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     mockMessagesFetch([]);
@@ -1276,492 +848,34 @@ describe("ChatPage", () => {
     expect(localStorage.getItem("heming.draft.c1")).toBeNull(); // 盘上的那份也清了
   });
 
-  it("对方消息显示对方头像（无头像首字回退），自己的消息不显示头像", async () => {
-    const mine: Message = {
-      ...msg("m2", "我回一句", "2026-10-14T01:05:00.000Z"),
-      senderId: "u1",
-    };
-    mockMessagesFetch([msg("m1", "在的", "2026-10-14T01:00:00.000Z"), mine]);
 
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("在的")).toBeInTheDocument());
 
-    // 对方两条中仅 m1 是对方消息：首字「鲍」头像出现且仅出现一次（自己的消息不带头像）
-    // 头部改版后 header 也渲染对方头像 → 共 2 处（header + m1 气泡；自己的消息仍无头像）
-    expect(screen.getAllByText("鲍")).toHaveLength(2);
-    // 自己的消息气泡正常渲染（右对齐为既有样式，不另作断言）
-    expect(screen.getByText("我回一句")).toBeInTheDocument();
-  });
 
-  it("direct 下对方已读我的消息时显示「已读」（晚于读点的不显示）", async () => {
-    const mine1: Message = {
-      ...msg("m1", "我 10:00 发的", "2026-10-14T02:00:00.000Z"),
-      senderId: "u1",
-    };
-    const mine2: Message = {
-      ...msg("m2", "我 10:03 发的", "2026-10-14T02:03:00.000Z"),
-      senderId: "u1",
-    };
-    mockMessagesFetch([mine1, mine2], undefined, {
-      reads: [[{ userId: "u2", at: "2026-10-14T02:01:00.000Z" }]],
-    });
 
-    render(<ChatPage />);
-    expect(await screen.findByText("已读")).toBeInTheDocument();
-    // 逐条判断：m1 早于对方读点 → 已读；m2 晚于读点 → 不显示
-    expect(screen.getByText("我 10:00 发的").closest("[data-message-bubble]")).toHaveTextContent("已读");
-    expect(screen.getByText("我 10:03 发的").closest("[data-message-bubble]")).not.toHaveTextContent("已读");
-    expect(screen.getAllByText("已读")).toHaveLength(1);
-  });
 
-  it("挂载后 unreadCount>0 时发送 mark_read", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 3 }],
-    });
 
-    render(<ChatPage />);
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith({ type: "mark_read", conversationId: "c1" }),
-    );
-  });
 
-  it("挂载后 unreadCount=0 时不发送 mark_read", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
 
-    render(<ChatPage />);
-    await act(async () => {}); // 冲刷挂载 effects（loadReads/fetchMessages 落定）
-    expect(send).not.toHaveBeenCalled();
-  });
 
-  it("会话内收到他人新消息补发 mark_read，自己发的消息不补发", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
 
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument());
 
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_new",
-        message: { ...msg("m2", "刚发来的", "2026-10-14T02:10:00.000Z"), senderId: "u2" },
-      });
-    });
-    // 正在会话内看到的消息即时标记已读：否则退出后角标会把已读内容算作未读
-    expect(send).toHaveBeenCalledWith({ type: "mark_read", conversationId: "c1" });
 
-    send.mockClear();
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_new",
-        message: { ...msg("m3", "我自己发的", "2026-10-14T02:11:00.000Z"), senderId: "u1" },
-      });
-    });
-    expect(send).not.toHaveBeenCalled();
-  });
 
-  it("群会话头显示「群名（N 人）」，且群会话不显示「已读」（真击穿守卫）", async () => {
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 5, unreadCount: 0 }],
-    });
-    const other = msg("m1", "我提个问题", "2026-10-14T01:00:00.000Z"); // senderId u2
-    // 真击穿：我方消息（senderId=me）+ 对方读点晚于消息 → 若守卫失效本应显示「已读」
-    const mine: Message = {
-      ...msg("m2", "群里我发的", "2026-10-14T09:00:00.000Z"),
-      senderId: "u1",
-    };
-    mockMessagesFetch([other, mine], undefined, {
-      reads: [[{ userId: "u2", at: "2026-10-14T09:30:00.000Z" }]],
-      members: [
-        [
-          { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
-          { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer },
-        ],
-      ],
-    });
 
-    render(<ChatPage />);
-    expect(await screen.findByText("评审组（5 人）")).toBeInTheDocument();
-    expect(screen.getByText("群里我发的")).toBeInTheDocument(); // 群内我方消息确实渲染
-    expect(screen.queryByText("已读")).not.toBeInTheDocument();
-  });
 
-  it("头部左侧显示会话头像与昵称、右侧有会话信息按钮", async () => {
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {}); // 冲刷挂载 effects
-    // 触发 onOpen → 已连接（否则显示「连接中…」）
-    act(() => {
-      lastHandlers().onOpen?.();
-    });
-    // direct：标题=对方昵称；头像为首字回退（peer 无 avatar）
-    expect(screen.getByText("鲍勃")).toBeInTheDocument();
-    expect(screen.getByText("鲍")).toBeInTheDocument();
-    expect(screen.getByText("已连接")).toBeInTheDocument();
-    expect(screen.getByLabelText("会话信息")).toBeInTheDocument();
-  });
 
-  it("点会话信息弹出信息卡", async () => {
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-    fireEvent.click(screen.getByLabelText("会话信息"));
-    // direct 信息卡：@用户名 + 关闭钮
-    expect(screen.getByText("@bob")).toBeInTheDocument();
-    expect(screen.getByLabelText("关闭会话信息")).toBeInTheDocument();
-  });
 
-  it("群内他人消息气泡显示成员映射名，自己的显示「我」", async () => {
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    const other = msg("m1", "我提个问题", "2026-10-14T01:00:00.000Z"); // senderId u2
-    const mine: Message = {
-      ...msg("m2", "同意", "2026-10-14T01:02:00.000Z"),
-      senderId: "u1",
-    };
-    const fetchMock = mockMessagesFetch([other, mine], undefined, {
-      members: [
-        [
-          { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
-          { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer },
-        ],
-      ],
-    });
-
-    render(<ChatPage />);
-    // 挂载时拉一次 members 建 id→名字映射（M2 消息体无 senderName）
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some((c) => String(c[0]) === "/api/conversations/c1/members")).toBe(
-        true,
-      ),
-    );
-    expect(await screen.findByText("鲍勃")).toBeInTheDocument(); // 他人气泡：映射名
-    expect(screen.getByText("我")).toBeInTheDocument(); // 自己
-    expect(screen.getByText("同意")).toBeInTheDocument();
-  });
-
-  it("收到 read_update：仅本会话重拉 /reads 并更新「已读」标记", async () => {
-    const mine: Message = {
-      ...msg("m1", "我发的", "2026-10-14T02:00:00.000Z"),
-      senderId: "u1",
-    };
-    const fetchMock = mockMessagesFetch([mine], undefined, {
-      reads: [[], [{ userId: "u2", at: "2026-10-14T02:01:00.000Z" }]],
-    });
-
-    render(<ChatPage />);
-    const readsCalls = () => fetchMock.mock.calls.filter((c) => String(c[0]).includes("/reads"));
-    await waitFor(() => expect(readsCalls()).toHaveLength(1)); // 挂载 loadReads
-    await waitFor(() => expect(screen.getByText("我发的")).toBeInTheDocument());
-    expect(screen.queryByText("已读")).not.toBeInTheDocument(); // 首拉空表 → 无已读标记
-
-    // 他会话的 read_update 不触发重拉
-    act(() => {
-      lastHandlers().onEvent({
-        type: "read_update",
-        conversationId: "other",
-        userId: "u2",
-        at: "2026-10-14T02:01:00.000Z",
-      });
-    });
-    expect(readsCalls()).toHaveLength(1);
-
-    act(() => {
-      lastHandlers().onEvent({
-        type: "read_update",
-        conversationId: "c1",
-        userId: "u2",
-        at: "2026-10-14T02:01:00.000Z",
-      });
-    });
-    expect(await screen.findByText("已读")).toBeInTheDocument();
-    expect(readsCalls().length).toBeGreaterThan(1);
-  });
-
-  it("点 @ 按钮出选择器，Esc 关；选中后发送 payload 含 mentions，发送成功清 chip", async () => {
-    const send = await setupGroupChat();
-    bindAssistant(); // 有绑定才不被发送前拦截（无绑定用例见下方「发送前拦截」）
-
-    // @ 按钮 → 选择器出现（本群 agent 来自 agents join 视图）
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    expect(screen.getByText("和小鸣")).toBeInTheDocument();
-    // Esc 关闭
-    fireEvent.keyDown(screen.getByPlaceholderText("输入消息…"), { key: "Escape" });
-    expect(screen.queryByText("和小鸣")).not.toBeInTheDocument();
-
-    // 再开 → 点选 → chip 出现（输入框文本不动，mentions 走内部 state）
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    fireEvent.click(screen.getByText("和小鸣"));
-    expect(screen.getByText("@和小鸣")).toBeInTheDocument();
-
-    const input = screen.getByPlaceholderText("输入消息…");
-    fireEvent.change(input, { target: { value: "@和小鸣 帮我看下" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
-
-    const plain = await lastSealed(send);
-    expect(plain).toEqual({
-      kind: "text",
-      text: "@和小鸣 帮我看下",
-      mentions: [{ agentId: "system-assistant", name: "和小鸣" }], // mentions 进密文
-    });
-    await waitFor(() => expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument()); // 发送成功清 chip
-    expect(input).toHaveValue("");
-    // 冲刷发送后启动的本机流（fetchHistory → streamChat → finish 上行），
-    // 否则挂起的异步链会漂到下一条用例才落定，污染其 store 断言
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent_finish" })),
-    );
-  });
-
-  it("chip 点 × 移除后发送不带 mentions", async () => {
-    const send = await setupGroupChat();
-
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    fireEvent.click(screen.getByText("和小鸣"));
-    expect(screen.getByText("@和小鸣")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "移除 和小鸣" }));
-    expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument();
-
-    const input = screen.getByPlaceholderText("输入消息…");
-    fireEvent.change(input, { target: { value: "这版先不提" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
-    const plain = await lastSealed(send);
-    expect(plain).toEqual({ kind: "text", text: "这版先不提" }); // 无 mentions 键
-    expect(plain).not.toHaveProperty("mentions");
-  });
-
-  it("键入 @ 触发选择器过滤，选中后文字保持原样且 token 不再重弹", async () => {
-    await setupGroupChat();
-    const input = screen.getByPlaceholderText("输入消息…");
-
-    // 键入尾随 token → 弹选择器（空 query 全量）
-    fireEvent.change(input, { target: { value: "@" } });
-    expect(screen.getByText("和小鸣")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("和小鸣"));
-    expect(screen.getByText("@和小鸣")).toBeInTheDocument(); // chip
-    expect(input).toHaveValue("@"); // 文字保持原样（mention 不注入草稿）
-
-    // token 仍在（未空格断开）：继续输入不重弹——否则每击键都闪空态
-    fireEvent.change(input, { target: { value: "@和看下" } });
-    expect(screen.queryByText("群内暂无智能体")).not.toBeInTheDocument();
-    expect(screen.queryByText("和小鸣")).not.toBeInTheDocument(); // 仅剩 chip（@和小鸣 ≠ 和小鸣）
-
-    // token 消失（空格断开）→ 解锁；再键入 @ 重弹（已选项被过滤 → 空态）
-    fireEvent.change(input, { target: { value: "@和看下 中段" } });
-    fireEvent.change(input, { target: { value: "@和看下 中段 @" } });
-    expect(screen.getByText("群内暂无智能体")).toBeInTheDocument();
-  });
-
-  it("切换会话清空已选 mention chip（防跨会话带出）", async () => {
-    await setupGroupChat();
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    fireEvent.click(screen.getByText("和小鸣"));
-    expect(screen.getByText("@和小鸣")).toBeInTheDocument();
-
-    act(() => {
-      useUiStore.setState({ activeConversationId: "c2" });
-    });
-    expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "提及智能体" })).not.toBeInTheDocument(); // direct/未知会话不给 @ 入口
-  });
-
-  it("候选只认本会话群 members：跨群 join 视图里的外群 agent 不可见不可选（评审 F1）", async () => {
-    // 跨群 join 视图（Task 6 的 agents）含只在 B 群的 agent——@ 候选若读它就会漏出外群项
-    useChatStore.setState({
-      agents: [{ id: "foreign-1", owner_id: null, name: "外群甲", avatar: null, description: "" }],
-    });
-    await setupGroupChat(); // members 响应仅本群行：有和小鸣，无外群甲
-
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    expect(screen.getByText("和小鸣")).toBeInTheDocument(); // 正例：本群 members 中的 agent 可见
-    expect(screen.queryByText("外群甲")).not.toBeInTheDocument(); // 负例：只在跨群视图的外群 agent 不可见
-
-    fireEvent.click(screen.getByText("和小鸣"));
-    expect(screen.getByText("@和小鸣")).toBeInTheDocument(); // 正例：本群 agent 可选
-    expect(screen.queryByText("外群甲")).not.toBeInTheDocument();
-    useChatStore.setState({ agents: [] }); // 还原，防泄漏到后续用例
-  });
-
-  it("Esc 关闭选择器同步清 tokenLock：token 仍在也可再键入重开", async () => {
-    await setupGroupChat();
-    const input = screen.getByPlaceholderText("输入消息…");
-
-    fireEvent.change(input, { target: { value: "@" } }); // 键入路径开
-    fireEvent.click(screen.getByText("和小鸣")); // 键入路径选中 → tokenLock 置位
-    expect(input).toHaveValue("@"); // 草稿保持原样（token 还在）
-
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" })); // 按钮重开（已选被过滤 → 空态）
-    expect(screen.getByText("群内暂无智能体")).toBeInTheDocument();
-    fireEvent.keyDown(input, { key: "Escape" }); // Esc 关 + 解锁（Minor#3）
-    expect(screen.queryByText("群内暂无智能体")).not.toBeInTheDocument();
-
-    fireEvent.change(input, { target: { value: "@再看" } }); // token 未断开，解锁后应能重开
-    expect(screen.getByText("群内暂无智能体")).toBeInTheDocument();
-  });
-
-  it("气泡对 mentions 名称高亮渲染", async () => {
-    const m: Message = {
-      ...msg("m1", "@和小鸣 看下这版", "2026-10-14T01:00:00.000Z"),
-      payload: {
-        text: "@和小鸣 看下这版",
-        mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
-      },
-    };
-    mockMessagesFetch([m]);
-
-    render(<ChatPage />);
-    const hl = await screen.findByText("和小鸣");
-    expect(hl.tagName).toBe("SPAN");
-    expect(hl).toHaveClass("bg-[#eef3f8]"); // 浅蓝 chip 高亮
-    expect(screen.getByText(/看下这版/)).toBeInTheDocument(); // 其余文本照常渲染
-  });
-
-  /** 选中 mention「和小鸣」并发出指定文本（流式用例共用前奏）。 */
+  /** 在助手会话里发出指定文本（流式用例共用前奏）。 */
   async function pickAndSend(text: string) {
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    fireEvent.click(screen.getByText("和小鸣"));
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
   }
 
-  it("发送前拦截：@ 到未绑定 LLM 的智能体 → 不发消息，提示先在设置页配置", async () => {
-    const send = await setupGroupChat();
 
-    await pickAndSend("@和小鸣 帮我看下");
 
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "和小鸣 未绑定 LLM 连接，请先在设置页配置",
-    );
-    expect(screen.getByPlaceholderText("输入消息…")).toHaveValue("@和小鸣 帮我看下"); // 草稿保留
-    expect(screen.getByText("@和小鸣")).toBeInTheDocument(); // chip 保留
-    expect(streamChat).not.toHaveBeenCalled(); // 拦截在触发编排之前
-  });
-
-  it("mentions 发送成功触发本机流：打字机气泡 + 生成中提示行 + 自身 chunk 回声不重复累积 + message_new 收口", async () => {
-    const send = await setupGroupChat();
-    bindAssistant();
-    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
-      o.onDelta("你");
-      o.onDelta("好");
-      return "你好";
-    });
-
-    await pickAndSend("@和小鸣 打个招呼");
-
-    // E2E 流式（硬验收④）：chunk/finish 均为密文信封（text 置空 + cipher/index）
-    await waitFor(() => expect(sealedOf(send, "agent_chunk")).toHaveLength(2));
-    const chunks = sealedOf(send, "agent_chunk");
-    expect(chunks[0]).toMatchObject({ text: "", index: 0, chainKid: "test-kid" });
-    expect(chunks[0].plain).toMatchObject({ kind: "chunk", text: "你" });
-    expect(chunks[1]).toMatchObject({ text: "", index: 1 });
-    expect(chunks[1].plain).toMatchObject({ kind: "chunk", text: "好" });
-    await waitFor(() => expect(sealedOf(send, "agent_finish")).toHaveLength(1));
-    const fin = sealedOf(send, "agent_finish")[0];
-    expect(fin.text).toBe("");
-    expect(fin.plain).toMatchObject({ kind: "text", text: "你好" }); // 全文进信封入库
-
-    // 打字机气泡（累积文本 + 光标）与输入栏上方「生成中」提示行
-    await waitFor(() => expect(screen.getByText(/你好/)).toBeInTheDocument());
-    expect(document.body.textContent).toContain("▌");
-    expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument();
-
-    const finish = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_finish");
-    const streamId = (finish as { streamId: string }).streamId;
-
-    // 自身 agent_chunk 回声（服务端全量广播）：本机流已本地累积 → 不重复 upsert
-    act(() => {
-      lastHandlers().onEvent({
-        type: "agent_chunk",
-        conversationId: "c1",
-        agentId: "system-assistant",
-        streamId,
-        text: "你",
-      });
-    });
-    expect(screen.getByText(/你好/)).toBeInTheDocument();
-    expect(screen.queryByText(/你好你/)).not.toBeInTheDocument();
-
-    // agent_finish → 服务端回 message_new{streamId}：移除 streaming 项，正式消息入列
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_new",
-        streamId,
-        message: {
-          ...msg("mAgent", "你好", "2026-10-14T01:01:00.000Z"),
-          senderType: "agent",
-          senderId: "system-assistant",
-        },
-      });
-    });
-    expect(screen.queryByText("▌")).not.toBeInTheDocument();
-    expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument();
-    expect(screen.getByText("你好")).toBeInTheDocument();
-    expect(useChatStore.getState().streaming[streamId]).toBeUndefined();
-    expect(useChatStore.getState().streamOwner[streamId]).toBe(true); // 归属标记保留（迟到 error 回声仍按本机流处理）
-  });
-
-  it("流失败：finish(partial) 上行，agent_error 回声置错误行，点重试重新触发该 mention", async () => {
-    const send = await setupGroupChat();
-    bindAssistant();
-    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
-      o.onDelta("半");
-      throw new Error("provider_error: HTTP 401 bad key");
-    });
-
-    await pickAndSend("@和小鸣 帮我看下");
-
-    await waitFor(() => expect(sealedOf(send, "agent_finish")).toHaveLength(1));
-    expect(sealedOf(send, "agent_finish")[0].plain).toMatchObject({ kind: "text", text: "半" }); // partial 也走信封
-    // fix I2：错误正文也信封化（message 置空 + cipher，code 明文保留）
-    const errEv = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_error");
-    expect(errEv).toMatchObject({
-      type: "agent_error",
-      code: "provider_error",
-      message: "",
-      chainKid: "test-kid",
-    });
-    expect(typeof (errEv as { cipher: string }).cipher).toBe("string");
-    const streamId = (errEv as { streamId: string }).streamId;
-
-    // 服务端按序回声：partial 入库的 message_new → agent_error 广播（同帧转发）。
-    // agent_error 回声必须走**真实密文信封形态**（服务端广播的就是触发端上行的信封）——
-    // 本机自己触发的错误没有 recv 链，只能靠 sealError 登记的出站箱还原原文（fix round 2）。
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_new",
-        streamId,
-        message: {
-          ...msg("mHalf", "半", "2026-10-14T01:01:00.000Z"),
-          senderType: "agent",
-          senderId: "system-assistant",
-        },
-      });
-    });
-    act(() => {
-      lastHandlers().onEvent(errEv); // 密文回声（含 cipher/chainKid/n）
-    });
-
-    // 密文回声经出站箱还原原文（异步解密链 → waitFor）
-    await waitFor(() => expect(screen.getByText(/HTTP 401/)).toBeInTheDocument()); // 错误原因行
-    expect(screen.getByText("半")).toBeInTheDocument(); // partial 消息仍在列表
-
-    // 重试 = 对该 mention 重新跑一遍流（错误行动作按 A2 统一为「继续生成」）
-    vi.mocked(streamChat).mockClear();
-    fireEvent.click(screen.getByText("继续生成"));
-    await waitFor(() => expect(streamChat).toHaveBeenCalledTimes(1));
-  });
 
   it("生成中提示行点中断：abortAll → finish(partial) + aborted 错误行可重试", async () => {
-    const send = await setupGroupChat();
+    const send = await setupAgentChat();
     bindAssistant();
     vi.mocked(streamChat).mockImplementation(
       (_p, _m, o) =>
@@ -1798,7 +912,7 @@ describe("ChatPage", () => {
   });
 
   it("他机流：非本机 agent_chunk 按 text 累积渲染，message_new{streamId} 收口移除", async () => {
-    await setupGroupChat();
+    await setupAgentChat();
 
     act(() => {
       lastHandlers().onEvent({
@@ -1820,7 +934,7 @@ describe("ChatPage", () => {
     });
 
     expect(screen.getByText(/你好/)).toBeInTheDocument(); // 累积而非单段
-    expect(screen.getByText("和小鸣")).toBeInTheDocument(); // 署名取 members 映射名
+    expect(screen.getAllByText("和小鸣").length).toBeGreaterThan(0); // 标题/气泡署名
     expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 非本机流不占「生成中」行
     expect(useChatStore.getState().streaming["remote-1"]?.text).toBe("你好");
 
@@ -1849,10 +963,7 @@ describe("ChatPage", () => {
       order.push("close");
     });
     vi.mocked(connectWs).mockReturnValue({ send, close } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+        mockMessagesFetch([]);
     bindAssistant();
     vi.mocked(streamChat).mockImplementation(
       (_p, _m, o) =>
@@ -1918,13 +1029,10 @@ describe("ChatPage", () => {
   it("I3 fetchHistory 只取近 30 条：35 条历史组装出末 30 轮 + 本条 user 轮", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    const history = Array.from({ length: 35 }, (_, i) =>
+        const history = Array.from({ length: 35 }, (_, i) =>
       msg(`m${i + 1}`, `历史${i + 1}`, `2026-10-14T01:00:${String(i).padStart(2, "0")}.000Z`),
     );
-    mockMessagesFetch(history, undefined, { members: [inGroupMembers], reads: [[]] });
+    mockMessagesFetch(history);
     render(<ChatPage />);
     await act(async () => {});
     bindAssistant();
@@ -1950,10 +1058,7 @@ describe("ChatPage", () => {
   it("附件文本进提示词：模型能看到文件内容，且带清晰边界", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    // 一条带解析文本的附件消息（模拟已上传成功的 PDF/DOCX 解析结果）
+        // 一条带解析文本的附件消息（模拟已上传成功的 PDF/DOCX 解析结果）
     const withDoc: Message = {
       ...msg("m1", "帮我总结这份报告", "2026-10-14T01:00:00.000Z"),
       payload: {
@@ -1967,7 +1072,7 @@ describe("ChatPage", () => {
         },
       },
     };
-    mockMessagesFetch([withDoc], undefined, { members: [inGroupMembers], reads: [[]] });
+    mockMessagesFetch([withDoc]);
     render(<ChatPage />);
     await act(async () => {});
     bindAssistant();
@@ -1994,17 +1099,14 @@ describe("ChatPage", () => {
   it("没有解析文本的附件不污染提示词（只有正文，不出现空附件块）", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    const noText: Message = {
+        const noText: Message = {
       ...msg("m1", "看下这个", "2026-10-14T01:00:00.000Z"),
       payload: {
         text: "看下这个",
         file: { id: "f2", name: "photo.png", mime: "image/png", size: 900 },
       },
     };
-    mockMessagesFetch([noText], undefined, { members: [inGroupMembers], reads: [[]] });
+    mockMessagesFetch([noText]);
     render(<ChatPage />);
     await act(async () => {});
     bindAssistant();
@@ -2024,17 +1126,14 @@ describe("ChatPage", () => {
   it("视觉模型：历史图片转成内容片，正文同条保留", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    const withImage: Message = {
+        const withImage: Message = {
       ...msg("m1", "这是什么", "2026-10-14T01:00:00.000Z"),
       payload: {
         text: "这是什么",
         file: { id: "f9", name: "cat.png", mime: "image/png", size: 900, key: "k9" },
       },
     };
-    mockMessagesFetch([withImage], undefined, { members: [inGroupMembers], reads: [[]] });
+    mockMessagesFetch([withImage]);
     render(<ChatPage />);
     await act(async () => {});
     useLlmStore.setState({
@@ -2064,17 +1163,14 @@ describe("ChatPage", () => {
   it("非视觉模型：历史图片不附内容片，也不解密读图", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    const withImage: Message = {
+        const withImage: Message = {
       ...msg("m1", "看看图", "2026-10-14T01:00:00.000Z"),
       payload: {
         text: "看看图",
         file: { id: "f9", name: "cat.png", mime: "image/png", size: 900, key: "k9" },
       },
     };
-    mockMessagesFetch([withImage], undefined, { members: [inGroupMembers], reads: [[]] });
+    mockMessagesFetch([withImage]);
     render(<ChatPage />);
     await act(async () => {});
     bindAssistant(); // 未知模型 m → 保守判定为不支持视觉
@@ -2095,10 +1191,7 @@ describe("ChatPage", () => {
   it("图片 + 文字同发：一条消息带正文与附件，模型当轮就看到图", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    // 回声抢在前面落库的同一张图（同 id）：同发后它不该再作为独立历史行重复送模型
+        // 回声抢在前面落库的同一张图（同 id）：同发后它不该再作为独立历史行重复送模型
     const echoed: Message = {
       ...msg("m9", "@和小鸣 这张图里有什么", "2026-10-14T01:00:00.000Z"),
       payload: {
@@ -2107,8 +1200,6 @@ describe("ChatPage", () => {
       },
     };
     mockMessagesFetch([echoed], undefined, {
-      members: [inGroupMembers],
-      reads: [[]],
       uploadMeta: {
         id: "f9",
         owner: "alice",
@@ -2132,8 +1223,6 @@ describe("ChatPage", () => {
       return "";
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    fireEvent.click(screen.getByText("和小鸣"));
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
       target: { value: "@和小鸣 这张图里有什么" },
     });
@@ -2159,20 +1248,8 @@ describe("ChatPage", () => {
     expect(seen!.filter((r) => r.content.includes("这张图里有什么"))).toHaveLength(1);
     // ④ 同发即发送：草稿与 @ chip 一并清空
     expect(screen.getByPlaceholderText("输入消息…")).toHaveValue("");
-    expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument();
   });
 
-  it("I2 雷达@链路：attach 后（本群 members 出现自建 agent 行）该 agent 进入 @ 候选并可选", async () => {
-    await setupGroupChat([
-      ...inGroupMembers,
-      { kind: "agent", id: "a-mine", name: "架构师", avatar: null, user: null },
-    ]);
-
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    expect(screen.getByText("架构师")).toBeInTheDocument(); // 服务端 attach → listMembers 带出的行
-    fireEvent.click(screen.getByText("架构师"));
-    expect(screen.getByText("@架构师")).toBeInTheDocument();
-  });
 
   it("输入区有表情/图片/文件/语音/发送按钮（工具行 + 输入行两行布局）", async () => {
     mockMessagesFetch([]);
@@ -2196,16 +1273,6 @@ describe("ChatPage", () => {
     expect(tool).not.toBe(inputRow);
   });
 
-  it("点表情按钮弹选择器，选中后追加进输入框（并关选择器）", async () => {
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-
-    fireEvent.click(screen.getByLabelText("表情"));
-    fireEvent.click(await screen.findByRole("button", { name: "😀" }));
-    expect((screen.getByPlaceholderText("输入消息…") as HTMLInputElement).value).toBe("😀");
-    expect(screen.queryByRole("button", { name: "😄" })).not.toBeInTheDocument(); // 选中即关
-  });
 
   it("点语音输入：无 Web Speech API 的环境提示不支持，不静默", async () => {
     mockMessagesFetch([]);
@@ -2867,13 +1934,6 @@ describe("ChatPage", () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     mockMessagesFetch([]);
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 0 },
-        { id: "c2", type: "direct", peer, unreadCount: 0 },
-      ],
-    });
-
     render(<ChatPage />); // 挂在 c1（beforeEach 口径）
     await act(async () => {});
 
@@ -2917,360 +1977,10 @@ describe("ChatPage", () => {
     }); // 槽保留，等目标会话激活时再消费
   });
 
-  // —— 二期 IM Task 2：消息撤回 UI ——
-
-  it("自己消息出「撤回」按钮（对方消息无），点击经 ws 发 recall_message", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    const theirs = msg("m2", "对方的", "2026-10-14T01:00:00.000Z"); // senderId u2
-    const mine: Message = { ...msg("m1", "我发的", "2026-10-14T01:01:00.000Z"), senderId: "u1" };
-    mockMessagesFetch([theirs, mine]);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("我发的")).toBeInTheDocument());
-
-    // 按钮只在自己消息上出现（对方消息无）→ 全页恰 1 个
-    expect(screen.getAllByLabelText("撤回消息")).toHaveLength(1);
-    fireEvent.click(screen.getByLabelText("撤回消息"));
-    expect(send).toHaveBeenCalledWith({
-      type: "recall_message",
-      conversationId: "c1",
-      messageId: "m1",
-    });
-  });
-
-  it("已撤回消息渲染「消息已撤回」灰字：文本/附件/已读不显示，也不出撤回钮", async () => {
-    const recalled: Message = {
-      ...msg("m1", "敏感内容", "2026-10-14T01:00:00.000Z"),
-      senderId: "u1",
-      recalledAt: "2026-10-17T00:00:00.000Z",
-      payload: {
-        text: "敏感内容",
-        file: { id: "f1", name: "报告.pdf", mime: "application/pdf", size: 10 },
-      },
-    };
-    const live = msg("m2", "还在的", "2026-10-14T02:00:00.000Z");
-    mockMessagesFetch([recalled, live], undefined, {
-      // 对方读点晚于自己那条 → 若「已读」抑制失效本应显示（真击穿守卫）
-      reads: [[{ userId: "u2", at: "2026-10-14T03:00:00.000Z" }]],
-    });
-
-    render(<ChatPage />);
-    expect(await screen.findByText("消息已撤回")).toBeInTheDocument();
-    expect(screen.getByText("还在的")).toBeInTheDocument(); // 未撤回消息不受影响
-    expect(screen.queryByText("敏感内容")).not.toBeInTheDocument();
-    expect(screen.queryByText("报告.pdf")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument(); // 附件不渲染（也不发 content fetch）
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(screen.queryByText("已读")).not.toBeInTheDocument(); // 已撤回不显已读
-    expect(screen.queryByLabelText("撤回消息")).not.toBeInTheDocument(); // 已撤回不再出撤回钮
-    // 已撤回气泡无转发钮：全页仅剩 m2（未撤回）那 1 个
-    expect(screen.getAllByLabelText("转发消息")).toHaveLength(1);
-    expect(document.getElementById("msg-m1")!.querySelector('[aria-label="转发消息"]')).toBeNull();
-  });
-
-  it("收到 message_recalled 事件：气泡即时变「消息已撤回」，列表不移除", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([msg("m1", "刚发来的", "2026-10-14T01:00:00.000Z")]);
-
-    render(<ChatPage />);
-    expect(await screen.findByText("刚发来的")).toBeInTheDocument();
-
-    act(() => {
-      lastHandlers().onEvent({
-        type: "message_recalled",
-        conversationId: "c1",
-        messageId: "m1",
-        at: "2026-10-17T02:00:00.000Z",
-      });
-    });
-    expect(screen.getByText("消息已撤回")).toBeInTheDocument();
-    expect(screen.queryByText("刚发来的")).not.toBeInTheDocument();
-    expect(useChatStore.getState().messages.c1).toHaveLength(1); // 列表不移除
-    expect(useChatStore.getState().messages.c1[0].recalledAt).toBe("2026-10-17T02:00:00.000Z");
-  });
-
-  it("fetchHistory 跳过已撤回消息：streamChat 拿到的历史不含撤回原文，正常历史与本条 user 轮不受影响", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    // 末条是窗口尾的已撤回消息：跳过后尾部只剩正常历史，本条 user 轮的 pop 剔除逻辑仍正确
-    const history: Message[] = [
-      msg("m1", "早前正常讨论", "2026-10-14T01:00:00.000Z"),
-      {
-        ...msg("m2", "机密方案文本", "2026-10-14T01:01:00.000Z"),
-        recalledAt: "2026-10-17T00:00:00.000Z",
-      },
-    ];
-    mockMessagesFetch(history, undefined, { members: [inGroupMembers], reads: [[]] });
-    render(<ChatPage />);
-    await act(async () => {});
-    bindAssistant();
-
-    let seen: Parameters<typeof streamChat>[1] | undefined;
-    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
-      seen = messages;
-      return "";
-    });
-
-    await pickAndSend("@和小鸣 查下上下文");
-    await waitFor(() => expect(seen).toBeDefined());
-
-    // 已撤回原文不进提示词；正常历史保留；末轮是本条 user 轮（未被误剔、未重复）
-    const contents = seen!.map((r) => r.content);
-    expect(contents).not.toContain("机密方案文本");
-    expect(contents).toContain("早前正常讨论");
-    expect(seen).toHaveLength(3); // system + 正常历史 1 条 + 本条 user 轮
-    expect(seen![seen!.length - 1]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
-  });
-
-  // —— 二期 IM Task 3：回复引用 UI ——
-
-  it("点回复出引用预览条，发送消息带 replyTo（协议顶层键，非 payload 内）", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([msg("m1", "被回复的原句", "2026-10-14T01:00:00.000Z")]); // senderId u2
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("被回复的原句")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByLabelText("回复此消息"));
-    // 引用预览条：「回复」标签 + 署名 + 原文片段 + 取消钮（经取消钮的父容器圈定预览条，防与气泡同文撞车）
-    const bar = screen.getByLabelText("取消回复").parentElement!;
-    expect(bar).toHaveTextContent("回复");
-    expect(bar).toHaveTextContent("鲍勃"); // direct 会话署名 = peer.displayName
-    expect(bar).toHaveTextContent("被回复的原句");
-
-    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "我来回复" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
-
-    // E2E：replyTo 不再是事件顶层键——进密文（服务端 e2e 路径不读 replyTo）
-    const plain = await lastSealed(send);
-    expect(plain).toEqual({ kind: "text", text: "我来回复", replyTo: "m1" });
-    const ev = send.mock.calls.at(-1)![0] as Record<string, unknown>;
-    expect(ev).not.toHaveProperty("replyTo");
-    await waitFor(() =>
-      expect(screen.queryByLabelText("取消回复")).not.toBeInTheDocument(),
-    ); // 发送成功清预览条
-  });
-
-  it("气泡渲染 replyTo 引用小卡且点引用滚动到原消息", async () => {
-    const orig = msg("m1", "最初的提议", "2026-10-14T01:00:00.000Z"); // senderId u2
-    const reply: Message = {
-      ...msg("m2", "同意这个方向", "2026-10-14T01:05:00.000Z"),
-      senderId: "u1",
-      replyTo: "m1",
-    };
-    mockMessagesFetch([orig, reply]);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("同意这个方向")).toBeInTheDocument());
-
-    // 引用小卡：署名 + 原文片段（与 A 气泡正文区分：卡内含署名 span）
-    const card = await screen.findByRole("button", { name: /最初的提议/ });
-    expect(card).toHaveTextContent("鲍勃");
-    expect(card).toHaveTextContent("最初的提议");
-
-    fireEvent.click(card);
-    const target = document.getElementById("msg-m1");
-    expect(target).not.toBeNull();
-    expect(target!.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
-  });
-
-  it("× 取消引用后发送不带 replyTo 键", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([msg("m1", "被回复的原句", "2026-10-14T01:00:00.000Z")]);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("被回复的原句")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByLabelText("回复此消息"));
-    expect(screen.getByLabelText("取消回复")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("取消回复"));
-    expect(screen.queryByLabelText("取消回复")).not.toBeInTheDocument();
-
-    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "先不引用了" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
-    const plain = await lastSealed(send);
-    expect(plain).toEqual({ kind: "text", text: "先不引用了" }); // 精确形状：无 replyTo 键
-    expect(plain).not.toHaveProperty("replyTo");
-  });
-
-  it("已撤回消息不出回复钮；被撤回的原消息不渲染引用小卡", async () => {
-    const recalledOrig: Message = {
-      ...msg("m1", "会被撤回的原文", "2026-10-14T01:00:00.000Z"),
-      recalledAt: "2026-10-17T00:00:00.000Z",
-    };
-    const live: Message = {
-      ...msg("m2", "还在的回复", "2026-10-14T01:05:00.000Z"),
-      senderId: "u1",
-      replyTo: "m1", // 原消息已撤回 → 引用卡整体不渲染（撤回原文不回显）
-    };
-    const recalledReply: Message = {
-      ...msg("m3", "已撤回的回复体", "2026-10-14T01:06:00.000Z"),
-      replyTo: "m2",
-      recalledAt: "2026-10-17T00:01:00.000Z",
-    };
-    mockMessagesFetch([recalledOrig, live, recalledReply]);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("还在的回复")).toBeInTheDocument());
-    expect(screen.getAllByText("消息已撤回")).toHaveLength(2); // m1（原消息）与 m3 都出灰字行
-
-    expect(screen.queryByText("会被撤回的原文")).not.toBeInTheDocument(); // 原文不回显
-    // m3 的引用卡不渲染：页面上没有任何按钮引用 m2 原文
-    expect(
-      [...document.querySelectorAll("button")].filter((b) => b.textContent?.includes("还在的回复")),
-    ).toHaveLength(0);
-    // 回复钮只出现在 m2（未撤回）上——m1/m3 已撤回不出
-    expect(screen.getAllByLabelText("回复此消息")).toHaveLength(1);
-  });
-
-  it("切换会话清空引用预览（防跨会话带出）", async () => {
-    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([msg("m1", "本会话的引用", "2026-10-14T01:00:00.000Z")]);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("本会话的引用")).toBeInTheDocument());
-    fireEvent.click(screen.getByLabelText("回复此消息"));
-    expect(screen.getByLabelText("取消回复")).toBeInTheDocument();
-
-    act(() => {
-      useUiStore.setState({ activeConversationId: "c2" });
-    });
-    expect(screen.queryByLabelText("取消回复")).not.toBeInTheDocument();
-  });
-
-  it("fetchHistory 窗口尾全是已撤回消息（剔空尾部）：不炸，本条 user 轮照常在尾", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    // 全部已撤回 → 跳过后 rows 为空：pop 的 `last &&` 守卫不炸，本条 user 轮由编排方追加
-    const history: Message[] = [
-      {
-        ...msg("m1", "被撤回的旧讨论", "2026-10-14T01:00:00.000Z"),
-        recalledAt: "2026-10-17T00:00:00.000Z",
-      },
-      {
-        ...msg("m2", "被撤回的末条", "2026-10-14T01:01:00.000Z"),
-        recalledAt: "2026-10-17T00:00:01.000Z",
-      },
-    ];
-    mockMessagesFetch(history, undefined, { members: [inGroupMembers], reads: [[]] });
-    render(<ChatPage />);
-    await act(async () => {});
-    bindAssistant();
-
-    let seen: Parameters<typeof streamChat>[1] | undefined;
-    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
-      seen = messages;
-      return "";
-    });
-
-    await pickAndSend("@和小鸣 空历史触发");
-    await waitFor(() => expect(seen).toBeDefined());
-
-    const contents = seen!.map((r) => r.content);
-    expect(contents).not.toContain("被撤回的旧讨论");
-    expect(contents).not.toContain("被撤回的末条");
-    expect(seen).toHaveLength(2); // system + 本条 user 轮（历史被剔空）
-    expect(seen![1]).toEqual({ role: "user", content: "@和小鸣 空历史触发" });
-  });
-
   // —— 二期 IM Task 4：消息转发 ——
 
-  it("点转发出会话列表，选中后发送剥离 mentions 带 forward", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 },
-        { id: "c2", type: "direct", peer, unreadCount: 0 },
-        { id: "gA", type: "group", name: "群A", memberCount: 2, unreadCount: 0 },
-      ],
-    });
-    const m: Message = {
-      ...msg("m1", "@和小鸣 看下这版", "2026-10-14T01:00:00.000Z"),
-      senderId: "u1", // 自己的消息：forward.from 走「我」分支
-      payload: {
-        text: "@和小鸣 看下这版",
-        mentions: [{ agentId: "system-assistant", name: "和小鸣" }],
-        file: { id: "f1", name: "方案.png", mime: "image/png", size: 10 },
-      },
-    };
-    mockMessagesFetch([m]);
 
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText(/看下这版/)).toBeInTheDocument());
 
-    fireEvent.click(screen.getByLabelText("转发消息"));
-    // 浮层列出全部会话（群名 + direct 对方名）
-    expect(screen.getByText("转发到")).toBeInTheDocument();
-    expect(screen.getByText("评审组")).toBeInTheDocument();
-    expect(screen.getByText("鲍勃")).toBeInTheDocument(); // c2 direct 行
-    expect(screen.getByText("群A")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("群A"));
-    // 转发 = 原 text + 原 file 进密文，剥离 mentions，带 forward（from=我，source=源会话名）
-    const plain = await lastSealed(send);
-    expect(plain).toEqual({
-      kind: "forward",
-      text: "@和小鸣 看下这版",
-      file: { id: "f1", name: "方案.png", mime: "image/png", size: 10 },
-      forward: { from: "我", source: "评审组" },
-    });
-    const ev = send.mock.calls.at(-1)![0] as Record<string, unknown>;
-    expect(ev.conversationId).toBe("gA");
-    expect(plain).not.toHaveProperty("mentions");
-    await waitFor(() => expect(screen.queryByText("转发到")).not.toBeInTheDocument()); // 发送后浮层关闭
-    expect(screen.getByRole("status")).toHaveTextContent("已转发到 群A"); // 目标≠当前会话给提示
-  });
-
-  it("转发浮层可取消：Esc 或点遮罩关闭，不发送", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 },
-        { id: "gA", type: "group", name: "群A", memberCount: 2, unreadCount: 0 },
-      ],
-    });
-    mockMessagesFetch([msg("m1", "要转发吗", "2026-10-14T01:00:00.000Z")]);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("要转发吗")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByLabelText("转发消息"));
-    expect(screen.getByText("转发到")).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: "Escape" }); // Esc 关（文档级监听）
-    expect(screen.queryByText("转发到")).not.toBeInTheDocument();
-
-    // 重开 → 点遮罩层关闭（内卡 stopPropagation 不误关）
-    fireEvent.click(screen.getByLabelText("转发消息"));
-    const card = screen.getByText("转发到").parentElement!;
-    fireEvent.click(card.parentElement!);
-    expect(screen.queryByText("转发到")).not.toBeInTheDocument();
-
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
-  });
-
-  it("有 forward 的消息在文本上方渲染来源行「来自 {from} · {source}」", async () => {
-    const m: Message = {
-      ...msg("m1", "转发来的正文", "2026-10-14T01:00:00.000Z"),
-      payload: { text: "转发来的正文", forward: { from: "爱丽丝", source: "群A" } },
-    };
-    mockMessagesFetch([m]);
-
-    render(<ChatPage />);
-    expect(await screen.findByText("来自 爱丽丝 · 群A")).toBeInTheDocument();
-    expect(screen.getByText("转发来的正文")).toBeInTheDocument(); // 正文照常渲染
-  });
 
   // —— 二期 IM Task 5：语音消息（录音 → 上传 → audio 气泡） ——
 
@@ -3670,16 +2380,6 @@ describe("ChatPage", () => {
     }
   });
 
-  it("语音浮层 Esc 关闭（文档级，与信息卡/转发浮层同口径）", async () => {
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-
-    fireEvent.click(screen.getByLabelText("语音输入"));
-    expect(screen.getByRole("button", { name: "语音消息（录音）" })).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("button", { name: "语音消息（录音）" })).not.toBeInTheDocument();
-  });
 
   it("音频消息气泡渲染 audio 元素：鉴权 blob src、不出文件卡、卸载 revoke", async () => {
     const m: Message = {
@@ -3702,190 +2402,12 @@ describe("ChatPage", () => {
 
   // —— 二期 IM Task 6：表情回应 UI ——
 
-  it("表情回应事件化：kind=reaction 不画气泡、chips 按 target 聚合、浮排/chip 发 op add/remove", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    const m1 = msg("m1", "求回应", "2026-10-14T01:00:00.000Z"); // senderId u2
-    const r1: Message = {
-      ...msg("r1", "", "2026-10-14T01:01:00.000Z"),
-      senderId: "u1", // 我加的 👍
-      enc: "e2e",
-      cipher: "Qw==",
-      chainKid: "k1",
-      n: 1,
-    };
-    const r2: Message = {
-      ...msg("r2", "", "2026-10-14T01:02:00.000Z"),
-      senderId: "u2", // 对方加的 👍
-      enc: "e2e",
-      cipher: "Qw==",
-      chainKid: "k1",
-      n: 2,
-    };
-    const legacy: Message = {
-      ...msg("m0", "带存量回应", "2026-10-14T00:59:00.000Z"),
-      payload: { text: "带存量回应", reactions: [{ emoji: "❤️", userIds: ["u2"] }] },
-    };
-    mockMessagesFetch([legacy, m1, r1, r2]);
-    // plainById 预置 = store 已解密态（真解密路径由 e2eSession/chat store 测试覆盖）
-    useChatStore.setState({
-      plainById: {
-        c1: {
-          r1: { kind: "reaction", reaction: { target: "m1", emoji: "👍", op: "add" } },
-          r2: { kind: "reaction", reaction: { target: "m1", emoji: "👍", op: "add" } },
-        },
-      },
-    });
 
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("求回应")).toBeInTheDocument());
-    // 事件消息不画气泡：全页只有一条「求回应」（r1/r2 被过滤），且不显占位
-    expect(screen.queryAllByText("求回应")).toHaveLength(1);
-    expect(screen.queryByText("无法解密（密钥缺失）")).not.toBeInTheDocument();
 
-    // chips 聚合：m1 的 👍 由两个事件合成（u1+u2），m0 的存量 ❤️ 照常渲染
-    const chip = screen.getByRole("button", { name: "表情回应 👍 2" });
-    expect(chip).toHaveClass("bg-ink"); // 我参与 → 高亮可点
-    const legacyChip = screen.getByRole("button", { name: "表情回应 ❤️ 1" });
-    expect(legacyChip).not.toHaveClass("bg-ink");
-
-    const sealCalls = () => vi.mocked(sealMessage).mock.calls.length;
-    // 浮排入口按目标气泡圈定（legacy m0 也有一枚「添加表情回应」，全页 query 撞多匹配）
-    const m1Bubble = within(document.getElementById("msg-m1")!);
-    // 浮排：已参与 👍 → op remove（toggle 语义）
-    fireEvent.click(m1Bubble.getByLabelText("添加表情回应"));
-    const before1 = sealCalls();
-    fireEvent.click(screen.getByRole("button", { name: "👍" }));
-    await waitFor(() => expect(sealCalls()).toBe(before1 + 1));
-    expect(vi.mocked(sealMessage).mock.calls.at(-1)![1]).toEqual({
-      kind: "reaction",
-      reaction: { target: "m1", emoji: "👍", op: "remove" },
-    });
-    expect(screen.queryByRole("button", { name: "🎉" })).not.toBeInTheDocument(); // 点选即关
-
-    // 浮排：未参与 🎉 → op add
-    fireEvent.click(m1Bubble.getByLabelText("添加表情回应"));
-    const before2 = sealCalls();
-    fireEvent.click(screen.getByRole("button", { name: "🎉" }));
-    await waitFor(() => expect(sealCalls()).toBe(before2 + 1));
-    expect(vi.mocked(sealMessage).mock.calls.at(-1)![1]).toEqual({
-      kind: "reaction",
-      reaction: { target: "m1", emoji: "🎉", op: "add" },
-    });
-
-    // 点自己参与的 chip → op remove；他人参与的 chip 仅展示（点击不发送）
-    const before3 = sealCalls();
-    fireEvent.click(chip);
-    await waitFor(() => expect(sealCalls()).toBe(before3 + 1));
-    expect(vi.mocked(sealMessage).mock.calls.at(-1)![1]).toEqual({
-      kind: "reaction",
-      reaction: { target: "m1", emoji: "👍", op: "remove" },
-    });
-    const before4 = sealCalls();
-    fireEvent.click(legacyChip);
-    expect(sealCalls()).toBe(before4); // no-op
-    // react_message 已从契约删除：任何路径都不再发该事件
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "react_message" }));
-  });
-
-  it("表情回应浮排 Esc 关闭且不发送；切换会话关浮排", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([msg("m1", "原句", "2026-10-14T01:00:00.000Z")]);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("原句")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByLabelText("添加表情回应"));
-    expect(screen.getByRole("button", { name: "🔥" })).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("button", { name: "🔥" })).not.toBeInTheDocument();
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "react_message" }));
-
-    fireEvent.click(screen.getByLabelText("添加表情回应"));
-    expect(screen.getByRole("button", { name: "🔥" })).toBeInTheDocument();
-    act(() => {
-      useUiStore.setState({ activeConversationId: "c2" }); // 会话级状态：浮排不得带进 B 会话
-    });
-    expect(screen.queryByRole("button", { name: "🔥" })).not.toBeInTheDocument();
-  });
-
-  it("已撤回消息不出表情回应按钮与 chips", async () => {
-    const recalled: Message = {
-      ...msg("m1", "已撤回的", "2026-10-14T01:00:00.000Z"),
-      recalledAt: "2026-10-17T00:00:00.000Z",
-      payload: { text: "已撤回的", reactions: [{ emoji: "👍", userIds: ["u2"] }] },
-    };
-    const live = msg("m2", "还在的", "2026-10-14T02:00:00.000Z");
-    mockMessagesFetch([recalled, live]);
-
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("还在的")).toBeInTheDocument());
-    expect(screen.getByText("消息已撤回")).toBeInTheDocument();
-    expect(screen.queryByLabelText("表情回应 👍 1")).not.toBeInTheDocument(); // 撤回消息的 chips 不渲染
-    expect(screen.getAllByLabelText("添加表情回应")).toHaveLength(1); // 仅未撤回的 m2 有
-  });
 
   // —— 二期 IM Task 7：重连补已读 · 群头像 · 定时清扫 ——
 
-  it("ws 重连 onOpen 且有未读时补发 mark_read（未读为 0 则不补）", async () => {
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 2 }],
-    });
 
-    render(<ChatPage />);
-    // 挂载期即因未读发过一次；清掉以隔离「重连 onOpen」这一次
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith({ type: "mark_read", conversationId: "c1" }),
-    );
-    send.mockClear();
-
-    act(() => {
-      lastHandlers().onOpen?.();
-    });
-    expect(send).toHaveBeenCalledWith({ type: "mark_read", conversationId: "c1" });
-
-    // 负例：未读归零后重连不再补发（守卫生效）
-    send.mockClear();
-    act(() => {
-      useChatStore.setState({
-        conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
-      });
-    });
-    act(() => {
-      lastHandlers().onOpen?.();
-    });
-    expect(send).not.toHaveBeenCalledWith({ type: "mark_read", conversationId: "c1" });
-  });
-
-  it("群消息他人气泡渲染成员头像（快照带 avatar → img；无 avatar 不出头像）", async () => {
-    const avatar = "data:image/png;base64,QUJD";
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    const other = msg("m1", "我提个问题", "2026-10-14T01:00:00.000Z"); // senderId u2
-    mockMessagesFetch([other], undefined, {
-      members: [
-        [
-          { kind: "user", id: "u1", name: "爱丽丝", avatar: null, user: me },
-          { kind: "user", id: "u2", name: "鲍勃", avatar, user: peer },
-        ],
-      ],
-    });
-
-    render(<ChatPage />);
-    await waitFor(() =>
-      expect([...document.querySelectorAll("img")].some((i) => i.getAttribute("src") === avatar)).toBe(
-        true,
-      ),
-    );
-    // 只有他人气泡那一个 img（群头/无头像成员均走首字回退，不产生 img）
-    expect([...document.querySelectorAll("img")].filter((i) => i.getAttribute("src") === avatar)).toHaveLength(1);
-    expect(screen.getByText("鲍勃")).toBeInTheDocument(); // 署名照常
-  });
 
   it("定时清扫：15s 后过期他机流变 error 行（阈值内不动）", async () => {
     vi.useFakeTimers();
@@ -3980,7 +2502,7 @@ describe("ChatPage", () => {
   });
 
   it("他机流 watchdog 误报后收到 chunk 自愈：error 行消失、文本续上", async () => {
-    await setupGroupChat();
+    await setupAgentChat();
     // 注入被他机 watchdog 误判为中断的流（error 状态 + 文案）
     act(() => {
       useChatStore.setState({
@@ -4016,69 +2538,9 @@ describe("ChatPage", () => {
 
   // —— 智能体记忆 + 技能池接线（Task 5）：只验证接线本身，不重复记忆/技能内部逻辑 ——
 
-  it("记忆与技能接入 @ 触发：系统提示词 = 原提示词 + 记忆段 + 技能段；成功轮次写工作记忆并计技能使用", async () => {
-    await setupGroupChat();
-    bindAssistant();
-    // 记忆：打开总开关（beforeEach 默认关）+ 置顶一条语义记忆（pinned 必带，不依赖命词）
-    memoryStore.updateSettings({ enabled: true });
-    const entry = memoryStore.upsertSemantic({
-      agentId: "system-assistant",
-      key: "称呼",
-      value: "用户希望被称为「阿和」",
-      source: "manual",
-    });
-    memoryStore.updateSemantic("system-assistant", entry.id, { pinned: true });
-    // 技能：自建一条必命中（触发词与发送文本重合）
-    const skill = skillPool.create({
-      name: "上下文助手",
-      description: "按用户口令梳理上下文",
-      instructions: "按口令逐条梳理上下文。",
-      triggers: ["查下上下文"],
-      tags: [],
-      enabled: true,
-      version: "1.0.0",
-    });
-    // d.41 起分配是真路由边界：自建技能要先分配给该智能体才会注入。
-    skillPool.assign("system-assistant", skill.id);
-    const usage = vi.spyOn(skillPool, "recordUsage");
-
-    let seen: Parameters<typeof streamChat>[1] | undefined;
-    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
-      seen = messages;
-      return "好";
-    });
-
-    await pickAndSend("@和小鸣 查下上下文");
-    await waitFor(() => expect(seen).toBeDefined());
-
-    const system = seen![0];
-    expect(system.role).toBe("system");
-    expect(system.content.slice(0, "你是和小鸣".length)).toBe("你是和小鸣"); // 原提示词原文在前
-    expect(system.content).toContain("## 长期记忆（语义）");
-    expect(system.content).toContain("称呼：用户希望被称为「阿和」");
-    expect(system.content).toContain("## 已启用技能");
-    expect(system.content).toContain("### 上下文助手");
-    // 顺序：原提示词 → 记忆段 → 技能段
-    expect(system.content.indexOf("## 长期记忆（语义）")).toBeLessThan(
-      system.content.indexOf("## 已启用技能"),
-    );
-
-    // 成功 finish → onTurnComplete(ok) → 工作记忆落一条；命中技能 usage 计一次
-    await waitFor(() =>
-      expect(
-        memoryStore
-          .working("c1", "system-assistant")
-          .some((t) => t.userText === "@和小鸣 查下上下文"),
-      ).toBe(true),
-    );
-    expect(usage).toHaveBeenCalledWith(skill.id);
-
-    // 收尾：删掉自建技能，不把状态留给后续用例
-    skillPool.remove(skill.id);
-  });
 
   it("记忆/技能异常静默降级：系统提示词仍是原提示词，发送与流式渲染不受影响", async () => {
-    const send = await setupGroupChat();
+    const send = await setupAgentChat();
     bindAssistant();
     // 记忆读设置即抛错（模拟 localStorage 损坏/隐私模式）：注入与写入都必须被吞掉
     vi.spyOn(memoryStore, "getSettings").mockImplementation(() => {
@@ -4129,13 +2591,10 @@ describe("ChatPage", () => {
   async function setupLongHistoryChat(count = 6) {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    const history = Array.from({ length: count }, (_, i) =>
+        const history = Array.from({ length: count }, (_, i) =>
       msg(`m${i + 1}`, `历史${i + 1}`, `2026-10-14T01:00:${String(i).padStart(2, "0")}.000Z`),
     );
-    mockMessagesFetch(history, undefined, { members: [inGroupMembers], reads: [[]] });
+    mockMessagesFetch(history);
     render(<ChatPage />);
     await act(async () => {});
     bindAssistant();
@@ -4327,7 +2786,7 @@ describe("ChatPage", () => {
   });
 
   it("fetchHistory：解不开的 e2e 信封不进 LLM 提示词（硬验收⑤），明文照常入 prompt", async () => {
-    const send = await setupGroupChat();
+    const send = await setupAgentChat();
     bindAssistant();
     const undecryptable: Message = {
       ...msg("e-x", "", "2026-10-14T01:00:00.000Z"),
@@ -4436,6 +2895,7 @@ describe("ChatPage", () => {
   });
 
   it("硬验收③：同一信封 echo 重放——(chainKid,n) 去重经出站箱/缓存补齐，不重复入列", async () => {
+    bindAssistant();
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     mockMessagesFetch([]);
@@ -4445,8 +2905,12 @@ describe("ChatPage", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "只出一条" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     const plain = await lastSealed(send);
-    expect(plain).toEqual({ kind: "text", text: "只出一条" });
-    const ev = send.mock.calls.at(-1)![0] as { cipher: string; chainKid: string; n: number };
+    expect(plain).toMatchObject({ kind: "text", text: "只出一条" });
+    // 取最后一条 send_message（绑定后有 chunk/finish 回声，末次调用不一定是正文）
+    const ev = send.mock.calls
+      .map((c) => c[0] as { type?: string; cipher: string; chainKid: string; n: number })
+      .filter((e) => e.type === "send_message")
+      .at(-1)!;
     const echo = {
       type: "message_new" as const,
       message: {
@@ -4471,6 +2935,7 @@ describe("ChatPage", () => {
   });
 
   it("自己发送的 e2e 消息：echo 走出站箱自解渲染并落明文缓存（自发消息无 recv 链）", async () => {
+    bindAssistant();
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     mockMessagesFetch([]);
@@ -4480,8 +2945,12 @@ describe("ChatPage", () => {
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "自发密文" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     const plain = await lastSealed(send);
-    expect(plain).toEqual({ kind: "text", text: "自发密文" });
-    const ev = send.mock.calls.at(-1)![0] as { cipher: string; chainKid: string; n: number };
+    expect(plain).toMatchObject({ kind: "text", text: "自发密文" });
+    // 取最后一条 send_message（绑定后有 chunk/finish 回声，末次调用不一定是正文）
+    const ev = send.mock.calls
+      .map((c) => c[0] as { type?: string; cipher: string; chainKid: string; n: number })
+      .filter((e) => e.type === "send_message")
+      .at(-1)!;
 
     // 服务端回声（信封形态）：自己没有 recv 链 → openMessage 必 defer，须由出站箱接住
     act(() => {
@@ -4590,244 +3059,18 @@ describe("ChatPage", () => {
     expect(screen.queryByRole("button", { name: "滚动到最新消息" })).not.toBeInTheDocument();
   });
 
-  it("有未读时在第一条未读前插分隔线，并滚到分隔线而不是底部", async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 2, lastReadAt: "2026-10-14T01:01:00.000Z" },
-      ],
-    });
-    mockMessagesFetch([
-      msg("m1", "旧消息一", "2026-10-14T01:00:00.000Z"),
-      msg("m2", "旧消息二", "2026-10-14T01:01:00.000Z"),
-      msg("m3", "未读一", "2026-10-14T02:00:00.000Z"),
-      msg("m4", "未读二", "2026-10-14T02:01:00.000Z"),
-    ]);
 
-    render(<ChatPage />);
-    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
-    const firstUnread = document.getElementById("msg-m3")!;
-    expect(divider.compareDocumentPosition(firstUnread) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // 只有一次定位调用，且不是先平滑滚底再跳到分隔线
-    expect(scrollSpy).toHaveBeenCalledTimes(1);
-    expect(scrollSpy).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
-  });
-
-  it("没有未读时不插分隔线", async () => {
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
-    });
-    mockMessagesFetch([msg("m1", "普通消息", "2026-10-14T01:00:00.000Z")]);
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("普通消息")).toBeInTheDocument());
-    expect(screen.queryByRole("separator", { name: "以下是新消息" })).not.toBeInTheDocument();
-  });
 
   // —— d.37 连续性对抗用例（adversarial QA 2026-10-28）——
 
-  it("K1：lastReadAt 与 m2.createdAt 相等时，分隔线严格落在 m3 前（不是 m2 前）", async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 1, lastReadAt: "2026-10-14T02:00:00.000Z" },
-      ],
-    });
-    mockMessagesFetch([
-      msg("m1", "已读一", "2026-10-14T01:00:00.000Z"),
-      msg("m2", "边界那条（恰在 lastReadAt）", "2026-10-14T02:00:00.000Z"),
-      msg("m3", "未读那条", "2026-10-14T03:00:00.000Z"),
-    ]);
-    render(<ChatPage />);
-    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
-    const m2El = document.getElementById("msg-m2")!;
-    const m3El = document.getElementById("msg-m3")!;
-    // m2 在分隔线之前（边界那一秒算已读）
-    expect(m2El.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // 分隔线在 m3 之前
-    expect(divider.compareDocumentPosition(m3El) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
 
-  it("K2：unreadCount=0 但带 lastReadAt → 不画分隔线并回到底部", async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 0, lastReadAt: "2026-10-14T00:00:00.000Z" },
-      ],
-    });
-    mockMessagesFetch([
-      msg("m1", "读过的消息", "2026-10-14T01:00:00.000Z"),
-      msg("m2", "还是读过的", "2026-10-14T02:00:00.000Z"),
-    ]);
-    render(<ChatPage />);
-    await screen.findByText("还是读过的");
-    await waitFor(() =>
-      expect(screen.queryByRole("separator", { name: "以下是新消息" })).not.toBeInTheDocument(),
-    );
-    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "auto" });
-  });
 
-  it("未读只来自不渲染的控制行时，不画分隔线也不提示更多未读", async () => {
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 3, lastReadAt: "2026-10-14T02:00:00.000Z" },
-      ],
-    });
-    mockMessagesFetch([msg("m1", "最后一条可见消息", "2026-10-14T01:00:00.000Z")]);
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("最后一条可见消息")).toBeInTheDocument());
-    expect(screen.queryByRole("separator", { name: "以下是新消息" })).not.toBeInTheDocument();
-    expect(screen.queryByText("有更多未读消息在上方")).not.toBeInTheDocument();
-  });
 
-  it("未读区间夹着自己的消息时，分隔线仍落在第一条他人未读前", async () => {
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 2, lastReadAt: "2026-10-14T01:00:00.000Z" },
-      ],
-    });
-    const mine = { ...msg("m2", "我自己插一句", "2026-10-14T02:00:00.000Z"), senderId: "u1" };
-    mockMessagesFetch([
-      msg("m1", "旧消息", "2026-10-14T00:30:00.000Z"),
-      mine,
-      msg("m3", "他人未读一", "2026-10-14T03:00:00.000Z"),
-      msg("m4", "他人未读二", "2026-10-14T03:01:00.000Z"),
-    ]);
-    render(<ChatPage />);
-    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
-    expect(divider.compareDocumentPosition(document.getElementById("msg-m3")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
 
-  it("分隔线定位后，新消息到达不再让它漂移或二次滚动", async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 1, lastReadAt: "2026-10-14T01:00:00.000Z" },
-      ],
-    });
-    mockMessagesFetch([
-      msg("m1", "旧消息", "2026-10-14T01:00:00.000Z"),
-      msg("m2", "未读消息", "2026-10-14T02:00:00.000Z"),
-    ]);
-    render(<ChatPage />);
-    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
-    expect(divider.compareDocumentPosition(document.getElementById("msg-m2")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    scrollSpy.mockClear();
-    act(() => {
-      useChatStore.getState().appendMessage(msg("m3", "刚来的新消息", "2026-10-14T03:00:00.000Z"));
-    });
-    // 分隔线仍在 m2 前，没有被 m3「往前挪」
-    const still = screen.getByRole("separator", { name: "以下是新消息" });
-    expect(still.compareDocumentPosition(document.getElementById("msg-m2")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(scrollSpy).not.toHaveBeenCalled();
-  });
 
-  it("未读锚点落在初始窗口外时自动扩窗并定位（不静默失效）", async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 70, lastReadAt: "2026-10-14T00:29:00.000Z" },
-      ],
-    });
-    const many = Array.from({ length: 100 }, (_, i) =>
-      msg(
-        `x${i}`,
-        `第 ${i} 条`,
-        `2026-10-14T${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}:00.000Z`,
-      ),
-    );
-    mockMessagesFetch(many);
 
-    render(<ChatPage />);
-    // 最后已读时间 = x29 → 第一条更新的消息是 x30（初始窗口只有后 60 条，x30 在窗口外）
-    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
-    const firstUnread = document.getElementById("msg-x30")!;
-    expect(firstUnread).not.toBeNull();
-    expect(divider.compareDocumentPosition(firstUnread) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByText("第 29 条")).not.toBeInTheDocument(); // 窗口没扩得更多
-    expect(scrollSpy).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
-  });
 
-  it("无未读时打开会话仍回到底部", async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
-    });
-    mockMessagesFetch([msg("m1", "普通消息", "2026-10-14T01:00:00.000Z")]);
-    render(<ChatPage />);
-    await waitFor(() => expect(screen.getByText("普通消息")).toBeInTheDocument());
-    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "auto" });
-  });
-
-  it("自己已读后本地 lastReadAt 跟随 read_update，切走再来新消息时分隔线不倒退", async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 2, lastReadAt: "2026-10-14T00:00:00.000Z" },
-        { id: "c2", type: "direct", peer, unreadCount: 0, lastReadAt: null },
-      ],
-    });
-    mockMessagesFetch([
-      msg("m1", "早先消息", "2026-10-14T01:00:00.000Z"),
-      msg("m2", "读过的消息", "2026-10-14T02:00:00.000Z"),
-      msg("m3", "新到的消息", "2026-10-14T03:00:00.000Z"),
-    ]);
-    render(<ChatPage />);
-    await screen.findByText("早先消息");
-
-    // 自己在别处读过，服务端广播 read_update（at = m2 时间）→ 本地 lastReadAt 要跟着走
-    act(() => {
-      lastHandlers().onEvent({
-        type: "read_update",
-        conversationId: "c1",
-        userId: "u1",
-        at: "2026-10-14T02:00:00.000Z",
-      });
-    });
-    expect(useChatStore.getState().conversations.find((c) => c.id === "c1")?.lastReadAt).toBe(
-      "2026-10-14T02:00:00.000Z",
-    );
-
-    act(() => useUiStore.setState({ activeConversationId: "c2" }));
-    act(() => useChatStore.getState().bumpUnread("c1")); // A 来新消息
-    act(() => useUiStore.setState({ activeConversationId: "c1" }));
-
-    // 分隔线落在 m3（第一条晚于 at 的他人消息）前，而不是退回 m1 前
-    const divider = await screen.findByRole("separator", { name: "以下是新消息" });
-    expect(
-      divider.compareDocumentPosition(document.getElementById("msg-m3")!) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      document.getElementById("msg-m1")!.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(scrollSpy).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
-  });
-
-  it("旧服务端没有 lastReadAt 时不画分隔线并回到底部", async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
-    // 消息对象刻意不带 lastReadAt 属性（旧服务端不会返回该字段）
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 2 }],
-    });
-    mockMessagesFetch([
-      msg("m1", "旧消息一", "2026-10-14T01:00:00.000Z"),
-      msg("m2", "旧消息二", "2026-10-14T02:00:00.000Z"),
-    ]);
-    render(<ChatPage />);
-    await screen.findByText("旧消息二");
-    await waitFor(() =>
-      expect(screen.queryByRole("separator", { name: "以下是新消息" })).not.toBeInTheDocument(),
-    );
-    expect(screen.queryByText("有更多未读消息在上方")).not.toBeInTheDocument();
-    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "auto" });
-  });
 
   it("A4 气泡时间戳：每条带 HH:mm；间隔 ≥5 分钟插分隔、连续消息不插", async () => {
     const m1 = msg("m1", "第一条", "2026-10-14T01:00:00.000Z");
@@ -4949,6 +3192,7 @@ describe("ChatPage", () => {
     });
 
     render(<ChatPage />);
+    bindAssistant();
     await act(async () => {});
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), {
       target: { value: "一起传" },
@@ -4985,6 +3229,7 @@ describe("ChatPage", () => {
   });
 
   it("A9 文本发送失败：红色 alert + 「重试」；重试成功后清空草稿", async () => {
+    bindAssistant();
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     mockMessagesFetch([]);
@@ -5023,7 +3268,7 @@ describe("ChatPage", () => {
   });
 
   it("A10 空草稿发送禁用；无浮层无草稿时 Esc 停止生成", async () => {
-    const send = await setupGroupChat();
+    const send = await setupAgentChat();
     bindAssistant();
     vi.mocked(streamChat).mockImplementation(
       (_p, _m, o) =>
@@ -5048,482 +3293,10 @@ describe("ChatPage", () => {
     );
   });
 
-  it("A11 选择器键盘导航（↓/Enter），输入框有 aria-label", async () => {
-    await setupGroupChat([
-      ...inGroupMembers,
-      { kind: "agent", id: "a-arch", name: "架构师", avatar: null, user: null },
-    ]);
 
-    expect(screen.getByLabelText("消息输入框")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    const input = screen.getByPlaceholderText("输入消息…");
-    fireEvent.keyDown(input, { key: "ArrowDown" });
-    // 高亮移到第二项（键盘可达）
-    expect(screen.getByRole("button", { name: "架构师" })).toHaveAttribute(
-      "aria-current",
-      "true",
-    );
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.getByText("@架构师")).toBeInTheDocument();
-    expect(screen.queryByText("@和小鸣")).not.toBeInTheDocument();
-  });
-
-  it("A12 未读准确：他会话新消息 +1（自己发的不算），read_update(我) 清零", async () => {
-    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [
-        { id: "c1", type: "direct", peer, unreadCount: 0 },
-        { id: "c2", type: "group", name: "别处", memberCount: 2, unreadCount: 0 },
-      ],
-    });
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-
-    const otherConv = (id: string, text: string, senderId: string): Message => ({
-      ...msg(id, text, "2026-10-14T01:00:00.000Z"),
-      conversationId: "c2",
-      senderId,
-    });
-    const unreadOf = (id: string) =>
-      useChatStore.getState().conversations.find((c) => c.id === id)?.unreadCount;
-
-    act(() =>
-      lastHandlers().onEvent({ type: "message_new", message: otherConv("n1", "他说的", "u2") }),
-    );
-    expect(unreadOf("c2")).toBe(1);
-
-    act(() =>
-      lastHandlers().onEvent({ type: "message_new", message: otherConv("n2", "我发的", "u1") }),
-    );
-    expect(unreadOf("c2")).toBe(1); // 自己发的不涨
-
-    act(() =>
-      lastHandlers().onEvent({
-        type: "message_new",
-        message: { ...msg("n3", "当前会话", "2026-10-14T01:01:00.000Z"), senderId: "u2" },
-      }),
-    );
-    expect(unreadOf("c1")).toBe(0); // 正在看的会话不加未读
-
-    act(() =>
-      lastHandlers().onEvent({
-        type: "read_update",
-        conversationId: "c2",
-        userId: "u1",
-        at: "2026-10-14T01:02:00.000Z",
-      }),
-    );
-    expect(unreadOf("c2")).toBe(0); // 自己在别处读过 → 清零
-  });
 });
 
-describe("aggregateChips（fix I4 记忆化聚合）", () => {
-  it("legacy+事件聚合/ remove 生效 / 空集剔除；同引用输入返回同一结果对象（不重复计算）", () => {
-    const target = msg("m1", "求回应", "2026-10-14T01:00:00.000Z"); // senderId u2
-    const legacy: Message = {
-      ...msg("m0", "存量", "2026-10-14T00:59:00.000Z"),
-      payload: { text: "存量", reactions: [{ emoji: "❤️", userIds: ["u2"] }] },
-    };
-    const evAddU1: Message = {
-      ...msg("r1", "", "2026-10-14T01:01:00.000Z"),
-      senderId: "u1",
-      enc: "e2e",
-      cipher: "Qw==",
-      chainKid: "k1",
-      n: 1,
-    };
-    const evAddU2: Message = { ...evAddU1, id: "r2", n: 2, senderId: "u2" };
-    const evRemoveU1: Message = { ...evAddU1, id: "r3", n: 3 };
-    const plainOf = {
-      r1: { kind: "reaction" as const, reaction: { target: "m1", emoji: "👍", op: "add" as const } },
-      r2: { kind: "reaction" as const, reaction: { target: "m1", emoji: "👍", op: "add" as const } },
-      r3: {
-        kind: "reaction" as const,
-        reaction: { target: "m1", emoji: "👍", op: "remove" as const },
-      },
-    };
-    const messages = [legacy, target, evAddU1, evAddU2, evRemoveU1];
 
-    const a = aggregateChips(messages, plainOf);
-    const b = aggregateChips(messages, plainOf);
-    expect(b).toBe(a); // 同引用 → 进程内缓存命中，零重算（I4 断言）
-    // 聚合：m1 的 👍 add u1、add u2、remove u1 → 仅剩 u2；m0 存量 ❤️ 原样
-    expect(a.get("m1")).toEqual([{ emoji: "👍", userIds: ["u2"] }]);
-    expect(a.get("m0")).toEqual([{ emoji: "❤️", userIds: ["u2"] }]);
-
-    // 新数组引用 → 重算，但同内容聚合结果深等（「聚合结果不变」）
-    const c = aggregateChips([...messages], plainOf);
-    expect(c).not.toBe(a);
-    expect(c.get("m1")).toEqual(a.get("m1"));
-  });
-});
-
-describe("renderTextWithMentions", () => {
-  it("按各 mention.name 出现位置拆分，命中处包浅蓝高亮 span（长名优先不吃短名）", () => {
-    const parts = renderTextWithMentions("hi 和小鸣 与小鸣 再和小鸣", [
-      { agentId: "a1", name: "和小鸣" },
-      { agentId: "a2", name: "小鸣" },
-    ]);
-    const { container } = render(<div>{parts}</div>);
-    const hl = [...container.querySelectorAll("span")];
-    expect(hl.map((s) => s.textContent)).toEqual(["和小鸣", "小鸣", "和小鸣"]);
-    for (const s of hl) expect(s).toHaveClass("bg-[#eef3f8]");
-    expect(container.textContent).toBe("hi 和小鸣 与小鸣 再和小鸣"); // 原文无丢失
-  });
-
-  it("无 mentions 或名字未出现：原样单文本节点", () => {
-    const { container } = render(<div>{renderTextWithMentions("纯文本", undefined)}</div>);
-    expect(container.textContent).toBe("纯文本");
-    expect(container.querySelectorAll("span")).toHaveLength(0);
-
-    const { container: c2 } = render(
-      <div>{renderTextWithMentions("不提名", [{ agentId: "a1", name: "和小鸣" }])}</div>,
-    );
-    expect(c2.textContent).toBe("不提名");
-    expect(c2.querySelectorAll("span")).toHaveLength(0);
-  });
-
-  it("防注入：text 与 mention 名里的标签按 React 文本节点输出", () => {
-    const evil = '<img src=x onerror="alert(1)">';
-    const parts = renderTextWithMentions(`${evil} 提醒 <b>粗体</b>`, [
-      { agentId: "a1", name: "<b>粗体</b>" },
-    ]);
-    const { container } = render(<div>{parts}</div>);
-    expect(container.querySelector("img")).toBeNull();
-    expect(container.querySelector("b")).toBeNull();
-    expect(container.textContent).toBe(`${evil} 提醒 <b>粗体</b>`);
-    expect([...container.querySelectorAll("span")].map((s) => s.textContent)).toEqual([
-      "<b>粗体</b>",
-    ]);
-  });
-});
-
-/**
- * 设置 __heming_voice_call 桥接 mock（jsdom 无 preload，测试内手动挂载）。
- * 提升到模块级：群聊发起通话测试（C1）与桌面通知测试共用。
- */
-function installVoiceBridge() {
-  const notify = vi.fn();
-  const off = vi.fn();
-  const onMinimize = vi.fn((_cb: () => void) => off);
-  const bridge = { notify, onMinimize };
-  Object.defineProperty(window, "__heming_voice_call", {
-    configurable: true,
-    writable: true,
-    value: bridge,
-  });
-  return { bridge, notify, onMinimize, off };
-}
-
-describe("语音通话桌面通知接线（Task 5 fix）", () => {
-  afterEach(() => {
-    delete (window as unknown as { __heming_voice_call?: unknown }).__heming_voice_call;
-  });
-
-  it("来电（被叫 ringing）：系统通知「语音来电」", async () => {
-    const { notify } = installVoiceBridge();
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-
-    // 模拟收到 voice_call_invite（直接会话 c1 = peer 鲍勃）
-    act(() => {
-      lastHandlers().onEvent({
-        type: "voice_call_invite",
-        conversationId: "c1",
-        callId: "call-1",
-        sdp: "v=0",
-        fromUserId: "u2",
-      });
-    });
-    await act(async () => {});
-
-    expect(notify).toHaveBeenCalledWith("和鸣", "语音来电");
-  });
-
-  it("来电去重：同一 callId 的重复渲染不重复通知", async () => {
-    const { notify } = installVoiceBridge();
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-
-    act(() => {
-      lastHandlers().onEvent({
-        type: "voice_call_invite",
-        conversationId: "c1",
-        callId: "call-1",
-        sdp: "v=0",
-        fromUserId: "u2",
-      });
-    });
-    // 再次触发一次渲染（无关状态更新），status/role/callId 未变
-    act(() => {
-      lastHandlers().onEvent({
-        type: "voice_call_ice",
-        conversationId: "c1",
-        callId: "call-1",
-        candidate: "candidate:1",
-        fromUserId: "u2",
-      });
-    });
-    await act(async () => {});
-
-    expect(notify).toHaveBeenCalledTimes(1);
-  });
-
-  it("窗口最小化 + 通话中：系统通知「通话中」", async () => {
-    const { notify, onMinimize } = installVoiceBridge();
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-
-    // 先进入通话中（active）
-    act(() => {
-      lastHandlers().onEvent({
-        type: "voice_call_accept",
-        conversationId: "c1",
-        callId: "call-x",
-        sdp: "v=0",
-        fromUserId: "u2",
-      });
-    });
-    await act(async () => {});
-    // 再模拟窗口最小化回调
-    act(() => {
-      const cb = onMinimize.mock.calls[0]?.[0] as (() => void) | undefined;
-      cb?.();
-    });
-    await act(async () => {});
-
-    expect(notify).toHaveBeenCalledWith("和鸣", "通话中");
-  });
-
-  it("窗口最小化 + 未在通话：不触发系统通知", async () => {
-    const { notify, onMinimize } = installVoiceBridge();
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-
-    // 空闲状态时窗口最小化
-    act(() => {
-      const cb = onMinimize.mock.calls[0]?.[0] as (() => void) | undefined;
-      cb?.();
-    });
-    await act(async () => {});
-
-    expect(notify).not.toHaveBeenCalled();
-  });
-
-  it("卸载时调用 onMinimize 返回的取消函数（防监听器累积）", async () => {
-    const { off } = installVoiceBridge();
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    const { unmount } = render(<ChatPage />);
-    await act(async () => {});
-
-    unmount();
-
-    expect(off).toHaveBeenCalledTimes(1);
-  });
-
-  it("网页端（无桥接）：来电不抛错、不调用通知", async () => {
-    // 不安装 __heming_voice_call —— 桥接缺失，网页端降级
-    const send = vi.fn();
-    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-
-    // 网页端收到 invite：自动拒绝（不触发通知）
-    expect(() => {
-      act(() => {
-        lastHandlers().onEvent({
-          type: "voice_call_invite",
-          conversationId: "c1",
-          callId: "call-web",
-          sdp: "v=0",
-          fromUserId: "u2",
-        });
-      });
-    }).not.toThrow();
-    // 自动拒绝发出 voice_call_reject
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "voice_call_reject", reason: "busy" }),
-    );
-  });
-});
-
-describe("语音通话群聊发起入口（C1）", () => {
-  let restoreMedia: (() => void) | undefined;
-
-  beforeEach(() => {
-    // 外层 ChatPage describe 的 store/mock 初始化（C1 为独立 describe，需复制必要设置）
-    Element.prototype.scrollIntoView = vi.fn();
-    vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:mock`);
-    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-    vi.mocked(connectWs).mockReset();
-    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() });
-    vi.mocked(hasSubtle).mockReturnValue(true);
-    vi.mocked(sealMessage).mockReset();
-    vi.mocked(sealMessage).mockImplementation(stubSeal as never);
-    vi.mocked(streamChat).mockReset();
-    vi.mocked(streamChat).mockResolvedValue("");
-    useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
-    useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
-    useUiStore.setState({
-      page: "chat",
-      activeConversationId: "c1",
-      pendingAttachment: null,
-    });
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "direct", peer, unreadCount: 0 }],
-      friends: [],
-      incoming: [],
-      messages: {},
-      reads: {},
-      messagesLoading: {},
-      messagesError: {},
-      streaming: {},
-      streamOwner: {},
-      plainById: {},
-      pendingE2e: {},
-    });
-    memoryStore.updateSettings({ enabled: false });
-    for (const s of skillPool.list()) skillPool.setEnabled(s.id, false);
-
-    // WebRTC / getUserMedia 桩
-    class MockPC {
-      static instances: MockPC[] = [];
-      localDescription: RTCSessionDescription | null = null;
-      remoteDescription: RTCSessionDescription | null = null;
-      iceGatheringState = "complete";
-      iceConnectionState = "new";
-      connectionState = "new";
-      closed = false;
-      candidates: unknown[] = [];
-      constructor(public config: RTCConfiguration) {
-        MockPC.instances.push(this);
-      }
-      createOffer() {
-        return Promise.resolve({ type: "offer", sdp: "v=0 mock-offer" });
-      }
-      createAnswer() {
-        return Promise.resolve({ type: "answer", sdp: "v=0 mock-answer" });
-      }
-      setLocalDescription(desc: RTCSessionDescriptionInit) {
-        this.localDescription = desc as RTCSessionDescription;
-        return Promise.resolve();
-      }
-      setRemoteDescription(desc: RTCSessionDescriptionInit) {
-        this.remoteDescription = desc as RTCSessionDescription;
-        return Promise.resolve();
-      }
-      addIceCandidate(candidate: RTCIceCandidateInit) {
-        this.candidates.push(candidate);
-        return Promise.resolve();
-      }
-      addTrack() {
-        return { track: null } as RTCRtpSender;
-      }
-      close() {
-        this.closed = true;
-      }
-    }
-    vi.stubGlobal("RTCPeerConnection", MockPC);
-    const trackStop = vi.fn();
-    const stream = {
-      getTracks: () => [{ stop: trackStop }],
-      getAudioTracks: () => [{ stop: trackStop, enabled: true }],
-    };
-    const orig = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: { getUserMedia: vi.fn().mockResolvedValue(stream), enumerateDevices: vi.fn().mockResolvedValue([]) },
-    });
-    restoreMedia = () => {
-      if (orig) Object.defineProperty(navigator, "mediaDevices", orig);
-      else Reflect.deleteProperty(navigator, "mediaDevices");
-    };
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    delete (window as unknown as { __heming_voice_call?: unknown }).__heming_voice_call;
-    restoreMedia?.();
-  });
-
-  it("群聊渲染电话按钮（aria-label=发起群通话）", async () => {
-    installVoiceBridge();
-    const send = await setupGroupChat();
-    expect(send).toBeDefined();
-    expect(screen.getByLabelText("发起群通话")).toBeInTheDocument();
-  });
-
-  it("点击群通话按钮弹确认「邀请 0 人加入通话？」，确认后不发 invite（0 peer）", async () => {
-    installVoiceBridge();
-    const send = await setupGroupChat();
-
-    fireEvent.click(screen.getByLabelText("发起群通话"));
-    expect(screen.getByText("邀请 0 人加入通话？")).toBeInTheDocument();
-
-    // 群成员含 u1（自己）与 agent（system-assistant），人类仅 u1 → 0 个可邀 peer → 不发起
-    fireEvent.click(screen.getByRole("button", { name: "确认" }));
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it("群聊含其他人类成员时，确认后发出 invite 并带 peerIds", async () => {
-    installVoiceBridge();
-    // 通话现在优先开独立窗口；jsdom 没有 window.open，打桩返回 null 走「回退页内」分支，
-    // 这样既覆盖了回退逻辑，也能继续断言 invite 正常发出。
-    vi.spyOn(window, "open").mockReturnValue(null);
-    const other: Member = { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer };
-    const send = await setupGroupChat([...inGroupMembers, other]);
-
-    fireEvent.click(screen.getByLabelText("发起群通话"));
-    expect(screen.getByText("邀请 1 人加入通话？")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "确认" }));
-
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "voice_call_invite",
-          conversationId: "c1",
-          callId: expect.any(String),
-          sdp: expect.any(String),
-        }),
-      ),
-    );
-  });
-
-  it("确认弹窗可取消，取消后不发 invite", async () => {
-    installVoiceBridge();
-    const other: Member = { kind: "user", id: "u2", name: "鲍勃", avatar: null, user: peer };
-    const send = await setupGroupChat([...inGroupMembers, other]);
-
-    fireEvent.click(screen.getByLabelText("发起群通话"));
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
-    expect(screen.queryByText("邀请 1 人加入通话？")).not.toBeInTheDocument();
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it("非群聊（direct）不渲染「发起群通话」按钮", async () => {
-    installVoiceBridge();
-    mockMessagesFetch([]);
-    render(<ChatPage />);
-    await act(async () => {});
-    expect(screen.queryByLabelText("发起群通话")).not.toBeInTheDocument();
-  });
-});
 
 describe("输入栏高度（clampComposerHeight）", () => {
   it("默认 132，夹在 72–360 之间并取整", () => {
@@ -5536,23 +3309,38 @@ describe("输入栏高度（clampComposerHeight）", () => {
 
 
 describe("ChatPage 工具轮可视化接线", () => {
-  /**
-   * 自给自足的公共设置：这个 describe 之前**没有** beforeEach，靠前一个 describe
-   * 残留的 store 状态才跑得通（activeConversationId / hasSubtle 等）。
-   * 那些残留一旦被前面的用例清掉，本组就整个塌（找不到「提及智能体」——
-   * 因为 isGroup 为假，输入栏少渲染一个按钮）。这里补齐，不再依赖执行顺序。
-   */
+  /** 本 describe 不继承主 describe 的 beforeEach：助手会话与流式状态各就位。 */
   beforeEach(() => {
-    useUiStore.setState({ page: "chat", activeConversationId: "c1", contactsHidden: true });
+    useUiStore.setState({ page: "chat", activeConversationId: "c1" });
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: {
+            id: "system-assistant",
+            name: "和小鸣",
+            avatar: null,
+            owner_id: null,
+            description: "",
+          },
+          unreadCount: 0,
+        },
+      ],
+      messages: {},
+      streaming: {},
+      streamOwner: {},
+      plainById: {},
+      pendingE2e: {},
+    });
     vi.mocked(hasSubtle).mockReturnValue(true);
+    vi.mocked(streamChat).mockReset(); // 调用计数跨用例累积会误伤「第 2 轮」断言
     // 每次清掉上一个用例可能留下的 MCP 服务（含预置的），保证 armEchoServer 独占
     for (const s of [...mcpRegistry.servers()]) mcpRegistry.remove(s.id);
   });
 
   /** 与 ChatPage describe 内同名助手等价（那个是块内私有，这里用局部版）。 */
   async function pickAndSend(text: string) {
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    fireEvent.click(screen.getByText("和小鸣"));
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
   }
@@ -5575,15 +3363,12 @@ describe("ChatPage 工具轮可视化接线", () => {
     try {
       const send = vi.fn();
       vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-      useChatStore.setState({
-        conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-      });
-      mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+            mockMessagesFetch([]);
       render(<ChatPage />);
-      // 等 WS 句柄就绪：输入栏与「提及智能体」按钮在 connected 之后才渲染。
+      // 等 WS 句柄就绪：输入栏在 connected 之后才渲染。
       // 单次 act 可能不足以冲掉队列里的连接回调，故显式等它出现。
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "提及智能体" })).toBeInTheDocument(),
+        expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument(),
       );
       bindAssistant();
 
@@ -5647,13 +3432,10 @@ describe("ChatPage 工具轮可视化接线", () => {
     try {
       const send = vi.fn();
       vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-      useChatStore.setState({
-        conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-      });
-      mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+            mockMessagesFetch([]);
       render(<ChatPage />);
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "提及智能体" })).toBeInTheDocument(),
+        expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument(),
       );
       bindAssistant();
 
@@ -5698,81 +3480,6 @@ describe("ChatPage 工具轮可视化接线", () => {
   /**
    * d.34：待确认不再「切会话 = 拒绝」，且跨会话请求进通知中心。
    */
-  it("待确认属于其他会话时进通知中心；切回后弹窗仍在（d.34）", async () => {
-    const dispose = armEchoServer();
-    try {
-      const send = vi.fn();
-      vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-      useChatStore.setState({
-        conversations: [
-          { id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 },
-          { id: "c2", type: "group", name: "另一个群", memberCount: 3, unreadCount: 0 },
-        ],
-      });
-      mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
-      render(<ChatPage />);
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "提及智能体" })).toBeInTheDocument(),
-      );
-      bindAssistant();
-
-      let round = 0;
-      vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
-        if (round++ === 0) {
-          o.onToolCalls?.([
-            {
-              id: "call-n1",
-              type: "function",
-              function: { name: "echo-svc__echo", arguments: '{"text":"hi"}' },
-            },
-          ]);
-          return "";
-        }
-        o.onDelta("好的");
-        return "好的";
-      });
-
-      await pickAndSend("@和小鸣 用 echo 查一下");
-      await waitFor(() =>
-        expect(screen.getByRole("dialog", { name: /请求调用工具/ })).toBeInTheDocument(),
-      );
-
-      // 当前会话的请求不推通知：弹窗就在眼前，再来一条只是噪音。
-      expect(
-        useNotificationStore.getState().items.filter((n) => n.kind === "approval"),
-      ).toHaveLength(0);
-
-      // 切走：请求保持待定（**不再**按拒绝收口），并出现在通知中心。
-      act(() => {
-        useUiStore.setState({ activeConversationId: "c2" });
-      });
-      await waitFor(() => {
-        const approvals = useNotificationStore
-          .getState()
-          .items.filter((n) => n.kind === "approval");
-        expect(approvals).toHaveLength(1);
-        expect(approvals[0].conversationId).toBe("c1");
-        expect(approvals[0].title).toContain("请求调用工具");
-      });
-      expect(useHitlStore.getState().pending?.conversationId).toBe("c1");
-      expect(screen.getByRole("dialog", { name: /请求调用工具/ })).toBeInTheDocument();
-
-      // 切回来：裁决仍在等它。
-      act(() => {
-        useUiStore.setState({ activeConversationId: "c1" });
-      });
-      expect(useHitlStore.getState().pending?.conversationId).toBe("c1");
-
-      // 善后：点「拒绝」走真实裁决路径（顺带覆盖「裁决后摘掉待确认通知」）。
-      fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
-      await waitFor(() => expect(useHitlStore.getState().pending).toBeNull());
-      expect(
-        useNotificationStore.getState().items.some((n) => n.key.startsWith("approval:")),
-      ).toBe(false);
-    } finally {
-      dispose();
-    }
-  });
 
   it("确认超时 → 按拒绝收口、审计写明「超时未确认」、通知换成超时提示（d.34）", async () => {
     localStorage.removeItem("heming.selfAudit.v1");
@@ -5780,17 +3487,11 @@ describe("ChatPage 工具轮可视化接线", () => {
     try {
       const send = vi.fn();
       vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-      useChatStore.setState({
-        conversations: [
-          { id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 },
-          { id: "c2", type: "group", name: "另一个群", memberCount: 3, unreadCount: 0 },
-        ],
-      });
-      mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+      mockMessagesFetch([]);
       // 超时注入成极短值：生产 60 分钟，测试没必要等。
       render(<ChatPage hitlTimeoutMs={60} />);
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "提及智能体" })).toBeInTheDocument(),
+        expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument(),
       );
       bindAssistant();
 
@@ -5850,10 +3551,7 @@ describe("ChatPage 工具轮可视化接线", () => {
     // 现在按片攒、按片发，chunk 数与模型的分片数一致。
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+        mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {});
     bindAssistant();
@@ -5882,10 +3580,7 @@ describe("ChatPage 工具轮可视化接线", () => {
     // 用户一个字都看不到（模型明明已经吐了「半」）。
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+        mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {});
     bindAssistant();
@@ -5918,10 +3613,7 @@ describe("ChatPage 工具轮可视化接线", () => {
   it("未授权自我优化时不注入 self 工具，但 chart 工具照常在（两者授权是独立的）", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+        mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {});
     bindAssistant();
@@ -5962,10 +3654,7 @@ describe("ChatPage 复盘分身接线", () => {
   async function setup() {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
-    useChatStore.setState({
-      conversations: [{ id: "c1", type: "group", name: "评审组", memberCount: 3, unreadCount: 0 }],
-    });
-    mockMessagesFetch([], undefined, { members: [inGroupMembers], reads: [[]] });
+        mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {});
     bindAssistant();
@@ -5973,8 +3662,6 @@ describe("ChatPage 复盘分身接线", () => {
   }
 
   async function pickAndSendLocal(text: string) {
-    fireEvent.click(screen.getByRole("button", { name: "提及智能体" }));
-    fireEvent.click(screen.getByText("和小鸣"));
     fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: text } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
   }
@@ -6047,7 +3734,6 @@ describe("ChatPage 任务区接线", () => {
     useChatStore.setState({
       conversations: [agentConv] as never,
       messages: {},
-      reads: {},
       messagesLoading: {},
       messagesError: {},
       streaming: {},
@@ -6059,7 +3745,7 @@ describe("ChatPage 任务区接线", () => {
     setNotificationStorage(createMemoryStorage());
     useNotificationStore.setState({ items: [] });
     bindAssistant();
-    mockMessagesFetch([], undefined, { reads: [[]] });
+    mockMessagesFetch([]);
   });
 
   it("任务投递：自动发送目标、工具步骤落档、完成时收口 done", async () => {

@@ -22,7 +22,6 @@ const {
   draggedPosition,
   parsePetStateJson,
 } = require("./pet-window");
-const { isCallWindowUrl } = require("./call-window");
 
 /* ────────────────────────────── 入口判定 ────────────────────────────── */
 
@@ -51,27 +50,6 @@ test("非法输入不抛错、一律拒绝", () => {
   assert.equal(isPetWindowUrl(`?${PET_WINDOW_FLAG}`, ""), false);
   assert.equal(isSameAppOrigin(null, "app://heming"), false);
   assert.equal(isSameAppOrigin("app://heming/", null), false);
-});
-
-test("与 call-window 的同源规则必须一致（防两个窗口分叉）", () => {
-  const cases = [
-    ["app://heming/?FLAG", "app://heming"],
-    ["app://heming/index.html?FLAG", "app://heming"],
-    ["app://heming?FLAG", "app://heming"],
-    ["https://evil.example/?FLAG", "app://heming"],
-    ["http://47.92.39.184/?FLAG", "http://47.92.39.184"],
-    ["http://47.92.39.184:8080/?FLAG", "http://47.92.39.184"],
-    ["http://another.host/?FLAG", "http://47.92.39.184"],
-  ];
-  for (const [url, origin] of cases) {
-    const petUrl = url.replace("FLAG", "hemingWindow=pet");
-    const callUrl = url.replace("FLAG", "hemingWindow=call&conv=c1&peers=u2");
-    assert.equal(
-      isPetWindowUrl(petUrl, origin),
-      isCallWindowUrl(callUrl, origin),
-      `同源判定分叉：${url} @ ${origin}`,
-    );
-  }
 });
 
 /* ────────────────────────────── 缩放档位 ────────────────────────────── */

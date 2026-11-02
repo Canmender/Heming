@@ -35,8 +35,8 @@ test("preload 暴露 __heming_exports（记忆导出落盘桥）", () => {
 
 // 行为测试：stub electron 模块的 contextBridge + ipcRenderer，真实执行 preload.js，
 // 验证 contextBridge 暴露的对象上 __onBootReady/__startBootWave 为可调用函数。
-// 注：preload.js 会多次调用 exposeInMainWorld（heming / __heming_ice_servers_get /
-// __heming_voice_call / __heming_secrets），此处按 key 收集而非「最后一次即 heming」。
+// 注：preload.js 会多次调用 exposeInMainWorld（heming / __heming_secrets 等），
+// 此处按 key 收集而非「最后一次即 heming」。
 // ipcRenderer.sendSync 必须在桩里存在：preload 顶层会同步问一次密钥桥可用性。
 // sink.listeners：channel → Set<listener>，用于断言订阅注册/取消；
 // sink.sent：ipcRenderer.send 的调用记录，用于断言 system 通知请求。

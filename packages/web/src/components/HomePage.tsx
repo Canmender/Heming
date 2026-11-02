@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import type { TeamActivity, TeamMember } from "@heming/shared";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
@@ -9,12 +10,12 @@ import {
   dailyTotals,
   dayKeyOf,
 } from "../store/tokenUsage.js";
-import { acceptFriend, resolveUrl } from "../lib/api.js";
-import { draftsVersion, getDraft, hasDraft, subscribeDrafts } from "../lib/drafts.js";
+import { fetchTeam, fetchTeamActivities, resolveUrl } from "../lib/api.js";
 import { Avatar } from "./Avatar.js";
 import { InfohubHomeCard } from "./InfohubHomeCard.js";
 import { StaffHomeCard } from "./StaffHomeCard.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
+import { TeamIcon } from "./icons.js";
 
 /** 构建时注入的版本号（vite define __APP_VERSION__，file:// 桌面端无法 fetch package.json）。 */
 declare const __APP_VERSION__: string;
@@ -23,21 +24,24 @@ declare const __APP_VERSION__: string;
 const NEWS: { source: string; title: string; summary: string; date: string }[] = [
   {
     source: "官方",
-    title: "和鸣 M1 内测版发布：IM + 通讯录先行",
-    summary: "M1 内测版开放内测：本期上线账号体系、好友/通讯录与 1:1 即时通讯，云端共享目录可用。",
-    date: "2026-10-13",
+    title: "和鸣团队系统上线：告别 IM，聚焦协作动向",
+    summary:
+      "本版本移除人类私聊/群聊与语音通话，保留通讯录并升级为真实成员名册；成员的任务与日程摘要会汇总到「团队」页，智能体的工作留在「智能体」页。",
+    date: "2026-11-02",
   },
   {
     source: "教程",
-    title: "三步创建你的第一个智能体",
-    summary: "M3 将开放智能体创建：填写名称与简介、绑定个人模型接口、设定提示词，三步即可开聊。",
-    date: "2026-10-13",
+    title: "怎么让团队看到你的动向",
+    summary:
+      "团队页顶部可分别开启任务、日程共享；只上报摘要（标题/状态/时间），对话正文、提示词与智能体轨迹不会离开本机。",
+    date: "2026-11-02",
   },
   {
     source: "技巧",
-    title: "用共享目录做会话附件投递",
-    summary: "右栏「云端共享」上传文件后可在文件行悬停投递；共享目录中的文件对会话成员可见。",
-    date: "2026-10-13",
+    title: "用共享目录投递附件给智能体",
+    summary:
+      "右栏「上传」把文件放进共享库；打开智能体对话后点文件行的「绑定」，附件会随下一轮消息发给智能体。",
+    date: "2026-11-02",
   },
 ];
 
@@ -65,58 +69,19 @@ function fmtTime(iso: string): string {
     : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
 }
 
-/**
- * 工作区首帧的两种非数据态：加载骨架 / 失败重试。
- *
- * 为什么单独一个组件：会话、智能体、待处理三块原来在 `[]` 上统一渲染「暂无 X」，
- * 而首帧还没落地或首帧失败时列表同样是 `[]`——于是「正在加载」和「加载失败」
- * 都伪装成了「你还没有数据」。空态文案只该在真的拿到过数据之后出现。
- */
-function WorkspaceFallback({ error, onRetry, rows = 3 }: { error: string | null; onRetry: () => void; rows?: number }) {
-  if (error) {
-    return (
-      <div className="flex items-center justify-between gap-2 py-1.5 text-[12px]">
-        <span className="min-w-0 truncate text-[#b42318]">{`加载失败：${error}`}</span>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="shrink-0 rounded-md border border-[#e6e6e6] px-2 py-0.5 text-[11px] hover:bg-[#f7f7f7]"
-        >
-          重试
-        </button>
-      </div>
-    );
-  }
-  return (
-    <div role="status" aria-label="正在加载" className="flex flex-col gap-2 py-1.5">
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="h-7 animate-pulse rounded-lg bg-[#f4f4f4]" />
-      ))}
-    </div>
-  );
-}
-
 export function HomePage() {
   const user = useAuthStore((s) => s.user);
-  const {
-    conversations,
-    friends,
-    incoming,
-    messages,
-    loadWorkspace,
-    agents,
-    agentsRoster,
-    loadAgentsRoster,
-    workspaceReady,
-    workspaceError,
-  } = useChatStore();
-  const openConversation = useUiStore((s) => s.openConversation);
-  // 草稿落盘后刷新「最近会话」的预览（版本号变化触发重渲染）
-  useSyncExternalStore(subscribeDrafts, draftsVersion, () => 0);
+  const { loadWorkspace, agentsRoster, loadAgentsRoster } = useChatStore();
+  const setPage = useUiStore((s) => s.setPage);
   const { quota, records } = useTokenUsageStore();
   const [tab, setTab] = useState<"me" | "team" | "date">("me");
   const [openDay, setOpenDay] = useState<string | null>(null);
   const [cloud, setCloud] = useState<"检测中" | "正常" | "失败">("检测中");
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [onlineCount, setOnlineCount] = useState(0);
+  const [activities, setActivities] = useState<TeamActivity[]>([]);
+  const [teamReady, setTeamReady] = useState(false);
+  const [teamError, setTeamError] = useState("");
 
   // 真实数据优先：挂载时加载工作区数据、云端健康探测与智能体名册
   useEffect(() => {
@@ -124,10 +89,29 @@ export function HomePage() {
     void loadAgentsRoster().catch(() => {});
   }, [loadWorkspace, loadAgentsRoster]);
 
-  // 重试只由失败条上的按钮触发：错误已经写进 store，这里吞掉 rejection 即可
-  const retryWorkspace = () => {
-    void loadWorkspace().catch(() => {});
+  const loadTeam = () => {
+    void Promise.all([fetchTeam(), fetchTeamActivities({ limit: 100 })])
+      .then(([roster, feed]) => {
+        setMembers(roster.members);
+        setOnlineCount(roster.onlineCount);
+        setActivities(feed.activities);
+        setTeamError("");
+        setTeamReady(true);
+      })
+      .catch((err) => {
+        setTeamError(err instanceof Error && err.message ? err.message : "网络异常");
+        setTeamReady(true);
+      });
   };
+
+  useEffect(() => {
+    loadTeam();
+    // 首页停留期间不轮询：动向是「看一眼」的信息，切回首页/点重试时刷新即可。
+    const onFocus = () => loadTeam();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -184,23 +168,35 @@ export function HomePage() {
 
   const pct = quota > 0 ? Math.min(100, Math.round((monthSummary.total / quota) * 100)) : 0;
   const modelRows = Object.entries(monthSummary.byModel).sort((a, b) => b[1] - a[1]);
-  /**
-   * 最近会话：按最后消息时间降序（无消息排最后），取前 6。
-   *
-   * 之前直接 slice 数组——那是服务端的创建序，不是「最近」。
-   */
-  const recent = useMemo(() => {
-    return [...conversations]
-      .sort((a, b) => {
-        // 纯 ISO 字符串比较（字典序即时间序）；localeCompare 受区域排序规则影响，不适合锁时间顺序
-        const ax = a.lastMessageAt ?? "";
-        const bx = b.lastMessageAt ?? "";
-        return ax === bx ? 0 : ax < bx ? 1 : -1;
-      })
-      .slice(0, 6);
-  }, [conversations]);
-  // 智能体动态：优先群内已挂载的，空时回退名册全量（用户可能只自建未入群）
-  const displayAgents = (agents.length > 0 ? agents : agentsRoster).slice(0, 3);
+
+  /** 团队动向只收真实成员的任务与日程；智能体侧旧数据不在首页露出。 */
+  const humanActivities = useMemo(
+    () => activities.filter((a) => a.kind === "task" || a.kind === "agenda"),
+    [activities],
+  );
+
+  /** 今日动向条数（只统计最近 100 条；首页是概览，不为此转全量分组）。 */
+  const todayActivities = useMemo(() => {
+    const now = new Date();
+    return humanActivities.filter((a) => {
+      const d = new Date(a.occurredAt);
+      return (
+        d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate()
+      );
+    }).length;
+  }, [humanActivities]);
+  const recentActivities = humanActivities.slice(0, 3);
+  const onlineMembers = members.filter((m) => m.online).slice(0, 5);
+  const displayAgents = agentsRoster.slice(0, 3);
+  const KIND_LABEL: Record<TeamActivity["kind"], string> = {
+    task: "任务",
+    agent: "AI",
+    staff: "幕僚",
+    agenda: "日程",
+    join: "加入",
+  };
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-6">
@@ -211,7 +207,9 @@ export function HomePage() {
             {greeting}，{user?.displayName ?? ""}
             <span className="ml-2 text-[12px] font-normal text-muted">{today}</span>
           </h1>
-          <p className="mt-0.5 text-[12px] text-muted">欢迎使用和鸣 —— 从工作区添加好友开始</p>
+          <p className="mt-0.5 text-[12px] text-muted">
+            全站一个团队 —— 在「团队」页查看真实成员与大家的任务、日程摘要
+          </p>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2 pt-1">
           <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 text-[11px] text-muted">
@@ -230,9 +228,10 @@ export function HomePage() {
 
       {/* 2. 四张统计卡（真实数据） */}
       <div className="grid grid-cols-4 gap-2.5">
-        <StatCard title="会话总数" value={String(conversations.length)} sub="含群聊" />
-        <StatCard title="好友数" value={String(friends.length)} sub="可拉群聊" />
-        <StatCard title="我的智能体" value={String(agentsRoster.length)} sub="含系统预设" />
+        <StatCard title="团队成员" value={String(members.length)} sub="全站注册用户" />
+        <StatCard title="在线成员" value={String(onlineCount)} sub="约 20 秒刷新" />
+        <StatCard title="我的智能体" value={String(agentsRoster.length)} sub="本机运行 · 含系统预设" />
+        <StatCard title="今日动向" value={String(todayActivities)} sub="最近 100 条内" />
         <div className="col-span-4 rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
           <div className="flex items-center">
             <div className="text-[11px] font-bold text-[#777]">Token 用量 · {monthKey}</div>
@@ -371,82 +370,76 @@ export function HomePage() {
       {/* 2.7 幕僚：最近一份主动简报（d.48） */}
       <StaffHomeCard />
 
-      {/* 3/4/5/6. 两栏：左最近会话；右智能体动态 + 待处理 + 系统状态 */}
+      {/* 3/4/5/6. 两栏：左团队动向；右智能体动态 + 在线成员 + 系统状态 */}
       <div className="grid grid-cols-[1.5fr_1fr] gap-3">
         <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
           <div className="mb-1.5 flex items-center justify-between">
-            <div className="text-[12px] font-bold text-[#777]">最近会话</div>
+            <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#777]">
+              <TeamIcon width={14} height={14} />
+              团队动向
+            </div>
             <button
               type="button"
               className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink"
-              onClick={() => useUiStore.getState().setPage("conversations")}
+              onClick={() => setPage("team")}
             >
-              全部会话
+              进入团队
             </button>
           </div>
-          {recent.length === 0 ? (
-            !workspaceReady ? (
-              <WorkspaceFallback error={workspaceError} onRetry={retryWorkspace} />
+          {humanActivities.length === 0 ? (
+            !teamReady ? (
+              <div role="status" aria-label="正在加载" className="flex flex-col gap-2 py-1.5">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-7 animate-pulse rounded-lg bg-[#f4f4f4]" />
+                ))}
+              </div>
+            ) : teamError ? (
+              <div className="flex items-center justify-between gap-2 py-1.5 text-[12px]">
+                <span className="min-w-0 truncate text-[#b42318]">加载失败：{teamError}</span>
+                <button
+                  type="button"
+                  onClick={loadTeam}
+                  className="shrink-0 rounded-md border border-[#e6e6e6] px-2 py-0.5 text-[11px] hover:bg-[#f7f7f7]"
+                >
+                  重试
+                </button>
+              </div>
             ) : (
-              <div className="py-3 text-[12px] text-muted">暂无会话，从工作区开始</div>
+              <div className="py-3 text-[12px] leading-6 text-muted">
+                还没有团队动向。成员在「团队」页开启任务 / 日程共享后，
+                这里会出现摘要；对话正文、智能体轨迹不会上传。
+              </div>
             )
           ) : (
-            recent.map((c) => {
-              const list = messages[c.id] ?? [];
-              const last = list[list.length - 1];
-              // 有草稿时预览优先显示草稿（没发出去的话比最后一条消息更「当下」）
-              const draftText = hasDraft(c.id) ? getDraft(c.id) : "";
-              const preview = draftText
-                ? `草稿：${[...draftText].slice(0, 40).join("")}${[...draftText].length > 40 ? "…" : ""}`
-                : last
-                  ? last.recalledAt != null
-                    ? "消息已撤回"
-                    : last.payload.text || "(附件)"
-                  : c.lastMessageAt
-                    ? "点击查看消息" // 有消息但本机还没加载：不冒充「暂无消息」
-                    : "暂无消息";
-              // 三态会话（direct / agent 一对一 / group）各自的显示名与头像
-              const title =
-                c.type === "direct"
-                  ? c.peer.displayName
-                  : c.type === "agent"
-                    ? c.agent.name
-                    : c.name;
-              const avatarUser =
-                c.type === "direct"
-                  ? c.peer
-                  : c.type === "agent"
-                    ? { displayName: c.agent.name, avatar: c.agent.avatar ?? undefined }
-                    : { displayName: c.name };
+            recentActivities.map((a) => {
+              const actor = members.find((m) => m.user.id === a.actorId);
               return (
                 <button
-                  key={c.id}
+                  key={a.id}
                   type="button"
-                  onClick={() => openConversation(c.id)}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors duration-150 hover:bg-[#f7f7f7]"
+                  onClick={() => setPage("team")}
+                  className="flex w-full items-start gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors duration-150 hover:bg-[#f7f7f7]"
                 >
-                  <Avatar user={avatarUser} size={28} />
+                  <Avatar
+                    user={{
+                      displayName: actor?.user.displayName ?? "成员",
+                      avatar: actor?.user.avatar,
+                    }}
+                    size={28}
+                  />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium">{title}</span>
-                    <span className="block truncate text-[11px] text-muted">{preview}</span>
-                  </span>
-                  <span className="shrink-0 text-[10px] text-muted">
-                    {/* 消息未加载时回退服务端的最后消息时间，不让「点击查看消息」的行时间空白 */}
-                    {last
-                      ? fmtTime(last.createdAt)
-                      : c.lastMessageAt
-                        ? fmtTime(c.lastMessageAt)
-                        : ""}
-                  </span>
-                  {/* 未读角标（direct/group 一致，取服务端 unreadCount）：黑底白字圆角小徽标 */}
-                  {c.unreadCount > 0 && (
-                    <span
-                      aria-label={`${c.unreadCount} 条未读`}
-                      className="min-w-[18px] shrink-0 rounded-full bg-ink px-1.5 text-center text-[10px] font-semibold leading-[16px] text-white"
-                    >
-                      {c.unreadCount}
+                    <span className="flex items-baseline gap-1.5">
+                      <span className="shrink-0 rounded border border-line px-1 text-[10px] text-muted">
+                        {KIND_LABEL[a.kind]}
+                      </span>
+                      <span className="truncate text-[13px] font-medium">{a.title}</span>
                     </span>
-                  )}
+                    <span className="block truncate text-[11px] text-muted">
+                      {actor?.user.displayName ?? "成员"}
+                      {a.detail ? ` · ${a.detail}` : ""}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[10px] text-muted">{fmtTime(a.occurredAt)}</span>
                 </button>
               );
             })
@@ -474,32 +467,40 @@ export function HomePage() {
             )}
           </section>
 
-          {/* 5. 待处理：真实好友申请 */}
+          {/* 5. 在线成员 */}
           <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
-            <div className="mb-1.5 text-[12px] font-bold text-[#777]">待处理</div>
-            {incoming.length === 0 ? (
-              !workspaceReady ? (
-                <WorkspaceFallback error={workspaceError} onRetry={retryWorkspace} rows={2} />
-              ) : (
-                <div className="text-[12px] text-muted">没有待处理申请</div>
-              )
+            <div className="mb-1.5 flex items-center justify-between">
+              <div className="text-[12px] font-bold text-[#777]">在线成员</div>
+              <button
+                type="button"
+                className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink"
+                onClick={() => setPage("team")}
+              >
+                全部名册
+              </button>
+            </div>
+            {!teamReady ? (
+              <div role="status" aria-label="正在加载" className="flex flex-col gap-2 py-1.5">
+                {[0, 1].map((i) => (
+                  <div key={i} className="h-7 animate-pulse rounded-lg bg-[#f4f4f4]" />
+                ))}
+              </div>
+            ) : teamError ? (
+              <div className="text-[12px] text-[#b42318]">加载失败：{teamError}</div>
+            ) : onlineMembers.length === 0 ? (
+              <div className="text-[12px] text-muted">当前没有人在线</div>
             ) : (
-              incoming.map((r) => (
-                <div key={r.id} className="flex items-center gap-2 py-1 text-[12px]">
-                  <Avatar user={r.from} size={22} />
-                  <span className="font-medium">{r.from.displayName}</span>
-                  <span className="text-muted">@{r.from.username}</span>
-                  <button
-                    type="button"
-                    className="ml-auto rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card"
-                    onClick={() => {
-                      acceptFriend(r.id)
-                        .then(() => loadWorkspace())
-                        .catch((err) => console.warn("接受好友申请失败", err));
-                    }}
-                  >
-                    接受
-                  </button>
+              onlineMembers.map((m) => (
+                <div key={m.user.id} className="flex items-center gap-2 py-1 text-[12px]">
+                  <span className="relative">
+                    <Avatar
+                      user={{ displayName: m.user.displayName, avatar: m.user.avatar }}
+                      size={22}
+                    />
+                    <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white bg-[#16a34a]" />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-medium">{m.user.displayName}</span>
+                  <span className="text-muted">@{m.user.username}</span>
                 </div>
               ))
             )}

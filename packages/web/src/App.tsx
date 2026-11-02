@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useUiStore, type Page } from "./store/ui.js";
 import { initTheme } from "./store/theme.js";
 import { useAuthStore } from "./store/auth.js";
@@ -10,18 +10,14 @@ import { FileTree } from "./components/FileTree.js";
 import { FilePreviewModal } from "./components/FilePreviewModal.js";
 import { WorkspacePage } from "./components/WorkspacePage.js";
 import { TaskAreaPage } from "./components/TaskAreaPage.js";
-import { ChatPage } from "./components/ChatPage.js";
-import { ConversationTabs } from "./components/ConversationTabs.js";
-import { ChatConvStrip } from "./components/ChatConvStrip.js";
-import { RadarContacts } from "./components/RadarContacts.js";
+import { TeamPage } from "./components/TeamPage.js";
+import { AssistantPage } from "./components/AssistantPage.js";
 import { HomePage } from "./components/HomePage.js";
-import { ConversationsPage } from "./components/ConversationsPage.js";
 import { InfohubPage } from "./components/InfohubPage.js";
 import { AutomationPage } from "./components/AutomationPage.js";
 import { StaffPage } from "./components/StaffPage.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { MemoryPage } from "./components/MemoryPage.js";
-import { ArchivePage } from "./components/ArchivePage.js";
 import { CommandPalette } from "./components/CommandPalette.js";
 import { InterfacesPage } from "./components/InterfacesPage.js";
 import { RegistryInstallCard } from "./components/RegistryInstallCard.js";
@@ -34,35 +30,27 @@ import { useInfohubStore } from "./lib/infohub/store.js";
 import { useAutomationScheduler } from "./lib/automation/scheduler.js";
 import { useStaffLoop } from "./lib/staff/loop.js";
 import { hasOpenModal } from "./components/useModalA11y.js";
-import { useBackgroundMessages } from "./lib/backgroundMessages.js";
-import {
-  chatSocketCount,
-  chatSocketVersion,
-  subscribeChatSocket,
-} from "./lib/chatSocketPresence.js";
 
 /**
- * Alt+1–Alt+9、Alt+0 目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、6 设置区、7 归档、8 任务区、9 会话、0 插件区。
+ * Alt+数字键目标页：1 主页、2 工作区、3 技能区、4 接口区、5 记忆区、
+ * 6 设置区、8 任务区、0 插件区。
  *
- * 顺序必须与 NavRail 的 `digit` 严格对应——那边是快捷键提示的唯一来源，
- * 两边错位就会出现「界面写着 Alt+6、按下去却去了别的页」。
- * 新页追加到**末尾**：改动老页的序号等于换掉用户肌肉记忆里的快捷键。
+ * 去 IM 时原「会话」的 Alt+9 与「归档」的 Alt+7 一并取消，其余编号不动——
+ * 改动老页的序号等于换掉用户肌肉记忆里的快捷键。智能体/团队/幕僚/信息中枢/
+ * 自动化都是新页，不占数字键。
+ *
+ * 这里的键位必须与 NavRail 的 `digit` 严格对应（那边是快捷键提示的唯一来源）。
  */
-const SHORTCUT_PAGES: Page[] = [
-  "home",
-  "workspace",
-  "skills",
-  "interfaces",
-  "memory",
-  "settings",
-  "archive",
-  "tasks",
-  "conversations",
-  "plugins",
-];
-
-/** 快捷键数字 → SHORTCUT_PAGES 下标（`0` 对应第 10 项）。 */
-const SHORTCUT_DIGITS = "1234567890";
+const SHORTCUT_PAGES: Partial<Record<string, Page>> = {
+  "1": "home",
+  "2": "workspace",
+  "3": "skills",
+  "4": "interfaces",
+  "5": "memory",
+  "6": "settings",
+  "8": "tasks",
+  "0": "plugins",
+};
 
 /** 右侧目录栏宽度上下限（像素）：太窄放不下文件名，太宽会挤掉主内容。 */
 export const ASIDE_MIN = 180;
@@ -230,11 +218,6 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
 
-  // 没有 ChatPage 实例时由 App 壳保持一条后台连接：离开聊天页也能收到未读与提醒。
-  // 是否「有 ChatPage」按实例注册判断（任务区会嵌入一个 ChatPage，页面名判断不了）；
-  // useSyncExternalStore 让 ChatPage 挂载/卸载立刻触发本组件重算 active。
-  useSyncExternalStore(subscribeChatSocket, chatSocketVersion, () => 0);
-  useBackgroundMessages(Boolean(authUser) && chatSocketCount() === 0);
   // 本机自动化：只在登录后的桌面端到点执行，不补跑、不自动拉起 InfoHub
   useAutomationScheduler(Boolean(authUser));
   // 常驻幕僚（d.48）：登录后巡检日程与任务，只读、只递简报
@@ -250,24 +233,12 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
     });
   }, []);
 
-  // 桌宠请求「去设置」→ 打开设置页并直达模型分组。
-  // 桌宠说话用的是本机模型连接，它唯一会缺的东西就在「模型」分组里，
-  // 把用户丢到设置首页还要自己找一遍，等于让这条路走不通。
+  // 桌宠的「去设置」出口 → 打开设置页并直达模型分组（未登录时忽略）
   useEffect(() => {
     const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
     if (!bridge?.onOpenSettings) return;
     return bridge.onOpenSettings(() => {
       useUiStore.getState().openSettings("model");
-    });
-  }, []);
-
-  // 桌宠的未读角标被点 → 打开对应会话（未登录时忽略）
-  useEffect(() => {
-    const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
-    if (!bridge?.onOpenConversation) return;
-    return bridge.onOpenConversation((id) => {
-      if (!id || !useAuthStore.getState().user) return;
-      useUiStore.getState().openConversation(id);
     });
   }, []);
 
@@ -307,14 +278,16 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
       const inText =
         !!t &&
         (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-      // Alt+1–9 / Alt+0 直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应
-      if (e.altKey && !e.metaKey && !e.ctrlKey && SHORTCUT_DIGITS.includes(e.key)) {
+      // Alt+数字键直接切页（不用 ⌘/Ctrl，避开浏览器/输入法组合键冲突）；输入框内不响应。
+      // 7/9 已随会话/归档页取消，映射表里没有的键位直接忽略。
+      const shortcutPage = SHORTCUT_PAGES[e.key];
+      if (e.altKey && !e.metaKey && !e.ctrlKey && shortcutPage) {
         if (inText) return;
         e.preventDefault();
         // 模态弹窗开着时只吞键不切页：切走的子树里还留着那个弹窗，
         // 焦点归还、Esc 归属与 inert 计数全落在已经不属于当前视图的 DOM 上。
         if (hasOpenModal()) return;
-        setPage(SHORTCUT_PAGES[SHORTCUT_DIGITS.indexOf(e.key)]);
+        setPage(shortcutPage);
         return;
       }
       if (!e.metaKey && !e.ctrlKey) return;
@@ -344,29 +317,14 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
   const view =
     page === "home" ? (
       <HomePage />
+    ) : page === "team" ? (
+      // 团队：真实成员名册 + 动向流（任务 / 日程摘要）
+      <TeamPage />
     ) : page === "chat" ? (
-      // 会话态：ChatPage 常驻底层（保持 WS/草稿状态）；雷达覆盖层按 contactsHidden
-      // 滑出/呼出（面板自身管理 transform，隐藏时平移出容器并由 overflow 裁切）。
-      // 行布局：左侧头像缩略列（快速切会话） → 中间列（上方横向标签页 + ChatPage）
-      <div className="relative flex h-full min-h-0 w-full overflow-hidden">
-        <div className="flex min-w-0 flex-1">
-          <ChatConvStrip />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <ConversationTabs />
-            <div className="relative min-h-0 flex-1">
-              <div className="absolute inset-0 flex flex-col">
-                <ChatPage />
-              </div>
-              <RadarContacts overlay />
-            </div>
-          </div>
-        </div>
-      </div>
+      // 智能体（本机运行）：左侧智能体名册 + 右侧对话（复用 ChatPage）
+      <AssistantPage />
     ) : page === "workspace" ? (
       <WorkspacePage />
-    ) : page === "conversations" ? (
-      // 会话中心：全部未归档会话的一站式列表（置顶/搜索/归档入口）
-      <ConversationsPage />
     ) : page === "staff" ? (
       // 幕僚：常驻主动简报（只读采集 + 一键跳转）
       <StaffPage />
@@ -387,9 +345,6 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
     ) : page === "memory" ? (
       // 记忆区：三层记忆 + 技能池（全部数据只在本机 localStorage）
       <MemoryPage />
-    ) : page === "archive" ? (
-      // 归档处：收起来的历史会话，可按名字检索后恢复
-      <ArchivePage />
     ) : page === "settings" ? (
       <SettingsPage />
     ) : (

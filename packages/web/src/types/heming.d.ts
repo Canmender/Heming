@@ -141,10 +141,6 @@ declare global {
       reload: () => void;
       /** 请求主窗口上前台并切到设置页（未配置模型连接时的出口）。 */
       openSettings: () => void;
-      /** 请求主窗口打开某个会话（未读角标被点时）。 */
-      openConversation: (conversationId: string) => void;
-      /** 主窗口侧：订阅「桌宠要打开某会话」。返回取消订阅函数。 */
-      onOpenConversation: (cb: (conversationId: string | null) => void) => () => void;
       /**
        * 订阅主进程推来的事件（桌宠窗口用）。
        * 契约见 `lib/petEvent.ts` 的 PetEventPayload。**目前无生产者**，是第三期预留。

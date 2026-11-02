@@ -4,13 +4,7 @@ import { render, screen, waitFor, fireEvent, act, within } from "@testing-librar
 import { App, clampAsideWidth, ASIDE_MIN, ASIDE_MAX } from "./App.js";
 import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
-import { useChatStore } from "./store/chat.js";
 import { setToken, fetchFileBlobText } from "./lib/api.js";
-import {
-  chatSocketCount,
-  resetChatSocketPresenceForTest,
-} from "./lib/chatSocketPresence.js";
-import { useTaskStore } from "./lib/tasks/store.js";
 
 // 启动动画集成：BootWave 以「挂载即 onDone」桩替换，动画完成后 App 路由到登录页/主界面。
 // 自动完成的 BootWave 桩让既有用例聚焦认证/右栏/导航行为；完整的门禁路由用例见 App.boot.test.tsx。
@@ -27,8 +21,8 @@ vi.mock("./lib/api.js", async (importOriginal) => {
   return { ...actual, fetchFileBlobText: vi.fn() };
 });
 
-// App 壳在非聊天页会保持一条后台连接（useBackgroundMessages）：
-// 桩掉 connectWs，避免 jsdom 真去建 WebSocket；返回句柄供断言 close。
+// 命令面板打开时预取名册、首页拉取团队数据都走 fetchTeam（真实 api → mock fetch）。
+// 桩掉 connectWs，避免 ChatPage 挂载时 jsdom 真去建 WebSocket。
 vi.mock("./lib/ws.js", () => ({
   connectWs: vi.fn(() => ({ send: vi.fn(), close: vi.fn() })),
 }));
@@ -48,7 +42,7 @@ function mockFetch(
     me?: unknown;
     files?: unknown;
     usage?: unknown;
-    conversations?: unknown;
+    team?: unknown;
     friends?: unknown;
     incoming?: unknown;
     messages?: unknown;
@@ -62,7 +56,8 @@ function mockFetch(
       return Promise.resolve(jsonRes(routes.usage ?? { used: 0, quota: 200 * 1024 * 1024 }));
     if (url === "/api/files") return Promise.resolve(jsonRes(routes.files ?? []));
     if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
-    if (url === "/api/conversations") return Promise.resolve(jsonRes(routes.conversations ?? []));
+    if (url === "/api/team")
+      return Promise.resolve(jsonRes(routes.team ?? { members: [], onlineCount: 0 }));
     if (url === "/api/agents") return Promise.resolve(jsonRes(routes.agents ?? []));
     if (url === "/api/friends/requests") return Promise.resolve(jsonRes(routes.incoming ?? []));
     if (url === "/api/friends") return Promise.resolve(jsonRes(routes.friends ?? []));
@@ -337,7 +332,7 @@ describe("App 导航快捷键与隐藏态", () => {
     useUiStore.setState({ page: "home", activeConversationId: null });
   });
 
-  it("Alt+1–9 直接切页（含技能区/归档/任务区/会话），导航常驻；Ctrl+数字 不再切页", async () => {
+  it("Alt+数字直接切页（取消的 7/9 无动作），导航常驻；Ctrl/⌘+数字 不再切页", async () => {
     setToken("t1");
     mockFetch();
     render(<App />);
@@ -351,14 +346,16 @@ describe("App 导航快捷键与隐藏态", () => {
     expect(useUiStore.getState().page).toBe("memory");
     fireEvent.keyDown(window, { key: "6", altKey: true });
     expect(useUiStore.getState().page).toBe("settings");
-    fireEvent.keyDown(window, { key: "7", altKey: true });
-    expect(useUiStore.getState().page).toBe("archive");
     fireEvent.keyDown(window, { key: "8", altKey: true });
     expect(useUiStore.getState().page).toBe("tasks");
+    fireEvent.keyDown(window, { key: "0", altKey: true });
+    expect(useUiStore.getState().page).toBe("plugins");
+
+    // 去 IM 时「会话 Alt9」「归档 Alt7」一并取消：不在映射表里 → 不动当前页
+    fireEvent.keyDown(window, { key: "7", altKey: true });
     fireEvent.keyDown(window, { key: "9", altKey: true });
-    expect(useUiStore.getState().page).toBe("conversations");
-    // 路由真的落到会话页（而不是只改了 store.page）
-    expect(await screen.findByLabelText("搜索会话")).toBeInTheDocument();
+    expect(useUiStore.getState().page).toBe("plugins");
+
     fireEvent.keyDown(window, { key: "1", altKey: true });
     expect(useUiStore.getState().page).toBe("home");
 
@@ -460,27 +457,28 @@ describe("App 导航快捷键与隐藏态", () => {
   it("导航轨搜索按钮打开命令面板；焦点在结果按钮上按 Esc 也能关闭", async () => {
     setToken("t1");
     mockFetch({
-      conversations: [
-        {
-          id: "c1",
-          type: "direct",
-          peer: { id: "u2", username: "bob", displayName: "张三" },
-          unreadCount: 0,
-        },
-      ],
+      team: {
+        members: [
+          {
+            user: { id: "u2", username: "bob", displayName: "张三" },
+            lastSeenAt: null,
+            online: true,
+          },
+        ],
+        onlineCount: 1,
+      },
     });
     render(<App />);
     await screen.findByRole("button", { name: "全局搜索 Ctrl K" });
-    await waitFor(() => expect(useChatStore.getState().conversations).toHaveLength(1));
 
     fireEvent.click(screen.getByRole("button", { name: "全局搜索 Ctrl K" }));
     const dialog = await screen.findByRole("dialog", { name: "全局搜索" });
-    fireEvent.change(within(dialog).getByLabelText("搜索会话与技能"), {
+    fireEvent.change(within(dialog).getByLabelText("搜索成员与技能"), {
       target: { value: "张三" },
     });
 
     // 焦点不在输入框（在结果按钮上）：Esc 由面板容器接住
-    const result = within(dialog).getByRole("button", { name: "选择 张三" });
+    const result = await within(dialog).findByRole("button", { name: "选择 张三" });
     result.focus();
     fireEvent.keyDown(result, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "全局搜索" })).not.toBeInTheDocument();
@@ -488,24 +486,22 @@ describe("App 导航快捷键与隐藏态", () => {
 
   it("命令面板结果超过上限时提示「还有 N 条」", async () => {
     setToken("t1");
-    const many = Array.from({ length: 12 }, (_, i) => ({
-      id: `cx${i}`,
-      type: "direct" as const,
-      peer: { id: `ux${i}`, username: `ux${i}`, displayName: `候选${i}` },
-      unreadCount: 0,
+    const members = Array.from({ length: 12 }, (_, i) => ({
+      user: { id: `ux${i}`, username: `ux${i}`, displayName: `候选${i}` },
+      lastSeenAt: null,
+      online: false,
     }));
-    mockFetch({ conversations: many });
+    mockFetch({ team: { members, onlineCount: 0 } });
     render(<App />);
     await screen.findByRole("button", { name: "全局搜索 Ctrl K" });
-    await waitFor(() => expect(useChatStore.getState().conversations).toHaveLength(12));
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     const dialog = await screen.findByRole("dialog", { name: "全局搜索" });
-    fireEvent.change(within(dialog).getByLabelText("搜索会话与技能"), {
+    fireEvent.change(within(dialog).getByLabelText("搜索成员与技能"), {
       target: { value: "候选" },
     });
-    // 会话最多展示 8 条 → 12 − 8 = 4
-    expect(within(dialog).getByText("还有 4 条")).toBeInTheDocument();
+    // 成员最多展示 8 条 → 12 − 8 = 4
+    expect(await within(dialog).findByText("还有 4 条")).toBeInTheDocument();
     expect(within(dialog).getAllByRole("button", { name: /^选择 候选/ })).toHaveLength(8);
   });
 
@@ -619,108 +615,5 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽", () => {
     expect(clampAsideWidth(9999)).toBe(ASIDE_MAX);
     expect(clampAsideWidth(Number.NaN)).toBe(240);
     expect(clampAsideWidth(300)).toBe(300);
-  });
-});
-
-describe("App 后台消息通道", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    vi.restoreAllMocks();
-    resetChatSocketPresenceForTest();
-    setToken(null);
-    useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
-    useUiStore.setState({ page: "home", activeConversationId: null, taskFocusId: null });
-    delete (window as unknown as { __heming_notify?: unknown }).__heming_notify;
-  });
-
-  afterEach(() => {
-    delete (window as unknown as { __heming_notify?: unknown }).__heming_notify;
-  });
-
-  it("非聊天页启用后台连接；系统通知点击回跳到会话，并关闭后台连接", async () => {
-    const { connectWs } = await import("./lib/ws.js");
-    vi.mocked(connectWs).mockClear();
-
-    const onOpenCallbacks: Array<(id: string | null) => void> = [];
-    (window as unknown as { __heming_notify?: unknown }).__heming_notify = {
-      message: vi.fn(),
-      onOpen: (cb: (id: string | null) => void) => {
-        onOpenCallbacks.push(cb);
-        return () => {};
-      },
-    };
-    setToken("t1");
-    mockFetch({ me: alice });
-    // jsdom 未实现 scrollIntoView（聊天页滚到底部用），进入会话前补个空实现
-    Element.prototype.scrollIntoView = vi.fn();
-
-    render(<App />);
-    await waitFor(() => expect(vi.mocked(connectWs)).toHaveBeenCalled());
-
-    const backgroundHandle = vi.mocked(connectWs).mock.results[0]?.value as
-      | { send: unknown; close: () => void }
-      | undefined;
-    expect(backgroundHandle).toBeTruthy();
-
-    // 模拟主进程点击通知 → 回传会话 id
-    act(() => {
-      for (const cb of onOpenCallbacks) cb("c9");
-    });
-
-    expect(useUiStore.getState().page).toBe("chat");
-    expect(useUiStore.getState().activeConversationId).toBe("c9");
-    // ChatPage 已挂载（嵌入式/独立同口径）：存在实例即关闭后台连接，交给它自己的连接
-    await waitFor(() => expect(chatSocketCount()).toBeGreaterThan(0));
-    await waitFor(() => expect(backgroundHandle!.close).toHaveBeenCalled());
-  });
-
-  it("任务区嵌入 ChatPage 时后台连接让位（不与之并存处理同一条消息）", async () => {
-    const { connectWs } = await import("./lib/ws.js");
-    vi.mocked(connectWs).mockClear();
-
-    setToken("t1");
-    mockFetch({
-      me: alice,
-      conversations: [
-        {
-          id: "c1",
-          type: "direct",
-          peer: { id: "u2", username: "bob", displayName: "鲍勃" },
-          unreadCount: 0,
-        },
-      ],
-    });
-    useTaskStore.setState({
-      tasks: [
-        {
-          id: "t1",
-          conversationId: "c1",
-          agentId: "a1",
-          agentName: "阿和",
-          title: "任务一",
-          prompt: "做事",
-          status: "done",
-          createdAt: 1,
-          updatedAt: 2,
-          endedAt: 3,
-          steps: [],
-        },
-      ],
-    });
-    useUiStore.setState({ page: "tasks", activeConversationId: "c1", taskFocusId: "t1" });
-    Element.prototype.scrollIntoView = vi.fn();
-
-    render(<App />);
-
-    // 任务区选中任务 → 嵌入式 ChatPage 挂载并注册连接
-    await waitFor(() => expect(chatSocketCount()).toBeGreaterThan(0));
-    const handles = vi.mocked(connectWs).mock.results.map(
-      (r) => r.value as { close: () => void } | undefined,
-    );
-    // 首条是 App 壳的后台连接（任务区选中前打开），ChatPage 注册后必须被关闭；
-    // 后一条是嵌入式 ChatPage 自己的连接，测试存活期间保持打开。
-    expect(handles.length).toBe(2);
-    await waitFor(() => expect(handles[0]!.close).toHaveBeenCalled());
-    expect(handles[1]!.close).not.toHaveBeenCalled();
   });
 });

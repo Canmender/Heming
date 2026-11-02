@@ -24,6 +24,24 @@ export const ChatIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5.1A8 8 0 1 1 21 12z" />
   </svg>
 );
+/** 团队：两个人并排——名册与动向。 */
+export const TeamIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="9" cy="8" r="3.2" />
+    <path d="M2.5 20c0-3.2 2.9-5.5 6.5-5.5s6.5 2.3 6.5 5.5" />
+    <circle cx="17.5" cy="8.5" r="2.4" />
+    <path d="M15.5 14.6c3 .2 5 2.3 5 5" />
+  </svg>
+);
+
+/** 智能体：对话气泡 + 星点——本机智能体对话，不是人类 IM。 */
+export const AssistantIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4.5 19.5l1.3-4.6A7.5 7.5 0 1 1 20 11.5z" />
+    <path d="M16.8 4.2l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6z" />
+  </svg>
+);
+
 export const PlugIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M9 7V3M15 7V3M9 21v-4M15 21v-4" />

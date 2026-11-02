@@ -3,9 +3,7 @@
 /**
  * 桌宠窗口的入口判定、几何计算与窗口参数（纯函数，可在 node:test 里直接断言）。
  *
- * 与 call-window.js 的分工：那个文件管「主窗口里点开的通话窗」，这个文件管
- * 「独立于主窗口存在的透明置顶宠物窗」。两者共享同一套「同源 + query 标记」判定规则，
- * 但窗口参数完全不同——桌宠要透明、无边框、不占任务栏、且**默认鼠标穿透**。
+ * 桌宠是独立于主窗口存在的透明置顶窗：透明、无边框、不占任务栏、且**默认鼠标穿透**。
  *
  * ★ 这里不 require("electron")：窗口参数由本文件算好，创建动作留给 main.js。
  *   main.test.js 会 require 本模块，一旦引入 electron 就会在纯 Node 下炸掉。
@@ -36,8 +34,7 @@ const DEFAULT_MODEL_PATH = "pet/Hiyori/Hiyori.model3.json";
  * 两个地址是否属于同一个应用源。
  *
  * 自定义 scheme（`app://heming`）走不了 URL 解析——非特殊 scheme 的 origin 是 "null"，
- * 拿去比较必然不命中，所以按「去掉 query/hash 后比对前缀」。这段规则与
- * call-window.js 的 isCallWindowUrl 内部一致，一致性由 pet-window.test.js 交叉断言锁住。
+ * 拿去比较必然不命中，所以按「去掉 query/hash 后比对前缀」。
  */
 function isSameAppOrigin(url, appOrigin) {
   if (typeof url !== "string" || !url) return false;
