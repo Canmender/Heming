@@ -166,3 +166,26 @@
 - **①-5**：pixi 6.5.10 不升（peer 死钉 ^6）；pdfjs-dist 4.10.38 本轮不升（Electron 45 的 Chromium≥128 已满足 `Promise.try`，下一批可评估 + 真机 PDF 冒烟）；TS 6/7、@types/node 26 不升。
 - **环境坑（已写进 VERSION-MANAGEMENT）**：pnpm 不跑 electron postinstall（需 `ELECTRON_MIRROR` 重跑 install.js）；`detectElectronDist()` 会命中 `.pnpm` 下第一个 electron 目录，升级后必须先 `pnpm prune`。
 - **批次 ① 最终验收**：web 175 文件 / 2664 例、shared 24、server 122、desktop 443 全绿；三包 tsc 0 错误；web build 通过。
+
+### 第一波发布记录（2026-11-02 17:36 → ）
+
+| 项 | 结果 |
+|---|---|
+| 全量门禁 | ✅ 2026-11-02 17:36 `node scripts/release.mjs --allow-dirty --only=build,tests`：build 8.7s / 逐包测试 4/4 无重试；shared 24、server 122、web 176 文件 / 2678 例、desktop 443 例；日志 `.tmp/gate-wave1.log` |
+| 版本 | ✅ `d.57.2.18.0`（特性 54→57 三条新能力；修订 17→18 工程基线与技术债）；`bump-version.mjs` 五包同步，README 同步 |
+| CHANGELOG | ✅ 六节条目（工程基线 / file_patch / 回合日志 v2 / 热路径加密 / 技术债 / 测试与验收），`build-changelog.mjs` 已同步 75 条 |
+| 提交 | ✅ `e8cb91f`（149 文件，含删除 docker/） |
+| 安装包 | 进行中：`node scripts/release.mjs --desktop --release-r 45`（r45） |
+| 部署 + 更新源 | 进行中：同一条命令 `--deploy --publish`（备份 → 上传 → install → smoke → 传安装包 + latest.yml） |
+| 文档回填 | HANDOFF §2 四行 + 里程碑 50–54 + §6 六条新边界已写入；线上/安装包两行等部署完成后回填 |
+
+### 第一波发布完成（2026-11-02 19:55）
+
+| 项 | 结果与证据 |
+|---|---|
+| 安装包 | ✅ `release/r45/和鸣 Setup d.57.2.18.0.exe` 228,090,147 字节；runtime 7371 文件 / 5026 `.py`；内嵌 `web/assets/main-3CwM7stV.js`；`和鸣.exe` 文件版本 57.2.18.0；sha512 与 `latest.yml` 逐字一致 |
+| 云端部署 | ✅ `release.mjs` 第 8 步（备份 → 上传 15.5MB 包 → install → smoke）；`/api/health` `{"ok":true}`；线上主 bundle `main-qndET7YU.js` md5 `749A0318FC4D569242BE70F589CDFECC`，内含 `d.57.2.18.0` |
+| 更新源 | ✅ `/updates/latest.yml` 200 + `application/octet-stream` + 355B，指向 57.2.18；远端 sha512（hex）与本地实算逐字一致；Range 206 |
+| 发布链缺口 | ⚠ `release.mjs --publish` 调 `bash scripts/publish-update.sh`，但本机**没有 Git Bash**，`bash` 落到 WSL 并失败（`0x8007054f`）→ 本次用 `.tmp/publish-update.py`（paramiko）手工完成；**下一轮应把 publish 步骤改成 Node/Python 实现，或脚本内自动回退** |
+| 备份 | ✅ `.tmp/backups/heming-data-2026-11-02.tar.gz` 6.2KB（同名覆盖当天旧备份，见 HANDOFF 提醒） |
+| 提交 | `e8cb91f`（代码+文档），发布证据回填后再补一个 docs 提交 |
