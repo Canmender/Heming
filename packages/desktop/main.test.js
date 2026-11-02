@@ -186,6 +186,22 @@ test("main.js：stdio 桥接注入 planSpawn，并暴露 runtime:probe", () => {
   assert.ok(!/shell:\s*true/.test(mainCode), "禁止任何 shell:true");
 });
 
+test("main.js：子进程回收走 will-quit 闸，不再同步 dispose（d.50）", () => {
+  assert.ok(mainCode.includes('require("./child-kill")'), "回收逻辑必须来自 child-kill，别在 main.js 里再写一遍");
+  assert.ok(mainCode.includes("createChildReclaimer"), "will-quit 必须经回收闸：dispose 是异步的，同步放行就是孤儿");
+  assert.ok(
+    /app\.on\("will-quit",\s*\(event\)\s*=>\s*reclaimChildren\(event\)\)/.test(mainCode),
+    "will-quit 处理器要接住 event（preventDefault 是拦下来的唯一手段）",
+  );
+  assert.ok(
+    !/app\.on\("will-quit",\s*\(\)\s*=>/.test(mainCode),
+    "禁止无 event 的 will-quit：拦不住退出，dispose 的 Promise 会被丢掉",
+  );
+  // 判据是 idle（含在途回收），不是 running —— 刚点过停止就退出的场景要覆盖
+  assert.ok(mainCode.includes("!mcpStdio.idle()"), "MCP 侧按 idle 判要不要拦退出");
+  assert.ok(mainCode.includes("infohubBridge.idle()"), "InfoHub 侧按 idle 判要不要拦退出");
+});
+
 // 减弱动态偏好只有渲染进程能查到（matchMedia）；查到后回填给生命周期收紧关闭时机，
 // 否则这类用户要对着静止画面等满 3.2s 可见地板。
 test("main.js：查询减弱动态偏好并回填给 splash 生命周期", () => {

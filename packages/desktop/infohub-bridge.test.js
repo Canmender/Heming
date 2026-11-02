@@ -1,6 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const {
@@ -47,8 +48,24 @@ function tick() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+/**
+ * 假回收：**同步** kill（沿用旧断言里的 killedByUs），并记录每次调用。
+ * ★ 单元测试必须注入它：缺省实现会真的调 taskkill /T /F，测试里的 4321 是假 PID，
+ *   打在真机器上就是「跑个测试顺手杀了别人家的进程」。
+ */
+function fakeTeardown(calls = []) {
+  const fn = (child, deps) => {
+    child?.kill?.();
+    calls.push({ pid: child?.pid, ...deps });
+    return Promise.resolve({ exited: true, via: "fake" });
+  };
+  fn.calls = calls;
+  return fn;
+}
+
 function makeBridge(overrides = {}) {
   const spawned = [];
+  const teardown = overrides.teardown ?? fakeTeardown();
   const bridge = createInfohubBridge({
     spawn: (command, args, opts) => {
       const { child, writes } = fakeChild();
@@ -61,8 +78,10 @@ function makeBridge(overrides = {}) {
     exists: overrides.exists ?? (() => true),
     log: overrides.log ?? (() => {}),
     helloTimeoutMs: overrides.helloTimeoutMs ?? 500,
+    isWindows: overrides.isWindows ?? true,
+    teardown,
   });
-  return { bridge, spawned };
+  return { bridge, spawned, teardown };
 }
 
 test("协议编码/切分：半包留到下一次，坏行忽略", () => {
@@ -236,6 +255,144 @@ test("配置变化会重启进程；stop 先发 shutdown 再回收", async () =>
   const shutdown = JSON.parse(spawned[1].writes.at(-1).trim());
   assert.equal(shutdown.method, "shutdown");
   assert.equal(bridge.stop(), false);
+});
+
+// —————————————————————— 进程树回收（d.50）——————————————————————
+
+test("spawn 参数按平台加 detached：POSIX 要自成进程组，kill(-pid) 才敢用负号", () => {
+  const win = makeBridge({ isWindows: true });
+  const winPending = win.bridge.start({ home: path.join(process.cwd(), "a") });
+  reply(win.spawned[0].child, { event: "hello" });
+  assert.equal(win.spawned[0].opts.detached, undefined, "Windows 上没有进程组，detached 只会让子进程更难收口");
+
+  const posix = makeBridge({ isWindows: false });
+  const posixPending = posix.bridge.start({ home: path.join(process.cwd(), "a") });
+  reply(posix.spawned[0].child, { event: "hello" });
+  assert.equal(posix.spawned[0].opts.detached, true);
+  return Promise.all([winPending, posixPending]);
+});
+
+test("stop 交出的不是 kill 而是回收：宽限预算 = killDelayMs，平台一并传下去", () => {
+  const { bridge, spawned, teardown } = makeBridge();
+  const pending = bridge.start({ home: path.join(process.cwd(), "a") });
+  reply(spawned[0].child, { event: "hello" });
+
+  bridge.stop({ killDelayMs: 0 });
+  return pending.then(() => {
+    assert.deepEqual(teardown.calls, [{ pid: spawned[0].child.pid, graceMs: 0, isWindows: true }]);
+  });
+});
+
+test("stop 缺省给 1.5s 宽限：先让 Python 自己关掉归档库，再拔树", async () => {
+  const { bridge, spawned, teardown } = makeBridge();
+  const first = bridge.start({ home: path.join(process.cwd(), "a") });
+  reply(spawned[0].child, { event: "hello" });
+  await first;
+  bridge.stop();
+  assert.equal(teardown.calls[0].graceMs, 1_500);
+});
+
+test("dispose 必等在途回收：点了停止就关应用，也不能抢在杀干净之前返回", async () => {
+  let resolveTeardown;
+  const gate = new Promise((r) => {
+    resolveTeardown = r;
+  });
+  const calls = [];
+  const { bridge, spawned } = makeBridge({
+    teardown: (child, deps) => {
+      child?.kill?.();
+      calls.push(deps);
+      return gate.then(() => ({ exited: true, via: "fake" }));
+    },
+  });
+  const pending = bridge.start({ home: path.join(process.cwd(), "a") });
+  reply(spawned[0].child, { event: "hello" });
+  await pending;
+
+  bridge.stop();
+  assert.equal(calls.length, 1, "stop 已发起回收");
+  let disposed = false;
+  const disposing = bridge.dispose().then(() => {
+    disposed = true;
+  });
+  await tick();
+  assert.equal(disposed, false, "回收没跑完就返回 ⇒ Electron 会在杀进程之前退出，孤儿照旧");
+
+  resolveTeardown();
+  await disposing;
+  assert.equal(disposed, true);
+});
+
+test("回收结论 exited:false 要如实写日志，不能当已经回收", async () => {
+  const lines = [];
+  const { bridge, spawned } = makeBridge({
+    log: (line) => lines.push(line),
+    teardown: () => Promise.resolve({ exited: false, via: "force-group" }),
+  });
+  const pending = bridge.start({ home: path.join(process.cwd(), "a") });
+  reply(spawned[0].child, { event: "hello" });
+  await pending;
+  bridge.stop();
+  await bridge.dispose();
+  assert.match(lines.join("\n"), /回收未确认/);
+  assert.match(lines.join("\n"), /force-group/);
+});
+
+test("hello 超时也回收进程：起不来的 Python 不能占着归档库等下次 start", async () => {
+  const { bridge, spawned, teardown } = makeBridge({ helloTimeoutMs: 20 });
+  await assert.rejects(bridge.start({ home: path.join(process.cwd(), "a") }), /启动超时/);
+  assert.equal(teardown.calls.length, 1);
+  assert.equal(teardown.calls[0].graceMs, 0);
+  assert.equal(spawned[0].child.killedByUs, true);
+});
+
+test("idle：只有「没活进程且没在途回收」才允许退出流程不拦", async () => {
+  let resolveTeardown;
+  const gate = new Promise((r) => {
+    resolveTeardown = r;
+  });
+  const { bridge, spawned } = makeBridge({
+    teardown: () => gate.then(() => ({ exited: true, via: "fake" })),
+  });
+  assert.equal(bridge.idle(), true);
+  const pending = bridge.start({ home: path.join(process.cwd(), "a") });
+  reply(spawned[0].child, { event: "hello" });
+  await pending;
+  assert.equal(bridge.idle(), false, "进程在跑");
+
+  bridge.stop();
+  await tick();
+  assert.equal(bridge.idle(), false, "进程没了但回收还在途——这时退出照样要等");
+  resolveTeardown();
+  await bridge.dispose();
+  assert.equal(bridge.idle(), true);
+});
+
+test("护栏：这两个桥不许自己杀进程，回收一律交给 child-kill", () => {
+  // 只断言代码：注释里写「旧实现是 child.kill()」是说明，不是接线。
+  const codeOf = (file) =>
+    fs
+      .readFileSync(path.join(__dirname, file), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split(/\r?\n/)
+      .filter((line) => !/^\s*(\/\/|\*)/.test(line))
+      .join("\n");
+  for (const { file, dispose } of [
+    { file: "infohub-bridge.js", dispose: "dispose" },
+    { file: "mcp-stdio.js", dispose: "disposeAll" },
+  ]) {
+    const code = codeOf(file);
+    assert.equal(/\.kill\(/.test(code), false, `${file} 不许出现裸 kill：单杀直接子进程就是孤儿来源，回收归 child-kill`);
+    assert.ok(code.includes("require(\"./child-kill\")"), `${file} 必须复用 child-kill，别再写一套`);
+    assert.ok(code.includes("beginTeardown("), `${file} 必须经 beginTeardown 走进程树回收`);
+    // dispose 与 stop 的分工：stop 立刻返回（界面不能等），dispose 等回收跑完（退出不能抢跑）
+    assert.ok(
+      new RegExp(`async function ${dispose}\\(\\)`).test(code),
+      `${file} 的 ${dispose} 必须是 async：同步返回就是让 Electron 抢在杀进程之前退出`,
+    );
+    assert.ok(code.includes("teardowns"), `${file} 要记住在途回收，dispose 才有的可等`);
+    assert.ok(/function idle\(\)/.test(code), `${file} 必须报告「有没有在忙」，退出流程靠它判断要不要拦`);
+  }
 });
 
 test("IPC：白名单、错误透传、目录选择", async () => {

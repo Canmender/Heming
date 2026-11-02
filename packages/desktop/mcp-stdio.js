@@ -22,6 +22,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { bundledEnv, resolveMcpCommand } = require("./bundled-runtime");
+const { DEFAULT_GRACE_MS, teardownChild } = require("./child-kill");
 
 /** 单条消息编码：MCP stdio 用换行分隔的 JSON-RPC。 */
 function encodeMessage(obj) {
@@ -207,6 +208,9 @@ function resolveExecutablePath(cmd, pathEntries, existsFn) {
  *   把逻辑命令（`npx`/`uvx`）翻译成本机真正能执行的形态。★ 由 main.js 注入
  *   `local-runtime.planStdioSpawn` 而不是在这里直接 require —— 那边依赖本文件的
  *   `resolveExecutable`，互相 require 会成循环。
+ * @param {boolean} [deps.isWindows] 注入平台（决定 spawn 是否 detached、走哪条杀进程分支）
+ * @param {(child: any, deps: object) => Promise<{exited:boolean, via:string}>} [deps.teardown]
+ *   子进程回收实现，缺省见 child-kill.teardownChild
  */
 function createStdioBridge({
   spawn,
@@ -214,9 +218,13 @@ function createStdioBridge({
   now = () => Date.now(),
   log = () => {},
   planSpawn = null,
+  isWindows = process.platform === "win32",
+  teardown = teardownChild,
 }) {
   /** serverId → { child, buffer, nextId, pending } */
   const servers = new Map();
+  /** 进行中的回收：disposeAll 必须等完，stop 不等。 */
+  const teardowns = new Set();
 
   const rejectAll = (entry, reason) => {
     for (const [, waiter] of entry.pending) {
@@ -260,12 +268,16 @@ function createStdioBridge({
     if (!isValidCommand(command)) throw new Error("stdio 启动命令不合法");
     if (!isValidArgs(args)) throw new Error("stdio 启动参数不合法");
 
-    const child = spawn(command, args, {
+    // detached 只给非 Windows：MCP 服务普遍再拉起孙子（npx → node → Chromium、
+    // uvx → python），自成进程组后 kill(-pid) 才能连孙子一起收掉。
+    const spawnOpts = {
       stdio: ["pipe", "pipe", "pipe"],
       shell: false,
       windowsHide: true,
       env,
-    });
+    };
+    if (!isWindows) spawnOpts.detached = true;
+    const child = spawn(command, args, spawnOpts);
     const entry = { child, buffer: "", nextId: 1, pending: new Map() };
     servers.set(serverId, entry);
 
@@ -339,28 +351,64 @@ function createStdioBridge({
     entry.child.stdin.write(encodeMessage(message));
   }
 
+  /**
+   * 发起一次进程树回收（不阻塞调用方）：MCP 服务的孙子进程比直接子进程更常见
+   * （npx → node → 浏览器、uvx → python），只 kill 直接子进程等于留一窝孤儿。
+   */
+  function beginTeardown(targetChild, graceMs) {
+    const run = (async () => {
+      try {
+        const result = await teardown(targetChild, { graceMs, isWindows });
+        if (!result.exited) {
+          log(`[mcp] 进程（PID ${targetChild?.pid ?? "?"}）回收未确认（via=${result.via}）`);
+        }
+      } catch (err) {
+        log(`[mcp] 进程回收失败：${err?.message ?? err}`);
+      } finally {
+        teardowns.delete(run);
+      }
+    })();
+    teardowns.add(run);
+    return run;
+  }
+
   function stop(serverId) {
     const entry = servers.get(serverId);
     if (!entry) return false;
     servers.delete(serverId);
     rejectAll(entry, "MCP 进程已被停止");
     try {
-      entry.child.kill();
+      // stdio 传输的礼貌关闭方式就是关 stdin：合规服务读到 EOF 会自己退出，
+      // 而且它退出时会带走自己的孙子——比我们先杀父进程干净得多。
+      entry.child.stdin?.end?.();
     } catch {
       /* 已退出 */
     }
+    beginTeardown(entry.child, DEFAULT_GRACE_MS);
     return true;
   }
 
-  function disposeAll() {
+  /**
+   * 应用退出时调用：停掉全部服务并**等到回收跑完**。
+   * @returns {Promise<void>}
+   */
+  async function disposeAll() {
     for (const id of [...servers.keys()]) stop(id);
+    while (teardowns.size > 0) {
+      await Promise.allSettled([...teardowns]);
+    }
   }
 
   function running() {
     return [...servers.keys()];
   }
 
-  return { start, request, notify, stop, disposeAll, running };
+  /** 既没有活进程也没有在途回收 ⇒ 退出时不用拦（见 main.js 的 will-quit）。 */
+  function idle() {
+    return servers.size === 0 && teardowns.size === 0;
+  }
+
+  return { start, request, notify, stop, disposeAll, running, idle };
 }
 
 module.exports = {

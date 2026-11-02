@@ -20,9 +20,13 @@ function fakeChild() {
   child.stdout = Object.assign(new EventEmitter(), { setEncoding() {} });
   child.stderr = Object.assign(new EventEmitter(), { setEncoding() {} });
   child.stdin = {
+    ended: false,
     write: (chunk) => {
       writes.push(String(chunk));
       return true;
+    },
+    end() {
+      this.ended = true;
     },
   };
   child.kill = () => {
@@ -33,6 +37,28 @@ function fakeChild() {
 
 function reply(child, payload) {
   child.stdout.emit("data", JSON.stringify(payload) + "\n");
+}
+
+/**
+ * 假回收：**同步** kill（保留 killedByUs 断言），并记录调用。
+ * ★ 测试必须注入它——缺省实现会真的执行 `taskkill /T /F`，测试里的 PID 是假的，
+ *   打在真机器上就是「跑个测试顺手杀了别人家的进程」。
+ */
+function fakeTeardown(calls = []) {
+  return Object.assign(
+    (child, deps) => {
+      child?.kill?.();
+      calls.push({ pid: child?.pid, ...deps });
+      return Promise.resolve({ exited: true, via: "fake" });
+    },
+    { calls },
+  );
+}
+
+/** 测试工厂：默认假平台 + 假回收，个别用例再覆盖。 */
+function makeBridge(deps = {}) {
+  const teardown = deps.teardown ?? fakeTeardown();
+  return createStdioBridge({ isWindows: true, teardown, ...deps });
 }
 
 test("编码/切分：换行分隔，半包留到下一次", () => {
@@ -64,7 +90,7 @@ test("命令/参数校验：空白、换行、超长一律拒绝", () => {
 
 test("请求→响应配对：写入一行 JSON-RPC，按 id 解析结果", async () => {
   const { child, writes } = fakeChild();
-  const bridge = createStdioBridge({ spawn: () => child, timeoutMs: 200 });
+  const bridge = makeBridge({ spawn: () => child, timeoutMs: 200 });
 
   const pending = bridge.request("s1", { command: "npx" }, "tools/list", {});
   const sent = JSON.parse(writes[0].trim());
@@ -84,7 +110,7 @@ test("请求→响应配对：写入一行 JSON-RPC，按 id 解析结果", asyn
 
 test("通知（无 id）不会错配给挂起的请求", async () => {
   const { child } = fakeChild();
-  const bridge = createStdioBridge({ spawn: () => child, timeoutMs: 200 });
+  const bridge = makeBridge({ spawn: () => child, timeoutMs: 200 });
   const pending = bridge.request("s1", { command: "x" }, "tools/list", {});
   reply(child, { jsonrpc: "2.0", method: "notifications/message", params: { level: "info" } });
   reply(child, { jsonrpc: "2.0", id: 1, result: { ok: true } });
@@ -93,7 +119,7 @@ test("通知（无 id）不会错配给挂起的请求", async () => {
 
 test("错误响应 → 拒绝并带 code；进程退出 → 挂起请求全部失败", async () => {
   const { child } = fakeChild();
-  const bridge = createStdioBridge({ spawn: () => child, timeoutMs: 200 });
+  const bridge = makeBridge({ spawn: () => child, timeoutMs: 200 });
 
   const failed = bridge.request("s1", { command: "x" }, "tools/list", {});
   reply(child, { jsonrpc: "2.0", id: 1, error: { code: -32601, message: "没有这个方法" } });
@@ -105,23 +131,24 @@ test("错误响应 → 拒绝并带 code；进程退出 → 挂起请求全部�
   assert.equal(bridge.running().includes("s1"), false);
 });
 
-test("超时 → 拒绝；stop → kill 并清理", async () => {
+test("超时 → 拒绝；stop → 关 stdin 并回收整棵进程树", async () => {
   const { child } = fakeChild();
-  const bridge = createStdioBridge({ spawn: () => child, timeoutMs: 30 });
+  const bridge = makeBridge({ spawn: () => child, timeoutMs: 30 });
   await assert.rejects(bridge.request("s1", { command: "x" }, "tools/list", {}), /超时/);
 
-  const { child: c2 } = fakeChild();
-  const bridge2 = createStdioBridge({ spawn: () => c2, timeoutMs: 200 });
+  const second = fakeChild();
+  const bridge2 = makeBridge({ spawn: () => second.child, timeoutMs: 200 });
   const p = bridge2.request("s2", { command: "x" }, "tools/list", {});
   assert.equal(bridge2.stop("s2"), true);
-  assert.equal(c2.killedByUs, true);
+  assert.equal(second.child.killedByUs, true);
+  assert.equal(second.child.stdin.ended, true, "stdio 传输的礼貌关闭就是关 stdin：服务自己退时会带走孙子");
   await assert.rejects(p, /已被停止/);
   assert.deepEqual(bridge2.running(), []);
 });
 
 test("非法命令直接抛错，不 spawn", () => {
   let spawned = 0;
-  const bridge = createStdioBridge({
+  const bridge = makeBridge({
     spawn: () => {
       spawned++;
       return fakeChild().child;
@@ -133,16 +160,16 @@ test("非法命令直接抛错，不 spawn", () => {
 
 test("notify 只写一行、不建 pending", () => {
   const { child, writes } = fakeChild();
-  const bridge = createStdioBridge({ spawn: () => child });
+  const bridge = makeBridge({ spawn: () => child });
   bridge.notify("s1", { command: "x" }, "notifications/initialized");
   const sent = JSON.parse(writes[0].trim());
   assert.equal(sent.method, "notifications/initialized");
   assert.equal(sent.id, undefined);
 });
 
-test("disposeAll 停掉全部服务", () => {
+test("disposeAll 停掉全部服务", async () => {
   const kids = [];
-  const bridge = createStdioBridge({
+  const bridge = makeBridge({
     spawn: () => {
       const f = fakeChild();
       kids.push(f.child);
@@ -151,10 +178,106 @@ test("disposeAll 停掉全部服务", () => {
   });
   bridge.request("a", { command: "x" }, "tools/list", {}).catch(() => {});
   bridge.request("b", { command: "y" }, "tools/list", {}).catch(() => {});
-  bridge.disposeAll();
+  await bridge.disposeAll();
   assert.equal(kids.length, 2);
   assert.ok(kids.every((k) => k.killedByUs));
+  assert.ok(kids.every((k) => k.stdin.ended));
   assert.deepEqual(bridge.running(), []);
+});
+
+// —————————————————————— 进程树回收（d.50）——————————————————————
+
+test("spawn 参数按平台加 detached：MCP 的孙子进程（npx→node→Chromium）要靠整组信号收", () => {
+  // timeoutMs 给小值：这里的请求永远不会 stop，缺省 30s 超时定时器会把测试进程拖住
+  const spawnOn = (isWindows) => {
+    const opts = [];
+    const bridge = makeBridge({
+      isWindows,
+      timeoutMs: 20,
+      spawn: (_command, _args, options) => {
+        opts.push(options);
+        return fakeChild().child;
+      },
+    });
+    bridge.request("s", { command: "x" }, "tools/list", {}).catch(() => {});
+    return opts[0];
+  };
+  const win = spawnOn(true);
+  assert.equal(win.detached, undefined, "Windows 没有进程组，detached 只会让子进程更难收口");
+  assert.equal(win.shell, false);
+  assert.equal(win.windowsHide, true);
+
+  const posix = spawnOn(false);
+  assert.equal(posix.detached, true, "自成进程组是 kill(-pid) 的前提");
+  assert.equal(posix.shell, false);
+});
+
+test("stop 交出的不是 kill 而是回收：整棵树一并交给 child-kill", () => {
+  const handle = fakeChild();
+  const teardown = fakeTeardown();
+  const bridge = makeBridge({ spawn: () => handle.child, teardown, isWindows: false });
+  bridge.request("s", { command: "x" }, "tools/list", {}).catch(() => {});
+  bridge.stop("s");
+  assert.deepEqual(teardown.calls, [
+    { pid: handle.child.pid, graceMs: 1_500, isWindows: false },
+  ]);
+});
+
+test("回收没确认成功要写日志，不能当已经回收", async () => {
+  const lines = [];
+  const handle = fakeChild();
+  const bridge = makeBridge({
+    log: (line) => lines.push(line),
+    spawn: () => handle.child,
+    teardown: () => Promise.resolve({ exited: false, via: "force-group" }),
+  });
+  bridge.request("s", { command: "x" }, "tools/list", {}).catch(() => {});
+  bridge.stop("s");
+  await bridge.disposeAll();
+  assert.match(lines.join("\n"), /回收未确认/);
+});
+
+test("disposeAll 必等在途回收：刚点过停止就关应用，也不能抢在杀干净之前返回", async () => {
+  let resolveTeardown;
+  const gate = new Promise((r) => {
+    resolveTeardown = r;
+  });
+  const handle = fakeChild();
+  const bridge = makeBridge({
+    spawn: () => handle.child,
+    teardown: () => gate.then(() => ({ exited: true, via: "fake" })),
+  });
+  bridge.request("s", { command: "x" }, "tools/list", {}).catch(() => {});
+  bridge.stop("s");
+  let done = false;
+  const disposing = bridge.disposeAll().then(() => {
+    done = true;
+  });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(done, false, "回收没跑完就返回 ⇒ Electron 会在杀进程之前退出，孤儿照旧");
+  resolveTeardown();
+  await disposing;
+  assert.equal(done, true);
+});
+
+test("idle：只有「没活进程且没在途回收」才允许退出流程不拦", async () => {
+  let resolveTeardown;
+  const gate = new Promise((r) => {
+    resolveTeardown = r;
+  });
+  const bridge = makeBridge({
+    spawn: () => fakeChild().child,
+    teardown: () => gate.then(() => ({ exited: true, via: "fake" })),
+  });
+  assert.equal(bridge.idle(), true);
+  bridge.request("s", { command: "x" }, "tools/list", {}).catch(() => {});
+  assert.equal(bridge.idle(), false, "服务在跑");
+  bridge.stop("s");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(bridge.idle(), false, "进程没了但回收还在途——这时退出照样要等");
+  resolveTeardown();
+  await bridge.disposeAll();
+  assert.equal(bridge.idle(), true);
 });
 
 /* ================================================================== planSpawn（本机运行时翻译） */
@@ -162,7 +285,7 @@ test("disposeAll 停掉全部服务", () => {
 test("planSpawn · spawn 收到翻译后的命令与参数，且仍然 shell:false", () => {
   const calls = [];
   const { child } = fakeChild();
-  const bridge = createStdioBridge({
+  const bridge = makeBridge({
     spawn: (command, args, opts) => {
       calls.push({ command, args, opts });
       return child;
@@ -182,7 +305,7 @@ test("planSpawn · spawn 收到翻译后的命令与参数，且仍然 shell:fal
 test("planSpawn · 拿到的是补全过的 PATH（否则探测结果与启动环境会自相矛盾）", () => {
   const calls = [];
   const { child } = fakeChild();
-  const bridge = createStdioBridge({
+  const bridge = makeBridge({
     spawn: () => child,
     planSpawn: (plan) => {
       calls.push(plan);
@@ -199,7 +322,7 @@ test("planSpawn · 拿到的是补全过的 PATH（否则探测结果与启动�
 
 test("planSpawn 抛错（本机缺运行时）→ 不 spawn，文案原样冒泡", () => {
   let spawned = 0;
-  const bridge = createStdioBridge({
+  const bridge = makeBridge({
     spawn: () => {
       spawned++;
       return fakeChild().child;
@@ -215,7 +338,7 @@ test("planSpawn 抛错（本机缺运行时）→ 不 spawn，文案原样冒泡
 
 test("planSpawn 返回非法命令时仍然被拦住（不因翻译绕过校验）", () => {
   let spawned = 0;
-  const bridge = createStdioBridge({
+  const bridge = makeBridge({
     spawn: () => {
       spawned++;
       return fakeChild().child;

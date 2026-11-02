@@ -22,6 +22,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { bundledPython } = require("./bundled-runtime");
+const { teardownChild } = require("./child-kill");
 
 /** 与 packages/infohub/infohub/bridge.py 的 `_ALLOWED_METHODS` 保持一致。 */
 const ALLOWED_METHODS = new Set([
@@ -151,6 +152,9 @@ function isValidMethod(method, allowShutdown = false) {
  * @param {(target: string) => boolean} [deps.exists]
  * @param {(line: string) => void} [deps.log]
  * @param {number} [deps.helloTimeoutMs]
+ * @param {boolean} [deps.isWindows] 注入平台（决定 spawn 是否 detached、走哪条杀进程分支）
+ * @param {(child: any, deps: object) => Promise<{exited:boolean, via:string}>} [deps.teardown]
+ *   子进程回收实现，缺省见 child-kill.teardownChild（测试里换成断言用假实现）
  */
 function createInfohubBridge({
   spawn,
@@ -160,6 +164,8 @@ function createInfohubBridge({
   exists = defaultExists,
   log = () => {},
   helloTimeoutMs = HELLO_TIMEOUT_MS,
+  isWindows = process.platform === "win32",
+  teardown = teardownChild,
 }) {
   /** 当前子进程与它对应的配置。 */
   let child = null;
@@ -175,6 +181,12 @@ function createInfohubBridge({
   let startedAt = 0;
   const pending = new Map();
   const eventSinks = new Set();
+  /**
+   * 进行中的子进程回收。stop() 不阻塞调用方（start() 重拉时要立刻继续），
+   * 但 dispose() 必须等完它们——否则「用户刚点了停止就关应用」仍会留孤儿。
+   * @type {Set<Promise<void>>}
+   */
+  const teardowns = new Set();
 
   function resolveTarget(config = {}) {
     const home = normalizeHome(config.home, defaultHome);
@@ -295,15 +307,21 @@ function createInfohubBridge({
       PYTHONUTF8: "1",
     };
 
+    // detached 只给非 Windows：它让子进程自成进程组（组长），kill(-pid) 的负号才打得对；
+    // Windows 上没有进程组，拔树交给 taskkill /T（见 child-kill.js）。
+    // 代价是子进程不再随父进程自然收口——所以 stop/dispose 必须自己把它杀干净。
+    const spawnOpts = {
+      cwd: packageDir,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: false,
+      windowsHide: true,
+    };
+    if (!isWindows) spawnOpts.detached = true;
+
     let targetChild;
     try {
-      targetChild = spawn(target.python, ["-m", "infohub.bridge"], {
-        cwd: packageDir,
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: false,
-        windowsHide: true,
-      });
+      targetChild = spawn(target.python, ["-m", "infohub.bridge"], spawnOpts);
     } catch (err) {
       return Promise.reject(new Error(`InfoHub 启动失败：${err?.message ?? err}`));
     }
@@ -313,6 +331,9 @@ function createInfohubBridge({
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         helloDeferred = null;
+        // 20s 不报 hello 的进程不会再有用，而且它可能已经打开了归档库：
+        // 就地回收，别等下一次 start 才顺手清掉（那时用户可能已经退出应用了）。
+        stop({ killDelayMs: 0, silent: true });
         reject(new Error("InfoHub 启动超时：请检查 Python 解释器与数据目录是否正确"));
       }, helloTimeoutMs);
       timer.unref?.();
@@ -442,8 +463,30 @@ function createInfohubBridge({
   }
 
   /**
-   * 停止进程。先请 Python 自杀（关闭归档库），超时再强杀。
-   * @returns {boolean} 是否真的停了一个进程
+   * 发起一次进程树回收（不阻塞调用方）。
+   * 结论只写日志：`exited:false` 表示没证明它死了，如实留痕比假装成功有用。
+   */
+  function beginTeardown(targetChild, graceMs) {
+    const run = (async () => {
+      try {
+        const result = await teardown(targetChild, { graceMs, isWindows });
+        if (!result.exited) {
+          log(`[infohub] 进程（PID ${targetChild?.pid ?? "?"}）回收未确认（via=${result.via}）`);
+        }
+      } catch (err) {
+        log(`[infohub] 进程回收失败：${err?.message ?? err}`);
+      } finally {
+        teardowns.delete(run);
+      }
+    })();
+    teardowns.add(run);
+    return run;
+  }
+
+  /**
+   * 停止进程：先请 Python 自杀（关闭归档库），到点再拔整棵进程树。
+   * 同步返回「是否真的停了一个进程」，回收本身在后台跑完（dispose 会等）。
+   * @returns {boolean}
    */
   function stop({ killDelayMs = 1_500, silent = false } = {}) {
     const targetChild = child;
@@ -463,28 +506,21 @@ function createInfohubBridge({
     } catch {
       /* 进程可能已经退了 */
     }
-    if (killDelayMs <= 0) {
-      try {
-        targetChild.kill();
-      } catch {
-        /* 已退出 */
-      }
-    } else {
-      const timer = setTimeout(() => {
-        try {
-          targetChild.kill();
-        } catch {
-          /* 已退出 */
-        }
-      }, killDelayMs);
-      timer.unref?.();
-    }
+    // 旧实现在这里挂一个 `setTimeout(() => child.kill(), killDelayMs)` 并 unref：
+    // unref 的定时器在应用退出时直接被丢掉，进程一个没杀——孤儿就是这么来的。
+    beginTeardown(targetChild, killDelayMs);
     return true;
   }
 
-  /** 应用退出时调用：不留孤儿进程。 */
-  function dispose() {
-    return stop({ killDelayMs: 0, silent: true });
+  /**
+   * 应用退出时调用：发起回收并**等到它跑完**（或被硬超闸放行）。
+   * @returns {Promise<void>}
+   */
+  async function dispose() {
+    stop({ killDelayMs: 0, silent: true });
+    while (teardowns.size > 0) {
+      await Promise.allSettled([...teardowns]);
+    }
   }
 
   /** 订阅进度/事件（`{"event":"progress",...}`）。返回取消订阅函数。 */
@@ -494,9 +530,15 @@ function createInfohubBridge({
     return () => eventSinks.delete(callback);
   }
 
+  /** 既没有活进程也没有在途回收 ⇒ 退出时不用拦（见 main.js 的 will-quit）。 */
+  function idle() {
+    return !child && teardowns.size === 0;
+  }
+
   return {
     call,
     dispose,
+    idle,
     info,
     isValidMethod: (method) => isValidMethod(method),
     notify,

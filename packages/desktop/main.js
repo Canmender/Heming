@@ -10,6 +10,7 @@ const { resolveRequest, contentTypeFor, INDEX_FILE } = require("./app-protocol")
 const { isCallWindowUrl, callWindowOptions } = require("./call-window");
 const { appVersion } = require("./app-version");
 const { buildChildEnv, createStdioBridge } = require("./mcp-stdio");
+const { createChildReclaimer } = require("./child-kill");
 const { bundledPython } = require("./bundled-runtime");
 const { planStdioSpawn, probeLocalRuntime } = require("./local-runtime");
 
@@ -433,10 +434,24 @@ if (!gotLock) {
     probeLocalRuntime({ env: buildChildEnv({ ...process.env }), execPath: process.execPath }),
   );
 
-  app.on("will-quit", () => {
-    mcpStdio.disposeAll();
-    infohubBridge?.dispose();
+  // 子进程回收闸（d.50）：`will-quit` 是同步事件，回收却是异步的 —— 旧写法发完
+  // dispose 就任由 Electron 退下去，两个桥里 `child.kill()` 只杀直接子进程，
+  // Python 的转写/bot 与 MCP 的 npx→node→Chromium 全留在机器上。
+  // 这里改成「拦一次 → 等回收 → 再退」，并由 reclaimer 自带硬超闸：
+  // 进程杀不动也不能让用户关不掉应用。没有子进程时一律不拦，退出零延迟。
+  const reclaimChildren = createChildReclaimer({
+    tasks: () => {
+      const list = [];
+      // 判据是「有没有活着的或正在回收的子进程」，不是「界面有没有在跑」：
+      // 用户几秒前点过停止，回收可能还在后台跑，这时退出照样要等它。
+      if (!mcpStdio.idle()) list.push(() => mcpStdio.disposeAll());
+      if (infohubBridge && !infohubBridge.idle()) list.push(() => infohubBridge.dispose());
+      return list;
+    },
+    onQuit: () => app.quit(),
+    log: (line) => console.warn(line),
   });
+  app.on("will-quit", (event) => reclaimChildren(event));
 
   /* ------------------------------------------------------- 自动更新 */
 
