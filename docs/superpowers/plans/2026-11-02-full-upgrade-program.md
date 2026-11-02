@@ -257,3 +257,16 @@
 | pdfjs 6 | ✅ 4.10.38 → 6.5.438，真机冒烟通过、parse.ts 零改动、首屏零影响、回退一步 |
 | 全量门禁 | ✅ shared 29 / server 141 / web 186 文件 2798 例 / desktop 28 文件 494 例，4/4 无重试；三包 tsc 0 |
 | 版本 | `d.59.2.20.0`（纯加固与维护：修订 19→20） |
+
+### 第三波发布完成（2026-11-02 21:45）
+
+| 项 | 结果与证据 |
+|---|---|
+| 提交 | `96878ae`（d.59.2.20.0）+ `c349463`（BOM 修复与守卫） |
+| 门禁 | build 通过；逐包 4/4 无重试（shared 29 / server 141 / web 186 文件 2798 例 / desktop 28 文件 494 例）；三包 tsc 0 |
+| 安装包 | `release/r47/和鸣 Setup d.59.2.20.0.exe` 228,193,912 字节，sha512 本地/远端/清单三方一致 |
+| 云端部署 | ✅ 首次**失败**（nginx 配置带 UTF-8 BOM → unknown directive → 回退默认站点），去 BOM + release.mjs 预检加 BOM 守卫后重跑成功；`/api/health` ok、首页 200、线上 bundle `main-CUKCJzyM.js` 与本地同名 |
+| CSP | ✅ 线上响应头 `Content-Security-Policy-Report-Only` 已生效（策略含 `script-src 'self' 'wasm-unsafe-eval'`、`connect-src … https: wss: localhost/127.0.0.1`），本版按计划**只 report-only** |
+| 更新源 | ✅ latest.yml 指向 59.2.20，sha512 与安装包一致，Range 206 |
+| 备份 | ✅ `heming-data-2026-11-02-d.59.2.20.0.tar.gz`（8.1KB）——**文件名带版本号已生效，不再同日覆盖** |
+| 第四波 | `task-13` ③-4 安全复审、`task-14` Electron 46 前置收尾（E2E 热路径异步化 / 明文写窗口 / 同步桥降级） |
