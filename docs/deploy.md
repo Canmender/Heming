@@ -171,15 +171,18 @@ bash /opt/heming/app/deploy/install-app.sh /opt/heming/keep/heming-<旧版本>.t
 
 ```bash
 systemctl stop heming-api
-tar czf /root/heming-data-$(date +%F).tar.gz -C /var/lib/heming .
+# 文件名带版本号：以前只按日期命名，同一天发第二版会把上一份覆盖掉（d.28/d.30/d.57/d.59 都踩过）
+tar czf /root/heming-data-$(date +%F)-<版本号>.tar.gz -C /var/lib/heming .
 systemctl start heming-api
 
 # 恢复（覆盖前把现库改名留档）
 systemctl stop heming-api
-tar xzf /root/heming-data-<日期>.tar.gz -C /var/lib/heming
+tar xzf /root/heming-data-<日期>-<版本号>.tar.gz -C /var/lib/heming
 chown -R heming:heming /var/lib/heming
 systemctl start heming-api
 ```
+
+> `deploy-bare.py backup` 自 2026-11-02 起也按 `heming-data-<日期>-<VERSION>.tar.gz` 命名（脚本里的 `VERSION` 与当轮发版号同步）；本机 `.tmp/backups/` 同名留档，不再互相覆盖。
 
 停进程是为了拿到一致快照：WAL 在进程存活时可能尚未合并，热拷贝容易只拷走 `.db`、把最近的写入留在 `-wal` 里。
 

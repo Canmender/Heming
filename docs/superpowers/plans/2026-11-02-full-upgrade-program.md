@@ -230,3 +230,18 @@
 | 更新源 | ✅ `latest.yml` 355B/200/octet-stream，指向 59.2.19，与本地字节逐一相同（中文名未重编码）；安装包 Range 206；**发布脚本换成了 `publish-update.mjs`，不再依赖 Git Bash** |
 | 备份 | ✅ `.tmp/backups/heming-data-2026-11-02.tar.gz`（同名覆盖当天旧版，仍是待改的运维纪律） |
 | 第三波候选 | `task-9` CSP 基线（report-only 起步）、`task-10` 启动时序（hydrate 后 setState，Electron 46 前必须）、`task-11` 无障碍与错误态巡检、`task-12` pdfjs 6 评估 |
+
+## 8. 第三波（2026-11-02 20:45 起）
+
+第二波已发布 d.59.2.19.0（上线 + r46 安装包 + 更新源）。第三波四轨并行：
+
+| 轨 | 内容 | 负责人 | 主要风险/边界 |
+|---|---|---|---|
+| ②-6 CSP 基线 | web/桌面 `app://` 的 CSP，先 report-only 收集违例再 enforce；`connect-src` 必须含用户自填 baseUrl | filepatch | 内联脚本/样式是否需豁免；不能挡模型直连供应商 |
+| 启动时序（Electron 46 前置） | hydrate 完成后 `store/llm.ts`、`lib/mcp/store.ts` 自动补全且不覆盖用户编辑；E2E identity 纳入时序 | hotpath | 与用户编辑竞态；46 无同步桥兜底 |
+| ③-2/③-3 无障碍与错误态 | 键盘可达、焦点环、aria-live（流式不高频播报）、对比度计算、异步三态与断网行为 | rollout | 只标注不改视觉；清单逐条「已修/已存在/不适用」 |
+| pdfjs-dist 6 评估 | v6 breaking + Electron 45 真机 PDF 冒烟，决定升/不升 | baseline | worker 崩溃风险；只动 pdfjs 相关行 |
+
+**已顺手完成的运维根治**：`deploy-bare.py backup` 文件名加版本号（`heming-data-<日期>-<VERSION>.tar.gz`），不再同日覆盖；`docs/deploy.md` §6 与 HANDOFF §5-1 已同步。
+
+**版本预期**：第四波发布时按实际落地项重算（CSP/时序/无障碍偏 fix，pdfjs 若升则算依赖维护）。
