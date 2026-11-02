@@ -1,0 +1,85 @@
+import { describe, expect, it } from "vitest";
+import {
+  PET_POSES,
+  poseDrivesMouth,
+  poseMotion,
+  resolvePose,
+  type PetPose,
+  type PoseInput,
+} from "./petPose.js";
+
+/** 默认输入：一切平静。 */
+const base: PoseInput = {
+  hasError: false,
+  streaming: false,
+  inputOpen: false,
+  unreadTotal: 0,
+  celebrating: false,
+};
+
+const pose = (patch: Partial<PoseInput> = {}) => resolvePose({ ...base, ...patch });
+
+describe("姿态优先级", () => {
+  it("平静时待机", () => {
+    expect(pose()).toBe("idle");
+  });
+
+  it("出错最高优先：即便同时在说话/有未读，也报错态", () => {
+    expect(pose({ hasError: true })).toBe("alerting");
+    expect(pose({ hasError: true, streaming: true, unreadTotal: 9 })).toBe("alerting");
+  });
+
+  it("说话优先于开心（说到一半被点，不能闭嘴切动作）", () => {
+    expect(pose({ streaming: true, celebrating: true })).toBe("speaking");
+  });
+
+  it("开心优先于等待输入/未读（刚被摸的反馈要立刻给）", () => {
+    expect(pose({ celebrating: true, inputOpen: true, unreadTotal: 3 })).toBe("happy");
+  });
+
+  it("输入框打开 → 等待输入", () => {
+    expect(pose({ inputOpen: true })).toBe("listening");
+  });
+
+  it("有未读 → 提醒态", () => {
+    expect(pose({ unreadTotal: 1 })).toBe("alerting");
+  });
+
+  it("输入框打开且有未读：等待输入优先（人正在打字，别抢）", () => {
+    expect(pose({ inputOpen: true, unreadTotal: 5 })).toBe("listening");
+  });
+});
+
+describe("姿态映射表", () => {
+  const all: PetPose[] = ["idle", "listening", "thinking", "speaking", "alerting", "happy"];
+
+  it("每个姿态都有映射（新增姿态漏了表会被这条抓住）", () => {
+    for (const p of all) {
+      expect(PET_POSES[p], p).toBeDefined();
+      expect(PET_POSES[p].mouth === "text" || PET_POSES[p].mouth === "closed", p).toBe(true);
+    }
+  });
+
+  it("只有说话态由文字驱动口型", () => {
+    expect(all.filter(poseDrivesMouth)).toEqual(["speaking"]);
+  });
+
+  it("待机/思考不播进入动作（避免和模型自带动作打架）", () => {
+    expect(poseMotion("idle")).toBeNull();
+    expect(poseMotion("thinking")).toBeNull();
+  });
+
+  it("只有「开心」有进入动作（常驻窗口里每种状态都播一次就是噪音）", () => {
+    expect(poseMotion("happy")).toBe("TapBody");
+    for (const p of all.filter((x) => x !== "happy")) {
+      expect(poseMotion(p), p).toBeNull();
+    }
+  });
+
+  it("动作组名不是空串（空串会让 playMotion 白跑一趟）", () => {
+    for (const p of all) {
+      const m = PET_POSES[p].enterMotion;
+      if (m !== null) expect(m.length, p).toBeGreaterThan(0);
+    }
+  });
+});

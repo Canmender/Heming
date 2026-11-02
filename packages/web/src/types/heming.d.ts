@@ -145,6 +145,13 @@ declare global {
       openConversation: (conversationId: string) => void;
       /** 主窗口侧：订阅「桌宠要打开某会话」。返回取消订阅函数。 */
       onOpenConversation: (cb: (conversationId: string | null) => void) => () => void;
+      /**
+       * 订阅主进程推来的事件（桌宠窗口用）。
+       * 契约见 `lib/petEvent.ts` 的 PetEventPayload。**目前无生产者**，是第三期预留。
+       */
+      onEvent: (cb: (payload: unknown) => void) => () => void;
+      /** 主动发起一条推送（主窗口用；主进程校验来源后转发给桌宠）。 */
+      emit: (payload: unknown) => void;
       /** 主窗口侧：订阅「桌宠要打开设置」。返回取消订阅函数。 */
       onOpenSettings: (cb: () => void) => () => void;
     };

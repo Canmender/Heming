@@ -19,6 +19,7 @@
 | [LESS-AI-TONE.md](LESS-AI-TONE.md) | 去 AI 味：11 条统计验证规则、白名单、信息守恒 |
 | [WEB-SCRAPING.md](WEB-SCRAPING.md) | 网页抓取：Scrapling 16 个工具的三层启用策略 |
 | [SELF-EDIT.md](SELF-EDIT.md) | 自我修改：`self_*` 工具、护栏、审计、快照回滚与开关 |
+| [PET.md](PET.md) | 桌宠：怎么用、三层架构、数据边界、扩展指南（换形象/加姿态/接事件通道/接语音）、已知限制与排查 |
 
 ## 3. 设计规格与实施记录
 
@@ -101,6 +102,7 @@
 | [specs/2026-11-01-d48-staff-proactive-agent.md](superpowers/specs/2026-11-01-d48-staff-proactive-agent.md) | d.48：常驻幕僚——晨报 + 日程临期 + 任务异常三路只读巡检，规则优先、可选模型总结并强制补回紧急项，`heming.staff.*` 本机存储、去重账本、静默时段与预算；只递简报与跳转，不自动执行、不拉起 InfoHub、不巡检归档全文 |
 | [specs/2026-11-01-d46-desktop-pet.md](superpowers/specs/2026-11-01-d46-desktop-pet.md) | d.53（文件名为写作时编号）：桌宠——独立透明置顶窗（`pet.html` 独立入口，不背应用 bundle）、默认鼠标穿透 + 按可交互区动态关闭、Cubism Core 官方再分发文件 + Hiyori 示例模型、视线/点击/口型、点角色直接对话（复用 `streamChat` 直连本机 LLM）；不做语音/消息感知/模型市场 |
 | [plans/2026-11-01-d46-desktop-pet.md](superpowers/plans/2026-11-01-d46-desktop-pet.md) | d.53 实施计划：资源与依赖 → 窗口层纯函数 → 主进程接线 → 渲染层 → 对话与设置 → 门禁与真机验收 |
+| [specs/2026-11-02-pet-presence.md](superpowers/specs/2026-11-02-pet-presence.md) | 桌宠的在场感：事件由既有模块产出、渠道互斥（主窗口在前台则走通知中心）、三档打扰强度、错过不补发；**规格，未开工，版本号待定** |
 | [research/2026-10-28-d38-adversarial-qa.md](research/2026-10-28-d38-adversarial-qa.md) | d.38.1.10.0：对抗性自检 16 例（typing + 连续性），C2 暴露「消息到达不清理输入态」，已修 |
 | [research/2026-10-28-d39-deep-stress-testing.md](research/2026-10-28-d39-deep-stress-testing.md) | d.39.1.11.0：32 例深度对抗/压测（消息风暴、页面切换、通知桥模糊输入）+ 6 项修复（交接窗口、吐司合并、id 校验、文本清洗、点击幂等、通话窗焦点）；后台失败 UI 仍缺 |
 | [research/2026-10-23-rounds-after-d36.md](research/2026-10-23-rounds-after-d36.md) | d.36 之后的开工备忘：CSP 基线、`release.sh` 顺序、docker 清理、需拍板项与建议轮次 |

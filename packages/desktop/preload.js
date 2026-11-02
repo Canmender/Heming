@@ -237,6 +237,18 @@ contextBridge.exposeInMainWorld("__heming_pet", {
   },
   /** 重新加载桌宠页面（换模型 / 换绑定智能体后让它重新读配置）。 */
   reload: () => ipcRenderer.send("pet:reload"),
+  /**
+   * 订阅主进程推来的事件（桌宠窗口用）。
+   * 事件契约见 `packages/web/src/lib/petEvent.ts`；目前无生产者，是第三期的预留通道。
+   */
+  onEvent: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("pet:event", listener);
+    return () => ipcRenderer.removeListener("pet:event", listener);
+  },
+  /** 主动发起一条推送（主窗口用；主进程会校验来源）。 */
+  emit: (payload) => ipcRenderer.send("pet:emit", payload),
   /** 桌宠窗口请求把主窗口叫到前台并切到设置页（未配置模型时的出口）。 */
   openSettings: () => ipcRenderer.send("pet:open-settings"),
   /** 桌宠窗口请求打开某个会话（未读角标被点时）。 */

@@ -383,3 +383,40 @@ test("销毁后再销毁不抛错", () => {
   host.destroy();
   assert.doesNotThrow(() => host.destroy());
 });
+
+/* ────────────────────────────── 反向事件通道（主进程 → 桌宠） ────────────────────────────── */
+
+test("pushEvent：窗口不存在时返回 false，不抛错", () => {
+  const { host } = makeHost();
+  host.start();
+  assert.equal(host.pushEvent({ kind: "speak", text: "hi" }), false);
+});
+
+test("pushEvent：窗口存在时送达 pet:event 通道", () => {
+  const { host, created } = makeHost();
+  host.start();
+  host.show();
+  const win = created[0];
+  assert.equal(host.pushEvent({ kind: "speak", text: "早报来了" }), true);
+  const sent = win.webContents._sent.filter((m) => m.ch === "pet:event");
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].payload, { kind: "speak", text: "早报来了" });
+});
+
+test("pushEvent：畸形载荷一律拒绝，不把垃圾送进渲染层", () => {
+  const { host, created } = makeHost();
+  host.start();
+  host.show();
+  for (const bad of [null, undefined, "x", 42, [], { noKind: 1 }, { kind: 7 }]) {
+    assert.equal(host.pushEvent(bad), false, JSON.stringify(bad));
+  }
+  assert.equal(created[0].webContents._sent.filter((m) => m.ch === "pet:event").length, 0);
+});
+
+test("pushEvent：窗口销毁后返回 false", () => {
+  const { host } = makeHost();
+  host.start();
+  host.show();
+  host.destroy();
+  assert.equal(host.pushEvent({ kind: "reset" }), false);
+});

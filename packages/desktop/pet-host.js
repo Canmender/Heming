@@ -67,6 +67,8 @@ function createPetHost(deps) {
 
   /** @type {Electron.BrowserWindow|null} */
   let win = null;
+  /** 反向事件推送（见下方 pushEvent 定义）。 */
+  let pushEvent = () => false;
   /** @type {Electron.Tray|null} */
   let tray = null;
 
@@ -330,6 +332,17 @@ function createPetHost(deps) {
    * 主窗口或其他窗口（含将来新增的）不该能操纵桌宠的穿透与位置——
    * 这与 notify-bridge 校验 conversationId 是同一个思路：跨进程边界不靠调用方自觉。
    */
+  /** 只认主窗口发起的请求（桌宠与主窗口是两个渲染进程，来源必须分开判）。 */
+  function fromMainWindow(event) {
+    const main = getMainWindow && getMainWindow();
+    if (!main || main.isDestroyed()) return false;
+    try {
+      return BrowserWindow.fromWebContents(event.sender) === main;
+    } catch {
+      return false;
+    }
+  }
+
   function fromPetWindow(event) {
     if (!win || win.isDestroyed()) return false;
     try {
@@ -401,6 +414,31 @@ function createPetHost(deps) {
       main.show();
       main.focus();
       main.webContents.send("pet:open-conversation", conversationId);
+    });
+
+    /**
+     * 推送事件给桌宠（主进程 → 渲染进程）。
+     *
+     * 这是**唯一**的反向通道：桌宠此前只能自己感知（WS），无法接收平台侧发生的事
+     * （任务收尾、日程临期、幕僚简报）。第三期这些都走这一条，不必再开新 IPC。
+     * 目前只有测试与「主窗口主动发起」在用，属于**显式预留**，不是死代码：
+     * 契约见 `packages/web/src/lib/petEvent.ts` 的 PetEventPayload。
+     */
+    pushEvent = (payload) => {
+      if (!win || win.isDestroyed()) return false;
+      if (!payload || typeof payload !== "object" || typeof payload.kind !== "string") return false;
+      try {
+        win.webContents.send("pet:event", payload);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    // 主窗口也可以发起（例如未来的「把这条简报交给桌宠说」）；只认主窗口与桌宠窗口
+    ipcMain.on("pet:emit", (event, payload) => {
+      if (!fromPetWindow(event) && !fromMainWindow(event)) return;
+      pushEvent(payload);
     });
 
     ipcMain.on("pet:open-settings", (event) => {
@@ -490,6 +528,8 @@ function createPetHost(deps) {
     stepScale,
     setClickThrough,
     setInteractive,
+    /** 反向通道：向桌宠推送事件（主进程 → 渲染）。见上方 pushEvent 的说明。 */
+    pushEvent: (payload) => pushEvent(payload),
     refreshTrayMenu,
     get window() {
       return win;

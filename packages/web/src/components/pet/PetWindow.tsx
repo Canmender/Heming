@@ -12,6 +12,8 @@ import { classifyPointerUp, isInteractiveAt, shouldReportChange, type Rect } fro
 import { useLive2D } from "./useLive2D.js";
 import { usePetChat } from "./usePetChat.js";
 import { usePetUnread } from "../../lib/petUnread.js";
+import { poseDrivesMouth, poseMotion, resolvePose, type PetPose } from "../../lib/petPose.js";
+import { parsePetEvent } from "../../lib/petEvent.js";
 
 /**
  * 桌宠窗口（d.46）。
@@ -54,6 +56,67 @@ export function PetWindow() {
   const chat = usePetChat(prefs.agentId);
   // 未读感知：桌宠窗口存在即订阅（未登录时 hook 内部不建连接）
   const unread = usePetUnread(true);
+
+  /**
+   * 外部驱动（`pet:event`）：主进程推来的姿态与文案。
+   *
+   * 目前**没有生产者**，是第三期的预留消费端——接上任意发送方即生效
+   * （任务收尾 d.51 / 日程临期与幕僚简报 d.48 / 自动化 d.47）。
+   * 姿态由发送方负责收尾（发 `reset` 或下一条 `pose`），不设自动过期：
+   * 桌宠无从判断「这条简报该显示多久」，交给知道上下文的一方决定。
+   */
+  const [externalPose, setExternalPose] = useState<PetPose | null>(null);
+  const [externalBubble, setExternalBubble] = useState<{ text: string; at: number } | null>(null);
+
+  useEffect(() => {
+    const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
+    if (!bridge?.onEvent) return;
+    return bridge.onEvent((raw) => {
+      // 跨进程载荷一律不可信：畸形事件静默忽略（桌宠没有控制台可给用户看）
+      const ev = parsePetEvent(raw);
+      if (!ev) return;
+      if (ev.kind === "pose") {
+        setExternalPose(ev.pose);
+      } else if (ev.kind === "speak") {
+        setExternalBubble({ text: ev.text, at: Date.now() });
+      } else if (ev.kind === "task") {
+        setExternalBubble({ text: ev.ok ? `完成了：${ev.title}` : `没成功：${ev.title}`, at: Date.now() });
+      } else if (ev.kind === "schedule") {
+        setExternalBubble({ text: `${ev.at} ${ev.title}`, at: Date.now() });
+      } else if (ev.kind === "reset") {
+        setExternalPose(null);
+        setExternalBubble(null);
+      }
+    });
+  }, []);
+
+  // 外部文案 8 秒后收回（比未读提示长：简报通常不止一眼扫过）
+  useEffect(() => {
+    if (!externalBubble) return;
+    const timer = window.setTimeout(() => setExternalBubble(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [externalBubble]);
+
+  /**
+   * 「被摸」的短窗口。用对象而不是布尔：连点时要能刷新计时（布尔在 true→true 时不触发 effect）。
+   */
+  const [celebrate, setCelebrate] = useState<{ at: number } | null>(null);
+  useEffect(() => {
+    if (!celebrate) return;
+    const timer = window.setTimeout(() => setCelebrate(null), 900);
+    return () => window.clearTimeout(timer);
+  }, [celebrate]);
+
+  // 姿态：外部指定优先（第三期通道），否则由纯函数判定（见 petPose.ts）；
+  // 表现由映射表决定——渲染代码不再认识任何具体动作组名
+  const pose: PetPose = externalPose ?? resolvePose({
+    hasError: Boolean(chat.error),
+    streaming: chat.streaming,
+    inputOpen,
+    unreadTotal: unread.total,
+    celebrating: celebrate !== null,
+  });
+  const mouthDriven = poseDrivesMouth(pose);
 
   // 模型与 Core 都从当前页面的源取（app://heming 或部署站点），不联网。
   //
@@ -124,7 +187,7 @@ export function PetWindow() {
   /* ────────────── 口型：随流式文字到达振荡，停下就归零 ────────────── */
   const mouthRef = useRef(0);
   useEffect(() => {
-    if (!chat.streaming) {
+    if (!mouthDriven) {
       mouthRef.current = 0;
       setMouthOpen(0);
       return;
@@ -141,7 +204,7 @@ export function PetWindow() {
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [chat.streaming, setMouthOpen]);
+  }, [mouthDriven, setMouthOpen]);
 
   /** 有新字到达就顶一次口型（用 reply 长度变化判断，不额外挂钩子）。 */
   const replyLenRef = useRef(0);
@@ -151,6 +214,21 @@ export function PetWindow() {
     }
     replyLenRef.current = chat.reply.length;
   }, [chat.reply]);
+
+  /**
+   * 进入新姿态时播一次对应动作。
+   *
+   * ★ 只有「开心」有映射（见 PET_POSES）：常驻窗口里给每种状态都配一个动作，
+   *   很快就会变成噪音。其它表达交给角标、口型与输入框本身。
+   *   模型缺少该动作组时 playMotion 内部静默跳过，换模型不会炸。
+   */
+  const prevPoseRef = useRef<PetPose>("idle");
+  useEffect(() => {
+    if (prevPoseRef.current === pose) return;
+    prevPoseRef.current = pose;
+    const motion = poseMotion(pose);
+    if (motion) playMotion(motion);
+  }, [pose, playMotion]);
 
   /* ────────────── 未读：新消息到达时短暂提示 ────────────── */
   const [unreadHint, setUnreadHint] = useState<string | null>(null);
@@ -242,7 +320,7 @@ export function PetWindow() {
       // 双击：播动作；单击：呼出输入框
       const now = Date.now();
       if (now - d.lastTapAt < 320) {
-        playMotion("TapBody");
+        setCelebrate({ at: now }); // 姿态层负责播对应动作
         return;
       }
       setInputOpen(true);
@@ -306,7 +384,7 @@ export function PetWindow() {
 
   const bubbleText = chat.error
     ? chat.error
-    : chat.reply || (chat.streaming ? "…" : "") || unreadHint || "";
+    : chat.reply || (chat.streaming ? "…" : "") || externalBubble?.text || unreadHint || "";
 
   const showBubbleHint = !chat.hasConnection && inputOpen;
 
