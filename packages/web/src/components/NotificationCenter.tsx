@@ -90,6 +90,8 @@ export function NotificationCenter() {
         type="button"
         aria-label={`通知中心${unread > 0 ? ` ${unread} 条未读` : ""}`}
         aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-controls="notification-center-panel"
         onClick={() => {
           setOpen((v) => !v);
           // 打开即视为「已看到有通知」：列表项的未读点保留到逐条点击/全部已读，
@@ -114,15 +116,26 @@ export function NotificationCenter() {
           <path d="M10 19a2 2 0 0 0 4 0" />
         </svg>
         {unread > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 min-w-[15px] rounded-full border border-white bg-ink px-1 text-center text-[9px] font-semibold leading-[14px] text-white">
+          <span
+            aria-hidden="true"
+            className="absolute -right-0.5 -top-0.5 min-w-[15px] rounded-full border border-white bg-ink px-1 text-center text-[9px] font-semibold leading-[14px] text-white"
+          >
             {unread}
           </span>
         )}
       </button>
+      {/*
+       * 未读播报：角标是视觉的，读屏用户靠这条 polite 活区知道「有新通知」。
+       * 只在**未读数变化**时文本才变（0 → 不渲染内容），不会随每次渲染重复播报。
+       */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {unread > 0 ? `有 ${unread} 条未读通知` : ""}
+      </p>
 
       {open && (
         <div
           ref={panelRef}
+          id="notification-center-panel"
           role="dialog"
           aria-modal="false"
           aria-label="通知中心"
@@ -191,7 +204,7 @@ export function NotificationCenter() {
                             {item.body}
                           </p>
                         )}
-                        <span className="mt-0.5 block text-[10px] text-[#999]">
+                        <span className="mt-0.5 block text-[10px] text-[#6f6f6f]">
                           {formatRelativeTime(item.createdAt, now)}
                         </span>
                       </button>

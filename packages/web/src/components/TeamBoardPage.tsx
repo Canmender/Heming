@@ -242,7 +242,7 @@ export function TeamBoardPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索任务或日程…"
-            className="w-[200px] rounded-md border border-line px-2 py-1 text-[11px] outline-hidden focus:border-[#bbb]"
+            className="w-[200px] rounded-md border border-line-strong px-2 py-1 text-[11px] outline-hidden focus:border-ink"
           />
           <span className="text-muted">
             {selectedMember ? `${selectedMember.user.displayName} · ` : ""}

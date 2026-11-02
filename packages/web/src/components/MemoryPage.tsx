@@ -609,7 +609,7 @@ function workingTraceLines(labels: string[], trace: MemoryObservability): Recall
 function RecallGroup({ title, lines }: { title: string; lines: RecallLine[] }) {
   return (
     <div>
-      <div className="text-[11px] font-bold text-[#777]">
+      <div className="text-[11px] font-bold text-muted">
         {title}（{lines.length}）
       </div>
       {lines.length === 0 ? (
@@ -674,7 +674,7 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
                 width={10}
                 height={10}
                 aria-hidden="true"
-                className="shrink-0 translate-y-[1px] text-[#bbb]"
+                className="shrink-0 translate-y-[1px] text-muted"
               />
               <span>
                 {DROP_REASON_LABEL[item.reason]}：{item.content ?? item.id}
@@ -1090,7 +1090,7 @@ export function MemoryPage({
     <section aria-label="短期记忆" className={cardCls}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="text-[12px] font-bold text-[#777]">短期记忆</div>
+          <div className="text-[12px] font-bold text-muted">短期记忆</div>
           <div className={`mt-1 ${hintCls}`}>
             会话级缓冲：当前会话最近若干轮上下文，约 2 小时未活动或满 40 轮后过期，仅存本机
           </div>
@@ -1184,7 +1184,7 @@ export function MemoryPage({
       <section aria-label="数据库记忆概览" className={cardCls}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="text-[12px] font-bold text-[#777]">数据库 · 长期记忆</div>
+            <div className="text-[12px] font-bold text-muted">数据库 · 长期记忆</div>
             <div className={`mt-1 ${hintCls}`}>
               这是<strong className="font-medium text-[#666]">所有智能体共用</strong>的长期记忆，
               智能体对话时会读到这里的语义记忆。情景记忆仍按智能体分开（它记的是某次对话的过程）。
@@ -1258,7 +1258,7 @@ export function MemoryPage({
                 bump();
               }}
             />
-            <span className="text-[12px] font-bold text-[#777]">记忆总开关</span>
+            <span className="text-[12px] font-bold text-muted">记忆总开关</span>
           </div>
           <span aria-hidden="true" className="h-4 w-px bg-line-soft" />
           <div className="flex items-center gap-2">
@@ -1270,7 +1270,7 @@ export function MemoryPage({
                 bump();
               }}
             />
-            <span className="text-[12px] font-bold text-[#777]">自动记忆</span>
+            <span className="text-[12px] font-bold text-muted">自动记忆</span>
           </div>
           <span className={hintCls}>
             自动记忆关闭后不再自动沉淀情景与语义（短期记忆仍记录），手动添加不受影响
@@ -1331,7 +1331,7 @@ export function MemoryPage({
             readOnly
             aria-label="手动复制记忆 JSON"
             value={manualCopy}
-            className="mt-2 h-[120px] w-full rounded-lg border border-line bg-[#fafafa] p-2 text-[11px]"
+            className="mt-2 h-[120px] w-full rounded-lg border border-line-strong bg-[#fafafa] p-2 text-[11px]"
           />
         )}
         {importOpen && (
@@ -1363,18 +1363,18 @@ export function MemoryPage({
 
       <section className={`${cardCls} mt-3`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-[12px] font-bold text-[#777]">记忆条目</div>
+          <div className="text-[12px] font-bold text-muted">记忆条目</div>
           <input
             aria-label="检索记忆"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="按关键词过滤条目"
-            className="w-[200px] rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+            className="w-[200px] rounded-lg border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
           />
         </div>
 
         <div role="group" aria-label="语义记忆条目" className="mt-3">
-          <div className="text-[12px] font-bold text-[#777]">语义记忆（{semanticShown.length}）</div>
+          <div className="text-[12px] font-bold text-muted">语义记忆（{semanticShown.length}）</div>
           {semanticShown.length === 0 ? (
             <div className={`mt-1 ${hintCls}`}>{query ? "无匹配条目" : "暂无条目"}</div>
           ) : (
@@ -1493,7 +1493,7 @@ export function MemoryPage({
         </div>
 
         <div role="group" aria-label="情景记忆条目" className="mt-4 border-t border-line-soft pt-3">
-          <div className="text-[12px] font-bold text-[#777]">情景记忆（{episodicShown.length}）</div>
+          <div className="text-[12px] font-bold text-muted">情景记忆（{episodicShown.length}）</div>
           {episodicShown.length === 0 ? (
             <div className={`mt-1 ${hintCls}`}>{query ? "无匹配条目" : "暂无条目"}</div>
           ) : (
@@ -1529,7 +1529,7 @@ export function MemoryPage({
       </section>
 
       <section className={`${cardCls} mt-3`}>
-        <div className="text-[12px] font-bold text-[#777]">召回预览</div>
+        <div className="text-[12px] font-bold text-muted">召回预览</div>
         <div className={`mt-1 ${hintCls}`}>
           输入一句话，看这次触发会召回哪些记忆：语义（置顶必带 + top5）、情景（top3）、短期（最近 6
           轮），总量受 1200 字符预算约束
@@ -1545,7 +1545,7 @@ export function MemoryPage({
             value={recallQuery}
             onChange={(e) => setRecallQuery(e.target.value)}
             placeholder="如：帮我把发布计划整理一下"
-            className="min-w-0 flex-1 rounded-lg border border-line px-3 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+            className="min-w-0 flex-1 rounded-lg border border-line-strong px-3 py-1.5 text-[12px] outline-hidden focus:border-ink"
           />
           <button
             type="button"
@@ -1601,7 +1601,7 @@ export function MemoryPage({
                 readOnly
                 aria-label="将被注入的记忆段"
                 value={recall.text}
-                className="mt-3 h-[140px] w-full rounded-lg border border-line bg-[#fafafa] p-2 text-[11px]"
+                className="mt-3 h-[140px] w-full rounded-lg border border-line-strong bg-[#fafafa] p-2 text-[11px]"
               />
             ) : (
               <div className={`mt-3 ${hintCls}`}>三层皆无命中：不会注入任何记忆段</div>
@@ -1613,7 +1613,7 @@ export function MemoryPage({
       <section className={`${cardCls} mt-3`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-[12px] font-bold text-[#777]">召回记录</div>
+            <div className="text-[12px] font-bold text-muted">召回记录</div>
             <div className={`mt-1 ${hintCls}`}>
               本机最近 {RECALL_LOG_MAX} 次「带记忆的生成」留档：召回几条、真注入几条、哪些被预算裁掉，
               以及回答里疑似用到了哪条（判据是词重合，不是模型自述）。只存本机，不参与记忆导出。
@@ -1661,7 +1661,7 @@ export function MemoryPage({
 
       {coldRows.length > 0 && (
         <section className={`${cardCls} mt-3`}>
-          <div className="text-[12px] font-bold text-[#777]">长期未被引用（{coldRows.length}）</div>
+          <div className="text-[12px] font-bold text-muted">长期未被引用（{coldRows.length}）</div>
           <div className={`mt-1 ${hintCls}`}>
             被注入 {COLD_MIN_INJECTED} 次以上、却一次都没被判为「疑似引用」的记忆（含公用与私有的长期记忆、以及情景沉淀），
             按注入次数从多到少排。系统不会因为「冷」自动降权或删除它们——这只是一条线索：
@@ -1909,7 +1909,7 @@ export function MemoryPage({
   const reviewCard = (
     <section aria-label="复盘沉淀" className={`${cardCls} mt-3`}>
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[12px] font-bold text-[#777]">复盘沉淀（任务结束后自评）</div>
+        <div className="text-[12px] font-bold text-muted">复盘沉淀（任务结束后自评）</div>
         <button
           type="button"
           aria-label="立即复盘一次"
@@ -1958,7 +1958,7 @@ export function MemoryPage({
             max={50}
             value={reviewSettings.turnsThreshold}
             onChange={(e) => patchReview({ turnsThreshold: Number(e.target.value) })}
-            className="w-[56px] rounded-lg border border-line px-2 py-1 text-[12px]"
+            className="w-[56px] rounded-lg border border-line-strong px-2 py-1 text-[12px]"
           />
         </label>
       </div>
@@ -2004,7 +2004,7 @@ export function MemoryPage({
 
   const agentPrefsCard = (
     <section aria-label="智能体记忆开关" className={`${cardCls} mt-3`}>
-      <div className="text-[12px] font-bold text-[#777]">智能体记忆开关</div>
+      <div className="text-[12px] font-bold text-muted">智能体记忆开关</div>
       <div className={`mt-1 ${hintCls}`}>
         短期记忆与长期记忆默认关闭，需要为每个智能体手动开启；个人数据库默认允许使用（个人知识库默认允许）。
       </div>
@@ -2152,12 +2152,12 @@ export function MemoryPage({
           {/* 选择器不做可见文字标签：页面已经有一个名为「智能体」的标签页，
               再放一个同名文字会让读屏与测试都命中多处。可见性由 aria-label 承担。 */}
           <label className="flex shrink-0 items-center gap-2 whitespace-nowrap text-[12px] text-muted">
-            <span className="text-[#aaa]">当前</span>
+            <span className="text-muted">当前</span>
             <select
               aria-label="选择智能体"
               value={agentId}
               onChange={(e) => setAgentId(e.target.value)}
-              className="rounded-lg border border-line px-2 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+              className="rounded-lg border border-line-strong px-2 py-1.5 text-[12px] outline-hidden focus:border-ink"
             >
               <option value="">全部智能体</option>
               {[...agents, ...manualAgents].map((agent) => (
@@ -2199,7 +2199,7 @@ export function MemoryPage({
                 }`}
               >
                 {TAB_LABELS[key]}
-                <span className="ml-1.5 text-[11px] text-[#aaa]">{tabCounts[key]}</span>
+                <span className="ml-1.5 text-[11px] text-muted">{tabCounts[key]}</span>
               </button>
             );
           })}

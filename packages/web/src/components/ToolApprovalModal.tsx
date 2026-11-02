@@ -203,12 +203,12 @@ export function ToolApprovalModal({
                           ? "bg-[#b42318] text-white"
                           : call.risk === "write"
                             ? "bg-[#f3f0e6] text-[#8a6d1f]"
-                            : "bg-[#f0f0f0] text-[#777]"
+                            : "bg-[#f0f0f0] text-muted"
                       }`}
                     >
                       {RISK_LABEL[call.risk]}
                     </span>
-                    <span className="font-mono text-[10px] text-[#aaa]">{call.name}</span>
+                    <span className="font-mono text-[10px] text-muted">{call.name}</span>
                   </label>
                   {call.summary ? (
                     <div className="mt-0.5 break-all text-[11px] text-muted">{call.summary}</div>
@@ -218,7 +218,7 @@ export function ToolApprovalModal({
                   ) : preview ? (
                     <details className="mt-1 rounded-md border border-line-soft bg-white">
                       <summary
-                        className="cursor-pointer px-2 py-1 text-[10px] text-[#777]"
+                        className="cursor-pointer px-2 py-1 text-[10px] text-muted"
                         title={preview.path}
                       >
                         查看变更（{changeCountLabel(preview)}）
@@ -233,7 +233,7 @@ export function ToolApprovalModal({
                                 ? "bg-[#f2fbf4] text-[#1d6b3a]"
                                 : line.kind === "del"
                                   ? "bg-[#fdf4f3] text-[#b42318]"
-                                  : "text-[#999]"
+                                  : "text-muted"
                             }
                           >
                             {line.kind === "add" ? "+ " : line.kind === "del" ? "− " : "  "}
@@ -241,7 +241,7 @@ export function ToolApprovalModal({
                           </div>
                         ))}
                         {preview.truncated && (
-                          <div className="pt-1 text-[#aaa]">…（预览已截断）</div>
+                          <div className="pt-1 text-muted">…（预览已截断）</div>
                         )}
                       </pre>
                       {preview.kind === "delete" && (
@@ -264,7 +264,7 @@ export function ToolApprovalModal({
             </summary>
             <ul className="mt-1.5 flex flex-col gap-1">
               {auto.map((call) => (
-                <li key={call.id} className="text-[11px] text-[#aaa]">
+                <li key={call.id} className="text-[11px] text-muted">
                   <span className="font-mono">{call.name}</span>
                   {call.summary ? ` · ${call.summary}` : ""}
                 </li>
@@ -291,11 +291,11 @@ export function ToolApprovalModal({
             <span>
               记住本次选择（按工具与资源）
               {rememberPrefixes.length > 0 && (
-                <span className="block font-mono text-[10px] text-[#777]">
+                <span className="block font-mono text-[10px] text-muted">
                   将记住目录：{rememberPrefixes.join("、")}
                 </span>
               )}
-              <span className="block text-[10px] text-[#aaa]">
+              <span className="block text-[10px] text-muted">
                 文件编辑只按目录前缀授权，不会放行整个工具；危险操作不受记住的允许影响，
                 仍会每次询问；可在设置区一键清空。
               </span>
@@ -347,7 +347,7 @@ function FilePatchPreviewPanel({
   }, [argsJson, previewer]);
 
   if (preview === undefined) {
-    return <div className="mt-1 text-[10px] text-[#999]">正在生成变更预览…</div>;
+    return <div className="mt-1 text-[10px] text-muted">正在生成变更预览…</div>;
   }
   if (preview === null) return null;
   if (preview.error) {
@@ -360,7 +360,7 @@ function FilePatchPreviewPanel({
 
   return (
     <details className="mt-1 rounded-md border border-line-soft bg-white" open>
-      <summary className="cursor-pointer px-2 py-1 text-[10px] text-[#777]">
+      <summary className="cursor-pointer px-2 py-1 text-[10px] text-muted">
         查看变更（{preview.summary}）
       </summary>
       <div className="max-h-56 overflow-auto border-t border-line-soft px-2 py-1.5 font-mono text-[10px] leading-4">
@@ -369,7 +369,7 @@ function FilePatchPreviewPanel({
             <div className="text-[#555]">
               <span className="font-bold">{file.kind}</span> {file.rel}
               {file.movedFrom ? `（由 ${file.movedFrom} 改名）` : ""}
-              <span className="ml-1 text-[#aaa]">
+              <span className="ml-1 text-muted">
                 +{file.added} −{file.removed}
               </span>
             </div>
@@ -381,18 +381,18 @@ function FilePatchPreviewPanel({
                     ? "bg-[#f2fbf4] text-[#1d6b3a]"
                     : line.kind === "del"
                       ? "bg-[#fdf4f3] text-[#b42318]"
-                      : "text-[#999]"
+                      : "text-muted"
                 }
               >
                 {line.kind === "add" ? "+ " : line.kind === "del" ? "− " : "  "}
                 {line.text || " "}
               </div>
             ))}
-            {file.truncated && <div className="pt-0.5 text-[#aaa]">…（该文件预览已截断）</div>}
+            {file.truncated && <div className="pt-0.5 text-muted">…（该文件预览已截断）</div>}
           </div>
         ))}
         {preview.truncated && (
-          <div className="pt-1 text-[#aaa]">
+          <div className="pt-1 text-muted">
             …（预览超过 {PATCH_PREVIEW_MAX_LINES} 行，已截断；确认前可在设置区缩小改动范围）
           </div>
         )}

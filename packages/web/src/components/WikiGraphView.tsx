@@ -136,7 +136,7 @@ export function WikiGraphView({
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 pb-2 text-[11px] text-muted">
-        <span className="font-bold text-[#777]">图谱</span>
+        <span className="font-bold text-muted">图谱</span>
         <span>{graph.nodes.length} 页 · {graph.edges.length} 条链接</span>
         {orphans > 0 && (
           <span className="text-[#b45309]">{orphans} 个孤儿页（无任何链接）</span>
@@ -251,7 +251,7 @@ export function WikiGraphView({
             ＋
           </button>
         </div>
-        <div className="pointer-events-none absolute bottom-2 left-2 text-[10px] text-[#bbb]">
+        <div className="pointer-events-none absolute bottom-2 left-2 text-[10px] text-muted">
           拖动平移 · Ctrl+滚轮缩放 · 双击复位 · 点节点打开页面
         </div>
       </div>

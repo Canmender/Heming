@@ -6,7 +6,15 @@ const path = require("node:path");
 const { loadWindowState, saveWindowState } = require("./window-state");
 const { shouldShowSplash, splashWindowOptions } = require("./splash-config");
 const { attachSplashLifecycle } = require("./splash-lifecycle");
-const { resolveRequest, contentTypeFor, INDEX_FILE } = require("./app-protocol");
+const {
+  cspHeadersFor,
+  normalizeCspMode,
+  parseCspViolation,
+  DEFAULT_API_ORIGIN,
+  INDEX_FILE,
+  resolveRequest,
+  contentTypeFor,
+} = require("./app-protocol");
 const { isPetWindowUrl, parsePetStateJson } = require("./pet-window");
 const { createPetHost } = require("./pet-host");
 const { appVersion } = require("./app-version");
@@ -132,6 +140,102 @@ function isAllowedNavigation(url, appUrl) {
   }
 }
 
+// ── CSP 基线（P0-6，d.60）：协议响应头 + 违例日志 ────────────────────────
+//
+// 策略本体是 `app-protocol.js` 里的纯函数（可单测），这里只做三件事：
+// 1. 从环境变量算灰度模式与 API 源；
+// 2. 给 app:// 的响应挂 CSP 头；
+// 3. 把渲染层的 CSP 违例 console 消息收进本机日志（限长 + 去重 + 只记元数据）。
+
+/** 违例日志上限：超过就清空重来（CSP 违例通常只有少数几种，无需长期累积）。 */
+const CSP_REPORT_LOG_MAX_BYTES = 256 * 1024;
+/** 去重表上限：超过后不再记新种类，防止被刷爆磁盘。 */
+const CSP_REPORT_MAX_DEDUPE = 500;
+const cspSeenViolations = new Set();
+
+/** 灰度模式：`HEMING_CSP_MODE=off|report|enforce`，**默认 report**（先收集违例）。 */
+function cspMode() {
+  return normalizeCspMode(process.env.HEMING_CSP_MODE);
+}
+
+/** 服务端源：HEMING_WEB_URL 的 origin（与嵌入产物构建时注入的 VITE_API_BASE 同源）。 */
+function cspApiOrigin() {
+  const raw = (process.env.HEMING_WEB_URL || "").trim();
+  if (!raw) return DEFAULT_API_ORIGIN;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return DEFAULT_API_ORIGIN;
+  }
+}
+
+/** 运维附加来源（HEMING_CSP_CONNECT，逗号/空白分隔）：给需要远程明文 http 的部署留的口子。 */
+function cspExtraConnect() {
+  return String(process.env.HEMING_CSP_CONNECT || "")
+    .split(/[\s,]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function cspOptions() {
+  return {
+    mode: cspMode(),
+    apiOrigin: cspApiOrigin(),
+    extraConnect: cspExtraConnect(),
+  };
+}
+
+/** 违例日志目录：`~/Heming/logs`（与崩溃日志同根，但**不是崩溃日志**）。 */
+function cspReportFile() {
+  return path.join(os.homedir(), "Heming", "logs", "csp-report.log");
+}
+
+/**
+ * 追加一条违例（去重 + 限长）。
+ *
+ * ★ 只写 `directive / blocked / source` 三个字段：绝不写页面内容、绝不写整条 console 消息
+ * （内联样式/脚本的违例消息可能夹带片段）。
+ */
+function appendCspReport(violation) {
+  const key = `${violation.directive}|${violation.blockedUri}|${violation.source}`;
+  if (cspSeenViolations.has(key)) return;
+  if (cspSeenViolations.size >= CSP_REPORT_MAX_DEDUPE) return;
+  cspSeenViolations.add(key);
+  try {
+    const file = cspReportFile();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    try {
+      if (fs.statSync(file).size > CSP_REPORT_LOG_MAX_BYTES) fs.writeFileSync(file, "");
+    } catch {
+      /* 文件还不存在：第一次写入 */
+    }
+    const line =
+      `[${new Date().toISOString()}] directive=${violation.directive} ` +
+      `blocked=${violation.blockedUri} source=${violation.source || "inline"}:${violation.line}\n`;
+    fs.appendFileSync(file, line, "utf8");
+  } catch {
+    /* 日志失败绝不影响界面：CSP 本身仍生效 */
+  }
+}
+
+/**
+ * 给窗口挂 CSP 违例收集（仅 `console-message` 里的 CSP 消息）。
+ *
+ * Electron 45 起 console-message 是 `(event, details)`；为兼容旧签名，
+ * 对第二个参数做对象判断，两种形状都能取到 message/sourceId/line。
+ */
+function attachCspReportLogger(win) {
+  if (cspMode() === "off") return;
+  win.webContents.on("console-message", (_event, detailsOrLevel, legacyMessage) => {
+    const isDetails = !!detailsOrLevel && typeof detailsOrLevel === "object";
+    const message = isDetails ? detailsOrLevel.message : legacyMessage;
+    const sourceId = isDetails ? detailsOrLevel.sourceId || "" : "";
+    const line = isDetails ? detailsOrLevel.lineNumber || 0 : 0;
+    const violation = parseCspViolation(message, sourceId, line);
+    if (violation) appendCspReport(violation);
+  });
+}
+
 /**
  * 注册 app:// 的资源处理器（须在 app ready 之后）。逻辑下沉到 app-protocol.js 的
  * 纯函数，这里只做「解析 → 读文件 → 回响应」。
@@ -154,7 +258,10 @@ function installAppProtocol() {
     });
     if (!resolved) {
       // 资源缺失或路径越界：不回落首页（回落会把 404 变成难以排查的 MIME 错误）
-      return new Response("not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      return new Response("not found", {
+        status: 404,
+        headers: { "Content-Type": "text/plain; charset=utf-8", ...cspHeadersFor(urlPath, cspOptions()) },
+      });
     }
     try {
       const body = await fs.promises.readFile(resolved.file);
@@ -164,10 +271,15 @@ function installAppProtocol() {
           "Content-Type": contentTypeFor(resolved.file),
           // 产物带内容哈希，可长缓存；index.html 不缓存以免版本切换时读到旧壳
           "Cache-Control": resolved.spaFallback ? "no-store" : "public, max-age=31536000, immutable",
+          // CSP 基线：off 时为空对象；report-only 时是 Content-Security-Policy-Report-Only
+          ...cspHeadersFor(urlPath, cspOptions()),
         },
       });
     } catch {
-      return new Response("read failed", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      return new Response("read failed", {
+        status: 500,
+        headers: { "Content-Type": "text/plain; charset=utf-8", ...cspHeadersFor(urlPath, cspOptions()) },
+      });
     }
   });
 }
@@ -314,6 +426,8 @@ if (!gotLock) {
     win.maximize();
 
     mainWindow = win;
+    // CSP 违例收集（report-only 期的主要证据来源；enforce 期也能看到被挡了什么）
+    attachCspReportLogger(win);
     win.on("closed", () => {
       if (mainWindow === win) mainWindow = null;
     });
@@ -610,6 +724,8 @@ if (!gotLock) {
   }
 
   console.log("[heming] 版本", appVersion());
+  // CSP 灰度模式：off / report（默认）/ enforce。report 期违例会写 ~/Heming/logs/csp-report.log
+  console.log("[heming] CSP 模式", cspMode());
 
 app.whenReady().then(() => {
     // 自定义协议处理器须在创建窗口之前装好，否则首次 loadURL 会拿到空响应

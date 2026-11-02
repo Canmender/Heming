@@ -486,7 +486,7 @@ export function InfohubPage() {
                 value={home}
                 onChange={(e) => setHome(e.target.value)}
                 placeholder={info?.defaultHome ?? "例如 D:\\wohaolei"}
-                className="min-w-0 flex-1 rounded-md border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+                className="min-w-0 flex-1 rounded-md border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
               />
               <button
                 type="button"
@@ -525,7 +525,7 @@ export function InfohubPage() {
                     value={python}
                     onChange={(e) => setPython(e.target.value)}
                     placeholder={info?.bundledPython ?? "内置运行时不可用，请选择 python.exe"}
-                    className="min-w-0 flex-1 rounded-md border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+                    className="min-w-0 flex-1 rounded-md border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
                   />
                   <button
                     type="button"
@@ -704,7 +704,7 @@ export function InfohubPage() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="全文检索（FTS5 trigram）：人物、地点、单号…"
-                  className="min-w-0 flex-1 rounded-md border border-line px-3 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+                  className="min-w-0 flex-1 rounded-md border border-line-strong px-3 py-1.5 text-[12px] outline-hidden focus:border-ink"
                 />
                 <button
                   type="submit"

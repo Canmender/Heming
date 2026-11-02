@@ -25,6 +25,7 @@ import { useInfohubStore } from "../lib/infohub/store.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { dayKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
+import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { Avatar } from "./Avatar.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 
@@ -438,7 +439,7 @@ export function TeamPage() {
             />
             用量
           </label>
-          <span className="text-[#999]">
+          <span className="text-[#6f6f6f]">
             {share.lastSyncAt ? `上次同步 ${fmtTime(new Date(share.lastSyncAt).toISOString())}` : "尚未同步"}
           </span>
           <button
@@ -450,7 +451,7 @@ export function TeamPage() {
           </button>
         </div>
         {syncError && (
-          <p className="mt-1 text-[10px] text-[#b42318]">共享同步失败：{syncError}</p>
+          <p role="alert" className="mt-1 text-[10px] text-[#b42318]">共享同步失败：{syncError}</p>
         )}
       </div>
 
@@ -462,7 +463,7 @@ export function TeamPage() {
               onChange={(e) => setMemberQuery(e.target.value)}
               placeholder="搜索成员…"
               aria-label="搜索团队成员"
-              className="w-full rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+              className={`w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink ${FOCUS_RING}`}
             />
             <div className="mt-1.5 flex items-center justify-between text-[11px]">
               <label className="flex items-center gap-1 text-muted">
@@ -488,14 +489,14 @@ export function TeamPage() {
 
           <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
             {!rosterReady ? (
-              <div className="space-y-1.5 p-1.5">
+              <div role="status" aria-busy="true" aria-label="正在加载团队成员" className="space-y-1.5 p-1.5">
                 {[0, 1, 2, 3].map((i) => (
                   <div key={i} className="h-9 animate-pulse rounded-lg bg-[#f2f2f2]" />
                 ))}
               </div>
             ) : rosterError ? (
               <div className="p-2 text-[12px]">
-                <p className="text-[#b42318]">名册加载失败：{rosterError}</p>
+                <p role="alert" className="text-[#b42318]">名册加载失败：{rosterError}</p>
                 <button
                   type="button"
                   className="mt-1 rounded-sm border border-line px-2 py-0.5 text-[11px]"
@@ -632,14 +633,14 @@ export function TeamPage() {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
             {!feedReady ? (
-              <div className="space-y-2">
+              <div role="status" aria-busy="true" aria-label="正在加载团队动向" className="space-y-2">
                 {[0, 1, 2].map((i) => (
                   <div key={i} className="h-12 animate-pulse rounded-xl bg-[#f4f4f4]" />
                 ))}
               </div>
             ) : feedError ? (
               <div className="py-6 text-center text-[12px]">
-                <p className="text-[#b42318]">动向加载失败：{feedError}</p>
+                <p role="alert" className="text-[#b42318]">动向加载失败：{feedError}</p>
                 <button
                   type="button"
                   className="mt-2 rounded-sm border border-line px-2 py-0.5 text-[11px]"
@@ -713,7 +714,7 @@ export function TeamPage() {
                 不新增任何云端内容上传。
               </p>
               {!feedReady ? (
-                <p className="mt-3 text-[12px] text-muted">加载中…</p>
+                <p role="status" className="mt-3 text-[12px] text-muted">加载中…</p>
               ) : agendaActivities.length === 0 ? (
                 <div className="py-10 text-center text-[12px] leading-6 text-muted">
                   {!infohubRunning ? (
@@ -851,10 +852,10 @@ export function TeamPage() {
                   </p>
                 </section>
               ) : !usageReady ? (
-                <p className="mt-3 text-[12px] text-muted">加载中…</p>
+                <p role="status" className="mt-3 text-[12px] text-muted">加载中…</p>
               ) : usageError ? (
                 <div className="py-6 text-center text-[12px]">
-                  <p className="text-[#b42318]">用量加载失败：{usageError}</p>
+                  <p role="alert" className="text-[#b42318]">用量加载失败：{usageError}</p>
                   <button
                     type="button"
                     className="mt-2 rounded-sm border border-line px-2 py-0.5 text-[11px]"

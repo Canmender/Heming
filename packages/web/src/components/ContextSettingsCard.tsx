@@ -93,7 +93,7 @@ export function ContextSettingsCard() {
 
   return (
     <section className="mt-3 max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card">
-      <div className="text-[12px] font-bold text-[#777]">上下文预算</div>
+      <div className="text-[12px] font-bold text-muted">上下文预算</div>
       <div className={`mt-1 ${hintCls}`}>
         给 @ 触发组装的历史做 token 预算，超出的早期对话压缩为摘要；只在本机执行
       </div>

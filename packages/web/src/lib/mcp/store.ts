@@ -1,5 +1,11 @@
 import type { StorageLike } from "../memory/types.js";
-import { secureStorageFor, secureStorageStatus } from "../secureStorage.js";
+import {
+  hasSecureBridge,
+  onSecureHydrated,
+  secureStorageFor,
+  secureStorageStatus,
+  secureStorageHydrated,
+} from "../secureStorage.js";
 import type { McpServerConfig, McpTool, McpToolRef, McpTransport } from "./types.js";
 import { DEFAULT_PRESET_SERVERS, presetServerId } from "./presets.js";
 
@@ -150,6 +156,11 @@ export class McpRegistry {
   private serverList: McpServerConfig[];
   private toolMap: Record<string, McpTool[]>;
   private enabled: Set<string>;
+  /**
+   * 启动时序（d.59）：用户在本进程里**已经改过服务列表**（新增/修改/删除）。
+   * 一旦为真，hydrate 完成后不再重读安全键——内存就是最新值，重读会把用户刚改的冲掉。
+   */
+  private serversMutated = false;
 
   constructor(storage: StorageLike = defaultStorage(), now: () => string = () => new Date().toISOString()) {
     this.storage = storage;
@@ -157,7 +168,16 @@ export class McpRegistry {
     this.serverList = this.readServers();
     this.toolMap = this.readTools();
     this.enabled = this.readEnabled();
-    this.seedDefaults();
+    /*
+     * 启动时序（d.59）：hydrate 未完成时 `readServers()` 可能只是「缓存未命中」的空表，
+     * 与「真的没有服务」无法区分。Electron 46 没有同步桥兜底，此时 `seedDefaults()`
+     * 会把预置写盘、覆盖磁盘上的密文配置（用户请求头 token 一起丢）。
+     * 所以这里推迟预置，等 hydrate 完成后由 `refreshAfterHydrate()` 重新判断。
+     * 浏览器（无桥）没有这个问题，行为不变。
+     */
+    if (secureStorageHydrated() || !hasSecureBridge()) {
+      this.seedDefaults();
+    }
   }
 
   /**
@@ -196,6 +216,24 @@ export class McpRegistry {
       changed = true;
     }
     if (changed) this.saveServers();
+  }
+
+  /**
+   * hydrate 完成后补一次读（启动门禁 `onSecureHydrated` 会调；测试可手动调）。
+   *
+   * 合并规则（与 `store/llm.ts` 同一套思路）：
+   * 1. 用户已经改过服务列表（`serversMutated`）→ **不重读**，内存即最新（写路径已落盘）；
+   * 2. 否则重读安全键；读到空才补此前被推迟的预置（`seedDeferred`）。
+   *
+   * 任何情况下都不会删改磁盘上的密文：读不到时仍按空表展示，由 secure 层标记
+   * `undecryptableKeys`（d.36 口径：密文留在原地，换回原账户还能恢复）。
+   */
+  refreshAfterHydrate(): void {
+    if (this.serversMutated) return;
+    this.serverList = this.readServers();
+    this.toolMap = this.readTools();
+    this.enabled = this.readEnabled();
+    if (this.serverList.length === 0) this.seedDefaults();
   }
 
   private readRemovedPresets(): Set<string> {
@@ -383,6 +421,7 @@ export class McpRegistry {
       updatedAt: at,
     };
     this.serverList = [...this.serverList, server];
+    this.serversMutated = true;
     this.saveServers();
     return { ...server };
   }
@@ -397,12 +436,14 @@ export class McpRegistry {
       updatedAt: this.now(),
     };
     this.serverList = this.serverList.map((s, i) => (i === idx ? next : s));
+    this.serversMutated = true;
     this.saveServers();
     return { ...next };
   }
 
   remove(id: string): void {
     this.serverList = this.serverList.filter((s) => s.id !== id);
+    this.serversMutated = true;
     delete this.toolMap[id];
     for (const key of [...this.enabled]) {
       if (key.startsWith(`${id}::`)) this.enabled.delete(key);
@@ -479,3 +520,12 @@ export class McpRegistry {
 
 /** 全局单例（浏览器 localStorage）。测试请自行 new McpRegistry(内存存储)。 */
 export const mcpRegistry = new McpRegistry();
+
+/**
+ * 启动时序收口（d.59）：hydrate 完成后补读一次（不覆盖用户已改过的列表）。
+ *
+ * 注册在单例创建之后：`onSecureHydrated` 在「已完成」时会立即回调，此时单例必须已存在。
+ */
+onSecureHydrated(() => {
+  mcpRegistry.refreshAfterHydrate();
+});

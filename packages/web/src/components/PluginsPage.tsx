@@ -486,7 +486,7 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   placeholder={`{\n  "schemaVersion": 2,\n  "id": "acme.finance",\n  "name": "财务助手包",\n  "version": "1.0.0",\n  "skills": [ ... ],\n  "mcpServers": [ { "key": "weather", "name": "天气服务", "url": "https://..." } ]\n}`}
-                  className="mt-1 block min-h-[160px] w-full resize-y rounded-lg border border-line px-3 py-2 font-mono text-[11px] outline-hidden focus:border-[#bbb]"
+                  className="mt-1 block min-h-[160px] w-full resize-y rounded-lg border border-line-strong px-3 py-2 font-mono text-[11px] outline-hidden focus:border-ink"
                 />
               </label>
 

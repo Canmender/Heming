@@ -310,7 +310,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
           aria-label="选择智能体"
           value={agentId}
           onChange={(e) => setAgentId(e.target.value)}
-          className="w-full rounded-lg border border-line bg-white px-2.5 py-2 text-[13px] outline-hidden focus:border-ink"
+          className="w-full rounded-lg border border-line-strong bg-white px-2.5 py-2 text-[13px] outline-hidden focus:border-ink"
         >
           <option value="">请选择…</option>
           {agentsRoster.map((a) => {
@@ -347,7 +347,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
             aria-label="目标模板"
             value={templateId}
             onChange={(e) => applyTemplate(e.target.value)}
-            className="min-w-0 flex-1 rounded-lg border border-line bg-white px-2.5 py-2 text-[13px] outline-hidden focus:border-ink"
+            className="min-w-0 flex-1 rounded-lg border border-line-strong bg-white px-2.5 py-2 text-[13px] outline-hidden focus:border-ink"
           >
             <option value="">不使用模板</option>
             {templates.map((t) => (
@@ -375,7 +375,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
           onChange={(e) => setText(e.target.value)}
           rows={6}
           placeholder="例如：梳理 packages/web/src/lib 下的模块依赖，列出耦合最重的三处并给出拆分建议"
-          className="w-full resize-y rounded-lg border border-line px-2.5 py-2 text-[13px] leading-5 outline-hidden focus:border-ink"
+          className="w-full resize-y rounded-lg border border-line-strong px-2.5 py-2 text-[13px] leading-5 outline-hidden focus:border-ink"
         />
 
         <div className="mt-2 flex gap-2">
@@ -384,7 +384,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
             value={templateName}
             onChange={(e) => setTemplateName(e.target.value)}
             placeholder={text.trim() ? suggestTemplateName(text) : "给这个模板起个名字"}
-            className="min-w-0 flex-1 rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
+            className="min-w-0 flex-1 rounded-lg border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
           />
           <button
             type="button"
@@ -648,7 +648,7 @@ export function TaskAreaPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="搜索运行记录…"
-          className="ml-2 w-[200px] rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
+          className="ml-2 w-[200px] rounded-lg border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
         />
         <div className="flex items-center gap-1" role="group" aria-label="按状态筛选">
           {FILTERS.map((f) => {

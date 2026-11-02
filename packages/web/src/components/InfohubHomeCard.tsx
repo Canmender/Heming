@@ -33,7 +33,7 @@ export function InfohubHomeCard() {
     return (
       <section className={CARD} aria-label="本机归档">
         <div className="flex items-center gap-2">
-          <div className="text-[12px] font-bold text-[#777]">本机归档</div>
+          <div className="text-[12px] font-bold text-muted">本机归档</div>
           <span className="rounded-sm border border-line px-1.5 text-[10px] text-muted">未连接</span>
           <button
             type="button"
@@ -59,7 +59,7 @@ export function InfohubHomeCard() {
   return (
     <section className={CARD} aria-label="本机归档">
       <div className="mb-1.5 flex items-center gap-2">
-        <div className="text-[12px] font-bold text-[#777]">本机归档</div>
+        <div className="text-[12px] font-bold text-muted">本机归档</div>
         <span className="rounded-sm border border-line bg-[#fafafa] px-1.5 text-[10px] text-muted">已连接</span>
         <div className="ml-auto flex items-center gap-1">
           <button type="button" className={LINK} onClick={() => openInfohub({ tab: "search" })}>

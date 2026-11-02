@@ -211,3 +211,41 @@ describe("通知中心面板", () => {
     expect(within(dialog).getAllByRole("button", { name: "标记已读：有正文" })).toHaveLength(1);
   });
 });
+
+describe("通知中心无障碍（③-2）", () => {
+  it("未读数用 polite 活区播报；角标 aria-hidden 避免重复播报", () => {
+    useNotificationStore.setState({ items: [makeItem(), makeItem()] });
+    render(<NotificationCenter />);
+
+    const live = screen.getByRole("status");
+    expect(live).toHaveTextContent("有 2 条未读通知");
+    expect(live).toHaveAttribute("aria-live", "polite");
+    expect(live.className).toContain("sr-only");
+
+    // 角标只是视觉数字：aria-hidden，否则读屏会把「2」重复念一遍
+    const bell = screen.getByRole("button", { name: "通知中心 2 条未读" });
+    const badge = within(bell).getByText("2");
+    expect(badge).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("无未读时活区为空（不播报噪音，也不重复播报旧数字）", () => {
+    useNotificationStore.setState({ items: [makeItem({ read: true })] });
+    render(<NotificationCenter />);
+    expect(screen.getByRole("status")).toHaveTextContent("");
+  });
+
+  it("铃铛与面板的可展开语义：aria-haspopup/aria-controls/aria-expanded 对上", () => {
+    render(<NotificationCenter />);
+    const bell = screen.getByRole("button", { name: "通知中心" });
+    expect(bell).toHaveAttribute("aria-haspopup", "dialog");
+    expect(bell).toHaveAttribute("aria-controls", "notification-center-panel");
+    expect(bell).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(bell);
+    expect(bell).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("dialog", { name: "通知中心" })).toHaveAttribute(
+      "id",
+      "notification-center-panel",
+    );
+  });
+});

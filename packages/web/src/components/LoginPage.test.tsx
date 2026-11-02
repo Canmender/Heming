@@ -129,3 +129,48 @@ describe("LoginPage", () => {
     expect(form.textContent).toContain("登录你的账号");
   });
 });
+
+describe("LoginPage 无障碍（③-2）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+    setToken(null);
+    useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
+  });
+
+  it("字段有可访问名（不依赖 placeholder 当标签）", () => {
+    render(<LoginPage />);
+    expect(screen.getByLabelText("用户名")).toHaveAttribute("autocomplete", "username");
+    expect(screen.getByLabelText("密码")).toHaveAttribute("autocomplete", "current-password");
+  });
+
+  it("登录失败：错误行 role=alert，输入框 aria-invalid + aria-describedby 指向它", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "invalid credentials" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    render(<LoginPage />);
+    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "alice" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveAttribute("id", "login-error");
+    expect(alert).toHaveTextContent("invalid credentials");
+    for (const field of [screen.getByLabelText("用户名"), screen.getByLabelText("密码")]) {
+      expect(field).toHaveAttribute("aria-invalid", "true");
+      expect(field).toHaveAttribute("aria-describedby", "login-error");
+    }
+  });
+
+  it("输入框与提交按钮带可见焦点环（键盘 Tab 能看到）", () => {
+    render(<LoginPage />);
+    expect(screen.getByLabelText("用户名").className).toContain("focus-visible:outline-2");
+    expect(screen.getByLabelText("密码").className).toContain("focus-visible:outline-2");
+    expect(screen.getByRole("button", { name: "登录" }).className).toContain(
+      "focus-visible:outline-2",
+    );
+  });
+});

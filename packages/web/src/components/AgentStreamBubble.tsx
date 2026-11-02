@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { RouteAttempt } from "../lib/llmClient.js";
 import type { ToolTrace } from "../store/chat.js";
+import { FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 
 /**
@@ -39,10 +40,18 @@ export function AgentStreamBubble({
   const streaming = status === "streaming";
   return (
     <div className="mb-3 flex items-start gap-2">
+      {/*
+       * 粗粒度状态播报（③-2）：只报「开始/完成/失败」，**不含正文**——
+       * 流式文本逐 token 变化，若放进 live region 会变成每 token 念一次。
+       * 文本本身不设 aria-live（用户移动光标/读到时才见），这是刻意的。
+       */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {streaming ? `${name} 正在生成回复` : errorMessage ? `${name} 生成失败` : `${name} 已生成回复`}
+      </p>
       <div className="max-w-[78%] rounded-lg border border-line bg-[#f7f7f7] px-3 py-2 text-[13px] shadow-card">
         <div className="mb-0.5 flex items-center gap-2 text-[10px] text-muted">
           <span>{name}</span>
-          {streaming && <span className="text-[#bbb]">生成中…</span>}
+          {streaming && <span className="text-[#6f6f6f]">生成中…</span>}
         </div>
 
         {reasoning ? <ReasoningBlock text={reasoning} streaming={streaming} /> : null}
@@ -66,7 +75,7 @@ export function AgentStreamBubble({
             {onRetry ? (
               <button
                 type="button"
-                className="mt-1 rounded-sm border border-line px-2 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
+                className={`mt-1 rounded-sm border border-line px-2 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3] ${FOCUS_RING_TIGHT}`}
                 onClick={onRetry}
               >
                 继续生成
@@ -95,15 +104,17 @@ function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean 
         aria-expanded={open}
         aria-label="思考过程"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1 text-left text-[11px] text-[#888] hover:text-[#555]"
+        className={`flex w-full items-center gap-1 text-left text-[11px] text-[#6f6f6f] hover:text-[#555] ${FOCUS_RING_TIGHT}`}
       >
-        <span className="text-[9px]">{open ? "▾" : "▸"}</span>
+        <span className="text-[9px]" aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
         <span>思考过程</span>
-        <span className="text-[10px] text-[#bbb]">{text.length} 字</span>
-        {streaming && <span className="text-[10px] text-[#bbb]">· 进行中</span>}
+        <span className="text-[10px] text-[#6f6f6f]">{text.length} 字</span>
+        {streaming && <span className="text-[10px] text-[#6f6f6f]">· 进行中</span>}
       </button>
       {open && (
-        <div className="mt-1 max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words text-[12px] italic leading-relaxed text-[#777]">
+        <div className="mt-1 max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words text-[12px] italic leading-relaxed text-[#555]">
           {text}
         </div>
       )}
@@ -122,17 +133,17 @@ function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
             <span className="font-mono text-[11px] text-[#444]">{t.name}</span>
             <span className={`text-[10px] ${statusColor(t.status)}`}>{statusLabel(t.status)}</span>
             {t.endedAt ? (
-              <span className="text-[10px] text-[#bbb]">{Math.max(0, t.endedAt - t.startedAt)}ms</span>
+              <span className="text-[10px] text-[#6f6f6f]">{Math.max(0, t.endedAt - t.startedAt)}ms</span>
             ) : null}
           </summary>
           <div className="mt-1 border-t border-[#f1f1f1] pt-1">
-            <div className="text-[10px] text-[#999]">参数</div>
+            <div className="text-[10px] text-[#6f6f6f]">参数</div>
             <pre className="mt-0.5 max-h-[120px] overflow-auto whitespace-pre-wrap break-all rounded-sm bg-[#fafafa] px-1.5 py-1 font-mono text-[10px] text-[#555]">
               {t.args || "{}"}
             </pre>
             {t.status !== "running" && (
               <>
-                <div className="mt-1 text-[10px] text-[#999]">结果</div>
+                <div className="mt-1 text-[10px] text-[#6f6f6f]">结果</div>
                 <pre
                   className={`mt-0.5 max-h-[140px] overflow-auto whitespace-pre-wrap break-words rounded-sm px-1.5 py-1 font-mono text-[10px] ${
                     t.status === "error" || t.status === "denied"
@@ -159,7 +170,7 @@ function RouteTraceLine({ attempts }: { attempts: RouteAttempt[] }) {
   if (!attempts.some((a) => !a.ok)) return null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
-      <span className="shrink-0 text-[#999]">候选链</span>
+      <span className="shrink-0 text-[#6f6f6f]">候选链</span>
       {attempts.map((a, i) => (
         <span
           key={`${i}-${a.profileId}`}

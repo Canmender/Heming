@@ -240,7 +240,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
         </div>
       )}
       {root && !ephemeral && (
-        <div className="mb-2 truncate text-[11px] text-[#aaa]" title={root}>
+        <div className="mb-2 truncate text-[11px] text-muted" title={root}>
           目录：{root}
         </div>
       )}
@@ -263,7 +263,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="按标题、标签或正文过滤"
-              className="mb-2 w-full rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+              className="mb-2 w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
             />
             {shown.length === 0 ? (
               <div className="text-[12px] text-muted">
@@ -288,7 +288,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                             {t}
                           </span>
                         ))}
-                        <span className="shrink-0 text-[10px] text-[#aaa]">
+                        <span className="shrink-0 text-[10px] text-muted">
                           {KIND_LABEL[page.kind]} · {degree} 链接
                         </span>
                       </button>
@@ -310,13 +310,13 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                     value={draft.title}
                     placeholder="页面标题"
                     onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-                    className="min-w-0 flex-1 rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-bold outline-hidden focus:border-[#bbb]"
+                    className="min-w-0 flex-1 rounded-lg border border-line-strong px-2.5 py-1.5 text-[13px] font-bold outline-hidden focus:border-ink"
                   />
                   <select
                     aria-label="页面类别"
                     value={draft.kind}
                     onChange={(e) => setDraft({ ...draft, kind: e.target.value as WikiKind })}
-                    className="rounded-lg border border-line px-2 py-1.5 text-[12px] outline-hidden"
+                    className="rounded-lg border border-line-strong px-2 py-1.5 text-[12px] outline-hidden"
                   >
                     {WIKI_KINDS.map((k) => (
                       <option key={k} value={k}>
@@ -347,7 +347,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                   value={draft.body}
                   placeholder="在这里写内容。用 [[其他页面]] 交叉引用。"
                   onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-                  className="min-h-0 flex-1 resize-none rounded-lg border border-line px-2.5 py-2 font-mono text-[12px] leading-relaxed outline-hidden focus:border-[#bbb]"
+                  className="min-h-0 flex-1 resize-none rounded-lg border border-line-strong px-2.5 py-2 font-mono text-[12px] leading-relaxed outline-hidden focus:border-ink"
                 />
               </>
             ) : (

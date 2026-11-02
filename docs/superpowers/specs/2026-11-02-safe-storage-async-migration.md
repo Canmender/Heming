@@ -156,3 +156,84 @@ pnpm --filter @heming/web exec tsc --noEmit
 ## 9. 启动接线状态（baseline 负责）
 
 **启动接线（baseline 负责）**：`main.tsx` / `pet.tsx` 各一处，300ms 短帽后渲染，晚到由 task-10 的 setState 补。
+---
+
+## 10. 启动时序契约（d.59.2 收口）
+
+> 本节是第三波「启动时序」的收口结论，**修改 `main.tsx` 的 hydrate 接线、或给
+> `secureStorage` 增加启动期消费方之前，先读完这一节**。
+
+### 10.1 时序图
+
+```
+main.tsx
+ └─ hydrateSecureStorage() 启动（300ms 短帽；不 await 到底，渲染门禁只看这段 race）
+      ↓（与渲染并行）
+    React 渲染 → App 挂载
+      ★ 注意：store 模块在 main.tsx body 之前就求值了（ES import 提升）
+        llm/mcp 构造期同步读 secure 键：
+          ├─ 缓存命中（Electron 45 同步桥 / 预取已完成）→ 真实值（正常路径）
+          └─ 缓存未命中（Electron 46 纯异步）→ 只能读到空 / null（危险窗口）
+      ↓
+    hydrate 落定 → finish(state) → onSecureHydrated(state) 广播
+        ├─ llm：空且用户未改过 → 重读 profiles 并 setState（bindings/prompts 不动）
+        ├─ mcp：用户未改过 → 重读 servers/tools/enabled；仍空才补预置
+        │       （构造期「有桥且 hydrate 未完成」时推迟预置，绝不写盘）
+        └─ e2e：首帧已进 ensureIdentity 且无现存身份 → 先等 hydrate（≤1.5s）再读一次；
+                 只有「等完仍没有」才走 d.36 失败口径（备份旧密文后重建）
+```
+
+### 10.2 三条合并规则（llm / mcp 同构）
+
+hydrate 完成后的补读**只在一种情况下发生**，其余一律不覆盖内存：
+
+1. **用户已改过**（`profilesMutated` / `serversMutated`）→ 不重读。用户刚才的写路径已经落盘，
+   重读只可能把他刚改的冲掉；
+2. **内存非空** → 不重读。说明首帧已经读到真实数据（同步兜底 / 缓存命中），重读没有收益；
+3. **内存为空且用户未改过** → 重读并 `setState`。这是「首帧读到空配置」的补全路径。
+
+补充口径：
+- 「未保存编辑」在组件本地 draft 里，store 重读不写盘；用户之后保存时以组件内容为准，因此不会丢输入；
+- `mcp` 还有一条启动期保护：**hydrate 未完成时推迟 `seedDefaults()`**——纯异步环境下
+  `readServers()` 的「空」可能只是缓存未命中，此时预置会写盘覆盖磁盘上的密文配置（请求头 token 一起丢）。
+  hydrate 后再判断是否真的为空、才补预置。
+
+### 10.3 `secureHydrationInFlight()` / `whenSecureHydrated()` 语义
+
+- `secureHydrationInFlight(): boolean`：hydrate **已启动但未落定**（`hydrationPromise !== null && !done`）。
+  给启动期「没有同步兜底时做决定会做错」的调用方用（典型：E2E 身份）。**它不会启动 hydrate**。
+- `whenSecureHydrated(timeoutMs = 3000): Promise<SecureHydration>`：等 hydrate 落定，
+  **永不 reject**，已完成则立即返回；超时返回当前快照（调用方按「没等到」处理，不能因此挂住启动）。
+  只等不启动——谁启动 hydrate 由启动门禁（`main.tsx`）决定。
+- `e2eSession.ensureIdentity` 的等待上限是 **1500ms**（`IDENTITY_HYDRATE_WAIT_MS`）：
+  等太久会把收发挂住；超时后按「没等到」继续走 d.36 失败口径（覆盖前先备份旧密文）。
+
+### 10.4 维护约束（别改回去）
+
+1. **不要**把入口改成顶层 `await import()` / `await hydrateSecureStorage()`：
+   入口一旦变成 async 模块，Rolldown 不再把首屏依赖合并进入口 chunk（实测碎成 20+ 个预载块、gzip 反而更大），
+   而且把「安全存储不可用」变成启动阻塞。
+2. **不要删 300ms 短帽**（`HYDRATE_CAP_MS`）：hydrate 只保证「缓存尽量先热」，不承担正确性；
+   晚到/失败由 §10.2 的 store 补读兜底。
+3. **不要**在 `pet.tsx` 之外的桌宠入口加 hydrate 消费者：桌宠窗口不依赖这三个键（`usePetChat` 读模型 Key
+   走同一份缓存，由主窗口的 hydrate 与 storage 事件保证，见 §2.3）；
+   `pet.tsx` 的短帽接线保持不变。
+4. 给 `secureStorage` 增加启动期消费方时：优先订阅 `onSecureHydrated`；
+   需要「是否在途」才用 `secureHydrationInFlight()`/`whenSecureHydrated()`，**不要**自己复制单飞状态。
+5. 单测里 `resetSecureStorageState()` 会重置 hydrate 状态与单飞 promise，但**保留已注册的订阅**；
+   需要重复验证「hydrate 后补读」时按此顺序：reset → 设数据/桩桥 → 再次 `hydrateSecureStorage()`。
+
+### 10.5 对应测试
+
+| 文件 | 覆盖 |
+|---|---|
+| `store/llm.hydrate.test.ts`（5 例） | 启动读空→补全；hydrate 前保存不被覆盖；删改后不重读；失败不抛不阻塞；无桥不清空 |
+| `lib/mcp/store.hydrate.test.ts`（5 例） | 构造期推迟预置不写盘 + hydrate 后补读；用户改动不被覆盖；仍解不开时不动密文；失败不抛且补预置；无桥行为不变 |
+| `lib/e2eSession.hydrate.test.ts`（3 例） | hydrate 在途沿用磁盘身份不生成临时身份；失败按 d.36 备份重建；没人调 hydrate 时不等待 |
+
+### 10.6 46 前剩余项（本轮未做）
+
+- **保存早于 hydrate 的明文窗口**：`secureSetItem` 在纯异步且未 hydrate 时仍先落明文（d.36 fail-open，
+  状态卡可见），下一次读后台自迁；要彻底消除需放开 async 写的 `effectiveAvailable` 门禁（与 task-8 一起做）；
+- **mcp 首帧短暂空表**：hydrate 完成前（≤300ms 帽内）服务列表可能为空，hydrate 后自动补，UI loading 态是 UX 候选；
+- **真机验证**：45→46 升级环境上手动验「hydrate 晚到 / 失败 / DPAPI 不可用」三条路径。

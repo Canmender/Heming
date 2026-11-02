@@ -166,7 +166,7 @@ export function SettingsPage() {
         )}
         {tab === "navigation" && <NavigationSection />}
         {tab === "about" && <AboutSection />}
-        <p className="pt-1 text-[11px] text-[#999]">和鸣 {appVersionLabel()}</p>
+        <p className="pt-1 text-[11px] text-muted">和鸣 {appVersionLabel()}</p>
       </div>
     </div>
   );
@@ -221,10 +221,10 @@ function ProfileSection() {
 
   return (
     <section className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card">
-      <div className="text-[12px] font-bold text-[#777]">个人资料</div>
+      <div className="text-[12px] font-bold text-muted">个人资料</div>
 
       <div className="mt-3 flex items-center gap-4">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f0f0f0] text-[#777]">
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f0f0f0] text-muted">
           {avatar ? (
             <img src={avatar} alt="当前头像" className="h-full w-full object-cover" />
           ) : (
@@ -268,7 +268,7 @@ function ProfileSection() {
               setDisplayName(e.target.value);
               setSaved(false);
             }}
-            className="mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]"
+            className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm outline-hidden focus:border-ink"
           />
         </label>
         {error && <div className="text-[12px] text-red-600">{error}</div>}
@@ -288,7 +288,7 @@ function ProfileSection() {
         </div>
       </form>
 
-      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-[#999]">
+      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">
         {EFFECT_NOTE}
       </div>
     </section>
@@ -330,7 +330,7 @@ function AppearanceSection() {
       className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
     >
       <div className="flex items-center gap-2">
-        <span className="text-[12px] font-bold text-[#777]">页面颜色</span>
+        <span className="text-[12px] font-bold text-muted">页面颜色</span>
         {applied && (
           <span role="status" className="text-[11px] text-muted">
             已生效
@@ -370,7 +370,7 @@ function AppearanceSection() {
               setAccentError(null);
             }}
             onBlur={(e) => applyCustom(e.target.value)}
-            className="w-[92px] rounded-lg border border-line px-2 py-1 text-[12px] outline-hidden focus:border-[#bbb]"
+            className="w-[92px] rounded-lg border border-line-strong px-2 py-1 text-[12px] outline-hidden focus:border-ink"
           />
         </label>
         <button
@@ -387,7 +387,7 @@ function AppearanceSection() {
         </button>
       </div>
       {accentError && <div className="mt-2 text-[12px] text-red-600">{accentError}</div>}
-      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-[#999]">
+      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">
         {EFFECT_NOTE}
       </div>
     </section>
@@ -406,7 +406,7 @@ function NavigationSection() {
       className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[12px] font-bold text-[#777]">导航顺序</div>
+        <div className="text-[12px] font-bold text-muted">导航顺序</div>
         <button type="button" aria-label="恢复默认导航顺序" onClick={resetNavOrder} className={btnGhost}>
           恢复默认
         </button>
@@ -460,7 +460,7 @@ function AboutSection() {
         className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
       >
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[12px] font-bold text-[#777]">更新日志</div>
+        <div className="text-[12px] font-bold text-muted">更新日志</div>
         <span className="text-[11px] text-muted">当前 {appVersionLabel()}</span>
       </div>
       <div className="mt-1 text-[11px] text-muted">
@@ -488,11 +488,11 @@ function AboutSection() {
                 <span className="min-w-0 flex-1 truncate text-[12px] text-muted">
                   {stripInline(entry.title) || entry.date}
                 </span>
-                <span className="shrink-0 text-[11px] text-[#aaa]">{open ? "收起" : "展开"}</span>
+                <span className="shrink-0 text-[11px] text-muted">{open ? "收起" : "展开"}</span>
               </button>
               {open && (
                 <div className="border-t border-line-soft px-3 py-2">
-                  <div className="text-[11px] text-[#aaa]">{entry.date}</div>
+                  <div className="text-[11px] text-muted">{entry.date}</div>
                   {entry.title && (
                     <div className="mt-0.5 text-[12px] font-medium">
                       <InlineText text={entry.title} />
@@ -507,7 +507,7 @@ function AboutSection() {
                     <ul className="mt-1.5 flex flex-col gap-1">
                       {entry.bullets.map((line, i) => (
                         <li key={i} className="flex gap-1.5 text-[12px] leading-relaxed">
-                          <span className="text-[#bbb]">·</span>
+                          <span className="text-muted">·</span>
                           <span className="min-w-0 flex-1">
                             <InlineText text={line} />
                           </span>

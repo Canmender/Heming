@@ -264,7 +264,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="搜索成员、技能…"
-          className="w-full border-b border-line-soft px-3.5 py-2.5 text-[13px] outline-hidden placeholder:text-[#bbb]"
+          className="w-full border-b border-line-strong px-3.5 py-2.5 text-[13px] outline-hidden placeholder:text-[#bbb]"
         />
 
         <div className="max-h-[46vh] overflow-y-auto py-1">
@@ -272,7 +272,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             <div className="px-3.5 py-3 text-[12px] text-muted">
               输入关键词开始搜索。当前可搜：团队成员、技能
               {infohubRunning ? "、本机归档" : ""}。
-              <div className="mt-1 text-[11px] text-[#aaa]">
+              <div className="mt-1 text-[11px] text-muted">
                 {infohubRunning
                   ? "本机归档只在本机检索，不会上传。"
                   : "连接信息中枢后，可在这里搜本机 QQ/微信历史消息。"}
@@ -327,7 +327,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        <div className="flex items-center gap-3 border-t border-line-soft px-3.5 py-1.5 text-[10px] text-[#aaa]">
+        <div className="flex items-center gap-3 border-t border-line-soft px-3.5 py-1.5 text-[10px] text-muted">
           <span>↑↓ 选择</span>
           <span>Enter 打开</span>
           <span>Esc 关闭</span>

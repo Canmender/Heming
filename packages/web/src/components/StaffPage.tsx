@@ -306,7 +306,7 @@ export function StaffPage() {
         {settingsOpen && (
           <section className={`${CARD} mb-4`} aria-label="幕僚设置">
             <div className="mb-2 flex items-center gap-2">
-              <div className="text-[12px] font-bold text-[#777]">设置</div>
+              <div className="text-[12px] font-bold text-muted">设置</div>
               <span className="text-[10px] text-muted">改动即时生效，仅作用于本机</span>
               <label className="ml-auto flex items-center gap-2 text-[12px]">
                 <input

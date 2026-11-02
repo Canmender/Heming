@@ -1059,3 +1059,40 @@ export function onSecureHydrated(callback: (state: SecureHydration) => void): ()
 export function secureStorageHydrated(): boolean {
   return hydrationState.done;
 }
+
+/**
+ * hydrate 是否**已启动但尚未落定**（d.59 启动时序）。
+ *
+ * 给启动期的调用方用：Electron 46 没有同步桥兜底，「缓存未命中」与「键真的不存在」
+ * 在同步读里长得一模一样；此时若直接拿空值做决定（生成身份 / 预置服务 / 认为没配置），
+ * 就会写盘覆盖真实数据。已知 hydrate 在途时，正确做法是先等它落定（`whenSecureHydrated`）。
+ */
+export function secureHydrationInFlight(): boolean {
+  return hydrationPromise !== null && hydrationState.done !== true;
+}
+
+/**
+ * 等 hydrate 落定（最多 `timeoutMs`，**永不 reject**；已完成则立即返回）。
+ *
+ * 与 `hydrateSecureStorage()` 的区别：这里只是等，不会启动 hydrate（谁启动由启动门禁决定）。
+ * 超时返回当前快照——调用方按「没等到」处理即可，不能因此挂住启动。
+ */
+export function whenSecureHydrated(timeoutMs = 3000): Promise<SecureHydration> {
+  if (hydrationState.done) return Promise.resolve({ ...hydrationState });
+  return new Promise<SecureHydration>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribe: (() => void) | undefined;
+    const finish = (state: SecureHydration) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      unsubscribe?.();
+      resolve(state);
+    };
+    // 先订阅再装定时器：hydrate 可能在这一行之间恰好完成（onSecureHydrated 会同步回调）。
+    unsubscribe = onSecureHydrated((state) => finish({ ...state }));
+    if (settled) return; // 同步完成：不必再装定时器
+    timer = setTimeout(() => finish({ ...hydrationState }), Math.max(0, timeoutMs));
+  });
+}

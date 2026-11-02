@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { getFileBridge, type FileFsBridge } from "../lib/fileEdit/bridge.js";
 import {
   MAX_FILE_ROOTS,
@@ -93,7 +93,7 @@ export function FileEditCard({
 
   return (
     <section aria-label="文件编辑" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
-      <div className="text-[12px] font-bold text-[#777]">文件编辑</div>
+      <div className="text-[12px] font-bold text-muted">文件编辑</div>
       <div className="mt-1 text-[11px] text-muted">
         允许智能体在你圈定的目录内用补丁改文件。默认没有任何可写根，
         添加之后 `file_patch` / `file_read` 才会出现在智能体的工具里：任意一条根（含只读）会让 `file_read` 可见，至少一条可写根才会让 `file_patch` 可见。
@@ -107,11 +107,11 @@ export function FileEditCard({
         <>
           <div className="mt-3">
             <div className="flex items-center justify-between">
-              <div className="text-[12px] font-bold text-[#777]">
+              <div className="text-[12px] font-bold text-muted">
                 可写根{config.roots.length ? `（${config.roots.length}/${MAX_FILE_ROOTS}）` : ""}
               </div>
               {config.roots.length > 0 && (
-                <span className="text-[10px] text-[#aaa]">路径只存在本机，不上传</span>
+                <span className="text-[10px] text-muted">路径只存在本机，不上传</span>
               )}
             </div>
             {config.roots.length === 0 ? (
@@ -127,14 +127,14 @@ export function FileEditCard({
                     className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft px-2 py-1.5"
                   >
                     <span className="text-[12px] font-bold">{root.name}</span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[#777]" title={root.path}>
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted" title={root.path}>
                       {root.path}
                     </span>
                     <select
                       aria-label={`${root.name} 读写模式`}
                       value={root.mode}
                       onChange={(e) => changeMode(root.path, e.target.value as "read" | "write")}
-                      className="rounded-lg border border-line px-2 py-0.5 text-[11px] outline-hidden focus:border-[#bbb]"
+                      className="rounded-lg border border-line-strong px-2 py-0.5 text-[11px] outline-hidden focus:border-ink"
                     >
                       <option value="write">可写</option>
                       <option value="read">只读</option>
@@ -164,14 +164,14 @@ export function FileEditCard({
                   setError(null);
                 }}
                 placeholder="D:/Obsidian/学院事务"
-                className="mt-1 block w-full rounded-lg border border-line px-2 py-1.5 font-mono text-[12px] outline-hidden focus:border-[#bbb]"
+                className="mt-1 block w-full rounded-lg border border-line-strong px-2 py-1.5 font-mono text-[12px] outline-hidden focus:border-ink"
               />
             </label>
             <select
               aria-label="新根的读写模式"
               value={mode}
               onChange={(e) => setMode(e.target.value as "read" | "write")}
-              className="rounded-lg border border-line px-2 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+              className="rounded-lg border border-line-strong px-2 py-1.5 text-[12px] outline-hidden focus:border-ink"
             >
               <option value="write">可写</option>
               <option value="read">只读</option>
@@ -191,7 +191,11 @@ export function FileEditCard({
               添加
             </button>
           </div>
-          {error && <div className="mt-2 text-[12px] text-red-600">{error}</div>}
+          {error && (
+            <div role="alert" className="mt-2 text-[12px] text-red-600">
+              {error}
+            </div>
+          )}
           {status && (
             <div role="status" className="mt-2 text-[11px] text-muted">
               {status}
@@ -204,18 +208,18 @@ export function FileEditCard({
               aria-label="越界处理方式"
               value={config.outOfRoot}
               onChange={(e) => changeOutOfRoot(e.target.value as "ask" | "reject")}
-              className="mt-1 block rounded-lg border border-line px-3 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+              className="mt-1 block rounded-lg border border-line-strong px-3 py-1.5 text-[12px] outline-hidden focus:border-ink"
             >
               <option value="ask">先问我（默认）</option>
               <option value="reject">直接拒绝</option>
             </select>
-            <span className="mt-1 block text-[10px] text-[#aaa]">
+            <span className="mt-1 block text-[10px] text-muted">
               写盘层无论如何都只写可写根内；这里只是决定「先问一次再失败」还是「直接失败」。
             </span>
           </label>
 
           <div className="mt-3 border-t border-line-soft pt-2">
-            <div className="text-[11px] font-bold text-[#999]">
+            <div className="text-[11px] font-bold text-muted">
               已记住的目录授权{rules.length ? `（${rules.length} 条）` : ""}
             </div>
             {rules.length === 0 ? (
@@ -240,20 +244,20 @@ export function FileEditCard({
                       {rule.effect === "deny" ? "拒绝" : "允许"}
                     </span>
                     <span className="font-mono text-[#555]">{rule.tool}</span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-[#777]" title={rule.resource}>
+                    <span className="min-w-0 flex-1 truncate font-mono text-muted" title={rule.resource}>
                       {rule.resource}
                     </span>
                   </li>
                 ))}
               </ul>
             )}
-            <div className="mt-1 text-[10px] text-[#aaa]">
+            <div className="mt-1 text-[10px] text-muted">
               拒绝优先于允许；文件编辑只能按目录前缀授权，不能放行整个工具。
               规则可在「工具调用确认」卡里一键清空。
             </div>
           </div>
 
-          <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-[#999]">
+          <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">
             上限：单文件 {Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB、单次补丁{" "}
             {Math.round(MAX_PATCH_BYTES / 1024 / 1024)} MB、单次最多 {MAX_FILES_PER_PATCH} 个文件；
             只处理 UTF-8 文本，软链/硬链接与二进制文件一律拒绝。改动即时生效，仅作用于本机。

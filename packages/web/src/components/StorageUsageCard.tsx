@@ -484,7 +484,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
 
   return (
     <section aria-label="本机存储" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
-      <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#777]">
+      <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted">
         <StorageIcon className="text-[#999]" />
         本机存储
       </div>
@@ -521,13 +521,13 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
         </div>
         <div role="status" aria-label="存储水位" className={`mt-1 text-[11px] ${statusColor}`}>
           {statusText}
-          <span className="text-[#999]">（{Math.round(percent)}%）</span>
+          <span className="text-muted">（{Math.round(percent)}%）</span>
         </div>
       </div>
 
       {/* 明细：按字节数降序 */}
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-[11px] font-bold text-[#999]">
+        <div className="text-[11px] font-bold text-muted">
           按模块{usage.keyCount ? `（${usage.keyCount} 个键）` : ""}
         </div>
         {usage.modules.length === 0 ? (
@@ -541,11 +541,11 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
               >
                 <span className="min-w-0 truncate text-[#555]">
                   {m.name}
-                  <span className="ml-1 text-[10px] text-[#aaa]">{m.keys} 键</span>
+                  <span className="ml-1 text-[10px] text-muted">{m.keys} 键</span>
                 </span>
-                <span className="shrink-0 font-mono text-[#777]">
+                <span className="shrink-0 font-mono text-muted">
                   {formatBytes(m.bytes)}
-                  <span className="ml-1 text-[10px] text-[#aaa]">{formatExactBytes(m.bytes)} 字节</span>
+                  <span className="ml-1 text-[10px] text-muted">{formatExactBytes(m.bytes)} 字节</span>
                 </span>
               </li>
             ))}
@@ -599,7 +599,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
       </div>
 
       {/* 不可再生的东西不给入口——这里说清楚为什么，否则用户会以为漏了功能。 */}
-      <div className="mt-2 text-[11px] text-[#999]">
+      <div className="mt-2 text-[11px] text-muted">
         记忆条目与加密会话的私钥、棘轮不可再生（丢了就是永久丢），所以不提供清理入口；
         迁移期的旧明文/旧密文备份键也不提供清理入口（它们可能是唯一的可恢复副本）；
         上面两个按钮只清理能重新生成的内容。

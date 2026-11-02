@@ -28,6 +28,34 @@ describe("AgentStreamBubble", () => {
   });
 });
 
+describe("AgentStreamBubble 无障碍状态播报（③-2）", () => {
+  it("流式：只播报「正在生成」，正文不进 live region（避免逐 token 念屏）", () => {
+    render(<AgentStreamBubble name="和小鸣" text="这是一段很长的正文" status="streaming" />);
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/正在生成回复/);
+    expect(status).not.toHaveTextContent("这是一段很长的正文");
+    // 视觉隐藏但可被读屏读到
+    expect(status.className).toContain("sr-only");
+    expect(status).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("失败：播报「生成失败」；没有错误信息时按「已生成」播报", () => {
+    const { rerender } = render(
+      <AgentStreamBubble name="和小鸣" text="" status="error" errorMessage="HTTP 401" />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/生成失败/);
+
+    rerender(<AgentStreamBubble name="和小鸣" text="答案" status="error" />);
+    expect(screen.getByRole("status")).toHaveTextContent(/已生成回复/);
+  });
+
+  it("生成中/思考过程等次级文字用可读对比度（不再用 #bbb 这类极浅灰）", () => {
+    render(<AgentStreamBubble name="和小鸣" text="" status="streaming" reasoning="想一想" />);
+    const streamingHint = screen.getByText("生成中…");
+    expect(streamingHint.className).not.toMatch(/#bbb|#999|#888/);
+  });
+});
+
 describe("AgentStreamBubble 可视化（思考过程 / 工具调用）", () => {
   it("思考过程：流式中默认展开，可折叠；结束后自动收起", () => {
     const { rerender } = render(

@@ -1,6 +1,6 @@
 {
   "name": "@heming/web",
-  "version": "59.2.19",
+  "version": "59.2.20",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,7 @@
     "@heming/shared": "workspace:*",
     "katex": "^0.19.1",
     "officeparser": "~8.4.1",
-    "pdfjs-dist": "^4",
+    "pdfjs-dist": "^6.5.438",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
     "react": "^19.3.1",
@@ -40,5 +40,5 @@
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
-  "hemingVersion": "d.59.2.19.0"
+  "hemingVersion": "d.59.2.20.0"
 }

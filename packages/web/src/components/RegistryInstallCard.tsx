@@ -121,7 +121,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
 
         {hints.length > 0 && (
           <div className="rounded-lg border border-line px-3 py-2">
-            <div className="text-[11px] font-bold text-[#777]">该服务需要以下请求头</div>
+            <div className="text-[11px] font-bold text-muted">该服务需要以下请求头</div>
             {hints.map((h) => (
               <label key={h.name} className="mt-2 block text-[11px] text-muted">
                 {h.name}
@@ -136,9 +136,9 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
                     setError(null);
                   }}
                   placeholder={h.placeholder ?? (h.isSecret ? "敏感值，仅保存在本机" : "")}
-                  className="mt-1 block w-full rounded-lg border border-line px-3 py-2 font-mono text-[11px] text-ink outline-hidden focus:border-[#bbb]"
+                  className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-[11px] text-ink outline-hidden focus:border-ink"
                 />
-                {h.description && <span className="mt-0.5 block text-[10px] text-[#999]">{h.description}</span>}
+                {h.description && <span className="mt-0.5 block text-[10px] text-muted">{h.description}</span>}
               </label>
             ))}
           </div>

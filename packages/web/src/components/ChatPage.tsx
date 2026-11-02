@@ -28,6 +28,7 @@ import {
 } from "../lib/messageWindow.js";
 import { useTaskStore } from "../lib/tasks/store.js";
 import { resolveForkRun } from "../lib/tasks/forkTask.js";
+import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { useAuthStore } from "../store/auth.js";
 import { useLlmStore } from "../store/llm.js";
 import { useTokenUsageStore } from "../store/tokenUsage.js";
@@ -256,6 +257,8 @@ function AttachmentPreview({
 }): JSX.Element | null {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  /** 失败后的重试计数：+1 让下面 effect 重新拉取（附件下载失败必须能重试）。 */
+  const [reloadKey, setReloadKey] = useState(0);
   /** 图片放大（A6）：气泡内是受限缩略图，点击看原图；Esc/点遮罩关闭。 */
   const [zoomOpen, setZoomOpen] = useState(false);
   const zoomPanelRef = useRef<HTMLDivElement | null>(null);
@@ -285,14 +288,24 @@ function AttachmentPreview({
       alive = false;
       if (owned) URL.revokeObjectURL(owned);
     };
-  }, [file.id, file.key, file.mime]);
+  }, [file.id, file.key, file.mime, reloadKey]);
 
   if (failed) {
     return (
-      <div className="mt-1 flex items-center gap-2 rounded-md border border-line bg-white px-2 py-1.5 text-[12px] text-muted shadow-card">
+      <div
+        role="alert"
+        className="mt-1 flex items-center gap-2 rounded-md border border-line bg-white px-2 py-1.5 text-[12px] text-muted shadow-card"
+      >
         <FileIcon width={15} height={15} />
         <span className="min-w-0 truncate">{file.name}</span>
-        <span className="shrink-0 text-[10px]">加载失败</span>
+        <span className="shrink-0 text-[10px] text-[#6f6f6f]">加载失败</span>
+        <button
+          type="button"
+          onClick={() => setReloadKey((k) => k + 1)}
+          className={`shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-[11px] text-[#555] hover:bg-[#fafafa] ${FOCUS_RING_TIGHT}`}
+        >
+          重试
+        </button>
       </div>
     );
   }
@@ -2555,7 +2568,7 @@ export function ChatPage({
               >
                 导出 JSON
               </button>
-              <p className="px-2 pb-1 pt-0.5 text-[10px] leading-4 text-[#999]">
+              <p className="px-2 pb-1 pt-0.5 text-[10px] leading-4 text-[#6f6f6f]">
                 仅包含本机可解密的明文
               </p>
             </div>
@@ -2591,7 +2604,7 @@ export function ChatPage({
               }
             }}
             placeholder="在本会话中搜索…"
-            className="min-w-0 flex-1 bg-transparent text-[12px] outline-hidden placeholder:text-[#bbb]"
+            className="min-w-0 flex-1 bg-transparent text-[12px] outline-hidden placeholder:text-[#bbb] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
           />
           <span className="shrink-0 text-[11px] text-muted">
             {searchQuery.trim()
@@ -2605,7 +2618,7 @@ export function ChatPage({
             aria-label="上一个匹配"
             disabled={searchHits.length === 0}
             onClick={() => goSearch(-1)}
-            className="rounded-sm px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0] disabled:text-[#ccc]"
+            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f0f0f0] disabled:text-[#ccc]"
           >
             ↑
           </button>
@@ -2614,7 +2627,7 @@ export function ChatPage({
             aria-label="下一个匹配"
             disabled={searchHits.length === 0}
             onClick={() => goSearch(1)}
-            className="rounded-sm px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0] disabled:text-[#ccc]"
+            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f0f0f0] disabled:text-[#ccc]"
           >
             ↓
           </button>
@@ -2622,7 +2635,7 @@ export function ChatPage({
             type="button"
             aria-label="关闭搜索"
             onClick={closeSearch}
-            className="rounded-sm px-1.5 py-0.5 text-[12px] text-[#777] hover:bg-[#f0f0f0]"
+            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f0f0f0]"
           >
             ×
           </button>
@@ -2703,6 +2716,7 @@ export function ChatPage({
             // A1 首屏骨架：历史还没回来时不能把「正在加载」画成空会话
             <div
               data-testid="messages-skeleton"
+              role="status"
               aria-busy="true"
               aria-label="正在加载消息"
               className="space-y-3"
@@ -2732,7 +2746,7 @@ export function ChatPage({
           ) : (
             // A1 真空态：只有「加载成功且确实为空」才走到这里
             <div className="flex h-full flex-col items-center justify-center text-center">
-              <div className="rounded-2xl border border-line-soft bg-white p-3 text-[#999]">
+              <div className="rounded-2xl border border-line-soft bg-white p-3 text-muted">
                 <ChatIcon width={22} height={22} />
               </div>
               <div className="mt-3 text-[13px] font-bold text-[#555]">还没有消息</div>
@@ -3050,7 +3064,7 @@ export function ChatPage({
           )}
           <textarea
             aria-label="消息输入框"
-            className="h-full w-full flex-1 resize-none rounded-lg border border-line px-3 py-2 text-sm leading-relaxed outline-hidden focus:border-[#bbb]"
+            className={`h-full w-full flex-1 resize-none rounded-lg border border-line-strong px-3 py-2 text-sm leading-relaxed outline-hidden focus:border-ink ${FOCUS_RING}`}
             placeholder="输入消息…"
             value={draft}
             onChange={(e) => onDraftChange(e.target.value)}

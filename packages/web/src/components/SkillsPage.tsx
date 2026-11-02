@@ -194,22 +194,22 @@ function SkillDetailDrawer({
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          <div className="text-[12px] font-bold text-[#777]">描述</div>
+          <div className="text-[12px] font-bold text-muted">描述</div>
           <p className="mt-1 break-words text-[12px] text-[#555]">
             {skill.description || "暂无描述"}
           </p>
 
-          <div className="mt-3 text-[12px] font-bold text-[#777]">触发词</div>
+          <div className="mt-3 text-[12px] font-bold text-muted">触发词</div>
           <div className="mt-1">
             <TagList items={skill.triggers} empty="暂无触发词" />
           </div>
 
-          <div className="mt-3 text-[12px] font-bold text-[#777]">标签</div>
+          <div className="mt-3 text-[12px] font-bold text-muted">标签</div>
           <div className="mt-1">
             <TagList items={skill.tags} empty="暂无标签" />
           </div>
 
-          <div className="mt-3 text-[12px] font-bold text-[#777]">指令</div>
+          <div className="mt-3 text-[12px] font-bold text-muted">指令</div>
           <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-line bg-[#fafafa] p-2 font-sans text-[11px] leading-5 text-[#333]">
             {skill.instructions || "暂无指令"}
           </pre>
@@ -402,7 +402,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
         return (
           <section key={group.key} className={`${cardCls} mt-3`} role="region" aria-label={group.title}>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[12px] font-bold text-[#777]">{group.title}</span>
+              <span className="text-[12px] font-bold text-muted">{group.title}</span>
               <span className={badgeCls}>{items.length}</span>
               <button
                 type="button"
@@ -413,7 +413,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                   setMsg(null);
                   setAddFor(group.key);
                 }}
-                className="flex h-5 w-5 items-center justify-center rounded-sm border border-line text-[#777] hover:bg-[#f3f3f3] disabled:opacity-40"
+                className="flex h-5 w-5 items-center justify-center rounded-sm border border-line text-muted hover:bg-[#f3f3f3] disabled:opacity-40"
               >
                 <PlusIcon width={12} height={12} />
               </button>
@@ -529,7 +529,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
                 placeholder="粘贴 SKILL.md（以 --- 开头）或技能 JSON；同名/同 id 走更新"
-                className="mt-1 block min-h-[110px] w-full resize-y rounded-lg border border-line px-3 py-2 font-mono text-[11px] outline-hidden focus:border-[#bbb]"
+                className="mt-1 block min-h-[110px] w-full resize-y rounded-lg border border-line-strong px-3 py-2 font-mono text-[11px] outline-hidden focus:border-ink"
               />
             </label>
             <div className="mt-2 flex items-center gap-2">
@@ -549,7 +549,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
 
       <section className={`${cardCls} mt-3`}>
         <div className="flex items-center gap-2">
-          <span className="text-[12px] font-bold text-[#777]">全部技能</span>
+          <span className="text-[12px] font-bold text-muted">全部技能</span>
           <span className={badgeCls}>{filtered.length}</span>
         </div>
 
@@ -793,7 +793,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                             {skill.description || "暂无描述"}
                           </span>
                         </span>
-                        <span className="shrink-0 text-[11px] text-[#999]">
+                        <span className="shrink-0 text-[11px] text-muted">
                           {SOURCE_LABEL[skill.source]}
                         </span>
                       </button>

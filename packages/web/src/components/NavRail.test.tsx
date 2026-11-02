@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { NavRail } from "./NavRail.js";
 import { useUiStore, DEFAULT_NAV_ORDER } from "../store/ui.js";
@@ -185,5 +185,28 @@ describe("NavRail 导航顺序可自定义", () => {
     for (const name of ["主页", "团队", "智能体", "团队看板", "技能区", "接口区", "记忆区", "设置区", "信息中枢", "自动化"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(name) }).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("全站键盘焦点环（③-2）", () => {
+  afterEach(() => {
+    document.getElementById("heming-focus-visible")?.remove();
+  });
+
+  it("导航轨挂载时注入 :focus-visible 规则（覆盖 outline-hidden 的控件）", () => {
+    render(<NavRail />);
+    const style = document.getElementById("heming-focus-visible");
+    expect(style).not.toBeNull();
+    expect(style!.textContent).toContain(":focus-visible");
+    expect(style!.textContent).toContain("outline: 2px solid");
+    // 只对键盘生效：不能用 :focus（鼠标点击也会出环）
+    expect(style!.textContent).not.toMatch(/(^|[\s,{]):focus\s*\{/);
+  });
+
+  it("重复挂载不重复注入（幂等）", () => {
+    const first = render(<NavRail />);
+    render(<NavRail />);
+    expect(document.querySelectorAll("#heming-focus-visible")).toHaveLength(1);
+    first.unmount();
   });
 });

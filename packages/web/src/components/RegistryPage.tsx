@@ -142,7 +142,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
             来自官方 Registry。远程服务本机不落代码；本地包由本机的 Node/uv 运行（和鸣不内置）。装完工具默认关闭。
           </p>
           {runtimeProbed && runtime && (
-            <p className="mt-1 text-[11px] text-[#999]" title={runtime.note}>
+            <p className="mt-1 text-[11px] text-muted" title={runtime.note}>
               {`本机运行时：Node.js ${runtime.npm ? "可用" : "未检测到"} · uv ${runtime.pypi ? "可用" : "未检测到"}`}
             </p>
           )}
@@ -174,7 +174,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="搜索服务名，如 filesystem / github"
-          className="w-full max-w-[360px] rounded-lg border border-line px-3 py-2 text-[12px] text-ink outline-hidden focus:border-[#bbb]"
+          className="w-full max-w-[360px] rounded-lg border border-line-strong px-3 py-2 text-[12px] text-ink outline-hidden focus:border-ink"
         />
         <div className="flex flex-wrap items-center gap-1">
           {FILTERS.map((f) => (
@@ -192,7 +192,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
           ))}
         </div>
         {loadedAt && (
-          <span className="text-[10px] text-[#999]">
+          <span className="text-[10px] text-muted">
             {stale ? "缓存更新于 " : "更新于 "}
             {new Date(loadedAt).toLocaleString()}
           </span>
@@ -323,7 +323,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
           )}
         </div>
         <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{entry.description || "（无描述）"}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-[#999]">
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted">
           <span className="font-mono">{entry.key}</span>
           {option && (
             <span>
@@ -385,7 +385,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
 function EntryIcon({ entry }: { entry: RegistryEntry }) {
   const [broken, setBroken] = useState(false);
   return (
-    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-[#fafafa] text-[13px] font-bold text-[#777]">
+    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-[#fafafa] text-[13px] font-bold text-muted">
       {entry.title.slice(0, 1).toUpperCase()}
       {entry.iconUrl && !broken && (
         <img

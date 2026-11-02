@@ -22,7 +22,7 @@ export function StaffHomeCard() {
   return (
     <section className={CARD} aria-label="幕僚">
       <div className="mb-1.5 flex items-center gap-2">
-        <div className="text-[12px] font-bold text-[#777]">幕僚</div>
+        <div className="text-[12px] font-bold text-muted">幕僚</div>
         <span className="rounded-sm border border-line px-1.5 text-[10px] text-muted">
           {settings.enabled ? "常驻" : "未开启"}
         </span>

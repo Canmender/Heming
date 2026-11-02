@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { secureGetItem, secureSetItem } from "../lib/secureStorage.js";
+import { onSecureHydrated, secureGetItem, secureSetItem } from "../lib/secureStorage.js";
 
 /**
  * LLM 连接本机存储：Key 走系统安全存储（桌面端就地信封，见 lib/secureStorage.ts），
@@ -123,6 +123,46 @@ function loadRoutes(): RouteGroup[] {
 const saveProfiles = (profiles: LlmProfile[]): void => {
   secureSetItem(KEY_CONFIGS, JSON.stringify({ profiles }));
 };
+
+/**
+ * 启动时序（d.59）：`profilesMutated` = **用户在本进程里已经改过连接**（保存过/删过）。
+ *
+ * store 在模块 import 期就读盘，而安全存储的 hydrate 是异步的：
+ * Electron 46 没有同步桥兜底时，首帧的 `loadProfiles()` 可能只拿到空表；
+ * hydrate 完成后我们补读一次（`applyProfilesAfterHydrate`），但**绝不能覆盖用户的输入**。
+ *
+ * 合并规则（按顺序，写清楚是为了将来别加出第四种分支）：
+ * 1. 用户已改过连接 → 不重读：内存就是最新值，写路径也已经落盘；
+ * 2. 内存里已有连接 → 不重读：说明首帧已经读到真实数据（同步兜底/缓存命中），重读只可能
+ *    把用户正在编辑的东西冲掉；
+ * 3. 内存为空且用户没动过 → 重读并 `setState`：这就是「首帧读到空配置」的补全路径。
+ *
+ * 「未保存编辑」在组件本地 draft 里，store 重读不会写盘；用户之后保存时以组件内容为准，
+ * 因此不会丢用户输入（这也是规则 2/3 都只动 `profiles`、不动 bindings/prompts 的原因）。
+ */
+let profilesMutated = false;
+
+/** 测试隔离：清掉「用户已改过连接」标记（不动 localStorage / store 数据）。 */
+export function resetLlmHydrationState(): void {
+  profilesMutated = false;
+}
+
+/**
+ * hydrate 完成后补读 profiles（只补「首帧读到空」这一种情况）。
+ * 任何异常/空数据都静默——启动补全失败不能影响用户继续用应用。
+ */
+function applyProfilesAfterHydrate(): void {
+  if (profilesMutated) return;
+  if (useLlmStore.getState().profiles.length > 0) return;
+  let loaded: LlmProfile[] = [];
+  try {
+    loaded = loadProfiles();
+  } catch {
+    return;
+  }
+  if (loaded.length === 0) return;
+  useLlmStore.setState({ profiles: loaded });
+}
 const saveRecord = (key: string, value: Record<string, string>): void => {
   localStorage.setItem(key, JSON.stringify(value));
 };
@@ -160,16 +200,19 @@ export const useLlmStore = create<LlmState>((set, get) => ({
   prompts: loadRecord(KEY_PROMPTS),
   routes: loadRoutes(),
   addProfile(p) {
+    profilesMutated = true;
     const profiles = [...get().profiles, p];
     saveProfiles(profiles);
     set({ profiles });
   },
   updateProfile(id, patch) {
+    profilesMutated = true;
     const profiles = get().profiles.map((x) => (x.id === id ? { ...x, ...patch, id } : x));
     saveProfiles(profiles);
     set({ profiles });
   },
   removeProfile(id) {
+    profilesMutated = true;
     const profiles = get().profiles.filter((x) => x.id !== id);
     saveProfiles(profiles);
     // 删连接即解绑：已绑定该连接的智能体失联（契约由 LlmSettingsCard 提示）
@@ -221,3 +264,14 @@ export const useLlmStore = create<LlmState>((set, get) => ({
     return get().routes.find((g) => g.id === id);
   },
 }));
+
+/**
+ * 启动时序收口（d.59）：hydrate 完成后补读一次 profiles。
+ *
+ * 注册在 store 创建之后：`onSecureHydrated` 在「已完成」时会立即回调，此时 store 必须已存在。
+ * 浏览器（无桥）下 hydrate 很快以 `hydrated:false` 完成，补读只会在「内存为空」时读一次明文，
+ * 行为与今天一致。
+ */
+onSecureHydrated(() => {
+  applyProfilesAfterHydrate();
+});

@@ -355,3 +355,123 @@ free -m | head -3; swapon --show
 | compose `deploy.resources.limits` | 单元里的 `MemoryHigh` / `MemoryMax` |
 | `--profile preview` 起 8788 验证实例 | 已取消：预发靠本地门禁 + `install-app.sh` 自检。要独立预发就另开机器，别再往这台 2C2G 上叠进程 |
 | `docker builder prune -f` 清缓存 | 没有缓存可清了（也别在这台机上跑任何要遍历镜像层的诊断命令） |
+
+## 12. CSP 基线（P0-6）
+
+两处交付路径各设一份**同源策略**：
+
+| 环境 | 头在哪里 | 说明 |
+|---|---|---|
+| 云端 web | `deploy/nginx-heming.conf` 的 `add_header` | 本文件默认启用 **report-only**，确认无违例后换成 `Content-Security-Policy` 即 enforce |
+| 桌面 `app://` | `packages/desktop/app-protocol.js` → `main.js` 的协议响应头 | `HEMING_CSP_MODE=off|report|enforce`，**默认 report**（先收集违例） |
+| vite dev | **不设头** | dev 下插件会注入内联 preamble，设头会把 HMR 弄挂；dev 不是交付形态 |
+
+### 12.1 最终策略
+
+**主窗口（web 云端与桌面 `app://` 同一份语义）**
+
+```
+default-src 'self' app:;
+script-src 'self' app: 'wasm-unsafe-eval';
+style-src 'self' app: 'unsafe-inline';
+img-src 'self' app: data: blob:;
+font-src 'self' app: data:;
+media-src 'self' app: blob: data:;
+worker-src 'self' blob:;
+connect-src 'self' app: <API 源与 ws/wss> https: wss: http://127.0.0.1:* http://localhost:*;
+object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
+```
+
+（云端版本没有 `app:` 来源；`<API 源与 ws/wss>` 在云端是 `ws://$host wss://$host`，桌面是 `http://47.92.39.184 ws://47.92.39.184` 或 `HEMING_WEB_URL` 的源。）
+
+**桌宠窗口（`/pet.html`，桌面端单独一份）**：与主窗口相同，另加 `form-action 'none'`，
+且 `script-src` **额外有 `'unsafe-eval'`**（理由见下表最后一行）。
+
+### 12.2 每条的理由与豁免依据（都有实测/源码证据）
+
+| 指令 | 取值理由 |
+|---|---|
+| `script-src` 无 `'unsafe-inline'` | `index.html` / `pet.html` 的内联脚本 **0**（构建产物实测：外链 1、内联 0）；vite dev 的内联 preamble 不设头，不受影响。 |
+| `script-src 'wasm-unsafe-eval'` | **硬证据**：① 代码高亮 shiki 用 oniguruma WASM（`lib/markdown/highlight.ts` 的 `createOnigurumaEngine(import("shiki/wasm"))`）；② PDF/Office 解析的 pdfjs 用 WASM 解图像；③ 桌宠 Live2D cubism core 是 WASM。它只放开 **WebAssembly 编译**，不放开 `eval` / `new Function`（源码 `eval(`/`new Function` **0 命中**）。 |
+| `style-src 'unsafe-inline'` | **唯一的内联样式豁免**：KaTeX 渲染输出自带 style 属性、26 处 React `style={{…}}`（主题色/布局）、图表样式。要收掉需给 KaTeX 加 nonce/hash（另立一轮）。 |
+| `worker-src 'self' blob:` | pdfjs 的 module worker（同源 asset）+ blob 兜底。pdfjs **6.5.438** 实测：worker 是 `new Worker(<同源 hashed asset>, { type: "module" })`，`app://` 下取 200 / `text/javascript`，enforce 下真实 worker 完成 `getTextContent`（无 fake worker 回退）——**`'self'` 就够，无需放宽**；`blob:` 留给 officeparser 的 `URL.createObjectURL(new Blob(...))` worker 路径。 |
+| `img-src data: blob:` / `media-src blob: data:` | 录音、图片预览、附件预览走 blob/data URL。 |
+| `connect-src` 的 `https:`/`wss:`/回环 | **为什么不收窄**：模型供应商 `baseUrl`、MCP HTTP 服务、插件 Registry 都是**用户运行期配置**，静态头无法枚举；CSP 的主要收益在 `script-src`，这里只挡「远程明文 http」。**已知边界**：远程明文 http 的供应商会被拦——请上 https，或在部署时把来源加进来（nginx 改 `connect-src`；桌面用 `HEMING_CSP_CONNECT`，逗号分隔）。 |
+| `frame-ancestors 'none'` / `object-src 'none'` / `base-uri 'self'` / `form-action 'self'` | 防点击劫持、插件注入、base 标签劫持与表单外发。 |
+| 桌宠 `script-src 'unsafe-eval'` | **硬证据（enforce 冒烟）**：不放开时桌宠页面直接显示「桌宠没能加载：Current environment does not allow unsafe-eval, please use @pixi/unsafe-eval」——pixi 6 在 `generateProgram` 里用 `new Function` 生成着色器。pixi 8 才移除该依赖，而 `pixi-live2d-display` 硬绑 pixi 6。桌宠窗口只加载 app:// 本地资源、不渲染用户 HTML，风险面远小于主窗口；**pixi 8 可升级时这一条随 `buildCsp({pet:true})` 一起删**。 |
+
+> ☆ 经验记录：初稿把 `http://[::1]:*` 写进 `connect-src`，Chromium 报
+> 「contains an invalid source: 'http://[::1]:*'，ignored」。**CSP 不接受 IPv6 字面量的端口通配**，
+> 已移除；只监听 IPv6 的本机服务请用 `HEMING_CSP_CONNECT` 显式加来源。
+> （report-only 期日志里出现 `blocked=invalid-source` 时，先查是不是这类写法问题。）
+
+### 12.3 为什么不在 `index.html` 写 `<meta http-equiv>`
+
+① meta 对 vite dev 同样生效，而 dev 会注入内联 preamble（React Refresh），会当场把 dev 弄挂；
+② meta **不支持 report-only**，没法先灰度；
+③ 两个交付路径都能发头，meta 没有额外收益。CSP 只走 nginx 头与桌面协议头。
+
+### 12.4 report-only → enforce 切换
+
+1. 当前发布即 report-only：nginx 发 `Content-Security-Policy-Report-Only`；桌面默认 `HEMING_CSP_MODE=report`。
+2. 观察一轮：
+   - 桌面：`~/Heming/logs/csp-report.log`（**限长 256KB、同一条违例只记一次、只记指令/被拦 URI/来源，绝不记页面内容**）；
+   - 云端：浏览器 DevTools 控制台（nginx 没有报告收集端点，report-only 只发头、不发报告请求）。
+3. 无违例后切换：
+   - 云端：`deploy/nginx-heming.conf` 里把 report-only 那行注释、enforce 那行取消注释，`nginx -t && nginx -s reload`；
+   - 桌面：启动环境加 `HEMING_CSP_MODE=enforce`。**下一版本把默认改 enforce** = 改
+     `packages/desktop/app-protocol.js` 里的 `DEFAULT_CSP_MODE = "report"` 为 `"enforce"`（`normalizeCspMode`
+     的非法值兜底也读这同一个常量，只改这一处即可；`main.js` 的 `cspMode()` 默认值自动跟随）。
+4. 回滚：桌面 `HEMING_CSP_MODE=off`；云端注释 CSP 头后 reload。**数据/配置都不受影响**。
+
+### 12.5 冒烟证据（2026-11-02，d.60 轮）
+
+**report-only 期间（桌面 `app://`，`HEMING_CSP_MODE=report`）**
+
+- 文档响应头：`content-security-policy-report-only`，内容为本节 §12.1 的主窗口策略（已去掉非法的 `[::1]`）；
+- 首屏 `#root` 有子节点、标题「和鸣」、外链脚本 1 个、**应用自身 0 条违例**；
+- 只有人为探测产生的两条（用来验证管道与去重）：
+  - `directive=script-src blocked=inline`（注入内联脚本，report-only 下仍执行）；
+  - `directive=connect-src blocked=http://example.invalid/csp-probe`；
+  - 同一违例重复上报只落一条（去重生效）；`wasm` 编译 `ok`。
+- 桌宠窗口（同一份产物）：`canvas` 创建成功、无未捕获错误；pixi 的 `Function(...)` 特性探测产生一条
+  `'unsafe-eval' is not an allowed source`（report-only 下照常执行）。
+
+**enforce 后（三环境）**
+
+| 环境 | 结果 |
+|---|---|
+| vite dev（`http://localhost:5198`） | 不注入 CSP 头；页面正常渲染、HMR preamble 正常（零违例可报，因为没有策略限制）。 |
+| 生产构建 web（本机静态服务注入 nginx 同款头） | enforce 头存在；首屏渲染正常（字体/样式/图片全过）；内联脚本**被拦**（`inlineExecuted=false`）；`wasm-unsafe-eval` 下 WASM `ok`；connect 越界被拦。 |
+| 桌面 `app://` | enforce 头存在；主窗口正常渲染；内联脚本被拦、WASM `ok`、越界 connect 被拦；**桌宠窗口**加 `'unsafe-eval'` 后 canvas 正常、无错误。 |
+
+结论：主窗口 `script-src` 已收紧到「self + wasm-unsafe-eval」，内联脚本/远程明文 http 在 enforce 下确实被挡；
+`style` 的内联豁免与桌宠的 `unsafe-eval` 都有硬证据与移除条件，已在 §12.2 写明。
+
+**2026-11-02 完整产物复核（pdfjs 升到 6.5.438 之后重建）**
+
+- 重建完整生产产物（`.tmp/csp-web-dist`，63 chunk）后重跑三环境 + 桌宠：结果与上表一致，**CSP 策略 0 处 diff**
+  （`buildCsp` / `CSP_HEADER` 未改，`DEFAULT_CSP_MODE` 仍为 `report`）；
+- 新增 pdfjs v6 worker 复核：在真实应用页里 `await import(<pdf chunk>)` → `getWorkerSrc` 指向同源
+  `assets/pdf.worker.min-<hash>.mjs` → 建 module worker → `getDocument` → `getTextContent`，
+  四种组合（`app://`/生产 web × report-only/enforce）全部抽到 `Heming pdfjs smoke test 12345`，
+  耗时 38–51ms，CSP 违例 0、fake worker 警告 0；构建 chunk 中 `eval(`/`new Function(` 均 0 命中；
+- 结论：**pdfjs v6 的 module worker 由现有 `worker-src 'self' blob:` 覆盖，无需调整策略**；
+  证据明细见 `.tmp/csp-evidence.md`（含 pdfjs 复核表）。
+
+### 12.6 桌面端自测命令
+
+```bash
+# report-only（默认）：启动应用后操作一轮，然后看本机日志
+cd packages/desktop
+pnpm exec electron .                 # 或安装版直接启动
+cat ~/Heming/logs/csp-report.log
+
+# enforce：确认无误后切
+HEMING_CSP_MODE=enforce pnpm exec electron .
+# 临时关掉整条策略（排障用）
+HEMING_CSP_MODE=off pnpm exec electron .
+```
+
+> 注意：CSP 是**文档级**的——改 `HEMING_CSP_MODE` 后重启/重载页面才生效；
+> 改模型供应商 `baseUrl` 不需要动 CSP（TLS 端点已放通）。

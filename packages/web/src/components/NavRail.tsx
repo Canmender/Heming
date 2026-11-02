@@ -19,6 +19,7 @@ import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { NotificationCenter } from "./NotificationCenter.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { GlobalFocusRing } from "./a11y/GlobalFocusRing.js";
 
 /**
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
@@ -80,6 +81,8 @@ export function NavRail({ onOpenSearch }: { onOpenSearch?: () => void } = {}) {
       aria-label="主导航"
       className="flex w-[54px] shrink-0 flex-col items-center border-r border-line-soft bg-[#fafafa] py-3"
     >
+      {/* 全站键盘焦点环（③-2）：一条 :focus-visible 规则覆盖所有 outline-hidden 控件 */}
+      <GlobalFocusRing />
       <div className="group relative mb-2">
         <button
           type="button"

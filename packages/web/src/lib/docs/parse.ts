@@ -58,17 +58,21 @@ const OFFICE_EXTENSIONS = ["docx", "xlsx", "pptx", "odt", "odp", "ods", "rtf", "
 /**
  * `Promise.try` 兜底。
  *
- * pdfjs 内部用了 `Promise.try`——ES2025 才标准化的 API，Chromium 需 128+ 才内置。
- * 本项目用的 Electron 31 是 Chromium 126，**实测在真实应用里会
- * `Promise.try is not a function` 直接崩**（而且崩在 worker 线程，主线程的 polyfill 救不了）。
+ * pdfjs v4 起内部用了 `Promise.try`——ES2025 才标准化的 API，Chromium 需 128+ 才内置。
+ * 历史：本项目曾跑在 Electron 31（Chromium 126），实测 `Promise.try is not a function`
+ * 会直接崩，而且**崩在 worker 线程**（主线程补不上），所以当时把 pdfjs 锁在 4.x
+ * ——v4 的入口自带 `typeof Promise.try !== "function"` 的兜底，v6 把这层删了。
  *
- * ⚠️ **pdfjs-dist 必须锁在 4.x**：
- * - v4 的入口自带 `if (typeof Promise.try !== "function") { Promise.try = ... }` 兜底；
- * - v6 把这个兜底删了，装上去就是全局崩，且降级之外没有别的解法
- *   （legacy 构建里同样调 `Promise.try`）。
+ * 现状（d.60 起）：Electron 已升到 45（Chromium 156），`Promise.try` 原生可用，
+ * pdfjs 也随之升到 v6（6.5.438）。已用真实 Electron 跑过「上传 PDF → 文本抽取」冒烟：
+ * 文本精确命中、worker 未崩，见 `.tmp/pdfjs6-smoke` 记录。
  *
- * 这段 polyfill 留着是第二道保险：主线程先补上，worker 由 v4 自带的兜底负责。
- * 升级 pdfjs 之前务必先在 Electron 里跑一遍真实 PDF——jsdom 单测发现不了这个问题。
+ * 这段 polyfill 保留为**第二道保险**，服务于两个场景：
+ * 1. 浏览器端（网页版）落在 Chromium < 128 的老浏览器上：主线程能补，worker 线程补不上，
+ *    因此那种环境里 PDF 解析会走 catch 分支返回「PDF 解析失败：…」——**降级而非整页崩溃**；
+ * 2. 将来若回退到旧 Electron，主线程不会先炸，便于定位问题。
+ *
+ * 升级 pdfjs 前仍务必先在 Electron 里跑一遍真实 PDF——jsdom 单测发现不了这类问题。
  */
 function ensurePromiseTry(): void {
   const target = Promise as unknown as { try?: unknown };

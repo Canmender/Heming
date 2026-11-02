@@ -2,6 +2,54 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.59.2.20.0（2026-11-02）— 全面升级第三批：CSP 基线、启动时序、无障碍与可读性、pdfjs 6
+
+第三波偏「加固与可维护性」：给交付形态套上 CSP 基线（先 report-only），把 Electron 46 前的启动时序收口，修掉 Tailwind 4 迁移留下的系统性焦点环回归并把可读性拉回 AA，最后凭 Electron 45 的 Chromium 156 把压了很久的 pdfjs 4 升到 6。没有新功能入口，用户能感知的是「弱化文字更清楚、表单框线看得见、键盘焦点环回来了」。
+
+### 一、CSP 基线（先 report-only 上线）
+
+- **策略**：主窗口 `default-src 'self' app:`、`script-src 'self' app: 'wasm-unsafe-eval'`（**不含 unsafe-inline / unsafe-eval**）、`style-src 'self' 'unsafe-inline'`（KaTeX 输出 style 属性 + 26 处内联 style + 图表）、`worker-src 'self' blob:`、`img-src data: blob:`、`media-src blob: data:`、`object-src 'none'`、`base-uri 'self'`、`frame-ancestors 'none'`、`form-action 'self'`；`connect-src` = 自身 + API/WS + **`https:`/`wss:` 全放行 + 本机回环 http**（覆盖用户自填 baseUrl、MCP、Registry；只挡远程明文 http）。桌宠窗口单独策略：额外 `'unsafe-eval'`（pixi 6 用 `new Function` 生成 shader，pixi 8 才移除；豁免只作用于 `pet.html`）与 `form-action 'none'`。
+- **两处硬证据**：① shiki 的 oniguruma、pdfjs 图像解码、Live2D cubism 都是 WASM，必须 `'wasm-unsafe-eval'`；② 桌宠不加 `'unsafe-eval'` 会直接报 “please use @pixi/unsafe-eval”、模型起不来。两者都写进注释与文档，不是「先放开再说」。
+- **不在 `index.html` 加 meta**：vite dev 下 `@vitejs/plugin-react` 会注入内联 preamble，meta 会当场弄挂 dev；CSP 只走两个交付路径（nginx 响应头 + 桌面 `app://` 响应头），dev 不设头。
+- **灰度与回退**：桌面 `HEMING_CSP_MODE=off|report|enforce`（默认 `report`），nginx 同时给了 report-only 与 enforce 两段注释好的头；违例日志 `~/Heming/logs/csp-report.log`（限长 256KB、去重、只记 directive/URI/来源，不记页面内容）。回退=改 env 或注释头，无需改代码。
+- **验证**：完整产物下 6 种组合冒烟（桌面 app:// / 生产 web × report/enforce、vite dev 无头、桌宠 enforce）+ pdfjs v6 module worker 四组合——页面均正常渲染、内联脚本探测在 enforce 下被拦、WASM ok、CSP 违例 0；顺带修掉 Chromium 判为 invalid source 的 `http://[::1]:*`。
+- 本轮**以 report-only 上线**，观察一轮无违例后下一版把桌面默认改 enforce（`docs/deploy.md` §12 有明确切换点）。
+
+### 二、启动时序收口（Electron 46 前置）
+
+- **问题**：safeStorage 迁异步后，hydrate 晚到或失败时 `store/llm.ts` 与 `lib/mcp/store.ts` 不会自动补——Electron 46 没有同步桥兜底，这就是单点风险。
+- **做法**：hydrate 落定广播 → 三路各自补读。**三条合并规则**（llm/mcp 同构）：用户已改过 → 不重读；内存非空 → 不重读；空且未改过 → 重读并 `setState`（未保存编辑在组件 draft 里，store 重读不写盘，保存时以组件内容为准）。MCP 在 hydrate 未完成时**推迟预置**（防 46 上用预置覆盖密文配置）；E2E 身份在「有桥 + hydrate 在途」时先等落定（≤1.5s），等完仍无才按 d.36 失败口径备份旧密文后重建。`main.tsx` 的 300ms 短帽不变。
+- **契约文档**：`specs/2026-11-02-safe-storage-async-migration.md` §10 写清时序图、合并规则、helper 语义与维护约束（不得改顶层 await / 不得删短帽 / 新增启动期消费方订阅 `onSecureHydrated`）。
+- **仍剩**（46 前必须）：E2E 收发热路径异步化、保存早于 hydrate 时仍会先落一次明文（d.36 fail-open，下次读后台自迁）、同步桥降级为仅兜底。
+
+### 三、无障碍与可读性（③-2）
+
+- **系统性焦点环回归（本波最有价值的发现）**：Tailwind 4 把 `outline-none` 改成 `outline-hidden` 后，**59 处控件没有可见焦点环**（只靠 `focus:border-*` 变色）。修法：新增 `lib/a11y/focus.ts`（焦点环口径常量 + `outline-none` 源码守卫用例）与 `components/a11y/GlobalFocusRing.tsx`——在常驻导航挂一条 `:focus-visible` 规则（只对键盘生效、跟随主题色、`forced-colors` 交还系统色、幂等注入），不为 59 个 className 做逐处手术。
+- **登录页**：字段补可访问名与 `autocomplete`（不拿 placeholder 当名字）、错误行 `role=alert` + `id`、输入框 `aria-invalid`/`aria-describedby`。
+- **通知中心**：未读用 `sr-only role=status aria-live=polite` 只播未读数变化、角标 `aria-hidden` 防重复播报、铃铛补 `aria-haspopup/controls/expanded`。
+- **流式状态**：粗粒度 live 区只播「正在生成 / 生成失败 / 已生成」，**正文绝不进 live 区**（用例断言活区不含正文，避免逐 token 念屏）。
+- **附件下载失败可重试**：`role=alert` + 「重试」重拉 blob；消息骨架补 `role=status`；团队页（名册/动向/用量/共享/清除）、文件编辑卡补 loading `role=status` / 失败 `role=alert`。
+- **可读性 token**：`muted #888888 → #6f6f6f`（白底 3.54 → **5.02:1**、`#fafafa` 3.40 → **4.81:1**，达 AA），**138 处**硬编码弱化文字统一到 `text-muted`（占位/禁用/装饰按用途保留）；新增 `line-strong #8c8c8c`（白底 3.36 / `#fafafa` 3.22 / `#fcfcfc` 3.28，非文本 ≥3:1）用于**表单控件边界 50 处**，纯分隔线继续用 `line`；`focus:border-[#bbb]`（1.85）→ `focus:border-ink`（17.40）。
+- 审计清单：`docs/research/2026-11-02-a11y-error-audit.md`（每条「已修/已存在/不适用 + 理由」，含对比度实测表）。**未做**：图标默认 `aria-hidden`（收益小于全量背书成本）、NVDA 真机走查（人工）。
+
+### 四、错误态与离线（③-3）
+
+逐入口复核 loading/error/retry 三态：团队页（名册/动向/用量/共享/清除）、桌宠设置、文件编辑、任务区、信息中枢、附件上传/下载、会话历史、发送失败、WS 重连、E2E 不降级——三态齐全或本波补齐，**没有静默失败**。唯一有意例外：**附件上传不提供重试**（避免重放一次上传），文案已写明。
+
+### 五、pdfjs-dist 4 → 6.5.438
+
+- **解锁条件**：当初锁 v4 的唯一原因是 v6 删了 `Promise.try` 兜底而 Electron 31 的 Chromium 126 没有该 API；Electron 45 实测 Chromium **156** 原生支持。
+- **breaking 逐条核对对本仓无影响**：入口 `build/pdf.mjs` 与 worker 路径未变、导出面（`getDocument`/`GlobalWorkerOptions`/`version`）未变、新增的 renderer 拆分与 wasm 解码器都不在文本抽取链路上；`parse.ts` **代码零改动**（只改注释）。
+- **真机冒烟**（Electron 45.2.1 真实渲染进程，跑仓库自己的 `parseDocument`）：v4 与 v6 抽取同为 29 字精确命中、worker 均未崩；耗时 259 → 297ms。
+- **产物**：pdf worker 1,343.6 → 1,271.9 KB（−71.7 KB）、pdf 懒加载块 gzip 93.8 → 133.6 KB（+39.8 KB），**首屏零影响**（不预载）。
+- **回退**：`package.json` 改回 `^4.10.38` + install + build，代码无需回退。**残留风险**：网页版落在 Chromium <128 的老浏览器时 PDF 解析会降级为「解析失败」提示（不会整页崩），桌面端不受影响。
+
+### 六、测试与验收
+
+- 全量门禁（本版发布前实跑）：`shared` 2 文件 / 29 例、`server` 10 文件 / 141 例、`web` 186 文件 / 2798 例、`desktop` 28 个测试文件 / 494 例，全绿；三包 `tsc --noEmit` 零错误；`pnpm -r build` 通过；4/4 包无重试。
+- 视觉：a11y token 改动后截 13 页复核（弱化文字略深、表单框线明显一档，均为预期），布局无漂移。
+- 回滚：多轨合并的一次发布，无逐轨回滚；CSP 可用 `HEMING_CSP_MODE=off` 单独关，pdfjs 可单独降版。
+
 ## d.59.2.19.0（2026-11-02）— 全面升级第二批：首屏瘦身、桌宠在场、团队用量、安全收口
 
 第二波同样是多轨合并：首屏 JS 瘦了 79%，桌宠开始「知道平台上发生了什么」，团队页多了用量排行与团队日程，Electron 45 弃用的同步安全存储 API 完成了异步迁移。三条功能轨都沿用既有红线（本地驱动、E2E 不降级、个人数据不出设备、HITL 不动），新增的上行数据仍只有白名单摘要。

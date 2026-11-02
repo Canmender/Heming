@@ -165,7 +165,7 @@ export function RouteGroupsCard() {
     <section className="mt-3 max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-[12px] font-bold text-[#777]">候选链</span>
+          <span className="text-[12px] font-bold text-muted">候选链</span>
           <span className="text-[11px] text-muted">第一个答不了才走下一个</span>
         </div>
         {!open && (
@@ -225,12 +225,12 @@ export function RouteGroupsCard() {
               );
               return (
                 <li key={`${m.profileId}-${i}`} className="flex items-center gap-2 text-[12px]">
-                  <span className="w-4 shrink-0 text-right text-[#aaa]">{i + 1}</span>
+                  <span className="w-4 shrink-0 text-right text-muted">{i + 1}</span>
                   <span className="min-w-0 flex-1 truncate">
                     {p ? `${p.label} · ${m.model ?? p.model}` : "（连接已删除）"}
                   </span>
                   {p && lookupCapability(p.provider, m.model ?? p.model) === null && (
-                    <span className="shrink-0 text-[10px] text-[#aaa]">窗口未知</span>
+                    <span className="shrink-0 text-[10px] text-muted">窗口未知</span>
                   )}
                   {resting > 0 && (
                     <span className="shrink-0 text-[10px] text-amber-700">
@@ -248,7 +248,7 @@ export function RouteGroupsCard() {
       {rests.length > 0 && (
         <div className="mt-3 rounded-lg border border-line bg-[#fcfcfc] p-3">
           <div className="flex items-center justify-between">
-            <span className="text-[12px] font-bold text-[#777]">休息中的候选</span>
+            <span className="text-[12px] font-bold text-muted">休息中的候选</span>
             <button
               type="button"
               aria-label="刷新休息名单"
@@ -285,7 +285,7 @@ export function RouteGroupsCard() {
       {/* 逐候选账（d.48）：换候选换的是「谁在花钱」，所以按连接×模型分档列，而不是只给一个总数。 */}
       {usage.length > 0 && (
         <div className="mt-3 rounded-lg border border-line bg-[#fcfcfc] p-3">
-          <div className="text-[12px] font-bold text-[#777]">本月逐候选用量</div>
+          <div className="text-[12px] font-bold text-muted">本月逐候选用量</div>
           <ul className="mt-1.5 space-y-1">
             {usage.map((u) => {
               const p = profiles.find((x) => x.id === u.profileId);
@@ -302,7 +302,7 @@ export function RouteGroupsCard() {
                       : "暂无可估的费用数据"}
                   </span>
                   {u.unreported > 0 && (
-                    <span className="shrink-0 text-[10px] text-[#aaa]">
+                    <span className="shrink-0 text-[10px] text-muted">
                       {u.unreported} 轮未上报
                     </span>
                   )}
@@ -310,7 +310,7 @@ export function RouteGroupsCard() {
               );
             })}
           </ul>
-          <div className="mt-1.5 text-[10px] text-[#999]">{PRICING_DISCLAIMER}</div>
+          <div className="mt-1.5 text-[10px] text-muted">{PRICING_DISCLAIMER}</div>
         </div>
       )}
 
@@ -379,7 +379,7 @@ export function RouteGroupsCard() {
               const p = profiles.find((x) => x.id === m.profileId);
               return (
                 <li key={`${m.profileId}-${i}`} className="flex items-center gap-2 text-[12px]">
-                  <span className="w-4 shrink-0 text-right text-[#aaa]">{i + 1}</span>
+                  <span className="w-4 shrink-0 text-right text-muted">{i + 1}</span>
                   <span className="min-w-0 flex-1 truncate">
                     {p ? `${p.label} · ${m.model ?? p.model}` : "（连接已删除）"}
                   </span>
@@ -432,7 +432,7 @@ export function RouteGroupsCard() {
         </form>
       )}
 
-      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-[#999]">{EFFECT_NOTE}</div>
+      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">{EFFECT_NOTE}</div>
     </section>
   );
 }

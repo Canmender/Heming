@@ -306,7 +306,7 @@ export function RolloutTimeline({
             aria-label="本回合 JSON（可手动复制）"
             value={exportText}
             onFocus={(e) => e.currentTarget.select()}
-            className="mt-1 h-24 w-full resize-y rounded-sm border border-line-soft bg-[#fafafa] p-1.5 font-mono text-[10px] leading-4 outline-hidden"
+            className="mt-1 h-24 w-full resize-y rounded-sm border border-line-strong bg-[#fafafa] p-1.5 font-mono text-[10px] leading-4 outline-hidden"
           />
         </div>
       )}

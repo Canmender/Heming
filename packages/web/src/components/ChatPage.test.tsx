@@ -804,7 +804,9 @@ describe("ChatPage", () => {
     expect(ev.conversationId).toBe("c1");
     expect(JSON.stringify(ev)).not.toContain("你好"); // 明文不落帧
     await waitFor(() => expect(input).toHaveValue("")); // 封发异步：等落帧后断言清空
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    // 「无失败提示」：不能用 queryByRole("status") 当代理——消息骨架与流式气泡现在也带
+    // role=status（③-2 语义补全），这里按失败提示的具体文案断言。
+    expect(screen.queryByText(/发送失败/)).not.toBeInTheDocument();
   });
 
   it("草稿按会话持久：切走再回来各自的字还在，不串会话（d.31）", async () => {
@@ -1306,7 +1308,7 @@ describe("ChatPage", () => {
     act(() => {
       useUiStore.setState({ activeConversationId: "c2" });
     });
-    expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 提示随会话清理
+    expect(screen.queryByText("当前环境不支持语音输入")).not.toBeInTheDocument(); // 提示随会话清理
   });
 
   it("切会话停掉旧识别器：convId 切换调其 stop 并清实例，旧 onend 不清新会话指示", async () => {
@@ -1469,7 +1471,7 @@ describe("ChatPage", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-1");
   });
 
-  it("附件 content 拉取失败（401）：给「加载失败」占位，不出断链 img/链接", async () => {
+  it("附件 content 拉取失败（401）：给「加载失败」占位，不出断链 img/链接，可重试", async () => {
     const m: Message = {
       ...msg("m1", "看这张图", "2026-10-14T01:00:00.000Z"),
       payload: {
@@ -1480,10 +1482,47 @@ describe("ChatPage", () => {
     mockMessagesFetch([m], undefined, { contentFail: true });
 
     render(<ChatPage />);
-    expect(await screen.findByText("加载失败")).toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("加载失败");
     expect(screen.queryByRole("img")).not.toBeInTheDocument(); // 不渲染 src 指向裸地址的断图
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(URL.createObjectURL).not.toHaveBeenCalled();
+    // ③-3：失败不能只能干看着——给「重试」入口
+    expect(within(alert).getByRole("button", { name: "重试" })).toBeInTheDocument();
+  });
+
+  it("附件加载失败后点「重试」：重新拉取成功并渲染", async () => {
+    let contentAttempt = 0;
+    const m: Message = {
+      ...msg("m1", "看这张图", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "看这张图",
+        file: { id: "f9", name: "a.png", mime: "image/png", size: 1024 },
+      },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (/\/messages$/.test(url)) return Promise.resolve(jsonRes([m]));
+      if (/\/(reads|members)$/.test(url)) return Promise.resolve(jsonRes([]));
+      if (url === "/api/e2e/keys") return Promise.resolve(jsonRes({}));
+      if (/\/files\/[^/]+\/content$/.test(url)) {
+        contentAttempt += 1;
+        if (contentAttempt === 1) return Promise.resolve(jsonRes({ error: "denied" }, 401));
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          blob: async () => new Blob(["bin"]),
+        } as unknown as Response);
+      }
+      return Promise.resolve(jsonRes({ error: "not found" }, 404));
+    });
+
+    render(<ChatPage />);
+    const alert = await screen.findByRole("alert");
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+
+    expect(await screen.findByRole("img", { name: "a.png" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   /**
@@ -2269,7 +2308,8 @@ describe("ChatPage", () => {
       expect(media.instances[0].state).toBe("inactive"); // 旧会话录音已停
       expect(media.trackStop).toHaveBeenCalledTimes(1);
       expect(screen.queryByText(/录音中/)).not.toBeInTheDocument();
-      expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 放弃发送不落提示
+      // 「放弃发送不落提示」：按错误提示位断言（role=status 现在也被骨架/流式气泡使用）
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       await act(async () => {});
       expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
       expect(fetchSpy.mock.calls.some((c) => String(c[0]) === "/api/files")).toBe(false);

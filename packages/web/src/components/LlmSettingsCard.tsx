@@ -190,7 +190,7 @@ export function LlmSettingsCard() {
     <section className="mt-3 max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-[12px] font-bold text-[#777]">LLM 连接</span>
+          <span className="text-[12px] font-bold text-muted">LLM 连接</span>
           {saved && (
             <span role="status" className="text-[11px] text-muted">
               已保存
@@ -252,7 +252,7 @@ export function LlmSettingsCard() {
                     查不到就说「能力未知」并给手填入口。
                     这几维只是选型参考；真正驱动「判定 → 丢弃」的只有工具与视觉两维。 */}
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <span className="text-[10px] text-[#aaa]">模型能力（选型参考）</span>
+                  <span className="text-[10px] text-muted">模型能力（选型参考）</span>
                   {!caps ? (
                     <>
                       <span className="text-[11px] text-[#b45309]">能力未知</span>
@@ -278,11 +278,11 @@ export function LlmSettingsCard() {
                           </span>
                         ))
                       )}
-                      <span className="text-[10px] text-[#aaa]">
+                      <span className="text-[10px] text-muted">
                         上下文 {Math.round(caps.contextWindow / 1000)}K
                       </span>
                       {caps.pricing ? (
-                        <span className="text-[10px] text-[#aaa]">
+                        <span className="text-[10px] text-muted">
                           ¥{caps.pricing.input}/¥{caps.pricing.output} 每百万 token
                         </span>
                       ) : null}
@@ -297,7 +297,7 @@ export function LlmSettingsCard() {
                   )}
                 </div>
                 {caps?.pricing ? (
-                  <div className="mt-0.5 text-[10px] text-[#bbb]">{PRICING_DISCLAIMER}</div>
+                  <div className="mt-0.5 text-[10px] text-muted">{PRICING_DISCLAIMER}</div>
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -345,7 +345,7 @@ export function LlmSettingsCard() {
                     aria-label="上下文窗口（token）"
                     value={capsWindow}
                     onChange={(e) => setCapsWindow(e.target.value)}
-                    className="ml-2 w-[140px] rounded-lg border border-line px-2 py-1 text-[12px] outline-hidden focus:border-[#bbb]"
+                    className="ml-2 w-[140px] rounded-lg border border-line-strong px-2 py-1 text-[12px] outline-hidden focus:border-ink"
                   />
                 </label>
                 <button
@@ -487,7 +487,7 @@ export function LlmSettingsCard() {
       {/* 脱敏的全局部分：自定义词与对照表（magpie 的 redactWords / redact.key）。
           开关本身在每条连接上——「这家会不会存我数据」是逐家判断的。 */}
       <div className="mt-3 rounded-lg border border-line bg-[#fcfcfc] p-3">
-        <div className="text-[12px] font-bold text-[#777]">出站脱敏 · 词表与对照表</div>
+        <div className="text-[12px] font-bold text-muted">出站脱敏 · 词表与对照表</div>
         <label className="mt-1 block text-[12px] text-muted">
           额外要隐去的词（逗号分隔）
           <input
@@ -525,7 +525,7 @@ export function LlmSettingsCard() {
         </div>
       </div>
 
-      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-[#999]">
+      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">
         {EFFECT_NOTE}
       </div>
     </section>

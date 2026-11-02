@@ -280,3 +280,30 @@ describe("团队日程：只读摘要", () => {
     expect(uploadTeamUsage).not.toHaveBeenCalled();
   });
 });
+
+describe("团队页错误态语义（③-3）", () => {
+  it("名册与动向失败都用 role=alert 播报，并给可重试按钮（不静默）", async () => {
+    vi.mocked(fetchTeam).mockRejectedValue(new Error("网络异常"));
+    vi.mocked(fetchTeamActivities).mockRejectedValue(new Error("网络异常"));
+
+    render(<TeamPage />);
+    const alerts = await screen.findAllByRole("alert");
+    const text = alerts.map((a) => a.textContent ?? "").join("\n");
+    expect(text).toContain("名册加载失败");
+    expect(text).toContain("动向加载失败");
+    // 两个失败态都带「重试」入口
+    expect(screen.getAllByRole("button", { name: "重试" }).length).toBe(2);
+  });
+
+  it("用量加载失败用 role=alert 播报并可重试", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    vi.mocked(fetchTeamUsage).mockRejectedValue(new Error("网络异常"));
+
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/用量加载失败/);
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
+  });
+});

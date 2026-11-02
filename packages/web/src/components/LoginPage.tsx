@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuthStore } from "../store/auth.js";
+import { FOCUS_RING } from "../lib/a11y/focus.js";
 import { Wordmark } from "./Wordmark.js";
 
 /**
@@ -39,26 +40,44 @@ export function LoginPage() {
           <h1 className="mb-1 text-xl font-extrabold">和鸣</h1>
           <p className="mb-5 text-[13px] text-muted">登录你的账号</p>
           <div className="flex flex-col gap-3">
+            {/*
+             * 字段名走 aria-label 而不是可见 <label>：登录页版式是裸输入框 + placeholder，
+             * 加可见标签会改变版式（本轮不动视觉）。placeholder 不能当可访问名的主要来源，
+             * 所以显式给 aria-label；错误时用 aria-invalid + aria-describedby 关联到错误行。
+             */}
             <input
-              className="rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]"
+              aria-label="用户名"
+              autoComplete="username"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "login-error" : undefined}
+              className={`rounded-lg border border-line-strong px-3 py-2 text-sm outline-hidden focus:border-ink ${FOCUS_RING}`}
               placeholder="用户名"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
             />
             <input
-              className="rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]"
+              aria-label="密码"
+              autoComplete="current-password"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "login-error" : undefined}
+              className={`rounded-lg border border-line-strong px-3 py-2 text-sm outline-hidden focus:border-ink ${FOCUS_RING}`}
               placeholder="密码"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-            {error && <div className="text-[12px] text-red-600">{error}</div>}
+            {error && (
+              // 失败原因必须被读屏播报：role=alert 让它在出现时立刻读出（不是等用户 Tab 到）
+              <div id="login-error" role="alert" className="text-[12px] text-red-600">
+                {error}
+              </div>
+            )}
             <button
               type="submit"
               disabled={status === "pending"}
-              className="mt-1 rounded-lg bg-ink py-2 text-sm font-bold text-white disabled:opacity-50"
+              className={`mt-1 rounded-lg bg-ink py-2 text-sm font-bold text-white disabled:opacity-50 ${FOCUS_RING}`}
             >
               {status === "pending" ? "请稍候…" : "登录"}
             </button>

@@ -77,11 +77,11 @@ export function SelfEditCard({
     <section aria-label="自我优化" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-[12px] font-bold text-[#777]">自我优化</div>
+          <div className="text-[12px] font-bold text-muted">自我优化</div>
           <div className="mt-1 text-[11px] text-muted">
             允许智能体按需修改自己的记忆、技能与 MCP 配置。改动即时生效，并记录在下方。
           </div>
-          <div className="mt-1 text-[11px] text-[#aaa]">
+          <div className="mt-1 text-[11px] text-muted">
             工具占一定上下文开销，仅在开关被操作过（开或关）之后才会真正注入。
           </div>
         </div>
@@ -113,7 +113,7 @@ export function SelfEditCard({
       )}
 
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-[11px] font-bold text-[#999]">
+        <div className="text-[11px] font-bold text-muted">
           变更记录{audit.length ? `（最近 ${audit.length} 条）` : ""}
         </div>
         {audit.length === 0 ? (
@@ -128,10 +128,10 @@ export function SelfEditCard({
       </div>
 
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-[11px] font-bold text-[#999]">
+        <div className="text-[11px] font-bold text-muted">
           可回滚的修改{snaps.length ? `（${snaps.length} 条）` : ""}
         </div>
-        <div className="mt-0.5 text-[11px] text-[#aaa]">
+        <div className="mt-0.5 text-[11px] text-muted">
           回滚只还原这一项（记忆内容 / 技能定义 / MCP 配置），不撤销之后的其它改动。
         </div>
         {!agentId ? (
@@ -145,7 +145,7 @@ export function SelfEditCard({
                 key={snap.id}
                 className="flex flex-wrap items-center gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]"
               >
-                <span className="text-[#aaa]">{snap.at.slice(0, 16).replace("T", " ")}</span>
+                <span className="text-muted">{snap.at.slice(0, 16).replace("T", " ")}</span>
                 <span className="min-w-0 flex-1 truncate text-[#555]">{snap.label}</span>
                 <button
                   type="button"
@@ -227,8 +227,8 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
   const time = entry.at.slice(0, 16).replace("T", " ");
   return (
     <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]">
-      <span className="text-[#aaa]">{time}</span>
-      <span className="rounded-sm bg-[#f3f3f3] px-1 text-[#777]">
+      <span className="text-muted">{time}</span>
+      <span className="rounded-sm bg-[#f3f3f3] px-1 text-muted">
         {SCOPE_LABEL[entry.scope]}·{ACTION_LABEL[entry.action] ?? entry.action}
       </span>
       <span className="min-w-0 flex-1 truncate text-[#555]">{entry.target}</span>
@@ -238,7 +238,7 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
         </span>
       )}
       {entry.reason && !entry.rejected && (
-        <span className="max-w-[45%] truncate text-[#aaa]" title={entry.reason}>
+        <span className="max-w-[45%] truncate text-muted" title={entry.reason}>
           {entry.reason}
         </span>
       )}

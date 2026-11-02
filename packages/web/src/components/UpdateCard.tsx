@@ -102,7 +102,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
       className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[12px] font-bold text-[#777]">软件更新</div>
+        <div className="text-[12px] font-bold text-muted">软件更新</div>
         <span className="text-[11px] text-muted">当前 {currentVersion}</span>
       </div>
 

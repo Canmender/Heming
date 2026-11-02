@@ -48,7 +48,7 @@ const NEWS: { source: string; title: string; summary: string; date: string }[] =
 function StatCard({ title, value, sub }: { title: string; value: string; sub?: string }) {
   return (
     <div className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
-      <div className="text-[11px] font-bold text-[#777]">{title}</div>
+      <div className="text-[11px] font-bold text-muted">{title}</div>
       <div className="mt-0.5 text-[20px] font-extrabold">{value}</div>
       {sub && <div className="mt-0.5 text-[10px] text-muted">{sub}</div>}
     </div>
@@ -234,7 +234,7 @@ export function HomePage() {
         <StatCard title="今日动向" value={String(todayActivities)} sub="最近 100 条内" />
         <div className="col-span-4 rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
           <div className="flex items-center">
-            <div className="text-[11px] font-bold text-[#777]">Token 用量 · {monthKey}</div>
+            <div className="text-[11px] font-bold text-muted">Token 用量 · {monthKey}</div>
             <div className="ml-auto inline-flex overflow-hidden rounded-lg border border-[#ddd] bg-[#fafafa]">
               {(
                 [
@@ -352,7 +352,7 @@ export function HomePage() {
       {/* 2.5 近 30 日用量热力图 */}
       <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
         <div className="mb-1.5 flex items-center">
-          <div className="text-[12px] font-bold text-[#777]">近 30 日用量</div>
+          <div className="text-[12px] font-bold text-muted">近 30 日用量</div>
           <div className="ml-auto flex items-center gap-1 text-[10px] text-muted">
             少
             {["#f1f4f7", "#dbeafe", "#93c5fd", "#3b82f6", "#1d4ed8"].map((c) => (
@@ -374,7 +374,7 @@ export function HomePage() {
       <div className="grid grid-cols-[1.5fr_1fr] gap-3">
         <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
           <div className="mb-1.5 flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#777]">
+            <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted">
               <TeamIcon width={14} height={14} />
               团队动向
             </div>
@@ -449,7 +449,7 @@ export function HomePage() {
         <div className="flex flex-col gap-3">
           {/* 4. 智能体动态 */}
           <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
-            <div className="mb-1.5 text-[12px] font-bold text-[#777]">智能体动态</div>
+            <div className="mb-1.5 text-[12px] font-bold text-muted">智能体动态</div>
             {displayAgents.length === 0 ? (
               <div className="py-1.5 text-[12px] text-muted">暂无智能体，可在智能体页创建</div>
             ) : (
@@ -470,7 +470,7 @@ export function HomePage() {
           {/* 5. 在线成员 */}
           <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
             <div className="mb-1.5 flex items-center justify-between">
-              <div className="text-[12px] font-bold text-[#777]">在线成员</div>
+              <div className="text-[12px] font-bold text-muted">在线成员</div>
               <button
                 type="button"
                 className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink"
@@ -508,7 +508,7 @@ export function HomePage() {
 
           {/* 6. 系统状态 */}
           <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
-            <div className="mb-1.5 text-[12px] font-bold text-[#777]">系统状态</div>
+            <div className="mb-1.5 text-[12px] font-bold text-muted">系统状态</div>
             <div className="flex justify-between py-0.5 text-[12px]">
               <span className="text-muted">云端连接</span>
               <span>{cloud}</span>
@@ -527,7 +527,7 @@ export function HomePage() {
 
       {/* 7. 底部通栏：最新资讯（静态常量） */}
       <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
-        <div className="mb-2 text-[12px] font-bold text-[#777]">最新资讯</div>
+        <div className="mb-2 text-[12px] font-bold text-muted">最新资讯</div>
         <div className="grid grid-cols-3 gap-2.5">
           {NEWS.map((n) => (
             <article key={n.title} className="rounded-lg border border-line-soft bg-[#fafafa] p-2.5">

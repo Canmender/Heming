@@ -1,4 +1,4 @@
-﻿/**
+/**
  * E2E 会话层：链管理、封解密、乱序暂挂与本地明文缓存。
  * 规格：docs/superpowers/specs/2026-10-17-e2e-encryption-design.md §3.2/§5/§6。
  *
@@ -33,7 +33,7 @@ import {
   toB64,
   fromB64,
 } from "./e2eCrypto.js";
-import { secureGetItem, secureSetItem, secureBridge, secureSetItemVerified, readSecureValue, backupRawOnce, markSecureUndecryptable, onSecureHydrated, PLAINTEXT_BACKUP_SUFFIX, UNDECRYPTABLE_BACKUP_SUFFIX } from "./secureStorage.js";
+import { secureGetItem, secureSetItem, secureBridge, secureSetItemVerified, readSecureValue, backupRawOnce, markSecureUndecryptable, hasSecureBridge, secureHydrationInFlight, whenSecureHydrated, onSecureHydrated, PLAINTEXT_BACKUP_SUFFIX, UNDECRYPTABLE_BACKUP_SUFFIX } from "./secureStorage.js";
 import {
   MIGRATE_BATCH,
   decodeEntries,
@@ -451,9 +451,27 @@ function identityKidFor(raw: string): string | null {
   return kid;
 }
 
+/** 身份等 hydrate 的上限：等太久也不能把收发挂住；超时按「没等到」继续（d.36 fail-open）。 */
+const IDENTITY_HYDRATE_WAIT_MS = 1500;
+
 async function ensureIdentity(): Promise<StoredIdentity> {
   const existing = readSecureJson<StoredIdentity>(IDENTITY_KEY);
   if (existing?.kid && existing.spk?.pub) return existing;
+  /*
+   * 启动时序（d.59）：Electron 46 没有同步桥兜底，hydrate 未完成时 `secureGetItem`
+   * 对「缓存未命中的密文」只能返回 null（真正的解密是后台异步补取的）。
+   * 若此刻直接生成临时身份并写盘，会覆盖磁盘上的真实身份——其他设备之后发来的消息
+   * 就永久解不开了。所以只在这种情况下先等 hydrate 落定（有上限，绝不挂住收发），再读一次。
+   *
+   * 浏览器 / 单测（没人调 hydrate）不会进入等待分支，行为与今天一致；
+   * hydrate 已完成但**不可用**（keyring 重置 / 换系统账户）仍走 d.36 失败口径：
+   * 覆盖前先原样备份旧密文，再生成新身份（宁可降级也不能让应用不可用）。
+   */
+  if (hasSecureBridge() && secureHydrationInFlight()) {
+    await whenSecureHydrated(IDENTITY_HYDRATE_WAIT_MS);
+    const afterWait = readSecureJson<StoredIdentity>(IDENTITY_KEY);
+    if (afterWait?.kid && afterWait.spk?.pub) return afterWait;
+  }
   if (identityInFlight) return identityInFlight; // 并发首启：共享同一生成
   // 生成/载入身份：IK 双键（ECDH 协商 + ECDSA 签名链）+ 签名预键 SPK（§3.1）
   const gen = (async () => {

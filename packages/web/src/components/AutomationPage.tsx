@@ -473,7 +473,7 @@ function AutomationEditor({
             ref={nameRef}
             value={draft.name}
             onChange={(e) => setDraft((current) => ({ ...current, name: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+            className="mt-1 w-full rounded-md border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
           />
 
           <label className="mt-3 block text-[11px] font-medium text-[#555]" htmlFor="automation-kind">
@@ -488,7 +488,7 @@ function AutomationEditor({
                 kind: e.target.value === "infohub.agenda" ? "infohub.agenda" : "infohub.sync",
               }))
             }
-            className="mt-1 w-full rounded-md border border-line bg-white px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]"
+            className="mt-1 w-full rounded-md border border-line-strong bg-white px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
           >
             <option value="infohub.sync">{actionLabel("infohub.sync")}</option>
             <option value="infohub.agenda">{actionLabel("infohub.agenda")}</option>
@@ -600,7 +600,7 @@ function AutomationEditor({
                         : current,
                     )
                   }
-                  className="rounded-md border border-line px-2 py-1 text-[12px] outline-hidden focus:border-[#bbb]"
+                  className="rounded-md border border-line-strong px-2 py-1 text-[12px] outline-hidden focus:border-ink"
                 />
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -645,7 +645,7 @@ function AutomationEditor({
                       : current,
                   )
                 }
-                className="w-24 rounded-md border border-line px-2 py-1 text-[12px] outline-hidden focus:border-[#bbb]"
+                className="w-24 rounded-md border border-line-strong px-2 py-1 text-[12px] outline-hidden focus:border-ink"
               />
               <span className="text-[10px] text-muted">
                 {MIN_INTERVAL_MINUTES}–{MAX_INTERVAL_MINUTES} 分钟

@@ -19,6 +19,15 @@ import "katex/dist/katex.min.css";
  * 为什么不用模块顶层 `await`：入口一旦变成 async 模块，Rolldown 不再把首屏依赖
  * 合并进入口 chunk，实测会碎成 20+ 个预载块、gzip 反而更大。这里用 `.finally()`
  * 挂渲染，语义等价（等 race 落定再渲染），但入口保持同步模块、切块正常。
+ *
+ * ★ 启动时序契约（d.59，改这里之前先读）：
+ *   1. `hydrateSecureStorage()` 必须在本文件里、**渲染之前**启动（这就是「顺序正确」）；
+ *   2. store 模块是先于本 body 求值的（ES import 提升），所以它们的首帧读盘可能早于
+ *      hydrate 完成——Electron 46 没有同步桥兜底时会读到空。这不是 bug，由各 store
+ *      订阅 `onSecureHydrated` 自愈：LLM 连接 / MCP 服务 / E2E 身份各有一份合并规则
+ *      （用户已改过的东西绝不被 hydrate 后的重读覆盖，见对应模块注释）；
+ *   3. 给 hydrate 加帽可以，但**不要**为了等它把入口改成顶层 `await import()` 或
+ *      `await hydrate`——那会破坏上面的切块假设，也把「安全存储不可用」变成启动阻塞。
  */
 const HYDRATE_CAP_MS = 300;
 const root = document.getElementById("root")!;
