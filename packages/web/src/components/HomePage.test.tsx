@@ -5,7 +5,10 @@ import { HomePage } from "./HomePage.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
+import { useLlmStore } from "../store/llm.js";
+import { useTaskStore } from "../lib/tasks/store.js";
 import { useTokenUsageStore, monthKeyOf, daysOfMonth } from "../store/tokenUsage.js";
+import { ONBOARDING_KEY, useOnboardingStore } from "../lib/onboarding.js";
 import { fetchTeam, fetchTeamActivities } from "../lib/api.js";
 
 // 团队名册与动向走 lib/api（首页真实数据优先）；health 探测仍走裸 fetch，单独 spy。
@@ -97,6 +100,11 @@ describe("HomePage", () => {
     vi.mocked(fetchTeam).mockReset();
     vi.mocked(fetchTeamActivities).mockReset();
     useTokenUsageStore.getState().reset();
+    // UX-A 首跑引导：默认「无连接 + 没关过」；每个用例显式决定，避免状态泄漏
+    localStorage.removeItem(ONBOARDING_KEY);
+    useOnboardingStore.setState({ dismissedAt: null });
+    useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
+    useTaskStore.setState({ tasks: [] });
     useAuthStore.setState({ token: "t1", user, status: "authed", error: null });
     useUiStore.setState({ page: "home", activeConversationId: null });
     useChatStore.setState({
@@ -356,5 +364,85 @@ describe("HomePage", () => {
 
     await waitFor(() => expect(screen.getByText("正常")).toBeInTheDocument());
     expect(screen.getAllByText("加载失败：团队接口挂了").length).toBeGreaterThan(0);
+  });
+
+  /* ---------------------------------------------------- UX-A 首跑引导（U1） */
+
+  it("没有任何模型连接：首跑引导卡出现，三步骤齐全且按钮可直达", async () => {
+    render(<HomePage />);
+    await act(async () => {});
+
+    const card = screen.getByRole("region", { name: "开始使用" });
+    expect(within(card).getByText("配置模型连接")).toBeInTheDocument();
+    expect(within(card).getByText("和智能体对话")).toBeInTheDocument();
+    expect(within(card).getByText("建第一个任务")).toBeInTheDocument();
+    expect(within(card).getByText(/0\/3\s*已完成/)).toBeInTheDocument();
+
+    fireEvent.click(within(card).getByRole("button", { name: "去配置模型" }));
+    expect(useUiStore.getState().page).toBe("settings");
+  });
+
+  it("引导步骤状态来自真实 store：有会话/有任务时对应步骤标已完成", async () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: { id: "system-assistant", name: "和小鸣", avatar: null, owner_id: null, description: "" },
+          unreadCount: 0,
+        },
+      ] as never,
+    });
+    useTaskStore.setState({
+      tasks: [
+        {
+          id: "t1",
+          conversationId: "c1",
+          agentId: "system-assistant",
+          agentName: "和小鸣",
+          title: "任务",
+          prompt: "做一个任务",
+          status: "done",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          steps: [],
+        },
+      ],
+    });
+
+    render(<HomePage />);
+    await act(async () => {});
+    const card = screen.getByRole("region", { name: "开始使用" });
+    // 2/3 完成（会话 + 任务），只有「配置模型连接」还没做
+    expect(within(card).getByText(/2\/3\s*已完成/)).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "去配置模型" })).toBeEnabled();
+  });
+
+  it("已有模型连接：引导卡不再出现（只服务首跑）", async () => {
+    useLlmStore.setState({
+      profiles: [{ id: "p1", label: "本地", provider: "openai", apiKey: "k", model: "m" }],
+      bindings: {},
+    });
+    render(<HomePage />);
+    await act(async () => {});
+    expect(screen.queryByRole("region", { name: "开始使用" })).toBeNull();
+  });
+
+  it("点「不再显示」：卡片立刻消失，且只在本机记一个时间戳（重新挂载仍不出现）", async () => {
+    const { unmount } = render(<HomePage />);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "不再显示" }));
+    expect(screen.queryByRole("region", { name: "开始使用" })).toBeNull();
+    expect(typeof useOnboardingStore.getState().dismissedAt).toBe("number");
+
+    const raw = JSON.parse(localStorage.getItem(ONBOARDING_KEY) ?? "{}") as {
+      dismissedAt?: number;
+    };
+    expect(typeof raw.dismissedAt).toBe("number");
+
+    unmount();
+    render(<HomePage />);
+    await act(async () => {});
+    expect(screen.queryByRole("region", { name: "开始使用" })).toBeNull();
   });
 });

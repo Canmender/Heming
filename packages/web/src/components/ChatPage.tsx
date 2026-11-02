@@ -80,7 +80,7 @@ import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
 import { connectWs, type WsHandle } from "../lib/ws.js";
 import { registerChatSocket } from "../lib/chatSocketPresence.js";
-import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon, ChatIcon } from "./icons.js";
+import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon } from "./icons.js";
 import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
 import { Avatar } from "./Avatar.js";
 import { AgentStreamBubble } from "./AgentStreamBubble.js";
@@ -109,6 +109,10 @@ import { mcpRegistry } from "../lib/mcp/store.js";
 import { useModalA11y } from "./useModalA11y.js";
 import { capabilityNotice } from "../lib/capabilityNotice.js";
 import { formatClock, formatDayClock, needsTimeSeparator } from "../lib/formatTime.js";
+import { ChatEmptyState } from "./ux/ChatEmptyState.js";
+import { ComposerHints } from "./ux/ComposerHints.js";
+import { UNBOUND_NOTICE_ID, UnboundModelNotice, unboundNoticeText } from "./ux/UnboundModelNotice.js";
+import { chatExamplesFor } from "../lib/onboarding.js";
 
 /**
  * 空消息列表的**稳定引用**。
@@ -946,6 +950,37 @@ export function ChatPage({
    * （后者由路由层展开成候选链，见 lib/llmRoute.ts）。
    */
   const resolveProfile = resolveBoundProfile;
+
+  /**
+   * UX-A：当前会话的智能体是否**未绑定模型**。
+   *
+   * 与发送前拦截（submitMessage）共用同一个解析器，所以提示出现时发送必然也该被禁用；
+   * 提示条与禁用按钮都由这一个判定驱动，不会出现「按钮能点但一说就报错」。
+   */
+  const unboundAgent = useMemo(
+    () => effectiveMentions.find((m) => !resolveProfile(m.agentId)) ?? null,
+    // resolveProfile 读的是 store 快照；llmBindings/llmProfiles 变化时这里必须重算
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [effectiveMentions, llmBindings, llmProfiles],
+  );
+
+  /** 空对话示例按当前绑定模型的能力挑选（不支持工具就别给「帮我查一下」这种）。 */
+  const emptyExamples = useMemo(() => {
+    const profile = conv ? resolveProfile(conv.agent.id) : undefined;
+    const caps = profile ? resolveCapability(profile) : null;
+    return chatExamplesFor({ tools: caps?.supportsTools, vision: caps?.supportsVision });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conv, llmBindings, llmProfiles]);
+
+  /** 输入框引用：点示例后把焦点交回来，用户可以接着改。 */
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  /** 点空态示例：**只填入**（并落草稿），不提交表单、不发请求。 */
+  const applyExample = (text: string) => {
+    setDraft(text);
+    scheduleDraftSave(convId, text);
+    composerRef.current?.focus();
+  };
 
   /**
    * 构造某个智能体这一轮的工具桥。
@@ -2744,14 +2779,8 @@ export function ChatPage({
               </button>
             </div>
           ) : (
-            // A1 真空态：只有「加载成功且确实为空」才走到这里
-            <div className="flex h-full flex-col items-center justify-center text-center">
-              <div className="rounded-2xl border border-line-soft bg-white p-3 text-muted">
-                <ChatIcon width={22} height={22} />
-              </div>
-              <div className="mt-3 text-[13px] font-bold text-[#555]">还没有消息</div>
-              <div className="mt-1 text-[11px] text-muted">发送第一条消息，开始这段对话。</div>
-            </div>
+            // A1 真空态 + UX-A：只有「加载成功且确实为空」才显示；示例只填入不发送
+            <ChatEmptyState examples={emptyExamples} onPick={applyExample} />
           )
         ) : null}
         {windowedMessages.map((m, index) => {
@@ -2929,6 +2958,18 @@ export function ChatPage({
             {NO_E2E_NOTICE}
           </p>
         )}
+        {/* UX-A：未绑定模型前置提示（与任务区同源组件）；发送按钮同时置灰，
+            不再等用户敲完一段话才在发送时被拦。 */}
+        {unboundAgent && (
+          <div className="mx-5 mt-2">
+            <UnboundModelNotice
+              id={UNBOUND_NOTICE_ID}
+              variant="inline"
+              agentName={unboundAgent.name}
+              onGoSettings={() => useUiStore.getState().setPage("settings")}
+            />
+          </div>
+        )}
         {/* 提示行（复用同一位）：录音中占位（停止/取消入口），否则走发送提示 */}
         {recording ? (
           <div className="flex items-center gap-3 px-5 pt-2 text-[12px]">
@@ -3063,7 +3104,9 @@ export function ChatPage({
             />
           )}
           <textarea
+            ref={composerRef}
             aria-label="消息输入框"
+            aria-describedby={unboundAgent ? UNBOUND_NOTICE_ID : undefined}
             className={`h-full w-full flex-1 resize-none rounded-lg border border-line-strong px-3 py-2 text-sm leading-relaxed outline-hidden focus:border-ink ${FOCUS_RING}`}
             placeholder="输入消息…"
             value={draft}
@@ -3116,20 +3159,25 @@ export function ChatPage({
           </button>
           <button
             type="submit"
-            disabled={!draft.trim() || uploading}
-            title="发送"
+            disabled={!draft.trim() || uploading || Boolean(unboundAgent)}
+            title={unboundAgent ? unboundNoticeText(unboundAgent.name) : "发送"}
             className="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             发送
           </button>
         </div>
-        {/* 智能体一对一：明确告诉用户「发出去会自动交给这个智能体」 */}
-        {conv && (
-          <div className="px-5 pb-2 text-[11px] text-muted">
-            与 <span className="font-medium text-[#555]">{conv.agent.name}</span>{" "}
-            的对话 · 发送后自动交给智能体
-          </div>
-        )}
+        {/* 底部说明 + 快捷键提示（UX-A）：常驻但弱化，不占提示位 */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 pb-2">
+          {conv && (
+            <span className="text-[11px] text-muted">
+              与 <span className="font-medium text-[#555]">{conv.agent.name}</span>{" "}
+              的对话 · 发送后自动交给智能体
+            </span>
+          )}
+          <span className="ml-auto">
+            <ComposerHints streaming={activeLocal.length > 0} />
+          </span>
+        </div>
       </form>
       {/* HITL 工具确认弹窗（设计 §4.3）：
           智能体要调有副作用的工具时，先问用户同不同意。

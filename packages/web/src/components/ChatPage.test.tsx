@@ -4050,3 +4050,102 @@ describe("ChatPage 任务区接线", () => {
     }
   });
 });
+
+/**
+ * UX-A：未绑定模型前置提示、禁用发送、空态示例（只填不发）与快捷键提示。
+ * 单独一个 describe：复用文件级 helper，但状态独立，避免污染既有 100+ 用例。
+ */
+describe("UX-A 未绑定模型与对话空态", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.mocked(connectWs).mockReset();
+    vi.mocked(connectWs).mockReturnValue({ send: vi.fn(), close: vi.fn() });
+    vi.mocked(hasSubtle).mockReturnValue(true);
+    vi.mocked(sealMessage).mockReset();
+    vi.mocked(sealMessage).mockImplementation(stubSeal as never);
+    vi.mocked(streamChat).mockReset();
+    vi.mocked(streamChat).mockResolvedValue("");
+    useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
+    useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
+    useUiStore.setState({ page: "chat", activeConversationId: "c1", taskDraft: null });
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: { id: "system-assistant", name: "和小鸣", avatar: null, owner_id: null, description: "" },
+          unreadCount: 0,
+        },
+      ] as never,
+      messages: {},
+      messagesLoading: {},
+      messagesError: {},
+      streaming: {},
+      streamOwner: {},
+      plainById: {},
+      pendingE2e: {},
+    });
+    useNotificationStore.setState({ items: [] });
+    mockMessagesFetch([]);
+  });
+
+  it("未绑定模型：输入区上方出现统一提示、发送禁用、点「去设置」跳设置页", async () => {
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const notice = await screen.findByText(/当前智能体还没有绑定模型连接/);
+    expect(notice.textContent).toContain("和小鸣");
+    const noticeBox = document.getElementById("unbound-model-notice")!;
+    expect(noticeBox).not.toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "你好" } });
+    const send = screen.getByRole("button", { name: "发送" });
+    expect(send).toBeDisabled();
+    expect(send.getAttribute("title") ?? "").toContain("还没有绑定模型连接");
+
+    fireEvent.click(within(noticeBox).getByRole("button", { name: "去设置" }));
+    expect(useUiStore.getState().page).toBe("settings");
+  });
+
+  it("绑定模型后提示消失、发送可用（同一判定驱动提示与禁用）", async () => {
+    bindAssistant();
+    render(<ChatPage />);
+    await act(async () => {});
+    expect(screen.queryByText(/当前智能体还没有绑定模型连接/)).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息…"), { target: { value: "你好" } });
+    expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
+  });
+
+  it("对话空态：3 条示例可点，只填入输入框、不发任何请求", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const list = await screen.findByRole("list", { name: "对话示例" });
+    const buttons = within(list).getAllByRole("button");
+    expect(buttons).toHaveLength(3);
+
+    fireEvent.click(buttons[1]!);
+    const input = screen.getByPlaceholderText("输入消息…") as HTMLTextAreaElement;
+    expect(input.value).toBe(buttons[1]!.textContent);
+    // 没发请求：没有 send_message、也没启动模型流
+    expect(send.mock.calls.some(([e]) => (e as { type?: string }).type === "send_message")).toBe(
+      false,
+    );
+    expect(streamChat).not.toHaveBeenCalled();
+    expect(screen.getByText("还没有消息")).toBeInTheDocument();
+  });
+
+  it("输入区常驻弱化快捷键提示（Enter / Shift+Enter / Esc）", async () => {
+    bindAssistant();
+    render(<ChatPage />);
+    await act(async () => {});
+    const hints = screen.getByLabelText("输入快捷键提示");
+    expect(hints).toHaveTextContent("Enter");
+    expect(hints).toHaveTextContent("Shift+Enter");
+    expect(hints).toHaveTextContent("Esc");
+  });
+});

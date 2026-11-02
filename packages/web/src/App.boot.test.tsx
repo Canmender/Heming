@@ -34,14 +34,16 @@ vi.mock("./lib/api.js", async (importOriginal) => {
   };
 });
 
-/** 可控 BootWave 桩：渲染时记录最新 onDone，由测试手动触发；未完成时遮罩仍在。 */
+/** 可控 BootWave 桩：渲染时记录最新 onDone 与 props，由测试手动触发；未完成时遮罩仍在。 */
 let bootDoneFns: Array<() => void> = [];
+let bootProps: Array<{ ripplePlacement?: string }> = [];
 vi.mock("./components/BootWave.js", () => ({
-  BootWave: ({ onDone }: { onDone: () => void }) => {
+  BootWave: (props: { onDone: () => void; ripplePlacement?: string }) => {
     const [done, setDone] = useState(false);
     useEffect(() => {
-      bootDoneFns.push(() => { setDone(true); onDone(); });
-    }, [onDone]);
+      bootProps.push({ ripplePlacement: props.ripplePlacement });
+      bootDoneFns.push(() => { setDone(true); props.onDone(); });
+    }, [props.onDone, props.ripplePlacement]);
     return done ? null : <div>BootWave</div>;
   },
 }));
@@ -51,6 +53,7 @@ const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
 describe("App 启动动画集成", () => {
   beforeEach(() => {
     bootDoneFns = [];
+    bootProps = [];
     localStorage.clear();
     setToken(null);
     vi.mocked(fetchMe).mockReset();
@@ -62,7 +65,7 @@ describe("App 启动动画集成", () => {
     });
   });
 
-  afterEach(() => { bootDoneFns = []; });
+  afterEach(() => { bootDoneFns = []; bootProps = []; });
 
   it("未登录时：登录页在 T=0 就已挂载（遮罩只是盖在上面），动画结束后遮罩消失", async () => {
     render(<App />);
@@ -136,5 +139,35 @@ describe("App 启动动画集成", () => {
     await waitFor(() => { expect(screen.queryByText("BootWave")).toBeNull(); });
     expect(screen.getByText("LoginPage")).toBeTruthy();
     expect(screen.queryByText("加载中…")).toBeNull();
+  });
+
+  // ── 体验优化轮 C 轨：启动圆环落位 / 右栏标题与悬停说明 ──
+
+  it("登录页启动动画：圆环只在右半区扩散（不再横穿登录卡）", () => {
+    render(<App />);
+    expect(screen.getByText("BootWave")).toBeTruthy();
+    expect(bootProps.at(-1)?.ripplePlacement).toBe("right");
+  });
+
+  it("已登录启动：圆环保持中心扩散（其它页不变）", async () => {
+    setToken("t1");
+    useAuthStore.setState({ token: "t1", user: null, status: "pending", error: null });
+    render(<App />);
+    expect(bootProps.at(-1)?.ripplePlacement).toBe("center");
+    await waitFor(() => { expect(useAuthStore.getState().status).toBe("authed"); });
+  });
+
+  it("右侧文件栏：标题「共享文件」，绑定/上传按钮都有悬停说明", async () => {
+    setToken("t1");
+    useAuthStore.setState({ token: "t1", user: alice, status: "authed", error: null });
+    render(<App />);
+    await act(async () => { bootDoneFns[0]?.(); });
+    await waitFor(() => { expect(screen.queryByText("BootWave")).toBeNull(); });
+
+    expect(screen.getByText("共享文件")).toBeTruthy();
+    const bind = screen.getByRole("button", { name: "绑定本地文件到会话" });
+    expect(bind.getAttribute("title")).toContain("工作区");
+    const upload = screen.getByText("上传").closest("button");
+    expect(upload?.getAttribute("title")).toBe("上传文件到共享文件");
   });
 });

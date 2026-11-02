@@ -30,6 +30,8 @@ import { ChatPage } from "./ChatPage.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 import { RolloutTimeline } from "./RolloutTimeline.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { UnboundModelNotice } from "./ux/UnboundModelNotice.js";
+import { resolveBoundProfile } from "../lib/llmRoute.js";
 import { capabilityNotice } from "../lib/capabilityNotice.js";
 import { AssistantIcon, PlusIcon, TaskIcon, TrashIcon } from "./icons.js";
 
@@ -180,6 +182,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
   const createTask = useTaskStore((s) => s.create);
   const focusConversation = useUiStore((s) => s.focusConversation);
   const setTaskDraft = useUiStore((s) => s.setTaskDraft);
+  const setPage = useUiStore((s) => s.setPage);
   const templates = useTemplateStore((s) => s.templates);
   const saveTemplate = useTemplateStore((s) => s.save);
   const removeTemplate = useTemplateStore((s) => s.remove);
@@ -325,9 +328,9 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
         </select>
 
         {agentsRoster.length > 0 && boundCount === 0 && (
-          <p className="mt-3 rounded-lg border border-[#fed7aa] bg-[#fffbeb] px-3 py-2 text-[12px] text-[#b45309]">
-            还没有智能体绑定 LLM 连接。请先去设置区完成绑定，再回来运行。
-          </p>
+          <div className="mt-3">
+            <UnboundModelNotice onGoSettings={() => setPage("settings")} />
+          </div>
         )}
 
         {toolsNotice && (
@@ -468,6 +471,9 @@ export function TaskAreaPage() {
   const setTaskDraft = useUiStore((s) => s.setTaskDraft);
   const taskFocusId = useUiStore((s) => s.taskFocusId);
   const consumeTaskFocus = useUiStore((s) => s.consumeTaskFocus);
+  // 订阅绑定表：智能体被解绑/换绑后，运行卡上的「未绑定模型」提示要立即出现/消失
+  const llmBindings = useLlmStore((s) => s.bindings);
+  const llmProfiles = useLlmStore((s) => s.profiles);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -532,6 +538,12 @@ export function TaskAreaPage() {
   const selectedConv = selected
     ? conversations.find((c) => c.id === selected.conversationId)
     : undefined;
+  /** UX-A：选中任务的智能体是否未绑定模型（与对话页/启动面板同源判定）。 */
+  const selectedAgentUnbound = useMemo(
+    () => (selected ? !resolveBoundProfile(selected.agentId) : false),
+    // 绑定表/连接表变化必须重算：解绑后提示要立刻出现，绑上后立刻消失
+    [selected, llmBindings, llmProfiles],
+  );
 
   const selectTask = (task: TaskRecord) => {
     setSelectedId(task.id);
@@ -814,6 +826,8 @@ export function TaskAreaPage() {
               task={selected}
               sources={sources}
               copied={copied}
+              agentUnbound={selectedAgentUnbound}
+              onGoSettings={() => useUiStore.getState().setPage("settings")}
               onCopy={(format) => void copyTask(selected, format)}
               onRerun={() => setRerunTarget(selected)}
               onFork={(seq) => requestFork(selected, seq)}
@@ -1003,6 +1017,8 @@ function TaskSummary({
   task,
   sources,
   copied,
+  agentUnbound,
+  onGoSettings,
   onCopy,
   onRerun,
   onFork,
@@ -1011,6 +1027,9 @@ function TaskSummary({
   task: TaskRecord;
   sources: { id: string; title: string; detail?: string }[];
   copied: "md" | "json" | null;
+  /** 该任务的智能体是否未绑定模型（UX-A：与对话页/启动面板同源提示）。 */
+  agentUnbound: boolean;
+  onGoSettings: () => void;
   onCopy: (format: "md" | "json") => void;
   onRerun: () => void;
   onFork: (targetSeq: number) => void;
@@ -1023,6 +1042,10 @@ function TaskSummary({
   const forkNotice = taskForkNotice(task);
   return (
     <div className="flex flex-col gap-3">
+      {/* UX-A：未绑定模型时在运行卡顶部给同一份提示与「去设置」，重跑/新建都不会白跑 */}
+      {agentUnbound && (
+        <UnboundModelNotice agentName={task.agentName} onGoSettings={onGoSettings} />
+      )}
       <div>
         <div className="flex items-center gap-2">
           <span

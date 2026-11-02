@@ -29,6 +29,17 @@ export function AssistantPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Agent | null>(null);
 
+  // 命令面板「新建智能体」的消费点（d.60）。
+  // 面板只投一次内存意图并切到本页；本页是懒加载路由，可能晚一帧才挂载，
+  // 所以在「挂载后 effect」里读，读到就打开新建弹窗并消费（token 变化即触发，幂等）。
+  const paletteIntent = useUiStore((s) => s.paletteIntent);
+  const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
+  useEffect(() => {
+    if (paletteIntent?.kind !== "agent-create") return;
+    setCreateOpen(true);
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent]);
+
   // 名册与会话都从服务端取：智能体页是独立入口，不依赖用户先去别的页。
   useEffect(() => {
     void loadWorkspace().catch(() => {

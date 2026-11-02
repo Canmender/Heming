@@ -176,6 +176,34 @@ describe("BootWave", () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
+  // ── 圆环落位：登录页只在右半区扩散，不横穿左侧登录卡 ──
+  it("ripplePlacement=right：波纹容器带右半区裁切类（且 CSS 有 overflow 裁切）", () => {
+    useWaveFakeTimers();
+    const channel = installSignalChannel();
+    render(<BootWave onDone={vi.fn()} ripplePlacement="right" />);
+    channel.fire();
+
+    const wrap = document.querySelector<HTMLElement>(".boot-wave-ripples");
+    expect(wrap).toBeTruthy();
+    expect(wrap!.classList.contains("boot-wave-ripples--right")).toBe(true);
+    // 只挪圆心挡不住大半径的弧扫过左半区，必须有容器裁切
+    const css = document.querySelector("style")?.textContent ?? "";
+    expect(css).toMatch(/\.boot-wave-ripples--right \{[^}]*overflow: hidden/);
+    expect(css).toMatch(/\.boot-wave-ripples--right \{[^}]*left: 50%/);
+  });
+
+  it("默认 ripplePlacement=center：不加右半区类（其它页保持中心扩散）", () => {
+    useWaveFakeTimers();
+    const channel = installSignalChannel();
+    render(<BootWave onDone={vi.fn()} />);
+    channel.fire();
+
+    const wrap = document.querySelector<HTMLElement>(".boot-wave-ripples");
+    expect(wrap).toBeTruthy();
+    expect(wrap!.classList.contains("boot-wave-ripples--right")).toBe(false);
+    expect(document.querySelectorAll(".boot-wave .ripple")).toHaveLength(3);
+  });
+
   it("揭示进度逐帧增长（不是一次性跳变）", () => {
     useWaveFakeTimers();
     const channel = installSignalChannel();

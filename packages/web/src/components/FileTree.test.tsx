@@ -19,8 +19,16 @@ describe("FileTree", () => {
     expect(screen.queryByText("需求草案-v2.md")).not.toBeInTheDocument();
   });
 
-  it("本地未绑定时显示绑定入口文案", () => {
+  it("全空时给统一空态说明（告诉用户下一步在哪上传/绑定）", () => {
     render(<FileTree items={[]} localPaths={[]} />);
+    expect(screen.getByText("还没有文件；在输入框上传或从工作区绑定")).toBeInTheDocument();
+    // 空态下不再显示两个各自为政的分区占位
+    expect(screen.queryByText("未绑定本地目录")).not.toBeInTheDocument();
+    expect(screen.queryByText("（空）")).not.toBeInTheDocument();
+  });
+
+  it("有云端文件、本地未绑定时显示绑定入口文案", () => {
+    render(<FileTree items={[items[1]]} localPaths={[]} />);
     expect(screen.getByText("未绑定本地目录")).toBeInTheDocument();
   });
 

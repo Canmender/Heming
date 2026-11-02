@@ -109,6 +109,23 @@ export interface AutomationIntent {
   sync?: SyncOptions;
 }
 
+/**
+ * 命令面板向「常驻组件」投递的一次性意图（d.60）。
+ *
+ * 为什么需要它：新建智能体的弹窗在 `AssistantPage` 里、通知中心在 `NavRail` 的
+ * `NotificationCenter` 里，两者的开关都是组件内局部 state，外部没有触发点。
+ * 这里只加一个**内存**意图槽给命令面板投递：
+ * - 不落 localStorage —— 面板关掉就该忘掉，重启后残留一个「打开通知中心」很怪；
+ * - `token` 自增，保证「同一种意图连点两次」也能各自消费一次（不会因为 kind 相同被合并）；
+ * - 消费即清空，消费端以 `token` 为 effect 依赖，天然幂等、不会重复打开。
+ */
+export type PaletteIntentKind = "agent-create" | "notifications";
+
+export interface PaletteIntent {
+  kind: PaletteIntentKind;
+  token: number;
+}
+
 interface UiState {
   page: Page;
   /** 左侧导航显示顺序（用户可自定义；持久化）。 */
@@ -149,6 +166,12 @@ interface UiState {
   /** 打开设置页并可选直达某分组（复用 setPage 的清理语义）。 */
   openSettings: (tab?: string) => void;
   consumeSettingsTab: () => void;
+  /** 命令面板投递的一次性意图（内存，消费即清）。 */
+  paletteIntent: PaletteIntent | null;
+  /** 投递意图（token 自增）。 */
+  setPaletteIntent: (kind: PaletteIntentKind) => void;
+  /** 消费意图（消费端调用后立即清空）。 */
+  consumePaletteIntent: () => void;
   /** 打开某个助手会话并进入助手页。 */
   openConversation: (id: string) => void;
   /**
@@ -187,6 +210,12 @@ function persistNavOrder(order: NavPage[]): void {
   }
 }
 
+/**
+ * 命令面板意图的自增序号（模块级即可：意图是进程内瞬态，不需要跨实例同步）。
+ * 每次投递 +1，消费端用 token 判断「这是一次新的点击」。
+ */
+let paletteIntentToken = 0;
+
 export const useUiStore = create<UiState>((set, get) => ({
   page: "home",
   navOrder: readStoredNavOrder(
@@ -208,6 +237,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   infohubIntent: null,
   automationIntent: null,
   settingsTab: null,
+  paletteIntent: null,
+  setPaletteIntent: (kind) => {
+    paletteIntentToken += 1;
+    set({ paletteIntent: { kind, token: paletteIntentToken } });
+  },
+  consumePaletteIntent: () => set({ paletteIntent: null }),
   setPage: (page) =>
     set({
       page,

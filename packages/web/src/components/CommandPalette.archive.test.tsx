@@ -85,11 +85,13 @@ describe("命令面板 · 本机归档检索", () => {
     const onClose = vi.fn();
     render(<CommandPalette onClose={onClose} />);
 
-    fireEvent.change(screen.getByLabelText("搜索成员与技能"), {
+    fireEvent.change(screen.getByLabelText("搜索页面、动作与成员"), {
       target: { value: "免检单" },
     });
 
-    const row = await screen.findByRole("button", { name: "选择 请把免检单交上来" });
+    // d.60：结果项从 button 改成 listbox 的 option（命令面板 a11y 口径），
+    // 可访问名（aria-label「选择 …」）与点击行为都没变。
+    const row = await screen.findByRole("option", { name: "选择 请把免检单交上来" });
     expect(call).toHaveBeenCalledWith(
       "search",
       { query: "免检单", limit: 5 },
@@ -114,7 +116,7 @@ describe("命令面板 · 本机归档检索", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(screen.getByText(/连接信息中枢后/)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("搜索成员与技能"), {
+    fireEvent.change(screen.getByLabelText("搜索页面、动作与成员"), {
       target: { value: "免检单" },
     });
 
@@ -133,7 +135,7 @@ describe("命令面板 · 本机归档检索", () => {
     vi.mocked(fetchTeam).mockResolvedValue({ members: [member], onlineCount: 1 });
 
     render(<CommandPalette onClose={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("搜索成员与技能"), {
+    fireEvent.change(screen.getByLabelText("搜索页面、动作与成员"), {
       target: { value: "免检单" },
     });
 

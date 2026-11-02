@@ -123,13 +123,32 @@ describe("通用智能体页面", () => {
     expect(screen.getByTestId("chat-embed")).toHaveTextContent("embedded");
   });
 
-  it("没有绑定 LLM 时给出明确提示，启动按钮禁用", async () => {
+  it("没有绑定 LLM 时给出统一提示（与对话页同源组件），启动按钮禁用", async () => {
     useLlmStore.setState({ profiles: [], bindings: {} });
     render(<TaskAreaPage />);
 
-    expect(screen.getByText(/还没有智能体绑定 LLM 连接/)).toBeInTheDocument();
+    const notice = screen.getByText(/还没有智能体绑定 LLM 连接/);
+    expect(notice).toBeInTheDocument();
+    // 同源组件：带固定 id（不是随手写的一段文字）+「去设置」直达
+    expect(notice.closest("#unbound-model-notice")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("运行目标"), { target: { value: "要做的事" } });
     expect(screen.getByRole("button", { name: "开始运行" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "去设置" }));
+    expect(useUiStore.getState().page).toBe("settings");
+  });
+
+  it("选中运行记录：智能体未绑定时运行卡顶部也给同源提示（重跑/分叉不会白跑）", async () => {
+    const id = seedTask({ prompt: "查知识库" });
+    useLlmStore.setState({ profiles: [], bindings: {} });
+    useTaskStore.getState().settle(id, { status: "done", result: "结论" });
+    render(<TaskAreaPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "运行 查知识库" }));
+    // 右列运行卡里出现「当前智能体还没有绑定模型连接（和小鸣）」
+    expect(screen.getByText(/当前智能体还没有绑定模型连接/)).toBeInTheDocument();
+    // 列表页与启动面板之外的第三处：同一个组件的「去设置」
+    expect(screen.getAllByRole("button", { name: "去设置" }).length).toBeGreaterThan(0);
   });
 
   it("选中运行记录 → 聚焦其会话并渲染嵌入式 ChatPage", () => {

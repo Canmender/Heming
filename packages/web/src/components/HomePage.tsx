@@ -3,6 +3,8 @@ import type { TeamActivity, TeamMember } from "@heming/shared";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
+import { useLlmStore } from "../store/llm.js";
+import { useTaskStore } from "../lib/tasks/store.js";
 import {
   useTokenUsageStore,
   monthKeyOf,
@@ -10,11 +12,18 @@ import {
   dailyTotals,
   dayKeyOf,
 } from "../store/tokenUsage.js";
+import {
+  deriveOnboardingSteps,
+  shouldShowOnboarding,
+  useOnboardingStore,
+  type OnboardingTarget,
+} from "../lib/onboarding.js";
 import { fetchTeam, fetchTeamActivities, resolveUrl } from "../lib/api.js";
 import { Avatar } from "./Avatar.js";
 import { InfohubHomeCard } from "./InfohubHomeCard.js";
 import { StaffHomeCard } from "./StaffHomeCard.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
+import { OnboardingCard } from "./ux/OnboardingCard.js";
 import { TeamIcon } from "./icons.js";
 
 /** 构建时注入的版本号（vite define __APP_VERSION__，file:// 桌面端无法 fetch package.json）。 */
@@ -74,6 +83,12 @@ export function HomePage() {
   const { loadWorkspace, agentsRoster, loadAgentsRoster } = useChatStore();
   const setPage = useUiStore((s) => s.setPage);
   const { quota, records } = useTokenUsageStore();
+  /** UX-A 首跑引导：三步状态全部从真实 store 派生（连接/会话/任务），关闭状态只存本机。 */
+  const llmProfiles = useLlmStore((s) => s.profiles);
+  const conversations = useChatStore((s) => s.conversations);
+  const taskRecords = useTaskStore((s) => s.tasks);
+  const onboardingDismissedAt = useOnboardingStore((s) => s.dismissedAt);
+  const dismissOnboarding = useOnboardingStore((s) => s.dismiss);
   const [tab, setTab] = useState<"me" | "team" | "date">("me");
   const [openDay, setOpenDay] = useState<string | null>(null);
   const [cloud, setCloud] = useState<"检测中" | "正常" | "失败">("检测中");
@@ -190,6 +205,27 @@ export function HomePage() {
   const recentActivities = humanActivities.slice(0, 3);
   const onlineMembers = members.filter((m) => m.online).slice(0, 5);
   const displayAgents = agentsRoster.slice(0, 3);
+
+  /** 首跑引导三步骤（真状态派生，不落盘）。 */
+  const onboardingInputs = useMemo(
+    () => ({
+      connections: llmProfiles.length,
+      conversations: conversations.length,
+      tasks: taskRecords.length,
+    }),
+    [llmProfiles.length, conversations.length, taskRecords.length],
+  );
+  const onboardingSteps = useMemo(
+    () => deriveOnboardingSteps(onboardingInputs),
+    [onboardingInputs],
+  );
+  const showOnboarding = shouldShowOnboarding(
+    onboardingInputs,
+    onboardingDismissedAt,
+    onboardingSteps,
+  );
+  const goOnboarding = (target: OnboardingTarget) => setPage(target);
+
   const KIND_LABEL: Record<TeamActivity["kind"], string> = {
     task: "任务",
     agent: "AI",
@@ -225,6 +261,11 @@ export function HomePage() {
           </span>
         </div>
       </div>
+
+      {/* 1.5 首跑引导（UX-A · U1）：只在「一个模型连接都没有」且用户没关过时出现 */}
+      {showOnboarding && (
+        <OnboardingCard steps={onboardingSteps} onGo={goOnboarding} onDismiss={dismissOnboarding} />
+      )}
 
       {/* 2. 四张统计卡（真实数据） */}
       <div className="grid grid-cols-4 gap-2.5">

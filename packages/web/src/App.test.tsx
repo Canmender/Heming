@@ -441,14 +441,14 @@ describe("App 导航快捷键与隐藏态", () => {
     fireEvent.keyDown(window, { key: "5", altKey: true });
     expect(useUiStore.getState().page).toBe("home");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    expect(screen.queryByRole("dialog", { name: "全局搜索" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "命令面板" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("关闭预览")).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("关闭预览"));
     fireEvent.keyDown(window, { key: "5", altKey: true });
     expect(useUiStore.getState().page).toBe("memory");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    expect(await screen.findByRole("dialog", { name: "全局搜索" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "命令面板" })).toBeInTheDocument();
   });
 
   it("输入框聚焦时：Alt+数字 仍被过滤，导航常驻不被键盘改动", async () => {
@@ -489,16 +489,16 @@ describe("App 导航快捷键与隐藏态", () => {
     await screen.findByRole("button", { name: "全局搜索 Ctrl K" });
 
     fireEvent.click(screen.getByRole("button", { name: "全局搜索 Ctrl K" }));
-    const dialog = await screen.findByRole("dialog", { name: "全局搜索" });
-    fireEvent.change(within(dialog).getByLabelText("搜索成员与技能"), {
+    const dialog = await screen.findByRole("dialog", { name: "命令面板" });
+    fireEvent.change(within(dialog).getByLabelText("搜索页面、动作与成员"), {
       target: { value: "张三" },
     });
 
     // 焦点不在输入框（在结果按钮上）：Esc 由面板容器接住
-    const result = await within(dialog).findByRole("button", { name: "选择 张三" });
+    const result = await within(dialog).findByRole("option", { name: "选择 张三" });
     result.focus();
     fireEvent.keyDown(result, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: "全局搜索" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "命令面板" })).not.toBeInTheDocument();
   });
 
   it("命令面板结果超过上限时提示「还有 N 条」", async () => {
@@ -513,13 +513,13 @@ describe("App 导航快捷键与隐藏态", () => {
     await screen.findByRole("button", { name: "全局搜索 Ctrl K" });
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    const dialog = await screen.findByRole("dialog", { name: "全局搜索" });
-    fireEvent.change(within(dialog).getByLabelText("搜索成员与技能"), {
+    const dialog = await screen.findByRole("dialog", { name: "命令面板" });
+    fireEvent.change(within(dialog).getByLabelText("搜索页面、动作与成员"), {
       target: { value: "候选" },
     });
     // 成员最多展示 8 条 → 12 − 8 = 4
     expect(await within(dialog).findByText("还有 4 条")).toBeInTheDocument();
-    expect(within(dialog).getAllByRole("button", { name: /^选择 候选/ })).toHaveLength(8);
+    expect(within(dialog).getAllByRole("option", { name: /^选择 候选/ })).toHaveLength(8);
   });
 
   it("进入会话后左侧导航仍常驻（不再收起、不再有呼出条）", async () => {

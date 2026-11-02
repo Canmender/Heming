@@ -61,6 +61,11 @@ interface BootWaveProps {
    * 浏览器 / 预览环境没有 splash 窗口，传 true 才能看到写字动画。
    */
   writeFirst?: boolean;
+  /**
+   * 圆环落位（纯装饰）：`center` = 全窗口中心扩散（默认，与遮罩揭示同心）；
+   * `right` = 只在右半区扩散（登录页用——第一屏是左侧登录卡，中心扩散的圆环会横穿卡片）。
+   */
+  ripplePlacement?: "center" | "right";
 }
 
 /** 组件自带的样式：遮罩揭示靠 CSS 变量 `--reveal`（由 rAF 逐帧写入，不依赖 @property）。 */
@@ -98,6 +103,18 @@ const STYLES = `
     opacity: var(--reveal-front-opacity, 0);
   }
   /* 3 圈细线波纹叠在揭示层之上（不参与遮罩，否则会被中心洞吃掉） */
+  .boot-wave .boot-wave-ripples {
+    position: absolute; inset: 0;
+  }
+  /* 圆环落位：登录页把扩散限制在**右半区**，避免从窗口中心扩散时横穿左侧登录卡。
+     容器裁切（overflow:hidden）而不是只挪圆心——只挪圆心时大半径的弧仍会扫过左半区。
+     左边缘用 mask 羽化：硬裁会在 50% 处留一条竖线；羽化后像自然淡出（登录卡在最左侧，绝不会被扫到）。 */
+  .boot-wave .boot-wave-ripples--right {
+    left: 50%; right: 0; top: 0; bottom: 0;
+    overflow: hidden;
+    mask-image: linear-gradient(to right, transparent 0, #000 14%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 14%);
+  }
   .boot-wave .ripple {
     position: absolute; left: 50%; top: 50%;
     width: 40px; height: 40px;
@@ -126,7 +143,7 @@ const STYLES = `
  *
  * 无 preload（浏览器直接打开）时无外部信号源，直接开播兜底。
  */
-export function BootWave({ onDone, writeFirst = false }: BootWaveProps) {
+export function BootWave({ onDone, writeFirst = false, ripplePlacement = "center" }: BootWaveProps) {
   const revealRef = useRef<HTMLDivElement | null>(null);
 
   /** 手写段是否正在播（仅 writeFirst 且无 preload 信号通道时才会为 true）。 */
@@ -292,7 +309,10 @@ export function BootWave({ onDone, writeFirst = false }: BootWaveProps) {
         />
       )}
       {runId > 0 && (
-        <div className="boot-wave-ripples" key={runId}>
+        <div
+          className={`boot-wave-ripples${ripplePlacement === "right" ? " boot-wave-ripples--right" : ""}`}
+          key={runId}
+        >
           <div className="ripple" />
           <div className="ripple" />
           <div className="ripple" />

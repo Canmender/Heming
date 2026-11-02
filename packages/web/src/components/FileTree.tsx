@@ -136,6 +136,17 @@ function SectionRows({
 }
 
 export function FileTree({ items, localPaths, onSendToConversation, onPreview }: Props) {
+  // 整个文件栏没有任何文件（云端共享与本地工作目录都空）时给一条明确的空态说明：
+  // 比两个各说各话的「（空）」「未绑定本地目录」更容易让用户知道下一步该做什么。
+  if (items.length === 0 && localPaths.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-panel px-4 py-6 text-center">
+        <FolderIcon width={20} height={20} className="text-line-strong" />
+        <p className="text-[11px] leading-relaxed text-muted">还没有文件；在输入框上传或从工作区绑定</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col gap-1 overflow-y-auto bg-panel py-2">
       <SectionRows

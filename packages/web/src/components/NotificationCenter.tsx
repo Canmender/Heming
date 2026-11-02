@@ -45,6 +45,16 @@ export function NotificationCenter() {
   const openConversation = useUiStore((s) => s.openConversation);
   const focusTask = useUiStore((s) => s.focusTask);
 
+  // 命令面板「打开通知中心」的消费点（d.60）：常驻在导航栏，投了意图就直接开。
+  // 消费即清空，intent 变 null 后不会重复打开（幂等）。
+  const paletteIntent = useUiStore((s) => s.paletteIntent);
+  const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
+  useEffect(() => {
+    if (paletteIntent?.kind !== "notifications") return;
+    setOpen(true);
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent]);
+
   const [open, setOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);

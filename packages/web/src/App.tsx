@@ -70,18 +70,51 @@ const RegistryInstallCard = lazy(() =>
 );
 
 /**
- * 懒加载占位：父容器已经定高（h-full / flex-1），这里只放一行灰字，
- * 不撑开也不塌陷布局。启动动画期间首屏加载页 chunk，用户实际看不到这一行。
+ * 懒加载占位：**页面骨架**（与常规页结构相近：左列 + 右侧内容区 + 顶部标题条）。
+ *
+ * 为什么不只放一行灰字：路由级懒加载后切页会先看到这个占位，一行居中的「加载中…」
+ * 会让布局从「整页空」瞬间跳到「真实页」，观感上是闪一下；骨架与真实页同构，
+ * 位置稳定、切换时内容块只是被替换。
+ *
+ * 约束（d39 用例依赖）：`data-testid="page-fallback"` 必须保留——`settleRoutedPage()`
+ * 用它判断目标页 chunk 已挂上。纯静态、无定时器/动画；`pointer-events-none` 保证
+ * 占位期间不会截走本该落到壳层（导航/标题栏）的点击。
  */
-function PageFallback() {
+export function PageFallback() {
   return (
     <div
-      // data-testid 是给测试用的稳定锚点：路由级懒加载后切页不再同步完成，
-      // 测试要能判断「目标页真的挂上了」，而不是靠猜几个微任务。它不参与样式与行为。
       data-testid="page-fallback"
-      className="flex h-full w-full items-center justify-center text-[12px] text-muted"
+      role="status"
+      aria-busy="true"
+      className="pointer-events-none flex h-full w-full min-w-0 select-none"
     >
-      加载中…
+      {/* 无障碍：骨架块对读屏无意义，只播报「正在加载页面」 */}
+      <span className="sr-only">正在加载页面</span>
+
+      {/* 左列：与设置区/团队页等「列表 + 内容」页的次级导航同宽 */}
+      <div className="hidden w-[184px] shrink-0 border-r border-line-soft p-3 min-[720px]:block">
+        <div className="mb-3 h-3 w-16 rounded-sm bg-line-soft" />
+        <div className="space-y-2">
+          <div className="h-2.5 w-[72%] rounded-sm bg-line-soft" />
+          <div className="h-2.5 w-[56%] rounded-sm bg-line-soft" />
+          <div className="h-2.5 w-[64%] rounded-sm bg-line-soft" />
+          <div className="h-2.5 w-[48%] rounded-sm bg-line-soft" />
+        </div>
+      </div>
+
+      {/* 右侧内容：顶部标题条 + 内容块 */}
+      <div className="min-w-0 flex-1 p-4">
+        <div className="mb-4 flex items-center justify-between border-b border-line-soft pb-3">
+          <div className="h-4 w-32 rounded-sm bg-line-soft" />
+          <div className="h-6 w-16 rounded-md bg-line-soft" />
+        </div>
+        <div className="space-y-3">
+          <div className="h-3 w-[60%] rounded-sm bg-line-soft" />
+          <div className="h-3 w-[80%] rounded-sm bg-line-soft" />
+          <div className="h-24 w-full rounded-lg bg-panel" />
+          <div className="h-3 w-[40%] rounded-sm bg-line-soft" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -171,6 +204,12 @@ export function App() {
   const shellRef = useRef<HTMLDivElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
+  // 启动动画的圆环落位：登录页用右半区（clipped），其它页保持中心扩散。
+  // 登录页第一屏就是登录卡；圆环从窗口中心扩散会横穿卡片，看起来像装饰压字。
+  // 判定与 AppShell 的登录分支同口径：无用户且无 token = 登录页。
+  const bootUser = useAuthStore((s) => s.user);
+  const bootRipplePlacement = !bootUser && !getToken() ? "right" : "center";
+
   // 本机归档：只探测桥与运行态，不自动拉起 Python（拉起必须由用户点「连接」）。
   useEffect(() => {
     void useInfohubStore.getState().boot();
@@ -206,7 +245,13 @@ export function App() {
       <div ref={shellRef}>
         <AppShell onOpenSearch={() => setPaletteOpen(true)} />
       </div>
-      {!bootDone && <BootWave onDone={handleBootDone} writeFirst={!HAS_NATIVE_SPLASH} />}
+      {!bootDone && (
+        <BootWave
+          onDone={handleBootDone}
+          writeFirst={!HAS_NATIVE_SPLASH}
+          ripplePlacement={bootRipplePlacement}
+        />
+      )}
       {/* 全局加一层除了命令面板之外的空壳：面板自己带着遮罩，不需要外层容器 */}
       {paletteOpen && (
         <Suspense fallback={null}>
@@ -513,7 +558,7 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
             className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize hover:bg-[#1a1a1a]/10"
           />
           <div className="flex items-center justify-between gap-1 border-b border-line-soft px-3 py-2">
-            <span className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-muted">目录</span>
+            <span className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-muted">共享文件</span>
             {usage && (
               <span className="min-w-0 flex-1 truncate text-[10px] text-muted">
                 {fmtBytes(usage.used)} / {fmtBytes(usage.quota)}
@@ -523,6 +568,7 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
             <button
               type="button"
               aria-label="绑定本地文件到会话"
+              title="绑定工作区文件到当前会话（需先打开一个会话）"
               onClick={() => {
                 if (!useUiStore.getState().activeConversationId) {
                   window.alert("先打开一个会话，再绑定文件");
@@ -536,6 +582,7 @@ function AppShell({ onOpenSearch }: { onOpenSearch: () => void }) {
             </button>
             <button
               type="button"
+              title="上传文件到共享文件"
               onClick={() => void onUpload()}
               className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
             >
