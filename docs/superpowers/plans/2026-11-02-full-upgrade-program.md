@@ -289,3 +289,15 @@
 | ② 功能与技术债 | `file_patch`、回合日志回放/重跑/分叉、团队用量/日程/清除、桌宠在场感、P0-5b 加密与清理、CSP、release.mjs + publish-update.mjs、docker 清理、WS `?token=` 删除 | ✅ |
 | ③ 体验与安全加固 | 首屏 −79.4%、无障碍 AA 与焦点环、错误态/离线巡检、safeStorage 异步迁移、安全复审（越权 IPC 修复） | ✅ |
 | 需用户决定的遗留 | ① `feat/team-system` 合并回 `main`（main 被 WorkBuddy 工作树占用）；② 线上旧 IM 数据是否真删（dry-run 仅 3 行）；③ CSP 何时从 report-only 切 enforce；④ NVDA 真机走查与桌宠/file_patch 手工联调；⑤ 安全复审待修 4 条（草稿/token 明文、可写根 rootId、files mime nosniff）排期 | 待定 |
+
+### 第四波发布完成（2026-11-02 22:22）——「全面升级」四批全部发布
+
+| 项 | 结果与证据 |
+|---|---|
+| 提交 | `73cfa51`（d.59.2.21.0 全部改动与文档） |
+| 门禁 | build 通过；逐包 4/4 无重试（shared 29 / server 141 / web 188 文件 2815 例 / desktop 29 文件 518 例）；三包 tsc 0 |
+| 安装包 | `release/r48/和鸣 Setup d.59.2.21.0.exe` 228,200,790 字节，sha512 本地/远端/清单三方一致 |
+| 云端部署 | ✅ 8 步 OK；`/api/health` ok、首页 200、线上 bundle `main-C_syY_6C.js` 与本地同名、CSP report-only 头在位 |
+| 更新源 | ✅ latest.yml 指向 59.2.21，sha512 与安装包一致 |
+| 备份 | ✅ `heming-data-2026-11-02-d.59.2.21.0.tar.gz` |
+| 结论 | 目标四个批次全部落地并已上线：`d.57.2.18.0` → `d.59.2.19.0` → `d.59.2.20.0` → `d.59.2.21.0`（同一天四个发布，每个都有全量门禁与证据回填） |
