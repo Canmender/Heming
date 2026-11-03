@@ -12,6 +12,7 @@ import {
 } from "../lib/skills/index.js";
 import { memoryStore } from "../lib/memory/index.js";
 import { mcpRegistry } from "../lib/mcp/index.js";
+import { PageShell } from "./layout/PageShell.js";
 
 /**
  * 技能区：技能（四类分组）/ 技能池（全量表格）两个视图。
@@ -428,7 +429,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                     : group.empty}
               </div>
             ) : (
-              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {items.map((skill) => (
                   <div
                     key={skill.id}
@@ -649,17 +650,16 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
   );
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[17px] font-extrabold">技能区</h1>
-          <p className={`mt-1 ${hintCls}`}>
-            选择智能体后，可把技能分配给它在会话里使用；技能池展示全部技能。
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <label htmlFor="skill-agent-select" className="text-[12px] text-muted">
-              分配对象
-            </label>
+    <PageShell
+      title="技能区"
+      subtitle="选择智能体后，可把技能分配给它在会话里使用；技能池展示全部技能。"
+      width="wide"
+    >
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="skill-agent-select" className="ui-caption">
+            分配对象
+          </label>
             <select
               id="skill-agent-select"
               aria-label="选择智能体"
@@ -678,7 +678,6 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
               已分配 {assignedIds.size} 个技能 · 未分配的请到「技能池」查看
             </span>
           </div>
-        </div>
         <div
           role="tablist"
           aria-label="技能区视图"
@@ -853,6 +852,6 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
           </p>
         </ConfirmDialog>
       )}
-    </div>
+    </PageShell>
   );
 }

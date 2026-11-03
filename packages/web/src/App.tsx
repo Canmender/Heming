@@ -593,9 +593,10 @@ function AppShell({
             className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize hover:bg-[#1a1a1a]/10"
           />
           <div className="flex items-center justify-between gap-1 border-b border-line-soft px-3 py-2">
-            <span className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-muted">共享文件</span>
+            {/* d.62：表头用全站统一的 section 档（13/20/600），与导航轨 12px 内边距同节奏 */}
+            <span className="ui-section-title shrink-0 whitespace-nowrap">共享文件</span>
             {usage && (
-              <span className="min-w-0 flex-1 truncate text-[10px] text-muted">
+              <span className="ui-micro min-w-0 flex-1 truncate">
                 {fmtBytes(usage.used)} / {fmtBytes(usage.quota)}
               </span>
             )}

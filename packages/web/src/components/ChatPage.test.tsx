@@ -445,6 +445,27 @@ describe("ChatPage", () => {
     await waitFor(() => expect(rows()).toHaveLength(DEFAULT_WINDOW * 2));
   });
 
+  it("d.62：消息列 880 居中，输入区/工具栏同宽（宽屏行长可读）", async () => {
+    mockMessagesFetch([msg("l1", "布局检查", "2026-10-14T00:00:00.000Z")]);
+    render(<ChatPage />);
+    await waitFor(() => expect(screen.getByText("布局检查")).toBeInTheDocument());
+
+    const scroller = screen.getByTestId("message-list");
+    const column = scroller.querySelector('[class*="max-w-[880px]"]');
+    expect(column).not.toBeNull();
+    expect(column!.className).toContain("mx-auto");
+    expect(column!.className).toContain("w-full");
+    // 消息行确实在 880 列内部（不是直接挂在滚动容器上）
+    expect(column!.querySelector('[id^="msg-l1"]')).not.toBeNull();
+
+    // 输入区、工具栏、快捷键提示共用同一宽度档
+    const form = document.querySelector("form");
+    const composerWrap = form?.querySelector('[class*="max-w-[880px]"]');
+    expect(composerWrap).not.toBeNull();
+    expect(screen.getByLabelText("消息输入框").closest('[class*="max-w-[880px]"]')).not.toBeNull();
+    expect(screen.getByLabelText("输入快捷键提示").closest('[class*="max-w-[880px]"]')).not.toBeNull();
+  });
+
   it("会话内搜索命中窗口外的老消息：自动扩窗后高亮（d.33）", async () => {
     const many = Array.from({ length: 200 }, (_, i) =>
       msg(

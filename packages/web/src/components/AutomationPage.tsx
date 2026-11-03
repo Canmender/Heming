@@ -23,6 +23,7 @@ import { useUiStore } from "../store/ui.js";
 import { useModalA11y } from "./useModalA11y.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { AutomationIcon, PlusIcon, TrashIcon } from "./icons.js";
+import { PageShell } from "./layout/PageShell.js";
 
 /**
  * 自动化页（d.47）：把信息中枢的本机同步/日程重扫变成可定时的任务。
@@ -128,14 +129,11 @@ export function AutomationPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft px-5 py-3">
-        <div className="min-w-0">
-          <h1 className="text-[15px] font-semibold tracking-tight">自动化</h1>
-          <p className="mt-0.5 text-[11px] text-muted">
-            本机定时任务 · 只在和鸣运行期间触发 · 错过的时刻不补跑
-          </p>
-        </div>
+    <PageShell
+      title="自动化"
+      subtitle="本机定时任务 · 只在和鸣运行期间触发 · 错过的时刻不补跑"
+      width="readable"
+      actions={
         <button
           type="button"
           onClick={openCreate}
@@ -144,15 +142,15 @@ export function AutomationPage() {
           <PlusIcon width={14} height={14} />
           新建自动化
         </button>
-      </header>
-
+      }
+    >
       {!desktop && (
-        <div className="border-b border-line-soft bg-[#fffdf5] px-5 py-2 text-[11px] leading-5 text-[#8a6d3b]">
+        <div className="mb-4 rounded-lg border border-line-soft bg-[#fffdf5] px-3 py-2 ui-caption text-[#8a6d3b]">
           自动化只在桌面端执行。浏览器里可以创建和查看任务，但到点不会运行。
         </div>
       )}
       {desktop && booted && !infohubRunning && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-line-soft bg-[#fffdf5] px-5 py-2 text-[11px] leading-5 text-[#8a6d3b]">
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line-soft bg-[#fffdf5] px-3 py-2 ui-caption text-[#8a6d3b]">
           <span>信息中枢未连接：到点的任务会被记为跳过并顺延，不会自动拉起本机进程。</span>
           <button
             type="button"
@@ -167,7 +165,7 @@ export function AutomationPage() {
       {(error || notice) && (
         <div
           role={error ? "alert" : "status"}
-          className={`flex items-start justify-between gap-3 border-b px-5 py-2 text-[11px] leading-5 ${
+          className={`mb-4 flex items-start justify-between gap-3 rounded-lg border px-3 py-2 ui-caption ${
             error
               ? "border-[#f3c6c2] bg-[#fdf3f2] text-[#912018]"
               : "border-line-soft bg-panel text-[#555]"
@@ -184,7 +182,7 @@ export function AutomationPage() {
         </div>
       )}
 
-      <div className="flex gap-2 border-b border-line-soft px-5 py-2.5">
+      <div className="mb-4 flex flex-wrap gap-2">
         <Stat label="任务" value={String(tasks.length)} />
         <Stat label="启用" value={String(enabledCount)} />
         <Stat label="下次执行" value={nextTask ? formatAutomationTime(nextTask.nextRunAt) : "—"} />
@@ -194,12 +192,12 @@ export function AutomationPage() {
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+      <div>
         {tasks.length === 0 ? (
           <div className="mx-auto mt-8 max-w-[520px] rounded-xl border border-line bg-white p-6 text-center shadow-card">
             <AutomationIcon width={26} height={26} />
-            <h2 className="mt-2 text-[14px] font-semibold">还没有自动化任务</h2>
-            <p className="mt-1 text-[12px] leading-6 text-muted">
+            <h2 className="ui-section-title mt-2">还没有自动化任务</h2>
+            <p className="ui-body-sm mt-1 text-muted">
               可以把信息中枢的「同步归档」或「重扫日程」设成每天定时或按间隔执行。
               任务只存本机，不会上传。
             </p>
@@ -212,7 +210,7 @@ export function AutomationPage() {
             </button>
           </div>
         ) : (
-          <ul className="mx-auto flex max-w-[900px] flex-col gap-2">
+          <ul className="flex flex-col gap-4">
             {tasks.map((task) => {
               const running = runningId === task.id;
               return (
@@ -225,7 +223,7 @@ export function AutomationPage() {
                   <div className="flex flex-wrap items-start gap-3">
                     <div className="mt-0.5 flex w-[70px] shrink-0 flex-col items-start gap-1">
                       <span
-                        className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${
+                        className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 ui-micro font-semibold ${
                           task.enabled
                             ? "border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]"
                             : "border-line bg-panel text-muted"
@@ -233,13 +231,13 @@ export function AutomationPage() {
                       >
                         {task.enabled ? "启用" : "停用"}
                       </span>
-                      {running && <span className="text-[9px] text-muted">运行中…</span>}
+                      {running && <span className="ui-micro text-muted">运行中…</span>}
                     </div>
 
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-[13px] font-semibold">{task.name}</span>
-                        <span className="rounded-sm border border-line px-1.5 py-0.5 text-[9px] text-[#555]">
+                        <span className="rounded-sm border border-line px-1.5 py-0.5 ui-micro text-[#555]">
                           {actionLabel(task.kind)}
                         </span>
                       </div>
@@ -254,7 +252,7 @@ export function AutomationPage() {
                         <span>上次 {task.lastRunAt ? formatAutomationTime(task.lastRunAt) : "从未"}</span>
                         {task.lastStatus && (
                           <span
-                            className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${statusClass(task.lastStatus)}`}
+                            className={`inline-flex items-center rounded-full border px-1.5 py-0.5 ui-micro font-medium ${statusClass(task.lastStatus)}`}
                           >
                             {runStatusLabel(task.lastStatus)}
                           </span>
@@ -356,7 +354,7 @@ export function AutomationPage() {
           </p>
         </ConfirmDialog>
       )}
-    </div>
+    </PageShell>
   );
 }
 

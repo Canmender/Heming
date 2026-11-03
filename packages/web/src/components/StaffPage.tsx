@@ -17,6 +17,7 @@ import { useLlmStore } from "../store/llm.js";
 import { useUiStore } from "../store/ui.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { StaffIcon } from "./icons.js";
+import { PageShell } from "./layout/PageShell.js";
 
 /**
  * 幕僚页（d.48）：只递简报 + 一键跳转。
@@ -57,7 +58,7 @@ function FindingRow({ finding }: { finding: StaffFinding }) {
   return (
     <div className="flex flex-wrap items-start gap-2 rounded-lg border border-line-soft px-2.5 py-2">
       <span
-        className={`mt-0.5 shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${SEVERITY_CLASS[finding.severity]}`}
+        className={`mt-0.5 shrink-0 rounded-full border px-1.5 py-0.5 ui-micro font-semibold ${SEVERITY_CLASS[finding.severity]}`}
       >
         {severityLabel(finding.severity)}
       </span>
@@ -70,7 +71,7 @@ function FindingRow({ finding }: { finding: StaffFinding }) {
           {finding.evidence.map((item) => (
             <span
               key={`${item.kind}:${item.refId}`}
-              className="rounded-sm border border-line px-1.5 py-0.5 text-[9px] text-muted"
+              className="rounded-sm border border-line px-1.5 py-0.5 ui-micro text-muted"
             >
               {item.label}
             </span>
@@ -92,11 +93,11 @@ function RunItem({ run }: { run: StaffRun }) {
     <li className="rounded-xl border border-line bg-white px-4 py-3 shadow-card">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] text-muted">{formatStaffTime(run.startedAt)}</span>
-        <span className="rounded-sm border border-line px-1.5 py-0.5 text-[9px] text-[#555]">
+        <span className="rounded-sm border border-line px-1.5 py-0.5 ui-micro text-[#555]">
           {triggerLabel(run.trigger)}
         </span>
         <span
-          className={`rounded-sm border px-1.5 py-0.5 text-[9px] ${
+          className={`rounded-sm border px-1.5 py-0.5 ui-micro ${
             run.mode === "fallback"
               ? "border-[#fecdca] bg-[#fef3f2] text-[#b42318]"
               : "border-line bg-panel text-muted"
@@ -105,7 +106,7 @@ function RunItem({ run }: { run: StaffRun }) {
           {modeLabel(run.mode)}
         </span>
         {run.tokens != null && (
-          <span className="text-[9px] text-muted">{run.tokens.toLocaleString("zh-CN")} tokens</span>
+          <span className="ui-micro text-muted">{run.tokens.toLocaleString("zh-CN")} tokens</span>
         )}
         {run.findings.length > 0 && (
           <button
@@ -234,15 +235,12 @@ export function StaffPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft px-5 py-3">
-        <div className="min-w-0">
-          <h1 className="text-[15px] font-semibold tracking-tight">幕僚</h1>
-          <p className="mt-0.5 text-[11px] text-muted">
-            替你盯着日程与任务，只在需要你决定时递一份简报 · 不代你执行任何操作
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <PageShell
+      title="幕僚"
+      subtitle="替你盯着日程与任务，只在需要你决定时递一份简报 · 不代你执行任何操作"
+      width="readable"
+      actions={
+        <>
           <button
             type="button"
             onClick={() => void runOnce()}
@@ -259,10 +257,10 @@ export function StaffPage() {
           >
             {settingsOpen ? "收起设置" : "设置"}
           </button>
-        </div>
-      </header>
-
-      <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-5 py-2.5">
+        </>
+      }
+    >
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line-soft bg-panel px-3 py-2">
         <span
           className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
             settings.enabled
@@ -272,11 +270,11 @@ export function StaffPage() {
         >
           {settings.enabled ? "已开启" : "已关闭"}
         </span>
-        <span className="text-[11px] text-muted">
+        <span className="ui-caption">
           模式：{settings.profileId ? "模型总结 + 规则兜底" : "规则（未绑定模型）"}
         </span>
-        <span className="text-[11px] text-muted">下次：{describeNextCheck(settings, now)}</span>
-        <span className="ml-auto text-[10px] text-muted">
+        <span className="ui-caption">下次：{describeNextCheck(settings, now)}</span>
+        <span className="ui-caption ml-auto">
           今日自动 {autoToday}/{settings.dailyRunCap} 次 · token {usedTokens.toLocaleString("zh-CN")}
           {settings.dailyTokenCap > 0 ? `/${settings.dailyTokenCap.toLocaleString("zh-CN")}` : "/不限"}
         </span>
@@ -285,7 +283,7 @@ export function StaffPage() {
       {(error || notice) && (
         <div
           role={error ? "alert" : "status"}
-          className={`flex items-start justify-between gap-3 border-b px-5 py-2 text-[11px] leading-5 ${
+          className={`mb-4 flex items-start justify-between gap-3 rounded-lg border px-3 py-2 ui-caption ${
             error
               ? "border-[#f3c6c2] bg-[#fdf3f2] text-[#912018]"
               : "border-line-soft bg-panel text-[#555]"
@@ -302,7 +300,7 @@ export function StaffPage() {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+      <div>
         {settingsOpen && (
           <section className={`${CARD} mb-4`} aria-label="幕僚设置">
             <div className="mb-2 flex items-center gap-2">
@@ -340,7 +338,7 @@ export function StaffPage() {
               />
             </div>
 
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="mt-3 grid gap-4 md:grid-cols-2">
               <label className="flex items-center gap-2 text-[12px]">
                 <span className="w-[76px] shrink-0 text-muted">晨报时间</span>
                 <input
@@ -428,7 +426,7 @@ export function StaffPage() {
         {runs.length === 0 ? (
           <div className="mx-auto mt-8 max-w-[560px] rounded-xl border border-line bg-white p-6 text-center shadow-card">
             <StaffIcon width={26} height={26} />
-            <h2 className="mt-2 text-[14px] font-semibold">还没有简报</h2>
+            <h2 className="ui-section-title mt-2">还没有简报</h2>
             <p className="mt-1 text-[12px] leading-6 text-muted">
               开启后，幕僚会在每天 {settings.dailyAt} 前后给你一份；
               日程临期或任务卡住时也会单独提醒。所有内容只存本机。
@@ -443,7 +441,7 @@ export function StaffPage() {
             </button>
           </div>
         ) : (
-          <ul className="mx-auto flex max-w-[860px] flex-col gap-2">
+          <ul className="flex flex-col gap-4">
             {runs.map((run) => (
               <RunItem key={run.id} run={run} />
             ))}
@@ -479,6 +477,6 @@ export function StaffPage() {
           </p>
         </ConfirmDialog>
       )}
-    </div>
+    </PageShell>
   );
 }

@@ -23,6 +23,7 @@ import {
 } from "../lib/infohub/client.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { useUiStore, type InfohubIntent } from "../store/ui.js";
+import { PageShell } from "./layout/PageShell.js";
 
 const SEARCH_LIMIT = 100;
 
@@ -399,24 +400,28 @@ export function InfohubPage() {
         : "未连接";
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft px-5 py-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-[15px] font-semibold tracking-tight">信息中枢</h1>
-            <span
-              className={`inline-block h-1.5 w-1.5 rounded-full ${
-                ready ? "bg-[#1f9d55]" : phase === "error" ? "bg-[#b42318]" : "bg-[#bbb]"
-              }`}
-              aria-hidden
-            />
-            <span className="text-[11px] text-muted">{statusLine}</span>
-          </div>
-          <p className="mt-0.5 truncate text-[11px] text-muted">
-            {ready && status ? `${status.stats.conversations} 个归档会话 · ${formatInfohubBytes(status.dbBytes)}` : "QQ / 微信归档只在本机处理"}
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5">
+    <PageShell
+      title={
+        <span className="flex items-center gap-2">
+          信息中枢
+          <span
+            className={`inline-block h-1.5 w-1.5 rounded-full ${
+              ready ? "bg-[#1f9d55]" : phase === "error" ? "bg-[#b42318]" : "bg-[#bbb]"
+            }`}
+            aria-hidden
+          />
+          <span className="ui-caption">{statusLine}</span>
+        </span>
+      }
+      subtitle={
+        ready && status
+          ? `${status.stats.conversations} 个归档会话 · ${formatInfohubBytes(status.dbBytes)}`
+          : "QQ / 微信归档只在本机处理"
+      }
+      width="full"
+      scroll={false}
+      actions={
+        <>
           {ready && (
             <>
               <button
@@ -451,13 +456,13 @@ export function InfohubPage() {
               </button>
             </>
           )}
-        </div>
-      </header>
-
+        </>
+      }
+    >
       {error && (
         <div
           role="alert"
-          className="flex items-start justify-between gap-3 border-b border-[#f3c6c2] bg-[#fdf3f2] px-5 py-2 text-[11px] leading-5 text-[#912018]"
+          className="flex items-start justify-between gap-3 border-b border-[#f3c6c2] bg-[#fdf3f2] px-6 py-2 ui-caption text-[#912018]"
         >
           <span className="min-w-0 break-words">{error}</span>
           <button type="button" onClick={() => setError("")} className="shrink-0 hover:underline">
@@ -468,9 +473,9 @@ export function InfohubPage() {
 
       {/* 未连接：数据目录与解释器设置。默认目录来自主进程，可浏览选择已有 InfoHub 目录。 */}
       {!ready && (
-        <div className="min-h-0 flex-1 overflow-auto px-5 py-6">
+        <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
           <div className="mx-auto max-w-[620px] rounded-xl border border-line bg-white p-5 shadow-card">
-            <h2 className="text-[14px] font-semibold">连接本机归档</h2>
+            <h2 className="ui-section-title">连接本机归档</h2>
             <p className="mt-1 text-[12px] leading-6 text-muted">
               指向已有的 InfoHub 数据目录（里面有 <code className="rounded-sm bg-[#f4f4f4] px-1">config.json</code> 和{" "}
               <code className="rounded-sm bg-[#f4f4f4] px-1">data/archive.db</code>）。
@@ -563,7 +568,7 @@ export function InfohubPage() {
 
       {ready && status && (
         <>
-          <div className="flex gap-2 border-b border-line-soft px-5 py-2.5">
+          <div className="flex gap-2 border-b border-line-soft px-6 py-2.5">
             <Stat label="归档会话" value={String(status.stats.conversations)} />
             <Stat label="消息" value={status.stats.messages.toLocaleString("zh-CN")} />
             <Stat label="日程" value={agenda ? String(agenda.summary.total) : "—"} />
@@ -572,7 +577,7 @@ export function InfohubPage() {
           </div>
 
           {syncOpen && (
-            <div className="border-b border-line-soft bg-panel px-5 py-3">
+            <div className="border-b border-line-soft bg-panel px-6 py-3">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
                 <span className="font-medium text-[#555]">采集来源</span>
                 <label className="flex items-center gap-1.5">
@@ -649,7 +654,7 @@ export function InfohubPage() {
             </div>
           )}
 
-          <div role="tablist" className="flex items-center gap-1 border-b border-line-soft px-5 py-2">
+          <div role="tablist" className="flex items-center gap-1 border-b border-line-soft px-6 py-2">
             {(
               [
                 ["search", "检索"],
@@ -668,7 +673,7 @@ export function InfohubPage() {
               >
                 {label}
                 {value === "agenda" && agenda?.summary.overdue ? (
-                  <span className="ml-1 rounded-full bg-[#fdecea] px-1 text-[9px] font-semibold text-[#b42318]">
+                  <span className="ml-1 rounded-full bg-[#fdecea] px-1 ui-micro font-semibold text-[#b42318]">
                     {agenda.summary.overdue}
                   </span>
                 ) : null}
@@ -685,7 +690,7 @@ export function InfohubPage() {
           </div>
 
           {!status.hasDb && (
-            <div className="border-b border-line-soft bg-[#fffdf5] px-5 py-2 text-[11px] text-[#8a6d3b]">
+            <div className="border-b border-line-soft bg-[#fffdf5] px-6 py-2 text-[11px] text-[#8a6d3b]">
               该目录还没有归档库。先在「同步」里选择来源并开始采集；采集完成后这里会自动刷新。
             </div>
           )}
@@ -693,7 +698,7 @@ export function InfohubPage() {
           {tab === "search" && (
             <div className="flex min-h-0 flex-1 flex-col">
               <form
-                className="flex gap-2 border-b border-line-soft px-5 py-3"
+                className="flex gap-2 border-b border-line-soft px-6 py-3"
                 onSubmit={(e) => {
                   e.preventDefault();
                   void runSearch();
@@ -714,7 +719,7 @@ export function InfohubPage() {
                   {busy === "search" ? "检索中…" : "检索"}
                 </button>
               </form>
-              <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
+              <div className="min-h-0 flex-1 overflow-auto px-6 py-3">
                 {hits.length === 0 ? (
                   <p className="text-[11px] text-muted">
                     {searchedFor ? `没有找到「${searchedFor}」` : "输入关键词后回车。检索只在本机归档内进行。"}
@@ -749,7 +754,7 @@ export function InfohubPage() {
 
           {tab === "agenda" && (
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex items-center gap-3 border-b border-line-soft px-5 py-2.5 text-[11px]">
+              <div className="flex items-center gap-3 border-b border-line-soft px-6 py-2.5 text-[11px]">
                 <span className="text-muted">
                   未来 14 天 · 逾期 30 天
                   {agenda ? ` · 共 ${agenda.summary.total} 条` : ""}
@@ -780,7 +785,7 @@ export function InfohubPage() {
                   </button>
                 </div>
               </div>
-              <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
+              <div className="min-h-0 flex-1 overflow-auto px-6 py-3">
                 {!agenda || agenda.items.length === 0 ? (
                   <p className="text-[11px] text-muted">
                     {agenda ? "没有待办事项" : "读取中…"}
@@ -822,7 +827,7 @@ export function InfohubPage() {
             </div>
           )}
 
-          <details className="shrink-0 border-t border-line-soft bg-panel px-5 py-2 text-[11px]">
+          <details className="shrink-0 border-t border-line-soft bg-panel px-6 py-2 text-[11px]">
             <summary className="cursor-pointer text-[#555]">本机配置（已脱敏）</summary>
             <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-[10px] text-[#666] sm:grid-cols-4">
               <span>QQ：{status.config.qq.enabled ? "启用" : "停用"}</span>
@@ -841,6 +846,6 @@ export function InfohubPage() {
           </details>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

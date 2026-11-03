@@ -577,3 +577,17 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
     expect(screen.getByRole("region", { name: "设置搜索结果" })).toHaveTextContent("导航顺序");
   });
 });
+
+/** d.62-B 布局迁移守卫：页头走 PageShell、内容列上限 720。 */
+describe("设置区布局（d.62-B）", () => {
+  it("页头由 PageShell 提供（唯一 h1 + 副标题），内容列上限 720", () => {
+    render(<SettingsPage />);
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveClass("ui-page-title");
+    expect(headings[0]).toHaveTextContent("设置区");
+    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("无需重启");
+    // 内容列上限：narrow 档 720（PageShell 的 narrow 类或内部容器均算）
+    expect(document.querySelector(".max-w-\\[720px\\]")).not.toBeNull();
+  });
+});

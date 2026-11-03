@@ -301,7 +301,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
       >
         <div className="flex items-center gap-2">
           <AssistantIcon width={18} height={18} />
-          <h2 className="text-[15px] font-bold">直接调用智能体</h2>
+          <h2 className="ui-section-title">直接调用智能体</h2>
         </div>
         <p className="mt-1 text-[12px] leading-5 text-muted">
           选一个已绑定 LLM 连接的智能体，写下要做的事，点「开始运行」即执行。
@@ -647,11 +647,11 @@ export function TaskAreaPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-3 border-b border-line-soft px-5 py-3">
+      <header className="flex flex-wrap items-center gap-3 border-b border-line-soft px-6 pb-4 pt-5">
         <div className="flex items-center gap-2">
           <AssistantIcon width={18} height={18} />
-          <span className="text-[15px] font-bold">通用智能体</span>
-          <span className="text-[11px] text-muted">
+          <span className="ui-page-title">通用智能体</span>
+          <span className="ui-page-sub">
             {stats.total} 次运行 · {stats.running} 进行中 · {stats.done} 已完成
           </span>
         </div>
@@ -710,14 +710,14 @@ export function TaskAreaPage() {
       <div className="flex min-h-0 flex-1">
         {/* 左列：运行记录 */}
         <aside className="flex w-[280px] shrink-0 flex-col border-r border-line-soft">
-          <div className="flex items-center gap-2 border-b border-line-soft px-3 py-2">
-            <span className="text-[11px] font-medium text-[#555]">运行记录</span>
-            <span className="text-[10px] text-muted">{visible.length}</span>
+          <div className="flex items-center gap-2 border-b border-line-soft px-6 py-2">
+            <span className="ui-section-title">运行记录</span>
+            <span className="ui-micro">{visible.length}</span>
             {selected && (
               <button
                 type="button"
                 onClick={() => setSelectedId(null)}
-                className="ml-auto text-[10px] text-muted hover:text-ink"
+                className="ui-micro ml-auto hover:text-ink"
               >
                 新运行
               </button>
@@ -725,7 +725,7 @@ export function TaskAreaPage() {
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {visible.length === 0 ? (
-              <div className="px-3 py-10 text-center text-[12px] leading-6 text-muted">
+              <div className="px-4 py-10 text-center text-[12px] leading-6 text-muted">
                 {stats.total === 0
                   ? "还没有运行记录。在右侧选智能体、写下目标，就能直接开始。"
                   : "没有符合条件的运行记录。"}
@@ -738,7 +738,7 @@ export function TaskAreaPage() {
                   aria-label={`运行 ${task.title}`}
                   aria-current={task.id === selectedId}
                   onClick={() => selectTask(task)}
-                  className={`mb-1 w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                  className={`mb-1 w-full rounded-lg border px-4 py-2.5 text-left transition-colors ${
                     task.id === selectedId
                       ? "border-line bg-[#f7f7f7]"
                       : "border-transparent hover:bg-[#fafafa]"
@@ -784,7 +784,7 @@ export function TaskAreaPage() {
               ))
             )}
           </div>
-          <div className="border-t border-line-soft px-3 py-2 text-[10px] leading-4 text-muted">
+          <div className="ui-caption border-t border-line-soft px-6 py-2 leading-4">
             运行记录与汇总只保存在本机，不上传服务端。
           </div>
         </aside>
@@ -794,11 +794,11 @@ export function TaskAreaPage() {
           {selected && activeConversationId === selected.conversationId ? (
             <ChatPage embedded />
           ) : selected ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
               <span className="flex h-16 w-16 items-center justify-center rounded-2xl border border-line-soft bg-[#fafafa] text-[#98a2b3]">
                 <AssistantIcon width={30} height={30} />
               </span>
-              <div className="text-[14px] font-bold">正在打开运行…</div>
+              <div className="ui-section-title">正在打开运行…</div>
               {selectedConv && (
                 <button
                   type="button"
@@ -815,7 +815,7 @@ export function TaskAreaPage() {
         </section>
 
         {/* 右列：确定性汇总 */}
-        <aside className="w-[320px] shrink-0 overflow-y-auto border-l border-line-soft px-4 py-4">
+        <aside className="w-[320px] shrink-0 overflow-y-auto border-l border-line-soft px-6 py-5">
           {!selected ? (
             <div className="text-[12px] leading-6 text-muted">
               选中一次运行后，这里会显示目标、结果、工具步骤与来源，并可复制成

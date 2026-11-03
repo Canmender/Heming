@@ -384,3 +384,15 @@
 **三轨**：A 列表页（Plugins/Interfaces/Automation/Staff/Skills/Registry/Infohub）、B 分栏页（Team/TeamBoard/Settings/Memory）、C 聊天与壳（Assistant/Chat/TaskArea/App 右栏）。文件级不重叠。
 
 **基线截图**：`.tmp/layout/before/`（对线上 d.61.2.21.0 生产构建截 13 页），改造后 `.tmp/layout/after/` 对照。
+
+### 第七波完成与发布（2026-11-03 08:50）
+
+| 项 | 结果 |
+|---|---|
+| 排版基元 | ✅ 8 个 `ui-*` 语义档（18/700? 见 spec）+ `PageShell`（固定页头/24px/宽度档/滚动归属）+ PageShell 4 例 |
+| A 列表页 | ✅ 7 页迁 PageShell（wide/readable/full），删自写 h1、section 统一、gap-4、去内层双重限宽；74 例 |
+| B 分栏页 | ✅ 团队/团队看板/设置/记忆 统一页头 + headerExtra；设置内容列 720 左对齐；布局守卫 4 例 |
+| C 聊天与壳 | ✅ 智能体/聊天/任务区/App 右栏统一；聊天消息列与输入区 880 居中；ChatPage 布局断言 1 例 |
+| 全量门禁 | ✅ shared 29 / server 141 / web 200 文件 2980 例 / desktop 29 文件 518 例；4/4 无重试；三包 tsc 0 |
+| 版本 | `d.61.2.22.0`（修订 21→22） |
+| 视觉基线 | `.tmp/layout/before`（线上 d.61.2.21.0 生产构建 13 页）→ `.tmp/layout/after` / `after2` |

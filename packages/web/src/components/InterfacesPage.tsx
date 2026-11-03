@@ -16,6 +16,7 @@ import { PlusIcon, TrashIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { RegistryPage } from "./RegistryPage.js";
 import { MCP_PRESETS } from "../lib/mcp/presets.js";
+import { PageShell } from "./layout/PageShell.js";
 
 /**
  * 接口区：MCP 服务与工具调用。
@@ -191,16 +192,12 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[17px] font-extrabold">接口区</h1>
-          <p className="mt-1 text-[12px] text-muted">
-            MCP 服务与工具：连接后把工具开关打开，智能体在会话里就能调用（协议 {MCP_PROTOCOL_VERSION}）。
-            工具默认关闭，需要逐个授权。
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <PageShell
+      title="接口区"
+      subtitle={`MCP 服务与工具：连接后把工具开关打开，智能体在会话里就能调用（协议 ${MCP_PROTOCOL_VERSION}）。工具默认关闭，需要逐个授权。`}
+      width="wide"
+      actions={
+        <>
           <button
             type="button"
             onClick={() => {
@@ -222,13 +219,13 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
             <PlusIcon width={13} height={13} />
             添加 MCP 服务
           </button>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {msg && (
         <div
           role="status"
-          className={`mt-3 rounded-lg border px-3 py-2 text-[12px] ${
+          className={`mb-4 rounded-lg border px-3 py-2 text-[12px] ${
             msg.kind === "error"
               ? "border-[#f3d2ce] bg-[#fef3f2] text-[#b42318]"
               : "border-[#d7e9dc] bg-[#f2faf5] text-[#1d6b3a]"
@@ -239,8 +236,8 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
       )}
 
       {formOpen && (
-        <section className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
-          <div className="grid gap-3 md:grid-cols-2">
+        <section className="mb-4 rounded-xl border border-line bg-white p-4 shadow-card">
+          <div className="grid gap-4 md:grid-cols-2">
             <label className="text-[12px] text-muted">
               服务名称
               <input
@@ -617,7 +614,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
           </p>
         </ConfirmDialog>
       )}
-    </div>
+    </PageShell>
   );
 }
 

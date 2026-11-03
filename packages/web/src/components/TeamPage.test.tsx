@@ -307,3 +307,15 @@ describe("团队页错误态语义（③-3）", () => {
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 });
+
+/** d.62-B 布局迁移守卫：页头统一走 PageShell（标题档位/副标题在同一处）。 */
+describe("团队页布局（d.62-B）", () => {
+  it("页头由 PageShell 提供：唯一 h1 用 ui-page-title，副标题用 ui-page-sub", async () => {
+    await renderPage();
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveClass("ui-page-title");
+    expect(headings[0]).toHaveTextContent("团队");
+    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("名真实成员");
+  });
+});

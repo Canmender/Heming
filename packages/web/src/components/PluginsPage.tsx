@@ -13,6 +13,7 @@ import { PackageIcon, PlusIcon, XIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useModalA11y } from "./useModalA11y.js";
 import { useUiStore } from "../store/ui.js";
+import { PageShell } from "./layout/PageShell.js";
 
 /**
  * 插件区：系统能力包（`plugin.json`）的安装、更新、启停与卸载。
@@ -331,54 +332,46 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[17px] font-extrabold">插件区</h1>
-          <p className={`mt-1 ${hintCls}`}>
-            插件是系统能力包（plugin.json）：可带入技能与远程 MCP 服务。安装后技能进入技能池、
-            服务登记到接口区；启用状态与删除范围按插件统一管理，全部数据只在本机。
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={openInstall}
-          className={`flex items-center gap-1 ${btnGhost}`}
-        >
+    <PageShell
+      title="插件区"
+      subtitle="插件是系统能力包（plugin.json）：可带入技能与远程 MCP 服务。安装后技能进入技能池、服务登记到接口区；启用状态与删除范围按插件统一管理，全部数据只在本机。"
+      width="wide"
+      actions={
+        <button type="button" onClick={openInstall} className={`flex items-center gap-1 ${btnGhost}`}>
           <PlusIcon width={12} height={12} aria-hidden="true" />
           安装插件
         </button>
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      }
+    >
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className={badgeCls}>已装 {list.length}</span>
         <span className={badgeCls}>已启用 {enabledCount}</span>
-        <span className={hintCls}>
+        <span className="ui-caption">
           同一 id 再次安装 = 覆盖更新；停用不会删除技能或服务配置。
         </span>
       </div>
 
       {msg && (
-        <div role="status" className={`mt-2 ${msg.kind === "error" ? errorCls : okCls}`}>
+        <div role="status" className={`mb-4 ${msg.kind === "error" ? errorCls : okCls}`}>
           {msg.text}
         </div>
       )}
 
       {list.length === 0 ? (
         <section
-          className={`${cardCls} mt-3 flex flex-col items-center gap-2 py-10 text-center`}
+          className={`${cardCls} flex flex-col items-center gap-2 py-10 text-center`}
           aria-label="暂无插件"
         >
           <span className="text-muted" aria-hidden="true">
             <PackageIcon width={28} height={28} />
           </span>
-          <p className="text-[13px] font-bold">还没有安装插件</p>
-          <p className={hintCls}>
+          <p className="ui-section-title">还没有安装插件</p>
+          <p className="ui-caption">
             一个 plugin.json 可以一次带入一组技能与远程 MCP 服务。点右上角「安装插件」粘贴清单或选择文件。
           </p>
         </section>
       ) : (
-        <div className="mt-3 grid gap-3">
+        <div className="grid gap-4">
           {list.map((plugin) => {
             const manifest = plugin.manifest;
             return (
@@ -801,6 +794,6 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
           </p>
         </ConfirmDialog>
       )}
-    </div>
+    </PageShell>
   );
 }

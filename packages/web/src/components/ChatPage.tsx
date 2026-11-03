@@ -2504,7 +2504,7 @@ export function ChatPage({
 
   return (
     <div className="relative flex h-full flex-col">
-      <header className="relative flex items-center gap-2.5 border-b border-line-soft px-5 py-3">
+      <header className="relative flex items-center gap-2.5 border-b border-line-soft px-6 py-3">
         {!embedded && (
           <button
             type="button"
@@ -2521,8 +2521,8 @@ export function ChatPage({
             size={28}
           />
         )}
-        <span className="text-[14px] font-bold">{headerTitle}</span>
-        <span className="flex items-center gap-1 text-[12px] text-muted">
+        <span className="ui-section-title min-w-0 truncate">{headerTitle}</span>
+        <span className="ui-caption flex items-center gap-1">
           <span
             aria-hidden="true"
             className={`h-1.5 w-1.5 rounded-full ${
@@ -2613,13 +2613,13 @@ export function ChatPage({
       {connState === "closed" && (
         <div
           role="status"
-          className="border-b border-[#f0d58c] bg-[#fff7e6] px-5 py-1.5 text-[11px] text-[#b45309]"
+          className="border-b border-[#f0d58c] bg-[#fff7e6] px-6 py-1.5 text-[11px] text-[#b45309]"
         >
           连接已断开，正在自动重连…消息会排队，恢复后自动补发
         </div>
       )}
       {searchOpen && (
-        <div className="flex items-center gap-2 border-b border-line-soft bg-[#fafafa] px-5 py-2">
+        <div className="flex items-center gap-2 border-b border-line-soft bg-[#fafafa] px-6 py-2">
           <SearchIcon width={14} height={14} className="shrink-0 text-[#999]" />
           <input
             autoFocus
@@ -2678,7 +2678,7 @@ export function ChatPage({
       )}
       {/* 多选导出工具条：与搜索条同层（header 下方一条），不常驻挤压消息区。 */}
       {selectMode && (
-        <div className="flex items-center gap-2 border-b border-line-soft bg-[#fafafa] px-5 py-2 text-[12px]">
+        <div className="flex items-center gap-2 border-b border-line-soft bg-[#fafafa] px-6 py-2 text-[12px]">
           <span className="shrink-0 text-muted">已选 {selectedIds.length} 条</span>
           <button
             type="button"
@@ -2731,8 +2731,10 @@ export function ChatPage({
         onScroll={onMessageScroll}
         onDragOver={onMessagesDragOver}
         onDrop={onMessagesDrop}
-        className="flex-1 overflow-y-auto px-8 pb-5 pt-6"
+        className="flex-1 overflow-y-auto px-6 pb-5 pt-6"
       >
+        {/* d.62：消息列 880 居中——宽屏下中文长行的可读宽度约 80 字；滚动容器保持在外层。 */}
+        <div className="mx-auto w-full max-w-[880px]">
         {/* 窗口之外还有历史时给一个显式入口：滚到顶会自动加载，
             但触控板/滚轮行为在部分设备上不可靠，按钮是兜底，也让人知道「上面还有」。 */}
         {visibleMessages.length > windowCount && (
@@ -2936,6 +2938,7 @@ export function ChatPage({
           />
         ))}
         <div ref={bottomRef} />
+        </div>
       </div>
       {/* A3：用户上滑期间来了新内容 —— 不拽底，只亮一个回到底部的入口 */}
       {newBelow ? (
@@ -2949,11 +2952,13 @@ export function ChatPage({
         </button>
       ) : null}
       <form onSubmit={send} className="relative border-t border-line-soft">
+        {/* d.62：输入区与消息列同宽（880 居中），工具栏/提示/快捷键提示全部对齐这一宽度。 */}
+        <div className="mx-auto w-full max-w-[880px]">
         {/* E2E 常驻横幅（硬验收⑤ / 设计 §2.1）：无 subtle 环境红字提示 + 全发送路径拦截 */}
         {!subtleOk && (
           <p
             role="alert"
-            className="mx-5 mt-2 border-l-2 border-[#b42318] bg-[#fef3f2] px-2 py-1.5 text-[12px] text-[#b42318]"
+            className="mx-6 mt-2 border-l-2 border-[#b42318] bg-[#fef3f2] px-2 py-1.5 text-[12px] text-[#b42318]"
           >
             {NO_E2E_NOTICE}
           </p>
@@ -2961,7 +2966,7 @@ export function ChatPage({
         {/* UX-A：未绑定模型前置提示（与任务区同源组件）；发送按钮同时置灰，
             不再等用户敲完一段话才在发送时被拦。 */}
         {unboundAgent && (
-          <div className="mx-5 mt-2">
+          <div className="mx-6 mt-2">
             <UnboundModelNotice
               id={UNBOUND_NOTICE_ID}
               variant="inline"
@@ -2972,7 +2977,7 @@ export function ChatPage({
         )}
         {/* 提示行（复用同一位）：录音中占位（停止/取消入口），否则走发送提示 */}
         {recording ? (
-          <div className="flex items-center gap-3 px-5 pt-2 text-[12px]">
+          <div className="flex items-center gap-3 px-6 pt-2 text-[12px]">
             <span role="status">录音中…（最长 60 秒）</span>
             <button
               type="button"
@@ -2993,7 +2998,7 @@ export function ChatPage({
           </div>
         ) : uploading ? (
           // A8：上传进行中占住提示位，四个入口已禁用
-          <p role="status" className="px-5 pt-2 text-[12px] text-muted">
+          <p role="status" className="px-6 pt-2 text-[12px] text-muted">
             上传中…（≤6MB）
           </p>
         ) : sendNotice ? (
@@ -3001,7 +3006,7 @@ export function ChatPage({
           sendNotice.kind === "error" ? (
             <div
               role="alert"
-              className="flex items-center gap-3 px-5 pt-2 text-[12px] text-[#b42318]"
+              className="flex items-center gap-3 px-6 pt-2 text-[12px] text-[#b42318]"
             >
               <span>{sendNotice.text}</span>
               {sendNotice.retry ? (
@@ -3015,26 +3020,26 @@ export function ChatPage({
               ) : null}
             </div>
           ) : (
-            <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
+            <p role="status" className="px-6 pt-2 text-[12px] text-[#b45309]">
               {sendNotice.text}
             </p>
           )
         ) : null}
         {/* 分叉降级（d.56）：来源日志重建不出前缀，本次按普通重跑执行——整轮运行期间都显示 */}
         {forkNotice && (
-          <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
+          <p role="status" className="px-6 pt-2 text-[12px] text-[#b45309]">
             {forkNotice}
           </p>
         )}
         {/* 能力降级提示：与发送后的错误提示分开——这是「发之前就知道」的信息 */}
         {toolsNotice && (
-          <p role="status" className="px-5 pt-2 text-[12px] text-[#b45309]">
+          <p role="status" className="px-6 pt-2 text-[12px] text-[#b45309]">
             {toolsNotice}
           </p>
         )}
         {/* 「生成中」提示行（输入栏上方）：本机流署名 + 中断入口 */}
         {activeLocal.length > 0 && (
-          <div className="flex items-center gap-3 px-5 pt-2 text-[12px] text-muted">
+          <div className="flex items-center gap-3 px-6 pt-2 text-[12px] text-muted">
             <span>生成中：{activeLocal.map(([, s]) => nameOf(s.agentId)).join("、")}</span>
             <button
               type="button"
@@ -3046,7 +3051,7 @@ export function ChatPage({
           </div>
         )}
         {/* 工具行：表情 / 图片 / 文件（左上角） */}
-        <div className="flex items-center gap-1 px-5 pt-2">
+        <div className="flex items-center gap-1 px-6 pt-2">
           <button
             type="button"
             aria-label="表情"
@@ -3089,7 +3094,7 @@ export function ChatPage({
         >
           <span className="h-[2px] w-10 rounded-full bg-[#e8e8e8] transition-colors group-hover:bg-[#c9c9c9]" />
         </div>
-        <div className="relative flex items-end gap-2 px-5 pb-3" style={{ height: composerHeight }}>
+        <div className="relative flex items-end gap-2 px-6 pb-3" style={{ height: composerHeight }}>
           {emojiOpen && (
             <EmojiPicker
               onPick={(e) => {
@@ -3167,7 +3172,7 @@ export function ChatPage({
           </button>
         </div>
         {/* 底部说明 + 快捷键提示（UX-A）：常驻但弱化，不占提示位 */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 pb-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-6 pb-2">
           {conv && (
             <span className="text-[11px] text-muted">
               与 <span className="font-medium text-[#555]">{conv.agent.name}</span>{" "}
@@ -3177,6 +3182,7 @@ export function ChatPage({
           <span className="ml-auto">
             <ComposerHints streaming={activeLocal.length > 0} />
           </span>
+        </div>
         </div>
       </form>
       {/* HITL 工具确认弹窗（设计 §4.3）：

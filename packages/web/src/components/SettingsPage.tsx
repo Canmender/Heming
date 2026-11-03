@@ -20,6 +20,7 @@ import {
   type SettingsCardMeta,
 } from "../lib/settings/registry.js";
 import { FOCUS_RING } from "../lib/a11y/focus.js";
+import { PageShell } from "./layout/PageShell.js";
 
 /**
  * 头像文件上限：449_000 字节 → base64 data URL 约 598_700 字符，
@@ -188,87 +189,92 @@ export function SettingsPage() {
   const searching = query.trim().length > 0;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="shrink-0 px-6 pt-5">
-        <h1 className="text-[17px] font-extrabold">设置区</h1>
-        {/* 横向标签栏：选中项白底、下边框与内容区连成一体 */}
-        <div className="mt-3 flex gap-1 border-b border-line-soft" role="tablist" aria-label="设置分组">
-          {SETTINGS_TABS.map((t) => {
-            const active = t.id === tab;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => {
-                  setTab(t.id);
-                  // 手动切分组 = 结束这次搜索（回到普通分区视图）
-                  setQuery("");
-                }}
-                className={`-mb-px border-b-2 px-3.5 py-2 text-[12.5px] transition-colors ${
-                  active
-                    ? "border-b-ink font-bold text-ink"
-                    : "border-b-transparent text-muted hover:text-ink"
-                }`}
-              >
-                {t.label}
-              </button>
-            );
-          })}
+    <PageShell
+      scroll={false}
+      title="设置区"
+      subtitle="改动即时生效，仅作用于本机，无需重启。"
+      headerExtra={
+        <div className="px-6 pb-3 pt-3">
+          {/* 横向标签栏：选中项白底、选中线压在下边框上（与内容区连成一体） */}
+          <div className="flex gap-1" role="tablist" aria-label="设置分组">
+            {SETTINGS_TABS.map((t) => {
+              const active = t.id === tab;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => {
+                    setTab(t.id);
+                    // 手动切分组 = 结束这次搜索（回到普通分区视图）
+                    setQuery("");
+                  }}
+                  className={`-mb-px border-b-2 px-3.5 py-2 text-[13px] transition-colors ${
+                    active
+                      ? "border-b-ink font-semibold text-ink"
+                      : "border-b-transparent text-muted hover:text-ink"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+          {/* 卡片内搜索：跨 5 个分区按「标题 + 关键词 + 分区名」匹配 */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              ref={searchRef}
+              type="search"
+              aria-label="搜索设置项"
+              placeholder="搜索设置项…（如 主题色 / 免问下限 / 桌宠）"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className={`w-full max-w-[420px] rounded-lg border border-line-strong px-3 py-1.5 text-[12px] outline-hidden focus:border-ink ${FOCUS_RING}`}
+            />
+            <span className="ui-caption">
+              {searching ? `${results.length} 项匹配 · Esc 关闭` : "按标题、关键词或分区名搜索"}
+            </span>
+          </div>
         </div>
-        {/* 卡片内搜索：跨 5 个分区按「标题 + 关键词 + 分区名」匹配 */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <input
-            ref={searchRef}
-            type="search"
-            aria-label="搜索设置项"
-            placeholder="搜索设置项…（如 主题色 / 免问下限 / 桌宠）"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className={`w-full max-w-[420px] rounded-lg border border-line-strong px-3 py-1.5 text-[12px] outline-hidden focus:border-ink ${FOCUS_RING}`}
-          />
-          <span className="text-[11px] text-muted">
-            {searching ? `${results.length} 项匹配 · Esc 关闭` : "按标题、关键词或分区名搜索"}
-          </span>
-        </div>
-      </div>
-
+      }
+    >
       {/* 内容区：一次只渲染当前分组，切换时不保留上一次的输入态（草稿本就一次性保存） */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-6 pt-5">
-        {searching ? (
-          <section aria-label="设置搜索结果" className="max-w-[520px]">
-            {results.length === 0 ? (
-              <p className="text-[12px] leading-5 text-muted">
-                没有匹配的设置项。换个说法试试（如「主题色」「免问」「桌宠」「更新」）。
-              </p>
-            ) : (
-              <>
-                <p role="status" className="text-[11px] text-muted">
-                  找到 {results.length} 项，点击定位到卡片
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div className="w-full max-w-[720px]">
+          {searching ? (
+            <section aria-label="设置搜索结果">
+              {results.length === 0 ? (
+                <p className="ui-body-sm text-muted">
+                  没有匹配的设置项。换个说法试试（如「主题色」「免问」「桌宠」「更新」）。
                 </p>
-                <ul className="mt-2 flex flex-col gap-1">
-                  {results.map((card) => (
-                    <li key={card.id}>
-                      <button
-                        type="button"
-                        onClick={() => jumpToCard(card)}
-                        className={`flex w-full items-center gap-2 rounded-lg border border-line-soft bg-white px-3 py-2 text-left text-[12px] hover:border-line hover:bg-[#fafafa] ${FOCUS_RING}`}
-                      >
-                        <span className="min-w-0 flex-1 truncate">
-                          {settingsCardById(card.id)?.title ?? card.title}
-                        </span>
-                        <span className="shrink-0 text-[11px] text-muted">
-                          · {sectionLabelOf(card.section)}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </section>
-        ) : (
+              ) : (
+                <>
+                  <p role="status" className="ui-caption">
+                    找到 {results.length} 项，点击定位到卡片
+                  </p>
+                  <ul className="mt-2 flex flex-col gap-2">
+                    {results.map((card) => (
+                      <li key={card.id}>
+                        <button
+                          type="button"
+                          onClick={() => jumpToCard(card)}
+                          className={`flex w-full items-center gap-2 rounded-lg border border-line-soft bg-white px-3 py-2 text-left ui-body-sm hover:border-line hover:bg-[#fafafa] ${FOCUS_RING}`}
+                        >
+                          <span className="min-w-0 flex-1 truncate">
+                            {settingsCardById(card.id)?.title ?? card.title}
+                          </span>
+                          <span className="shrink-0 ui-caption">
+                            · {sectionLabelOf(card.section)}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </section>
+          ) : (
           <>
             {tab === "profile" && (
               <div data-settings-id="profile" className={anchorClass(highlightId === "profile")}>
@@ -346,11 +352,12 @@ export function SettingsPage() {
               </div>
             )}
             {tab === "about" && <AboutSection highlightedId={highlightId} />}
-            <p className="pt-1 text-[11px] text-muted">和鸣 {appVersionLabel()}</p>
+            <p className="pt-1 ui-caption">和鸣 {appVersionLabel()}</p>
           </>
         )}
+        </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -402,8 +409,8 @@ function ProfileSection() {
   };
 
   return (
-    <section className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card">
-      <div className="text-[12px] font-bold text-muted">个人资料</div>
+    <section className="max-w-full rounded-xl border border-line bg-white p-4 shadow-card">
+      <div className="ui-section-title">个人资料</div>
 
       <div className="mt-3 flex items-center gap-4">
         <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f0f0f0] text-muted">
@@ -509,10 +516,10 @@ function AppearanceSection() {
   return (
     <section
       aria-label="页面颜色"
-      className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
+      className="max-w-full rounded-xl border border-line bg-white p-4 shadow-card"
     >
       <div className="flex items-center gap-2">
-        <span className="text-[12px] font-bold text-muted">页面颜色</span>
+        <span className="ui-section-title">页面颜色</span>
         {applied && (
           <span role="status" className="text-[11px] text-muted">
             已生效
@@ -585,10 +592,10 @@ function NavigationSection() {
   return (
     <section
       aria-label="导航顺序"
-      className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
+      className="max-w-full rounded-xl border border-line bg-white p-4 shadow-card"
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[12px] font-bold text-muted">导航顺序</div>
+        <div className="ui-section-title">导航顺序</div>
         <button type="button" aria-label="恢复默认导航顺序" onClick={resetNavOrder} className={btnGhost}>
           恢复默认
         </button>
@@ -634,7 +641,7 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
   const [logState, setLogState] = useState<Record<string, boolean>>({});
 
   return (
-    <div className="flex max-w-[520px] flex-col gap-3">
+    <div className="flex max-w-full flex-col gap-3">
       <div data-settings-id="update" className={anchorClass(highlightedId === "update")}>
         <UpdateCard currentVersion={appVersionLabel()} />
       </div>
@@ -642,10 +649,10 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
       <div data-settings-id="changelog" className={anchorClass(highlightedId === "changelog")}>
         <section
           aria-label="更新日志"
-          className="max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
+          className="max-w-full rounded-xl border border-line bg-white p-4 shadow-card"
         >
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[12px] font-bold text-muted">更新日志</div>
+        <div className="ui-section-title">更新日志</div>
         <span className="text-[11px] text-muted">当前 {appVersionLabel()}</span>
       </div>
       <div className="mt-1 text-[11px] text-muted">

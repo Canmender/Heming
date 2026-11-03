@@ -26,6 +26,7 @@ import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { dayKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
+import { PageShell } from "./layout/PageShell.js";
 import { Avatar } from "./Avatar.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 
@@ -392,69 +393,74 @@ export function TeamPage() {
   const shareCount = [share.tasks, share.agenda, share.usage].filter(Boolean).length;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <header className="flex items-center gap-3 border-b border-line-soft px-5 py-3">
-        <div>
-          <h1 className="text-[15px] font-extrabold">团队</h1>
-          <p className="mt-0.5 text-[11px] text-muted">
-            全站一个团队 · {members.length} 名真实成员 · {onlineCount} 人在线 ·
-            今日 {todayCount} 条动向
-          </p>
-        </div>
-        <span className="ml-auto rounded-md border border-line bg-[#fafafa] px-2 py-0.5 text-[11px] text-muted">
+    <PageShell
+      scroll={false}
+      title="团队"
+      subtitle={
+        <>
+          全站一个团队 · {members.length} 名真实成员 · {onlineCount} 人在线 · 今日 {todayCount} 条动向
+        </>
+      }
+      actions={
+        <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 ui-caption">
           共享 {shareCount}/3
         </span>
-      </header>
-
-      <div className="border-b border-line-soft bg-[#fbfbfb] px-5 py-2 text-[11px]">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-          <span className="text-muted">
-            开启后团队成员可见你的任务/日程摘要与用量排行（不含提示词、对话内容、工具参数与结果）
-          </span>
-          <label className="flex items-center gap-1 text-[#555]">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-[#1a1a1a]"
-              checked={share.tasks}
-              onChange={(e) => updateShare({ tasks: e.target.checked })}
-            />
-            任务
-          </label>
-          <label className="flex items-center gap-1 text-[#555]">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-[#1a1a1a]"
-              checked={share.agenda}
-              onChange={(e) => updateShare({ agenda: e.target.checked })}
-            />
-            日程
-          </label>
-          <label className="flex items-center gap-1 text-[#555]">
-            <input
-              type="checkbox"
-              aria-label="共享用量"
-              className="h-3.5 w-3.5 accent-[#1a1a1a]"
-              checked={share.usage}
-              onChange={(e) => updateShare({ usage: e.target.checked })}
-            />
-            用量
-          </label>
-          <span className="text-[#6f6f6f]">
-            {share.lastSyncAt ? `上次同步 ${fmtTime(new Date(share.lastSyncAt).toISOString())}` : "尚未同步"}
-          </span>
-          <button
-            type="button"
-            className="ml-auto rounded-sm border border-line bg-white px-2 py-0.5 text-[11px] text-muted hover:bg-[#f5f5f5]"
-            onClick={() => setConfirmClear(true)}
-          >
-            清除我的共享记录
-          </button>
+      }
+      headerExtra={
+        <div className="bg-[#fbfbfb] px-6 py-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            <span className="ui-caption">
+              开启后团队成员可见你的任务/日程摘要与用量排行（不含提示词、对话内容、工具参数与结果）
+            </span>
+            <label className="flex items-center gap-1 ui-caption text-[#555]">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                checked={share.tasks}
+                onChange={(e) => updateShare({ tasks: e.target.checked })}
+              />
+              任务
+            </label>
+            <label className="flex items-center gap-1 ui-caption text-[#555]">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                checked={share.agenda}
+                onChange={(e) => updateShare({ agenda: e.target.checked })}
+              />
+              日程
+            </label>
+            <label className="flex items-center gap-1 ui-caption text-[#555]">
+              <input
+                type="checkbox"
+                aria-label="共享用量"
+                className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                checked={share.usage}
+                onChange={(e) => updateShare({ usage: e.target.checked })}
+              />
+              用量
+            </label>
+            <span className="ui-caption">
+              {share.lastSyncAt
+                ? `上次同步 ${fmtTime(new Date(share.lastSyncAt).toISOString())}`
+                : "尚未同步"}
+            </span>
+            <button
+              type="button"
+              className="ml-auto rounded-sm border border-line bg-white px-2 py-0.5 ui-caption hover:bg-[#f5f5f5]"
+              onClick={() => setConfirmClear(true)}
+            >
+              清除我的共享记录
+            </button>
+          </div>
+          {syncError && (
+            <p role="alert" className="mt-1 ui-micro text-[#b42318]">
+              共享同步失败：{syncError}
+            </p>
+          )}
         </div>
-        {syncError && (
-          <p role="alert" className="mt-1 text-[10px] text-[#b42318]">共享同步失败：{syncError}</p>
-        )}
-      </div>
-
+      }
+    >
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-[300px] shrink-0 flex-col border-r border-line-soft">
           <div className="border-b border-line-soft p-2.5">
@@ -554,7 +560,7 @@ export function TeamPage() {
 
         <main className="flex min-w-0 flex-1 flex-col">
           {selectedMember && (
-            <div className="flex items-center gap-3 border-b border-line-soft bg-white px-5 py-2.5">
+            <div className="flex items-center gap-3 border-b border-line-soft bg-white px-6 py-2.5">
               <Avatar user={selectedMember.user} size={32} />
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -582,7 +588,7 @@ export function TeamPage() {
 
           {/* 三个视图互斥：动向（默认）/ 团队日程（只读）/ 用量（本机 + 开启共享后的排行） */}
           <div
-            className="flex items-center gap-1 border-b border-line-soft px-5 py-2"
+            className="flex items-center gap-1 border-b border-line-soft px-6 py-2"
             role="tablist"
             aria-label="团队视图"
           >
@@ -597,8 +603,10 @@ export function TeamPage() {
                 role="tab"
                 aria-selected={tab === t.key}
                 onClick={() => setTab(t.key)}
-                className={`rounded-lg px-2 py-1 text-[11px] ${
-                  tab === t.key ? "bg-ink text-white" : "text-muted hover:bg-[#f3f3f3]"
+                className={`rounded-lg px-2.5 py-1 text-[13px] ${
+                  tab === t.key
+                    ? "bg-ink font-semibold text-white"
+                    : "text-muted hover:bg-[#f3f3f3]"
                 }`}
               >
                 {t.label}
@@ -608,7 +616,7 @@ export function TeamPage() {
 
           {tab === "feed" && (
             <>
-              <div className="flex items-center gap-1 border-b border-line-soft px-5 py-2">
+              <div className="flex items-center gap-1 border-b border-line-soft px-6 py-2">
                 {FILTERS.map((f) => (
                   <button
                     key={f.key}
@@ -631,7 +639,7 @@ export function TeamPage() {
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
             {!feedReady ? (
               <div role="status" aria-busy="true" aria-label="正在加载团队动向" className="space-y-2">
                 {[0, 1, 2].map((i) => (
@@ -708,7 +716,7 @@ export function TeamPage() {
           )}
 
           {tab === "agenda" && (
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
               <p className="rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2 text-[11px] leading-5 text-muted">
                 团队日程只收成员自己开启共享的「日程」摘要（标题 + 到期档位），不含日程详情、证据或发送人；
                 不新增任何云端内容上传。
@@ -770,7 +778,7 @@ export function TeamPage() {
           )}
 
           {tab === "usage" && (
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] leading-5 text-muted">
                   只统计 token 数、模型名与连接名；提示词、对话内容、工具参数与结果都不出本机。
@@ -813,7 +821,7 @@ export function TeamPage() {
 
               {!share.usage ? (
                 <section className="mt-3" aria-label="本机用量">
-                  <h2 className="text-[12px] font-bold">本机用量（仅自己可见）</h2>
+                  <h2 className="ui-section-title">本机用量（仅自己可见）</h2>
                   <p className="mt-1 text-[11px] leading-5 text-muted">
                     「用量」共享未开启：不上传、不采集，全站排行也不会显示。开启后会同步近 30 天的
                     白名单摘要（自然日 / 模型 / 连接名 / token 数 / 未上报轮数）。
@@ -867,7 +875,7 @@ export function TeamPage() {
               ) : usage ? (
                 <>
                   <section className="mt-3" aria-label="我的用量">
-                    <h2 className="text-[12px] font-bold">我的用量（近 {rangeDays} 天）</h2>
+                    <h2 className="ui-section-title">我的用量（近 {rangeDays} 天）</h2>
                     <div className="mt-1 flex flex-wrap items-baseline gap-4 text-[12px]">
                       <span>
                         合计 <b className="tabular-nums">{fmtTokens(usage.self.total)}</b>
@@ -898,7 +906,7 @@ export function TeamPage() {
                   </section>
 
                   <section className="mt-4" aria-label="团队用量排行">
-                    <h2 className="text-[12px] font-bold">团队排行（近 {rangeDays} 天）</h2>
+                    <h2 className="ui-section-title">团队排行（近 {rangeDays} 天）</h2>
                     {usage.ranking.length === 0 ? (
                       <p className="mt-1 text-[11px] text-muted">还没有成员共享用量。</p>
                     ) : (
@@ -998,6 +1006,6 @@ export function TeamPage() {
           </p>
         </ConfirmDialog>
       )}
-    </div>
+    </PageShell>
   );
 }

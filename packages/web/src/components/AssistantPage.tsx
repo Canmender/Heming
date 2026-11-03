@@ -6,6 +6,7 @@ import { ChatPage } from "./ChatPage.js";
 import { AgentFormModal } from "./AgentFormModal.js";
 import { Avatar } from "./Avatar.js";
 import { AssistantIcon, PlusIcon } from "./icons.js";
+import { PageShell } from "./layout/PageShell.js";
 
 /**
  * 智能体页（原聊天页转正）：
@@ -83,13 +84,19 @@ export function AssistantPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0">
+    <PageShell
+      title="智能体"
+      subtitle="在本机与智能体对话、派任务；模型 Key、工具与记忆都不出设备。"
+      scroll={false}
+    >
+      <div className="flex min-h-0 flex-1">
       <aside className="flex w-[240px] shrink-0 flex-col border-r border-line-soft">
         <header className="flex items-center gap-2 border-b border-line-soft px-3 py-2.5">
           <AssistantIcon width={17} height={17} />
-          <span className="text-[13px] font-bold">智能体</span>
-          <span className="rounded-sm border border-line px-1 text-[9px] text-muted">本机</span>
-          <span className="text-[10px] text-muted">{sortedAgents.length}</span>
+          {/* d.62：左栏列表表头用统一 section 档；徽标/数量用 micro 档 */}
+          <span className="ui-section-title min-w-0 truncate">我的智能体</span>
+          <span className="ui-micro rounded-sm border border-line px-1">本机</span>
+          <span className="ui-micro">{sortedAgents.length}</span>
           <button
             type="button"
             aria-label="新建智能体"
@@ -103,7 +110,7 @@ export function AssistantPage() {
 
         <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
           {sortedAgents.length === 0 ? (
-            <p className="px-2 py-6 text-center text-[12px] leading-5 text-muted">
+            <p className="ui-body-sm px-2 py-6 text-center leading-5">
               还没有智能体。
               <br />
               点右上角「+」建一个。
@@ -130,8 +137,8 @@ export function AssistantPage() {
                       size={26}
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12px] font-medium">{agent.name}</span>
-                      <span className="block truncate text-[10px] text-muted">
+                      <span className="ui-body-sm block truncate font-medium">{agent.name}</span>
+                      <span className="ui-caption block truncate">
                         {busy
                           ? "正在打开…"
                           : conv?.lastMessageAt
@@ -146,7 +153,7 @@ export function AssistantPage() {
                     type="button"
                     aria-label={`编辑智能体：${agent.name}`}
                     onClick={() => setEditing(agent)}
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-sm px-1 py-0.5 text-[10px] text-muted opacity-0 hover:bg-[#e9e9e9] hover:text-ink group-hover:opacity-100"
+                    className="ui-micro absolute right-1.5 top-1/2 -translate-y-1/2 rounded-sm px-1 py-0.5 opacity-0 hover:bg-[#e9e9e9] hover:text-ink group-hover:opacity-100"
                   >
                     编辑
                   </button>
@@ -157,7 +164,7 @@ export function AssistantPage() {
         </div>
 
         {error && <p className="border-t border-line-soft px-3 py-2 text-[11px] text-[#b42318]">{error}</p>}
-        <p className="border-t border-line-soft px-3 py-2 text-[10px] leading-4 text-muted">
+        <p className="ui-caption border-t border-line-soft px-3 py-2 leading-4">
           智能体在本机运行：模型 Key、工具与记忆不出设备；消息不进团队动向。
         </p>
       </aside>
@@ -166,12 +173,12 @@ export function AssistantPage() {
         {activeConv ? (
           <ChatPage />
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             <span className="flex h-16 w-16 items-center justify-center rounded-2xl border border-line-soft bg-[#fafafa] text-[#98a2b3]">
               <AssistantIcon width={30} height={30} />
             </span>
-            <div className="text-[14px] font-bold">选择一个智能体开始</div>
-            <p className="max-w-[420px] text-[12px] leading-6 text-muted">
+            <div className="ui-section-title">选择一个智能体开始</div>
+            <p className="ui-body-sm max-w-[520px] leading-6">
               {"把任务交给本机智能体：它可以对话、调用本机工具、执行任务。人类私聊与群聊已从这个版本移除；团队页只展示真实成员的任务与日程动向。"}
             </p>
             {systemAgent && (
@@ -194,6 +201,7 @@ export function AssistantPage() {
         {...(editing ? { agent: editing } : {})}
         onClose={() => setEditing(null)}
       />
-    </div>
+      </div>
+    </PageShell>
   );
 }

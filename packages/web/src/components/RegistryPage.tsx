@@ -12,6 +12,7 @@ import {
 import { hasStdioBridge } from "../lib/mcp/index.js";
 import { useRegistryStore, type RegistryStore } from "../store/registry.js";
 import { PlusIcon } from "./icons.js";
+import { PageShell } from "./layout/PageShell.js";
 
 /** 搜索防抖：输入过程中的每个字符都打一次 Registry 没有意义。 */
 export const SEARCH_DEBOUNCE_MS = 400;
@@ -134,20 +135,12 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
   };
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[17px] font-extrabold">发现 MCP 服务</h1>
-          <p className="mt-1 text-[12px] text-muted">
-            来自官方 Registry。远程服务本机不落代码；本地包由本机的 Node/uv 运行（和鸣不内置）。装完工具默认关闭。
-          </p>
-          {runtimeProbed && runtime && (
-            <p className="mt-1 text-[11px] text-muted" title={runtime.note}>
-              {`本机运行时：Node.js ${runtime.npm ? "可用" : "未检测到"} · uv ${runtime.pypi ? "可用" : "未检测到"}`}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
+    <PageShell
+      title="发现 MCP 服务"
+      subtitle="来自官方 Registry。远程服务本机不落代码；本地包由本机的 Node/uv 运行（和鸣不内置）。装完工具默认关闭。"
+      width="wide"
+      actions={
+        <>
           <button
             type="button"
             onClick={() => void load(undefined, { force: true })}
@@ -165,10 +158,16 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
               返回接口区
             </button>
           )}
-        </div>
-      </div>
+        </>
+      }
+    >
+      {runtimeProbed && runtime && (
+        <p className="ui-caption mb-4" title={runtime.note}>
+          {`本机运行时：Node.js ${runtime.npm ? "可用" : "未检测到"} · uv ${runtime.pypi ? "可用" : "未检测到"}`}
+        </p>
+      )}
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <input
           aria-label="搜索 MCP 服务"
           value={text}
@@ -271,10 +270,10 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
         </div>
       )}
 
-      <p className="mt-4 text-[11px] text-muted">
+      <p className="mt-4 ui-caption">
         Registry 是开放注册中心，任何条目都不代表已通过安全审核。安装前请自行核对来源与仓库。
       </p>
-    </div>
+    </PageShell>
   );
 }
 

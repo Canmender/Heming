@@ -166,6 +166,17 @@ describe("MemoryPage 三分区结构", () => {
     expect(screen.getByRole("region", { name: "短期记忆" })).toBeInTheDocument();
     expect(screen.getByText(/名册为空/)).toBeInTheDocument();
   });
+
+  /** d.62-B 布局迁移守卫：页头统一走 PageShell。 */
+  it("页头由 PageShell 提供：唯一 h1 用 ui-page-title，副标题用 ui-page-sub", () => {
+    mockApi({ agents: AGENTS });
+    renderPage();
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveClass("ui-page-title");
+    expect(headings[0]).toHaveTextContent("记忆区");
+    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("智能体管自己的记忆设置");
+  });
 });
 
 describe("MemoryPage 短期记忆", () => {

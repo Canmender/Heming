@@ -45,6 +45,7 @@ import {
 import { fetchFiles } from "../lib/api.js";
 import { ChevronIcon, PlusIcon, TrashIcon, XIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { PageShell } from "./layout/PageShell.js";
 import { useModalA11y } from "./useModalA11y.js";
 
 /**
@@ -82,7 +83,7 @@ const btnDangerSm =
 const btnPrimary = "rounded-lg bg-ink px-4 py-1.5 text-sm font-bold text-white disabled:opacity-40";
 const btnPrimarySm =
   "rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-40";
-const hintCls = "text-[11px] text-muted";
+const hintCls = "ui-caption";
 /** 召回记录默认只列最近 3 次，其余按需展开。 */
 const RECALL_RUNS_PREVIEW = 3;
 const errorCls = "text-[12px] text-red-600";
@@ -610,7 +611,7 @@ function workingTraceLines(labels: string[], trace: MemoryObservability): Recall
 function RecallGroup({ title, lines }: { title: string; lines: RecallLine[] }) {
   return (
     <div>
-      <div className="text-[11px] font-bold text-muted">
+      <div className="ui-caption font-semibold text-ink">
         {title}（{lines.length}）
       </div>
       {lines.length === 0 ? (
@@ -1118,7 +1119,7 @@ export function MemoryPage({
     <section aria-label="短期记忆" className={cardCls}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="text-[12px] font-bold text-muted">短期记忆</div>
+          <div className="ui-section-title">短期记忆</div>
           <div className={`mt-1 ${hintCls}`}>
             会话级缓冲：当前会话最近若干轮上下文，约 2 小时未活动或满 40 轮后过期，仅存本机
           </div>
@@ -1215,7 +1216,7 @@ export function MemoryPage({
       <section aria-label="数据库记忆概览" className={cardCls}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="text-[12px] font-bold text-muted">数据库 · 长期记忆</div>
+            <div className="ui-section-title">数据库 · 长期记忆</div>
             <div className={`mt-1 ${hintCls}`}>
               这是<strong className="font-medium text-[#666]">所有智能体共用</strong>的长期记忆，
               智能体对话时会读到这里的语义记忆。情景记忆仍按智能体分开（它记的是某次对话的过程）。
@@ -1289,7 +1290,7 @@ export function MemoryPage({
                 bump();
               }}
             />
-            <span className="text-[12px] font-bold text-muted">记忆总开关</span>
+            <span className="ui-section-title">记忆总开关</span>
           </div>
           <span aria-hidden="true" className="h-4 w-px bg-line-soft" />
           <div className="flex items-center gap-2">
@@ -1301,7 +1302,7 @@ export function MemoryPage({
                 bump();
               }}
             />
-            <span className="text-[12px] font-bold text-muted">自动记忆</span>
+            <span className="ui-section-title">自动记忆</span>
           </div>
           <span className={hintCls}>
             自动记忆关闭后不再自动沉淀情景与语义（短期记忆仍记录），手动添加不受影响
@@ -1394,7 +1395,7 @@ export function MemoryPage({
 
       <section className={`${cardCls} mt-3`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-[12px] font-bold text-muted">记忆条目</div>
+          <div className="ui-section-title">记忆条目</div>
           <input
             aria-label="检索记忆"
             value={query}
@@ -1405,7 +1406,7 @@ export function MemoryPage({
         </div>
 
         <div role="group" aria-label="语义记忆条目" className="mt-3">
-          <div className="text-[12px] font-bold text-muted">语义记忆（{semanticShown.length}）</div>
+          <div className="ui-section-title">语义记忆（{semanticShown.length}）</div>
           {semanticShown.length === 0 ? (
             <div className={`mt-1 ${hintCls}`}>{query ? "无匹配条目" : "暂无条目"}</div>
           ) : (
@@ -1530,7 +1531,7 @@ export function MemoryPage({
         </div>
 
         <div role="group" aria-label="情景记忆条目" className="mt-4 border-t border-line-soft pt-3">
-          <div className="text-[12px] font-bold text-muted">情景记忆（{episodicShown.length}）</div>
+          <div className="ui-section-title">情景记忆（{episodicShown.length}）</div>
           {episodicShown.length === 0 ? (
             <div className={`mt-1 ${hintCls}`}>{query ? "无匹配条目" : "暂无条目"}</div>
           ) : (
@@ -1569,7 +1570,7 @@ export function MemoryPage({
       </section>
 
       <section className={`${cardCls} mt-3`}>
-        <div className="text-[12px] font-bold text-muted">召回预览</div>
+        <div className="ui-section-title">召回预览</div>
         <div className={`mt-1 ${hintCls}`}>
           输入一句话，看这次触发会召回哪些记忆：语义（置顶必带 + top5）、情景（top3）、短期（最近 6
           轮），总量受 1200 字符预算约束
@@ -1653,7 +1654,7 @@ export function MemoryPage({
       <section className={`${cardCls} mt-3`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-[12px] font-bold text-muted">召回记录</div>
+            <div className="ui-section-title">召回记录</div>
             <div className={`mt-1 ${hintCls}`}>
               本机最近 {RECALL_LOG_MAX} 次「带记忆的生成」留档：召回几条、真注入几条、哪些被预算裁掉，
               以及回答里疑似用到了哪条（判据是词重合，不是模型自述）。只存本机，不参与记忆导出。
@@ -1701,7 +1702,7 @@ export function MemoryPage({
 
       {coldRows.length > 0 && (
         <section className={`${cardCls} mt-3`}>
-          <div className="text-[12px] font-bold text-muted">长期未被引用（{coldRows.length}）</div>
+          <div className="ui-section-title">长期未被引用（{coldRows.length}）</div>
           <div className={`mt-1 ${hintCls}`}>
             被注入 {COLD_MIN_INJECTED} 次以上、却一次都没被判为「疑似引用」的记忆（含公用与私有的长期记忆、以及情景沉淀），
             按注入次数从多到少排。系统不会因为「冷」自动降权或删除它们——这只是一条线索：
@@ -1949,7 +1950,7 @@ export function MemoryPage({
   const reviewCard = (
     <section aria-label="复盘沉淀" className={`${cardCls} mt-3`}>
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[12px] font-bold text-muted">复盘沉淀（任务结束后自评）</div>
+        <div className="ui-section-title">复盘沉淀（任务结束后自评）</div>
         <button
           type="button"
           aria-label="立即复盘一次"
@@ -2044,7 +2045,7 @@ export function MemoryPage({
 
   const agentPrefsCard = (
     <section aria-label="智能体记忆开关" className={`${cardCls} mt-3`}>
-      <div className="text-[12px] font-bold text-muted">智能体记忆开关</div>
+      <div className="ui-section-title">智能体记忆开关</div>
       <div className={`mt-1 ${hintCls}`}>
         短期记忆与长期记忆默认关闭，需要为每个智能体手动开启；个人数据库默认允许使用（个人知识库默认允许）。
       </div>
@@ -2180,77 +2181,70 @@ export function MemoryPage({
   const tabOrder: TabKey[] = ["agents", "database", "wiki"];
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="shrink-0 px-6 pt-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-[17px] font-extrabold">记忆区</h1>
-            <div className={`mt-1 ${hintCls}`}>
-              智能体管自己的记忆设置，数据库是所有智能体公用的长期记忆，个人知识库给你自己看
+    <PageShell
+      scroll={false}
+      title="记忆区"
+      subtitle="智能体管自己的记忆设置，数据库是所有智能体公用的长期记忆，个人知识库给你自己看"
+      actions={
+        <label className="flex shrink-0 items-center gap-2 whitespace-nowrap ui-caption">
+          <span>当前</span>
+          <select
+            aria-label="选择智能体"
+            value={agentId}
+            onChange={(e) => setAgentId(e.target.value)}
+            className="rounded-lg border border-line-strong px-2 py-1.5 text-[12px] outline-hidden focus:border-ink"
+          >
+            <option value="">全部智能体</option>
+            {[...agents, ...manualAgents].map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      }
+      headerExtra={
+        <div className="px-6 pb-3 pt-3">
+          {rosterError && (
+            <div role="status" className="mb-2 text-[12px] text-[#b45309]">
+              {rosterError}
             </div>
-          </div>
-          {/* 选择器不做可见文字标签：页面已经有一个名为「智能体」的标签页，
-              再放一个同名文字会让读屏与测试都命中多处。可见性由 aria-label 承担。 */}
-          <label className="flex shrink-0 items-center gap-2 whitespace-nowrap text-[12px] text-muted">
-            <span className="text-muted">当前</span>
-            <select
-              aria-label="选择智能体"
-              value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
-              className="rounded-lg border border-line-strong px-2 py-1.5 text-[12px] outline-hidden focus:border-ink"
-            >
-              <option value="">全部智能体</option>
-              {[...agents, ...manualAgents].map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {rosterError && (
-          <div role="status" className="mt-2 text-[12px] text-[#b45309]">
-            {rosterError}
-          </div>
-        )}
+          )}
 
-        {/* 上侧横向标签页：选中项白底、下边框与内容区连成一体（与设置页同一视觉语言） */}
-        <div
-          role="tablist"
-          aria-label="记忆分区"
-          className="mt-3 flex gap-1 border-b border-line-soft"
-        >
-          {tabOrder.map((key) => {
-            const active = tab === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                id={`memory-${key}-tab`}
-                aria-controls={`memory-${key}-panel`}
-                aria-selected={active}
-                aria-label={TAB_LABELS[key]}
-                onClick={() => setTab(key)}
-                className={`-mb-px border-b-2 px-3.5 py-2 text-[12.5px] transition-colors ${
-                  active
-                    ? "border-b-ink font-bold text-ink"
-                    : "border-b-transparent text-muted hover:text-ink"
-                }`}
-              >
-                {TAB_LABELS[key]}
-                <span className="ml-1.5 text-[11px] text-muted">{tabCounts[key]}</span>
-              </button>
-            );
-          })}
+          {/* 上侧横向标签页：选中项白底、下边框与内容区连成一体（与设置页同一视觉语言） */}
+          <div role="tablist" aria-label="记忆分区" className="flex gap-1">
+            {tabOrder.map((key) => {
+              const active = tab === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  id={`memory-${key}-tab`}
+                  aria-controls={`memory-${key}-panel`}
+                  aria-selected={active}
+                  aria-label={TAB_LABELS[key]}
+                  onClick={() => setTab(key)}
+                  className={`-mb-px border-b-2 px-3.5 py-2 text-[13px] transition-colors ${
+                    active
+                      ? "border-b-ink font-semibold text-ink"
+                      : "border-b-transparent text-muted hover:text-ink"
+                  }`}
+                >
+                  {TAB_LABELS[key]}
+                  <span className="ml-1.5 ui-micro">{tabCounts[key]}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
-
+      }
+    >
       <div
         role="tabpanel"
         id={`memory-${tab}-panel`}
         aria-labelledby={`memory-${tab}-tab`}
-        className="min-h-0 flex-1 overflow-y-auto px-6 py-4"
+        className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
       >
         {tab === "agents" && (
           <div className="flex flex-col gap-3">
@@ -2291,7 +2285,6 @@ export function MemoryPage({
           </p>
         </ConfirmDialog>
       )}
-
-    </div>
+    </PageShell>
   );
 }
