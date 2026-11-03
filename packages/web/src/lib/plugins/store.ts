@@ -7,6 +7,7 @@ import {
   type PluginManifest,
 } from "./manifest.js";
 import { pluginIdFromServerId } from "./permissions.js";
+import { contentFingerprint, FINGERPRINT_PREFIX } from "./integrity.js";
 
 // 目录（catalog）与命令面板都从插件侧反解服务归属，统一从本模块导出，
 // 避免两处各写一份 `plugin:` 前缀解析而漂移。
@@ -45,6 +46,13 @@ export interface InstalledPlugin {
   skillIds: string[];
   /** 本插件登记的服务 id（`plugin:<插件 id>:<key>`），卸载/停用按此收口。 */
   serverIds: string[];
+  /**
+   * 安装时的清单**内容指纹**（`fnv1a64:…`，见 `integrity.ts`）。
+   *
+   * 只用来发现「同 id 同版本但内容被悄悄改过」，不是签名、不证明来源。
+   * 旧版本应用留下的记录没有该字段，读取时补算并落盘（不视为损坏）。
+   */
+  fingerprint: string;
   installedAt: string;
   updatedAt: string;
 }
@@ -86,6 +94,26 @@ export interface PluginServerConflict {
   name: string;
 }
 
+/**
+ * 安装前的信任预览（d.66 覆盖保护）。
+ *
+ * 只看**清单内容**，不碰文件/网络：作者变了、或同版本内容变了，才是需要人
+ * 显式确认的覆盖更新；首次安装与正常的版本升级沿用既有差异预览。
+ */
+export interface PluginTrustPreview {
+  /** 本次清单的指纹。 */
+  fingerprint: string;
+  /** 已装版本的指纹；首次安装为 null。 */
+  previousFingerprint: string | null;
+  /** 同 id 同 version 但内容变了（最需要人看一眼的情况）。 */
+  sameVersionContentChanged: boolean;
+  authorChanged: boolean;
+  previousAuthor: string | null;
+  versionChanged: boolean;
+  /** 需要用户在安装弹窗显式勾选「我已确认这次覆盖更新」才能继续。 */
+  needsConfirm: boolean;
+}
+
 export interface PluginInstallPreview {
   manifest: PluginManifest;
   existing: InstalledPlugin | null;
@@ -95,6 +123,8 @@ export interface PluginInstallPreview {
   conflicts: PluginServerConflict[];
   /** 网络访问主机（含端口），安装前展示；口径来自归一化后的 `permissions.network`。 */
   hosts: string[];
+  /** 信任与覆盖保护提示（d.66）。 */
+  trust: PluginTrustPreview;
   /** 新插件且已达数量上限；更新不受影响。 */
   limitReached: boolean;
 }
@@ -254,6 +284,8 @@ export class PluginStore {
   private readonly now: () => number;
   private readonly mcp: PluginMcpPort;
   private data: PluginData;
+  /** 读取时发现旧记录缺指纹 → 构造完成后补写一次（不视为错误）。 */
+  private backfilledFingerprint = false;
 
   constructor(
     storage?: StorageLike,
@@ -266,6 +298,7 @@ export class PluginStore {
     this.now = now ?? (() => Date.now());
     this.mcp = mcp ?? mcpRegistry;
     this.data = this.parse(this.read());
+    if (this.backfilledFingerprint) this.save();
   }
 
   list(): InstalledPlugin[] {
@@ -330,6 +363,25 @@ export class PluginStore {
     // v1/v2 归一化时已由服务 URL 推导并补全，这里不再二次推导，避免两套口径。
     const hosts = [...manifest.permissions.network];
 
+    const fingerprint = contentFingerprint(manifest);
+    const previousFingerprint = existing?.fingerprint || null;
+    // 「同版本内容变了」只对同 id 同 version 有意义：正常升级的内容差异
+    // 已经由技能/服务差异预览覆盖，再叠加一个红字只会制造噪声。
+    const sameVersionContentChanged =
+      existing != null &&
+      existing.manifest.version === manifest.version &&
+      previousFingerprint !== fingerprint;
+    const authorChanged = existing != null && existing.manifest.author !== manifest.author;
+    const trust: PluginTrustPreview = {
+      fingerprint,
+      previousFingerprint,
+      sameVersionContentChanged,
+      authorChanged,
+      previousAuthor: existing ? existing.manifest.author : null,
+      versionChanged: existing != null && existing.manifest.version !== manifest.version,
+      needsConfirm: existing != null && (authorChanged || sameVersionContentChanged),
+    };
+
     return {
       manifest,
       existing: existing ? copyPlugin(existing) : null,
@@ -337,6 +389,7 @@ export class PluginStore {
       servers,
       conflicts,
       hosts,
+      trust,
       limitReached: !existing && this.data.plugins.length >= MAX_PLUGINS,
     };
   }
@@ -544,6 +597,7 @@ export class PluginStore {
       enabled,
       skillIds,
       serverIds: nextServerIds,
+      fingerprint: contentFingerprint(manifest),
       installedAt: existing?.installedAt ?? at,
       updatedAt: at,
     };
@@ -649,9 +703,19 @@ export class PluginStore {
       return null; // 单条损坏只丢这条插件，不影响其它插件
     }
     const at = this.iso();
+    // 指纹算法版本：只有 `fnv1a64b:` 前缀才算当前算法。旧前缀（含 d.64.2.23.0
+    // 的 `fnv1a64:`）按新算法重算并落盘——否则算法升级会让所有已装插件在下次
+    // 安装预览里假告警「内容与上次不同」。用户手工改过存储里的清单仍会被抓到：
+    // 重算基于存储中的真实清单，改过的内容自然对不上安装记录里的清单。
+    const rawFingerprint =
+      typeof r.fingerprint === "string" && r.fingerprint.startsWith(FINGERPRINT_PREFIX)
+        ? r.fingerprint
+        : null;
+    if (!rawFingerprint) this.backfilledFingerprint = true;
     return {
       manifest,
       enabled: r.enabled !== false,
+      fingerprint: rawFingerprint ?? contentFingerprint(manifest),
       skillIds: Array.isArray(r.skillIds)
         ? uniq(r.skillIds.filter((x): x is string => typeof x === "string"))
         : [],

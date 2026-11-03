@@ -1,5 +1,6 @@
 export * from "./manifest.js";
 export * from "./permissions.js";
+export * from "./integrity.js";
 export * from "./catalog.js";
 export * from "./system.js";
 export * from "./descriptors.js";
@@ -22,6 +23,7 @@ export type {
   InstallResult,
   PluginMcpPort,
   PluginInstallPreview,
+  PluginTrustPreview,
   PluginSkillDiff,
   PluginServerDiff,
   PluginServerDiffEntry,

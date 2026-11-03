@@ -11,6 +11,7 @@ import {
   evaluatePluginPermissions,
   type CapabilitySnapshot,
   type CatalogToolPack,
+  type PluginTrustPreview,
   type InstallResult,
   type PluginInstallPreview,
 } from "../../lib/plugins/index.js";
@@ -393,6 +394,44 @@ export function describeMcpRows(
       connected: mcp.hasDiscovered(server.id),
     };
   });
+}
+
+/* ------------------------------------------------------------ 安装信任（d.66） */
+
+/** 指纹展示：`fnv1a64:0123456789abcdef` → `fnv1a64:01234567…`（完整值放 title）。 */
+export function shortFingerprint(fingerprint: string): string {
+  const text = String(fingerprint ?? "");
+  const colon = text.indexOf(":");
+  if (colon < 0) return text.length > 12 ? `${text.slice(0, 12)}…` : text;
+  const prefix = text.slice(0, colon + 1);
+  const digest = text.slice(colon + 1);
+  return digest.length > 8 ? `${prefix}${digest.slice(0, 8)}…` : text;
+}
+
+/**
+ * 信任行的状态文案（三种）：首次安装 / 与上次相同 / 与上次不同。
+ *
+ * 「与上次相同」对应用户心里的问题「这次更新到底改没改内容」——
+ * 只比版本号会漏掉「同版本内容被替换」，所以用指纹比。
+ */
+export function trustStatusText(trust: PluginTrustPreview): string {
+  if (!trust.previousFingerprint) return "首次安装";
+  return trust.previousFingerprint === trust.fingerprint ? "与上次相同" : "与上次不同";
+}
+
+/** 作者变化文案；未变化返回 null（不显示空提示）。新作者来自本次清单。 */
+export function authorChangeText(trust: PluginTrustPreview, nextAuthor: string): string | null {
+  if (!trust.authorChanged) return null;
+  return `作者：${trust.previousAuthor || "（未署名）"} → ${nextAuthor || "（未署名）"}`;
+}
+
+/**
+ * 本插件自己登记的服务提供的工具：`plugin:<pluginId>:<key>` 开头。
+ * 只有这类工具能在插件详情里直接开关（其它工具去接口区）。
+ */
+export function isOwnPluginTool(serverId: string | undefined, pluginId: string): boolean {
+  if (!serverId) return false;
+  return serverId.startsWith(`plugin:${pluginId}:`);
 }
 
 /* ---------------------------------------------------------------- 统计卡 */

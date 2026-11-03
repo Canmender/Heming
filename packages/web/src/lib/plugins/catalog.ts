@@ -60,6 +60,15 @@ export interface CapabilityToolEntry {
   toolPacks?: CatalogToolPackRef[];
 }
 
+/** 工具束里单个工具的授权信息（d.66：详情页据此逐个开关，接口区状态同源）。 */
+export interface CatalogToolPackEntry {
+  tool: string;
+  /** 工具所属 MCP 服务；未匹配的工具没有（服务还没连上）。 */
+  serverId?: string;
+  enabled: boolean;
+  risk: CatalogRisk;
+}
+
 /** 插件声明的工具束在目录里的解析结果（matched = 目录里存在，unresolved = 尚未连接/提供）。 */
 export interface CatalogToolPack {
   id: string;
@@ -72,6 +81,8 @@ export interface CatalogToolPack {
   matched: string[];
   /** 声明了但目录里没有的工具名（服务未连接/未启用；不报错）。 */
   unresolved: string[];
+  /** 逐工具授权信息（d.66；顺序与 `tools` 一致）。 */
+  entries: CatalogToolPackEntry[];
   /** 插件是否启用（停用插件后其工具束归属仍在，但展示为未启用）。 */
   enabled: boolean;
 }
@@ -262,13 +273,23 @@ export function describeCapabilityCatalog(
     for (const pack of plugin.manifest.contributions.toolPacks) {
       const matched: string[] = [];
       const unresolved: string[] = [];
+      const entries: CatalogToolPackEntry[] = [];
       for (const name of pack.tools) {
         const tool = toolsByName.get(name);
         if (!tool) {
           unresolved.push(name);
+          // 未匹配的工具没有 serverId：T2 只能展示「未连接/未提供」并禁用开关。
+          // 风险按与执行期同一条名字启发给出，仅作提示（真正风险在连接后以服务为准）。
+          entries.push({ tool: name, enabled: false, risk: catalogRisk(riskOfName(name)) });
           continue;
         }
         matched.push(name);
+        entries.push({
+          tool: name,
+          serverId: tool.serverId,
+          enabled: tool.enabled,
+          risk: tool.risk,
+        });
         const refs = tool.toolPacks ?? [];
         if (!refs.some((ref) => ref.id === pack.id && ref.pluginId === plugin.manifest.id)) {
           refs.push({ id: pack.id, name: pack.name, pluginId: plugin.manifest.id });
@@ -284,6 +305,7 @@ export function describeCapabilityCatalog(
         tools: [...pack.tools],
         matched,
         unresolved,
+        entries,
         enabled: plugin.enabled,
       });
     }

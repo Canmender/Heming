@@ -114,6 +114,7 @@
 | [research/2026-10-28-d38-adversarial-qa.md](research/2026-10-28-d38-adversarial-qa.md) | d.38.1.10.0：对抗性自检 16 例（typing + 连续性），C2 暴露「消息到达不清理输入态」，已修 |
 | [research/2026-10-28-d39-deep-stress-testing.md](research/2026-10-28-d39-deep-stress-testing.md) | d.39.1.11.0：32 例深度对抗/压测（消息风暴、页面切换、通知桥模糊输入）+ 6 项修复（交接窗口、吐司合并、id 校验、文本清洗、点击幂等、通话窗焦点）；后台失败 UI 仍缺 |
 | [research/2026-10-23-rounds-after-d36.md](research/2026-10-23-rounds-after-d36.md) | d.36 之后的开工备忘：CSP 基线、`release.sh` 顺序、docker 清理、需拍板项与建议轮次 |
+| [specs/2026-11-03-d66-plugin-trust-toolpack-authz.md](superpowers/specs/2026-11-03-d66-plugin-trust-toolpack-authz.md) | **d.64.2.23 插件信任与工具束授权**：安装内容指纹（fnv1a64，明确非密码学签名）与覆盖保护（同版本内容变化/作者变化需显式勾选确认）；工具束按工具逐个授权（仅限本插件自己的 MCP 服务工具、逐个确认、无批量放行） |
 | [specs/2026-11-03-d65-system-plugin.md](superpowers/specs/2026-11-03-d65-system-plugin.md) | **d.63.2.23 系统插件与声明式工具束**：内置技能/预置 MCP/内置工具建模为只读系统插件 `heming.core`（置顶不可停用/卸载）；清单 v3 向后兼容增补 `contributions.toolPacks`（声明式工具归属，不改开关与 HITL）；统一 `CapabilityDescriptor` 让插件页/技能区/接口区同源 |
 | [specs/2026-11-03-d64-plugin-unification.md](superpowers/specs/2026-11-03-d64-plugin-unification.md) | **d.62.2.23 统一插件模型**：参考 DeepSeek Harness 插件模型（`apply(ctx)` 贡献面/依赖声明/生命周期/权限门禁）把技能、工具、MCP 服务合并为一份插件清单 v3（`contributions` + `permissions`），新增统一能力目录与插件页能力中枢（插件/技能/工具/MCP 四 Tab），命令面板接插件命令 |
 | [specs/2026-11-03-d63-component-typography.md](superpowers/specs/2026-11-03-d63-component-typography.md) | **d.61.2.23 组件级排版与控件规范**：七组控件基元（input/btn/chip/table/list-row/empty/skeleton）、设置卡与弹窗收口、7 页表格与列表、空态骨架组件化、登录页归位 |

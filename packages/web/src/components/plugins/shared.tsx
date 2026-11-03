@@ -30,10 +30,12 @@ export function formatAt(at: string | undefined): string {
 export function Switch({
   label,
   checked,
+  disabled = false,
   onChange,
 }: {
   label: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (next: boolean) => void;
 }) {
   return (
@@ -42,10 +44,11 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-150 ${
         checked ? "bg-ink" : "bg-[#d8d8d8]"
-      }`}
+      } disabled:cursor-not-allowed disabled:opacity-40`}
     >
       <span
         className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-all duration-150 ${

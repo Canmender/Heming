@@ -1,11 +1,33 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { InstalledPlugin, PluginServerInfo, PluginSkillInfo } from "../../lib/plugins/index.js";
 import type { ToolPackGroup } from "./viewModel.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { XIcon } from "../icons.js";
+import { ConfirmDialog } from "../ConfirmDialog.js";
 import { PluginPermissionList } from "./PluginPermissionList.js";
-import { BTN_DANGER_SM, BTN_GHOST, BTN_GHOST_SM, CHIP, HINT, formatAt } from "./shared.js";
-import { contributionCountsOf, contributionText, permissionViewOf } from "./viewModel.js";
+import {
+  BTN_DANGER_SM,
+  BTN_GHOST,
+  BTN_GHOST_SM,
+  CHIP,
+  HINT,
+  Switch,
+  formatAt,
+} from "./shared.js";
+import {
+  contributionCountsOf,
+  contributionText,
+  isOwnPluginTool,
+  permissionViewOf,
+} from "./viewModel.js";
+
+/** 某个工具开关的待确认请求（d.66：逐个确认，绝不批量）。 */
+interface PendingToolToggle {
+  tool: string;
+  serverId: string;
+  risk: "read" | "write";
+  next: boolean;
+}
 
 /**
  * 插件详情抽屉（d.64 · T2）：技能/服务两份物化清单之外，
@@ -16,6 +38,8 @@ export function PluginDetailDialog({
   skills,
   servers,
   toolPacks,
+  mcp,
+  serverNameOf,
   hostOf,
   onClose,
   onRemove,
@@ -27,6 +51,10 @@ export function PluginDetailDialog({
   servers: PluginServerInfo[];
   /** 该插件的工具束（来自能力目录解析，含 matched/unresolved）。 */
   toolPacks: ToolPackGroup["packs"];
+  /** 工具开关的真实写入口（与接口区同源）。 */
+  mcp: { setToolEnabled(serverId: string, toolName: string, enabled: boolean): void };
+  /** serverId → 服务名（所属服务列展示）。 */
+  serverNameOf: (serverId: string) => string;
   hostOf: (url: string) => string;
   onClose: () => void;
   onRemove: () => void;
@@ -37,6 +65,8 @@ export function PluginDetailDialog({
   useModalA11y(dialogRef, onClose, { active: true });
   const counts = contributionCountsOf(plugin);
   const permission = permissionViewOf(plugin.manifest);
+  const [pending, setPending] = useState<PendingToolToggle | null>(null);
+  const pluginEnabled = plugin.enabled;
 
   return (
     <div
@@ -138,24 +168,70 @@ export function PluginDetailDialog({
                       </span>
                     </div>
                     {pack.description && <p className="ui-caption">{pack.description}</p>}
-                    <div className="mt-0.5 flex flex-wrap gap-1">
-                      {pack.matched.map((name) => (
-                        <span key={`matched:${name}`} className={CHIP}>
-                          {name}
-                        </span>
-                      ))}
+                    <ul className="mt-1 flex w-full flex-col gap-1">
+                      {pack.entries.map((entry) => {
+                        const own = isOwnPluginTool(entry.serverId, plugin.manifest.id);
+                        const toggleLabel = `${entry.enabled ? "停用" : "启用"}工具 ${entry.tool}`;
+                        return (
+                          <li
+                            key={`entry:${entry.tool}`}
+                            className="flex flex-wrap items-center gap-2 ui-caption"
+                          >
+                            <span className="font-mono ui-body-sm">{entry.tool}</span>
+                            <span className={CHIP}>{entry.risk === "read" ? "只读" : "写入"}</span>
+                            <span className="text-muted">
+                              {entry.serverId
+                                ? `服务：${serverNameOf(entry.serverId)}`
+                                : "服务：未连接/未提供"}
+                            </span>
+                            <span className={`ml-auto ${CHIP}`}>
+                              {entry.enabled ? "已启用" : "已停用"}
+                            </span>
+                            {own ? (
+                              <Switch
+                                label={toggleLabel}
+                                checked={entry.enabled}
+                                disabled={!pluginEnabled}
+                                onChange={(next) =>
+                                  setPending({
+                                    tool: entry.tool,
+                                    serverId: entry.serverId as string,
+                                    risk: entry.risk,
+                                    next,
+                                  })
+                                }
+                              />
+                            ) : (
+                              <button type="button" onClick={onGoInterfaces} className={BTN_GHOST_SM}>
+                                在接口区管理
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
                       {pack.unresolved.map((name) => (
-                        <span key={`unresolved:${name}`} className={`${CHIP} text-[#8a5a00]`}>
-                          {name} · 未连接/未提供
-                        </span>
+                        <li
+                          key={`unresolved:${name}`}
+                          className="flex flex-wrap items-center gap-2 ui-caption"
+                        >
+                          <span className="font-mono ui-body-sm">{name}</span>
+                          <span className={`${CHIP} text-[#8a5a00]`}>未连接/未提供</span>
+                          <Switch
+                            label={`启用工具 ${name}`}
+                            checked={false}
+                            disabled
+                            onChange={() => {}}
+                          />
+                        </li>
                       ))}
-                    </div>
+                    </ul>
                   </li>
                 ))}
               </ul>
             )}
             <p className="mt-1 ui-caption">
-              工具束只声明归属，不改变任何工具开关；连接与授权在接口区进行。
+              工具束只声明归属，不改变任何工具开关；逐项确认后才会切到接口区的真实开关，
+              每次调用仍按 HITL 确认。{pluginEnabled ? "" : "插件已停用：工具开关暂不可操作。"}
             </p>
             {toolPacks.length > 0 && (
               <button type="button" onClick={onGoInterfaces} className={`mt-1 ${BTN_GHOST_SM}`}>
@@ -205,6 +281,42 @@ export function PluginDetailDialog({
           </button>
         </div>
       </div>
+
+      {pending && (
+        <ConfirmDialog
+          title={`${pending.next ? "启用" : "停用"}工具 ${pending.tool}`}
+          onCancel={() => setPending(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setPending(null)}
+                className={BTN_GHOST}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  mcp.setToolEnabled(pending.serverId, pending.tool, pending.next);
+                  setPending(null);
+                }}
+                className={BTN_GHOST_SM}
+              >
+                {pending.next ? "启用" : "停用"}
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            风险：{pending.risk === "read" ? "只读（read）" : "写入（write）"}。
+            {pending.next ? "启用" : "停用"}只代表模型是否能看到该工具，
+            {pending.next
+              ? "每次调用仍按 HITL 确认。"
+              : "停用后模型不再看到该工具，已授权状态保留。"}
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

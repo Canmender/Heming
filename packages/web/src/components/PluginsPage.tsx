@@ -157,6 +157,11 @@ export function PluginsPage({
   );
   const toolGroups = useMemo(() => groupCatalogTools(capabilityCatalog), [capabilityCatalog]);
   const toolPackGroups = useMemo(() => groupToolPacks(capabilityCatalog), [capabilityCatalog]);
+  /** serverId → 服务名（详情里「所属服务」列；缺失时退回 id）。 */
+  const serverNameOf = useMemo(() => {
+    const names = new Map(mcp.servers().map((server) => [server.id, server.name]));
+    return (serverId: string) => names.get(serverId) ?? serverId;
+  }, [mcp, tick]);
   const blockedTools = useMemo(
     () => describeBlockedTools(capabilityCatalog, plugins),
     [capabilityCatalog, plugins],
@@ -409,6 +414,8 @@ export function PluginsPage({
           toolPacks={
             toolPackGroups.find((group) => group.pluginId === detail.manifest.id)?.packs ?? []
           }
+          mcp={mcp}
+          serverNameOf={serverNameOf}
           hostOf={hostOf}
           onClose={() => setDetailId(null)}
           onRemove={() => {

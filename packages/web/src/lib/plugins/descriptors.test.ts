@@ -4,7 +4,7 @@ import type { ToolBridge } from "../agentStream.js";
 import type { McpRegistry, McpServerConfig, McpToolRef } from "../mcp/index.js";
 import type { SkillDefinition } from "../skills/index.js";
 import type { InstalledPlugin, PluginStore } from "./store.js";
-import { parsePluginManifest, pluginServerId } from "./index.js";
+import { contentFingerprint, parsePluginManifest, pluginServerId } from "./index.js";
 import { describeCapabilities } from "./descriptors.js";
 import { SYSTEM_PLUGIN_ID, SYSTEM_PLUGIN_NAME } from "./system.js";
 
@@ -98,6 +98,7 @@ function installed(
     manifest,
     enabled,
     skillIds: [],
+    fingerprint: contentFingerprint(manifest),
     serverIds: [],
     installedAt: "2026-11-03T00:00:00.000Z",
     updatedAt: "2026-11-03T00:00:00.000Z",

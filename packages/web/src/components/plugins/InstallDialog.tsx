@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MAX_PLUGINS, type PluginInstallPreview } from "../../lib/plugins/index.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { XIcon } from "../icons.js";
@@ -14,7 +14,14 @@ import {
   hasPreviewChanges,
   serverDiffLine,
 } from "./shared.js";
-import { contributionText, manifestContributionCounts, permissionViewOf } from "./viewModel.js";
+import {
+  authorChangeText,
+  contributionText,
+  manifestContributionCounts,
+  permissionViewOf,
+  shortFingerprint,
+  trustStatusText,
+} from "./viewModel.js";
 
 /**
  * 安装 / 更新弹窗（d.64 · T2）。
@@ -43,7 +50,22 @@ export function InstallDialog({
 
   const preview = previewState.data;
   const updating = Boolean(preview?.existing);
-  const blocked = Boolean(preview && (preview.conflicts.length > 0 || preview.limitReached));
+  /** 覆盖确认勾选（d.66）：needsConfirm 时必须显式勾选，换清单就复位。 */
+  const [trustAcked, setTrustAcked] = useState(false);
+  const trustFingerprint = preview?.trust.fingerprint ?? "";
+  useEffect(() => {
+    setTrustAcked(false);
+  }, [trustFingerprint]);
+
+  const needsTrustConfirm = Boolean(preview?.trust.needsConfirm);
+  const trustConfirmId = "plugin-trust-confirm";
+  const blocked = Boolean(
+    preview &&
+      (preview.conflicts.length > 0 ||
+        preview.limitReached ||
+        (needsTrustConfirm && !trustAcked)),
+  );
+  const authorChangedTip = preview ? authorChangeText(preview.trust, preview.manifest.author) : null;
 
   return (
     <div
@@ -116,6 +138,27 @@ export function InstallDialog({
                 {preview.manifest.description || "暂无描述"}
               </p>
 
+              {/* 信任行（d.66）：内容指纹 + 首装/与上次相同/不同；不是签名，只发现悄悄改动 */}
+              <div className="mt-1 flex flex-wrap items-center gap-2 ui-caption">
+                <span
+                  className="font-mono"
+                  title={`内容指纹（FNV-1a 64，非密码学签名，不证明作者与来源）：${preview.trust.fingerprint}`}
+                >
+                  内容指纹 {shortFingerprint(preview.trust.fingerprint)}
+                </span>
+                <span className={CHIP}>{trustStatusText(preview.trust)}</span>
+              </div>
+              {authorChangedTip && (
+                <p role="alert" className={`mt-1 ${ERROR_TEXT}`}>
+                  {authorChangedTip}
+                </p>
+              )}
+              {preview.trust.sameVersionContentChanged && (
+                <p role="alert" className={`mt-1 ${ERROR_TEXT}`}>
+                  版本未变，但内容有变化
+                </p>
+              )}
+
               {/* 贡献计数：与插件卡同一口径 */}
               <p className={`mt-1 ${HINT}`}>
                 贡献：{contributionText(manifestContributionCounts(preview.manifest))}
@@ -182,6 +225,30 @@ export function InstallDialog({
                   插件数量已达上限（{MAX_PLUGINS} 个），请先卸载不用的插件。
                 </p>
               )}
+
+              {needsTrustConfirm && (
+                <div className="mt-3 rounded-lg border border-[#f3d2ce] bg-[#fffafa] p-2.5">
+                  <label className="flex items-start gap-2 ui-body-sm">
+                    <input
+                      type="checkbox"
+                      checked={trustAcked}
+                      onChange={(e) => setTrustAcked(e.target.checked)}
+                      aria-describedby={`${trustConfirmId}-hint`}
+                    />
+                    我已确认这次覆盖更新
+                  </label>
+                  <p id={`${trustConfirmId}-hint`} className="mt-1 ui-caption">
+                    该插件与已装版本内容不同（
+                    {[
+                      preview.trust.sameVersionContentChanged ? "版本未变" : "",
+                      preview.trust.authorChanged ? "作者变化" : "",
+                    ]
+                      .filter(Boolean)
+                      .join("、")}
+                    ）。内容指纹只用于发现「内容被悄悄改过」，不是签名，不证明作者与来源。
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -190,7 +257,13 @@ export function InstallDialog({
           <button type="button" onClick={onClose} className={BTN_GHOST}>
             取消
           </button>
-          <button type="button" onClick={onInstall} disabled={!preview || blocked} className={BTN_PRIMARY}>
+          <button
+            type="button"
+            onClick={onInstall}
+            disabled={!preview || blocked}
+            aria-describedby={needsTrustConfirm ? `${trustConfirmId}-hint` : undefined}
+            className={BTN_PRIMARY}
+          >
             {updating ? "确认更新" : "确认安装"}
           </button>
         </div>

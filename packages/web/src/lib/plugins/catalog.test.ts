@@ -5,6 +5,7 @@ import type { McpRegistry, McpToolRef } from "../mcp/index.js";
 import type { RiskLevel } from "../hitl/types.js";
 import { describeCapabilityCatalog } from "./catalog.js";
 import { parsePluginManifest } from "./manifest.js";
+import { contentFingerprint } from "./integrity.js";
 import { pluginServerId, type InstalledPlugin, type PluginStore } from "./store.js";
 
 type FakeTool = { name: string; description?: string; risk?: RiskLevel };
@@ -71,6 +72,7 @@ function installed(
     manifest,
     enabled,
     skillIds: [],
+    fingerprint: contentFingerprint(manifest),
     serverIds: servers.map((server) => pluginServerId(id, server.key)),
     installedAt: "2026-11-03T00:00:00.000Z",
     updatedAt: "2026-11-03T00:00:00.000Z",
@@ -342,6 +344,16 @@ describe("describeCapabilityCatalog · 工具束归属", () => {
         tools: ["search_docs", "not_connected_yet"],
         matched: ["search_docs"],
         unresolved: ["not_connected_yet"],
+        // entries 与 tools 同序：匹配到带 serverId/开关/风险，未匹配的只有名字
+        entries: [
+          {
+            tool: "search_docs",
+            serverId: "plugin:acme.finance:report",
+            enabled: true,
+            risk: "read",
+          },
+          { tool: "not_connected_yet", enabled: false, risk: "write" },
+        ],
         enabled: true,
       },
     ]);
@@ -424,5 +436,64 @@ describe("describeCapabilityCatalog · 工具束归属", () => {
     expect(catalog.toolPacks[0].matched).toEqual([]);
     expect(catalog.toolPacks[0].unresolved).toEqual(["a_tool", "b_tool"]);
     expect(catalog.tools).toEqual([]);
+    expect(catalog.toolPacks[0].entries).toEqual([
+      { tool: "a_tool", enabled: false, risk: "write" },
+      { tool: "b_tool", enabled: false, risk: "write" },
+    ]);
+  });
+
+  it("entries 透出每个工具的 serverId、开关与风险，供详情页逐个授权", () => {
+    const finance = installed(
+      "acme.finance",
+      "财务包",
+      // 声明 write 上限：export_report 的风险是 write，否则会被上限过滤进 blocked，
+      // 这里要测的是「已注入但被用户关掉」的工具，所以放宽上限。
+      "write",
+      [server],
+      [
+        {
+          id: "report-tools",
+          name: "报告工具",
+          tools: ["search_docs", "export_report", "ghost_tool"],
+        },
+      ],
+    );
+    // search_docs 开启、export_report 被用户关掉；ghost_tool 服务未提供
+    const mcp = fakeMcp(
+      [
+        ref("plugin:acme.finance:report", "报告服务", { name: "search_docs" }),
+        ref("plugin:acme.finance:report", "报告服务", { name: "export_report" }),
+      ],
+      { "plugin:acme.finance:report::export_report": false },
+    );
+
+    const catalog = describeCapabilityCatalog({
+      mcp,
+      plugins: fakePlugins([finance]),
+      providers: [],
+    });
+
+    expect(catalog.toolPacks[0].entries).toEqual([
+      {
+        tool: "search_docs",
+        serverId: "plugin:acme.finance:report",
+        enabled: true,
+        risk: "read",
+      },
+      {
+        tool: "export_report",
+        serverId: "plugin:acme.finance:report",
+        enabled: false,
+        risk: "write",
+      },
+      // 未匹配：没有 serverId，开关恒关，风险按名字启发兜底
+      { tool: "ghost_tool", enabled: false, risk: "write" },
+    ]);
+    // entries 顺序与声明顺序一致；老字段仍在（兼容）
+    expect(catalog.toolPacks[0].entries.map((entry) => entry.tool)).toEqual(
+      catalog.toolPacks[0].tools,
+    );
+    expect(catalog.toolPacks[0].matched).toEqual(["search_docs", "export_report"]);
+    expect(catalog.toolPacks[0].unresolved).toEqual(["ghost_tool"]);
   });
 });

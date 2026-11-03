@@ -3,6 +3,7 @@ import {
   MAX_PLUGINS,
   PLUGINS_KEY,
   PluginManifestError,
+  contentFingerprint,
   pluginIdFromServerId,
   pluginServerId,
   PluginStore,
@@ -717,5 +718,135 @@ describe("PluginStore · v3 贡献与命令", () => {
   it("pluginIdFromServerId 从 store 侧导出，与 pluginServerId 互逆", () => {
     expect(pluginIdFromServerId(pluginServerId("acme.finance", "report"))).toBe("acme.finance");
     expect(pluginIdFromServerId("manual-server")).toBeNull();
+  });
+});
+
+describe("PluginStore · 内容指纹与覆盖保护", () => {
+  it("安装写入内容指纹，预览与记录一致", () => {
+    const { store } = fresh();
+    const installed = store.install(manifest());
+    const expected = contentFingerprint(installed.plugin.manifest);
+
+    expect(installed.plugin.fingerprint).toBe(expected);
+    expect(store.list()[0].fingerprint).toBe(expected);
+    expect(store.preview(manifest()).trust).toEqual({
+      fingerprint: expected,
+      previousFingerprint: expected,
+      sameVersionContentChanged: false,
+      authorChanged: false,
+      previousAuthor: "Acme",
+      versionChanged: false,
+      needsConfirm: false,
+    });
+  });
+
+  it("首次安装不需要额外确认", () => {
+    const { store } = fresh();
+    const { trust } = store.preview(manifest());
+
+    expect(trust.previousFingerprint).toBeNull();
+    expect(trust.previousAuthor).toBeNull();
+    expect(trust.sameVersionContentChanged).toBe(false);
+    expect(trust.authorChanged).toBe(false);
+    expect(trust.versionChanged).toBe(false);
+    expect(trust.needsConfirm).toBe(false);
+  });
+
+  it("同版本内容变化 → sameVersionContentChanged 且需要确认", () => {
+    const { store } = fresh();
+    store.install(manifest());
+    const before = contentFingerprint(store.list()[0].manifest);
+
+    const { trust } = store.preview(manifest({ description: "悄悄改过的描述" }));
+    expect(trust.previousFingerprint).toBe(before);
+    expect(trust.fingerprint).not.toBe(before);
+    expect(trust.sameVersionContentChanged).toBe(true);
+    expect(trust.versionChanged).toBe(false);
+    expect(trust.authorChanged).toBe(false);
+    expect(trust.needsConfirm).toBe(true);
+  });
+
+  it("作者变化 → authorChanged 且需要确认（即使版本正常升级）", () => {
+    const { store } = fresh();
+    store.install(manifest());
+
+    const { trust } = store.preview(manifest({ version: "1.1.0", author: "Other" }));
+    expect(trust.authorChanged).toBe(true);
+    expect(trust.previousAuthor).toBe("Acme");
+    expect(trust.versionChanged).toBe(true);
+    expect(trust.sameVersionContentChanged).toBe(false);
+    expect(trust.needsConfirm).toBe(true);
+  });
+
+  it("纯版本升级（作者不变）不需要额外确认", () => {
+    const { store } = fresh();
+    store.install(manifest());
+
+    const { trust } = store.preview(manifest({ version: "1.1.0" }));
+    expect(trust.versionChanged).toBe(true);
+    expect(trust.authorChanged).toBe(false);
+    expect(trust.sameVersionContentChanged).toBe(false);
+    expect(trust.needsConfirm).toBe(false);
+  });
+
+  it("更新写入新指纹、保留 installedAt、刷新 updatedAt", () => {
+    const { store } = fresh();
+    const first = store.install(manifest());
+    const second = store.install(manifest({ version: "1.1.0" }));
+
+    expect(second.created).toBe(false);
+    expect(second.plugin.installedAt).toBe(first.plugin.installedAt);
+    expect(second.plugin.updatedAt).not.toBe(first.plugin.updatedAt);
+    expect(second.plugin.fingerprint).toBe(contentFingerprint(second.plugin.manifest));
+    expect(second.plugin.fingerprint).not.toBe(first.plugin.fingerprint);
+  });
+
+  it("旧记录没有 fingerprint：读取时补算并落盘，不报错", () => {
+    const { store, map, mcp } = fresh();
+    store.install(manifest());
+
+    const data = JSON.parse(map.get(PLUGINS_KEY) as string) as {
+      plugins: Record<string, unknown>[];
+    };
+    delete data.plugins[0].fingerprint;
+    map.set(PLUGINS_KEY, JSON.stringify(data));
+
+    const { storage } = makeStorage(map);
+    const reloaded = new PluginStore(storage, new SkillPool(storage, clock()), clock(), mcp.port);
+    const plugin = reloaded.list()[0];
+    const expected = contentFingerprint(plugin.manifest);
+
+    expect(plugin.fingerprint).toBe(expected);
+    // 补算结果已经落盘：记录里存着指纹，后续读取原样使用
+    const persisted = JSON.parse(map.get(PLUGINS_KEY) as string) as {
+      plugins: { fingerprint?: string }[];
+    };
+    expect(persisted.plugins[0].fingerprint).toBe(expected);
+
+    const again = new PluginStore(storage, new SkillPool(storage, clock()), clock(), mcp.port);
+    expect(again.list()[0].fingerprint).toBe(expected);
+    // 补算后按同一内容预览：不算「内容变了」
+    expect(reloaded.preview(manifest()).trust.needsConfirm).toBe(false);
+  });
+
+  it("旧算法指纹前缀 fnv1a64: 读取时按新算法重算（避免算法升级假告警）", () => {
+    const { store, map, mcp } = fresh();
+    store.install(manifest());
+
+    const data = JSON.parse(map.get(PLUGINS_KEY) as string) as {
+      plugins: Record<string, unknown>[];
+    };
+    data.plugins[0].fingerprint = "fnv1a64:deadbeefdeadbeef";
+    map.set(PLUGINS_KEY, JSON.stringify(data));
+
+    const { storage } = makeStorage(map);
+    const reloaded = new PluginStore(storage, new SkillPool(storage, clock()), clock(), mcp.port);
+    const plugin = reloaded.list()[0];
+    const expected = contentFingerprint(plugin.manifest);
+
+    expect(expected.startsWith("fnv1a64b:")).toBe(true);
+    expect(plugin.fingerprint).toBe(expected);
+    // 旧前缀不算「内容变了」，装同一份清单不该要求二次确认
+    expect(reloaded.preview(manifest()).trust.needsConfirm).toBe(false);
   });
 });

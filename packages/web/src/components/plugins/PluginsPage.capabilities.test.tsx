@@ -209,9 +209,18 @@ function fixedCatalog(): CapabilityCatalog {
         pluginName: "报告工具箱",
         name: "报告工具",
         description: "周报要用的查询工具",
-        tools: ["weather_query", "report_export"],
-        matched: ["weather_query"],
+        tools: ["weather_query", "manual_echo", "report_export"],
+        matched: ["weather_query", "manual_echo"],
         unresolved: ["report_export"],
+        entries: [
+          {
+            tool: "weather_query",
+            serverId: "plugin:acme.report-kit:report",
+            enabled: false,
+            risk: "read",
+          },
+          { tool: "manual_echo", serverId: "mcp-manual", enabled: true, risk: "write" },
+        ],
         enabled: true,
       },
     ],
@@ -634,7 +643,7 @@ describe("插件页 · 工具束（d.65）", () => {
     const section = screen.getByRole("region", { name: "工具束" });
     expect(section).toHaveTextContent("报告工具箱");
     expect(section).toHaveTextContent("报告工具");
-    expect(section).toHaveTextContent("已匹配 1/2");
+    expect(section).toHaveTextContent("已匹配 2/3");
     expect(section).toHaveTextContent("weather_query");
     expect(section).toHaveTextContent("report_export · 未连接/未提供");
   });
@@ -669,9 +678,159 @@ describe("插件页 · 工具束（d.65）", () => {
     expect(section).toHaveTextContent("工具束（1）");
     expect(section).toHaveTextContent("报告工具");
     expect(section).toHaveTextContent("weather_query");
-    expect(section).toHaveTextContent("report_export · 未连接/未提供");
+    expect(section).toHaveTextContent("report_export");
+    expect(section).toHaveTextContent("未连接/未提供");
 
-    fireEvent.click(within(section).getByRole("button", { name: "在接口区管理" }));
+    const manageButtons = within(section).getAllByRole("button", { name: "在接口区管理" });
+    expect(manageButtons.length).toBeGreaterThan(0);
+    fireEvent.click(manageButtons[manageButtons.length - 1]!);
     expect(useUiStore.getState().page).toBe("interfaces");
+  });
+});
+
+
+/* ------------------------------------------------- 安装信任（d.66 · §2.3） */
+
+describe("插件页 · 安装信任行", () => {
+  it("首次安装：显示内容指纹与「首次安装」，无覆盖勾选框", () => {
+    renderPage();
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(v3Manifest()) },
+    });
+    expect(within(dialog).getByText(/内容指纹 fnv1a64b:/)).toBeInTheDocument();
+    expect(within(dialog).getByText("首次安装")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("我已确认这次覆盖更新")).toBeNull();
+  });
+
+  it("更新且内容相同：显示「与上次相同」，不要求勾选", () => {
+    renderPage();
+    installV3();
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(v3Manifest()) },
+    });
+    expect(within(dialog).getByText("与上次相同")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("我已确认这次覆盖更新")).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "确认更新" })).toBeEnabled();
+  });
+
+  it("同版本内容变化：标红提示 + 未勾选时确认禁用，勾选后可更新", () => {
+    renderPage();
+    installV3();
+    const changed = v3Manifest();
+    (changed.contributions as { skills: { instructions: string }[] }).skills[0]!.instructions =
+      "按新模板生成周报";
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(changed) },
+    });
+
+    expect(within(dialog).getByText("与上次不同")).toBeInTheDocument();
+    const warning = within(dialog).getByText("版本未变，但内容有变化");
+    expect(warning.className).toContain("text-[#b42318]");
+
+    const confirm = within(dialog).getByRole("button", { name: "确认更新" });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("aria-describedby", "plugin-trust-confirm-hint");
+
+    const ack = within(dialog).getByLabelText("我已确认这次覆盖更新") as HTMLInputElement;
+    expect(ack.checked).toBe(false);
+    fireEvent.click(ack);
+    expect(within(dialog).getByRole("button", { name: "确认更新" })).toBeEnabled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认更新" }));
+    expect(screen.getByRole("status")).toHaveTextContent("已更新插件「报告工具箱」");
+  });
+
+  it("作者变化：标红「作者：旧 → 新」并同样要求勾选确认", () => {
+    renderPage();
+    installV3();
+    const moved = v3Manifest({ author: "Evil Corp" });
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(moved) },
+    });
+
+    const author = within(dialog).getByText("作者：ACME → Evil Corp");
+    expect(author.className).toContain("text-[#b42318]");
+    expect(within(dialog).getByRole("button", { name: "确认更新" })).toBeDisabled();
+  });
+});
+
+/* ------------------------------------------- 工具束逐个授权（d.66 · §3） */
+
+describe("插件页 · 工具束逐个授权", () => {
+  function openDetailToolPacks() {
+    installV3();
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "查看插件详情 报告工具箱" }));
+    const dialog = screen.getByRole("dialog", { name: "插件详情 报告工具箱" });
+    return within(dialog).getByRole("region", { name: "插件工具束" });
+  }
+
+  it("本插件工具给 role=switch，非本插件工具只有「在接口区管理」", () => {
+    const section = openDetailToolPacks();
+    expect(section).toHaveTextContent("服务：报告服务");
+    expect(section).toHaveTextContent("服务：手填服务");
+    // 本插件工具：开关 aria-label 明确带工具名
+    expect(
+      within(section).getByRole("switch", { name: "启用工具 weather_query" }),
+    ).toBeInTheDocument();
+    // 非本插件工具（manual_echo 属于手填服务）不给开关
+    expect(
+      within(section).queryByRole("switch", { name: /manual_echo/ }),
+    ).toBeNull();
+    expect(within(section).getAllByRole("button", { name: "在接口区管理" }).length).toBeGreaterThan(0);
+  });
+
+  it("点击开关先弹逐个确认：风险与 HITL 说明，确认后才调用 setToolEnabled", () => {
+    const section = openDetailToolPacks();
+    fireEvent.click(within(section).getByRole("switch", { name: "启用工具 weather_query" }));
+
+    const confirm = screen.getByRole("dialog", { name: "启用工具 weather_query" });
+    expect(confirm).toHaveTextContent("风险：只读（read）");
+    expect(confirm).toHaveTextContent("每次调用仍按 HITL 确认");
+    expect(registry.setToolEnabled).not.toHaveBeenCalled();
+
+    // 取消不写
+    fireEvent.click(within(confirm).getByRole("button", { name: "取消" }));
+    expect(registry.setToolEnabled).not.toHaveBeenCalled();
+
+    // 再点开关 → 确认 → 写到接口区同源开关
+    fireEvent.click(within(section).getByRole("switch", { name: "启用工具 weather_query" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "启用工具 weather_query" })).getByRole("button", {
+        name: "启用",
+      }),
+    );
+    expect(registry.setToolEnabled).toHaveBeenCalledWith(
+      "plugin:acme.report-kit:report",
+      "weather_query",
+      true,
+    );
+  });
+
+  it("未匹配工具显示「未连接/未提供」且开关禁用；无批量按钮", () => {
+    const section = openDetailToolPacks();
+    expect(section).toHaveTextContent("report_export");
+    expect(section).toHaveTextContent("未连接/未提供");
+    const unresolvedSwitch = within(section).getByRole("switch", {
+      name: "启用工具 report_export",
+    });
+    expect(unresolvedSwitch).toBeDisabled();
+    // 红线：没有「全部启用/全部停用」入口
+    expect(within(section).queryByRole("button", { name: /全部/ })).toBeNull();
+  });
+
+  it("插件停用时本插件工具的开关禁用，并注明不可操作", () => {
+    installV3();
+    store.setEnabled("acme.report-kit", false);
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "查看插件详情 报告工具箱" }));
+    const dialog = screen.getByRole("dialog", { name: "插件详情 报告工具箱" });
+    const section = within(dialog).getByRole("region", { name: "插件工具束" });
+    expect(section).toHaveTextContent("插件已停用");
+    expect(within(section).getByRole("switch", { name: "启用工具 weather_query" })).toBeDisabled();
   });
 });

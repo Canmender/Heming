@@ -520,3 +520,32 @@
 | 更新源 | ✅ latest.yml 指向 63.2.23，sha512 一致，Content-Type `application/octet-stream`、Range 206 |
 | 备份 | ✅ `heming-data-2026-11-03-d.63.2.23.0.tar.gz`（本机 `.tmp/backups/` 8.7KB） |
 | 真机自检 | ✅ Chrome CDP 对线上：插件页出现置顶「系统能力」卡（内置/置顶/v1.0.0，技能 7 / 服务 2 / 工具 5，无开关无卸载）；统计「1 + 0（系统 + 已装）」；工具 Tab 内置归属「系统能力」；装带 toolPacks 的 v3 包后预览显示「工具束 1 · 工具 2」，工具束段显示 `report_query` / `report_export`「未连接/未提供」（已匹配 0/2），且 `heming.mcp.enabledTools.v1` 仍为 `[]`（**没有自动打开任何开关**）；技能区/接口区显示「内置：系统能力」；卸载后存储清空 |
+
+## 15. 第十一波：插件信任与工具束授权（2026-11-03 11:53 起）
+
+触发：用户「继续」。规格 `docs/superpowers/specs/2026-11-03-d66-plugin-trust-toolpack-authz.md`。
+
+d.63 留了两个真实缺口：
+- **更新时看不出内容被悄悄换掉**：同一 `id`+`version` 改指令/加服务，差异预览只按技能名与服务 key 比，**同名内容变化不显眼**；作者换了也看不出来。
+- **工具束只能看不能授权**：插件页「工具束」是只读清单，想启用还得去接口区逐台服务找。
+
+本波：
+1. **内容指纹** `fnv1a64`（规范化清单文本，键排序；明确**非密码学签名**，只做「内容被改过」的提示）+ `InstalledPlugin.fingerprint`（旧记录首次读取补算）；`preview.trust` 给出 `sameVersionContentChanged / authorChanged / needsConfirm`；安装弹窗在「同版本内容变化」或「作者变化」时要求**显式勾选确认**才允许覆盖更新，首装与正常升级不打扰。
+2. **工具束逐个授权**：目录 `CatalogToolPack` 增 `entries`（tool/serverId/enabled/risk）；详情页对**本插件自己的 MCP 服务工具**逐行给开关，点击弹**逐个确认**（启用只代表模型可见，调用仍逐次 HITL）；未匹配/其它来源工具不给开关；**不提供批量启停**（避免变成全部放行口子）。
+
+**三轨**：T1 `lib/plugins/**`（integrity/store/catalog/index + 测试）、T2 插件页（安装信任提示 + 覆盖确认 + 工具束逐个开关 + 测试）。Lead：文档、版本、门禁、发布。
+
+### 第十一波完成与发布（2026-11-03 12:24）
+
+| 项 | 结果与证据 |
+|---|---|
+| T1 核心 | ✅ `lib/plugins` 123 例（integrity 9 / store 39 / catalog 16 / manifest 37 / permissions 12 / system 5 / descriptors 7）；`fingerprint` 旧记录补算、`preview.trust`（needsConfirm 规则）、`CatalogToolPack.entries` |
+| T2 插件页 | ✅ 安装弹窗信任行三态 + 作者变化/同版本内容变化红字 + 默认不勾的「我已确认这次覆盖更新」（未勾确认禁用）；详情工具束逐工具行、仅本插件服务工具可开关、逐个确认后写 `setToolEnabled`、未匹配/停用禁用、**无批量入口**；插件相关 38 例（+8） |
+| 事故与修复 | ⚠ **真机自检抓到指纹算法缺陷**：第二轮质数 `0x100000001b3 ^ 0x9e3779b97f4a7c15` 末位为 0（偶数），偶数乘数每轮左移丢位 → 指纹后 8 位只与文本末尾有关；同长度、改靠前描述/指令的两份清单后 8 位完全相同（`…23fe99e6`）。**同日修复**（d.64.2.24.0）：质数按位或 1 强制奇数、前缀升 `fnv1a64b:`、旧前缀读取重算（避免假告警），新增「同长度只改 author 末字符时前后两半都变」「旧前缀重算」回归用例 |
+| 全量门禁 | ✅ shared 29 / server 141 / web 215 文件 3133 例 / desktop 29 文件 518 例；4/4 无重试；三包 tsc 0 |
+| 版本 | `d.64.2.23.0`（特性）→ 同日 `d.64.2.24.0`（修订，指纹修复） |
+| 安装包 | `release/r56/和鸣 Setup d.64.2.24.0.exe` 228,234,959 字节，sha512 `u3vS8Oy+/WLaV6sjCmCvuoUPTXRVqycid3ZLDPdtTyApSflyFSdWcnVshQENt3o5rtvu1CXNSIFLaWRNgs/RYQ==` 与本地/远端 latest.yml 三方一致 |
+| 云端部署 | ✅ 第 8 步 OK（1m11s）；`/api/health` ok、首页 200、线上 bundle `main-DGgNotXs.js` 与本地同名同字节、CSP report-only 在位 |
+| 更新源 | ✅ latest.yml 指向 64.2.24，sha512 一致，Content-Type `application/octet-stream`、Range 206 |
+| 备份 | ✅ `heming-data-2026-11-03-d.64.2.24.0.tar.gz`（本机 `.tmp/backups/` 8.9KB） |
+| 真机自检 | ✅ 首装显示「首次安装 + fnv1a64b 指纹」；同内容更新「与上次相同」不要求勾选（旧 `fnv1a64:` 指纹被静默重算，**无假告警**）；同版本内容变化/作者变化红字 + 需勾选，未勾确认禁用、勾选后更新；更新前后指纹 `d64ce675682e847c` → `0d77e5883fe44dfd`，**前后两半都变**（修复生效）；工具束在无可用 MCP 连接时显示「服务：未连接/未提供 · 已停用」、无开关、无批量入口；卸载后存储清空 |
