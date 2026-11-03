@@ -59,7 +59,7 @@ export function ConfirmDialog({
         className="flex max-h-[80vh] w-[min(560px,92vw)] flex-col overflow-hidden rounded-xl border border-[#ececec] bg-white shadow-card"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
-          <span className="truncate text-[13px] font-bold">{title}</span>
+          <span className="truncate ui-section-title">{title}</span>
           <button
             type="button"
             aria-label="关闭并拒绝"

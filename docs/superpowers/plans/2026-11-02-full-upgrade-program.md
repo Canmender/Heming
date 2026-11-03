@@ -418,3 +418,16 @@
 **Lead 已落地基元**（`index.css`，`@layer components`）：`.ui-input`（高 32）、`.ui-btn*`（两档尺寸 + 三个变体）、`.ui-chip`、`.ui-table`、`.ui-list-row`、`.ui-empty*`、`.ui-skeleton`（含 reduced-motion 降级）。设计约束：字号只走 `ui-*` 档、点击区 ≥28、hover 150ms、焦点环仍由 GlobalFocusRing 统一提供。
 
 **三轨**：T1 设置卡片与弹窗（12 张卡 + SettingsPage + 3 个弹窗）、T2 表格/列表/密集控件（Interfaces/Registry/Skills/Plugins/Team/Memory/Infohub）、T3 空态骨架组件 + 登录页（Home/Automation/Staff/TeamBoard/PageFallback/LoginPage）。
+
+### 第八波完成与发布（2026-11-03 09:20）
+
+| 项 | 结果 |
+|---|---|
+| 控件基元 | ✅ `index.css` 七组基元（input/btn 两档三变体/chip/table/list-row/empty/skeleton + reduced-motion） |
+| T1 设置卡与弹窗 | ✅ 12 卡 + SettingsPage + 3 弹窗，152 处 className 收口；15 文件 177 例全绿；保留 7 处「不敢统一」并写明理由 |
+| T2 表格/列表/密集控件 | ✅ 7 页；三张表统一 `.ui-table`（宽表内部滚动、数字列右对齐）+ 列表 `.ui-list-row` + 胶囊/按钮/输入档位；102 例全绿，新增 0（纯 class 迁移） |
+| T3 空态骨架 + 登录页 | ✅ 新增 EmptyState/Skeleton 组件并替换 5 处；登录页归位新体系；+8 例；d39 仍绿 |
+| 事故与修复 | ⚠ 首轮全量门禁 web 红 1 例（`paletteLocalConsume` 断言 `ring-2`，T2 把记忆条目定位高亮改成 bg）→ 统一回 ring 高亮（三层一致），复跑全绿；另 dev server 旧模块热更导致 `PageFallback` 运行时报错（清 Vite 缓存重启即正常，非代码缺陷） |
+| 全量门禁 | ✅ shared 29 / server 141 / web 202 文件 2988 例 / desktop 29 文件 518 例；4/4 无重试；三包 tsc 0 |
+| 版本 | `d.61.2.23.0`（修订 22→23） |
+| 视觉 | `.tmp/d63/pages`（13 页）+ `.tmp/d63/after`（流程）对照 d.62 |

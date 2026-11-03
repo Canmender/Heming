@@ -23,20 +23,15 @@ import { PageShell } from "./layout/PageShell.js";
  */
 
 const cardCls = "rounded-xl border border-line bg-white p-4 shadow-card";
-const badgeCls =
-  "rounded-sm border border-line-soft bg-[#fafafa] px-1.5 py-0.5 text-[10px] text-muted";
-const chipCls = "rounded-sm bg-[#f4f4f4] px-1.5 py-0.5 text-[10px] text-[#666]";
-const hintCls = "text-[11px] text-muted";
-const errorCls = "text-[12px] text-red-600";
-const okCls = "text-[12px] text-muted";
-const btnGhost =
-  "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa] disabled:opacity-40";
-const btnGhostSm =
-  "rounded-lg border border-line px-2 py-1 text-[11px] text-[#555] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
-const btnDangerSm =
-  "rounded-lg border border-line px-2 py-1 text-[11px] text-[#b42318] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
-const btnPrimary =
-  "rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-40";
+const badgeCls = "ui-chip";
+const chipCls = "ui-chip";
+const hintCls = "ui-caption";
+const errorCls = "ui-body-sm text-[#b42318]";
+const okCls = "ui-body-sm text-muted";
+const btnGhost = "ui-btn ui-btn-md ui-btn-ghost";
+const btnGhostSm = "ui-btn ui-btn-sm ui-btn-ghost";
+const btnDangerSm = "ui-btn ui-btn-sm ui-btn-ghost text-[#b42318]";
+const btnPrimary = "ui-btn ui-btn-md ui-btn-primary";
 
 function Switch({
   label,
@@ -657,7 +652,7 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
                 {detail.manifest.id}
                 {detail.manifest.author ? ` · ${detail.manifest.author}` : ""}
               </div>
-              <p className="mt-2 break-words text-[12px] text-[#555]">
+              <p className="mt-2 break-words ui-body-sm text-[#555]">
                 {detail.manifest.description || "暂无描述"}
               </p>
               <div className={`mt-2 ${hintCls}`}>
@@ -667,22 +662,19 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
               </div>
 
               <section className="mt-4" aria-label="插件技能">
-                <h3 className="text-[12px] font-bold">技能（{detailSkills.length}）</h3>
+                <h3 className="ui-section-title">技能（{detailSkills.length}）</h3>
                 {detailSkills.length === 0 ? (
                   <p className={`mt-1 ${hintCls}`}>本包未声明技能</p>
                 ) : (
                   <ul className="mt-1 space-y-1">
                     {detailSkills.map((skill) => (
-                      <li
-                        key={skill.id}
-                        className="rounded-lg border border-line-soft px-2.5 py-1.5"
-                      >
+                      <li key={skill.id} className="ui-list-row flex-col items-start gap-0.5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[12px] font-medium">{skill.name}</span>
+                          <span className="ui-body-sm font-medium">{skill.name}</span>
                           <span className={badgeCls}>{skill.enabled ? "启用" : "已停用"}</span>
                         </div>
                         {skill.description && (
-                          <p className="mt-0.5 text-[11px] text-muted">{skill.description}</p>
+                          <p className="ui-caption">{skill.description}</p>
                         )}
                       </li>
                     ))}
@@ -691,18 +683,15 @@ export function PluginsPage({ plugins = pluginStore }: PluginsPageProps = {}) {
               </section>
 
               <section className="mt-4" aria-label="插件 MCP 服务">
-                <h3 className="text-[12px] font-bold">MCP 服务（{detailServers.length}）</h3>
+                <h3 className="ui-section-title">MCP 服务（{detailServers.length}）</h3>
                 {detailServers.length === 0 ? (
                   <p className={`mt-1 ${hintCls}`}>本包未声明 MCP 服务</p>
                 ) : (
                   <ul className="mt-1 space-y-1">
                     {detailServers.map((server) => (
-                      <li
-                        key={server.id}
-                        className="rounded-lg border border-line-soft px-2.5 py-1.5"
-                      >
+                      <li key={server.id} className="ui-list-row flex-col items-start gap-0.5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[12px] font-medium">{server.name}</span>
+                          <span className="ui-body-sm font-medium">{server.name}</span>
                           <span className={badgeCls}>
                             {server.enabled ? "已启用" : "已停用"}
                           </span>

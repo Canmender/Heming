@@ -21,6 +21,8 @@ import {
 import { fetchTeam, fetchTeamActivities, resolveUrl } from "../lib/api.js";
 import { Avatar } from "./Avatar.js";
 import { PageShell } from "./layout/PageShell.js";
+import { EmptyState } from "./ui/EmptyState.js";
+import { SkeletonLine } from "./ui/Skeleton.js";
 import { InfohubHomeCard } from "./InfohubHomeCard.js";
 import { StaffHomeCard } from "./StaffHomeCard.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
@@ -322,7 +324,11 @@ export function HomePage() {
               </div>
               <div className="flex-1 border-l border-[#f1f1f1] pl-4">
                 {modelRows.length === 0 ? (
-                  <div className="text-[11px] text-muted">暂无调用记录（M3 接入模型后自动累计）</div>
+                  <EmptyState
+                    compact
+                    className="px-0 py-2"
+                    title="暂无调用记录（M3 接入模型后自动累计）"
+                  />
                 ) : (
                   modelRows.map(([model, n]) => (
                     <div key={model} className="flex justify-between py-0.5 text-[11px]">
@@ -432,7 +438,7 @@ export function HomePage() {
             !teamReady ? (
               <div role="status" aria-label="正在加载" className="flex flex-col gap-2 py-1.5">
                 {[0, 1, 2].map((i) => (
-                  <div key={i} className="h-7 animate-pulse rounded-lg bg-[#f4f4f4]" />
+                  <SkeletonLine key={i} className="h-7 rounded-lg" />
                 ))}
               </div>
             ) : teamError ? (
@@ -447,10 +453,11 @@ export function HomePage() {
                 </button>
               </div>
             ) : (
-              <div className="py-3 text-[12px] leading-6 text-muted">
-                还没有团队动向。成员在「团队」页开启任务 / 日程共享后，
-                这里会出现摘要；对话正文、智能体轨迹不会上传。
-              </div>
+              <EmptyState
+                compact
+                title="还没有团队动向"
+                desc="成员在「团队」页开启任务 / 日程共享后，这里会出现摘要；对话正文、智能体轨迹不会上传。"
+              />
             )
           ) : (
             recentActivities.map((a) => {
@@ -493,7 +500,7 @@ export function HomePage() {
           <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
             <div className="mb-1.5 text-[12px] font-bold text-muted">智能体动态</div>
             {displayAgents.length === 0 ? (
-              <div className="py-1.5 text-[12px] text-muted">暂无智能体，可在智能体页创建</div>
+              <EmptyState compact className="px-0 py-2" title="暂无智能体，可在智能体页创建" />
             ) : (
               displayAgents.map((a) => (
                 <div key={a.id} className="flex items-center gap-2 py-1">
@@ -524,13 +531,13 @@ export function HomePage() {
             {!teamReady ? (
               <div role="status" aria-label="正在加载" className="flex flex-col gap-2 py-1.5">
                 {[0, 1].map((i) => (
-                  <div key={i} className="h-7 animate-pulse rounded-lg bg-[#f4f4f4]" />
+                  <SkeletonLine key={i} className="h-7 rounded-lg" />
                 ))}
               </div>
             ) : teamError ? (
               <div className="text-[12px] text-[#b42318]">加载失败：{teamError}</div>
             ) : onlineMembers.length === 0 ? (
-              <div className="text-[12px] text-muted">当前没有人在线</div>
+              <EmptyState compact className="px-0 py-2" title="当前没有人在线" />
             ) : (
               onlineMembers.map((m) => (
                 <div key={m.user.id} className="flex items-center gap-2 py-1 text-[12px]">

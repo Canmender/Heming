@@ -69,27 +69,20 @@ export interface MemoryPageProps {
 /* ------------------------------------------------------------------ 样式 */
 
 const cardCls = "rounded-xl border border-line bg-white p-4 shadow-card";
-const inputCls =
-  "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
-const inputSmCls =
-  "mt-1 block w-full rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]";
-const labelCls = "block text-[12px] text-muted";
-const btnGhost =
-  "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa] disabled:opacity-40";
-const btnGhostSm =
-  "rounded-lg border border-line px-2 py-1 text-[11px] text-[#555] shadow-card transition-colors duration-150 hover:bg-[#fafafa] disabled:opacity-40";
-const btnDangerSm =
-  "rounded-lg border border-line p-1.5 text-[#b42318] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
-const btnPrimary = "rounded-lg bg-ink px-4 py-1.5 text-sm font-bold text-white disabled:opacity-40";
-const btnPrimarySm =
-  "rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-40";
+const inputCls = "mt-1 block w-full ui-input";
+const inputSmCls = "mt-1 block w-full ui-input";
+const labelCls = "block ui-caption";
+const btnGhost = "ui-btn ui-btn-md ui-btn-ghost";
+const btnGhostSm = "ui-btn ui-btn-sm ui-btn-ghost";
+const btnDangerSm = "ui-btn ui-btn-sm ui-btn-ghost text-[#b42318]";
+const btnPrimary = "ui-btn ui-btn-md ui-btn-primary";
+const btnPrimarySm = "ui-btn ui-btn-sm ui-btn-primary";
 const hintCls = "ui-caption";
 /** 召回记录默认只列最近 3 次，其余按需展开。 */
 const RECALL_RUNS_PREVIEW = 3;
-const errorCls = "text-[12px] text-red-600";
-const okCls = "text-[12px] text-muted";
-const badgeCls =
-  "rounded-sm border border-line-soft bg-[#fafafa] px-1.5 py-0.5 text-[10px] text-muted";
+const errorCls = "ui-body-sm text-red-600";
+const okCls = "ui-body-sm text-muted";
+const badgeCls = "ui-chip";
 
 /* ---------------------------------------------------------------- 纯工具 */
 
@@ -1401,7 +1394,7 @@ export function MemoryPage({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="按关键词过滤条目"
-            className="w-[200px] rounded-lg border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
+            className="ui-input w-[200px]"
           />
         </div>
 
@@ -1414,7 +1407,7 @@ export function MemoryPage({
               <div
                 key={entry.id}
                 data-memory-id={entry.id}
-                className={`mt-2 rounded-lg border border-line p-2.5 ${
+                className={`ui-list-row mt-2 rounded-lg ${
                   highlightMemoryId === entry.id ? "ring-2 ring-[#1a1a1a]/25" : ""
                 }`}
               >
@@ -1539,7 +1532,7 @@ export function MemoryPage({
               <div
                 key={entry.id}
                 data-memory-id={entry.id}
-                className={`mt-2 flex items-start justify-between gap-2 rounded-lg border border-line p-2.5 ${
+                className={`ui-list-row mt-2 items-start justify-between ${
                   highlightMemoryId === entry.id ? "ring-2 ring-[#1a1a1a]/25" : ""
                 }`}
               >
@@ -1586,7 +1579,7 @@ export function MemoryPage({
             value={recallQuery}
             onChange={(e) => setRecallQuery(e.target.value)}
             placeholder="如：帮我把发布计划整理一下"
-            className="min-w-0 flex-1 rounded-lg border border-line-strong px-3 py-1.5 text-[12px] outline-hidden focus:border-ink"
+            className="min-w-0 flex-1 ui-input"
           />
           <button
             type="button"
@@ -1712,7 +1705,7 @@ export function MemoryPage({
             {coldRows.map((row) => (
               <li
                 key={row.id}
-                className="flex items-start justify-between gap-2 rounded-lg border border-line p-2.5"
+                className="ui-list-row items-start justify-between"
               >
                 <div className="min-w-0">
                   <div className="truncate text-[12px] font-bold">{row.title}</div>
@@ -2053,13 +2046,13 @@ export function MemoryPage({
         <div className={`mt-3 ${hintCls}`}>名册为空：可在下方手动登记智能体 ID</div>
       )}
       {displayAgents.length > 0 && (
-        <table className="mt-3 w-full text-left">
+        <table className="ui-table mt-3">
           <thead>
-            <tr className="border-b border-line-soft text-[11px] text-muted">
-              <th className="py-1.5 font-normal">智能体</th>
-              <th className="py-1.5 text-center font-normal">短期记忆</th>
-              <th className="py-1.5 text-center font-normal">长期记忆</th>
-              <th className="py-1.5 text-center font-normal">个人数据库</th>
+            <tr>
+              <th>智能体</th>
+              <th className="text-center">短期记忆</th>
+              <th className="text-center">长期记忆</th>
+              <th className="text-center">个人数据库</th>
             </tr>
           </thead>
           <tbody>
@@ -2067,10 +2060,10 @@ export function MemoryPage({
               const pref = prefs.get(agent.id);
               return (
                 <Fragment key={agent.id}>
-                  <tr className="border-b border-line-soft align-middle">
+                  <tr className="align-middle">
                     <td className="py-2 pr-2">
-                      <div className="text-[12px] font-bold">{agent.name}</div>
-                      <div className="text-[10px] text-muted">{agent.id}</div>
+                      <div className="ui-body-sm font-semibold">{agent.name}</div>
+                      <div className="ui-caption">{agent.id}</div>
                     </td>
                     <td className="py-2 text-center">
                       <Switch
@@ -2095,8 +2088,8 @@ export function MemoryPage({
                     </td>
                   </tr>
                   {pendingDbOff === agent.id && (
-                    <tr className="border-b border-line-soft bg-[#fafafa]">
-                      <td colSpan={4} className="px-2 py-2">
+                    <tr className="bg-[#fafafa]">
+                      <td colSpan={4} className="px-2 py-2" >
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[11px] text-[#b45309]">
                             关闭后该智能体将不能读取个人知识库。个人知识库默认允许使用，确认关闭？
@@ -2192,7 +2185,7 @@ export function MemoryPage({
             aria-label="选择智能体"
             value={agentId}
             onChange={(e) => setAgentId(e.target.value)}
-            className="rounded-lg border border-line-strong px-2 py-1.5 text-[12px] outline-hidden focus:border-ink"
+            className="ui-input w-auto"
           >
             <option value="">全部智能体</option>
             {[...agents, ...manualAgents].map((agent) => (

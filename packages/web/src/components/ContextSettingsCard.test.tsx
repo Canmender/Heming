@@ -94,7 +94,8 @@ describe("ContextSettingsCard 上下文预算", () => {
 
     expect(stored().llmSummary).toBe(false);
     const hint = screen.getByText(/只用零成本确定性摘要/);
-    expect(hint).toHaveClass("text-muted"); // 浅灰
+    // d.63：说明文字统一走排版档 ui-caption（同样是 muted 灰），断言意图不变
+    expect(hint).toHaveClass("ui-caption");
     // 打开时说明消失
     fireEvent.click(screen.getByRole("switch", { name: "用模型生成早期摘要" }));
     expect(stored().llmSummary).toBe(true);

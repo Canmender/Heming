@@ -78,10 +78,10 @@ export function SelfEditCard({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-[12px] font-bold text-muted">自我优化</div>
-          <div className="mt-1 text-[11px] text-muted">
+          <div className="mt-1 ui-caption">
             允许智能体按需修改自己的记忆、技能与 MCP 配置。改动即时生效，并记录在下方。
           </div>
-          <div className="mt-1 text-[11px] text-muted">
+          <div className="mt-1 ui-caption">
             工具占一定上下文开销，仅在开关被操作过（开或关）之后才会真正注入。
           </div>
         </div>
@@ -117,7 +117,7 @@ export function SelfEditCard({
           变更记录{audit.length ? `（最近 ${audit.length} 条）` : ""}
         </div>
         {audit.length === 0 ? (
-          <div className="mt-1 text-[11px] text-muted">还没有变更记录。</div>
+          <div className="mt-1 ui-caption">还没有变更记录。</div>
         ) : (
           <ul className="mt-1 flex flex-col gap-1">
             {audit.map((entry, i) => (
@@ -131,13 +131,13 @@ export function SelfEditCard({
         <div className="text-[11px] font-bold text-muted">
           可回滚的修改{snaps.length ? `（${snaps.length} 条）` : ""}
         </div>
-        <div className="mt-0.5 text-[11px] text-muted">
+        <div className="mt-0.5 ui-caption">
           回滚只还原这一项（记忆内容 / 技能定义 / MCP 配置），不撤销之后的其它改动。
         </div>
         {!agentId ? (
-          <div className="mt-1 text-[11px] text-muted">选择智能体后显示。</div>
+          <div className="mt-1 ui-caption">选择智能体后显示。</div>
         ) : snaps.length === 0 ? (
-          <div className="mt-1 text-[11px] text-muted">还没有可回滚的修改。</div>
+          <div className="mt-1 ui-caption">还没有可回滚的修改。</div>
         ) : (
           <ul className="mt-1 flex flex-col gap-1">
             {snaps.map((snap) => (
@@ -177,14 +177,14 @@ export function SelfEditCard({
               <button
                 type="button"
                 onClick={() => setRollbackTarget(null)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
               >
                 取消
               </button>
               <button
                 type="button"
                 onClick={confirmRollback}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+                className="ui-btn ui-btn-sm ui-btn-danger"
               >
                 回滚
               </button>

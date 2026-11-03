@@ -26,10 +26,10 @@ const TURN_OPTIONS = [2, 4, 8, 12];
  */
 const BUDGET_RATIO = 0.6;
 
-const labelCls = "text-[12px] text-muted";
+const labelCls = "ui-caption";
 const selectCls =
   "mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
-const hintCls = "text-[11px] text-muted";
+const hintCls = "ui-caption";
 
 function Switch({
   label,
@@ -161,7 +161,7 @@ export function ContextSettingsCard() {
 
       {/* 预算与模型窗口的关系：超了就是白填（供应商会 400） */}
       {caps ? (
-        <div className="mt-2 text-[11px] text-muted">
+        <div className="mt-2 ui-caption">
           当前预算 {shownBudget} / 模型上限 {windowLimit} token（{model?.model}，按窗口 60% 计）
           {windowLimit > 0 && settings.budgetTokens > windowLimit ? (
             <span className="ml-1 text-[#b45309]">已超出上限，下面的选择会被收敛到上限</span>
@@ -181,7 +181,7 @@ export function ContextSettingsCard() {
         <div className={`mt-1 ${hintCls}`}>已关闭：只用零成本确定性摘要，不发额外请求</div>
       )}
 
-      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">
+      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
         设置仅保存在本机浏览器，不上传和鸣服务端；改动即时生效，无需保存
       </div>
     </section>

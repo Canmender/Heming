@@ -103,10 +103,10 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
     >
       <div className="flex items-center justify-between gap-3">
         <div className="text-[12px] font-bold text-muted">软件更新</div>
-        <span className="text-[11px] text-muted">当前 {currentVersion}</span>
+        <span className="ui-caption">当前 {currentVersion}</span>
       </div>
 
-      <div className="mt-1 text-[11px] text-muted">{describe(state)}</div>
+      <div className="mt-1 ui-caption">{describe(state)}</div>
 
       {hasUpdate && state?.available && (
         <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2 text-[12px]">
@@ -115,7 +115,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
       )}
 
       {!state?.canDownload && (
-        <div className="mt-1 text-[11px] text-muted">
+        <div className="mt-1 ui-caption">
           开发模式不支持下载更新，仅可检查。
         </div>
       )}
@@ -125,7 +125,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
         aria-label="检查更新"
         disabled={!canAct || state?.status === "checking"}
         onClick={() => void onAction()}
-        className="mt-2.5 rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-2.5 ui-btn ui-btn-sm ui-btn-ghost"
       >
         {buttonLabel(state, busy)}
       </button>
@@ -138,7 +138,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
               <button
                 type="button"
                 onClick={() => setConfirmInstall(false)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
               >
                 稍后
               </button>
@@ -148,7 +148,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
                   setConfirmInstall(false);
                   void bridge.install();
                 }}
-                className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+                className="ui-btn ui-btn-sm ui-btn-primary"
               >
                 重启并安装
               </button>

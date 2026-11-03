@@ -31,7 +31,7 @@ import { PageShell } from "./layout/PageShell.js";
 const MAX_AVATAR_BYTES = 449_000;
 
 const btnGhost =
-  "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
+  "ui-btn ui-btn-sm ui-btn-ghost";
 
 /** 设置卡统一的生效说明：与 LLM 连接卡、工具调用确认卡同一句。 */
 const EFFECT_NOTE = "改动即时生效，仅作用于本机，无需重启。";
@@ -230,7 +230,7 @@ export function SettingsPage() {
               placeholder="搜索设置项…（如 主题色 / 免问下限 / 桌宠）"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className={`w-full max-w-[420px] rounded-lg border border-line-strong px-3 py-1.5 text-[12px] outline-hidden focus:border-ink ${FOCUS_RING}`}
+              className={`w-full max-w-[420px] ui-input ${FOCUS_RING}`}
             />
             <span className="ui-caption">
               {searching ? `${results.length} 项匹配 · Esc 关闭` : "按标题、关键词或分区名搜索"}
@@ -420,7 +420,7 @@ function ProfileSection() {
             <UserIcon width={22} height={22} />
           )}
         </span>
-        <label className="inline-flex cursor-pointer items-center rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa]">
+        <label className="inline-flex cursor-pointer items-center ui-btn ui-btn-sm ui-btn-ghost">
           上传头像
           <input
             type="file"
@@ -448,7 +448,7 @@ function ProfileSection() {
       )}
 
       <form onSubmit={save} className="mt-4 flex flex-col gap-3">
-        <label className="text-[12px] text-muted">
+        <label className="ui-caption">
           昵称
           <input
             value={displayName}
@@ -457,7 +457,7 @@ function ProfileSection() {
               setDisplayName(e.target.value);
               setSaved(false);
             }}
-            className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm outline-hidden focus:border-ink"
+            className="mt-1 block w-full ui-input"
           />
         </label>
         {error && <div className="text-[12px] text-red-600">{error}</div>}
@@ -465,19 +465,19 @@ function ProfileSection() {
           <button
             type="submit"
             disabled={saving}
-            className="rounded-lg bg-ink px-4 py-1.5 text-sm font-bold text-white disabled:opacity-50"
+            className="ui-btn ui-btn-md ui-btn-primary"
           >
             {saving ? "保存中…" : "保存"}
           </button>
           {saved && (
-            <span role="status" className="text-[12px] text-muted">
+            <span role="status" className="ui-caption">
               已保存
             </span>
           )}
         </div>
       </form>
 
-      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">
+      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
         {EFFECT_NOTE}
       </div>
     </section>
@@ -521,12 +521,12 @@ function AppearanceSection() {
       <div className="flex items-center gap-2">
         <span className="ui-section-title">页面颜色</span>
         {applied && (
-          <span role="status" className="text-[11px] text-muted">
+          <span role="status" className="ui-caption">
             已生效
           </span>
         )}
       </div>
-      <div className="mt-1 text-[11px] text-muted">
+      <div className="mt-1 ui-caption">
         作用于选中项、主按钮等填充色；文字颜色不变，保证长文可读
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -548,7 +548,7 @@ function AppearanceSection() {
             style={{ backgroundColor: p.color }}
           />
         ))}
-        <label className="flex items-center gap-1 text-[11px] text-muted">
+        <label className="flex items-center gap-1 ui-caption">
           自定义
           <input
             aria-label="自定义主题色"
@@ -559,7 +559,7 @@ function AppearanceSection() {
               setAccentError(null);
             }}
             onBlur={(e) => applyCustom(e.target.value)}
-            className="w-[92px] rounded-lg border border-line-strong px-2 py-1 text-[12px] outline-hidden focus:border-ink"
+            className="w-[92px] ui-input"
           />
         </label>
         <button
@@ -576,7 +576,7 @@ function AppearanceSection() {
         </button>
       </div>
       {accentError && <div className="mt-2 text-[12px] text-red-600">{accentError}</div>}
-      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">
+      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
         {EFFECT_NOTE}
       </div>
     </section>
@@ -600,7 +600,7 @@ function NavigationSection() {
           恢复默认
         </button>
       </div>
-      <div className="mt-1 text-[11px] text-muted">
+      <div className="mt-1 ui-caption">
         只改左侧导航的显示顺序，Alt+1–9 快捷键保持原位
       </div>
       <ul className="mt-2 flex flex-col gap-1">
@@ -609,7 +609,7 @@ function NavigationSection() {
             key={page}
             className="flex items-center gap-2 rounded-lg border border-line-soft px-2 py-1.5"
           >
-            <span className="w-[18px] text-[11px] text-muted">{index + 1}</span>
+            <span className="w-[18px] ui-caption">{index + 1}</span>
             <span className="flex-1 text-[12px]">{NAV_LABELS[page]}</span>
             <button
               type="button"
@@ -653,9 +653,9 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
         >
       <div className="flex items-center justify-between gap-3">
         <div className="ui-section-title">更新日志</div>
-        <span className="text-[11px] text-muted">当前 {appVersionLabel()}</span>
+        <span className="ui-caption">当前 {appVersionLabel()}</span>
       </div>
-      <div className="mt-1 text-[11px] text-muted">
+      <div className="mt-1 ui-caption">
         来自仓库 CHANGELOG.md，随版本自动生成；点击任一条目展开/收起
       </div>
       <ul className="mt-2 flex flex-col gap-1">
@@ -677,14 +677,14 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
                     当前
                   </span>
                 )}
-                <span className="min-w-0 flex-1 truncate text-[12px] text-muted">
+                <span className="min-w-0 flex-1 truncate ui-caption">
                   {stripInline(entry.title) || entry.date}
                 </span>
-                <span className="shrink-0 text-[11px] text-muted">{open ? "收起" : "展开"}</span>
+                <span className="shrink-0 ui-caption">{open ? "收起" : "展开"}</span>
               </button>
               {open && (
                 <div className="border-t border-line-soft px-3 py-2">
-                  <div className="text-[11px] text-muted">{entry.date}</div>
+                  <div className="ui-caption">{entry.date}</div>
                   {entry.title && (
                     <div className="mt-0.5 text-[12px] font-medium">
                       <InlineText text={entry.title} />

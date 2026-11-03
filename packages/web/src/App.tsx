@@ -17,6 +17,7 @@ import { useInfohubStore } from "./lib/infohub/store.js";
 import { useAutomationScheduler } from "./lib/automation/scheduler.js";
 import { useStaffLoop } from "./lib/staff/loop.js";
 import { hasOpenModal } from "./components/useModalA11y.js";
+import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
 
 /**
  * 路由级懒加载：每个页面单独成 chunk，首屏只下「壳」。
@@ -93,27 +94,25 @@ export function PageFallback() {
       <span className="sr-only">正在加载页面</span>
 
       {/* 左列：与设置区/团队页等「列表 + 内容」页的次级导航同宽 */}
-      <div className="hidden w-[184px] shrink-0 border-r border-line-soft p-3 min-[720px]:block">
-        <div className="mb-3 h-3 w-16 rounded-sm bg-line-soft" />
-        <div className="space-y-2">
-          <div className="h-2.5 w-[72%] rounded-sm bg-line-soft" />
-          <div className="h-2.5 w-[56%] rounded-sm bg-line-soft" />
-          <div className="h-2.5 w-[64%] rounded-sm bg-line-soft" />
-          <div className="h-2.5 w-[48%] rounded-sm bg-line-soft" />
-        </div>
+      <div className="hidden w-[184px] shrink-0 flex-col gap-2 border-r border-line-soft p-3 min-[720px]:flex">
+        <SkeletonLine className="mb-1 h-3 w-16" />
+        <SkeletonLine className="h-2.5 w-[72%]" />
+        <SkeletonLine className="h-2.5 w-[56%]" />
+        <SkeletonLine className="h-2.5 w-[64%]" />
+        <SkeletonLine className="h-2.5 w-[48%]" />
       </div>
 
-      {/* 右侧内容：顶部标题条 + 内容块 */}
+      {/* 右侧内容：顶部标题条 + 内容块（骨架基元与各页 loading 态同一套观感） */}
       <div className="min-w-0 flex-1 p-4">
         <div className="mb-4 flex items-center justify-between border-b border-line-soft pb-3">
-          <div className="h-4 w-32 rounded-sm bg-line-soft" />
-          <div className="h-6 w-16 rounded-md bg-line-soft" />
+          <SkeletonLine className="h-4 w-32" />
+          <SkeletonLine className="h-6 w-16" />
         </div>
-        <div className="space-y-3">
-          <div className="h-3 w-[60%] rounded-sm bg-line-soft" />
-          <div className="h-3 w-[80%] rounded-sm bg-line-soft" />
-          <div className="h-24 w-full rounded-lg bg-panel" />
-          <div className="h-3 w-[40%] rounded-sm bg-line-soft" />
+        <div className="flex flex-col gap-3">
+          <SkeletonLine className="h-3 w-[60%]" />
+          <SkeletonLine className="h-3 w-[80%]" />
+          <SkeletonBlock className="h-24 w-full rounded-lg" />
+          <SkeletonLine className="h-3 w-[40%]" />
         </div>
       </div>
     </div>

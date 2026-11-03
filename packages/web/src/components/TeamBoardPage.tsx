@@ -5,6 +5,8 @@ import { useUiStore } from "../store/ui.js";
 import { Avatar } from "./Avatar.js";
 import { PageShell } from "./layout/PageShell.js";
 import { AssistantIcon, TaskIcon, TeamIcon } from "./icons.js";
+import { EmptyState } from "./ui/EmptyState.js";
+import { SkeletonCard } from "./ui/Skeleton.js";
 
 /**
  * 团队看板：工作区的替代页。
@@ -264,9 +266,9 @@ export function TeamBoardPage() {
 
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
         {!ready ? (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2" role="status" aria-label="正在加载">
             {[0, 1].map((i) => (
-              <div key={i} className="h-40 animate-pulse rounded-xl bg-[#f2f2f2]" />
+              <SkeletonCard key={i} lines={3} className="h-40" />
             ))}
           </div>
         ) : error ? (
@@ -289,9 +291,11 @@ export function TeamBoardPage() {
                 <span className="ui-micro font-normal">{tasks.length}</span>
               </div>
               {tasks.length === 0 ? (
-                <p className="px-1 py-6 text-center ui-caption">
-                  {selectedMember ? "该成员没有符合条件的任务。" : "还没有任务摘要。"}
-                </p>
+                <EmptyState
+                  compact
+                  className="px-0 py-6"
+                  title={selectedMember ? "该成员没有符合条件的任务。" : "还没有任务摘要。"}
+                />
               ) : (
                 <div className="flex flex-col gap-2">
                   {tasks.map((a) => (
@@ -308,9 +312,11 @@ export function TeamBoardPage() {
                 <span className="ui-micro font-normal">{agenda.length}</span>
               </div>
               {agenda.length === 0 ? (
-                <p className="px-1 py-6 text-center ui-caption">
-                  {selectedMember ? "该成员没有符合条件的日程。" : "还没有日程摘要。"}
-                </p>
+                <EmptyState
+                  compact
+                  className="px-0 py-6"
+                  title={selectedMember ? "该成员没有符合条件的日程。" : "还没有日程摘要。"}
+                />
               ) : (
                 <div className="flex flex-col gap-2">
                   {agenda.map((a) => (

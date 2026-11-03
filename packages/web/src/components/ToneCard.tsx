@@ -33,7 +33,7 @@ export function ToneCard() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-[12px] font-bold text-muted">写作能力 · 去 AI 味</div>
-          <div className="mt-1 text-[11px] text-muted">
+          <div className="mt-1 ui-caption">
             按 283 万字人类/生成语料对照统计得出的 11 条规则，定位 AI 写作痕迹。
             智能体改写前先用它框定可改范围——没命中规则的句子逐字保留。
           </div>
@@ -41,7 +41,7 @@ export function ToneCard() {
       </div>
 
       <details className="mt-2">
-        <summary className="cursor-pointer text-[11px] text-muted hover:text-ink">
+        <summary className="cursor-pointer ui-caption hover:text-ink">
           查看 11 条规则
         </summary>
         <ol className="mt-2 flex flex-col gap-1">
@@ -52,7 +52,7 @@ export function ToneCard() {
             </li>
           ))}
         </ol>
-        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] p-2 text-[11px] text-muted">
+        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] p-2 ui-caption">
           <div className="font-medium text-muted">刻意不查的（实测站不住）</div>
           <ul className="mt-1 flex flex-col gap-0.5">
             <li>比喻本身、比喻独立成段 —— 人类用得比 AI 多 2.4 倍</li>
@@ -80,12 +80,12 @@ export function ToneCard() {
             type="button"
             onClick={onDetect}
             disabled={!text.trim()}
-            className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-40"
+            className="ui-btn ui-btn-sm ui-btn-primary"
           >
             检测 AI 痕迹
           </button>
           {report && (
-            <span className="text-[11px] text-muted">
+            <span className="ui-caption">
               {report.hits.length === 0
                 ? "未命中任何规则"
                 : `命中 ${report.hits.length} 处（${report.perKilo.toFixed(1)} 处/千字）`}
@@ -103,7 +103,7 @@ export function ToneCard() {
               </li>
             ))}
             {report.hits.length > 20 && (
-              <li className="text-[11px] text-muted">
+              <li className="ui-caption">
                 …… 另有 {report.hits.length - 20} 处未列出
               </li>
             )}

@@ -211,7 +211,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
             </button>
           ))}
         </div>
-        <span className="text-[11px] text-muted">
+        <span className="ui-caption">
           {pages.length} 页 · {graph.edges.length} 链接
         </span>
         <div className="ml-auto flex items-center gap-1.5">
@@ -240,7 +240,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
         </div>
       )}
       {root && !ephemeral && (
-        <div className="mb-2 truncate text-[11px] text-muted" title={root}>
+        <div className="mb-2 truncate ui-caption" title={root}>
           目录：{root}
         </div>
       )}
@@ -263,10 +263,10 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="按标题、标签或正文过滤"
-              className="mb-2 w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
+              className="mb-2 w-full ui-input"
             />
             {shown.length === 0 ? (
-              <div className="text-[12px] text-muted">
+              <div className="ui-caption">
                 {query ? "无匹配页面" : "还没有页面。用右上角「新建」新建一页。"}
               </div>
             ) : (
@@ -310,13 +310,13 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                     value={draft.title}
                     placeholder="页面标题"
                     onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-                    className="min-w-0 flex-1 rounded-lg border border-line-strong px-2.5 py-1.5 text-[13px] font-bold outline-hidden focus:border-ink"
+                    className="min-w-0 flex-1 ui-input font-semibold"
                   />
                   <select
                     aria-label="页面类别"
                     value={draft.kind}
                     onChange={(e) => setDraft({ ...draft, kind: e.target.value as WikiKind })}
-                    className="rounded-lg border border-line-strong px-2 py-1.5 text-[12px] outline-hidden"
+                    className="ui-input w-auto"
                   >
                     {WIKI_KINDS.map((k) => (
                       <option key={k} value={k}>
@@ -338,7 +338,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                     </button>
                   )}
                 </div>
-                <div className="text-[11px] text-muted">
+                <div className="ui-caption">
                   正文中写 <code className="rounded-sm bg-[#f3f3f3] px-1">[[页面名]]</code> 建立双向链接，
                   保存后可在图谱里看到连接。
                 </div>
@@ -351,7 +351,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
                 />
               </>
             ) : (
-              <div className="flex items-center justify-center text-[12px] text-muted">
+              <div className="flex items-center justify-center ui-caption">
                 从图谱或目录里选一个页面，或用右上角「新建」新建。
               </div>
             )}
@@ -375,7 +375,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
               <button
                 type="button"
                 onClick={() => void confirmRemovePage(removeTarget)}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[11px] font-medium text-white"
+                className="ui-btn ui-btn-sm ui-btn-danger"
               >
                 删除
               </button>
@@ -391,6 +391,6 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
   );
 }
 
-const btnPrimary = "rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-40";
+const btnPrimary = "ui-btn ui-btn-sm ui-btn-primary";
 const btnGhost =
-  "rounded-lg border border-line px-2 py-1 text-[11px] text-muted shadow-card hover:bg-[#fafafa]";
+  "rounded-lg border border-line px-2 py-1 ui-caption shadow-card hover:bg-[#fafafa]";

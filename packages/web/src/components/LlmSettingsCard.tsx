@@ -30,9 +30,9 @@ function newId(): string {
 
 const inputCls =
   "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
-const labelCls = "block text-[12px] text-muted";
+const labelCls = "block ui-caption";
 const btnGhost =
-  "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
+  "ui-btn ui-btn-sm ui-btn-ghost";
 
 export function LlmSettingsCard() {
   const profiles = useLlmStore((s) => s.profiles);
@@ -192,7 +192,7 @@ export function LlmSettingsCard() {
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-bold text-muted">LLM 连接</span>
           {saved && (
-            <span role="status" className="text-[11px] text-muted">
+            <span role="status" className="ui-caption">
               已保存
             </span>
           )}
@@ -209,13 +209,13 @@ export function LlmSettingsCard() {
           </button>
         )}
       </div>
-      <div className="mt-1 text-[11px] text-muted">
+      <div className="mt-1 ui-caption">
         API Key 仅存本机（桌面端经系统安全存储加密），不上传和鸣服务端
       </div>
 
       {/* 常用服务商：一点填好协议/地址/模型；私有部署仍可手填，预设不限制 */}
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-muted">常用服务商</span>
+        <span className="ui-caption">常用服务商</span>
         {LLM_PRESETS.map((preset) => (
           <button
             key={preset.id}
@@ -231,7 +231,7 @@ export function LlmSettingsCard() {
       </div>
 
       {profiles.length === 0 && !open && (
-        <div className="mt-3 text-[12px] text-muted">还没有 LLM 连接</div>
+        <div className="mt-3 ui-caption">还没有 LLM 连接</div>
       )}
 
       {profiles.map((p) => {
@@ -243,8 +243,8 @@ export function LlmSettingsCard() {
           <div key={p.id} className="mt-3 rounded-lg border border-line p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="truncate text-[13px] font-bold">{p.label}</div>
-                <div className="mt-0.5 truncate text-[12px] text-muted">
+                <div className="truncate ui-section-title">{p.label}</div>
+                <div className="mt-0.5 truncate ui-caption">
                   {p.provider} · {p.model} · ••••{p.apiKey.slice(-4)}
                   {p.mask ? " · 出站已脱敏" : ""}
                 </div>
@@ -267,7 +267,7 @@ export function LlmSettingsCard() {
                   ) : (
                     <>
                       {badges.length === 0 ? (
-                        <span className="text-[11px] text-muted">纯文本模型</span>
+                        <span className="ui-caption">纯文本模型</span>
                       ) : (
                         badges.map((b) => (
                           <span
@@ -345,13 +345,13 @@ export function LlmSettingsCard() {
                     aria-label="上下文窗口（token）"
                     value={capsWindow}
                     onChange={(e) => setCapsWindow(e.target.value)}
-                    className="ml-2 w-[140px] rounded-lg border border-line-strong px-2 py-1 text-[12px] outline-hidden focus:border-ink"
+                    className="ml-2 w-[140px] ui-input"
                   />
                 </label>
                 <button
                   type="button"
                   onClick={() => saveCaps(p)}
-                  className="rounded-lg bg-ink px-3 py-1 text-[12px] font-bold text-white"
+                  className="ui-btn ui-btn-sm ui-btn-primary"
                 >
                   保存
                 </button>
@@ -370,7 +370,7 @@ export function LlmSettingsCard() {
                 <button
                   type="button"
                   onClick={() => onRemove(p.id)}
-                  className="rounded-lg bg-[#b42318] px-3 py-1 text-[12px] font-bold text-white"
+                  className="ui-btn ui-btn-sm ui-btn-danger"
                 >
                   确认删除
                 </button>
@@ -385,7 +385,7 @@ export function LlmSettingsCard() {
 
       {open && (
         <form onSubmit={submit} className="mt-3 rounded-lg border border-line p-3">
-          <div className="mb-2 text-[13px] font-bold">{editingId ? "编辑连接" : "新建连接"}</div>
+          <div className="mb-2 ui-section-title">{editingId ? "编辑连接" : "新建连接"}</div>
           <div className="flex flex-col gap-3">
             <label className={labelCls}>
               服务商
@@ -455,7 +455,7 @@ export function LlmSettingsCard() {
                 className={inputCls}
               />
             </label>
-            <label className="flex items-start gap-1.5 text-[12px] text-muted">
+            <label className="flex items-start gap-1.5 ui-caption">
               <input
                 type="checkbox"
                 aria-label="出站脱敏"
@@ -473,7 +473,7 @@ export function LlmSettingsCard() {
           <div className="mt-3 flex items-center gap-2">
             <button
               type="submit"
-              className="rounded-lg bg-ink px-4 py-1.5 text-sm font-bold text-white"
+              className="ui-btn ui-btn-md ui-btn-primary"
             >
               保存
             </button>
@@ -488,7 +488,7 @@ export function LlmSettingsCard() {
           开关本身在每条连接上——「这家会不会存我数据」是逐家判断的。 */}
       <div className="mt-3 rounded-lg border border-line bg-[#fcfcfc] p-3">
         <div className="text-[12px] font-bold text-muted">出站脱敏 · 词表与对照表</div>
-        <label className="mt-1 block text-[12px] text-muted">
+        <label className="mt-1 block ui-caption">
           额外要隐去的词（逗号分隔）
           <input
             aria-label="额外隐去词"
@@ -509,7 +509,7 @@ export function LlmSettingsCard() {
           >
             保存隐去词
           </button>
-          <span className="text-[11px] text-muted">
+          <span className="ui-caption">
             对照表 {maskLedger().length} 条 · 原文只留在本机，绝不进任何请求
           </span>
           <button
@@ -525,7 +525,7 @@ export function LlmSettingsCard() {
         </div>
       </div>
 
-      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">
+      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
         {EFFECT_NOTE}
       </div>
     </section>

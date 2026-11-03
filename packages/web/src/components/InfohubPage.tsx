@@ -41,7 +41,7 @@ function sourceLabel(source: string): string {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 flex-1 rounded-lg border border-line-soft bg-panel px-3 py-2">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-muted">{label}</div>
+      <div className="ui-micro uppercase tracking-wider">{label}</div>
       <div className="mt-0.5 truncate text-[15px] font-semibold tabular-nums text-ink">{value}</div>
     </div>
   );
@@ -427,7 +427,7 @@ export function InfohubPage() {
               <button
                 type="button"
                 onClick={() => setSyncOpen((v) => !v)}
-                className="rounded-md border border-line px-2.5 py-1 text-[11px] shadow-card hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-sm ui-btn-ghost"
               >
                 {syncOpen ? "收起同步" : "同步"}
               </button>
@@ -436,21 +436,21 @@ export function InfohubPage() {
                 aria-label="新建定时同步"
                 title="把当前同步选项设为定时任务"
                 onClick={scheduleSyncAutomation}
-                className="rounded-md border border-line px-2.5 py-1 text-[11px] shadow-card hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-sm ui-btn-ghost"
               >
                 定时
               </button>
               <button
                 type="button"
                 onClick={() => void refresh()}
-                className="rounded-md border border-line px-2.5 py-1 text-[11px] shadow-card hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-sm ui-btn-ghost"
               >
                 刷新
               </button>
               <button
                 type="button"
                 onClick={() => void disconnect()}
-                className="rounded-md border border-line px-2.5 py-1 text-[11px] text-[#666] hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-sm ui-btn-ghost text-[#666]"
               >
                 断开
               </button>
@@ -482,7 +482,7 @@ export function InfohubPage() {
               首次使用也可以直接用默认目录，同步后自动建库。
             </p>
 
-            <label className="mt-4 block text-[11px] font-medium text-[#555]" htmlFor="infohub-home">
+            <label className="ui-caption mt-4 block font-medium text-[#555]" htmlFor="infohub-home">
               数据目录
             </label>
             <div className="mt-1 flex gap-1.5">
@@ -491,12 +491,12 @@ export function InfohubPage() {
                 value={home}
                 onChange={(e) => setHome(e.target.value)}
                 placeholder={info?.defaultHome ?? "例如 D:\\wohaolei"}
-                className="min-w-0 flex-1 rounded-md border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
+                className="ui-input min-w-0 flex-1"
               />
               <button
                 type="button"
                 onClick={() => void chooseHome()}
-                className="shrink-0 rounded-md border border-line px-2.5 py-1.5 text-[11px] hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
               >
                 浏览…
               </button>
@@ -505,7 +505,7 @@ export function InfohubPage() {
               <button
                 type="button"
                 onClick={() => setHome(info.defaultHome)}
-                className="mt-1 text-[10px] text-muted underline-offset-2 hover:underline"
+                className="ui-micro underline-offset-2 hover:underline"
               >
                 使用默认目录 {info.defaultHome}
               </button>
@@ -521,7 +521,7 @@ export function InfohubPage() {
             </button>
             {showAdvanced && (
               <div className="mt-2 rounded-lg border border-line-soft bg-panel p-3">
-                <label className="block text-[11px] font-medium text-[#555]" htmlFor="infohub-python">
+                <label className="ui-caption block font-medium text-[#555]" htmlFor="infohub-python">
                   Python 解释器
                 </label>
                 <div className="mt-1 flex gap-1.5">
@@ -530,17 +530,17 @@ export function InfohubPage() {
                     value={python}
                     onChange={(e) => setPython(e.target.value)}
                     placeholder={info?.bundledPython ?? "内置运行时不可用，请选择 python.exe"}
-                    className="min-w-0 flex-1 rounded-md border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
+                    className="ui-input min-w-0 flex-1"
                   />
                   <button
                     type="button"
                     onClick={() => void choosePython()}
-                    className="shrink-0 rounded-md border border-line px-2.5 py-1.5 text-[11px] hover:bg-[#fafafa]"
+                    className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
                   >
                     浏览…
                   </button>
                 </div>
-                <p className="mt-1 text-[10px] leading-4 text-muted">
+                <p className="ui-micro mt-1">
                   浏览/检索只需要标准库；<strong>同步采集</strong>需要 InfoHub 的虚拟环境
                   （含 wechatauto-replica / zstandard 等依赖）。留空则使用内置运行时。
                 </p>
@@ -557,7 +557,7 @@ export function InfohubPage() {
                 {phase === "connecting" ? "连接中…" : "连接"}
               </button>
               {info?.bundledPython ? (
-                <span className="text-[10px] text-muted">内置运行时可用</span>
+                <span className="ui-micro">内置运行时可用</span>
               ) : (
                 <span className="text-[10px] text-[#b42318]">未找到内置运行时</span>
               )}
@@ -578,7 +578,7 @@ export function InfohubPage() {
 
           {syncOpen && (
             <div className="border-b border-line-soft bg-panel px-6 py-3">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 ui-caption">
                 <span className="font-medium text-[#555]">采集来源</span>
                 <label className="flex items-center gap-1.5">
                   <input
@@ -620,7 +620,7 @@ export function InfohubPage() {
                   type="button"
                   disabled={syncing}
                   onClick={() => void runSync()}
-                  className="rounded-md bg-ink px-3 py-1 text-[11px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+                  className="ui-btn ui-btn-sm ui-btn-primary"
                 >
                   {syncing ? "同步中…" : "开始同步"}
                 </button>
@@ -628,11 +628,11 @@ export function InfohubPage() {
                   type="button"
                   disabled={syncing}
                   onClick={scheduleSyncAutomation}
-                  className="rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa] disabled:opacity-50"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
                 >
                   保存为定时任务
                 </button>
-                <span className="text-[10px] text-muted">同步会写入归档库；检索与日程始终只读。</span>
+                <span className="ui-micro">同步会写入归档库；检索与日程始终只读。</span>
               </div>
               {syncing && (
                 <div className="mt-2">
@@ -646,7 +646,7 @@ export function InfohubPage() {
                       }}
                     />
                   </div>
-                  <div className="mt-1 text-[10px] text-muted">
+                  <div className="ui-micro mt-1">
                     {progress ? `${progress.stage} · ${progress.current}/${progress.total}` : "准备中…"}
                   </div>
                 </div>
@@ -667,9 +667,7 @@ export function InfohubPage() {
                 role="tab"
                 aria-selected={tab === value}
                 onClick={() => setTab(value)}
-                className={`rounded-md px-3 py-1 text-[12px] transition-colors ${
-                  tab === value ? "bg-ink text-white" : "text-[#666] hover:bg-[#f2f2f2] hover:text-ink"
-                }`}
+                className={`ui-btn ui-btn-sm ${tab === value ? "ui-btn-primary" : "ui-btn-ghost text-[#666]"}`}
               >
                 {label}
                 {value === "agenda" && agenda?.summary.overdue ? (
@@ -679,7 +677,7 @@ export function InfohubPage() {
                 ) : null}
               </button>
             ))}
-            <div className="ml-auto flex items-center gap-2 text-[10px] text-muted">
+            <div className="ml-auto flex items-center gap-2 ui-micro">
               {Object.entries(status.sources).map(([key, value]) => (
                 <span key={key} title={value.detail || ""}>
                   {sourceLabel(key)} {value.status || "未同步"}
@@ -690,7 +688,7 @@ export function InfohubPage() {
           </div>
 
           {!status.hasDb && (
-            <div className="border-b border-line-soft bg-[#fffdf5] px-6 py-2 text-[11px] text-[#8a6d3b]">
+            <div className="border-b border-line-soft bg-[#fffdf5] px-6 py-2 ui-caption text-[#8a6d3b]">
               该目录还没有归档库。先在「同步」里选择来源并开始采集；采集完成后这里会自动刷新。
             </div>
           )}
@@ -714,7 +712,7 @@ export function InfohubPage() {
                 <button
                   type="submit"
                   disabled={busy === "search"}
-                  className="rounded-md bg-ink px-3 py-1.5 text-[11px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+                  className="ui-btn ui-btn-sm ui-btn-primary"
                 >
                   {busy === "search" ? "检索中…" : "检索"}
                 </button>
@@ -726,19 +724,19 @@ export function InfohubPage() {
                   </p>
                 ) : (
                   <>
-                    <p className="mb-2 text-[10px] text-muted">
+                    <p className="ui-micro mb-2">
                       「{searchedFor}」命中 {hits.length} 条
                     </p>
                     <ul className="flex flex-col gap-1.5">
                       {hits.map((hit) => (
                         <li key={hit.id}>
-                          <div className="rounded-lg border border-line-soft bg-white px-3 py-2">
-                            <div className="flex items-baseline gap-2 text-[10px] text-muted">
+                          <div className="ui-list-row rounded-lg bg-white">
+                            <div className="flex items-baseline gap-2 ui-micro">
                               <span className="font-medium text-[#555]">{hit.convName}</span>
                               <span>{sourceLabel(hit.source)}</span>
                               <span className="ml-auto">{formatInfohubTime(hit.ts, true)}</span>
                             </div>
-                            <div className="mt-1 text-[12px] leading-5">
+                            <div className="mt-1 ui-body-sm leading-5">
                               {hit.senderName ? <span className="text-muted">{hit.senderName}：</span> : null}
                               <Snippet text={hit.snippet || hit.content} />
                             </div>
@@ -754,13 +752,13 @@ export function InfohubPage() {
 
           {tab === "agenda" && (
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex items-center gap-3 border-b border-line-soft px-6 py-2.5 text-[11px]">
+              <div className="flex items-center gap-3 border-b border-line-soft px-6 py-2.5 ui-caption">
                 <span className="text-muted">
                   未来 14 天 · 逾期 30 天
                   {agenda ? ` · 共 ${agenda.summary.total} 条` : ""}
                 </span>
                 {agenda && (
-                  <span className="flex gap-2 text-[10px]">
+                  <span className="flex gap-2 ui-micro">
                     <span className="text-[#b42318]">逾期 {agenda.summary.overdue}</span>
                     <span>今天 {agenda.summary.today}</span>
                     <span>本周 {agenda.summary.week}</span>
@@ -771,7 +769,7 @@ export function InfohubPage() {
                     type="button"
                     disabled={busy === "rebuild"}
                     onClick={() => void rebuildAgenda()}
-                    className="rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa] disabled:opacity-50"
+                    className="ui-btn ui-btn-sm ui-btn-ghost"
                   >
                     {busy === "rebuild" ? "重扫中…" : "重扫议程"}
                   </button>
@@ -779,7 +777,7 @@ export function InfohubPage() {
                     type="button"
                     aria-label="新建定时重扫"
                     onClick={() => openAutomations({ kind: "infohub.agenda" })}
-                    className="rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa]"
+                    className="ui-btn ui-btn-sm ui-btn-ghost"
                   >
                     定时重扫
                   </button>
@@ -787,7 +785,7 @@ export function InfohubPage() {
               </div>
               <div className="min-h-0 flex-1 overflow-auto px-6 py-3">
                 {!agenda || agenda.items.length === 0 ? (
-                  <p className="text-[11px] text-muted">
+                  <p className="ui-caption">
                     {agenda ? "没有待办事项" : "读取中…"}
                   </p>
                 ) : (
@@ -798,7 +796,7 @@ export function InfohubPage() {
                       return (
                         <li
                           key={item.id}
-                          className="flex items-start gap-3 rounded-lg border border-line-soft bg-white px-3 py-2"
+                          className="ui-list-row items-start gap-3 rounded-lg bg-white"
                         >
                           <span
                             className={`mt-0.5 shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
@@ -808,11 +806,11 @@ export function InfohubPage() {
                             {item.dueText || (item.dueTs ? formatInfohubTime(item.dueTs) : "未定")}
                           </span>
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-[12px] font-medium text-ink">{item.title}</div>
+                            <div className="truncate ui-body-sm font-medium text-ink">{item.title}</div>
                             {item.detail && (
-                              <div className="mt-0.5 line-clamp-2 text-[11px] leading-5 text-[#666]">{item.detail}</div>
+                              <div className="mt-0.5 line-clamp-2 ui-caption leading-5 text-[#666]">{item.detail}</div>
                             )}
-                            <div className="mt-0.5 text-[10px] text-muted">
+                            <div className="mt-0.5 ui-micro">
                               {item.convName}
                               {item.senderName ? ` · ${item.senderName}` : ""}
                               {item.msgTs ? ` · 消息 ${formatInfohubTime(item.msgTs, true)}` : ""}
@@ -827,9 +825,9 @@ export function InfohubPage() {
             </div>
           )}
 
-          <details className="shrink-0 border-t border-line-soft bg-panel px-6 py-2 text-[11px]">
+          <details className="shrink-0 border-t border-line-soft bg-panel px-6 py-2 ui-caption">
             <summary className="cursor-pointer text-[#555]">本机配置（已脱敏）</summary>
-            <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-[10px] text-[#666] sm:grid-cols-4">
+            <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 ui-micro sm:grid-cols-4">
               <span>QQ：{status.config.qq.enabled ? "启用" : "停用"}</span>
               <span>微信：{status.config.wechat.enabled ? "启用" : "停用"}</span>
               <span>语音转写：{status.config.voice.enabled ? "启用" : "停用"}</span>
@@ -841,8 +839,8 @@ export function InfohubPage() {
               <span>知识库：{status.config.kb.autoExport ? "自动导出" : "未开启导出"}</span>
               <span>智能体：{status.config.agent.enabled ? "启用" : "停用"}</span>
             </div>
-            <p className="mt-1.5 break-all text-[10px] text-muted">配置：{status.configPath}</p>
-            <p className="break-all text-[10px] text-muted">归档：{status.dbPath}</p>
+            <p className="mt-1.5 break-all ui-micro">配置：{status.configPath}</p>
+            <p className="break-all ui-micro">归档：{status.dbPath}</p>
           </details>
         </>
       )}

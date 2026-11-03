@@ -109,7 +109,7 @@ export function HitlPolicyCard({
   return (
     <section aria-label="工具调用确认" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
       <div className="text-[12px] font-bold text-muted">工具调用确认</div>
-      <div className="mt-1 text-[11px] text-muted">
+      <div className="mt-1 ui-caption">
         智能体调用有副作用的工具前先问你一句。只读操作默认不打扰，写入与危险操作必问。
       </div>
 
@@ -155,7 +155,7 @@ export function HitlPolicyCard({
           aria-label="免问下限"
           value={policy.floor}
           onChange={(e) => update({ floor: e.target.value as RiskLevel })}
-          className="mt-1 block rounded-lg border border-line-strong px-3 py-2 text-sm outline-hidden focus:border-ink"
+          className="mt-1 block ui-input"
         >
           {/*
             选项**从 `FLOORS` 渲染**（策略层的唯一权威列表），不另写一份。
@@ -170,7 +170,7 @@ export function HitlPolicyCard({
       </label>
 
       {clampedNotice && (
-        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 text-[11px] text-muted">
+        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 ui-caption">
           免问下限已从「危险」下调为「写入」：危险操作现在都会先问你。
           <span className="text-muted">（原先「危险」那一档等同于不设边界，已移除。）</span>
         </div>
@@ -182,7 +182,7 @@ export function HitlPolicyCard({
           aria-label="授权作用域"
           value={policy.scope}
           onChange={(e) => update({ scope: e.target.value as PolicyScope })}
-          className="mt-1 block rounded-lg border border-line-strong px-3 py-2 text-sm outline-hidden focus:border-ink"
+          className="mt-1 block ui-input"
         >
           <option value="global">所有智能体共用</option>
           <option value="per-agent">按智能体分别授权</option>
@@ -196,7 +196,7 @@ export function HitlPolicyCard({
             setSessionMsg(null);
             setConfirmClearSession(true);
           }}
-          className="rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
+          className="ui-btn ui-btn-sm ui-btn-ghost"
         >
           清空本会话授权
         </button>
@@ -209,9 +209,9 @@ export function HitlPolicyCard({
             清空记住的规则
           </button>
         )}
-        <span className="text-[11px] text-muted">会话授权只存在内存里，退出应用即失效。</span>
+        <span className="ui-caption">会话授权只存在内存里，退出应用即失效。</span>
         {saved && (
-          <span role="status" className="text-[11px] text-muted">
+          <span role="status" className="ui-caption">
             已保存
           </span>
         )}
@@ -233,7 +233,7 @@ export function HitlPolicyCard({
           记住的规则{rules.length ? `（${rules.length} 条）` : ""}
         </div>
         {rules.length === 0 ? (
-          <div className="mt-1 text-[11px] text-muted">
+          <div className="mt-1 ui-caption">
             还没有记住的规则。在确认弹窗里勾选「记住本次选择」即可按工具与资源记住。
           </div>
         ) : (
@@ -275,7 +275,7 @@ export function HitlPolicyCard({
           确认记录{audit.length ? `（最近 ${audit.length} 条）` : ""}
         </div>
         {audit.length === 0 ? (
-          <div className="mt-1 text-[11px] text-muted">还没有确认记录。</div>
+          <div className="mt-1 ui-caption">还没有确认记录。</div>
         ) : (
           <ul className="mt-1 flex flex-col gap-1">
             {audit.map((entry, i) => (
@@ -294,7 +294,7 @@ export function HitlPolicyCard({
               <button
                 type="button"
                 onClick={() => setConfirmClearRules(false)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
               >
                 取消
               </button>
@@ -305,7 +305,7 @@ export function HitlPolicyCard({
                   setConfirmClearRules(false);
                   bump();
                 }}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+                className="ui-btn ui-btn-sm ui-btn-danger"
               >
                 清空
               </button>
@@ -326,14 +326,14 @@ export function HitlPolicyCard({
               <button
                 type="button"
                 onClick={() => setConfirmClearSession(false)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
               >
                 取消
               </button>
               <button
                 type="button"
                 onClick={clearSession}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+                className="ui-btn ui-btn-sm ui-btn-danger"
               >
                 清空授权
               </button>
@@ -346,7 +346,7 @@ export function HitlPolicyCard({
         </ConfirmDialog>
       )}
 
-      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">
+      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
         {EFFECT_NOTE}
       </div>
     </section>
@@ -379,7 +379,7 @@ function ModeRow({
       />
       <span className="min-w-0">
         <span className="block text-[12px] font-bold">{title}</span>
-        <span className="block text-[11px] text-muted">{desc}</span>
+        <span className="block ui-caption">{desc}</span>
       </span>
       <span className="sr-only">{mode}</span>
     </label>

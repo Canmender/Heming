@@ -488,13 +488,13 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
         <StorageIcon className="text-[#999]" />
         本机存储
       </div>
-      <div className="mt-1 text-[11px] text-muted">
+      <div className="mt-1 ui-caption">
         本机存储（浏览器配额）是一条单源预算，写满后新数据会静默丢失。这条水位告诉你还剩多少、是谁占的。
       </div>
 
       {/* 水位条 */}
       <div className="mt-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-[11px] text-muted">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-2 ui-caption">
           <span>
             已用 {formatBytes(usage.totalBytes)}（{formatExactBytes(usage.totalBytes)} 字节）
           </span>
@@ -531,7 +531,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
           按模块{usage.keyCount ? `（${usage.keyCount} 个键）` : ""}
         </div>
         {usage.modules.length === 0 ? (
-          <div className="mt-1 text-[11px] text-muted">本机还没有存储内容。</div>
+          <div className="mt-1 ui-caption">本机还没有存储内容。</div>
         ) : (
           <ul className="mt-1 flex flex-col gap-1">
             {usage.modules.map((m) => (
@@ -589,24 +589,24 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
           type="button"
           onClick={onProbe}
           disabled={probing}
-          className="rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa] disabled:opacity-60"
+          className="ui-btn ui-btn-sm ui-btn-ghost disabled:opacity-60"
         >
           {probing ? "检测中…" : "重新检测"}
         </button>
-        <span className="text-[11px] text-muted">
+        <span className="ui-caption">
           「重新检测」会临时写入最多约 32MB 以实测配额，写完即删。
         </span>
       </div>
 
       {/* 不可再生的东西不给入口——这里说清楚为什么，否则用户会以为漏了功能。 */}
-      <div className="mt-2 text-[11px] text-muted">
+      <div className="mt-2 ui-caption">
         记忆条目与加密会话的私钥、棘轮不可再生（丢了就是永久丢），所以不提供清理入口；
         迁移期的旧明文/旧密文备份键也不提供清理入口（它们可能是唯一的可恢复副本）；
         上面两个按钮只清理能重新生成的内容。
       </div>
 
       {notice && (
-        <div role="status" aria-label="操作结果" className="mt-2 text-[11px] text-muted">
+        <div role="status" aria-label="操作结果" className="mt-2 ui-caption">
           {notice}
         </div>
       )}
@@ -620,14 +620,14 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
               <button
                 type="button"
                 onClick={() => setPending(null)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
               >
                 取消
               </button>
               <button
                 type="button"
                 onClick={() => runClear(pending)}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+                className="ui-btn ui-btn-sm ui-btn-danger"
               >
                 清理
               </button>

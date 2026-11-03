@@ -18,6 +18,7 @@ import { useUiStore } from "../store/ui.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { StaffIcon } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
+import { EmptyState } from "./ui/EmptyState.js";
 
 /**
  * 幕僚页（d.48）：只递简报 + 一键跳转。
@@ -424,21 +425,22 @@ export function StaffPage() {
         )}
 
         {runs.length === 0 ? (
-          <div className="mx-auto mt-8 max-w-[560px] rounded-xl border border-line bg-white p-6 text-center shadow-card">
-            <StaffIcon width={26} height={26} />
-            <h2 className="ui-section-title mt-2">还没有简报</h2>
-            <p className="mt-1 text-[12px] leading-6 text-muted">
-              开启后，幕僚会在每天 {settings.dailyAt} 前后给你一份；
-              日程临期或任务卡住时也会单独提醒。所有内容只存本机。
-            </p>
-            <button
-              type="button"
-              onClick={() => void toggleEnabled(true)}
-              disabled={running || settings.enabled}
-              className={`mt-4 ${BTN_PRIMARY}`}
-            >
-              {settings.enabled ? "正在等待第一份简报" : running ? "正在生成…" : "开启幕僚"}
-            </button>
+          <div className="mx-auto mt-8 max-w-[560px] rounded-xl border border-line bg-white shadow-card">
+            <EmptyState
+              icon={<StaffIcon width={22} height={22} />}
+              title="还没有简报"
+              desc={`开启后，幕僚会在每天 ${settings.dailyAt} 前后给你一份；日程临期或任务卡住时也会单独提醒。所有内容只存本机。`}
+              actions={
+                <button
+                  type="button"
+                  onClick={() => void toggleEnabled(true)}
+                  disabled={running || settings.enabled}
+                  className="ui-btn ui-btn-md ui-btn-primary"
+                >
+                  {settings.enabled ? "正在等待第一份简报" : running ? "正在生成…" : "开启幕僚"}
+                </button>
+              }
+            />
           </div>
         ) : (
           <ul className="flex flex-col gap-4">

@@ -80,21 +80,16 @@ const GROUPS: readonly GroupMeta[] = [
 
 const cardCls = "rounded-xl border border-line bg-white p-4 shadow-card";
 const cardInnerCls = "rounded-lg border border-line p-3";
-const chipCls = "rounded-sm bg-[#f4f4f4] px-1.5 py-0.5 text-[10px] text-[#666]";
-const badgeCls = "rounded-sm border border-line-soft bg-[#fafafa] px-1.5 py-0.5 text-[10px] text-muted";
-const btnGhost =
-  "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa] disabled:opacity-40";
-const btnGhostSm =
-  "rounded-lg border border-line px-2 py-1 text-[11px] text-[#555] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
-const btnDangerSm =
-  "rounded-lg border border-line px-2 py-1 text-[11px] text-[#b42318] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
-const btnPrimarySm =
-  "rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-40";
-const inputSmCls =
-  "rounded-lg border border-line px-3 py-1.5 text-[12px] outline-hidden focus:border-[#bbb]";
-const hintCls = "text-[11px] text-muted";
-const errorCls = "text-[12px] text-red-600";
-const okCls = "text-[12px] text-muted";
+const chipCls = "ui-chip";
+const badgeCls = "ui-chip";
+const btnGhost = "ui-btn ui-btn-md ui-btn-ghost";
+const btnGhostSm = "ui-btn ui-btn-sm ui-btn-ghost";
+const btnDangerSm = "ui-btn ui-btn-sm ui-btn-ghost text-[#b42318]";
+const btnPrimarySm = "ui-btn ui-btn-sm ui-btn-primary";
+const inputSmCls = "ui-input";
+const hintCls = "ui-caption";
+const errorCls = "ui-body-sm text-[#b42318]";
+const okCls = "ui-body-sm text-muted";
 
 /* ---------------------------------------------------------------- 基础件 */
 
@@ -562,49 +557,46 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
           </div>
         ) : (
           <div className="mt-2 overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-left">
+            <table className="ui-table min-w-[760px]">
               <thead>
-                <tr className="border-b border-line text-[11px] font-normal text-muted">
-                  <th className="py-2 pr-3 font-normal">名称</th>
-                  <th className="py-2 pr-3 font-normal">来源</th>
-                  <th className="py-2 pr-3 font-normal">启用</th>
-                  <th className="py-2 pr-3 font-normal">使用次数</th>
-                  <th className="py-2 pr-3 font-normal">最近使用</th>
-                  <th className="py-2 pr-3 font-normal">标签</th>
-                  <th className="py-2 font-normal">操作</th>
+                <tr>
+                  <th>名称</th>
+                  <th>来源</th>
+                  <th>启用</th>
+                  <th className="text-right">使用次数</th>
+                  <th>最近使用</th>
+                  <th>标签</th>
+                  <th className="text-right">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((skill) => (
-                  <tr
-                    key={skill.id}
-                    className="border-b border-line-soft align-top text-[12px] last:border-b-0"
-                  >
-                    <td className="py-2 pr-3">
-                      <div className="truncate font-bold text-ink">{skill.name}</div>
-                      <div className="mt-0.5 line-clamp-2 break-words text-[11px] text-muted">
+                  <tr key={skill.id} className="align-top">
+                    <td>
+                      <div className="truncate font-semibold text-ink">{skill.name}</div>
+                      <div className="mt-0.5 line-clamp-2 break-words ui-caption">
                         {skill.description || "暂无描述"}
                       </div>
                     </td>
-                    <td className="py-2 pr-3">
+                    <td>
                       <span className={badgeCls}>{SOURCE_LABEL[skill.source]}</span>
                     </td>
-                    <td className="py-2 pr-3">
+                    <td>
                       <Switch
                         label={`启用 ${skill.name}`}
                         checked={skill.enabled}
                         onChange={(next) => toggleEnabled(skill, next)}
                       />
                     </td>
-                    <td className="py-2 pr-3 tabular-nums text-[#555]">
+                    <td className="ui-numeric text-right text-[#555]">
                       {usages[skill.id]?.count ?? 0}
                     </td>
-                    <td className="py-2 pr-3 text-[11px] text-muted">{formatAt(usages[skill.id]?.at)}</td>
-                    <td className="py-2 pr-3">
+                    <td className="ui-caption">{formatAt(usages[skill.id]?.at)}</td>
+                    <td>
                       <TagList items={skill.tags} empty="—" />
                     </td>
-                    <td className="py-2">
-                      <div className="flex items-center gap-1.5">
+                    <td className="text-right">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"
                           aria-label={`池中详情 ${skill.name}`}
@@ -784,7 +776,7 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                           assignSkill(skill);
                           setAddFor(null);
                         }}
-                        className="flex w-full items-center gap-2 px-1 py-2 text-left hover:bg-[#fafafa]"
+                        className="ui-list-row w-full text-left"
                       >
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[12px] font-medium">{skill.name}</span>

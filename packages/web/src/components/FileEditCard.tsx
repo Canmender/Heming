@@ -94,13 +94,13 @@ export function FileEditCard({
   return (
     <section aria-label="文件编辑" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
       <div className="text-[12px] font-bold text-muted">文件编辑</div>
-      <div className="mt-1 text-[11px] text-muted">
+      <div className="mt-1 ui-caption">
         允许智能体在你圈定的目录内用补丁改文件。默认没有任何可写根，
         添加之后 `file_patch` / `file_read` 才会出现在智能体的工具里：任意一条根（含只读）会让 `file_read` 可见，至少一条可写根才会让 `file_patch` 可见。
       </div>
 
       {!fileBridge ? (
-        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 text-[11px] text-muted">
+        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 ui-caption">
           仅桌面端可用：浏览器里没有文件系统访问能力，因此不提供文件编辑工具。
         </div>
       ) : (
@@ -115,7 +115,7 @@ export function FileEditCard({
               )}
             </div>
             {config.roots.length === 0 ? (
-              <div className="mt-1 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 text-[11px] text-muted">
+              <div className="mt-1 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 ui-caption">
                 还没有可写根。智能体目前不能改任何文件（若添加只读根，它可以读取那些目录）。建议选一个你希望它维护的目录
                 （例如 Obsidian 库的某个子目录），不要选整个盘。
               </div>
@@ -127,7 +127,7 @@ export function FileEditCard({
                     className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft px-2 py-1.5"
                   >
                     <span className="text-[12px] font-bold">{root.name}</span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted" title={root.path}>
+                    <span className="min-w-0 flex-1 truncate font-mono ui-caption" title={root.path}>
                       {root.path}
                     </span>
                     <select
@@ -154,7 +154,7 @@ export function FileEditCard({
           </div>
 
           <div className="mt-3 flex flex-wrap items-end gap-2">
-            <label className="min-w-0 flex-1 text-[11px] text-muted">
+            <label className="min-w-0 flex-1 ui-caption">
               目录路径
               <input
                 aria-label="可写根路径"
@@ -164,14 +164,14 @@ export function FileEditCard({
                   setError(null);
                 }}
                 placeholder="D:/Obsidian/学院事务"
-                className="mt-1 block w-full rounded-lg border border-line-strong px-2 py-1.5 font-mono text-[12px] outline-hidden focus:border-ink"
+                className="mt-1 block w-full ui-input"
               />
             </label>
             <select
               aria-label="新根的读写模式"
               value={mode}
               onChange={(e) => setMode(e.target.value as "read" | "write")}
-              className="rounded-lg border border-line-strong px-2 py-1.5 text-[12px] outline-hidden focus:border-ink"
+              className="ui-input"
             >
               <option value="write">可写</option>
               <option value="read">只读</option>
@@ -179,14 +179,14 @@ export function FileEditCard({
             <button
               type="button"
               onClick={pickDirectory}
-              className="rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
+              className="ui-btn ui-btn-sm ui-btn-ghost"
             >
               选择目录
             </button>
             <button
               type="button"
               onClick={addRoot}
-              className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+              className="ui-btn ui-btn-sm ui-btn-primary"
             >
               添加
             </button>
@@ -197,7 +197,7 @@ export function FileEditCard({
             </div>
           )}
           {status && (
-            <div role="status" className="mt-2 text-[11px] text-muted">
+            <div role="status" className="mt-2 ui-caption">
               {status}
             </div>
           )}
@@ -208,7 +208,7 @@ export function FileEditCard({
               aria-label="越界处理方式"
               value={config.outOfRoot}
               onChange={(e) => changeOutOfRoot(e.target.value as "ask" | "reject")}
-              className="mt-1 block rounded-lg border border-line-strong px-3 py-1.5 text-[12px] outline-hidden focus:border-ink"
+              className="mt-1 block ui-input"
             >
               <option value="ask">先问我（默认）</option>
               <option value="reject">直接拒绝</option>
@@ -223,7 +223,7 @@ export function FileEditCard({
               已记住的目录授权{rules.length ? `（${rules.length} 条）` : ""}
             </div>
             {rules.length === 0 ? (
-              <div className="mt-1 text-[11px] text-muted">
+              <div className="mt-1 ui-caption">
                 还没有。在确认弹窗里勾选「记住本次选择」会按目标文件所在目录授权
                 （如 `D:/Obsidian/学院事务/`），之后该目录内的改动不再逐次询问。
               </div>
@@ -257,7 +257,7 @@ export function FileEditCard({
             </div>
           </div>
 
-          <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">
+          <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
             上限：单文件 {Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB、单次补丁{" "}
             {Math.round(MAX_PATCH_BYTES / 1024 / 1024)} MB、单次最多 {MAX_FILES_PER_PATCH} 个文件；
             只处理 UTF-8 文本，软链/硬链接与二进制文件一律拒绝。改动即时生效，仅作用于本机。

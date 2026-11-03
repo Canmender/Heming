@@ -20,7 +20,7 @@ import { useModalA11y } from "./useModalA11y.js";
 
 const inputCls =
   "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
-const labelCls = "block text-[12px] text-muted";
+const labelCls = "block ui-caption";
 
 export function AgentFormModal({
   open,
@@ -182,7 +182,7 @@ export function AgentFormModal({
             {mode === "create" ? "新建智能体" : "编辑智能体"}
           </h3>
           {pending && (
-            <span role="status" className="text-[11px] text-muted">
+            <span role="status" className="ui-caption">
               提交中…
             </span>
           )}
@@ -209,8 +209,8 @@ export function AgentFormModal({
         </label>
 
         <div className="mb-3">
-          <div className="text-[12px] text-muted">头像</div>
-          <label className="mt-1 inline-flex cursor-pointer items-center rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa]">
+          <div className="ui-caption">头像</div>
+          <label className="mt-1 inline-flex cursor-pointer items-center ui-btn ui-btn-sm ui-btn-ghost">
             上传头像
             <input
               type="file"
@@ -235,12 +235,12 @@ export function AgentFormModal({
         </label>
 
         <div className="mb-3">
-          <div className="text-[12px] text-muted">绑定连接</div>
+          <div className="ui-caption">绑定连接</div>
           {profiles.length === 0 ? (
             <button
               type="button"
               onClick={gotoSettings}
-              className="mt-1 rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa]"
+              className="mt-1 ui-btn ui-btn-sm ui-btn-ghost"
             >
               去设置页添加
             </button>
@@ -291,7 +291,7 @@ export function AgentFormModal({
           <button
             type="submit"
             disabled={pending}
-            className="rounded-lg bg-ink px-3 py-1.5 text-[13px] font-bold text-white disabled:opacity-60"
+            className="ui-btn ui-btn-sm ui-btn-primary"
           >
             {mode === "create" ? "创建" : "保存"}
           </button>
@@ -306,7 +306,7 @@ export function AgentFormModal({
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
               >
                 取消
               </button>
@@ -314,7 +314,7 @@ export function AgentFormModal({
                 type="button"
                 disabled={pending}
                 onClick={() => void onDelete()}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+                className="ui-btn ui-btn-sm ui-btn-danger"
               >
                 删除
               </button>

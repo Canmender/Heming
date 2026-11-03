@@ -139,7 +139,9 @@ describe("LlmSettingsCard", () => {
     render(<LlmSettingsCard />);
     fireEvent.click(screen.getByText("删除"));
     const confirm = screen.getByRole("button", { name: "确认删除" });
-    expect(confirm.className).toContain("bg-[#b42318]");
-    expect(confirm.className).not.toContain("bg-ink");
+    // d.63：危险操作统一用 .ui-btn-danger（红底），且不能退化成主操作按钮。
+    // 断言意图不变：红底破坏性按钮、不是主操作。
+    expect(confirm.className).toContain("ui-btn-danger");
+    expect(confirm.className).not.toContain("ui-btn-primary");
   });
 });

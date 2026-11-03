@@ -24,6 +24,7 @@ import { useModalA11y } from "./useModalA11y.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { AutomationIcon, PlusIcon, TrashIcon } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
+import { EmptyState } from "./ui/EmptyState.js";
 
 /**
  * 自动化页（d.47）：把信息中枢的本机同步/日程重扫变成可定时的任务。
@@ -194,20 +195,21 @@ export function AutomationPage() {
 
       <div>
         {tasks.length === 0 ? (
-          <div className="mx-auto mt-8 max-w-[520px] rounded-xl border border-line bg-white p-6 text-center shadow-card">
-            <AutomationIcon width={26} height={26} />
-            <h2 className="ui-section-title mt-2">还没有自动化任务</h2>
-            <p className="ui-body-sm mt-1 text-muted">
-              可以把信息中枢的「同步归档」或「重扫日程」设成每天定时或按间隔执行。
-              任务只存本机，不会上传。
-            </p>
-            <button
-              type="button"
-              onClick={openCreate}
-              className="mt-4 rounded-md bg-ink px-4 py-1.5 text-[12px] font-medium text-white hover:opacity-90"
-            >
-              新建自动化
-            </button>
+          <div className="mx-auto mt-8 max-w-[520px] rounded-xl border border-line bg-white shadow-card">
+            <EmptyState
+              icon={<AutomationIcon width={22} height={22} />}
+              title="还没有自动化任务"
+              desc="可以把信息中枢的「同步归档」或「重扫日程」设成每天定时或按间隔执行。任务只存本机，不会上传。"
+              actions={
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="ui-btn ui-btn-md ui-btn-primary"
+                >
+                  新建自动化
+                </button>
+              }
+            />
           </div>
         ) : (
           <ul className="flex flex-col gap-4">

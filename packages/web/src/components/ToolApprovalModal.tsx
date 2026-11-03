@@ -134,7 +134,7 @@ export function ToolApprovalModal({
         <button
           type="button"
           onClick={() => allowChecked("allow-session")}
-          className="rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
+          className="ui-btn ui-btn-sm ui-btn-ghost"
         >
           本会话内允许此工具
         </button>
@@ -142,7 +142,7 @@ export function ToolApprovalModal({
       <button
         type="button"
         onClick={() => allowChecked("allow")}
-        className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+        className="ui-btn ui-btn-sm ui-btn-primary"
       >
         仅本次允许
       </button>
@@ -158,7 +158,7 @@ export function ToolApprovalModal({
     >
       <div className="flex flex-col gap-2">
         {conversationLabel && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-1.5 text-[11px] text-muted">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-1.5 ui-caption">
             <span className="min-w-0 flex-1">请求来自会话「{conversationLabel}」</span>
             {onOpenConversation && (
               <button
@@ -196,7 +196,7 @@ export function ToolApprovalModal({
                     htmlFor={`hitl-allow-${call.id}`}
                     className="flex cursor-pointer flex-wrap items-center gap-1.5"
                   >
-                    <span className="text-[13px] font-bold">{call.displayName}</span>
+                    <span className="ui-section-title">{call.displayName}</span>
                     <span
                       className={`rounded-sm px-1 text-[10px] ${
                         call.risk === "danger"
@@ -211,7 +211,7 @@ export function ToolApprovalModal({
                     <span className="font-mono text-[10px] text-muted">{call.name}</span>
                   </label>
                   {call.summary ? (
-                    <div className="mt-0.5 break-all text-[11px] text-muted">{call.summary}</div>
+                    <div className="mt-0.5 break-all ui-caption">{call.summary}</div>
                   ) : null}
                   {isPatch ? (
                     <FilePatchPreviewPanel argsJson={call.argsJson} previewer={patchPreviewer} />
@@ -259,12 +259,12 @@ export function ToolApprovalModal({
 
         {auto.length > 0 && (
           <details className="rounded-lg border border-line-soft px-2.5 py-2">
-            <summary className="cursor-pointer list-none text-[12px] text-muted">
+            <summary className="cursor-pointer list-none ui-caption">
               只读工具（已自动放行，{auto.length} 项）
             </summary>
             <ul className="mt-1.5 flex flex-col gap-1">
               {auto.map((call) => (
-                <li key={call.id} className="text-[11px] text-muted">
+                <li key={call.id} className="ui-caption">
                   <span className="font-mono">{call.name}</span>
                   {call.summary ? ` · ${call.summary}` : ""}
                 </li>
@@ -280,7 +280,7 @@ export function ToolApprovalModal({
             且目标不在可写根内时**不显示**这个复选框——勾了也不会生效。
         */}
         {rememberable ? (
-          <label className="mt-1 flex cursor-pointer items-start gap-2 text-[11px] text-muted">
+          <label className="mt-1 flex cursor-pointer items-start gap-2 ui-caption">
             <input
               type="checkbox"
               aria-label="记住本次选择"

@@ -12,6 +12,45 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.61.2.23.0",
+    "date": "2026-11-03",
+    "title": "组件级排版与控件规范：卡片、表格、空态、登录页",
+    "bullets": [
+      "卡片标题统一 `ui-section-title`、说明与字段标签 `ui-caption`、正文/值 `ui-body-sm`；卡片内边距统一 `p-4`；",
+      "按钮收敛到 `ui-btn` 两档三变体（`bg-[#b42318]` 这类手写危险色改 `ui-btn-danger`）、单行输入/下拉核心样式改 `ui-input`、中性徽标改 `ui-chip`；",
+      "共替换约 152 处 className（`text-[11px]/[12px] text-muted` → `ui-caption` 105 处清零、按钮约 30 处、输入 15 处）。",
+      "**刻意没统一**：多行文本域（`ui-input` 是 32px 单行规格，套 textarea 会压死高度）、行内紧凑输入框、原生 `<select>` 的下拉箭头、彩色语义色胶囊（中性灰会丢状态色）、纯图标按钮（避免方形/圆形按钮被拉变形）——都写进交接边界。",
+      "**表格**（接口区、技能区、记忆开关表）改 `.ui-table`：表头 11px muted、单元格 12px、行分隔与 hover 统一；**数字列右对齐 + `tabular-nums`、操作列右对齐且不换行**；宽表保留内部横向滚动（`min-w` 560/760），1440 下页面不被撑破；",
+      "**列表**（注册表、技能池、插件详情、团队名册与动向、记忆条目、信息中枢检索/日程）改 `.ui-list-row`：行高 44、左右 12、hover 与分隔线统一，主标题 `ui-body-sm`、次要 `ui-caption`；",
+      "密集控件：按钮 `ui-btn` 档、搜索/筛选 `ui-input`（高 32）、中性徽标 `ui-chip`、筛选/分页行间距 12；",
+      "保留：插件主列表仍是卡片网格（原版式即卡片）、彩色状态胶囊保留语义色、多行文本域保留自定义尺寸、记忆「展开即编辑」复合行的内部表单结构。",
+      "新增 `components/ui/EmptyState.tsx`（icon/title/desc/actions/compact）与 `Skeleton.tsx`（`SkeletonLine`/`SkeletonBlock`/`SkeletonCard`），内部走 `.ui-empty*`/`.ui-skeleton`；应用到主页（4 个空态 + 2 个骨架）、自动化、幕僚、团队看板与 `PageFallback`（**保留 `data-testid=\"page-fallback\"`**，d39 的 100 次切页用例仍绿）；",
+      "**登录页排版**归位到新体系：标题 18/600、副标题 `ui-page-sub`、输入框 `.ui-input`、登录按钮 `.ui-btn .ui-btn-md .ui-btn-primary`、错误行 `role=alert` + `ui-caption`；品牌字样、左右分栏、启动波纹圆环未动。",
+      "全量门禁（本版发布前实跑）：`shared` 2 文件 / 29 例、`server` 10 文件 / 141 例、`web` 202 文件 / 2988 例、`desktop` 29 个测试文件 / 518 例，全绿；三包 `tsc --noEmit` 零错误；`pnpm -r build` 通过；4/4 包无重试。",
+      "本轮新增用例 8 条（EmptyState 4 + Skeleton 4），另有设置卡 2 处 class 断言机械适配（断言意图不变）；记忆条目定位高亮统一回 ring 样式（与另外两层一致，原 d.61 的定位用例恢复绿）。",
+      "视觉：`.tmp/d63/pages`（13 页）与 `.tmp/d63/after`（登录/首跑/智能体/设置/团队/任务流程）对照 d.62 基线；设置卡、接口区、团队名册、登录页变化最明显。",
+      "回滚：纯样式与包裹层级改动，无数据/协议/行为变化。"
+    ],
+    "paragraphs": [
+      "d.62 统一了「页面级」排版，这一版把「组件级」也收成一套：设置卡片内部、按钮与输入框、表格与列表行、空态与骨架、登录页。目标不是换风格，而是让**同类东西长得一样**——以前同一屏里会出现三种按钮高度、四种说明文字字号。",
+      "### 一、新增控件与列表基元（`index.css`）",
+      "| 类 | 规格 | 替代掉的写法 |",
+      "|---|---|---|",
+      "| `.ui-input` | 高 32、13px、`line-strong` 边框、focus 转 ink、禁用态 | 各处 `h-8/h-9`、边框色不一的输入框 |",
+      "| `.ui-btn` + `.ui-btn-sm(28)/.ui-btn-md(32)` + `primary/ghost/danger` | 12px、图标间距、hover/禁用态 | `h-7/h-8/h-9` 混用、手写主/次/危险按钮 |",
+      "| `.ui-chip` | 高 20、11px、浅底描边 | 10px/11px 混用的中性徽标 |",
+      "| `.ui-table` | th 11px muted、td 12px、行分隔、hover | 各页手写的表格行/表头 |",
+      "| `.ui-list-row` | 行高 44、左右 12、hover、末行无分隔 | 名册/列表各写一套行样式 |",
+      "| `.ui-empty*` | 图标槽 32、标题 13/600、说明 12/muted、按钮槽 | 各页自己拼的空态 |",
+      "| `.ui-skeleton` | `bg-line-soft` + pulse，尊重 `prefers-reduced-motion` | 各页各写一遍的骨架块 |",
+      "设计约束：字号只走 `ui-*` 档位，点击区 ≥28px，hover 过渡 150ms，焦点环继续由 `GlobalFocusRing` 统一提供。",
+      "### 二、设置卡片与弹窗（12 张卡 + SettingsPage + 3 个弹窗）",
+      "### 三、表格、列表与密集控件（7 个页面）",
+      "### 四、空态、骨架与登录页",
+      "### 五、测试与验收"
+    ]
+  },
+  {
     "version": "d.61.2.22.0",
     "date": "2026-11-03",
     "title": "页面布局与 UI 排版统一",

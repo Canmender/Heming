@@ -116,7 +116,7 @@ export function KeyStorageCard() {
         密钥存储
       </div>
       <div className={`mt-1 text-[11px] ${tone}`}>{mainLine}</div>
-      <div className="mt-1 text-[11px] text-muted">
+      <div className="mt-1 ui-caption">
         覆盖模型 Key、MCP 请求头、设备身份私钥、会话加密链与消息缓存（有桌面安全存储时加密；浏览器端为明文）。
       </div>
       {undecryptable.length > 0 && (

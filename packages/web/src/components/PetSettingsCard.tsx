@@ -141,7 +141,7 @@ export function PetSettingsCard() {
       <div className="flex items-center gap-2">
         <span className="text-[12px] font-bold text-[#777]">桌宠</span>
         {saved && (
-          <span role="status" className="text-[11px] text-muted">
+          <span role="status" className="ui-caption">
             已保存
           </span>
         )}
@@ -194,7 +194,7 @@ export function PetSettingsCard() {
             >
               隐藏
             </button>
-            <span className="text-[11px] text-muted">
+            <span className="ui-caption">
               {visible ? "当前显示中" : "当前已隐藏"}
             </span>
           </div>
@@ -222,7 +222,7 @@ export function PetSettingsCard() {
                 );
               })}
             </div>
-            <p className="mt-1 text-[11px] text-muted">
+            <p className="mt-1 ui-caption">
               {intensityHint(presence.intensity)}。任务收尾、日程临期与幕僚简报会让桌宠开口；
               主窗口在前台时只进通知中心，桌宠不打扰。
             </p>
@@ -277,7 +277,7 @@ export function PetSettingsCard() {
                 </option>
               ))}
             </select>
-            <div className="mt-1 text-[11px] text-muted">
+            <div className="mt-1 ui-caption">
               用的是该智能体在「接口区」绑定的模型连接；没绑定就用第一个可用连接。
             </div>
           </div>
@@ -323,7 +323,7 @@ export function PetSettingsCard() {
                 {modelError}
               </p>
             ) : (
-              <p className="mt-1 text-[11px] text-muted">
+              <p className="mt-1 ui-caption">
                 相对路径，指向标准的 Cubism 3/4 模型清单（.model3.json）。换形象只换这个路径。
               </p>
             )}
@@ -333,7 +333,7 @@ export function PetSettingsCard() {
           <label className="mt-3.5 flex items-center justify-between gap-3">
             <span className="text-[12.5px] text-ink">
               鼠标穿透
-              <span className="ml-1 text-[11px] text-muted">（不挡桌面点击）</span>
+              <span className="ml-1 ui-caption">（不挡桌面点击）</span>
             </span>
             <input
               type="checkbox"

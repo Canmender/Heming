@@ -113,6 +113,7 @@
 | [research/2026-10-28-d38-adversarial-qa.md](research/2026-10-28-d38-adversarial-qa.md) | d.38.1.10.0：对抗性自检 16 例（typing + 连续性），C2 暴露「消息到达不清理输入态」，已修 |
 | [research/2026-10-28-d39-deep-stress-testing.md](research/2026-10-28-d39-deep-stress-testing.md) | d.39.1.11.0：32 例深度对抗/压测（消息风暴、页面切换、通知桥模糊输入）+ 6 项修复（交接窗口、吐司合并、id 校验、文本清洗、点击幂等、通话窗焦点）；后台失败 UI 仍缺 |
 | [research/2026-10-23-rounds-after-d36.md](research/2026-10-23-rounds-after-d36.md) | d.36 之后的开工备忘：CSP 基线、`release.sh` 顺序、docker 清理、需拍板项与建议轮次 |
+| [specs/2026-11-03-d63-component-typography.md](superpowers/specs/2026-11-03-d63-component-typography.md) | **d.61.2.23 组件级排版与控件规范**：七组控件基元（input/btn/chip/table/list-row/empty/skeleton）、设置卡与弹窗收口、7 页表格与列表、空态骨架组件化、登录页归位 |
 | [specs/2026-11-03-d62-layout-typography.md](superpowers/specs/2026-11-03-d62-layout-typography.md) | **d.61.2.22 布局与排版统一**：审计数据（11 档字号 / 3 种内边距 / 3 种内容宽度）、8 个语义排版档、`PageShell` 基元（固定页头 + 宽度档 + 滚动归属）、16 页逐页落地与刻意保留的不一致 |
 | [specs/2026-11-02-d61-ux-round2.md](superpowers/specs/2026-11-02-d61-ux-round2.md) | **d.61.2.21 体验优化第二轮**：全局本机搜索（任务/记忆/插件进命令面板，只读本机）、设置页内搜索与 13 张卡片定位（registry + 双向源码守卫）、快捷键帮助面板、通知中心类型筛选 |
 | [specs/2026-11-02-d60-ux-round.md](superpowers/specs/2026-11-02-d60-ux-round.md) | **d.60.2.21 用户体验优化轮**：审计到的 7 个问题（首跑无引导/未绑定模型不提示/命令面板单薄/空态空白/页面切换无骨架/登录页圆环压表单/文件栏缺上下文）与三轨方案（首跑引导+提示同源、命令面板 v2、空态骨架细节） |

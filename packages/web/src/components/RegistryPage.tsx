@@ -145,7 +145,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
             type="button"
             onClick={() => void load(undefined, { force: true })}
             disabled={loading}
-            className="rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa] disabled:opacity-60"
+            className="ui-btn ui-btn-md ui-btn-ghost"
           >
             {loading ? "刷新中…" : "刷新"}
           </button>
@@ -153,7 +153,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
             <button
               type="button"
               onClick={onBack}
-              className="rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
+              className="ui-btn ui-btn-md ui-btn-ghost"
             >
               返回接口区
             </button>
@@ -167,13 +167,13 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
         </p>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <input
           aria-label="搜索 MCP 服务"
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="搜索服务名，如 filesystem / github"
-          className="w-full max-w-[360px] rounded-lg border border-line-strong px-3 py-2 text-[12px] text-ink outline-hidden focus:border-ink"
+          className="ui-input w-full max-w-[360px]"
         />
         <div className="flex flex-wrap items-center gap-1">
           {FILTERS.map((f) => (
@@ -182,16 +182,14 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
               type="button"
               aria-pressed={filter === f.id}
               onClick={() => setFilter(f.id)}
-              className={`rounded-lg border px-2.5 py-1 text-[11px] ${
-                filter === f.id ? "border-ink bg-ink text-white" : "border-line bg-white text-muted hover:bg-[#fafafa]"
-              }`}
+              className={`ui-btn ui-btn-sm ${filter === f.id ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
             >
               {f.label}
             </button>
           ))}
         </div>
         {loadedAt && (
-          <span className="text-[10px] text-muted">
+          <span className="ui-caption">
             {stale ? "缓存更新于 " : "更新于 "}
             {new Date(loadedAt).toLocaleString()}
           </span>
@@ -226,7 +224,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
           <button
             type="button"
             onClick={() => void load(undefined, { force: true })}
-            className="rounded-sm border border-current px-2 py-0.5"
+            className="ui-btn ui-btn-sm ui-btn-ghost border-current"
           >
             重试
           </button>
@@ -234,15 +232,15 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
       )}
 
       {loading && entries.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-line bg-white p-8 text-center text-[13px] text-muted">
-          正在连接 Registry…
+        <div className="ui-empty rounded-xl border border-dashed border-line bg-white">
+          <p className="ui-empty-desc">正在连接 Registry…</p>
         </div>
       ) : visible.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-line bg-white p-8 text-center text-[13px] text-muted">
-          {entries.length === 0 ? "没有拉到可展示的服务。检查网络后重试。" : "没有匹配的服务。"}
+        <div className="ui-empty rounded-xl border border-dashed border-line bg-white">
+          <p className="ui-empty-desc">{entries.length === 0 ? "没有拉到可展示的服务。检查网络后重试。" : "没有匹配的服务。"}</p>
         </div>
       ) : (
-        <div className="mt-4 flex flex-col gap-2">
+        <div className="mt-4 flex flex-col rounded-xl border border-line bg-white shadow-card">
           {visible.map((entry) => (
             <RegistryRow
               key={entry.key}
@@ -263,7 +261,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
             type="button"
             disabled={loadingMore}
             onClick={() => void loadMore()}
-            className="rounded-lg border border-line bg-white px-4 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa] disabled:opacity-40"
+            className="ui-btn ui-btn-md ui-btn-ghost"
           >
             {loadingMore ? "加载中…" : "加载更多"}
           </button>
@@ -296,13 +294,13 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
   return (
     <section
       aria-label={`Registry 服务 ${entry.title}`}
-      className="flex flex-wrap items-start gap-3 rounded-xl border border-line bg-white p-3.5 shadow-card"
+      className="ui-list-row flex-wrap items-start px-3.5"
     >
       <EntryIcon entry={entry} />
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[13px] font-bold">{entry.title}</span>
+          <span className="ui-section-title">{entry.title}</span>
           {risk && (
             <span
               className={`rounded-sm px-1 text-[10px] ${
@@ -318,11 +316,11 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
             </span>
           )}
           {installed && (
-            <span className="rounded-sm bg-[#f0f0f0] px-1 text-[10px] text-[#666]">已安装</span>
+            <span className="ui-chip">已安装</span>
           )}
         </div>
-        <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{entry.description || "（无描述）"}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted">
+        <p className="mt-0.5 line-clamp-2 ui-caption">{entry.description || "（无描述）"}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 ui-micro">
           <span className="font-mono">{entry.key}</span>
           {option && (
             <span>
@@ -364,7 +362,7 @@ function RegistryRow({ entry, runtime, installed, installing, busy, onInstall }:
           disabled={installed || !installable || installing || busy}
           title={installable ? undefined : blockReason}
           onClick={() => option && onInstall(entry, option)}
-          className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-[11px] shadow-card hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-40"
+          className="ui-btn ui-btn-sm ui-btn-ghost"
         >
           {installing
             ? "安装中…"

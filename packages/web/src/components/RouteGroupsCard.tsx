@@ -20,7 +20,7 @@ const EFFECT_NOTE = "改动即时生效，仅作用于本机，绝不上传和�
 const inputCls =
   "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
 const btnGhost =
-  "rounded-lg border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors duration-150 hover:bg-[#fafafa]";
+  "ui-btn ui-btn-sm ui-btn-ghost";
 
 function newGroupId(): string {
   return `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -166,7 +166,7 @@ export function RouteGroupsCard() {
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-bold text-muted">候选链</span>
-          <span className="text-[11px] text-muted">第一个答不了才走下一个</span>
+          <span className="ui-caption">第一个答不了才走下一个</span>
         </div>
         {!open && (
           <button
@@ -180,20 +180,20 @@ export function RouteGroupsCard() {
           </button>
         )}
       </div>
-      <div className="mt-1 text-[11px] text-muted">
+      <div className="mt-1 ui-caption">
         链里只存连接的引用，API Key 仍各自留在本机安全存储里
       </div>
 
       {routes.length === 0 && !open && (
-        <div className="mt-3 text-[12px] text-muted">还没有候选链</div>
+        <div className="mt-3 ui-caption">还没有候选链</div>
       )}
 
       {routes.map((g) => (
         <div key={g.id} className="mt-3 rounded-lg border border-line p-3">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <div className="truncate text-[13px] font-bold">{g.label}</div>
-              <div className="mt-0.5 text-[11px] text-muted">
+              <div className="truncate ui-section-title">{g.label}</div>
+              <div className="mt-0.5 ui-caption">
                 {g.members.length} 个候选 · {g.strategy === "cheap" ? "参考价优先" : "按声明顺序"} ·
                 绑定 {boundCount(g.id)} 个智能体
               </div>
@@ -262,7 +262,7 @@ export function RouteGroupsCard() {
             {rests.map(({ key, rest }) => (
               <li key={key} className="flex items-center gap-2 text-[12px]">
                 <span className="min-w-0 flex-1 truncate">{describeRestKey(key, profiles)}</span>
-                <span className="shrink-0 text-[11px] text-muted">
+                <span className="shrink-0 ui-caption">
                   {rest.kind} · 还剩 {formatLeft(rest.until - now)}
                 </span>
                 <button
@@ -295,8 +295,8 @@ export function RouteGroupsCard() {
                   <span className="min-w-0 flex-1 truncate">
                     {u.profileLabel} · {u.model}
                   </span>
-                  <span className="shrink-0 text-[11px] text-muted">{u.total} tokens</span>
-                  <span className="shrink-0 text-[11px] text-muted">
+                  <span className="shrink-0 ui-caption">{u.total} tokens</span>
+                  <span className="shrink-0 ui-caption">
                     {yuan !== null
                       ? `≈ ¥${yuan < 0.001 ? yuan.toFixed(4) : yuan.toFixed(3)}`
                       : "暂无可估的费用数据"}
@@ -316,7 +316,7 @@ export function RouteGroupsCard() {
 
       {open && (
         <form onSubmit={submit} className="mt-3 rounded-lg border border-line p-3">
-          <label className="text-[12px] text-muted">
+          <label className="ui-caption">
             名称
             <input
               aria-label="候选链名称"
@@ -328,7 +328,7 @@ export function RouteGroupsCard() {
           </label>
 
           <fieldset className="mt-2">
-            <legend className="text-[12px] text-muted">选路方式</legend>
+            <legend className="ui-caption">选路方式</legend>
             <div className="mt-1 flex gap-3 text-[12px]">
               <label className="flex items-center gap-1">
                 <input
@@ -349,7 +349,7 @@ export function RouteGroupsCard() {
                 参考价优先
               </label>
             </div>
-            <div className="mt-1 text-[11px] text-muted">
+            <div className="mt-1 ui-caption">
               参考价优先：醒着的候选里先问本机价目表上便宜的那个（查不到价目的排最后，不猜）；
               休息中的仍排最后——省钱排在「现在能不能答」之后。
             </div>
@@ -414,14 +414,14 @@ export function RouteGroupsCard() {
             })}
           </ol>
           {members.length === 1 && (
-            <div className="mt-1 text-[11px] text-muted">只有一个候选，等于不换人——再加一个才有备胎。</div>
+            <div className="mt-1 ui-caption">只有一个候选，等于不换人——再加一个才有备胎。</div>
           )}
 
           {error && <div className="mt-2 text-[12px] text-red-600">{error}</div>}
           <div className="mt-3 flex items-center gap-2">
             <button
               type="submit"
-              className="rounded-lg bg-ink px-4 py-1.5 text-sm font-bold text-white"
+              className="ui-btn ui-btn-md ui-btn-primary"
             >
               保存
             </button>
@@ -432,7 +432,7 @@ export function RouteGroupsCard() {
         </form>
       )}
 
-      <div className="mt-3 border-t border-line-soft pt-2 text-[11px] text-muted">{EFFECT_NOTE}</div>
+      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">{EFFECT_NOTE}</div>
     </section>
   );
 }

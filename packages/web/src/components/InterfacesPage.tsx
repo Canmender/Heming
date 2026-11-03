@@ -204,7 +204,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
               setDiscover(true);
               setMsg(null);
             }}
-            className="rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
+            className="ui-btn ui-btn-md ui-btn-ghost"
           >
             从 Registry 发现
           </button>
@@ -214,7 +214,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
               setFormOpen((v) => !v);
               setMsg(null);
             }}
-            className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-card hover:bg-[#fafafa]"
+            className="ui-btn ui-btn-md ui-btn-ghost"
           >
             <PlusIcon width={13} height={13} />
             添加 MCP 服务
@@ -238,23 +238,23 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
       {formOpen && (
         <section className="mb-4 rounded-xl border border-line bg-white p-4 shadow-card">
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="text-[12px] text-muted">
+            <label className="ui-caption">
               服务名称
               <input
                 aria-label="服务名称"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="例如 本地工具服务"
-                className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-[12px] text-ink outline-hidden focus:border-ink"
+                className="mt-1 block w-full ui-input"
               />
             </label>
-            <label className="text-[12px] text-muted">
+            <label className="ui-caption">
               传输方式
               <select
                 aria-label="传输方式"
                 value={transport}
                 onChange={(e) => setTransport(e.target.value as "http" | "stdio")}
-                className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-[12px] text-ink outline-hidden focus:border-ink"
+                className="mt-1 block w-full ui-input"
               >
                 <option value="http">HTTP（浏览器/桌面通用）</option>
                 <option value="stdio">stdio（桌面端，本机进程）</option>
@@ -263,7 +263,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
             {/* 常用服务预设：一次填好传输/命令/参数。stdio 参数拼错时不会报错，
                 只表现为「连上了但没有工具」，很难排查——所以值得一键填。 */}
             <div className="md:col-span-2">
-              <span className="text-[12px] text-muted">常用预设</span>
+              <span className="ui-caption">常用预设</span>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 {MCP_PRESETS.map((p) => (
                   <button
@@ -280,7 +280,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                       setPresetHint(p.hint);
                       setMsg({ kind: "ok", text: `已填好「${p.name}」，确认后点保存` });
                     }}
-                    className="rounded-lg border border-line px-2.5 py-1 text-[11px] shadow-card hover:bg-[#fafafa]"
+                    className="ui-btn ui-btn-sm ui-btn-ghost"
                   >
                     {p.name}
                     {p.verified && <span className="ml-1 text-[10px] text-[#15803d]">已实测</span>}
@@ -290,48 +290,48 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
               </div>
             </div>
             {transport === "http" ? (
-              <label className="text-[12px] text-muted md:col-span-2">
+              <label className="ui-caption md:col-span-2">
                 服务地址
                 <input
                   aria-label="服务地址"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://example.com/mcp"
-                  className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-[12px] text-ink outline-hidden focus:border-ink"
+                  className="mt-1 block w-full ui-input"
                 />
               </label>
             ) : (
               <>
-                <label className="text-[12px] text-muted">
+                <label className="ui-caption">
                   启动命令
                   <input
                     aria-label="启动命令"
                     value={command}
                     onChange={(e) => setCommand(e.target.value)}
                     placeholder="npx"
-                    className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-[12px] text-ink outline-hidden focus:border-ink"
+                    className="mt-1 block w-full ui-input"
                   />
                 </label>
-                <label className="text-[12px] text-muted">
+                <label className="ui-caption">
                   参数（空格分隔）
                   <input
                     aria-label="启动参数"
                     value={args}
                     onChange={(e) => setArgs(e.target.value)}
                     placeholder="-y @modelcontextprotocol/server-filesystem /tmp"
-                    className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-[12px] text-ink outline-hidden focus:border-ink"
+                    className="mt-1 block w-full ui-input"
                   />
                 </label>
               </>
             )}
-            <label className="text-[12px] text-muted md:col-span-2">
+            <label className="ui-caption md:col-span-2">
               请求头（可选，JSON）
               <input
                 aria-label="请求头"
                 value={headersText}
                 onChange={(e) => setHeadersText(e.target.value)}
                 placeholder={'{"Authorization":"Bearer xxx"}'}
-                className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-[11px] text-ink outline-hidden focus:border-ink"
+                className="mt-1 block w-full ui-input font-mono"
               />
             </label>
           </div>
@@ -339,7 +339,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
             <button
               type="button"
               onClick={addServer}
-              className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+              className="ui-btn ui-btn-md ui-btn-primary"
             >
               保存服务
             </button>
@@ -349,7 +349,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                 setFormOpen(false);
                 resetForm();
               }}
-              className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#fafafa]"
+              className="ui-btn ui-btn-md ui-btn-ghost text-muted"
             >
               取消
             </button>
@@ -387,17 +387,17 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[13px] font-bold">{server.name}</span>
                   {registry.isPreset(server.id) && (
-                    <span className="rounded-full border border-line bg-[#f6f6f6] px-2 py-0.5 text-[10px] text-muted">
+                    <span className="ui-chip">
                       默认接入
                     </span>
                   )}
-                  <span className="rounded-full border border-line px-2 py-0.5 text-[10px] text-muted">
+                  <span className="ui-chip">
                     {server.transport === "http" ? "HTTP" : "stdio"}
                   </span>
                   {/* 从 Registry 装的本地包：把「哪类包、钉的哪个版本」摊出来。
                       界面据此能看出本机跑的是钉死版本，不是上游最新版。 */}
                   {server.origin === "registry" && (
-                    <span className="rounded-full border border-line bg-[#f6f6f6] px-2 py-0.5 text-[10px] text-muted">
+                    <span className="ui-chip">
                       {`Registry${server.registryType ? ` · ${server.registryType}` : ""}${
                         server.registryVersion ? ` · v${server.registryVersion}` : ""
                       }`}
@@ -445,7 +445,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                       aria-label={`连接 ${server.name}`}
                       onClick={() => void connect(server)}
                       disabled={state === "connecting"}
-                      className="rounded-lg border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa] disabled:opacity-60"
+                      className="ui-btn ui-btn-sm ui-btn-ghost"
                     >
                       {state === "connecting"
                         ? "连接中…"
@@ -457,7 +457,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                       type="button"
                       aria-label={`删除 ${server.name}`}
                       onClick={() => removeServer(server)}
-                      className="rounded-lg border border-[#f3d2ce] px-2 py-1 text-[11px] text-[#b42318] hover:bg-[#fef3f2]"
+                      className="ui-btn ui-btn-sm ui-btn-ghost text-[#b42318]"
                     >
                       <TrashIcon width={12} height={12} />
                     </button>
@@ -486,13 +486,13 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                   </p>
                 ) : (
                   <div className="mt-3 overflow-x-auto">
-                    <table className="w-full min-w-[560px] border-collapse text-left text-[12px]">
+                    <table className="ui-table min-w-[560px]">
                       <thead>
-                        <tr className="border-b border-line text-[11px] text-muted">
-                          <th className="py-1.5 pr-3 font-medium">工具</th>
-                          <th className="py-1.5 pr-3 font-medium">描述</th>
-                          <th className="py-1.5 pr-3 font-medium">交给模型</th>
-                          <th className="py-1.5 font-medium">操作</th>
+                        <tr>
+                          <th>工具</th>
+                          <th>描述</th>
+                          <th>交给模型</th>
+                          <th className="text-right">操作</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -500,12 +500,12 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                           const enabled = registry.isToolEnabled(server.id, tool.name);
                           const key = `${server.id}::${tool.name}`;
                           return (
-                            <tr key={tool.name} className="border-b border-[#f1f1f1] last:border-0">
-                              <td className="py-2 pr-3 font-mono text-[11px]">{tool.name}</td>
-                              <td className="max-w-[320px] truncate py-2 pr-3 text-muted">
+                            <tr key={tool.name}>
+                              <td className="font-mono">{tool.name}</td>
+                              <td className="max-w-[320px] truncate text-muted">
                                 {tool.description || "—"}
                               </td>
-                              <td className="py-2 pr-3">
+                              <td>
                                 <input
                                   type="checkbox"
                                   aria-label={`启用工具 ${tool.name}`}
@@ -516,7 +516,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                                   }}
                                 />
                               </td>
-                              <td className="py-2">
+                              <td className="text-right">
                                 <button
                                   type="button"
                                   aria-label={`测试 ${tool.name}`}
@@ -525,7 +525,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                                     setTestArgs("{}");
                                     setTestResult(null);
                                   }}
-                                  className="rounded-sm border border-line px-2 py-0.5 text-[11px] hover:bg-[#fafafa]"
+                                  className="ui-btn ui-btn-sm ui-btn-ghost"
                                 >
                                   测试
                                 </button>
@@ -538,7 +538,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
 
                     {testFor && testFor.startsWith(`${server.id}::`) && (
                       <div className="mt-3 rounded-lg border border-line bg-[#fafafa] p-3">
-                        <div className="text-[11px] font-bold text-muted">
+                        <div className="ui-section-title">
                           测试 {testFor.split("::")[1]}
                         </div>
                         <textarea
@@ -552,7 +552,7 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                             type="button"
                             onClick={() => void runTest(server, testFor.split("::")[1])}
                             disabled={testRunning === testFor}
-                            className="rounded-lg bg-ink px-3 py-1 text-[11px] font-bold text-white disabled:opacity-60"
+                            className="ui-btn ui-btn-sm ui-btn-primary"
                           >
                             {testRunning === testFor ? "执行中…" : "执行"}
                           </button>

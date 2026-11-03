@@ -37,8 +37,9 @@ export function LoginPage() {
           onSubmit={submit}
           className="w-[340px] rounded-xl border border-line bg-white p-7 shadow-card"
         >
-          <h1 className="mb-1 text-xl font-extrabold">和鸣</h1>
-          <p className="mb-5 text-[13px] text-muted">登录你的账号</p>
+          {/* d.63：页面标题/副标题走全站排版档（18/600 + 12/muted），表单与按钮走控件基元 */}
+          <h1 className="ui-page-title mb-1">和鸣</h1>
+          <p className="ui-page-sub mb-5">登录你的账号</p>
           <div className="flex flex-col gap-3">
             {/*
              * 字段名走 aria-label 而不是可见 <label>：登录页版式是裸输入框 + placeholder，
@@ -50,7 +51,7 @@ export function LoginPage() {
               autoComplete="username"
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? "login-error" : undefined}
-              className={`rounded-lg border border-line-strong px-3 py-2 text-sm outline-hidden focus:border-ink ${FOCUS_RING}`}
+              className={`ui-input ${FOCUS_RING}`}
               placeholder="用户名"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -61,7 +62,7 @@ export function LoginPage() {
               autoComplete="current-password"
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? "login-error" : undefined}
-              className={`rounded-lg border border-line-strong px-3 py-2 text-sm outline-hidden focus:border-ink ${FOCUS_RING}`}
+              className={`ui-input ${FOCUS_RING}`}
               placeholder="密码"
               type="password"
               value={password}
@@ -70,14 +71,14 @@ export function LoginPage() {
             />
             {error && (
               // 失败原因必须被读屏播报：role=alert 让它在出现时立刻读出（不是等用户 Tab 到）
-              <div id="login-error" role="alert" className="text-[12px] text-red-600">
+              <div id="login-error" role="alert" className="ui-caption text-[#b42318]">
                 {error}
               </div>
             )}
             <button
               type="submit"
               disabled={status === "pending"}
-              className={`mt-1 rounded-lg bg-ink py-2 text-sm font-bold text-white disabled:opacity-50 ${FOCUS_RING}`}
+              className={`ui-btn ui-btn-md ui-btn-primary mt-1 w-full ${FOCUS_RING}`}
             >
               {status === "pending" ? "请稍候…" : "登录"}
             </button>

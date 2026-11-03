@@ -402,9 +402,7 @@ export function TeamPage() {
         </>
       }
       actions={
-        <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 ui-caption">
-          共享 {shareCount}/3
-        </span>
+        <span className="ui-chip">共享 {shareCount}/3</span>
       }
       headerExtra={
         <div className="bg-[#fbfbfb] px-6 py-2">
@@ -469,7 +467,7 @@ export function TeamPage() {
               onChange={(e) => setMemberQuery(e.target.value)}
               placeholder="搜索成员…"
               aria-label="搜索团队成员"
-              className={`w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink ${FOCUS_RING}`}
+              className={`ui-input ${FOCUS_RING}`}
             />
             <div className="mt-1.5 flex items-center justify-between text-[11px]">
               <label className="flex items-center gap-1 text-muted">
@@ -497,7 +495,7 @@ export function TeamPage() {
             {!rosterReady ? (
               <div role="status" aria-busy="true" aria-label="正在加载团队成员" className="space-y-1.5 p-1.5">
                 {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="h-9 animate-pulse rounded-lg bg-[#f2f2f2]" />
+                  <div key={i} className="ui-skeleton h-9 rounded-lg" />
                 ))}
               </div>
             ) : rosterError ? (
@@ -505,14 +503,14 @@ export function TeamPage() {
                 <p role="alert" className="text-[#b42318]">名册加载失败：{rosterError}</p>
                 <button
                   type="button"
-                  className="mt-1 rounded-sm border border-line px-2 py-0.5 text-[11px]"
+                  className="ui-btn ui-btn-sm ui-btn-ghost mt-1"
                   onClick={() => void loadRoster()}
                 >
                   重试
                 </button>
               </div>
             ) : filteredMembers.length === 0 ? (
-              <p className="p-2 text-[12px] text-muted">
+              <p className="p-2 ui-caption">
                 {members.length === 0 ? "还没有其他成员。" : "没有符合条件的成员。"}
               </p>
             ) : (
@@ -523,9 +521,7 @@ export function TeamPage() {
                     key={m.user.id}
                     type="button"
                     onClick={() => setSelectedId(selected ? null : m.user.id)}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${
-                      selected ? "bg-[#f2f2f2]" : "hover:bg-[#f7f7f7]"
-                    }`}
+                    className={`ui-list-row w-full text-left ${selected ? "bg-[#f2f2f2]" : ""}`}
                   >
                     <span className="relative shrink-0">
                       <Avatar user={m.user} size={28} />
@@ -538,16 +534,14 @@ export function TeamPage() {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1">
-                        <span className="truncate text-[12px] font-medium">
+                        <span className="truncate ui-body-sm font-medium">
                           {m.user.displayName}
                         </span>
                         {m.user.id === me?.id && (
-                          <span className="shrink-0 rounded-sm border border-line px-1 text-[9px] text-muted">
-                            我
-                          </span>
+                          <span className="ui-chip">我</span>
                         )}
                       </span>
-                      <span className="block truncate text-[10px] text-muted">
+                      <span className="block truncate ui-caption">
                         {m.online ? "在线" : fmtLastSeen(m.lastSeenAt)}
                       </span>
                     </span>
@@ -564,21 +558,21 @@ export function TeamPage() {
               <Avatar user={selectedMember.user} size={32} />
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="truncate text-[13px] font-bold">
+                  <span className="truncate ui-section-title">
                     {selectedMember.user.displayName}
                   </span>
-                  <span className="truncate text-[11px] text-muted">
+                  <span className="truncate ui-caption">
                     @{selectedMember.user.username}
                   </span>
                 </div>
-                <div className="text-[10px] text-muted">
+                <div className="ui-caption">
                   {selectedMember.online ? "在线" : fmtLastSeen(selectedMember.lastSeenAt)} ·
                   该成员最近的动向
                 </div>
               </div>
               <button
                 type="button"
-                className="ml-auto rounded-lg border border-line px-2 py-0.5 text-[11px] text-muted hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted"
                 onClick={() => setSelectedId(null)}
               >
                 返回全部
@@ -588,7 +582,7 @@ export function TeamPage() {
 
           {/* 三个视图互斥：动向（默认）/ 团队日程（只读）/ 用量（本机 + 开启共享后的排行） */}
           <div
-            className="flex items-center gap-1 border-b border-line-soft px-6 py-2"
+            className="flex items-center gap-2 border-b border-line-soft px-6 py-2"
             role="tablist"
             aria-label="团队视图"
           >
@@ -616,23 +610,21 @@ export function TeamPage() {
 
           {tab === "feed" && (
             <>
-              <div className="flex items-center gap-1 border-b border-line-soft px-6 py-2">
+              <div className="flex items-center gap-2 border-b border-line-soft px-6 py-2">
                 {FILTERS.map((f) => (
                   <button
                     key={f.key}
                     type="button"
                     aria-pressed={filter === f.key}
                     onClick={() => setFilter(f.key)}
-                    className={`rounded-lg px-2 py-1 text-[11px] ${
-                      filter === f.key ? "bg-ink text-white" : "text-muted hover:bg-[#f3f3f3]"
-                    }`}
+                    className={`ui-btn ui-btn-sm ${filter === f.key ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
                   >
                     {f.label}
                   </button>
                 ))}
             <button
               type="button"
-              className="ml-auto rounded-sm px-2 py-1 text-[11px] text-muted hover:bg-[#f3f3f3]"
+              className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted"
               onClick={() => void loadFeed(true)}
             >
               刷新
@@ -643,7 +635,7 @@ export function TeamPage() {
             {!feedReady ? (
               <div role="status" aria-busy="true" aria-label="正在加载团队动向" className="space-y-2">
                 {[0, 1, 2].map((i) => (
-                  <div key={i} className="h-12 animate-pulse rounded-xl bg-[#f4f4f4]" />
+                  <div key={i} className="ui-skeleton h-12 rounded-xl" />
                 ))}
               </div>
             ) : feedError ? (
@@ -651,16 +643,16 @@ export function TeamPage() {
                 <p role="alert" className="text-[#b42318]">动向加载失败：{feedError}</p>
                 <button
                   type="button"
-                  className="mt-2 rounded-sm border border-line px-2 py-0.5 text-[11px]"
+                  className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
                   onClick={() => void loadFeed(true)}
                 >
                   重试
                 </button>
               </div>
             ) : visibleActivities.length === 0 ? (
-              <div className="py-10 text-center text-[12px] text-muted">
+              <div className="ui-empty">
                 <p>还没有可见的动向。</p>
-                <p className="mt-1 text-[11px]">
+                <p className="mt-1 ui-caption">
                   成员在团队页勾选「任务 / 日程」后，摘要会出现在这里；智能体的工作不进入团队动向。
                 </p>
               </div>
@@ -669,27 +661,27 @@ export function TeamPage() {
                 {visibleActivities.map((a) => (
                   <li
                     key={a.id}
-                    className="flex items-start gap-2.5 rounded-xl px-2 py-2 hover:bg-[#fafafa]"
+                    className="ui-list-row items-start"
                   >
                     <Avatar user={avatarOf(a.actorId)} size={26} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline gap-1.5">
-                        <span className="shrink-0 text-[12px] font-medium">
+                        <span className="shrink-0 ui-body-sm font-medium">
                           {nameOf(a.actorId)}
                         </span>
-                        <span className="shrink-0 rounded-sm border border-[#ececec] px-1 text-[9px] text-muted">
+                        <span className="ui-chip">
                           {KIND_LABEL[a.kind]}
                         </span>
-                        <span className="truncate text-[12px]">{a.title}</span>
+                        <span className="truncate ui-body-sm">{a.title}</span>
                         <time
                           dateTime={a.occurredAt}
-                          className="ml-auto shrink-0 text-[10px] text-muted"
+                          className="ml-auto shrink-0 ui-caption"
                         >
                           {fmtTime(a.occurredAt)}
                         </time>
                       </div>
                       {a.detail && (
-                        <p className="mt-0.5 truncate text-[11px] text-muted">{a.detail}</p>
+                        <p className="mt-0.5 truncate ui-caption">{a.detail}</p>
                       )}
                     </div>
                   </li>
@@ -705,7 +697,7 @@ export function TeamPage() {
                     setLoadingMore(true);
                     void loadFeed(false).finally(() => setLoadingMore(false));
                   }}
-                  className="rounded-lg border border-line px-3 py-1.5 text-[11px] text-muted hover:bg-[#fafafa] disabled:opacity-40"
+                  className="ui-btn ui-btn-sm ui-btn-ghost text-muted"
                 >
                   {loadingMore ? "加载中…" : "加载更早"}
                 </button>
@@ -722,7 +714,7 @@ export function TeamPage() {
                 不新增任何云端内容上传。
               </p>
               {!feedReady ? (
-                <p role="status" className="mt-3 text-[12px] text-muted">加载中…</p>
+                <p role="status" className="mt-3 ui-caption">加载中…</p>
               ) : agendaActivities.length === 0 ? (
                 <div className="py-10 text-center text-[12px] leading-6 text-muted">
                   {!infohubRunning ? (
@@ -732,12 +724,12 @@ export function TeamPage() {
                         信息中枢未连接：团队日程不显示，本机日程也没有被采集。连接信息中枢并开启「日程」共享后，
                         摘要才会同步给团队。
                       </p>
-                      <p className="mt-1 text-[11px]">信息中枢只在本机运行，不会自动拉起。</p>
+                      <p className="mt-1 ui-caption">信息中枢只在本机运行，不会自动拉起。</p>
                     </>
                   ) : !share.agenda ? (
                     <>
                       <p>你还没有开启「日程」共享。</p>
-                      <p className="mt-1 text-[11px]">
+                      <p className="mt-1 ui-caption">
                         开启后，你的日程摘要（标题 + 到期档位）会出现在团队日程里。
                       </p>
                     </>
@@ -750,24 +742,24 @@ export function TeamPage() {
                   {agendaActivities.map((a) => (
                     <li
                       key={a.id}
-                      className="flex items-start gap-2.5 rounded-xl px-2 py-2 hover:bg-[#fafafa]"
+                      className="ui-list-row items-start"
                     >
                       <Avatar user={avatarOf(a.actorId)} size={26} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline gap-1.5">
-                          <span className="shrink-0 text-[12px] font-medium">
+                          <span className="shrink-0 ui-body-sm font-medium">
                             {nameOf(a.actorId)}
                           </span>
-                          <span className="truncate text-[12px]">{a.title}</span>
+                          <span className="truncate ui-body-sm">{a.title}</span>
                           <time
                             dateTime={a.occurredAt}
-                            className="ml-auto shrink-0 text-[10px] text-muted"
+                            className="ml-auto shrink-0 ui-caption"
                           >
                             {fmtTime(a.occurredAt)}
                           </time>
                         </div>
                         {a.detail && (
-                          <p className="mt-0.5 truncate text-[11px] text-muted">{a.detail}</p>
+                          <p className="mt-0.5 truncate ui-caption">{a.detail}</p>
                         )}
                       </div>
                     </li>
@@ -780,7 +772,7 @@ export function TeamPage() {
           {tab === "usage" && (
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] leading-5 text-muted">
+                <span className="ui-caption leading-5">
                   只统计 token 数、模型名与连接名；提示词、对话内容、工具参数与结果都不出本机。
                 </span>
                 <div className="ml-auto flex items-center gap-1" role="group" aria-label="用量区间">
@@ -790,9 +782,7 @@ export function TeamPage() {
                       type="button"
                       aria-pressed={usageRange === r}
                       onClick={() => setUsageRange(r)}
-                      className={`rounded-lg px-2 py-1 text-[11px] ${
-                        usageRange === r ? "bg-ink text-white" : "text-muted hover:bg-[#f3f3f3]"
-                      }`}
+                      className={`ui-btn ui-btn-sm ${usageRange === r ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
                     >
                       {r === "7d" ? "近 7 天" : "近 30 天"}
                     </button>
@@ -802,7 +792,7 @@ export function TeamPage() {
                       type="button"
                       disabled={usageSyncing}
                       onClick={() => void syncUsage()}
-                      className="rounded-sm px-2 py-1 text-[11px] text-muted hover:bg-[#f3f3f3] disabled:opacity-40"
+                      className="ui-btn ui-btn-sm ui-btn-ghost text-muted"
                     >
                       {usageSyncing ? "同步中…" : "刷新"}
                     </button>
@@ -831,7 +821,7 @@ export function TeamPage() {
                       近 {rangeDays} 天合计{" "}
                       <b className="tabular-nums">{fmtTokens(localUsage.total)}</b>
                     </span>
-                    <span className="text-[11px] text-muted">未上报 {localUsage.unreported} 轮</span>
+                    <span className="ui-caption">未上报 {localUsage.unreported} 轮</span>
                   </div>
                   <ul className="mt-2 space-y-1 text-[11px] leading-5">
                     {localUsage.byModel.map((m) => (
@@ -847,7 +837,7 @@ export function TeamPage() {
                       <li className="text-muted">近 {rangeDays} 天还没有用量记录。</li>
                     )}
                   </ul>
-                  <p className="mt-2 text-[10px] leading-4 text-muted">
+                  <p className="mt-2 ui-micro">
                     已停止上传；如需删除已上传记录，点
                     <button
                       type="button"
@@ -860,13 +850,13 @@ export function TeamPage() {
                   </p>
                 </section>
               ) : !usageReady ? (
-                <p role="status" className="mt-3 text-[12px] text-muted">加载中…</p>
+                <p role="status" className="mt-3 ui-caption">加载中…</p>
               ) : usageError ? (
                 <div className="py-6 text-center text-[12px]">
                   <p role="alert" className="text-[#b42318]">用量加载失败：{usageError}</p>
                   <button
                     type="button"
-                    className="mt-2 rounded-sm border border-line px-2 py-0.5 text-[11px]"
+                    className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
                     onClick={() => void syncUsage()}
                   >
                     重试
@@ -880,7 +870,7 @@ export function TeamPage() {
                       <span>
                         合计 <b className="tabular-nums">{fmtTokens(usage.self.total)}</b>
                       </span>
-                      <span className="text-[11px] text-muted">
+                      <span className="ui-caption">
                         未上报 {usage.self.unreported} 轮
                       </span>
                     </div>
@@ -908,7 +898,7 @@ export function TeamPage() {
                   <section className="mt-4" aria-label="团队用量排行">
                     <h2 className="ui-section-title">团队排行（近 {rangeDays} 天）</h2>
                     {usage.ranking.length === 0 ? (
-                      <p className="mt-1 text-[11px] text-muted">还没有成员共享用量。</p>
+                      <p className="mt-1 ui-caption">还没有成员共享用量。</p>
                     ) : (
                       <ol className="mt-1 space-y-1 text-[11px] leading-5">
                         {rankingRows.map((row, i) => (
@@ -933,7 +923,7 @@ export function TeamPage() {
                         ))}
                       </ol>
                     )}
-                    <p className="mt-2 text-[10px] leading-4 text-muted">
+                    <p className="mt-2 ui-micro">
                       排行只显示聚合数与显示名；模型名与连接名只在你自己的明细里。
                     </p>
                   </section>
@@ -952,7 +942,7 @@ export function TeamPage() {
             <>
               <button
                 type="button"
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-md ui-btn-ghost"
                 onClick={() => setConfirmClear(false)}
               >
                 取消
@@ -960,7 +950,7 @@ export function TeamPage() {
               <button
                 type="button"
                 disabled={clearing}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#912018] disabled:opacity-50"
+                className="ui-btn ui-btn-md ui-btn-danger"
                 onClick={() => void onClearMine()}
               >
                 {clearing ? "清除中…" : "清除"}
@@ -982,7 +972,7 @@ export function TeamPage() {
             <>
               <button
                 type="button"
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-md ui-btn-ghost"
                 onClick={() => setConfirmClearUsage(false)}
               >
                 取消
@@ -990,7 +980,7 @@ export function TeamPage() {
               <button
                 type="button"
                 disabled={clearingUsage}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#912018] disabled:opacity-50"
+                className="ui-btn ui-btn-md ui-btn-danger"
                 onClick={() => void onClearUsage()}
               >
                 {clearingUsage ? "清除中…" : "清除"}
