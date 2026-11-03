@@ -150,3 +150,120 @@ body {
   }
 }
 
+
+/*
+ * ── 控件与列表基元（d.63 组件级排版与控件规范）──────────────────────
+ *
+ * d.62 统一了「页面级」排版；本轮把「组件级」也收口：表单控件、按钮、胶囊、
+ * 表格、列表行、空态、骨架各只有一套写法。设计约束：
+ *   · 高度只两档：sm 28 / md 32（输入框固定 32）——此前 h-7/h-8/h-9 混用；
+ *   · 字号只走 ui-* 档（12/13/11），不再新增任意 px；
+ *   · 可点击元素点击区 ≥28px（胶囊本身就是 20px 展示件，外层可点区域由父级保证）；
+ *   · hover/focus 过渡 150ms，焦点环由 GlobalFocusRing 统一提供，这里只做边框变化。
+ */
+@layer components {
+  /* ── 表单控件 ── */
+  .ui-input {
+    @apply h-8 w-full rounded-md border border-line-strong bg-white px-2.5 text-[13px] leading-5 text-ink outline-hidden transition-colors;
+  }
+  .ui-input::placeholder {
+    @apply text-[#b8b8b8];
+  }
+  .ui-input:focus {
+    @apply border-ink;
+  }
+  .ui-input:disabled {
+    @apply cursor-not-allowed bg-[#fafafa] text-muted;
+  }
+
+  /* ── 按钮：尺寸 sm 28 / md 32，三种变体 ── */
+  .ui-btn {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border text-[12px] font-medium leading-5 transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .ui-btn-sm {
+    @apply h-7 px-2.5;
+  }
+  .ui-btn-md {
+    @apply h-8 px-3;
+  }
+  .ui-btn-primary {
+    background-color: var(--heming-accent);
+    color: var(--heming-on-accent);
+    border-color: transparent;
+  }
+  .ui-btn-primary:hover:not(:disabled) {
+    opacity: 0.88;
+  }
+  .ui-btn-ghost {
+    @apply border-line bg-white text-ink;
+  }
+  .ui-btn-ghost:hover:not(:disabled) {
+    @apply bg-[#f7f7f7];
+  }
+  .ui-btn-danger {
+    @apply border-transparent bg-[#c43d3d] text-white;
+  }
+  .ui-btn-danger:hover:not(:disabled) {
+    @apply bg-[#b03535];
+  }
+
+  /* ── 胶囊/徽标（展示件，不承载点击） ── */
+  .ui-chip {
+    @apply inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-line bg-[#fafafa] px-1.5 text-[11px] leading-4 text-muted;
+  }
+
+  /* ── 表格 ── */
+  .ui-table {
+    @apply w-full border-collapse text-left;
+  }
+  .ui-table th {
+    @apply border-b border-line-soft px-3 py-2 text-[11px] font-medium text-muted;
+  }
+  .ui-table td {
+    @apply border-b border-line-soft px-3 py-2.5 text-[12px] leading-5 text-ink;
+  }
+  .ui-table tr:last-child td {
+    @apply border-b-0;
+  }
+  .ui-table tbody tr:hover td {
+    @apply bg-[#fbfbfb];
+  }
+
+  /* ── 列表行（名册/会话/插件/技能等） ── */
+  .ui-list-row {
+    @apply flex items-center gap-2 border-b border-line-soft px-3 py-2.5 transition-colors last:border-b-0;
+  }
+  .ui-list-row:hover {
+    @apply bg-[#fbfbfb];
+  }
+
+  /* ── 空态 ── */
+  .ui-empty {
+    @apply flex flex-col items-center justify-center gap-2 px-6 py-10 text-center;
+  }
+  .ui-empty-title {
+    @apply text-[13px] font-semibold leading-5 text-ink;
+  }
+  .ui-empty-desc {
+    @apply max-w-[420px] text-[12px] leading-5 text-muted;
+  }
+  .ui-empty-actions {
+    @apply mt-1 flex items-center gap-2;
+  }
+
+  /* ── 骨架块 ── */
+  .ui-skeleton {
+    @apply rounded-sm bg-line-soft;
+    animation: ui-skeleton-pulse 1.4s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ui-skeleton {
+      animation: none;
+    }
+  }
+}
+
+@keyframes ui-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
