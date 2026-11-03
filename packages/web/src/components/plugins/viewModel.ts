@@ -1,5 +1,3 @@
-import type { McpServerConfig, ServerOrigin } from "../../lib/mcp/types.js";
-import type { SkillDefinition } from "../../lib/skills/types.js";
 import type {
   CapabilityCatalog,
   CapabilityToolEntry,
@@ -27,32 +25,6 @@ import {
  * - 解析与权限逻辑**只在 `lib/plugins`**（清单校验、`evaluatePluginPermissions`），这里只做展示适配，
  *   绝不在组件里重复实现一遍——否则两套口径迟早漂移。
  */
-
-/** 页面需要的最小技能池接口（真实 `SkillPool` 天然满足）。 */
-export interface SkillPoolPort {
-  list(): SkillDefinition[];
-  assigned(agentId: string): string[];
-  setEnabled(id: string, enabled: boolean): void;
-}
-
-/** 页面需要的最小 MCP 注册表接口（真实 `mcpRegistry` 天然满足）。 */
-export interface McpRegistryPort {
-  servers(): McpServerConfig[];
-  /** 预置服务判定（系统插件只收预置服务，与接口区同源）。 */
-  isPreset(id: string): boolean;
-  allTools(): { serverId: string; serverName: string; tool: { name: string; description?: string } }[];
-  tools(serverId: string): { name: string; description?: string }[];
-  isToolEnabled(serverId: string, toolName: string): boolean;
-  hasDiscovered(serverId: string): boolean;
-  setToolEnabled(serverId: string, toolName: string, enabled: boolean): void;
-  update(id: string, patch: { enabled?: boolean }): unknown;
-}
-
-/** 智能体名册（只需要 id/name，避免页面依赖整个 chat store 类型）。 */
-export interface AgentLite {
-  id: string;
-  name: string;
-}
 
 /* ------------------------------------------------------------ 贡献与权限 */
 
@@ -176,71 +148,6 @@ export function hostPreview(view: PluginPermissionView, max = 3): {
   };
 }
 
-/* ---------------------------------------------------------------- 技能页 */
-
-export type SkillSourceKind = "builtin" | "imported" | "plugin" | "custom" | "distilled";
-
-export interface CapabilitySkillRow {
-  id: string;
-  name: string;
-  description: string;
-  source: SkillSourceKind;
-  sourceLabel: string;
-  pluginId?: string;
-  pluginName?: string;
-  triggerCount: number;
-  enabled: boolean;
-  /** 被几个智能体分配使用（按名册逐个 `assigned()` 判定）。 */
-  agentCount: number;
-}
-
-const SOURCE_LABEL: Record<SkillSourceKind, string> = {
-  builtin: "内置",
-  imported: "导入",
-  plugin: "插件",
-  custom: "自定义",
-  distilled: "沉淀",
-};
-
-/**
- * 技能 Tab 的统一行。
- *
- * 来源判定优先看 `pluginId`：插件贡献物化进技能池时 `source` 可能是 `imported`，
- * 只按 source 展示会把插件技能说成「导入」，用户找不回是哪个插件带的。
- */
-export function describeSkillRows(
-  pool: SkillPoolPort,
-  plugins: Pick<PluginStore, "list">,
-  agents: readonly AgentLite[],
-): CapabilitySkillRow[] {
-  const pluginNames = new Map(plugins.list().map((p) => [p.manifest.id, p.manifest.name]));
-  return pool.list().map((skill) => {
-    const pluginId = skill.pluginId;
-    const source: SkillSourceKind = pluginId
-      ? "plugin"
-      : skill.source === "builtin"
-        ? "builtin"
-        : skill.source === "distilled"
-          ? "distilled"
-          : skill.source === "user"
-            ? "custom"
-            : "imported";
-    const agentCount = agents.filter((agent) => pool.assigned(agent.id).includes(skill.id)).length;
-    return {
-      id: skill.id,
-      name: skill.name,
-      description: skill.description,
-      source,
-      sourceLabel: SOURCE_LABEL[source],
-      pluginId,
-      pluginName: pluginId ? pluginNames.get(pluginId) : undefined,
-      triggerCount: skill.triggers.length,
-      enabled: skill.enabled,
-      agentCount,
-    };
-  });
-}
-
 /* ---------------------------------------------------------------- 工具页 */
 
 export type ToolGroupKind = "system" | "mcp" | "plugin" | "self";
@@ -340,62 +247,6 @@ export function groupToolPacks(catalog: CapabilityCatalog): ToolPackGroup[] {
     });
   }
   return [...groups.values()];
-}
-
-/* ------------------------------------------------------------- MCP 服务页 */
-
-export type McpSourceKind = ServerOrigin;
-
-export interface CapabilityMcpRow {
-  id: string;
-  name: string;
-  url: string;
-  origin: McpSourceKind;
-  originLabel: string;
-  pluginId?: string;
-  pluginName?: string;
-  toolCount: number;
-  enabled: boolean;
-  /** 已发现过工具视为已连接（连接状态只在前端，不落盘）。 */
-  connected: boolean;
-}
-
-const ORIGIN_LABEL: Record<McpSourceKind, string> = {
-  preset: "预置",
-  manual: "手工",
-  registry: "Registry",
-  plugin: "插件",
-};
-
-/** MCP Tab 统一行；`plugin:` 前缀的服务补插件名（来自已装清单，不猜）。 */
-export function describeMcpRows(
-  mcp: McpRegistryPort,
-  plugins: Pick<PluginStore, "list">,
-  pluginIdFromServerId: (serverId: string) => string | null,
-): CapabilityMcpRow[] {
-  const names = new Map(plugins.list().map((p) => [p.manifest.id, p.manifest.name]));
-  return mcp.servers().map((server) => {
-    const pluginId = pluginIdFromServerId(server.id) ?? undefined;
-    const origin: McpSourceKind = server.origin ?? "manual";
-    let toolCount = 0;
-    try {
-      toolCount = mcp.tools(server.id).length;
-    } catch {
-      toolCount = 0;
-    }
-    return {
-      id: server.id,
-      name: server.name,
-      url: server.url ?? "",
-      origin,
-      originLabel: ORIGIN_LABEL[origin],
-      pluginId,
-      pluginName: pluginId ? names.get(pluginId) : undefined,
-      toolCount,
-      enabled: server.enabled,
-      connected: mcp.hasDiscovered(server.id),
-    };
-  });
 }
 
 /* ------------------------------------------------------------ 安装信任（d.66） */

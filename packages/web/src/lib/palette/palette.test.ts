@@ -38,23 +38,21 @@ function member(id: string, displayName: string, over: Partial<TeamMember> = {})
 }
 
 describe("palette · 页面目录", () => {
-  it("覆盖 13 个导航页，且与 store 的默认导航顺序是同一集合", () => {
-    expect(PALETTE_PAGES).toHaveLength(13);
+  it("覆盖 9 个导航页，且与 store 的默认导航顺序是同一集合", () => {
+    expect(PALETTE_PAGES).toHaveLength(9);
     expect(PALETTE_PAGES.map((p) => p.page).sort()).toEqual([...DEFAULT_NAV_ORDER].sort());
   });
 
-  it("Alt 快捷键与 App/NavRail 的绑定一致（1/2/3/4/5/6/8/0）", () => {
+  it("Alt 快捷键与 App/NavRail 的绑定一致（1/2/5/6/8/0）", () => {
     const digits = Object.fromEntries(
       PALETTE_PAGES.filter((p) => p.digit).map((p) => [p.page, p.digit]),
     );
     expect(digits).toEqual({
       home: "1",
-      workspace: "2",
-      skills: "3",
-      interfaces: "4",
+      team: "2",
       memory: "5",
       settings: "6",
-      tasks: "8",
+      chat: "8",
       plugins: "0",
     });
   });
@@ -130,7 +128,7 @@ describe("palette · 最近使用（本机 ≤5）", () => {
 
   it("容量上限 5：超出淘汰最旧的一条", () => {
     const store = fakeStorage();
-    for (const id of ["home", "team", "chat", "skills", "memory", "settings"] as const) {
+    for (const id of ["home", "team", "chat", "plugins", "memory", "settings"] as const) {
       recordRecent({ kind: "page", id }, store);
     }
     const list = loadRecent(store);
@@ -175,7 +173,7 @@ describe("palette · 空查询分组", () => {
   it("无最近使用时只有「页面跳转」与「常用动作」两组", () => {
     const groups = buildEmptyGroups([]);
     expect(groups.map((g) => g.id)).toEqual(["page", "action"]);
-    expect(groups[0].items).toHaveLength(13);
+    expect(groups[0].items).toHaveLength(9);
     expect(groups[1].items).toHaveLength(4);
   });
 
@@ -288,7 +286,7 @@ describe("palette · 输入检索", () => {
 
   it("flattenGroups 只摊平结果项，便于键盘游标", () => {
     const groups = buildEmptyGroups([]);
-    expect(flattenGroups(groups)).toHaveLength(17);
+    expect(flattenGroups(groups)).toHaveLength(13);
   });
 
   it("旧口径 searchAll 仍可用（兼容导出）", () => {

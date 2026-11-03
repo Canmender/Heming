@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
-import { SkillsPage, categorizeSkill, SOURCE_LABEL } from "./SkillsPage.js";
+import { SkillsPage, SkillsView, categorizeSkill, SOURCE_LABEL } from "./SkillsPage.js";
 import { SkillPool, SKILLS_KEY, BUILTIN_SKILLS, type StorageLike } from "../lib/skills/index.js";
 
 /**
@@ -74,7 +74,7 @@ describe("SkillsPage 技能区", () => {
     await renderReady();
 
     expect(screen.getByRole("heading", { name: "技能区" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "按智能体" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "技能池" })).toHaveAttribute("aria-selected", "false");
 
     // 首启种子 4 个内置技能
@@ -236,7 +236,7 @@ describe("SkillsPage 技能区", () => {
       screen.queryByRole("button", { name: "沉淀 财报速读（沉淀）" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "技能" }));
+    fireEvent.click(screen.getByRole("tab", { name: "按智能体" }));
     expect(within(group("沉淀技能")).getByText("1")).toBeInTheDocument();
   });
 
@@ -250,7 +250,7 @@ describe("SkillsPage 技能区", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("导入完成：新增 1 个，更新 0 个");
 
-    fireEvent.click(screen.getByRole("tab", { name: "技能" }));
+    fireEvent.click(screen.getByRole("tab", { name: "按智能体" }));
     // 导入的技能默认不分配：用分组头 ＋ 加进来
     expect(within(group("已装技能")).getByText("0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "为已装技能添加技能" }));
@@ -370,5 +370,31 @@ describe("SkillsPage 按智能体分配技能", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "添加 财报速读" }));
     expect(screen.queryByRole("dialog", { name: "添加技能" })).not.toBeInTheDocument();
     expect(within(group("已装技能")).getByText("1")).toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------ 可嵌入视图（d.67 导航合并） */
+
+describe("SkillsView 嵌入视图", () => {
+  it("去掉 PageShell 与页面标题，保留智能体分配、技能池、搜索与来源徽标", async () => {
+    const { container } = render(<SkillsView skills={pool} />);
+    // 嵌入后由宿主页提供唯一的页面标题
+    expect(container.querySelector("h1")).toBeNull();
+
+    const select = (await screen.findByLabelText("选择智能体")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("a1"));
+    expect(screen.getByRole("tab", { name: "按智能体" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "技能池" })).toBeInTheDocument();
+    expect(screen.getByLabelText("搜索技能")).toBeInTheDocument();
+    // 内置技能默认分配给第一个智能体，来源徽标仍是「内置：<系统能力名>」
+    const card = within(group("内置技能")).getByRole("group", { name: "技能卡 记忆整理" });
+    expect(within(card).getByText("：系统能力", { exact: false })).toBeInTheDocument();
+
+    // 子页签照常可用
+    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
+    expect(screen.getByRole("row", { name: /记忆整理/ })).toBeInTheDocument();
   });
 });

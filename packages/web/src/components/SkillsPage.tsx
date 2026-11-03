@@ -298,15 +298,38 @@ function SkillDetailDrawer({
   );
 }
 
-/* ------------------------------------------------------------------ 页面 */
+/* ------------------------------------------------------------------ 视图 */
 
-export interface SkillsPageProps {
+export interface SkillsViewProps {
   skills?: SkillPool;
   /** 插件 store（取「插件：<名>」来源徽标要用的显示名；测试可注入）。 */
   plugins?: PluginStore;
+  /**
+   * 「插件：<名>」徽标被点时做什么。
+   * 嵌入插件区时由宿主打开插件详情（同页弹窗）；不传则退回旧行为（投意图 + 切插件区），
+   * 这样独立页/旧用例的跨页语义仍在，而宿主页内不再发生「自己跳自己」。
+   */
+  onOpenPlugin?: (pluginId: string) => void;
+  /** 额外容器类（宿主控制高度/内边距用；视图本身不自带 PageShell）。 */
+  className?: string;
 }
 
-export function SkillsPage({ skills = skillPool, plugins = pluginStore }: SkillsPageProps = {}) {
+export type SkillsPageProps = SkillsViewProps;
+
+/**
+ * 可嵌入的技能视图（d.67 导航合并）。
+ *
+ * 为什么把技能区从「页」降级成「视图」：导航里技能区与插件区各有一个入口，
+ * 但插件技能本来就会物化进技能池、分配与启停是同一份数据——两个入口只是
+ * 把同一个能力面拆成两处。合并后插件区（能力中心）承载一个「技能」Tab，
+ * 本视图保留技能池、按智能体分配、导入/沉淀/删除、搜索与分组，只去掉页面外壳。
+ */
+export function SkillsView({
+  skills = skillPool,
+  plugins = pluginStore,
+  onOpenPlugin,
+  className = "",
+}: SkillsViewProps = {}) {
   const [tab, setTab] = useState<"groups" | "pool">("groups");
   const [tick, setTick] = useState(0);
   const [query, setQuery] = useState("");
@@ -321,11 +344,17 @@ export function SkillsPage({ skills = skillPool, plugins = pluginStore }: Skills
   /** 系统插件的显示名（内置技能来源徽标用；不硬编码文案）。 */
   const systemName = useMemo(() => describeSystemPlugin({ skills }).name, [skills]);
 
-  /** 跳插件区并打开该插件详情：只投既有内存意图，不新增 IPC。 */
-  const openPlugin = (pluginId: string) => {
-    useUiStore.getState().setPaletteIntent("open-plugin", { id: pluginId });
-    useUiStore.getState().setPage("plugins");
-  };
+  /**
+   * 「插件：<名>」徽标的动作：
+   * - 嵌入式（宿主传 onOpenPlugin）→ 宿主打开插件详情，留在插件区内；
+   * - 独立渲染（旧外壳/旧用例）→ 仍投既有 open-plugin 内存意图再切插件区。
+   */
+  const openPlugin =
+    onOpenPlugin ??
+    ((pluginId: string) => {
+      useUiStore.getState().setPaletteIntent("open-plugin", { id: pluginId });
+      useUiStore.getState().setPage("plugins");
+    });
   const [detailId, setDetailId] = useState<string | null>(null);
   // d.64 T3b：命令面板「插件命令」（target=skill）的定位意图。
   // 找不到该技能时只停在技能区：不报错、不弹空抽屉（页面已经切过来了）。
@@ -764,11 +793,7 @@ export function SkillsPage({ skills = skillPool, plugins = pluginStore }: Skills
   );
 
   return (
-    <PageShell
-      title="技能区"
-      subtitle="选择智能体后，可把技能分配给它在会话里使用；技能池展示全部技能。"
-      width="wide"
-    >
+    <div className={className}>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor="skill-agent-select" className="ui-caption">
@@ -794,7 +819,7 @@ export function SkillsPage({ skills = skillPool, plugins = pluginStore }: Skills
           </div>
         <div
           role="tablist"
-          aria-label="技能区视图"
+          aria-label="技能视图"
           className="inline-flex overflow-hidden rounded-lg border border-line shadow-card"
         >
           <button
@@ -808,7 +833,7 @@ export function SkillsPage({ skills = skillPool, plugins = pluginStore }: Skills
               tab === "groups" ? "bg-ink font-bold text-white" : "text-muted hover:bg-[#fafafa]"
             }`}
           >
-            技能
+            按智能体
           </button>
           <button
             type="button"
@@ -969,6 +994,25 @@ export function SkillsPage({ skills = skillPool, plugins = pluginStore }: Skills
           </p>
         </ConfirmDialog>
       )}
+    </div>
+  );
+}
+
+/**
+ * 旧独立入口的过渡外壳（d.67 导航合并）。
+ *
+ * `skills` 路由已不存在——旧链接会被 `store/ui.ts` 折叠成「插件区 + 技能视图」；
+ * App 侧已不再引用本组件。保留一个带 PageShell 的导出，只是让旧引用/旧用例
+ * 在这段时间里不会把构建打挂；新代码请用 `SkillsView`。
+ */
+export function SkillsPage({ skills, plugins }: SkillsPageProps = {}) {
+  return (
+    <PageShell
+      title="技能区"
+      subtitle="技能区已并入插件区的「技能」视图；此独立入口仅作旧链接兼容。"
+      width="wide"
+    >
+      <SkillsView skills={skills} plugins={plugins} />
     </PageShell>
   );
 }

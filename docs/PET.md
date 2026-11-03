@@ -14,7 +14,7 @@
 | 设置区 → 外观 → 桌宠 → 「在桌面显示桌宠」 | 出现/收起桌宠（默认**不自动出现**） |
 | 单击角色 | 浮出输入框，说一句话 |
 | 双击角色 | 播一次「开心」动作 |
-| 拖动角色 | 移动窗口（位置记住，重启后回来） |
+| 拖动角色 | 移动窗口（位置记住，重启后回来；松手会贴边吸附，拖出屏幕也会被拉回可见区） |
 | 点右上角红色角标 | 叫起主窗口并打开那个会话 |
 | 右键角色 | 菜单：说点什么 / 放大 / 缩小 / 设置 / 隐藏 |
 | 托盘图标左键 | 显隐切换；右键有完整菜单含「退出」 |
@@ -31,14 +31,14 @@
 
 ```
 主进程 packages/desktop/pet-host.js      ← 窗口、托盘、穿透、位置记忆、拖拽
-   │  pet-window.js  纯函数：几何 / 缩放 / 位置夹取 / 地址拼接 / 状态解析
+   │  pet-window.js  纯函数：几何 / 缩放 / 位置夹取 / 拖拽收尾吸附与钳制 / 地址拼接 / 状态解析
    │
    ├─ preload.js  __heming_pet 桥（12 个动作 + 2 个订阅）
    │
 渲染进程 packages/web/src/pet.tsx        ← 独立入口 pet.html，不加载主应用
    ├─ components/pet/PetWindow.tsx   画面 + 输入 + 角标 + 气泡
    ├─ components/pet/useLive2D.ts    pixi + Cubism 装配（动态 import）
-   ├─ components/pet/petInteraction.ts  命中判定 / 点击 vs 拖拽（纯函数）
+   ├─ components/pet/petInteraction.ts  命中判定 / 点击 vs 拖拽 / rAF 合并（纯函数）
    ├─ lib/petPose.ts                 姿态判定与表现映射（纯函数）
    ├─ lib/petPrefs.ts                本机偏好（开关 / 绑定 / 模型路径）
    ├─ lib/petUnread.ts               未读归约（纯函数 + 一条自己的 WS）
@@ -159,12 +159,49 @@
 
 没有做：音频播放、TTS 供应商适配、打断处理。
 
+### 4.5 拖拽：改之前先读（残影/闪烁与「被鼠标带着跑」的成因）
+
+拖动桌宠 = 每帧移动一个**透明置顶窗**，而透明窗每次移动都要 DWM 重新合成。下面几条
+硬约束，改动前先读懂：
+
+1. **移动上报按帧合并**（`petInteraction.createFrameCoalescer`）：Windows 上原生
+   `mousemove` 可达 125–1000Hz，逐次 `pet:drag-move` IPC + 主进程逐次 `win.setPosition`
+   会让透明层合成跟不上输入频率——表现就是拖动时的**残影、边缘闪烁**。现在同一帧最多
+   一次 IPC，`mouseup` 时 `flush()` 补一次终值，最后一段位移不会丢。
+2. **位置没变就不调 `setPosition`**：主进程 `moveWindowTo()` 先比 `getBounds()`，相同直接
+   跳过。重复设置同一个位置同样会触发一次合成，纯属浪费。
+3. **拖拽期间冻结 Live2D 与命中判定**：`useLive2D.setPaused(true)` 同时停 `app.ticker`
+   与 `model.autoUpdate`——两者是两条独立时钟，只停一条的话物理/呼吸仍在后台算。
+   移动期间只搬静态位图；同时不追视、不做命中判定、不上报 `pet:set-interactive`
+   （移动中来回切 ignore-mouse 会让鼠标事件抖动）。抬起后 `setPaused(false)` 恢复
+   并立即渲染一帧，画面不会停在旧帧。
+4. **收尾吸附与可见性钳制**（`pet-window.settlePetPosition`，纯函数）：`drag-end` 先按
+   当前光标补终值，再在选中的工作区上做两件事——距边 ≤ `PET_SNAP_PX`（12px）时吸附到
+   该边；至少保留 `MIN_VISIBLE_WIDTH/HEIGHT`（60×80）可见，因此拖到屏幕外也能拖回来
+   （与重启校验 `isOnVisibleDisplay` 同一口径）。**拖拽过程中不钳制**，否则窗口会和
+   光标脱节。多显示器按重叠面积最大的工作区吸附，完全出屏时取最近的一块。
+5. **tap 之后不残留拖拽**：`mouseup` 一律清空按下会话；继续移动时先看
+   `MouseEvent.buttons` 的左键位（`isPrimaryButtonDown`），没按着就不开始拖拽。
+   双击计时单独放 `lastTapAtRef`，不再写回按下会话——把 `dragging:false` 的对象塞回去
+   正是「松开鼠标后桌宠仍被带着跑」的成因。
+
+**改这些时的验收**：`packages/desktop` 的 `pet-window.test.js` / `pet-host.test.js` 覆盖
+吸附、钳制、跳过重复位置、终值对齐；`packages/web` 的 `petInteraction.test.ts` 与
+`PetWindow.drag.test.tsx` 覆盖 rAF 合并、抬起补终值、拖拽期不上报交互、tap 后不残留拖拽。
+取舍与现象口径见 `docs/superpowers/specs/2026-11-03-pet-drag-flicker.md`。
+
 ---
 
 ## 5. 已知限制
 
 - **只在 Windows 真机验证过**；macOS 未适配（托盘图标、`alwaysOnTop` 层级可能需要调整）。
 - **盖不住独占全屏**：Windows 上独占全屏应用（多数游戏）会盖住所有置顶窗，这是系统行为，不做绕过。
+- **拖拽时角色画面是静止的**（`setPaused` 冻结 ticker 与物理，这是刻意的：移动期间不重绘
+  透明画布）。松手立即恢复并渲染一帧；模型尚未加载完成时冻结/恢复都是空操作。
+- **吸附只认工作区矩形**：不处理「拖拽中途任务栏自动隐藏导致工作区变化」的情况——
+  那次收尾仍按旧工作区算，下一次拖拽会重新取。
+- **窗口外松开鼠标**靠后续 `mousemove` 的 `buttons=0` 取消会话；若系统之后完全不再派发
+  鼠标事件，窗口会停在最后一次移动的位置（收尾吸附不执行，但位置仍可再次拖回）。
 - **鼠标穿透依赖 `forward: true`**：个别平台/驱动下穿透态收不到 `mousemove`，表现为「角色点不中」。
   出口是关掉穿透（设置区或托盘）。
 - **不做**：语音、正文预览、系统级徽章（任务栏/托盘计数）、按会话免打扰联动、养成系统、模型市场。
@@ -179,6 +216,9 @@
 | 窗口在、角色不在 | Cubism Core 与模型是否 200；`pet-state.json` 是否带 BOM（已兼容）；控制台有无 404 |
 | 角色点不中 | 关掉鼠标穿透试一次 |
 | 拖动没反应 | 渲染层只上报按下/移动/抬起，位移由**主进程**用 `getCursorScreenPoint()` 算；查 IPC 是否到了主进程 |
+| **拖动时有残影 / 边缘闪烁** | ① 移动是否还按原生 mousemove 逐次发 `pet:drag-move`（应经 `createFrameCoalescer` 每帧一次）；② 拖拽期间 Live2D 是否被冻结（`useLive2D.setPaused(true)` 停 ticker 与物理）；③ 主进程是否对相同位置重复 `setPosition`（`moveWindowTo` 应跳过）；④ 拖拽中是否还在切 `pet:set-interactive`（渲染层与主进程都不该切换） |
+| **松开鼠标后桌宠被鼠标带着跑** | ① `mouseup` 是否清空了按下会话（不要再把 `dragging:false` 的对象写回 `dragRef`）；② 拖拽起点是否检查 `MouseEvent.buttons` 左键位；③ 双击计时是否独立的 `lastTapAtRef` 而不是塞在按下会话里 |
+| 松手后窗口跑到屏幕外 / 贴不住边 | 看 `settlePetPosition` 是否在 `drag-end` 执行；`PET_SNAP_PX`、`MIN_VISIBLE_*` 与工作区是否被意外改动 |
 | 角标不出现 | 未登录不建 WS；确认登录态与网络 |
 
 真机验证脚本的写法可参考 `docs/superpowers/plans/2026-11-01-d46-desktop-pet.md` 末尾的验收记录——

@@ -61,8 +61,8 @@ describe("命令面板 v2 · 空查询分组", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(screen.getByText("页面跳转")).toBeInTheDocument();
     expect(screen.getByText("常用动作")).toBeInTheDocument();
-    // 13 个页面 + 4 个动作
-    expect(screen.getAllByRole("option")).toHaveLength(17);
+    // 9 个页面 + 4 个动作（d.67 合并后导航只剩 9 个宿主页）
+    expect(screen.getAllByRole("option")).toHaveLength(13);
     // 没有最近使用时不出现该组标题
     expect(screen.queryByText("最近使用")).not.toBeInTheDocument();
   });
@@ -71,7 +71,8 @@ describe("命令面板 v2 · 空查询分组", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(OPTION("主页").textContent).toContain("Alt+1");
     expect(OPTION("插件区").textContent).toContain("Alt+0");
-    expect(OPTION("团队").textContent).not.toContain("Alt+");
+    // 幕僚没有数字键（2 已给团队、8 已给智能体）
+    expect(OPTION("幕僚").textContent).not.toContain("Alt+");
   });
 
   it("结果项是 option，首项默认 aria-selected，输入框用 aria-activedescendant 指向它", () => {
@@ -229,11 +230,12 @@ describe("命令面板 v2 · 四个动作的分发", () => {
   });
   afterEach(() => cleanup());
 
-  it("新建任务 → 切到任务区（常驻启动面板）", () => {
+  it("新建任务 → 切到智能体页的任务视图（任务区已并入）", () => {
     const onClose = vi.fn();
     render(<CommandPalette onClose={onClose} />);
     fireEvent.click(OPTION("新建任务"));
-    expect(useUiStore.getState().page).toBe("tasks");
+    expect(useUiStore.getState().page).toBe("chat");
+    expect(useUiStore.getState().pageView).toBe("tasks");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -382,7 +384,8 @@ describe("命令面板 · 本机三组（任务 / 记忆 / 插件）", () => {
     expect(screen.getByText("任务")).toBeInTheDocument();
     fireEvent.click(OPTION("整理周报"));
     const s = useUiStore.getState();
-    expect(s.page).toBe("tasks");
+    expect(s.page).toBe("chat");
+    expect(s.pageView).toBe("tasks");
     expect(s.taskFocusId).toBe("t1");
     // 复用 focusTask 时会连带聚焦该任务的会话
     expect(s.activeConversationId).toBe("c1");

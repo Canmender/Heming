@@ -1,15 +1,23 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { PluginsPage } from "./PluginsPage.js";
 import { PluginStore, pluginServerId, type PluginMcpPort } from "../lib/plugins/index.js";
 import { SkillPool, type StorageLike } from "../lib/skills/index.js";
-import type { McpServerConfig } from "../lib/mcp/index.js";
+import { McpRegistry, type McpServerConfig } from "../lib/mcp/index.js";
 import { useUiStore } from "../store/ui.js";
 
 /**
  * 插件区 UI 用例：真实 PluginStore + SkillPool，只注入独立内存存储与 MCP 端口，
  * 用例之间零污染。
+ *
+ * d.67 起「技能 / MCP 服务」两个 Tab 内嵌完整视图（原技能区 / 接口区页面主体），
+ * 所以这里也给页面注入独立的 SkillPool 与 McpRegistry——两个视图各自读自己的单例。
  */
+
+// 技能 Tab 内嵌的技能视图会拉一次智能体名册：固定成内存名册，不依赖网络。
+vi.mock("../lib/agentsApi.js", () => ({
+  listAgents: vi.fn(async () => [{ id: "a1", name: "和鸣助手" }]),
+}));
 
 const T0 = new Date("2026-11-01T08:00:00.000Z").getTime();
 
@@ -99,17 +107,20 @@ function manifest(overrides: Record<string, unknown> = {}): Record<string, unkno
 let pool: SkillPool;
 let store: PluginStore;
 let mcp: ReturnType<typeof fakeMcp>;
+let registry: McpRegistry;
 
 beforeEach(() => {
   const storage = makeStorage();
   pool = new SkillPool(storage, () => T0);
   mcp = fakeMcp();
   store = new PluginStore(storage, pool, () => T0, mcp.port);
-  useUiStore.setState({ page: "home" });
+  // MCP Tab 现在渲染完整接口视图，需要一个真实的注册表（内存存储，不联网）。
+  registry = new McpRegistry(makeStorage(), () => new Date(T0).toISOString());
+  useUiStore.setState({ page: "home", pageView: null });
 });
 
 function renderPage() {
-  return render(<PluginsPage plugins={store} />);
+  return render(<PluginsPage plugins={store} skills={pool} mcp={registry} />);
 }
 
 function openInstall(): void {
@@ -265,10 +276,15 @@ describe("PluginsPage 插件区", () => {
     expect(card).toHaveTextContent("1 台 MCP 服务");
     expect(card).toHaveTextContent("MCP · 天气服务");
 
+    // d.67：接口区已并入本页「MCP 服务」Tab，按钮变成切 Tab，不再跨页
     fireEvent.click(within(card).getByRole("button", { name: "查看插件接口 财务助手包" }));
-    expect(useUiStore.getState().page).toBe("interfaces");
+    expect(useUiStore.getState().page).toBe("home");
+    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
 
-    fireEvent.click(within(card).getByRole("button", { name: "卸载插件 财务助手包" }));
+    // 切回「插件」Tab 继续卸载流程（切走即卸载，卡片要重新查）
+    fireEvent.click(screen.getByRole("tab", { name: "插件" }));
+    const cardAgain = screen.getByRole("region", { name: "插件 财务助手包" });
+    fireEvent.click(within(cardAgain).getByRole("button", { name: "卸载插件 财务助手包" }));
     const confirm = screen.getByRole("dialog", { name: "卸载插件" });
     expect(confirm).toHaveTextContent("1 台 MCP 服务");
   });
@@ -336,7 +352,7 @@ describe("PluginsPage 插件区", () => {
     expect(within(dialog).getByText(/网络访问：mcp\.example\.com/)).toBeInTheDocument();
   });
 
-  it("详情弹窗展示物化技能与服务，并可跳转接口区", () => {
+  it("详情弹窗展示物化技能与服务，并可在页内切到 MCP Tab", () => {
     renderPage();
     openInstall();
     fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
@@ -355,8 +371,10 @@ describe("PluginsPage 插件区", () => {
     expect(within(dialog).getByText("mcp.example.com")).toBeInTheDocument();
     expect(within(dialog).getByText(/连接与工具授权在接口区进行/)).toBeInTheDocument();
 
+    // d.67：不再跳接口区页，改为切到本页「MCP 服务」Tab
     fireEvent.click(within(dialog).getByRole("button", { name: "查看接口" }));
-    expect(useUiStore.getState().page).toBe("interfaces");
+    expect(useUiStore.getState().page).toBe("home");
+    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("dialog", { name: "插件详情 天气能力包" })).not.toBeInTheDocument();
   });
 
@@ -381,5 +399,51 @@ describe("PluginsPage 插件区", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "卸载插件" }));
     expect(screen.queryByRole("dialog", { name: "插件详情 天气能力包" })).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "卸载插件" })).toHaveTextContent("1 台 MCP 服务");
+  });
+});
+
+/* ------------------------------------------------ 导航合并（d.67） */
+
+describe("PluginsPage 导航合并", () => {
+  it("四个 Tab：技能与 MCP 渲染完整视图，页面级标题始终只有一个", () => {
+    renderPage();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("插件区");
+    expect(screen.queryByRole("heading", { name: "技能区" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "技能" }));
+    expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
+    // 原技能区页的完整能力都在：智能体分配、技能池、搜索
+    expect(screen.getByLabelText("搜索技能")).toBeInTheDocument();
+    expect(screen.getByLabelText("选择智能体")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "按智能体" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "技能池" })).toBeInTheDocument();
+    // 嵌入后不再有自己的页面标题
+    expect(screen.queryByRole("heading", { name: "技能区" })).toBeNull();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("tab", { name: "MCP 服务" }));
+    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    // 原接口区页的完整能力都在：新增服务、Registry 发现、协议说明
+    expect(screen.getByRole("button", { name: /添加 MCP 服务/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "从 Registry 发现" })).toBeInTheDocument();
+    expect(screen.getByText(/MCP 协议 \d{4}-\d{2}-\d{2}/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "接口区" })).toBeNull();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
+  it("消费一次性视图意图：旧 setPage(\"skills\") 落到技能 Tab，读完即清", () => {
+    useUiStore.getState().setPage("skills");
+    expect(useUiStore.getState().page).toBe("plugins");
+    renderPage();
+    expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
+    expect(useUiStore.getState().pageView).toBeNull();
+  });
+
+  it("消费一次性视图意图：旧 setPage(\"interfaces\") 落到 MCP Tab", () => {
+    useUiStore.getState().setPage("interfaces");
+    renderPage();
+    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    expect(useUiStore.getState().pageView).toBeNull();
   });
 });

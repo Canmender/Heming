@@ -70,7 +70,8 @@ let plugins: PluginStore;
 
 beforeEach(() => {
   localStorage.clear();
-  useUiStore.setState({ page: "skills", paletteIntent: null });
+  // 技能区已并入插件区（d.67）：宿主页 = plugins，视图 = skills
+  useUiStore.setState({ page: "plugins", pageView: "skills", paletteIntent: null });
   const storage = makeStorage();
   skills = new SkillPool(storage, () => T0);
   plugins = new PluginStore(storage, skills, () => T0, fakeMcp());

@@ -151,7 +151,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
         )}
 
         <p className="text-[11px] text-muted">
-          安装后服务会出现在接口区，<strong>工具默认全部关闭</strong>，需要你逐个授权。
+          安装后服务会出现在插件区的「MCP 服务」Tab，<strong>工具默认全部关闭</strong>，需要你逐个授权。
         </p>
       </div>
     </ConfirmDialog>

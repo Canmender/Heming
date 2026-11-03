@@ -39,10 +39,121 @@ export function isInteractiveAt(rects: Array<Rect | null | undefined>, x: number
 
 /** 抬起时的最终判定：位移达到阈值才算拖拽。 */
 export function classifyPointerUp(startX: number, startY: number, x: number, y: number): "tap" | "drag" {
-  if (![startX, startY, x, y].every(Number.isFinite)) return "tap";
+  return exceedsDragThreshold(startX, startY, x, y) ? "drag" : "tap";
+}
+
+/** 位移是否已经越过「点击 vs 拖拽」的阈值（拖拽起点判定与抬起判定共用同一口径）。 */
+export function exceedsDragThreshold(
+  startX: number,
+  startY: number,
+  x: number,
+  y: number,
+): boolean {
+  if (![startX, startY, x, y].every(Number.isFinite)) return false;
   const dx = x - startX;
   const dy = y - startY;
-  return Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX ? "drag" : "tap";
+  return Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX;
+}
+
+/** `MouseEvent.buttons` 的左键位（规范位掩码：1 = 左键，2 = 右键，4 = 中键）。 */
+const LEFT_BUTTON_MASK = 1;
+
+/**
+ * 鼠标左键是否仍按着。
+ *
+ * ★ 这是「tap 之后桌宠被鼠标带着跑」那个缺陷的判据。放下鼠标抬起后，
+ *   Chromium 仍会继续派发 mousemove（buttons === 0）；只看位移不看按键，
+ *   残留的按下状态就会把任何超过 4px 的移动当成拖拽开始。
+ *   非法值按「没按」处理——宁可不拖，也不要窗口自己动。
+ */
+export function isPrimaryButtonDown(buttons: number | null | undefined): boolean {
+  if (typeof buttons !== "number" || !Number.isFinite(buttons)) return false;
+  return (buttons & LEFT_BUTTON_MASK) === LEFT_BUTTON_MASK;
+}
+
+/** 一次「按下」的会话状态；dragging 一旦为真就不需要再判阈值。 */
+export interface DragSession {
+  startX: number;
+  startY: number;
+  dragging: boolean;
+}
+
+/**
+ * 是否应该从「按下」进入「拖拽」：越过阈值 **且** 左键仍按着。
+ *
+ * 拖拽已经开始后不再调用本函数（中途松键丢抬起事件时，由鼠标移动里的
+ * 「左键已抬起」分支清掉会话，见 PetWindow 的 onMoveDrag）。
+ */
+export function shouldBeginDrag(
+  session: DragSession | null | undefined,
+  x: number,
+  y: number,
+  buttons: number | null | undefined,
+): boolean {
+  if (!session || session.dragging) return false;
+  if (!isPrimaryButtonDown(buttons)) return false;
+  return exceedsDragThreshold(session.startX, session.startY, x, y);
+}
+
+/**
+ * 按帧合并高频动作（拖拽移动上报用）。
+ *
+ * 设计稿（spec §5）要求拖拽按 requestAnimationFrame 节流、抬起补一次终值：
+ * 原生 mousemove 在 Windows 上可达 125–1000Hz，逐次 IPC + 主进程逐次 setPosition
+ * 会让透明置顶窗的合成跟不上，表现就是残影与边缘闪烁。这里把「这一帧内发生的
+ * 任意多次 request」合并成一次 emit，并且只在真的有未发出的移动时补发终值。
+ *
+ * 调度器由调用方注入（组件用 requestAnimationFrame，测试用可控的假帧），
+ * 所以本函数不依赖任何 DOM。
+ */
+export interface FrameCoalescer {
+  /** 标记「有一次待上报」，同一帧内重复调用只会上报一次。 */
+  request: () => void;
+  /** 立刻把待上报的那次发出去（用于 mouseup 补终值）；没有待发的就不发。 */
+  flush: () => void;
+  /** 丢弃待上报的移动（组件卸载 / 拖拽被取消）。 */
+  cancel: () => void;
+}
+
+export interface FrameScheduler {
+  schedule: (callback: () => void) => number;
+  cancel: (id: number) => void;
+}
+
+export function createFrameCoalescer(
+  emit: () => void,
+  scheduler: FrameScheduler,
+): FrameCoalescer {
+  let frame = 0; // 0 表示没有已排队的帧（rAF 的返回值恒为正整数）
+  let dirty = false;
+  return {
+    request() {
+      dirty = true;
+      if (frame !== 0) return;
+      frame = scheduler.schedule(() => {
+        frame = 0;
+        if (!dirty) return;
+        dirty = false;
+        emit();
+      });
+    },
+    flush() {
+      if (frame !== 0) {
+        scheduler.cancel(frame);
+        frame = 0;
+      }
+      if (!dirty) return;
+      dirty = false;
+      emit();
+    },
+    cancel() {
+      if (frame !== 0) {
+        scheduler.cancel(frame);
+        frame = 0;
+      }
+      dirty = false;
+    },
+  };
 }
 
 /**

@@ -48,7 +48,9 @@ beforeEach(() => {
   useTaskStore.setState({ tasks: [] });
   useTemplateStore.setState({ templates: [] });
   useUiStore.setState({
-    page: "tasks",
+    // d.67：任务区不再是独立页，宿主是智能体页（page="chat"）；
+    // 这里只验证「任务区不改宿主页」，所以初值给宿主页名即可。
+    page: "chat",
     activeConversationId: null,
     taskDraft: null,
   });
@@ -112,7 +114,7 @@ describe("通用智能体页面", () => {
     });
     expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("a1");
     // 页面不被切走，且运行创建后立刻选中并挂载嵌入式 ChatPage 消费自动执行
-    expect(useUiStore.getState().page).toBe("tasks");
+    expect(useUiStore.getState().page).toBe("chat");
     expect(useUiStore.getState().activeConversationId).toBe("c1");
     expect(useUiStore.getState().taskDraft).toMatchObject({
       taskId: task.id,
@@ -409,5 +411,29 @@ describe("通用智能体页面", () => {
     fireEvent.change(screen.getByLabelText("运行目标"), { target: { value: "再存一条" } });
     expect(screen.getByRole("button", { name: "存为模板" })).toBeDisabled();
     expect(screen.getByText(/模板已达 12 条上限/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * d.67 导航合并：任务区并入智能体页的「任务」Tab。
+ * 嵌入态只藏本页自己的页头标题（否则宿主页 h1 + 本页标题会叠成两个），
+ * 列表/筛选/启动面板/详情这些真正的内容一律保留。
+ */
+describe("任务区嵌入态（d.67）", () => {
+  it("embedded：不画自己的页头标题，但搜索、状态筛选与启动面板都在", () => {
+    render(<TaskAreaPage embedded />);
+
+    expect(screen.queryByText("通用智能体")).not.toBeInTheDocument();
+    expect(document.querySelector(".ui-page-title")).toBeNull();
+    // 页头标题去掉，功能控件不能跟着丢
+    expect(screen.getByLabelText("搜索运行记录")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "按状态筛选" })).toBeInTheDocument();
+    expect(screen.getByRole("form", { name: "运行智能体" })).toBeInTheDocument();
+  });
+
+  it("独立态（旧路由过渡期）：仍保留页面标题与运行统计", () => {
+    render(<TaskAreaPage />);
+    expect(screen.getByText("通用智能体")).toBeInTheDocument();
+    expect(document.querySelector(".ui-page-title")).not.toBeNull();
   });
 });

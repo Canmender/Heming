@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
-import { InterfacesPage } from "./InterfacesPage.js";
+import { InterfacesPage, InterfacesView } from "./InterfacesPage.js";
 import {
   McpRegistry,
   MCP_SERVERS_KEY,
@@ -247,5 +247,48 @@ describe("InterfacesPage", () => {
     });
     expect(await screen.findByRole("status")).toHaveTextContent("完成");
     expect(screen.getByRole("button", { name: "执行" })).toBeEnabled();
+  });
+});
+
+/* ------------------------------------------ 可嵌入视图（d.67 导航合并） */
+
+describe("InterfacesView 嵌入视图", () => {
+  it("去掉 PageShell 与页面标题，保留服务管理、连接、逐工具授权与协议说明", async () => {
+    const added = registry.add({ name: "Demo", transport: "http", url: "https://x/mcp" });
+    const { container } = render(<InterfacesView registry={registry} />);
+    // 嵌入后由宿主页提供唯一的页面标题
+    expect(container.querySelector("h1")).toBeNull();
+
+    // 页头动作收进视图顶部工具条，按钮名称不变
+    expect(screen.getByRole("button", { name: "从 Registry 发现" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /添加 MCP 服务/ })).toBeInTheDocument();
+    // 协议版本说明仍在（原在页头副标题里，去掉页头后放在工具条右侧）
+    expect(screen.getByText(/MCP 协议 2024-11-05/)).toBeInTheDocument();
+
+    // 服务卡片、连接、逐工具授权都保留
+    const card = screen.getByRole("region", { name: "MCP 服务 Demo" });
+    fireEvent.click(within(card).getByRole("button", { name: "连接 Demo" }));
+    await screen.findByText("echo");
+    const toggle = screen.getByLabelText("启用工具 echo") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    expect(registry.isToolEnabled(added.id, "echo")).toBe(true);
+    expect(screen.getByText(/已授权 1 个工具/)).toBeInTheDocument();
+  });
+
+  it("请求头仍可在嵌入视图里随服务一起保存", () => {
+    render(<InterfacesView registry={registry} />);
+    fireEvent.click(screen.getByRole("button", { name: /添加 MCP 服务/ }));
+    fireEvent.change(screen.getByLabelText("服务名称"), { target: { value: "带鉴权" } });
+    fireEvent.change(screen.getByLabelText("服务地址"), {
+      target: { value: "https://api.example.com/mcp" },
+    });
+    fireEvent.change(screen.getByLabelText("请求头"), {
+      target: { value: '{"Authorization":"Bearer t"}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存服务" }));
+
+    const created = registry.servers().find((server) => server.name === "带鉴权");
+    expect(created?.headers).toEqual({ Authorization: "Bearer t" });
   });
 });

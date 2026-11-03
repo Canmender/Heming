@@ -1,6 +1,16 @@
 import { create } from "zustand";
 import type { AutomationKind, SyncOptions } from "../lib/automation/model.js";
 
+/**
+ * 导航页（d.67 合并后的 9 个入口）。
+ *
+ * 合并掉的 4 个旧页面名不再进导航，但**不能从类型里删掉**：
+ * 旧链接、旧 `heming.navOrder.v1`、命令面板与通知中心的跳转、桌宠气泡的 route
+ * 都还在产出这些字符串。删掉它们只会把兼容处理逼进 `as never` 之类的强转里，
+ * 于是保留为 `LegacyPage`，由 `resolvePage` 统一折叠到「宿主页 + 视图」。
+ *
+ * 智能体页沿用内部名 `chat`（会话链路的既有锚点），显示名由 NavRail 决定。
+ */
 export type Page =
   | "home"
   | "team"
@@ -8,18 +18,31 @@ export type Page =
   | "staff"
   | "infohub"
   | "automations"
-  | "workspace"
-  | "tasks"
-  | "skills"
   | "plugins"
-  | "interfaces"
   | "memory"
   | "settings";
 
 /**
- * 导航项：所有页面都可排进导航轨。
- * 智能体页沿用内部名 `chat`（会话链路的既有锚点），显示名由 NavRail 决定。
+ * 已合并页面的旧 id（只保留在类型与解析里，不再出现在导航中）：
+ * - `workspace`（团队看板）→ 团队页的「看板」视图
+ * - `tasks`（通用智能体）→ 智能体页的「任务」视图
+ * - `skills`（技能区）      → 插件区（能力中心）的「技能」视图
+ * - `interfaces`（接口区）  → 插件区（能力中心）的「MCP」视图
  */
+export type LegacyPage = "workspace" | "tasks" | "skills" | "interfaces";
+export type PageId = Page | LegacyPage;
+
+/**
+ * 宿主页内部视图（一次性导航意图）。
+ *
+ * 为什么用「一次性意图」而不是把 Tab 状态放进 store：
+ * 跳转方（命令面板、通知中心、桌宠气泡、旧链接）只知道要「去技能」，不知道宿主页
+ * 的 Tab 是局部 state；把 Tab 长期放 store 又会让「切走再回来」被钉在上次的位置，
+ * 那超出了跳转方的意图。消费一次即清，与 `automationIntent` / `paletteIntent` 同口径。
+ */
+export type PageView = "board" | "tasks" | "skills" | "interfaces" | "chat";
+
+/** 导航项：所有页面都可排进导航轨（只含合并后的宿主页）。 */
 export type NavPage = Page;
 
 /** 导航默认顺序；快捷键数字由 App/NavRail 按页面固定绑定（显示顺序改了不影响快捷键）。 */
@@ -30,14 +53,37 @@ export const DEFAULT_NAV_ORDER: NavPage[] = [
   "staff",
   "infohub",
   "automations",
-  "workspace",
-  "tasks",
-  "skills",
   "plugins",
-  "interfaces",
   "memory",
   "settings",
 ];
+
+/** 旧页面 id → 宿主页 + 视图的折叠表。新增合并页时只改这里与 `Page`。 */
+const LEGACY_ROUTES: Record<LegacyPage, { page: Page; view: PageView }> = {
+  workspace: { page: "team", view: "board" },
+  tasks: { page: "chat", view: "tasks" },
+  skills: { page: "plugins", view: "skills" },
+  interfaces: { page: "plugins", view: "interfaces" },
+};
+
+/** 是否是已合并的旧页面名。 */
+export function isLegacyPage(value: unknown): value is LegacyPage {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(LEGACY_ROUTES, value);
+}
+
+/**
+ * 把任意旧页面名/宿主页归一成「宿主页 + 视图」。
+ *
+ * 显式传入的 `view` 优先于旧页面的默认视图：`setPage("plugins", "interfaces")` 是
+ * 「去插件区的 MCP 视图」，而 `setPage("interfaces")` 只是旧链接的等价写法。
+ */
+export function resolvePage(page: PageId, view?: PageView | null): { page: Page; view: PageView | null } {
+  if (isLegacyPage(page)) {
+    const route = LEGACY_ROUTES[page];
+    return { page: route.page, view: view ?? route.view };
+  }
+  return { page, view: view ?? null };
+}
 
 /** 导航顺序本地存储键。 */
 export const NAV_ORDER_KEY = "heming.navOrder.v1";
@@ -45,14 +91,18 @@ export const NAV_ORDER_KEY = "heming.navOrder.v1";
 /**
  * 规整读回的顺序：只保留已知页、去重、缺项补在末尾——
  * 旧版本加过新页面时不会因为存储里缺它而整个顺序失效。
+ *
+ * 并入宿主页的旧项（workspace/tasks/skills/interfaces）按 `resolvePage` 折叠成宿主页；
+ * 折叠后与已出现的宿主页重复就丢掉，所以老用户的导航顺序能平滑迁移。
  */
 export function normalizeNavOrder(raw: unknown): NavPage[] {
   const seen: NavPage[] = [];
   if (Array.isArray(raw)) {
     for (const item of raw) {
-      if (typeof item === "string" && (DEFAULT_NAV_ORDER as string[]).includes(item)) {
-        if (!seen.includes(item as NavPage)) seen.push(item as NavPage);
-      }
+      if (typeof item !== "string") continue;
+      if (!(DEFAULT_NAV_ORDER as string[]).includes(item) && !isLegacyPage(item)) continue;
+      const { page } = resolvePage(item as PageId);
+      if (!seen.includes(page)) seen.push(page);
     }
   }
   for (const page of DEFAULT_NAV_ORDER) if (!seen.includes(page)) seen.push(page);
@@ -147,6 +197,11 @@ export interface PaletteIntent {
 
 interface UiState {
   page: Page;
+  /**
+   * 宿主页要激活的视图（一次性意图，消费即清）。
+   * 只由 `setPage(page, view)` / 旧页面名折叠写入；页面用 `consumePageView` 取走。
+   */
+  pageView: PageView | null;
   /** 左侧导航显示顺序（用户可自定义；持久化）。 */
   navOrder: NavPage[];
   /** 当前打开的助手会话（null=助手页显示选择列表）。 */
@@ -174,7 +229,13 @@ interface UiState {
   infohubIntent: InfohubIntent | null;
   /** 进入自动化页并预填新建表单的一次性意图；命中即消费。 */
   automationIntent: AutomationIntent | null;
-  setPage: (page: Page) => void;
+  /**
+   * 切页。接受合并前的旧页面 id（`workspace` / `tasks` / `skills` / `interfaces`），
+   * 会折叠成宿主页并投递对应视图意图；`view` 省略即「不指定视图」。
+   */
+  setPage: (page: PageId, view?: PageView | null) => void;
+  /** 取走宿主的视图意图并清空（页面 effect 消费一次）。 */
+  consumePageView: () => PageView | null;
   /** 跳到信息中枢并投递意图；不传意图即普通进入。 */
   openInfohub: (intent?: InfohubIntent) => void;
   consumeInfohubIntent: () => void;
@@ -245,6 +306,7 @@ let paletteIntentToken = 0;
 
 export const useUiStore = create<UiState>((set, get) => ({
   page: "home",
+  pageView: null,
   navOrder: readStoredNavOrder(
     typeof window === "undefined"
       ? null
@@ -271,12 +333,14 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ paletteIntent: { kind, token: paletteIntentToken, ...(data ? { data } : {}) } });
   },
   consumePaletteIntent: () => set({ paletteIntent: null }),
-  setPage: (page) =>
+  setPage: (page, view) => {
+    const route = resolvePage(page, view);
     set({
-      page,
+      page: route.page,
+      pageView: route.view,
       // 助手页保留当前会话（从别页回来接着聊）；离开助手页则清掉选中，
       // 避免别的页面残留一个看不见的会话态。
-      activeConversationId: page === "chat" ? get().activeConversationId : null,
+      activeConversationId: route.page === "chat" ? get().activeConversationId : null,
       // 待投递槽/详情卡是页内瞬态，离开聊天页就没意义了。
       pendingAttachment: null,
       // 未消费的任务投递跟着离开：切页后再自动发送会让用户莫名其妙多一条消息。
@@ -285,10 +349,17 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
       infohubIntent: null,
       automationIntent: null,
-    }),
+    });
+  },
+  consumePageView: () => {
+    const view = get().pageView;
+    if (view) set({ pageView: null });
+    return view;
+  },
   openInfohub: (intent) =>
     set({
       page: "infohub",
+      pageView: null,
       activeConversationId: null,
       pendingAttachment: null,
       taskDraft: null,
@@ -301,6 +372,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   openAutomations: (intent) =>
     set({
       page: "automations",
+      pageView: null,
       activeConversationId: null,
       pendingAttachment: null,
       taskDraft: null,
@@ -319,6 +391,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   openConversation: (id) =>
     set({
       page: "chat",
+      /**
+       * 通知/系统通知/HITL 点进来要的是**对话本身**：
+       * 若用户当时正停在智能体页的「任务」Tab，只改 activeConversationId 会让会话
+       * 在看不见的 Tab 下打开。所以这里显式投递「对话视图」意图，宿主页切回对话。
+       */
+      pageView: "chat",
       activeConversationId: id,
       taskDraft: null,
       automationFocusId: null,
@@ -330,7 +408,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   consumeTaskDraft: () => set({ taskDraft: null }),
   focusTask: (taskId, conversationId) =>
     set({
-      page: "tasks",
+      // 任务区已并入智能体页：进宿主页 + 任务视图，再靠 taskFocusId 定位到具体任务。
+      page: "chat",
+      pageView: "tasks",
       taskFocusId: taskId,
       automationFocusId: null,
       taskDraft: null,
@@ -343,6 +423,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   focusTeamMember: (userId) =>
     set({
       page: "team",
+      pageView: null,
       teamFocusUserId: userId,
       activeConversationId: null,
       pendingAttachment: null,
@@ -355,6 +436,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   focusAutomation: (taskId) =>
     set({
       page: "automations",
+      pageView: null,
       automationFocusId: taskId,
       // 与 setPage 同口径清掉跨页瞬态：自动化页不该继承任务区的投递/选中，
       // 也不该被残留的「新建表单预填」意图一进来就弹窗。
@@ -366,7 +448,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       activeConversationId: null,
     }),
   consumeAutomationFocus: () => set({ automationFocusId: null }),
-  leaveConversation: () => set({ page: "chat", activeConversationId: null }),
+  leaveConversation: () => set({ page: "chat", pageView: "chat", activeConversationId: null }),
   sendFileToConversation: (conversationId, file) =>
     set({ pendingAttachment: { conversationId, file } }),
   consumePendingAttachment: () => set({ pendingAttachment: null }),

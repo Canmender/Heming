@@ -36,6 +36,14 @@ export interface Live2DStage {
   focus: (x: number, y: number) => void;
   /** 视线回正 */
   focusCenter: () => void;
+  /**
+   * 冻结/恢复舞台（拖拽期间用）。
+   *
+   * ★ 透明置顶窗连续移动时，画布还在逐帧重绘（呼吸/眨眼/物理/口型）会让 Windows
+   *   DWM 每帧重新合成"移动 + 内容变化"的透明层，观感就是残影与边缘闪烁。冻结后
+   *   移动期间只搬静态位图；恢复时立即渲染一帧，避免松手后画面停在旧帧。
+   */
+  setPaused: (paused: boolean) => void;
 }
 
 interface UseLive2DOptions {
@@ -261,5 +269,36 @@ export function useLive2D(opts: UseLive2DOptions): Live2DStage {
     focus(width / 2, height / 2);
   }, [focus, width, height]);
 
-  return { status, error, hitBox, setMouthOpen, playMotion, focus, focusCenter };
+  /**
+   * 暂停/恢复舞台。两条更新链要一起停：
+   * - `app.ticker`（渲染）——停了就不再重绘透明画布；
+   * - `model.autoUpdate`——pixi-live2d-display 把模型挂在 `PIXI.Ticker.shared` 上，
+   *   它与 app 的 ticker 是两条独立时钟，只停 app 的话物理/动作/呼吸仍在后台算，
+   *   恢复时会积累一大段 delta 导致动作"跳一下"。
+   *
+   * ★ 幂等：`autoUpdate` 的 setter 每调一次 `true` 就往共享 ticker 上加一个回调，
+   *   重复恢复会让模型一帧更新两次。用 ref 记住当前是否已暂停，重复调用直接忽略。
+   */
+  const pausedRef = useRef(false);
+  const setPaused = useCallback((paused: boolean) => {
+    if (pausedRef.current === paused) return;
+    const stage = stageRef.current;
+    if (!stage.app) return; // 舞台未就绪：没有可冻结的东西
+    pausedRef.current = paused;
+    try {
+      if (paused) {
+        stage.app.ticker.stop();
+        if (stage.model) stage.model.autoUpdate = false;
+      } else {
+        if (stage.model) stage.model.autoUpdate = true;
+        stage.app.ticker.start();
+        // 停表期间窗口内容没有更新，恢复时先补一帧，别等下一次 ticker 回调
+        stage.app.render();
+      }
+    } catch {
+      /* 正在销毁：冻结与否都不影响窗口移动 */
+    }
+  }, []);
+
+  return { status, error, hitBox, setMouthOpen, playMotion, focus, focusCenter, setPaused };
 }

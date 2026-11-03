@@ -66,11 +66,7 @@ const NAV_LABELS: Record<NavPage, string> = {
   staff: "幕僚",
   infohub: "信息中枢",
   automations: "自动化",
-  workspace: "团队看板",
-  tasks: "通用智能体",
-  skills: "技能区",
   plugins: "插件区",
-  interfaces: "接口区",
   memory: "记忆区",
   settings: "设置区",
 };

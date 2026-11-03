@@ -12,6 +12,7 @@ const live2d = vi.hoisted(() => ({
   setMouthOpen: vi.fn(),
   focus: vi.fn(),
   focusCenter: vi.fn(),
+  setPaused: vi.fn(),
 }));
 
 const chat = vi.hoisted(() => ({

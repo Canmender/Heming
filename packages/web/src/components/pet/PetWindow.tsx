@@ -8,7 +8,15 @@ import {
   type ReactNode,
 } from "react";
 import { loadPetPrefs, petModelUrl } from "../../lib/petPrefs.js";
-import { classifyPointerUp, isInteractiveAt, shouldReportChange, type Rect } from "./petInteraction.js";
+import {
+  classifyPointerUp,
+  createFrameCoalescer,
+  isInteractiveAt,
+  isPrimaryButtonDown,
+  shouldBeginDrag,
+  shouldReportChange,
+  type Rect,
+} from "./petInteraction.js";
 import { useLive2D } from "./useLive2D.js";
 import { usePetChat } from "./usePetChat.js";
 import { poseDrivesMouth, poseMotion, resolvePose, type PetPose } from "../../lib/petPose.js";
@@ -164,7 +172,7 @@ export function PetWindow() {
    * 每个 effect（含口型那个 rAF 循环）都会在每次渲染时拆掉重建——表现是口型抖动、
    * 事件监听反复解绑重绑。hook 内部这些方法都是 useCallback 稳定的，单独依赖即可。
    */
-  const { setMouthOpen, playMotion, focus, focusCenter } = stage;
+  const { setMouthOpen, playMotion, focus, focusCenter, setPaused } = stage;
   /** hitBox 会随视口尺寸变化，用 ref 读，避免把 mousemove 监听绑到它身上。 */
   const hitBoxRef = useRef<Rect | null>(stage.hitBox);
   hitBoxRef.current = stage.hitBox;
@@ -248,6 +256,10 @@ export function PetWindow() {
 
   /* ────────────── 可交互区与穿透上报 ────────────── */
   const interactiveRef = useRef(false);
+  /** 拖拽期间的冻结开关：ref 供事件闭包同步读取，state 只驱动光标样式。 */
+  const draggingRef = useRef(false);
+  const [dragging, setDragging] = useState(false);
+
   const extraRects = useCallback((): Array<Rect | null> => {
     const toRect = (el: HTMLElement | null): Rect | null => {
       if (!el) return null;
@@ -258,29 +270,62 @@ export function PetWindow() {
     return [toRect(bubbleRef.current), toRect(inputRef.current)];
   }, []);
 
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      const x = e.clientX;
-      const y = e.clientY;
-      focus(x, y);
-
+  /** 按当前光标重算「该不该挡鼠标」；值没变就不发 IPC（mousemove 是高频事件）。 */
+  const reportInteractiveAt = useCallback(
+    (x: number, y: number) => {
       const next = isInteractiveAt([hitBoxRef.current, ...extraRects()], x, y);
       if (shouldReportChange(interactiveRef.current, next)) {
         interactiveRef.current = next;
         window.__heming_pet?.setInteractive(next);
       }
+    },
+    [extraRects],
+  );
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      // 拖拽期间冻结：不追视、不做命中判定、不报穿透。
+      // 窗口在连续移动，此时切换 ignore-mouse 会让鼠标事件在透传/拦截之间抖动。
+      if (draggingRef.current) return;
+      focus(e.clientX, e.clientY);
+      reportInteractiveAt(e.clientX, e.clientY);
     };
     window.addEventListener("mousemove", onMove);
     return () => window.removeEventListener("mousemove", onMove);
-  }, [focus, extraRects]);
+  }, [focus, reportInteractiveAt]);
 
   /* ────────────── 拖拽 / 点击 / 双击 ────────────── */
-  const dragRef = useRef<{
-    startX: number;
-    startY: number;
-    dragging: boolean;
-    lastTapAt: number;
-  } | null>(null);
+
+  /**
+   * 移动上报的按帧合并器。
+   *
+   * ★ 这里必须有：原生 mousemove 直接逐次 IPC + 主进程逐次 setPosition，
+   *   等于让透明置顶窗的 DWM 合成跟不上输入频率，表现就是拖动时的残影与边缘闪烁。
+   *   合并后同一帧内任意多次移动只发一次，抬起时由 flush 补终值。
+   */
+  const dragMove = useMemo(
+    () =>
+      createFrameCoalescer(
+        () => window.__heming_pet?.dragMove(),
+        {
+          schedule: (callback) => window.requestAnimationFrame(callback),
+          cancel: (id) => window.cancelAnimationFrame(id),
+        },
+      ),
+    [],
+  );
+
+  /** 进入 / 退出拖拽（ref 供事件闭包立刻可读，state 触发光标样式）。 */
+  const setDraggingState = useCallback((next: boolean) => {
+    if (draggingRef.current === next) return;
+    draggingRef.current = next;
+    setDragging(next);
+  }, []);
+
+  /** 当前按下会话；抬起即清空——拖拽状态绝不跨手势残留。 */
+  const dragRef = useRef<{ startX: number; startY: number; dragging: boolean } | null>(null);
+  /** 双击计时单独存，不塞回 dragRef（那正是「tap 后残留一次拖拽」的成因）。 */
+  const lastTapAtRef = useRef(0);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -288,24 +333,52 @@ export function PetWindow() {
       const target = e.target as HTMLElement | null;
       // 输入框与菜单内的点击不该触发拖拽
       if (target && target.closest("[data-pet-ui]")) return;
-      dragRef.current = {
-        startX: e.clientX,
-        startY: e.clientY,
-        dragging: false,
-        lastTapAt: dragRef.current?.lastTapAt ?? 0,
-      };
+      dragRef.current = { startX: e.clientX, startY: e.clientY, dragging: false };
+    };
+
+    /**
+     * 结束一次拖拽：补终值 → 通知主进程收尾（吸附/钳制在那边做）→ 恢复舞台 → 补穿透判定。
+     * 三条退出路径共用（正常 mouseup / 拖拽中检测到左键已松开 / 窗口失焦），
+     * 分开写会出现「某条路径忘了恢复 Live2D 或忘了 dragEnd」的半截状态。
+     */
+    const finishDrag = (x: number, y: number) => {
+      dragMove.flush(); // 补一次终值：最后一帧的 rAF 可能还没执行
+      window.__heming_pet?.dragEnd();
+      setDraggingState(false);
+      setPaused(false); // 恢复舞台并立即渲染一帧，画面不会停在旧帧
+      // 拖拽期间跳过了追视，结束后以当前指针重新对一次焦点（不做补间，补间会看到眼睛扫回来）
+      focus(x, y);
+      // 同理，穿透判定也在拖拽期间跳过了，这里按此刻位置补一次，避免状态停在拖拽前
+      reportInteractiveAt(x, y);
     };
 
     const onMoveDrag = (e: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      if (!d.dragging) {
-        const moved = Math.hypot(e.clientX - d.startX, e.clientY - d.startY);
-        if (moved < 4) return; // 阈值内还算点击，交给 mouseup 判定
-        d.dragging = true;
-        window.__heming_pet?.dragStart();
+      if (d.dragging) {
+        // 中途丢了 mouseup（在窗口外松开、被别的窗口截走）：左键已抬起就收尾，
+        // 否则会一直停在「拖拽中」——主进程也就一直不落盘、不响应穿透上报。
+        if (!isPrimaryButtonDown(e.buttons)) {
+          dragRef.current = null;
+          finishDrag(e.clientX, e.clientY);
+          return;
+        }
+        dragMove.request(); // 拖拽中：每帧最多一次 IPC
+        return;
       }
-      window.__heming_pet?.dragMove();
+      // 左键已经松开（tap 之后继续移动 / 在窗口外抬起）：丢掉会话，绝不开始拖拽。
+      // 只按位移判拖拽的话，这里会把桌宠变成"被鼠标带着跑"。
+      if (!isPrimaryButtonDown(e.buttons)) {
+        dragRef.current = null;
+        return;
+      }
+      if (!shouldBeginDrag(d, e.clientX, e.clientY, e.buttons)) return;
+
+      d.dragging = true;
+      setDraggingState(true);
+      setPaused(true); // 冻结 Live2D：移动期间只搬静态位图，不给透明层叠加逐帧重绘
+      window.__heming_pet?.dragStart();
+      dragMove.request();
     };
 
     const onUp = (e: MouseEvent) => {
@@ -313,7 +386,7 @@ export function PetWindow() {
       dragRef.current = null;
       if (!d) return;
       if (d.dragging) {
-        window.__heming_pet?.dragEnd();
+        finishDrag(e.clientX, e.clientY);
         return;
       }
       const verdict = classifyPointerUp(d.startX, d.startY, e.clientX, e.clientY);
@@ -321,17 +394,35 @@ export function PetWindow() {
 
       // 双击：播动作；单击：呼出输入框
       const now = Date.now();
-      if (now - d.lastTapAt < 320) {
+      if (now - lastTapAtRef.current < 320) {
+        lastTapAtRef.current = 0; // 双击后重新计时，连点三下不会当成两次双击
         setCelebrate({ at: now }); // 姿态层负责播对应动作
         return;
       }
+      lastTapAtRef.current = now;
       setInputOpen(true);
       setMenu(null);
       requestAnimationFrame(() => inputElRef.current?.focus());
-      dragRef.current = { ...d, lastTapAt: now };
+    };
+
+    /** 失焦（Alt+Tab / 别的窗口抢走焦点）：按下与拖拽状态都复位，不留幽灵拖拽。 */
+    const onBlur = () => {
+      const d = dragRef.current;
+      dragRef.current = null;
+      if (d && d.dragging) {
+        // 没有可信的光标坐标可用：让主进程按它自己拿到的屏幕光标收尾即可
+        dragMove.flush();
+        window.__heming_pet?.dragEnd();
+        setDraggingState(false);
+        setPaused(false);
+      } else {
+        dragMove.cancel();
+      }
     };
 
     const onLeave = () => {
+      if (draggingRef.current) return; // 拖拽中窗口跟着光标走，不该在这里清穿透
+      dragRef.current = null; // 按下后移出窗口（还没进入拖拽）：会话作废，不留可被推进的状态
       focusCenter();
       if (interactiveRef.current) {
         interactiveRef.current = false;
@@ -343,13 +434,27 @@ export function PetWindow() {
     window.addEventListener("mousemove", onMoveDrag);
     window.addEventListener("mouseup", onUp);
     window.addEventListener("mouseleave", onLeave);
+    window.addEventListener("blur", onBlur);
     return () => {
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("mousemove", onMoveDrag);
       window.removeEventListener("mouseup", onUp);
       window.removeEventListener("mouseleave", onLeave);
+      window.removeEventListener("blur", onBlur);
+      dragMove.cancel();
     };
-  }, [playMotion, focusCenter]);
+  }, [dragMove, focus, focusCenter, reportInteractiveAt, setDraggingState, setPaused]);
+
+  /* 拖拽时给 body 加 grabbing：光标形状本身就是「正在拖」的反馈。 */
+  useEffect(() => {
+    if (!dragging) return;
+    const body = document.body;
+    const previous = body.style.cursor;
+    body.style.cursor = "grabbing";
+    return () => {
+      body.style.cursor = previous;
+    };
+  }, [dragging]);
 
   /* ────────────── 右键菜单 ────────────── */
   useEffect(() => {

@@ -88,7 +88,7 @@ beforeEach(() => {
   localStorage.clear();
   useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE } });
   useAuthStore.setState({ token: "t1", user: me, status: "authed", error: null });
-  useUiStore.setState({ page: "team", activeConversationId: null, teamFocusUserId: null });
+  useUiStore.setState({ page: "team", pageView: null, activeConversationId: null, teamFocusUserId: null });
   useInfohubStore.setState({ running: false, available: false, agenda: null });
   useTokenUsageStore.setState({
     records: [
@@ -119,7 +119,11 @@ beforeEach(() => {
 
 async function renderPage() {
   render(<TeamPage />);
-  await waitFor(() => expect(screen.getByText(/名真实成员/)).toBeInTheDocument());
+  // 看板视图里也有一行「N 名真实成员」统计，所以这里用 getAllByText：
+  // 页面加载完成与否看的是「至少出现一处成员统计」，不假设只有页头那一处。
+  await waitFor(() =>
+    expect(screen.getAllByText(/名真实成员/).length).toBeGreaterThan(0),
+  );
 }
 
 describe("团队用量：默认关闭只看本人", () => {
@@ -317,5 +321,50 @@ describe("团队页布局（d.62-B）", () => {
     expect(headings[0]).toHaveClass("ui-page-title");
     expect(headings[0]).toHaveTextContent("团队");
     expect(document.querySelector(".ui-page-sub")?.textContent).toContain("名真实成员");
+  });
+});
+
+/** d.67 导航合并：原「团队看板」独立页并成团队页的「看板」Tab。 */
+describe("团队页：看板 Tab（d.67 导航合并）", () => {
+  const boardTask = activity({ id: "b1", kind: "task", title: "整理会议纪要", detail: "按项目分组" });
+  const boardAgenda = activity({ id: "b2", kind: "agenda", actorId: bob.id, title: "周五交材料" });
+
+  it("Tab 栏有看板；切过去渲染两列卡片，页头仍只有一个 h1", async () => {
+    vi.mocked(fetchTeamActivities).mockResolvedValue({
+      activities: [boardTask, boardAgenda],
+    });
+    await renderPage();
+
+    fireEvent.click(screen.getByRole("tab", { name: "看板" }));
+    expect(await screen.findByText("整理会议纪要")).toBeInTheDocument();
+    expect(screen.getByText("周五交材料")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "看板" })).toHaveAttribute("aria-selected", "true");
+
+    // 嵌入后不再出现第二个页面标题：看板不画自己的「团队看板」页头
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("团队");
+    expect(screen.queryByText("团队看板")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".ui-page-title")).toHaveLength(1);
+
+    // 看板自己的搜索/两列都在；名册给看板让位（看板自带成员筛选）
+    expect(screen.getByLabelText("搜索看板")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "任务" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "日程" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("搜索团队成员")).not.toBeInTheDocument();
+  });
+
+  it("pageView=board 意图：自动切到看板并消费，之后手动切走不残留", async () => {
+    useUiStore.setState({ pageView: "board" });
+    await renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "看板" })).toHaveAttribute("aria-selected", "true"),
+    );
+    // 意图读走即清：切走再回来应回到默认的动向视图
+    expect(useUiStore.getState().pageView).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "动向" }));
+    expect(screen.getByRole("tab", { name: "动向" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("搜索团队成员")).toBeInTheDocument();
   });
 });

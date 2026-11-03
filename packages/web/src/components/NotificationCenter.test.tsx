@@ -123,7 +123,9 @@ describe("通知中心面板", () => {
     fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
     fireEvent.click(screen.getByRole("button", { name: "打开通知：梳理模块依赖已完成" }));
 
-    expect(useUiStore.getState().page).toBe("tasks");
+    // 任务区已并入智能体页：跳转落到 chat + 任务视图
+    expect(useUiStore.getState().page).toBe("chat");
+    expect(useUiStore.getState().pageView).toBe("tasks");
     expect(useUiStore.getState().taskFocusId).toBe("t1");
     expect(useUiStore.getState().activeConversationId).toBe("c1");
   });

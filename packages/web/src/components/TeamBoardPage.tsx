@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TeamActivity, TeamActivityKind, TeamMember } from "@heming/shared";
 import { fetchTeam, fetchTeamActivities } from "../lib/api.js";
-import { useUiStore } from "../store/ui.js";
 import { Avatar } from "./Avatar.js";
-import { PageShell } from "./layout/PageShell.js";
-import { AssistantIcon, TaskIcon, TeamIcon } from "./icons.js";
+import { TaskIcon } from "./icons.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { SkeletonCard } from "./ui/Skeleton.js";
 
 /**
- * 团队看板：工作区的替代页。
+ * 团队看板（d.67 起并入团队页的「看板」Tab）。
  *
  * 只收真实成员的任务与日程摘要，按「任务 / 日程」两列铺开；聊天记录、
  * 群聊与好友关系都不在这里——团队本身只有一份名册，隐私边界与团队页一致。
+ *
+ * 为什么不留在独立页：导航里它和「团队」是同一份名册的两种读法，两个入口只会
+ * 让用户来回跳。这里只保留 `TeamBoardView`（取数、筛选、两列卡片），页面外壳
+ * 交给宿主 TeamPage——所以本文件不再 import PageShell，也不再画页头标题。
+ *
+ * 数据仍由本视图自己取（fetchTeam/fetchTeamActivities），不与团队页的动向流合并：
+ * 两者请求口径不同（看板固定 limit=100、30s 轮询），硬合并只会让一边被另一边牵着走。
  */
 
 const REFRESH_MS = 30_000;
@@ -71,8 +76,16 @@ function BoardCard({ activity, actor }: { activity: TeamActivity; actor: string 
   );
 }
 
-export function TeamBoardPage() {
-  const setPage = useUiStore((s) => s.setPage);
+export interface TeamBoardViewProps {
+  /** 额外容器类：宿主页要控制高度/内边距时用，视图本身不自带 PageShell。 */
+  className?: string;
+}
+
+/**
+ * 可嵌入的看板视图：不含 PageShell、不含页面级 h1。
+ * 宿主页（TeamPage）负责页头与 Tab，视图只负责筛选条 + 两列卡片。
+ */
+export function TeamBoardView({ className = "" }: TeamBoardViewProps = {}) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [onlineCount, setOnlineCount] = useState(0);
   const [activities, setActivities] = useState<TeamActivity[]>([]);
@@ -99,6 +112,8 @@ export function TeamBoardPage() {
     }
   }, []);
 
+  // 只在 View 挂载时轮询：切到别的 Tab 会卸载本视图，定时器自然停掉，
+  // 不会在后台继续打接口（看板不是所有团队页访问都需要）。
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), REFRESH_MS);
@@ -144,125 +159,91 @@ export function TeamBoardPage() {
     : null;
 
   return (
-    <PageShell
-      scroll={false}
-      title={
-        <span className="flex items-center gap-2">
-          <TeamIcon width={18} height={18} />
-          团队看板
-          <span className="rounded-sm border border-line px-1 ui-micro font-normal">
-            全站一个团队
-          </span>
-        </span>
-      }
-      subtitle={
-        <>
-          {members.length} 名真实成员 · {onlineCount} 人在线 · 今日 {todayCount} 条动向
-        </>
-      }
-      actions={
-        <>
+    <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
+      {/* 筛选条：原先挂在 PageShell 的 headerExtra，嵌到 Tab 里后仍是同一份控件，
+          只是不再借页面页头的位置。 */}
+      <div className="shrink-0 border-b border-line-soft bg-[#fbfbfb] px-6 py-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void load()}
-            className="rounded-lg border border-line px-2.5 py-1.5 ui-caption hover:bg-[#fafafa]"
+            onClick={() => setSelectedActor(null)}
+            className={`rounded-full border px-2.5 py-1 text-[11px] ${
+              selectedActor === null
+                ? "border-ink bg-ink text-white"
+                : "border-line text-muted hover:bg-white"
+            }`}
           >
-            刷新
+            全部成员
           </button>
-          <button
-            type="button"
-            onClick={() => setPage("team")}
-            className="rounded-lg border border-line px-2.5 py-1.5 ui-caption hover:bg-[#fafafa]"
-          >
-            成员动向
-          </button>
-          <button
-            type="button"
-            onClick={() => setPage("tasks")}
-            className="flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[11px] font-medium text-white"
-          >
-            <AssistantIcon width={13} height={13} />
-            去通用智能体
-          </button>
-        </>
-      }
-      headerExtra={
-        <div className="bg-[#fbfbfb] px-6 py-2.5">
-          <div className="flex flex-wrap items-center gap-2">
+          {roster.map((m) => (
             <button
+              key={m.user.id}
               type="button"
-              onClick={() => setSelectedActor(null)}
-              className={`rounded-full border px-2.5 py-1 text-[11px] ${
-                selectedActor === null
+              onClick={() => setSelectedActor(m.user.id === selectedActor ? null : m.user.id)}
+              className={`flex items-center gap-1.5 rounded-full border py-0.5 pl-0.5 pr-2 text-[11px] ${
+                m.user.id === selectedActor
                   ? "border-ink bg-ink text-white"
-                  : "border-line text-muted hover:bg-white"
+                  : "border-line text-[#555] hover:bg-white"
               }`}
             >
-              全部成员
+              <span className="relative">
+                <Avatar user={m.user} size={22} />
+                <span
+                  aria-hidden="true"
+                  className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white ${
+                    m.online ? "bg-[#12b76a]" : "bg-[#c4c4c4]"
+                  }`}
+                />
+              </span>
+              {m.user.displayName}
             </button>
-            {roster.map((m) => (
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 ui-caption">
+          <div className="flex items-center gap-1" role="group" aria-label="时间范围">
+            {(
+              [
+                ["today", "今日"],
+                ["all", "全部"],
+              ] as [Range, string][]
+            ).map(([value, label]) => (
               <button
-                key={m.user.id}
+                key={value}
                 type="button"
-                onClick={() => setSelectedActor(m.user.id === selectedActor ? null : m.user.id)}
-                className={`flex items-center gap-1.5 rounded-full border py-0.5 pl-0.5 pr-2 text-[11px] ${
-                  m.user.id === selectedActor
-                    ? "border-ink bg-ink text-white"
-                    : "border-line text-[#555] hover:bg-white"
+                aria-pressed={range === value}
+                onClick={() => setRange(value)}
+                className={`rounded-md px-2 py-0.5 ${
+                  range === value ? "bg-[#ececec] text-ink" : "text-muted hover:bg-[#f2f2f2]"
                 }`}
               >
-                <span className="relative">
-                  <Avatar user={m.user} size={22} />
-                  <span
-                    aria-hidden="true"
-                    className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white ${
-                      m.online ? "bg-[#12b76a]" : "bg-[#c4c4c4]"
-                    }`}
-                  />
-                </span>
-                {m.user.displayName}
+                {label}
               </button>
             ))}
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 ui-caption">
-            <div className="flex items-center gap-1" role="group" aria-label="时间范围">
-              {(
-                [
-                  ["today", "今日"],
-                  ["all", "全部"],
-                ] as [Range, string][]
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={range === value}
-                  onClick={() => setRange(value)}
-                  className={`rounded-md px-2 py-0.5 ${
-                    range === value ? "bg-[#ececec] text-ink" : "text-muted hover:bg-[#f2f2f2]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <input
-              aria-label="搜索看板"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索任务或日程…"
-              className="w-[200px] rounded-md border border-line-strong px-2 py-1 ui-caption outline-hidden focus:border-ink"
-            />
-            <span>
-              {selectedMember ? `${selectedMember.user.displayName} · ` : ""}
-              任务 {tasks.length} · 日程 {agenda.length}
-            </span>
-            <span className="ml-auto ui-micro">
-              只含成员主动共享的任务 / 日程摘要，不含对话与智能体轨迹
-            </span>
-          </div>
+          <input
+            aria-label="搜索看板"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索任务或日程…"
+            className="w-[200px] rounded-md border border-line-strong px-2 py-1 ui-caption outline-hidden focus:border-ink"
+          />
+          <span>
+            {selectedMember ? `${selectedMember.user.displayName} · ` : ""}
+            任务 {tasks.length} · 日程 {agenda.length}
+          </span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="rounded-lg border border-line bg-white px-2.5 py-1 ui-caption hover:bg-[#f5f5f5]"
+          >
+            刷新
+          </button>
         </div>
-      }
-    >
+        <p className="mt-1.5 ui-micro">
+          {members.length} 名真实成员 · {onlineCount} 人在线 · 今日 {todayCount} 条动向 ·
+          只含成员主动共享的任务 / 日程摘要，不含对话与智能体轨迹
+        </p>
+      </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
         {!ready ? (
@@ -329,9 +310,13 @@ export function TeamBoardPage() {
         )}
       </div>
 
-      <footer className="border-t border-line-soft px-6 py-2 ui-micro">
-        看板数据来自团队成员主动共享的摘要；{selectedMember ? `${selectedMember.user.displayName} 最近${selectedMember.online ? "在线" : ` ${lastSeenLabel(selectedMember.lastSeenAt)} 在线`}` : "点击成员可只看他的任务与日程"}。
+      <footer className="shrink-0 border-t border-line-soft px-6 py-2 ui-micro">
+        看板数据来自团队成员主动共享的摘要；
+        {selectedMember
+          ? `${selectedMember.user.displayName} 最近${selectedMember.online ? "在线" : ` ${lastSeenLabel(selectedMember.lastSeenAt)} 在线`}`
+          : "点击成员可只看他的任务与日程"}
+        。
       </footer>
-    </PageShell>
+    </div>
   );
 }

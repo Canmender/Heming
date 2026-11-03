@@ -364,19 +364,15 @@ describe("设置区 · 导航顺序", () => {
   it("上移/下移改变顺序并落盘，首项上移与末项下移禁用", () => {
     render(<SettingsPage />);
     goTab("导航");
-    fireEvent.click(screen.getByRole("button", { name: "上移 技能区" }));
+    fireEvent.click(screen.getByRole("button", { name: "上移 插件区" }));
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
       "team",
       "chat",
       "staff",
       "infohub",
-      "automations",
-      "workspace",
-      "skills",
-      "tasks",
       "plugins",
-      "interfaces",
+      "automations",
       "memory",
       "settings",
     ]);
@@ -388,7 +384,7 @@ describe("设置区 · 导航顺序", () => {
   });
 
   it("恢复默认导航顺序", () => {
-    useUiStore.getState().setNavOrder(["settings", "memory", "home", "workspace", "skills", "interfaces"]);
+    useUiStore.getState().setNavOrder(["settings", "memory", "home", "team", "plugins"]);
     render(<SettingsPage />);
     goTab("导航");
     fireEvent.click(screen.getByRole("button", { name: "恢复默认导航顺序" }));

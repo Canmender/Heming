@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   describeCapabilities,
   describeCapabilityCatalog,
-  pluginIdFromServerId,
   pluginStore,
   type CapabilityCatalog,
   type CapabilitySnapshot,
@@ -17,41 +16,39 @@ import {
   publicKeyFingerprint,
   verifyManifestSignature,
 } from "../lib/plugins/index.js";
-import { mcpRegistry } from "../lib/mcp/index.js";
-import { skillPool } from "../lib/skills/index.js";
-import { useChatStore } from "../store/chat.js";
-import { useUiStore } from "../store/ui.js";
+import { mcpRegistry, type McpRegistry } from "../lib/mcp/index.js";
+import { skillPool, type SkillPool } from "../lib/skills/index.js";
+import { useUiStore, type PageView } from "../store/ui.js";
 import { PackageIcon, PlusIcon } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
 import { InstallDialog } from "./plugins/InstallDialog.js";
 import { PluginCard } from "./plugins/PluginCard.js";
 import { PluginDetailDialog } from "./plugins/PluginDetailDialog.js";
-import { PluginMcpPanel } from "./plugins/PluginMcpPanel.js";
-import { PluginSkillPanel } from "./plugins/PluginSkillPanel.js";
 import { RemovePluginDialog } from "./plugins/RemovePluginDialog.js";
 import { PluginStats } from "./plugins/PluginStats.js";
 import { SystemPluginCard } from "./plugins/SystemPluginCard.js";
 import { PluginToolPanel } from "./plugins/PluginToolPanel.js";
+import { SkillsView } from "./SkillsPage.js";
+import { InterfacesView } from "./InterfacesPage.js";
 import {
   describeBlockedTools,
   describeCapabilityStats,
-  describeMcpRows,
-  describeSkillRows,
   groupCatalogTools,
   groupToolPacks,
   installResultMessage,
-  type AgentLite,
-  type McpRegistryPort,
-  type SkillPoolPort,
 } from "./plugins/viewModel.js";
 import { BTN_GHOST, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
 
 /**
- * 插件区 · 统一能力中枢（d.64 · T2）。
+ * 插件区 · 统一能力中枢（d.64 · T2；d.67 导航合并）。
  *
  * 插件 = 能力包：技能 / 工具 / MCP 服务 / 命令。本页把此前散在插件区、技能区、
  * 接口区的四份口径合并成四个 Tab，数据全部只读本机（插件存储、技能池、能力目录、MCP 注册表），
  * 不发起网络请求；安装/更新/停用/卸载语义与存储格式完全不变。
+ *
+ * d.67 起「技能」「MCP」两个 Tab 不再是只读摘要：分别内嵌完整的 `SkillsView` /
+ * `InterfacesView`（原技能区页、接口区页的页面主体），页内所有「去技能区 / 去接口区」
+ * 动作改为切 Tab，不再跨页 setPage——导航里也不再有这两个独立入口。
  */
 
 type TabKey = "plugins" | "skills" | "tools" | "mcp";
@@ -63,12 +60,24 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "mcp", label: "MCP 服务" },
 ];
 
+/**
+ * 宿主页视图意图 → 本页 Tab（d.67）。
+ *
+ * 一次性意图由 `store/ui.ts` 的 `pageView` 投递：旧链接 `setPage("skills")` /
+ * `setPage("interfaces")` 会被折叠成「插件区 + 对应视图」。本页读走即清，
+ * 所以只是「这一次进入」落在哪个 Tab，不会把 Tab 长期钉在 store 里。
+ */
+const VIEW_TO_TAB: Partial<Record<PageView, TabKey>> = {
+  skills: "skills",
+  interfaces: "mcp",
+};
+
 export interface PluginsPageProps {
   plugins?: PluginStore;
-  /** 技能池（默认全局 skillPool；测试注入独立实例）。 */
-  skills?: SkillPoolPort;
-  /** MCP 注册表（默认全局 mcpRegistry）。 */
-  mcp?: McpRegistryPort;
+  /** 技能池（默认全局 skillPool；测试注入独立实例）。技能 Tab 的完整技能视图用它。 */
+  skills?: SkillPool;
+  /** MCP 注册表（默认全局 mcpRegistry）。MCP Tab 的完整接口视图用它。 */
+  mcp?: McpRegistry;
   /** 能力目录（默认现场 `describeCapabilityCatalog()`；测试可注入固定目录）。 */
   catalog?: CapabilityCatalog;
   /** 统一能力快照（默认现场 `describeCapabilities()`；测试可注入固定快照）。 */
@@ -79,8 +88,6 @@ export interface PluginsPageProps {
   verify?: (manifest: PluginManifest) => Promise<SignatureCheck>;
   /** 公钥指纹实现（测试注入；默认 SHA-256）。 */
   fingerprintOf?: (publicKey: string) => Promise<string>;
-  /** 智能体名册（技能 Tab 的「被几个智能体使用」需要）。 */
-  agents?: readonly AgentLite[];
 }
 
 /** 主机名（含端口）；清单已校验合法，这里只用于展示。 */
@@ -101,11 +108,7 @@ export function PluginsPage({
   publishers: publishersProp,
   verify = verifyManifestSignature,
   fingerprintOf = publicKeyFingerprint,
-  agents,
 }: PluginsPageProps = {}) {
-  // 技能 Tab 的「被几个智能体使用」需要名册：订阅 chat store，未注入时懒加载一次。
-  const roster = useChatStore((s) => s.agentsRoster);
-  const loadAgentsRoster = useChatStore((s) => s.loadAgentsRoster);
   const [tick, setTick] = useState(0);
   const [tab, setTab] = useState<TabKey>("plugins");
   const [installOpen, setInstallOpen] = useState(false);
@@ -113,6 +116,18 @@ export function PluginsPage({
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<InstalledPlugin | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+
+  /**
+   * 一次性视图意图（d.67）：旧「技能区 / 接口区」链接、命令面板与桌宠气泡
+   * 都会落到「插件区 + pageView」；这里消费一次并切到对应 Tab。
+   */
+  const pageView = useUiStore((s) => s.pageView);
+  useEffect(() => {
+    if (!pageView) return;
+    const view = useUiStore.getState().consumePageView();
+    const next = view ? VIEW_TO_TAB[view] : undefined;
+    if (next) setTab(next);
+  }, [pageView]);
 
   // 命令面板「插件」结果跳转：打开该插件详情并短暂高亮卡片（d.61 起的既有行为）。
   const paletteIntent = useUiStore((s) => s.paletteIntent);
@@ -137,27 +152,10 @@ export function PluginsPage({
     return () => window.clearTimeout(timer);
   }, [highlightPluginId]);
 
-  const resolvedAgents = useMemo<readonly AgentLite[]>(
-    () => agents ?? roster.map((agent) => ({ id: agent.id, name: agent.name })),
-    [agents, roster],
-  );
-
-  useEffect(() => {
-    if (agents) return;
-    if (roster.length > 0) return;
-    void loadAgentsRoster().catch(() => {
-      // 名册加载失败不影响本页：技能行只是少一个「使用智能体」计数
-    });
-  }, [agents, roster.length, loadAgentsRoster]);
-
   const bump = () => setTick((n) => n + 1);
 
   // 数据快照：tick 是「安装/启停后重算」的统一信号；catalog 传入时优先用注入值。
   const list = useMemo(() => plugins.list(), [plugins, tick]);
-  const skillRows = useMemo(
-    () => describeSkillRows(skills, plugins, resolvedAgents),
-    [skills, plugins, resolvedAgents, tick],
-  );
   const capabilityCatalog = useMemo(
     () => catalog ?? describeCapabilityCatalog({ plugins, mcp }),
     [catalog, plugins, mcp, tick],
@@ -181,10 +179,6 @@ export function PluginsPage({
   const blockedTools = useMemo(
     () => describeBlockedTools(capabilityCatalog, plugins),
     [capabilityCatalog, plugins],
-  );
-  const mcpRows = useMemo(
-    () => describeMcpRows(mcp, plugins, pluginIdFromServerId),
-    [mcp, plugins, tick],
   );
 
   const previewState = useMemo((): {
@@ -272,8 +266,15 @@ export function PluginsPage({
     });
   };
 
-  const goSkills = () => useUiStore.getState().setPage("skills");
-  const goInterfaces = () => useUiStore.getState().setPage("interfaces");
+  // 页内所有「去技能区 / 去接口区」的入口都收敛成切 Tab（d.67：两页已不存在）。
+  const goSkills = () => setTab("skills");
+  const goInterfaces = () => setTab("mcp");
+  /** 打开某插件详情并高亮卡片：内嵌视图里点「插件：<名>」徽标走这里，不跨页。 */
+  const openPluginDetail = (pluginId: string) => {
+    setTab("plugins");
+    setDetailId(pluginId);
+    setHighlightPluginId(pluginId);
+  };
 
   const publishers = useMemo<PublisherTrustStore>(
     () => publishersProp ?? new PublisherTrustStoreClass(),
@@ -284,7 +285,7 @@ export function PluginsPage({
   return (
     <PageShell
       title="插件区"
-      subtitle="插件 = 能力包：技能 / 工具 / MCP 服务 / 命令，全部本机。安装后技能进入技能池、服务登记到接口区；启用状态与删除范围按插件统一管理。"
+      subtitle="插件 = 能力包：技能 / 工具 / MCP 服务 / 命令，全部本机。安装后技能进入技能池、服务登记到 MCP 视图；技能与 MCP 的日常管理就在本页两个 Tab 里，无需再切页。"
       width="wide"
       actions={
         <button type="button" onClick={openInstall} className={`flex items-center gap-1 ${BTN_GHOST}`}>
@@ -370,20 +371,14 @@ export function PluginsPage({
 
             <p className={`mt-3 ${HINT}`}>
               插件只声明技能、远程 MCP 服务与命令，不含可执行代码、不携带密钥；安装不会启动进程，
-              也不会主动联网——服务连接与工具启用由你在接口区发起，工具调用仍走人工确认。
+              也不会主动联网——服务连接与工具启用由你在「MCP 服务」Tab 发起，工具调用仍走人工确认。
             </p>
           </>
         )}
 
+        {/* 技能 Tab：完整技能视图（原技能区页主体）。 */}
         {tab === "skills" && (
-          <PluginSkillPanel
-            rows={skillRows}
-            onToggle={(id, enabled) => {
-              skills.setEnabled(id, enabled);
-              bump();
-            }}
-            onManage={goSkills}
-          />
+          <SkillsView skills={skills} plugins={plugins} onOpenPlugin={openPluginDetail} />
         )}
 
         {tab === "tools" && (
@@ -398,20 +393,9 @@ export function PluginsPage({
           />
         )}
 
+        {/* MCP Tab：完整接口视图（原接口区页主体）。 */}
         {tab === "mcp" && (
-          <PluginMcpPanel
-            rows={mcpRows}
-            onToggle={(serverId, enabled) => {
-              mcp.update(serverId, { enabled });
-              bump();
-            }}
-            onManage={goInterfaces}
-            onOpenPlugin={(pluginId) => {
-              setTab("plugins");
-              setDetailId(pluginId);
-              setHighlightPluginId(pluginId);
-            }}
-          />
+          <InterfacesView registry={mcp} plugins={plugins} onOpenPlugin={openPluginDetail} />
         )}
       </div>
 

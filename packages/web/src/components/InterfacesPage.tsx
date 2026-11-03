@@ -62,14 +62,35 @@ function SystemSourceChip({ systemName }: { systemName: string }) {
  *
  * 安全默认：**工具默认不启用**，必须显式打开才会进入模型提示词。
  */
-export function InterfacesPage({
-  registry = mcpRegistry,
-  plugins = pluginStore,
-}: {
+/**
+ * 可嵌入的接口（MCP）视图（d.67 导航合并）。
+ *
+ * 为什么把接口区从「页」降级成「视图」：导航里接口区与插件区的「MCP」Tab
+ * 看的是同一份 MCP 注册表（插件声明的远程服务也登记在这里），两个入口
+ * 只是把同一张表拆成两处。合并后插件区承载「MCP」Tab，本视图保留服务
+ * 增删改、请求头、连接、逐工具授权与协议说明，只去掉页面外壳。
+ */
+export interface InterfacesViewProps {
   registry?: McpRegistry;
   /** 插件 store（取「插件：<名>」来源徽标要用的显示名；测试可注入）。 */
   plugins?: PluginStore;
-}) {
+  /**
+   * 「插件：<名>」徽标被点时做什么。
+   * 嵌入插件区时由宿主打开插件详情（同页弹窗）；不传则退回旧行为（投意图 + 切插件区）。
+   */
+  onOpenPlugin?: (pluginId: string) => void;
+  /** 额外容器类（宿主控制高度/内边距用；视图本身不自带 PageShell）。 */
+  className?: string;
+}
+
+export type InterfacesPageProps = InterfacesViewProps;
+
+export function InterfacesView({
+  registry = mcpRegistry,
+  plugins = pluginStore,
+  onOpenPlugin,
+  className = "",
+}: InterfacesViewProps = {}) {
   /** 插件 id → 显示名；来源徽标与 aria-label 共用。 */
   const pluginNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -80,11 +101,17 @@ export function InterfacesPage({
   /** 系统插件的显示名（预置服务来源徽标用；不硬编码文案）。 */
   const systemName = useMemo(() => describeSystemPlugin({ mcp: registry }).name, [registry]);
 
-  /** 跳插件区并打开该插件详情：复用 d.60 的 open-plugin 内存意图，不新增 IPC。 */
-  const openPlugin = (pluginId: string) => {
-    useUiStore.getState().setPaletteIntent("open-plugin", { id: pluginId });
-    useUiStore.getState().setPage("plugins");
-  };
+  /**
+   * 「插件：<名>」徽标的动作：
+   * - 嵌入式（宿主传 onOpenPlugin）→ 宿主打开插件详情，留在插件区内；
+   * - 独立渲染（旧外壳/旧用例）→ 仍投既有 open-plugin 内存意图再切插件区。
+   */
+  const openPlugin =
+    onOpenPlugin ??
+    ((pluginId: string) => {
+      useUiStore.getState().setPaletteIntent("open-plugin", { id: pluginId });
+      useUiStore.getState().setPage("plugins");
+    });
   const [tick, setTick] = useState(0);
   const [discover, setDiscover] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<McpServerConfig | null>(null);
@@ -235,49 +262,52 @@ export function InterfacesPage({
   };
 
   if (discover) {
+    // 发现页是接口区的二级面板：嵌入后没有「整页可换」，改用覆盖层承载。
+    // 这样既保住「返回接口区」这条退路，也不会在 Tab 内叠出第二个页面页头。
     return (
-      <RegistryPage
-        onBack={() => {
-          setDiscover(false);
-          // 安装/删除都可能改过服务列表，回列表时重新读一次。
-          bump();
-        }}
-        onInstalled={bump}
-      />
+      <div className="fixed inset-0 z-40 overflow-y-auto bg-white">
+        <RegistryPage
+          onBack={() => {
+            setDiscover(false);
+            // 安装/删除都可能改过服务列表，回列表时重新读一次。
+            bump();
+          }}
+          onInstalled={bump}
+        />
+      </div>
     );
   }
 
   return (
-    <PageShell
-      title="接口区"
-      subtitle={`MCP 服务与工具：连接后把工具开关打开，智能体在会话里就能调用（协议 ${MCP_PROTOCOL_VERSION}）。工具默认关闭，需要逐个授权。`}
-      width="wide"
-      actions={
-        <>
-          <button
-            type="button"
-            onClick={() => {
-              setDiscover(true);
-              setMsg(null);
-            }}
-            className="ui-btn ui-btn-md ui-btn-ghost"
-          >
-            从 Registry 发现
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setFormOpen((v) => !v);
-              setMsg(null);
-            }}
-            className="ui-btn ui-btn-md ui-btn-ghost"
-          >
-            <PlusIcon width={13} height={13} />
-            添加 MCP 服务
-          </button>
-        </>
-      }
-    >
+    <div className={className}>
+      {/* 页头动作原先挂在 PageShell.actions，嵌入后收进视图顶部工具条；
+          协议版本也放这一行——去掉页头后它需要一个固定的落点。 */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setDiscover(true);
+            setMsg(null);
+          }}
+          className="ui-btn ui-btn-md ui-btn-ghost"
+        >
+          从 Registry 发现
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setFormOpen((v) => !v);
+            setMsg(null);
+          }}
+          className="ui-btn ui-btn-md ui-btn-ghost"
+        >
+          <PlusIcon width={13} height={13} />
+          添加 MCP 服务
+        </button>
+        <span className="ml-auto text-[11px] text-muted">
+          MCP 协议 {MCP_PROTOCOL_VERSION} · 工具默认关闭，需要逐个授权
+        </span>
+      </div>
       {msg && (
         <div
           role="status"
@@ -678,6 +708,25 @@ export function InterfacesPage({
           </p>
         </ConfirmDialog>
       )}
+    </div>
+  );
+}
+
+/**
+ * 旧独立入口的过渡外壳（d.67 导航合并）。
+ *
+ * `interfaces` 路由已不存在——旧链接会被 `store/ui.ts` 折叠成「插件区 + MCP 视图」；
+ * App 侧已不再引用本组件。保留一个带 PageShell 的导出，只是让旧引用/旧用例
+ * 在这段时间里不会把构建打挂；新代码请用 `InterfacesView`。
+ */
+export function InterfacesPage({ registry, plugins }: InterfacesPageProps = {}) {
+  return (
+    <PageShell
+      title="接口区"
+      subtitle={`MCP 服务与工具：接口区已并入插件区的「MCP」视图；此独立入口仅作旧链接兼容（协议 ${MCP_PROTOCOL_VERSION}）。`}
+      width="wide"
+    >
+      <InterfacesView registry={registry} plugins={plugins} />
     </PageShell>
   );
 }

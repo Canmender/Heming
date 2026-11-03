@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useUiStore, DEFAULT_NAV_ORDER, normalizeNavOrder, readStoredNavOrder } from "./ui.js";
+import { useUiStore, DEFAULT_NAV_ORDER, normalizeNavOrder, readStoredNavOrder, resolvePage } from "./ui.js";
 
 describe("ui store 页面与会话状态", () => {
   beforeEach(() => {
@@ -47,7 +47,7 @@ describe("ui store 导航顺序", () => {
     useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("默认顺序（团队页紧随主页，智能体页随后）", () => {
+  it("默认顺序（d.67 合并后 9 个宿主页）", () => {
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
       "team",
@@ -55,11 +55,7 @@ describe("ui store 导航顺序", () => {
       "staff",
       "infohub",
       "automations",
-      "workspace",
-      "tasks",
-      "skills",
       "plugins",
-      "interfaces",
       "memory",
       "settings",
     ]);
@@ -67,9 +63,9 @@ describe("ui store 导航顺序", () => {
 
   it("moveNav 上移/下移生效并落盘", () => {
     useUiStore.getState().moveNav("memory", -1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(10);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(6);
     useUiStore.getState().moveNav("memory", 1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(11);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(7);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
       useUiStore.getState().navOrder,
     );
@@ -101,13 +97,25 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "staff",
       "infohub",
       "automations",
-      "workspace",
-      "tasks",
-      "skills",
       "plugins",
-      "interfaces",
       "settings",
     ]);
+  });
+
+  it("合并前的旧页面名折叠成宿主页，且不与已有宿主页重复", () => {
+    // 老用户 localStorage 里可能还是 13 项：读回后必须只剩 9 个宿主页，
+    // 顺序以旧列表中「第一次出现」的位置为准。
+    expect(
+      normalizeNavOrder([
+        "settings",
+        "workspace",
+        "home",
+        "skills",
+        "tasks",
+        "interfaces",
+        "memory",
+      ]),
+    ).toEqual(["settings", "team", "home", "plugins", "chat", "memory", "staff", "infohub", "automations"]);
   });
 
   it("非数组/损坏 JSON → 默认顺序", () => {
@@ -121,14 +129,69 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "staff",
       "infohub",
       "automations",
-      "workspace",
-      "tasks",
-      "skills",
       "plugins",
-      "interfaces",
       "memory",
     ]);
     expect(readStoredNavOrder(null)).toEqual([...DEFAULT_NAV_ORDER]);
+  });
+});
+
+describe("d.67 页面合并：旧页面 id 折叠成宿主页 + 视图意图", () => {
+  beforeEach(() => {
+    useUiStore.setState({
+      page: "home",
+      pageView: null,
+      activeConversationId: null,
+      taskFocusId: null,
+      automationFocusId: null,
+      infohubIntent: null,
+      automationIntent: null,
+    });
+  });
+
+  it("resolvePage 折叠四个已合并页面", () => {
+    expect(resolvePage("workspace")).toEqual({ page: "team", view: "board" });
+    expect(resolvePage("tasks")).toEqual({ page: "chat", view: "tasks" });
+    expect(resolvePage("skills")).toEqual({ page: "plugins", view: "skills" });
+    expect(resolvePage("interfaces")).toEqual({ page: "plugins", view: "interfaces" });
+    // 宿主页本身不产生视图意图
+    expect(resolvePage("home")).toEqual({ page: "home", view: null });
+    // 显式 view 优先于旧页面的默认视图
+    expect(resolvePage("interfaces", "skills")).toEqual({ page: "plugins", view: "skills" });
+  });
+
+  it("setPage 折叠旧 id 并投递一次性视图意图，consumePageView 取走即清", () => {
+    useUiStore.getState().setPage("skills");
+    expect(useUiStore.getState().page).toBe("plugins");
+    expect(useUiStore.getState().pageView).toBe("skills");
+    expect(useUiStore.getState().consumePageView()).toBe("skills");
+    expect(useUiStore.getState().pageView).toBeNull();
+    // 已经消费过：再取是 null（页面 effect 不会重复切 Tab）
+    expect(useUiStore.getState().consumePageView()).toBeNull();
+  });
+
+  it("普通切页把视图意图清掉（不把上一个宿主的 Tab 带过来）", () => {
+    useUiStore.getState().setPage("tasks");
+    useUiStore.getState().setPage("home");
+    expect(useUiStore.getState().pageView).toBeNull();
+  });
+
+  it("focusTask 进智能体页的任务视图（任务区已并入）", () => {
+    useUiStore.getState().focusTask("t1", "c1");
+    const s = useUiStore.getState();
+    expect(s.page).toBe("chat");
+    expect(s.pageView).toBe("tasks");
+    expect(s.taskFocusId).toBe("t1");
+    expect(s.activeConversationId).toBe("c1");
+  });
+
+  it("openConversation 从通知/会话入口进来时显式切回对话视图（不落进任务 Tab）", () => {
+    useUiStore.getState().setPage("tasks");
+    useUiStore.getState().openConversation("c1");
+    expect(useUiStore.getState().page).toBe("chat");
+    // "chat" 视图意图会插队覆盖掉刚才的 "tasks"：通知点进来必须看见对话
+    expect(useUiStore.getState().pageView).toBe("chat");
+    expect(useUiStore.getState().consumePageView()).toBe("chat");
   });
 });
 

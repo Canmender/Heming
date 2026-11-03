@@ -27,6 +27,9 @@ const EDGE_MARGIN = 24;
 const MIN_VISIBLE_WIDTH = 60;
 const MIN_VISIBLE_HEIGHT = 80;
 
+/** 拖拽收尾时贴到工作区边缘的吸附阈值（像素）。 */
+const PET_SNAP_PX = 12;
+
 /** 默认模型（相对 web 产物根目录）。 */
 const DEFAULT_MODEL_PATH = "pet/Hiyori/Hiyori.model3.json";
 
@@ -303,6 +306,107 @@ function draggedPosition(origin, cursor) {
 }
 
 /**
+ * 拖拽收尾的窗口位置：**先吸附、再钳制**。
+ *
+ * 为什么收尾要单独算一次：拖拽过程中窗口跟着光标走（可以短暂出屏），抬起时
+ * 若原样停住，用户会遇到两个问题——贴着屏幕边缘时永远差几像素（视觉上"没贴住"），
+ * 以及拖得太狠后窗口留在屏幕外、再也点不回来（位置还会被持久化，重启也回不来）。
+ *
+ * 规则：
+ * 1. 选**重叠面积最大**的工作区作为目标（多显示器：吸到当前所在那块屏的边缘）；
+ *    完全出屏时改选最近的一块，保证能拖回来。
+ * 2. 四条边各自判断：距离 ≤ PET_SNAP_PX 就把窗口贴到该边。
+ * 3. 两个方向都钳制「至少留 MIN_VISIBLE_* 露在工作区内」——与持久化校验
+ *    isOnVisibleDisplay 同一口径，因此收尾后的位置一定能通过重启校验。
+ *
+ * 纯函数：不碰 Electron，多显示器/DPI 都由调用方把 workArea 传进来。
+ *
+ * @param {{x:number,y:number}|null} pos 收尾时光标换算出的窗口起点
+ * @param {{width:number,height:number}} size 窗口像素尺寸
+ * @param {Array<{x:number,y:number,width:number,height:number}>} workAreas 各显示器工作区
+ */
+function settlePetPosition(pos, size, workAreas) {
+  if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return null;
+  const width = size && Number.isFinite(size.width) && size.width > 0 ? size.width : BASE_WIDTH;
+  const height = size && Number.isFinite(size.height) && size.height > 0 ? size.height : BASE_HEIGHT;
+  const start = { x: Math.round(pos.x), y: Math.round(pos.y) };
+  const areas = Array.isArray(workAreas)
+    ? workAreas.filter(
+        (area) =>
+          area &&
+          Number.isFinite(area.x) &&
+          Number.isFinite(area.y) &&
+          Number.isFinite(area.width) &&
+          Number.isFinite(area.height),
+      )
+    : [];
+  // 拿不到显示器信息（测试/异形环境）：只保证坐标是整数，不做裁剪
+  if (areas.length === 0) return start;
+
+  const bounds = { x: start.x, y: start.y, width, height };
+  let target = null;
+  let bestOverlap = -1;
+  for (const area of areas) {
+    const overlap = overlapOf(bounds, area);
+    const score = Math.max(0, overlap.width) * Math.max(0, overlap.height);
+    if (score > bestOverlap) {
+      bestOverlap = score;
+      target = area;
+    }
+  }
+  if (!target || bestOverlap <= 0) {
+    let bestDistance = Infinity;
+    for (const area of areas) {
+      const dx = start.x + width / 2 - (area.x + area.width / 2);
+      const dy = start.y + height / 2 - (area.y + area.height / 2);
+      const distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        target = area;
+      }
+    }
+  }
+
+  return {
+    x: clampToVisible(
+      snapToEdge(start.x, width, target.x, target.width),
+      width,
+      target.x,
+      target.width,
+      MIN_VISIBLE_WIDTH,
+    ),
+    y: clampToVisible(
+      snapToEdge(start.y, height, target.y, target.height),
+      height,
+      target.y,
+      target.height,
+      MIN_VISIBLE_HEIGHT,
+    ),
+  };
+}
+
+/** 一维吸附：起点贴工作区起点或窗口末端贴工作区末端，取更近的那条边。 */
+function snapToEdge(start, size, areaStart, areaSize) {
+  const toStart = Math.abs(start - areaStart);
+  const toEnd = Math.abs(start + size - (areaStart + areaSize));
+  if (toStart <= PET_SNAP_PX && toStart <= toEnd) return areaStart;
+  if (toEnd <= PET_SNAP_PX) return areaStart + areaSize - size;
+  return start;
+}
+
+/**
+ * 一维钳制：窗口起点夹到「右/下边至少露出 minVisible」与「左/上边至少露出 minVisible」
+ * 之间。窗口比工作区还小时，两个约束都成立，拖出屏幕后仍能抓住一块。
+ */
+function clampToVisible(start, size, areaStart, areaSize, minVisible) {
+  const need = Math.min(minVisible, size);
+  const lower = areaStart + need - size;
+  const upper = areaStart + areaSize - need;
+  if (lower > upper) return areaStart; // 工作区连两块最小可见都放不下：贴齐起点兜底
+  return Math.min(upper, Math.max(lower, start));
+}
+
+/**
  * 解析桌宠状态文件的文本。
  *
  * ★ 必须剥掉 UTF-8 BOM：Windows 上用 PowerShell / 记事本存过的 JSON 常带 BOM，
@@ -353,6 +457,9 @@ module.exports = {
   BASE_WIDTH,
   BASE_HEIGHT,
   EDGE_MARGIN,
+  MIN_VISIBLE_WIDTH,
+  MIN_VISIBLE_HEIGHT,
+  PET_SNAP_PX,
   DEFAULT_MODEL_PATH,
   PET_PAGE_ALLOWLIST,
   isSameAppOrigin,
@@ -368,5 +475,6 @@ module.exports = {
   petWindowOptions,
   petUrl,
   draggedPosition,
+  settlePetPosition,
   parsePetStateJson,
 };

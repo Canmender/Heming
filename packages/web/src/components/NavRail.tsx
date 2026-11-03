@@ -3,13 +3,10 @@ import {
   HomeIcon,
   TeamIcon,
   AssistantIcon,
-  PlugIcon,
   MemoryIcon,
   GearIcon,
   UserIcon,
-  SkillsIcon,
   PackageIcon,
-  TaskIcon,
   SearchIcon,
   InfoHubIcon,
   AutomationIcon,
@@ -24,27 +21,28 @@ import { GlobalFocusRing } from "./a11y/GlobalFocusRing.js";
 /**
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
  * 而 digit 固定绑定页本身——所以排序后 Alt+N 快捷键不变。
+ *
+ * d.67 合并后只剩 9 个宿主页：团队看板 / 通用智能体 / 技能区 / 接口区不再单独占位。
+ * - 团队看板 → 团队页「看板」视图
+ * - 通用智能体 → 智能体页「任务」视图
+ * - 技能区、接口区 → 插件区（能力中心）的「技能」「MCP」视图
+ * 数字键沿用被合并页的旧键位（2 团队看板、8 通用智能体），保住肌肉记忆；
+ * 技能区 3 / 接口区 4 没有承接页，空出来不用——不给现有页凭空换号。
  */
 const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }[] = [
   { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
-  // 团队（d.54）：名册 + 动向，去 IM 后的主入口；新页不占数字键
-  { page: "team", label: "团队", icon: <TeamIcon width={17} height={17} /> },
-  // 智能体（本机运行）：原 chat 页转正为导航页（仍不占数字键，沿用旧逻辑）
-  { page: "chat", label: "智能体", icon: <AssistantIcon width={17} height={17} /> },
+  // 团队（d.54）：名册 + 动向；d.67 起还承接原「团队看板」的看板视图
+  { page: "team", label: "团队", icon: <TeamIcon width={17} height={17} />, digit: "2" },
+  // 智能体（本机运行）：d.67 起承接原「通用智能体」的任务视图
+  { page: "chat", label: "智能体", icon: <AssistantIcon width={17} height={17} />, digit: "8" },
   // 幕僚（d.48）：常驻主动简报，与信息中枢同口径，不占数字键
   { page: "staff", label: "幕僚", icon: <StaffIcon width={17} height={17} /> },
-  // 信息中枢（d.45）：1–9/0 已排满，新页不再占用快捷键，只从导航点开
+  // 信息中枢（d.45）：1–9 已排满，新页不再占用快捷键，只从导航点开
   { page: "infohub", label: "信息中枢", icon: <InfoHubIcon width={17} height={17} /> },
   // 自动化（d.47）：与信息中枢同口径，不占数字键
   { page: "automations", label: "自动化", icon: <AutomationIcon width={17} height={17} /> },
-  // 团队看板（原工作区）：真实成员的任务 / 日程摘要两列铺开
-  { page: "workspace", label: "团队看板", icon: <TeamIcon width={17} height={17} />, digit: "2" },
-  // 通用智能体（原任务区）：页内直接向智能体派活并运行
-  { page: "tasks", label: "通用智能体", icon: <TaskIcon width={17} height={17} />, digit: "8" },
-  { page: "skills", label: "技能区", icon: <SkillsIcon width={17} height={17} />, digit: "3" },
-  // 插件区是新页，拿 0（老页编号不动）；1–9 之外只剩这个键位空着
+  // 插件区（d.62 统一插件模型，d.67 起并入技能区与接口区）：能力中心
   { page: "plugins", label: "插件区", icon: <PackageIcon width={17} height={17} />, digit: "0" },
-  { page: "interfaces", label: "接口区", icon: <PlugIcon width={17} height={17} />, digit: "4" },
   { page: "memory", label: "记忆区", icon: <MemoryIcon width={17} height={17} />, digit: "5" },
   // digit 绑定页面不随显示顺序变：改老页的编号等于换掉用户肌肉记忆里的快捷键。
   { page: "settings", label: "设置区", icon: <GearIcon width={17} height={17} />, digit: "6" },

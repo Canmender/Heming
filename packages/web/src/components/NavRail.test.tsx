@@ -22,18 +22,16 @@ describe("NavRail 图标轨（A 方案）", () => {
     render(<NavRail />);
     for (const name of [
       "主页 Alt1",
-      "团队看板 Alt2",
-      "技能区 Alt3",
-      "接口区 Alt4",
+      "团队 Alt2",
       "记忆区 Alt5",
       "设置区 Alt6",
-      "通用智能体 Alt8",
+      "智能体 Alt8",
       "插件区 Alt0",
     ]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
-    // 团队/智能体/幕僚/信息中枢/自动化不占数字键：只有名称
-    for (const name of ["团队", "智能体", "幕僚", "信息中枢", "自动化"]) {
+    // 幕僚/信息中枢/自动化不占数字键：只有名称
+    for (const name of ["幕僚", "信息中枢", "自动化"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
   });
@@ -51,13 +49,13 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(homeBtn.className).toContain("text-white");
     expect(homeBtn).toHaveAttribute("aria-current", "page");
 
-    fireEvent.click(screen.getByRole("button", { name: "接口区 Alt4" }));
-    expect(useUiStore.getState().page).toBe("interfaces");
+    fireEvent.click(screen.getByRole("button", { name: "插件区 Alt0" }));
+    expect(useUiStore.getState().page).toBe("plugins");
 
-    const intfBtn = screen.getByRole("button", { name: "接口区 Alt4" });
-    expect(intfBtn.className).toContain("bg-ink");
-    expect(intfBtn.className).toContain("text-white");
-    expect(intfBtn).toHaveAttribute("aria-current", "page");
+    const pluginsBtn = screen.getByRole("button", { name: "插件区 Alt0" });
+    expect(pluginsBtn.className).toContain("bg-ink");
+    expect(pluginsBtn.className).toContain("text-white");
+    expect(pluginsBtn).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "主页 Alt1" }).className).not.toContain("bg-ink");
     expect(screen.getByRole("button", { name: "主页 Alt1" })).not.toHaveAttribute("aria-current");
   });
@@ -151,9 +149,8 @@ describe("NavRail 图标轨（A 方案）", () => {
     const nav = screen.getByLabelText("主导航");
     const items = [
       "主页 Alt1",
-      "团队看板 Alt2",
-      "技能区 Alt3",
-      "接口区 Alt4",
+      "团队 Alt2",
+      "插件区 Alt0",
       "记忆区 Alt5",
       "设置区 Alt6",
     ].map(
@@ -176,13 +173,13 @@ describe("NavRail 导航顺序可自定义", () => {
 
   it("按 store.navOrder 渲染，且快捷键徽标仍绑页本身", () => {
     useUiStore.setState({
-      navOrder: ["settings", "home", "workspace", "skills", "interfaces", "memory"],
+      navOrder: ["settings", "home", "team", "chat", "plugins", "memory"],
     });
     render(<NavRail />);
     const labels = screen
       .getAllByRole("button")
       .map((b) => b.getAttribute("aria-label"))
-      .filter((l): l is string => Boolean(l?.startsWith("主页") || l?.startsWith("团队看板") || l?.startsWith("技能区") || l?.startsWith("接口区") || l?.startsWith("记忆区") || l?.startsWith("设置区")));
+      .filter((l): l is string => Boolean(l?.startsWith("主页") || l?.startsWith("团队") || l?.startsWith("智能体") || l?.startsWith("插件区") || l?.startsWith("记忆区") || l?.startsWith("设置区")));
     // 顺序跟着 store 走
     expect(labels[0]).toContain("设置区");
     expect(labels[1]).toContain("主页");
@@ -192,10 +189,40 @@ describe("NavRail 导航顺序可自定义", () => {
   });
 
   it("存储里缺项时自动补齐，不漏渲染任何导航", () => {
-    useUiStore.setState({ navOrder: ["memory", "home", "workspace", "skills", "interfaces"] });
+    useUiStore.setState({ navOrder: ["memory", "home"] });
     render(<NavRail />);
-    for (const name of ["主页", "团队", "智能体", "团队看板", "技能区", "接口区", "记忆区", "设置区", "信息中枢", "自动化"]) {
+    for (const name of ["主页", "团队", "智能体", "幕僚", "信息中枢", "自动化", "插件区", "记忆区", "设置区"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(name) }).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("旧导航顺序里的已合并页（团队看板/技能区/接口区/通用智能体）折叠成宿主页，不重复渲染", () => {
+    // 老用户的 localStorage 里可能还留着合并前的 13 项：读回时必须折叠、去重，
+    // 否则导航轨会凭空多出几个点不开的入口。
+    useUiStore.getState().setNavOrder([
+      "settings",
+      "workspace",
+      "home",
+      "skills",
+      "tasks",
+      "interfaces",
+      "memory",
+    ] as never);
+    render(<NavRail />);
+    expect(useUiStore.getState().navOrder).toEqual([
+      "settings",
+      "team",
+      "home",
+      "plugins",
+      "chat",
+      "memory",
+      "staff",
+      "infohub",
+      "automations",
+    ]);
+    // 团队/插件区/智能体各只出现一次
+    for (const name of ["团队", "插件区", "智能体"]) {
+      expect(screen.getAllByRole("button", { name: new RegExp(`^${name}( |$)`) }).length).toBe(1);
     }
   });
 });

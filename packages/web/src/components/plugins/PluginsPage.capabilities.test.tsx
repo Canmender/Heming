@@ -8,22 +8,27 @@ import {
   PublisherTrustStore,
   type CapabilityCatalog,
   type CapabilitySnapshot,
-  type PluginMcpPort,
   type PluginManifest,
   type SignatureCheck,
   type SystemPlugin,
 } from "../../lib/plugins/index.js";
 import { SkillPool, type StorageLike } from "../../lib/skills/index.js";
-import type { McpServerConfig } from "../../lib/mcp/index.js";
+import { McpRegistry, MCP_SERVERS_KEY, type McpServerConfig } from "../../lib/mcp/index.js";
 import { useUiStore } from "../../store/ui.js";
-import type { AgentLite, McpRegistryPort } from "./viewModel.js";
-import { describeCapabilityStats, describeSkillRows } from "./viewModel.js";
+import { describeCapabilityStats } from "./viewModel.js";
+
+// 技能 Tab 内嵌的是完整技能视图，它会自己拉一次智能体名册：
+// 固定成内存名册，用例不依赖网络、也不受 Fetch 实现差异影响。
+vi.mock("../../lib/agentsApi.js", () => ({
+  listAgents: vi.fn(async () => [{ id: "a1", name: "阿和" }]),
+}));
 
 /**
- * 插件页统一能力中枢（d.64 · T2）用例。
+ * 插件页统一能力中枢（d.64 · T2；d.67 导航合并）用例。
  *
- * 数据源全部注入：真实 PluginStore + SkillPool（内存存储）、假 MCP 注册表与固定能力目录，
- * 断言「四个统计数、四个 Tab、权限摘要、v3 预览、v2 旧包提示、工具分组与 blocked 标注」。
+ * 数据源全部注入：真实 PluginStore + SkillPool + McpRegistry（内存存储）与固定能力目录，
+ * 断言「四个统计数、四个 Tab（技能/MCP 换成完整视图）、权限摘要、v3 预览、v2 旧包提示、
+ * 工具分组与 blocked 标注、视图意图消费」。
  */
 
 const T0 = new Date("2026-11-01T08:00:00.000Z").getTime();
@@ -41,40 +46,6 @@ function makeStorage(map: Map<string, string> = new Map()): StorageLike {
     },
     removeItem: (key) => {
       map.delete(key);
-    },
-  };
-}
-
-function fakeMcp(): { port: PluginMcpPort; servers: Map<string, McpServerConfig> } {
-  const servers = new Map<string, McpServerConfig>();
-  return {
-    servers,
-    port: {
-      get: (id) => servers.get(id),
-      add: (input) => {
-        const server: McpServerConfig = {
-          id: input.id ?? "fake",
-          name: input.name,
-          transport: input.transport,
-          url: input.url,
-          enabled: input.enabled !== false,
-          origin: input.origin ?? "manual",
-          createdAt: "2026-11-01T00:00:00.000Z",
-          updatedAt: "2026-11-01T00:00:00.000Z",
-        };
-        servers.set(server.id, server);
-        return server;
-      },
-      update: (id, patch) => {
-        const current = servers.get(id);
-        if (!current) throw new Error("MCP 服务不存在");
-        const next = { ...current, ...patch };
-        servers.set(id, next);
-        return next;
-      },
-      remove: (id) => {
-        servers.delete(id);
-      },
     },
   };
 }
@@ -295,91 +266,75 @@ function fixedCapabilities(catalog: CapabilityCatalog = fixedCatalog()): Capabil
   };
 }
 
-/** 假 MCP 注册表：一个插件服务 + 一个手工服务 + 一个预置服务。 */
-function fakeRegistry(): McpRegistryPort & { update: ReturnType<typeof vi.fn> } {
-  const servers: McpServerConfig[] = [
-    {
-      id: "plugin:acme.report-kit:report",
-      name: "报告服务",
-      transport: "http",
-      url: "https://api.acme.com/mcp",
-      enabled: true,
-      origin: "plugin",
-      createdAt: "2026-11-01T00:00:00.000Z",
-      updatedAt: "2026-11-01T00:00:00.000Z",
-    },
-    {
-      id: "mcp-manual",
-      name: "手填服务",
-      transport: "http",
-      url: "https://manual.example.com/mcp",
-      enabled: false,
-      origin: "manual",
-      createdAt: "2026-11-01T00:00:00.000Z",
-      updatedAt: "2026-11-01T00:00:00.000Z",
-    },
-    {
-      id: "mcp-registry-demo",
-      name: "Registry 演示服务",
-      transport: "http",
-      url: "https://registry.example.com/mcp",
-      enabled: true,
-      origin: "registry",
-      createdAt: "2026-11-01T00:00:00.000Z",
-      updatedAt: "2026-11-01T00:00:00.000Z",
-    },
-    {
-      id: "mcp-windows-desktop",
-      name: "Windows 桌面",
-      transport: "http",
-      url: "http://127.0.0.1:9999/mcp",
-      enabled: true,
-      origin: "preset",
-      createdAt: "2026-11-01T00:00:00.000Z",
-      updatedAt: "2026-11-01T00:00:00.000Z",
-    },
-  ];
-  return {
-    servers: () => servers,
-    tools: (serverId) =>
-      serverId === "plugin:acme.report-kit:report"
-        ? [{ name: "weather_query", description: "查天气" }]
-        : serverId === "mcp-manual"
-          ? [{ name: "manual_echo" }]
-          : [],
-    isPreset: (id: string) => id === "mcp-windows-desktop",
-    isToolEnabled: () => true,
-    hasDiscovered: (serverId) => serverId === "plugin:acme.report-kit:report",
-    setToolEnabled: vi.fn(),
-    update: vi.fn((id: string, patch: { enabled?: boolean }) => {
-      const server = servers.find((item) => item.id === id);
-      if (server && patch.enabled !== undefined) server.enabled = patch.enabled;
-      return server;
-    }),
-    allTools: () =>
-      servers.flatMap((server) =>
-        server.id === "plugin:acme.report-kit:report"
-          ? []
-          : [],
-      ),
-  };
-}
+/**
+ * MCP 注册表夹具：一个插件服务 + 一个手工服务 + 一个 Registry 服务 + 一个预置服务。
+ *
+ * d.67 起 MCP Tab 渲染的是完整接口视图，需要真实的 McpRegistry（增删改、连接态、
+ * 逐工具授权都是它自己的方法）。页面与 PluginStore 共用同一个实例，测试因此能断言
+ * 「插件详情里改的开关确实写进了接口区同源注册表」。
+ */
+const MCP_FIXTURE: McpServerConfig[] = [
+  {
+    id: "plugin:acme.report-kit:report",
+    name: "报告服务",
+    transport: "http",
+    url: "https://api.acme.com/mcp",
+    enabled: true,
+    origin: "plugin",
+    createdAt: "2026-11-01T00:00:00.000Z",
+    updatedAt: "2026-11-01T00:00:00.000Z",
+  },
+  {
+    id: "mcp-manual",
+    name: "手填服务",
+    transport: "http",
+    url: "https://manual.example.com/mcp",
+    enabled: false,
+    origin: "manual",
+    createdAt: "2026-11-01T00:00:00.000Z",
+    updatedAt: "2026-11-01T00:00:00.000Z",
+  },
+  {
+    id: "mcp-registry-demo",
+    name: "Registry 演示服务",
+    transport: "http",
+    url: "https://registry.example.com/mcp",
+    enabled: true,
+    origin: "registry",
+    createdAt: "2026-11-01T00:00:00.000Z",
+    updatedAt: "2026-11-01T00:00:00.000Z",
+  },
+  {
+    id: "mcp-windows-desktop",
+    name: "Windows 桌面",
+    transport: "http",
+    url: "http://127.0.0.1:9999/mcp",
+    enabled: true,
+    origin: "preset",
+    createdAt: "2026-11-01T00:00:00.000Z",
+    updatedAt: "2026-11-01T00:00:00.000Z",
+  },
+];
 
 let storage: StorageLike;
 let publishers: PublisherTrustStore;
 let pool: SkillPool;
 let store: PluginStore;
-let mcp: ReturnType<typeof fakeMcp>;
-let registry: ReturnType<typeof fakeRegistry>;
+let registry: McpRegistry;
 
 beforeEach(() => {
-  storage = makeStorage();
+  const map = new Map<string, string>();
+  // 先种四台服务再构造注册表：McpRegistry 在空表时会预置默认服务，
+  // 这里要的是固定夹具，且 `setTools` 决定「已连接/工具数」的展示口径。
+  map.set(MCP_SERVERS_KEY, JSON.stringify(MCP_FIXTURE));
+  storage = makeStorage(map);
   pool = new SkillPool(storage, () => T0);
-  mcp = fakeMcp();
   publishers = new PublisherTrustStore(storage);
-  store = new PluginStore(storage, pool, () => T0, mcp.port, publishers);
-  registry = fakeRegistry();
-  useUiStore.setState({ page: "home" });
+  registry = new McpRegistry(storage, () => new Date(T0).toISOString());
+  registry.setTools("plugin:acme.report-kit:report", [{ name: "weather_query", description: "查天气" }]);
+  registry.setTools("mcp-manual", [{ name: "manual_echo" }]);
+  store = new PluginStore(storage, pool, () => T0, registry, publishers);
+  useUiStore.setState({ page: "home", pageView: null });
 });
 
 type RenderOverrides = {
@@ -389,7 +344,7 @@ type RenderOverrides = {
   fingerprintOf?: (publicKey: string) => Promise<string>;
 };
 
-function renderPage(agents: readonly AgentLite[] = [], overrides: RenderOverrides = {}) {
+function renderPage(overrides: RenderOverrides = {}) {
   const catalog = overrides.catalog ?? fixedCatalog();
   const capabilities = overrides.capabilities ?? fixedCapabilities(catalog);
   return render(
@@ -402,7 +357,6 @@ function renderPage(agents: readonly AgentLite[] = [], overrides: RenderOverride
       publishers={publishers}
       verify={overrides.verify ?? (async (manifest) => (manifest.signature ? { status: "valid" } : { status: "none" }))}
       fingerprintOf={overrides.fingerprintOf ?? (async () => FP)}
-      agents={agents}
     />,
   );
 }
@@ -441,24 +395,62 @@ describe("插件页 · 能力统计", () => {
 });
 
 describe("插件页 · 四个 Tab", () => {
-  it("默认插件 Tab；切换后 aria-selected 与面板同步", () => {
+  it("默认插件 Tab；技能/MCP Tab 渲染完整视图，页面级标题始终只有一个", () => {
+    installV3();
     renderPage();
     expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "false");
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "plugins-plugins-panel");
+    expect(screen.getByRole("tabpanel", { name: "插件" })).toHaveAttribute(
+      "id",
+      "plugins-plugins-panel",
+    );
 
     fireEvent.click(screen.getByRole("tab", { name: "技能" }));
     expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "plugins-skills-panel");
-    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel", { name: "技能" })).toHaveAttribute(
+      "id",
+      "plugins-skills-panel",
+    );
+    // 完整技能视图：搜索框与「按智能体 / 技能池」子页签都在（旧的只读摘要已删除）
+    expect(screen.getByLabelText("搜索技能")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "按智能体" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("button", { name: /在技能区管理/ })).toBeNull();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("tab", { name: "工具" }));
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "plugins-tools-panel");
+    expect(screen.getByRole("tabpanel", { name: "工具" })).toHaveAttribute(
+      "id",
+      "plugins-tools-panel",
+    );
     expect(screen.getByRole("region", { name: "工具分组 系统能力" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "MCP 服务" }));
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "plugins-mcp-panel");
-    expect(screen.getByText("报告服务")).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel", { name: "MCP 服务" })).toHaveAttribute(
+      "id",
+      "plugins-mcp-panel",
+    );
+    // 完整接口视图：服务卡片、新增入口、协议说明都在（旧的只读摘要已删除）
+    expect(screen.getByRole("region", { name: "MCP 服务 报告服务" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /添加 MCP 服务/ })).toBeInTheDocument();
+    expect(screen.getByText(/MCP 协议 \d{4}-\d{2}-\d{2}/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /在接口区管理/ })).toBeNull();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
+  it("一次性视图意图：pageView=skills 落到技能 Tab，pageView=interfaces 落到 MCP Tab", () => {
+    useUiStore.setState({ page: "plugins", pageView: "skills" });
+    renderPage();
+    expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
+    // 读走即清：意图只对「这一次进入」有效
+    expect(useUiStore.getState().pageView).toBeNull();
+  });
+
+  it("旧链接 setPage(\"interfaces\") 折叠成插件区 + MCP 视图", () => {
+    useUiStore.getState().setPage("interfaces");
+    expect(useUiStore.getState().page).toBe("plugins");
+    renderPage();
+    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    expect(useUiStore.getState().pageView).toBeNull();
   });
 });
 
@@ -555,52 +547,62 @@ describe("插件页 · 工具目录", () => {
   });
 });
 
-describe("插件页 · 技能面板", () => {
-  it("列出统一技能行（来源/所属插件/触发词数/使用智能体），并可跳技能区", () => {
+describe("插件页 · 技能 Tab（内嵌完整技能视图）", () => {
+  it("插件技能进技能池，来源徽标可打开插件详情（不跨页）", async () => {
     const result = installV3();
     const skillId = result.plugin.skillIds[0]!;
-    const agents: AgentLite[] = [{ id: "a1", name: "阿和" }];
     pool.assign("a1", skillId);
 
-    renderPage(agents);
+    renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "技能" }));
+    // 名册到位后自动选第一个智能体；切到「技能池」看全量技能
+    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
 
-    const rows = describeSkillRows(pool, store, agents);
-    const row = rows.find((item) => item.id === skillId)!;
-    expect(row.sourceLabel).toBe("插件");
-    expect(row.pluginName).toBe("报告工具箱");
-    expect(row.agentCount).toBe(1);
+    const row = await screen.findByRole("row", { name: /周报/ });
+    // 插件来源在技能池里可辨识（插件技能 materialize 后 source 仍是 imported）
+    expect(within(row).getByText("插件")).toBeInTheDocument();
+    const chip = within(row).getByRole("button", { name: "打开插件 报告工具箱" });
+    expect(within(row).getByRole("switch", { name: "启用 周报" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
 
-    expect(screen.getByText("周报")).toBeInTheDocument();
-    const table = screen.getByRole("table");
-    expect(table).toHaveTextContent("报告工具箱");
-    expect(table).toHaveTextContent("2");
-
-    fireEvent.click(screen.getByRole("button", { name: "在技能区管理 周报" }));
-    expect(useUiStore.getState().page).toBe("skills");
+    fireEvent.click(chip);
+    expect(screen.getByRole("dialog", { name: "插件详情 报告工具箱" })).toBeInTheDocument();
+    // 仍在插件区内：没有发生跨页 setPage
+    expect(useUiStore.getState().page).toBe("home");
   });
 });
 
-describe("插件页 · MCP 服务面板", () => {
-  it("列出来源与工具数，插件服务可跳详情，行内可跳接口区", () => {
+describe("插件页 · MCP Tab（内嵌完整接口视图）", () => {
+  it("服务卡片按来源展示连接态，逐工具授权写同一份注册表，插件徽标打开详情", () => {
     installV3();
     renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "MCP 服务" }));
 
-    const table = screen.getByRole("table");
-    expect(table).toHaveTextContent("报告服务");
-    expect(table).toHaveTextContent("插件 · 报告工具箱");
-    expect(table).toHaveTextContent("Registry");
-    expect(table).toHaveTextContent("预置");
-    expect(table).toHaveTextContent("已连接");
+    const report = screen.getByRole("region", { name: "MCP 服务 报告服务" });
+    expect(report).toHaveTextContent("已连接");
+    expect(within(report).getByRole("button", { name: "打开插件 报告工具箱" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "查看插件 报告工具箱" }));
+    // 来源口径不变：预置带「内置」徽标、Registry 装来的带 Registry 徽标
+    expect(screen.getByRole("region", { name: "MCP 服务 Windows 桌面" })).toHaveTextContent(
+      "内置",
+    );
+    expect(
+      screen.getByRole("region", { name: "MCP 服务 Registry 演示服务" }),
+    ).toHaveTextContent("Registry");
+
+    // 逐工具授权：默认关闭，勾选即写进同一份注册表
+    const toggle = within(report).getByLabelText("启用工具 weather_query") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    expect(registry.isToolEnabled("plugin:acme.report-kit:report", "weather_query")).toBe(true);
+    expect(screen.getByText(/已授权 1 个工具/)).toBeInTheDocument();
+
+    // 点插件徽标 = 打开插件详情，留在本页
+    fireEvent.click(within(report).getByRole("button", { name: "打开插件 报告工具箱" }));
     expect(screen.getByRole("dialog", { name: "插件详情 报告工具箱" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "关闭插件详情" }));
-
-    fireEvent.click(screen.getByRole("tab", { name: "MCP 服务" }));
-    fireEvent.click(screen.getByRole("button", { name: "在接口区管理 报告服务" }));
-    expect(useUiStore.getState().page).toBe("interfaces");
+    expect(useUiStore.getState().page).toBe("home");
   });
 });
 
@@ -680,7 +682,7 @@ describe("插件页 · 工具束（d.65）", () => {
     installV3();
     const catalog = fixedCatalog();
     catalog.toolPacks = catalog.toolPacks.map((pack) => ({ ...pack, enabled: false }));
-    renderPage([], { catalog, capabilities: fixedCapabilities(catalog) });
+    renderPage({ catalog, capabilities: fixedCapabilities(catalog) });
     fireEvent.click(screen.getByRole("tab", { name: "工具" }));
 
     const section = screen.getByRole("region", { name: "工具束" });
@@ -697,7 +699,7 @@ describe("插件页 · 工具束（d.65）", () => {
     expect(within(dialog).getByText(/工具束 1 · 工具 2/)).toBeInTheDocument();
   });
 
-  it("详情抽屉有「工具束」段：工具列表 + 在接口区管理跳转", () => {
+  it("详情抽屉有「工具束」段：工具列表 + 在接口区管理切到 MCP Tab", () => {
     installV3();
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "查看插件详情 报告工具箱" }));
@@ -712,7 +714,10 @@ describe("插件页 · 工具束（d.65）", () => {
     const manageButtons = within(section).getAllByRole("button", { name: "在接口区管理" });
     expect(manageButtons.length).toBeGreaterThan(0);
     fireEvent.click(manageButtons[manageButtons.length - 1]!);
-    expect(useUiStore.getState().page).toBe("interfaces");
+    // d.67：接口区已并入本页「MCP 服务」Tab，动作变成切 Tab，不再跨页
+    expect(useUiStore.getState().page).toBe("home");
+    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: "MCP 服务 报告服务" })).toBeInTheDocument();
   });
 });
 
@@ -812,31 +817,28 @@ describe("插件页 · 工具束逐个授权", () => {
     expect(within(section).getAllByRole("button", { name: "在接口区管理" }).length).toBeGreaterThan(0);
   });
 
-  it("点击开关先弹逐个确认：风险与 HITL 说明，确认后才调用 setToolEnabled", () => {
+  it("点击开关先弹逐个确认：风险与 HITL 说明，确认后才写接口区同源开关", () => {
     const section = openDetailToolPacks();
     fireEvent.click(within(section).getByRole("switch", { name: "启用工具 weather_query" }));
 
     const confirm = screen.getByRole("dialog", { name: "启用工具 weather_query" });
     expect(confirm).toHaveTextContent("风险：只读（read）");
     expect(confirm).toHaveTextContent("每次调用仍按 HITL 确认");
-    expect(registry.setToolEnabled).not.toHaveBeenCalled();
+    // 只是弹确认，还没写
+    expect(registry.isToolEnabled("plugin:acme.report-kit:report", "weather_query")).toBe(false);
 
     // 取消不写
     fireEvent.click(within(confirm).getByRole("button", { name: "取消" }));
-    expect(registry.setToolEnabled).not.toHaveBeenCalled();
+    expect(registry.isToolEnabled("plugin:acme.report-kit:report", "weather_query")).toBe(false);
 
-    // 再点开关 → 确认 → 写到接口区同源开关
+    // 再点开关 → 确认 → 写到接口区同源开关（同一份 McpRegistry）
     fireEvent.click(within(section).getByRole("switch", { name: "启用工具 weather_query" }));
     fireEvent.click(
       within(screen.getByRole("dialog", { name: "启用工具 weather_query" })).getByRole("button", {
         name: "启用",
       }),
     );
-    expect(registry.setToolEnabled).toHaveBeenCalledWith(
-      "plugin:acme.report-kit:report",
-      "weather_query",
-      true,
-    );
+    expect(registry.isToolEnabled("plugin:acme.report-kit:report", "weather_query")).toBe(true);
   });
 
   it("未匹配工具显示「未连接/未提供」且开关禁用；无批量按钮", () => {
@@ -906,7 +908,7 @@ describe("插件页 · 签名与发布者信任", () => {
   });
 
   it("无效签名：红字拒绝安装，且没有任何绕过入口（信任勾选都不给）", async () => {
-    renderPage([], {
+    renderPage({
       verify: async () => ({ status: "invalid", reason: "签名与清单内容不匹配" }),
     });
     const dialog = openInstall();
@@ -925,7 +927,7 @@ describe("插件页 · 签名与发布者信任", () => {
   });
 
   it("环境不支持：明说不代表验过、不算无效、不要求信任勾选，可直接装且不写信任表", async () => {
-    renderPage([], {
+    renderPage({
       verify: async () => ({ status: "unsupported", reason: "当前环境不支持 WebCrypto" }),
       fingerprintOf: async () => {
         throw new Error("当前环境不支持 WebCrypto，无法计算公钥指纹");
@@ -950,7 +952,7 @@ describe("插件页 · 签名与发布者信任", () => {
   });
 
   it("验签有效但指纹算不出来：仍显示有效、可装，只是不记录发布者信任", async () => {
-    renderPage([], {
+    renderPage({
       verify: async () => ({ status: "valid" }),
       fingerprintOf: async () => {
         throw new Error("环境不支持指纹");
@@ -975,7 +977,7 @@ describe("插件页 · 签名与发布者信任", () => {
     const pending = new Promise<SignatureCheck>((resolve) => {
       resolveCheck = resolve;
     });
-    renderPage([], { verify: () => pending });
+    renderPage({ verify: () => pending });
     const dialog = openInstall();
     fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
       target: { value: JSON.stringify(signedManifest()) },
@@ -1042,12 +1044,14 @@ describe("插件页 · 贡献级停用", () => {
     expect(pool.list().filter((skill) => skill.pluginId).every((skill) => !skill.enabled)).toBe(true);
   });
 
-  it("切换服务调用接口区同源开关（mcp.update）", () => {
+  it("切换服务调用接口区同源开关（同一份 McpRegistry）", () => {
     const section = openContributionSection();
     fireEvent.click(within(section).getByRole("switch", { name: "启用本插件的服务" }));
     expect(store.get("acme.report-kit")!.disabledKinds).toEqual(["mcpServers"]);
     // 真实写入口是 PluginStore 注入的 MCP 端口（与接口区同一份注册表）
-    expect(mcp.servers.get("plugin:acme.report-kit:report")?.enabled).toBe(false);
+    expect(
+      registry.servers().find((item) => item.id === "plugin:acme.report-kit:report")?.enabled,
+    ).toBe(false);
   });
 
   it("主开关关闭时四类开关禁用并注明", () => {

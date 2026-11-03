@@ -19,6 +19,7 @@ const {
   normalizeScale,
   normalizePetPage,
   draggedPosition,
+  settlePetPosition,
   defaultPetPosition,
   petUrl,
 } = require("./pet-window");
@@ -330,6 +331,29 @@ function createPetHost(deps) {
 
   /* ────────────────────────── 拖拽 ────────────────────────── */
 
+  /**
+   * 把窗口移到目标位置，**位置没变就什么都不做**。
+   *
+   * ★ 透明置顶窗每调一次 setPosition，DWM 都要重新合成一次该窗口。
+   *   渲染层虽然已按 rAF 合并上报，但仍会有"光标停住、脚本继续发移动"的帧；
+   *   这些重复位置以前会照样调 setPosition，等于让系统反复重合成同一块透明层，
+   *   是拖动时残影/边缘闪烁的来源之一。比较整数坐标（上下左右都由 draggedPosition 取整）。
+   *
+   * @returns {boolean} 是否真的移动了
+   */
+  function moveWindowTo(pos) {
+    if (!pos || !win || win.isDestroyed()) return false;
+    let bounds = null;
+    try {
+      bounds = win.getBounds();
+    } catch {
+      /* 窗口正在销毁：当作位置未知，照常设一次 */
+    }
+    if (bounds && bounds.x === pos.x && bounds.y === pos.y) return false;
+    win.setPosition(pos.x, pos.y);
+    return true;
+  }
+
   function beginDrag() {
     if (!win || win.isDestroyed()) return;
     const cursor = screen.getCursorScreenPoint();
@@ -342,12 +366,39 @@ function createPetHost(deps) {
     const cursor = screen.getCursorScreenPoint();
     const pos = draggedPosition(dragOrigin, cursor);
     if (!pos) return;
-    win.setPosition(pos.x, pos.y);
+    moveWindowTo(pos);
   }
 
   function endDrag() {
     if (!dragOrigin) return;
+    const origin = dragOrigin;
+    // 先清起点：下面的 setPosition 会触发 move 事件，那不该再被当成"拖拽中"而跳过落盘
     dragOrigin = null;
+    if (!win || win.isDestroyed()) {
+      saveNow();
+      return;
+    }
+    // 抬起补一次终值：渲染层最后一次 rAF 合并可能还没执行，按此刻光标的真实位置对齐
+    const cursor = screen.getCursorScreenPoint();
+    const pos = draggedPosition(origin, cursor);
+    if (pos) {
+      let bounds = null;
+      try {
+        bounds = win.getBounds();
+      } catch {
+        bounds = null;
+      }
+      // 收尾吸附 + 可见性钳制：贴边吸住，拖出屏幕也能拖回来
+      const settled = settlePetPosition(
+        pos,
+        {
+          width: bounds ? bounds.width : petWindowSize(state.scale).width,
+          height: bounds ? bounds.height : petWindowSize(state.scale).height,
+        },
+        workAreas(),
+      );
+      if (settled) moveWindowTo(settled);
+    }
     saveNow();
   }
 
@@ -444,6 +495,10 @@ function createPetHost(deps) {
 
     ipcMain.on("pet:set-interactive", (event, value) => {
       if (!fromPetWindow(event)) return;
+      // 拖拽期间不接受穿透开关的切换：窗口正在连续移动，此时来回切 ignore-mouse
+      // 会让鼠标事件在"透传/拦截"之间抖动，观感上是边缘闪烁。渲染层拖拽期间已不再
+      // 上报，这里再兜一层（在途消息也不该生效），抬起后渲染层会重新上报。
+      if (dragOrigin) return;
       setInteractive(value);
     });
     ipcMain.on("pet:drag-start", (event) => {

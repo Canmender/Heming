@@ -457,7 +457,18 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
   );
 }
 
-export function TaskAreaPage() {
+export interface TaskAreaPageProps {
+  /**
+   * 嵌入式（d.67：通用智能体并入智能体页的「任务」Tab）。
+   *
+   * 只藏本页自己的页头标题块：运行列表、搜索/状态筛选、启动面板、任务详情、
+   * 报告与嵌入式 ChatPage 都是这个视图的内容，必须留着。宿主页已有页头，
+   * 两边都画标题会出现两个「智能体 / 通用智能体」。
+   */
+  embedded?: boolean;
+}
+
+export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
   const tasks = useTaskStore((s) => s.tasks);
   const removeTask = useTaskStore((s) => s.remove);
   const clearFinished = useTaskStore((s) => s.clearFinished);
@@ -648,19 +659,21 @@ export function TaskAreaPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-line-soft px-6 pb-4 pt-5">
-        <div className="flex items-center gap-2">
-          <AssistantIcon width={18} height={18} />
-          <span className="ui-page-title">通用智能体</span>
-          <span className="ui-page-sub">
-            {stats.total} 次运行 · {stats.running} 进行中 · {stats.done} 已完成
-          </span>
-        </div>
+        {!embedded && (
+          <div className="flex items-center gap-2">
+            <AssistantIcon width={18} height={18} />
+            <span className="ui-page-title">通用智能体</span>
+            <span className="ui-page-sub">
+              {stats.total} 次运行 · {stats.running} 进行中 · {stats.done} 已完成
+            </span>
+          </div>
+        )}
         <input
           aria-label="搜索运行记录"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="搜索运行记录…"
-          className="ml-2 w-[200px] rounded-lg border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
+          className={`${embedded ? "" : "ml-2"} w-[200px] rounded-lg border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink`}
         />
         <div className="flex items-center gap-1" role="group" aria-label="按状态筛选">
           {FILTERS.map((f) => {

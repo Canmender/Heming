@@ -132,13 +132,15 @@ describe("StaffPage", () => {
     expect(useStaffStore.getState().settings.profileId).toBeNull();
   });
 
-  it("finding 动作只跳转：任务 → 通用智能体，日程 → 信息中枢", () => {
+  it("finding 动作只跳转：任务 → 智能体页任务视图，日程 → 信息中枢", () => {
     enabledSettings();
     useStaffStore.setState({ runs: [runWithActions()] });
     render(<StaffPage />);
 
-    fireEvent.click(screen.getByRole("button", { name: "去通用智能体" }));
-    expect(useUiStore.getState().page).toBe("tasks");
+    fireEvent.click(screen.getByRole("button", { name: "去智能体" }));
+    // 任务区已并入智能体页：page=chat + view=tasks，再由 taskFocusId 定位
+    expect(useUiStore.getState().page).toBe("chat");
+    expect(useUiStore.getState().pageView).toBe("tasks");
     expect(useUiStore.getState().taskFocusId).toBe("t-1");
 
     fireEvent.click(screen.getByRole("button", { name: "看日程" }));

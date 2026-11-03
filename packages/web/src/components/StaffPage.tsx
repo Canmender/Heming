@@ -54,7 +54,8 @@ function FindingRow({ finding }: { finding: StaffFinding }) {
     openInfohub({ tab: "agenda" });
   }
 
-  const actionLabel = finding.action?.kind === "open-task" ? "去通用智能体" : "看日程";
+  // 任务区已并入智能体页（d.67）：按钮文案跟着宿主页叫「智能体」，点击仍走 focusTask
+  const actionLabel = finding.action?.kind === "open-task" ? "去智能体" : "看日程";
 
   return (
     <div className="flex flex-wrap items-start gap-2 rounded-lg border border-line-soft px-2.5 py-2">

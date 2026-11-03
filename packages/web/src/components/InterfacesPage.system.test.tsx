@@ -78,7 +78,8 @@ let plugins: PluginStore;
 
 beforeEach(() => {
   localStorage.clear();
-  useUiStore.setState({ page: "interfaces", paletteIntent: null });
+  // 接口区已并入插件区（d.67）：宿主页 = plugins，视图 = interfaces（MCP Tab）
+  useUiStore.setState({ page: "plugins", pageView: "interfaces", paletteIntent: null });
   const storage = makeStorage([]);
   const pool = new SkillPool(storage, () => T0);
   plugins = new PluginStore(storage, pool, () => T0, fakeMcp());

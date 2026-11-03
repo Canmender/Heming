@@ -20,6 +20,7 @@ function makeFakeElectron() {
       this._visible = false;
       this._destroyed = false;
       this._ignoreMouse = null;
+      this._setPositionCalls = 0;
       this._url = null;
       this._inactiveShown = false;
       this._listeners = {};
@@ -42,7 +43,7 @@ function makeFakeElectron() {
     isMinimized() { return false; }
     getBounds() { return { ...this._bounds }; }
     setBounds(b) { this._bounds = { ...this._bounds, ...b }; }
-    setPosition(x, y) { this._bounds.x = x; this._bounds.y = y; }
+    setPosition(x, y) { this._setPositionCalls += 1; this._bounds.x = x; this._bounds.y = y; }
     show() { this._visible = true; }
     showInactive() { this._visible = true; this._inactiveShown = true; }
     hide() { this._visible = false; }
@@ -308,6 +309,108 @@ test("非桌宠窗口不能拖走桌宠", () => {
   screen.setCursor(500, 500);
   ons.get("pet:drag-move")({ sender: { notThePet: true } });
   assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, { x: 1000, y: 500 });
+});
+
+test("拖拽：位置没变时不重复 setPosition（少一次透明窗合成，少一次残影机会）", () => {
+  const { host, created, ons, screen } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  const event = { sender: w.webContents };
+  w.setPosition(1000, 500);
+  w._setPositionCalls = 0;
+
+  screen.setCursor(1200, 700);
+  ons.get("pet:drag-start")(event);
+  // 光标没动 → 目标位置与当前 bounds 相同，不该再调 setPosition
+  ons.get("pet:drag-move")(event);
+  assert.equal(w._setPositionCalls, 0);
+
+  screen.setCursor(1260, 740);
+  ons.get("pet:drag-move")(event);
+  assert.equal(w._setPositionCalls, 1);
+  assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, { x: 1060, y: 540 });
+
+  // 抬起时终值也算出来与当前相同 → 仍然不重复调用
+  ons.get("pet:drag-end")(event);
+  assert.equal(w._setPositionCalls, 1);
+});
+
+test("拖拽结束：按当前光标补一次终值（渲染层最后一帧 rAF 可能还没执行）", () => {
+  const { host, created, ons, screen, written } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  const event = { sender: w.webContents };
+  w.setPosition(1000, 500);
+
+  screen.setCursor(1200, 700);
+  ons.get("pet:drag-start")(event);
+  // 只报一次移动：模拟"最后一次 mousemove 的 rAF 还没到就松手了"
+  screen.setCursor(1260, 740);
+  ons.get("pet:drag-move")(event);
+  assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, { x: 1060, y: 540 });
+
+  // 松手前光标又移了一段，且这次没有 drag-move → 收尾必须按当前光标对齐
+  screen.setCursor(1300, 800);
+  ons.get("pet:drag-end")(event);
+  assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, { x: 1100, y: 600 });
+  assert.deepEqual(written.at(-1).s.bounds, { x: 1100, y: 600, width: 300, height: 420 });
+});
+
+test("拖拽收尾：拖出屏幕后钳回「至少一块可见区域」（还能拖回来）", () => {
+  const { host, created, ons, screen, written } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  const event = { sender: w.webContents };
+  w.setPosition(1000, 500);
+
+  screen.setCursor(1200, 700);
+  ons.get("pet:drag-start")(event);
+  screen.setCursor(-2000, 700);
+  ons.get("pet:drag-move")(event);
+  // 拖拽过程中跟随光标出屏（不钳制：那会让窗口和光标脱节）
+  assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, { x: -2200, y: 500 });
+
+  ons.get("pet:drag-end")(event);
+  // 左边缘外：右边缘至少露出 60px → x = 0 + 60 - 300 = -240
+  assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, { x: -240, y: 500 });
+  assert.deepEqual(written.at(-1).s.bounds, { x: -240, y: 500, width: 300, height: 420 });
+});
+
+test("拖拽收尾：贴边时吸附到工作区边缘", () => {
+  const { host, created, ons, screen } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  const event = { sender: w.webContents };
+  // 工作区 1920×1040：右下角贴边（距右/下各 5px）
+  w.setPosition(1920 - 300 - 5, 1040 - 420 - 5);
+
+  screen.setCursor(1200, 700);
+  ons.get("pet:drag-start")(event);
+  ons.get("pet:drag-end")(event);
+  assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, { x: 1620, y: 620 });
+});
+
+test("拖拽期间：渲染层的穿透上报被忽略（不在移动中反复切 ignore-mouse）", () => {
+  const { host, created, ons, screen } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  const event = { sender: w.webContents };
+  // 默认穿透
+  assert.equal(w._ignoreMouse.v, true);
+
+  screen.setCursor(1200, 700);
+  ons.get("pet:drag-start")(event);
+  ons.get("pet:set-interactive")(event, true);
+  assert.equal(w._ignoreMouse.v, true, "拖拽中即便收到上报也不切换");
+
+  ons.get("pet:drag-end")(event);
+  ons.get("pet:set-interactive")(event, true);
+  assert.equal(w._ignoreMouse.v, false, "抬起后恢复上报，正常取消穿透");
 });
 
 /* ────────────────────────────── 缩放 ────────────────────────────── */

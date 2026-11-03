@@ -126,7 +126,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
     if (result.ok) {
       setMsg({
         kind: "ok",
-        text: `${entry.title}：已连接，发现 ${result.tools ?? 0} 个工具。工具默认未启用，请到接口区逐个授权。`,
+        text: `${entry.title}：已连接，发现 ${result.tools ?? 0} 个工具。工具默认未启用，请在插件区的「MCP 服务」Tab 逐个授权。`,
       });
       onInstalled?.();
     } else {
@@ -155,7 +155,7 @@ export function RegistryPage({ store, onBack, onInstalled }: RegistryPageProps) 
               onClick={onBack}
               className="ui-btn ui-btn-md ui-btn-ghost"
             >
-              返回接口区
+              返回 MCP 服务
             </button>
           )}
         </>

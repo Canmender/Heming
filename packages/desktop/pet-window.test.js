@@ -20,9 +20,13 @@ const {
   petWindowOptions,
   petUrl,
   draggedPosition,
+  settlePetPosition,
   parsePetStateJson,
   normalizePetPage,
   PET_PAGE_ALLOWLIST,
+  PET_SNAP_PX,
+  MIN_VISIBLE_WIDTH,
+  MIN_VISIBLE_HEIGHT,
 } = require("./pet-window");
 
 /* ────────────────────────────── 入口判定 ────────────────────────────── */
@@ -280,6 +284,83 @@ test("拖拽结果取整（避免亚像素抖动）", () => {
   const p = draggedPosition(origin, { x: 10.9, y: 30.6 });
   assert.equal(Number.isInteger(p.x), true);
   assert.equal(Number.isInteger(p.y), true);
+});
+
+/* ───────────────────── 拖拽收尾：边缘吸附 + 可见性钳制 ───────────────────── */
+
+const SIZE = { width: 300, height: 420 };
+const AREA = { x: 0, y: 0, width: 1920, height: 1040 };
+
+test("收尾吸附：四条边在阈值内都贴到工作区边缘", () => {
+  assert.deepEqual(settlePetPosition({ x: 5, y: 5 }, SIZE, [AREA]), { x: 0, y: 0 });
+  assert.deepEqual(
+    settlePetPosition({ x: AREA.width - SIZE.width - 5, y: AREA.height - SIZE.height - 5 }, SIZE, [AREA]),
+    { x: AREA.width - SIZE.width, y: AREA.height - SIZE.height },
+  );
+  // 只吸一条边：x 离左边 3、y 离上下都远 → 只动 x
+  assert.deepEqual(settlePetPosition({ x: 3, y: 400 }, SIZE, [AREA]), { x: 0, y: 400 });
+});
+
+test("收尾吸附：超过阈值不动（避免「明明没到边却被吸过去」）", () => {
+  const gap = PET_SNAP_PX + 1;
+  assert.deepEqual(settlePetPosition({ x: gap, y: 300 }, SIZE, [AREA]), { x: gap, y: 300 });
+  assert.deepEqual(settlePetPosition({ x: 700, y: 300 }, SIZE, [AREA]), { x: 700, y: 300 });
+});
+
+test("收尾钳制：拖出屏幕后仍至少留一块可见区域（能拖回来）", () => {
+  // 左 / 上：右/下边至少留 MIN_VISIBLE_*
+  assert.deepEqual(settlePetPosition({ x: -2000, y: 500 }, SIZE, [AREA]), {
+    x: AREA.x + MIN_VISIBLE_WIDTH - SIZE.width,
+    y: 500,
+  });
+  assert.deepEqual(settlePetPosition({ x: 500, y: -2000 }, SIZE, [AREA]), {
+    x: 500,
+    y: AREA.y + MIN_VISIBLE_HEIGHT - SIZE.height,
+  });
+  // 右 / 下：左/上边至少留 MIN_VISIBLE_*
+  assert.deepEqual(settlePetPosition({ x: 5000, y: 500 }, SIZE, [AREA]), {
+    x: AREA.width - MIN_VISIBLE_WIDTH,
+    y: 500,
+  });
+  assert.deepEqual(settlePetPosition({ x: 500, y: 5000 }, SIZE, [AREA]), {
+    x: 500,
+    y: AREA.height - MIN_VISIBLE_HEIGHT,
+  });
+});
+
+test("收尾钳制：拖到两块屏之间的空隙里，按最近的工作区兜住", () => {
+  const left = { x: 0, y: 0, width: 1920, height: 1040 };
+  const right = { x: 3000, y: 0, width: 1920, height: 1040 };
+  const settled = settlePetPosition({ x: 2400, y: 300 }, SIZE, [left, right]);
+  // 2400 离右屏更近 → 钳到右屏左侧「露 60px」
+  assert.deepEqual(settled, { x: right.x + MIN_VISIBLE_WIDTH - SIZE.width, y: 300 });
+});
+
+test("收尾吸附：多显示器吸到当前所在那块的边缘，而不是主屏", () => {
+  const left = { x: 0, y: 0, width: 1920, height: 1040 };
+  const right = { x: 1920, y: 0, width: 1920, height: 1040 };
+  // 落在副屏内、离它左边界 5px → 吸到副屏左边界
+  assert.deepEqual(settlePetPosition({ x: right.x + 5, y: 300 }, SIZE, [left, right]), {
+    x: right.x,
+    y: 300,
+  });
+  // 落在副屏右边界内 5px → 吸到副屏右边界
+  assert.deepEqual(
+    settlePetPosition({ x: right.x + right.width - SIZE.width - 5, y: 300 }, SIZE, [left, right]),
+    { x: right.x + right.width - SIZE.width, y: 300 },
+  );
+});
+
+test("收尾：没有显示器信息时只取整，不裁剪（不产生 NaN）", () => {
+  assert.deepEqual(settlePetPosition({ x: 1.4, y: 2.6 }, SIZE, []), { x: 1, y: 3 });
+  assert.deepEqual(settlePetPosition({ x: -5.6, y: 500.2 }, SIZE, null), { x: -6, y: 500 });
+});
+
+test("收尾：坏输入返回 null；尺寸缺失回落基准尺寸", () => {
+  assert.equal(settlePetPosition(null, SIZE, [AREA]), null);
+  assert.equal(settlePetPosition({ x: NaN, y: 0 }, SIZE, [AREA]), null);
+  // 尺寸非法 → 按 300×420 算钳制（x 仍是贴左边）
+  assert.deepEqual(settlePetPosition({ x: -2000, y: 5 }, null, [AREA]), { x: -240, y: 0 });
 });
 
 /* ────────────────────────────── 桌宠地址 ────────────────────────────── */

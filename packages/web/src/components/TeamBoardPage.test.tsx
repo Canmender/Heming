@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { TeamActivity, TeamMember } from "@heming/shared";
-import { TeamBoardPage } from "./TeamBoardPage.js";
-import { useUiStore } from "../store/ui.js";
+import { TeamBoardView } from "./TeamBoardPage.js";
 import { fetchTeam, fetchTeamActivities } from "../lib/api.js";
 
 vi.mock("../lib/api.js", () => ({
   fetchTeam: vi.fn(),
   fetchTeamActivities: vi.fn(),
 }));
+
+/**
+ * 看板测试（d.67 导航合并后）：
+ * 主体是嵌进团队页 Tab 的 `TeamBoardView`——它不该再画自己的 PageShell / 页头标题，
+ * 只要筛选条 + 两列卡片 + 加载/错误/空态。
+ */
 
 const alice: TeamMember = {
   user: { id: "u1", username: "alice", displayName: "爱丽丝" },
@@ -59,14 +64,12 @@ beforeEach(() => {
   vi.mocked(fetchTeamActivities).mockResolvedValue({
     activities: [todayTask, todayAgenda, yesterdayTask, agentActivity],
   });
-  useUiStore.setState({ page: "workspace", activeConversationId: null });
 });
 
-describe("团队看板", () => {
+describe("团队看板视图（嵌入态）", () => {
   it("展示真实成员与今日任务/日程，不收智能体动向", async () => {
-    render(<TeamBoardPage />);
+    render(<TeamBoardView />);
 
-    expect(screen.getByText("团队看板")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("整理会议纪要")).toBeInTheDocument());
     expect(screen.getByText("周五交材料")).toBeInTheDocument();
     expect(screen.getAllByText("爱丽丝").length).toBeGreaterThan(0);
@@ -76,10 +79,23 @@ describe("团队看板", () => {
     expect(screen.queryByText("昨天的任务")).not.toBeInTheDocument();
     expect(screen.queryByText("智能体轨迹")).not.toBeInTheDocument();
     expect(fetchTeamActivities).toHaveBeenCalledWith({ limit: 100 });
+    // 两列结构还在
+    expect(screen.getByRole("region", { name: "任务" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "日程" })).toBeInTheDocument();
+  });
+
+  it("嵌入后不画自己的页头：没有 h1、没有「团队看板」标题", async () => {
+    render(<TeamBoardView />);
+    await waitFor(() => expect(screen.getByText("整理会议纪要")).toBeInTheDocument());
+    expect(screen.queryAllByRole("heading", { level: 1 })).toHaveLength(0);
+    expect(screen.queryByText("团队看板")).not.toBeInTheDocument();
+    expect(document.querySelector(".ui-page-title")).toBeNull();
+    // 但摘要文案仍要让用户看到统计口径
+    expect(screen.getByText(/2 名真实成员/)).toBeInTheDocument();
   });
 
   it("切到全部后可看更早动向，并能按成员与关键词过滤", async () => {
-    render(<TeamBoardPage />);
+    render(<TeamBoardView />);
     await waitFor(() => expect(screen.getByText("整理会议纪要")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "全部" }));
@@ -96,35 +112,29 @@ describe("团队看板", () => {
     expect(screen.queryByText("周五交材料")).not.toBeInTheDocument();
   });
 
-  it("给出团队动向与通用智能体入口", async () => {
-    render(<TeamBoardPage />);
-    await waitFor(() => expect(screen.getByText("整理会议纪要")).toBeInTheDocument());
+  it("加载中给骨架屏，加载失败给错误与重试", async () => {
+    vi.mocked(fetchTeam).mockImplementationOnce(() => new Promise(() => {}));
+    vi.mocked(fetchTeamActivities).mockImplementationOnce(() => new Promise(() => {}));
+    const { unmount } = render(<TeamBoardView />);
+    expect(screen.getByRole("status", { name: "正在加载" })).toBeInTheDocument();
+    unmount();
 
-    fireEvent.click(screen.getByRole("button", { name: "成员动向" }));
-    expect(useUiStore.getState().page).toBe("team");
-
-    useUiStore.setState({ page: "workspace" });
-    fireEvent.click(screen.getByRole("button", { name: "去通用智能体" }));
-    expect(useUiStore.getState().page).toBe("tasks");
-  });
-
-  it("加载失败时显示错误并可重试", async () => {
     vi.mocked(fetchTeam).mockRejectedValueOnce(new Error("服务端不可用"));
-    render(<TeamBoardPage />);
-
+    render(<TeamBoardView />);
     expect(await screen.findByText(/看板加载失败：服务端不可用/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(screen.getByText("整理会议纪要")).toBeInTheDocument());
   });
 
-  /** d.62-B 布局迁移守卫：页头统一走 PageShell。 */
-  it("页头由 PageShell 提供：唯一 h1 用 ui-page-title，副标题用 ui-page-sub", async () => {
-    render(<TeamBoardPage />);
-    await waitFor(() => expect(screen.getByText("团队看板")).toBeInTheDocument());
-    const headings = screen.getAllByRole("heading", { level: 1 });
-    expect(headings).toHaveLength(1);
-    expect(headings[0]).toHaveClass("ui-page-title");
-    expect(headings[0]).toHaveTextContent("团队看板");
-    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("名真实成员");
+  it("没有摘要时给两列空态，刷新按钮会重新取数", async () => {
+    vi.mocked(fetchTeamActivities).mockResolvedValue({ activities: [] });
+    render(<TeamBoardView />);
+
+    expect(await screen.findByText("还没有任务摘要。")).toBeInTheDocument();
+    expect(screen.getByText("还没有日程摘要。")).toBeInTheDocument();
+
+    vi.mocked(fetchTeamActivities).mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(fetchTeamActivities).toHaveBeenCalled());
   });
 });

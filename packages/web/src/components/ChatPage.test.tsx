@@ -3813,7 +3813,8 @@ describe("ChatPage 任务区接线", () => {
       plainById: {},
       pendingE2e: {},
     });
-    useUiStore.setState({ page: "tasks", activeConversationId: "c1", taskDraft: null });
+    // 任务视图已并入智能体页：页 = chat，视图 = tasks
+    useUiStore.setState({ page: "chat", pageView: "tasks", activeConversationId: "c1", taskDraft: null });
     setNotificationStorage(createMemoryStorage());
     useNotificationStore.setState({ items: [] });
     bindAssistant();

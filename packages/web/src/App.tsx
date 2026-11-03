@@ -36,9 +36,6 @@ const TeamPage = lazy(() => import("./components/TeamPage.js").then((m) => ({ de
 const AssistantPage = lazy(() =>
   import("./components/AssistantPage.js").then((m) => ({ default: m.AssistantPage })),
 );
-const TeamBoardPage = lazy(() =>
-  import("./components/TeamBoardPage.js").then((m) => ({ default: m.TeamBoardPage })),
-);
 const StaffPage = lazy(() => import("./components/StaffPage.js").then((m) => ({ default: m.StaffPage })));
 const InfohubPage = lazy(() =>
   import("./components/InfohubPage.js").then((m) => ({ default: m.InfohubPage })),
@@ -46,19 +43,12 @@ const InfohubPage = lazy(() =>
 const AutomationPage = lazy(() =>
   import("./components/AutomationPage.js").then((m) => ({ default: m.AutomationPage })),
 );
-const TaskAreaPage = lazy(() =>
-  import("./components/TaskAreaPage.js").then((m) => ({ default: m.TaskAreaPage })),
-);
-const SkillsPage = lazy(() => import("./components/SkillsPage.js").then((m) => ({ default: m.SkillsPage })));
 const PluginsPage = lazy(() =>
   import("./components/PluginsPage.js").then((m) => ({ default: m.PluginsPage })),
 );
 const MemoryPage = lazy(() => import("./components/MemoryPage.js").then((m) => ({ default: m.MemoryPage })));
 const SettingsPage = lazy(() =>
   import("./components/SettingsPage.js").then((m) => ({ default: m.SettingsPage })),
-);
-const InterfacesPage = lazy(() =>
-  import("./components/InterfacesPage.js").then((m) => ({ default: m.InterfacesPage })),
 );
 // 下面三个是「按需出现」的全局浮层/卡片，同样不该进首屏：
 // 命令面板（Ctrl+K 才挂载）、文件预览模态（点预览才挂载）、安装确认卡（有 pending 才有内容）。
@@ -121,23 +111,19 @@ export function PageFallback() {
 }
 
 /**
- * Alt+数字键目标页：1 主页、2 团队看板、3 技能区、4 接口区、5 记忆区、
- * 6 设置区、8 通用智能体、0 插件区。
- *
- * 去 IM 时原「会话」的 Alt+9 与「归档」的 Alt+7 一并取消，其余编号不动——
- * 改动老页的序号等于换掉用户肌肉记忆里的快捷键。智能体/团队/幕僚/信息中枢/
- * 自动化都是新页，不占数字键。
+ * Alt+数字键目标页。d.67 导航合并后只剩 9 个宿主页：
+ * 1 主页、2 团队（承接原团队看板）、5 记忆区、6 设置区、8 智能体（承接原通用智能体）、
+ * 0 插件区。原先的 3 技能区 / 4 接口区没有承接页——两个页面都并进了插件区的 Tab，
+ * 不给已有页凭空换号，让 3/4 空着比让人重新记「3 现在是什么」更省心。
  *
  * 这里的键位必须与 NavRail 的 `digit` 严格对应（那边是快捷键提示的唯一来源）。
  */
 const SHORTCUT_PAGES: Partial<Record<string, Page>> = {
   "1": "home",
-  "2": "workspace",
-  "3": "skills",
-  "4": "interfaces",
+  "2": "team",
   "5": "memory",
   "6": "settings",
-  "8": "tasks",
+  "8": "chat",
   "0": "plugins",
 };
 
@@ -666,14 +652,11 @@ function AppShell({
     page === "home" ? (
       <HomePage />
     ) : page === "team" ? (
-      // 团队：真实成员名册 + 动向流（任务 / 日程摘要）
+      // 团队：真实成员名册 + 动向流（任务 / 日程摘要）；d.67 起承接「看板」视图
       <TeamPage />
     ) : page === "chat" ? (
-      // 智能体（本机运行）：左侧智能体名册 + 右侧对话（复用 ChatPage）
+      // 智能体（本机运行）：左侧智能体名册 + 右侧对话；d.67 起承接「任务」视图
       <AssistantPage />
-    ) : page === "workspace" ? (
-      // 团队看板：真实成员的任务 / 日程摘要，按两列铺开
-      <TeamBoardPage />
     ) : page === "staff" ? (
       // 幕僚：常驻主动简报（只读采集 + 一键跳转）
       <StaffPage />
@@ -683,21 +666,14 @@ function AppShell({
     ) : page === "automations" ? (
       // 自动化：本机定时同步/重扫，只在和鸣运行且信息中枢已连接时执行
       <AutomationPage />
-    ) : page === "tasks" ? (
-      // 通用智能体：页内直接选智能体、写目标并运行；保留运行记录与结果汇总
-      <TaskAreaPage />
-    ) : page === "skills" ? (
-      <SkillsPage />
     ) : page === "plugins" ? (
-      // 插件区：声明式能力包（plugin.json）的安装、启停与卸载
+      // 插件区（能力中心）：插件包 + 技能池 + 工具 + MCP 服务，四个 Tab
       <PluginsPage />
     ) : page === "memory" ? (
       // 记忆区：三层记忆 + 技能池（全部数据只在本机 localStorage）
       <MemoryPage />
-    ) : page === "settings" ? (
-      <SettingsPage />
     ) : (
-      <InterfacesPage />
+      <SettingsPage />
     );
 
   return (

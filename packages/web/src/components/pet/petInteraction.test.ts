@@ -3,8 +3,12 @@ import {
   DRAG_THRESHOLD_PX,
   classifyPointerUp,
   containsPoint,
+  createFrameCoalescer,
+  exceedsDragThreshold,
   isInteractiveAt,
+  isPrimaryButtonDown,
   modelBoundsToHitBox,
+  shouldBeginDrag,
   shouldReportChange,
 } from "./petInteraction.js";
 
@@ -116,5 +120,152 @@ describe("上报去重", () => {
   it("值变化才上报", () => {
     expect(shouldReportChange(true, false)).toBe(true);
     expect(shouldReportChange(false, true)).toBe(true);
+  });
+});
+
+describe("拖拽起点的按键判据", () => {
+  it("左键位：1 表示按下；0/2 表示没按（右键不算左键）", () => {
+    expect(isPrimaryButtonDown(1)).toBe(true);
+    expect(isPrimaryButtonDown(3)).toBe(true); // 左键 + 右键
+    expect(isPrimaryButtonDown(0)).toBe(false);
+    expect(isPrimaryButtonDown(2)).toBe(false);
+    expect(isPrimaryButtonDown(undefined)).toBe(false);
+    expect(isPrimaryButtonDown(NaN)).toBe(false);
+  });
+
+  it("越过阈值且左键仍按着才开始拖拽", () => {
+    const session = { startX: 10, startY: 10, dragging: false };
+    expect(shouldBeginDrag(session, 10 + DRAG_THRESHOLD_PX, 10, 1)).toBe(true);
+    expect(shouldBeginDrag(session, 10, 10 + DRAG_THRESHOLD_PX, 1)).toBe(true);
+  });
+
+  it("tap 之后光标继续动（buttons=0）不判拖拽 —— 否则桌宠会被鼠标带着跑", () => {
+    const session = { startX: 10, startY: 10, dragging: false };
+    expect(shouldBeginDrag(session, 200, 200, 0)).toBe(false);
+  });
+
+  it("阈值内不算拖拽；没有按下会话也不算", () => {
+    const session = { startX: 10, startY: 10, dragging: false };
+    expect(shouldBeginDrag(session, 10 + DRAG_THRESHOLD_PX - 1, 10, 1)).toBe(false);
+    expect(shouldBeginDrag(null, 200, 200, 1)).toBe(false);
+  });
+
+  it("已经在拖拽中就不再重复判定起点", () => {
+    expect(shouldBeginDrag({ startX: 0, startY: 0, dragging: true }, 200, 200, 1)).toBe(false);
+  });
+
+  it("exceedsDragThreshold 与 classifyPointerUp 同一口径", () => {
+    const far = DRAG_THRESHOLD_PX;
+    expect(exceedsDragThreshold(0, 0, far, 0)).toBe(true);
+    expect(exceedsDragThreshold(0, 0, far - 0.5, 0)).toBe(false);
+    expect(classifyPointerUp(0, 0, far, 0)).toBe("drag");
+    expect(classifyPointerUp(0, 0, 0, 0)).toBe("tap");
+    expect(exceedsDragThreshold(0, 0, NaN, 0)).toBe(false);
+  });
+});
+
+describe("按帧合并移动上报（rAF 节流）", () => {
+  function makeFakeFrames() {
+    let nextId = 1;
+    const queue = new Map<number, () => void>();
+    const cancelled: number[] = [];
+    return {
+      schedule: (callback: () => void) => {
+        const id = nextId++;
+        queue.set(id, callback);
+        return id;
+      },
+      cancel: (id: number) => {
+        cancelled.push(id);
+        queue.delete(id);
+      },
+      runFrame: () => {
+        const pending = [...queue.entries()];
+        queue.clear();
+        for (const [, callback] of pending) callback();
+      },
+      pendingCount: () => queue.size,
+      cancelled,
+    };
+  }
+
+  it("同一帧内多次 request 只上报一次（这是残影/闪烁的根因修复）", () => {
+    const frames = makeFakeFrames();
+    let emitted = 0;
+    const coalescer = createFrameCoalescer(() => {
+      emitted += 1;
+    }, frames);
+    coalescer.request();
+    coalescer.request();
+    coalescer.request();
+    expect(emitted).toBe(0); // 还没到下一帧
+    expect(frames.pendingCount()).toBe(1);
+    frames.runFrame();
+    expect(emitted).toBe(1);
+  });
+
+  it("跨帧的移动各上报一次（不会把连续移动并成一帧）", () => {
+    const frames = makeFakeFrames();
+    let emitted = 0;
+    const coalescer = createFrameCoalescer(() => {
+      emitted += 1;
+    }, frames);
+    coalescer.request();
+    frames.runFrame();
+    coalescer.request();
+    frames.runFrame();
+    expect(emitted).toBe(2);
+  });
+
+  it("flush 在帧未执行时立刻补一次终值，并取消已排队的帧（不重发）", () => {
+    const frames = makeFakeFrames();
+    let emitted = 0;
+    const coalescer = createFrameCoalescer(() => {
+      emitted += 1;
+    }, frames);
+    coalescer.request();
+    coalescer.flush();
+    expect(emitted).toBe(1);
+    expect(frames.cancelled).toHaveLength(1);
+    expect(frames.pendingCount()).toBe(0);
+
+    frames.runFrame(); // 已取消，不该再发
+    expect(emitted).toBe(1);
+  });
+
+  it("flush 没有待发移动时不上报（光标没动就别发 IPC）", () => {
+    const frames = makeFakeFrames();
+    let emitted = 0;
+    const coalescer = createFrameCoalescer(() => {
+      emitted += 1;
+    }, frames);
+    coalescer.flush();
+    expect(emitted).toBe(0);
+    expect(frames.cancelled).toHaveLength(0);
+  });
+
+  it("帧已执行后再 flush 不重复上报", () => {
+    const frames = makeFakeFrames();
+    let emitted = 0;
+    const coalescer = createFrameCoalescer(() => {
+      emitted += 1;
+    }, frames);
+    coalescer.request();
+    frames.runFrame();
+    coalescer.flush();
+    expect(emitted).toBe(1);
+  });
+
+  it("cancel 丢弃待发移动（拖拽被取消/组件卸载）", () => {
+    const frames = makeFakeFrames();
+    let emitted = 0;
+    const coalescer = createFrameCoalescer(() => {
+      emitted += 1;
+    }, frames);
+    coalescer.request();
+    coalescer.cancel();
+    frames.runFrame();
+    expect(emitted).toBe(0);
+    expect(frames.cancelled).toHaveLength(1);
   });
 });

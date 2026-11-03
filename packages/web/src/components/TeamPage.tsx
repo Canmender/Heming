@@ -29,6 +29,7 @@ import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { PageShell } from "./layout/PageShell.js";
 import { Avatar } from "./Avatar.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { TeamBoardView } from "./TeamBoardPage.js";
 
 /**
  * 团队页（去 IM 后的主入口）：
@@ -101,6 +102,8 @@ export function TeamPage() {
   const me = useAuthStore((s) => s.user);
   const focusUserId = useUiStore((s) => s.teamFocusUserId);
   const consumeTeamFocus = useUiStore((s) => s.consumeTeamFocus);
+  /** 一次性视图意图（d.67）：旧「团队看板」链接会被折叠成 team + pageView="board"。 */
+  const pageView = useUiStore((s) => s.pageView);
   const share = useTeamShareStore((s) => s.settings);
   const updateShare = useTeamShareStore((s) => s.update);
 
@@ -121,10 +124,12 @@ export function TeamPage() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
   /**
-   * 团队页三个视图互斥：动向（默认）/ 团队日程（只读）/ 用量。
+   * 团队页四个视图互斥：动向（默认）/ 看板 / 团队日程（只读）/ 用量。
    * 挤在一屏会把「摘要流」和「排行」互相压扁，切 Tab 反而是最省事的读法。
+   * 看板是 d.67 从独立页（旧 workspace）并进来的——它保留自己的取数与筛选，
+   * 只把「页面外壳」换成这里的 Tab。
    */
-  const [tab, setTab] = useState<"feed" | "agenda" | "usage">("feed");
+  const [tab, setTab] = useState<"feed" | "board" | "agenda" | "usage">("feed");
   const [usageRange, setUsageRange] = useState<TeamUsageRange>("7d");
   const [usage, setUsage] = useState<TeamUsageResponse | null>(null);
   const [usageReady, setUsageReady] = useState(false);
@@ -197,6 +202,14 @@ export function TeamPage() {
     setSelectedId(focusUserId);
     consumeTeamFocus();
   }, [focusUserId, consumeTeamFocus]);
+
+  // 视图意图消费（d.67）：旧链接 setPage("workspace") / 看板跳转落在本页时切到「看板」。
+  // 读走即清，避免用户切走再回来还被上次跳转钉在看板（意图只对「这一次进入」有效）。
+  useEffect(() => {
+    if (!pageView) return;
+    const view = useUiStore.getState().consumePageView();
+    if (view === "board") setTab("board");
+  }, [pageView]);
 
   const tasksOn = share.tasks;
   const agendaOn = share.agenda;
@@ -460,100 +473,104 @@ export function TeamPage() {
       }
     >
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-[300px] shrink-0 flex-col border-r border-line-soft">
-          <div className="border-b border-line-soft p-2.5">
-            <input
-              value={memberQuery}
-              onChange={(e) => setMemberQuery(e.target.value)}
-              placeholder="搜索成员…"
-              aria-label="搜索团队成员"
-              className={`ui-input ${FOCUS_RING}`}
-            />
-            <div className="mt-1.5 flex items-center justify-between text-[11px]">
-              <label className="flex items-center gap-1 text-muted">
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5 accent-[#1a1a1a]"
-                  checked={onlineOnly}
-                  onChange={(e) => setOnlineOnly(e.target.checked)}
-                />
-                仅看在线
-              </label>
-              {selectedId && (
-                <button
-                  type="button"
-                  className="text-muted underline-offset-2 hover:underline"
-                  onClick={() => setSelectedId(null)}
-                >
-                  查看全部动向
-                </button>
+        {/* 看板自带成员筛选条与两列卡片，再叠一栏名册会把两列挤窄；
+            其余视图（动向/日程/用量）仍用名册 + 右栏的结构。 */}
+        {tab !== "board" && (
+          <aside className="flex w-[300px] shrink-0 flex-col border-r border-line-soft">
+            <div className="border-b border-line-soft p-2.5">
+              <input
+                value={memberQuery}
+                onChange={(e) => setMemberQuery(e.target.value)}
+                placeholder="搜索成员…"
+                aria-label="搜索团队成员"
+                className={`ui-input ${FOCUS_RING}`}
+              />
+              <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                <label className="flex items-center gap-1 text-muted">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                    checked={onlineOnly}
+                    onChange={(e) => setOnlineOnly(e.target.checked)}
+                  />
+                  仅看在线
+                </label>
+                {selectedId && (
+                  <button
+                    type="button"
+                    className="text-muted underline-offset-2 hover:underline"
+                    onClick={() => setSelectedId(null)}
+                  >
+                    查看全部动向
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+              {!rosterReady ? (
+                <div role="status" aria-busy="true" aria-label="正在加载团队成员" className="space-y-1.5 p-1.5">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="ui-skeleton h-9 rounded-lg" />
+                  ))}
+                </div>
+              ) : rosterError ? (
+                <div className="p-2 text-[12px]">
+                  <p role="alert" className="text-[#b42318]">名册加载失败：{rosterError}</p>
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn-sm ui-btn-ghost mt-1"
+                    onClick={() => void loadRoster()}
+                  >
+                    重试
+                  </button>
+                </div>
+              ) : filteredMembers.length === 0 ? (
+                <p className="p-2 ui-caption">
+                  {members.length === 0 ? "还没有其他成员。" : "没有符合条件的成员。"}
+                </p>
+              ) : (
+                filteredMembers.map((m) => {
+                  const selected = m.user.id === selectedId;
+                  return (
+                    <button
+                      key={m.user.id}
+                      type="button"
+                      onClick={() => setSelectedId(selected ? null : m.user.id)}
+                      className={`ui-list-row w-full text-left ${selected ? "bg-[#f2f2f2]" : ""}`}
+                    >
+                      <span className="relative shrink-0">
+                        <Avatar user={m.user} size={28} />
+                        <span
+                          aria-hidden="true"
+                          className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white ${
+                            m.online ? "bg-[#12b76a]" : "bg-[#c4c4c4]"
+                          }`}
+                        />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1">
+                          <span className="truncate ui-body-sm font-medium">
+                            {m.user.displayName}
+                          </span>
+                          {m.user.id === me?.id && (
+                            <span className="ui-chip">我</span>
+                          )}
+                        </span>
+                        <span className="block truncate ui-caption">
+                          {m.online ? "在线" : fmtLastSeen(m.lastSeenAt)}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })
               )}
             </div>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-            {!rosterReady ? (
-              <div role="status" aria-busy="true" aria-label="正在加载团队成员" className="space-y-1.5 p-1.5">
-                {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="ui-skeleton h-9 rounded-lg" />
-                ))}
-              </div>
-            ) : rosterError ? (
-              <div className="p-2 text-[12px]">
-                <p role="alert" className="text-[#b42318]">名册加载失败：{rosterError}</p>
-                <button
-                  type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost mt-1"
-                  onClick={() => void loadRoster()}
-                >
-                  重试
-                </button>
-              </div>
-            ) : filteredMembers.length === 0 ? (
-              <p className="p-2 ui-caption">
-                {members.length === 0 ? "还没有其他成员。" : "没有符合条件的成员。"}
-              </p>
-            ) : (
-              filteredMembers.map((m) => {
-                const selected = m.user.id === selectedId;
-                return (
-                  <button
-                    key={m.user.id}
-                    type="button"
-                    onClick={() => setSelectedId(selected ? null : m.user.id)}
-                    className={`ui-list-row w-full text-left ${selected ? "bg-[#f2f2f2]" : ""}`}
-                  >
-                    <span className="relative shrink-0">
-                      <Avatar user={m.user} size={28} />
-                      <span
-                        aria-hidden="true"
-                        className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white ${
-                          m.online ? "bg-[#12b76a]" : "bg-[#c4c4c4]"
-                        }`}
-                      />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1">
-                        <span className="truncate ui-body-sm font-medium">
-                          {m.user.displayName}
-                        </span>
-                        {m.user.id === me?.id && (
-                          <span className="ui-chip">我</span>
-                        )}
-                      </span>
-                      <span className="block truncate ui-caption">
-                        {m.online ? "在线" : fmtLastSeen(m.lastSeenAt)}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </aside>
+          </aside>
+        )}
 
         <main className="flex min-w-0 flex-1 flex-col">
-          {selectedMember && (
+          {tab !== "board" && selectedMember && (
             <div className="flex items-center gap-3 border-b border-line-soft bg-white px-6 py-2.5">
               <Avatar user={selectedMember.user} size={32} />
               <div className="min-w-0">
@@ -580,7 +597,7 @@ export function TeamPage() {
             </div>
           )}
 
-          {/* 三个视图互斥：动向（默认）/ 团队日程（只读）/ 用量（本机 + 开启共享后的排行） */}
+          {/* 四个视图互斥：动向（默认）/ 看板 / 团队日程（只读）/ 用量（本机 + 开启共享后的排行） */}
           <div
             className="flex items-center gap-2 border-b border-line-soft px-6 py-2"
             role="tablist"
@@ -588,6 +605,7 @@ export function TeamPage() {
           >
             {[
               { key: "feed" as const, label: "动向" },
+              { key: "board" as const, label: "看板" },
               { key: "agenda" as const, label: "团队日程" },
               { key: "usage" as const, label: "用量" },
             ].map((t) => (
@@ -607,6 +625,10 @@ export function TeamPage() {
               </button>
             ))}
           </div>
+
+          {/* 看板：d.67 从独立页并进来的视图，自己取数、自己筛选，只借用这里的 Tab 位。
+              条件渲染意味着切走即卸载（轮询停止），不会在别的视图里偷偷占用带宽。 */}
+          {tab === "board" && <TeamBoardView />}
 
           {tab === "feed" && (
             <>

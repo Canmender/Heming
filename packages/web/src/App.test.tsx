@@ -364,22 +364,24 @@ describe("App 导航快捷键与隐藏态", () => {
     useUiStore.setState({ page: "home", activeConversationId: null });
   });
 
-  it("Alt+数字直接切页（取消的 7/9 无动作），导航常驻；Ctrl/⌘+数字 不再切页", async () => {
+  it("Alt+数字直接切页（d.67 键位 2/5/6/8/0，空出来的 3/4/7/9 无动作），导航常驻；Ctrl/⌘+数字 不再切页", async () => {
     setToken("t1");
     mockFetch();
     render(<App />);
     await screen.findByRole("button", { name: "主页 Alt1" });
 
     fireEvent.keyDown(window, { key: "2", altKey: true });
-    expect(useUiStore.getState().page).toBe("workspace");
+    expect(useUiStore.getState().page).toBe("team");
+    // 3/4 随技能区/接口区合并取消：没有承接页，按空键位处理（不切页）
     fireEvent.keyDown(window, { key: "3", altKey: true });
-    expect(useUiStore.getState().page).toBe("skills");
+    fireEvent.keyDown(window, { key: "4", altKey: true });
+    expect(useUiStore.getState().page).toBe("team");
     fireEvent.keyDown(window, { key: "5", altKey: true });
     expect(useUiStore.getState().page).toBe("memory");
     fireEvent.keyDown(window, { key: "6", altKey: true });
     expect(useUiStore.getState().page).toBe("settings");
     fireEvent.keyDown(window, { key: "8", altKey: true });
-    expect(useUiStore.getState().page).toBe("tasks");
+    expect(useUiStore.getState().page).toBe("chat");
     fireEvent.keyDown(window, { key: "0", altKey: true });
     expect(useUiStore.getState().page).toBe("plugins");
 
@@ -413,11 +415,14 @@ describe("App 导航快捷键与隐藏态", () => {
     const probe = document.createElement("input");
     container.appendChild(probe);
     probe.focus();
-    fireEvent.keyDown(probe, { key: "4", altKey: true });
+    fireEvent.keyDown(probe, { key: "2", altKey: true });
     expect(useUiStore.getState().page).toBe("home");
     probe.remove();
+    fireEvent.keyDown(window, { key: "2", altKey: true });
+    expect(useUiStore.getState().page).toBe("team");
+    // 合并后空出来的 4 是空键位：不切页、不报错
     fireEvent.keyDown(window, { key: "4", altKey: true });
-    expect(useUiStore.getState().page).toBe("interfaces");
+    expect(useUiStore.getState().page).toBe("team");
 
     // 未登录：App 走登录页分支，快捷键静默不改 page
     act(() => {

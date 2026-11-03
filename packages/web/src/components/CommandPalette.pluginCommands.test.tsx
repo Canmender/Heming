@@ -128,7 +128,9 @@ describe("命令面板 · 插件命令的三种 target 分发", () => {
     fireEvent.change(searchBox(), { target: { value: "导出" } });
     fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
 
-    await waitFor(() => expect(useUiStore.getState().page).toBe("skills"));
+    // 技能区已并入插件区：页面落到插件区，并投递「技能」视图意图
+    await waitFor(() => expect(useUiStore.getState().page).toBe("plugins"));
+    expect(useUiStore.getState().pageView).toBe("skills");
     expect(useUiStore.getState().paletteIntent).toMatchObject({
       kind: "focus-skill",
       data: { id: "skill-1" },
@@ -141,7 +143,8 @@ describe("命令面板 · 插件命令的三种 target 分发", () => {
     fireEvent.change(searchBox(), { target: { value: "导出" } });
     fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
 
-    await waitFor(() => expect(useUiStore.getState().page).toBe("skills"));
+    await waitFor(() => expect(useUiStore.getState().page).toBe("plugins"));
+    expect(useUiStore.getState().pageView).toBe("skills");
     expect(useUiStore.getState().paletteIntent).toBeNull();
   });
 

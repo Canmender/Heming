@@ -278,7 +278,7 @@ export function PetSettingsCard() {
               ))}
             </select>
             <div className="mt-1 ui-caption">
-              用的是该智能体在「接口区」绑定的模型连接；没绑定就用第一个可用连接。
+              用的是该智能体在设置区「模型」里绑定的连接；没绑定就用第一个可用连接。
             </div>
           </div>
 
