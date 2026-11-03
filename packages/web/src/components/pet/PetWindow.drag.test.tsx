@@ -18,6 +18,9 @@ const live2d = vi.hoisted(() => ({
   focus: vi.fn(),
   focusCenter: vi.fn(),
   setPaused: vi.fn(),
+  resizeTo: vi.fn(),
+  /** useLive2D 收到的视口尺寸：用来断言「拖拽期间 viewport 冻结」 */
+  lastViewport: { width: 0, height: 0 },
 }));
 
 const chat = vi.hoisted(() => ({
@@ -30,13 +33,16 @@ const chat = vi.hoisted(() => ({
 }));
 
 vi.mock("./useLive2D.js", () => ({
-  useLive2D: () => ({
-    status: "ready",
-    error: null,
-    // 覆盖整个窗口：光标在任何位置都算「在角色上」，用来观察穿透上报
-    hitBox: { x: 0, y: 0, width: 300, height: 420 },
-    ...live2d,
-  }),
+  useLive2D: (opts: { width: number; height: number }) => {
+    live2d.lastViewport = { width: opts.width, height: opts.height };
+    return {
+      status: "ready",
+      error: null,
+      // 覆盖整个窗口：光标在任何位置都算「在角色上」，用来观察穿透上报
+      hitBox: { x: 0, y: 0, width: 300, height: 420 },
+      ...live2d,
+    };
+  },
 }));
 
 vi.mock("./usePetChat.js", () => ({
@@ -70,7 +76,10 @@ function installBridge(): BridgeHandle {
 
 beforeEach(() => {
   localStorage.clear();
-  for (const mock of Object.values(live2d)) mock.mockClear();
+  for (const [key, value] of Object.entries(live2d)) {
+    if (key !== "lastViewport") (value as ReturnType<typeof vi.fn>).mockClear();
+  }
+  live2d.lastViewport = { width: 0, height: 0 };
   chat.streaming = false;
   chat.reply = "";
   chat.error = null;
@@ -204,6 +213,68 @@ describe("PetWindow · tap 之后不残留拖拽", () => {
       fireEvent.mouseMove(document.body, { clientX: 250, clientY: 250, buttons: 1 });
     });
     expect(bridge.dragStart).not.toHaveBeenCalled();
+  });
+});
+
+describe("PetWindow · 拖拽期间冻结窗口尺寸（d.68 局部放大/裁切）", () => {
+  /** jsdom 的 innerWidth 是只读的：临时改写来模拟「拖动中客户区尺寸变化」。 */
+  function setInnerSize(width: number, height: number): () => void {
+    const original = {
+      width: Object.getOwnPropertyDescriptor(window, "innerWidth"),
+      height: Object.getOwnPropertyDescriptor(window, "innerHeight"),
+    };
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+    return () => {
+      for (const [key, descriptor] of Object.entries(original)) {
+        if (descriptor) Object.defineProperty(window, key, descriptor);
+      }
+    };
+  }
+
+  it("拖拽中的 resize 被忽略，抬起后重测客户区尺寸并重拟合", () => {
+    const bridge = installBridge();
+    render(<PetWindow />);
+    const beforeDrag = { ...live2d.lastViewport };
+    // 首次挂载会同步一次尺寸（挂载时 viewport 初值）
+    live2d.resizeTo.mockClear();
+
+    startDrag(bridge);
+
+    // 拖动中 Chromium 会因跨屏 DPI / 像素取整派发 resize：此时不能重排
+    const restore = setInnerSize(360, 520);
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+      window.dispatchEvent(new Event("resize"));
+    });
+    try {
+      expect(live2d.resizeTo).not.toHaveBeenCalled();
+      // viewport 也冻结在拖拽前的尺寸上：拖动中画面不跳
+      expect(live2d.lastViewport).toEqual(beforeDrag);
+    } finally {
+      // 抬起时仍按「落点后的真实尺寸」重测（360×520）
+      act(() => {
+        fireEvent.mouseUp(document.body, { button: 0, clientX: 150, clientY: 150, buttons: 0 });
+      });
+      expect(live2d.resizeTo).toHaveBeenCalledWith(360, 520);
+      restore();
+    }
+  });
+
+  it("非拖拽状态的 resize 照常同步（缩放档位切换要立即重排）", () => {
+    const bridge = installBridge();
+    render(<PetWindow />);
+    const restore = setInnerSize(320, 448);
+    try {
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      // 视口更新交给 useLive2D 的 resize effect（真实实现里会重设分辨率并重拟合）
+      expect(live2d.lastViewport).toEqual({ width: 320, height: 448 });
+      expect(bridge.dragStart).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
   });
 });
 

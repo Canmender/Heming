@@ -8,6 +8,7 @@ import {
   isInteractiveAt,
   isPrimaryButtonDown,
   modelBoundsToHitBox,
+  resolveInteractive,
   shouldBeginDrag,
   shouldReportChange,
 } from "./petInteraction.js";
@@ -120,6 +121,35 @@ describe("上报去重", () => {
   it("值变化才上报", () => {
     expect(shouldReportChange(true, false)).toBe(true);
     expect(shouldReportChange(false, true)).toBe(true);
+  });
+});
+
+describe("浮层与可交互判定（d.68 菜单点了没反应）", () => {
+  const hitBox = { x: 40, y: 10, width: 220, height: 400 };
+  const bubble = { x: 0, y: 0, width: 300, height: 60 };
+  const menu = { x: 100, y: 200, width: 148, height: 220 };
+  const error = { x: 8, y: 300, width: 284, height: 60 };
+  const rects = [bubble, menu, error];
+
+  it("命中区包含菜单：落在菜单上算可交互（旧实现漏了菜单，穿透态吃不到点击）", () => {
+    expect(resolveInteractive(hitBox, rects, menu.x + 10, menu.y + 10, false)).toBe(true);
+  });
+
+  it("命中区包含错误条", () => {
+    expect(resolveInteractive(hitBox, rects, error.x + 5, error.y + 5, false)).toBe(true);
+  });
+
+  it("空白处不拦截鼠标（不挡桌面点击）", () => {
+    expect(resolveInteractive(hitBox, rects, 5, 300, false)).toBe(false);
+  });
+
+  it("浮层打开时整窗拦截：指针不在任何矩形上也返回 true（别把菜单点穿）", () => {
+    expect(resolveInteractive(hitBox, rects, 5, 300, true)).toBe(true);
+    expect(resolveInteractive(null, [], 0, 0, true)).toBe(true);
+  });
+
+  it("没有命中区（模型未加载）时只有浮层能触发拦截", () => {
+    expect(resolveInteractive(null, [], 150, 200, false)).toBe(false);
   });
 });
 

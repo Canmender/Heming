@@ -307,6 +307,8 @@ contextBridge.exposeInMainWorld("__heming_pet", {
   dragStart: () => ipcRenderer.send("pet:drag-start"),
   dragMove: () => ipcRenderer.send("pet:drag-move"),
   dragEnd: () => ipcRenderer.send("pet:drag-end"),
+  /** 回到默认落位（工作区右下角，按当前缩放档位重新算）。 */
+  resetPosition: () => ipcRenderer.send("pet:reset-position"),
   show: () => ipcRenderer.send("pet:show"),
   hide: () => ipcRenderer.send("pet:hide"),
   toggle: () => ipcRenderer.send("pet:toggle"),

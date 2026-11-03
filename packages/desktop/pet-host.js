@@ -84,9 +84,11 @@ function createPetHost(deps) {
 
   /** 当前是否由渲染层判定为「可交互」（仅 clickThrough 生效时才有意义）。 */
   let interactive = false;
-  /** 拖拽起点：屏幕光标 + 当时的窗口原点。 */
+  /** 拖拽起点：屏幕光标 + 当时的窗口原点 + 上一次已处理的光标位置。 */
   let dragOrigin = null;
   let saveTimer = null;
+  /** 显示器事件是否已接线（避免重复 on）。 */
+  let displaysWatched = false;
 
   /* ────────────────────────── 状态读写 ────────────────────────── */
 
@@ -286,6 +288,7 @@ function createPetHost(deps) {
       clearTimer(saveTimer);
       saveTimer = null;
     }
+    unwatchDisplays();
     if (win && !win.isDestroyed()) {
       saveNow();
       win.destroy();
@@ -294,6 +297,57 @@ function createPetHost(deps) {
     if (tray) {
       tray.destroy();
       tray = null;
+    }
+  }
+
+  /* ────────────────────────── 显示器变化 ────────────────────────── */
+
+  /**
+   * 显示器变化（换屏 / 系统缩放变化 / 插拔屏）后，按**当前缩放档位**重算一次窗口尺寸。
+   *
+   * 为什么需要：窗口尺寸由 `petWindowSize(scale)` 推导，是 DIP 尺寸。Windows 在跨显示器
+   * DPI 变化后可能调整窗口的 DIP 尺寸（不同感知模式下行为不一致），而 Electron 不会为
+   * 我们重算。不主动对齐的话，桌宠会保持一个「不是档位对应值」的尺寸，画面与命中区
+   * 都会按错误尺寸拟合。这里按 `setScale` 的同一口径处理：**保持右下角不动**。
+   *
+   * 拖拽中不重算：窗口正跟着光标走，此时 setBounds 会和拖拽争抢位置。
+   */
+  function handleDisplayChange() {
+    if (!win || win.isDestroyed()) return;
+    if (dragOrigin) return;
+    let bounds = null;
+    try {
+      bounds = win.getBounds();
+    } catch {
+      return;
+    }
+    const size = petWindowSize(state.scale);
+    if (bounds.width === size.width && bounds.height === size.height) return;
+    win.setBounds({
+      x: bounds.x + (bounds.width - size.width),
+      y: bounds.y + (bounds.height - size.height),
+      width: size.width,
+      height: size.height,
+    });
+    scheduleSave();
+  }
+
+  const DISPLAY_EVENTS = ["display-metrics-changed", "display-added", "display-removed"];
+
+  /** 接线上面的三件事；screen 在纯 Node 测试里是假对象，没有 on 就跳过（fail-soft）。 */
+  function watchDisplays() {
+    if (displaysWatched) return;
+    if (!screen || typeof screen.on !== "function") return;
+    displaysWatched = true;
+    for (const event of DISPLAY_EVENTS) screen.on(event, handleDisplayChange);
+  }
+
+  /** destroy 时解绑：窗口没了还留着监听会在下次创建时重复触发。 */
+  function unwatchDisplays() {
+    if (!displaysWatched) return;
+    displaysWatched = false;
+    if (screen && typeof screen.removeListener === "function") {
+      for (const event of DISPLAY_EVENTS) screen.removeListener(event, handleDisplayChange);
     }
   }
 
@@ -329,6 +383,23 @@ function createPetHost(deps) {
     return setScale(nextScale(state.scale, dir));
   }
 
+  /**
+   * 把桌宠放回默认落位（工作区右下角，按当前缩放算尺寸）。
+   *
+   * 口径与 `defaultPetPosition` / 启动时的回落落位一致：用户把桌宠拖到奇怪的地方后
+   * 可以从右键菜单一键找回。用 `moveWindowTo` 复用「位置没变就不 setPosition」。
+   */
+  function resetPosition() {
+    if (!win || win.isDestroyed()) return false;
+    const size = petWindowSize(state.scale);
+    const target = defaultPetPosition(primaryArea(), size);
+    const moved = moveWindowTo(target);
+    // 即便位置恰好没变也落一次盘：这条动作的语义是「把当前位置变成期望值」，
+    // 顺手保证重启后仍落在默认位（与 hide() 一样是立即落盘，不走防抖）。
+    saveNow();
+    return moved;
+  }
+
   /* ────────────────────────── 拖拽 ────────────────────────── */
 
   /**
@@ -358,12 +429,27 @@ function createPetHost(deps) {
     if (!win || win.isDestroyed()) return;
     const cursor = screen.getCursorScreenPoint();
     const b = win.getBounds();
-    dragOrigin = { cursorX: cursor.x, cursorY: cursor.y, windowX: b.x, windowY: b.y };
+    dragOrigin = {
+      cursorX: cursor.x,
+      cursorY: cursor.y,
+      windowX: b.x,
+      windowY: b.y,
+      // 上一次已处理的屏幕光标：光标没动时目标位置必然与上一帧相同
+      lastX: cursor.x,
+      lastY: cursor.y,
+    };
   }
 
   function dragTo() {
     if (!dragOrigin || !win || win.isDestroyed()) return;
     const cursor = screen.getCursorScreenPoint();
+    if (!cursor || !Number.isFinite(cursor.x) || !Number.isFinite(cursor.y)) return;
+    // ★ 光标没动就直接返回：拖拽期间仍会有「光标停住、脚本继续发移动」的帧，
+    //   连 getBounds/setPosition 都不该做（每一次 setPosition 都是一次透明层合成）。
+    //   收尾的终值由 endDrag 按当前光标重算，跳过这里不会丢位移。
+    if (cursor.x === dragOrigin.lastX && cursor.y === dragOrigin.lastY) return;
+    dragOrigin.lastX = cursor.x;
+    dragOrigin.lastY = cursor.y;
     const pos = draggedPosition(dragOrigin, cursor);
     if (!pos) return;
     moveWindowTo(pos);
@@ -518,6 +604,15 @@ function createPetHost(deps) {
       hide();
     });
 
+    /**
+     * 右键菜单「重置位置」：回到默认落位（工作区右下角）。
+     * pet: 前缀通道由本文件自校验来源（main.test.js 的 IPC 不变量按此白名单放行）。
+     */
+    ipcMain.on("pet:reset-position", (event) => {
+      if (!fromPetWindow(event)) return;
+      resetPosition();
+    });
+
     ipcMain.on("pet:toggle", () => toggle());
     ipcMain.on("pet:show", () => show());
     // 穿透开关：设置区与托盘都要能改，所以不限制来源
@@ -639,6 +734,7 @@ function createPetHost(deps) {
     loadState();
     registerIpc();
     createTray();
+    watchDisplays();
     if (state.visible) show();
   }
 
@@ -650,6 +746,8 @@ function createPetHost(deps) {
     destroy,
     setScale,
     stepScale,
+    /** 回到默认落位（右键菜单「重置位置」）；返回是否真的移动了窗口。 */
+    resetPosition,
     setClickThrough,
     setInteractive,
     /** 反向通道：向桌宠推送事件（主进程 → 渲染）。见上方 pushEvent 的说明。 */
@@ -667,7 +765,17 @@ function createPetHost(deps) {
     get isInteractive() {
       return interactive;
     },
-    _internal: { createWindow, beginDrag, dragTo, endDrag, saveNow, loadState, applyMouseIgnore },
+    _internal: {
+      createWindow,
+      beginDrag,
+      dragTo,
+      endDrag,
+      saveNow,
+      loadState,
+      applyMouseIgnore,
+      handleDisplayChange,
+      watchDisplays,
+    },
   };
 }
 

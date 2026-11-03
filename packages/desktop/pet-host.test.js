@@ -2,7 +2,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createPetHost } = require("./pet-host");
-const { petWindowSize } = require("./pet-window");
+const { petWindowSize, defaultPetPosition } = require("./pet-window");
 
 /* ────────────────────────────── 假对象 ────────────────────────────── */
 
@@ -77,11 +77,28 @@ function makeFakeElectron() {
   const menu = (template) => ({ template });
 
   let cursor = { x: 0, y: 0 };
+  /** 显示器事件监听：真实 Electron 是 EventEmitter，这里只实现 on/removeListener/emit。 */
+  const displayListeners = new Map();
+  const displayEvents = [];
   const screen = {
     getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }],
     getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }),
     getCursorScreenPoint: () => ({ ...cursor }),
     setCursor: (x, y) => { cursor = { x, y }; },
+    on: (event, fn) => {
+      if (!displayListeners.has(event)) displayListeners.set(event, new Set());
+      displayListeners.get(event).add(fn);
+    },
+    removeListener: (event, fn) => {
+      displayListeners.get(event)?.delete(fn);
+    },
+    /** 测试用：模拟系统派发显示器变化事件 */
+    emit: (event, ...args) => {
+      displayEvents.push(event);
+      for (const fn of displayListeners.get(event) ?? []) fn(...args);
+    },
+    listenerCount: (event) => displayListeners.get(event)?.size ?? 0,
+    displayEvents,
   };
 
   return {
@@ -336,6 +353,34 @@ test("拖拽：位置没变时不重复 setPosition（少一次透明窗合成�
   assert.equal(w._setPositionCalls, 1);
 });
 
+test("拖拽：光标没动时直接返回（连 getBounds/setPosition 都不做）", () => {
+  const { host, created, ons, screen } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  const event = { sender: w.webContents };
+  w.setPosition(1000, 500);
+  screen.setCursor(1200, 700);
+  ons.get("pet:drag-start")(event);
+
+  w._setPositionCalls = 0;
+  ons.get("pet:drag-move")(event); // 光标没动
+  assert.equal(w._setPositionCalls, 0);
+
+  // 即便窗口被外部挪动过，光标没动的上报也不该把窗口拽回去（跳过整条计算链）
+  w.setPosition(1111, 222);
+  w._setPositionCalls = 0;
+  ons.get("pet:drag-move")(event);
+  assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, { x: 1111, y: 222 });
+  assert.equal(w._setPositionCalls, 0);
+
+  // 光标一移动就恢复跟随（按 drag 起点算，不按外部挪动后的位置算）
+  screen.setCursor(1260, 740);
+  ons.get("pet:drag-move")(event);
+  assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, { x: 1060, y: 540 });
+  assert.equal(w._setPositionCalls, 1);
+});
+
 test("拖拽结束：按当前光标补一次终值（渲染层最后一帧 rAF 可能还没执行）", () => {
   const { host, created, ons, screen, written } = makeHost();
   host.start();
@@ -446,6 +491,114 @@ test("缩放两端夹住，档位不变时不重建窗口", () => {
   host.setScale(0.6);
   host.stepScale(-1); // 已在最小档，再减不越界
   assert.equal(host.state.scale, 0.6);
+});
+
+/* ────────────────────────────── 重置位置 ────────────────────────────── */
+
+test("重置位置：回到工作区右下角默认落位并立即落盘", () => {
+  const { host, created, ons, written } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  w.setPosition(50, 60);
+
+  ons.get("pet:reset-position")({ sender: w.webContents });
+
+  const expected = defaultPetPosition(
+    { x: 0, y: 0, width: 1920, height: 1040 },
+    petWindowSize(1),
+  );
+  assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, expected);
+  assert.deepEqual(written.at(-1).s.bounds, {
+    ...expected,
+    width: petWindowSize(1).width,
+    height: petWindowSize(1).height,
+  });
+});
+
+test("重置位置：非桌宠窗口发来的请求被忽略（跨进程边界不靠调用方自觉）", () => {
+  const { host, created, ons } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  w.setPosition(50, 60);
+  w._setPositionCalls = 0;
+
+  ons.get("pet:reset-position")({ sender: { notThePet: true } });
+  assert.deepEqual({ x: w._bounds.x, y: w._bounds.y }, { x: 50, y: 60 });
+  assert.equal(w._setPositionCalls, 0);
+});
+
+test("重置位置：已经在默认位时是 no-op（不重复 setPosition）", () => {
+  const { host, created, ons } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  ons.get("pet:reset-position")({ sender: w.webContents });
+  w._setPositionCalls = 0;
+
+  const moved = host.resetPosition();
+  assert.equal(moved, false);
+  assert.equal(w._setPositionCalls, 0);
+});
+
+/* ────────────────────────────── 显示器变化 ────────────────────────────── */
+
+test("显示器变化：按当前档位重算窗口尺寸，并保持右下角不动", () => {
+  const { host, created, screen } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  // 模拟系统在跨屏 DPI 变化后把 DIP 尺寸改成了非档位值
+  w.setBounds({ x: 1000, y: 500, width: 320, height: 440 });
+
+  screen.emit("display-metrics-changed", {}, { workArea: { x: 0, y: 0, width: 1920, height: 1040 } });
+
+  assert.deepEqual(w._bounds, {
+    x: 1020, // 右边缘保持 1320
+    y: 520, // 下边缘保持 940
+    width: petWindowSize(1).width,
+    height: petWindowSize(1).height,
+  });
+});
+
+test("显示器变化：拖拽中不重算（不和拖拽争抢窗口位置）", () => {
+  const { host, created, screen, ons } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  screen.setCursor(1200, 700);
+  ons.get("pet:drag-start")({ sender: w.webContents });
+  w.setBounds({ x: 1000, y: 500, width: 320, height: 440 });
+
+  screen.emit("display-added", {}, { workArea: { x: 0, y: 0, width: 1920, height: 1040 } });
+
+  assert.equal(w._bounds.width, 320, "拖拽中不改尺寸");
+  ons.get("pet:drag-end")({ sender: w.webContents });
+});
+
+test("显示器变化：尺寸已与档位一致时不重复 setBounds", () => {
+  const { host, created, screen } = makeHost();
+  host.start();
+  host.show();
+  const w = created[0];
+  const calls = [];
+  w.setBounds = (b) => {
+    calls.push(b);
+  };
+
+  screen.emit("display-metrics-changed", {}, { workArea: { x: 0, y: 0, width: 1920, height: 1040 } });
+  assert.equal(calls.length, 0);
+});
+
+test("显示器事件在销毁时解绑（窗口没了不该留着监听）", () => {
+  const { host, screen } = makeHost();
+  host.start();
+  assert.equal(screen.listenerCount("display-metrics-changed"), 1);
+  assert.equal(screen.listenerCount("display-added"), 1);
+  host.destroy();
+  assert.equal(screen.listenerCount("display-metrics-changed"), 0);
+  assert.equal(screen.listenerCount("display-added"), 0);
 });
 
 /* ────────────────────────────── 设置跳转 ────────────────────────────── */

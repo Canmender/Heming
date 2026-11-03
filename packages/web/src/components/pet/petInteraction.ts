@@ -32,9 +32,36 @@ export function containsPoint(rect: Rect | null | undefined, x: number, y: numbe
   return x >= rx && x <= rx + width && y >= ry && y <= ry + height;
 }
 
-/** 点是否落在任一矩形内。用于"角色 ∪ 气泡 ∪ 输入框"。 */
+/** 点是否落在任一矩形内。用于"角色 ∪ 气泡 ∪ 输入框 ∪ 菜单 ∪ 错误条"。 */
 export function isInteractiveAt(rects: Array<Rect | null | undefined>, x: number, y: number): boolean {
   return rects.some((r) => containsPoint(r, x, y));
+}
+
+/**
+ * 这一刻窗口该不该接收鼠标（用于上报 `pet:set-interactive`）。
+ *
+ * 两条规则，顺序不能反：
+ *
+ * 1. **浮层打开时整窗拦截**。菜单/输入框是窗口内的浮动 UI，它们打开时鼠标可能不在
+ *    任何矩形上（比如菜单刚弹出、指针还在两帧之间），或者从菜单移到桌面时先收到
+ *    `mouseleave`。若这时按坐标判成"不拦截"，穿透态会把菜单一起点穿——
+ *    用户看到的就是「右键菜单点了没反应」。所以只要浮层开着就返回 true。
+ *
+ * 2. 否则按坐标判：命中区 = 角色包围盒 ∪ 气泡 ∪ 输入框 ∪ 菜单 ∪ 错误条。
+ *    空白处一律穿透（桌宠不该挡住桌面点击）。
+ *
+ * ★ 菜单/错误条以前漏在命中区外（旧 `extraRects` 只有 bubble 与 input），
+ *   是「菜单点了没反应」的第一根因：默认穿透时菜单区域不挡鼠标，点击落到桌面。
+ */
+export function resolveInteractive(
+  hitBox: Rect | null | undefined,
+  uiRects: Array<Rect | null | undefined>,
+  x: number,
+  y: number,
+  floatingOpen: boolean,
+): boolean {
+  if (floatingOpen) return true;
+  return isInteractiveAt([hitBox, ...uiRects], x, y);
 }
 
 /** 抬起时的最终判定：位移达到阈值才算拖拽。 */

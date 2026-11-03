@@ -16,11 +16,16 @@
 | 双击角色 | 播一次「开心」动作 |
 | 拖动角色 | 移动窗口（位置记住，重启后回来；松手会贴边吸附，拖出屏幕也会被拉回可见区） |
 | 点右上角红色角标 | 叫起主窗口并打开那个会话 |
-| 右键角色 | 菜单：说点什么 / 放大 / 缩小 / 设置 / 隐藏 |
+| 右键角色 | 菜单：说点什么 / 放大一档 / 缩小一档 / 重置位置 / 鼠标穿透 / 设置 / 隐藏 |
 | 托盘图标左键 | 显隐切换；右键有完整菜单含「退出」 |
 
+**右键菜单怎么用键盘**：右键打开后焦点在第一项，`↑` / `↓` 在项间移动，`Enter` / 空格执行，
+`Esc` 关闭并把焦点还给画布。菜单项最小高度 28px；「鼠标穿透」项会显示当前是开还是关，点一下切换。
+「重置位置」把桌宠放回工作区右下角的默认落位（与首次出现时的位置同一算法）。
+
 **如果角色点不中**：多半是鼠标穿透。设置区 → 外观 → 桌宠 → 关掉「鼠标穿透」，或从托盘菜单关。
-穿透模式下只有角色、气泡、角标、输入框会拦截鼠标，其余区域点击直接落到桌面。
+穿透模式下只有角色、气泡、角标、输入框、**右键菜单**与**错误提示条**会拦截鼠标，其余区域点击直接落到桌面。
+菜单打开期间整窗会临时接收鼠标（否则菜单会被"点穿"），关闭后立刻恢复穿透。
 
 **说话用哪个模型**：设置区可绑定某个智能体的模型连接；不绑定就用第一个可用连接。
 没配任何连接时，点它会直接说「还没有可用的模型连接」并给一个「去设置」。
@@ -33,11 +38,12 @@
 主进程 packages/desktop/pet-host.js      ← 窗口、托盘、穿透、位置记忆、拖拽
    │  pet-window.js  纯函数：几何 / 缩放 / 位置夹取 / 拖拽收尾吸附与钳制 / 地址拼接 / 状态解析
    │
-   ├─ preload.js  __heming_pet 桥（12 个动作 + 2 个订阅）
+   ├─ preload.js  __heming_pet 桥（13 个动作 + 2 个订阅）
    │
 渲染进程 packages/web/src/pet.tsx        ← 独立入口 pet.html，不加载主应用
-   ├─ components/pet/PetWindow.tsx   画面 + 输入 + 角标 + 气泡
+   ├─ components/pet/PetWindow.tsx   画面 + 输入 + 角标 + 气泡 + 右键菜单
    ├─ components/pet/useLive2D.ts    pixi + Cubism 装配（动态 import）
+   ├─ components/pet/live2dFit.ts    适配算法（纯函数：自然尺寸 / 幂等 / 贴底）
    ├─ components/pet/petInteraction.ts  命中判定 / 点击 vs 拖拽 / rAF 合并（纯函数）
    ├─ lib/petPose.ts                 姿态判定与表现映射（纯函数）
    ├─ lib/petPrefs.ts                本机偏好（开关 / 绑定 / 模型路径）
@@ -184,11 +190,24 @@
    `MouseEvent.buttons` 的左键位（`isPrimaryButtonDown`），没按着就不开始拖拽。
    双击计时单独放 `lastTapAtRef`，不再写回按下会话——把 `dragging:false` 的对象塞回去
    正是「松开鼠标后桌宠仍被带着跑」的成因。
+6. **适配必须基于「自然尺寸」**（`live2dFit.ts`）：pixi 的 `Container.width` 是**缩放后**的宽度，
+   拿它当基准会在第二次拟合时把缩放取倒数（`scale → 1.0`，角色突然变大被裁）。
+   现在 `readNaturalSize` 优先 `internalModel.width/height`，退化用「当前尺寸 ÷ 当前 scale」；
+   `fitModel` 对同一窗口尺寸**幂等**，`live2dFit.test.ts` 有「旧实现对照」用例证明旧算法确实翻转。
+7. **拖拽期间冻结尺寸/适配**：拖拽中收到 `resize` 直接忽略（不更新 viewport）；
+   `dragEnd` 后重测 `innerWidth/innerHeight` → 同步 `renderer.resolution = devicePixelRatio`
+   → 重拟合 → 立刻渲染一帧。拖动中画面只搬静态位图，不会「一边移动一边重排」。
+8. **命中区单一来源**：角色 ∪ 气泡 ∪ 输入框 ∪ 菜单 ∪ 错误条；**菜单/输入框打开时整窗拦截**，
+   否则穿透态会把菜单一起「点穿」。浮层开合时主动重算并上报 `pet:set-interactive`，不等下一次
+   `mousemove`；click-away 只看 `mousedown` 的 target 是否在 `[data-pet-ui]` 内，点了不会先卸载菜单。
 
 **改这些时的验收**：`packages/desktop` 的 `pet-window.test.js` / `pet-host.test.js` 覆盖
-吸附、钳制、跳过重复位置、终值对齐；`packages/web` 的 `petInteraction.test.ts` 与
-`PetWindow.drag.test.tsx` 覆盖 rAF 合并、抬起补终值、拖拽期不上报交互、tap 后不残留拖拽。
-取舍与现象口径见 `docs/superpowers/specs/2026-11-03-pet-drag-flicker.md`。
+吸附、钳制、跳过重复位置、终值对齐、光标没动短路、`pet:reset-position` 来源校验、显示器变化重算；
+`packages/web` 的 `petInteraction.test.ts` / `live2dFit.test.ts` 与 `PetWindow.drag.test.tsx` /
+`PetWindow.menu.test.tsx` 覆盖 rAF 合并、抬起补终值、拖拽期不上报交互、tap 后不残留拖拽、
+拖拽中 resize 冻结、菜单命中区/click-away/键盘可达。
+取舍与现象口径见 `docs/superpowers/specs/2026-11-03-pet-drag-flicker.md`（d.67）与
+`docs/superpowers/specs/2026-11-03-d68-pet-interaction.md`（d.68）。
 
 ---
 
@@ -204,7 +223,16 @@
   鼠标事件，窗口会停在最后一次移动的位置（收尾吸附不执行，但位置仍可再次拖回）。
 - **鼠标穿透依赖 `forward: true`**：个别平台/驱动下穿透态收不到 `mousemove`，表现为「角色点不中」。
   出口是关掉穿透（设置区或托盘）。
+- **右键菜单的键盘导航不做 Tab 轮转**：`↑/↓/Home/End/Enter/Esc` 可用；按 `Tab` 会离开菜单
+  （菜单不自动关闭）。需要时用 Esc 收起。
+- **显示器变化只对齐窗口尺寸**：`display-metrics-changed`/`display-added`/`display-removed` 触发时，
+  按当前缩放档位重算窗口尺寸并保持右下角不动；不重算「用户拖到的位置」，也不改变吸附策略。
+- **拖拽期间不降分辨率**：调研建议「拖动中临时把 `renderer.resolution` 降到 1 倍以减少合成量」，
+  本轮未做（避免移动中改分辨率引入新的抖动），列为后续优化。
 - **不做**：语音、正文预览、系统级徽章（任务栏/托盘计数）、按会话免打扰联动、养成系统、模型市场。
+
+> d.68 的拖动放大/裁切、菜单点不动、换屏发虚三项修复的**真机待验清单**见
+> `docs/superpowers/specs/2026-11-03-d68-pet-interaction.md` §6；本轮只完成逻辑层单测，未宣称肉眼已验证。
 
 ---
 
@@ -216,9 +244,13 @@
 | 窗口在、角色不在 | Cubism Core 与模型是否 200；`pet-state.json` 是否带 BOM（已兼容）；控制台有无 404 |
 | 角色点不中 | 关掉鼠标穿透试一次 |
 | 拖动没反应 | 渲染层只上报按下/移动/抬起，位移由**主进程**用 `getCursorScreenPoint()` 算；查 IPC 是否到了主进程 |
-| **拖动时有残影 / 边缘闪烁** | ① 移动是否还按原生 mousemove 逐次发 `pet:drag-move`（应经 `createFrameCoalescer` 每帧一次）；② 拖拽期间 Live2D 是否被冻结（`useLive2D.setPaused(true)` 停 ticker 与物理）；③ 主进程是否对相同位置重复 `setPosition`（`moveWindowTo` 应跳过）；④ 拖拽中是否还在切 `pet:set-interactive`（渲染层与主进程都不该切换） |
+| **拖动时画面局部放大 / 角色只露一部分** | ① 适配是否基于自然尺寸（`live2dFit.readNaturalSize` 是否走 `internalModel.width/height` 或「当前尺寸÷scale」）；② 拖拽中是否还在执行 resize（应直接忽略，dragEnd 才重测）；③ 看 `live2dFit.test.ts` 的幂等用例与「旧实现对照」是否仍绿 |
+| **拖动时有残影 / 边缘闪烁** | ① 移动是否还按原生 mousemove 逐次发 `pet:drag-move`（应经 `createFrameCoalescer` 每帧一次）；② 拖拽期间 Live2D 是否被冻结（`useLive2D.setPaused(true)` 停 ticker 与物理）；③ 主进程是否对相同位置重复 `setPosition`（`moveWindowTo` 应跳过）或光标没动仍走计算（`dragTo` 应直接返回）；④ 拖拽中是否还在切 `pet:set-interactive`（渲染层与主进程都不该切换） |
+| **右键菜单点了没反应** | ① 菜单/错误条是否在命中区（`PetWindow.extraRects`）；② 浮层打开后是否主动上报 `pet:set-interactive(true)`（穿透态下菜单必须整窗拦截）；③ click-away 是否只看 `mousedown`、且跳过 `[data-pet-ui]`（否则菜单项 click 永远不派发）；④ 旧 preload 没有 `resetPosition` 时该项应隐藏，不是死按钮 |
+| **换屏 / 改系统缩放后画面发虚** | ① resize 时是否先 `renderer.resolution = devicePixelRatio` 再 `resize`；② 主进程是否监听 `display-metrics-changed` 并按档位重算窗口尺寸 |
 | **松开鼠标后桌宠被鼠标带着跑** | ① `mouseup` 是否清空了按下会话（不要再把 `dragging:false` 的对象写回 `dragRef`）；② 拖拽起点是否检查 `MouseEvent.buttons` 左键位；③ 双击计时是否独立的 `lastTapAtRef` 而不是塞在按下会话里 |
 | 松手后窗口跑到屏幕外 / 贴不住边 | 看 `settlePetPosition` 是否在 `drag-end` 执行；`PET_SNAP_PX`、`MIN_VISIBLE_*` 与工作区是否被意外改动 |
+| 重置位置没反应 | 渲染层 `window.__heming_pet.resetPosition` 是否存在（旧 preload 会隐藏菜单项）；主进程 `pet:reset-position` 是否只接受桌宠窗口来源 |
 | 角标不出现 | 未登录不建 WS；确认登录态与网络 |
 
 真机验证脚本的写法可参考 `docs/superpowers/plans/2026-11-01-d46-desktop-pet.md` 末尾的验收记录——

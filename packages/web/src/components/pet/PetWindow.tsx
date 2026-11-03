@@ -5,14 +5,15 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import { loadPetPrefs, petModelUrl } from "../../lib/petPrefs.js";
 import {
   classifyPointerUp,
   createFrameCoalescer,
-  isInteractiveAt,
   isPrimaryButtonDown,
+  resolveInteractive,
   shouldBeginDrag,
   shouldReportChange,
   type Rect,
@@ -65,6 +66,18 @@ export function PetWindow() {
   const bubbleRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLFormElement | null>(null);
   const inputElRef = useRef<HTMLInputElement | null>(null);
+  /** 菜单与错误条也要算进命中区（d.68）：否则穿透态下点击落到桌面，菜单永远收不到 click。 */
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const errorRef = useRef<HTMLDivElement | null>(null);
+  /** 根容器：菜单按 Esc 关闭后把焦点还到这里（tabIndex=-1，不参与 Tab 序列）。 */
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  /** 最近一次已知光标位置：浮层开合时要按它主动重算可交互，不能等下一次 mousemove。 */
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  /** 菜单里显示的鼠标穿透当前值（打开菜单时异步读主进程状态，读不到就显示未知）。 */
+  const [menuClickThrough, setMenuClickThrough] = useState<boolean | null>(null);
+  /** 拖拽期间的冻结开关：ref 供事件闭包同步读取，state 只驱动光标样式。 */
+  const draggingRef = useRef(false);
+  const [dragging, setDragging] = useState(false);
 
   const chat = usePetChat(prefs.agentId);
 
@@ -172,7 +185,7 @@ export function PetWindow() {
    * 每个 effect（含口型那个 rAF 循环）都会在每次渲染时拆掉重建——表现是口型抖动、
    * 事件监听反复解绑重绑。hook 内部这些方法都是 useCallback 稳定的，单独依赖即可。
    */
-  const { setMouthOpen, playMotion, focus, focusCenter, setPaused } = stage;
+  const { setMouthOpen, playMotion, focus, focusCenter, setPaused, resizeTo } = stage;
   /** hitBox 会随视口尺寸变化，用 ref 读，避免把 mousemove 监听绑到它身上。 */
   const hitBoxRef = useRef<Rect | null>(stage.hitBox);
   hitBoxRef.current = stage.hitBox;
@@ -199,6 +212,11 @@ export function PetWindow() {
   /* ────────────── 尺寸跟随主进程的缩放 ────────────── */
   useEffect(() => {
     const onResize = () => {
+      // ★ 拖拽期间冻结窗口尺寸 / 模型适配：窗口正在连续移动，Chromium 会因跨屏 DPI 变化
+      //   或客户区像素取整派发 resize。此时重新拟合会让画面在拖动中跳变（再叠加旧
+      //   fitModel 的非幂等缺陷，观感就是「局部放大 / 角色只露一部分」）。
+      //   直接忽略：dragEnd 后由 finishDrag 统一重测、重设分辨率、重拟合、补一帧。
+      if (draggingRef.current) return;
       setViewport({
         width: window.innerWidth || 300,
         height: window.innerHeight || 420,
@@ -256,10 +274,15 @@ export function PetWindow() {
 
   /* ────────────── 可交互区与穿透上报 ────────────── */
   const interactiveRef = useRef(false);
-  /** 拖拽期间的冻结开关：ref 供事件闭包同步读取，state 只驱动光标样式。 */
-  const draggingRef = useRef(false);
-  const [dragging, setDragging] = useState(false);
+  /** 菜单 / 输入框是否打开。打开期间整窗拦截鼠标（否则穿透会把菜单一起「点穿」）。 */
+  const floatingOpenRef = useRef(false);
 
+  /**
+   * 命中区**单一来源**：角色包围盒 ∪ 气泡 ∪ 输入框 ∪ 菜单 ∪ 错误条。
+   *
+   * ★ d.68 之前这里只有气泡与输入框：菜单和错误条不在命中区，默认穿透时鼠标点击
+   *   直接落到桌面，窗口收不到 mousedown/click——「右键菜单里点了没反应」的第一根因。
+   */
   const extraRects = useCallback((): Array<Rect | null> => {
     const toRect = (el: HTMLElement | null): Rect | null => {
       if (!el) return null;
@@ -267,13 +290,24 @@ export function PetWindow() {
       if (r.width <= 0 || r.height <= 0) return null;
       return { x: r.left, y: r.top, width: r.width, height: r.height };
     };
-    return [toRect(bubbleRef.current), toRect(inputRef.current)];
+    return [
+      toRect(bubbleRef.current),
+      toRect(inputRef.current),
+      toRect(menuRef.current),
+      toRect(errorRef.current),
+    ];
   }, []);
 
-  /** 按当前光标重算「该不该挡鼠标」；值没变就不发 IPC（mousemove 是高频事件）。 */
+  /** 按给定光标位置重算「该不该挡鼠标」；值没变就不发 IPC（mousemove 是高频事件）。 */
   const reportInteractiveAt = useCallback(
     (x: number, y: number) => {
-      const next = isInteractiveAt([hitBoxRef.current, ...extraRects()], x, y);
+      const next = resolveInteractive(
+        hitBoxRef.current,
+        extraRects(),
+        x,
+        y,
+        floatingOpenRef.current,
+      );
       if (shouldReportChange(interactiveRef.current, next)) {
         interactiveRef.current = next;
         window.__heming_pet?.setInteractive(next);
@@ -282,8 +316,34 @@ export function PetWindow() {
     [extraRects],
   );
 
+  /**
+   * 用最近一次已知光标位置重算一次。
+   * 浮层开 / 合时调用：不能依赖下一次 mousemove（用户可能点了菜单后就不再动鼠标）。
+   */
+  const refreshInteractive = useCallback(() => {
+    const pointer = lastPointerRef.current;
+    reportInteractiveAt(pointer?.x ?? Number.NaN, pointer?.y ?? Number.NaN);
+  }, [reportInteractiveAt]);
+
+  /**
+   * 浮层开合 → 主动重算并上报，不依赖下一次 mousemove。
+   *
+   * ★ 这是「菜单点了没反应」的第二处修复：菜单一打开就必须立刻停止穿透，
+   *   否则用户点到菜单时事件落到桌面；关闭后立刻按当前指针恢复穿透。
+   */
+  useEffect(() => {
+    floatingOpenRef.current = menu !== null || inputOpen;
+    refreshInteractive();
+    if (!menu) return;
+    // 菜单打开后聚焦第一项：方向键 / 回车可用，焦点不会悬空
+    requestAnimationFrame(() => {
+      menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    });
+  }, [inputOpen, menu, refreshInteractive]);
+
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
       // 拖拽期间冻结：不追视、不做命中判定、不报穿透。
       // 窗口在连续移动，此时切换 ignore-mouse 会让鼠标事件在透传/拦截之间抖动。
       if (draggingRef.current) return;
@@ -337,14 +397,28 @@ export function PetWindow() {
     };
 
     /**
-     * 结束一次拖拽：补终值 → 通知主进程收尾（吸附/钳制在那边做）→ 恢复舞台 → 补穿透判定。
+     * 结束一次拖拽：补终值 → 通知主进程收尾（吸附/钳制在那边做）→ 补测尺寸并重拟合
+     * → 恢复舞台 → 补穿透判定。
      * 三条退出路径共用（正常 mouseup / 拖拽中检测到左键已松开 / 窗口失焦），
      * 分开写会出现「某条路径忘了恢复 Live2D 或忘了 dragEnd」的半截状态。
      */
+    const refitAfterDrag = () => {
+      // 拖拽期间忽略了 resize（见尺寸 effect）：落点后重测一次真实客户区尺寸，
+      // 重设分辨率（跨屏 DPR 可能变了）、重新拟合、立刻渲染一帧。
+      const w = window.innerWidth || 300;
+      const h = window.innerHeight || 420;
+      setViewport((prev) =>
+        prev.width === w && prev.height === h ? prev : { width: w, height: h },
+      );
+      resizeTo(w, h);
+    };
+
     const finishDrag = (x: number, y: number) => {
+      lastPointerRef.current = { x, y };
       dragMove.flush(); // 补一次终值：最后一帧的 rAF 可能还没执行
       window.__heming_pet?.dragEnd();
       setDraggingState(false);
+      refitAfterDrag(); // 先出正确画面（尺寸/分辨率/拟合），再恢复 ticker
       setPaused(false); // 恢复舞台并立即渲染一帧，画面不会停在旧帧
       // 拖拽期间跳过了追视，结束后以当前指针重新对一次焦点（不做补间，补间会看到眼睛扫回来）
       focus(x, y);
@@ -414,6 +488,7 @@ export function PetWindow() {
         dragMove.flush();
         window.__heming_pet?.dragEnd();
         setDraggingState(false);
+        refitAfterDrag(); // 拖拽期间攒下的 resize 同样要补
         setPaused(false);
       } else {
         dragMove.cancel();
@@ -423,6 +498,7 @@ export function PetWindow() {
     const onLeave = () => {
       if (draggingRef.current) return; // 拖拽中窗口跟着光标走，不该在这里清穿透
       dragRef.current = null; // 按下后移出窗口（还没进入拖拽）：会话作废，不留可被推进的状态
+      if (floatingOpenRef.current) return; // 浮层开着：保持拦截，别把菜单一起点穿
       focusCenter();
       if (interactiveRef.current) {
         interactiveRef.current = false;
@@ -443,7 +519,7 @@ export function PetWindow() {
       window.removeEventListener("blur", onBlur);
       dragMove.cancel();
     };
-  }, [dragMove, focus, focusCenter, reportInteractiveAt, setDraggingState, setPaused]);
+  }, [dragMove, focus, focusCenter, reportInteractiveAt, resizeTo, setDraggingState, setPaused]);
 
   /* 拖拽时给 body 加 grabbing：光标形状本身就是「正在拖」的反馈。 */
   useEffect(() => {
@@ -457,25 +533,133 @@ export function PetWindow() {
   }, [dragging]);
 
   /* ────────────── 右键菜单 ────────────── */
+
+  /** 菜单尺寸（7 项 + 内边距）：贴边时往回收，别被窗口裁掉。 */
+  const MENU_WIDTH = 156;
+  const MENU_HEIGHT = 248;
+
   useEffect(() => {
     const onContext = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && target.closest("[data-pet-ui]")) return;
       e.preventDefault();
-      // 菜单贴着窗口边缘时往回收，别被裁掉
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
       setMenu({
-        x: Math.min(e.clientX, Math.max(0, viewport.width - 132)),
-        y: Math.min(e.clientY, Math.max(0, viewport.height - 180)),
+        x: Math.min(e.clientX, Math.max(0, viewport.width - MENU_WIDTH)),
+        y: Math.min(e.clientY, Math.max(0, viewport.height - MENU_HEIGHT)),
       });
     };
-    const onClickAway = () => setMenu(null);
     window.addEventListener("contextmenu", onContext);
-    window.addEventListener("mousedown", onClickAway);
-    return () => {
-      window.removeEventListener("contextmenu", onContext);
-      window.removeEventListener("mousedown", onClickAway);
-    };
+    return () => window.removeEventListener("contextmenu", onContext);
   }, [viewport.width, viewport.height]);
+
+  /**
+   * 点窗外关闭菜单。
+   *
+   * ★ 必须是 mousedown 且**跳过 `[data-pet-ui]`**：旧实现无条件 `setMenu(null)`，
+   *   手指按在菜单项上时菜单在 mousedown 阶段就被卸载，click 永远不会派发到按钮——
+   *   这是「点了没反应」的第二根因（与命中区漏了菜单叠加出现）。
+   */
+  useEffect(() => {
+    if (!menu) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest("[data-pet-ui]")) return;
+      setMenu(null);
+    };
+    window.addEventListener("mousedown", onDocMouseDown);
+    return () => window.removeEventListener("mousedown", onDocMouseDown);
+  }, [menu]);
+
+  /** 菜单打开时读一次主进程的穿透状态，菜单项据此显示「已开 / 已关」。 */
+  useEffect(() => {
+    if (!menu) {
+      setMenuClickThrough(null);
+      return;
+    }
+    let alive = true;
+    const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
+    if (!bridge?.state) return;
+    void Promise.resolve(bridge.state())
+      .then((s) => {
+        if (!alive) return;
+        setMenuClickThrough(s && typeof s.clickThrough === "boolean" ? s.clickThrough : null);
+      })
+      .catch(() => {
+        if (alive) setMenuClickThrough(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [menu]);
+
+  /**
+   * Esc：关闭菜单并把焦点还给画布容器（菜单键盘可达的出口）。
+   * 输入框自己的 Esc 由输入框处理，这里不抢。
+   */
+  useEffect(() => {
+    if (!menu) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setMenu(null);
+      requestAnimationFrame(() => rootRef.current?.focus());
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [menu]);
+
+  /** 菜单内方向键导航（Enter / 空格由原生 button 触发 click）。 */
+  const onMenuKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+    );
+    if (items.length === 0) return;
+    const index = items.findIndex((el) => el === document.activeElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      const next = (Math.max(0, index) + step + items.length) % items.length;
+      items[next]?.focus();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      items[0]?.focus();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      items[items.length - 1]?.focus();
+    }
+  }, []);
+
+  /** 点菜单项：先收起菜单，再执行动作（动作里的 focus 不会被菜单卸载打断）。 */
+  const chooseMenu = useCallback((action: () => void) => {
+    setMenu(null);
+    action();
+  }, []);
+
+  /**
+   * 「重置位置」能力探测：旧版 preload 没有暴露 resetPosition 时**不渲染**这一项，
+   * 避免出现点了没反应的死按钮（本轮 IPC 由 Lead 接线，见规格文档）。
+   */
+  const canResetPosition = useMemo(() => {
+    const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
+    return typeof (bridge as { resetPosition?: unknown } | undefined)?.resetPosition === "function";
+  }, []);
+
+  /** 鼠标穿透开关：菜单里显示当前值，点击切换（复用既有 pet:set-click-through）。 */
+  const toggleClickThrough = useCallback(() => {
+    const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
+    if (!bridge) return;
+    if (menuClickThrough !== null) {
+      bridge.setClickThrough(!menuClickThrough);
+      return;
+    }
+    // 状态没读到时再问一次主进程，别把「未知」当成「关」直接写反
+    void Promise.resolve(bridge.state?.())
+      .then((s) => {
+        if (s && typeof s.clickThrough === "boolean") bridge.setClickThrough(!s.clickThrough);
+      })
+      .catch(() => {});
+  }, [menuClickThrough]);
 
   /* ────────────── 发送 ────────────── */
   const send = useCallback(async () => {
@@ -512,11 +696,15 @@ export function PetWindow() {
 
   return (
     <div
+      ref={rootRef}
+      // 菜单按 Esc 关闭后把焦点还到这里：tabIndex=-1 让它可编程聚焦、但不进 Tab 序列
+      tabIndex={-1}
       style={{
         position: "fixed",
         inset: 0,
         background: "transparent",
         userSelect: "none",
+        outline: "none",
         fontFamily:
           '"PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif',
       }}
@@ -660,12 +848,16 @@ export function PetWindow() {
 
       {menu && (
         <div
+          ref={menuRef}
           data-pet-ui="menu"
+          role="menu"
+          aria-label="桌宠菜单"
+          onKeyDown={onMenuKeyDown}
           style={{
             position: "absolute",
             left: menu.x,
             top: menu.y,
-            width: 128,
+            minWidth: MENU_WIDTH,
             padding: 4,
             background: "#fff",
             border: "1px solid #e6e6e6",
@@ -676,51 +868,49 @@ export function PetWindow() {
           }}
         >
           <MenuItem
-            onClick={() => {
-              setMenu(null);
-              setInputOpen(true);
-              requestAnimationFrame(() => inputElRef.current?.focus());
-            }}
+            onClick={() =>
+              chooseMenu(() => {
+                setInputOpen(true);
+                requestAnimationFrame(() => inputElRef.current?.focus());
+              })
+            }
           >
             说点什么
           </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setMenu(null);
-              window.__heming_pet?.setScale({ dir: 1 });
-            }}
-          >
+          <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.setScale({ dir: 1 }))}>
             放大一档
           </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setMenu(null);
-              window.__heming_pet?.setScale({ dir: -1 });
-            }}
-          >
+          <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.setScale({ dir: -1 }))}>
             缩小一档
           </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setMenu(null);
-              window.__heming_pet?.openSettings();
-            }}
-          >
+          {canResetPosition && (
+            <MenuItem
+              onClick={() =>
+                chooseMenu(() =>
+                  (
+                    window.__heming_pet as unknown as { resetPosition?: () => void }
+                  )?.resetPosition?.(),
+                )
+              }
+            >
+              重置位置
+            </MenuItem>
+          )}
+          <MenuItem onClick={() => chooseMenu(toggleClickThrough)}>
+            {`鼠标穿透（${
+              menuClickThrough === true ? "已开" : menuClickThrough === false ? "已关" : "读取中"
+            }）`}
+          </MenuItem>
+          <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.openSettings())}>
             设置
           </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setMenu(null);
-              window.__heming_pet?.hide();
-            }}
-          >
-            隐藏
-          </MenuItem>
+          <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.hide())}>隐藏</MenuItem>
         </div>
       )}
 
       {stage.status === "error" && (
         <div
+          ref={errorRef}
           data-pet-ui="error"
           style={{
             position: "absolute",
@@ -757,23 +947,34 @@ function MenuItem({ onClick, children }: { onClick: () => void; children: ReactN
   return (
     <button
       type="button"
+      role="menuitem"
       onClick={onClick}
       style={{
-        display: "block",
+        display: "flex",
+        alignItems: "center",
         width: "100%",
+        minHeight: 28, // 触摸/鼠标都好点：低于 28px 会明显难按
         padding: "6px 8px",
         border: "none",
         borderRadius: 6,
         background: "transparent",
         textAlign: "left",
         fontSize: 12.5,
+        lineHeight: 1.35,
         color: "#2f2f2f",
         cursor: "pointer",
+        outline: "none",
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = "#f2f2f2";
       }}
       onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+      onFocus={(e) => {
+        e.currentTarget.style.background = "#f2f2f2";
+      }}
+      onBlur={(e) => {
         e.currentTarget.style.background = "transparent";
       }}
     >

@@ -3,6 +3,7 @@ import type { Application } from "pixi.js";
 import type { Live2DModel as Live2DModelInstance } from "pixi-live2d-display/cubism4";
 import type { Rect } from "./petInteraction.js";
 import { modelBoundsToHitBox } from "./petInteraction.js";
+import { fitModel, type FitTarget } from "./live2dFit.js";
 
 /**
  * Live2D 舞台（d.46）：把 Cubism Core + pixi + 模型装配成一个"能看能点"的角色。
@@ -44,6 +45,13 @@ export interface Live2DStage {
    *   移动期间只搬静态位图；恢复时立即渲染一帧，避免松手后画面停在旧帧。
    */
   setPaused: (paused: boolean) => void;
+  /**
+   * 同步窗口尺寸：重设分辨率（跨屏 DPI 可能变）→ resize 渲染器 → 重新拟合 → 渲染一帧。
+   *
+   * 拖拽期间渲染层会忽略 resize，松手后用它补一次（见 PetWindow 的 finishDrag）：
+   * 拖动中画面只搬静态位图，尺寸/DPI 的变化攒到落点一次处理。
+   */
+  resizeTo: (width: number, height: number) => void;
 }
 
 interface UseLive2DOptions {
@@ -90,25 +98,10 @@ function loadCubismCore(url: string): Promise<void> {
 /**
  * 模型适配窗口：等比缩放到窗口内，底边贴窗口下沿（"站在"窗口底部而不是浮在正中）。
  *
- * 入参用结构类型而不是 `Live2DModel`：这样这个函数不依赖 pixi 的运行时类型，
- * 也方便在测试里拿一个假对象验证「缩放/锚点/位置」三件事。
+ * d.68 起移到 `live2dFit.ts` 的纯函数：必须基于**自然尺寸**拟合（旧实现用缩放后的
+ * `model.width/height`，第二次调用会把缩放取倒数 —— 拖动时「局部放大」的根因）。
+ * 这里只保留调用点，算法与幂等性由 `live2dFit.test.ts` 钉住。
  */
-interface FitTarget {
-  width: number;
-  height: number;
-  scale: { set: (x: number, y: number) => void };
-  anchor: { set: (x: number, y: number) => void };
-  position: { set: (x: number, y: number) => void };
-}
-
-function fitModel(model: FitTarget, width: number, height: number): void {
-  const modelW = model.width || 1;
-  const modelH = model.height || 1;
-  const scale = Math.min(width / modelW, height / modelH);
-  model.scale.set(scale, scale);
-  model.anchor.set(0.5, 1);
-  model.position.set(width / 2, height);
-}
 
 export function useLive2D(opts: UseLive2DOptions): Live2DStage {
   const { canvas, modelUrl, coreUrl, width, height, onReady, onError } = opts;
@@ -129,6 +122,14 @@ export function useLive2D(opts: UseLive2DOptions): Live2DStage {
   const onErrorRef = useRef(onError);
   onReadyRef.current = onReady;
   onErrorRef.current = onError;
+
+  /**
+   * 最新视口尺寸（ref 版本）。
+   * 创建流程里不能直接用 props 的 width/height 闭包：模型是异步加载的，加载期间用户
+   * 可能已经切了缩放档。舞台就绪后用它对齐一次，避免「加载完成瞬间还是旧尺寸」。
+   */
+  const viewportRef = useRef({ width, height });
+  viewportRef.current = { width, height };
 
   useEffect(() => {
     if (!canvas) return;
@@ -166,31 +167,56 @@ export function useLive2D(opts: UseLive2DOptions): Live2DStage {
           return;
         }
 
-        fitModel(model, width, height);
+        fitModel(model as unknown as FitTarget, width, height);
         app.stage.addChild(model);
 
-        const syncHitBox = () => {
+        /** 命中区按**当前**窗口尺寸夹取（不能用初始 width/height 的闭包值，否则 resize 后夹错）。 */
+        const syncHitBox = (vw: number, vh: number) => {
           const b = model.getBounds();
           setHitBox(
             modelBoundsToHitBox(
               { x: b.x, y: b.y, width: b.width, height: b.height },
-              { width, height },
+              { width: vw, height: vh },
             ),
           );
         };
-        syncHitBox();
+        syncHitBox(width, height);
 
         stageRef.current = {
           model,
           app,
           resize: (w, h) => {
+            if (!(Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0)) return;
+            // ★ 先在 resize 之前同步分辨率：跨显示器拖动 / 系统缩放变化后 devicePixelRatio
+            //   会和创建时不同。只 resize 不改 resolution 的话，画布位图密度仍是旧的，
+            //   观感是「拖到另一块屏就发虚」。包 try/catch：个别后端不允许运行中改分辨率。
+            try {
+              const dpr = window.devicePixelRatio || 1;
+              if (Number.isFinite(dpr) && dpr > 0 && app.renderer.resolution !== dpr) {
+                app.renderer.resolution = dpr;
+              }
+            } catch {
+              /* 改不了分辨率：保持原值，至少尺寸是对的 */
+            }
             app.renderer.resize(w, h);
-            fitModel(model, w, h);
-            syncHitBox();
+            fitModel(model as unknown as FitTarget, w, h);
+            syncHitBox(w, h);
+            // 尺寸与缩放刚改完：立刻渲染一帧，别等下一次 ticker——
+            // 拖拽结束时用户马上要看到拟合正确的画面，不能停在旧帧。
+            try {
+              app.render();
+            } catch {
+              /* 正在销毁 */
+            }
           },
         };
 
         setStatus("ready");
+        // 模型加载期间用户可能切过缩放档：按最新视口再对齐一次（幂等；尺寸没变时也安全）
+        const latest = viewportRef.current;
+        if (latest.width !== width || latest.height !== height) {
+          stageRef.current.resize?.(latest.width, latest.height);
+        }
         onReadyRef.current?.();
       } catch (err) {
         if (cancelled) return;
@@ -222,10 +248,21 @@ export function useLive2D(opts: UseLive2DOptions): Live2DStage {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvas, modelUrl, coreUrl]);
 
+  /**
+   * 主动同步窗口尺寸（稳定引用）。
+   *
+   * 两处调用：props 的 width/height 变化（缩放档位切换）；以及拖拽结束后的补测
+   * （拖动期间 PetWindow 会忽略 resize，攒到 dragEnd 再一次性处理）。
+   * 舞台未就绪时是空操作——首次拟合由创建流程按当时的 width/height 完成。
+   */
+  const resizeTo = useCallback((w: number, h: number) => {
+    stageRef.current.resize?.(w, h);
+  }, []);
+
   // 窗口尺寸变化（缩放档位切换）时重排，不重建模型
   useEffect(() => {
-    stageRef.current.resize?.(width, height);
-  }, [width, height]);
+    resizeTo(width, height);
+  }, [resizeTo, width, height]);
 
   const setMouthOpen = useCallback((value: number) => {
     // coreModel 在类型声明里退化成 object（Cubism 的参数 API 不在 d.ts 里），
@@ -300,5 +337,15 @@ export function useLive2D(opts: UseLive2DOptions): Live2DStage {
     }
   }, []);
 
-  return { status, error, hitBox, setMouthOpen, playMotion, focus, focusCenter, setPaused };
+  return {
+    status,
+    error,
+    hitBox,
+    setMouthOpen,
+    playMotion,
+    focus,
+    focusCenter,
+    setPaused,
+    resizeTo,
+  };
 }

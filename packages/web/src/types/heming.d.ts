@@ -166,6 +166,8 @@ declare global {
       dragStart: () => void;
       dragMove: () => void;
       dragEnd: () => void;
+      /** 回到默认落位（工作区右下角，按当前缩放档位重算）。 */
+      resetPosition: () => void;
       show: () => void;
       hide: () => void;
       toggle: () => void;
