@@ -408,3 +408,13 @@
 | 更新源 | ✅ latest.yml 指向 61.2.22，sha512 与安装包一致 |
 | 备份 | ✅ `heming-data-2026-11-03-d.61.2.22.0.tar.gz` |
 | 视觉 | `.tmp/layout/before`（线上 d.61.2.21.0）→ `.tmp/layout/after` / `after2`；左边缘对齐、页头固定、标题档统一、聊天列 880 |
+
+## 12. 第八波：组件级排版与控件规范（2026-11-03 08:58 起）
+
+触发：用户「继续全部优化改进」。规格 `docs/superpowers/specs/2026-11-03-d63-component-typography.md`。
+
+**d.62 留下的 5 项一起做**：① 卡片内部字号各写一套；② 控件尺寸不统一（按钮 h-7/8/9、输入框高度、胶囊 10/11px）；③ 表格/列表行无规范（th 档位、行高、数字列对齐）；④ 空态与骨架各写一套；⑤ 登录页不在新排版体系里。
+
+**Lead 已落地基元**（`index.css`，`@layer components`）：`.ui-input`（高 32）、`.ui-btn*`（两档尺寸 + 三个变体）、`.ui-chip`、`.ui-table`、`.ui-list-row`、`.ui-empty*`、`.ui-skeleton`（含 reduced-motion 降级）。设计约束：字号只走 `ui-*` 档、点击区 ≥28、hover 150ms、焦点环仍由 GlobalFocusRing 统一提供。
+
+**三轨**：T1 设置卡片与弹窗（12 张卡 + SettingsPage + 3 个弹窗）、T2 表格/列表/密集控件（Interfaces/Registry/Skills/Plugins/Team/Memory/Infohub）、T3 空态骨架组件 + 登录页（Home/Automation/Staff/TeamBoard/PageFallback/LoginPage）。
