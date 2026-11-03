@@ -101,3 +101,52 @@ body {
   overflow-y: hidden;
   padding: 2px 0;
 }
+
+/*
+ * ── 排版与布局基元（d.62 布局/排版统一轮）────────────────────────────
+ *
+ * 背景：全站字号散落在 9–20px 共 11 档（10/11/12px 各上百处），页面标题从 15px
+ * 到 17px 各种粗细；各页内边距 24/32px 混用、没有统一内容宽度。用户要求「优化
+ * 页面布局和 UI 排版」——先把**语义化的排版档位**定下来，页面标题/副标题/小标题
+ * 只允许用这四档，避免继续长出新字号。
+ *
+ * 命名前缀 `ui-`：与 Tailwind 工具类区分，便于源码检索「还有谁没用统一档位」。
+ * 尺寸取现有界面里出现最多、观感最稳的值，不追求新奇：
+ *   page-title 18/24 600   —— 页面级标题（原来 15/17/18px 混用）
+ *   page-sub   12/20 400   —— 标题下方一句话说明
+ *   section    13/20 600   —— 卡片/分区标题
+ *   body       13/22 400   —— 正文（中文 13px 在 100% 缩放下最易读）
+ *   body-sm    12/20 400   —— 次要正文/表格
+ *   caption    11/16 400   —— 注释/时间/辅助信息
+ *   micro      10/14 500   —— 角标/徽标（仅此用途，别再扩）
+ *   numeric    tabular-nums —— 数字对齐（表格/统计）
+ *
+ * 行高刻意比 Tailwind 默认松一点：中文方块字在 1.55–1.7 行高下才不挤。
+ */
+@layer components {
+  .ui-page-title {
+    @apply text-[18px] font-semibold leading-6 tracking-[-0.01em] text-ink;
+  }
+  .ui-page-sub {
+    @apply mt-1 text-[12px] leading-5 text-muted;
+  }
+  .ui-section-title {
+    @apply text-[13px] font-semibold leading-5 text-ink;
+  }
+  .ui-body {
+    @apply text-[13px] leading-[22px] text-ink;
+  }
+  .ui-body-sm {
+    @apply text-[12px] leading-5 text-ink;
+  }
+  .ui-caption {
+    @apply text-[11px] leading-4 text-muted;
+  }
+  .ui-micro {
+    @apply text-[10px] font-medium leading-4 text-muted;
+  }
+  .ui-numeric {
+    @apply tabular-nums;
+  }
+}
+

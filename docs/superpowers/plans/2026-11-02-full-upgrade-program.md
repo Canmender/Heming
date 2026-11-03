@@ -369,3 +369,18 @@
 | 云端部署 | ✅ 8 步 OK；`/api/health` ok、首页 200、线上 bundle `main-DN-9K-jH.js` 与本地同名、CSP report-only 在位 |
 | 更新源 | ✅ latest.yml 指向 61.2.21，sha512 与安装包一致 |
 | 备份 | ✅ `heming-data-2026-11-02-d.61.2.21.0.tar.gz` |
+
+## 11. 第七波：页面布局与 UI 排版统一（2026-11-03 08:30 起）
+
+触发：用户「优化页面布局和 UI 排版」。规格 `docs/superpowers/specs/2026-11-03-d62-layout-typography.md`。
+
+**审计结论**：字号 11 档（10/11/12px 各上百处）、页面标题 15/16/17px 混用、内边距 24/32px 混用、内容宽度通栏/520/900 三种、页头结构不一、滚动容器位置不一、聊天正文行宽近 980px。
+
+**Lead 已落地的基础**：
+- `index.css` 新增语义排版类（`ui-page-title`/`ui-page-sub`/`ui-section-title`/`ui-body`/`ui-body-sm`/`ui-caption`/`ui-micro`/`ui-numeric`），中文行高 1.55–1.7；
+- `components/layout/PageShell.tsx`：统一页头 + 内容宽度档位（full/wide 1200/readable 960/narrow 720）+ 可选自管滚动；
+- `HomePage` 作为参考实现已迁移（页头 + wide + gap-4），新增 `PageShell.test.tsx` 4 例。
+
+**三轨**：A 列表页（Plugins/Interfaces/Automation/Staff/Skills/Registry/Infohub）、B 分栏页（Team/TeamBoard/Settings/Memory）、C 聊天与壳（Assistant/Chat/TaskArea/App 右栏）。文件级不重叠。
+
+**基线截图**：`.tmp/layout/before/`（对线上 d.61.2.21.0 生产构建截 13 页），改造后 `.tmp/layout/after/` 对照。

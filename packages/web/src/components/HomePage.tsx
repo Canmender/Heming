@@ -20,6 +20,7 @@ import {
 } from "../lib/onboarding.js";
 import { fetchTeam, fetchTeamActivities, resolveUrl } from "../lib/api.js";
 import { Avatar } from "./Avatar.js";
+import { PageShell } from "./layout/PageShell.js";
 import { InfohubHomeCard } from "./InfohubHomeCard.js";
 import { StaffHomeCard } from "./StaffHomeCard.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
@@ -235,23 +236,22 @@ export function HomePage() {
   };
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto p-6">
-      {/* 1. 问候行：问候 + 日期 + 两个小徽标 */}
-      <div className="flex items-start gap-3">
-        <div>
-          <h1 className="text-[17px] font-extrabold">
-            {greeting}，{user?.displayName ?? ""}
-            <span className="ml-2 text-[12px] font-normal text-muted">{today}</span>
-          </h1>
-          <p className="mt-0.5 text-[12px] text-muted">
-            全站一个团队 —— 在「团队」页查看真实成员与大家的任务、日程摘要
-          </p>
-        </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2 pt-1">
-          <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 text-[11px] text-muted">
+    <PageShell
+      title={
+        <>
+          {greeting}，{user?.displayName ?? ""}
+          <span className="ml-2 ui-caption font-normal">{today}</span>
+        </>
+      }
+      subtitle="全站一个团队 —— 在「团队」页查看真实成员与大家的任务、日程摘要"
+      width="wide"
+      bodyClassName="flex flex-col gap-4"
+      actions={
+        <>
+          <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 ui-caption">
             版本 {__APP_VERSION__}
           </span>
-          <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 text-[11px] text-muted">
+          <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 ui-caption">
             {/* 有数字优先；今天只有未上报 → 明说未上报，别用「0」冒充真实用量 */}
             {todayUsage.reported > 0
               ? `今日已用 ${todayUsage.total}`
@@ -259,8 +259,9 @@ export function HomePage() {
                 ? "今日用量未上报"
                 : "今日已用 0"}
           </span>
-        </div>
-      </div>
+        </>
+      }
+    >
 
       {/* 1.5 首跑引导（UX-A · U1）：只在「一个模型连接都没有」且用户没关过时出现 */}
       {showOnboarding && (
@@ -584,6 +585,6 @@ export function HomePage() {
           ))}
         </div>
       </section>
-    </div>
+    </PageShell>
   );
 }
