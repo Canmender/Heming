@@ -138,3 +138,51 @@ describe("智能体页：对话 / 任务 两个 Tab", () => {
     expect(screen.getByRole("tab", { name: "对话" })).toHaveAttribute("aria-selected", "true");
   });
 });
+
+describe("智能体页：新建入口与创建后直接开聊（d.68 简化）", () => {
+  it("名册为空时给出「新建智能体」「从模板创建」两个直达动作", () => {
+    useChatStore.setState({ agentsRoster: [] });
+    render(<AssistantPage />);
+
+    expect(screen.getByText("还没有自建智能体")).toBeInTheDocument();
+
+    // 从模板创建：打开弹窗，焦点直接落在第一个模板上
+    fireEvent.click(screen.getByRole("button", { name: "从模板创建" }));
+    expect(screen.getByRole("dialog", { name: "新建智能体" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "使用模板 通用助手" })).toHaveFocus();
+
+    // 关掉后走「新建智能体」：同一个弹窗，焦点落在名称输入框
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "新建智能体" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("新建智能体"));
+    expect(screen.getByRole("dialog", { name: "新建智能体" })).toBeInTheDocument();
+    expect(screen.getByLabelText("名称")).toHaveFocus();
+  });
+
+  it("名册「＋ 新建」入口打开弹窗，焦点在名称上", () => {
+    render(<AssistantPage />);
+    fireEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+    expect(screen.getByRole("dialog", { name: "新建智能体" })).toBeInTheDocument();
+    expect(screen.getByLabelText("名称")).toHaveFocus();
+  });
+
+  it("创建成功后直接开始对话：复用 openAgent + 激活会话，不新增页面/路由", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ id: "a9", owner_id: "u1", name: "新助手", avatar: null, description: "" }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      ),
+    );
+    render(<AssistantPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "新助手" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c1"));
+    expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("a9");
+    // 会话已激活：右栏直接进入对话（ChatPage 探针），不是停在「选择一个智能体开始」
+    expect(screen.getByTestId("chat-standalone")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "新建智能体" })).not.toBeInTheDocument();
+  });
+});

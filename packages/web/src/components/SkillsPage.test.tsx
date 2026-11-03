@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
-import { SkillsPage, SkillsView, categorizeSkill, SOURCE_LABEL } from "./SkillsPage.js";
+import { SkillsPage, SkillsView, categorizeSkill, SOURCE_LABEL, SKILL_TEMPLATES } from "./SkillsPage.js";
 import { SkillPool, SKILLS_KEY, BUILTIN_SKILLS, type StorageLike } from "../lib/skills/index.js";
 
 /**
@@ -373,7 +373,105 @@ describe("SkillsPage 按智能体分配技能", () => {
   });
 });
 
-/* ------------------------------------------ 可嵌入视图（d.67 导航合并） */
+/* ------------------------------------------- 新建技能（d.68 简化流程） */
+
+describe("SkillsPage 新建技能（简化）", () => {
+  it("3 个模板只填空字段；必填只有名称与内容，缺了会指到具体字段", async () => {
+    await renderReady();
+    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
+
+    const dialog = screen.getByRole("dialog", { name: "新建技能" });
+    expect(within(dialog).getAllByRole("button", { name: /^使用模板 / })).toHaveLength(3);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "使用模板 写作润色" }));
+    const writing = SKILL_TEMPLATES.find((tpl) => tpl.key === "writing")!;
+    const nameInput = within(dialog).getByLabelText("技能名称");
+    const contentInput = within(dialog).getByLabelText("技能内容");
+    expect(nameInput).toHaveValue(writing.name);
+    expect(contentInput).toHaveValue(writing.instructions);
+
+    // 已输入的名称不被覆盖；换模板也不覆盖已填的内容
+    fireEvent.change(nameInput, { target: { value: "我的润色" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "使用模板 会议纪要" }));
+    expect(within(dialog).getByLabelText("技能名称")).toHaveValue("我的润色");
+    expect(within(dialog).getByLabelText("技能内容")).toHaveValue(writing.instructions);
+
+    // 必填清空后提交：分别提示名称与内容，且不写库
+    fireEvent.change(within(dialog).getByLabelText("技能名称"), { target: { value: "" } });
+    fireEvent.change(within(dialog).getByLabelText("技能内容"), { target: { value: "   " } });
+    const before = pool.list().length;
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建技能" }));
+    expect(within(dialog).getByText("请给技能起个名字")).toBeInTheDocument();
+    expect(within(dialog).getByText(/技能内容不能为空/)).toBeInTheDocument();
+    expect(pool.list()).toHaveLength(before);
+    expect(screen.getByRole("dialog", { name: "新建技能" })).toBeInTheDocument();
+  });
+
+  it("创建后自动分配给当前智能体，自定义技能组里直接可见", async () => {
+    await renderReady();
+    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
+
+    const dialog = screen.getByRole("dialog", { name: "新建技能" });
+    fireEvent.change(within(dialog).getByLabelText("技能名称"), {
+      target: { value: "周报润色" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("技能描述"), {
+      target: { value: "把周报改得更短、更像人写的" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("技能内容"), {
+      target: { value: "你在帮我润色周报。\n1. 先删掉套话。\n2. 保留数字与结论。" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建技能" }));
+
+    expect(screen.queryByRole("dialog", { name: "新建技能" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("已新建技能「周报润色」");
+    expect(screen.getByRole("status")).toHaveTextContent("和鸣助手");
+
+    const created = pool.list().find((skill) => skill.name === "周报润色");
+    expect(created).toBeDefined();
+    expect(created?.source).toBe("user");
+    expect(created?.instructions).toContain("润色周报");
+    // 自动分配：否则「建好了却不会用于对话」是新手最容易踩的坑
+    expect(pool.assigned("a1")).toContain(created?.id);
+
+    fireEvent.click(screen.getByRole("tab", { name: "按智能体" }));
+    expect(
+      within(group("自定义技能")).getByRole("group", { name: "技能卡 周报润色" }),
+    ).toBeInTheDocument();
+  });
+
+  it("技能池空态：动作直达「新建技能」「导入 SKILL.md」", async () => {
+    map.set(SKILLS_KEY, JSON.stringify({ version: 1, seeded: true, skills: [], usage: {} }));
+    pool = new SkillPool(makeStorage(map), () => T0);
+    await renderReady();
+    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
+
+    expect(screen.getByText("技能池还是空的")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新建技能" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "导入 SKILL.md" }));
+    expect(screen.getByLabelText("导入技能内容")).toBeInTheDocument();
+
+    // 新建入口同样直达弹窗
+    fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
+    expect(screen.getByRole("dialog", { name: "新建技能" })).toBeInTheDocument();
+  });
+
+  it("把「未分配的技能不会用于对话」写清楚（按智能体视图与技能池各一处）", async () => {
+    await renderReady();
+    expect(
+      screen.getByText(/只有已分配的技能才会用于「和鸣助手」的对话/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
+    expect(
+      screen.getByText(/需要「启用」并「分配给对应智能体」/),
+    ).toBeInTheDocument();
+  });
+});
+
 
 describe("SkillsView 嵌入视图", () => {
   it("去掉 PageShell 与页面标题，保留智能体分配、技能池、搜索与来源徽标", async () => {

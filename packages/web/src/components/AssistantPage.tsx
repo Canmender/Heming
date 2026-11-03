@@ -38,6 +38,8 @@ export function AssistantPage() {
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  /** 新建弹窗打开时焦点落点：名册「＋ 新建」→ 名称；「从模板创建」→ 第一个模板。 */
+  const [createStartAt, setCreateStartAt] = useState<"name" | "templates">("name");
   const [editing, setEditing] = useState<Agent | null>(null);
   /** 默认落在「对话」：导航里这一项的主体是聊天，任务只是它的第二个视图。 */
   const [tab, setTab] = useState<AssistantTab>("chat");
@@ -49,6 +51,7 @@ export function AssistantPage() {
   const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
   useEffect(() => {
     if (paletteIntent?.kind !== "agent-create") return;
+    setCreateStartAt("name");
     setCreateOpen(true);
     // 新建/编辑智能体是名册侧的动作：从「任务」 Tab 走命令面板过来时切回对话，
     // 否则建完关掉弹窗，用户看到的还是任务列表，会以为没生效。
@@ -160,20 +163,45 @@ export function AssistantPage() {
                 type="button"
                 aria-label="新建智能体"
                 title="新建智能体"
-                onClick={() => setCreateOpen(true)}
-                className="ml-auto flex h-[24px] w-[24px] items-center justify-center rounded-md text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
+                onClick={() => {
+                  setCreateStartAt("name");
+                  setCreateOpen(true);
+                }}
+                className="ml-auto flex h-[24px] items-center gap-1 rounded-md px-1.5 text-[12px] text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
               >
                 <PlusIcon width={14} height={14} />
+                <span>新建</span>
               </button>
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
               {sortedAgents.length === 0 ? (
-                <p className="ui-body-sm px-2 py-6 text-center leading-5">
-                  还没有智能体。
-                  <br />
-                  点右上角「+」建一个。
-                </p>
+                <div className="ui-empty px-2 py-6">
+                  <p className="ui-empty-title">还没有自建智能体</p>
+                  <p className="ui-empty-desc">从模板开始最快：选个预设、改个名字就能用。</p>
+                  <div className="ui-empty-actions flex-col items-stretch">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreateStartAt("name");
+                        setCreateOpen(true);
+                      }}
+                      className="ui-btn ui-btn-sm ui-btn-primary w-full"
+                    >
+                      新建智能体
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreateStartAt("templates");
+                        setCreateOpen(true);
+                      }}
+                      className="ui-btn ui-btn-sm ui-btn-ghost w-full"
+                    >
+                      从模板创建
+                    </button>
+                  </div>
+                </div>
               ) : (
                 sortedAgents.map((agent) => {
                   const conv = convByAgent.get(agent.id);
@@ -240,7 +268,7 @@ export function AssistantPage() {
                 </span>
                 <div className="ui-section-title">选择一个智能体开始</div>
                 <p className="ui-body-sm max-w-[520px] leading-6">
-                  {"把任务交给本机智能体：它可以对话、调用本机工具、执行任务。人类私聊与群聊已从这个版本移除；团队页只展示真实成员的任务与日程动向。"}
+                  {"从左边选一个智能体就能直接对话；没有合适的，点左栏右上角「新建」创建一个。智能体在本机运行，模型 Key、工具与记忆都不出设备。"}
                 </p>
                 {systemAgent && (
                   <button
@@ -261,7 +289,17 @@ export function AssistantPage() {
         <TaskAreaPage embedded />
       )}
 
-      <AgentFormModal open={createOpen} mode="create" onClose={() => setCreateOpen(false)} />
+      <AgentFormModal
+        open={createOpen}
+        mode="create"
+        startAt={createStartAt}
+        onCreated={(created) => {
+          // 创建成功直接开聊：复用既有 openAgent + openConversation，不新增页面/路由。
+          // 失败只落到本页的错误条，不阻塞弹窗关闭。
+          void startChat(created);
+        }}
+        onClose={() => setCreateOpen(false)}
+      />
       <AgentFormModal
         open={!!editing}
         mode="edit"
