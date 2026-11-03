@@ -431,3 +431,15 @@
 | 全量门禁 | ✅ shared 29 / server 141 / web 202 文件 2988 例 / desktop 29 文件 518 例；4/4 无重试；三包 tsc 0 |
 | 版本 | `d.61.2.23.0`（修订 22→23） |
 | 视觉 | `.tmp/d63/pages`（13 页）+ `.tmp/d63/after`（流程）对照 d.62 |
+
+### 第八波发布完成（2026-11-03 09:28）
+
+| 项 | 结果与证据 |
+|---|---|
+| 提交 | `bed1923`（控件基元）+ `623e9a0`（三轨落地 + 文档） |
+| 门禁 | build 通过；逐包 4/4 无重试（shared 29 / server 141 / web 202 文件 2988 例 / desktop 29 文件 518 例）；三包 tsc 0 |
+| 安装包 | `release/r52/和鸣 Setup d.61.2.23.0.exe` 228,219,273 字节，sha512 三方一致 |
+| 云端部署 | ✅ 8 步 OK；`/api/health` ok、首页 200、线上 bundle `main-DHGyw_9J.js` 与本地同名、CSP report-only 在位 |
+| 更新源 | ✅ latest.yml 指向 61.2.23，sha512 与安装包一致 |
+| 备份 | ✅ `heming-data-2026-11-03-d.61.2.23.0.tar.gz` |
+| 视觉 | `.tmp/d63/pages`（13 页）+ `.tmp/d63/after`（流程） |
