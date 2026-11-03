@@ -624,19 +624,42 @@ describe("PluginStore · v3 贡献与命令", () => {
     };
   }
 
-  it("贡献计数按清单声明统计，未安装的插件返回全 0", () => {
+  it("贡献计数按清单声明统计（含工具束与工具总数），未安装的插件返回全 0", () => {
     const { store } = fresh();
-    store.install(v3Manifest());
+    store.install(
+      v3Manifest({
+        contributions: {
+          ...(v3Manifest().contributions as Record<string, unknown>),
+          toolPacks: [
+            { id: "report-tools", name: "报告工具", tools: ["report_query", "report_export"] },
+            { id: "extra", name: "附加工具", tools: ["extra_tool"] },
+          ],
+        },
+      }),
+    );
 
     expect(store.contributionCounts("acme.finance")).toEqual({
       skills: 1,
       servers: 1,
       commands: 2,
+      toolPacks: 2,
+      packTools: 3,
     });
     expect(store.contributionCounts("not.installed")).toEqual({
       skills: 0,
       servers: 0,
       commands: 0,
+      toolPacks: 0,
+      packTools: 0,
+    });
+  });
+
+  it("老 v3 清单没有工具束时计数为 0", () => {
+    const { store } = fresh();
+    store.install(v3Manifest());
+    expect(store.contributionCounts("acme.finance")).toMatchObject({
+      toolPacks: 0,
+      packTools: 0,
     });
   });
 

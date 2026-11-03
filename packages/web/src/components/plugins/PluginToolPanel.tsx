@@ -1,4 +1,4 @@
-import type { CapabilityToolGroup, BlockedToolRow } from "./viewModel.js";
+import type { CapabilityToolGroup, BlockedToolRow, ToolPackGroup } from "./viewModel.js";
 import { toolRiskLabel } from "./viewModel.js";
 import { CHIP, HINT, Switch } from "./shared.js";
 
@@ -14,10 +14,13 @@ import { CHIP, HINT, Switch } from "./shared.js";
 export function PluginToolPanel({
   groups,
   blocked,
+  toolPacks,
   onToggleTool,
 }: {
   groups: CapabilityToolGroup[];
   blocked: BlockedToolRow[];
+  /** 插件声明的工具束（按插件分组；d.65 只做归属展示，不改任何开关）。 */
+  toolPacks: ToolPackGroup[];
   onToggleTool: (serverId: string, toolName: string, enabled: boolean) => void;
 }) {
   const total = groups.reduce((sum, group) => sum + group.tools.length, 0);
@@ -64,6 +67,58 @@ export function PluginToolPanel({
             </ul>
           </section>
         ))
+      )}
+
+      {toolPacks.length > 0 && (
+        <section aria-label="工具束">
+          <h3 className="ui-section-title">工具束</h3>
+          <p className={HINT}>
+            工具束只声明「插件用哪些工具」，不会自动打开任何开关；引用了尚未连接的工具时记为未提供。
+          </p>
+          <div className="mt-1 flex flex-col gap-2">
+            {toolPacks.map((group) => (
+              <div
+                key={group.pluginId}
+                className="rounded-lg border border-line-soft bg-white p-3"
+                aria-label={`工具束组 ${group.pluginName}`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="ui-body-sm font-medium">{group.pluginName}</span>
+                  {!group.enabled && <span className={CHIP}>插件已停用</span>}
+                </div>
+                <ul className="mt-1 flex flex-col gap-1.5">
+                  {group.packs.map((pack) => (
+                    <li key={`${group.pluginId}:${pack.id}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="ui-body-sm font-medium">{pack.name}</span>
+                        {pack.description && <span className="ui-caption">{pack.description}</span>}
+                        <span className={`ml-auto ${CHIP}`}>
+                          已匹配 {pack.matched.length}/{pack.tools.length}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {pack.matched.map((name) => (
+                          <span key={`matched:${name}`} className={CHIP} title="目录里存在该工具">
+                            {name}
+                          </span>
+                        ))}
+                        {pack.unresolved.map((name) => (
+                          <span
+                            key={`unresolved:${name}`}
+                            className={`${CHIP} text-[#8a5a00]`}
+                            title="服务未连接或未提供该工具"
+                          >
+                            {name} · 未连接/未提供
+                          </span>
+                        ))}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {blocked.length > 0 && (

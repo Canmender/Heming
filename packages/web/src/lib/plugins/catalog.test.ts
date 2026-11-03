@@ -53,6 +53,8 @@ function installed(
   name: string,
   tools: "none" | "read" | "write",
   servers: { key: string; name: string; url: string }[],
+  toolPacks: { id: string; name: string; description?: string; tools: string[] }[] = [],
+  enabled = true,
 ): InstalledPlugin {
   const manifest = parsePluginManifest({
     schemaVersion: 3,
@@ -63,11 +65,11 @@ function installed(
       network: servers.map((server) => new URL(server.url).host),
       tools,
     },
-    contributions: { mcpServers: servers },
+    contributions: { mcpServers: servers, toolPacks },
   });
   return {
     manifest,
-    enabled: true,
+    enabled,
     skillIds: [],
     serverIds: servers.map((server) => pluginServerId(id, server.key)),
     installedAt: "2026-11-03T00:00:00.000Z",
@@ -120,7 +122,7 @@ describe("describeCapabilityCatalog · MCP 工具归属", () => {
       editable: true,
     });
     expect(catalog.tools[1].pluginId).toBeUndefined();
-    expect(catalog.counts).toEqual({ builtin: 0, mcp: 1, plugin: 1, self: 0, enabled: 2 });
+    expect(catalog.counts).toEqual({ system: 0, mcp: 1, plugin: 1, self: 0, enabled: 2 });
     expect(catalog.blocked).toEqual([]);
   });
 
@@ -238,9 +240,9 @@ describe("describeCapabilityCatalog · 内置与自我修改工具", () => {
       "chart_render",
       "tone_detect",
     ]);
-    expect(catalog.tools[0]).toMatchObject({ ownerKind: "builtin", ownerLabel: "内置", risk: "read" });
+    expect(catalog.tools[0]).toMatchObject({ ownerKind: "system", ownerLabel: "系统能力", risk: "read" });
     expect(catalog.tools[2].risk).toBe("write");
-    expect(catalog.counts.builtin).toBe(3);
+    expect(catalog.counts.system).toBe(3);
   });
 
   it("危险级工具按 write 展示（不会出现 danger 档）", () => {
@@ -268,7 +270,7 @@ describe("describeCapabilityCatalog · 内置与自我修改工具", () => {
 
     expect(catalog.tools).toHaveLength(1);
     expect(catalog.tools[0]).toMatchObject({ ownerKind: "mcp", description: "MCP 版" });
-    expect(catalog.counts).toEqual({ builtin: 0, mcp: 1, plugin: 0, self: 0, enabled: 1 });
+    expect(catalog.counts).toEqual({ system: 0, mcp: 1, plugin: 0, self: 0, enabled: 1 });
   });
 
   it("selfAgents 为空时不列 self；给出后按智能体构建并去重", () => {
@@ -301,5 +303,126 @@ describe("describeCapabilityCatalog · 内置与自我修改工具", () => {
       enabled: true,
     });
     expect(withAgents.counts.self).toBe(1);
+  });
+});
+
+describe("describeCapabilityCatalog · 工具束归属", () => {
+  const server = { key: "report", name: "报告服务", url: "https://mcp.acme.com/mcp" };
+
+  it("匹配目录里的工具、缺的进 unresolved，并给工具标注来源工具束", () => {
+    const finance = installed(
+      "acme.finance",
+      "财务包",
+      "read",
+      [server],
+      [
+        {
+          id: "report-tools",
+          name: "报告工具",
+          description: "周报要用到的查询工具",
+          tools: ["search_docs", "not_connected_yet"],
+        },
+      ],
+    );
+    const mcp = fakeMcp([ref("plugin:acme.finance:report", "报告服务", { name: "search_docs" })]);
+
+    const catalog = describeCapabilityCatalog({
+      mcp,
+      plugins: fakePlugins([finance]),
+      providers: [],
+    });
+
+    expect(catalog.toolPacks).toEqual([
+      {
+        id: "report-tools",
+        pluginId: "acme.finance",
+        pluginName: "财务包",
+        name: "报告工具",
+        description: "周报要用到的查询工具",
+        tools: ["search_docs", "not_connected_yet"],
+        matched: ["search_docs"],
+        unresolved: ["not_connected_yet"],
+        enabled: true,
+      },
+    ]);
+    expect(catalog.tools[0].toolPacks).toEqual([
+      { id: "report-tools", name: "报告工具", pluginId: "acme.finance" },
+    ]);
+    // 工具束只是归属声明：不改变工具开关与计数
+    expect(catalog.tools[0].enabled).toBe(true);
+    expect(catalog.counts).toEqual({ system: 0, mcp: 0, plugin: 1, self: 0, enabled: 1 });
+  });
+
+  it("工具束不打开任何开关：MCP 工具仍按用户开关展示", () => {
+    const finance = installed(
+      "acme.finance",
+      "财务包",
+      "read",
+      [server],
+      [{ id: "tools", name: "工具束", tools: ["search_docs"] }],
+    );
+    const mcp = fakeMcp([ref("plugin:acme.finance:report", "报告服务", { name: "search_docs" })], {
+      "plugin:acme.finance:report::search_docs": false,
+    });
+
+    const catalog = describeCapabilityCatalog({
+      mcp,
+      plugins: fakePlugins([finance]),
+      providers: [],
+    });
+
+    expect(catalog.toolPacks[0].matched).toEqual(["search_docs"]);
+    expect(catalog.tools[0].enabled).toBe(false);
+    expect(catalog.counts.enabled).toBe(0);
+  });
+
+  it("插件停用时工具束标记为未启用，但归属仍可展示", () => {
+    const finance = installed(
+      "acme.finance",
+      "财务包",
+      "read",
+      [server],
+      [{ id: "report-tools", name: "报告工具", tools: ["search_docs"] }],
+      false,
+    );
+    const mcp = fakeMcp([ref("plugin:acme.finance:report", "报告服务", { name: "search_docs" })]);
+
+    const catalog = describeCapabilityCatalog({
+      mcp,
+      plugins: fakePlugins([finance]),
+      providers: [],
+    });
+    expect(catalog.toolPacks[0]).toMatchObject({ enabled: false, matched: ["search_docs"] });
+  });
+
+  it("没有工具束的老插件（含 v1/v2 归一化）不产生工具束，工具也不带归属", () => {
+    const legacy = installed("acme.legacy", "旧包", "read", [server]);
+    const mcp = fakeMcp([ref("plugin:acme.legacy:report", "报告服务", { name: "search_docs" })]);
+
+    const catalog = describeCapabilityCatalog({
+      mcp,
+      plugins: fakePlugins([legacy]),
+      providers: [],
+    });
+    expect(catalog.toolPacks).toEqual([]);
+    expect(catalog.tools[0].toolPacks).toBeUndefined();
+  });
+
+  it("全部工具都未连接时 matched 为空、unresolved 全量列出，不报错", () => {
+    const finance = installed(
+      "acme.finance",
+      "财务包",
+      "read",
+      [server],
+      [{ id: "report-tools", name: "报告工具", tools: ["a_tool", "b_tool"] }],
+    );
+    const catalog = describeCapabilityCatalog({
+      mcp: fakeMcp([]),
+      plugins: fakePlugins([finance]),
+      providers: [],
+    });
+    expect(catalog.toolPacks[0].matched).toEqual([]);
+    expect(catalog.toolPacks[0].unresolved).toEqual(["a_tool", "b_tool"]);
+    expect(catalog.tools).toEqual([]);
   });
 });

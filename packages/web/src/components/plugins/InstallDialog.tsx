@@ -14,7 +14,7 @@ import {
   hasPreviewChanges,
   serverDiffLine,
 } from "./shared.js";
-import { contributionText, permissionViewOf } from "./viewModel.js";
+import { contributionText, manifestContributionCounts, permissionViewOf } from "./viewModel.js";
 
 /**
  * 安装 / 更新弹窗（d.64 · T2）。
@@ -118,11 +118,7 @@ export function InstallDialog({
 
               {/* 贡献计数：与插件卡同一口径 */}
               <p className={`mt-1 ${HINT}`}>
-                贡献：{contributionText({
-                  skills: preview.manifest.contributions.skills.length,
-                  servers: preview.manifest.contributions.mcpServers.length,
-                  commands: preview.manifest.contributions.commands.length,
-                })}
+                贡献：{contributionText(manifestContributionCounts(preview.manifest))}
               </p>
 
               <PluginPermissionList

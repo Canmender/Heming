@@ -8,23 +8,35 @@ import { pluginStore, type InstalledPlugin, type PluginStore } from "./store.js"
 import { pluginIdFromServerId } from "./permissions.js";
 
 /**
- * 统一能力目录（d.64 · 统一插件模型 T1）。
+ * 统一能力目录（d.65 · 系统插件 + 工具束）。
  *
  * 插件页的「工具」Tab 与「这台机器一共能用哪些工具、谁提供的、会不会问人」
  * 都只读这份目录——展示与执行同源：
- * - 内置工具来自 `capabilityRegistry.providers()`（排除 mcp/self 后逐个 build）；
+ * - 内置工具来自 `capabilityRegistry.providers()`（排除 mcp/self 后逐个 build），
+ *   归属改为**系统能力**（d.65：内置能力 = 系统插件 `heming.core` 的贡献）；
  * - MCP 工具来自 `mcpRegistry.allTools()`，`plugin:` 前缀的服务归到插件名下；
  * - 风险口径与执行期完全一致：`meta.risk ?? riskOfName(name)`（复用 `lib/hitl/classify`）。
  *
  * 安全边界（只收紧、不放宽）：插件的 `permissions.tools` 是它 MCP 工具的**风险上限**，
  * 超过上限的工具不进入 `tools`，而是进 `blocked` 供 UI 说明「插件声明 read，未注入」。
  * 这是过滤，不是审批——HITL 判定链不变。
+ *
+ * 工具束（`contributions.toolPacks`）在本文件里**只做归属与分组**：
+ * 把目录里已存在的工具标上「来自工具束 X」，缺的进 `unresolved`（服务没连上很正常，
+ * 不报错、不猜测，更不会去打开任何工具开关）。
  */
 
-export type CapabilityOwnerKind = "builtin" | "mcp" | "plugin" | "self";
+export type CapabilityOwnerKind = "system" | "mcp" | "plugin" | "self";
 
 /** 工具在目录里的风险只分两档（`danger` 按 write 处理：展示上更保守）。 */
 type CatalogRisk = "read" | "write";
+
+/** 工具束在目录里的归属标注（同一个工具可以被不同插件各声明一次吗？见下方校验：不允许跨束重复）。 */
+export interface CatalogToolPackRef {
+  id: string;
+  name: string;
+  pluginId: string;
+}
 
 export interface CapabilityToolEntry {
   /** 工具名（执行时用的键）。 */
@@ -33,24 +45,44 @@ export interface CapabilityToolEntry {
   ownerKind: CapabilityOwnerKind;
   /** providerId 或 serverId。 */
   ownerId: string;
-  /** 人读：内置 / MCP 服务名 / 插件名 / 自我修改。 */
+  /** 人读：系统能力 / MCP 服务名 / 插件名 / 自我修改。 */
   ownerLabel: string;
   /** 插件提供时必填。 */
   pluginId?: string;
   /** MCP 工具填写。 */
   serverId?: string;
   risk: CatalogRisk;
-  /** MCP 工具 = 开关；内置工具 = true；self = 该智能体是否配置。 */
+  /** MCP 工具 = 开关；系统工具 = true；self = 该智能体是否配置。 */
   enabled: boolean;
   /** 只有 MCP 工具可在目录里直接开关。 */
   editable: boolean;
+  /** 声明了该工具的工具束（d.65；只做归属展示，不影响 enabled）。 */
+  toolPacks?: CatalogToolPackRef[];
+}
+
+/** 插件声明的工具束在目录里的解析结果（matched = 目录里存在，unresolved = 尚未连接/提供）。 */
+export interface CatalogToolPack {
+  id: string;
+  pluginId: string;
+  pluginName: string;
+  name: string;
+  description: string;
+  tools: string[];
+  /** 目录里存在的工具名（保留声明顺序）。 */
+  matched: string[];
+  /** 声明了但目录里没有的工具名（服务未连接/未启用；不报错）。 */
+  unresolved: string[];
+  /** 插件是否启用（停用插件后其工具束归属仍在，但展示为未启用）。 */
+  enabled: boolean;
 }
 
 export interface CapabilityCatalog {
   tools: CapabilityToolEntry[];
-  counts: { builtin: number; mcp: number; plugin: number; self: number; enabled: number };
+  counts: { system: number; mcp: number; plugin: number; self: number; enabled: number };
   /** 插件风险上限过滤掉的工具（展示用，说明「插件声明 read，写工具未注入」）。 */
   blocked: { name: string; ownerLabel: string; risk: CatalogRisk; pluginId: string }[];
+  /** 按插件声明顺序展开的工具束（d.65）。 */
+  toolPacks: CatalogToolPack[];
 }
 
 /** 目录的数据来源（全部可注入，单测不必碰真实 localStorage 与网络）。 */
@@ -110,7 +142,11 @@ export function describeCapabilityCatalog(
   const selfAgents = options.selfAgents ?? [];
 
   const installed = new Map<string, InstalledPlugin>();
-  for (const plugin of plugins.list()) installed.set(plugin.manifest.id, plugin);
+  const pluginOrder: InstalledPlugin[] = [];
+  for (const plugin of plugins.list()) {
+    installed.set(plugin.manifest.id, plugin);
+    pluginOrder.push(plugin);
+  }
 
   const tools: CapabilityToolEntry[] = [];
   const blocked: CapabilityCatalog["blocked"] = [];
@@ -179,9 +215,9 @@ export function describeCapabilityCatalog(
       push({
         name: tool.name,
         description: tool.description,
-        ownerKind: "builtin",
+        ownerKind: "system",
         ownerId: provider.id,
-        ownerLabel: "内置",
+        ownerLabel: "系统能力",
         risk: catalogRisk(riskLevel),
         enabled: true,
         editable: false,
@@ -218,15 +254,50 @@ export function describeCapabilityCatalog(
     }
   }
 
+  // 4) 工具束：在已收集的目录上做**归属标注**。
+  //    同名工具在目录里唯一定义，所以按名字精确匹配即可；缺的进 unresolved 不报错。
+  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+  const toolPacks: CatalogToolPack[] = [];
+  for (const plugin of pluginOrder) {
+    for (const pack of plugin.manifest.contributions.toolPacks) {
+      const matched: string[] = [];
+      const unresolved: string[] = [];
+      for (const name of pack.tools) {
+        const tool = toolsByName.get(name);
+        if (!tool) {
+          unresolved.push(name);
+          continue;
+        }
+        matched.push(name);
+        const refs = tool.toolPacks ?? [];
+        if (!refs.some((ref) => ref.id === pack.id && ref.pluginId === plugin.manifest.id)) {
+          refs.push({ id: pack.id, name: pack.name, pluginId: plugin.manifest.id });
+        }
+        tool.toolPacks = refs;
+      }
+      toolPacks.push({
+        id: pack.id,
+        pluginId: plugin.manifest.id,
+        pluginName: plugin.manifest.name,
+        name: pack.name,
+        description: pack.description,
+        tools: [...pack.tools],
+        matched,
+        unresolved,
+        enabled: plugin.enabled,
+      });
+    }
+  }
+
   const counts = {
-    builtin: tools.filter((tool) => tool.ownerKind === "builtin").length,
+    system: tools.filter((tool) => tool.ownerKind === "system").length,
     mcp: tools.filter((tool) => tool.ownerKind === "mcp").length,
     plugin: tools.filter((tool) => tool.ownerKind === "plugin").length,
     self: tools.filter((tool) => tool.ownerKind === "self").length,
     enabled: tools.filter((tool) => tool.enabled).length,
   };
 
-  return { tools, counts, blocked };
+  return { tools, counts, blocked, toolPacks };
 }
 
 /** MCP 工具描述缺失时用缓存的工具清单补一次（`allTools` 正常已带描述）。 */

@@ -28,6 +28,9 @@ export const MAX_PLUGIN_SKILLS = 50;
 export const MAX_PLUGIN_MCP_SERVERS = 10;
 export const MAX_PLUGIN_COMMANDS = 30;
 export const MAX_PLUGIN_PERMISSION_HOSTS = 20;
+/** 工具束上限（d.65 增补：第四类贡献面，只声明归属，不改执行）。 */
+export const MAX_PLUGIN_TOOL_PACKS = 10;
+export const MAX_TOOL_PACK_TOOLS = 50;
 
 /** 预留文件根上限（本轮只校验与展示，不执行）。 */
 const MAX_PLUGIN_FILES = 5;
@@ -51,6 +54,16 @@ const COMMAND_TITLE_MAX = 64;
 const COMMAND_DESCRIPTION_MAX = 200;
 const COMMAND_KEYWORDS_MAX = 20;
 const COMMAND_KEYWORD_MAX = 32;
+
+/**
+ * 工具束里的工具名：精确匹配 MCP 裸工具名（字母数字开头，允许 `.` `_` `:` `-`）。
+ *
+ * 为什么不用通配符：工具束只做「归属与分组」，写通配符会让「哪些工具属于这个插件」
+ * 变成模糊声明，展示时会误导用户；精确名匹配不上就进 `unresolved`，不猜。
+ */
+const TOOL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+const TOOL_PACK_NAME_MAX = 32;
+const TOOL_PACK_DESCRIPTION_MAX = 200;
 
 const HOST_MAX = 253;
 
@@ -298,6 +311,36 @@ const PermissionsSchema = z.object(
   typeParams("permissions 必须是 JSON 对象"),
 );
 
+/** 工具束：一组工具名的**声明式分组**（不定义工具、不改变开关与 HITL）。 */
+const ToolPackSpecSchema = z.object(
+  {
+    id: z
+      .string(typeParams("缺少工具束 id", "工具束 id 必须是文本"))
+      .trim()
+      .regex(COMMAND_ID_RE, "工具束 id 只能用小写字母、数字、点、下划线和连字符，且以字母或数字开头（≤64）"),
+    name: z
+      .string(typeParams("缺少工具束名", "工具束名必须是文本"))
+      .trim()
+      .min(1, "工具束名不能为空")
+      .max(TOOL_PACK_NAME_MAX, `工具束名最多 ${TOOL_PACK_NAME_MAX} 字`),
+    description: z
+      .string(typeParams("工具束描述必须是文本"))
+      .trim()
+      .max(TOOL_PACK_DESCRIPTION_MAX, `工具束描述最多 ${TOOL_PACK_DESCRIPTION_MAX} 字`)
+      .default(""),
+    tools: z
+      .array(
+        z
+          .string(typeParams("工具名必须是文本"))
+          .trim()
+          .regex(TOOL_NAME_RE, "工具名只能由字母、数字和 . _ : - 组成，且以字母或数字开头（≤64）"),
+        typeParams("工具列表必须是数组"),
+      )
+      .max(MAX_TOOL_PACK_TOOLS, `单个工具束最多 ${MAX_TOOL_PACK_TOOLS} 个工具`),
+  },
+  typeParams("工具束必须是 JSON 对象"),
+);
+
 const ContributionsSchema = z.object(
   {
     skills: z
@@ -311,6 +354,10 @@ const ContributionsSchema = z.object(
     commands: z
       .array(CommandSpecSchema, typeParams("命令列表必须是数组"))
       .max(MAX_PLUGIN_COMMANDS, `单个插件最多 ${MAX_PLUGIN_COMMANDS} 个命令`)
+      .default([]),
+    toolPacks: z
+      .array(ToolPackSpecSchema, typeParams("工具束列表必须是数组"))
+      .max(MAX_PLUGIN_TOOL_PACKS, `单个插件最多 ${MAX_PLUGIN_TOOL_PACKS} 个工具束`)
       .default([]),
   },
   typeParams("contributions 必须是 JSON 对象"),
@@ -371,6 +418,7 @@ const PluginManifestSchema = z
     const skills = legacy ? (manifest.skills ?? []) : (manifest.contributions?.skills ?? []);
     const servers = legacy ? (manifest.mcpServers ?? []) : (manifest.contributions?.mcpServers ?? []);
     const commands = legacy ? [] : (manifest.contributions?.commands ?? []);
+    const toolPacks = legacy ? [] : (manifest.contributions?.toolPacks ?? []);
 
     if (legacy && manifest.contributions) {
       ctx.addIssue({
@@ -409,13 +457,13 @@ const PluginManifestSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["contributions"],
-          message: "schemaVersion 3 必须声明 contributions（技能 / MCP 服务 / 命令至少一类）",
+          message: "schemaVersion 3 必须声明 contributions（技能 / MCP 服务 / 命令 / 工具束至少一类）",
         });
-      } else if (skills.length + servers.length + commands.length === 0) {
+      } else if (skills.length + servers.length + commands.length + toolPacks.length === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["contributions"],
-          message: "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令）",
+          message: "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令 / 工具束）",
         });
       }
     } else if (skills.length + servers.length === 0) {
@@ -490,11 +538,40 @@ const PluginManifestSchema = z
         });
       }
     });
+
+    // v3：工具束 id 唯一；同一个工具不能被两个工具束同时声明（否则归属展示会自相矛盾）。
+    // 报错必须点名**两处**字段路径，用户才知道改哪一行。
+    const seenPacks = new Set<string>();
+    const toolOwners = new Map<string, string>();
+    toolPacks.forEach((pack, packIndex) => {
+      if (seenPacks.has(pack.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "toolPacks", packIndex, "id"],
+          message: `工具束 id 重复：${pack.id}`,
+        });
+      }
+      seenPacks.add(pack.id);
+      pack.tools.forEach((tool, toolIndex) => {
+        const path = `contributions.toolPacks[${packIndex}].tools[${toolIndex}]`;
+        const first = toolOwners.get(tool);
+        if (first) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["contributions", "toolPacks", packIndex, "tools", toolIndex],
+            message: `工具名重复：${tool}（已由 ${first} 声明）`,
+          });
+          return;
+        }
+        toolOwners.set(tool, path);
+      });
+    });
   });
 
 export type PluginSkillSpec = z.infer<typeof SkillSpecSchema>;
 export type PluginMcpServerSpec = z.infer<typeof McpServerSpecSchema>;
 export type PluginCommandSpec = z.infer<typeof CommandSpecSchema>;
+export type PluginToolPackSpec = z.infer<typeof ToolPackSpecSchema>;
 export type PluginSchemaVersion = (typeof PLUGIN_SCHEMA_VERSIONS)[number];
 export type PluginToolRisk = "none" | "read" | "write";
 
@@ -508,11 +585,17 @@ export interface PluginPermissions {
   files: string[];
 }
 
-/** 三类贡献面：技能 / 远程 MCP 服务 / 命令。 */
+/**
+ * 四类贡献面：技能 / 远程 MCP 服务 / 命令 / 工具束。
+ *
+ * `toolPacks` 是 d.65 的**向后兼容增补**（schemaVersion 仍为 3）：老清单没有该字段
+ * 照样合法；它只声明「哪些工具属于同一组」，不定义工具、不改变开关与 HITL。
+ */
 export interface PluginContributions {
   skills: PluginSkillSpec[];
   mcpServers: PluginMcpServerSpec[];
   commands: PluginCommandSpec[];
+  toolPacks: PluginToolPackSpec[];
 }
 
 /**
@@ -624,6 +707,12 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
           ...command,
           keywords: uniq(command.keywords),
           target: { ...command.target },
+        })),
+    toolPacks: legacy
+      ? []
+      : (manifest.contributions?.toolPacks ?? []).map((pack) => ({
+          ...pack,
+          tools: [...pack.tools],
         })),
   };
   const permissions: PluginPermissions = legacy

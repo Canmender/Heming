@@ -13,7 +13,7 @@ import {
 import { memoryStore } from "../lib/memory/index.js";
 import { mcpRegistry } from "../lib/mcp/index.js";
 import { PageShell } from "./layout/PageShell.js";
-import { pluginStore, type PluginStore } from "../lib/plugins/index.js";
+import { describeSystemPlugin, pluginStore, type PluginStore } from "../lib/plugins/index.js";
 import { useUiStore } from "../store/ui.js";
 
 /**
@@ -179,12 +179,33 @@ function PluginSourceChip({
   );
 }
 
+/* ------------------------------------------------------------------ 系统来源 */
+
+/**
+ * 「内置：<系统能力名>」来源徽标（d.65 T3）。
+ *
+ * 前缀用「内置」而不是「系统」：系统插件名就叫「系统能力」，写成「系统：系统能力」
+ * 在列表里连续多行会自我重复；来源类别说「内置」、归属说「系统能力」，读起来不绕。
+ *
+ * 与插件徽标的关键区别：**不是按钮、不可点** —— 系统插件随应用内置，没有插件详情页可跳。
+ * 名字取自 describeSystemPlugin().name（页面里不硬编码「系统能力」）。
+ */
+function SystemSourceChip({ systemName }: { systemName: string }) {
+  return (
+    <span className="ui-chip" title="随应用内置；不可停用或卸载">
+      <span>内置</span>
+      <span>：{systemName}</span>
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------------ 详情 */
 
 function SkillDetailDrawer({
   skill,
   onClose,
   onDelete,
+  systemName,
   pluginName,
   onOpenPlugin,
 }: {
@@ -194,6 +215,8 @@ function SkillDetailDrawer({
   /** 插件来源技能：所属插件显示名（undefined = 不是插件来源）。 */
   pluginName?: string;
   onOpenPlugin?: () => void;
+  /** 系统插件的显示名（内置技能来源徽标用）。 */
+  systemName: string;
 }) {
   const panelRef = useRef<HTMLElement>(null);
   useModalA11y(panelRef, onClose);
@@ -217,7 +240,11 @@ function SkillDetailDrawer({
           <div className="min-w-0">
             <h2 className="truncate text-[14px] font-extrabold">{skill.name}</h2>
             <div className={`mt-0.5 ${hintCls}`}>
-              {SOURCE_LABEL[skill.source]} · v{skill.version} ·{" "}
+              {skill.source === "builtin" ? (
+                <SystemSourceChip systemName={systemName} />
+              ) : (
+                SOURCE_LABEL[skill.source]
+              )} · v{skill.version} ·{" "}
               {skill.enabled ? "已启用" : "未启用"}
               {pluginName && onOpenPlugin ? (
                 <span className="ml-1 inline-flex align-middle">
@@ -290,6 +317,9 @@ export function SkillsPage({ skills = skillPool, plugins = pluginStore }: Skills
     return map;
     // tick：本页内的安装/导入动作后刷新名字（插件店是可变单例）
   }, [plugins, tick]);
+
+  /** 系统插件的显示名（内置技能来源徽标用；不硬编码文案）。 */
+  const systemName = useMemo(() => describeSystemPlugin({ skills }).name, [skills]);
 
   /** 跳插件区并打开该插件详情：只投既有内存意图，不新增 IPC。 */
   const openPlugin = (pluginId: string) => {
@@ -503,7 +533,12 @@ export function SkillsPage({ skills = skillPool, plugins = pluginStore }: Skills
                       <div className="min-w-0">
                         <div className="truncate text-[13px] font-bold">{skill.name}</div>
                         <div className={`mt-0.5 ${hintCls}`}>
-                          {SOURCE_LABEL[skill.source]} · v{skill.version}
+                          {skill.source === "builtin" ? (
+                            <SystemSourceChip systemName={systemName} />
+                          ) : (
+                            SOURCE_LABEL[skill.source]
+                          )}
+                          {" "}· v{skill.version}
                           {skill.pluginId && pluginNames.get(skill.pluginId) ? (
                             <span className="ml-1.5 inline-flex align-middle">
                               <PluginSourceChip
@@ -654,7 +689,11 @@ export function SkillsPage({ skills = skillPool, plugins = pluginStore }: Skills
                       </div>
                     </td>
                     <td>
-                      <span className={badgeCls}>{SOURCE_LABEL[skill.source]}</span>
+                      {skill.source === "builtin" ? (
+                        <SystemSourceChip systemName={systemName} />
+                      ) : (
+                        <span className={badgeCls}>{SOURCE_LABEL[skill.source]}</span>
+                      )}
                       {skill.pluginId && pluginNames.get(skill.pluginId) ? (
                         <span className="ml-1.5 inline-flex align-middle">
                           <PluginSourceChip
@@ -895,6 +934,7 @@ export function SkillsPage({ skills = skillPool, plugins = pluginStore }: Skills
           skill={detail}
           onClose={() => setDetailId(null)}
           onDelete={() => removeSkill(detail)}
+          systemName={systemName}
           pluginName={detail.pluginId ? pluginNames.get(detail.pluginId) : undefined}
           onOpenPlugin={detail.pluginId ? () => openPlugin(detail.pluginId!) : undefined}
         />

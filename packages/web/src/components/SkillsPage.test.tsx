@@ -140,7 +140,11 @@ describe("SkillsPage 技能区", () => {
     expect(within(customRow).getByText(/^2026-10-17 \d{2}:\d{2}$/)).toBeInTheDocument();
 
     // 四种来源标签都能在池中出现
-    expect(within(screen.getByRole("row", { name: /记忆整理/ })).getByText("内置")).toBeInTheDocument();
+    // d.65：内置技能的来源徽标改为「系统：<系统能力名>」（非按钮、不可点）。
+    // 徽标拆成两个文本节点，这里断言整段文案，来源分类本身不变。
+    expect(
+      within(screen.getByRole("row", { name: /记忆整理/ })).getByText("：系统能力", { exact: false }),
+    ).toBeInTheDocument();
     expect(within(screen.getByRole("row", { name: /财报速读（沉淀）/ })).getByText("沉淀")).toBeInTheDocument();
     expect(
       within(screen.getByRole("row", { name: /^财报速读 [^（]/ })).getByText("已装"),

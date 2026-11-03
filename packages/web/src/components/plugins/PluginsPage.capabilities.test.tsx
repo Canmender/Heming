@@ -5,7 +5,9 @@ import {
   describeCapabilityCatalog,
   PluginStore,
   type CapabilityCatalog,
+  type CapabilitySnapshot,
   type PluginMcpPort,
+  type SystemPlugin,
 } from "../../lib/plugins/index.js";
 import { SkillPool, type StorageLike } from "../../lib/skills/index.js";
 import type { McpServerConfig } from "../../lib/mcp/index.js";
@@ -104,6 +106,14 @@ function v3Manifest(overrides: Record<string, unknown> = {}): Record<string, unk
           target: { kind: "skill", name: "周报" },
         },
       ],
+      toolPacks: [
+        {
+          id: "report-tools",
+          name: "报告工具",
+          description: "周报要用的查询工具",
+          tools: ["weather_query", "report_export"],
+        },
+      ],
     },
     ...overrides,
   };
@@ -132,9 +142,9 @@ function fixedCatalog(): CapabilityCatalog {
       {
         name: "chart_render",
         description: "画图",
-        ownerKind: "builtin",
+        ownerKind: "system",
         ownerId: "charts",
-        ownerLabel: "内置",
+        ownerLabel: "系统能力",
         risk: "read",
         enabled: true,
         editable: false,
@@ -142,9 +152,9 @@ function fixedCatalog(): CapabilityCatalog {
       {
         name: "chart_export",
         description: "导出图表",
-        ownerKind: "builtin",
+        ownerKind: "system",
         ownerId: "charts",
-        ownerLabel: "内置",
+        ownerLabel: "系统能力",
         risk: "read",
         enabled: true,
         editable: false,
@@ -152,9 +162,9 @@ function fixedCatalog(): CapabilityCatalog {
       {
         name: "tone_apply",
         description: "语气改写",
-        ownerKind: "builtin",
+        ownerKind: "system",
         ownerId: "tone",
-        ownerLabel: "内置",
+        ownerLabel: "系统能力",
         risk: "write",
         enabled: true,
         editable: false,
@@ -183,7 +193,7 @@ function fixedCatalog(): CapabilityCatalog {
         editable: true,
       },
     ],
-    counts: { builtin: 3, mcp: 1, plugin: 1, self: 0, enabled: 4 },
+    counts: { system: 3, mcp: 1, plugin: 1, self: 0, enabled: 4 },
     blocked: [
       {
         name: "dangerous_write",
@@ -192,6 +202,69 @@ function fixedCatalog(): CapabilityCatalog {
         pluginId: "acme.report-kit",
       },
     ],
+    toolPacks: [
+      {
+        id: "report-tools",
+        pluginId: "acme.report-kit",
+        pluginName: "报告工具箱",
+        name: "报告工具",
+        description: "周报要用的查询工具",
+        tools: ["weather_query", "report_export"],
+        matched: ["weather_query"],
+        unresolved: ["report_export"],
+        enabled: true,
+      },
+    ],
+  };
+}
+
+/** 固定系统插件（与 fixedCatalog 的内置工具数量对齐：3 个）。 */
+function fixedSystem(): SystemPlugin {
+  return {
+    id: "heming.core",
+    name: "系统能力",
+    version: "1.0.0",
+    description: "随应用内置的技能、预置服务与工具",
+    pinned: true,
+    uninstallable: false,
+    enabled: true,
+    contributions: {
+      skills: [
+        { id: "builtin:1", name: "通用问答", description: "", enabled: true },
+        { id: "builtin:2", name: "总结", description: "", enabled: true },
+      ],
+      servers: [
+        { id: "mcp-windows-desktop", name: "Windows 桌面", url: "http://127.0.0.1:9999/mcp", enabled: true, preset: true },
+      ],
+      tools: [
+        { name: "chart_render", description: "画图", risk: "read" },
+        { name: "chart_export", description: "导出图表", risk: "read" },
+        { name: "tone_apply", description: "语气改写", risk: "write" },
+      ],
+      commands: [],
+    },
+    counts: { skills: 2, servers: 1, tools: 3, commands: 0 },
+  };
+}
+
+/** 固定能力快照：统计卡读 byKind，插件页读 system。 */
+function fixedCapabilities(catalog: CapabilityCatalog = fixedCatalog()): CapabilitySnapshot {
+  const system = fixedSystem();
+  return {
+    descriptors: [],
+    counts: {
+      total: 0,
+      enabled: 0,
+      byKind: { skill: 6, tool: catalog.tools.length, mcp: 4, command: 0 },
+      byOwner: { system: 0, plugin: 0, mcp: 0 },
+      systemPlugin: {
+        installed: 1,
+        skills: system.counts.skills,
+        tools: system.counts.tools,
+        servers: system.counts.servers,
+      },
+    },
+    system,
   };
 }
 
@@ -247,6 +320,7 @@ function fakeRegistry(): McpRegistryPort & { update: ReturnType<typeof vi.fn> } 
         : serverId === "mcp-manual"
           ? [{ name: "manual_echo" }]
           : [],
+    isPreset: (id: string) => id === "mcp-windows-desktop",
     isToolEnabled: () => true,
     hasDiscovered: (serverId) => serverId === "plugin:acme.report-kit:report",
     setToolEnabled: vi.fn(),
@@ -278,9 +352,21 @@ beforeEach(() => {
   useUiStore.setState({ page: "home" });
 });
 
-function renderPage(agents: readonly AgentLite[] = []) {
+function renderPage(
+  agents: readonly AgentLite[] = [],
+  overrides: { catalog?: CapabilityCatalog; capabilities?: CapabilitySnapshot } = {},
+) {
+  const catalog = overrides.catalog ?? fixedCatalog();
+  const capabilities = overrides.capabilities ?? fixedCapabilities(catalog);
   return render(
-    <PluginsPage plugins={store} skills={pool} mcp={registry} catalog={fixedCatalog()} agents={agents} />,
+    <PluginsPage
+      plugins={store}
+      skills={pool}
+      mcp={registry}
+      catalog={catalog}
+      capabilities={capabilities}
+      agents={agents}
+    />,
   );
 }
 
@@ -298,18 +384,16 @@ describe("插件页 · 能力统计", () => {
   it("四个统计卡数值分别来自插件存储 / 技能池 / 能力目录 / MCP 注册表", () => {
     installV3();
     renderPage();
-    const expected = describeCapabilityStats({
-      plugins: store,
-      skills: pool,
-      catalog: fixedCatalog(),
-      mcp: registry,
-    });
+    const expected = describeCapabilityStats({ plugins: store, capabilities: fixedCapabilities() });
+    expect(expected.system).toBe(1);
     expect(expected.plugins).toBe(1);
+    expect(expected.skills).toBe(6);
     expect(expected.tools).toBe(5);
     expect(expected.mcpServers).toBe(4);
 
+    // 插件卡是一句「系统 + 已装」，不是单独的已装数
+    expect(screen.getByLabelText("统计 插件")).toHaveTextContent("1 + 1");
     for (const [label, value] of [
-      ["已装插件", expected.plugins],
       ["技能", expected.skills],
       ["工具", expected.tools],
       ["MCP 服务", expected.mcpServers],
@@ -333,7 +417,7 @@ describe("插件页 · 四个 Tab", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "工具" }));
     expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "plugins-tools-panel");
-    expect(screen.getByRole("region", { name: "工具分组 内置工具" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "工具分组 系统能力" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "MCP 服务" }));
     expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "plugins-mcp-panel");
@@ -412,12 +496,12 @@ describe("插件页 · 工具目录", () => {
     renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "工具" }));
 
-    expect(screen.getByRole("region", { name: "工具分组 内置工具" })).toHaveTextContent("内置工具（3）");
+    expect(screen.getByRole("region", { name: "工具分组 系统能力" })).toHaveTextContent("系统能力（3）");
     expect(screen.getByRole("region", { name: "工具分组 MCP 服务" })).toHaveTextContent("MCP 服务（1）");
     expect(screen.getByRole("region", { name: "工具分组 插件工具" })).toHaveTextContent(
       "插件工具（1）",
     );
-    expect(screen.getByText("weather_query")).toBeInTheDocument();
+    expect(screen.getAllByText("weather_query").length).toBeGreaterThan(0);
   });
 
   it("被插件风险上限拦下的工具以只读行标注「插件声明 read，未注入」", () => {
@@ -510,5 +594,84 @@ describe("插件页 · 目录与统计口径自测", () => {
     expect(Array.isArray(viaReal.tools)).toBe(true);
     expect(viaReal.counts).toHaveProperty("enabled");
     expect(catalog.tools).toHaveLength(5);
+  });
+});
+
+
+describe("插件页 · 系统能力卡（d.65）", () => {
+  it("插件 Tab 顶部固定系统卡：名称/内置标记/贡献计数，且没有开关与卸载", () => {
+    installV3();
+    renderPage();
+    const card = screen.getByTestId("system-plugin-card");
+    expect(card).toHaveTextContent("系统能力");
+    expect(card).toHaveTextContent("内置");
+    expect(card).toHaveTextContent("技能 2");
+    expect(card).toHaveTextContent("服务 1");
+    expect(card).toHaveTextContent("工具 3");
+    expect(card).toHaveTextContent("随应用内置，不可停用或卸载");
+    // 只读：没有启用开关、没有卸载/停用按钮
+    expect(within(card).queryByRole("switch")).toBeNull();
+    expect(within(card).queryByRole("button")).toBeNull();
+    expect(within(card).queryByRole("button", { name: /卸载/ })).toBeNull();
+  });
+
+  it("系统卡排在已装插件卡之前", () => {
+    installV3();
+    renderPage();
+    const system = screen.getByTestId("system-plugin-card");
+    const plugin = screen.getByRole("region", { name: "插件 报告工具箱" });
+    // DOM 顺序：系统卡在前
+    expect(system.compareDocumentPosition(plugin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("插件页 · 工具束（d.65）", () => {
+  it("工具 Tab 展示工具束：matched 工具 + unresolved 标注", () => {
+    installV3();
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "工具" }));
+
+    const section = screen.getByRole("region", { name: "工具束" });
+    expect(section).toHaveTextContent("报告工具箱");
+    expect(section).toHaveTextContent("报告工具");
+    expect(section).toHaveTextContent("已匹配 1/2");
+    expect(section).toHaveTextContent("weather_query");
+    expect(section).toHaveTextContent("report_export · 未连接/未提供");
+  });
+
+  it("插件停用时工具束仍展示归属，并标注「插件已停用」", () => {
+    installV3();
+    const catalog = fixedCatalog();
+    catalog.toolPacks = catalog.toolPacks.map((pack) => ({ ...pack, enabled: false }));
+    renderPage([], { catalog, capabilities: fixedCapabilities(catalog) });
+    fireEvent.click(screen.getByRole("tab", { name: "工具" }));
+
+    const section = screen.getByRole("region", { name: "工具束" });
+    expect(section).toHaveTextContent("插件已停用");
+    expect(section).toHaveTextContent("报告工具");
+  });
+
+  it("安装预览贡献行包含「工具束 1 · 工具 2」", () => {
+    renderPage();
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(v3Manifest()) },
+    });
+    expect(within(dialog).getByText(/工具束 1 · 工具 2/)).toBeInTheDocument();
+  });
+
+  it("详情抽屉有「工具束」段：工具列表 + 在接口区管理跳转", () => {
+    installV3();
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "查看插件详情 报告工具箱" }));
+    const dialog = screen.getByRole("dialog", { name: "插件详情 报告工具箱" });
+    const section = within(dialog).getByRole("region", { name: "插件工具束" });
+    expect(section).toHaveTextContent("工具束（1）");
+    expect(section).toHaveTextContent("报告工具");
+    expect(section).toHaveTextContent("weather_query");
+    expect(section).toHaveTextContent("report_export · 未连接/未提供");
+
+    fireEvent.click(within(section).getByRole("button", { name: "在接口区管理" }));
+    expect(useUiStore.getState().page).toBe("interfaces");
   });
 });

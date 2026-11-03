@@ -490,3 +490,33 @@
 | 更新源 | ✅ latest.yml 指向 62.2.23，sha512 与安装包一致，Content-Type `application/octet-stream`、Range 206 |
 | 备份 | ✅ `heming-data-2026-11-03-d.62.2.23.0.tar.gz`（本机 `.tmp/backups/` 8.3KB） |
 | 发布链修复 | ⚠ ① `--bump=feature` 与「CHANGELOG 顶部条目」互斥：第 3 步测试时顶部条目已指向新版本 → `changelog-sync` 红；改为**先手工 `bump-version.mjs` + `build-changelog.mjs`，再跑不带 `--bump` 的发布**（脚本 hint 的预期用法）；② 第 8b-2 步 `tar` 在 bash 环境里吃到 MSYS GNU tar，把 `C:\...` 当远端主机报 `Cannot connect to C:`；`release.mjs` 改为 Windows 优先用系统 bsdtar（`System32\tar.exe`，已实测排除表语义一致），deploy/publish 用 `--only=deploy,publish` 续跑成功 |
+
+## 14. 第十波：系统插件与声明式工具束（2026-11-03 10:32 起）
+
+触发：用户追问「插件和技能、MCP 有何区别？能不能把技能与工具全部视作插件来制作？」→ 拍板 **A：内置能力作为系统插件置顶只读**。
+
+规格 `docs/superpowers/specs/2026-11-03-d65-system-plugin.md`。
+
+**结论**：插件是安装/授权单位，技能/工具/MCP/命令是贡献类型；d.65 把最后的「内置能力」与「工具」也纳入同一模型：
+- **系统插件 `heming.core`**（只读、置顶、不可停用/卸载、不写存储、不计入 MAX_PLUGINS）：贡献 = 内置技能（`source: builtin`）+ 预置 MCP 服务（`isPreset`）+ 内置工具（目录 system 归属）。
+- **清单 v3 向后兼容增补 `contributions.toolPacks`**：声明式工具束（精确工具名、≤10 束 / ≤50 个、跨束重复报错），**只声明归属与分组，不自动开工具开关、不改 HITL**；未连接的工具进 `unresolved` 展示。
+- **统一能力描述符 `describeCapabilities()`**：`CapabilityDescriptor { id, kind: skill|tool|mcp|command, ownerKind: system|plugin|mcp, ... }`，插件页统计/Tab、技能区/接口区来源徽标都读它，不再各页手写「内置/系统」。
+- 页面：插件页插件 Tab 顶部「系统能力」只读卡片 + 统计「系统 1 + 已装 N」；工具 Tab 增「工具束」段；技能区/接口区来源徽标改「内置：系统能力」（前缀说来源、后面是系统插件名，避免自我重复）。
+
+**三轨**：T1 `lib/plugins/**`（manifest/store/catalog 增补 + system.ts + descriptors.ts）、T2 插件页（系统卡/统计/工具束/安装预览）、T3 技能区与接口区来源口径。Lead：文档、版本、门禁、发布。
+
+### 第十波完成与发布（2026-11-03 11:05）
+
+| 项 | 结果与证据 |
+|---|---|
+| T1 核心 | ✅ `lib/plugins` 106 例（manifest 37 / permissions 12 / catalog 15 / store 30 / system 5 / descriptors 7）；系统插件只读不写存储（Storage spy 钉住）、toolPacks 校验与 unresolved、描述符归属矩阵 |
+| T2 插件页 | ✅ 系统能力卡置顶只读（无开关/无卸载/贡献计数）、统计「1 + N（系统 + 已装）」、工具 Tab「工具束」段（matched/unresolved/停用标注）、安装预览「工具束 N · 工具 M」、详情工具束段；插件相关 19 例 |
+| T3 来源口径 | ✅ 技能区/接口区内置来源改「内置：系统能力」（非按钮、名称取自 describeSystemPlugin）；插件徽标保持可点；+6 例 |
+| 测试基建 | ⚠ 214 个 web 文件在 32 核满并发下饿死懒加载 chunk（d39 占位 5s 超时、App 命令面板 3s 超时）→ `vite.config.ts` 测试段 `maxWorkers: 8`；全量 ~30s→~92s，**连跑两次 214 文件 / 3108 例全绿**，断言一条未放宽 |
+| 全量门禁 | ✅ shared 29 / server 141 / web 214 文件 3108 例 / desktop 29 文件 518 例；4/4 无重试；三包 tsc 0 |
+| 版本 | `d.63.2.23.0`（特性 62→63，其余位保留） |
+| 安装包 | `release/r54/和鸣 Setup d.63.2.23.0.exe` 228,231,566 字节，sha512 `LAFYhV1xsnu2tLZbGKlhujwjQs19+v4EGICD9Tvq8WSanmLfml29Gt1NA/++J6guHZToY/mtg925wjrfKoOZ6g==` 与本地/远端 latest.yml 三方一致 |
+| 云端部署 | ✅ 第 8 步 OK（1m22s）；`/api/health` ok、首页 200、线上 bundle `main-DMRWq2cT.js` 与本地同名同字节、CSP report-only 在位 |
+| 更新源 | ✅ latest.yml 指向 63.2.23，sha512 一致，Content-Type `application/octet-stream`、Range 206 |
+| 备份 | ✅ `heming-data-2026-11-03-d.63.2.23.0.tar.gz`（本机 `.tmp/backups/` 8.7KB） |
+| 真机自检 | ✅ Chrome CDP 对线上：插件页出现置顶「系统能力」卡（内置/置顶/v1.0.0，技能 7 / 服务 2 / 工具 5，无开关无卸载）；统计「1 + 0（系统 + 已装）」；工具 Tab 内置归属「系统能力」；装带 toolPacks 的 v3 包后预览显示「工具束 1 · 工具 2」，工具束段显示 `report_query` / `report_export`「未连接/未提供」（已匹配 0/2），且 `heming.mcp.enabledTools.v1` 仍为 `[]`（**没有自动打开任何开关**）；技能区/接口区显示「内置：系统能力」；卸载后存储清空 |

@@ -4,6 +4,8 @@ import {
   MAX_PLUGIN_MCP_SERVERS,
   MAX_PLUGIN_PERMISSION_HOSTS,
   MAX_PLUGIN_SKILLS,
+  MAX_PLUGIN_TOOL_PACKS,
+  MAX_TOOL_PACK_TOOLS,
   PluginManifestError,
   parsePluginManifest,
 } from "./index.js";
@@ -545,5 +547,124 @@ describe("parsePluginManifest · 通用校验（v1/v2/v3 共用）", () => {
         }),
       ),
     ).toContain(`单个插件最多 ${MAX_PLUGIN_MCP_SERVERS} 台 MCP 服务`);
+  });
+});
+
+describe("parsePluginManifest · v3 工具束（d.65 增补）", () => {
+  const pack = {
+    id: "report-tools",
+    name: "报告工具",
+    description: "周报要用到的查询工具",
+    tools: ["report_query", "report_export"],
+  };
+
+  it("工具束解析并归一化，description 缺省为空、工具名 trim", () => {
+    const parsed = parsePluginManifest(
+      meta({
+        contributions: {
+          toolPacks: [{ id: "report-tools", name: "  报告工具  ", tools: [" report_query "] }],
+        },
+      }),
+    );
+
+    expect(parsed.contributions.toolPacks).toEqual([
+      {
+        id: "report-tools",
+        name: "报告工具",
+        description: "",
+        tools: ["report_query"],
+      },
+    ]);
+    // 只有工具束也算一项能力（d.65：第四类贡献面）
+    expect(parsed.contributions.skills).toEqual([]);
+  });
+
+  it("旧 v3 清单没有 toolPacks 继续合法，归一化为空数组", () => {
+    const parsed = parsePluginManifest(
+      meta({ contributions: { skills: [skill] } }),
+    );
+    expect(parsed.contributions.toolPacks).toEqual([]);
+  });
+
+  it("v1/v2 归一化后 toolPacks 为空数组", () => {
+    const v1 = parsePluginManifest({
+      schemaVersion: 1,
+      id: "acme.demo",
+      name: "演示包",
+      version: "0.1.0",
+      skills: [skill],
+    });
+    const v2 = parsePluginManifest(
+      legacy({ schemaVersion: 2, skills: [], mcpServers: [server] }),
+    );
+    expect(v1.contributions.toolPacks).toEqual([]);
+    expect(v2.contributions.toolPacks).toEqual([]);
+  });
+
+  it("工具束 id / 名称 / 工具名格式校验", () => {
+    for (const id of ["Report", "-pack", "pack id"]) {
+      expect(
+        failure(meta({ contributions: { toolPacks: [{ ...pack, id }] } })),
+      ).toContain("工具束 id");
+    }
+    expect(
+      failure(meta({ contributions: { toolPacks: [{ ...pack, name: "x".repeat(33) }] } })),
+    ).toContain("工具束名最多 32 字");
+    for (const tool of ["", "-tool", "tool name", "工具"]) {
+      expect(
+        failure(meta({ contributions: { toolPacks: [{ ...pack, tools: [tool] }] } })),
+        tool,
+      ).toContain("工具名只能由字母、数字");
+    }
+    expect(
+      failure(meta({ contributions: { toolPacks: [{ ...pack, tools: "report_query" }] } })),
+    ).toContain("工具列表必须是数组");
+  });
+
+  it("跨工具束重复工具报错，并指出两处字段路径", () => {
+    const message = failure(
+      meta({
+        contributions: {
+          toolPacks: [
+            { id: "pack-a", name: "甲", tools: ["report_query", "report_export"] },
+            { id: "pack-b", name: "乙", tools: ["report_export"] },
+          ],
+        },
+      }),
+    );
+    expect(message).toContain("工具名重复：report_export");
+    expect(message).toContain("contributions.toolPacks[0].tools[1]");
+    expect(message).toContain("contributions.toolPacks[1].tools[0]");
+  });
+
+  it("工具束 id 重复报错", () => {
+    expect(
+      failure(
+        meta({
+          contributions: {
+            toolPacks: [
+              { id: "same", name: "甲", tools: ["a"] },
+              { id: "same", name: "乙", tools: ["b"] },
+            ],
+          },
+        }),
+      ),
+    ).toContain("工具束 id 重复：same");
+  });
+
+  it("工具束数量与单个工具束工具数上限", () => {
+    const manyPacks = Array.from({ length: MAX_PLUGIN_TOOL_PACKS + 1 }, (_, i) => ({
+      id: `pack-${i}`,
+      name: `束${i}`,
+      tools: [`tool_${i}`],
+    }));
+    expect(failure(meta({ contributions: { toolPacks: manyPacks } }))).toContain(
+      `单个插件最多 ${MAX_PLUGIN_TOOL_PACKS} 个工具束`,
+    );
+
+    const manyTools = Array.from({ length: MAX_TOOL_PACK_TOOLS + 1 }, (_, i) => `tool_${i}`);
+    expect(
+      failure(meta({ contributions: { toolPacks: [{ ...pack, tools: manyTools }] } })),
+    ).toContain(`单个工具束最多 ${MAX_TOOL_PACK_TOOLS} 个工具`);
   });
 });

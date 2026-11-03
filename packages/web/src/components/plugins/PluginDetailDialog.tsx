@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import type { InstalledPlugin, PluginServerInfo, PluginSkillInfo } from "../../lib/plugins/index.js";
+import type { ToolPackGroup } from "./viewModel.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { XIcon } from "../icons.js";
 import { PluginPermissionList } from "./PluginPermissionList.js";
@@ -14,6 +15,7 @@ export function PluginDetailDialog({
   plugin,
   skills,
   servers,
+  toolPacks,
   hostOf,
   onClose,
   onRemove,
@@ -23,6 +25,8 @@ export function PluginDetailDialog({
   plugin: InstalledPlugin;
   skills: PluginSkillInfo[];
   servers: PluginServerInfo[];
+  /** 该插件的工具束（来自能力目录解析，含 matched/unresolved）。 */
+  toolPacks: ToolPackGroup["packs"];
   hostOf: (url: string) => string;
   onClose: () => void;
   onRemove: () => void;
@@ -115,6 +119,48 @@ export function PluginDetailDialog({
                   </li>
                 ))}
               </ul>
+            )}
+          </section>
+
+          <section className="mt-4" aria-label="插件工具束">
+            <h3 className="ui-section-title">工具束（{toolPacks.length}）</h3>
+            {toolPacks.length === 0 ? (
+              <p className={`mt-1 ${HINT}`}>本包未声明工具束</p>
+            ) : (
+              <ul className="mt-1 flex flex-col gap-1.5">
+                {toolPacks.map((pack) => (
+                  <li key={`${plugin.manifest.id}:${pack.id}`} className="ui-list-row flex-col items-start gap-0.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="ui-body-sm font-medium">{pack.name}</span>
+                      {!pack.enabled && <span className={CHIP}>插件已停用</span>}
+                      <span className={`ml-auto ${CHIP}`}>
+                        已匹配 {pack.matched.length}/{pack.tools.length}
+                      </span>
+                    </div>
+                    {pack.description && <p className="ui-caption">{pack.description}</p>}
+                    <div className="mt-0.5 flex flex-wrap gap-1">
+                      {pack.matched.map((name) => (
+                        <span key={`matched:${name}`} className={CHIP}>
+                          {name}
+                        </span>
+                      ))}
+                      {pack.unresolved.map((name) => (
+                        <span key={`unresolved:${name}`} className={`${CHIP} text-[#8a5a00]`}>
+                          {name} · 未连接/未提供
+                        </span>
+                      ))}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-1 ui-caption">
+              工具束只声明归属，不改变任何工具开关；连接与授权在接口区进行。
+            </p>
+            {toolPacks.length > 0 && (
+              <button type="button" onClick={onGoInterfaces} className={`mt-1 ${BTN_GHOST_SM}`}>
+                在接口区管理
+              </button>
             )}
           </section>
 

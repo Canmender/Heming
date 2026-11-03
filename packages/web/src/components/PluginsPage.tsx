@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  describeCapabilities,
   describeCapabilityCatalog,
   pluginIdFromServerId,
   pluginStore,
   type CapabilityCatalog,
+  type CapabilitySnapshot,
   type InstalledPlugin,
   type PluginInstallPreview,
   type PluginStore,
@@ -21,6 +23,7 @@ import { PluginMcpPanel } from "./plugins/PluginMcpPanel.js";
 import { PluginSkillPanel } from "./plugins/PluginSkillPanel.js";
 import { RemovePluginDialog } from "./plugins/RemovePluginDialog.js";
 import { PluginStats } from "./plugins/PluginStats.js";
+import { SystemPluginCard } from "./plugins/SystemPluginCard.js";
 import { PluginToolPanel } from "./plugins/PluginToolPanel.js";
 import {
   describeBlockedTools,
@@ -28,6 +31,7 @@ import {
   describeMcpRows,
   describeSkillRows,
   groupCatalogTools,
+  groupToolPacks,
   installResultMessage,
   type AgentLite,
   type McpRegistryPort,
@@ -60,6 +64,8 @@ export interface PluginsPageProps {
   mcp?: McpRegistryPort;
   /** 能力目录（默认现场 `describeCapabilityCatalog()`；测试可注入固定目录）。 */
   catalog?: CapabilityCatalog;
+  /** 统一能力快照（默认现场 `describeCapabilities()`；测试可注入固定快照）。 */
+  capabilities?: CapabilitySnapshot;
   /** 智能体名册（技能 Tab 的「被几个智能体使用」需要）。 */
   agents?: readonly AgentLite[];
 }
@@ -78,6 +84,7 @@ export function PluginsPage({
   skills = skillPool,
   mcp = mcpRegistry,
   catalog,
+  capabilities: capabilitiesProp,
   agents,
 }: PluginsPageProps = {}) {
   // 技能 Tab 的「被几个智能体使用」需要名册：订阅 chat store，未注入时懒加载一次。
@@ -139,11 +146,17 @@ export function PluginsPage({
     () => catalog ?? describeCapabilityCatalog({ plugins, mcp }),
     [catalog, plugins, mcp, tick],
   );
+  const capabilities = useMemo(
+    () => capabilitiesProp ?? describeCapabilities({ skills, mcp, plugins }),
+    [capabilitiesProp, skills, mcp, plugins, tick],
+  );
+  const system = capabilities.system;
   const stats = useMemo(
-    () => describeCapabilityStats({ plugins, skills, catalog: capabilityCatalog, mcp }),
-    [plugins, skills, capabilityCatalog, mcp, tick],
+    () => describeCapabilityStats({ plugins, capabilities }),
+    [plugins, capabilities, tick],
   );
   const toolGroups = useMemo(() => groupCatalogTools(capabilityCatalog), [capabilityCatalog]);
+  const toolPackGroups = useMemo(() => groupToolPacks(capabilityCatalog), [capabilityCatalog]);
   const blockedTools = useMemo(
     () => describeBlockedTools(capabilityCatalog, plugins),
     [capabilityCatalog, plugins],
@@ -299,6 +312,7 @@ export function PluginsPage({
       >
         {tab === "plugins" && (
           <>
+            <SystemPluginCard system={system} />
             {list.length === 0 ? (
               <section
                 className="flex flex-col items-center gap-2 rounded-xl border border-line bg-white py-10 text-center shadow-card"
@@ -351,6 +365,7 @@ export function PluginsPage({
           <PluginToolPanel
             groups={toolGroups}
             blocked={blockedTools}
+            toolPacks={toolPackGroups}
             onToggleTool={(serverId, toolName, enabled) => {
               mcp.setToolEnabled(serverId, toolName, enabled);
               bump();
@@ -391,6 +406,9 @@ export function PluginsPage({
           plugin={detail}
           skills={detailSkills}
           servers={detailServers}
+          toolPacks={
+            toolPackGroups.find((group) => group.pluginId === detail.manifest.id)?.packs ?? []
+          }
           hostOf={hostOf}
           onClose={() => setDetailId(null)}
           onRemove={() => {

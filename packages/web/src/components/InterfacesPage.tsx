@@ -17,7 +17,7 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
 import { RegistryPage } from "./RegistryPage.js";
 import { MCP_PRESETS } from "../lib/mcp/presets.js";
 import { PageShell } from "./layout/PageShell.js";
-import { pluginStore, type PluginStore } from "../lib/plugins/index.js";
+import { describeSystemPlugin, pluginStore, type PluginStore } from "../lib/plugins/index.js";
 import { useUiStore } from "../store/ui.js";
 
 /**
@@ -33,6 +33,23 @@ function pluginIdFromServerId(serverId: string): string | null {
   const cut = rest.indexOf(":");
   const id = cut > 0 ? rest.slice(0, cut) : rest;
   return id || null;
+}
+
+/**
+ * 「内置：<系统能力名>」来源徽标（d.65 T3）。
+ *
+ * 前缀用「内置」而非「系统」：系统插件名就是「系统能力」，避免「系统：系统能力」重复。
+ *
+ * 与插件徽标一样用 .ui-chip，但**不是按钮**——预置服务随应用内置，没有插件详情页可跳。
+ * 名字取自 describeSystemPlugin().name，页面里不硬编码。
+ */
+function SystemSourceChip({ systemName }: { systemName: string }) {
+  return (
+    <span className="ui-chip" title="随应用内置；不可停用或卸载">
+      <span>内置</span>
+      <span>：{systemName}</span>
+    </span>
+  );
 }
 
 /**
@@ -59,6 +76,9 @@ export function InterfacesPage({
     for (const item of plugins.list()) map.set(item.manifest.id, item.manifest.name);
     return map;
   }, [plugins]);
+
+  /** 系统插件的显示名（预置服务来源徽标用；不硬编码文案）。 */
+  const systemName = useMemo(() => describeSystemPlugin({ mcp: registry }).name, [registry]);
 
   /** 跳插件区并打开该插件详情：复用 d.60 的 open-plugin 内存意图，不新增 IPC。 */
   const openPlugin = (pluginId: string) => {
@@ -422,10 +442,8 @@ export function InterfacesPage({
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[13px] font-bold">{server.name}</span>
-                  {registry.isPreset(server.id) && (
-                    <span className="ui-chip">
-                      默认接入
-                    </span>
+                  {(server.origin === "preset" || registry.isPreset(server.id)) && (
+                    <SystemSourceChip systemName={systemName} />
                   )}
                   <span className="ui-chip">
                     {server.transport === "http" ? "HTTP" : "stdio"}

@@ -54,5 +54,12 @@ export default defineConfig({
     // 吃新默认值等于批量改语义。这里显式关掉，保持 vitest 1.x 的原有语义；
     // 全仓 526 处 vi.fn 因此不需要为迁就新默认值而改。
     clearMocks: false,
+    // 限制并发 worker：这台机器 32 逻辑核，vitest 默认会把 worker 开到接近核数，
+    // 而 214 个 jsdom 文件同时跑时，**懒加载 chunk 的解析会被饿死**——
+    // d39 的 `settleRoutedPage`（等 `page-fallback` 消失，5s 预算）与 App 的
+    // 「关弹窗后 Ctrl+K 开命令面板」在满并发下会稳定超时，单跑或低并发必过。
+    // 这不是产品缺陷：树莓派级 CPU 争用下，动态 import 与 React 提交都变慢。
+    // 8 个 worker 给渲染线程留出余量，全量 web 用例从 ~30s 变成 ~60s，门禁因此可复现。
+    maxWorkers: 8,
   },
 });

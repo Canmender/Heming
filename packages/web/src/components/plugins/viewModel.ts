@@ -9,6 +9,8 @@ import type {
 } from "../../lib/plugins/index.js";
 import {
   evaluatePluginPermissions,
+  type CapabilitySnapshot,
+  type CatalogToolPack,
   type InstallResult,
   type PluginInstallPreview,
 } from "../../lib/plugins/index.js";
@@ -33,6 +35,8 @@ export interface SkillPoolPort {
 /** 页面需要的最小 MCP 注册表接口（真实 `mcpRegistry` 天然满足）。 */
 export interface McpRegistryPort {
   servers(): McpServerConfig[];
+  /** 预置服务判定（系统插件只收预置服务，与接口区同源）。 */
+  isPreset(id: string): boolean;
   allTools(): { serverId: string; serverName: string; tool: { name: string; description?: string } }[];
   tools(serverId: string): { name: string; description?: string }[];
   isToolEnabled(serverId: string, toolName: string): boolean;
@@ -53,6 +57,10 @@ export interface PluginContributionCountsView {
   skills: number;
   servers: number;
   commands: number;
+  /** 工具束数量（d.65；旧清单缺省 0）。 */
+  toolPacks: number;
+  /** 全部工具束声明的工具名总数（按声明计，不代表已连接）。 */
+  packTools: number;
 }
 
 /**
@@ -63,17 +71,38 @@ export interface PluginContributionCountsView {
  * 不会因为某一边缺字段就显示成 0；停用插件也照常显示声明贡献（停用不等于没装）。
  */
 export function contributionCountsOf(plugin: InstalledPlugin): PluginContributionCountsView {
-  const declared = plugin.manifest.contributions;
+  return manifestContributionCounts(plugin.manifest, plugin.skillIds.length, plugin.serverIds.length);
+}
+
+/**
+ * 清单层面的贡献计数（安装预览用：还没装、拿不到物化 id 数量）。
+ *
+ * 与插件卡同一份口径；工具束部分按声明计（`tools` 里可能有服务未连接的工具，
+ * 那是 `unresolved`，仍属于「这个插件声明了这些工具」）。
+ */
+export function manifestContributionCounts(
+  manifest: PluginManifest,
+  materializedSkills = 0,
+  materializedServers = 0,
+): PluginContributionCountsView {
+  const declared = manifest.contributions;
   return {
-    skills: Math.max(declared.skills.length, plugin.skillIds.length),
-    servers: Math.max(declared.mcpServers.length, plugin.serverIds.length),
+    skills: Math.max(declared.skills.length, materializedSkills),
+    servers: Math.max(declared.mcpServers.length, materializedServers),
     commands: declared.commands.length,
+    toolPacks: declared.toolPacks.length,
+    packTools: declared.toolPacks.reduce((sum, pack) => sum + pack.tools.length, 0),
   };
 }
 
-/** 贡献行的可读文案：`技能 2 · 服务 1 · 命令 0`。 */
+/**
+ * 贡献行的可读文案：`技能 2 · 服务 1 · 命令 0 · 工具束 1 · 工具 3`。
+ *
+ * 工具束是 d.65 增补：0 个时也照常显示，让「这个插件有没有声明工具」一眼可见；
+ * 老清单显示 `工具束 0 · 工具 0`，不是缺字段。
+ */
 export function contributionText(counts: PluginContributionCountsView): string {
-  return `技能 ${counts.skills} · 服务 ${counts.servers} · 命令 ${counts.commands}`;
+  return `技能 ${counts.skills} · 服务 ${counts.servers} · 命令 ${counts.commands} · 工具束 ${counts.toolPacks} · 工具 ${counts.packTools}`;
 }
 
 export interface PluginPermissionView {
@@ -211,7 +240,7 @@ export function describeSkillRows(
 
 /* ---------------------------------------------------------------- 工具页 */
 
-export type ToolGroupKind = "builtin" | "mcp" | "plugin" | "self";
+export type ToolGroupKind = "system" | "mcp" | "plugin" | "self";
 
 export interface CapabilityToolGroup {
   kind: ToolGroupKind;
@@ -228,15 +257,20 @@ export interface BlockedToolRow {
 }
 
 const OWNER_LABEL: Record<ToolGroupKind, string> = {
-  builtin: "内置工具",
+  system: "系统能力",
   mcp: "MCP 服务",
   plugin: "插件工具",
   self: "自我修改",
 };
 
-/** 目录按归属分组：固定顺序（内置 → MCP → 插件 → 自我修改），空组不出现。 */
+/**
+ * 目录按归属分组：固定顺序（系统能力 → MCP 服务 → 插件工具 → 自我修改），空组不出现。
+ *
+ * d.65 起内置工具归属为 `system`（系统插件 `heming.core`），不再是 `builtin`；
+ * 分组标签也统一叫「系统能力」——页面里不再出现「内置」这个第二套说法。
+ */
 export function groupCatalogTools(catalog: CapabilityCatalog): CapabilityToolGroup[] {
-  const order: ToolGroupKind[] = ["builtin", "mcp", "plugin", "self"];
+  const order: ToolGroupKind[] = ["system", "mcp", "plugin", "self"];
   return order
     .map((kind) => ({
       kind,
@@ -269,6 +303,40 @@ export function describeBlockedTools(
       reason: `插件声明 ${ceiling}，未注入`,
     };
   });
+}
+
+/** 工具束分组：同一个插件的多个工具束归到一个折叠组（按插件名排序，稳定输出）。 */
+export interface ToolPackGroup {
+  pluginId: string;
+  pluginName: string;
+  enabled: boolean;
+  packs: CatalogToolPack[];
+}
+
+/**
+ * 把目录里的工具束按插件分组。
+ *
+ * 为什么按插件分组而不是平铺：工具束是「插件声明我用哪些工具」，
+ * 用户排查时关心的是「哪个插件声明了哪些、哪些还没连接」——按插件归组才读得出来。
+ * 停用插件仍展示（`enabled: false`），只标注「插件已停用」，不隐藏归属。
+ */
+export function groupToolPacks(catalog: CapabilityCatalog): ToolPackGroup[] {
+  const groups = new Map<string, ToolPackGroup>();
+  for (const pack of catalog.toolPacks) {
+    const group = groups.get(pack.pluginId);
+    if (group) {
+      group.packs.push(pack);
+      group.enabled = group.enabled && pack.enabled;
+      continue;
+    }
+    groups.set(pack.pluginId, {
+      pluginId: pack.pluginId,
+      pluginName: pack.pluginName,
+      enabled: pack.enabled,
+      packs: [pack],
+    });
+  }
+  return [...groups.values()];
 }
 
 /* ------------------------------------------------------------- MCP 服务页 */
@@ -330,6 +398,8 @@ export function describeMcpRows(
 /* ---------------------------------------------------------------- 统计卡 */
 
 export interface CapabilityStats {
+  /** 系统插件恒为 1（d.65：内置能力也是一个插件，置顶只读）。 */
+  system: number;
   plugins: number;
   skills: number;
   tools: number;
@@ -337,22 +407,21 @@ export interface CapabilityStats {
 }
 
 /**
- * 头部四个统计卡：已装插件 / 技能 / 工具 / MCP 服务。
+ * 头部四个统计卡：插件（系统 1 + 已装 N）/ 技能 / 工具 / MCP 服务。
  *
- * 口径固定：数值只能来自这四处数据源（插件存储、技能池、能力目录、MCP 注册表），
- * 不在这里做任何过滤——过滤会让四个数互相矛盾（例如「工具 12」但目录只列 9 个）。
+ * 口径固定：除「已装」来自插件存储外，技能/工具/MCP 一律取 `describeCapabilities()`
+ * 的 counts（页面不再自己数目录或技能池），避免同一页出现两套数。
  */
 export function describeCapabilityStats(input: {
   plugins: Pick<PluginStore, "list">;
-  skills: Pick<SkillPoolPort, "list">;
-  catalog: CapabilityCatalog;
-  mcp: Pick<McpRegistryPort, "servers">;
+  capabilities: CapabilitySnapshot;
 }): CapabilityStats {
   return {
+    system: 1,
     plugins: input.plugins.list().length,
-    skills: input.skills.list().length,
-    tools: input.catalog.tools.length,
-    mcpServers: input.mcp.servers().length,
+    skills: input.capabilities.counts.byKind.skill,
+    tools: input.capabilities.counts.byKind.tool,
+    mcpServers: input.capabilities.counts.byKind.mcp,
   };
 }
 
