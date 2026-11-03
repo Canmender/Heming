@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { NavRail } from "./NavRail.js";
 import { useUiStore, DEFAULT_NAV_ORDER } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -247,5 +247,131 @@ describe("全站键盘焦点环（③-2）", () => {
     render(<NavRail />);
     expect(document.querySelectorAll("#heming-focus-visible")).toHaveLength(1);
     first.unmount();
+  });
+});
+
+/**
+ * d.68 导航自动隐藏：pinned（默认常显）/ auto（左缘热区 + 浮层）。
+ * 只断言结构与状态机，不断言像素；动效只允许动 transform/opacity 由源码守卫覆盖。
+ */
+describe("NavRail 导航自动隐藏（d.68）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useUiStore.setState({
+      page: "home",
+      navOrder: [...DEFAULT_NAV_ORDER],
+      navMode: "pinned",
+      navOpen: false,
+    });
+    useAuthStore.setState({
+      token: "t1",
+      user: { id: "u1", username: "alice", displayName: "爱丽丝" },
+      status: "authed",
+      error: null,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("默认 pinned：常驻轨道参与布局，底部 pin 按钮切换到自动隐藏并落盘", () => {
+    render(<NavRail />);
+    const nav = screen.getByRole("navigation", { name: "主导航" });
+    expect(nav.className).toContain("shrink-0");
+    expect(nav.className).not.toContain("absolute");
+
+    const pin = screen.getByRole("button", { name: "自动隐藏导航栏" });
+    expect(pin).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(pin);
+    expect(useUiStore.getState().navMode).toBe("auto");
+    expect(localStorage.getItem("heming.nav.mode.v1")).toBe("auto");
+  });
+
+  it("auto：8px 热区是可聚焦 button，浮层 absolute 不占布局宽度、收起时 aria-hidden", () => {
+    useUiStore.setState({ navMode: "auto" });
+    render(<NavRail />);
+
+    const hot = screen.getByRole("button", { name: "展开导航" });
+    expect(hot).toHaveAttribute("data-testid", "nav-hotzone");
+    expect(hot.style.width).toBe("8px");
+    expect(hot).toHaveAttribute("aria-expanded", "false");
+
+    const nav = screen.getByLabelText("主导航");
+    expect(nav.className).toContain("absolute");
+    expect(nav.className).not.toContain("shrink-0");
+    expect(nav).toHaveAttribute("aria-hidden", "true");
+    expect(nav).toHaveAttribute("inert");
+
+    // 悬停热区 → 展开（浮层滑入，不改变任何布局宽度）
+    fireEvent.mouseEnter(hot);
+    expect(useUiStore.getState().navOpen).toBe(true);
+    expect(screen.getByLabelText("主导航")).toHaveAttribute("aria-hidden", "false");
+    expect(screen.getByLabelText("主导航")).not.toHaveAttribute("inert");
+    expect(screen.getByLabelText("主导航").className).toContain("translate-x-0");
+    expect(hot).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("鼠标离开 300ms 后收回；不足 300ms 不收回", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    useUiStore.setState({ navMode: "auto" });
+    render(<NavRail />);
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "展开导航" }));
+    expect(useUiStore.getState().navOpen).toBe(true);
+
+    fireEvent.mouseLeave(screen.getByLabelText("主导航"));
+    act(() => {
+      vi.advanceTimersByTime(299);
+    });
+    expect(useUiStore.getState().navOpen).toBe(true); // 还没到点
+
+    act(() => {
+      vi.advanceTimersByTime(2);
+    });
+    expect(useUiStore.getState().navOpen).toBe(false);
+  });
+
+  it("焦点在导航内时，鼠标移开不收回（键盘用户不会被打断）", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    useUiStore.setState({ navMode: "auto" });
+    render(<NavRail />);
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "展开导航" }));
+    screen.getByLabelText("主页 Alt1").focus();
+
+    fireEvent.mouseLeave(screen.getByLabelText("主导航"));
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(useUiStore.getState().navOpen).toBe(true);
+  });
+
+  it("Esc 收回浮层，并把焦点还给热区（不会立刻又被聚焦展开）", () => {
+    useUiStore.setState({ navMode: "auto" });
+    render(<NavRail />);
+
+    const hot = screen.getByRole("button", { name: "展开导航" });
+    fireEvent.mouseEnter(hot);
+    expect(useUiStore.getState().navOpen).toBe(true);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(useUiStore.getState().navOpen).toBe(false);
+    expect(hot).toHaveFocus();
+    // 回焦热区不应再次触发 onFocus 展开
+    expect(useUiStore.getState().navOpen).toBe(false);
+  });
+
+  it("auto 模式下点 pin 按钮回到常显：浮层收起、轨道重新参与布局", () => {
+    useUiStore.setState({ navMode: "auto", navOpen: true });
+    render(<NavRail />);
+
+    fireEvent.click(screen.getByRole("button", { name: "固定导航栏" }));
+    const s = useUiStore.getState();
+    expect(s.navMode).toBe("pinned");
+    expect(s.navOpen).toBe(false);
+    const nav = screen.getByRole("navigation", { name: "主导航" });
+    expect(nav.className).toContain("shrink-0");
+    expect(nav.className).not.toContain("absolute");
   });
 });

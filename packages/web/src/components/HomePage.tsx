@@ -59,7 +59,7 @@ const NEWS: { source: string; title: string; summary: string; date: string }[] =
 
 function StatCard({ title, value, sub }: { title: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
+    <div className="ui-card p-3">
       <div className="text-[11px] font-bold text-muted">{title}</div>
       <div className="mt-0.5 text-[20px] font-extrabold">{value}</div>
       {sub && <div className="mt-0.5 text-[10px] text-muted">{sub}</div>}
@@ -270,13 +270,13 @@ export function HomePage() {
         <OnboardingCard steps={onboardingSteps} onGo={goOnboarding} onDismiss={dismissOnboarding} />
       )}
 
-      {/* 2. 四张统计卡（真实数据） */}
-      <div className="grid grid-cols-4 gap-2.5">
+      {/* 2. 四张统计卡（真实数据）：宽窗 4 列，窄窗折成 2 列（不新增断点，沿用 max-[1199px]:） */}
+      <div className="grid grid-cols-4 gap-2.5 max-[1199px]:grid-cols-2">
         <StatCard title="团队成员" value={String(members.length)} sub="全站注册用户" />
         <StatCard title="在线成员" value={String(onlineCount)} sub="约 20 秒刷新" />
         <StatCard title="我的智能体" value={String(agentsRoster.length)} sub="本机运行 · 含系统预设" />
         <StatCard title="今日动向" value={String(todayActivities)} sub="最近 100 条内" />
-        <div className="col-span-4 rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
+        <div className="col-span-4 ui-card p-3 max-[1199px]:col-span-2">
           <div className="flex items-center">
             <div className="text-[11px] font-bold text-muted">Token 用量 · {monthKey}</div>
             <div className="ml-auto inline-flex overflow-hidden rounded-lg border border-[#ddd] bg-[#fafafa]">
@@ -398,7 +398,7 @@ export function HomePage() {
       </div>
 
       {/* 2.5 近 30 日用量热力图 */}
-      <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
+      <section className="ui-card p-3">
         <div className="mb-1.5 flex items-center">
           <div className="text-[12px] font-bold text-muted">近 30 日用量</div>
           <div className="ml-auto flex items-center gap-1 text-[10px] text-muted">
@@ -418,9 +418,10 @@ export function HomePage() {
       {/* 2.7 幕僚：最近一份主动简报（d.48） */}
       <StaffHomeCard />
 
-      {/* 3/4/5/6. 两栏：左团队动向；右智能体动态 + 在线成员 + 系统状态 */}
-      <div className="grid grid-cols-[1.5fr_1fr] gap-3">
-        <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
+      {/* 3/4/5/6. 两栏：左团队动向；右智能体动态 + 在线成员 + 系统状态。
+          窄窗（<1200）折成单列：1.5fr/1fr 的比例在 1000px 出头的窗口里会把左栏压得读不完整。 */}
+      <div className="grid grid-cols-[1.5fr_1fr] gap-3 max-[1199px]:grid-cols-1">
+        <section className="ui-card p-3">
           <div className="mb-1.5 flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted">
               <TeamIcon width={14} height={14} />
@@ -497,7 +498,7 @@ export function HomePage() {
 
         <div className="flex flex-col gap-3">
           {/* 4. 智能体动态 */}
-          <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
+          <section className="ui-card p-3">
             <div className="mb-1.5 text-[12px] font-bold text-muted">智能体动态</div>
             {displayAgents.length === 0 ? (
               <EmptyState compact className="px-0 py-2" title="暂无智能体，可在智能体页创建" />
@@ -517,7 +518,7 @@ export function HomePage() {
           </section>
 
           {/* 5. 在线成员 */}
-          <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
+          <section className="ui-card p-3">
             <div className="mb-1.5 flex items-center justify-between">
               <div className="text-[12px] font-bold text-muted">在线成员</div>
               <button
@@ -556,7 +557,7 @@ export function HomePage() {
           </section>
 
           {/* 6. 系统状态 */}
-          <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
+          <section className="ui-card p-3">
             <div className="mb-1.5 text-[12px] font-bold text-muted">系统状态</div>
             <div className="flex justify-between py-0.5 text-[12px]">
               <span className="text-muted">云端连接</span>
@@ -575,9 +576,9 @@ export function HomePage() {
       </div>
 
       {/* 7. 底部通栏：最新资讯（静态常量） */}
-      <section className="rounded-xl border border-[#ececec] bg-white p-3 shadow-card">
+      <section className="ui-card p-3">
         <div className="mb-2 text-[12px] font-bold text-muted">最新资讯</div>
-        <div className="grid grid-cols-3 gap-2.5">
+        <div className="grid grid-cols-3 gap-2.5 max-[1199px]:grid-cols-2">
           {NEWS.map((n) => (
             <article key={n.title} className="rounded-lg border border-line-soft bg-[#fafafa] p-2.5">
               <div className="flex items-center gap-1.5">

@@ -84,10 +84,11 @@ function mockTeam(
   vi.mocked(fetchTeamActivities).mockResolvedValue({ activities });
 }
 
-/** 取统计卡：标题 → 卡片容器，避免与页面别处的同名区块（如「在线成员」列表）互串。 */
+/** 取统计卡：标题 → 卡片容器，避免与页面别处的同名区块（如「在线成员」列表）互串。
+ *  d.68 起卡片外观收口到 `.ui-card`（圆角/描边/阴影改由 CSS 类给出，DOM 上不再逐字面量写）。 */
 function statCard(title: string): HTMLElement {
   const cards = Array.from(
-    document.querySelectorAll<HTMLElement>(".grid.grid-cols-4 > div.rounded-xl"),
+    document.querySelectorAll<HTMLElement>(".grid.grid-cols-4 > div.ui-card"),
   );
   const card = cards.find((c) => c.firstElementChild?.textContent === title);
   if (!card) throw new Error(`找不到统计卡：${title}`);

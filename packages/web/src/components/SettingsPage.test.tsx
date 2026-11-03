@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { SettingsPage, SETTINGS_HIGHLIGHT_MS, appVersionLabel } from "./SettingsPage.js";
 import { useAuthStore } from "../store/auth.js";
 import { useThemeStore } from "../store/theme.js";
 import { DEFAULT_NAV_ORDER, useUiStore } from "../store/ui.js";
 import { setToken } from "../lib/api.js";
+import { getThemeMode, setThemeMode } from "../lib/theme.js";
 import { resetSecureStorageState, secureGetItem, secureSetItem } from "../lib/secureStorage.js";
 
 const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
@@ -571,6 +572,101 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
 
     fireEvent.change(input, { target: { value: "导航" } });
     expect(screen.getByRole("region", { name: "设置搜索结果" })).toHaveTextContent("导航顺序");
+  });
+});
+
+/**
+ * d.68 外观页新增「导航栏」卡：
+ * - 顺序 主题模式 → 主题色 → 导航栏 → 桌宠；
+ * - 两档 radio 与导航轨底部 pin 按钮同源（useUiStore.navMode）；
+ * - 「恢复默认外观」二次确认后一次改三处（主题模式/主题色/导航模式）。
+ */
+describe("设置区 · 导航栏与恢复默认外观（d.68）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.documentElement.removeAttribute("style");
+    document.documentElement.removeAttribute("data-theme");
+    useThemeStore.setState({ accent: "#1a1a1a" });
+    useUiStore.setState({ navMode: "pinned", navOpen: false });
+    setThemeMode("system");
+  });
+
+  it("外观页顺序：主题模式 → 主题色 → 导航栏 → 桌宠", () => {
+    const { container } = render(<SettingsPage />);
+    goTab("外观");
+    const ids = Array.from(container.querySelectorAll<HTMLElement>("[data-settings-id]")).map(
+      (el) => el.dataset.settingsId,
+    );
+    expect(ids).toEqual(["theme-mode", "accent-color", "nav-mode", "pet"]);
+    // 卡片标题与锚点都在
+    expect(screen.getByText("导航栏")).toBeInTheDocument();
+    expect(container.querySelector('[data-settings-id="nav-mode"]')).not.toBeNull();
+  });
+
+  it("导航栏卡：默认选中「固定常显」；点「自动隐藏」写 store 并落盘", () => {
+    render(<SettingsPage />);
+    goTab("外观");
+
+    const pinned = screen.getByRole("radio", { name: "导航栏 固定常显" });
+    expect(pinned).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "导航栏 自动隐藏" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "导航栏 自动隐藏" }));
+    expect(useUiStore.getState().navMode).toBe("auto");
+    expect(localStorage.getItem("heming.nav.mode.v1")).toBe("auto");
+    expect(screen.getByRole("radio", { name: "导航栏 自动隐藏" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    // 自动隐藏说明里写清呼出方式（用户不需要再猜）
+    expect(screen.getByText(/左缘或按 Ctrl\+B 呼出/)).toBeInTheDocument();
+  });
+
+  it("「恢复默认」（卡内）把导航栏改回常显，不影响主题色", () => {
+    useThemeStore.getState().setAccent("#2f5bd7");
+    useUiStore.setState({ navMode: "auto" });
+    render(<SettingsPage />);
+    goTab("外观");
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认导航栏模式" }));
+    expect(useUiStore.getState().navMode).toBe("pinned");
+    expect(useThemeStore.getState().accent).toBe("#2f5bd7");
+  });
+
+  it("「恢复默认外观」二次确认：取消不动，确认后主题模式/主题色/导航一起复位", () => {
+    useThemeStore.getState().setAccent("#2f5bd7");
+    useUiStore.setState({ navMode: "auto" });
+    setThemeMode("dark");
+
+    render(<SettingsPage />);
+    goTab("外观");
+
+    // 取消：什么都不改
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认外观" }));
+    const dialog = screen.getByRole("dialog", { name: "恢复默认外观" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(useThemeStore.getState().accent).toBe("#2f5bd7");
+    expect(useUiStore.getState().navMode).toBe("auto");
+    expect(getThemeMode()).toBe("dark");
+
+    // 确认：三处一起复位
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认外观" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "恢复默认外观" })).getByRole("button", {
+        name: "恢复默认",
+      }),
+    );
+    expect(useThemeStore.getState().accent).toBe("#1a1a1a");
+    expect(useUiStore.getState().navMode).toBe("pinned");
+    expect(getThemeMode()).toBe("system");
+    // 主题模式卡跟着重置（key 重挂载后选中项回到「跟随系统」）
+    expect(screen.getByRole("radio", { name: "主题模式 跟随系统" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   });
 });
 

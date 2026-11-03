@@ -32,8 +32,10 @@ export const PALETTE_SETTINGS: PaletteSettingSection[] = [
   {
     tab: "appearance",
     label: "外观",
-    description: "主题色、字号与界面观感",
-    keywords: ["主题", "主题色", "颜色", "字号", "深浅"],
+    description: "主题模式、主题色、导航栏与界面观感",
+    // d.68：外观页新增「导航栏」卡（常显/自动隐藏），把同义说法登记进来，
+    // 用户在命令面板搜「导航栏」「自动隐藏」「Ctrl+B」都能落到外观页。
+    keywords: ["主题", "主题色", "颜色", "字号", "深浅", "导航栏", "自动隐藏", "侧边栏", "ctrl+b"],
   },
   {
     tab: "navigation",

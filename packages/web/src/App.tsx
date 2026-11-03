@@ -19,6 +19,7 @@ import { useStaffLoop } from "./lib/staff/loop.js";
 import { hasOpenModal, useModalA11y } from "./components/useModalA11y.js";
 import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
 import { useViewport } from "./lib/viewport.js";
+import { NAV_HOTZONE_PX } from "./lib/navPrefs.js";
 
 /**
  * 路由级懒加载：每个页面单独成 chunk，首屏只下「壳」。
@@ -199,8 +200,9 @@ function SharedFilesPanel({
 }: SharedFilesPanelProps) {
   return (
     <>
-      <div className="flex items-center justify-between gap-1 border-b border-line-soft px-3 py-2">
-        {/* d.62：表头用全站统一的 section 档（13/20/600），与导航轨 12px 内边距同节奏 */}
+      {/* d.68：表头左内边距与文件树行对齐（FileTree 行是 px-2），表头标题不再比内容缩进一档 */}
+      <div className="flex items-center justify-between gap-1 border-b border-line-soft px-2 py-2">
+        {/* d.62：表头用全站统一的 section 档（13/20/600） */}
         <span className="ui-section-title shrink-0 whitespace-nowrap">共享文件</span>
         {usage && (
           <span className="ui-micro min-w-0 flex-1 truncate">
@@ -526,6 +528,8 @@ function AppShell({
 
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
+  /** auto 模式下给左缘热区留一条 8px 空档，避免热区盖住内容最左侧的可点元素（列表整行按钮等）。 */
+  const navMode = useUiStore((s) => s.navMode);
 
   // 本机自动化：只在登录后的桌面端到点执行，不补跑、不自动拉起 InfoHub
   useAutomationScheduler(Boolean(authUser));
@@ -613,6 +617,19 @@ function AppShell({
         setPage(shortcutPage);
         return;
       }
+      if (e.metaKey || e.ctrlKey) {
+        // Ctrl/⌘+B：切换导航显隐（d.68）——
+        // pinned 下切到 auto（导航收起、主内容变宽）；auto 下呼出/收回左缘浮层。
+        // 输入框内不响应：浏览器里 Ctrl+B 是「加粗」，用户可能真在编辑文本。
+        // 有模态弹窗时只吞键不动导航：与 Alt+N、Ctrl+K 同一套纪律。
+        if (!e.altKey && !e.shiftKey && e.key.toLowerCase() === "b") {
+          if (inText) return;
+          e.preventDefault();
+          if (hasOpenModal()) return;
+          useUiStore.getState().toggleNav();
+          return;
+        }
+      }
       if (!e.metaKey && !e.ctrlKey) return;
     };
     window.addEventListener("keydown", onKey);
@@ -680,7 +697,14 @@ function AppShell({
     <div className="flex h-screen flex-col overflow-hidden border border-line bg-white">
       {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
       <TitleBar />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* relative 是导航轨 auto 模式的定位基准：浮层用 absolute 贴在本行内，
+          既不占布局宽度，也不会盖住上面的自定义标题栏。
+          paddingLeft 只在 auto 下出现：热区是 8px，这一条空档保证热区不压到内容最左侧
+          （助手页/团队页的列表行是整行按钮，左边缘就是可点区）。 */}
+      <div
+        className="relative flex min-h-0 flex-1 overflow-hidden"
+        style={navMode === "auto" ? { paddingLeft: NAV_HOTZONE_PX } : undefined}
+      >
         <NavRail onOpenSearch={onOpenSearch} onOpenShortcuts={onOpenShortcuts} />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* 窄窗顶部工具区（d.67 T4）：右侧共享文件栏默认不渲染，入口收在这里。

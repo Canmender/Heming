@@ -1,5 +1,10 @@
 import { create } from "zustand";
 import type { AutomationKind, SyncOptions } from "../lib/automation/model.js";
+import {
+  persistNavMode,
+  readStoredNavMode,
+  type NavMode,
+} from "../lib/navPrefs.js";
 
 /**
  * 导航页（d.67 合并后的 9 个入口）。
@@ -204,6 +209,31 @@ interface UiState {
   pageView: PageView | null;
   /** 左侧导航显示顺序（用户可自定义；持久化）。 */
   navOrder: NavPage[];
+  /**
+   * 导航轨显示模式（d.68）：`pinned` 常显（默认）/ `auto` 自动隐藏。
+   * 持久化到 `heming.nav.mode.v1`，解析与坏值回落见 `lib/navPrefs.ts`。
+   */
+  navMode: NavMode;
+  /**
+   * `auto` 模式下浮层导航是否展开（**临时态**，不落盘）。
+   * 与 `navMode` 分开：收起浮层 ≠ 放弃自动隐藏模式，下次悬停/快捷键仍可呼出。
+   */
+  navOpen: boolean;
+  /** 设为某档模式；切档时收起浮层（避免「pin 了却还挂着浮层」的半展开态）。 */
+  setNavMode: (mode: NavMode) => void;
+  /** 固定 ↔ 自动 切换（pin 按钮用）。 */
+  toggleNavMode: () => void;
+  /** 展开浮层导航（auto 模式；pinned 下无副作用）。 */
+  openNav: () => void;
+  /** 收起浮层导航。 */
+  closeNav: () => void;
+  /**
+   * 快捷键 Ctrl/⌘+B 的「切换显隐」：
+   * - pinned：切到 auto（导航隐藏，主内容变宽）；
+   * - auto：展开/收起浮层（呼出/收回）。
+   * 想重新常显用导航轨底部 pin 按钮或设置区「导航栏」卡。
+   */
+  toggleNav: () => void;
   /** 当前打开的助手会话（null=助手页显示选择列表）。 */
   activeConversationId: string | null;
   /** 右栏「发送到会话」待投递单槽（null=无）。切页时清空；ChatPage 命中目标会话即消费。 */
@@ -304,20 +334,22 @@ function persistNavOrder(order: NavPage[]): void {
  */
 let paletteIntentToken = 0;
 
+/** 取 localStorage；SSR / 隐私模式禁用时返回 null（调用方各自回落默认值）。 */
+function uiStorage(): Pick<Storage, "getItem" | "setItem"> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 export const useUiStore = create<UiState>((set, get) => ({
   page: "home",
   pageView: null,
-  navOrder: readStoredNavOrder(
-    typeof window === "undefined"
-      ? null
-      : (() => {
-          try {
-            return window.localStorage;
-          } catch {
-            return null;
-          }
-        })(),
-  ),
+  navOrder: readStoredNavOrder(uiStorage()),
+  navMode: readStoredNavMode(uiStorage()),
+  navOpen: false,
   activeConversationId: null,
   pendingAttachment: null,
   taskDraft: null,
@@ -472,5 +504,31 @@ export const useUiStore = create<UiState>((set, get) => ({
   resetNavOrder: () => {
     set({ navOrder: [...DEFAULT_NAV_ORDER] });
     persistNavOrder([...DEFAULT_NAV_ORDER]);
+  },
+  setNavMode: (mode) => {
+    const next = mode === "auto" ? "auto" : "pinned";
+    // 切档一律收起浮层：pin 之后还挂着一层浮层，看起来像「没生效」。
+    set({ navMode: next, navOpen: false });
+    persistNavMode(next);
+  },
+  toggleNavMode: () => {
+    get().setNavMode(get().navMode === "pinned" ? "auto" : "pinned");
+  },
+  openNav: () => {
+    if (get().navMode !== "auto") return;
+    set({ navOpen: true });
+  },
+  closeNav: () => {
+    if (!get().navOpen) return;
+    set({ navOpen: false });
+  },
+  toggleNav: () => {
+    const { navMode, navOpen } = get();
+    // pinned：Ctrl+B 的含义是「藏起来」——切到自动隐藏模式；再按一次呼出浮层。
+    if (navMode === "pinned") {
+      get().setNavMode("auto");
+      return;
+    }
+    set({ navOpen: !navOpen });
   },
 }));

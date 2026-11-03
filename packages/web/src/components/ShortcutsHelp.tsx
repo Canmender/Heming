@@ -10,7 +10,7 @@ import { XIcon } from "./icons.js";
  * （命令面板与它共用）。这里再抄一份数字 → 两份迟早漂移（改键位时只改一处，
  * 帮助面板就会教用户按错的键）。所以导航组由 `PALETTE_PAGES` 现场生成。
  *
- * 其它快捷键（Ctrl+K / Esc / Enter / Shift+Enter / ?）没有单一数据源，
+ * 其它快捷键（Ctrl+K / Ctrl+B / Esc / Enter / Shift+Enter / ?）没有单一数据源，
  * 用下面的静态表——它们同时出现在实现里，注释互相指向，改实现时记得改这里。
  */
 interface ShortcutRow {
@@ -21,6 +21,9 @@ interface ShortcutRow {
 
 const GLOBAL_ROWS: ShortcutRow[] = [
   { keys: ["Ctrl", "K"], label: "全局搜索（命令面板）" },
+  // d.68：切换导航显隐（pinned → auto 收起；auto 下呼出/收回浮层）。
+  // 实现在 App.tsx 的全局 keydown 里，与 Alt+N / Ctrl+K 同一套「模态弹窗时吞键」纪律。
+  { keys: ["Ctrl", "B"], label: "显示 / 隐藏导航栏" },
   { keys: ["?"], label: "打开快捷键帮助" },
   { keys: ["Ctrl", "/"], label: "打开快捷键帮助（备用键）" },
   { keys: ["Esc"], label: "关闭当前弹窗 / 取消" },

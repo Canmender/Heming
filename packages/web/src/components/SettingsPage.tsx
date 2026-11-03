@@ -12,6 +12,9 @@ import { PetSettingsCard } from "./PetSettingsCard.js";
 import { ThemeModeCard } from "./settings/ThemeModeCard.js";
 import { useUiStore, type NavPage } from "../store/ui.js";
 import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
+import { setThemeMode, watchThemeMode } from "../lib/theme.js";
+import { DEFAULT_NAV_MODE, type NavMode } from "../lib/navPrefs.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 import { CHANGELOG, logOpenState, parseInline, stripInline, toggleLog } from "../lib/changelog.js";
 import { UpdateCard } from "./UpdateCard.js";
 import {
@@ -191,7 +194,7 @@ export function SettingsPage() {
       title="设置区"
       subtitle="改动即时生效，仅作用于本机，无需重启。"
       headerExtra={
-        <div className="px-6 pb-3 pt-3">
+        <div className="px-6 pb-3 pt-3 max-[1199px]:px-4">
           {/* 横向标签栏：选中项白底、选中线压在下边框上（与内容区连成一体） */}
           <div className="flex gap-1" role="tablist" aria-label="设置分组">
             {SETTINGS_TABS.map((t) => {
@@ -237,7 +240,7 @@ export function SettingsPage() {
       }
     >
       {/* 内容区：一次只渲染当前分组，切换时不保留上一次的输入态（草稿本就一次性保存） */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 max-[1199px]:px-4">
         <div className="w-full max-w-[720px]">
           {searching ? (
             <section aria-label="设置搜索结果">
@@ -330,23 +333,7 @@ export function SettingsPage() {
                 </div>
               </>
             )}
-            {tab === "appearance" && (
-              <>
-                <div
-                  data-settings-id="accent-color"
-                  className={anchorClass(highlightId === "accent-color")}
-                >
-                  <AppearanceSection />
-                </div>
-                {/* d.67 T3：主题模式（浅色/深色/跟随系统）与主题色并列，互不影响。 */}
-                <div data-settings-id="theme-mode" className={anchorClass(highlightId === "theme-mode")}>
-                  <ThemeModeCard />
-                </div>
-                <div data-settings-id="pet" className={anchorClass(highlightId === "pet")}>
-                  <PetSettingsCard />
-                </div>
-              </>
-            )}
+            {tab === "appearance" && <AppearanceTab highlightedId={highlightId} />}
             {tab === "navigation" && (
               <div data-settings-id="nav-order" className={anchorClass(highlightId === "nav-order")}>
                 <NavigationSection />
@@ -481,6 +468,173 @@ function ProfileSection() {
       <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
         {EFFECT_NOTE}
       </div>
+    </section>
+  );
+}
+
+/**
+ * 外观分组（d.68 顺序）：主题模式 → 主题色 → 导航栏 → 桌宠 + 恢复默认外观。
+ *
+ * 为什么顺序要改：主题模式决定「亮/暗」，是最粗的一层；主题色只改填充强调色；
+ * 导航栏与桌宠是局部外观偏好。从粗到细看下来，用户不用来回跳。
+ *
+ * 「恢复默认外观」用既有 ConfirmDialog 二次确认：它一次改三处（主题模式/主题色/导航），
+ * 误点的代价比单张卡片的「恢复默认」大，值得多问一句。
+ */
+function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
+  const resetAccent = useThemeStore((t) => t.resetAccent);
+  const [confirmReset, setConfirmReset] = useState(false);
+  // 主题模式卡的模式是卡内 local state（外部重置后不会自己刷新），用 key 重挂载一次
+  const [themeModeKey, setThemeModeKey] = useState(0);
+
+  const resetAppearance = () => {
+    resetAccent(); // 主题色 → 默认墨色
+    setThemeMode("system"); // 主题模式 → 跟随系统
+    watchThemeMode({ accent: useThemeStore.getState().accent }); // 立即应用（摘旧挂新系统监听）
+    useUiStore.getState().setNavMode(DEFAULT_NAV_MODE); // 导航 → 固定常显
+    setThemeModeKey((k) => k + 1);
+    setConfirmReset(false);
+  };
+
+  return (
+    <>
+      {/* d.67 T3：主题模式（浅色/深色/跟随系统）排在最前，它决定整套配色 */}
+      <div data-settings-id="theme-mode" className={anchorClass(highlightedId === "theme-mode")}>
+        <ThemeModeCard key={themeModeKey} />
+      </div>
+      <div
+        data-settings-id="accent-color"
+        className={anchorClass(highlightedId === "accent-color")}
+      >
+        <AppearanceSection />
+      </div>
+      {/* d.68：导航栏显示方式（常显 / 自动隐藏），与导航轨底部 pin 按钮同源 */}
+      <div data-settings-id="nav-mode" className={anchorClass(highlightedId === "nav-mode")}>
+        <NavModeSection />
+      </div>
+      <div data-settings-id="pet" className={anchorClass(highlightedId === "pet")}>
+        <PetSettingsCard />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line-soft bg-subtle px-4 py-3">
+        <div className="min-w-0">
+          <div className="ui-body-sm font-medium">恢复默认外观</div>
+          <div className="ui-caption">主题模式跟随系统、主题色墨黑、导航栏常显</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setConfirmReset(true)}
+          className={btnGhost}
+        >
+          恢复默认外观
+        </button>
+      </div>
+
+      {confirmReset && (
+        <ConfirmDialog
+          title="恢复默认外观"
+          onCancel={() => setConfirmReset(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmReset(false)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={resetAppearance}
+                className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium"
+              >
+                恢复默认
+              </button>
+            </>
+          }
+        >
+          <p className="ui-body">
+            将把主题模式改为「跟随系统」、主题色恢复墨黑、导航栏恢复常显。桌宠与其它设置不受影响。
+          </p>
+        </ConfirmDialog>
+      )}
+    </>
+  );
+}
+
+/** 导航栏显示方式的两档（文案与 lib/navPrefs 的语义一一对应）。 */
+const NAV_MODE_OPTIONS: { id: NavMode; label: string; hint: string }[] = [
+  { id: "pinned", label: "固定常显", hint: "导航栏一直显示（默认，推荐）" },
+  { id: "auto", label: "自动隐藏", hint: "左缘悬停或 Ctrl+B 呼出，Esc 收回" },
+];
+
+/**
+ * 导航栏卡（d.68）：两档 radio + 一句话说明 + 恢复默认。
+ *
+ * 与导航轨底部的 pin 按钮读写同一个 store（`useUiStore.navMode`），
+ * 所以「在导航轨上 pin 过」再进设置页，选中项就是对的——不存在两份偏好。
+ */
+function NavModeSection() {
+  const navMode = useUiStore((s) => s.navMode);
+  const setNavMode = useUiStore((s) => s.setNavMode);
+
+  // 单选组键盘语义：←/↑ 上一档，→/↓ 下一档（与主题模式卡一致）
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const index = NAV_MODE_OPTIONS.findIndex((m) => m.id === navMode);
+    let next = index;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown")
+      next = (index + 1) % NAV_MODE_OPTIONS.length;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowUp")
+      next = (index - 1 + NAV_MODE_OPTIONS.length) % NAV_MODE_OPTIONS.length;
+    else return;
+    event.preventDefault();
+    setNavMode(NAV_MODE_OPTIONS[next].id);
+  };
+
+  return (
+    <section aria-label="导航栏" className="max-w-full ui-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="ui-section-title">导航栏</div>
+        <button
+          type="button"
+          aria-label="恢复默认导航栏模式"
+          onClick={() => setNavMode(DEFAULT_NAV_MODE)}
+          className={btnGhost}
+        >
+          恢复默认
+        </button>
+      </div>
+      <div className="mt-1 ui-caption">
+        自动隐藏时导航不占内容宽度：鼠标移到窗口左缘或按 Ctrl+B 呼出；移开 0.3 秒后自动收回，Esc 立即收回。
+      </div>
+      <div
+        role="radiogroup"
+        aria-label="导航栏显示方式"
+        className="mt-2 grid gap-2 sm:grid-cols-2"
+        onKeyDown={onKeyDown}
+      >
+        {NAV_MODE_OPTIONS.map((item) => {
+          const checked = navMode === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              aria-label={`导航栏 ${item.label}`}
+              tabIndex={checked ? 0 : -1}
+              onClick={() => setNavMode(item.id)}
+              className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                checked ? "border-ink bg-subtle-2" : "border-line bg-surface hover:bg-subtle"
+              }`}
+            >
+              <span className="block ui-body-sm">{item.label}</span>
+              <span className="mt-0.5 block ui-caption">{item.hint}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">{EFFECT_NOTE}</div>
     </section>
   );
 }

@@ -9,6 +9,27 @@
 @config "../tailwind.config.js";
 
 /*
+ * ── 字体族 token（d.68 · 工作流 B）────────────────────────────────────
+ *
+ * 只做「中文桌面字体栈」的收口，不加载任何外部字体（应用离线运行、桌面端是
+ * file:// 加载，外部字体既慢又可能被墙）。顺序按「拉丁 → 中文 → 系统默认」：
+ *   -apple-system / BlinkMacSystemFont（macOS 系统拉丁）→ Segoe UI（Windows 拉丁）→
+ *   PingFang SC（macOS 中文）→ HarmonyOS Sans SC（鸿蒙）→ Microsoft YaHei UI /
+ *   Microsoft YaHei（Windows 简体中文 UI 字体，微软官方推荐）→ Noto Sans SC → system-ui。
+ * 拉丁放在 CJK 之前是有意的：CJK 字体优先会让英文/数字被中文字体接管，
+ * 字宽与字重都不稳（调研文档 §3.2 同结论）。
+ * 等宽同理：JetBrains Mono（用户自装）→ Cascadia Code（Windows Terminal 自带）→
+ * Sarasa Mono SC / Noto Sans Mono CJK SC（中文等宽）→ Consolas。
+ *
+ * 为什么走 `@theme` 而不是只给 body 写 font-family：仓里有 `font-sans` / `font-mono`
+ * 工具类（代码块、InlineText 的 <code> 等），只改 body 会留下一半字体不跟随。
+ */
+@theme {
+  --font-sans: var(--heming-font-sans);
+  --font-mono: var(--heming-font-mono);
+}
+
+/*
  * v4 把默认边框色从 v3 的 gray-200 改成了 currentColor —— 所有没写颜色的 border
  * 会从浅灰变成正文黑，观感差很多。这里在 base 层把默认值恢复成 v3 的 #e5e7eb；
  * 显式颜色工具类（border-line / border-ink 等）在 utilities 层，优先级更高，不受影响。
@@ -45,12 +66,22 @@
   --subtle-3: #f3f3f3;
   --subtle-4: #f0f0f0;
   --body: #555555;
-  --placeholder: #b8b8b8;
+  /* 占位符对比度（d.68）：#b8b8b8 在 #ffffff 上只有约 2.0:1，低于 WCAG 2.2 AA 的 3:1；
+     #767676 ≈ 4.5:1，仍明显弱于正文，观感上还是「占位」而不是「已输入」。 */
+  --placeholder: #767676;
   --danger: #b42318;
   --danger-soft: #fef3f2;
   --danger-line: #fecdca;
   --warn: #b45309;
   --success: #1d6b3a;
+  /* 中文字体栈（d.68）：纯系统字体，不加载外部字体；理由见文件顶部 @theme 段。
+     顺序是「拉丁在前、CJK 在后」：Windows 上让 Segoe UI 管英文/数字（字宽、字重更稳），
+     中文回落到 Microsoft YaHei UI。纯 CJK 优先会让英文被中文字体接管，观感明显变差。 */
+  --heming-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui,
+    sans-serif;
+  --heming-font-mono: ui-monospace, "JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas,
+    "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Courier New", monospace;
   color-scheme: light;
 }
 
@@ -67,7 +98,9 @@
   --subtle-3: #232529;
   --subtle-4: #2a2c31;
   --body: #c7ccd3;
-  --placeholder: #6b7078;
+  /* 暗色占位符：#6b7078 在 #16171a 上约 3.6:1，偏弱；#8b9199 ≈ 5:1，
+     仍弱于正文 #c7ccd3（约 9:1），层级不丢。 */
+  --placeholder: #8b9199;
   --danger: #ff8a80;
   --danger-soft: #2a1a1a;
   --danger-line: #5a2a2a;
@@ -78,6 +111,16 @@
 
 body {
   @apply bg-surface text-ink antialiased;
+  font-family: var(--heming-font-sans);
+}
+
+/* 代码块/快捷键键帽/行内代码统一等宽栈：`font-mono` 工具类之外再兜一层标签选择器，
+   避免个别位置（原生 <kbd>、<pre>）漏掉字体。 */
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--heming-font-mono);
 }
 
 /*
@@ -173,13 +216,13 @@ body {
  * 只允许用这四档，避免继续长出新字号。
  *
  * 命名前缀 `ui-`：与 Tailwind 工具类区分，便于源码检索「还有谁没用统一档位」。
- * 尺寸取现有界面里出现最多、观感最稳的值，不追求新奇：
- *   page-title 18/24 600   —— 页面级标题（原来 15/17/18px 混用）
+ * 尺寸取现有界面里出现最多、观感最稳的值，不追求新奇（d.68 微调行高，类名不变）：
+ *   page-title 18/26 600   —— 页面级标题（原来 15/17/18px 混用）
  *   page-sub   12/20 400   —— 标题下方一句话说明
  *   section    13/20 600   —— 卡片/分区标题
  *   body       13/22 400   —— 正文（中文 13px 在 100% 缩放下最易读）
  *   body-sm    12/20 400   —— 次要正文/表格
- *   caption    11/16 400   —— 注释/时间/辅助信息
+ *   caption    11/17 400   —— 注释/时间/辅助信息
  *   micro      10/14 500   —— 角标/徽标（仅此用途，别再扩）
  *   numeric    tabular-nums —— 数字对齐（表格/统计）
  *
@@ -187,7 +230,7 @@ body {
  */
 @layer components {
   .ui-page-title {
-    @apply text-[18px] font-semibold leading-6 tracking-[-0.01em] text-ink;
+    @apply text-[18px] font-semibold leading-[26px] tracking-[-0.01em] text-ink;
   }
   .ui-page-sub {
     @apply mt-1 text-[12px] leading-5 text-muted;
@@ -202,13 +245,36 @@ body {
     @apply text-[12px] leading-5 text-ink;
   }
   .ui-caption {
-    @apply text-[11px] leading-4 text-muted;
+    @apply text-[11px] leading-[17px] text-muted;
   }
   .ui-micro {
     @apply text-[10px] font-medium leading-4 text-muted;
   }
   .ui-numeric {
     @apply tabular-nums;
+  }
+  /*
+   * 卡片基元（d.68 排版轮）：壳层/主页/设置页的「白底 + 细边 + 卡片阴影 + 12px 圆角」
+   * 此前在 30+ 处重复写了三四个类，宽窄窗下偶尔少写 shadow 或把圆角写成本地值。
+   * 这里只收口**外观**，内边距仍由调用方决定（主页信息密度更高用 p-3，设置页用 p-4）。
+   *
+   * ★ 颜色必须走 CSS 变量而不是 `@apply bg-white shadow-card`：
+   *   暗色兼容层是按**类名**覆盖的（`[data-theme="dark"] .bg-white` / `.shadow-card`），
+   *   `.ui-card` 的元素身上没有 `bg-white` 类，兼容层匹配不到——@apply 会把亮色值
+   *   直接编译进 `.ui-card`，暗色下就变成「白卡片」。所以背景/阴影用变量与暗色覆盖。
+   */
+  .ui-card {
+    @apply rounded-xl border border-line-soft;
+    background-color: var(--surface);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
+  }
+  /*
+   * 浮层阴影（d.68 导航 auto 浮层）：侧滑出来的面板需要一层柔和竖向投影把层次压出来。
+   * 不复用 `shadow-float`：那是 3px 硬偏移的「贴纸」阴影（卡片/气泡用的），侧滑面板用它会
+   * 像贴在内容上而不是浮在上面。亮色值写在这里，暗色在文件末尾的兼容层里加深。
+   */
+  .ui-overlay-shadow {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
   }
 }
 
@@ -229,7 +295,7 @@ body {
     @apply h-8 w-full rounded-md border border-line-strong bg-white px-2.5 text-[13px] leading-5 text-ink outline-hidden transition-colors;
   }
   .ui-input::placeholder {
-    @apply text-[#b8b8b8];
+    color: var(--placeholder);
   }
   .ui-input:focus {
     @apply border-ink;
@@ -293,7 +359,7 @@ body {
 
   /* ── 列表行（名册/会话/插件/技能等） ── */
   .ui-list-row {
-    @apply flex items-center gap-2 border-b border-line-soft px-3 py-2.5 transition-colors last:border-b-0;
+    @apply flex min-h-[40px] items-center gap-2 border-b border-line-soft px-3 py-2 transition-colors last:border-b-0;
   }
   .ui-list-row:hover {
     @apply bg-[#fbfbfb];
@@ -463,6 +529,16 @@ body {
 }
 [data-theme="dark"] .shadow-float {
   box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+/* 导航 auto 浮层：暗色下同样加深（亮色 0.14 → 暗色 0.55），但边缘不发光 */
+[data-theme="dark"] .ui-overlay-shadow {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+/* 卡片基元（.ui-card）自绘背景与阴影：不经过 .bg-white / .shadow-card 类名，
+   所以上面两条按类名覆盖的暗色规则匹配不到，必须单独覆盖（背景用 --surface 变量）。 */
+[data-theme="dark"] .ui-card {
+  background-color: var(--surface);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
 }
 
 /* 图片/视频不因暗色反色；确保表单控件在暗色下也跟随（Chromium 默认控件色） */

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useUiStore, DEFAULT_NAV_ORDER, normalizeNavOrder, readStoredNavOrder, resolvePage } from "./ui.js";
+import { NAV_MODE_KEY } from "../lib/navPrefs.js";
 
 describe("ui store 页面与会话状态", () => {
   beforeEach(() => {
@@ -267,5 +268,76 @@ describe("ui store 自动化意图", () => {
     useUiStore.getState().focusAutomation("a1");
     useUiStore.getState().openConversation("c1");
     expect(useUiStore.getState().automationFocusId).toBeNull();
+  });
+});
+
+/**
+ * 导航栏显示模式（d.68）：pinned（默认常显）/ auto（自动隐藏）。
+ * store 只做状态与持久化；解析/坏值回落由 lib/navPrefs 的用例覆盖。
+ */
+describe("ui store 导航栏模式", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useUiStore.setState({ navMode: "pinned", navOpen: false });
+  });
+
+  it("默认常显，浮层默认收起", () => {
+    const s = useUiStore.getState();
+    expect(s.navMode).toBe("pinned");
+    expect(s.navOpen).toBe(false);
+  });
+
+  it("setNavMode 切换并落盘；切档时收起浮层", () => {
+    useUiStore.getState().openNav(); // pinned 下 openNav 是 no-op
+    expect(useUiStore.getState().navOpen).toBe(false);
+
+    useUiStore.getState().setNavMode("auto");
+    expect(useUiStore.getState().navMode).toBe("auto");
+    expect(localStorage.getItem(NAV_MODE_KEY)).toBe("auto");
+
+    useUiStore.getState().openNav();
+    expect(useUiStore.getState().navOpen).toBe(true);
+
+    // 切回 pinned：浮层必须一起收起，否则会出现「常显 + 还挂着浮层」的半展开态
+    useUiStore.getState().setNavMode("pinned");
+    expect(useUiStore.getState().navMode).toBe("pinned");
+    expect(useUiStore.getState().navOpen).toBe(false);
+    expect(localStorage.getItem(NAV_MODE_KEY)).toBe("pinned");
+  });
+
+  it("toggleNavMode 在固定 ↔ 自动之间来回", () => {
+    useUiStore.getState().toggleNavMode();
+    expect(useUiStore.getState().navMode).toBe("auto");
+    useUiStore.getState().toggleNavMode();
+    expect(useUiStore.getState().navMode).toBe("pinned");
+  });
+
+  it("Ctrl+B 语义（toggleNav）：pinned → 切 auto；auto → 展开/收起浮层", () => {
+    useUiStore.getState().toggleNav();
+    expect(useUiStore.getState().navMode).toBe("auto");
+    expect(useUiStore.getState().navOpen).toBe(false);
+
+    useUiStore.getState().toggleNav();
+    expect(useUiStore.getState().navOpen).toBe(true);
+    useUiStore.getState().toggleNav();
+    expect(useUiStore.getState().navOpen).toBe(false);
+    // 收起浮层 ≠ 放弃自动隐藏：再按一次还能呼出
+    useUiStore.getState().toggleNav();
+    expect(useUiStore.getState().navOpen).toBe(true);
+    expect(useUiStore.getState().navMode).toBe("auto");
+  });
+
+  it("openNav/closeNav 只在 auto 下对浮层生效", () => {
+    useUiStore.getState().openNav();
+    expect(useUiStore.getState().navOpen).toBe(false);
+
+    useUiStore.getState().setNavMode("auto");
+    useUiStore.getState().openNav();
+    expect(useUiStore.getState().navOpen).toBe(true);
+    useUiStore.getState().closeNav();
+    expect(useUiStore.getState().navOpen).toBe(false);
+    // 重复 close 不产生额外状态变化（幂等）
+    useUiStore.getState().closeNav();
+    expect(useUiStore.getState().navOpen).toBe(false);
   });
 });

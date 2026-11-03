@@ -13,8 +13,11 @@ describe("ShortcutsHelp（快捷键帮助面板）", () => {
     for (const group of ["导航", "全局", "编辑"]) {
       expect(within(dialog).getByRole("heading", { name: group })).toBeInTheDocument();
     }
-    // 全局/编辑组的静态表（Ctrl+K / Esc / Enter / Shift+Enter / ?）
+    // 全局/编辑组的静态表（Ctrl+K / Ctrl+B / Esc / Enter / Shift+Enter / ?）
     expect(within(dialog).getByText("全局搜索（命令面板）")).toBeInTheDocument();
+    // d.68：导航栏显隐（Ctrl+B）必须登记，否则帮助面板会漏教一个全局键
+    expect(within(dialog).getByText("显示 / 隐藏导航栏")).toBeInTheDocument();
+    expect(within(dialog).getByText("B")).toBeInTheDocument();
     expect(within(dialog).getByText("关闭当前弹窗 / 取消")).toBeInTheDocument();
     expect(within(dialog).getByText("发送消息 / 确认")).toBeInTheDocument();
     expect(within(dialog).getByText("换行（不发送）")).toBeInTheDocument();

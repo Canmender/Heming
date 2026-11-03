@@ -68,8 +68,9 @@ export function PageShell({
   return (
     <div className={`flex h-full min-h-0 min-w-0 flex-col ${className}`}>
       {/* 窄窗（<1200）收窄内边距：1280/1024 两档下页头与内容都不贴边也不浪费横向空间。
-          断点用 arbitrary variant（max-[1199px]:），不新增 Tailwind breakpoint、不动既有 md:/lg:。 */}
-      <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-line-soft px-6 pb-4 pt-5 max-[1199px]:px-4">
+          断点用 arbitrary variant（max-[1199px]:），不新增 Tailwind breakpoint、不动既有 md:/lg:。
+          d.68：页头纵向统一 py-4（16），横向 24/窄窗 16，与内容区左右内边距同列。 */}
+      <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-line-soft px-6 py-4 max-[1199px]:px-4">
         <div className="min-w-0">
           <h1 className="ui-page-title">{title}</h1>
           {subtitle ? <p className="ui-page-sub">{subtitle}</p> : null}
