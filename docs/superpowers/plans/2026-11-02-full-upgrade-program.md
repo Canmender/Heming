@@ -288,7 +288,7 @@
 | ① 工程基线升级 | React 19 / zustand 5 / zod 4 / Vite 8 / Vitest 5 / Tailwind 4 / Electron 45 / pdfjs 6；pixi 与 TS6 有证据不升 | ✅ |
 | ② 功能与技术债 | `file_patch`、回合日志回放/重跑/分叉、团队用量/日程/清除、桌宠在场感、P0-5b 加密与清理、CSP、release.mjs + publish-update.mjs、docker 清理、WS `?token=` 删除 | ✅ |
 | ③ 体验与安全加固 | 首屏 −79.4%、无障碍 AA 与焦点环、错误态/离线巡检、safeStorage 异步迁移、安全复审（越权 IPC 修复） | ✅ |
-| 需用户决定的遗留 | ① `feat/team-system` 合并回 `main`（main 被 WorkBuddy 工作树占用）；② 线上旧 IM 数据是否真删（dry-run 仅 3 行）；③ CSP 何时从 report-only 切 enforce；④ NVDA 真机走查与桌宠/file_patch 手工联调；⑤ 安全复审待修 4 条（草稿/token 明文、可写根 rootId、files mime nosniff）排期 | 待定 |
+| 需用户决定的遗留 | ① ~~`feat/team-system` 合并回 `main`（main 被 WorkBuddy 工作树占用）~~ **✅ 2026-11-03 已快进合并并推送到 origin（`main` = `feat/team-system` = `81e3472`，远端同名分支已推送）**；② 线上旧 IM 数据是否真删（dry-run 仅 3 行）；③ CSP 何时从 report-only 切 enforce；④ NVDA 真机走查与桌宠/file_patch 手工联调；⑤ 安全复审待修 4 条（草稿/token 明文、可写根 rootId、files mime nosniff）排期 | 待定 |
 
 ### 第四波发布完成（2026-11-02 22:22）——「全面升级」四批全部发布
 
