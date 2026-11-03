@@ -17,6 +17,12 @@ import {
   type AutomationDraft,
   type AutomationTask,
 } from "../lib/automation/model.js";
+import { isAutomationKind, kindMeta, listKindMeta } from "../lib/automation/kinds.js";
+import {
+  MAX_AUTOMATION_RUNS,
+  useAutomationRunsStore,
+  type AutomationRun,
+} from "../lib/automation/runs.js";
 import { runAutomationTask } from "../lib/automation/runner.js";
 import { useAutomationStore } from "../lib/automation/store.js";
 import { useUiStore } from "../store/ui.js";
@@ -39,6 +45,22 @@ function statusClass(status: AutomationTask["lastStatus"]): string {
   if (status === "error") return "border-[#fecdca] bg-[#fef3f2] text-[#b42318]";
   if (status === "skipped") return "border-[#fed7aa] bg-[#fffbeb] text-[#b45309]";
   return "border-line bg-panel text-muted";
+}
+
+/** 执行耗时：秒级为主，超过一分钟给「N 分 M 秒」。 */
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "0 秒";
+  if (ms < 1_000) return "不到 1 秒";
+  const seconds = Math.round(ms / 1_000);
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest > 0 ? `${minutes} 分 ${rest} 秒` : `${minutes} 分`;
+}
+
+/** 运行记录的触发来源（文案留在页内，避免同一句话散到多个模块）。 */
+function triggerLabel(trigger: AutomationRun["trigger"]): string {
+  return trigger === "manual" ? "手动" : "定时";
 }
 
 function cloneDraft(draft: AutomationDraft): AutomationDraft {
@@ -69,10 +91,14 @@ export function AutomationPage() {
   const removeTask = useAutomationStore((s) => s.remove);
   const beginRun = useAutomationStore((s) => s.beginRun);
   const finishRun = useAutomationStore((s) => s.finishRun);
+  const runs = useAutomationRunsStore((s) => s.runs);
+  const clearRuns = useAutomationRunsStore((s) => s.clearAll);
 
   const openInfohub = useUiStore((s) => s.openInfohub);
   const intent = useUiStore((s) => s.automationIntent);
   const consumeIntent = useUiStore((s) => s.consumeAutomationIntent);
+  const automationFocusId = useUiStore((s) => s.automationFocusId);
+  const consumeAutomationFocus = useUiStore((s) => s.consumeAutomationFocus);
 
   const desktop = isInfohubAvailable();
   const booted = useInfohubStore((s) => s.booted);
@@ -82,6 +108,11 @@ export function AutomationPage() {
   const [deleteTarget, setDeleteTarget] = useState<AutomationTask | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  /** 展开运行记录的任务 id；默认收起，只有用户点开或通知跳转时才展开。 */
+  const [expandedRuns, setExpandedRuns] = useState<Record<string, boolean>>({});
+  const [clearRunsOpen, setClearRunsOpen] = useState(false);
+  /** 从通知跳进来时短暂高亮目标任务，2 秒后自灭（不做常驻选中态）。 */
+  const [highlightId, setHighlightId] = useState<string | null>(null);
 
   // 直接进本页（如刷新后）时也探测一次；只读 info，不拉起进程。
   useEffect(() => {
@@ -94,6 +125,19 @@ export function AutomationPage() {
     setError("");
     setEditor({ id: null, draft: draftForKind(intent.kind, intent.sync) });
   }, [intent, consumeIntent]);
+
+  // 从通知中心跳进来：展开目标任务的运行记录、滚到视野里、短暂高亮。
+  // 无论命中与否都消费焦点——留着的话，切走再回来会被同一条旧通知再拽一次。
+  useEffect(() => {
+    if (!automationFocusId) return;
+    const taskId = automationFocusId;
+    consumeAutomationFocus();
+    setExpandedRuns((current) => ({ ...current, [taskId]: true }));
+    setHighlightId(taskId);
+    document.getElementById(`automation-task-${taskId}`)?.scrollIntoView?.({ block: "center" });
+    const timer = window.setTimeout(() => setHighlightId(null), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [automationFocusId, consumeAutomationFocus]);
 
   const enabledCount = tasks.filter((task) => task.enabled).length;
   const nextTask = tasks
@@ -113,7 +157,8 @@ export function AutomationPage() {
   async function runNow(task: AutomationTask) {
     setError("");
     setNotice("");
-    if (!beginRun(task.id)) {
+    // 「立即运行」是人点的：触发来源记为 manual，运行记录里与定时任务区分得开。
+    if (!beginRun(task.id, Date.now(), "manual")) {
       setError("已有任务正在运行，请等它结束");
       return;
     }
@@ -187,10 +232,20 @@ export function AutomationPage() {
         <Stat label="任务" value={String(tasks.length)} />
         <Stat label="启用" value={String(enabledCount)} />
         <Stat label="下次执行" value={nextTask ? formatAutomationTime(nextTask.nextRunAt) : "—"} />
+        <Stat label="运行记录" value={String(runs.length)} />
         <Stat
           label="信息中枢"
           value={!desktop ? "仅桌面端" : infohubRunning ? "已连接" : booted ? "未连接" : "探测中"}
         />
+        {runs.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setClearRunsOpen(true)}
+            className="shrink-0 self-stretch rounded-lg border border-line px-3 text-[11px] text-[#555] hover:bg-[#fafafa]"
+          >
+            清空记录
+          </button>
+        )}
       </div>
 
       <div>
@@ -212,16 +267,20 @@ export function AutomationPage() {
             />
           </div>
         ) : (
-          <ul className="flex flex-col gap-4">
-            {tasks.map((task) => {
-              const running = runningId === task.id;
-              return (
-                <li
-                  key={task.id}
-                  className={`rounded-xl border bg-white px-4 py-3 shadow-card ${
-                    task.enabled ? "border-line" : "border-line-soft opacity-75"
-                  }`}
-                >
+          <>
+            <ul className="flex flex-col gap-4">
+              {tasks.map((task) => {
+                const running = runningId === task.id;
+                const taskRuns = runs.filter((run) => run.taskId === task.id);
+                const runsOpen = expandedRuns[task.id] === true;
+                return (
+                  <li
+                    key={task.id}
+                    id={`automation-task-${task.id}`}
+                    className={`rounded-xl border bg-white px-4 py-3 shadow-card ${
+                      task.enabled ? "border-line" : "border-line-soft opacity-75"
+                    } ${highlightId === task.id ? "ring-2 ring-[#bbb]" : ""}`}
+                  >
                   <div className="flex flex-wrap items-start gap-3">
                     <div className="mt-0.5 flex w-[70px] shrink-0 flex-col items-start gap-1">
                       <span
@@ -243,9 +302,7 @@ export function AutomationPage() {
                           {actionLabel(task.kind)}
                         </span>
                       </div>
-                      <div className="mt-1 text-[11px] text-[#555]">
-                        {task.kind === "infohub.sync" ? describeAction(task) : "重扫本机归档的日程表"}
-                      </div>
+                      <div className="mt-1 text-[11px] text-[#555]">{describeAction(task)}</div>
                       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted">
                         <span>{describeSchedule(task.schedule)}</span>
                         <span>
@@ -265,6 +322,58 @@ export function AutomationPage() {
                           {task.lastDetail}
                         </div>
                       )}
+                      <div className="mt-2 border-t border-line-soft pt-1.5">
+                        <button
+                          type="button"
+                          aria-label={`运行记录 ${task.name}`}
+                          aria-expanded={runsOpen}
+                          onClick={() =>
+                            setExpandedRuns((current) => ({
+                              ...current,
+                              [task.id]: !current[task.id],
+                            }))
+                          }
+                          className="text-[10px] text-[#555] hover:text-ink"
+                        >
+                          {runsOpen ? "收起运行记录" : `运行记录（${taskRuns.length}）`}
+                        </button>
+                        {runsOpen &&
+                          (taskRuns.length === 0 ? (
+                            <p className="mt-1 text-[10px] text-muted">还没有运行记录。</p>
+                          ) : (
+                            <ul className="mt-1.5 flex flex-col gap-1">
+                              {taskRuns.slice(0, 8).map((run) => (
+                                <li
+                                  key={run.id}
+                                  className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-line-soft bg-panel px-2 py-1 text-[10px] text-[#555]"
+                                >
+                                  <span
+                                    className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${statusClass(run.status)}`}
+                                  >
+                                    {runStatusLabel(run.status)}
+                                  </span>
+                                  <span className="tabular-nums">
+                                    {formatAutomationTime(run.finishedAt)}
+                                  </span>
+                                  <span>{triggerLabel(run.trigger)}</span>
+                                  <span className="tabular-nums">
+                                    耗时 {formatDuration(run.durationMs)}
+                                  </span>
+                                  {run.detail && (
+                                    <span className="min-w-0 basis-full break-words leading-4 text-[#666]">
+                                      {run.detail}
+                                    </span>
+                                  )}
+                                </li>
+                              ))}
+                              {taskRuns.length > 8 && (
+                                <li className="text-[10px] text-muted">
+                                  只显示最近 8 条，共 {taskRuns.length} 条
+                                </li>
+                              )}
+                            </ul>
+                          ))}
+                      </div>
                     </div>
 
                     <div className="flex shrink-0 flex-wrap items-center gap-1.5">
@@ -306,8 +415,13 @@ export function AutomationPage() {
                   </div>
                 </li>
               );
-            })}
-          </ul>
+              })}
+            </ul>
+            <p className="mx-auto mt-3 max-w-[900px] text-[10px] leading-4 text-muted">
+              运行记录只存本机，最多保留 {MAX_AUTOMATION_RUNS} 条；本机存储写不下时只在本次会话里可见。
+              错过的时刻不补跑，失败也不会自动重试。
+            </p>
+          </>
         )}
       </div>
 
@@ -353,6 +467,39 @@ export function AutomationPage() {
         >
           <p className="text-[12px] leading-6">
             确定删除「{deleteTarget.name}」？删除后不会再按计划执行，已有的运行结果也会一并移除。
+          </p>
+        </ConfirmDialog>
+      )}
+
+      {clearRunsOpen && (
+        <ConfirmDialog
+          title="清空运行记录"
+          onCancel={() => setClearRunsOpen(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setClearRunsOpen(false)}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  clearRuns();
+                  setClearRunsOpen(false);
+                  setNotice("运行记录已清空");
+                }}
+                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#912018]"
+              >
+                清空
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            确定清空全部运行记录？共 {runs.length} 条，清空后无法恢复；任务本身与排期不受影响。
           </p>
         </ConfirmDialog>
       )}
@@ -482,19 +629,25 @@ function AutomationEditor({
           <select
             id="automation-kind"
             value={draft.kind}
-            onChange={(e) =>
+            onChange={(e) => {
+              const next = e.target.value;
+              // 下拉项来自注册表；值不可信时落回默认动作（与旧行为「未知按同步」等价）。
               setDraft((current) => ({
                 ...current,
-                kind: e.target.value === "infohub.agenda" ? "infohub.agenda" : "infohub.sync",
-              }))
-            }
+                kind: isAutomationKind(next) ? next : "infohub.sync",
+              }));
+            }}
             className="mt-1 w-full rounded-md border border-line-strong bg-white px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
           >
-            <option value="infohub.sync">{actionLabel("infohub.sync")}</option>
-            <option value="infohub.agenda">{actionLabel("infohub.agenda")}</option>
+            {listKindMeta().map((meta) => (
+              <option key={meta.kind} value={meta.kind}>
+                {meta.label}
+              </option>
+            ))}
           </select>
+          <p className="mt-1 text-[10px] leading-4 text-muted">{kindMeta(draft.kind).summary}</p>
 
-          {draft.kind === "infohub.sync" && (
+          {kindMeta(draft.kind).hasSyncParams && (
             <div className="mt-2 rounded-lg border border-line-soft bg-panel p-3">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
                 <span className="font-medium text-[#555]">同步选项</span>

@@ -34,6 +34,8 @@ const KIND_LABEL: Record<AppNotification["kind"], string> = {
   approval: "确认",
   // d.48：常驻幕僚的主动简报——点开去幕僚页看完整证据。
   staff: "幕僚",
+  // 自动化任务执行失败——点开去自动化页并选中那条任务（运行记录在那儿）。
+  automation: "自动化",
 };
 
 /**
@@ -103,6 +105,12 @@ export function NotificationCenter() {
     setOpen(false);
     if (item.kind === "staff") {
       useUiStore.getState().setPage("staff");
+      return;
+    }
+    // 放在 staff 之后、task 之前：automation 与 task 都带 id，顺序反了会先命中 task 分支
+    // 走进任务区（自动化任务的 id 在任务区里根本不存在）。
+    if (item.kind === "automation" && item.automationId) {
+      useUiStore.getState().focusAutomation(item.automationId);
       return;
     }
     if (item.kind === "task" && item.taskId) {

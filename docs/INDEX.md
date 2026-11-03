@@ -124,6 +124,7 @@
 | [specs/2026-11-02-d60-ux-round.md](superpowers/specs/2026-11-02-d60-ux-round.md) | **d.60.2.21 用户体验优化轮**：审计到的 7 个问题（首跑无引导/未绑定模型不提示/命令面板单薄/空态空白/页面切换无骨架/登录页圆环压表单/文件栏缺上下文）与三轨方案（首跑引导+提示同源、命令面板 v2、空态骨架细节） |
 | [research/2026-11-02-security-review.md](research/2026-11-02-security-review.md) | **d.59.2.21 安全复审**（28 条结论，每条带 `file:line`）：越权 IPC（已修，`secureIpc` fail-closed + 桌宠导航闸 + IPC 通道不变量守卫）、E2E 红线完整性、本机存储口径、保险模块零网络、注入面；待修 4 条（草稿/token 明文、可写根 rootId、files mime nosniff）与处置 |
 | [research/2026-11-02-a11y-error-audit.md](research/2026-11-02-a11y-error-audit.md) | **d.59.2.20 无障碍与错误态巡检**：焦点环系统性回归（Tailwind 4 `outline-hidden` 后 59 处控件）、屏幕阅读语义、流式 live 区、对比度实测表与 token 修复（`muted #6f6f6f` AA、`line-strong` 表单边界）、逐入口 loading/error/retry 三态清单 |
+| [specs/2026-11-03-d66-automation-execution-kernel.md](superpowers/specs/2026-11-03-d66-automation-execution-kernel.md) | d.66：自动化执行内核——动作注册表（`kinds.ts`/`actions.ts`，加动作只加元数据 + 执行函数）、运行记录独立键（40 条 / 192KB 双淘汰、触发来源与耗时、删任务级联）、失败通知（`kind:"automation"` + 跳转定位）、存储水位登记；借 n8n 概念但不复制代码，仍不自动重试/不补跑 |
 
 ## 4. 调研
 
@@ -140,6 +141,9 @@
 | [research/2026-10-22-deep-audit-followup-plan.md](research/2026-10-22-deep-audit-followup-plan.md) | 深度调研与后续完善计划：P0 红线口子 / P1 数据一致性 / P2 体感 / P3 功能 / P4 工程，逐条带 `file:line` 证据与 d.30… 分轮排期 |
 | [research/2026-10-28-ai-im-ux-pain-points.md](research/2026-10-28-ai-im-ux-pain-points.md) | AI 工作台 / IM 体验痛点：后台失联、系统通知、会话列表、免打扰、全局搜索、presence、托盘（P0–P3，附本仓证据；d.39 取 P0 两项 + 免打扰） |
 | [research/2026-11-01-codex-vs-heming-agent.md](research/2026-11-01-codex-vs-heming-agent.md) | Codex 全量对比：15 维能力矩阵、六个缺口与逐条改法、可移植资产清单（Apache-2.0）、P0/P1/P2 路线；G1–G6 已于 d.50–d.52 落地 |
+| [research/2026-11-03-n8n-engine-notes.md](research/2026-11-03-n8n-engine-notes.md) | n8n 工作流引擎一手源码调研（2.46.0 / `bb832f1`，180 处 `file:line` 已校验）：执行栈、重试默认值与硬边界、节点注册表、执行记录两级清理、调度 misfire/去重、表达式与超时；含「可移植/需改造/不可移植」判断表与 8 条候选改进 |
+| [research/2026-11-03-n8n-license-and-reuse.md](research/2026-11-03-n8n-license-and-reuse.md) | n8n 许可证事实与复用边界：Sustainable Use License 1.0（fair-code，非 OSI 开源）、核心包全为 SUL、npm 发布物许可被改写、2019 起从未 OSI 开源；结论「不复制代码、只借概念」，附可直接抄的「来源与许可」声明模板 |
+| [research/2026-11-03-heming-automation-audit.md](research/2026-11-03-heming-automation-audit.md) | 和鸣自动化子系统审计（d.48 现状）：能力表、红线原文、存储键与内存态、动作注册表/重试/运行记录/失败通知四块的精确扩展点（`file:line`）、通知中心 API、测试约定与 14 条风险坑；推荐方案 B |
 
 ## 5. 历史计划
 

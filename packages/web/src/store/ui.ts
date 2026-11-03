@@ -165,6 +165,11 @@ interface UiState {
    * TeamPage 命中该 id 即选中并消费，避免切走再回来还被同一目标钉住。
    */
   teamFocusUserId: string | null;
+  /**
+   * 通知中心跳转自动化页时要选中的自动化任务（null=无）。
+   * 与 taskFocusId 同思路：只到「进入自动化页」为止，页面命中该 id 即选中并消费。
+   */
+  automationFocusId: string | null;
   /** 进入信息中枢的一次性意图（检索词/日程页）；命中即消费。 */
   infohubIntent: InfohubIntent | null;
   /** 进入自动化页并预填新建表单的一次性意图；命中即消费。 */
@@ -206,6 +211,9 @@ interface UiState {
   /** 命令面板跳到团队页并选中某位成员。 */
   focusTeamMember: (userId: string) => void;
   consumeTeamFocus: () => void;
+  /** 从通知中心跳到自动化页的某条自动化任务（看它的运行记录）。 */
+  focusAutomation: (taskId: string) => void;
+  consumeAutomationFocus: () => void;
   /** 回到助手选择列表（保持助手页，不选会话）。 */
   leaveConversation: () => void;
   /** 置入待投递槽（单槽：后写覆盖先写）。 */
@@ -253,6 +261,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   taskDraft: null,
   taskFocusId: null,
   teamFocusUserId: null,
+  automationFocusId: null,
   infohubIntent: null,
   automationIntent: null,
   settingsTab: null,
@@ -273,6 +282,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       // 未消费的任务投递跟着离开：切页后再自动发送会让用户莫名其妙多一条消息。
       taskDraft: null,
       taskFocusId: null,
+      automationFocusId: null,
       infohubIntent: null,
       automationIntent: null,
     }),
@@ -283,6 +293,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       pendingAttachment: null,
       taskDraft: null,
       taskFocusId: null,
+      automationFocusId: null,
       infohubIntent: intent ?? null,
       automationIntent: null,
     }),
@@ -294,6 +305,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       pendingAttachment: null,
       taskDraft: null,
       taskFocusId: null,
+      // 从这里进来是「去新建/看列表」，不该再落在一个旧的选中任务上。
+      automationFocusId: null,
       infohubIntent: null,
       automationIntent: intent ?? null,
     }),
@@ -308,6 +321,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       page: "chat",
       activeConversationId: id,
       taskDraft: null,
+      automationFocusId: null,
       infohubIntent: null,
       automationIntent: null,
     }),
@@ -318,6 +332,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({
       page: "tasks",
       taskFocusId: taskId,
+      automationFocusId: null,
       taskDraft: null,
       pendingAttachment: null,
       infohubIntent: null,
@@ -337,6 +352,20 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationIntent: null,
     }),
   consumeTeamFocus: () => set({ teamFocusUserId: null }),
+  focusAutomation: (taskId) =>
+    set({
+      page: "automations",
+      automationFocusId: taskId,
+      // 与 setPage 同口径清掉跨页瞬态：自动化页不该继承任务区的投递/选中，
+      // 也不该被残留的「新建表单预填」意图一进来就弹窗。
+      taskFocusId: null,
+      automationIntent: null,
+      taskDraft: null,
+      pendingAttachment: null,
+      infohubIntent: null,
+      activeConversationId: null,
+    }),
+  consumeAutomationFocus: () => set({ automationFocusId: null }),
   leaveConversation: () => set({ page: "chat", activeConversationId: null }),
   sendFileToConversation: (conversationId, file) =>
     set({ pendingAttachment: { conversationId, file } }),
