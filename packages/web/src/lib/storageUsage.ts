@@ -61,6 +61,9 @@ export const STORAGE_MODULE_RULES: readonly StorageModuleRule[] = [
   { prefix: "heming.memory.", module: "记忆" },
   { prefix: "heming.tasks.", module: "任务" },
   { prefix: "heming.taskTemplates.", module: "任务" },
+  // 自动化：任务键（`heming.automations.v1`）与运行记录键（`.runs.v1`）共用这个前缀，
+  // 一条规则就够——给它单列 `.runs` 会多出一行「运行记录」明细，而清理入口只按任务区走。
+  { prefix: "heming.automations.", module: "自动化" },
   { prefix: "heming.staff.", module: "幕僚" },
   { prefix: "heming.e2e.", module: "加密会话" },
   { prefix: "heming.x3dh.", module: "加密会话" },

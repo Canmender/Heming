@@ -24,7 +24,13 @@ beforeEach(() => {
   localStorage.clear();
   setNotificationStorage(createMemoryStorage());
   useNotificationStore.setState({ items: [] });
-  useUiStore.setState({ page: "home", activeConversationId: null, openTabs: [], taskFocusId: null });
+  useUiStore.setState({
+    page: "home",
+    activeConversationId: null,
+    openTabs: [],
+    taskFocusId: null,
+    automationFocusId: null,
+  });
 });
 
 describe("formatRelativeTime", () => {
@@ -136,6 +142,31 @@ describe("通知中心面板", () => {
     fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
     fireEvent.click(screen.getByRole("button", { name: "打开通知：幕僚简报" }));
     expect(useUiStore.getState().page).toBe("staff");
+  });
+
+  it("自动化失败通知点进去：进自动化页并投递要选中的任务", () => {
+    const item = makeItem({
+      kind: "automation",
+      key: "automation:a1:error:1000",
+      title: "「同步本机归档」执行失败",
+      body: "QQ 连接失败",
+      automationId: "a1",
+    });
+    useNotificationStore.setState({ items: [item] });
+    // 先停在一个旧会话上：跳到自动化页必须把会话态清掉，否则聊天页会「残留」在背后
+    useUiStore.setState({ activeConversationId: "c-old" });
+    render(<NotificationCenter />);
+
+    fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
+    const dialog = screen.getByRole("dialog", { name: "通知中心" });
+    // 列表上的类型标签（新 kind 要有中文标签，不能显示成空白）
+    expect(within(dialog).getByText("自动化")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "打开通知：「同步本机归档」执行失败" }));
+
+    expect(useUiStore.getState().page).toBe("automations");
+    expect(useUiStore.getState().automationFocusId).toBe("a1");
+    // 不带会话跳转：自动化失败通知不是某条聊天记录
+    expect(useUiStore.getState().activeConversationId).toBeNull();
   });
 
   it("逐条已读 / 删除只影响那一条", () => {

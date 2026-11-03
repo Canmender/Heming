@@ -97,6 +97,7 @@
 | [specs/2026-11-01-d46-infohub-native-capability.md](superpowers/specs/2026-11-01-d46-infohub-native-capability.md) | d.46：信息中枢原生融入——归档工具提供者（检索/读会话/日程，重扫走 HITL）、共享运行态 store、首页归档卡、Ctrl+K 归档检索、跨页意图、归档来源脚注；只在桌面端且已连接时注入，不自动启动边车、不暴露 sync、不迁移数据 |
 | [specs/2026-11-01-d47-automation-center.md](superpowers/specs/2026-11-01-d47-automation-center.md) | d.47：自动化中心——本机任务（每天定时/按间隔，`heming.automations.v1`）、InfoHub 同步与日程重扫白名单、15s 串行调度、启动不补跑、未连接记 `skipped` 且绝不自动拉起边车；信息中枢「定时/保存为定时任务/定时重扫」预填；不执行脚本、不推送、不上云 |
 | [specs/2026-11-01-d48-staff-proactive-agent.md](superpowers/specs/2026-11-01-d48-staff-proactive-agent.md) | d.48：常驻幕僚——晨报 + 日程临期 + 任务异常三路只读巡检，规则优先、可选模型总结并强制补回紧急项，`heming.staff.*` 本机存储、去重账本、静默时段与预算；只递简报与跳转，不自动执行、不拉起 InfoHub、不巡检归档全文 |
+| [specs/2026-11-03-d51-automation-execution-kernel.md](superpowers/specs/2026-11-03-d51-automation-execution-kernel.md) | d.51：自动化执行内核——动作注册表（`kinds.ts`/`actions.ts`，加动作只加元数据 + 执行函数）、运行记录独立键（40 条 / 192KB 双淘汰、触发来源与耗时、删任务级联）、失败通知（`kind:"automation"` + 跳转定位）、存储水位登记；借 n8n 概念但不复制代码，仍不自动重试/不补跑 |
 | [research/2026-10-28-d38-adversarial-qa.md](research/2026-10-28-d38-adversarial-qa.md) | d.38.1.10.0：对抗性自检 16 例（typing + 连续性），C2 暴露「消息到达不清理输入态」，已修 |
 | [research/2026-10-28-d39-deep-stress-testing.md](research/2026-10-28-d39-deep-stress-testing.md) | d.39.1.11.0：32 例深度对抗/压测（消息风暴、页面切换、通知桥模糊输入）+ 6 项修复（交接窗口、吐司合并、id 校验、文本清洗、点击幂等、通话窗焦点）；后台失败 UI 仍缺 |
 | [research/2026-10-23-rounds-after-d36.md](research/2026-10-23-rounds-after-d36.md) | d.36 之后的开工备忘：CSP 基线、`release.sh` 顺序、docker 清理、需拍板项与建议轮次 |
@@ -115,6 +116,9 @@
 | [research/2026-10-21-all-feature-gap-audit.md](research/2026-10-21-all-feature-gap-audit.md) | 全功能缺口审计：d.24 已落地 10 项 + 暂缓项的 d.25 处置（8 项已补做，附未做部分与理由） |
 | [research/2026-10-22-deep-audit-followup-plan.md](research/2026-10-22-deep-audit-followup-plan.md) | 深度调研与后续完善计划：P0 红线口子 / P1 数据一致性 / P2 体感 / P3 功能 / P4 工程，逐条带 `file:line` 证据与 d.30… 分轮排期 |
 | [research/2026-10-28-ai-im-ux-pain-points.md](research/2026-10-28-ai-im-ux-pain-points.md) | AI 工作台 / IM 体验痛点：后台失联、系统通知、会话列表、免打扰、全局搜索、presence、托盘（P0–P3，附本仓证据；d.39 取 P0 两项 + 免打扰） |
+| [research/2026-11-03-n8n-engine-notes.md](research/2026-11-03-n8n-engine-notes.md) | n8n 工作流引擎一手源码调研（2.46.0 / `bb832f1`，180 处 `file:line` 已校验）：执行栈、重试默认值与硬边界、节点注册表、执行记录两级清理、调度 misfire/去重、表达式与超时；含「可移植/需改造/不可移植」判断表与 8 条候选改进 |
+| [research/2026-11-03-n8n-license-and-reuse.md](research/2026-11-03-n8n-license-and-reuse.md) | n8n 许可证事实与复用边界：Sustainable Use License 1.0（fair-code，非 OSI 开源）、核心包全为 SUL、npm 发布物许可被改写、2019 起从未 OSI 开源；结论「不复制代码、只借概念」，附可直接抄的「来源与许可」声明模板 |
+| [research/2026-11-03-heming-automation-audit.md](research/2026-11-03-heming-automation-audit.md) | 和鸣自动化子系统审计（d.48 现状）：能力表、红线原文、存储键与内存态、动作注册表/重试/运行记录/失败通知四块的精确扩展点（`file:line`）、通知中心 API、测试约定与 14 条风险坑；推荐方案 B |
 
 ## 5. 历史计划
 

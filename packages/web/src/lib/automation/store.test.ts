@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryStorage } from "../memory/storage.js";
 import type { StorageLike } from "../memory/types.js";
+import { setNotificationStorage, useNotificationStore } from "../../store/notifications.js";
 import {
   ALL_WEEKDAYS,
   MAX_AUTOMATIONS,
@@ -8,6 +9,7 @@ import {
   type AutomationDraft,
   type AutomationTask,
 } from "./model.js";
+import { AUTOMATION_RUNS_KEY, setAutomationRunStorage, useAutomationRunsStore } from "./runs.js";
 import {
   AUTOMATIONS_KEY,
   readAutomations,
@@ -48,15 +50,29 @@ function stored(mem: StorageLike): AutomationTask[] {
 }
 
 let mem: StorageLike;
+let runMem: StorageLike;
 
 beforeEach(() => {
   mem = createMemoryStorage();
   setAutomationStorage(mem);
-  useAutomationStore.setState({ tasks: [], runningId: null, runningSince: 0 });
+  // 三个键各自一份内存存储：断言「写没写进哪个键」时互不干扰
+  runMem = createMemoryStorage();
+  setAutomationRunStorage(runMem);
+  setNotificationStorage(createMemoryStorage());
+  useAutomationStore.setState({
+    tasks: [],
+    runningId: null,
+    runningSince: 0,
+    runningTrigger: "schedule",
+  });
+  useAutomationRunsStore.setState({ runs: [] });
+  useNotificationStore.setState({ items: [] });
 });
 
 afterEach(() => {
   setAutomationStorage(null);
+  setAutomationRunStorage(null);
+  setNotificationStorage(null);
 });
 
 describe("自动化 store · 增删改", () => {
@@ -161,6 +177,93 @@ describe("自动化 store · 执行状态", () => {
     useAutomationStore.setState({ tasks: [makeTask({ id: "t1" })], runningId: "t1", runningSince: now });
     useAutomationStore.getState().finishRun("t1", { status: "error", detail: "x" }, now);
     expect(useAutomationStore.getState().runningId).toBeNull();
+  });
+
+  it("收尾时任务已不存在：不写流水也不推通知（没有「谁失败」可写）", () => {
+    const now = at(2026, 11, 1, 12, 0);
+    useAutomationStore.setState({ tasks: [], runningId: "t1", runningSince: now });
+    useAutomationStore.getState().finishRun("t1", { status: "error", detail: "x" }, now);
+    expect(useAutomationStore.getState().runningId).toBeNull();
+    expect(useAutomationRunsStore.getState().runs).toEqual([]);
+    expect(useNotificationStore.getState().items).toEqual([]);
+  });
+
+  it("finishRun 写一条运行记录：trigger、耗时、任务名来自本次运行", () => {
+    const now = at(2026, 11, 1, 12, 0);
+    useAutomationStore.setState({ tasks: [makeTask({ id: "t1", name: "每晚同步" })] });
+    expect(useAutomationStore.getState().beginRun("t1", now, "manual")).toBe(true);
+    const finishedAt = now + 4_500;
+    useAutomationStore
+      .getState()
+      .finishRun("t1", { status: "ok", detail: "同步完成\n共 3 条" }, finishedAt);
+
+    const runs = useAutomationRunsStore.getState().runs;
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      taskId: "t1",
+      taskName: "每晚同步",
+      kind: "infohub.sync",
+      trigger: "manual",
+      status: "ok",
+      startedAt: now,
+      finishedAt,
+      durationMs: 4_500,
+    });
+    // detail 单行化（换行压成空格），与任务卡片上的 lastDetail 同口径
+    expect(runs[0].detail).toBe("同步完成 共 3 条");
+    expect(JSON.parse(runMem.getItem(AUTOMATION_RUNS_KEY) as string)).toHaveLength(1);
+    // 运行态复位：下一次调度不继承上一次的 trigger
+    expect(useAutomationStore.getState().runningTrigger).toBe("schedule");
+  });
+
+  it("error 推一条自动化通知；同一次失败重复收尾只推一条", () => {
+    const now = at(2026, 11, 1, 12, 0);
+    useAutomationStore.setState({ tasks: [makeTask({ id: "t1", name: "同步" })] });
+    useAutomationStore.getState().beginRun("t1", now);
+    useAutomationStore.getState().finishRun("t1", { status: "error", detail: "QQ 连接失败" }, now + 1_000);
+
+    const notice = useNotificationStore.getState().items;
+    expect(notice).toHaveLength(1);
+    expect(notice[0]).toMatchObject({
+      kind: "automation",
+      automationId: "t1",
+      title: "「同步」执行失败",
+      body: "QQ 连接失败",
+      key: `automation:t1:error:${now + 1_000}`,
+    });
+
+    // 同一次收尾被重放：通知 key 相同、流水 id 确定，两者都不会变成两条
+    useAutomationStore
+      .getState()
+      .finishRun("t1", { status: "error", detail: "QQ 连接失败" }, now + 1_000);
+    expect(useNotificationStore.getState().items).toHaveLength(1);
+    expect(useAutomationRunsStore.getState().runs).toHaveLength(1);
+  });
+
+  it("skipped 只记流水不推通知（未连接时到点提醒会刷屏）", () => {
+    const now = at(2026, 11, 1, 12, 0);
+    useAutomationStore.setState({ tasks: [makeTask({ id: "t1" })] });
+    useAutomationStore.getState().beginRun("t1", now);
+    useAutomationStore.getState().finishRun("t1", { status: "skipped", detail: "未连接 QQ" }, now + 10);
+    expect(useAutomationRunsStore.getState().runs).toHaveLength(1);
+    expect(useAutomationRunsStore.getState().runs[0].status).toBe("skipped");
+    expect(useNotificationStore.getState().items).toEqual([]);
+  });
+
+  it("remove 级联删掉该任务的运行记录（页面文案承诺）", () => {
+    const now = at(2026, 11, 1, 12, 0);
+    useAutomationStore.setState({
+      tasks: [makeTask({ id: "t1" }), makeTask({ id: "t2" })],
+    });
+    useAutomationStore.getState().beginRun("t1", now);
+    useAutomationStore.getState().finishRun("t1", { status: "ok", detail: "t1 完成" }, now + 100);
+    useAutomationStore.getState().beginRun("t2", now + 1_000);
+    useAutomationStore.getState().finishRun("t2", { status: "ok", detail: "t2 完成" }, now + 1_100);
+    expect(useAutomationRunsStore.getState().runs).toHaveLength(2);
+
+    useAutomationStore.getState().remove("t1");
+    expect(useAutomationRunsStore.getState().runs.map((run) => run.taskId)).toEqual(["t2"]);
+    expect(JSON.parse(runMem.getItem(AUTOMATION_RUNS_KEY) as string)).toHaveLength(1);
   });
 
   it("rescheduleMissed 只顺延启用且已过期的任务", () => {

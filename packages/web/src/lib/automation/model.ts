@@ -5,7 +5,16 @@
  * 不携带密钥。所有时间与频率都在本地时区解释。
  */
 
-export type AutomationKind = "infohub.sync" | "infohub.agenda";
+import {
+  AUTOMATION_KINDS,
+  isAutomationKind,
+  kindMeta,
+  type AutomationKind,
+} from "./kinds.js";
+
+/** 动作白名单的唯一来源是 kinds.ts；这里 re-export 保持既有 import 路径可用。 */
+export type { AutomationKind } from "./kinds.js";
+
 export type AutomationRunStatus = "ok" | "error" | "skipped";
 
 export interface SyncOptions {
@@ -141,10 +150,10 @@ export function validateDraft(draft: AutomationDraft): string {
   const name = String(draft.name ?? "").trim();
   if (!name) return "请填写任务名称";
   if ([...name].length > MAX_NAME_CHARS) return `名称最多 ${MAX_NAME_CHARS} 字`;
-  if (draft.kind !== "infohub.sync" && draft.kind !== "infohub.agenda") {
-    return "请选择要执行的动作";
-  }
-  if (draft.kind === "infohub.sync") {
+  // 动作白名单走注册表：未知 kind 一律拒绝，不在模型层再抄一份字面量。
+  if (!isAutomationKind(draft.kind)) return "请选择要执行的动作";
+  // 只有声明了同步参数的动作才要求至少一个来源；重扫日程不涉及。
+  if (kindMeta(draft.kind).hasSyncParams) {
     const sources = draft.sync?.sources ?? [];
     if (!sources.some((s) => s === "qq" || s === "wechat")) return "至少选择一个同步来源";
   }
@@ -197,9 +206,11 @@ export function normalizeDraft(draft: AutomationDraft): AutomationDraft {
             Math.max(MIN_INTERVAL_MINUTES, Math.round(Number(draft.schedule.minutes) || 60)),
           ),
         };
+  // 未知 kind 落回清单第一项（即原来的默认动作 infohub.sync），与改造前一致。
+  const kind = isAutomationKind(draft.kind) ? draft.kind : AUTOMATION_KINDS[0];
   return {
     name: clipText(draft.name, MAX_NAME_CHARS),
-    kind: draft.kind === "infohub.agenda" ? "infohub.agenda" : "infohub.sync",
+    kind,
     schedule,
     sync: normalizeSync(draft.sync),
   };
@@ -211,7 +222,9 @@ export function normalizeTask(raw: unknown, now: number = Date.now()): Automatio
   const id = typeof raw.id === "string" ? raw.id.trim() : "";
   const name = typeof raw.name === "string" ? clipText(raw.name, MAX_NAME_CHARS) : "";
   if (!id || !name) return null;
-  if (raw.kind !== "infohub.sync" && raw.kind !== "infohub.agenda") return null;
+  // 读盘校验不能放宽：老数据里未知 kind 的条目仍旧整条丢弃。
+  const kind = raw.kind;
+  if (!isAutomationKind(kind)) return null;
 
   let schedule: AutomationSchedule;
   if (isPlainObject(raw.schedule) && raw.schedule.type === "daily") {
@@ -232,7 +245,8 @@ export function normalizeTask(raw: unknown, now: number = Date.now()): Automatio
   }
 
   const sync = normalizeSync(raw.sync);
-  if (raw.kind === "infohub.sync" && sync.sources.length === 0) return null;
+  // 需要同步参数的动作为空来源时丢弃；不需要的动作用不到这份占位配置。
+  if (kindMeta(kind).hasSyncParams && sync.sources.length === 0) return null;
 
   const createdAt = typeof raw.createdAt === "number" && Number.isFinite(raw.createdAt) ? raw.createdAt : now;
   const updatedAt =
@@ -249,7 +263,7 @@ export function normalizeTask(raw: unknown, now: number = Date.now()): Automatio
   return {
     id,
     name,
-    kind: raw.kind,
+    kind,
     enabled: raw.enabled !== false,
     schedule,
     sync,
@@ -285,11 +299,13 @@ export function describeSync(sync: SyncOptions): string {
 }
 
 export function describeAction(task: Pick<AutomationTask, "kind" | "sync">): string {
-  return task.kind === "infohub.agenda" ? "重扫日程" : `同步归档（${describeSync(task.sync)}）`;
+  const meta = kindMeta(task.kind);
+  // 同步动作的选项是动态的，必须拼进描述；其余动作直接用元数据里的说明。
+  return meta.hasSyncParams ? `同步归档（${describeSync(task.sync)}）` : meta.summary;
 }
 
 export function actionLabel(kind: AutomationKind): string {
-  return kind === "infohub.agenda" ? "重扫日程" : "同步本机归档";
+  return kindMeta(kind).label;
 }
 
 export function runStatusLabel(status: AutomationRunStatus): string {
@@ -310,7 +326,7 @@ export function formatAutomationTime(ms: number | undefined): string {
 export function draftForKind(kind: AutomationKind, sync?: SyncOptions): AutomationDraft {
   return {
     ...DEFAULT_DRAFT,
-    name: actionLabel(kind),
+    name: kindMeta(kind).defaultName,
     kind,
     schedule: { type: "daily", time: "09:00", weekdays: [...ALL_WEEKDAYS] },
     sync: sync ? normalizeSync(sync) : { ...DEFAULT_SYNC, sources: [...DEFAULT_SYNC.sources] },

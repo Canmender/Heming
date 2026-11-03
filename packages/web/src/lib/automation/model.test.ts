@@ -103,6 +103,11 @@ describe("validateDraft", () => {
       }),
     ).toBe("");
   });
+
+  it("未知动作按「请选择动作」拒绝（白名单来自注册表）", () => {
+    const unknownKind = "infohub.unknown" as unknown as AutomationDraft["kind"];
+    expect(validateDraft({ ...baseDraft, kind: unknownKind })).toBe("请选择要执行的动作");
+  });
 });
 
 describe("读盘与展示", () => {
@@ -178,5 +183,29 @@ describe("读盘与展示", () => {
     expect(
       draftForKind("infohub.sync", { sources: ["qq"], full: true, archive: false }).sync,
     ).toEqual({ sources: ["qq"], full: true, archive: false });
+  });
+
+  it("未知 kind：草稿落默认动作，读盘条目照旧丢弃", () => {
+    const unknownKind = "infohub.unknown" as unknown as AutomationDraft["kind"];
+    expect(normalizeDraft({ ...baseDraft, kind: unknownKind }).kind).toBe("infohub.sync");
+    expect(
+      normalizeTask({
+        id: "a9",
+        name: "未知动作",
+        kind: "infohub.unknown",
+        schedule: { type: "interval", minutes: 30 },
+        sync: { sources: ["qq"] },
+      }),
+    ).toBeNull();
+  });
+
+  it("动作描述与注册表元数据对齐", () => {
+    expect(
+      describeAction({ kind: "infohub.sync", sync: { sources: ["qq"], full: true, archive: false } }),
+    ).toBe("同步归档（QQ · 全量重扫）");
+    // 与任务卡现有说明逐字一致：页面可直接改用 describeAction 而不动文案。
+    expect(
+      describeAction({ kind: "infohub.agenda", sync: { sources: [], full: false, archive: false } }),
+    ).toBe("重扫本机归档的日程表");
   });
 });

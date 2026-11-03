@@ -184,6 +184,8 @@ describe("ui store 自动化意图", () => {
       activeConversationId: null,
       infohubIntent: null,
       automationIntent: null,
+      taskFocusId: null,
+      automationFocusId: null,
     });
   });
 
@@ -216,5 +218,36 @@ describe("ui store 自动化意图", () => {
     useUiStore.getState().openAutomations({ kind: "infohub.agenda" });
     useUiStore.getState().setPage("home");
     expect(useUiStore.getState().automationIntent).toBeNull();
+  });
+
+  it("focusAutomation 进入自动化页并投递选中任务，消费后清空", () => {
+    useUiStore.setState({
+      activeConversationId: "c1",
+      automationIntent: { kind: "infohub.sync" },
+      taskFocusId: "t1",
+    });
+    useUiStore.getState().focusAutomation("a1");
+
+    const s = useUiStore.getState();
+    expect(s.page).toBe("automations");
+    expect(s.automationFocusId).toBe("a1");
+    // 跳转带过来的旧瞬态必须一起清掉：否则自动化页一进去就弹新建表单，
+    // 任务区那边还残留一个「要选中」的 id。
+    expect(s.automationIntent).toBeNull();
+    expect(s.taskFocusId).toBeNull();
+    expect(s.activeConversationId).toBeNull();
+
+    s.consumeAutomationFocus();
+    expect(useUiStore.getState().automationFocusId).toBeNull();
+  });
+
+  it("切页 / 开会话会清掉未消费的 automationFocusId", () => {
+    useUiStore.getState().focusAutomation("a1");
+    useUiStore.getState().setPage("home");
+    expect(useUiStore.getState().automationFocusId).toBeNull();
+
+    useUiStore.getState().focusAutomation("a1");
+    useUiStore.getState().openConversation("c1");
+    expect(useUiStore.getState().automationFocusId).toBeNull();
   });
 });

@@ -191,6 +191,27 @@ describe("approval 通知与 removeByKey（d.34）", () => {
     expect(again[0].kind).toBe("staff");
   });
 
+  it("automation 失败通知能落盘并读回 automationId；未知 kind 仍被丢弃", () => {
+    const id = useNotificationStore.getState().push({
+      kind: "automation",
+      key: "automation:a1:error:1000",
+      title: "「同步本机归档」执行失败",
+      body: "QQ 连接失败",
+      automationId: "a1",
+      now: 1_000,
+    });
+    expect(id).not.toBeNull();
+
+    const again = readNotifications(storage);
+    expect(again).toHaveLength(1);
+    expect(again[0].kind).toBe("automation");
+    expect(again[0].automationId).toBe("a1");
+    // 形近但不在白名单里的 kind（拼错复数）仍要拒绝，避免旧/脏数据变成静默的「未知通知」
+    expect(
+      normalizeNotification({ id: "2", key: "k", title: "t", kind: "automations", createdAt: 1 }),
+    ).toBeNull();
+  });
+
   it("removeByKey 只删指定 key，其它通知不动", () => {
     useNotificationStore.setState({
       items: [

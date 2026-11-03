@@ -3,6 +3,12 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { AutomationPage } from "./AutomationPage.js";
 import { DEFAULT_DRAFT, type SyncOptions } from "../lib/automation/model.js";
 import { useAutomationStore } from "../lib/automation/store.js";
+import {
+  setAutomationRunStorage,
+  useAutomationRunsStore,
+  type AutomationRun,
+} from "../lib/automation/runs.js";
+import { createMemoryStorage } from "../lib/memory/storage.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { useUiStore } from "../store/ui.js";
 
@@ -31,6 +37,7 @@ function installBridge(running = false) {
 
 function resetStores() {
   useAutomationStore.setState({ tasks: [], runningId: null, runningSince: 0 });
+  useAutomationRunsStore.setState({ runs: [] });
   useInfohubStore.setState({
     available: false,
     running: false,
@@ -44,6 +51,24 @@ function resetStores() {
   useUiStore.setState({ page: "home", automationIntent: null, infohubIntent: null });
 }
 
+/** 造一条运行记录：默认是一次成功的定时同步，按需覆盖字段。 */
+function makeRun(taskId: string, overrides: Partial<AutomationRun> = {}): AutomationRun {
+  const now = Date.now();
+  return {
+    id: `run-${taskId}-${now}`,
+    taskId,
+    taskName: "夜间归档",
+    kind: "infohub.sync",
+    trigger: "schedule",
+    status: "ok",
+    detail: "同步完成：QQ 新增 2",
+    startedAt: now - 1_500,
+    finishedAt: now,
+    durationMs: 1_500,
+    ...overrides,
+  };
+}
+
 function seedTask(name = "夜间归档") {
   const outcome = useAutomationStore.getState().create({ ...DEFAULT_DRAFT, name });
   if (!outcome.ok) throw new Error(outcome.error);
@@ -54,11 +79,14 @@ describe("自动化页", () => {
   beforeEach(() => {
     localStorage.clear();
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
+    // 运行记录写盘走注入的 memory storage：跨用例不污染、也不吃 jsdom 的真配额。
+    setAutomationRunStorage(createMemoryStorage());
     resetStores();
   });
 
   afterEach(() => {
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
+    setAutomationRunStorage(null);
   });
 
   it("浏览器端：明确提示只在桌面端执行，仍可创建任务", () => {
@@ -217,5 +245,88 @@ describe("自动化页", () => {
       { sources: syncAll.sources, full: false, archive: false },
       {},
     );
+  });
+
+  it("运行记录：展开后按最新在前显示状态、触发来源与耗时", () => {
+    const taskId = seedTask("夜间归档");
+    const older = makeRun(taskId, {
+      id: "run-older",
+      status: "error",
+      detail: "同步失败：边车未就绪",
+      trigger: "manual",
+      finishedAt: 1_700_000_000_000,
+      startedAt: 1_700_000_000_000 - 65_000,
+      durationMs: 65_000,
+    });
+    useAutomationRunsStore.setState({ runs: [makeRun(taskId), older] });
+
+    render(<AutomationPage />);
+    fireEvent.click(screen.getByRole("button", { name: "运行记录 夜间归档" }));
+
+    // 展开后 aria-label 不变（仍是「运行记录 <任务名>」），用 aria-expanded 确认状态；
+    // 以按钮的父容器为锚点，限定到这一个任务的记录列表。
+    const toggle = screen.getByRole("button", { name: "运行记录 夜间归档" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const panel = toggle.closest("div") as HTMLElement;
+    const items = within(panel).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent("成功");
+    expect(items[0]).toHaveTextContent("定时");
+    expect(items[1]).toHaveTextContent("失败");
+    expect(items[1]).toHaveTextContent("手动");
+    expect(items[1]).toHaveTextContent("1 分 5 秒");
+    expect(items[1]).toHaveTextContent("边车未就绪");
+  });
+
+  it("运行记录：没有历史时给空态，不编数据", () => {
+    seedTask("夜间归档");
+    render(<AutomationPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "运行记录 夜间归档" }));
+    expect(screen.getByText("还没有运行记录。")).toBeInTheDocument();
+  });
+
+  it("立即运行记为手动触发，并写入运行记录", async () => {
+    installBridge(false);
+    useInfohubStore.setState({ available: true, booted: true, running: false });
+    seedTask("夜间归档");
+    render(<AutomationPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "立即运行 夜间归档" }));
+
+    await waitFor(() => expect(useAutomationRunsStore.getState().runs).toHaveLength(1));
+    const [run] = useAutomationRunsStore.getState().runs;
+    expect(run.trigger).toBe("manual");
+    expect(run.status).toBe("skipped");
+    expect(run.taskName).toBe("夜间归档");
+    expect(screen.getByText(/「夜间归档」已跳过/)).toBeInTheDocument();
+  });
+
+  it("从通知跳转：展开目标任务并消费焦点", () => {
+    const taskId = seedTask("夜间归档");
+    useUiStore.setState({ automationFocusId: taskId });
+
+    render(<AutomationPage />);
+
+    expect(useUiStore.getState().automationFocusId).toBeNull();
+    expect(screen.getByRole("button", { name: "运行记录 夜间归档" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByText("还没有运行记录。")).toBeInTheDocument();
+  });
+
+  it("清空运行记录：二次确认后清空，任务本身不动", () => {
+    const taskId = seedTask("夜间归档");
+    useAutomationRunsStore.setState({ runs: [makeRun(taskId), makeRun(taskId, { id: "run-2" })] });
+    render(<AutomationPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "清空记录" }));
+    const dialog = screen.getByRole("dialog", { name: "清空运行记录" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "清空" }));
+
+    expect(useAutomationRunsStore.getState().runs).toHaveLength(0);
+    expect(useAutomationStore.getState().tasks).toHaveLength(1);
+    expect(screen.getByText("运行记录已清空")).toBeInTheDocument();
   });
 });

@@ -197,4 +197,16 @@ describe("自动化执行器", () => {
     expect(outcome.status).toBe("error");
     expect(outcome.detail).toBe("InfoHub 请求超时（300s）：sync");
   });
+
+  it("未知动作：不调用桥、不拉起进程，直接记为失败", async () => {
+    const { bridge } = installBridge();
+    useInfohubStore.setState({ available: true, booted: true, running: true });
+    const unknownKind = "infohub.unknown" as unknown as AutomationTask["kind"];
+
+    const outcome = await runAutomationTask(task({ kind: unknownKind }));
+
+    expect(outcome).toEqual({ status: "error", detail: "未知的自动化动作" });
+    expect(bridge.start).not.toHaveBeenCalled();
+    expect(bridge.call).not.toHaveBeenCalled();
+  });
 });

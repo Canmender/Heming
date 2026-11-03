@@ -26,6 +26,9 @@ describe("moduleOf（键名 → 模块）", () => {
     expect(moduleOf("heming.memory.semantic.v1")).toBe("记忆");
     expect(moduleOf("heming.tasks.v1")).toBe("任务");
     expect(moduleOf("heming.taskTemplates.v1")).toBe("任务");
+    // 自动化：任务键与运行记录键都归「自动化」（同一条前缀规则覆盖两个键）
+    expect(moduleOf("heming.automations.v1")).toBe("自动化");
+    expect(moduleOf("heming.automations.runs.v1")).toBe("自动化");
     expect(moduleOf("heming.staff.v1")).toBe("幕僚");
     expect(moduleOf("heming.msgCache.c1")).toBe("明文缓存");
     expect(moduleOf("heming.e2e.identity")).toBe("加密会话");
