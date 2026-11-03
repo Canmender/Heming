@@ -17,6 +17,23 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
 import { RegistryPage } from "./RegistryPage.js";
 import { MCP_PRESETS } from "../lib/mcp/presets.js";
 import { PageShell } from "./layout/PageShell.js";
+import { pluginStore, type PluginStore } from "../lib/plugins/index.js";
+import { useUiStore } from "../store/ui.js";
+
+/**
+ * 从 `plugin:<插件 id>:<服务 key>` 形态的服务 id 里取出插件 id。
+ *
+ * 为什么不从 manifest 反查：T1 的 v3 清单尚在落地中，这里只依赖既有 id 约定
+ * （插件 id 的字符白名单不含冒号，所以第二个冒号之前一定是插件 id）。
+ */
+function pluginIdFromServerId(serverId: string): string | null {
+  const prefix = "plugin:";
+  if (!serverId.startsWith(prefix)) return null;
+  const rest = serverId.slice(prefix.length);
+  const cut = rest.indexOf(":");
+  const id = cut > 0 ? rest.slice(0, cut) : rest;
+  return id || null;
+}
 
 /**
  * 接口区：MCP 服务与工具调用。
@@ -28,7 +45,26 @@ import { PageShell } from "./layout/PageShell.js";
  *
  * 安全默认：**工具默认不启用**，必须显式打开才会进入模型提示词。
  */
-export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegistry }) {
+export function InterfacesPage({
+  registry = mcpRegistry,
+  plugins = pluginStore,
+}: {
+  registry?: McpRegistry;
+  /** 插件 store（取「插件：<名>」来源徽标要用的显示名；测试可注入）。 */
+  plugins?: PluginStore;
+}) {
+  /** 插件 id → 显示名；来源徽标与 aria-label 共用。 */
+  const pluginNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of plugins.list()) map.set(item.manifest.id, item.manifest.name);
+    return map;
+  }, [plugins]);
+
+  /** 跳插件区并打开该插件详情：复用 d.60 的 open-plugin 内存意图，不新增 IPC。 */
+  const openPlugin = (pluginId: string) => {
+    useUiStore.getState().setPaletteIntent("open-plugin", { id: pluginId });
+    useUiStore.getState().setPage("plugins");
+  };
   const [tick, setTick] = useState(0);
   const [discover, setDiscover] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<McpServerConfig | null>(null);
@@ -403,14 +439,24 @@ export function InterfacesPage({ registry = mcpRegistry }: { registry?: McpRegis
                       }`}
                     </span>
                   )}
-                  {server.origin === "plugin" && (
-                    <span
-                      className="rounded-full border border-line bg-[#f6f6f6] px-2 py-0.5 text-[10px] text-muted"
-                      title="随插件安装；停用或卸载插件时同步"
-                    >
-                      插件
-                    </span>
-                  )}
+                  {server.origin === "plugin" && (() => {
+                    const pluginId = pluginIdFromServerId(server.id);
+                    const pluginName = pluginId ? pluginNames.get(pluginId) : undefined;
+                    return (
+                      <button
+                        type="button"
+                        aria-label={`打开插件 ${pluginName ?? pluginId ?? "（未知插件）"}`}
+                        title="随插件安装；停用或卸载插件时同步"
+                        onClick={() => {
+                          if (pluginId) openPlugin(pluginId);
+                        }}
+                        className="ui-chip hover:text-ink"
+                      >
+                        <span>插件</span>
+                        <span>：{pluginName ?? "未知插件"}</span>
+                      </button>
+                    );
+                  })()}
                   <span
                     className={`rounded-full px-2 py-0.5 text-[10px] ${
                       state === "ready"

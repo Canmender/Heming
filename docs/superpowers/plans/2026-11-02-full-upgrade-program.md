@@ -443,3 +443,49 @@
 | 更新源 | ✅ latest.yml 指向 61.2.23，sha512 与安装包一致 |
 | 备份 | ✅ `heming-data-2026-11-03-d.61.2.23.0.tar.gz` |
 | 视觉 | `.tmp/d63/pages`（13 页）+ `.tmp/d63/after`（流程） |
+
+## 13. 第九波：统一插件模型（2026-11-03 09:37 起）
+
+触发：用户「继续推进，然后参考 deepseek-harness 的插件化模式，把和鸣也做成插件化模式，把技能工具 MCP 都合并插件页统一口径」。
+
+规格 `docs/superpowers/specs/2026-11-03-d64-plugin-unification.md`；用户文档 `docs/PLUGINS.md`。
+
+**参考模型（DSH）→ 和鸣落地**：DSH 插件是 `apply(ctx)` 声明贡献面（工具/技能/MCP/命令都是「注册到统一扩展点」）、`inject` 声明依赖、`ctx.effect()` 卸载自动清理、`tools/pre-execute` 权限门禁。和鸣不能执行第三方代码，因此**保留声明式清单**，把「一份清单声明所有贡献 + 显式权限 + 运行时只收紧」作为等价物：
+
+| DSH | 和鸣 |
+|---|---|
+| 一个插件可注册多类扩展点 | `contributions: { skills, mcpServers, commands }` 一份清单四类贡献 |
+| `inject` 依赖声明 / `ctx.effect` 清理 | 平台固定装配顺序；停用/卸载按 `pluginId` 级联回收技能/服务/命令 |
+| 工具目录展示与执行同源 | 新增 `describeCapabilityCatalog()`：内置 + MCP + 插件工具一张目录，风险 `meta.risk ?? riskOfName` 与执行期同源 |
+| `tools/pre-execute` allow/deny/ask | `permissions.tools` 风险上限（超限不注入）+ 既有 HITL 判定链不变 |
+| 插件配置/市场 | `permissions.network` 声明即约束（未覆盖主机直接拒装）+ 安装弹窗确认 |
+
+**三轨（文件级不重叠）**：
+- T1 核心模型（`lib/plugins/**`）：清单 v3（v1/v2 归一化）、`permissions.ts`、`catalog.ts`、store 贡献计数与命令读取、单例移入 store 消除循环导入；顺带修掉「重启后 v1/v2 插件列表丢失」的隐性回归。
+- T2 插件页能力中枢（`components/PluginsPage.tsx` + `components/plugins/**`）：四个统计 + 四个 Tab（插件/技能/工具/MCP 服务）+ 安装弹窗权限摘要 + 详情贡献/权限段。
+- T3 口径统一（`SkillsPage`/`InterfacesPage`/`lib/palette/**`/`CommandPalette`）：插件来源徽标与跳转、命令面板「插件命令」分组、`focus-skill` 意图。
+
+### 第九波完成（2026-11-03 10:05）
+
+| 项 | 结果 |
+|---|---|
+| T1 核心模型 | ✅ `lib/plugins` 81 例全绿（manifest 30 / permissions 12 / catalog 10 / store 29）；`PLUGIN_SCHEMA_VERSION=3`，v1/v2 归一化，权限报告与风险上限过滤 |
+| T2 插件页中枢 | ✅ `PluginsPage` 421 行 + `components/plugins/` 11 文件；四统计/四 Tab/安装摘要/详情两段；新增 13 例，既有 11 例零回归 |
+| T3 口径统一 | ✅ 技能区/接口区「插件：<名>」徽标（+8 例）；命令面板「插件命令」分组与三种 target 分发（130 例含既有）；`focus-skill` 意图 |
+| 事故与修复 | ⚠ ① 全量 web 首跑红 1 例（`App.test` 在 210 文件并发下 1s 等不到命令面板）→ 根因是 jsdom 环境争用而非代码缺陷，`test-setup.ts` 把 `findBy*` 默认等待提到 3s（断言未放宽）；② 第一次修用 `@testing-library/dom` 直接 import（pnpm 下非直接依赖）导致 setup 抛错、全量 210 文件全红，改从 `@testing-library/react` 取 `configure` 后恢复 |
+| 文档 | ✅ 新增 `docs/PLUGINS.md`、规格 d.64；CHANGELOG/HANDOFF/INDEX/本台账回填 |
+| 全量门禁 | ✅ shared 29 / server 141 / web 210 文件 3071 例 / desktop 29 文件 518 例；4/4 无重试；三包 tsc 0 |
+| 版本 | `d.62.2.23.0`（特性 61→62，其余位保留） |
+| 典型自检 | `.tmp/d64/plugin-v3-example.json`（技能 + 本地 MCP + 2 命令 + 权限）与 `plugin-v2-legacy.json`（v2 旧包） |
+
+### 第九波发布完成（2026-11-03 10:17）
+
+| 项 | 结果与证据 |
+|---|---|
+| 提交 | 见 `git log -1`（本轮改动一次提交：清单 v3/目录/权限 + 插件页中枢 + 命令面板 + 技能区接口区口径 + 文档） |
+| 门禁 | build 通过；逐包 4/4 无重试（shared 29 / server 141 / web 210 文件 3071 例 / desktop 29 文件 518 例）；三包 tsc 0 |
+| 安装包 | `release/r53/和鸣 Setup d.62.2.23.0.exe` 228,228,138 字节，sha512 `RIr3/iJ70v5M/eqr+1BtY0fWAHUwGgO4MNHvD4yCymb7a6HNcRJVbzQDSgPXa9KV2TGBawzMTnujVRW6i0106w==` 与本地/远端 latest.yml 三方一致 |
+| 云端部署 | ✅ 第 8 步 OK（1m02s）；`/api/health` ok、首页 200、线上 bundle `main-Doa-8pUP.js` 与本地同名同字节、CSP report-only 在位 |
+| 更新源 | ✅ latest.yml 指向 62.2.23，sha512 与安装包一致，Content-Type `application/octet-stream`、Range 206 |
+| 备份 | ✅ `heming-data-2026-11-03-d.62.2.23.0.tar.gz`（本机 `.tmp/backups/` 8.3KB） |
+| 发布链修复 | ⚠ ① `--bump=feature` 与「CHANGELOG 顶部条目」互斥：第 3 步测试时顶部条目已指向新版本 → `changelog-sync` 红；改为**先手工 `bump-version.mjs` + `build-changelog.mjs`，再跑不带 `--bump` 的发布**（脚本 hint 的预期用法）；② 第 8b-2 步 `tar` 在 bash 环境里吃到 MSYS GNU tar，把 `C:\...` 当远端主机报 `Cannot connect to C:`；`release.mjs` 改为 Windows 优先用系统 bsdtar（`System32\tar.exe`，已实测排除表语义一致），deploy/publish 用 `--only=deploy,publish` 续跑成功 |

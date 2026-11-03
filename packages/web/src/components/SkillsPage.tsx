@@ -13,6 +13,8 @@ import {
 import { memoryStore } from "../lib/memory/index.js";
 import { mcpRegistry } from "../lib/mcp/index.js";
 import { PageShell } from "./layout/PageShell.js";
+import { pluginStore, type PluginStore } from "../lib/plugins/index.js";
+import { useUiStore } from "../store/ui.js";
 
 /**
  * 技能区：技能（四类分组）/ 技能池（全量表格）两个视图。
@@ -147,16 +149,51 @@ function formatAt(at: string | undefined): string {
   )}:${pad(date.getMinutes())}`;
 }
 
+/* ------------------------------------------------------------------ 插件来源 */
+
+/**
+ * 「插件：<名>」来源徽标（d.64 T3a）。
+ *
+ * 为什么拆成两个文本节点：既有接口区用例用 getByText("插件") 锚定来源徽标，
+ * 直接写成一整个「插件：名称」会让旧锚点失配；拆开后旧锚点与新文案同时成立。
+ * 点击 = 切到插件区并打开该插件详情（复用 d.60 的 open-plugin 内存意图，不新增 IPC）。
+ */
+function PluginSourceChip({
+  pluginName,
+  onOpen,
+}: {
+  pluginName: string;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`打开插件 ${pluginName}`}
+      title="随插件安装；点开看插件详情"
+      onClick={onOpen}
+      className="ui-chip hover:text-ink"
+    >
+      <span>插件</span>
+      <span>：{pluginName}</span>
+    </button>
+  );
+}
+
 /* ------------------------------------------------------------------ 详情 */
 
 function SkillDetailDrawer({
   skill,
   onClose,
   onDelete,
+  pluginName,
+  onOpenPlugin,
 }: {
   skill: SkillDefinition;
   onClose: () => void;
   onDelete: () => void;
+  /** 插件来源技能：所属插件显示名（undefined = 不是插件来源）。 */
+  pluginName?: string;
+  onOpenPlugin?: () => void;
 }) {
   const panelRef = useRef<HTMLElement>(null);
   useModalA11y(panelRef, onClose);
@@ -180,9 +217,13 @@ function SkillDetailDrawer({
           <div className="min-w-0">
             <h2 className="truncate text-[14px] font-extrabold">{skill.name}</h2>
             <div className={`mt-0.5 ${hintCls}`}>
-              {SOURCE_LABEL[skill.source]} · v{skill.version}
-              {skill.pluginId ? ` · 插件 ${skill.pluginId}` : ""} ·{" "}
+              {SOURCE_LABEL[skill.source]} · v{skill.version} ·{" "}
               {skill.enabled ? "已启用" : "未启用"}
+              {pluginName && onOpenPlugin ? (
+                <span className="ml-1 inline-flex align-middle">
+                  <PluginSourceChip pluginName={pluginName} onOpen={onOpenPlugin} />
+                </span>
+              ) : null}
             </div>
           </div>
           <button type="button" onClick={onClose} className={btnGhostSm}>
@@ -234,13 +275,39 @@ function SkillDetailDrawer({
 
 export interface SkillsPageProps {
   skills?: SkillPool;
+  /** 插件 store（取「插件：<名>」来源徽标要用的显示名；测试可注入）。 */
+  plugins?: PluginStore;
 }
 
-export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
+export function SkillsPage({ skills = skillPool, plugins = pluginStore }: SkillsPageProps = {}) {
   const [tab, setTab] = useState<"groups" | "pool">("groups");
   const [tick, setTick] = useState(0);
   const [query, setQuery] = useState("");
+  /** 插件 id → 显示名（「插件：<名>」来源徽标用；插件店可注入便于单测）。 */
+  const pluginNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of plugins.list()) map.set(item.manifest.id, item.manifest.name);
+    return map;
+    // tick：本页内的安装/导入动作后刷新名字（插件店是可变单例）
+  }, [plugins, tick]);
+
+  /** 跳插件区并打开该插件详情：只投既有内存意图，不新增 IPC。 */
+  const openPlugin = (pluginId: string) => {
+    useUiStore.getState().setPaletteIntent("open-plugin", { id: pluginId });
+    useUiStore.getState().setPage("plugins");
+  };
   const [detailId, setDetailId] = useState<string | null>(null);
+  // d.64 T3b：命令面板「插件命令」（target=skill）的定位意图。
+  // 找不到该技能时只停在技能区：不报错、不弹空抽屉（页面已经切过来了）。
+  const paletteIntent = useUiStore((s) => s.paletteIntent);
+  const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
+  useEffect(() => {
+    if (paletteIntent?.kind !== "focus-skill") return;
+    const id = paletteIntent.data?.id;
+    const skill = id ? skills.list().find((item) => item.id === id) : undefined;
+    if (skill) setDetailId(skill.id);
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent, skills]);
   const [removeTarget, setRemoveTarget] = useState<SkillDefinition | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
@@ -437,6 +504,14 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                         <div className="truncate text-[13px] font-bold">{skill.name}</div>
                         <div className={`mt-0.5 ${hintCls}`}>
                           {SOURCE_LABEL[skill.source]} · v{skill.version}
+                          {skill.pluginId && pluginNames.get(skill.pluginId) ? (
+                            <span className="ml-1.5 inline-flex align-middle">
+                              <PluginSourceChip
+                                pluginName={pluginNames.get(skill.pluginId)!}
+                                onOpen={() => openPlugin(skill.pluginId!)}
+                              />
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                       <Switch
@@ -580,6 +655,14 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
                     </td>
                     <td>
                       <span className={badgeCls}>{SOURCE_LABEL[skill.source]}</span>
+                      {skill.pluginId && pluginNames.get(skill.pluginId) ? (
+                        <span className="ml-1.5 inline-flex align-middle">
+                          <PluginSourceChip
+                            pluginName={pluginNames.get(skill.pluginId)!}
+                            onOpen={() => openPlugin(skill.pluginId!)}
+                          />
+                        </span>
+                      ) : null}
                     </td>
                     <td>
                       <Switch
@@ -812,6 +895,8 @@ export function SkillsPage({ skills = skillPool }: SkillsPageProps = {}) {
           skill={detail}
           onClose={() => setDetailId(null)}
           onDelete={() => removeSkill(detail)}
+          pluginName={detail.pluginId ? pluginNames.get(detail.pluginId) : undefined}
+          onOpenPlugin={detail.pluginId ? () => openPlugin(detail.pluginId!) : undefined}
         />
       )}
 

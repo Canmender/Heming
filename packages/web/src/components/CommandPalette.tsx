@@ -10,7 +10,10 @@ import {
 } from "../lib/infohub/client.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { readLocalSnapshot, type LocalSnapshot } from "../lib/palette/local.js";
-import { shortcutLabel } from "../lib/palette/pages.js";
+import { PALETTE_PAGES, shortcutLabel } from "../lib/palette/pages.js";
+import { pluginStore } from "../lib/plugins/index.js";
+import { skillPool } from "../lib/skills/index.js";
+
 import { loadRecent, recordRecent, type RecentEntry } from "../lib/palette/recent.js";
 import {
   buildEmptyGroups,
@@ -123,13 +126,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   // 本机三组（任务/记忆/插件）：打开面板时读一次内存快照，之后的检索全在内存里做。
   // 只读本机、不发请求、不写日志（隐私边界见 lib/palette/local.ts 顶部）。
   const [local] = useState<LocalSnapshot>(() => readLocalSnapshot());
+  /** 插件命令：每次打开面板现读 store —— 停用插件后命令自然消失（不缓存）。 */
+  const [commands] = useState(() => pluginStore.commands());
 
   const groups = useMemo<PaletteGroup[]>(
     () =>
       query.trim()
-        ? searchPalette(query, { members, archiveHits, local })
+        ? searchPalette(query, { members, archiveHits, local, commands })
         : buildEmptyGroups(recent),
-    [query, members, archiveHits, local, recent],
+    [query, members, archiveHits, local, commands, recent],
   );
   const items = useMemo(() => flattenGroups(groups), [groups]);
   const indexByKey = useMemo(() => {
@@ -224,6 +229,24 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         // 归档页自己会跑同词检索；这里只投递意图，不复制结果页
         openInfohub({ tab: "search", query: query.trim() });
         break;
+      case "plugin-command": {
+        // 只走既有能力：page → 切页；skill → 技能区定位意图；plugin → 插件详情意图。
+        const command = item.command;
+        if (!command) break;
+        const target = command.target;
+        if (target.kind === "page") {
+          // 页面 id 非法时忽略（解析期已校验，这里再兜一层，避免把任意字符串塞进 store）
+          if (PALETTE_PAGES.some((p) => p.page === target.page)) setPage(target.page as never);
+        } else if (target.kind === "skill") {
+          const skill = skillPool.list().find((s) => s.name === target.name);
+          if (skill) setPaletteIntent("focus-skill", { id: skill.id });
+          setPage("skills");
+        } else {
+          setPaletteIntent("open-plugin", { id: command.pluginId });
+          setPage("plugins");
+        }
+        break;
+      }
       case "task":
         // 复用既有 focusTask：切任务区 + taskFocusId，任务区自己选中该记录并消费。
         if (item.taskId) focusTask(item.taskId, item.conversationId);
@@ -423,6 +446,8 @@ function kindGlyph(kind: PaletteItem["kind"]): string {
       return "设";
     case "action":
       return "动";
+    case "plugin-command":
+      return "令";
     case "task":
       return "任";
     case "memory":

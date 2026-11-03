@@ -20,6 +20,7 @@
 | [WEB-SCRAPING.md](WEB-SCRAPING.md) | 网页抓取：Scrapling 16 个工具的三层启用策略 |
 | [SELF-EDIT.md](SELF-EDIT.md) | 自我修改：`self_*` 工具、护栏、审计、快照回滚与开关 |
 | [PET.md](PET.md) | 桌宠：怎么用、三层架构、数据边界、扩展指南（换形象/加姿态/接事件通道/接语音）、已知限制与排查 |
+| [PLUGINS.md](PLUGINS.md) | 插件（能力包）：清单 v3 字段表、权限声明（网络/工具风险上限/文件根）、命令 target、安装/更新/停用/卸载语义、v1/v2 兼容与红线、可粘贴示例 |
 
 ## 3. 设计规格与实施记录
 
@@ -113,6 +114,7 @@
 | [research/2026-10-28-d38-adversarial-qa.md](research/2026-10-28-d38-adversarial-qa.md) | d.38.1.10.0：对抗性自检 16 例（typing + 连续性），C2 暴露「消息到达不清理输入态」，已修 |
 | [research/2026-10-28-d39-deep-stress-testing.md](research/2026-10-28-d39-deep-stress-testing.md) | d.39.1.11.0：32 例深度对抗/压测（消息风暴、页面切换、通知桥模糊输入）+ 6 项修复（交接窗口、吐司合并、id 校验、文本清洗、点击幂等、通话窗焦点）；后台失败 UI 仍缺 |
 | [research/2026-10-23-rounds-after-d36.md](research/2026-10-23-rounds-after-d36.md) | d.36 之后的开工备忘：CSP 基线、`release.sh` 顺序、docker 清理、需拍板项与建议轮次 |
+| [specs/2026-11-03-d64-plugin-unification.md](superpowers/specs/2026-11-03-d64-plugin-unification.md) | **d.62.2.23 统一插件模型**：参考 DeepSeek Harness 插件模型（`apply(ctx)` 贡献面/依赖声明/生命周期/权限门禁）把技能、工具、MCP 服务合并为一份插件清单 v3（`contributions` + `permissions`），新增统一能力目录与插件页能力中枢（插件/技能/工具/MCP 四 Tab），命令面板接插件命令 |
 | [specs/2026-11-03-d63-component-typography.md](superpowers/specs/2026-11-03-d63-component-typography.md) | **d.61.2.23 组件级排版与控件规范**：七组控件基元（input/btn/chip/table/list-row/empty/skeleton）、设置卡与弹窗收口、7 页表格与列表、空态骨架组件化、登录页归位 |
 | [specs/2026-11-03-d62-layout-typography.md](superpowers/specs/2026-11-03-d62-layout-typography.md) | **d.61.2.22 布局与排版统一**：审计数据（11 档字号 / 3 种内边距 / 3 种内容宽度）、8 个语义排版档、`PageShell` 基元（固定页头 + 宽度档 + 滚动归属）、16 页逐页落地与刻意保留的不一致 |
 | [specs/2026-11-02-d61-ux-round2.md](superpowers/specs/2026-11-02-d61-ux-round2.md) | **d.61.2.21 体验优化第二轮**：全局本机搜索（任务/记忆/插件进命令面板，只读本机）、设置页内搜索与 13 张卡片定位（registry + 双向源码守卫）、快捷键帮助面板、通知中心类型筛选 |

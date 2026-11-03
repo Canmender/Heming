@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
 import { webcrypto } from "node:crypto";
 
 /**
@@ -60,6 +61,18 @@ if (typeof URL !== "undefined" && typeof URL.createObjectURL !== "function") {
 if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = function scrollIntoView() {};
 }
+
+/**
+ * 全量门禁下 jsdom 环境争用会把 `findBy*` 的默认 1s 等待顶穿。
+ *
+ * 背景（d.64 集成时实测）：210 个测试文件并发跑时，环境创建占去约 65% 的 worker 时间，
+ * `App.test.tsx` 里「关掉弹窗后 Ctrl+K 打开命令面板」这条断言偶发在 1s 内等不到
+ * `role="dialog"`——单文件跑必然通过，全量跑必红。断言本身没有放宽（仍要求弹窗出现），
+ * 只是把「等多久算失败」从 1s 提到 3s：宁可让真正的挂起多等 2s，也不要让门禁被环境争用染红。
+ *
+ * 放在全局而不是给单条用例传 timeout：同类断言全仓有几百处，逐个加只会变成打地鼠。
+ */
+configure({ asyncUtilTimeout: 3000 });
 
 /**
  * jsdom 未实现 window.matchMedia（浏览器/Electron 原生有），而 BootWave 的用例要

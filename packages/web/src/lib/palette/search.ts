@@ -5,6 +5,8 @@ import {
   type InfohubSearchHit,
 } from "../infohub/client.js";
 import { PALETTE_ACTIONS, findPaletteAction, type PaletteActionId } from "./actions.js";
+import type { PluginCommandInfo } from "../plugins/index.js";
+import { pluginCommandDetail, searchPluginCommands } from "./pluginCommands.js";
 import { PALETTE_PAGES, findPalettePage, type PalettePage } from "./pages.js";
 import { PALETTE_SETTINGS, findPaletteSetting, type PaletteSettingSection } from "./settings.js";
 import {
@@ -139,6 +141,7 @@ export type PaletteItemKind =
   | "page"
   | "setting"
   | "action"
+  | "plugin-command"
   | "task"
   | "memory"
   | "plugin"
@@ -172,6 +175,8 @@ export interface PaletteItem {
   memoryLayer?: LocalLayerKind;
   /** plugin 项：插件 id（定位用）。 */
   pluginId?: string;
+  /** plugin-command 项：原始命令（执行时按 target 分发）。 */
+  command?: PluginCommandInfo;
   /** page 项的 Alt 快捷键数字（无则 undefined）。 */
   digit?: string;
   /** member 项：成员 userId（执行时聚焦用）。 */
@@ -188,6 +193,7 @@ export type PaletteGroupId =
   | "page"
   | "setting"
   | "action"
+  | "plugin-command"
   | "task"
   | "memory"
   | "plugin"
@@ -208,6 +214,7 @@ export const GROUP_LABELS: Record<PaletteGroupId, string> = {
   page: "页面跳转",
   setting: "设置",
   action: "常用动作",
+  "plugin-command": "插件命令",
   task: "任务",
   memory: "记忆",
   plugin: "插件",
@@ -222,6 +229,7 @@ export const GROUP_LIMITS: Record<PaletteGroupId, number> = {
   page: 8,
   setting: 5,
   action: 4,
+  "plugin-command": 5,
   task: 5,
   memory: 5,
   plugin: 5,
@@ -235,6 +243,7 @@ const SEARCH_ORDER: PaletteGroupId[] = [
   "page",
   "setting",
   "action",
+  "plugin-command",
   "task",
   "memory",
   "plugin",
@@ -300,6 +309,18 @@ export function skillItem(s: ReturnType<typeof skillPool.list>[number]): Palette
 export function archiveItem(hit: InfohubSearchHit): PaletteItem {
   const r = archiveResult(hit);
   return { kind: "archive", id: r.id, name: r.name, detail: r.detail, hit };
+}
+
+/** 插件命令 → 面板项（id 用 store 给的 `plugin:<插件>:<命令>`，不用另拼）。 */
+export function pluginCommandPaletteItem(command: PluginCommandInfo): PaletteItem {
+  return {
+    kind: "plugin-command",
+    id: command.id,
+    name: command.title,
+    detail: pluginCommandDetail(command),
+    command,
+    pluginId: command.pluginId,
+  };
 }
 
 /* ---- 本机三组（任务 / 记忆 / 插件）：只带定位 id，不带任何正文快照 ---- */
@@ -397,7 +418,13 @@ function rank<T extends { name: string }>(items: T[], q: string): T[] {
  */
 export function searchPalette(
   keyword: string,
-  ctx: { members: TeamMember[]; archiveHits: InfohubSearchHit[]; local?: LocalSnapshot },
+  ctx: {
+    members: TeamMember[];
+    archiveHits: InfohubSearchHit[];
+    local?: LocalSnapshot;
+    /** 启用中插件贡献的命令（面板打开时现读 store）；不传则本组为空。 */
+    commands?: PluginCommandInfo[];
+  },
 ): PaletteGroup[] {
   const q = keyword.trim().toLowerCase();
   if (!q) return buildEmptyGroups([]);
@@ -438,6 +465,14 @@ export function searchPalette(
   })));
   found.set("archive", ctx.archiveHits.map(archiveItem));
 
+  // 插件命令：只来自启用中的插件（store.commands() 已过滤），面板每次打开现读。
+  const commandRes = searchPluginCommands(
+    q,
+    ctx.commands ?? [],
+    GROUP_LIMITS["plugin-command"],
+  );
+  found.set("plugin-command", commandRes.hits.map(pluginCommandPaletteItem));
+
   // 本机三组：只在本机内存里匹配，不发网络请求（见 local.ts 顶部隐私边界）。
   const local = ctx.local;
   const taskRes = local
@@ -458,6 +493,7 @@ export function searchPalette(
     page: PALETTE_PAGES.filter((p) => matches(q, p.label, p.description)).length,
     setting: PALETTE_SETTINGS.filter((s) => matches(q, s.label, s.description, s.keywords)).length,
     action: PALETTE_ACTIONS.filter((a) => matches(q, a.label, a.description, a.keywords)).length,
+    "plugin-command": commandRes.total,
     task: taskRes.total,
     memory: memoryRes.total,
     plugin: pluginRes.total,

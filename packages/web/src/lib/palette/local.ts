@@ -170,6 +170,11 @@ export function readMemoryItems(exportedJson: string): LocalMemoryItem[] {
   return out;
 }
 
+/** 插件技能数：兼容 T1 归一化后的 contributions 与旧夹具的顶层 skills。 */
+function skillCount(m: { contributions?: { skills?: unknown[] }; skills?: unknown[] }): number {
+  return (m.contributions?.skills ?? m.skills ?? []).length;
+}
+
 /** 插件一行：名称 + 「id · 描述 · N 个技能」。 */
 export function pluginItem(plugin: InstalledPlugin): LocalPluginItem {
   const m = plugin.manifest;
@@ -178,7 +183,7 @@ export function pluginItem(plugin: InstalledPlugin): LocalPluginItem {
     kind: "plugin",
     id: m.id,
     name: m.name,
-    detail: `${m.id}${desc ? ` · ${Array.from(desc).slice(0, 30).join("")}` : ""} · ${m.skills.length} 个技能`,
+    detail: `${m.id}${desc ? ` · ${Array.from(desc).slice(0, 30).join("")}` : ""} · ${skillCount(m)} 个技能`,
   };
 }
 
@@ -290,7 +295,12 @@ export function searchLocalPlugins(
     .map((plugin) => {
       const item = pluginItem(plugin);
       const m = plugin.manifest;
-      const skillNames = (m.skills ?? []).map((s) => s.name);
+      // T1 归一化后真实 manifest 一定有 contributions；单测夹具可能仍是 v2 形态，
+      // 这里兼容两种形状（只影响检索关键词的来源，不改变匹配口径）。
+      const rawSkills =
+        (m.contributions?.skills as { name: string }[] | undefined) ??
+        ((m as unknown as { skills?: { name: string }[] }).skills ?? []);
+      const skillNames = rawSkills.map((s) => s.name);
       const score = matchScore(query, m.name, [m.description ?? "", m.id, ...skillNames]);
       return { item, score, name: item.name };
     })

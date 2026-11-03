@@ -93,6 +93,20 @@ const TAR_REQUIRED = [
   "packages/shared/dist/index.js",
 ];
 
+/**
+ * tar 可执行文件：Windows 上优先用系统自带 bsdtar（`System32\tar.exe`）。
+ *
+ * 为什么不能直接写 `tar`：本机 PATH 里可能排着 MSYS/Git 的 GNU tar（在 bash 类
+ * shell 里跑发布链时尤其常见），GNU tar 会把 `C:\...` 当成「远端主机 C」并报
+ * `Cannot connect to C:`；系统 bsdtar 既认 Windows 绝对路径，`--exclude` 裸段名
+ * 语义也与 deploy.md §2 的排除表一致（已实测嵌套 node_modules 被正确排除）。
+ */
+const TAR_BIN =
+  process.platform === "win32" &&
+  existsSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe"))
+    ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+    : "tar";
+
 /* ------------------------------------------------------------------ *
  * 小工具：输出、格式化、错误
  * ------------------------------------------------------------------ */
@@ -1513,7 +1527,7 @@ function planDeploy(ctx) {
         note: "备份不通过 → 整轮中止，install 不会被调用",
       },
       {
-        cmd: `tar ${TAR_EXCLUDES.map((item) => `--exclude ${item}`).join(" ")} -czf ${shellQuote(tar)} .`,
+        cmd: `${TAR_BIN} ${TAR_EXCLUDES.map((item) => `--exclude ${item}`).join(" ")} -czf ${shellQuote(tar)} .`,
         cwd: ROOT,
         writes: `${tar}（仓库外，避免把自身卷进归档）`,
         note: "随后 tar -tzf 校验：不该有的必须 0、必须有的至少 1",
@@ -1640,7 +1654,7 @@ async function runDeploy(ctx) {
     print(`\n[8b-2] 打部署包 → ${tarPath}`);
     const excludeArgs = TAR_EXCLUDES.map((item) => `--exclude ${item}`).join(" ");
     const tarResult = await run(ctx, {
-      cmd: `tar ${excludeArgs} -czf ${shellQuote(tarPath)} .`,
+      cmd: `${TAR_BIN} ${excludeArgs} -czf ${shellQuote(tarPath)} .`,
       cwd: ROOT,
       timeoutMs: ctx.opts.timeout || STEP_TIMEOUTS.deployStage,
     });
@@ -1659,7 +1673,7 @@ async function runDeploy(ctx) {
     }
     if (size > 50 * 1024 * 1024) notesWarn.push(`部署包 ${formatBytes(size)} 偏大（预期 5MB 量级），核对排除表`);
 
-    const list = await capture(ctx, `tar -tzf ${shellQuote(tarPath)}`, {
+    const list = await capture(ctx, `${TAR_BIN} -tzf ${shellQuote(tarPath)}`, {
       timeoutMs: ctx.opts.timeout || STEP_TIMEOUTS.deployStage,
     });
     if (list.code !== 0) throw new StepError("tar -tzf 读取失败", { tail: list.tail40 });

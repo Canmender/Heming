@@ -122,6 +122,8 @@ export interface AutomationIntent {
 export type PaletteIntentKind =
   | "agent-create"
   | "notifications"
+  /** d.64：命令面板插件命令（target=skill）→ 技能区定位并打开详情。 */
+  | "focus-skill"
   /** d.61：命令面板本机搜索 → 记忆条目定位。 */
   | "focus-memory"
   /** d.61：命令面板本机搜索 → 插件卡片定位。 */

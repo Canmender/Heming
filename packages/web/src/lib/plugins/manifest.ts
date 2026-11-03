@@ -1,20 +1,37 @@
 import { z } from "zod";
+import { PALETTE_PAGES } from "../palette/pages.js";
+import { hostOfUrl } from "./permissions.js";
 
 /**
- * 插件清单（`plugin.json`）的唯一解析入口。
+ * 插件清单（`plugin.json`）的唯一解析入口（d.64 · 统一插件模型 v3）。
  *
- * 插件是纯声明式系统能力包：承载技能与**远程 MCP 服务**（仅 HTTP）。
+ * 插件是纯声明式系统能力包：三类贡献面（技能 / 远程 MCP 服务 / 命令）统一收进
+ * `contributions`，并显式声明 `permissions`（网络主机 / 工具风险上限 / 预留文件根）。
  * 清单在进入存储前必须完整校验，解析失败一律给出中文错误并指出字段路径——
  * 不做「尽量猜」的容错，否则坏包会在安装后以半可用状态存在，比直接拒绝更难排查。
  *
- * 为什么 v2 仍拒绝 stdio/命令：那会在用户机器上拉起进程，等于安装即执行
+ * 版本策略：
+ * - **v3**（`PLUGIN_SCHEMA_VERSION`）是唯一新契约；不再接受顶层 `skills` / `mcpServers`；
+ * - **v1 / v2 旧包继续按原规则解析**，随后归一化成 v3 结构：
+ *   `commands` 空、`permissions.network` = 其服务 host 全集、`permissions.tools = "read"`
+ *   （等于「安装时已确认的既有事实」——旧包不回溯拦截）；
+ * - 归一化后 `PluginManifest` 恒定具备 `contributions.skills/mcpServers/commands` 与
+ *   `permissions { network, tools, files }`，UI 不用再判空。
+ *
+ * 为什么仍拒绝 stdio/命令类 MCP：那会在用户机器上拉起进程，等于安装即执行
  * 第三方代码；本地进程类集成仍走接口区手动配置或 Registry 安装。
  */
 
-export const PLUGIN_SCHEMA_VERSION = 2;
-export const PLUGIN_SCHEMA_VERSIONS = [1, 2] as const;
+export const PLUGIN_SCHEMA_VERSION = 3;
+export const PLUGIN_SCHEMA_VERSIONS = [1, 2, 3] as const;
 export const MAX_PLUGIN_SKILLS = 50;
 export const MAX_PLUGIN_MCP_SERVERS = 10;
+export const MAX_PLUGIN_COMMANDS = 30;
+export const MAX_PLUGIN_PERMISSION_HOSTS = 20;
+
+/** 预留文件根上限（本轮只校验与展示，不执行）。 */
+const MAX_PLUGIN_FILES = 5;
+const FILE_PATH_MAX = 200;
 
 const MCP_SERVER_NAME_MAX = 64;
 const MCP_SERVER_DESCRIPTION_MAX = 200;
@@ -28,6 +45,17 @@ const SKILL_TRIGGER_MAX = 64;
 const SKILL_TRIGGERS_MAX = 20;
 const SKILL_TAGS_MAX = 20;
 const SKILL_TAG_MAX = 32;
+
+const COMMAND_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const COMMAND_TITLE_MAX = 64;
+const COMMAND_DESCRIPTION_MAX = 200;
+const COMMAND_KEYWORDS_MAX = 20;
+const COMMAND_KEYWORD_MAX = 32;
+
+const HOST_MAX = 253;
+
+/** 命令 target 可指向的页面 id（单一真源：命令面板的页面目录）。 */
+const PAGE_IDS: ReadonlySet<string> = new Set(PALETTE_PAGES.map((page) => page.page));
 
 /** 手写清单里的空字符串条目直接丢弃；非字符串保留，交给内层报类型错误。 */
 function dropBlankEntries<T extends z.ZodTypeAny>(schema: T) {
@@ -51,22 +79,26 @@ function typeParams(missing: string, wrongType?: string) {
 
 const SkillSpecSchema = z.object(
   {
-    name: z.string(typeParams("缺少技能名", "技能名必须是文本"))
+    name: z
+      .string(typeParams("缺少技能名", "技能名必须是文本"))
       .trim()
       .min(1, "技能名不能为空")
       .max(SKILL_NAME_MAX, `技能名最多 ${SKILL_NAME_MAX} 字`),
-    description: z.string(typeParams("技能描述必须是文本"))
+    description: z
+      .string(typeParams("技能描述必须是文本"))
       .trim()
       .max(SKILL_DESCRIPTION_MAX, `技能描述最多 ${SKILL_DESCRIPTION_MAX} 字`)
       .default(""),
-    instructions: z.string(typeParams("缺少技能指令", "技能指令必须是文本"))
+    instructions: z
+      .string(typeParams("缺少技能指令", "技能指令必须是文本"))
       .trim()
       .min(1, "技能指令不能为空")
       .max(SKILL_INSTRUCTIONS_MAX, `技能指令最多 ${SKILL_INSTRUCTIONS_MAX} 字`),
     triggers: dropBlankEntries(
       z
         .array(
-          z.string(typeParams("触发词必须是文本"))
+          z
+            .string(typeParams("触发词必须是文本"))
             .trim()
             .min(1, "触发词不能为空")
             .max(SKILL_TRIGGER_MAX, `单个触发词最多 ${SKILL_TRIGGER_MAX} 字`),
@@ -78,7 +110,8 @@ const SkillSpecSchema = z.object(
     tags: dropBlankEntries(
       z
         .array(
-          z.string(typeParams("标签必须是文本"))
+          z
+            .string(typeParams("标签必须是文本"))
             .trim()
             .min(1, "标签不能为空")
             .max(SKILL_TAG_MAX, `单个标签最多 ${SKILL_TAG_MAX} 字`),
@@ -94,21 +127,25 @@ const SkillSpecSchema = z.object(
 const McpServerSpecSchema = z
   .object(
     {
-      key: z.string(typeParams("缺少服务 key", "服务 key 必须是文本"))
+      key: z
+        .string(typeParams("缺少服务 key", "服务 key 必须是文本"))
         .trim()
         .regex(
           /^[a-z0-9][a-z0-9-]{0,31}$/,
           "服务 key 只能用小写字母、数字和连字符，且以字母或数字开头（≤32）",
         ),
-      name: z.string(typeParams("缺少服务名", "服务名必须是文本"))
+      name: z
+        .string(typeParams("缺少服务名", "服务名必须是文本"))
         .trim()
         .min(1, "服务名不能为空")
         .max(MCP_SERVER_NAME_MAX, `服务名最多 ${MCP_SERVER_NAME_MAX} 字`),
-      url: z.string(typeParams("缺少服务地址", "服务地址必须是文本"))
+      url: z
+        .string(typeParams("缺少服务地址", "服务地址必须是文本"))
         .trim()
         .min(1, "服务地址不能为空")
         .max(MCP_SERVER_URL_MAX, `服务地址最多 ${MCP_SERVER_URL_MAX} 字符`),
-      description: z.string(typeParams("服务描述必须是文本"))
+      description: z
+        .string(typeParams("服务描述必须是文本"))
         .trim()
         .max(MCP_SERVER_DESCRIPTION_MAX, `服务描述最多 ${MCP_SERVER_DESCRIPTION_MAX} 字`)
         .default(""),
@@ -140,64 +177,248 @@ const McpServerSpecSchema = z
     });
   });
 
+/** 命令目标：页面 / 本插件技能 / 插件详情（打开自己的详情面板）。 */
+const CommandTargetSchema = z.discriminatedUnion(
+  "kind",
+  [
+    z.object(
+      {
+        kind: z.literal("page", typeParams("目标类型缺失", "目标类型必须是 page/skill/plugin")),
+        page: z.string(typeParams("缺少页面 id", "页面 id 必须是文本")).trim().min(1, "页面 id 不能为空"),
+      },
+      typeParams("命令目标必须是 JSON 对象"),
+    ),
+    z.object(
+      {
+        kind: z.literal("skill"),
+        name: z.string(typeParams("缺少技能名", "技能名必须是文本")).trim().min(1, "技能名不能为空"),
+      },
+      typeParams("命令目标必须是 JSON 对象"),
+    ),
+    z.object(
+      {
+        kind: z.literal("plugin"),
+      },
+      typeParams("命令目标必须是 JSON 对象"),
+    ),
+  ],
+  typeParams("命令目标必须是 JSON 对象（kind: page / skill / plugin）"),
+);
+
+const CommandSpecSchema = z.object(
+  {
+    id: z
+      .string(typeParams("缺少命令 id", "命令 id 必须是文本"))
+      .trim()
+      .regex(COMMAND_ID_RE, "命令 id 只能用小写字母、数字、点、下划线和连字符，且以字母或数字开头（≤64）"),
+    title: z
+      .string(typeParams("缺少命令标题", "命令标题必须是文本"))
+      .trim()
+      .min(1, "命令标题不能为空")
+      .max(COMMAND_TITLE_MAX, `命令标题最多 ${COMMAND_TITLE_MAX} 字`),
+    description: z
+      .string(typeParams("命令描述必须是文本"))
+      .trim()
+      .max(COMMAND_DESCRIPTION_MAX, `命令描述最多 ${COMMAND_DESCRIPTION_MAX} 字`)
+      .default(""),
+    keywords: dropBlankEntries(
+      z
+        .array(
+          z
+            .string(typeParams("关键词必须是文本"))
+            .trim()
+            .min(1, "关键词不能为空")
+            .max(COMMAND_KEYWORD_MAX, `单个关键词最多 ${COMMAND_KEYWORD_MAX} 字`),
+          typeParams("关键词必须是数组"),
+        )
+        .max(COMMAND_KEYWORDS_MAX, `关键词最多 ${COMMAND_KEYWORDS_MAX} 个`)
+        .default([]),
+    ),
+    target: CommandTargetSchema,
+  },
+  typeParams("命令必须是 JSON 对象"),
+);
+
+/**
+ * 主机白名单条目：`host` 或 `host:port`，不含协议/路径/账号。
+ * 用 URL 反解析校验：它同时覆盖 IPv4、域名与 `[::1]:8787` 这类 IPv6 字面量。
+ */
+function isHostLike(value: string): boolean {
+  if (!value || /[\s/\\?#@]/.test(value)) return false;
+  try {
+    const url = new URL(`http://${value}`);
+    return url.host.toLowerCase() === value.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+const HostSchema = z
+  .string(typeParams("网络主机必须是文本"))
+  .trim()
+  .min(1, "网络主机不能为空")
+  .max(HOST_MAX, `单个主机最多 ${HOST_MAX} 字符`)
+  .refine(isHostLike, "网络主机只能写 host 或 host:port（不含协议、路径与账号密码）");
+
+/** 预留文件根：相对路径，不允许绝对路径与 `..`（本轮只校验与展示）。 */
+function isRelativePath(value: string): boolean {
+  if (!value || value.length > FILE_PATH_MAX) return false;
+  if (value.startsWith("/") || value.startsWith("\\")) return false;
+  if (/^[a-zA-Z]:/.test(value)) return false;
+  return !value.replace(/\\/g, "/").split("/").some((part) => part === "..");
+}
+
+const FilePathSchema = z
+  .string(typeParams("文件根必须是文本"))
+  .trim()
+  .min(1, "文件根不能为空")
+  .max(FILE_PATH_MAX, `单个文件根最多 ${FILE_PATH_MAX} 字符`)
+  .refine(isRelativePath, "文件根必须是相对路径（不能以 / 或盘符开头，也不能包含 ..）");
+
+const PermissionsSchema = z.object(
+  {
+    network: dropBlankEntries(
+      z
+        .array(HostSchema, typeParams("权限网络列表必须是数组"))
+        .max(MAX_PLUGIN_PERMISSION_HOSTS, `网络主机最多 ${MAX_PLUGIN_PERMISSION_HOSTS} 个`)
+        .default([]),
+    ),
+    tools: z
+      .enum(["none", "read", "write"], {
+        error: 'permissions.tools 只能是 "none" / "read" / "write"',
+      })
+      .default("read"),
+    files: dropBlankEntries(
+      z
+        .array(FilePathSchema, typeParams("权限文件列表必须是数组"))
+        .max(MAX_PLUGIN_FILES, `预留文件根最多 ${MAX_PLUGIN_FILES} 个`)
+        .default([]),
+    ),
+  },
+  typeParams("permissions 必须是 JSON 对象"),
+);
+
+const ContributionsSchema = z.object(
+  {
+    skills: z
+      .array(SkillSpecSchema, typeParams("技能列表必须是数组"))
+      .max(MAX_PLUGIN_SKILLS, `单个插件最多 ${MAX_PLUGIN_SKILLS} 个技能`)
+      .default([]),
+    mcpServers: z
+      .array(McpServerSpecSchema, typeParams("MCP 服务列表必须是数组"))
+      .max(MAX_PLUGIN_MCP_SERVERS, `单个插件最多 ${MAX_PLUGIN_MCP_SERVERS} 台 MCP 服务`)
+      .default([]),
+    commands: z
+      .array(CommandSpecSchema, typeParams("命令列表必须是数组"))
+      .max(MAX_PLUGIN_COMMANDS, `单个插件最多 ${MAX_PLUGIN_COMMANDS} 个命令`)
+      .default([]),
+  },
+  typeParams("contributions 必须是 JSON 对象"),
+);
+
 const PluginManifestSchema = z
   .object(
     {
-      schemaVersion: z.union([z.literal(1), z.literal(2)], {
+      schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)], {
         // zod 4 去掉了 errorMap，直接给一个字符串即覆盖这一层的所有报错文案。
-        error: `仅支持 schemaVersion: ${PLUGIN_SCHEMA_VERSIONS.join(" 或 ")}`,
+        error: `仅支持 schemaVersion: ${PLUGIN_SCHEMA_VERSIONS.join(" / ")}`,
       }),
-      id: z.string(typeParams("缺少插件 id", "插件 id 必须是文本"))
+      id: z
+        .string(typeParams("缺少插件 id", "插件 id 必须是文本"))
         .trim()
         .regex(
           /^[a-z0-9][a-z0-9._-]{0,63}$/,
           "插件 id 只能用小写字母、数字、点、下划线和连字符，且以字母或数字开头（≤64）",
         ),
-      name: z.string(typeParams("缺少插件名", "插件名必须是文本"))
+      name: z
+        .string(typeParams("缺少插件名", "插件名必须是文本"))
         .trim()
         .min(1, "插件名不能为空")
         .max(64, "插件名最多 64 字"),
-      version: z.string(typeParams("缺少版本号", "版本号必须是文本"))
+      version: z
+        .string(typeParams("缺少版本号", "版本号必须是文本"))
         .trim()
         .min(1, "版本号不能为空")
         .max(32, "版本号最多 32 字"),
-      description: z.string(typeParams("插件描述必须是文本"))
+      description: z
+        .string(typeParams("插件描述必须是文本"))
         .trim()
         .max(200, "插件描述最多 200 字")
         .default(""),
-      author: z.string(typeParams("作者名必须是文本"))
+      author: z
+        .string(typeParams("作者名必须是文本"))
         .trim()
         .max(64, "作者名最多 64 字")
         .default(""),
+      // v1/v2 的顶层字段（仅旧包使用；v3 进来会被 parsePluginManifest 的迁移提示拦下）
       skills: z
         .array(SkillSpecSchema, typeParams("技能列表必须是数组"))
         .max(MAX_PLUGIN_SKILLS, `单个插件最多 ${MAX_PLUGIN_SKILLS} 个技能`)
-        .default([]),
+        .optional(),
       mcpServers: z
         .array(McpServerSpecSchema, typeParams("MCP 服务列表必须是数组"))
         .max(MAX_PLUGIN_MCP_SERVERS, `单个插件最多 ${MAX_PLUGIN_MCP_SERVERS} 台 MCP 服务`)
-        .default([]),
+        .optional(),
+      // v3 的贡献面
+      contributions: ContributionsSchema.optional(),
+      // v3 的权限声明（无 MCP 服务时可省略）
+      permissions: PermissionsSchema.optional(),
     },
     typeParams("插件清单必须是 JSON 对象"),
   )
   .superRefine((manifest, ctx) => {
+    const legacy = manifest.schemaVersion !== 3;
+    const skills = legacy ? (manifest.skills ?? []) : (manifest.contributions?.skills ?? []);
+    const servers = legacy ? (manifest.mcpServers ?? []) : (manifest.contributions?.mcpServers ?? []);
+    const commands = legacy ? [] : (manifest.contributions?.commands ?? []);
+
+    if (legacy && manifest.contributions) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["contributions"],
+        message: `schemaVersion ${manifest.schemaVersion} 请使用顶层 skills / mcpServers；升级到 schemaVersion 3 才支持 contributions`,
+      });
+    }
+    if (legacy && manifest.permissions) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["permissions"],
+        message: `schemaVersion ${manifest.schemaVersion} 不支持权限声明，请升级到 schemaVersion 3`,
+      });
+    }
+
     if (manifest.schemaVersion === 1) {
-      if (manifest.skills.length === 0) {
+      if (skills.length === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["skills"],
           message: "插件至少要包含 1 个技能",
         });
       }
-      if (manifest.mcpServers.length > 0) {
+      if (servers.length > 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["mcpServers"],
-          message: "schemaVersion 1 不支持 MCP 服务，请升级到 schemaVersion 2",
+          message: "schemaVersion 1 不支持 MCP 服务，请升级到 schemaVersion 2 或 3",
         });
       }
     }
-    if (manifest.skills.length + manifest.mcpServers.length === 0) {
+
+    if (manifest.schemaVersion === 3) {
+      if (!manifest.contributions) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions"],
+          message: "schemaVersion 3 必须声明 contributions（技能 / MCP 服务 / 命令至少一类）",
+        });
+      } else if (skills.length + servers.length + commands.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions"],
+          message: "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令）",
+        });
+      }
+    } else if (skills.length + servers.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["skills"],
@@ -206,11 +427,11 @@ const PluginManifestSchema = z
     }
 
     const seenSkills = new Set<string>();
-    manifest.skills.forEach((skill, index) => {
+    skills.forEach((skill, index) => {
       if (seenSkills.has(skill.name)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["skills", index, "name"],
+          path: legacy ? ["skills", index, "name"] : ["contributions", "skills", index, "name"],
           message: `技能名重复：${skill.name}`,
         });
       }
@@ -218,21 +439,98 @@ const PluginManifestSchema = z
     });
 
     const seenServers = new Set<string>();
-    manifest.mcpServers.forEach((server, index) => {
+    servers.forEach((server, index) => {
       if (seenServers.has(server.key)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["mcpServers", index, "key"],
+          path: legacy ? ["mcpServers", index, "key"] : ["contributions", "mcpServers", index, "key"],
           message: `服务 key 重复：${server.key}`,
         });
       }
       seenServers.add(server.key);
     });
+
+    // v3：权限声明必须覆盖全部 MCP 服务主机（声明即约束）。
+    if (!legacy) {
+      const declared = new Set((manifest.permissions?.network ?? []).map((host) => host.toLowerCase()));
+      servers.forEach((server, index) => {
+        const host = hostOfUrl(server.url);
+        if (!host || declared.has(host)) return;
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["permissions", "network"],
+          message: `未声明 MCP 服务主机：${host}（见 contributions.mcpServers[${index}].url）`,
+        });
+      });
+    }
+
+    // v3：命令 id 唯一、目标必须可解析。
+    const seenCommands = new Set<string>();
+    commands.forEach((command, index) => {
+      if (seenCommands.has(command.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "commands", index, "id"],
+          message: `命令 id 重复：${command.id}`,
+        });
+      }
+      seenCommands.add(command.id);
+      if (command.target.kind === "page" && !PAGE_IDS.has(command.target.page)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "commands", index, "target", "page"],
+          message: `未知页面：${command.target.page}`,
+        });
+      }
+      if (command.target.kind === "skill" && !seenSkills.has(command.target.name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "commands", index, "target", "name"],
+          message: `command 目标技能不存在于本插件：${command.target.name}`,
+        });
+      }
+    });
   });
 
 export type PluginSkillSpec = z.infer<typeof SkillSpecSchema>;
 export type PluginMcpServerSpec = z.infer<typeof McpServerSpecSchema>;
-export type PluginManifest = z.infer<typeof PluginManifestSchema>;
+export type PluginCommandSpec = z.infer<typeof CommandSpecSchema>;
+export type PluginSchemaVersion = (typeof PLUGIN_SCHEMA_VERSIONS)[number];
+export type PluginToolRisk = "none" | "read" | "write";
+
+/** 归一化后的权限声明（v1/v2 也会补全，UI 不用判空）。 */
+export interface PluginPermissions {
+  /** 网络主机白名单（host 或 host:port）。 */
+  network: string[];
+  /** 本插件 MCP 工具的风险上限（只能收紧，不放宽 HITL）。 */
+  tools: PluginToolRisk;
+  /** 预留文件根（本轮只校验与展示，不执行）。 */
+  files: string[];
+}
+
+/** 三类贡献面：技能 / 远程 MCP 服务 / 命令。 */
+export interface PluginContributions {
+  skills: PluginSkillSpec[];
+  mcpServers: PluginMcpServerSpec[];
+  commands: PluginCommandSpec[];
+}
+
+/**
+ * 归一化后的插件清单（唯一对外形态）。
+ *
+ * ★ `schemaVersion` 保留原始版本号（1/2/3）：安装弹窗要据此提示「旧版清单（v2）」；
+ * 但 `contributions` / `permissions` 一定存在且为 v3 形状。
+ */
+export interface PluginManifest {
+  schemaVersion: PluginSchemaVersion;
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  contributions: PluginContributions;
+  permissions: PluginPermissions;
+}
 
 /** 清单错误：`message` 已是可直接展示的中文。 */
 export class PluginManifestError extends Error {
@@ -266,6 +564,15 @@ function uniq(items: string[]): string[] {
   return [...new Set(items.filter(Boolean))];
 }
 
+/** 旧版清单的权限兜底：网络 = 其服务 host 全集、工具上限 read（等于既有事实）。 */
+function legacyPermissions(servers: PluginMcpServerSpec[]): PluginPermissions {
+  return {
+    network: uniq(servers.map((server) => hostOfUrl(server.url)).filter(Boolean)),
+    tools: "read",
+    files: [],
+  };
+}
+
 /**
  * 解析插件清单。接受 JSON 文本或已解析对象；失败抛 `PluginManifestError`。
  * 未知字段由 zod 丢弃，不会进入存储。
@@ -280,15 +587,60 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
       throw new PluginManifestError("不是有效的 JSON，请检查逗号、引号与括号是否配对");
     }
   }
+  // v3 迁移提示必须在 zod 之前判：未知字段会被丢弃，schema 里看不到它们。
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const record = raw as Record<string, unknown>;
+    if (record.schemaVersion === 3) {
+      if ("skills" in record) {
+        throw new PluginManifestError(
+          "schemaVersion 3 不再接受顶层 skills，请迁移到 contributions.skills",
+        );
+      }
+      if ("mcpServers" in record) {
+        throw new PluginManifestError(
+          "schemaVersion 3 不再接受顶层 mcpServers，请迁移到 contributions.mcpServers",
+        );
+      }
+    }
+  }
   const parsed = PluginManifestSchema.safeParse(raw);
   if (!parsed.success) throw new PluginManifestError(formatIssues(parsed.error));
   const manifest = parsed.data;
-  return {
-    ...manifest,
-    skills: manifest.skills.map((skill) => ({
+  const legacy = manifest.schemaVersion !== 3;
+  const legacySkills = manifest.skills ?? [];
+  const legacyServers = manifest.mcpServers ?? [];
+  const contributions: PluginContributions = {
+    skills: (legacy ? legacySkills : (manifest.contributions?.skills ?? [])).map((skill) => ({
       ...skill,
       triggers: uniq(skill.triggers),
       tags: uniq(skill.tags),
     })),
+    mcpServers: (legacy ? legacyServers : (manifest.contributions?.mcpServers ?? [])).map((server) => ({
+      ...server,
+    })),
+    commands: legacy
+      ? []
+      : (manifest.contributions?.commands ?? []).map((command) => ({
+          ...command,
+          keywords: uniq(command.keywords),
+          target: { ...command.target },
+        })),
+  };
+  const permissions: PluginPermissions = legacy
+    ? legacyPermissions(contributions.mcpServers)
+    : {
+        network: uniq((manifest.permissions?.network ?? []).map((host) => host.toLowerCase())),
+        tools: manifest.permissions?.tools ?? "read",
+        files: uniq(manifest.permissions?.files ?? []),
+      };
+  return {
+    schemaVersion: manifest.schemaVersion,
+    id: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
+    description: manifest.description,
+    author: manifest.author,
+    contributions,
+    permissions,
   };
 }

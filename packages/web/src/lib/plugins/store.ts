@@ -3,8 +3,14 @@ import { mcpRegistry, type McpServerConfig, type ServerOrigin } from "../mcp/ind
 import {
   parsePluginManifest,
   PluginManifestError,
+  type PluginCommandSpec,
   type PluginManifest,
 } from "./manifest.js";
+import { pluginIdFromServerId } from "./permissions.js";
+
+// 目录（catalog）与命令面板都从插件侧反解服务归属，统一从本模块导出，
+// 避免两处各写一份 `plugin:` 前缀解析而漂移。
+export { pluginIdFromServerId } from "./permissions.js";
 
 /**
  * 已装插件的本机存储（`heming.plugins.v1`）。
@@ -87,7 +93,7 @@ export interface PluginInstallPreview {
   servers: PluginServerDiff;
   /** 与手工/Registry 服务撞 id；非空时安装会被拒绝。 */
   conflicts: PluginServerConflict[];
-  /** 网络访问主机（含端口），安装前展示。 */
+  /** 网络访问主机（含端口），安装前展示；口径来自归一化后的 `permissions.network`。 */
   hosts: string[];
   /** 新插件且已达数量上限；更新不受影响。 */
   limitReached: boolean;
@@ -107,6 +113,25 @@ export interface PluginServerInfo {
   enabled: boolean;
 }
 
+/** 插件贡献计数（插件卡「贡献」行与安装弹窗摘要共用）。 */
+export interface PluginContributionCounts {
+  skills: number;
+  servers: number;
+  commands: number;
+}
+
+/** 插件命令：命令面板用的执行入口（`id` 已加 `plugin:<插件 id>:` 前缀，全局唯一）。 */
+export interface PluginCommandInfo {
+  /** `plugin:<pluginId>:<commandId>`。 */
+  id: string;
+  pluginId: string;
+  pluginName: string;
+  title: string;
+  description: string;
+  keywords: string[];
+  target: PluginCommandSpec["target"];
+}
+
 /** 稳定的服务 id；`key` 不含冒号，工具键 `serverId::toolName` 的分隔不受影响。 */
 export function pluginServerId(pluginId: string, key: string): string {
   return `plugin:${pluginId}:${key}`;
@@ -114,8 +139,10 @@ export function pluginServerId(pluginId: string, key: string): string {
 
 /** 从旧记录的服务 id 反推 key；异常 id 原样返回，只用于展示。 */
 function serverKeyFromId(pluginId: string, id: string): string {
-  const prefix = `plugin:${pluginId}:`;
-  return id.startsWith(prefix) ? id.slice(prefix.length) : id;
+  if (pluginIdFromServerId(id) === pluginId) {
+    return id.slice(`plugin:${pluginId}:`.length);
+  }
+  return id;
 }
 
 function sameStringList(a: string[], b: string[]): boolean {
@@ -123,7 +150,7 @@ function sameStringList(a: string[], b: string[]): boolean {
 }
 
 function sameSkill(
-  spec: PluginManifest["skills"][number],
+  spec: PluginManifest["contributions"]["skills"][number],
   skill: { description: string; instructions: string; triggers: string[]; tags: string[] },
 ): boolean {
   return (
@@ -166,20 +193,54 @@ function uniq(items: string[]): string[] {
 }
 
 function copyPlugin(plugin: InstalledPlugin): InstalledPlugin {
+  const { contributions, permissions } = plugin.manifest;
   return {
     ...plugin,
     manifest: {
       ...plugin.manifest,
-      skills: plugin.manifest.skills.map((skill) => ({
-        ...skill,
-        triggers: [...skill.triggers],
-        tags: [...skill.tags],
-      })),
-      mcpServers: plugin.manifest.mcpServers.map((server) => ({ ...server })),
+      contributions: {
+        skills: contributions.skills.map((skill) => ({
+          ...skill,
+          triggers: [...skill.triggers],
+          tags: [...skill.tags],
+        })),
+        mcpServers: contributions.mcpServers.map((server) => ({ ...server })),
+        commands: contributions.commands.map((command) => ({
+          ...command,
+          keywords: [...command.keywords],
+          target: { ...command.target },
+        })),
+      },
+      permissions: {
+        network: [...permissions.network],
+        tools: permissions.tools,
+        files: [...permissions.files],
+      },
     },
     skillIds: [...plugin.skillIds],
     serverIds: [...plugin.serverIds],
   };
+}
+
+/**
+ * 读回本机存储里的清单。
+ *
+ * 存的是**归一化后的 v3 形状**（`contributions` / `permissions`），但 `schemaVersion`
+ * 保留原始值（v1/v2 包要能在界面上标「旧版清单」）。直接交给 `parsePluginManifest`
+ * 会按旧版规则去找顶层 `skills`，必然解析失败；所以先按 v3 解析再把版本号还原。
+ * 旧版本应用留下的记录（顶层 skills、无 contributions）仍走原来的旧版解析路径。
+ */
+function parseStoredManifest(raw: unknown): PluginManifest {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const record = raw as Record<string, unknown>;
+    if ("contributions" in record || "permissions" in record) {
+      const version = record.schemaVersion;
+      const parsed = parsePluginManifest({ ...record, schemaVersion: 3 });
+      const legacy = version === 1 || version === 2;
+      return legacy ? { ...parsed, schemaVersion: version } : parsed;
+    }
+  }
+  return parsePluginManifest(raw);
 }
 
 export class PluginStore {
@@ -224,7 +285,7 @@ export class PluginStore {
     const owned = this.skills.list().filter((s) => s.pluginId === manifest.id);
     const byName = new Map(owned.map((s) => [s.name, s]));
     const skills: PluginSkillDiff = { added: [], changed: [], unchanged: [], removed: [] };
-    for (const spec of manifest.skills) {
+    for (const spec of manifest.contributions.skills) {
       const match = byName.get(spec.name);
       if (!match) skills.added.push(spec.name);
       else if (sameSkill(spec, match)) skills.unchanged.push(spec.name);
@@ -236,7 +297,7 @@ export class PluginStore {
     const conflicts: PluginServerConflict[] = [];
     const servers: PluginServerDiff = { added: [], changed: [], unchanged: [], removed: [] };
     const nextIds = new Set<string>();
-    for (const spec of manifest.mcpServers) {
+    for (const spec of manifest.contributions.mcpServers) {
       const id = pluginServerId(manifest.id, spec.key);
       nextIds.add(id);
       const current = this.mcp.get(id);
@@ -256,19 +317,13 @@ export class PluginStore {
       if (!current || current.origin !== "plugin") continue;
       const key = serverKeyFromId(manifest.id, oldId);
       const oldName =
-        existing?.manifest.mcpServers.find((server) => server.key === key)?.name ?? current.name;
+        existing?.manifest.contributions.mcpServers.find((server) => server.key === key)?.name ?? current.name;
       servers.removed.push({ key, name: oldName });
     }
 
-    const hosts: string[] = [];
-    for (const spec of manifest.mcpServers) {
-      try {
-        const { host } = new URL(spec.url);
-        if (host && !hosts.includes(host)) hosts.push(host);
-      } catch {
-        // 清单已校验合法；这里只做展示
-      }
-    }
+    // 主机的「已声明」口径与解析期一致：v3 直接读 permissions.network，
+    // v1/v2 归一化时已由服务 URL 推导并补全，这里不再二次推导，避免两套口径。
+    const hosts = [...manifest.permissions.network];
 
     return {
       manifest,
@@ -294,6 +349,39 @@ export class PluginStore {
           name: skill.name,
           description: skill.description,
           enabled: skill.enabled,
+        });
+      }
+    }
+    return out;
+  }
+
+  /** 贡献计数（技能 / 服务 / 命令）：插件卡与安装弹窗的摘要都用它。 */
+  contributionCounts(pluginId: string): PluginContributionCounts {
+    const plugin = this.data.plugins.find((p) => p.manifest.id === pluginId);
+    if (!plugin) return { skills: 0, servers: 0, commands: 0 };
+    const { skills, mcpServers, commands } = plugin.manifest.contributions;
+    return { skills: skills.length, servers: mcpServers.length, commands: commands.length };
+  }
+
+  /**
+   * 命令面板用的插件命令。
+   *
+   * 只列**启用中**插件的命令：停用插件 = 它的技能/服务都不可用，
+   * 命令若还能触发就是绕过停用语义（面板入口必须和执行面同口径）。
+   */
+  commands(): PluginCommandInfo[] {
+    const out: PluginCommandInfo[] = [];
+    for (const plugin of this.data.plugins) {
+      if (!plugin.enabled) continue;
+      for (const command of plugin.manifest.contributions.commands) {
+        out.push({
+          id: pluginServerId(plugin.manifest.id, command.id),
+          pluginId: plugin.manifest.id,
+          pluginName: plugin.manifest.name,
+          title: command.title,
+          description: command.description,
+          keywords: [...command.keywords],
+          target: { ...command.target },
         });
       }
     }
@@ -334,7 +422,7 @@ export class PluginStore {
     }
 
     // 服务 id 冲突必须在写入技能之前查完：否则会把技能改了一半再失败。
-    const nextServerIds = manifest.mcpServers.map((spec) =>
+    const nextServerIds = manifest.contributions.mcpServers.map((spec) =>
       pluginServerId(manifest.id, spec.key),
     );
     for (const id of nextServerIds) {
@@ -350,7 +438,7 @@ export class PluginStore {
     const enabled = existing?.enabled ?? true;
     const owned = this.skills.list().filter((s) => s.pluginId === manifest.id);
     const byName = new Map(owned.map((s) => [s.name, s]));
-    const nextNames = new Set(manifest.skills.map((s) => s.name));
+    const nextNames = new Set(manifest.contributions.skills.map((s) => s.name));
 
     let added = 0;
     let updated = 0;
@@ -358,7 +446,7 @@ export class PluginStore {
     const skillIds: string[] = [];
     const createdIds: string[] = [];
 
-    for (const spec of manifest.skills) {
+    for (const spec of manifest.contributions.skills) {
       const match = byName.get(spec.name);
       if (match) {
         this.skills.update(match.id, {
@@ -405,7 +493,7 @@ export class PluginStore {
     let serversAdded = 0;
     let serversUpdated = 0;
     let serversRemoved = 0;
-    for (const spec of manifest.mcpServers) {
+    for (const spec of manifest.contributions.mcpServers) {
       const id = pluginServerId(manifest.id, spec.key);
       if (this.mcp.get(id)) {
         this.mcp.update(id, {
@@ -545,7 +633,7 @@ export class PluginStore {
     const r = raw as Record<string, unknown>;
     let manifest: PluginManifest;
     try {
-      manifest = parsePluginManifest(r.manifest);
+      manifest = parseStoredManifest(r.manifest);
     } catch {
       return null; // 单条损坏只丢这条插件，不影响其它插件
     }
@@ -564,3 +652,13 @@ export class PluginStore {
     };
   }
 }
+
+/**
+ * 模块级单例：插件记录只本机存储（`heming.plugins.v1`），
+ * 技能物化到共用的 `skillPool`，与技能区/聊天路由同一份技能事实。
+ *
+ * ★ 单例放在 store 而不是 `index.ts`：能力目录（`catalog.ts`）也要读它，
+ * 若从 `index.ts` 取会形成 index → catalog → index 的循环导入——
+ * 循环在 ESM 里能跑，但初始化顺序一变 `pluginStore` 就可能是 undefined。
+ */
+export const pluginStore = new PluginStore();

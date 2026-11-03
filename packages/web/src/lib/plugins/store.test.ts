@@ -3,6 +3,7 @@ import {
   MAX_PLUGINS,
   PLUGINS_KEY,
   PluginManifestError,
+  pluginIdFromServerId,
   pluginServerId,
   PluginStore,
   type PluginMcpPort,
@@ -588,5 +589,110 @@ describe("PluginStore · 更新预览与详情", () => {
       v2Manifest({ mcpServers: [{ key: "weather", name: "天气服务", url: "https://mcp.example.com/weather" }] }),
     );
     expect(preview.servers.removed.map((s) => s.key)).toEqual(["alerts"]);
+  });
+});
+
+describe("PluginStore · v3 贡献与命令", () => {
+  /** v3 清单：技能 / 单个 MCP 服务 / 两个命令。 */
+  function v3Manifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      schemaVersion: 3,
+      id: "acme.finance",
+      name: "财务助手包",
+      version: "1.0.0",
+      permissions: { network: ["mcp.example.com"], tools: "read", files: [] },
+      contributions: {
+        skills: [{ name: "财报速读", instructions: "先看收入。" }],
+        mcpServers: [
+          { key: "report", name: "报告服务", url: "https://mcp.example.com/report" },
+        ],
+        commands: [
+          {
+            id: "open-home",
+            title: "打开主页",
+            keywords: ["首页"],
+            target: { kind: "page", page: "home" },
+          },
+          {
+            id: "read-report",
+            title: "读财报",
+            target: { kind: "skill", name: "财报速读" },
+          },
+        ],
+      },
+      ...overrides,
+    };
+  }
+
+  it("贡献计数按清单声明统计，未安装的插件返回全 0", () => {
+    const { store } = fresh();
+    store.install(v3Manifest());
+
+    expect(store.contributionCounts("acme.finance")).toEqual({
+      skills: 1,
+      servers: 1,
+      commands: 2,
+    });
+    expect(store.contributionCounts("not.installed")).toEqual({
+      skills: 0,
+      servers: 0,
+      commands: 0,
+    });
+  });
+
+  it("新增 v3 包照旧安装：技能物化、服务登记为插件来源", () => {
+    const { store, pool, mcp } = fresh();
+    const result = store.install(v3Manifest());
+
+    expect(result.created).toBe(true);
+    expect(pool.list().filter((s) => s.pluginId === "acme.finance")).toHaveLength(1);
+
+    const serverId = pluginServerId("acme.finance", "report");
+    expect(mcp.port.get(serverId)).toMatchObject({
+      name: "报告服务",
+      url: "https://mcp.example.com/report",
+      origin: "plugin",
+      enabled: true,
+    });
+    expect(store.serversOf("acme.finance").map((s) => s.id)).toEqual([serverId]);
+  });
+
+  it("命令带全局唯一 id 与目标，启用中才出现在读取口径里", () => {
+    const { store } = fresh();
+    store.install(v3Manifest());
+
+    const commands = store.commands();
+    expect(commands.map((command) => command.id)).toEqual([
+      "plugin:acme.finance:open-home",
+      "plugin:acme.finance:read-report",
+    ]);
+    expect(commands[0]).toMatchObject({
+      pluginId: "acme.finance",
+      pluginName: "财务助手包",
+      title: "打开主页",
+      description: "",
+      keywords: ["首页"],
+      target: { kind: "page", page: "home" },
+    });
+    expect(commands[1].target).toEqual({ kind: "skill", name: "财报速读" });
+
+    // 停用插件后命令随之下线（面板入口不能绕过停用语义）
+    store.setEnabled("acme.finance", false);
+    expect(store.commands()).toEqual([]);
+
+    store.setEnabled("acme.finance", true);
+    expect(store.commands()).toHaveLength(2);
+  });
+
+  it("preview 的权限主机来自 permissions.network", () => {
+    const { store } = fresh();
+    const preview = store.preview(v3Manifest());
+    expect(preview.hosts).toEqual(["mcp.example.com"]);
+    expect(preview.manifest.permissions.tools).toBe("read");
+  });
+
+  it("pluginIdFromServerId 从 store 侧导出，与 pluginServerId 互逆", () => {
+    expect(pluginIdFromServerId(pluginServerId("acme.finance", "report"))).toBe("acme.finance");
+    expect(pluginIdFromServerId("manual-server")).toBeNull();
   });
 });
