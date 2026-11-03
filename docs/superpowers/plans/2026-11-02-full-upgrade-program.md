@@ -482,7 +482,7 @@
 
 | 项 | 结果与证据 |
 |---|---|
-| 提交 | 见 `git log -1`（本轮改动一次提交：清单 v3/目录/权限 + 插件页中枢 + 命令面板 + 技能区接口区口径 + 文档） |
+| 提交 | `4eaf4c0`（清单 v3/目录/权限 + 插件页中枢 + 命令面板 + 技能区接口区口径 + 文档一次提交） |
 | 门禁 | build 通过；逐包 4/4 无重试（shared 29 / server 141 / web 210 文件 3071 例 / desktop 29 文件 518 例）；三包 tsc 0 |
 | 安装包 | `release/r53/和鸣 Setup d.62.2.23.0.exe` 228,228,138 字节，sha512 `RIr3/iJ70v5M/eqr+1BtY0fWAHUwGgO4MNHvD4yCymb7a6HNcRJVbzQDSgPXa9KV2TGBawzMTnujVRW6i0106w==` 与本地/远端 latest.yml 三方一致 |
 | 云端部署 | ✅ 第 8 步 OK（1m02s）；`/api/health` ok、首页 200、线上 bundle `main-Doa-8pUP.js` 与本地同名同字节、CSP report-only 在位 |
