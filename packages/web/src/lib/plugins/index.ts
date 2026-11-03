@@ -1,6 +1,7 @@
 export * from "./manifest.js";
 export * from "./permissions.js";
 export * from "./integrity.js";
+export * from "./signature.js";
 export * from "./catalog.js";
 export * from "./system.js";
 export * from "./descriptors.js";
@@ -14,6 +15,8 @@ export {
   PluginStore,
   PLUGINS_KEY,
   MAX_PLUGINS,
+  PLUGIN_CONTRIBUTION_KINDS,
+  effectiveEnabled,
   pluginServerId,
   pluginIdFromServerId,
   pluginStore,
@@ -23,7 +26,9 @@ export type {
   InstallResult,
   PluginMcpPort,
   PluginInstallPreview,
+  PluginInstallOptions,
   PluginTrustPreview,
+  PluginContributionKind,
   PluginSkillDiff,
   PluginServerDiff,
   PluginServerDiffEntry,

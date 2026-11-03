@@ -6,7 +6,12 @@ import type { RiskLevel } from "../hitl/types.js";
 import { describeCapabilityCatalog } from "./catalog.js";
 import { parsePluginManifest } from "./manifest.js";
 import { contentFingerprint } from "./integrity.js";
-import { pluginServerId, type InstalledPlugin, type PluginStore } from "./store.js";
+import {
+  pluginServerId,
+  type InstalledPlugin,
+  type PluginContributionKind,
+  type PluginStore,
+} from "./store.js";
 
 type FakeTool = { name: string; description?: string; risk?: RiskLevel };
 
@@ -56,6 +61,7 @@ function installed(
   servers: { key: string; name: string; url: string }[],
   toolPacks: { id: string; name: string; description?: string; tools: string[] }[] = [],
   enabled = true,
+  disabledKinds: PluginContributionKind[] = [],
 ): InstalledPlugin {
   const manifest = parsePluginManifest({
     schemaVersion: 3,
@@ -73,6 +79,9 @@ function installed(
     enabled,
     skillIds: [],
     fingerprint: contentFingerprint(manifest),
+    publisher: null,
+    signature: null,
+    disabledKinds,
     serverIds: servers.map((server) => pluginServerId(id, server.key)),
     installedAt: "2026-11-03T00:00:00.000Z",
     updatedAt: "2026-11-03T00:00:00.000Z",
@@ -495,5 +504,46 @@ describe("describeCapabilityCatalog · 工具束归属", () => {
     );
     expect(catalog.toolPacks[0].matched).toEqual(["search_docs", "export_report"]);
     expect(catalog.toolPacks[0].unresolved).toEqual(["ghost_tool"]);
+  });
+
+  it("贡献级停用 toolPacks：插件仍启用，但工具束 enabled=false（不影响工具注入）", () => {
+    const finance = installed(
+      "acme.finance",
+      "财务包",
+      "read",
+      [server],
+      [{ id: "report-tools", name: "报告工具", tools: ["search_docs"] }],
+      true,
+      ["toolPacks"],
+    );
+    const mcp = fakeMcp([ref("plugin:acme.finance:report", "报告服务", { name: "search_docs" })]);
+
+    const catalog = describeCapabilityCatalog({
+      mcp,
+      plugins: fakePlugins([finance]),
+      providers: [],
+    });
+
+    expect(catalog.toolPacks[0].enabled).toBe(false);
+    // 只影响工具束展示口径：工具本身仍按接口区开关注入，计数不变
+    expect(catalog.tools[0]).toMatchObject({ name: "search_docs", enabled: true });
+    expect(catalog.counts.plugin).toBe(1);
+  });
+
+  it("主开关关闭时工具束 enabled=false（与贡献级停用同一读口径）", () => {
+    const finance = installed(
+      "acme.finance",
+      "财务包",
+      "read",
+      [server],
+      [{ id: "report-tools", name: "报告工具", tools: ["search_docs"] }],
+      false,
+    );
+    const catalog = describeCapabilityCatalog({
+      mcp: fakeMcp([]),
+      plugins: fakePlugins([finance]),
+      providers: [],
+    });
+    expect(catalog.toolPacks[0].enabled).toBe(false);
   });
 });

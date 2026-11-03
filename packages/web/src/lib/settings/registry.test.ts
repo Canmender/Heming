@@ -18,8 +18,8 @@ import {
 const SETTINGS_TAB_IDS = new Set(["profile", "model", "appearance", "navigation", "about"]);
 
 describe("registry 完整性", () => {
-  it("13 张卡、id 唯一、分区合法、标题与关键词非空", () => {
-    expect(SETTINGS_CARDS).toHaveLength(13);
+  it("14 张卡、id 唯一、分区合法、标题与关键词非空", () => {
+    expect(SETTINGS_CARDS).toHaveLength(14);
     const ids = SETTINGS_CARDS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const card of SETTINGS_CARDS) {
@@ -69,7 +69,7 @@ describe("matchSettingsCards（跨分区匹配）", () => {
 
   it("分区名也参与匹配：搜「外观」命中该分区全部卡片", () => {
     const ids = matchSettingsCards("外观").map((c) => c.id);
-    expect(ids).toEqual(["accent-color", "pet"]);
+    expect(ids).toEqual(["accent-color", "theme-mode", "pet"]);
   });
 
   it("大小写不敏感、空格分词为 AND：搜「key 存储」→ 密钥存储", () => {

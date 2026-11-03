@@ -1,5 +1,12 @@
 import type { InstalledPlugin } from "../../lib/plugins/index.js";
-import { contributionCountsOf, contributionText, permissionText, permissionViewOf } from "./viewModel.js";
+import {
+  contributionCountsOf,
+  contributionText,
+  isPartiallyDisabled,
+  partialDisabledTitle,
+  permissionText,
+  permissionViewOf,
+} from "./viewModel.js";
 import {
   BTN_DANGER_SM,
   BTN_GHOST_SM,
@@ -52,6 +59,11 @@ export function PluginCard({
             <span className="truncate text-[13px] font-extrabold">{manifest.name}</span>
             <span className={CHIP}>v{manifest.version}</span>
             <span className={CHIP}>{plugin.enabled ? "已启用" : "已停用"}</span>
+            {isPartiallyDisabled(plugin) && (
+              <span className={CHIP} title={partialDisabledTitle(plugin)}>
+                部分停用
+              </span>
+            )}
           </div>
           <div className={`mt-0.5 ${HINT}`}>
             {manifest.id}

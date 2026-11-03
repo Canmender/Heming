@@ -34,9 +34,24 @@ function jsonRes(body: unknown, status = 200): Response {
   });
 }
 
+/**
+ * d.67 T4：jsdom 的 `window.innerWidth` 默认 1024（窄窗），而本文件绝大多数用例
+ * 验证的是**宽窗**既有行为（右侧 aside / 拖拽调宽）。这里统一把视口置 1280，
+ * 窄窗用例自己再切到 1024；不断言任何真实像素布局，只驱动 useViewport 的断点判定。
+ */
+function setViewportWidth(width: number, dispatch = true): void {
+  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: width });
+  if (dispatch) window.dispatchEvent(new Event("resize"));
+}
+
 // 外层先清一次：网络失败用例会排自动重试定时器，避免跨用例泄漏
 beforeEach(() => {
   useAuthStore.getState().logout();
+  setViewportWidth(1280); // 既有用例按宽窗语义写：默认 1280，避免被 jsdom 的 1024 当成窄窗
+});
+
+afterEach(() => {
+  setViewportWidth(1280, false); // 不派发 resize：此时组件可能还没被 RTL 卸载，避免 act 噪音
 });
 
 const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
@@ -632,5 +647,116 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽", () => {
     expect(clampAsideWidth(9999)).toBe(ASIDE_MAX);
     expect(clampAsideWidth(Number.NaN)).toBe(240);
     expect(clampAsideWidth(300)).toBe(300);
+  });
+});
+
+/**
+ * d.67 T4 · 窄窗（<1200）响应式：右侧共享文件栏默认不渲染，改由顶部按钮打开覆盖层抽屉。
+ *
+ * 只验证交互契约（不验证像素）：无 aside 列 / 有入口 / 抽屉 aria-modal + 遮罩 / Esc 与焦点归还 /
+ * 拖宽后恢复宽窗 aside。宽窗既有可拖拽 aside 的用例在上一组，保持原断言不变。
+ */
+describe("App 窄窗响应式：共享文件改抽屉", () => {
+  const draftFile = {
+    id: "f1",
+    owner: "alice",
+    name: "需求草案.md",
+    mime: "text/markdown",
+    size: 18,
+    updatedAt: "2026-10-13T00:00:00.000Z",
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+    delete (window as unknown as { heming?: unknown }).heming;
+    setToken("t1");
+    useAuthStore.setState({ token: "t1", user: alice, status: "authed", error: null });
+    useUiStore.setState({ page: "home", activeConversationId: null });
+    mockFetch({ files: [draftFile] });
+    setViewportWidth(1024); // 窄窗：<1200
+  });
+
+  afterEach(() => {
+    setViewportWidth(1280);
+  });
+
+  it("窄窗默认不渲染 aside 列，但顶部有「共享文件」入口（aria-expanded=false）", async () => {
+    render(<App />);
+    const trigger = await screen.findByRole("button", { name: "打开共享文件" });
+
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(screen.queryByRole("separator", { name: "调整目录栏宽度" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+  });
+
+  it("点入口打开覆盖层抽屉：role=dialog + aria-modal + 遮罩，内容与宽窗同一份", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "打开共享文件" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "共享文件" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByTestId("shared-files-backdrop")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开共享文件" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+
+    // 抽屉里是真实的 aside 内容组件（表头入口 + FileTree 行），不是另复制一份
+    expect(within(dialog).getByRole("button", { name: "绑定本地文件到会话" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "上传" })).toBeInTheDocument();
+    expect(within(dialog).getByText("需求草案.md")).toBeInTheDocument();
+  });
+
+  it("Esc 关闭抽屉，关闭后焦点回到触发按钮", async () => {
+    render(<App />);
+    const trigger = await screen.findByRole("button", { name: "打开共享文件" });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const dialog = await screen.findByRole("dialog", { name: "共享文件" });
+    // 打开即把焦点移进面板（模态契约）
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("点遮罩也能关闭抽屉", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "打开共享文件" }));
+    await screen.findByRole("dialog", { name: "共享文件" });
+
+    fireEvent.click(screen.getByTestId("shared-files-backdrop"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("从窄窗拖宽到 ≥1200：抽屉自动收起，恢复可拖拽 aside 与宽度记忆", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "打开共享文件" }));
+    await screen.findByRole("dialog", { name: "共享文件" });
+
+    act(() => setViewportWidth(1280));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "打开共享文件" })).not.toBeInTheDocument();
+    const handle = screen.getByRole("separator", { name: "调整目录栏宽度" });
+    expect(handle).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "绑定本地文件到会话" })).toBeInTheDocument();
+  });
+
+  it("窄窗切到宽页面（settings）时主内容列仍是 min-w-0/overflow-hidden，不横向撑破", async () => {
+    useUiStore.setState({ page: "settings" });
+    const { container } = render(<App />);
+    await screen.findByRole("button", { name: "打开共享文件" });
+
+    const main = container.querySelector("main");
+    expect(main?.className).toContain("min-w-0");
+    expect(main?.className).toContain("overflow-hidden");
+    // aside 列不存在，唯一横向占位是导航轨 + 主列
+    expect(container.querySelectorAll("aside").length).toBe(0);
   });
 });

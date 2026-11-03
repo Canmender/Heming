@@ -3,10 +3,13 @@ import {
   MAX_PLUGINS,
   PLUGINS_KEY,
   PluginManifestError,
+  PublisherTrustStore,
   contentFingerprint,
+  effectiveEnabled,
   pluginIdFromServerId,
   pluginServerId,
   PluginStore,
+  type PluginContributionKind,
   type PluginMcpPort,
 } from "./index.js";
 import { SkillPool, type StorageLike } from "../skills/index.js";
@@ -113,11 +116,21 @@ function fresh(): {
   pool: SkillPool;
   map: Map<string, string>;
   mcp: ReturnType<typeof fakeMcp>;
+  publishers: PublisherTrustStore;
+  storage: StorageLike;
 } {
   const { storage, map } = makeStorage();
   const pool = new SkillPool(storage, clock());
   const mcp = fakeMcp();
-  return { store: new PluginStore(storage, pool, clock(), mcp.port), pool, map, mcp };
+  const publishers = new PublisherTrustStore(storage);
+  return {
+    store: new PluginStore(storage, pool, clock(), mcp.port, publishers),
+    pool,
+    map,
+    mcp,
+    publishers,
+    storage,
+  };
 }
 
 describe("PluginStore · 安装", () => {
@@ -737,6 +750,8 @@ describe("PluginStore · 内容指纹与覆盖保护", () => {
       previousAuthor: "Acme",
       versionChanged: false,
       needsConfirm: false,
+      signatureStatus: "none",
+      publisherKeyChanged: false,
     });
   });
 
@@ -848,5 +863,228 @@ describe("PluginStore · 内容指纹与覆盖保护", () => {
     expect(plugin.fingerprint).toBe(expected);
     // 旧前缀不算「内容变了」，装同一份清单不该要求二次确认
     expect(reloaded.preview(manifest()).trust.needsConfirm).toBe(false);
+  });
+});
+
+describe("PluginStore · 签名信任（d.67）", () => {
+  const PUBLIC_KEY = "A".repeat(43); // base64url 解码后 32 字节
+  const SIGNATURE = "B".repeat(86); // base64url 解码后 64 字节
+
+  function signedManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      schemaVersion: 3,
+      id: "acme.signed",
+      name: "签名包",
+      version: "1.0.0",
+      author: "Acme",
+      publisher: { id: "acme", publicKey: PUBLIC_KEY },
+      signature: { alg: "ed25519", value: SIGNATURE },
+      contributions: { skills: [{ name: "签名技能", instructions: "做点什么。" }] },
+      ...overrides,
+    };
+  }
+
+  it("安装写入发布者指纹与验签状态；更新保留", () => {
+    const { store } = fresh();
+    const result = store.install(signedManifest(), {
+      publisher: { id: "acme", fingerprint: "sha256:1234567890abcdef" },
+      signatureStatus: "valid",
+    });
+
+    expect(result.plugin.publisher).toEqual({ id: "acme", fingerprint: "sha256:1234567890abcdef" });
+    expect(result.plugin.signature).toEqual({ status: "valid", alg: "ed25519" });
+
+    const updated = store.install(signedManifest({ version: "1.1.0" }), {
+      publisher: { id: "acme", fingerprint: "sha256:1234567890abcdef" },
+      signatureStatus: "valid",
+    });
+    expect(updated.plugin.publisher).toEqual({ id: "acme", fingerprint: "sha256:1234567890abcdef" });
+    expect(updated.plugin.signature).toEqual({ status: "valid", alg: "ed25519" });
+  });
+
+  it("含签名但没传验签结果时记 unsupported，绝不默认 valid", () => {
+    const { store } = fresh();
+    const plugin = store.install(signedManifest()).plugin;
+    expect(plugin.publisher).toBeNull();
+    expect(plugin.signature).toEqual({ status: "unsupported", alg: "ed25519" });
+  });
+
+  it("未签名清单的记录为 null", () => {
+    const { store } = fresh();
+    const plugin = store.install(manifest()).plugin;
+    expect(plugin.publisher).toBeNull();
+    expect(plugin.signature).toBeNull();
+  });
+
+  it("preview.trust：未签名 none、已签名 unsupported（预览不验签）", () => {
+    const { store } = fresh();
+    expect(store.preview(manifest()).trust.signatureStatus).toBe("none");
+    expect(store.preview(signedManifest()).trust.signatureStatus).toBe("unsupported");
+  });
+
+  it("publisherKeyChanged：同 id 换钥为 true；首次出现/同钥为 false", () => {
+    const { store, publishers } = fresh();
+    const otherKey = "C".repeat(43);
+
+    // 未信任过该发布者 → false（首次信任走另一条确认）
+    expect(store.preview(signedManifest()).trust.publisherKeyChanged).toBe(false);
+
+    publishers.remember({
+      id: "acme",
+      publicKey: PUBLIC_KEY,
+      fingerprint: "sha256:1234567890abcdef",
+    });
+    // 同钥 → false
+    expect(store.preview(signedManifest()).trust.publisherKeyChanged).toBe(false);
+    // 换钥 → true
+    expect(
+      store.preview(
+        signedManifest({ publisher: { id: "acme", publicKey: otherKey } }),
+      ).trust.publisherKeyChanged,
+    ).toBe(true);
+    // 不同发布者 id 互不影响
+    expect(
+      store.preview(
+        signedManifest({ publisher: { id: "other", publicKey: otherKey } }),
+      ).trust.publisherKeyChanged,
+    ).toBe(false);
+    // 未签名清单 → false
+    expect(store.preview(manifest()).trust.publisherKeyChanged).toBe(false);
+  });
+});
+
+describe("PluginStore · 贡献级停用（d.67）", () => {
+  const KINDS: PluginContributionKind[] = ["skills", "mcpServers", "commands", "toolPacks"];
+
+  function kindsManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      schemaVersion: 3,
+      id: "acme.kinds",
+      name: "分类包",
+      version: "1.0.0",
+      permissions: { network: ["mcp.example.com"], tools: "read" },
+      contributions: {
+        skills: [
+          { name: "分类技能甲", instructions: "a" },
+          { name: "分类技能乙", instructions: "b" },
+        ],
+        mcpServers: [{ key: "svc", name: "分类服务", url: "https://mcp.example.com/mcp" }],
+        commands: [{ id: "go", title: "走", target: { kind: "plugin" } }],
+        toolPacks: [{ id: "pack", name: "分类工具束", tools: ["get_data"] }],
+      },
+      ...overrides,
+    };
+  }
+
+  function installedKinds(): ReturnType<typeof fresh> & { pluginId: string } {
+    const context = fresh();
+    context.store.install(kindsManifest());
+    return { ...context, pluginId: "acme.kinds" };
+  }
+
+  it("新装插件 disabledKinds 为空，effectiveEnabled 全 true", () => {
+    const { store, pluginId } = installedKinds();
+    const plugin = store.get(pluginId);
+    expect(plugin?.disabledKinds).toEqual([]);
+    for (const kind of KINDS) expect(effectiveEnabled(plugin!, kind)).toBe(true);
+  });
+
+  it("停用 skills：技能池真实关闭，服务与命令不受影响", () => {
+    const { store, pool, pluginId } = installedKinds();
+    store.setKindEnabled(pluginId, "skills", false);
+
+    expect(store.get(pluginId)?.disabledKinds).toEqual(["skills"]);
+    expect(pool.list().filter((s) => s.pluginId === pluginId).every((s) => !s.enabled)).toBe(true);
+    expect(store.serversOf(pluginId).every((s) => s.enabled)).toBe(true);
+    expect(store.commands()).toHaveLength(1);
+
+    store.setKindEnabled(pluginId, "skills", true);
+    expect(pool.list().filter((s) => s.pluginId === pluginId).every((s) => s.enabled)).toBe(true);
+  });
+
+  it("停用 mcpServers：服务关闭，技能与命令不受影响", () => {
+    const { store, pool, pluginId } = installedKinds();
+    store.setKindEnabled(pluginId, "mcpServers", false);
+
+    expect(store.serversOf(pluginId).every((s) => !s.enabled)).toBe(true);
+    expect(pool.list().filter((s) => s.pluginId === pluginId).every((s) => s.enabled)).toBe(true);
+    expect(store.commands()).toHaveLength(1);
+  });
+
+  it("停用 commands：命令面板读取口径立即过滤，技能/服务不受影响", () => {
+    const { store, pool, pluginId } = installedKinds();
+    store.setKindEnabled(pluginId, "commands", false);
+
+    expect(store.commands()).toEqual([]);
+    expect(pool.list().filter((s) => s.pluginId === pluginId).every((s) => s.enabled)).toBe(true);
+    expect(store.serversOf(pluginId).every((s) => s.enabled)).toBe(true);
+  });
+
+  it("停用 toolPacks：只落盘，目录侧按 effectiveEnabled 过滤", () => {
+    const { store, pluginId } = installedKinds();
+    store.setKindEnabled(pluginId, "toolPacks", false);
+    expect(store.get(pluginId)?.disabledKinds).toEqual(["toolPacks"]);
+    expect(effectiveEnabled(store.get(pluginId)!, "toolPacks")).toBe(false);
+    expect(effectiveEnabled(store.get(pluginId)!, "skills")).toBe(true);
+  });
+
+  it("主开关关闭 = 全部不生效；重新打开仍尊重贡献级停用", () => {
+    const { store, pool, pluginId } = installedKinds();
+    store.setKindEnabled(pluginId, "skills", false);
+    store.setEnabled(pluginId, false);
+
+    const off = store.get(pluginId)!;
+    expect(off.enabled).toBe(false);
+    for (const kind of KINDS) expect(effectiveEnabled(off, kind)).toBe(false);
+    expect(pool.list().filter((s) => s.pluginId === pluginId).every((s) => !s.enabled)).toBe(true);
+    expect(store.serversOf(pluginId).every((s) => !s.enabled)).toBe(true);
+    expect(store.commands()).toEqual([]);
+
+    store.setEnabled(pluginId, true);
+    const on = store.get(pluginId)!;
+    expect(effectiveEnabled(on, "skills")).toBe(false); // 之前单独停用的不偷偷恢复
+    expect(effectiveEnabled(on, "mcpServers")).toBe(true);
+    expect(pool.list().filter((s) => s.pluginId === pluginId).every((s) => !s.enabled)).toBe(true);
+    expect(store.serversOf(pluginId).every((s) => s.enabled)).toBe(true);
+  });
+
+  it("disabledKinds 持久化，重载后生效", () => {
+    const { store, storage, pool, mcp, pluginId } = installedKinds();
+    store.setKindEnabled(pluginId, "commands", false);
+
+    const reloaded = new PluginStore(storage, pool, clock(), mcp.port);
+    expect(reloaded.get(pluginId)?.disabledKinds).toEqual(["commands"]);
+    expect(reloaded.commands()).toEqual([]);
+  });
+
+  it("旧记录缺 publisher / signature / disabledKinds 时按 null 与空数组读回", () => {
+    const { store, map, mcp } = fresh();
+    store.install(manifest());
+
+    const data = JSON.parse(map.get(PLUGINS_KEY) as string) as {
+      plugins: Record<string, unknown>[];
+    };
+    delete data.plugins[0].publisher;
+    delete data.plugins[0].signature;
+    delete data.plugins[0].disabledKinds;
+    map.set(PLUGINS_KEY, JSON.stringify(data));
+
+    const { storage } = makeStorage(map);
+    const reloaded = new PluginStore(storage, new SkillPool(storage, clock()), clock(), mcp.port);
+    const plugin = reloaded.list()[0];
+    expect(plugin.publisher).toBeNull();
+    expect(plugin.signature).toBeNull();
+    expect(plugin.disabledKinds).toEqual([]);
+  });
+
+  it("读取详情按 effectiveEnabled 掩码：外部把技能单独开回来也不显示为可用", () => {
+    const { store, pool, pluginId } = installedKinds();
+    store.setKindEnabled(pluginId, "skills", false);
+    // 模拟用户在技能区绕过插件页单独打开某个插件技能
+    const skillId = store.get(pluginId)!.skillIds[0];
+    pool.setEnabled(skillId, true);
+
+    expect(pool.get(skillId)?.enabled).toBe(true); // 底层事实
+    expect(store.skillsOf(pluginId).every((skill) => !skill.enabled)).toBe(true); // 插件读口径
   });
 });

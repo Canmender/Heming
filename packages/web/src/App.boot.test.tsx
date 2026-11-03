@@ -63,6 +63,9 @@ describe("App 启动动画集成", () => {
       page: "home", activeConversationId: null,
       pendingAttachment: null,
     });
+    // d.67 T4：App 在 <1200 渲染窄窗布局（默认不渲染右侧共享文件栏）。jsdom 默认 1024，
+    // 与本文件既有断言（右侧文件栏存在）不符——统一按宽窗 1280 跑，不改产品口径。
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1280 });
   });
 
   afterEach(() => { bootDoneFns = []; bootProps = []; });

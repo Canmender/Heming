@@ -1,5 +1,10 @@
 import { useRef, useState } from "react";
-import type { InstalledPlugin, PluginServerInfo, PluginSkillInfo } from "../../lib/plugins/index.js";
+import type {
+  InstalledPlugin,
+  PluginContributionKind,
+  PluginServerInfo,
+  PluginSkillInfo,
+} from "../../lib/plugins/index.js";
 import type { ToolPackGroup } from "./viewModel.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { XIcon } from "../icons.js";
@@ -16,9 +21,12 @@ import {
 } from "./shared.js";
 import {
   contributionCountsOf,
+  contributionKindRows,
   contributionText,
   isOwnPluginTool,
   permissionViewOf,
+  shortFingerprint,
+  signatureStatusLabel,
 } from "./viewModel.js";
 
 /** 某个工具开关的待确认请求（d.66：逐个确认，绝不批量）。 */
@@ -45,6 +53,7 @@ export function PluginDetailDialog({
   onRemove,
   onGoSkills,
   onGoInterfaces,
+  onKindToggle,
 }: {
   plugin: InstalledPlugin;
   skills: PluginSkillInfo[];
@@ -60,6 +69,8 @@ export function PluginDetailDialog({
   onRemove: () => void;
   onGoSkills: () => void;
   onGoInterfaces: () => void;
+  /** 贡献级开关（技能/服务/命令/工具束），受主开关控制。 */
+  onKindToggle: (kind: PluginContributionKind, enabled: boolean) => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalA11y(dialogRef, onClose, { active: true });
@@ -116,6 +127,34 @@ export function PluginDetailDialog({
           <section className="mt-4" aria-label="插件贡献">
             <h3 className="ui-section-title">贡献</h3>
             <p className="mt-1 ui-body-sm">{contributionText(counts)}</p>
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {contributionKindRows(plugin).map((row) => (
+                <li
+                  key={row.kind}
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft px-3 py-1.5"
+                >
+                  <span className="ui-body-sm font-medium">{row.label}</span>
+                  <span className={`${CHIP} ui-numeric`}>{row.count}</span>
+                  <span className="ml-auto ui-caption">
+                    {!plugin.enabled
+                      ? "主开关已关闭"
+                      : row.enabled
+                        ? "生效中"
+                        : "本类已停用"}
+                  </span>
+                  <Switch
+                    label={`启用本插件的${row.label}`}
+                    checked={row.enabled}
+                    disabled={!plugin.enabled}
+                    onChange={(next) => onKindToggle(row.kind, next)}
+                  />
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 ui-caption">
+              主开关关闭时不可单独调整；这里的切换只影响这一类贡献，
+              不改变 HITL 判定、工具风险上限与工具默认关闭口径。
+            </p>
             <div className="mt-1 flex flex-wrap gap-1">
               {plugin.manifest.contributions.commands.map((command) => (
                 <span key={`command:${command.id}`} className={CHIP} title={command.description}>

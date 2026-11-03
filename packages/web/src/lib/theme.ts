@@ -78,3 +78,160 @@ export function clearAccent(): void {
   root.style.removeProperty("--heming-accent");
   root.style.removeProperty("--heming-on-accent");
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * 主题模式（d.67 T3 暗色）：light / dark / system
+ * ══════════════════════════════════════════════════════════════════════
+ *
+ * 与「主题色」（上面那套 accent）是两件事：
+ *   · 主题色决定主按钮/选中项等**填充色**；
+ *   · 主题模式决定整页是浅色还是暗色（CSS 变量在 `[data-theme="dark"]` 下覆盖）。
+ *
+ * 为什么这里不碰 React：启动阶段（main.tsx / pet.tsx）要在首帧前应用到 DOM，
+ * 那时候还没有组件树；设置页只是再调一次同样的函数即可，避免两套逻辑漂移。
+ */
+
+export type ThemeMode = "light" | "dark" | "system";
+
+/** 主题模式本地存储键（与主题色的 `heming.theme.v1` 分开，互不影响）。 */
+export const THEME_MODE_KEY = "heming.theme.mode.v1";
+
+/** 暗色下的默认强调色：默认墨黑在深底上对比度约 1.1:1，换成浅色保证 `.bg-ink` 可读。 */
+export const DARK_DEFAULT_ACCENT = "#e8eaed";
+
+type ModeStorage = Pick<Storage, "getItem" | "setItem">;
+
+/** 规整任意输入到 ThemeMode；缺失/脏值一律回落 `system`（跟随系统最安全）。 */
+export function normalizeThemeMode(raw: unknown): ThemeMode {
+  return raw === "light" || raw === "dark" || raw === "system" ? raw : "system";
+}
+
+/** 把「模式 + 系统偏好」解析成最终生效的浅/深色。 */
+export function resolveThemeMode(mode: ThemeMode, prefersDark: boolean): "light" | "dark" {
+  if (mode === "light" || mode === "dark") return mode;
+  return prefersDark ? "dark" : "light";
+}
+
+/** 系统当前是否偏好深色；非浏览器环境/不支持 matchMedia 时按浅色处理。 */
+export function systemPrefersDark(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  try {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  } catch {
+    return false;
+  }
+}
+
+function defaultModeStorage(): ModeStorage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null; // 隐私模式/配额禁用：只在本次会话生效
+  }
+}
+
+/** 读回主题模式；无记录或脏数据 → `system`。 */
+export function getThemeMode(storage: ModeStorage | null = defaultModeStorage()): ThemeMode {
+  if (!storage) return "system";
+  try {
+    return normalizeThemeMode(storage.getItem(THEME_MODE_KEY));
+  } catch {
+    return "system";
+  }
+}
+
+/** 写入主题模式（非法值规整为 system 后落盘），返回最终写入的模式。 */
+export function setThemeMode(
+  mode: ThemeMode,
+  storage: ModeStorage | null = defaultModeStorage(),
+): ThemeMode {
+  const normalized = normalizeThemeMode(mode);
+  if (storage) {
+    try {
+      storage.setItem(THEME_MODE_KEY, normalized);
+    } catch {
+      /* 存不下就只在本次会话生效 */
+    }
+  }
+  return normalized;
+}
+
+/**
+ * 把主题模式应用到 DOM，返回清理函数（system 模式下用于摘掉 matchMedia 监听）。
+ *
+ * 规则：
+ * - 写 `<html data-theme="light|dark">` 与 `color-scheme`（原生控件、滚动条跟随）；
+ * - `accent` 是当前主题色：暗色且仍是默认墨黑时临时换成浅色强调；
+ *   用户自定义过颜色就尊重用户值（spec §3）；
+ * - `system` 模式挂 `matchMedia("(prefers-color-scheme: dark)")`，系统切换即时生效。
+ */
+export function applyThemeMode(
+  mode: ThemeMode,
+  options: { accent?: string } = {},
+): () => void {
+  if (typeof document === "undefined") return () => {};
+  const root = document.documentElement;
+  const accent = options.accent ?? DEFAULT_ACCENT;
+
+  const paint = (current: ThemeMode): void => {
+    const resolved = resolveThemeMode(current, systemPrefersDark());
+    root.dataset.theme = resolved;
+    root.style.colorScheme = resolved;
+    if (resolved === "dark" && accent === DEFAULT_ACCENT) {
+      // 暗色 + 默认墨黑：临时换浅色强调（内联变量，高于 index.css 的暗色兜底）
+      applyAccent(DARK_DEFAULT_ACCENT);
+    } else if (accent === DEFAULT_ACCENT) {
+      // 浅色 + 默认墨黑：清掉内联变量，回到 :root 的默认值（不制造冗余内联样式）
+      clearAccent();
+    } else {
+      // 用户自定义色：照用户的值应用，暗色下也不替换
+      applyAccent(accent);
+    }
+  };
+
+  paint(mode);
+
+  if (mode !== "system") return () => {};
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+
+  let mq: MediaQueryList;
+  try {
+    mq = window.matchMedia("(prefers-color-scheme: dark)");
+  } catch {
+    return () => {};
+  }
+  const onChange = () => paint("system");
+  if (typeof mq.addEventListener === "function") {
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }
+  // 老 WebView（无 addEventListener 的 MediaQueryList）兜底
+  const legacy = mq as unknown as {
+    addListener?: (cb: () => void) => void;
+    removeListener?: (cb: () => void) => void;
+  };
+  legacy.addListener?.(onChange);
+  return () => legacy.removeListener?.(onChange);
+}
+
+/** 当前 system 监听器的清理函数（切换模式时先清旧监听，避免叠加）。 */
+let systemWatcherDispose: (() => void) | null = null;
+
+/**
+ * 启动/切换主题模式：应用当前模式，system 时挂系统监听；重复调用先清理旧监听。
+ *
+ * 为什么是「watcher」而不是直接用 applyThemeMode 的返回值：应用级监听要活到进程结束，
+ * 不能绑在某个组件的 useEffect 清理上（离开设置页就停止跟随系统是 bug）。
+ */
+export function watchThemeMode(options: { accent?: string } = {}): void {
+  if (typeof document === "undefined") return;
+  systemWatcherDispose?.();
+  systemWatcherDispose = applyThemeMode(getThemeMode(), options);
+}
+
+/** 测试用：清掉模块级监听器（生产不需要）。 */
+export function resetThemeModeWatcherForTest(): void {
+  systemWatcherDispose?.();
+  systemWatcherDispose = null;
+}

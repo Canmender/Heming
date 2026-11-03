@@ -19,12 +19,65 @@
   ::after,
   ::backdrop,
   ::file-selector-button {
-    border-color: #e5e7eb;
+    border-color: var(--line, #e5e7eb);
   }
 }
 
+/*
+ * ── 主题 token（d.67 T3 暗色主题）────────────────────────────────────
+ *
+ * light 值 = 改造前 Tailwind 配置里的字面量（逐像素不变）；dark 在
+ * [data-theme="dark"] 覆盖。所有页面 className 只引用 token 名，不关心当前主题。
+ *
+ * 为什么放在 :root：既能被 [data-theme] 覆盖，也能被更具体的元素变量覆盖
+ * （例如桌宠窗口可用自己的 data-theme 独立控制）。
+ */
+:root {
+  --line: #e6e6e6;
+  --line-soft: #ececec;
+  --line-strong: #8c8c8c;
+  --muted: #6f6f6f;
+  --ink: #1a1a1a;
+  --panel: #fcfcfc;
+  --surface: #ffffff;
+  --subtle: #fafafa;
+  --subtle-2: #f7f7f7;
+  --subtle-3: #f3f3f3;
+  --subtle-4: #f0f0f0;
+  --body: #555555;
+  --placeholder: #b8b8b8;
+  --danger: #b42318;
+  --danger-soft: #fef3f2;
+  --danger-line: #fecdca;
+  --warn: #b45309;
+  --success: #1d6b3a;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --line: #2f3136;
+  --line-soft: #2a2c31;
+  --line-strong: #6b707a;
+  --muted: #9aa0a8;
+  --ink: #f2f4f7;
+  --panel: #1a1b1f;
+  --surface: #16171a;
+  --subtle: #111214;
+  --subtle-2: #1b1c20;
+  --subtle-3: #232529;
+  --subtle-4: #2a2c31;
+  --body: #c7ccd3;
+  --placeholder: #6b7078;
+  --danger: #ff8a80;
+  --danger-soft: #2a1a1a;
+  --danger-line: #5a2a2a;
+  --warn: #f0b24a;
+  --success: #6bd08a;
+  color-scheme: dark;
+}
+
 body {
-  @apply bg-white text-ink antialiased;
+  @apply bg-surface text-ink antialiased;
 }
 
 /*
@@ -49,6 +102,15 @@ body {
 :root {
   --heming-accent: #1a1a1a;
   --heming-on-accent: #ffffff;
+}
+/*
+ * 暗色兜底：默认墨黑在暗底上几乎看不见（对比度约 1.1:1），这里换成浅色强调。
+ * 用户自定义过主题色时，lib/theme.ts 会把它写成**内联变量**（元素 style 优先于
+ * 本规则），所以自定义色不会被这里覆盖——规则只负责「默认值」和「JS 未执行的首帧」。
+ */
+[data-theme="dark"] {
+  --heming-accent: #e8eaed;
+  --heming-on-accent: #101010;
 }
 .bg-ink {
   background-color: var(--heming-accent);
@@ -266,4 +328,279 @@ body {
 @keyframes ui-skeleton-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
+}
+
+
+/*
+ * ══════════════════════════════════════════════════════════════════════
+ * 暗色兼容层（d.67 T3）——**迁移期桥接，后续把字面量类改成 token 时删**
+ * ══════════════════════════════════════════════════════════════════════
+ *
+ * 背景：暗色只覆盖了语义 token，但既有界面还有大量字面量颜色类（bg-[#fafafa]、
+ * text-[#555] 等，共 200+ 处）。本轮不逐个改组件（四轨文件级不重叠，改不动别轨的
+ * 文件），改在**类名层面**做等价覆盖：同一类名在暗色下换成语义变量。
+ *
+ * 为什么放在文件末尾且不写 @layer：Tailwind 的 utilities 都在 @layer utilities 里，
+ * 而未分层（unlayered）样式的优先级高于任何 layer —— 这样不用 !important 也能盖过
+ * 「.bg-white」这类工具类；写进 @layer 反而会被 utilities 盖掉。
+ *
+ * 后续清理方式：把这些字面量类替换成同名 token 类（bg-subtle / text-body 等）后，
+ * 逐条删除本段即可，删完暗色自然生效，无需再动这里。
+ */
+[data-theme="dark"] .bg-white {
+  background-color: var(--surface);
+}
+
+/* 浅灰填充：91 / 39 / 38 / 28 处，按层级映射到 subtle ~ subtle-4 */
+[data-theme="dark"] .bg-\[\#fafafa\],
+[data-theme="dark"] .bg-\[\#fcfcfc\],
+[data-theme="dark"] .bg-\[\#f9f9f9\] {
+  background-color: var(--subtle);
+}
+[data-theme="dark"] .bg-\[\#f7f7f7\],
+[data-theme="dark"] .bg-\[\#f6f6f6\],
+[data-theme="dark"] .bg-\[\#f5f5f5\],
+[data-theme="dark"] .bg-\[\#f4f4f4\] {
+  background-color: var(--subtle-2);
+}
+[data-theme="dark"] .bg-\[\#f3f3f3\],
+[data-theme="dark"] .bg-\[\#f2f2f2\],
+[data-theme="dark"] .bg-\[\#f1f1f1\] {
+  background-color: var(--subtle-3);
+}
+[data-theme="dark"] .bg-\[\#f0f0f0\],
+[data-theme="dark"] .bg-\[\#eeeeee\],
+[data-theme="dark"] .bg-\[\#ededed\] {
+  background-color: var(--subtle-4);
+}
+
+/* 浅色提示块：错误 / 警告 / 成功底色 */
+[data-theme="dark"] .bg-\[\#fef3f2\],
+[data-theme="dark"] .bg-\[\#fdf3f2\],
+[data-theme="dark"] .bg-\[\#fdf6f6\] {
+  background-color: var(--danger-soft);
+}
+[data-theme="dark"] .bg-\[\#fffbeb\],
+[data-theme="dark"] .bg-\[\#fffaeb\],
+[data-theme="dark"] .bg-\[\#fffdf5\] {
+  background-color: #2a2418;
+}
+[data-theme="dark"] .bg-\[\#f2faf5\],
+[data-theme="dark"] .bg-\[\#f0fdf4\] {
+  background-color: #16241b;
+}
+
+/* 文字：正文灰 / 次要灰 / 墨色 / 占位 / 语义色 */
+[data-theme="dark"] .text-\[\#555\],
+[data-theme="dark"] .text-\[\#555555\],
+[data-theme="dark"] .text-\[\#666\],
+[data-theme="dark"] .text-\[\#444\] {
+  color: var(--body);
+}
+[data-theme="dark"] .text-\[\#6f6f6f\] {
+  color: var(--muted);
+}
+[data-theme="dark"] .text-\[\#1a1a1a\],
+[data-theme="dark"] .text-\[\#111\],
+[data-theme="dark"] .text-\[\#222\] {
+  color: var(--ink);
+}
+[data-theme="dark"] .text-\[\#b8b8b8\] {
+  color: var(--placeholder);
+}
+[data-theme="dark"] .text-\[\#b42318\],
+[data-theme="dark"] .text-\[\#912018\] {
+  color: var(--danger);
+}
+[data-theme="dark"] .text-\[\#b45309\],
+[data-theme="dark"] .text-\[\#8a6d3b\],
+[data-theme="dark"] .text-\[\#8a5a00\],
+[data-theme="dark"] .text-\[\#92400e\] {
+  color: var(--warn);
+}
+[data-theme="dark"] .text-\[\#1d6b3a\],
+[data-theme="dark"] .text-\[\#15803d\] {
+  color: var(--success);
+}
+
+/* 边框：仍有字面量边框的地方按 token 覆盖 */
+[data-theme="dark"] .border-\[\#ececec\],
+[data-theme="dark"] .border-\[\#e6e6e6\],
+[data-theme="dark"] .border-\[\#e5e7eb\] {
+  border-color: var(--line);
+}
+[data-theme="dark"] .border-\[\#fecdca\],
+[data-theme="dark"] .border-\[\#f3c6c2\],
+[data-theme="dark"] .border-\[\#f3d2ce\] {
+  border-color: var(--danger-line);
+}
+/* 浅色 hover 底（hover:bg-[#fafafa] 这类在 utilities 里带伪类，类名不同，单独覆盖） */
+[data-theme="dark"] .hover\:bg-\[\#fafafa\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#f7f7f7\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#fcfcfc\]:hover {
+  background-color: var(--subtle-2);
+}
+
+/* 滚动条：暗色下滑块用中灰，避免浅灰细条在深底上发亮 */
+[data-theme="dark"] * {
+  scrollbar-color: #4a4d55 transparent;
+}
+[data-theme="dark"] *::-webkit-scrollbar-thumb {
+  background-color: #4a4d55;
+}
+[data-theme="dark"] *::-webkit-scrollbar-thumb:hover {
+  background-color: #5a5e66;
+}
+
+/* 骨架屏：浅灰底在暗色下会「发白」，换成层级灰 */
+[data-theme="dark"] .ui-skeleton {
+  background-color: var(--subtle-3);
+}
+
+/* 阴影：暗底上原来的 7% 黑阴影几乎不可见，加深一档保留层次 */
+[data-theme="dark"] .shadow-card {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+[data-theme="dark"] .shadow-float {
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+
+/* 图片/视频不因暗色反色；确保表单控件在暗色下也跟随（Chromium 默认控件色） */
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  color-scheme: dark;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * 暗色兼容层补充（d.65.2.25）——首轮巡检发现的两类漏网字面量：
+ *  1. `bg-[#fbfbfb]`：团队/团队看板/通知中心的浅色条，暗色下是一整块白条；
+ *  2. 语义胶囊与浅色边框（错误/提醒/成功底色、浅线）在暗色下仍是亮块。
+ * 处理方式同上一段：按类名映射到语义变量，迁移期桥接。文本色同步映射，
+ * 保证「浅底变深底后文字仍可读」。
+ * ────────────────────────────────────────────────────────────────────── */
+
+/* bg-surface-2 */
+[data-theme="dark"] .bg-\[\#fbfbfb\],
+[data-theme="dark"] .bg-\[\#f9fafb\],
+[data-theme="dark"] .bg-\[\#fffafa\],
+[data-theme="dark"] .bg-\[\#f5f8ff\],
+[data-theme="dark"] .bg-\[\#fdfaf3\],
+[data-theme="dark"] .bg-\[\#fafbfc\] {
+  background-color: var(--subtle);
+}
+
+/* bg-danger-soft */
+[data-theme="dark"] .bg-\[\#fdecea\],
+[data-theme="dark"] .bg-\[\#fdf0ef\],
+[data-theme="dark"] .bg-\[\#fdf4f3\] {
+  background-color: var(--danger-soft);
+}
+
+/* bg-warn-soft */
+[data-theme="dark"] .bg-\[\#fff7e6\],
+[data-theme="dark"] .bg-\[\#fff8e1\],
+[data-theme="dark"] .bg-\[\#fff8e6\],
+[data-theme="dark"] .bg-\[\#fff9e6\],
+[data-theme="dark"] .bg-\[\#f3f0e6\] {
+  background-color: var(--subtle-2);
+}
+
+/* bg-success-soft */
+[data-theme="dark"] .bg-\[\#ecfdf3\],
+[data-theme="dark"] .bg-\[\#f2fbf4\],
+[data-theme="dark"] .bg-\[\#f4faf4\],
+[data-theme="dark"] .bg-\[\#eef6f0\] {
+  background-color: var(--subtle-2);
+}
+
+/* border-line-2 */
+[data-theme="dark"] .border-\[\#e8e8e8\],
+[data-theme="dark"] .border-\[\#e9e9e9\],
+[data-theme="dark"] .border-\[\#ebebeb\],
+[data-theme="dark"] .border-\[\#e4e4e4\],
+[data-theme="dark"] .border-\[\#d8d8d8\],
+[data-theme="dark"] .border-\[\#d0d5dd\],
+[data-theme="dark"] .border-\[\#cfe3cf\],
+[data-theme="dark"] .border-\[\#d7e9dc\],
+[data-theme="dark"] .border-\[\#abefc6\],
+[data-theme="dark"] .border-\[\#bbf7d0\],
+[data-theme="dark"] .border-\[\#fed7aa\],
+[data-theme="dark"] .border-\[\#fedf89\],
+[data-theme="dark"] .border-\[\#c7d2fe\] {
+  border-color: var(--line);
+}
+
+/* border-danger-2 */
+[data-theme="dark"] .border-\[\#e3b6b2\],
+[data-theme="dark"] .border-\[\#e6b3ae\],
+[data-theme="dark"] .border-\[\#f3c2bd\],
+[data-theme="dark"] .border-\[\#f3d2ce\],
+[data-theme="dark"] .border-\[\#fecdca\] {
+  border-color: var(--danger-line);
+}
+
+/* border-warn-2 */
+[data-theme="dark"] .border-\[\#e5d5a8\],
+[data-theme="dark"] .border-\[\#f0d58c\],
+[data-theme="dark"] .border-\[\#eadfc8\],
+[data-theme="dark"] .border-\[\#f0e0b8\] {
+  border-color: var(--line-strong);
+}
+
+/* text-muted-2 */
+[data-theme="dark"] .text-\[\#777\],
+[data-theme="dark"] .text-\[\#888\],
+[data-theme="dark"] .text-\[\#999\],
+[data-theme="dark"] .text-\[\#bbb\],
+[data-theme="dark"] .text-\[\#ccc\],
+[data-theme="dark"] .text-\[\#c4c4c4\],
+[data-theme="dark"] .text-\[\#c9c9c9\],
+[data-theme="dark"] .text-\[\#ddd\],
+[data-theme="dark"] .text-\[\#98a2b3\] {
+  color: var(--muted);
+}
+
+/* text-body-2 */
+[data-theme="dark"] .text-\[\#333\],
+[data-theme="dark"] .text-\[\#344054\],
+[data-theme="dark"] .text-\[\#475467\] {
+  color: var(--body);
+}
+
+/* text-success-2 */
+[data-theme="dark"] .text-\[\#067647\],
+[data-theme="dark"] .text-\[\#12b76a\],
+[data-theme="dark"] .text-\[\#16a34a\],
+[data-theme="dark"] .text-\[\#1f9d55\] {
+  color: var(--success);
+}
+
+/* text-warn-2 */
+[data-theme="dark"] .text-\[\#d97706\],
+[data-theme="dark"] .text-\[\#c98a00\],
+[data-theme="dark"] .text-\[\#8a6d1f\],
+[data-theme="dark"] .text-\[\#8a7a55\] {
+  color: var(--warn);
+}
+
+/* text-danger-2 */
+[data-theme="dark"] .text-\[\#dc2626\],
+[data-theme="dark"] .text-\[\#c7254e\] {
+  color: var(--danger);
+}
+
+/* text-info-2 */
+[data-theme="dark"] .text-\[\#2563eb\],
+[data-theme="dark"] .text-\[\#1d4ed8\],
+[data-theme="dark"] .text-\[\#3538cd\] {
+  color: var(--body);
+}
+
+/* 补充两条：浅分隔线 `border-[#eee]` 与搜索高亮底色 `bg-[#fff1a8]` */
+[data-theme="dark"] .border-\[\#eee\] {
+  border-color: var(--line);
+}
+[data-theme="dark"] .bg-\[\#fff1a8\] {
+  background-color: var(--subtle-3);
 }

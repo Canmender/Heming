@@ -7,8 +7,15 @@ import {
   type CapabilityCatalog,
   type CapabilitySnapshot,
   type InstalledPlugin,
+  type PluginInstallOptions,
   type PluginInstallPreview,
+  type PluginManifest,
   type PluginStore,
+  type PublisherTrustStore,
+  type SignatureCheck,
+  PublisherTrustStore as PublisherTrustStoreClass,
+  publicKeyFingerprint,
+  verifyManifestSignature,
 } from "../lib/plugins/index.js";
 import { mcpRegistry } from "../lib/mcp/index.js";
 import { skillPool } from "../lib/skills/index.js";
@@ -66,6 +73,12 @@ export interface PluginsPageProps {
   catalog?: CapabilityCatalog;
   /** 统一能力快照（默认现场 `describeCapabilities()`；测试可注入固定快照）。 */
   capabilities?: CapabilitySnapshot;
+  /** 发布者信任表（默认与插件存储共用介质；测试可注入内存实现）。 */
+  publishers?: PublisherTrustStore;
+  /** 验签实现（测试注入；默认 WebCrypto）。 */
+  verify?: (manifest: PluginManifest) => Promise<SignatureCheck>;
+  /** 公钥指纹实现（测试注入；默认 SHA-256）。 */
+  fingerprintOf?: (publicKey: string) => Promise<string>;
   /** 智能体名册（技能 Tab 的「被几个智能体使用」需要）。 */
   agents?: readonly AgentLite[];
 }
@@ -85,6 +98,9 @@ export function PluginsPage({
   mcp = mcpRegistry,
   catalog,
   capabilities: capabilitiesProp,
+  publishers: publishersProp,
+  verify = verifyManifestSignature,
+  fingerprintOf = publicKeyFingerprint,
   agents,
 }: PluginsPageProps = {}) {
   // 技能 Tab 的「被几个智能体使用」需要名册：订阅 chat store，未注入时懒加载一次。
@@ -212,11 +228,11 @@ export function PluginsPage({
     }
   };
 
-  const onInstall = () => {
+  const onInstall = (options: PluginInstallOptions = {}) => {
     if (!preview) return;
     const before = preview;
     try {
-      const result = plugins.install(text);
+      const result = plugins.install(text, options);
       bump();
       setText("");
       setInstallOpen(false);
@@ -259,6 +275,10 @@ export function PluginsPage({
   const goSkills = () => useUiStore.getState().setPage("skills");
   const goInterfaces = () => useUiStore.getState().setPage("interfaces");
 
+  const publishers = useMemo<PublisherTrustStore>(
+    () => publishersProp ?? new PublisherTrustStoreClass(),
+    [publishersProp],
+  );
   const enabledCount = list.filter((plugin) => plugin.enabled).length;
 
   return (
@@ -403,6 +423,9 @@ export function PluginsPage({
           onFile={(e) => void onFile(e)}
           onInstall={onInstall}
           onClose={() => setInstallOpen(false)}
+          publishers={publishers}
+          verify={verify}
+          fingerprintOf={fingerprintOf}
         />
       )}
 
@@ -417,6 +440,10 @@ export function PluginsPage({
           mcp={mcp}
           serverNameOf={serverNameOf}
           hostOf={hostOf}
+          onKindToggle={(kind, enabled) => {
+            plugins.setKindEnabled(detail.manifest.id, kind, enabled);
+            bump();
+          }}
           onClose={() => setDetailId(null)}
           onRemove={() => {
             const target = detail;

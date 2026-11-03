@@ -3,19 +3,36 @@ export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      /*
+       * d.67 T3 暗色主题：颜色原来写死 hex，暗色只能逐个 className 改；
+       * 现在统一走 CSS 变量（`:root` 放 light 值 = 改造前逐像素一致，
+       * `[data-theme="dark"]` 覆盖一套暗色值）。同名 token 语义不变，
+       * 因此 500+ 处既有 className 一行都不用改。
+       *
+       * 为什么不带 <alpha-value>：全仓只有一处 `ring-ink/20` 用到透明度修饰，
+       * 带 alpha 通道改造会把每个 token 拆成 r g b 三段，收益不抵成本；
+       * 那一处改用字面量即可（见 TokenHeatmap）。
+       */
       colors: {
-        line: "#e6e6e6",
-        "line-soft": "#ececec",
-        // 弱化文字：原 #888888 白底对比度 3.54:1（AA 正文要求 4.5），
-        // ③-2 巡检按 token 实测后调到 #6f6f6f（白底 5.02:1 / 页面底 #fafafa 4.81:1）。
-        muted: "#6f6f6f",
-        ink: "#1a1a1a",
-        panel: "#fcfcfc",
-        // 表单控件边界专用（非文本 UI 需 ≥3:1）：纯分隔线继续用 line（1.25:1），
-        // 只有 input/select/textarea 这类「靠边框标出可交互区域」的地方用它。
-        // 取 #8c8c8c：白底 3.36 / #fafafa 3.22 / #fcfcfc 3.28，三种页面底色都过 3:1
-        //（#949494 在 #fafafa 上只有 2.91，不达标）。
-        "line-strong": "#8c8c8c",
+        line: "var(--line)",
+        "line-soft": "var(--line-soft)",
+        "line-strong": "var(--line-strong)",
+        muted: "var(--muted)",
+        ink: "var(--ink)",
+        panel: "var(--panel)",
+        // 以下为暗色轮新增的语义 token（light 值见 index.css `:root`）
+        surface: "var(--surface)",
+        subtle: "var(--subtle)",
+        "subtle-2": "var(--subtle-2)",
+        "subtle-3": "var(--subtle-3)",
+        "subtle-4": "var(--subtle-4)",
+        body: "var(--body)",
+        placeholder: "var(--placeholder)",
+        danger: "var(--danger)",
+        "danger-soft": "var(--danger-soft)",
+        "danger-line": "var(--danger-line)",
+        warn: "var(--warn)",
+        success: "var(--success)",
       },
       boxShadow: {
         card: "0 4px 14px rgba(0, 0, 0, 0.07)",

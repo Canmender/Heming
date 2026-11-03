@@ -67,6 +67,13 @@ const TOOL_PACK_DESCRIPTION_MAX = 200;
 
 const HOST_MAX = 253;
 
+/** base64url（无填充）解码后的字节数；非法或长度不可能（len%4===1）返回 -1。 */
+function base64UrlByteLength(value: string): number {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return -1;
+  if (value.length % 4 === 1) return -1;
+  return Math.floor((value.length * 3) / 4);
+}
+
 /** 命令 target 可指向的页面 id（单一真源：命令面板的页面目录）。 */
 const PAGE_IDS: ReadonlySet<string> = new Set(PALETTE_PAGES.map((page) => page.page));
 
@@ -363,6 +370,46 @@ const ContributionsSchema = z.object(
   typeParams("contributions 必须是 JSON 对象"),
 );
 
+/**
+ * 发布者公钥（d.67，TOFU 模型）：Ed25519 raw 公钥 32 字节，base64url（无填充）。
+ *
+ * 只做**格式**校验；是否可信由安装时的首次信任/换钥复核决定（见 signature.ts）。
+ */
+const PublisherSchema = z.object(
+  {
+    id: z
+      .string(typeParams("缺少发布者 id", "发布者 id 必须是文本"))
+      .trim()
+      .regex(
+        COMMAND_ID_RE,
+        "发布者 id 只能用小写字母、数字、点、下划线和连字符，且以字母或数字开头（≤64）",
+      ),
+    publicKey: z
+      .string(typeParams("缺少发布者公钥", "发布者公钥必须是文本"))
+      .trim()
+      .refine(
+        (value) => base64UrlByteLength(value) === 32,
+        "发布者公钥必须是 base64url 编码的 Ed25519 raw 公钥（32 字节）",
+      ),
+  },
+  typeParams("publisher 必须是 JSON 对象"),
+);
+
+/** 清单签名（d.67）：目前只支持 ed25519，值为 base64url 64 字节。 */
+const SignatureSchema = z.object(
+  {
+    alg: z.literal("ed25519", { error: 'signature.alg 只支持 "ed25519"' }),
+    value: z
+      .string(typeParams("缺少签名值", "签名值必须是文本"))
+      .trim()
+      .refine(
+        (value) => base64UrlByteLength(value) === 64,
+        "签名值必须是 base64url 编码的 Ed25519 签名（64 字节）",
+      ),
+  },
+  typeParams("signature 必须是 JSON 对象"),
+);
+
 const PluginManifestSchema = z
   .object(
     {
@@ -410,6 +457,9 @@ const PluginManifestSchema = z
       contributions: ContributionsSchema.optional(),
       // v3 的权限声明（无 MCP 服务时可省略）
       permissions: PermissionsSchema.optional(),
+      // v3 的可选签名与发布者（d.67；旧 v3 清单没有这两个字段照样合法）
+      publisher: PublisherSchema.optional(),
+      signature: SignatureSchema.optional(),
     },
     typeParams("插件清单必须是 JSON 对象"),
   )
@@ -432,6 +482,28 @@ const PluginManifestSchema = z
         code: z.ZodIssueCode.custom,
         path: ["permissions"],
         message: `schemaVersion ${manifest.schemaVersion} 不支持权限声明，请升级到 schemaVersion 3`,
+      });
+    }
+    if (legacy && manifest.publisher) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["publisher"],
+        message: `schemaVersion ${manifest.schemaVersion} 不支持 publisher，请升级到 schemaVersion 3`,
+      });
+    }
+    if (legacy && manifest.signature) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["signature"],
+        message: `schemaVersion ${manifest.schemaVersion} 不支持 signature，请升级到 schemaVersion 3`,
+      });
+    }
+    // 有签名必须有发布者：验签公钥只能来自 publisher，缺了就无法判断签名有效性。
+    if (manifest.signature && !manifest.publisher) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["signature"],
+        message: "有 signature 时必须同时提供 publisher（否则无法确定验签公钥）",
       });
     }
 
@@ -598,6 +670,20 @@ export interface PluginContributions {
   toolPacks: PluginToolPackSpec[];
 }
 
+/** 发布者声明（d.67，TOFU）：公钥只是内容，不证明身份；信任由首次安装确认。 */
+export interface PluginPublisher {
+  id: string;
+  /** base64url（无填充）编码的 Ed25519 raw 公钥（32 字节）。 */
+  publicKey: string;
+}
+
+/** 清单签名（d.67）。只覆盖语义内容（含 publisher），不含 signature 自己。 */
+export interface PluginSignature {
+  alg: "ed25519";
+  /** base64url（无填充）编码的 64 字节签名。 */
+  value: string;
+}
+
 /**
  * 归一化后的插件清单（唯一对外形态）。
  *
@@ -613,6 +699,9 @@ export interface PluginManifest {
   author: string;
   contributions: PluginContributions;
   permissions: PluginPermissions;
+  /** 可选：发布者与签名（d.67；旧 v3 清单没有这两个字段）。 */
+  publisher?: PluginPublisher;
+  signature?: PluginSignature;
 }
 
 /** 清单错误：`message` 已是可直接展示的中文。 */
@@ -731,5 +820,8 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
     author: manifest.author,
     contributions,
     permissions,
+    // 旧版清单不允许带签名（superRefine 已拒绝），这里只透传 v3 的可选字段。
+    ...(manifest.publisher ? { publisher: { ...manifest.publisher } } : {}),
+    ...(manifest.signature ? { signature: { ...manifest.signature } } : {}),
   };
 }

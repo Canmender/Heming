@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { PetWindow } from "./components/pet/PetWindow.js";
 import { hydrateSecureStorage } from "./lib/secureStorage.js";
+import { initThemeMode } from "./store/theme.js";
 
 /**
  * 桌宠窗口的独立入口（`pet.html`，由 Vite 多入口产出）。
@@ -15,6 +16,9 @@ import { hydrateSecureStorage } from "./lib/secureStorage.js";
  *   而 Live2D 的 effect 会创建 WebGL 上下文与模型实例——双跑等于「建了又拆再建」，
  *   表现为开发时模型闪一下、GL 上下文泄漏。生产构建虽不受影响，但开发体验也是体验。
  */
+// 桌宠窗口与应用共享同一份主题设置：启动时同样先应用，避免小窗先亮后暗。
+initThemeMode();
+
 const container = document.getElementById("root");
 if (container) {
   /**

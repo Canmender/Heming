@@ -549,3 +549,32 @@ d.63 留了两个真实缺口：
 | 更新源 | ✅ latest.yml 指向 64.2.24，sha512 一致，Content-Type `application/octet-stream`、Range 206 |
 | 备份 | ✅ `heming-data-2026-11-03-d.64.2.24.0.tar.gz`（本机 `.tmp/backups/` 8.9KB） |
 | 真机自检 | ✅ 首装显示「首次安装 + fnv1a64b 指纹」；同内容更新「与上次相同」不要求勾选（旧 `fnv1a64:` 指纹被静默重算，**无假告警**）；同版本内容变化/作者变化红字 + 需勾选，未勾确认禁用、勾选后更新；更新前后指纹 `d64ce675682e847c` → `0d77e5883fe44dfd`，**前后两半都变**（修复生效）；工具束在无可用 MCP 连接时显示「服务：未连接/未提供 · 已停用」、无开关、无批量入口；卸载后存储清空 |
+
+## 16. 第十二波：签名信任 / 贡献级停用 / 暗色主题 / 窄窗响应式（2026-11-03 14:42 起）
+
+触发：用户「插件签名/来源校验、停用粒度到单类贡献、暗色主题、<1200 窄窗响应式，全部做完」。规格 `docs/superpowers/specs/2026-11-03-d67-signature-dark-responsive.md`。
+
+四件一起做，四轨文件级不重叠：
+1. **签名与发布者信任**（T1 `lib/plugins/**` + `scripts/sign-plugin.mjs`，T2 插件页）：清单 v3 增补 `publisher{id,publicKey}`/`signature{alg:"ed25519",value}`；`signedManifestText`（含 publisher、排除 signature）与 WebCrypto Ed25519 校验（valid/invalid/none/unsupported）；发布者公钥 TOFU（`heming.plugin.publishers.v1`）：首次信任勾选、换钥复核勾选、**invalid 禁用确认不可绕过**；签名脚本 `--gen-key` / `sign`；诚实边界：自签名 TOFU ≠ 公开 CA，不联网取钥。
+2. **贡献级停用**（T1 store，T2 详情 UI）：`disabledKinds: skills|mcpServers|commands|toolPacks`，`setKindEnabled` 直接作用到技能池/注册表/命令过滤/工具束 enabled；主开关语义不变；无全选/全不选。
+3. **暗色主题**（T3）：tailwind 颜色改 CSS 变量，`:root`/`[data-theme=dark]` 双套；暗色兼容层按既有字面量类覆盖（迁移期桥接）；`lib/theme.ts` 增 light/dark/system + `heming.theme.mode.v1` + matchMedia 跟随 + 暗色默认墨色改浅强调；设置区「主题模式」卡。
+4. **<1200 窄窗**（T4）：`lib/viewport.ts` + App.tsx 右栏窄窗默认隐藏、「共享文件」按钮开覆盖层抽屉（aria-modal/Esc/焦点归还）、PageShell 窄窗 px-4；断点用 arbitrary variants。
+
+**Lead**：规格、文档、版本（d.65.2.24.0）、门禁、安装包、部署、真机证据（暗色逐页截图 + 1024/1280 两档 + 签名/停用真机）。
+
+### 第十二波完成与发布（2026-11-03 15:35）
+
+| 项 | 结果与证据 |
+|---|---|
+| T1 签名 + 贡献级停用核心 | ✅ `lib/plugins` 162 例（signature 17 / manifest 43 / store 52 / catalog 18 / integrity 8 / permissions 12 / system 5 / descriptors 7）；Ed25519 验签四态、TOFU 信任表、`scripts/sign-plugin.mjs`（--gen-key / sign，与前端规范化逐字节一致，CLI 冒烟通过）；`disabledKinds` + `setKindEnabled` + `effectiveEnabled` |
+| T2 插件页 | ✅ 安装弹窗异步验签（签名四态 + 发布者指纹 + 首次信任/换钥勾选 + invalid 硬拒无绕过）、详情发布者/签名/四类贡献开关、插件卡「部分停用」徽标；插件相关 49 例 |
+| T3 暗色 | ✅ 18 个语义 token 双套 + 27 条兼容层（后扩到 101 个字面量全覆盖）+ `light/dark/system` 三态 + 设置区「主题模式」卡；主题 72 例 |
+| T4 窄窗 | ✅ `lib/viewport.ts` + App 右栏覆盖层抽屉（aria-modal/遮罩/Esc/焦点归还）+ PageShell 窄窗 px-4；App/视口 42 例 |
+| 事故与修复 | ⚠ **真机抓到签名状态误报**：http 来源无 `crypto.subtle` 时验签正确返回 unsupported，但指纹计算抛错被同一 `try` 吞成 `invalid` → 用户看到「内容被篡改，已拒绝安装」。同日修复（d.65.2.25.0）：验签与指纹拆两段错误处理，信任/换钥勾选只在 valid 时要求；unsupported 可装但如实标注、不写信任表。另：首轮暗色巡检发现 `bg-[#fbfbfb]` 等 64 个字面量未覆盖 → 兼容层扩到 101 个全覆盖 |
+| 全量门禁 | ✅ shared 29 / server 141 / web 219 文件 3217 例 / desktop 29 文件 518 例；4/4 无重试；三包 tsc 0 |
+| 版本 | `d.65.2.24.0`（特性）→ 同日 `d.65.2.25.0`（修订：签名误报修复 + 暗色补漏） |
+| 安装包 | `release/r58/和鸣 Setup d.65.2.25.0.exe` 228,242,337 字节，sha512 `/chTekOLAxEwp6QtJXVjWtJ1sa2FYwAcwYRoo3Ewx7MhzPPM5GlW+F8uZoji0XPPfKrutU8nIRJFBGMZ3AWkVQ==` 与本地/远端 latest.yml 三方一致 |
+| 云端部署 | ✅ 第 8 步 OK（1m10s）；`/api/health` ok、首页 200、线上 bundle `main-C3eAo5B8.js` 与本地同名同字节、CSP report-only 在位 |
+| 更新源 | ✅ latest.yml 指向 65.2.25，sha512 一致，Content-Type `application/octet-stream`、Range 206 |
+| 备份 | ✅ `heming-data-2026-11-03-d.65.2.25.0.tar.gz`（本机 `.tmp/backups/` 9.2KB） |
+| 真机自检 | ✅ 签名：有效签名在 http 来源显示「环境不支持」且可装（不再谎报无效）、发布者/指纹不可用明示、无形式化信任勾选；篡改清单会因同 id 同版本触发覆盖确认（桌面端安全上下文下验签为 invalid 硬拒，由单测覆盖）；换钥在 unsupported 下不要求核对。贡献级：四类开关全部关闭后 `disabledKinds` 四项齐全、技能池真实关闭。暗色：13 个导航页逐页巡检「浅色大块 = 0」，截图见 `.tmp/d67/dark/`。窄窗：1024 无 aside、有「打开共享文件」按钮、抽屉 `aria-modal` + 遮罩、Esc 关闭且焦点回到按钮、7 个宽页面无横向溢出；1280 恢复可拖拽 aside |

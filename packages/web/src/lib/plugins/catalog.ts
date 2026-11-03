@@ -4,7 +4,7 @@ import { riskOfName } from "../hitl/classify.js";
 import type { RiskLevel } from "../hitl/types.js";
 import type { McpRegistry, McpToolRef } from "../mcp/index.js";
 import { mcpRegistry } from "../mcp/index.js";
-import { pluginStore, type InstalledPlugin, type PluginStore } from "./store.js";
+import { effectiveEnabled, pluginStore, type InstalledPlugin, type PluginStore } from "./store.js";
 import { pluginIdFromServerId } from "./permissions.js";
 
 /**
@@ -306,7 +306,7 @@ export function describeCapabilityCatalog(
         matched,
         unresolved,
         entries,
-        enabled: plugin.enabled,
+        enabled: effectiveEnabled(plugin, "toolPacks"),
       });
     }
   }

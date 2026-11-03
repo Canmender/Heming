@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
 import { hydrateSecureStorage } from "./lib/secureStorage.js";
+import { initThemeMode } from "./store/theme.js";
 import "./index.css";
 import "katex/dist/katex.min.css";
 
@@ -29,6 +30,12 @@ import "katex/dist/katex.min.css";
  *   3. 给 hydrate 加帽可以，但**不要**为了等它把入口改成顶层 `await import()` 或
  *      `await hydrate`——那会破坏上面的切块假设，也把「安全存储不可用」变成启动阻塞。
  */
+/**
+ * 主题模式必须在**渲染前**应用：晚一帧就会先闪一下浅色再变暗（暗色用户最刺眼）。
+ * 这一步只读 localStorage + 写 documentElement 属性，没有 IPC/网络，代价可忽略。
+ */
+initThemeMode();
+
 const HYDRATE_CAP_MS = 300;
 const root = document.getElementById("root")!;
 void Promise.race([

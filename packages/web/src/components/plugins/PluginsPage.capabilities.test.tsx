@@ -1,12 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { PluginsPage } from "../PluginsPage.js";
 import {
+  base64UrlEncode,
   describeCapabilityCatalog,
   PluginStore,
+  PublisherTrustStore,
   type CapabilityCatalog,
   type CapabilitySnapshot,
   type PluginMcpPort,
+  type PluginManifest,
+  type SignatureCheck,
   type SystemPlugin,
 } from "../../lib/plugins/index.js";
 import { SkillPool, type StorageLike } from "../../lib/skills/index.js";
@@ -23,6 +27,11 @@ import { describeCapabilityStats, describeSkillRows } from "./viewModel.js";
  */
 
 const T0 = new Date("2026-11-01T08:00:00.000Z").getTime();
+/** 签名相关夹具：Ed25519 公钥 32B、签名 64B（内容真假由注入的 verify 决定）。 */
+const PUB_KEY = base64UrlEncode(new Uint8Array(32).fill(7));
+const OTHER_PUB_KEY = base64UrlEncode(new Uint8Array(32).fill(3));
+const SIG_VALUE = base64UrlEncode(new Uint8Array(64).fill(9));
+const FP = "sha256:0123456789abcdef";
 
 function makeStorage(map: Map<string, string> = new Map()): StorageLike {
   return {
@@ -117,6 +126,15 @@ function v3Manifest(overrides: Record<string, unknown> = {}): Record<string, unk
     },
     ...overrides,
   };
+}
+
+/** 带签名的 v3 清单（发布者 acme；验签结果由注入的 verify 决定）。 */
+function signedManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return v3Manifest({
+    publisher: { id: "acme", publicKey: PUB_KEY },
+    signature: { alg: "ed25519", value: SIG_VALUE },
+    ...overrides,
+  });
 }
 
 /** v2 旧包：顶层 skills/mcpServers，无 permissions。 */
@@ -347,24 +365,31 @@ function fakeRegistry(): McpRegistryPort & { update: ReturnType<typeof vi.fn> } 
   };
 }
 
+let storage: StorageLike;
+let publishers: PublisherTrustStore;
 let pool: SkillPool;
 let store: PluginStore;
 let mcp: ReturnType<typeof fakeMcp>;
 let registry: ReturnType<typeof fakeRegistry>;
 
 beforeEach(() => {
-  const storage = makeStorage();
+  storage = makeStorage();
   pool = new SkillPool(storage, () => T0);
   mcp = fakeMcp();
-  store = new PluginStore(storage, pool, () => T0, mcp.port);
+  publishers = new PublisherTrustStore(storage);
+  store = new PluginStore(storage, pool, () => T0, mcp.port, publishers);
   registry = fakeRegistry();
   useUiStore.setState({ page: "home" });
 });
 
-function renderPage(
-  agents: readonly AgentLite[] = [],
-  overrides: { catalog?: CapabilityCatalog; capabilities?: CapabilitySnapshot } = {},
-) {
+type RenderOverrides = {
+  catalog?: CapabilityCatalog;
+  capabilities?: CapabilitySnapshot;
+  verify?: (manifest: PluginManifest) => Promise<SignatureCheck>;
+  fingerprintOf?: (publicKey: string) => Promise<string>;
+};
+
+function renderPage(agents: readonly AgentLite[] = [], overrides: RenderOverrides = {}) {
   const catalog = overrides.catalog ?? fixedCatalog();
   const capabilities = overrides.capabilities ?? fixedCapabilities(catalog);
   return render(
@@ -374,6 +399,9 @@ function renderPage(
       mcp={registry}
       catalog={catalog}
       capabilities={capabilities}
+      publishers={publishers}
+      verify={overrides.verify ?? (async (manifest) => (manifest.signature ? { status: "valid" } : { status: "none" }))}
+      fingerprintOf={overrides.fingerprintOf ?? (async () => FP)}
       agents={agents}
     />,
   );
@@ -832,5 +860,217 @@ describe("插件页 · 工具束逐个授权", () => {
     const section = within(dialog).getByRole("region", { name: "插件工具束" });
     expect(section).toHaveTextContent("插件已停用");
     expect(within(section).getByRole("switch", { name: "启用工具 weather_query" })).toBeDisabled();
+  });
+});
+
+
+/* --------------------------------------- 签名与发布者信任（d.67 · §1） */
+
+describe("插件页 · 签名与发布者信任", () => {
+  it("未签名清单：显示「未签名」，无发布者与信任勾选，可直接装", async () => {
+    renderPage();
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(v3Manifest()) },
+    });
+    expect(await within(dialog).findByText("未签名")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/发布者：/)).toBeNull();
+    expect(within(dialog).queryByLabelText(/我信任发布者/)).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "确认安装" })).toBeEnabled();
+  });
+
+  it("有效签名 + 首次信任：显示发布者指纹；未勾选禁用，勾选后安装并写入信任表", async () => {
+    renderPage();
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(signedManifest()) },
+    });
+
+    expect(await within(dialog).findByText("有效")).toBeInTheDocument();
+    expect(within(dialog).getByText(/发布者：acme · sha256:01234567…/)).toBeInTheDocument();
+
+    const trustBox = within(dialog).getByLabelText("我信任发布者 acme 的公钥") as HTMLInputElement;
+    expect(trustBox.checked).toBe(false);
+    const confirm = within(dialog).getByRole("button", { name: "确认安装" });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("aria-describedby", expect.stringContaining("plugin-install-requirements"));
+
+    fireEvent.click(trustBox);
+    expect(within(dialog).getByRole("button", { name: "确认安装" })).toBeEnabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认安装" }));
+
+    const installed = store.get("acme.report-kit")!;
+    expect(installed.publisher).toEqual({ id: "acme", fingerprint: FP });
+    expect(installed.signature).toEqual({ status: "valid", alg: "ed25519" });
+    expect(publishers.get("acme")?.fingerprint).toBe(FP);
+  });
+
+  it("无效签名：红字拒绝安装，且没有任何绕过入口（信任勾选都不给）", async () => {
+    renderPage([], {
+      verify: async () => ({ status: "invalid", reason: "签名与清单内容不匹配" }),
+    });
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(signedManifest()) },
+    });
+
+    expect(await within(dialog).findByText("无效")).toBeInTheDocument();
+    expect(within(dialog).getByText("签名与清单内容不匹配，已拒绝安装。")).toBeInTheDocument();
+    // 无效签名没有「可以信任的公钥结论」→ 不出现信任勾选，避免用户以为勾了就能装
+    expect(within(dialog).queryByLabelText("我信任发布者 acme 的公钥")).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "确认安装" })).toBeDisabled();
+    // 红线：没有「忽略/仍然安装」之类绕过入口
+    expect(within(dialog).queryByRole("button", { name: /仍然安装|忽略|强制/ })).toBeNull();
+    expect(store.list()).toEqual([]);
+  });
+
+  it("环境不支持：明说不代表验过、不算无效、不要求信任勾选，可直接装且不写信任表", async () => {
+    renderPage([], {
+      verify: async () => ({ status: "unsupported", reason: "当前环境不支持 WebCrypto" }),
+      fingerprintOf: async () => {
+        throw new Error("当前环境不支持 WebCrypto，无法计算公钥指纹");
+      },
+    });
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(signedManifest()) },
+    });
+
+    expect(await within(dialog).findByText("环境不支持")).toBeInTheDocument();
+    expect(within(dialog).getByText(/当前环境不支持 WebCrypto/)).toBeInTheDocument();
+    // 指纹算不出来不能把结论篡改成「无效」，也不能要求用户信任一个没有指纹的公钥
+    expect(within(dialog).queryByText("无效")).toBeNull();
+    expect(within(dialog).getByText(/指纹不可用/)).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("我信任发布者 acme 的公钥")).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认安装" }));
+    expect(store.get("acme.report-kit")!.signature?.status).toBe("unsupported");
+    expect(store.get("acme.report-kit")!.publisher).toBeNull();
+    expect(publishers.get("acme")).toBeUndefined();
+  });
+
+  it("验签有效但指纹算不出来：仍显示有效、可装，只是不记录发布者信任", async () => {
+    renderPage([], {
+      verify: async () => ({ status: "valid" }),
+      fingerprintOf: async () => {
+        throw new Error("环境不支持指纹");
+      },
+    });
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(signedManifest()) },
+    });
+
+    expect(await within(dialog).findByText("有效")).toBeInTheDocument();
+    expect(within(dialog).getByText(/指纹不可用/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByLabelText("我信任发布者 acme 的公钥"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认安装" }));
+    expect(store.get("acme.report-kit")!.signature?.status).toBe("valid");
+    expect(store.get("acme.report-kit")!.publisher).toBeNull();
+    expect(publishers.get("acme")).toBeUndefined();
+  });
+
+  it("验签中：确认按钮禁用，完成后放行", async () => {
+    let resolveCheck!: (check: SignatureCheck) => void;
+    const pending = new Promise<SignatureCheck>((resolve) => {
+      resolveCheck = resolve;
+    });
+    renderPage([], { verify: () => pending });
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(signedManifest()) },
+    });
+
+    expect(within(dialog).getByText("校验中…")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "确认安装" })).toBeDisabled();
+
+    await act(async () => {
+      resolveCheck({ status: "valid" });
+    });
+    expect(await within(dialog).findByText("有效")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByLabelText("我信任发布者 acme 的公钥"));
+    expect(within(dialog).getByRole("button", { name: "确认安装" })).toBeEnabled();
+  });
+
+  it("同 id 公钥变更：红字提示换钥，核对勾选后才可装", async () => {
+    publishers.remember({ id: "acme", publicKey: OTHER_PUB_KEY, fingerprint: "sha256:deadbeefdeadbeef" });
+    renderPage();
+    const dialog = openInstall();
+    fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(signedManifest()) },
+    });
+
+    expect(await within(dialog).findByText("有效")).toBeInTheDocument();
+    expect(within(dialog).getByText(/发布者公钥已变更/)).toBeInTheDocument();
+    // 发布者已信任：不应再出现首次信任勾选
+    expect(within(dialog).queryByLabelText(/我信任发布者/)).toBeNull();
+
+    const ack = within(dialog).getByLabelText("我已核对发布者公钥变更");
+    expect(within(dialog).getByRole("button", { name: "确认安装" })).toBeDisabled();
+    fireEvent.click(ack);
+    expect(within(dialog).getByRole("button", { name: "确认安装" })).toBeEnabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认安装" }));
+    expect(publishers.get("acme")?.fingerprint).toBe(FP);
+  });
+});
+
+/* ----------------------------------------- 贡献级停用（d.67 · §2） */
+
+describe("插件页 · 贡献级停用", () => {
+  function openContributionSection() {
+    installV3();
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "查看插件详情 报告工具箱" }));
+    const dialog = screen.getByRole("dialog", { name: "插件详情 报告工具箱" });
+    return within(dialog).getByRole("region", { name: "插件贡献" });
+  }
+
+  it("四类各一行开关；切换技能只写 disabledKinds 并作用到技能池", () => {
+    const section = openContributionSection();
+    for (const label of ["技能", "服务", "命令", "工具束"]) {
+      expect(within(section).getByRole("switch", { name: `启用本插件的${label}` })).toBeInTheDocument();
+    }
+    // 红线：没有全选/全不选
+    expect(within(section).queryByRole("button", { name: /全部/ })).toBeNull();
+
+    fireEvent.click(within(section).getByRole("switch", { name: "启用本插件的技能" }));
+    expect(store.get("acme.report-kit")!.disabledKinds).toEqual(["skills"]);
+    expect(within(section).getByRole("switch", { name: "启用本插件的技能" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(pool.list().filter((skill) => skill.pluginId).every((skill) => !skill.enabled)).toBe(true);
+  });
+
+  it("切换服务调用接口区同源开关（mcp.update）", () => {
+    const section = openContributionSection();
+    fireEvent.click(within(section).getByRole("switch", { name: "启用本插件的服务" }));
+    expect(store.get("acme.report-kit")!.disabledKinds).toEqual(["mcpServers"]);
+    // 真实写入口是 PluginStore 注入的 MCP 端口（与接口区同一份注册表）
+    expect(mcp.servers.get("plugin:acme.report-kit:report")?.enabled).toBe(false);
+  });
+
+  it("主开关关闭时四类开关禁用并注明", () => {
+    installV3();
+    store.setEnabled("acme.report-kit", false);
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "查看插件详情 报告工具箱" }));
+    const dialog = screen.getByRole("dialog", { name: "插件详情 报告工具箱" });
+    const section = within(dialog).getByRole("region", { name: "插件贡献" });
+    expect(section).toHaveTextContent("主开关已关闭");
+    expect(within(section).getByRole("switch", { name: "启用本插件的技能" })).toBeDisabled();
+  });
+
+  it("部分停用：插件卡显示徽标并用 title 列出类别；全部启用或停用后不显示", () => {
+    installV3();
+    store.setKindEnabled("acme.report-kit", "skills", false);
+    const first = renderPage();
+    const badge = within(screen.getByRole("region", { name: "插件 报告工具箱" })).getByText("部分停用");
+    expect(badge).toHaveAttribute("title", "已停用：技能");
+
+    first.unmount();
+    store.setEnabled("acme.report-kit", false);
+    renderPage();
+    expect(within(screen.getByRole("region", { name: "插件 报告工具箱" })).queryByText("部分停用")).toBeNull();
   });
 });

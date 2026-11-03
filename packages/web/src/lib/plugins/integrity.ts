@@ -55,6 +55,16 @@ function stableValue(value: unknown): unknown {
 }
 
 /**
+ * 通用规范化 JSON 文本：键排序、无空白、丢弃 `undefined`（数组顺序保留）。
+ *
+ * 内容指纹与清单签名（`signature.ts`）必须共用同一套规范化，否则
+ * 「本机验签」与「`scripts/sign-plugin.mjs` 签名」会各算一份文本、互相不认。
+ */
+export function canonicalJsonText(value: unknown): string {
+  return JSON.stringify(stableValue(value));
+}
+
+/**
  * 规范化清单文本：键排序 + 无空白的稳定 JSON。
  *
  * 只挑语义字段重排，而不是对 `PluginManifest` 整体序列化：
@@ -62,17 +72,15 @@ function stableValue(value: unknown): unknown {
  * 对象键顺序、空白与末尾换行都不影响结果（安装弹窗粘贴同一份清单的不同排版 = 同一指纹）。
  */
 export function canonicalManifestText(manifest: PluginManifest): string {
-  return JSON.stringify(
-    stableValue({
-      id: manifest.id,
-      version: manifest.version,
-      name: manifest.name,
-      description: manifest.description,
-      author: manifest.author,
-      permissions: manifest.permissions,
-      contributions: manifest.contributions,
-    }),
-  );
+  return canonicalJsonText({
+    id: manifest.id,
+    version: manifest.version,
+    name: manifest.name,
+    description: manifest.description,
+    author: manifest.author,
+    permissions: manifest.permissions,
+    contributions: manifest.contributions,
+  });
 }
 
 /**

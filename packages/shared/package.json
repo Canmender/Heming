@@ -1,6 +1,6 @@
 {
   "name": "@heming/shared",
-  "version": "64.2.24",
+  "version": "65.2.25",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,5 +17,5 @@
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
-  "hemingVersion": "d.64.2.24.0"
+  "hemingVersion": "d.65.2.25.0"
 }

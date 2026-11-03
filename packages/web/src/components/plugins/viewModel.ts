@@ -11,7 +11,9 @@ import {
   evaluatePluginPermissions,
   type CapabilitySnapshot,
   type CatalogToolPack,
+  type PluginContributionKind,
   type PluginTrustPreview,
+  type SignatureStatus,
   type InstallResult,
   type PluginInstallPreview,
 } from "../../lib/plugins/index.js";
@@ -432,6 +434,69 @@ export function authorChangeText(trust: PluginTrustPreview, nextAuthor: string):
 export function isOwnPluginTool(serverId: string | undefined, pluginId: string): boolean {
   if (!serverId) return false;
   return serverId.startsWith(`plugin:${pluginId}:`);
+}
+
+/* ------------------------------------------------------ 签名与贡献级停用（d.67） */
+
+/** 验签状态中文（四态）；「环境不支持」必须明说，不能让人以为验过了。 */
+export function signatureStatusLabel(status: SignatureStatus): string {
+  switch (status) {
+    case "valid":
+      return "有效";
+    case "invalid":
+      return "无效";
+    case "unsupported":
+      return "环境不支持";
+    default:
+      return "未签名";
+  }
+}
+
+export const CONTRIBUTION_KIND_LABELS: Record<PluginContributionKind, string> = {
+  skills: "技能",
+  mcpServers: "服务",
+  commands: "命令",
+  toolPacks: "工具束",
+};
+
+export interface ContributionKindRow {
+  kind: PluginContributionKind;
+  label: string;
+  count: number;
+  /** 该类是否被单独停用（贡献级开关当前值）。 */
+  enabled: boolean;
+}
+
+/**
+ * 详情「贡献」段四类各一行：技能 / 服务 / 命令 / 工具束。
+ *
+ * 计数来自清单声明（与卡片的贡献行同源）；启停只影响这一类，主开关仍是总闸。
+ */
+export function contributionKindRows(plugin: InstalledPlugin): ContributionKindRow[] {
+  const c = plugin.manifest.contributions;
+  const counts: Record<PluginContributionKind, number> = {
+    skills: c.skills.length,
+    mcpServers: c.mcpServers.length,
+    commands: c.commands.length,
+    toolPacks: c.toolPacks.length,
+  };
+  return (Object.keys(CONTRIBUTION_KIND_LABELS) as PluginContributionKind[]).map((kind) => ({
+    kind,
+    label: CONTRIBUTION_KIND_LABELS[kind],
+    count: counts[kind],
+    enabled: !plugin.disabledKinds.includes(kind),
+  }));
+}
+
+/** 插件卡「部分停用」判定：主开关仍开、但至少一类贡献被单独关掉。 */
+export function isPartiallyDisabled(plugin: InstalledPlugin): boolean {
+  return plugin.enabled && plugin.disabledKinds.length > 0;
+}
+
+/** 「部分停用」徽标的 title：把被停用的类别列出来。 */
+export function partialDisabledTitle(plugin: InstalledPlugin): string {
+  const labels = plugin.disabledKinds.map((kind) => CONTRIBUTION_KIND_LABELS[kind]);
+  return labels.length > 0 ? `已停用：${labels.join("、")}` : "";
 }
 
 /* ---------------------------------------------------------------- 统计卡 */

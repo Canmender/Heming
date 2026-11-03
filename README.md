@@ -2,7 +2,7 @@
 
 原生电脑端智能体应用平台（云端团队名册）：本机智能体 + 真实团队动向。
 
-> **当前版本**：`d.64.2.24.0`　查看最新：`node scripts/version.mjs`（或 `pnpm version:show`）
+> **当前版本**：`d.65.2.25.0`　查看最新：`node scripts/version.mjs`（或 `pnpm version:show`）
 > **版本号规则**：5 段 `d.特性.破坏性.修订.构建`，**每次修改/修复都要 bump** —— 见 [docs/VERSION-MANAGEMENT.md](docs/VERSION-MANAGEMENT.md)
 > 改动记录见 [CHANGELOG.md](CHANGELOG.md)。
 

@@ -16,8 +16,9 @@ import { autoConnectAll } from "./lib/mcp/runtime.js";
 import { useInfohubStore } from "./lib/infohub/store.js";
 import { useAutomationScheduler } from "./lib/automation/scheduler.js";
 import { useStaffLoop } from "./lib/staff/loop.js";
-import { hasOpenModal } from "./components/useModalA11y.js";
+import { hasOpenModal, useModalA11y } from "./components/useModalA11y.js";
 import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
+import { useViewport } from "./lib/viewport.js";
 
 /**
  * 路由级懒加载：每个页面单独成 chunk，首屏只下「壳」。
@@ -176,6 +177,94 @@ function fmtBytes(n: number): string {
   if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}MB`;
   if (n >= 1024) return `${(n / 1024).toFixed(1)}KB`;
   return `${n}B`;
+}
+
+/**
+ * 右侧「共享文件」面板内容（d.67 T4 从 AppShell 内联 jsx 提取）。
+ *
+ * 为什么提取：宽窗的可拖拽 aside 与窄窗的覆盖层抽屉**必须是同一份内容**
+ * （表头/用量/绑定/上传/FileTree/预览模态）。复制一份等于以后两端行为慢慢分叉。
+ * 本组件只管渲染，数据与回调仍由 AppShell 持有（数据加载、上传、预览状态都不搬）。
+ */
+interface SharedFilesPanelProps {
+  files: SharedFileMeta[];
+  usage: { used: number; quota: number } | null;
+  previewFile: SharedFileMeta | null;
+  /** 绑定到当前会话（无会话时由 AppShell 给提示，不静默失败）。 */
+  onBind: () => void;
+  onUpload: () => void;
+  onPreview: (file: SharedFileMeta) => void;
+  onClosePreview: () => void;
+  onSendToConversation: (item: SharedFileMeta) => void;
+  /** 抽屉模式才传：显示面板内的关闭按钮（宽窗 aside 不传，布局与改前一致）。 */
+  onClose?: () => void;
+}
+
+function SharedFilesPanel({
+  files,
+  usage,
+  previewFile,
+  onBind,
+  onUpload,
+  onPreview,
+  onClosePreview,
+  onSendToConversation,
+  onClose,
+}: SharedFilesPanelProps) {
+  return (
+    <>
+      <div className="flex items-center justify-between gap-1 border-b border-line-soft px-3 py-2">
+        {/* d.62：表头用全站统一的 section 档（13/20/600），与导航轨 12px 内边距同节奏 */}
+        <span className="ui-section-title shrink-0 whitespace-nowrap">共享文件</span>
+        {usage && (
+          <span className="ui-micro min-w-0 flex-1 truncate">
+            {fmtBytes(usage.used)} / {fmtBytes(usage.quota)}
+          </span>
+        )}
+        {/* 绑定：把本地文件绑进当前会话。没有会话时提示先开一个——不静默失败 */}
+        <button
+          type="button"
+          aria-label="绑定本地文件到会话"
+          title="绑定工作区文件到当前会话（需先打开一个会话）"
+          onClick={onBind}
+          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
+        >
+          绑定
+        </button>
+        <button
+          type="button"
+          title="上传文件到共享文件"
+          onClick={onUpload}
+          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
+        >
+          上传
+        </button>
+        {onClose ? (
+          <button
+            type="button"
+            aria-label="关闭共享文件面板"
+            onClick={onClose}
+            className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
+          >
+            关闭
+          </button>
+        ) : null}
+      </div>
+      <div className="min-h-0 flex-1">
+        <FileTree
+          items={files}
+          localPaths={[]}
+          onPreview={onPreview}
+          onSendToConversation={onSendToConversation}
+        />
+      </div>
+      {previewFile && (
+        <Suspense fallback={null}>
+          <FilePreviewModal file={previewFile} onClose={onClosePreview} />
+        </Suspense>
+      )}
+    </>
+  );
 }
 
 /**
@@ -408,6 +497,47 @@ function AppShell({
     input.click();
   };
 
+  /** 绑定：把本地文件绑进当前会话。没有会话时提示先开一个——不静默失败（行为同提取前）。 */
+  const onBindFile = () => {
+    if (!useUiStore.getState().activeConversationId) {
+      window.alert("先打开一个会话，再绑定文件");
+      return;
+    }
+    void onUpload();
+  };
+
+  /** 目录文件名 → 发到当前会话（非会话页/无会话时提示，行为同提取前）。 */
+  const onSendFileToConversation = (item: SharedFileMeta) => {
+    const { page: currentPage, activeConversationId } = useUiStore.getState();
+    if (currentPage !== "chat" || !activeConversationId) {
+      window.alert("先打开一个会话，再从目录发送文件");
+      return;
+    }
+    useUiStore.getState().sendFileToConversation(activeConversationId, {
+      id: item.id,
+      name: item.name,
+      mime: item.mime,
+      size: item.size,
+    });
+  };
+
+  /*
+   * d.67 T4 · 窄窗（<1200）响应式：
+   * 宽窗完全保持原样（可拖拽 aside、宽度记忆、最小/最大、拖动手柄 aria 都不动）；
+   * 窄窗默认不渲染 aside 列，改由顶部「共享文件」按钮打开覆盖层抽屉（同一份面板内容）。
+   * 断点只在 viewport.ts 定义一次，这里不写死 1200。
+   */
+  const { narrow } = useViewport();
+  const [filesDrawerOpen, setFilesDrawerOpen] = useState(false);
+  const filesDrawerRef = useRef<HTMLElement | null>(null);
+  const closeFilesDrawer = useCallback(() => setFilesDrawerOpen(false), []);
+  // 抽屉是模态：Esc 关闭、Tab 在面板内循环、背景 inert、关闭后焦点回到触发按钮。
+  useModalA11y(filesDrawerRef, closeFilesDrawer, { active: narrow && filesDrawerOpen });
+  // 拖宽到 ≥1200 时自动收起：宽窗有常驻 aside，不能同时压一层遮罩。
+  useEffect(() => {
+    if (!narrow) setFilesDrawerOpen(false);
+  }, [narrow]);
+
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
 
@@ -576,81 +706,87 @@ function AppShell({
       <TitleBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <NavRail onOpenSearch={onOpenSearch} onOpenShortcuts={onOpenShortcuts} />
-        <main className="flex min-w-0 flex-1 flex-col">
-          {/* 每个槽位各自 Suspense：只有当前页一块走占位，壳（标题栏/导航/目录栏）不动。
-              启动动画挂着时页面 chunk 已在后台加载，揭开时通常已经就绪。 */}
-          <Suspense fallback={<PageFallback />}>{view}</Suspense>
-        </main>
-        {/* 右侧工作目录：可拖动左边缘改宽度（手柄整条 6px 宽，好抓）。
-            绑定按钮把本地文件绑到当前会话，通话/协作里点目录就能带上文件。 */}
-        <aside className="relative flex shrink-0 flex-col border-l border-line-soft" style={{ width: asideWidth }}>
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="调整目录栏宽度"
-            onPointerDown={onResizeStart}
-            className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize hover:bg-[#1a1a1a]/10"
-          />
-          <div className="flex items-center justify-between gap-1 border-b border-line-soft px-3 py-2">
-            {/* d.62：表头用全站统一的 section 档（13/20/600），与导航轨 12px 内边距同节奏 */}
-            <span className="ui-section-title shrink-0 whitespace-nowrap">共享文件</span>
-            {usage && (
-              <span className="ui-micro min-w-0 flex-1 truncate">
-                {fmtBytes(usage.used)} / {fmtBytes(usage.quota)}
-              </span>
-            )}
-            {/* 绑定：把本地文件绑进当前会话。没有会话时提示先开一个——不静默失败 */}
-            <button
-              type="button"
-              aria-label="绑定本地文件到会话"
-              title="绑定工作区文件到当前会话（需先打开一个会话）"
-              onClick={() => {
-                if (!useUiStore.getState().activeConversationId) {
-                  window.alert("先打开一个会话，再绑定文件");
-                  return;
-                }
-                void onUpload();
-              }}
-              className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
-            >
-              绑定
-            </button>
-            <button
-              type="button"
-              title="上传文件到共享文件"
-              onClick={() => void onUpload()}
-              className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
-            >
-              上传
-            </button>
-          </div>
-          <div className="min-h-0 flex-1">
-            <FileTree
-              items={files}
-              localPaths={[]}
-              onPreview={setPreviewFile}
-              onSendToConversation={(item) => {
-                const { page, activeConversationId } = useUiStore.getState();
-                if (page !== "chat" || !activeConversationId) {
-                  window.alert("先打开一个会话，再从目录发送文件");
-                  return;
-                }
-                useUiStore.getState().sendFileToConversation(activeConversationId, {
-                  id: item.id,
-                  name: item.name,
-                  mime: item.mime,
-                  size: item.size,
-                });
-              }}
-            />
-          </div>
-          {previewFile && (
-            <Suspense fallback={null}>
-              <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
-            </Suspense>
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* 窄窗顶部工具区（d.67 T4）：右侧共享文件栏默认不渲染，入口收在这里。
+              宽窗（≥1200）不渲染这条工具区，主内容高度与改前完全一致。 */}
+          {narrow && (
+            <div className="flex shrink-0 items-center justify-end border-b border-line-soft px-4 py-1.5">
+              <button
+                type="button"
+                aria-label="打开共享文件"
+                aria-haspopup="dialog"
+                aria-expanded={filesDrawerOpen}
+                onClick={() => setFilesDrawerOpen(true)}
+                className="rounded-md border border-line px-2.5 py-1 text-[12px] shadow-card hover:bg-[#fafafa]"
+              >
+                共享文件
+              </button>
+            </div>
           )}
-        </aside>
+          {/* min-w-0 + overflow-hidden：窄窗下宽页面（settings/team/workspace/memory）不横向撑破主列 */}
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            {/* 每个槽位各自 Suspense：只有当前页一块走占位，壳（标题栏/导航/目录栏）不动。
+                启动动画挂着时页面 chunk 已在后台加载，揭开时通常已经就绪。 */}
+            <Suspense fallback={<PageFallback />}>{view}</Suspense>
+          </div>
+        </main>
+        {/* 宽窗：右侧工作目录可拖动左边缘改宽度（手柄整条 6px 宽，好抓）。
+            绑定按钮把本地文件绑到当前会话，通话/协作里点目录就能带上文件。
+            窄窗不渲染这一列（内容改由顶部按钮 + 覆盖层抽屉承载，见下方）。 */}
+        {!narrow && (
+          <aside className="relative flex shrink-0 flex-col border-l border-line-soft" style={{ width: asideWidth }}>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整目录栏宽度"
+              onPointerDown={onResizeStart}
+              className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize hover:bg-[#1a1a1a]/10"
+            />
+            <SharedFilesPanel
+              files={files}
+              usage={usage}
+              previewFile={previewFile}
+              onBind={onBindFile}
+              onUpload={() => void onUpload()}
+              onPreview={setPreviewFile}
+              onClosePreview={() => setPreviewFile(null)}
+              onSendToConversation={onSendFileToConversation}
+            />
+          </aside>
+        )}
       </div>
+      {/* 窄窗共享文件抽屉：覆盖层 + aria-modal；Esc/焦点归还/背景 inert 由 useModalA11y 统一托管。 */}
+      {narrow && filesDrawerOpen && (
+        <div className="fixed inset-0 z-40 flex justify-end" data-testid="shared-files-drawer-overlay">
+          <button
+            type="button"
+            aria-label="关闭共享文件遮罩"
+            data-testid="shared-files-backdrop"
+            onClick={closeFilesDrawer}
+            className="absolute inset-0 cursor-default bg-black/30"
+          />
+          <aside
+            id="shared-files-drawer"
+            ref={filesDrawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="共享文件"
+            className="relative flex h-full w-[min(360px,90vw)] flex-col border-l border-line-soft bg-white shadow-xl"
+          >
+            <SharedFilesPanel
+              files={files}
+              usage={usage}
+              previewFile={previewFile}
+              onBind={onBindFile}
+              onUpload={() => void onUpload()}
+              onPreview={setPreviewFile}
+              onClosePreview={() => setPreviewFile(null)}
+              onSendToConversation={onSendFileToConversation}
+              onClose={closeFilesDrawer}
+            />
+          </aside>
+        </div>
+      )}
       {/* 安装确认是全局的：从接口区发起，但用户可能立刻切页；
           挂在根节点上，pending 在第几页都能弹出来。 */}
       <Suspense fallback={null}>

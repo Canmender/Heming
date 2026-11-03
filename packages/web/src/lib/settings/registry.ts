@@ -91,6 +91,12 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
     section: "appearance",
   },
   {
+    id: "theme-mode",
+    title: "主题模式",
+    keywords: ["主题", "暗色", "深色", "浅色", "跟随系统", "夜间", "护眼", "dark", "light", "theme", "模式"],
+    section: "appearance",
+  },
+  {
     id: "pet",
     title: "桌宠",
     keywords: ["桌宠", "宠物", "形象", "模型路径", "打扰强度", "大小", "点击穿透", "显示"],

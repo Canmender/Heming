@@ -26,7 +26,7 @@ export function TokenHeatmap() {
             data-day={d.day}
             data-total={d.total}
             style={{ backgroundColor: LEVEL_BG[level] }}
-            className={`h-3.5 w-3.5 rounded-[3px]${i === 29 ? " ring-1 ring-ink/20" : ""}`}
+            className={`h-3.5 w-3.5 rounded-[3px]${i === 29 ? " ring-1 ring-[#1a1a1a]/20" : ""}`}
           />
         );
       })}

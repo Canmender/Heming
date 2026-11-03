@@ -668,3 +668,85 @@ describe("parsePluginManifest · v3 工具束（d.65 增补）", () => {
     ).toContain(`单个工具束最多 ${MAX_TOOL_PACK_TOOLS} 个工具`);
   });
 });
+
+describe("parsePluginManifest · 发布者与签名（d.67）", () => {
+  const PUBLIC_KEY = "A".repeat(43); // base64url → 32 字节
+  const SIGNATURE = "B".repeat(86); // base64url → 64 字节
+
+  function signed(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return meta({
+      publisher: { id: "acme", publicKey: PUBLIC_KEY },
+      signature: { alg: "ed25519", value: SIGNATURE },
+      contributions: { skills: [skill] },
+      ...overrides,
+    });
+  }
+
+  function failureOf(input: unknown): string {
+    try {
+      parsePluginManifest(input);
+    } catch (err) {
+      expect(err).toBeInstanceOf(PluginManifestError);
+      return (err as Error).message;
+    }
+    throw new Error("应当解析失败");
+  }
+
+  it("合法的 publisher + signature 被保留", () => {
+    const parsed = parsePluginManifest(signed());
+    expect(parsed.publisher).toEqual({ id: "acme", publicKey: PUBLIC_KEY });
+    expect(parsed.signature).toEqual({ alg: "ed25519", value: SIGNATURE });
+  });
+
+  it("旧 v3 清单没有 publisher/signature 继续合法", () => {
+    const parsed = parsePluginManifest(meta({ contributions: { skills: [skill] } }));
+    expect(parsed.publisher).toBeUndefined();
+    expect(parsed.signature).toBeUndefined();
+  });
+
+  it("有签名必须有发布者，报错带 signature 路径", () => {
+    const message = failureOf(
+      meta({
+        signature: { alg: "ed25519", value: SIGNATURE },
+        contributions: { skills: [skill] },
+      }),
+    );
+    expect(message).toContain("signature");
+    expect(message).toContain("必须同时提供 publisher");
+  });
+
+  it("发布者 id / 公钥格式校验（错误带 publisher 路径）", () => {
+    expect(failureOf(signed({ publisher: { id: "Acme", publicKey: PUBLIC_KEY } }))).toContain(
+      "发布者 id",
+    );
+    expect(failureOf(signed({ publisher: { id: "acme", publicKey: "A".repeat(20) } }))).toContain(
+      "32 字节",
+    );
+    expect(failureOf(signed({ publisher: { id: "acme", publicKey: "不是base64!" } }))).toContain(
+      "base64url",
+    );
+    expect(failureOf(signed({ publisher: "acme" }))).toContain("publisher 必须是 JSON 对象");
+  });
+
+  it("签名算法与签名值格式校验（错误带 signature 路径）", () => {
+    expect(
+      failureOf(signed({ signature: { alg: "rsa", value: SIGNATURE } })),
+    ).toContain('signature.alg 只支持 "ed25519"');
+    expect(
+      failureOf(signed({ signature: { alg: "ed25519", value: "B".repeat(40) } })),
+    ).toContain("64 字节");
+    expect(failureOf(signed({ signature: { alg: "ed25519", value: "不是base64!" } }))).toContain(
+      "base64url",
+    );
+  });
+
+  it("旧版清单不允许 publisher / signature（提示升级 schemaVersion）", () => {
+    const unsigned = { schemaVersion: 2, id: "acme.legacy", name: "旧包", version: "1.0.0", skills: [skill] };
+    expect(
+      failureOf({ ...unsigned, publisher: { id: "acme", publicKey: PUBLIC_KEY } }),
+    ).toContain("不支持 publisher");
+    expect(
+      failureOf({ ...unsigned, signature: { alg: "ed25519", value: SIGNATURE } }),
+    ).toContain("不支持 signature");
+  });
+});

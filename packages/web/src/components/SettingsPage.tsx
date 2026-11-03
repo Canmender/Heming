@@ -9,6 +9,7 @@ import { FileEditCard } from "./FileEditCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
 import { PetSettingsCard } from "./PetSettingsCard.js";
+import { ThemeModeCard } from "./settings/ThemeModeCard.js";
 import { useUiStore, type NavPage } from "../store/ui.js";
 import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
 import { CHANGELOG, logOpenState, parseInline, stripInline, toggleLog } from "../lib/changelog.js";
@@ -340,6 +341,10 @@ export function SettingsPage() {
                   className={anchorClass(highlightId === "accent-color")}
                 >
                   <AppearanceSection />
+                </div>
+                {/* d.67 T3：主题模式（浅色/深色/跟随系统）与主题色并列，互不影响。 */}
+                <div data-settings-id="theme-mode" className={anchorClass(highlightId === "theme-mode")}>
+                  <ThemeModeCard />
                 </div>
                 <div data-settings-id="pet" className={anchorClass(highlightId === "pet")}>
                   <PetSettingsCard />

@@ -5,6 +5,7 @@ import {
   applyAccent,
   clearAccent,
   normalizeHex,
+  watchThemeMode,
 } from "../lib/theme.js";
 
 /** 主题色本地存储键（只存色值，前景色运行时算出来）。 */
@@ -74,6 +75,16 @@ export function initTheme(): void {
   const accent = useThemeStore.getState().accent;
   if (accent === DEFAULT_ACCENT) return;
   applyAccent(accent);
+}
+
+/** 启动时应用「主题模式」：读存储、写 data-theme、system 时挂系统监听。
+ *
+ * 与 `initTheme` 的分工：initTheme 只负责主题色（accent），本函数负责浅/深色模式；
+ * 两者都写 CSS 变量，先后顺序无关。放这里而不是 lib/theme.ts，是为了复用 store
+ * 里已经读好的 accent（避免再解析一次 localStorage）。
+ */
+export function initThemeMode(): void {
+  watchThemeMode({ accent: useThemeStore.getState().accent });
 }
 
 export { ACCENT_PRESETS, DEFAULT_ACCENT };
