@@ -125,6 +125,10 @@
 | [research/2026-11-02-security-review.md](research/2026-11-02-security-review.md) | **d.59.2.21 安全复审**（28 条结论，每条带 `file:line`）：越权 IPC（已修，`secureIpc` fail-closed + 桌宠导航闸 + IPC 通道不变量守卫）、E2E 红线完整性、本机存储口径、保险模块零网络、注入面；待修 4 条（草稿/token 明文、可写根 rootId、files mime nosniff）与处置 |
 | [research/2026-11-02-a11y-error-audit.md](research/2026-11-02-a11y-error-audit.md) | **d.59.2.20 无障碍与错误态巡检**：焦点环系统性回归（Tailwind 4 `outline-hidden` 后 59 处控件）、屏幕阅读语义、流式 live 区、对比度实测表与 token 修复（`muted #6f6f6f` AA、`line-strong` 表单边界）、逐入口 loading/error/retry 三态清单 |
 | [specs/2026-11-03-d66-automation-execution-kernel.md](superpowers/specs/2026-11-03-d66-automation-execution-kernel.md) | d.66：自动化执行内核——动作注册表（`kinds.ts`/`actions.ts`，加动作只加元数据 + 执行函数）、运行记录独立键（40 条 / 192KB 双淘汰、触发来源与耗时、删任务级联）、失败通知（`kind:"automation"` + 跳转定位）、存储水位登记；借 n8n 概念但不复制代码，仍不自动重试/不补跑 |
+| [plans/2026-11-03-d68-pet-nav-custom.md](superpowers/plans/2026-11-03-d68-pet-nav-custom.md) | **d.68.2.25 执行计划**：四条用户体验问题（桌宠拖动/菜单、导航自动隐藏、布局字体、自定义内容简化）的根因线索、三路写入边界、验收与收尾口径 |
+| [specs/2026-11-03-d68-pet-interaction.md](superpowers/specs/2026-11-03-d68-pet-interaction.md) | **d.68 桌宠交互修复**：`fitModel` 用已缩放尺寸导致「局部放大/裁切」的代数推导与自然尺寸幂等拟合（`live2dFit.ts`）、拖拽中冻结重排与落点统一重拟合、跨屏 DPR 同步、右键菜单两个叠加缺陷（命中区漏菜单 / click-away 抢在 click 前卸载）、菜单键盘与重置位置/穿透开关、真机待验清单 |
+| [specs/2026-11-03-d68-nav-layout.md](superpowers/specs/2026-11-03-d68-nav-layout.md) | **d.68 导航自动隐藏 + 布局字体**：`pinned/auto` 两模式与 `heming.nav.mode.v1`、左缘 8px 热区/300ms 收回/Esc/焦点还热区、`Ctrl/⌘+B` 三态、浮层 absolute 不挤压内容、设置卡与 pin 按钮同源；字体栈拉丁在前/CJK 在后、占位符对比度 AA、`.ui-card`/`.ui-overlay-shadow`、主页窄窗排布 |
+| [specs/2026-11-03-d68-custom-content.md](superpowers/specs/2026-11-03-d68-custom-content.md) | **d.68 自定义内容简化**：自建智能体 4 模板 + 基础/进阶渐进披露、创建后直接进对话；自定义技能新建弹窗（必填名称+内容、3 模板、创建即分配、空态直达）；明确不做记忆区/Wiki、云同步与键位迁移 |
 
 ## 4. 调研
 
@@ -144,6 +148,7 @@
 | [research/2026-11-03-n8n-engine-notes.md](research/2026-11-03-n8n-engine-notes.md) | n8n 工作流引擎一手源码调研（2.46.0 / `bb832f1`，180 处 `file:line` 已校验）：执行栈、重试默认值与硬边界、节点注册表、执行记录两级清理、调度 misfire/去重、表达式与超时；含「可移植/需改造/不可移植」判断表与 8 条候选改进 |
 | [research/2026-11-03-n8n-license-and-reuse.md](research/2026-11-03-n8n-license-and-reuse.md) | n8n 许可证事实与复用边界：Sustainable Use License 1.0（fair-code，非 OSI 开源）、核心包全为 SUL、npm 发布物许可被改写、2019 起从未 OSI 开源；结论「不复制代码、只借概念」，附可直接抄的「来源与许可」声明模板 |
 | [research/2026-11-03-heming-automation-audit.md](research/2026-11-03-heming-automation-audit.md) | 和鸣自动化子系统审计（d.48 现状）：能力表、红线原文、存储键与内存态、动作注册表/重试/运行记录/失败通知四块的精确扩展点（`file:line`）、通知中心 API、测试约定与 14 条风险坑；推荐方案 B |
+| [research/2026-11-03-d68-ux-solutions.md](research/2026-11-03-d68-ux-solutions.md) | d.68 体验方案调研（19 个来源，外部资料仅参考）：透明窗拖动残影/放大裁切的机理与修法、侧栏自动隐藏的竞品默认值表（热区/延迟/动效/键盘）、中文桌面字体栈与字号行高、低门槛创建流程（模板预填/渐进披露/空态三件事）；含 6 条未核实项 |
 
 ## 5. 历史计划
 
