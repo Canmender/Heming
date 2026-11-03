@@ -396,3 +396,15 @@
 | 全量门禁 | ✅ shared 29 / server 141 / web 200 文件 2980 例 / desktop 29 文件 518 例；4/4 无重试；三包 tsc 0 |
 | 版本 | `d.61.2.22.0`（修订 21→22） |
 | 视觉基线 | `.tmp/layout/before`（线上 d.61.2.21.0 生产构建 13 页）→ `.tmp/layout/after` / `after2` |
+
+### 第七波发布完成（2026-11-03 08:56）
+
+| 项 | 结果与证据 |
+|---|---|
+| 提交 | `4905c26`（排版基元 + 主页参考）+ `a13a3e4`（16 页落地 + 文档） |
+| 门禁 | build 通过；逐包 4/4 无重试（shared 29 / server 141 / web 200 文件 2980 例 / desktop 29 文件 518 例）；三包 tsc 0 |
+| 安装包 | `release/r51/和鸣 Setup d.61.2.22.0.exe` 228,217,379 字节，sha512 三方一致 |
+| 云端部署 | ✅ 8 步 OK；`/api/health` ok、首页 200、线上 bundle `main-BMT7S661.js` 与本地同名、CSP report-only 在位 |
+| 更新源 | ✅ latest.yml 指向 61.2.22，sha512 与安装包一致 |
+| 备份 | ✅ `heming-data-2026-11-03-d.61.2.22.0.tar.gz` |
+| 视觉 | `.tmp/layout/before`（线上 d.61.2.21.0）→ `.tmp/layout/after` / `after2`；左边缘对齐、页头固定、标题档统一、聊天列 880 |
