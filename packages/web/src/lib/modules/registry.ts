@@ -46,8 +46,10 @@ export interface BuiltinModule {
   contributions: ModuleContributions;
   /** 依赖的其它模块：依赖项停用时本模块**实际不生效**（开关保留，卡片说明原因）。 */
   requires?: ModuleId[];
-  /** 本机数据键（仅用于卡片说明「停用不删数据」）。 */
-  dataKeys: string[];
+  /** 和鸣本机存储里的数据键（仅用于展示占用；停用不删除）。 */
+  storageKeys: string[];
+  /** 不在和鸣存储里的本机数据（说明用途；不展示字节、也不由和鸣清理）。 */
+  externalData?: string[];
   /** 停用后会发生什么（卡片上直接写清楚，不靠用户猜）。 */
   disableNote: string;
 }
@@ -62,7 +64,7 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
       "常驻主动简报：巡检本机日程与任务，只在需要你决定时递一份摘要；只读采集，不代你执行操作。",
     page: "staff",
     contributions: { page: true, homeCard: "staff", backgroundLoop: "staff-loop" },
-    dataKeys: ["heming.staff.v1"],
+    storageKeys: ["heming.staff.v1", "heming.staff.runs.v1", "heming.staff.seen.v1"],
     disableNote: "停用后不再后台巡检、首页幕僚卡与导航入口下线；已生成的简报仍保留在本机。",
   },
   {
@@ -77,7 +79,8 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
       homeCard: "infohub",
       toolPrefixes: ["infohub_"],
     },
-    dataKeys: ["InfoHub 配置文件（仓库外）", "本机归档数据库（只读打开）"],
+    storageKeys: [],
+    externalData: ["InfoHub 配置与归档数据库在本机由 InfoHub 管理（不在和鸣存储内，也不会被和鸣删除）"],
     disableNote:
       "停用后导航入口、首页归档卡与 infohub_* 工具下线；不会自动启动或删除任何本机归档。重新启用后可再连接。",
   },
@@ -90,7 +93,7 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     page: "automations",
     contributions: { page: true, backgroundLoop: "automation-scheduler" },
     requires: ["infohub"],
-    dataKeys: ["heming.automations.v1", "heming.automations.runs.v1"],
+    storageKeys: ["heming.automations.v1", "heming.automations.runs.v1"],
     disableNote:
       "停用后不再到点执行、导航入口下线；任务与运行记录仍保留在本机。依赖「信息中枢」启用后才生效。",
   },
@@ -115,4 +118,24 @@ export function isModulePage(page: string): boolean {
 /** 页面 → 模块（非模块页返回 undefined）。 */
 export function moduleForPage(page: string): BuiltinModule | undefined {
   return BUILTIN_MODULES.find((m) => m.page === page);
+}
+
+/** 一组本机存储键的占用量（字节，按 UTF-16 字符数估算同 `storageUsage` 的既有口径）。 */
+export function moduleStorageBytes(
+  mod: BuiltinModule,
+  storage: Pick<Storage, "getItem"> | null = typeof window !== "undefined"
+    ? window.localStorage
+    : null,
+): number {
+  if (!storage) return 0;
+  let total = 0;
+  for (const key of mod.storageKeys) {
+    try {
+      const value = storage.getItem(key);
+      if (value) total += key.length + value.length;
+    } catch {
+      /* 隐私模式等读不到就按 0 算，不影响卡片渲染 */
+    }
+  }
+  return total;
 }

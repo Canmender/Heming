@@ -73,6 +73,7 @@ const TABS: { key: TabKey; label: string }[] = [
 const VIEW_TO_TAB: Partial<Record<PageView, TabKey>> = {
   skills: "skills",
   interfaces: "mcp",
+  modules: "modules",
 };
 
 export interface PluginsPageProps {

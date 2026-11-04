@@ -28,6 +28,11 @@ describe("ModulesView 内置能力模块卡", () => {
     expect(within(infohub).getByText(/导航入口 \+ 页面/)).toBeInTheDocument();
     expect(within(infohub).getAllByText(/infohub_\*/).length).toBeGreaterThan(0);
     expect(within(infohub).getByText(/停用后导航入口/)).toBeInTheDocument();
+    // 本机数据：只读展示占用；外部数据（InfoHub 归档）明确「不在和鸣存储内」
+    expect(within(infohub).getByText(/不在和鸣存储内/)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("已启用 3/3 个模块");
+    const staff = screen.getByRole("region", { name: "模块 幕僚" });
+    expect(within(staff).getByText(/个本机键/)).toBeInTheDocument();
   });
 
   it("停用信息中枢：卡片状态变为已停用、打开页面禁用；自动化显示依赖未启用", () => {
@@ -41,6 +46,9 @@ describe("ModulesView 内置能力模块卡", () => {
       "false",
     );
     expect(within(infohub).getByRole("button", { name: "打开页面" })).toBeDisabled();
+
+    // 启用数是「实际生效」而不是「开关打开」：只剩幕僚 1/3
+    expect(screen.getByRole("status")).toHaveTextContent("已启用 1/3 个模块");
 
     // 自动化的开关仍是「开」，但因为依赖不满足而实际不生效
     const automations = screen.getByRole("region", { name: "模块 自动化" });

@@ -104,7 +104,8 @@ export function NotificationCenter() {
     markRead(item.id);
     setOpen(false);
     if (item.kind === "staff") {
-      useUiStore.getState().setPage("staff");
+      // 幕僚模块停用时落到模块管理，而不是 setPage 后被路由重定向回主页
+      useUiStore.getState().openStaff();
       return;
     }
     // 放在 staff 之后、task 之前：automation 与 task 都带 id，顺序反了会先命中 task 分支

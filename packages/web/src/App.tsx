@@ -583,10 +583,14 @@ function AppShell({
         isModuleEffective(useModuleStore.getState(), id);
       if (page === "team") ui.setPage("team");
       else if (page === "tasks") ui.setPage("tasks");
-      // 模块被停用时不再跳到一个不该存在的页，落回设置（用户本就要去配置）
-      else if (page === "staff" && moduleOn("staff")) ui.setPage("staff");
-      else if (page === "infohub" && moduleOn("infohub")) ui.openInfohub();
-      else ui.openSettings("model");
+      // 模块被停用时落到「插件区 → 模块」，让用户能一键重新启用，而不是静默跳设置
+      else if (page === "staff") {
+        if (moduleOn("staff")) ui.openStaff();
+        else ui.openModuleManager();
+      } else if (page === "infohub") {
+        if (moduleOn("infohub")) ui.openInfohub();
+        else ui.openModuleManager();
+      } else ui.openSettings("model");
     });
   }, []);
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useUiStore, DEFAULT_NAV_ORDER, normalizeNavOrder, readStoredNavOrder, resolvePage } from "./ui.js";
 import { NAV_MODE_KEY } from "../lib/navPrefs.js";
+import { useModuleStore } from "../lib/modules/store.js";
 
 describe("ui store 页面与会话状态", () => {
   beforeEach(() => {
@@ -339,5 +340,54 @@ describe("ui store 导航栏模式", () => {
     // 重复 close 不产生额外状态变化（幂等）
     useUiStore.getState().closeNav();
     expect(useUiStore.getState().navOpen).toBe(false);
+  });
+});
+
+/** d.71：停用模块的通知/旧链接不能静默不动，统一落到「插件区 → 模块」。 */
+describe("模块停用时的跳转落点", () => {
+  beforeEach(() => {
+    useModuleStore.getState().reset();
+    useUiStore.setState({ page: "home", pageView: null, infohubIntent: null, automationIntent: null });
+  });
+
+  it("openInfohub：模块停用 → 插件区模块 Tab；启用 → 信息中枢页", () => {
+    useModuleStore.getState().setEnabled("infohub", false);
+    useUiStore.getState().openInfohub({ tab: "agenda" });
+    let s = useUiStore.getState();
+    expect(s.page).toBe("plugins");
+    expect(s.pageView).toBe("modules");
+    expect(s.infohubIntent).toBeNull();
+
+    useModuleStore.getState().setEnabled("infohub", true);
+    useUiStore.getState().openInfohub({ tab: "agenda" });
+    s = useUiStore.getState();
+    expect(s.page).toBe("infohub");
+    expect(s.infohubIntent).toEqual({ tab: "agenda" });
+  });
+
+  it("openAutomations / focusAutomation：模块停用 → 模块管理，不留下选中态", () => {
+    useModuleStore.getState().setEnabled("automations", false);
+    useUiStore.getState().openAutomations({ kind: "infohub.agenda" });
+    expect(useUiStore.getState().page).toBe("plugins");
+    expect(useUiStore.getState().pageView).toBe("modules");
+
+    useUiStore.getState().focusAutomation("a1");
+    expect(useUiStore.getState()).toMatchObject({
+      page: "plugins",
+      pageView: "modules",
+      automationFocusId: null,
+      automationIntent: null,
+    });
+  });
+
+  it("openStaff：停用 → 模块管理；启用 → 幕僚页", () => {
+    useModuleStore.getState().setEnabled("staff", false);
+    useUiStore.getState().openStaff();
+    expect(useUiStore.getState().page).toBe("plugins");
+    expect(useUiStore.getState().pageView).toBe("modules");
+
+    useModuleStore.getState().setEnabled("staff", true);
+    useUiStore.getState().openStaff();
+    expect(useUiStore.getState().page).toBe("staff");
   });
 });

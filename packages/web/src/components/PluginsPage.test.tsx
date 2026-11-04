@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import { PluginsPage } from "./PluginsPage.js";
 import { PluginStore, pluginServerId, type PluginMcpPort } from "../lib/plugins/index.js";
 import { SkillPool, type StorageLike } from "../lib/skills/index.js";
@@ -137,6 +137,16 @@ function installNow(): void {
 }
 
 describe("PluginsPage · 模块 Tab（d.70）", () => {
+  it("通过一次性视图意图（pageView=modules）进入时直接落在模块 Tab（停用模块的兜底落点）", () => {
+    useModuleStore.getState().reset();
+    renderPage();
+    act(() => {
+      useUiStore.getState().setPage("plugins", "modules");
+    });
+    expect(screen.getByRole("tab", { name: "模块" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: "模块 幕僚" })).toBeInTheDocument();
+  });
+
   it("模块 Tab 展示三个内置能力模块，并可停用/恢复", () => {
     useModuleStore.getState().reset();
     renderPage();

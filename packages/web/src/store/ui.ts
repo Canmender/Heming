@@ -46,7 +46,7 @@ export type PageId = Page | LegacyPage;
  * 的 Tab 是局部 state；把 Tab 长期放 store 又会让「切走再回来」被钉在上次的位置，
  * 那超出了跳转方的意图。消费一次即清，与 `automationIntent` / `paletteIntent` 同口径。
  */
-export type PageView = "board" | "tasks" | "skills" | "interfaces" | "chat";
+export type PageView = "board" | "tasks" | "skills" | "interfaces" | "modules" | "chat";
 
 /** 导航项：所有页面都可排进导航轨（只含合并后的宿主页）。 */
 export type NavPage = Page;
@@ -268,6 +268,10 @@ interface UiState {
   /** 取走宿主的视图意图并清空（页面 effect 消费一次）。 */
   consumePageView: () => PageView | null;
   /** 跳到信息中枢并投递意图；不传意图即普通进入。 */
+  /** 打开「插件区 → 模块」：停用模块的通知/旧链接统一落到这里，而不是静默不动。 */
+  openModuleManager: () => void;
+  /** 打开幕僚页；模块停用时落到模块管理（不再 setPage 后被路由重定向回主页）。 */
+  openStaff: () => void;
   openInfohub: (intent?: InfohubIntent) => void;
   consumeInfohubIntent: () => void;
   /** 跳到自动化页；带意图时打开预填的新建表单。 */
@@ -389,9 +393,31 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (view) set({ pageView: null });
     return view;
   },
+  openModuleManager: () =>
+    set({
+      page: "plugins",
+      pageView: "modules",
+      activeConversationId: null,
+      pendingAttachment: null,
+      taskDraft: null,
+      taskFocusId: null,
+      infohubIntent: null,
+      automationIntent: null,
+      automationFocusId: null,
+    }),
+  openStaff: () => {
+    if (!isModuleOn("staff")) {
+      get().openModuleManager();
+      return;
+    }
+    set({ page: "staff", pageView: null });
+  },
   openInfohub: (intent) => {
-    // d.70：模块被停用时不再切到一个不该存在的页面（按钮层也会禁用，这里兜住通知/旧链接）
-    if (!isModuleOn("infohub")) return;
+    // d.70：模块被停用时不再切到一个不该存在的页面；落到「模块」Tab 让用户能启用它
+    if (!isModuleOn("infohub")) {
+      get().openModuleManager();
+      return;
+    }
     set({
       page: "infohub",
       pageView: null,
@@ -406,7 +432,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   consumeInfohubIntent: () => set({ infohubIntent: null }),
   openAutomations: (intent) => {
-    if (!isModuleOn("automations")) return;
+    if (!isModuleOn("automations")) {
+      get().openModuleManager();
+      return;
+    }
     set({
       page: "automations",
       pageView: null,
@@ -471,7 +500,11 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationIntent: null,
     }),
   consumeTeamFocus: () => set({ teamFocusUserId: null }),
-  focusAutomation: (taskId) =>
+  focusAutomation: (taskId) => {
+    if (!isModuleOn("automations")) {
+      get().openModuleManager();
+      return;
+    }
     set({
       page: "automations",
       pageView: null,
@@ -484,7 +517,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       pendingAttachment: null,
       infohubIntent: null,
       activeConversationId: null,
-    }),
+    });
+  },
   consumeAutomationFocus: () => set({ automationFocusId: null }),
   leaveConversation: () => set({ page: "chat", pageView: "chat", activeConversationId: null }),
   sendFileToConversation: (conversationId, file) =>

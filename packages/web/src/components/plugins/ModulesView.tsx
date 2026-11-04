@@ -3,10 +3,15 @@ import { useUiStore } from "../../store/ui.js";
 import {
   BUILTIN_MODULES,
   MODULE_BY_ID,
+  moduleStorageBytes,
   type BuiltinModule,
   type ModuleId,
 } from "../../lib/modules/registry.js";
-import { missingRequirements, useModuleStore } from "../../lib/modules/store.js";
+import {
+  effectiveModuleIds,
+  missingRequirements,
+  useModuleStore,
+} from "../../lib/modules/store.js";
 import { AutomationIcon, InfoHubIcon, StaffIcon } from "../icons.js";
 import { BTN_GHOST, HINT, Switch } from "./shared.js";
 
@@ -27,6 +32,14 @@ const MODULE_ICONS: Record<ModuleId, ComponentType<SVGProps<SVGSVGElement>>> = {
   automations: AutomationIcon,
 };
 
+/** 字节 → 便于扫读的「约 x KB / x MB」（0 显示「无数据」）。 */
+function fmtBytes(bytes: number): string {
+  if (bytes <= 0) return "无数据";
+  if (bytes < 1024) return `约 ${bytes} B`;
+  if (bytes < 1024 * 1024) return `约 ${(bytes / 1024).toFixed(1)} KB`;
+  return `约 ${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function ModuleCard({ mod }: { mod: BuiltinModule }) {
   const enabledMap = useModuleStore((s) => s.enabled);
   const setEnabled = useModuleStore((s) => s.setEnabled);
@@ -36,6 +49,7 @@ function ModuleCard({ mod }: { mod: BuiltinModule }) {
   const setPage = useUiStore((s) => s.setPage);
   const Icon = MODULE_ICONS[mod.id];
 
+  const occupancy = moduleStorageBytes(mod);
   const contributions: string[] = [];
   if (mod.contributions.page) contributions.push("导航入口 + 页面");
   if (mod.contributions.homeCard) contributions.push("首页卡片");
@@ -85,7 +99,14 @@ function ModuleCard({ mod }: { mod: BuiltinModule }) {
         </div>
         <div>
           <dt className="font-semibold text-muted">本机数据（停用不删除）</dt>
-          <dd className="text-[#444]">{mod.dataKeys.join("；")}</dd>
+          <dd className="text-[#444]">
+            {mod.storageKeys.length > 0
+              ? `${mod.storageKeys.length} 个本机键 · ${fmtBytes(occupancy)}`
+              : "不占和鸣本机存储"}
+            {mod.externalData?.length ? (
+              <span className="block text-[10px] text-muted">{mod.externalData.join("；")}</span>
+            ) : null}
+          </dd>
         </div>
         {mod.requires?.length ? (
           <div className="sm:col-span-2">
@@ -123,13 +144,20 @@ function ModuleCard({ mod }: { mod: BuiltinModule }) {
 
 export function ModulesView({ modules = BUILTIN_MODULES }: { modules?: readonly BuiltinModule[] } = {}) {
   const reset = useModuleStore((s) => s.reset);
+  const enabledMap = useModuleStore((s) => s.enabled);
+  const enabledCount = effectiveModuleIds({ enabled: enabledMap }).length;
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className={`${HINT} max-w-[560px]`}>
-          内置能力模块与插件同属「能力包」模型：都能在插件区查看版本与贡献、启用或停用。
-          停用只下线入口与后台挂载，不删除任何本机数据；第三方能力（技能 / 远程 MCP / 命令）仍走「插件」Tab。
-        </p>
+        <div className="max-w-[560px]">
+          <p className={HINT}>
+            内置能力模块与插件同属「能力包」模型：都能在插件区查看版本与贡献、启用或停用。
+            停用只下线入口与后台挂载，不删除任何本机数据；第三方能力（技能 / 远程 MCP / 命令）仍走「插件」Tab。
+          </p>
+          <p className="mt-1 ui-caption" role="status">
+            已启用 {enabledCount}/{modules.length} 个模块
+          </p>
+        </div>
         <button type="button" className={BTN_GHOST} onClick={reset}>
           全部恢复启用
         </button>
