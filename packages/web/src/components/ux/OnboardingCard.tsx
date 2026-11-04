@@ -27,7 +27,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
           <h2 className="text-[14px] font-extrabold">开始使用</h2>
           <p className="mt-0.5 text-[12px] leading-5 text-muted">
             三步就能让智能体替你干活（{doneCount}/{steps.length}
-            已完成）。这些状态来自本机真实数据，不是演示进度。
+            已完成）。这些就是你本机的真实进度。
           </p>
         </div>
         <button

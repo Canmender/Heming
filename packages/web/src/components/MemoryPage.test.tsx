@@ -556,14 +556,14 @@ describe("记忆区 · 复盘沉淀卡", () => {
     localStorage.clear();
   });
 
-  it("渲染频率三档、间隔轮次与容量条", async () => {
+  it("渲染频率三档、每隔几轮与容量条", async () => {
     render(<MemoryPage memory={memory} prefs={prefs} fetchSharedFiles={async () => []} />);
     expect(screen.getByRole("region", { name: "复盘沉淀" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "复盘频率 仅复杂任务" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(screen.getByLabelText("复盘间隔轮次")).toBeInTheDocument();
+    expect(screen.getByLabelText("每隔几轮复盘")).toBeInTheDocument();
   });
 
   it("切频率写盘并立即反映到按钮态", () => {

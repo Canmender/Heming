@@ -153,7 +153,10 @@ describe("信息中枢页", () => {
 
   it("浏览器环境：明确提示仅桌面端可用，不回退云端", () => {
     render(<InfohubPage />);
+    // 与其他页一致的页头（不再是一张孤立卡片落在空白页上）
+    expect(screen.getByRole("heading", { name: "信息中枢", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("信息中枢仅桌面端可用")).toBeInTheDocument();
+    expect(screen.getByText(/在桌面版安装包里打开「信息中枢」/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "连接" })).not.toBeInTheDocument();
   });
 

@@ -28,6 +28,7 @@ import { StaffHomeCard } from "./StaffHomeCard.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
 import { OnboardingCard } from "./ux/OnboardingCard.js";
 import { TeamIcon } from "./icons.js";
+import { fileRootsStore } from "../lib/fileEdit/roots.js";
 
 /** 构建时注入的版本号（vite define __APP_VERSION__，file:// 桌面端无法 fetch package.json）。 */
 declare const __APP_VERSION__: string;
@@ -36,9 +37,9 @@ declare const __APP_VERSION__: string;
 const NEWS: { source: string; title: string; summary: string; date: string }[] = [
   {
     source: "官方",
-    title: "和鸣团队系统上线：告别 IM，聚焦协作动向",
+    title: "团队动向上线：任务与日程摘要汇总到「团队」页",
     summary:
-      "本版本移除人类私聊/群聊与语音通话，保留通讯录并升级为真实成员名册；成员的任务与日程摘要会汇总到「团队」页，智能体的工作留在「智能体」页。",
+      "成员可以选择共享任务与日程的摘要（标题、状态、时间），在「团队」页查看；对话正文、提示词与智能体轨迹仍只留在本机。",
     date: "2026-11-02",
   },
   {
@@ -95,6 +96,8 @@ export function HomePage() {
   const [tab, setTab] = useState<"me" | "team" | "date">("me");
   const [openDay, setOpenDay] = useState<string | null>(null);
   const [cloud, setCloud] = useState<"检测中" | "正常" | "失败">("检测中");
+  /** 已绑定的可写根数量：首页「系统状态」不再写死「未绑定」（用户其实可能在设置区配过）。 */
+  const [writeRootCount, setWriteRootCount] = useState(() => fileRootsStore.writeRoots().length);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [onlineCount, setOnlineCount] = useState(0);
   const [activities, setActivities] = useState<TeamActivity[]>([]);
@@ -143,6 +146,14 @@ export function HomePage() {
     return () => {
       alive = false;
     };
+  }, []);
+
+  // 从设置区加/删可写根后回到首页要立刻反映（首页不常驻，focus 是最便宜的刷新时机）
+  useEffect(() => {
+    const syncRoots = () => setWriteRootCount(fileRootsStore.writeRoots().length);
+    syncRoots();
+    window.addEventListener("focus", syncRoots);
+    return () => window.removeEventListener("focus", syncRoots);
   }, []);
 
   const monthKey = useMemo(() => monthKeyOf(new Date().toISOString()), []);
@@ -313,7 +324,7 @@ export function HomePage() {
                     / {(quota / 1_000_000).toFixed(1)}M
                   </small>
                 </div>
-                <div className="text-[10px] text-muted">本月个人已用 {pct}%（读取时按日重算）</div>
+                <div className="text-[10px] text-muted">本月已用 {pct}%</div>
                 <div className="mt-1 h-1 w-[140px] overflow-hidden rounded-sm bg-[#f0f0f0]">
                   <div className="h-full bg-ink" style={{ width: `${pct}%` }} />
                 </div>
@@ -327,7 +338,8 @@ export function HomePage() {
                   <EmptyState
                     compact
                     className="px-0 py-2"
-                    title="暂无调用记录（M3 接入模型后自动累计）"
+                    title="暂无调用记录"
+                    desc="接入模型并开始对话后，这里会自动累计。"
                   />
                 ) : (
                   modelRows.map(([model, n]) => (
@@ -345,7 +357,7 @@ export function HomePage() {
               </div>
             </div>
           ) : tab === "team" ? (
-            <div className="mt-2 text-[11px] text-muted">团队用量排行二期开放（需服务端汇总）</div>
+            <div className="mt-2 text-[11px] text-muted">团队用量排行暂未开放。</div>
           ) : (
             <div className="mt-2 max-h-[220px] overflow-y-auto">
               <table className="w-full text-left text-[11px]">
@@ -569,7 +581,9 @@ export function HomePage() {
             </div>
             <div className="flex justify-between py-0.5 text-[12px]">
               <span className="text-muted">本地工作目录</span>
-              <span className="text-muted">未绑定</span>
+              <span className={writeRootCount > 0 ? "" : "text-muted"}>
+                {writeRootCount > 0 ? `已绑定 ${writeRootCount} 个` : "未绑定"}
+              </span>
             </div>
           </section>
         </div>

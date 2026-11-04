@@ -63,10 +63,34 @@ describe("LoginPage", () => {
     fireEvent.change(screen.getByPlaceholderText("密码"), { target: { value: "wrongpass" } });
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
 
-    expect(await screen.findByText("invalid credentials")).toBeInTheDocument();
+    expect(await screen.findByText("用户名或密码不正确")).toBeInTheDocument();
     const s = useAuthStore.getState();
     expect(s.status).toBe("error");
     expect(localStorage.getItem("heming.token")).toBeNull();
+  });
+
+  it("改输入即清掉上一次的失败提示（错误不追着用户走、aria-invalid 复位）", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "invalid credentials" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    render(<LoginPage />);
+    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "alice" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+    expect(await screen.findByText("用户名或密码不正确")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "wrong2" } });
+    expect(screen.queryByText("用户名或密码不正确")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("密码")).not.toHaveAttribute("aria-invalid");
+    expect(useAuthStore.getState().status).toBe("idle");
+  });
+
+  it("登录页说明账号来源（没有注册入口时不把新用户晾在原地）", () => {
+    render(<LoginPage />);
+    expect(screen.getByText(/账号由团队管理员开通/)).toBeInTheDocument();
   });
 
   // ── 左右分栏（左卡右字样） ──
@@ -158,7 +182,7 @@ describe("LoginPage 无障碍（③-2）", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveAttribute("id", "login-error");
-    expect(alert).toHaveTextContent("invalid credentials");
+    expect(alert).toHaveTextContent("用户名或密码不正确");
     for (const field of [screen.getByLabelText("用户名"), screen.getByLabelText("密码")]) {
       expect(field).toHaveAttribute("aria-invalid", "true");
       expect(field).toHaveAttribute("aria-describedby", "login-error");

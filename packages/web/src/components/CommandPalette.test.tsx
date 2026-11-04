@@ -445,3 +445,28 @@ describe("命令面板 · 本机三组（任务 / 记忆 / 插件）", () => {
     expect(row.textContent).not.toContain("本周完成 3 项");
   });
 });
+
+describe("命令面板 · 焦点可见性", () => {
+  beforeEach(() => {
+    resetStores();
+    vi.mocked(fetchTeam).mockReset();
+    vi.mocked(fetchTeam).mockResolvedValue({ members: [], onlineCount: 0 });
+    useInfohubStore.setState({ available: false, running: false, booted: true, error: "" });
+  });
+  afterEach(() => cleanup());
+
+  it("焦点在面板内时焦点环画在面板上（输入框自己的环会被 overflow 裁掉）", async () => {
+    render(<CommandPalette onClose={vi.fn()} />);
+    const panel = screen.getByRole("dialog", { name: "命令面板" });
+    const input = searchBox();
+    // 输入框不再依赖自己被裁掉的 outline；改为透明环（保留高对比模式可见性）
+    // 输入框自己不再画环（会被面板裁掉），焦点环由面板提供
+    expect(input.style.outline).toBe("none");
+    // 打开即聚焦输入框 → 面板拿到可见焦点环
+    input.focus();
+    await waitFor(() => expect(panel.className).toContain("outline-ink"));
+    // 焦点移出面板后环消失
+    input.blur();
+    await waitFor(() => expect(panel.className).not.toContain("outline-ink"));
+  });
+});

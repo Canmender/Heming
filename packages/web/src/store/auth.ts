@@ -17,6 +17,8 @@ interface AuthState {
   /** restore 临时失败（断网/5xx）时的说明；token 仍保留，界面显示重连面板而非登录页。 */
   restoreError: string | null;
   login: (username: string, password: string) => Promise<void>;
+  /** 用户重新输入时清掉上一次的登录错误（错误不该在改密码后还挂着）。 */
+  clearError: () => void;
   updateProfile: (displayName: string, avatar?: string) => Promise<void>;
   logout: () => void;
   restore: () => Promise<void>;
@@ -45,6 +47,21 @@ function isTransientFailure(e: unknown): boolean {
 function restoreErrorMessage(e: unknown): string {
   if (!(e instanceof ApiError)) return "网络异常，暂时连不上服务器";
   return e.message || `http ${e.status}`;
+}
+
+/**
+ * 登录失败文案：**不透传服务端/网络的英文原文**（此前直接显示 "invalid credentials"）。
+ * 只按状态码翻成人话；未知情况给一句可操作的兜底，不暴露内部实现。
+ */
+export function loginErrorMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.status === 401) return "用户名或密码不正确";
+    if (e.status === 429) return "尝试次数过多，请稍后再试";
+    if (e.status === 408) return "请求超时，请重试";
+    if (e.status >= 500) return "服务器暂时不可用，请稍后重试";
+    return "登录失败，请重试";
+  }
+  return "连不上服务器，请检查网络后重试";
 }
 
 export const useAuthStore = create<AuthState>((set) => {
@@ -115,8 +132,13 @@ export const useAuthStore = create<AuthState>((set) => {
         retryAttempt = 0;
         set({ token, user, status: "authed" });
       } catch (e) {
-        set({ status: "error", error: (e as Error).message });
+        set({ status: "error", error: loginErrorMessage(e) });
       }
+    },
+    clearError() {
+      // 只在「上一次确实失败了」时复位，正常状态下不要无谓触发订阅更新
+      const { error, status } = useAuthStore.getState();
+      if (error !== null || status === "error") set({ error: null, status: "idle" });
     },
     async updateProfile(displayName, avatar) {
       // 成功后用服务端返回的 User 整体替换；失败直接抛给页面展示（不改登录状态）

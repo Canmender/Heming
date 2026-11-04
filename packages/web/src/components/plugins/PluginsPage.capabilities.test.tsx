@@ -476,7 +476,7 @@ describe("插件页 · 贡献与权限", () => {
     store.install(JSON.stringify(v2Manifest()));
     renderPage();
     const card = screen.getByRole("region", { name: "插件 天气能力包" });
-    expect(card).toHaveTextContent("权限：旧版清单：未声明权限");
+    expect(card).toHaveTextContent("权限：旧格式清单：未声明权限");
   });
 });
 
@@ -504,13 +504,13 @@ describe("插件页 · 安装预览（v3）", () => {
     expect(card).toHaveTextContent("权限：主机 1 · 风险上限 只读");
   });
 
-  it("v2 旧包可安装，并标注「旧版清单（v2）：未声明权限」", () => {
+  it("v2 旧包可安装，并标注「旧格式清单（v2）：没有声明权限」", () => {
     renderPage();
     const dialog = openInstall();
     fireEvent.change(within(dialog).getByLabelText("插件清单 JSON"), {
       target: { value: JSON.stringify(v2Manifest()) },
     });
-    expect(within(dialog).getByText(/旧版清单（v2）：未声明权限/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/旧格式清单（v2）：没有声明权限/)).toBeInTheDocument();
     // 旧包的既有口径提示仍然保留
     expect(within(dialog).getByText(/网络访问：mcp\.example\.com/)).toBeInTheDocument();
 

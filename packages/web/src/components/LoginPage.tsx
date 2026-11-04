@@ -12,13 +12,26 @@ import { Wordmark } from "./Wordmark.js";
 export function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  /** 密码框聚焦且大写锁定开启时提示（登录失败里「密码看起来没打错」的最常见原因）。 */
+  const [capsLock, setCapsLock] = useState(false);
   const status = useAuthStore((s) => s.status);
   const error = useAuthStore((s) => s.error);
   const login = useAuthStore((s) => s.login);
+  const clearError = useAuthStore((s) => s.clearError);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     void login(username, password);
+  };
+
+  /** 改输入即清掉上一次的失败提示：错误不再追着用户走、aria-invalid 同步复位。 */
+  const onEdit = (setter: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setter(e.target.value);
+    clearError();
+  };
+  /** CapsLock 状态只能从键盘事件的 modifier 里读，没有别的来源。 */
+  const trackCapsLock = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    setCapsLock(e.getModifierState("CapsLock"));
   };
 
   return (
@@ -49,12 +62,14 @@ export function LoginPage() {
             <input
               aria-label="用户名"
               autoComplete="username"
+              /* 登录页只有两个字段：打开就能直接输，不用先点一下 */
+              autoFocus
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? "login-error" : undefined}
               className={`ui-input ${FOCUS_RING}`}
               placeholder="用户名"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={onEdit(setUsername)}
               required
             />
             <input
@@ -66,9 +81,17 @@ export function LoginPage() {
               placeholder="密码"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={onEdit(setPassword)}
+              onKeyDown={trackCapsLock}
+              onKeyUp={trackCapsLock}
+              onBlur={() => setCapsLock(false)}
               required
             />
+            {capsLock && (
+              <div role="status" className="ui-caption text-[#8a5a00]">
+                大写锁定已开启
+              </div>
+            )}
             {error && (
               // 失败原因必须被读屏播报：role=alert 让它在出现时立刻读出（不是等用户 Tab 到）
               <div id="login-error" role="alert" className="ui-caption text-[#b42318]">
@@ -82,6 +105,8 @@ export function LoginPage() {
             >
               {status === "pending" ? "请稍候…" : "登录"}
             </button>
+            {/* 登录页没有注册入口（服务端默认关闭公开注册）：说清去哪儿要账号，别让新用户干瞪眼 */}
+            <p className="ui-caption text-center">账号由团队管理员开通。</p>
           </div>
         </form>
       </div>

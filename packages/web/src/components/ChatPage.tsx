@@ -126,7 +126,7 @@ import { chatExamplesFor } from "../lib/onboarding.js";
 const EMPTY_MESSAGES: Message[] = [];
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
-export const NO_E2E_NOTICE = "当前环境不支持端到端加密，请使用桌面端或 HTTPS";
+export const NO_E2E_NOTICE = "当前环境无法加密消息，请在桌面版打开，或使用 https 地址访问";
 
 /** 与正文同发的本轮附件：图片转内容片、文档拼正文，重试时按它复原同一轮。 */
 type TurnAttachment = NonNullable<MessagePayload["file"]>;

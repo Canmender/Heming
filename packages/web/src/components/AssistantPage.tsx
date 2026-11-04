@@ -145,7 +145,7 @@ export function AssistantPage() {
             </button>
           ))}
           <span className="ui-micro ml-auto">
-            任务视图来自原「通用智能体」：运行记录、目标模板、报告与分叉都在这里
+            任务视图：运行记录、目标模板、报告与分叉都在这里
           </span>
         </div>
       }

@@ -444,7 +444,7 @@ function ForkButton({
         type="button"
         aria-label={`从此处分叉（第 ${item.seq} 条之后）`}
         disabled={!check.ok}
-        title={first?.message ?? "复用这一步及之前的工具结果，换条路继续"}
+        title={first?.message ?? "沿用这一步及之前的工具结果，换条路继续"}
         onClick={() => {
           if (check.ok) onFork(item.seq);
         }}

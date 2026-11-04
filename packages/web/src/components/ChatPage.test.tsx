@@ -2792,7 +2792,7 @@ describe("ChatPage", () => {
 
     // 常驻横幅（硬验收⑤ / 设计 §2.1）
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "当前环境不支持端到端加密，请使用桌面端或 HTTPS",
+      "当前环境无法加密消息，请在桌面版打开，或使用 https 地址访问",
     );
 
     // 文本发送拦截：不发帧、草稿保留；不再叠第二条同文案提示（横幅已是 role=alert）

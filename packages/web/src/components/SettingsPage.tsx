@@ -77,13 +77,14 @@ const NAV_LABELS: Record<NavPage, string> = {
 /**
  * 应用版本：桌面端由 preload 注入 5 段版本（d.特性.破坏性.修订.构建）。
  *
- * 拿不到时显示「桌面版」而不是「网页版」：和鸣只面向桌面安装版，
- * 浏览器环境属于异常情况（web 界面只作为安装包内的前端被加载），
- * 不该在这里暗示用户还能用网页版。
+ * 拿不到注入值时回落到构建期注入的 `__APP_VERSION__`（同一份 hemingVersion）：
+ * 云端网页与桌面端共用这份前端产物，浏览器里显示真实版本号比显示「桌面版」有用——
+ * 用户能据此判断「看到的是哪一版」，也便于报障时对照。
  */
 export function appVersionLabel(): string {
   const v = typeof window !== "undefined" ? window.__heming_version : undefined;
-  return v && v.trim() ? v.trim() : "桌面版";
+  if (v && v.trim()) return v.trim();
+  return typeof __APP_VERSION__ === "string" && __APP_VERSION__.trim() ? __APP_VERSION__.trim() : "—";
 }
 
 /** 设置区分组标签（用户要求：改为上侧横向标签页，点击切换）。 */
@@ -756,7 +757,7 @@ function NavigationSection() {
         </button>
       </div>
       <div className="mt-1 ui-caption">
-        只改左侧导航的显示顺序，Alt+1–9 快捷键保持原位
+        只改左侧导航的显示顺序；数字快捷键仍对应原来的页面（Alt+1 / 2 / 5 / 6 / 8 / 0）
       </div>
       <ul className="mt-2 flex flex-col gap-1">
         {navOrder.map((page, index) => (
@@ -811,7 +812,7 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
         <span className="ui-caption">当前 {appVersionLabel()}</span>
       </div>
       <div className="mt-1 ui-caption">
-        来自仓库 CHANGELOG.md，随版本自动生成；点击任一条目展开/收起
+        历史版本的改动记录；点击条目展开/收起
       </div>
       <ul className="mt-2 flex flex-col gap-1">
         {CHANGELOG.map((entry) => {

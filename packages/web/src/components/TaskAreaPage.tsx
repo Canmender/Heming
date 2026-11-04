@@ -377,7 +377,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={6}
-          placeholder="例如：梳理 packages/web/src/lib 下的模块依赖，列出耦合最重的三处并给出拆分建议"
+          placeholder="例如：梳理这个项目各模块之间的依赖，列出耦合最重的三处并给出拆分建议"
           className="w-full resize-y rounded-lg border border-line-strong px-2.5 py-2 text-[13px] leading-5 outline-hidden focus:border-ink"
         />
 
@@ -979,7 +979,7 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
             ))}
             <div>
               <p className="font-medium">
-                将复用 {forkDraft.preview.reuse.length} 条工具结果：
+                将沿用 {forkDraft.preview.reuse.length} 条工具结果：
               </p>
               <ul className="mt-1 flex flex-col gap-0.5 text-[11px] leading-5 text-muted">
                 {forkDraft.preview.reuse.map((pair) => (

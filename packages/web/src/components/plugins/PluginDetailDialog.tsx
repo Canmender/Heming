@@ -153,7 +153,7 @@ export function PluginDetailDialog({
             </ul>
             <p className="mt-1 ui-caption">
               主开关关闭时不可单独调整；这里的切换只影响这一类贡献，
-              不改变 HITL 判定、工具风险上限与工具默认关闭口径。
+              不改变人工确认规则、工具风险上限与工具默认关闭的设置。
             </p>
             <div className="mt-1 flex flex-wrap gap-1">
               {plugin.manifest.contributions.commands.map((command) => (

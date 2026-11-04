@@ -33,8 +33,30 @@ describe("auth store", () => {
     await useAuthStore.getState().login("alice", "wrongpass");
     const s = useAuthStore.getState();
     expect(s.status).toBe("error");
-    expect(s.error).toBe("invalid credentials");
+    // 不把服务端英文原文透传给用户（旧行为是显示 "invalid credentials"）
+    expect(s.error).toBe("用户名或密码不正确");
     expect(localStorage.getItem("heming.token")).toBeNull();
+  });
+
+  it("登录失败文案按状态码翻译：429/5xx/网络异常各不相同", async () => {
+    const { loginErrorMessage } = await import("./auth.js");
+    const { ApiError } = await import("../lib/api.js");
+    expect(loginErrorMessage(new ApiError(401, "invalid credentials"))).toBe("用户名或密码不正确");
+    expect(loginErrorMessage(new ApiError(429, "too many"))).toBe("尝试次数过多，请稍后再试");
+    expect(loginErrorMessage(new ApiError(503, "boom"))).toBe("服务器暂时不可用，请稍后重试");
+    expect(loginErrorMessage(new ApiError(400, "bad"))).toBe("登录失败，请重试");
+    expect(loginErrorMessage(new TypeError("Failed to fetch"))).toBe("连不上服务器，请检查网络后重试");
+  });
+
+  it("clearError：改输入即复位 error/status，未失败时不打扰", async () => {
+    useAuthStore.setState({ status: "error", error: "用户名或密码不正确" });
+    useAuthStore.getState().clearError();
+    expect(useAuthStore.getState().error).toBeNull();
+    expect(useAuthStore.getState().status).toBe("idle");
+
+    useAuthStore.setState({ status: "authed", error: null });
+    useAuthStore.getState().clearError();
+    expect(useAuthStore.getState().status).toBe("authed");
   });
 
   it("updateProfile 成功：PUT /api/me 后用返回 User 更新 store.user", async () => {

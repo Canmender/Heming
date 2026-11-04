@@ -9,6 +9,7 @@ import { useLlmStore } from "../store/llm.js";
 import { useTaskStore } from "../lib/tasks/store.js";
 import { useTokenUsageStore, monthKeyOf, daysOfMonth } from "../store/tokenUsage.js";
 import { ONBOARDING_KEY, useOnboardingStore } from "../lib/onboarding.js";
+import { FILE_ROOTS_KEY } from "../lib/fileEdit/roots.js";
 import { fetchTeam, fetchTeamActivities } from "../lib/api.js";
 
 // 团队名册与动向走 lib/api（首页真实数据优先）；health 探测仍走裸 fetch，单独 spy。
@@ -266,12 +267,30 @@ describe("HomePage", () => {
     expect(screen.getByText("未绑定")).toBeInTheDocument();
 
     expect(screen.getByText("最新资讯")).toBeInTheDocument();
-    expect(screen.getByText(/和鸣团队系统上线/)).toBeInTheDocument();
+    expect(screen.getByText(/团队动向上线/)).toBeInTheDocument();
     expect(screen.getByText("怎么让团队看到你的动向")).toBeInTheDocument();
     expect(screen.getByText("用共享目录投递附件给智能体")).toBeInTheDocument();
     expect(screen.getByText("官方")).toBeInTheDocument();
     expect(screen.getByText("教程")).toBeInTheDocument();
     expect(screen.getByText("技巧")).toBeInTheDocument();
+  });
+
+  it("系统状态·本地工作目录读取真实可写根，不再永远写「未绑定」", async () => {
+    localStorage.setItem(
+      FILE_ROOTS_KEY,
+      JSON.stringify({
+        roots: [
+          { name: "intro", path: "D:/notes", mode: "write" },
+          { name: "ref", path: "D:/ref", mode: "read" },
+        ],
+        outOfRoot: "ask",
+      }),
+    );
+    render(<HomePage />);
+    await act(async () => {});
+    // 只有 write 根算「智能体能改哪些文件」，只读根不计入
+    expect(screen.getByText("已绑定 1 个")).toBeInTheDocument();
+    expect(screen.queryByText("未绑定")).not.toBeInTheDocument();
   });
 
   it("云端探测失败时状态显示「失败」", async () => {
@@ -293,7 +312,7 @@ describe("HomePage", () => {
     expect(screen.getByText("2000")).toBeInTheDocument();
     expect(screen.getByText("deepseek-v3")).toBeInTheDocument();
     expect(screen.getByText("300")).toBeInTheDocument();
-    expect(screen.getByText(/本月个人已用/)).toBeInTheDocument();
+    expect(screen.getByText(/本月已用/)).toBeInTheDocument();
   });
 
   it("按日期：当月全日期行，零值天显示 0", async () => {

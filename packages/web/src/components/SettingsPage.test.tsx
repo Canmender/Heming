@@ -8,6 +8,8 @@ import { setToken } from "../lib/api.js";
 import { getThemeMode, setThemeMode } from "../lib/theme.js";
 import { resetSecureStorageState, secureGetItem, secureSetItem } from "../lib/secureStorage.js";
 
+declare const __APP_VERSION__: string;
+
 const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
 
 /**
@@ -288,12 +290,12 @@ describe("设置区版本展示", () => {
     expect(appVersionLabel()).toBe("d.0.1.0.0");
   });
 
-  it("拿不到注入版本时显示「桌面版」，不伪造版本号，也不提网页版", () => {
-    // 和鸣只面向桌面安装版，浏览器环境属异常情况；
-    // 这里刻意不再显示「网页版」——那会暗示用户还能用网页访问。
-    expect(appVersionLabel()).toBe("桌面版");
+  it("拿不到注入版本时回落到构建版本（浏览器/网页端也显示真实版本号，而不是「桌面版」）", () => {
+    // 云端网页与桌面端共用同一份前端产物；浏览器里显示构建版本便于报障对照。
+    // 断言与 __APP_VERSION__ 相等而不是写死版本串——每轮 bump 后这个用例仍然成立。
+    expect(appVersionLabel()).toBe(__APP_VERSION__);
     window.__heming_version = "   ";
-    expect(appVersionLabel()).toBe("桌面版");
+    expect(appVersionLabel()).toBe(__APP_VERSION__);
   });
 });
 

@@ -732,7 +732,7 @@ export function TeamPage() {
           {tab === "agenda" && (
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
               <p className="rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2 text-[11px] leading-5 text-muted">
-                团队日程只收成员自己开启共享的「日程」摘要（标题 + 到期档位），不含日程详情、证据或发送人；
+                团队日程只收成员自己开启共享的「日程」摘要（标题 + 到期时间），不含日程详情、证据或发送人；
                 不新增任何云端内容上传。
               </p>
               {!feedReady ? (
@@ -752,7 +752,7 @@ export function TeamPage() {
                     <>
                       <p>你还没有开启「日程」共享。</p>
                       <p className="mt-1 ui-caption">
-                        开启后，你的日程摘要（标题 + 到期档位）会出现在团队日程里。
+                        开启后，你的日程摘要（标题 + 到期时间）会出现在团队日程里。
                       </p>
                     </>
                   ) : (

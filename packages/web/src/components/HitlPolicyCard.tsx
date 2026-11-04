@@ -171,8 +171,8 @@ export function HitlPolicyCard({
 
       {clampedNotice && (
         <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 ui-caption">
-          免问下限已从「危险」下调为「写入」：危险操作现在都会先问你。
-          <span className="text-muted">（原先「危险」那一档等同于不设边界，已移除。）</span>
+          为避免危险操作被自动放行，这一项已调整为「写入」：危险操作现在都会先询问你。
+          <span className="text-muted"></span>
         </div>
       )}
 

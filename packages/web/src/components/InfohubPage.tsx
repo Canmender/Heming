@@ -373,16 +373,25 @@ export function InfohubPage() {
   /* ---------------------------------------------------------------- 渲染 */
 
   if (!available) {
+    // 与其他页保持同一套页面骨架：有页头、有说明，用户不会落到一个「只有一张卡片」的空页面。
     return (
-      <div className="flex h-full min-h-0 items-center justify-center p-6">
-        <div className="max-w-[460px] rounded-xl border border-line bg-white p-6 shadow-card">
-          <h1 className="text-[16px] font-semibold">信息中枢仅桌面端可用</h1>
-          <p className="mt-2 text-[12px] leading-6 text-muted">
-            QQ / 微信归档要读取本机数据库，必须由桌面端拉起本机进程。
-            和鸣不会把归档上传到云端，所以浏览器环境没有可用的数据源。
-          </p>
+      <PageShell
+        title="信息中枢"
+        subtitle="QQ / 微信归档只在本机处理；浏览器里没有可用的数据源"
+      >
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <div className="max-w-[460px] rounded-xl border border-line bg-white p-6 shadow-card">
+            <h2 className="text-[16px] font-semibold">信息中枢仅桌面端可用</h2>
+            <p className="mt-2 text-[12px] leading-6 text-muted">
+              QQ / 微信归档要读取本机数据库，需要由桌面版启动本机进程。
+              和鸣不会把归档上传到云端，所以浏览器里没有可用的数据源。
+            </p>
+            <p className="mt-2 ui-caption">
+              在桌面版安装包里打开「信息中枢」，即可连接本机归档并检索。
+            </p>
+          </div>
         </div>
-      </div>
+      </PageShell>
     );
   }
 

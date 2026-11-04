@@ -1957,7 +1957,7 @@ export function MemoryPage({
       </div>
       <div className={`mt-1 ${hintCls}`}>
         每轮结束后后台起一次轻量复盘：自问「有什么值得长期记住」，把事实写进语义记忆、
-        把可复用流程沉淀成技能。密钥与口令一律不落盘，失败不影响对话。
+        把可复用流程沉淀成技能。密钥和口令不会被写入磁盘；复盘失败也不影响对话。
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1985,9 +1985,9 @@ export function MemoryPage({
           </button>
         ))}
         <label className="flex items-center gap-1 text-[11px] text-muted">
-          间隔轮次
+          每隔几轮
           <input
-            aria-label="复盘间隔轮次"
+            aria-label="每隔几轮复盘"
             type="number"
             min={1}
             max={50}

@@ -285,7 +285,7 @@ export function PluginsPage({
   return (
     <PageShell
       title="插件区"
-      subtitle="插件 = 能力包：技能 / 工具 / MCP 服务 / 命令，全部本机。安装后技能进入技能池、服务登记到 MCP 视图；技能与 MCP 的日常管理就在本页两个 Tab 里，无需再切页。"
+      subtitle="插件可以一次带入技能、工具、MCP 服务与命令，全部在本机运行。安装后在下面的标签页里就能管理和使用。"
       width="wide"
       actions={
         <button type="button" onClick={openInstall} className={`flex items-center gap-1 ${BTN_GHOST}`}>
@@ -349,7 +349,7 @@ export function PluginsPage({
                 </span>
                 <p className="ui-section-title">还没有安装插件</p>
                 <p className="ui-caption">
-                  一个 plugin.json 可以一次带入一组技能、远程 MCP 服务与命令。点右上角「安装插件」粘贴清单或选择文件。
+                  一份插件清单可以一次带入一组技能、远程 MCP 服务与命令。点右上角「安装插件」粘贴清单或选择文件。
                 </p>
               </section>
             ) : (
@@ -370,7 +370,7 @@ export function PluginsPage({
             )}
 
             <p className={`mt-3 ${HINT}`}>
-              插件只声明技能、远程 MCP 服务与命令，不含可执行代码、不携带密钥；安装不会启动进程，
+              插件只声明技能、远程 MCP 服务与命令，不含可执行代码、不携带密钥；安装不会运行任何程序，
               也不会主动联网——服务连接与工具启用由你在「MCP 服务」Tab 发起，工具调用仍走人工确认。
             </p>
           </>

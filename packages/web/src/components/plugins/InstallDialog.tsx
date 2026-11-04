@@ -249,7 +249,7 @@ export function InstallDialog({
               <div className="mt-1 flex flex-wrap items-center gap-2 ui-caption">
                 <span
                   className="font-mono"
-                  title={`内容指纹（FNV-1a 64，非密码学签名，不证明作者与来源）：${preview.trust.fingerprint}`}
+                  title={`内容指纹：用来发现内容是否被改过，不代表已审核来源：${preview.trust.fingerprint}`}
                 >
                   内容指纹 {shortFingerprint(preview.trust.fingerprint)}
                 </span>
@@ -416,7 +416,7 @@ export function InstallDialog({
                     </label>
                   )}
                   <p id={requirementsId} className="mt-1 ui-caption">
-                    发布者信任是「首次使用即信任」（TOFU）：只记住你确认过的公钥，不是证书链。
+                    你确认过的发布者会被记住；公钥变了会再问你一次。
                     验签失败或公钥变更未确认时，本次安装不会继续。
                   </p>
                 </div>

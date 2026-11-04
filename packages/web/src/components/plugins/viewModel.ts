@@ -128,7 +128,7 @@ export function permissionViewOf(manifest: PluginManifest): PluginPermissionView
 
 /** 权限一行摘要：`主机 1 · 风险上限 只读`。 */
 export function permissionText(view: PluginPermissionView): string {
-  if (view.legacy) return "旧版清单：未声明权限";
+  if (view.legacy) return "旧格式清单：未声明权限";
   return `主机 ${view.hostCount} · 风险上限 ${view.ceilingLabel}`;
 }
 

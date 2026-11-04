@@ -75,6 +75,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const [archiveHits, setArchiveHits] = useState<InfohubSearchHit[]>([]);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [recent, setRecent] = useState<RecentEntry[]>(() => loadRecent());
+  /** 焦点在面板内（输入框或结果项）：焦点环画在整块面板上，而不是被 overflow 裁掉的输入框上。 */
+  const [focusWithin, setFocusWithin] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -322,8 +324,16 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     >
       <div
         ref={panelRef}
-        className="w-[560px] max-w-[92vw] overflow-hidden rounded-xl border border-line bg-white shadow-[0_12px_40px_rgba(0,0,0,0.18)]"
+        className={`w-[560px] max-w-[92vw] overflow-hidden rounded-xl border border-line bg-white shadow-[0_12px_40px_rgba(0,0,0,0.18)] ${
+          focusWithin ? "outline outline-2 outline-offset-2 outline-ink" : ""
+        }`}
         onMouseDown={(e) => e.stopPropagation()}
+        // 焦点环由面板统一提供：输入框贴在面板顶边，它的 :focus-visible 环会被
+        // overflow-hidden 裁掉（键盘用户等于看不到焦点）。用面板的 outline 替代。
+        onFocus={() => setFocusWithin(true)}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
+        }}
         // 键盘约定挂在面板容器上而不是输入框：焦点移到结果项后（Tab/方向键），
         // Esc 与上下选择仍然生效，不需要先把焦点移回输入框。
         onKeyDown={onKeyDown}
@@ -341,6 +351,14 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="搜索页面、动作、设置、成员、技能…"
+          /*
+           * 焦点环由面板容器画（见上），这里必须用**内联样式**关掉输入框自己的环：
+           * GlobalFocusRing 的 `:focus-visible` 规则是未分层的作者样式，优先级高于
+           * @layer utilities 里的任何 Tailwind 类（含 focus-visible:outline-hidden），
+           * 而输入框贴着面板顶边，环会被 overflow-hidden 裁成一条黑线。内联样式是
+           * 唯一不靠优先级运气的写法；容器环仍然满足键盘焦点可见（2.4.7）。
+           */
+          style={{ outline: "none" }}
           className="w-full border-b border-line-strong px-3.5 py-2.5 text-[13px] outline-hidden placeholder:text-[#bbb]"
         />
 

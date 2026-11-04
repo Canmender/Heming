@@ -21,7 +21,7 @@ export function PluginPermissionList({
       <div className="flex flex-wrap items-center gap-2">
         <span className="ui-section-title">权限</span>
         {view.legacy ? (
-          <span className="ui-chip">旧版清单 v{schemaVersion}</span>
+          <span className="ui-chip">旧格式清单 v{schemaVersion}</span>
         ) : (
           <span className="ui-chip">{view.accepted ? "已声明" : "存在未声明主机"}</span>
         )}
@@ -52,7 +52,7 @@ export function PluginPermissionList({
 
       {view.legacy && (
         <p className="mt-1 ui-caption">
-          旧版清单（v{schemaVersion}）：未声明权限，按既有口径处理。
+          旧格式清单（v{schemaVersion}）：没有声明权限，安装时按你确认过的服务地址放行。
         </p>
       )}
     </div>

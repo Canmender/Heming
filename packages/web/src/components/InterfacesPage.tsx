@@ -442,7 +442,7 @@ export function InterfacesView({
             {transport === "stdio" && (
               <span className="text-[11px] text-[#b45309]">
                 {stdioReady
-                  ? "将在本机拉起该命令进程，请确认命令与参数可信"
+                  ? "会在本机启动这条命令，请确认来源可信"
                   : "当前环境不支持 stdio（需桌面端）；配置可先保存"}
               </span>
             )}
@@ -650,7 +650,7 @@ export function InterfacesView({
                           >
                             {testRunning === testFor ? "执行中…" : "执行"}
                           </button>
-                          <span className="text-[11px] text-muted">参数按工具 inputSchema 填 JSON 对象</span>
+                          <span className="text-[11px] text-muted">按每个工具的说明填写参数（JSON 格式）</span>
                         </div>
                         {testResult && (
                           <pre

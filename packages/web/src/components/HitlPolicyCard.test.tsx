@@ -104,13 +104,13 @@ describe("HitlPolicyCard", () => {
     // 下拉显示的是夹下来的「写入」
     expect((screen.getByLabelText("免问下限") as HTMLSelectElement).value).toBe("write");
     // 并且明确告诉用户发生了什么（危险操作现在会问了）
-    expect(screen.getByText(/免问下限已从/)).toBeInTheDocument();
+    expect(screen.getByText(/这一项已调整为「写入」/)).toBeInTheDocument();
   });
 
   it("没有存过 danger 时不提示（不啰嗦）", () => {
     render(<HitlPolicyCard policyStore={store} storage={storage} />);
 
-    expect(screen.queryByText(/免问下限已从/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/这一项已调整为「写入」/)).not.toBeInTheDocument();
   });
 
   it("清空本会话授权：先确认，确认后清空并报出条数", () => {
