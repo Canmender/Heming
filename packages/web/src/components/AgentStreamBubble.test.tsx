@@ -191,3 +191,14 @@ describe("AgentStreamBubble 可视化（思考过程 / 工具调用）", () => {
     expect(screen.queryByText("候选链")).not.toBeInTheDocument();
   });
 });
+
+describe("AgentStreamBubble · 失败原因说人话", () => {
+  it("429 的供应商 JSON 原文不进气泡正文，只翻成一句可操作提示（原文留在 title）", () => {
+    const raw = 'provider_error: HTTP 429 {"error":{"message":"rate limit exceeded","type":"rate_limit_error"}}';
+    render(<AgentStreamBubble name="和小鸣" text="" status="error" errorMessage={raw} />);
+    const hint = screen.getByText(/HTTP 429/);
+    expect(hint.textContent).toContain("稍等");
+    expect(hint.textContent).not.toContain("rate_limit_error");
+    expect(hint.getAttribute("title")).toBe(raw);
+  });
+});

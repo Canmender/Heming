@@ -923,7 +923,7 @@ describe("ChatPage", () => {
     await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
     expect(document.body.textContent).toContain("▌");
 
-    fireEvent.click(screen.getByText("中断"));
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith(
         expect.objectContaining({ type: "agent_error", code: "aborted" }),
@@ -2849,7 +2849,7 @@ describe("ChatPage", () => {
 
     render(<ChatPage />);
     await waitFor(() =>
-      expect(screen.getByText("无法解密（密钥缺失）")).toBeInTheDocument(),
+      expect(screen.getByText(/本机解不开这条消息/)).toBeInTheDocument(),
     );
     // 挂起等待 chaindist（硬验收③场景的前半段；重试补齐由 chat store 测试覆盖）
     expect(useChatStore.getState().pendingE2e.c1).toEqual(["e-orphan"]);
@@ -2879,7 +2879,7 @@ describe("ChatPage", () => {
     expect(contents).toContain("@和小鸣 看历史");
     expect(contents).not.toContain(""); // 占位行（空 content）被过滤，不外发模型供应商
     // 本地渲染面同步出占位（提示词与 UI 两面口径一致）
-    expect(screen.getByText("无法解密（密钥缺失）")).toBeInTheDocument();
+    expect(screen.getByText(/本机解不开这条消息/)).toBeInTheDocument();
   });
 
   it("挂载后台自迁移：本会话自己 plain 消息 PUT reencrypt，成功后换 e2e 形态且明文仍可渲染", async () => {
@@ -2961,7 +2961,7 @@ describe("ChatPage", () => {
     await act(async () => {});
     expect(useChatStore.getState().messages.c1 ?? []).toHaveLength(0); // 不入列
     expect(useChatStore.getState().pendingE2e.c1 ?? []).toHaveLength(0); // 不挂起
-    expect(screen.queryByText("无法解密（密钥缺失）")).not.toBeInTheDocument(); // 不占位
+    expect(screen.queryByText(/本机解不开这条消息/)).not.toBeInTheDocument(); // 不占位
   });
 
   it("硬验收③：同一信封 echo 重放——(chainKid,n) 去重经出站箱/缓存补齐，不重复入列", async () => {
@@ -3037,7 +3037,7 @@ describe("ChatPage", () => {
       });
     });
     await waitFor(() => expect(screen.getByText("自发密文")).toBeInTheDocument());
-    expect(screen.queryByText("无法解密（密钥缺失）")).not.toBeInTheDocument();
+    expect(screen.queryByText(/本机解不开这条消息/)).not.toBeInTheDocument();
     expect(useChatStore.getState().plainById.c1!["m-mine"]).toMatchObject({ text: "自发密文" });
     // §6 明文缓存落盘：重载后无出站箱也能靠缓存优先自解
     const cached = JSON.parse(localStorage.getItem("heming.msgCache.c1") ?? "[]") as {
@@ -3667,7 +3667,7 @@ describe("ChatPage 工具轮可视化接线", () => {
 
     await pickAndSend("@和小鸣 写段文字");
     await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("中断"));
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
 
     await waitFor(() => expect(framesOf(send, "agent_finish")).toHaveLength(1));
     const sealedTexts = (kind: string) =>

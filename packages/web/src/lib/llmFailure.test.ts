@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { carriedStatus, classifyFailure, decodeWords, retryable } from "./llmFailure.js";
+import { carriedStatus, classifyFailure, decodeWords, humanizeProviderError, retryable } from "./llmFailure.js";
 
 /**
  * 失败分类判据（规则来自 magpie 的 failure()/retryable()）。
@@ -202,5 +202,33 @@ describe("裸 4xx 一律中止（magpie retryable 对普通 400 返回 false）"
     expect(v.kind).toBe("fatal");
     expect(v.rests).toBe(false);
     expect(retryable(v)).toBe(false);
+  });
+});
+
+describe("humanizeProviderError：供应商原文翻成人话（展示层用）", () => {
+  it("429 不再把 JSON 原文甩给用户，但保留状态码", () => {
+    const raw = 'provider_error: HTTP 429 {"error":{"message":"rate limit exceeded","type":"rate_limit_error"}}';
+    const text = humanizeProviderError(raw);
+    expect(text).toContain("HTTP 429");
+    expect(text).toContain("稍等");
+    expect(text).not.toContain("rate_limit_error");
+    expect(text).not.toContain("provider_error");
+  });
+
+  it("401/404/5xx/400 各自给可操作的一句", () => {
+    expect(humanizeProviderError("provider_error: HTTP 401 bad key")).toContain("API Key");
+    expect(humanizeProviderError("provider_error: HTTP 404 not found")).toContain("Base URL");
+    expect(humanizeProviderError("provider_error: HTTP 503 boom")).toContain("暂时不可用");
+    expect(humanizeProviderError("provider_error: HTTP 400 nope")).toContain("模型名或参数");
+  });
+
+  it("网络层失败（无状态码）与未绑定连接都有明确指引", () => {
+    expect(humanizeProviderError("provider_error: fetch failed")).toContain("检查网络");
+    expect(humanizeProviderError("未绑定 LLM 连接")).toContain("设置 → 模型");
+  });
+
+  it("其它文案原样返回（不二次翻译，避免走样）", () => {
+    expect(humanizeProviderError("长时间无响应，生成可能已中断")).toBe("长时间无响应，生成可能已中断");
+    expect(humanizeProviderError("")).toBe("生成失败，请重试。");
   });
 });

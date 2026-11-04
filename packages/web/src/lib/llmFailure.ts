@@ -285,3 +285,46 @@ function minuteLimit(body: string): boolean {
 export function retryable(v: FailureVerdict): boolean {
   return v.failover;
 }
+
+/**
+ * 把 `provider_error: HTTP 429 {...}` 这类**供应商原文**翻成用户能看懂的一句话。
+ *
+ * 为什么在展示层做（而不是改写 `agentStream` 落库的 message）：
+ * - 已存消息里还是原文，旧数据也一起变好，不需要迁移；
+ * - 分类词表（`classifyFailure`）仍按原文工作，界面不该反过来影响路由判据；
+ * - 原文不丢：调用方把它放 `title`，需要排障的人仍能看到状态码与响应片段。
+ *
+ * 只认两种形状：`provider_error: HTTP <status> <body>` 与 `provider_error: <body>`；
+ * 其它错误（超时提示、内容无法解密等）原样返回，避免把已有文案再次翻译走样。
+ */
+export function humanizeProviderError(raw: string): string {
+  const text = (raw ?? "").trim();
+  if (!text) return "生成失败，请重试。";
+  if (text === "未绑定 LLM 连接") {
+    return "这个智能体还没有绑定模型连接，请先到「设置 → 模型」选一条连接。";
+  }
+  const http = text.match(/^provider_error:\s*HTTP\s+(\d{3})\b/i);
+  if (http) {
+    const status = Number(http[1]);
+    const hint =
+      status === 401 || status === 403
+        ? "模型服务鉴权失败：请到「设置 → 模型」检查 API Key 是否正确、是否有权限。"
+        : status === 404
+          ? "接口地址找不到：请检查 Base URL（通常以 /v1 结尾）。"
+          : status === 408
+            ? "模型服务响应超时：请稍后重试。"
+            : status === 429
+              ? "请求太频繁或额度用尽：稍等片刻再试；持续出现请检查服务商额度。"
+              : status === 400
+                ? "请求被服务商拒绝：可能是模型名或参数不被支持。"
+                : status >= 500
+                  ? "模型服务暂时不可用：请稍后重试。"
+                  : "模型请求失败。";
+    return `${hint}（HTTP ${status}）`;
+  }
+  if (/^provider_error:/i.test(text)) {
+    return "连不上模型服务：请检查网络与 Base URL 后重试。";
+  }
+  return text;
+}
+

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { RouteAttempt } from "../lib/llmClient.js";
 import type { ToolTrace } from "../store/chat.js";
 import { FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
+import { humanizeProviderError } from "../lib/llmFailure.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 
 /**
@@ -71,7 +72,12 @@ export function AgentStreamBubble({
                 <MarkdownMessage text={text} />
               </div>
             ) : null}
-            {errorMessage ? <div className="mt-0.5 text-[#b45309]">{errorMessage}</div> : null}
+            {/* 失败原因：把 `provider_error: HTTP 429 {json}` 翻成人话；原文留在 title 里排障用 */}
+            {errorMessage ? (
+              <div className="mt-0.5 text-[#b45309]" title={errorMessage}>
+                {humanizeProviderError(errorMessage)}
+              </div>
+            ) : null}
             {onRetry ? (
               <button
                 type="button"

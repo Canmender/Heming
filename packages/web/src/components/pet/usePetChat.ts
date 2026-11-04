@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { humanizeProviderError } from "../../lib/llmFailure.js";
 import { streamChat, type ChatMessage } from "../../lib/llmClient.js";
 import { useLlmStore, type LlmProfile } from "../../store/llm.js";
 
@@ -130,8 +131,10 @@ export function usePetChat(agentId: string | null): PetChatState {
         const aborted = err instanceof Error && err.name === "AbortError";
         if (!aborted) {
           const msg = err instanceof Error ? err.message : String(err);
-          // provider_error 前缀对用户没意义，剥掉
-          setError(msg.replace(/^provider_error:\s*/, "") || "请求失败");
+
+          // 供应商原文（provider_error: HTTP 429 {...}）对用户没意义：翻成人话再用。
+          // 旧写法把 \s 写成了字面反斜杠，从来没匹配上过，等价于没剥。
+          setError(humanizeProviderError(msg) || "请求失败");
         }
       } finally {
         abortRef.current = null;

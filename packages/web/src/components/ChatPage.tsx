@@ -2874,8 +2874,16 @@ export function ChatPage({
                   </div>
                 )}
                 {m.enc === "e2e" && !plainOf[m.id] ? (
-                  // E2E Task 4 / 设计 §8：解不开的信封渲染占位（不吞不崩），且不进 LLM 提示词
-                  <div className="text-muted">无法解密（密钥缺失）</div>
+                  // E2E Task 4 / 设计 §8：解不开的信封渲染占位（不吞不崩），且不进 LLM 提示词。
+                  // 文案不写「密钥缺失」：设备钥匙通常还在，缺的是这条消息所属链的窗口钥匙
+                  //（典型来源：换设备/清缓存，或生成中途退出）；对用户只说「解不开」并给出可能原因。
+                  <div
+                    className="text-muted"
+                    title="本机没有这条消息对应的解密密钥：可能来自其他设备，或这条回复在生成时被中途关闭。"
+                  >
+                    本机解不开这条消息
+                    <span className="ml-1 text-[11px]">（可能来自其他设备，或生成时被中断）</span>
+                  </div>
                 ) : (
                   <>
                     <MarkdownMessage text={stripChartFences(m.payload.text)} />
@@ -3046,7 +3054,8 @@ export function ChatPage({
               className="rounded-sm border border-line px-2 py-0.5 hover:bg-[#f3f3f3]"
               onClick={abortRuns}
             >
-              中断
+              {/* 与底部提示行「Esc 停止生成」用同一个词：按钮叫「中断」时用户对不上号 */}
+              停止生成
             </button>
           </div>
         )}
