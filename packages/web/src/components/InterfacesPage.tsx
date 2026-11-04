@@ -650,7 +650,7 @@ export function InterfacesView({
                           >
                             {testRunning === testFor ? "执行中…" : "执行"}
                           </button>
-                          <span className="text-[11px] text-muted">按每个工具的说明填写参数（JSON 格式）</span>
+                          <span className="text-[11px] text-muted">按每个工具的说明填写参数（JSON 对象）</span>
                         </div>
                         {testResult && (
                           <pre

@@ -219,7 +219,28 @@ describe("humanizeProviderError：供应商原文翻成人话（展示层用）"
     expect(humanizeProviderError("provider_error: HTTP 401 bad key")).toContain("API Key");
     expect(humanizeProviderError("provider_error: HTTP 404 not found")).toContain("Base URL");
     expect(humanizeProviderError("provider_error: HTTP 503 boom")).toContain("暂时不可用");
-    expect(humanizeProviderError("provider_error: HTTP 400 nope")).toContain("模型名或参数");
+    expect(humanizeProviderError("provider_error: HTTP 400 nope")).toContain("请求被服务商拒绝");
+  });
+
+  it("上下文太长 / 余额不足分别给对应建议（不统一翻成「参数不支持」）", () => {
+    expect(
+      humanizeProviderError(
+        'provider_error: HTTP 400 {"error":{"message":"maximum context length exceeded"}}',
+      ),
+    ).toContain("对话太长");
+    expect(
+      humanizeProviderError(
+        'provider_error: HTTP 402 {"error":{"message":"余额不足，请充值"}}',
+      ),
+    ).toContain("余额不足");
+  });
+
+  it("中文错误体带上服务商说明；英文错误体不带（不把 JSON 塞给用户）", () => {
+    const zh = humanizeProviderError('provider_error: HTTP 400 {"message":"余额不足，请充值"}');
+    expect(zh).toContain("服务商说明");
+    expect(zh).toContain("余额不足");
+    const en = humanizeProviderError('provider_error: HTTP 400 {"message":"bad request"}');
+    expect(en).not.toContain("bad request");
   });
 
   it("网络层失败（无状态码）与未绑定连接都有明确指引", () => {

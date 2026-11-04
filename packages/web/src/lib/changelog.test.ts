@@ -127,3 +127,39 @@ describe("entriesUpTo / 生成数据", () => {
     }
   });
 });
+
+describe("parseChangelog · 硬折行与条目内小标题", () => {
+  const WRAPPED = [
+    "## d.1.0.0.0（2026-11-04）— 测试",
+    "",
+    "第一句被折行，",
+    "第二行其实是同一段。",
+    "",
+    "- 要点第一行，",
+    "  要点续行应该并回去",
+    "",
+    "### 一、小节标题",
+    "",
+    "小节正文。",
+  ].join("\n");
+
+  it("段落与列表项的折行续行会并成一条，不再碎片化", () => {
+    const entries = parseChangelog(WRAPPED);
+    expect(entries[0].paragraphs[0]).toBe("第一句被折行，第二行其实是同一段。");
+    // 没有列表符号的缩进续行不另起一条，而是并回上一条要点
+    expect(entries[0].bullets[0]).toBe("要点第一行，要点续行应该并回去");
+    expect(entries[0].bullets).toHaveLength(1);
+  });
+
+  it("条目内的 ### 小标题去掉井号，界面不再显示字面量", () => {
+    const entries = parseChangelog(WRAPPED);
+    expect(entries[0].paragraphs).toContain("一、小节标题");
+    expect(entries[0].paragraphs.join("\n")).not.toContain("###");
+  });
+
+  it("空行是块边界：两段独立文本不会被并成一段", () => {
+    const md = ["## d.1.0.0.0（2026-11-04）", "", "第一段。", "", "第二段。"].join("\n");
+    const entries = parseChangelog(md);
+    expect(entries[0].paragraphs).toEqual(["第一段。", "第二段。"]);
+  });
+});

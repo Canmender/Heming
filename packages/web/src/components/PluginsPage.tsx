@@ -285,7 +285,7 @@ export function PluginsPage({
   return (
     <PageShell
       title="插件区"
-      subtitle="插件可以一次带入技能、工具、MCP 服务与命令，全部在本机运行。安装后在下面的标签页里就能管理和使用。"
+      subtitle="插件可以一次带入技能、工具、MCP 服务与命令；能力包在本机管理，远程 MCP 连接由你在「MCP 服务」里发起。"
       width="wide"
       actions={
         <button type="button" onClick={openInstall} className={`flex items-center gap-1 ${BTN_GHOST}`}>

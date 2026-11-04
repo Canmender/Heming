@@ -33,19 +33,32 @@ describe("焦点环工具", () => {
     expect(hasFocusRing("focus-visible:outline-2")).toBe(true);
   });
 
-  it("禁止使用 v4 的 outline-none（连高对比模式焦点也抹掉）", async () => {
-    // 源码扫描守卫：components 里不得出现 `outline-none`（旧的 outline-none 已统一改名 outline-hidden）
-    const mods = import.meta.glob("../../components/**/*.tsx", {
+  /** 去掉注释再扫：注释里写「不要用 outline-none」不算违规。 */
+  const stripComments = (src: string) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*?$/gm, "$1");
+
+  const componentSources = () =>
+    import.meta.glob("../../components/**/*.tsx", {
       query: "?raw",
       import: "default",
       eager: true,
     }) as Record<string, string>;
-    /** 去掉注释再扫：注释里写「不要用 outline-none」不算违规。 */
-    const stripComments = (src: string) =>
-      src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-    const offenders = Object.entries(mods)
+
+  it("禁止使用 v4 的 outline-none（连高对比模式焦点也抹掉）", async () => {
+    // 源码扫描守卫：components 里不得出现 `outline-none`（旧的 outline-none 已统一改名 outline-hidden）
+    const offenders = Object.entries(componentSources())
       .filter(([path]) => !path.includes(".test."))
       .filter(([, src]) => /(^|[\s"'`])outline-none(?=[\s"'`]|$)/m.test(stripComments(src)))
+      .map(([path]) => path);
+    expect(offenders).toEqual([]);
+  });
+
+  it("禁止用内联样式 outline:none 绕过守卫（连高对比模式焦点一起抹掉）", async () => {
+    // 守卫只扫类名会漏掉 style={{ outline: "none" }}：命令面板就曾这样写。
+    // 合规写法是 `outline: "2px solid transparent"`（v4 outline-hidden 的语义）。
+    const offenders = Object.entries(componentSources())
+      .filter(([path]) => !path.includes(".test."))
+      .filter(([, src]) => /outline\s*:\s*["']none["']/i.test(stripComments(src)))
       .map(([path]) => path);
     expect(offenders).toEqual([]);
   });

@@ -3,6 +3,7 @@ import type { RouteAttempt } from "../lib/llmClient.js";
 import type { ToolTrace } from "../store/chat.js";
 import { FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { humanizeProviderError } from "../lib/llmFailure.js";
+import { toolNameLabel } from "../lib/toolName.js";
 import { MarkdownMessage } from "./MarkdownMessage.js";
 
 /**
@@ -136,7 +137,9 @@ function ToolTraceList({ tools }: { tools: ToolTrace[] }) {
         <details key={t.id} className="rounded-md border border-[#e4e4e4] bg-white px-2 py-1">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[11px]">
             <StatusDot status={t.status} />
-            <span className="font-mono text-[11px] text-[#444]">{t.name}</span>
+            <span className="font-mono text-[11px] text-[#444]" title={t.name}>
+              {toolNameLabel(t.name)}
+            </span>
             <span className={`text-[10px] ${statusColor(t.status)}`}>{statusLabel(t.status)}</span>
             {t.endedAt ? (
               <span className="text-[10px] text-[#6f6f6f]">{Math.max(0, t.endedAt - t.startedAt)}ms</span>

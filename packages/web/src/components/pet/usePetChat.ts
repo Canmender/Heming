@@ -28,6 +28,8 @@ export interface PetChatState {
   reply: string;
   streaming: boolean;
   error: string | null;
+  /** 错误的原始文本（provider_error…）：只用于排障 title/日志，不直接上屏 */
+  errorDetail: string | null;
   /** 是否已配置可用的模型连接 */
   hasConnection: boolean;
   /** 当前使用的连接名（用于气泡角标） */
@@ -75,6 +77,7 @@ export function usePetChat(agentId: string | null): PetChatState {
   const [reply, setReply] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
   const historyRef = useRef<ChatMessage[]>([]);
   const abortRef = useRef<AbortController | null>(null);
@@ -94,10 +97,12 @@ export function usePetChat(agentId: string | null): PetChatState {
       if (!content || streaming) return;
       if (!profile) {
         setError("还没有可用的模型连接");
+        setErrorDetail(null);
         return;
       }
 
       setError(null);
+      setErrorDetail(null);
       setReply("");
       bufferRef.current = "";
       setStreaming(true);
@@ -132,9 +137,11 @@ export function usePetChat(agentId: string | null): PetChatState {
         if (!aborted) {
           const msg = err instanceof Error ? err.message : String(err);
 
-          // 供应商原文（provider_error: HTTP 429 {...}）对用户没意义：翻成人话再用。
-          // 旧写法把 \s 写成了字面反斜杠，从来没匹配上过，等价于没剥。
-          setError(humanizeProviderError(msg) || "请求失败");
+          // 供应商原文（provider_error: HTTP 429 {...}）对用户没意义：翻成人话再用；
+          // 原文留在 errorDetail（气泡 title + 控制台），排障时仍能看到状态码与响应体。
+          console.warn("[pet] 模型请求失败：", msg);
+          setError(humanizeProviderError(msg));
+          setErrorDetail(msg);
         }
       } finally {
         abortRef.current = null;
@@ -144,12 +151,16 @@ export function usePetChat(agentId: string | null): PetChatState {
     [agentId, profile, prompts, streaming],
   );
 
-  const clearError = useCallback(() => setError(null), []);
+  const clearError = useCallback(() => {
+    setError(null);
+    setErrorDetail(null);
+  }, []);
 
   return {
     reply,
     streaming,
     error,
+    errorDetail,
     hasConnection: profile !== null,
     connectionLabel: profile?.label ?? profile?.model ?? null,
     send,

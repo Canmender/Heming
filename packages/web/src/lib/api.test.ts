@@ -516,12 +516,12 @@ describe("uploadEncryptedFile / downloadEncryptedFile（E2E 附件加密）", ()
 
     const up = await uploadEncryptedFile(new File(["x"], "a.txt")).catch((e: unknown) => e);
     expect(up).toBeInstanceOf(Error);
-    expect((up as Error).message).toMatch(/端到端加密/);
+    expect((up as Error).message).toMatch(/无法加密消息/);
     const down = await downloadEncryptedFile("f1", toB64(new Uint8Array(32))).catch(
       (e: unknown) => e,
     );
     expect(down).toBeInstanceOf(Error);
-    expect((down as Error).message).toMatch(/端到端加密/);
+    expect((down as Error).message).toMatch(/无法加密消息/);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

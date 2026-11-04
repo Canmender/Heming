@@ -455,18 +455,14 @@ describe("命令面板 · 焦点可见性", () => {
   });
   afterEach(() => cleanup());
 
-  it("焦点在面板内时焦点环画在面板上（输入框自己的环会被 overflow 裁掉）", async () => {
+  it("焦点环画在面板上（has-[:focus-visible]，仅键盘），输入框只保留高对比模式可见性", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     const panel = screen.getByRole("dialog", { name: "命令面板" });
     const input = searchBox();
-    // 输入框不再依赖自己被裁掉的 outline；改为透明环（保留高对比模式可见性）
-    // 输入框自己不再画环（会被面板裁掉），焦点环由面板提供
-    expect(input.style.outline).toBe("none");
-    // 打开即聚焦输入框 → 面板拿到可见焦点环
-    input.focus();
-    await waitFor(() => expect(panel.className).toContain("outline-ink"));
-    // 焦点移出面板后环消失
-    input.blur();
-    await waitFor(() => expect(panel.className).not.toContain("outline-ink"));
+    // 输入框不能写 outline:none——那会连 Windows 高对比模式的焦点也抹掉（v4 outline-hidden 语义）
+    expect(input.style.outline).toBe("2px solid transparent");
+    // 面板的环只在 :focus-visible（键盘）时出现：鼠标打开面板不会常驻一圈黑框
+    expect(panel.className).toContain("has-[:focus-visible]:outline-2");
+    expect(panel.className).toContain("has-[:focus-visible]:outline-ink");
   });
 });

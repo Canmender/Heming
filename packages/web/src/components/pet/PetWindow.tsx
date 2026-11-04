@@ -736,6 +736,13 @@ export function PetWindow() {
 
   const bubbleRoute = chat.error || chat.reply || chat.streaming ? undefined : presence.bubble?.route;
 
+  // 错误态把供应商原文放进 title：气泡只说话，排障时悬停仍能看到状态码与响应体
+  const bubbleTitle = chat.error
+    ? (chat.errorDetail ?? chat.error)
+    : bubbleRoute
+      ? "点击打开对应页面"
+      : undefined;
+
   const showBubbleHint = !chat.hasConnection && inputOpen;
 
   return (
@@ -748,7 +755,7 @@ export function PetWindow() {
         inset: 0,
         background: "transparent",
         userSelect: "none",
-        outline: "none",
+        outline: "2px solid transparent",
         fontFamily:
           '"PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif',
       }}
@@ -776,7 +783,7 @@ export function PetWindow() {
               : undefined
           }
           tabIndex={bubbleRoute ? 0 : undefined}
-          title={bubbleRoute ? "点击打开对应页面" : undefined}
+          title={bubbleTitle}
           style={{
             position: "absolute",
             top: 8,
@@ -869,7 +876,7 @@ export function PetWindow() {
               fontSize: 13,
               color: "#2f2f2f",
               background: chat.hasConnection ? "#fff" : "#f7f7f7",
-              outline: "none",
+              outline: "2px solid transparent",
               userSelect: "text",
             }}
           />
@@ -1017,7 +1024,7 @@ function MenuItem({ onClick, children }: { onClick: () => void; children: ReactN
         lineHeight: 1.35,
         color: "#2f2f2f",
         cursor: "pointer",
-        outline: "none",
+        outline: "2px solid transparent",
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = "#f2f2f2";

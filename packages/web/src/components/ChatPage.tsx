@@ -38,6 +38,7 @@ import {
   downloadEncryptedFile,
   fetchE2eKeys,
   putE2eKeys,
+  NO_E2E_MESSAGE,
 } from "../lib/api.js";
 import { hasSubtle } from "../lib/e2eCrypto.js";
 import {
@@ -99,6 +100,7 @@ import { HitlPolicyStore } from "../lib/hitl/policy.js";
 import { useHitlStore, type PendingConfirm } from "../store/hitl.js";
 import { ToolApprovalModal } from "./ToolApprovalModal.js";
 import { appendToolAudit } from "../lib/hitl/audit.js";
+import { toolNameLabel } from "../lib/toolName.js";
 import type { HitlVerdict } from "../lib/hitl/types.js";
 import type { StorageLike } from "../lib/memory/types.js";
 import { extractCharts, stripChartFences } from "../lib/charts/spec.js";
@@ -126,7 +128,7 @@ import { chatExamplesFor } from "../lib/onboarding.js";
 const EMPTY_MESSAGES: Message[] = [];
 
 /** 无 subtle 环境的常驻提示（横幅 + 发送拦截共用文案，设计 §2.1：拒绝发送不降级明文）。 */
-export const NO_E2E_NOTICE = "当前环境无法加密消息，请在桌面版打开，或使用 https 地址访问";
+export const NO_E2E_NOTICE = NO_E2E_MESSAGE;
 
 /** 与正文同发的本轮附件：图片转内容片、文档拼正文，重试时按它复原同一轮。 */
 type TurnAttachment = NonNullable<MessagePayload["file"]>;
@@ -1040,7 +1042,8 @@ export function ChatPage({
         appendToolAudit(hitlAuditStorage, {
           agentId: pending.agentId,
           action: v.decision,
-          target: `${call.displayName}（${call.name}）`,
+          // 与确认弹窗同一口径：MCP 工具名是 `服务__工具` 内部命名，留痕里也展示成「服务 · 工具」
+          target: `${call.displayName}（${toolNameLabel(call.name)}）`,
           ...(v.decision === "deny" ? { rejected: v.reason ?? "用户拒绝" } : {}),
         });
       }
@@ -2875,14 +2878,16 @@ export function ChatPage({
                 )}
                 {m.enc === "e2e" && !plainOf[m.id] ? (
                   // E2E Task 4 / 设计 §8：解不开的信封渲染占位（不吞不崩），且不进 LLM 提示词。
-                  // 文案不写「密钥缺失」：设备钥匙通常还在，缺的是这条消息所属链的窗口钥匙
-                  //（典型来源：换设备/清缓存，或生成中途退出）；对用户只说「解不开」并给出可能原因。
+                  // 文案不写「密钥缺失」：设备钥匙通常还在，缺的是这条消息所属链的窗口钥匙。
+                  // 三类来源并列写全（换设备 / 本机清过缓存 / 生成中途退出），别只列其中一类。
                   <div
                     className="text-muted"
-                    title="本机没有这条消息对应的解密密钥：可能来自其他设备，或这条回复在生成时被中途关闭。"
+                    title="本机没有这条消息对应的解密密钥：可能来自其他设备、本机缓存被清理过，或这条消息在生成时被中断。"
                   >
                     本机解不开这条消息
-                    <span className="ml-1 text-[11px]">（可能来自其他设备，或生成时被中断）</span>
+                    <span className="ml-1 text-[11px]">
+                      （可能来自其他设备、本机缓存被清理，或消息在生成时被中断）
+                    </span>
                   </div>
                 ) : (
                   <>

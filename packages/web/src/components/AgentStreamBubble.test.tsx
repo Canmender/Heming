@@ -104,10 +104,11 @@ describe("AgentStreamBubble 可视化（思考过程 / 工具调用）", () => {
         ]}
       />,
     );
-    expect(screen.getByText("srv__echo")).toBeInTheDocument();
+    expect(screen.getByText("srv · echo")).toBeInTheDocument();
+    expect(screen.getByText("srv · echo").getAttribute("title")).toBe("srv__echo");
     expect(screen.getByText("完成")).toBeInTheDocument();
     expect(screen.getByText("120ms")).toBeInTheDocument();
-    expect(screen.getByText("srv__now")).toBeInTheDocument();
+    expect(screen.getByText("srv · now")).toBeInTheDocument();
     expect(screen.getByText("调用中")).toBeInTheDocument();
     // 结果默认折叠在 details 里（DOM 中可见但不可见文本仍可查询）
     expect(screen.getByText("回声：hi")).toBeInTheDocument();

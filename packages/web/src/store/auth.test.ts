@@ -170,7 +170,7 @@ describe("auth store", () => {
     await useAuthStore.getState().restore();
 
     expect(useAuthStore.getState().status).toBe("pending");
-    expect(useAuthStore.getState().restoreError).toBe("bad gateway");
+    expect(useAuthStore.getState().restoreError).toBe("服务器暂时不可用，正在重试…");
     expect(localStorage.getItem("heming.token")).toBe("t1");
   });
 

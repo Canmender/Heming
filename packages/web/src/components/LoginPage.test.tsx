@@ -185,8 +185,13 @@ describe("LoginPage 无障碍（③-2）", () => {
     expect(alert).toHaveTextContent("用户名或密码不正确");
     for (const field of [screen.getByLabelText("用户名"), screen.getByLabelText("密码")]) {
       expect(field).toHaveAttribute("aria-invalid", "true");
-      expect(field).toHaveAttribute("aria-describedby", "login-error");
     }
+    // 用户名只关联错误行；密码还要关联常驻的大写锁定 live region
+    expect(screen.getByLabelText("用户名")).toHaveAttribute("aria-describedby", "login-error");
+    expect(screen.getByLabelText("密码")).toHaveAttribute(
+      "aria-describedby",
+      "login-error login-capslock",
+    );
   });
 
   it("输入框与提交按钮带可见焦点环（键盘 Tab 能看到）", () => {
@@ -196,5 +201,46 @@ describe("LoginPage 无障碍（③-2）", () => {
     expect(screen.getByRole("button", { name: "登录" }).className).toContain(
       "focus-visible:outline-2",
     );
+  });
+});
+
+describe("LoginPage · 输入辅助", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+    setToken(null);
+    useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
+  });
+
+  it("大写锁定开启时提示出现，并通过 aria-describedby 挂在密码框上", () => {
+    render(<LoginPage />);
+    const pwd = screen.getByLabelText("密码");
+    expect(pwd).toHaveAttribute("aria-describedby", "login-capslock");
+    // jsdom 的 KeyboardEvent 不会真的带修饰键状态：直接覆写 getModifierState 模拟 CapsLock
+    const capsEvent = (on: boolean) => {
+      const ev = new KeyboardEvent("keydown", { key: "a", bubbles: true });
+      Object.defineProperty(ev, "getModifierState", { value: () => on });
+      return ev;
+    };
+    fireEvent(pwd, capsEvent(true));
+    expect(screen.getByText("大写锁定已开启")).toBeInTheDocument();
+    fireEvent(pwd, capsEvent(false));
+    // 关灯后换成 sr-only 常驻容器，文字清空（live region 不重建）
+    expect(screen.queryByText("大写锁定已开启")).not.toBeInTheDocument();
+    expect(document.getElementById("login-capslock")).toHaveClass("sr-only");
+  });
+
+  it("打开页面时焦点落在用户名（焦点无处可去时）", async () => {
+    render(<LoginPage />);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("用户名")));
+  });
+
+  it("已经有别处焦点时不抢焦点", async () => {
+    render(<LoginPage />);
+    const submit = screen.getByRole("button", { name: "登录" });
+    submit.focus();
+    // 等一帧，确认 rAF 里的 guard 不会把焦点夺回用户名
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    expect(document.activeElement).toBe(submit);
   });
 });

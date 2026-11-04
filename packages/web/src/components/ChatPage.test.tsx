@@ -2792,7 +2792,7 @@ describe("ChatPage", () => {
 
     // 常驻横幅（硬验收⑤ / 设计 §2.1）
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "当前环境无法加密消息，请在桌面版打开，或使用 https 地址访问",
+      "当前环境无法加密消息，请在桌面端打开，或使用以 https 开头的网址访问",
     );
 
     // 文本发送拦截：不发帧、草稿保留；不再叠第二条同文案提示（横幅已是 role=alert）
@@ -2833,7 +2833,7 @@ describe("ChatPage", () => {
     expect(typeof (body.spk as { createdAt: unknown }).createdAt).toBe("number"); // epoch ms 约定
   });
 
-  it("解不开的 e2e 信封渲染「无法解密」占位（不吞不崩，pending 等 chaindist）", async () => {
+  it("解不开的 e2e 信封渲染「本机解不开」占位并写全可能原因（不吞不崩，pending 等 chaindist）", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
     // 无 chaindist 的孤儿信封：真 handler → 缺链 defer → 占位（渲染面断言）
@@ -2850,6 +2850,11 @@ describe("ChatPage", () => {
     render(<ChatPage />);
     await waitFor(() =>
       expect(screen.getByText(/本机解不开这条消息/)).toBeInTheDocument(),
+    );
+    // 原因要写全（换设备 / 本机清过缓存 / 生成被中断），不能只留一句「无法解密」
+    expect(screen.getByText(/本机缓存被清理/)).toBeInTheDocument();
+    expect(screen.getByText(/本机解不开这条消息/).closest("div")?.getAttribute("title")).toMatch(
+      /本机缓存被清理过/,
     );
     // 挂起等待 chaindist（硬验收③场景的前半段；重试补齐由 chat store 测试覆盖）
     expect(useChatStore.getState().pendingE2e.c1).toEqual(["e-orphan"]);
@@ -3469,7 +3474,7 @@ describe("ChatPage 工具轮可视化接线", () => {
       // 工具轨迹：命名空间化工具名 + 成功态
       //（HITL 闸门会先弹确认框，同一工具名在框里也出现一次，故用 getAllByText）
       await waitFor(() =>
-        expect(screen.getAllByText("echo-svc__echo").length).toBeGreaterThanOrEqual(1),
+        expect(screen.getAllByText("echo-svc · echo").length).toBeGreaterThanOrEqual(1),
       );
       // 确认框出现 = 未知工具按 write 处理、必问（设计 T01「未知工具 = write」）
       await waitFor(() =>
@@ -3599,8 +3604,13 @@ describe("ChatPage 工具轮可视化接线", () => {
       const audit = JSON.parse(localStorage.getItem("heming.selfAudit.v1") ?? "[]") as {
         action: string;
         rejected?: string;
+        target?: string;
       }[];
       expect(audit.some((e) => e.action === "deny" && e.rejected === "超时未确认")).toBe(true);
+      // 留痕里的工具名与确认弹窗同一口径：`服务__工具` → `服务 · 工具`
+      const audited = audit.find((e) => e.action === "deny");
+      expect(audited?.target).toContain("echo-svc · echo");
+      expect(audited?.target ?? "").not.toContain("__");
 
       // 通知：原来的「待确认」被替换成超时提示（不会留一个已经结束的请求）。
       const keys = useNotificationStore.getState().items.map((n) => n.key);

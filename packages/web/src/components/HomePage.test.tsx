@@ -104,6 +104,8 @@ describe("HomePage", () => {
     useTokenUsageStore.getState().reset();
     // UX-A 首跑引导：默认「无连接 + 没关过」；每个用例显式决定，避免状态泄漏
     localStorage.removeItem(ONBOARDING_KEY);
+    // 可写根是 localStorage 的全局状态：不清会漏到后面的用例（尤其新加的「文件可写目录」用例）
+    localStorage.removeItem(FILE_ROOTS_KEY);
     useOnboardingStore.setState({ dismissedAt: null });
     useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
     useTaskStore.setState({ tasks: [] });
@@ -263,7 +265,7 @@ describe("HomePage", () => {
     expect(await screen.findByText("正常")).toBeInTheDocument();
     expect(screen.getByText("实时通道")).toBeInTheDocument();
     expect(screen.getByText("会话内连接")).toBeInTheDocument(); // 首页未连 ws，中性文案
-    expect(screen.getByText("本地工作目录")).toBeInTheDocument();
+    expect(screen.getByText("文件可写目录")).toBeInTheDocument();
     expect(screen.getByText("未绑定")).toBeInTheDocument();
 
     expect(screen.getByText("最新资讯")).toBeInTheDocument();
@@ -275,7 +277,7 @@ describe("HomePage", () => {
     expect(screen.getByText("技巧")).toBeInTheDocument();
   });
 
-  it("系统状态·本地工作目录读取真实可写根，不再永远写「未绑定」", async () => {
+  it("系统状态·文件可写目录读取真实可写根，不再永远写「未绑定」", async () => {
     localStorage.setItem(
       FILE_ROOTS_KEY,
       JSON.stringify({

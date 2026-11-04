@@ -32,6 +32,15 @@ export function parseChangelog(markdown) {
   const entries = [];
   let current = null;
   let inCode = false;
+  /** 上一行属于哪种块：用于把硬折行的续行并回去（否则界面会把一句话拆成两段）。 */
+  let lastKind = /** @type {"bullet" | "paragraph" | null} */ (null);
+
+  /** 续行拼接：中文折行处不该有空格；两侧都是 ASCII 字母数字时补一个空格。 */
+  const joinText = (prev, next) => {
+    if (!prev) return next;
+    const needSpace = /[A-Za-z0-9]$/.test(prev) && /^[A-Za-z0-9]/.test(next);
+    return `${prev}${needSpace ? " " : ""}${next}`;
+  };
 
   const flush = () => {
     if (current) entries.push(current);
@@ -49,6 +58,12 @@ export function parseChangelog(markdown) {
     }
     if (inCode) {
       if (current) current.paragraphs.push(line);
+      continue;
+    }
+
+    if (!line.trim()) {
+      // 空行是块边界：之后的普通文本开新段落，不能并进上一段
+      lastKind = null;
       continue;
     }
 
@@ -72,17 +87,31 @@ export function parseChangelog(markdown) {
     if (sub) {
       const text = sub[1].trim();
       if (text) current.bullets.push(`— ${text}`);
+      lastKind = "bullet";
       continue;
     }
     const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
     if (bullet) {
       const text = bullet[1].trim();
       if (text) current.bullets.push(text);
+      lastKind = "bullet";
       continue;
     }
 
-    const text = line.trim();
-    if (text) current.paragraphs.push(text);
+    // 条目内的小标题（### 一、xxx）：保留文字、去掉井号，界面不再显示字面量 `###`
+    const text = line.trim().replace(/^#{1,6}\s+/, "");
+    if (!text) continue;
+    if (lastKind === "bullet" && current.bullets.length > 0) {
+      // 硬折行的续行：并回上一条要点
+      const i = current.bullets.length - 1;
+      current.bullets[i] = joinText(current.bullets[i], text);
+    } else if (lastKind === "paragraph" && current.paragraphs.length > 0) {
+      const i = current.paragraphs.length - 1;
+      current.paragraphs[i] = joinText(current.paragraphs[i], text);
+    } else {
+      current.paragraphs.push(text);
+    }
+    lastKind = "paragraph";
   }
   flush();
 

@@ -46,7 +46,12 @@ function isTransientFailure(e: unknown): boolean {
 
 function restoreErrorMessage(e: unknown): string {
   if (!(e instanceof ApiError)) return "网络异常，暂时连不上服务器";
-  return e.message || `http ${e.status}`;
+  // 恢复登录失败同样不能让服务端英文原文（bad gateway / unauthorized…）上屏：
+  // 这一屏显示在「正在恢复登录」面板里，用户同样需要一句能行动的话。
+  if (e.status === 408) return "请求超时，正在重试…";
+  if (e.status === 429) return "请求太频繁，正在重试…";
+  if (e.status >= 500) return "服务器暂时不可用，正在重试…";
+  return "恢复登录失败，请重试或重新登录";
 }
 
 /**

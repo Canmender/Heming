@@ -148,14 +148,6 @@ export function HomePage() {
     };
   }, []);
 
-  // 从设置区加/删可写根后回到首页要立刻反映（首页不常驻，focus 是最便宜的刷新时机）
-  useEffect(() => {
-    const syncRoots = () => setWriteRootCount(fileRootsStore.writeRoots().length);
-    syncRoots();
-    window.addEventListener("focus", syncRoots);
-    return () => window.removeEventListener("focus", syncRoots);
-  }, []);
-
   const monthKey = useMemo(() => monthKeyOf(new Date().toISOString()), []);
   const monthSummary = useMemo(() => summarizeMonth(records, monthKey), [records, monthKey]);
   const dayRows = useMemo(() => dailyTotals(records, monthKey), [records, monthKey]);
@@ -580,7 +572,9 @@ export function HomePage() {
               <span className="text-muted">会话内连接</span>
             </div>
             <div className="flex justify-between py-0.5 text-[12px]">
-              <span className="text-muted">本地工作目录</span>
+              {/* 这一行读的是「设置 → 模型 → 文件编辑」的可写根，与右栏会话工作区不是一回事：
+                  名字写准（文件可写目录），避免两处同名不同源 */}
+              <span className="text-muted">文件可写目录</span>
               <span className={writeRootCount > 0 ? "" : "text-muted"}>
                 {writeRootCount > 0 ? `已绑定 ${writeRootCount} 个` : "未绑定"}
               </span>

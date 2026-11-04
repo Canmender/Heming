@@ -7,6 +7,7 @@ import {
   type PatchPreview,
 } from "../lib/fileEdit/patchPreview.js";
 import { canRememberCall, prefixesOfCall } from "../lib/fileEdit/remember.js";
+import { toolNameLabel } from "../lib/toolName.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 
 /**
@@ -121,32 +122,41 @@ export function ToolApprovalModal({
   };
 
   const footer = (
-    <>
-      <button
-        type="button"
-        ref={denyRef}
-        onClick={denyAll}
-        className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
-      >
-        拒绝
-      </button>
-      {!hasPatch && (
+    <div className="flex w-full flex-col gap-1.5">
+      {/*
+        勾选语义放在按钮正上方（footer 固定、不随内容区滚动）：调用多时提示不会被滚出视野。
+        写操作默认不勾、允许只放行勾选项——这条规则不说出来，用户会以为「点了允许却被拒绝」。
+      */}
+      {calls.length > 0 && (
+        <p className="text-[11px] text-muted">先勾选要放行的调用，再点下方按钮；没勾的会按拒绝处理。</p>
+      )}
+      <div className="flex w-full flex-wrap items-center justify-end gap-2">
         <button
           type="button"
-          onClick={() => allowChecked("allow-session")}
-          className="ui-btn ui-btn-sm ui-btn-ghost"
+          ref={denyRef}
+          onClick={denyAll}
+          className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
         >
-          本会话内允许此工具
+          拒绝
         </button>
-      )}
-      <button
-        type="button"
-        onClick={() => allowChecked("allow")}
-        className="ui-btn ui-btn-sm ui-btn-primary"
-      >
-        仅本次允许
-      </button>
-    </>
+        {!hasPatch && (
+          <button
+            type="button"
+            onClick={() => allowChecked("allow-session")}
+            className="ui-btn ui-btn-sm ui-btn-ghost"
+          >
+            本会话内允许此工具
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => allowChecked("allow")}
+          className="ui-btn ui-btn-sm ui-btn-primary"
+        >
+          仅本次允许
+        </button>
+      </div>
+    </div>
   );
 
   return (
@@ -208,10 +218,10 @@ export function ToolApprovalModal({
                     >
                       {RISK_LABEL[call.risk]}
                     </span>
-                    <span className="font-mono text-[10px] text-muted">
-                      {/* MCP 工具名是 `服务__工具` 的内部命名：直接展示双下划线像代码，
-                          换成「服务 · 工具」既保留可辨识度，又不暴露命名约定 */}
-                      {call.name.replace(/__/g, " · ")}
+                    <span className="font-mono text-[10px] text-muted" title={call.name}>
+                      {/* MCP 工具名是 `服务__工具` 的内部命名：展示成「服务 · 工具」，
+                          原文留在 title 供排障 */}
+                      {toolNameLabel(call.name)}
                     </span>
                   </label>
                   {call.summary ? (
@@ -269,7 +279,7 @@ export function ToolApprovalModal({
             <ul className="mt-1.5 flex flex-col gap-1">
               {auto.map((call) => (
                 <li key={call.id} className="ui-caption">
-                  <span className="font-mono">{call.name}</span>
+                  <span className="font-mono" title={call.name}>{toolNameLabel(call.name)}</span>
                   {call.summary ? ` · ${call.summary}` : ""}
                 </li>
               ))}
@@ -283,13 +293,6 @@ export function ToolApprovalModal({
           - file_patch / file_read 只能按**目录前缀**记（整工具放行是红线），
             且目标不在可写根内时**不显示**这个复选框——勾了也不会生效。
         */}
-        {calls.length > 0 && (
-          // 勾选语义必须写出来：写操作默认不勾，直接点「允许」只会把未勾的按拒绝处理
-          //（实测：用户点「仅本次允许」以为放行了，结果拿到「拒绝原因：未勾选」）。
-          <p className="rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-1.5 text-[10px] text-muted">
-            先勾选要放行的调用，再点下方按钮；没勾的会按拒绝处理。
-          </p>
-        )}
         {rememberable ? (
           <label className="mt-1 flex cursor-pointer items-start gap-2 ui-caption">
             <input

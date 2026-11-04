@@ -303,26 +303,57 @@ export function humanizeProviderError(raw: string): string {
   if (text === "未绑定 LLM 连接") {
     return "这个智能体还没有绑定模型连接，请先到「设置 → 模型」选一条连接。";
   }
+  /** 中文错误体里通常带着「哪一步不对」：能显示就显示，比套通用提示有用。 */
+  const hasCjk = (s: string) => /[\u4e00-\u9fff]/.test(s);
+  const detailOf = (s: string) => {
+    const body = decodeWords(s).replace(/\s+/g, " ").trim();
+    return hasCjk(body) && body.length <= 160 ? `服务商说明：${body}` : "";
+  };
+
   const http = text.match(/^provider_error:\s*HTTP\s+(\d{3})\b/i);
   if (http) {
     const status = Number(http[1]);
-    const hint =
+    const body = text.slice(http[0].length).trim();
+    // 状态码能直接定位的，先用状态码：语义比词表更确定
+    const direct =
       status === 401 || status === 403
         ? "模型服务鉴权失败：请到「设置 → 模型」检查 API Key 是否正确、是否有权限。"
         : status === 404
           ? "接口地址找不到：请检查 Base URL（通常以 /v1 结尾）。"
           : status === 408
             ? "模型服务响应超时：请稍后重试。"
-            : status === 429
-              ? "请求太频繁或额度用尽：稍等片刻再试；持续出现请检查服务商额度。"
-              : status === 400
-                ? "请求被服务商拒绝：可能是模型名或参数不被支持。"
-                : status >= 500
-                  ? "模型服务暂时不可用：请稍后重试。"
-                  : "模型请求失败。";
-    return `${hint}（HTTP ${status}）`;
+            : "";
+    if (direct) return `${direct}（HTTP ${status}）`;
+
+    // 其余交给已有的失败分类（与路由/冷却共用一套判据）——否则「上下文太长」「余额不足」
+    // 这类真实高频错误会被统一翻成「模型名或参数不支持」，给错建议。
+    const kind = classifyFailure({ status, body, retryAfterMs: 0 }).kind;
+    const hint: Partial<Record<FailureKind, string>> = {
+      overflow: "这轮对话太长了，超出模型能读的长度：请缩短上下文或新建对话。",
+      credit: "模型服务余额不足：请先到服务商充值后再试。",
+      quota: "模型服务的额度已用完：请稍后重试或检查套餐额度。",
+      rate: "请求太频繁：稍等片刻再试。",
+      auth: "模型服务鉴权失败：请到「设置 → 模型」检查 API Key 与权限。",
+      verify: "模型服务要求先验证账号：请到服务商完成验证。",
+      restricted: "账号被服务商限制：需要到服务商申诉或更换账号。",
+      modelGone: "这个模型在服务商处不可用：请换一个模型或连接。",
+      shape: "服务商不接受这个请求格式：可尝试更换模型，或先关闭工具再试。",
+      region: "当前地区不支持该服务商：请更换网络出口或服务商。",
+      refused: "服务商拒绝了这个客户端：请更换连接方式。",
+      protection: "内容被服务商的安全策略拦下：请改写后重试。",
+      cut: "模型响应被中途中断：请重试。",
+      transient: "模型服务暂时不可用：请稍后重试。",
+      fatal: "请求被服务商拒绝。",
+      aborted: "生成已停止。",
+    };
+    const detail = detailOf(body);
+    const base = hint[kind] ?? "模型请求失败。";
+    return `${base}${detail ? `（${detail}）` : ""}（HTTP ${status}）`;
   }
   if (/^provider_error:/i.test(text)) {
+    const body = text.replace(/^provider_error:\s*/i, "");
+    const detail = detailOf(body);
+    if (detail) return `${detail}。`;
     return "连不上模型服务：请检查网络与 Base URL 后重试。";
   }
   return text;

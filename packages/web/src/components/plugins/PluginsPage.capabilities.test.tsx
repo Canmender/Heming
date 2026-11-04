@@ -476,7 +476,7 @@ describe("插件页 · 贡献与权限", () => {
     store.install(JSON.stringify(v2Manifest()));
     renderPage();
     const card = screen.getByRole("region", { name: "插件 天气能力包" });
-    expect(card).toHaveTextContent("权限：旧格式清单：未声明权限");
+    expect(card).toHaveTextContent("权限：旧格式清单：没有声明权限");
   });
 });
 

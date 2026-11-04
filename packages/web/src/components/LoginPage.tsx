@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { FOCUS_RING } from "../lib/a11y/focus.js";
 import { Wordmark } from "./Wordmark.js";
@@ -18,6 +18,18 @@ export function LoginPage() {
   const error = useAuthStore((s) => s.error);
   const login = useAuthStore((s) => s.login);
   const clearError = useAuthStore((s) => s.clearError);
+  const userRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * 打开即聚焦用户名——但**只在焦点确实无处可去时**：
+   * 会话过期被踢回登录页时，用户可能正在输入框里打字，autofocus 抢焦点会把后续按键吞进用户名框。
+   */
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      if (document.activeElement === document.body) userRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,10 +72,9 @@ export function LoginPage() {
              * 所以显式给 aria-label；错误时用 aria-invalid + aria-describedby 关联到错误行。
              */}
             <input
+              ref={userRef}
               aria-label="用户名"
               autoComplete="username"
-              /* 登录页只有两个字段：打开就能直接输，不用先点一下 */
-              autoFocus
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? "login-error" : undefined}
               className={`ui-input ${FOCUS_RING}`}
@@ -76,7 +87,9 @@ export function LoginPage() {
               aria-label="密码"
               autoComplete="current-password"
               aria-invalid={error ? true : undefined}
-              aria-describedby={error ? "login-error" : undefined}
+              aria-describedby={
+                error ? "login-error login-capslock" : "login-capslock"
+              }
               className={`ui-input ${FOCUS_RING}`}
               placeholder="密码"
               type="password"
@@ -87,11 +100,17 @@ export function LoginPage() {
               onBlur={() => setCapsLock(false)}
               required
             />
-            {capsLock && (
-              <div role="status" className="ui-caption text-[#8a5a00]">
-                大写锁定已开启
-              </div>
-            )}
+            {/*
+              大写锁定提示：live region 常驻（动态插入的 role=status 很多读屏不播报），
+              关闭时 sr-only 不占位；同时通过 aria-describedby 挂在密码框上，聚焦即可听到。
+            */}
+            <div
+              id="login-capslock"
+              role="status"
+              className={capsLock ? "ui-caption text-[#8a5a00]" : "sr-only"}
+            >
+              {capsLock ? "大写锁定已开启" : ""}
+            </div>
             {error && (
               // 失败原因必须被读屏播报：role=alert 让它在出现时立刻读出（不是等用户 Tab 到）
               <div id="login-error" role="alert" className="ui-caption text-[#b42318]">

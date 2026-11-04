@@ -262,7 +262,14 @@ const FILE_IV_LEN = 12;
 const FILE_KEY_LEN = 32;
 
 /** 无 subtle 的附件拦截文案（与 ChatPage NO_E2E_NOTICE 同语义；api 层不 import 组件防环）。 */
-const NO_E2E_FILE_ERROR = "当前环境不支持端到端加密，附件未处理";
+/**
+ * 无安全上下文（file:// 或 http 非回环）时统一的加密不可用文案。
+ * 聊天页横幅与附件上传失败共用这一句，避免同一条件两种说法。
+ */
+export const NO_E2E_MESSAGE =
+  "当前环境无法加密消息，请在桌面端打开，或使用以 https 开头的网址访问";
+
+const NO_E2E_FILE_ERROR = `${NO_E2E_MESSAGE}（附件未处理）`;
 
 /** 解密失败的可读文案（密钥不匹配/密文损坏/AAD 漂移统一口径，气泡占位直接展示）。 */
 const FILE_DECRYPT_ERROR = "附件解密失败（密钥不匹配或数据已损坏）";

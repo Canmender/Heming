@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toolNameLabel } from "../lib/toolName.js";
 import { useChatStore } from "../store/chat.js";
 import { useLlmStore } from "../store/llm.js";
 import { useUiStore } from "../store/ui.js";
@@ -984,7 +985,7 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
               <ul className="mt-1 flex flex-col gap-0.5 text-[11px] leading-5 text-muted">
                 {forkDraft.preview.reuse.map((pair) => (
                   <li key={`${pair.callSeq}-${pair.resultSeq}`} className="truncate">
-                    {pair.name || pair.id}
+                    {pair.name ? toolNameLabel(pair.name) : pair.id}
                     {pair.denied ? "（已拒绝）" : pair.ok ? "" : "（失败）"}
                   </li>
                 ))}

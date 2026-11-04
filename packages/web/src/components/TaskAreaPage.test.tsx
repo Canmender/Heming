@@ -263,7 +263,8 @@ describe("通用智能体页面", () => {
     const dialog = screen.getByRole("dialog", { name: "从这一步之后分叉" });
     // P3：点之前就看清复用哪几条、丢弃哪些
     expect(within(dialog).getByText(/将沿用 1 条工具结果/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/srv__read/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/srv · read/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/srv__read/)).not.toBeInTheDocument();
     expect(within(dialog).getByText(/将丢弃 1 条记录/)).toBeInTheDocument();
     // 诚实提示：前缀是重建的、可能被截断
     expect(within(dialog).getByText(/前缀由本机日志重建/)).toBeInTheDocument();
