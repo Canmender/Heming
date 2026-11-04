@@ -129,6 +129,7 @@
 | [specs/2026-11-03-d68-pet-interaction.md](superpowers/specs/2026-11-03-d68-pet-interaction.md) | **d.68 桌宠交互修复**：`fitModel` 用已缩放尺寸导致「局部放大/裁切」的代数推导与自然尺寸幂等拟合（`live2dFit.ts`）、拖拽中冻结重排与落点统一重拟合、跨屏 DPR 同步、右键菜单两个叠加缺陷（命中区漏菜单 / click-away 抢在 click 前卸载）、菜单键盘与重置位置/穿透开关、真机待验清单 |
 | [specs/2026-11-03-d68-nav-layout.md](superpowers/specs/2026-11-03-d68-nav-layout.md) | **d.68 导航自动隐藏 + 布局字体**：`pinned/auto` 两模式与 `heming.nav.mode.v1`、左缘 8px 热区/300ms 收回/Esc/焦点还热区、`Ctrl/⌘+B` 三态、浮层 absolute 不挤压内容、设置卡与 pin 按钮同源；字体栈拉丁在前/CJK 在后、占位符对比度 AA、`.ui-card`/`.ui-overlay-shadow`、主页窄窗排布 |
 | [specs/2026-11-03-d68-custom-content.md](superpowers/specs/2026-11-03-d68-custom-content.md) | **d.68 自定义内容简化**：自建智能体 4 模板 + 基础/进阶渐进披露、创建后直接进对话；自定义技能新建弹窗（必填名称+内容、3 模板、创建即分配、空态直达）；明确不做记忆区/Wiki、云同步与键位迁移 |
+| [specs/2026-11-04-d68-selfcheck.md](superpowers/specs/2026-11-04-d68-selfcheck.md) | **d.68.2.26 自检与再优化**：headless Edge + CDP 真实浏览器逐页自检方法、8 个实测问题（暗色组件基元白底/热力图白方块/开关倒置/缺失 hover、导航 auto 鼠标焦点钉住、桌宠菜单贴边被裁与无桥死按钮、插件区统计滞后）的根因/修法/证据，以及未复验项 |
 
 ## 4. 调研
 

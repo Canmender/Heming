@@ -12,6 +12,44 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.68.2.26.0",
+    "date": "2026-11-04",
+    "title": "自检：暗色可读了、导航浮层会收了、统计不再滞后",
+    "bullets": [
+      "**组件基元的白底**：`.ui-btn-ghost` / `.ui-input` / `.ui-chip` 在 d.63 收口时把 `bg-white` / `bg-[#fafafa]` `@apply` 进了 `@layer components`，而 d.67 的暗色兼容层只按 **JSX 类名**覆盖（`[data-theme=\"dark\"] .bg-white`）——匹配不到组件类，于是暗色下按钮/输入框是白底、文字是浅色变量，几乎看不见。改为 `var(--surface)` / `var(--subtle)`，`:disabled`、hover、表格/列表 hover 同步走变量。",
+      "**用量热力图**：`TokenHeatmap` 的 5 档颜色是组件内联 hex，暗色下 30 个白方块。改为 `--heat-0…4` 两套变量（暗色用层级灰 + 压暗蓝阶），今日格子描边改 `var(--line-strong)`。",
+      "**开关配色**：4 处开关用 `bg-[#d8d8d8]` + `bg-white`，暗色下轨道浅灰、滑块被兼容层映射成深色（观感倒置）。新增 `--switch-off` / `--switch-knob`，滑块按开启/关闭取 `--heming-on-accent` / `--switch-knob`。",
+      "**悬停闪白**：兼容层只覆盖了 3 个 `hover:bg-[#…]`，实际用到 7+ 种浅灰 hover。按静态底色层级补齐映射，并补 `bg-[#ebebeb]/#e9e9e9/#ececec/#e8e8e8` 等中性色。",
+      "**验证**：暗色下逐页扫描（9 页）无「亮底+亮字 / 暗底+暗字」；计算样式：ghost/input `rgb(22,23,26)`、placeholder `#8b9199`；新增 `lib/themePrimitives.test.ts` 源码守卫（基元变量、暗色 `.ui-card`、常用 hover、热力图两套 token、开关变量）。",
+      "**现象**：auto 模式悬停展开 → 鼠标点「记忆区」→ 页面切换、鼠标移开，等 1 秒浮层仍开着。",
+      "**根因**：收回条件只看「焦点是否在导航内」；鼠标点按钮后按钮保留 focus，这份**鼠标焦点**被当成键盘焦点，浮层被钉死。",
+      "**修法**：用 `keydown`/`pointerdown` + `:focus-visible` 区分键盘与鼠标焦点；只有键盘焦点才保留浮层；auto 模式下鼠标点击导航项后立即收起并 `blur`，避免焦点停在 inert 元素上。键盘 Enter 激活仍保留浮层（焦点连续）。",
+      "**验证**：真实鼠标实测 `aria-hidden=true`、`focusInside=false`；新增 3 条单测（鼠标焦点不钉住 / 键盘焦点保留 / 点击项立即收起）。",
+      "**贴边被裁**：旧估算宽 156px，实际菜单宽 166px；300×420 窗口在 x=144 右键时右边缘到 310px，超出 10px。估算改为 176/252，并新增 `useLayoutEffect` 在绘制前按真实 `getBoundingClientRect()` 再夹一次（只在溢出且坐标真变时调整）。实测 `right=296 < 300`。",
+      "**浏览器降级**：没有 Electron 桥时，菜单仍渲染放大/缩小/设置/隐藏/「鼠标穿透（读取中）」——全是死按钮，且「读取中」永远不结束。改为统一能力探测 `{hasBridge, canScale, canResetPosition, canToggleClickThrough}`，无桥时只保留「说点什么」；旧 preload 缺单项时也不显示该项。",
+      "**顺带**：导航浮签的快捷键键帽在暗色下对比度低，改为 `border-current + opacity-70`。",
+      "**现象**：技能池 7→8 且已分配，顶部统计卡仍显示 7。",
+      "**根因**：统计来自宿主 `PluginsPage` 的 `describeCapabilities(...)`，只在宿主 `tick` 变化时重算；内嵌的 `SkillsView` 有自己的 tick，变更没有通知宿主。",
+      "**修法**：`SkillsView` 增加可选 `onChanged`，内部 `bump()` 同时通知宿主；插件区传 `onChanged={bump}`。独立页/旧用例不传，行为不变。",
+      "**验证**：浏览器实测 8→9；新增 2 条用例（SkillsView 触发 onChanged、PluginsPage 统计 +1）。",
+      "全量门禁（2026-11-04 08:2x）：`pnpm -r build` 通过；**shared 2 文件 / 29 例，server 10 文件 / 141 例，web 228 文件 / 3401 例，desktop 538 例**全绿；`pnpm -r typecheck` 四包零错误。",
+      "本轮 web 净增 1 个测试文件 / +24 例（基线 d.68.2.25 的 227 / 3377）：`lib/themePrimitives.test.ts`（17 例）、NavRail +3、PetWindow.menu +1、SkillsPage +1、PluginsPage +1 等。",
+      "浏览器自检通过：九页暗色扫描 0 亮底亮字；1280/1100/1024 三档 × 6 页无横向溢出；Ctrl/⌘+B 三态与 Esc；恢复默认外观（深色+自动隐藏 → 跟随系统+常显）；自建智能体与自定义技能真实提交无异常。",
+      "**未复验（如实标注）**：Electron 真机上的桌宠拖拽、跨 DPI 屏、菜单实际点击与导航悬停观感——需要安装后人工操作；本轮只做到「真实浏览器 + 组件测试」这一层，不写「肉眼已验证」。",
+      "明确不做：重做暗色兼容层（仍是迁移期方案）、引入 Playwright/Cypress（自检脚本留在本机 `.tmp` 不入库）、改桌宠透明窗/穿透模型。"
+    ],
+    "paragraphs": [
+      "d.68.2.25 上线前一天的自检轮。方法不是「看单测全绿」，而是**用 headless Edge + CDP 真开一次前端**：",
+      "登录、真实鼠标/键盘操作、九页 × 亮/暗 × 四档宽度截图与计算样式扫描、桌宠页降级环境实测。",
+      "规格见 `docs/superpowers/specs/2026-11-04-d68-selfcheck.md`（含方法、复现步骤与未复验项）。",
+      "### 一、暗色主题：从「白底白字」到可读（自检发现 3 类）",
+      "### 二、导航 auto 模式：鼠标点完导航项后浮层永远不收回（自检实测复现）",
+      "### 三、桌宠右键菜单：贴边被裁 + 浏览器里一排死按钮（自检实测复现）",
+      "### 四、插件区统计滞后：新建技能后统计不 +1（自检实测复现）",
+      "### 五、自检通过项与验证"
+    ]
+  },
+  {
     "version": "d.68.2.25.0",
     "date": "2026-11-03",
     "title": "桌宠能拖稳了，导航能收起来了，自定义内容少填一半",

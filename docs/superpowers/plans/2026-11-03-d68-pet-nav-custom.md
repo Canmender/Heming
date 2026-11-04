@@ -224,3 +224,10 @@ pixi 的 `Container.width` 是**缩放后的宽度**（`scale.x × localBounds.w
 - Lead 额外收口：`.ui-card` 的暗色回归（背景/阴影改 CSS 变量 + `[data-theme="dark"] .ui-card` 覆盖；原 `@apply bg-white shadow-card` 匹配不到按类名的兼容层）。
 - 版本 `d.68.2.25.0`、CHANGELOG + `generated/changelog.ts`、HANDOFF/INDEX 已回填；分支 `feat/d68-pet-nav-custom` 按工作流分提交，**未 push、未部署、未打安装包**（用户未要求）。
 - 真机待验：桌宠跨 DPI 屏拖动/松手/换屏清晰度、菜单逐项/键盘/穿透边界、导航悬停滑出与暗色浮层观感——见各规格与 `docs/PET.md`，不宣称已验证。
+
+## 8. 自检轮记录（2026-11-04，d.68.2.26.0）
+
+- 用户追加「自检和再优化」后，用 headless Edge + CDP 真开前端做逐页自检（方法/证据见 `docs/superpowers/specs/2026-11-04-d68-selfcheck.md`），**不是**只重跑单测。
+- 实测修掉 8 个真实问题：暗色组件基元白底近白字、热力图白方块、开关倒置、缺失 hover 映射、导航 auto 鼠标点完不收回、桌宠菜单贴边被裁、桌宠浏览器无桥死按钮、插件区统计滞后；新增 `themePrimitives` 源码守卫与 5 条行为用例。
+- 最终门禁（2026-11-04）：`pnpm -r build` 通过；shared 2/29、server 10/141、web **228 文件 / 3401 例**、desktop 538 例全绿；`pnpm -r typecheck` 四包零错误。
+- 仍未做：Electron 真机拖拽/跨 DPI/菜单点击（需安装后人工）、把 CDP 自检脚本接 CI/引入 E2E 基线（需拍板）。
