@@ -163,7 +163,8 @@ ls -la /opt/heming/keep
 bash /opt/heming/app/deploy/install-app.sh /opt/heming/keep/heming-<旧版本>.tar.gz <旧版本>
 ```
 
-`/var/lib/heming` 全程不动，回滚不涉及数据。旧包别删：回滚依赖它（40G 磁盘、包 5MB，留得起）。
+`/var/lib/heming` 全程不动，回滚不涉及数据。`/opt/heming/keep/` **不清理**：服务器回滚依赖它（40G 磁盘、每包约 17MB，留得起）。
+注意与「更新源（`/opt/heming/updates/`）」区分：后者只保留最近 2 版安装包即可（客户端回滚够用），2026-11-04 已按此清理过一次（5 版 1.1G → 2 版 436M）。
 
 ## 6. 备份
 
@@ -318,7 +319,7 @@ curl -sI -H 'Range: bytes=0-16' "http://47.92.39.184/updates/<URL 编码后的�
 
 ### 回滚
 
-把 `/opt/heming/updates/latest.yml` 换回上一版的（连同安装包与 blockmap）即可。已安装的客户端下次检查会回到旧版本——**这正是要的效果**。旧包别急着删：回滚依赖它。
+把 `/opt/heming/updates/latest.yml` 换回上一版的（连同安装包与 blockmap）即可。已安装的客户端下次检查会回到旧版本——**这正是要的效果**。所以更新源**至少保留上一版**；现行口径是「保留最近 2 版」（当前 + 上一版），更早的可以清理。**`/opt/heming/keep/` 不适用这条**：服务器回滚依赖全部历史包，不要清理。
 
 ## 10. 资源与运维参考
 

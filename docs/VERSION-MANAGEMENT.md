@@ -96,6 +96,14 @@ node scripts/bump-version.mjs d.5.2.0.0      # 或直接指定（必须大于当
    `packages/web/src/generated/changelog.ts`（忘了会被 `changelog-sync.test.js` 抓出来）
 4. `pnpm dist:desktop`（内部会先构建嵌入用的 web 产物）
 5. 需要时部署云端（见 `docs/deploy.md`）
+6. **打发布标签并推送**（每版必做，便于回滚与对照）：
+   `git tag -a d.x.y.z -m "release d.x.y.z（YYYY-MM-DD 部署）"` → `git push origin d.x.y.z`。
+   （`d.66.2.25.0` / `d.67.2.25.0` / `d.68.2.26.0` 是 2026-11-04 补打的示例；标签打在「版本 + CHANGELOG + 证据回填」所在的提交上）
+7. **合并与推送**：在 clean 的 main 工作树里 `git merge --ff-only <发布提交>`，再 `git push origin main`；
+   远端 feature 分支合并后即可删除（`git push origin --delete <分支>`、`git branch -d <分支>`）。
+8. **清理旧版**（发布后）：`/opt/heming/updates/` 只保留最近 **2 版**（当前 latest + 上一版，客户端回滚够用）；
+   `/opt/heming/keep/` 是服务器回滚依赖，**不清理**；本机 `packages/desktop/release/` 只留最近 2 个 `rNN`。
+   仓库侧建议保持 `fetch.prune=true` / `pull.ff=only`（本机已设），已合并分支及时删，未合并分支不要删。
 
 ## 一条命令发版
 
