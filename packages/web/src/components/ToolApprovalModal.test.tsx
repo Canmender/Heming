@@ -226,3 +226,17 @@ describe("ToolApprovalModal", () => {
     expect(screen.getByText("没有待确认的调用。")).toBeInTheDocument();
   });
 });
+
+describe("ToolApprovalModal · 勾选语义说清楚", () => {
+  it("弹窗里写明「先勾选再允许，没勾的按拒绝」——避免点了允许却得到拒绝", () => {
+    render(<ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={vi.fn()} />);
+    expect(screen.getByText(/先勾选要放行的调用/)).toBeInTheDocument();
+    expect(screen.getByText(/没勾的会按拒绝处理/)).toBeInTheDocument();
+  });
+
+  it("MCP 工具名按「服务 · 工具」展示，不把内部双下划线原样暴露给用户", () => {
+    render(<ToolApprovalModal requestId="req-1" calls={[writeCall]} onDecide={vi.fn()} />);
+    expect(screen.getByText("fs · write_file")).toBeInTheDocument();
+    expect(screen.queryByText("fs__write_file")).not.toBeInTheDocument();
+  });
+});

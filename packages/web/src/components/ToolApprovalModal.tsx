@@ -208,7 +208,11 @@ export function ToolApprovalModal({
                     >
                       {RISK_LABEL[call.risk]}
                     </span>
-                    <span className="font-mono text-[10px] text-muted">{call.name}</span>
+                    <span className="font-mono text-[10px] text-muted">
+                      {/* MCP 工具名是 `服务__工具` 的内部命名：直接展示双下划线像代码，
+                          换成「服务 · 工具」既保留可辨识度，又不暴露命名约定 */}
+                      {call.name.replace(/__/g, " · ")}
+                    </span>
                   </label>
                   {call.summary ? (
                     <div className="mt-0.5 break-all ui-caption">{call.summary}</div>
@@ -279,6 +283,13 @@ export function ToolApprovalModal({
           - file_patch / file_read 只能按**目录前缀**记（整工具放行是红线），
             且目标不在可写根内时**不显示**这个复选框——勾了也不会生效。
         */}
+        {calls.length > 0 && (
+          // 勾选语义必须写出来：写操作默认不勾，直接点「允许」只会把未勾的按拒绝处理
+          //（实测：用户点「仅本次允许」以为放行了，结果拿到「拒绝原因：未勾选」）。
+          <p className="rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-1.5 text-[10px] text-muted">
+            先勾选要放行的调用，再点下方按钮；没勾的会按拒绝处理。
+          </p>
+        )}
         {rememberable ? (
           <label className="mt-1 flex cursor-pointer items-start gap-2 ui-caption">
             <input

@@ -161,6 +161,15 @@ describe("HTTP 传输客户端", () => {
     await expect(c2.listTools()).rejects.toThrow(/HTTP 500/);
   });
 
+  it("网络层失败（浏览器 TypeError: Failed to fetch）→ 翻成可排查的中文，不把英文原样甩给用户", async () => {
+    const netErr = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    const c = createHttpMcpClient(SERVER, netErr as unknown as typeof fetch);
+    await expect(c.listTools()).rejects.toThrow(/连不上这个 MCP 地址/);
+    await expect(c.listTools()).rejects.not.toThrow(/Failed to fetch/);
+  });
+
   it("内容块拼平：文本直出、图片与资源给占位", () => {
     expect(
       stringifyContent([

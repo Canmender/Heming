@@ -102,6 +102,13 @@ export function createHttpMcpClient(
         if (external?.aborted) throw new Error("工具调用已中断");
         throw new Error(`MCP 服务超时（${MCP_HTTP_TIMEOUT_MS / 1000}s 未响应）`);
       }
+      // fetch 的网络层失败在浏览器里抛 TypeError("Failed to fetch")：这句英文对用户毫无意义，
+      // 也看不出是「服务没开」「地址写错」还是「服务不允许跨域」。统一翻成可排查的一句话。
+      if (err instanceof TypeError) {
+        throw new Error(
+          "连不上这个 MCP 地址：请确认服务已启动、地址填写正确，且服务允许跨域访问（CORS）。",
+        );
+      }
       throw err instanceof Error ? err : new Error(String(err));
     } finally {
       clearTimeout(timer);
