@@ -1,4 +1,4 @@
-import type { ComponentType, SVGProps } from "react";
+import { useMemo, useState, type ComponentType, type SVGProps } from "react";
 import { useUiStore } from "../../store/ui.js";
 import {
   BUILTIN_MODULES,
@@ -13,7 +13,9 @@ import {
   useModuleStore,
 } from "../../lib/modules/store.js";
 import { AutomationIcon, InfoHubIcon, StaffIcon } from "../icons.js";
-import { BTN_GHOST, HINT, Switch } from "./shared.js";
+import { moduleCleanupPlan } from "../../lib/modules/lifecycle.js";
+import { ConfirmDialog } from "../ConfirmDialog.js";
+import { BTN_GHOST, BTN_GHOST_SM, HINT, Switch } from "./shared.js";
 
 /**
  * 插件区 · 模块 Tab（d.70）：把内置能力模块按插件卡片的样子摆出来。
@@ -48,8 +50,14 @@ function ModuleCard({ mod }: { mod: BuiltinModule }) {
   const effective = enabled && missing.length === 0;
   const setPage = useUiStore((s) => s.setPage);
   const Icon = MODULE_ICONS[mod.id];
+  const cleanup = moduleCleanupPlan(mod.id);
+  const [confirmingCleanup, setConfirmingCleanup] = useState(false);
+  const [cleanupNotice, setCleanupNotice] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  /** tick 只用来在清理后重算占用（localStorage 不是响应式数据）。 */
+  const refreshOccupancy = () => setTick((n) => n + 1);
+  const occupancy = useMemo(() => moduleStorageBytes(mod), [mod, tick]);
 
-  const occupancy = moduleStorageBytes(mod);
   const contributions: string[] = [];
   if (mod.contributions.page) contributions.push("导航入口 + 页面");
   if (mod.contributions.homeCard) contributions.push("首页卡片");
@@ -137,7 +145,62 @@ function ModuleCard({ mod }: { mod: BuiltinModule }) {
         <span className="ui-caption">
           {effective ? "当前生效" : enabled ? "依赖项启用后自动恢复" : "随时可重新启用"}
         </span>
+        {cleanup ? (
+          <button
+            type="button"
+            onClick={() => {
+              setCleanupNotice(null);
+              setConfirmingCleanup(true);
+            }}
+            className={`${BTN_GHOST_SM} ml-auto text-[#b42318]`}
+          >
+            清理本机数据
+          </button>
+        ) : null}
+        {cleanupNotice ? (
+          <span role="status" className="ui-caption text-[#8a5a00]">
+            {cleanupNotice}
+          </span>
+        ) : null}
       </div>
+
+      {cleanup && confirmingCleanup ? (
+        <ConfirmDialog
+          title={cleanup.title}
+          onCancel={() => setConfirmingCleanup(false)}
+          footer={
+            <>
+              <button
+                type="button"
+                className={BTN_GHOST}
+                onClick={() => setConfirmingCleanup(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn-md ui-btn-primary"
+                onClick={() => {
+                  const error = cleanup.run();
+                  setCleanupNotice(error ?? "已清理本机数据");
+                  setConfirmingCleanup(false);
+                  refreshOccupancy();
+                }}
+              >
+                清理
+              </button>
+            </>
+          }
+        >
+          <p className="text-[13px] leading-6">{cleanup.description}</p>
+          <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-[12px] leading-5 text-muted">
+            {cleanup.items.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] text-[#8a5a00]">清理不可恢复，请确认后再执行。</p>
+        </ConfirmDialog>
+      ) : null}
     </section>
   );
 }

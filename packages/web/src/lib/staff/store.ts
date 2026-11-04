@@ -43,6 +43,13 @@ interface StaffState {
   markSeen: (keys: { agenda: string[]; tasks: string[] }, now?: number) => void;
   /** 清空历史简报（去重账本保留，避免清完又重新提醒一遍）。 */
   clearRuns: () => void;
+  /**
+   * 模块生命周期用：清空**简报 + 已见账本**，保留设置（是否常驻、来源、频率）。
+   *
+   * 为什么保留设置：清理的是「产生过的内容」，不是用户的配置；
+   * 去重账本也一起清，是因为用户明确要「清空本机数据」，留着账本会解释不通。
+   */
+  clearHistory: () => void;
 }
 
 let storage: StorageLike | null = null;
@@ -123,5 +130,13 @@ export const useStaffStore = create<StaffState>((set, get) => ({
 
   clearRuns: () => {
     set({ runs: persistRuns([]) });
+  },
+
+  clearHistory: () => {
+    set({ runs: persistRuns([]), seen: (() => {
+      const next = normalizeSeen(null);
+      persistSeen(next);
+      return next;
+    })() });
   },
 }));

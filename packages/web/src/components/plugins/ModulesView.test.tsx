@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { ModulesView } from "./ModulesView.js";
 import { useModuleStore } from "../../lib/modules/store.js";
+import { useStaffStore } from "../../lib/staff/store.js";
+import { normalizeSeen } from "../../lib/staff/model.js";
+import { useAutomationStore } from "../../lib/automation/store.js";
+import { ALL_WEEKDAYS, type AutomationDraft } from "../../lib/automation/model.js";
 
 /**
  * 插件区 · 模块 Tab（d.70）。
@@ -86,5 +90,63 @@ describe("ModulesView 内置能力模块卡", () => {
       "false",
     );
     expect(within(staff).getByRole("button", { name: "打开页面" })).toBeDisabled();
+  });
+
+  it("清理幕僚数据：先弹确认、写明会删什么，确认后清空且保留设置", () => {
+    useStaffStore.setState({
+      runs: [
+        {
+          id: "run-1",
+          trigger: "manual",
+          mode: "rules",
+          startedAt: 1,
+          finishedAt: 1,
+          summary: "今天没有临期事项",
+          findings: [],
+          tokens: null,
+        },
+      ],
+      seen: { agenda: { "2026-11-01": 1 }, tasks: {} },
+    });
+    render(<ModulesView />);
+    const staff = screen.getByRole("region", { name: "模块 幕僚" });
+    fireEvent.click(within(staff).getByRole("button", { name: "清理本机数据" }));
+
+    const dialog = screen.getByRole("dialog", { name: "清理「幕僚」的本机数据？" });
+    // 破坏性操作必须把「删什么、什么会保留」说清楚，再让用户点确认
+    expect(within(dialog).getByText(/历史简报/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/设置会保留/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "清理" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useStaffStore.getState().runs).toEqual([]);
+    expect(useStaffStore.getState().seen).toEqual(normalizeSeen(null));
+    expect(within(staff).getByRole("status")).toHaveTextContent("已清理本机数据");
+  });
+
+  it("清理自动化数据：有任务在运行时拒绝清理并提示原因", () => {
+    const draft: AutomationDraft = {
+      name: "同步归档",
+      kind: "infohub.sync",
+      schedule: { type: "daily", time: "09:00", weekdays: [...ALL_WEEKDAYS] },
+      sync: { sources: ["qq"], full: false, archive: false },
+    };
+    const created = useAutomationStore.getState().create(draft, 1);
+    const taskId = created.ok ? created.id : "";
+
+    render(<ModulesView />);
+    const automations = screen.getByRole("region", { name: "模块 自动化" });
+    fireEvent.click(within(automations).getByRole("button", { name: "清理本机数据" }));
+    useAutomationStore.setState({ runningId: taskId });
+
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "清理「自动化」的本机数据？" })).getByRole(
+        "button",
+        { name: "清理" },
+      ),
+    );
+    expect(within(automations).getByRole("status")).toHaveTextContent(/正在运行/);
+    expect(useAutomationStore.getState().tasks).toHaveLength(1);
+    useAutomationStore.setState({ tasks: [], runningId: null });
   });
 });
