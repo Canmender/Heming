@@ -15,6 +15,7 @@ import {
   type InfohubSearchResult,
 } from "./client.js";
 import { canUseInfohub, useInfohubStore } from "./store.js";
+import { isModuleOn } from "../modules/store.js";
 
 /**
  * 本机归档工具（d.46）：让智能体直接检索/阅读 InfoHub 的 QQ/微信归档。
@@ -339,5 +340,7 @@ export function buildInfohubToolBridge(): ToolBridge {
 
 /** 只在桌面端且已连接时提供归档工具。 */
 export function buildInfohubToolsIfConnected(): ToolBridge | null {
+  // d.70：信息中枢模块停用后，工具与页面一起下线——否则模型仍能检索用户以为「已关掉」的归档
+  if (!isModuleOn("infohub")) return null;
   return canUseInfohub() ? buildInfohubToolBridge() : null;
 }

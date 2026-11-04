@@ -15,6 +15,7 @@ import { runStaffNow } from "../lib/staff/manual.js";
 import { useStaffStore, type StaffSettingsPatch } from "../lib/staff/store.js";
 import { useLlmStore } from "../store/llm.js";
 import { useUiStore } from "../store/ui.js";
+import { isModuleEffective, useModuleStore } from "../lib/modules/store.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { StaffIcon } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
@@ -44,6 +45,8 @@ const SEVERITY_CLASS: Record<StaffFinding["severity"], string> = {
 function FindingRow({ finding }: { finding: StaffFinding }) {
   const openInfohub = useUiStore((s) => s.openInfohub);
   const focusTask = useUiStore((s) => s.focusTask);
+  // d.70：信息中枢停用时，「看日程」没有落点——禁用并说明，而不是点完回主页
+  const infohubOn = useModuleStore((s) => isModuleEffective(s, "infohub"));
 
   function jump(): void {
     if (!finding.action) return;
@@ -79,7 +82,17 @@ function FindingRow({ finding }: { finding: StaffFinding }) {
             </span>
           ))}
           {finding.action && (
-            <button type="button" onClick={jump} className="ml-auto text-[11px] text-ink hover:underline">
+            <button
+              type="button"
+              onClick={jump}
+              disabled={finding.action.kind !== "open-task" && !infohubOn}
+              title={
+                finding.action.kind !== "open-task" && !infohubOn
+                  ? "信息中枢模块已停用：到「插件区 → 模块」启用后可查看日程"
+                  : undefined
+              }
+              className="ml-auto text-[11px] text-ink hover:underline disabled:cursor-not-allowed disabled:text-muted disabled:no-underline"
+            >
               {actionLabel}
             </button>
           )}

@@ -29,6 +29,7 @@ import { TokenHeatmap } from "./TokenHeatmap.js";
 import { OnboardingCard } from "./ux/OnboardingCard.js";
 import { TeamIcon } from "./icons.js";
 import { fileRootsStore } from "../lib/fileEdit/roots.js";
+import { isModuleEffective, useModuleStore } from "../lib/modules/store.js";
 
 /** 构建时注入的版本号（vite define __APP_VERSION__，file:// 桌面端无法 fetch package.json）。 */
 declare const __APP_VERSION__: string;
@@ -147,6 +148,12 @@ export function HomePage() {
       alive = false;
     };
   }, []);
+
+  const moduleEnabled = useModuleStore((s) => s.enabled);
+  const moduleState = {
+    staff: isModuleEffective({ enabled: moduleEnabled }, "staff"),
+    infoHub: isModuleEffective({ enabled: moduleEnabled }, "infohub"),
+  };
 
   const monthKey = useMemo(() => monthKeyOf(new Date().toISOString()), []);
   const monthSummary = useMemo(() => summarizeMonth(records, monthKey), [records, monthKey]);
@@ -416,11 +423,12 @@ export function HomePage() {
         <TokenHeatmap />
       </section>
 
-      {/* 2.6 本机归档：日程摘要与归档规模（仅桌面端渲染） */}
-      <InfohubHomeCard />
+      {/* 2.6 本机归档：日程摘要与归档规模（仅桌面端渲染）。
+          d.70：信息中枢模块停用后整张卡下线，不在首页留假入口。 */}
+      {moduleState.infoHub && <InfohubHomeCard />}
 
-      {/* 2.7 幕僚：最近一份主动简报（d.48） */}
-      <StaffHomeCard />
+      {/* 2.7 幕僚：最近一份主动简报（d.48）；模块停用后同样下线 */}
+      {moduleState.staff && <StaffHomeCard />}
 
       {/* 3/4/5/6. 两栏：左团队动向；右智能体动态 + 在线成员 + 系统状态。
           窄窗（<1200）折成单列：1.5fr/1fr 的比例在 1000px 出头的窗口里会把左栏压得读不完整。 */}

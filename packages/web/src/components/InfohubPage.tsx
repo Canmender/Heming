@@ -23,6 +23,7 @@ import {
 } from "../lib/infohub/client.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { useUiStore, type InfohubIntent } from "../store/ui.js";
+import { isModuleEffective, useModuleStore } from "../lib/modules/store.js";
 import { PageShell } from "./layout/PageShell.js";
 
 const SEARCH_LIMIT = 100;
@@ -111,6 +112,8 @@ export function InfohubPage() {
   const intent = useUiStore((s) => s.infohubIntent);
   const consumeInfohubIntent = useUiStore((s) => s.consumeInfohubIntent);
   const openAutomations = useUiStore((s) => s.openAutomations);
+  // d.70：自动化模块停用时，「定时 / 保存为定时任务 / 定时重扫」不把人送到一个不存在的页
+  const automationsOn = useModuleStore((s) => isModuleEffective(s, "automations"));
   const pendingIntentRef = useRef<InfohubIntent | null>(null);
 
   /** 当前连接配置：未填目录时交给主进程用默认目录。 */
@@ -443,7 +446,12 @@ export function InfohubPage() {
               <button
                 type="button"
                 aria-label="新建定时同步"
-                title="把当前同步选项设为定时任务"
+                title={
+                  automationsOn
+                    ? "把当前同步选项设为定时任务"
+                    : "自动化模块已停用：到「插件区 → 模块」启用后可再建定时任务"
+                }
+                disabled={!automationsOn}
                 onClick={scheduleSyncAutomation}
                 className="ui-btn ui-btn-sm ui-btn-ghost"
               >
@@ -635,7 +643,8 @@ export function InfohubPage() {
                 </button>
                 <button
                   type="button"
-                  disabled={syncing}
+                  disabled={syncing || !automationsOn}
+                  title={automationsOn ? undefined : "自动化模块已停用：到「插件区 → 模块」启用"}
                   onClick={scheduleSyncAutomation}
                   className="ui-btn ui-btn-sm ui-btn-ghost"
                 >
@@ -785,6 +794,8 @@ export function InfohubPage() {
                   <button
                     type="button"
                     aria-label="新建定时重扫"
+                    disabled={!automationsOn}
+                    title={automationsOn ? undefined : "自动化模块已停用：到「插件区 → 模块」启用"}
                     onClick={() => openAutomations({ kind: "infohub.agenda" })}
                     className="ui-btn ui-btn-sm ui-btn-ghost"
                   >

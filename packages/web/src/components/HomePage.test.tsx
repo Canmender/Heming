@@ -10,6 +10,8 @@ import { useTaskStore } from "../lib/tasks/store.js";
 import { useTokenUsageStore, monthKeyOf, daysOfMonth } from "../store/tokenUsage.js";
 import { ONBOARDING_KEY, useOnboardingStore } from "../lib/onboarding.js";
 import { FILE_ROOTS_KEY } from "../lib/fileEdit/roots.js";
+import { useModuleStore } from "../lib/modules/store.js";
+import { useInfohubStore } from "../lib/infohub/store.js";
 import { fetchTeam, fetchTeamActivities } from "../lib/api.js";
 
 // 团队名册与动向走 lib/api（首页真实数据优先）；health 探测仍走裸 fetch，单独 spy。
@@ -106,6 +108,7 @@ describe("HomePage", () => {
     localStorage.removeItem(ONBOARDING_KEY);
     // 可写根是 localStorage 的全局状态：不清会漏到后面的用例（尤其新加的「文件可写目录」用例）
     localStorage.removeItem(FILE_ROOTS_KEY);
+    useModuleStore.getState().reset();
     useOnboardingStore.setState({ dismissedAt: null });
     useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
     useTaskStore.setState({ tasks: [] });
@@ -293,6 +296,24 @@ describe("HomePage", () => {
     // 只有 write 根算「智能体能改哪些文件」，只读根不计入
     expect(screen.getByText("已绑定 1 个")).toBeInTheDocument();
     expect(screen.queryByText("未绑定")).not.toBeInTheDocument();
+  });
+
+  it("停用幕僚 / 信息中枢模块后，首页对应的卡一起下线（不留假入口）", async () => {
+    // jsdom 没有 InfoHub 桥，默认 available=false 卡本来就不渲染；先给一个「未连接」状态让卡出现
+    useInfohubStore.setState({ available: true, running: false });
+    // 先确认默认渲染时有这两张卡（否则下面的 queryBy 断言没有意义）
+    const first = render(<HomePage />);
+    await act(async () => {});
+    expect(screen.getByRole("region", { name: "幕僚" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "本机归档" })).toBeInTheDocument();
+    first.unmount();
+
+    useModuleStore.getState().setEnabled("staff", false);
+    useModuleStore.getState().setEnabled("infohub", false);
+    render(<HomePage />);
+    await act(async () => {});
+    expect(screen.queryByRole("region", { name: "幕僚" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "本机归档" })).not.toBeInTheDocument();
   });
 
   it("云端探测失败时状态显示「失败」", async () => {

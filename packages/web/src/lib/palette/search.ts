@@ -362,13 +362,18 @@ export function pluginPaletteItem(p: LocalPluginItem): PaletteItem {
  *
  * 最近使用里若某条已不存在（页面被删/动作下线），**静默跳过**而不是渲染一条点了没反应的项。
  */
-export function buildEmptyGroups(recent: RecentEntry[]): PaletteGroup[] {
+export function buildEmptyGroups(
+  recent: RecentEntry[],
+  /** 可用页面目录（d.70：停用的内置模块页不出现在面板里）；缺省为完整目录。 */
+  pages: readonly PalettePage[] = PALETTE_PAGES,
+): PaletteGroup[] {
   const groups: PaletteGroup[] = [];
   const recentItems: PaletteItem[] = [];
   for (const entry of recent) {
     if (entry.kind === "page") {
       const p = findPalettePage(entry.id);
-      if (p) recentItems.push(pageItem(p));
+      // 最近使用里可能残留已停用模块的页面：按当前可用目录过滤
+      if (p && pages.some((x) => x.page === p.page)) recentItems.push(pageItem(p));
     } else if (entry.kind === "setting") {
       const s = findPaletteSetting(entry.id);
       if (s) recentItems.push(settingItem(s));
@@ -381,7 +386,7 @@ export function buildEmptyGroups(recent: RecentEntry[]): PaletteGroup[] {
   if (recentItems.length) {
     groups.push({ id: "recent", label: GROUP_LABELS.recent, items: recentItems });
   }
-  groups.push({ id: "page", label: GROUP_LABELS.page, items: PALETTE_PAGES.map(pageItem) });
+  groups.push({ id: "page", label: GROUP_LABELS.page, items: pages.map(pageItem) });
   groups.push({ id: "action", label: GROUP_LABELS.action, items: PALETTE_ACTIONS.map(actionItem) });
   return groups;
 }
@@ -424,10 +429,13 @@ export function searchPalette(
     local?: LocalSnapshot;
     /** 启用中插件贡献的命令（面板打开时现读 store）；不传则本组为空。 */
     commands?: PluginCommandInfo[];
+    /** 可用页面目录（d.70：停用模块页不参与检索）；缺省为完整目录。 */
+    pages?: readonly PalettePage[];
   },
 ): PaletteGroup[] {
   const q = keyword.trim().toLowerCase();
-  if (!q) return buildEmptyGroups([]);
+  const pageCatalog = ctx.pages ?? PALETTE_PAGES;
+  if (!q) return buildEmptyGroups([], pageCatalog);
 
   const found = new Map<PaletteGroupId, PaletteItem[]>();
 
@@ -435,7 +443,7 @@ export function searchPalette(
     "page",
     // 先映射成面板项再排序：目录对象上的字段叫 label，排序要的是统一的 name。
     rank(
-      PALETTE_PAGES.filter((p) => matches(q, p.label, p.description)).map(pageItem),
+      pageCatalog.filter((p) => matches(q, p.label, p.description)).map(pageItem),
       q,
     ),
   );
@@ -490,7 +498,7 @@ export function searchPalette(
 
   const groups: PaletteGroup[] = [];
   const totals: Partial<Record<PaletteGroupId, number>> = {
-    page: PALETTE_PAGES.filter((p) => matches(q, p.label, p.description)).length,
+    page: pageCatalog.filter((p) => matches(q, p.label, p.description)).length,
     setting: PALETTE_SETTINGS.filter((s) => matches(q, s.label, s.description, s.keywords)).length,
     action: PALETTE_ACTIONS.filter((a) => matches(q, a.label, a.description, a.keywords)).length,
     "plugin-command": commandRes.total,

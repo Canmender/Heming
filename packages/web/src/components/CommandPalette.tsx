@@ -12,6 +12,8 @@ import { useInfohubStore } from "../lib/infohub/store.js";
 import { readLocalSnapshot, type LocalSnapshot } from "../lib/palette/local.js";
 import { PALETTE_PAGES, shortcutLabel } from "../lib/palette/pages.js";
 import { pluginStore } from "../lib/plugins/index.js";
+import { useModuleStore } from "../lib/modules/store.js";
+import { filterPalettePages } from "../lib/modules/nav.js";
 import { skillPool } from "../lib/skills/index.js";
 
 import { loadRecent, recordRecent, type RecentEntry } from "../lib/palette/recent.js";
@@ -68,6 +70,12 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const setPaletteIntent = useUiStore((s) => s.setPaletteIntent);
   const focusTask = useUiStore((s) => s.focusTask);
   const infohubRunning = useInfohubStore((s) => s.running);
+  // d.70：内置模块停用后，其页面从「页面跳转」与插件命令目标里一起消失
+  const moduleEnabled = useModuleStore((s) => s.enabled);
+  const pages = useMemo(
+    () => filterPalettePages(PALETTE_PAGES, { enabled: moduleEnabled }),
+    [moduleEnabled],
+  );
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -132,9 +140,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const groups = useMemo<PaletteGroup[]>(
     () =>
       query.trim()
-        ? searchPalette(query, { members, archiveHits, local, commands })
-        : buildEmptyGroups(recent),
-    [query, members, archiveHits, local, commands, recent],
+        ? searchPalette(query, { members, archiveHits, local, commands, pages })
+        : buildEmptyGroups(recent, pages),
+    [query, members, archiveHits, local, commands, recent, pages],
   );
   const items = useMemo(() => flattenGroups(groups), [groups]);
   const indexByKey = useMemo(() => {
@@ -236,7 +244,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         const target = command.target;
         if (target.kind === "page") {
           // 页面 id 非法时忽略（解析期已校验，这里再兜一层，避免把任意字符串塞进 store）
-          if (PALETTE_PAGES.some((p) => p.page === target.page)) setPage(target.page as never);
+          if (pages.some((p) => p.page === target.page)) setPage(target.page as never);
         } else if (target.kind === "skill") {
           const skill = skillPool.list().find((s) => s.name === target.name);
           if (skill) setPaletteIntent("focus-skill", { id: skill.id });

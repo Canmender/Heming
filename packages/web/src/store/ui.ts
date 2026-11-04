@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isModuleOn } from "../lib/modules/store.js";
 import type { AutomationKind, SyncOptions } from "../lib/automation/model.js";
 import {
   persistNavMode,
@@ -388,7 +389,9 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (view) set({ pageView: null });
     return view;
   },
-  openInfohub: (intent) =>
+  openInfohub: (intent) => {
+    // d.70：模块被停用时不再切到一个不该存在的页面（按钮层也会禁用，这里兜住通知/旧链接）
+    if (!isModuleOn("infohub")) return;
     set({
       page: "infohub",
       pageView: null,
@@ -399,9 +402,11 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
       infohubIntent: intent ?? null,
       automationIntent: null,
-    }),
+    });
+  },
   consumeInfohubIntent: () => set({ infohubIntent: null }),
-  openAutomations: (intent) =>
+  openAutomations: (intent) => {
+    if (!isModuleOn("automations")) return;
     set({
       page: "automations",
       pageView: null,
@@ -413,7 +418,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
       infohubIntent: null,
       automationIntent: intent ?? null,
-    }),
+    });
+  },
   consumeAutomationIntent: () => set({ automationIntent: null }),
   openSettings: (tab) => {
     get().setPage("settings");

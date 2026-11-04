@@ -4,9 +4,11 @@ import { NavRail } from "./NavRail.js";
 import { useUiStore, DEFAULT_NAV_ORDER } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
+import { useModuleStore } from "../lib/modules/store.js";
 
 describe("NavRail 图标轨（A 方案）", () => {
   beforeEach(() => {
+    useModuleStore.getState().reset();
     useUiStore.setState({ page: "home", activeConversationId: null });
     // 角标用例注入未读会话：逐例清零，避免泄漏到「无角标」断言
     useChatStore.setState({ conversations: [] });
@@ -31,6 +33,22 @@ describe("NavRail 图标轨（A 方案）", () => {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
     // 幕僚/信息中枢/自动化不占数字键：只有名称
+    for (const name of ["幕僚", "信息中枢", "自动化"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("停用的内置模块从导航撤下；重新启用后按原顺序回来", () => {
+    useModuleStore.getState().setEnabled("infohub", false);
+    render(<NavRail />);
+    expect(screen.queryByRole("button", { name: "信息中枢" })).not.toBeInTheDocument();
+    // 自动化依赖信息中枢：依赖停用时也一并撤下
+    expect(screen.queryByRole("button", { name: "自动化" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "幕僚" })).toBeInTheDocument();
+  });
+
+  it("全部启用的默认状态下三个模块入口都在（与改造前一致）", () => {
+    render(<NavRail />);
     for (const name of ["幕僚", "信息中枢", "自动化"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }

@@ -10,7 +10,9 @@ import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
 import { PetSettingsCard } from "./PetSettingsCard.js";
 import { ThemeModeCard } from "./settings/ThemeModeCard.js";
-import { useUiStore, type NavPage } from "../store/ui.js";
+import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
+import { useModuleStore } from "../lib/modules/store.js";
+import { filterNavOrder } from "../lib/modules/nav.js";
 import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
 import { setThemeMode, watchThemeMode } from "../lib/theme.js";
 import { DEFAULT_NAV_MODE, type NavMode } from "../lib/navPrefs.js";
@@ -741,9 +743,26 @@ function AppearanceSection() {
 
 /** 导航分组：左侧导航显示顺序（上移/下移，不做拖拽——按钮在键盘与触屏下都可靠）。 */
 function NavigationSection() {
-  const navOrder = useUiStore((u) => u.navOrder);
-  const moveNav = useUiStore((u) => u.moveNav);
+  const fullOrder = normalizeNavOrder(useUiStore((u) => u.navOrder));
+  const setNavOrder = useUiStore((u) => u.setNavOrder);
   const resetNavOrder = useUiStore((u) => u.resetNavOrder);
+  const moduleEnabled = useModuleStore((u) => u.enabled);
+  const moduleState = { enabled: moduleEnabled };
+  // d.70：停用的内置模块页不在列表里出现；上下移动只在可见项之间交换，
+  // 隐藏页占的位置不动（否则用户点一次「下移」看着没反应——实际是和隐藏页换了位）。
+  const navOrder = filterNavOrder(fullOrder, moduleState);
+  const move = (page: NavPage, dir: -1 | 1) => {
+    const index = navOrder.indexOf(page);
+    const target = index + dir;
+    if (index < 0 || target < 0 || target >= navOrder.length) return;
+    const nextVisible = [...navOrder];
+    [nextVisible[index], nextVisible[target]] = [nextVisible[target], nextVisible[index]];
+    let cursor = 0;
+    const merged = fullOrder.map((item) =>
+      navOrder.includes(item) ? nextVisible[cursor++] : item,
+    );
+    setNavOrder(merged);
+  };
 
   return (
     <section
@@ -771,7 +790,7 @@ function NavigationSection() {
               type="button"
               aria-label={`上移 ${NAV_LABELS[page]}`}
               disabled={index === 0}
-              onClick={() => moveNav(page, -1)}
+              onClick={() => move(page, -1)}
               className={`${btnGhost} px-2 py-0.5 disabled:opacity-35`}
             >
               上移
@@ -780,7 +799,7 @@ function NavigationSection() {
               type="button"
               aria-label={`下移 ${NAV_LABELS[page]}`}
               disabled={index === navOrder.length - 1}
-              onClick={() => moveNav(page, 1)}
+              onClick={() => move(page, 1)}
               className={`${btnGhost} px-2 py-0.5 disabled:opacity-35`}
             >
               下移

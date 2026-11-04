@@ -130,6 +130,8 @@
 | [specs/2026-11-03-d68-nav-layout.md](superpowers/specs/2026-11-03-d68-nav-layout.md) | **d.68 导航自动隐藏 + 布局字体**：`pinned/auto` 两模式与 `heming.nav.mode.v1`、左缘 8px 热区/300ms 收回/Esc/焦点还热区、`Ctrl/⌘+B` 三态、浮层 absolute 不挤压内容、设置卡与 pin 按钮同源；字体栈拉丁在前/CJK 在后、占位符对比度 AA、`.ui-card`/`.ui-overlay-shadow`、主页窄窗排布 |
 | [specs/2026-11-03-d68-custom-content.md](superpowers/specs/2026-11-03-d68-custom-content.md) | **d.68 自定义内容简化**：自建智能体 4 模板 + 基础/进阶渐进披露、创建后直接进对话；自定义技能新建弹窗（必填名称+内容、3 模板、创建即分配、空态直达）；明确不做记忆区/Wiki、云同步与键位迁移 |
 | [specs/2026-11-04-d68-selfcheck.md](superpowers/specs/2026-11-04-d68-selfcheck.md) | **d.68.2.26 自检与再优化**：headless Edge + CDP 真实浏览器逐页自检方法、8 个实测问题（暗色组件基元白底/热力图白方块/开关倒置/缺失 hover、导航 auto 鼠标焦点钉住、桌宠菜单贴边被裁与无桥死按钮、插件区统计滞后）的根因/修法/证据，以及未复验项 |
+| [specs/2026-11-04-d69-ux-round.md](superpowers/specs/2026-11-04-d69-ux-round.md) | **d.69 体验自检六轮**：真实浏览器（含本机假 LLM 网关 / 假 MCP 服务）逐轮找问题与修复——登录说人话、内部术语出清、假状态换真数据、命令面板焦点环（含高对比回归）、失败原因分类翻译、HITL 记住规则/高对比实测、任务失败原因；附每轮未覆盖项 |
+| [specs/2026-11-04-d70-pluggable-modules.md](superpowers/specs/2026-11-04-d70-pluggable-modules.md) | **d.70 内置能力模块可插拔**：幕僚 / 信息中枢 / 自动化改为插件区「模块」Tab 的开关；模块注册表 + `heming.modules.v1` + 依赖语义（自动化依赖信息中枢）+ 导航/路由/首页卡/命令面板/设置/后台循环/工具注入/边车的接线矩阵；第三方页面贡献明确不做 |
 
 ## 4. 调研
 

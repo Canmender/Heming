@@ -5,6 +5,7 @@ import {
   buildInfohubToolsIfConnected,
 } from "./tools.js";
 import { useInfohubStore } from "./store.js";
+import { useModuleStore } from "../modules/store.js";
 import type {
   InfohubAgendaItem,
   InfohubBridgeInfo,
@@ -167,6 +168,18 @@ describe("信息中枢工具提供者", () => {
       "infohub_agenda",
       "infohub_agenda_rebuild",
     ]);
+  });
+
+  it("信息中枢模块停用后不再注入工具（页面关了，模型也不该还能查归档）", () => {
+    installBridge();
+    useInfohubStore.setState({ available: true, running: true });
+    // 默认启用时注入
+    useModuleStore.getState().reset();
+    expect(buildInfohubToolsIfConnected()).not.toBeNull();
+
+    useModuleStore.getState().setEnabled("infohub", false);
+    expect(buildInfohubToolsIfConnected()).toBeNull();
+    useModuleStore.getState().reset();
   });
 
   it("sync 不暴露为工具（写归档只从信息中枢页发起）", () => {

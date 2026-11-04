@@ -20,6 +20,9 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
 import { GlobalFocusRing } from "./a11y/GlobalFocusRing.js";
 import { hasOpenModal } from "./useModalA11y.js";
 import { NAV_HIDE_DELAY_MS, NAV_HOTZONE_PX, otherNavMode } from "../lib/navPrefs.js";
+import { useModuleStore } from "../lib/modules/store.js";
+import { filterNavOrder } from "../lib/modules/nav.js";
+import { moduleForPage } from "../lib/modules/registry.js";
 
 /**
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
@@ -106,7 +109,10 @@ export function NavRail({
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
   // 渲染前再规整一次：手改过 localStorage 或旧版本残留时，缺项也会被补齐，绝不漏掉某个入口
-  const navOrder = normalizeNavOrder(useUiStore((s) => s.navOrder));
+  const rawNavOrder = normalizeNavOrder(useUiStore((s) => s.navOrder));
+  const moduleEnabled = useModuleStore((s) => s.enabled);
+  // d.70：内置能力模块停用后，其页面入口从导航中撤下（重新启用按原顺序回来）
+  const navOrder = filterNavOrder(rawNavOrder, { enabled: moduleEnabled });
   const navMode = useUiStore((s) => s.navMode);
   const navOpen = useUiStore((s) => s.navOpen);
   const setNavMode = useUiStore((s) => s.setNavMode);
@@ -259,11 +265,13 @@ export function NavRail({
           .map((it) => {
             const active = page === it.page;
             const shortcut = it.digit ? `Alt${it.digit}` : "";
+            // d.70：模块页的显示名以模块注册表为准（与插件区卡片同源，改一处不会两处漂移）
+            const label = moduleForPage(it.page)?.name ?? it.label;
             return (
               <div key={it.page} className="group relative">
                 <button
                   type="button"
-                  aria-label={`${it.label}${shortcut ? ` ${shortcut}` : ""}`}
+                  aria-label={`${label}${shortcut ? ` ${shortcut}` : ""}`}
                   aria-current={active ? "page" : undefined}
                   onClick={() => {
                     setPage(it.page);
@@ -277,7 +285,7 @@ export function NavRail({
                 >
                   {it.icon}
                 </button>
-                <Tip label={it.label} shortcut={shortcut || undefined} />
+                <Tip label={label} shortcut={shortcut || undefined} />
               </div>
             );
           })}

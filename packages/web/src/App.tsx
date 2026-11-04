@@ -16,6 +16,8 @@ import { autoConnectAll } from "./lib/mcp/runtime.js";
 import { useInfohubStore } from "./lib/infohub/store.js";
 import { useAutomationScheduler } from "./lib/automation/scheduler.js";
 import { useStaffLoop } from "./lib/staff/loop.js";
+import { useModuleStore, isModuleEffective } from "./lib/modules/store.js";
+import { isPageAvailable } from "./lib/modules/nav.js";
 import { hasOpenModal, useModalA11y } from "./components/useModalA11y.js";
 import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
 import { useViewport } from "./lib/viewport.js";
@@ -528,13 +530,31 @@ function AppShell({
 
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
+  // d.70：内置能力模块的启用状态。页面可用性、后台循环与跨页跳转都读这一份。
+  const moduleEnabled = useModuleStore((s) => s.enabled);
+  const moduleState = { enabled: moduleEnabled };
   /** auto 模式下给左缘热区留一条 8px 空档，避免热区盖住内容最左侧的可点元素（列表整行按钮等）。 */
   const navMode = useUiStore((s) => s.navMode);
 
-  // 本机自动化：只在登录后的桌面端到点执行，不补跑、不自动拉起 InfoHub
-  useAutomationScheduler(Boolean(authUser));
-  // 常驻幕僚（d.48）：登录后巡检日程与任务，只读、只递简报
-  useStaffLoop(Boolean(authUser));
+  // 本机自动化：只在登录后的桌面端到点执行，不补跑、不自动拉起 InfoHub。
+  // d.70：自动化模块停用（或依赖的信息中枢停用）后不再挂载调度器。
+  useAutomationScheduler(Boolean(authUser) && isModuleEffective(moduleState, "automations"));
+  // 常驻幕僚（d.48）：登录后巡检日程与任务，只读、只递简报；模块停用即停止巡检。
+  useStaffLoop(Boolean(authUser) && isModuleEffective(moduleState, "staff"));
+
+  // d.70：信息中枢模块被停用 = 运行时一起下线。已连接的本机边车进程在停用后释放，
+  // 不删任何归档数据；重新启用后可再次连接。（不自动拉起进程的既有约束不变。）
+  const infohubModuleOn = isModuleEffective(moduleState, "infohub");
+  useEffect(() => {
+    if (infohubModuleOn) return;
+    if (!useInfohubStore.getState().running) return;
+    void useInfohubStore
+      .getState()
+      .disconnect()
+      .catch(() => {
+        /* 停用时的进程回收失败不该影响界面：页面入口已下线，下次连接会重试 */
+      });
+  }, [infohubModuleOn]);
 
   // 系统通知点击 → 主进程回传会话 id → 打开会话（未登录时忽略，登录后再点即可）
   useEffect(() => {
@@ -546,6 +566,12 @@ function AppShell({
     });
   }, []);
 
+  // 模块页被停用（或被通知/桌宠/旧链接指到）时统一回主页，不渲染不该存在的页面。
+  const currentPage = isPageAvailable(page, moduleState) ? page : "home";
+  useEffect(() => {
+    if (page !== currentPage) setPage(currentPage);
+  }, [page, currentPage, setPage]);
+
   // 桌宠的「去设置 / 点气泡直达页面」出口（未登录时忽略）。
   // 复用同一条通道：收到 page 时直达对应页面，无 page（旧的无参调用）仍落到设置页。
   useEffect(() => {
@@ -553,10 +579,13 @@ function AppShell({
     if (!bridge?.onOpenSettings) return;
     return bridge.onOpenSettings((page) => {
       const ui = useUiStore.getState();
+      const moduleOn = (id: "staff" | "infohub") =>
+        isModuleEffective(useModuleStore.getState(), id);
       if (page === "team") ui.setPage("team");
       else if (page === "tasks") ui.setPage("tasks");
-      else if (page === "staff") ui.setPage("staff");
-      else if (page === "infohub") ui.openInfohub();
+      // 模块被停用时不再跳到一个不该存在的页，落回设置（用户本就要去配置）
+      else if (page === "staff" && moduleOn("staff")) ui.setPage("staff");
+      else if (page === "infohub" && moduleOn("infohub")) ui.openInfohub();
       else ui.openSettings("model");
     });
   }, []);
@@ -666,27 +695,27 @@ function AppShell({
   }
 
   const view =
-    page === "home" ? (
+    currentPage === "home" ? (
       <HomePage />
-    ) : page === "team" ? (
+    ) : currentPage === "team" ? (
       // 团队：真实成员名册 + 动向流（任务 / 日程摘要）；d.67 起承接「看板」视图
       <TeamPage />
-    ) : page === "chat" ? (
+    ) : currentPage === "chat" ? (
       // 智能体（本机运行）：左侧智能体名册 + 右侧对话；d.67 起承接「任务」视图
       <AssistantPage />
-    ) : page === "staff" ? (
+    ) : currentPage === "staff" ? (
       // 幕僚：常驻主动简报（只读采集 + 一键跳转）
       <StaffPage />
-    ) : page === "infohub" ? (
+    ) : currentPage === "infohub" ? (
       // 信息中枢：本机 QQ/微信归档（桌面端 Python 子进程，数据不出本机）
       <InfohubPage />
-    ) : page === "automations" ? (
+    ) : currentPage === "automations" ? (
       // 自动化：本机定时同步/重扫，只在和鸣运行且信息中枢已连接时执行
       <AutomationPage />
-    ) : page === "plugins" ? (
+    ) : currentPage === "plugins" ? (
       // 插件区（能力中心）：插件包 + 技能池 + 工具 + MCP 服务，四个 Tab
       <PluginsPage />
-    ) : page === "memory" ? (
+    ) : currentPage === "memory" ? (
       // 记忆区：三层记忆 + 技能池（全部数据只在本机 localStorage）
       <MemoryPage />
     ) : (

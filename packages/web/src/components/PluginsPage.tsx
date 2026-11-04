@@ -28,6 +28,7 @@ import { RemovePluginDialog } from "./plugins/RemovePluginDialog.js";
 import { PluginStats } from "./plugins/PluginStats.js";
 import { SystemPluginCard } from "./plugins/SystemPluginCard.js";
 import { PluginToolPanel } from "./plugins/PluginToolPanel.js";
+import { ModulesView } from "./plugins/ModulesView.js";
 import { SkillsView } from "./SkillsPage.js";
 import { InterfacesView } from "./InterfacesPage.js";
 import {
@@ -51,10 +52,12 @@ import { BTN_GHOST, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
  * 动作改为切 Tab，不再跨页 setPage——导航里也不再有这两个独立入口。
  */
 
-type TabKey = "plugins" | "skills" | "tools" | "mcp";
+type TabKey = "plugins" | "modules" | "skills" | "tools" | "mcp";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "plugins", label: "插件" },
+  // d.70：内置能力模块（幕僚 / 信息中枢 / 自动化）与插件同区展示，可启用/停用
+  { key: "modules", label: "模块" },
   { key: "skills", label: "技能" },
   { key: "tools", label: "工具" },
   { key: "mcp", label: "MCP 服务" },
@@ -326,7 +329,9 @@ export function PluginsPage({
           );
         })}
         <span className="ml-auto self-center ui-caption">
-          已启用 {enabledCount}/{list.length} 个插件 · 同一 id 再次安装 = 覆盖更新
+          {tab === "modules"
+            ? "内置模块 · 停用只下线入口与后台挂载，不删除本机数据"
+            : `已启用 ${enabledCount}/${list.length} 个插件 · 同一 id 再次安装 = 覆盖更新`}
         </span>
       </div>
 
@@ -378,6 +383,8 @@ export function PluginsPage({
 
         {/* 技能 Tab：完整技能视图（原技能区页主体）。
             onChanged：技能池变更后让本页统计/能力快照同帧刷新（自检：新建技能后统计不涨）。 */}
+        {tab === "modules" && <ModulesView />}
+
         {tab === "skills" && (
           <SkillsView
             skills={skills}

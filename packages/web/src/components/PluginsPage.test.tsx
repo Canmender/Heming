@@ -5,6 +5,7 @@ import { PluginStore, pluginServerId, type PluginMcpPort } from "../lib/plugins/
 import { SkillPool, type StorageLike } from "../lib/skills/index.js";
 import { McpRegistry, type McpServerConfig } from "../lib/mcp/index.js";
 import { useUiStore } from "../store/ui.js";
+import { useModuleStore } from "../lib/modules/store.js";
 
 /**
  * 插件区 UI 用例：真实 PluginStore + SkillPool，只注入独立内存存储与 MCP 端口，
@@ -134,6 +135,22 @@ function installNow(): void {
   });
   fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
 }
+
+describe("PluginsPage · 模块 Tab（d.70）", () => {
+  it("模块 Tab 展示三个内置能力模块，并可停用/恢复", () => {
+    useModuleStore.getState().reset();
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "模块" }));
+    expect(screen.getByRole("tab", { name: "模块" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: "模块 幕僚" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "模块 信息中枢" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "模块 自动化" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: "停用模块 幕僚" }));
+    expect(useModuleStore.getState().enabled.staff).toBe(false);
+    useModuleStore.getState().reset();
+  });
+});
 
 describe("PluginsPage 插件区", () => {
   it("空态与安装面板：没有清单时确认按钮禁用", () => {
