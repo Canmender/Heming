@@ -332,19 +332,51 @@ describe("NavRail 导航自动隐藏（d.68）", () => {
     expect(useUiStore.getState().navOpen).toBe(false);
   });
 
-  it("焦点在导航内时，鼠标移开不收回（键盘用户不会被打断）", () => {
+  it("键盘焦点在导航内时，鼠标移开不收回（键盘用户不会被打断）", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     useUiStore.setState({ navMode: "auto" });
     render(<NavRail />);
 
     fireEvent.mouseEnter(screen.getByRole("button", { name: "展开导航" }));
+    const nav = screen.getByLabelText("主导航");
+    // 先有一次键盘交互，再聚焦：模拟「Tab 进导航」，不是鼠标点击留下的焦点
+    fireEvent.keyDown(nav, { key: "Tab" });
     screen.getByLabelText("主页 Alt1").focus();
 
-    fireEvent.mouseLeave(screen.getByLabelText("主导航"));
+    fireEvent.mouseLeave(nav);
     act(() => {
       vi.advanceTimersByTime(500);
     });
     expect(useUiStore.getState().navOpen).toBe(true);
+  });
+
+  it("鼠标点击留下的焦点不会把浮层钉住：鼠标移开 300ms 后照样收回", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    useUiStore.setState({ navMode: "auto" });
+    render(<NavRail />);
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "展开导航" }));
+    const nav = screen.getByLabelText("主导航");
+    // 只有 focus（无键盘交互）= 鼠标点击后的焦点状态（d.68 自检实测到的「浮层关不掉」）
+    screen.getByLabelText("主页 Alt1").focus();
+    fireEvent.mouseLeave(nav);
+    act(() => {
+      vi.advanceTimersByTime(320);
+    });
+    expect(useUiStore.getState().navOpen).toBe(false);
+  });
+
+  it("auto 模式下鼠标点击导航项：页面切换后浮层立即收起", () => {
+    useUiStore.setState({ navMode: "auto" });
+    render(<NavRail />);
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "展开导航" }));
+    const item = screen.getByLabelText("记忆区 Alt5");
+    // 真实鼠标点击顺序：pointerdown（标记鼠标交互）→ click
+    fireEvent.pointerDown(item);
+    fireEvent.click(item);
+    expect(useUiStore.getState().page).toBe("memory");
+    expect(useUiStore.getState().navOpen).toBe(false);
   });
 
   it("Esc 收回浮层，并把焦点还给热区（不会立刻又被聚焦展开）", () => {

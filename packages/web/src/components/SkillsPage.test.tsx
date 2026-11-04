@@ -442,6 +442,27 @@ describe("SkillsPage 新建技能（简化）", () => {
     ).toBeInTheDocument();
   });
 
+  it("新建技能后触发 onChanged，宿主（插件区）统计能同帧刷新", async () => {
+    const onChanged = vi.fn();
+    render(<SkillsPage skills={pool} onChanged={onChanged} />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("选择智能体") as HTMLSelectElement).value).toBe("a1"),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
+
+    const dialog = screen.getByRole("dialog", { name: "新建技能" });
+    fireEvent.change(within(dialog).getByLabelText("技能名称"), {
+      target: { value: "自检刷新技能" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("技能内容"), {
+      target: { value: "自检用：验证宿主统计刷新。" },
+    });
+    expect(onChanged).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建技能" }));
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
   it("技能池空态：动作直达「新建技能」「导入 SKILL.md」", async () => {
     map.set(SKILLS_KEY, JSON.stringify({ version: 1, seeded: true, skills: [], usage: {} }));
     pool = new SkillPool(makeStorage(map), () => T0);

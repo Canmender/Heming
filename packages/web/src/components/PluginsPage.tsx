@@ -376,9 +376,15 @@ export function PluginsPage({
           </>
         )}
 
-        {/* 技能 Tab：完整技能视图（原技能区页主体）。 */}
+        {/* 技能 Tab：完整技能视图（原技能区页主体）。
+            onChanged：技能池变更后让本页统计/能力快照同帧刷新（自检：新建技能后统计不涨）。 */}
         {tab === "skills" && (
-          <SkillsView skills={skills} plugins={plugins} onOpenPlugin={openPluginDetail} />
+          <SkillsView
+            skills={skills}
+            plugins={plugins}
+            onOpenPlugin={openPluginDetail}
+            onChanged={bump}
+          />
         )}
 
         {tab === "tools" && (

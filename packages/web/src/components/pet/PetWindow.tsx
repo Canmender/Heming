@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -534,9 +535,16 @@ export function PetWindow() {
 
   /* ────────────── 右键菜单 ────────────── */
 
-  /** 菜单尺寸（7 项 + 内边距）：贴边时往回收，别被窗口裁掉。 */
-  const MENU_WIDTH = 156;
-  const MENU_HEIGHT = 248;
+  /**
+   * 菜单尺寸（最多 7 项 + 内边距）：贴边时往回收，别被窗口裁掉。
+   *
+   * ★ 估大不估小：菜单最小宽 156 + 左右 padding 8 + 边框 2 = 166，行高 28 × 7 + 8 ≈ 204。
+   *   这里取 176 / 252 留余量——旧值 156/248 会让 300px 窗口下菜单右边缘溢出 10px
+   *   （d.68 自检实测），点最右一列会被窗口裁掉。
+   *   另有一个 useLayoutEffect 在挂载后按真实 rect 再夹一次（字体/缩放档不同也能兜住）。
+   */
+  const MENU_WIDTH = 176;
+  const MENU_HEIGHT = 252;
 
   useEffect(() => {
     const onContext = (e: MouseEvent) => {
@@ -552,6 +560,29 @@ export function PetWindow() {
     window.addEventListener("contextmenu", onContext);
     return () => window.removeEventListener("contextmenu", onContext);
   }, [viewport.width, viewport.height]);
+
+  /**
+   * 菜单挂载后按真实尺寸再夹一次。
+   *
+   * 常量估算是第一道；这里用 `useLayoutEffect` 在绘制前量真实 rect，
+   * 只处理「右/下溢出」这一种情况，且只在坐标真的需要变时 setMenu，避免循环渲染。
+   */
+  useLayoutEffect(() => {
+    if (!menu) return;
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const maxX = Math.max(0, viewport.width - rect.width - 4);
+    const maxY = Math.max(0, viewport.height - rect.height - 4);
+    if (rect.right <= viewport.width - 2 && rect.bottom <= viewport.height - 2) return;
+    setMenu((prev) => {
+      if (!prev) return prev;
+      const x = Math.min(prev.x, maxX);
+      const y = Math.min(prev.y, maxY);
+      if (x === prev.x && y === prev.y) return prev;
+      return { x, y };
+    });
+  }, [menu, viewport.width, viewport.height]);
 
   /**
    * 点窗外关闭菜单。
@@ -637,13 +668,26 @@ export function PetWindow() {
   }, []);
 
   /**
-   * 「重置位置」能力探测：旧版 preload 没有暴露 resetPosition 时**不渲染**这一项，
-   * 避免出现点了没反应的死按钮（本轮 IPC 由 Lead 接线，见规格文档）。
+   * 能力探测（d.68 自检补）：**没有桥就不渲染桥专属菜单项**。
+   *
+   * 浏览器里直接打开 pet.html 时没有 `window.__heming_pet`，旧实现会渲染出
+   * 「放大/缩小/设置/隐藏/鼠标穿透（读取中）」一排点了没反应的死按钮。
+   * 现在只保留「说点什么」（纯渲染层能力），其余按桥能力逐项显示。
    */
-  const canResetPosition = useMemo(() => {
+  const capabilities = useMemo(() => {
     const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
-    return typeof (bridge as { resetPosition?: unknown } | undefined)?.resetPosition === "function";
+    const b = bridge as
+      | { resetPosition?: unknown; setScale?: unknown; setClickThrough?: unknown; state?: unknown }
+      | undefined;
+    return {
+      hasBridge: !!bridge,
+      canScale: typeof b?.setScale === "function",
+      canResetPosition: typeof b?.resetPosition === "function",
+      canToggleClickThrough:
+        typeof b?.setClickThrough === "function" && typeof b?.state === "function",
+    };
   }, []);
+  const canResetPosition = capabilities.canResetPosition;
 
   /** 鼠标穿透开关：菜单里显示当前值，点击切换（复用既有 pet:set-click-through）。 */
   const toggleClickThrough = useCallback(() => {
@@ -877,12 +921,16 @@ export function PetWindow() {
           >
             说点什么
           </MenuItem>
-          <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.setScale({ dir: 1 }))}>
-            放大一档
-          </MenuItem>
-          <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.setScale({ dir: -1 }))}>
-            缩小一档
-          </MenuItem>
+          {capabilities.canScale && (
+            <>
+              <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.setScale({ dir: 1 }))}>
+                放大一档
+              </MenuItem>
+              <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.setScale({ dir: -1 }))}>
+                缩小一档
+              </MenuItem>
+            </>
+          )}
           {canResetPosition && (
             <MenuItem
               onClick={() =>
@@ -896,15 +944,21 @@ export function PetWindow() {
               重置位置
             </MenuItem>
           )}
-          <MenuItem onClick={() => chooseMenu(toggleClickThrough)}>
-            {`鼠标穿透（${
-              menuClickThrough === true ? "已开" : menuClickThrough === false ? "已关" : "读取中"
-            }）`}
-          </MenuItem>
-          <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.openSettings())}>
-            设置
-          </MenuItem>
-          <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.hide())}>隐藏</MenuItem>
+          {capabilities.canToggleClickThrough && (
+            <MenuItem onClick={() => chooseMenu(toggleClickThrough)}>
+              {`鼠标穿透（${
+                menuClickThrough === true ? "已开" : menuClickThrough === false ? "已关" : "读取中"
+              }）`}
+            </MenuItem>
+          )}
+          {capabilities.hasBridge && (
+            <>
+              <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.openSettings())}>
+                设置
+              </MenuItem>
+              <MenuItem onClick={() => chooseMenu(() => window.__heming_pet?.hide())}>隐藏</MenuItem>
+            </>
+          )}
         </div>
       )}
 

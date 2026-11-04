@@ -446,4 +446,29 @@ describe("PluginsPage 导航合并", () => {
     expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
     expect(useUiStore.getState().pageView).toBeNull();
   });
+
+  it("在「技能」Tab 新建技能后，顶部统计同帧 +1（d.68 自检：统计不再滞后）", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "技能" }));
+    const readSkillStat = () => {
+      const text = screen.getByLabelText("统计 技能").textContent ?? "";
+      const m = text.match(/([0-9]+)/);
+      return m ? Number(m[1]) : NaN;
+    };
+    const before = readSkillStat();
+
+    fireEvent.click(screen.getByRole("tab", { name: "技能池" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建技能" }));
+    const dialog = screen.getByRole("dialog", { name: "新建技能" });
+    fireEvent.change(within(dialog).getByLabelText("技能名称"), {
+      target: { value: "统计刷新技能" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("技能内容"), {
+      target: { value: "自检：新建后统计卡应即时 +1。" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建技能" }));
+
+    expect(pool.list().some((skill) => skill.name === "统计刷新技能")).toBe(true);
+    expect(readSkillStat()).toBe(before + 1);
+  });
 });

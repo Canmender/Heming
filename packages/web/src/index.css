@@ -74,6 +74,17 @@
   --danger-line: #fecdca;
   --warn: #b45309;
   --success: #1d6b3a;
+  /* 近 30 日用量热力图（TokenHeatmap）的 5 档底色：亮色用蓝阶，暗色单独给一套，
+     避免组件里写死 #f1f4f7 导致暗色下 30 个白方块（d.68 自检发现）。 */
+  --heat-0: #f1f4f7;
+  --heat-1: #dbeafe;
+  --heat-2: #93c5fd;
+  --heat-3: #3b82f6;
+  --heat-4: #1d4ed8;
+  /* 开关（Switch）轨道/滑块：亮色沿用原 #d8d8d8 + 白滑块；
+     暗色必须单独给（否则轨道是浅灰、滑块被 .bg-white 兼容层映射成深色，观感怪异）。 */
+  --switch-off: #d8d8d8;
+  --switch-knob: #ffffff;
   /* 中文字体栈（d.68）：纯系统字体，不加载外部字体；理由见文件顶部 @theme 段。
      顺序是「拉丁在前、CJK 在后」：Windows 上让 Segoe UI 管英文/数字（字宽、字重更稳），
      中文回落到 Microsoft YaHei UI。纯 CJK 优先会让英文被中文字体接管，观感明显变差。 */
@@ -106,6 +117,15 @@
   --danger-line: #5a2a2a;
   --warn: #f0b24a;
   --success: #6bd08a;
+  /* 热力图暗色档：0 用层级灰（「无」不该在深底上发光），1–4 保持蓝色语义但压暗。 */
+  --heat-0: #232529;
+  --heat-1: #1e3a5f;
+  --heat-2: #1e40af;
+  --heat-3: #2563eb;
+  --heat-4: #60a5fa;
+  /* 暗色开关：关闭态轨道用深灰、滑块用浅色（开启态仍走 accent/on-accent）。 */
+  --switch-off: #3a3d43;
+  --switch-knob: #e8eaed;
   color-scheme: dark;
 }
 
@@ -292,7 +312,12 @@ samp {
 @layer components {
   /* ── 表单控件 ── */
   .ui-input {
-    @apply h-8 w-full rounded-md border border-line-strong bg-white px-2.5 text-[13px] leading-5 text-ink outline-hidden transition-colors;
+    @apply h-8 w-full rounded-md border border-line-strong px-2.5 text-[13px] leading-5 text-ink outline-hidden transition-colors;
+    /* ★ 控件背景与其内部文字都是主题化变量：不能 @apply bg-white ——
+       暗色兼容层按「类名」覆盖（[data-theme="dark"] .bg-white），
+       `.ui-input` 元素身上没有 bg-white 类，@apply 会把白色写死进规则，
+       暗色下变成「白底 + 近白文字」。d.68 自检发现并修（同 .ui-card）。 */
+    background-color: var(--surface);
   }
   .ui-input::placeholder {
     color: var(--placeholder);
@@ -301,7 +326,8 @@ samp {
     @apply border-ink;
   }
   .ui-input:disabled {
-    @apply cursor-not-allowed bg-[#fafafa] text-muted;
+    @apply cursor-not-allowed text-muted;
+    background-color: var(--subtle);
   }
 
   /* ── 按钮：尺寸 sm 28 / md 32，三种变体 ── */
@@ -323,10 +349,12 @@ samp {
     opacity: 0.88;
   }
   .ui-btn-ghost {
-    @apply border-line bg-white text-ink;
+    @apply border-line text-ink;
+    /* 同 .ui-input：背景必须走变量，否则暗色下是白底浅字（自检发现）。 */
+    background-color: var(--surface);
   }
   .ui-btn-ghost:hover:not(:disabled) {
-    @apply bg-[#f7f7f7];
+    background-color: var(--subtle-2);
   }
   .ui-btn-danger {
     @apply border-transparent bg-[#c43d3d] text-white;
@@ -337,7 +365,8 @@ samp {
 
   /* ── 胶囊/徽标（展示件，不承载点击） ── */
   .ui-chip {
-    @apply inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-line bg-[#fafafa] px-1.5 text-[11px] leading-4 text-muted;
+    @apply inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-line px-1.5 text-[11px] leading-4 text-muted;
+    background-color: var(--subtle);
   }
 
   /* ── 表格 ── */
@@ -354,7 +383,7 @@ samp {
     @apply border-b-0;
   }
   .ui-table tbody tr:hover td {
-    @apply bg-[#fbfbfb];
+    background-color: var(--subtle);
   }
 
   /* ── 列表行（名册/会话/插件/技能等） ── */
@@ -362,7 +391,7 @@ samp {
     @apply flex min-h-[40px] items-center gap-2 border-b border-line-soft px-3 py-2 transition-colors last:border-b-0;
   }
   .ui-list-row:hover {
-    @apply bg-[#fbfbfb];
+    background-color: var(--subtle);
   }
 
   /* ── 空态 ── */
@@ -436,7 +465,11 @@ samp {
 }
 [data-theme="dark"] .bg-\[\#f0f0f0\],
 [data-theme="dark"] .bg-\[\#eeeeee\],
-[data-theme="dark"] .bg-\[\#ededed\] {
+[data-theme="dark"] .bg-\[\#ededed\],
+[data-theme="dark"] .bg-\[\#ebebeb\],
+[data-theme="dark"] .bg-\[\#e9e9e9\],
+[data-theme="dark"] .bg-\[\#e8e8e8\],
+[data-theme="dark"] .bg-\[\#ececec\] {
   background-color: var(--subtle-4);
 }
 
@@ -500,11 +533,44 @@ samp {
 [data-theme="dark"] .border-\[\#f3d2ce\] {
   border-color: var(--danger-line);
 }
-/* 浅色 hover 底（hover:bg-[#fafafa] 这类在 utilities 里带伪类，类名不同，单独覆盖） */
+/* 浅色 hover 底（hover:bg-[#fafafa] 这类在 utilities 里带伪类，类名不同，单独覆盖）。
+   d.68 自检补齐：组件里还有大量 hover:bg-[#f3f3f3]/[#f0f0f0]/[#f5f5f5] 等，只覆盖三个
+   会让暗色下「鼠标一悬停就闪一块浅灰」。按与静态底色相同的层级分组映射。 */
 [data-theme="dark"] .hover\:bg-\[\#fafafa\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#fcfcfc\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#f9f9f9\]:hover {
+  background-color: var(--subtle);
+}
 [data-theme="dark"] .hover\:bg-\[\#f7f7f7\]:hover,
-[data-theme="dark"] .hover\:bg-\[\#fcfcfc\]:hover {
+[data-theme="dark"] .hover\:bg-\[\#f6f6f6\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#f5f5f5\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#f4f4f4\]:hover {
   background-color: var(--subtle-2);
+}
+[data-theme="dark"] .hover\:bg-\[\#f3f3f3\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#f2f2f2\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#f1f1f1\]:hover {
+  background-color: var(--subtle-3);
+}
+[data-theme="dark"] .hover\:bg-\[\#f0f0f0\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#eeeeee\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#ededed\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#ebebeb\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#e9e9e9\]:hover {
+  background-color: var(--subtle-4);
+}
+[data-theme="dark"] .hover\:bg-\[\#fbfbfb\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#f9fafb\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#fafbfc\]:hover {
+  background-color: var(--subtle);
+}
+/* 语义色 hover：错误/警告/成功底色在暗色下用同一套 soft 值 */
+[data-theme="dark"] .hover\:bg-\[\#fef3f2\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#fdf3f2\]:hover {
+  background-color: var(--danger-soft);
+}
+[data-theme="dark"] .hover\:bg-\[\#fff8e1\]:hover {
+  background-color: #2a2418;
 }
 
 /* 滚动条：暗色下滑块用中灰，避免浅灰细条在深底上发亮 */

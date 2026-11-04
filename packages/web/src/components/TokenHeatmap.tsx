@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { last30DaysTotals, heatLevel, useTokenUsageStore } from "../store/tokenUsage.js";
 
-const LEVEL_BG = ["#f1f4f7", "#dbeafe", "#93c5fd", "#3b82f6", "#1d4ed8"] as const;
+/** 5 档底色走 CSS 变量：暗色有独立一套（组件内写死亮色会在深底上出现白方块）。 */
+const LEVEL_BG = ["var(--heat-0)", "var(--heat-1)", "var(--heat-2)", "var(--heat-3)", "var(--heat-4)"] as const;
 const LEVEL_LABEL = ["无", "少", "较少", "较多", "多"] as const;
 
 /** 近 30 日用量热力图（Claude Code 式横排小方格，蓝色深浅=用量）。 */
@@ -26,7 +27,7 @@ export function TokenHeatmap() {
             data-day={d.day}
             data-total={d.total}
             style={{ backgroundColor: LEVEL_BG[level] }}
-            className={`h-3.5 w-3.5 rounded-[3px]${i === 29 ? " ring-1 ring-[#1a1a1a]/20" : ""}`}
+            className={`h-3.5 w-3.5 rounded-[3px]${i === 29 ? " ring-1 ring-[color:var(--line-strong)]" : ""}`}
           />
         );
       })}

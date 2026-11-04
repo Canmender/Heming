@@ -266,4 +266,17 @@ describe("PetWindow · 菜单能力项（重置位置 / 鼠标穿透）", () => 
     // 基础项仍然齐全
     expect(screen.getByRole("menuitem", { name: "说点什么" })).toBeInTheDocument();
   });
+
+  it("浏览器里没有桌宠桥：只保留纯渲染层的「说点什么」，不渲染一排死按钮", () => {
+    // 不安装 bridge（等价于浏览器直接打开 pet.html）
+    render(<PetWindow />);
+    openMenu();
+    const items = screen.getAllByRole("menuitem").map((b) => b.textContent?.trim());
+    expect(items).toEqual(["说点什么"]);
+    for (const dead of ["放大一档", "缩小一档", "重置位置", "设置", "隐藏"]) {
+      expect(screen.queryByRole("menuitem", { name: dead })).not.toBeInTheDocument();
+    }
+    // 穿透项状态读不到时也不该出现「（读取中）」这种悬空项
+    expect(screen.queryByRole("menuitem", { name: /鼠标穿透/ })).not.toBeInTheDocument();
+  });
 });

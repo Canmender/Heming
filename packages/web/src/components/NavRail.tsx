@@ -57,7 +57,7 @@ function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
     <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-1.5 whitespace-nowrap rounded-[7px] bg-ink px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-[0_2px_6px_rgba(0,0,0,0.25)] transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100">
       <span>{label}</span>
       {shortcut && (
-        <kbd className="rounded-sm border border-[#666] px-1 text-[10px] font-normal text-[#ccc]">
+        <kbd className="rounded-sm border border-current px-1 text-[10px] font-normal opacity-70">
           {shortcut}
         </kbd>
       )}
@@ -67,6 +67,21 @@ function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
 
 /** 导航轨外形尺寸：与 d.67 的 A 方案一致（54px 常驻宽度）。 */
 const RAIL_WIDTH = "w-[54px]";
+
+/**
+ * 元素当前是否是「键盘可见焦点」。
+ *
+ * jsdom 不实现 `:focus-visible`（会抛错），所以包一层 try/catch；
+ * 测试环境回退到调用方的 keyboardFocusRef 判定。
+ */
+function isFocusVisible(el: Element | null): boolean {
+  if (!el || typeof (el as HTMLElement).matches !== "function") return false;
+  try {
+    return (el as HTMLElement).matches(":focus-visible");
+  } catch {
+    return false;
+  }
+}
 
 /**
  * 图标轨（A 方案）：约 54px 常驻左缘，无产品名文字。
@@ -113,6 +128,15 @@ export function NavRail({
    * 「收回到热区」就会变成「收起来立刻又弹开」。这个门闩只在程序化聚焦热区的那一瞬间关掉。
    */
   const suppressFocusOpen = useRef(false);
+  /**
+   * 最近一次交互是不是键盘（d.68 自检修）。
+   *
+   * ★ 为什么需要：鼠标点导航项后，按钮会保留 focus；而「收回前看焦点是否在导航内」
+   *   是给键盘用户留的，鼠标点击留下的焦点不该把浮层永远钉住。否则 auto 模式点完
+   *   一个页面后鼠标移开，浮层不会收回（实测确认）。这里用 keydown/pointerdown 区分，
+   *   并辅以 `:focus-visible`（真实 Chromium 能正确区分鼠标/键盘焦点）。
+   */
+  const keyboardFocusRef = useRef(false);
 
   const clearHideTimer = () => {
     if (hideTimer.current !== null) {
@@ -121,9 +145,18 @@ export function NavRail({
     }
   };
 
+  /** 收起浮层；若焦点因鼠标点击留在导航里，先 blur，避免焦点停在 inert 元素上。 */
+  const closeOverlay = () => {
+    const nav = navRef.current;
+    const active = document.activeElement as HTMLElement | null;
+    if (nav && active && nav.contains(active)) active.blur();
+    useUiStore.getState().closeNav();
+  };
+
   /**
    * 延迟收回（auto 模式）。真正收回前**再看一眼焦点**：
-   * 键盘用户可能正停在导航里没动鼠标，400ms 一到就收走会让焦点悬空。
+   * 键盘用户可能正停在导航里没动鼠标，300ms 一到就收走会让焦点悬空；
+   * 但鼠标点击留下的焦点不算「键盘焦点」，否则浮层会被永远钉住。
    */
   const scheduleHide = () => {
     if (!auto) return;
@@ -131,8 +164,11 @@ export function NavRail({
     hideTimer.current = window.setTimeout(() => {
       hideTimer.current = null;
       const nav = navRef.current;
-      if (nav && nav.contains(document.activeElement)) return; // 焦点在导航内：不收回
-      useUiStore.getState().closeNav();
+      const active = document.activeElement;
+      const keyboardInside =
+        !!nav && !!active && nav.contains(active) && (keyboardFocusRef.current || isFocusVisible(active));
+      if (keyboardInside) return; // 键盘焦点在导航内：不收回
+      closeOverlay();
     }, NAV_HIDE_DELAY_MS);
   };
 
@@ -147,6 +183,7 @@ export function NavRail({
   /** 展开并把焦点送进当前页按钮（键盘路径：Tab/Enter 与 Ctrl+B）。 */
   const openWithFocus = () => {
     clearHideTimer();
+    keyboardFocusRef.current = true;
     openNav();
     // 等浮层挂上再聚焦；rAF 在 jsdom 里同样可用
     window.requestAnimationFrame(() => {
@@ -174,6 +211,7 @@ export function NavRail({
       suppressFocusOpen.current = true;
       hotzoneRef.current?.focus();
       suppressFocusOpen.current = false;
+      keyboardFocusRef.current = false;
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
@@ -227,7 +265,12 @@ export function NavRail({
                   type="button"
                   aria-label={`${it.label}${shortcut ? ` ${shortcut}` : ""}`}
                   aria-current={active ? "page" : undefined}
-                  onClick={() => setPage(it.page)}
+                  onClick={() => {
+                    setPage(it.page);
+                    // auto 模式 + 鼠标点击：导航已完成使命，直接收起。
+                    // 键盘激活（Enter）保留浮层，让焦点连续、可继续 Tab/Esc。
+                    if (auto && !keyboardFocusRef.current) closeOverlay();
+                  }}
                   className={`relative flex h-[34px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
                     active ? "bg-ink text-white" : "text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
                   }`}
@@ -339,6 +382,7 @@ export function NavRail({
         }}
         onFocus={() => {
           if (suppressFocusOpen.current) return;
+          keyboardFocusRef.current = true;
           clearHideTimer();
           openNav();
         }}
@@ -351,6 +395,13 @@ export function NavRail({
         aria-label="主导航"
         aria-hidden={!navOpen}
         inert={!navOpen}
+        // 键盘/鼠标交互标记：决定「收回时焦点是否该留住浮层」（见 keyboardFocusRef 注释）。
+        onKeyDownCapture={() => {
+          keyboardFocusRef.current = true;
+        }}
+        onPointerDownCapture={() => {
+          keyboardFocusRef.current = false;
+        }}
         onMouseEnter={clearHideTimer}
         onMouseLeave={scheduleHide}
         onBlur={(e) => {

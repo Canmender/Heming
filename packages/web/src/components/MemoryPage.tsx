@@ -305,11 +305,12 @@ function Switch({
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-150 ${
-        checked ? "bg-ink" : "bg-[#d8d8d8]"
+        checked ? "bg-ink" : "bg-[color:var(--switch-off)]"
       }`}
     >
       <span
-        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-all duration-150 ${
+        style={{ backgroundColor: checked ? "var(--heming-on-accent)" : "var(--switch-knob)" }}
+        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all duration-150 ${
           checked ? "left-[16px]" : "left-[2px]"
         }`}
       />

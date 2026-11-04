@@ -357,11 +357,12 @@ function Switch({
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-150 ${
-        checked ? "bg-ink" : "bg-[#d8d8d8]"
+        checked ? "bg-ink" : "bg-[color:var(--switch-off)]"
       }`}
     >
       <span
-        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-all duration-150 ${
+        style={{ backgroundColor: checked ? "var(--heming-on-accent)" : "var(--switch-knob)" }}
+        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all duration-150 ${
           checked ? "left-[16px]" : "left-[2px]"
         }`}
       />
@@ -557,6 +558,15 @@ export interface SkillsViewProps {
   onOpenPlugin?: (pluginId: string) => void;
   /** 额外容器类（宿主控制高度/内边距用；视图本身不自带 PageShell）。 */
   className?: string;
+  /**
+   * 技能池发生变更（新建/导入/启停/分配/删除）后通知宿主。
+   *
+   * 为什么需要：宿主（插件区）的统计卡与能力快照来自 `describeCapabilities`，
+   * 只在宿主自己的 `tick` 变化时重算。此前在「技能」Tab 里新建一个技能后，
+   * 技能池已经 +1，但插件区统计仍显示旧数字（d.68 自检实测 7 → 仍 7）。
+   * 这里把视图内部的变更信号透给宿主，让统计与列表同帧刷新。
+   */
+  onChanged?: () => void;
 }
 
 export type SkillsPageProps = SkillsViewProps;
@@ -574,6 +584,7 @@ export function SkillsView({
   plugins = pluginStore,
   onOpenPlugin,
   className = "",
+  onChanged,
 }: SkillsViewProps = {}) {
   const [tab, setTab] = useState<"groups" | "pool">("groups");
   const [tick, setTick] = useState(0);
@@ -643,7 +654,11 @@ export function SkillsView({
     };
   }, []);
 
-  const bump = () => setTick((n) => n + 1);
+  const bump = () => {
+    setTick((n) => n + 1);
+    // 宿主统计/能力快照同源刷新（不传则保持独立页行为不变）。
+    onChanged?.();
+  };
 
   const agentName = agents.find((a) => a.id === agentId)?.name ?? "未选择智能体";
 
@@ -1350,14 +1365,14 @@ export function SkillsView({
  * App 侧已不再引用本组件。保留一个带 PageShell 的导出，只是让旧引用/旧用例
  * 在这段时间里不会把构建打挂；新代码请用 `SkillsView`。
  */
-export function SkillsPage({ skills, plugins }: SkillsPageProps = {}) {
+export function SkillsPage({ skills, plugins, onChanged }: SkillsPageProps = {}) {
   return (
     <PageShell
       title="技能区"
       subtitle="技能区已并入插件区的「技能」视图；此独立入口仅作旧链接兼容。"
       width="wide"
     >
-      <SkillsView skills={skills} plugins={plugins} />
+      <SkillsView skills={skills} plugins={plugins} onChanged={onChanged} />
     </PageShell>
   );
 }
