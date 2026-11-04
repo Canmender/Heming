@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { humanizeProviderError } from "../llmFailure.js";
 import type { ToolSource } from "../agentStream.js";
 import type { DenyCause } from "../hitl/types.js";
 import { FORK_PREFIX_NOTICE, FORK_TRUNCATED_NOTICE } from "../rollout/fork.js";
@@ -272,7 +273,8 @@ export function buildTaskReport(task: TaskRecord): string {
   lines.push("## 结果", "");
   lines.push(task.result?.trim() || (task.status === "running" ? "（执行中，暂无结果）" : "（无）"));
   if (task.error) {
-    lines.push("", "## 失败原因", "", task.error.trim());
+    // 报告是给人看的：provider_error 原文翻成人话；JSON 导出仍保留原文（排障用）
+    lines.push("", "## 失败原因", "", humanizeProviderError(task.error));
   }
   lines.push("");
 

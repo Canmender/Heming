@@ -308,6 +308,22 @@ describe("pruneTasks 容量控制", () => {
   });
 });
 
+describe("buildTaskReport · 失败原因说人话", () => {
+  it("provider_error 原文翻成人话进 Markdown 报告（JSON 导出仍保留原文）", () => {
+    const task = makeTask({
+      status: "failed",
+      error: 'provider_error: HTTP 429 {"error":{"message":"rate limit exceeded"}}',
+    });
+    const report = buildTaskReport(task);
+    expect(report).toContain("## 失败原因");
+    expect(report).toContain("HTTP 429");
+    expect(report).not.toContain("rate_limit_error");
+    expect(report).not.toContain("provider_error");
+    // JSON 报告是排障用：原始 error 字段保留
+    expect(JSON.stringify(buildTaskJson(task))).toContain("provider_error");
+  });
+});
+
 describe("buildTaskReport", () => {
   it("包含目标/结果/步骤/来源，且同一记录输出稳定", () => {
     const task = makeTask({

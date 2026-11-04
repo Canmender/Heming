@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toolNameLabel } from "../lib/toolName.js";
+import { humanizeProviderError } from "../lib/llmFailure.js";
 import { useChatStore } from "../store/chat.js";
 import { useLlmStore } from "../store/llm.js";
 import { useUiStore } from "../store/ui.js";
@@ -1128,8 +1129,13 @@ function TaskSummary({
       {task.error && (
         <section>
           <h3 className="mb-1 text-[11px] font-bold uppercase tracking-wider text-muted">失败原因</h3>
-          <p className="rounded-lg border border-[#fecdca] bg-[#fef3f2] px-2.5 py-2 text-[12px] leading-5 text-[#b42318]">
-            {task.error}
+          {/* 记录里存的是 agent_error 原文（可能是 provider_error: HTTP 429 {json}）：
+              展示层翻成人话，原文留在 title 供排障。 */}
+          <p
+            className="rounded-lg border border-[#fecdca] bg-[#fef3f2] px-2.5 py-2 text-[12px] leading-5 text-[#b42318]"
+            title={task.error}
+          >
+            {humanizeProviderError(task.error)}
           </p>
         </section>
       )}
