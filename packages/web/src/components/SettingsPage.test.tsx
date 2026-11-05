@@ -370,8 +370,8 @@ describe("设置区 · 导航顺序", () => {
     fireEvent.click(screen.getByRole("button", { name: "上移 插件区" }));
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
-      "team",
       "chat",
+      "team",
       "staff",
       "infohub",
       "plugins",
@@ -672,16 +672,18 @@ describe("设置区 · 导航栏与恢复默认外观（d.68）", () => {
   });
 });
 
-/** d.62-B 布局迁移守卫：页头走 PageShell、内容列上限 720。 */
+/** d.62-B 布局迁移守卫：页头走 PageShell、内容列收口并居中（d.73 起 760）。 */
 describe("设置区布局（d.62-B）", () => {
-  it("页头由 PageShell 提供（唯一 h1 + 副标题），内容列上限 720", () => {
+  it("页头由 PageShell 提供（唯一 h1 + 副标题），内容列 760 居中", () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveClass("ui-page-title");
     expect(headings[0]).toHaveTextContent("设置区");
     expect(document.querySelector(".ui-page-sub")?.textContent).toContain("无需重启");
-    // 内容列上限：narrow 档 720（PageShell 的 narrow 类或内部容器均算）
-    expect(document.querySelector(".max-w-\\[720px\\]")).not.toBeNull();
+    // 内容列 760 且水平居中：宽屏下不再贴左留出半屏空白
+    const column = document.querySelector('[class*="max-w-[760px]"]');
+    expect(column).not.toBeNull();
+    expect(column?.className).toContain("mx-auto");
   });
 });

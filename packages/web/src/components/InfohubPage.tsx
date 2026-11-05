@@ -381,9 +381,12 @@ export function InfohubPage() {
       <PageShell
         title="信息中枢"
         subtitle="QQ / 微信归档只在本机处理；浏览器里没有可用的数据源"
+        // d.72：这个分支只有一张说明卡，滚动容器里 flex-1 撑不开高度、items-center 失效，
+        // 卡片会贴在顶部。改为 PageShell 不接管滚动，让说明卡在整页垂直居中。
+        scroll={false}
       >
-        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-          <div className="max-w-[460px] rounded-xl border border-line bg-white p-6 shadow-card">
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
+          <div className="w-full max-w-[460px] rounded-xl border border-line bg-white p-6 shadow-card">
             <h2 className="text-[16px] font-semibold">信息中枢仅桌面端可用</h2>
             <p className="mt-2 text-[12px] leading-6 text-muted">
               QQ / 微信归档要读取本机数据库，需要由桌面版启动本机进程。

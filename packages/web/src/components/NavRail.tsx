@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from "react";
+import { Fragment, useEffect, useRef, useState, type JSX } from "react";
 import {
   HomeIcon,
   TeamIcon,
@@ -23,6 +23,7 @@ import { NAV_HIDE_DELAY_MS, NAV_HOTZONE_PX, otherNavMode } from "../lib/navPrefs
 import { useModuleStore } from "../lib/modules/store.js";
 import { filterNavOrder } from "../lib/modules/nav.js";
 import { moduleForPage } from "../lib/modules/registry.js";
+import { navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
 
 /**
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
@@ -223,6 +224,14 @@ export function NavRail({
     return () => document.removeEventListener("keydown", onKey, true);
   }, [auto, navOpen, closeNav]);
 
+  /**
+   * 可见导航项（顺序跟 store 走、模块停用的撤下）。
+   * 抽成变量是为了让分隔线能看「上一项是谁」——内联 map 里拿不到过滤后的前一项。
+   */
+  const visibleItems = navOrder
+    .map((navPage) => ITEMS.find((it) => it.page === navPage))
+    .filter((it): it is (typeof ITEMS)[number] => Boolean(it));
+
   /** 导航轨内容：常显与浮层共用一份，避免两种模式的行为慢慢分叉。 */
   const railInner = (
     <>
@@ -257,18 +266,20 @@ export function NavRail({
         </div>
       </div>
 
-      {/* 中组：9 个宿主页，垂直居中（间距 8px，d.68 排版轮统一节奏） */}
+      {/* 中组：9 个宿主页，垂直居中（组内间距 8px；组间用一条细线分隔，见 lib/navGroups） */}
       <div className="flex flex-1 flex-col items-center justify-center gap-2">
-        {navOrder
-          .map((navPage) => ITEMS.find((it) => it.page === navPage))
-          .filter((it): it is (typeof ITEMS)[number] => Boolean(it))
-          .map((it) => {
-            const active = page === it.page;
-            const shortcut = it.digit ? `Alt${it.digit}` : "";
-            // d.70：模块页的显示名以模块注册表为准（与插件区卡片同源，改一处不会两处漂移）
-            const label = moduleForPage(it.page)?.name ?? it.label;
-            return (
-              <div key={it.page} className="group relative">
+        {visibleItems.map((it, index) => {
+          const active = page === it.page;
+          const shortcut = it.digit ? `Alt${it.digit}` : "";
+          // d.70：模块页的显示名以模块注册表为准（与插件区卡片同源，改一处不会两处漂移）
+          const label = moduleForPage(it.page)?.name ?? it.label;
+          // d.72：按「工作台 / 智能模块 / 资料与能力 / 系统」分组画分隔线。
+          // 用可见相邻项算（模块停用会跳过若干项），所以不会出现空组或悬空线。
+          const divider = needsGroupDivider(visibleItems[index - 1]?.page ?? null, it.page);
+          return (
+            <Fragment key={it.page}>
+              {divider ? <div aria-hidden="true" className="h-px w-6 bg-[#e6e6e6]" /> : null}
+              <div className="group relative" data-nav-group={navGroupOf(it.page)}>
                 <button
                   type="button"
                   aria-label={`${label}${shortcut ? ` ${shortcut}` : ""}`}
@@ -287,8 +298,9 @@ export function NavRail({
                 </button>
                 <Tip label={label} shortcut={shortcut || undefined} />
               </div>
-            );
-          })}
+            </Fragment>
+          );
+        })}
       </div>
 
       {/* 下组：通知 + 固定开关 + 账户（间距 8px，与上/中组同节奏） */}

@@ -49,11 +49,12 @@ describe("ui store 导航顺序", () => {
     useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("默认顺序（d.67 合并后 9 个宿主页）", () => {
+  it("默认顺序（d.72 重排后 9 个宿主页）", () => {
+    // 工作台（主页 → 智能体 → 团队）→ 智能模块 → 资料与能力 → 系统
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
-      "team",
       "chat",
+      "team",
       "staff",
       "infohub",
       "automations",
@@ -126,8 +127,8 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
     expect(readStoredNavOrder({ getItem: () => '["settings","home"]' })).toEqual([
       "settings",
       "home",
-      "team",
       "chat",
+      "team",
       "staff",
       "infohub",
       "automations",
@@ -135,6 +136,33 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "memory",
     ]);
     expect(readStoredNavOrder(null)).toEqual([...DEFAULT_NAV_ORDER]);
+  });
+
+  it("没动过顺序的老用户跟随新默认顺序；自定义顺序原样保留", () => {
+    const legacyDefault = JSON.stringify([
+      "home",
+      "team",
+      "chat",
+      "staff",
+      "infohub",
+      "automations",
+      "plugins",
+      "memory",
+      "settings",
+    ]);
+    expect(readStoredNavOrder({ getItem: () => legacyDefault })).toEqual([...DEFAULT_NAV_ORDER]);
+    // 用户亲手排过的顺序（哪怕很短）不被升级覆盖
+    expect(readStoredNavOrder({ getItem: () => '["memory","settings"]' })).toEqual([
+      "memory",
+      "settings",
+      "home",
+      "chat",
+      "team",
+      "staff",
+      "infohub",
+      "automations",
+      "plugins",
+    ]);
   });
 });
 

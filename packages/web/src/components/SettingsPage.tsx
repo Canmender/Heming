@@ -27,6 +27,7 @@ import {
 } from "../lib/settings/registry.js";
 import { FOCUS_RING } from "../lib/a11y/focus.js";
 import { PageShell } from "./layout/PageShell.js";
+import { NAV_GROUP_LABEL, navGroupOf } from "../lib/navGroups.js";
 
 /**
  * 头像文件上限：449_000 字节 → base64 data URL 约 598_700 字符，
@@ -198,6 +199,9 @@ export function SettingsPage() {
       subtitle="改动即时生效，仅作用于本机，无需重启。"
       headerExtra={
         <div className="px-6 pb-3 pt-3 max-[1199px]:px-4">
+          {/* d.72：标签栏与搜索框跟正文同列居中。之前正文固定 720px 贴左，
+              宽屏（1600）右侧空出半屏，看起来像页面没铺满。 */}
+          <div className="mx-auto w-full max-w-[760px]">
           {/* 横向标签栏：选中项白底、选中线压在下边框上（与内容区连成一体） */}
           <div className="flex gap-1" role="tablist" aria-label="设置分组">
             {SETTINGS_TABS.map((t) => {
@@ -239,12 +243,13 @@ export function SettingsPage() {
               {searching ? `${results.length} 项匹配 · Esc 关闭` : "按标题、关键词或分区名搜索"}
             </span>
           </div>
+          </div>
         </div>
       }
     >
       {/* 内容区：一次只渲染当前分组，切换时不保留上一次的输入态（草稿本就一次性保存） */}
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 max-[1199px]:px-4">
-        <div className="w-full max-w-[720px]">
+        <div className="mx-auto w-full max-w-[760px]">
           {searching ? (
             <section aria-label="设置搜索结果">
               {results.length === 0 ? (
@@ -776,7 +781,8 @@ function NavigationSection() {
         </button>
       </div>
       <div className="mt-1 ui-caption">
-        只改左侧导航的显示顺序；数字快捷键仍对应原来的页面（Alt+1 / 2 / 5 / 6 / 8 / 0）
+        只改左侧导航的显示顺序；数字快捷键仍对应原来的页面（Alt+1 / 2 / 5 / 6 / 8 / 0）。
+        导航按「工作台 / 智能模块 / 资料与能力 / 系统」用细线分组，移动时细线跟着组变化走。
       </div>
       <ul className="mt-2 flex flex-col gap-1">
         {navOrder.map((page, index) => (
@@ -786,6 +792,7 @@ function NavigationSection() {
           >
             <span className="w-[18px] ui-caption">{index + 1}</span>
             <span className="flex-1 text-[12px]">{NAV_LABELS[page]}</span>
+            <span className="ui-micro shrink-0 text-muted">{NAV_GROUP_LABEL[navGroupOf(page)]}</span>
             <button
               type="button"
               aria-label={`上移 ${NAV_LABELS[page]}`}

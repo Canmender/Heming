@@ -5,6 +5,7 @@ import { useUiStore, DEFAULT_NAV_ORDER } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
 import { useModuleStore } from "../lib/modules/store.js";
+import { DEFAULT_NAV_ORDER as NEW_DEFAULT } from "../store/ui.js";
 
 describe("NavRail 图标轨（A 方案）", () => {
   beforeEach(() => {
@@ -423,5 +424,57 @@ describe("NavRail 导航自动隐藏（d.68）", () => {
     const nav = screen.getByRole("navigation", { name: "主导航" });
     expect(nav.className).toContain("shrink-0");
     expect(nav.className).not.toContain("absolute");
+  });
+});
+
+describe("NavRail 分组重排（d.72）", () => {
+  beforeEach(() => {
+    useModuleStore.getState().reset();
+    useUiStore.setState({ page: "home", navOrder: [...NEW_DEFAULT] });
+  });
+
+  const PAGE_LABELS = [
+    "主页",
+    "智能体",
+    "团队",
+    "幕僚",
+    "信息中枢",
+    "自动化",
+    "插件区",
+    "记忆区",
+    "设置区",
+  ];
+
+  it("默认顺序：先工作台、再智能模块、再资料、最后系统", () => {
+    render(<NavRail />);
+    const labels = screen
+      .getAllByRole("button")
+      .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
+      .filter((label) => PAGE_LABELS.includes(label));
+    expect(labels).toEqual(PAGE_LABELS);
+  });
+
+  it("组间画 3 条细线；模块停用后按可见项只剩 2 条", () => {
+    const { container, unmount } = render(<NavRail />);
+    const dividers = () => container.querySelectorAll("[data-nav-group]");
+    expect(dividers()).toHaveLength(9);
+    // 分隔线是 aria-hidden 的纯视觉元素，不参与读屏
+    const lines = () =>
+      [...container.querySelectorAll("div[aria-hidden='true']")].filter((el) =>
+        el.className.includes("h-px"),
+      );
+    expect(lines()).toHaveLength(3);
+
+    unmount();
+    // 停用信息中枢（连带自动化）与幕僚：智能模块整组消失，只剩 工作台 → 资料 → 系统 两条线
+    useModuleStore.getState().setEnabled("infohub", false);
+    useModuleStore.getState().setEnabled("staff", false);
+    const second = render(<NavRail />);
+    expect(second.container.querySelectorAll("[data-nav-group]")).toHaveLength(6);
+    expect(
+      [...second.container.querySelectorAll("div[aria-hidden='true']")].filter((el) =>
+        el.className.includes("h-px"),
+      ),
+    ).toHaveLength(2);
   });
 });

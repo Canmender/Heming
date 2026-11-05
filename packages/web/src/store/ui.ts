@@ -51,8 +51,37 @@ export type PageView = "board" | "tasks" | "skills" | "interfaces" | "modules" |
 /** 导航项：所有页面都可排进导航轨（只含合并后的宿主页）。 */
 export type NavPage = Page;
 
-/** 导航默认顺序；快捷键数字由 App/NavRail 按页面固定绑定（显示顺序改了不影响快捷键）。 */
+/**
+ * 导航默认顺序（d.72 重排）；快捷键数字由 App/NavRail 按页面固定绑定
+ * （显示顺序改了不影响快捷键）。
+ *
+ * 排法按「干活 → 智能模组 → 资料与能力 → 系统」：
+ * - 工作台：先总览、再跟智能体对话、最后看团队；
+ * - 智能模块：幕僚 / 信息中枢 / 自动化（d.70 的三个可插拔内置模块）；
+ * - 资料与能力：插件区 / 记忆区；
+ * - 系统：设置区。
+ * 视觉分组见 `lib/navGroups.ts`。
+ */
 export const DEFAULT_NAV_ORDER: NavPage[] = [
+  "home",
+  "chat",
+  "team",
+  "staff",
+  "infohub",
+  "automations",
+  "plugins",
+  "memory",
+  "settings",
+];
+
+/**
+ * d.72 之前的默认顺序。
+ *
+ * 用户没动过顺序时，localStorage 里存的就是这一份；重排默认值后要把它迁移成新顺序，
+ * 否则「重排列导航栏」对老用户完全不生效（看起来像功能没做）。用户自定义过的顺序
+ * 一律原样保留——那是他亲手排的，不该被升级覆盖。
+ */
+const LEGACY_DEFAULT_NAV_ORDER: NavPage[] = [
   "home",
   "team",
   "chat",
@@ -63,6 +92,10 @@ export const DEFAULT_NAV_ORDER: NavPage[] = [
   "memory",
   "settings",
 ];
+
+function sameOrder(a: readonly NavPage[], b: readonly NavPage[]): boolean {
+  return a.length === b.length && a.every((page, i) => page === b[i]);
+}
 
 /** 旧页面 id → 宿主页 + 视图的折叠表。新增合并页时只改这里与 `Page`。 */
 const LEGACY_ROUTES: Record<LegacyPage, { page: Page; view: PageView }> = {
@@ -121,7 +154,9 @@ export function readStoredNavOrder(storage: Pick<Storage, "getItem"> | null): Na
   try {
     const raw = storage.getItem(NAV_ORDER_KEY);
     if (!raw) return [...DEFAULT_NAV_ORDER];
-    return normalizeNavOrder(JSON.parse(raw));
+    const order = normalizeNavOrder(JSON.parse(raw));
+    // 没动过顺序的老用户：跟随新版默认顺序（见 LEGACY_DEFAULT_NAV_ORDER 注释）
+    return sameOrder(order, LEGACY_DEFAULT_NAV_ORDER) ? [...DEFAULT_NAV_ORDER] : order;
   } catch {
     return [...DEFAULT_NAV_ORDER];
   }
@@ -349,10 +384,35 @@ function uiStorage(): Pick<Storage, "getItem" | "setItem"> | null {
   }
 }
 
+/**
+ * 启动时把「迁移后的导航顺序」落盘（d.72）。
+ *
+ * 读盘本身保持纯函数（测试里注入的假 storage 只有 getItem）；这里只在真机上
+ * 发现存储值与归一结果不一致时写回——典型场景是把 d.72 之前的默认顺序升级成
+ * 新默认，避免以后每次启动都重新迁移一遍。用户自定义顺序归一后内容不变，不会写。
+ */
+function persistMigratedNavOrder(next: NavPage[]): void {
+  const storage = uiStorage();
+  if (!storage) return;
+  try {
+    const raw = storage.getItem(NAV_ORDER_KEY);
+    if (!raw || raw === JSON.stringify(next)) return;
+    storage.setItem(NAV_ORDER_KEY, JSON.stringify(next));
+  } catch {
+    /* 隐私模式/配额满：内存态已生效，不因落盘失败影响启动 */
+  }
+}
+
+const INITIAL_NAV_ORDER = (() => {
+  const order = readStoredNavOrder(uiStorage());
+  persistMigratedNavOrder(order);
+  return order;
+})();
+
 export const useUiStore = create<UiState>((set, get) => ({
   page: "home",
   pageView: null,
-  navOrder: readStoredNavOrder(uiStorage()),
+  navOrder: INITIAL_NAV_ORDER,
   navMode: readStoredNavMode(uiStorage()),
   navOpen: false,
   activeConversationId: null,
