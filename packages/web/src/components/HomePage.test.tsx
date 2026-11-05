@@ -372,11 +372,14 @@ describe("HomePage", () => {
     expect(screen.getByRole("button", { name: "收起" })).toBeInTheDocument();
   });
 
-  it("主页含近 30 日用量热力图卡", async () => {
+  it("近 30 日用量热力图并在「Token 用量」同一张卡里（d.73 合并，不再单开一条卡）", async () => {
     render(<HomePage />);
     await act(async () => {});
     expect(screen.getByRole("img", { name: "近 30 日 token 用量" })).toBeInTheDocument();
-    expect(screen.getByText("近 30 日用量")).toBeInTheDocument();
+    // 热力图标题与用量卡同属一张卡片：单独一张卡时它只是一条 70px 的细带，宽屏上白占一行。
+    const usageCard = screen.getByText(/Token 用量/).closest(".ui-card") as HTMLElement;
+    expect(usageCard).not.toBeNull();
+    expect(within(usageCard).getByText("近 30 日用量")).toBeInTheDocument();
   });
 
   it("今日只有未上报 → 徽标说「今日用量未上报」而不是 0，本月卡补「N 轮未上报」", async () => {

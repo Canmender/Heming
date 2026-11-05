@@ -405,23 +405,25 @@ export function HomePage() {
               </table>
             </div>
           )}
-        </div>
-      </div>
 
-      {/* 2.5 近 30 日用量热力图 */}
-      <section className="ui-card p-3">
-        <div className="mb-1.5 flex items-center">
-          <div className="text-[12px] font-bold text-muted">近 30 日用量</div>
-          <div className="ml-auto flex items-center gap-1 text-[10px] text-muted">
-            少
-            {["#f1f4f7", "#dbeafe", "#93c5fd", "#3b82f6", "#1d4ed8"].map((c) => (
-              <span key={c} style={{ backgroundColor: c }} className="h-2.5 w-2.5 rounded-[2px]" />
-            ))}
-            多
+          {/* 2.5 近 30 日用量热力图：并进「Token 用量」卡。
+              单独一张卡时它只是一条细带（标题 + 30 个方块），在宽屏上占了一整行却几乎没有内容；
+              并进来后「本月汇总 / 按日明细 / 近 30 日」在同一张卡里读，也少一个卡片框。 */}
+          <div className="mt-3 border-t border-line-soft pt-2">
+            <div className="mb-1.5 flex items-center">
+              <div className="text-[11px] font-bold text-muted">近 30 日用量</div>
+              <div className="ml-auto flex items-center gap-1 text-[10px] text-muted">
+                少
+                {["#f1f4f7", "#dbeafe", "#93c5fd", "#3b82f6", "#1d4ed8"].map((c) => (
+                  <span key={c} style={{ backgroundColor: c }} className="h-2.5 w-2.5 rounded-[2px]" />
+                ))}
+                多
+              </div>
+            </div>
+            <TokenHeatmap />
           </div>
         </div>
-        <TokenHeatmap />
-      </section>
+      </div>
 
       {/* 2.6 本机归档：日程摘要与归档规模（仅桌面端渲染）。
           d.70：信息中枢模块停用后整张卡下线，不在首页留假入口。 */}

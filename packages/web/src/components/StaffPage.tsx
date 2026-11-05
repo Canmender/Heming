@@ -254,6 +254,8 @@ export function StaffPage() {
       title="幕僚"
       subtitle="替你盯着日程与任务，只在需要你决定时递一份简报 · 不代你执行任何操作"
       width="readable"
+      // d.72：空态要垂直居中，滚动交给内层容器（PageShell 的滚动层不是 flex，flex-1 撑不开）
+      scroll={false}
       actions={
         <>
           <button
@@ -275,6 +277,8 @@ export function StaffPage() {
         </>
       }
     >
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 max-[1199px]:px-4">
+      <div className="mx-auto flex min-h-full w-full max-w-[960px] flex-col">
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line-soft bg-panel px-3 py-2">
         <span
           className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
@@ -315,7 +319,7 @@ export function StaffPage() {
         </div>
       )}
 
-      <div>
+      <div className="flex flex-1 flex-col">
         {settingsOpen && (
           <section className={`${CARD} mb-4`} aria-label="幕僚设置">
             <div className="mb-2 flex items-center gap-2">
@@ -439,7 +443,8 @@ export function StaffPage() {
         )}
 
         {runs.length === 0 ? (
-          <div className="mx-auto mt-8 max-w-[560px] rounded-xl border border-line bg-white shadow-card">
+          <div className="flex flex-1 items-center justify-center py-8">
+          <div className="w-full max-w-[560px] rounded-xl border border-line bg-white shadow-card">
             <EmptyState
               icon={<StaffIcon width={22} height={22} />}
               title="还没有简报"
@@ -456,6 +461,7 @@ export function StaffPage() {
               }
             />
           </div>
+          </div>
         ) : (
           <ul className="flex flex-col gap-4">
             {runs.map((run) => (
@@ -463,6 +469,8 @@ export function StaffPage() {
             ))}
           </ul>
         )}
+      </div>
+      </div>
       </div>
 
       {confirmClear && (

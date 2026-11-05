@@ -179,6 +179,8 @@ export function AutomationPage() {
       title="自动化"
       subtitle="本机定时任务 · 只在和鸣运行期间触发 · 错过的时刻不补跑"
       width="readable"
+      // d.72：空态垂直居中，同幕僚页；滚动交给内层容器
+      scroll={false}
       actions={
         <button
           type="button"
@@ -190,6 +192,8 @@ export function AutomationPage() {
         </button>
       }
     >
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 max-[1199px]:px-4">
+      <div className="mx-auto flex min-h-full w-full max-w-[960px] flex-col">
       {!desktop && (
         <div className="mb-4 rounded-lg border border-line-soft bg-[#fffdf5] px-3 py-2 ui-caption text-[#8a6d3b]">
           自动化只在桌面端执行。浏览器里可以创建和查看任务，但到点不会运行。
@@ -248,9 +252,10 @@ export function AutomationPage() {
         )}
       </div>
 
-      <div>
+      <div className="flex flex-1 flex-col">
         {tasks.length === 0 ? (
-          <div className="mx-auto mt-8 max-w-[520px] rounded-xl border border-line bg-white shadow-card">
+          <div className="flex flex-1 items-center justify-center py-8">
+          <div className="w-full max-w-[520px] rounded-xl border border-line bg-white shadow-card">
             <EmptyState
               icon={<AutomationIcon width={22} height={22} />}
               title="还没有自动化任务"
@@ -265,6 +270,7 @@ export function AutomationPage() {
                 </button>
               }
             />
+          </div>
           </div>
         ) : (
           <>
@@ -423,6 +429,8 @@ export function AutomationPage() {
             </p>
           </>
         )}
+      </div>
+      </div>
       </div>
 
       {editor && (

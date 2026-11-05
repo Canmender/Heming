@@ -96,3 +96,38 @@ Rail 渲染时对**过滤后的可见相邻项**调用它（模块停用会让�
    若后续要继续，可评估：主页「Token 用量」空态的垂直空白、幕僚/自动化空态是否垂直居中、
    记忆区超宽卡片的行宽上限。
 4. **横向平板/移动端布局**：本产品是桌面优先；本轮只验证到 900px 宽无溢出。
+
+---
+
+## 7. 收尾（d.73.2.33.0）：空态与密度
+
+### 7.1 幕僚 / 自动化空态垂直居中
+
+`PageShell` 默认 `scroll={true}` 时 children 在滚动层里，内部 `flex-1` 没有可分配高度，`items-center` 失效
+（信息中枢空态在 d.72 已用同一思路修过）。两页统一改为：
+
+```
+<PageShell scroll={false}>
+  <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 …">
+    <div className="mx-auto flex min-h-full w-full max-w-[960px] flex-col">
+      <状态条/统计行（shrink 高度）>
+      <div className="flex flex-1 flex-col">
+        空态：<div className="flex flex-1 items-center justify-center py-8"><卡/></div>
+        列表：<ul>…</ul>（由外层滚动容器接管）
+      </div>
+```
+
+空态卡宽度：幕僚 560px、自动化 520px（保持原宽度）；列表页仍单滚动条。
+
+### 7.2 主页用量热力图并卡
+
+- Token 用量卡内，tab 内容之后加一条 `border-t` 分隔：标题「近 30 日用量」+ 图例 + `TokenHeatmap`；
+- 删除原独立 `<section className="ui-card p-3">`；
+- 结果：1600 下用量卡 202px 高，热力图 `cardsWithHeat = 1`（同一卡内只出现一次）。
+
+### 7.3 测试守卫
+
+- `HomePage.test.tsx`：热力图标题必须能在「Token 用量」的 `.ui-card` 内找到；
+- `StaffPage.test.tsx` / `AutomationPage.test.tsx`：空态卡父容器必须同时有 `flex-1` 与 `items-center`，
+  防止回退成 `mt-8` 贴顶。
+

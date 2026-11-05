@@ -330,3 +330,21 @@ describe("自动化页", () => {
     expect(screen.getByText("运行记录已清空")).toBeInTheDocument();
   });
 });
+
+describe("自动化页空态布局（d.73）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
+    setAutomationRunStorage(createMemoryStorage());
+    resetStores();
+  });
+
+  it("空态卡在统计行下方的剩余空间垂直居中", () => {
+    render(<AutomationPage />);
+    const title = screen.getByText("还没有自动化任务");
+    const card = title.closest("div.rounded-xl") as HTMLElement;
+    expect(card.className).toContain("max-w-[520px]");
+    expect(card.parentElement?.className).toContain("flex-1");
+    expect(card.parentElement?.className).toContain("items-center");
+  });
+});
