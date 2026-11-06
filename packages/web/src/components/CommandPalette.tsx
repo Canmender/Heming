@@ -12,7 +12,7 @@ import { useInfohubStore } from "../lib/infohub/store.js";
 import { readLocalSnapshot, type LocalSnapshot } from "../lib/palette/local.js";
 import { PALETTE_PAGES, shortcutLabel } from "../lib/palette/pages.js";
 import { pluginStore } from "../lib/plugins/index.js";
-import { useModuleStore } from "../lib/modules/store.js";
+import { effectiveModuleIds, useModuleStore } from "../lib/modules/store.js";
 import { filterPalettePages } from "../lib/modules/nav.js";
 import { skillPool } from "../lib/skills/index.js";
 
@@ -36,7 +36,7 @@ export type { SearchOutcome, SearchResult } from "../lib/palette/search.js";
  * 命令面板（Ctrl/⌘+K）· v2（d.60）。
  *
  * ## 空查询：三组「目的地」
- * 最近使用（本机 ≤5）→ 页面跳转（13 页，带 Alt 快捷键）→ 常用动作（4 个）。
+ * 最近使用（本机 ≤5）→ 页面跳转（9 个宿主页，带 Alt 快捷键）→ 常用动作（5 个）。
  * 打开面板就能「去哪里」，不必先想关键词。
  *
  * ## 输入：同屏分组检索，组间不混排
@@ -67,6 +67,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const focusTeamMember = useUiStore((s) => s.focusTeamMember);
   const openInfohub = useUiStore((s) => s.openInfohub);
   const openSettings = useUiStore((s) => s.openSettings);
+  const openModuleManager = useUiStore((s) => s.openModuleManager);
   const setPaletteIntent = useUiStore((s) => s.setPaletteIntent);
   const focusTask = useUiStore((s) => s.focusTask);
   const infohubRunning = useInfohubStore((s) => s.running);
@@ -76,6 +77,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     () => filterPalettePages(PALETTE_PAGES, { enabled: moduleEnabled }),
     [moduleEnabled],
   );
+  /** 「模块管理」动作的副标题显示实际生效数（依赖未满足的不计），与模块卡同一口径。 */
+  const effectiveModuleCount = effectiveModuleIds({ enabled: moduleEnabled }).length;
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -199,6 +202,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         break;
       case "settings":
         openSettings();
+        break;
+      case "modules":
+        // 插件区 + 模块 Tab 的一次性意图（d.70 的 openModuleManager），
+        // 与停用模块后的跳转落点同一入口。
+        openModuleManager();
         break;
       default:
         break;
@@ -407,7 +415,10 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     )}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{item.name}</span>
-                      <span className="block truncate text-[10px] text-muted">{item.detail}</span>
+                      <span className="block truncate text-[10px] text-muted">
+                        {item.detail}
+                        {item.actionId === "modules" ? ` · 已启用 ${effectiveModuleCount}/3` : null}
+                      </span>
                     </span>
                     {item.kind === "page" && shortcutLabel(item.digit) ? (
                       <kbd className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">

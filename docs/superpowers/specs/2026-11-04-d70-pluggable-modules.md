@@ -158,3 +158,28 @@
   「已清理本机数据」；失败（运行中）显示原因，不改变任何数据；
 - 不做「一键清空所有模块」：跨模块清理涉及 InfoHub 外部数据边界，逐个模块明确确认更好解释。
 
+---
+
+## 9. 收尾（d.74.2.33.0）：命令面板的「模块管理」入口
+
+### 9.1 问题
+
+d.70 之后「模块」成为产品概念，但命令面板的页面目录只有三个模块页（幕僚 / 信息中枢 / 自动化），
+插件区条目描述里没有「模块」；QA 实测搜「模块」返回 0 条。用户知道有这个能力，却得先跳插件区再找 Tab。
+
+### 9.2 修法
+
+- `lib/palette/actions.ts` 新增 `modules` 动作：标签「模块管理」，描述「启用 / 停用幕僚、信息中枢、自动化」，
+  关键词含「模块 / 内置模块 / 模块管理 / module(s)」；
+- `CommandPalette.runAction` 的 `modules` 分支调用 `ui.openModuleManager()`——插件区 + `pageView:"modules"`，
+  与停用模块后的跳转落点、`pageView` 意图消费完全同一套；
+- 渲染时给该动作的副标题追加 `· 已启用 N/3`（`effectiveModuleIds({enabled})` 口径，依赖未满足不计），
+  与模块 Tab 头部、模块卡状态同源；
+- 空态项数 13 → 14（9 页 + 5 动作）。
+
+### 9.3 测试
+
+- `CommandPalette.test.tsx`：点击「模块管理」→ `page:"plugins"` + `pageView:"modules"`；
+  输入「模块」命中该动作；停用信息中枢后副标题「已启用 1/3」；
+- `palette.test.ts`：动作目录 5 个、`buildEmptyGroups` 动作组 5 项、`flattenGroups` 14 项。
+

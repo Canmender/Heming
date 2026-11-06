@@ -91,14 +91,16 @@ describe("palette · 设置分区与动作目录", () => {
     }
   });
 
-  it("常用动作固定 4 个", () => {
+  it("常用动作固定 5 个", () => {
     expect(PALETTE_ACTIONS.map((a) => a.id)).toEqual([
       "new-task",
       "new-agent",
       "notifications",
       "settings",
+      "modules",
     ]);
     expect(findPaletteAction("new-task")?.label).toBe("新建任务");
+    expect(findPaletteAction("modules")?.label).toBe("模块管理");
     expect(findPaletteAction("nope")).toBeUndefined();
   });
 
@@ -174,7 +176,7 @@ describe("palette · 空查询分组", () => {
     const groups = buildEmptyGroups([]);
     expect(groups.map((g) => g.id)).toEqual(["page", "action"]);
     expect(groups[0].items).toHaveLength(9);
-    expect(groups[1].items).toHaveLength(4);
+    expect(groups[1].items).toHaveLength(5);
   });
 
   it("有最近使用时置顶，且最多 5 条；不存在的条目静默跳过", () => {
@@ -286,7 +288,7 @@ describe("palette · 输入检索", () => {
 
   it("flattenGroups 只摊平结果项，便于键盘游标", () => {
     const groups = buildEmptyGroups([]);
-    expect(flattenGroups(groups)).toHaveLength(13);
+    expect(flattenGroups(groups)).toHaveLength(14);
   });
 
   it("旧口径 searchAll 仍可用（兼容导出）", () => {

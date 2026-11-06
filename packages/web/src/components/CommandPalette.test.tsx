@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { CommandPalette } from "./CommandPalette.js";
 import { useUiStore } from "../store/ui.js";
+import { useModuleStore } from "../lib/modules/store.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { fetchTeam } from "../lib/api.js";
 import { RECENT_KEY } from "../lib/palette/recent.js";
@@ -25,7 +26,7 @@ vi.mock("../lib/palette/local.js", async (importOriginal) => {
 /**
  * 命令面板 v2（d.60）的行为用例。
  *
- * 覆盖：空查询三分组、输入检索、四个动作的分发（断言调用了正确的 store）、
+ * 覆盖：空查询三分组、输入检索、五个动作的分发（断言调用了正确的 store）、
  * 键盘 ↑↓/Enter/Esc（含 preventDefault 不滚动页面）、结果项 a11y 口径、
  * 最近使用落盘与再次打开时置顶。
  */
@@ -35,6 +36,7 @@ const searchBox = () => screen.getByLabelText("搜索页面、动作与成员");
 
 function resetStores() {
   localStorage.clear();
+  useModuleStore.getState().reset();
   useUiStore.setState({
     page: "home",
     activeConversationId: null,
@@ -61,8 +63,8 @@ describe("命令面板 v2 · 空查询分组", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(screen.getByText("页面跳转")).toBeInTheDocument();
     expect(screen.getByText("常用动作")).toBeInTheDocument();
-    // 9 个页面 + 4 个动作（d.67 合并后导航只剩 9 个宿主页）
-    expect(screen.getAllByRole("option")).toHaveLength(13);
+    // 9 个页面 + 5 个动作（d.67 合并后导航只剩 9 个宿主页）
+    expect(screen.getAllByRole("option")).toHaveLength(14);
     // 没有最近使用时不出现该组标题
     expect(screen.queryByText("最近使用")).not.toBeInTheDocument();
   });
@@ -261,6 +263,27 @@ describe("命令面板 v2 · 四个动作的分发", () => {
     fireEvent.click(OPTION("打开设置"));
     expect(useUiStore.getState().page).toBe("settings");
     expect(useUiStore.getState().settingsTab).toBeNull();
+  });
+
+  it("模块管理 → 插件区 + 模块 Tab 意图（与停用模块后的跳转落点同一入口）", () => {
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.click(OPTION("模块管理"));
+    const s = useUiStore.getState();
+    expect(s.page).toBe("plugins");
+    expect(s.pageView).toBe("modules");
+  });
+
+  it("模块管理动作显示实际生效数（依赖未满足的不计）", () => {
+    useModuleStore.getState().setEnabled("infohub", false);
+    render(<CommandPalette onClose={vi.fn()} />);
+    // 停信息中枢会连带自动化失效（依赖），只剩幕僚 1/3
+    expect(screen.getByText(/已启用 1\/3/)).toBeInTheDocument();
+  });
+
+  it("搜「模块」能命中模块管理动作（此前一条结果都没有）", async () => {
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "模块" } });
+    expect(await screen.findByRole("option", { name: "选择 模块管理" })).toBeInTheDocument();
   });
 
   it("连续两次「新智能体」意图的 token 不同（不会被合并成一次）", () => {
