@@ -33,6 +33,7 @@ import { fmtTokens } from "../lib/format/tokens.js";
 import { Avatar } from "./Avatar.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { TeamBoardView } from "./TeamBoardPage.js";
+import { TeamWorkspace } from "./team/TeamWorkspace.js";
 
 /**
  * 团队页（去 IM 后的主入口）：
@@ -96,7 +97,7 @@ function fmtLastSeen(iso: string | null): string {
 
 /** 团队视图 Tab 的会话级记忆：刷新回到上次看的视图（关窗重开回「动向」）。 */
 const TEAM_TAB_KEY = "heming.tab.team.v1";
-const TEAM_TABS = ["feed", "board", "agenda", "usage"] as const;
+const TEAM_TABS = ["workspace", "feed", "board", "agenda", "usage"] as const;
 type TeamTab = (typeof TEAM_TABS)[number];
 
 export function TeamPage() {
@@ -473,6 +474,7 @@ export function TeamPage() {
         </span>
       }
       headerExtra={
+        tab === "workspace" ? null : (
         <div className="bg-[var(--subtle)] px-6 py-2">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <span className="ui-caption">
@@ -547,12 +549,13 @@ export function TeamPage() {
             </p>
           )}
         </div>
+        )
       }
     >
       <div className="flex min-h-0 flex-1">
         {/* 看板自带成员筛选条与两列卡片，再叠一栏名册会把两列挤窄；
             其余视图（动向/日程/用量）仍用名册 + 右栏的结构。 */}
-        {tab !== "board" && (
+        {tab !== "board" && tab !== "workspace" && (
           <aside className="flex w-[300px] shrink-0 flex-col border-r border-line-soft">
             <div className="border-b border-line-soft p-2.5">
               <input
@@ -647,7 +650,7 @@ export function TeamPage() {
         )}
 
         <main className="flex min-w-0 flex-1 flex-col">
-          {tab !== "board" && selectedMember && (
+          {tab !== "board" && tab !== "workspace" && selectedMember && (
             <div className="flex items-center gap-3 border-b border-line-soft bg-white px-6 py-2.5">
               <Avatar user={selectedMember.user} size={32} />
               <div className="min-w-0">
@@ -688,6 +691,7 @@ export function TeamPage() {
             aria-label="团队视图"
           >
             {[
+              { key: "workspace" as const, label: "工作台" },
               { key: "feed" as const, label: "动向" },
               { key: "board" as const, label: "看板" },
               { key: "agenda" as const, label: "团队日程" },
@@ -705,6 +709,8 @@ export function TeamPage() {
               </button>
             ))}
           </div>
+
+          {tab === "workspace" && <TeamWorkspace />}
 
           {/* 看板：d.67 从独立页并进来的视图，自己取数、自己筛选，只借用这里的 Tab 位。
               条件渲染意味着切走即卸载（轮询停止），不会在别的视图里偷偷占用带宽。 */}

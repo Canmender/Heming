@@ -11,6 +11,19 @@ import {
   fetchFileBlobUrl,
   fetchFileBlobText,
   fetchFileUsage,
+  fetchWorkspaceTeams,
+  fetchWorkspaceTeam,
+  createWorkspaceTeam,
+  updateWorkspaceTeam,
+  deleteWorkspaceTeam,
+  addWorkspaceMember,
+  removeWorkspaceMember,
+  createTeamPlan,
+  updateTeamPlan,
+  deleteTeamPlan,
+  createTeamTask,
+  updateTeamTask,
+  deleteTeamTask,
 } from "./api.js";
 import { hasSubtle, fromB64, toB64 } from "./e2eCrypto.js";
 
@@ -523,5 +536,143 @@ describe("uploadEncryptedFile / downloadEncryptedFile（E2E 附件加密）", ()
     expect(down).toBeInstanceOf(Error);
     expect((down as Error).message).toMatch(/无法加密消息/);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+/** 团队工作台（d.92）：URL / method / body 一次钉死，避免工具层与 UI 各写一套路径。 */
+describe("团队工作台 REST（/api/teams）", () => {
+  const T0 = "2026-11-07T10:00:00.000Z";
+  const team = { id: "t1", name: "增长小组", goal: "提升周活", ownerId: "u1", createdAt: T0, updatedAt: T0 };
+  const snapshot = { team, members: [], plans: [], tasks: [] };
+  const jsonRes = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const lastCall = () => {
+    const spy = vi.mocked(globalThis.fetch);
+    const call = spy.mock.calls[spy.mock.calls.length - 1]!;
+    return { url: String(call[0]), init: call[1] as RequestInit };
+  };
+
+  beforeEach(() => {
+    setToken("t1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonRes(snapshot));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setToken(null);
+  });
+
+  it("列表/创建团队：GET 与 POST /api/teams", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes({ teams: [team] }));
+    await fetchWorkspaceTeams();
+    expect(lastCall().url).toBe("/api/teams");
+    expect(lastCall().init.method).toBeUndefined(); // GET
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes(snapshot, 201));
+    const got = await createWorkspaceTeam({ name: "增长小组", goal: "提升周活" });
+    expect(got).toEqual(snapshot);
+    expect(lastCall().url).toBe("/api/teams");
+    expect(lastCall().init.method).toBe("POST");
+    expect(JSON.parse(String(lastCall().init.body))).toEqual({
+      name: "增长小组",
+      goal: "提升周活",
+    });
+  });
+
+  it("单个团队：GET / PATCH / DELETE /api/teams/:id", async () => {
+    await fetchWorkspaceTeam("t1");
+    expect(lastCall().url).toBe("/api/teams/t1");
+    expect(lastCall().init.method).toBeUndefined();
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes(snapshot));
+    await updateWorkspaceTeam("t1", { goal: "新的目标" });
+    expect(lastCall().url).toBe("/api/teams/t1");
+    expect(lastCall().init.method).toBe("PATCH");
+    expect(JSON.parse(String(lastCall().init.body))).toEqual({ goal: "新的目标" });
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes({}));
+    await deleteWorkspaceTeam("t1");
+    expect(lastCall().url).toBe("/api/teams/t1");
+    expect(lastCall().init.method).toBe("DELETE");
+  });
+
+  it("成员：POST /api/teams/:id/members 与 DELETE /api/teams/:id/members/:userId", async () => {
+    await addWorkspaceMember("t1", "linxiao");
+    expect(lastCall().url).toBe("/api/teams/t1/members");
+    expect(lastCall().init.method).toBe("POST");
+    expect(JSON.parse(String(lastCall().init.body))).toEqual({ username: "linxiao" });
+
+    await removeWorkspaceMember("t1", "u2");
+    expect(lastCall().url).toBe("/api/teams/t1/members/u2");
+    expect(lastCall().init.method).toBe("DELETE");
+  });
+
+  it("方案：POST / PATCH / DELETE /api/teams/:id/plans(/:planId)", async () => {
+    const plan = { ...snapshot.team, id: "p1" };
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes(plan));
+    await createTeamPlan("t1", { title: "拉新", detail: "先做落地页", orderIndex: 2 });
+    expect(lastCall().url).toBe("/api/teams/t1/plans");
+    expect(lastCall().init.method).toBe("POST");
+    expect(JSON.parse(String(lastCall().init.body))).toEqual({
+      title: "拉新",
+      detail: "先做落地页",
+      orderIndex: 2,
+    });
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes(plan));
+    await updateTeamPlan("t1", "p1", { status: "doing" });
+    expect(lastCall().url).toBe("/api/teams/t1/plans/p1");
+    expect(lastCall().init.method).toBe("PATCH");
+    expect(JSON.parse(String(lastCall().init.body))).toEqual({ status: "doing" });
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes({}));
+    await deleteTeamPlan("t1", "p1");
+    expect(lastCall().url).toBe("/api/teams/t1/plans/p1");
+    expect(lastCall().init.method).toBe("DELETE");
+  });
+
+  it("任务：POST / PATCH / DELETE /api/teams/:id/tasks(/:taskId)", async () => {
+    const task = { id: "k1", teamId: "t1", title: "写落地页" };
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes(task, 201));
+    await createTeamTask("t1", { title: "写落地页", assigneeId: "u2", dueAt: null });
+    expect(lastCall().url).toBe("/api/teams/t1/tasks");
+    expect(lastCall().init.method).toBe("POST");
+    expect(JSON.parse(String(lastCall().init.body))).toEqual({
+      title: "写落地页",
+      assigneeId: "u2",
+      dueAt: null,
+    });
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes(task));
+    await updateTeamTask("t1", "k1", { status: "done", attachmentFileId: "f9" });
+    expect(lastCall().url).toBe("/api/teams/t1/tasks/k1");
+    expect(lastCall().init.method).toBe("PATCH");
+    expect(JSON.parse(String(lastCall().init.body))).toEqual({
+      status: "done",
+      attachmentFileId: "f9",
+    });
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes({}));
+    await deleteTeamTask("t1", "k1");
+    expect(lastCall().url).toBe("/api/teams/t1/tasks/k1");
+    expect(lastCall().init.method).toBe("DELETE");
+  });
+
+  it("403/404：服务端中文 error 进 ApiError.message（原样让上层透给模型）", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      jsonRes({ error: "只有团队 owner 可以修改团队" }, 403),
+    );
+    const denied = await updateWorkspaceTeam("t1", { name: "x" }).catch((e: unknown) => e);
+    expect(denied).toBeInstanceOf(ApiError);
+    expect((denied as ApiError).status).toBe(403);
+    expect((denied as ApiError).message).toBe("只有团队 owner 可以修改团队");
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonRes({ error: "团队不存在" }, 404));
+    const missing = await fetchWorkspaceTeam("nope").catch((e: unknown) => e);
+    expect((missing as ApiError).status).toBe(404);
+    expect((missing as ApiError).message).toBe("团队不存在");
   });
 });

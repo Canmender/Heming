@@ -10,6 +10,12 @@ import type {
   TeamActivity,
   TeamActivityInput,
   TeamUsageInput,
+  TeamItemStatus,
+  TeamMemberRole,
+  TeamPlanItem,
+  TeamTask,
+  TeamWorkspaceSnapshot,
+  WorkspaceTeam,
 } from "@heming/shared";
 
 /** 服务端存的一行团队用量（聚合前）：只有白名单维度与数字。 */
@@ -29,6 +35,51 @@ export interface TeamUsageRow {
 export type ReencryptResult =
   | { ok: true; message: Message }
   | { ok: false; reason: "not_found" | "forbidden" | "conflict" };
+
+/* ───────────────────────── d.92 团队工作台：入参与返回值 ───────────────────────── */
+
+/** 建团队入参（schema 已校验；Store 只做语义，不重复校验长度）。 */
+export interface WorkspaceTeamCreateInput {
+  name: string;
+  goal?: string;
+}
+
+/** 改团队入参：只带要改的字段。 */
+export interface WorkspaceTeamUpdateInput {
+  name?: string;
+  goal?: string;
+}
+
+export interface TeamPlanCreateInput {
+  title: string;
+  detail?: string;
+  orderIndex?: number;
+}
+
+export interface TeamPlanUpdateInput {
+  title?: string;
+  detail?: string;
+  status?: TeamItemStatus;
+  orderIndex?: number;
+}
+
+export interface TeamTaskCreateInput {
+  title: string;
+  detail?: string;
+  planId?: string | null;
+  assigneeId?: string | null;
+  dueAt?: string | null;
+}
+
+export interface TeamTaskUpdateInput {
+  title?: string;
+  detail?: string;
+  planId?: string | null;
+  assigneeId?: string | null;
+  status?: TeamItemStatus;
+  dueAt?: string | null;
+  attachmentFileId?: string | null;
+}
 
 /**
  * 系统预设 agent 元数据单一真源：内存注册表与 sqlite agents 表 upsert 共用，
@@ -146,6 +197,81 @@ export interface Store {
    * 所以清除必须是一个显式动作（对称团队动向的 `clearTeamActivities`）。
    */
   clearTeamUsage(actorId: string): number;
+  // —— d.92 团队工作台：用户自建团队 / 方案 / 任务（智能体接口预留，权限只在服务端判） ——
+  //
+  // 权限口径（app 层按此映射状态码，两个实现必须一致）：
+  // - 非成员访问团队 → 一律返回 null（app 404「团队不存在」），不泄露团队是否存在；
+  // - 成员但不是 owner 做 owner-only 动作 → "forbidden"（app 403）；
+  // - 方案/任务：团队成员都能读写（`forbidden` 留在联合类型里给后续按项授权用）。
+  /** 我是成员的团队，按 updatedAt 降序（最近有动静的在前）。 */
+  listWorkspaceTeams(userId: string): WorkspaceTeam[];
+  /** 团队工作台快照（成员 + 方案 + 任务）；不是成员 / 不存在 → null。 */
+  getWorkspaceTeam(teamId: string, userId: string): TeamWorkspaceSnapshot | null;
+  /** 建团队并把自己写成 owner 成员；返回空快照。 */
+  createWorkspaceTeam(ownerId: string, body: WorkspaceTeamCreateInput): TeamWorkspaceSnapshot;
+  /** 仅 owner 可改名/改目标；非成员 null，成员非 owner "forbidden"。 */
+  updateWorkspaceTeam(
+    teamId: string,
+    actorId: string,
+    body: WorkspaceTeamUpdateInput,
+  ): TeamWorkspaceSnapshot | "forbidden" | null;
+  /** 仅 owner；级联删除成员/方案/任务。非成员 null，成员非 owner "forbidden"。 */
+  deleteWorkspaceTeam(teamId: string, actorId: string): boolean | "forbidden" | null;
+  /** 仅 owner 按用户名拉人；用户不存在 "user_not_found"，已在团队 "already_member"。 */
+  addWorkspaceMember(
+    teamId: string,
+    actorId: string,
+    username: string,
+  ): TeamWorkspaceSnapshot | "forbidden" | "user_not_found" | "already_member" | null;
+  /** 仅 owner；不能移除 owner（"owner"）。目标不是成员 → null。 */
+  removeWorkspaceMember(
+    teamId: string,
+    actorId: string,
+    targetUserId: string,
+  ): TeamWorkspaceSnapshot | "forbidden" | "owner" | null;
+  /** 新建方案项（成员可写）；plan 不存在 "not_found"。 */
+  createTeamPlan(
+    teamId: string,
+    actorId: string,
+    body: TeamPlanCreateInput,
+  ): TeamPlanItem | "forbidden" | "not_found" | null;
+  updateTeamPlan(
+    teamId: string,
+    planId: string,
+    actorId: string,
+    body: TeamPlanUpdateInput,
+  ): TeamPlanItem | "forbidden" | "not_found" | null;
+  deleteTeamPlan(teamId: string, planId: string, actorId: string): boolean | "forbidden" | "not_found";
+  /**
+   * 新建任务（成员可写）。校验两类引用：
+   * - assigneeId 必须是团队成员 → "assignee_not_member"（app 400）
+   * - planId 必须属于该团队 → "plan_not_found"（app 400）
+   */
+  createTeamTask(
+    teamId: string,
+    actorId: string,
+    body: TeamTaskCreateInput,
+  ):
+    | TeamTask
+    | "forbidden"
+    | "not_found"
+    | "assignee_not_member"
+    | "plan_not_found"
+    | null;
+  /** 改任务（成员可写）；任务不存在 "not_found"；引用校验同 createTeamTask。 */
+  updateTeamTask(
+    teamId: string,
+    taskId: string,
+    actorId: string,
+    body: TeamTaskUpdateInput,
+  ):
+    | TeamTask
+    | "forbidden"
+    | "not_found"
+    | "assignee_not_member"
+    | "plan_not_found"
+    | null;
+  deleteTeamTask(teamId: string, taskId: string, actorId: string): boolean | "forbidden" | "not_found";
   /** 幂等登记系统预设 agent（新库没有预设群后仍要能开「和小鸣」对话）。 */
   ensureSystemAgents(): void;
 }
@@ -180,11 +306,67 @@ export function createMemoryStore(): Store {
   const teamActivityKeys = new Set<string>();
   /** 团队用量：键 = `actorId\0date\0model`（与 sqlite 主键同口径），值只有白名单维度。 */
   const teamUsage = new Map<string, TeamUsageRow>();
+  // d.92 团队工作台：键与 sqlite 主键同口径（成员键 = `teamId` + NUL + `userId`）
+  const teams = new Map<string, WorkspaceTeam>();
+  const teamMembers = new Map<
+    string,
+    { teamId: string; userId: string; role: TeamMemberRole; joinedAt: string }
+  >();
+  const teamPlans = new Map<string, TeamPlanItem>();
+  const teamTasks = new Map<string, TeamTask>();
 
   const mustUser = (id: string): User => {
     const row = users.get(id);
     if (!row) throw new Error("user not found");
     return row.user;
+  };
+
+  const teamMemberKey = (teamId: string, userId: string) => `${teamId}\0${userId}`;
+  const memberRole = (teamId: string, userId: string): TeamMemberRole | null =>
+    teamMembers.get(teamMemberKey(teamId, userId))?.role ?? null;
+  /** 可见团队：存在且本人是成员；否则 null（app 层一律 404，不泄露存在性）。 */
+  const visibleTeam = (teamId: string, actorId: string): WorkspaceTeam | null => {
+    const team = teams.get(teamId);
+    if (!team || !teamMembers.has(teamMemberKey(teamId, actorId))) return null;
+    return team;
+  };
+  /** 团队内有任何动静（改团队/成员/方案/任务）就刷新 updatedAt：列表按它倒序排。 */
+  const touchTeam = (teamId: string): void => {
+    const team = teams.get(teamId);
+    if (team) teams.set(teamId, { ...team, updatedAt: new Date().toISOString() });
+  };
+  const snapshotOf = (teamId: string): TeamWorkspaceSnapshot => {
+    const team = teams.get(teamId)!;
+    const members = [...teamMembers.values()]
+      .filter((m) => m.teamId === teamId)
+      .map((m) => {
+        const row = users.get(m.userId);
+        return row ? { user: row.user, role: m.role, joinedAt: m.joinedAt } : null;
+      })
+      .filter((m): m is NonNullable<typeof m> => m !== null)
+      .sort(
+        (a, b) =>
+          // owner 排第一，其余按加入时间；同时刻用显示名兜底，保证两实现顺序一致
+          (a.role === b.role ? 0 : a.role === "owner" ? -1 : 1) ||
+          (a.joinedAt < b.joinedAt ? -1 : a.joinedAt > b.joinedAt ? 1 : 0) ||
+          a.user.displayName.localeCompare(b.user.displayName, "zh-Hans-CN"),
+      );
+    const plans = [...teamPlans.values()]
+      .filter((p) => p.teamId === teamId)
+      .sort(
+        (a, b) =>
+          a.orderIndex - b.orderIndex ||
+          (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0) ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+    const tasks = [...teamTasks.values()]
+      .filter((t) => t.teamId === teamId)
+      .sort(
+        (a, b) =>
+          (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0) ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+    return { team, members, plans, tasks };
   };
   return {
     createUser(username, passwordHash, displayName) {
@@ -455,6 +637,208 @@ export function createMemoryStore(): Store {
         removed += 1;
       }
       return removed;
+    },
+    listWorkspaceTeams(userId) {
+      return [...teams.values()]
+        .filter((team) => teamMembers.has(teamMemberKey(team.id, userId)))
+        .sort(
+          (a, b) =>
+            (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0) ||
+            (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+        )
+        .map((team) => ({ ...team }));
+    },
+    getWorkspaceTeam(teamId, userId) {
+      return visibleTeam(teamId, userId) ? snapshotOf(teamId) : null;
+    },
+    createWorkspaceTeam(ownerId, body) {
+      const at = new Date().toISOString();
+      const team: WorkspaceTeam = {
+        id: randomUUID(),
+        name: body.name,
+        goal: body.goal ?? "",
+        ownerId,
+        createdAt: at,
+        updatedAt: at,
+      };
+      teams.set(team.id, team);
+      teamMembers.set(teamMemberKey(team.id, ownerId), {
+        teamId: team.id,
+        userId: ownerId,
+        role: "owner",
+        joinedAt: at,
+      });
+      return snapshotOf(team.id);
+    },
+    updateWorkspaceTeam(teamId, actorId, body) {
+      const team = visibleTeam(teamId, actorId);
+      if (!team) return null;
+      if (team.ownerId !== actorId) return "forbidden";
+      const next: WorkspaceTeam = {
+        ...team,
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.goal !== undefined ? { goal: body.goal } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      teams.set(teamId, next);
+      return snapshotOf(teamId);
+    },
+    deleteWorkspaceTeam(teamId, actorId) {
+      const team = visibleTeam(teamId, actorId);
+      if (!team) return null;
+      if (team.ownerId !== actorId) return "forbidden";
+      teams.delete(teamId);
+      for (const [key, m] of [...teamMembers.entries()]) if (m.teamId === teamId) teamMembers.delete(key);
+      for (const [id, p] of [...teamPlans.entries()]) if (p.teamId === teamId) teamPlans.delete(id);
+      for (const [id, t] of [...teamTasks.entries()]) if (t.teamId === teamId) teamTasks.delete(id);
+      return true;
+    },
+    addWorkspaceMember(teamId, actorId, username) {
+      const team = visibleTeam(teamId, actorId);
+      if (!team) return null;
+      if (team.ownerId !== actorId) return "forbidden";
+      const targetId = usersByName.get(username);
+      if (!targetId) return "user_not_found";
+      if (teamMembers.has(teamMemberKey(teamId, targetId))) return "already_member";
+      teamMembers.set(teamMemberKey(teamId, targetId), {
+        teamId,
+        userId: targetId,
+        role: "member",
+        joinedAt: new Date().toISOString(),
+      });
+      touchTeam(teamId);
+      return snapshotOf(teamId);
+    },
+    removeWorkspaceMember(teamId, actorId, targetUserId) {
+      const team = visibleTeam(teamId, actorId);
+      if (!team) return null;
+      if (team.ownerId !== actorId) return "forbidden";
+      if (targetUserId === team.ownerId) return "owner";
+      if (!teamMembers.has(teamMemberKey(teamId, targetUserId))) return null;
+      teamMembers.delete(teamMemberKey(teamId, targetUserId));
+      // 被移出的人不该继续挂任务：指给他的任务解绑成「待认领」，
+      // 否则团队里会留下一个「指给非成员」的非法引用。
+      for (const [id, task] of teamTasks) {
+        if (task.teamId === teamId && task.assigneeId === targetUserId) {
+          teamTasks.set(id, { ...task, assigneeId: null, updatedAt: new Date().toISOString() });
+        }
+      }
+      touchTeam(teamId);
+      return snapshotOf(teamId);
+    },
+    createTeamPlan(teamId, actorId, body) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const at = new Date().toISOString();
+      const siblings = [...teamPlans.values()].filter((p) => p.teamId === teamId);
+      const plan: TeamPlanItem = {
+        id: randomUUID(),
+        teamId,
+        title: body.title,
+        detail: body.detail ?? "",
+        status: "todo",
+        orderIndex: body.orderIndex ?? siblings.length,
+        createdBy: actorId,
+        createdAt: at,
+        updatedAt: at,
+      };
+      teamPlans.set(plan.id, plan);
+      touchTeam(teamId);
+      return { ...plan };
+    },
+    updateTeamPlan(teamId, planId, actorId, body) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const plan = teamPlans.get(planId);
+      if (!plan || plan.teamId !== teamId) return "not_found";
+      const next: TeamPlanItem = {
+        ...plan,
+        ...(body.title !== undefined ? { title: body.title } : {}),
+        ...(body.detail !== undefined ? { detail: body.detail } : {}),
+        ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.orderIndex !== undefined ? { orderIndex: body.orderIndex } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      teamPlans.set(planId, next);
+      touchTeam(teamId);
+      return { ...next };
+    },
+    deleteTeamPlan(teamId, planId, actorId) {
+      // 非成员与「方案不存在」同口径（都是 404），不泄露团队存在性
+      if (!visibleTeam(teamId, actorId)) return "not_found";
+      const plan = teamPlans.get(planId);
+      if (!plan || plan.teamId !== teamId) return "not_found";
+      teamPlans.delete(planId);
+      // 删方案不删任务：归属它的任务解绑成独立任务（执行内容比归类更重要）
+      for (const [id, task] of teamTasks) {
+        if (task.teamId === teamId && task.planId === planId) {
+          teamTasks.set(id, { ...task, planId: null, updatedAt: new Date().toISOString() });
+        }
+      }
+      touchTeam(teamId);
+      return true;
+    },
+    createTeamTask(teamId, actorId, body) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      if (body.planId) {
+        const plan = teamPlans.get(body.planId);
+        if (!plan || plan.teamId !== teamId) return "plan_not_found";
+      }
+      if (body.assigneeId && memberRole(teamId, body.assigneeId) === null) {
+        return "assignee_not_member";
+      }
+      const at = new Date().toISOString();
+      const task: TeamTask = {
+        id: randomUUID(),
+        teamId,
+        planId: body.planId ?? null,
+        title: body.title,
+        detail: body.detail ?? "",
+        assigneeId: body.assigneeId ?? null,
+        status: "todo",
+        createdBy: actorId,
+        createdAt: at,
+        updatedAt: at,
+        dueAt: body.dueAt ?? null,
+        attachmentFileId: null,
+      };
+      teamTasks.set(task.id, task);
+      touchTeam(teamId);
+      return { ...task };
+    },
+    updateTeamTask(teamId, taskId, actorId, body) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const task = teamTasks.get(taskId);
+      if (!task || task.teamId !== teamId) return "not_found";
+      if (body.planId) {
+        const plan = teamPlans.get(body.planId);
+        if (!plan || plan.teamId !== teamId) return "plan_not_found";
+      }
+      if (body.assigneeId && memberRole(teamId, body.assigneeId) === null) {
+        return "assignee_not_member";
+      }
+      const next: TeamTask = {
+        ...task,
+        ...(body.title !== undefined ? { title: body.title } : {}),
+        ...(body.detail !== undefined ? { detail: body.detail } : {}),
+        ...(body.planId !== undefined ? { planId: body.planId } : {}),
+        ...(body.assigneeId !== undefined ? { assigneeId: body.assigneeId } : {}),
+        ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.dueAt !== undefined ? { dueAt: body.dueAt } : {}),
+        ...(body.attachmentFileId !== undefined
+          ? { attachmentFileId: body.attachmentFileId }
+          : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      teamTasks.set(taskId, next);
+      touchTeam(teamId);
+      return { ...next };
+    },
+    deleteTeamTask(teamId, taskId, actorId) {
+      if (!visibleTeam(teamId, actorId)) return "not_found";
+      const task = teamTasks.get(taskId);
+      if (!task || task.teamId !== teamId) return "not_found";
+      teamTasks.delete(taskId);
+      touchTeam(teamId);
+      return true;
     },
     ensureSystemAgents() {
       for (const [id, meta] of Object.entries(SYSTEM_AGENTS)) {

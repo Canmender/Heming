@@ -90,6 +90,60 @@ export function initSchema(db: DatabaseSyncType): void {
     );
     CREATE INDEX IF NOT EXISTS idx_team_usage_date ON team_usage(date);
   `);
+  /*
+   * d.92 团队工作台：用户自建团队 / 方案 / 任务（与上面的「全站单团队」两层东西）。
+   *
+   * 不建外键：级联删除在 Store 里显式做（四个删除口都要在事务里清干净），
+   * 这样内存实现与 SQLite 实现的行为是同一份契约、同一批测试双跑。
+   * order_index 是方案排序值（小的在前，同值按 created_at），任务按 created_at 正序。
+   */
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS teams (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      goal TEXT NOT NULL DEFAULT '',
+      owner_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS team_members (
+      team_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      joined_at TEXT NOT NULL,
+      PRIMARY KEY (team_id, user_id)
+    );
+    CREATE TABLE IF NOT EXISTS team_plans (
+      id TEXT PRIMARY KEY,
+      team_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL,
+      order_index INTEGER NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS team_tasks (
+      id TEXT PRIMARY KEY,
+      team_id TEXT NOT NULL,
+      plan_id TEXT,
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      assignee_id TEXT,
+      status TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      due_at TEXT,
+      attachment_file_id TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id, team_id);
+    CREATE INDEX IF NOT EXISTS idx_teams_updated ON teams(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_team_plans_team ON team_plans(team_id, order_index, created_at);
+    CREATE INDEX IF NOT EXISTS idx_team_tasks_team ON team_tasks(team_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_team_tasks_plan ON team_tasks(plan_id);
+  `);
   // 幂等列迁移：生产库已有无 recalled_at 列的 messages 表（CREATE IF NOT EXISTS 不会补列）；
   // E2E Task 2 同模式补 enc/cipher/chain_kid/n（enc 带非空默认值，SQLite ALTER 允许常量默认）。
   const cols = db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;

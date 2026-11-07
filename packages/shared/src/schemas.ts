@@ -578,3 +578,162 @@ export const TeamUsageResponseSchema = z.object({
   ranking: z.array(TeamUsageRankRowSchema),
 });
 export type TeamUsageResponse = z.infer<typeof TeamUsageResponseSchema>;
+
+// ══════════════════════════════════════════════════════════════════════
+// 团队工作台（d.92）：用户自建团队 / 目标 / 方案 / 任务
+// ══════════════════════════════════════════════════════════════════════
+//
+// 与「全站名册」是两层东西：
+// - 现有 TeamRoster/TeamActivity 仍描述「全站一个团队」的名册与动向摘要；
+// - 这里的 WorkspaceTeam 是用户自建的工作组：有名字、目标、方案与任务，
+//   成员由 owner 按用户名拉进来（不做公开邀请链接，不公开注册）。
+//
+// 智能体接口预留：所有写操作都走 REST（带用户 token），能力提供者 `team_*`
+// 走同一套 API——权限判定只有服务端一处（是否成员 / 是否 owner）。
+
+export const TeamItemStatusSchema = z.enum(["todo", "doing", "done", "blocked"]);
+export type TeamItemStatus = z.infer<typeof TeamItemStatusSchema>;
+
+export const TeamMemberRoleSchema = z.enum(["owner", "member"]);
+export type TeamMemberRole = z.infer<typeof TeamMemberRoleSchema>;
+
+export const WorkspaceTeamSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(40),
+  /** 团队目标（自由文本；空串 = 还没写）。 */
+  goal: z.string().max(500),
+  ownerId: z.string().min(1),
+  createdAt: IsoTimeSchema,
+  updatedAt: IsoTimeSchema,
+});
+export type WorkspaceTeam = z.infer<typeof WorkspaceTeamSchema>;
+
+export const TeamPlanItemSchema = z.object({
+  id: z.string().min(1),
+  teamId: z.string().min(1),
+  title: z.string().min(1).max(120),
+  detail: z.string().max(2000),
+  status: TeamItemStatusSchema,
+  /** 排序值（小的在前；同值按 createdAt）。 */
+  orderIndex: z.number().int().min(0).max(9999),
+  createdBy: z.string().min(1),
+  createdAt: IsoTimeSchema,
+  updatedAt: IsoTimeSchema,
+});
+export type TeamPlanItem = z.infer<typeof TeamPlanItemSchema>;
+
+export const TeamTaskSchema = z.object({
+  id: z.string().min(1),
+  teamId: z.string().min(1),
+  /** 归属方案项；null = 独立任务。 */
+  planId: z.string().nullable(),
+  title: z.string().min(1).max(120),
+  detail: z.string().max(2000),
+  /** 指给谁做（必须是团队成员）；null = 待认领。 */
+  assigneeId: z.string().nullable(),
+  status: TeamItemStatusSchema,
+  createdBy: z.string().min(1),
+  createdAt: IsoTimeSchema,
+  updatedAt: IsoTimeSchema,
+  /** 截止时间（ISO）；null = 没定。 */
+  dueAt: z.string().nullable(),
+  /** 任务交付物引用共享文件库里的文件 id；null = 还没有上传。 */
+  attachmentFileId: z.string().nullable(),
+});
+export type TeamTask = z.infer<typeof TeamTaskSchema>;
+
+export const WorkspaceTeamMemberSchema = z.object({
+  user: UserSchema,
+  role: TeamMemberRoleSchema,
+  joinedAt: IsoTimeSchema,
+});
+export type WorkspaceTeamMember = z.infer<typeof WorkspaceTeamMemberSchema>;
+
+/** 一个团队的完整工作台快照（成员 + 方案 + 任务；任务/方案按时间正序，方案再按 orderIndex）。 */
+export const TeamWorkspaceSnapshotSchema = z.object({
+  team: WorkspaceTeamSchema,
+  members: z.array(WorkspaceTeamMemberSchema),
+  plans: z.array(TeamPlanItemSchema),
+  tasks: z.array(TeamTaskSchema),
+});
+export type TeamWorkspaceSnapshot = z.infer<typeof TeamWorkspaceSnapshotSchema>;
+
+export const WorkspaceTeamListSchema = z.object({
+  teams: z.array(WorkspaceTeamSchema),
+});
+export type WorkspaceTeamList = z.infer<typeof WorkspaceTeamListSchema>;
+
+export const CreateWorkspaceTeamBodySchema = z.object({
+  name: z.string().trim().min(1, "请填写团队名称").max(40, "团队名称最多 40 字"),
+  goal: z.string().trim().max(500, "目标最多 500 字").optional(),
+});
+export type CreateWorkspaceTeamBody = z.infer<typeof CreateWorkspaceTeamBodySchema>;
+
+export const UpdateWorkspaceTeamBodySchema = z
+  .object({
+    name: z.string().trim().min(1, "团队名称不能为空").max(40, "团队名称最多 40 字").optional(),
+    goal: z.string().trim().max(500, "目标最多 500 字").optional(),
+  })
+  .refine((v) => v.name !== undefined || v.goal !== undefined, { message: "没有要修改的字段" });
+export type UpdateWorkspaceTeamBody = z.infer<typeof UpdateWorkspaceTeamBodySchema>;
+
+export const AddTeamMemberBodySchema = z.object({
+  username: z.string().trim().min(1, "请填写用户名").max(64, "用户名过长"),
+});
+export type AddTeamMemberBody = z.infer<typeof AddTeamMemberBodySchema>;
+
+export const CreateTeamPlanBodySchema = z.object({
+  title: z.string().trim().min(1, "请填写方案标题").max(120, "标题最多 120 字"),
+  detail: z.string().trim().max(2000, "说明最多 2000 字").optional(),
+  orderIndex: z.number().int().min(0).max(9999).optional(),
+});
+export type CreateTeamPlanBody = z.infer<typeof CreateTeamPlanBodySchema>;
+
+export const UpdateTeamPlanBodySchema = z
+  .object({
+    title: z.string().trim().min(1, "标题不能为空").max(120, "标题最多 120 字").optional(),
+    detail: z.string().trim().max(2000, "说明最多 2000 字").optional(),
+    status: TeamItemStatusSchema.optional(),
+    orderIndex: z.number().int().min(0).max(9999).optional(),
+  })
+  .refine(
+    (v) =>
+      v.title !== undefined ||
+      v.detail !== undefined ||
+      v.status !== undefined ||
+      v.orderIndex !== undefined,
+    { message: "没有要修改的字段" },
+  );
+export type UpdateTeamPlanBody = z.infer<typeof UpdateTeamPlanBodySchema>;
+
+export const CreateTeamTaskBodySchema = z.object({
+  title: z.string().trim().min(1, "请填写任务标题").max(120, "标题最多 120 字"),
+  detail: z.string().trim().max(2000, "说明最多 2000 字").optional(),
+  planId: z.string().trim().min(1).nullable().optional(),
+  assigneeId: z.string().trim().min(1).nullable().optional(),
+  dueAt: IsoTimeSchema.nullable().optional(),
+});
+export type CreateTeamTaskBody = z.infer<typeof CreateTeamTaskBodySchema>;
+
+export const UpdateTeamTaskBodySchema = z
+  .object({
+    title: z.string().trim().min(1, "标题不能为空").max(120, "标题最多 120 字").optional(),
+    detail: z.string().trim().max(2000, "说明最多 2000 字").optional(),
+    planId: z.string().trim().min(1).nullable().optional(),
+    assigneeId: z.string().trim().min(1).nullable().optional(),
+    status: TeamItemStatusSchema.optional(),
+    dueAt: IsoTimeSchema.nullable().optional(),
+    attachmentFileId: z.string().trim().min(1).nullable().optional(),
+  })
+  .refine(
+    (v) =>
+      v.title !== undefined ||
+      v.detail !== undefined ||
+      v.planId !== undefined ||
+      v.assigneeId !== undefined ||
+      v.status !== undefined ||
+      v.dueAt !== undefined ||
+      v.attachmentFileId !== undefined,
+    { message: "没有要修改的字段" },
+  );
+export type UpdateTeamTaskBody = z.infer<typeof UpdateTeamTaskBodySchema>;

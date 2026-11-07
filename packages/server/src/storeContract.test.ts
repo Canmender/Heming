@@ -229,5 +229,167 @@ for (const f of factories) {
       expect(after.map((r) => r.actorId)).toEqual([b.id]);
       expect(store.listTeamUsage({ from: "2026-11-02", to: "2026-11-02" })).toHaveLength(1);
     });
+
+    /* ───────────────────── d.92 团队工作台（两实现同契约） ───────────────────── */
+
+    it("团队工作台：建团队 → 加成员 → 方案/任务 CRUD，快照口径一致", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const created = store.createWorkspaceTeam(a.id, { name: "课程组", goal: "把课表排好" });
+      expect(created.team).toMatchObject({
+        name: "课程组",
+        goal: "把课表排好",
+        ownerId: a.id,
+      });
+      expect(created.members).toHaveLength(1);
+      expect(created.members[0]).toMatchObject({ role: "owner" });
+      expect(created.members[0].user.id).toBe(a.id);
+      expect(created.plans).toEqual([]);
+      expect(created.tasks).toEqual([]);
+
+      // 列表：只有成员看得到；建完即出现
+      expect(store.listWorkspaceTeams(a.id).map((t) => t.id)).toEqual([created.team.id]);
+      expect(store.listWorkspaceTeams(b.id)).toEqual([]);
+      // 非成员读快照 = null（不泄露存在性）
+      expect(store.getWorkspaceTeam(created.team.id, b.id)).toBeNull();
+      expect(store.getWorkspaceTeam("nope", a.id)).toBeNull();
+
+      // 加成员后 b 也能读；重复加是 already_member；未知用户名单独区分
+      const added = store.addWorkspaceMember(created.team.id, a.id, "bob");
+      expect(added).not.toBeNull();
+      expect((added as { members: unknown[] }).members).toHaveLength(2);
+      expect(store.addWorkspaceMember(created.team.id, a.id, "bob")).toBe("already_member");
+      expect(store.addWorkspaceMember(created.team.id, a.id, "nobody")).toBe("user_not_found");
+      expect(store.listWorkspaceTeams(b.id).map((t) => t.id)).toEqual([created.team.id]);
+
+      // 方案：orderIndex 缺省按添加序；成员可改
+      const plan1 = store.createTeamPlan(created.team.id, a.id, { title: "收集课程" });
+      const plan2 = store.createTeamPlan(created.team.id, b.id, { title: "排查冲突" });
+      expect(plan1).not.toBe("not_found");
+      expect((plan1 as { orderIndex: number }).orderIndex).toBe(0);
+      expect((plan2 as { orderIndex: number }).orderIndex).toBe(1);
+      const planId = (plan1 as { id: string }).id;
+      const updatedPlan = store.updateTeamPlan(created.team.id, planId, b.id, {
+        status: "doing",
+        title: "收集全部课程",
+      });
+      expect(updatedPlan).toMatchObject({ status: "doing", title: "收集全部课程" });
+
+      // 任务：可挂方案、可指派成员；非成员不能指派、跨团队方案不行
+      const task = store.createTeamTask(created.team.id, a.id, {
+        title: "导出课表",
+        planId,
+        assigneeId: b.id,
+      });
+      expect(task).toMatchObject({ planId, assigneeId: b.id, status: "todo" });
+      const taskId = (task as { id: string }).id;
+      expect(
+        store.createTeamTask(created.team.id, a.id, { title: "x", assigneeId: "outsider" }),
+      ).toBe("assignee_not_member");
+      expect(
+        store.createTeamTask(created.team.id, a.id, { title: "x", planId: "no-such-plan" }),
+      ).toBe("plan_not_found");
+
+      // 外地人（非成员）读写一律 null（app 404），不泄露团队存在性
+      expect(store.createTeamPlan(created.team.id, "outsider", { title: "x" })).toBeNull();
+      expect(store.createTeamTask(created.team.id, "outsider", { title: "x" })).toBeNull();
+      expect(store.updateTeamPlan(created.team.id, planId, "outsider", { title: "x" })).toBeNull();
+
+      // 改任务：状态推进 + 换人 + 解绑
+      const patched = store.updateTeamTask(created.team.id, taskId, b.id, {
+        status: "done",
+        assigneeId: null,
+      });
+      expect(patched).toMatchObject({ status: "done", assigneeId: null });
+
+      // 快照顺序：owner 在前、方案按 orderIndex、任务按创建序
+      const snap = store.getWorkspaceTeam(created.team.id, b.id)!;
+      expect(snap.members.map((m) => m.role)).toEqual(["owner", "member"]);
+      expect(snap.plans.map((p) => p.id)).toEqual([planId, (plan2 as { id: string }).id]);
+      expect(snap.tasks.map((t) => t.id)).toEqual([taskId]);
+      expect(snap.team.updatedAt >= snap.team.createdAt).toBe(true);
+    });
+
+    it("团队工作台：owner-only 动作与不可移除创建者", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const teamId = store.createWorkspaceTeam(a.id, { name: "组" }).team.id;
+      store.addWorkspaceMember(teamId, a.id, "bob");
+
+      // 成员非 owner：改/删团队、加/移除成员 → forbidden
+      expect(store.updateWorkspaceTeam(teamId, b.id, { name: "改名" })).toBe("forbidden");
+      expect(store.deleteWorkspaceTeam(teamId, b.id)).toBe("forbidden");
+      expect(store.addWorkspaceMember(teamId, b.id, "alice")).toBe("forbidden");
+      expect(store.removeWorkspaceMember(teamId, b.id, a.id)).toBe("forbidden");
+
+      // 非成员：null（app 404），不是 forbidden
+      expect(store.updateWorkspaceTeam(teamId, "outsider", { name: "x" })).toBeNull();
+      expect(store.deleteWorkspaceTeam(teamId, "outsider")).toBeNull();
+      expect(store.addWorkspaceMember(teamId, "outsider", "alice")).toBeNull();
+      expect(store.removeWorkspaceMember(teamId, "outsider", b.id)).toBeNull();
+
+      // owner 不能被移除
+      expect(store.removeWorkspaceMember(teamId, a.id, a.id)).toBe("owner");
+      // 移除成员后他就不再能看到团队，且列表里消失
+      const removed = store.removeWorkspaceMember(teamId, a.id, b.id);
+      expect(removed).not.toBeNull();
+      expect((removed as { members: unknown[] }).members).toHaveLength(1);
+      expect(store.getWorkspaceTeam(teamId, b.id)).toBeNull();
+      expect(store.listWorkspaceTeams(b.id)).toEqual([]);
+      // 目标不是成员 → null
+      expect(store.removeWorkspaceMember(teamId, a.id, b.id)).toBeNull();
+
+      // owner 自己改团队信息成功
+      const renamed = store.updateWorkspaceTeam(teamId, a.id, { name: "新组名", goal: "目标" });
+      expect(renamed).toMatchObject({ team: { name: "新组名", goal: "目标" } });
+    });
+
+    it("团队工作台：级联删除与引用解绑（删方案不删任务、移成员解绑指派）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const teamId = store.createWorkspaceTeam(a.id, { name: "组" }).team.id;
+      store.addWorkspaceMember(teamId, a.id, "bob");
+      const plan = store.createTeamPlan(teamId, a.id, { title: "方案" }) as { id: string };
+      const task = store.createTeamTask(teamId, a.id, {
+        title: "任务",
+        planId: plan.id,
+        assigneeId: b.id,
+      }) as { id: string };
+
+      // 移出成员 → 指派被解绑（不留「指给非成员」的非法引用）
+      store.removeWorkspaceMember(teamId, a.id, b.id);
+      expect(store.getWorkspaceTeam(teamId, a.id)!.tasks[0].assigneeId).toBeNull();
+      // 删方案 → 任务保留但解绑
+      expect(store.deleteTeamPlan(teamId, plan.id, a.id)).toBe(true);
+      const afterPlan = store.getWorkspaceTeam(teamId, a.id)!;
+      expect(afterPlan.plans).toEqual([]);
+      expect(afterPlan.tasks.map((t) => t.id)).toEqual([task.id]);
+      expect(afterPlan.tasks[0].planId).toBeNull();
+
+      // 删任务 / 删不存在的任务
+      expect(store.deleteTeamTask(teamId, task.id, a.id)).toBe(true);
+      expect(store.deleteTeamTask(teamId, task.id, a.id)).toBe("not_found");
+      expect(store.deleteTeamPlan(teamId, plan.id, a.id)).toBe("not_found");
+      // 非成员删 = not_found（同一口径）
+      expect(store.deleteTeamTask(teamId, "x", "outsider")).toBe("not_found");
+      expect(store.deleteTeamPlan(teamId, "x", "outsider")).toBe("not_found");
+
+      // 删团队 → 级联清干净：再读为 null，成员列表也不再出现
+      expect(store.deleteWorkspaceTeam(teamId, a.id)).toBe(true);
+      expect(store.getWorkspaceTeam(teamId, a.id)).toBeNull();
+      expect(store.listWorkspaceTeams(a.id)).toEqual([]);
+    });
+
+    it("团队工作台：列表按最近动静倒序", async () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const t1 = store.createWorkspaceTeam(a.id, { name: "一号" }).team.id;
+      // updatedAt 是毫秒级 ISO：隔一毫秒，排序才有确定的先后（不依赖 id 的随机序）
+      await new Promise((r) => setTimeout(r, 5));
+      const t2 = store.createWorkspaceTeam(a.id, { name: "二号" }).team.id;
+      expect(store.listWorkspaceTeams(a.id).map((t) => t.id)).toEqual([t2, t1]);
+      await new Promise((r) => setTimeout(r, 5));
+      store.createTeamPlan(t1, a.id, { title: "动一下" });
+      expect(store.listWorkspaceTeams(a.id).map((t) => t.id)).toEqual([t1, t2]);
+    });
   });
 }

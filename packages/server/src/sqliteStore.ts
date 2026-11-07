@@ -11,6 +11,12 @@ import type {
   TeamActivity,
   TeamActivityInput,
   TeamUsageInput,
+  TeamItemStatus,
+  TeamMemberRole,
+  TeamPlanItem,
+  TeamTask,
+  TeamWorkspaceSnapshot,
+  WorkspaceTeam,
 } from "@heming/shared";
 import type { Store, TeamUsageRow } from "./store.js";
 import { SYSTEM_AGENTS } from "./store.js";
@@ -86,6 +92,142 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       .get(id) as { id: string; username: string; display_name: string; avatar: string | null } | undefined;
     if (!row) throw new Error("user not found");
     return rowToUser(row);
+  };
+
+  /* ───────────────── d.92 团队工作台：行映射与可见性判定 ───────────────── */
+
+  type TeamRow = {
+    id: string;
+    name: string;
+    goal: string;
+    owner_id: string;
+    created_at: string;
+    updated_at: string;
+  };
+  const rowToTeam = (r: TeamRow): WorkspaceTeam => ({
+    id: r.id,
+    name: r.name,
+    goal: r.goal,
+    ownerId: r.owner_id,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  });
+
+  type PlanRow = {
+    id: string;
+    team_id: string;
+    title: string;
+    detail: string;
+    status: string;
+    order_index: number;
+    created_by: string;
+    created_at: string;
+    updated_at: string;
+  };
+  const rowToPlan = (r: PlanRow): TeamPlanItem => ({
+    id: r.id,
+    teamId: r.team_id,
+    title: r.title,
+    detail: r.detail,
+    status: r.status as TeamItemStatus,
+    orderIndex: Number(r.order_index),
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  });
+
+  type TaskRow = {
+    id: string;
+    team_id: string;
+    plan_id: string | null;
+    title: string;
+    detail: string;
+    assignee_id: string | null;
+    status: string;
+    created_by: string;
+    created_at: string;
+    updated_at: string;
+    due_at: string | null;
+    attachment_file_id: string | null;
+  };
+  const rowToTask = (r: TaskRow): TeamTask => ({
+    id: r.id,
+    teamId: r.team_id,
+    planId: r.plan_id ?? null,
+    title: r.title,
+    detail: r.detail,
+    assigneeId: r.assignee_id ?? null,
+    status: r.status as TeamItemStatus,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    dueAt: r.due_at ?? null,
+    attachmentFileId: r.attachment_file_id ?? null,
+  });
+
+  const teamMemberRole = (teamId: string, userId: string): TeamMemberRole | null => {
+    const row = db
+      .prepare("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+      .get(teamId, userId) as { role: string } | undefined;
+    return row ? (row.role as TeamMemberRole) : null;
+  };
+
+  /** 可见团队：存在且本人是成员；否则 null（app 层一律 404，不泄露存在性）。 */
+  const visibleTeam = (teamId: string, actorId: string): WorkspaceTeam | null => {
+    const row = db.prepare("SELECT * FROM teams WHERE id = ?").get(teamId) as TeamRow | undefined;
+    if (!row) return null;
+    if (!teamMemberRole(teamId, actorId)) return null;
+    return rowToTeam(row);
+  };
+
+  /** 团队内有任何动静就刷新 updated_at：列表按它倒序排（与内存实现同语义）。 */
+  const touchTeam = (teamId: string): void => {
+    db.prepare("UPDATE teams SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), teamId);
+  };
+
+  const snapshotOf = (teamId: string): TeamWorkspaceSnapshot => {
+    const teamRow = db.prepare("SELECT * FROM teams WHERE id = ?").get(teamId) as TeamRow | undefined;
+    if (!teamRow) throw new Error("team not found");
+    const memberRows = db
+      .prepare(
+        `SELECT u.id, u.username, u.display_name, u.avatar, m.role, m.joined_at
+         FROM team_members m JOIN users u ON u.id = m.user_id WHERE m.team_id = ?`,
+      )
+      .all(teamId) as Array<{
+      id: string;
+      username: string;
+      display_name: string;
+      avatar: string | null;
+      role: string;
+      joined_at: string;
+    }>;
+    // 成员排序在 JS 里做：SQLite 的排序规则与 JS localeCompare 不同，
+    // 放在一处（与内存实现逐字一致）才能保证「两实现同一契约」的断言稳定。
+    const members = memberRows
+      .map((r) => ({
+        user: rowToUser(r),
+        role: r.role as TeamMemberRole,
+        joinedAt: r.joined_at,
+      }))
+      .sort(
+        (a, b) =>
+          (a.role === b.role ? 0 : a.role === "owner" ? -1 : 1) ||
+          (a.joinedAt < b.joinedAt ? -1 : a.joinedAt > b.joinedAt ? 1 : 0) ||
+          a.user.displayName.localeCompare(b.user.displayName, "zh-Hans-CN"),
+      );
+    const plans = (
+      db
+        .prepare(
+          "SELECT * FROM team_plans WHERE team_id = ? ORDER BY order_index ASC, created_at ASC, id ASC",
+        )
+        .all(teamId) as PlanRow[]
+    ).map(rowToPlan);
+    const tasks = (
+      db
+        .prepare("SELECT * FROM team_tasks WHERE team_id = ? ORDER BY created_at ASC, id ASC")
+        .all(teamId) as TaskRow[]
+    ).map(rowToTask);
+    return { team: rowToTeam(teamRow), members, plans, tasks };
   };
 
   return {
@@ -577,6 +719,231 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     },
     clearTeamUsage(actorId) {
       return Number(db.prepare("DELETE FROM team_usage WHERE actor_id = ?").run(actorId).changes);
+    },
+    listWorkspaceTeams(userId) {
+      const rows = db
+        .prepare(
+          `SELECT t.* FROM teams t JOIN team_members m ON m.team_id = t.id
+           WHERE m.user_id = ? ORDER BY t.updated_at DESC, t.id ASC`,
+        )
+        .all(userId) as TeamRow[];
+      return rows.map(rowToTeam);
+    },
+    getWorkspaceTeam(teamId, userId) {
+      return visibleTeam(teamId, userId) ? snapshotOf(teamId) : null;
+    },
+    createWorkspaceTeam(ownerId, body) {
+      const id = randomUUID();
+      const at = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO teams (id, name, goal, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(id, body.name, body.goal ?? "", ownerId, at, at);
+      db.prepare(
+        "INSERT INTO team_members (team_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
+      ).run(id, ownerId, "owner", at);
+      return snapshotOf(id);
+    },
+    updateWorkspaceTeam(teamId, actorId, body) {
+      const team = visibleTeam(teamId, actorId);
+      if (!team) return null;
+      if (team.ownerId !== actorId) return "forbidden";
+      db.prepare("UPDATE teams SET name = ?, goal = ?, updated_at = ? WHERE id = ?").run(
+        body.name ?? team.name,
+        body.goal ?? team.goal,
+        new Date().toISOString(),
+        teamId,
+      );
+      return snapshotOf(teamId);
+    },
+    deleteWorkspaceTeam(teamId, actorId) {
+      const team = visibleTeam(teamId, actorId);
+      if (!team) return null;
+      if (team.ownerId !== actorId) return "forbidden";
+      // 显式级联：建表时没加外键（内存实现也无法表达），四个删除口要一起清干净
+      db.prepare("DELETE FROM team_tasks WHERE team_id = ?").run(teamId);
+      db.prepare("DELETE FROM team_plans WHERE team_id = ?").run(teamId);
+      db.prepare("DELETE FROM team_members WHERE team_id = ?").run(teamId);
+      db.prepare("DELETE FROM teams WHERE id = ?").run(teamId);
+      return true;
+    },
+    addWorkspaceMember(teamId, actorId, username) {
+      const team = visibleTeam(teamId, actorId);
+      if (!team) return null;
+      if (team.ownerId !== actorId) return "forbidden";
+      const target = db.prepare("SELECT id FROM users WHERE username = ?").get(username) as
+        | { id: string }
+        | undefined;
+      if (!target) return "user_not_found";
+      if (teamMemberRole(teamId, target.id)) return "already_member";
+      db.prepare(
+        "INSERT INTO team_members (team_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
+      ).run(teamId, target.id, "member", new Date().toISOString());
+      touchTeam(teamId);
+      return snapshotOf(teamId);
+    },
+    removeWorkspaceMember(teamId, actorId, targetUserId) {
+      const team = visibleTeam(teamId, actorId);
+      if (!team) return null;
+      if (team.ownerId !== actorId) return "forbidden";
+      if (targetUserId === team.ownerId) return "owner";
+      if (!teamMemberRole(teamId, targetUserId)) return null;
+      db.prepare("DELETE FROM team_members WHERE team_id = ? AND user_id = ?").run(
+        teamId,
+        targetUserId,
+      );
+      // 被移出的人不该继续挂任务：指给他的任务解绑成「待认领」
+      db.prepare(
+        "UPDATE team_tasks SET assignee_id = NULL, updated_at = ? WHERE team_id = ? AND assignee_id = ?",
+      ).run(new Date().toISOString(), teamId, targetUserId);
+      touchTeam(teamId);
+      return snapshotOf(teamId);
+    },
+    createTeamPlan(teamId, actorId, body) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const at = new Date().toISOString();
+      const count = db.prepare("SELECT COUNT(*) AS n FROM team_plans WHERE team_id = ?").get(teamId) as {
+        n: number;
+      };
+      const id = randomUUID();
+      db.prepare(
+        `INSERT INTO team_plans (id, team_id, title, detail, status, order_index, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        teamId,
+        body.title,
+        body.detail ?? "",
+        "todo",
+        body.orderIndex ?? Number(count.n),
+        actorId,
+        at,
+        at,
+      );
+      touchTeam(teamId);
+      const row = db.prepare("SELECT * FROM team_plans WHERE id = ?").get(id) as PlanRow;
+      return rowToPlan(row);
+    },
+    updateTeamPlan(teamId, planId, actorId, body) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const row = db.prepare("SELECT * FROM team_plans WHERE id = ?").get(planId) as
+        | PlanRow
+        | undefined;
+      if (!row || row.team_id !== teamId) return "not_found";
+      const current = rowToPlan(row);
+      const next: TeamPlanItem = {
+        ...current,
+        ...(body.title !== undefined ? { title: body.title } : {}),
+        ...(body.detail !== undefined ? { detail: body.detail } : {}),
+        ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.orderIndex !== undefined ? { orderIndex: body.orderIndex } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      db.prepare(
+        "UPDATE team_plans SET title = ?, detail = ?, status = ?, order_index = ?, updated_at = ? WHERE id = ?",
+      ).run(next.title, next.detail, next.status, next.orderIndex, next.updatedAt, planId);
+      touchTeam(teamId);
+      return next;
+    },
+    deleteTeamPlan(teamId, planId, actorId) {
+      // 非成员与「方案不存在」同口径（都是 404），不泄露团队存在性
+      if (!visibleTeam(teamId, actorId)) return "not_found";
+      const row = db
+        .prepare("SELECT team_id FROM team_plans WHERE id = ?")
+        .get(planId) as { team_id: string } | undefined;
+      if (!row || row.team_id !== teamId) return "not_found";
+      db.prepare("DELETE FROM team_plans WHERE id = ?").run(planId);
+      // 删方案不删任务：归属它的任务解绑成独立任务
+      db.prepare(
+        "UPDATE team_tasks SET plan_id = NULL, updated_at = ? WHERE team_id = ? AND plan_id = ?",
+      ).run(new Date().toISOString(), teamId, planId);
+      touchTeam(teamId);
+      return true;
+    },
+    createTeamTask(teamId, actorId, body) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      if (body.planId) {
+        const plan = db.prepare("SELECT team_id FROM team_plans WHERE id = ?").get(body.planId) as
+          | { team_id: string }
+          | undefined;
+        if (!plan || plan.team_id !== teamId) return "plan_not_found";
+      }
+      if (body.assigneeId && !teamMemberRole(teamId, body.assigneeId)) return "assignee_not_member";
+      const id = randomUUID();
+      const at = new Date().toISOString();
+      db.prepare(
+        `INSERT INTO team_tasks
+         (id, team_id, plan_id, title, detail, assignee_id, status, created_by, created_at, updated_at, due_at, attachment_file_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        teamId,
+        body.planId ?? null,
+        body.title,
+        body.detail ?? "",
+        body.assigneeId ?? null,
+        "todo",
+        actorId,
+        at,
+        at,
+        body.dueAt ?? null,
+        null,
+      );
+      touchTeam(teamId);
+      const row = db.prepare("SELECT * FROM team_tasks WHERE id = ?").get(id) as TaskRow;
+      return rowToTask(row);
+    },
+    updateTeamTask(teamId, taskId, actorId, body) {
+      if (!visibleTeam(teamId, actorId)) return null;
+      const row = db.prepare("SELECT * FROM team_tasks WHERE id = ?").get(taskId) as
+        | TaskRow
+        | undefined;
+      if (!row || row.team_id !== teamId) return "not_found";
+      if (body.planId) {
+        const plan = db.prepare("SELECT team_id FROM team_plans WHERE id = ?").get(body.planId) as
+          | { team_id: string }
+          | undefined;
+        if (!plan || plan.team_id !== teamId) return "plan_not_found";
+      }
+      if (body.assigneeId && !teamMemberRole(teamId, body.assigneeId)) return "assignee_not_member";
+      const next: TeamTask = {
+        ...rowToTask(row),
+        ...(body.title !== undefined ? { title: body.title } : {}),
+        ...(body.detail !== undefined ? { detail: body.detail } : {}),
+        ...(body.planId !== undefined ? { planId: body.planId } : {}),
+        ...(body.assigneeId !== undefined ? { assigneeId: body.assigneeId } : {}),
+        ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.dueAt !== undefined ? { dueAt: body.dueAt } : {}),
+        ...(body.attachmentFileId !== undefined
+          ? { attachmentFileId: body.attachmentFileId }
+          : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      db.prepare(
+        `UPDATE team_tasks SET plan_id = ?, title = ?, detail = ?, assignee_id = ?, status = ?,
+           due_at = ?, attachment_file_id = ?, updated_at = ? WHERE id = ?`,
+      ).run(
+        next.planId,
+        next.title,
+        next.detail,
+        next.assigneeId,
+        next.status,
+        next.dueAt,
+        next.attachmentFileId,
+        next.updatedAt,
+        taskId,
+      );
+      touchTeam(teamId);
+      return next;
+    },
+    deleteTeamTask(teamId, taskId, actorId) {
+      if (!visibleTeam(teamId, actorId)) return "not_found";
+      const row = db
+        .prepare("SELECT team_id FROM team_tasks WHERE id = ?")
+        .get(taskId) as { team_id: string } | undefined;
+      if (!row || row.team_id !== teamId) return "not_found";
+      db.prepare("DELETE FROM team_tasks WHERE id = ?").run(taskId);
+      touchTeam(teamId);
+      return true;
     },
     ensureSystemAgents() {
       const upsert = db.prepare(

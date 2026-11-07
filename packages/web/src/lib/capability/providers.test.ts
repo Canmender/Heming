@@ -1,5 +1,6 @@
-﻿import { describe, it, expect } from "vitest";
-import { capabilityRegistry, filesProvider, infohubProvider, selfProvider } from "./index.js";
+import { describe, it, expect } from "vitest";
+import { capabilityRegistry, filesProvider, infohubProvider, selfProvider, teamProvider } from "./index.js";
+import { TEAM_TOOLS } from "./teamTools.js";
 import { SelfEditBudget, type SelfEditStore } from "../selfEdit/index.js";
 
 /** 只关心注册表的策略接口；自我修改的执行细节由 selfEdit 自己的用例覆盖。 */
@@ -16,8 +17,32 @@ describe("内置能力提供者", () => {
       ["wiki", "builtin"],
       ["files", "builtin"],
       ["infohub", "builtin"],
+      ["team", "builtin"],
       ["self", "self"],
     ]);
+  });
+
+  it("team 提供者始终注入团队工作台工具（不依赖桌面桥/模块开关）", () => {
+    const bridge = teamProvider.build({ agentId: "a", conversationId: "c" });
+    expect(bridge).not.toBeNull();
+    expect(bridge!.tools).toHaveLength(TEAM_TOOLS.length);
+  });
+
+  it("注册表合并后工具名唯一：team_* 不与其它提供者撞名", () => {
+    const ctx = { agentId: "a", conversationId: "c" };
+    const names: string[] = [];
+    for (const provider of capabilityRegistry.providers()) {
+      // 各提供者按自己的运行态决定注不注入；这里只关心「声明了什么名字」。
+      const built = provider.build(ctx);
+      for (const tool of built?.tools ?? []) {
+        names.push((tool as { function: { name: string } }).function.name);
+      }
+    }
+    expect(names).toContain("team_list");
+    expect(names).toContain("team_task_update");
+    expect(new Set(names).size).toBe(names.length);
+    // 团队工具只能在 team 提供者里出现一次
+    expect(names.filter((n) => n.startsWith("team_")).length).toBe(TEAM_TOOLS.length);
   });
 
   it("files 在桌面桥缺失或没有可写根时不注入（浏览器端不可见）", () => {

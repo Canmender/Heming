@@ -13,6 +13,13 @@ import {
   CreateTeamActivitiesBodySchema,
   CreateTeamUsageBodySchema,
   TeamUsageRangeSchema,
+  CreateWorkspaceTeamBodySchema,
+  UpdateWorkspaceTeamBodySchema,
+  AddTeamMemberBodySchema,
+  CreateTeamPlanBodySchema,
+  UpdateTeamPlanBodySchema,
+  CreateTeamTaskBodySchema,
+  UpdateTeamTaskBodySchema,
   type SharedFileMeta,
 } from "@heming/shared";
 import type { Store } from "./store.js";
@@ -296,6 +303,236 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
    */
   app.delete("/api/team/usage/mine", authOnly, (req, res) => {
     res.json({ deleted: store.clearTeamUsage(userId(req)) });
+  });
+
+  // —— d.92 团队工作台：用户自建团队 / 目标 / 方案 / 任务 ——
+  //
+  // 接口口径（智能体侧走同一套 REST，权限只在服务端判一处）：
+  // - 非成员访问团队 → 一律 404「团队不存在」：返回 403 等于告诉对方「这个 id 存在」；
+  // - 成员但不是创建者做 owner-only 动作（改/删团队、加/移除成员）→ 403；
+  // - 方案与任务：团队成员都能写（任务可指派给成员、可挂到本团队的方案下）。
+
+  app.get("/api/teams", authOnly, (req, res) => {
+    res.json({ teams: store.listWorkspaceTeams(userId(req)) });
+  });
+
+  app.post("/api/teams", authOnly, (req, res) => {
+    const parsed = CreateWorkspaceTeamBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    res.status(201).json(store.createWorkspaceTeam(userId(req), parsed.data));
+  });
+
+  app.get("/api/teams/:id", authOnly, (req, res) => {
+    const snapshot = store.getWorkspaceTeam(req.params.id, userId(req));
+    if (!snapshot) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    res.json(snapshot);
+  });
+
+  app.patch("/api/teams/:id", authOnly, (req, res) => {
+    const parsed = UpdateWorkspaceTeamBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.updateWorkspaceTeam(req.params.id, userId(req), parsed.data);
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队创建者可以修改团队信息" });
+      return;
+    }
+    res.json(result);
+  });
+
+  app.delete("/api/teams/:id", authOnly, (req, res) => {
+    const result = store.deleteWorkspaceTeam(req.params.id, userId(req));
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队创建者可以删除团队" });
+      return;
+    }
+    res.status(204).end();
+  });
+
+  app.post("/api/teams/:id/members", authOnly, (req, res) => {
+    const parsed = AddTeamMemberBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.addWorkspaceMember(req.params.id, userId(req), parsed.data.username);
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队创建者可以添加成员" });
+      return;
+    }
+    if (result === "user_not_found") {
+      res.status(404).json({ error: "该用户不存在" });
+      return;
+    }
+    if (result === "already_member") {
+      res.status(409).json({ error: "该用户已在团队里" });
+      return;
+    }
+    res.json(result);
+  });
+
+  app.delete("/api/teams/:id/members/:userId", authOnly, (req, res) => {
+    const result = store.removeWorkspaceMember(req.params.id, userId(req), req.params.userId);
+    if (result === null) {
+      res.status(404).json({ error: "成员不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队创建者可以移除成员" });
+      return;
+    }
+    if (result === "owner") {
+      res.status(409).json({ error: "不能移除团队创建者" });
+      return;
+    }
+    res.json(result);
+  });
+
+  app.post("/api/teams/:id/plans", authOnly, (req, res) => {
+    const parsed = CreateTeamPlanBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.createTeamPlan(req.params.id, userId(req), parsed.data);
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队成员可以编排方案" });
+      return;
+    }
+    res.status(201).json(result);
+  });
+
+  app.patch("/api/teams/:id/plans/:planId", authOnly, (req, res) => {
+    const parsed = UpdateTeamPlanBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.updateTeamPlan(req.params.id, req.params.planId, userId(req), parsed.data);
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队成员可以改方案" });
+      return;
+    }
+    if (result === "not_found") {
+      res.status(404).json({ error: "方案不存在" });
+      return;
+    }
+    res.json(result);
+  });
+
+  app.delete("/api/teams/:id/plans/:planId", authOnly, (req, res) => {
+    const result = store.deleteTeamPlan(req.params.id, req.params.planId, userId(req));
+    if (result === "not_found") {
+      res.status(404).json({ error: "方案不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队成员可以删方案" });
+      return;
+    }
+    res.status(204).end();
+  });
+
+  app.post("/api/teams/:id/tasks", authOnly, (req, res) => {
+    const parsed = CreateTeamTaskBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.createTeamTask(req.params.id, userId(req), parsed.data);
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队成员可以派任务" });
+      return;
+    }
+    if (result === "assignee_not_member") {
+      res.status(400).json({ error: "只能把任务指派给团队成员" });
+      return;
+    }
+    if (result === "plan_not_found") {
+      res.status(400).json({ error: "方案不属于该团队" });
+      return;
+    }
+    res.status(201).json(result);
+  });
+
+  app.patch("/api/teams/:id/tasks/:taskId", authOnly, (req, res) => {
+    const parsed = UpdateTeamTaskBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+      return;
+    }
+    const result = store.updateTeamTask(
+      req.params.id,
+      req.params.taskId,
+      userId(req),
+      parsed.data,
+    );
+    if (result === null) {
+      res.status(404).json({ error: "团队不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队成员可以改任务" });
+      return;
+    }
+    if (result === "not_found") {
+      res.status(404).json({ error: "任务不存在" });
+      return;
+    }
+    if (result === "assignee_not_member") {
+      res.status(400).json({ error: "只能把任务指派给团队成员" });
+      return;
+    }
+    if (result === "plan_not_found") {
+      res.status(400).json({ error: "方案不属于该团队" });
+      return;
+    }
+    res.json(result);
+  });
+
+  app.delete("/api/teams/:id/tasks/:taskId", authOnly, (req, res) => {
+    const result = store.deleteTeamTask(req.params.id, req.params.taskId, userId(req));
+    if (result === "not_found") {
+      res.status(404).json({ error: "任务不存在" });
+      return;
+    }
+    if (result === "forbidden") {
+      res.status(403).json({ error: "只有团队成员可以删任务" });
+      return;
+    }
+    res.status(204).end();
   });
 
   app.get("/api/conversations", authOnly, (req, res) => {

@@ -15,6 +15,16 @@ import type {
   TeamUsageResponse,
   TeamUsageWriteResult,
   TeamUsageClearResult,
+  WorkspaceTeamList,
+  TeamWorkspaceSnapshot,
+  TeamPlanItem,
+  TeamTask,
+  CreateWorkspaceTeamBody,
+  UpdateWorkspaceTeamBody,
+  CreateTeamPlanBody,
+  UpdateTeamPlanBody,
+  CreateTeamTaskBody,
+  UpdateTeamTaskBody,
 } from "@heming/shared";
 import { hasSubtle, toB64, fromB64 } from "./e2eCrypto.js";
 
@@ -185,6 +195,85 @@ export const fetchTeamUsage = (
 /** 删除本人已上传的全部用量行（关闭共享不删数据，删除必须是显式动作）。 */
 export const clearMyTeamUsage = () =>
   api<TeamUsageClearResult>("/api/team/usage/mine", { method: "DELETE" });
+
+/* ══════════════════════════════════════════════════════════════════════
+ * 团队工作台（d.92 · 用户自建团队）
+ * ══════════════════════════════════════════════════════════════════════
+ *
+ * 与上面「全站一个团队」的 TeamRoster/TeamActivity 是两层东西：
+ * 这里是用户自己建的工作组（名字 / 目标 / 方案 / 任务 / 成员），权限判定只在
+ * 服务端（是否成员 / 是否 owner）。智能体能力提供者 `team_*`（lib/capability/teamTools.ts）
+ * 与 UI 走同一套 REST 封装，错误口径一致（ApiError，中文 message 原样上抛）。
+ */
+
+/** 我加入/拥有的团队列表（不含方案与任务明细）。 */
+export const fetchWorkspaceTeams = () => api<WorkspaceTeamList>("/api/teams");
+
+/** 新建团队；返回完整快照（含 owner 自己在 members 里）。 */
+export const createWorkspaceTeam = (body: CreateWorkspaceTeamBody) =>
+  api<TeamWorkspaceSnapshot>("/api/teams", { method: "POST", body: JSON.stringify(body) });
+
+/** 单个团队的完整工作台快照（team + members + plans + tasks）。 */
+export const fetchWorkspaceTeam = (id: string) =>
+  api<TeamWorkspaceSnapshot>(`/api/teams/${id}`);
+
+/** 改团队名/目标；返回更新后的快照。 */
+export const updateWorkspaceTeam = (id: string, body: UpdateWorkspaceTeamBody) =>
+  api<TeamWorkspaceSnapshot>(`/api/teams/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+/** 解散团队（owner 才能删）；成功无响应体。 */
+export const deleteWorkspaceTeam = (id: string) =>
+  api<void>(`/api/teams/${id}`, { method: "DELETE" });
+
+/** 按用户名把已有用户拉进团队；返回更新后的快照。 */
+export const addWorkspaceMember = (id: string, username: string) =>
+  api<TeamWorkspaceSnapshot>(`/api/teams/${id}/members`, {
+    method: "POST",
+    body: JSON.stringify({ username }),
+  });
+
+/** 把某个成员移出团队（owner 才能移）；返回更新后的快照。 */
+export const removeWorkspaceMember = (id: string, userId: string) =>
+  api<TeamWorkspaceSnapshot>(`/api/teams/${id}/members/${userId}`, { method: "DELETE" });
+
+/** 新增方案项（团队的「怎么做」）。 */
+export const createTeamPlan = (teamId: string, body: CreateTeamPlanBody) =>
+  api<TeamPlanItem>(`/api/teams/${teamId}/plans`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+/** 改方案项（标题/说明/状态/排序）。 */
+export const updateTeamPlan = (teamId: string, planId: string, body: UpdateTeamPlanBody) =>
+  api<TeamPlanItem>(`/api/teams/${teamId}/plans/${planId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+/** 删方案项（归属该方案的任务由服务端决定如何处理）。 */
+export const deleteTeamPlan = (teamId: string, planId: string) =>
+  api<void>(`/api/teams/${teamId}/plans/${planId}`, { method: "DELETE" });
+
+/** 派任务（可挂在方案下、可指派给成员）。 */
+export const createTeamTask = (teamId: string, body: CreateTeamTaskBody) =>
+  api<TeamTask>(`/api/teams/${teamId}/tasks`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+/** 改任务（状态/负责人/标题/说明/截止时间/交付物）。 */
+export const updateTeamTask = (teamId: string, taskId: string, body: UpdateTeamTaskBody) =>
+  api<TeamTask>(`/api/teams/${teamId}/tasks/${taskId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+/** 删任务。 */
+export const deleteTeamTask = (teamId: string, taskId: string) =>
+  api<void>(`/api/teams/${teamId}/tasks/${taskId}`, { method: "DELETE" });
 
 /**
  * E2E 公钥分发与明文重加密（Task 2 契约，设计 §3.1/§7）：
