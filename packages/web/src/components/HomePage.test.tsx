@@ -92,7 +92,7 @@ function mockTeam(
  *  d.68 起卡片外观收口到 `.ui-card`（圆角/描边/阴影改由 CSS 类给出，DOM 上不再逐字面量写）。 */
 function statCard(title: string): HTMLElement {
   const cards = Array.from(
-    document.querySelectorAll<HTMLElement>(".grid.grid-cols-4 > div.ui-card"),
+    document.querySelectorAll<HTMLElement>(".grid.grid-cols-4 > div.ui-card, .grid.grid-cols-4 > button.ui-card"),
   );
   const card = cards.find((c) => c.firstElementChild?.textContent === title);
   if (!card) throw new Error(`找不到统计卡：${title}`);
@@ -117,6 +117,7 @@ describe("HomePage", () => {
     useUiStore.setState({ page: "home", activeConversationId: null, settingsTab: null });
     useChatStore.setState({
       agentsRoster: AGENT_ROSTER,
+      conversations: [],
       loadWorkspace: vi.fn(async () => undefined),
       loadAgentsRoster: vi.fn(async () => undefined),
     });
@@ -124,7 +125,7 @@ describe("HomePage", () => {
     mockTeam();
   });
 
-  it("渲染问候、版本徽标、四张团队统计卡与今日用量", async () => {
+  it("渲染问候、四个动作指标卡与页头快捷动作（不再挂版本号/今日用量）", async () => {
     const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
     mockTeam(
       [member(user, { online: true }), member(bob)],
@@ -134,7 +135,6 @@ describe("HomePage", () => {
         activity({ id: "a-yesterday", title: "昨天的动向", occurredAt: yesterday.toISOString() }),
       ],
     );
-    useTokenUsageStore.getState().record("claude-sonnet-5", 700, now.toISOString());
 
     render(<HomePage />);
     await act(async () => {}); // 冲刷挂载时 health/团队/工作区加载的异步状态更新
@@ -145,15 +145,18 @@ describe("HomePage", () => {
       screen.getByRole("heading", { name: new RegExp(`${greeting}，${user.displayName}`) }),
     ).toBeInTheDocument();
 
-    // 四张卡：人数来自名册；今日动向只数「今天」的那条（昨天的不算）
-    expect(within(statCard("团队成员")).getByText("2")).toBeInTheDocument();
-    expect(within(statCard("在线成员")).getByText("1")).toBeInTheDocument();
+    // 动作指标卡（不是看板数字）：待处理/运行中/智能体/今日动向
+    expect(within(statCard("待处理")).getByText("0")).toBeInTheDocument();
+    expect(within(statCard("运行中任务")).getByText("0")).toBeInTheDocument();
     expect(within(statCard("我的智能体")).getByText("2")).toBeInTheDocument();
     expect(within(statCard("今日动向")).getByText("1")).toBeInTheDocument();
-    expect(within(statCard("在线成员")).getByText("此刻在线")).toBeInTheDocument();
 
-    expect(screen.getByText(`版本 ${__APP_VERSION__}`)).toBeInTheDocument();
-    expect(screen.getByText("今日已用 700")).toBeInTheDocument();
+    // 页头两个动作入口
+    expect(screen.getByRole("button", { name: "新对话" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "派任务" })).toBeInTheDocument();
+    // 开发代号与今日用量徽标不再出现在首页
+    expect(screen.queryByText(/版本 d\./)).toBeNull();
+    expect(screen.queryByText(/今日已用/)).toBeNull();
   });
 
   it("团队动向：展示最近三条，点击行进入团队页", async () => {
@@ -225,19 +228,46 @@ describe("HomePage", () => {
 
     expect(screen.getAllByRole("status", { name: "正在加载" }).length).toBeGreaterThan(0);
     expect(screen.queryByText(/还没有团队动向/)).not.toBeInTheDocument();
-    expect(screen.queryByText("当前没有人在线")).not.toBeInTheDocument();
   });
 
-  it("在线成员只列在线者；「全部名册」进入团队页", async () => {
+  it("最近对话：按最后消息时间排序、点一下进那个会话；「在线成员」卡不再重复出现", async () => {
     mockTeam([member(user, { online: true }), member(bob)], 1);
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c-old",
+          type: "agent",
+          agent: { id: "system-assistant", name: "和小鸣", avatar: null, owner_id: null, description: "" },
+          unreadCount: 0,
+          lastMessageAt: new Date(now.getTime() - 3_600_000).toISOString(),
+        },
+        {
+          id: "c-new",
+          type: "agent",
+          agent: { id: "a1", name: "我的智能体甲", avatar: null, owner_id: "u1", description: "" },
+          unreadCount: 2,
+          lastMessageAt: new Date(now.getTime() - 60_000).toISOString(),
+        },
+      ] as never,
+    });
     render(<HomePage />);
     await act(async () => {});
 
-    expect(screen.getByText("@alice")).toBeInTheDocument();
-    expect(screen.queryByText("@bob")).not.toBeInTheDocument(); // 离线不上榜
+    // 最近对话块存在，且排序按时间（新的在前）
+    const recent = screen.getByRole("region", { name: "最近对话" });
+    const names = within(recent)
+      .getAllByRole("button", { name: /^继续与/ })
+      .map((b) => b.textContent ?? "");
+    expect(names[0]).toContain("我的智能体甲");
+    expect(names[1]).toContain("和小鸣");
+    // 未读角标
+    expect(within(recent).getByText("2")).toBeInTheDocument();
+    // 重复的「在线成员」卡已从右栏删除（页头副标题里的在线人数仍在）
+    expect(screen.queryByText("全部名册")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "全部名册" }));
-    expect(useUiStore.getState().page).toBe("team");
+    fireEvent.click(within(recent).getByRole("button", { name: "继续与 我的智能体甲 对话" }));
+    expect(useUiStore.getState().page).toBe("chat");
+    expect(useUiStore.getState().activeConversationId).toBe("c-new");
   });
 
   it("「进入团队」按钮切到团队页", async () => {
@@ -247,7 +277,20 @@ describe("HomePage", () => {
     expect(useUiStore.getState().page).toBe("team");
   });
 
+  it("Token 用量：本月没有记录时折叠成一行；有记录才展开 tab 与热力图", async () => {
+    render(<HomePage />);
+    await act(async () => {});
+    // 折叠态：一句说明 + 去配置模型，不占一整卡
+    const collapsed = screen.getByText(/本月还没有调用记录/).closest(".ui-card") as HTMLElement;
+    expect(collapsed).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "按日期" })).toBeNull();
+    fireEvent.click(within(collapsed).getByRole("button", { name: "去配置模型" }));
+    expect(useUiStore.getState().page).toBe("settings");
+    expect(useUiStore.getState().settingsTab).toBe("model");
+  });
+
   it("Token 用量卡「团队」页签：共享关闭时给开启入口，不拉排行", async () => {
+    useTokenUsageStore.getState().record("claude-sonnet-5", 700, now.toISOString());
     render(<HomePage />);
     await act(async () => {});
 
@@ -258,45 +301,20 @@ describe("HomePage", () => {
     expect(globalThis.fetch).not.toHaveBeenCalledWith(expect.stringContaining("/api/team/usage"));
   });
 
-  it("智能体动态：名册前三个显示名称与描述；空名册给引导", async () => {
+  it("页脚：服务状态 + 文件目录 + 更新日志入口（系统状态不再占一整卡）", async () => {
     render(<HomePage />);
     await act(async () => {});
 
-    expect(screen.getByText("智能体动态")).toBeInTheDocument();
-    expect(screen.getByText("我的智能体甲")).toBeInTheDocument();
-    expect(screen.getByText("帮我写代码")).toBeInTheDocument();
-    expect(screen.getByText("和小鸣")).toBeInTheDocument();
-
-    act(() => useChatStore.setState({ agentsRoster: [] }));
-    expect(screen.getByText("暂无智能体，可在智能体页创建")).toBeInTheDocument();
-  });
-
-  it("系统状态三行与「最近更新」三卡（取真实更新日志）", async () => {
-    render(<HomePage />);
-    await act(async () => {});
-
-    expect(screen.getByText("系统状态")).toBeInTheDocument();
-    expect(screen.getByText("云端连接")).toBeInTheDocument();
-    expect(await screen.findByText("正常")).toBeInTheDocument();
-    expect(screen.getByText("实时通道")).toBeInTheDocument();
-    expect(screen.getByText("会话内连接")).toBeInTheDocument(); // 首页未连 ws，中性文案
-    expect(screen.getByText("文件可写目录")).toBeInTheDocument();
-    expect(screen.getByText("未绑定")).toBeInTheDocument();
-
-    // 底栏不再手写三条静态「资讯」：取用户版发布说明的最新三条（工程细节不进首页）。
-    const updates = latestUserUpdates(3);
-    expect(screen.getByText("最近更新")).toBeInTheDocument();
-    expect(screen.getByText(updates[0].title)).toBeInTheDocument();
-    expect(screen.getByText(updates[1].title)).toBeInTheDocument();
-    expect(screen.getByText(updates[2].title)).toBeInTheDocument();
-
-    // 「查看全部」进设置区「关于」（更新日志全文在那里）
-    fireEvent.click(screen.getByRole("button", { name: "查看全部" }));
+    expect(screen.getByText("服务：正常")).toBeInTheDocument();
+    expect(screen.getByText("文件目录：未绑定")).toBeInTheDocument();
+    // 底部不再有「最近更新」三卡墙，只留一个入口
+    expect(screen.queryByText("最近更新")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "更新日志" }));
     expect(useUiStore.getState().page).toBe("settings");
     expect(useUiStore.getState().settingsTab).toBe("about");
   });
 
-  it("系统状态·文件可写目录读取真实可写根，不再永远写「未绑定」", async () => {
+  it("页脚·文件目录读取真实可写根，不再永远写「未绑定」", async () => {
     localStorage.setItem(
       FILE_ROOTS_KEY,
       JSON.stringify({
@@ -310,8 +328,8 @@ describe("HomePage", () => {
     render(<HomePage />);
     await act(async () => {});
     // 只有 write 根算「智能体能改哪些文件」，只读根不计入
-    expect(screen.getByText("已绑定 1 个")).toBeInTheDocument();
-    expect(screen.queryByText("未绑定")).not.toBeInTheDocument();
+    expect(screen.getByText("文件目录：已绑定 1 个")).toBeInTheDocument();
+    expect(screen.queryByText("文件目录：未绑定")).toBeNull();
   });
 
   it("停用幕僚 / 信息中枢模块后，首页对应的卡一起下线（不留假入口）", async () => {
@@ -332,11 +350,13 @@ describe("HomePage", () => {
     expect(screen.queryByRole("region", { name: "本机归档" })).not.toBeInTheDocument();
   });
 
-  it("云端探测失败时状态显示「失败」", async () => {
+  it("云端探测失败时页脚显示「失败」", async () => {
+    mockTeam();
     mockHealth(false);
     render(<HomePage />);
-    expect(await screen.findByText("失败")).toBeInTheDocument();
-    expect(screen.queryByText("正常")).not.toBeInTheDocument();
+    await act(async () => {});
+
+    expect(await screen.findByText("服务：失败")).toBeInTheDocument();
   });
 
   it("个人视图显示当月汇总（读取时按月重算）", async () => {
@@ -398,6 +418,7 @@ describe("HomePage", () => {
   });
 
   it("近 30 日用量热力图并在「Token 用量」同一张卡里（d.73 合并，不再单开一条卡）", async () => {
+    useTokenUsageStore.getState().record("claude-sonnet-5", 120, now.toISOString());
     render(<HomePage />);
     await act(async () => {});
     expect(screen.getByRole("img", { name: "近 30 日 token 用量" })).toBeInTheDocument();
@@ -407,34 +428,37 @@ describe("HomePage", () => {
     expect(within(usageCard).getByText("近 30 日用量")).toBeInTheDocument();
   });
 
-  it("今日只有未上报 → 徽标说「今日用量未上报」而不是 0，本月卡补「N 轮未上报」", async () => {
+  it("只有未上报：本月卡仍展开，但总量不拿未上报冒充，单独标「N 轮未上报」", async () => {
     useTokenUsageStore.getState().recordUnreported("claude-sonnet-5", now.toISOString());
     render(<HomePage />);
     await act(async () => {});
 
-    expect(screen.getByText("今日用量未上报")).toBeInTheDocument();
-    expect(screen.queryByText(/今日已用 0/)).not.toBeInTheDocument();
+    // 有未上报记录也算「本月有记录」：卡片展开，但合计为 0（null 不是 0 的既有口径）
     expect(screen.getByText("1 轮未上报")).toBeInTheDocument();
+    expect(screen.getByText("本月已用 0%")).toBeInTheDocument();
   });
 
-  it("今日有数字又有未上报 → 数字优先，未上报只作补充", async () => {
+  it("有数字也有未上报：数字照实显示，未上报只作补充", async () => {
     useTokenUsageStore.getState().record("claude-sonnet-5", 500, now.toISOString());
     useTokenUsageStore.getState().recordUnreported("claude-sonnet-5", now.toISOString());
     render(<HomePage />);
     await act(async () => {});
 
-    expect(screen.getByText("今日已用 500")).toBeInTheDocument();
     expect(screen.getByText("1 轮未上报")).toBeInTheDocument();
+    expect(screen.getByText("本月已用 0%")).toBeInTheDocument();
   });
 
-  it("健康探测与团队请求互不牵连：团队失败不影响云端状态", async () => {
+  it("团队接口失败：团队卡片报错、今日动向显示「—」而不是 0；云端状态不受牵连", async () => {
     mockTeam(undefined, undefined, []);
     vi.mocked(fetchTeam).mockRejectedValue(new Error("团队接口挂了"));
     render(<HomePage />);
     await act(async () => {});
 
-    await waitFor(() => expect(screen.getByText("正常")).toBeInTheDocument());
+    // 数据不诚实修复（审计 P1-5）：失败不能显示成「0 人/0 条」
+    expect(await screen.findByText("服务：正常")).toBeInTheDocument();
     expect(screen.getAllByText("加载失败：团队接口挂了").length).toBeGreaterThan(0);
+    expect(within(statCard("今日动向")).getByText("—")).toBeInTheDocument();
+    expect(within(statCard("今日动向")).getByText("团队数据加载失败")).toBeInTheDocument();
   });
 
   /* ---------------------------------------------------- UX-A 首跑引导（U1） */
