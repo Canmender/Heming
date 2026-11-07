@@ -92,6 +92,8 @@ describe("StaffPage", () => {
   });
 
   it("未开启：空态说明 + 开启后立刻生成首份简报", async () => {
+    // 把晨报时间设成 00:00：否则这条用例只在「当天晨报时间之后」才成立（跨零点会假红）
+    useStaffStore.getState().updateSettings({ dailyAt: "00:00" });
     render(<StaffPage />);
     expect(screen.getByText("还没有简报")).toBeInTheDocument();
 

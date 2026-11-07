@@ -4,7 +4,7 @@ import type { TeamUsageResponse } from "@heming/shared";
 import { fetchTeamUsage, uploadTeamUsage } from "../lib/api.js";
 import { HomeTeamUsage } from "./HomeTeamUsage.js";
 import { useAuthStore } from "../store/auth.js";
-import { useTokenUsageStore } from "../store/tokenUsage.js";
+import { dayKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
 import { useUiStore } from "../store/ui.js";
 import { DEFAULT_TEAM_SHARE, useTeamShareStore } from "../lib/team/share.js";
 
@@ -69,7 +69,8 @@ describe("首页 Token 用量卡的「团队」页签", () => {
     expect(uploadTeamUsage).toHaveBeenCalledTimes(1);
     // 上传内容只有白名单字段：日期/模型/token 数/未上报数/连接名
     const payload = vi.mocked(uploadTeamUsage).mock.calls[0][0];
-    expect(payload[0]).toMatchObject({ date: nowIso.slice(0, 10), model: "gpt-x", tokens: 700 });
+    // 客户端上报的是**本地自然日**（契约），UTC 切片在跨零点时会差一天
+    expect(payload[0]).toMatchObject({ date: dayKeyOf(new Date().toISOString()), model: "gpt-x", tokens: 700 });
     expect(JSON.stringify(payload)).not.toMatch(/prompt|content|args|result/);
 
     expect(fetchTeamUsage).toHaveBeenCalledWith({ range: "30d", to: expect.any(String) });
