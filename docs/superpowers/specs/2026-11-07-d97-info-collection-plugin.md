@@ -1,8 +1,8 @@
-# d.96 信息采集中枢插件：本机采集桥随和鸣托管 + 完整可分发插件包
+# d.97 信息采集中枢插件：本机采集桥随和鸣托管 + 完整可分发插件包
 
 - 日期：2026-11-07
-- 版本：`d.96.2.42.0`（特性 +1）
-- 分支：`feat/d96-infohub-plugin`（独立 worktree `.worktrees/infohub-plugin`，从 `d.94` 的 `46360a5` 拉出）
+- 版本：`d.97.2.42.0`（特性 +1）
+- 分支：`feat/d97-infohub-plugin`（独立 worktree `.worktrees/infohub-plugin`，从 `d.94` 的 `46360a5` 拉出）
 - 交付物：① 完整可安装、可发布到云端目录的第三方插件「信息采集中枢」（`plugins/infohub-collector/`）；
   ② 随包 Python 采集桥（`packages/infohub/infohub/mcp_server.py`）；③ 桌面端托管的采集桥生命周期 +
   信息中枢页的「采集桥」区块；④ 文档、测试、版本与发布说明。

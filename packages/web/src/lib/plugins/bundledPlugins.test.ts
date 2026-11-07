@@ -208,7 +208,7 @@ describe("plugins/infohub-collector · 信息采集中枢（v3）", () => {
   it("描述与说明如实承诺自动采集：由和鸣托管、可关闭，不写「自动启动进程」", () => {
     const { manifest } = loadInfohub();
     const instructions = manifest.contributions.skills[0].instructions;
-    // d.97 新口径：装并启用插件后自动采集（每 30 分钟增量一次），用户可在信息中枢页关掉。
+    // d.98 新口径：装并启用插件后自动采集（每 30 分钟增量一次），用户可在信息中枢页关掉。
     // 两处文案都必须讲清「自动采集」与「可关闭」，否则用户会以为装上就停不下来。
     for (const [name, text] of [
       ["description", manifest.description],

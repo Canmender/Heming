@@ -80,7 +80,7 @@ const BRIDGE_HOST = "127.0.0.1";
 const BRIDGE_PORT = 8776;
 
 /**
- * 「自动采集」（d.97）：插件「信息采集中枢」装上并启用后，由和鸣托管的后台增量采集。
+ * 「自动采集」（d.98）：插件「信息采集中枢」装上并启用后，由和鸣托管的后台增量采集。
  *
  * 页面**只读运行态、只投递用户动作**：30 分钟循环、安装即采、采集桥托管都在
  * `lib/infohub/autoCollect.ts`，这里不自己起定时器。`running` 时只禁用按钮，不做加载动画。
@@ -173,12 +173,12 @@ function AutoCollectSection({ desktop }: { desktop: boolean }) {
 }
 
 /**
- * 「采集桥」区块（d.96，规格 §8）：本机 MCP 端点的状态与启停。
+ * 「采集桥」区块（d.97，规格 §8）：本机 MCP 端点的状态与启停。
  *
  * 两条路能力不同，也都不阻塞归档那条路：
  * - 桌面端：读 IPC 状态、用户点按钮才启动/停止；外部进程只提示「去它自己的窗口关」；
  * - 浏览器端：只能 `GET /health` 探测，拉不起进程——如实说明，不假装可用。
- * - d.97 起自动采集（见 `AutoCollectSection`）会在插件启用后托管采集与采集桥，
+ * - d.98 起自动采集（见 `AutoCollectSection`）会在插件启用后托管采集与采集桥，
  *   但采集桥的**进程启停入口**仍只在这里，自动采集可随时关掉。
  */
 function CollectBridgeSection({ desktop, layout }: { desktop: boolean; layout: "card" | "strip" }) {
@@ -287,7 +287,7 @@ function CollectBridgeSection({ desktop, layout }: { desktop: boolean; layout: "
           {bridgeProbe && !bridgeProbe.ok ? `（${bridgeProbe.error}）` : ""}
         </p>
       )}
-      {/* d.97：自动采集一段就长在采集桥区块里——同一件事的两种入口（自动 / 手动）。 */}
+      {/* d.98：自动采集一段就长在采集桥区块里——同一件事的两种入口（自动 / 手动）。 */}
       <AutoCollectSection desktop={desktop} />
     </>
   );
@@ -302,7 +302,7 @@ function CollectBridgeSection({ desktop, layout }: { desktop: boolean; layout: "
  * 红线：
  * - 只读：归档以 `mode=ro` 打开，检索与重扫不会写库；
  * - 数据不出本机：不调用任何云端接口，浏览器环境直接显示「仅桌面端可用」；
- * - 自动采集由插件驱动（d.97）：装并启用「信息采集中枢」后由和鸣托管（每 30 分钟增量一次、
+ * - 自动采集由插件驱动（d.98）：装并启用「信息采集中枢」后由和鸣托管（每 30 分钟增量一次、
  *   可在本页关掉）；但归档边车仍由用户点「连接」拉起，页面不会自行起进程。
  */
 export function InfohubPage() {
@@ -336,7 +336,7 @@ export function InfohubPage() {
   const openAutomations = useUiStore((s) => s.openAutomations);
   // d.70：自动化模块停用时，「定时 / 保存为定时任务 / 定时重扫」不把人送到一个不存在的页
   const automationsOn = useModuleStore((s) => isModuleEffective(s, "automations"));
-  // d.97：自动采集（App 层）拉起边车后，页面要能自动挂上——订阅共享运行态，而不是只信挂载那一刻的快照。
+  // d.98：自动采集（App 层）拉起边车后，页面要能自动挂上——订阅共享运行态，而不是只信挂载那一刻的快照。
   const sharedRunning = useInfohubStore((s) => s.running);
   const pendingIntentRef = useRef<InfohubIntent | null>(null);
 
@@ -409,7 +409,7 @@ export function InfohubPage() {
           if (bridgeInfo.python) setPython(bridgeInfo.python);
           setPhase("connecting");
           // 必须带上解释器：少传 python 会让主进程把它当成「另一个目标」重开边车，
-          // 在没有内置运行时的机器上会直接报「未找到可用的 Python 解释器」（d.97 真机自检抓到）。
+          // 在没有内置运行时的机器上会直接报「未找到可用的 Python 解释器」（d.98 真机自检抓到）。
           const config: InfohubConfig = {
             ...(bridgeInfo.home ? { home: bridgeInfo.home } : {}),
             ...(bridgeInfo.python ? { python: bridgeInfo.python } : {}),
@@ -431,7 +431,7 @@ export function InfohubPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [available]);
 
-  // d.97：自动采集可能在本页挂载后才拉起边车（安装插件即采 / 打开和鸣补采）。
+  // d.98：自动采集可能在本页挂载后才拉起边车（安装插件即采 / 打开和鸣补采）。
   // 共享 store 一旦 running，页面直接挂上，不再要求用户点「连接」——否则会出现
   // 「自动采集正在采、归档却显示未连接」的自相矛盾。只在 idle 时接管，不抢用户的连接流程。
   useEffect(() => {
@@ -447,7 +447,7 @@ export function InfohubPage() {
       if (event && event.event === "progress") setProgress(event);    });
   }, [available]);
 
-  // 采集桥（d.96）：桌面端读 IPC 状态并订阅事件；浏览器端只探测本机回环。
+  // 采集桥（d.97）：桌面端读 IPC 状态并订阅事件；浏览器端只探测本机回环。
   // 这里**不启动任何进程**——启动只由用户点「启动采集桥」触发（d.45/d.47 红线）。
   // 订阅挂在 store 上（单例），组件卸载不退订，切页回来仍能收到状态变化。
   useEffect(() => {
@@ -458,7 +458,7 @@ export function InfohubPage() {
     void useInfohubStore.getState().refreshBridge();
   }, [available]);
 
-  // 自动采集（d.97）：页面只读运行态。安装即采、30 分钟循环与插件事件监听由 App 层
+  // 自动采集（d.98）：页面只读运行态。安装即采、30 分钟循环与插件事件监听由 App 层
   // 的 useAutoCollect 托管；这里 refresh 一次把「插件是否启用 / 上次结果」同步进来。
   useEffect(() => {
     void useAutoCollectStore.getState().refresh();
@@ -650,7 +650,7 @@ export function InfohubPage() {
               在桌面版安装包里打开「信息中枢」，即可连接本机归档并检索。
             </p>
           </div>
-          {/* d.96：采集桥是「本机 MCP 端点」，与归档桥两条路；浏览器只能探测、不能拉起。 */}
+          {/* d.97：采集桥是「本机 MCP 端点」，与归档桥两条路；浏览器只能探测、不能拉起。 */}
           <div className="w-full max-w-[460px]">
             <CollectBridgeSection desktop={false} layout="card" />
           </div>

@@ -1,9 +1,9 @@
-# d.97 装插件即自动采集 + 插件进云端仓库（含真机自检）
+# d.98 装插件即自动采集 + 插件进云端仓库（含真机自检）
 
 - 日期：2026-11-08
-- 版本：`d.97.2.42.0`（特性 +1）
-- 分支：`feat/d96-infohub-plugin`（worktree `.worktrees/infohub-plugin`，已 rebase 到 `feat/d77-heming-core` 的 d.95）
-- 前置：d.96「信息采集中枢插件：采集桥随和鸣托管」（本分支上一轮）
+- 版本：`d.98.2.42.0`（特性 +1）
+- 分支：`feat/d97-infohub-plugin`（worktree `.worktrees/infohub-plugin`，已 rebase 到 `feat/d77-heming-core` 的 d.95）
+- 前置：d.97「信息采集中枢插件：采集桥随和鸣托管」（本分支上一轮）
 - 用户指令：「和鸣安装插件后自动进行采集信息。把插件打包到云端，用户可以自行安装。先自检」
 
 ## 0. 一句话
@@ -119,7 +119,7 @@ d.97 的自动采集是**用户显式安装并启用采集插件**之后的行�
 
 - Web：新增 `autoCollect.test.ts` 32 例 + 插件 store 事件 3 例；`InfohubPage.test.tsx` 35 例
   （新增自动采集 10 + 页面接管 2）；`bundledPlugins.test.ts` 8 例（新口径守卫）；
-- 桌面 / Python：d.96 已覆盖，本轮未改这两层（全量门禁含它们）；
+- 桌面 / Python：d.97 已覆盖，本轮未改这两层（全量门禁含它们）；
 - 全量（2026-11-08 分步实跑，exit 0）：**shared 29 / server 172 / web 256 文件 3686 例 / desktop 573 /
   Python 210**；`tsc --noEmit` 零错；
 - 说明：并发 `pnpm -r test` 时 server 的 vitest worker 偶发原生崩溃（0xC0000409，单跑 `app.test.ts` 37 例

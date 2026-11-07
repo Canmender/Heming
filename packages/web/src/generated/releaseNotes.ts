@@ -12,7 +12,7 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
-    "version": "d.97.2.42.0",
+    "version": "d.98.2.42.0",
     "date": "2026-11-08",
     "title": "装上「信息采集中枢」就自动开始采集，插件从云端仓库直接装",
     "bullets": [
@@ -25,7 +25,7 @@ export const RELEASE_NOTES: ReleaseNoteEntry[] = [
     "paragraphs": []
   },
   {
-    "version": "d.96.2.42.0",
+    "version": "d.97.2.42.0",
     "date": "2026-11-07",
     "title": "装个「信息采集中枢」插件，智能体就能帮你采集和查聊天归档",
     "bullets": [

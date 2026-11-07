@@ -14,7 +14,7 @@ import {
 import { useAutoCollectStore } from "../lib/infohub/autoCollect.js";
 
 /**
- * d.97 自动采集 store（T5 的 `lib/infohub/autoCollect.ts`）在页面测试里用同契约的
+ * d.98 自动采集 store（T5 的 `lib/infohub/autoCollect.ts`）在页面测试里用同契约的
  * 真实 zustand store 顶替：页面只负责「读状态 / 投动作」，真正的 30 分钟循环与采集
  * 由 autoCollect 自己的测试覆盖。每个用例前重置状态与调用记录，避免跨用例污染。
  */
@@ -232,7 +232,7 @@ describe("信息中枢页", () => {
       busy: "",
       error: "",
     });
-    // d.97 自动采集 store 也是模块单例：每例前清掉调用记录、还原「插件已启用、自动采集开」，
+    // d.98 自动采集 store 也是模块单例：每例前清掉调用记录、还原「插件已启用、自动采集开」，
     // 否则上一个用例留下的插件/开关状态会串到下一个用例。
     vi.clearAllMocks();
     setAutoCollect();
@@ -256,7 +256,7 @@ describe("信息中枢页", () => {
     expect(screen.getByText("信息中枢仅桌面端可用")).toBeInTheDocument();
     expect(screen.getByText(/在桌面版安装包里打开「信息中枢」/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "连接" })).not.toBeInTheDocument();
-    // d.96 采集桥：浏览器只能探测，如实显示「未检测到」，不假装可用
+    // d.97 采集桥：浏览器只能探测，如实显示「未检测到」，不假装可用
     expect(await screen.findByText("未检测到本机采集桥")).toBeInTheDocument();
   });
 
@@ -297,7 +297,7 @@ describe("信息中枢页", () => {
     });
     render(<InfohubPage />);
     await waitFor(() => expect(screen.getByText("已连接 · 只读归档")).toBeInTheDocument());
-    // d.97 真机自检抓到的回归：少传 python 会被主进程当成另一个目标重开边车，
+    // d.98 真机自检抓到的回归：少传 python 会被主进程当成另一个目标重开边车，
     // 在没有内置运行时的机器上直接报「未找到可用的 Python 解释器」。
     expect(call).toHaveBeenCalledWith(
       "status",
@@ -493,7 +493,7 @@ describe("信息中枢页", () => {
     expect(await screen.findByText("补交材料")).toBeInTheDocument();
   });
 
-  describe("采集桥区块（d.96）", () => {
+  describe("采集桥区块（d.97）", () => {
     it("桌面端未运行：显示未运行与启动按钮，且不影响归档连接区", async () => {
       installBridge();
       render(<InfohubPage />);
@@ -669,7 +669,7 @@ describe("信息中枢页", () => {
     });
   });
 
-  describe("自动采集（d.97）", () => {
+  describe("自动采集（d.98）", () => {
     it("插件未启用：说明装完即自动采集，并给出去插件区的入口", async () => {
       setAutoCollect({ pluginActive: false });
       installBridge();

@@ -12,7 +12,7 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    "version": "d.97.2.42.0",
+    "version": "d.98.2.42.0",
     "date": "2026-11-08",
     "title": "装插件即自动采集 + 插件进云端仓库（真机自检并修掉两个真实缺陷）",
     "bullets": [
@@ -29,26 +29,26 @@ export const CHANGELOG: ChangelogEntry[] = [
       "**真实浏览器**（headless Edge + CDP；临时服务端 8799 + 独立 vite）：登录 → 插件区 → 仓库（「共 1 个 · 云端同一份插件仓库」，显示信息采集中枢 v1.1.0）→ 安装预览（权限/指纹/贡献）→",
       "**真实 Electron**（`electron . --remote-debugging-port`；临时 home + InfoHub venv 解释器）：装插件后**立即开始采集**——采集桥「运行中 · 127.0.0.1:8776 · 由和鸣托管」，`/health` 200；",
       "**修掉两个真实缺陷**：① `InfohubPage` 挂载发现边车已在跑时只传 `{home}` 去 `status`，主进程当成另一个目标重开边车 → 报到「未找到可用的 Python 解释器」并停在 error；改为带上 `python` 并补回归用例；",
-      "红线口径更新：d.45/d.47「不自动拉起」约束的是信息中枢/自动化模块的默认行为；d.97 是**用户显式安装并启用插件**后的托管采集（与自动化「用户建的任务到点跑 sync」同口径），停用插件/关闭自动采集即停，",
+      "红线口径更新：d.45/d.47「不自动拉起」约束的是信息中枢/自动化模块的默认行为；d.98 是**用户显式安装并启用插件**后的托管采集（与自动化「用户建的任务到点跑 sync」同口径），停用插件/关闭自动采集即停，",
       "**线上** `47.92.39.184` 仍是旧版：`GET /api/plugins` 404（没有 d.95 插件仓库接口），所以公网用户暂时还看不到「仓库」。本轮已把插件发布进仓库数据并在本地服务端 + 真实浏览器/Electron 全流程验证；",
       "Web：新增 `src/lib/infohub/autoCollect.test.ts` **32 例**、插件 store 事件 +3 例、`InfohubPage.test.tsx`35 例（自动采集 +10、页面接管 +2）、`bundledPlugins.test.ts` 8 例；全量 web **256 文件 / 3686 例**全绿；",
       "桌面 573 例、Python 210 例（本轮未改这两层，随全量门禁复跑）；",
       "顺带修掉两个**跨零点/凌晨必红**的既有用例（本轮自检抓到）：`HomeTeamUsage` 拿 UTC 日期比本地自然日（东八区 00:00–08:00 必红）、`StaffPage` 首跑 trigger 依赖「现在是否已过 dailyAt」（凌晨得到 manual）——",
       "门禁按包分步跑全绿（2026-11-08 实跑）：**shared 29 / server 172 / web 256 文件 3686 例 /desktop 573 / Python 210**；`tsc --noEmit` 零错；",
-      "版本：`node scripts/bump-version.mjs d.97.2.42.0`；插件包 1.1.0 已 `--push` 到本地仓库服务并验证`GET /api/plugins` 与客户端「仓库」安装全链路。"
+      "版本：`node scripts/bump-version.mjs d.98.2.42.0`；插件包 1.1.0 已 `--push` 到本地仓库服务并验证`GET /api/plugins` 与客户端「仓库」安装全链路。"
     ],
     "paragraphs": [
-      "用户指令：「和鸣安装插件后自动进行采集信息。把插件打包到云端，用户可以自行安装。先自检」。d.96 已经能把采集桥托起来，但用户还得手动「启动采集桥」、手动「同步」；本轮把这条链路改成**装上就自动采**，并把插件 1.1.0 发布进云端插件仓库。",
+      "用户指令：「和鸣安装插件后自动进行采集信息。把插件打包到云端，用户可以自行安装。先自检」。d.97 已经能把采集桥托起来，但用户还得手动「启动采集桥」、手动「同步」；本轮把这条链路改成**装上就自动采**，并把插件 1.1.0 发布进云端插件仓库。",
       "一、装插件即自动采集（应用级后台动作）`createAutoCollectStore`（测试不真等 30 分钟、不真 spawn）；立即停调度；「立即采集一次」是用户显式动作，自动采集关掉也照跑；`running` 防重入；失败记中文原因、下一轮间隔到点再试（不重试风暴）；",
       "二、信息中枢页「自动采集」段每 30 分钟增量一次 · 可在这一步关闭」；浏览器端只显示「浏览器版不会自动采集，也不会拉起进程」。",
       "三、插件包 1.1.0 进云端仓库7 工具覆盖、预览可装不写存储）保留；下载安装」浏览、下载、校验 sha256 后走同一套安装预览（d.95 链路未改）。",
       "四、自检（真实浏览器 + 真实 Electron，两处真实缺陷已修）确认安装（统计 +1、提示已安装）→ 信息中枢页采集桥/自动采集的浏览器口径正确，0 error；采集完成显示已连接 · 只读归档 · 271 会话 / 139,042 条消息 / 48.0 MB，来源 qqnt/QQ/微信/voice/agenda 全 ok，自动采集「已开启 · 上次采集 00:03 · 下次预计 00:33」；关闭自动采集 → 「已关闭」、下次预计消失；立即采集一次 → 重新采集并完成；退出应用 → 8776 关闭、无残留 Python/Electron 进程；② 自动采集先起、页面后开时页面停在「未连接」而自动采集在采；改为订阅共享 store 的 `running`，idle 时自动接管连接，并补用例。③ 采集桥早退拒绝（403/404/400）带着未读请求体关连接，Windows 上对端可能收到 RST、**响应丢失**（门禁里偶发 `ConnectionResetError`）；改为先按 `Content-Length` 读掉请求体（≤256KB）再回响应，超限则立即 413 不阻塞；`test_mcp_server` 连跑多遍稳定、Python 210 例全绿。",
-      "五、边界与线上状态浏览器端不拉进程，退出仍整树回收；HITL 只管模型工具调用，采集仍只写本机、不上传；要让用户真正可装，需要先把 d.95+d.96+d.97 部署上线（见 `docs/deploy.md`），本轮未擅自做生产部署。",
+      "五、边界与线上状态浏览器端不拉进程，退出仍整树回收；HITL 只管模型工具调用，采集仍只写本机、不上传；要让用户真正可装，需要先把 d.95–d.98 部署上线（见 `docs/deploy.md`），本轮未擅自做生产部署。",
       "门禁都改成与时钟无关；> 说明：并发 `pnpm -r test` 时 server 的 vitest worker 偶发原生崩溃（0xC0000409，> 单跑 `app.test.ts` 37 例与分步跑均通过，属并发资源抖动），门禁数字以分步为准。"
     ]
   },
   {
-    "version": "d.96.2.42.0",
+    "version": "d.97.2.42.0",
     "date": "2026-11-07",
     "title": "信息采集中枢插件：采集桥随和鸣托管，装一个插件就能让智能体采集 QQ/微信",
     "bullets": [
@@ -80,7 +80,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "桌面：新增 `infohub-mcp-host.test.js` **18 例**（全替身，不真 spawn/不真监听）；`main.test.js` /`preload.test.js` / `infohub-bridge.test.js` 守卫同步（受信通道、退出回收、无裸 kill、不自动启动）；",
       "Web：`bundledPlugins.test.ts` 8 例；`InfohubPage` / `infohub/client` / `infohub/store` 新增采集桥用例**26 例**（客户端 7 / 运行态 9 / 页面 10）；全量 web **254 文件 / 3632 例**全绿；`tsc --noEmit` 零错；",
       "全量门禁 `pnpm -r build && pnpm -r test`：**shared 29 / server 165 / web 3632 / desktop 573** 全绿（2026-11-07 实跑）；",
-      "版本：`node scripts/bump-version.mjs d.96.2.42.0`（五处 package.json + README），`node scripts/build-changelog.mjs` 已重跑；发布链路 `node scripts/publish-plugin.mjs plugins/ --dest <目录>`",
+      "版本：`node scripts/bump-version.mjs d.97.2.42.0`（五处 package.json + README），`node scripts/build-changelog.mjs` 已重跑；发布链路 `node scripts/publish-plugin.mjs plugins/ --dest <目录>`",
       "Electron 真机点「启动采集桥」（需要装包或 `electron .`）未跑：本轮桌面侧全部用替身单测，加上本机真实Python 端点 curl 验证；建议装包后点一次并 `curl http://127.0.0.1:8776/health`；",
       "公网 https 页面访问 `127.0.0.1` 的浏览器 PNA / 混合内容行为未验证（本地 `http://localhost` 前端可用）；",
       "真实 QQ/微信首次采集耗时与失败态未在本轮实测（沿用 InfoHub 既有口径与错误文案）。"
