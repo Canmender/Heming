@@ -422,47 +422,52 @@ export function TeamPage() {
         <div className="bg-[#fbfbfb] px-6 py-2">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <span className="ui-caption">
-              开启后团队成员可见你的任务/日程摘要与用量排行（不含提示词、对话内容、工具参数与结果）
+              对团队可见：任务 / 日程摘要与用量排行，不含对话和工具参数
             </span>
-            <label className="flex items-center gap-1 ui-caption text-[#555]">
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 accent-[#1a1a1a]"
-                checked={share.tasks}
-                onChange={(e) => updateShare({ tasks: e.target.checked })}
-              />
-              任务
-            </label>
-            <label className="flex items-center gap-1 ui-caption text-[#555]">
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 accent-[#1a1a1a]"
-                checked={share.agenda}
-                onChange={(e) => updateShare({ agenda: e.target.checked })}
-              />
-              日程
-            </label>
-            <label className="flex items-center gap-1 ui-caption text-[#555]">
-              <input
-                type="checkbox"
-                aria-label="共享用量"
-                className="h-3.5 w-3.5 accent-[#1a1a1a]"
-                checked={share.usage}
-                onChange={(e) => updateShare({ usage: e.target.checked })}
-              />
-              用量
-            </label>
-            <span className="ui-caption">
-              {share.lastSyncAt
-                ? `上次同步 ${fmtTime(new Date(share.lastSyncAt).toISOString())}`
-                : "尚未同步"}
-            </span>
+            <div className="flex items-center gap-3" role="group" aria-label="共享内容">
+              <label className="flex items-center gap-1 ui-caption text-[#555]">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                  checked={share.tasks}
+                  onChange={(e) => updateShare({ tasks: e.target.checked })}
+                />
+                任务
+              </label>
+              <label className="flex items-center gap-1 ui-caption text-[#555]">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                  checked={share.agenda}
+                  onChange={(e) => updateShare({ agenda: e.target.checked })}
+                />
+                日程
+              </label>
+              <label className="flex items-center gap-1 ui-caption text-[#555]">
+                <input
+                  type="checkbox"
+                  aria-label="共享用量"
+                  className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                  checked={share.usage}
+                  onChange={(e) => updateShare({ usage: e.target.checked })}
+                />
+                用量
+              </label>
+            </div>
+            {/* 一项都没开时不会同步，显示「尚未同步」会让人以为出了故障 */}
+            {shareCount > 0 && (
+              <span className="ui-caption">
+                {share.lastSyncAt
+                  ? `上次同步 ${fmtTime(new Date(share.lastSyncAt).toISOString())}`
+                  : "尚未同步"}
+              </span>
+            )}
             <button
               type="button"
-              className="ml-auto rounded-sm border border-line bg-white px-2 py-0.5 ui-caption hover:bg-[#f5f5f5]"
+              className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted"
               onClick={() => setConfirmClear(true)}
             >
-              清除我的共享记录
+              清除共享记录
             </button>
           </div>
           {syncError && (

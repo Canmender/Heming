@@ -1213,8 +1213,8 @@ export function MemoryPage({
           <div>
             <div className="ui-section-title">数据库 · 长期记忆</div>
             <div className={`mt-1 ${hintCls}`}>
-              这是<strong className="font-medium text-[#666]">所有智能体共用</strong>的长期记忆，
-              智能体对话时会读到这里的语义记忆。情景记忆仍按智能体分开（它记的是某次对话的过程）。
+              这是<strong className="font-medium text-[#666]">所有智能体共用</strong>的长期记忆；
+              情景记忆按智能体分开，记的是每次对话的过程。
             </div>
           </div>
           <div className="flex flex-wrap items-start gap-5">
@@ -1300,7 +1300,7 @@ export function MemoryPage({
             <span className="ui-section-title">自动记忆</span>
           </div>
           <span className={hintCls}>
-            自动记忆关闭后不再自动沉淀情景与语义（短期记忆仍记录），手动添加不受影响
+            关闭后不再自动记录；手动添加不受影响
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <label className="flex cursor-pointer select-none items-center gap-1.5 text-[12px] text-muted">
@@ -1567,8 +1567,7 @@ export function MemoryPage({
       <section className={`${cardCls} mt-3`}>
         <div className="ui-section-title">召回预览</div>
         <div className={`mt-1 ${hintCls}`}>
-          输入一句话，看这次触发会召回哪些记忆：语义（置顶必带 + top5）、情景（top3）、短期（最近 6
-          轮），总量受 1200 字符预算约束
+          输入一句话，看看会召回哪些记忆（语义 / 情景 / 短期）
         </div>
         {!settings.enabled && (
           <div className={`mt-1 ${hintCls}`}>
@@ -1651,9 +1650,8 @@ export function MemoryPage({
           <div className="min-w-0">
             <div className="ui-section-title">召回记录</div>
             <div className={`mt-1 ${hintCls}`}>
-              本机最近 {RECALL_LOG_MAX} 次「带记忆的生成」留档：召回几条、真注入几条、哪些被预算裁掉，
-              以及回答里疑似用到了哪条（判据是词重合，不是模型自述）。只存本机，不参与记忆导出。
-              累计的注入/引用次数还用于个性化加权（被引用过的记忆在同等相关度下最多提权 25%）。
+              本机最近 {RECALL_LOG_MAX} 次召回的记录：注入了哪几条、哪些被预算截掉、回答可能用到了哪条。
+              只存本机，不参与导出；被引用多的记忆会略微加权。
             </div>
           </div>
           {runs.length > 0 && (
@@ -1668,7 +1666,7 @@ export function MemoryPage({
         </div>
         {runs.length === 0 ? (
           <div className={`mt-2 ${hintCls}`}>
-            还没有留档：在聊天里 @ 智能体说一句话（记忆开关为开、且本轮召回到了东西）就会记下。
+            还没有记录。开着记忆时，在聊天里 @ 智能体说话就会留档。
           </div>
         ) : (
           <>
@@ -1957,8 +1955,7 @@ export function MemoryPage({
         </button>
       </div>
       <div className={`mt-1 ${hintCls}`}>
-        每轮结束后后台起一次轻量复盘：自问「有什么值得长期记住」，把事实写进语义记忆、
-        把可复用流程沉淀成技能。密钥和口令不会被写入磁盘；复盘失败也不影响对话。
+        任务结束后自动复盘：值得记的事实写进记忆，可复用流程存成技能；失败不影响对话。
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -2042,7 +2039,7 @@ export function MemoryPage({
     <section aria-label="智能体记忆开关" className={`${cardCls} mt-3`}>
       <div className="ui-section-title">智能体记忆开关</div>
       <div className={`mt-1 ${hintCls}`}>
-        短期记忆与长期记忆默认关闭，需要为每个智能体手动开启；个人数据库默认允许使用（个人知识库默认允许）。
+        短期与长期记忆默认关闭，需要为每个智能体单独开启；个人数据库默认允许。
       </div>
       {displayAgents.length === 0 && (
         <div className={`mt-3 ${hintCls}`}>名册为空：可在下方手动登记智能体 ID</div>
@@ -2200,6 +2197,9 @@ export function MemoryPage({
       }
       headerExtra={
         <div className="px-6 pb-3 pt-3">
+          {/* R7：记忆区在 1600 宽屏下卡片会拉到 1256px，表格列被拉得很开；
+              与设置区同一做法，标签与内容收进 1200px 居中列，宽屏阅读更稳。 */}
+          <div className="mx-auto w-full max-w-[1200px]">
           {rosterError && (
             <div role="status" className="mb-2 text-[12px] text-[#b45309]">
               {rosterError}
@@ -2228,6 +2228,7 @@ export function MemoryPage({
               );
             })}
           </div>
+          </div>
         </div>
       }
     >
@@ -2237,6 +2238,7 @@ export function MemoryPage({
         aria-labelledby={`memory-${tab}-tab`}
         className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
       >
+        <div className="mx-auto w-full max-w-[1200px]">
         {tab === "agents" && (
           <div className="flex flex-col gap-3">
             {shortPanel}
@@ -2246,6 +2248,7 @@ export function MemoryPage({
         )}
         {tab === "database" && databasePanel}
         {tab === "wiki" && <WikiPanel />}
+        </div>
       </div>
 
       {clearTarget && (

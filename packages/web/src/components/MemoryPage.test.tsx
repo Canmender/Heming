@@ -689,7 +689,7 @@ describe("MemoryPage 召回可观测性", () => {
     await pickAgent();
     openTab("数据库");
 
-    expect(screen.getByText(/还没有留档/)).toBeInTheDocument();
+    expect(screen.getByText(/还没有记录/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "清除记录" })).not.toBeInTheDocument();
   });
 
@@ -754,7 +754,7 @@ describe("MemoryPage 召回可观测性", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "清除" }));
     expect(logMap.has(RECALL_LOG_KEY)).toBe(false);
     expect(within(card).queryByText(/最近注入/)).not.toBeInTheDocument();
-    expect(screen.getByText(/还没有留档/)).toBeInTheDocument();
+    expect(screen.getByText(/还没有记录/)).toBeInTheDocument();
   });
 
   /**
