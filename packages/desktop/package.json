@@ -1,6 +1,6 @@
 {
   "name": "@heming/desktop",
-  "version": "74.2.39",
+  "version": "75.2.39",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -84,7 +84,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -96,10 +97,16 @@
         "zh_CN"
       ],
       "language": "2052",
-      "differentialPackage": true
+      "differentialPackage": true,
+      "include": "installer.nsh",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerHeader": "installerHeader.bmp",
+      "installerSidebar": "installerSidebar.bmp",
+      "uninstallerSidebar": "uninstallerSidebar.bmp"
     }
   },
-  "hemingVersion": "d.74.2.39.0",
-  "shortVersion": "74.2.39.0",
-  "shortVersionWindows": "74.2.39.0"
+  "hemingVersion": "d.75.2.39.0",
+  "shortVersion": "75.2.39.0",
+  "shortVersionWindows": "75.2.39.0"
 }

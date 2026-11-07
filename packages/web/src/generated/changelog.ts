@@ -12,6 +12,28 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.75.2.39.0",
+    "date": "2026-11-07",
+    "title": "安装器品牌化：欢迎页、侧栏与应用图标",
+    "bullets": [
+      "新增 `packages/desktop/build/icon.ico`（16–256 多尺寸，墨黑圆角底 + 白「和」），同时作为 exe 图标、安装器图标与卸载器图标；",
+      "素材由 `scripts/make-installer-assets.py` 生成，改样式重跑即可，不手改二进制。",
+      "`installerSidebar.bmp`（164×314）：墨黑侧栏，白「和鸣」+ HEMING 字标、底部「本机 AI 工作站 / 数据留在设备上」；",
+      "`uninstallerSidebar.bmp`：同语言，文案换成「卸载后，你的本机数据与设置仍会保留」；",
+      "`installerHeader.bmp`（150×57）：白底黑字「和鸣 / HEMING」，用于目录页与安装进度页右上；",
+      "`build/installer.nsh`：补上欢迎页（默认没有），文案说明「本机优先、卸载不删数据」；完成页改为「安装完成 / 运行 和鸣」，目录页说明安装位置与数据保留。",
+      "重新出包 r64（`和鸣 Setup d.75.2.39.0.exe`），真实启动安装器截图确认欢迎页、侧栏、页头与图标生效；",
+      "安装行为未改：仍是 currentUser、可选目录、`allowToChangeInstallationDirectory`；",
+      "门禁：`pnpm -r build`、四包测试、desktop 测试（含 changelog-sync）通过。"
+    ],
+    "paragraphs": [
+      "安装包此前是 electron-builder 的默认外观：没有欢迎页、侧栏是 NSIS 自带 metro 图、应用图标还是 Electron 默认图标。这轮把安装/卸载界面按产品语言做了一版。",
+      "一、应用与安装器图标",
+      "二、安装向导外观",
+      "三、验证"
+    ]
+  },
+  {
     "version": "d.74.2.39.0",
     "date": "2026-11-07",
     "title": "UI 自检追加轮 R23–R24：加载失败可播报、共享文件空态",
