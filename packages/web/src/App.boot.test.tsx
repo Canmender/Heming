@@ -163,6 +163,8 @@ describe("App 启动动画集成", () => {
   it("右侧文件栏：标题「共享文件」，绑定/上传按钮都有悬停说明", async () => {
     setToken("t1");
     useAuthStore.setState({ token: "t1", user: alice, status: "authed", error: null });
+    // d.76：共享文件面板只在智能体页渲染
+    useUiStore.setState({ page: "chat" });
     render(<App />);
     await act(async () => { bootDoneFns[0]?.(); });
     await waitFor(() => { expect(screen.queryByText("BootWave")).toBeNull(); });

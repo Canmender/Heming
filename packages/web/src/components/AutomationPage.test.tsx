@@ -361,3 +361,39 @@ describe("自动化页空态布局（d.73）", () => {
     expect(card.parentElement?.className).toContain("items-center");
   });
 });
+
+describe("自动化预设（d.76）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
+    setAutomationRunStorage(createMemoryStorage());
+    resetStores();
+  });
+
+  it("一键创建：按预设落库，带默认时间、来源与启用状态", () => {
+    render(<AutomationPage />);
+    const region = screen.getByRole("region", { name: "自动化预设" });
+    fireEvent.click(within(region).getByRole("button", { name: "一键创建：每日同步归档" }));
+
+    const [task] = useAutomationStore.getState().tasks;
+    expect(task.name).toBe("每日同步归档");
+    expect(task.kind).toBe("infohub.sync");
+    expect(task.enabled).toBe(true);
+    expect(task.schedule).toMatchObject({ type: "daily", time: "08:00" });
+    expect(task.sync.sources).toEqual(["qq", "wechat"]);
+    expect(screen.getByText("已按预设创建「每日同步归档」")).toBeInTheDocument();
+  });
+
+  it("第二条预设：间隔 120 分钟，不覆盖已有任务", () => {
+    render(<AutomationPage />);
+    fireEvent.click(screen.getByRole("button", { name: "一键创建：每 2 小时增量同步" }));
+    fireEvent.click(screen.getByRole("button", { name: "一键创建：每天早上重扫日程" }));
+
+    const tasks = useAutomationStore.getState().tasks;
+    expect(tasks).toHaveLength(2);
+    const interval = tasks.find((task) => task.name === "每 2 小时增量同步");
+    const agenda = tasks.find((task) => task.name === "每天早上重扫日程");
+    expect(interval?.schedule).toMatchObject({ type: "interval", minutes: 120 });
+    expect(agenda?.kind).toBe("infohub.agenda");
+  });
+});

@@ -18,6 +18,7 @@ import {
   type AutomationTask,
 } from "../lib/automation/model.js";
 import { isAutomationKind, kindMeta, listKindMeta } from "../lib/automation/kinds.js";
+import { AUTOMATION_PRESETS, presetDraft } from "../lib/automation/presets.js";
 import {
   MAX_AUTOMATION_RUNS,
   useAutomationRunsStore,
@@ -89,6 +90,7 @@ export function AutomationPage() {
   const runningId = useAutomationStore((s) => s.runningId);
   const setEnabled = useAutomationStore((s) => s.setEnabled);
   const removeTask = useAutomationStore((s) => s.remove);
+  const createTask = useAutomationStore((s) => s.create);
   const beginRun = useAutomationStore((s) => s.beginRun);
   const finishRun = useAutomationStore((s) => s.finishRun);
   const runs = useAutomationRunsStore((s) => s.runs);
@@ -247,6 +249,45 @@ export function AutomationPage() {
           </button>
         )}
       </div>
+
+      {/* d.76：常用组合一键创建——把「动作 / 来源 / 时间 / 全量」的选择降级为高级入口。 */}
+      <section aria-label="自动化预设" className="mb-4">
+        <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="ui-section-title">常用预设</span>
+          <span className="ui-caption">点一下直接建好，之后仍可在列表里改</span>
+        </div>
+        <div className="grid gap-2 md:grid-cols-2">
+          {AUTOMATION_PRESETS.map((preset) => (
+            <div
+              key={preset.id}
+              className="flex flex-col gap-1 rounded-xl border border-line bg-panel p-3"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[13px] font-semibold">{preset.label}</span>
+                <span className="ui-chip">{preset.scheduleText}</span>
+              </div>
+              <p className="ui-caption">{preset.description}</p>
+              <button
+                type="button"
+                aria-label={`一键创建：${preset.label}`}
+                className="ui-btn ui-btn-sm ui-btn-ghost mt-2 self-start"
+                onClick={() => {
+                  setError("");
+                  setNotice("");
+                  const outcome = createTask(presetDraft(preset));
+                  if (!outcome.ok) {
+                    setError(outcome.error);
+                    return;
+                  }
+                  setNotice(`已按预设创建「${preset.label}」`);
+                }}
+              >
+                一键创建
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <div className="flex flex-1 flex-col">
         {tasks.length === 0 ? (

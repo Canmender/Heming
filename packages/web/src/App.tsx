@@ -726,6 +726,12 @@ function AppShell({
       <SettingsPage />
     );
 
+  /**
+   * 共享文件面板只在智能体页出现（用户要求：文件管理只留在智能体对话页）。
+   * 其它页面不再常驻右栏，主内容获得完整宽度；窄窗入口也只在智能体页显示。
+   */
+  const showFilesPanel = currentPage === "chat";
+
   return (
     <div className="flex h-screen flex-col overflow-hidden border border-line bg-white">
       {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
@@ -742,7 +748,7 @@ function AppShell({
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* 窄窗顶部工具区（d.67 T4）：右侧共享文件栏默认不渲染，入口收在这里。
               宽窗（≥1200）不渲染这条工具区，主内容高度与改前完全一致。 */}
-          {narrow && (
+          {narrow && showFilesPanel && (
             <div className="flex shrink-0 items-center justify-end border-b border-line-soft px-4 py-1.5">
               <button
                 type="button"
@@ -766,8 +772,12 @@ function AppShell({
         {/* 宽窗：右侧工作目录可拖动左边缘改宽度（手柄整条 6px 宽，好抓）。
             绑定按钮把本地文件绑到当前会话，通话/协作里点目录就能带上文件。
             窄窗不渲染这一列（内容改由顶部按钮 + 覆盖层抽屉承载，见下方）。 */}
-        {!narrow && (
-          <aside className="relative flex shrink-0 flex-col border-l border-line-soft" style={{ width: asideWidth }}>
+        {!narrow && showFilesPanel && (
+          <aside
+            aria-label="共享文件"
+            className="relative flex shrink-0 flex-col border-l border-line-soft"
+            style={{ width: asideWidth }}
+          >
             <div
               role="separator"
               aria-orientation="vertical"
@@ -789,7 +799,7 @@ function AppShell({
         )}
       </div>
       {/* 窄窗共享文件抽屉：覆盖层 + aria-modal；Esc/焦点归还/背景 inert 由 useModalA11y 统一托管。 */}
-      {narrow && filesDrawerOpen && (
+      {narrow && showFilesPanel && filesDrawerOpen && (
         <div className="fixed inset-0 z-40 flex justify-end" data-testid="shared-files-drawer-overlay">
           <button
             type="button"

@@ -131,6 +131,7 @@
 | [specs/2026-11-03-d68-custom-content.md](superpowers/specs/2026-11-03-d68-custom-content.md) | **d.68 自定义内容简化**：自建智能体 4 模板 + 基础/进阶渐进披露、创建后直接进对话；自定义技能新建弹窗（必填名称+内容、3 模板、创建即分配、空态直达）；明确不做记忆区/Wiki、云同步与键位迁移 |
 | [specs/2026-11-04-d68-selfcheck.md](superpowers/specs/2026-11-04-d68-selfcheck.md) | **d.68.2.26 自检与再优化**：headless Edge + CDP 真实浏览器逐页自检方法、8 个实测问题（暗色组件基元白底/热力图白方块/开关倒置/缺失 hover、导航 auto 鼠标焦点钉住、桌宠菜单贴边被裁与无桥死按钮、插件区统计滞后）的根因/修法/证据，以及未复验项 |
 | [specs/2026-11-04-d69-ux-round.md](superpowers/specs/2026-11-04-d69-ux-round.md) | **d.69 体验自检六轮**：真实浏览器（含本机假 LLM 网关 / 假 MCP 服务）逐轮找问题与修复——登录说人话、内部术语出清、假状态换真数据、命令面板焦点环（含高对比回归）、失败原因分类翻译、HITL 记住规则/高对比实测、任务失败原因；附每轮未覆盖项 |
+| [specs/2026-11-07-file-panel-and-automation-presets.md](superpowers/specs/2026-11-07-file-panel-and-automation-presets.md) | **文件管理收进智能体页 + 自动化预设**：共享文件面板不再全局常驻（只在智能体页显示），窄窗入口同步收口；自动化新增 4 条一键预设（每日/每2小时/日程/周导出），编辑器保留为自定义入口 |
 | [specs/2026-11-07-installer-branding.md](superpowers/specs/2026-11-07-installer-branding.md) | **安装器品牌化**：NSIS 欢迎页/完成页文案、164×314 侧栏、150×57 页头、多尺寸应用图标；素材由 `scripts/make-installer-assets.py` 生成，附安装行为不变与未做项（签名/深色控件） |
 | [specs/2026-11-07-ui-polish-rounds.md](superpowers/specs/2026-11-07-ui-polish-rounds.md) | **20 轮 UI/UX 自检与优化**（进行中）：按「使用习惯 / 排版 / UI 一致性 / AI 腔文案」逐轮找证据并修复；含轮次看板、每轮问题与修法、验证口径与遗留清单 |
 | [specs/2026-11-05-nav-layout.md](superpowers/specs/2026-11-05-nav-layout.md) | **d.72 导航分组重排与页面布局收口**：9 个导航项按「工作台 → 智能模块 → 资料与能力 → 系统」重排并加组间细线；老默认顺序迁移、自定义顺序保留、Alt 键位不变；设置区正文/标签/搜索收进 760px 居中列；信息中枢浏览器空态真正垂直居中；d.73 收尾把幕僚/自动化空态改为剩余空间垂直居中、主页「近 30 日用量」并入 Token 用量卡。附真实浏览器多档宽度截图证据与不做清单 |

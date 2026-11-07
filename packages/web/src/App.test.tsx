@@ -167,13 +167,14 @@ describe("App 认证门禁", () => {
   });
 });
 
-describe("App 右栏云端共享", () => {
+describe("App 右栏云端共享（仅智能体页显示）", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
     setToken(null);
     useAuthStore.setState({ token: null, user: null, status: "idle", error: null });
-    useUiStore.setState({ page: "home", activeConversationId: null });
+    // d.76：共享文件面板从全局右栏移到智能体页；本组用例统一落在 chat 页验证。
+    useUiStore.setState({ page: "chat", activeConversationId: null });
   });
 
   it("登录后拉取共享文件并渲染上传按钮与根级行", async () => {
@@ -437,6 +438,8 @@ describe("App 导航快捷键与隐藏态", () => {
   });
 
   it("模态弹窗开着时 Alt+N 不切页、Ctrl+K 不开面板，关掉后两者恢复", async () => {
+    // d.76：共享文件面板只在智能体页，本用例需要文件行来打开预览
+    useUiStore.setState({ page: "chat" });
     setToken("t1");
     mockFetch({
       files: [
@@ -459,7 +462,7 @@ describe("App 导航快捷键与隐藏态", () => {
 
     // inert 挡得住点击，挡不住挂在 window 上的 keydown：这里必须显式拦
     fireEvent.keyDown(window, { key: "5", altKey: true });
-    expect(useUiStore.getState().page).toBe("home");
+    expect(useUiStore.getState().page).toBe("chat");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(screen.queryByRole("dialog", { name: "命令面板" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("关闭预览")).toBeInTheDocument();
@@ -605,13 +608,14 @@ describe("App 桌面窗口标题栏", () => {
   });
 });
 
-describe("右侧工作目录栏：绑定按钮与拖动调宽", () => {
+describe("右侧工作目录栏：绑定按钮与拖动调宽（仅智能体页）", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
     delete (window as unknown as { heming?: unknown }).heming;
     setToken("t1");
     mockFetch();
+    useUiStore.setState({ page: "chat", activeConversationId: null });
   });
 
   it("目录栏头部有「绑定」与「上传」两个入口", async () => {
@@ -633,7 +637,7 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽", () => {
     const { container } = render(<App />);
     await screen.findByRole("button", { name: "主页 Alt1" });
     const handle = screen.getByRole("separator", { name: "调整目录栏宽度" });
-    const aside = container.querySelector("aside.flex.shrink-0") as HTMLElement;
+    const aside = container.querySelector('aside[aria-label="共享文件"]') as HTMLElement;
 
     // jsdom 不实现 PointerEvent（typeof undefined），fireEvent.pointerDown 造出的事件
     // React 认不出来、onPointerDown 不触发。这里用 MouseEvent 顶替——它同样带
@@ -677,7 +681,7 @@ describe("App 窄窗响应式：共享文件改抽屉", () => {
     delete (window as unknown as { heming?: unknown }).heming;
     setToken("t1");
     useAuthStore.setState({ token: "t1", user: alice, status: "authed", error: null });
-    useUiStore.setState({ page: "home", activeConversationId: null });
+    useUiStore.setState({ page: "chat", activeConversationId: null });
     mockFetch({ files: [draftFile] });
     setViewportWidth(1024); // 窄窗：<1200
   });
@@ -690,7 +694,7 @@ describe("App 窄窗响应式：共享文件改抽屉", () => {
     render(<App />);
     const trigger = await screen.findByRole("button", { name: "打开共享文件" });
 
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "共享文件" })).not.toBeInTheDocument();
     expect(screen.queryByRole("separator", { name: "调整目录栏宽度" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(trigger).toHaveAttribute("aria-expanded", "false");
@@ -753,10 +757,12 @@ describe("App 窄窗响应式：共享文件改抽屉", () => {
     expect(screen.getByRole("button", { name: "绑定本地文件到会话" })).toBeInTheDocument();
   });
 
-  it("窄窗切到宽页面（settings）时主内容列仍是 min-w-0/overflow-hidden，不横向撑破", async () => {
+  it("窄窗切到宽页面（settings）时主内容列仍是 min-w-0/overflow-hidden，且不再有共享文件入口", async () => {
     useUiStore.setState({ page: "settings" });
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "打开共享文件" });
+    await screen.findByRole("button", { name: "主页 Alt1" });
+    // d.76：文件管理只在智能体页，其它页连入口都不出现
+    expect(screen.queryByRole("button", { name: "打开共享文件" })).not.toBeInTheDocument();
 
     const main = container.querySelector("main");
     expect(main?.className).toContain("min-w-0");
