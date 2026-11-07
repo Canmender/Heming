@@ -17,6 +17,7 @@ import { useInfohubStore } from "./lib/infohub/store.js";
 import { useAutomationScheduler } from "./lib/automation/scheduler.js";
 import { useStaffLoop } from "./lib/staff/loop.js";
 import { useModuleStore, isModuleEffective } from "./lib/modules/store.js";
+import { useAppPresence } from "./lib/appPresence.js";
 import { isPageAvailable } from "./lib/modules/nav.js";
 import { hasOpenModal, useModalA11y } from "./components/useModalA11y.js";
 import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
@@ -288,6 +289,9 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function App() {
+  // 应用级在场连接：人在应用里就算在线（团队名册/在线数不再要求「正开着某个会话」）
+  useAppPresence();
+
   // 首帧之前就把主题色写进 CSS 变量，避免刷新时闪回默认墨色
   initTheme();
 

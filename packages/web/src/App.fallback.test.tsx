@@ -9,6 +9,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { PageFallback } from "./App.js";
 
+vi.mock("./lib/appPresence.js", () => ({ useAppPresence: () => undefined }));
+
 describe("PageFallback（页面骨架）", () => {
   afterEach(() => cleanup());
 

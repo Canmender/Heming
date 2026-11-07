@@ -348,6 +348,14 @@ export function TeamPage() {
     [activities],
   );
 
+  /** 成员详情升级（d.88）：除了「他是谁」，也给「他最近干了多少」——动向条数 + 排行里的用量。 */
+  const selectedMemberStats = useMemo(() => {
+    if (!selectedMember) return null;
+    const recent = humanActivities.filter((a) => a.actorId === selectedMember.user.id);
+    const rank = usage?.ranking.find((r) => r.userId === selectedMember.user.id) ?? null;
+    return { recentCount: recent.length, latest: recent[0] ?? null, rank };
+  }, [selectedMember, humanActivities, usage]);
+
   const visibleActivities = useMemo(
     () => humanActivities.filter((a) => filter === "all" || a.kind === filter),
     [humanActivities, filter],
@@ -407,6 +415,20 @@ export function TeamPage() {
 
   const shareCount = [share.tasks, share.agenda, share.usage].filter(Boolean).length;
 
+  /**
+   * 关闭某一类共享时的一次性说明（d.88）：关闭只停止未来上报，**不撤回已上传的摘要**——
+   * 原来这条口径只有「用量」页签写了，任务/日程关掉后摘要还留在团队里、没有任何提示。
+   */
+  const [shareNotice, setShareNotice] = useState("");
+  const turnOffShare = (kind: "tasks" | "agenda" | "usage") => {
+    if (kind === "tasks") updateShare({ tasks: false });
+    else if (kind === "agenda") updateShare({ agenda: false });
+    else updateShare({ usage: false });
+    const label = kind === "tasks" ? "任务摘要" : kind === "agenda" ? "日程摘要" : "用量排行";
+    setShareNotice(`已停止上报${label}；之前上传的内容仍留在团队里，可用「清除共享记录」撤回。`);
+    window.setTimeout(() => setShareNotice(""), 6000);
+  };
+
   return (
     <PageShell
       scroll={false}
@@ -434,7 +456,7 @@ export function TeamPage() {
         <div className="bg-[var(--subtle)] px-6 py-2">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <span className="ui-caption">
-              向团队共享（只上报摘要，不含对话与工具参数）：
+              向团队共享（只上报摘要，不含对话与工具参数；关闭只停止上报，不撤回已上传的内容）：
             </span>
             <div className="flex items-center gap-3" role="group" aria-label="共享内容">
               <label className="flex items-center gap-1 ui-caption">
@@ -442,7 +464,7 @@ export function TeamPage() {
                   type="checkbox"
                   className="h-3.5 w-3.5 accent-[#1a1a1a]"
                   checked={share.tasks}
-                  onChange={(e) => updateShare({ tasks: e.target.checked })}
+                  onChange={(e) => (e.target.checked ? updateShare({ tasks: true }) : turnOffShare("tasks"))}
                 />
                 任务摘要
               </label>
@@ -451,7 +473,7 @@ export function TeamPage() {
                   type="checkbox"
                   className="h-3.5 w-3.5 accent-[#1a1a1a]"
                   checked={share.agenda}
-                  onChange={(e) => updateShare({ agenda: e.target.checked })}
+                  onChange={(e) => (e.target.checked ? updateShare({ agenda: true }) : turnOffShare("agenda"))}
                 />
                 日程摘要
               </label>
@@ -461,7 +483,7 @@ export function TeamPage() {
                   aria-label="共享用量"
                   className="h-3.5 w-3.5 accent-[#1a1a1a]"
                   checked={share.usage}
-                  onChange={(e) => updateShare({ usage: e.target.checked })}
+                  onChange={(e) => (e.target.checked ? updateShare({ usage: true }) : turnOffShare("usage"))}
                 />
                 用量排行
               </label>
@@ -489,6 +511,16 @@ export function TeamPage() {
               清除共享记录
             </button>
           </div>
+          {shareNotice && (
+            <p role="status" className="mt-1 ui-micro text-[#92400e]">
+              {shareNotice}
+            </p>
+          )}
+          {members.length <= 1 && (
+            <p className="mt-1 ui-micro">
+              团队目前只有你。团队是全站名册：新同事的账号由管理员在服务端创建，登录后会自动出现在这里。
+            </p>
+          )}
           {syncError && (
             <p role="alert" className="mt-1 ui-micro text-[var(--danger)]">
               共享同步失败：{syncError}
@@ -608,8 +640,15 @@ export function TeamPage() {
                   </span>
                 </div>
                 <div className="ui-caption">
-                  {selectedMember.online ? "在线" : fmtLastSeen(selectedMember.lastSeenAt)} ·
-                  该成员最近的动向
+                  {selectedMember.online ? "在线" : fmtLastSeen(selectedMember.lastSeenAt)}
+                  {selectedMemberStats
+                    ? ` · 近 ${rangeDays} 天动向 ${selectedMemberStats.recentCount} 条`
+                    : ""}
+                  {selectedMemberStats?.rank
+                    ? ` · 用量 ${fmtTokens(selectedMemberStats.rank.tokens)}`
+                    : share.usage
+                      ? " · 用量暂无"
+                      : " · 用量未共享"}
                 </div>
               </div>
               <button
@@ -696,7 +735,9 @@ export function TeamPage() {
               <div className="ui-empty">
                 <p>还没有可见的动向。</p>
                 <p className="mt-1 ui-caption">
-                  成员在团队页勾选「任务 / 日程」后，摘要会出现在这里；智能体的工作不进入团队动向。
+                  {shareCount > 0
+                    ? "你已经开启共享，但还没有可显示的摘要；产生任务或日程后会自动同步过来。"
+                    : "成员在团队页勾选「任务 / 日程」后，摘要会出现在这里；智能体的工作不进入团队动向。"}
                 </p>
               </div>
             ) : (
@@ -753,7 +794,7 @@ export function TeamPage() {
           {tab === "agenda" && (
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
               <p className="rounded-lg border border-line-soft bg-[var(--subtle)] px-2.5 py-2 text-[11px] leading-5 text-muted">
-                团队日程只收成员共享的日程摘要（标题 + 到期时间）；详情、证据与发送人不出现，也不新增云端内容。
+                团队日程只收成员共享的日程摘要（标题 + 到期档位）；不含日程正文、证据与发送人。
               </p>
               {!feedReady ? (
                 <p role="status" className="mt-3 ui-caption">加载中…</p>

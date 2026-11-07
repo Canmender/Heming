@@ -285,7 +285,7 @@ export function HomePage() {
     onboardingSteps,
   );
   /**
-   * 首跑引导的去处：第 1 步是「配置模型连接」，必须直接落在设置区「模型」页签，
+   * 首跑引导的去处：第 1 步是「连接 magpie 并读取模型」，必须直接落在设置区「模型」页签，
    * 不能只 setPage("settings")——那会停在「个人资料」，用户在昵称/头像里找模型。
    */
   const goOnboarding = (target: OnboardingTarget) => {
@@ -611,7 +611,8 @@ export function HomePage() {
                 <button
                   key={a.id}
                   type="button"
-                  onClick={() => setPage("team")}
+                  // 点的是「谁的动向」就落到谁：团队页支持 teamFocusUserId 定位（审计 P2-6）
+                  onClick={() => useUiStore.getState().focusTeamMember(a.actorId)}
                   className="flex w-full items-start gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors duration-150 hover:bg-[var(--subtle-2)]"
                 >
                   <Avatar

@@ -250,6 +250,57 @@ describe("团队用量：清除已上传记录", () => {
   });
 });
 
+describe("团队协作口径（d.88）", () => {
+  it("关闭某一类共享：给一次性说明「关≠撤回」，原有动向仍然可见", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, tasks: true } });
+    vi.mocked(fetchTeamActivities).mockResolvedValue({
+      activities: [activity({ id: "a1", title: "整理周报", kind: "task" })],
+    });
+    await renderPage();
+    expect(await screen.findByText("整理周报")).toBeInTheDocument();
+
+    // 关掉「任务摘要」共享 → 说明关≠撤回
+    fireEvent.click(screen.getByLabelText("任务摘要"));
+    expect(await screen.findByText(/已停止上报任务摘要/)).toBeInTheDocument();
+    expect(screen.getByText(/不撤回已上传的内容/)).toBeInTheDocument();
+    // 已上传的动向仍显示（关闭只停未来上报）
+    expect(screen.getByText("整理周报")).toBeInTheDocument();
+  });
+
+  it("团队只有自己时，说明新同事账号从哪来", async () => {
+    vi.mocked(fetchTeam).mockResolvedValue({ members: [member(me, true)], onlineCount: 1 });
+    await renderPage();
+    expect(screen.getByText(/团队目前只有你/)).toBeInTheDocument();
+    expect(screen.getByText(/账号由管理员在服务端创建/)).toBeInTheDocument();
+  });
+
+  it("名册有多人时不再显示「只有你」的说明", async () => {
+    vi.mocked(fetchTeam).mockResolvedValue({
+      members: [member(me, true), member(bob)],
+      onlineCount: 1,
+    });
+    await renderPage();
+    expect(screen.queryByText(/团队目前只有你/)).toBeNull();
+  });
+
+  it("共享已开启但没数据时，空态说的是「等摘要」而不是「去开启共享」", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, tasks: true } });
+    vi.mocked(fetchTeamActivities).mockResolvedValue({ activities: [] });
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "动向" }));
+    expect(
+      await screen.findByText(/你已经开启共享，但还没有可显示的摘要/),
+    ).toBeInTheDocument();
+  });
+
+  it("成员详情给出「近 N 天动向条数」与用量口径（未共享时说清）", async () => {
+    await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /鲍勃/ }));
+    expect(await screen.findByText(/近 7 天动向 0 条/)).toBeInTheDocument();
+    expect(screen.getByText(/用量未共享/)).toBeInTheDocument();
+  });
+});
+
 describe("团队日程：只读摘要", () => {
   it("未连接信息中枢：空态给「去连接」出口，且不自动拉起、不上传", async () => {
     await renderPage();

@@ -9,6 +9,7 @@ import { setToken, fetchMe, ApiError } from "./lib/api.js";
 // 启动动画集成用例独立成文件：BootWave 换成可控桩（不自动完成），
 // 专注验证「主界面从 T=0 就挂载（动画只是遮罩）」与「登录态恢复在动画期间后台完成」。
 // 组件自身的揭示行为见 components/BootWave.test.tsx。
+vi.mock("./lib/appPresence.js", () => ({ useAppPresence: () => undefined }));
 vi.mock("./components/LoginPage.js", () => ({ LoginPage: () => <div>LoginPage</div> }));
 vi.mock("./components/NavRail.js", () => ({
   NavRail: () => <div>NavRail</div>,

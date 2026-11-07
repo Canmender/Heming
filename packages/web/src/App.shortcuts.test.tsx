@@ -12,6 +12,7 @@ import { useAuthStore } from "./store/auth.js";
 import { useUiStore } from "./store/ui.js";
 import { setToken, fetchMe } from "./lib/api.js";
 
+vi.mock("./lib/appPresence.js", () => ({ useAppPresence: () => undefined }));
 vi.mock("./components/BootWave.js", () => ({
   BootWave: ({ onDone }: { onDone: () => void }) => {
     useEffect(() => {

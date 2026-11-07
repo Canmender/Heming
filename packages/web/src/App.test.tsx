@@ -8,6 +8,7 @@ import { setToken, fetchFileBlobText } from "./lib/api.js";
 
 // 启动动画集成：BootWave 以「挂载即 onDone」桩替换，动画完成后 App 路由到登录页/主界面。
 // 自动完成的 BootWave 桩让既有用例聚焦认证/右栏/导航行为；完整的门禁路由用例见 App.boot.test.tsx。
+vi.mock("./lib/appPresence.js", () => ({ useAppPresence: () => undefined }));
 vi.mock("./components/BootWave.js", () => ({
   BootWave: ({ onDone }: { onDone: () => void }) => {
     useEffect(() => { onDone(); }, [onDone]);

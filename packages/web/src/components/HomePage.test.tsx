@@ -179,6 +179,8 @@ describe("HomePage", () => {
 
     fireEvent.click(screen.getByText("整理周报").closest("button")!);
     expect(useUiStore.getState().page).toBe("team");
+    // 落到「谁的动向」对应的成员（审计 P2-6：原来只 setPage，团队页停在默认视图）
+    expect(useUiStore.getState().teamFocusUserId).toBe(bob.id);
   });
 
   it("智能体 / 幕僚类旧动向不在团队卡露出（团队只放真实成员）", async () => {
