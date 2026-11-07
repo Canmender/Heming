@@ -49,6 +49,8 @@ export function AssistantPage() {
   const [editing, setEditing] = useState<Agent | null>(null);
   /** 默认落在「对话」：导航里这一项的主体是聊天，任务只是它的第二个视图。 */
   const [tab, setTab] = useSessionTab<AssistantTab>(ASSISTANT_TAB_KEY, "chat", ASSISTANT_TABS);
+  /** 名册搜索：智能体多了以后按名称/简介找（<5 个时不显示，不给一两条数据配搜索框）。 */
+  const [agentQuery, setAgentQuery] = useState("");
 
   // 命令面板「新建智能体」的消费点（d.60）。
   // 面板只投一次内存意图并切到本页；本页是懒加载路由，可能晚一帧才挂载，
@@ -97,6 +99,22 @@ export function AssistantPage() {
       return a.name.localeCompare(b.name, "zh");
     });
   }, [agentsRoster]);
+
+  /** 搜索：按名称/简介过滤（大小写不敏感、去空白）。 */
+  const filteredAgents = useMemo(() => {
+    const q = agentQuery.trim().toLowerCase();
+    if (!q) return sortedAgents;
+    return sortedAgents.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        (a.description ?? "").toLowerCase().includes(q),
+    );
+  }, [sortedAgents, agentQuery]);
+  const systemAgents = filteredAgents.filter((a) => a.id === "system-assistant");
+  const ownAgents = filteredAgents.filter((a) => a.id !== "system-assistant");
+  /** 名册里同时有系统/自建时才打分组标题；只有一类时不加噪。 */
+  const showGroupLabels = systemAgents.length > 0 && ownAgents.length > 0;
+  const showSearch = agentsRoster.length >= 5;
 
   const convByAgent = useMemo(() => {
     const map = new Map<string, (typeof conversations)[number]>();
@@ -175,6 +193,17 @@ export function AssistantPage() {
               </button>
             </header>
 
+            {showSearch && !agentsRoster.length ? null : showSearch ? (
+              <div className="border-b border-line-soft px-2 py-1.5">
+                <input
+                  aria-label="搜索智能体"
+                  value={agentQuery}
+                  onChange={(e) => setAgentQuery(e.target.value)}
+                  placeholder="搜索智能体…"
+                  className="w-full rounded-lg border border-line px-2 py-1 text-[12px] outline-hidden focus:border-ink"
+                />
+              </div>
+            ) : null}
             <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
               {sortedAgents.length === 0 ? (
                 <div className="ui-empty px-2 py-6">
@@ -204,50 +233,85 @@ export function AssistantPage() {
                   </div>
                 </div>
               ) : (
-                sortedAgents.map((agent) => {
-                  const conv = convByAgent.get(agent.id);
-                  const active = conv && conv.id === activeConversationId;
-                  const busy = openingId === agent.id;
-                  return (
-                    <div key={agent.id} className="group relative mb-1">
-                      <button
-                        type="button"
-                        aria-label={`与智能体 ${agent.name} 对话`}
-                        aria-current={active ? "true" : undefined}
-                        disabled={busy}
-                        onClick={() => void startChat(agent)}
-                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors disabled:opacity-60 ${
-                          active ? "bg-[var(--subtle-4)]" : "hover:bg-[var(--subtle-2)]"
-                        }`}
-                      >
-                        <Avatar
-                          user={{ displayName: agent.name, avatar: agent.avatar ?? undefined }}
-                          size={26}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="ui-body-sm block truncate font-medium">{agent.name}</span>
-                          <span className="ui-caption block truncate">
-                            {busy
-                              ? "正在打开…"
-                              : conv?.lastMessageAt
-                                ? "最近有对话"
-                                : agent.id === "system-assistant"
-                                  ? "和鸣内置智能体"
-                                  : agent.description || "暂无对话"}
-                          </span>
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`编辑智能体：${agent.name}`}
-                        onClick={() => setEditing(agent)}
-                        className="ui-micro absolute right-1.5 top-1/2 flex h-6 -translate-y-1/2 items-center rounded-sm px-1.5 opacity-0 hover:bg-[var(--subtle-3)] hover:text-ink focus:opacity-100 group-hover:opacity-100"
-                      >
-                        编辑
-                      </button>
-                    </div>
-                  );
-                })
+                (() => {
+                  // 分组 + 搜索：系统智能体在前（同一组内按名称），自建在后
+                  const groups = showGroupLabels
+                    ? [
+                        { key: "system", label: "系统智能体", agents: systemAgents },
+                        { key: "own", label: "自建智能体", agents: ownAgents },
+                      ]
+                    : [{ key: "all", label: "", agents: filteredAgents }];
+                  if (filteredAgents.length === 0) {
+                    return (
+                      <div className="ui-empty px-2 py-6">
+                        <p className="ui-empty-title">没有匹配的智能体</p>
+                        <p className="ui-empty-desc">换个名字试试，或清空关键词。</p>
+                        <button
+                          type="button"
+                          className="ui-btn ui-btn-sm ui-btn-ghost"
+                          onClick={() => setAgentQuery("")}
+                        >
+                          清空搜索
+                        </button>
+                      </div>
+                    );
+                  }
+                  return groups
+                    .filter((g) => g.agents.length > 0)
+                    .map((group) => (
+                      <div key={group.key}>
+                        {group.label ? (
+                          <div className="px-2 pb-1 pt-2 ui-micro text-muted">{group.label}</div>
+                        ) : null}
+                        {group.agents.map((agent) => {
+                          const conv = convByAgent.get(agent.id);
+                          const active = conv && conv.id === activeConversationId;
+                          const busy = openingId === agent.id;
+                          return (
+                            <div key={agent.id} className="group relative mb-1">
+                              <button
+                                type="button"
+                                aria-label={`与智能体 ${agent.name} 对话`}
+                                aria-current={active ? "true" : undefined}
+                                disabled={busy}
+                                onClick={() => void startChat(agent)}
+                                className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors disabled:opacity-60 ${
+                                  active ? "bg-[var(--subtle-4)]" : "hover:bg-[var(--subtle-2)]"
+                                }`}
+                              >
+                                <Avatar
+                                  user={{ displayName: agent.name, avatar: agent.avatar ?? undefined }}
+                                  size={26}
+                                />
+                                <span className="min-w-0 flex-1">
+                                  <span className="ui-body-sm block truncate font-medium">{agent.name}</span>
+                                  <span className="ui-caption block truncate">
+                                    {busy
+                                      ? "正在打开…"
+                                      : conv?.lastMessageAt
+                                        ? "最近有对话"
+                                        : agent.id === "system-assistant"
+                                          ? "和鸣内置智能体"
+                                          : agent.description || "暂无对话"}
+                                  </span>
+                                </span>
+                              </button>
+                              {/* 编辑按钮常显（低对比，悬停/聚焦加深）：纯 hover 可见在触控板/键盘上等于没有 */}
+                              <button
+                                type="button"
+                                aria-label={`编辑智能体：${agent.name}`}
+                                title="编辑智能体"
+                                onClick={() => setEditing(agent)}
+                                className="ui-micro absolute right-1.5 top-1/2 flex h-6 -translate-y-1/2 items-center rounded-sm px-1.5 text-muted opacity-60 hover:bg-[var(--subtle-3)] hover:text-ink hover:opacity-100 focus:opacity-100"
+                              >
+                                编辑
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ));
+                })()
               )}
             </div>
 

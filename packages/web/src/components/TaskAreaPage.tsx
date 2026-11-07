@@ -520,6 +520,9 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
   const [confirmClear, setConfirmClear] = useState(false);
   const [copied, setCopied] = useState<"md" | "json" | null>(null);
   const copiedTimer = useRef<number | null>(null);
+  /** 复制失败要说出来（headless/浏览器权限拒绝时原来静默什么都不发生）。 */
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const copyErrorTimer = useRef<number | null>(null);
 
   // 通用智能体是独立页：名册（启动面板候选）与会话列表（ChatPage 标题）在这里自行补齐，
   // 不依赖用户先去过别的页。
@@ -673,8 +676,18 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
   const copyTask = async (task: TaskRecord, format: "md" | "json") => {
     const ok = await copyText(format === "md" ? buildTaskReport(task) : buildTaskJson(task));
     if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+    if (copyErrorTimer.current !== null) window.clearTimeout(copyErrorTimer.current);
     setCopied(ok ? format : null);
-    if (!ok) return;
+    if (!ok) {
+      // 失败不静默：说清为什么、还能怎么复制（报告本身已在本机记录里）
+      setCopyError("复制失败：浏览器不允许写剪贴板。可在步骤/结果区手动选择文本复制。");
+      copyErrorTimer.current = window.setTimeout(() => {
+        copyErrorTimer.current = null;
+        setCopyError(null);
+      }, 5000);
+      return;
+    }
+    setCopyError(null);
     copiedTimer.current = window.setTimeout(() => {
       copiedTimer.current = null;
       setCopied(null);
@@ -866,7 +879,8 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
               task={selected}
               sources={sources}
               copied={copied}
-              agentUnbound={selectedAgentUnbound}
+              // 中栏嵌入的 ChatPage 自己会提示未绑定；只有它没渲染时才在右栏再提示，避免同屏说两遍
+              agentUnbound={selectedAgentUnbound && activeConversationId !== selected.conversationId}
               onGoSettings={() => useUiStore.getState().openSettings("model")}
               onCopy={(format) => void copyTask(selected, format)}
               onRerun={() => setRerunTarget(selected)}
@@ -874,6 +888,7 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
               onRemove={() => setRemoveTarget(selected)}
               onStop={selected.status === "running" ? stopSelectedRun : undefined}
               stopNotice={stopNotice}
+              copyError={copyError}
             />
           )}
         </aside>
@@ -1067,6 +1082,7 @@ function TaskSummary({
   onRemove,
   onStop,
   stopNotice,
+  copyError,
 }: {
   task: TaskRecord;
   sources: { id: string; title: string; detail?: string }[];
@@ -1081,6 +1097,8 @@ function TaskSummary({
   /** 运行中任务的「停止」；执行者不在当前页面时由调用方给提示。 */
   onStop?: () => void;
   stopNotice?: string | null;
+  /** 复制失败的原因（失败不能静默）。 */
+  copyError?: string | null;
 }) {
   const running = task.status === "running";
   const now = useNow(running);
@@ -1265,6 +1283,11 @@ function TaskSummary({
         </section>
       )}
 
+      {copyError && (
+        <p role="alert" className="rounded-lg border border-[#fecdca] bg-[#fef3f2] px-2.5 py-2 text-[11px] leading-5 text-[#b42318]">
+          {copyError}
+        </p>
+      )}
       {stopNotice && (
         <p role="status" className="rounded-lg border border-[#fedf89] bg-[#fffaeb] px-2.5 py-2 text-[11px] leading-5 text-[#b45309]">
           {stopNotice}

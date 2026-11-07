@@ -73,6 +73,60 @@ beforeEach(() => {
   useLlmStore.setState({ profiles: [profile], bindings: { a1: "p1" } });
 });
 
+describe("智能体名册：搜索 / 分组 / 编辑常显（d.87）", () => {
+  const roster = [
+    { id: "system-assistant", owner_id: null, name: "和小鸣", avatar: null, description: "和鸣内置智能体" },
+    ...Array.from({ length: 5 }, (_, i) => ({
+      id: `own-${i}`,
+      owner_id: "u1",
+      name: `自建助手${i + 1}`,
+      avatar: null,
+      description: i === 0 ? "专门写周报" : "",
+    })),
+  ];
+
+  it("名册 ≥5 个才出现搜索框；按名称/简介过滤，空结果可一键清空", () => {
+    useChatStore.setState({ agentsRoster: roster as never });
+    render(<AssistantPage />);
+    const search = screen.getByLabelText("搜索智能体");
+    expect(search).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "周报" } });
+    // 只按简介命中的那条留下
+    expect(screen.getByRole("button", { name: "与智能体 自建助手1 对话" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "与智能体 自建助手2 对话" })).toBeNull();
+
+    fireEvent.change(search, { target: { value: "不存在的名字" } });
+    expect(screen.getByText("没有匹配的智能体")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
+    expect(screen.getByRole("button", { name: "与智能体 自建助手2 对话" })).toBeInTheDocument();
+  });
+
+  it("系统与自建同时存在时打分组标题；只有系统智能体时不加噪", () => {
+    useChatStore.setState({ agentsRoster: roster as never });
+    const { unmount } = render(<AssistantPage />);
+    expect(screen.getByText("系统智能体")).toBeInTheDocument();
+    // 左栏表头已经叫「我的智能体」，分组标题用「自建智能体」避免重名
+    expect(screen.getByText("自建智能体")).toBeInTheDocument();
+    unmount();
+
+    useChatStore.setState({ agentsRoster: [roster[0]] as never });
+    render(<AssistantPage />);
+    expect(screen.queryByText("系统智能体")).toBeNull();
+    expect(screen.queryByText("自建智能体")).toBeNull();
+  });
+
+  it("编辑按钮常显（不是 hover 才出现），触控板/键盘也能看到入口", () => {
+    useChatStore.setState({ agentsRoster: roster as never });
+    render(<AssistantPage />);
+    const edit = screen.getByRole("button", { name: "编辑智能体：和小鸣" });
+    // 低对比常显：不再是 opacity-0 + group-hover 才可见
+    expect(edit.className).toContain("opacity-60");
+    expect(edit.className).not.toContain("opacity-0");
+    expect(edit).toHaveAttribute("title", "编辑智能体");
+  });
+});
+
 describe("智能体页：对话 / 任务 两个 Tab", () => {
   it("默认落在对话；切到任务渲染原通用智能体主体，且页面只有一个 h1", async () => {
     seedTask();

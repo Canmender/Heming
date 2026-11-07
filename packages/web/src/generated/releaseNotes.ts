@@ -12,6 +12,18 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.87.2.42.0",
+    "date": "2026-11-07",
+    "title": "名册更好找，提示不啰嗦",
+    "bullets": [
+      "智能体多了以后，左栏可以直接搜索；系统与自建分开成组。",
+      "「编辑」入口一直看得见，不用先猜哪里能点。",
+      "任务详情里「还没绑定模型」不再同一屏说两遍。",
+      "复制报告失败时会说明原因和替代做法，不再点了没反应。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.86.2.42.0",
     "date": "2026-11-07",
     "title": "任务区更稳、运行中可以停",

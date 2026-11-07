@@ -144,18 +144,27 @@ describe("通用智能体页面", () => {
     expect(useUiStore.getState().settingsTab).toBe("model");
   });
 
-  it("选中运行记录：智能体未绑定时运行卡顶部也给同源提示（重跑/分叉不会白跑）", async () => {
+  it("未绑定提示不重复：中栏渲染 ChatPage 时右栏不再重复同一句", async () => {
     const id = seedTask({ prompt: "查知识库" });
     useLlmStore.setState({ profiles: [], bindings: {} });
     useTaskStore.getState().settle(id, { status: "done", result: "结论" });
     render(<TaskAreaPage />);
 
     fireEvent.click(screen.getByRole("button", { name: "运行 查知识库" }));
-    // 右列运行卡里出现「当前智能体还没有绑定模型连接（和小鸣）」
-    expect(screen.getByText(/当前智能体还没有绑定模型连接/)).toBeInTheDocument();
-    // 列表页与启动面板之外的第三处：同一个组件的「去设置」
-    expect(screen.getAllByRole("button", { name: "去设置" }).length).toBeGreaterThan(0);
-    // 第三处的「去设置」同样直达「模型」页签
+    // 中栏嵌入式 ChatPage（探针）已挂载；右栏不再重复同一句（审计 P2-5）
+    expect(screen.getByTestId("chat-embed")).toBeInTheDocument();
+    expect(screen.queryByText(/当前智能体还没有绑定模型连接/)).toBeNull();
+  });
+
+  it("中栏没有 ChatPage 时，右栏给未绑定提示且「去设置」直达模型页签", async () => {
+    const id = seedTask({ prompt: "查知识库" });
+    useLlmStore.setState({ profiles: [], bindings: {} });
+    useTaskStore.getState().settle(id, { status: "done", result: "结论" });
+    // 选中记录从会话快照恢复，但不聚焦会话 → 中栏是「正在打开运行…」，右栏承担提示
+    sessionStorage.setItem("heming.task.selected.v1", JSON.stringify(id));
+    render(<TaskAreaPage />);
+
+    expect(await screen.findByText(/当前智能体还没有绑定模型连接/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "去设置" })[0]);
     expect(useUiStore.getState().page).toBe("settings");
     expect(useUiStore.getState().settingsTab).toBe("model");
@@ -215,6 +224,26 @@ describe("通用智能体页面", () => {
     expect(asJson.sources).toEqual([{ id: "wiki/mcp", title: "MCP 说明" }]);
     expect(screen.getByRole("button", { name: "复制运行 JSON" })).toHaveTextContent("已复制");
     expect(screen.getByRole("button", { name: "复制 Markdown 报告" })).toBeInTheDocument();
+  });
+
+  it("复制失败不静默：给出可执行的替代做法", async () => {
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+    // execCommand 不可用 → copyText 的兜底也失败
+    Object.defineProperty(document, "execCommand", {
+      value: () => {
+        throw new Error("blocked");
+      },
+      configurable: true,
+    });
+    const id = seedTask({ prompt: "查知识库" });
+    useTaskStore.getState().settle(id, { status: "done", result: "结论" });
+    render(<TaskAreaPage />);
+    fireEvent.click(screen.getByRole("button", { name: "运行 查知识库" }));
+    fireEvent.click(screen.getByRole("button", { name: "复制 Markdown 报告" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/复制失败/);
+    expect(alert).toHaveTextContent(/手动选择文本复制/);
   });
 
   it("重跑：确认文案讲清副作用，确认后新建任务且原任务一字不变", () => {
