@@ -11,6 +11,8 @@
 export interface MagpieHostStatus {
   available: boolean;
   running: boolean;
+  /** true = 用的是用户自己已经在跑的 magpie（和鸣没有另起进程，也不会去停它）。 */
+  external?: boolean;
   port: number;
   version?: string;
   binaryPath?: string;

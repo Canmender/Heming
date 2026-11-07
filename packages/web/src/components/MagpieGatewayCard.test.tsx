@@ -150,3 +150,36 @@ describe("MagpieGatewayCard · 桌面端内置 magpie（d.91）", () => {
     expect(screen.getByLabelText("magpie 网关地址")).toBeInTheDocument();
   });
 });
+
+describe("MagpieGatewayCard · 本机已有 magpie 在跑（采用而非另起）", () => {
+  it("显示「已接入本机 magpie」，只有「断开」，不会假装是自己启动的", async () => {
+    const hostStatus = {
+      available: true,
+      running: true,
+      external: true,
+      port: 3425,
+      version: "0.1.3246",
+      proxyPort: 40124,
+    };
+    (window as unknown as { __heming_magpie?: unknown }).__heming_magpie = {
+      status: vi.fn(async () => hostStatus),
+      start: vi.fn(async () => ({ baseUrl: "http://127.0.0.1:40124/v1", status: hostStatus })),
+      stop: vi.fn(async () => ({ ...hostStatus, running: false, external: false })),
+      gateway: vi.fn(async () => ({ baseUrl: "http://127.0.0.1:40124/v1", status: hostStatus })),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        if (String(input).endsWith("/api/hello")) {
+          return new Response(JSON.stringify({ name: "magpie", version: "0.1.3246" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ data: [{ id: "deepseek/deepseek-chat" }] }), { status: 200 });
+      }),
+    );
+    render(<MagpieGatewayCard />);
+    await waitFor(() => expect(screen.getByText(/已接入本机 magpie/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "断开本机 magpie" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "停止内置 magpie" })).toBeNull();
+    expect(screen.getByText(/不会另起一个，也不会关掉它/)).toBeInTheDocument();
+  });
+});

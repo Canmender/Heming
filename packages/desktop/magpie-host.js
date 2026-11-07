@@ -91,6 +91,11 @@ function createMagpieHost(opts) {
   let starting = null;
   /** 主动停止中：此时的退出不是故障，不该记 lastError。 */
   let stopping = false;
+  /**
+   * 外部实例（用户自己开的 magpie，例如菜单栏应用）：此时不 spawn、不杀它，
+   * 只把地址与版本借过来用。端口冲突是真实场景——用户可能本来就在跑 magpie。
+   */
+  let external = false;
   const stderrTail = [];
 
   const running = () => Boolean(child) && child.exitCode === null && child.signalCode === null;
@@ -131,6 +136,16 @@ function createMagpieHost(opts) {
     starting = (async () => {
       lastError = null;
       stderrTail.length = 0;
+      // 先看端口上是不是已经有一个 magpie（用户自己开的菜单栏应用/服务）。
+      // 有就采用它：再 spawn 一个只会撞端口，还会让用户以为自己开的那份被抢了。
+      const existing = await probeHealth();
+      if (existing) {
+        external = true;
+        version = existing.version;
+        startedAt = now();
+        log(`[magpie] 采用已在运行的本机 magpie${version ? `（${version}）` : ""}（端口 ${port}）`);
+        return { port, version, external: true };
+      }
       log(`[magpie] 启动：${binaryPath} ${args.join(" ")}（端口 ${port}）`);
       const spawned = spawn(binaryPath, args, {
         windowsHide: true,
@@ -174,6 +189,13 @@ function createMagpieHost(opts) {
   }
 
   async function stop() {
+    if (external) {
+      // 外部实例不是我们拉起的：只断开「使用关系」，不杀用户的进程。
+      external = false;
+      version = undefined;
+      startedAt = 0;
+      return;
+    }
     const target = child;
     if (!target) return;
     stopping = true;
@@ -197,11 +219,12 @@ function createMagpieHost(opts) {
   function status() {
     return {
       available: Boolean(binaryPath) && exists(binaryPath),
-      running: running(),
+      running: running() || external,
+      external,
       port,
       version,
       binaryPath,
-      startedAt: running() ? startedAt : 0,
+      startedAt: running() || external ? startedAt : 0,
       lastError,
       stderrTail: stderrTail.slice(),
     };

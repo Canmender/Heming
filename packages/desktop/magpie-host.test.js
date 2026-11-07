@@ -91,15 +91,48 @@ test("没有二进制：启动给出可执行提示，不自称运行中", async
   await assert.rejects(() => host.start(), /没有找到内置 magpie/);
 });
 
+test("端口上已有 magpie（用户自己开的）→ 直接采用：不 spawn、stop 不杀它", async () => {
+  let spawns = 0;
+  const child = fakeChild();
+  const { host } = hostWith({
+    child,
+    spawn: () => {
+      spawns += 1;
+      return child;
+    },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ name: "magpie", version: "0.1.3246" }) }),
+  });
+
+  const started = await host.start();
+  expectAdopted(started);
+  assert.equal(spawns, 0);
+  assert.equal(host.status().running, true);
+  assert.equal(host.status().external, true);
+
+  await host.stop();
+  assert.equal(host.status().running, false);
+  assert.equal(host.status().external, false);
+  assert.equal(spawns, 0); // 自始至终没拉起也没杀掉外部进程
+});
+
+function expectAdopted(started) {
+  assert.equal(started.version, "0.1.3246");
+  assert.equal(started.external, true);
+}
+
 test("启动成功：spawn serve、等到 /api/hello 就绪并记录版本；stop 回收整树", async () => {
   const spawned = [];
+  let probes = 0;
   const { host, child } = hostWith({
     spawn: (...args) => {
       spawned.push(args);
       return child;
     },
+    // 第一次探活（采用检查）失败 → 走 spawn；之后探活成功 → 就绪
     fetchImpl: async (url) => {
       assert.match(String(url), /\/api\/hello$/);
+      probes += 1;
+      if (probes === 1) return { ok: false, json: async () => ({}) };
       return { ok: true, json: async () => ({ name: "magpie", version: "0.1.3246" }) };
     },
   });
@@ -120,15 +153,20 @@ test("启动成功：spawn serve、等到 /api/hello 就绪并记录版本；sto
 
 test("就绪超时：回收进程并带出 stderr 尾巴", async () => {
   const child = fakeChild();
+  let probes = 0;
   const { host } = hostWith({
     child,
-    fetchImpl: async () => ({ ok: false, json: async () => ({}) }),
+    // 第一次探活是「采用检查」（失败 → spawn）；第二次起监听器已挂好，喂 stderr 尾巴
+    fetchImpl: async () => {
+      probes += 1;
+      if (probes === 2) {
+        child.stderr.emit("data", "listen tcp 127.0.0.1:3425: bind: address already in use\n");
+      }
+      return { ok: false, json: async () => ({}) };
+    },
     readyTimeoutMs: 2_000,
   });
-  // 启动过程中进程还没退出，sleep 只是推进假时钟
-  const started = host.start();
-  child.stderr.emit("data", "listen tcp 127.0.0.1:3425: bind: address already in use\n");
-  await assert.rejects(started, /没有在规定时间内就绪/);
+  await assert.rejects(host.start(), /没有在规定时间内就绪/);
   assert.equal(child.exitCode, 0); // 被回收
   assert.match(host.status().stderrTail.join("\n"), /address already in use/);
 });
@@ -143,6 +181,7 @@ test("/api/hello 不是 magpie：不认作就绪（防连到别的本机服务�
 
 test("start 并发只拉起一个进程；running 时重复 start 不再 spawn", async () => {
   let spawns = 0;
+  let probes = 0;
   const child = fakeChild();
   const { host } = hostWith({
     child,
@@ -150,7 +189,12 @@ test("start 并发只拉起一个进程；running 时重复 start 不再 spawn",
       spawns += 1;
       return child;
     },
-    fetchImpl: okHealth(),
+    // 采用检查失败 → spawn；后续探活成功
+    fetchImpl: async () => {
+      probes += 1;
+      if (probes === 1) return { ok: false, json: async () => ({}) };
+      return { ok: true, json: async () => ({ name: "magpie", version: "0.1.3246" }) };
+    },
   });
   await Promise.all([host.start(), host.start()]);
   assert.equal(spawns, 1);

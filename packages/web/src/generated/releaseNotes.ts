@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.95.2.42.0",
+    "date": "2026-11-07",
+    "title": "你自己开着的 magpie，和鸣直接接入",
+    "bullets": [
+      "如果本机已经有 magpie 在跑，和鸣会直接连它，不会另起一个、也不会抢端口；设置里显示「已接入本机 magpie」。",
+      "点「断开」只是和鸣不再用它，不会关掉你开着的 magpie。",
+      "和鸣自己启动的那份仍然是「启动 / 重启 / 停止」，两种状态在设置里分得清。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.94.2.42.0",
     "date": "2026-11-07",
     "title": "模型相关只剩「magpie 目录 + 模型」",

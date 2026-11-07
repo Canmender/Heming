@@ -145,7 +145,9 @@ export function MagpieGatewayCard() {
               {!host
                 ? "检测中…"
                 : host.running
-                  ? `运行中${host.version ? ` · magpie ${host.version}` : ""}${host.proxyPort ? ` · 反代端口 ${host.proxyPort}` : ""}`
+                  ? `${host.external ? "已接入本机 magpie" : "运行中"}${
+                      host.version ? ` · magpie ${host.version}` : ""
+                    }${host.proxyPort ? ` · 反代端口 ${host.proxyPort}` : ""}`
                   : host.available
                     ? "未运行"
                     : "未安装"}
@@ -153,28 +155,30 @@ export function MagpieGatewayCard() {
             <span className="ml-auto flex items-center gap-1">
               <button
                 type="button"
-                aria-label="重启内置 magpie"
+                aria-label={host?.external ? "重新连接本机 magpie" : "重启内置 magpie"}
                 disabled={hostBusy}
                 onClick={() => {
                   void bridge.stop().then(() => controlHost("start"));
                 }}
                 className="ui-btn ui-btn-sm ui-btn-ghost"
               >
-                {hostBusy ? "处理中…" : "启动 / 重启"}
+                {hostBusy ? "处理中…" : host?.external ? "重新连接" : "启动 / 重启"}
               </button>
               <button
                 type="button"
-                aria-label="停止内置 magpie"
+                aria-label={host?.external ? "断开本机 magpie" : "停止内置 magpie"}
                 disabled={hostBusy || !host?.running}
                 onClick={() => void controlHost("stop")}
                 className="ui-btn ui-btn-sm ui-btn-ghost"
               >
-                停止
+                {host?.external ? "断开" : "停止"}
               </button>
             </span>
           </div>
           <p className="mt-1 ui-caption">
-            和鸣会自动启动它并接上本机反代；账号、订阅与 Key 都在 magpie 里管理。
+            {host?.external
+              ? "检测到本机已有 magpie 在运行：和鸣直接接入它，不会另起一个，也不会关掉它；账号、订阅与 Key 都在 magpie 里管理。"
+              : "和鸣会自动启动它并接上本机反代；账号、订阅与 Key 都在 magpie 里管理。"}
             {host && !host.available ? "缺少内置二进制时，开发态运行 node scripts/fetch-magpie.mjs。" : ""}
           </p>
           {host?.lastError && <p className="mt-1 ui-body-sm text-[#b42318]">{host.lastError}</p>}

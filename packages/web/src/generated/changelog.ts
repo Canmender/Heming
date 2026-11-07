@@ -12,6 +12,27 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.95.2.42.0",
+    "date": "2026-11-07",
+    "title": "采用本机已有 magpie：不另起、不抢端口、不误杀",
+    "bullets": [
+      "`magpie-host.start()` 先 `GET /api/hello`：应答 `name=magpie` → 采用现有实例（`external=true`），不 spawn；",
+      "否则才 spawn 并轮询就绪（原有超时/回收/并发逻辑不变）；",
+      "`status()` 增加 `external`；`stop()` 在 external 时只断开使用关系，**不杀用户进程**；",
+      "反代、版本展示、目录刷新不变。",
+      "分两种状态：「运行中 · 版本 · 反代端口」+ 启动/重启/停止；「已接入本机 magpie · 版本 · 反代端口」+ 重新连接/断开，并说明不会另起、不会关掉它。",
+      "`magpie-host` 7 例（新增采用已有实例；spawn/超时/并发按先探活适配）；",
+      "`MagpieGatewayCard` 14 例（新增 external 文案与断开按钮）；",
+      "`tsc --noEmit` 零错；全量门禁见本轮提交记录。"
+    ],
+    "paragraphs": [
+      "d.92 的内置托管默认 spawn 一个 `magpie serve`；但用户很可能本来就在跑 magpie（菜单栏应用/服务），3425 被占时再 spawn 只会启动失败。本轮把「已有就接入」作为默认路径。",
+      "一、托管逻辑",
+      "二、设置页",
+      "门禁"
+    ]
+  },
+  {
     "version": "d.94.2.42.0",
     "date": "2026-11-07",
     "title": "清掉 provider 死代码：Anthropic 协议、价格档、插件残留字段",
