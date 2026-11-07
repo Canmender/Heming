@@ -17,7 +17,14 @@ import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
 import { setThemeMode, watchThemeMode } from "../lib/theme.js";
 import { DEFAULT_NAV_MODE, type NavMode } from "../lib/navPrefs.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
-import { CHANGELOG, logOpenState, parseInline, stripInline, toggleLog } from "../lib/changelog.js";
+import {
+  CHANGELOG,
+  logOpenState,
+  parseInline,
+  stripInline,
+  toggleLog,
+  userNotesFor,
+} from "../lib/changelog.js";
 import { UpdateCard } from "./UpdateCard.js";
 import {
   matchSettingsCards,
@@ -850,13 +857,13 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
         <span className="ui-caption">当前 {appVersionLabel()}</span>
       </div>
       <div className="mt-1 ui-caption">
-        历史版本的改动记录；点击条目展开/收起。以下是开发记录原文（含实现细节与验证口径），
-        供排查问题时对照。
+        点击条目看这一版对用户的影响；工程记录（根因、验证口径）见仓库 CHANGELOG.md，不在这里展开。
       </div>
       <ul className="mt-2 flex flex-col gap-1">
         {CHANGELOG.slice(0, showAllLogs ? CHANGELOG.length : RECENT_LOG_LIMIT).map((entry) => {
           const isCurrent = entry.version === appVersionLabel();
           const open = logOpenState(logState, entry.version, isCurrent);
+          const notes = userNotesFor(entry.version);
           return (
             <li key={entry.version} className="rounded-lg border border-line-soft">
               <button
@@ -864,7 +871,7 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
                 aria-expanded={open}
                 aria-label={`更新日志 ${entry.version}`}
                 onClick={() => setLogState((prev) => toggleLog(prev, entry.version, isCurrent))}
-                className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-[#fafafa]"
+                className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-[var(--subtle)]"
               >
                 <span className="text-[12px] font-bold">{entry.version}</span>
                 {isCurrent && (
@@ -873,34 +880,33 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
                   </span>
                 )}
                 <span className="min-w-0 flex-1 truncate ui-caption">
-                  {stripInline(entry.title) || entry.date}
+                  {stripInline(notes?.title ?? entry.title) || entry.date}
                 </span>
                 <span className="shrink-0 ui-caption">{open ? "收起" : "展开"}</span>
               </button>
               {open && (
                 <div className="border-t border-line-soft px-3 py-2">
                   <div className="ui-caption">{entry.date}</div>
-                  {entry.title && (
-                    <div className="mt-0.5 text-[12px] font-medium">
-                      <InlineText text={entry.title} />
-                    </div>
-                  )}
-                  {entry.paragraphs.map((line, i) => (
-                    <p key={i} className="mt-1 text-[12px] leading-relaxed text-muted">
-                      <InlineText text={line} />
+                  {notes ? (
+                    <>
+                      <div className="mt-0.5 text-[12px] font-medium">
+                        <InlineText text={notes.title} />
+                      </div>
+                      <ul className="mt-1.5 flex flex-col gap-1">
+                        {(notes.bullets.length > 0 ? notes.bullets : notes.paragraphs).map((line, i) => (
+                          <li key={i} className="flex gap-1.5 text-[12px] leading-relaxed">
+                            <span className="text-muted">·</span>
+                            <span className="min-w-0 flex-1">
+                              <InlineText text={line} />
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <p className="mt-1 text-[12px] leading-relaxed text-muted">
+                      这一版还没有用户版说明；工程记录见仓库 CHANGELOG.md。
                     </p>
-                  ))}
-                  {entry.bullets.length > 0 && (
-                    <ul className="mt-1.5 flex flex-col gap-1">
-                      {entry.bullets.map((line, i) => (
-                        <li key={i} className="flex gap-1.5 text-[12px] leading-relaxed">
-                          <span className="text-muted">·</span>
-                          <span className="min-w-0 flex-1">
-                            <InlineText text={line} />
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
                   )}
                 </div>
               )}

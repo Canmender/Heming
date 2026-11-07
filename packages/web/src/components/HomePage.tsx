@@ -28,7 +28,7 @@ import { StaffHomeCard } from "./StaffHomeCard.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
 import { OnboardingCard } from "./ux/OnboardingCard.js";
 import { HomeTeamUsage } from "./HomeTeamUsage.js";
-import { CHANGELOG } from "../generated/changelog.js";
+import { latestUserUpdates } from "../lib/changelog.js";
 import { TeamIcon } from "./icons.js";
 import { fileRootsStore } from "../lib/fileEdit/roots.js";
 import { isModuleEffective, useModuleStore } from "../lib/modules/store.js";
@@ -36,8 +36,11 @@ import { isModuleEffective, useModuleStore } from "../lib/modules/store.js";
 /** 构建时注入的版本号（vite define __APP_VERSION__，file:// 桌面端无法 fetch package.json）。 */
 declare const __APP_VERSION__: string;
 
-/** 底部通栏「最近更新」取真实更新日志（CHANGELOG.md 生成物），不再手写三条静态资讯。 */
-const RECENT_UPDATES = CHANGELOG.slice(0, 3);
+/**
+ * 底部通栏「最近更新」：取用户版发布说明（docs/RELEASE-NOTES.md 生成物）的最新 3 条。
+ * 没写用户版说明的版本回落 CHANGELOG 标题——工程细节不进首页。
+ */
+const RECENT_UPDATES = latestUserUpdates(3);
 
 function StatCard({ title, value, sub }: { title: string; value: string; sub?: string }) {
   return (

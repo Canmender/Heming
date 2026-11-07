@@ -139,3 +139,25 @@ export interface ChangelogEntry {
 export const CHANGELOG: ChangelogEntry[] = ${json};
 `;
 }
+
+/**
+ * 生成「用户版发布说明」的 TS 模块文本（写进 src/generated/releaseNotes.ts）。
+ * 版式与 CHANGELOG 相同，因此复用 parseChangelog；内容只面向用户。
+ */
+export function renderReleaseNotesModule(entries) {
+  const json = JSON.stringify(entries, null, 2);
+  return `// 本文件由 \`node scripts/build-changelog.mjs\` 从 docs/RELEASE-NOTES.md 生成，请勿手改。
+// 改了 RELEASE-NOTES.md 就重跑该脚本（发版流程里已有这一步）。
+
+export interface ReleaseNoteEntry {
+  version: string;
+  date: string;
+  title: string;
+  bullets: string[];
+  paragraphs: string[];
+}
+
+/** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
+export const RELEASE_NOTES: ReleaseNoteEntry[] = ${json};
+`;
+}

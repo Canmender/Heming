@@ -5,9 +5,34 @@
  * 因此**运行时不读文件、不发请求、也不引入 markdown 依赖**。
  */
 import { CHANGELOG, type ChangelogEntry } from "../generated/changelog.js";
+import { RELEASE_NOTES, type ReleaseNoteEntry } from "../generated/releaseNotes.js";
 
-export type { ChangelogEntry };
-export { CHANGELOG };
+export type { ChangelogEntry, ReleaseNoteEntry };
+export { CHANGELOG, RELEASE_NOTES };
+
+/** 用户版发布说明按版本索引（docs/RELEASE-NOTES.md 生成；未收录的版本为 undefined）。 */
+const NOTES_BY_VERSION = new Map<string, ReleaseNoteEntry>(
+  RELEASE_NOTES.map((entry) => [entry.version, entry]),
+);
+
+/** 某个版本的用户版说明；没有收录时返回 null（界面只展示标题，不端出工程细节）。 */
+export function userNotesFor(version: string): ReleaseNoteEntry | null {
+  return NOTES_BY_VERSION.get(version) ?? null;
+}
+
+/**
+ * 首页「最近更新」与关于页共用的用户视角摘要：取最新 N 个版本。
+ *
+ * 有用户版说明用它的标题，没有则回落 CHANGELOG 标题——**绝不把 bullets/paragraphs
+ * 里的工程细节拿到用户侧**（根因、文件名、测试统计都属于 CHANGELOG）。
+ */
+export function latestUserUpdates(count: number): { version: string; date: string; title: string }[] {
+  return CHANGELOG.slice(0, Math.max(0, count)).map((entry) => ({
+    version: entry.version,
+    date: entry.date,
+    title: userNotesFor(entry.version)?.title ?? entry.title,
+  }));
+}
 
 /** 行内片段：粗体 / 行内代码 / 普通文本。 */
 export type InlineSegment =

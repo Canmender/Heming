@@ -6,6 +6,7 @@ import { useThemeStore } from "../store/theme.js";
 import { DEFAULT_NAV_ORDER, useUiStore } from "../store/ui.js";
 import { setToken } from "../lib/api.js";
 import { CHANGELOG } from "../generated/changelog.js";
+import { RELEASE_NOTES } from "../generated/releaseNotes.js";
 import { getThemeMode, setThemeMode } from "../lib/theme.js";
 import { resetSecureStorageState, secureGetItem, secureSetItem } from "../lib/secureStorage.js";
 
@@ -451,21 +452,42 @@ describe("设置区 · 更新日志卡", () => {
     expect(screen.getByRole("button", { name: "更新日志 d.3.0.3.0" })).toBeInTheDocument();
   });
 
-  it("点条目展开/收起，并渲染粗体与行内代码", () => {
+  it("点条目展开/收起：展开显示用户版发布说明，不展示工程细节", () => {
+    // 最新一条必须有用户版说明（docs/RELEASE-NOTES.md 与 CHANGELOG 同版本维护）
+    const latestNotes = RELEASE_NOTES.find((n) => n.version === CHANGELOG[0].version);
+    expect(latestNotes).toBeTruthy();
     window.__heming_version = CHANGELOG[0].version;
     render(<SettingsPage />);
     goTab("关于");
     const btn = screen.getByRole("button", { name: `更新日志 ${CHANGELOG[0].version}` });
     // 当前版本默认展开
     expect(btn).toHaveAttribute("aria-expanded", "true");
+    // 用户版说明的要点可见；工程细节（如测试统计/文件名）不出现
+    const card = screen.getByRole("region", { name: "更新日志" });
+    expect(card).toHaveTextContent(latestNotes!.bullets[0]);
+    expect(card).not.toHaveTextContent(/web \d+ 文件/);
 
     fireEvent.click(btn);
     expect(btn).toHaveAttribute("aria-expanded", "false");
+  });
 
+  it("没有用户版说明的版本：展开只给「工程记录见 CHANGELOG.md」，不端出根因", () => {
+    // 找一个未收录进 RELEASE-NOTES 的版本（历史版本）
+    const missing = CHANGELOG.find((e) => !RELEASE_NOTES.some((n) => n.version === e.version));
+    expect(missing).toBeTruthy();
+    // 当前版本用最新一条（默认展开的是它），missing 版本保持收起，点开看展开内容
+    window.__heming_version = CHANGELOG[0].version;
+    render(<SettingsPage />);
+    goTab("关于");
+    // 默认只列最近 20 条，先把完整的日志展开
+    fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(`^显示更早的 ${CHANGELOG.length - 20} 个版本$`) }),
+    );
+    const btn = screen.getByRole("button", { name: `更新日志 ${missing!.version}` });
+    // 历史版本默认收起，点开看展开内容
     fireEvent.click(btn);
-    expect(btn).toHaveAttribute("aria-expanded", "true");
-    // 行内代码被渲染成 <code>
-    expect(document.querySelector("code")).toBeTruthy();
+    const card = screen.getByRole("region", { name: "更新日志" });
+    expect(card).toHaveTextContent("这一版还没有用户版说明");
   });
 
   it("给当前版本打「当前」徽标", () => {

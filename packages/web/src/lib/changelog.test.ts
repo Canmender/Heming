@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { CHANGELOG, entriesUpTo, parseInline, stripInline } from "./changelog.js";
+import {
+  CHANGELOG,
+  entriesUpTo,
+  latestUserUpdates,
+  parseInline,
+  RELEASE_NOTES,
+  stripInline,
+  userNotesFor,
+} from "./changelog.js";
 // 解析器是 node 侧脚本（.mjs），直接从仓库路径引入同一份实现
 // @ts-expect-error 运行时无类型信息
 import { parseChangelog } from "../../../../scripts/changelog-parser.mjs";
@@ -161,5 +169,28 @@ describe("parseChangelog · 硬折行与条目内小标题", () => {
     const md = ["## d.1.0.0.0（2026-11-04）", "", "第一段。", "", "第二段。"].join("\n");
     const entries = parseChangelog(md);
     expect(entries[0].paragraphs).toEqual(["第一段。", "第二段。"]);
+  });
+});
+
+describe("用户版发布说明", () => {
+  it("最新一条必须有用户版说明（与 CHANGELOG 同版本维护）", () => {
+    expect(userNotesFor(CHANGELOG[0].version)).not.toBeNull();
+  });
+
+  it("没有收录的版本返回 null，界面只显示标题而不是工程细节", () => {
+    expect(userNotesFor("d.0.0.0.0")).toBeNull();
+  });
+
+  it("latestUserUpdates：有说明用说明标题，没有回落 CHANGELOG 标题；只给标题不给细节", () => {
+    const updates = latestUserUpdates(3);
+    expect(updates).toHaveLength(3);
+    for (const u of updates) {
+      expect(Object.keys(u).sort()).toEqual(["date", "title", "version"]);
+      const notes = userNotesFor(u.version);
+      expect(u.title).toBe(notes ? notes.title : CHANGELOG.find((e) => e.version === u.version)!.title);
+    }
+    // 用户版说明的标题与工程 CHANGELOG 的标题可以不同（前者面向用户）
+    const seeded = RELEASE_NOTES[0];
+    expect(updates[0].title).toBe(seeded.title);
   });
 });

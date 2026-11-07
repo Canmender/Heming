@@ -13,7 +13,7 @@ import { FILE_ROOTS_KEY } from "../lib/fileEdit/roots.js";
 import { useModuleStore } from "../lib/modules/store.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { fetchTeam, fetchTeamActivities } from "../lib/api.js";
-import { CHANGELOG } from "../generated/changelog.js";
+import { latestUserUpdates } from "../lib/changelog.js";
 
 // 团队名册与动向走 lib/api（首页真实数据优先）；health 探测仍走裸 fetch，单独 spy。
 vi.mock("../lib/api.js", async (importOriginal) => {
@@ -283,11 +283,12 @@ describe("HomePage", () => {
     expect(screen.getByText("文件可写目录")).toBeInTheDocument();
     expect(screen.getByText("未绑定")).toBeInTheDocument();
 
-    // 底栏不再手写三条静态「资讯」：取 CHANGELOG.md 生成的真实更新日志前三条。
+    // 底栏不再手写三条静态「资讯」：取用户版发布说明的最新三条（工程细节不进首页）。
+    const updates = latestUserUpdates(3);
     expect(screen.getByText("最近更新")).toBeInTheDocument();
-    expect(screen.getByText(CHANGELOG[0].title)).toBeInTheDocument();
-    expect(screen.getByText(CHANGELOG[1].title)).toBeInTheDocument();
-    expect(screen.getByText(CHANGELOG[2].title)).toBeInTheDocument();
+    expect(screen.getByText(updates[0].title)).toBeInTheDocument();
+    expect(screen.getByText(updates[1].title)).toBeInTheDocument();
+    expect(screen.getByText(updates[2].title)).toBeInTheDocument();
 
     // 「查看全部」进设置区「关于」（更新日志全文在那里）
     fireEvent.click(screen.getByRole("button", { name: "查看全部" }));

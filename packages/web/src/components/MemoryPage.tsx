@@ -1106,8 +1106,22 @@ export function MemoryPage({
         </div>
       )}
       {!agentId && (
-        <div className={`mt-2 ${hintCls}`}>
-          添加记忆与立即整理需要先选择一个具体智能体（记忆按智能体隔离）
+        <div className={`mt-2 ${hintCls} flex flex-wrap items-center gap-2`}>
+          <span>添加记忆与立即整理需要先选择一个具体智能体（记忆按智能体隔离）：</span>
+          {/* 选择器不只在页头：按钮就在这儿，让用户就地选，而不是跑到右上角找（审计 P1-5） */}
+          <select
+            aria-label="选择要添加记忆的智能体"
+            value={agentId}
+            onChange={(e) => setAgentId(e.target.value)}
+            className="ui-input w-auto"
+          >
+            <option value="">选择智能体…</option>
+            {[...agents, ...manualAgents].map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.name}
+              </option>
+            ))}
+          </select>
         </div>
       )}
     </>
@@ -2187,12 +2201,17 @@ export function MemoryPage({
     </section>
   );
 
-  const tabCounts: Record<TabKey, number> = {
+  /**
+   * Tab 徽标：只给「本页真能算出条目数」的分类。
+   *
+   * wiki 的页数由 WikiPanel 自管（走文件层，不在本页统计）——原来写死 0，
+   * 用户建了页面也永远显示 0，比不显示更容易误导；没有准确数字就不显示（d.81）。
+   */
+  const tabCounts: Partial<Record<TabKey, number>> = {
     // 智能体：短期记忆条数（设置与复盘卡是表单，不计入）
     agents: layers.working.length,
     // 数据库：全局语义记忆 + 情景记忆（这是所有智能体真正会读到的长期记忆）
     database: layers.globalSemantic.length + layers.episodic.length,
-    wiki: 0, // wiki 页数由 WikiPanel 自管（走文件层，不在本页统计）
   };
   const tabOrder: TabKey[] = ["agents", "database", "wiki"];
 
@@ -2247,7 +2266,9 @@ export function MemoryPage({
                   className={pageTabClass(active)}
                 >
                   {TAB_LABELS[key]}
-                  <span className="ml-1.5 ui-micro">{tabCounts[key]}</span>
+                  {typeof tabCounts[key] === "number" ? (
+                    <span className="ml-1.5 ui-micro">{tabCounts[key]}</span>
+                  ) : null}
                 </button>
               );
             })}

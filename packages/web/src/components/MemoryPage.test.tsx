@@ -120,9 +120,15 @@ function renderPage(mem: MemoryStore = memory) {
   return render(<MemoryPage memory={mem} kb={kb} prefs={prefs} />);
 }
 
+/** 等名册进选择器（未选中智能体时页头与提示条各有一个选择器，不能全局按 option 查）。 */
+async function waitForAgentRoster(name = "阿和") {
+  const select = (await screen.findByLabelText("选择智能体")) as HTMLSelectElement;
+  await waitFor(() => expect(within(select).getByRole("option", { name })).toBeInTheDocument());
+}
+
 /** 等名册到位后选中智能体（未选中时写操作被禁用）。 */
 async function pickAgent(id = "a1", name = "阿和") {
-  await screen.findByRole("option", { name });
+  await waitForAgentRoster(name);
   fireEvent.change(screen.getByLabelText("选择智能体"), { target: { value: id } });
 }
 
@@ -151,7 +157,7 @@ describe("MemoryPage 三分区结构", () => {
     expect(screen.getByRole("region", { name: "短期记忆" })).toBeInTheDocument();
     expect(screen.getByText(/约 2 小时未活动或满 40 轮后过期/)).toBeInTheDocument();
 
-    expect(await screen.findByRole("option", { name: "阿和" })).toBeInTheDocument();
+    expect(await screen.findAllByRole("option", { name: "阿和" })).not.toHaveLength(0);
     expect(screen.getByRole("option", { name: "小码" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "全部智能体" })).toBeInTheDocument();
   });
@@ -347,7 +353,7 @@ describe("MemoryPage 数据库记忆", () => {
   it("添加/编辑/置顶语义条目仍工作；未选智能体时写入口禁用", async () => {
     mockApi({ agents: AGENTS });
     renderPage();
-    await screen.findByRole("option", { name: "阿和" });
+    await waitForAgentRoster();
     openTab("数据库");
 
     expect(screen.getByRole("button", { name: "添加记忆" })).toBeDisabled();
@@ -398,7 +404,7 @@ describe("MemoryPage 数据库记忆", () => {
   it("记忆总开关/自动记忆落盘，关闭总开关后写入口禁用", async () => {
     mockApi({ agents: AGENTS });
     renderPage();
-    await screen.findByRole("option", { name: "阿和" });
+    await waitForAgentRoster();
     openTab("数据库");
 
     const auto = screen.getByRole("switch", { name: "自动记忆" });
@@ -421,7 +427,7 @@ describe("MemoryPage 数据库记忆", () => {
     const writeText = mockClipboard();
     memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
     renderPage();
-    await screen.findByRole("option", { name: "阿和" });
+    await waitForAgentRoster();
     openTab("数据库");
 
     fireEvent.click(screen.getByRole("button", { name: "复制 JSON" }));
@@ -1097,5 +1103,37 @@ describe("MemoryPage 导出到文件", () => {
     await waitFor(() => expect(saveExportFileMock).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/已导出到文件/)).toBeInTheDocument();
     expect(screen.getByText(/Heming\\exports/)).toBeInTheDocument();
+  });
+});
+
+
+describe("记忆区入口摩擦（d.81）", () => {
+  it("未选智能体时提示条里就地给选择器，选中后写入口立即可用", async () => {
+    mockApi({ agents: AGENTS });
+    renderPage();
+    await waitForAgentRoster();
+    openTab("数据库");
+
+    expect(screen.getByRole("button", { name: "添加记忆" })).toBeDisabled();
+    // 选择器不只在页头：按钮旁边就能选（审计 P1-5，原来要跑到右上角找）
+    const inline = screen.getByLabelText("选择要添加记忆的智能体");
+    fireEvent.change(inline, { target: { value: "a1" } });
+
+    expect(screen.getByRole("button", { name: "添加记忆" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "立即整理" })).toBeEnabled();
+    expect(screen.queryByText(/需要先选择一个具体智能体/)).not.toBeInTheDocument();
+    // 页头选择器与内联选择器是同一份状态
+    expect((screen.getByLabelText("选择智能体") as HTMLSelectElement).value).toBe("a1");
+  });
+
+  it("个人知识库 Tab 不显示写死的 0 徽标；有准确数字的分类仍显示", async () => {
+    mockApi({ agents: AGENTS });
+    renderPage();
+    await waitForAgentRoster();
+
+    const wiki = screen.getByRole("tab", { name: "个人知识库" });
+    expect(wiki.textContent).toBe("个人知识库");
+    // 数据库的徽标是真实条目数（这里 0 条也照实显示 0，因为口径准确）
+    expect(screen.getByRole("tab", { name: "数据库" }).textContent).toBe("数据库0");
   });
 });

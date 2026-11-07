@@ -10,11 +10,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseChangelog, renderChangelogModule } from "./changelog-parser.mjs";
+import { parseChangelog, renderChangelogModule, renderReleaseNotesModule } from "./changelog-parser.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = join(root, "CHANGELOG.md");
 const target = join(root, "packages", "web", "src", "generated", "changelog.ts");
+const notesSource = join(root, "docs", "RELEASE-NOTES.md");
+const notesTarget = join(root, "packages", "web", "src", "generated", "releaseNotes.ts");
 
 if (!existsSync(source)) {
   console.error(`找不到 CHANGELOG.md（${source}）`);
@@ -35,4 +37,21 @@ if (previous === next) {
 } else {
   writeFileSync(target, next);
   console.log(`[build-changelog] 已写入 ${target.replace(root, ".")}（${entries.length} 条，最新 ${entries[0].version}）`);
+}
+
+// 用户版发布说明（可选文件）：与 CHANGELOG 同一套解析器，内容只面向用户。
+if (existsSync(notesSource)) {
+  const notes = parseChangelog(readFileSync(notesSource, "utf8"));
+  const nextNotes = renderReleaseNotesModule(notes);
+  const prevNotes = existsSync(notesTarget) ? readFileSync(notesTarget, "utf8") : "";
+  if (prevNotes === nextNotes) {
+    console.log(`[build-changelog] 用户版发布说明无变化（${notes.length} 条）`);
+  } else {
+    writeFileSync(notesTarget, nextNotes);
+    console.log(
+      `[build-changelog] 已写入 ${notesTarget.replace(root, ".")}（${notes.length} 条，最新 ${notes[0]?.version ?? "—"}）`,
+    );
+  }
+} else {
+  console.log("[build-changelog] 没有 docs/RELEASE-NOTES.md，跳过用户版发布说明");
 }
