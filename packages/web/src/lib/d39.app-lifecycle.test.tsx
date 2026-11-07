@@ -172,7 +172,9 @@ describe("B3/B4. 登录态与通知点击", () => {
 describe("E4. 100 次页面切换计时与配平", () => {
   it("100 次 chat↔home 切换：每次挂载建连、离开关闭，无残留", async () => {
     await renderAuthed();
-    expect(mockConnect).not.toHaveBeenCalled(); // 首页不再建后台连接
+    // d.91 起首页持有**一条**应用级在场连接（presence 用，不消费业务事件）：
+    // 它不随切页增减；聊天连接仍严格「进助手页建、离开关」。
+    expect(mockConnect).toHaveBeenCalledTimes(1);
     const switches = 100;
     const t0 = performance.now();
     for (let i = 0; i < switches; i += 1) {
@@ -191,8 +193,10 @@ describe("E4. 100 次页面切换计时与配平", () => {
       `[E4] ${switches} switches total=${total.toFixed(1)}ms per=${(total / switches).toFixed(2)}ms ` +
         `handles=${hs.length} live=${live.length} chatSocketCount=${chatSocketCount()}`,
     );
-    expect(hs.length).toBe(switches / 2); // 每进一次助手页建一次（偶数步）
-    expect(live).toHaveLength(0); // 最后停在首页，全部关闭
+    expect(hs.length).toBe(switches / 2 + 1); // 每进一次助手页建一次（偶数步）+ 1 条在场连接
+    // 最后停在首页：聊天连接全部关闭，只剩那条在场连接（它本来就该在）
+    expect(live).toHaveLength(1);
+    expect(live[0]).toBe(handles()[0]);
     expect(chatSocketCount()).toBe(0);
     expect(total).toBeLessThan(120_000);
   }, 180_000);

@@ -12,6 +12,26 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.91.2.42.0",
+    "date": "2026-11-07",
+    "title": "团队第二轮：从「定位到人」到「定位到那条动向」",
+    "bullets": [
+      "ui store 新增一次性投递槽 `teamFocusActivityId` + `focusTeamActivity(activityId, actorId)`；首页条目点击改为投递「成员 + 动向 id」。",
+      "TeamPage 消费：切回「动向」视图 → 等该条出现在可见列表 → 滚到中间 → 高亮 2.4 秒后褪去；读走即清，不会切走再回来还被钉住。若该条被当前筛选过滤，不强行改筛选。",
+      "`store/ui.test.ts` +1（一次性投递与消费只清 id）；`TeamPage.test.tsx` +1（预置 intent → 行存在、高亮、`scrollIntoView` 被调用、intent 已消费）；`HomePage.test.tsx` 补断言。",
+      "真机（1600×1000，0 error）：用 `Page.addScriptToEvaluateOnNewDocument` 拦截 `/api/team*` 造2 成员 + 2 条动向（不动服务端）→ 首页点「发版到生产」→ 团队页选中鲍勃、目标行高亮、"
+    ],
+    "paragraphs": [
+      "接团队审计 P2 剩余项。",
+      "一、首页动向条目：落到那件事，而不是只落到那个人",
+      "二、看板空态压缩",
+      "看板两列原来固定 `min-h-160 + py-6`，空态时是两块巨型空卡；改为有内容才保留最小高度，空态随内容收缩。",
+      "三、隐私口径收敛",
+      "团队页原来在共享条 / 动向空态 / 看板头 / 日程段 4 处重复「只含摘要、不含对话」。现在共享条承担完整口径（含「关闭只停止上报」），各视图只补充**自己特有的边界**（日程：标题 + 到期档位；用量：token/模型/连接名）；动向空态与看板头去重。",
+      "四、测试与证据成员详情「近 7 天动向 1 条 · 用量未共享」。"
+    ]
+  },
+  {
     "version": "d.90.2.42.0",
     "date": "2026-11-07",
     "title": "magpie 内化为原生模型层，删掉「模型提供商」",

@@ -296,6 +296,13 @@ interface UiState {
    */
   teamFocusUserId: string | null;
   /**
+   * 「跳到团队页并定位到某条动向」的一次性投递槽（d.90）。
+   *
+   * 与 `teamFocusUserId` 的区别：那边只到「选中谁」，这边还要在动向流里高亮那一条
+   * （首页点「谁完成了什么」应该落到那件事，而不是只落到那个人）。
+   */
+  teamFocusActivityId: string | null;
+  /**
    * 通知中心跳转自动化页时要选中的自动化任务（null=无）。
    * 与 taskFocusId 同思路：只到「进入自动化页」为止，页面命中该 id 即选中并消费。
    */
@@ -351,6 +358,9 @@ interface UiState {
   /** 命令面板跳到团队页并选中某位成员。 */
   focusTeamMember: (userId: string) => void;
   consumeTeamFocus: () => void;
+  /** 首页动向条目 → 团队页：选中成员并高亮那一条动向。 */
+  focusTeamActivity: (activityId: string, actorId: string) => void;
+  consumeTeamActivityFocus: () => void;
   /** 从通知中心跳到自动化页的某条自动化任务（看它的运行记录）。 */
   focusAutomation: (taskId: string) => void;
   consumeAutomationFocus: () => void;
@@ -497,6 +507,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   taskDraft: null,
   taskFocusId: null,
   teamFocusUserId: null,
+  teamFocusActivityId: null,
   automationFocusId: null,
   infohubIntent: null,
   automationIntent: null,
@@ -637,6 +648,18 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationIntent: null,
     }),
   consumeTeamFocus: () => set({ teamFocusUserId: null }),
+  focusTeamActivity: (activityId, actorId) =>
+    set({
+      page: "team",
+      pageView: null,
+      teamFocusUserId: actorId,
+      teamFocusActivityId: activityId,
+      activeConversationId: null,
+      pendingAttachment: null,
+      taskDraft: null,
+      taskFocusId: null,
+    }),
+  consumeTeamActivityFocus: () => set({ teamFocusActivityId: null }),
   focusAutomation: (taskId) => {
     if (!isModuleOn("automations")) {
       get().openModuleManager();

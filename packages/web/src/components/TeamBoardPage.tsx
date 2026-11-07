@@ -241,7 +241,7 @@ export function TeamBoardView({ className = "" }: TeamBoardViewProps = {}) {
         </div>
         <p className="mt-1.5 ui-micro">
           {members.length} 名真实成员 · {onlineCount} 人在线 · 今日 {todayCount} 条动向 ·
-          只含成员主动共享的任务 / 日程摘要，不含对话与智能体轨迹
+          只含成员主动共享的任务 / 日程摘要
         </p>
       </div>
 
@@ -265,7 +265,7 @@ export function TeamBoardView({ className = "" }: TeamBoardViewProps = {}) {
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            <section aria-label="任务" className="flex min-h-[160px] flex-col rounded-xl bg-[#f7f7f7] p-3">
+            <section aria-label="任务" className={`flex flex-col rounded-xl bg-[#f7f7f7] p-3 ${tasks.length === 0 ? "" : "min-h-[160px]"}`}>
               <div className="mb-2 flex items-center gap-1.5 ui-section-title">
                 <TaskIcon width={14} height={14} />
                 任务
@@ -286,7 +286,7 @@ export function TeamBoardView({ className = "" }: TeamBoardViewProps = {}) {
               )}
             </section>
 
-            <section aria-label="日程" className="flex min-h-[160px] flex-col rounded-xl bg-[#f7f7f7] p-3">
+            <section aria-label="日程" className={`flex flex-col rounded-xl bg-[#f7f7f7] p-3 ${agenda.length === 0 ? "" : "min-h-[160px]"}`}>
               <div className="mb-2 flex items-center gap-1.5 ui-section-title">
                 <span className="h-2 w-2 rounded-full bg-[#98a2b3]" aria-hidden="true" />
                 日程

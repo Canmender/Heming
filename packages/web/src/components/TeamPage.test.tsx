@@ -301,6 +301,30 @@ describe("团队协作口径（d.88）", () => {
   });
 });
 
+describe("首页动向条目 → 定位到那一条（d.90）", () => {
+  it("消费一次性 intent：切回动向、滚到该条并高亮，随后清空", async () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    const acts = [
+      activity({ id: "target-1", actorId: bob.id, title: "发版了" }),
+      activity({ id: "other-1", title: "写周报" }),
+    ];
+    vi.mocked(fetchTeamActivities).mockResolvedValue({ activities: acts });
+    useUiStore.setState({ teamFocusUserId: bob.id, teamFocusActivityId: "target-1" });
+    await renderPage();
+
+    const row = await waitFor(() => {
+      const el = document.querySelector('[data-activity-id="target-1"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    await waitFor(() => expect(row.className).toContain("ring-1"));
+    expect(scrollSpy).toHaveBeenCalled();
+    // 一次性意图：消费后清空，再切走回来不会被钉住
+    expect(useUiStore.getState().teamFocusActivityId).toBeNull();
+  });
+});
+
 describe("团队日程：只读摘要", () => {
   it("未连接信息中枢：空态给「去连接」出口，且不自动拉起、不上传", async () => {
     await renderPage();

@@ -103,6 +103,8 @@ export function TeamPage() {
   const me = useAuthStore((s) => s.user);
   const focusUserId = useUiStore((s) => s.teamFocusUserId);
   const consumeTeamFocus = useUiStore((s) => s.consumeTeamFocus);
+  const focusActivityId = useUiStore((s) => s.teamFocusActivityId);
+  const consumeTeamActivityFocus = useUiStore((s) => s.consumeTeamActivityFocus);
   /** 一次性视图意图（d.67）：旧「团队看板」链接会被折叠成 team + pageView="board"。 */
   const pageView = useUiStore((s) => s.pageView);
   const setPage = useUiStore((s) => s.setPage);
@@ -123,6 +125,8 @@ export function TeamPage() {
   const [memberQuery, setMemberQuery] = useState("");
   const [onlineOnly, setOnlineOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** 从首页点进来的那一条动向：滚动到它并高亮 2.4 秒（一次性，不落盘）。 */
+  const [highlightActivityId, setHighlightActivityId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
   /**
@@ -360,6 +364,22 @@ export function TeamPage() {
     () => humanActivities.filter((a) => filter === "all" || a.kind === filter),
     [humanActivities, filter],
   );
+
+  // 首页动向条目 → 定位到那一条：切回「动向」视图、滚到它、临时高亮，读走即清。
+  useEffect(() => {
+    if (!focusActivityId) return;
+    setTab("feed");
+    // 数据可能还没到/还在筛选中：等可见列表里出现这一条再滚（effect 会随 visibleActivities 重跑）
+    const el = document.querySelector(`[data-activity-id="${focusActivityId}"]`);
+    if (!el) return;
+    consumeTeamActivityFocus();
+    setHighlightActivityId(focusActivityId);
+    el.scrollIntoView({ block: "center" });
+    const timer = window.setTimeout(() => setHighlightActivityId(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [focusActivityId, visibleActivities, consumeTeamActivityFocus]);
+
+
 
   /** 团队日程：只读，来源是既有 `agenda` 摘要通道（不新增任何上传）。升序 = 先到期的在前。 */
   const agendaActivities = useMemo(
@@ -737,7 +757,7 @@ export function TeamPage() {
                 <p className="mt-1 ui-caption">
                   {shareCount > 0
                     ? "你已经开启共享，但还没有可显示的摘要；产生任务或日程后会自动同步过来。"
-                    : "成员在团队页勾选「任务 / 日程」后，摘要会出现在这里；智能体的工作不进入团队动向。"}
+                    : "成员开启「任务 / 日程摘要」共享后，摘要会出现在这里。"}
                 </p>
               </div>
             ) : (
@@ -745,7 +765,10 @@ export function TeamPage() {
                 {visibleActivities.map((a) => (
                   <li
                     key={a.id}
-                    className="ui-list-row items-start"
+                    data-activity-id={a.id}
+                    className={`ui-list-row items-start transition-colors ${
+                      highlightActivityId === a.id ? "bg-[var(--subtle-3)] ring-1 ring-[var(--line-strong)]" : ""
+                    }`}
                   >
                     <Avatar user={avatarOf(a.actorId)} size={26} />
                     <div className="min-w-0 flex-1">

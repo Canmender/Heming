@@ -611,8 +611,8 @@ export function HomePage() {
                 <button
                   key={a.id}
                   type="button"
-                  // 点的是「谁的动向」就落到谁：团队页支持 teamFocusUserId 定位（审计 P2-6）
-                  onClick={() => useUiStore.getState().focusTeamMember(a.actorId)}
+                  // 点的是「谁的哪条动向」就落到那个人 + 高亮那一条（审计 P2-6 的完整一半）
+                  onClick={() => useUiStore.getState().focusTeamActivity(a.id, a.actorId)}
                   className="flex w-full items-start gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors duration-150 hover:bg-[var(--subtle-2)]"
                 >
                   <Avatar

@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.91.2.42.0",
+    "date": "2026-11-07",
+    "title": "团队动点点进去就是那件事",
+    "bullets": [
+      "首页团队动向点进去，会选中那位成员并高亮你点的那一条动向。",
+      "团队看板在没有内容时不再出现两块很高的空卡。",
+      "团队的隐私说明不再一页重复四遍。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.90.2.42.0",
     "date": "2026-11-07",
     "title": "模型统一走本机 magpie",

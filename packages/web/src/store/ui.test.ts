@@ -111,6 +111,31 @@ describe("刷新恢复：当前页与会话落 sessionStorage（d.79）", () => 
   });
 });
 
+describe("团队动向定位：focusTeamActivity（d.90）", () => {
+  beforeEach(() => {
+    useUiStore.setState({
+      page: "home",
+      teamFocusUserId: null,
+      teamFocusActivityId: null,
+      activeConversationId: null,
+    });
+  });
+
+  it("一次性投递「成员 + 动向 id」并进团队页", () => {
+    useUiStore.getState().focusTeamActivity("act-1", "u2");
+    const s = useUiStore.getState();
+    expect(s.page).toBe("team");
+    expect(s.teamFocusUserId).toBe("u2");
+    expect(s.teamFocusActivityId).toBe("act-1");
+    expect(s.activeConversationId).toBeNull();
+
+    s.consumeTeamActivityFocus();
+    expect(useUiStore.getState().teamFocusActivityId).toBeNull();
+    // 成员选中是另一条槽：消费动向 id 不应把它清掉
+    expect(useUiStore.getState().teamFocusUserId).toBe("u2");
+  });
+});
+
 describe("ui store 导航顺序", () => {
   beforeEach(() => {
     localStorage.clear();

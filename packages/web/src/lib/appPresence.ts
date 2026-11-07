@@ -18,14 +18,16 @@ import { useAuthStore } from "../store/auth.js";
  * 客户端该做的是「人在应用里就连着」，而不是把「在线」重新定义成「最近活跃」。
  */
 export function useAppPresence(enabled = true): void {
-  const authed = useAuthStore((s) => s.status === "authed" && Boolean(s.token));
+  // 只看 token，不看 status：启动时会话恢复会短暂经过 pending，若依赖 status
+  // 就会在启动瞬间「连上→断开→再连上」，多一次无意义的重连（也把「离开必关」的配平搅乱）。
+  const token = useAuthStore((s) => s.token);
 
   useEffect(() => {
-    if (!enabled || !authed) return;
+    if (!enabled || !token) return;
     const handle = connectWs({
       // 只保活：业务事件由页面自己的连接处理，这里收到什么都忽略。
       onEvent: () => {},
     });
     return () => handle.close();
-  }, [authed, enabled]);
+  }, [token, enabled]);
 }
