@@ -14,6 +14,8 @@ import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
 import { useInfohubStore } from "./lib/infohub/store.js";
+import { isInfohubAvailable } from "./lib/infohub/client.js";
+import { useAutoCollect } from "./lib/infohub/autoCollect.js";
 import { ensureDesktopGateway } from "./lib/magpieHost.js";
 import { useAutomationScheduler } from "./lib/automation/scheduler.js";
 import { useStaffLoop } from "./lib/staff/loop.js";
@@ -569,6 +571,11 @@ function AppShell({
         /* 停用时的进程回收失败不该影响界面：页面入口已下线，下次连接会重试 */
       });
   }, [infohubModuleOn]);
+
+  // d.97：装了「信息采集中枢」插件并启用后，桌面端自动采集本机 QQ/微信——
+  // 安装/启用即补一次，此后每 30 分钟增量一次；浏览器端不拉起任何进程（hook 内部判桌面端）。
+  // 信息中枢模块停用 = 一并停下；插件停用/卸载由插件事件通知 hook 停止循环。
+  useAutoCollect(Boolean(authUser) && infohubModuleOn && isInfohubAvailable());
 
   // 系统通知点击 → 主进程回传会话 id → 打开会话（未登录时忽略，登录后再点即可）
   useEffect(() => {

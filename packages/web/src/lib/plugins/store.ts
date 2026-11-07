@@ -26,6 +26,25 @@ export { pluginIdFromServerId } from "./permissions.js";
 export const PLUGINS_KEY = "heming.plugins.v1";
 export const MAX_PLUGINS = 50;
 
+/**
+ * 插件集合/启停变化事件（d.97）。
+ *
+ * 为什么是 window 自定义事件而不是 module store：改插件记录的入口有安装、启停、
+ * 贡献级启停、卸载四条路径，订阅方（自动采集）只关心「变了」，不该逐条跟。事件在
+ * **写盘之后**统一派发，监听方读到的必然是新状态；jsdom 里 window 存在，测试可监听。
+ */
+export const PLUGINS_CHANGED_EVENT = "heming:plugins-changed";
+
+/** 通知界面「插件变了」。极端环境（window 被禁用）派发失败不影响安装结果。 */
+function notifyPluginsChanged(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent(PLUGINS_CHANGED_EVENT));
+  } catch {
+    /* 派发失败不阻塞业务：事件只是通知，不是事实来源 */
+  }
+}
+
 /** 插件依赖的 MCP 注册表面：窄接口让单测不必真的碰 localStorage 与预置服务。 */
 export interface PluginMcpPort {
   get(id: string): McpServerConfig | undefined;
@@ -705,6 +724,7 @@ export class PluginStore {
     if (index >= 0) this.data.plugins[index] = plugin;
     else this.data.plugins.push(plugin);
     this.save();
+    notifyPluginsChanged();
 
     return {
       plugin: copyPlugin(plugin),
@@ -742,6 +762,7 @@ export class PluginStore {
       }
     }
     this.save();
+    notifyPluginsChanged();
   }
 
   /**
@@ -775,6 +796,7 @@ export class PluginStore {
       }
     }
     this.save();
+    notifyPluginsChanged();
   }
 
   /** 卸载插件：删除其全部技能（含使用统计与绑定）与 MCP 服务，再删记录。 */
@@ -789,6 +811,7 @@ export class PluginStore {
     }
     this.data.plugins = this.data.plugins.filter((p) => p.manifest.id !== id);
     this.save();
+    notifyPluginsChanged();
   }
 
   private iso(): string {

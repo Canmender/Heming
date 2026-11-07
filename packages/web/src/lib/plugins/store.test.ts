@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   MAX_PLUGINS,
   PLUGINS_KEY,
@@ -14,6 +14,7 @@ import {
 } from "./index.js";
 import { SkillPool, type StorageLike } from "../skills/index.js";
 import type { McpServerConfig } from "../mcp/index.js";
+import { PLUGINS_CHANGED_EVENT } from "./store.js";
 
 function makeStorage(map = new Map<string, string>()): { storage: StorageLike; map: Map<string, string> } {
   return {
@@ -1113,5 +1114,58 @@ describe("PluginStore · URL 协议名大小写（d.77 半安装修复）", () =
     expect(result.plugin.manifest.id).toBe("acme.upper");
     expect(pool.list().some((skill) => skill.pluginId === "acme.upper")).toBe(true);
     expect(mcp.servers.has(pluginServerId("acme.upper", "svc"))).toBe(true);
+  });
+});
+
+/**
+ * 插件变化事件（d.97）：自动采集靠它做到「装完即采、停用即停」。
+ * 事件是 window 上的自定义事件（jsdom 可监听），必须在写盘**之后**派发。
+ */
+describe("PluginStore · 插件变化事件（d.97）", () => {
+  function watch(): { spy: ReturnType<typeof vi.fn>; off: () => void } {
+    const spy = vi.fn();
+    window.addEventListener(PLUGINS_CHANGED_EVENT, spy);
+    return { spy, off: () => window.removeEventListener(PLUGINS_CHANGED_EVENT, spy) };
+  }
+
+  it("安装、更新、启停、贡献级启停、卸载各自派发一次", () => {
+    const { store } = fresh();
+    const { spy, off } = watch();
+    try {
+      store.install(manifest()); // 安装
+      store.install(manifest({ version: "1.1.0" })); // 覆盖更新
+      store.setEnabled("acme.finance", false); // 总开关
+      store.setKindEnabled("acme.finance", "mcpServers", false); // 贡献级停用
+      store.remove("acme.finance"); // 卸载
+      expect(spy).toHaveBeenCalledTimes(5);
+    } finally {
+      off();
+    }
+  });
+
+  it("没有变化就不派发：卸载不存在的插件是 no-op", () => {
+    const { store } = fresh();
+    const { spy, off } = watch();
+    try {
+      store.remove("acme.not-installed");
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      off();
+    }
+  });
+
+  it("事件在写盘之后派发：监听方读到的已是新状态", () => {
+    const { store, map } = fresh();
+    let persisted = "";
+    const listener = (): void => {
+      persisted = map.get(PLUGINS_KEY) ?? "";
+    };
+    window.addEventListener(PLUGINS_CHANGED_EVENT, listener);
+    try {
+      store.install(manifest({ version: "9.9.9" }));
+    } finally {
+      window.removeEventListener(PLUGINS_CHANGED_EVENT, listener);
+    }
+    expect(persisted).toContain("9.9.9");
   });
 });

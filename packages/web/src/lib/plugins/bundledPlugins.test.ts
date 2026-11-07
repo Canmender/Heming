@@ -133,7 +133,7 @@ describe("plugins/infohub-collector · 信息采集中枢（v3）", () => {
     expect(manifest.id).toBe("heming.infohub-collector");
     expect(manifest.schemaVersion).toBe(3);
     expect(manifest.name).toBe("信息采集中枢");
-    expect(manifest.version).toBe("1.0.0");
+    expect(manifest.version).toBe("1.1.0");
     expect(manifest.author).toBe("和鸣");
     expect(manifest.permissions).toEqual({
       network: ["127.0.0.1:8776"],
@@ -205,16 +205,28 @@ describe("plugins/infohub-collector · 信息采集中枢（v3）", () => {
     }
   });
 
-  it("描述与说明不承诺自动采集/自动启动，只承诺用户显式启动", () => {
+  it("描述与说明如实承诺自动采集：由和鸣托管、可关闭，不写「自动启动进程」", () => {
     const { manifest } = loadInfohub();
     const instructions = manifest.contributions.skills[0].instructions;
-    // 「一装就采」类承诺是误导：端点要用户自己点「启动采集桥」
-    for (const promise of [/自动采集/, /自动启动/, /安装即启动/, /开箱即用/, /一装就自动/]) {
+    // d.97 新口径：装并启用插件后自动采集（每 30 分钟增量一次），用户可在信息中枢页关掉。
+    // 两处文案都必须讲清「自动采集」与「可关闭」，否则用户会以为装上就停不下来。
+    for (const [name, text] of [
+      ["description", manifest.description],
+      ["instructions", instructions],
+    ] as const) {
+      expect(text, `${name} 应说明自动采集`).toContain("自动采集");
+      expect(text, `${name} 应说明可关闭`).toContain("关闭");
+    }
+    expect(manifest.description).toContain("信息中枢");
+    expect(manifest.description).toContain("和鸣托管");
+    // 不再写「自动启动进程」这类不实承诺：采集由和鸣托管，浏览器端不拉起任何进程。
+    for (const promise of [/自动启动/, /安装即启动/, /开箱即用/, /一装就自动/]) {
       expect(manifest.description).not.toMatch(promise);
       expect(instructions).not.toMatch(promise);
     }
-    expect(manifest.description).toContain("启动采集桥");
-    expect(instructions).toContain("手动启动");
+    // 端点没起来时的如实说明口径不变
+    expect(instructions).toContain("不要编造");
+    expect(instructions).toContain("启动采集桥");
   });
 
   it("预览可安装，且预览不写存储", () => {

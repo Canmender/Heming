@@ -93,6 +93,11 @@ describe("StaffPage", () => {
 
   it("未开启：空态说明 + 开启后立刻生成首份简报", async () => {
     render(<StaffPage />);
+    // 「开启」时的首跑 trigger 由「现在是否已过 dailyAt」决定（默认 08:00）。
+    // 凌晨跑测试会得到 manual，跨零点必红（d.97 自检抓到）；把 dailyAt 调到 00:00 让语义与时间无关。
+    useStaffStore.setState({
+      settings: { ...useStaffStore.getState().settings, dailyAt: "00:00" },
+    });
     expect(screen.getByText("还没有简报")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "开启幕僚" }));

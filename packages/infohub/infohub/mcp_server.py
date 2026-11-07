@@ -711,9 +711,37 @@ class McpHandler(BaseHTTPRequestHandler):
             return
         self._json(405, {"error": "MCP 只接受 POST /mcp"})
 
+    def _drain_request_body(self) -> None:
+        """把还没读的请求体读掉再关连接。
+
+        为什么必须读：HTTP/1.1 客户端（尤其浏览器/`http.client`）发完 body 才等响应；
+        服务端若带着未读数据直接 close，Windows 会给对端发 RST，**响应本身可能被丢掉**
+        （模型/客户端看到的是网络错误而不是 403/404）。d.97 自检里这条在并发跑测试时
+        偶发成 `ConnectionResetError`，根因就在这里。只按 Content-Length 读、有上限，
+        绝不把请求体当上传通道。
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            return
+        if length <= 0 or length > MAX_BODY_BYTES:
+            # 超限请求体**不读**：要么客户端根本没发完（读会阻塞），要么是恶意声明；
+            # 413 立即回、关连接即可（客户端会按响应处理剩下的数据）。
+            return
+        remaining = length
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
+
     def _reject(self, status: int, payload: Any) -> None:
         """拒绝请求后关连接：没读掉的请求体不能再被当成下一条请求解析。"""
         self.close_connection = True
+        self._drain_request_body()
         self._json(status, payload)
 
     def do_POST(self) -> None:  # noqa: N802

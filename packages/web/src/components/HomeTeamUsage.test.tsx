@@ -16,6 +16,14 @@ vi.mock("../lib/api.js", async (importOriginal) => {
 const me = { id: "u1", username: "alice", displayName: "爱丽丝" };
 const bob = { id: "u2", username: "bob", displayName: "鲍勃" };
 const nowIso = new Date().toISOString();
+/**
+ * 上传的 `date` 用的是**本地自然日**（服务端不猜时区）。这里不能拿 `nowIso.slice(0, 10)`
+ * 比——TOCTOU：东八区 00:00–08:00 之间，UTC 还停在昨天，断言会在跨零点后必红（d.97 自检抓到）。
+ */
+const localDate = (() => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+})();
 
 function usageResponse(over: Partial<TeamUsageResponse> = {}): TeamUsageResponse {
   return {
@@ -69,7 +77,7 @@ describe("首页 Token 用量卡的「团队」页签", () => {
     expect(uploadTeamUsage).toHaveBeenCalledTimes(1);
     // 上传内容只有白名单字段：日期/模型/token 数/未上报数/连接名
     const payload = vi.mocked(uploadTeamUsage).mock.calls[0][0];
-    expect(payload[0]).toMatchObject({ date: nowIso.slice(0, 10), model: "gpt-x", tokens: 700 });
+    expect(payload[0]).toMatchObject({ date: localDate, model: "gpt-x", tokens: 700 });
     expect(JSON.stringify(payload)).not.toMatch(/prompt|content|args|result/);
 
     expect(fetchTeamUsage).toHaveBeenCalledWith({ range: "30d", to: expect.any(String) });
