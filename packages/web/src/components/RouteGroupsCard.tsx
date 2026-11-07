@@ -15,7 +15,6 @@ import { PlusIcon } from "./icons.js";
 
 /** 设置区 · 候选链：一条按声明顺序的模型链，第一个答不了才走下一个。 */
 
-const EFFECT_NOTE = "改动即时生效，仅作用于本机，绝不上传和鸣服务端。";
 
 const inputCls =
   "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
@@ -162,7 +161,7 @@ export function RouteGroupsCard() {
   }
 
   return (
-    <section className="mt-3 max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card">
+    <section className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-bold text-muted">候选链</span>
@@ -432,7 +431,6 @@ export function RouteGroupsCard() {
         </form>
       )}
 
-      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">{EFFECT_NOTE}</div>
     </section>
   );
 }

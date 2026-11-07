@@ -109,7 +109,7 @@ export function KeyStorageCard() {
   return (
     <section
       aria-label="密钥存储"
-      className="mt-3 max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
+      className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card"
     >
       <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted">
         <LockIcon className="text-[#999]" />

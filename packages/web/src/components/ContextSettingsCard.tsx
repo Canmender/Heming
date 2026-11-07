@@ -93,7 +93,7 @@ export function ContextSettingsCard() {
   const shownBudget = windowLimit && settings.budgetTokens > windowLimit ? windowLimit : settings.budgetTokens;
 
   return (
-    <section className="mt-3 max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card">
+    <section className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
       <div className="text-[12px] font-bold text-muted">上下文预算</div>
       <div className={`mt-1 ${hintCls}`}>
         给 @ 触发组装的历史做 token 预算，超出的早期对话压缩为摘要；只在本机执行
@@ -183,7 +183,7 @@ export function ContextSettingsCard() {
       )}
 
       <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
-        设置仅保存在本机浏览器，不上传和鸣服务端；改动即时生效，无需保存
+        设置只保存在本机浏览器，不上传服务端
       </div>
     </section>
   );

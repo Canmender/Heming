@@ -108,6 +108,19 @@ describe("自动化页", () => {
     expect(JSON.parse(localStorage.getItem("heming.automations.v1") as string)).toHaveLength(1);
   });
 
+  it("弹窗内回车即保存（与桌面端习惯一致）", () => {
+    render(<AutomationPage />);
+    fireEvent.click(screen.getAllByRole("button", { name: "新建自动化" })[0]);
+    const name = screen.getByLabelText("名称");
+    fireEvent.change(name, { target: { value: "回车保存" } });
+    fireEvent.submit(name.closest("form") as HTMLFormElement);
+
+    const tasks = useAutomationStore.getState().tasks;
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].name).toBe("回车保存");
+    expect(screen.queryByRole("dialog", { name: "新建自动化" })).toBeNull();
+  });
+
   it("表单校验：名称为空时不落库，错误留在弹窗里", () => {
     render(<AutomationPage />);
     fireEvent.click(screen.getAllByRole("button", { name: "新建自动化" })[0]);

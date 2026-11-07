@@ -152,7 +152,6 @@ describe("HitlPolicyCard", () => {
     fireEvent.click(screen.getByRole("radio", { name: "严格" }));
 
     expect(screen.getByRole("status")).toHaveTextContent("已保存");
-    expect(screen.getByText("改动即时生效，仅作用于本机，无需重启。")).toBeInTheDocument();
   });
 
   it("审计列表能读出批准与拒绝记录（只显示 tool 作用域的）", () => {

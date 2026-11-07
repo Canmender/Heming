@@ -13,7 +13,6 @@ import { clearMaskLedger, maskLedger, maskWords, setMaskWords } from "../lib/llm
 import { PlusIcon } from "./icons.js";
 
 /** 设置卡统一的生效说明：与工具调用确认卡、个人资料卡同一句。 */
-const EFFECT_NOTE = "改动即时生效，仅作用于本机，无需重启。";
 
 /** 设置区 · LLM 连接：本机 CRUD + 连通性测试；Key 只落 localStorage 不出设备。 */
 
@@ -187,7 +186,7 @@ export function LlmSettingsCard() {
     Object.values(bindings).filter((pid) => pid === profileId).length;
 
   return (
-    <section className="mt-3 max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card">
+    <section className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-bold text-muted">LLM 连接</span>
@@ -526,7 +525,6 @@ export function LlmSettingsCard() {
       </div>
 
       <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
-        {EFFECT_NOTE}
       </div>
     </section>
   );

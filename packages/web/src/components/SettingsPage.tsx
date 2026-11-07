@@ -41,9 +41,6 @@ const MAX_AVATAR_BYTES = 449_000;
 const btnGhost =
   "ui-btn ui-btn-sm ui-btn-ghost";
 
-/** 设置卡统一的生效说明：与 LLM 连接卡、工具调用确认卡同一句。 */
-const EFFECT_NOTE = "改动即时生效，仅作用于本机，无需重启。";
-
 /** 行内标记渲染：`**粗体**` 加粗、`` `代码` `` 等宽（无 markdown 依赖）。 */
 function InlineText({ text }: { text: string }) {
   return (
@@ -234,10 +231,19 @@ export function SettingsPage() {
               placeholder="搜索设置项…（如 主题色 / 免问下限 / 桌宠）"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                // d.77（R10）：搜完直接回车打开第一项，不用再把鼠标挪到列表上。
+                if (e.key === "Enter" && results.length > 0) {
+                  e.preventDefault();
+                  jumpToCard(results[0]);
+                }
+              }}
               className={`w-full max-w-[420px] ui-input ${FOCUS_RING}`}
             />
             <span className="ui-caption">
-              {searching ? `${results.length} 项匹配 · Esc 关闭` : "按标题、关键词或分区名搜索"}
+              {searching
+                ? `${results.length} 项匹配 · Enter 打开${results.length > 0 ? "第一项" : ""} · Esc 关闭`
+                : "按标题、关键词或分区名搜索"}
             </span>
           </div>
           </div>
@@ -470,9 +476,6 @@ function ProfileSection() {
         </div>
       </form>
 
-      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
-        {EFFECT_NOTE}
-      </div>
     </section>
   );
 }
@@ -639,7 +642,6 @@ function NavModeSection() {
           );
         })}
       </div>
-      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">{EFFECT_NOTE}</div>
     </section>
   );
 }
@@ -736,9 +738,6 @@ function AppearanceSection() {
         </button>
       </div>
       {accentError && <div className="mt-2 text-[12px] text-red-600">{accentError}</div>}
-      <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
-        {EFFECT_NOTE}
-      </div>
     </section>
   );
 }

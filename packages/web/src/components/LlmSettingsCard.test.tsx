@@ -131,7 +131,6 @@ describe("LlmSettingsCard", () => {
     fireEvent.click(screen.getByText("保存"));
 
     expect(await screen.findByRole("status")).toHaveTextContent("已保存");
-    expect(screen.getByText("改动即时生效，仅作用于本机，无需重启。")).toBeInTheDocument();
   });
 
   it("「确认删除」与其它页面一致：红底破坏性按钮", () => {

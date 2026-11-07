@@ -545,6 +545,11 @@ function AutomationEditor({
 
   const schedule = draft.schedule;
   const preview = nextRunAt(schedule, Date.now());
+  /** d.77（R10）：弹窗内回车 = 保存，和桌面端习惯一致；Esc 仍由 useModalA11y 关闭。 */
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    save();
+  };
 
   function patchSync(patch: Partial<AutomationDraft["sync"]>) {
     setDraft((current) => ({ ...current, sync: { ...current.sync, ...patch } }));
@@ -600,12 +605,13 @@ function AutomationEditor({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
       onClick={onClose}
     >
-      <div
-        ref={panelRef}
+      <form
+        ref={panelRef as unknown as React.RefObject<HTMLFormElement>}
         role="dialog"
         aria-modal="true"
         aria-label={taskId ? "编辑自动化" : "新建自动化"}
         onClick={(e) => e.stopPropagation()}
+        onSubmit={submit}
         className="flex max-h-[88vh] w-[min(600px,94vw)] flex-col overflow-hidden rounded-xl border border-[#ececec] bg-white shadow-card"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
@@ -834,15 +840,11 @@ function AutomationEditor({
           >
             取消
           </button>
-          <button
-            type="button"
-            onClick={save}
-            className="ui-btn ui-btn-md ui-btn-primary"
-          >
+          <button type="submit" className="ui-btn ui-btn-md ui-btn-primary">
             保存
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

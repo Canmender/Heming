@@ -136,7 +136,7 @@ export function PetSettingsCard() {
   return (
     <section
       aria-label="桌宠"
-      className="mb-4 max-w-[520px] rounded-xl border border-line bg-white p-4 shadow-card"
+      className="mb-4 rounded-xl border border-line bg-white p-4 shadow-card"
     >
       <div className="flex items-center gap-2">
         <span className="text-[12px] font-bold text-[#777]">桌宠</span>

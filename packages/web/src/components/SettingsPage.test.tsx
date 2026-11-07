@@ -513,6 +513,17 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
     expect(screen.queryByLabelText("昵称")).toBeNull();
   });
 
+  it("输入后直接回车打开第一项（不用把鼠标挪到结果上）", () => {
+    render(<SettingsPage />);
+    const input = screen.getByLabelText("搜索设置项");
+    fireEvent.change(input, { target: { value: "桌宠" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
+    expect(input).toHaveValue("");
+    expect(document.querySelector('[data-settings-id="pet"]')).not.toBeNull();
+  });
+
   it("点结果：切到对应分区、滚动到卡片、高亮 2 秒后消失", async () => {
     const scrollSpy = stubScrollIntoView();
     render(<SettingsPage />);

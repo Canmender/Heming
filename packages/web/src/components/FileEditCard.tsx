@@ -260,7 +260,7 @@ export function FileEditCard({
           <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
             上限：单文件 {Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB、单次补丁{" "}
             {Math.round(MAX_PATCH_BYTES / 1024 / 1024)} MB、单次最多 {MAX_FILES_PER_PATCH} 个文件；
-            只处理 UTF-8 文本，软链/硬链接与二进制文件一律拒绝。改动即时生效，仅作用于本机。
+            只处理 UTF-8 文本，软链/硬链接与二进制文件一律拒绝。
           </div>
         </>
       )}

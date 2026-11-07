@@ -21,7 +21,6 @@ const FLOOR_LABELS: Record<string, string> = {
  * 设置卡统一的生效说明：与 LLM 连接卡、个人资料卡同一句。
  * 这张卡的每次改动都直接落盘，没有「保存」按钮，所以更要说明清楚。
  */
-const EFFECT_NOTE = "改动即时生效，仅作用于本机，无需重启。";
 
 /**
  * 旧存储里是不是存过 `floor:"danger"`？
@@ -347,7 +346,6 @@ export function HitlPolicyCard({
       )}
 
       <div className="mt-3 border-t border-line-soft pt-2 ui-caption">
-        {EFFECT_NOTE}
       </div>
     </section>
   );

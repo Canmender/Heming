@@ -39,22 +39,19 @@ const NEWS: { source: string; title: string; summary: string; date: string }[] =
   {
     source: "官方",
     title: "团队动向上线：任务与日程摘要汇总到「团队」页",
-    summary:
-      "成员可以选择共享任务与日程的摘要（标题、状态、时间），在「团队」页查看；对话正文、提示词与智能体轨迹仍只留在本机。",
+    summary: "成员共享任务与日程摘要后，在「团队」页看汇总；对话正文和智能体轨迹不上传。",
     date: "2026-11-02",
   },
   {
     source: "教程",
     title: "怎么让团队看到你的动向",
-    summary:
-      "团队页顶部可分别开启任务、日程共享；只上报摘要（标题/状态/时间），对话正文、提示词与智能体轨迹不会离开本机。",
+    summary: "团队页顶部可分别开启任务、日程共享，只上报摘要（标题 / 状态 / 时间）。",
     date: "2026-11-02",
   },
   {
     source: "技巧",
     title: "用共享目录投递附件给智能体",
-    summary:
-      "右栏「上传」把文件放进共享库；打开智能体对话后点文件行的「绑定」，附件会随下一轮消息发给智能体。",
+    summary: "右栏「上传」进共享库；对话里点文件行的「绑定」，下一轮消息就会带上它。",
     date: "2026-11-02",
   },
 ];
@@ -285,7 +282,7 @@ export function HomePage() {
         <StatCard title="团队成员" value={String(members.length)} sub="全站注册用户" />
         <StatCard title="在线成员" value={String(onlineCount)} sub="约 20 秒刷新" />
         <StatCard title="我的智能体" value={String(agentsRoster.length)} sub="本机运行 · 含系统预设" />
-        <StatCard title="今日动向" value={String(todayActivities)} sub="最近 100 条内" />
+        <StatCard title="今日动向" value={String(todayActivities)} sub="今天的团队动态" />
         <div className="col-span-4 ui-card p-3 max-[1199px]:col-span-2">
           <div className="flex items-center">
             <div className="text-[11px] font-bold text-muted">Token 用量 · {monthKey}</div>
