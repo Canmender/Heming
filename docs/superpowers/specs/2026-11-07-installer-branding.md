@@ -56,3 +56,16 @@ r63 安装包仍是 electron-builder 默认外观：无欢迎页、NSIS 自带 m
 - r64 真机启动安装器截图确认：欢迎页侧栏、页头、图标、完成页文案与新图标；
 - 未做：自定义 NSIS 页面配色/字体（MUI 用系统控件，深色主题不可控）、安装器高 DPI 逐档截图、
   签名（无证书，仍是「未知发布者」提示）。
+
+## 6. 打包修正（d.75.2.40.0）
+
+- `build-desktop.mjs` 打包前强制重建 `packages/desktop/web-dist`：r64 曾因直接跑它而把上一版 UI 打进新版本号；
+- `build.win.executableName = "Heming"`：避免 electron-builder 用包名 `@heming/desktop` 兜底，
+  把安装目录变成 `@hemingdesktop`；显示名仍是「和鸣」。
+
+## 7. 已知环境坑：不要把应用装进开发工作区
+
+在 `D:\Heming`（低完整性级别目录）安装后，双击 exe 秒退且无日志；同样文件复制到普通目录可正常启动。
+诊断路径：比较安装目录 ACL（`icacls` 显示 `Mandatory Label\Low Mandatory Level`）→ 复制到普通目录可运行。
+结论：安装位置必须在普通用户目录（默认 `%LOCALAPPDATA%\Programs\...`），不要装进开发目录。
+

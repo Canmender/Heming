@@ -2,6 +2,35 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.75.2.40.0（2026-11-07）— 打包修正：web-dist 必须同版本、安装目录不再叫 @hemingdesktop
+
+r64 发现两个打包问题（与功能代码无关，但会直接影响用户）：
+
+### 一、r64 里「版本号是新的、界面是旧的」
+
+- `build-desktop.mjs` 只做 electron-builder，不含 `build-desktop-web.mjs`；手工直接跑它时
+  `packages/desktop/web-dist` 还是上一版，安装包文件名写 d.75.2.39.0，界面里却显示 d.74.2.39.0。
+- 修法：`build-desktop.mjs` 在打包前**强制重建 web-dist**，失败即中止——
+  「产物 == 当前源码」不能依赖调用方记得先跑哪一步。
+
+### 二、安装目录叫 `@hemingdesktop`
+
+- electron-builder 在 Windows 上用包名兜底生成目录名，`@heming/desktop` 被压成 `@hemingdesktop`，
+  用户会看到 `…\Programs\Heming\@hemingdesktop\和鸣.exe` 这种路径。
+- 修法：`build.win.executableName: "Heming"` → 安装目录与 exe 名统一为 `Heming`，
+  显示名仍是「和鸣」（快捷键/「应用和功能」不受影响）。
+
+### 三、附：一次「打不开」的排查结论
+
+- 真机上把 r64 装进 `D:\Heming`（开发工作区）后双击无反应：进程秒退、无窗口、无崩溃日志；
+- 同一份文件复制到普通目录即可启动 → 根因是工作区目录带 **Low 完整性级别**，Chromium 无法创建用户数据目录；
+- 这不是产品缺陷，是「不要装进开发工作区」；安装到 `%LOCALAPPDATA%\Programs\...` 正常。
+  本轮同时清理了该目录下的测试安装，避免继续误导。
+
+### 门禁
+
+- desktop 测试（含 changelog-sync）通过；`pnpm -r build` 通过；重出 r65 并真机启动确认界面版本为 d.75.2.40.0。
+
 ## d.75.2.39.0（2026-11-07）— 安装器品牌化：欢迎页、侧栏与应用图标
 
 安装包此前是 electron-builder 的默认外观：没有欢迎页、侧栏是 NSIS 自带 metro 图、应用图标还是 Electron 默认图标。

@@ -43,6 +43,17 @@ if (existsSync(join(desktopDir, "runtime", "mcp-env"))) {
   }
 }
 
+// web-dist 是打包的**输入**，不是产物：直接跑本脚本时很容易忘了先跑
+// build-desktop-web.mjs（r64 就因此把上一版 UI 打进了新版本号里——安装包写 d.75，
+// 界面里还显示 d.74）。这里强制先重建一次；dist:desktop 里会重复调用，只多几秒。
+const webBuilt = spawnSync(process.execPath, [join(root, "scripts", "build-desktop-web.mjs")], {
+  stdio: "inherit",
+});
+if (webBuilt.status !== 0) {
+  console.error("[build-desktop] web-dist 重建失败，已中止打包（旧产物不能当新版本发）");
+  process.exit(1);
+}
+
 const args = process.argv.slice(2);
 
 /** 找 node_modules/.pnpm 下已解包的 electron 目录（有 electron.exe/electron 才是完整包）。 */

@@ -1,6 +1,6 @@
 {
   "name": "@heming/desktop",
-  "version": "75.2.39",
+  "version": "75.2.40",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -85,7 +85,8 @@
       "target": [
         "nsis"
       ],
-      "icon": "icon.ico"
+      "icon": "icon.ico",
+      "executableName": "Heming"
     },
     "nsis": {
       "oneClick": false,
@@ -106,7 +107,7 @@
       "uninstallerSidebar": "uninstallerSidebar.bmp"
     }
   },
-  "hemingVersion": "d.75.2.39.0",
-  "shortVersion": "75.2.39.0",
-  "shortVersionWindows": "75.2.39.0"
+  "hemingVersion": "d.75.2.40.0",
+  "shortVersion": "75.2.40.0",
+  "shortVersionWindows": "75.2.40.0"
 }
