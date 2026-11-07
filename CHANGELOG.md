@@ -2,6 +2,52 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.93.2.42.0（2026-11-07）— 团队工作台：用户自建团队 + 目标/方案/任务 + 智能体接口
+
+用户指令：「先做团队功能，可以用户自己创设团队，设定团队名字，确立团队目标，规划方案，派发任务，
+上传任务，并且都预留接口，便于智能体操作」。
+
+### 一、两层「团队」分清楚
+
+- 既有「全站名册 / 动向」保留（全员可见的公司通讯录 + 摘要流）；
+- 新增**团队工作台**：用户自建工作组（名字 / 目标 / 方案 / 任务 / 成员），**仅成员可见**。
+
+### 二、数据与接口
+
+- shared 契约：`WorkspaceTeam` / `TeamPlanItem` / `TeamTask` / `TeamWorkspaceMember` /
+  `TeamWorkspaceSnapshot` + Create/Update body（命名前缀 WorkspaceTeam，与既有 TeamActivity 区分）；
+- 服务端 4 张表 `teams / team_members / team_plans / team_tasks`（幂等建表、可加索引）；
+  内存与 SQLite 两套 Store **同契约**（13 个方法，契约测试双跑）；
+- **13 条 REST**：团队 CRUD、按用户名加/移成员、方案增改删、任务增改删；
+  权限语义：**非成员一律 404**（不泄露存在性）、owner-only 403、任务只能指派给成员、
+  方案必须属于本团队；移成员自动解绑任务、删方案不删任务、删团队级联清理、任何改动刷新 updated_at。
+
+### 三、UI（团队页新增第一个 Tab「工作台」）
+
+- 左栏「我的团队」：列表 + 新建（名称/目标），选中团队落 sessionStorage（刷新/切页不丢）；
+- 右栏：团队概况（目标可编辑、成员 chips、加/移成员、删除团队）→ 方案（添加、状态流转、删除）→
+  任务（未完成/全部/已完成筛选；派任务含标题/说明/负责人/归属方案/截止时间/**上传交付物**；
+  状态流转、改负责人、删除）；
+- **上传交付物复用共享文件库**（fileId 记在任务上），不新建第二套存储与配额；
+- 非 owner 不渲染管理入口（服务端仍兜底 403）。
+
+### 四、智能体接口（「预留接口，便于智能体操作」）
+
+- 新增能力提供者 `teamProvider`（始终注入，不依赖桌面桥/模块开关），9 个工具：
+  只读 `team_list` / `team_get`；写入（走人工确认 HITL）`team_create` / `team_update` /
+  `team_member_add` / `team_plan_add` / `team_plan_update` / `team_task_add` / `team_task_update`；
+- 描述写明「用户自建团队工作台、不是全站动向、未知 id 先 team_list、写操作会请用户确认」；
+  服务端中文错误原样回给模型；尊重中断信号；
+- **删除类不开放给智能体**（误删团队代价太大，需要时单独评审）。
+
+### 五、测试与验证
+
+- 服务端 **165 例**（storeContract 双 Store + teamWorkspace 9 例），真实 8787 冒烟：建团队→方案→
+  任务→权限→删除→404；
+- Web：`teamTools.test` 20 例、`api.test` +6、`TeamWorkspace.test` 5 例；
+- 真机（1600×1000，0 error）：新建「验证小组」→ 写目标 → 加 alice → 加方案 → 派任务并指派 →
+  插件区「工具」Tab 能检索到 `team_list / team_task_add / team_plan_update`；验证数据 API 删除 204。
+
 ## d.92.2.42.0（2026-11-07）— 内置 magpie：模型网关做成随包托管的原生组件
 
 d.90 把模型层改成「只连 magpie 网关」，d.91 做了设置页；本轮把 magpie 本体也变成和鸣自己的组件。
