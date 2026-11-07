@@ -35,14 +35,37 @@ export interface RouteMember {
   profileId: string;
   /** 覆盖该连接的默认模型（同 Key 换模型走 failover）。 */
   model?: string;
+  /**
+   * 轮询权重（`weight` 档用；magpie `routes.Weighted`）。缺省 1，范围 1–100，
+   * 界面可编辑。其它档不读它——老数据没这个字段，行为不变。
+   */
+  weight?: number;
 }
 
 /**
- * 选路档（d.48）：`order` = 声明顺序（magpie「In order」）；`cheap` = 醒着的候选里先问
- * 参考价便宜的。smart/usage/pace/weight/fast 那几档依赖「供应商窗口何时续期」这类
- * 本仓读不到的数据，不做近似——近似出来的选路比不选更难解释。
+ * 选路档（d.48 / magpie 移植第二批）。
+ *
+ * - `order`：声明顺序（magpie「In order」）——老数据缺省，行为与加这档之前逐字相同；
+ * - `cheap`：醒着里先问本机价目表便宜的（查不到价目排最后，不猜）；
+ * - `smart`：醒着里按「本月用量 / 参考价 / 近期失败」综合打分（magpie 默认档的客户端版）；
+ * - `usage`：本月用量最少先问（近期用量按 1 小时半衰计，magpie `usageHalfLife`）；
+ * - `pace`：本月用量 ÷ 本月已过时间，比值小先问（magpie「Use before expiry」的客户端近似——
+ *   **本仓不读供应商配额**，没有预算概念，只比「花得比时间慢」）；
+ * - `weight`：平滑加权轮询（magpie `routes.Weighted`），权重见 `RouteMember.weight`；
+ * - `fast`：最近「首 token + 200 token 用时」短先问（magpie `Fastest`），没测过速的排后；
+ * - `rotate`：醒着的按序轮换（magpie「In turn」），休息的跳过。
+ *
+ * 所有档共同的三条硬规矩：确定性、可解释、休息中的候选永远排最后（绝不删除）。
  */
-export type RouteStrategy = "order" | "cheap";
+export type RouteStrategy =
+  | "order"
+  | "cheap"
+  | "smart"
+  | "usage"
+  | "pace"
+  | "weight"
+  | "fast"
+  | "rotate";
 
 /**
  * 候选链（magpie 的 routing group，docs/reference.md「Routing groups」）。
@@ -52,9 +75,9 @@ export interface RouteGroup {
   label: string;
   members: RouteMember[];
   /**
-   * 选路档（d.48）：`"order"` = 声明顺序（magpie「In order」，默认）；
-   * `"cheap"` = 醒着的候选里先问**参考价更便宜**的那个。
-   * 可选字段：老数据没它，读回按 order 走，行为与加这档之前逐字相同。
+   * 选路档（见 `RouteStrategy`）。可选字段：老数据没它，读回按 `order` 走，
+   * 行为与加这档之前逐字相同（零迁移）。本机 `modelroute` 模块停用时，
+   * 无论这里写什么，路由层都按 `order` 走（停用只下线高级选路，候选链照常）。
    */
   strategy?: RouteStrategy;
 }

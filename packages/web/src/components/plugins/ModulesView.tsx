@@ -12,7 +12,7 @@ import {
   missingRequirements,
   useModuleStore,
 } from "../../lib/modules/store.js";
-import { AutomationIcon, InfoHubIcon, StaffIcon } from "../icons.js";
+import { AutomationIcon, InfoHubIcon, RouteIcon, StaffIcon } from "../icons.js";
 import { moduleCleanupPlan } from "../../lib/modules/lifecycle.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { BTN_GHOST, BTN_GHOST_SM, HINT, Switch } from "./shared.js";
@@ -32,6 +32,7 @@ const MODULE_ICONS: Record<ModuleId, ComponentType<SVGProps<SVGSVGElement>>> = {
   staff: StaffIcon,
   infohub: InfoHubIcon,
   automations: AutomationIcon,
+  modelroute: RouteIcon,
 };
 
 /** 字节 → 便于扫读的「约 x KB / x MB」（0 显示「无数据」）。 */
@@ -230,7 +231,7 @@ export function ModulesView({ modules = BUILTIN_MODULES }: { modules?: readonly 
           className={BTN_GHOST}
           // 全启用时点它没有任何作用：禁用并说明，而不是留一个点了没反应的按钮
           disabled={allEnabled}
-          title={allEnabled ? "三个模块都已启用" : "把停用的模块全部恢复启用（不删数据）"}
+          title={allEnabled ? "全部模块都已启用" : "把停用的模块全部恢复启用（不删数据）"}
           onClick={() => {
             reset();
             setRestoredNotice("已全部恢复启用");

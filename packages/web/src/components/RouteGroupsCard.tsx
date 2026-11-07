@@ -15,6 +15,66 @@ import { PlusIcon } from "./icons.js";
 
 /** 设置区 · 候选链：一条按声明顺序的模型链，第一个答不了才走下一个。 */
 
+/**
+ * 选路档的中文名与一行说明（语义照 magpie；本仓是客户端，不读供应商配额）。
+ *
+ * 名字与「模型路由」模块页（ModelRoutePage 的 STRATEGY_NOTES）保持一致——
+ * 同一个功能在两处出现时不能有两套叫法；改档位说明时两处一起改。
+ */
+const STRATEGY_OPTIONS: readonly { value: RouteStrategy; label: string; desc: string }[] = [
+  {
+    value: "order",
+    label: "按声明顺序",
+    desc: "第一个能答的一直答，最省事也最可预期。",
+  },
+  {
+    value: "cheap",
+    label: "参考价优先",
+    desc: "醒着里先问本机价目表便宜的；查不到价目的排最后，不猜它便宜。",
+  },
+  {
+    value: "smart",
+    label: "智能",
+    desc: "醒着里按本月用量（占一半）、参考价、近期失败综合打分；不读供应商配额。",
+  },
+  {
+    value: "usage",
+    label: "用得最少优先",
+    desc: "本月用量最少的先问；近期用量按 1 小时半衰计，同量保持声明顺序。",
+  },
+  {
+    value: "pace",
+    label: "按节奏优先",
+    desc: "本月用量 ÷ 本月已过时间，比值小的先问；不假设供应商有额度、不装配额。",
+  },
+  {
+    value: "weight",
+    label: "按权重",
+    desc: "平滑加权轮询：权重大的被选中更多；权重 1–100，缺省 1。",
+  },
+  {
+    value: "fast",
+    label: "按速度优先",
+    desc: "最近「首 token + 200 token 用时」短的先问；没测过速的排后，每 5 次给一次机会。",
+  },
+  {
+    value: "rotate",
+    label: "轮流",
+    desc: "醒着的候选按序轮换、休息的跳过，请求分布最均匀。",
+  },
+];
+
+/** 档位 → 中文名；认不出的值按「按声明顺序」显示（与路由层兜底一致）。 */
+function strategyLabel(strategy: RouteStrategy | undefined): string {
+  return STRATEGY_OPTIONS.find((o) => o.value === strategy)?.label ?? "按声明顺序";
+}
+
+/** 权重输入规范化：夹到 1–100 的整数，坏输入回落缺省 1。 */
+function clampWeight(raw: string): number {
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.min(100, Math.max(1, Math.round(n))) : 1;
+}
+
 
 const inputCls =
   "mt-1 block w-full rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
@@ -127,6 +187,11 @@ export function RouteGroupsCard() {
     setMembers(next);
   };
 
+  /** 编辑成员的轮询权重（仅 `weight` 档显示该输入）。 */
+  const setMemberWeight = (index: number, raw: string) => {
+    setMembers(members.map((m, j) => (j === index ? { ...m, weight: clampWeight(raw) } : m)));
+  };
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!label.trim()) {
@@ -193,7 +258,7 @@ export function RouteGroupsCard() {
             <div className="min-w-0">
               <div className="truncate ui-section-title">{g.label}</div>
               <div className="mt-0.5 ui-caption">
-                {g.members.length} 个候选 · {g.strategy === "cheap" ? "参考价优先" : "按声明顺序"} ·
+                {g.members.length} 个候选 · {strategyLabel(g.strategy)} ·
                 绑定 {boundCount(g.id)} 个智能体
               </div>
             </div>
@@ -230,6 +295,9 @@ export function RouteGroupsCard() {
                   </span>
                   {p && lookupCapability(p.provider, m.model ?? p.model) === null && (
                     <span className="shrink-0 text-[10px] text-muted">窗口未知</span>
+                  )}
+                  {g.strategy === "weight" && (
+                    <span className="shrink-0 ui-caption">权重 {m.weight ?? 1}</span>
                   )}
                   {resting > 0 && (
                     <span className="shrink-0 text-[10px] text-amber-700">
@@ -328,29 +396,26 @@ export function RouteGroupsCard() {
 
           <fieldset className="mt-2">
             <legend className="ui-caption">选路方式</legend>
-            <div className="mt-1 flex gap-3 text-[12px]">
-              <label className="flex items-center gap-1">
-                <input
-                  type="radio"
-                  aria-label="按声明顺序选路"
-                  checked={strategy === "order"}
-                  onChange={() => setStrategy("order")}
-                />
-                按声明顺序
-              </label>
-              <label className="flex items-center gap-1">
-                <input
-                  type="radio"
-                  aria-label="参考价优先选路"
-                  checked={strategy === "cheap"}
-                  onChange={() => setStrategy("cheap")}
-                />
-                参考价优先
-              </label>
+            <div className="mt-1 space-y-1 text-[12px]">
+              {STRATEGY_OPTIONS.map((o) => (
+                <label key={o.value} className="flex items-start gap-1.5">
+                  <input
+                    type="radio"
+                    className="mt-0.5"
+                    aria-label={`${o.label}选路`}
+                    checked={strategy === o.value}
+                    onChange={() => setStrategy(o.value)}
+                  />
+                  <span>
+                    <span className="font-medium">{o.label}</span>
+                    <span className="text-muted"> · {o.desc}</span>
+                  </span>
+                </label>
+              ))}
             </div>
             <div className="mt-1 ui-caption">
-              参考价优先：醒着的候选里先问本机价目表上便宜的那个（查不到价目的排最后，不猜）；
-              休息中的仍排最后——省钱排在「现在能不能答」之后。
+              所有档都只用本机数据（不读供应商配额）：休息中的候选永远排最后、绝不删除；
+              本机「模型路由」模块停用时一律退回按声明顺序，候选链与失败切换照常工作。
             </div>
           </fieldset>
 
@@ -382,6 +447,20 @@ export function RouteGroupsCard() {
                   <span className="min-w-0 flex-1 truncate">
                     {p ? `${p.label} · ${m.model ?? p.model}` : "（连接已删除）"}
                   </span>
+                  {strategy === "weight" && (
+                    <label className="flex shrink-0 items-center gap-1 text-[12px]">
+                      权重
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        aria-label={`权重 ${p?.label ?? m.profileId}`}
+                        value={m.weight ?? 1}
+                        onChange={(e) => setMemberWeight(i, e.target.value)}
+                        className="w-14 rounded border border-line px-1 py-0.5 text-[12px]"
+                      />
+                    </label>
+                  )}
                   <button
                     type="button"
                     aria-label={`上移 ${p?.label ?? m.profileId}`}

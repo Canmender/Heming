@@ -17,7 +17,7 @@ import type { Page } from "../../store/ui.js";
  */
 
 /** 可插拔的内置模块 id。新增模块时只加注册表项 + 页面 + 接线点。 */
-export type ModuleId = "staff" | "infohub" | "automations";
+export type ModuleId = "staff" | "infohub" | "automations" | "modelroute";
 
 export type ModuleHomeCard = "staff" | "infohub";
 export type ModuleBackgroundLoop = "staff-loop" | "automation-scheduler";
@@ -96,6 +96,19 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     storageKeys: ["heming.automations.v1", "heming.automations.runs.v1"],
     disableNote:
       "停用后不再到点执行、导航入口下线；任务与运行记录仍保留在本机。依赖「信息中枢」启用后才生效。",
+  },
+  {
+    id: "modelroute",
+    name: "模型路由",
+    version: "v1.0.0",
+    description:
+      "把多条模型连接串成候选链，按策略挑一个；失败自动换人，冷却与用量都在本机算。",
+    page: "modelroute",
+    contributions: { page: true },
+    storageKeys: ["heming.llmRoutes.v1", "heming.llmHealth.v1"],
+    externalData: ["选路测速样本（fast 档）只在内存里，重启清零，不落盘、不进导出"],
+    disableNote:
+      "停用后「模型路由」页与导航入口下线，选路退回声明顺序；候选链与失败切换照常工作，路由组、冷却与用量数据都保留在本机。",
   },
 ];
 

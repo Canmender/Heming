@@ -12,6 +12,32 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.85.2.42.0",
+    "date": "2026-11-07",
+    "title": "模型路由收口（magpie 移植）+ InfoHub 采集插件",
+    "bullets": [
+      "插件区 →「模块」Tab 新增第四个模块**模型路由**（页面 id `modelroute`，导航在「智能模块」组）：概览数字（连接 / 候选链 / 候选 / 休息中 / 本月用量）、候选链编辑器、每档策略人话、边界说明；",
+      "选路八档全部落地（此前只有声明序与参考价）：`smart`（本月用量 0.5 + 参考价 0.3 + 近期失败 0.2 归一加权）、`usage`（本月用量 1 小时半衰）、`pace`（已用 ÷ 本月已过比例，不假装有配额）、",
+      "新增 `lib/llmSpeed.ts`：测速账本（纯内存、20 分钟半衰、4096 上限、重启清零）；模块停用时八档一律退回声明序，候选链/failover 与数据都不动（模块闸门 `isModuleOn(\"modelroute\")`）；",
+      "候选链编辑器从设置区移到「模型路由」页，设置区只留入口卡——同一编辑器不再两处渲染；",
+      "共同底线不变：休息中的候选排最后但绝不删除、全休息仍问最快回来的、已吐内容的流绝不换人。",
+      "`D:\\wohaolei` 新增 `infohub/mcp_server.py` 与 `infohub mcp [--port 8776]`：标准库实现的 MCP HTTP最小子集（initialize / initialized / ping / tools/list / tools/call），只监听回环、校验 Host、",
+      "五个工具：`infohub_status`（只读）、`infohub_sync`（**写**：增量采集，只收 qq/wechat，不重扫日程/不导出/不推送）、`infohub_archive_search` / `infohub_archive_read` / `infohub_archive_agenda`（只读）；",
+      "仓库新增 `plugins/infohub-collector/`：`plugin.json`（v3）声明本机 MCP 服务 + 技能「本机归档采集与查询」+两条命令；权限 `network: 127.0.0.1:8776`、`tools: write`；不含代码 / 命令 / 请求头 / 密钥；",
+      "仓库内守卫 `bundledPlugins.test.ts`：清单必须通过 v3 校验、唯一回环服务、风险上限 write、预览可装且不写存储。",
+      "magpie 侧：`llmRoute` 20 + `llmRoute.strategies` 22 + `llmSpeed` 11 + `llmHealth` 16 + `RouteGroupsCard` 12 = **81 例**；",
+      "InfoHub 桥：`tests/test_mcp_server.py` **13 例**（协议层起真实 HTTP 服务、工具层临时 sqlite、不碰真实归档）；curl 实测 `initialize` / `tools/list` / `infohub_status`（真实归档 271 会话 / 138488 条消息）；",
+      "和鸣侧：模块卡片/导航/命令面板/插件页/UI 用例同步更新；`ModelRoutePage.test` 4、`bundledPlugins.test` 3；`pnpm --filter @heming/web typecheck` 零错；",
+      "真实浏览器：装 `plugins/infohub-collector/plugin.json` → 接口区连接 `127.0.0.1:8776` → 工具入目录且默认关闭 →启用后调用 `infohub_status` 回显本机归档规模；模块页可停用/恢复，停用后选路退回声明序。"
+    ],
+    "paragraphs": [
+      "两条线，一个共同点：**能力要么进内置模块，要么走声明式插件**——不执行随包代码。",
+      "一、magpie 全量移植：「模型路由」内置能力模块`weight`（成员权重 1–100，平滑加权轮询）、`fast`（首 token + 200 token 用时，500ms 分档，未测速排后且每第 5 次给机会）、`rotate`（醒着轮换）；`drain`/`expiring` 因没有供应商窗口/免费额度数据**明确不做**；",
+      "二、InfoHub 做成插件：本机 HTTP MCP 采集桥 + 声明式插件包CORS 预检放行、请求体 256KB 上限；**端口被占直接启动失败**（实测 InfoHub 桌面端自己占了 8765，所以默认端口定 8776，避免 Windows 上两个进程同时绑一个端口）；可预期错误回 `isError` 文本，traceback 只进 stderr；",
+      "门禁"
+    ]
+  },
+  {
     "version": "d.84.2.42.0",
     "date": "2026-11-07",
     "title": "主页从「项目仪表盘」改成「工作台」",

@@ -377,8 +377,9 @@ describe("设置区 · 导航顺序", () => {
       "team",
       "staff",
       "infohub",
-      "plugins",
       "automations",
+      "plugins",
+      "modelroute",
       "memory",
       "settings",
     ]);

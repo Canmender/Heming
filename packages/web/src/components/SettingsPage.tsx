@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
 import { LlmSettingsCard } from "./LlmSettingsCard.js";
-import { RouteGroupsCard } from "./RouteGroupsCard.js";
 import { KeyStorageCard } from "./KeyStorageCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
 import { FileEditCard } from "./FileEditCard.js";
@@ -77,6 +76,7 @@ const NAV_LABELS: Record<NavPage, string> = {
   staff: "幕僚",
   infohub: "信息中枢",
   automations: "自动化",
+  modelroute: "模型路由",
   plugins: "插件区",
   memory: "记忆区",
   settings: "设置区",
@@ -307,12 +307,25 @@ export function SettingsPage() {
                 >
                   <LlmSettingsCard />
                 </div>
-                {/* 候选链紧跟连接列表：先有连接，才谈得上把它们串成一条 failover 链 */}
+                {/* 候选链已搬到「模型路由」页（d.84 模块）：这里只留入口，
+                    免得同一个编辑器在设置区与模块页各渲染一份、口径漂移。 */}
                 <div
                   data-settings-id="route-groups"
                   className={anchorClass(highlightId === "route-groups")}
                 >
-                  <RouteGroupsCard />
+                  <section className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
+                    <div className="text-[12px] font-bold text-muted">模型路由</div>
+                    <p className="mt-1 ui-caption">
+                      候选链与选路策略已移到导航里的「模型路由」页；连接（Key / Base URL / 模型）仍在这里管理。
+                    </p>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+                      onClick={() => useUiStore.getState().setPage("modelroute")}
+                    >
+                      打开模型路由
+                    </button>
+                  </section>
                 </div>
                 <div
                   data-settings-id="key-storage"

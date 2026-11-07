@@ -12,6 +12,7 @@ const all: NavPage[] = [
   "staff",
   "infohub",
   "automations",
+  "modelroute",
   "plugins",
   "memory",
   "settings",
@@ -24,13 +25,13 @@ const off = (patch: Partial<ModuleState["enabled"]>): ModuleState => {
 };
 
 describe("模块开关 · 导航与路由过滤", () => {
-  it("全开时 9 页都在（与改造前一致）", () => {
+  it("全开时 10 页都在（与改造前一致）", () => {
     expect(filterNavOrder(all, defaultModuleState())).toEqual(all);
   });
 
   it("停用幕僚/信息中枢/自动化后，只撤下这三页，其余页顺序不变", () => {
     const state = off({ staff: false, infohub: false, automations: false });
-    expect(filterNavOrder(all, state)).toEqual(["home", "team", "chat", "plugins", "memory", "settings"]);
+    expect(filterNavOrder(all, state)).toEqual(["home", "team", "chat", "modelroute", "plugins", "memory", "settings"]);
   });
 
   it("自动化依赖信息中枢：只停信息中枢时自动化页也不可用", () => {
@@ -53,7 +54,7 @@ describe("模块开关 · 导航与路由过滤", () => {
   it("命令面板页面目录同样过滤（停用页不出现）", () => {
     const state = off({ staff: false, infohub: false, automations: false });
     const pages = filterPalettePages(PALETTE_PAGES, state).map((p) => p.page);
-    expect(pages).toEqual(["home", "chat", "team", "plugins", "memory", "settings"]);
+    expect(pages).toEqual(["home", "chat", "team", "modelroute", "plugins", "memory", "settings"]);
   });
 
   it("当前页被停用时落到主页；可用时原样返回", () => {

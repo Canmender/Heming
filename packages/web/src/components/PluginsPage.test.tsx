@@ -147,7 +147,7 @@ describe("PluginsPage · 模块 Tab（d.70）", () => {
     expect(screen.getByRole("region", { name: "模块 幕僚" })).toBeInTheDocument();
   });
 
-  it("模块 Tab 展示三个内置能力模块，并可停用/恢复", () => {
+  it("模块 Tab 展示四个内置能力模块，并可停用/恢复", () => {
     useModuleStore.getState().reset();
     renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "模块" }));
@@ -155,6 +155,7 @@ describe("PluginsPage · 模块 Tab（d.70）", () => {
     expect(screen.getByRole("region", { name: "模块 幕僚" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "模块 信息中枢" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "模块 自动化" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "模块 模型路由" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: "停用模块 幕僚" }));
     expect(useModuleStore.getState().enabled.staff).toBe(false);

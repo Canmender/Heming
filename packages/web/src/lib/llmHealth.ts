@@ -170,6 +170,19 @@ export class LlmHealth {
   }
 
   /**
+   * 账本里这一档的连续失败次数（**含已过期但还没被读掉的行**）。
+   *
+   * 给 `smart` 档做「近期表现」的代理：醒着的候选没有 active rest，
+   * 唯一还能读到的近期信号就是它上一次失败留下了多少档。
+   * 只读、不触发清理——调用方必须在 `resting()` 之前读它，否则过期行会被
+   * `restOf()` 顺手删掉，这个信号就没了（lib/llmRoute.ts 的排序按此顺序）。
+   */
+  failures(key: string): number {
+    const r = this.load()[key];
+    return r && typeof r.failures === "number" ? r.failures : 0;
+  }
+
+  /**
    * 记一次失败。verdict 说不冷却（shape/region/refusal/protection/cut/overflow/fatal）
    * 就原样返回 null —— 那类失败换下一个候选就行，把这个账号关起来只会误伤。
    */

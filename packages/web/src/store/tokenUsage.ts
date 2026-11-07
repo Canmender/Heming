@@ -55,6 +55,85 @@ export function dayKeyOf(iso: string): string {
   ).padStart(2, "0")}`;
 }
 
+/**
+ * 「少用优先」的半衰期（magpie `usageHalfLife`）：1 小时前的用量按一半计。
+ *
+ * 为什么要有衰减：没有衰减的话，月初用掉的量会压着整个月不再被选，
+ * 而供应商的限流/配额窗口通常是短周期的。magpie 在网关里按半衰计数，
+ * 这里用**记录时间戳**做同样的衰减（数据来源不同，口径对齐）。
+ */
+export const USAGE_HALF_LIFE_MS = 60 * 60_000;
+
+/**
+ * 某个「连接×模型」在指定月份的已上报 token 合计（未上报的轮不计，不猜 0）。
+ * 只认带 `profileId` 的账——归不到具体连接的量不能拿来给连接排序。
+ */
+export function monthTokensOf(
+  records: UsageRecord[],
+  profileId: string,
+  model: string,
+  monthKey: string,
+): number {
+  let total = 0;
+  for (const r of records) {
+    if (r.profileId !== profileId || r.model !== model) continue;
+    if (monthKeyOf(r.at) !== monthKey) continue;
+    const tokens = reportedTokens(r);
+    if (tokens !== null) total += tokens;
+  }
+  return total;
+}
+
+/**
+ * `usage` 档的排序键：本月用量按 1 小时半衰计权后求和（越小越「少用」）。
+ *
+ * 与 magpie 的偏离（写清楚是为了将来别当成 bug）：
+ * - magpie 在自己的内存里累加并让计数随时间衰减；本仓的用量是**已落盘的历史记录**，
+ *   只能用记录时间戳回算衰减——语义相同，粒度粗一点（记录级，不是请求级）；
+ * - 时间戳读不出来的老记录无法判断年龄，按「整月口径」原样计入（不衰减），
+ *   宁可高估它的用量、也不假装知道它是什么时候花的。
+ * - 没有记录的候选算 0（从没用过 = 最该先试），与 magpie 新账号同义。
+ */
+export function decayedMonthTokensOf(
+  records: UsageRecord[],
+  profileId: string,
+  model: string,
+  now = Date.now(),
+  halfLifeMs = USAGE_HALF_LIFE_MS,
+): number {
+  const monthKey = monthKeyOf(new Date(now).toISOString());
+  let total = 0;
+  for (const r of records) {
+    if (r.profileId !== profileId || r.model !== model) continue;
+    const tokens = reportedTokens(r);
+    if (tokens === null) continue;
+    const at = Date.parse(r.at);
+    if (!Number.isFinite(at)) {
+      total += tokens; // 月汇总口径兜底：无法判龄，按整月计
+      continue;
+    }
+    if (monthKeyOf(r.at) !== monthKey) continue;
+    total += tokens * 0.5 ** (Math.max(0, now - at) / halfLifeMs);
+  }
+  return total;
+}
+
+/**
+ * 本月已过时间比例（0,1]，`pace` 档的分母。
+ *
+ * 下限取「一个月的一毫秒分之一」而不是 0：月初除零会得到 Infinity，
+ * 排序里出现 Infinity 比较虽然还能用，但界面上解释不清；给一个极小值即可，
+ * 反正所有候选同除一个分母，顺序不受影响。
+ */
+export function monthElapsedFraction(now = Date.now()): number {
+  const d = new Date(now);
+  const start = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+  const end = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+  if (!(end > start)) return 1;
+  const raw = (now - start) / (end - start);
+  return Math.min(1, Math.max(1 / (end - start), raw));
+}
+
 export function summarizeMonth(
   records: UsageRecord[],
   monthKey: string,

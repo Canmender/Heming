@@ -126,6 +126,7 @@ describe("ui store 导航顺序", () => {
       "staff",
       "infohub",
       "automations",
+      "modelroute",
       "plugins",
       "memory",
       "settings",
@@ -134,9 +135,9 @@ describe("ui store 导航顺序", () => {
 
   it("moveNav 上移/下移生效并落盘", () => {
     useUiStore.getState().moveNav("memory", -1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(6);
-    useUiStore.getState().moveNav("memory", 1);
     expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(7);
+    useUiStore.getState().moveNav("memory", 1);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(8);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
       useUiStore.getState().navOrder,
     );
@@ -168,6 +169,7 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "staff",
       "infohub",
       "automations",
+      "modelroute",
       "plugins",
       "settings",
     ]);
@@ -186,7 +188,18 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
         "interfaces",
         "memory",
       ]),
-    ).toEqual(["settings", "team", "home", "plugins", "chat", "memory", "staff", "infohub", "automations"]);
+    ).toEqual([
+      "settings",
+      "team",
+      "home",
+      "plugins",
+      "chat",
+      "memory",
+      "staff",
+      "infohub",
+      "automations",
+      "modelroute",
+    ]);
   });
 
   it("非数组/损坏 JSON → 默认顺序", () => {
@@ -200,6 +213,7 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "staff",
       "infohub",
       "automations",
+      "modelroute",
       "plugins",
       "memory",
     ]);
@@ -229,6 +243,7 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "staff",
       "infohub",
       "automations",
+      "modelroute",
       "plugins",
     ]);
   });

@@ -31,6 +31,11 @@ export const PALETTE_PAGES: PalettePage[] = [
   { page: "infohub", label: "信息中枢", description: "本机 QQ / 微信归档检索与日程" },
   { page: "automations", label: "自动化", description: "本机定时同步与重扫日程" },
   {
+    page: "modelroute",
+    label: "模型路由",
+    description: "候选链与选路策略、冷却与逐候选用量（magpie 语义移植）",
+  },
+  {
     page: "plugins",
     label: "插件区",
     description: "能力中心：插件包、技能池、工具与 MCP 服务",

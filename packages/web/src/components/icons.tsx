@@ -88,6 +88,18 @@ export const InfoHubIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M16 15.5 12.5 13" />
   </svg>
 );
+/** 模型路由：三个入口汇到一个节点再分出去——候选链与选路（magpie 语义）。 */
+export const RouteIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 6h4.5a3 3 0 0 1 3 3v6a3 3 0 0 0 3 3H20" />
+    <path d="M4 18h4.5a3 3 0 0 0 3-3" />
+    <path d="M4 12h7" />
+    <path d="m17 15 3 3-3 3" />
+    <circle cx="4" cy="6" r="1.4" />
+    <circle cx="4" cy="12" r="1.4" />
+    <circle cx="4" cy="18" r="1.4" />
+  </svg>
+);
 export const GearIcon = (p: SVGProps<SVGSVGElement>) => (  <svg {...base(p)}>
     <circle cx="12" cy="12" r="3" />
     <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z" />

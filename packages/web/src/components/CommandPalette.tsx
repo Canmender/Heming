@@ -13,6 +13,7 @@ import { readLocalSnapshot, type LocalSnapshot } from "../lib/palette/local.js";
 import { PALETTE_PAGES, shortcutLabel } from "../lib/palette/pages.js";
 import { pluginStore } from "../lib/plugins/index.js";
 import { effectiveModuleIds, useModuleStore } from "../lib/modules/store.js";
+import { MODULE_IDS } from "../lib/modules/registry.js";
 import { filterPalettePages } from "../lib/modules/nav.js";
 import { skillPool } from "../lib/skills/index.js";
 
@@ -417,7 +418,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                       <span className="block truncate">{item.name}</span>
                       <span className="block truncate text-[10px] text-muted">
                         {item.detail}
-                        {item.actionId === "modules" ? ` · 已启用 ${effectiveModuleCount}/3` : null}
+                        {item.actionId === "modules" ? ` · 已启用 ${effectiveModuleCount}/${MODULE_IDS.length}` : null}
                       </span>
                     </span>
                     {item.kind === "page" && shortcutLabel(item.digit) ? (

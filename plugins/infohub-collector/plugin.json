@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 3,
+  "id": "heming.infohub-collector",
+  "name": "InfoHub 采集桥",
+  "version": "0.1.0",
+  "description": "把本机 InfoHub（QQ/微信归档）接成和鸣的采集能力：采集状态、增量采集、归档检索、会话与日程。只连本机 127.0.0.1；采集会写本机归档，执行前仍要你确认。",
+  "author": "和鸣",
+  "permissions": {
+    "network": ["127.0.0.1:8776"],
+    "tools": "write",
+    "files": []
+  },
+  "contributions": {
+    "skills": [
+      {
+        "name": "本机归档采集与查询",
+        "description": "通过 InfoHub 采集桥（本机 MCP 服务）看采集状态、增量采集 QQ/微信消息、检索归档、读会话、看日程。",
+        "triggers": ["采集", "同步消息", "归档", "聊天记录", "QQ", "微信", "日程"],
+        "tags": ["本机", "归档", "信息采集"],
+        "instructions": "本机有一个 InfoHub 归档库（QQ 与微信消息的只读归档），通过插件「InfoHub 采集桥」提供的 MCP 工具访问。工具都只连本机 127.0.0.1，数据不出设备。\n\n可用工具：\n- infohub_status：看采集状态与归档规模（会话数、消息数、最近一次采集时间）。回答「最近采过吗 / 有多少消息」前先调它。\n- infohub_sync：增量采集。参数 sources 可选 [\"qq\"]、[\"wechat\"] 或两者（缺省用 InfoHub 里已启用的来源）。这是写操作，会真的去读本机聊天数据库，调用前必须让用户确认来源与范围——用户说「都同步」也要先复述一遍再调用。\n- infohub_archive_search：全文检索归档，返回命中摘要与会话引用；引用时写清「来自本机归档」以及会话名与时间。\n- infohub_archive_read：按会话 id 读最近若干条消息，只读。\n- infohub_archive_agenda：从消息里识别出的日程（逾期 / 今天 / 本周），适合回答「最近有什么要办的」。\n\n使用边界（必须遵守）：\n1. 归档内容只在本机，不要建议把原文上传到任何云端服务；引用时只带与问题相关的片段。\n2. 采集、重扫这类写操作走人工确认；被拒绝就停下如实说明，不要换个说法再试。\n3. 工具不可用（服务没启动 / 未连接）时直接说「采集桥没连上，请在 InfoHub 里启动采集桥」，不要编造归档内容。\n4. 不要把归档里的消息当作用户当前会话的内容；回答时注明来源是本机 QQ/微信归档。"
+      }
+    ],
+    "mcpServers": [
+      {
+        "key": "infohub",
+        "name": "InfoHub 采集桥",
+        "url": "http://127.0.0.1:8776/mcp",
+        "description": "InfoHub 本机 MCP 服务（只监听 127.0.0.1）：采集状态、增量采集、归档检索、会话与日程"
+      }
+    ],
+    "commands": [
+      {
+        "id": "infohub-status",
+        "title": "查看采集状态",
+        "description": "打开信息中枢，看最近一次采集与归档规模",
+        "keywords": ["采集", "同步", "归档"],
+        "target": { "kind": "page", "page": "infohub" }
+      },
+      {
+        "id": "infohub-collect",
+        "title": "采集本机消息",
+        "description": "打开信息中枢，勾选来源后手动采集",
+        "keywords": ["采集", "QQ", "微信"],
+        "target": { "kind": "page", "page": "infohub" }
+      }
+    ]
+  }
+}

@@ -46,6 +46,9 @@ const InfohubPage = lazy(() =>
 const AutomationPage = lazy(() =>
   import("./components/AutomationPage.js").then((m) => ({ default: m.AutomationPage })),
 );
+const ModelRoutePage = lazy(() =>
+  import("./components/ModelRoutePage.js").then((m) => ({ default: m.ModelRoutePage })),
+);
 const PluginsPage = lazy(() =>
   import("./components/PluginsPage.js").then((m) => ({ default: m.PluginsPage })),
 );
@@ -716,6 +719,9 @@ function AppShell({
     ) : currentPage === "automations" ? (
       // 自动化：本机定时同步/重扫，只在和鸣运行且信息中枢已连接时执行
       <AutomationPage />
+    ) : currentPage === "modelroute" ? (
+      // 模型路由（d.84，magpie 语义移植）：候选链、选路策略、冷却与用量
+      <ModelRoutePage />
     ) : currentPage === "plugins" ? (
       // 插件区（能力中心）：插件包 + 技能池 + 工具 + MCP 服务，四个 Tab
       <PluginsPage />

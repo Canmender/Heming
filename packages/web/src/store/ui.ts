@@ -24,6 +24,7 @@ export type Page =
   | "staff"
   | "infohub"
   | "automations"
+  | "modelroute"
   | "plugins"
   | "memory"
   | "settings";
@@ -69,6 +70,8 @@ export const DEFAULT_NAV_ORDER: NavPage[] = [
   "staff",
   "infohub",
   "automations",
+  // magpie 语义移植（d.84 模块）：候选链/策略/冷却/用量，与其它内置模块同组
+  "modelroute",
   "plugins",
   "memory",
   "settings",
@@ -154,9 +157,15 @@ export function readStoredNavOrder(storage: Pick<Storage, "getItem"> | null): Na
   try {
     const raw = storage.getItem(NAV_ORDER_KEY);
     if (!raw) return [...DEFAULT_NAV_ORDER];
-    const order = normalizeNavOrder(JSON.parse(raw));
-    // 没动过顺序的老用户：跟随新版默认顺序（见 LEGACY_DEFAULT_NAV_ORDER 注释）
-    return sameOrder(order, LEGACY_DEFAULT_NAV_ORDER) ? [...DEFAULT_NAV_ORDER] : order;
+    const parsed = JSON.parse(raw) as unknown;
+    const order = normalizeNavOrder(parsed);
+    // 没动过顺序的老用户：跟随新版默认顺序（见 LEGACY_DEFAULT_NAV_ORDER 注释）。
+    // 判据用**存储里的原始数组**而不是 normalize 之后的结果：normalize 会把新页补在末尾，
+    // 拿补完的结果去比旧默认永远不相等——d.84 新增「模型路由」时正是这样漏掉的。
+    const stored = Array.isArray(parsed) ? parsed : null;
+    const followsLegacyDefault =
+      stored !== null && sameOrder(stored as NavPage[], LEGACY_DEFAULT_NAV_ORDER);
+    return followsLegacyDefault ? [...DEFAULT_NAV_ORDER] : order;
   } catch {
     return [...DEFAULT_NAV_ORDER];
   }

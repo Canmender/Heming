@@ -30,6 +30,7 @@ export const NAV_GROUP_OF: Record<NavPage, NavGroupId> = {
   staff: "modules",
   infohub: "modules",
   automations: "modules",
+  modelroute: "modules",
   memory: "resources",
   plugins: "resources",
   settings: "system",
