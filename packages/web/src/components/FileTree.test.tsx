@@ -21,7 +21,7 @@ describe("FileTree", () => {
 
   it("全空时给统一空态说明（告诉用户下一步在哪上传/绑定）", () => {
     render(<FileTree items={[]} localPaths={[]} />);
-    expect(screen.getByText("还没有文件；在输入框上传或从工作区绑定")).toBeInTheDocument();
+    expect(screen.getByText("还没有文件。点上方「上传」或「绑定」，把文件放进来。")).toBeInTheDocument();
     // 空态下不再显示两个各自为政的分区占位
     expect(screen.queryByText("未绑定本地目录")).not.toBeInTheDocument();
     expect(screen.queryByText("（空）")).not.toBeInTheDocument();

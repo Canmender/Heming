@@ -408,7 +408,7 @@ function AudioBubble({
     };
   }, [fileId, fileKey, mime]);
 
-  if (err) return <div className="mt-1 text-[11px] text-[#b42318]">音频加载失败：{err}</div>;
+  if (err) return <div role="alert" className="mt-1 text-[11px] text-[#b42318]">音频加载失败：{err}</div>;
   return url ? (
     <audio
       controls

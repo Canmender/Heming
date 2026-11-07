@@ -47,7 +47,7 @@ export function InfohubHomeCard() {
         <p className="mt-1 text-[11px] leading-relaxed text-muted">
           读本机的 QQ / 微信聊天记录；连接后智能体能检索归档、看日程。
         </p>
-        {error && <p className="mt-1 text-[11px] text-[#b42318]">{error}</p>}
+        {error && <p role="alert" className="mt-1 text-[11px] text-[#b42318]">{error}</p>}
       </section>
     );
   }
@@ -109,7 +109,7 @@ export function InfohubHomeCard() {
         </div>
       )}
 
-      {error && <p className="mt-1.5 text-[11px] text-[#b42318]">{error}</p>}
+      {error && <p role="alert" className="mt-1.5 text-[11px] text-[#b42318]">{error}</p>}
     </section>
   );
 }

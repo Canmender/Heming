@@ -455,7 +455,7 @@ export function HomePage() {
               </div>
             ) : teamError ? (
               <div className="flex items-center justify-between gap-2 py-1.5 text-[12px]">
-                <span className="min-w-0 truncate text-[#b42318]">加载失败：{teamError}</span>
+                <span role="alert" className="min-w-0 truncate text-[#b42318]">加载失败：{teamError}</span>
                 <button
                   type="button"
                   onClick={loadTeam}
@@ -547,7 +547,7 @@ export function HomePage() {
                 ))}
               </div>
             ) : teamError ? (
-              <div className="text-[12px] text-[#b42318]">加载失败：{teamError}</div>
+              <div role="alert" className="text-[12px] text-[#b42318]">加载失败：{teamError}</div>
             ) : onlineMembers.length === 0 ? (
               <EmptyState compact className="px-0 py-2" title="当前没有人在线" />
             ) : (

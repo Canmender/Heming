@@ -154,7 +154,7 @@ export function FilePreviewModal({ file, onClose }: { file: SharedFileMeta; onCl
   } else if (status === "error") {
     body = (
       <div className="py-6 text-center">
-        <div className="mb-3 text-[13px] text-red-600">加载失败：{error}</div>
+        <div role="alert" className="mb-3 text-[13px] text-red-600">加载失败：{error}</div>
         <button
           type="button"
           onClick={() => setAttempt((a) => a + 1)}

@@ -142,7 +142,7 @@ export function FileTree({ items, localPaths, onSendToConversation, onPreview }:
     return (
       <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-panel px-4 py-6 text-center">
         <FolderIcon width={20} height={20} className="text-line-strong" />
-        <p className="text-[11px] leading-relaxed text-muted">还没有文件；在输入框上传或从工作区绑定</p>
+        <p className="text-[11px] leading-relaxed text-muted">还没有文件。点上方「上传」或「绑定」，把文件放进来。</p>
       </div>
     );
   }
