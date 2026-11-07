@@ -78,6 +78,37 @@ describe("UnboundModelNotice（三处同源）", () => {
     expect(unboundNoticeText("和小鸣")).toContain("和小鸣");
   });
 
+  it("本机已有连接：提示条里就地给选择器，选中即回调绑定（d.82）", () => {
+    const bind = vi.fn();
+    render(
+      <UnboundModelNotice
+        agentName="和小鸣"
+        connections={[
+          { id: "p1", label: "DeepSeek" },
+          { id: "p2", label: "Moonshot" },
+        ]}
+        onBind={bind}
+        onGoSettings={vi.fn()}
+      />,
+    );
+    const picker = screen.getByLabelText("选择要绑定的模型连接");
+    fireEvent.change(picker, { target: { value: "p2" } });
+    expect(bind).toHaveBeenCalledWith("p2");
+    // 有快捷绑定时主按钮是「管理连接」，不是把用户再送去设置页
+    expect(screen.getByRole("button", { name: "管理连接" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "去设置" })).toBeNull();
+  });
+
+  it("没有可用连接（或没传 onBind）：不渲染选择器，避免空下拉", () => {
+    const { unmount } = render(
+      <UnboundModelNotice agentName="X" onGoSettings={vi.fn()} connections={[]} onBind={vi.fn()} />,
+    );
+    expect(screen.queryByLabelText("选择要绑定的模型连接")).toBeNull();
+    unmount();
+    render(<UnboundModelNotice agentName="X" onGoSettings={vi.fn()} />);
+    expect(screen.queryByLabelText("选择要绑定的模型连接")).toBeNull();
+  });
+
   it("常驻指引不占 live region：不抢「生成中/失败」的状态播报", () => {
     render(<UnboundModelNotice agentName="X" onGoSettings={vi.fn()} />);
     // role=status 只留给真正的状态变化；这里是静态说明

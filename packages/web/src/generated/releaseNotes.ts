@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.82.2.42.0",
+    "date": "2026-11-07",
+    "title": "第一次配模型少绕两圈",
+    "bullets": [
+      "已经配过连接、只是某个智能体没绑定时，对话页提示条里可以直接选一个用，不用再跳去设置。",
+      "设置·模型点「常用服务商」预设后，只剩 API Key 要填，光标已经停在那里。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.81.2.42.0",
     "date": "2026-11-07",
     "title": "更新日志改说人话；记忆区少跑一趟",

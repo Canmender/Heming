@@ -4143,6 +4143,25 @@ describe("UX-A 未绑定模型与对话空态", () => {
     expect(useUiStore.getState().settingsTab).toBe("model");
   });
 
+  it("本机已有连接但未绑定：提示条里直接选一个就能绑上（d.82）", async () => {
+    useLlmStore.setState({ profiles: [testProfile], bindings: {}, prompts: {} });
+    render(<ChatPage />);
+    await act(async () => {});
+
+    const noticeBox = document.getElementById("unbound-model-notice")!;
+    expect(noticeBox).not.toBeNull();
+    const picker = within(noticeBox).getByLabelText("选择要绑定的模型连接");
+    fireEvent.change(picker, { target: { value: "p1" } });
+
+    // 绑定写进本机绑定表，提示条随之消失（同一判定驱动）
+    expect(useLlmStore.getState().bindings["system-assistant"]).toBe("p1");
+    await waitFor(() =>
+      expect(screen.queryByText(/当前智能体还没有绑定模型连接/)).toBeNull(),
+    );
+    // 拿不准管理连接时仍可去设置：按钮改叫「管理连接」
+    expect(screen.queryByRole("button", { name: "去设置" })).toBeNull();
+  });
+
   it("通道状态只描述实时通道，不与「未绑定模型」互相矛盾（P1-3）", async () => {
     render(<ChatPage />);
     await act(async () => {});

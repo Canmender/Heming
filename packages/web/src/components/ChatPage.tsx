@@ -932,6 +932,8 @@ export function ChatPage({
    */
   const llmProfiles = useLlmStore((s) => s.profiles);
   const llmBindings = useLlmStore((s) => s.bindings);
+  /** 「未绑定」提示条里的就地绑定：写本机 agentLlm，与智能体编辑弹窗同一条路径。 */
+  const setAgentBinding = useLlmStore((s) => s.setBinding);
   const toolsNotice = useMemo(() => {
     if (mcpRegistry.enabledTools().length === 0) return null;
     return capabilityNotice(
@@ -2986,6 +2988,9 @@ export function ChatPage({
               id={UNBOUND_NOTICE_ID}
               variant="inline"
               agentName={unboundAgent.name}
+              // 本机已有连接：提示条里直接选一个就绑上，不用再跳设置页绕一圈（d.82）
+              connections={llmProfiles.map((p) => ({ id: p.id, label: p.label }))}
+              onBind={(profileId) => setAgentBinding(unboundAgent.agentId, profileId)}
               onGoSettings={() => useUiStore.getState().openSettings("model")}
             />
           </div>

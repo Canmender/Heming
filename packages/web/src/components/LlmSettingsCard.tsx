@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLlmStore, type LlmProfile, type LlmProvider } from "../store/llm.js";
 import { testConnection } from "../lib/llmClient.js";
 import { LLM_PRESETS, findPreset } from "../lib/llmPresets.js";
@@ -117,7 +117,18 @@ export function LlmSettingsCard() {
     setOpen(true);
   };
 
-  /** 点预设：填好协议 / Base URL / 模型，并展开表单（用户仍可继续改）。 */
+  const apiKeyRef = useRef<HTMLInputElement | null>(null);
+  /** 预设填好表单后把焦点交给 API Key：其余字段都已填好，唯一还要动手的就是它。 */
+  const focusKeyAfterOpen = useRef(false);
+
+  useEffect(() => {
+    if (open && focusKeyAfterOpen.current) {
+      focusKeyAfterOpen.current = false;
+      apiKeyRef.current?.focus();
+    }
+  }, [open]);
+
+  /** 点预设：填好协议 / Base URL / 模型 / 名称，并展开表单、聚焦 API Key（用户仍可继续改）。 */
   const applyPreset = (presetId: string) => {
     const preset = findPreset(presetId);
     if (!preset) return;
@@ -126,6 +137,7 @@ export function LlmSettingsCard() {
     setModel(preset.model);
     if (!label.trim()) setLabel(preset.label);
     setError(null);
+    focusKeyAfterOpen.current = true;
     setOpen(true);
   };
 
@@ -229,8 +241,11 @@ export function LlmSettingsCard() {
         ))}
       </div>
 
-      {profiles.length === 0 && !open && (
-        <div className="mt-3 ui-caption">还没有 LLM 连接</div>
+      {profiles.length === 0 && (
+        <div className="mt-3 ui-caption">
+          还没有 LLM 连接：点上面的服务商预设，其余字段会填好，只需补一个 API Key。
+          保存后到「智能体」页，未绑定的提示条里能直接选这条连接。
+        </div>
       )}
 
       {profiles.map((p) => {
@@ -433,6 +448,7 @@ export function LlmSettingsCard() {
               API Key
               <input
                 aria-label="API Key"
+                ref={apiKeyRef}
                 type="password"
                 value={apiKey}
                 autoComplete="off"

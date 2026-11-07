@@ -26,6 +26,13 @@ export interface UnboundModelNoticeProps {
   /** 「去设置」的动作（跳设置页 / 打开设置弹窗）；不传则不渲染按钮。 */
   onGoSettings?: () => void;
   /**
+   * 本机已有的模型连接。传了且非空时，提示条里直接给一个选择器——
+   * 「本机明明有连接、只是这个智能体没绑」不该让用户再跳去设置找一遍（d.82）。
+   */
+  connections?: { id: string; label: string }[];
+  /** 选中连接后的动作（写本机绑定）；不传则不渲染选择器。 */
+  onBind?: (profileId: string) => void;
+  /**
    * 视觉形态：
    * - `card`：任务区那种独立卡片（表单里的一整块提示）；
    * - `inline`：对话页输入区上方的一条提示（贴边、不抢版面）。
@@ -40,10 +47,13 @@ export const UNBOUND_NOTICE_ID = "unbound-model-notice";
 export function UnboundModelNotice({
   agentName,
   onGoSettings,
+  connections,
+  onBind,
   variant = "card",
   id = UNBOUND_NOTICE_ID,
 }: UnboundModelNoticeProps) {
   const text = unboundNoticeText(agentName);
+  const canQuickBind = Boolean(onBind) && (connections?.length ?? 0) > 0;
   const base =
     variant === "card"
       ? "rounded-lg border border-[#fed7aa] bg-[#fffbeb] px-3 py-2 text-[12px] leading-5 text-[#b45309]"
@@ -57,13 +67,36 @@ export function UnboundModelNotice({
       className={`${base} flex flex-wrap items-center gap-2`}
     >
       <span className="min-w-0 flex-1">{text}</span>
+      {canQuickBind && (
+        <label className="flex shrink-0 items-center gap-1 text-[11px]">
+          <span className="whitespace-nowrap">用本机连接</span>
+          <select
+            aria-label="选择要绑定的模型连接"
+            value=""
+            onChange={(e) => {
+              const id = e.target.value;
+              if (!id) return;
+              e.target.value = "";
+              onBind?.(id);
+            }}
+            className="ui-input w-auto"
+          >
+            <option value="">选择…</option>
+            {connections?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {onGoSettings && (
         <button
           type="button"
           onClick={onGoSettings}
           className={`shrink-0 rounded-sm border border-[#e6b3ae] px-2 py-0.5 text-[11px] text-[#92400e] hover:bg-[#fef3f2] ${FOCUS_RING_TIGHT}`}
         >
-          去设置
+          {canQuickBind ? "管理连接" : "去设置"}
         </button>
       )}
     </div>

@@ -24,6 +24,20 @@ describe("LlmSettingsCard", () => {
     expect(JSON.parse(localStorage.getItem("heming.llmConfigs")!).profiles[0].apiKey).toBe("sk-test");
   });
 
+  it("点服务商预设：填好名称/模型/Base URL，并把焦点交给 API Key（首跑少填两项）", async () => {
+    render(<LlmSettingsCard />);
+    fireEvent.click(screen.getByRole("button", { name: "套用预设 DeepSeek" }));
+
+    expect((screen.getByLabelText("名称") as HTMLInputElement).value).toBe("DeepSeek");
+    expect((screen.getByLabelText("模型") as HTMLInputElement).value).toBe("deepseek-chat");
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
+      "https://api.deepseek.com/v1",
+    );
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("API Key")));
+    // 空态文案说清下一步（预设 + 只补 Key + 去智能体绑）
+    expect(screen.getByText(/只需补一个 API Key/)).toBeInTheDocument();
+  });
+
   it("连通性测试失败展示原因", async () => {
     useLlmStore.getState().addProfile({ id: "p1", label: "断的", provider: "openai", baseUrl: "http://127.0.0.1:1/v1", apiKey: "k", model: "m" });
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("fetch failed"));
