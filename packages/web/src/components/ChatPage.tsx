@@ -26,6 +26,7 @@ import {
   expandCount,
   shouldLoadMore,
 } from "../lib/messageWindow.js";
+import { readChatScroll, writeChatScroll } from "../lib/chatScroll.js";
 import { useTaskStore } from "../lib/tasks/store.js";
 import { resolveForkRun } from "../lib/tasks/forkTask.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
@@ -1146,15 +1147,72 @@ export function ChatPage({
     prevScrollHeightRef.current = el.scrollHeight;
     setWindowCount((count) => expandCount(count, visibleMessages.length));
   }, [windowCount, visibleMessages.length]);
-  // 切会话：窗口回到初始值（回到该会话时从最近的一窗开始看）。
-  // A3：阅读位置复位到最新消息——切进来先看到的是「现在」，不是上次翻到一半的位置。
+  /**
+   * 切会话：优先恢复这个会话上次的阅读位置（d.83）。
+   *
+   * - 没有记录 / 上次本来就贴着最新 → 从最新看起（保持原行为）；
+   * - 上次停在历史里 → 记下目标位置，等消息渲染出足够高度后落位（见下一个 effect），
+   *   窗口化只增不减，所以恢复时要先把窗口展开到上次那一窗，深历史才回得去。
+   */
+  const pendingScrollRestore = useRef<{ top: number; windowCount: number } | null>(null);
   useEffect(() => {
-    setWindowCount(DEFAULT_WINDOW);
+    const saved = readChatScroll(convId);
     prevScrollHeightRef.current = null;
-    atBottomRef.current = true;
     setNewBelow(false);
+    if (saved && !saved.atBottom) {
+      atBottomRef.current = false;
+      setWindowCount((count) => Math.max(count, DEFAULT_WINDOW, saved.windowCount));
+      pendingScrollRestore.current = { top: saved.top, windowCount: saved.windowCount };
+      return;
+    }
+    atBottomRef.current = true;
+    setWindowCount(DEFAULT_WINDOW);
     bottomRef.current?.scrollIntoView({ behavior: "auto" });
   }, [convId]);
+
+  /**
+   * 落位：消息到齐、DOM 高度足够后再设 scrollTop。
+   *
+   * 高度不够（窗口化把深历史切掉了）就再放一窗，下一轮再试；已经加载全部仍不够时
+   * 只能停在能滚到的最深处——不为了对齐数字无限加载历史。
+   * 首帧量不出高度（布局未完成 / jsdom）时挂一帧 rAF 重试，最多 30 帧，避免空转。
+   */
+  const restoreRaf = useRef<number | null>(null);
+  const restoreAttempts = useRef(0);
+  const applyPendingScrollRestore = useCallback(() => {
+    const pending = pendingScrollRestore.current;
+    if (!pending) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 0) {
+      if (restoreAttempts.current >= 30 || restoreRaf.current !== null) return;
+      restoreAttempts.current += 1;
+      restoreRaf.current = window.requestAnimationFrame(() => {
+        restoreRaf.current = null;
+        applyPendingScrollRestore();
+      });
+      return;
+    }
+    if (pending.top > max + 24 && windowCount < visibleMessages.length) {
+      setWindowCount((count) => expandCount(count, visibleMessages.length));
+      return;
+    }
+    pendingScrollRestore.current = null;
+    restoreAttempts.current = 0;
+    el.scrollTop = Math.max(0, Math.min(pending.top, max));
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    atBottomRef.current = distance < STICK_BOTTOM_PX;
+  }, [windowCount, visibleMessages.length]);
+  useLayoutEffect(() => {
+    applyPendingScrollRestore();
+  }, [applyPendingScrollRestore, messagesLoading, convId]);
+  useEffect(
+    () => () => {
+      if (restoreRaf.current !== null) window.cancelAnimationFrame(restoreRaf.current);
+    },
+    [],
+  );
   // 追加后补偿滚动位置：上方长出来的高度要加回 scrollTop，否则正在看的内容会跳走。
   // 用 useLayoutEffect 是为了在绘制前完成补偿，避免看到一帧跳动。
   useLayoutEffect(() => {
@@ -2444,6 +2502,49 @@ export function ChatPage({
     bottomRef.current?.scrollIntoView({ behavior });
   }, []);
 
+  /**
+   * 阅读位置写盘（d.83）：滚动时采样，节流 200ms 写一次；页面隐藏/卸载时补最后一次。
+   * 只记 scrollTop / 是否贴底 / 当前窗口，不碰消息内容。
+   */
+  const pendingScrollSave = useRef<{
+    convId: string;
+    top: number;
+    atBottom: boolean;
+    windowCount: number;
+  } | null>(null);
+  const scrollSaveTimer = useRef<number | null>(null);
+  const flushScrollSave = useCallback(() => {
+    const v = pendingScrollSave.current;
+    if (!v) return;
+    pendingScrollSave.current = null;
+    writeChatScroll(v.convId, { top: v.top, atBottom: v.atBottom, windowCount: v.windowCount });
+  }, []);
+  const scheduleScrollSave = useCallback(
+    (top: number, atBottom: boolean) => {
+      pendingScrollSave.current = { convId, top, atBottom, windowCount };
+      if (scrollSaveTimer.current !== null) return;
+      scrollSaveTimer.current = window.setTimeout(() => {
+        scrollSaveTimer.current = null;
+        flushScrollSave();
+      }, 200);
+    },
+    [convId, windowCount, flushScrollSave],
+  );
+  useEffect(() => {
+    const flush = () => flushScrollSave();
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      if (scrollSaveTimer.current !== null) {
+        window.clearTimeout(scrollSaveTimer.current);
+        scrollSaveTimer.current = null;
+      }
+      flushScrollSave();
+    };
+  }, [flushScrollSave]);
+
   /** 消息区滚动：更新贴底判定（<80px 视为贴底），顺带触发「加载更早」。 */
   const onMessageScroll = () => {
     const el = scrollRef.current;
@@ -2452,6 +2553,7 @@ export function ChatPage({
     const atBottom = distance < STICK_BOTTOM_PX;
     atBottomRef.current = atBottom;
     if (atBottom) setNewBelow(false); // 自己滚回底部即视为看过
+    scheduleScrollSave(el.scrollTop, atBottom);
     if (shouldLoadMore(el.scrollTop, visibleMessages.length, windowCount)) {
       loadEarlierMessages();
     }

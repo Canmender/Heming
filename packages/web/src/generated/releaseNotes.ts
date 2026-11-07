@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.83.2.42.0",
+    "date": "2026-11-07",
+    "title": "刷新/切回会话，回到上次读到的位置",
+    "bullets": [
+      "在长对话里往上翻着看，按 F5 或切到别的会话再回来，仍停在那一屏。",
+      "本来就在看最新消息的话，回来还是跟着最新消息走。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.82.2.42.0",
     "date": "2026-11-07",
     "title": "第一次配模型少绕两圈",

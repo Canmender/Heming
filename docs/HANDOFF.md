@@ -230,6 +230,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 ## 5. 下一步候选
 
+**本体第六轮已完成（分支 `feat/d77-heming-core`，`d.83.2.42.0`；未合入 main、未部署）**：会话阅读位置恢复——新增 `lib/chatScroll.ts`，按会话 id 把 `{scrollTop, 是否贴底, 窗口大小}` 存进 **sessionStorage**（`heming.chatScroll.v1:<convId>`，刷新保留、关窗清空），切会话/刷新回到上次那一屏，贴底则继续跟随最新（不浮出「↓ 新消息」）；配合消息窗口化：恢复时逐窗展开深历史、首帧量不出高度时挂 rAF 重试（≤30 帧）、`pagehide`/卸载补最后一次写盘；只存位置数字不存正文，脏值回落 null。任务区快捷绑定、消息锚点式精确恢复留候选。规格 `docs/superpowers/specs/2026-11-07-heming-core-round6.md`。**下一步候选**：① 消息锚点式阅读位置（图片/图表导致高度变化时像素方案会漂）；② 任务区运行卡快捷绑定（需先定绑定哪个智能体）；③ 旧版本 RELEASE-NOTES 回填；④ 在线口径需产品拍板。
+
 **本体第五轮已完成（分支 `feat/d77-heming-core`，`d.82.2.42.0`；未合入 main、未部署）**：第一次配模型少绕两圈——① `UnboundModelNotice` 新增 `connections` / `onBind`：本机已有连接、只是当前智能体没绑时，对话页提示条里直接选一个就写本机绑定（`heming.agentLlm`），提示与发送禁用同时消失，按钮改叫「管理连接」；没有可用连接时保持原样「去设置」。② 设置·模型点常用服务商预设后名称/协议/Base URL/模型都填好、**焦点落到 API Key**，首跑说明在表单打开时也保留（点预设 → 只需补 Key → 保存后到智能体页绑定）。任务区两处未改快捷绑定（启动面板未选定智能体、运行卡语义另议）。真机端到端 0 error。规格 `docs/superpowers/specs/2026-11-07-heming-core-round5.md`。**下一步候选**：① 会话消息滚动位置恢复；② 任务区运行卡快捷绑定（需先定绑定哪个智能体）；③ 旧版本 RELEASE-NOTES 回填；④ 在线口径需产品拍板。
 
 **本体第四轮已完成（分支 `feat/d77-heming-core`，`d.81.2.42.0`；未合入 main、未部署）**：把「更新日志」拆成两份文本——新增 `docs/RELEASE-NOTES.md`（面向用户，一句一条，不写文件名/根因/测试数字），`build-changelog.mjs` 一并生成 `generated/releaseNotes.ts`；设置·关于的条目标题与展开内容改用用户版说明，**未收录版本只显示「工程记录见仓库 CHANGELOG.md」不回退细节**，首页「最近更新」改取 `latestUserUpdates(3)`；已回填最近 5 版并在文件头写维护约定。同轮修记忆区入口摩擦：未选智能体时提示条里就地给选择器（与页头同一 state），个人知识库徽标不再写死 0（数字不准就不显示）。规格 `docs/superpowers/specs/2026-11-07-heming-core-round4.md`。**下一步候选**：① 模型 Tab 首次配置「一步接上」引导；② 会话消息滚动位置恢复；③ 旧版本 RELEASE-NOTES 回填；④ 在线口径（在线=实时通道 vs 打开应用即在线）需产品拍板。

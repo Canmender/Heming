@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import type { Message, User, WsClientEvent } from "@heming/shared";
 import { ChatPage, clampComposerHeight } from "./ChatPage.js";
+import { readChatScroll, writeChatScroll } from "../lib/chatScroll.js";
 import { useUiStore } from "../store/ui.js";
 import { useChatStore } from "../store/chat.js";
 import { useAuthStore } from "../store/auth.js";
@@ -3136,6 +3137,46 @@ describe("ChatPage", () => {
   });
 
 
+
+  it("d.83 刷新/切回会话恢复上次阅读位置；写盘只记位置不记内容", async () => {
+    const many = Array.from({ length: 120 }, (_, i) =>
+      msg(`s${i}`, `行 ${i}`, `2026-10-14T0${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}:00.000Z`),
+    );
+    mockMessagesFetch(many);
+    // 上次停在中段（不是贴底）
+    writeChatScroll("c1", { top: 420, atBottom: false, windowCount: 60 });
+
+    render(<ChatPage />);
+    const list = screen.getByTestId("message-list");
+    Object.defineProperty(list, "scrollHeight", { value: 2000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+
+    await waitFor(() => expect(screen.getByText("行 119")).toBeInTheDocument());
+    await waitFor(() => expect(list.scrollTop).toBe(420));
+
+    // 滚动会把新位置写回；存的东西只有位置，没有消息正文
+    fireEvent.scroll(list);
+    await waitFor(() => {
+      const saved = readChatScroll("c1");
+      expect(saved).toMatchObject({ atBottom: false });
+      expect(saved!.top).toBe(420);
+    });
+    expect(sessionStorage.getItem("heming.chatScroll.v1:c1")).not.toMatch(/行 119/);
+  });
+
+  it("d.83 上次贴着最新消息：切回来仍然从最新看起（不回放旧像素位置）", async () => {
+    const many = Array.from({ length: 120 }, (_, i) =>
+      msg(`b${i}`, `第 ${i} 条`, `2026-10-14T0${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}:00.000Z`),
+    );
+    mockMessagesFetch(many);
+    writeChatScroll("c1", { top: 900, atBottom: true, windowCount: 60 });
+    render(<ChatPage />);
+    await act(async () => {});
+    await waitFor(() => expect(screen.getByText("第 119 条")).toBeInTheDocument());
+    // 贴底状态：不恢复旧像素位置（既不设 900，也不该把「↓ 新消息」浮出来）
+    expect(screen.queryByRole("button", { name: "滚动到最新消息" })).toBeNull();
+    expect(readChatScroll("c1")?.atBottom).toBe(true);
+  });
 
   // —— d.37 连续性对抗用例（adversarial QA 2026-10-28）——
 
