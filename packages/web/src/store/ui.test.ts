@@ -1,5 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useUiStore, DEFAULT_NAV_ORDER, normalizeNavOrder, readStoredNavOrder, resolvePage } from "./ui.js";
+import {
+  useUiStore,
+  DEFAULT_NAV_ORDER,
+  normalizeNavOrder,
+  readStoredNavOrder,
+  readSessionView,
+  writeSessionView,
+  resolvePage,
+  SESSION_VIEW_KEY,
+} from "./ui.js";
 import { NAV_MODE_KEY } from "../lib/navPrefs.js";
 import { useModuleStore } from "../lib/modules/store.js";
 
@@ -40,6 +49,65 @@ describe("ui store 页面与会话状态", () => {
       .sendFileToConversation("c1", { id: "f1", name: "a", mime: "text/plain", size: 1 });
     useUiStore.getState().setPage("home");
     expect(useUiStore.getState().pendingAttachment).toBeNull();
+  });
+});
+
+describe("刷新恢复：当前页与会话落 sessionStorage（d.79）", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    useUiStore.setState({ page: "home", activeConversationId: null });
+  });
+
+  it("打开会话后写入 sessionStorage：刷新能回到那个会话", () => {
+    useUiStore.getState().openConversation("c1");
+    expect(JSON.parse(sessionStorage.getItem(SESSION_VIEW_KEY)!)).toEqual({
+      page: "chat",
+      activeConversationId: "c1",
+    });
+  });
+
+  it("离开智能体页时清掉会话，写盘的是「首页 + 无会话」", () => {
+    useUiStore.getState().openConversation("c1");
+    useUiStore.getState().setPage("team");
+    expect(JSON.parse(sessionStorage.getItem(SESSION_VIEW_KEY)!)).toEqual({
+      page: "team",
+      activeConversationId: null,
+    });
+  });
+
+  it("readSessionView 只认宿主页；脏值/未知页/非 JSON 一律回落 null（不猜）", () => {
+    sessionStorage.setItem(
+      SESSION_VIEW_KEY,
+      JSON.stringify({ page: "memory", activeConversationId: "c9" }),
+    );
+    expect(readSessionView()).toEqual({ page: "memory", activeConversationId: "c9" });
+
+    // 已合并的旧页 id 不在宿主页集合里：不恢复（旧链接兼容由 resolvePage 负责，不在刷新路径）
+    sessionStorage.setItem(SESSION_VIEW_KEY, JSON.stringify({ page: "interfaces" }));
+    expect(readSessionView()).toBeNull();
+
+    sessionStorage.setItem(SESSION_VIEW_KEY, JSON.stringify({ page: "chat", activeConversationId: 42 }));
+    expect(readSessionView()).toEqual({ page: "chat", activeConversationId: null });
+
+    sessionStorage.setItem(SESSION_VIEW_KEY, "{oops");
+    expect(readSessionView()).toBeNull();
+    expect(readSessionView(null)).toBeNull();
+  });
+
+  it("writeSessionView / readSessionView 往返；存储不可用时不抛", () => {
+    writeSessionView({ page: "plugins", activeConversationId: null });
+    expect(readSessionView()).toEqual({ page: "plugins", activeConversationId: null });
+
+    const broken = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    };
+    expect(() => writeSessionView({ page: "home", activeConversationId: null }, broken)).not.toThrow();
+    expect(readSessionView(broken)).toBeNull();
   });
 });
 

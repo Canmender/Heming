@@ -79,6 +79,18 @@ describe("ModulesView 内置能力模块卡", () => {
       infohub: true,
       automations: true,
     });
+    // 点了要有可见反馈（审计 P2-2：原来点了没有任何变化提示）
+    expect(screen.getByRole("status")).toHaveTextContent("已全部恢复启用");
+  });
+
+  it("三个模块全启用时「全部恢复启用」禁用；停用任一后可用", () => {
+    render(<ModulesView />);
+    const restore = screen.getByRole("button", { name: "全部恢复启用" });
+    expect(restore).toBeDisabled();
+    expect(restore).toHaveAttribute("title", "三个模块都已启用");
+
+    fireEvent.click(screen.getByRole("switch", { name: "停用模块 幕僚" }));
+    expect(screen.getByRole("button", { name: "全部恢复启用" })).toBeEnabled();
   });
 
   it("停用幕僚后不再显示「已启用」，且打开页面禁用", () => {

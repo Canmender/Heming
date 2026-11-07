@@ -3,6 +3,20 @@ import { toolRiskLabel } from "./viewModel.js";
 import { CHIP, HINT, Switch } from "./shared.js";
 
 /**
+ * 工具描述是**写给模型看的**（含 `**加粗**`、行内代码、甚至「不要改写」这类指令），
+ * 直接铺到界面上会出现字面量 `**不是**`。这里只做「去标记 + 压空白」，不改写语义；
+ * 完整原文放 `title`，被两行截断时悬停可看全。
+ */
+export function plainToolDescription(input: string): string {
+  return input
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * 工具 Tab（d.64 · T2）：统一能力目录。
  *
  * 只读 `describeCapabilityCatalog()` 的结果（展示与执行同源）。
@@ -48,7 +62,12 @@ export function PluginToolPanel({
                       <span className={CHIP}>{toolRiskLabel(tool.risk)}</span>
                     </div>
                     {tool.description && (
-                      <p className="mt-0.5 line-clamp-2 ui-caption">{tool.description}</p>
+                      <p
+                        className="mt-0.5 line-clamp-2 ui-caption"
+                        title={plainToolDescription(tool.description)}
+                      >
+                        {plainToolDescription(tool.description)}
+                      </p>
                     )}
                   </div>
                   <div className="shrink-0">

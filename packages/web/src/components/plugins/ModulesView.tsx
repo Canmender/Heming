@@ -209,6 +209,9 @@ export function ModulesView({ modules = BUILTIN_MODULES }: { modules?: readonly 
   const reset = useModuleStore((s) => s.reset);
   const enabledMap = useModuleStore((s) => s.enabled);
   const enabledCount = effectiveModuleIds({ enabled: enabledMap }).length;
+  const allEnabled = enabledCount === modules.length;
+  /** 点「全部恢复启用」后给一次可见反馈（此前点了没有任何变化提示）。 */
+  const [restoredNotice, setRestoredNotice] = useState("");
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -219,9 +222,20 @@ export function ModulesView({ modules = BUILTIN_MODULES }: { modules?: readonly 
           </p>
           <p className="mt-1 ui-caption" role="status">
             已启用 {enabledCount}/{modules.length} 个模块
+            {restoredNotice ? ` · ${restoredNotice}` : ""}
           </p>
         </div>
-        <button type="button" className={BTN_GHOST} onClick={reset}>
+        <button
+          type="button"
+          className={BTN_GHOST}
+          // 全启用时点它没有任何作用：禁用并说明，而不是留一个点了没反应的按钮
+          disabled={allEnabled}
+          title={allEnabled ? "三个模块都已启用" : "把停用的模块全部恢复启用（不删数据）"}
+          onClick={() => {
+            reset();
+            setRestoredNotice("已全部恢复启用");
+          }}
+        >
           全部恢复启用
         </button>
       </div>

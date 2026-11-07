@@ -409,13 +409,81 @@ const INITIAL_NAV_ORDER = (() => {
   return order;
 })();
 
+/* ══════════════════════════════════════════════════════════════════════
+ * 刷新恢复（d.79）：当前页与已选会话落 sessionStorage
+ * ══════════════════════════════════════════════════════════════════════
+ *
+ * 为什么用 sessionStorage 而不是 localStorage：
+ * - **刷新要留住**：用户在智能体页聊到一半按 F5，不该被弹回主页（审计 P1-1）；
+ * - **重启要回主页**：关窗再开是新会话，上一个会话的页面是过期意图；
+ * - 页面与会话属于「这一次使用」，不是需要长期记住的偏好（偏好才落 localStorage）。
+ *
+ * 只恢复宿主页 `Page` 与 `activeConversationId`：宿主页内部 Tab（团队看板/智能体任务）
+ * 是页面局部 state，恢复它需要每个页面自己声明持久化策略，超出「刷新别丢上下文」的诉求。
+ * 会话 id 恢复后若已不在工作区，`AssistantPage` 的 `activeConv` 找不到 → 回到空态，不崩。
+ */
+export const SESSION_VIEW_KEY = "heming.session.view.v1";
+
+export interface SessionView {
+  page: Page;
+  activeConversationId: string | null;
+}
+
+function viewStorage(): Pick<Storage, "getItem" | "setItem"> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null; // 隐私模式/禁用存储：只在本次内存里导航，刷新回主页
+  }
+}
+
+/** 读刷新前的页面与会话；缺失/脏值/未知页一律回落 null（不猜）。 */
+export function readSessionView(
+  storage: Pick<Storage, "getItem"> | null = viewStorage(),
+): SessionView | null {
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(SESSION_VIEW_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const record = parsed as { page?: unknown; activeConversationId?: unknown };
+    if (typeof record.page !== "string") return null;
+    if (!(DEFAULT_NAV_ORDER as string[]).includes(record.page)) return null;
+    return {
+      page: record.page as Page,
+      activeConversationId:
+        typeof record.activeConversationId === "string" && record.activeConversationId
+          ? record.activeConversationId
+          : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function writeSessionView(
+  view: SessionView,
+  storage: Pick<Storage, "setItem"> | null = viewStorage(),
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(SESSION_VIEW_KEY, JSON.stringify(view));
+  } catch {
+    /* 配额满/隐私模式：内存态已生效，刷新回主页不是错误 */
+  }
+}
+
+const INITIAL_SESSION_VIEW = readSessionView();
+
 export const useUiStore = create<UiState>((set, get) => ({
-  page: "home",
+  page: INITIAL_SESSION_VIEW?.page ?? "home",
   pageView: null,
   navOrder: INITIAL_NAV_ORDER,
   navMode: readStoredNavMode(uiStorage()),
   navOpen: false,
-  activeConversationId: null,
+  activeConversationId: INITIAL_SESSION_VIEW?.activeConversationId ?? null,
   pendingAttachment: null,
   taskDraft: null,
   taskFocusId: null,
@@ -632,3 +700,22 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ navOpen: !navOpen });
   },
 }));
+
+/**
+ * 页面/会话一变就写一次 sessionStorage（供刷新恢复）。
+ *
+ * 放在 store 外部订阅而不是每个 setter 里：`setPage` / `openConversation` / `leaveConversation` /
+ * 各页的「回主页」有十来个入口，散着写必然漏一个；订阅只认「改完之后的状态」，天然收口。
+ * 只比较这两个字段，避免 `navOpen` 之类的瞬时状态把写盘次数放大。
+ */
+let persistedSessionView: string | null = null;
+useUiStore.subscribe((state) => {
+  const next = JSON.stringify({
+    page: state.page,
+    activeConversationId: state.activeConversationId,
+  } satisfies SessionView);
+  if (next === persistedSessionView) return;
+  const parsed = JSON.parse(next) as SessionView;
+  persistedSessionView = next;
+  writeSessionView(parsed);
+});
