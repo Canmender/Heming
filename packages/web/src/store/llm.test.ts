@@ -1,97 +1,183 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useLlmStore, type LlmProfile } from "./llm.js";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import {
+  DEFAULT_GATEWAY,
+  modelIdOfProfile,
+  modelProfileId,
+  routeRef,
+  useLlmStore,
+  type RouteGroup,
+} from "./llm.js";
+import type { GatewayModel } from "../lib/magpieClient.js";
 
-const p: LlmProfile = { id: "p1", label: "我的 Claude", provider: "anthropic", apiKey: "sk-ant-x", model: "claude-sonnet-5" };
+/**
+ * 模型 store（d.89：magpie 原生组件）。
+ *
+ * 关注点：网关配置落盘、目录 → 模型档案派生、绑定/候选链只存模型引用、
+ * 旧版供应商连接按产品决定被清除。聊天调用本身在 llmClient 测试里覆盖。
+ */
 
-describe("llm store", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    delete (window as unknown as { __heming_secrets?: unknown }).__heming_secrets;
-    useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
+const MODELS: GatewayModel[] = [
+  { id: "anthropic/claude-sonnet-5", name: "Claude Sonnet 5", ownedBy: "anthropic", contextWindow: 200000, maxOutputTokens: 8192, reasoningLevels: ["low", "high"], vision: true },
+  { id: "deepseek/deepseek-chat", name: "DeepSeek Chat", ownedBy: "deepseek", contextWindow: 64000, maxOutputTokens: 4096, reasoningLevels: [], vision: false },
+];
+
+beforeEach(() => {
+  localStorage.clear();
+  vi.restoreAllMocks();
+  useLlmStore.setState({
+    gateway: { ...DEFAULT_GATEWAY },
+    models: [],
+    gatewayVersion: undefined,
+    profiles: [],
+    bindings: {},
+    prompts: {},
+    routes: [],
   });
-  it("addProfile 落 localStorage", () => {
-    useLlmStore.getState().addProfile(p);
-    expect(useLlmStore.getState().profiles).toHaveLength(1);
-    const saved = JSON.parse(localStorage.getItem("heming.llmConfigs")!);
-    expect(saved.profiles[0].model).toBe("claude-sonnet-5");
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("llm store · magpie 网关与模型档案", () => {
+  it("默认就是本机 magpie 网关，且没有任何模型（还没读过目录）", () => {
+    expect(useLlmStore.getState().gateway).toEqual(DEFAULT_GATEWAY);
+    expect(useLlmStore.getState().profiles).toEqual([]);
   });
-  it("绑定与提示词独立持久化", () => {
-    useLlmStore.getState().setBinding("agent-1", "p1");
+
+  it("setModels 派生模型档案（id 带 mp: 前缀），并落盘目录缓存", () => {
+    useLlmStore.getState().setModels(MODELS, "0.1.3246");
+    const state = useLlmStore.getState();
+    expect(state.profiles).toHaveLength(2);
+    expect(state.profiles[0]).toMatchObject({
+      id: modelProfileId("anthropic/claude-sonnet-5"),
+      label: "Claude Sonnet 5",
+      provider: "openai",
+      baseUrl: DEFAULT_GATEWAY.baseUrl,
+      apiKey: DEFAULT_GATEWAY.key,
+      model: "anthropic/claude-sonnet-5",
+    });
+    expect(modelIdOfProfile(state.profiles[1].id)).toBe("deepseek/deepseek-chat");
+    expect(state.gatewayVersion).toBe("0.1.3246");
+    const saved = JSON.parse(localStorage.getItem("heming.magpie.models.v1")!);
+    expect(saved.map((m: GatewayModel) => m.id)).toEqual([
+      "anthropic/claude-sonnet-5",
+      "deepseek/deepseek-chat",
+    ]);
+  });
+
+  it("setGateway 落盘并把地址/Key 同步进已有档案（模型列表不变）", () => {
+    useLlmStore.getState().setModels(MODELS);
+    useLlmStore.getState().setGateway({ baseUrl: "http://127.0.0.1:3999/v1/", key: "magpie-acme" });
+    expect(useLlmStore.getState().gateway).toEqual({
+      baseUrl: "http://127.0.0.1:3999/v1",
+      key: "magpie-acme",
+    });
+    expect(useLlmStore.getState().profiles[0].baseUrl).toBe("http://127.0.0.1:3999/v1");
+    expect(useLlmStore.getState().profiles[0].apiKey).toBe("magpie-acme");
+    expect(JSON.parse(localStorage.getItem("heming.magpie.v1")!)).toEqual({
+      baseUrl: "http://127.0.0.1:3999/v1",
+      key: "magpie-acme",
+    });
+  });
+
+  it("refreshCatalog 走网关 /v1/models（带网关 Key），成功写入目录与版本", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        calls.push(String(input));
+        if (String(input).endsWith("/api/hello")) {
+          return new Response(JSON.stringify({ name: "magpie", version: "0.1.3246" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: MODELS.map((m) => ({
+              id: m.id,
+              display_name: m.name,
+              owned_by: m.ownedBy,
+              context_window: m.contextWindow,
+              max_output_tokens: m.maxOutputTokens,
+              modalities: m.vision ? ["text", "image"] : ["text"],
+            })),
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const catalog = await useLlmStore.getState().refreshCatalog();
+    expect(catalog.models.map((m) => m.id)).toEqual([
+      "anthropic/claude-sonnet-5",
+      "deepseek/deepseek-chat",
+    ]);
+    expect(useLlmStore.getState().gatewayVersion).toBe("0.1.3246");
+    expect(useLlmStore.getState().profiles).toHaveLength(2);
+    expect(calls.some((url) => url.endsWith("/v1/models"))).toBe(true);
+  });
+
+  it("绑定与提示词独立持久化；解绑落盘", () => {
+    useLlmStore.getState().setBinding("agent-1", modelProfileId("deepseek/deepseek-chat"));
     useLlmStore.getState().setPrompt("agent-1", "你是架构师");
-    expect(JSON.parse(localStorage.getItem("heming.agentLlm")!)["agent-1"]).toBe("p1");
+    expect(JSON.parse(localStorage.getItem("heming.agentLlm")!)["agent-1"]).toBe(
+      "mp:deepseek/deepseek-chat",
+    );
     expect(JSON.parse(localStorage.getItem("heming.agentPrompts")!)["agent-1"]).toBe("你是架构师");
-  });
-  it("removeProfile 清相关绑定", () => {
-    useLlmStore.getState().addProfile(p);
-    useLlmStore.getState().setBinding("agent-1", "p1");
-    useLlmStore.getState().removeProfile("p1");
-    expect(useLlmStore.getState().bindings["agent-1"]).toBeUndefined();
-  });
-
-  // Produces 契约补充：updateProfile/getProfile 语义、null 解绑落盘、页面加载时从三键水合
-  it("updateProfile 打补丁落盘，getProfile 按 id 取", () => {
-    useLlmStore.getState().addProfile(p);
-    useLlmStore.getState().updateProfile("p1", { label: "改名", temperature: 0.5 });
-    expect(useLlmStore.getState().getProfile("p1")?.label).toBe("改名");
-    expect(useLlmStore.getState().getProfile("nope")).toBeUndefined();
-    const saved = JSON.parse(localStorage.getItem("heming.llmConfigs")!);
-    expect(saved.profiles[0]).toMatchObject({ label: "改名", temperature: 0.5, model: "claude-sonnet-5" });
-  });
-
-  it("setBinding(agentId, null) 解绑并落盘", () => {
-    useLlmStore.getState().setBinding("agent-1", "p1");
     useLlmStore.getState().setBinding("agent-1", null);
-    expect(useLlmStore.getState().bindings["agent-1"]).toBeUndefined();
     expect(JSON.parse(localStorage.getItem("heming.agentLlm")!)).not.toHaveProperty("agent-1");
   });
 
-  it("初始化从 localStorage 水合三键（模拟刷新）", async () => {
-    localStorage.setItem("heming.llmConfigs", JSON.stringify({ profiles: [p] }));
-    localStorage.setItem("heming.agentLlm", JSON.stringify({ "agent-1": "p1" }));
-    localStorage.setItem("heming.agentPrompts", JSON.stringify({ "agent-1": "提示" }));
-    vi.resetModules(); // 重置模块注册表 → 重新 import 触发 store 模块级 load()
-    const fresh = await import("./llm.js");
-    expect(fresh.useLlmStore.getState().profiles).toEqual([p]);
-    expect(fresh.useLlmStore.getState().bindings).toEqual({ "agent-1": "p1" });
-    expect(fresh.useLlmStore.getState().prompts).toEqual({ "agent-1": "提示" });
-    // 损坏 JSON 不炸：再验证一次坏数据回退
-    localStorage.setItem("heming.llmConfigs", "{oops");
-    vi.resetModules();
-    const fresh2 = await import("./llm.js");
-    expect(fresh2.useLlmStore.getState().profiles).toEqual([]);
-  });
-
-  it("有桌面桥时 apiKey 以信封落盘，刷新后能解密水合", async () => {
-    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
-      available: true,
-      encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
-      decrypt: (data: string) =>
-        data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null,
+  it("候选链只存模型档案引用；删链时解绑", () => {
+    const group: RouteGroup = {
+      id: "g1",
+      label: "主备",
+      members: [{ profileId: modelProfileId("deepseek/deepseek-chat") }],
     };
+    useLlmStore.getState().addRoute(group);
+    useLlmStore.getState().setBinding("agent-1", routeRef("g1"));
+    useLlmStore.getState().removeRoute("g1");
+    expect(useLlmStore.getState().routes).toEqual([]);
+    expect(useLlmStore.getState().bindings["agent-1"]).toBeUndefined();
+  });
+});
+
+describe("旧版供应商配置迁移（产品决定：直接清除）", () => {
+  it("首次启动清掉旧连接（含安全存储备份键）、旧绑定、旧候选链与旧冷却", async () => {
+    localStorage.setItem("heming.llmConfigs", JSON.stringify({ profiles: [{ id: "p1", apiKey: "sk-x" }] }));
+    localStorage.setItem("heming.llmConfigs.__heming_undecryptable", "cipher");
+    localStorage.setItem("heming.llmConfigs.__heming_plaintext_backup", "plain");
+    localStorage.setItem("heming.agentLlm", JSON.stringify({ "agent-1": "p1" }));
+    localStorage.setItem("heming.llmRoutes.v1", JSON.stringify([{ id: "g", label: "x", members: [] }]));
+    localStorage.setItem("heming.llmHealth.v1", JSON.stringify({ a: { until: Date.now() + 1000 } }));
     vi.resetModules();
     const fresh = await import("./llm.js");
-    fresh.useLlmStore.getState().addProfile(p);
-
-    const raw = localStorage.getItem("heming.llmConfigs")!;
-    expect(JSON.parse(raw).__hemingEnc).toBe("v1");
-    expect(raw).not.toContain("sk-ant-x");
-
+    for (const key of [
+      "heming.llmConfigs",
+      "heming.llmConfigs.__heming_undecryptable",
+      "heming.llmConfigs.__heming_plaintext_backup",
+      "heming.agentLlm",
+      "heming.llmRoutes.v1",
+      "heming.llmHealth.v1",
+    ]) {
+      expect(localStorage.getItem(key), key).toBeNull();
+    }
+    expect(fresh.useLlmStore.getState().bindings).toEqual({});
+    expect(fresh.useLlmStore.getState().routes).toEqual([]);
+    // 标记已迁移：二次启动不再清（用户新建的绑定不会被误删）
+    localStorage.setItem("heming.agentLlm", JSON.stringify({ "agent-2": "mp:x" }));
     vi.resetModules();
     const again = await import("./llm.js");
-    expect(again.useLlmStore.getState().profiles).toEqual([p]);
+    expect(again.useLlmStore.getState().bindings["agent-2"]).toBe("mp:x");
   });
 
-  it("绑定与提示词不是凭据：仍走普通 localStorage", () => {
-    (window as unknown as { __heming_secrets?: unknown }).__heming_secrets = {
-      available: true,
-      encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
-      decrypt: (data: string) =>
-        data.startsWith("enc:") ? Buffer.from(data.slice(4), "base64").toString("utf8") : null,
-    };
-    useLlmStore.getState().setBinding("agent-1", "p1");
-    useLlmStore.getState().setPrompt("agent-1", "你是架构师");
-    expect(localStorage.getItem("heming.agentLlm")).not.toContain("__hemingEnc");
-    expect(localStorage.getItem("heming.agentPrompts")).not.toContain("__hemingEnc");
-    expect(JSON.parse(localStorage.getItem("heming.agentLlm")!)).toEqual({ "agent-1": "p1" });
+  it("提示词不属于供应商配置，迁移不删", async () => {
+    localStorage.setItem("heming.agentPrompts", JSON.stringify({ "agent-1": "保留我" }));
+    vi.resetModules();
+    await import("./llm.js");
+    expect(JSON.parse(localStorage.getItem("heming.agentPrompts")!)["agent-1"]).toBe("保留我");
   });
 });

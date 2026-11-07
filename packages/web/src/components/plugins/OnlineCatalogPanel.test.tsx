@@ -63,7 +63,7 @@ describe("OnlineCatalogPanel", () => {
     expect(screen.getByText("magpie 网关")).toBeInTheDocument();
     expect(screen.getByText("v0.1.0")).toBeInTheDocument();
     expect(screen.getByText("新插件")).toBeInTheDocument();
-    expect(screen.getByText(/技能 1 · MCP 0 · 命令 1 · 模型预设 1/)).toBeInTheDocument();
+    expect(screen.getByText(/技能 1 · MCP 0 · 命令 1/)).toBeInTheDocument();
     expect(screen.getByText(/主机 1 · 风险上限 不提供工具/)).toBeInTheDocument();
     expect(screen.getByText(/指纹 abcdef01…/)).toBeInTheDocument();
   });

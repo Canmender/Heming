@@ -46,17 +46,17 @@ export function ModelRoutePage() {
   return (
     <PageShell
       title="模型路由"
-      subtitle="把多条模型连接串成一条候选链：第一个答不了才走下一个；选路策略、冷却与用量都只在本机算。"
+      subtitle="把网关里的多个模型串成一条候选链：第一个答不了才走下一个；选路策略、冷却与用量都只在本机算。"
       width="wide"
       actions={
         <button type="button" className="ui-btn ui-btn-md ui-btn-ghost" onClick={() => openSettings("model")}>
-          管理模型连接
+          管理模型
         </button>
       }
     >
       <section aria-label="路由概览" className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {[
-          { label: "模型连接", value: String(overview.profiles), hint: "本机保存的连接" },
+          { label: "可用模型", value: String(overview.profiles), hint: "来自 magpie 网关" },
           { label: "候选链", value: String(overview.routes), hint: `${overview.members} 个候选` },
           { label: "休息中", value: String(overview.resting), hint: "冷却到点自动回来" },
           {

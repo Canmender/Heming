@@ -12,6 +12,18 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.90.2.42.0",
+    "date": "2026-11-07",
+    "title": "模型统一走本机 magpie",
+    "bullets": [
+      "设置·模型不再让你逐个填服务商、地址和 Key：改成填一条本机 magpie 网关（默认 127.0.0.1:3425），点「读取模型」就能看到你现在能用的所有模型。",
+      "你已经在用的 Claude Code / Codex / 各家 API Key，都交给 magpie 管；它的多账号轮换与额度选路对和鸣透明，和鸣这边只填网关 Key。",
+      "智能体绑定和候选链现在绑的是「模型」：换模型不用改 Key，候选链就是多个模型之间自动切换。",
+      "旧版保存的供应商连接（含 Key）已按决定清除；系统提示词与历史用量保留。没有 magpie 时会在设置页如实提示。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.89.2.42.0",
     "date": "2026-11-07",
     "title": "团队页更诚实",

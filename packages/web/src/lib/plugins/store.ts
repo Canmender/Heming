@@ -292,7 +292,7 @@ function copyPlugin(plugin: InstalledPlugin): InstalledPlugin {
           target: { ...command.target },
         })),
         toolPacks: contributions.toolPacks.map((pack) => ({ ...pack, tools: [...pack.tools] })),
-        llmPresets: (contributions.llmPresets ?? []).map((preset) => ({ ...preset })),
+        llmPresets: [],
       },
       permissions: {
         network: [...permissions.network],

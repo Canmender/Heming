@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
-import { LlmSettingsCard } from "./LlmSettingsCard.js";
+import { MagpieGatewayCard } from "./MagpieGatewayCard.js";
 import { KeyStorageCard } from "./KeyStorageCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
 import { FileEditCard } from "./FileEditCard.js";
@@ -305,7 +305,7 @@ export function SettingsPage() {
                   data-settings-id="llm-connection"
                   className={anchorClass(highlightId === "llm-connection")}
                 >
-                  <LlmSettingsCard />
+                  <MagpieGatewayCard />
                 </div>
                 {/* 候选链已搬到「模型路由」页（d.84 模块）：这里只留入口，
                     免得同一个编辑器在设置区与模块页各渲染一份、口径漂移。 */}

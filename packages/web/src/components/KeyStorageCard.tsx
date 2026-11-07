@@ -4,7 +4,7 @@ import { MSG_CACHE_LRU_KEY } from "../lib/e2eSession.js";
 
 /** 三个 d.36 受保护键的中文名：状态提示要能点名，不能只说「部分密钥」。 */
 const KEY_LABELS: Record<string, string> = {
-  "heming.llmConfigs": "模型连接密钥",
+  "heming.llmConfigs": "旧模型连接（已废弃）",
   "heming.mcp.servers.v1": "MCP 服务请求头",
   "heming.e2e.identity": "设备身份私钥",
 };

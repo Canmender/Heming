@@ -196,7 +196,7 @@ export function AgentFormModal({
 
   const gotoSettings = () => {
     onClose();
-    // 「绑定连接」去的是模型连接：直接落在设置区「模型」页签，别让用户先在个人资料里找
+    // 「绑定模型」去的是设置区「模型」页签，别让用户先在个人资料里找
     openSettings("model");
   };
 
@@ -221,7 +221,7 @@ export function AgentFormModal({
         if (profileId) setBinding(created.id, profileId);
         onCreated?.(created);
       } else if (agent) {
-        // 系统预置智能体的名称/简介由应用维护，服务端会 403；但「模型连接 + 系统提示词」
+        // 系统预置智能体的名称/简介由应用维护，服务端会 403；但「模型 + 系统提示词」
         // 本来就只存本机，必须照常写入，否则用户永远配不上模型。
         if (!systemAgent) await updateAgent(agent.id, body);
         setPrompt(agent.id, promptText.trim()); // 编辑允许清空（写空串）
@@ -235,7 +235,7 @@ export function AgentFormModal({
       const message = (err as Error).message;
       setError(
         message === "forbidden"
-          ? "这个智能体不能改名称或简介（系统预置）；模型连接与提示词只存本机，可在「进阶设置」里配置"
+          ? "这个智能体不能改名称或简介（系统预置）；模型与提示词只存本机，可在「进阶设置」里配置"
           : message,
       );
     } finally {
@@ -262,7 +262,7 @@ export function AgentFormModal({
       const message = (err as Error).message;
       setError(
         message === "forbidden"
-          ? "这个智能体不能改名称或简介（系统预置）；模型连接与提示词只存本机，可在「进阶设置」里配置"
+          ? "这个智能体不能改名称或简介（系统预置）；模型与提示词只存本机，可在「进阶设置」里配置"
           : message,
       );
     } finally {
@@ -336,7 +336,7 @@ export function AgentFormModal({
 
         {systemAgent && (
           <p role="status" className="mb-2 rounded-lg border border-line-soft bg-panel px-2.5 py-1.5 ui-caption">
-            内置智能体：名称、头像和简介由应用维护，不能改；下方的「模型连接」和「系统提示词」只存本机，可以改。
+            内置智能体：名称、头像和简介由应用维护，不能改；下方的「模型」和「系统提示词」只存本机，可以改。
           </p>
         )}
 
@@ -416,7 +416,7 @@ export function AgentFormModal({
             >
               {advancedOpen ? "收起进阶设置" : "进阶设置（可选）"}
             </button>
-            <span className="ui-caption">系统提示词、模型连接；不填也能直接用</span>
+            <span className="ui-caption">系统提示词、模型；不填也能直接用</span>
           </div>
         </div>
 
@@ -437,7 +437,7 @@ export function AgentFormModal({
             <p className="mb-3 -mt-2 ui-caption">只保存在本机，不会上传服务端。</p>
 
             <div className="mb-3">
-              <div className="ui-caption">模型连接（可选）</div>
+              <div className="ui-caption">模型（可选）</div>
               <p className="mt-0.5 ui-caption">不绑定 = 用默认连接。</p>
               {profiles.length === 0 ? (
                 <button

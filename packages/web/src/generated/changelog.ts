@@ -12,6 +12,31 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.90.2.42.0",
+    "date": "2026-11-07",
+    "title": "magpie 内化为原生模型层，删掉「模型提供商」",
+    "bullets": [
+      "删服务商预设（8 个按钮）、协议选择（openai / anthropic）、手填 Base URL / 模型 / API Key 的表单、逐连接 Key 管理；",
+      "删 `heming.llmConfigs`（含系统安全存储里的供应商 Key 与备份键）、旧绑定、旧候选链、旧冷却键：**一次性迁移直接清除**（标记 `heming.magpie.migrated.v1`，之后不再清）；提示词与历史用量保留；",
+      "收回插件 v4 的 `contributions.llmPresets`（d.88 引入）：模型不由插件声明，清单回到 v1/v2/v3；删除 `plugins/magpie-gateway` 包；",
+      "`KeyStorageCard` 把旧连接标记为「已废弃」；首跑引导、绑定弹窗、桌宠提示等文案改为「模型」口径。",
+      "`store/llm.ts`：`gateway { baseUrl, key }`（默认 `http://127.0.0.1:3425/v1` + `magpie-heming`，存 `heming.magpie.v1`）；目录 → `mp:<模型 id>` 的派生模型档案（含网关地址/Key，不落盘）；绑定/候选链只存模型引用；",
+      "`lib/magpieClient.ts`：`GET /v1/models`（OpenAI 形状 + magpie 扩展：display_name / context_window / max_output_tokens /modalities / reasoning levels），顺带 `/api/hello` 拿版本并确认「这是 magpie」；401 点名网关 Key，连不上说清地址；",
+      "目录给出的窗口/输出/视觉/推理写进 `modelCaps` 覆盖表——能力判定与网关实际提供的一致；",
+      "设置区换成 `MagpieGatewayCard`：网关地址 / 网关 Key / 读取模型 / 仅保存 / 模型表（上下文、看图、推理档位），只请求用户填的地址，不经过和鸣服务端；",
+      "浏览器/云端网页版可填「已共享的远端 magpie」+ 网关 Key；否则如实提示连不上。",
+      "新增 `magpieClient` 11 例、`MagpieGatewayCard` 4 例；重写 `store/llm.test` 8 例（网关落盘/目录派生/迁移清除/提示词保留）；",
+      "更新 `SettingsPage`（不再有预设与 Key 表单）、`AgentFormModal`、`modelCaps`、`bundledPlugins`、`manifest`（v4 拒绝）等用例；",
+      "`pnpm --filter @heming/web typecheck` 零错误；已知一处与本轮无关的红：`d39.app-lifecycle` E4（在 d.89 提交上也会失败，属其它会话的并行改动，未在本轮处理）。"
+    ],
+    "paragraphs": [
+      "模型能力统一由本机 magpie 网关提供：用户已有的 Agent 登录（Claude Code / Codex / 各家 Key / 订阅）由 magpie 管理，和鸣不再维护第二套供应商账号。",
+      "一、删掉旧模型提供商体系",
+      "二、新模型层（原生 magpie 组件）",
+      "门禁"
+    ]
+  },
+  {
     "version": "d.89.2.42.0",
     "date": "2026-11-07",
     "title": "团队第一轮：关共享≠撤回、在线口径修正、成员详情有数",

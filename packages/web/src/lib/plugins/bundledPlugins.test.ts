@@ -91,6 +91,8 @@ describe("仓库自带插件包 · 目录与共性", () => {
       const { text, json } = readPlugin(dir);
       const manifest = parsePluginManifest(json);
       expect(manifest.id, dir).toBeTruthy();
+      // 目录名与插件 id 的最后一段保持一致（infohub-collector → heming.infohub-collector）
+      expect(manifest.id.endsWith(dir), dir).toBe(true);
       expect(manifest.schemaVersion, dir).toBeGreaterThanOrEqual(3);
       // 声明式红线：没有可执行物、没有密钥、没有请求头
       for (const banned of ["apiKey", "headers", "env", "command", "args", "scripts"]) {
@@ -126,29 +128,5 @@ describe("plugins/infohub-collector · 采集桥（v3）", () => {
     const { preview } = previewPlugin(text);
     expect(preview.skills.added.length).toBe(1);
     expect(preview.servers.added.map((s) => s.key)).toEqual(["infohub"]);
-  });
-});
-
-describe("plugins/magpie-gateway · 网关接入（v4）", () => {
-  it("声明一个模型接入预设（OpenAI 兼容、本机 3425），不含 Key", () => {
-    const { text } = readPlugin("magpie-gateway");
-    const manifest = parsePluginManifest(JSON.parse(text));
-    expect(manifest.id).toBe("heming.magpie-gateway");
-    expect(manifest.schemaVersion).toBe(4);
-    expect(manifest.contributions.llmPresets).toEqual([
-      expect.objectContaining({
-        id: "magpie-gateway",
-        provider: "openai",
-        baseUrl: "http://127.0.0.1:3425/v1",
-      }),
-    ]);
-    expect(manifest.contributions.mcpServers).toEqual([]);
-    expect(manifest.permissions.tools).toBe("none");
-    expect(manifest.permissions.network).toEqual(["127.0.0.1:3425"]);
-    expect(manifest.contributions.skills.length).toBeGreaterThan(0);
-
-    const { preview } = previewPlugin(text);
-    expect(preview.manifest.contributions.llmPresets[0]?.label).toBe("magpie 本地网关");
-    expect(preview.skills.added.length).toBe(1);
   });
 });

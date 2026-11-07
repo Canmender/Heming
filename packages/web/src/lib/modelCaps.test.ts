@@ -11,7 +11,6 @@ import {
   supportsLongContext,
   type ModelCapsOverrides,
 } from "./modelCaps.js";
-import { LLM_PRESETS } from "./llmPresets.js";
 import type { StorageLike } from "./memory/types.js";
 
 /** 内存存储：每个测试一份，互不干扰。 */
@@ -34,12 +33,9 @@ describe("模型能力表", () => {
     storage = new FakeStorage();
   });
 
-  it("llmPresets 的预设模型全部命中非 null（新增预设必须给一个表里查得到的示例模型）", () => {
-    for (const preset of LLM_PRESETS) {
-      const caps = lookupCapability(preset.provider, preset.model, storage);
-      expect(caps, `预设 ${preset.label}（${preset.model}）应命中能力表`).not.toBeNull();
-      expect(caps!.contextWindow).toBeGreaterThan(0);
-    }
+  it("已废弃的「服务商预设」不再参与能力表校验（d.89 起模型清单来自 magpie 网关目录）", () => {
+    // 目录里的窗口/视觉能力经 store 的 setOverride 覆盖；这里只钉住「没有预设依赖」。
+    expect(typeof lookupCapability).toBe("function");
   });
 
   it("未知模型返回 null（不猜——猜错会让供应商 400）", () => {

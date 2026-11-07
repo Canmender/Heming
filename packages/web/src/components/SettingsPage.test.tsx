@@ -167,19 +167,19 @@ describe("SettingsPage 个人资料", () => {
     expect(screen.queryByAltText("当前头像")).not.toBeInTheDocument();
   });
 
-  it("「模型」分组挂 LLM 连接卡（空态）与上下文预算卡", () => {
+  it("「模型」分组挂 magpie 网关卡（原生组件）与上下文预算卡", () => {
     render(<SettingsPage />);
     // 设置区已标签化：默认停在「个人资料」，切到「模型」才渲染这两张卡
-    expect(screen.queryByText("LLM 连接")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "模型" })).not.toBeInTheDocument();
     goTab("模型");
-    expect(screen.getByText("LLM 连接")).toBeInTheDocument();
-    expect(screen.getByText(/还没有 LLM 连接/)).toBeInTheDocument();
-    // 文案与 d.36 一致：桌面端 Key 由系统安全存储加密保管，不再是「仅存浏览器」
-    expect(screen.getByText(/桌面端经系统安全存储加密/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "模型" })).toBeInTheDocument();
+    expect(screen.getByLabelText("magpie 网关地址")).toHaveValue("http://127.0.0.1:3425/v1");
+    expect(screen.getByLabelText("magpie 网关 Key")).toHaveValue("magpie-heming");
+    expect(screen.getByText(/由本机 magpie 网关提供/)).toBeInTheDocument();
     expect(screen.getByText("上下文预算")).toBeInTheDocument();
     // 切回「个人资料」后模型卡卸载（一次只渲染当前分组）
     goTab("个人资料");
-    expect(screen.queryByText("LLM 连接")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "模型" })).not.toBeInTheDocument();
   });
 
   it("LLM 连接卡之后挂载上下文预算卡：默认值回填、改动即时落盘", () => {
@@ -243,7 +243,7 @@ describe("设置区 密钥存储状态", () => {
     render(<SettingsPage />);
     goTab("模型");
     expect(screen.getByText(/以下内容未能加密/)).toBeInTheDocument();
-    expect(screen.getByText(/模型连接密钥/)).toBeInTheDocument();
+    expect(screen.getByText(/旧模型连接/)).toBeInTheDocument();
   });
 
   it("系统安全存储不可用：说明新写入将明文，并点名已落明文的键", () => {
@@ -267,7 +267,7 @@ describe("设置区 密钥存储状态", () => {
     goTab("模型");
     expect(screen.getByText(/新写入的密钥与本地数据将以明文保存/)).toBeInTheDocument();
     expect(screen.getByText(/无法在本机解密/)).toBeInTheDocument();
-    expect(screen.getByText(/模型连接密钥/)).toBeInTheDocument();
+    expect(screen.getByText(/旧模型连接/)).toBeInTheDocument();
   });
 
   it("旧密文被备份后，卡片明确告知用户可以找回", () => {
@@ -279,7 +279,7 @@ describe("设置区 密钥存储状态", () => {
     render(<SettingsPage />);
     goTab("模型");
     expect(screen.getByText(/已在本机原样备份/)).toBeInTheDocument();
-    expect(screen.getByText(/模型连接密钥/)).toBeInTheDocument();
+    expect(screen.getByText(/旧模型连接/)).toBeInTheDocument();
   });
 });
 
@@ -399,22 +399,32 @@ describe("设置区 · 导航顺序", () => {
   });
 });
 
-describe("设置区 · 常用服务商预设", () => {
-  it("点预设自动填好协议、Base URL 与模型，并展开表单", () => {
+describe("设置区 · 模型（magpie 原生组件）", () => {
+  it("不再有服务商预设与手填供应商 Key；只配网关地址与网关 Key", () => {
     render(<SettingsPage />);
     goTab("模型");
-    fireEvent.click(screen.getByRole("button", { name: "套用预设 DeepSeek" }));
-    expect(screen.getByLabelText("Base URL")).toHaveValue("https://api.deepseek.com/v1");
-    expect(screen.getByLabelText("模型")).toHaveValue("deepseek-chat");
-    expect((screen.getByLabelText("服务商") as HTMLSelectElement).value).toBe("openai");
+    expect(screen.queryByRole("button", { name: /套用预设/ })).toBeNull();
+    expect(screen.queryByLabelText("服务商")).toBeNull();
+    expect(screen.queryByLabelText("API Key")).toBeNull();
+    expect(screen.getByRole("button", { name: "读取模型" })).toBeInTheDocument();
+    expect(screen.getByText(/订阅账号、API Key、多账号轮换与额度选路都在 magpie 里管理/)).toBeInTheDocument();
   });
 
-  it("Anthropic 预设切到 anthropic 协议", () => {
+  it("网关地址可改并「仅保存」落盘（不联网）", () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
     render(<SettingsPage />);
     goTab("模型");
-    fireEvent.click(screen.getByRole("button", { name: "套用预设 Anthropic" }));
-    expect((screen.getByLabelText("服务商") as HTMLSelectElement).value).toBe("anthropic");
-    expect(screen.getByLabelText("Base URL")).toHaveValue("https://api.anthropic.com");
+    fireEvent.change(screen.getByLabelText("magpie 网关地址"), {
+      target: { value: "http://127.0.0.1:3999/v1/" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "仅保存" }));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem("heming.magpie.v1")!)).toEqual({
+      baseUrl: "http://127.0.0.1:3999/v1",
+      key: "magpie-heming",
+    });
+    vi.unstubAllGlobals();
   });
 });
 

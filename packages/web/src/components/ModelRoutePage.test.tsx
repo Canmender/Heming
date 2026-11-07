@@ -42,7 +42,7 @@ describe("ModelRoutePage", () => {
   it("概览数字来自本机 store（连接 / 候选链 / 候选数）", () => {
     render(<ModelRoutePage />);
     expect(screen.getByRole("heading", { name: "模型路由" })).toBeInTheDocument();
-    expect(screen.getByLabelText("统计 模型连接")).toHaveTextContent("2");
+    expect(screen.getByLabelText("统计 可用模型")).toHaveTextContent("2");
     expect(screen.getByLabelText("统计 候选链")).toHaveTextContent("1");
     expect(screen.getByLabelText("统计 候选链")).toHaveTextContent("2 个候选");
     expect(screen.getByLabelText("统计 休息中")).toHaveTextContent("0");

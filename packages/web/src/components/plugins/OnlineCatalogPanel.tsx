@@ -32,7 +32,7 @@ function permissionLine(entry: PluginCatalogEntry): string {
 
 function contributionLine(entry: PluginCatalogEntry): string {
   const c = entry.contributions;
-  return `技能 ${c.skills} · MCP ${c.mcpServers} · 命令 ${c.commands} · 模型预设 ${c.llmPresets}`;
+  return `技能 ${c.skills} · MCP ${c.mcpServers} · 命令 ${c.commands}`;
 }
 
 function installedStateOf(

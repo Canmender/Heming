@@ -20,7 +20,7 @@ describe("AgentFormModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "进阶设置（可选）" }));
     expect(screen.getByText(/去设置页添加/)).toBeInTheDocument();
 
-    useLlmStore.getState().addProfile({ id: "p1", label: "主模型", provider: "openai", apiKey: "k", model: "m" });
+    useLlmStore.setState({ profiles: [{ id: "mp:m", label: "主模型", provider: "openai", apiKey: "k", model: "m" }] });
     rerender(<AgentFormModal open mode="create" onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "架构师" } });
     fireEvent.change(screen.getByLabelText("系统提示词（仅本机）"), { target: { value: "你是架构师" } });
