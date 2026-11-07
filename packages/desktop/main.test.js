@@ -369,7 +369,7 @@ test("main.js：受信通道清单覆盖能力型 IPC，且经 guardIpc 按主�
 const IPC_UNGUARDED_BY_DESIGN = [
   "app:version", // preload 顶层 sendSync 取版本：任何窗口的 preload 都要能问
 ];
-const IPC_PET_PREFIX = "pet:"; // 桌宠控制通道由 pet-host.js 内部校验（emit/open-settings 有来源与白名单）
+const IPC_WIDGET_PREFIX = "widget:"; // widget 窗口控制通道由 plugin-host.js 内部按 sender 自校验
 // file-fs 的三个通道用自己的 `isTrustedSender`（fail-closed）收口，不走 secureIpc 门面；
 // 下面的断言同时钉住 file-fs 里确实还有那两道 sender 校验，防止重构时把守卫丢成裸 handler。
 const IPC_SELF_GUARDED = ["file:read", "file:write", "file:pick-root"];
@@ -438,7 +438,7 @@ test("main.js：IPC 通道不变量（新通道不能绕过 secureIpc 门面）"
       trustedChannels.includes(ch) ||
       IPC_UNGUARDED_BY_DESIGN.includes(ch) ||
       IPC_SELF_GUARDED.includes(ch) ||
-      ch.startsWith(IPC_PET_PREFIX);
+      ch.startsWith(IPC_WIDGET_PREFIX);
     assert.ok(ok, `preload 暴露了既不在 TRUSTED_CHANNELS 也不在白名单的通道：${ch}`);
   }
 
@@ -452,9 +452,47 @@ test("main.js：IPC 通道不变量（新通道不能绕过 secureIpc 门面）"
     "file-fs.js 的 sender 校验必须保持 fail-closed 默认（没接线 = 拒绝）",
   );
 
-  // 桌宠通道按设计不进能力守卫（由 pet-host 校验），但必须全部是 pet: 前缀，防止夹带别的能力
-  const petHostSrc = fs.readFileSync(path.join(__dirname, "pet-host.js"), "utf8");
-  for (const ch of channelsIn(petHostSrc, /ipcMain\.(?:handle|on)\(\s*["']([^"']+)["']/g)) {
-    assert.ok(ch.startsWith(IPC_PET_PREFIX), `pet-host 注册了非 pet: 通道：${ch}`);
+  // widget 窗口通道按设计不进能力守卫（由 plugin-host 按 sender 自校验），
+  // 但必须全部是 `widget:` 前缀，防止夹带 `widgets:`（主窗专用）或别的能力。
+  const widgetHostSrc = fs.readFileSync(path.join(__dirname, "plugin-host.js"), "utf8");
+  for (const ch of channelsIn(widgetHostSrc, /ipcMain\.(?:handle|on)\(\s*["']([^"']+)["']/g)) {
+    assert.ok(ch.startsWith(IPC_WIDGET_PREFIX), `plugin-host 注册了非 widget: 通道：${ch}`);
   }
+  assert.ok(
+    !widgetHostSrc.includes('"widgets:'),
+    "plugin-host 不应注册 widgets: 通道（那是主窗经 secureIpc 的安装/管理面）",
+  );
+
+  // widget preload 是插件代码能看到的**全部**宿主能力：不许出现 secrets/mcp/files/会话桥
+  const widgetPreloadSrc = fs.readFileSync(path.join(__dirname, "widget-preload.js"), "utf8");
+  for (const banned of ["__heming_secrets", "__mcp_stdio", "__heming_files", "__heming_wiki", "__heming_infohub"]) {
+    assert.ok(
+      !widgetPreloadSrc.includes(`exposeInMainWorld("${banned}"`),
+      `widget preload 不应暴露 ${banned}`,
+    );
+  }
+  for (const ch of channelsIn(widgetPreloadSrc, /ipcRenderer\.(?:invoke|sendSync|send)\(\s*["'`]([^"'`]+)["'`]/g)) {
+    assert.ok(ch.startsWith(IPC_WIDGET_PREFIX), `widget preload 不应调非 widget: 通道：${ch}`);
+  }
+  assert.ok(widgetPreloadSrc.includes('"__heming_widget"'), "widget preload 应暴露 __heming_widget");
+
+  // 主窗的界面插件桥存在，且 channel 全部在 TRUSTED_CHANNELS（安装/卸载是权限面）
+  assert.ok(preloadSrc.includes('"__heming_widgets"'), "主窗 preload 应暴露 __heming_widgets");
+  assert.ok(
+    preloadSrc.includes('"widgets:chat-config-reply"'),
+    "主窗 preload 应能回 chatConfig 请求（widget 直连本机网关时需要 agents/binding）",
+  );
+
+  // 界面插件运行时接线：独立 scheme + 注册表 + 宿主 + 两处协议处理器
+  assert.ok(mainCode.includes("createPluginStore("), "main.js 应创建界面插件注册表");
+  assert.ok(mainCode.includes("createWidgetHost("), "main.js 应接上界面插件宿主");
+  assert.ok(mainCode.includes("installWidgetProtocol();"), "main.js 应注册 widget:// 处理器");
+  // widget 能直连本机网关，但反代必须按「已安装且启用」判定 origin（不放通配）
+  assert.ok(mainCode.includes("isWidgetOriginAllowed"), "magpie 反代应注入 widget origin 判定");
+  assert.ok(
+    mainCode.indexOf("isWidgetOriginAllowed") < mainCode.indexOf("startMagpieProxy({"),
+    "判定必须在创建反代之前定义（闭包引用的是同一个 store）",
+  );
+  assert.ok(!mainCode.includes("createPetHost("), "桌宠宿主已删除（改为界面插件宿主）");
+  assert.ok(!mainCode.includes("isPetWindowUrl("), "桌宠窗口特判已删除（widget 走独立 origin + 清单）");
 });

@@ -32,6 +32,21 @@ export const PluginCatalogContributionsSchema = z.object({
   mcpServers: z.number().int().min(0).default(0),
   commands: z.number().int().min(0).default(0),
   toolPacks: z.number().int().min(0).default(0),
+  /** d.97：界面插件（desktopWidget）数量；纯声明式包恒为 0。 */
+  desktopWidgets: z.number().int().min(0).default(0),
+});
+
+/**
+ * 分发形态（d.97）：
+ * - `manifest`：只分发 `plugin.json` 本身（既有全部插件；缺省值，向后兼容）；
+ * - `bundle`：界面插件，除清单外还分发 `package.tgz`（含 `files/**` 代码与资源）。
+ */
+export const PluginCatalogDistributionSchema = z.enum(["manifest", "bundle"]);
+
+/** 界面插件包（`package.tgz`）的指纹与字节数；`manifest` 形态没有这一项。 */
+export const PluginCatalogPackageSchema = z.object({
+  sha256: z.string().regex(PLUGIN_CATALOG_SHA256_RE),
+  size: z.number().int().min(0),
 });
 
 export const PluginCatalogEntrySchema = z.object({
@@ -49,6 +64,10 @@ export const PluginCatalogEntrySchema = z.object({
   size: z.number().int().min(0),
   permissions: PluginCatalogPermissionsSchema,
   contributions: PluginCatalogContributionsSchema,
+  /** d.97：缺省 `manifest`（老服务端/老目录不认识这个字段时按纯声明式处理）。 */
+  distribution: PluginCatalogDistributionSchema.default("manifest"),
+  /** d.97：`distribution: "bundle"` 时存在；客户端下载后先比 sha256 再解包。 */
+  package: PluginCatalogPackageSchema.optional(),
 });
 
 export const PluginCatalogResponseSchema = z.object({
@@ -60,6 +79,8 @@ export type PluginCatalogEntry = z.infer<typeof PluginCatalogEntrySchema>;
 export type PluginCatalogResponse = z.infer<typeof PluginCatalogResponseSchema>;
 export type PluginCatalogPermissions = z.infer<typeof PluginCatalogPermissionsSchema>;
 export type PluginCatalogContributions = z.infer<typeof PluginCatalogContributionsSchema>;
+export type PluginCatalogDistribution = z.infer<typeof PluginCatalogDistributionSchema>;
+export type PluginCatalogPackage = z.infer<typeof PluginCatalogPackageSchema>;
 
 // —— 云端插件仓库（d.95）：详情 / 发布 / 删除 的共用契约 ——
 //

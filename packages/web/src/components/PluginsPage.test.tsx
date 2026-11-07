@@ -663,3 +663,20 @@ describe("PluginsPage · 插件列表筛选与安装定位（d.77）", () => {
     expect(within(dialog).getByRole("switch", { name: "启用本插件的技能" })).toBeEnabled();
   });
 });
+
+/* ------------------------------------------------ 桌面小组件（d.94） */
+
+describe("PluginsPage · 桌面小组件 Tab（d.94）", () => {
+  it("声明的 Tab 与声明式插件分开；浏览器里给「仅桌面端可用」", () => {
+    delete window.__heming_widgets;
+    renderPage();
+    const tab = screen.getByRole("tab", { name: "桌面小组件" });
+    fireEvent.click(tab);
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: "桌面小组件" })).toHaveTextContent(
+      /界面插件需要桌面窗口能力/,
+    );
+    // 桌面小组件 Tab 自己的安装入口（与声明式「安装插件」不是同一个按钮）
+    expect(screen.queryByRole("button", { name: /安装桌面小组件/ })).toBeNull();
+  });
+});

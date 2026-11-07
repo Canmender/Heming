@@ -67,6 +67,67 @@ function stringList(value) {
   return uniq(value.map(trim).filter(Boolean));
 }
 
+/**
+ * 桌面小组件声明（d.94 / v4）：按 `manifest.ts` 的 zod 默认值归一化。
+ *
+ * 这些默认值必须与应用解析完全一致（`transparent: false`、`defaultScale: 1`、
+ * `position` 缺省、`tray.items` 缺省……），否则 v4 bundle 的签名与验签对不上。
+ */
+function normalizeDesktopWidget(widget) {
+  const position = widget.position ?? {};
+  const tray = widget.tray;
+  const settings = widget.settings;
+  return {
+    id: trim(widget.id),
+    name: trim(widget.name),
+    entry: trim(widget.entry),
+    width: widget.width,
+    height: widget.height,
+    scales: (Array.isArray(widget.scales) ? widget.scales : []).map(Number),
+    defaultScale: typeof widget.defaultScale === "number" ? widget.defaultScale : 1,
+    transparent: widget.transparent === true,
+    alwaysOnTop: widget.alwaysOnTop === true,
+    skipTaskbar: widget.skipTaskbar === true,
+    resizable: widget.resizable === true,
+    clickThrough: widget.clickThrough ?? "none",
+    position: {
+      anchor: trim(position.anchor) || "bottom-right",
+      margin: typeof position.margin === "number" ? position.margin : 24,
+      remember: position.remember !== false,
+    },
+    ...(widget.icon ? { icon: trim(widget.icon) } : {}),
+    ...(tray
+      ? {
+          tray: {
+            icon: trim(tray.icon),
+            items: Array.isArray(tray.items) ? tray.items.map(trim) : ["toggle", "settings"],
+          },
+        }
+      : {}),
+    ...(settings
+      ? {
+          settings: {
+            ...(settings.title ? { title: trim(settings.title) } : {}),
+            fields: (Array.isArray(settings.fields) ? settings.fields : []).map((field) => ({
+              key: trim(field.key),
+              label: trim(field.label),
+              type: field.type,
+              ...(field.default !== undefined ? { default: field.default } : {}),
+              ...(Array.isArray(field.options)
+                ? {
+                    options: field.options.map((option) => ({
+                      value: trim(option.value),
+                      label: trim(option.label),
+                    })),
+                  }
+                : {}),
+            })),
+          },
+        }
+      : {}),
+  };
+}
+
 function normalizeManifest(manifest) {
   const permissions = manifest.permissions ?? {};
   const contributions = manifest.contributions ?? {};
@@ -84,6 +145,10 @@ function normalizeManifest(manifest) {
       network: uniq(network.map((host) => trim(host).toLowerCase()).filter(Boolean)),
       tools: permissions.tools ?? "read",
       files: stringList(files),
+      // d.94（v4）：未声明时为 [] / false，与应用归一化一致
+      events: stringList(permissions.events),
+      graphics: stringList(permissions.graphics),
+      eval: permissions.eval === true,
     },
     contributions: {
       skills: (Array.isArray(contributions.skills) ? contributions.skills : []).map((skill) => ({
@@ -118,18 +183,13 @@ function normalizeManifest(manifest) {
           tools: (Array.isArray(pack.tools) ? pack.tools : []).map(trim),
         }),
       ),
-      // d.88：v4 的模型接入预设也必须进规范化文本，否则签名与验签两边对不上。
-      // 旧清单没有该字段 → 空数组（应用归一化后也恒为空数组）。
-      llmPresets: (Array.isArray(contributions.llmPresets) ? contributions.llmPresets : []).map(
-        (preset) => ({
-          id: trim(preset.id),
-          label: trim(preset.label),
-          provider: preset.provider,
-          baseUrl: trim(preset.baseUrl),
-          model: trim(preset.model),
-          note: trim(preset.note),
-        }),
-      ),
+      // d.94：界面插件声明（v3 及更旧没有该字段 → 空数组；应用归一化后也恒为数组）。
+      desktopWidgets: (Array.isArray(contributions.desktopWidgets)
+        ? contributions.desktopWidgets
+        : []
+      ).map(normalizeDesktopWidget),
+      // d.90：模型预设已收回——清单里写 llmPresets 会被应用丢弃，签名文本同样恒为空数组。
+      llmPresets: [],
     },
   };
 }

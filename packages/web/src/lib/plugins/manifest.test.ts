@@ -86,6 +86,9 @@ describe("parsePluginManifest · v3 合法清单", () => {
       network: ["mcp.example.com"],
       tools: "read",
       files: [],
+      events: [],
+      graphics: [],
+      eval: false,
     });
   });
 
@@ -133,7 +136,14 @@ describe("parsePluginManifest · v3 合法清单", () => {
       }),
     );
 
-    expect(parsed.permissions).toEqual({ network: [], tools: "read", files: [] });
+    expect(parsed.permissions).toEqual({
+      network: [],
+      tools: "read",
+      files: [],
+      events: [],
+      graphics: [],
+      eval: false,
+    });
     expect(parsed.contributions.mcpServers).toEqual([]);
   });
 
@@ -342,7 +352,15 @@ describe("parsePluginManifest · v1 / v2 归一化", () => {
     });
     expect(parsed.contributions.mcpServers).toEqual([]);
     expect(parsed.contributions.commands).toEqual([]);
-    expect(parsed.permissions).toEqual({ network: [], tools: "read", files: [] });
+    expect(parsed.contributions.desktopWidgets).toEqual([]);
+    expect(parsed.permissions).toEqual({
+      network: [],
+      tools: "read",
+      files: [],
+      events: [],
+      graphics: [],
+      eval: false,
+    });
     expect("extra" in parsed).toBe(false);
   });
 
@@ -354,7 +372,14 @@ describe("parsePluginManifest · v1 / v2 归一化", () => {
     expect(parsed.contributions.skills).toEqual([]);
     expect(parsed.contributions.mcpServers).toEqual([{ ...server, description: "" }]);
     expect(parsed.contributions.commands).toEqual([]);
-    expect(parsed.permissions).toEqual({ network: ["mcp.example.com"], tools: "read", files: [] });
+    expect(parsed.permissions).toEqual({
+      network: ["mcp.example.com"],
+      tools: "read",
+      files: [],
+      events: [],
+      graphics: [],
+      eval: false,
+    });
   });
 
   it("v2 混合包保留技能与服务，network 去重", () => {
@@ -413,11 +438,10 @@ describe("parsePluginManifest · 通用校验（v1/v2/v3 共用）", () => {
     ).toContain("技能必须是 JSON 对象");
   });
 
-  it("schemaVersion 只接受 1 / 2 / 3；4 及以上明确拒绝", () => {
-    // d.90 起 v4 的模型预设能力已移除（模型统一由 magpie 网关提供），这里随实现同步。
-    expect(failure(meta({ schemaVersion: 3 }))).not.toContain("仅支持 schemaVersion");
-    expect(failure(meta({ schemaVersion: 4 }))).toContain("仅支持 schemaVersion: 1 / 2 / 3");
-    expect(failure(meta({ schemaVersion: 5 }))).toContain("仅支持 schemaVersion: 1 / 2 / 3");
+  it("schemaVersion 只接受 1 / 2 / 3 / 4；5 及以上明确拒绝", () => {
+    // d.94：v4 是当前契约（界面插件）；更旧的 1/2/3 语义不变。
+    expect(failure(meta({ schemaVersion: 5 }))).toContain("仅支持 schemaVersion: 1 / 2 / 3 / 4");
+    expect(failure(meta({ schemaVersion: 0 }))).toContain("仅支持 schemaVersion: 1 / 2 / 3 / 4");
     expect(failure({ ...meta(), schemaVersion: undefined })).toContain("schemaVersion");
   });
 
@@ -768,11 +792,266 @@ describe("parsePluginManifest · 发布者与签名（d.67）", () => {
 describe("模型预设已废弃（d.90：模型统一由 magpie 网关提供）", () => {
   const preset = { id: "p", label: "P", provider: "openai", baseUrl: "http://127.0.0.1:3425/v1", model: "m" };
 
-  it("schemaVersion 4 不再被接受；v3 里写 llmPresets 会被忽略（归一化为空数组）", () => {
-    expect(() => parsePluginManifest({ ...meta(), schemaVersion: 4 })).toThrow(/仅支持 schemaVersion/);
+  it("v3 里写 llmPresets 会被忽略（归一化为空数组，不静默成为能力）", () => {
     const parsed = parsePluginManifest(
       meta({ contributions: { skills: [skill], llmPresets: [preset] } }),
     );
     expect(parsed.contributions.llmPresets).toEqual([]);
+  });
+});
+
+/* ══════════════ d.94 · v4：界面插件（desktopWidget）清单 ══════════════ */
+
+/** 一个完整合法的桌面小组件声明（对齐 packages/pet-widget/plugin.json）。 */
+const widget = {
+  id: "pet",
+  name: "桌宠",
+  entry: "files/index.html",
+  width: 300,
+  height: 420,
+  scales: [0.6, 0.8, 1, 1.25, 1.5],
+  defaultScale: 1,
+  transparent: true,
+  alwaysOnTop: true,
+  skipTaskbar: true,
+  resizable: false,
+  clickThrough: "auto",
+  position: { anchor: "bottom-right", margin: 24, remember: true },
+  icon: "files/tray.png",
+  tray: { icon: "files/tray.png", items: ["toggle", "clickThrough", "resetPosition", "settings"] },
+  settings: {
+    title: "桌宠",
+    fields: [
+      { key: "agentId", type: "agent", label: "对话绑定智能体" },
+      {
+        key: "modelPath",
+        type: "text",
+        label: "Live2D 模型路径",
+        default: "pet/Hiyori/Hiyori.model3.json",
+      },
+      {
+        key: "presence",
+        type: "select",
+        label: "打扰强度",
+        default: "normal",
+        options: [
+          { value: "quiet", label: "安静" },
+          { value: "normal", label: "正常" },
+          { value: "eager", label: "积极" },
+        ],
+      },
+    ],
+  },
+};
+
+/** 合法 v4 bundle 清单（界面插件）。 */
+function bundle(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schemaVersion: 4,
+    id: "heming.pet",
+    name: "桌宠",
+    version: "1.0.0",
+    description: "桌面上的 Live2D 化身",
+    author: "和鸣",
+    distribution: "bundle",
+    permissions: {
+      network: [],
+      tools: "none",
+      files: [],
+      events: ["notify"],
+      graphics: ["webgl", "wasm"],
+      eval: true,
+    },
+    contributions: {
+      desktopWidgets: [widget],
+      commands: [],
+      skills: [],
+      mcpServers: [],
+      toolPacks: [],
+    },
+    ...overrides,
+  };
+}
+
+describe("parsePluginManifest · v4 界面插件", () => {
+  it("bundle 清单归一化：distribution / desktopWidgets / permissions 新字段", () => {
+    const parsed = parsePluginManifest(bundle());
+    expect(parsed.schemaVersion).toBe(4);
+    expect(parsed.distribution).toBe("bundle");
+    expect(parsed.contributions.desktopWidgets).toHaveLength(1);
+    expect(parsed.contributions.desktopWidgets[0]).toMatchObject({
+      id: "pet",
+      name: "桌宠",
+      entry: "files/index.html",
+      width: 300,
+      height: 420,
+      defaultScale: 1,
+      transparent: true,
+      clickThrough: "auto",
+      position: { anchor: "bottom-right", margin: 24, remember: true },
+      tray: { items: ["toggle", "clickThrough", "resetPosition", "settings"] },
+    });
+    expect(parsed.permissions.events).toEqual(["notify"]);
+    expect(parsed.permissions.graphics).toEqual(["webgl", "wasm"]);
+    expect(parsed.permissions.eval).toBe(true);
+    // 归一化后 desktopWidgets 是深拷贝：外部改它不影响下一次解析
+    parsed.contributions.desktopWidgets[0].settings!.fields[0].label = "改过";
+    expect(parsePluginManifest(bundle()).contributions.desktopWidgets[0].settings!.fields[0].label).toBe(
+      "对话绑定智能体",
+    );
+  });
+
+  it("distribution 缺省 manifest；desktopWidgets 缺省空数组（v4 的纯声明式包照样可装）", () => {
+    const parsed = parsePluginManifest(
+      meta({ schemaVersion: 4, contributions: { skills: [skill] } }),
+    );
+    expect(parsed.distribution).toBe("manifest");
+    expect(parsed.contributions.desktopWidgets).toEqual([]);
+    expect(parsed.permissions.events).toEqual([]);
+    expect(parsed.permissions.graphics).toEqual([]);
+    expect(parsed.permissions.eval).toBe(false);
+  });
+
+  it("bundle 不能声明技能 / MCP 服务 / 工具束（只允许 commands + desktopWidgets）", () => {
+    expect(
+      failure(bundle({ contributions: { desktopWidgets: [widget], skills: [skill] } })),
+    ).toContain("只允许贡献 commands 与 desktopWidgets");
+    expect(
+      failure(bundle({ contributions: { desktopWidgets: [widget], mcpServers: [server] } })),
+    ).toContain("只允许贡献 commands 与 desktopWidgets");
+    expect(
+      failure(
+        bundle({
+          contributions: {
+            desktopWidgets: [widget],
+            toolPacks: [{ id: "p", name: "P", tools: ["t"] }],
+          },
+        }),
+      ),
+    ).toContain("只允许贡献 commands 与 desktopWidgets");
+  });
+
+  it("desktopWidgets 非空但 distribution 不是 bundle → 拒绝", () => {
+    expect(
+      failure(
+        bundle({
+          distribution: "manifest",
+          contributions: { desktopWidgets: [widget] },
+        }),
+      ),
+    ).toContain('必须 distribution: "bundle"');
+  });
+
+  it("bundle 只有桌面小组件也算一项能力；全空仍拒绝", () => {
+    expect(() => parsePluginManifest(bundle())).not.toThrow();
+    expect(
+      failure(
+        bundle({ contributions: { desktopWidgets: [], commands: [], skills: [], mcpServers: [] } }),
+      ),
+    ).toContain("至少要包含 1 项能力");
+  });
+
+  it("桌面小组件字段校验：id / 入口 / 尺寸 / 缩放档 / 穿透 / 托盘", () => {
+    const withWidget = (patch: Record<string, unknown>) =>
+      bundle({ contributions: { desktopWidgets: [{ ...widget, ...patch }] } });
+    expect(failure(withWidget({ id: "Pet" }))).toContain("小组件 id");
+    expect(failure(withWidget({ entry: "/files/index.html" }))).toContain(
+      "入口必须是包内相对路径的 .html",
+    );
+    expect(failure(withWidget({ entry: "files/../index.html" }))).toContain(
+      "入口必须是包内相对路径的 .html",
+    );
+    expect(failure(withWidget({ entry: "files/index.js" }))).toContain(
+      "入口必须是包内相对路径的 .html",
+    );
+    expect(failure(withWidget({ width: 50 }))).toContain("窗口宽度不能小于 96");
+    expect(failure(withWidget({ height: 2048 }))).toContain("窗口高度不能大于 1024");
+    expect(failure(withWidget({ scales: [1, 1] }))).toContain("缩放档位必须严格递增");
+    expect(failure(withWidget({ scales: [0.1] }))).toContain("缩放档位不能小于 0.5");
+    expect(failure(withWidget({ scales: [1, 2.5] }))).toContain("缩放档位不能大于 2");
+    expect(failure(withWidget({ scales: [1.234] }))).toContain("缩放档位最多 2 位小数");
+    expect(failure(withWidget({ defaultScale: 1.1 }))).toContain("defaultScale 必须是 scales 里的一档");
+    expect(failure(withWidget({ clickThrough: "yes" }))).toContain('clickThrough 只能是 "none" / "auto"');
+    expect(
+      failure(withWidget({ tray: { icon: "files/tray.png", items: ["bogus"] } })),
+    ).toContain("托盘菜单项只能是");
+    expect(failure(withWidget({ tray: { icon: "files/tray.jpg", items: ["toggle"] } }))).toContain(
+      "托盘图标必须是包内相对路径的 .png",
+    );
+  });
+
+  it("settings.fields 通用表单校验：select 选项 / 默认值 / 重复键 / 坏类型", () => {
+    const withFields = (fields: unknown[]) =>
+      bundle({ contributions: { desktopWidgets: [{ ...widget, settings: { fields } }] } });
+    expect(failure(withFields([{ key: "a", type: "select", label: "A" }]))).toContain(
+      "select 字段必须提供 options",
+    );
+    expect(
+      failure(
+        withFields([
+          {
+            key: "a",
+            type: "select",
+            label: "A",
+            default: "x",
+            options: [{ value: "y", label: "Y" }],
+          },
+        ]),
+      ),
+    ).toContain("default 必须是 options 里的某个 value");
+    expect(failure(withFields([{ key: "a", type: "text", label: "A", options: [] }]))).toContain(
+      "只有 select 字段可以声明 options",
+    );
+    expect(failure(withFields([{ key: "a", type: "boolean", label: "A", default: "yes" }]))).toContain(
+      "boolean 字段的 default 必须是布尔值",
+    );
+    expect(failure(withFields([{ key: "a", type: "number", label: "A", default: "1" }]))).toContain(
+      "number 字段的 default 必须是数字",
+    );
+    expect(
+      failure(
+        withFields([
+          { key: "dup", type: "text", label: "A" },
+          { key: "dup", type: "text", label: "B" },
+        ]),
+      ),
+    ).toContain("设置字段键重复：dup");
+    expect(failure(withFields([{ key: "a", type: "bogus", label: "A" }]))).toContain(
+      "设置字段类型只能是 boolean / select / text / number / agent",
+    );
+  });
+
+  it("permissions 新字段只接受协议内的值", () => {
+    expect(
+      failure(bundle({ permissions: { network: [], tools: "none", files: [], events: ["evil"] } })),
+    ).toContain('permissions.events 目前只支持 "notify"');
+    expect(
+      failure(
+        bundle({ permissions: { network: [], tools: "none", files: [], graphics: ["cuda"] } }),
+      ),
+    ).toContain('permissions.graphics 只支持 "webgl" / "wasm"');
+    expect(
+      failure(bundle({ permissions: { network: [], tools: "none", files: [], eval: "yes" } })),
+    ).toContain("permissions.eval 必须是布尔值");
+  });
+});
+
+describe("parsePluginManifest · v3 拒绝 v4 新增字段（不静默丢弃）", () => {
+  it("v3 带 distribution / desktopWidgets / permissions.events|graphics|eval 都明确拒绝并给路径", () => {
+    expect(failure(meta({ distribution: "bundle" }))).toContain("schemaVersion 3 不支持 distribution");
+    expect(
+      failure(meta({ contributions: { skills: [skill], desktopWidgets: [widget] } })),
+    ).toContain("schemaVersion 3 不支持 contributions.desktopWidgets");
+    expect(
+      failure(meta({ contributions: { skills: [skill] }, permissions: { events: ["notify"] } })),
+    ).toContain("schemaVersion 3 不支持 permissions.events");
+    expect(
+      failure(
+        meta({ contributions: { skills: [skill] }, permissions: { graphics: ["webgl"] } }),
+      ),
+    ).toContain("schemaVersion 3 不支持 permissions.graphics");
+    expect(
+      failure(meta({ contributions: { skills: [skill] }, permissions: { eval: true } })),
+    ).toContain("schemaVersion 3 不支持 permissions.eval");
   });
 });

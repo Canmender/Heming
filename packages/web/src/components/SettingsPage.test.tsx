@@ -561,7 +561,7 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
 
     expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
     expect(input).toHaveValue("");
-    expect(document.querySelector('[data-settings-id="pet"]')).not.toBeNull();
+    expect(document.querySelector('[data-settings-id="widgets"]')).not.toBeNull();
   });
 
   it("点结果：切到对应分区、滚动到卡片、高亮 2 秒后消失", async () => {
@@ -571,7 +571,7 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
     // 用假 setTimeout 只为验证 2 秒淡出；rAF 保持真实（高亮在下一帧挂上）
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     fireEvent.change(screen.getByLabelText("搜索设置项"), { target: { value: "桌宠" } });
-    fireEvent.click(screen.getByRole("button", { name: /桌宠/ }));
+    fireEvent.click(screen.getByRole("button", { name: /桌面小组件/ }));
 
     await act(async () => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -579,7 +579,7 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
 
     // 切到「外观」分区且锚点存在、带 ink 描边高亮
     expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
-    const anchor = document.querySelector<HTMLElement>('[data-settings-id="pet"]')!;
+    const anchor = document.querySelector<HTMLElement>('[data-settings-id="widgets"]')!;
     expect(anchor).not.toBeNull();
     expect(anchor.className).toContain("outline-ink");
     expect(scrollSpy).toHaveBeenCalled();
@@ -591,7 +591,7 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
       vi.advanceTimersByTime(SETTINGS_HIGHLIGHT_MS + 50);
     });
     expect(
-      document.querySelector<HTMLElement>('[data-settings-id="pet"]')!.className,
+      document.querySelector<HTMLElement>('[data-settings-id="widgets"]')!.className,
     ).not.toContain("outline-ink");
   });
 
@@ -620,7 +620,7 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
     render(<SettingsPage />);
     const input = screen.getByLabelText("搜索设置项");
     fireEvent.change(input, { target: { value: "桌宠" } });
-    fireEvent.click(screen.getByRole("button", { name: /桌宠/ }));
+    fireEvent.click(screen.getByRole("button", { name: /桌面小组件/ }));
     expect(screen.queryByRole("region", { name: "设置搜索结果" })).toBeNull();
 
     fireEvent.change(input, { target: { value: "导航" } });
@@ -630,7 +630,7 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
 
 /**
  * d.68 外观页新增「导航栏」卡：
- * - 顺序 主题模式 → 主题色 → 导航栏 → 桌宠；
+ * - 顺序 主题模式 → 主题色 → 导航栏 → 桌面小组件（d.94 起原桌宠卡改成通用小组件卡）；
  * - 两档 radio 与导航轨底部 pin 按钮同源（useUiStore.navMode）；
  * - 「恢复默认外观」二次确认后一次改三处（主题模式/主题色/导航模式）。
  */
@@ -644,13 +644,13 @@ describe("设置区 · 导航栏与恢复默认外观（d.68）", () => {
     setThemeMode("system");
   });
 
-  it("外观页顺序：主题模式 → 主题色 → 导航栏 → 桌宠", () => {
+  it("外观页顺序：主题模式 → 主题色 → 导航栏 → 桌面小组件", () => {
     const { container } = render(<SettingsPage />);
     goTab("外观");
     const ids = Array.from(container.querySelectorAll<HTMLElement>("[data-settings-id]")).map(
       (el) => el.dataset.settingsId,
     );
-    expect(ids).toEqual(["theme-mode", "accent-color", "nav-mode", "pet"]);
+    expect(ids).toEqual(["theme-mode", "accent-color", "nav-mode", "widgets"]);
     // 卡片标题与锚点都在
     expect(screen.getByText("导航栏")).toBeInTheDocument();
     expect(container.querySelector('[data-settings-id="nav-mode"]')).not.toBeNull();

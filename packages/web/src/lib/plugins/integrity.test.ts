@@ -30,12 +30,18 @@ function reordered(parsed: PluginManifest): PluginManifest {
       files: parsed.permissions.files,
       tools: parsed.permissions.tools,
       network: parsed.permissions.network,
+      // d.94：v4 归一化后恒带这三个字段，重排键顺序时不能漏（否则不是「同一份清单」）
+      eval: parsed.permissions.eval,
+      graphics: parsed.permissions.graphics,
+      events: parsed.permissions.events,
     },
     contributions: {
       toolPacks: parsed.contributions.toolPacks,
       commands: parsed.contributions.commands,
       mcpServers: parsed.contributions.mcpServers,
       skills: parsed.contributions.skills,
+      // d.94：桌面小组件声明同样进规范化文本
+      desktopWidgets: parsed.contributions.desktopWidgets,
       // d.88：v4 归一化后恒带空数组，重排键顺序时不能漏掉它（否则不是「同一份清单」）
       llmPresets: parsed.contributions.llmPresets,
     },

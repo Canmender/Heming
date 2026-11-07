@@ -19,8 +19,8 @@
 | [LESS-AI-TONE.md](LESS-AI-TONE.md) | 去 AI 味：11 条统计验证规则、白名单、信息守恒 |
 | [WEB-SCRAPING.md](WEB-SCRAPING.md) | 网页抓取：Scrapling 16 个工具的三层启用策略 |
 | [SELF-EDIT.md](SELF-EDIT.md) | 自我修改：`self_*` 工具、护栏、审计、快照回滚与开关 |
-| [PET.md](PET.md) | 桌宠：怎么用、三层架构、数据边界、扩展指南（换形象/加姿态/接事件通道/接语音）、已知限制与排查 |
-| [PLUGINS.md](PLUGINS.md) | 插件（能力包）：清单 v3 字段表、权限声明（网络/工具风险上限/文件根）、命令 target、安装/更新/停用/卸载语义、v1/v2 兼容与红线、可粘贴示例 |
+| [PET.md](PET.md) | 桌宠（**d.97 起为界面插件 `heming.pet`**）：怎么装/用/卸、插件包结构、宿主运行时与三种边界、数据边界与老数据迁移、扩展指南（换形象/加姿态/加设置项）、已知限制与排查 |
+| [PLUGINS.md](PLUGINS.md) | 插件（能力包）：清单 v3 字段表、权限声明（网络/工具风险上限/文件根）、命令 target、安装/更新/停用/卸载语义、v1/v2 兼容与红线、可粘贴示例；**§10 界面插件（v4 bundle）**：`package.tgz`、独立 origin `widget://`、最小 preload、官方目录分发 |
 
 ## 3. 设计规格与实施记录
 
@@ -136,6 +136,8 @@
 | [specs/2026-11-07-ui-polish-rounds.md](superpowers/specs/2026-11-07-ui-polish-rounds.md) | **20 轮 UI/UX 自检与优化**（进行中）：按「使用习惯 / 排版 / UI 一致性 / AI 腔文案」逐轮找证据并修复；含轮次看板、每轮问题与修法、验证口径与遗留清单 |
 | [specs/2026-11-07-d95-adopt-existing-magpie.md](superpowers/specs/2026-11-07-d95-adopt-existing-magpie.md) | **d.95 采用本机已有 magpie**：启动前先 `/api/hello` 探活，已有实例则接入不 spawn（external 状态、stop 不杀外部进程）；设置页分「运行中/已接入」两套文案与按钮 |
 | [specs/2026-11-07-d94-drop-anthropic-and-price.md](superpowers/specs/2026-11-07-d94-drop-anthropic-and-price.md) | **d.94 清掉 provider 死代码**：删 Anthropic 协议实现与前缀缓存（llmAnthropic/promptCache 及测试）、llmClient 重写为 OpenAI 单协议；删价格表与 `cheap` 档（smart 改 0.65/0.35）；插件目录 DTO 的 `llmPresets` 收尾 |
+| [specs/2026-11-07-d97-pet-as-plugin.md](superpowers/specs/2026-11-07-d97-pet-as-plugin.md) | **d.97 桌宠拆成界面插件**：新增第二类包 `desktopWidget`（v4 `distribution: "bundle"`）——`package.tgz`（确定性 tar/gzip）+ 主进程安装落盘 + 独立 origin `widget://<id>` 渲染 + 最小 preload + `widget:*`/`widgets:*` 通道契约；桌宠迁到 `packages/pet-widget`，主程序删除 pet 入口/pixi/5MB 模型；老 `pet-state.json` / `heming.pet.v1` / `heming.pet.presence.v1` 一次性迁移；云端目录新增 `GET /api/plugins/:id/:version/package` |
+| [plans/2026-11-07-d97-pet-as-plugin.md](superpowers/plans/2026-11-07-d97-pet-as-plugin.md) | d.97 实施计划：契约 → 宿主运行时 → 插件包迁移 → 主窗插件区/设置/删桌宠 → 分发与门禁，附明确不做（第三方界面插件/多 widget/签名/宿主代发） |
 | [specs/2026-11-07-d92-bundled-magpie-component.md](superpowers/specs/2026-11-07-d92-bundled-magpie-component.md) | **d.92 内置 magpie 原生组件**：构建时下载并 SHA256 校验 CLI（约 73MB，不进仓库）、主进程托管启动/探活/整树回收、本机回环反代（来源白名单 + 清 Origin + SSE 直通）、渲染层桥与 `source=desktop/manual` 网关语义、设置页内置状态区块；含桌面/渲染层测试与打包前置检查 |
 | [specs/2026-11-07-d90-magpie-native-model-layer.md](superpowers/specs/2026-11-07-d90-magpie-native-model-layer.md) | **d.90 magpie 内化为原生模型层**：删除服务商预设 / 协议选择 / 手填 BaseURL+Key / 逐连接 Key 与旧绑定候选链（一次性清除）；模型目录改由本机 magpie 网关 `/v1/models` 提供，绑定与候选链只绑模型；设置区换成网关卡；收回插件 v4 模型预设 |
 | [specs/2026-11-07-d88-cloud-plugin-catalog.md](superpowers/specs/2026-11-07-d88-cloud-plugin-catalog.md) | **d.88 云端插件目录（插件独立分发）**：插件包不随安装包（desktop 打包守卫）；服务端目录 `GET /api/plugins` + 原样清单 + `X-Plugin-Sha256`；客户端「从云端浏览」下载并**校验指纹**后走既有安装预览；清单 v4 新增 `contributions.llmPresets`（只填地址/模型、strict 拒绝 apiKey、主机须被权限覆盖）；落地 `plugins/magpie-gateway` 与 `plugins/infohub-collector` 两个独立包 |

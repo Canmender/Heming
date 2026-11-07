@@ -284,64 +284,53 @@ contextBridge.exposeInMainWorld("__heming_notify", {
   },
 });
 
-// —— 桌宠桥（d.46）——
-// 桌宠是独立渲染进程：它自己画 Live2D、自己直连本机 LLM，主进程只负责
-// 「窗口在哪、要不要挡鼠标、显示还是隐藏」。这里因此只暴露这三类动作，
-// **不暴露任意窗口操作**（move/resize/setAlwaysOnTop 之类的通用入口）。
+// —— 界面插件桥（d.97：主窗专用，管理 widget 类插件的安装/启停/设置/动作）——
+// 桌宠已从本体拆出去，成为第一个「界面插件」（desktopWidget）。本桥只给**主窗**用，
+// 通道走 secureIpc + TRUSTED_CHANNELS（不是 widget 窗口那份最小桥）；
+// widget 窗口自己的桥在 widget-preload.js，只有窗口动作与环境，没有安装权和文件能力。
 //
-// ★ 坐标不上报：拖拽只发"按下/移动了/抬起"三个信号，位移由主进程按屏幕光标计算。
-//   渲染层的 clientX 会随窗口移动而失真，拿它算位置一定跑偏。
-contextBridge.exposeInMainWorld("__heming_pet", {
-  /** 读当前状态 { visible, scale, clickThrough, bounds }。 */
-  state: () => ipcRenderer.invoke("pet:state"),
-  /**
-   * 缩放。两种语义：
-   *   setScale({ dir: 1 })  相对切一档（1 = 放大，-1 = 缩小）
-   *   setScale(1.25)        设为该绝对档位
-   */
-  setScale: (payload) => ipcRenderer.invoke("pet:set-scale", payload),
-  /** 上报「光标此刻是否在可交互区」。只在值变化时调用（mousemove 是高频事件）。 */
-  setInteractive: (value) => {
-    ipcRenderer.send("pet:set-interactive", value === true);
-  },
-  dragStart: () => ipcRenderer.send("pet:drag-start"),
-  dragMove: () => ipcRenderer.send("pet:drag-move"),
-  dragEnd: () => ipcRenderer.send("pet:drag-end"),
-  /** 回到默认落位（工作区右下角，按当前缩放档位重新算）。 */
-  resetPosition: () => ipcRenderer.send("pet:reset-position"),
-  show: () => ipcRenderer.send("pet:show"),
-  hide: () => ipcRenderer.send("pet:hide"),
-  toggle: () => ipcRenderer.send("pet:toggle"),
-  /** 鼠标穿透开关（设置区与托盘共用同一份状态）。 */
-  setClickThrough: (value) => {
-    ipcRenderer.send("pet:set-click-through", value === true);
-  },
-  /** 重新加载桌宠页面（换模型 / 换绑定智能体后让它重新读配置）。 */
-  reload: () => ipcRenderer.send("pet:reload"),
-  /**
-   * 订阅主进程推来的事件（桌宠窗口用）。
-   * 事件契约见 `packages/web/src/lib/petEvent.ts`；目前无生产者，是第三期的预留通道。
-   */
-  onEvent: (callback) => {
+// ★ 安装包字节从渲染层传进来（ArrayBuffer）：主进程按 expectedSha256 复核后才解包，
+//   渲染层不碰 fs、不决定落盘位置。
+contextBridge.exposeInMainWorld("__heming_widgets", {
+  /** 已安装的界面插件记录（{id,name,version,enabled,widget,settings,installedAt,error?}）。 */
+  list: () => ipcRenderer.invoke("widgets:list"),
+  /** 打开文件框选一个 .tgz，只返回路径（不安装）。 */
+  pickPackage: () => ipcRenderer.invoke("widgets:pickPackage"),
+  /** 安装/升级：bytes 是 package.tgz 的 ArrayBuffer，expectedSha256 来自云端目录。 */
+  install: (payload) => ipcRenderer.invoke("widgets:install", payload),
+  /** 主进程自己开文件框选包并安装（渲染层不碰 fs）。 */
+  installFromFile: () => ipcRenderer.invoke("widgets:installFromFile"),
+  uninstall: (payload) => ipcRenderer.invoke("widgets:uninstall", payload),
+  setEnabled: (payload) => ipcRenderer.invoke("widgets:setEnabled", payload),
+  settingsGet: (payload) => ipcRenderer.invoke("widgets:settingsGet", payload),
+  settingsSet: (payload) => ipcRenderer.invoke("widgets:settingsSet", payload),
+  /** 窗口动作：show/hide/toggle/scaleUp/scaleDown/toggleClickThrough/resetPosition/reload。 */
+  action: (payload) => ipcRenderer.invoke("widgets:action", payload),
+  /** 运行时状态 { visible, scale, clickThrough }（未运行为 null）。 */
+  state: (payload) => ipcRenderer.invoke("widgets:state", payload),
+  /** 把通知中心的新条目脱敏后转发给声明了 permissions.events 含 notify 的 widget。 */
+  publish: (payload) => ipcRenderer.send("widgets:publish", payload),
+  /** 老 localStorage["heming.pet.v1"] 一次性并入 heming.pet 的设置（幂等）。 */
+  migrateLegacy: (payload) => ipcRenderer.invoke("widgets:migrateLegacy", payload),
+  /** 主进程要求主窗跳页（托盘「设置」/widget 气泡点击）。返回取消订阅函数。 */
+  onOpenPage: (callback) => {
     if (typeof callback !== "function") return () => {};
     const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on("pet:event", listener);
-    return () => ipcRenderer.removeListener("pet:event", listener);
+    ipcRenderer.on("widgets:open-page", listener);
+    return () => ipcRenderer.removeListener("widgets:open-page", listener);
   },
-  /** 主动发起一条推送（主窗口用；主进程会校验来源）。 */
-  emit: (payload) => ipcRenderer.send("pet:emit", payload),
   /**
-   * 桌宠窗口请求把主窗口叫到前台并切到设置页（未配置模型时的出口）。
-   * @param {string} [page] 桌宠直达页面，page 可选（不传 = 当前既有行为：设置页）。
+   * chatConfig 请求/应答（规格 §3.4）：主进程不知道 agents/binding，向主窗问一次并缓存 30s。
+   * 返回取消订阅函数；主窗不接也能跑（主进程 1s 后降级为空列表）。
    */
-  openSettings: (page) => ipcRenderer.send("pet:open-settings", page),
-  /** 主窗口侧订阅「桌宠要切换页面」。返回取消订阅函数。payload 为 `{ page?: string }` 或字符串（旧调用）。 */
-  onOpenSettings: (callback) => {
+  onChatConfigRequest: (callback) => {
     if (typeof callback !== "function") return () => {};
     const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on("pet:open-settings", listener);
-    return () => ipcRenderer.removeListener("pet:open-settings", listener);
+    ipcRenderer.on("widgets:chat-config-request", listener);
+    return () => ipcRenderer.removeListener("widgets:chat-config-request", listener);
   },
+  replyChatConfig: (requestId, config) =>
+    ipcRenderer.invoke("widgets:chat-config-reply", { requestId, config }),
 });
 
 // —— 文件编辑桥（d.55 · file_patch）——

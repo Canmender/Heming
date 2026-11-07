@@ -123,6 +123,66 @@ describe("createPluginCatalog", () => {
   });
 });
 
+describe("界面插件包（d.94 bundle）", () => {
+  function bundleManifest(id: string, version: string) {
+    return {
+      schemaVersion: 4,
+      id,
+      name: `组件 ${id}`,
+      version,
+      distribution: "bundle",
+      permissions: { network: [], tools: "none", files: [], events: ["notify"], graphics: ["webgl"], eval: false },
+      contributions: {
+        desktopWidgets: [{ id: "pet", name: "桌宠", entry: "files/index.html", width: 300, height: 420 }],
+      },
+    };
+  }
+
+  function writeBundle(rootDir: string, id: string, version: string, withPackage = true): Buffer {
+    const dir = join(rootDir, id, version);
+    mkdirSync(dir, { recursive: true });
+    const manifest = Buffer.from(JSON.stringify(bundleManifest(id, version)), "utf8");
+    writeFileSync(join(dir, "plugin.json"), manifest);
+    if (withPackage) writeFileSync(join(dir, "package.tgz"), Buffer.from("fake-tgz-bytes"));
+    return manifest;
+  }
+
+  it("目录条目带 distribution/package 指纹，包可原样下载", async () => {
+    writeBundle(root, "heming.pet", "1.0.0");
+    const catalog = createPluginCatalog({ dir: root });
+    const entry = catalog.list()[0];
+    expect(entry.distribution).toBe("bundle");
+    expect(entry.package).toEqual({
+      sha256: createHash("sha256").update("fake-tgz-bytes").digest("hex"),
+      size: "fake-tgz-bytes".length,
+    });
+    expect(entry.contributions.desktopWidgets).toBe(1);
+
+    const read = catalog.readPackage("heming.pet", "1.0.0");
+    expect(read?.sha256).toBe(entry.package?.sha256);
+    expect(read?.bytes.toString()).toBe("fake-tgz-bytes");
+
+    const app = createApp(createMemoryStore(), { pluginDir: root });
+    const res = await request(app).get("/api/plugins/heming.pet/1.0.0/package");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("application/gzip");
+    expect(res.headers["x-plugin-package-sha256"]).toBe(entry.package?.sha256);
+  });
+
+  it("声明 bundle 却没有 package.tgz 的版本按坏包跳过", () => {
+    writeBundle(root, "heming.broken", "1.0.0", false);
+    expect(createPluginCatalog({ dir: root }).list()).toEqual([]);
+  });
+
+  it("纯声明式包没有 package，readPackage 返回 null", () => {
+    writePlugin(root, "acme.plain", "1.0.0", v4("acme.plain", "1.0.0"));
+    const catalog = createPluginCatalog({ dir: root });
+    expect(catalog.list()[0].distribution).toBe("manifest");
+    expect(catalog.list()[0].package).toBeUndefined();
+    expect(catalog.readPackage("acme.plain", "1.0.0")).toBeNull();
+  });
+});
+
 describe("GET /api/plugins（公开）", () => {
   it("无 token 也能取目录；manifest 原样返回并带 sha256 头", async () => {
     const bytes = writePlugin(root, "acme.cloud", "0.2.0", v4("acme.cloud", "0.2.0"));

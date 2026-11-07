@@ -2,9 +2,9 @@
  * 日程「临期」分级（纯函数）。
  *
  * 为什么单独成文件（d.58 性能收口）：同一个判据有两类消费者——
- * 幕僚巡检（`lib/staff/model.ts`）与桌宠事件派生（`lib/petEvent.ts`）。
+ * 幕僚巡检（`lib/staff/model.ts`）与桌宠事件派生（已随桌宠拆到 `packages/pet-widget/src/lib/petEvent.ts`）。
  * 后者是**桌宠事件协议层**，只为一个 6 行函数不该把 30KB 的 `staff/model`
- * 整条依赖图拖进两个 HTML 入口（实测过 petEvent 块 261KB raw / 82.8KB gzip，
+ * 整条依赖图拖进两个 HTML 入口（实测过原 petEvent 块 261KB raw / 82.8KB gzip，
  * 被 index.html 与 pet.html 同时预载）。
  *
  * 真源仍只有这一处：判据改了这里改，调用方不要各自抄一份

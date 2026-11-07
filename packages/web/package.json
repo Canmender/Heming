@@ -13,8 +13,6 @@
     "katex": "^0.19.1",
     "officeparser": "~8.4.1",
     "pdfjs-dist": "^6.5.438",
-    "pixi-live2d-display": "^0.4.0",
-    "pixi.js": "^6.5.10",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",

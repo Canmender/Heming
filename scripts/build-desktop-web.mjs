@@ -48,11 +48,13 @@ if (!existsSync(join(WEB_DIST, "index.html"))) {
   process.exit(1);
 }
 
-// 桌宠是独立入口（d.46）：产不出 pet.html 时，桌宠窗口会打开一片空白，
-// 而主界面一切正常——这类缺页必须在这里报出来，不能等用户去看那块空窗。
-if (!existsSync(join(WEB_DIST, "pet.html"))) {
+// 桌宠已从本体拆成界面插件（d.94）：本体的产物里**不应该**再有 pet.html——
+// 它的入口/资源现在由独立插件包（`packages/pet-widget` → `package.tgz`）提供，
+// 由 `widget://` 协议加载。这里反过来钉住「本体不再合并桌宠」：
+// 如果哪天有人把 pet 入口加回 vite.config 或 public/pet 没删，安装包会白白变大。
+if (existsSync(join(WEB_DIST, "pet.html"))) {
   console.error(
-    `[build-desktop-web] 失败：${WEB_DIST} 里没有 pet.html（桌宠独立入口缺失，检查 vite.config.ts 的 build.rollupOptions.input）`,
+    `[build-desktop-web] 失败：${WEB_DIST} 里出现了 pet.html（桌宠已改为界面插件，不应再合进本体）`,
   );
   process.exit(1);
 }
