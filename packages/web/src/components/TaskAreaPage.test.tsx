@@ -13,6 +13,7 @@ import { useChatStore } from "../store/chat.js";
 import { useLlmStore } from "../store/llm.js";
 import { setOverride } from "../lib/modelCaps.js";
 import { rolloutLog } from "../lib/rollout/index.js";
+import { registerConversationAbort, resetConversationAbortsForTests } from "../lib/runAbort.js";
 
 // 通用智能体页只负责「运行视图」：嵌入式 ChatPage 的消息/E2E/工具链路另有专门测试，
 // 这里替换成一个探针，验证传参（embedded）与选中后的挂载。
@@ -427,6 +428,69 @@ describe("通用智能体页面", () => {
  * 嵌入态只藏本页自己的页头标题（否则宿主页 h1 + 本页标题会叠成两个），
  * 列表/筛选/启动面板/详情这些真正的内容一律保留。
  */
+describe("任务区稳定化（d.86）", () => {
+  beforeEach(() => resetConversationAbortsForTests());
+
+  it("选中运行记录后卸载再挂载（等价切 Tab）仍停在原记录上", async () => {
+    const id = seedTask();
+    const { unmount } = render(<TaskAreaPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /运行 梳理模块依赖/ }));
+    // 选中后右栏是汇总（出现「目标」段）
+    await waitFor(() => expect(screen.getByText("目标")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /运行 梳理模块依赖/ })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    unmount();
+
+    // 「切到对话 Tab 再切回来」= 组件卸载重建；选中应从会话级快照恢复
+    render(<TaskAreaPage />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /运行 梳理模块依赖/ })).toHaveAttribute(
+        "aria-current",
+        "true",
+      ),
+    );
+    expect(screen.getByText("目标")).toBeInTheDocument();
+    expect(sessionStorage.getItem("heming.task.selected.v1")).toContain(id);
+  });
+
+  it("运行中的任务在汇总卡有「停止运行」；执行者不在当前页面时如实说明", async () => {
+    const id = seedTask();
+    useTaskStore.setState({
+      tasks: useTaskStore.getState().tasks.map((t) =>
+        t.id === id ? { ...t, status: "running" as const } : t,
+      ),
+    });
+    render(<TaskAreaPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /运行 梳理模块依赖/ }));
+
+    const stop = await screen.findByRole("button", { name: "停止运行" });
+    fireEvent.click(stop);
+    expect(
+      await screen.findByText(/这条运行不在当前页面里，先打开运行会话再停止/),
+    ).toBeInTheDocument();
+  });
+
+  it("有执行者登记时，「停止运行」会请求中断该会话", async () => {
+    const id = seedTask();
+    useTaskStore.setState({
+      tasks: useTaskStore.getState().tasks.map((t) =>
+        t.id === id ? { ...t, status: "running" as const } : t,
+      ),
+    });
+    const abort = vi.fn();
+    const off = registerConversationAbort("c1", abort);
+    render(<TaskAreaPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /运行 梳理模块依赖/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "停止运行" }));
+
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/已请求停止/)).toBeInTheDocument();
+    off();
+  });
+});
+
 describe("任务区嵌入态（d.67）", () => {
   it("embedded：不画自己的页头标题，但搜索、状态筛选与启动面板都在", () => {
     render(<TaskAreaPage embedded />);

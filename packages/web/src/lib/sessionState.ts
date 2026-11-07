@@ -76,3 +76,47 @@ export function useSessionTab<T extends string>(
   );
   return [value, set];
 }
+
+/** 合法字符/长度的会话级字符串（如「选中的运行记录 id」）。 */
+function safeSessionString(value: string): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (trimmed.length > 128) return "";
+  return /^[A-Za-z0-9_-]*$/.test(trimmed) ? trimmed : "";
+}
+
+/** 读会话级字符串：非法/超长回落 ""（不猜）。 */
+export function readSessionString(
+  key: string,
+  storage: Pick<Storage, "getItem"> | null = viewStorage(),
+): string {
+  if (!storage) return "";
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return "";
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "string" ? safeSessionString(parsed) : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 非枚举的会话级字符串状态（枚举 Tab 用 `useSessionTab`）。
+ * 例：任务区「当前选中的运行记录 id」——切 Tab 再回来要还在那一条。
+ */
+export function useSessionStringValue(
+  key: string,
+  fallback = "",
+): [string, (next: string) => void] {
+  const [value, setValue] = useState<string>(() => readSessionString(key) || fallback);
+  const set = useCallback(
+    (next: string) => {
+      const clean = safeSessionString(next);
+      setValue(clean);
+      writeSessionValue(key, clean);
+    },
+    [key],
+  );
+  return [value, set];
+}

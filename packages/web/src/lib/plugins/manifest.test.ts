@@ -413,8 +413,11 @@ describe("parsePluginManifest · 通用校验（v1/v2/v3 共用）", () => {
     ).toContain("技能必须是 JSON 对象");
   });
 
-  it("schemaVersion 必须为 1 / 2 / 3", () => {
-    expect(failure(meta({ schemaVersion: 4 }))).toContain("仅支持 schemaVersion: 1 / 2 / 3");
+  it("schemaVersion 只接受 1 / 2 / 3 / 4（v4 为模型预设贡献），5 及以上明确拒绝", () => {
+    // d.85 起支持 schemaVersion 4（contributions.llmPresets）；这条用例随实现同步，
+    // 避免「代码已放开 v4、用例还按 1/2/3 断言」的漂移。
+    expect(failure(meta({ schemaVersion: 4 }))).not.toContain("仅支持 schemaVersion");
+    expect(failure(meta({ schemaVersion: 5 }))).toContain("仅支持 schemaVersion: 1 / 2 / 3 / 4");
     expect(failure({ ...meta(), schemaVersion: undefined })).toContain("schemaVersion");
   });
 
@@ -759,5 +762,90 @@ describe("parsePluginManifest · 发布者与签名（d.67）", () => {
     expect(
       failureOf({ ...unsigned, signature: { alg: "ed25519", value: SIGNATURE } }),
     ).toContain("不支持 signature");
+  });
+});
+
+describe("parsePluginManifest · v4 模型接入预设（d.86）", () => {
+  const preset = {
+    id: "magpie-gateway",
+    label: "magpie 本地网关",
+    provider: "openai",
+    baseUrl: "http://127.0.0.1:3425/v1",
+    model: "deepseek/deepseek-chat",
+    note: "本机 magpie 网关；Key 填 magpie-heming",
+  };
+
+  const v4 = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    schemaVersion: 4,
+    id: "acme.gateway",
+    name: "网关接入包",
+    version: "1.0.0",
+    permissions: { network: ["127.0.0.1:3425"], tools: "none", files: [] },
+    contributions: { llmPresets: [preset] },
+    ...overrides,
+  });
+
+  it("合法预设：字段保留、provider 只认 openai/anthropic、v3 包归一化为空", () => {
+    const parsed = parsePluginManifest(v4());
+    expect(parsed.schemaVersion).toBe(4);
+    expect(parsed.contributions.llmPresets).toEqual([
+      {
+        id: "magpie-gateway",
+        label: "magpie 本地网关",
+        provider: "openai",
+        baseUrl: "http://127.0.0.1:3425/v1",
+        model: "deepseek/deepseek-chat",
+        note: "本机 magpie 网关；Key 填 magpie-heming",
+      },
+    ]);
+    expect(parsePluginManifest(full()).contributions.llmPresets).toEqual([]);
+  });
+
+  it("v3 清单带预设：拒绝并提示升级到 v4（不静默丢字段）", () => {
+    expect(
+      failure(
+        meta({
+          contributions: { llmPresets: [preset] },
+        }),
+      ),
+    ).toContain("模型接入预设需要 schemaVersion 4");
+  });
+
+  it("预设的 Base URL 主机必须被 permissions.network 覆盖（声明即约束）", () => {
+    expect(
+      failure(
+        v4({
+          permissions: { network: ["127.0.0.1:3425"], tools: "none", files: [] },
+          contributions: {
+            llmPresets: [{ ...preset, baseUrl: "https://api.acme.com/v1" }],
+          },
+        }),
+      ),
+    ).toContain("未声明模型地址主机：api.acme.com");
+  });
+
+  it("预设 id 重复 / 远程明文 http / 携带 apiKey 一律拒绝", () => {
+    expect(
+      failure(v4({ contributions: { llmPresets: [preset, preset] } })),
+    ).toContain("预设 id 重复");
+
+    expect(
+      failure(
+        v4({
+          permissions: { network: ["api.acme.com"], tools: "none", files: [] },
+          contributions: {
+            llmPresets: [{ ...preset, baseUrl: "http://api.acme.com/v1" }],
+          },
+        }),
+      ),
+    ).toContain("模型地址必须使用 https");
+
+    expect(
+      failure(
+        v4({
+          contributions: { llmPresets: [{ ...preset, apiKey: "sk-should-not-be-here" }] },
+        }),
+      ),
+    ).toContain("apiKey");
   });
 });

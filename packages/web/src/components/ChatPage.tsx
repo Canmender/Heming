@@ -27,6 +27,7 @@ import {
   shouldLoadMore,
 } from "../lib/messageWindow.js";
 import { readChatScroll, writeChatScroll } from "../lib/chatScroll.js";
+import { registerConversationAbort } from "../lib/runAbort.js";
 import { useTaskStore } from "../lib/tasks/store.js";
 import { resolveForkRun } from "../lib/tasks/forkTask.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
@@ -1730,6 +1731,16 @@ export function ChatPage({
     // 闸门的 await 永不 resolve → 整轮挂死（设计 §4.4）。
     useHitlStore.getState().cancelAll("用户中断");
   };
+  /**
+   * 把「中断本会话」登记给跨组件登记表（d.86）：任务区右栏的汇总卡据此停止运行，
+   * 不必把 ChatPage 的 runsRef 上提成全局状态。用 ref 包一层，避免每次渲染都重登记。
+   */
+  const abortRunsRef = useRef(abortRuns);
+  abortRunsRef.current = abortRuns;
+  useEffect(
+    () => registerConversationAbort(convId, () => abortRunsRef.current()),
+    [convId],
+  );
 
   /** 错误行重试：清掉旧项，按原触发文本重新跑该单个 mention（新 streamId 重新登记）。 */
   const retryStream = (streamId: string) => {
@@ -2663,6 +2674,7 @@ export function ChatPage({
         <button
           type="button"
           aria-label="选择消息导出"
+          title="选择若干条消息单独导出"
           aria-pressed={selectMode}
           className={`rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3]${
             selectMode ? " bg-[#f3f3f3] text-ink" : ""
@@ -2683,6 +2695,7 @@ export function ChatPage({
           <button
             type="button"
             aria-label="导出会话"
+            title="导出整段会话（只含本机可解密的明文）"
             aria-haspopup="menu"
             aria-expanded={exportOpen}
             className="rounded-lg p-1.5 text-muted hover:bg-[#f3f3f3]"

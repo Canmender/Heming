@@ -4,6 +4,8 @@ import { humanizeProviderError } from "../lib/llmFailure.js";
 import { useChatStore } from "../store/chat.js";
 import { useLlmStore } from "../store/llm.js";
 import { useUiStore } from "../store/ui.js";
+import { useSessionStringValue } from "../lib/sessionState.js";
+import { abortConversation } from "../lib/runAbort.js";
 import {
   buildTaskJson,
   buildTaskReport,
@@ -414,7 +416,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
 
         {error && <p role="alert" className="mt-2 text-[12px] text-[#b42318]">{error}</p>}
 
-        <div className="mt-4 flex items-center justify-between">
+        <div className="sticky bottom-0 -mx-5 mt-4 flex items-center justify-between border-t border-line-soft bg-white px-5 py-2.5">
           <span className="text-[10px] text-muted">运行记录与结果只保存在本机，不上传服务端。</span>
           <button
             type="submit"
@@ -459,6 +461,9 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
   );
 }
 
+/** 选中的运行记录落 sessionStorage：切「对话/任务」Tab 或刷新后仍停在那条上（d.86）。 */
+const TASK_SELECTION_KEY = "heming.task.selected.v1";
+
 export interface TaskAreaPageProps {
   /**
    * 嵌入式（d.67：通用智能体并入智能体页的「任务」Tab）。
@@ -488,7 +493,15 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
   const llmBindings = useLlmStore((s) => s.bindings);
   const llmProfiles = useLlmStore((s) => s.profiles);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * 选中的运行记录：原来只是组件内 state，切到「对话」Tab 再回来（TaskAreaPage 卸载重建）
+   * 就丢了选中、被弹回启动面板（审计 P1-1）。现在落 sessionStorage——切 Tab/刷新都还在。
+   */
+  const [selectedSaved, setSelectedSaved] = useSessionStringValue(TASK_SELECTION_KEY);
+  const selectedId = selectedSaved || null;
+  const setSelectedId = (id: string | null) => setSelectedSaved(id ?? "");
+  /** 「停止」的即时反馈（真正的收尾由 ChatPage 的中断流程落任务终态）。 */
+  const [stopNotice, setStopNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [removeTarget, setRemoveTarget] = useState<TaskRecord | null>(null);
@@ -557,6 +570,18 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
     // 绑定表/连接表变化必须重算：解绑后提示要立刻出现，绑上后立刻消失
     [selected, llmBindings, llmProfiles],
   );
+
+  /**
+   * 停止当前选中的运行（审计 P1-3）：任务区右栏原来只有复制/删除，运行中停不掉。
+   * 真正的中断执行者在 ChatPage 里（登记在 `lib/runAbort.ts`），这里按会话 id 找到它。
+   * 找不到说明这条运行不在当前挂载的页面里——如实说，不假装已停。
+   */
+  const stopSelectedRun = () => {
+    if (!selected) return;
+    const ok = abortConversation(selected.conversationId);
+    setStopNotice(ok ? "已请求停止，这一轮收尾后会标记为「已中断」。" : "这条运行不在当前页面里，先打开运行会话再停止。");
+    window.setTimeout(() => setStopNotice(null), 4000);
+  };
 
   const selectTask = (task: TaskRecord) => {
     setSelectedId(task.id);
@@ -724,7 +749,7 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
 
       <div className="flex min-h-0 flex-1">
         {/* 左列：运行记录 */}
-        <aside className="flex w-[280px] shrink-0 flex-col border-r border-line-soft">
+        <aside className="flex w-[280px] shrink-0 flex-col border-r border-line-soft max-[1199px]:w-[232px]">
           <div className="flex items-center gap-2 border-b border-line-soft px-6 py-2">
             <span className="ui-section-title">运行记录</span>
             <span className="ui-micro">{visible.length}</span>
@@ -830,7 +855,7 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
         </section>
 
         {/* 右列：确定性汇总 */}
-        <aside className="w-[320px] shrink-0 overflow-y-auto border-l border-line-soft px-6 py-5">
+        <aside className="w-[320px] shrink-0 overflow-y-auto border-l border-line-soft px-6 py-5 max-[1199px]:w-[268px] max-[1199px]:px-4">
           {!selected ? (
             <div className="text-[12px] leading-6 text-muted">
               选中一次运行后，这里会显示目标、结果、工具步骤与来源，并可复制成
@@ -847,6 +872,8 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
               onRerun={() => setRerunTarget(selected)}
               onFork={(seq) => requestFork(selected, seq)}
               onRemove={() => setRemoveTarget(selected)}
+              onStop={selected.status === "running" ? stopSelectedRun : undefined}
+              stopNotice={stopNotice}
             />
           )}
         </aside>
@@ -1038,6 +1065,8 @@ function TaskSummary({
   onRerun,
   onFork,
   onRemove,
+  onStop,
+  stopNotice,
 }: {
   task: TaskRecord;
   sources: { id: string; title: string; detail?: string }[];
@@ -1049,6 +1078,9 @@ function TaskSummary({
   onRerun: () => void;
   onFork: (targetSeq: number) => void;
   onRemove: () => void;
+  /** 运行中任务的「停止」；执行者不在当前页面时由调用方给提示。 */
+  onStop?: () => void;
+  stopNotice?: string | null;
 }) {
   const running = task.status === "running";
   const now = useNow(running);
@@ -1233,6 +1265,11 @@ function TaskSummary({
         </section>
       )}
 
+      {stopNotice && (
+        <p role="status" className="rounded-lg border border-[#fedf89] bg-[#fffaeb] px-2.5 py-2 text-[11px] leading-5 text-[#b45309]">
+          {stopNotice}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2 border-t border-line-soft pt-3">
         <button
           type="button"
@@ -1250,6 +1287,16 @@ function TaskSummary({
         >
           {copied === "json" ? "已复制" : "复制 JSON"}
         </button>
+        {running && onStop && (
+          <button
+            type="button"
+            onClick={onStop}
+            title="中断这一轮生成（已执行完的工具调用不会回滚）"
+            className="rounded-lg border border-[#fecdca] px-2.5 py-1.5 text-[12px] text-[#b42318] hover:bg-[#fef3f2]"
+          >
+            停止运行
+          </button>
+        )}
         {!running && (
           <button
             type="button"
