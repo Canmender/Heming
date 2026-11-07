@@ -43,6 +43,40 @@ describe("AgentFormModal", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("系统预置智能体：名称/简介禁用，模型绑定仍可保存且不走服务端", async () => {
+    useLlmStore.setState({
+      profiles: [{ id: "p1", label: "DeepSeek", provider: "openai", apiKey: "k", model: "deepseek-chat" }],
+      bindings: {},
+      prompts: {},
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const onClose = vi.fn();
+    render(
+      <AgentFormModal
+        open
+        mode="edit"
+        agent={{ id: "system-assistant", owner_id: null, name: "和小鸣", avatar: null, description: "系统预置" }}
+        onClose={onClose}
+      />,
+    );
+
+    expect(screen.getByLabelText("名称")).toBeDisabled();
+    expect(screen.getByLabelText("一句话描述")).toBeDisabled();
+    expect(screen.getByText(/系统预置智能体/)).toBeInTheDocument();
+    // 系统智能体不走服务端 PUT，也不该显示删除
+    expect(screen.queryByText("删除智能体")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "进阶设置（可选）" }));
+    fireEvent.change(screen.getByLabelText("绑定连接"), { target: { value: "p1" } });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(useLlmStore.getState().bindings["system-assistant"]).toBe("p1");
+    // 只允许名册刷新（GET）；系统智能体不发 PUT
+    const puts = fetchSpy.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "PUT");
+    expect(puts).toHaveLength(0);
+  });
+
   it("编辑系统 owner 时显示删除，非 owner 不显示", () => {
     render(<AgentFormModal open mode="edit" agent={{ id: "a1", owner_id: "someone", name: "别人的", avatar: null, description: "" }} onClose={() => {}} />);
     expect(screen.queryByText("删除智能体")).not.toBeInTheDocument();

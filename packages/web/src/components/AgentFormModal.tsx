@@ -152,6 +152,8 @@ export function AgentFormModal({
   if (!open) return null;
 
   const isOwner = !!agent && !!me && agent.owner_id === me.id;
+  /** 系统预置智能体（owner_id=null）：服务端 PUT/DELETE 一律 403，只能改本机字段。 */
+  const systemAgent = mode === "edit" && agent?.owner_id === null;
 
   const applyTemplate = (template: AgentTemplate) => {
     // 只填空字段：用户已经写下的名称/描述/提示词一律不覆盖（再次点击同一模板也不会追加）。
@@ -218,7 +220,9 @@ export function AgentFormModal({
         if (profileId) setBinding(created.id, profileId);
         onCreated?.(created);
       } else if (agent) {
-        await updateAgent(agent.id, body);
+        // 系统预置智能体的名称/简介由应用维护，服务端会 403；但「模型连接 + 系统提示词」
+        // 本来就只存本机，必须照常写入，否则用户永远配不上模型。
+        if (!systemAgent) await updateAgent(agent.id, body);
         setPrompt(agent.id, promptText.trim()); // 编辑允许清空（写空串）
         setBinding(agent.id, profileId || null);
       }
@@ -227,7 +231,12 @@ export function AgentFormModal({
       });
       onClose();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      setError(
+        message === "forbidden"
+          ? "这个智能体不能改名称或简介（系统预置）；模型连接与提示词只存本机，可在「进阶设置」里配置"
+          : message,
+      );
     } finally {
       pendingRef.current = false;
       setPending(false);
@@ -249,7 +258,12 @@ export function AgentFormModal({
       void loadAgentsRoster().catch(() => {});
       onClose();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      setError(
+        message === "forbidden"
+          ? "这个智能体不能改名称或简介（系统预置）；模型连接与提示词只存本机，可在「进阶设置」里配置"
+          : message,
+      );
     } finally {
       pendingRef.current = false;
       setPending(false);
@@ -289,7 +303,8 @@ export function AgentFormModal({
           )}
         </div>
 
-        {/* 从模板开始：只填空字段，不想用模板就直接往下填 */}
+        {/* 从模板开始：只填空字段，不想用模板就直接往下填（编辑时不显示，避免误覆盖已有信息） */}
+        {mode === "create" && (
         <div className="mb-3 rounded-lg border border-line-soft bg-[#fafafa] p-2.5">
           <div className="ui-caption">从模板开始（可选）</div>
           <div className="mt-1.5 grid grid-cols-2 gap-1.5" role="group" aria-label="智能体模板">
@@ -313,15 +328,23 @@ export function AgentFormModal({
               : "点一个预设，自动填好名称、描述和提示词；也可以直接往下填。"}
           </p>
         </div>
+        )}
 
         {/* 基础：名称必填，头像与描述可选 */}
         <div className="ui-caption mb-2 font-bold">基础信息</div>
+
+        {systemAgent && (
+          <p role="status" className="mb-2 rounded-lg border border-line-soft bg-panel px-2.5 py-1.5 ui-caption">
+            系统预置智能体：名称、头像和简介由应用维护，不能改；下方的「模型连接」和「系统提示词」只存本机，可以改。
+          </p>
+        )}
 
         <label className={`${labelCls} mb-3`}>
           名称（必填）
           <input
             ref={nameRef}
             aria-label="名称"
+            disabled={systemAgent}
             aria-invalid={errorField === "name" ? true : undefined}
             aria-describedby={errorField === "name" ? "agent-name-error" : undefined}
             className={inputCls}
@@ -346,17 +369,23 @@ export function AgentFormModal({
         <div className="mb-3">
           <div className="ui-caption">头像（可选）</div>
           <div className="mt-1 flex items-center gap-2">
-            <label className="inline-flex cursor-pointer items-center ui-btn ui-btn-sm ui-btn-ghost">
-              上传头像
-              <input
-                type="file"
-                accept="image/*"
-                aria-label="上传头像"
-                className="sr-only"
-                onChange={onPickFile}
-              />
-            </label>
-            <span className="ui-caption">不传就用名称首字，之后也能换</span>
+            {systemAgent ? (
+              <span className="ui-caption">系统预置头像，不可更换</span>
+            ) : (
+              <>
+                <label className="inline-flex cursor-pointer items-center ui-btn ui-btn-sm ui-btn-ghost">
+                  上传头像
+                  <input
+                    type="file"
+                    accept="image/*"
+                    aria-label="上传头像"
+                    className="sr-only"
+                    onChange={onPickFile}
+                  />
+                </label>
+                <span className="ui-caption">不传就用名称首字，之后也能换</span>
+              </>
+            )}
           </div>
           {fileError && <div role="alert" className="mt-1 text-[12px] text-red-600">{fileError}</div>}
         </div>
@@ -365,6 +394,7 @@ export function AgentFormModal({
           一句话描述（可选）
           <textarea
             aria-label="一句话描述"
+            disabled={systemAgent}
             className={`${inputCls} min-h-[54px] resize-y`}
             value={description}
             maxLength={500}
