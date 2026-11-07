@@ -149,7 +149,7 @@ function renderPage() {
 }
 
 function openInstall(): void {
-  fireEvent.click(screen.getByRole("button", { name: /安装插件/ }));
+  fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
 }
 
 function installNow(): void {
@@ -159,6 +159,33 @@ function installNow(): void {
   });
   fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
 }
+
+describe("PluginsPage · 下载安装弹窗（d.96）", () => {
+  it("插件页「下载安装」直接列出云端插件库，选中后关闭弹窗并进入安装预览", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "下载安装" }));
+    const dialog = await screen.findByRole("dialog", { name: "云端插件库" });
+    expect(await within(dialog).findByText("仓库插件")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("搜索插件仓库")).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "安装" }));
+    // 下载完成后弹窗关闭，清单进同一个安装预览
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "云端插件库" })).toBeNull());
+    const textarea = (await screen.findByLabelText("插件清单 JSON")) as HTMLTextAreaElement;
+    expect(textarea.value).toContain("acme.repo");
+    expect(screen.getByRole("dialog", { name: "安装插件" })).toBeInTheDocument();
+  });
+
+  it("空插件页给出「从云端安装」与「手动粘贴清单」两个入口", async () => {
+    renderPage();
+    expect(screen.getByText("还没有安装插件")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "从云端安装" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "手动粘贴清单" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "从云端安装" }));
+    expect(await screen.findByRole("dialog", { name: "云端插件库" })).toBeInTheDocument();
+  });
+});
 
 describe("PluginsPage · 仓库 Tab（d.95）", () => {
   it("仓库 Tab 展示云端目录；点「安装」下载清单并打开同一个安装预览", async () => {
@@ -210,7 +237,7 @@ describe("PluginsPage 插件区", () => {
     expect(screen.getByRole("region", { name: "暂无插件" })).toBeInTheDocument();
     expect(screen.getByText("还没有安装插件")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /安装插件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
     const dialog = screen.getByRole("dialog", { name: "安装插件" });
     expect(within(dialog).getByLabelText("插件清单 JSON")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "确认安装" })).toBeDisabled();
@@ -219,7 +246,7 @@ describe("PluginsPage 插件区", () => {
 
   it("粘贴清单后预览，确认安装写入技能池并显示插件卡", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /安装插件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
     fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
       target: { value: JSON.stringify(manifest()) },
     });
@@ -244,7 +271,7 @@ describe("PluginsPage 插件区", () => {
 
   it("非法清单给出中文错误，且不能确认", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /安装插件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
     fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
       target: { value: '{"schemaVersion":1,"id":"Bad ID"}' },
     });
@@ -290,7 +317,7 @@ describe("PluginsPage 插件区", () => {
     renderPage();
     installNow();
 
-    fireEvent.click(screen.getByRole("button", { name: /安装插件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
     fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
       target: { value: JSON.stringify(manifest({ version: "1.1.0", skills: [{ name: "财报速读", instructions: "v2" }] })) },
     });
@@ -310,7 +337,7 @@ describe("PluginsPage 插件区", () => {
 
   it("v2 能力包：预览网络主机、服务标签与接口区入口", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /安装插件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
     fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
       target: {
         value: JSON.stringify(

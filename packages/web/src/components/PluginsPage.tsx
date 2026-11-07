@@ -26,6 +26,7 @@ import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { InstallDialog } from "./plugins/InstallDialog.js";
 import { PluginRepositoryPanel } from "./plugins/PluginRepositoryPanel.js";
+import { PluginRepositoryDialog } from "./plugins/PluginRepositoryDialog.js";
 import { downloadPluginManifest } from "../lib/plugins/catalogClient.js";
 import { PluginCard } from "./plugins/PluginCard.js";
 import { PluginDetailDialog } from "./plugins/PluginDetailDialog.js";
@@ -138,6 +139,8 @@ export function PluginsPage({
   const [installOpen, setInstallOpen] = useState(false);
   /** 仓库面板正在下载的包（id@version）：只禁那一张卡的按钮。 */
   const [repoLoadingKey, setRepoLoadingKey] = useState<string | null>(null);
+  /** 「下载安装」弹窗：插件页主操作直达云端插件库，不必先找「仓库」Tab。 */
+  const [repoDialogOpen, setRepoDialogOpen] = useState(false);
   const [text, setText] = useState("");
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<InstalledPlugin | null>(null);
@@ -260,6 +263,7 @@ export function PluginsPage({
     try {
       const manifest = await downloadPluginManifest(entry);
       setText(manifest);
+      setRepoDialogOpen(false);
       setInstallOpen(true);
     } catch (err) {
       setMsg({
@@ -353,10 +357,19 @@ export function PluginsPage({
       subtitle="安装一次，带入技能、工具、MCP 服务和命令；全部在本机管理。"
       width="wide"
       actions={
-        <button type="button" onClick={openInstall} className={`flex items-center gap-1 ${BTN_GHOST}`}>
-          <PlusIcon width={12} height={12} aria-hidden="true" />
-          安装插件
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setRepoDialogOpen(true)}
+            className="ui-btn ui-btn-sm ui-btn-primary"
+          >
+            下载安装
+          </button>
+          <button type="button" onClick={openInstall} className={`flex items-center gap-1 ${BTN_GHOST}`}>
+            <PlusIcon width={12} height={12} aria-hidden="true" />
+            手动安装
+          </button>
+        </div>
       }
     >
       <PluginStats stats={stats} />
@@ -462,9 +475,18 @@ export function PluginsPage({
                 <p className="ui-caption">
                   一份插件清单可以一次带入一组技能、远程 MCP 服务与命令。
                 </p>
-                <button type="button" onClick={openInstall} className="ui-btn ui-btn-md ui-btn-primary mt-1">
-                  安装第一个插件
-                </button>
+                <div className="mt-1 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRepoDialogOpen(true)}
+                    className="ui-btn ui-btn-md ui-btn-primary"
+                  >
+                    从云端安装
+                  </button>
+                  <button type="button" onClick={openInstall} className="ui-btn ui-btn-md ui-btn-ghost">
+                    手动粘贴清单
+                  </button>
+                </div>
               </section>
             ) : visiblePlugins.length === 0 ? (
               <section
@@ -531,6 +553,19 @@ export function PluginsPage({
           <InterfacesView registry={mcp} plugins={plugins} onOpenPlugin={openPluginDetail} />
         )}
       </div>
+
+      {repoDialogOpen && (
+        <PluginRepositoryDialog
+          installed={list.map((plugin) => ({
+            id: plugin.manifest.id,
+            version: plugin.manifest.version,
+          }))}
+          loadingKey={repoLoadingKey}
+          onLoad={loadFromRepository}
+          onClose={() => setRepoDialogOpen(false)}
+          onError={(message) => setMsg({ kind: "error", text: message })}
+        />
+      )}
 
       {installOpen && (
         <InstallDialog

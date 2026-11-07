@@ -367,7 +367,7 @@ function installV3(manifest: Record<string, unknown> = v3Manifest()) {
 }
 
 function openInstall() {
-  fireEvent.click(screen.getByRole("button", { name: /安装插件/ }));
+  fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
   return screen.getByRole("dialog", { name: "安装插件" });
 }
 
