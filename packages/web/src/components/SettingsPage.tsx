@@ -27,6 +27,7 @@ import {
 } from "../lib/settings/registry.js";
 import { FOCUS_RING } from "../lib/a11y/focus.js";
 import { PageShell } from "./layout/PageShell.js";
+import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { NAV_GROUP_LABEL, navGroupOf } from "../lib/navGroups.js";
 
 /**
@@ -196,14 +197,14 @@ export function SettingsPage() {
     <PageShell
       scroll={false}
       title="设置区"
-      subtitle="改动即时生效，仅作用于本机，无需重启。"
+      subtitle="改完立即生效，只影响本机，不用重启。"
       headerExtra={
         <div className="px-6 pb-3 pt-3 max-[1199px]:px-4">
           {/* d.72：标签栏与搜索框跟正文同列居中。之前正文固定 720px 贴左，
               宽屏（1600）右侧空出半屏，看起来像页面没铺满。 */}
           <div className="mx-auto w-full max-w-[760px]">
           {/* 横向标签栏：选中项白底、选中线压在下边框上（与内容区连成一体） */}
-          <div className="flex gap-1" role="tablist" aria-label="设置分组">
+          <div className={PAGE_TABLIST} role="tablist" aria-label="设置分组">
             {SETTINGS_TABS.map((t) => {
               const active = t.id === tab;
               return (
@@ -217,11 +218,7 @@ export function SettingsPage() {
                     // 手动切分组 = 结束这次搜索（回到普通分区视图）
                     setQuery("");
                   }}
-                  className={`-mb-px border-b-2 px-3.5 py-2 text-[13px] transition-colors ${
-                    active
-                      ? "border-b-ink font-semibold text-ink"
-                      : "border-b-transparent text-muted hover:text-ink"
-                  }`}
+                  className={pageTabClass(active)}
                 >
                   {t.label}
                 </button>
@@ -547,14 +544,14 @@ function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
               <button
                 type="button"
                 onClick={() => setConfirmReset(false)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-md ui-btn-ghost"
               >
                 取消
               </button>
               <button
                 type="button"
                 onClick={resetAppearance}
-                className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium"
+                className="ui-btn ui-btn-md ui-btn-primary"
               >
                 恢复默认
               </button>

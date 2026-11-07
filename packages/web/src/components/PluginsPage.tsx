@@ -21,6 +21,7 @@ import { skillPool, type SkillPool } from "../lib/skills/index.js";
 import { useUiStore, type PageView } from "../store/ui.js";
 import { PackageIcon, PlusIcon } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
+import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { InstallDialog } from "./plugins/InstallDialog.js";
 import { PluginCard } from "./plugins/PluginCard.js";
 import { PluginDetailDialog } from "./plugins/PluginDetailDialog.js";
@@ -289,7 +290,7 @@ export function PluginsPage({
   return (
     <PageShell
       title="插件区"
-      subtitle="插件可以一次带入技能、工具、MCP 服务与命令；能力包在本机管理，远程 MCP 连接由你在「MCP 服务」里发起。"
+      subtitle="安装一次，带入技能、工具、MCP 服务和命令；全部在本机管理。"
       width="wide"
       actions={
         <button type="button" onClick={openInstall} className={`flex items-center gap-1 ${BTN_GHOST}`}>
@@ -307,7 +308,7 @@ export function PluginsPage({
       )}
 
       {/* Tab 栏：复用技能区的角色与下划线样式 */}
-      <div className="flex gap-1 border-b border-line-soft" role="tablist" aria-label="能力分区">
+      <div className={`${PAGE_TABLIST} border-b border-line-soft`} role="tablist" aria-label="能力分区">
         {TABS.map((item) => {
           const active = tab === item.key;
           return (
@@ -319,11 +320,7 @@ export function PluginsPage({
               aria-controls={`plugins-${item.key}-panel`}
               aria-selected={active}
               onClick={() => setTab(item.key)}
-              className={`-mb-px border-b-2 px-3.5 py-2 text-[13px] transition-colors ${
-                active
-                  ? "border-b-ink font-semibold text-ink"
-                  : "border-b-transparent text-muted hover:text-ink"
-              }`}
+              className={pageTabClass(active)}
             >
               {item.label}
             </button>

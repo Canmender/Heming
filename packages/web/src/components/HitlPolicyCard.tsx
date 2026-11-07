@@ -204,7 +204,7 @@ export function HitlPolicyCard({
           <button
             type="button"
             onClick={() => setConfirmClearRules(true)}
-            className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
+            className="ui-btn ui-btn-md ui-btn-ghost text-[#b42318]"
           >
             清空记住的规则
           </button>
@@ -294,7 +294,7 @@ export function HitlPolicyCard({
               <button
                 type="button"
                 onClick={() => setConfirmClearRules(false)}
-                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
               >
                 取消
               </button>
@@ -326,7 +326,7 @@ export function HitlPolicyCard({
               <button
                 type="button"
                 onClick={() => setConfirmClearSession(false)}
-                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
               >
                 取消
               </button>

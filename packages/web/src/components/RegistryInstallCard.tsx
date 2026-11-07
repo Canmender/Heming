@@ -73,7 +73,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
         type="button"
         ref={cancelRef}
         onClick={() => finish({ approved: false })}
-        className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
+        className="ui-btn ui-btn-md ui-btn-ghost text-[#b42318]"
       >
         取消安装
       </button>
@@ -82,7 +82,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
         disabled={missingRequired}
         title={missingRequired ? "请填写必填请求头" : undefined}
         onClick={approve}
-        className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+        className="ui-btn ui-btn-md ui-btn-primary disabled:opacity-40"
       >
         确认安装
       </button>

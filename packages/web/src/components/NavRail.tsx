@@ -349,7 +349,7 @@ export function NavRail({
               <button
                 type="button"
                 onClick={() => setConfirmLogout(false)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-md ui-btn-ghost"
               >
                 取消
               </button>
@@ -359,7 +359,7 @@ export function NavRail({
                   setConfirmLogout(false);
                   useAuthStore.getState().logout();
                 }}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#912018]"
+                className="ui-btn ui-btn-md ui-btn-danger"
               >
                 退出登录
               </button>

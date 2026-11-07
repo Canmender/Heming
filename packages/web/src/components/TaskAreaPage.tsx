@@ -395,7 +395,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
             type="button"
             onClick={onSaveTemplate}
             disabled={!text.trim() || templatesFull}
-            className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-40"
+            className="shrink-0 ui-btn ui-btn-md ui-btn-ghost disabled:cursor-not-allowed disabled:opacity-40"
           >
             存为模板
           </button>
@@ -434,14 +434,14 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
                 <button
                   type="button"
                   onClick={() => setRemoveTemplateTarget(null)}
-                  className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+                  className="ui-btn ui-btn-md ui-btn-ghost"
                 >
                   取消
                 </button>
                 <button
                   type="button"
                   onClick={confirmRemoveTemplate}
-                  className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#912018]"
+                  className="ui-btn ui-btn-md ui-btn-danger"
                 >
                   删除
                 </button>
@@ -713,7 +713,7 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
               type="button"
               aria-label="新建运行"
               onClick={() => setSelectedId(null)}
-              className="flex items-center gap-1 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white"
+              className="ui-btn ui-btn-md ui-btn-primary"
             >
               <PlusIcon width={14} height={14} />
               新建运行
@@ -818,7 +818,7 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
                 <button
                   type="button"
                   onClick={() => selectTask(selected)}
-                  className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+                  className="ui-btn ui-btn-md ui-btn-ghost"
                 >
                   打开运行会话
                 </button>
@@ -860,14 +860,14 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
             <>
               <button
                 type="button"
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
                 onClick={() => setConfirmClear(false)}
               >
                 取消
               </button>
               <button
                 type="button"
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-bold text-white"
+                className="ui-btn ui-btn-md ui-btn-danger"
                 onClick={() => {
                   const n = clearFinished();
                   setConfirmClear(false);
@@ -893,14 +893,14 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
             <>
               <button
                 type="button"
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
                 onClick={() => setRemoveTarget(null)}
               >
                 取消
               </button>
               <button
                 type="button"
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-bold text-white"
+                className="ui-btn ui-btn-md ui-btn-danger"
                 onClick={() => {
                   removeTask(removeTarget.id);
                   if (selectedId === removeTarget.id) setSelectedId(null);
@@ -926,14 +926,14 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
             <>
               <button
                 type="button"
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
                 onClick={() => setRerunTarget(null)}
               >
                 取消
               </button>
               <button
                 type="button"
-                className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+                className="ui-btn ui-btn-md ui-btn-primary"
                 onClick={() => runRerun(rerunTarget)}
               >
                 确认重跑
@@ -958,14 +958,14 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
             <>
               <button
                 type="button"
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
                 onClick={() => setForkDraft(null)}
               >
                 取消
               </button>
               <button
                 type="button"
-                className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-bold text-white"
+                className="ui-btn ui-btn-md ui-btn-primary"
                 onClick={confirmFork}
               >
                 确认分叉
@@ -1009,7 +1009,7 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
           footer={
             <button
               type="button"
-              className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#f7f7f7]"
+              className="ui-btn ui-btn-md ui-btn-ghost"
               onClick={() => setForkRejection(null)}
             >
               知道了

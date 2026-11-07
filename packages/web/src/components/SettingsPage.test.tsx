@@ -680,7 +680,7 @@ describe("设置区布局（d.62-B）", () => {
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveClass("ui-page-title");
     expect(headings[0]).toHaveTextContent("设置区");
-    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("无需重启");
+    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("不用重启");
     // 内容列 760 且水平居中：宽屏下不再贴左留出半屏空白
     const column = document.querySelector('[class*="max-w-[760px]"]');
     expect(column).not.toBeNull();

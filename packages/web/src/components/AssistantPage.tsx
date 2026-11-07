@@ -8,6 +8,7 @@ import { AgentFormModal } from "./AgentFormModal.js";
 import { Avatar } from "./Avatar.js";
 import { AssistantIcon, PlusIcon } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
+import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 
 /**
  * 智能体页：
@@ -119,11 +120,11 @@ export function AssistantPage() {
   return (
     <PageShell
       title="智能体"
-      subtitle="在本机与智能体对话、派任务；模型 Key、工具与记忆都不出设备。"
+      subtitle="和智能体对话、派任务；模型 Key、工具和记忆都留在本机。"
       scroll={false}
       headerExtra={
         <div
-          className="flex flex-wrap items-center gap-2 bg-[#fbfbfb] px-6 py-2"
+          className={`${PAGE_TABLIST} flex-wrap items-center gap-2 border-b border-line-soft px-6 pt-2`}
           role="tablist"
           aria-label="智能体视图"
         >
@@ -137,16 +138,11 @@ export function AssistantPage() {
               role="tab"
               aria-selected={tab === t.key}
               onClick={() => setTab(t.key)}
-              className={`rounded-lg px-2.5 py-1 text-[13px] ${
-                tab === t.key ? "bg-ink font-semibold text-white" : "text-muted hover:bg-[#f3f3f3]"
-              }`}
+              className={pageTabClass(tab === t.key)}
             >
               {t.label}
             </button>
           ))}
-          <span className="ui-micro ml-auto">
-            任务视图：运行记录、目标模板、报告与分叉都在这里
-          </span>
         </div>
       }
     >
@@ -268,13 +264,13 @@ export function AssistantPage() {
                 </span>
                 <div className="ui-section-title">选择一个智能体开始</div>
                 <p className="ui-body-sm max-w-[520px] leading-6">
-                  {"从左边选一个智能体就能直接对话；没有合适的，点左栏右上角「新建」创建一个。智能体在本机运行，模型 Key、工具与记忆都不出设备。"}
+                  {"从左边选一个智能体就能直接对话；没有合适的，点左栏右上角「新建」创建一个。"}
                 </p>
                 {systemAgent && (
                   <button
                     type="button"
                     onClick={() => void startChat(systemAgent)}
-                    className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white"
+                    className="ui-btn ui-btn-md ui-btn-primary"
                   >
                     和小鸣聊聊
                   </button>

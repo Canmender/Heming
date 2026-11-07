@@ -177,7 +177,7 @@ export function AutomationPage() {
   return (
     <PageShell
       title="自动化"
-      subtitle="本机定时任务 · 只在和鸣运行期间触发 · 错过的时刻不补跑"
+      subtitle="定时同步归档、重扫日程；和鸣关着时错过的点不补跑。"
       width="readable"
       // d.72：空态垂直居中，同幕僚页；滚动交给内层容器
       scroll={false}
@@ -185,7 +185,7 @@ export function AutomationPage() {
         <button
           type="button"
           onClick={openCreate}
-          className="flex items-center gap-1.5 rounded-md bg-ink px-3 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90"
+          className="ui-btn ui-btn-md ui-btn-primary"
         >
           <PlusIcon width={14} height={14} />
           新建自动化
@@ -259,7 +259,7 @@ export function AutomationPage() {
             <EmptyState
               icon={<AutomationIcon width={22} height={22} />}
               title="还没有自动化任务"
-              desc="可以把信息中枢的「同步归档」或「重扫日程」设成每天定时或按间隔执行。任务只存本机，不会上传。"
+              desc="把信息中枢的「同步归档」「重扫日程」设为每天定时或按间隔执行。任务只存本机。"
               actions={
                 <button
                   type="button"
@@ -455,7 +455,7 @@ export function AutomationPage() {
               <button
                 type="button"
                 onClick={() => setDeleteTarget(null)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-md ui-btn-ghost"
               >
                 取消
               </button>
@@ -466,7 +466,7 @@ export function AutomationPage() {
                   setDeleteTarget(null);
                   setNotice("自动化任务已删除");
                 }}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#912018]"
+                className="ui-btn ui-btn-md ui-btn-danger"
               >
                 删除
               </button>
@@ -488,7 +488,7 @@ export function AutomationPage() {
               <button
                 type="button"
                 onClick={() => setClearRunsOpen(false)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+                className="ui-btn ui-btn-md ui-btn-ghost"
               >
                 取消
               </button>
@@ -499,7 +499,7 @@ export function AutomationPage() {
                   setClearRunsOpen(false);
                   setNotice("运行记录已清空");
                 }}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#912018]"
+                className="ui-btn ui-btn-md ui-btn-danger"
               >
                 清空
               </button>
@@ -830,14 +830,14 @@ function AutomationEditor({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-[#fafafa]"
+            className="ui-btn ui-btn-md ui-btn-ghost"
           >
             取消
           </button>
           <button
             type="button"
             onClick={save}
-            className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-white hover:opacity-90"
+            className="ui-btn ui-btn-md ui-btn-primary"
           >
             保存
           </button>

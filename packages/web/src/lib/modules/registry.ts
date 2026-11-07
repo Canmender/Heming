@@ -61,7 +61,7 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     name: "幕僚",
     version: "v1.0.0",
     description:
-      "常驻主动简报：巡检本机日程与任务，只在需要你决定时递一份摘要；只读采集，不代你执行操作。",
+      "每天检查日程和任务，有要紧事才提醒；只读，不替你操作。",
     page: "staff",
     contributions: { page: true, homeCard: "staff", backgroundLoop: "staff-loop" },
     storageKeys: ["heming.staff.v1", "heming.staff.runs.v1", "heming.staff.seen.v1"],
@@ -72,7 +72,7 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     name: "信息中枢",
     version: "v1.0.0",
     description:
-      "把本机 QQ / 微信归档接进和鸣：桌面端用 stdio 拉起本机进程，只读浏览、全文检索与议程都在本机完成。",
+      "在本机浏览、检索 QQ / 微信聊天记录和日程；归档不出本机。",
     page: "infohub",
     contributions: {
       page: true,
@@ -89,7 +89,7 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     name: "自动化",
     version: "v1.0.0",
     description:
-      "为本机归档建定时任务：按每天定时或间隔执行归档同步 / 重扫日程；只识别两个白名单动作，不执行任意脚本。",
+      "定时同步归档、重扫日程；只跑两种固定动作，不执行脚本。",
     page: "automations",
     contributions: { page: true, backgroundLoop: "automation-scheduler" },
     requires: ["infohub"],

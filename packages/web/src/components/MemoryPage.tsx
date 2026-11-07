@@ -46,6 +46,7 @@ import { fetchFiles } from "../lib/api.js";
 import { ChevronIcon, PlusIcon, TrashIcon, XIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { PageShell } from "./layout/PageShell.js";
+import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { useModalA11y } from "./useModalA11y.js";
 
 /**
@@ -1740,7 +1741,7 @@ export function MemoryPage({
               <button
                 type="button"
                 onClick={() => setClearRunsOpen(false)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
               >
                 取消
               </button>
@@ -1755,7 +1756,7 @@ export function MemoryPage({
                   // 卡片上的「累计注入 / 加权」会停清除前的旧快照上（用户看到已清零的权重）。
                   bump();
                 }}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+                className="ui-btn ui-btn-md ui-btn-danger"
               >
                 清除
               </button>
@@ -1778,7 +1779,7 @@ export function MemoryPage({
               <button
                 type="button"
                 onClick={() => setPendingSemantic(null)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
               >
                 取消
               </button>
@@ -1793,7 +1794,7 @@ export function MemoryPage({
                   bump();
                   setMemoryMsg({ kind: "ok", text: `已删除记忆：${pendingSemantic.key}` });
                 }}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+                className="ui-btn ui-btn-md ui-btn-danger"
               >
                 删除
               </button>
@@ -1816,7 +1817,7 @@ export function MemoryPage({
               <button
                 type="button"
                 onClick={() => setPendingEpisodic(null)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
               >
                 取消
               </button>
@@ -1831,7 +1832,7 @@ export function MemoryPage({
                   bump();
                   setMemoryMsg({ kind: "ok", text: "已删除一条情景记忆" });
                 }}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+                className="ui-btn ui-btn-md ui-btn-danger"
               >
                 删除
               </button>
@@ -1852,14 +1853,14 @@ export function MemoryPage({
               <button
                 type="button"
                 onClick={() => setImportConfirm(false)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
               >
                 取消
               </button>
               <button
                 type="button"
                 onClick={confirmImportMemory}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+                className="ui-btn ui-btn-md ui-btn-danger"
               >
                 替换并导入
               </button>
@@ -2178,7 +2179,7 @@ export function MemoryPage({
     <PageShell
       scroll={false}
       title="记忆区"
-      subtitle="智能体管自己的记忆设置，数据库是所有智能体公用的长期记忆，个人知识库给你自己看"
+      subtitle="智能体的记忆开关、共享记忆库和你的个人知识库。"
       actions={
         <label className="flex shrink-0 items-center gap-2 whitespace-nowrap ui-caption">
           <span>当前</span>
@@ -2206,7 +2207,7 @@ export function MemoryPage({
           )}
 
           {/* 上侧横向标签页：选中项白底、下边框与内容区连成一体（与设置页同一视觉语言） */}
-          <div role="tablist" aria-label="记忆分区" className="flex gap-1">
+          <div role="tablist" aria-label="记忆分区" className={PAGE_TABLIST}>
             {tabOrder.map((key) => {
               const active = tab === key;
               return (
@@ -2219,11 +2220,7 @@ export function MemoryPage({
                   aria-selected={active}
                   aria-label={TAB_LABELS[key]}
                   onClick={() => setTab(key)}
-                  className={`-mb-px border-b-2 px-3.5 py-2 text-[13px] transition-colors ${
-                    active
-                      ? "border-b-ink font-semibold text-ink"
-                      : "border-b-transparent text-muted hover:text-ink"
-                  }`}
+                  className={pageTabClass(active)}
                 >
                   {TAB_LABELS[key]}
                   <span className="ml-1.5 ui-micro">{tabCounts[key]}</span>
@@ -2260,14 +2257,14 @@ export function MemoryPage({
               <button
                 type="button"
                 onClick={() => setClearTarget(null)}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost text-muted"
               >
                 取消
               </button>
               <button
                 type="button"
                 onClick={confirmClearConversation}
-                className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+                className="ui-btn ui-btn-md ui-btn-danger"
               >
                 清空
               </button>

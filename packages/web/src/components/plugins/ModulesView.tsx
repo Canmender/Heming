@@ -214,8 +214,8 @@ export function ModulesView({ modules = BUILTIN_MODULES }: { modules?: readonly 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="max-w-[560px]">
           <p className={HINT}>
-            内置能力模块与插件同属「能力包」模型：都能在插件区查看版本与贡献、启用或停用。
-            停用只下线入口与后台挂载，不删除任何本机数据；第三方能力（技能 / 远程 MCP / 命令）仍走「插件」Tab。
+            内置模块（幕僚 / 信息中枢 / 自动化）可随时启用或停用。停用只是收起入口和后台任务，不会删数据；
+            第三方能力（技能 / 远程 MCP / 命令）仍走「插件」Tab。
           </p>
           <p className="mt-1 ui-caption" role="status">
             已启用 {enabledCount}/{modules.length} 个模块

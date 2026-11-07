@@ -27,6 +27,7 @@ import { useUiStore } from "../store/ui.js";
 import { dayKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { PageShell } from "./layout/PageShell.js";
+import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { Avatar } from "./Avatar.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { TeamBoardView } from "./TeamBoardPage.js";
@@ -599,7 +600,7 @@ export function TeamPage() {
 
           {/* 四个视图互斥：动向（默认）/ 看板 / 团队日程（只读）/ 用量（本机 + 开启共享后的排行） */}
           <div
-            className="flex items-center gap-2 border-b border-line-soft px-6 py-2"
+            className={`${PAGE_TABLIST} items-center border-b border-line-soft px-6`}
             role="tablist"
             aria-label="团队视图"
           >
@@ -615,11 +616,7 @@ export function TeamPage() {
                 role="tab"
                 aria-selected={tab === t.key}
                 onClick={() => setTab(t.key)}
-                className={`rounded-lg px-2.5 py-1 text-[13px] ${
-                  tab === t.key
-                    ? "bg-ink font-semibold text-white"
-                    : "text-muted hover:bg-[#f3f3f3]"
-                }`}
+                className={pageTabClass(tab === t.key)}
               >
                 {t.label}
               </button>

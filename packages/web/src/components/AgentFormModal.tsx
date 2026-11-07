@@ -452,7 +452,7 @@ export function AgentFormModal({
             type="button"
             onClick={onClose}
             disabled={pending}
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px] disabled:opacity-60"
+            className="ui-btn ui-btn-md ui-btn-ghost text-[13px] disabled:opacity-60"
           >
             取消
           </button>
@@ -484,7 +484,7 @@ export function AgentFormModal({
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
-                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
               >
                 取消
               </button>

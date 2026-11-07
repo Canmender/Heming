@@ -177,7 +177,7 @@ export function SelfEditCard({
               <button
                 type="button"
                 onClick={() => setRollbackTarget(null)}
-                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
               >
                 取消
               </button>

@@ -255,7 +255,7 @@ export function HomePage() {
           <span className="ml-2 ui-caption font-normal">{today}</span>
         </>
       }
-      subtitle="全站一个团队 —— 在「团队」页查看真实成员与大家的任务、日程摘要"
+      subtitle="今天要处理什么、团队在忙什么、用量还剩多少。"
       width="wide"
       bodyClassName="flex flex-col gap-4"
       actions={
@@ -338,7 +338,7 @@ export function HomePage() {
                     compact
                     className="px-0 py-2"
                     title="暂无调用记录"
-                    desc="接入模型并开始对话后，这里会自动累计。"
+                    desc="接入模型、开始对话后自动累计。"
                   />
                 ) : (
                   modelRows.map(([model, n]) => (
@@ -471,7 +471,7 @@ export function HomePage() {
               <EmptyState
                 compact
                 title="还没有团队动向"
-                desc="成员在「团队」页开启任务 / 日程共享后，这里会出现摘要；对话正文、智能体轨迹不会上传。"
+                desc="成员在「团队」页开启共享后，这里显示任务和日程摘要；对话正文不上传。"
               />
             )
           ) : (

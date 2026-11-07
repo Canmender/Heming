@@ -138,7 +138,7 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
               <button
                 type="button"
                 onClick={() => setConfirmInstall(false)}
-                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
               >
                 稍后
               </button>

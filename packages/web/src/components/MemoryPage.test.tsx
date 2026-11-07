@@ -175,7 +175,7 @@ describe("MemoryPage 三分区结构", () => {
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveClass("ui-page-title");
     expect(headings[0]).toHaveTextContent("记忆区");
-    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("智能体管自己的记忆设置");
+    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("智能体的记忆开关");
   });
 });
 

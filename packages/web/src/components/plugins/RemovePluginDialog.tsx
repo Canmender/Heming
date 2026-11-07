@@ -25,14 +25,14 @@ export function RemovePluginDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#f7f7f7]"
+            className="ui-btn ui-btn-md ui-btn-ghost text-muted"
           >
             取消
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="rounded-lg bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white"
+            className="ui-btn ui-btn-md ui-btn-danger"
           >
             卸载
           </button>

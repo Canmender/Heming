@@ -32,9 +32,9 @@ const CARD = "rounded-xl border border-[#ececec] bg-white p-3 shadow-card";
 const INPUT =
   "rounded-md border border-line bg-white px-2 py-1 text-[12px] shadow-card outline-hidden focus:border-ink";
 const BTN =
-  "rounded-md border border-line px-3 py-1.5 text-[12px] shadow-card transition-colors hover:bg-[#fafafa] disabled:opacity-50";
+  "ui-btn ui-btn-md ui-btn-ghost";
 const BTN_PRIMARY =
-  "rounded-md bg-ink px-3 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50";
+  "ui-btn ui-btn-md ui-btn-primary";
 
 const SEVERITY_CLASS: Record<StaffFinding["severity"], string> = {
   urgent: "border-[#fecdca] bg-[#fef3f2] text-[#b42318]",
@@ -252,7 +252,7 @@ export function StaffPage() {
   return (
     <PageShell
       title="幕僚"
-      subtitle="替你盯着日程与任务，只在需要你决定时递一份简报 · 不代你执行任何操作"
+      subtitle="每天替你检查日程和任务，有要紧事才提醒，不会替你做操作。"
       width="readable"
       // d.72：空态要垂直居中，滚动交给内层容器（PageShell 的滚动层不是 flex，flex-1 撑不开）
       scroll={false}
@@ -448,7 +448,7 @@ export function StaffPage() {
             <EmptyState
               icon={<StaffIcon width={22} height={22} />}
               title="还没有简报"
-              desc={`开启后，幕僚会在每天 ${settings.dailyAt} 前后给你一份；日程临期或任务卡住时也会单独提醒。所有内容只存本机。`}
+              desc={`开启后，每天 ${settings.dailyAt} 前后给你一份；日程临期、任务卡住时也会单独提醒。`}
               actions={
                 <button
                   type="button"
@@ -484,7 +484,7 @@ export function StaffPage() {
               </button>
               <button
                 type="button"
-                className="rounded-md bg-[#b42318] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#912018]"
+                className="ui-btn ui-btn-md ui-btn-danger"
                 onClick={() => {
                   clearRuns();
                   setConfirmClear(false);

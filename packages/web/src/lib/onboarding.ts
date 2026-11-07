@@ -106,7 +106,7 @@ export function deriveOnboardingSteps(inputs: OnboardingInputs): OnboardingStep[
     {
       id: "model",
       title: "配置模型连接",
-      description: "填一个可用的模型服务地址与 Key，智能体才能开口说话。",
+      description: "填好模型服务地址和 Key，智能体就能开口。",
       done: inputs.connections > 0,
       actionLabel: "去配置模型",
       target: "settings",
@@ -114,7 +114,7 @@ export function deriveOnboardingSteps(inputs: OnboardingInputs): OnboardingStep[
     {
       id: "chat",
       title: "和智能体对话",
-      description: "在「智能体」页选一个已绑定的智能体，发第一句话。",
+      description: "在「智能体」页挑一个智能体，发第一句话。",
       done: inputs.conversations > 0,
       actionLabel: "去对话",
       target: "chat",
@@ -122,7 +122,7 @@ export function deriveOnboardingSteps(inputs: OnboardingInputs): OnboardingStep[
     {
       id: "task",
       title: "建第一个任务",
-      description: "把要做的事写成目标，让智能体带着工具跑一遍并留下汇总。",
+      description: "把要做的事写成一句话，让智能体跑完给你结果。",
       done: inputs.tasks > 0,
       actionLabel: "去建任务",
       target: "tasks",

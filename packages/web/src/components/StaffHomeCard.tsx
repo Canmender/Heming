@@ -33,7 +33,7 @@ export function StaffHomeCard() {
 
       {!settings.enabled ? (
         <p className="text-[11px] leading-relaxed text-muted">
-          它替你盯着日程与任务，只在需要你决定时递一份简报；不会代你执行任何操作。
+          每天检查日程和任务，有要紧事才提醒。
         </p>
       ) : !latest ? (
         <p className="text-[11px] leading-relaxed text-muted">

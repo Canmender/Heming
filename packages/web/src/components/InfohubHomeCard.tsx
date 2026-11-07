@@ -45,7 +45,7 @@ export function InfohubHomeCard() {
           </button>
         </div>
         <p className="mt-1 text-[11px] leading-relaxed text-muted">
-          QQ / 微信历史消息只在本机读取。连接后可让智能体检索归档、查看日程。
+          读本机的 QQ / 微信聊天记录；连接后智能体能检索归档、看日程。
         </p>
         {error && <p className="mt-1 text-[11px] text-[#b42318]">{error}</p>}
       </section>

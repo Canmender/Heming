@@ -571,7 +571,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             setNotice(null);
             setPending("cache");
           }}
-          className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
+          className="ui-btn ui-btn-md ui-btn-ghost text-[#b42318]"
         >
           清理消息缓存
         </button>
@@ -581,7 +581,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             setNotice(null);
             setPending("tasks");
           }}
-          className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
+          className="ui-btn ui-btn-md ui-btn-ghost text-[#b42318]"
         >
           清理任务记录
         </button>
@@ -620,7 +620,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
               <button
                 type="button"
                 onClick={() => setPending(null)}
-                className="rounded-lg border border-line px-3 py-1.5 ui-caption hover:bg-[#f7f7f7]"
+                className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
               >
                 取消
               </button>

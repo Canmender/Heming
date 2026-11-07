@@ -135,7 +135,7 @@ export function ToolApprovalModal({
           type="button"
           ref={denyRef}
           onClick={denyAll}
-          className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card hover:bg-[#fafafa]"
+          className="ui-btn ui-btn-md ui-btn-ghost text-[#b42318]"
         >
           拒绝
         </button>

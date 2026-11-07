@@ -315,7 +315,7 @@ export function LlmSettingsCard() {
                 <button
                   type="button"
                   onClick={() => setConfirmId(p.id)}
-                  className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-red-600 shadow-card transition-colors duration-150 hover:bg-[#fafafa]"
+                  className="ui-btn ui-btn-md ui-btn-ghost text-[#b42318]"
                 >
                   删除
                 </button>

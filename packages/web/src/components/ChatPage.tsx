@@ -2745,7 +2745,7 @@ export function ChatPage({
             <button
               type="button"
               onClick={loadEarlierMessages}
-              className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted shadow-card hover:bg-[#fafafa]"
+              className="ui-btn ui-btn-md ui-btn-ghost text-muted"
             >
               加载更早的消息（还有 {visibleMessages.length - windowCount} 条）
             </button>

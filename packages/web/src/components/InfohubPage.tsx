@@ -380,7 +380,7 @@ export function InfohubPage() {
     return (
       <PageShell
         title="信息中枢"
-        subtitle="QQ / 微信归档只在本机处理；浏览器里没有可用的数据源"
+        subtitle="QQ / 微信归档只在本机处理；浏览器里读不到本机数据。"
         // d.72：这个分支只有一张说明卡，滚动容器里 flex-1 撑不开高度、items-center 失效，
         // 卡片会贴在顶部。改为 PageShell 不接管滚动，让说明卡在整页垂直居中。
         scroll={false}

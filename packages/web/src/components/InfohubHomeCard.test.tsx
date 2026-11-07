@@ -121,7 +121,7 @@ describe("首页本机归档卡", () => {
 
     expect(await screen.findByText("本机归档")).toBeInTheDocument();
     expect(screen.getByText("未连接")).toBeInTheDocument();
-    expect(screen.getByText(/QQ \/ 微信历史消息只在本机读取/)).toBeInTheDocument();
+    expect(screen.getByText(/读本机的 QQ \/ 微信聊天记录/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "连接" }));
 
