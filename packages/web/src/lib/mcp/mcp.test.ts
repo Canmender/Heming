@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  buildToolBridge,
   buildToolCatalog,
   createHttpMcpClient,
   executeToolCall,
@@ -465,5 +466,42 @@ describe("工具桥接（命名空间 + 执行）", () => {
       ok: false,
       text: expect.stringContaining("连接断了"),
     });
+  });
+});
+
+describe("工具桥 · 注入期过滤（d.77 插件风险上限）", () => {
+  it("toolAllowed 过滤掉的工具不进入桥；全被过滤时返回 null", () => {
+    const reg = new McpRegistry(memStorage());
+    const server = reg.add({
+      id: "plugin:acme.tools:svc",
+      name: "插件服务",
+      transport: "http",
+      url: "https://x/mcp",
+      origin: "plugin",
+    });
+    reg.setTools(server.id, [{ name: "read_file" }, { name: "write_file" }]);
+    reg.setToolEnabled(server.id, "read_file", true);
+    reg.setToolEnabled(server.id, "write_file", true);
+    expect(reg.enabledTools()).toHaveLength(2);
+
+    const bridge = buildToolBridge(reg, {
+      toolAllowed: (ref) => ref.tool.name === "read_file",
+    });
+    expect(bridge).not.toBeNull();
+    expect(bridge!.tools).toHaveLength(1);
+    expect(JSON.stringify(bridge!.tools)).toContain("read_file");
+    expect(JSON.stringify(bridge!.tools)).not.toContain("write_file");
+
+    expect(buildToolBridge(reg, { toolAllowed: () => false })).toBeNull();
+  });
+
+  it("大写协议名的服务地址可以登记（不再装到一半失败）", () => {
+    const reg = new McpRegistry(memStorage());
+    const server = reg.add({
+      name: "大写地址",
+      transport: "http",
+      url: "HTTPS://mcp.example.com/mcp",
+    });
+    expect(server.url).toBe("HTTPS://mcp.example.com/mcp");
   });
 });

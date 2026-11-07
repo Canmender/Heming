@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PALETTE_PAGES } from "../palette/pages.js";
-import { hostOfUrl } from "./permissions.js";
+import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
 
 /**
  * 插件清单（`plugin.json`）的唯一解析入口（d.64 · 统一插件模型 v3）。
@@ -262,12 +262,16 @@ const CommandSpecSchema = z.object(
 /**
  * 主机白名单条目：`host` 或 `host:port`，不含协议/路径/账号。
  * 用 URL 反解析校验：它同时覆盖 IPv4、域名与 `[::1]:8787` 这类 IPv6 字面量。
+ *
+ * 这里只校验「像不像主机」；默认端口（80/443）在比对前由
+ * `normalizeNetworkHost` 统一规范化——所以 `api.acme.com:443` 是合法写法，
+ * 不该因为 URL 把它规范化掉就判成格式错误（d.77 修复）。
  */
 function isHostLike(value: string): boolean {
   if (!value || /[\s/\\?#@]/.test(value)) return false;
   try {
     const url = new URL(`http://${value}`);
-    return url.host.toLowerCase() === value.toLowerCase();
+    return url.hostname.length > 0;
   } catch {
     return false;
   }
@@ -572,7 +576,9 @@ const PluginManifestSchema = z
 
     // v3：权限声明必须覆盖全部 MCP 服务主机（声明即约束）。
     if (!legacy) {
-      const declared = new Set((manifest.permissions?.network ?? []).map((host) => host.toLowerCase()));
+      const declared = new Set(
+        (manifest.permissions?.network ?? []).map(normalizeNetworkHost),
+      );
       servers.forEach((server, index) => {
         const host = hostOfUrl(server.url);
         if (!host || declared.has(host)) return;

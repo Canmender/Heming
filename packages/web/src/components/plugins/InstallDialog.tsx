@@ -67,6 +67,14 @@ export function InstallDialog({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalA11y(dialogRef, onClose, { active: true });
+  /**
+   * 打开即把焦点放到清单一栏（d.77）：这个弹窗的主操作是粘贴 JSON / 选文件，
+   * 落到关闭按钮上要再 Tab 两三次；不影响键盘可达性，只是少几步。
+   */
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
 
   const preview = previewState.data;
   const updating = Boolean(preview?.existing);
@@ -203,6 +211,7 @@ export function InstallDialog({
           <label className="block ui-caption">
             插件清单 JSON
             <textarea
+              ref={textareaRef}
               aria-label="插件清单 JSON"
               value={text}
               onChange={(e) => onTextChange(e.target.value)}

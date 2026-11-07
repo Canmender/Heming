@@ -134,6 +134,7 @@
 | [specs/2026-11-07-file-panel-and-automation-presets.md](superpowers/specs/2026-11-07-file-panel-and-automation-presets.md) | **文件管理收进智能体页 + 自动化预设**：共享文件面板不再全局常驻（只在智能体页显示），窄窗入口同步收口；自动化新增 4 条一键预设（每日/每2小时/日程/周导出），编辑器保留为自定义入口 |
 | [specs/2026-11-07-installer-branding.md](superpowers/specs/2026-11-07-installer-branding.md) | **安装器品牌化**：NSIS 欢迎页/完成页文案、164×314 侧栏、150×57 页头、多尺寸应用图标；素材由 `scripts/make-installer-assets.py` 生成，附安装行为不变与未做项（签名/深色控件） |
 | [specs/2026-11-07-ui-polish-rounds.md](superpowers/specs/2026-11-07-ui-polish-rounds.md) | **20 轮 UI/UX 自检与优化**（进行中）：按「使用习惯 / 排版 / UI 一致性 / AI 腔文案」逐轮找证据并修复；含轮次看板、每轮问题与修法、验证口径与遗留清单 |
+| [specs/2026-11-07-d77-plugin-optimization.md](superpowers/specs/2026-11-07-d77-plugin-optimization.md) | **d.77 插件优化轮**：插件列表搜索 + 状态筛选 + 空态 + 安装后定位高亮；详情未声明贡献类别灰置；**权限 `tools` 上限落到注入点**（此前只在目录展示，模型实际仍拿到写工具）；清单/注册表两处地址校验不一致（大写协议半安装、默认端口 443/80 误判未声明）；附真实浏览器证据与 5 条「只记录未修」的后续候选 |
 | [specs/2026-11-05-nav-layout.md](superpowers/specs/2026-11-05-nav-layout.md) | **d.72 导航分组重排与页面布局收口**：9 个导航项按「工作台 → 智能模块 → 资料与能力 → 系统」重排并加组间细线；老默认顺序迁移、自定义顺序保留、Alt 键位不变；设置区正文/标签/搜索收进 760px 居中列；信息中枢浏览器空态真正垂直居中；d.73 收尾把幕僚/自动化空态改为剩余空间垂直居中、主页「近 30 日用量」并入 Token 用量卡。附真实浏览器多档宽度截图证据与不做清单 |
 | [specs/2026-11-04-d70-pluggable-modules.md](superpowers/specs/2026-11-04-d70-pluggable-modules.md) | **d.70 内置能力模块可插拔**：幕僚 / 信息中枢 / 自动化改为插件区「模块」Tab 的开关；模块注册表 + `heming.modules.v1` + 依赖语义（自动化依赖信息中枢）+ 导航/路由/首页卡/命令面板/设置/后台循环/工具注入/边车的接线矩阵；第三方页面贡献明确不做；d.74 补命令面板「模块管理」直达入口（含实际生效数） |
 

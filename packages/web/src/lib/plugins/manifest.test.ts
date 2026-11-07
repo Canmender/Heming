@@ -208,6 +208,17 @@ describe("parsePluginManifest · v3 拒绝非法清单", () => {
       ).permissions.network,
     ).toEqual(["api.acme.com"]);
 
+    // 显式写 https 默认端口（:443）与不写等价：URL 会把端口规范化掉，
+    // 不能因此反过来判作者「未声明」（d.77 修复；此前提示补的值正是他刚写的那个）
+    expect(
+      parsePluginManifest(
+        meta({
+          permissions: { network: ["api.acme.com:443"] },
+          contributions: { mcpServers: [remote] },
+        }),
+      ).permissions.network,
+    ).toEqual(["api.acme.com:443"]);
+
     // 端口不同不是同一台服务
     expect(
       failure(

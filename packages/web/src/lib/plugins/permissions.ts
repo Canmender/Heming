@@ -74,6 +74,26 @@ export function riskAllowed(risk: "read" | "write", ceiling: PluginToolRisk): bo
 }
 
 /**
+ * 规范化「权限声明里的主机」：小写，并去掉 http/https 的默认端口（80/443）。
+ *
+ * 为什么需要：URL 解析会把 `https://api.acme.com:443/mcp` 的 host 规范成
+ * `api.acme.com`，而作者按「实际访问地址」写的 `api.acme.com:443` 若原样参与比对，
+ * 就会被判成「未声明主机」——提示他补的正是刚写的那个值（d.77 修复）。
+ * 非默认端口（:8787 / :8443）照旧保留：不同端口是不同服务。
+ */
+export function normalizeNetworkHost(value: string): string {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return "";
+  try {
+    const url = new URL(`http://${raw}`);
+    const port = url.port === "80" || url.port === "443" ? "" : url.port;
+    return `${url.hostname}${port ? `:${port}` : ""}`;
+  } catch {
+    return raw;
+  }
+}
+
+/**
  * 生成一份权限报告（安装弹窗与运行时兜底共用同一口径）。
  *
  * 主机覆盖判定是**精确匹配**（case-insensitive）：声明 `api.acme.com` 不会顺带
@@ -88,7 +108,7 @@ export function evaluatePluginPermissions(manifest: PluginManifest): PluginPermi
     const host = hostOfUrl(server.url);
     if (host && !hosts.includes(host)) hosts.push(host);
   }
-  const declared = new Set(network.map((host) => host.toLowerCase()));
+  const declared = new Set(network.map(normalizeNetworkHost));
   const undeclared = hosts.filter((host) => !declared.has(host));
   return {
     network,

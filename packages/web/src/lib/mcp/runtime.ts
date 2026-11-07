@@ -3,7 +3,7 @@ import { buildToolCatalog, executeToolCall, toOpenAiTools } from "./bridge.js";
 import { createHttpMcpClient, type HttpMcpClient } from "./httpClient.js";
 import { createStdioMcpClient, hasStdioBridge, stdioBridge } from "./stdioClient.js";
 import { mcpRegistry, type McpRegistry } from "./store.js";
-import type { McpServerConfig, McpTool } from "./types.js";
+import type { McpServerConfig, McpTool, McpToolRef } from "./types.js";
 
 /**
  * MCP 运行时：把注册表（配置 + 启用开关）、HTTP 客户端与工具桥接串起来。
@@ -158,8 +158,21 @@ export async function autoConnectAll(
  * 所以 MCP 工具的风险**一律按名字启发判定**（未知 → write，必问），
  * `annotations` 只用于界面上的「该服务器自述为只读工具（未经核实）」这类标注。
  */
-export function buildToolBridge(registry: McpRegistry = mcpRegistry): ToolBridge | null {
-  const refs = registry.enabledTools();
+export interface BuildToolBridgeOptions {
+  /**
+   * 逐工具过滤（d.77）：插件声明的 `permissions.tools` 是**风险上限**，
+   * 但过滤只能发生在注入点——仅靠能力目录把它们标成「未注入」是展示，
+   * 不是约束。调用方（能力提供者）传入插件侧的上限判定；缺省不过滤。
+   */
+  toolAllowed?: (ref: McpToolRef) => boolean;
+}
+
+export function buildToolBridge(
+  registry: McpRegistry = mcpRegistry,
+  options: BuildToolBridgeOptions = {},
+): ToolBridge | null {
+  const enabled = registry.enabledTools();
+  const refs = options.toolAllowed ? enabled.filter((ref) => options.toolAllowed!(ref)) : enabled;
   if (refs.length === 0) return null;
   const catalog = buildToolCatalog(refs);
   const tools = toOpenAiTools(catalog);

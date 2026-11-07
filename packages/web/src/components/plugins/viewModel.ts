@@ -350,6 +350,58 @@ export function partialDisabledTitle(plugin: InstalledPlugin): string {
   return labels.length > 0 ? `已停用：${labels.join("、")}` : "";
 }
 
+/* ---------------------------------------------------------- 列表筛选（d.77） */
+
+/** 插件列表的状态筛选：全部 / 已启用 / 已停用（「部分停用」仍算已启用，主开关才是总闸）。 */
+export type PluginStatusFilter = "all" | "enabled" | "disabled";
+
+export interface PluginFilterState {
+  query: string;
+  status: PluginStatusFilter;
+}
+
+/**
+ * 搜索命中判定：名称 / id / 作者 / 描述 / 技能名 / 服务名 / 命令标题。
+ *
+ * 为什么搜到技能与服务名：装到几十个插件后，用户记得的是「那个带天气服务的包」，
+ * 而不是插件的 id；只搜插件名等于逼用户先打开详情确认。
+ * 多个词按 **AND** 匹配（与技能区搜索同口径），空串恒真。
+ */
+export function pluginMatchesQuery(plugin: InstalledPlugin, query: string): boolean {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const manifest = plugin.manifest;
+  const haystack = [
+    manifest.name,
+    manifest.id,
+    manifest.author,
+    manifest.description,
+    ...manifest.contributions.skills.map((skill) => skill.name),
+    ...manifest.contributions.mcpServers.map((server) => server.name),
+    ...manifest.contributions.commands.map((command) => command.title),
+  ]
+    .join("\n")
+    .toLowerCase();
+  return terms.every((term) => haystack.includes(term));
+}
+
+/**
+ * 插件列表筛选（搜索 + 状态）。
+ *
+ * 纯函数、保持输入顺序（存储层已按安装时间排序）——页面只负责渲染，
+ * 「匹配几条」与「为什么没结果」都由这里给，避免组件里再写一套口径。
+ */
+export function filterPlugins(
+  list: InstalledPlugin[],
+  state: PluginFilterState,
+): InstalledPlugin[] {
+  return list.filter((plugin) => {
+    if (state.status === "enabled" && !plugin.enabled) return false;
+    if (state.status === "disabled" && plugin.enabled) return false;
+    return pluginMatchesQuery(plugin, state.query);
+  });
+}
+
 /* ---------------------------------------------------------------- 统计卡 */
 
 export interface CapabilityStats {

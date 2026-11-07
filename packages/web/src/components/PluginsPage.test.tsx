@@ -499,3 +499,100 @@ describe("PluginsPage 导航合并", () => {
     expect(readSkillStat()).toBe(before + 1);
   });
 });
+
+describe("PluginsPage · 插件列表筛选与安装定位（d.77）", () => {
+  const weatherManifest = (): Record<string, unknown> => ({
+    schemaVersion: 1,
+    id: "acme.weather",
+    name: "天气能力包",
+    version: "1.0.0",
+    description: "出行天气建议",
+    author: "Acme",
+    skills: [{ name: "出行建议", instructions: "结合天气出行。" }],
+  });
+
+  function installManifest(m: Record<string, unknown>): void {
+    openInstall();
+    fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(m) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
+  }
+
+  function installTwo(): void {
+    installNow(); // acme.finance：财务助手包（技能：财报速读 / 现金流检查）
+    installManifest(weatherManifest());
+  }
+
+  it("按名称 / 技能名搜索，命中数写清楚；无结果给清除筛选的出口", () => {
+    renderPage();
+    installTwo();
+    expect(screen.getByRole("region", { name: "插件 财务助手包" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "插件 天气能力包" })).toBeInTheDocument();
+
+    const search = screen.getByLabelText("搜索插件");
+    fireEvent.change(search, { target: { value: "天气" } });
+    expect(screen.getByRole("region", { name: "插件 天气能力包" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "插件 财务助手包" })).toBeNull();
+    expect(screen.getByText("匹配 1 / 共 2 个")).toBeInTheDocument();
+
+    // 搜的是技能名，不只是插件名
+    fireEvent.change(search, { target: { value: "现金流" } });
+    expect(screen.getByRole("region", { name: "插件 财务助手包" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "插件 天气能力包" })).toBeNull();
+
+    fireEvent.change(search, { target: { value: "不存在的包" } });
+    expect(screen.getByRole("region", { name: "筛选无结果" })).toBeInTheDocument();
+    expect(screen.getByText("没有匹配的插件")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
+    expect(screen.getByRole("region", { name: "插件 财务助手包" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "插件 天气能力包" })).toBeInTheDocument();
+    expect(search).toHaveValue("");
+  });
+
+  it("状态筛选：只看已停用 / 已启用", () => {
+    renderPage();
+    installTwo();
+    fireEvent.click(screen.getByRole("switch", { name: "启用插件 财务助手包" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "已停用" }));
+    expect(screen.getByRole("region", { name: "插件 财务助手包" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "插件 天气能力包" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "已启用" }));
+    expect(screen.queryByRole("region", { name: "插件 财务助手包" })).toBeNull();
+    expect(screen.getByRole("region", { name: "插件 天气能力包" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "全部" }));
+    expect(screen.getByRole("region", { name: "插件 财务助手包" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "插件 天气能力包" })).toBeInTheDocument();
+  });
+
+  it("从别的 Tab 安装后回到插件 Tab，并高亮新装的卡片", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "工具" }));
+    installNow();
+
+    expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
+    const card = screen.getByRole("region", { name: "插件 财务助手包" });
+    expect(card.className).toContain("ring-2");
+    // 筛选栏出现后总数说清楚（安装前没有插件，不显示筛选栏）
+    expect(screen.getByText("共 1 个插件")).toBeInTheDocument();
+  });
+
+  it("详情里本包未声明的贡献类别：开关禁用并写明原因", () => {
+    renderPage();
+    installNow();
+    fireEvent.click(screen.getByRole("button", { name: "查看插件详情 财务助手包" }));
+
+    const dialog = screen.getByRole("dialog", { name: "插件详情 财务助手包" });
+    // 服务 / 命令 / 工具束三类都没声明：三行都标「本包未声明」
+    expect(within(dialog).getAllByText("本包未声明")).toHaveLength(3);
+    for (const label of ["服务", "命令", "工具束"]) {
+      expect(within(dialog).getByRole("switch", { name: `启用本插件的${label}` })).toBeDisabled();
+    }
+    // 声明过的类别仍可单独关
+    expect(within(dialog).getByRole("switch", { name: "启用本插件的技能" })).toBeEnabled();
+  });
+});

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   evaluatePluginPermissions,
   hostOfUrl,
+  normalizeNetworkHost,
   pluginIdFromServerId,
   riskAllowed,
 } from "./permissions.js";
@@ -133,5 +134,39 @@ describe("evaluatePluginPermissions", () => {
     expect(report.network).toEqual(["api.acme.com"]);
     expect(report.undeclared).toEqual([]);
     expect(report.accepted).toBe(true);
+  });
+});
+
+describe("normalizeNetworkHost（默认端口规范化，d.77）", () => {
+  it("小写并去掉 http/https 的默认端口 80 / 443", () => {
+    expect(normalizeNetworkHost("API.Acme.com")).toBe("api.acme.com");
+    expect(normalizeNetworkHost("api.acme.com:443")).toBe("api.acme.com");
+    expect(normalizeNetworkHost("localhost:80")).toBe("localhost");
+  });
+
+  it("非默认端口保留：不同端口是不同服务", () => {
+    expect(normalizeNetworkHost("localhost:8787")).toBe("localhost:8787");
+    expect(normalizeNetworkHost("[::1]:8787")).toBe("[::1]:8787");
+  });
+
+  it("空值与非法输入不抛错", () => {
+    expect(normalizeNetworkHost("")).toBe("");
+    expect(normalizeNetworkHost("  ")).toBe("");
+  });
+
+  it("声明里写 https 默认端口，与实际 https 地址等价（不误报未声明）", () => {
+    const parsed = parsePluginManifest({
+      schemaVersion: 3,
+      id: "acme.report",
+      name: "报告工具箱",
+      version: "1.0.0",
+      permissions: { network: ["api.acme.com:443"], tools: "read", files: [] },
+      contributions: { mcpServers: [server] },
+    });
+    const report = evaluatePluginPermissions(parsed);
+    expect(report.undeclared).toEqual([]);
+    expect(report.accepted).toBe(true);
+    // 展示仍按声明原文，不改写用户写下的值
+    expect(report.network).toEqual(["api.acme.com:443"]);
   });
 });

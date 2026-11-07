@@ -382,8 +382,10 @@ describe("插件页 · 能力统计", () => {
     expect(expected.tools).toBe(5);
     expect(expected.mcpServers).toBe(4);
 
-    // 插件卡是一句「系统 + 已装」，不是单独的已装数
-    expect(screen.getByLabelText("统计 插件")).toHaveTextContent("1 + 1");
+    // 插件卡给总数，构成写在说明行（d.77：原先「1 + 1」读不出谁是系统、谁是已装）
+    const pluginCard = screen.getByLabelText("统计 插件");
+    expect(pluginCard).toHaveTextContent("2");
+    expect(pluginCard).toHaveTextContent("系统 1 · 已装 1");
     for (const [label, value] of [
       ["技能", expected.skills],
       ["工具", expected.tools],

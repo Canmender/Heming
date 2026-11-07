@@ -1088,3 +1088,30 @@ describe("PluginStore · 贡献级停用（d.67）", () => {
     expect(store.skillsOf(pluginId).every((skill) => !skill.enabled)).toBe(true); // 插件读口径
   });
 });
+
+describe("PluginStore · URL 协议名大小写（d.77 半安装修复）", () => {
+  it("大写 HTTPS:// 通过清单校验后也能登记服务，不留下半安装状态", () => {
+    const { store, pool, mcp } = fresh();
+    const manifest = {
+      schemaVersion: 3,
+      id: "acme.upper",
+      name: "大写地址包",
+      version: "1.0.0",
+      permissions: { network: ["mcp.example.com"], tools: "read", files: [] },
+      contributions: {
+        skills: [{ name: "大写技能", instructions: "做点什么。" }],
+        mcpServers: [{ key: "svc", name: "大写服务", url: "HTTPS://mcp.example.com/mcp" }],
+      },
+    };
+    const text = JSON.stringify(manifest);
+
+    // 预览说能装，安装就必须真的能装（此前 mcp.add 的协议正则区分大小写，
+    // 会在技能已物化后抛错，留下「有技能、没插件记录」的半安装状态）
+    expect(store.preview(text).servers.added).toHaveLength(1);
+    const result = store.install(text);
+
+    expect(result.plugin.manifest.id).toBe("acme.upper");
+    expect(pool.list().some((skill) => skill.pluginId === "acme.upper")).toBe(true);
+    expect(mcp.servers.has(pluginServerId("acme.upper", "svc"))).toBe(true);
+  });
+});

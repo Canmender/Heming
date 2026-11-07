@@ -128,28 +128,35 @@ export function PluginDetailDialog({
             <h3 className="ui-section-title">贡献</h3>
             <p className="mt-1 ui-body-sm">{contributionText(counts)}</p>
             <ul className="mt-2 flex flex-col gap-1.5">
-              {contributionKindRows(plugin).map((row) => (
-                <li
-                  key={row.kind}
-                  className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft px-3 py-1.5"
-                >
-                  <span className="ui-body-sm font-medium">{row.label}</span>
-                  <span className={`${CHIP} ui-numeric`}>{row.count}</span>
-                  <span className="ml-auto ui-caption">
-                    {!plugin.enabled
-                      ? "主开关已关闭"
-                      : row.enabled
-                        ? "生效中"
-                        : "本类已停用"}
-                  </span>
-                  <Switch
-                    label={`启用本插件的${row.label}`}
-                    checked={row.enabled}
-                    disabled={!plugin.enabled}
-                    onChange={(next) => onKindToggle(row.kind, next)}
-                  />
-                </li>
-              ))}
+              {contributionKindRows(plugin).map((row) => {
+                // 本包没声明的类别：开关照常显示当前值，但置灰并写明「本包未声明」——
+                // 可点却点不出任何效果的开关比灰掉更容易让人以为坏了（d.77）。
+                const undeclared = row.count === 0;
+                return (
+                  <li
+                    key={row.kind}
+                    className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft px-3 py-1.5"
+                  >
+                    <span className="ui-body-sm font-medium">{row.label}</span>
+                    <span className={`${CHIP} ui-numeric`}>{row.count}</span>
+                    <span className="ml-auto ui-caption">
+                      {undeclared
+                        ? "本包未声明"
+                        : !plugin.enabled
+                          ? "主开关已关闭"
+                          : row.enabled
+                            ? "生效中"
+                            : "本类已停用"}
+                    </span>
+                    <Switch
+                      label={`启用本插件的${row.label}`}
+                      checked={row.enabled}
+                      disabled={!plugin.enabled || undeclared}
+                      onChange={(next) => onKindToggle(row.kind, next)}
+                    />
+                  </li>
+                );
+              })}
             </ul>
             <p className="mt-1 ui-caption">
               主开关关闭时不可单独调整；这里的切换只影响这一类贡献，

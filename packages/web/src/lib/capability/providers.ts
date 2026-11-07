@@ -4,6 +4,7 @@ import { buildInfohubToolsIfConnected } from "../infohub/tools.js";
 import { buildToolBridge } from "../mcp/index.js";
 import { mcpRegistry } from "../mcp/store.js";
 import { memoryStore } from "../memory/index.js";
+import { makePluginToolFilter } from "../plugins/toolCeiling.js";
 import { buildSelfToolBridge } from "../selfEdit/index.js";
 import { skillPool } from "../skills/index.js";
 import { buildToneToolBridge } from "../tone/tools.js";
@@ -16,10 +17,16 @@ import type { CapabilityProvider } from "./types.js";
  * 顺序与改前一致（mcp → charts → tone → wiki → infohub → self）：工具名重复时前者胜出。
  */
 
+/**
+ * 插件声明的工具风险上限（d.77）：在**注入点**过滤，而不是只在能力目录里标「未注入」。
+ * 目录与执行同源（同一份 `riskAllowed` 口径），否则工具页的承诺是假的。
+ */
+const pluginToolFilter = makePluginToolFilter();
+
 export const mcpProvider: CapabilityProvider = {
   id: "mcp",
   origin: "mcp",
-  build: () => buildToolBridge(),
+  build: () => buildToolBridge(mcpRegistry, { toolAllowed: pluginToolFilter }),
 };
 
 export const chartsProvider: CapabilityProvider = {

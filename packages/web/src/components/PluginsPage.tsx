@@ -35,9 +35,11 @@ import { InterfacesView } from "./InterfacesPage.js";
 import {
   describeBlockedTools,
   describeCapabilityStats,
+  filterPlugins,
   groupCatalogTools,
   groupToolPacks,
   installResultMessage,
+  type PluginStatusFilter,
 } from "./plugins/viewModel.js";
 import { BTN_GHOST, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
 
@@ -62,6 +64,13 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "skills", label: "技能" },
   { key: "tools", label: "工具" },
   { key: "mcp", label: "MCP 服务" },
+];
+
+/** 插件列表的状态筛选（d.77）：三档，默认「全部」。 */
+const STATUS_FILTERS: { key: PluginStatusFilter; label: string }[] = [
+  { key: "all", label: "全部" },
+  { key: "enabled", label: "已启用" },
+  { key: "disabled", label: "已停用" },
 ];
 
 /**
@@ -121,6 +130,9 @@ export function PluginsPage({
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<InstalledPlugin | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  /** 插件列表筛选（d.77）：装到几十个后，按名字/技能/服务找得到；状态可只看已停用。 */
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<PluginStatusFilter>("all");
 
   /**
    * 一次性视图意图（d.67）：旧「技能区 / 接口区」链接、命令面板与桌宠气泡
@@ -161,6 +173,16 @@ export function PluginsPage({
 
   // 数据快照：tick 是「安装/启停后重算」的统一信号；catalog 传入时优先用注入值。
   const list = useMemo(() => plugins.list(), [plugins, tick]);
+  /** 过滤后的已装插件（系统能力卡不在其中，它是应用内置的只读条目）。 */
+  const visiblePlugins = useMemo(
+    () => filterPlugins(list, { query, status: statusFilter }),
+    [list, query, statusFilter],
+  );
+  const filterActive = query.trim().length > 0 || statusFilter !== "all";
+  const clearFilters = () => {
+    setQuery("");
+    setStatusFilter("all");
+  };
   const capabilityCatalog = useMemo(
     () => catalog ?? describeCapabilityCatalog({ plugins, mcp }),
     [catalog, plugins, mcp, tick],
@@ -235,6 +257,10 @@ export function PluginsPage({
       bump();
       setText("");
       setInstallOpen(false);
+      // 安装/更新后回到插件 Tab 并高亮这张卡：从「技能 / 工具 / MCP」Tab 点安装时，
+      // 装完还停在原 Tab 会让人以为没生效（高亮与滚动沿用命令面板的同一套机制）。
+      setTab("plugins");
+      setHighlightPluginId(result.plugin.manifest.id);
       setMsg({ kind: "ok", text: installResultMessage(result, before) });
     } catch (err) {
       setMsg({
@@ -327,9 +353,11 @@ export function PluginsPage({
           );
         })}
         <span className="ml-auto self-center ui-caption">
-          {tab === "modules"
-            ? "内置模块 · 停用只下线入口与后台挂载，不删除本机数据"
-            : `已启用 ${enabledCount}/${list.length} 个插件 · 同一 id 再次安装 = 覆盖更新`}
+          {tab === "plugins"
+            ? `已启用 ${enabledCount}/${list.length} 个插件 · 同一 id 再次安装 = 覆盖更新`
+            : tab === "modules"
+              ? "内置模块 · 停用只下线入口与后台挂载，不删除本机数据"
+              : ""}
         </span>
       </div>
 
@@ -341,6 +369,38 @@ export function PluginsPage({
       >
         {tab === "plugins" && (
           <>
+            {/* 列表筛选（d.77）：装到几十个后按名字/技能/服务找，状态可只看已停用。 */}
+            {list.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <input
+                  aria-label="搜索插件"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="按名称、id、作者、技能或服务搜索"
+                  className="ui-input min-w-[200px] max-w-[320px] flex-1"
+                />
+                <div role="group" aria-label="插件状态筛选" className="flex items-center gap-1">
+                  {STATUS_FILTERS.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      aria-pressed={statusFilter === item.key}
+                      onClick={() => setStatusFilter(item.key)}
+                      className={`ui-btn ui-btn-sm ${
+                        statusFilter === item.key ? "ui-btn-primary" : "ui-btn-ghost text-muted"
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                <span className="ui-caption">
+                  {filterActive
+                    ? `匹配 ${visiblePlugins.length} / 共 ${list.length} 个`
+                    : `共 ${list.length} 个插件`}
+                </span>
+              </div>
+            )}
             <SystemPluginCard system={system} />
             {list.length === 0 ? (
               <section
@@ -358,9 +418,20 @@ export function PluginsPage({
                   安装第一个插件
                 </button>
               </section>
+            ) : visiblePlugins.length === 0 ? (
+              <section
+                className="flex flex-col items-center gap-2 rounded-xl border border-line bg-white py-10 text-center shadow-card"
+                aria-label="筛选无结果"
+              >
+                <p className="ui-section-title">没有匹配的插件</p>
+                <p className="ui-caption">换个关键词，或清除筛选看全部。</p>
+                <button type="button" onClick={clearFilters} className="ui-btn ui-btn-md ui-btn-ghost mt-1">
+                  清除筛选
+                </button>
+              </section>
             ) : (
               <div className="grid gap-4">
-                {list.map((plugin) => (
+                {visiblePlugins.map((plugin) => (
                   <PluginCard
                     key={plugin.manifest.id}
                     plugin={plugin}

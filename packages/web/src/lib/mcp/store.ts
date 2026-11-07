@@ -394,7 +394,9 @@ export class McpRegistry {
     const at = this.now();
     const name = input.name.trim();
     if (!name) throw new Error("请填写服务名称");
-    if (input.transport === "http" && !/^https?:\/\//.test(input.url ?? "")) {
+    // 协议名大小写不敏感（`HTTPS://…` 是合法 URL）：这里若用区分大小写的正则，
+    // 插件清单能通过 `new URL` 校验、却在这里抛错——preview 说能装、装到一半失败（d.77 修复）。
+    if (input.transport === "http" && !/^https?:\/\//i.test(input.url ?? "")) {
       throw new Error("HTTP 传输的地址必须以 http:// 或 https:// 开头");
     }
     if (input.transport === "stdio" && !(input.command ?? "").trim()) {
