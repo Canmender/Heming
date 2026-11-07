@@ -32,9 +32,7 @@ function v4(id: string, version: string, overrides: Record<string, unknown> = {}
     description: "测试包",
     author: "tester",
     permissions: { network: ["127.0.0.1:3425"], tools: "none", files: [] },
-    contributions: {
-      llmPresets: [{ id: "p", label: "P", provider: "openai", baseUrl: "http://127.0.0.1:3425/v1", model: "m" }],
-    },
+    contributions: { skills: [{ name: "s", instructions: "i" }] },
     ...overrides,
   };
 }
@@ -79,7 +77,7 @@ describe("createPluginCatalog", () => {
     expect(old.version).toBe("1.10.0");
     expect(old.sha256).toBe(createHash("sha256").update(newest).digest("hex"));
     expect(old.size).toBe(newest.length);
-    expect(old.contributions.llmPresets).toBe(1);
+    expect(old.contributions.skills).toBe(1);
     expect(list[1].contributions.skills).toBe(1);
 
     const read = catalog.read("acme.old", "1.10.0");

@@ -21,7 +21,6 @@ import type { StorageLike } from "./memory/types.js";
 export const MODEL_CAPS_KEY = "heming.modelCaps.v1";
 
 /** 定价文案的免责说明（界面必须原样展示）。 */
-export const PRICING_DISCLAIMER = "参考价，以服务商账单为准";
 
 /** 一个模型的能力描述。 */
 export interface ModelCapability {
@@ -47,8 +46,6 @@ export interface ModelCapability {
    * ★ 当前**不驱动任何行为**（见 `capabilityBadges` 上方的说明），只作选型参考。
    */
   supportsStructuredOutput: boolean;
-  /** 定价：每百万 token，单位「元」。 */
-  pricing?: { input: number; output: number };
 }
 
 /** 用户可手改的字段（其余按表填）。 */
@@ -97,7 +94,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: false,
     supportsParallelTools: true,
     supportsStructuredOutput: true,
-    pricing: { input: 2, output: 8 },
   },
   "deepseek-reasoner": {
     contextWindow: 64000,
@@ -107,7 +103,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: true,
     supportsParallelTools: true,
     supportsStructuredOutput: true,
-    pricing: { input: 4, output: 16 },
   },
   // —— Kimi / Moonshot ——
   "moonshot-v1-8k": {
@@ -118,7 +113,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: false,
     supportsParallelTools: false,
     supportsStructuredOutput: false,
-    pricing: { input: 12, output: 12 },
   },
   "moonshot-v1-32k": {
     contextWindow: 32768,
@@ -128,7 +122,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: false,
     supportsParallelTools: false,
     supportsStructuredOutput: false,
-    pricing: { input: 12, output: 12 },
   },
   // —— 智谱 GLM ——
   "glm-4-flash": {
@@ -139,7 +132,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: false,
     supportsParallelTools: false,
     supportsStructuredOutput: false,
-    pricing: { input: 0.5, output: 5 },
   },
   "glm-4-plus": {
     contextWindow: 128000,
@@ -149,7 +141,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: false,
     supportsParallelTools: false,
     supportsStructuredOutput: false,
-    pricing: { input: 4, output: 12 },
   },
   // —— 通义千问 ——
   "qwen-plus": {
@@ -160,7 +151,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: false,
     supportsParallelTools: false,
     supportsStructuredOutput: false,
-    pricing: { input: 0.8, output: 2 },
   },
   "qwen-max": {
     contextWindow: 32768,
@@ -170,7 +160,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: false,
     supportsParallelTools: false,
     supportsStructuredOutput: false,
-    pricing: { input: 2.4, output: 9.6 },
   },
   "qwen-turbo": {
     contextWindow: 1000000,
@@ -180,7 +169,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: false,
     supportsParallelTools: false,
     supportsStructuredOutput: false,
-    pricing: { input: 0.3, output: 0.6 },
   },
   "qwen2.5-vl-7b-instruct": {
     contextWindow: 32768,
@@ -220,7 +208,6 @@ const EXACT: Record<string, ModelCapability> = {
     // Anthropic 协议：并行工具是默认行为（无 parallel_tool_calls 开关）；结构化输出不走 response_format
     supportsParallelTools: true,
     supportsStructuredOutput: false,
-    pricing: { input: 21, output: 105 },
   },
   "claude-opus-5": {
     contextWindow: 200000,
@@ -230,7 +217,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: true,
     supportsParallelTools: true,
     supportsStructuredOutput: false,
-    pricing: { input: 105, output: 525 },
   },
   // —— OpenAI 兼容端点常见的几个 ——
   "gpt-4o": {
@@ -241,7 +227,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: false,
     supportsParallelTools: true,
     supportsStructuredOutput: true,
-    pricing: { input: 18, output: 72 },
   },
   "gpt-4o-mini": {
     contextWindow: 128000,
@@ -251,7 +236,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: false,
     supportsParallelTools: true,
     supportsStructuredOutput: true,
-    pricing: { input: 1.1, output: 4.3 },
   },
   "o3-mini": {
     contextWindow: 200000,
@@ -261,7 +245,6 @@ const EXACT: Record<string, ModelCapability> = {
     supportsReasoning: true,
     supportsParallelTools: true,
     supportsStructuredOutput: true,
-    pricing: { input: 11, output: 44 },
   },
 };
 

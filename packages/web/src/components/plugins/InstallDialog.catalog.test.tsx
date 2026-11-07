@@ -35,7 +35,7 @@ const entry: PluginCatalogEntry = {
   sha256: "a".repeat(64),
   size: manifestText.length,
   permissions: { network: ["127.0.0.1:3425"], tools: "none", files: [] },
-  contributions: { skills: 0, mcpServers: 0, commands: 0, toolPacks: 0, llmPresets: 1 },
+  contributions: { skills: 0, mcpServers: 0, commands: 0, toolPacks: 0 },
 };
 
 function memStorage() {

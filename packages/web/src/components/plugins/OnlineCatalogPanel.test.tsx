@@ -21,7 +21,7 @@ const entry = (overrides: Partial<PluginCatalogEntry> = {}): PluginCatalogEntry 
   sha256: "abcdef0123456789".repeat(4),
   size: 1024,
   permissions: { network: ["127.0.0.1:3425"], tools: "none", files: [] },
-  contributions: { skills: 1, mcpServers: 0, commands: 1, toolPacks: 0, llmPresets: 1 },
+  contributions: { skills: 1, mcpServers: 0, commands: 1, toolPacks: 0 },
   ...overrides,
 });
 

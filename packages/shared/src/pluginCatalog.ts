@@ -32,7 +32,6 @@ export const PluginCatalogContributionsSchema = z.object({
   mcpServers: z.number().int().min(0).default(0),
   commands: z.number().int().min(0).default(0),
   toolPacks: z.number().int().min(0).default(0),
-  llmPresets: z.number().int().min(0).default(0),
 });
 
 export const PluginCatalogEntrySchema = z.object({

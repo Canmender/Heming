@@ -119,7 +119,6 @@ export function usePetChat(agentId: string | null): PetChatState {
       try {
         await streamChat(profile, messages, {
           signal: controller.signal,
-          maxTokens: 512,
           onDelta: (delta) => {
             bufferRef.current += delta;
             setReply(bufferRef.current);

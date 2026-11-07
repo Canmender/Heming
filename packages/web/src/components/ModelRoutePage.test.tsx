@@ -59,7 +59,6 @@ describe("ModelRoutePage", () => {
     expect(screen.getByRole("heading", { name: "每档策略在选谁" })).toBeInTheDocument();
     for (const name of [
       "按声明顺序",
-      "参考价优先",
       "智能",
       "用得最少优先",
       "按节奏优先",

@@ -26,7 +26,7 @@ const entry: PluginCatalogEntry = {
   sha256: "a".repeat(64),
   size: 12,
   permissions: { network: ["127.0.0.1:3425"], tools: "none", files: [] },
-  contributions: { skills: 1, mcpServers: 0, commands: 1, toolPacks: 0, llmPresets: 1 },
+  contributions: { skills: 1, mcpServers: 0, commands: 1, toolPacks: 0 },
 };
 
 const response = {

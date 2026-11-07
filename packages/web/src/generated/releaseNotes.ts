@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.94.2.42.0",
+    "date": "2026-11-07",
+    "title": "模型相关只剩「magpie 目录 + 模型」",
+    "bullets": [
+      "候选链的选路档从 8 档减到 7 档：不再有「参考价优先」，因为价格由 magpie 管，和鸣不复制一份价目表。",
+      "本月逐候选用量仍按 token 展示，不再估金额（网关不给价格，估出来只会是假账）。",
+      "与模型连接相关的旧协议实现已清理（内部改动，用户无感）；模型仍全部来自本机 magpie。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.93.2.42.0",
     "date": "2026-11-07",
     "title": "团队页有了「工作台」：自己建团队、写目标、排方案、派任务",

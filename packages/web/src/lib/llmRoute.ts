@@ -20,7 +20,6 @@
  * 八档全部确定性、可解释、可单测，共同规矩：**休息中的候选永远排最后但绝不删除**，
  * 全休息时仍问最快回来的一个（`probeOne` 语义一字不动）。
  * - `order`：声明顺序（老数据缺省，行为与加这档前逐字相同）；
- * - `cheap`：参考价从低到高（本机价目表，查不到排最后）；
  * - `smart`：本月用量、参考价、近期失败三项归一后加权求和（权重见常量；magpie 默认档）；
  * - `usage`：本月用量按 1 小时半衰后升序（magpie `usageHalfLife`）；
  * - `pace`：本月用量 ÷ 本月已过时间比例，比值升序（「Use before expiry」的客户端近似，
@@ -47,7 +46,6 @@
  */
 
 import { estimateTokens, ROW_TOKEN_OVERHEAD } from "./agentContext/tokens.js";
-import { lookupCapability } from "./modelCaps.js";
 import { classifyFailure, type FailureVerdict } from "./llmFailure.js";
 import {
   LlmHttpError,
@@ -58,6 +56,7 @@ import {
   type UsageTotals,
 } from "./llmClient.js";
 import { accountKey, keyForVerdict, llmHealth, modelKey } from "./llmHealth.js";
+import { lookupCapability } from "./modelCaps.js";
 import { llmSpeed } from "./llmSpeed.js";
 import { isModuleOn } from "./modules/store.js";
 import {
@@ -154,18 +153,6 @@ export function expandChain(profile: LlmProfile): Candidate[] {
 }
 
 /**
- * 参考价键（`cheap` 档用）：input+output 单价之和，元/百万 token。
- *
- * 为什么用「两侧相加」这种粗口径：一次请求的输入/输出比例事先不知道，
- * 拿比例去加权等于猜；两侧相加只保留「哪家更贵」这个单调关系，排序用途够了。
- * 查不到价目返回 Infinity = 排到最后——不猜它便宜，也不删它（绝不死路）。
- */
-function priceKey(c: Candidate): number {
-  const pricing = lookupCapability(c.profile.provider, c.profile.model)?.pricing;
-  return pricing ? pricing.input + pricing.output : Number.POSITIVE_INFINITY;
-}
-
-/**
  * 选路策略的排序上下文。
  * - `now`：读取时刻（单测注入假时钟；生产传 Date.now()）；
  * - `strategy`：路由组上写的档位（老数据缺省 order）；
@@ -178,9 +165,8 @@ interface OrderContext {
 }
 
 /** smart 档的三项权重（三项都归一到 0..1，分数越小越前）。理由见 `sortSmart`。 */
-const SMART_W_USAGE = 0.5;
-const SMART_W_PRICE = 0.3;
-const SMART_W_FAILURE = 0.2;
+const SMART_W_USAGE = 0.65;
+const SMART_W_FAILURE = 0.35;
 
 /** fast 档的分档粒度（毫秒）：同档内保持声明序，避免几十毫秒的抖动就换人。 */
 const FAST_BUCKET_MS = 500;
@@ -240,27 +226,20 @@ function sortByNumberAsc(awake: Candidate[], valueOf: (c: Candidate) => number):
   awake.sort((a, b) => (values.get(a) ?? 0) - (values.get(b) ?? 0));
 }
 
-/** `cheap`：参考价从低到高（查不到价目的 Infinity 排最后），同价保持声明序。 */
-function sortCheap(awake: Candidate[]): void {
-  sortByNumberAsc(awake, priceKey);
-}
-
 /**
  * `smart`：醒着里按三项本机可算的信号综合打分，分数小者先。
  *
- * 公式（三项都归一到 0..1）：
- * `0.5 × 本月用量占比 + 0.3 × 参考价占比 + 0.2 × 近期失败占比`
+ * 公式（两项都归一到 0..1）：
+ * `0.65 × 本月用量占比 + 0.35 × 近期失败占比`
  *
- * 为什么是这三个权重：
- * - 用量（0.5）是主信号——「这个月还愿意让它花多少」是客户端唯一能自己判断的余量代理；
- * - 参考价（0.3）是次信号——同一批候选用量相近时，先试便宜的；
- * - 近期失败（0.2）只做微调——休息中的候选本来就已经排最后了，这里只是让「刚失败过
- *   但已经出休息期」的候选排在干净候选后面一点，不至于一回来就抢首发。
+ * 权重说明（d.93 起）：
+ * - 网关不提供价格，参考价维度已删除；用量成为主信号（「这个月还愿意让它花多少」），
+ *   近期失败做次信号（刚失败过、已出休息期的候选排干净候选后面，避免一回来就抢首发）；
+ * - 原本的 0.5/0.3/0.2 按「去掉价格后重新归一」变成 0.65/0.35，保持两项相对优先级不变。
  *
  * 口径说明：
  * - 用量用**本月已上报 token**（`monthTokensOf`），不是衰减值——smart 要的是「月度盘面」；
  *   想要近期衰减语义请选 `usage` 档；
- * - 查不到参考价按**最坏档**计（与 cheap 档「排最后」同一口径：不知道贵不贵，不当便宜）；
  * - 「近期失败」取冷却账本里残留的连续失败档位（`llmHealth.failures`），醒着的候选
  *   没有 active rest，这是唯一还能读到的近期表现；
  * - 同分保持声明序（稳定排序），所以没有任何数据时 smart ≡ order。
@@ -273,26 +252,19 @@ function sortSmart(
   const month = monthKeyOf(new Date(now).toISOString());
   const records = useTokenUsageStore.getState().records;
   const usage = new Map<Candidate, number>();
-  const price = new Map<Candidate, number>();
   let maxUsage = 0;
-  let maxPrice = 0;
   let maxFailure = 1;
   for (const c of awake) {
     const u = monthTokensOf(records, c.profile.id, c.profile.model, month);
-    const p = priceKey(c);
     const f = failureOf.get(c) ?? 0;
     usage.set(c, u);
-    price.set(c, p);
     maxUsage = Math.max(maxUsage, u);
     maxFailure = Math.max(maxFailure, f);
-    if (Number.isFinite(p)) maxPrice = Math.max(maxPrice, p);
   }
   const scoreOf = (c: Candidate): number => {
     const u = maxUsage > 0 ? (usage.get(c) ?? 0) / maxUsage : 0;
-    const rawPrice = price.get(c) ?? Number.POSITIVE_INFINITY;
-    const p = Number.isFinite(rawPrice) ? (maxPrice > 0 ? rawPrice / maxPrice : 0) : 1;
     const f = (failureOf.get(c) ?? 0) / maxFailure;
-    return SMART_W_USAGE * u + SMART_W_PRICE * p + SMART_W_FAILURE * f;
+    return SMART_W_USAGE * u + SMART_W_FAILURE * f;
   };
   const scores = new Map(awake.map((c) => [c, scoreOf(c)]));
   awake.sort((a, b) => (scores.get(a) ?? 0) - (scores.get(b) ?? 0));
@@ -436,9 +408,6 @@ function orderCandidates(chain: Candidate[], ctx: OrderContext): Candidate[] {
     (llmHealth.resting(c.ak, ctx.now) || llmHealth.resting(c.mk, ctx.now) ? resting : awake).push(c);
   }
   switch (strategy) {
-    case "cheap":
-      sortCheap(awake);
-      break;
     case "smart":
       sortSmart(awake, ctx.now, failureOf);
       break;
@@ -542,7 +511,7 @@ export async function streamChatRouted(
   // 单候选 = 旧行为，逐字等价（不排序、不预筛、不记账）
   if (chain.length === 1) return streamChat(chain[0].profile, messages, opts);
 
-  const roomy = withRoom(chain, messages, opts.maxTokens);
+  const roomy = withRoom(chain, messages);
   const route = (profile as RoutedProfile).route;
   const ordered = orderCandidates(roomy, {
     now: Date.now(),

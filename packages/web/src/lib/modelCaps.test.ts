@@ -108,8 +108,8 @@ describe("模型能力表", () => {
     expect(gpt.supportsParallelTools).toBe(true);
     expect(gpt.supportsStructuredOutput).toBe(true);
 
-    // Anthropic 协议如实标：并行是默认行为（无开关），结构化不走 response_format
-    const claude = lookupCapability("anthropic", "claude-sonnet-5", storage)!;
+    // Claude 系列如实标（协议已统一，按模型 id 查表）：并行默认、结构化不走 response_format
+    const claude = lookupCapability("openai", "claude-sonnet-5", storage)!;
     expect(claude.supportsParallelTools).toBe(true);
     expect(claude.supportsStructuredOutput).toBe(false);
 

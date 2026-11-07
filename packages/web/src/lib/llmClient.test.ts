@@ -1,663 +1,285 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { buildRequest, testConnection, streamChat, type ChatMessage } from "./llmClient.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  LlmHttpError,
+  buildRequest,
+  carriedError,
+  retryAfterMs,
+  streamChat,
+  testConnection,
+  type ChatMessage,
+} from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
 
-const openai: LlmProfile = { id: "p1", label: "o", provider: "openai", apiKey: "sk-o", model: "gpt-x" };
-const anthropic: LlmProfile = { id: "p2", label: "a", provider: "anthropic", apiKey: "sk-ant-x", model: "claude-x" };
-const msgs: ChatMessage[] = [
-  { role: "system", content: "sys" },
-  { role: "user", content: "hi" },
-];
+/**
+ * 网关请求客户端（d.93：只剩 OpenAI 兼容协议）。
+ *
+ * 这里只钉「发出去的东西」与「读回来的东西」：URL/头/body 单一出处、流式与非流式解析、
+ * 工具调用拼装、用量口径、错误分类。Anthropic 协议实现已删除（协议翻译在 magpie 里）。
+ */
 
-describe("buildRequest", () => {
-  it("openai 缺省 baseUrl → 官方端点，Bearer 头与 messages 原样", () => {
-    const r = buildRequest(openai, msgs, { stream: false });
-    expect(r.url).toBe("https://api.openai.com/v1/chat/completions");
-    expect(r.headers.authorization).toBe("Bearer sk-o");
-    const body = JSON.parse(r.body);
-    expect(body.messages).toEqual(msgs);
-    expect(body.stream).toBe(false);
-    expect(body.model).toBe("gpt-x");
-    expect(body.temperature).toBeUndefined(); // 未设置不进 body
-  });
+const openai: LlmProfile = {
+  id: "mp:deepseek/deepseek-chat",
+  label: "DeepSeek Chat",
+  provider: "openai",
+  baseUrl: "http://127.0.0.1:3425/v1",
+  apiKey: "magpie-heming",
+  model: "deepseek/deepseek-chat",
+};
 
-  it("自定义 baseUrl 去尾斜杠再拼路径", () => {
-    const r = buildRequest({ ...openai, baseUrl: "https://my.proxy/v1/" }, msgs, { stream: true });
-    expect(r.url).toBe("https://my.proxy/v1/chat/completions");
-    expect(JSON.parse(r.body).stream).toBe(true);
-  });
+const msgs: ChatMessage[] = [{ role: "user", content: "hi" }];
 
-  it("anthropic：/v1/messages、x-api-key、system 拆分、maxTokens 覆盖", () => {
-    const r = buildRequest(anthropic, msgs, { stream: false, maxTokens: 1 });
-    expect(r.url).toBe("https://api.anthropic.com/v1/messages");
-    expect(r.headers["x-api-key"]).toBe("sk-ant-x");
-    expect(r.headers["anthropic-version"]).toBe("2023-06-01");
-    const body = JSON.parse(r.body);
-    expect(body.max_tokens).toBe(1);
-    expect(body.system).toBe("sys");
-    expect(body.messages).toEqual([
-      // d.49：消息内容统一成 block 数组（Anthropic 两种形态都收；tool_use/tool_result 只能是数组）
-      { role: "user", content: [{ type: "text", text: "hi" }] },
-    ]);
-    expect(body.stream).toBe(false);
+function sse(lines: string[]): Response {
+  return new Response(lines.map((line) => `data: ${line}\n`).join("\n"), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
   });
+}
 
-  it("缺省 maxTokens → anthropic 默认 1024", () => {
-    const body = JSON.parse(buildRequest(anthropic, msgs, { stream: false }).body);
-    expect(body.max_tokens).toBe(1024);
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
   });
+}
 
-  it("Key 红线：目标域名只随 profile.baseUrl，绝不指向和鸣自有服务端", () => {
-    const urls = [
-      buildRequest(openai, msgs, { stream: false }).url,
-      buildRequest(anthropic, msgs, { stream: false }).url,
-      buildRequest({ ...openai, baseUrl: "https://llm.example.com/v1" }, msgs, { stream: false }).url,
-      buildRequest({ ...anthropic, baseUrl: "http://127.0.0.1:11434" }, msgs, { stream: false }).url,
-    ];
-    for (const url of urls) {
-      expect(url).toMatch(/^https?:\/\//); // 绝对地址，非相对路径（相对路径会被浏览器发往自有域）
-      expect(url).not.toContain("47.92.39.184"); // 部署机 IP（自有服务端）锁死不出现
-    }
-    // 配套 F1：缺 scheme 的 baseUrl 拼出的正是相对路径——守卫直接拒绝，而非产出上面这种 URL
-    expect(() =>
-      buildRequest({ ...openai, baseUrl: "api.deepseek.com/v1" }, msgs, { stream: false }),
-    ).toThrow("baseUrl 必须以 http:// 或 https:// 开头");
-    expect(() =>
-      buildRequest({ ...anthropic, baseUrl: "api.deepseek.com" }, msgs, { stream: false }),
-    ).toThrow("baseUrl 必须以 http:// 或 https:// 开头");
-  });
+beforeEach(() => {
+  vi.restoreAllMocks();
 });
 
-describe("buildRequest：多模态内容片", () => {
-  const withImage: ChatMessage[] = [
-    {
-      role: "user",
-      content: "看图",
-      contentParts: [
-        { type: "text", text: "看图" },
-        { type: "image", mime: "image/png", data: "aW1n" },
-      ],
-    },
-  ];
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
-  it("openai：image_url + data URL，且不把 contentParts 漏进请求体", () => {
-    const body = JSON.parse(buildRequest(openai, withImage, { stream: true }).body);
+describe("buildRequest", () => {
+  it("缺省 baseUrl → 官方端点；自定义地址去尾斜杠再拼 /chat/completions", () => {
+    expect(buildRequest({ ...openai, baseUrl: undefined }, msgs, { stream: false }).url).toBe(
+      "https://api.openai.com/v1/chat/completions",
+    );
+    expect(buildRequest(openai, msgs, { stream: false }).url).toBe(
+      "http://127.0.0.1:3425/v1/chat/completions",
+    );
+    expect(
+      buildRequest({ ...openai, baseUrl: "https://gw.example.com/v1/" }, msgs, { stream: false }).url,
+    ).toBe("https://gw.example.com/v1/chat/completions");
+  });
+
+  it("Bearer 头 + messages 原样；流式默认带 stream_options，非流式不带", () => {
+    const req = buildRequest(openai, msgs, { stream: true });
+    expect(req.headers).toEqual({
+      "content-type": "application/json",
+      authorization: "Bearer magpie-heming",
+    });
+    expect(JSON.parse(req.body)).toMatchObject({
+      model: "deepseek/deepseek-chat",
+      stream: true,
+      messages: [{ role: "user", content: "hi" }],
+      stream_options: { include_usage: true },
+    });
+    expect(JSON.parse(buildRequest(openai, msgs, { stream: true, includeUsage: false }).body)).not.toHaveProperty(
+      "stream_options",
+    );
+    expect(JSON.parse(buildRequest(openai, msgs, { stream: false }).body)).not.toHaveProperty("stream_options");
+  });
+
+  it("带 tools 时带 tools + tool_choice:auto；不带时不出现这两个字段", () => {
+    const tools = [{ type: "function", function: { name: "t" } }];
+    expect(JSON.parse(buildRequest(openai, msgs, { stream: false, tools }).body)).toMatchObject({
+      tools,
+      tool_choice: "auto",
+    });
+    expect(JSON.parse(buildRequest(openai, msgs, { stream: false }).body)).not.toHaveProperty("tools");
+  });
+
+  it("Key 红线：目标地址只随 profile.baseUrl；缺 scheme 直接抛", () => {
+    expect(() => buildRequest({ ...openai, baseUrl: "api.deepseek.com" }, msgs, { stream: false })).toThrow(
+      /baseUrl 必须以 http/,
+    );
+    const req = buildRequest({ ...openai, baseUrl: "http://127.0.0.1:9/v1" }, msgs, { stream: false });
+    expect(req.url.startsWith("http://127.0.0.1:9/")).toBe(true);
+    expect(req.headers.authorization).toBe("Bearer magpie-heming");
+  });
+
+  it("多模态：image_url + data URL，且不把 contentParts 漏进请求体", () => {
+    const withImage: ChatMessage[] = [
+      {
+        role: "user",
+        content: "看图",
+        contentParts: [
+          { type: "text", text: "看图" },
+          { type: "image", mime: "image/png", data: "QUJD" },
+        ],
+      },
+    ];
+    const body = JSON.parse(buildRequest(openai, withImage, { stream: false }).body);
     expect(body.messages[0].content).toEqual([
       { type: "text", text: "看图" },
-      { type: "image_url", image_url: { url: "data:image/png;base64,aW1n" } },
+      { type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } },
     ]);
     expect(body.messages[0]).not.toHaveProperty("contentParts");
-  });
-
-  it("anthropic：base64 source（不是 data URL）", () => {
-    const body = JSON.parse(buildRequest(anthropic, withImage, { stream: false }).body);
-    expect(body.messages[0].content).toEqual([
-      { type: "text", text: "看图" },
-      { type: "image", source: { type: "base64", media_type: "image/png", data: "aW1n" } },
-    ]);
-  });
-
-  it("纯文本消息逐字不变（无内容片时走老路径）", () => {
-    const body = JSON.parse(buildRequest(openai, msgs, { stream: false }).body);
-    expect(body.messages).toEqual(msgs);
   });
 });
 
 describe("testConnection", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
+  it("成功：POST /chat/completions 非流式", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(testConnection(openai)).resolves.toEqual({ ok: true });
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/chat\/completions$/);
+    const init = fetchMock.mock.calls[0][1]!;
+    expect(JSON.parse(String(init.body)).stream).toBe(false);
   });
 
-  it("HTTP 错误 → ok:false + 状态与响应片段", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("bad key", { status: 401 }));
-    const r = await testConnection(openai);
-    expect(r.ok).toBe(false);
-    expect(r.error).toContain("HTTP 401");
-    expect(r.error).toContain("bad key");
-  });
+  it("HTTP 错误 / 网络异常 / 缺 scheme 都返回 ok:false（不抛）", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ error: "bad" }, 401)));
+    await expect(testConnection(openai)).resolves.toMatchObject({ ok: false });
+    expect((await testConnection(openai)).error).toMatch(/HTTP 401/);
 
-  it("网络异常 → ok:false + error message", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("fetch failed"));
-    const r = await testConnection(openai);
-    expect(r).toEqual({ ok: false, error: "fetch failed" });
-  });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+    await expect(testConnection(openai)).resolves.toMatchObject({ ok: false, error: "fetch failed" });
 
-  it("缺 scheme baseUrl → ok:false（守卫经 testConnection 转错误，不抛出且不发请求）", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const r = await testConnection({ ...openai, baseUrl: "api.deepseek.com/v1" });
-    expect(r.ok).toBe(false);
-    expect(r.error).toMatch(/https?:\/\//);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("成功：POST 官方端点，非流式 + anthropic max_tokens:1", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response("{}", { status: 200 }));
-    const r = await testConnection(anthropic);
-    expect(r).toEqual({ ok: true });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://api.anthropic.com/v1/messages");
-    expect(init.method).toBe("POST");
-    const body = JSON.parse(String(init.body));
-    expect(body.stream).toBe(false);
-    expect(body.max_tokens).toBe(1);
-    // 红线：请求目标不是部署机
-    expect(String(url)).not.toContain("47.92.39.184");
+    await expect(testConnection({ ...openai, baseUrl: "no-scheme" })).resolves.toMatchObject({
+      ok: false,
+    });
   });
 });
 
 describe("streamChat", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  const openaiProfile: LlmProfile = { id: "p", label: "l", provider: "openai", apiKey: "k", model: "m" };
-  const anthropicProfile: LlmProfile = { id: "p2", label: "l2", provider: "anthropic", apiKey: "k", model: "m" };
-  const userMsg: ChatMessage[] = [{ role: "user", content: "hi" }];
-
-  function sseResponse(chunks: string[]): Response {
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        const enc = new TextEncoder();
-        for (const c of chunks) controller.enqueue(enc.encode(c));
-        controller.close();
-      },
-    });
-    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+  function capture() {
+    const deltas: string[] = [];
+    const reasoning: string[] = [];
+    const toolCalls: unknown[] = [];
+    const usages: unknown[] = [];
+    return {
+      deltas,
+      reasoning,
+      toolCalls,
+      usages,
+      opts: (signal = new AbortController().signal) => ({
+        signal,
+        onDelta: (d: string) => deltas.push(d),
+        onReasoning: (t: string) => reasoning.push(t),
+        onToolCalls: (c: unknown) => toolCalls.push(c),
+        onUsage: (u: unknown) => usages.push(u),
+      }),
+    };
   }
 
-  it("openai SSE 逐段回调并返回全文", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      sseResponse([
-        'data: {"choices":[{"delta":{"content":"你"}}]}\n\n',
-        'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
-        "data: [DONE]\n\n",
-      ]),
+  it("SSE：choices[0].delta.content 逐段回调，返回全文；usage 尾包只回调一次", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse([
+          JSON.stringify({ choices: [{ delta: { content: "你" } }] }),
+          JSON.stringify({ choices: [{ delta: { content: "好" } }] }),
+          JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } }),
+          "[DONE]",
+        ]),
+      ),
     );
-    const deltas: string[] = [];
-    const text = await streamChat(openaiProfile, userMsg, {
-      signal: new AbortController().signal,
-      onDelta: (t) => deltas.push(t),
-    });
-    expect(deltas).toEqual(["你", "好"]);
+    const c = capture();
+    const text = await streamChat(openai, msgs, c.opts());
     expect(text).toBe("你好");
+    expect(c.deltas).toEqual(["你", "好"]);
+    expect(c.usages).toEqual([{ inputTokens: 10, outputTokens: 2, totalTokens: 12 }]);
   });
 
-  it("anthropic SSE content_block_delta", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      sseResponse([
-        'event: content_block_delta\ndata: {"delta":{"text":"和"}}\n\n',
-        "event: message_stop\ndata: {}\n\n",
-      ]),
+  it("思考过程与工具调用分片拼装", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse([
+          JSON.stringify({ choices: [{ delta: { reasoning_content: "想" } }] }),
+          JSON.stringify({
+            choices: [
+              { delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "echo", arguments: '{"a"' } }] } },
+            ],
+          }),
+          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: ":1}" } }] } }] }),
+          "[DONE]",
+        ]),
+      ),
     );
-    const deltas: string[] = [];
-    const text = await streamChat(anthropicProfile, userMsg, {
-      signal: new AbortController().signal,
-      onDelta: (t) => deltas.push(t),
-    });
-    expect(deltas).toEqual(["和"]);
-    expect(text).toBe("和");
+    const c = capture();
+    await streamChat(openai, msgs, c.opts());
+    expect(c.reasoning).toEqual(["想"]);
+    expect(c.toolCalls).toEqual([
+      [{ id: "c1", type: "function", function: { name: "echo", arguments: '{"a":1}' } }],
+    ]);
   });
 
-  it("非流式 json 响应单次回调", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ choices: [{ message: { content: "整段" } }] }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
+  it("非流式 json：整段回调；长文本切片 ≤3000", async () => {
+    const long = "x".repeat(6500);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ choices: [{ message: { content: long } }], usage: { total_tokens: 5 } })),
     );
-    const deltas: string[] = [];
-    const text = await streamChat(openaiProfile, userMsg, {
-      signal: new AbortController().signal,
-      onDelta: (t) => deltas.push(t),
-    });
-    expect(text).toBe("整段");
-    expect(deltas).toEqual(["整段"]);
-  });
-
-  it("I5：非流式长文本切片回调——每片 ≤4000、累积等于全文", async () => {
-    const long = "汉".repeat(7500); // > 两倍 agent_chunk 单帧上限
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ choices: [{ message: { content: long } }] }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    const deltas: string[] = [];
-    const text = await streamChat(openaiProfile, userMsg, {
-      signal: new AbortController().signal,
-      onDelta: (t) => deltas.push(t),
-    });
+    const c = capture();
+    const text = await streamChat(openai, msgs, c.opts());
     expect(text).toBe(long);
-    expect(deltas.length).toBe(3); // 3000 + 3000 + 1500
-    for (const d of deltas) expect(d.length).toBeLessThanOrEqual(4000);
-    expect(deltas.every((d) => d.length <= 3000)).toBe(true);
-    expect(deltas.join("")).toBe(long);
+    expect(c.deltas.join("")).toBe(long);
+    expect(c.deltas.every((d) => d.length <= 3000)).toBe(true);
+    expect(c.usages).toEqual([{ totalTokens: 5 }]);
   });
 
-  it("HTTP 错误抛 provider_error", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ error: { message: "bad key" } }), {
-        status: 401,
-        headers: { "content-type": "application/json" },
-      }),
+  it("400 时关闭 stream_options 重试一次；其它状态不重试", async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      calls.push(String(init.body));
+      if (calls.length === 1) return json({ error: "unknown field stream_options" }, 400);
+      return sse([JSON.stringify({ choices: [{ delta: { content: "ok" } }] }), "[DONE]"]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const c = capture();
+    await expect(streamChat(openai, msgs, c.opts())).resolves.toBe("ok");
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(calls[0])).toHaveProperty("stream_options");
+    expect(JSON.parse(calls[1])).not.toHaveProperty("stream_options");
+
+    vi.stubGlobal("fetch", vi.fn(async () => json({ error: "rate" }, 429)));
+    await expect(streamChat(openai, msgs, capture().opts())).rejects.toBeInstanceOf(LlmHttpError);
+  });
+
+  it("200 里携带的错误按它自己的状态失败", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse([JSON.stringify({ error: { type: "rate_limit_exceeded", message: "slow down" } }), "[DONE]"]),
+      ),
     );
-    await expect(
-      streamChat(openaiProfile, [{ role: "user", content: "x" }], {
-        signal: new AbortController().signal,
-        onDelta: () => {},
-      }),
-    ).rejects.toThrow(/provider_error/);
+    await expect(streamChat(openai, msgs, capture().opts())).rejects.toMatchObject({ status: 429 });
   });
 
   it("AbortSignal 中止抛 AbortError", async () => {
-    const ac = new AbortController();
-    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
-      void init;
-      const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"a"}}]}\n\n'));
-          ac.abort(); // 中止发生在首个 chunk 已入队之后
-          setTimeout(() => controller.error(new DOMException("aborted", "AbortError")), 0);
-        },
-      });
-      return Promise.resolve(new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } }));
-    });
-    await expect(
-      streamChat(openaiProfile, [{ role: "user", content: "x" }], {
-        signal: ac.signal,
-        onDelta: () => {},
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        controller.abort();
+        throw new DOMException("Aborted", "AbortError");
       }),
-    ).rejects.toThrow(/AbortError|aborted/i);
-  });
-
-  describe("Anthropic 原生工具调用与前缀缓存（d.49）", () => {
-    const bodyOf = (call: unknown): Record<string, unknown> =>
-      JSON.parse(String((call as [string, RequestInit])[1].body));
-
-    it("请求体带 Anthropic 形状 tools（name/description/input_schema），不发 tool_choice", () => {
-      const r = buildRequest(anthropic, msgs, {
-        stream: true,
-        tools: [
-          {
-            type: "function",
-            function: { name: "charts__bar", description: "画图", parameters: { type: "object" } },
-          },
-        ],
-      });
-      const body = JSON.parse(r.body);
-      expect(body.tools).toEqual([
-        {
-          name: "charts__bar",
-          description: "画图",
-          input_schema: { type: "object", properties: {} },
-        },
-      ]);
-      expect(body.tool_choice).toBeUndefined();
-      // 工具参数也计入输出：1024 会把长参数截成半个 JSON
-      expect(body.max_tokens).toBe(2048);
-    });
-
-    it("openai 分支仍按 OpenAI 形状发 tools（不受本次改造影响）", () => {
-      const body = JSON.parse(
-        buildRequest(openai, msgs, {
-          stream: true,
-          tools: [{ type: "function", function: { name: "a", parameters: { type: "object" } } }],
-        }).body,
-      );
-      expect(body.tools[0].function.name).toBe("a");
-      expect(body.tool_choice).toBe("auto");
-    });
-
-    it("护栏①（请求体层）：空 text block 绝不进 body", () => {
-      const body = JSON.parse(
-        buildRequest(anthropic, [{ role: "user", content: "" }] as ChatMessage[], { stream: true }).body,
-      );
-      expect(JSON.stringify(body.messages)).toContain("(empty)");
-      expect(body.messages[0].content[0].text).toBe("(empty)");
-    });
-
-    it("role:tool 不会原样发给供应商（Anthropic 没有这个角色）", () => {
-      const body = JSON.parse(
-        buildRequest(anthropic, [...msgs, { role: "tool", content: "结果", tool_call_id: "c1" }] as ChatMessage[], {
-          stream: true,
-        }).body,
-      );
-      expect(JSON.stringify(body.messages)).not.toContain('"role":"tool"');
-    });
-
-    it("content_block_start/delta 拼出 tool_calls，且只回调一次", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        sseResponse([
-          'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
-          'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"我查一下"}}\n\n',
-          'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"mcp__echo"}}\n\n',
-          'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"q\\""}}\n\n',
-          'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":":\\"hi\\"}"}}\n\n',
-          'data: {"type":"content_block_stop","index":1}\n\n',
-          "data: [DONE]\n\n",
-        ]),
-      );
-      const deltas: string[] = [];
-      const calls: unknown[] = [];
-      await streamChat(anthropicProfile, userMsg, {
-        signal: new AbortController().signal,
-        onDelta: (t) => deltas.push(t),
-        onToolCalls: (c) => calls.push(c),
-      });
-      expect(deltas).toEqual(["我查一下"]); // input_json 不能混进正文
-      expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual([
-        { id: "toolu_1", type: "function", function: { name: "mcp__echo", arguments: '{"q":"hi"}' } },
-      ]);
-    });
-
-    it("多个 tool_use 按 index 分槽，顺序稳定", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        sseResponse([
-          'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"a","name":"n1"}}\n\n',
-          'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"b","name":"n2"}}\n\n',
-          'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}}\n\n',
-          "data: [DONE]\n\n",
-        ]),
-      );
-      let got: { id: string }[] = [];
-      await streamChat(anthropicProfile, userMsg, {
-        signal: new AbortController().signal,
-        onDelta: () => {},
-        onToolCalls: (c) => (got = c as unknown as { id: string }[]),
-      });
-      expect(got.map((c) => c.id)).toEqual(["a", "b"]);
-    });
-
-    it("thinking_delta 走 onReasoning，不进正文累积", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        sseResponse([
-          'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"想想"}}\n\n',
-          'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"结论"}}\n\n',
-          "data: [DONE]\n\n",
-        ]),
-      );
-      const reasoning: string[] = [];
-      const deltas: string[] = [];
-      const text = await streamChat(anthropicProfile, userMsg, {
-        signal: new AbortController().signal,
-        onDelta: (t) => deltas.push(t),
-        onReasoning: (t) => reasoning.push(t),
-      });
-      expect(reasoning).toEqual(["想想"]);
-      expect(deltas).toEqual(["结论"]);
-      expect(text).toBe("结论");
-    });
-
-    it("usage 合并 cache 读写；input_tokens 保持供应商口径不换算", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        sseResponse([
-          'data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":900,"cache_creation_input_tokens":50}}}\n\n',
-          'data: {"type":"message_delta","usage":{"output_tokens":7}}\n\n',
-          "data: [DONE]\n\n",
-        ]),
-      );
-      const usages: Record<string, number | undefined>[] = [];
-      await streamChat(anthropicProfile, userMsg, {
-        signal: new AbortController().signal,
-        onDelta: () => {},
-        onUsage: (u) => usages.push(u as Record<string, number | undefined>),
-      });
-      expect(usages).toHaveLength(1); // 分散在两个事件 ⇒ 合并后恰好回调一次
-      expect(usages[0]).toEqual({
-        inputTokens: 10,
-        outputTokens: 7,
-        cacheReadTokens: 900,
-        cacheWriteTokens: 50,
-      });
-    });
-
-    it("system 存在时默认打 cache_control，promptCache:off 时逐字回到旧形状", () => {
-      const on = JSON.parse(
-        buildRequest(anthropic, msgs, { stream: true, promptCache: "auto" }).body,
-      );
-      const off = JSON.parse(buildRequest(anthropic, msgs, { stream: true, promptCache: "off" }).body);
-      expect(JSON.stringify(on.system)).toContain("cache_control");
-      expect(off.system).toBe("sys");
-      expect(JSON.stringify(off)).not.toContain("cache_control");
-    });
-
-    it("非流式响应可读多个 text block 与 tool_use（旧版只取 content[0].text）", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            content: [
-              { type: "text", text: "一部" },
-              { type: "text", text: "二部" },
-              { type: "tool_use", id: "t1", name: "srv__echo", input: { a: 1 } },
-            ],
-            usage: { input_tokens: 3, output_tokens: 4 },
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-      );
-      const deltas: string[] = [];
-      let calls: { function: { name: string; arguments: string } }[] = [];
-      const text = await streamChat(anthropicProfile, userMsg, {
-        signal: new AbortController().signal,
-        onDelta: (t) => deltas.push(t),
-        onToolCalls: (c) => (calls = c as never),
-      });
-      expect(text).toBe("一部二部");
-      expect(calls[0]?.function).toEqual({ name: "srv__echo", arguments: '{"a":1}' });
-    });
-
-    it("缺省 maxTokens 且带 tools 时抬到 2048", () => {
-      const body = JSON.parse(
-        buildRequest(anthropic, msgs, { stream: true, tools: [{ function: { name: "t" } }] as never[] }).body,
-      );
-      expect(body.max_tokens).toBe(2048);
+    );
+    await expect(streamChat(openai, msgs, capture().opts(controller.signal))).rejects.toMatchObject({
+      name: "AbortError",
     });
   });
+});
 
-  describe("stream_options 与 usage（d.32）", () => {
-    type Usage = { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+describe("错误与工具函数", () => {
+  it("retryAfterMs：秒数与 HTTP 日期", () => {
+    expect(retryAfterMs("2")).toBe(2000);
+    expect(retryAfterMs(null)).toBe(0);
+    const at = new Date(Date.now() + 5000).toUTCString();
+    expect(retryAfterMs(at)).toBeGreaterThan(3000);
+  });
 
-    it("buildRequest：OpenAI 流式默认带 stream_options，includeUsage=false 或非流式不带，anthropic 不带", () => {
-      const streamBody = JSON.parse(
-        buildRequest(openaiProfile, userMsg, { stream: true }).body,
-      );
-      expect(streamBody.stream_options).toEqual({ include_usage: true });
-
-      const offBody = JSON.parse(
-        buildRequest(openaiProfile, userMsg, { stream: true, includeUsage: false }).body,
-      );
-      expect(offBody).not.toHaveProperty("stream_options");
-
-      const nonStream = JSON.parse(buildRequest(openaiProfile, userMsg, { stream: false }).body);
-      expect(nonStream).not.toHaveProperty("stream_options");
-
-      // Anthropic 本来就带 usage，不需要也不认 stream_options
-      const anthropicBody = JSON.parse(
-        buildRequest(anthropicProfile, userMsg, { stream: true }).body,
-      );
-      expect(anthropicBody).not.toHaveProperty("stream_options");
-    });
-
-    it("OpenAI 流式尾包 usage → onUsage 回调一次且数值正确", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        sseResponse([
-          'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
-          'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}\n\n',
-          "data: [DONE]\n\n",
-        ]),
-      );
-      const usages: Usage[] = [];
-      const text = await streamChat(openaiProfile, userMsg, {
-        signal: new AbortController().signal,
-        onDelta: () => {},
-        onUsage: (u) => usages.push(u),
-      });
-      expect(text).toBe("好");
-      expect(usages).toEqual([{ inputTokens: 5, outputTokens: 7, totalTokens: 12 }]);
-    });
-
-    it("Anthropic message_start + message_delta 合并后只回调一次", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        sseResponse([
-          'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":1}}}\n\n',
-          'event: content_block_delta\ndata: {"delta":{"text":"和"}}\n\n',
-          'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":34}}\n\n',
-          "event: message_stop\ndata: {}\n\n",
-        ]),
-      );
-      const usages: Usage[] = [];
-      const text = await streamChat(anthropicProfile, userMsg, {
-        signal: new AbortController().signal,
-        onDelta: () => {},
-        onUsage: (u) => usages.push(u),
-      });
-      expect(text).toBe("和");
-      // output_tokens 是累计值：message_delta 的 34 覆盖 message_start 的 1
-      expect(usages).toEqual([{ inputTokens: 12, outputTokens: 34 }]);
-    });
-
-    it("带 stream_options 的请求 400 → 去掉该参数重试一次并成功", async () => {
-      const fetchMock = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(new Response("unknown field: stream_options", { status: 400 }))
-        .mockResolvedValueOnce(
-          sseResponse([
-            'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
-            "data: [DONE]\n\n",
-          ]),
-        );
-      const text = await streamChat(openaiProfile, userMsg, {
-        signal: new AbortController().signal,
-        onDelta: () => {},
-      });
-      expect(text).toBe("好");
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      const firstBody = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
-      expect(firstBody.stream_options).toEqual({ include_usage: true });
-      const secondBody = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
-      expect(secondBody).not.toHaveProperty("stream_options");
-      expect(secondBody.stream).toBe(true); // 除该参数外其余请求不变
-    });
-
-    it("两次都 400 → 抛第二个错误，且只重试一次（共两次 fetch）", async () => {
-      const fetchMock = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(new Response("unknown field: stream_options", { status: 400 }))
-        .mockResolvedValueOnce(new Response("还是不行", { status: 400 }));
-      await expect(
-        streamChat(openaiProfile, userMsg, {
-          signal: new AbortController().signal,
-          onDelta: () => {},
-        }),
-      ).rejects.toThrow(/HTTP 400 还是不行/);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-    });
-
-    it("非流式 json.usage 直接读", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: "整段" } }],
-            usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-      );
-      const usages: Usage[] = [];
-      await streamChat(openaiProfile, userMsg, {
-        signal: new AbortController().signal,
-        onDelta: () => {},
-        onUsage: (u) => usages.push(u),
-      });
-      expect(usages).toEqual([{ inputTokens: 3, outputTokens: 4, totalTokens: 7 }]);
-    });
-
-    it("没有 usage → 不回调（不回调 0）", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        sseResponse([
-          'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
-          "data: [DONE]\n\n",
-        ]),
-      );
-      const onUsage = vi.fn();
-      await streamChat(openaiProfile, userMsg, {
-        signal: new AbortController().signal,
-        onDelta: () => {},
-        onUsage,
-      });
-      expect(onUsage).not.toHaveBeenCalled();
-    });
-
-    it("Anthropic 400 降级一次：剥掉 cache_control 再试（d.49）", async () => {
-      const fetchMock = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response("bad request", { status: 400 }));
-      await expect(
-        streamChat(anthropicProfile, [{ role: "system", content: "sys" }, ...userMsg], {
-          signal: new AbortController().signal,
-          onDelta: () => {},
-        }),
-      ).rejects.toThrow(/HTTP 400/);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      const first = String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body);
-      const second = String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body);
-      // 第一次带标记，第二次不带——兼容网关不认 cache_control 时还有路可走
-      expect(first).toContain("cache_control");
-      expect(second).not.toContain("cache_control");
-    });
-
-    it("Anthropic 400：body 里没带可降级的字段时不重复请求", async () => {
-      const fetchMock = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response("bad request", { status: 400 }));
-      await expect(
-        streamChat(anthropicProfile, userMsg, {
-          signal: new AbortController().signal,
-          onDelta: () => {},
-        }),
-      ).rejects.toThrow(/HTTP 400/);
-      // 没有 system/tools/事务 ⇒ 第一发就没带 cache_control，降级档与它逐字相同 ⇒ 不发
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    it("Anthropic 关缓存时 400 不重试（没有可降级的东西，重试只是掩盖真实错误）", async () => {
-      const fetchMock = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response("bad request", { status: 400 }));
-      await expect(
-        streamChat(anthropicProfile, [{ role: "system", content: "sys" }, ...userMsg], {
-          signal: new AbortController().signal,
-          onDelta: () => {},
-          promptCache: "off",
-        }),
-      ).rejects.toThrow(/HTTP 400/);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    it("Anthropic 带 tools 时 400 走完整降级链：先剥缓存、再丢 tools", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const fetchMock = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response("bad request", { status: 400 }));
-      await expect(
-        streamChat(anthropicProfile, [{ role: "system", content: "sys" }, ...userMsg], {
-          signal: new AbortController().signal,
-          onDelta: () => {},
-          tools: [{ type: "function", function: { name: "a__b", parameters: { type: "object" } } }],
-        }),
-      ).rejects.toThrow(/HTTP 400/);
-      expect(fetchMock).toHaveBeenCalledTimes(3);
-      const bodies = fetchMock.mock.calls.map((c) => String((c as [string, RequestInit])[1].body));
-      expect(bodies[0]).toContain("cache_control");
-      expect(bodies[1]).not.toContain("cache_control");
-      expect(bodies[1]).toContain('"tools"');
-      expect(bodies[2]).not.toContain('"tools"');
-      // 丢工具是行为级降级，必须留痕（剥标记只是省钱，不留痕）
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("不带工具"));
-    });
+  it("carriedError：error 对象/type=error 视为 200 携带的错误，普通 200 返回 null", () => {
+    expect(carriedError({ choices: [] })).toBeNull();
+    expect(carriedError({ error: { message: "boom" } })).toBeInstanceOf(LlmHttpError);
+    expect(carriedError({ type: "error", message: "boom" })?.status).toBeGreaterThanOrEqual(400);
   });
 });

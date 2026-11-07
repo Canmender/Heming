@@ -13,8 +13,7 @@ export type CapabilityKind = "tools" | "vision";
 /**
  * 判定「这个连接能不能用某项能力」——**唯一**的判据源（判定与丢弃同源）。
  *
- * 曾经这里对 anthropic 一票否决（因为工具桥只发 OpenAI 形状）。现在形状转换在
- * `lib/llmAnthropic.ts`，Anthropic 原生支持函数调用与视觉，判据交回能力表：
+ * d.93 起只剩 OpenAI 兼容协议（协议翻译在 magpie 网关侧），判据交回能力表：
  * 用户在模型能力矩阵里的显式改判仍然优先（`resolveCapability` 读覆盖层）。
  */
 export function supportsKind(profile: LlmProfile | undefined, kind: CapabilityKind): boolean {

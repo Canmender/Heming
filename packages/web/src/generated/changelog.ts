@@ -12,6 +12,32 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.94.2.42.0",
+    "date": "2026-11-07",
+    "title": "清掉 provider 死代码：Anthropic 协议、价格档、插件残留字段",
+    "bullets": [
+      "删除 `lib/llmAnthropic.ts`（IR ↔ content blocks）与 `lib/promptCache.ts`（只服务 Anthropic 的前缀缓存标记）及测试；",
+      "`llmClient.ts` 重写为 OpenAI 兼容单协议：去掉协议分支、`x-api-key`/`anthropic-version`、`cache_control`、`cache_read/creation_input_tokens`、`content_block_*` 流式解析、`thinking_delta`；",
+      "400 降级链缩为「关 stream_options 重试一次」；`maxTokens`/`promptCache`/`omitTools` 选项删除，ChatPage 摘要、桌宠、幕僚简报、路由 roomy 的调用点同步清理；`toolError` 字段删除；",
+      "`capabilityNotice`/`agentStream` 里指向已删文件的注释改写。",
+      "网关不提供价格：`modelCaps.pricing` 与全部价目表、`PRICING_DISCLAIMER` 删除；",
+      "`cheap`（参考价优先）从 `RouteStrategy`、路由排序、候选链 UI、模型路由说明删除；",
+      "`smart` 公式改为 `0.65 × 本月用量 + 0.35 × 近期失败`（去掉价格后重新归一，注释写明原因）；",
+      "「本月逐候选用量」仍列 token，不再出现金额与「暂无可估的费用数据」。",
+      "`contributions.llmPresets` 从 shared 目录 schema、服务端计数、Web viewModel/store 删除。",
+      "`llmClient.test.ts` 重写为 15 例 OpenAI-only；路由/候选链/模型路由/设置/插件目录用例同步更新；",
+      "受影响用例集全绿（插件目录 25 文件 428 例、模型层与 UI 相关 200+ 例）；`tsc --noEmit` 零错；",
+      "全量门禁：web 256 文件 / 3680 例、shared/server/desktop 全绿（见本轮提交记录）。"
+    ],
+    "paragraphs": [
+      "d.90 起模型只连 magpie 网关、d.92 把网关做成内置组件；本轮删除仍然存在的「旧世界」代码，让「模型提供商」这个抽象在仓库里彻底消失。",
+      "一、删除 Anthropic 协议实现`UsageTotals` 只留 input/output/total；",
+      "二、删除价格与 cheap 档",
+      "三、插件目录 DTO 收尾",
+      "门禁"
+    ]
+  },
+  {
     "version": "d.93.2.42.0",
     "date": "2026-11-07",
     "title": "团队工作台：用户自建团队 + 目标/方案/任务 + 智能体接口",

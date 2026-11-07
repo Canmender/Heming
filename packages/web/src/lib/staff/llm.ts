@@ -207,7 +207,6 @@ export async function callBriefModel(
     let usage: UsageTotals | undefined;
     await streamChat(profile, buildBriefMessages(payload), {
       signal: controller.signal,
-      maxTokens: 800,
       onDelta: (delta) => {
         text += delta;
       },

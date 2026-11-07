@@ -9,7 +9,6 @@ import {
   previewFork,
 } from "./fork.js";
 import { buildRequest, type ChatMessage } from "../llmClient.js";
-import { toAnthropicMessages } from "../llmAnthropic.js";
 import { MAX_TEXT_CHARS } from "./log.js";
 import type { RolloutItem } from "./types.js";
 
@@ -218,33 +217,22 @@ describe("buildForkPrefix 前缀重建", () => {
     expect(toolCalls).toHaveLength(toolMessages.length);
     expect(toolMessages.map((m) => m.tool_call_id)).toEqual(toolCalls.map((c) => c.id));
 
-    // 既有构造函数的验收：Anthropic 分支不会丢弃任何 tool_use（丢弃说明前缀不合法）。
-    const { messages } = toAnthropicMessages(prefix.messages);
-    const toolUseIds: string[] = [];
-    const toolResultIds: string[] = [];
-    for (const message of messages) {
-      for (const block of message.content) {
-        if (block.type === "tool_use") toolUseIds.push(block.id);
-        if (block.type === "tool_result") toolResultIds.push(block.tool_use_id);
-      }
-    }
-    expect(toolUseIds).toEqual(["t1", "t2"]);
-    expect(toolResultIds).toEqual(["t1", "t2"]);
-
-    // OpenAI 形状的构造函数同样不能抛（这里是「能拼出请求」而非「能连通」）。
+    // 既有构造函数的验收：拼出来的请求必须是合法 JSON，tool_calls 与 tool 消息等长同序。
     const built = buildRequest(
       {
-        id: "p1",
+        id: "mp:deepseek/deepseek-chat",
         label: "测试",
-        provider: "anthropic",
-        baseUrl: "https://example.com",
-        apiKey: "sk-test",
-        model: "claude-test",
-      } as never,
+        provider: "openai",
+        baseUrl: "http://127.0.0.1:3425/v1",
+        apiKey: "magpie-heming",
+        model: "deepseek/deepseek-chat",
+      },
       prefix.messages,
       { stream: false, tools: [] },
     );
     expect(() => JSON.parse(built.body)).not.toThrow();
+    const sent = JSON.parse(built.body).messages as { role: string; tool_calls?: { id: string }[]; tool_call_id?: string }[];
+    expect(sent.filter((m) => m.role === "tool").map((m) => m.tool_call_id)).toEqual(["t1", "t2"]);
   });
 
   it("参数被截断（非法 JSON）的调用整条跳过，不留孤儿 tool 消息", () => {

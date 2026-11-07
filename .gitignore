@@ -44,3 +44,6 @@ packages/infohub/data/
 # 内置 magpie CLI（约 70MB，构建时由 scripts/fetch-magpie.mjs 下载并校验；只留 .gitkeep）
 packages/desktop/resources/magpie/magpie-cli*
 packages/desktop/resources/magpie/*.download
+
+# 本机自检日志（不属于仓库内容）
+d[0-9]*-selfcheck-*.log

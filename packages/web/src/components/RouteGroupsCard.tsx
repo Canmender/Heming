@@ -9,7 +9,7 @@ import {
   type RouteStrategy,
 } from "../store/llm.js";
 import { llmHealth, accountKey, modelKey } from "../lib/llmHealth.js";
-import { PRICING_DISCLAIMER, lookupCapability } from "../lib/modelCaps.js";
+import { lookupCapability } from "../lib/modelCaps.js";
 import { byProfileModel, monthKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
 import { PlusIcon } from "./icons.js";
 
@@ -28,14 +28,9 @@ const STRATEGY_OPTIONS: readonly { value: RouteStrategy; label: string; desc: st
     desc: "第一个能答的一直答，最省事也最可预期。",
   },
   {
-    value: "cheap",
-    label: "参考价优先",
-    desc: "醒着里先问本机价目表便宜的；查不到价目的排最后，不猜它便宜。",
-  },
-  {
     value: "smart",
     label: "智能",
-    desc: "醒着里按本月用量（占一半）、参考价、近期失败综合打分；不读供应商配额。",
+    desc: "醒着里按本月用量与近期失败综合打分（网关不提供价格，不含价格维度）。",
   },
   {
     value: "usage",
@@ -101,25 +96,6 @@ function formatLeft(ms: number): string {
   if (mins < 60) return `${mins} 分钟`;
   const hours = Math.floor(mins / 60);
   return hours < 24 ? `${hours} 小时` : `${Math.round(hours / 24)} 天`;
-}
-
-/**
- * 参考价估算（元）：价目按「服务商×模型」查，输入按 input、输出按 output 各算一份。
- *
- * 只有拿到**完整拆分**才估——拿 total 去猜输入/输出比例，猜错了账面差好几倍，
- * 那是把「估算」做成「假账」。同样地，缓存命中按未命中的价计，估出来是**上界**。
- * 表里没这家（或这条账没有拆分）→ null，界面就老实用「暂无可估的费用数据」。
- */
-function estimateYuan(
-  provider: LlmProvider,
-  model: string,
-  input: number,
-  output: number,
-): number | null {
-  if (input <= 0 && output <= 0) return null;
-  const pricing = lookupCapability(provider, model)?.pricing;
-  if (!pricing) return null;
-  return (input / 1_000_000) * pricing.input + (output / 1_000_000) * pricing.output;
 }
 
 export function RouteGroupsCard() {
@@ -355,19 +331,12 @@ export function RouteGroupsCard() {
           <div className="text-[12px] font-bold text-muted">本月逐候选用量</div>
           <ul className="mt-1.5 space-y-1">
             {usage.map((u) => {
-              const p = profiles.find((x) => x.id === u.profileId);
-              const yuan = p ? estimateYuan(p.provider, u.model, u.input, u.output) : null;
               return (
                 <li key={`${u.profileId}-${u.model}`} className="flex items-center gap-2 text-[12px]">
                   <span className="min-w-0 flex-1 truncate">
                     {u.profileLabel} · {u.model}
                   </span>
                   <span className="shrink-0 ui-caption">{u.total} tokens</span>
-                  <span className="shrink-0 ui-caption">
-                    {yuan !== null
-                      ? `≈ ¥${yuan < 0.001 ? yuan.toFixed(4) : yuan.toFixed(3)}`
-                      : "暂无可估的费用数据"}
-                  </span>
                   {u.unreported > 0 && (
                     <span className="shrink-0 text-[10px] text-muted">
                       {u.unreported} 轮未上报
@@ -377,7 +346,6 @@ export function RouteGroupsCard() {
               );
             })}
           </ul>
-          <div className="mt-1.5 text-[10px] text-muted">{PRICING_DISCLAIMER}</div>
         </div>
       )}
 

@@ -3,7 +3,7 @@
  *
  * 两块都是「用户看不看得懂换候选这件事」的落点：路由层与记账本身在
  * llmRoute.test.ts / tokenUsage.test.ts 里覆盖，这里只管界面口径
- * ——便宜与否、钱花在哪、没数据时怎么说。
+ * ——档位怎么选、摘要怎么标、数据不足时怎么说（d.93 起不再有价格/费用）。
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
@@ -52,20 +52,12 @@ describe("候选链 · 选路档", () => {
     expect(screen.getByText(/2 个候选 · 按声明顺序/)).toBeInTheDocument();
   });
 
-  it("选「参考价优先」→ 存进本机档并标在链上", () => {
-    render(<RouteGroupsCard />);
-    createChain("参考价优先");
-    expect(useLlmStore.getState().routes[0].strategy).toBe("cheap");
-    expect(screen.getByText(/2 个候选 · 参考价优先/)).toBeInTheDocument();
-  });
-
-  it("八档都能选，每档带一行中文说明（客户端口径：不读供应商配额）", () => {
+  it("七档都能选，每档带一行中文说明（客户端口径：不读供应商配额）", () => {
     render(<RouteGroupsCard />);
     fireEvent.click(screen.getByLabelText("新建候选链"));
-    expect(screen.getAllByRole("radio")).toHaveLength(8);
+    expect(screen.getAllByRole("radio")).toHaveLength(7);
     for (const label of [
       "按声明顺序",
-      "参考价优先",
       "智能",
       "用得最少优先",
       "按节奏优先",
@@ -115,11 +107,11 @@ describe("候选链 · 选路档", () => {
       id: "g1",
       label: "已存在的链",
       members: [{ profileId: "贵 Key" }, { profileId: "便宜 Key" }],
-      strategy: "cheap",
+      strategy: "smart",
     });
     render(<RouteGroupsCard />);
     fireEvent.click(screen.getByLabelText("编辑 已存在的链"));
-    expect(screen.getByLabelText<HTMLInputElement>("参考价优先选路").checked).toBe(true);
+    expect(screen.getByLabelText<HTMLInputElement>("智能选路").checked).toBe(true);
     expect(screen.getByLabelText<HTMLInputElement>("按声明顺序选路").checked).toBe(false);
   });
 
@@ -156,7 +148,7 @@ describe("候选链 · 选路档", () => {
 describe("候选链 · 本月逐候选用量", () => {
   const now = () => new Date().toISOString();
 
-  it("有归属且有拆分 → 按 连接×模型 列一行，给参考价估算", () => {
+  it("有归属 → 按 连接×模型 列一行，只给 token 用量（d.93 起无价目/费用）", () => {
     useTokenUsageStore
       .getState()
       .record("deepseek-chat", 300_000, now(), {
@@ -169,18 +161,19 @@ describe("候选链 · 本月逐候选用量", () => {
     expect(screen.getByText("本月逐候选用量")).toBeInTheDocument();
     expect(screen.getByText(/便宜 Key · deepseek-chat/)).toBeInTheDocument();
     expect(screen.getByText("300000 tokens")).toBeInTheDocument();
-    // 240k×2 + 60k×8 = 0.48 + 0.48 = 0.96 元（每百万 token 计价）
-    expect(screen.getByText(/≈ ¥0\.960/)).toBeInTheDocument();
-    expect(screen.getByText("参考价，以服务商账单为准")).toBeInTheDocument();
+    // 网关不提供价格：界面上不再出现金额或参考价免责声明
+    expect(screen.queryByText(/¥/)).toBeNull();
+    expect(screen.queryByText(/参考价/)).toBeNull();
   });
 
-  it("没报拆分 → 说「暂无可估的费用数据」，不拿总量猜比例", () => {
+  it("没报拆分 → 仍按 token 列出（不拿总量猜比例，也不再估费用）", () => {
     useTokenUsageStore.getState().record("deepseek-chat", 300_000, now(), {
       profileId: "便宜 Key",
       profileLabel: "便宜 Key",
     });
     render(<RouteGroupsCard />);
-    expect(screen.getByText("暂无可估的费用数据")).toBeInTheDocument();
+    expect(screen.getByText("300000 tokens")).toBeInTheDocument();
+    expect(screen.queryByText(/暂无可估的费用数据/)).toBeNull();
   });
 
   it("未上报的轮数单独标出来（null 不当 0 吞掉）", () => {

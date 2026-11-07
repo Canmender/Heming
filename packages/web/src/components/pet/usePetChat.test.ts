@@ -13,7 +13,7 @@ const profileA: LlmProfile = {
 const profileB: LlmProfile = {
   id: "p-b",
   label: "连接 B",
-  provider: "anthropic",
+  provider: "openai",
   apiKey: "sk-b",
   model: "claude-3-5-sonnet",
 };

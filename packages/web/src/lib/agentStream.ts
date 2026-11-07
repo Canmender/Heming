@@ -610,7 +610,7 @@ export function runAgentMentions(
         let usageSeen = false;
         /**
          * 提示词/生成拆分累加（d.48 记账用）：口径与 usageTotal 一致（含前缀缓存的
-         * 读/写，两家对齐成「本轮提示词规模」），目的是按参考价估个上界——
+         * （d.93 起网关统一 OpenAI 形状，不再有缓存 token 口径），
          * 缓存命中其实更便宜，估出来只会偏贵不会偏便宜。
          */
         let usageInput = 0;
@@ -753,7 +753,7 @@ export function runAgentMentions(
           const bridge = deps.getTools?.(m.agentId) ?? null;
           // 两个条件缺一不可：能力表认定该模型支持函数调用，且真的有工具可给。
           // 不支持时给了也没用，反而让模型胡言「我去查一下」——所以在这里就丢掉（判定与丢弃同源）。
-          // 形状差异不必在这里管：`lib/llmAnthropic.ts` 在请求边缘把 OpenAI 形状转成 content blocks。
+          // 形状差异不必在这里管：d.93 起只有 OpenAI 兼容协议（协议翻译在 magpie 网关侧）。
           const useTools =
             !!bridge &&
             bridge.tools.length > 0 &&
@@ -834,13 +834,10 @@ export function runAgentMentions(
               },
               onUsage: (u) => {
                 // 优先总用量；没有就 input+output；两者都缺 = 这个包没上报（不按 0 计）。
-                // ★ Anthropic 的 input_tokens **不含**被缓存的那段，而 OpenAI 的 prompt_tokens 含；
-                // 把缓存读/写补回求和，两家的数字才都表示「本轮提示词的 token 规模」。
-                const cached = (u.cacheReadTokens ?? 0) + (u.cacheWriteTokens ?? 0);
                 const t =
                   u.totalTokens ??
-                  (u.inputTokens !== undefined || u.outputTokens !== undefined || cached > 0
-                    ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0) + cached
+                  (u.inputTokens !== undefined || u.outputTokens !== undefined
+                    ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0)
                     : undefined);
                 if (t === undefined) return;
                 usageSeen = true;
@@ -850,7 +847,7 @@ export function runAgentMentions(
                 // 也别让估算费用少算一整轮（少算比「按上界估」更骗人）。
                 if (u.inputTokens !== undefined && u.outputTokens !== undefined) {
                   usageSplitRounds++;
-                  usageInput += u.inputTokens + cached;
+                  usageInput += u.inputTokens;
                   usageOutput += u.outputTokens;
                 }
               },
@@ -1053,9 +1050,6 @@ export function runAgentMentions(
                 tool_call_id: call.id,
                 name: call.function.name,
                 content: results[i]?.text ?? "",
-                // 拒绝/失败都算工具报错：Anthropic 侧映射成 is_error，
-                // 模型看到的语义与 OpenAI 侧的文案一致，不必靠措辞去猜。
-                ...(results[i]?.ok === false ? { toolError: true } : {}),
               })),
             ];
             // 累计回灌量，供下一轮的预算收口判断（见 MAX_TURN_TOOL_TOKENS）

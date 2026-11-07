@@ -1691,7 +1691,6 @@ export function ChatPage({
                     // 摘要请求独立于本次生成的中断（生成尚未开始）；只读不改：不落库
                     const text = await streamChatRouted(profile, messages, {
                       signal: new AbortController().signal,
-                      maxTokens: 400,
                       onDelta: (d) => {
                         collected += d;
                       },

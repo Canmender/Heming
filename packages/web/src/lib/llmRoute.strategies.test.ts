@@ -138,21 +138,8 @@ describe("order（老数据缺省档：零迁移、行为不变）", () => {
   });
 });
 
-describe("cheap（参考价优先，既有档回归）", () => {
-  it("贵→便宜的声明序，实际先问便宜的", async () => {
-    setProfiles([
-      ["p1", MODELS_PRICED.expensive],
-      ["p2", MODELS_PRICED.cheap],
-    ]);
-    expect(await orderOf(routed([{ profileId: "p1" }, { profileId: "p2" }], "cheap"))).toEqual([
-      "p2",
-      "p1",
-    ]);
-  });
-});
-
-describe("smart（本月用量 / 参考价 / 近期失败 综合打分）", () => {
-  it("用量少 + 便宜 + 无失败史的排前面；无价目的按最坏档计", async () => {
+describe("smart（本月用量 / 近期失败 综合打分，d.93 起无价格维度）", () => {
+  it("用量少 + 无失败史的排前面；有失败史的不占首发", async () => {
     setProfiles([
       ["p1", MODELS_PRICED.expensive],
       ["p2", MODELS_PRICED.cheap],
@@ -168,9 +155,9 @@ describe("smart（本月用量 / 参考价 / 近期失败 综合打分）", () =
     llmHealth.mark(accountKey("p3"), rateVerdict);
     vi.advanceTimersByTime(2 * 60_000);
 
-    // p1 = .5×1.0 + .3×1.0 + 0 = .80
-    // p2 = .5×.01 + .3×(10/24) + 0 = .13
-    // p3 = 0 + .3×1.0（无价目按最坏档） + .2×1.0 = .50
+    // p1 = .65×1.0 + .35×0 = .650
+    // p2 = .65×.01 + .35×0 = .0065
+    // p3 = .65×0 + .35×1.0 = .350
     expect(
       await orderOf(
         routed([{ profileId: "p1" }, { profileId: "p2" }, { profileId: "p3" }], "smart"),
@@ -452,7 +439,7 @@ describe("fast（速度优先：首 token + 200 token 用时）", () => {
 });
 
 describe("模块闸门（modelroute 停用 → 高级选路全部退回声明顺序）", () => {
-  it("停用时 cheap/smart/usage/pace/weight/fast 一律按声明序，rotate 也不轮换", async () => {
+  it("停用时 smart/usage/pace/weight/fast 一律按声明序，rotate 也不轮换", async () => {
     setProfiles([
       ["p1", MODELS_PRICED.expensive],
       ["p2", MODELS_PRICED.cheap],
@@ -465,7 +452,7 @@ describe("模块闸门（modelroute 停用 → 高级选路全部退回声明顺
 
     useModuleStore.getState().setEnabled("modelroute", false);
     try {
-      const strategies: RouteStrategy[] = ["cheap", "smart", "usage", "pace", "weight", "fast"];
+      const strategies: RouteStrategy[] = ["smart", "usage", "pace", "weight", "fast"];
       for (const strategy of strategies) {
         resetRouteStrategyState();
         expect(await orderOf(routed([{ profileId: "p1" }, { profileId: "p2" }], strategy))).toEqual([
@@ -494,8 +481,12 @@ describe("模块闸门（modelroute 停用 → 高级选路全部退回声明顺
       ["p1", MODELS_PRICED.expensive],
       ["p2", MODELS_PRICED.cheap],
     ]);
+    // usage 档：p2 本月没用量、p1 有 → 启用时 p2 先；停用时退回声明序 p1 先
+    useTokenUsageStore.setState({
+      records: [usage("p1", MODELS_PRICED.expensive, 100_000, hoursAgo(1))],
+    });
     useModuleStore.getState().setEnabled("modelroute", false);
-    expect(await orderOf(routed([{ profileId: "p1" }, { profileId: "p2" }], "cheap"))).toEqual([
+    expect(await orderOf(routed([{ profileId: "p1" }, { profileId: "p2" }], "usage"))).toEqual([
       "p1",
       "p2",
     ]);
@@ -503,7 +494,7 @@ describe("模块闸门（modelroute 停用 → 高级选路全部退回声明顺
     useModuleStore.getState().setEnabled("modelroute", true);
     // 上一轮 429 给两个候选都留下了休息账；先清掉，只看「策略是否恢复」
     llmHealth.reset();
-    expect(await orderOf(routed([{ profileId: "p1" }, { profileId: "p2" }], "cheap"))).toEqual([
+    expect(await orderOf(routed([{ profileId: "p1" }, { profileId: "p2" }], "usage"))).toEqual([
       "p2",
       "p1",
     ]);

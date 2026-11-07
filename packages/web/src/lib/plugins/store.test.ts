@@ -658,7 +658,6 @@ describe("PluginStore · v3 贡献与命令", () => {
       commands: 2,
       toolPacks: 2,
       packTools: 3,
-      presets: 0,
     });
     expect(store.contributionCounts("not.installed")).toEqual({
       skills: 0,
@@ -666,7 +665,6 @@ describe("PluginStore · v3 贡献与命令", () => {
       commands: 0,
       toolPacks: 0,
       packTools: 0,
-      presets: 0,
     });
   });
 
@@ -676,7 +674,6 @@ describe("PluginStore · v3 贡献与命令", () => {
     expect(store.contributionCounts("acme.finance")).toMatchObject({
       toolPacks: 0,
       packTools: 0,
-      presets: 0,
     });
   });
 

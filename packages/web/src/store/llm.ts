@@ -34,7 +34,8 @@ export interface GatewayConfig extends BaseGatewayConfig {
  * 指向这些连接的绑定与候选链，按本轮决定**直接清除**（迁移只做一次，见 `migrateLegacy`）。
  */
 
-export type LlmProvider = "openai" | "anthropic";
+/** 协议只剩 OpenAI 兼容（d.94）：magpie 网关对上游做翻译，和鸣不再有第二种协议。 */
+export type LlmProvider = "openai";
 
 /**
  * 供既有代码消费的「模型档案」：由网关目录**派生**，不落盘、不带用户 Key。
@@ -67,7 +68,6 @@ export interface RouteMember {
 /** 选路档（语义来自 magpie；数据全部来自本机网关目录与本地记账）。 */
 export type RouteStrategy =
   | "order"
-  | "cheap"
   | "smart"
   | "usage"
   | "pace"

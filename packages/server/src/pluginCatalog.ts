@@ -90,7 +90,6 @@ function contributionsOf(raw: Record<string, unknown>): PluginCatalogContributio
     mcpServers: countOf(declaredServers),
     commands: countOf(contributions.commands),
     toolPacks: countOf(contributions.toolPacks),
-    llmPresets: countOf(contributions.llmPresets),
   };
 }
 
