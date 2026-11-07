@@ -440,7 +440,7 @@ export function HomePage() {
             </div>
             <button
               type="button"
-              className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink"
+              className="ui-link"
               onClick={() => setPage("team")}
             >
               进入团队
@@ -459,7 +459,7 @@ export function HomePage() {
                 <button
                   type="button"
                   onClick={loadTeam}
-                  className="shrink-0 rounded-md border border-[#e6e6e6] px-2 py-0.5 text-[11px] hover:bg-[#f7f7f7]"
+                  className="ui-link border border-[#e6e6e6]"
                 >
                   重试
                 </button>
@@ -534,7 +534,7 @@ export function HomePage() {
               <div className="text-[12px] font-bold text-muted">在线成员</div>
               <button
                 type="button"
-                className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink"
+                className="ui-link"
                 onClick={() => setPage("team")}
               >
                 全部名册

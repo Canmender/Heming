@@ -363,6 +363,17 @@ samp {
     @apply bg-[#b03535];
   }
 
+  /* 文字链接按钮（R16）：首页卡片右上、卡片内「进入团队 / 全部名册」等。
+     原来 px-1.5 py-0.5 只有 21px 高，比同页按钮矮一截、点击目标也偏小；
+     统一成 24px 高的轻按钮，hover 用变量色（暗色不再闪白）。 */
+  .ui-link {
+    @apply inline-flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-[11px] leading-4 text-muted transition-colors;
+  }
+  .ui-link:hover {
+    background-color: var(--subtle-2);
+    color: var(--ink);
+  }
+
   /* ── 胶囊/徽标（展示件，不承载点击） ── */
   .ui-chip {
     @apply inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-line px-1.5 text-[11px] leading-4 text-muted;

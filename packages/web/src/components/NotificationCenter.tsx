@@ -185,7 +185,7 @@ export function NotificationCenter() {
                 type="button"
                 onClick={markAllRead}
                 disabled={unread === 0}
-                className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f0f0f0] hover:text-ink disabled:opacity-40"
+                className="ui-link disabled:opacity-40"
               >
                 全部已读
               </button>
@@ -193,7 +193,7 @@ export function NotificationCenter() {
                 type="button"
                 onClick={() => setConfirmClear(true)}
                 disabled={items.length === 0}
-                className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f0f0f0] hover:text-ink disabled:opacity-40"
+                className="ui-link disabled:opacity-40"
               >
                 清空
               </button>
@@ -238,7 +238,7 @@ export function NotificationCenter() {
               <p className="px-3 py-6 text-center text-[12px] leading-5 text-muted">
                 还没有通知。
                 <br />
-                任务收尾、待确认的工具调用与幕僚简报会在这里汇总。
+                任务完成、需要确认的工具调用和幕僚简报会出现在这里。
               </p>
             ) : visible.length === 0 ? (
               <p className="px-3 py-6 text-center text-[12px] text-muted">该类型暂无通知</p>

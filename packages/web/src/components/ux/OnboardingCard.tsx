@@ -34,7 +34,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
           // 不能直接把 onDismiss 交给 onClick：React 会把事件对象当第一个参数传进去
           //（dismiss(now) 会把 Event 存成 dismissedAt，读回又回落 null → 关不掉）
           onClick={() => onDismiss()}
-          className={`shrink-0 rounded-sm px-2 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] ${FOCUS_RING_TIGHT}`}
+          className={`ui-link ${FOCUS_RING_TIGHT}`}
         >
           不再显示
         </button>
@@ -72,7 +72,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
               type="button"
               disabled={step.done}
               onClick={() => onGo(step.target)}
-              className={`mt-auto self-start rounded-sm border border-line bg-white px-2 py-0.5 text-[11px] text-[#555] hover:bg-[#f5f5f5] disabled:cursor-default disabled:opacity-50 ${FOCUS_RING_TIGHT}`}
+              className={`ui-btn ui-btn-sm ui-btn-ghost mt-auto self-start disabled:cursor-default ${FOCUS_RING_TIGHT}`}
             >
               {step.done ? "已完成" : step.actionLabel}
             </button>

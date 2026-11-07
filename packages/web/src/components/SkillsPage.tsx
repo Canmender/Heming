@@ -1160,11 +1160,7 @@ export function SkillsView({
                 : "先选择智能体，才能把技能分配给它使用"}
             </span>
           </div>
-        <div
-          role="tablist"
-          aria-label="技能视图"
-          className="inline-flex overflow-hidden rounded-lg border border-line shadow-card"
-        >
+        <div role="tablist" aria-label="技能视图" className="flex items-center gap-1">
           <button
             type="button"
             role="tab"
@@ -1172,9 +1168,7 @@ export function SkillsView({
             aria-controls="skill-groups-panel"
             aria-selected={tab === "groups"}
             onClick={() => setTab("groups")}
-            className={`px-3 py-1.5 text-[12px] transition-colors duration-150 ${
-              tab === "groups" ? "bg-ink font-bold text-white" : "text-muted hover:bg-[#fafafa]"
-            }`}
+            className={`ui-btn ui-btn-sm ${tab === "groups" ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
           >
             按智能体
           </button>
@@ -1185,9 +1179,7 @@ export function SkillsView({
             aria-controls="skill-pool-panel"
             aria-selected={tab === "pool"}
             onClick={() => setTab("pool")}
-            className={`border-l border-line px-3 py-1.5 text-[12px] transition-colors duration-150 ${
-              tab === "pool" ? "bg-ink font-bold text-white" : "text-muted hover:bg-[#fafafa]"
-            }`}
+            className={`ui-btn ui-btn-sm ${tab === "pool" ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
           >
             技能池
           </button>

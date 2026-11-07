@@ -48,7 +48,6 @@ export function ChatEmptyState({ examples, onPick }: ChatEmptyStateProps) {
             </li>
           ))}
         </ul>
-        <p className="mt-1.5 text-left text-[10px] text-muted">点一下只填入，不会直接发送。</p>
       </div>
     </div>
   );

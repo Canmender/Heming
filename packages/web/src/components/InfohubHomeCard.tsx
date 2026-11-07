@@ -10,7 +10,7 @@ import { useUiStore } from "../store/ui.js";
  */
 
 const CARD = "rounded-xl border border-[#ececec] bg-white p-3 shadow-card";
-const LINK = "rounded-sm px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f3f3f3] hover:text-ink";
+const LINK = "ui-link";
 
 export function InfohubHomeCard() {
   const available = useInfohubStore((s) => s.available);

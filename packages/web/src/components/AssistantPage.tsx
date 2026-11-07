@@ -236,7 +236,7 @@ export function AssistantPage() {
                         type="button"
                         aria-label={`编辑智能体：${agent.name}`}
                         onClick={() => setEditing(agent)}
-                        className="ui-micro absolute right-1.5 top-1/2 -translate-y-1/2 rounded-sm px-1 py-0.5 opacity-0 hover:bg-[#e9e9e9] hover:text-ink group-hover:opacity-100"
+                        className="ui-micro absolute right-1.5 top-1/2 flex h-6 -translate-y-1/2 items-center rounded-sm px-1.5 opacity-0 hover:bg-[#e9e9e9] hover:text-ink focus:opacity-100 group-hover:opacity-100"
                       >
                         编辑
                       </button>

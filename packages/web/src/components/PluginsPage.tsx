@@ -352,8 +352,11 @@ export function PluginsPage({
                 </span>
                 <p className="ui-section-title">还没有安装插件</p>
                 <p className="ui-caption">
-                  一份插件清单可以一次带入一组技能、远程 MCP 服务与命令。点右上角「安装插件」粘贴清单或选择文件。
+                  一份插件清单可以一次带入一组技能、远程 MCP 服务与命令。
                 </p>
+                <button type="button" onClick={openInstall} className="ui-btn ui-btn-md ui-btn-primary mt-1">
+                  安装第一个插件
+                </button>
               </section>
             ) : (
               <div className="grid gap-4">
@@ -372,9 +375,9 @@ export function PluginsPage({
               </div>
             )}
 
-            <p className={`mt-3 ${HINT}`}>
-              插件只声明技能、远程 MCP 服务与命令，不含可执行代码、不携带密钥；安装不会运行任何程序，
-              也不会主动联网——服务连接与工具启用由你在「MCP 服务」Tab 发起，工具调用仍走人工确认。
+            <p className={`mt-3 max-w-[680px] ${HINT}`}>
+              插件只声明技能、MCP 服务和命令，不含代码、不带密钥。安装不会运行程序，也不会联网；
+              连接与工具启用仍由你手动确认。
             </p>
           </>
         )}
