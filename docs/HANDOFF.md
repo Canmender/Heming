@@ -123,7 +123,7 @@ packages/
 │   ├── lib/memory/                            # 三层记忆、召回、复盘、存储
 │   ├── lib/skills/                            # 技能池、内置技能、路由、分配
 │   ├── lib/plugins/                           # 插件清单 v1/v2、安装/更新/启停/卸载、MCP 服务生命周期、更新差异与能力详情（d.42/d.43/d.44）
-│   ├── lib/infohub/                           # 信息中枢：类型/配置/IPC 错误清洗/进度订阅（d.45）+ 共享运行态 store 与归档工具提供者（d.46）
+│   ├── lib/infohub/                           # 信息中枢：类型/配置/IPC 错误清洗/进度订阅（d.45）+ 共享运行态 store 与归档工具提供者（d.46）+ 采集桥运行态与浏览器探测（d.96）
 │   ├── lib/agentContext/                      # token 预算、历史切分、摘要
 │   ├── lib/selfEdit/                          # self_* 工具与护栏
 │   ├── lib/tasks/ export/                     # 任务记录与报告、会话导出格式化
@@ -136,14 +136,16 @@ packages/
 │                                              #   ToolApprovalModal、ConfirmDialog、AgentStreamBubble 等
 ├── infohub/                    # 本机归档边车（Python ≥3.11，d.45 源码并入）
 │   ├── infohub/bridge.py       # stdio JSON 协议：白名单方法、只读 Store、脱敏配置、进度事件
+│   ├── infohub/mcp_server.py   # 采集桥：MCP Streamable HTTP 最小子集（7 工具、只回环、Host 白名单，d.96）
 │   ├── infohub/sources/        # QQ / 微信采集与解密（原 InfoHub 实现）
-│   └── tests/test_bridge.py    # 协议、浏览/检索、议程、只读 SHA-256 不变性
+│   └── tests/test_bridge.py    # 协议、浏览/检索、议程、只读 SHA-256 不变性（另有 test_mcp_server.py，d.96）
 └── desktop/                    # Electron 壳
     ├── main.js                 # 窗口、菜单、导航白名单、splash、协议注册
     ├── app-protocol.js         # app:// 资源解析（路径穿越防护/MIME/SPA 回落）
     ├── secure-origins.js       # HTTP 源安全上下文白名单
     ├── mcp-stdio.js            # stdio MCP 桥（spawn shell:false、JSON-RPC 配对、可执行文件解析）
     ├── infohub-bridge.js       # InfoHub stdio 边车：hello 握手、id 配对、超时、IPC 白名单（d.45）
+    ├── infohub-mcp-host.js     # 采集桥托管：回环 8776、显式启动、外部端点复用、整树回收（d.96）
     ├── child-kill.js           # 子进程整树回收 + will-quit 回收闸（d.50，两个桥都不自己 kill）
     ├── local-runtime.js        # 本机 npm/pypi 运行时探测 + 逻辑命令翻译（node npx-cli.js / uvx）
     ├── auto-update.js          # electron-updater 接线
@@ -229,6 +231,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 
 ## 5. 下一步候选
+
+**信息采集中枢插件已完成（分支 `feat/d96-infohub-plugin`，`d.96.2.42.0`；未合入 main、未部署）**：用户要求「新拉一条分支，负责制作信息采集中枢插件」，选定方案 A（把插件做成完整可分发能力包，**不动**「第三方插件不贡献页面」红线）。已交付：① 插件包 v1.0.0——id 保持 `heming.infohub-collector`、名字改「信息采集中枢」，1 个本机 MCP 服务（`127.0.0.1:8776/mcp`）+ 1 技能（7 个工具逐个说明、两个写操作先确认、端点没起如实说）+ 3 命令 + 权限（loopback 主机 / `write` / 无文件根），仍只声明不执行代码、不携带密钥；② 采集桥进随包 Python（`packages/infohub/infohub/mcp_server.py`，7 工具：status/sync/archive_search/archive_read/archive_agenda + 新增 conversations/agenda_rebuild；只读 `Store(readonly=True)`、Host 白名单、CORS、请求体 256KB、端口被占即失败）；③ 桌面端托管 `infohub-mcp-host.js`：显式启动、先探 `/health`（外部端点复用不 spawn）、解释器与 `INFOHUB_HOME` 和 stdio 边车同源、健康轮询 15s、退出整树回收、**无任何自动启动路径**；IPC `infohub:bridge-status/start/stop` + 事件广播 + preload 四方法；④ 信息中枢页「采集桥」区块（桌面启停 / 外部进程识别 / 浏览器只探测）；⑤ README、PLUGINS、INDEX、RELEASE-NOTES、CHANGELOG 与版本收口。门禁：Python 新增 54 例、全量 210 例 OK、真实端点 curl（health / initialize / tools-list / status / 伪造 Host 403）、桌面新增 18 例且全套全绿、Web 相关用例全绿。规格 `docs/superpowers/specs/2026-11-07-d96-info-collection-plugin.md`。**未验证**：Electron 真机点「启动采集桥」、公网 https 页面访问本机回环的 PNA/混合内容、真实 QQ/微信首次采集耗时。**下一步**：把采集桥状态接进首页卡/命令面板提示、MCP 采集进度事件透传到页面（当前采集桥无进度）、云端目录发布跑一次真实部署。
 
 **团队工作台已完成（分支 `feat/d77-heming-core`，`d.93.2.42.0`；待合并 main、未部署）**：用户要求「先做团队功能：自己创设团队、名字、目标、规划方案、派发任务、上传任务，并预留接口便于智能体操作」。已交付：① 两层团队分开——既有全站名册/动向保留，新增仅成员可见的**团队工作台**；② shared 契约（WorkspaceTeam/PlanItem/Task/Member/Snapshot）+ 服务端 4 表 + 内存/SQLite 双 Store 同契约 + **13 条 REST**（非成员 404、owner 403、指派必须成员、方案必须本团队、移成员解绑任务、删方案不删任务、删团队级联）；③ 团队页新增第一个 Tab「工作台」：我的团队/新建、目标编辑、成员增删、方案、任务（负责人/归属方案/截止/**上传交付物复用共享文件库**/状态流转）；④ 智能体接口 `teamProvider` **9 个工具**（team_list/team_get 只读；create/update/member_add/plan_add/plan_update/task_add/task_update 走 HITL；删除类刻意不开放）。测试：server 165 例 + web 相关 79 例；真机端到端建团队→成员→方案→任务→工具目录可检索。规格 `docs/superpowers/specs/2026-11-07-heming-core-team-workspace.md`。**下一步**：任务评论/时间线、成员角色与看板视图、任务提醒；之后按顺序进「插件区」（需等并行会话的 magpie/插件重构收口）。
 

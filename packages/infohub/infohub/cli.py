@@ -213,6 +213,26 @@ def cmd_search(args) -> int:
     return 0
 
 
+def cmd_mcp(args) -> int:
+    """本机 MCP 采集桥（HTTP）：只有和鸣桌面端/本机客户端需要，默认 127.0.0.1:8776。
+
+    只允许回环地址：这个端点没有鉴权，回环就是边界；非回环直接拒绝启动，
+    免得用户误开 `--host 0.0.0.0` 把个人归档暴露到局域网。
+    """
+    host = (args.host or "").strip() or "127.0.0.1"
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            f"采集桥只允许监听本机回环地址（127.0.0.1 / localhost / ::1），拒绝 {host}",
+            file=sys.stderr,
+        )
+        return 2
+    # 延迟导入：mcp_server 只在真正要起服务时才加载，其它子命令不受影响。
+    from .mcp_server import run
+
+    run(host=host, port=args.port)
+    return 0
+
+
 def cmd_config(args) -> int:
     cfg = load_config()
     print(json.dumps({"path": str(CONFIG_PATH), "config": cfg.raw}, ensure_ascii=False, indent=2))
@@ -606,6 +626,11 @@ def main(argv: list[str] | None = None) -> int:
     p_agenda.add_argument("--ics", default="", help="导出 .ics 日历文件到指定路径")
     p_agenda.add_argument("--rebuild", action="store_true", help="先重扫消息再输出")
     p_agenda.set_defaults(func=cmd_agenda)
+
+    p_mcp = sub.add_parser("mcp", help="本机 MCP 采集桥（HTTP，只监听回环；供和鸣桌面端/插件使用）")
+    p_mcp.add_argument("--host", default="127.0.0.1", help="监听地址（只允许 127.0.0.1 / localhost / ::1）")
+    p_mcp.add_argument("--port", type=int, default=8776, help="监听端口（默认 8776）")
+    p_mcp.set_defaults(func=cmd_mcp)
 
     p_config = sub.add_parser("config", help="查看配置")
     p_config.set_defaults(func=cmd_config)

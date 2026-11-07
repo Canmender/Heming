@@ -2,6 +2,92 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.96.2.42.0（2026-11-07）— 信息采集中枢插件：采集桥随和鸣托管，装一个插件就能让智能体采集 QQ/微信
+
+用户要求「新拉一条分支，负责制作信息采集中枢插件」（方案 A：在既有插件模型内做成完整可分发插件包，
+不动「第三方插件不贡献页面」红线）。此前 `plugins/infohub-collector` 只有声明、0.1.0，端点要靠用户
+自己在 InfoHub 项目里开窗口跑 `infohub mcp`；随包 Python 也没有 MCP 服务。本轮把「端点由谁提供」补上。
+
+### 一、插件包「信息采集中枢」v1.0.0
+
+- `plugins/infohub-collector/`：id 保持 `heming.infohub-collector`（同 id 才是更新而不是新增），
+  名称改「信息采集中枢」、版本 1.0.0；
+- 贡献面：1 个本机 MCP 服务（`key:infohub` → `http://127.0.0.1:8776/mcp`）+ 1 个技能
+  （逐个写清 7 个工具、两个写操作先确认、端点没起如实说、引用标注「来自本机归档」）+ 3 个命令
+  （查看采集状态 / 采集本机消息 / 查看本机日程）；权限 `network:["127.0.0.1:8776"]`、`tools:"write"`、`files:[]`；
+- 仍不含代码 / 命令 / 环境变量 / 请求头 / 密钥；仍由 `scripts/publish-plugin.mjs` 发布到云端插件目录，
+  客户端下载后校验 sha256 再走既有安装预览（d.88 链路未改）；
+- README 重写；`bundledPlugins.test.ts` 守卫更新为钉死新名字/版本/权限/服务 key/命令数，
+  并新增「技能说明必须覆盖全部 7 个工具」「两个写工具与『确认』同现」「不得写『自动采集/自动启动』」三条。
+
+### 二、采集桥进随包 Python（7 个工具）
+
+- 新增 `packages/infohub/infohub/mcp_server.py`：标准库实现的 MCP Streamable HTTP 最小子集
+  （`POST /mcp`、`GET /health`），**协议层顶层不 import 采集依赖**（store/config/sync/agenda 全部懒加载）——
+  「桥能起来、能握手、能列工具」与「采集依赖装没装好」解耦；
+- 工具 5 个对齐 InfoHub：`infohub_status`（只读）、`infohub_sync`（**写**，增量/全量）、
+  `infohub_archive_search`、`infohub_archive_read`、`infohub_archive_agenda`；新增 2 个：
+  `infohub_conversations`（只读，「先列会话再读消息」的入口，1–200 条）与
+  `infohub_agenda_rebuild`（**写**，采集本身不重扫日程，新消息要有日程必须显式补扫）；
+- 归档口径按和鸣：只读工具 `Store(db, readonly=True)`（`mode=ro`、不建表）、写工具才用可写 `Store`；
+  `load_config(create=False)`（读操作不顺手写配置）；归档目录由 `INFOHUB_HOME` 决定（与 stdio 边车一致）；
+- 安全边界照抄并保留注释：只监听回环（`run()` 拒绝非回环）、Host 头白名单、CORS 预检放行、
+  请求体 ≤256KB、`allow_reuse_address=False`（Windows 上端口被占直接失败、不静默抢端口）、通知回 202、
+  JSON-RPC 错误码齐全、异常一律收口成中文（traceback 只进 stderr）；
+- CLI 新增 `infohub mcp [--host 127.0.0.1] [--port 8776]`，并支持 `python -m infohub.mcp_server`（桌面端 spawn 入口）。
+
+### 三、桌面端托管采集桥（显式启动、绝不自动）
+
+- 新增 `packages/desktop/infohub-mcp-host.js`：`createInfohubMcpHost` → `{status,start,stop,dispose,idle,onEvent}`；
+  - `start` 先 `GET /health` 探测：**已有外部端点（用户自己跑的 `infohub mcp`）就复用**、`source:"external"`、
+    不 spawn、不抢端口；
+  - 解释器复用 stdio 边车的 `resolvePython` 语义（用户配置 → 内置运行时 → 中文报错）；spawn
+    `python -m infohub.mcp_server --host 127.0.0.1 --port 8776`，`INFOHUB_HOME` / `PYTHONPATH` 与边车一致；
+  - 健康轮询 ≤15s；进程早退、端口占用、缺解释器都回中文可执行错误（含 stderr 尾部 ≤4000 字符）；
+  - `stop`/`dispose` 走 `child-kill.js` 的 `teardownChild` 整树回收（无孤儿进程），`will-quit` 由 `reclaimChildren` 兜底；
+  - **模块内没有任何自动启动路径**：只有 IPC `infohub:bridge-start` 会调 `start()`；
+- IPC：`infohub:bridge-status` / `infohub:bridge-start` / `infohub:bridge-stop` + `infohub:bridge-event` 广播；
+  `preload.js` 在 `__heming_infohub` 上新增 `bridgeStatus/bridgeStart/bridgeStop/onBridgeEvent`；
+  `package.json` 的 `build.files` 补 `infohub-mcp-host.js`（否则打包后 main.js require 不到）。
+
+### 四、信息中枢页「采集桥」区块
+
+- 桌面端：状态行（未运行 / 启动中 / 运行中·由和鸣托管 / 运行中·外部进程 / 失败：原因）、启动与停止、
+  「外部进程请在启动它的窗口里关闭」、地址与边界说明；运行态不持久化；
+- 浏览器端：只做 `GET /health` 探测（1.5s 超时）+「重新检测」，并说明「浏览器版不能拉起进程，请在桌面端启动」；
+- 「去插件区」入口；原有的连接 / 检索 / 日程 / 同步不受影响（stdio 边车与采集桥两条路互不依赖）。
+
+### 五、边界（逐条对应既有承诺）
+
+- 插件仍**只声明、不执行代码、不贡献页面**（d.85 红线未动）；
+- 采集桥只监听回环、无鉴权但有 Host 白名单与体积上限；归档不上传、不进会话记录；
+- **不自动拉起任何 Python 进程**（d.45/d.47 红线未动），装插件、开页面、登录都不触发；
+- 两个写工具按名字判风险，仍走人工确认；采集桥不替用户做二次确认；
+- 端口固定 8776：被占/缺依赖/缺解释器都如实报错，不静默降级。
+
+### 门禁
+
+- Python：新增 `packages/infohub/tests/test_mcp_server.py` **54 例**；`python -m unittest discover -s tests`
+  **210 例 OK**（基线 156，无回归）；真实端点 smoke（临时端口）：`/health`、`initialize`、`tools/list`
+  7 个顺序、`tools/call(status)` 无归档时中文 isError、伪造 Host 403；
+- 桌面：新增 `infohub-mcp-host.test.js` **18 例**（全替身，不真 spawn/不真监听）；`main.test.js` /
+  `preload.test.js` / `infohub-bridge.test.js` 守卫同步（受信通道、退出回收、无裸 kill、不自动启动）；
+  桌面全套 **573 例**通过（含 `node --check` 全部文件、version-sync 8 例、changelog-sync 2 例）；
+- Web：`bundledPlugins.test.ts` 8 例；`InfohubPage` / `infohub/client` / `infohub/store` 新增采集桥用例
+  **26 例**（客户端 7 / 运行态 9 / 页面 10）；全量 web **254 文件 / 3632 例**全绿；`tsc --noEmit` 零错；
+- 全量门禁 `pnpm -r build && pnpm -r test`：**shared 29 / server 165 / web 3632 / desktop 573** 全绿
+  （2026-11-07 实跑）；
+- 版本：`node scripts/bump-version.mjs d.96.2.42.0`（五处 package.json + README），
+  `node scripts/build-changelog.mjs` 已重跑；发布链路 `node scripts/publish-plugin.mjs plugins/ --dest <目录>`
+  产出 `heming.infohub-collector/1.0.0/plugin.json`，与源文件 sha256 一致。
+
+### 未验证（如实说明）
+
+- Electron 真机点「启动采集桥」（需要装包或 `electron .`）未跑：本轮桌面侧全部用替身单测，加上本机真实
+  Python 端点 curl 验证；建议装包后点一次并 `curl http://127.0.0.1:8776/health`；
+- 公网 https 页面访问 `127.0.0.1` 的浏览器 PNA / 混合内容行为未验证（本地 `http://localhost` 前端可用）；
+- 真实 QQ/微信首次采集耗时与失败态未在本轮实测（沿用 InfoHub 既有口径与错误文案）。
+
 ## d.94.2.42.0（2026-11-07）— 清掉 provider 死代码：Anthropic 协议、价格档、插件残留字段
 
 d.90 起模型只连 magpie 网关、d.92 把网关做成内置组件；本轮删除仍然存在的「旧世界」代码，

@@ -5,7 +5,9 @@ import { useUiStore } from "../store/ui.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import type {
   InfohubAgendaItem,
+  InfohubBridgeApi,
   InfohubBridgeInfo,
+  InfohubBridgeStatus,
   InfohubStatus,
 } from "../lib/infohub/client.js";
 
@@ -54,7 +56,23 @@ const agendaItem: InfohubAgendaItem = {
   msgTs: 1800000100,
 };
 
-type Bridge = NonNullable<Window["__heming_infohub"]>;
+type Bridge = NonNullable<Window["__heming_infohub"]> & InfohubBridgeApi;
+
+function bridgeStatus(overrides: Partial<InfohubBridgeStatus> = {}): InfohubBridgeStatus {
+  return {
+    running: false,
+    starting: false,
+    url: null,
+    port: null,
+    home: null,
+    python: null,
+    pythonSource: "unknown",
+    source: "none",
+    since: null,
+    error: null,
+    ...overrides,
+  };
+}
 
 function bridgeInfo(overrides: Partial<InfohubBridgeInfo> = {}): InfohubBridgeInfo {
   return {
@@ -112,6 +130,12 @@ function installBridge(overrides: Partial<Bridge> = {}) {
     pickHome: vi.fn(async () => "D:\\picked"),
     pickPython: vi.fn(async () => "D:\\py\\python.exe"),
     onEvent: vi.fn(() => () => {}),
+    bridgeStatus: vi.fn(async () => bridgeStatus()),
+    bridgeStart: vi.fn(async () =>
+      bridgeStatus({ running: true, source: "app", port: 8776, url: "http://127.0.0.1:8776/mcp" }),
+    ),
+    bridgeStop: vi.fn(async () => true),
+    onBridgeEvent: vi.fn(() => () => {}),
     ...overrides,
   } as unknown as Bridge;
 
@@ -129,6 +153,8 @@ describe("信息中枢页", () => {
   beforeEach(() => {
     localStorage.clear();
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
+    // 采集桥事件订阅是 store 级单例：每例前退订，避免上个用例的 mock 被复用。
+    useInfohubStore.getState().resetBridge();
     useUiStore.setState({
       page: "home",
       activeConversationId: null,
@@ -148,16 +174,25 @@ describe("信息中枢页", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
   });
 
-  it("浏览器环境：明确提示仅桌面端可用，不回退云端", () => {
+  it("浏览器环境：明确提示仅桌面端可用，不回退云端", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("ECONNREFUSED");
+      }),
+    );
     render(<InfohubPage />);
     // 与其他页一致的页头（不再是一张孤立卡片落在空白页上）
     expect(screen.getByRole("heading", { name: "信息中枢", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("信息中枢仅桌面端可用")).toBeInTheDocument();
     expect(screen.getByText(/在桌面版安装包里打开「信息中枢」/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "连接" })).not.toBeInTheDocument();
+    // d.96 采集桥：浏览器只能探测，如实显示「未检测到」，不假装可用
+    expect(await screen.findByText("未检测到本机采集桥")).toBeInTheDocument();
   });
 
   it("连接后展示归档规模，不提供会话浏览入口", async () => {
@@ -351,5 +386,181 @@ describe("信息中枢页", () => {
     );
     expect(useUiStore.getState().infohubIntent).toBeNull();
     expect(await screen.findByText("补交材料")).toBeInTheDocument();
+  });
+
+  describe("采集桥区块（d.96）", () => {
+    it("桌面端未运行：显示未运行与启动按钮，且不影响归档连接区", async () => {
+      installBridge();
+      render(<InfohubPage />);
+
+      expect(await screen.findByText("采集桥")).toBeInTheDocument();
+      expect(await screen.findByText("未运行")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "启动采集桥" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "去插件区" })).toBeInTheDocument();
+      // 说明区：只回环、不自动启动、写操作人工确认、归档不出本机
+      expect(screen.getByText(/只监听本机回环 · 不自动启动 · 写操作仍走人工确认 · 归档不出本机/)).toBeInTheDocument();
+      // 采集桥未运行时，归档连接照常可用
+      expect(screen.getByRole("button", { name: "连接" })).toBeInTheDocument();
+    });
+
+    it("桌面端启动中：显示启动中…并禁用启动按钮", async () => {
+      installBridge({
+        bridgeStatus: vi.fn(async () => bridgeStatus({ starting: true })),
+      });
+      render(<InfohubPage />);
+
+      expect(await screen.findByText("启动中…")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "启动采集桥" })).toBeDisabled();
+    });
+
+    it("桌面端运行中（和鸣托管）：显示回环地址与托管方，可停止", async () => {
+      installBridge({
+        bridgeStatus: vi.fn(async () =>
+          bridgeStatus({
+            running: true,
+            source: "app",
+            port: 8776,
+            url: "http://127.0.0.1:8776/mcp",
+          }),
+        ),
+      });
+      render(<InfohubPage />);
+
+      expect(await screen.findByText("运行中 · 127.0.0.1:8776 · 由和鸣托管")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "停止" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "启动采集桥" })).not.toBeInTheDocument();
+    });
+
+    it("桌面端运行中（外部进程）：不显示停止，提示去原窗口关闭", async () => {
+      installBridge({
+        bridgeStatus: vi.fn(async () =>
+          bridgeStatus({
+            running: true,
+            source: "external",
+            port: 8776,
+            url: "http://127.0.0.1:8776/mcp",
+          }),
+        ),
+      });
+      render(<InfohubPage />);
+
+      expect(await screen.findByText("运行中 · 外部进程")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "停止" })).not.toBeInTheDocument();
+      expect(screen.getByText("请在你启动它的窗口里关闭")).toBeInTheDocument();
+    });
+
+    it("桌面端失败：显示主进程给的中文原因", async () => {
+      installBridge({
+        bridgeStatus: vi.fn(async () => bridgeStatus({ error: "端口 8776 已被占用，请先关掉占用它的进程" })),
+      });
+      render(<InfohubPage />);
+
+      expect(
+        await screen.findByText("失败：端口 8776 已被占用，请先关掉占用它的进程"),
+      ).toBeInTheDocument();
+    });
+
+    it("桌面端：点启动后进入运行中，点停止回到未运行", async () => {
+      let running = false;
+      const { bridge } = installBridge({
+        bridgeStatus: vi.fn(async () =>
+          running
+            ? bridgeStatus({
+                running: true,
+                source: "app",
+                port: 8776,
+                url: "http://127.0.0.1:8776/mcp",
+              })
+            : bridgeStatus(),
+        ),
+        bridgeStart: vi.fn(async () => {
+          running = true;
+          return bridgeStatus({
+            running: true,
+            source: "app",
+            port: 8776,
+            url: "http://127.0.0.1:8776/mcp",
+          });
+        }),
+        bridgeStop: vi.fn(async () => {
+          running = false;
+          return true;
+        }),
+      });
+      render(<InfohubPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "启动采集桥" }));
+      expect(await screen.findByText("运行中 · 127.0.0.1:8776 · 由和鸣托管")).toBeInTheDocument();
+      // 没有保存过目录/解释器时传空对象，由主进程回落默认值
+      expect(bridge.bridgeStart).toHaveBeenCalledWith({});
+
+      fireEvent.click(screen.getByRole("button", { name: "停止" }));
+      expect(await screen.findByText("未运行")).toBeInTheDocument();
+      expect(bridge.bridgeStop).toHaveBeenCalledTimes(1);
+    });
+
+    it("浏览器端：自动探测到本机采集桥，说明不能拉起进程", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ status: "ok", name: "infohub-mcp" }),
+        })),
+      );
+      render(<InfohubPage />);
+
+      expect(await screen.findByText("检测到本机采集桥")).toBeInTheDocument();
+      expect(screen.getByText(/浏览器版不能拉起进程，请在和鸣桌面端启动/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "启动采集桥" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "重新检测" })).toBeInTheDocument();
+    });
+
+    it("浏览器端：未检测到时给出原因，可重新检测", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          throw new Error("ECONNREFUSED");
+        }),
+      );
+      render(<InfohubPage />);
+
+      expect(await screen.findByText("未检测到本机采集桥")).toBeInTheDocument();
+      expect(screen.getByText(/无法连接本机采集桥/)).toBeInTheDocument();
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ status: "ok", name: "infohub-mcp" }),
+        })),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "重新检测" }));
+      expect(await screen.findByText("检测到本机采集桥")).toBeInTheDocument();
+    });
+
+    it("去插件区：入口把页面切到插件区", async () => {
+      installBridge();
+      render(<InfohubPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "去插件区" }));
+      expect(useUiStore.getState().page).toBe("plugins");
+    });
+
+    it("不阻塞主流程：采集桥未启动时连接、检索、日程照常可用", async () => {
+      installBridge();
+      await connectPage();
+
+      expect(screen.getByText("已连接 · 只读归档")).toBeInTheDocument();
+      expect(await screen.findByText("未运行")).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText("在归档中检索"), { target: { value: "免检单" } });
+      fireEvent.click(screen.getByRole("button", { name: "检索" }));
+      expect(await screen.findByText("免检单")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("tab", { name: /日程/ }));
+      expect(await screen.findByText("补交材料")).toBeInTheDocument();
+    });
   });
 });

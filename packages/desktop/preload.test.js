@@ -436,3 +436,39 @@ test("__heming_infohub.onEvent 订阅可取消，非函数回调不注册", () =
   });
   assert.equal((listeners.get("infohub:event") || new Set()).size, 0);
 });
+
+// ── 信息采集中枢 · 采集桥（d.96）──
+test("preload 暴露 __heming_infohub 采集桥桥面（状态/启动/停止/事件订阅）", async () => {
+  const invoked = [];
+  const bridge = loadExposed({}, { invoked }).__heming_infohub;
+  for (const fn of ["bridgeStatus", "bridgeStart", "bridgeStop", "onBridgeEvent"]) {
+    assert.equal(typeof bridge[fn], "function", `${fn} 应是函数`);
+  }
+
+  await bridge.bridgeStatus();
+  await bridge.bridgeStart({ home: "D:\\archive", python: "D:\\py.exe" });
+  await bridge.bridgeStop();
+  assert.deepEqual(
+    invoked.slice(-3).map(([channel]) => channel),
+    ["infohub:bridge-status", "infohub:bridge-start", "infohub:bridge-stop"],
+  );
+  assert.deepEqual(invoked.at(-2)[1], { home: "D:\\archive", python: "D:\\py.exe" });
+
+  // 事件订阅：payload 原样回调，可取消，非函数不注册。
+  const listeners = new Map();
+  const bridge2 = loadExposed({}, { listeners }).__heming_infohub;
+  const received = [];
+  const off = bridge2.onBridgeEvent((status) => received.push(status));
+  const set = listeners.get("infohub:bridge-event");
+  assert.ok(set && set.size === 1, "应监听 infohub:bridge-event");
+  const status = { running: true, starting: false, url: "http://127.0.0.1:8776/mcp", port: 8776 };
+  for (const fn of [...set]) fn({}, status);
+  assert.deepEqual(received, [status]);
+  off();
+  assert.equal(set.size, 0);
+
+  const noop = bridge2.onBridgeEvent("not a function");
+  assert.equal(typeof noop, "function");
+  noop();
+  assert.equal((listeners.get("infohub:bridge-event") || new Set()).size, 0);
+});

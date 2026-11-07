@@ -200,6 +200,9 @@ test("main.js：子进程回收走 will-quit 闸，不再同步 dispose（d.50�
   // 判据是 idle（含在途回收），不是 running —— 刚点过停止就退出的场景要覆盖
   assert.ok(mainCode.includes("!mcpStdio.idle()"), "MCP 侧按 idle 判要不要拦退出");
   assert.ok(mainCode.includes("infohubBridge.idle()"), "InfoHub 侧按 idle 判要不要拦退出");
+  // 采集桥（d.96）：同属「退出前必须收口」，判据也是 idle（含在途回收）。
+  assert.ok(mainCode.includes("!infohubMcpHost.idle()"), "采集桥侧按 idle 判要不要拦退出");
+  assert.ok(mainCode.includes("infohubMcpHost.dispose()"), "退出时必须回收采集桥进程树");
 });
 
 // 减弱动态偏好只有渲染进程能查到（matchMedia）；查到后回填给生命周期收紧关闭时机，
@@ -345,6 +348,7 @@ test("main.js：受信通道清单覆盖能力型 IPC，且经 guardIpc 按主�
     "mcp:stdio:request",
     "update:install",
     "infohub:start",
+    "infohub:bridge-start",
   ]) {
     assert.ok(mainCode.includes(`"${ch}"`), `受信通道清单应含 ${ch}`);
   }
@@ -361,6 +365,38 @@ test("main.js：受信通道清单覆盖能力型 IPC，且经 guardIpc 按主�
   }
   // app:version 是 preload 顶层 sendSync，必须保持裸 ipcMain（否则非主窗口 preload 拿不到版本）
   assert.ok(mainCode.includes('ipcMain.on("app:version"'), "app:version 不应被来源守卫拦");
+});
+
+// ── 信息采集中枢 · 采集桥托管（d.96）──
+// 采集桥 = 用户显式启动的本机 MCP HTTP 端点（127.0.0.1:8776）。它是**唯一允许
+// 被「点一下」拉起的 Python 进程**，所以接线要同时钉住三件事：
+// ① 三个通道都经来源守卫（桌宠窗口不能越权启停本机服务）；
+// ② 状态变化广播给所有窗口（界面要实时从「启动中」切到「运行中」）；
+// ③ 创建实例时**不许顺手 start**（d.45/d.47 红线：不自动拉起）。
+test("main.js：采集桥托管接线（创建 + 3 个 IPC + 广播 + 回收），且不自动启动", () => {
+  assert.ok(mainCode.includes('require("./infohub-mcp-host")'), "主进程必须接上采集桥托管模块");
+  assert.ok(mainCode.includes("createInfohubMcpHost({"), "必须创建采集桥实例");
+  for (const ch of ["infohub:bridge-status", "infohub:bridge-start", "infohub:bridge-stop"]) {
+    assert.ok(mainCode.includes(`secureIpc.handle("${ch}"`), `${ch} 必须经来源守卫注册`);
+  }
+  assert.ok(mainCode.includes('"infohub:bridge-event"'), "状态变化必须广播给窗口");
+  // 复用 stdio 边车的路径辅助：两套各自算一份迟早漂移。
+  assert.ok(
+    /createInfohubMcpHost\(\{[\s\S]{0,600}resolveInfohubPackageDir\(/.test(mainCode),
+    "采集桥的包目录要与 stdio 边车同源（resolveInfohubPackageDir）",
+  );
+  assert.ok(
+    /createInfohubMcpHost\(\{[\s\S]{0,600}bundledPythonPath:\s*bundledPython\(\)/.test(mainCode),
+    "解释器要与 stdio 边车同源（bundledPython()）",
+  );
+
+  // 红线：全文件只能有一处 infohubMcpHost.start( —— 且必须在 bridge-start 处理器内。
+  const startCalls = [...mainCode.matchAll(/infohubMcpHost\.start\(/g)].length;
+  assert.equal(startCalls, 1, "只允许 infohub:bridge-start 里那一处显式启动（不自动拉起）");
+  assert.ok(
+    /secureIpc\.handle\("infohub:bridge-start"[\s\S]{0,300}infohubMcpHost\.start\(/.test(mainCode),
+    "唯一的启动调用必须落在 infohub:bridge-start 处理器里",
+  );
 });
 
 // ── ③-4 安全复审：IPC 通道不变量（防新通道绕过 secureIpc 门面）──

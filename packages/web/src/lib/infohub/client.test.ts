@@ -4,13 +4,36 @@ import {
   describeInfohubError,
   formatInfohubBytes,
   formatInfohubTime,
+  infohubBridgeStatus,
   isInfohubAvailable,
+  onInfohubBridgeEvent,
   onInfohubEvent,
+  probeInfohubBridge,
   readInfohubConfig,
+  startInfohubBridge,
+  stopInfohubBridge,
   writeInfohubConfig,
+  type InfohubBridgeApi,
+  type InfohubBridgeStatus,
 } from "./client.js";
 
-type Bridge = NonNullable<Window["__heming_infohub"]>;
+type Bridge = NonNullable<Window["__heming_infohub"]> & InfohubBridgeApi;
+
+function bridgeStatus(overrides: Partial<InfohubBridgeStatus> = {}): InfohubBridgeStatus {
+  return {
+    running: false,
+    starting: false,
+    url: null,
+    port: null,
+    home: null,
+    python: null,
+    pythonSource: "unknown",
+    source: "none",
+    since: null,
+    error: null,
+    ...overrides,
+  };
+}
 
 function installBridge(partial: Partial<Bridge>): Bridge {
   const bridge = {
@@ -21,6 +44,10 @@ function installBridge(partial: Partial<Bridge>): Bridge {
     pickHome: vi.fn(async () => null),
     pickPython: vi.fn(async () => null),
     onEvent: vi.fn(() => () => {}),
+    bridgeStatus: vi.fn(async () => bridgeStatus()),
+    bridgeStart: vi.fn(async () => bridgeStatus({ running: true, starting: false, source: "app", port: 8776 })),
+    bridgeStop: vi.fn(async () => true),
+    onBridgeEvent: vi.fn(() => () => {}),
     ...partial,
   } as unknown as Bridge;
   (window as unknown as { __heming_infohub?: Bridge }).__heming_infohub = bridge;
@@ -123,5 +150,121 @@ describe("infohub 客户端", () => {
     expect(formatInfohubBytes(2048)).toBe("2.0 KB");
     expect(formatInfohubBytes(5 * 1024 ** 2)).toBe("5.0 MB");
     expect(formatInfohubBytes(2 * 1024 ** 3)).toBe("2.00 GB");
+  });
+
+  describe("采集桥（d.96）", () => {
+    it("桌面端：四个函数转发到 preload，事件订阅可退订", async () => {
+      const listeners: ((status: InfohubBridgeStatus) => void)[] = [];
+      const status = bridgeStatus({
+        running: true,
+        source: "app",
+        port: 8776,
+        url: "http://127.0.0.1:8776/mcp",
+        since: 1800000000000,
+      });
+      const bridge = installBridge({
+        bridgeStatus: vi.fn(async () => status),
+        bridgeStart: vi.fn(async () => status),
+        bridgeStop: vi.fn(async () => true),
+        onBridgeEvent: vi.fn((callback) => {
+          listeners.push(callback);
+          return () => {
+            const index = listeners.indexOf(callback);
+            if (index >= 0) listeners.splice(index, 1);
+          };
+        }),
+      });
+
+      await expect(infohubBridgeStatus()).resolves.toEqual(status);
+      await expect(startInfohubBridge({ home: "D:\\\\wohaolei" })).resolves.toEqual(status);
+      expect(bridge.bridgeStart).toHaveBeenCalledWith({ home: "D:\\\\wohaolei" });
+      await expect(stopInfohubBridge()).resolves.toBe(true);
+
+      const received: InfohubBridgeStatus[] = [];
+      const off = onInfohubBridgeEvent((next) => received.push(next));
+      listeners[0]?.(status);
+      expect(received).toEqual([status]);
+      off();
+      expect(listeners).toHaveLength(0);
+    });
+
+    it("浏览器端：采集桥函数与事件订阅都按「仅桌面端可用」处理", async () => {
+      expect(isInfohubAvailable()).toBe(false);
+      await expect(infohubBridgeStatus()).rejects.toThrow("信息中枢仅桌面端可用");
+      await expect(startInfohubBridge()).rejects.toThrow("信息中枢仅桌面端可用");
+      await expect(stopInfohubBridge()).rejects.toThrow("信息中枢仅桌面端可用");
+      // 事件订阅是「有就挂、没有就空函数」：页面卸载时统一调 off() 不能炸。
+      const off = onInfohubBridgeEvent(() => {});
+      expect(typeof off).toBe("function");
+      expect(() => off()).not.toThrow();
+    });
+
+    it("旧版桌面端没有采集桥方法：给可执行的更新提示，而不是 TypeError", async () => {
+      installBridge({
+        bridgeStatus: undefined,
+        bridgeStart: undefined,
+        bridgeStop: undefined,
+        onBridgeEvent: undefined,
+      } as unknown as Partial<Bridge>);
+      await expect(infohubBridgeStatus()).rejects.toThrow("当前桌面端不支持采集桥，请更新和鸣");
+      await expect(startInfohubBridge()).rejects.toThrow("当前桌面端不支持采集桥，请更新和鸣");
+      const off = onInfohubBridgeEvent(() => {});
+      expect(() => off()).not.toThrow();
+    });
+
+    it("probe：/health 返回 infohub-mcp 即视为检测到（只读 GET、不带凭据）", async () => {
+      const fetchImpl = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ok", name: "infohub-mcp" }),
+      })) as unknown as typeof fetch;
+      const result = await probeInfohubBridge(undefined, { fetchImpl });
+
+      expect(result).toEqual({ ok: true, name: "infohub-mcp" });
+      expect(fetchImpl).toHaveBeenCalledWith(
+        "http://127.0.0.1:8776/health",
+        expect.objectContaining({ method: "GET" }),
+      );
+    });
+
+    it("probe：超时按中文原因返回，不抛异常", async () => {
+      const fetchImpl = vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+      const result = await probeInfohubBridge("http://127.0.0.1:8776/health", {
+        fetchImpl,
+        timeoutMs: 10,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/超时/);
+    });
+
+    it("probe：网络错误与 HTTP 非 2xx 都收口成 { ok: false, error }", async () => {
+      const refused = vi.fn(async () => {
+        throw new Error("ECONNREFUSED");
+      }) as unknown as typeof fetch;
+      const network = await probeInfohubBridge(undefined, { fetchImpl: refused });
+      expect(network.ok).toBe(false);
+      expect(network.error).toMatch(/无法连接本机采集桥/);
+
+      const broken = vi.fn(async () => ({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      })) as unknown as typeof fetch;
+      const http = await probeInfohubBridge(undefined, { fetchImpl: broken });
+      expect(http).toEqual({ ok: false, error: "本机采集桥返回 HTTP 503" });
+    });
+
+    it("probe：2xx 但服务名不是 infohub-mcp 时不误判为可用", async () => {
+      const other = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ name: "some-other-service" }),
+      })) as unknown as typeof fetch;
+      const result = await probeInfohubBridge(undefined, { fetchImpl: other });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/不是信息采集中枢/);
+    });
   });
 });

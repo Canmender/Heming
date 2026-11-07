@@ -36,6 +36,7 @@ const { registerSecretIpc } = require("./secret-store");
 const { registerNotifyIpc } = require("./notify-bridge");
 const { createInfohubBridge, registerInfohubIpc, resolveDefaultHome, resolveInfohubPackageDir } =
   require("./infohub-bridge");
+const { createInfohubMcpHost } = require("./infohub-mcp-host");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
 
 // Windows 系统通知要求进程 AUMID 与安装快捷方式一致（electron-builder 使用 build.appId）。
@@ -96,6 +97,10 @@ const TRUSTED_CHANNELS = [
   "infohub:stop",
   "infohub:pick-home",
   "infohub:pick-python",
+  // 采集桥（d.96）：本机 MCP HTTP 端点，只有用户显式点「启动采集桥」才会拉起进程。
+  "infohub:bridge-status",
+  "infohub:bridge-start",
+  "infohub:bridge-stop",
   "magpie:status",
   "magpie:start",
   "magpie:stop",
@@ -650,6 +655,9 @@ if (!gotLock) {
   // 打包后 Python 包在 resources/infohub；开发态直接用 packages/infohub。
   // 解释器默认用内置运行时（浏览/检索只需标准库）；采集依赖缺失时界面会提示改路径。
   let infohubBridge = null;
+  // 信息采集中枢的采集桥（d.96）：显式启停的本机 MCP HTTP 端点，与上面的 stdio 边车
+  // 互不依赖——一个不开端口，一个只回环；任一失败都不影响另一条路。
+  let infohubMcpHost = null;
 
   /** 首次用到某服务时先握手（initialize → notifications/initialized）。 */
   const ensureStdioReady = async (serverId, config) => {
@@ -706,6 +714,9 @@ if (!gotLock) {
       // 用户几秒前点过停止，回收可能还在后台跑，这时退出照样要等它。
       if (!mcpStdio.idle()) list.push(() => mcpStdio.disposeAll());
       if (infohubBridge && !infohubBridge.idle()) list.push(() => infohubBridge.dispose());
+      // 采集桥同属「退出前必须收口」：外部端点（用户自己的进程）不在 idle 判据里，
+      // 因为 idle 只看我们自己拉起的子进程；dispose 也不会去动 external。
+      if (infohubMcpHost && !infohubMcpHost.idle()) list.push(() => infohubMcpHost.dispose());
       // magpie 网关与它的反代：关闭时先停进程再关服务，避免端口悬挂。
       if (magpieHost.status().running) list.push(() => magpieHost.stop());
       if (magpieProxy) list.push(() => magpieProxy.close());
@@ -915,6 +926,45 @@ app.whenReady().then(() => {
       dialog,
       windowFromEvent: (event) => BrowserWindow.fromWebContents(event.sender),
     });
+    // 信息采集中枢的采集桥（d.96）：本机 MCP HTTP 端点（只监听 127.0.0.1:8776）。
+    // ★ 这里只**创建实例**，启动时绝不拉起 Python：红线是「用户显式点启动才启动」，
+    //   所以本段没有 start() 调用——只有 IPC infohub:bridge-start 会走到它。
+    //   解释器/包目录/默认归档目录复用 stdio 边车的既有辅助函数，两套不各算一份。
+    infohubMcpHost = createInfohubMcpHost({
+      spawn: require("node:child_process").spawn,
+      log: (line) => console.log(line),
+      packageDir: resolveInfohubPackageDir({
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        dirname: __dirname,
+      }),
+      defaultHome: resolveDefaultHome(path.join(os.homedir(), "Heming")),
+      bundledPythonPath: bundledPython(),
+    });
+    // 状态变化广播给所有窗口（含桌宠窗口）：「采集桥」区块要从「启动中」实时切到「运行中」，
+    // 失败时的中文原因也要立刻显示，不能等用户手动刷新页面。
+    infohubMcpHost.onEvent((status) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send("infohub:bridge-event", status);
+      }
+    });
+    secureIpc.handle("infohub:bridge-status", () => infohubMcpHost.status());
+    secureIpc.handle("infohub:bridge-start", async (_event, config) => {
+      // 只透传两个合法配置字段：渲染层给什么都别带进 spawn 环境。
+      const safe = config && typeof config === "object" ? config : {};
+      return infohubMcpHost.start({ home: safe.home, python: safe.python });
+    });
+    secureIpc.handle("infohub:bridge-stop", () => infohubMcpHost.stop());
+    // 启动只打一行状态：只包含运行态/来源/端口，**不打 home 与 python 路径**——
+    // 日志可能被用户贴出来求助，路径里常带用户名。
+    console.log(
+      "[heming] 采集桥:",
+      JSON.stringify({
+        running: infohubMcpHost.status().running,
+        source: infohubMcpHost.status().source,
+        port: 8776,
+      }),
+    );
     createWindow();
 
     // ── 桌宠（d.46）──

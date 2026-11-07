@@ -399,4 +399,20 @@ contextBridge.exposeInMainWorld("__heming_infohub", {
     ipcRenderer.on("infohub:event", listener);
     return () => ipcRenderer.removeListener("infohub:event", listener);
   },
+  // —— 采集桥（d.96）：信息采集中枢依赖的本机 MCP HTTP 端点 ——
+  // 与上面的 stdio 边车是两条独立的桥：这个是「用户显式启动」的 127.0.0.1:8776。
+  // 浏览器端没有它，页面据此显示「浏览器版不能拉起进程」。
+  /** 只读状态，不做探测：状态形状见规格 §6.1（主进程产出、渲染层直接消费）。 */
+  bridgeStatus: () => ipcRenderer.invoke("infohub:bridge-status"),
+  /** 显式启动（或复用外部已在跑的端点）；失败会 reject 中文 Error。 */
+  bridgeStart: (config) => ipcRenderer.invoke("infohub:bridge-start", config),
+  /** 只停和鸣自己拉起的进程；外部端点返回 false（界面提示去原窗口关闭）。 */
+  bridgeStop: () => ipcRenderer.invoke("infohub:bridge-stop"),
+  /** 订阅采集桥状态变化。返回取消订阅函数。 */
+  onBridgeEvent: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("infohub:bridge-event", listener);
+    return () => ipcRenderer.removeListener("infohub:bridge-event", listener);
+  },
 });

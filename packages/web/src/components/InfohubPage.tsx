@@ -75,6 +75,129 @@ function Snippet({ text }: { text: string }) {
   );
 }
 
+const BRIDGE_HOST = "127.0.0.1";
+const BRIDGE_PORT = 8776;
+
+/**
+ * 「采集桥」区块（d.96，规格 §8）：本机 MCP 端点的状态与启停。
+ *
+ * 两条路能力不同，但都**不自动拉起进程**、也都不阻塞归档那条路：
+ * - 桌面端：读 IPC 状态、用户点按钮才启动/停止；外部进程只提示「去它自己的窗口关」；
+ * - 浏览器端：只能 `GET /health` 探测，拉不起进程——如实说明，不假装可用。
+ */
+function CollectBridgeSection({ desktop, layout }: { desktop: boolean; layout: "card" | "strip" }) {
+  const bridgeStatus = useInfohubStore((s) => s.bridgeStatus);
+  const bridgeBusy = useInfohubStore((s) => s.bridgeBusy);
+  const bridgeError = useInfohubStore((s) => s.bridgeError);
+  const bridgeProbe = useInfohubStore((s) => s.bridgeProbe);
+  const startBridge = useInfohubStore((s) => s.startBridge);
+  const stopBridge = useInfohubStore((s) => s.stopBridge);
+  const probeBridge = useInfohubStore((s) => s.probeBridge);
+  const setPage = useUiStore((s) => s.setPage);
+
+  const running = bridgeStatus?.running === true;
+  const starting = bridgeBusy === "start" || bridgeStatus?.starting === true;
+  const external = bridgeStatus?.source === "external";
+  // 本次操作错误优先于主进程状态里的旧错误：用户刚点「启动」失败时，原因就在眼前。
+  const failure = bridgeError || bridgeStatus?.error || "";
+  const port = bridgeStatus?.port ?? BRIDGE_PORT;
+
+  const desktopStatus = starting
+    ? "启动中…"
+    : running
+      ? external
+        ? "运行中 · 外部进程"
+        : `运行中 · ${BRIDGE_HOST}:${port} · 由和鸣托管`
+      : failure
+        ? `失败：${failure}`
+        : "未运行";
+
+  const probeText =
+    bridgeBusy === "probe"
+      ? "检测中…"
+      : bridgeProbe?.ok
+        ? "检测到本机采集桥"
+        : bridgeProbe
+          ? "未检测到本机采集桥"
+          : "尚未检测";
+
+  const dotClass = (desktop ? running : bridgeProbe?.ok === true)
+    ? "bg-[#1f9d55]"
+    : desktop && failure
+      ? "bg-[#b42318]"
+      : starting || bridgeBusy === "probe"
+        ? "bg-[#d99a2b]"
+        : "bg-[#bbb]";
+
+  const body = (
+    <>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <span className="ui-section-title">采集桥</span>
+        <span className="flex items-center gap-1.5">
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass}`} aria-hidden />
+          <span role="status" className="ui-body-sm text-ink">
+            {desktop ? desktopStatus : probeText}
+          </span>
+        </span>
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          {desktop ? (
+            running ? (
+              external ? (
+                <span className="ui-micro">请在你启动它的窗口里关闭</span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={bridgeBusy === "stop"}
+                  onClick={() => void stopBridge()}
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                >
+                  停止
+                </button>
+              )
+            ) : (
+              <button
+                type="button"
+                disabled={starting}
+                onClick={() => void startBridge(readInfohubConfig())}
+                className="ui-btn ui-btn-sm ui-btn-primary"
+              >
+                启动采集桥
+              </button>
+            )
+          ) : (
+            <button
+              type="button"
+              disabled={bridgeBusy === "probe"}
+              onClick={() => void probeBridge()}
+              className="ui-btn ui-btn-sm ui-btn-ghost"
+            >
+              重新检测
+            </button>
+          )}
+          <button
+            type="button"
+            title="到插件区安装 / 查看「信息采集中枢」"
+            onClick={() => setPage("plugins")}
+            className="ui-btn ui-btn-sm ui-btn-ghost"
+          >
+            去插件区
+          </button>
+        </div>
+      </div>
+      <p className="ui-micro mt-1">只监听本机回环 · 不自动启动 · 写操作仍走人工确认 · 归档不出本机</p>
+      {!desktop && (
+        <p className="ui-caption mt-1">
+          浏览器版不能拉起进程，请在和鸣桌面端启动。
+          {bridgeProbe && !bridgeProbe.ok ? `（${bridgeProbe.error}）` : ""}
+        </p>
+      )}
+    </>
+  );
+
+  if (layout === "card") return <div className="ui-card p-4">{body}</div>;
+  return <div className="shrink-0 border-b border-line-soft bg-panel px-6 py-2.5">{body}</div>;
+}
+
 /**
  * 信息中枢（d.45）：把 InfoHub 的本机 QQ/微信归档接进和鸣。
  *
@@ -208,6 +331,17 @@ export function InfohubPage() {
     return onInfohubEvent((event) => {
       if (event && event.event === "progress") setProgress(event);
     });
+  }, [available]);
+
+  // 采集桥（d.96）：桌面端读 IPC 状态并订阅事件；浏览器端只探测本机回环。
+  // 这里**不启动任何进程**——启动只由用户点「启动采集桥」触发（d.45/d.47 红线）。
+  // 订阅挂在 store 上（单例），组件卸载不退订，切页回来仍能收到状态变化。
+  useEffect(() => {
+    if (!available) {
+      void useInfohubStore.getState().probeBridge();
+      return;
+    }
+    void useInfohubStore.getState().refreshBridge();
   }, [available]);
 
   // 跨页意图：首页卡/命令面板投递检索词或日程页。未连接时先记住，连接就绪后再执行。
@@ -385,7 +519,7 @@ export function InfohubPage() {
         // 卡片会贴在顶部。改为 PageShell 不接管滚动，让说明卡在整页垂直居中。
         scroll={false}
       >
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-y-auto p-6">
           <div className="w-full max-w-[460px] rounded-xl border border-line bg-white p-6 shadow-card">
             <h2 className="text-[16px] font-semibold">信息中枢仅桌面端可用</h2>
             <p className="mt-2 text-[12px] leading-6 text-muted">
@@ -395,6 +529,10 @@ export function InfohubPage() {
             <p className="mt-2 ui-caption">
               在桌面版安装包里打开「信息中枢」，即可连接本机归档并检索。
             </p>
+          </div>
+          {/* d.96：采集桥是「本机 MCP 端点」，与归档桥两条路；浏览器只能探测、不能拉起。 */}
+          <div className="w-full max-w-[460px]">
+            <CollectBridgeSection desktop={false} layout="card" />
           </div>
         </div>
       </PageShell>
@@ -583,6 +721,10 @@ export function InfohubPage() {
               )}
             </div>
           </div>
+          {/* 采集桥（规格 §8）：连接区之后、检索区之前；未启动时不影响归档连接。 */}
+          <div className="mx-auto mt-4 max-w-[620px]">
+            <CollectBridgeSection desktop layout="card" />
+          </div>
         </div>
       )}
 
@@ -674,6 +816,9 @@ export function InfohubPage() {
               )}
             </div>
           )}
+
+          {/* 采集桥（规格 §8）：有连接态时以一条紧凑带呈现，不挤占检索/日程的纵向空间。 */}
+          <CollectBridgeSection desktop layout="strip" />
 
           <div role="tablist" className="flex items-center gap-1 border-b border-line-soft px-6 py-2">
             {(

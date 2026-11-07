@@ -3,6 +3,10 @@
  * `window.heming` 上的桥接 API。只有 Electron 里存在；浏览器直接打开时是 undefined，
  * 调用方必须按可选处理（BootWave 即靠此区分「有主进程信号」与「无信号兜底」）。
  */
+// 采集桥状态/配置是渲染层与桌面端共同的契约（规格 §6.1），唯一类型源在 infohub/client.ts。
+// 这里只引用，避免两处各写一份 10 字段形状后漂移。
+import type { InfohubBridgeConfig, InfohubBridgeStatus } from "../lib/infohub/client.js";
+
 declare global {
   /** 自动更新状态（主进程 → 渲染层）。 */
   interface UpdateState {
@@ -143,6 +147,16 @@ declare global {
       pickHome: () => Promise<string | null>;
       pickPython: () => Promise<string | null>;
       onEvent: (cb: (event: unknown) => void) => () => void;
+      /**
+       * 采集桥（d.96）：桌面主进程托管的本机 MCP 端点（127.0.0.1:8776）。
+       *
+       * 只有新版桌面端才有这组方法：旧版 preload 上缺失时，渲染层按
+       * 「请更新和鸣」处理（见 client.ts 的 bridgeApi()），不能直接把 undefined 当函数调。
+       */
+      bridgeStatus: () => Promise<InfohubBridgeStatus>;
+      bridgeStart: (config?: InfohubBridgeConfig) => Promise<InfohubBridgeStatus>;
+      bridgeStop: () => Promise<boolean>;
+      onBridgeEvent: (cb: (status: InfohubBridgeStatus) => void) => () => void;
     };
     /**
      * 桌宠桥（d.46）：preload 暴露，只有桌面端存在。

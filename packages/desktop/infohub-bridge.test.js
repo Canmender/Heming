@@ -368,7 +368,7 @@ test("idle：只有「没活进程且没在途回收」才允许退出流程不�
   assert.equal(bridge.idle(), true);
 });
 
-test("护栏：这两个桥不许自己杀进程，回收一律交给 child-kill", () => {
+test("护栏：这些桥不许自己杀进程，回收一律交给 child-kill", () => {
   // 只断言代码：注释里写「旧实现是 child.kill()」是说明，不是接线。
   const codeOf = (file) =>
     fs
@@ -380,6 +380,7 @@ test("护栏：这两个桥不许自己杀进程，回收一律交给 child-kill
   for (const { file, dispose } of [
     { file: "infohub-bridge.js", dispose: "dispose" },
     { file: "mcp-stdio.js", dispose: "disposeAll" },
+    { file: "infohub-mcp-host.js", dispose: "dispose" },
   ]) {
     const code = codeOf(file);
     assert.equal(/\.kill\(/.test(code), false, `${file} 不许出现裸 kill：单杀直接子进程就是孤儿来源，回收归 child-kill`);
