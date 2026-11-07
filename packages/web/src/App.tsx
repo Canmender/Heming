@@ -15,6 +15,7 @@ import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
 import { useInfohubStore } from "./lib/infohub/store.js";
 import { useAutomationScheduler } from "./lib/automation/scheduler.js";
+import { useWorkflowScheduler } from "./lib/workflow/scheduler.js";
 import { useStaffLoop } from "./lib/staff/loop.js";
 import { useModuleStore, isModuleEffective } from "./lib/modules/store.js";
 import { isPageAvailable } from "./lib/modules/nav.js";
@@ -45,6 +46,9 @@ const InfohubPage = lazy(() =>
 );
 const AutomationPage = lazy(() =>
   import("./components/AutomationPage.js").then((m) => ({ default: m.AutomationPage })),
+);
+const WorkflowPage = lazy(() =>
+  import("./components/workflow/WorkflowPage.js").then((m) => ({ default: m.WorkflowPage })),
 );
 const ModelRoutePage = lazy(() =>
   import("./components/ModelRoutePage.js").then((m) => ({ default: m.ModelRoutePage })),
@@ -542,6 +546,8 @@ function AppShell({
   // 本机自动化：只在登录后的桌面端到点执行，不补跑、不自动拉起 InfoHub。
   // d.70：自动化模块停用（或依赖的信息中枢停用）后不再挂载调度器。
   useAutomationScheduler(Boolean(authUser) && isModuleEffective(moduleState, "automations"));
+  // 工作流（d.87）：定时触发同样只在登录后、模块启用时才挂；停用后不再到点执行。
+  useWorkflowScheduler(Boolean(authUser) && isModuleEffective(moduleState, "workflows"));
   // 常驻幕僚（d.48）：登录后巡检日程与任务，只读、只递简报；模块停用即停止巡检。
   useStaffLoop(Boolean(authUser) && isModuleEffective(moduleState, "staff"));
 
@@ -719,6 +725,10 @@ function AppShell({
     ) : currentPage === "automations" ? (
       // 自动化：本机定时同步/重扫，只在和鸣运行且信息中枢已连接时执行
       <AutomationPage />
+    ) : currentPage === "workflows" ? (
+      <Suspense fallback={<PageFallback />}>
+        <WorkflowPage />
+      </Suspense>
     ) : currentPage === "modelroute" ? (
       // 模型路由（d.84，magpie 语义移植）：候选链、选路策略、冷却与用量
       <ModelRoutePage />

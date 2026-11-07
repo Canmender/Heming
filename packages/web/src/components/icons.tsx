@@ -69,6 +69,16 @@ export const AutomationIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M12 5V3M9.5 3h5" />
   </svg>
 );
+/** 工作流：三个节点用线接起来——把要做的事一步步串起来。 */
+export const WorkflowIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="3" width="7" height="5.5" rx="1.2" />
+    <rect x="3" y="15.5" width="7" height="5.5" rx="1.2" />
+    <rect x="14" y="9.2" width="7" height="5.5" rx="1.2" />
+    <path d="M10 6h2.6a1.4 1.4 0 0 1 1.4 1.4V12" />
+    <path d="M10 18.2h2.6a1.4 1.4 0 0 0 1.4-1.4V14" />
+  </svg>
+);
 /** 幕僚：肩上的参谋——人形 + 一只小钟，表达「替你盯着」。 */
 export const StaffIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>

@@ -397,11 +397,14 @@ test("main.js：IPC 通道不变量（新通道不能绕过 secureIpc 门面）"
     "secret-store.js",
     "notify-bridge.js",
     "infohub-bridge.js",
+    "http-bridge.js",
   ];
   const moduleChannels = new Set();
   for (const file of moduleFiles) {
     const fileSrc = fs.readFileSync(path.join(__dirname, file), "utf8");
-    for (const ch of channelsIn(fileSrc, /ipcMain\.(?:handle|on)\(\s*["']([^"']+)["']/g)) {
+    // 能力模块既可能直接注册 ipcMain，也可能接收主进程的 secureIpc 门面后再注册
+    // （workflow:http 走后者）：两种写法都要扫到，否则「通道忘了登记」的守卫会漏。
+    for (const ch of channelsIn(fileSrc, /(?:ipcMain|secureIpc)\.(?:handle|on)\(\s*["']([^"']+)["']/g)) {
       moduleChannels.add(ch);
     }
   }

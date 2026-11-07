@@ -378,6 +378,7 @@ describe("设置区 · 导航顺序", () => {
       "staff",
       "infohub",
       "automations",
+      "workflows",
       "plugins",
       "modelroute",
       "memory",

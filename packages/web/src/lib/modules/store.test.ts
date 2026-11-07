@@ -26,8 +26,8 @@ function memoryStorage(initial: Record<string, string> = {}): StorageLike & { ma
 describe("内置能力模块 · 状态规整", () => {
   it("缺省全开：升级后行为与改造前一致", () => {
     const state = defaultModuleState();
-    expect(state.enabled).toEqual({ staff: true, infohub: true, automations: true, modelroute: true });
-    expect(effectiveModuleIds(state)).toEqual(["staff", "infohub", "automations", "modelroute"]);
+    expect(state.enabled).toEqual({ staff: true, infohub: true, automations: true, workflows: true, modelroute: true });
+    expect(effectiveModuleIds(state)).toEqual(["staff", "infohub", "automations", "workflows", "modelroute"]);
   });
 
   it("坏 JSON / 非对象 / 缺字段一律回落默认（不把模块锁死）", () => {
@@ -37,6 +37,7 @@ describe("内置能力模块 · 状态规整", () => {
       staff: false,
       infohub: true,
       automations: true,
+      workflows: true,
       modelroute: true,
     });
     // 非布尔值不认
@@ -45,7 +46,13 @@ describe("内置能力模块 · 状态规整", () => {
 
   it("未知模块 id 直接丢弃（卸载模块后的残留不会变成幽灵开关）", () => {
     const state = normalizeModuleState({ enabled: { ghost: false, staff: false } });
-    expect(state.enabled).toEqual({ staff: false, infohub: true, automations: true, modelroute: true });
+    expect(state.enabled).toEqual({
+      staff: false,
+      infohub: true,
+      automations: true,
+      workflows: true,
+      modelroute: true,
+    });
   });
 });
 
@@ -56,7 +63,7 @@ describe("内置能力模块 · 依赖语义", () => {
     expect(state.enabled.automations).toBe(true);
     expect(isModuleEffective(state, "automations")).toBe(false);
     expect(missingRequirements(state, "automations")).toEqual(["infohub"]);
-    expect(effectiveModuleIds(state)).toEqual(["staff", "modelroute"]);
+    expect(effectiveModuleIds(state)).toEqual(["staff", "workflows", "modelroute"]);
 
     state.enabled.infohub = true;
     expect(isModuleEffective(state, "automations")).toBe(true);
@@ -85,6 +92,7 @@ describe("内置能力模块 · 存储", () => {
       staff: true,
       infohub: true,
       automations: true,
+      workflows: true,
       modelroute: true,
     });
   });
@@ -95,7 +103,7 @@ describe("内置能力模块 · 存储", () => {
     const raw = storage.map.get(MODULES_KEY);
     expect(raw).toBeTruthy();
     expect(JSON.parse(raw as string)).toEqual({
-      enabled: { staff: true, infohub: false, automations: true, modelroute: true },
+      enabled: { staff: true, infohub: false, automations: true, workflows: true, modelroute: true },
     });
     expect(readModuleState(storage).enabled.infohub).toBe(false);
   });

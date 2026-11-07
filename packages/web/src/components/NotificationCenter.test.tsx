@@ -5,6 +5,7 @@ import { setNotificationStorage, useNotificationStore } from "../store/notificat
 import { createMemoryStorage } from "../lib/memory/storage.js";
 import { useUiStore } from "../store/ui.js";
 import type { AppNotification } from "../store/notifications.js";
+import { useWorkflowStore } from "../lib/workflow/store.js";
 
 function makeItem(overrides: Partial<AppNotification> = {}): AppNotification {
   return {
@@ -30,6 +31,7 @@ beforeEach(() => {
     taskFocusId: null,
     automationFocusId: null,
   });
+  useWorkflowStore.setState({ workflows: [], selectedId: null });
 });
 
 describe("formatRelativeTime", () => {
@@ -168,6 +170,29 @@ describe("通知中心面板", () => {
     expect(useUiStore.getState().automationFocusId).toBe("a1");
     // 不带会话跳转：自动化失败通知不是某条聊天记录
     expect(useUiStore.getState().activeConversationId).toBeNull();
+  });
+
+  it("工作流失败通知点进去：进工作流页并选中那条工作流", () => {
+    const created = useWorkflowStore.getState().create({ name: "抓取接口" });
+    const workflowId = created.ok ? created.workflow.id : "";
+    const item = makeItem({
+      kind: "workflow",
+      key: "workflow:w1:error:1000",
+      title: "工作流「抓取接口」执行失败",
+      body: "HTTP 请求失败：404",
+      workflowId,
+    });
+    useNotificationStore.setState({ items: [item] });
+    render(<NotificationCenter />);
+
+    fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
+    const dialog = screen.getByRole("dialog", { name: "通知中心" });
+    // 新 kind 必须有中文标签，不能显示成空白
+    expect(within(dialog).getByText("工作流")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "打开通知：工作流「抓取接口」执行失败" }));
+
+    expect(useUiStore.getState().page).toBe("workflows");
+    expect(useWorkflowStore.getState().selectedId).toBe(workflowId);
   });
 
   it("逐条已读 / 删除只影响那一条", () => {

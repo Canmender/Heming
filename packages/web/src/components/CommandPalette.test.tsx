@@ -63,8 +63,8 @@ describe("命令面板 v2 · 空查询分组", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(screen.getByText("页面跳转")).toBeInTheDocument();
     expect(screen.getByText("常用动作")).toBeInTheDocument();
-    // 10 个页面 + 5 个动作（d.67 合并后导航只剩宿主页；d.84 加「模型路由」）
-    expect(screen.getAllByRole("option")).toHaveLength(15);
+    // 11 个页面 + 5 个动作（d.67 合并后导航只剩宿主页；d.87 加「工作流」）
+    expect(screen.getAllByRole("option")).toHaveLength(16);
     // 没有最近使用时不出现该组标题
     expect(screen.queryByText("最近使用")).not.toBeInTheDocument();
   });
@@ -276,8 +276,8 @@ describe("命令面板 v2 · 四个动作的分发", () => {
   it("模块管理动作显示实际生效数（依赖未满足的不计）", () => {
     useModuleStore.getState().setEnabled("infohub", false);
     render(<CommandPalette onClose={vi.fn()} />);
-    // 停信息中枢会连带自动化失效（依赖），只剩幕僚与模型路由 2/4
-    expect(screen.getByText(/已启用 2\/4/)).toBeInTheDocument();
+    // 停信息中枢会连带自动化失效（依赖），生效的是幕僚、工作流、模型路由 3/5
+    expect(screen.getByText(/已启用 3\/5/)).toBeInTheDocument();
   });
 
   it("搜「模块」能命中模块管理动作（此前一条结果都没有）", async () => {

@@ -17,10 +17,10 @@ import type { Page } from "../../store/ui.js";
  */
 
 /** 可插拔的内置模块 id。新增模块时只加注册表项 + 页面 + 接线点。 */
-export type ModuleId = "staff" | "infohub" | "automations" | "modelroute";
+export type ModuleId = "staff" | "infohub" | "automations" | "modelroute" | "workflows";
 
 export type ModuleHomeCard = "staff" | "infohub";
-export type ModuleBackgroundLoop = "staff-loop" | "automation-scheduler";
+export type ModuleBackgroundLoop = "staff-loop" | "automation-scheduler" | "workflow-scheduler";
 
 /** 模块贡献面：插件区卡片按这个展示「它到底带了什么」。 */
 export interface ModuleContributions {
@@ -96,6 +96,24 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     storageKeys: ["heming.automations.v1", "heming.automations.runs.v1"],
     disableNote:
       "停用后不再到点执行、导航入口下线；任务与运行记录仍保留在本机。依赖「信息中枢」启用后才生效。",
+  },
+  {
+    id: "workflows",
+    name: "工作流",
+    version: "v1.0.0",
+    description:
+      "节点式自动化：触发器、分支、HTTP、代码、大模型与子流程，把要做的事一步步接起来。",
+    page: "workflows",
+    contributions: { page: true, backgroundLoop: "workflow-scheduler" },
+    storageKeys: [
+      "heming.workflows.v1",
+      "heming.workflows.executions.v1",
+      "heming.workflows.credentials.v1",
+      "heming.workflows.vars.v1",
+      "heming.workflows.static.v1",
+    ],
+    disableNote:
+      "停用后定时触发不再执行、导航入口下线；工作流、执行记录、凭据与变量都保留在本机，重新启用即恢复。",
   },
   {
     id: "modelroute",

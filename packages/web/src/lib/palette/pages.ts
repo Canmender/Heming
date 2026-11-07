@@ -30,6 +30,7 @@ export const PALETTE_PAGES: PalettePage[] = [
   { page: "staff", label: "幕僚", description: "常驻简报：日程与任务摘要" },
   { page: "infohub", label: "信息中枢", description: "本机 QQ / 微信归档检索与日程" },
   { page: "automations", label: "自动化", description: "本机定时同步与重扫日程" },
+  { page: "workflows", label: "工作流", description: "节点式自动化：画布编排、定时触发与执行记录" },
   {
     page: "modelroute",
     label: "模型路由",

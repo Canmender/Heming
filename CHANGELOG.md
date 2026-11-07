@@ -2,6 +2,92 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.87.2.42.0（2026-11-07）— 工作流：节点式自动化（n8n 语义自研，可插拔内置模块）
+
+用户要「n8n 的一切功能」。本仓第三方插件只能声明能力、**不执行随包代码**，所以工作流做成
+第五个**内置能力模块**（插件区 → 「模块」Tab 可启停），代码随应用发布。能力按 n8n 的公开文档语义
+**独立实现**：不引入其源码或 npm 包（n8n 自 2022-03-17 起为 Sustainable Use License 1.0，
+禁止复制与商业分发；见 `docs/superpowers/specs/2026-11-07-workflow-module.md` §3「来源与许可」）。
+
+### 一、执行引擎（items 数据流）
+
+- **执行栈**（非递归）：从触发器（或指定起点）出发，弹出一个节点，把「输出口有 items 的下游」按画布位置
+  压回队列；回环合法（Loop 用法），以 **500 次节点运行 + 单次 10 分钟**兜底，超限置错停止；
+- **多输入就绪**：同一输入口多根上游线按画布位置依次拼接 items；Merge 这类双输入节点等所有已连接
+  输入口都有上游完成过才执行，避免被执行两次；
+- **节点级重试**：`retryOnFail` + `maxTries`（夹 2–5）+ `waitBetweenTries`（0–5000ms），只重跑该节点、中间不留档；
+- **错误三态**：`stopWorkflow`（默认）/ `continueRegularOutput`（输入原样透传）/ `continueErrorOutput`
+  （成功项留原输出、错误项切到最后一个输出口，带 `{error, message, ...上游json}` 与血缘）；
+- **executeOnce / pinData / 部分执行**（`startNodeId` + `destinationNodeId`）：调试与「只跑这一步」；
+- **子流程**：`executeWorkflow` 节点经 runtime 注入递归执行，父执行 id 下传、深度上限 8 层、父取消信号传递；
+- **错误工作流**：失败且配置了 `errorWorkflowId` 时以 `mode:"error"` 跑它，输入是 execution/workflow/error
+  三段上下文；它自己失败不覆盖原错误；
+- **执行记录与执行数据分离**：`WorkflowExecution.runData` 逐节点逐次记录开始/耗时/状态/输出/错误；
+  `saveDataSuccessExecution` / `saveDataErrorExecution` 控制是否保存数据；`onEvent` 供 UI 画运行态。
+
+### 二、节点库（30 个，中文参数表 + 默认值 + 单测）
+
+- 触发：手动、定时（间隔/每天/每周/5 段 Cron）、错误、子流程触发；
+- 流程：条件判断（两输出）、分支（动态输出）、合并（追加/按位置/按字段/选分支）、分批循环（循环/完成两输出）、
+  等待、空操作、停止并报错；
+- 数据：设置字段、拆分、过滤、排序、限制、去重、汇总、列表操作；
+- 集成：HTTP 请求（桌面端走主进程桥，绕 CORS；方法/头/查询/体/超时/非 2xx 策略）、代码（Web Worker 沙箱）、
+  执行子工作流、日期时间、加密（SHA/HMAC/Base64/UUID）、XML（解析/生成）；
+- 和鸣：大模型（本机模型连接一次补全，可选 JSON 输出）、归档检索/日程（只读）、归档同步（写，来源显式）、站内通知。
+
+### 三、画布与页面
+
+- 自研 SVG/div 画布（**不引第三方画布库**）：滚轮以光标为中心缩放（0.2–2）、空格/中键拖平移、框选、
+  多选拖动、端口拖线（高亮可落点）、Delete 删除、双击空白加节点、适配视图、网格、缩放工具栏；
+- 节点卡片：运行态描边与 items 数、禁用灰显、pinData 标记、节点图标；
+- 页面：工作流列表（搜索/新建/模板/导入/导出/复制/删除/启用）、编辑器（工具栏 + 画布 + 节点详情）、
+  执行记录（列表/逐节点详情/重跑/删除/清空）、凭据（四类字段 + 加密保存 + 删除二次确认）；
+- 节点详情：参数表单按 `NodePropertyDescription` 渲染（displayOptions 条件显示、必填校验、表达式输入提示）、
+  节点设置（重试/错误策略/执行一次/禁用/备注/固定数据）、输入输出数据（树/表/原始、截断提示）、执行此节点。
+
+### 四、表达式与代码沙箱
+
+- `{{ }}` 表达式：整段保留原始类型、文本拼接、嵌套对象递归；`$json/$items/$itemIndex/$runIndex/$node/$now/
+  $today/$timestamp/$workflow/$execution/$vars/$parameter` + `$if/$isEmpty/$length/$toJson/$fromJson/$number/
+  $string/$boolean/$uuid/$random/$item` 等 helper；编译缓存；中文错误带表达式片段；
+- 安全硬化：遮蔽 `window/document/fetch/XMLHttpRequest/localStorage/process/eval/Function` 等全局，
+  内部静态扫描拦 `constructor`/`__proto__`/动态 `import(`（目标是防误用与明显逃逸，不是对抗级隔离）；
+- 代码节点：Blob Worker 沙箱（无 DOM/网络/存储），超时 10s terminate，支持一次性/逐项两种模式；
+  jsdom 下走受限同步 fallback（不打断同步死循环，已在测试注释写明）。
+
+### 五、触发、凭据、存储与接线
+
+- 调度器 `useWorkflowScheduler(enabled)`：登录后挂载、模块启用才生效、15s 轮询、全局串行、
+  **启动时错过的到点不补跑**（与自动化模块同口径）；失败推站内通知；
+- 凭据：`httpBasic` / `httpHeader` / `httpQueryAuth` / `bearerToken`，值走 `secureStorage` 信封
+  （桌面端系统安全存储加密、浏览器明文兜底并注明）；**导出工作流不含凭据值**；
+- 存储：`heming.workflows.v1`（50 条 / 单条 512KB）、`.executions.v1`（60 条 / 1MB 双淘汰）、
+  `.credentials.v1`（30 条）、`.vars.v1`、`.static.v1`；读盘逐条归一、坏条目丢弃；
+  执行数据按设置裁剪（单节点单次 ≤200 items、单 item 预览 ≤64KB、单条执行二进制 >2MB 丢弃并标注）；
+- 接线：模块注册表第五个模块、导航/命令面板/分组/设置区顺序/存储水位/图标各加一项；
+  `App.tsx` 懒加载页面并按 `isModuleEffective("workflows")` 挂调度；停用只撤入口与调度、不删数据；
+- 导入导出：导出为**类 n8n 形状**（`{name,nodes,connections,pinData,settings,active,tags}`，连接按节点名、
+  n8n 节点类型带 `n8n-nodes-base.` 前缀），导入支持 n8n/本仓两种来源（前缀剥离、别名、name→id 重映射、
+  未知类型给 warning 或 strict 失败）。
+
+### 门禁（本机实测，2026-11-07）
+
+- **工作流模块**：`vitest run src/lib/workflow src/components/workflow` = **28 个测试文件 / 406 例全绿**
+  （引擎 75、表达式与沙箱 65、核心节点 126、集成节点与模板 11、存储/执行记录/凭据/导入导出/运行时 83、
+  调度 10、画布几何 13、画布交互 7、节点面板 5、页面 6、端到端 5）；
+- **web 全量**：**276 文件 / 4011 例全绿**（基线 3604，净增 407；含通知中心「工作流失败 → 点开直达」1 例，
+  以及模块注册表/导航/命令面板/设置区/模块卡/存储水位的既有用例同步更新）；
+- **shared 29 例 / server 141 例 / desktop**（全文件 `node --check` + `node --test`，含新增
+  `http-bridge.test.js` 9 例）全绿；
+- 根门禁：`pnpm test`（先 `pnpm -r build` 再各包测试）与 `pnpm typecheck` 均 **exit 0**；
+- 新增依赖：**0**；新增运行时代码里没有 `fetch` 直连（HTTP 统一走注入的 `helpers.httpRequest`），
+  代码/表达式执行都在本机沙箱与遮蔽作用域内。
+
+### 明确不做（下一轮候选）
+
+Webhook 触发器/响应节点（需本机端口监听）、跨重启的持久化等待、第三方声明式节点 SDK、
+画布便签/自动布局、执行数据脱敏与导出、AI Agent 多轮编排、团队共享工作流、分布式队列模式。
+
 ## d.85.2.42.0（2026-11-07）— 模型路由收口（magpie 移植）+ InfoHub 采集插件
 
 两条线，一个共同点：**能力要么进内置模块，要么走声明式插件**——不执行随包代码。

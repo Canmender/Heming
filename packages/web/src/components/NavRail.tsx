@@ -13,6 +13,7 @@ import {
   StaffIcon,
   RouteIcon,
   PinIcon,
+  WorkflowIcon,
 } from "./icons.js";
 import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -49,6 +50,8 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
   { page: "infohub", label: "信息中枢", icon: <InfoHubIcon width={17} height={17} /> },
   // 自动化（d.47）：与信息中枢同口径，不占数字键
   { page: "automations", label: "自动化", icon: <AutomationIcon width={17} height={17} /> },
+  // 工作流（d.87）：节点式自动化；与自动化同口径，不占数字键
+  { page: "workflows", label: "工作流", icon: <WorkflowIcon width={17} height={17} /> },
   // 模型路由（d.84，magpie 语义移植）：候选链/选路/冷却/用量；不占数字键
   { page: "modelroute", label: "模型路由", icon: <RouteIcon width={17} height={17} /> },
   // 插件区（d.62 统一插件模型，d.67 起并入技能区与接口区）：能力中心

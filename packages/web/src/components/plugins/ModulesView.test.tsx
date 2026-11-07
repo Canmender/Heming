@@ -18,9 +18,9 @@ describe("ModulesView 内置能力模块卡", () => {
     useModuleStore.getState().reset();
   });
 
-  it("展示四个模块与版本/贡献/本机数据说明，默认全部启用", () => {
+  it("展示五个模块与版本/贡献/本机数据说明，默认全部启用", () => {
     render(<ModulesView />);
-    for (const name of ["幕僚", "信息中枢", "自动化", "模型路由"]) {
+    for (const name of ["幕僚", "信息中枢", "自动化", "工作流", "模型路由"]) {
       expect(screen.getByRole("region", { name: `模块 ${name}` })).toBeInTheDocument();
     }
     expect(screen.getByRole("switch", { name: "停用模块 信息中枢" })).toHaveAttribute(
@@ -34,7 +34,7 @@ describe("ModulesView 内置能力模块卡", () => {
     expect(within(infohub).getByText(/停用后导航入口/)).toBeInTheDocument();
     // 本机数据：只读展示占用；外部数据（InfoHub 归档）明确「不在和鸣存储内」
     expect(within(infohub).getByText(/不在和鸣存储内/)).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("已启用 4/4 个模块");
+    expect(screen.getByRole("status")).toHaveTextContent("已启用 5/5 个模块");
     const staff = screen.getByRole("region", { name: "模块 幕僚" });
     expect(within(staff).getByText(/本机数据 \d+ 项/)).toBeInTheDocument();
   });
@@ -51,8 +51,8 @@ describe("ModulesView 内置能力模块卡", () => {
     );
     expect(within(infohub).getByRole("button", { name: "打开页面" })).toBeDisabled();
 
-    // 启用数是「实际生效」而不是「开关打开」：只剩幕僚 1/4
-    expect(screen.getByRole("status")).toHaveTextContent("已启用 2/4 个模块");
+    // 启用数是「实际生效」而不是「开关打开」：幕僚、工作流、模型路由 3/5
+    expect(screen.getByRole("status")).toHaveTextContent("已启用 3/5 个模块");
 
     // 自动化的开关仍是「开」，但因为依赖不满足而实际不生效
     const automations = screen.getByRole("region", { name: "模块 自动化" });
@@ -61,7 +61,7 @@ describe("ModulesView 内置能力模块卡", () => {
     expect(useModuleStore.getState().enabled.automations).toBe(true);
   });
 
-  it("重新启用依赖后自动化自动生效；「全部恢复启用」把四个都打开", () => {
+  it("重新启用依赖后自动化自动生效；「全部恢复启用」把五个都打开", () => {
     render(<ModulesView />);
     fireEvent.click(screen.getByRole("switch", { name: "停用模块 幕僚" }));
     fireEvent.click(screen.getByRole("switch", { name: "停用模块 信息中枢" }));
@@ -78,13 +78,14 @@ describe("ModulesView 内置能力模块卡", () => {
       staff: true,
       infohub: true,
       automations: true,
+      workflows: true,
       modelroute: true,
     });
     // 点了要有可见反馈（审计 P2-2：原来点了没有任何变化提示）
     expect(screen.getByRole("status")).toHaveTextContent("已全部恢复启用");
   });
 
-  it("四个模块全启用时「全部恢复启用」禁用；停用任一后可用", () => {
+  it("五个模块全启用时「全部恢复启用」禁用；停用任一后可用", () => {
     render(<ModulesView />);
     const restore = screen.getByRole("button", { name: "全部恢复启用" });
     expect(restore).toBeDisabled();

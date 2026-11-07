@@ -48,9 +48,9 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(screen.getByRole("button", { name: "幕僚" })).toBeInTheDocument();
   });
 
-  it("全部启用的默认状态下四个模块入口都在（与改造前一致）", () => {
+  it("全部启用的默认状态下五个模块入口都在（与改造前一致）", () => {
     render(<NavRail />);
-    for (const name of ["幕僚", "信息中枢", "自动化", "模型路由"]) {
+    for (const name of ["幕僚", "信息中枢", "自动化", "工作流", "模型路由"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
   });
@@ -238,6 +238,7 @@ describe("NavRail 导航顺序可自定义", () => {
       "staff",
       "infohub",
       "automations",
+      "workflows",
       "modelroute",
     ]);
     // 团队/插件区/智能体各只出现一次
@@ -441,6 +442,7 @@ describe("NavRail 分组重排（d.72）", () => {
     "幕僚",
     "信息中枢",
     "自动化",
+    "工作流",
     "插件区",
     "记忆区",
     "设置区",
@@ -458,7 +460,7 @@ describe("NavRail 分组重排（d.72）", () => {
   it("组间画 3 条细线；模块停用后按可见项只剩 2 条", () => {
     const { container, unmount } = render(<NavRail />);
     const dividers = () => container.querySelectorAll("[data-nav-group]");
-    expect(dividers()).toHaveLength(10);
+    expect(dividers()).toHaveLength(11);
     // 分隔线是 aria-hidden 的纯视觉元素，不参与读屏
     const lines = () =>
       [...container.querySelectorAll("div[aria-hidden='true']")].filter((el) =>
@@ -471,6 +473,7 @@ describe("NavRail 分组重排（d.72）", () => {
     useModuleStore.getState().setEnabled("infohub", false);
     useModuleStore.getState().setEnabled("staff", false);
     useModuleStore.getState().setEnabled("modelroute", false);
+    useModuleStore.getState().setEnabled("workflows", false);
     const second = render(<NavRail />);
     expect(second.container.querySelectorAll("[data-nav-group]")).toHaveLength(6);
     expect(

@@ -38,8 +38,8 @@ function member(id: string, displayName: string, over: Partial<TeamMember> = {})
 }
 
 describe("palette · 页面目录", () => {
-  it("覆盖 10 个导航页，且与 store 的默认导航顺序是同一集合", () => {
-    expect(PALETTE_PAGES).toHaveLength(10);
+  it("覆盖 11 个导航页，且与 store 的默认导航顺序是同一集合", () => {
+    expect(PALETTE_PAGES).toHaveLength(11);
     expect(PALETTE_PAGES.map((p) => p.page).sort()).toEqual([...DEFAULT_NAV_ORDER].sort());
   });
 
@@ -175,7 +175,7 @@ describe("palette · 空查询分组", () => {
   it("无最近使用时只有「页面跳转」与「常用动作」两组", () => {
     const groups = buildEmptyGroups([]);
     expect(groups.map((g) => g.id)).toEqual(["page", "action"]);
-    expect(groups[0].items).toHaveLength(10);
+    expect(groups[0].items).toHaveLength(11);
     expect(groups[1].items).toHaveLength(5);
   });
 
@@ -288,7 +288,7 @@ describe("palette · 输入检索", () => {
 
   it("flattenGroups 只摊平结果项，便于键盘游标", () => {
     const groups = buildEmptyGroups([]);
-    expect(flattenGroups(groups)).toHaveLength(15);
+    expect(flattenGroups(groups)).toHaveLength(16);
   });
 
   it("旧口径 searchAll 仍可用（兼容导出）", () => {

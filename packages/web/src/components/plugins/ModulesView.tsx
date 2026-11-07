@@ -12,7 +12,7 @@ import {
   missingRequirements,
   useModuleStore,
 } from "../../lib/modules/store.js";
-import { AutomationIcon, InfoHubIcon, RouteIcon, StaffIcon } from "../icons.js";
+import { AutomationIcon, InfoHubIcon, RouteIcon, StaffIcon, WorkflowIcon } from "../icons.js";
 import { moduleCleanupPlan } from "../../lib/modules/lifecycle.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { BTN_GHOST, BTN_GHOST_SM, HINT, Switch } from "./shared.js";
@@ -32,6 +32,7 @@ const MODULE_ICONS: Record<ModuleId, ComponentType<SVGProps<SVGSVGElement>>> = {
   staff: StaffIcon,
   infohub: InfoHubIcon,
   automations: AutomationIcon,
+  workflows: WorkflowIcon,
   modelroute: RouteIcon,
 };
 
@@ -65,6 +66,8 @@ function ModuleCard({ mod }: { mod: BuiltinModule }) {
   if (mod.contributions.backgroundLoop === "staff-loop") contributions.push("后台巡检（每 60 秒）");
   if (mod.contributions.backgroundLoop === "automation-scheduler")
     contributions.push("后台调度（每 15 秒）");
+  if (mod.contributions.backgroundLoop === "workflow-scheduler")
+    contributions.push("后台调度（每 15 秒跑定时触发）");
   if (mod.contributions.toolPrefixes?.length)
     contributions.push(`模型工具：${mod.contributions.toolPrefixes.join("、")}*`);
 
