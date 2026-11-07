@@ -60,3 +60,33 @@ export type PluginCatalogEntry = z.infer<typeof PluginCatalogEntrySchema>;
 export type PluginCatalogResponse = z.infer<typeof PluginCatalogResponseSchema>;
 export type PluginCatalogPermissions = z.infer<typeof PluginCatalogPermissionsSchema>;
 export type PluginCatalogContributions = z.infer<typeof PluginCatalogContributionsSchema>;
+
+// —— 云端插件仓库（d.95）：详情 / 发布 / 删除 的共用契约 ——
+//
+// 「目录」是客户端只读视图（只给最新版）；「仓库」多两个写/查能力：
+// - detail：某个 id 的全部版本（客户端展示更新记录、回滚参考）；
+// - publish：把一份 plugin.json 原样写进仓库（只校验 id/版本/大小，不解析权限）；
+// - remove：下线某个版本（仓库运维用，不做成客户端能力）。
+// 发布/下线需要单独的发布密钥（环境变量 HEMING_PLUGIN_PUBLISH_KEY），不是用户登录态。
+
+/** 单个插件在仓库里的全部版本（新→旧）。 */
+export const PluginCatalogDetailSchema = z.object({
+  id: z.string().regex(PLUGIN_CATALOG_ID_RE),
+  versions: z.array(PluginCatalogEntrySchema).min(1),
+});
+export type PluginCatalogDetail = z.infer<typeof PluginCatalogDetailSchema>;
+
+export const PluginCatalogDetailResponseSchema = z.union([
+  PluginCatalogDetailSchema,
+  z.object({ error: z.string() }),
+]);
+
+/** 发布结果：`created=false` 表示同 id/版本已存在且被覆盖（幂等重发）。 */
+export const PluginCatalogPublishResultSchema = z.object({
+  id: z.string().regex(PLUGIN_CATALOG_ID_RE),
+  version: z.string().regex(PLUGIN_CATALOG_VERSION_RE),
+  sha256: z.string().regex(PLUGIN_CATALOG_SHA256_RE),
+  size: z.number().int().min(0),
+  created: z.boolean(),
+});
+export type PluginCatalogPublishResult = z.infer<typeof PluginCatalogPublishResultSchema>;

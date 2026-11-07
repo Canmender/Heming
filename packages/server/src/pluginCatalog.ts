@@ -1,12 +1,23 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   PLUGIN_CATALOG_ID_RE,
   PLUGIN_CATALOG_VERSION_RE,
   type PluginCatalogContributions,
+  type PluginCatalogDetail,
   type PluginCatalogEntry,
   type PluginCatalogPermissions,
+  type PluginCatalogPublishResult,
 } from "@heming/shared";
 
 /**
@@ -27,6 +38,9 @@ const MAX_MANIFEST_BYTES = 256 * 1024;
 
 const TOOLS = new Set(["none", "read", "write"]);
 
+/** 发布/下线失败原因（app 层映射 400/409）。 */
+export type PluginCatalogWriteError = "invalid_id" | "invalid_version" | "too_large" | "mismatch";
+
 export interface PluginCatalogRead {
   bytes: Buffer;
   sha256: string;
@@ -37,6 +51,17 @@ export interface PluginCatalog {
   list(): PluginCatalogEntry[];
   /** 读取某个 id/版本的原样清单字节；不存在或参数非法返回 null。 */
   read(id: string, version: string): PluginCatalogRead | null;
+  /** 某个插件在仓库里的全部版本（新→旧）；不存在返回 null。 */
+  detail(id: string): PluginCatalogDetail | null;
+  /**
+   * 发布一份清单到仓库（原样字节落盘，不解析权限/不执行任何代码）。
+   *
+   * 只做三件事：校验 id/版本字符集与大小、确认清单里的 id/version 与参数一致、原子写入。
+   * 同 id/版本重复发布 = 覆盖（幂等重发），返回 created=false。
+   */
+  publish(id: string, version: string, bytes: Buffer): PluginCatalogPublishResult | PluginCatalogWriteError;
+  /** 下线一个版本（仓库运维；不存在返回 not_found）。 */
+  remove(id: string, version: string): "ok" | "not_found";
   /** 目录位置（部署排查用）。 */
   readonly dir: string;
 }
@@ -167,6 +192,33 @@ export function createPluginCatalog(opts: { dir: string }): PluginCatalog {
     return null;
   }
 
+  /** 某个 id 的全部可解析版本（新→旧）。坏版本跳过，不阻断其它版本。 */
+  function allEntriesOf(id: string): PluginCatalogEntry[] {
+    const out: PluginCatalogEntry[] = [];
+    for (const version of [...versionDirsOf(id)].reverse()) {
+      const file = join(dir, id, version, "plugin.json");
+      try {
+        const stat = statSync(file);
+        if (!stat.isFile() || stat.size > MAX_MANIFEST_BYTES) continue;
+        const entry = entryOf(id, version, readFileSync(file), stat.mtimeMs);
+        if (entry) out.push(entry);
+      } catch {
+        // 该版本不可读：跳过，继续看其它版本
+      }
+    }
+    return out;
+  }
+
+  /** 发布时的清单一致性校验：解析出的 id/version 必须与发布参数一致。 */
+  function manifestMatches(bytes: Buffer, id: string, version: string): boolean {
+    try {
+      const raw = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;
+      return asString(raw.id) === id && asString(raw.version) === version;
+    } catch {
+      return false;
+    }
+  }
+
   return {
     dir,
     list(): PluginCatalogEntry[] {
@@ -199,5 +251,47 @@ export function createPluginCatalog(opts: { dir: string }): PluginCatalog {
         return null;
       }
     },
+    detail(id: string): PluginCatalogDetail | null {
+      if (!PLUGIN_CATALOG_ID_RE.test(id)) return null;
+      const versions = allEntriesOf(id);
+      if (versions.length === 0) return null;
+      return { id, versions };
+    },
+    publish(id, version, bytes) {
+      if (!PLUGIN_CATALOG_ID_RE.test(id)) return "invalid_id";
+      if (!PLUGIN_CATALOG_VERSION_RE.test(version)) return "invalid_version";
+      if (bytes.length === 0 || bytes.length > MAX_MANIFEST_BYTES) return "too_large";
+      if (!manifestMatches(bytes, id, version)) return "mismatch";
+      const targetDir = join(dir, id, version);
+      const targetFile = join(targetDir, "plugin.json");
+      const created = !existsSync(targetFile);
+      mkdirSync(targetDir, { recursive: true });
+      // 先写临时文件再 rename：并发发布/读到半个文件的窗口都不存在
+      const tmp = join(targetDir, `.plugin.json.tmp-${process.pid}-${Date.now()}`);
+      writeFileSync(tmp, bytes);
+      renameSync(tmp, targetFile);
+      const entry = entryOf(id, version, bytes, statSync(targetFile).mtimeMs);
+      if (!entry) return "mismatch";
+      return {
+        id,
+        version,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        size: bytes.length,
+        created,
+      };
+    },
+    remove(id, version) {
+      if (!PLUGIN_CATALOG_ID_RE.test(id) || !PLUGIN_CATALOG_VERSION_RE.test(version)) {
+        return "not_found";
+      }
+      const targetDir = join(dir, id, version);
+      if (!existsSync(targetDir)) return "not_found";
+      try {
+        rmSync(targetDir, { recursive: true, force: true });
+        return "ok";
+      } catch {
+        return "not_found";
+      }
+    }
   };
 }

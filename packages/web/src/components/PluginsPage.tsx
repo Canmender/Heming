@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { PluginCatalogEntry } from "@heming/shared";
 import { useSessionTab } from "../lib/sessionState.js";
 import {
   describeCapabilities,
@@ -24,6 +25,8 @@ import { PackageIcon, PlusIcon } from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { InstallDialog } from "./plugins/InstallDialog.js";
+import { PluginRepositoryPanel } from "./plugins/PluginRepositoryPanel.js";
+import { downloadPluginManifest } from "../lib/plugins/catalogClient.js";
 import { PluginCard } from "./plugins/PluginCard.js";
 import { PluginDetailDialog } from "./plugins/PluginDetailDialog.js";
 import { RemovePluginDialog } from "./plugins/RemovePluginDialog.js";
@@ -56,10 +59,12 @@ import { BTN_GHOST, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
  * 动作改为切 Tab，不再跨页 setPage——导航里也不再有这两个独立入口。
  */
 
-type TabKey = "plugins" | "modules" | "skills" | "tools" | "mcp";
+type TabKey = "plugins" | "repo" | "modules" | "skills" | "tools" | "mcp";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "plugins", label: "插件" },
+  // d.95：云端插件仓库（浏览/下载/安装）作为一等入口，不再只藏在安装弹窗里
+  { key: "repo", label: "仓库" },
   // d.70：内置能力模块（幕僚 / 信息中枢 / 自动化）与插件同区展示，可启用/停用
   { key: "modules", label: "模块" },
   { key: "skills", label: "技能" },
@@ -116,7 +121,7 @@ function hostOf(url: string): string {
 
 /** 插件区五个 Tab 的会话级记忆：刷新回到上次看的 Tab。 */
 const PLUGINS_TAB_KEY = "heming.tab.plugins.v1";
-const PLUGINS_TABS = ["plugins", "modules", "skills", "tools", "mcp"] as const satisfies readonly TabKey[];
+const PLUGINS_TABS = ["plugins", "repo", "modules", "skills", "tools", "mcp"] as const satisfies readonly TabKey[];
 
 export function PluginsPage({
   plugins = pluginStore,
@@ -131,6 +136,8 @@ export function PluginsPage({
   const [tick, setTick] = useState(0);
   const [tab, setTab] = useSessionTab<TabKey>(PLUGINS_TAB_KEY, "plugins", PLUGINS_TABS);
   const [installOpen, setInstallOpen] = useState(false);
+  /** 仓库面板正在下载的包（id@version）：只禁那一张卡的按钮。 */
+  const [repoLoadingKey, setRepoLoadingKey] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<InstalledPlugin | null>(null);
@@ -240,6 +247,28 @@ export function PluginsPage({
     setText("");
     setMsg(null);
     setInstallOpen(true);
+  };
+
+  /**
+   * 从仓库载入清单（d.95）：下载原样 plugin.json（catalogClient 已校验 sha256），
+   * 填进同一个安装弹窗——安装预览/信任确认/写入语义与手动粘贴完全一致。
+   */
+  const loadFromRepository = async (entry: PluginCatalogEntry) => {
+    const key = `${entry.id}@${entry.version}`;
+    setRepoLoadingKey(key);
+    setMsg(null);
+    try {
+      const manifest = await downloadPluginManifest(entry);
+      setText(manifest);
+      setInstallOpen(true);
+    } catch (err) {
+      setMsg({
+        kind: "error",
+        text: err instanceof Error ? err.message : "从仓库下载插件失败",
+      });
+    } finally {
+      setRepoLoadingKey(null);
+    }
   };
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -360,6 +389,8 @@ export function PluginsPage({
         <span className="ml-auto self-center ui-caption">
           {tab === "plugins"
             ? `已启用 ${enabledCount}/${list.length} 个插件 · 同一 id 再次安装 = 覆盖更新`
+            : tab === "repo"
+              ? "云端同一份插件仓库：下载原样清单、校验指纹后走同一套安装预览"
             : tab === "modules"
               ? "内置模块 · 停用只收起入口与后台任务，不删除本机数据"
               : ""}
@@ -372,6 +403,18 @@ export function PluginsPage({
         aria-labelledby={`plugins-${tab}-tab`}
         className="mt-4"
       >
+        {tab === "repo" && (
+          <PluginRepositoryPanel
+            installed={list.map((plugin) => ({
+              id: plugin.manifest.id,
+              version: plugin.manifest.version,
+            }))}
+            loadingKey={repoLoadingKey}
+            onLoad={loadFromRepository}
+            onError={(message) => setMsg({ kind: "error", text: message })}
+          />
+        )}
+
         {tab === "plugins" && (
           <>
             {/* 列表筛选（d.77）：装到几十个后按名字/技能/服务找，状态可只看已停用。 */}

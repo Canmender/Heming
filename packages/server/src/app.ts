@@ -132,6 +132,90 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.send(found.bytes);
   });
 
+  /**
+   * 插件仓库（d.95）：单个插件的全部版本。
+   * 目录只给「最新版」，这里给「历史版本 + 指纹」，客户端据此判断更新与回看旧版。
+   */
+  app.get("/api/plugins/:id", (req, res) => {
+    const detail = pluginCatalog.detail(req.params.id);
+    if (!detail) {
+      res.status(404).json({ error: "插件不存在" });
+      return;
+    }
+    res.json(detail);
+  });
+
+  /** 发布密钥：仓库写操作只认它，不认用户登录态（目录本身是公开的）。 */
+  const publishKey = (process.env.HEMING_PLUGIN_PUBLISH_KEY ?? "").trim();
+  function publishAuthorized(req: Request<{ [key: string]: string }>): boolean {
+    if (!publishKey) return false; // 未配置 = 关闭发布接口
+    const given = String(req.header("x-publish-key") ?? "");
+    return given.length === publishKey.length && given === publishKey;
+  }
+
+  /**
+   * 发布清单到仓库（运维/CI 用；界面不走这条路）。
+   *
+   * `PUT /api/plugins/:id/:version`：路径写 id/版本、body 是 plugin.json 全文。
+   * 服务端不解析权限、不执行代码，只做「id/版本字符集 + 大小 + 清单内 id/version 与路径一致」
+   * 三条校验，然后原样落盘；同版本重复 PUT = 覆盖（200，created=false），首次发布 201。
+   */
+  app.put("/api/plugins/:id/:version", (req, res) => {
+    if (!publishKey) {
+      res.status(503).json({ error: "云端插件仓库未开启发布接口（未配置 HEMING_PLUGIN_PUBLISH_KEY）" });
+      return;
+    }
+    if (!publishAuthorized(req)) {
+      res.status(401).json({ error: "发布密钥不正确" });
+      return;
+    }
+    const body = req.body as unknown;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      res.status(400).json({ error: "请求体必须是 plugin.json 对象" });
+      return;
+    }
+    const manifest = body as Record<string, unknown>;
+    const id = req.params.id;
+    const version = req.params.version;
+    if (manifest.id !== id || manifest.version !== version) {
+      res.status(400).json({ error: "plugin.json 里的 id/version 必须与发布路径一致" });
+      return;
+    }
+    const bytes = Buffer.from(JSON.stringify(body, null, 2), "utf8");
+    const result = pluginCatalog.publish(id, version, bytes);
+    if (result === "invalid_id" || result === "invalid_version") {
+      res.status(400).json({ error: "插件 id 或版本号格式不正确" });
+      return;
+    }
+    if (result === "too_large") {
+      res.status(413).json({ error: "plugin.json 过大（上限 256KB）" });
+      return;
+    }
+    if (result === "mismatch") {
+      res.status(400).json({ error: "plugin.json 里的 id/version 与路径不一致或无法解析" });
+      return;
+    }
+    res.status(result.created ? 201 : 200).json(result);
+  });
+
+  /** 下线某个版本（运维/CI 用）。 */
+  app.delete("/api/plugins/:id/:version", (req, res) => {
+    if (!publishKey) {
+      res.status(503).json({ error: "云端插件仓库未开启发布接口（未配置 HEMING_PLUGIN_PUBLISH_KEY）" });
+      return;
+    }
+    if (!publishAuthorized(req)) {
+      res.status(401).json({ error: "发布密钥不正确" });
+      return;
+    }
+    const result = pluginCatalog.remove(req.params.id, req.params.version);
+    if (result === "not_found") {
+      res.status(404).json({ error: "插件版本不存在" });
+      return;
+    }
+    res.status(204).end();
+  });
+
   app.post("/api/auth/register", (req, res) => {
     if (!allowRegister) {
       res.status(403).json({ error: "registration disabled" });

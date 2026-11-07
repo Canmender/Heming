@@ -15,9 +15,16 @@
  *   node scripts/publish-plugin.mjs plugins/                     # 目录下每个并包
  *   node scripts/publish-plugin.mjs plugins/magpie-gateway/plugin.json --dry-run
  *   node scripts/publish-plugin.mjs plugins/ --dest D:/tmp/plugins-catalog
+ *   node scripts/publish-plugin.mjs plugins/ --push https://heming.example.com
+ *
+ * 两种目标：
+ * - 缺省写本地目录（沿用「同步目录到服务器」的部署链）；
+ * - `--push <apiBase>` 直接走仓库发布接口：`PUT /api/plugins/<id>/<version>`
+ *   （`x-publish-key: $HEMING_PLUGIN_PUBLISH_KEY`），适合 CI 直接发到云端。
  *
  * 环境变量：
- *   HEMING_PLUGIN_DIR  目标目录；缺省 `<cwd>/plugins-catalog`
+ *   HEMING_PLUGIN_DIR         目标目录；缺省 `<cwd>/plugins-catalog`
+ *   HEMING_PLUGIN_PUBLISH_KEY 发布密钥（`--push` 必填；服务端未配置则接口关闭）
  *
  * 不做的事（边界）：
  * - **不做 SFTP/SSH**：上传服务器沿用现有部署链（把本目录同步到服务器的
@@ -38,9 +45,10 @@ const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/;
 function usage() {
   console.error(
     [
-      "用法：node scripts/publish-plugin.mjs <plugin.json | 目录> [...] [--dest <dir>] [--dry-run]",
+      "用法：node scripts/publish-plugin.mjs <plugin.json | 目录> [...] [--dest <dir>] [--push <apiBase>] [--dry-run]",
       "  --dest      目标目录（缺省 HEMING_PLUGIN_DIR 或 <cwd>/plugins-catalog）",
-      "  --dry-run   只校验并打印，不写盘",
+      "  --push      直接发布到远端仓库（PUT /api/plugins/<id>/<version>），需 HEMING_PLUGIN_PUBLISH_KEY",
+      "  --dry-run   只校验并打印，不写盘/不请求",
     ].join("\n"),
   );
 }
@@ -96,14 +104,46 @@ function validate(file) {
   };
 }
 
-function main(argv) {
+async function pushToRepo(apiBase, result) {
+  const key = (process.env.HEMING_PLUGIN_PUBLISH_KEY ?? "").trim();
+  if (!key) return { error: "未设置 HEMING_PLUGIN_PUBLISH_KEY（发布接口需要发布密钥）" };
+  const base = apiBase.replace(/\/+$/, "");
+  const url = `${base}/api/plugins/${encodeURIComponent(result.id)}/${encodeURIComponent(result.version)}`;
+  try {
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-publish-key": key },
+      body: result.bytes,
+    });
+    if (!response.ok) {
+      let reason = `HTTP ${response.status}`;
+      try {
+        const body = await response.json();
+        if (body && typeof body.error === "string") reason = `${reason} ${body.error}`;
+      } catch {
+        /* 非 JSON 错误体：保留状态码 */
+      }
+      return { error: `发布失败：${reason}` };
+    }
+    const body = await response.json();
+    return { target: url, created: Boolean(body?.created) };
+  } catch (err) {
+    return { error: `请求失败：${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+async function main(argv) {
   let destArg = "";
+  let pushArg = "";
   let dryRun = false;
   const inputs = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--dry-run") dryRun = true;
-    else if (arg === "--dest") {
+    else if (arg === "--push") {
+      pushArg = argv[i + 1] ?? "";
+      i += 1;
+    } else if (arg === "--dest") {
       destArg = argv[i + 1] ?? "";
       i += 1;
     } else if (arg === "-h" || arg === "--help") {
@@ -128,6 +168,15 @@ function main(argv) {
       failures.push(`${file}：${result.error}`);
       continue;
     }
+    if (!dryRun && pushArg) {
+      const pushed = await pushToRepo(pushArg, result);
+      if (pushed.error) {
+        failures.push(`${file}：${pushed.error}`);
+        continue;
+      }
+      ok.push({ ...result, source: file, target: pushed.target, created: pushed.created });
+      continue;
+    }
     const targetDir = join(dest, result.id, result.version);
     if (!dryRun) {
       try {
@@ -144,18 +193,27 @@ function main(argv) {
   for (const item of ok) {
     console.log(
       `${dryRun ? "[dry-run] " : ""}发布 ${item.id}@${item.version}（schemaVersion ${item.schemaVersion}）` +
-        ` sha256=${item.sha256.slice(0, 16)}… → ${item.target}`,
+        ` sha256=${item.sha256.slice(0, 16)}… → ${item.target}` +
+        (item.created === false ? "（覆盖已有版本）" : ""),
     );
   }
   for (const failure of failures) console.error(`[失败] ${failure}`);
   if (ok.length > 0) {
-    console.log(`\n目录：${dest}`);
-    console.log(
-      "下一步：把该目录同步到服务器的 HEMING_PLUGIN_DIR（例如 /opt/heming/plugins），" +
-        "客户端「插件区 → 从云端浏览」即可看到（服务端 GET /api/plugins）。",
-    );
+    if (pushArg) {
+      console.log(`
+已发布到 ${pushArg}；客户端「插件区 → 仓库」即可看到（服务端 GET /api/plugins）。`);
+    } else {
+      console.log(`
+目录：${dest}`);
+      console.log(
+        "下一步：把该目录同步到服务器的 HEMING_PLUGIN_DIR（例如 /opt/heming/plugins），" +
+          "客户端「插件区 → 仓库」即可看到（服务端 GET /api/plugins）。",
+      );
+    }
   }
   return failures.length > 0 ? 1 : 0;
 }
 
-process.exitCode = main(process.argv.slice(2));
+main(process.argv.slice(2)).then((code) => {
+  process.exitCode = code;
+});

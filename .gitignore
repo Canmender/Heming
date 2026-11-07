@@ -47,3 +47,6 @@ packages/desktop/resources/magpie/*.download
 
 # 本机自检日志（不属于仓库内容）
 d[0-9]*-selfcheck-*.log
+
+# 云端插件仓库的发布产物（部署数据，不入库；由 scripts/publish-plugin.mjs 生成/同步）
+plugins-catalog/

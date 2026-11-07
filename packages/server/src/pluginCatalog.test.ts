@@ -145,3 +145,152 @@ describe("GET /api/plugins（公开）", () => {
     expect(missing.status).toBe(404);
   });
 });
+
+describe("仓库详情 / 发布 / 下线（d.95）", () => {
+  it("detail：某插件的全部版本（新→旧），坏版本跳过；未知 id 返回 null", () => {
+    writePlugin(root, "acme.repo", "1.0.0", v4("acme.repo", "1.0.0"));
+    writePlugin(root, "acme.repo", "1.2.0", v4("acme.repo", "1.2.0"));
+    writePlugin(root, "acme.repo", "1.1.0", v4("acme.repo", "1.1.0"));
+    // 坏版本：非 JSON，应被跳过而不影响其它版本
+    mkdirSync(join(root, "acme.repo", "9.9.9"), { recursive: true });
+    writeFileSync(join(root, "acme.repo", "9.9.9", "plugin.json"), "not json");
+
+    const catalog = createPluginCatalog({ dir: root });
+    const detail = catalog.detail("acme.repo");
+    expect(detail?.id).toBe("acme.repo");
+    expect(detail?.versions.map((v) => v.version)).toEqual(["1.2.0", "1.1.0", "1.0.0"]);
+
+    expect(catalog.detail("acme.none")).toBeNull();
+    expect(catalog.detail("../etc")).toBeNull();
+  });
+
+  it("publish：校验 id/版本/大小/清单一致性，成功后 read 能拿到原样字节", () => {
+    const catalog = createPluginCatalog({ dir: root });
+    const manifest = v4("acme.pub", "0.1.0");
+    const bytes = Buffer.from(JSON.stringify(manifest), "utf8");
+
+    expect(catalog.publish("../evil", "0.1.0", bytes)).toBe("invalid_id");
+    expect(catalog.publish("acme.pub", "../0.1.0", bytes)).toBe("invalid_version");
+    expect(catalog.publish("acme.pub", "0.1.0", Buffer.alloc(0))).toBe("too_large");
+    // 清单里 id 与发布参数不一致
+    expect(catalog.publish("acme.pub", "0.1.1", bytes)).toBe("mismatch");
+
+    const result = catalog.publish("acme.pub", "0.1.0", bytes);
+    expect(result).toMatchObject({ id: "acme.pub", version: "0.1.0", created: true });
+    expect(catalog.read("acme.pub", "0.1.0")?.sha256).toBe(
+      createHash("sha256").update(bytes).digest("hex"),
+    );
+    // 同版本重发 = 覆盖（created=false），不产生第二个版本
+    expect(catalog.publish("acme.pub", "0.1.0", bytes)).toMatchObject({ created: false });
+    expect(catalog.detail("acme.pub")?.versions).toHaveLength(1);
+  });
+
+  it("remove：只下线指定版本，其它版本保留；不存在返回 not_found", () => {
+    writePlugin(root, "acme.rm", "1.0.0", v4("acme.rm", "1.0.0"));
+    writePlugin(root, "acme.rm", "1.1.0", v4("acme.rm", "1.1.0"));
+    const catalog = createPluginCatalog({ dir: root });
+    expect(catalog.remove("acme.rm", "1.0.0")).toBe("ok");
+    expect(catalog.detail("acme.rm")?.versions.map((v) => v.version)).toEqual(["1.1.0"]);
+    expect(catalog.remove("acme.rm", "1.0.0")).toBe("not_found");
+    expect(catalog.remove("../etc", "1.0.0")).toBe("not_found");
+  });
+});
+
+describe("仓库 REST（d.95）", () => {
+  const KEY = "test-publish-key";
+
+  function appWithRepo() {
+    return createApp(createMemoryStore(), { pluginDir: root });
+  }
+
+  beforeEach(() => {
+    process.env.HEMING_PLUGIN_PUBLISH_KEY = KEY;
+  });
+  afterEach(() => {
+    delete process.env.HEMING_PLUGIN_PUBLISH_KEY;
+  });
+
+  it("GET /api/plugins/:id：全版本；不存在 404", async () => {
+    writePlugin(root, "acme.api", "1.0.0", v4("acme.api", "1.0.0"));
+    writePlugin(root, "acme.api", "1.1.0", v4("acme.api", "1.1.0"));
+    const app = appWithRepo();
+    const res = await request(app).get("/api/plugins/acme.api");
+    expect(res.status).toBe(200);
+    expect(res.body.versions.map((v: { version: string }) => v.version)).toEqual(["1.1.0", "1.0.0"]);
+    expect((await request(app).get("/api/plugins/none.here")).status).toBe(404);
+  });
+
+  it("PUT /api/plugins/:id/:version：密钥错 401、清单与路径不一致 400、首次 201、重发 200", async () => {
+    const app = appWithRepo();
+    const manifest = v4("acme.push", "0.3.0");
+
+    expect(
+      (await request(app).put("/api/plugins/acme.push/0.3.0").send(manifest)).status,
+    ).toBe(401);
+    expect(
+      (
+        await request(app)
+          .put("/api/plugins/acme.push/0.3.0")
+          .set("x-publish-key", "wrong")
+          .send(manifest)
+      ).status,
+    ).toBe(401);
+
+    // 路径与清单不一致：拒绝（防止发布到 A 路径的其实是 B 包）
+    expect(
+      (
+        await request(app)
+          .put("/api/plugins/other.id/0.3.0")
+          .set("x-publish-key", KEY)
+          .send(manifest)
+      ).status,
+    ).toBe(400);
+    // 非法版本号（以 "." 开头，字符集不通过；仍是一个合法 URL 段）
+    expect(
+      (
+        await request(app)
+          .put("/api/plugins/acme.push/..0.3")
+          .set("x-publish-key", KEY)
+          .send({ ...manifest, version: "..0.3" })
+      ).status,
+    ).toBe(400);
+
+    const ok = await request(app)
+      .put("/api/plugins/acme.push/0.3.0")
+      .set("x-publish-key", KEY)
+      .send(manifest);
+    expect(ok.status).toBe(201);
+    expect(ok.body).toMatchObject({ id: "acme.push", version: "0.3.0", created: true });
+
+    const again = await request(app)
+      .put("/api/plugins/acme.push/0.3.0")
+      .set("x-publish-key", KEY)
+      .send(manifest);
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ created: false });
+
+    const manifestRes = await request(app).get("/api/plugins/acme.push/0.3.0/manifest");
+    expect(manifestRes.status).toBe(200);
+  });
+
+  it("未配置发布密钥时发布/下线一律 503（接口关闭），读接口照常", async () => {
+    delete process.env.HEMING_PLUGIN_PUBLISH_KEY;
+    const app = appWithRepo();
+    expect((await request(app).put("/api/plugins/x.y/1.0.0").send(v4("x.y", "1.0.0"))).status).toBe(503);
+    expect((await request(app).delete("/api/plugins/x.y/1.0.0")).status).toBe(503);
+    expect((await request(app).get("/api/plugins")).status).toBe(200);
+  });
+
+  it("DELETE /api/plugins/:id/:version：401 / 404 / 204", async () => {
+    writePlugin(root, "acme.del", "1.0.0", v4("acme.del", "1.0.0"));
+    const app = appWithRepo();
+    expect((await request(app).delete("/api/plugins/acme.del/1.0.0")).status).toBe(401);
+    expect(
+      (await request(app).delete("/api/plugins/acme.del/9.9.9").set("x-publish-key", KEY)).status,
+    ).toBe(404);
+    expect(
+      (await request(app).delete("/api/plugins/acme.del/1.0.0").set("x-publish-key", KEY)).status,
+    ).toBe(204);
+    expect((await request(app).get("/api/plugins/acme.del")).status).toBe(404);
+  });
+});

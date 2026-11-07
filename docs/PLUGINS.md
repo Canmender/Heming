@@ -169,3 +169,43 @@
 - 工具束里的工具仍受 `permissions.tools` 风险上限约束：超过上限的工具照旧不注入。
 - 一个插件只声明工具束、不声明技能/MCP 也是合法的 v3 清单（清单 v3 对此**向后兼容**，旧应用会忽略该字段，不会坏）。
 
+## 云端插件仓库（d.95）
+
+安装包**不内置**任何第三方插件；官网/服务端只维护**一份**插件仓库，客户端在「插件区 → 仓库」
+里浏览、下载、安装。仓库是静态目录，服务端只做「列目录 + 原样分发清单」，不执行插件代码。
+
+### 目录布局（服务端 `HEMING_PLUGIN_DIR`）
+
+```
+<dir>/<插件 id>/<版本>/plugin.json          # 原样字节，一个 id 可有多版
+```
+
+缺省 `<cwd>/plugins-catalog`；部署时把发布产物同步到这个目录，或用环境变量指定。
+
+### 接口（公开读 / 密钥写）
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/plugins` | 公开 | 每个 id 的**最新版**：名称/版本/schemaVersion/描述/作者/sha256/权限/贡献计数 |
+| GET | `/api/plugins/:id` | 公开 | 该 id 的**全部版本**（新→旧，含各自 sha256），用于更新记录/回滚参考 |
+| GET | `/api/plugins/:id/:version/manifest` | 公开 | 原样 `plugin.json` 字节；响应头 `X-Plugin-Sha256` 供客户端校验 |
+| PUT | `/api/plugins/:id/:version` | `x-publish-key` | 发布/覆盖一个版本：body 是 plugin.json 全文，路径 id/版本必须与清单一致；首次 201、覆盖 200 |
+| DELETE | `/api/plugins/:id/:version` | `x-publish-key` | 下线某个版本（运维/CI） |
+
+- 写接口只在配置了 `HEMING_PLUGIN_PUBLISH_KEY` 时开启，否则一律 503；密钥不对 401；
+- 服务端不解析权限、不执行代码；权限/签名/安装校验仍由客户端在下载后做（sha256 不符就不装）；
+- 目录接口是公开产物，不含用户数据；客户端「插件区 → 仓库」与安装弹窗里的「从云端浏览」
+  走同一批接口，安装预览/信任确认/写入语义完全一致。
+
+### 发布
+
+```bash
+# 1) 写本地发布目录（沿用「同步目录到服务器」的部署链）
+node scripts/publish-plugin.mjs plugins/infohub-collector/plugin.json --dest /opt/heming/plugins
+
+# 2) 或直接推到云端仓库（CI 用；需服务端已配置发布密钥）
+HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugins/ --push https://heming.example.com
+```
+
+两种方式都会先做「能不能解析 / id 与版本是否合规 / schemaVersion 是否是整数 / 有没有名字」的基础校验，
+坏包不静默跳过（退出码非 0）。

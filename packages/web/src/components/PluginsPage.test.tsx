@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { render, screen, fireEvent, within, act, waitFor } from "@testing-library/react";
 import { PluginsPage } from "./PluginsPage.js";
 import { PluginStore, pluginServerId, type PluginMcpPort } from "../lib/plugins/index.js";
 import { SkillPool, type StorageLike } from "../lib/skills/index.js";
@@ -19,6 +19,30 @@ import { useModuleStore } from "../lib/modules/store.js";
 vi.mock("../lib/agentsApi.js", () => ({
   listAgents: vi.fn(async () => [{ id: "a1", name: "和鸣助手" }]),
 }));
+
+// 仓库 Tab 会拉云端目录并下载清单：固定成可控数据，不依赖网络。
+vi.mock("../lib/plugins/catalogClient.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/plugins/catalogClient.js")>();
+  return {
+    ...actual,
+    fetchPluginCatalog: vi.fn(async () => [
+      {
+        id: "acme.repo",
+        name: "仓库插件",
+        version: "1.0.0",
+        schemaVersion: 3,
+        description: "从仓库安装",
+        author: "ACME",
+        publishedAt: "2026-11-07T10:00:00.000Z",
+        sha256: "b".repeat(64),
+        size: 1024,
+        permissions: { network: [], tools: "none", files: [] },
+        contributions: { skills: 0, mcpServers: 0, commands: 0, toolPacks: 0 },
+      },
+    ]),
+    downloadPluginManifest: vi.fn(async () => JSON.stringify({ schemaVersion: 3, id: "acme.repo", name: "仓库插件", version: "1.0.0" })),
+  };
+});
 
 const T0 = new Date("2026-11-01T08:00:00.000Z").getTime();
 
@@ -135,6 +159,21 @@ function installNow(): void {
   });
   fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
 }
+
+describe("PluginsPage · 仓库 Tab（d.95）", () => {
+  it("仓库 Tab 展示云端目录；点「安装」下载清单并打开同一个安装预览", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "仓库" }));
+    expect(await screen.findByLabelText("搜索插件仓库")).toBeInTheDocument();
+    expect(await screen.findByText("仓库插件")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "安装" }));
+    // 下载后的清单填进安装弹窗：与手动粘贴/选文件走同一条预览管线
+    const textarea = await screen.findByLabelText("插件清单 JSON");
+    await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toContain("acme.repo"));
+    expect(screen.getByRole("button", { name: "确认安装" })).toBeInTheDocument();
+  });
+});
 
 describe("PluginsPage · 模块 Tab（d.70）", () => {
   it("通过一次性视图意图（pageView=modules）进入时直接落在模块 Tab（停用模块的兜底落点）", () => {
