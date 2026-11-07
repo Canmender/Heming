@@ -92,8 +92,8 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
   },
   {
     id: "accent-color",
-    title: "页面颜色",
-    keywords: ["主题", "主题色", "颜色", "配色", "accent", "色板", "自定义颜色", "恢复默认"],
+    title: "主题色",
+    keywords: ["主题", "主题色", "页面颜色", "颜色", "配色", "accent", "色板", "自定义颜色", "恢复默认"],
     section: "appearance",
   },
   {

@@ -163,7 +163,7 @@ export function AssistantPage() {
                   setCreateStartAt("name");
                   setCreateOpen(true);
                 }}
-                className="ml-auto flex h-[24px] items-center gap-1 rounded-md px-1.5 text-[12px] text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
+                className="ml-auto flex h-[24px] items-center gap-1 rounded-md px-1.5 text-[12px] text-[#666] hover:bg-[var(--subtle-4)] hover:text-ink"
               >
                 <PlusIcon width={14} height={14} />
                 <span>新建</span>
@@ -212,7 +212,7 @@ export function AssistantPage() {
                         disabled={busy}
                         onClick={() => void startChat(agent)}
                         className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors disabled:opacity-60 ${
-                          active ? "bg-[#f0f0f0]" : "hover:bg-[#f7f7f7]"
+                          active ? "bg-[var(--subtle-4)]" : "hover:bg-[var(--subtle-2)]"
                         }`}
                       >
                         <Avatar
@@ -227,7 +227,7 @@ export function AssistantPage() {
                               : conv?.lastMessageAt
                                 ? "最近有对话"
                                 : agent.id === "system-assistant"
-                                  ? "和鸣系统智能体"
+                                  ? "和鸣内置智能体"
                                   : agent.description || "暂无对话"}
                           </span>
                         </span>
@@ -236,7 +236,7 @@ export function AssistantPage() {
                         type="button"
                         aria-label={`编辑智能体：${agent.name}`}
                         onClick={() => setEditing(agent)}
-                        className="ui-micro absolute right-1.5 top-1/2 flex h-6 -translate-y-1/2 items-center rounded-sm px-1.5 opacity-0 hover:bg-[#e9e9e9] hover:text-ink focus:opacity-100 group-hover:opacity-100"
+                        className="ui-micro absolute right-1.5 top-1/2 flex h-6 -translate-y-1/2 items-center rounded-sm px-1.5 opacity-0 hover:bg-[var(--subtle-3)] hover:text-ink focus:opacity-100 group-hover:opacity-100"
                       >
                         编辑
                       </button>

@@ -53,6 +53,7 @@ beforeEach(() => {
     page: "chat",
     activeConversationId: null,
     taskDraft: null,
+    settingsTab: null,
   });
   useChatStore.setState({
     conversations: [
@@ -138,6 +139,8 @@ describe("通用智能体页面", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "去设置" }));
     expect(useUiStore.getState().page).toBe("settings");
+    // P1-2：直达「模型」页签，而不是停在「个人资料」
+    expect(useUiStore.getState().settingsTab).toBe("model");
   });
 
   it("选中运行记录：智能体未绑定时运行卡顶部也给同源提示（重跑/分叉不会白跑）", async () => {
@@ -151,6 +154,10 @@ describe("通用智能体页面", () => {
     expect(screen.getByText(/当前智能体还没有绑定模型连接/)).toBeInTheDocument();
     // 列表页与启动面板之外的第三处：同一个组件的「去设置」
     expect(screen.getAllByRole("button", { name: "去设置" }).length).toBeGreaterThan(0);
+    // 第三处的「去设置」同样直达「模型」页签
+    fireEvent.click(screen.getAllByRole("button", { name: "去设置" })[0]);
+    expect(useUiStore.getState().page).toBe("settings");
+    expect(useUiStore.getState().settingsTab).toBe("model");
   });
 
   it("选中运行记录 → 聚焦其会话并渲染嵌入式 ChatPage", () => {

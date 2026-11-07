@@ -436,6 +436,7 @@ describe("插件页 · 四个 Tab", () => {
     expect(screen.getByRole("button", { name: /添加 MCP 服务/ })).toBeInTheDocument();
     expect(screen.getByText(/MCP 协议 \d{4}-\d{2}-\d{2}/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /在接口区管理/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /在 MCP 服务 Tab 管理/ })).toBeNull();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
@@ -701,7 +702,7 @@ describe("插件页 · 工具束（d.65）", () => {
     expect(within(dialog).getByText(/工具束 1 · 工具 2/)).toBeInTheDocument();
   });
 
-  it("详情抽屉有「工具束」段：工具列表 + 在接口区管理切到 MCP Tab", () => {
+  it("详情抽屉有「工具束」段：工具列表 + 在 MCP 服务 Tab 管理切到 MCP Tab", () => {
     installV3();
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "查看插件详情 报告工具箱" }));
@@ -713,7 +714,7 @@ describe("插件页 · 工具束（d.65）", () => {
     expect(section).toHaveTextContent("report_export");
     expect(section).toHaveTextContent("未连接/未提供");
 
-    const manageButtons = within(section).getAllByRole("button", { name: "在接口区管理" });
+    const manageButtons = within(section).getAllByRole("button", { name: "在 MCP 服务 Tab 管理" });
     expect(manageButtons.length).toBeGreaterThan(0);
     fireEvent.click(manageButtons[manageButtons.length - 1]!);
     // d.67：接口区已并入本页「MCP 服务」Tab，动作变成切 Tab，不再跨页
@@ -804,7 +805,7 @@ describe("插件页 · 工具束逐个授权", () => {
     return within(dialog).getByRole("region", { name: "插件工具束" });
   }
 
-  it("本插件工具给 role=switch，非本插件工具只有「在接口区管理」", () => {
+  it("本插件工具给 role=switch，非本插件工具只有「在 MCP 服务 Tab 管理」", () => {
     const section = openDetailToolPacks();
     expect(section).toHaveTextContent("服务：报告服务");
     expect(section).toHaveTextContent("服务：手填服务");
@@ -816,7 +817,9 @@ describe("插件页 · 工具束逐个授权", () => {
     expect(
       within(section).queryByRole("switch", { name: /manual_echo/ }),
     ).toBeNull();
-    expect(within(section).getAllByRole("button", { name: "在接口区管理" }).length).toBeGreaterThan(0);
+    expect(
+      within(section).getAllByRole("button", { name: "在 MCP 服务 Tab 管理" }).length,
+    ).toBeGreaterThan(0);
   });
 
   it("点击开关先弹逐个确认：风险与 HITL 说明，确认后才写接口区同源开关", () => {

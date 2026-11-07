@@ -27,6 +27,8 @@ import { InfohubHomeCard } from "./InfohubHomeCard.js";
 import { StaffHomeCard } from "./StaffHomeCard.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
 import { OnboardingCard } from "./ux/OnboardingCard.js";
+import { HomeTeamUsage } from "./HomeTeamUsage.js";
+import { CHANGELOG } from "../generated/changelog.js";
 import { TeamIcon } from "./icons.js";
 import { fileRootsStore } from "../lib/fileEdit/roots.js";
 import { isModuleEffective, useModuleStore } from "../lib/modules/store.js";
@@ -34,27 +36,8 @@ import { isModuleEffective, useModuleStore } from "../lib/modules/store.js";
 /** 构建时注入的版本号（vite define __APP_VERSION__，file:// 桌面端无法 fetch package.json）。 */
 declare const __APP_VERSION__: string;
 
-/** 底部通栏「最新资讯」：静态产品介绍常量（非虚构统计数据）。 */
-const NEWS: { source: string; title: string; summary: string; date: string }[] = [
-  {
-    source: "官方",
-    title: "团队动向上线：任务与日程摘要汇总到「团队」页",
-    summary: "成员共享任务与日程摘要后，在「团队」页看汇总；对话正文和智能体轨迹不上传。",
-    date: "2026-11-02",
-  },
-  {
-    source: "教程",
-    title: "怎么让团队看到你的动向",
-    summary: "团队页顶部可分别开启任务、日程共享，只上报摘要（标题 / 状态 / 时间）。",
-    date: "2026-11-02",
-  },
-  {
-    source: "技巧",
-    title: "用共享目录投递附件给智能体",
-    summary: "右栏「上传」进共享库；对话里点文件行的「绑定」，下一轮消息就会带上它。",
-    date: "2026-11-02",
-  },
-];
+/** 底部通栏「最近更新」取真实更新日志（CHANGELOG.md 生成物），不再手写三条静态资讯。 */
+const RECENT_UPDATES = CHANGELOG.slice(0, 3);
 
 function StatCard({ title, value, sub }: { title: string; value: string; sub?: string }) {
   return (
@@ -84,6 +67,7 @@ export function HomePage() {
   const user = useAuthStore((s) => s.user);
   const { loadWorkspace, agentsRoster, loadAgentsRoster } = useChatStore();
   const setPage = useUiStore((s) => s.setPage);
+  const openSettings = useUiStore((s) => s.openSettings);
   const { quota, records } = useTokenUsageStore();
   /** UX-A 首跑引导：三步状态全部从真实 store 派生（连接/会话/任务），关闭状态只存本机。 */
   const llmProfiles = useLlmStore((s) => s.profiles);
@@ -154,7 +138,6 @@ export function HomePage() {
 
   const monthKey = useMemo(() => monthKeyOf(new Date().toISOString()), []);
   const monthSummary = useMemo(() => summarizeMonth(records, monthKey), [records, monthKey]);
-  const dayRows = useMemo(() => dailyTotals(records, monthKey), [records, monthKey]);
 
   const { today, todayKey } = useMemo(() => {
     const d = new Date();
@@ -166,6 +149,17 @@ export function HomePage() {
       todayKey: dayKeyOf(d.toISOString()),
     };
   }, []);
+
+  /**
+   * 按日明细只列到「今天」：本月还没到的日期不是「0 调用」，
+   * 把它们铺成 0 会让账本看起来像出错（审计 P1-6）。
+   */
+  const dayRows = useMemo(
+    () => dailyTotals(records, monthKey).filter((row) => row.day <= todayKey),
+    [records, monthKey, todayKey],
+  );
+  const monthHasRecords = monthSummary.total > 0 || monthSummary.missing > 0;
+
   // 今日用量：已上报的数字求和；未上报的单独计数（null 不是 0，不能混进求和）
   const todayUsage = useMemo(() => {
     let total = 0;
@@ -234,7 +228,14 @@ export function HomePage() {
     onboardingDismissedAt,
     onboardingSteps,
   );
-  const goOnboarding = (target: OnboardingTarget) => setPage(target);
+  /**
+   * 首跑引导的去处：第 1 步是「配置模型连接」，必须直接落在设置区「模型」页签，
+   * 不能只 setPage("settings")——那会停在「个人资料」，用户在昵称/头像里找模型。
+   */
+  const goOnboarding = (target: OnboardingTarget) => {
+    if (target === "settings") openSettings("model");
+    else setPage(target);
+  };
 
   const KIND_LABEL: Record<TeamActivity["kind"], string> = {
     task: "任务",
@@ -257,10 +258,10 @@ export function HomePage() {
       bodyClassName="flex flex-col gap-4"
       actions={
         <>
-          <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 ui-caption">
+          <span className="rounded-md border border-line bg-[var(--subtle)] px-2 py-0.5 ui-caption">
             版本 {__APP_VERSION__}
           </span>
-          <span className="rounded-md border border-line bg-[#fafafa] px-2 py-0.5 ui-caption">
+          <span className="rounded-md border border-line bg-[var(--subtle)] px-2 py-0.5 ui-caption">
             {/* 有数字优先；今天只有未上报 → 明说未上报，别用「0」冒充真实用量 */}
             {todayUsage.reported > 0
               ? `今日已用 ${todayUsage.total}`
@@ -279,14 +280,14 @@ export function HomePage() {
 
       {/* 2. 四张统计卡（真实数据）：宽窗 4 列，窄窗折成 2 列（不新增断点，沿用 max-[1199px]:） */}
       <div className="grid grid-cols-4 gap-2.5 max-[1199px]:grid-cols-2">
-        <StatCard title="团队成员" value={String(members.length)} sub="全站注册用户" />
-        <StatCard title="在线成员" value={String(onlineCount)} sub="约 20 秒刷新" />
-        <StatCard title="我的智能体" value={String(agentsRoster.length)} sub="本机运行 · 含系统预设" />
-        <StatCard title="今日动向" value={String(todayActivities)} sub="今天的团队动态" />
+        <StatCard title="团队成员" value={String(members.length)} sub="全站成员" />
+        <StatCard title="在线成员" value={String(onlineCount)} sub="此刻在线" />
+        <StatCard title="我的智能体" value={String(agentsRoster.length)} sub="都在这台设备上运行" />
+        <StatCard title="今日动向" value={String(todayActivities)} sub="成员共享的任务与日程" />
         <div className="col-span-4 ui-card p-3 max-[1199px]:col-span-2">
           <div className="flex items-center">
             <div className="text-[11px] font-bold text-muted">Token 用量 · {monthKey}</div>
-            <div className="ml-auto inline-flex overflow-hidden rounded-lg border border-[#ddd] bg-[#fafafa]">
+            <div className="ml-auto inline-flex overflow-hidden rounded-lg border border-line bg-[var(--subtle)]">
               {(
                 [
                   ["me", "个人"],
@@ -301,7 +302,7 @@ export function HomePage() {
                     setTab(key);
                     if (key !== "date") setOpenDay(null);
                   }}
-                  className={`border-l border-[#eee] px-2.5 py-1 text-[11px] font-semibold first:border-l-0 ${
+                  className={`border-l border-line-soft px-2.5 py-1 text-[11px] font-semibold first:border-l-0 ${
                     tab === key ? "bg-ink text-white" : "text-muted"
                   }`}
                 >
@@ -321,7 +322,7 @@ export function HomePage() {
                   </small>
                 </div>
                 <div className="text-[10px] text-muted">本月已用 {pct}%</div>
-                <div className="mt-1 h-1 w-[140px] overflow-hidden rounded-sm bg-[#f0f0f0]">
+                <div className="mt-1 h-1 w-[140px] overflow-hidden rounded-sm bg-[var(--subtle-4)]">
                   <div className="h-full bg-ink" style={{ width: `${pct}%` }} />
                 </div>
                 {/* 未上报单独提示（灰字，不抢主数字）：null 不是 0，不能被总量悄悄吞掉 */}
@@ -329,7 +330,7 @@ export function HomePage() {
                   <div className="mt-1 text-[10px] text-muted">{monthSummary.missing} 轮未上报</div>
                 )}
               </div>
-              <div className="flex-1 border-l border-[#f1f1f1] pl-4">
+              <div className="flex-1 border-l border-line-soft pl-4">
                 {modelRows.length === 0 ? (
                   <EmptyState
                     compact
@@ -353,12 +354,21 @@ export function HomePage() {
               </div>
             </div>
           ) : tab === "team" ? (
-            <div className="mt-2 text-[11px] text-muted">团队用量排行暂未开放。</div>
+            <HomeTeamUsage />
+          ) : !monthHasRecords ? (
+            <div className="mt-2">
+              <EmptyState
+                compact
+                className="px-0 py-2"
+                title="本月还没有调用记录"
+                desc="接入模型并开始对话后，这里按天列出用量（只列到今天）。"
+              />
+            </div>
           ) : (
             <div className="mt-2 max-h-[220px] overflow-y-auto">
               <table className="w-full text-left text-[11px]">
                 <thead>
-                  <tr className="border-b border-[#ececec] text-muted">
+                  <tr className="border-b border-line-soft text-muted">
                     <th className="py-1 font-semibold">日期</th>
                     <th className="py-1 font-semibold">个人</th>
                     <th className="py-1 font-semibold">操作</th>
@@ -367,7 +377,7 @@ export function HomePage() {
                 <tbody>
                   {dayRows.map((row) => (
                     <Fragment key={row.day}>
-                      <tr className="border-b border-[#f4f4f4]">
+                      <tr className="border-b border-line-soft">
                         <td className="py-1">{row.day}</td>
                         <td className="py-1">{row.total}</td>
                         <td className="py-1">
@@ -381,7 +391,7 @@ export function HomePage() {
                         </td>
                       </tr>
                       {openDay === row.day ? (
-                        <tr className="bg-[#fafafa]">
+                        <tr className="bg-[var(--subtle)]">
                           <td colSpan={3} className="py-1.5 pl-4">
                             {Object.keys(row.byModel).length === 0 ? (
                               <span className="text-muted">当天无调用记录</span>
@@ -411,7 +421,7 @@ export function HomePage() {
               <div className="text-[11px] font-bold text-muted">近 30 日用量</div>
               <div className="ml-auto flex items-center gap-1 text-[10px] text-muted">
                 少
-                {["#f1f4f7", "#dbeafe", "#93c5fd", "#3b82f6", "#1d4ed8"].map((c) => (
+                {["var(--heat-0)", "var(--heat-1)", "var(--heat-2)", "var(--heat-3)", "var(--heat-4)"].map((c) => (
                   <span key={c} style={{ backgroundColor: c }} className="h-2.5 w-2.5 rounded-[2px]" />
                 ))}
                 多
@@ -455,11 +465,11 @@ export function HomePage() {
               </div>
             ) : teamError ? (
               <div className="flex items-center justify-between gap-2 py-1.5 text-[12px]">
-                <span role="alert" className="min-w-0 truncate text-[#b42318]">加载失败：{teamError}</span>
+                <span role="alert" className="min-w-0 truncate text-[var(--danger)]">加载失败：{teamError}</span>
                 <button
                   type="button"
                   onClick={loadTeam}
-                  className="ui-link border border-[#e6e6e6]"
+                  className="ui-link border border-line"
                 >
                   重试
                 </button>
@@ -479,7 +489,7 @@ export function HomePage() {
                   key={a.id}
                   type="button"
                   onClick={() => setPage("team")}
-                  className="flex w-full items-start gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors duration-150 hover:bg-[#f7f7f7]"
+                  className="flex w-full items-start gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors duration-150 hover:bg-[var(--subtle-2)]"
                 >
                   <Avatar
                     user={{
@@ -547,7 +557,7 @@ export function HomePage() {
                 ))}
               </div>
             ) : teamError ? (
-              <div role="alert" className="text-[12px] text-[#b42318]">加载失败：{teamError}</div>
+              <div role="alert" className="text-[12px] text-[var(--danger)]">加载失败：{teamError}</div>
             ) : onlineMembers.length === 0 ? (
               <EmptyState compact className="px-0 py-2" title="当前没有人在线" />
             ) : (
@@ -558,7 +568,7 @@ export function HomePage() {
                       user={{ displayName: m.user.displayName, avatar: m.user.avatar }}
                       size={22}
                     />
-                    <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white bg-[#16a34a]" />
+                    <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-[var(--surface)] bg-[var(--success)]" />
                   </span>
                   <span className="min-w-0 flex-1 truncate font-medium">{m.user.displayName}</span>
                   <span className="text-muted">@{m.user.username}</span>
@@ -590,21 +600,30 @@ export function HomePage() {
         </div>
       </div>
 
-      {/* 7. 底部通栏：最新资讯（静态常量） */}
+      {/* 7. 底部通栏：最近更新（真实更新日志，3 条；点开进设置区「关于」看全文） */}
       <section className="ui-card p-3">
-        <div className="mb-2 text-[12px] font-bold text-muted">最新资讯</div>
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[12px] font-bold text-muted">最近更新</div>
+          <button type="button" className="ui-link" onClick={() => openSettings("about")}>
+            查看全部
+          </button>
+        </div>
         <div className="grid grid-cols-3 gap-2.5 max-[1199px]:grid-cols-2">
-          {NEWS.map((n) => (
-            <article key={n.title} className="rounded-lg border border-line-soft bg-[#fafafa] p-2.5">
+          {RECENT_UPDATES.map((n) => (
+            <button
+              key={n.version}
+              type="button"
+              onClick={() => openSettings("about")}
+              className="rounded-lg border border-line-soft p-2.5 text-left transition-colors duration-150 hover:bg-[var(--subtle)]"
+            >
               <div className="flex items-center gap-1.5">
-                <span className="rounded-sm border border-line bg-white px-1.5 py-px text-[10px] text-muted">
-                  {n.source}
+                <span className="rounded-sm border border-line px-1.5 py-px text-[10px] text-muted tabular-nums">
+                  {n.version}
                 </span>
                 <span className="text-[10px] text-muted">{n.date}</span>
               </div>
               <div className="mt-1 text-[12px] font-bold">{n.title}</div>
-              <div className="mt-0.5 text-[11px] leading-relaxed text-muted">{n.summary}</div>
-            </article>
+            </button>
           ))}
         </div>
       </section>

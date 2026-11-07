@@ -28,6 +28,7 @@ import { dayKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
 import { FOCUS_RING, FOCUS_RING_TIGHT } from "../lib/a11y/focus.js";
 import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
+import { fmtTokens } from "../lib/format/tokens.js";
 import { Avatar } from "./Avatar.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { TeamBoardView } from "./TeamBoardPage.js";
@@ -92,19 +93,13 @@ function fmtLastSeen(iso: string | null): string {
   return `${Math.floor(diff / 86_400_000)} 天前活跃`;
 }
 
-/** token 数的紧凑写法：超过 1 万换成「万」，避免排行榜每行都是长数字。 */
-export function fmtTokens(n: number): string {
-  const v = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
-  if (v < 10_000) return String(v);
-  return `${(v / 10_000).toFixed(1)} 万`;
-}
-
 export function TeamPage() {
   const me = useAuthStore((s) => s.user);
   const focusUserId = useUiStore((s) => s.teamFocusUserId);
   const consumeTeamFocus = useUiStore((s) => s.consumeTeamFocus);
   /** 一次性视图意图（d.67）：旧「团队看板」链接会被折叠成 team + pageView="board"。 */
   const pageView = useUiStore((s) => s.pageView);
+  const setPage = useUiStore((s) => s.setPage);
   const share = useTeamShareStore((s) => s.settings);
   const updateShare = useTeamShareStore((s) => s.update);
 
@@ -416,34 +411,45 @@ export function TeamPage() {
         </>
       }
       actions={
-        <span className="ui-chip">共享 {shareCount}/3</span>
+        <span
+          className="ui-chip"
+          title={`已共享：${[
+            share.tasks ? "任务摘要" : "",
+            share.agenda ? "日程摘要" : "",
+            share.usage ? "用量排行" : "",
+          ]
+            .filter(Boolean)
+            .join("、") || "尚未共享任何内容"}`}
+        >
+          共享 {shareCount}/3
+        </span>
       }
       headerExtra={
-        <div className="bg-[#fbfbfb] px-6 py-2">
+        <div className="bg-[var(--subtle)] px-6 py-2">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <span className="ui-caption">
-              对团队可见：任务 / 日程摘要与用量排行，不含对话和工具参数
+              向团队共享（只上报摘要，不含对话与工具参数）：
             </span>
             <div className="flex items-center gap-3" role="group" aria-label="共享内容">
-              <label className="flex items-center gap-1 ui-caption text-[#555]">
+              <label className="flex items-center gap-1 ui-caption">
                 <input
                   type="checkbox"
                   className="h-3.5 w-3.5 accent-[#1a1a1a]"
                   checked={share.tasks}
                   onChange={(e) => updateShare({ tasks: e.target.checked })}
                 />
-                任务
+                任务摘要
               </label>
-              <label className="flex items-center gap-1 ui-caption text-[#555]">
+              <label className="flex items-center gap-1 ui-caption">
                 <input
                   type="checkbox"
                   className="h-3.5 w-3.5 accent-[#1a1a1a]"
                   checked={share.agenda}
                   onChange={(e) => updateShare({ agenda: e.target.checked })}
                 />
-                日程
+                日程摘要
               </label>
-              <label className="flex items-center gap-1 ui-caption text-[#555]">
+              <label className="flex items-center gap-1 ui-caption">
                 <input
                   type="checkbox"
                   aria-label="共享用量"
@@ -451,7 +457,7 @@ export function TeamPage() {
                   checked={share.usage}
                   onChange={(e) => updateShare({ usage: e.target.checked })}
                 />
-                用量
+                用量排行
               </label>
             </div>
             {/* 一项都没开时不会同步，显示「尚未同步」会让人以为出了故障 */}
@@ -464,14 +470,21 @@ export function TeamPage() {
             )}
             <button
               type="button"
-              className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted"
+              // 从未共享过（也没同步过）时没有可清除的记录：不用一个点了没反应的按钮骗人
+              disabled={shareCount === 0 && !share.lastSyncAt}
+              title={
+                shareCount === 0 && !share.lastSyncAt
+                  ? "还没有可清除的共享记录"
+                  : "删除你已上传到团队动向/用量排行的全部摘要"
+              }
+              className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted disabled:opacity-40"
               onClick={() => setConfirmClear(true)}
             >
               清除共享记录
             </button>
           </div>
           {syncError && (
-            <p role="alert" className="mt-1 ui-micro text-[#b42318]">
+            <p role="alert" className="mt-1 ui-micro text-[var(--danger)]">
               共享同步失败：{syncError}
             </p>
           )}
@@ -733,9 +746,8 @@ export function TeamPage() {
 
           {tab === "agenda" && (
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-              <p className="rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2 text-[11px] leading-5 text-muted">
-                团队日程只收成员自己开启共享的「日程」摘要（标题 + 到期时间），不含日程详情、证据或发送人；
-                不新增任何云端内容上传。
+              <p className="rounded-lg border border-line-soft bg-[var(--subtle)] px-2.5 py-2 text-[11px] leading-5 text-muted">
+                团队日程只收成员共享的日程摘要（标题 + 到期时间）；详情、证据与发送人不出现，也不新增云端内容。
               </p>
               {!feedReady ? (
                 <p role="status" className="mt-3 ui-caption">加载中…</p>
@@ -743,17 +755,23 @@ export function TeamPage() {
                 <div className="py-10 text-center text-[12px] leading-6 text-muted">
                   {!infohubRunning ? (
                     <>
-                      <p className="font-medium text-[#555]">仅本机可见</p>
+                      <p className="font-medium text-ink">还没有共享的日程</p>
                       <p className="mt-1">
-                        信息中枢未连接：团队日程不显示，本机日程也没有被采集。连接信息中枢并开启「日程」共享后，
-                        摘要才会同步给团队。
+                        连接「信息中枢」后，团队成员共享的日程摘要会出现在这里（只含标题与到期时间）。
                       </p>
-                      <p className="mt-1 ui-caption">信息中枢只在本机运行，不会自动拉起。</p>
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn-sm ui-btn-primary mt-3"
+                        onClick={() => setPage("infohub")}
+                      >
+                        去连接信息中枢
+                      </button>
+                      <p className="mt-2 ui-caption">信息中枢只在本机运行，不会自动拉起。</p>
                     </>
                   ) : !share.agenda ? (
                     <>
-                      <p>你还没有开启「日程」共享。</p>
-                      <p className="mt-1 ui-caption">
+                      <p className="font-medium text-ink">你还没有开启「日程摘要」共享</p>
+                      <p className="mt-1">
                         开启后，你的日程摘要（标题 + 到期时间）会出现在团队日程里。
                       </p>
                     </>

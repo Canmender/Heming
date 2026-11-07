@@ -327,6 +327,7 @@ describe("ChatPage", () => {
       page: "chat",
       activeConversationId: "c1",
       pendingAttachment: null,
+      settingsTab: null,
     });
     useChatStore.setState({
       conversations: [
@@ -688,11 +689,11 @@ describe("ChatPage", () => {
     expect(
       screen.queryByText("连接已断开，正在自动重连…消息会排队，恢复后自动补发"),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("已恢复连接")).toBeInTheDocument();
-    expect(screen.getByText("已连接")).toBeInTheDocument();
+    expect(screen.getByText("通道已恢复")).toBeInTheDocument();
+    expect(screen.getByText("通道已连接")).toBeInTheDocument();
   });
 
-  it("首次连接不显示「已恢复连接」", async () => {
+  it("首次连接不显示「通道已恢复」", async () => {
     mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {});
@@ -700,8 +701,8 @@ describe("ChatPage", () => {
     act(() => {
       lastHandlers().onOpen?.();
     });
-    expect(screen.getByText("已连接")).toBeInTheDocument();
-    expect(screen.queryByText("已恢复连接")).not.toBeInTheDocument();
+    expect(screen.getByText("通道已连接")).toBeInTheDocument();
+    expect(screen.queryByText("通道已恢复")).not.toBeInTheDocument();
   });
 
   it("恢复提示出现后再断线：提示立刻收起，断线横幅出现", async () => {
@@ -715,18 +716,18 @@ describe("ChatPage", () => {
     act(() => {
       lastHandlers().onOpen?.();
     });
-    expect(screen.getByText("已恢复连接")).toBeInTheDocument();
+    expect(screen.getByText("通道已恢复")).toBeInTheDocument();
 
     act(() => {
       lastHandlers().onClose?.();
     });
-    expect(screen.queryByText("已恢复连接")).not.toBeInTheDocument();
+    expect(screen.queryByText("通道已恢复")).not.toBeInTheDocument();
     expect(
       screen.getByText("连接已断开，正在自动重连…消息会排队，恢复后自动补发"),
     ).toBeInTheDocument();
   });
 
-  it("切会话重建连接不误报「已恢复连接」（断线标记不跨会话黏住）", async () => {
+  it("切会话重建连接不误报「通道已恢复」（断线标记不跨会话黏住）", async () => {
     mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {});
@@ -737,24 +738,24 @@ describe("ChatPage", () => {
     act(() => {
       lastHandlers().onOpen?.();
     });
-    expect(screen.getByText("已恢复连接")).toBeInTheDocument();
+    expect(screen.getByText("通道已恢复")).toBeInTheDocument();
 
-    // 切到 c2：WS effect 重建，新连接尚未 open → 回到「连接中…」，恢复提示清掉
+    // 切到 c2：WS effect 重建，新连接尚未 open → 回到「通道连接中…」，恢复提示清掉
     act(() => {
       useUiStore.setState({ activeConversationId: "c2" });
     });
-    expect(screen.getByText("连接中…")).toBeInTheDocument();
-    expect(screen.queryByText("已恢复连接")).not.toBeInTheDocument();
+    expect(screen.getByText("通道连接中…")).toBeInTheDocument();
+    expect(screen.queryByText("通道已恢复")).not.toBeInTheDocument();
 
     // c2 的连接首次 open 不算「恢复」
     act(() => {
       lastHandlers().onOpen?.();
     });
-    expect(screen.getByText("已连接")).toBeInTheDocument();
-    expect(screen.queryByText("已恢复连接")).not.toBeInTheDocument();
+    expect(screen.getByText("通道已连接")).toBeInTheDocument();
+    expect(screen.queryByText("通道已恢复")).not.toBeInTheDocument();
   });
 
-  it("「已恢复连接」3 秒后自动消失", async () => {
+  it("「通道已恢复」3 秒后自动消失", async () => {
     mockMessagesFetch([]);
     render(<ChatPage />);
     await act(async () => {});
@@ -767,17 +768,17 @@ describe("ChatPage", () => {
       act(() => {
         lastHandlers().onOpen?.();
       });
-      expect(screen.getByText("已恢复连接")).toBeInTheDocument();
+      expect(screen.getByText("通道已恢复")).toBeInTheDocument();
 
       act(() => {
         vi.advanceTimersByTime(2999);
       });
-      expect(screen.getByText("已恢复连接")).toBeInTheDocument(); // 未满 3 秒仍在
+      expect(screen.getByText("通道已恢复")).toBeInTheDocument(); // 未满 3 秒仍在
 
       act(() => {
         vi.advanceTimersByTime(1);
       });
-      expect(screen.queryByText("已恢复连接")).not.toBeInTheDocument();
+      expect(screen.queryByText("通道已恢复")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -4138,6 +4139,23 @@ describe("UX-A 未绑定模型与对话空态", () => {
 
     fireEvent.click(within(noticeBox).getByRole("button", { name: "去设置" }));
     expect(useUiStore.getState().page).toBe("settings");
+    // P1-2：直达设置区「模型」页签，不要停在「个人资料」让用户在昵称/头像里找模型
+    expect(useUiStore.getState().settingsTab).toBe("model");
+  });
+
+  it("通道状态只描述实时通道，不与「未绑定模型」互相矛盾（P1-3）", async () => {
+    render(<ChatPage />);
+    await act(async () => {});
+
+    // 未绑定：橙色提示条出现、发送禁用
+    expect(await screen.findByText(/当前智能体还没有绑定模型连接/)).toBeInTheDocument();
+    act(() => {
+      lastHandlers().onOpen?.();
+    });
+    // 通道连上是事实，但措辞必须点明是「通道」，不能被读成「智能体已连上模型」
+    expect(screen.getByText("通道已连接")).toBeInTheDocument();
+    // 旧文案「已连接」（裸说法）不再出现，避免与模型就绪混淆
+    expect(screen.queryByText("已连接")).not.toBeInTheDocument();
   });
 
   it("绑定模型后提示消失、发送可用（同一判定驱动提示与禁用）", async () => {

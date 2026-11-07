@@ -152,6 +152,11 @@ export function InterfacesView({
     () => servers.reduce((n, s) => n + toolsByServer[s.id].filter((t) => registry.isToolEnabled(s.id, t.name)).length, 0),
     [registry, servers, toolsByServer, tick],
   );
+  /**
+   * 被删掉过的预置服务 id（d.77）：有值才显示「恢复预置服务」。
+   * 预置的删除是「不再自动补回」的语义，没有这个入口就只能手填找回。
+   */
+  const removedPresets = useMemo(() => registry.removedPresetIds(), [registry, tick]);
 
   // 组件卸载时刷新不设置状态
   useEffect(() => () => setConn({}), []);
@@ -224,6 +229,19 @@ export function InterfacesView({
 
   const removeServer = (server: McpServerConfig) => {
     setRemoveTarget(server);
+  };
+
+  /** 恢复被删掉的预置服务；按钮只在存在删除记录时出现（见 removedPresets）。 */
+  const restorePresets = () => {
+    const restored = registry.restorePresets();
+    bump();
+    setMsg({
+      kind: "ok",
+      text:
+        restored > 0
+          ? `已恢复 ${restored} 个预置服务`
+          : "预置服务都在（同名服务已存在，不覆盖其配置）",
+    });
   };
 
   const confirmRemoveServer = () => {
@@ -304,6 +322,11 @@ export function InterfacesView({
           <PlusIcon width={13} height={13} />
           添加 MCP 服务
         </button>
+        {removedPresets.length > 0 && (
+          <button type="button" onClick={restorePresets} className="ui-btn ui-btn-md ui-btn-ghost">
+            恢复预置服务
+          </button>
+        )}
         <span className="ml-auto text-[11px] text-muted">
           MCP 协议 {MCP_PROTOCOL_VERSION} · 工具默认关闭，需要逐个授权
         </span>
@@ -704,7 +727,10 @@ export function InterfacesView({
         >
           <p className="text-[12px] leading-6">
             删除 MCP 服务「{removeTarget.name}」？这条配置、缓存的工具清单与逐个工具的授权开关都会被移除；
-            需要时得重新添加或从发现页安装。删除不会卸载本机的第三方包。
+            {registry.isPreset(removeTarget.id)
+              ? "这是随应用内置的预置服务，删除后可用列表上方的「恢复预置服务」找回。"
+              : "需要时得重新添加或从发现页安装。"}
+            删除不会卸载本机的第三方包。
           </p>
         </ConfirmDialog>
       )}

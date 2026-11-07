@@ -1312,11 +1312,21 @@ export function MemoryPage({
               />
               附上辅助账本（用量/召回记录，可再生）
             </label>
-            <button type="button" onClick={() => void onExportMemoryFile()} className={btnGhost}>
-              {hasDesktopExportBridge() ? "导出到文件" : "下载 JSON"}
+            <button
+              type="button"
+              onClick={() => void onExportMemoryFile()}
+              title={hasDesktopExportBridge() ? "保存到本机导出目录" : "下载为 JSON 文件"}
+              className={btnGhost}
+            >
+              {hasDesktopExportBridge() ? "导出到文件" : "下载文件"}
             </button>
-            <button type="button" onClick={() => void onExportMemory()} className={btnGhost}>
-              导出
+            <button
+              type="button"
+              onClick={() => void onExportMemory()}
+              title="复制到剪贴板，不产生文件"
+              className={btnGhost}
+            >
+              复制 JSON
             </button>
             <button
               type="button"
@@ -1473,7 +1483,10 @@ export function MemoryPage({
                         {entry.value}
                       </div>
                       <div className="mt-1 text-[10px] text-muted">
-                        {SOURCE_LABEL[entry.source]} · 置信度 {entry.confidence.toFixed(2)}
+                        {SOURCE_LABEL[entry.source]}
+                        {/* 手动添加的条目没有「置信度」可言：置信度是自动提取时的可信度，
+                            人工录入再显示 0.60 只会让人怀疑内容本身（d.77）。 */}
+                        {entry.source === "manual" ? "" : ` · 置信度 ${entry.confidence.toFixed(2)}`}
                         {touchNote(touches.get(entry.id))}
                       </div>
                       {personalNote(usage[entry.id]) && (
@@ -1982,17 +1995,21 @@ export function MemoryPage({
             {label}
           </button>
         ))}
+        {/* 间隔是**所有频率档共用**的节流（不是某一档的专属参数），所以常显；
+            但要在界面上说清「每 N 轮」，否则一个孤零零的 10 看不出在控制什么。 */}
         <label className="flex items-center gap-1 text-[11px] text-muted">
-          每隔几轮
+          每
           <input
             aria-label="每隔几轮复盘"
             type="number"
             min={1}
             max={50}
+            disabled={reviewSettings.frequency === "never"}
             value={reviewSettings.turnsThreshold}
             onChange={(e) => patchReview({ turnsThreshold: Number(e.target.value) })}
-            className="w-[56px] rounded-lg border border-line-strong px-2 py-1 text-[12px]"
+            className="w-[56px] rounded-lg border border-line-strong px-2 py-1 text-[12px] disabled:opacity-50"
           />
+          轮才复盘一次
         </label>
       </div>
 
@@ -2061,8 +2078,10 @@ export function MemoryPage({
                 <Fragment key={agent.id}>
                   <tr className="align-middle">
                     <td className="py-2 pr-2">
-                      <div className="ui-body-sm font-semibold">{agent.name}</div>
-                      <div className="ui-caption">{agent.id}</div>
+                      {/* 只显示名称；原始 id（含 UUID）收进 title，需要排查时悬停可见（d.77）。 */}
+                      <div className="ui-body-sm font-semibold" title={`智能体 ID：${agent.id}`}>
+                        {agent.name}
+                      </div>
                     </td>
                     <td className="py-2 text-center">
                       <Switch

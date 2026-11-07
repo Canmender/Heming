@@ -184,7 +184,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
   const createTask = useTaskStore((s) => s.create);
   const focusConversation = useUiStore((s) => s.focusConversation);
   const setTaskDraft = useUiStore((s) => s.setTaskDraft);
-  const setPage = useUiStore((s) => s.setPage);
+  const openSettings = useUiStore((s) => s.openSettings);
   const templates = useTemplateStore((s) => s.templates);
   const saveTemplate = useTemplateStore((s) => s.save);
   const removeTemplate = useTemplateStore((s) => s.remove);
@@ -331,7 +331,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
 
         {agentsRoster.length > 0 && boundCount === 0 && (
           <div className="mt-3">
-            <UnboundModelNotice onGoSettings={() => setPage("settings")} />
+            <UnboundModelNotice onGoSettings={() => openSettings("model")} />
           </div>
         )}
 
@@ -842,7 +842,7 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
               sources={sources}
               copied={copied}
               agentUnbound={selectedAgentUnbound}
-              onGoSettings={() => useUiStore.getState().setPage("settings")}
+              onGoSettings={() => useUiStore.getState().openSettings("model")}
               onCopy={(format) => void copyTask(selected, format)}
               onRerun={() => setRerunTarget(selected)}
               onFork={(seq) => requestFork(selected, seq)}

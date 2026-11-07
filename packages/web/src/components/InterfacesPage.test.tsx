@@ -292,3 +292,50 @@ describe("InterfacesView 嵌入视图", () => {
     expect(created?.headers).toEqual({ Authorization: "Bearer t" });
   });
 });
+
+/* ------------------------------------------------- 预置服务的删除与恢复（d.77） */
+
+describe("内置预置服务：删除后可恢复", () => {
+  /** 全新存储 → 首次预置两条（Windows 桌面控制 / 网页抓取）。 */
+  function freshRegistry(): McpRegistry {
+    return new McpRegistry(memStorage());
+  }
+
+  it("没删过预置时不显示「恢复预置服务」按钮", () => {
+    const fresh = freshRegistry();
+    render(<InterfacesView registry={fresh} />);
+    expect(screen.queryByRole("button", { name: "恢复预置服务" })).not.toBeInTheDocument();
+  });
+
+  it("删预置后出现恢复按钮，点击把服务补回来并给 role=status 反馈", () => {
+    const fresh = freshRegistry();
+    fresh.remove("mcp-scrapling");
+    render(<InterfacesView registry={fresh} />);
+
+    const restore = screen.getByRole("button", { name: "恢复预置服务" });
+    fireEvent.click(restore);
+
+    expect(screen.getByRole("status")).toHaveTextContent("已恢复 1 个预置服务");
+    expect(screen.getByRole("region", { name: "MCP 服务 网页抓取（Scrapling）" })).toBeInTheDocument();
+    // 恢复后不再需要这个入口
+    expect(screen.queryByRole("button", { name: "恢复预置服务" })).not.toBeInTheDocument();
+  });
+
+  it("删除确认里说明这是内置预置、可用「恢复预置服务」找回", () => {
+    const fresh = freshRegistry();
+    render(<InterfacesView registry={fresh} />);
+    fireEvent.click(screen.getByRole("button", { name: "删除 网页抓取（Scrapling）" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/这是随应用内置的预置服务/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/恢复预置服务/)).toBeInTheDocument();
+  });
+
+  it("手填的服务删除确认里不出现预置说明", () => {
+    const fresh = freshRegistry();
+    const mine = fresh.add({ name: "我自己的", transport: "http", url: "https://x.example.com/mcp" });
+    render(<InterfacesView registry={fresh} />);
+    fireEvent.click(screen.getByRole("button", { name: `删除 ${mine.name}` }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByText(/这是随应用内置的预置服务/)).toBeNull();
+  });
+});

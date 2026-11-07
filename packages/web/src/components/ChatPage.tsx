@@ -564,7 +564,7 @@ export function ChatPage({
   const [searchHitId, setSearchHitId] = useState<string | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
-  /** WS 三态：首次连接 / 已连接 / 已断开（用于标题与横幅，不用 connected 二元冒充）。 */
+  /** WS 三态：首次连接 / 通道已连接 / 通道断开（用于标题与横幅，不用 connected 二元冒充）。 */
   const [connState, setConnState] = useState<"connecting" | "open" | "closed">("connecting");
   /**
    * 当前会话 id 的同步镜像：WS 回调闭包里的 `convId` 是建立连接时的旧值，
@@ -574,7 +574,7 @@ export function ChatPage({
   /** 断线后恢复的短暂提示（3 秒）。 */
   const [recovered, setRecovered] = useState(false);
   const recoveredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 卸载时清掉「已恢复连接」的 3 秒定时器，防对已卸载组件 setState
+  // 卸载时清掉「通道已恢复」的 3 秒定时器，防对已卸载组件 setState
   useEffect(
     () => () => {
       if (recoveredTimer.current) clearTimeout(recoveredTimer.current);
@@ -2536,11 +2536,13 @@ export function ChatPage({
                   : "bg-[#c4c4c4]"
             }`}
           />
-          {connState === "open" ? "已连接" : connState === "closed" ? "连接已断开" : "连接中…"}
+          {/* 这里只描述「实时通道」状态，不要和「智能体能否对话（模型绑定）」混为一谈：
+              以前写「已连接」时，紧挨着的「当前智能体还没有绑定模型连接」提示条会自相矛盾。 */}
+          {connState === "open" ? "通道已连接" : connState === "closed" ? "通道断开" : "通道连接中…"}
         </span>
         {recovered && connState === "open" && (
           <span role="status" className="text-[11px] text-[#12b76a]">
-            已恢复连接
+            通道已恢复
           </span>
         )}
         {/* 会话内搜索：在已解密明文里找关键词，跳转并高亮命中的消息。 */}
@@ -2984,7 +2986,7 @@ export function ChatPage({
               id={UNBOUND_NOTICE_ID}
               variant="inline"
               agentName={unboundAgent.name}
-              onGoSettings={() => useUiStore.getState().setPage("settings")}
+              onGoSettings={() => useUiStore.getState().openSettings("model")}
             />
           </div>
         )}

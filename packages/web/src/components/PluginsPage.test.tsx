@@ -258,7 +258,7 @@ describe("PluginsPage 插件区", () => {
     expect(within(dialog).getByText("将覆盖更新")).toBeInTheDocument();
     expect(within(dialog).getByText("~ 财报速读")).toBeInTheDocument();
     expect(within(dialog).getByText("- 现金流检查")).toBeInTheDocument();
-    expect(within(dialog).getByText(/确认后将保留：接口区补的请求头/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/确认后将保留：在「MCP 服务」Tab 补的请求头/)).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "确认更新" }));
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -292,7 +292,7 @@ describe("PluginsPage 插件区", () => {
     const dialog = screen.getByRole("dialog", { name: "安装插件" });
     expect(within(dialog).getByText("MCP · 天气服务")).toBeInTheDocument();
     expect(within(dialog).getByText(/网络访问：mcp\.example\.com/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/安装后需到接口区连接/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/安装后需到「MCP 服务」Tab 连接/)).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "确认安装" }));
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -304,7 +304,7 @@ describe("PluginsPage 插件区", () => {
     expect(card).toHaveTextContent("MCP · 天气服务");
 
     // d.67：接口区已并入本页「MCP 服务」Tab，按钮变成切 Tab，不再跨页
-    fireEvent.click(within(card).getByRole("button", { name: "查看插件接口 财务助手包" }));
+    fireEvent.click(within(card).getByRole("button", { name: "查看插件 MCP 服务 财务助手包" }));
     expect(useUiStore.getState().page).toBe("home");
     expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
 
@@ -396,10 +396,10 @@ describe("PluginsPage 插件区", () => {
     expect(within(dialog).getByText("MCP 服务（1）")).toBeInTheDocument();
     expect(within(dialog).getByText("天气服务")).toBeInTheDocument();
     expect(within(dialog).getByText("mcp.example.com")).toBeInTheDocument();
-    expect(within(dialog).getByText(/连接与工具授权在接口区进行/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/连接与工具授权在「MCP 服务」Tab 进行/)).toBeInTheDocument();
 
     // d.67：不再跳接口区页，改为切到本页「MCP 服务」Tab
-    fireEvent.click(within(dialog).getByRole("button", { name: "查看接口" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "查看 MCP 服务" }));
     expect(useUiStore.getState().page).toBe("home");
     expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("dialog", { name: "插件详情 天气能力包" })).not.toBeInTheDocument();

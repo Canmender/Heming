@@ -9,7 +9,7 @@ import { useUiStore } from "../store/ui.js";
  * 浏览器端照常渲染（任务路可用；日程路需要信息中枢已连接）。
  */
 
-const CARD = "rounded-xl border border-[#ececec] bg-white p-3 shadow-card";
+const CARD = "ui-card p-3";
 const LINK = "ui-link";
 
 export function StaffHomeCard() {
@@ -27,7 +27,8 @@ export function StaffHomeCard() {
           {settings.enabled ? "常驻" : "未开启"}
         </span>
         <button type="button" className={`${LINK} ml-auto`} onClick={() => setPage("staff")}>
-          {settings.enabled ? "查看全部" : "开启幕僚"}
+          {/* 这里只是跳页，不会真的开启：文案必须说「去开启」，否则点完以为已开 */}
+          {settings.enabled ? "查看全部" : "去开启"}
         </button>
       </div>
 
@@ -44,7 +45,7 @@ export function StaffHomeCard() {
           <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted">
             <span>{formatStaffTime(latest.startedAt)}</span>
             <span>· {triggerLabel(latest.trigger)}</span>
-            {latest.mode === "fallback" && <span className="text-[#b42318]">· 已回退规则</span>}
+            {latest.mode === "fallback" && <span className="text-[var(--danger)]">· 已回退规则</span>}
           </div>
           <p className="mt-1 break-words text-[12px] leading-5">{latest.summary}</p>
           {latest.findings.length > 0 && (
@@ -54,12 +55,12 @@ export function StaffHomeCard() {
                   key={finding.id}
                   type="button"
                   onClick={() => setPage("staff")}
-                  className="flex items-center gap-2 rounded-md px-1.5 py-1 text-left text-[11px] hover:bg-[#f7f7f7]"
+                  className="flex items-center gap-2 rounded-md px-1.5 py-1 text-left text-[11px] hover:bg-[var(--subtle-2)]"
                 >
                   <span
                     className={`shrink-0 rounded-full border px-1.5 text-[9px] ${
                       finding.severity === "urgent"
-                        ? "border-[#fecdca] bg-[#fef3f2] text-[#b42318]"
+                        ? "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
                         : "border-line bg-panel text-muted"
                     }`}
                   >

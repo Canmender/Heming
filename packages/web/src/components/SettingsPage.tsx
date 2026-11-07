@@ -646,7 +646,7 @@ function NavModeSection() {
   );
 }
 
-/** 外观分组：页面颜色（预设色板 + 自定义十六进制；只驱动填充色，正文保持墨色）。 */
+/** 外观分组：主题色（预设色板 + 自定义十六进制；只驱动填充色，正文保持墨色）。 */
 function AppearanceSection() {
   const accent = useThemeStore((t) => t.accent);
   const setAccent = useThemeStore((t) => t.setAccent);
@@ -677,11 +677,11 @@ function AppearanceSection() {
 
   return (
     <section
-      aria-label="页面颜色"
+      aria-label="主题色"
       className="max-w-full rounded-xl border border-line bg-white p-4 shadow-card"
     >
       <div className="flex items-center gap-2">
-        <span className="ui-section-title">页面颜色</span>
+        <span className="ui-section-title">主题色</span>
         {applied && (
           <span role="status" className="ui-caption">
             已生效
@@ -814,14 +814,30 @@ function NavigationSection() {
   );
 }
 
-/** 关于分组：软件更新（仅安装版有桥，桥缺失时整卡不渲染）+ 更新日志。 */
+/** 更新日志默认只展开最近 N 个版本：111 条平铺是一面墙，用户只想看最近改了什么。 */
+const RECENT_LOG_LIMIT = 20;
+
+/** 关于分组：软件更新（仅安装版有桥；网页版给说明卡，不留空白高亮框）+ 更新日志。 */
 function AboutSection({ highlightedId }: { highlightedId: string | null }) {
   const [logState, setLogState] = useState<Record<string, boolean>>({});
+  const [showAllLogs, setShowAllLogs] = useState(false);
+  // 桥在桌面安装版里由 preload 注入；网页版没有——按审计 P1-3，搜索命中后不能只剩空框
+  const hasUpdateBridge =
+    typeof window !== "undefined" && Boolean(window.__heming_update);
 
   return (
     <div className="flex max-w-full flex-col gap-3">
       <div data-settings-id="update" className={anchorClass(highlightedId === "update")}>
-        <UpdateCard currentVersion={appVersionLabel()} />
+        {hasUpdateBridge ? (
+          <UpdateCard currentVersion={appVersionLabel()} />
+        ) : (
+          <section aria-label="软件更新" className="ui-card p-4">
+            <div className="ui-section-title">软件更新</div>
+            <p className="mt-1 ui-caption leading-5">
+              当前在网页里打开，更新由桌面安装版自动检查并提示；网页版会随服务端一起更新，不用手动升级。
+            </p>
+          </section>
+        )}
       </div>
 
       <div data-settings-id="changelog" className={anchorClass(highlightedId === "changelog")}>
@@ -834,10 +850,11 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
         <span className="ui-caption">当前 {appVersionLabel()}</span>
       </div>
       <div className="mt-1 ui-caption">
-        历史版本的改动记录；点击条目展开/收起
+        历史版本的改动记录；点击条目展开/收起。以下是开发记录原文（含实现细节与验证口径），
+        供排查问题时对照。
       </div>
       <ul className="mt-2 flex flex-col gap-1">
-        {CHANGELOG.map((entry) => {
+        {CHANGELOG.slice(0, showAllLogs ? CHANGELOG.length : RECENT_LOG_LIMIT).map((entry) => {
           const isCurrent = entry.version === appVersionLabel();
           const open = logOpenState(logState, entry.version, isCurrent);
           return (
@@ -891,6 +908,15 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
           );
         })}
       </ul>
+      {!showAllLogs && CHANGELOG.length > RECENT_LOG_LIMIT ? (
+        <button
+          type="button"
+          className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+          onClick={() => setShowAllLogs(true)}
+        >
+          显示更早的 {CHANGELOG.length - RECENT_LOG_LIMIT} 个版本
+        </button>
+      ) : null}
         </section>
       </div>
     </div>

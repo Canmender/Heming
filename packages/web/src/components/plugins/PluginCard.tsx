@@ -127,11 +127,11 @@ export function PluginCard({
           {manifest.contributions.mcpServers.length > 0 && (
             <button
               type="button"
-              aria-label={`查看插件接口 ${manifest.name}`}
+              aria-label={`查看插件 MCP 服务 ${manifest.name}`}
               onClick={onGoInterfaces}
               className={BTN_GHOST_SM}
             >
-              查看接口
+              查看 MCP 服务
             </button>
           )}
           <button

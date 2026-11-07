@@ -251,11 +251,14 @@ describe("团队用量：清除已上传记录", () => {
 });
 
 describe("团队日程：只读摘要", () => {
-  it("未连接信息中枢：空态写明「仅本机可见」，且不自动拉起、不上传", async () => {
+  it("未连接信息中枢：空态给「去连接」出口，且不自动拉起、不上传", async () => {
     await renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "团队日程" }));
-    expect(screen.getByText("仅本机可见")).toBeInTheDocument();
+    expect(screen.getByText("还没有共享的日程")).toBeInTheDocument();
     expect(screen.getByText(/不会自动拉起/)).toBeInTheDocument();
+    // 空态必须给出可点的下一步（审计 P1-7：原来只有一段术语，没有出口）
+    fireEvent.click(screen.getByRole("button", { name: "去连接信息中枢" }));
+    expect(useUiStore.getState().page).toBe("infohub");
     expect(uploadTeamActivities).not.toHaveBeenCalled();
     expect(useInfohubStore.getState().running).toBe(false);
   });

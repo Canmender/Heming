@@ -325,7 +325,7 @@ export function InstallDialog({
                   <DiffLine label="MCP 服务" diff={serverDiffLine(preview.servers)} />
                   <p className={HINT}>
                     {hasPreviewChanges(preview)
-                      ? "确认后将保留：接口区补的请求头、已授权工具、插件启停状态与安装时间。"
+                      ? "确认后将保留：在「MCP 服务」Tab 补的请求头、已授权工具、插件启停状态与安装时间。"
                       : "清单与已装内容一致，确认后只刷新更新时间。"}
                   </p>
                 </div>
@@ -359,7 +359,7 @@ export function InstallDialog({
                 <div className={`mt-2 ${HINT}`}>
                   网络访问：{preview.hosts.join("、") || "—"}
                   <br />
-                  安装后需到接口区连接并逐个启用工具；调用仍走人工确认。
+                  安装后需到「MCP 服务」Tab 连接并逐个启用工具；调用仍走人工确认。
                 </div>
               )}
 
@@ -367,7 +367,7 @@ export function InstallDialog({
                 <p role="alert" className={`mt-2 ${ERROR_TEXT}`}>
                   MCP 服务 id 冲突：
                   {preview.conflicts.map((item) => `${item.name}（${item.id}）`).join("、")}
-                  ；请先到接口区删除或改名，再安装。
+                  ；请先到「MCP 服务」Tab 删除或改名，再安装。
                 </p>
               )}
               {preview.limitReached && (

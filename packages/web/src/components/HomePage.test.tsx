@@ -13,6 +13,7 @@ import { FILE_ROOTS_KEY } from "../lib/fileEdit/roots.js";
 import { useModuleStore } from "../lib/modules/store.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { fetchTeam, fetchTeamActivities } from "../lib/api.js";
+import { CHANGELOG } from "../generated/changelog.js";
 
 // 团队名册与动向走 lib/api（首页真实数据优先）；health 探测仍走裸 fetch，单独 spy。
 vi.mock("../lib/api.js", async (importOriginal) => {
@@ -113,7 +114,7 @@ describe("HomePage", () => {
     useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
     useTaskStore.setState({ tasks: [] });
     useAuthStore.setState({ token: "t1", user, status: "authed", error: null });
-    useUiStore.setState({ page: "home", activeConversationId: null });
+    useUiStore.setState({ page: "home", activeConversationId: null, settingsTab: null });
     useChatStore.setState({
       agentsRoster: AGENT_ROSTER,
       loadWorkspace: vi.fn(async () => undefined),
@@ -149,7 +150,7 @@ describe("HomePage", () => {
     expect(within(statCard("在线成员")).getByText("1")).toBeInTheDocument();
     expect(within(statCard("我的智能体")).getByText("2")).toBeInTheDocument();
     expect(within(statCard("今日动向")).getByText("1")).toBeInTheDocument();
-    expect(within(statCard("在线成员")).getByText("约 20 秒刷新")).toBeInTheDocument();
+    expect(within(statCard("在线成员")).getByText("此刻在线")).toBeInTheDocument();
 
     expect(screen.getByText(`版本 ${__APP_VERSION__}`)).toBeInTheDocument();
     expect(screen.getByText("今日已用 700")).toBeInTheDocument();
@@ -246,6 +247,17 @@ describe("HomePage", () => {
     expect(useUiStore.getState().page).toBe("team");
   });
 
+  it("Token 用量卡「团队」页签：共享关闭时给开启入口，不拉排行", async () => {
+    render(<HomePage />);
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("button", { name: "团队" }));
+    expect(screen.getByText(/「用量」共享未开启/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "去团队页开启" })).toBeInTheDocument();
+    // 默认共享是关的：这一页不经 lib/api 拉排行（HomePage 的 fetch 只允许 /api/health）
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(expect.stringContaining("/api/team/usage"));
+  });
+
   it("智能体动态：名册前三个显示名称与描述；空名册给引导", async () => {
     render(<HomePage />);
     await act(async () => {});
@@ -259,7 +271,7 @@ describe("HomePage", () => {
     expect(screen.getByText("暂无智能体，可在智能体页创建")).toBeInTheDocument();
   });
 
-  it("系统状态三行与最新资讯三卡", async () => {
+  it("系统状态三行与「最近更新」三卡（取真实更新日志）", async () => {
     render(<HomePage />);
     await act(async () => {});
 
@@ -271,13 +283,16 @@ describe("HomePage", () => {
     expect(screen.getByText("文件可写目录")).toBeInTheDocument();
     expect(screen.getByText("未绑定")).toBeInTheDocument();
 
-    expect(screen.getByText("最新资讯")).toBeInTheDocument();
-    expect(screen.getByText(/团队动向上线/)).toBeInTheDocument();
-    expect(screen.getByText("怎么让团队看到你的动向")).toBeInTheDocument();
-    expect(screen.getByText("用共享目录投递附件给智能体")).toBeInTheDocument();
-    expect(screen.getByText("官方")).toBeInTheDocument();
-    expect(screen.getByText("教程")).toBeInTheDocument();
-    expect(screen.getByText("技巧")).toBeInTheDocument();
+    // 底栏不再手写三条静态「资讯」：取 CHANGELOG.md 生成的真实更新日志前三条。
+    expect(screen.getByText("最近更新")).toBeInTheDocument();
+    expect(screen.getByText(CHANGELOG[0].title)).toBeInTheDocument();
+    expect(screen.getByText(CHANGELOG[1].title)).toBeInTheDocument();
+    expect(screen.getByText(CHANGELOG[2].title)).toBeInTheDocument();
+
+    // 「查看全部」进设置区「关于」（更新日志全文在那里）
+    fireEvent.click(screen.getByRole("button", { name: "查看全部" }));
+    expect(useUiStore.getState().page).toBe("settings");
+    expect(useUiStore.getState().settingsTab).toBe("about");
   });
 
   it("系统状态·文件可写目录读取真实可写根，不再永远写「未绑定」", async () => {
@@ -338,31 +353,40 @@ describe("HomePage", () => {
     expect(screen.getByText(/本月已用/)).toBeInTheDocument();
   });
 
-  it("按日期：当月全日期行，零值天显示 0", async () => {
+  it("按日期：只列到今天（未来日期不铺成 0），零值天显示 0", async () => {
+    const today = new Date().getDate();
+    const zeroDay = Math.max(2, today - 1); // 选一个「今天之前、没记账」的日子
     useTokenUsageStore.getState().record("claude-sonnet-5", 1200, at(1));
     render(<HomePage />);
     await act(async () => {});
     fireEvent.click(screen.getByRole("button", { name: "按日期" }));
 
+    // 未来日期不是「0 调用」：只到今天为止（审计 P1-6）
     const rows = document.querySelectorAll("tbody tr");
-    expect(rows).toHaveLength(daysOfMonth(monthKeyOf(new Date().toISOString())).length);
+    expect(rows).toHaveLength(today);
 
     const table = screen.getByRole("table"); // 资讯卡也有日期文本，限定在表格内查询
-    const zeroRow = within(table).getByText(dayKey(15)).closest("tr") as HTMLElement;
+    const zeroRow = within(table).getByText(dayKey(zeroDay)).closest("tr") as HTMLElement;
     expect(within(zeroRow).getByText("0")).toBeInTheDocument();
     const day1Row = within(table).getByText(dayKey(1)).closest("tr") as HTMLElement;
     expect(within(day1Row).getByText("1200")).toBeInTheDocument();
+    // 明天（如果本月还有）不应出现
+    if (today < daysOfMonth(monthKeyOf(new Date().toISOString())).length) {
+      expect(within(table).queryByText(dayKey(today + 1))).not.toBeInTheDocument();
+    }
   });
 
   it("点某行「查看」展开该行 byModel 明细", async () => {
-    useTokenUsageStore.getState().record("claude-sonnet-5", 800, at(13, 9));
-    useTokenUsageStore.getState().record("deepseek-v3", 300, at(13, 10));
+    // 只可能展开「今天及以前」的行：未来日期不再出现在按日表里
+    const day = Math.max(1, new Date().getDate() - 2);
+    useTokenUsageStore.getState().record("claude-sonnet-5", 800, at(day, 9));
+    useTokenUsageStore.getState().record("deepseek-v3", 300, at(day, 10));
     render(<HomePage />);
     await act(async () => {});
     fireEvent.click(screen.getByRole("button", { name: "按日期" }));
 
     const table = screen.getByRole("table");
-    const row = within(table).getByText(dayKey(13)).closest("tr") as HTMLElement;
+    const row = within(table).getByText(dayKey(day)).closest("tr") as HTMLElement;
     expect(within(row).getByText("1100")).toBeInTheDocument();
     fireEvent.click(within(row).getByRole("button", { name: "查看" }));
 
@@ -426,6 +450,8 @@ describe("HomePage", () => {
 
     fireEvent.click(within(card).getByRole("button", { name: "去配置模型" }));
     expect(useUiStore.getState().page).toBe("settings");
+    // 首跑第 1 步是配模型：必须直接落在「模型」页签，而不是「个人资料」（审计 P1-2）
+    expect(useUiStore.getState().settingsTab).toBe("model");
   });
 
   it("引导步骤状态来自真实 store：有会话/有任务时对应步骤标已完成", async () => {

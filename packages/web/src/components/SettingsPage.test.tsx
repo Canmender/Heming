@@ -5,6 +5,7 @@ import { useAuthStore } from "../store/auth.js";
 import { useThemeStore } from "../store/theme.js";
 import { DEFAULT_NAV_ORDER, useUiStore } from "../store/ui.js";
 import { setToken } from "../lib/api.js";
+import { CHANGELOG } from "../generated/changelog.js";
 import { getThemeMode, setThemeMode } from "../lib/theme.js";
 import { resetSecureStorageState, secureGetItem, secureSetItem } from "../lib/secureStorage.js";
 
@@ -433,26 +434,30 @@ describe("设置区 · 更新日志卡", () => {
     delete window.__heming_version;
   });
 
-  it("列出 CHANGELOG 全部条目；版本对不上时不认「当前」，全部收起", () => {
+  it("默认只列最近 20 条并可展开更早；版本对不上时不认「当前」，全部收起", () => {
     window.__heming_version = "d.0.0.9.9";
     render(<SettingsPage />);
     goTab("关于");
     expect(screen.getByRole("region", { name: "更新日志" })).toBeInTheDocument();
-    // 条目来自生成的 CHANGELOG（数据本身在 lib/changelog.test.ts 里校验）
-    expect(screen.getByRole("button", { name: "更新日志 d.3.0.3.0" })).toBeInTheDocument();
+    // 111 条平铺是一面墙（审计 P1-4）：默认只渲染最近 20 条
+    expect(screen.getAllByRole("button", { name: /^更新日志 d\./ })).toHaveLength(20);
     for (const b of screen.getAllByRole("button", { name: /^更新日志 d\./ })) {
       expect(b).toHaveAttribute("aria-expanded", "false");
     }
+    // 更早的版本在「显示更早的 N 个版本」之后才出现（数据本身在 lib/changelog.test.ts 校验）
+    fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(`^显示更早的 ${CHANGELOG.length - 20} 个版本$`) }),
+    );
+    expect(screen.getByRole("button", { name: "更新日志 d.3.0.3.0" })).toBeInTheDocument();
   });
 
   it("点条目展开/收起，并渲染粗体与行内代码", () => {
-    window.__heming_version = "d.3.0.3.0";
+    window.__heming_version = CHANGELOG[0].version;
     render(<SettingsPage />);
     goTab("关于");
-    const btn = screen.getByRole("button", { name: "更新日志 d.3.0.3.0" });
+    const btn = screen.getByRole("button", { name: `更新日志 ${CHANGELOG[0].version}` });
     // 当前版本默认展开
     expect(btn).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText(/单一解析点/)).toBeInTheDocument();
 
     fireEvent.click(btn);
     expect(btn).toHaveAttribute("aria-expanded", "false");
@@ -464,11 +469,11 @@ describe("设置区 · 更新日志卡", () => {
   });
 
   it("给当前版本打「当前」徽标", () => {
-    window.__heming_version = "d.3.0.3.0";
+    window.__heming_version = CHANGELOG[0].version;
     render(<SettingsPage />);
     goTab("关于");
     const card = screen.getByRole("region", { name: "更新日志" });
-    const current = card.querySelector("button[aria-label='更新日志 d.3.0.3.0']");
+    const current = card.querySelector(`button[aria-label='更新日志 ${CHANGELOG[0].version}']`);
     expect(current?.textContent).toContain("当前");
   });
 });
@@ -508,7 +513,7 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
     fireEvent.change(screen.getByLabelText("搜索设置项"), { target: { value: "主题色" } });
 
     const panel = screen.getByRole("region", { name: "设置搜索结果" });
-    expect(panel).toHaveTextContent("页面颜色");
+    expect(panel).toHaveTextContent("主题色");
     expect(panel).toHaveTextContent("· 外观");
     // 普通分区视图让位给结果面板
     expect(screen.queryByLabelText("昵称")).toBeNull();

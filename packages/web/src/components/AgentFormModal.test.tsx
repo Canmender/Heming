@@ -34,12 +34,13 @@ describe("AgentFormModal", () => {
     expect(JSON.parse(localStorage.getItem("heming.agentPrompts")!)["a1"]).toBe("你是架构师");
   });
 
-  it("「去设置页添加」点击后切到设置页并关闭弹窗", () => {
+  it("「去设置页添加」点击后切到设置页「模型」并关闭弹窗", () => {
     const onClose = vi.fn();
     render(<AgentFormModal open mode="create" onClose={onClose} />);
     fireEvent.click(screen.getByRole("button", { name: "进阶设置（可选）" }));
     fireEvent.click(screen.getByText(/去设置页添加/));
     expect(useUiStore.getState().page).toBe("settings");
+    expect(useUiStore.getState().settingsTab).toBe("model");
     expect(onClose).toHaveBeenCalled();
   });
 

@@ -96,7 +96,7 @@ export function AgentFormModal({
   const routes = useLlmStore((s) => s.routes);
   const setPrompt = useLlmStore((s) => s.setPrompt);
   const setBinding = useLlmStore((s) => s.setBinding);
-  const setPage = useUiStore((s) => s.setPage);
+  const openSettings = useUiStore((s) => s.openSettings);
   const loadAgentsRoster = useChatStore((s) => s.loadAgentsRoster);
 
   const [name, setName] = useState(agent?.name ?? "");
@@ -196,7 +196,8 @@ export function AgentFormModal({
 
   const gotoSettings = () => {
     onClose();
-    setPage("settings");
+    // 「绑定连接」去的是模型连接：直接落在设置区「模型」页签，别让用户先在个人资料里找
+    openSettings("model");
   };
 
   const submit = async (e: React.FormEvent) => {

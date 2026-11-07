@@ -271,8 +271,33 @@ describe("MemoryPage 数据库记忆", () => {
     expect(memory.getSettings().retentionDays).toBe(90);
   });
 
-  it("检索过滤语义/情景条目，删除后条目消失", async () => {
+  it("手动添加的条目不显示「置信度」，自动提取的仍显示（d.77）", async () => {
     mockApi({ agents: AGENTS });
+    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    memory.upsertSemantic({
+      agentId: "a2",
+      key: "偏好-语言",
+      value: "默认使用简体中文",
+      source: "explicit",
+      confidence: 0.8,
+    });
+    renderPage();
+    openTab("数据库");
+
+    // 手动录入的条目：只有来源，没有置信度
+    const manualRow = within(semanticList())
+      .getByText("手动添加")
+      .closest("[data-memory-id]") as HTMLElement;
+    expect(manualRow).toHaveTextContent("手动添加");
+    expect(manualRow).not.toHaveTextContent("置信度");
+    // 自动提取的条目：置信度仍在（它是「提取可信度」，对自动条目有意义）
+    const autoRow = within(semanticList())
+      .getByText(/对话识别/)
+      .closest("[data-memory-id]") as HTMLElement;
+    expect(autoRow).toHaveTextContent("置信度 0.80");
+  });
+
+  it("检索过滤语义/情景条目，删除后条目消失", async () => {    mockApi({ agents: AGENTS });
     memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
     memory.upsertSemantic({
       agentId: "a1",
@@ -399,7 +424,7 @@ describe("MemoryPage 数据库记忆", () => {
     await screen.findByRole("option", { name: "阿和" });
     openTab("数据库");
 
-    fireEvent.click(screen.getByRole("button", { name: "导出" }));
+    fireEvent.click(screen.getByRole("button", { name: "复制 JSON" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(JSON.parse(writeText.mock.calls[0][0])).toMatchObject({ version: 1 });
     expect(await screen.findByText(/已复制 记忆 JSON/)).toBeInTheDocument();
@@ -531,6 +556,18 @@ describe("MemoryPage 智能体记忆开关", () => {
     expect(JSON.parse(prefsMap.get(AGENT_PREFS_KEY) as string).a1.personalDb).toBe(false);
   });
 
+  it("智能体列只显示名称，原始 ID 收进 title（d.77）", async () => {
+    mockApi({ agents: AGENTS });
+    renderPage();
+
+    // 等名册到位后取表格里的名称单元格（下拉框里也有同名 option，按 title 定位）
+    const card = await screen.findByRole("region", { name: "智能体记忆开关" });
+    const nameCell = await within(card).findByTitle("智能体 ID：a1");
+    expect(nameCell).toHaveTextContent("阿和");
+    // 原始 id 不再作为正文出现
+    expect(screen.queryByText("a1")).toBeNull();
+  });
+
   it("名册读不到时可手动登记智能体，偏好仍按 ID 持久化", async () => {
     mockApi({ agents: "fail" });
     renderPage();
@@ -563,7 +600,18 @@ describe("记忆区 · 复盘沉淀卡", () => {
       "aria-pressed",
       "true",
     );
+    // d.77：孤零零的数字看不出在控制什么，改成「每 N 轮才复盘一次」
+    expect(screen.getByText(/轮才复盘一次/)).toBeInTheDocument();
     expect(screen.getByLabelText("每隔几轮复盘")).toBeInTheDocument();
+    expect(screen.getByLabelText("每隔几轮复盘")).toBeEnabled();
+  });
+
+  it("频率切到「关闭」后，间隔输入框禁用（不再复盘，节流参数无意义）", () => {
+    render(<MemoryPage memory={memory} prefs={prefs} fetchSharedFiles={async () => []} />);
+    fireEvent.click(screen.getByRole("button", { name: "复盘频率 关闭" }));
+    expect(screen.getByLabelText("每隔几轮复盘")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "复盘频率 每轮都复盘" }));
+    expect(screen.getByLabelText("每隔几轮复盘")).toBeEnabled();
   });
 
   it("切频率写盘并立即反映到按钮态", () => {
@@ -967,6 +1015,24 @@ describe("MemoryPage 导出到文件", () => {
     );
   }
 
+  it("两个导出按钮文案可区分：文件下载 vs 复制到剪贴板（d.77）", async () => {
+    mockApi({ agents: AGENTS });
+    const writeText = mockClipboard();
+    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "阿和", source: "manual" });
+    renderWithAux();
+    openTab("数据库");
+
+    const download = screen.getByRole("button", { name: "下载文件" });
+    const copy = screen.getByRole("button", { name: "复制 JSON" });
+    expect(download).toHaveAttribute("title", "下载为 JSON 文件");
+    expect(copy).toHaveAttribute("title", "复制到剪贴板，不产生文件");
+
+    // 复制只走剪贴板，不触发文件导出
+    fireEvent.click(copy);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(saveExportFileMock).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     hasDesktopExportBridgeMock.mockReturnValue(false);
     saveExportFileMock.mockReset();
@@ -982,7 +1048,7 @@ describe("MemoryPage 导出到文件", () => {
     const box = screen.getByRole("checkbox", { name: "附上辅助账本（用量/召回记录，可再生）" });
     expect(box).not.toBeChecked();
 
-    fireEvent.click(screen.getByRole("button", { name: "下载 JSON" }));
+    fireEvent.click(screen.getByRole("button", { name: "下载文件" }));
     await waitFor(() => expect(saveExportFileMock).toHaveBeenCalledTimes(1));
 
     const [fileName, content] = saveExportFileMock.mock.calls[0] as [string, string];
@@ -1002,7 +1068,7 @@ describe("MemoryPage 导出到文件", () => {
     fireEvent.click(box);
     expect(box).toBeChecked();
 
-    fireEvent.click(screen.getByRole("button", { name: "下载 JSON" }));
+    fireEvent.click(screen.getByRole("button", { name: "下载文件" }));
     await waitFor(() => expect(saveExportFileMock).toHaveBeenCalledTimes(1));
 
     const [, content] = saveExportFileMock.mock.calls[0] as [string, string];

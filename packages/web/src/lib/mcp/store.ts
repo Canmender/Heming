@@ -320,6 +320,66 @@ export class McpRegistry {
     return DEFAULT_PRESET_SERVERS.some((p) => presetServerId(p.id) === serverId);
   }
 
+  /**
+   * 被用户删掉过的预置服务 id（按预置顺序）。
+   *
+   * 界面据此决定要不要显示「恢复预置服务」：删过才显示，没删过不占地方。
+   */
+  removedPresetIds(): string[] {
+    const removed = this.readRemovedPresets();
+    return DEFAULT_PRESET_SERVERS.map((p) => presetServerId(p.id)).filter((id) => removed.has(id));
+  }
+
+  /**
+   * 恢复预置服务（d.77）：把「用户删掉的预置」补回来。
+   *
+   * 为什么需要它：`remove()` 会把预置 id 记进 removedPresets，之后 `seedDefaults()`
+   * 永不再补——初衷是「用户能真正删掉它」，但界面上没有回退路径，删错了就只能手填。
+   * 这里给出显式的找回动作，语义是**可逆的删除**：
+   * 1. 清掉这些 id 的删除记录（再删一次仍然记得住）；
+   * 2. 只补**当前列表里确实没有**的预置，且**同名服务已存在时不覆盖**——
+   *    用户手填了同名服务时，不能拿预置去顶掉他的配置；
+   * 3. 不动其它服务的工具授权与请求头。
+   *
+   * @returns 本次真正补回的条数（已存在的不算）
+   */
+  restorePresets(): number {
+    const removed = this.readRemovedPresets();
+    const before = [...removed].sort().join(",");
+    const at = this.now();
+    let restored = 0;
+    for (const preset of DEFAULT_PRESET_SERVERS) {
+      const id = presetServerId(preset.id);
+      removed.delete(id);
+      const hasSameId = this.serverList.some((s) => s.id === id);
+      const hasSameName = this.serverList.some((s) => s.name.trim() === preset.name.trim());
+      if (hasSameId || hasSameName) continue;
+      this.serverList = [
+        ...this.serverList,
+        {
+          id,
+          name: preset.name,
+          transport: preset.transport,
+          url: preset.url,
+          command: preset.command,
+          args: preset.args ? [...preset.args] : undefined,
+          enabled: true,
+          createdAt: at,
+          updatedAt: at,
+        },
+      ];
+      restored += 1;
+    }
+    if (restored > 0) {
+      this.serversMutated = true;
+      this.saveServers();
+    }
+    // 删除记录也要落盘：哪怕这次一条都没补（已被同名服务顶替），
+    // 记录清掉才能让「以后再删一次」重新被记住。
+    if ([...removed].sort().join(",") !== before) this.writeRemovedPresets(removed);
+    return restored;
+  }
+
   private readServers(): McpServerConfig[] {
     const raw = this.storage.getItem(MCP_SERVERS_KEY);
     if (!raw) return [];

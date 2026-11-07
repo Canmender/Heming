@@ -62,7 +62,7 @@ export function ThemeModeCard() {
         <span className="ui-caption">即时生效，仅本机保存</span>
       </div>
       <div className="mt-1 ui-caption">
-        深色只改配色，不改变任何功能与文案；与上方「页面颜色」可自由组合。
+        深色只改配色，不改变任何功能与文案；与同一页的「主题色」可自由组合。
       </div>
       <div
         role="radiogroup"

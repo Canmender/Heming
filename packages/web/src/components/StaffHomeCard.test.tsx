@@ -56,7 +56,7 @@ describe("StaffHomeCard", () => {
   it("未开启：定位说明 + 跳转幕僚页", () => {
     render(<StaffHomeCard />);
     expect(screen.getByText("未开启")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "开启幕僚" }));
+    fireEvent.click(screen.getByRole("button", { name: "去开启" }));
     expect(useUiStore.getState().page).toBe("staff");
   });
 
