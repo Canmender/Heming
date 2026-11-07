@@ -12,6 +12,25 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.74.2.38.0",
+    "date": "2026-11-07",
+    "title": "UI 自检追加轮 R21–R22：提示条与内联错误",
+    "bullets": [
+      "同类错误条原来两套红（`#b42318` 与 `#912018`），后者未在暗色兼容层里；",
+      "新增 `.ui-alert` / `.ui-alert-danger` / `.ui-alert-muted`，颜色全部走 token；自动化、幕僚页顶部错误/提示条、信息中枢顶部错误条、任务区错误卡统一使用；",
+      "修掉任务行删除按钮 hover 的亮色底色（暗色下会闪白）。",
+      "设置保存/主题色、模型连接、候选链、自动化编辑器、智能体新建、任务模板等 8 处表单错误补 `role=\"alert\"`，读屏可立即播报；",
+      "设置区保存失败用例改为断言 `role=\"alert\"`。",
+      "**web 234 文件 3474 例全绿**；四包 typecheck 零错误；desktop 测试通过；",
+      "真实浏览器：自动化编辑弹窗空名称保存 → `role=\"alert\"` 文本「请填写任务名称」；控制台仅 favicon 404。"
+    ],
+    "paragraphs": [
+      "R21 提示条统一",
+      "R22 内联错误 `role=\"alert\"`",
+      "门禁"
+    ]
+  },
+  {
     "version": "d.74.2.37.0",
     "date": "2026-11-07",
     "title": "UI 自检第 13–20 轮：分段控件、暗色、点击目标与空态 CTA",

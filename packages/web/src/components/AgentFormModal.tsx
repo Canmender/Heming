@@ -358,7 +358,7 @@ export function AgentFormModal({
             </label>
             <span className="ui-caption">不传就用名称首字，之后也能换</span>
           </div>
-          {fileError && <div className="mt-1 text-[12px] text-red-600">{fileError}</div>}
+          {fileError && <div role="alert" className="mt-1 text-[12px] text-red-600">{fileError}</div>}
         </div>
 
         <label className={`${labelCls} mb-3`}>

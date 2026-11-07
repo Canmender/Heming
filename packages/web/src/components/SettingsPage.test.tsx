@@ -80,7 +80,8 @@ describe("SettingsPage 个人资料", () => {
     fireEvent.change(screen.getByLabelText("昵称"), { target: { value: "新昵称" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(await screen.findByText("boom")).toBeInTheDocument();
+    // 读屏要能立刻播报：错误必须是 alert，而不是一段静态红字
+    expect(await screen.findByRole("alert")).toHaveTextContent("boom");
     expect(screen.queryByText("已保存")).not.toBeInTheDocument();
     expect(useAuthStore.getState().user?.displayName).toBe("爱丽丝");
   });

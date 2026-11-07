@@ -468,7 +468,7 @@ export function LlmSettingsCard() {
               </span>
             </label>
           </div>
-          {error && <div className="mt-2 text-[12px] text-red-600">{error}</div>}
+          {error && <div role="alert" className="mt-2 text-[12px] text-red-600">{error}</div>}
           <div className="mt-3 flex items-center gap-2">
             <button
               type="submit"

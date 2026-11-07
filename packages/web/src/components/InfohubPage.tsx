@@ -482,7 +482,7 @@ export function InfohubPage() {
       {error && (
         <div
           role="alert"
-          className="flex items-start justify-between gap-3 border-b border-[#f3c6c2] bg-[#fdf3f2] px-6 py-2 ui-caption text-[#912018]"
+          className="flex items-start justify-between gap-3 border-b border-[var(--danger-line)] bg-[var(--danger-soft)] px-6 py-2 ui-caption text-[var(--danger)]"
         >
           <span className="min-w-0 break-words">{error}</span>
           <button type="button" onClick={() => setError("")} className="shrink-0 hover:underline">

@@ -302,11 +302,7 @@ export function StaffPage() {
       {(error || notice) && (
         <div
           role={error ? "alert" : "status"}
-          className={`mb-4 flex items-start justify-between gap-3 rounded-lg border px-3 py-2 ui-caption ${
-            error
-              ? "border-[#f3c6c2] bg-[#fdf3f2] text-[#912018]"
-              : "border-line-soft bg-panel text-[#555]"
-          }`}
+          className={`ui-alert mb-4 justify-between ${error ? "ui-alert-danger" : "ui-alert-muted"}`}
         >
           <span className="min-w-0 break-words">{error || notice}</span>
           <button

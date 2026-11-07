@@ -215,11 +215,7 @@ export function AutomationPage() {
       {(error || notice) && (
         <div
           role={error ? "alert" : "status"}
-          className={`mb-4 flex items-start justify-between gap-3 rounded-lg border px-3 py-2 ui-caption ${
-            error
-              ? "border-[#f3c6c2] bg-[#fdf3f2] text-[#912018]"
-              : "border-line-soft bg-panel text-[#555]"
-          }`}
+          className={`ui-alert mb-4 justify-between ${error ? "ui-alert-danger" : "ui-alert-muted"}`}
         >
           <span className="min-w-0 break-words">{error || notice}</span>
           <button
@@ -829,7 +825,7 @@ function AutomationEditor({
             和鸣关闭期间错过的时刻不会补跑。
           </div>
 
-          {error && <p className="mt-2 text-[11px] text-[#b42318]">{error}</p>}
+          {error && <p role="alert" className="mt-2 text-[11px] text-[#b42318]">{error}</p>}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-line-soft px-4 py-2.5">

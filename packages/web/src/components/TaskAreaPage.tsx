@@ -405,14 +405,14 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
             模板已达 {MAX_TEMPLATES} 条上限，删除旧模板后才能继续保存。
           </p>
         )}
-        {templateError && <p className="mt-1 text-[12px] text-[#b42318]">{templateError}</p>}
+        {templateError && <p role="alert" className="mt-1 text-[12px] text-[#b42318]">{templateError}</p>}
         {templateNotice && (
           <p role="status" className="mt-1 text-[12px] text-[#15803d]">
             {templateNotice}
           </p>
         )}
 
-        {error && <p className="mt-2 text-[12px] text-[#b42318]">{error}</p>}
+        {error && <p role="alert" className="mt-2 text-[12px] text-[#b42318]">{error}</p>}
 
         <div className="mt-4 flex items-center justify-between">
           <span className="text-[10px] text-muted">运行记录与结果只保存在本机，不上传服务端。</span>
@@ -1132,7 +1132,7 @@ function TaskSummary({
           {/* 记录里存的是 agent_error 原文（可能是 provider_error: HTTP 429 {json}）：
               展示层翻成人话，原文留在 title 供排障。 */}
           <p
-            className="rounded-lg border border-[#fecdca] bg-[#fef3f2] px-2.5 py-2 text-[12px] leading-5 text-[#b42318]"
+            className="ui-alert ui-alert-danger px-2.5 py-2"
             title={task.error}
           >
             {humanizeProviderError(task.error)}

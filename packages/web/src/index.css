@@ -374,6 +374,23 @@ samp {
     color: var(--ink);
   }
 
+  /* 提示条（R21）：错误/提醒/普通提示统一骨架。
+     改造前同一类错误条有 #b42318/#912018 两套红、亮色写死，暗色只能靠兼容层兜；
+     这里改成 token，颜色随主题走。 */
+  .ui-alert {
+    @apply flex items-start gap-3 rounded-lg border px-3 py-2 text-[12px] leading-5;
+  }
+  .ui-alert-danger {
+    background-color: var(--danger-soft);
+    border-color: var(--danger-line);
+    color: var(--danger);
+  }
+  .ui-alert-muted {
+    background-color: var(--panel);
+    border-color: var(--line-soft);
+    color: var(--body);
+  }
+
   /* ── 胶囊/徽标（展示件，不承载点击） ── */
   .ui-chip {
     @apply inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-line px-1.5 text-[11px] leading-4 text-muted;

@@ -459,7 +459,7 @@ function ProfileSection() {
             className="mt-1 block w-full ui-input"
           />
         </label>
-        {error && <div className="text-[12px] text-red-600">{error}</div>}
+        {error && <div role="alert" className="text-[12px] text-red-600">{error}</div>}
         <div className="flex items-center gap-3">
           <button
             type="submit"
@@ -737,7 +737,7 @@ function AppearanceSection() {
           恢复默认
         </button>
       </div>
-      {accentError && <div className="mt-2 text-[12px] text-red-600">{accentError}</div>}
+      {accentError && <div role="alert" className="mt-2 text-[12px] text-red-600">{accentError}</div>}
     </section>
   );
 }
