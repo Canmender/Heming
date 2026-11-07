@@ -336,7 +336,7 @@ export function AgentFormModal({
 
         {systemAgent && (
           <p role="status" className="mb-2 rounded-lg border border-line-soft bg-panel px-2.5 py-1.5 ui-caption">
-            系统预置智能体：名称、头像和简介由应用维护，不能改；下方的「模型连接」和「系统提示词」只存本机，可以改。
+            内置智能体：名称、头像和简介由应用维护，不能改；下方的「模型连接」和「系统提示词」只存本机，可以改。
           </p>
         )}
 

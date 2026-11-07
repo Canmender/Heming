@@ -44,7 +44,7 @@ describe("AgentFormModal", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("系统预置智能体：名称/简介禁用，模型绑定仍可保存且不走服务端", async () => {
+  it("内置智能体：名称/简介禁用，模型绑定仍可保存且不走服务端", async () => {
     useLlmStore.setState({
       profiles: [{ id: "p1", label: "DeepSeek", provider: "openai", apiKey: "k", model: "deepseek-chat" }],
       bindings: {},
@@ -63,7 +63,7 @@ describe("AgentFormModal", () => {
 
     expect(screen.getByLabelText("名称")).toBeDisabled();
     expect(screen.getByLabelText("一句话描述")).toBeDisabled();
-    expect(screen.getByText(/系统预置智能体/)).toBeInTheDocument();
+    expect(screen.getByText(/内置智能体/)).toBeInTheDocument();
     // 系统智能体不走服务端 PUT，也不该显示删除
     expect(screen.queryByText("删除智能体")).not.toBeInTheDocument();
 

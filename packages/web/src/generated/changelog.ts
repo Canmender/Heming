@@ -12,6 +12,16 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.78.2.42.0",
+    "date": "2026-11-07",
+    "title": "系统智能体称呼收口",
+    "bullets": [
+      "首页「智能体动态」不再照搬服务端种子的旧简介「和鸣官方预设智能体」，系统智能体统一显示「和鸣内置智能体」（与智能体页一致）；`AgentFormModal` 的说明文案同步改为「内置智能体」。",
+      "纯文案修正，无行为变化；新增/同步断言 2 例。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.78.2.41.0",
     "date": "2026-11-07",
     "title": "本体第一轮：六页真实审计后的修复与补齐",

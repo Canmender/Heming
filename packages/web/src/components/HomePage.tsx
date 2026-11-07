@@ -524,17 +524,22 @@ export function HomePage() {
             {displayAgents.length === 0 ? (
               <EmptyState compact className="px-0 py-2" title="暂无智能体，可在智能体页创建" />
             ) : (
-              displayAgents.map((a) => (
-                <div key={a.id} className="flex items-center gap-2 py-1">
-                  <Avatar user={{ displayName: a.name, avatar: a.avatar ?? undefined }} size={22} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12px] font-medium">{a.name}</span>
-                    {a.description && (
-                      <span className="block truncate text-[10px] text-muted">{a.description}</span>
-                    )}
-                  </span>
-                </div>
-              ))
+              displayAgents.map((a) => {
+                // 系统智能体的简介以应用为准：服务端种子写的是「和鸣官方预设智能体」，
+                // 与智能体页的「和鸣内置智能体」不一致，首页不照搬数据里的旧文案。
+                const sub = a.id === "system-assistant" ? "和鸣内置智能体" : a.description;
+                return (
+                  <div key={a.id} className="flex items-center gap-2 py-1">
+                    <Avatar user={{ displayName: a.name, avatar: a.avatar ?? undefined }} size={22} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12px] font-medium">{a.name}</span>
+                      {sub && (
+                        <span className="block truncate text-[10px] text-muted">{sub}</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })
             )}
           </section>
 
