@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSessionTab } from "../lib/sessionState.js";
 import {
   describeCapabilities,
   describeCapabilityCatalog,
@@ -113,6 +114,10 @@ function hostOf(url: string): string {
   }
 }
 
+/** 插件区五个 Tab 的会话级记忆：刷新回到上次看的 Tab。 */
+const PLUGINS_TAB_KEY = "heming.tab.plugins.v1";
+const PLUGINS_TABS = ["plugins", "modules", "skills", "tools", "mcp"] as const satisfies readonly TabKey[];
+
 export function PluginsPage({
   plugins = pluginStore,
   skills = skillPool,
@@ -124,7 +129,7 @@ export function PluginsPage({
   fingerprintOf = publicKeyFingerprint,
 }: PluginsPageProps = {}) {
   const [tick, setTick] = useState(0);
-  const [tab, setTab] = useState<TabKey>("plugins");
+  const [tab, setTab] = useSessionTab<TabKey>(PLUGINS_TAB_KEY, "plugins", PLUGINS_TABS);
   const [installOpen, setInstallOpen] = useState(false);
   const [text, setText] = useState("");
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -356,7 +361,7 @@ export function PluginsPage({
           {tab === "plugins"
             ? `已启用 ${enabledCount}/${list.length} 个插件 · 同一 id 再次安装 = 覆盖更新`
             : tab === "modules"
-              ? "内置模块 · 停用只下线入口与后台挂载，不删除本机数据"
+              ? "内置模块 · 停用只收起入口与后台任务，不删除本机数据"
               : ""}
         </span>
       </div>

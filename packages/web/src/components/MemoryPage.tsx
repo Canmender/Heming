@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSessionTab } from "../lib/sessionState.js";
 import { useUiStore } from "../store/ui.js";
 import type { Agent, SharedFileMeta } from "@heming/shared";
 import { WikiPanel } from "./WikiPanel.js";
@@ -705,6 +706,10 @@ interface CloudState {
   error?: string;
 }
 
+/** 记忆区三个 Tab 的会话级记忆：刷新回到上次看的 Tab。 */
+const MEMORY_TAB_KEY = "heming.tab.memory.v1";
+const MEMORY_TABS = ["agents", "database", "wiki"] as const satisfies readonly TabKey[];
+
 export function MemoryPage({
   memory = memoryStore,
   kb = knowledgeBase,
@@ -712,7 +717,7 @@ export function MemoryPage({
   recorder = recallRecorder,
   fetchSharedFiles = fetchFiles,
 }: MemoryPageProps = {}) {
-  const [tab, setTab] = useState<TabKey>("agents");
+  const [tab, setTab] = useSessionTab<TabKey>(MEMORY_TAB_KEY, "agents", MEMORY_TABS);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [manualAgents, setManualAgents] = useState<Agent[]>([]);
   const [rosterError, setRosterError] = useState("");

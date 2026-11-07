@@ -109,7 +109,7 @@ function ModuleCard({ mod }: { mod: BuiltinModule }) {
           <dt className="font-semibold text-muted">本机数据（停用不删除）</dt>
           <dd className="text-[#444]">
             {mod.storageKeys.length > 0
-              ? `${mod.storageKeys.length} 个本机键 · ${fmtBytes(occupancy)}`
+              ? `本机数据 ${mod.storageKeys.length} 项 · ${fmtBytes(occupancy)}`
               : "不占和鸣本机存储"}
             {mod.externalData?.length ? (
               <span className="block text-[10px] text-muted">{mod.externalData.join("；")}</span>
@@ -143,7 +143,7 @@ function ModuleCard({ mod }: { mod: BuiltinModule }) {
           打开页面
         </button>
         <span className="ui-caption">
-          {effective ? "当前生效" : enabled ? "依赖项启用后自动恢复" : "随时可重新启用"}
+          {effective ? "状态：已生效" : enabled ? "依赖项启用后自动恢复" : "随时可重新启用"}
         </span>
         {cleanup ? (
           <button

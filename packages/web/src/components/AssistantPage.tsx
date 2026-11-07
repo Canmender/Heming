@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSessionTab } from "../lib/sessionState.js";
 import type { Agent } from "@heming/shared";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
@@ -25,6 +26,10 @@ import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 
 type AssistantTab = "chat" | "tasks";
 
+/** 对话/任务 Tab 的会话级记忆：刷新回到上次看的视图。 */
+const ASSISTANT_TAB_KEY = "heming.tab.assistant.v1";
+const ASSISTANT_TABS = ["chat", "tasks"] as const;
+
 export function AssistantPage() {
   const conversations = useChatStore((s) => s.conversations);
   const agentsRoster = useChatStore((s) => s.agentsRoster);
@@ -43,7 +48,7 @@ export function AssistantPage() {
   const [createStartAt, setCreateStartAt] = useState<"name" | "templates">("name");
   const [editing, setEditing] = useState<Agent | null>(null);
   /** 默认落在「对话」：导航里这一项的主体是聊天，任务只是它的第二个视图。 */
-  const [tab, setTab] = useState<AssistantTab>("chat");
+  const [tab, setTab] = useSessionTab<AssistantTab>(ASSISTANT_TAB_KEY, "chat", ASSISTANT_TABS);
 
   // 命令面板「新建智能体」的消费点（d.60）。
   // 面板只投一次内存意图并切到本页；本页是懒加载路由，可能晚一帧才挂载，

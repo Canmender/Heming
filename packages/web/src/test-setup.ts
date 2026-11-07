@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { configure } from "@testing-library/react";
+import { beforeEach } from "vitest";
 import { webcrypto } from "node:crypto";
 
 /**
@@ -72,6 +73,21 @@ if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !=
  *
  * 放在全局而不是给单条用例传 timeout：同类断言全仓有几百处，逐个加只会变成打地鼠。
  */
+
+/**
+ * sessionStorage 是「刷新恢复」的载体（页面/会话/Tab 快照）：同一测试文件的用例共用一个
+ * jsdom，上一个用例切过的页与 Tab 会漏到下一个用例（表现为「默认 Tab 不对」）。
+ * 每个用例前清空，保证用例之间互不影响——生产里它本来就只在一次渲染进程会话内有效。
+ * 用例内部仍可正常断言写盘（清除发生在用例开始前）。
+ */
+beforeEach(() => {
+  try {
+    window.sessionStorage.clear();
+  } catch {
+    /* 少数用例会把 sessionStorage 换掉/禁用，忽略即可 */
+  }
+});
+
 configure({ asyncUtilTimeout: 3000 });
 
 /**

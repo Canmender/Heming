@@ -36,7 +36,7 @@ describe("ModulesView 内置能力模块卡", () => {
     expect(within(infohub).getByText(/不在和鸣存储内/)).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("已启用 3/3 个模块");
     const staff = screen.getByRole("region", { name: "模块 幕僚" });
-    expect(within(staff).getByText(/个本机键/)).toBeInTheDocument();
+    expect(within(staff).getByText(/本机数据 \d+ 项/)).toBeInTheDocument();
   });
 
   it("停用信息中枢：卡片状态变为已停用、打开页面禁用；自动化显示依赖未启用", () => {

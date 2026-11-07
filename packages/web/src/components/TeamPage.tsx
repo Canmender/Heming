@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSessionTab } from "../lib/sessionState.js";
 import type {
   TeamActivity,
   TeamActivityKind,
@@ -93,6 +94,11 @@ function fmtLastSeen(iso: string | null): string {
   return `${Math.floor(diff / 86_400_000)} 天前活跃`;
 }
 
+/** 团队视图 Tab 的会话级记忆：刷新回到上次看的视图（关窗重开回「动向」）。 */
+const TEAM_TAB_KEY = "heming.tab.team.v1";
+const TEAM_TABS = ["feed", "board", "agenda", "usage"] as const;
+type TeamTab = (typeof TEAM_TABS)[number];
+
 export function TeamPage() {
   const me = useAuthStore((s) => s.user);
   const focusUserId = useUiStore((s) => s.teamFocusUserId);
@@ -125,7 +131,7 @@ export function TeamPage() {
    * 看板是 d.67 从独立页（旧 workspace）并进来的——它保留自己的取数与筛选，
    * 只把「页面外壳」换成这里的 Tab。
    */
-  const [tab, setTab] = useState<"feed" | "board" | "agenda" | "usage">("feed");
+  const [tab, setTab] = useSessionTab<TeamTab>(TEAM_TAB_KEY, "feed", TEAM_TABS);
   const [usageRange, setUsageRange] = useState<TeamUsageRange>("7d");
   const [usage, setUsage] = useState<TeamUsageResponse | null>(null);
   const [usageReady, setUsageReady] = useState(false);

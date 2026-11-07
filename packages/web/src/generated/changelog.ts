@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.80.2.42.0",
+    "date": "2026-11-07",
+    "title": "刷新后连所在 Tab 也留在原地",
+    "bullets": [
+      "宿主页内部 Tab 也做**会话级记忆**（`lib/sessionState.ts` + `useSessionTab`）：团队（动向/看板/团队日程/用量）、智能体（对话/任务）、插件区（插件/模块/技能/工具/MCP 服务）、记忆区（智能体/数据库/个人知识库）",
+      "模块 Tab 术语落地：「3 个本机键」→「本机数据 3 项」、「当前生效」→「状态：已生效」、「停用只下线入口与后台挂载」→「停用只收起入口与后台任务」。",
+      "测试基建：`test-setup.ts` 每个用例前清 `sessionStorage`——同一文件的用例共用一个 jsdom，上一个用例切过的页/Tab 会漏到下一个用例（表现为「默认 Tab 不对」）；用例内部仍正常断言写盘。"
+    ],
+    "paragraphs": [
+      "刷新后回到上次看的 Tab。与「页面 + 会话」快照同一口径：**刷新保留、关窗清空**；只认白名单里的 Tab，脏值/旧值回落默认 Tab。"
+    ]
+  },
+  {
     "version": "d.79.2.42.0",
     "date": "2026-11-07",
     "title": "刷新不再被弹回主页",
