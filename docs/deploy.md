@@ -155,6 +155,27 @@ HEMING_SEED_USERS=admin:admin
   旧版桌面安装包（d.29 及以前）由主进程代拉、无 token，会拿不到 ICE 而回落公共 STUN；
   自动更新到 d.30 后即恢复正常。TURN 配不配都不影响登录与聊天。
 
+### 4.1 插件目录（d.88，云端插件分发）
+
+插件包（信息采集 / magpie 网关等）**不随安装包分发**，由服务端目录提供：
+
+```bash
+# 1) 本机把仓库里的插件包摆成服务端布局（原样字节）
+node scripts/publish-plugin.mjs plugins/            # 缺省写到 ./plugins-catalog
+# 2) 同步到服务器（沿用现有部署账号；只读发布，不含用户数据）
+scp -r plugins-catalog/* root@<server>:/opt/heming/plugins/
+# 3) api.env 指到该目录并重启
+echo 'HEMING_PLUGIN_DIR=/opt/heming/plugins' >> /etc/heming/api.env
+systemctl restart heming-api
+curl -s http://127.0.0.1:8787/api/plugins | head -c 300   # 应看到插件列表
+```
+
+- 目录布局：`/opt/heming/plugins/<插件 id>/<版本>/plugin.json`；同 id 多版本时目录接口只返回最新版；
+- 接口公开（不含用户数据）：`GET /api/plugins` 与 `GET /api/plugins/:id/:version/manifest`（带 `X-Plugin-Sha256`）；
+- 客户端下载后**自行校验 sha256**，不一致拒绝安装；服务端只搬运、不解析执行；
+- 客户端发版与服务端插件发布相互独立：新增插件不需要重发包，但 **v4 清单（模型预设）需要较新的客户端**，
+  旧客户端会明确提示「不支持 schemaVersion 4」而不是半安装。
+
 ## 5. 回滚
 
 ```bash

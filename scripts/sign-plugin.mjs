@@ -118,6 +118,18 @@ function normalizeManifest(manifest) {
           tools: (Array.isArray(pack.tools) ? pack.tools : []).map(trim),
         }),
       ),
+      // d.88：v4 的模型接入预设也必须进规范化文本，否则签名与验签两边对不上。
+      // 旧清单没有该字段 → 空数组（应用归一化后也恒为空数组）。
+      llmPresets: (Array.isArray(contributions.llmPresets) ? contributions.llmPresets : []).map(
+        (preset) => ({
+          id: trim(preset.id),
+          label: trim(preset.label),
+          provider: preset.provider,
+          baseUrl: trim(preset.baseUrl),
+          model: trim(preset.model),
+          note: trim(preset.note),
+        }),
+      ),
     },
   };
 }

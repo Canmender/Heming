@@ -197,6 +197,8 @@ export interface PluginContributionCounts {
   toolPacks: number;
   /** 全部工具束里声明的工具名总数（按声明计，不代表已连接）。 */
   packTools: number;
+  /** 模型接入预设数量（d.86；只填地址/模型，不含 Key）。 */
+  presets: number;
 }
 
 /** 插件命令：命令面板用的执行入口（`id` 已加 `plugin:<插件 id>:` 前缀，全局唯一）。 */
@@ -290,6 +292,7 @@ function copyPlugin(plugin: InstalledPlugin): InstalledPlugin {
           target: { ...command.target },
         })),
         toolPacks: contributions.toolPacks.map((pack) => ({ ...pack, tools: [...pack.tools] })),
+        llmPresets: (contributions.llmPresets ?? []).map((preset) => ({ ...preset })),
       },
       permissions: {
         network: [...permissions.network],
@@ -498,14 +501,18 @@ export class PluginStore {
   /** 贡献计数（技能 / 服务 / 命令 / 工具束·工具）：插件卡与安装弹窗的摘要都用它。 */
   contributionCounts(pluginId: string): PluginContributionCounts {
     const plugin = this.data.plugins.find((p) => p.manifest.id === pluginId);
-    if (!plugin) return { skills: 0, servers: 0, commands: 0, toolPacks: 0, packTools: 0 };
-    const { skills, mcpServers, commands, toolPacks } = plugin.manifest.contributions;
+    if (!plugin) {
+      return { skills: 0, servers: 0, commands: 0, toolPacks: 0, packTools: 0, presets: 0 };
+    }
+    const { skills, mcpServers, commands, toolPacks, llmPresets } =
+      plugin.manifest.contributions;
     return {
       skills: skills.length,
       servers: mcpServers.length,
       commands: commands.length,
       toolPacks: toolPacks.length,
       packTools: toolPacks.reduce((sum, pack) => sum + pack.tools.length, 0),
+      presets: llmPresets.length,
     };
   }
 

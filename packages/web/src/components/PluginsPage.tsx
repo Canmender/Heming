@@ -498,6 +498,7 @@ export function PluginsPage({
           onInstall={onInstall}
           onClose={() => setInstallOpen(false)}
           publishers={publishers}
+          installed={list.map((plugin) => ({ id: plugin.manifest.id, version: plugin.manifest.version }))}
           verify={verify}
           fingerprintOf={fingerprintOf}
         />

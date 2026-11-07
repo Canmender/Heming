@@ -11,7 +11,14 @@ import {
 } from "../../lib/plugins/index.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { XIcon } from "../icons.js";
+import type { PluginCatalogEntry } from "@heming/shared";
 import { PluginPermissionList } from "./PluginPermissionList.js";
+import { OnlineCatalogPanel } from "./OnlineCatalogPanel.js";
+import {
+  downloadPluginManifest,
+  fetchPluginCatalog,
+  type CatalogClientDeps,
+} from "../../lib/plugins/catalogClient.js";
 import {
   BTN_GHOST,
   BTN_GHOST_SM,
@@ -48,6 +55,8 @@ export function InstallDialog({
   onInstall,
   onClose,
   publishers,
+  installed = [],
+  catalog,
   verify = verifyManifestSignature,
   fingerprintOf = publicKeyFingerprint,
 }: {
@@ -60,6 +69,10 @@ export function InstallDialog({
   onClose: () => void;
   /** 发布者信任表（TOFU）；确认安装且用户勾选/已信任时写入 */
   publishers: PublisherTrustStore;
+  /** 已装插件（id + 版本）：云端目录据此显示「已装 / 可更新」。 */
+  installed?: { id: string; version: string }[];
+  /** 云端目录客户端（测试注入；缺省走 catalogClient 的真实实现）。 */
+  catalog?: CatalogClientDeps;
   /** 验签实现（测试注入；默认 WebCrypto） */
   verify?: (manifest: PluginManifest) => Promise<SignatureCheck>;
   /** 公钥指纹实现（测试注入；默认 SHA-256） */
@@ -75,6 +88,49 @@ export function InstallDialog({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  /**
+   * 云端插件目录（d.86）：首次展开才联网（不在挂载时请求），失败只影响本面板，
+   * 手动粘贴/选文件那条路径照常可用。
+   */
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogEntries, setCatalogEntries] = useState<PluginCatalogEntry[] | null>(null);
+  const [catalogLoadingKey, setCatalogLoadingKey] = useState<string | null>(null);
+
+  const loadCatalog = async (): Promise<void> => {
+    setCatalogLoading(true);
+    setCatalogError(null);
+    try {
+      setCatalogEntries(await fetchPluginCatalog(catalog));
+    } catch (err) {
+      setCatalogError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCatalogLoading(false);
+    }
+  };
+
+  const toggleCatalog = (): void => {
+    const next = !catalogOpen;
+    setCatalogOpen(next);
+    if (next && catalogEntries === null && !catalogLoading) void loadCatalog();
+  };
+
+  const loadFromCatalog = async (entry: PluginCatalogEntry): Promise<void> => {
+    const key = `${entry.id}@${entry.version}`;
+    setCatalogLoadingKey(key);
+    setCatalogError(null);
+    try {
+      const downloaded = await downloadPluginManifest(entry, catalog);
+      onTextChange(downloaded);
+      setCatalogOpen(false);
+    } catch (err) {
+      setCatalogError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCatalogLoadingKey(null);
+    }
+  };
 
   const preview = previewState.data;
   const updating = Boolean(preview?.existing);
@@ -232,8 +288,30 @@ export function InstallDialog({
             <label htmlFor="plugin-file-input" className={`cursor-pointer ${BTN_GHOST_SM}`}>
               选择 plugin.json 文件
             </label>
+            <button
+              type="button"
+              aria-label={catalogOpen ? "收起云端插件目录" : "从云端浏览插件"}
+              aria-expanded={catalogOpen}
+              onClick={toggleCatalog}
+              className={BTN_GHOST_SM}
+            >
+              {catalogOpen ? "收起云端目录" : "从云端浏览"}
+            </button>
             <span className={HINT}>只读取本地 JSON；不会上传，也不会执行其中的内容。</span>
           </div>
+
+          {catalogOpen && (
+            <OnlineCatalogPanel
+              entries={catalogEntries}
+              loading={catalogLoading}
+              error={catalogError}
+              installed={installed}
+              loadingKey={catalogLoadingKey}
+              onRefresh={() => void loadCatalog()}
+              onLoad={(entry) => void loadFromCatalog(entry)}
+              onClose={() => setCatalogOpen(false)}
+            />
+          )}
 
           {previewState.error && (
             <p role="alert" className={`mt-3 ${ERROR_TEXT}`}>

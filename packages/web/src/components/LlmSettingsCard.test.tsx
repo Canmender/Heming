@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { LlmSettingsCard } from "./LlmSettingsCard.js";
 import { useLlmStore } from "../store/llm.js";
+import { pluginStore } from "../lib/plugins/index.js";
 
 describe("LlmSettingsCard", () => {
   beforeEach(() => {
@@ -156,5 +157,67 @@ describe("LlmSettingsCard", () => {
     // 断言意图不变：红底破坏性按钮、不是主操作。
     expect(confirm.className).toContain("ui-btn-danger");
     expect(confirm.className).not.toContain("ui-btn-primary");
+  });
+});
+
+describe("LlmSettingsCard · 插件带来的模型预设（d.86）", () => {
+  const PLUGIN_TEXT = JSON.stringify({
+    schemaVersion: 4,
+    id: "heming.magpie-gateway",
+    name: "magpie 网关",
+    version: "0.1.0",
+    permissions: { network: ["127.0.0.1:3425"], tools: "none", files: [] },
+    contributions: {
+      llmPresets: [
+        {
+          id: "magpie-gateway",
+          label: "magpie 本地网关",
+          provider: "openai",
+          baseUrl: "http://127.0.0.1:3425/v1",
+          model: "deepseek/deepseek-chat",
+          note: "本机 magicpie 网关",
+        },
+      ],
+    },
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
+    useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
+    // 插件存储是模块级单例：用例自己装/删，保证不影响其它文件
+    pluginStore.remove("heming.magpie-gateway");
+    pluginStore.install(PLUGIN_TEXT);
+  });
+
+  afterEach(() => {
+    pluginStore.remove("heming.magpie-gateway");
+  });
+
+  it("点插件预设：填好协议/地址/模型，来源写明是插件，并把焦点交给 API Key", async () => {
+    render(<LlmSettingsCard />);
+    expect(screen.getByText("插件带来的模型预设")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "套用插件预设 magpie 本地网关" }));
+
+    expect((screen.getByLabelText("名称") as HTMLInputElement).value).toBe("magpie 本地网关");
+    expect((screen.getByLabelText("模型") as HTMLInputElement).value).toBe(
+      "deepseek/deepseek-chat",
+    );
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
+      "http://127.0.0.1:3425/v1",
+    );
+    expect((screen.getByLabelText("服务商") as HTMLSelectElement).value).toBe("openai");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("API Key")));
+    // 说清边界：插件只填地址与模型，Key 仍由用户填
+    expect(screen.getByText(/插件预设只填协议、地址与模型名/)).toBeInTheDocument();
+  });
+
+  it("插件停用后预设整组消失（与插件停用语义一致）", () => {
+    const first = render(<LlmSettingsCard />);
+    expect(screen.getByText("插件带来的模型预设")).toBeInTheDocument();
+    first.unmount();
+    pluginStore.setEnabled("heming.magpie-gateway", false);
+    // 重新挂载模拟「切页回来」：停用插件的预设不再出现
+    render(<LlmSettingsCard />);
+    expect(screen.queryByText("插件带来的模型预设")).toBeNull();
   });
 });

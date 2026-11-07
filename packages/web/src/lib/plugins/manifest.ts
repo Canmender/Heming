@@ -11,7 +11,11 @@ import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
  * 不做「尽量猜」的容错，否则坏包会在安装后以半可用状态存在，比直接拒绝更难排查。
  *
  * 版本策略：
- * - **v3**（`PLUGIN_SCHEMA_VERSION`）是唯一新契约；不再接受顶层 `skills` / `mcpServers`；
+ * - **v4**（`PLUGIN_SCHEMA_VERSION`）是当前契约：在 v3 的贡献面之上增加模型接入预设
+ *   （`contributions.llmPresets`，只填地址/模型、不带 Key）；
+ * - **v3** 仍可安装（技能 / MCP / 命令 / 工具束），但不接受预设——带预设的 v3 直接拒绝，
+ *   不静默丢字段；
+ * - v1 / v2 继续按原规则解析并归一化；
  * - **v1 / v2 旧包继续按原规则解析**，随后归一化成 v3 结构：
  *   `commands` 空、`permissions.network` = 其服务 host 全集、`permissions.tools = "read"`
  *   （等于「安装时已确认的既有事实」——旧包不回溯拦截）；
@@ -22,8 +26,8 @@ import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
  * 第三方代码；本地进程类集成仍走接口区手动配置或 Registry 安装。
  */
 
-export const PLUGIN_SCHEMA_VERSION = 3;
-export const PLUGIN_SCHEMA_VERSIONS = [1, 2, 3] as const;
+export const PLUGIN_SCHEMA_VERSION = 4;
+export const PLUGIN_SCHEMA_VERSIONS = [1, 2, 3, 4] as const;
 export const MAX_PLUGIN_SKILLS = 50;
 export const MAX_PLUGIN_MCP_SERVERS = 10;
 export const MAX_PLUGIN_COMMANDS = 30;
@@ -31,6 +35,8 @@ export const MAX_PLUGIN_PERMISSION_HOSTS = 20;
 /** 工具束上限（d.65 增补：第四类贡献面，只声明归属，不改执行）。 */
 export const MAX_PLUGIN_TOOL_PACKS = 10;
 export const MAX_TOOL_PACK_TOOLS = 50;
+/** 模型接入预设上限（d.86：插件可以声明「模型连接预设」，只填地址/模型，不带 Key）。 */
+export const MAX_PLUGIN_LLM_PRESETS = 20;
 
 /** 预留文件根上限（本轮只校验与展示，不执行）。 */
 const MAX_PLUGIN_FILES = 5;
@@ -64,6 +70,10 @@ const COMMAND_KEYWORD_MAX = 32;
 const TOOL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const TOOL_PACK_NAME_MAX = 32;
 const TOOL_PACK_DESCRIPTION_MAX = 200;
+const LLM_PRESET_LABEL_MAX = 32;
+const LLM_PRESET_MODEL_MAX = 128;
+const LLM_PRESET_NOTE_MAX = 200;
+const LLM_PRESET_BASE_URL_MAX = 2048;
 
 const HOST_MAX = 253;
 
@@ -352,6 +362,70 @@ const ToolPackSpecSchema = z.object(
   typeParams("工具束必须是 JSON 对象"),
 );
 
+/**
+ * 模型接入预设（d.86）：插件带来的「连接怎么填」模板。
+ *
+ * 只允许声明协议 / Base URL / 模型 / 说明——**没有 apiKey 字段**。
+ * 远程必须 https，明文 http 仅放行本机回环（与本仓 MCP 服务地址同一套约束）：
+ * 预设会把用户引到一个地址上，地址规则两边必须一致，否则插件能绕开「不能明文出网」。
+ */
+const LlmPresetSpecSchema = z
+  .strictObject(
+    {
+      id: z
+        .string(typeParams("缺少预设 id", "预设 id 必须是文本"))
+        .trim()
+        .regex(COMMAND_ID_RE, "预设 id 只能用小写字母、数字、点、下划线和连字符，且以字母或数字开头（≤64）"),
+      label: z
+        .string(typeParams("缺少预设名", "预设名必须是文本"))
+        .trim()
+        .min(1, "预设名不能为空")
+        .max(LLM_PRESET_LABEL_MAX, `预设名最多 ${LLM_PRESET_LABEL_MAX} 字`),
+      provider: z.enum(["openai", "anthropic"], {
+        error: '预设协议只能是 "openai"（OpenAI 兼容）或 "anthropic"（Messages API）',
+      }),
+      baseUrl: z
+        .string(typeParams("缺少 Base URL", "Base URL 必须是文本"))
+        .trim()
+        .min(1, "Base URL 不能为空")
+        .max(LLM_PRESET_BASE_URL_MAX, `Base URL 最多 ${LLM_PRESET_BASE_URL_MAX} 字符`),
+      model: z
+        .string(typeParams("缺少模型名", "模型名必须是文本"))
+        .trim()
+        .min(1, "模型名不能为空")
+        .max(LLM_PRESET_MODEL_MAX, `模型名最多 ${LLM_PRESET_MODEL_MAX} 字`),
+      note: z
+        .string(typeParams("预设说明必须是文本"))
+        .trim()
+        .max(LLM_PRESET_NOTE_MAX, `预设说明最多 ${LLM_PRESET_NOTE_MAX} 字`)
+        .default(""),
+    },
+  )
+  .superRefine((preset, ctx) => {
+    let url: URL;
+    try {
+      url = new URL(preset.baseUrl);
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["baseUrl"], message: "Base URL 不是合法的 URL" });
+      return;
+    }
+    if (url.username || url.password) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["baseUrl"],
+        message: "Base URL 不能包含用户名或密码（Key 由用户自己在表单里填）",
+      });
+      return;
+    }
+    if (url.protocol === "https:") return;
+    if (url.protocol === "http:" && LOCAL_MCP_HOSTS.has(url.hostname)) return;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["baseUrl"],
+      message: "模型地址必须使用 https；http 仅允许 localhost / 127.0.0.1 / [::1]",
+    });
+  });
+
 const ContributionsSchema = z.object(
   {
     skills: z
@@ -369,6 +443,11 @@ const ContributionsSchema = z.object(
     toolPacks: z
       .array(ToolPackSpecSchema, typeParams("工具束列表必须是数组"))
       .max(MAX_PLUGIN_TOOL_PACKS, `单个插件最多 ${MAX_PLUGIN_TOOL_PACKS} 个工具束`)
+      .default([]),
+    // d.86：模型接入预设（只填地址/模型，不含 Key；publisher 仍是插件作者）
+    llmPresets: z
+      .array(LlmPresetSpecSchema, typeParams("模型预设列表必须是数组"))
+      .max(MAX_PLUGIN_LLM_PRESETS, `单个插件最多 ${MAX_PLUGIN_LLM_PRESETS} 个模型预设`)
       .default([]),
   },
   typeParams("contributions 必须是 JSON 对象"),
@@ -417,7 +496,7 @@ const SignatureSchema = z.object(
 const PluginManifestSchema = z
   .object(
     {
-      schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)], {
+      schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)], {
         // zod 4 去掉了 errorMap，直接给一个字符串即覆盖这一层的所有报错文案。
         error: `仅支持 schemaVersion: ${PLUGIN_SCHEMA_VERSIONS.join(" / ")}`,
       }),
@@ -468,11 +547,12 @@ const PluginManifestSchema = z
     typeParams("插件清单必须是 JSON 对象"),
   )
   .superRefine((manifest, ctx) => {
-    const legacy = manifest.schemaVersion !== 3;
+    const legacy = manifest.schemaVersion < 3;
     const skills = legacy ? (manifest.skills ?? []) : (manifest.contributions?.skills ?? []);
     const servers = legacy ? (manifest.mcpServers ?? []) : (manifest.contributions?.mcpServers ?? []);
     const commands = legacy ? [] : (manifest.contributions?.commands ?? []);
     const toolPacks = legacy ? [] : (manifest.contributions?.toolPacks ?? []);
+    const llmPresets = legacy ? [] : (manifest.contributions?.llmPresets ?? []);
 
     if (legacy && manifest.contributions) {
       ctx.addIssue({
@@ -528,18 +608,29 @@ const PluginManifestSchema = z
       }
     }
 
-    if (manifest.schemaVersion === 3) {
+    if (manifest.schemaVersion === 3 && llmPresets.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["contributions", "llmPresets"],
+        message: "模型接入预设需要 schemaVersion 4（旧版本应用不认识它，宁可拒绝也不要静默丢掉）",
+      });
+    }
+
+    if (!legacy) {
       if (!manifest.contributions) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["contributions"],
-          message: "schemaVersion 3 必须声明 contributions（技能 / MCP 服务 / 命令 / 工具束至少一类）",
+          message: `schemaVersion ${manifest.schemaVersion} 必须声明 contributions（技能 / MCP 服务 / 命令 / 工具束 / 模型预设至少一类）`,
         });
-      } else if (skills.length + servers.length + commands.length + toolPacks.length === 0) {
+      } else if (
+        skills.length + servers.length + commands.length + toolPacks.length + llmPresets.length ===
+        0
+      ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["contributions"],
-          message: "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令 / 工具束）",
+          message: "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令 / 工具束 / 模型预设）",
         });
       }
     } else if (skills.length + servers.length === 0) {
@@ -573,6 +664,32 @@ const PluginManifestSchema = z
       }
       seenServers.add(server.key);
     });
+
+    // v4：模型预设的 Base URL 主机也必须被权限声明覆盖（预设会把用户引到这个地址）。
+    if (!legacy) {
+      const declaredHosts = new Set(
+        (manifest.permissions?.network ?? []).map(normalizeNetworkHost),
+      );
+      const seenPresets = new Set<string>();
+      llmPresets.forEach((preset, index) => {
+        if (seenPresets.has(preset.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["contributions", "llmPresets", index, "id"],
+            message: `预设 id 重复：${preset.id}`,
+          });
+        }
+        seenPresets.add(preset.id);
+        const host = hostOfUrl(preset.baseUrl);
+        if (host && !declaredHosts.has(host)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["permissions", "network"],
+            message: `未声明模型地址主机：${host}（见 contributions.llmPresets[${index}].baseUrl）`,
+          });
+        }
+      });
+    }
 
     // v3：权限声明必须覆盖全部 MCP 服务主机（声明即约束）。
     if (!legacy) {
@@ -650,6 +767,7 @@ export type PluginSkillSpec = z.infer<typeof SkillSpecSchema>;
 export type PluginMcpServerSpec = z.infer<typeof McpServerSpecSchema>;
 export type PluginCommandSpec = z.infer<typeof CommandSpecSchema>;
 export type PluginToolPackSpec = z.infer<typeof ToolPackSpecSchema>;
+export type PluginLlmPresetSpec = z.infer<typeof LlmPresetSpecSchema>;
 export type PluginSchemaVersion = (typeof PLUGIN_SCHEMA_VERSIONS)[number];
 export type PluginToolRisk = "none" | "read" | "write";
 
@@ -664,7 +782,7 @@ export interface PluginPermissions {
 }
 
 /**
- * 四类贡献面：技能 / 远程 MCP 服务 / 命令 / 工具束。
+ * 五类贡献面：技能 / 远程 MCP 服务 / 命令 / 工具束 / 模型接入预设。
  *
  * `toolPacks` 是 d.65 的**向后兼容增补**（schemaVersion 仍为 3）：老清单没有该字段
  * 照样合法；它只声明「哪些工具属于同一组」，不定义工具、不改变开关与 HITL。
@@ -674,6 +792,12 @@ export interface PluginContributions {
   mcpServers: PluginMcpServerSpec[];
   commands: PluginCommandSpec[];
   toolPacks: PluginToolPackSpec[];
+  /**
+   * 模型接入预设（d.86）：插件带来「一条连接怎么填」的模板（协议 / Base URL / 模型 / 说明），
+   * **不含 Key**——用户点一下只是把表单填好，Key 仍由用户自己填、仍存本机安全存储。
+   * v1–v3 旧清单归一化为空数组。
+   */
+  llmPresets: PluginLlmPresetSpec[];
 }
 
 /** 发布者声明（d.67，TOFU）：公钥只是内容，不证明身份；信任由首次安装确认。 */
@@ -784,7 +908,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
   const parsed = PluginManifestSchema.safeParse(raw);
   if (!parsed.success) throw new PluginManifestError(formatIssues(parsed.error));
   const manifest = parsed.data;
-  const legacy = manifest.schemaVersion !== 3;
+  const legacy = manifest.schemaVersion < 3;
   const legacySkills = manifest.skills ?? [];
   const legacyServers = manifest.mcpServers ?? [];
   const contributions: PluginContributions = {
@@ -809,6 +933,9 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
           ...pack,
           tools: [...pack.tools],
         })),
+    llmPresets: legacy
+      ? []
+      : (manifest.contributions?.llmPresets ?? []).map((preset) => ({ ...preset })),
   };
   const permissions: PluginPermissions = legacy
     ? legacyPermissions(contributions.mcpServers)

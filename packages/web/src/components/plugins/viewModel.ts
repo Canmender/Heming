@@ -36,6 +36,8 @@ export interface PluginContributionCountsView {
   toolPacks: number;
   /** 全部工具束声明的工具名总数（按声明计，不代表已连接）。 */
   packTools: number;
+  /** 模型接入预设数量（d.86）。 */
+  presets: number;
 }
 
 /**
@@ -67,6 +69,8 @@ export function manifestContributionCounts(
     commands: declared.commands.length,
     toolPacks: declared.toolPacks.length,
     packTools: declared.toolPacks.reduce((sum, pack) => sum + pack.tools.length, 0),
+    // 旧清单归一化后也有 llmPresets（空数组），这里只需长度。
+    presets: declared.llmPresets.length,
   };
 }
 
@@ -77,7 +81,9 @@ export function manifestContributionCounts(
  * 老清单显示 `工具束 0 · 工具 0`，不是缺字段。
  */
 export function contributionText(counts: PluginContributionCountsView): string {
-  return `技能 ${counts.skills} · 服务 ${counts.servers} · 命令 ${counts.commands} · 工具束 ${counts.toolPacks} · 工具 ${counts.packTools}`;
+  const base = `技能 ${counts.skills} · 服务 ${counts.servers} · 命令 ${counts.commands} · 工具束 ${counts.toolPacks} · 工具 ${counts.packTools}`;
+  // 只在真有预设时追加，v1–v3 旧包（与升级前）的摘要逐字不变。
+  return counts.presets > 0 ? `${base} · 模型预设 ${counts.presets}` : base;
 }
 
 export interface PluginPermissionView {

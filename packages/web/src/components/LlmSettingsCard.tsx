@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLlmStore, type LlmProfile, type LlmProvider } from "../store/llm.js";
 import { testConnection } from "../lib/llmClient.js";
 import { LLM_PRESETS, findPreset } from "../lib/llmPresets.js";
+import { pluginStore } from "../lib/plugins/index.js";
 import {
   PRICING_DISCLAIMER,
   capabilityBadges,
@@ -117,6 +118,25 @@ export function LlmSettingsCard() {
     setOpen(true);
   };
 
+  /**
+   * 插件带来的模型接入预设（d.86）：只读本机已启用的插件，**不联网**。
+   * 插件预设只填协议 / 地址 / 模型，不带 Key——Key 仍由用户填、仍只存本机。
+   */
+  const pluginPresets = useMemo(
+    () =>
+      pluginStore
+        .list()
+        .filter((plugin) => plugin.enabled)
+        .flatMap((plugin) =>
+          plugin.manifest.contributions.llmPresets.map((preset) => ({
+            key: `${plugin.manifest.id}:${preset.id}`,
+            pluginName: plugin.manifest.name,
+            ...preset,
+          })),
+        ),
+    [],
+  );
+
   const apiKeyRef = useRef<HTMLInputElement | null>(null);
   /** 预设填好表单后把焦点交给 API Key：其余字段都已填好，唯一还要动手的就是它。 */
   const focusKeyAfterOpen = useRef(false);
@@ -131,6 +151,19 @@ export function LlmSettingsCard() {
   /** 点预设：填好协议 / Base URL / 模型 / 名称，并展开表单、聚焦 API Key（用户仍可继续改）。 */
   const applyPreset = (presetId: string) => {
     const preset = findPreset(presetId);
+    if (!preset) return;
+    setProvider(preset.provider);
+    setBaseUrl(preset.baseUrl);
+    setModel(preset.model);
+    if (!label.trim()) setLabel(preset.label);
+    setError(null);
+    focusKeyAfterOpen.current = true;
+    setOpen(true);
+  };
+
+  /** 套用插件预设：与内置预设同一路径（填表单 + 展开 + 聚焦 Key），只是来源不同。 */
+  const applyPluginPreset = (key: string) => {
+    const preset = pluginPresets.find((item) => item.key === key);
     if (!preset) return;
     setProvider(preset.provider);
     setBaseUrl(preset.baseUrl);
@@ -240,6 +273,30 @@ export function LlmSettingsCard() {
           </button>
         ))}
       </div>
+
+      {/* 插件预设（d.86）：来源与内置预设明确区分；插件停用时整组不出现（与模块/插件停用语义一致）。 */}
+      {pluginPresets.length > 0 && (
+        <>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="ui-caption">插件带来的模型预设</span>
+            {pluginPresets.map((preset) => (
+              <button
+                key={preset.key}
+                type="button"
+                aria-label={`套用插件预设 ${preset.label}`}
+                title={`${preset.note ? `${preset.note} · ` : ""}来自插件「${preset.pluginName}」；只填地址与模型，不携带 Key`}
+                onClick={() => applyPluginPreset(preset.key)}
+                className={btnGhost}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 ui-caption">
+            插件预设只填协议、地址与模型名；API Key 仍由你填，且只存本机安全存储。
+          </p>
+        </>
+      )}
 
       {profiles.length === 0 && (
         <div className="mt-3 ui-caption">

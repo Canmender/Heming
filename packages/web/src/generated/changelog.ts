@@ -12,6 +12,34 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.88.2.42.0",
+    "date": "2026-11-07",
+    "title": "插件独立分发：云端目录 + 清单 v4 模型预设",
+    "bullets": [
+      "服务端新增 `GET /api/plugins`（公开目录：最新版本、权限、贡献计数、sha256、大小、上线时间）与`GET /api/plugins/:id/:version/manifest`（**原样** `plugin.json` + `X-Plugin-Sha256` 头）；",
+      "客户端安装弹窗新增「从云端浏览」：首次展开才联网；每行给出已装/可更新、贡献、权限、指纹前 8 位；「载入清单」下载后**必须校验 sha256**（无 `crypto.subtle` 直接拒绝、不回退跳过），",
+      "新增共享契约 `@heming/shared` 的 `pluginCatalog`（目录条目 schema、id/版本/指纹正则），前后端同一份。",
+      "新增发布脚本 `scripts/publish-plugin.mjs`（校验 + 摆目录 + `--dry-run`/`--dest`/`HEMING_PLUGIN_DIR`；不做 SSH，上传沿用现有部署链）。",
+      "新增第五类贡献面：只填协议（openai 兼容 / anthropic）、Base URL、模型、说明；**没有 apiKey 字段**（`strictObject`，写了直接拒绝）；远程必须 https、http 仅回环，",
+      "v3 清单带预设直接拒绝并提示升 v4（不静默丢字段）；v1–v3 归一化为空数组。",
+      "设置区「模型」多一组「插件带来的模型预设」：来源写明插件名，点击只填表单、焦点交给 API Key；插件停用后整组消失，已保存的连接不受影响。",
+      "移除 d.48 内置的 magpie 预设：网关接入改由 `plugins/magpie-gateway` 插件提供，安装包不再带第三方接入配置。",
+      "`plugins/magpie-gateway`（v4）：模型预设（`127.0.0.1:3425/v1`）+ 接入/排障技能 + 命令；`tools: none`；",
+      "`plugins/infohub-collector`（v3）：本机 MCP 采集桥 + 技能 + 命令；`tools: write`（采集写归档）；",
+      "`packages/desktop/packaging.plugins.test.js` 断言打包配置**不含任何 `plugins/` 路径**——「不随安装包分发」写在测试里，不靠口头约定。",
+      "服务端 `pluginCatalog.test.ts` 7 例（版本选择 / 坏包跳过 / 防穿越 / mtime / 公开路由与 sha 头）；",
+      "客户端 `catalogClient` 10、`OnlineCatalogPanel` 6、`InstallDialog.catalog` 3、`manifest` +4、`LlmSettingsCard` +2、`bundledPlugins` 3（扫描 `plugins/` 全量守卫）、desktop 打包守卫 2；",
+      "临时服务端 + 真实浏览器实测：云端目录列两包 → 载入 magpie 包（预览显示 v4/模型预设 1/主机 127.0.0.1:3425）→安装成功 → 设置区「套用插件预设 magpie 本地网关」把名称/Base URL/模型三项填好。"
+    ],
+    "paragraphs": [
+      "两条线的收口：**信息采集与 magpie 网关是独立插件**，安装包不再携带，改由云端插件目录发布、用户自行下载安装。",
+      "一、云端插件目录（服务端 + 客户端）目录布局 `<HEMING_PLUGIN_DIR>/<id>/<version>/plugin.json`，坏包只跳过该条；`read()` 只接受 shared 的 id/版本正则并只拼这两段路径（防穿越）。再填进同一个清单框——预览、信任确认、写入与手动粘贴完全一致（不新增第二条安装路径）。",
+      "二、清单 v4：模型接入预设（`contributions.llmPresets`）且 Base URL 主机必须被 `permissions.network` 覆盖。",
+      "三、两个独立插件包",
+      "门禁"
+    ]
+  },
+  {
     "version": "d.87.2.42.0",
     "date": "2026-11-07",
     "title": "智能体应用第二轮：名册好找、提示不重复、复制失败不静默",

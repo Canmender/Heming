@@ -1,5 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { scryptSync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { join } from "node:path";
 import {
   RegisterBodySchema,
   LoginBodySchema,
@@ -18,6 +19,7 @@ import type { Store } from "./store.js";
 import { issueToken, userIdFromToken } from "./auth.js";
 import { presence } from "./presence.js";
 import { dayKeyUtc, parseDayKey, summarizeTeamUsage, usageRangeBounds } from "./teamUsage.js";
+import { createPluginCatalog } from "./pluginCatalog.js";
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -63,11 +65,24 @@ function cors(req: Request, res: Response, next: NextFunction): void {
 export interface CreateAppOptions {
   /** 覆盖注册开关（优先于 HEMING_ALLOW_REGISTER），测试注入用；缺省读环境变量。 */
   allowRegister?: boolean;
+  /** 云端插件目录（测试注入；缺省 HEMING_PLUGIN_DIR 或 <cwd>/plugins-catalog）。 */
+  pluginDir?: string;
 }
 
 export function createApp(store: Store, opts?: CreateAppOptions): express.Express {
   // 环境变量在 createApp 调用时读取（非 module 级缓存），便于测试内 set/delete 后注入。
   const allowRegister = opts?.allowRegister ?? envFlagEnabled(process.env.HEMING_ALLOW_REGISTER);
+  /**
+   * 云端插件目录（d.86）：插件包是**独立产物**，不随安装包分发；这里只读发布目录。
+   * 缺省 `<cwd>/plugins-catalog`——部署时把该目录同步到服务器，或用 HEMING_PLUGIN_DIR 指定。
+   */
+  const pluginCatalog = createPluginCatalog({
+    dir:
+      opts?.pluginDir ??
+      process.env.HEMING_PLUGIN_DIR ??
+      join(process.cwd(), "plugins-catalog"),
+  });
+
   const app = express();
   app.use(cors);
   app.use(express.json({ limit: "8mb" }));
@@ -89,6 +104,25 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
+  });
+
+  /**
+   * 插件目录：公开（包内容本就是公开产物，不含用户数据），不要求登录态。
+   * 只返回元数据；真正的 plugin.json 走下面那条原样分发路由，客户端自行校验 sha256。
+   */
+  app.get("/api/plugins", (_req, res) => {
+    res.json({ plugins: pluginCatalog.list(), generatedAt: new Date().toISOString() });
+  });
+
+  app.get("/api/plugins/:id/:version/manifest", (req, res) => {
+    const found = pluginCatalog.read(req.params.id, req.params.version);
+    if (!found) {
+      res.status(404).json({ error: "插件不存在" });
+      return;
+    }
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("X-Plugin-Sha256", found.sha256);
+    res.send(found.bytes);
   });
 
   app.post("/api/auth/register", (req, res) => {

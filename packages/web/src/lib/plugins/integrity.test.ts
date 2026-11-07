@@ -36,6 +36,8 @@ function reordered(parsed: PluginManifest): PluginManifest {
       commands: parsed.contributions.commands,
       mcpServers: parsed.contributions.mcpServers,
       skills: parsed.contributions.skills,
+      // d.88：v4 归一化后恒带空数组，重排键顺序时不能漏掉它（否则不是「同一份清单」）
+      llmPresets: parsed.contributions.llmPresets,
     },
   } as PluginManifest;
 }
