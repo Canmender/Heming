@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MagpieGatewayCard } from "./MagpieGatewayCard.js";
 import { DEFAULT_GATEWAY, useLlmStore } from "../store/llm.js";
@@ -10,8 +10,14 @@ import { DEFAULT_GATEWAY, useLlmStore } from "../store/llm.js";
  * 模型表把「窗口/视觉/推理」这些用户选型要看的字段摆出来。
  */
 
+afterEach(() => {
+  delete (window as unknown as { __heming_magpie?: unknown }).__heming_magpie;
+  vi.unstubAllGlobals();
+});
+
 beforeEach(() => {
   localStorage.clear();
+  delete (window as unknown as { __heming_magpie?: unknown }).__heming_magpie;
   vi.restoreAllMocks();
   useLlmStore.setState({
     gateway: { ...DEFAULT_GATEWAY },
@@ -93,5 +99,54 @@ describe("MagpieGatewayCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "读取模型" }));
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(screen.getByRole("alert")).toHaveTextContent(/网关拒绝了这个 Key/);
+  });
+});
+
+describe("MagpieGatewayCard · 桌面端内置 magpie（d.91）", () => {
+  function installBridge(overrides: Record<string, unknown> = {}) {
+    const hostStatus = {
+      available: true,
+      running: true,
+      port: 3425,
+      version: "0.1.3246",
+      proxyPort: 40123,
+    };
+    const bridge = {
+      status: vi.fn(async () => hostStatus),
+      start: vi.fn(async () => ({ baseUrl: "http://127.0.0.1:40123/v1", status: hostStatus })),
+      stop: vi.fn(async () => ({ ...hostStatus, running: false })),
+      gateway: vi.fn(async () => ({ baseUrl: "http://127.0.0.1:40123/v1", status: hostStatus })),
+      ...overrides,
+    };
+    (window as unknown as { __heming_magpie?: unknown }).__heming_magpie = bridge;
+    return bridge;
+  }
+
+  it("显示内置组件状态（运行中 + 版本 + 反代端口），可停止", async () => {
+    const bridge = installBridge();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        if (String(input).endsWith("/api/hello")) {
+          return new Response(JSON.stringify({ name: "magpie", version: "0.1.3246" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ data: [{ id: "deepseek/deepseek-chat" }] }), { status: 200 });
+      }),
+    );
+    render(<MagpieGatewayCard />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: "内置 magpie" })).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(screen.getByText(/运行中 · magpie 0.1.3246 · 反代端口 40123/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "停止内置 magpie" }));
+    await waitFor(() => expect(bridge.stop).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("未运行")).toBeInTheDocument();
+  });
+
+  it("浏览器没有桥：不渲染内置区块，仍可手填网关", () => {
+    render(<MagpieGatewayCard />);
+    expect(screen.queryByRole("region", { name: "内置 magpie" })).toBeNull();
+    expect(screen.getByLabelText("magpie 网关地址")).toBeInTheDocument();
   });
 });

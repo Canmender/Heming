@@ -54,6 +54,25 @@ if (webBuilt.status !== 0) {
   process.exit(1);
 }
 
+// 内置 magpie CLI（d.91）：安装包里要带 `resources/magpie/magpie-cli.exe`，
+// 否则用户装完和鸣没有模型网关可用。二进制不进仓库（约 70MB），打包前在这里确保就位：
+// 已有就校验 sha256；没有就按 scripts/fetch-magpie.mjs 的钉死版本下载。
+const magpieChecked = spawnSync(
+  process.execPath,
+  [join(root, "scripts", "fetch-magpie.mjs"), "--check"],
+  { stdio: "inherit" },
+);
+if (magpieChecked.status !== 0) {
+  console.log("[build-desktop] 内置 magpie 未就位，开始下载…");
+  const fetched = spawnSync(process.execPath, [join(root, "scripts", "fetch-magpie.mjs")], {
+    stdio: "inherit",
+  });
+  if (fetched.status !== 0) {
+    console.error("[build-desktop] 内置 magpie 下载/校验失败，已中止打包（安装包里不能缺模型网关）");
+    process.exit(1);
+  }
+}
+
 const args = process.argv.slice(2);
 
 /** 找 node_modules/.pnpm 下已解包的 electron 目录（有 electron.exe/electron 才是完整包）。 */

@@ -12,6 +12,18 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.92.2.42.0",
+    "date": "2026-11-07",
+    "title": "模型网关随和鸣一起装好",
+    "bullets": [
+      "和鸣安装包自带 magpie：装完打开就能用，不用再自己启动一个网关。",
+      "设置·模型会显示「内置 magpie 运行中（版本）」，也可以在这里启动/重启/停止；地址由和鸣自动接好。",
+      "想连别的机器上共享的 magpie，仍可以在「高级：手动指定网关」里填地址与网关 Key。",
+      "模型账号、订阅与多账号轮换都在 magpie 里管理，和鸣这边不保存任何供应商 Key。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.91.2.42.0",
     "date": "2026-11-07",
     "title": "团队动点点进去就是那件事",

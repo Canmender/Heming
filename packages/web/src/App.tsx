@@ -14,6 +14,7 @@ import { TitleBar } from "./components/TitleBar.js";
 import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
 import { useInfohubStore } from "./lib/infohub/store.js";
+import { ensureDesktopGateway } from "./lib/magpieHost.js";
 import { useAutomationScheduler } from "./lib/automation/scheduler.js";
 import { useStaffLoop } from "./lib/staff/loop.js";
 import { useModuleStore, isModuleEffective } from "./lib/modules/store.js";
@@ -310,6 +311,12 @@ export function App() {
   // 本机归档：只探测桥与运行态，不自动拉起 Python（拉起必须由用户点「连接」）。
   useEffect(() => {
     void useInfohubStore.getState().boot();
+  }, []);
+
+  // 内置 magpie（d.91）：桌面端由主进程托管，这里只取它给的反代地址并刷新模型目录。
+  // 浏览器没有这个桥，ensureDesktopGateway 直接返回 supported:false，不影响手动网关。
+  useEffect(() => {
+    void ensureDesktopGateway();
   }, []);
 
   // 全局搜索：Ctrl/⌘+K。启动动画期间不响应（与 Alt+N 同一套纪律：

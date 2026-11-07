@@ -5,12 +5,21 @@ import {
   DEFAULT_GATEWAY,
   fetchGatewayCatalog,
   normalizeGatewayBaseUrl,
-  type GatewayConfig,
   type GatewayModel,
 } from "../lib/magpieClient.js";
 
 export { DEFAULT_GATEWAY } from "../lib/magpieClient.js";
-export type { GatewayConfig, GatewayModel } from "../lib/magpieClient.js";
+export type { GatewayModel } from "../lib/magpieClient.js";
+import type { GatewayConfig as BaseGatewayConfig } from "../lib/magpieClient.js";
+
+/**
+ * 网关配置来源（d.91）：
+ * - `desktop`：桌面端内置 magpie 托管（地址是主进程反代，端口每次启动可能变，允许自动覆盖）；
+ * - `manual`：用户手填（本机另一端口 / 远端已共享的 magpie），**永不被自动覆盖**。
+ */
+export interface GatewayConfig extends BaseGatewayConfig {
+  source?: "desktop" | "manual";
+}
 
 /**
  * 模型层（d.89 起）：**和鸣不再直连各家模型供应商**。
@@ -133,7 +142,13 @@ function loadGateway(): GatewayConfig {
         ? normalizeGatewayBaseUrl(obj.baseUrl)
         : DEFAULT_GATEWAY.baseUrl;
     const key = typeof obj.key === "string" && obj.key.trim() ? obj.key.trim() : DEFAULT_GATEWAY.key;
-    return { baseUrl, key };
+    const source =
+      obj.source === "desktop" || obj.source === "manual"
+        ? obj.source
+        : baseUrl === DEFAULT_GATEWAY.baseUrl
+          ? "desktop"
+          : "manual";
+    return { baseUrl, key, source } as GatewayConfig;
   });
 }
 
@@ -258,6 +273,8 @@ interface LlmState {
   prompts: Record<string, string>;
   routes: RouteGroup[];
   setGateway: (next: GatewayConfig) => void;
+  /** 桌面端反代地址（d.91）：仅在用户没手动指定网关时自动采用，并持久化。 */
+  adoptDesktopGateway: (baseUrl: string) => boolean;
   /** 从网关重新读目录；成功后同步模型档案与能力覆盖。 */
   refreshCatalog: () => Promise<GatewayCatalogResult>;
   /** 直接写入目录（测试与离线恢复用）。 */
@@ -289,10 +306,24 @@ export const useLlmStore = create<LlmState>((set, get) => ({
     const gateway: GatewayConfig = {
       baseUrl: normalizeGatewayBaseUrl(next.baseUrl) || DEFAULT_GATEWAY.baseUrl,
       key: next.key.trim() || DEFAULT_GATEWAY.key,
+      // 用户在表单里保存 = 手动指定；桌面端自动采用另走 adoptDesktopGateway。
+      source: next.source ?? "manual",
     };
     writeJson(createDefaultStorage(), KEY_GATEWAY, gateway, 4 * 1024);
     // 网关变了：已有档案的地址/Key 立刻跟着换（模型列表下一次刷新再更新）
     set({ gateway, profiles: profilesOf(gateway, get().models) });
+  },
+  adoptDesktopGateway(baseUrl) {
+    const current = get().gateway;
+    const normalized = normalizeGatewayBaseUrl(baseUrl);
+    if (!normalized) return false;
+    // 手动指定过网关（例如远端 magpie）就不覆盖用户的决定。
+    if (current.source === "manual") return false;
+    if (current.baseUrl === normalized) return true;
+    const gateway: GatewayConfig = { baseUrl: normalized, key: current.key, source: "desktop" };
+    writeJson(createDefaultStorage(), KEY_GATEWAY, gateway, 4 * 1024);
+    set({ gateway, profiles: profilesOf(gateway, get().models) });
+    return true;
   },
   async refreshCatalog() {
     const catalog = await fetchGatewayCatalog(get().gateway);

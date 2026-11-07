@@ -423,6 +423,7 @@ describe("设置区 · 模型（magpie 原生组件）", () => {
     expect(JSON.parse(localStorage.getItem("heming.magpie.v1")!)).toEqual({
       baseUrl: "http://127.0.0.1:3999/v1",
       key: "magpie-heming",
+      source: "manual",
     });
     vi.unstubAllGlobals();
   });

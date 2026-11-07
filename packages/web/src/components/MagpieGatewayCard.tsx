@@ -1,6 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLlmStore } from "../store/llm.js";
 import { DEFAULT_GATEWAY, normalizeGatewayBaseUrl } from "../lib/magpieClient.js";
+import {
+  ensureDesktopGateway,
+  getMagpieBridge,
+  type MagpieBridge,
+  type MagpieHostStatus,
+} from "../lib/magpieHost.js";
 
 /**
  * 设置区 · 模型（d.89：magpie 原生组件）。
@@ -30,6 +36,57 @@ export function MagpieGatewayCard() {
   const [key, setKey] = useState(gateway.key);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  /** 桌面端内置桥（浏览器为 null）。 */
+  const [bridge, setBridge] = useState<MagpieBridge | null>(null);
+  const [host, setHost] = useState<MagpieHostStatus | null>(null);
+  const [hostBusy, setHostBusy] = useState(false);
+
+  useEffect(() => {
+    const found = getMagpieBridge();
+    setBridge(found);
+    if (!found) return;
+    let alive = true;
+    void (async () => {
+      const initial = await found.status().catch(() => null);
+      if (alive && initial) setHost(initial);
+      // 进设置页时顺手把内置组件拉起来（幂等；失败由下面展示原因）。
+      await ensureDesktopGateway();
+      const latest = await found.status().catch(() => null);
+      if (alive && latest) setHost(latest);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const controlHost = async (action: "start" | "stop") => {
+    if (!bridge) return;
+    setHostBusy(true);
+    setStatus(null);
+    try {
+      if (action === "stop") {
+        setHost(await bridge.stop());
+        return;
+      }
+      const started = await bridge.start();
+      setHost(started.status);
+      if (started.error) {
+        setStatus({ kind: "error", text: started.error });
+        return;
+      }
+      await ensureDesktopGateway();
+      setHost(await bridge.status());
+      await refreshCatalog().catch(() => {});
+      setStatus({
+        kind: "ok",
+        text: `内置 magpie 已就绪${started.status.version ? `（${started.status.version}）` : ""}，模型目录已刷新。`,
+      });
+    } catch (err) {
+      setStatus({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setHostBusy(false);
+    }
+  };
 
   const normalize = (value: string) => normalizeGatewayBaseUrl(value);
 
@@ -80,6 +137,54 @@ export function MagpieGatewayCard() {
         本机默认 `{DEFAULT_GATEWAY.baseUrl}`，Key 填 `{DEFAULT_GATEWAY.key}` 即可。
       </p>
 
+      {bridge && (
+        <section role="region" aria-label="内置 magpie" className="mt-3 rounded-lg border border-line bg-[#fafafa] p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[12px] font-bold text-muted">内置 magpie（随和鸣安装）</span>
+            <span className="ui-caption">
+              {!host
+                ? "检测中…"
+                : host.running
+                  ? `运行中${host.version ? ` · magpie ${host.version}` : ""}${host.proxyPort ? ` · 反代端口 ${host.proxyPort}` : ""}`
+                  : host.available
+                    ? "未运行"
+                    : "未安装"}
+            </span>
+            <span className="ml-auto flex items-center gap-1">
+              <button
+                type="button"
+                aria-label="重启内置 magpie"
+                disabled={hostBusy}
+                onClick={() => {
+                  void bridge.stop().then(() => controlHost("start"));
+                }}
+                className="ui-btn ui-btn-sm ui-btn-ghost"
+              >
+                {hostBusy ? "处理中…" : "启动 / 重启"}
+              </button>
+              <button
+                type="button"
+                aria-label="停止内置 magpie"
+                disabled={hostBusy || !host?.running}
+                onClick={() => void controlHost("stop")}
+                className="ui-btn ui-btn-sm ui-btn-ghost"
+              >
+                停止
+              </button>
+            </span>
+          </div>
+          <p className="mt-1 ui-caption">
+            和鸣会自动启动它并接上本机反代；账号、订阅与 Key 都在 magpie 里管理。
+            {host && !host.available ? "缺少内置二进制时，开发态运行 node scripts/fetch-magpie.mjs。" : ""}
+          </p>
+          {host?.lastError && <p className="mt-1 ui-body-sm text-[#b42318]">{host.lastError}</p>}
+        </section>
+      )}
+
+      <details className="mt-3" open={!bridge}>
+        <summary className="cursor-pointer ui-caption">
+          {bridge ? "高级：手动指定网关（远端 magpie / 自装）" : "网关地址与 Key"}
+        </summary>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="block ui-caption">
           网关地址
@@ -115,6 +220,8 @@ export function MagpieGatewayCard() {
         </button>
         <span className="ui-caption">「读取模型」只请求上面这个地址，不经过和鸣服务端。</span>
       </div>
+
+      </details>
 
       {status && (
         <div

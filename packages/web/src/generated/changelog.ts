@@ -12,6 +12,32 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.92.2.42.0",
+    "date": "2026-11-07",
+    "title": "内置 magpie：模型网关做成随包托管的原生组件",
+    "bullets": [
+      "新增 `scripts/fetch-magpie.mjs`：钉版本 `v0.1.3246` 下载官方 Windows CLI（约 73MB）+ `SHA256SUMS` 校验；Node 自带 CA 不认 GitHub 证书时回落系统 curl（只读下载）；`--check` / `--force`；",
+      "落点 `packages/desktop/resources/magpie/magpie-cli.exe`（gitignore，只留 `.gitkeep`），electron-builder `extraResources` 打进 `resources/magpie/`；",
+      "`scripts/build-desktop.mjs` 打包前强制校验，缺失自动下载；失败中止打包（安装包不能缺模型网关）。",
+      "`magpie-host.js`：`magpie serve` 启动、`/api/hello` 就绪（默认 30s，带版本）、失败带 stderr 尾巴并回收；Windows `taskkill /T /F`、POSIX 进程组回收；并发 start 复用 Promise；状态含 available/running/version/binaryPath；",
+      "`magpie-proxy.js`：随机端口、只监听回环；来源白名单（`app://heming` / localhost / 127.0.0.1）其余 403；转发前清 `Origin`/`Referer`、补 `Host`；补 CORS；SSE 直接 pipe；上游不可用 502；",
+      "主进程新增 `magpie:status/start/stop/gateway` 四个通道（全部登记 `TRUSTED_CHANNELS`），应用启动后自动拉起（失败只记日志），退出时随既有子进程回收闸收口。",
+      "preload 暴露 `__heming_magpie`；`lib/magpieHost.ts` 做桥探测、启动与采用反代地址；",
+      "store 网关配置增加 `source: \"desktop\" | \"manual\"`：桌面反代地址自动采用且端口变化可更新，**用户手填的网关永不覆盖**；`App` 启动时 `ensureDesktopGateway()`（浏览器无桥 → no-op）；",
+      "设置页 `MagpieGatewayCard` 增加「内置 magpie」区块：运行状态/版本/反代端口、启动/重启、停止；手填地址收进「高级」折叠区。",
+      "桌面：`magpie-host.test` 6 例 + `magpie-proxy.test` 8 例；main/preload 既有守卫（通道白名单、preload 暴露面）全绿；打包守卫沿用；",
+      "渲染层：`magpieHost.test` 7 例、`MagpieGatewayCard` +2 例、store 网关 source 语义 +1 例；",
+      "`pnpm --filter @heming/web typecheck` 零错；web 全量除既有无关用例（d39 生命周期，在干净 HEAD 同样失败）外通过。"
+    ],
+    "paragraphs": [
+      "d.90 把模型层改成「只连 magpie 网关」，d.91 做了设置页；本轮把 magpie 本体也变成和鸣自己的组件。",
+      "一、二进制与构建（不进仓库）",
+      "二、主进程托管与反代",
+      "三、渲染层",
+      "门禁"
+    ]
+  },
+  {
     "version": "d.91.2.42.0",
     "date": "2026-11-07",
     "title": "团队第二轮：从「定位到人」到「定位到那条动向」",

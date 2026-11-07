@@ -40,3 +40,7 @@ __pycache__/
 # InfoHub 的本机配置与归档只属于设备，不进仓库
 packages/infohub/config.json
 packages/infohub/data/
+
+# 内置 magpie CLI（约 70MB，构建时由 scripts/fetch-magpie.mjs 下载并校验；只留 .gitkeep）
+packages/desktop/resources/magpie/magpie-cli*
+packages/desktop/resources/magpie/*.download

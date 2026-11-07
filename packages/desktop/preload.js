@@ -360,6 +360,16 @@ contextBridge.exposeInMainWorld("__heming_files", {
 
 // —— 信息中枢 · InfoHub 本机桥（d.45）——
 // 归档数据留在本机：主进程用 stdio 拉起 Python 桥，这里只转发白名单方法。
+// ── 内置 magpie 网关（d.91）───────────────────────────────────────────────
+// 模型统一由 magpie 提供：主进程托管 `magpie serve` 与带 CORS 的本机反代，
+// 渲染层只拿 status / 启动停止 / 反代 baseUrl（不直接碰 3425 端口，避开 Origin 策略）。
+contextBridge.exposeInMainWorld("__heming_magpie", {
+  status: () => ipcRenderer.invoke("magpie:status"),
+  start: () => ipcRenderer.invoke("magpie:start"),
+  stop: () => ipcRenderer.invoke("magpie:stop"),
+  gateway: () => ipcRenderer.invoke("magpie:gateway"),
+});
+
 // 浏览器端没有这个桥，页面据此显示「仅桌面端可用」，绝不回退到云端读归档。
 contextBridge.exposeInMainWorld("__heming_infohub", {
   /** 静态信息：包目录、默认数据目录、内置解释器、当前进程状态。 */

@@ -20,6 +20,8 @@ const { createPetHost } = require("./pet-host");
 const { appVersion } = require("./app-version");
 const { buildChildEnv, createStdioBridge } = require("./mcp-stdio");
 const { createChildReclaimer } = require("./child-kill");
+const { createMagpieHost, resolveBinaryPath } = require("./magpie-host");
+const { startMagpieProxy } = require("./magpie-proxy");
 const { bundledPython } = require("./bundled-runtime");
 const { planStdioSpawn, probeLocalRuntime } = require("./local-runtime");
 
@@ -94,6 +96,10 @@ const TRUSTED_CHANNELS = [
   "infohub:stop",
   "infohub:pick-home",
   "infohub:pick-python",
+  "magpie:status",
+  "magpie:start",
+  "magpie:stop",
+  "magpie:gateway",
 ];
 
 // ── 崩溃兜底（d.30 · P0-4）─────────────────────────────────────────────
@@ -566,6 +572,79 @@ if (!gotLock) {
     planSpawn: planStdioSpawn,
   });
 
+  // —— 内置 magpie 网关（d.91 原生模型组件）——
+  // 模型统一由 magpie 提供（d.90）；桌面端随包带 `resources/magpie/magpie-cli.exe`，
+  // 主进程负责启动/探活/退出回收，并在本机回环上开一个带 CORS 的反代给渲染层用
+  // （magpie 默认拒绝网页跨源请求，渲染层也不能自己起 HTTP 服务）。
+  const magpieHost = createMagpieHost({
+    binaryPath: resolveBinaryPath({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appDir: __dirname,
+    }),
+    spawn: require("node:child_process").spawn,
+    log: (line) => console.log(line),
+  });
+  /** 反代按需创建：只有真的要用网关（且 magpie 已就绪）时才监听端口。 */
+  let magpieProxy = null;
+
+  const ensureMagpieProxy = async () => {
+    if (!magpieProxy) {
+      magpieProxy = await startMagpieProxy({
+        upstreamPort: magpieHost.port,
+        log: (line) => console.log(line),
+      });
+    }
+    return `http://127.0.0.1:${magpieProxy.port}/v1`;
+  };
+
+  /** 启动（若未运行）并确保反代存在；失败把原因带回去给设置页展示。 */
+  const startMagpieGateway = async () => {
+    const started = await magpieHost.start();
+    const baseUrl = await ensureMagpieProxy();
+    return { baseUrl, status: { ...magpieHost.status(), version: started.version } };
+  };
+
+  secureIpc.handle("magpie:status", () => ({
+    ...magpieHost.status(),
+    proxyPort: magpieProxy ? magpieProxy.port : null,
+  }));
+
+  secureIpc.handle("magpie:start", async () => {
+    try {
+      return await startMagpieGateway();
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err), status: magpieHost.status() };
+    }
+  });
+
+  secureIpc.handle("magpie:stop", async () => {
+    await magpieHost.stop();
+    if (magpieProxy) {
+      await magpieProxy.close().catch(() => {});
+      magpieProxy = null;
+    }
+    return magpieHost.status();
+  });
+
+  secureIpc.handle("magpie:gateway", async () => {
+    if (!magpieHost.status().running) return { baseUrl: null, status: magpieHost.status() };
+    try {
+      return { baseUrl: await ensureMagpieProxy(), status: magpieHost.status() };
+    } catch (err) {
+      return {
+        baseUrl: null,
+        status: magpieHost.status(),
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
+  // 登录后自动拉起（不阻塞窗口）：失败只记日志，设置页会显示「未运行 + 原因」。
+  void startMagpieGateway().catch((err) => {
+    console.warn(`[magpie] 自动启动失败：${err instanceof Error ? err.message : String(err)}`);
+  });
+
   // —— InfoHub 本机进程桥（d.45 信息中枢）——
   // 归档数据只留在本机：主进程用 stdio 拉起 Python 桥，不开端口、不走网络。
   // 打包后 Python 包在 resources/infohub；开发态直接用 packages/infohub。
@@ -627,6 +706,9 @@ if (!gotLock) {
       // 用户几秒前点过停止，回收可能还在后台跑，这时退出照样要等它。
       if (!mcpStdio.idle()) list.push(() => mcpStdio.disposeAll());
       if (infohubBridge && !infohubBridge.idle()) list.push(() => infohubBridge.dispose());
+      // magpie 网关与它的反代：关闭时先停进程再关服务，避免端口悬挂。
+      if (magpieHost.status().running) list.push(() => magpieHost.stop());
+      if (magpieProxy) list.push(() => magpieProxy.close());
       // 桌宠：同步销毁窗口与托盘（托盘不销毁会在托盘区留下一个幽灵图标）。
       // 它不是子进程，但同属「退出前必须收口」的资源；放在这里统一收口，
       // 而不是再挂一个无 event 的 will-quit——那种处理器拦不住退出（见 main.test 的守卫）。

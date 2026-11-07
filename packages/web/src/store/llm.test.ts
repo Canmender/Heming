@@ -72,12 +72,14 @@ describe("llm store · magpie 网关与模型档案", () => {
     expect(useLlmStore.getState().gateway).toEqual({
       baseUrl: "http://127.0.0.1:3999/v1",
       key: "magpie-acme",
+      source: "manual",
     });
     expect(useLlmStore.getState().profiles[0].baseUrl).toBe("http://127.0.0.1:3999/v1");
     expect(useLlmStore.getState().profiles[0].apiKey).toBe("magpie-acme");
     expect(JSON.parse(localStorage.getItem("heming.magpie.v1")!)).toEqual({
       baseUrl: "http://127.0.0.1:3999/v1",
       key: "magpie-acme",
+      source: "manual",
     });
   });
 
@@ -129,6 +131,25 @@ describe("llm store · magpie 网关与模型档案", () => {
     expect(JSON.parse(localStorage.getItem("heming.agentPrompts")!)["agent-1"]).toBe("你是架构师");
     useLlmStore.getState().setBinding("agent-1", null);
     expect(JSON.parse(localStorage.getItem("heming.agentLlm")!)).not.toHaveProperty("agent-1");
+  });
+
+  it("桌面端反代地址：source=desktop 时自动采用并落盘；manual 永不覆盖", () => {
+    useLlmStore.getState().setModels(MODELS);
+    useLlmStore.setState({ gateway: { ...DEFAULT_GATEWAY, source: "desktop" } });
+    expect(useLlmStore.getState().adoptDesktopGateway("http://127.0.0.1:40123/v1")).toBe(true);
+    expect(useLlmStore.getState().gateway).toMatchObject({
+      baseUrl: "http://127.0.0.1:40123/v1",
+      source: "desktop",
+    });
+    expect(useLlmStore.getState().profiles[0].baseUrl).toBe("http://127.0.0.1:40123/v1");
+    expect(JSON.parse(localStorage.getItem("heming.magpie.v1")!)).toMatchObject({
+      baseUrl: "http://127.0.0.1:40123/v1",
+      source: "desktop",
+    });
+
+    useLlmStore.getState().setGateway({ baseUrl: "https://gw.example.com/v1", key: "k" });
+    expect(useLlmStore.getState().adoptDesktopGateway("http://127.0.0.1:40124/v1")).toBe(false);
+    expect(useLlmStore.getState().gateway.baseUrl).toBe("https://gw.example.com/v1");
   });
 
   it("候选链只存模型档案引用；删链时解绑", () => {
