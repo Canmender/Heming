@@ -2,6 +2,44 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.109.2.42.0（2026-11-08）— 技能社区接入（虾评）+ 插件阶段 C 收尾（bundle 命令物化 / 市场直装 / target 对齐）
+
+### 新增（技能社区：虾评）
+
+- **服务端代理**：`/api/skill-hub`（状态/分类）、`/skills`（列表/搜索/分页）、`/skills/:id`（详情）、
+  `/skills/:id/download`（需用户 Key）、`/register`（代用户注册，明确点击才调）。上游无 CORS，必须经和鸣服务端；
+  上游字段在这里归一化成 `shared/skillHub.ts` 的形状，web 不接触平台特有 JSON。
+- **零依赖 zip 读取**：EOCD + 中央目录 + `inflateRawSync`，只取 `SKILL.md`（≤128KB）与文件清单（path/size）；
+  硬拒路径穿越/加密/ZIP64/未知压缩法，zip ≤5MB、条目 ≤200、单文件 ≤1MB、解压总量 ≤16MB（zip bomb 兜底）。
+  **不落盘、不执行脚本**。
+- **Key 只从请求头透传**：`x-skill-hub-key` → 上游 `Authorization: Bearer`；服务端不落库、不写日志；
+  无 Key 401 中文提示，401/402/403/429 分类翻译（代币不足时不代扣）。
+- **web「社区」Tab**（技能区新增第三 Tab）：搜索（250ms 防抖）、分类 chips、排序（下载量/收藏/更新）、
+  卡片（作者/分类/下载/收藏/official|trial/需自备 Key/已安装/有新版本）、详情（含上游安全结论与安全报告，
+  缺失时明写「上游未提供」）、连接虾评面板（粘贴 Key 或明确点击「用这个名字创建账号」）、Key 清除。
+- **安装流程**：下载 → `parseImportText` 解析 → 预览（名称/触发词/标签/指令字数/作者版本/同名警告）→
+  确认后写入技能池（`source: "imported"` + `community` 元信息），**默认不分配给任何智能体**；老技能无该字段照常读。
+- 设计文档 `docs/SKILL-HUB.md`（架构/边界/接口/安装六步/上限/Key/信任/降级/接第二个源）。
+
+### 新增（插件阶段 C 收尾）
+
+- **bundle 命令物化**：已装界面插件的 `commands` 经 `__heming_widgets.list()` 转成命令面板条目
+  （`lib/widgets/commands.ts`），只在桌面端有桥时出现；浏览器端为空且不报错。
+- **市场直装界面插件**：市场详情里 bundle 版本可点安装 → 下载 `package.tgz` 并校验 sha256 →
+  `installWidgetFromBytes`；无桌面桥时禁用并注明「仅桌面版可安装界面插件」（`lib/widgets/marketInstall.ts`）。
+- **target 对齐**：bundle 的 `commands.target` 允许 `page` / `plugin` / `settings` / `unit`（与声明式一致），
+  **仍不允许 `skill`**；主进程安装器与 web 解析两侧同口径收紧。
+
+### 文档与版本
+
+- 版本 `d.109.2.42.0`；`docs/INDEX.md` 增 `SKILL-HUB.md`。
+- 全量门禁 build/test/typecheck 全绿（shared 78 · web 全量 · server 223 · desktop 全量）。
+
+### 边界（明确未做）
+
+- 技能社区：不做自动更新（只提示+可重装）、不落盘随包其它文件、不做 featured 排序、不做多源切换 UI（契约已留源位）。
+- 插件：Agent 写安装（需 HITL 非聊天页确认）与插件健康检查/自动禁用仍未做。
+
 ## d.108.2.42.0（2026-11-08）— 插件阶段 B/C：市场页、命令 target 扩展、Agent 只读工具、界面插件生命周期
 
 ### 新增（web 市场）
