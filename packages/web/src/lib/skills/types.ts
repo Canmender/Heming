@@ -1,4 +1,5 @@
 import type { StorageLike } from "../memory/types.js";
+import type { SkillCommunityMeta } from "@heming/shared";
 
 /**
  * 技能池类型与常量（设计 §5、§8）。
@@ -23,6 +24,11 @@ export interface SkillDefinition {
   source: "builtin" | "user" | "imported" | "distilled";
   /** 插件归属：由 `plugin.json` 安装的技能带插件 id，卸载/停用按此归组。 */
   pluginId?: string;
+  /**
+   * 社区归属（d.109）：从技能社区安装时记来源/上游 id/版本/作者。
+   * 可选且向后兼容——老技能没有该字段，存储解析按缺失处理。
+   */
+  community?: SkillCommunityMeta;
   createdAt: string;
   updatedAt: string;
 }

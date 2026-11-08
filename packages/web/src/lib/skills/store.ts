@@ -13,6 +13,7 @@ import {
   DEFAULT_ROUTE_BUDGET,
   DEFAULT_ROUTE_TOP_K,
 } from "./types.js";
+import { SkillCommunityMetaSchema } from "@heming/shared";
 import { buildBuiltinSkills } from "./builtins.js";
 import { routeSkills } from "./router.js";
 import { parseImportText, skillToMarkdown } from "./markdown.js";
@@ -79,6 +80,13 @@ function uniq(items: string[]): string[] {
   return [...new Set(items.filter(Boolean))];
 }
 
+/** 社区元信息容错：坏形状按缺失处理（不因为一条脏字段丢掉整条技能）。 */
+function coerceCommunity(raw: unknown): SkillDefinition["community"] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const parsed = SkillCommunityMetaSchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /** 单条技能的结构校验：字段缺失补默认值，无法识别时返回 null（当作不存在）。 */
 function coerceSkill(raw: unknown, fallbackAt: string): SkillDefinition | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -105,13 +113,19 @@ function coerceSkill(raw: unknown, fallbackAt: string): SkillDefinition | null {
     version: typeof r.version === "string" && r.version ? r.version : "1.0.0",
     source,
     pluginId: typeof r.pluginId === "string" && r.pluginId ? r.pluginId : undefined,
+    community: coerceCommunity(r.community),
     createdAt: typeof r.createdAt === "string" ? r.createdAt : fallbackAt,
     updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : fallbackAt,
   };
 }
 
 function copySkill(skill: SkillDefinition): SkillDefinition {
-  return { ...skill, triggers: [...skill.triggers], tags: [...skill.tags] };
+  return {
+    ...skill,
+    triggers: [...skill.triggers],
+    tags: [...skill.tags],
+    community: skill.community ? { ...skill.community } : undefined,
+  };
 }
 
 export class SkillPool {
@@ -183,6 +197,7 @@ export class SkillPool {
       version: input.version || "1.0.0",
       source: input.source ?? "user",
       pluginId: input.pluginId,
+      community: input.community ? { ...input.community } : undefined,
       createdAt: at,
       updatedAt: at,
     };

@@ -15,6 +15,8 @@ import { mcpRegistry } from "../lib/mcp/index.js";
 import { PageShell } from "./layout/PageShell.js";
 import { describeSystemPlugin, pluginStore, type PluginStore } from "../lib/plugins/index.js";
 import { useUiStore } from "../store/ui.js";
+import { useSessionTab } from "../lib/sessionState.js";
+import { SkillHubPanel } from "./skills/SkillHubPanel.js";
 
 /**
  * 技能区：技能（四类分组）/ 技能池（全量表格）两个视图。
@@ -586,7 +588,11 @@ export function SkillsView({
   className = "",
   onChanged,
 }: SkillsViewProps = {}) {
-  const [tab, setTab] = useState<"groups" | "pool">("groups");
+  const [tab, setTab] = useSessionTab<"groups" | "pool" | "hub">(
+    "heming.tab.skills.v1",
+    "groups",
+    ["groups", "pool", "hub"],
+  );
   const [tick, setTick] = useState(0);
   const [query, setQuery] = useState("");
   /** 插件 id → 显示名（「插件：<名>」来源徽标用；插件店可注入便于单测）。 */
@@ -1137,28 +1143,32 @@ export function SkillsView({
     <div className={className}>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <label htmlFor="skill-agent-select" className="ui-caption">
-            给哪个智能体用
-          </label>
-            <select
-              id="skill-agent-select"
-              aria-label="选择智能体"
-              value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
-              className={`${inputSmCls} min-w-[160px]`}
-            >
-              {agents.length === 0 && <option value="">（名册加载中…）</option>}
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-            <span className={hintCls}>
-              {agentId
-                ? `已分配 ${assignedIds.size} 个技能；只有已分配的技能才会用于「${agentName}」的对话`
-                : "先选择智能体，才能把技能分配给它使用"}
-            </span>
+          {tab !== "hub" && (
+            <>
+              <label htmlFor="skill-agent-select" className="ui-caption">
+                给哪个智能体用
+              </label>
+              <select
+                id="skill-agent-select"
+                aria-label="选择智能体"
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
+                className={`${inputSmCls} min-w-[160px]`}
+              >
+                {agents.length === 0 && <option value="">（名册加载中…）</option>}
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+              <span className={hintCls}>
+                {agentId
+                  ? `已分配 ${assignedIds.size} 个技能；只有已分配的技能才会用于「${agentName}」的对话`
+                  : "先选择智能体，才能把技能分配给它使用"}
+              </span>
+            </>
+          )}
           </div>
         <div role="tablist" aria-label="技能视图" className="flex items-center gap-1">
           <button
@@ -1183,26 +1193,40 @@ export function SkillsView({
           >
             技能池
           </button>
+          <button
+            type="button"
+            role="tab"
+            id="skill-hub-tab"
+            aria-controls="skill-hub-panel"
+            aria-selected={tab === "hub"}
+            onClick={() => setTab("hub")}
+            className={`ui-btn ui-btn-sm ${tab === "hub" ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
+          >
+            社区
+          </button>
         </div>
       </div>
 
-      {/* 搜索提到页头：分组视图与技能池共用同一个搜索词（此前分组视图完全忽略它）。 */}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <input
-          aria-label="搜索技能"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="按名称、描述或标签搜索"
-          className={`${inputSmCls} min-w-[180px] max-w-[320px] flex-1`}
-        />
-        <span className={hintCls}>
-          {keyword
-            ? tab === "groups"
-              ? `分组内匹配 ${GROUPS.reduce((n, g) => n + byCategory(g.key).length, 0)} 个`
-              : `匹配 ${filtered.length} 个`
-            : "搜索同时作用于分组与技能池"}
-        </span>
-      </div>
+      {/* 搜索提到页头：分组视图与技能池共用同一个搜索词（此前分组视图完全忽略它）。
+          社区 Tab 用自己的搜索框（服务端检索 + 防抖），不复用本机技能搜索。 */}
+      {tab !== "hub" && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            aria-label="搜索技能"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="按名称、描述或标签搜索"
+            className={`${inputSmCls} min-w-[180px] max-w-[320px] flex-1`}
+          />
+          <span className={hintCls}>
+            {keyword
+              ? tab === "groups"
+                ? `分组内匹配 ${GROUPS.reduce((n, g) => n + byCategory(g.key).length, 0)} 个`
+                : `匹配 ${filtered.length} 个`
+              : "搜索同时作用于分组与技能池"}
+          </span>
+        </div>
+      )}
 
       {msg && (
         <div role="status" className={`mt-2 ${msg.kind === "error" ? errorCls : okCls}`}>
@@ -1212,10 +1236,22 @@ export function SkillsView({
 
       <div
         role="tabpanel"
-        id={tab === "groups" ? "skill-groups-panel" : "skill-pool-panel"}
-        aria-labelledby={tab === "groups" ? "skill-groups-tab" : "skill-pool-tab"}
+        id={tab === "groups" ? "skill-groups-panel" : tab === "pool" ? "skill-pool-panel" : "skill-hub-panel"}
+        aria-labelledby={tab === "groups" ? "skill-groups-tab" : tab === "pool" ? "skill-pool-tab" : "skill-hub-tab"}
       >
-        {tab === "groups" ? groupsPanel : poolPanel}
+        {tab === "groups" ? (
+          groupsPanel
+        ) : tab === "pool" ? (
+          poolPanel
+        ) : (
+          <SkillHubPanel
+            skills={skills}
+            onInstalled={() => {
+              setTick((n) => n + 1);
+              onChanged?.();
+            }}
+          />
+        )}
       </div>
 
       {addFor && (
