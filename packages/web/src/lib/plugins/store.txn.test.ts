@@ -1,28 +1,31 @@
 import { describe, it, expect } from "vitest";
 import { McpRegistry, MCP_SERVERS_KEY } from "../mcp/index.js";
 import { SkillPool, SKILLS_KEY, type StorageLike } from "../skills/index.js";
-import { contentFingerprint, PublisherTrustStore, PluginManifestError } from "./index.js";
+import { contentFingerprint, PublisherTrustStore, PluginManifestError, pluginEnginesStatus } from "./index.js";
 import {
   INSTALL_WRITE_BUDGET_BYTES,
   PLUGIN_TXN_KEYS,
   PLUGINS_KEY,
   PluginInstallError,
   PluginStore,
+  SKILLS_POOL_WRITE_BUDGET_BYTES,
   pluginServerId,
 } from "./store.js";
 
 /**
- * 安装事务（d.105 / 规格 §5.2）：plan → prepare/persist → 失败 rollback。
+ * 安装事务（d.105 / 规格 §5.2）与单步事务（d.110 修复轮）。
  *
  * 这些用例的存在理由：localStorage 没有真正事务，本仓此前的 `save()` 还会**吞**
- * 配额异常——用户看到「装好了」，重启后却是半装态。这里用「注入 StorageLike，
- * 让指定键的 setItem 抛错」把最难复现的那条路径（写失败 → 补偿 → 内存 reload）
- * 变成可回归的断言，并把「回滚失败必须如实报告」钉住。
+ * 配额异常——用户看到「装好了/卸掉了/停用了」，重启后却是半装态或回弹。
+ * 这里用「注入 StorageLike，让指定键的 setItem 抛错」把最难复现的那条路径
+ * （写失败 → 补偿 → 内存 reload）变成可回归的断言，并把「回滚失败必须如实报告」钉住。
  */
 
 function makeStorage(
   map = new Map<string, string>(),
   throwing = new Set<string>(),
+  /** 只失败一次（用于验证「失败 → 补偿成功」这条路径，补偿写会成功）。 */
+  failOnce = new Set<string>(),
 ): { storage: StorageLike; map: Map<string, string> } {
   return {
     map,
@@ -30,6 +33,10 @@ function makeStorage(
       getItem: (key) => (map.has(key) ? (map.get(key) as string) : null),
       setItem: (key, value) => {
         if (throwing.has(key)) throw new Error(`QuotaExceededError: ${key}`);
+        if (failOnce.has(key)) {
+          failOnce.delete(key);
+          throw new Error(`QuotaExceededError(once): ${key}`);
+        }
         map.set(key, value);
       },
       removeItem: (key) => {
@@ -88,7 +95,7 @@ function v5Manifest(overrides: Record<string, unknown> = {}): Record<string, unk
   };
 }
 
-function fresh(throwing = new Set<string>()): {
+function fresh(throwing = new Set<string>(), failOnce = new Set<string>()): {
   store: PluginStore;
   pool: SkillPool;
   mcp: McpRegistry;
@@ -96,7 +103,7 @@ function fresh(throwing = new Set<string>()): {
   storage: StorageLike;
   publishers: PublisherTrustStore;
 } {
-  const { storage, map } = makeStorage(new Map(), throwing);
+  const { storage, map } = makeStorage(new Map(), throwing, failOnce);
   const pool = new SkillPool(storage, clock());
   const mcp = new McpRegistry(storage, () => new Date(Date.UTC(2026, 10, 1)).toISOString());
   const publishers = new PublisherTrustStore(storage);
@@ -424,5 +431,201 @@ describe("安装事务 · 写失败回滚与诚实报告", () => {
     });
     expect(() => other.install(manifest())).toThrow(PluginManifestError);
     expect(() => other.install(manifest())).toThrow("MCP 服务 id 冲突");
+  });
+});
+
+describe("卸载事务（P0-2，d.110）", () => {
+  it("卸载成功：技能/服务/记录一并删除，返回 ok=true", () => {
+    const { store, pool, mcp } = fresh();
+    store.install(manifest());
+
+    const result = store.remove("acme.txn");
+
+    expect(result.ok).toBe(true);
+    expect(store.list()).toEqual([]);
+    expect(pool.list().filter((skill) => skill.pluginId === "acme.txn")).toEqual([]);
+    expect(mcp.get(pluginServerId("acme.txn", "report"))).toBeUndefined();
+  });
+
+  it("卸载是幂等的：插件不存在时返回 ok=true", () => {
+    const { store } = fresh();
+    expect(store.remove("acme.missing").ok).toBe(true);
+  });
+
+  it("技能池写失败（一次性）：整笔回滚，技能与记录都恢复，rollback.ok=true", () => {
+    const throwing = new Set<string>();
+    const failOnce = new Set<string>();
+    const { store, pool, map } = fresh(throwing, failOnce);
+    store.install(manifest());
+    const before = new Map(map);
+    // 只让下一次 SKILLS_KEY 写入失败：卸载的读回校验会发现「技能没删掉」，
+    // 而补偿写（restore）会成功——这正是「能回滚干净」的场景。
+    failOnce.add(SKILLS_KEY);
+
+    const result = store.remove("acme.txn");
+
+    expect(result.ok).toBe(false);
+    expect(result.rollback?.ok).toBe(true);
+    expect(result.error).toContain(SKILLS_KEY);
+    // 存储逐字节回到卸载前
+    expect(map).toEqual(before);
+    // 内存也 reload 回卸载前：记录与技能都还在
+    expect(store.list().map((plugin) => plugin.manifest.id)).toEqual(["acme.txn"]);
+    expect(pool.list().filter((skill) => skill.pluginId === "acme.txn")).toHaveLength(1);
+  });
+
+  it("技能池写失败（持续）：rollback.ok=false 如实报告，但内存仍回到卸载前", () => {
+    const throwing = new Set<string>();
+    const { store, pool, mcp, map } = fresh(throwing);
+    store.install(manifest());
+    const before = new Map(map);
+    throwing.add(SKILLS_KEY);
+
+    const result = store.remove("acme.txn");
+
+    expect(result.ok).toBe(false);
+    expect(result.rollback?.ok).toBe(false);
+    expect(result.rollback?.error).toContain(SKILLS_KEY);
+    expect(map).toEqual(before);
+    // reload 后仍是「插件在、技能在、服务在」——不会留下半卸载的悬空 skillIds
+    expect(store.list().map((plugin) => plugin.manifest.id)).toEqual(["acme.txn"]);
+    expect(store.get("acme.txn")?.skillIds).toHaveLength(1);
+    expect(pool.list().filter((skill) => skill.pluginId === "acme.txn")).toHaveLength(1);
+    expect(mcp.get(pluginServerId("acme.txn", "report"))?.origin).toBe("plugin");
+  });
+});
+
+describe("启停事务（P1-3，d.110）", () => {
+  it("总开关写失败：返回 ok=false、回滚内存，读回仍是启用", () => {
+    const throwing = new Set<string>();
+    const { store, pool, map } = fresh(throwing);
+    store.install(manifest());
+    const before = new Map(map);
+    throwing.add(PLUGINS_KEY);
+
+    const result = store.setEnabled("acme.txn", false);
+
+    expect(result.ok).toBe(false);
+    expect(result.rollback?.ok).toBe(false);
+    expect(result.error).toContain(PLUGINS_KEY);
+    expect(map).toEqual(before);
+    expect(store.get("acme.txn")?.enabled).toBe(true);
+    expect(pool.list().find((skill) => skill.pluginId === "acme.txn")?.enabled).toBe(true);
+  });
+
+  it("贡献级停用写失败：disabledKinds 与技能启用位都回滚", () => {
+    const throwing = new Set<string>();
+    const { store, pool } = fresh(throwing);
+    store.install(manifest());
+    throwing.add(PLUGINS_KEY);
+
+    const result = store.setKindEnabled("acme.txn", "skills", false);
+
+    expect(result.ok).toBe(false);
+    expect(store.get("acme.txn")?.disabledKinds).toEqual([]);
+    expect(pool.list().find((skill) => skill.pluginId === "acme.txn")?.enabled).toBe(true);
+  });
+
+  it("总开关写成功：返回 ok=true，技能启用位同步", () => {
+    const { store, pool } = fresh();
+    store.install(manifest());
+
+    const off = store.setEnabled("acme.txn", false);
+    expect(off.ok).toBe(true);
+    expect(store.get("acme.txn")?.enabled).toBe(false);
+    expect(pool.list().find((skill) => skill.pluginId === "acme.txn")?.enabled).toBe(false);
+  });
+});
+
+describe("损坏的 v5 记录（P1-7，d.110）", () => {
+  it("v5 解析失败不再降级按 v4 读：标 invalidRecord 且按 invalidEngines 判定", () => {
+    const { store, storage, pool, mcp, publishers } = fresh();
+    store.applyPlan(store.planInstall(v5Manifest(), { appVersion: "d.106.2.42.0" }));
+    const data = JSON.parse(storage.getItem(PLUGINS_KEY) as string) as {
+      plugins: Array<{ manifest: Record<string, unknown> }>;
+    };
+    // 模拟损坏：v5 记录丢了 engines（旧实现会 v4 兜底 → 判「兼容」）
+    delete data.plugins[0].manifest.engines;
+    storage.setItem(PLUGINS_KEY, JSON.stringify(data));
+
+    const reloaded = new PluginStore(storage, pool, clock(), mcp, publishers);
+    const record = reloaded.get("acme.v5");
+
+    expect(record?.invalidRecord).toBe(true);
+    expect(record?.invalidReason).toContain("v5");
+    expect(record?.manifest.engines).toBeUndefined();
+    expect(pluginEnginesStatus(record!.manifest, "d.106.2.42.0").status).toBe("invalidEngines");
+    // 抢救出展示字段，且保留 skillIds 以便卸载（不留孤儿）
+    expect(record?.manifest.id).toBe("acme.v5");
+    expect(record?.skillIds).toHaveLength(1);
+    expect(reloaded.remove("acme.v5").ok).toBe(true);
+    expect(reloaded.list()).toEqual([]);
+  });
+
+  it("损坏记录重新安装同一清单即可修复（幂等 noop 不能吞掉修复）", () => {
+    const { store, storage, pool, mcp, publishers } = fresh();
+    store.applyPlan(store.planInstall(v5Manifest(), { appVersion: "d.106.2.42.0" }));
+    const data = JSON.parse(storage.getItem(PLUGINS_KEY) as string) as {
+      plugins: Array<{ manifest: Record<string, unknown> }>;
+    };
+    delete data.plugins[0].manifest.engines;
+    storage.setItem(PLUGINS_KEY, JSON.stringify(data));
+    const reloaded = new PluginStore(storage, pool, clock(), mcp, publishers);
+    expect(reloaded.get("acme.v5")?.invalidRecord).toBe(true);
+
+    const result = reloaded.applyPlan(
+      reloaded.planInstall(v5Manifest(), { appVersion: "d.106.2.42.0" }),
+    );
+
+    expect(result.applied).toBe("applied");
+    expect(result.changed).toBe(true);
+    const repaired = reloaded.get("acme.v5");
+    expect(repaired?.invalidRecord).toBeUndefined();
+    expect(repaired?.manifest.engines).toEqual({ heming: "d.104" });
+  });
+
+  it("id 都救不出来的坏记录只丢这一条，不影响其它插件", () => {
+    const { store, storage, pool, mcp, publishers } = fresh();
+    store.install(manifest());
+    const data = JSON.parse(storage.getItem(PLUGINS_KEY) as string) as {
+      plugins: Array<Record<string, unknown>>;
+    };
+    data.plugins.push({
+      manifest: { schemaVersion: 5 }, // 没有 id，无法定位/卸载
+      enabled: true,
+      skillIds: [],
+      serverIds: [],
+    });
+    storage.setItem(PLUGINS_KEY, JSON.stringify(data));
+
+    const reloaded = new PluginStore(storage, pool, clock(), mcp, publishers);
+    expect(reloaded.list().map((plugin) => plugin.manifest.id)).toEqual(["acme.txn"]);
+  });
+});
+
+describe("技能池预算预检（P1-8，d.110）", () => {
+  it("技能池接近 1.2MB 上限时阻断安装（避免 evictToQuota 静默淘汰技能）", () => {
+    const { store, map } = fresh();
+    // 用合法 JSON + 尾部空白把池撑到预算之上（JSON.parse 容忍尾部空白）。
+    const base = JSON.stringify({ version: 1, seeded: true, skills: [], usage: {} });
+    map.set(SKILLS_KEY, base + " ".repeat(SKILLS_POOL_WRITE_BUDGET_BYTES + 16));
+
+    const plan = store.planInstall(manifest());
+
+    expect(plan.size.skillsPoolExceeded).toBe(true);
+    expect(plan.size.skillsPoolAfterBytes).toBeGreaterThan(SKILLS_POOL_WRITE_BUDGET_BYTES);
+    expect(plan.blocked.map((item) => item.code)).toContain("skills-pool-budget");
+    const result = store.applyPlan(plan);
+    expect(result.applied).toBe("failed");
+    expect(result.diagnostics.some((item) => item.code === "skills-pool-budget")).toBe(true);
+    expect(store.list()).toEqual([]);
+  });
+
+  it("技能池远未到上限时正常放行", () => {
+    const { store } = fresh();
+    const plan = store.planInstall(manifest());
+    expect(plan.size.skillsPoolExceeded).toBe(false);
+    expect(plan.blocked).toEqual([]);
+    expect(store.applyPlan(plan).applied).toBe("applied");
   });
 });

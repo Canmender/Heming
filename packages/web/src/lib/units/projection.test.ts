@@ -261,6 +261,19 @@ describe("projectPackageUnits · 贡献计数 / 停用 / meta", () => {
   });
 });
 
+describe("projectPackageUnits · 损坏记录（P1-7）", () => {
+  it("invalidRecord 的插件判降级并给出原因，不复用「旧包=不限制」语义", () => {
+    const [unit] = projectPackageUnits(
+      [installedPlugin({ invalidRecord: true, invalidReason: "engines 缺失" })],
+      APP_VERSION,
+    );
+    const blocks = unit.blocks ?? [];
+    expect(blocks.some((block) => block.kind === "degraded")).toBe(true);
+    expect(blocks.find((block) => block.kind === "degraded")?.detail).toContain("安装记录损坏");
+    expect(blocks.find((block) => block.kind === "degraded")?.detail).toContain("engines 缺失");
+  });
+});
+
 describe("projectPackageUnits · engines / 签名 / 指纹阻断", () => {
   it("engines 要求更高版本：incompatible 并带两侧版本", () => {
     const plugin = installedPlugin();

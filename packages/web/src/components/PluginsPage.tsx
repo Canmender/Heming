@@ -409,26 +409,43 @@ export function PluginsPage({
   };
 
   const onToggle = (plugin: InstalledPlugin, next: boolean) => {
-    try {
-      plugins.setEnabled(plugin.manifest.id, next);
-      bump();
+    // P1-3（d.110）：启停写失败必须可见——此前 store 吞异常，界面显示已停用、
+    // 重载后回弹。现在 store 返回结构化结果，失败时保持界面不变并提示。
+    const result = plugins.setEnabled(plugin.manifest.id, next);
+    bump();
+    if (!result.ok) {
       setMsg({
-        kind: "ok",
-        text: next
-          ? `已启用插件「${plugin.manifest.name}」`
-          : `已停用插件「${plugin.manifest.name}」，其技能不参与路由，MCP 服务也不再连接`,
+        kind: "error",
+        text: `保存失败：${result.error ?? "写入本机存储失败"}${
+          result.rollback && !result.rollback.ok ? "（回滚未完全成功）" : ""
+        }`,
       });
-    } catch (err) {
-      setMsg({ kind: "error", text: `切换失败：${err instanceof Error ? err.message : String(err)}` });
+      return;
     }
+    setMsg({
+      kind: "ok",
+      text: next
+        ? `已启用插件「${plugin.manifest.name}」`
+        : `已停用插件「${plugin.manifest.name}」，其技能不参与路由，MCP 服务也不再连接`,
+    });
   };
 
   const confirmRemove = () => {
     if (!removeTarget) return;
     const plugin = removeTarget;
-    plugins.remove(plugin.manifest.id);
+    // P0-2（d.110）：卸载是事务操作；失败时记录/技能已回滚，必须如实提示而不是报「已卸载」。
+    const result = plugins.remove(plugin.manifest.id);
     setRemoveTarget(null);
     bump();
+    if (!result.ok) {
+      setMsg({
+        kind: "error",
+        text: `卸载失败${result.rollback?.ok ? "，已恢复到卸载前状态" : "，回滚未能完全恢复"}：${
+          result.error ?? "写入本机存储失败"
+        }`,
+      });
+      return;
+    }
     setMsg({
       kind: "ok",
       text: `已卸载插件「${plugin.manifest.name}」，其 ${plugin.skillIds.length} 个技能与 ${plugin.serverIds.length} 台 MCP 服务一并删除`,
@@ -720,8 +737,17 @@ export function PluginsPage({
           serverNameOf={serverNameOf}
           hostOf={hostOf}
           onKindToggle={(kind, enabled) => {
-            plugins.setKindEnabled(detail.manifest.id, kind, enabled);
+            // P1-3：贡献级停用同样走事务；失败时保持开关不变并提示「保存失败」。
+            const result = plugins.setKindEnabled(detail.manifest.id, kind, enabled);
             bump();
+            if (!result.ok) {
+              setMsg({
+                kind: "error",
+                text: `保存失败：${result.error ?? "写入本机存储失败"}${
+                  result.rollback && !result.rollback.ok ? "（回滚未完全成功）" : ""
+                }`,
+              });
+            }
           }}
           onClose={() => setDetailId(null)}
           onRemove={() => {

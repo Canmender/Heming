@@ -8,6 +8,7 @@ import {
 } from "@heming/shared";
 import {
   skillPool,
+  MAX_POOL_CHARS,
   SKILLS_KEY,
   SKILL_BINDINGS_KEY,
   SKILL_ASSIGNMENTS_KEY,
@@ -80,6 +81,20 @@ export const PREVIOUS_MANIFEST_MAX_BYTES = 128 * 1024;
 
 /** 全部插件 `previous` 的合计上限（规格 §5.3）。 */
 export const PREVIOUS_TOTAL_MAX_BYTES = 512 * 1024;
+
+/**
+ * 技能池写入预算（P1-8，d.110）。
+ *
+ * 技能池自身有 1.2MB 单键硬上限（`MAX_POOL_CHARS`，见 `lib/skills/types.ts`），
+ * 超限时 `SkillPool.evictToQuota()` 会**静默淘汰**技能（内置技能同样会被删且不复活）。
+ * 插件安装的 4MB 预算管不到这件事，所以 plan 阶段单独预检：写后技能池超过 90%
+ * 上限就把计划标 blocked，把「会淘汰已有技能」提前说清楚，而不是装完掉技能。
+ *
+ * 口径说明：用 UTF-8 字节估算（与体积预检一致），而技能池的硬上限按 JS 字符数
+ * （`serialized.length`）判——中文技能正文下字节数 ≥ 字符数，所以这里是**偏保守**的
+ * 守卫（宁可早一点提示，也不让用户装完才发现技能被删）。
+ */
+export const SKILLS_POOL_WRITE_BUDGET_BYTES = Math.floor(MAX_POOL_CHARS * 0.9);
 
 /** 安装事务涉及的存储键（快照/恢复/体积预检的同一份清单）。 */
 export const PLUGIN_TXN_KEYS: readonly string[] = [
@@ -170,6 +185,17 @@ export interface InstalledPlugin {
    * 只在本机，不联网。
    */
   highestVersion?: string;
+  /**
+   * v5 记录读回失败（P1-7，d.110）：清单损坏但记录本身仍可管理。
+   *
+   * 为什么保留而不是丢弃：丢了记录就丢掉了 skillIds/serverIds，插件的技能/服务
+   * 变成永远清不掉的孤儿；保留下来才能「显示损坏 + 允许卸载/覆盖重装」。
+   * 判读口径：`invalidRecord === true` 时**不得**把它当「兼容」——`manifest` 是
+   * 无 engines 的占位清单，`pluginEnginesStatus` 会返回 `invalidEngines`。
+   */
+  invalidRecord?: true;
+  /** 损坏原因（中文，详情页/诊断直接展示）。 */
+  invalidReason?: string;
   installedAt: string;
   updatedAt: string;
 }
@@ -223,6 +249,20 @@ export interface InstallApplyResult {
   serversRemoved: number;
   rollback?: InstallRollbackReport;
   diagnostics: PluginDiagnostic[];
+}
+
+/**
+ * 删除/启停这类「单步事务」的结果（P0-2 / P1-3，d.110）。
+ *
+ * 为什么不再抛错：这些操作在 UI 上是开关/确认按钮，失败需要展示提示并保持
+ * 界面状态与存储一致；返回结构化结果比让每个调用点 try/catch 更不容易漏。
+ * `rollback.ok=false` 表示补偿也失败了——调用方必须如实提示「未能完全恢复」。
+ */
+export interface StoreMutationResult {
+  ok: boolean;
+  /** 失败原因（中文，可直接展示）。 */
+  error?: string;
+  rollback?: InstallRollbackReport;
 }
 
 /** 更新预览：按「物化后的真实状态」算差异，与实际安装语义一致。 */
@@ -330,7 +370,7 @@ export interface PlanWrite {
 
 /** 计划被哪条硬规则挡住（非空则 `applyPlan` 不写任何存储）。 */
 export interface InstallPlanBlock {
-  code: "conflicts" | "engines" | "downgrade" | "size";
+  code: "conflicts" | "engines" | "downgrade" | "size" | "skills-pool-budget";
   message: string;
 }
 
@@ -361,6 +401,11 @@ export interface InstallSizeEstimate {
   exceeded: boolean;
   /** 超限时的「先清理什么」建议。 */
   suggestion?: string;
+  /** 技能池写入后估算字节（P1-8：技能池有独立 1.2MB 硬上限，超了会静默淘汰技能）。 */
+  skillsPoolAfterBytes: number;
+  /** 技能池预算（`MAX_POOL_CHARS * 0.9`）。 */
+  skillsPoolLimitBytes: number;
+  skillsPoolExceeded: boolean;
 }
 
 /**
@@ -805,9 +850,10 @@ function stripWebCompatFields(record: Record<string, unknown>): Record<string, u
  * `desktopWidgets` / `events|graphics|eval` 与 v5 的 `engines/meta`），但 `schemaVersion`
  * 保留原始值（旧包要能在界面上标「旧版清单」）。直接按原始版本号解析会踩三条坑：
  * 旧版规则会去顶层找 `skills`；v3 规则会把归一化后的 v4 字段当成「v3 带新字段」拒绝；
- * v5 的 `engines` 是必填，手改坏的记录会让整条插件消失。所以：
- * v5 先按 v5 重读（判兼容性需要 engines），失败退回当前形状并保留版本号；
- * v1–v4 先按**当前形状**（v4）解析，再把版本号还原成存储里的原始值。
+ * v5 的 `engines` 是必填。所以：
+ * v5 先按 v5 重读（判兼容性需要 engines），**失败即抛**（P1-7：绝不用 v4 兜底，
+ * 否则 engines 丢失后会被误判「兼容」）；v1–v4 先按**当前形状**（v4）解析，
+ * 再把版本号还原成存储里的原始值。
  */
 function parseStoredManifest(raw: unknown): PluginManifest {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
@@ -816,11 +862,11 @@ function parseStoredManifest(raw: unknown): PluginManifest {
     if (version === 5) {
       try {
         return parsePluginManifest(stripWebCompatFields(record));
-      } catch {
-        // 存储被手改坏（缺 engines 等）时不丢整条记录：按当前形状读出来，
-        // 保留版本号，等下次安装预览再把问题暴露给用户。
-        const parsed = parsePluginManifest({ ...record, schemaVersion: 4 });
-        return { ...parsed, schemaVersion: 5 };
+      } catch (err) {
+        // P1-7（d.110）：失败**关闭**。此前这里用 v4 重新解析并把 schemaVersion 回填 5，
+        // 结果 engines 被 zod 剥掉 → `pluginEnginesStatus` 按「不限制」放行，
+        // 损坏记录反而比正常记录更容易生效。现在交给 `coerce()` 标 invalidRecord。
+        throw new PluginManifestError(`v5 清单记录损坏：${errorMessage(err)}`);
       }
     }
     if ("contributions" in record || "permissions" in record) {
@@ -832,6 +878,46 @@ function parseStoredManifest(raw: unknown): PluginManifest {
     }
   }
   return parsePluginManifest(raw);
+}
+
+/**
+ * 从损坏的 v5 记录里抢救出「还能展示/还能卸载」的最小清单（P1-7）。
+ *
+ * 只抢救 id/name/version/description/author 这类纯展示字段；贡献与权限一律清空
+ * （损坏的权限声明不可信，宁可显示「无贡献」）。返回的清单**不带 engines**，
+ * 所以 `pluginEnginesStatus` 对它会给出 `invalidEngines`（而不是「兼容」）。
+ * id 都救不出来时返回 null（无法定位/卸载，只能丢）。
+ */
+function salvageCorruptManifest(
+  raw: unknown,
+  reason: string,
+): { manifest: PluginManifest; reason: string } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (typeof record.id !== "string" || !record.id) return null;
+  const text = (value: unknown, fallback: string): string =>
+    typeof value === "string" && value.trim() ? value : fallback;
+  return {
+    manifest: {
+      schemaVersion: 5,
+      id: record.id,
+      name: text(record.name, "（损坏的插件记录）"),
+      version: text(record.version, "0.0.0"),
+      description: text(record.description, ""),
+      author: text(record.author, ""),
+      distribution: "manifest",
+      contributions: {
+        skills: [],
+        mcpServers: [],
+        commands: [],
+        toolPacks: [],
+        desktopWidgets: [],
+        llmPresets: [],
+      },
+      permissions: { network: [], tools: "read", files: [], events: [], graphics: [], eval: false },
+    },
+    reason,
+  };
 }
 
 /**
@@ -1168,12 +1254,17 @@ export class PluginStore {
       { schemaVersion: manifest.schemaVersion, engines: manifest.engines },
       appVersion,
     );
-    const permissionUpgrade = diffPermissionUpgrade(existing?.manifest ?? null, manifest);
+    // 损坏记录（P1-7）没有可信的权限基线：本次安装按「首装」重新确认整份清单。
+    const permissionUpgrade = diffPermissionUpgrade(existing?.invalidRecord ? null : (existing?.manifest ?? null), manifest);
     const at = this.iso();
     const highestVersion = existing
       ? highestPluginVersion(existing.highestVersion, existing.manifest.version, manifest.version)
       : manifest.version;
-    const previousInfo = existing ? this.buildPrevious(existing) : { previous: null as InstalledPlugin["previous"] | null };
+    const previousInfo = existing
+      ? existing.invalidRecord
+        ? { previous: null as InstalledPlugin["previous"] | null }
+        : this.buildPrevious(existing)
+      : { previous: null as InstalledPlugin["previous"] | null };
     const history = buildHistory(existing, manifest.version, at);
     const size = this.estimateInstallSize(manifest, existing, previousInfo.previous);
     const blocked: InstallPlanBlock[] = [];
@@ -1195,6 +1286,14 @@ export class PluginStore {
     if (size.exceeded) {
       blocked.push({ code: "size", message: size.suggestion ?? "安装体积超限，请先清理本机存储" });
     }
+    // P1-8：技能池有独立 1.2MB 硬上限，超限会静默淘汰技能（含内置且不复活）。
+    // 必须在写之前拦住——装完再回滚也救不回被淘汰的技能。
+    if (size.skillsPoolExceeded) {
+      blocked.push({
+        code: "skills-pool-budget",
+        message: `技能池接近上限（写入后约 ${formatMiB(size.skillsPoolAfterBytes)}，上限 ${formatMiB(size.skillsPoolLimitBytes)}）：安装会淘汰已有技能；请先清理技能`,
+      });
+    }
 
     const planWarnings = [...warnings];
     if (manifest.schemaVersion < 5) {
@@ -1206,10 +1305,17 @@ export class PluginStore {
       planWarnings.push(...permissionUpgrade.reasons.map((reason) => `权限扩张：${reason}`));
     }
     if (previousInfo.warning) planWarnings.push(previousInfo.warning);
+    if (existing?.invalidRecord) {
+      planWarnings.push(
+        `原插件记录已损坏（${existing.invalidReason ?? "清单无法解析"}）：本次安装会覆盖修复它；本次不保留 previous`,
+      );
+    }
 
     // 幂等：同清单重复安装不写存储（changed=false）；版本历史与 previous 也不动。
+    // 损坏记录例外（P1-7）：必须重写一次才能把 invalidRecord 修掉。
     const noop =
       existing != null &&
+      existing.invalidRecord !== true &&
       existing.fingerprint === diff.trust.fingerprint &&
       isEmptySkillDiff(diff.skills) &&
       isEmptyServerDiff(diff.servers) &&
@@ -1594,22 +1700,38 @@ export class PluginStore {
     if (existing) delta -= utf8Length(JSON.stringify(existing.manifest));
 
     // 技能池：按名字对齐新增/更新/删除（记录外壳约 160B：id/时间戳/启用位等）。
+    // 单独累计 `skillsDelta`：技能池还有自己的 1.2MB 硬上限（P1-8），要单独预检。
     const owned = this.skills.list().filter((s) => s.pluginId === manifest.id);
     const byName = new Map(owned.map((skill) => [skill.name, skill] as const));
+    let skillsDelta = 0;
+    let assignmentsDelta = 0;
     for (const spec of manifest.contributions.skills) {
       const cost = utf8Length(JSON.stringify(spec)) + 160;
       const match = byName.get(spec.name);
       if (match) {
-        delta += cost - (utf8Length(JSON.stringify(match)) + 160);
+        skillsDelta += cost - (utf8Length(JSON.stringify(match)) + 160);
         byName.delete(spec.name);
       } else {
-        // 新技能还会追加进「已有显式分配记录」的智能体（按 1 个智能体粗估）。
-        delta += cost + 64;
+        skillsDelta += cost;
+        // 新技能还会追加进「已有显式分配记录」的智能体（按 1 个智能体粗估）；
+        // 这部分落在 skillAssignments 键，不属于技能池 JSON。
+        assignmentsDelta += 64;
       }
     }
     for (const leftover of byName.values()) {
-      delta -= utf8Length(JSON.stringify(leftover)) + 160;
+      skillsDelta -= utf8Length(JSON.stringify(leftover)) + 160;
     }
+    delta += skillsDelta + assignmentsDelta;
+
+    // 技能池现状：直接读存储原始 JSON 的字节数（不解析，避免把大池再展开一次）。
+    let skillsPoolCurrentBytes = 0;
+    try {
+      skillsPoolCurrentBytes = bytesOf(this.storage.getItem(SKILLS_KEY));
+    } catch {
+      /* 读不到按 0 算：预检只是守卫 */
+    }
+    const skillsPoolAfterBytes = Math.max(0, skillsPoolCurrentBytes + skillsDelta);
+    const skillsPoolExceeded = skillsPoolAfterBytes > SKILLS_POOL_WRITE_BUDGET_BYTES;
 
     // MCP 服务：按 key 对齐增改删。
     const existingServers = new Map(
@@ -1639,6 +1761,9 @@ export class PluginStore {
       deltaBytes,
       limitBytes: INSTALL_WRITE_BUDGET_BYTES,
       exceeded,
+      skillsPoolAfterBytes,
+      skillsPoolLimitBytes: SKILLS_POOL_WRITE_BUDGET_BYTES,
+      skillsPoolExceeded,
       ...(exceeded
         ? {
             suggestion: `插件体系写后约 ${formatMiB(afterBytes)}，超过预算 ${formatMiB(INSTALL_WRITE_BUDGET_BYTES)}（本次新增约 ${formatMiB(deltaBytes)}）：请先清理消息缓存或卸载不用的插件`,
@@ -1758,29 +1883,71 @@ export class PluginStore {
   }
 
   /**
+   * 单步事务（P0-2 / P1-3，d.110）：快照 → 执行 → `saveOrThrow()`；异常逐键恢复 + 三单例 reload。
+   *
+   * 与 `applyPlan` 共用同一套 `snapshotTransactionKeys`/`rollbackTransaction`：
+   * 卸载、总开关、贡献级停用这类「改一处存储 + 可能联动技能/服务」的操作，
+   * 写失败时必须整笔回退，否则会留下半卸载（删了技能、记录还在）或
+   * 「UI 显示已停用、重载又弹回来」。
+   *
+   * `run` 拿到快照，可在写后做读回校验——技能池/MCP 注册表的 `save()` 会吞配额异常，
+   * 只靠 `saveOrThrow()` 只能发现插件记录本身的写失败。
+   */
+  private transactionalMutation(
+    run: (snapshot: Map<string, string | null>) => void,
+  ): StoreMutationResult {
+    const snapshot = this.snapshotTransactionKeys();
+    try {
+      run(snapshot);
+      this.saveOrThrow();
+      return { ok: true };
+    } catch (err) {
+      const rollback = this.rollbackTransaction(snapshot);
+      return { ok: false, error: errorMessage(err), rollback };
+    }
+  }
+
+  /**
    * 启停插件（主开关）：同步其全部技能与 MCP 服务的启用位。
    *
    * 总开关关闭 = 全部贡献不生效；重新打开时**仍尊重贡献级停用**——
    * 之前单独停用的技能/服务不会因为总开关一开就偷偷恢复。
+   *
+   * P1-3（d.110）：写入走 `saveOrThrow()` + 事务回滚。此前末尾是吞异常的 `save()`，
+   * 配额满时界面显示已停用、重载后回弹；现在失败会回滚内存并返回 `ok=false`。
    */
-  setEnabled(id: string, enabled: boolean): void {
+  setEnabled(id: string, enabled: boolean): StoreMutationResult {
     const plugin = this.data.plugins.find((p) => p.manifest.id === id);
-    if (!plugin) throw new Error(`插件不存在：${id}`);
-    plugin.enabled = enabled;
-    plugin.updatedAt = this.iso();
+    if (!plugin) return { ok: false, error: `插件不存在：${id}` };
     const skillsOn = enabled && !plugin.disabledKinds.includes("skills");
     const serversOn = enabled && !plugin.disabledKinds.includes("mcpServers");
-    for (const skillId of plugin.skillIds) {
-      // 技能可能已被用户在技能区单独删除；缺了就跳过，不让插件页卡死
-      if (this.skills.get(skillId)) this.skills.setEnabled(skillId, skillsOn);
-    }
-    for (const serverId of plugin.serverIds) {
+    // 真实会发生变化的键（值本来就相同的不该被读回校验误判成写失败）。
+    const willChangeSkills = plugin.skillIds.some((skillId) => {
+      const skill = this.skills.get(skillId);
+      return skill !== undefined && skill.enabled !== skillsOn;
+    });
+    const willWriteServers = plugin.serverIds.some((serverId) => {
       const current = this.mcp.get(serverId);
-      if (current && current.origin === "plugin") {
-        this.mcp.update(serverId, { enabled: serversOn });
+      return current !== undefined && current.origin === "plugin" && current.enabled !== serversOn;
+    });
+    return this.transactionalMutation((snapshot) => {
+      plugin.enabled = enabled;
+      plugin.updatedAt = this.iso();
+      for (const skillId of plugin.skillIds) {
+        // 技能可能已被用户在技能区单独删除；缺了就跳过，不让插件页卡死
+        if (this.skills.get(skillId)) this.skills.setEnabled(skillId, skillsOn);
       }
-    }
-    this.save();
+      for (const serverId of plugin.serverIds) {
+        const current = this.mcp.get(serverId);
+        if (current && current.origin === "plugin") {
+          this.mcp.update(serverId, { enabled: serversOn });
+        }
+      }
+      if (willChangeSkills) this.assertKeyChanged(SKILLS_KEY, snapshot, "技能启用位");
+      if (willWriteServers && typeof this.mcp.reload === "function") {
+        this.assertKeyChanged(MCP_SERVERS_KEY, snapshot, "MCP 服务启用位");
+      }
+    });
   }
 
   /**
@@ -1791,48 +1958,82 @@ export class PluginStore {
    * - `commands` / `toolPacks`：没有物化实体，只落盘，读口径经 `effectiveEnabled` 过滤。
    *
    * 主开关关闭时调用也只会写 `disabledKinds`（不会把东西偷偷打开）。
+   *
+   * P1-3（d.110）：与 `setEnabled` 同一套事务语义（失败回滚 + `ok=false`）。
    */
-  setKindEnabled(pluginId: string, kind: PluginContributionKind, on: boolean): void {
+  setKindEnabled(pluginId: string, kind: PluginContributionKind, on: boolean): StoreMutationResult {
     const plugin = this.data.plugins.find((p) => p.manifest.id === pluginId);
-    if (!plugin) throw new Error(`插件不存在：${pluginId}`);
+    if (!plugin) return { ok: false, error: `插件不存在：${pluginId}` };
     const disabled = new Set(plugin.disabledKinds);
     if (on) disabled.delete(kind);
     else disabled.add(kind);
-    plugin.disabledKinds = [...disabled];
-    plugin.updatedAt = this.iso();
-    const active = effectiveEnabled(plugin, kind);
-    if (kind === "skills") {
-      for (const skillId of plugin.skillIds) {
-        if (this.skills.get(skillId)) this.skills.setEnabled(skillId, active);
-      }
-    } else if (kind === "mcpServers") {
-      for (const serverId of plugin.serverIds) {
+    const active = plugin.enabled && !disabled.has(kind);
+    const willChangeSkills =
+      kind === "skills" &&
+      plugin.skillIds.some((skillId) => {
+        const skill = this.skills.get(skillId);
+        return skill !== undefined && skill.enabled !== active;
+      });
+    const willWriteServers =
+      kind === "mcpServers" &&
+      plugin.serverIds.some((serverId) => {
         const current = this.mcp.get(serverId);
-        if (current && current.origin === "plugin") {
-          this.mcp.update(serverId, { enabled: active });
+        return current !== undefined && current.origin === "plugin" && current.enabled !== active;
+      });
+    return this.transactionalMutation((snapshot) => {
+      plugin.disabledKinds = [...disabled];
+      plugin.updatedAt = this.iso();
+      if (kind === "skills") {
+        for (const skillId of plugin.skillIds) {
+          if (this.skills.get(skillId)) this.skills.setEnabled(skillId, active);
+        }
+      } else if (kind === "mcpServers") {
+        for (const serverId of plugin.serverIds) {
+          const current = this.mcp.get(serverId);
+          if (current && current.origin === "plugin") {
+            this.mcp.update(serverId, { enabled: active });
+          }
         }
       }
-    }
-    this.save();
+      if (willChangeSkills) this.assertKeyChanged(SKILLS_KEY, snapshot, "技能启用位");
+      if (willWriteServers && typeof this.mcp.reload === "function") {
+        this.assertKeyChanged(MCP_SERVERS_KEY, snapshot, "MCP 服务启用位");
+      }
+    });
   }
 
   /**
    * 卸载插件：删除其全部技能（含使用统计与绑定）与 MCP 服务，再删记录。
    *
-   * 卸载属关键路径：改用 `saveOrThrow()`，写失败直接冒泡（此前吞异常会留下
-   * 「技能删了、插件记录还在」的半卸态）。
+   * P0-2（d.110）：整笔走事务。此前是「先删技能/MCP、再改内存、最后 saveOrThrow」，
+   * 而 `skills.remove` 的落盘会吞配额异常 → 可能留下「技能已从内存删掉、存储还在」
+   * 或「记录删了、技能没删」的半卸载，且悬空 skillIds 不可恢复。现在：
+   * 快照 → 删除 → 读回校验（技能/MCP 真的写进去了）→ 改记录 → saveOrThrow；
+   * 任一异常逐键恢复并 reload 三个单例，返回结构化的 `ok/rollback`。
+   *
+   * 幂等：插件不存在时返回 `ok=true`（卸载一个已经不在的插件不是错误）。
    */
-  remove(id: string): void {
+  remove(id: string): StoreMutationResult {
     const plugin = this.data.plugins.find((p) => p.manifest.id === id);
-    if (!plugin) return;
-    for (const skillId of plugin.skillIds) this.skills.remove(skillId);
-    for (const serverId of plugin.serverIds) {
+    if (!plugin) return { ok: true };
+    const willWriteSkills = plugin.skillIds.some((skillId) => this.skills.get(skillId) !== undefined);
+    const willWriteServers = plugin.serverIds.some((serverId) => {
       const current = this.mcp.get(serverId);
-      // 只删仍标记为插件来源的服务：用户若把它改成手填，视为用户资产。
-      if (current && current.origin === "plugin") this.mcp.remove(serverId);
-    }
-    this.data.plugins = this.data.plugins.filter((p) => p.manifest.id !== id);
-    this.saveOrThrow();
+      return current !== undefined && current.origin === "plugin";
+    });
+    return this.transactionalMutation((snapshot) => {
+      for (const skillId of plugin.skillIds) this.skills.remove(skillId);
+      for (const serverId of plugin.serverIds) {
+        const current = this.mcp.get(serverId);
+        // 只删仍标记为插件来源的服务：用户若把它改成手填，视为用户资产。
+        if (current && current.origin === "plugin") this.mcp.remove(serverId);
+      }
+      if (willWriteSkills) this.assertKeyChanged(SKILLS_KEY, snapshot, "技能删除");
+      if (willWriteServers && typeof this.mcp.reload === "function") {
+        this.assertKeyChanged(MCP_SERVERS_KEY, snapshot, "MCP 服务删除");
+      }
+      this.data.plugins = this.data.plugins.filter((p) => p.manifest.id !== id);
+    });
   }
 
   private iso(): string {
@@ -1896,11 +2097,18 @@ export class PluginStore {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     const r = raw as Record<string, unknown>;
     let manifest: PluginManifest;
+    let invalidReason: string | undefined;
     try {
       manifest = parseStoredManifest(r.manifest);
-    } catch {
-      return null; // 单条损坏只丢这条插件，不影响其它插件
+    } catch (err) {
+      // P1-7：v5 记录坏掉时不再「降级按 v4 读」，而是抢救展示字段 + 标 invalidRecord，
+      // 让兼容性判定走 invalidEngines（失败关闭），同时保留 skillIds/serverIds 以便卸载。
+      const salvaged = salvageCorruptManifest(r.manifest, errorMessage(err));
+      if (!salvaged) return null; // id 都救不出来：无法定位/卸载，只能丢这一条
+      manifest = salvaged.manifest;
+      invalidReason = salvaged.reason;
     }
+    const invalidRecord = invalidReason !== undefined;
     const at = this.iso();
     // 指纹算法版本：只有 `fnv1a64b:` 前缀才算当前算法。旧前缀（含 d.64.2.23.0
     // 的 `fnv1a64:`）按新算法重算并落盘——否则算法升级会让所有已装插件在下次
@@ -1910,7 +2118,7 @@ export class PluginStore {
       typeof r.fingerprint === "string" && r.fingerprint.startsWith(FINGERPRINT_PREFIX)
         ? r.fingerprint
         : null;
-    if (!rawFingerprint) this.backfilledFingerprint = true;
+    if (!rawFingerprint && !invalidRecord) this.backfilledFingerprint = true;
     const previous = coercePrevious(r.previous, at);
     const history = coerceHistory(r.history);
     return {
@@ -1931,6 +2139,7 @@ export class PluginStore {
       ...(typeof r.highestVersion === "string" && r.highestVersion
         ? { highestVersion: r.highestVersion }
         : {}),
+      ...(invalidRecord ? { invalidRecord: true as const, invalidReason } : {}),
       installedAt: typeof r.installedAt === "string" ? r.installedAt : at,
       updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : at,
     };

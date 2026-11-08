@@ -191,6 +191,16 @@ export function pluginBlocks(
   appVersion: string,
 ): UnitBlockReason[] {
   const blocks: UnitBlockReason[] = [];
+  // 安装记录损坏（v5 解析失败被抢救出来的记录，P1-7）：必须显式降级提示，
+  // 不能复用「旧包=不限制」的兼容语义，否则坏记录反而比正常记录更容易生效。
+  if (plugin.invalidRecord) {
+    blocks.push({
+      kind: "degraded",
+      detail: plugin.invalidReason
+        ? `安装记录损坏：${plugin.invalidReason}（建议重装该插件）`
+        : "安装记录损坏（建议重装该插件）",
+    });
+  }
   const engines = pluginEngines(plugin);
   if (engines) {
     const status = enginesStatus(engines, appVersion);
