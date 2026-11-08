@@ -160,6 +160,24 @@ describe("parsePluginManifestV5", () => {
     expect(() => parsePluginManifestV5(badCommand)).toThrow(/不在本插件 contributions\.skills/);
   });
 
+  it("命令 target 支持 settings / unit（v5 扩展）", () => {
+    const parsed = parsePluginManifestV5(
+      baseManifest({
+        contributions: {
+          skills: [{ name: "周报", instructions: "x" }],
+          commands: [
+            { id: "open-settings", title: "打开设置", target: { kind: "settings", card: "profile" } },
+            { id: "open-unit", title: "打开单元", target: { kind: "unit", unitId: "heming.pet" } },
+          ],
+        },
+      }),
+    );
+    expect(parsed.manifest.contributions.commands.map((item) => item.target.kind)).toEqual([
+      "settings",
+      "unit",
+    ]);
+  });
+
   it("贡献全空被拒；meta 与图标形状被校验", () => {
     expect(() => parsePluginManifestV5(baseManifest({ contributions: {} }))).toThrow(/至少要让 contributions/);
     expect(() =>

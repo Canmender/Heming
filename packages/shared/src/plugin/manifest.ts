@@ -240,10 +240,18 @@ const McpServerSchema = z
     if (problem) ctx.addIssue({ code: "custom", path: ["url"], message: problem });
   });
 
+/**
+ * 命令 target（v5 起扩展两类，见规格附录 A）：
+ * - `settings`：打开设置区某张卡（`card` 是 `SETTINGS_CARDS` 的 id，web 侧校验存在性）；
+ * - `unit`：打开某个能力单元的详情（`unitId` 与单元 id 同规则）。
+ * `bundle` 包仍只允许 `page` / `plugin`（由主进程安装器二次收紧）。
+ */
 const CommandTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("page"), page: z.string().min(1).max(64) }),
   z.strictObject({ kind: z.literal("skill"), name: z.string().min(1).max(32) }),
   z.strictObject({ kind: z.literal("plugin") }),
+  z.strictObject({ kind: z.literal("settings"), card: z.string().min(1).max(64) }),
+  z.strictObject({ kind: z.literal("unit"), unitId: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/) }),
 ]);
 
 const CommandSchema = z.strictObject({
