@@ -19,6 +19,7 @@ import { MarkdownMessage } from "../MarkdownMessage.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { XIcon } from "../icons.js";
 import { BTN_GHOST, CHIP, ERROR_TEXT, HINT } from "./shared.js";
+import { safeExternalUrl } from "../../lib/safeUrl.js";
 
 /**
  * 市场详情（d.108）：概述 / 贡献 / 版本历史三块。
@@ -268,20 +269,20 @@ export function MarketDetailDialog({
                   标签 · {tag}
                 </span>
               ))}
-              {plugin.homepage && (
+              {safeExternalUrl(plugin.homepage) && (
                 <a
                   className="ui-link"
-                  href={plugin.homepage}
+                  href={safeExternalUrl(plugin.homepage) ?? undefined}
                   target="_blank"
                   rel="noreferrer noopener"
                 >
                   主页
                 </a>
               )}
-              {plugin.repository && (
+              {safeExternalUrl(plugin.repository) && (
                 <a
                   className="ui-link"
-                  href={plugin.repository}
+                  href={safeExternalUrl(plugin.repository) ?? undefined}
                   target="_blank"
                   rel="noreferrer noopener"
                 >

@@ -18,6 +18,7 @@ import {
   fetchHubStatus,
   readHubKeyState,
   registerHubAccount,
+  safeExternalUrl,
   saveHubKey,
   type HubKeyState,
   type SkillHubClientDeps,
@@ -136,6 +137,8 @@ function KeyDialog({
     keyInfo?.kind === "encrypted" ? true : keyInfo?.kind === "plain" ? false : null,
   );
   const source = status.source ?? DEFAULT_SOURCE;
+  const sourceHomepage = safeExternalUrl(source.homepage);
+  const sourceDocs = safeExternalUrl(source.docsUrl);
   const hasKey = keyInfo?.kind === "encrypted" || keyInfo?.kind === "plain";
 
   const save = async () => {
@@ -242,18 +245,18 @@ function KeyDialog({
           >
             保存 Key
           </button>
-          {source.homepage && (
+          {sourceHomepage && (
             <a
               className="ui-link"
-              href={source.homepage}
+              href={sourceHomepage}
               target="_blank"
               rel="noreferrer noopener"
             >
               去{source.name}注册 / 获取 Key
             </a>
           )}
-          {source.docsUrl && (
-            <a className="ui-link" href={source.docsUrl} target="_blank" rel="noreferrer noopener">
+          {sourceDocs && (
+            <a className="ui-link" href={sourceDocs} target="_blank" rel="noreferrer noopener">
               接入说明
             </a>
           )}
@@ -345,6 +348,7 @@ function HubDetailDialog({
   }, [skill.id, deps?.fetchImpl, deps?.baseUrl, retryTick]);
 
   const detail = state.detail;
+  const detailHomepage = safeExternalUrl(detail?.homepage);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="presentation">
       <div
@@ -411,10 +415,10 @@ function HubDetailDialog({
                 <span className={HINT}>上游没有提供触发词</span>
               )}
             </div>
-            {detail?.homepage && (
+            {detailHomepage && (
               <a
                 className="ui-link mt-2 inline-block"
-                href={detail.homepage}
+                href={detailHomepage}
                 target="_blank"
                 rel="noreferrer noopener"
               >
@@ -920,7 +924,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
       name: target.name,
       author: target.author,
       version: download.version || target.version,
-      ...(target.homepage ? { homepage: target.homepage } : {}),
+      ...(safeExternalUrl(target.homepage) ? { homepage: safeExternalUrl(target.homepage) as string } : {}),
       installedAt: new Date().toISOString(),
     };
     const content = {
@@ -1026,7 +1030,9 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
             name: row.skill.community?.name ?? parsed.name,
             author: row.skill.community?.author ?? "",
             version,
-            ...(row.skill.community?.homepage ? { homepage: row.skill.community.homepage } : {}),
+            ...(safeExternalUrl(row.skill.community?.homepage)
+              ? { homepage: safeExternalUrl(row.skill.community?.homepage) as string }
+              : {}),
             installedAt: row.skill.community?.installedAt ?? new Date().toISOString(),
           },
         });
@@ -1294,7 +1300,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
               name: detail.name,
               version: detail.version,
               author: detail.ownerName,
-              ...(detail.homepage ? { homepage: detail.homepage } : {}),
+              ...(safeExternalUrl(detail.homepage) ? { homepage: safeExternalUrl(detail.homepage) as string } : {}),
             });
           }}
         />

@@ -249,6 +249,42 @@ describe("SkillHubPanel · 列表与筛选", () => {
   });
 });
 
+
+  it("恶意 homepage 不渲染链接：仅 http(s) 通过（详情 + 来源外链）", async () => {
+    const bad = renderPanel({
+      detail: { ...DETAIL, homepage: "javascript:alert(1)" },
+    });
+    fireEvent.click(await bad.findByRole("button", { name: "查看 周报助手 详情" }));
+    const dialog = await bad.findByRole("dialog", { name: "社区技能 周报助手" });
+    expect(within(dialog).queryByRole("link", { name: "在社区查看原文" })).toBeNull();
+    bad.unmount();
+
+    const badSource = renderPanel({
+      status: {
+        ...STATUS,
+        source: {
+          ...STATUS.source,
+          homepage: "data:text/html,<script>alert(1)</script>",
+          docsUrl: " javascript:alert(1)",
+        },
+      },
+    });
+    await badSource.findByText("周报助手");
+    fireEvent.click(badSource.getByRole("button", { name: "社区 Key" }));
+    const keyDialog = await badSource.findByRole("dialog", { name: "社区 Key" });
+    expect(within(keyDialog).queryByRole("link", { name: /去虾评注册/ })).toBeNull();
+    expect(within(keyDialog).queryByRole("link", { name: "接入说明" })).toBeNull();
+    badSource.unmount();
+
+    const good = renderPanel();
+    fireEvent.click(await good.findByRole("button", { name: "查看 周报助手 详情" }));
+    const goodDialog = await good.findByRole("dialog", { name: "社区技能 周报助手" });
+    expect(within(goodDialog).getByRole("link", { name: "在社区查看原文" })).toHaveAttribute(
+      "href",
+      "https://xiaping.coze.com/skills/xp-1",
+    );
+  });
+
 describe("SkillHubPanel · 详情", () => {
   it("详情展示安全结论与可折叠报告；无结论时如实写「上游未提供」", async () => {
     const first = renderPanel();

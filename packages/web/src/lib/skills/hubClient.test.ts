@@ -10,6 +10,7 @@ import {
   fetchHubStatus,
   readHubKeyState,
   registerHubAccount,
+  safeExternalUrl,
   saveHubKey,
 } from "./hubClient.js";
 
@@ -188,6 +189,26 @@ describe("fetchHubDetail / downloadHubSkill / registerHubAccount", () => {
     expect(url).toBe(`${BASE}/api/skill-hub/register`);
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({ name: "snake" });
+  });
+});
+
+
+describe("safeExternalUrl（P1-4 外部链接白名单）", () => {
+  it("只放行 http/https；javascript/data/ftp/相对路径/空白/超长都返回 null", () => {
+    expect(safeExternalUrl("http://ok")).toBe("http://ok");
+    expect(safeExternalUrl("https://ok/path?q=1")).toBe("https://ok/path?q=1");
+    expect(safeExternalUrl("  https://ok  ")).toBe("https://ok");
+
+    expect(safeExternalUrl("javascript:alert(1)")).toBeNull();
+    expect(safeExternalUrl(" JavaScript:alert(1)")).toBeNull();
+    expect(safeExternalUrl("data:text/html,<script>alert(1)</script>")).toBeNull();
+    expect(safeExternalUrl("ftp://example.com/file")).toBeNull();
+    expect(safeExternalUrl("/relative/path")).toBeNull();
+    expect(safeExternalUrl("not a url")).toBeNull();
+    expect(safeExternalUrl("   ")).toBeNull();
+    expect(safeExternalUrl(undefined)).toBeNull();
+    expect(safeExternalUrl(null)).toBeNull();
+    expect(safeExternalUrl(`https://ok/${"a".repeat(500)}`)).toBeNull();
   });
 });
 

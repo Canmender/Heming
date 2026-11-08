@@ -301,3 +301,13 @@ export function clearHubKey(storage: KeyStorage = keyStorage()): void {
     /* 清不掉也不影响 UI 状态：下次读取仍会失败为 missing */
   }
 }
+
+/**
+ * 外部链接白名单（d.110 · P1-4）：只放行 `http(s)` 且长度合理，其余一律 null。
+ *
+ * 为什么需要：社区详情/来源里的 `homepage` 来自上游，可能含 `javascript:` 或
+ * `data:text/html,...`；React 19 不会拦 `<a href>` 的协议，直出等于可点击 XSS。
+ * 只做协议白名单（不做域名白名单）：这里是「去社区看原文」的展示链接，
+ * 目标域名本来就随源变化；真正的信任边界仍是「不执行、不自动带凭据」。
+ */
+export { safeExternalUrl } from "../safeUrl.js";

@@ -116,6 +116,7 @@ describe("parsePluginManifest · v5 合法清单", () => {
   it("bundle 清单仍能解析（是否可装由 web 安装管线判，不在解析器里拒绝）", () => {
     const bundle = v5({
       distribution: "bundle",
+      packageSha256: "a".repeat(64),
       permissions: { network: [], tools: "read", files: [], events: ["notify"], graphics: ["wasm"] },
       contributions: {
         commands: [{ id: "toggle", title: "开关桌宠", target: { kind: "plugin" } }],
