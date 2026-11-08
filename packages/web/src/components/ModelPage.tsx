@@ -252,6 +252,7 @@ export function ModelPage() {
       title="模型"
       subtitle="所有模型在一个地方：加一个来源，智能体就能选它的模型。"
       width="wide"
+      bodyClassName="bg-[#f7f8fa]"
       actions={
         <button
           type="button"
@@ -319,7 +320,7 @@ export function ModelPage() {
                 ))}
               </div>
             ) : profiles.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-line bg-[#fcfcfd] px-6 py-10 text-center">
+              <div className="rounded-[20px] border border-dashed border-line bg-white px-6 py-10 text-center">
                 <div className="text-[15px] font-bold">还没有可用的模型</div>
                 <p className="mx-auto mt-1 max-w-[420px] ui-caption">
                   添加一个来源：订阅一个账号，或填一个厂商的 API Key。加完模型会自动出现。
@@ -333,7 +334,7 @@ export function ModelPage() {
                 </button>
               </div>
             ) : (
-              <div className="rounded-2xl border border-line bg-white p-4">
+              <div className="rounded-[20px] border border-line bg-white p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-[13px] font-bold">可用模型</div>
                   <input
@@ -357,6 +358,9 @@ export function ModelPage() {
                         </span>
                         <span className="block ui-caption">来源 {providerOf(profile.model)}</span>
                       </span>
+                      <span className="shrink-0 rounded-full bg-[#f2f3f5] px-2.5 py-0.5 text-[11px] text-muted">
+                        可用
+                      </span>
                     </li>
                   ))}
                   {visibleModels.length === 0 && <li className="ui-caption px-2 py-2">没有匹配的模型。</li>}
@@ -372,7 +376,7 @@ export function ModelPage() {
         {/* ── 来源 ───────────────────────────────────────────── */}
         {tab === "sources" && (
           <section aria-label="来源" className="space-y-4">
-            <div className="rounded-2xl border border-line bg-white p-4">
+            <div className="rounded-[20px] border border-line bg-white p-4">
               <div className="text-[13px] font-bold">订阅与账号</div>
               <p className="mt-0.5 ui-caption">
                 点一下登录厂商自己的页面，登录完成后账号与额度自动出现；多个账号会自动分担。
@@ -412,7 +416,7 @@ export function ModelPage() {
               </ul>
             </div>
 
-            <div className="rounded-2xl border border-line bg-white p-4">
+            <div className="rounded-[20px] border border-line bg-white p-4">
               <div className="text-[13px] font-bold">API Key 服务商</div>
               <p className="mt-0.5 ui-caption">点一个服务商，粘贴它给你的 Key；模型会自动读出来。</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
@@ -476,7 +480,7 @@ export function ModelPage() {
               )}
             </div>
 
-            <div className="rounded-2xl border border-line bg-white p-4">
+            <div className="rounded-[20px] border border-line bg-white p-4">
               <div className="text-[13px] font-bold">其他服务商 / 自定义地址</div>
               <p className="mt-0.5 ui-caption">任何 OpenAI 兼容接口都可以接进来。</p>
               {!custom.open ? (
@@ -540,7 +544,7 @@ export function ModelPage() {
               )}
             </div>
 
-            <div className="rounded-2xl border border-line bg-white p-4">
+            <div className="rounded-[20px] border border-line bg-white p-4">
               <div className="text-[13px] font-bold">已添加的来源（{providers.length}）</div>
               <ul className="mt-2 divide-y divide-line">
                 {providers.map((row) => (
@@ -596,7 +600,7 @@ export function ModelPage() {
               </button>
             </div>
 
-            <details className="rounded-2xl border border-line bg-white p-4">
+            <details className="rounded-[20px] border border-line bg-white p-4">
               <summary className="cursor-pointer text-[13px] font-bold">路由分组（可选）</summary>
               <p className="mt-1 ui-caption">多个模型或账号合成一个名字，按策略分配。一般不需要手动建。</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
@@ -670,7 +674,7 @@ export function ModelPage() {
               </div>
             </details>
 
-            <details className="rounded-2xl border border-line bg-white p-4">
+            <details className="rounded-[20px] border border-line bg-white p-4">
               <summary className="cursor-pointer text-[13px] font-bold">用量</summary>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <select
@@ -704,7 +708,7 @@ export function ModelPage() {
               </div>
             </details>
 
-            <details className="rounded-2xl border border-line bg-white p-4">
+            <details className="rounded-[20px] border border-line bg-white p-4">
               <summary className="cursor-pointer text-[13px] font-bold">备份与恢复</summary>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button type="button" className="ui-btn ui-btn-sm ui-btn-primary" disabled={!cli} onClick={() => void runTerminal("备份", ["backup"])}>
@@ -717,7 +721,7 @@ export function ModelPage() {
               <p className="mt-1 ui-caption">口令在终端里输入，不经过页面。</p>
             </details>
 
-            <details className="rounded-2xl border border-line bg-white p-4">
+            <details className="rounded-[20px] border border-line bg-white p-4">
               <summary className="cursor-pointer text-[13px] font-bold">多机同步</summary>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <select aria-label="同步类型" className="ui-input" value={syncKind} onChange={(event) => setSyncKind(event.target.value)}>
@@ -758,7 +762,7 @@ export function ModelPage() {
               </button>
             </details>
 
-            <details className="rounded-2xl border border-line bg-white p-4">
+            <details className="rounded-[20px] border border-line bg-white p-4">
               <summary className="cursor-pointer text-[13px] font-bold">资源库与网页搜索</summary>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void run("库状态", ["library"])}>
@@ -810,7 +814,7 @@ export function ModelPage() {
               </button>
             </details>
 
-            <details className="rounded-2xl border border-line bg-white p-4">
+            <details className="rounded-[20px] border border-line bg-white p-4">
               <summary className="cursor-pointer text-[13px] font-bold">高级命令</summary>
               <div className="mt-2 flex gap-2">
                 <input
@@ -886,10 +890,10 @@ export function ModelPage() {
 
 function StatCard({ label, value, hint }: { label: string; value: number; hint: string }) {
   return (
-    <div className="rounded-2xl border border-line bg-white p-4">
-      <div className="ui-caption">{label}</div>
-      <div className="mt-1 text-[24px] font-bold leading-none">{value}</div>
-      <div className="mt-1 ui-caption">{hint}</div>
+    <div className="rounded-[20px] border border-line bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div className="text-[11px] font-bold uppercase tracking-wide text-muted">{label}</div>
+      <div className="mt-1.5 text-[26px] font-bold leading-none">{value}</div>
+      <div className="mt-1.5 ui-caption">{hint}</div>
     </div>
   );
 }

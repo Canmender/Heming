@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLlmStore } from "../store/llm.js";
+import { useUiStore } from "../store/ui.js";
 import {
   EDGE_STATE_LABEL,
   buildTraceGraph,
@@ -40,6 +41,19 @@ const RIGHT_X = W - RIGHT_W;
 const HUB_H = 116;
 
 const AVATAR_COLORS = ["#7c6bd6", "#2f6feb", "#0f9d8a", "#d97706", "#db2777", "#4b5563"];
+
+const STRATEGY_LABELS: Record<string, string> = {
+  order: "按声明顺序",
+  smart: "智能",
+  usage: "用得最少",
+  pace: "按节奏",
+  weight: "按权重",
+  fast: "按速度",
+  rotate: "轮流",
+  cheap: "最便宜",
+  drain: "用完再换",
+  expiring: "到期前用完",
+};
 
 function avatarColor(name: string): string {
   let hash = 0;
@@ -130,6 +144,29 @@ export function ModelTraceView() {
   const agentCount = (id: string) => graph.edges.filter((edge) => edge.from === id).length;
   const accountCount = (id: string) => graph.edges.filter((edge) => edge.to === id).length;
 
+  const storeProfiles = useLlmStore((s) => s.profiles);
+  const storeRoutes = useLlmStore((s) => s.routes);
+  const setPage = useUiStore((s) => s.setPage);
+  const candidates = useMemo(
+    () =>
+      storeRoutes.map((route) => ({
+        id: route.id,
+        label: route.label || "候选链",
+        strategy: route.strategy,
+        members: route.members
+          .map((member) => {
+            const profile = storeProfiles.find((item) => item.id === member.profileId);
+            if (!profile) return null;
+            const provider = profile.model.includes("/")
+              ? profile.model.split("/")[0]!
+              : profile.label;
+            return { id: profile.id, model: profile.model, provider };
+          })
+          .filter((item): item is { id: string; model: string; provider: string } => item !== null),
+      })),
+    [storeRoutes, storeProfiles],
+  );
+
   const latest = graph.rows.at(-1);
   const summary = latest
     ? `${latest.route.agent || "客户端"} 请求 ${latest.route.model}，${
@@ -184,7 +221,7 @@ export function ModelTraceView() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-2xl border border-line bg-white p-4">
+      <div className="overflow-x-auto rounded-[20px] border border-line bg-[#f8f9fb] p-4">
         {visibleRows.length === 0 ? (
           <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 text-center">
             <svg aria-hidden="true" width="160" height="72" viewBox="0 0 160 72">
@@ -249,6 +286,15 @@ export function ModelTraceView() {
                         fill={COLORS[edge.state]}
                         className={edge.state === "live" && !reducedMotion ? "rta-live-dot" : undefined}
                       />
+                      {edge.state === "live" && !reducedMotion && (
+                        <circle r={3.5} fill={COLORS.live} opacity={0.9}>
+                          <animateMotion
+                            dur="1.6s"
+                            repeatCount="indefinite"
+                            path={`M ${LEFT_W} ${y1} C ${(LEFT_W + HUB_X) / 2} ${y1}, ${(LEFT_W + HUB_X) / 2} ${hubY}, ${HUB_X} ${hubY} L ${HUB_X + HUB_W} ${hubY} C ${(HUB_X + HUB_W + RIGHT_X) / 2} ${hubY}, ${(HUB_X + HUB_W + RIGHT_X) / 2} ${y2}, ${RIGHT_X} ${y2}`}
+                          />
+                        </circle>
+                      )}
                     </g>
                   );
                 })}
@@ -279,12 +325,21 @@ export function ModelTraceView() {
             ))}
 
             <div
-              className="absolute flex flex-col items-center justify-center rounded-2xl border border-line bg-white shadow-card"
+              className="absolute flex flex-col items-center justify-center rounded-[20px] border border-ink bg-white shadow-[0_10px_30px_rgba(16,24,40,0.08)]"
               style={{ left: HUB_X, top: hubY - HUB_H / 2, width: HUB_W, height: HUB_H }}
             >
-              <div className="text-[15px] font-bold tracking-wide">和鸣</div>
-              <div className="mt-0.5 ui-caption">模型路由</div>
-              <span className="mt-2 rounded-full bg-[#f2f3f5] px-2.5 py-0.5 text-[11px] text-muted">
+              <span className="relative flex h-8 w-8 items-center justify-center">
+                <span className="absolute inset-0 rounded-full bg-[#f2f3f5]" />
+                <span
+                  aria-hidden="true"
+                  className={`absolute inset-0 rounded-full border ${
+                    stats.live > 0 ? "rta-live-dot border-[#2f6feb]" : "border-line"
+                  }`}
+                />
+                <span className="relative text-[13px] font-bold">鸣</span>
+              </span>
+              <div className="mt-1 text-[14px] font-bold tracking-wide">和鸣</div>
+              <span className="mt-1 rounded-full bg-[#111] px-2.5 py-0.5 text-[11px] text-white">
                 {stats.live > 0 ? "回答中" : "待命"}
               </span>
             </div>
@@ -302,8 +357,8 @@ export function ModelTraceView() {
                 <button
                   key={node.id}
                   type="button"
-                  className={`rta-hit rta-enter absolute rounded-2xl border bg-white px-3 text-left ${
-                    active ? "border-ink" : "border-line"
+                  className={`rta-hit rta-enter absolute rounded-[18px] border bg-white px-3 text-left ${
+                    active ? "border-ink shadow-[0_6px_18px_rgba(16,24,40,0.06)]" : "border-line"
                   }`}
                   style={{ left: RIGHT_X, top: rowY(index) - ROW_H / 2, width: RIGHT_W, height: ROW_H }}
                   onMouseEnter={() => setHovered(routeId)}
@@ -330,7 +385,7 @@ export function ModelTraceView() {
                       <span className="block ui-caption">{accountCount(node.id)} 个请求</span>
                     </span>
                     <span className={`shrink-0 text-[11px] ${active ? "text-[#2f6feb]" : "text-muted"}`}>
-                      {active ? "回答中…" : "完成"}
+                      {active ? "回答中…" : visibleRows.some((row) => row.account === node.label) ? "已就绪" : "待命"}
                     </span>
                   </span>
                 </button>
@@ -361,8 +416,50 @@ export function ModelTraceView() {
         </div>
       )}
 
+      {candidates.length > 0 && (
+        <div className="rounded-[20px] border border-line bg-white p-4">
+          <div className="flex items-center justify-between">
+            <div className="text-[13px] font-bold">候选链</div>
+            <button
+              type="button"
+              className="rta-segment rounded-full bg-[#f2f3f5] px-3 py-1 text-[12px] text-muted hover:bg-[#e9ebef]"
+              onClick={() => setPage("modelroute")}
+            >
+              管理候选链 →
+            </button>
+          </div>
+          <ul className="mt-2 divide-y divide-line">
+            {candidates.map((route) => (
+              <li key={route.id} className="flex items-center gap-3 py-2">
+                <span className="flex -space-x-1.5">
+                  {route.members.slice(0, 3).map((member) => (
+                    <span
+                      key={member.id}
+                      className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white"
+                      style={{ backgroundColor: avatarColor(member.provider) }}
+                      title={member.model}
+                    >
+                      {member.provider.slice(0, 1).toUpperCase()}
+                    </span>
+                  ))}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-bold">{route.label}</span>
+                  <span className="block truncate ui-caption">
+                    {route.members.map((member) => member.model).join(" · ") || "还没有候选"}
+                  </span>
+                </span>
+                <span className="shrink-0 rounded-full bg-[#f2f3f5] px-2.5 py-0.5 text-[11px] text-muted">
+                  {STRATEGY_LABELS[route.strategy ?? "order"] ?? route.strategy}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {graph.rows.length > 0 && (
-        <div ref={listRef} className="rounded-2xl border border-line bg-white p-4">
+        <div ref={listRef} className="rounded-[20px] border border-line bg-white p-4">
           <div className="text-[13px] font-bold">最近请求是怎么走的</div>
           <ul className="mt-2 space-y-2">
             {[...visibleRows]
