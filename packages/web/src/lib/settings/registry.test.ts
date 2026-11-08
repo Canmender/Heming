@@ -18,8 +18,8 @@ import {
 const SETTINGS_TAB_IDS = new Set(["profile", "model", "appearance", "navigation", "about"]);
 
 describe("registry 完整性", () => {
-  it("15 张卡（d.68 新增「导航栏」）、id 唯一、分区合法、标题与关键词非空", () => {
-    expect(SETTINGS_CARDS).toHaveLength(15);
+  it("14 张卡（模型接入移出设置区后）、id 唯一、分区合法、标题与关键词非空", () => {
+    expect(SETTINGS_CARDS).toHaveLength(14);
     const ids = SETTINGS_CARDS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const card of SETTINGS_CARDS) {
@@ -35,7 +35,7 @@ describe("registry 完整性", () => {
       expect(SETTINGS_CARDS.some((c) => c.section === section)).toBe(true);
     }
     expect(SETTINGS_SECTION_LABELS.profile).toBe("个人资料");
-    expect(SETTINGS_SECTION_LABELS.model).toBe("模型");
+    expect(SETTINGS_SECTION_LABELS.model).toBe("高级");
     expect(SETTINGS_SECTION_LABELS.appearance).toBe("外观");
     expect(SETTINGS_SECTION_LABELS.navigation).toBe("导航");
     expect(SETTINGS_SECTION_LABELS.about).toBe("关于");
@@ -79,10 +79,10 @@ describe("matchSettingsCards（跨分区匹配）", () => {
   });
 
   it("结果顺序 = 设置页渲染顺序（按分区先后，不按匹配度乱排）", () => {
-    const ids = matchSettingsCards("模型").map((c) => c.id);
+    const ids = matchSettingsCards("上下文").map((c) => c.id);
     const order = SETTINGS_CARDS.map((c) => c.id);
     expect([...ids].sort((a, b) => order.indexOf(a) - order.indexOf(b))).toEqual(ids);
-    expect(ids[0]).toBe("llm-connection");
+    expect(ids[0]).toBe("context-budget");
   });
 
   it("没有命中 → 空数组（不抛）", () => {

@@ -288,8 +288,7 @@ describe("HomePage", () => {
     expect(collapsed).not.toBeNull();
     expect(screen.queryByRole("button", { name: "按日期" })).toBeNull();
     fireEvent.click(within(collapsed).getByRole("button", { name: "去配置模型" }));
-    expect(useUiStore.getState().page).toBe("settings");
-    expect(useUiStore.getState().settingsTab).toBe("model");
+    expect(useUiStore.getState().page).toBe("model");
   });
 
   it("Token 用量卡「团队」页签：共享关闭时给开启入口，不拉排行", async () => {
@@ -477,9 +476,7 @@ describe("HomePage", () => {
     expect(within(card).getByText(/0\/3\s*已完成/)).toBeInTheDocument();
 
     fireEvent.click(within(card).getByRole("button", { name: "去配置模型" }));
-    expect(useUiStore.getState().page).toBe("settings");
-    // 首跑第 1 步是配模型：必须直接落在「模型」页签，而不是「个人资料」（审计 P1-2）
-    expect(useUiStore.getState().settingsTab).toBe("model");
+    expect(useUiStore.getState().page).toBe("model");
   });
 
   it("引导步骤状态来自真实 store：有会话/有任务时对应步骤标已完成", async () => {

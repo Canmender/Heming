@@ -285,11 +285,11 @@ export function HomePage() {
     onboardingSteps,
   );
   /**
-   * 首跑引导的去处：第 1 步是「连接 magpie 并读取模型」，必须直接落在设置区「模型」页签，
+   * 首跑引导的去处：第 1 步是「添加模型来源并读取模型」，直接落在「模型」页，
    * 不能只 setPage("settings")——那会停在「个人资料」，用户在昵称/头像里找模型。
    */
   const goOnboarding = (target: OnboardingTarget) => {
-    if (target === "settings") openSettings("model");
+    if (target === "settings") setPage("model");
     else setPage(target);
   };
 
@@ -387,7 +387,7 @@ export function HomePage() {
               <button
                 type="button"
                 className="ui-link ml-auto"
-                onClick={() => openSettings("model")}
+                onClick={() => setPage("model")}
               >
                 去配置模型
               </button>

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
-import { MagpieGatewayCard } from "./MagpieGatewayCard.js";
 import { KeyStorageCard } from "./KeyStorageCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
 import { FileEditCard } from "./FileEditCard.js";
@@ -98,7 +97,7 @@ export function appVersionLabel(): string {
 /** 设置区分组标签（用户要求：改为上侧横向标签页，点击切换）。 */
 const SETTINGS_TABS = [
   { id: "profile", label: "个人资料" },
-  { id: "model", label: "模型" },
+  { id: "model", label: "高级" },
   { id: "appearance", label: "外观" },
   { id: "navigation", label: "导航" },
   { id: "about", label: "关于" },
@@ -301,12 +300,6 @@ export function SettingsPage() {
             )}
             {tab === "model" && (
               <>
-                <div
-                  data-settings-id="llm-connection"
-                  className={anchorClass(highlightId === "llm-connection")}
-                >
-                  <MagpieGatewayCard />
-                </div>
                 {/* 候选链已搬到「模型路由」页（d.84 模块）：这里只留入口，
                     免得同一个编辑器在设置区与模块页各渲染一份、口径漂移。 */}
                 <div

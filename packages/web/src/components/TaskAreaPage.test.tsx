@@ -139,9 +139,7 @@ describe("通用智能体页面", () => {
     expect(screen.getByRole("button", { name: "开始运行" })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "去设置" }));
-    expect(useUiStore.getState().page).toBe("settings");
-    // P1-2：直达「模型」页签，而不是停在「个人资料」
-    expect(useUiStore.getState().settingsTab).toBe("model");
+    expect(useUiStore.getState().page).toBe("model");
   });
 
   it("未绑定提示不重复：中栏渲染 ChatPage 时右栏不再重复同一句", async () => {
@@ -166,8 +164,7 @@ describe("通用智能体页面", () => {
 
     expect(await screen.findByText(/当前智能体还没有绑定模型连接/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "去设置" })[0]);
-    expect(useUiStore.getState().page).toBe("settings");
-    expect(useUiStore.getState().settingsTab).toBe("model");
+    expect(useUiStore.getState().page).toBe("model");
   });
 
   it("选中运行记录 → 聚焦其会话并渲染嵌入式 ChatPage", () => {

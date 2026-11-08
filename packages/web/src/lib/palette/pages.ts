@@ -33,7 +33,7 @@ export const PALETTE_PAGES: PalettePage[] = [
   {
     page: "modelroute",
     label: "模型路由",
-    description: "候选链与选路策略、冷却与逐候选用量（magpie 语义移植）",
+    description: "候选链与选路策略、冷却与逐候选用量",
   },
   {
     page: "model",

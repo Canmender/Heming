@@ -187,6 +187,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
   const focusConversation = useUiStore((s) => s.focusConversation);
   const setTaskDraft = useUiStore((s) => s.setTaskDraft);
   const openSettings = useUiStore((s) => s.openSettings);
+  const setPage = useUiStore((s) => s.setPage);
   const templates = useTemplateStore((s) => s.templates);
   const saveTemplate = useTemplateStore((s) => s.save);
   const removeTemplate = useTemplateStore((s) => s.remove);
@@ -333,7 +334,7 @@ function AgentComposer({ onStarted }: { onStarted: (taskId: string) => void }) {
 
         {agentsRoster.length > 0 && boundCount === 0 && (
           <div className="mt-3">
-            <UnboundModelNotice onGoSettings={() => openSettings("model")} />
+            <UnboundModelNotice onGoSettings={() => setPage("model")} />
           </div>
         )}
 
@@ -881,7 +882,7 @@ export function TaskAreaPage({ embedded = false }: TaskAreaPageProps = {}) {
               copied={copied}
               // 中栏嵌入的 ChatPage 自己会提示未绑定；只有它没渲染时才在右栏再提示，避免同屏说两遍
               agentUnbound={selectedAgentUnbound && activeConversationId !== selected.conversationId}
-              onGoSettings={() => useUiStore.getState().openSettings("model")}
+              onGoSettings={() => useUiStore.getState().setPage("model")}
               onCopy={(format) => void copyTask(selected, format)}
               onRerun={() => setRerunTarget(selected)}
               onFork={(seq) => requestFork(selected, seq)}

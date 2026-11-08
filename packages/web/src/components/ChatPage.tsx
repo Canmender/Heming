@@ -3105,7 +3105,7 @@ export function ChatPage({
               // 本机已有连接：提示条里直接选一个就绑上，不用再跳设置页绕一圈（d.82）
               connections={llmProfiles.map((p) => ({ id: p.id, label: p.label }))}
               onBind={(profileId) => setAgentBinding(unboundAgent.agentId, profileId)}
-              onGoSettings={() => useUiStore.getState().openSettings("model")}
+              onGoSettings={() => useUiStore.getState().setPage("model")}
             />
           </div>
         )}

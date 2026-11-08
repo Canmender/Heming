@@ -4179,9 +4179,7 @@ describe("UX-A 未绑定模型与对话空态", () => {
     expect(send.getAttribute("title") ?? "").toContain("还没有绑定模型连接");
 
     fireEvent.click(within(noticeBox).getByRole("button", { name: "去设置" }));
-    expect(useUiStore.getState().page).toBe("settings");
-    // P1-2：直达设置区「模型」页签，不要停在「个人资料」让用户在昵称/头像里找模型
-    expect(useUiStore.getState().settingsTab).toBe("model");
+    expect(useUiStore.getState().page).toBe("model");
   });
 
   it("本机已有连接但未绑定：提示条里直接选一个就能绑上（d.82）", async () => {

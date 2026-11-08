@@ -70,7 +70,7 @@ describe("ModelRoutePage", () => {
     }
     expect(screen.getByRole("heading", { name: "边界" })).toBeInTheDocument();
     expect(screen.getByText(/不读供应商的配额、并发与限流/)).toBeInTheDocument();
-    expect(screen.getByText(/magpie（github.com\/yetone\/magpie/)).toBeInTheDocument();
+    expect(screen.getByText(/选路语义与业界通行的候选链做法一致/)).toBeInTheDocument();
   });
 
   it("没有连接时给出去设置区添加的提示", () => {

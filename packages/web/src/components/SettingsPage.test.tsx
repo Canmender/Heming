@@ -17,9 +17,9 @@ const alice = { id: "u1", username: "alice", displayName: "爱丽丝" };
 /**
  * 切到设置区的某个分组标签。
  * 设置区已改为上侧横向标签页、一次只渲染一个分组，
- * 所以测「外观/导航/关于/模型」里的东西前必须先切过去。
+ * 所以测「外观/导航/关于/高级」里的东西前必须先切过去。
  */
-function goTab(name: "个人资料" | "模型" | "外观" | "导航" | "关于"): void {
+function goTab(name: "个人资料" | "高级" | "外观" | "导航" | "关于"): void {
   fireEvent.click(screen.getByRole("tab", { name }));
 }
 
@@ -167,24 +167,23 @@ describe("SettingsPage 个人资料", () => {
     expect(screen.queryByAltText("当前头像")).not.toBeInTheDocument();
   });
 
-  it("「模型」分组挂 magpie 网关卡（原生组件）与上下文预算卡", () => {
+  it("「高级」分组只保留本机设置卡；模型接入已移到「模型」页", () => {
     render(<SettingsPage />);
-    // 设置区已标签化：默认停在「个人资料」，切到「模型」才渲染这两张卡
-    expect(screen.queryByRole("region", { name: "模型" })).not.toBeInTheDocument();
-    goTab("模型");
-    expect(screen.getByRole("region", { name: "模型" })).toBeInTheDocument();
-    expect(screen.getByLabelText("magpie 网关地址")).toHaveValue("http://127.0.0.1:3425/v1");
-    expect(screen.getByLabelText("magpie 网关 Key")).toHaveValue("magpie-heming");
-    expect(screen.getByText(/由本机 magpie 网关提供/)).toBeInTheDocument();
+    // 设置区已标签化：默认停在「个人资料」，切到「高级」才渲染这些卡
+    expect(screen.queryByText("上下文预算")).not.toBeInTheDocument();
+    goTab("高级");
+    // 模型连接卡已搬到导航「模型」页：设置区不再出现网关地址/Key 这类字段
+    expect(screen.queryByLabelText("magpie 网关地址")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("magpie 网关 Key")).not.toBeInTheDocument();
     expect(screen.getByText("上下文预算")).toBeInTheDocument();
-    // 切回「个人资料」后模型卡卸载（一次只渲染当前分组）
+    // 切回「个人资料」后本组卡卸载（一次只渲染当前分组）
     goTab("个人资料");
-    expect(screen.queryByRole("region", { name: "模型" })).not.toBeInTheDocument();
+    expect(screen.queryByText("上下文预算")).not.toBeInTheDocument();
   });
 
-  it("LLM 连接卡之后挂载上下文预算卡：默认值回填、改动即时落盘", () => {
+  it("上下文预算卡：默认值回填、改动即时落盘", () => {
     render(<SettingsPage />);
-    goTab("模型");
+    goTab("高级");
     expect(screen.getByText("上下文预算")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "启用上下文预算" })).toHaveAttribute(
       "aria-checked",
@@ -224,14 +223,14 @@ describe("设置区 密钥存储状态", () => {
 
   it("浏览器环境：如实说明不加密", () => {
     render(<SettingsPage />);
-    goTab("模型");
+    goTab("高级");
     expect(screen.getByText(/浏览器端不落安全存储/)).toBeInTheDocument();
   });
 
   it("桌面桥可用：显示已加密与平台名", () => {
     stubSecrets();
     render(<SettingsPage />);
-    goTab("模型");
+    goTab("高级");
     expect(screen.getByText(/密钥与本地数据已用系统安全存储加密/)).toBeInTheDocument();
     // jsdom 没有 window.heming.platform → 默认分支「系统密钥环」
     expect(screen.getByText(/系统密钥环/)).toBeInTheDocument();
@@ -241,7 +240,7 @@ describe("设置区 密钥存储状态", () => {
     stubSecrets({ failEncrypt: true });
     secureSetItem("heming.llmConfigs", "{}");
     render(<SettingsPage />);
-    goTab("模型");
+    goTab("高级");
     expect(screen.getByText(/以下内容未能加密/)).toBeInTheDocument();
     expect(screen.getByText(/旧模型连接/)).toBeInTheDocument();
   });
@@ -250,7 +249,7 @@ describe("设置区 密钥存储状态", () => {
     stubSecrets({ available: false });
     secureSetItem("heming.mcp.servers.v1", "{}"); // 不可用 → 记入明文清单
     render(<SettingsPage />);
-    goTab("模型");
+    goTab("高级");
     expect(screen.getByText(/本机安全存储不可用/)).toBeInTheDocument();
     expect(screen.getByText(/新写入的密钥与本地数据将以明文保存/)).toBeInTheDocument();
     expect(screen.getByText(/MCP 服务请求头/)).toBeInTheDocument();
@@ -264,7 +263,7 @@ describe("设置区 密钥存储状态", () => {
     // 本文件里 store 在 import 期已初始化（早于本用例写入），故在此显式触发同一条读取路径。
     secureGetItem("heming.llmConfigs");
     render(<SettingsPage />);
-    goTab("模型");
+    goTab("高级");
     expect(screen.getByText(/新写入的密钥与本地数据将以明文保存/)).toBeInTheDocument();
     expect(screen.getByText(/无法在本机解密/)).toBeInTheDocument();
     expect(screen.getByText(/旧模型连接/)).toBeInTheDocument();
@@ -277,7 +276,7 @@ describe("设置区 密钥存储状态", () => {
     secureGetItem("heming.llmConfigs"); // 标记解不开
     secureSetItem("heming.llmConfigs", "{}"); // 覆盖前备份
     render(<SettingsPage />);
-    goTab("模型");
+    goTab("高级");
     expect(screen.getByText(/已在本机原样备份/)).toBeInTheDocument();
     expect(screen.getByText(/旧模型连接/)).toBeInTheDocument();
   });
@@ -397,36 +396,6 @@ describe("设置区 · 导航顺序", () => {
     goTab("导航");
     fireEvent.click(screen.getByRole("button", { name: "恢复默认导航顺序" }));
     expect(useUiStore.getState().navOrder).toEqual([...DEFAULT_NAV_ORDER]);
-  });
-});
-
-describe("设置区 · 模型（magpie 原生组件）", () => {
-  it("不再有服务商预设与手填供应商 Key；只配网关地址与网关 Key", () => {
-    render(<SettingsPage />);
-    goTab("模型");
-    expect(screen.queryByRole("button", { name: /套用预设/ })).toBeNull();
-    expect(screen.queryByLabelText("服务商")).toBeNull();
-    expect(screen.queryByLabelText("API Key")).toBeNull();
-    expect(screen.getByRole("button", { name: "读取模型" })).toBeInTheDocument();
-    expect(screen.getByText(/订阅账号、API Key、多账号轮换与额度选路都在 magpie 里管理/)).toBeInTheDocument();
-  });
-
-  it("网关地址可改并「仅保存」落盘（不联网）", () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
-    render(<SettingsPage />);
-    goTab("模型");
-    fireEvent.change(screen.getByLabelText("magpie 网关地址"), {
-      target: { value: "http://127.0.0.1:3999/v1/" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "仅保存" }));
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(JSON.parse(localStorage.getItem("heming.magpie.v1")!)).toEqual({
-      baseUrl: "http://127.0.0.1:3999/v1",
-      key: "magpie-heming",
-      source: "manual",
-    });
-    vi.unstubAllGlobals();
   });
 });
 

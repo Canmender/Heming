@@ -25,7 +25,7 @@ export function ModelRoutePage() {
   const profiles = useLlmStore((s) => s.profiles);
   const routes = useLlmStore((s) => s.routes);
   const records = useTokenUsageStore((s) => s.records);
-  const openSettings = useUiStore((s) => s.openSettings);
+  const setPage = useUiStore((s) => s.setPage);
   const [now] = useState(() => Date.now());
 
   const overview = useMemo(() => {
@@ -49,14 +49,14 @@ export function ModelRoutePage() {
       subtitle="把网关里的多个模型串成一条候选链：第一个答不了才走下一个；选路策略、冷却与用量都只在本机算。"
       width="wide"
       actions={
-        <button type="button" className="ui-btn ui-btn-md ui-btn-ghost" onClick={() => openSettings("model")}>
+        <button type="button" className="ui-btn ui-btn-md ui-btn-ghost" onClick={() => setPage("model")}>
           管理模型
         </button>
       }
     >
       <section aria-label="路由概览" className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {[
-          { label: "可用模型", value: String(overview.profiles), hint: "来自 magpie 网关" },
+          { label: "可用模型", value: String(overview.profiles), hint: "来自模型目录" },
           { label: "候选链", value: String(overview.routes), hint: `${overview.members} 个候选` },
           { label: "休息中", value: String(overview.resting), hint: "冷却到点自动回来" },
           {
@@ -107,10 +107,10 @@ export function ModelRoutePage() {
           <li>本页只读本机数据，不发网络请求；连接里的 Key 在系统安全存储里，路由组只存连接引用。</li>
           <li>冷却与测速本机内存档，重启清零；用量来自本机 token 记账，不上云。</li>
           <li>
-            不读供应商的配额、并发与限流数据，也不做请求翻译——这些是 magpie 网关侧的能力，本仓没有数据源就不做近似。
+            不读供应商的配额、并发与限流数据，也不做请求翻译——这些属于模型服务侧的能力，本仓没有数据源就不做近似。
           </li>
           <li>
-            语义参考 magpie（github.com/yetone/magpie，MIT）：候选链 / 失败切换 / 冷却 / 脱敏 / 选路策略；实现是本仓自己的，不搬运代码。
+            选路语义与业界通行的候选链做法一致：候选链 / 失败切换 / 冷却 / 脱敏 / 选路策略；实现为和鸣自己的客户端逻辑。
           </li>
         </ul>
       </section>

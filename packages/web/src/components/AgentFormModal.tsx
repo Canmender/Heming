@@ -197,7 +197,7 @@ export function AgentFormModal({
   const gotoSettings = () => {
     onClose();
     // 「绑定模型」去的是设置区「模型」页签，别让用户先在个人资料里找
-    openSettings("model");
+    useUiStore.getState().setPage("model");
   };
 
   const submit = async (e: React.FormEvent) => {

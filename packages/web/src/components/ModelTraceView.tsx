@@ -307,10 +307,10 @@ export function ModelTraceView() {
                 fill="#111"
               />
               <text x={CENTER_X} y={centerY - 6} textAnchor="middle" fill="#fff" fontSize="12" fontWeight="700">
-                和鸣内核
+                和鸣
               </text>
               <text x={CENTER_X} y={centerY + 12} textAnchor="middle" fill="#bbb" fontSize="10">
-                magpie-core
+                模型路由
               </text>
             </g>
 

@@ -14,7 +14,7 @@ export type SettingsSectionId = "profile" | "model" | "appearance" | "navigation
 /** 分区显示名：与 SettingsPage 的标签文字保持一致（搜索也匹配分区名）。 */
 export const SETTINGS_SECTION_LABELS: Record<SettingsSectionId, string> = {
   profile: "个人资料",
-  model: "模型",
+  model: "高级",
   appearance: "外观",
   navigation: "导航",
   about: "关于",
@@ -42,12 +42,7 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
     keywords: ["头像", "昵称", "名字", "账号", "上传头像", "恢复默认头像", "保存"],
     section: "profile",
   },
-  {
-    id: "llm-connection",
-    title: "LLM 连接",
-    keywords: ["模型", "连接", "api", "key", "密钥", "provider", "baseurl", "地址", "绑定", "供应商"],
-    section: "model",
-  },
+
   {
     id: "route-groups",
     title: "候选链",

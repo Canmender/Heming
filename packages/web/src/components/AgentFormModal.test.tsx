@@ -39,8 +39,7 @@ describe("AgentFormModal", () => {
     render(<AgentFormModal open mode="create" onClose={onClose} />);
     fireEvent.click(screen.getByRole("button", { name: "进阶设置（可选）" }));
     fireEvent.click(screen.getByText(/去设置页添加/));
-    expect(useUiStore.getState().page).toBe("settings");
-    expect(useUiStore.getState().settingsTab).toBe("model");
+    expect(useUiStore.getState().page).toBe("model");
     expect(onClose).toHaveBeenCalled();
   });
 
