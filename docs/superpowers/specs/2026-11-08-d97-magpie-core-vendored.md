@@ -20,6 +20,8 @@ d.97 改为：**把 magpie 的 MIT 源码裁剪后放进本仓库，由本仓库
 
 - 上游：`github.com/yetone/magpie`，标签 `v0.1.3246`（MIT）；
 - 位置：`vendor/magpie-core/`，含 `LICENSE`、`THIRD_PARTY_NOTICES`、`PROVENANCE.md`（来源/裁剪口径/升级步骤）；
+  **该目录不入库**（`.gitignore`）：它只是编译 `magpie-core.exe` 的输入，且含随 Gemini CLI / Antigravity 分发的 OAuth client 凭据，
+  GitHub 密钥扫描会拦下整条历史。构建机本地放好源码后，`scripts/build-magpie-core.mjs` 照常工作；
 - 裁剪：去掉 `site/`、`docs/`、`native/`、`build/`、全部 `*_test.go`、`testdata/`、`internal/gui/tests/`、
   上游 README/Dockerfile/Makefile/CI —— 与本应用（只跑 `magpie serve` 网关）无关；
 - 保留：`main.go`、`internal/**`（含 `internal/gui` 的少量辅助函数引用与内置插件注册表 `plugins/`）。

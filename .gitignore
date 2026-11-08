@@ -50,3 +50,9 @@ d[0-9]*-selfcheck-*.log
 
 # 云端插件仓库的发布产物（部署数据，不入库；由 scripts/publish-plugin.mjs 生成/同步）
 plugins-catalog/
+
+# magpie 内核源码（MIT，构建机本地放置；不入库）
+# 原因：vendor 里含 Gemini CLI / Antigravity 随 CLI 分发的 OAuth client 凭据，
+# GitHub 密钥扫描会把整条历史拦下；而它只是「编译 magpie-core.exe」的输入，不是运行时内容。
+# 需要重建内核时：把上游裁剪后的源码放到 vendor/magpie-core/，再 `node scripts/build-magpie-core.mjs --force`。
+vendor/magpie-core/
