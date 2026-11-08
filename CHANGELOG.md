@@ -2,6 +2,54 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.113.3.45.0（2026-11-08）— 第二轮对抗审计修复（P0 数据外泄链）+ 插件健康检查/修复
+
+第二轮只读审计覆盖此前未审路径（窗口/协议、plugin-host 全部 IPC、浏览器无桥降级、社区浏览器态、枚举一致性）：
+**P0 1 条 + P1 8 条 + P2 11 条**，本轮修掉 P0 与全部 P1（P2 留档）。
+
+### 安全（P0）
+
+- **界面插件数据外泄链已断**（`chatConfig` → 回环 CSP → 本机无鉴权接口）：
+  1. `chatConfig()` **不再下发智能体 `prompt`**（只给 `{id,name}`；测试断言响应里搜不到人设文本）；
+  2. 清单新增 `permissions.chat`（默认 false，仅 bundle 有意义）——未声明时 `chatConfig` 返回空名册并给原因；
+  3. widget CSP **删除 `127.0.0.1:*` / `localhost:*` 通配**，`connect-src` = `'self'` + 本机网关**精确 origin**
+    （仅在 `chat:true` 时注入）+ 清单 `permissions.network` 逐 host；非法 origin 丢弃。
+- 桌宠 **1.0.2** 重新签出（`permissions.chat: true`、`events: ["notify","theme"]`），
+  `packageSha256` digest 不变（files 未变）、tgz sha256 `2d5e7cfb…05ee`、`readPackage ✓`。
+- 源码清除 3 处裸 NUL 字节（`shared/plugin/manifest.ts`、`wiki/index.ts`、一篇旧规格），
+  新增 `scripts/check-source-encoding.mjs` 守卫（git/grep 不再把这些文件当二进制而跳过审阅）。
+
+### 插件体系（健康检查与修复）
+
+- `inspectPluginHealth`：`ok/degraded/broken` 三级，覆盖无效记录、悬空技能/服务引用、指纹不一致、
+  签名无效/未验证、全部贡献关闭、engines 不兼容。
+- `repairPlugin`（整笔事务、失败回滚 + 三单例 reload）：按归属重建 `skillIds`/`serverIds`、
+  重算指纹、可解析时才清除 `invalidRecord`；**只摘悬空引用，不删技能/服务本体**，结果如实报 repaired/dropped。
+- 插件页统一列表显示健康徽标 + 诊断明细 + 「修复记录」入口（成功/失败/仍有问题都进消息条）。
+
+### 修复（P1）
+
+- 权限枚举与运行时对齐：`events` 增 `lifecycle`/`theme`/`tray`，`graphics` 增 `webgl2`（shared/schema/文档同步）；
+  `theme`/`tray` 事件不再无条件广播，按 `permissions.events` 逐插件投递。
+- 界面插件安装/卸载改为**可回滚顺序**：install 先成功写指针与注册表再切内存；
+  uninstall 先摘记录落盘（失败则文件不动）再删目录，删失败标 `error` 并如实返回。
+- 技能社区：首次无 Key 点「全部更新」会先冻结清单（不再空跑 0 条）；客户端透传服务端中文错误与
+  `retryAfter`（429 显示「约 N 秒后重试」）；请求统一 15s 超时与取消；安装单飞；批量更新可停止。
+- 技能社区 P2：zip 重复条目拒绝 + CRC32 校验（store/deflate 两路 + central/local 比对）；
+  上游缓存 single-flight；register 名称折叠/零宽字符/码点长度校验。
+
+### 文档与工具
+
+- 第二轮审计原文入库：`docs/research/2026-11-08-plugin-audit-round2.md`（含 d.113 修复记录表）。
+- `node scripts/check-source-encoding.mjs` 加入发布前检查建议；`plugin.schema.json` 随权限枚举重生成。
+
+### 边界
+
+- P2 未全部处理（400 响应 CSP、`permissions.files` 仅展示、`current.json` 只写不读、界面插件无防降级、
+  卸载中途失败丢设置、仓库列表 bundle 无前置禁用、市场降级提示不清空、`widgets:install` 无 IPC 大小上限等），
+  保留在审计原文 §3 供后续排期。
+- `permissions.chat` 是**收紧**：旧 bundle（如桌宠 1.0.1）升级后 `chatConfig` 会被拒；其余窗口功能不受影响。
+
 ## d.112.3.45.0（2026-11-08）— P1 收口：正式首方公钥上线，dev 公钥在打包版被忽略
 
 审计 P1-1（正式公钥未就位 → 打包版拒绝安装所有界面插件）已完成，并非只加检查脚本：

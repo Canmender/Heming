@@ -101,6 +101,7 @@ describe("parsePluginManifest · v5 合法清单", () => {
       events: [],
       graphics: [],
       eval: false,
+      chat: false,
     });
     // web 内部形状恒定带 llmPresets（旧消费方兼容字段）。
     expect(parsed.contributions.llmPresets).toEqual([]);

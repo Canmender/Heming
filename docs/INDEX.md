@@ -196,7 +196,8 @@
 | [research/2026-11-08-plugin-system-benchmark.md](research/2026-11-08-plugin-system-benchmark.md) | DeepSeek Harness 官方插件体系对标调研（`fcc0ad46`）：三层实体/注册即 effect/贡献点/引导式安装/市场索引/信任立场 + 和鸣四套机制审计、差距矩阵与「可借鉴 7 / 需改造 6 / 不照搬 7」 |
 | [research/2026-11-08-plugin-upgrade-feasibility.md](research/2026-11-08-plugin-upgrade-feasibility.md) | 插件升级**可实现性自检**（代码探针 + 可运行实验）：5 段版本比较、zod 4.6.7 的 JSON Schema 丢 refine、v5 strict 的破坏性、安装事务与内存态 reload、清单/索引体积实测、首方签名现状（bundle 实际不验签）、市场索引 225KB 实测；附 F1–F10 规格修正清单与「最小可验证切片」 |
 | [research/2026-11-08-plugin-ecosystem-cross-reference.md](research/2026-11-08-plugin-ecosystem-cross-reference.md) |
-| [research/2026-11-08-plugin-audit-round.md](research/2026-11-08-plugin-audit-round.md) | 插件/技能社区**对抗审计**（只读，2 P0 + 8 P1 + 10 P2，逐条 `file:line`）：签名不覆盖代码、卸载无事务、包可覆盖、启停写失败被吞、外链可点击 XSS、register 无限流、兼容口径不一致、坏 v5 记录降级、技能池预算口径；除正式公钥外已在 d.111.3.43.0 修复 | 插件生态**横向对标**（VS Code / Chrome / Claude Code / Dify / n8n / Figma / Obsidian / Raycast）：贡献点/懒激活、版本兼容三策略、索引-制品-工具链三分离、Dify 三段式安装事务、签名信封与 TUF-lite、开发沙箱三范式；产出 N1–N14 设计增量与证据缺口 |
+| [research/2026-11-08-plugin-audit-round.md](research/2026-11-08-plugin-audit-round.md) |
+| [research/2026-11-08-plugin-audit-round2.md](research/2026-11-08-plugin-audit-round2.md) | 第二轮对抗审计（窗口/协议、plugin-host IPC、浏览器降级、社区浏览器态、枚举一致性）：P0 1 条（界面插件数据外泄链：chatConfig+回环 CSP+无鉴权注册）、P1 8 条、P2 11 条；末尾附 d.113 修复记录 | 插件/技能社区**对抗审计**（只读，2 P0 + 8 P1 + 10 P2，逐条 `file:line`）：签名不覆盖代码、卸载无事务、包可覆盖、启停写失败被吞、外链可点击 XSS、register 无限流、兼容口径不一致、坏 v5 记录降级、技能池预算口径；除正式公钥外已在 d.111.3.43.0 修复 | 插件生态**横向对标**（VS Code / Chrome / Claude Code / Dify / n8n / Figma / Obsidian / Raycast）：贡献点/懒激活、版本兼容三策略、索引-制品-工具链三分离、Dify 三段式安装事务、签名信封与 TUF-lite、开发沙箱三范式；产出 N1–N14 设计增量与证据缺口 |
 
 ## 5. 历史计划
 
