@@ -27,6 +27,8 @@ import {
   type PaletteGroup,
   type PaletteItem,
 } from "../lib/palette/search.js";
+import type { VaultIndex } from "../lib/vault/types.js";
+import { rankQuickOpenNotes } from "./knowledge/quickOpenModel.js";
 import { Avatar } from "./Avatar.js";
 import { useModalA11y } from "./useModalA11y.js";
 
@@ -71,6 +73,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const openInfohub = useUiStore((s) => s.openInfohub);
   const openSettings = useUiStore((s) => s.openSettings);
   const openModuleManager = useUiStore((s) => s.openModuleManager);
+  const openVault = useUiStore((s) => s.openVault);
   const setPaletteIntent = useUiStore((s) => s.setPaletteIntent);
   const focusTask = useUiStore((s) => s.focusTask);
   const infohubRunning = useInfohubStore((s) => s.running);
@@ -140,6 +143,36 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   // 本机三组（任务/记忆/插件）：打开面板时读一次内存快照，之后的检索全在内存里做。
   // 只读本机、不发请求、不写日志（隐私边界见 lib/palette/local.ts 顶部）。
   const [local] = useState<LocalSnapshot>(() => readLocalSnapshot());
+
+  /**
+   * 知识库索引：**动态 import** vault store，避免把整条 vault 引擎（索引/解析/store）
+   * 打进命令面板所在的主 chunk——知识库不是首屏能力，只有面板真的打开时才付这份成本。
+   * 拉不到（浏览器老版本 / 引擎未就绪）就只是少一组「知识库笔记」，不报错。
+   */
+  const [vaultIndex, setVaultIndex] = useState<VaultIndex | null>(null);
+  useEffect(() => {
+    let alive = true;
+    let unsubscribe: (() => void) | null = null;
+    void import("../lib/vault/store.js")
+      .then((mod) => {
+        if (!alive) return;
+        setVaultIndex(mod.useVaultStore.getState().index);
+        // 索引重建时同步刷新：面板开着也能搜到刚建好的索引
+        unsubscribe = mod.useVaultStore.subscribe((state) => setVaultIndex(state.index));
+      })
+      .catch(() => {
+        /* 没有知识库引擎时少一组结果，不影响其它检索 */
+      });
+    return () => {
+      alive = false;
+      unsubscribe?.();
+    };
+  }, []);
+  /** 知识库笔记命中：排序复用 W2 `rankQuickOpen`（当前由 quickOpen.ts 适配层兜底）。 */
+  const vaultNotes = useMemo(
+    () => (query.trim() ? rankQuickOpenNotes(vaultIndex, query.trim(), 8) : []),
+    [vaultIndex, query],
+  );
   /**
    * 插件命令：声明式插件（每次打开面板现读 store，停用后自然消失）+ 已装界面插件
    * （d.109：主进程注册表经 `widgets:list()` 同步到 zustand，本文件只做投影，不执行插件代码）。
@@ -160,9 +193,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const groups = useMemo<PaletteGroup[]>(
     () =>
       query.trim()
-        ? searchPalette(query, { members, archiveHits, local, commands, pages })
+        ? searchPalette(query, { members, archiveHits, local, commands, pages, vaultNotes })
         : buildEmptyGroups(recent, pages),
-    [query, members, archiveHits, local, commands, recent, pages],
+    [query, members, archiveHits, local, commands, recent, pages, vaultNotes],
   );
   const items = useMemo(() => flattenGroups(groups), [groups]);
   const indexByKey = useMemo(() => {
@@ -188,7 +221,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   // 结果集变化时把光标收回第一项，避免停在一个已经不存在的位置
   useEffect(() => {
     setCursor(0);
-  }, [query, members, archiveHits, recent]);
+  }, [query, members, archiveHits, recent, vaultNotes]);
 
   // 光标移动时把当前项滚进视野（长列表里键盘走到屏外会看不见选中项）
   useEffect(() => {
@@ -225,6 +258,20 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         // 与停用模块后的跳转落点同一入口。
         openModuleManager();
         break;
+      // d.113 第二轮：知识库四个动作统一「切页 + 投意图」，由知识库页执行；
+      // 面板不直接读写文件（存盘路径、模板、日记设置都在页面/引擎侧）。
+      case "vault-new-note":
+        openVault({ kind: "new" });
+        break;
+      case "vault-daily":
+        openVault({ kind: "daily" });
+        break;
+      case "vault-new-canvas":
+        openVault({ kind: "canvas" });
+        break;
+      case "vault-settings":
+        openVault({ kind: "settings" });
+        break;
       default:
         break;
     }
@@ -257,6 +304,10 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       case "skill":
         // 技能没有详情路由，跳到技能区即可——到了列表里一眼能认出来
         setPage("skills");
+        break;
+      case "vault":
+        // 知识库笔记：切到知识库页并投递「打开这篇」意图，由页面消费后 openFile。
+        if (item.vaultRel) openVault({ kind: "open", rel: item.vaultRel });
         break;
       case "archive":
         // 归档页自己会跑同词检索；这里只投递意图，不复制结果页
@@ -459,6 +510,10 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                       <span className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
                         本机
                       </span>
+                    ) : item.kind === "vault" ? (
+                      <span className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
+                        知识库
+                      </span>
                     ) : null}
                   </div>
                 );
@@ -502,6 +557,8 @@ function kindGlyph(kind: PaletteItem["kind"]): string {
   switch (kind) {
     case "page":
       return "页";
+    case "vault":
+      return "库";
     case "setting":
       return "设";
     case "action":

@@ -537,3 +537,33 @@ describe("模块停用时的跳转落点", () => {
     expect(useUiStore.getState().page).toBe("staff");
   });
 });
+
+describe("知识库动作意图 vaultIntent（d.114）", () => {
+  it("openVault 切页并投递意图；同类连点两次 token 递增（各自消费一次）", () => {
+    useUiStore.setState({ page: "home", vaultIntent: null });
+    useUiStore.getState().openVault({ kind: "new" });
+    const first = useUiStore.getState();
+    expect(first.page).toBe("vault");
+    expect(first.vaultIntent).toMatchObject({ kind: "new" });
+
+    useUiStore.getState().openVault({ kind: "new" });
+    expect(useUiStore.getState().vaultIntent!.token).toBeGreaterThan(first.vaultIntent!.token);
+  });
+
+  it("openVault 不传意图 = 普通进入（清掉残留动作）", () => {
+    useUiStore.getState().openVault({ kind: "daily" });
+    useUiStore.getState().openVault();
+    expect(useUiStore.getState().page).toBe("vault");
+    expect(useUiStore.getState().vaultIntent).toBeNull();
+  });
+
+  it("consumeVaultIntent 消费即清；切页清掉未消费的意图", () => {
+    useUiStore.getState().openVault({ kind: "settings" });
+    useUiStore.getState().consumeVaultIntent();
+    expect(useUiStore.getState().vaultIntent).toBeNull();
+
+    useUiStore.getState().openVault({ kind: "settings" });
+    useUiStore.getState().setPage("home");
+    expect(useUiStore.getState().vaultIntent).toBeNull();
+  });
+});

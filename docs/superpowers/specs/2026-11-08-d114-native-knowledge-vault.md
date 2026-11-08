@@ -133,9 +133,16 @@ vault 根由**主进程**登记，渲染层只传 `vaultId` + 相对路径；主
 4. `lib/memory/vaultMemory.ts` + 召回/格式化/沉淀写回 + 记忆设置开关；
 5. 桌面与 web 测试、文档、CHANGELOG、版本 bump（→ `d.114.3.45.0`）。
 
-### 第二轮（另立规格）
-Canvas 编辑、日记/周期笔记、模板、即时预览内联、大纲滚动同步、附件面板、批量导入（把已有 vault 迁进和鸣自动维护区）、
-命令面板全量命令、`wiki-*` 与 `vault-*` 的收敛。
+### 第二轮（本次一并实施，目标版本 `d.115.3.45.0`）
+
+| 项 | 范围 |
+|---|---|
+| **Canvas** | `.canvas` 解析/序列化（保留未知字段，坏 JSON **绝不回写**）、SVG 画布：平移/缩放、选中/拖动（20px 吸附）、双击编辑文本节点、新建/删除节点、连线（拒绝自环与重复）、file 节点点击打开笔记。组件受控，写回统一走编辑器同一套「脏标记 + Ctrl+S」流程 |
+| **日记** | 配置 `{folder, format, templatePath}`（默认 `daily/` + `YYYY-MM-DD`）；「今天」一键打开，不存在则按模板创建（frontmatter 带 `date`）；`parseDailyPath` 反解日期 |
+| **模板** | `templates/*.md`，变量 `{{title}} {{date}} {{time}} {{vault}}` 与 `{{date:YYYY-MM-DD}}` 子集；未知占位符原样保留并回报；新建笔记时可选用 |
+| **命令面板** | 新增 kind `vault`（笔记快速打开，含别名与路径匹配）+ 4 个动作（新建笔记 / 打开今天日记 / 新建画布 / 知识库设置）；跨页用 `vaultIntent`（照 `infohubIntent` 模式）；页面内 `Ctrl/⌘+O` 快速切换 |
+| **修正项** | 跨行行内代码屏蔽（CommonMark 反引号 span 可跨行）；锚点未命中独立状态（`WikiLink.anchor`，界面黄色「锚点未命中」而非断链）；`vault:createDir` 新建文件夹；树按 `rel` 懒加载；嵌入笔记未打开时异步 `readText` |
+| **仍不做（第三轮）** | 即时预览内联（Live Preview）、大纲滚动同步、附件面板、批量导入、`wiki-*` 与 `vault-*` 收敛、跨平台 watch（Linux 非 recursive） |
 
 ## 8. 测试计划
 

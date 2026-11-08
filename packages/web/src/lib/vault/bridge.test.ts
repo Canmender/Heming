@@ -265,4 +265,52 @@ describe("内存桥", () => {
     const bridge = createMemoryVaultBridge();
     expect(await bridge.reveal(MEMORY_VAULT, "a.md")).toBe(false);
   });
+
+  it("createDir：多级 mkdir -p、幂等、空目录出现在 tree 里", async () => {
+    const bridge = createMemoryVaultBridge();
+    const created = await bridge.createDir(MEMORY_VAULT, "新目录/子目录/更深");
+    expect(created).toEqual({ rel: "新目录/子目录/更深", bytes: 0, mtime: expect.any(String) });
+
+    const tree = await bridge.tree(MEMORY_VAULT, { depth: 4 });
+    expect(tree.map((entry) => [entry.rel, entry.kind])).toEqual([
+      ["新目录", "dir"],
+    ]);
+    expect(tree[0].children?.map((entry) => entry.rel)).toEqual(["新目录/子目录"]);
+    expect(tree[0].children?.[0].children?.map((entry) => entry.rel)).toEqual([
+      "新目录/子目录/更深",
+    ]);
+    // 空目录按 rel 拉子树：depth=1 只返回直接子目录（更深一层）
+    expect(
+      (await bridge.tree(MEMORY_VAULT, { rel: "新目录/子目录", depth: 1 })).map(
+        (entry) => entry.rel,
+      ),
+    ).toEqual(["新目录/子目录/更深"]);
+
+    // 幂等：重复创建成功且不产生重复节点
+    await expect(bridge.createDir(MEMORY_VAULT, "新目录/子目录/更深")).resolves.toMatchObject({
+      rel: "新目录/子目录/更深",
+      bytes: 0,
+    });
+    const again = await bridge.tree(MEMORY_VAULT, { depth: 4 });
+    expect(again).toHaveLength(1);
+    expect(again[0].children?.[0].children).toHaveLength(1);
+  });
+
+  it("createDir 的路径守卫与文件写入一致", async () => {
+    const bridge = createMemoryVaultBridge();
+    for (const bad of ["../escape", "/abs", "C:/x", ".hidden/x", "a\u0000b", "CON"]) {
+      await expect(bridge.createDir(MEMORY_VAULT, bad)).rejects.toMatchObject({
+        code: "forbidden-path",
+      });
+    }
+    await expect(bridge.createDir("nope", "a")).rejects.toMatchObject({ code: "no-vault" });
+  });
+
+  it("写文件时自动登记祖先目录（tree 不需要额外 createDir）", async () => {
+    const bridge = createMemoryVaultBridge({ files: { "a/b/c.md": "正文\n" } });
+    const tree = await bridge.tree(MEMORY_VAULT, { depth: 3 });
+    expect(tree[0].rel).toBe("a");
+    expect(tree[0].children?.[0].rel).toBe("a/b");
+    expect(tree[0].children?.[0].children?.[0].rel).toBe("a/b/c.md");
+  });
 });

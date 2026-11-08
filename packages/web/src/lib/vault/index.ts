@@ -314,6 +314,27 @@ function nearestCandidate(fromRel: string, candidates: string[]): string {
 }
 
 /**
+ * 锚点命中判定（规格 §3.3）：标题比较大小写不敏感、去首尾空格。
+ *
+ * 链接里的 `#` 只切一次（`extractLinks` 保证），所以 `heading` 本身可能还带 `#`
+ * （用户把二级标题写成 `[[页#标题#小节]]`）。先按完整串比，再按第一个 `#` 之前
+ * 的部分比——两种写法都能命中同一个标题，不会因为多了个 `#` 就变成「锚点未命中」。
+ */
+function anchorStatus(page: PageInfo | undefined, heading: string): "hit" | "miss" {
+  if (!page) return "miss";
+  const raw = heading.trim().replace(/^#+/, "").trim();
+  if (!raw) return "miss";
+  const candidates = new Set<string>([raw.toLowerCase()]);
+  const firstSegment = raw.split("#")[0].trim();
+  if (firstSegment) candidates.add(firstSegment.toLowerCase());
+  for (const item of page.headings) {
+    const text = item.text.trim().replace(/^#+/, "").trim().toLowerCase();
+    if (candidates.has(text)) return "hit";
+  }
+  return "miss";
+}
+
+/**
  * 由「已解析文档 + 行偏移」构建全库索引。
  *
  * 增量重算时调用方只需重解析变化的文件，再把整表传进来——
@@ -396,12 +417,18 @@ export function buildVaultIndexFromParsed(docs: ParsedVaultDoc[]): VaultIndex {
     if (pageMap.get(page.rel) !== page) continue; // 重复 rel 跳过
     for (const parsed of extractLinks(page.body, { lineOffset })) {
       const { rel } = resolve(parsed.target, page.rel);
+      // 锚点状态：文件没解析成功时也是 none（`miss` 只表示「文件在、标题不在」）
+      const anchor: WikiLink["anchor"] =
+        parsed.heading === undefined || rel === null
+          ? "none"
+          : anchorStatus(pageMap.get(rel), parsed.heading);
       const link: WikiLink = {
         target: parsed.target,
         embed: parsed.embed,
         from: page.rel,
         line: parsed.line,
         resolved: rel,
+        anchor,
       };
       if (parsed.alias !== undefined) link.alias = parsed.alias;
       if (parsed.heading !== undefined) link.heading = parsed.heading;
@@ -499,5 +526,7 @@ export * from "./parse.js";
 export * from "./bridge.js";
 export * from "./search.js";
 export * from "./graph.js";
+export * from "./template.js";
+export * from "./daily.js";
 export * from "./store.js";
 export * from "./tools.js";

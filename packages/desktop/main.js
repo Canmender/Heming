@@ -94,6 +94,7 @@ const TRUSTED_CHANNELS = [
   "vault:write",
   "vault:apply",
   "vault:create",
+  "vault:createDir",
   "vault:move",
   "vault:delete",
   "vault:reveal",

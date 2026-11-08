@@ -189,43 +189,64 @@ function blank(line: string): string {
   return " ".repeat(line.length);
 }
 
-/** 掩掉一行里的行内代码（反引号串，闭合串长度必须与开启串一致）。 */
-function maskInlineCode(line: string): string {
-  if (!line.includes("`")) return line;
-  const chars = line.split("");
-  let i = 0;
-  while (i < line.length) {
-    if (line[i] !== "`") {
-      i += 1;
+/**
+ * 行内代码掩码（**有状态、可跨行**）。
+ *
+ * CommonMark 的 code span 由**同数量**的反引号串闭合，并且可以跨行，所以不能逐行配对
+ * （逐行配对的旧实现会把 `跨行 span` 里的 `[[链接]]` / `#标签` 当成真语法，这是对抗复核
+ * 提的 P2-3）。规则：
+ * - 开串（N 个反引号）之后的一切都是代码，直到遇到**同样 N 个**反引号的串；
+ * - 中途出现的长度不同的反引号串只是代码内容；
+ * - 到文本末尾仍未闭合的 span 整段按代码处理（宁可多掩，也不把代码内容当链接）；
+ * - 块级代码行（围栏/缩进代码块）是块边界：CommonMark 里段落到此结束，
+ *   未闭合 span 就地收尾，不会吞掉围栏之后的正文。
+ *
+ * `lines` 与 `blockCode` 等长；返回行数、行长都与输入一致（行号因此不变）。
+ */
+function maskInlineCodeSpans(lines: string[], blockCode: boolean[]): string[] {
+  const out = lines.slice();
+  let span: number | null = null;
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    if (blockCode[lineIndex]) {
+      // 块级代码是块边界：段落结束，未闭合的行内 span 不再延续
+      span = null;
+      out[lineIndex] = blank(line);
       continue;
     }
-    let run = 0;
-    while (i + run < line.length && line[i + run] === "`") run += 1;
-    // 向后找长度**恰好**为 run 的反引号串作为闭合
-    let j = i + run;
-    let closeAt = -1;
-    while (j < line.length) {
-      if (line[j] === "`") {
-        let closeRun = 0;
-        while (j + closeRun < line.length && line[j + closeRun] === "`") closeRun += 1;
-        if (closeRun === run) {
-          closeAt = j;
-          break;
+    if (span === null && !line.includes("`")) {
+      out[lineIndex] = line;
+      continue;
+    }
+    const chars = line.split("");
+    let i = 0;
+    while (i < line.length) {
+      if (span !== null) {
+        if (line[i] !== "`") {
+          chars[i] = " ";
+          i += 1;
+          continue;
         }
-        j += closeRun;
+        let run = 0;
+        while (i + run < line.length && line[i + run] === "`") run += 1;
+        for (let k = i; k < i + run; k += 1) chars[k] = " ";
+        if (run === span) span = null;
+        i += run;
         continue;
       }
-      j += 1;
-    }
-    if (closeAt < 0) {
-      // 没有闭合：按 CommonMark，这个反引号串是普通文本
+      if (line[i] !== "`") {
+        i += 1;
+        continue;
+      }
+      let run = 0;
+      while (i + run < line.length && line[i + run] === "`") run += 1;
+      for (let k = i; k < i + run; k += 1) chars[k] = " ";
+      span = run;
       i += run;
-      continue;
     }
-    for (let k = i; k < closeAt + run; k += 1) chars[k] = " ";
-    i = closeAt + run;
+    out[lineIndex] = chars.join("");
   }
-  return chars.join("");
+  return out;
 }
 
 /** 行首缩进宽度：空格算 1 列，Tab 对齐到下一个 4 列（CommonMark 的 tab stop）。 */
@@ -291,10 +312,10 @@ interface FenceState {
  * - **缩进代码块**：相对容器缩进 ≥4 且处于块起点/空行之后（不能打断段落）；
  * - **引用块里的围栏**：`> ``` ` 每行去掉 `>` 前缀后按同样规则判定；
  * - **列表项里的围栏 / 缩进代码块**：按列表内容列计算相对缩进，嵌套列表同理；
- * - 行内代码：成对反引号串（同长度闭合；未闭合按普通文本，见 CommonMark）。
+ * - 行内代码：**有状态扫描、可跨行**——同长度反引号串闭合，未闭合到文本末尾的整段按代码处理。
  *
  * 容器结束（引用层级下降、列表项缩进不足）时围栏随之结束，不会越界把后续正文吞掉。
- * 跨行的行内代码不掩（当前按行配对；极少数写法会与围栏判定冲突，第二轮再处理）。
+ * 行内代码与块级代码都保持等长掩码、行数不变，行号可以直接用于界面跳转。
  */
 export function maskCode(text: string): string {
   const lines = String(text ?? "").split("\n");
@@ -420,10 +441,15 @@ export function maskCode(text: string): string {
       continue;
     }
 
-    out.push(maskInlineCode(line));
+    out.push(line);
     prevBlank = false;
   }
-  return out.join("\n");
+  // 第一遍只做块级代码掩码；行内代码在第二遍有状态扫描（可跨行）。
+  // 块级代码行 = 输出被整行掩成空格、且原行不是空白行。
+  const blockCode = lines.map(
+    (line, index) => out[index] === blank(line) && line.trim() !== "",
+  );
+  return maskInlineCodeSpans(out, blockCode).join("\n");
 }
 
 /* ------------------------------------------------------------------ 通用小工具 */

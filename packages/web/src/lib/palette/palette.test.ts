@@ -91,16 +91,21 @@ describe("palette · 设置分区与动作目录", () => {
     }
   });
 
-  it("常用动作固定 5 个", () => {
+  it("常用动作固定 9 个（d.114 知识库新增 4 个）", () => {
     expect(PALETTE_ACTIONS.map((a) => a.id)).toEqual([
       "new-task",
       "new-agent",
       "notifications",
       "settings",
       "modules",
+      "vault-new-note",
+      "vault-daily",
+      "vault-new-canvas",
+      "vault-settings",
     ]);
     expect(findPaletteAction("new-task")?.label).toBe("新建任务");
     expect(findPaletteAction("modules")?.label).toBe("模块管理");
+    expect(findPaletteAction("vault-daily")?.label).toBe("打开今天的日记");
     expect(findPaletteAction("nope")).toBeUndefined();
   });
 
@@ -176,7 +181,7 @@ describe("palette · 空查询分组", () => {
     const groups = buildEmptyGroups([]);
     expect(groups.map((g) => g.id)).toEqual(["page", "action"]);
     expect(groups[0].items).toHaveLength(12);
-    expect(groups[1].items).toHaveLength(5);
+    expect(groups[1].items).toHaveLength(9);
   });
 
   it("有最近使用时置顶，且最多 5 条；不存在的条目静默跳过", () => {
@@ -288,7 +293,32 @@ describe("palette · 输入检索", () => {
 
   it("flattenGroups 只摊平结果项，便于键盘游标", () => {
     const groups = buildEmptyGroups([]);
-    expect(flattenGroups(groups)).toHaveLength(17);
+    expect(flattenGroups(groups)).toHaveLength(21);
+  });
+
+  it("知识库笔记：vault 组排在页面之后，副标题显示所属目录", () => {
+    const groups = searchPalette("周会", {
+      members: [],
+      archiveHits: [],
+      vaultNotes: [
+        { rel: "notes/周会.md", title: "周会", dir: "notes" },
+        { rel: "周会记录.md", title: "周会记录", dir: "" },
+      ],
+    });
+    const ids = groups.map((g) => g.id);
+    expect(ids.indexOf("vault")).toBeGreaterThan(ids.indexOf("page"));
+    const vault = groups.find((g) => g.id === "vault")!;
+    expect(vault.label).toBe("知识库笔记");
+    expect(vault.items.map((item) => item.kind)).toEqual(["vault", "vault"]);
+    expect(vault.items[0].vaultRel).toBe("notes/周会.md");
+    expect(vault.items[0].detail).toBe("知识库 · notes");
+    expect(vault.items[1].detail).toBe("知识库 · 库根");
+    expect(vault.total).toBe(2);
+  });
+
+  it("没有 vaultNotes 时不出知识库组（未打开过库不占屏）", () => {
+    const groups = searchPalette("周会", { members: [], archiveHits: [] });
+    expect(groups.some((g) => g.id === "vault")).toBe(false);
   });
 
   it("旧口径 searchAll 仍可用（兼容导出）", () => {

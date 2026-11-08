@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryVaultBridge } from "./bridge.js";
 import { resetVaultStore, setVaultBridge, useVaultStore } from "./store.js";
-import { MAX_TEXT_BYTES, type VaultBridge } from "./types.js";
+import { MAX_TEXT_BYTES, type VaultBridge, type VaultEntry } from "./types.js";
 
 /**
  * vault store：库/文件/索引/编辑动作 + 分片索引 + watch 增量 + 大文件跳过。
@@ -290,5 +290,92 @@ describe("多库", () => {
     expect(state.ephemeral).toBe(true);
     expect(state.activeVaultId).toBe("memory");
     expect(state.indexStatus).toBe("ready");
+  });
+});
+
+describe("树懒加载与新建目录", () => {
+  const NESTED: Record<string, string> = {
+    "a.md": "A\n",
+    "dir/b.md": "B\n",
+    "dir/deep/c.md": "C\n",
+    "dir/deep/deeper/d.md": "D\n",
+  };
+
+  function shallowDir(rel: string): VaultEntry {
+    return { rel, name: rel.slice(rel.lastIndexOf("/") + 1), kind: "dir", size: 0, mtime: "" };
+  }
+
+  it("loadTreeDir 只合并目标目录一层，并保留已加载的更深层 children", async () => {
+    await boot(NESTED);
+    // 模拟界面还没展开：树里只有 dir 节点、没有 children
+    useVaultStore.setState({ tree: [shallowDir("dir")] });
+    await useVaultStore.getState().loadTreeDir("dir");
+
+    let tree = useVaultStore.getState().tree;
+    expect(tree.map((entry) => entry.rel)).toEqual(["dir"]);
+    expect(tree[0].children?.map((entry) => entry.rel)).toEqual(["dir/deep", "dir/b.md"]);
+
+    // 再展开 deep：父层已加载的条目不能丢
+    await useVaultStore.getState().loadTreeDir("dir/deep");
+    tree = useVaultStore.getState().tree;
+    expect(tree[0].children?.map((entry) => entry.rel)).toEqual(["dir/deep", "dir/b.md"]);
+    expect(tree[0].children?.[0].children?.map((entry) => entry.rel)).toEqual([
+      "dir/deep/deeper",
+      "dir/deep/c.md",
+    ]);
+
+    // 重新展开父目录（重新拉一层）时，deep 已加载的 children 必须保留
+    await useVaultStore.getState().loadTreeDir("dir");
+    tree = useVaultStore.getState().tree;
+    expect(tree[0].children?.[0].children?.map((entry) => entry.rel)).toEqual([
+      "dir/deep/deeper",
+      "dir/deep/c.md",
+    ]);
+  });
+
+  it("loadTreeDir('') 合并根层；树里没有的目录回退整树刷新", async () => {
+    await boot(NESTED);
+    useVaultStore.setState({ tree: [] });
+    await useVaultStore.getState().loadTreeDir("");
+    expect(useVaultStore.getState().tree.map((entry) => entry.rel)).toEqual(["dir", "a.md"]);
+
+    useVaultStore.setState({ tree: [] });
+    await useVaultStore.getState().loadTreeDir("dir");
+    expect(useVaultStore.getState().tree.length).toBeGreaterThan(0);
+    expect(useVaultStore.getState().error).toBeNull();
+  });
+
+  it("createDir 多级建目录并合并进现有树（父目录已加载时不整树刷新）", async () => {
+    const bridge = await boot(NESTED);
+    useVaultStore.setState({ tree: [shallowDir("dir")] });
+
+    expect(await useVaultStore.getState().createDir("dir/新目录")).toBe(true);
+    const tree = useVaultStore.getState().tree;
+    // 目录优先 + 名称码点序：deep 在 新目录 之前
+    expect(tree[0].children?.map((entry) => entry.rel)).toEqual([
+      "dir/deep",
+      "dir/新目录",
+      "dir/b.md",
+    ]);
+    // 空目录在内存桥里也能读到
+    expect((await bridge.tree("memory", { rel: "dir/新目录", depth: 1 }))).toEqual([]);
+
+    // 幂等：再建一次仍成功，树里不出现重复节点
+    expect(await useVaultStore.getState().createDir("dir/新目录")).toBe(true);
+    expect(
+      useVaultStore.getState().tree[0].children?.filter((entry) => entry.rel === "dir/新目录"),
+    ).toHaveLength(1);
+  });
+
+  it("createDir 根层目录与非法路径", async () => {
+    await boot(NESTED);
+    useVaultStore.setState({ tree: [] });
+    expect(await useVaultStore.getState().createDir("新目录/子目录")).toBe(true);
+    expect(useVaultStore.getState().tree.map((entry) => entry.rel)).toContain("新目录");
+
+    expect(await useVaultStore.getState().createDir("../越界")).toBe(false);
+    expect(useVaultStore.getState().error).toContain("..");
+    expect(await useVaultStore.getState().createDir("")).toBe(false);
+    expect(useVaultStore.getState().error).toContain("不能为空");
   });
 });

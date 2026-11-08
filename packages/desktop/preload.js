@@ -151,6 +151,8 @@ contextBridge.exposeInMainWorld("__heming_vault", {
   apply: (request) => ipcRenderer.invoke("vault:apply", request).then(unwrapVaultResult),
   /** 新建文件（父目录自动创建）。 */
   create: (vaultId, rel, text) => ipcRenderer.invoke("vault:create", vaultId, rel, text).then(unwrapVaultResult),
+  /** 新建目录（多级 mkdir -p；已存在视为成功，失败仍是带 code 的结构化 Error）。 */
+  createDir: (vaultId, rel) => ipcRenderer.invoke("vault:createDir", vaultId, rel).then(unwrapVaultResult),
   /** 库内移动/改名。 */
   move: (vaultId, from, to) => ipcRenderer.invoke("vault:move", vaultId, from, to).then(unwrapVaultResult),
   /** 删除单个文件（不递归）。 */

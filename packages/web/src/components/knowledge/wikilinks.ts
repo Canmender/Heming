@@ -145,3 +145,26 @@ export function isSafeExternalHref(href: string | undefined): boolean {
   if (!href) return false;
   return /^(https?:\/\/|mailto:)/i.test(href);
 }
+
+/** 锚点命中状态：none=没写锚点；hit=标题存在；miss=文件存在但标题没找到（黄色提示，不是断链）。 */
+export type AnchorStatus = "none" | "hit" | "miss";
+
+/**
+ * 计算 `[[页面#标题]]` 的锚点状态。
+ *
+ * 规格口径：**锚点没命中也算「文件已解析」**，界面用黄色「锚点未命中」提示，
+ * 不当成断链（红色）——用户点进去仍是那篇笔记，只是标题改过名。
+ */
+export function anchorStatusOf(
+  index: VaultIndex | null | undefined,
+  targetRel: string | null,
+  heading: string | undefined,
+): AnchorStatus {
+  if (!heading) return "none";
+  if (!index || !targetRel) return "miss";
+  const page = index.pages.get(targetRel);
+  if (!page) return "miss";
+  const wanted = heading.trim().toLowerCase();
+  if (!wanted) return "none";
+  return page.headings.some((item) => item.text.trim().toLowerCase() === wanted) ? "hit" : "miss";
+}

@@ -12,6 +12,43 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.115.3.45.0",
+    "date": "2026-11-08",
+    "title": "知识库第二轮：Canvas、日记与模板、命令面板，以及对抗复核留下的修正",
+    "bullets": [
+      "新增 `components/knowledge/canvas/`：`canvasModel.ts`（纯函数解析/序列化/编辑/几何）与 `CanvasPane.tsx`（受控 SVG 画布）。",
+      "**往返保真**：Obsidian 的未知字段（含 `color`、`fromSide/toSide`、顶层扩展键）解析进 `__extra` 并原样写回，有「解析→序列化→再解析 deep-equal + 二次序列化逐字节一致」对拍用例；原文件没写的边侧不补默认值（否则往返不等价）。",
+      "交互：平移/缩放/复位、选中、拖动（20px 吸附）、双击编辑文本节点、新建文本节点、Delete 删除、只读模式。",
+      "**坏 JSON 绝不回写**：非法/缺字段时显示中文错误 + 原文只读预览，没有任何 `onChange` 路径（用例覆盖）。",
+      "`.canvas` 文件在编辑器位置渲染 CanvasPane，`onChange` 只标脏（与普通笔记同一套「脏标记 + Ctrl+S」流程）。",
+      "`lib/vault/daily.ts`：`DailyConfig {folder, format, templatePath}`、`resolveDailyConfig`（非法回退并给中文原因）、`dailyNotePath`（`YYYY-MM-DD` 等格式）、`parseDailyPath`（反解；拒绝 `2026-02-31` 这类日期）。",
+      "`lib/vault/template.ts`：`renderTemplate` / `applyTemplate` / `formatDateTokens`，变量`{{title}} {{date}} {{time}} {{vault}}` 与 `{{date:FORMAT}}` 子集；**未知占位符原样保留并回报 `unknown`**。",
+      "界面：知识库设置弹窗（文件夹/格式/模板，带实时预览）+ 页头「今天」按钮（存在即打开、不存在按模板创建并写 `date` frontmatter）；新建笔记弹窗可选 `templates/*.md` 并做变量替换。",
+      "命令面板新增 `vault` 分组：笔记快速打开（`rankQuickOpen`：文件名 > 别名 > 路径，精确 > 前缀 > 包含 > 子序列，空查询走最近打开）+ 四个动作「新建笔记 / 打开今天的日记 / 新建画布 / 知识库设置」。",
+      "跨页意图 `vaultIntent`（照 `infohubIntent` 既有模式，带 token 与消费即清，连点两次各消费一次）。",
+      "页面内 `Ctrl/⌘+O` 快速切换浮层：输入过滤、↑↓ 选择、Enter 打开、Esc 关闭，`role=dialog/listbox/option` + `aria-activedescendant`。",
+      "知识库索引在命令面板里走动态 import，不把 vault 引擎打进主 chunk。",
+      "**跨行行内代码屏蔽**：行内代码掩码改为有状态扫描（同长度反引号闭合、可跨行、未闭合到 EOF 全按代码），跨行 code span 里的 `[[链接]]`/`#标签`/`# 标题` 不再误入索引；等长掩码与行号保持不变。",
+      "**锚点未命中独立状态**：`WikiLink.anchor = \"hit\" | \"miss\" | \"none\"`；`miss` 仍解析到文件、仍进反链，界面显示黄色「锚点未命中」（不是断链红色）。",
+      "**新建文件夹**：桌面 `vault:createDir`（多级 `mkdir -p`、幂等、建后再次 realpath 复核）+ `store.createDir` 合并进树。",
+      "**树按目录懒加载**：`store.loadTreeDir(rel)` 一层合并、保留已加载的深层 children，不整树刷新。",
+      "**嵌入笔记异步读取**：`![[笔记]]` 缓存未命中时 `store.readText` 异步取（限深 1、防环），读不到给明确提示。",
+      "**无障碍**：Canvas 里两处 `outline-none` 改为 `outline: 2px solid transparent`（a11y 源码守卫要求，保住高对比焦点环）。",
+      "`lib/vault`：9 文件 **182 例**（新增 template 13 / daily 16 / 跨行行内 6 / 锚点 5 / 懒加载与建目录 4 / 快速切换 6）；",
+      "`components/knowledge`（含 canvas）：**16 文件 197 例**（canvas 53、快速切换与面板等）；",
+      "`lib/palette` + `CommandPalette` + `store/ui` + `App`：339 例；",
+      "全量 web **4169→（本轮收口后）全绿**；`tsc --noEmit` 0 错误。"
+    ],
+    "paragraphs": [
+      "在 d.114 的原生知识库骨架上补齐第二轮（目标里列的 Canvas / 日记 / 模板 / 命令面板），并修掉上一轮只读对抗复核里登记的问题。规格同一份：`docs/superpowers/specs/2026-11-08-d114-native-knowledge-vault.md` §7 第二轮。",
+      "Canvas（`.canvas`）",
+      "日记与模板",
+      "命令面板与快速切换",
+      "修正（上一轮对抗复核登记项）",
+      "测试"
+    ]
+  },
+  {
     "version": "d.114.3.45.0",
     "date": "2026-11-08",
     "title": "原生知识库：Obsidian 级多库 vault + 智能体记忆双向绑定",

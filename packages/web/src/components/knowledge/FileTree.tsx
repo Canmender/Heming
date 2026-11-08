@@ -3,7 +3,7 @@ import type { VaultEntry } from "../../lib/vault/types.js";
 import { ChevronIcon, FileIcon, FolderIcon, ImageIcon, PlusIcon } from "../icons.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { PromptDialog } from "./PromptDialog.js";
-import { ancestorsOf, baseName, ensureMdExt, isDir, joinRel, parentOf } from "./model.js";
+import { ancestorsOf, baseName, ensureMdExt, findEntry, isDir, joinRel, parentOf } from "./model.js";
 
 /**
  * 知识库文件树：折叠、当前文件高亮、右键菜单（新建笔记 / 新建文件夹 / 重命名 /
@@ -85,13 +85,17 @@ export function FileTree({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   /** 已经触发过懒加载的目录：收起再展开不重复拉 children。 */
   const loadedDirs = useRef<Set<string>>(new Set());
+  /** onExpandDir 放 ref：自动展开的 effect 不该因为父组件传了新函数就重跑。 */
+  const onExpandDirRef = useRef(onExpandDir);
+  onExpandDirRef.current = onExpandDir;
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [prompt, setPrompt] = useState<PromptState | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // 打开深层文件时，把它所在的目录链自动展开（否则高亮项根本不可见）
+  // 打开深层文件时，把它所在的目录链自动展开（否则高亮项根本不可见）；
+  // 顺带按需拉这些目录的子项——树可能是按 depth 懒加载的，光展开不拉会看到空目录。
   useEffect(() => {
     if (!activeRel) return;
     const needed = ancestorsOf(activeRel);
@@ -102,7 +106,14 @@ export function FileTree({
       for (const rel of needed) next.add(rel);
       return next;
     });
-  }, [activeRel]);
+    for (const rel of needed) {
+      if (loadedDirs.current.has(rel)) continue;
+      const entry = findEntry(tree, rel);
+      if (!entry || !isDir(entry)) continue;
+      loadedDirs.current.add(rel);
+      onExpandDirRef.current?.(rel);
+    }
+  }, [activeRel, tree]);
 
   // 菜单打开后：点外部或按 Esc 关闭（pointerdown 在 click 之前，先判断是不是菜单自身）。
   useEffect(() => {

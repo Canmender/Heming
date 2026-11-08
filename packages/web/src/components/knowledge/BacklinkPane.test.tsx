@@ -103,4 +103,41 @@ describe("右栏面板", () => {
     fireEvent.keyDown(tablist, { key: "ArrowLeft" });
     expect(screen.getByRole("tab", { name: /反链/ })).toHaveAttribute("aria-selected", "true");
   });
+
+  it("锚点未命中（link.anchor=miss）：黄色提示，不当成断链", () => {
+    setup({
+      outlinks: [
+        wikiLink({
+          target: "target",
+          from: "notes/source.md",
+          line: 5,
+          resolved: "notes/target.md",
+          heading: "改过名的标题",
+          anchor: "miss",
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /出链/ }));
+    expect(screen.getByText("锚点未命中")).toBeInTheDocument();
+    // 仍是可打开的已解析目标（不是「未解析」）
+    expect(screen.getByRole("button", { name: /打开出链目标 notes\/target\.md（锚点未命中）/ })).toBeInTheDocument();
+  });
+
+  it("锚点命中时不出现「锚点未命中」", () => {
+    setup({
+      outlinks: [
+        wikiLink({
+          target: "target",
+          from: "notes/source.md",
+          line: 5,
+          resolved: "notes/target.md",
+          heading: "细节",
+          anchor: "hit",
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /出链/ }));
+    expect(screen.queryByText("锚点未命中")).not.toBeInTheDocument();
+    expect(screen.getByText("已解析")).toBeInTheDocument();
+  });
 });

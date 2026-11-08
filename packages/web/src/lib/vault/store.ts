@@ -62,6 +62,11 @@ export interface VaultState extends VaultStoreApi {
   readText(rel: string): Promise<string | null>;
   /** 智能体写通道：走 `vault:apply`（仅 writeDirs 内），写后增量重算。 */
   applyWrite(rel: string, text: string, mode?: "overwrite" | "append"): Promise<boolean>;
+  /**
+   * 懒加载一个目录：拉该目录的一层子项并**合并**进现有 tree（不整树刷新）。
+   * 展开文件树时按需调用；目录不在现有树里时回退整树刷新。
+   */
+  loadTreeDir(rel: string): Promise<void>;
 }
 
 /* ------------------------------------------------------------------ 模块级内部状态 */
@@ -114,6 +119,70 @@ function flattenTree(entries: VaultEntry[]): VaultEntry[] {
   };
   walk(entries);
   return out;
+}
+
+/** 树条目排序：目录优先 + 名称码点序（与内存桥、桌面树同一口径）。 */
+function compareEntries(a: VaultEntry, b: VaultEntry): number {
+  const aDir = a.kind === "dir" ? 0 : 1;
+  const bDir = b.kind === "dir" ? 0 : 1;
+  if (aDir !== bDir) return aDir - bDir;
+  return compareText(a.name, b.name);
+}
+
+/**
+ * 合并同目录的两层条目（懒加载合并的核心）。
+ *
+ * `incoming` 是桥刚返回的、该目录的直接子项：元数据以它为准；
+ * 已经懒加载过的更深层 `children` 要保留，否则展开过的子目录会「塌回去」。
+ */
+function mergeTreeEntries(current: VaultEntry[], incoming: VaultEntry[]): VaultEntry[] {
+  const existingByRel = new Map(current.map((entry) => [entry.rel, entry]));
+  const incomingRels = new Set(incoming.map((entry) => entry.rel));
+  // 保留 incoming 里没有的旧条目（懒加载只拉一层，同层其它条目可能已存在）
+  const merged: VaultEntry[] = current.filter((entry) => !incomingRels.has(entry.rel));
+  for (const entry of incoming) {
+    const existing = existingByRel.get(entry.rel);
+    if (!existing) {
+      merged.push(entry);
+      continue;
+    }
+    const next: VaultEntry = {
+      rel: entry.rel,
+      name: entry.name,
+      kind: entry.kind,
+      size: entry.size,
+      mtime: entry.mtime,
+    };
+    const baseChildren = existing.kind === "dir" ? existing.children : undefined;
+    if (entry.children) next.children = mergeTreeEntries(baseChildren ?? [], entry.children);
+    else if (baseChildren) next.children = baseChildren;
+    if (next.kind !== "dir") delete next.children;
+    merged.push(next);
+  }
+  return merged.sort(compareEntries);
+}
+
+/** 把 `targetRel` 目录的一层子项合并进树；`found=false` 表示树里没有这个目录。 */
+function replaceTreeChildren(
+  tree: VaultEntry[],
+  targetRel: string,
+  incoming: VaultEntry[],
+): { entries: VaultEntry[]; found: boolean } {
+  let found = false;
+  const walk = (list: VaultEntry[]): VaultEntry[] =>
+    list.map((entry) => {
+      if (entry.rel === targetRel) {
+        if (entry.kind !== "dir") return entry;
+        found = true;
+        return { ...entry, children: mergeTreeEntries(entry.children ?? [], incoming) };
+      }
+      if (entry.children && targetRel.startsWith(`${entry.rel}/`)) {
+        return { ...entry, children: walk(entry.children) };
+      }
+      return entry;
+    });
+  const entries = walk(tree);
+  return { entries, found };
 }
 
 /** 清空与当前库绑定的内部缓存（切库/重置时用）。 */
@@ -182,6 +251,32 @@ export const useVaultStore = create<VaultState>((set, get) => {
       if (normalized.code === "not-found" || normalized.code === "forbidden-ext") return null;
       throw normalized;
     }
+  };
+
+  /**
+   * 拉某个目录的一层子项并合并进现有 tree（不整树刷新）。
+   *
+   * `loadTreeDir` 与 `createDir` 共用：两者都只需要「这个目录现在有哪些直接子项」，
+   * 合并时保留其它目录已经懒加载好的更深层 children。
+   * 返回 false 表示现有树里没有这个目录（调用方回退整树刷新）。
+   */
+  const mergeTreeDir = async (rel: string): Promise<boolean> => {
+    const { activeVaultId } = get();
+    if (!activeVaultId) return false;
+    const target = normalizeRel(rel);
+    const incoming = await getBridge().tree(activeVaultId, {
+      ...(target ? { rel: target } : {}),
+      depth: 1,
+    });
+    const current = get().tree;
+    if (!target) {
+      set({ tree: mergeTreeEntries(current, incoming), error: null });
+      return true;
+    }
+    const { entries, found } = replaceTreeChildren(current, target, incoming);
+    if (!found) return false;
+    set({ tree: entries, error: null });
+    return true;
   };
 
   return {
@@ -299,6 +394,19 @@ export const useVaultStore = create<VaultState>((set, get) => {
       }
     },
 
+    loadTreeDir: async (rel) => {
+      const { activeVaultId } = get();
+      if (!activeVaultId) return;
+      const target = normalizeRel(rel);
+      try {
+        const merged = await mergeTreeDir(target);
+        // 树里没有这个目录（例如刚切库/树还没加载）：兜底整树刷新
+        if (!merged) await get().refreshTree();
+      } catch (err) {
+        set({ error: describeVaultError(err) });
+      }
+    },
+
     openFile: async (rel) => {
       const key = normalizeRel(rel);
       const { activeVaultId } = get();
@@ -397,6 +505,31 @@ export const useVaultStore = create<VaultState>((set, get) => {
         await get().refreshTree();
         await get().reindexPaths([key]);
         await get().openFile(key);
+        return true;
+      } catch (err) {
+        set({ error: describeVaultError(err) });
+        return false;
+      }
+    },
+
+    createDir: async (rel) => {
+      const key = normalizeRel(rel);
+      const { activeVaultId } = get();
+      if (!activeVaultId) {
+        set({ error: "还没有打开知识库。" });
+        return false;
+      }
+      if (!key) {
+        set({ error: "目录名不能为空。" });
+        return false;
+      }
+      try {
+        await getBridge().createDir(activeVaultId, key);
+        // 只把父目录的一层子项合并进现有树；父目录还没加载时回退整树刷新
+        const parent = key.includes("/") ? key.slice(0, key.lastIndexOf("/")) : "";
+        const merged = await mergeTreeDir(parent);
+        if (!merged) await get().refreshTree();
+        set({ error: null });
         return true;
       } catch (err) {
         set({ error: describeVaultError(err) });

@@ -2,16 +2,31 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SearchHit, VaultStoreApi } from "../../lib/vault/types.js";
 import { useVaultStore } from "../../lib/vault/store.js";
 import { runSearch } from "../../lib/vault/search.js";
+import { applyTemplate } from "../../lib/vault/template.js";
 import { resolveVaultBridge } from "../../lib/vault/bridge.js";
+import { useUiStore } from "../../store/ui.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
+import { hasOpenModal } from "../useModalA11y.js";
 import { BacklinkPane } from "./BacklinkPane.js";
+import { CanvasPane, emptyCanvas, serializeCanvas } from "./canvas/index.js";
 import { EditorPane, type EditorLoader } from "./EditorPane.js";
 import { FileTree } from "./FileTree.js";
 import { GraphPane } from "./GraphPane.js";
+import { NewNoteDialog } from "./NewNoteDialog.js";
 import { PreviewPane } from "./PreviewPane.js";
+import { QuickOpen } from "./QuickOpen.js";
 import { SearchPanel } from "./SearchPanel.js";
 import { TagPanel } from "./TagPanel.js";
-import { baseName, ensureMdExt, joinRel, parentOf } from "./model.js";
+import { VaultSettingsDialog } from "./VaultSettingsDialog.js";
+import {
+  DEFAULT_DAILY_TEMPLATE,
+  dailyRelOf,
+  readDailyConfig,
+  saveDailyConfig,
+  templatesOfTree,
+  type DailyConfig,
+} from "./daily.js";
+import { baseName, ensureMdExt, joinRel, parentOf, stripMdExt } from "./model.js";
 
 /**
  * 知识库页（vault）：三栏装配。
@@ -36,6 +51,8 @@ export type KnowledgeStore = VaultStoreApi & {
   lineOffsetOf?: (rel: string) => number;
   /** 直接读正文（嵌入笔记等异步路径用）。 */
   readText?: (rel: string) => Promise<string | null>;
+  /** 按目录懒加载子树（W2；缺省时退回整树 refreshTree）。 */
+  loadTreeDir?: (rel: string) => Promise<void>;
 };
 
 export interface KnowledgePageProps {
@@ -92,6 +109,13 @@ function KnowledgePageShell({
   const [removeConfirm, setRemoveConfirm] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [revealLine, setRevealLine] = useState<number | null>(null);
+  // 第二轮：快速切换 / 新建笔记（带模板） / 知识库设置（日记与模板）
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  const [newNoteDir, setNewNoteDir] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dailyConfig, setDailyConfig] = useState<DailyConfig>(() =>
+    readDailyConfig(store.activeVaultId),
+  );
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeRel = store.activeRel;
@@ -245,6 +269,158 @@ function KnowledgePageShell({
     [store.activeVaultId, showNotice],
   );
 
+  // ── 第二轮新增能力：模板 / 日记 / 快速切换 / 画布 / 新建文件夹 ──
+
+  /** 可用模板：从目录树里的 templates/*.md 算（没有就是空列表，只给空白笔记）。 */
+  const templates = useMemo(() => templatesOfTree(store.tree), [store.tree]);
+
+  /** 切库时重新读该库的日记设置（每个库一套）。 */
+  useEffect(() => {
+    setDailyConfig(readDailyConfig(store.activeVaultId));
+  }, [store.activeVaultId]);
+
+  /** 读库内文本：优先 store.readText，其次退回文件桥（浏览器临时模式返回 null）。 */
+  const readTextOf = useCallback(
+    async (rel: string): Promise<string | null> => {
+      if (store.readText) return store.readText(rel);
+      const bridge = resolveVaultBridge();
+      const vaultId = store.activeVaultId;
+      if (!bridge || !vaultId) return null;
+      const doc = await bridge.read(vaultId, rel);
+      return doc?.text ?? null;
+    },
+    [store],
+  );
+
+  /** 依据模板生成正文（无模板时返回 undefined = 建空文件）。 */
+  const buildNoteText = useCallback(
+    async (rel: string, templateRel: string | null): Promise<string | undefined> => {
+      const options = {
+        title: stripMdExt(baseName(rel)),
+        vaultName: activeMeta?.name ?? "",
+      };
+      if (!templateRel) {
+        // 日记默认带 date frontmatter；普通新建笔记保持空白，让用户自己写
+        return rel === dailyRelOf(dailyConfig)
+          ? applyTemplate({ template: DEFAULT_DAILY_TEMPLATE, ...options })
+          : undefined;
+      }
+      const template = await readTextOf(templateRel);
+      if (template === null) {
+        showNotice(`模板读不到：${templateRel}，已改为空白笔记。`);
+        return undefined;
+      }
+      // 占位符口径统一走引擎 applyTemplate（未知占位符原样保留）
+      return applyTemplate({ template, ...options });
+    },
+    [activeMeta?.name, dailyConfig, readTextOf, showNotice],
+  );
+
+  /** 新建并打开一篇笔记（模板可空）。 */
+  const createNoteAt = useCallback(
+    async (rel: string, templateRel: string | null) => {
+      const text = await buildNoteText(rel, templateRel);
+      const ok = await store.createFile(rel, text);
+      if (ok) await store.openFile(rel);
+    },
+    [buildNoteText, store],
+  );
+
+  /** 「今天」：日记存在就打开，不存在就按模板创建。 */
+  const openToday = useCallback(async () => {
+    const rel = dailyRelOf(dailyConfig);
+    setGraphOpen(false);
+    const exists = store.index?.pages.has(rel) || store.docs.has(rel);
+    if (exists) {
+      await store.openFile(rel);
+      return;
+    }
+    await createNoteAt(rel, dailyConfig.templatePath ?? null);
+  }, [dailyConfig, store, createNoteAt]);
+
+  /** 新建画布：`未命名画布.canvas`（重名自动加序号），写入空画布 JSON 并打开。 */
+  const createCanvas = useCallback(async () => {
+    const base = "未命名画布";
+    let rel = `${base}.canvas`;
+    let seq = 2;
+    const taken = (candidate: string) =>
+      store.docs.has(candidate) ||
+      store.openFiles.includes(candidate) ||
+      Boolean(store.index?.pages.has(candidate));
+    while (taken(rel) && seq < 1000) {
+      rel = `${base}-${seq}.canvas`;
+      seq += 1;
+    }
+    const ok = await store.createFile(rel, serializeCanvas(emptyCanvas()));
+    if (ok) await store.openFile(rel);
+  }, [store]);
+
+  /** 新建文件夹：走 store.createDir（W1/W2；成功后 store 自己把新目录合进树）。 */
+  const createFolder = useCallback(
+    async (dirRel: string, folderName: string) => {
+      const rel = joinRel(dirRel, folderName.trim());
+      if (!rel) return;
+      try {
+        const ok = await store.createDir(rel);
+        if (!ok) showNotice("新建文件夹失败：可能已存在或没有权限。");
+      } catch {
+        showNotice("新建文件夹失败：可能已存在或没有权限。");
+      }
+    },
+    [store, showNotice],
+  );
+
+  /** 保存日记设置（按库 id 落 localStorage，并立即生效）。 */
+  const saveSettings = useCallback(
+    (config: DailyConfig) => {
+      setDailyConfig(saveDailyConfig(store.activeVaultId, config));
+      setSettingsOpen(false);
+    },
+    [store.activeVaultId],
+  );
+
+  // Ctrl/⌘+O：页面内快速切换（离开知识库页卸载监听，不劫持全站快捷键）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (e.key.toLowerCase() !== "o") return;
+      // 有模态弹窗开着时让位：否则会在弹窗上面再叠一层浮层
+      if (hasOpenModal()) return;
+      e.preventDefault();
+      setQuickOpenOpen(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // 命令面板投递的知识库动作（vaultIntent）：进入页面后消费一次
+  const vaultIntent = useUiStore((s) => s.vaultIntent);
+  const consumeVaultIntent = useUiStore((s) => s.consumeVaultIntent);
+  useEffect(() => {
+    if (!vaultIntent) return;
+    consumeVaultIntent();
+    switch (vaultIntent.kind) {
+      case "open":
+        if (vaultIntent.rel) requestOpen(vaultIntent.rel);
+        break;
+      case "new":
+        setNewNoteDir(activeRel ? parentOf(activeRel) : "");
+        break;
+      case "daily":
+        void openToday();
+        break;
+      case "canvas":
+        void createCanvas();
+        break;
+      case "settings":
+        setSettingsOpen(true);
+        break;
+      default:
+        break;
+    }
+    // 依赖 token：同一动作连点两次也要各执行一次
+  }, [vaultIntent, consumeVaultIntent, requestOpen, activeRel, openToday, createCanvas]);
+
   // 搜索结果：查询串变化就重算（索引就绪前 results 恒空）
   const hits = useMemo<SearchHit[]>(() => {
     if (!searchQuery.trim() || !store.index) return [];
@@ -346,6 +522,38 @@ function KnowledgePageShell({
         ) : null}
 
         <span className="ml-auto flex items-center gap-1">
+          {/* 第二轮入口：今天 / 新建 / 快速切换 / 设置（键盘路径 Ctrl+O 见下方监听） */}
+          <button
+            type="button"
+            aria-label="打开今天的日记"
+            className="ui-btn ui-btn-sm ui-btn-ghost"
+            onClick={() => void openToday()}
+          >
+            今天
+          </button>
+          <button
+            type="button"
+            className="ui-btn ui-btn-sm ui-btn-ghost"
+            onClick={() => setNewNoteDir(activeRel ? parentOf(activeRel) : "")}
+          >
+            新建笔记
+          </button>
+          <button
+            type="button"
+            title="快速切换笔记（Ctrl+O）"
+            onClick={() => setQuickOpenOpen(true)}
+            className="ui-btn ui-btn-sm ui-btn-ghost"
+          >
+            快速切换
+          </button>
+          <button
+            type="button"
+            aria-label="知识库设置"
+            className="ui-btn ui-btn-sm ui-btn-ghost"
+            onClick={() => setSettingsOpen(true)}
+          >
+            设置
+          </button>
           <button
             type="button"
             aria-pressed={graphOpen}
@@ -450,13 +658,18 @@ function KnowledgePageShell({
                   dirty={store.dirty}
                   onOpen={requestOpen}
                   onCreateFile={createFile}
+                  onCreateFolder={(dirRel, folderName) => void createFolder(dirRel, folderName)}
                   onRename={(from, to) => void store.renameFile(from, to)}
                   onDelete={(rel) => void store.deleteFile(rel)}
                   onReveal={revealInOs}
                   onExpandDir={(rel) => {
-                    // 目录按需加载：桥的 tree() 单次最多返回 20000 节点，大树靠展开时补拉
+                    // 目录按需加载：W2 的 loadTreeDir 只拉这一层；老 store 退回整树刷新。
+                    // 桥的 tree() 单次最多返回 20000 节点，大树必须靠按需补拉。
+                    if (typeof store.loadTreeDir === "function") {
+                      void store.loadTreeDir(rel);
+                      return;
+                    }
                     void store.refreshTree();
-                    void rel;
                   }}
                 />
               )
@@ -573,27 +786,44 @@ function KnowledgePageShell({
               </div>
 
               <div className="min-h-0 flex-1">
-                <EditorPane
-                  rel={activeRel}
-                  text={activeDoc?.text ?? activePage?.body ?? ""}
-                  mode={store.mode}
-                  dirty={activeDirty}
-                  loader={editorLoader}
-                  onChange={(text) => store.editFile(activeRel, text)}
-                  onSave={() => void store.saveFile(activeRel)}
-                  revealLine={revealLine}
-                  renderPreview={() => (
-                    <PreviewPane
-                      rel={activeRel}
-                      text={activeDoc?.text ?? activePage?.body ?? ""}
-                      index={store.index}
-                      onOpenLink={requestOpen}
-                      onCreatePage={createPage}
-                      resolveImage={resolveImage}
-                      resolveDoc={resolveDoc}
-                    />
-                  )}
-                />
+                {activeRel.toLowerCase().endsWith(".canvas") ? (
+                  // Canvas 接入：`.canvas` 用画布组件替换编辑器；onChange 只写缓存，
+                  // 落盘仍走 Ctrl+S / store.saveFile（与 markdown 同一套脏标记与保存链路）。
+                  <CanvasPane
+                    text={activeDoc?.text ?? ""}
+                    onChange={(next) => store.editFile(activeRel, next)}
+                    readOnly={store.mode === "read"}
+                    onOpenLink={requestOpen}
+                    resolveAsset={resolveImage}
+                  />
+                ) : (
+                  <EditorPane
+                    rel={activeRel}
+                    text={activeDoc?.text ?? activePage?.body ?? ""}
+                    mode={store.mode}
+                    dirty={activeDirty}
+                    loader={editorLoader}
+                    onChange={(text) => store.editFile(activeRel, text)}
+                    onSave={() => void store.saveFile(activeRel)}
+                    revealLine={revealLine}
+                    renderPreview={() => (
+                      <PreviewPane
+                        rel={activeRel}
+                        text={activeDoc?.text ?? activePage?.body ?? ""}
+                        index={store.index}
+                        onOpenLink={requestOpen}
+                        onCreatePage={createPage}
+                        resolveImage={resolveImage}
+                        resolveDoc={resolveDoc}
+                        loadDoc={async (rel) => {
+                          // 异步嵌入：缓存里没有时按需读一次（限深 1 由 PreviewPane 控制）
+                          const text = await readTextOf(rel);
+                          return text === null ? null : { rel, text };
+                        }}
+                      />
+                    )}
+                  />
+                )}
               </div>
             </>
           ) : (
@@ -603,15 +833,26 @@ function KnowledgePageShell({
               </p>
               <p className="ui-caption">
                 写 <code className="rounded-sm bg-subtle-3 px-1">[[页面名]]</code> 建立双链，
-                写 <code className="rounded-sm bg-subtle-3 px-1">#标签</code> 归类。
+                写 <code className="rounded-sm bg-subtle-3 px-1">#标签</code> 归类；
+                <kbd className="ml-1 rounded-sm border border-line px-1 text-[10px]">Ctrl+O</kbd>
+                可以快速切换笔记。
               </p>
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-primary mt-1"
-                onClick={() => createFile("", "新建笔记.md")}
-              >
-                新建笔记
-              </button>
+              <div className="mt-1 flex items-center gap-2">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-primary"
+                  onClick={() => setNewNoteDir("")}
+                >
+                  新建笔记
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  onClick={() => void openToday()}
+                >
+                  打开今天的日记
+                </button>
+              </div>
             </div>
           )}
         </main>
@@ -648,7 +889,7 @@ function KnowledgePageShell({
       {/* 状态栏：脏文件计数 + 快捷键提示 */}
       <footer className="flex shrink-0 items-center gap-3 border-t border-line-soft px-3 py-1 text-[10px] text-muted">
         <span>{dirtyCount > 0 ? `${dirtyCount} 个文件未保存` : "全部已保存"}</span>
-        <span>Ctrl+S 保存 · Ctrl+F 编辑器内搜索</span>
+        <span>Ctrl+S 保存 · Ctrl+F 编辑器内搜索 · Ctrl+O 快速切换</span>
         <span className="ml-auto">{activeMeta?.root ?? ""}</span>
       </footer>
 
@@ -717,6 +958,40 @@ function KnowledgePageShell({
           </p>
           <p className="ui-caption mt-1">之后仍可以用「打开本地库」重新加回来。</p>
         </ConfirmDialog>
+      ) : null}
+
+      {/* 快速切换（Ctrl+O）：独立浮层，不占用页面布局 */}
+      <QuickOpen
+        open={quickOpenOpen}
+        index={store.index}
+        recent={store.openFiles}
+        onClose={() => setQuickOpenOpen(false)}
+        onOpen={requestOpen}
+      />
+
+      {/* 新建笔记（带模板）：由页头按钮或命令面板 vaultIntent=new 触发 */}
+      {newNoteDir !== null ? (
+        <NewNoteDialog
+          dir={newNoteDir}
+          templates={templates}
+          onCancel={() => setNewNoteDir(null)}
+          onCreate={(fileName, templateRel) => {
+            const dir = newNoteDir;
+            setNewNoteDir(null);
+            if (dir === null) return;
+            void createNoteAt(joinRel(dir, fileName), templateRel);
+          }}
+        />
+      ) : null}
+
+      {/* 知识库设置：日记文件夹 / 日期格式 / 日记模板 */}
+      {settingsOpen ? (
+        <VaultSettingsDialog
+          config={dailyConfig}
+          templates={templates}
+          onCancel={() => setSettingsOpen(false)}
+          onSave={saveSettings}
+        />
       ) : null}
     </div>
   );

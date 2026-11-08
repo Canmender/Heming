@@ -802,7 +802,8 @@ function createVaultService(options) {
     },
 
     /**
-     * 目录树（懒加载）：`rel` 为空/缺省表示库根，`depth` 默认 2、上限 6。
+     * 目录树（懒加载）：`rel` 为空/缺省表示库根，任意子目录 `rel` 都只返回该子树
+     * （界面大目录懒加载用）；`depth` 默认 2、上限 6；整棵树节点数受 MAX_TREE_NODES 限制。
      * 隐藏目录/文件、`node_modules`、软链一律不出现。
      */
     async tree(vaultId, treeOptions) {
@@ -968,6 +969,57 @@ function createVaultService(options) {
       await ensureParent(meta, abs);
       await atomicWrite(abs, body);
       return writeResult(norm, bytes, abs);
+    },
+
+    /**
+     * 新建目录（多级 `mkdir -p`）：界面「新建文件夹」与文件树懒加载要用。
+     *
+     * 安全口径与写文件完全一致：`checkRel` 挡隐藏目录/`.git`/`.obsidian`/保留名/`..`，
+     * `clampPath` 做 resolveInsideRoot + 逐级软链检查 + realpath 复核；建完再复核一次
+     * 真实路径，防「创建过程中某一级被换成指向库外的链接」（TOCTOU 兜底）。
+     *
+     * 幂等：目标已是目录直接返回成功（界面连点/重试不该报错）；目标同名文件存在则失败
+     * （不能把文件当目录用）。`vault:delete` 仍只删文件，不提供目录删除。
+     * 返回形状与 `create` 对齐（VaultWriteResult）：目录没有内容，bytes 恒为 0。
+     */
+    async createDir(vaultId, rel) {
+      const meta = await requireVault(vaultId);
+      const norm = checkRel(rel, { allowDir: true });
+      const { abs } = await clampPath(meta, norm, { allowMissing: true });
+      const existing = await statOrNull(abs);
+      if (existing) {
+        if (existing.isSymbolicLink()) fail("forbidden-path", "目标是符号链接，已拒绝");
+        if (!existing.isDirectory()) fail("io-error", `同名文件已存在，无法创建目录：${norm}`);
+        return { rel: norm, bytes: 0, mtime: existing.mtime.toISOString() };
+      }
+      try {
+        await fsp.mkdir(abs, { recursive: true });
+      } catch (error) {
+        fail("io-error", `创建目录失败：${textOf(error)}`);
+      }
+      // 建完再复核真实路径（mkdir -p 可能穿过并发被替换的中间目录）
+      let rootReal;
+      try {
+        rootReal = await fsp.realpath(meta.root);
+      } catch {
+        fail("not-found", "知识库目录不存在或无法访问");
+      }
+      let real;
+      try {
+        real = await fsp.realpath(abs);
+      } catch (error) {
+        fail("io-error", `复核目录失败：${textOf(error)}`);
+      }
+      if (!isSameOrInsideRoot(rootReal, real)) {
+        fail("forbidden-path", "目录指向知识库之外（符号链接逃逸已拒绝）");
+      }
+      let stat;
+      try {
+        stat = await fsp.stat(abs);
+      } catch (error) {
+        fail("io-error", `读取目录信息失败：${textOf(error)}`);
+      }
+      return { rel: norm, bytes: 0, mtime: stat.mtime.toISOString() };
     },
 
     /** 库内移动/改名（只对文件；不跨库——本桥只有库内相对路径，天然不跨库）。 */
@@ -1217,6 +1269,7 @@ function registerVaultIpc(ipcMain, deps) {
   ipcMain.handle("vault:write", handle((vaultId, rel, text, writeOptions) => service.write(vaultId, rel, text, writeOptions)));
   ipcMain.handle("vault:apply", handle((request) => service.apply(request)));
   ipcMain.handle("vault:create", handle((vaultId, rel, text) => service.create(vaultId, rel, text)));
+  ipcMain.handle("vault:createDir", handle((vaultId, rel) => service.createDir(vaultId, rel)));
   ipcMain.handle("vault:move", handle((vaultId, from, to) => service.move(vaultId, from, to)));
   ipcMain.handle("vault:delete", handle((vaultId, rel) => service.deleteFile(vaultId, rel)));
   ipcMain.handle("vault:reveal", handle((vaultId, rel) => service.reveal(vaultId, rel)));

@@ -157,9 +157,16 @@ export function BacklinkPane({
                     {link.alias ? <span className="ml-1 text-muted">（{link.alias}）</span> : null}
                   </>
                 }
-                meta={`第 ${link.line} 行`}
+                meta={
+                  <>
+                    第 {link.line} 行
+                    {link.anchor === "miss" ? (
+                      <span className="ml-1 text-warn">锚点未命中</span>
+                    ) : null}
+                  </>
+                }
                 onClick={() => onOpen(link.from)}
-                ariaLabel={`打开反链来源 ${link.from} 第 ${link.line} 行`}
+                ariaLabel={`打开反链来源 ${link.from} 第 ${link.line} 行${link.anchor === "miss" ? "（锚点未命中）" : ""}`}
               />
             ))
           )
@@ -181,13 +188,24 @@ export function BacklinkPane({
                       {link.embed ? <span className="ml-1 text-[10px] text-muted">嵌入</span> : null}
                     </>
                   }
-                  meta={link.resolved ? "已解析" : "未解析"}
+                  meta={
+                    link.resolved ? (
+                      // 锚点未命中：文件已解析、标题找不到 → 黄色提示，不当断链
+                      link.anchor === "miss" ? (
+                        <span className="text-warn">锚点未命中</span>
+                      ) : (
+                        "已解析"
+                      )
+                    ) : (
+                      "未解析"
+                    )
+                  }
                   onClick={() =>
                     link.resolved ? onOpen(link.resolved) : onCreatePage(link.target)
                   }
                   ariaLabel={
                     link.resolved
-                      ? `打开出链目标 ${link.resolved}`
+                      ? `打开出链目标 ${link.resolved}${link.anchor === "miss" ? "（锚点未命中）" : ""}`
                       : `创建页面 ${link.target}（当前未解析）`
                   }
                 />

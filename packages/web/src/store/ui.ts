@@ -244,6 +244,23 @@ export interface AutomationIntent {
 }
 
 /**
+ * 命令面板 → 知识库页的一次性意图（d.113 第二轮）。
+ *
+ * 照 `InfohubIntent` 的既有模式，但多带一个自增 `token`：日记/新建这类动作
+ * 「连着点两次」都要各触发一次，只靠 kind 相同会被 React effect 合并掉。
+ * 只放跳转/动作标识与目标 rel，**不放正文**；消费即清空，不落 localStorage。
+ */
+export type VaultIntentKind = "open" | "new" | "daily" | "canvas" | "settings";
+
+export interface VaultIntent {
+  kind: VaultIntentKind;
+  /** open 时为目标文件 rel。 */
+  rel?: string;
+  /** 自增序号：同类意图连点两次也能分别消费。 */
+  token: number;
+}
+
+/**
  * 命令面板向「常驻/懒加载页面」投递的一次性意图（d.60 起，d.61 扩三种）。
  *
  * 为什么需要它：弹窗/高亮这类开关是组件内局部 state，外部没有触发点。
@@ -349,6 +366,8 @@ interface UiState {
   infohubIntent: InfohubIntent | null;
   /** 进入自动化页并预填新建表单的一次性意图；命中即消费。 */
   automationIntent: AutomationIntent | null;
+  /** 进入知识库页并执行动作（打开笔记 / 新建 / 日记 / 画布 / 设置）的一次性意图。 */
+  vaultIntent: VaultIntent | null;
   /**
    * 切页。接受合并前的旧页面 id（`workspace` / `tasks` / `skills` / `interfaces`），
    * 会折叠成宿主页并投递对应视图意图；`view` 省略即「不指定视图」。
@@ -366,6 +385,9 @@ interface UiState {
   /** 跳到自动化页；带意图时打开预填的新建表单。 */
   openAutomations: (intent?: AutomationIntent) => void;
   consumeAutomationIntent: () => void;
+  /** 进入知识库页并投递动作意图（笔记 / 新建 / 日记 / 画布 / 设置）。 */
+  openVault: (intent?: Omit<VaultIntent, "token">) => void;
+  consumeVaultIntent: () => void;
   /**
    * 设置页要打开的分组（null=保持默认「个人资料」）。
    * 桌宠未配置模型时的「去设置」用它直达「模型」分组，避免用户进来还要自己找。
@@ -430,6 +452,9 @@ function persistNavOrder(order: NavPage[]): void {
  * 每次投递 +1，消费端用 token 判断「这是一次新的点击」。
  */
 let paletteIntentToken = 0;
+
+/** 知识库动作意图的自增序号：日记/新建连点两次也要各消费一次。 */
+let vaultIntentToken = 0;
 
 /** 取 localStorage；SSR / 隐私模式禁用时返回 null（调用方各自回落默认值）。 */
 function uiStorage(): Pick<Storage, "getItem" | "setItem"> | null {
@@ -549,6 +574,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   automationFocusId: null,
   infohubIntent: null,
   automationIntent: null,
+  vaultIntent: null,
   settingsTab: null,
   paletteIntent: null,
   setPaletteIntent: (kind, data) => {
@@ -572,6 +598,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
       infohubIntent: null,
       automationIntent: null,
+      // 知识库动作意图同样一次性：切走就作废，回来不能莫名其妙弹一个新建框
+      vaultIntent: null,
     });
   },
   consumePageView: () => {
@@ -636,6 +664,23 @@ export const useUiStore = create<UiState>((set, get) => ({
     });
   },
   consumeAutomationIntent: () => set({ automationIntent: null }),
+  openVault: (intent) => {
+    vaultIntentToken += 1;
+    set({
+      page: "vault",
+      pageView: null,
+      activeConversationId: null,
+      pendingAttachment: null,
+      taskDraft: null,
+      taskFocusId: null,
+      automationFocusId: null,
+      infohubIntent: null,
+      automationIntent: null,
+      // 无 intent = 普通进入知识库页（清掉残留动作，不重复执行上次的「新建」）
+      vaultIntent: intent ? { ...intent, token: vaultIntentToken } : null,
+    });
+  },
+  consumeVaultIntent: () => set({ vaultIntent: null }),
   openSettings: (tab) => {
     get().setPage("settings");
     set({ settingsTab: tab ?? null });

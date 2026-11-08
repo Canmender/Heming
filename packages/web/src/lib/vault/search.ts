@@ -344,3 +344,138 @@ export function runSearch(
   hits.sort((a, b) => b.score - a.score || compareText(a.rel, b.rel) || a.line - b.line);
   return hits.slice(0, clampLimit(options.limit));
 }
+
+/* ------------------------------------------------------------------ 快速切换 */
+
+/** 快速切换的命中来源：文件名 / 别名 / 路径 / 最近打开。 */
+export type QuickOpenMatchKind = "title" | "alias" | "path" | "recent";
+
+export interface QuickOpenHit {
+  rel: string;
+  title: string;
+  matchKind: QuickOpenMatchKind;
+}
+
+/** 快速切换默认返回条数（命令面板列表正好一屏）。 */
+export const QUICK_OPEN_DEFAULT_LIMIT = 8;
+/** 快速切换硬上限。 */
+export const QUICK_OPEN_MAX_LIMIT = 50;
+
+function normalizeQuickRel(rel: string): string {
+  let out = String(rel ?? "")
+    .replace(/\\/g, "/")
+    .trim();
+  while (out.startsWith("./")) out = out.slice(2);
+  return out.replace(/^\/+/, "");
+}
+
+function clampQuickLimit(limit: unknown): number {
+  const value =
+    typeof limit === "number" && Number.isFinite(limit)
+      ? Math.floor(limit)
+      : QUICK_OPEN_DEFAULT_LIMIT;
+  return Math.min(QUICK_OPEN_MAX_LIMIT, Math.max(1, value));
+}
+
+/**
+ * 子序列匹配得分（0 = 不匹配）。
+ *
+ * 「模糊」指按顺序出现即可（`zj` 命中「总结」的拼音首字母写法不在此列，
+ * 但 `预算` 能命中「项目预算」这类顺序包含），间隔越少、越贴近越短得分越高。
+ */
+function subsequenceScore(haystack: string, needle: string): number {
+  if (!haystack || !needle) return 0;
+  let index = 0;
+  let gap = 0;
+  let last = -1;
+  for (let i = 0; i < haystack.length && index < needle.length; i += 1) {
+    if (haystack[i] !== needle[index]) continue;
+    if (last >= 0) gap += i - last - 1;
+    last = i;
+    index += 1;
+  }
+  if (index < needle.length) return 0;
+  return Math.max(1, 120 - gap * 4 - (haystack.length - needle.length));
+}
+
+/**
+ * 快速切换排序（Ctrl/⌘+O 与命令面板用）。
+ *
+ * - 大小写不敏感；文件名 > 别名 > 路径；同等质量下「精确 > 前缀 > 包含 > 子序列」；
+ * - 空 query 时按 `recent` 的顺序返回最近打开的笔记（只保留索引里仍存在的页面）；
+ * - 排序稳定：得分降序 → 标题更短优先 → rel 码点序，同一份索引同一输入结果一致。
+ */
+export function rankQuickOpen(
+  index: VaultIndex | null,
+  query: string,
+  limit: number = QUICK_OPEN_DEFAULT_LIMIT,
+  recent: readonly string[] = [],
+): QuickOpenHit[] {
+  if (!index) return [];
+  const cap = clampQuickLimit(limit);
+  const raw = String(query ?? "").trim();
+
+  if (!raw) {
+    const out: QuickOpenHit[] = [];
+    const seen = new Set<string>();
+    for (const item of recent) {
+      const rel = normalizeQuickRel(item);
+      const page = index.pages.get(rel);
+      if (!page || seen.has(page.rel)) continue;
+      seen.add(page.rel);
+      out.push({ rel: page.rel, title: page.title, matchKind: "recent" });
+      if (out.length >= cap) break;
+    }
+    return out;
+  }
+
+  const needle = raw.toLowerCase();
+  const pages = [...index.pages.values()].sort((a, b) => compareText(a.rel, b.rel));
+  const scored: { rel: string; title: string; matchKind: QuickOpenMatchKind; score: number }[] = [];
+
+  for (const page of pages) {
+    const title = page.title.toLowerCase();
+    const rel = page.rel.toLowerCase().replace(/\.md$/i, "");
+    const base = rel.slice(rel.lastIndexOf("/") + 1);
+    let bestScore = -1;
+    let bestKind: QuickOpenMatchKind = "title";
+    const consider = (score: number, kind: QuickOpenMatchKind): void => {
+      if (score <= 0 || score <= bestScore) return;
+      bestScore = score;
+      bestKind = kind;
+    };
+
+    if (title === needle) consider(1000, "title");
+    else if (title.startsWith(needle)) consider(850, "title");
+    else if (title.includes(needle)) consider(700, "title");
+
+    for (const alias of page.aliases) {
+      const value = alias.toLowerCase();
+      if (value === needle) consider(900, "alias");
+      else if (value.startsWith(needle)) consider(750, "alias");
+      else if (value.includes(needle)) consider(600, "alias");
+    }
+
+    if (base === needle) consider(800, "path");
+    else if (base.startsWith(needle)) consider(650, "path");
+    else if (rel.includes(needle)) consider(500, "path");
+
+    const titleSub = subsequenceScore(title, needle);
+    if (titleSub > 0) consider(300 + titleSub, "title");
+    const pathSub = subsequenceScore(rel, needle);
+    if (pathSub > 0) consider(250 + pathSub, "path");
+
+    if (bestScore < 0) continue;
+    scored.push({ rel: page.rel, title: page.title, matchKind: bestKind, score: bestScore });
+  }
+
+  scored.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.title.length - b.title.length ||
+      compareText(a.rel, b.rel),
+  );
+  return scored
+    .slice(0, cap)
+    .map(({ rel, title, matchKind }) => ({ rel, title, matchKind }));
+}

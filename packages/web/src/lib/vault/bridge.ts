@@ -120,6 +120,11 @@ interface MemoryFile {
 interface MemoryVault {
   meta: VaultMeta;
   files: Map<string, MemoryFile>;
+  /**
+   * 显式登记的目录（含祖先）。内存实现没有真实文件系统，空目录必须单独记下来，
+   * 否则 `createDir` 之后 `tree()` 看不到它。
+   */
+  dirs: Set<string>;
 }
 
 const EPOCH = "1970-01-01T00:00:00.000Z";
@@ -237,7 +242,7 @@ export function createMemoryVaultBridge(options: MemoryVaultBridgeOptions = {}):
   let pickSeq = 1;
 
   const addVault = (meta: VaultMeta): void => {
-    vaults.set(meta.id, { meta, files: new Map() });
+    vaults.set(meta.id, { meta, files: new Map(), dirs: new Set() });
   };
 
   addVault({
@@ -261,6 +266,7 @@ export function createMemoryVaultBridge(options: MemoryVaultBridgeOptions = {}):
       text: String(file.text ?? ""),
       mtime: file.mtime ?? EPOCH,
     });
+    if (firstVault) registerParentDirs(firstVault, rel);
   }
 
   const requireVault = (vaultId: VaultId): MemoryVault => {
@@ -281,6 +287,18 @@ export function createMemoryVaultBridge(options: MemoryVaultBridgeOptions = {}):
     }
   };
 
+  /** 记下一个目录及其所有祖先（`a/b/c` → a、a/b、a/b/c）。 */
+  function registerDir(vault: MemoryVault, rel: string): void {
+    const parts = rel.split("/").filter(Boolean);
+    for (let i = 1; i <= parts.length; i += 1) vault.dirs.add(parts.slice(0, i).join("/"));
+  }
+
+  /** 记下一个文件的所有祖先目录（文件本身不算目录）。 */
+  function registerParentDirs(vault: MemoryVault, rel: string): void {
+    const parts = rel.split("/").filter(Boolean);
+    for (let i = 1; i < parts.length; i += 1) vault.dirs.add(parts.slice(0, i).join("/"));
+  }
+
   const writeFile = (vault: MemoryVault, rel: string, text: string): VaultWriteResult => {
     const bytes = byteLength(text);
     if (bytes > MAX_TEXT_BYTES) {
@@ -291,6 +309,7 @@ export function createMemoryVaultBridge(options: MemoryVaultBridgeOptions = {}):
     }
     const mtime = nextMtime();
     vault.files.set(rel, { text, mtime });
+    registerParentDirs(vault, rel);
     return { rel, bytes, mtime };
   };
 
@@ -316,6 +335,14 @@ export function createMemoryVaultBridge(options: MemoryVaultBridgeOptions = {}):
       if (slash < 0) direct.push({ name: rest, rel, file });
       else dirs.add(rest.slice(0, slash));
     }
+    // 显式登记的空目录（createDir）也要出现在树里
+    for (const dir of vault.dirs) {
+      if (!dir.startsWith(base) || dir === base) continue;
+      const rest = dir.slice(base.length);
+      const slash = rest.indexOf("/");
+      if (slash < 0) dirs.add(rest);
+      else dirs.add(rest.slice(0, slash));
+    }
     const entries: VaultEntry[] = [];
     for (const dir of [...dirs].sort(compareText)) {
       const rel = prefix ? `${prefix}/${dir}` : dir;
@@ -324,7 +351,7 @@ export function createMemoryVaultBridge(options: MemoryVaultBridgeOptions = {}):
         name: dir,
         kind: "dir",
         size: 0,
-        mtime: maxMtimeUnder(vault, rel),
+        mtime: maxMtimeUnder(vault, rel) || EPOCH,
       };
       if (depth > 1) entry.children = buildEntries(vault, rel, depth - 1);
       entries.push(entry);
@@ -474,6 +501,15 @@ export function createMemoryVaultBridge(options: MemoryVaultBridgeOptions = {}):
       return result;
     },
 
+    async createDir(vaultId, rel) {
+      const vault = requireVault(vaultId);
+      const safe = assertSafeRel(rel);
+      if (!safe) throw new VaultBridgeError("forbidden-path", "目录路径不能为空。");
+      // 多级 mkdir -p + 幂等：重复创建只保证目录存在，不报错
+      registerDir(vault, safe);
+      return { rel: safe, bytes: 0, mtime: nextMtime() };
+    },
+
     async move(vaultId, from, to) {
       const vault = requireVault(vaultId);
       const source = assertSafeRel(from);
@@ -483,6 +519,7 @@ export function createMemoryVaultBridge(options: MemoryVaultBridgeOptions = {}):
       if (vault.files.has(target)) return false;
       vault.files.delete(source);
       vault.files.set(target, { text: file.text, mtime: nextMtime() });
+      registerParentDirs(vault, target);
       notify(vaultId, [source, target]);
       return true;
     },

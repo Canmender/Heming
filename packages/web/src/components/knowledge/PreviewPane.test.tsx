@@ -200,3 +200,73 @@ describe("预览面板 · 反链链接行号元数据", () => {
     expect(wikiLink({ target: "a", from: "b.md" }).line).toBe(1);
   });
 });
+
+describe("预览面板 · 锚点未命中与异步嵌入（d.114）", () => {
+  const indexWithHeadings = makeIndex([
+    pageInfo({
+      rel: "notes/target.md",
+      title: "target",
+      headings: [{ level: 1, text: "小节", line: 1 }],
+    }),
+  ]);
+
+  it("文件已解析但锚点找不到：chip 标「锚点未命中」（黄色提示，不是断链）", () => {
+    render(
+      <PreviewPane
+        rel="notes/source.md"
+        text={"见 [[target#不存在的小节]]"}
+        index={indexWithHeadings}
+        onOpenLink={vi.fn()}
+      />,
+    );
+    const chip = screen.getByRole("button", { name: /锚点未命中/ });
+    expect(chip).toBeInTheDocument();
+    expect(chip.textContent).toContain("锚点未命中");
+    expect(chip.className).toContain("border-warn");
+    // 不是「未创建」：文件本身解析成功
+    expect(chip.textContent).not.toContain("未创建");
+  });
+
+  it("锚点命中时不显示提示", () => {
+    render(
+      <PreviewPane
+        rel="notes/source.md"
+        text={"见 [[target#小节]]"}
+        index={indexWithHeadings}
+        onOpenLink={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("锚点未命中")).not.toBeInTheDocument();
+  });
+
+  it("![[笔记]] 缓存里没有时用 loadDoc 异步读，读到后渲染正文", async () => {
+    const loadDoc = vi.fn(async (rel: string) =>
+      rel === "notes/target.md" ? { rel, text: "异步嵌入的正文" } : null,
+    );
+    render(
+      <PreviewPane
+        rel="notes/source.md"
+        text={"![[target]]"}
+        index={indexWithHeadings}
+        loadDoc={loadDoc}
+        onOpenLink={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText("异步嵌入的正文")).toBeInTheDocument();
+    expect(loadDoc).toHaveBeenCalledWith("notes/target.md");
+    expect(screen.getByText("嵌入：notes/target.md")).toBeInTheDocument();
+  });
+
+  it("loadDoc 读不到：给可读提示，不显示空白块", async () => {
+    render(
+      <PreviewPane
+        rel="notes/source.md"
+        text={"![[target]]"}
+        index={indexWithHeadings}
+        loadDoc={async () => null}
+        onOpenLink={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText(/嵌入读取失败/)).toBeInTheDocument();
+  });
+});

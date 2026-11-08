@@ -129,6 +129,15 @@ export interface WikiLink {
   line: number;
   /** 解析结果：目标文件的 rel；未解析为 null。 */
   resolved: string | null;
+  /**
+   * 锚点命中情况（d.114 第二轮补，规格 §3.3）：
+   * - `"hit"`：`#标题` 能在目标文件的 headings 里找到；
+   * - `"miss"`：文件解析成功但这个标题不存在（界面标「锚点未命中」，**不**当未解析链接）；
+   * - `"none"`：链接没带锚点，或文件本身未解析。
+   *
+   * 可选：老调用方/测试构造的链接可以不带该字段，按 `"none"` 处理。
+   */
+  anchor?: "hit" | "miss" | "none";
 }
 
 /** 标签引用：`#tag` 或 frontmatter tags。 */
@@ -247,6 +256,11 @@ export interface VaultBridge {
   apply(req: VaultApplyRequest): Promise<VaultWriteResult>;
   /** 新建文件（父目录自动创建）；已存在返回失败。 */
   create(vaultId: VaultId, rel: string, text?: string): Promise<VaultWriteResult>;
+  /**
+   * 新建目录（多级 `mkdir -p`；已存在视为成功 = 幂等）。返回形状与 `create` 对齐，
+   * 目录没有内容所以 `bytes` 恒为 0（界面不要拿它当"写入了多少"展示）。
+   */
+  createDir(vaultId: VaultId, rel: string): Promise<VaultWriteResult>;
   /** 改名/移动（只对文件；不跨库）。 */
   move(vaultId: VaultId, from: string, to: string): Promise<boolean>;
   /** 删除单个文件（不递归、不删目录）。 */
@@ -333,6 +347,8 @@ export interface VaultStoreApi {
   /** 落盘（走 vault:write，带 expectMtime）。 */
   saveFile(rel: string): Promise<boolean>;
   createFile(rel: string, text?: string): Promise<boolean>;
+  /** 新建目录（多级、幂等）；成功后应把新目录合并进树，不必整树刷新。 */
+  createDir(rel: string): Promise<boolean>;
   renameFile(from: string, to: string): Promise<boolean>;
   deleteFile(rel: string): Promise<boolean>;
 

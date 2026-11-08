@@ -338,6 +338,38 @@ test("tree：depth 控制层级、rel 懒加载子树", async (t) => {
   assert.ok(Array.isArray(fallback));
 });
 
+test("tree：任意 rel 拉子树（多级、尾斜杠归一、目标非目录拒绝）", async (t) => {
+  const ws = makeWorkspace(t);
+  fs.mkdirSync(path.join(ws.root, "a", "b", "c"), { recursive: true });
+  fs.writeFileSync(path.join(ws.root, "a", "x.md"), "x\n");
+  fs.writeFileSync(path.join(ws.root, "a", "b", "y.md"), "y\n");
+  fs.writeFileSync(path.join(ws.root, "a", "b", "c", "z.md"), "z\n");
+
+  // 任意层级都只返回该子树的直接子节点（界面懒加载契约）
+  const atB = await ws.service.tree("v1", { rel: "a/b", depth: 1 });
+  assert.deepEqual(atB.map((entry) => entry.name), ["c", "y.md"], "目录优先 + 名称序");
+  assert.equal(atB.find((entry) => entry.name === "c").children, undefined, "depth=1 不展开");
+
+  // 尾斜杠应被归一，等价于不带斜杠
+  const slash = await ws.service.tree("v1", { rel: "a/b/", depth: 2 });
+  assert.deepEqual(
+    slash.map((entry) => entry.name),
+    atB.map((entry) => entry.name),
+    "带尾斜杠与不带斜杠结果一致",
+  );
+  const cNode = slash.find((entry) => entry.name === "c");
+  assert.deepEqual(cNode.children.map((entry) => entry.name), ["z.md"]);
+
+  // 更深一层：子树根就是 c，不包含上级 a/b 的内容
+  const atC = await ws.service.tree("v1", { rel: "a/b/c", depth: 2 });
+  assert.deepEqual(atC.map((entry) => entry.name), ["z.md"]);
+
+  // 目标不是目录 → 拒绝；继续向上逃逸 → 拒绝
+  await rejectsWith(ws.service.tree("v1", { rel: "a/x.md" }), "forbidden-path");
+  await rejectsWith(ws.service.tree("v1", { rel: "a/../.." }), "forbidden-path");
+  await rejectsWith(ws.service.tree("v1", { rel: "不存在目录", depth: 1 }), "not-found");
+});
+
 /* ────────────────────────────── 读文本 / 读图片 ────────────────────────────── */
 
 test("read：文本内容/mtime/size 正确，不存在返回 null", async (t) => {
@@ -559,6 +591,72 @@ test("create：新建成功、已存在失败、非法路径与扩展名拒绝",
   await rejectsWith(ws.service.create("v1", "x.png", "x"), "forbidden-ext");
 });
 
+test("createDir：多级 mkdir -p、已存在幂等（含尾斜杠）、同名文件冲突拒绝", async (t) => {
+  const ws = makeWorkspace(t);
+  const created = await ws.service.createDir("v1", "项目/子目录/更深");
+  assert.equal(created.rel, "项目/子目录/更深");
+  assert.equal(created.bytes, 0, "目录没有内容，bytes 恒为 0（与 create 返回形状对齐）");
+  assert.ok(!Number.isNaN(Date.parse(created.mtime)));
+  assert.ok(fs.statSync(path.join(ws.root, "项目", "子目录", "更深")).isDirectory());
+
+  // 幂等：重复创建返回成功而不是报错（界面连点/重试）
+  const again = await ws.service.createDir("v1", "项目/子目录/更深");
+  assert.equal(again.rel, "项目/子目录/更深");
+  assert.equal(again.bytes, 0);
+  assert.ok(fs.statSync(path.join(ws.root, "项目", "子目录", "更深")).isDirectory());
+  // 尾斜杠归一后同样幂等
+  const slash = await ws.service.createDir("v1", "项目/子目录/更深/");
+  assert.equal(slash.rel, "项目/子目录/更深");
+
+  // 同名文件存在时不能创建目录，且原文件一字未动
+  fs.writeFileSync(path.join(ws.root, "占用.md"), "x\n");
+  await rejectsWith(ws.service.createDir("v1", "占用.md"), "io-error");
+  assert.equal(fs.readFileSync(path.join(ws.root, "占用.md"), "utf8"), "x\n");
+});
+
+test("createDir：越界、隐藏目录、保留名、非法字符全部拒绝且不落盘", async (t) => {
+  const ws = makeWorkspace(t);
+  const bad = [
+    "../外面",
+    "a/../../外面",
+    "/绝对",
+    "\\绝对",
+    "C:/Windows",
+    "a\0b",
+    "x".repeat(301),
+    ".obsidian/新目录",
+    ".git/x",
+    "node_modules/x",
+    ".hidden/x",
+    "CON",
+    "aux",
+    "a//b",
+    "./x",
+    ".",
+    "",
+    null,
+    42,
+  ];
+  for (const rel of bad) {
+    await rejectsWith(ws.service.createDir("v1", rel), "forbidden-path");
+  }
+  assert.deepEqual(fs.readdirSync(ws.root), [], "库内不得留下任何目录");
+  assert.equal(fs.existsSync(path.join(ws.base, "外面")), false, "库外不得落盘");
+});
+
+test("createDir：目录建出来后 delete 仍只删文件（不提供递归删目录）", async (t) => {
+  const ws = makeWorkspace(t);
+  await ws.service.createDir("v1", "文件夹/子文件夹");
+  fs.writeFileSync(path.join(ws.root, "文件夹", "子文件夹", "孩子.md"), "孩子\n");
+  // 目录本身不是可删对象：无扩展名/目录一律按 forbidden-ext / io-error 拒绝
+  await rejectsWith(ws.service.deleteFile("v1", "文件夹"), "forbidden-ext");
+  await rejectsWith(ws.service.deleteFile("v1", "文件夹/子文件夹"), "forbidden-ext");
+  const dirWithMdExt = path.join(ws.root, "看起来像.md");
+  fs.mkdirSync(dirWithMdExt);
+  await rejectsWith(ws.service.deleteFile("v1", "看起来像.md"), "io-error");
+  assert.equal(fs.existsSync(path.join(ws.root, "文件夹", "子文件夹", "孩子.md")), true);
+});
+
 test("move：库内改名成功；目标已存在/目录/非法扩展名拒绝", async (t) => {
   const ws = makeWorkspace(t);
   fs.writeFileSync(path.join(ws.root, "旧名.md"), "内容\n");
@@ -644,8 +742,10 @@ test("符号链接逃逸：库内联接指向库外时，读/写/树都必须拒
   await rejectsWith(ws.service.readBinary("v1", "逃逸/秘密.png"), "forbidden-path");
   await rejectsWith(ws.service.write("v1", "逃逸/新文件.md", "越界\n"), "forbidden-path");
   await rejectsWith(ws.service.create("v1", "逃逸/新文件2.md", "越界\n"), "forbidden-path");
+  await rejectsWith(ws.service.createDir("v1", "逃逸/新目录"), "forbidden-path");
   await rejectsWith(ws.service.deleteFile("v1", "逃逸/秘密.md"), "forbidden-path");
   assert.equal(fs.existsSync(path.join(ws.outside, "新文件.md")), false, "库外不得出现新文件");
+  assert.equal(fs.existsSync(path.join(ws.outside, "新目录")), false, "库外不得出现新目录");
   assert.equal(fs.readFileSync(secret, "utf8"), "库外机密\n");
   assert.equal(fs.existsSync(secret), true, "库外文件不得被删除");
 
@@ -667,6 +767,7 @@ test("IPC：注册全部 vault 通道，乱传参数只回结构化失败、不�
   const expected = [
     "vault:apply",
     "vault:create",
+    "vault:createDir",
     "vault:delete",
     "vault:list",
     "vault:move",
@@ -717,6 +818,16 @@ test("IPC：成功 envelope 形状正确（list/read/write/apply/tree）", async
   const readResult = await ipc.invoke("vault:read", {}, "v1", "ipc.md");
   assert.equal(readResult.ok, true);
   assert.equal(readResult.value.text, "内容\n");
+
+  const dirResult = await ipc.invoke("vault:createDir", {}, "v1", "ipc-目录/子目录");
+  assert.equal(dirResult.ok, true);
+  assert.equal(dirResult.value.rel, "ipc-目录/子目录");
+  assert.equal(dirResult.value.bytes, 0);
+  assert.ok(!Number.isNaN(Date.parse(dirResult.value.mtime)));
+  assert.ok(fs.statSync(path.join(ws.root, "ipc-目录", "子目录")).isDirectory());
+  // 幂等：再调一次仍成功
+  const dirAgain = await ipc.invoke("vault:createDir", {}, "v1", "ipc-目录/子目录");
+  assert.equal(dirAgain.ok, true);
 
   const applyResult = await ipc.invoke("vault:apply", {}, { vaultId: "v1", rel: "inbox/记忆.md", text: "x" });
   assert.equal(applyResult.ok, true);

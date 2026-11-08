@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseSearchQuery, runSearch, SEARCH_MAX } from "./search.js";
+import {
+  parseSearchQuery,
+  QUICK_OPEN_DEFAULT_LIMIT,
+  rankQuickOpen,
+  runSearch,
+  SEARCH_MAX,
+} from "./search.js";
 import {
   buildVaultIndex,
   buildVaultIndexFromParsed,
@@ -204,5 +210,69 @@ describe("runSearch", () => {
         true,
       );
     }
+  });
+});
+
+describe("rankQuickOpen（快速切换）", () => {
+  const QUICK_INDEX = buildVaultIndex([
+    {
+      rel: "项目/预算.md",
+      text: "---\naliases: [季度预算]\n---\n# 预算\n正文\n",
+      mtime: "2026-11-08T00:00:00.000Z",
+    },
+    { rel: "部署.md", text: "# 部署\n正文\n", mtime: "2026-11-08T00:00:00.000Z" },
+    { rel: "项目/部署记录.md", text: "# 部署记录\n正文\n", mtime: "2026-11-08T00:00:00.000Z" },
+  ]);
+
+  it("文件名精确/前缀/包含优先于别名与路径", () => {
+    const hits = rankQuickOpen(QUICK_INDEX, "部署");
+    expect(hits[0]).toMatchObject({ rel: "部署.md", matchKind: "title" });
+    expect(hits.map((hit) => hit.rel)).toContain("项目/部署记录.md");
+  });
+
+  it("别名也能命中（matchKind=alias）", () => {
+    const hits = rankQuickOpen(QUICK_INDEX, "季度预算");
+    expect(hits[0]).toMatchObject({ rel: "项目/预算.md", matchKind: "alias" });
+  });
+
+  it("路径匹配（含目录名）与子序列模糊匹配", () => {
+    const pathHit = rankQuickOpen(QUICK_INDEX, "项目").find((hit) => hit.rel === "项目/预算.md");
+    expect(pathHit).toBeDefined();
+    // 「项预」是「项目/预算」的子序列
+    const fuzzy = rankQuickOpen(QUICK_INDEX, "项预");
+    expect(fuzzy.map((hit) => hit.rel)).toContain("项目/预算.md");
+  });
+
+  it("大小写不敏感", () => {
+    const index = buildVaultIndex([
+      { rel: "RoadMap.md", text: "# RoadMap\n", mtime: "2026-11-08T00:00:00.000Z" },
+    ]);
+    expect(rankQuickOpen(index, "roadmap")[0]).toMatchObject({
+      rel: "RoadMap.md",
+      matchKind: "title",
+    });
+    expect(rankQuickOpen(index, "ROADMAP")[0].rel).toBe("RoadMap.md");
+  });
+
+  it("空 query 按 recent 顺序返回最近打开（过滤不存在与重复）", () => {
+    const hits = rankQuickOpen(QUICK_INDEX, "   ", 8, [
+      "部署.md",
+      "不存在的.md",
+      "./部署.md",
+      "项目/预算.md",
+    ]);
+    expect(hits).toEqual([
+      { rel: "部署.md", title: "部署", matchKind: "recent" },
+      { rel: "项目/预算.md", title: "预算", matchKind: "recent" },
+    ]);
+    expect(rankQuickOpen(QUICK_INDEX, "")).toEqual([]);
+  });
+
+  it("limit 生效、空索引返回空、结果确定性", () => {
+    expect(rankQuickOpen(QUICK_INDEX, "部署", 1)).toHaveLength(1);
+    expect(rankQuickOpen(null, "部署")).toEqual([]);
+    expect(rankQuickOpen(QUICK_INDEX, "部署")).toEqual(rankQuickOpen(QUICK_INDEX, "部署"));
+    // 默认上限 8
+    expect(QUICK_OPEN_DEFAULT_LIMIT).toBe(8);
   });
 });

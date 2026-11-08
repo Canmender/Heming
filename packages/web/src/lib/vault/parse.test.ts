@@ -88,9 +88,55 @@ describe("maskCode", () => {
     expect(masked).not.toContain("[[z]]");
   });
 
-  it("未闭合的反引号按普通文本处理", () => {
+  it("未闭合的反引号延伸到文本末尾（整段按代码处理）", () => {
+    // CommonMark：没有同长度闭合串时，开串之后的全部内容都是代码
     const md = "一个 ` 未闭合 [[x]]";
-    expect(maskCode(md)).toBe(md);
+    const masked = maskCode(md);
+    expect(masked).not.toContain("[[x]]");
+    expect(masked.length).toBe(md.length);
+    expect(extractLinks(md)).toEqual([]);
+  });
+
+  it("跨行行内代码：span 内的双链、标签、标题都不算，span 外照常", () => {
+    const md = [
+      "正文 `跨行代码开始",
+      "[[链接]] #标签",
+      "## 标题",
+      "还在代码里` 结尾",
+      "[[真链接]] #真标签",
+    ].join("\n");
+    const masked = maskCode(md);
+    // 掩码等长、行数不变（行号不错位）
+    expect(masked.length).toBe(md.length);
+    expect(masked.split("\n").length).toBe(md.split("\n").length);
+    expect(masked).not.toContain("[[链接]]");
+    expect(masked).not.toContain("#标签");
+    expect(masked).not.toContain("## 标题");
+    expect(masked).toContain("[[真链接]]");
+
+    expect(extractLinks(md).map((link) => link.target)).toEqual(["真链接"]);
+    expect(extractLinks(md)[0].line).toBe(5);
+    expect(extractInlineTags(md)).toEqual([{ tag: "真标签", line: 5 }]);
+    expect(extractHeadings(md)).toEqual([]);
+  });
+
+  it("跨行 span 闭合后，同一行的链接照常、行号正确", () => {
+    const md = ["`开", "[[假]]", "闭` 之后 [[真]]"].join("\n");
+    const links = extractLinks(md);
+    expect(links.map((link) => link.target)).toEqual(["真"]);
+    expect(links[0].line).toBe(3);
+  });
+
+  it("长度不同的反引号串不能闭合（中间那串是代码内容）", () => {
+    const md = "``a`b[[假]]`` 之后 [[真]]";
+    const masked = maskCode(md);
+    expect(masked).not.toContain("[[假]]");
+    expect(extractLinks(md).map((link) => link.target)).toEqual(["真"]);
+  });
+
+  it("块级代码是块边界：未闭合的行内 span 不会吞掉围栏之后的正文", () => {
+    const md = ["`未闭合", "```", "代码", "```", "[[真]]"].join("\n");
+    expect(extractLinks(md).map((link) => link.target)).toEqual(["真"]);
   });
 
   it("~~~ 围栏同样生效", () => {

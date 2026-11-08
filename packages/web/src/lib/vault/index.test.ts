@@ -260,3 +260,61 @@ describe("buildVaultIndex", () => {
     expect(typeof useVaultStore.getState().buildIndexNow).toBe("function");
   });
 });
+
+describe("锚点状态（anchor）", () => {
+  const docs = [
+    doc("目标.md", "# 第一节\n\n正文\n\n## 预算 与 风险\n"),
+    doc("来源.md", "[[目标]]\n[[目标#第一节]]\n[[目标# 预算 与 风险 ]]\n[[目标#不存在]]\n"),
+  ];
+
+  it("无锚点 none；命中 hit；未命中 miss（仍 resolved、仍进 backlinks）", () => {
+    const index = buildVaultIndex(docs);
+    const links = index.links.filter((link) => link.from === "来源.md");
+    expect(links.map((link) => link.anchor)).toEqual(["none", "hit", "hit", "miss"]);
+    expect(links.map((link) => link.resolved)).toEqual([
+      "目标.md",
+      "目标.md",
+      "目标.md",
+      "目标.md",
+    ]);
+    // 锚点未命中不是断链：照样进反链
+    expect(index.backlinks.get("目标.md")).toHaveLength(4);
+    expect(index.unresolved).toEqual([]);
+  });
+
+  it("标题比较大小写不敏感、去首尾空格", () => {
+    const index = buildVaultIndex([
+      doc("目标.md", "# Budget Risk\n"),
+      doc("来源.md", "[[目标#budget risk]]\n[[目标#  Budget Risk  ]]\n"),
+    ]);
+    expect(index.links.map((link) => link.anchor)).toEqual(["hit", "hit"]);
+  });
+
+  it("`#` 只切一次：二级 `#` 按完整串或首段匹配", () => {
+    const index = buildVaultIndex([
+      doc("目标.md", "# 标题#小节\n"),
+      doc("来源.md", "[[目标#标题#小节]]\n"),
+    ]);
+    expect(index.links[0].heading).toBe("标题#小节");
+    expect(index.links[0].anchor).toBe("hit");
+
+    // 目标页只有「标题」时，`标题#小节` 也按首段命中（不因多一个 # 变 miss）
+    const partial = buildVaultIndex([
+      doc("目标.md", "# 标题\n"),
+      doc("来源.md", "[[目标#标题#小节]]\n"),
+    ]);
+    expect(partial.links[0].anchor).toBe("hit");
+  });
+
+  it("文件未解析时 anchor 一律 none（不是 miss）", () => {
+    const index = buildVaultIndex([doc("来源.md", "[[没有这页#标题]]\n")]);
+    expect(index.links[0].resolved).toBeNull();
+    expect(index.links[0].anchor).toBe("none");
+  });
+
+  it("空标题（[[页#]]）按无锚点处理", () => {
+    const index = buildVaultIndex([doc("目标.md", "# 甲\n"), doc("来源.md", "[[目标#]]\n")]);
+    expect(index.links[0].anchor).toBe("none");
+    expect(index.links[0].resolved).toBe("目标.md");
+  });
+});

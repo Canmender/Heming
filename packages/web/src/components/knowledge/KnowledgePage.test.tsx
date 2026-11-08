@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { VaultDoc, VaultEntry, VaultMeta } from "../../lib/vault/types.js";
+import { DEFAULT_DAILY_CONFIG, dailyNotePath } from "../../lib/vault/daily.js";
+import { useUiStore } from "../../store/ui.js";
 import { KnowledgePage, type KnowledgeStore } from "./KnowledgePage.js";
 import type { EditorLoader } from "./EditorPane.js";
 import { makeIndex, pageInfo, wikiLink } from "./testFixtures.js";
@@ -83,6 +85,7 @@ function fakeStore(over: Partial<KnowledgeStore> = {}): KnowledgeStore {
     editFile: vi.fn(),
     saveFile: vi.fn(async () => true),
     createFile: vi.fn(async () => true),
+    createDir: vi.fn(async () => true),
     renameFile: vi.fn(async () => true),
     deleteFile: vi.fn(async () => true),
     buildIndexNow: vi.fn(async () => {}),
@@ -245,5 +248,142 @@ describe("知识库页 · 未保存拦截", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存并关闭" }));
     await waitFor(() => expect(store.saveFile).toHaveBeenCalledWith("notes/source.md"));
     expect(store.closeFile).not.toHaveBeenCalled();
+  });
+});
+
+/* ============================ 第二轮（d.114）============================ */
+
+describe("知识库页 · 快速切换（Ctrl+O）", () => {
+  afterEach(() => {
+    useUiStore.setState({ vaultIntent: null });
+  });
+
+  it("Ctrl+O 打开浮层，输入过滤后 Enter 打开目标文件", async () => {
+    const { store } = renderPage();
+    fireEvent.keyDown(window, { key: "o", ctrlKey: true });
+    expect(screen.getByRole("dialog", { name: "快速切换笔记" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("输入笔记名快速切换"), { target: { value: "other" } });
+    fireEvent.keyDown(screen.getByLabelText("输入笔记名快速切换"), { key: "Enter" });
+    await waitFor(() => expect(store.openFile).toHaveBeenCalledWith("notes/other.md"));
+    expect(screen.queryByRole("dialog", { name: "快速切换笔记" })).not.toBeInTheDocument();
+  });
+
+  it("Esc 关闭浮层，不打开任何文件", () => {
+    const { store } = renderPage();
+    fireEvent.keyDown(window, { key: "o", ctrlKey: true });
+    fireEvent.keyDown(screen.getByLabelText("输入笔记名快速切换"), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "快速切换笔记" })).not.toBeInTheDocument();
+    expect(store.openFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("知识库页 · 命令面板意图（vaultIntent）", () => {
+  afterEach(() => {
+    useUiStore.setState({ vaultIntent: null });
+  });
+
+  it("intent=new 打开新建笔记弹窗", () => {
+    useUiStore.getState().openVault({ kind: "new" });
+    renderPage();
+    expect(screen.getByRole("dialog", { name: "新建笔记" })).toBeInTheDocument();
+  });
+
+  it("intent=open 直接打开目标文件", async () => {
+    useUiStore.getState().openVault({ kind: "open", rel: "notes/other.md" });
+    const { store } = renderPage();
+    await waitFor(() => expect(store.openFile).toHaveBeenCalledWith("notes/other.md"));
+  });
+
+  it("intent=settings 打开知识库设置弹窗", () => {
+    useUiStore.getState().openVault({ kind: "settings" });
+    renderPage();
+    expect(screen.getByRole("dialog", { name: "知识库设置" })).toBeInTheDocument();
+  });
+
+  it("intent=daily 创建今天的日记（带 date frontmatter）并打开", async () => {
+    useUiStore.getState().openVault({ kind: "daily" });
+    const { store } = renderPage();
+    const rel = dailyNotePath(DEFAULT_DAILY_CONFIG, new Date());
+    await waitFor(() => expect(store.createFile).toHaveBeenCalled());
+    const [createdRel, createdText] = vi.mocked(store.createFile).mock.calls[0];
+    expect(createdRel).toBe(rel);
+    expect(String(createdText)).toContain("date:");
+    await waitFor(() => expect(store.openFile).toHaveBeenCalledWith(rel));
+  });
+
+  it("intent=canvas 新建 .canvas 并写入空画布 JSON", async () => {
+    useUiStore.getState().openVault({ kind: "canvas" });
+    const { store } = renderPage();
+    await waitFor(() => expect(store.createFile).toHaveBeenCalled());
+    const [rel, text] = vi.mocked(store.createFile).mock.calls[0];
+    expect(rel).toBe("未命名画布.canvas");
+    expect(String(text)).toContain('"nodes"');
+    await waitFor(() => expect(store.openFile).toHaveBeenCalledWith("未命名画布.canvas"));
+  });
+});
+
+describe("知识库页 · 模板 / 新建 / 文件夹 / 懒加载 / 画布", () => {
+  const treeWithTemplates: VaultEntry[] = [
+    ...tree,
+    {
+      rel: "templates",
+      name: "templates",
+      kind: "dir",
+      size: 0,
+      mtime: MTIME,
+      children: [
+        { rel: "templates/会议.md", name: "会议.md", kind: "md", size: 10, mtime: MTIME },
+      ],
+    },
+  ];
+
+  it("新建笔记可选模板，模板变量由引擎填好", async () => {
+    const readText = vi.fn(async (rel: string) =>
+      rel === "templates/会议.md" ? "---\ntitle: {{title}}\ndate: {{date}}\n---\n" : null,
+    );
+    const { store } = renderPage({ tree: treeWithTemplates, readText });
+    fireEvent.click(screen.getByRole("button", { name: "新建笔记" }));
+    fireEvent.change(screen.getByLabelText("笔记名"), { target: { value: "周会" } });
+    fireEvent.change(screen.getByLabelText("模板"), { target: { value: "templates/会议.md" } });
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    await waitFor(() => expect(store.createFile).toHaveBeenCalled());
+    const [rel, text] = vi.mocked(store.createFile).mock.calls[0];
+    expect(rel).toBe("notes/周会.md");
+    expect(String(text)).toContain("title: 周会");
+    expect(String(text)).not.toContain("{{date}}");
+  });
+
+  it("文件树新建文件夹走 store.createDir（成功后 store 自己合并树）", async () => {
+    const { store } = renderPage();
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /root\.md/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "新建文件夹" }));
+    fireEvent.change(screen.getByLabelText("文件夹名"), { target: { value: "资料" } });
+    fireEvent.click(screen.getByRole("button", { name: "确定" }));
+    await waitFor(() => expect(store.createDir).toHaveBeenCalledWith("资料"));
+  });
+
+  it("打开深层文件时自动展开祖先目录，并按需 loadTreeDir（不整树刷新）", () => {
+    const loadTreeDir = vi.fn(async () => {});
+    const { store } = renderPage({ loadTreeDir });
+    expect(loadTreeDir).toHaveBeenCalledWith("notes");
+    expect(store.refreshTree).not.toHaveBeenCalled();
+  });
+
+  it("打开 .canvas 文件时用 CanvasPane 替代编辑器", async () => {
+    const canvasDoc: VaultDoc = {
+      vaultId: "v1",
+      rel: "board.canvas",
+      text: JSON.stringify({ nodes: [], edges: [] }, null, 2),
+      mtime: MTIME,
+      size: 10,
+    };
+    renderPage({
+      activeRel: "board.canvas",
+      openFiles: ["board.canvas"],
+      docs: new Map([["board.canvas", canvasDoc]]),
+      mode: "split",
+    });
+    expect(await screen.findByTestId("canvas-pane")).toBeInTheDocument();
+    expect(screen.queryByTestId("vault-editor-host")).not.toBeInTheDocument();
   });
 });

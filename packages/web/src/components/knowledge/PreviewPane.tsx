@@ -6,7 +6,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { VaultIndex } from "../../lib/vault/types.js";
 import { remarkWikiLinks } from "./remarkWikiLinks.js";
-import { decodeWikiHref, isSafeExternalHref, resolveWikiTarget } from "./wikilinks.js";
+import { anchorStatusOf, decodeWikiHref, isSafeExternalHref, resolveWikiTarget } from "./wikilinks.js";
 
 /**
  * 知识库预览面板：复用仓库既有的 markdown 渲染链
@@ -35,8 +35,10 @@ export interface PreviewPaneProps {
   onCreatePage?: (target: string) => void;
   /** 读图片附件 → data URL（桌面桥 vault:readBinary）。 */
   resolveImage?: (rel: string) => Promise<string | null>;
-  /** 读嵌入笔记（`![[笔记]]` 限深 1）。 */
+  /** 读嵌入笔记（`![[笔记]]` 限深 1），同步路径：已在 docs 缓存里时优先用它。 */
   resolveDoc?: (rel: string) => { rel: string; text: string } | null;
+  /** 异步读嵌入笔记：缓存里没有时按需读一次（store.readText / 文件桥）。 */
+  loadDoc?: (rel: string) => Promise<{ rel: string; text: string } | null>;
   /** 嵌入深度：0=顶层；到 1 后不再继续嵌入，防环。 */
   embedDepth?: number;
   className?: string;
@@ -47,12 +49,15 @@ function WikiChip({
   label,
   resolved,
   ambiguous,
+  anchorMiss = false,
   title,
   onClick,
 }: {
   label: string;
   resolved: boolean;
   ambiguous: boolean;
+  /** 文件已解析但 `#锚点` 没命中：黄色提示，不当成断链。 */
+  anchorMiss?: boolean;
   title?: string;
   onClick: () => void;
 }) {
@@ -62,19 +67,68 @@ function WikiChip({
       onClick={onClick}
       title={title}
       aria-label={
-        resolved ? `打开页面 ${label}` : `创建页面 ${label}（当前未解析）`
+        resolved ? `打开页面 ${label}${anchorMiss ? "（锚点未命中）" : ""}` : `创建页面 ${label}（当前未解析）`
       }
       className={`mx-0.5 inline-flex max-w-full items-baseline gap-1 truncate rounded-sm border px-1 py-0 align-baseline text-[12px] leading-5 transition-colors ${
         resolved
-          ? "border-line text-[#2563eb] hover:border-[#2563eb] hover:bg-subtle-3"
+          ? anchorMiss
+            ? "border-dashed border-warn text-[#b45309] hover:bg-subtle-3"
+            : "border-line text-[#2563eb] hover:border-[#2563eb] hover:bg-subtle-3"
           : ambiguous
-            ? "border-warn/50 border-dashed text-[#b45309] hover:bg-subtle-3"
+            ? "border-dashed border-warn text-[#b45309] hover:bg-subtle-3"
             : "border-dashed border-line-strong text-muted hover:border-ink hover:text-ink"
       }`}
     >
       <span className="truncate">{label}</span>
-      {!resolved ? <span className="shrink-0 text-[10px]">{ambiguous ? "有歧义" : "未创建"}</span> : null}
+      {!resolved ? (
+        <span className="shrink-0 text-[10px]">{ambiguous ? "有歧义" : "未创建"}</span>
+      ) : anchorMiss ? (
+        <span className="shrink-0 text-[10px]">锚点未命中</span>
+      ) : null}
     </button>
+  );
+}
+
+/**
+ * 异步嵌入笔记：`![[笔记]]` 不在 docs 缓存里时按需读一次正文再渲染。
+ *
+ * 限深由调用方控制（embedDepth）；这里只做「加载中 / 读不到 / 读到」三态，
+ * 读不到时退回一张可点 chip（不是空块），用户仍能打开原页。
+ */
+function AsyncNoteEmbed({
+  rel,
+  load,
+  render,
+}: {
+  rel: string;
+  load: (rel: string) => Promise<{ rel: string; text: string } | null>;
+  render: (doc: { rel: string; text: string }) => React.ReactNode;
+}) {
+  const [doc, setDoc] = useState<{ rel: string; text: string } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setDoc(null);
+    setFailed(false);
+    void load(rel)
+      .then((loaded) => {
+        if (!alive) return;
+        if (loaded) setDoc(loaded);
+        else setFailed(true);
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [rel, load]);
+
+  if (doc) return <>{render(doc)}</>;
+  return (
+    <span className="ui-chip my-1 align-middle">
+      {failed ? `嵌入读取失败：${rel}（点击原页查看）` : `嵌入加载中：${rel}`}
+    </span>
   );
 }
 
@@ -135,6 +189,7 @@ export function PreviewPane({
   onCreatePage,
   resolveImage,
   resolveDoc,
+  loadDoc,
   embedDepth = 0,
   className = "",
 }: PreviewPaneProps) {
@@ -145,46 +200,53 @@ export function PreviewPane({
   };
 
   const components = useMemo(() => {
+    /** 嵌入块（同步：文档已在缓存里）。 */
+    const renderEmbedded = (doc: { rel: string; text: string }) => (
+      <div className="my-2 rounded-lg border border-line-soft bg-subtle p-2.5">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="ui-micro truncate text-muted">嵌入：{doc.rel}</span>
+          <button
+            type="button"
+            aria-label={`打开嵌入页面 ${doc.rel}`}
+            className="ui-link shrink-0"
+            onClick={() => onOpenLink?.(doc.rel)}
+          >
+            打开
+          </button>
+        </div>
+        <PreviewPane
+          rel={doc.rel}
+          text={doc.text}
+          index={index}
+          resolve={resolve}
+          onOpenLink={onOpenLink}
+          onCreatePage={onCreatePage}
+          resolveImage={resolveImage}
+          resolveDoc={resolveDoc}
+          loadDoc={loadDoc}
+          embedDepth={embedDepth + 1}
+        />
+      </div>
+    );
+
     const embed = (target: string, display: string) => {
       const { rel: targetRel } = resolvedOf(target);
-      const doc = targetRel && resolveDoc ? resolveDoc(targetRel) : null;
-      if (!doc || embedDepth >= 1) {
-        return (
-          <WikiChip
-            label={`嵌入：${display}`}
-            resolved={Boolean(targetRel)}
-            ambiguous={false}
-            title={targetRel ? "嵌入层级已达上限，点击打开原页" : "目标页面不存在"}
-            onClick={() => (targetRel ? onOpenLink?.(targetRel) : onCreatePage?.(target))}
-          />
-        );
-      }
-      return (
-        <div className="my-2 rounded-lg border border-line-soft bg-subtle p-2.5">
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <span className="ui-micro truncate text-muted">嵌入：{doc.rel}</span>
-            <button
-              type="button"
-              aria-label={`打开嵌入页面 ${doc.rel}`}
-              className="ui-link shrink-0"
-              onClick={() => onOpenLink?.(doc.rel)}
-            >
-              打开
-            </button>
-          </div>
-          <PreviewPane
-            rel={doc.rel}
-            text={doc.text}
-            index={index}
-            resolve={resolve}
-            onOpenLink={onOpenLink}
-            onCreatePage={onCreatePage}
-            resolveImage={resolveImage}
-            resolveDoc={resolveDoc}
-            embedDepth={embedDepth + 1}
-          />
-        </div>
+      const chip = (
+        <WikiChip
+          label={`嵌入：${display}`}
+          resolved={Boolean(targetRel)}
+          ambiguous={false}
+          title={targetRel ? "嵌入层级已达上限，点击打开原页" : "目标页面不存在"}
+          onClick={() => (targetRel ? onOpenLink?.(targetRel) : onCreatePage?.(target))}
+        />
       );
+      // 限深 1：内层不再继续嵌入，避免 A→B→A 这种环
+      if (embedDepth >= 1 || !targetRel) return chip;
+      // 先走同步缓存（已打开的文档），没有再异步读一次
+      const cached = resolveDoc?.(targetRel) ?? null;
+      if (cached) return renderEmbedded(cached);
+      if (loadDoc) return <AsyncNoteEmbed rel={targetRel} load={loadDoc} render={renderEmbedded} />;
+      return chip;
     };
 
     return {
@@ -195,11 +257,14 @@ export function PreviewPane({
             typeof children === "string" ? children : String(children ?? wiki.target);
           if (wiki.kind === "embed") return embed(wiki.target, display);
           const { rel: targetRel, ambiguous } = resolvedOf(wiki.target);
+          // 锚点未命中：文件解析成功、但 `#标题` 找不到 → 黄色提示（不是断链）
+          const anchorMiss = anchorStatusOf(index, targetRel, title) === "miss";
           return (
             <WikiChip
               label={display}
               resolved={Boolean(targetRel)}
               ambiguous={ambiguous}
+              anchorMiss={anchorMiss}
               title={targetRel ? (title ? `跳到「${title}」` : `打开 ${targetRel}`) : `创建「${wiki.target}」`}
               onClick={() =>
                 targetRel ? onOpenLink?.(targetRel) : onCreatePage?.(wiki.target)
@@ -323,6 +388,7 @@ export function PreviewPane({
     onCreatePage,
     resolveImage,
     resolveDoc,
+    loadDoc,
     embedDepth,
   ]);
 
