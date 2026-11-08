@@ -14,6 +14,7 @@ import {
   indexToCatalogEntry,
   type MarketClientDeps,
 } from "../../lib/plugins/marketClient.js";
+import { widgetsAvailable } from "../../lib/widgets/store.js";
 import { MarkdownMessage } from "../MarkdownMessage.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { XIcon } from "../icons.js";
@@ -37,8 +38,13 @@ export interface MarketDetailDialogProps {
   hostVersion: string;
   installed?: { id: string; version: string }[];
   deps?: MarketClientDeps;
+  /**
+   * 桌面桥是否可用（d.109：界面插件只能由桌面版安装）。
+   * 测试可注入；缺省读 `widgetsAvailable()`。
+   */
+  widgetInstallAvailable?: boolean;
   onClose: () => void;
-  /** 交给页面：下载清单并打开既有安装预览（本组件不直接安装）。 */
+  /** 交给页面：下载清单并打开既有安装预览，或下载界面插件包交给桌面桥（本组件不直接安装）。 */
   onInstall: (entry: PluginCatalogEntry, version: MarketVersion) => void | Promise<void>;
   /** 测试注入：详情文档加载（缺省 `fetchMarketDetail`）。 */
   loadDetail?: (id: string, version: string, deps?: MarketClientDeps) => Promise<string | null>;
@@ -72,12 +78,18 @@ function sortedVersions(plugin: MarketPlugin): MarketVersion[] {
 export function marketInstallBlockedReason(
   version: MarketVersion,
   hostVersion: string,
+  options: { widgetInstallAvailable?: boolean } = {},
 ): string | null {
   if (version.status === "deleted") return "该版本已删除，不可安装";
   if (!isVersionCompatible(version, hostVersion)) {
     return `需要和鸣 ${version.engines.heming} 或更高（当前 ${hostVersion}）`;
   }
-  if (version.distribution === "bundle") return "界面插件请到「桌面小组件」安装";
+  // d.109：界面插件（bundle）也能在市场里直接装——但必须走桌面桥（主进程解包 + 验签），
+  // 浏览器/无桥环境只能给出明确原因。桥是否可用可注入，便于测试。
+  if (version.distribution === "bundle") {
+    const available = options.widgetInstallAvailable ?? widgetsAvailable();
+    return available ? null : "仅桌面版可安装界面插件";
+  }
   return null;
 }
 
@@ -86,6 +98,7 @@ export function MarketDetailDialog({
   hostVersion,
   installed = [],
   deps,
+  widgetInstallAvailable,
   onClose,
   onInstall,
   loadDetail = fetchMarketDetail,
@@ -93,6 +106,11 @@ export function MarketDetailDialog({
 }: MarketDetailDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalA11y(dialogRef, onClose, { active: true });
+  // 只判一次（渲染内不读 window 的副作用）：无桥时界面插件版本一律显示不可安装原因
+  const widgetAvailable = useMemo(
+    () => widgetInstallAvailable ?? widgetsAvailable(),
+    [widgetInstallAvailable],
+  );
 
   const fetchImpl = deps?.fetchImpl;
   const baseUrl = deps?.baseUrl;
@@ -165,7 +183,7 @@ export function MarketDetailDialog({
   const retry = () => setRetryTick((n) => n + 1);
 
   const installVersion = async (target: MarketVersion) => {
-    if (marketInstallBlockedReason(target, hostVersion)) return;
+    if (marketInstallBlockedReason(target, hostVersion, { widgetInstallAvailable: widgetAvailable })) return;
     setSelectedVersion(target.version);
     setInstalling(true);
     setInstallError(null);
@@ -339,7 +357,9 @@ export function MarketDetailDialog({
             <h3 className="ui-body-sm font-bold">版本历史</h3>
             <ul className="mt-1 divide-y divide-line-soft">
               {versions.map((item) => {
-                const reason = marketInstallBlockedReason(item, hostVersion);
+                const reason = marketInstallBlockedReason(item, hostVersion, {
+                  widgetInstallAvailable: widgetAvailable,
+                });
                 const current = installedVersion === item.version;
                 const active = item.version === version?.version;
                 return (

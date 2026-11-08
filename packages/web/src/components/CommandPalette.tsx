@@ -16,6 +16,8 @@ import { effectiveModuleIds, useModuleStore } from "../lib/modules/store.js";
 import { MODULE_IDS } from "../lib/modules/registry.js";
 import { filterPalettePages } from "../lib/modules/nav.js";
 import { skillPool } from "../lib/skills/index.js";
+import { refreshWidgets, useWidgetsStore, widgetsAvailable } from "../lib/widgets/store.js";
+import { widgetCommands } from "../lib/widgets/commands.js";
 
 import { loadRecent, recordRecent, type RecentEntry } from "../lib/palette/recent.js";
 import {
@@ -138,8 +140,22 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   // 本机三组（任务/记忆/插件）：打开面板时读一次内存快照，之后的检索全在内存里做。
   // 只读本机、不发请求、不写日志（隐私边界见 lib/palette/local.ts 顶部）。
   const [local] = useState<LocalSnapshot>(() => readLocalSnapshot());
-  /** 插件命令：每次打开面板现读 store —— 停用插件后命令自然消失（不缓存）。 */
-  const [commands] = useState(() => pluginStore.commands());
+  /**
+   * 插件命令：声明式插件（每次打开面板现读 store，停用后自然消失）+ 已装界面插件
+   * （d.109：主进程注册表经 `widgets:list()` 同步到 zustand，本文件只做投影，不执行插件代码）。
+   *
+   * 浏览器端没有桌面桥 → `widgetsAvailable()` 为 false，列表恒为空；只是少一组命令，不报错。
+   */
+  const widgetRecords = useWidgetsStore((s) => s.records);
+  const commands = useMemo(
+    () => [...pluginStore.commands(), ...widgetCommands(widgetRecords)],
+    [widgetRecords],
+  );
+  useEffect(() => {
+    if (!widgetsAvailable()) return;
+    // 面板可能在插件区之外打开：主动拉一次注册表，失败只影响「界面插件命令」这一组
+    void refreshWidgets();
+  }, []);
 
   const groups = useMemo<PaletteGroup[]>(
     () =>

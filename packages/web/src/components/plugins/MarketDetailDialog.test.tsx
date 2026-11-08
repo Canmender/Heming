@@ -41,12 +41,37 @@ const PLUGIN: MarketPlugin = {
     version({
       version: "1.2.0",
       distribution: "bundle",
+      // 与 2.0.0 一样要求新宿主：默认在 d.105 下不会被 pickInstallVersion 选中，
+      // 本文件的「声明式三块」用例仍以 1.0.0 为默认版本（bundle 专项用例自己抬 hostVersion）。
+      engines: { heming: "d.200" },
       package: { sha256: PKG, size: 1234 },
     }),
   ],
 };
 
 function manifestFor(entry: PluginCatalogEntry): string {
+  if (entry.distribution === "bundle" && entry.package) {
+    // d.109：bundle 清单走 v4 形状（桌面小部件），详情页只用来算「贡献」块
+    return JSON.stringify({
+      schemaVersion: 4,
+      id: entry.id,
+      name: "报告工具箱",
+      version: entry.version,
+      description: "周报与月报",
+      author: "ACME",
+      distribution: "bundle",
+      permissions: { network: [], tools: "none", files: [], events: [], graphics: [], eval: false },
+      contributions: {
+        desktopWidgets: [
+          { id: "report", name: "报告", entry: "files/index.html", width: 300, height: 200 },
+        ],
+        commands: [],
+        skills: [],
+        mcpServers: [],
+        toolPacks: [],
+      },
+    });
+  }
   return JSON.stringify({
     schemaVersion: 3,
     id: entry.id,
@@ -117,15 +142,48 @@ describe("MarketDetailDialog · 三块", () => {
     expect(await within(dialog).findByText("版本说明")).toBeInTheDocument();
   });
 
-  it("不兼容/已删除/界面插件版本不可安装并写明原因；弃用版本给迁移说明", async () => {
+  it("不兼容/已删除版本不可安装并写明原因；弃用版本给迁移说明", async () => {
     renderDialog();
     const history = screen.getByRole("region", { name: "版本历史" });
     expect(history).toHaveTextContent("需要和鸣 d.200 或更高（当前 d.105）");
     expect(history).toHaveTextContent("该版本已删除，不可安装");
-    expect(history).toHaveTextContent("界面插件请到「桌面小组件」安装");
     expect(screen.getAllByRole("button", { name: "不可安装" })).toHaveLength(3);
     fireEvent.click(within(history).getByRole("button", { name: "v0.9.0" }));
     expect(history).toHaveTextContent("请升级到 1.0.0");
+  });
+
+  it("无桌面桥时 bundle 版本禁用并写明「仅桌面版可安装界面插件」", () => {
+    const bridgePlugin: MarketPlugin = {
+      ...PLUGIN,
+      versions: [
+        version({ version: "1.0.0" }),
+        version({ version: "1.2.0", distribution: "bundle", package: { sha256: PKG, size: 1234 } }),
+      ],
+    };
+    renderDialog({ plugin: bridgePlugin, widgetInstallAvailable: false });
+    const history = screen.getByRole("region", { name: "版本历史" });
+    expect(history).toHaveTextContent("仅桌面版可安装界面插件");
+    expect(screen.getAllByRole("button", { name: "不可安装" })).toHaveLength(1);
+  });
+
+  it("桌面桥可用时 bundle 版本可安装，点击把 bundle 条目交给页面（d.109）", async () => {
+    const { onInstall } = renderDialog({ hostVersion: "d.300", widgetInstallAvailable: true });
+    const history = screen.getByRole("region", { name: "版本历史" });
+    expect(history).not.toHaveTextContent("仅桌面版可安装界面插件");
+    // v1.2.0 是 bundle 版本：没有「不可安装」原因，按钮可点
+    const row = within(history).getByText("v1.2.0").closest("li") as HTMLElement;
+    const button = within(row).getByRole("button", { name: "更新到此版本" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(onInstall).toHaveBeenCalledTimes(1));
+    const call = onInstall.mock.calls[0] as unknown as [PluginCatalogEntry, MarketVersion];
+    expect(call[0]).toMatchObject({
+      id: "acme.report-kit",
+      version: "1.2.0",
+      distribution: "bundle",
+      package: { sha256: PKG, size: 1234 },
+    });
+    expect(call[1].distribution).toBe("bundle");
   });
 
   it("安装按钮把所选版本的 PluginCatalogEntry 交给页面（复用既有安装预览）", async () => {

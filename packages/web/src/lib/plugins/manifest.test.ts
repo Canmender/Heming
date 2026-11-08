@@ -1113,4 +1113,36 @@ describe("parsePluginManifest · 命令 target 扩展（d.108）", () => {
       expect(failure(v5Command({ kind: "unit", unitId })), unitId).toContain("target.unitId");
     }
   });
+
+  it("bundle（v4 界面插件）例外：允许 settings / unit；声明式 v4 仍拒绝", () => {
+    const bundleCommand = (target: Record<string, unknown>) =>
+      bundle({
+        contributions: {
+          ...(bundle().contributions as Record<string, unknown>),
+          commands: [{ id: "go", title: "执行", target }],
+        },
+      });
+
+    const settings = parsePluginManifest(bundleCommand({ kind: "settings", card: "theme-mode" }));
+    expect(settings.contributions.commands[0].target).toEqual({ kind: "settings", card: "theme-mode" });
+    const unit = parsePluginManifest(bundleCommand({ kind: "unit", unitId: "heming.pet" }));
+    expect(unit.contributions.commands[0].target).toEqual({ kind: "unit", unitId: "heming.pet" });
+
+    // 设置卡目录在 web：未知卡片必须报字段路径（主进程只校验形状）
+    expect(failure(bundleCommand({ kind: "settings", card: "no-such-card" }))).toContain(
+      "contributions.commands[0].target.card",
+    );
+    // bundle 不贡献技能 → skill 目标没有可解析对象
+    expect(failure(bundleCommand({ kind: "skill", name: "周报" }))).toContain("command 目标技能不存在于本插件");
+
+    // 非 bundle 的 v4 声明式清单：仍按「旧版不支持新目标」拒绝
+    const v4Declarative = (target: Record<string, unknown>) =>
+      meta({
+        schemaVersion: 4,
+        contributions: { commands: [{ id: "go", title: "执行", target }] },
+      });
+    expect(failure(v4Declarative({ kind: "settings", card: "theme-mode" }))).toContain(
+      "schemaVersion 4 不支持 settings 目标",
+    );
+  });
 });

@@ -307,25 +307,27 @@ test("sha256：给了 expectedSha256 就必须一致，不一致拒绝且不返�
   assert.equal(right.ok, true, right.errors && right.errors.join("；"));
 });
 
-test("bundle 命令 target 收紧：只允许 page / plugin，skill / settings 拒绝并给字段路径", () => {
+test("bundle 命令 target：允许 page/plugin/settings/unit，拒绝 skill 并给字段路径（d.109）", () => {
   const command = (target) => ({ id: "open", title: "打开", target });
   const withCommands = (targets) =>
     baseManifest({ contributions: { ...baseManifest().contributions, commands: targets.map(command) } });
 
-  // 合法：页面目标与「插件自身」目标
-  const ok = validateBundleManifest(withCommands([{ kind: "page", page: "plugins" }, { kind: "plugin" }]));
+  // 合法：四种目标（settings 带 card、unit 带合法 unitId）
+  const ok = validateBundleManifest(
+    withCommands([
+      { kind: "page", page: "plugins" },
+      { kind: "plugin" },
+      { kind: "settings", card: "appearance" },
+      { kind: "unit", unitId: "heming.pet" },
+    ]),
+  );
   assert.equal(ok.ok, true, ok.errors.join("；"));
 
-  // bundle 不允许技能，所以 target.kind: "skill" 无意义 → 拒绝（带字段路径）
+  // bundle 不贡献技能 → skill 目标没有可解析对象，拒绝（带字段路径）
   const skill = validateBundleManifest(withCommands([{ kind: "skill", name: "x" }]));
   assert.equal(skill.ok, false);
-  assert.match(skill.errors.join("；"), /contributions\.commands\[0\]\.target\.kind 只允许 page \/ plugin/);
+  assert.match(skill.errors.join("；"), /target\.kind 只允许 page \/ plugin \/ settings \/ unit/);
   assert.match(skill.errors.join("；"), /收到 skill/);
-
-  // settings 等宿主页目标属阶段 C：本轮明确拒绝，避免声明了永不生效的「假命令」
-  const settings = validateBundleManifest(withCommands([{ kind: "settings" }]));
-  assert.equal(settings.ok, false);
-  assert.match(settings.errors.join("；"), /收到 settings/);
 
   const missingKind = validateBundleManifest(withCommands([{ page: "plugins" }]));
   assert.equal(missingKind.ok, false);
@@ -334,12 +336,40 @@ test("bundle 命令 target 收紧：只允许 page / plugin，skill / settings �
   const pageNoPath = validateBundleManifest(withCommands([{ kind: "page" }]));
   assert.match(pageNoPath.errors.join("；"), /target\.page 必须是非空文本/);
 
+  // settings 缺 card / unitId 非法 → 字段路径级错误
+  const settingsNoCard = validateBundleManifest(withCommands([{ kind: "settings" }]));
+  assert.match(settingsNoCard.errors.join("；"), /contributions\.commands\[0\]\.target\.card 必须是非空文本/);
+  const badUnit = validateBundleManifest(withCommands([{ kind: "unit", unitId: "Heming.Pet" }]));
+  assert.match(badUnit.errors.join("；"), /contributions\.commands\[0\]\.target\.unitId/);
+
+  // 命令 id / title 缺失 → 面板无法展示，直接拒绝
+  const noTitle = withCommands([]);
+  noTitle.contributions.commands = [{ id: "open", target: { kind: "plugin" } }];
+  assert.match(validateBundleManifest(noTitle).errors.join("；"), /commands\[0\]\.title 必须是非空文本/);
+
   const pluginWithName = validateBundleManifest(withCommands([{ kind: "plugin", name: "x" }]));
   assert.match(pluginWithName.errors.join("；"), /不应再带 name/);
 
-  // 合法命令 + 已签名 → 可安装
-  const pkg = readPackage(packPackage(packageEntries(signManifestForTest(withCommands([{ kind: "plugin" }])))));
+  // 合法命令 + 已签名 → 可安装，且 readPackage 返回规范化后的命令（供命令面板物化）
+  const manifest = withCommands([
+    { kind: "settings", card: "appearance" },
+    { kind: "unit", unitId: "heming.pet" },
+    { kind: "page", page: "plugins" },
+    { kind: "plugin" },
+  ]);
+  const pkg = readPackage(packPackage(packageEntries(signManifestForTest(manifest))));
   assert.equal(pkg.ok, true, pkg.errors && pkg.errors.join("；"));
+  assert.deepEqual(
+    pkg.commands.map((item) => item.target),
+    [
+      { kind: "settings", card: "appearance" },
+      { kind: "unit", unitId: "heming.pet" },
+      { kind: "page", page: "plugins" },
+      { kind: "plugin" },
+    ],
+  );
+  assert.equal(pkg.commands[0].id, "open");
+  assert.equal(pkg.commands[0].title, "打开");
 });
 
 test("纯声明式包不要求首方签名（bundle 专属要求；声明式走 web 侧 TOFU，不进这条链路）", () => {

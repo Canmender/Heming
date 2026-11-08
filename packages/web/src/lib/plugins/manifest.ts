@@ -1100,10 +1100,13 @@ const PluginManifestSchema = z
         });
       }
       seenCommands.add(command.id);
-      // d.108：settings / unit 是 v5 新增目标。旧版清单按既有口径明确拒绝
-      // （与「v3 拒绝 v4 新增字段」一致：不静默接受新字段，也不静默降级）。
+      // d.108：settings / unit 是 v5 新增目标。旧版**声明式**清单明确拒绝
+      // （与「v3 拒绝 v4 新增字段」一致：不静默接受新字段，也不静默降级）；
+      // d.109：`bundle`（界面插件）例外——它只能是 v4，但命令面板物化与声明式 v5
+      // 同口径，主进程安装器已按 page/plugin/settings/unit 收紧。
       if (
         manifest.schemaVersion < 5 &&
+        manifest.distribution !== "bundle" &&
         (command.target.kind === "settings" || command.target.kind === "unit")
       ) {
         ctx.addIssue({
@@ -1112,6 +1115,14 @@ const PluginManifestSchema = z
           message: `schemaVersion ${manifest.schemaVersion} 不支持 ${command.target.kind} 目标，请升级到 schemaVersion 5`,
         });
         return;
+      }
+      // bundle 的 settings 目标：设置卡目录在 web 侧，主进程只校验形状。
+      if (command.target.kind === "settings" && !settingsCardById(command.target.card)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "commands", index, "target", "card"],
+          message: `未知设置卡：${command.target.card}`,
+        });
       }
       if (command.target.kind === "page" && !PAGE_IDS.has(command.target.page)) {
         ctx.addIssue({

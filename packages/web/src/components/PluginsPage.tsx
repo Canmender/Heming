@@ -28,6 +28,7 @@ import { InstallDialog } from "./plugins/InstallDialog.js";
 import { PluginRepositoryPanel } from "./plugins/PluginRepositoryPanel.js";
 import { PluginRepositoryDialog } from "./plugins/PluginRepositoryDialog.js";
 import { downloadPluginManifest } from "../lib/plugins/catalogClient.js";
+import { installBundleFromMarket } from "../lib/widgets/marketInstall.js";
 import type { MarketClientDeps } from "../lib/plugins/marketClient.js";
 import { MarketView } from "./plugins/MarketView.js";
 import { PluginCard } from "./plugins/PluginCard.js";
@@ -313,6 +314,9 @@ export function PluginsPage({
    * 从仓库/市场载入清单（d.95/d.108）：下载原样 plugin.json（catalogClient 已校验
    * sha256），填进同一个安装弹窗——安装预览/信任确认/写入语义完全一致。
    * `source` 只影响装完回到哪个 Tab（市场装完回市场列表并标已安装）。
+   *
+   * d.109：界面插件（bundle）是另一条管线——下载 tgz（再验一次 sha256）交给主进程
+   * `widgets:install`（首方验签/解包/落盘），这里只负责结果三态与提示。
    */
   const loadFromRepository = async (entry: PluginCatalogEntry, source: "repo" | "market" = "repo") => {
     const key = `${entry.id}@${entry.version}`;
@@ -320,6 +324,22 @@ export function PluginsPage({
     setRepoLoadingKey(key);
     setMsg(null);
     try {
+      if (entry.distribution === "bundle") {
+        const outcome = await installBundleFromMarket(entry);
+        if (!outcome.ok) {
+          setMsg({ kind: "error", text: `安装失败：${outcome.error ?? "未知原因"}` });
+          return;
+        }
+        const name = outcome.record?.name ?? entry.name;
+        const version = outcome.record?.version ?? entry.version;
+        setTab("market");
+        bump();
+        setMsg({
+          kind: "ok",
+          text: `已${outcome.updated ? "更新" : "安装"}界面插件「${name}」${version}，可在「设置 → 外观 → 桌面小组件」启停`,
+        });
+        return;
+      }
       const manifest = await downloadPluginManifest(entry);
       setText(manifest);
       setRepoDialogOpen(false);

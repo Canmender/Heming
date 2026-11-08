@@ -50,14 +50,17 @@ const ALLOWED_EVENTS = new Set(["notify", "lifecycle"]);
 const ALLOWED_GRAPHICS = new Set(["webgl", "webgl2", "wasm"]);
 const ALLOWED_TOOLS = new Set(["none", "read", "write"]);
 /**
- * bundle 的命令只能指向「页面」或「插件自身」。
+ * bundle 命令允许的 target 集合（d.109，与声明式 v5 口径一致）。
  *
- * 界面插件不允许贡献 skills（见上），所以 `target.kind: "skill"` 对 bundle 无意义；
- * `settings` 等宿主页目标属阶段 C（规格 §7.3 / 可行性 §2.11），本轮一律拒绝，
- * 避免声明了却永远不生效的「假命令」。
+ * - `page` / `plugin`：既有；
+ * - `settings` / `unit`：d.108 新增、d.109 对 bundle 放开（规格 §7.3 修订）；
+ * - **仍不允许 `skill`**：界面插件不贡献技能，指向技能的命令没有可解析的目标。
  */
-const BUNDLE_COMMAND_TARGET_KINDS = new Set(["page", "plugin"]);
+const BUNDLE_COMMAND_TARGET_KINDS = new Set(["page", "plugin", "settings", "unit"]);
 const MAX_COMMANDS = 30;
+const MAX_COMMAND_ID = 64;
+const MAX_COMMAND_TITLE = 80;
+const MAX_COMMAND_KEYWORDS = 10;
 
 /** sha256 十六进制（整包字节的完整性指纹；发布侧算的也是这个）。 */
 function sha256Hex(bytes) {
@@ -229,19 +232,33 @@ function validateBundleManifest(raw, options = {}) {
         errors.push(`${at} 必须是对象`);
         return;
       }
+      // id / title 是命令面板的展示与去重依据，缺了这条命令等于不存在
+      if (typeof command.id !== "string" || !command.id.trim() || command.id.trim().length > MAX_COMMAND_ID) {
+        errors.push(`${at}.id 必须是非空文本（≤${MAX_COMMAND_ID}）`);
+      }
+      if (typeof command.title !== "string" || !command.title.trim() || command.title.trim().length > MAX_COMMAND_TITLE) {
+        errors.push(`${at}.title 必须是非空文本（≤${MAX_COMMAND_TITLE}）`);
+      }
       const target = command.target;
+      const allowedText = [...BUNDLE_COMMAND_TARGET_KINDS].join(" / ");
       if (!isPlainObject(target) || typeof target.kind !== "string" || !target.kind) {
-        errors.push(`${at}.target 必须是 { kind: "page" | "plugin" }`);
+        errors.push(`${at}.target 必须是 { kind: "${allowedText.split(" / ").join('" | "')}" }`);
         return;
       }
       if (!BUNDLE_COMMAND_TARGET_KINDS.has(target.kind)) {
         errors.push(
-          `${at}.target.kind 只允许 page / plugin（界面插件不允许引用 skill；settings 等阶段 C 再做），收到 ${target.kind}`,
+          `${at}.target.kind 只允许 ${allowedText}（界面插件不贡献技能，skill 目标没有可解析对象），收到 ${target.kind}`,
         );
         return;
       }
       if (target.kind === "page" && (typeof target.page !== "string" || !target.page.trim())) {
         errors.push(`${at}.target.page 必须是非空文本`);
+      }
+      if (target.kind === "settings" && (typeof target.card !== "string" || !target.card.trim())) {
+        errors.push(`${at}.target.card 必须是非空文本（设置卡 id）`);
+      }
+      if (target.kind === "unit" && (typeof target.unitId !== "string" || !ID_RE.test(target.unitId.trim()))) {
+        errors.push(`${at}.target.unitId 必须是小写字母/数字/点/下划线/连字符的能力单元 id`);
       }
       if (target.kind === "plugin" && target.name !== undefined) {
         errors.push(`${at}.target 为 plugin 时不应再带 name（bundle 命令只能指向自身）`);
@@ -279,6 +296,62 @@ function validateBundleManifest(raw, options = {}) {
     signed: signed === true,
     publisherId: isPlainObject(publisher) && typeof publisher.id === "string" ? publisher.id.trim() : null,
   };
+}
+
+/**
+ * 从清单里提取「命令面板可物化」的 bundle 命令（d.109）。
+ *
+ * 纯函数、失败即丢：安装时清单已过 `validateBundleManifest`，但这里仍逐项收紧
+ * （长度/类型/目标字段），因为它也会被 `plugin-store.init()` 用来回填旧安装记录——
+ * 磁盘上的 `plugin.json` 可能被外部改过，不能假设一定合法。
+ *
+ * @param {unknown} manifest 解析后的 `plugin.json`
+ * @returns {Array<{id: string, title: string, description: string, keywords: string[], target: object}>}
+ */
+function normalizeBundleCommands(manifest) {
+  const contributions = isPlainObject(manifest) && isPlainObject(manifest.contributions)
+    ? manifest.contributions
+    : {};
+  const commands = Array.isArray(contributions.commands) ? contributions.commands : [];
+  const out = [];
+  for (const command of commands) {
+    if (!isPlainObject(command)) continue;
+    if (typeof command.id !== "string" || !command.id.trim()) continue;
+    if (typeof command.title !== "string" || !command.title.trim()) continue;
+    const targetRaw = isPlainObject(command.target) ? command.target : null;
+    if (!targetRaw || typeof targetRaw.kind !== "string" || !BUNDLE_COMMAND_TARGET_KINDS.has(targetRaw.kind)) {
+      continue;
+    }
+    let target;
+    if (targetRaw.kind === "page") {
+      if (typeof targetRaw.page !== "string" || !targetRaw.page.trim()) continue;
+      target = { kind: "page", page: targetRaw.page.trim().slice(0, 64) };
+    } else if (targetRaw.kind === "settings") {
+      if (typeof targetRaw.card !== "string" || !targetRaw.card.trim()) continue;
+      target = { kind: "settings", card: targetRaw.card.trim().slice(0, 64) };
+    } else if (targetRaw.kind === "unit") {
+      const unitId = typeof targetRaw.unitId === "string" ? targetRaw.unitId.trim() : "";
+      if (!ID_RE.test(unitId)) continue;
+      target = { kind: "unit", unitId };
+    } else {
+      target = { kind: "plugin" };
+    }
+    const keywords = Array.isArray(command.keywords)
+      ? command.keywords
+          .filter((item) => typeof item === "string" && item.trim())
+          .map((item) => item.trim().slice(0, 32))
+          .slice(0, MAX_COMMAND_KEYWORDS)
+      : [];
+    out.push({
+      id: command.id.trim().slice(0, MAX_COMMAND_ID),
+      title: command.title.trim().slice(0, MAX_COMMAND_TITLE),
+      description: typeof command.description === "string" ? command.description.trim().slice(0, MAX_DESCRIPTION) : "",
+      keywords,
+      target,
+    });
+    if (out.length >= MAX_COMMANDS) break;
+  }
+  return out;
 }
 
 /**
@@ -363,6 +436,8 @@ function readPackage(bytes, options = {}) {
     signed: manifestCheck.signed === true,
     publisherId: manifestCheck.publisherId,
     signatureKeyId: signatureCheck.keyId,
+    // 命令面板物化用（d.109）：已按 bundle 允许的 target 收紧，web 侧直接消费
+    commands: normalizeBundleCommands(manifest),
     files: entries.map((entry) => ({ path: entry.path, data: entry.data })),
     totalBytes: entries.reduce((sum, entry) => sum + entry.data.length, 0),
   };
@@ -387,6 +462,7 @@ module.exports = {
   toBuffer,
   validateLayout,
   validateBundleManifest,
+  normalizeBundleCommands,
   readPackage,
   packPackage,
 };

@@ -134,6 +134,39 @@ test("install：包落盘到 <id>/<version>/，切 current 指针，list 给出 
   assert.equal(store.currentDir("heming.pet"), versionDir);
 });
 
+test("命令物化：安装记录带 commands；启动时从 plugin.json 回填旧记录（d.109）", () => {
+  const store = makeStore();
+  const commands = [
+    {
+      id: "open-plugins",
+      title: "打开插件区",
+      description: "去插件列表",
+      keywords: ["插件"],
+      target: { kind: "page", page: "plugins" },
+    },
+    { id: "open-pet", title: "打开桌宠详情", target: { kind: "plugin" } },
+  ];
+  const bytes = packageBytes({
+    contributions: { desktopWidgets: manifest().contributions.desktopWidgets, commands },
+  });
+  const installed = store.install({ bytes });
+  assert.equal(installed.ok, true, installed.error);
+  assert.deepEqual(
+    store.list()[0].commands.map((item) => item.target),
+    [{ kind: "page", page: "plugins" }, { kind: "plugin" }],
+  );
+
+  // 旧安装记录（注册表里没有 commands）→ 重新 init 时从当前版本 plugin.json 回填
+  const registryPath = path.join(store.dir, "installed.json");
+  const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+  delete registry.plugins[0].commands;
+  fs.writeFileSync(registryPath, JSON.stringify(registry));
+  const reopened = createPluginStore({ dir: store.dir, now: () => Date.parse("2026-11-07T00:00:00Z") });
+  reopened.init();
+  assert.equal(reopened.list()[0].commands.length, 2);
+  assert.deepEqual(reopened.list()[0].commands[0].keywords, ["插件"]);
+});
+
 test("install：坏包/指纹不符都拒绝，且不产生半装状态", () => {
   const store = makeStore();
   const bad = store.install({ bytes: Buffer.from("nope") });

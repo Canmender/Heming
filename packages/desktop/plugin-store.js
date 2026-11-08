@@ -2,7 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { readPackage } = require("./plugin-package");
+const { readPackage, normalizeBundleCommands } = require("./plugin-package");
 
 /**
  * 界面插件的本机注册表（主进程持有，规格 §3.1）。
@@ -144,7 +144,11 @@ function createPluginStore(options = {}) {
         plugin.error = "插件文件缺失，请重新安装";
         plugin.enabled = false;
         log(`[widgets] ${plugin.id} 文件缺失（${manifestPath}），已停用`);
+        continue;
       }
+      // d.109：命令面板物化读的是注册表记录；旧安装记录没有 `commands`，
+      // 从当前版本的 plugin.json 回填一次（纯函数会逐项收紧，磁盘被改也不怕）。
+      plugin.commands = normalizeBundleCommands(readJson(manifestPath));
     }
     save();
     return api;
@@ -163,6 +167,8 @@ function createPluginStore(options = {}) {
       installedAt: plugin.installedAt,
       updatedAt: plugin.updatedAt,
       signed: plugin.signed === true,
+      // d.109：命令面板用（主窗 `widgets:list` 直接读；停用/损坏记录也带上，由 web 侧决定是否展示）
+      commands: Array.isArray(plugin.commands) ? plugin.commands : [],
       ...(plugin.error ? { error: plugin.error } : {}),
     };
   }
@@ -242,6 +248,8 @@ function createPluginStore(options = {}) {
       // 包是否带 ed25519 签名；d.105 起 readPackage 已强制首方验签，能走到这里即已通过
       signed: parsed.signed === true,
       publisherId: parsed.publisherId,
+      // d.109：命令面板物化（target 已由 readPackage 按 bundle 允许集合收紧）
+      commands: Array.isArray(parsed.commands) ? parsed.commands : [],
       migratedAt: existing ? existing.migratedAt || null : null,
     };
     if (existing) Object.assign(existing, record);

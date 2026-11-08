@@ -91,6 +91,27 @@ export interface WidgetState {
   clickThrough: boolean;
 }
 
+/** 界面插件命令的目标（d.109；与声明式 v5 同四类，bundle 不允许 `skill`）。 */
+export type WidgetCommandTarget =
+  | { kind: "page"; page: string }
+  | { kind: "plugin" }
+  | { kind: "settings"; card: string }
+  | { kind: "unit"; unitId: string };
+
+/**
+ * 界面插件命令（`contributions.commands[]` 的物化视图，d.109）。
+ *
+ * 主进程在安装/启动自检时按 bundle 允许的 target 集合收紧后写进注册表；
+ * web 侧命令面板据此生成「插件命令」条目（不执行插件代码，只做导航）。
+ */
+export interface WidgetCommand {
+  id: string;
+  title: string;
+  description: string;
+  keywords: string[];
+  target: WidgetCommandTarget;
+}
+
 /**
  * 已安装的界面插件记录（`widgets:list` 的一项）。
  *
@@ -107,6 +128,8 @@ export interface WidgetRecord {
   settings: Record<string, unknown>;
   /** ISO 时间。 */
   installedAt: string;
+  /** 清单里的命令（d.109；旧安装记录缺省 `[]`，主进程启动时会回填）。 */
+  commands?: WidgetCommand[];
   error?: string;
 }
 
