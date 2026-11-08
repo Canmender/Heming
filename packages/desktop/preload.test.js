@@ -380,7 +380,7 @@ test("__heming_notify.onOpen 收到非函数回调时安全忽略", () => {
   assert.equal((listeners.get("notify:open") || new Set()).size, 0, "非函数回调不应注册监听");
 });
 
-// ── 界面插件桥（d.97：桌宠拆成插件后，主窗只剩安装/管理面）──
+// ── 界面插件桥（d.98：桌宠拆成插件后，主窗只剩安装/管理面）──
 test("主窗暴露 __heming_widgets，且只调用 widgets: 前缀通道", async () => {
   const sent = [];
   const invoked = [];

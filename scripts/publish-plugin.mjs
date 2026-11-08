@@ -208,6 +208,24 @@ async function pushToRepo(apiBase, result) {
       return { error: `发布失败：${reason}` };
     }
     const body = await response.json();
+    // 界面插件：清单发布成功后再发 package.tgz（服务端要求同 id/版本的清单已存在）
+    if (result.bundle) {
+      const packageResponse = await fetch(`${url}/package`, {
+        method: "PUT",
+        headers: { "content-type": "application/gzip", "x-publish-key": key },
+        body: result.bundle.bytes,
+      });
+      if (!packageResponse.ok) {
+        let reason = `HTTP ${packageResponse.status}`;
+        try {
+          const packageBody = await packageResponse.json();
+          if (packageBody && typeof packageBody.error === "string") reason = `${reason} ${packageBody.error}`;
+        } catch {
+          /* 非 JSON 错误体：保留状态码 */
+        }
+        return { error: `清单已发布，但插件包发布失败：${reason}` };
+      }
+    }
     return { target: url, created: Boolean(body?.created) };
   } catch (err) {
     return { error: `请求失败：${err instanceof Error ? err.message : String(err)}` };

@@ -14,7 +14,7 @@ import {
 import type { WidgetRecord, WidgetsBridge } from "../../types/widgets.js";
 
 /**
- * 桌宠迁移与一次性提示（d.97 §4.3）：
+ * 桌宠迁移与一次性提示（d.98 §4.3）：
  * - 只挑已知字段交给主进程（localStorage 里的任意内容不原样外传）；
  * - 老键（heming.pet.v1 / presence）保留不删；
  * - 「桌宠已改为插件」只提示一次，且只在桌面端 + 未安装 heming.pet 时提示。

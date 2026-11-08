@@ -36,7 +36,7 @@ import { NAV_HOTZONE_PX } from "./lib/navPrefs.js";
  * （改导出形态会波及全部引用与测试）。
  *
  * 为什么值得懒加载：设置区/任务区/信息中枢/记忆区这类重页面各自带着一坨只在
- * 本页用得到的依赖（设置区曾经牵着 242KB 的桌宠偏好块，d.97 拆插件后不再有这块）。
+ * 本页用得到的依赖（设置区曾经牵着 242KB 的桌宠偏好块，d.98 拆插件后不再有这块）。
  * 拆开后这些块只在第一次切到该页时下载，启动帧只付壳的成本。
  */
 const HomePage = lazy(() => import("./components/HomePage.js").then((m) => ({ default: m.HomePage })));
@@ -589,7 +589,7 @@ function AppShell({
     if (page !== currentPage) setPage(currentPage);
   }, [page, currentPage, setPage]);
 
-  // 界面插件（原桌宠，d.97）的「打开设置 / 气泡直达页面」出口：主进程只转发白名单页面。
+  // 界面插件（原桌宠，d.98）的「打开设置 / 气泡直达页面」出口：主进程只转发白名单页面。
   // 旧 preload 没有 onOpenPage 时自动跳过（页面跳转是便利功能，不是可用性前提）。
   useEffect(() => {
     const bridge = typeof window !== "undefined" ? window.__heming_widgets : undefined;
@@ -616,7 +616,7 @@ function AppShell({
     });
   }, []);
 
-  // 界面插件的对话上下文（d.97 §3.4 `chatConfig`）：widget 要一句话短回复时向主进程要，
+  // 界面插件的对话上下文（d.98 §3.4 `chatConfig`）：widget 要一句话短回复时向主进程要，
   // 主进程再向主窗要一次「可用智能体 + 绑定」。Key 不出主进程——这里只给智能体列表与提示词，
   // 网关地址/Key 由主进程补（用户供应商 Key 不经过这条通道）。
   // ★ `binding.agentId` 固定回 null：桌宠绑哪个智能体是**插件设置**（主进程持有），

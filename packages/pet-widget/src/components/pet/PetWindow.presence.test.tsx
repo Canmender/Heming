@@ -4,7 +4,7 @@
  * 只测「宿主事件 → 气泡/姿态/点击」这一层：Live2D 与对话 hook 都换成可控桩，
  * 不启动 pixi，也不碰网络。
  *
- * d.97 差异：事件与偏好都来自宿主 widget 桥（`window.__heming_widget`），
+ * d.98 差异：事件与偏好都来自宿主 widget 桥（`window.__heming_widget`），
  * 不再是 `__heming_pet` + localStorage。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";

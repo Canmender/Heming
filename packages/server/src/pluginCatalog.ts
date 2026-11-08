@@ -56,7 +56,7 @@ export interface PluginCatalog {
   /** 读取某个 id/版本的界面插件包（`package.tgz`）字节；纯声明式包返回 null。 */
   readPackage(id: string, version: string): PluginCatalogRead | null;
   /**
-   * 发布界面插件包（d.97）：原样落盘 `package.tgz`。
+   * 发布界面插件包（d.98）：原样落盘 `package.tgz`。
    *
    * 与清单分开两次发布（先清单、再包）：包必须能找到同 id/版本的清单，避免「有包没清单」的孤儿；
    * 不解析包内容——解包配额、清单结构、entry 存在性都由客户端安装时校验。
@@ -324,8 +324,9 @@ export function createPluginCatalog(opts: { dir: string }): PluginCatalog {
       const tmp = join(targetDir, `.plugin.json.tmp-${process.pid}-${Date.now()}`);
       writeFileSync(tmp, bytes);
       renameSync(tmp, targetFile);
-      const entry = entryOf(id, version, bytes, statSync(targetFile).mtimeMs, packageOf(id, version));
-      if (!entry) return "mismatch";
+      // 注意：这里**不**用 entryOf 判成败——界面插件的 package.tgz 是清单之后第二次 PUT 才到，
+      // 那一瞬间 entryOf 会因为「声明 bundle 却没有包」返回 null；清单本身是否合法已由
+      // manifestMatches（可解析 + id/version 与路径一致）判过，故只做落盘与指纹。
       return {
         id,
         version,

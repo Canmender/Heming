@@ -3,7 +3,7 @@ import { PALETTE_PAGES } from "../palette/pages.js";
 import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
 
 /**
- * 插件清单（`plugin.json`）的唯一解析入口（d.97 · 统一插件模型 v4）。
+ * 插件清单（`plugin.json`）的唯一解析入口（d.98 · 统一插件模型 v4）。
  *
  * 插件是纯声明式系统能力包：三类贡献面（技能 / 远程 MCP 服务 / 命令）统一收进
  * `contributions`，并显式声明 `permissions`（网络主机 / 工具风险上限 / 预留文件根）。
@@ -39,7 +39,7 @@ export const MAX_PLUGIN_PERMISSION_HOSTS = 20;
 /** 工具束上限（d.65 增补：第四类贡献面，只声明归属，不改执行）。 */
 export const MAX_PLUGIN_TOOL_PACKS = 10;
 export const MAX_TOOL_PACK_TOOLS = 50;
-/** 界面插件上限（d.97 P0：一个插件包本轮只允许 1 个桌面小组件）。 */
+/** 界面插件上限（d.98 P0：一个插件包本轮只允许 1 个桌面小组件）。 */
 export const MAX_PLUGIN_DESKTOP_WIDGETS = 1;
 /** 缩放档位上限（规格 §2.3：1–6 档）。 */
 export const MAX_DESKTOP_WIDGET_SCALES = 6;
@@ -335,7 +335,7 @@ const PermissionsSchema = z.object(
         .default([]),
     ),
     /**
-     * d.97 新增（v4）：界面插件可接收的事件类别。
+     * d.98 新增（v4）：界面插件可接收的事件类别。
      *
      * 用 `optional` 与 desktopWidgets 同理——v3 带这三个字段要能被识别并拒绝。
      * 归一化后未声明即为空数组（不接收任何事件）。
@@ -344,12 +344,12 @@ const PermissionsSchema = z.object(
       .array(z.enum(["notify"], { error: 'permissions.events 目前只支持 "notify"' }), typeParams("事件列表必须是数组"))
       .max(8, "事件最多 8 个")
       .optional(),
-    /** d.97 新增（v4）：渲染能力声明（决定 widget 的 CSP，如 wasm → 'wasm-unsafe-eval'）。 */
+    /** d.98 新增（v4）：渲染能力声明（决定 widget 的 CSP，如 wasm → 'wasm-unsafe-eval'）。 */
     graphics: z
       .array(z.enum(["webgl", "wasm"], { error: 'permissions.graphics 只支持 "webgl" / "wasm"' }), typeParams("渲染能力列表必须是数组"))
       .max(8, "渲染能力最多 8 个")
       .optional(),
-    /** d.97 新增（v4）：是否允许 `unsafe-eval`（pixi6 需要 true；只对声明了的第一方 widget 放开）。 */
+    /** d.98 新增（v4）：是否允许 `unsafe-eval`（pixi6 需要 true；只对声明了的第一方 widget 放开）。 */
     eval: z.boolean(typeParams("permissions.eval 必须是布尔值")).optional(),
   },
   typeParams("permissions 必须是 JSON 对象"),
@@ -385,7 +385,7 @@ const ToolPackSpecSchema = z.object(
   typeParams("工具束必须是 JSON 对象"),
 );
 
-/* ══════════════════ d.97 · 界面插件声明（规格 §2.3） ══════════════════ */
+/* ══════════════════ d.98 · 界面插件声明（规格 §2.3） ══════════════════ */
 
 const WIDGET_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const WIDGET_NAME_MAX = 32;
@@ -713,7 +713,7 @@ const ContributionsSchema = z.object(
       .max(MAX_PLUGIN_TOOL_PACKS, `单个插件最多 ${MAX_PLUGIN_TOOL_PACKS} 个工具束`)
       .default([]),
     /**
-     * 界面插件声明（d.97 / v4）。
+     * 界面插件声明（d.98 / v4）。
      *
      * 用 `optional` 而不是 `.default([])`：v3 清单里**写没写这个字段**本身要能被识别
      * （带新字段的 v3 必须明确拒绝，而不是被默认值抹平后静默通过）。
@@ -802,7 +802,7 @@ const PluginManifestSchema = z
         .max(64, "作者名最多 64 字")
         .default(""),
       /**
-       * d.97 新增（v4）：分发形态。
+       * d.98 新增（v4）：分发形态。
        *
        * `bundle` = 界面插件（带 files/** 可执行内容，走主进程安装）；
        * `manifest` = 纯声明式包（既有全部插件；缺省值，v3 等价）。
@@ -1095,11 +1095,11 @@ export interface PluginPermissions {
   tools: PluginToolRisk;
   /** 预留文件根（本轮只校验与展示，不执行）。 */
   files: string[];
-  /** d.97（v4）：界面插件可接收的事件类别；未声明为空数组（不接收任何事件）。 */
+  /** d.98（v4）：界面插件可接收的事件类别；未声明为空数组（不接收任何事件）。 */
   events: PluginWidgetEvent[];
-  /** d.97（v4）：渲染能力声明（webgl / wasm）；决定 widget 的 CSP。 */
+  /** d.98（v4）：渲染能力声明（webgl / wasm）；决定 widget 的 CSP。 */
   graphics: PluginGraphicsCapability[];
-  /** d.97（v4）：是否允许 `unsafe-eval`（只对第一方 widget 放开）。 */
+  /** d.98（v4）：是否允许 `unsafe-eval`（只对第一方 widget 放开）。 */
   eval: boolean;
 }
 
@@ -1114,7 +1114,7 @@ export type PluginGraphicsCapability = "webgl" | "wasm";
  * `toolPacks` 是 d.65 的**向后兼容增补**（schemaVersion 仍为 3）：老清单没有该字段
  * 照样合法；它只声明「哪些工具属于同一组」，不定义工具、不改变开关与 HITL。
  *
- * `desktopWidgets` 是 d.97（schemaVersion 4）的第五类贡献面：**界面插件**。
+ * `desktopWidgets` 是 d.98（schemaVersion 4）的第五类贡献面：**界面插件**。
  * web 侧只做清单校验与展示，安装/窗口/代码执行全部在主进程（见 `src/types/widgets.ts`）。
  */
 export interface PluginContributions {
@@ -1122,7 +1122,7 @@ export interface PluginContributions {
   mcpServers: PluginMcpServerSpec[];
   commands: PluginCommandSpec[];
   toolPacks: PluginToolPackSpec[];
-  /** d.97（v4）：界面插件声明；v3 及更旧清单恒为空数组。 */
+  /** d.98（v4）：界面插件声明；v3 及更旧清单恒为空数组。 */
   desktopWidgets: PluginDesktopWidgetSpec[];
   /**
    * 已废弃（d.90）：模型不再由插件声明，统一由 magpie 网关提供。
@@ -1161,7 +1161,7 @@ export interface PluginManifest {
   version: string;
   description: string;
   author: string;
-  /** d.97：分发形态。`bundle` = 界面插件（带可执行内容，由主进程安装）；缺省 `manifest`。 */
+  /** d.98：分发形态。`bundle` = 界面插件（带可执行内容，由主进程安装）；缺省 `manifest`。 */
   distribution: PluginDistribution;
   contributions: PluginContributions;
   permissions: PluginPermissions;
@@ -1303,7 +1303,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
           ...pack,
           tools: [...pack.tools],
         })),
-    // d.97：界面插件声明（v3 及更旧恒为空数组）；深拷贝避免调用方改到解析缓存。
+    // d.98：界面插件声明（v3 及更旧恒为空数组）；深拷贝避免调用方改到解析缓存。
     desktopWidgets: legacy ? [] : (manifest.contributions?.desktopWidgets ?? []).map(copyWidgetSpec),
     // 插件不再能声明模型预设（d.90：模型统一由 magpie 网关提供）；字段保留为空数组以兼容既有消费方。
     llmPresets: [],

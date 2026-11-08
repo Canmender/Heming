@@ -2,7 +2,7 @@ import { useNotificationStore, type AppNotification } from "../store/notificatio
 import { widgetsBridge, type WidgetNotifyEvent, type WidgetsBridge } from "../types/widgets.js";
 
 /**
- * 通知中心 → 界面插件的事件转发（d.97 · 规格 §4.2）。
+ * 通知中心 → 界面插件的事件转发（d.98 · 规格 §4.2）。
  *
  * 这是原桌宠「在场感」（`lib/petEvent.ts`）拆插件后的宿主侧替代：
  * 主窗只负责**订阅新通知 → 脱敏 → 经 `window.__heming_widgets.publish()` 交给主进程**；

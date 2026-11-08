@@ -1,7 +1,7 @@
 import { widgetsBridge, type WidgetRecord, type WidgetsBridge } from "../../types/widgets.js";
 
 /**
- * 桌宠「从本体改成插件」的迁移与一次性提示（d.97 · 规格 §4.3）。
+ * 桌宠「从本体改成插件」的迁移与一次性提示（d.98 · 规格 §4.3）。
  *
  * 两件事都只在本机做，不上云：
  * 1. **迁移**：首次安装 `heming.pet` 时把老版本主窗 localStorage 的偏好（开关/绑定/模型路径，

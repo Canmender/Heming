@@ -18,7 +18,7 @@ import { PluginInstallDialog } from "../PluginInstallDialog.js";
 import { ERROR_TEXT, HINT, Switch } from "./shared.js";
 
 /**
- * 插件区「桌面小组件」Tab（d.97 · 规格 §4.2）。
+ * 插件区「桌面小组件」Tab（d.98 · 规格 §4.2）。
  *
  * 界面插件（原桌宠是第一例）的宿主管理面：
  * - 列表：名称/版本/启用状态/窗口状态；损坏的记录显示 `error` 而不是静默消失；

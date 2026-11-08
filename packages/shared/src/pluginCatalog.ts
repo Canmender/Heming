@@ -32,12 +32,12 @@ export const PluginCatalogContributionsSchema = z.object({
   mcpServers: z.number().int().min(0).default(0),
   commands: z.number().int().min(0).default(0),
   toolPacks: z.number().int().min(0).default(0),
-  /** d.97：界面插件（desktopWidget）数量；纯声明式包恒为 0。 */
+  /** d.98：界面插件（desktopWidget）数量；纯声明式包恒为 0。 */
   desktopWidgets: z.number().int().min(0).default(0),
 });
 
 /**
- * 分发形态（d.97）：
+ * 分发形态（d.98）：
  * - `manifest`：只分发 `plugin.json` 本身（既有全部插件；缺省值，向后兼容）；
  * - `bundle`：界面插件，除清单外还分发 `package.tgz`（含 `files/**` 代码与资源）。
  */
@@ -64,9 +64,9 @@ export const PluginCatalogEntrySchema = z.object({
   size: z.number().int().min(0),
   permissions: PluginCatalogPermissionsSchema,
   contributions: PluginCatalogContributionsSchema,
-  /** d.97：缺省 `manifest`（老服务端/老目录不认识这个字段时按纯声明式处理）。 */
+  /** d.98：缺省 `manifest`（老服务端/老目录不认识这个字段时按纯声明式处理）。 */
   distribution: PluginCatalogDistributionSchema.default("manifest"),
-  /** d.97：`distribution: "bundle"` 时存在；客户端下载后先比 sha256 再解包。 */
+  /** d.98：`distribution: "bundle"` 时存在；客户端下载后先比 sha256 再解包。 */
   package: PluginCatalogPackageSchema.optional(),
 });
 

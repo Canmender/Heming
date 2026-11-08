@@ -2,9 +2,9 @@
 
 > 桌面上的 Live2D 化身：关掉主窗口它还在，点它就能说话，有消息它会提醒。
 >
-> **d.97 起桌宠不再内置在主程序里**：它是和鸣的第一个**界面插件**，从云端插件目录下载安装，
+> **d.98 起桌宠不再内置在主程序里**：它是和鸣的第一个**界面插件**，从云端插件目录下载安装，
 > 代码、Live2D 模型与 Cubism Core 全部随插件包走，主程序里没有 pet 入口、没有 pixi、没有 5MB 模型。
-> 设计契约见 [`superpowers/specs/2026-11-07-d94-pet-as-plugin.md`](superpowers/specs/2026-11-07-d94-pet-as-plugin.md)；
+> 设计契约见 [`superpowers/specs/2026-11-07-d98-pet-as-plugin.md`](superpowers/specs/2026-11-07-d98-pet-as-plugin.md)；
 > 插件通用规则见 [`PLUGINS.md`](PLUGINS.md) §10，插件包自身说明见 `packages/pet-widget/README.md`。
 
 本文面向两类读者：**使用者**（怎么装、怎么用、哪里调）与 **维护者**（改哪里、怎么打包、怎么排查）。

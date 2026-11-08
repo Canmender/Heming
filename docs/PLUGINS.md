@@ -2,7 +2,7 @@
 
 插件是**纯声明式能力包**：一个 `plugin.json` 声明「这个包带来哪些能力」，和鸣负责把它物化到现有系统里。插件不执行第三方代码，也不从网络下载可执行物——技能变成技能池里的技能，MCP 服务登记进接口区，命令出现在命令面板。
 
-> **唯一的例外是界面插件（§10，d.97）**：它带一个独立窗口的可执行渲染包，清单用 `schemaVersion: 4` + `distribution: "bundle"`，
+> **唯一的例外是界面插件（§10，d.98）**：它带一个独立窗口的可执行渲染包，清单用 `schemaVersion: 4` + `distribution: "bundle"`，
 > 只允许官方目录发布、用户在插件区二次确认后安装。第三方仍只能是纯声明式包。
 >
 > 版本口径：纯声明式清单 `schemaVersion: 3`（v1/v2 旧包归一化后可装）；d.88 短暂引入的 v4（模型预设）已在 d.90 收回——
@@ -214,7 +214,7 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugins/ --push h
 两种方式都会先做「能不能解析 / id 与版本是否合规 / schemaVersion 是否是整数 / 有没有名字」的基础校验，
 坏包不静默跳过（退出码非 0）。
 
-## 10. 界面插件（v4 · `distribution: "bundle"`，d.97）
+## 10. 界面插件（v4 · `distribution: "bundle"`，d.98）
 
 界面插件是**唯一带可执行内容**的插件：它提供一个独立窗口的渲染包（第一个也是当前唯一一个：桌宠 `heming.pet`，见 `docs/PET.md`）。
 因为「装插件 = 在本机运行代码」，它与纯声明式包走两套清单字段、两套安装链路，**只有官方目录发布的包才允许安装**（第三方仍只能是 §1–§8 的声明式包）。
@@ -260,7 +260,7 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugins/ --push h
 约束：
 
 - `distribution: "bundle"` 的包**只允许** `desktopWidgets`（可选 `commands`）；声明 `skills` / `mcpServers` / `toolPacks` 一律拒绝。
-- `desktopWidgets` 本轮 **≤1 个**，字段校验见 `docs/superpowers/specs/2026-11-07-d97-pet-as-plugin.md` §2.3。
+- `desktopWidgets` 本轮 **≤1 个**，字段校验见 `docs/superpowers/specs/2026-11-07-d98-pet-as-plugin.md` §2.3。
 - 字段类型只支持 `boolean` / `select` / `text` / `number` / `agent`；值由**主进程**持有（`userData/plugins/<id>/settings.json`），
   渲染层经 IPC 读写、插件窗口经 preload 读，**不写 localStorage**。
 

@@ -7,7 +7,7 @@ import type { WidgetInstallResult, WidgetRecord, WidgetsBridge } from "../types/
 import type { CatalogClientDeps } from "../lib/plugins/catalogClient.js";
 
 /**
- * 「安装桌面小组件」弹窗（d.97 §4.2）：
+ * 「安装桌面小组件」弹窗（d.98 §4.2）：
  * - 云端 bundle 与本地 .tgz 都必须**二次确认**，文案写明「包含可执行界面代码」「来源」；
  * - 云端下载后校验 sha256/大小，校验不过不装；
  * - 首次安装 heming.pet 成功后把旧 localStorage 偏好交给主进程做迁移。

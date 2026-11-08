@@ -3,7 +3,7 @@
 /**
  * 界面插件（desktopWidget）的规格归一化、入口判定与几何计算（纯函数，不 require electron）。
  *
- * 由 d.46 的 `pet-window.js` 泛化而来（d.97）：桌宠当时是"写死的一个窗口"，
+ * 由 d.46 的 `pet-window.js` 泛化而来（d.98）：桌宠当时是"写死的一个窗口"，
  * 现在是"清单声明的一类窗口"——尺寸、缩放档位、透明/置顶/穿透、位置边距全部来自
  * `plugin.json` 的 `contributions.desktopWidgets[0]`，本文件负责把那份 JSON 归一化成
  * 宿主敢直接用的 spec，并把 pet 时代的几何语义**逐条保留**：

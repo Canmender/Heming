@@ -2,7 +2,7 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
-## d.97.2.42.0（2026-11-08）— 桌宠拆成界面插件：从本体抽出，云端按需安装
+## d.98.2.42.0（2026-11-08）— 桌宠拆成界面插件：从本体抽出，云端按需安装
 
 用户指令：「和鸣的桌宠模块，把他拉出来做成一个插件，不再合并到本体程序」；分发口径：云端服务器下发、用户自行下载安装
 （另有并行会话在改服务端，本轮服务端改动克制、集中）。
@@ -59,6 +59,9 @@
 
 ### 五、分发链路
 
+- **与并行会话的云端插件仓库（d.95 / d.96）合并**：界面插件沿用同一份仓库与发布密钥——
+  清单走既有 `PUT /api/plugins/:id/:version`，插件包走新增的 `PUT …/version/package`（先清单后包、缺清单 409）；
+  `publish-plugin.mjs --push` 一次把清单 + `package.tgz` 都发上去；
 - shared 目录契约新增 `distribution: "manifest"|"bundle"`、`package{sha256,size}`、`contributions.desktopWidgets` 计数；
 - 服务端新增 `GET /api/plugins/:id/:version/package`（`application/gzip` + `X-Plugin-Package-Sha256`）
   与 `PUT` 同路由（发布密钥 `HEMING_PLUGIN_PUBLISH_KEY`，先清单后包、缺清单 409），
@@ -74,9 +77,9 @@
 - 验证：新增本机 Electron 冒烟（不入库，`.tmp`）：真实 Electron 里安装 `package.tgz` → 建 widget 窗口 →
   `widget://` 加载 → preload 桥/probe → 设置落盘 → notify/theme 事件 → 主题切换，`console` 错误 0；
   桌宠页在独立 origin 下 pixi/Live2D canvas 正常创建（456×636）。
-- 文档：`docs/PET.md` 重写为插件文档、`docs/PLUGINS.md` 新增 §9、`docs/INDEX.md` 增规格/计划条目、
-  `docs/HANDOFF.md` 补本轮条目；规格 `docs/superpowers/specs/2026-11-07-d97-pet-as-plugin.md`、
-  计划 `docs/superpowers/plans/2026-11-07-d97-pet-as-plugin.md`
+- 文档：`docs/PET.md` 重写为插件文档、`docs/PLUGINS.md` 新增 §10、`docs/INDEX.md` 增规格/计划条目、
+  `docs/HANDOFF.md` 补本轮条目；规格 `docs/superpowers/specs/2026-11-07-d98-pet-as-plugin.md`、
+  计划 `docs/superpowers/plans/2026-11-07-d98-pet-as-plugin.md`
 - **明确不做**：第三方界面插件（另立沙箱规格）、多 widget 并存、逐包 Ed25519 签名、宿主代发对话、远端 magpie 网关、
   插件独立 session partition；Electron 真机的跨 DPI 拖动/菜单点击/对话联调仍需人工过一遍。
 

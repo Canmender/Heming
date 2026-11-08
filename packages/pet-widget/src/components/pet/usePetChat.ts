@@ -7,7 +7,7 @@ import {
 import type { ChatConfig } from "../../lib/widgetBridge.js";
 
 /**
- * 桌宠的对话（d.46 起；d.97 拆插件后改走宿主给的 `chatConfig()`）。
+ * 桌宠的对话（d.46 起；d.98 拆插件后改走宿主给的 `chatConfig()`）。
  *
  * ★ 为什么不是复用宿主的 `lib/llmClient.ts`：
  * - 那个模块牵着宿主的 store / 脱敏 / 路由 / 工具链，import 过来会把宿主模块拖进

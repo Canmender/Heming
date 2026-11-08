@@ -284,7 +284,7 @@ contextBridge.exposeInMainWorld("__heming_notify", {
   },
 });
 
-// —— 界面插件桥（d.97：主窗专用，管理 widget 类插件的安装/启停/设置/动作）——
+// —— 界面插件桥（d.98：主窗专用，管理 widget 类插件的安装/启停/设置/动作）——
 // 桌宠已从本体拆出去，成为第一个「界面插件」（desktopWidget）。本桥只给**主窗**用，
 // 通道走 secureIpc + TRUSTED_CHANNELS（不是 widget 窗口那份最小桥）；
 // widget 窗口自己的桥在 widget-preload.js，只有窗口动作与环境，没有安装权和文件能力。

@@ -215,7 +215,7 @@ function cspHeadersFor(urlPath, opts = {}) {
   return { [header]: policy };
 }
 
-/* ─────────────────── 界面插件 `widget://` 的 CSP（d.97） ─────────────────── */
+/* ─────────────────── 界面插件 `widget://` 的 CSP（d.98） ─────────────────── */
 /*
  * 与主窗策略的三处**故意不同**（规格 §3.2）：
  * 1. `connect-src` **不继承** `https:` / `wss:` 通配：插件只能连本机回环 + 清单
@@ -375,7 +375,7 @@ module.exports = {
   wsOriginOf,
   buildCsp,
   cspHeadersFor,
-  // 界面插件 widget://（d.97）
+  // 界面插件 widget://（d.98）
   buildWidgetCsp,
   widgetCspHeaders,
   resolveWidgetRequest,

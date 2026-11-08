@@ -12,7 +12,7 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
-    "version": "d.97.2.42.0",
+    "version": "d.98.2.42.0",
     "date": "2026-11-08",
     "title": "桌宠改成插件了：在插件区下载安装，不再跟着主程序",
     "bullets": [

@@ -24,7 +24,7 @@ const http = require("node:http");
  * - `app://heming`：本体主窗；
  * - `http(s)://localhost|127.0.0.1[:port]`：开发态 vite 与本地调试。
  *
- * `widget://<pluginId>`（界面插件，d.97）**不在这条正则里**：插件是独立 origin，
+ * `widget://<pluginId>`（界面插件，d.98）**不在这条正则里**：插件是独立 origin，
  * 但"能不能用本机网关"取决于「这个插件是否已安装且启用」（见 `startMagpieProxy` 的
  * `isWidgetOriginAllowed` 注入）。默认不注入 = 一律拒绝（fail-closed），
  * 绝不放开 `widget://*` 通配。

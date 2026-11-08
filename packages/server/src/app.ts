@@ -214,11 +214,9 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     res.status(204).end();
-   * 界面插件包（d.94）：`package.tgz` 原样分发，客户端先比目录里的 sha256 再解包。
-   * 纯声明式插件没有这个文件，返回 404（客户端据此按「只装清单」处理）。
-   */
+  });
   /**
-   * 发布界面插件包（d.97）：`PUT /api/plugins/:id/:version/package`，body 是 package.tgz 原始字节。
+   * 发布界面插件包（d.98）：`PUT /api/plugins/:id/:version/package`，body 是 package.tgz 原始字节。
    *
    * 与清单分成两次 PUT（先清单、再包）：包必须能找到同 id/版本的清单，避免「有包没清单」的孤儿；
    * 服务端只校验 id/版本字符集、大小（≤40MB）与清单已存在，**不解析包内容**——
@@ -258,6 +256,10 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     },
   );
 
+  /**
+   * 界面插件包（d.98）：`package.tgz` 原样分发，客户端先比目录里的 sha256 再解包。
+   * 纯声明式插件没有这个文件，返回 404（客户端据此按「只装清单」处理）。
+   */
   app.get("/api/plugins/:id/:version/package", (req, res) => {
     const found = pluginCatalog.readPackage(req.params.id, req.params.version);
     if (!found) {

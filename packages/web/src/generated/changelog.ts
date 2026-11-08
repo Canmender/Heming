@@ -12,7 +12,7 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    "version": "d.97.2.42.0",
+    "version": "d.98.2.42.0",
     "date": "2026-11-08",
     "title": "桌宠拆成界面插件：从本体抽出，云端按需安装",
     "bullets": [
@@ -34,13 +34,14 @@ export const CHANGELOG: ChangelogEntry[] = [
       "设置区新增「外观 · 桌面小组件」：宿主通用动作（显示/隐藏、缩放、鼠标穿透、重置位置）+ 清单 `settings.fields`通用表单（boolean/select/text/number/agent）；",
       "新增 `lib/widgetEvents.ts`：通知中心 → 脱敏（kind/title≤60/summary≤60/route/at，不带正文/附件/会话名/发送人）→ 转发；",
       "老数据迁移（一次性、幂等）：`heming.pet.v1`（agentId/modelPath）+ `heming.pet.presence.v1`（intensity）→ settings；旧 `pet-state.json`（visible/scale/clickThrough/bounds）→ state；未安装时设置区/插件区一次性提示「桌宠已改为插件」。",
+      "**与并行会话的云端插件仓库（d.95 / d.96）合并**：界面插件沿用同一份仓库与发布密钥——清单走既有 `PUT /api/plugins/:id/:version`，插件包走新增的 `PUT …/version/package`（先清单后包、缺清单 409）；",
       "shared 目录契约新增 `distribution: \"manifest\"|\"bundle\"`、`package{sha256,size}`、`contributions.desktopWidgets` 计数；",
       "服务端新增 `GET /api/plugins/:id/:version/package`（`application/gzip` + `X-Plugin-Package-Sha256`）与 `PUT` 同路由（发布密钥 `HEMING_PLUGIN_PUBLISH_KEY`，先清单后包、缺清单 409），",
       "`scripts/publish-plugin.mjs` 支持目录型 bundle（`plugin.json` + `files/**`）→ 确定性 `package.tgz` + 目录布局；",
       "`packages/pet-widget`：`scripts/build-pet-widget.mjs`（vite → `dist/package/`）、`scripts/pack-plugin.mjs`（复用宿主 `plugin-package.js` 的打包函数）；产物 28 文件 / 5.74MB（gzip 4.57MB）。",
       "shared / server / web / desktop / pet-widget 全量 build + test + typecheck 全绿（desktop 34 套 `node --test`，新增 98 例；pet-widget 132 例；server 目录用例 10 例含 bundle 指纹与包下载）",
       "验证：新增本机 Electron 冒烟（不入库，`.tmp`）：真实 Electron 里安装 `package.tgz` → 建 widget 窗口 →`widget://` 加载 → preload 桥/probe → 设置落盘 → notify/theme 事件 → 主题切换，`console` 错误 0；",
-      "文档：`docs/PET.md` 重写为插件文档、`docs/PLUGINS.md` 新增 §9、`docs/INDEX.md` 增规格/计划条目、`docs/HANDOFF.md` 补本轮条目；规格 `docs/superpowers/specs/2026-11-07-d97-pet-as-plugin.md`、",
+      "文档：`docs/PET.md` 重写为插件文档、`docs/PLUGINS.md` 新增 §10、`docs/INDEX.md` 增规格/计划条目、`docs/HANDOFF.md` 补本轮条目；规格 `docs/superpowers/specs/2026-11-07-d98-pet-as-plugin.md`、",
       "**明确不做**：第三方界面插件（另立沙箱规格）、多 widget 并存、逐包 Ed25519 签名、宿主代发对话、远端 magpie 网关、插件独立 session partition；Electron 真机的跨 DPI 拖动/菜单点击/对话联调仍需人工过一遍。"
     ],
     "paragraphs": [
@@ -49,8 +50,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       "二、宿主运行时（`packages/desktop`）localStorage / 会话 / 记忆；反向推送 `widgets:open-page`、`widgets:chat-config-request`；",
       "三、桌宠迁到 `packages/pet-widget`（不再并入本体）",
       "四、主窗（`packages/web`）下次启动建窗即用，不会出现「应用是暗色、桌宠先亮一下」；",
-      "五、分发链路声明 bundle 却缺包的版本按坏包跳过；",
-      "六、门禁与文档桌宠页在独立 origin 下 pixi/Live2D canvas 正常创建（456×636）。计划 `docs/superpowers/plans/2026-11-07-d97-pet-as-plugin.md`"
+      "五、分发链路`publish-plugin.mjs --push` 一次把清单 + `package.tgz` 都发上去；声明 bundle 却缺包的版本按坏包跳过；",
+      "六、门禁与文档桌宠页在独立 origin 下 pixi/Live2D canvas 正常创建（456×636）。计划 `docs/superpowers/plans/2026-11-07-d98-pet-as-plugin.md`"
     ]
   },
   {

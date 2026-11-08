@@ -1,7 +1,7 @@
 import type { WidgetSettingField, WidgetSettingOption } from "../../types/widgets.js";
 
 /**
- * 清单 `settings.fields` 的通用表单取值/校验（d.97 · 规格 §2.3）。
+ * 清单 `settings.fields` 的通用表单取值/校验（d.98 · 规格 §2.3）。
  *
  * 值由**主进程**持有：这里只负责「按字段类型把 settings 里的值规成表单能用的形状」，
  * 以及「用户改了之后该写什么回 patch」。字段类型本轮固定 5 种：

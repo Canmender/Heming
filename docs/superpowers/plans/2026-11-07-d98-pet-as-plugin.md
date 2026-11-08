@@ -1,8 +1,8 @@
-# d.97 实施计划 · 桌宠拆成界面插件
+# d.98 实施计划 · 桌宠拆成界面插件
 
-> 规格：[`../specs/2026-11-07-d94-pet-as-plugin.md`](../specs/2026-11-07-d94-pet-as-plugin.md)
-> 分支：`feat/d94-pet-content`（从 `feat/d77-heming-core` 的 `93f9b65` 拉出，独立 worktree）
-> 版本：`d.97.2.42.0`
+> 规格：[`../specs/2026-11-07-d98-pet-as-plugin.md`](../specs/2026-11-07-d98-pet-as-plugin.md)
+> 分支：`feat/d98-pet-content`（rebase 到 `origin/main` d.96 之后的独立 worktree；d.97 被并行会话占用，本分支顺延 d.98）
+> 版本：`d.98.2.42.0`
 
 ## 依赖图
 

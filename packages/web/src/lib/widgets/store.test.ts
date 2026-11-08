@@ -19,7 +19,7 @@ import {
 } from "./store.js";
 
 /**
- * 界面插件主窗 store（d.97）：
+ * 界面插件主窗 store（d.98）：
  * - 所有数据经 `window.__heming_widgets` 从主进程读，本模块不碰 localStorage；
  * - 业务失败统一成中文 `{ ok:false, error }`，界面只展示；
  * - 单条记录的状态读失败不拖垮整个列表（坏记录要能显示出来而不是消失）。

@@ -17,7 +17,7 @@ import { useModalA11y } from "./useModalA11y.js";
 import { XIcon } from "./icons.js";
 
 /**
- * 「安装桌面小组件」弹窗（d.97 · 规格 §4.2 / §4.2.1）。
+ * 「安装桌面小组件」弹窗（d.98 · 规格 §4.2 / §4.2.1）。
  *
  * 两条安装路径都收在这里，因为它们的**信任模型一样**：
  * - 云端：云端插件目录里 `distribution: "bundle"` 的包 → 下载 `.tgz` → 校验 sha256/大小

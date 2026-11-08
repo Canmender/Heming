@@ -5,7 +5,7 @@ import { PetWindow } from "./components/pet/PetWindow.js";
 /**
  * 桌宠小组件的入口（插件包 `files/index.html`，由 `pnpm --filter @heming/pet-widget build` 产出）。
  *
- * d.97 之前它是本体 web 的第二个 Vite 入口（`pet.html`）；现在整个包跑在宿主的
+ * d.98 之前它是本体 web 的第二个 Vite 入口（`pet.html`）；现在整个包跑在宿主的
  * 独立 origin `widget://heming.pet/files/index.html` 下：
  * - **没有宿主 localStorage**（不同 origin），偏好/主题/事件全部经 `window.__heming_widget`；
  * - **没有 Node、没有密钥桥**（preload 是最小桥，见规格 §3.4 / §6）；

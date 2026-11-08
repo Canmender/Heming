@@ -8,7 +8,7 @@ import {
 } from "../../types/widgets.js";
 
 /**
- * 界面插件（桌面小组件）的主窗状态层（d.97 · 规格 §4.2）。
+ * 界面插件（桌面小组件）的主窗状态层（d.98 · 规格 §4.2）。
  *
  * 真源在主进程：`installed.json` / `state.json` / `settings.json` 全由宿主持有，
  * 本模块只做三件事：

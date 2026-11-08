@@ -1,5 +1,5 @@
 /**
- * 界面插件（desktopWidget）在主窗侧的类型契约（d.97）。
+ * 界面插件（desktopWidget）在主窗侧的类型契约（d.98）。
  *
  * 真源是规格 `docs/superpowers/specs/2026-11-07-d94-pet-as-plugin.md`：
  * - §2.3 `desktopWidget` 清单规格 → `WidgetSpec`

@@ -180,7 +180,7 @@ function makeHost(overrides = {}) {
     preloadPath: "/tmp/widget-preload.js",
     defaultTrayIconPath: "/tmp/tray.png",
     getMainWindow: overrides.getMainWindow || (() => null),
-    appVersion: () => "d.97.0",
+    appVersion: () => "d.98.0",
     getTheme: () => "light",
     getGateway: overrides.getGateway || (async () => ({ baseUrl: "http://127.0.0.1:4242/v1", key: "local" })),
     requestChatConfig: overrides.requestChatConfig,

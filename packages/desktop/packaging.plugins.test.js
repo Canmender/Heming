@@ -39,7 +39,7 @@ test("插件目录只存在于仓库根，且带发布说明（publish-plugin.mj
   assert.match(publish, /plugins-catalog/);
 });
 
-test("界面插件（desktopWidget bundle）同样不随安装包分发（d.97）", () => {
+test("界面插件（desktopWidget bundle）同样不随安装包分发（d.98）", () => {
   // 桌宠已从本体拆成 heming.pet 界面插件：入口/资源在独立 package.tgz 里，
   // 本体产物里不该再有 pet 资源，安装包也不该携带插件包或插件产物目录。
   for (const source of packagedSources()) {

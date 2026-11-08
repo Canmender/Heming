@@ -104,7 +104,7 @@ const TRUSTED_CHANNELS = [
   "magpie:start",
   "magpie:stop",
   "magpie:gateway",
-  // ── 界面插件（desktopWidget · d.97）──
+  // ── 界面插件（desktopWidget · d.98）──
   // 这些是**主窗专用**的安装/启停/设置通道（widget 窗口永远碰不到：它不是 mainWindow，
   // 且 widget 自己的桥在 widget-preload.js 里，只有窗口动作与环境）。
   "widgets:list",
@@ -362,7 +362,7 @@ function installAppProtocol() {
   });
 }
 
-/* ────────────────────── 界面插件（desktopWidget · d.97） ────────────────────── */
+/* ────────────────────── 界面插件（desktopWidget · d.98） ────────────────────── */
 
 /** 插件目录根：`<userData>/plugins`（主进程独有；渲染层不经 localStorage 决定窗口）。 */
 function pluginsRoot() {
@@ -726,7 +726,7 @@ if (!gotLock) {
   let magpieProxy = null;
 
   /**
-   * 界面插件 origin 能否用本机网关（d.97）。
+   * 界面插件 origin 能否用本机网关（d.98）。
    *
    * 只放行「已安装 + 已启用 + 文件完好 + 清单声明了渲染能力」的 widget：
    * 插件窗口要直连 magpie 反代（对话），但反代不能变成任意本机页面都能读的网关。
@@ -1079,7 +1079,7 @@ app.whenReady().then(() => {
     });
     createWindow();
 
-    // ── 界面插件宿主（d.97：桌宠已拆成 heming.pet 插件）──
+    // ── 界面插件宿主（d.98：桌宠已拆成 heming.pet 插件）──
     // 只给「已安装 + enabled + 文件完好」的插件建窗。老 pet-state.json 一次性种入
     // heming.pet 的 state.json（幂等；老文件保留一版不删，方便回滚）。
     widgetStore.seedLegacyState("heming.pet", readLegacyPetState());

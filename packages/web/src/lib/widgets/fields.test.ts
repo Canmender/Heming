@@ -9,7 +9,7 @@ import {
 } from "./fields.js";
 
 /**
- * 通用设置表单的取值口径（d.97）：
+ * 通用设置表单的取值口径（d.98）：
  * - 缺省值按类型给（boolean→false / number→0 / select→首项 / text→"" / agent→null）；
  * - settings 里的坏值逐字段回落默认（一个字段坏掉不清空整张表）；
  * - 写回前做类型级校验（select 必须在选项里、number 必须有限、text ≤500）。
