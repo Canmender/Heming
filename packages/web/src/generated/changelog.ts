@@ -12,6 +12,26 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.106.2.42.0",
+    "date": "2026-11-08",
+    "title": "修复模型页「用不了」：命令桥接线 + 浏览器降级",
+    "bullets": [
+      "重新接上命令桥：preload 暴露 `cli / cliStart / cliInput / cliKill / openTerminal / onCli`；主进程注册 `magpie:cli / cli:start / cli:input / cli:kill / terminal` 五个通道并登记 `TRUSTED_CHANNELS`；",
+      "新增源码级回归守卫 `magpie-wiring.test.js`：桥两端任何一端丢了桌面门禁立刻红；",
+      "真机验证：桥 keys 10 个、`cli([\"providers\"])` 返回真实来源、模型页显示来源与模型。",
+      "没有命令桥时只显示「模型 / 运行」两个分区并隐藏「来源」，避免一屏点不动的按钮；",
+      "顶部说明模型能力运行在用户电脑上、管理请用桌面端。",
+      "读取原版路由页实现：三列卡片 + 覆盖层曲线、`rtflow .7s` 虚线流动、`rtlive 1.8s` 呼吸点、`rtin .3~.4s ease-out` 入场、hover 200ms/边框 300ms；",
+      "d.104 的模型页与实时链路已按这些参数与结构实现，而不是另起观感。"
+    ],
+    "paragraphs": [
+      "用户反馈模型页不能用。真机（Electron dev + 本机服务 + CDP）复现：`window.__heming_magpie`只有 `status/start/stop/gateway` 四个方法——d.100 那一轮对主进程/preload 的命令桥改动没有落进提交，页面据此判定「没有命令桥」，所有管理操作都被禁用。",
+      "修复",
+      "浏览器端",
+      "复用 magpie 原版的经验"
+    ]
+  },
+  {
     "version": "d.104.2.42.0",
     "date": "2026-11-08",
     "title": "模型页三分区：模型 / 来源 / 运行，界面按 magpie 路由页重做",

@@ -121,7 +121,7 @@ describe("ModelPage · 结构与主路径", () => {
 
   it("浏览器没有命令桥：提示只能在桌面端添加，但仍可看模型", () => {
     render(<ModelPage />);
-    expect(screen.getByRole("status")).toHaveTextContent(/桌面端完成/);
+    expect(screen.getByRole("status")).toHaveTextContent(/请打开和鸣桌面端/);
     expect(screen.getByText("deepseek/deepseek-chat")).toBeInTheDocument();
   });
 });

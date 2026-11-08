@@ -357,6 +357,21 @@ contextBridge.exposeInMainWorld("__heming_magpie", {
   start: () => ipcRenderer.invoke("magpie:start"),
   stop: () => ipcRenderer.invoke("magpie:stop"),
   gateway: () => ipcRenderer.invoke("magpie:gateway"),
+  /** 模型页的管理命令（白名单由主进程校验）：返回 {ok, code, stdout, stderr, error}。 */
+  cli: (args) => ipcRenderer.invoke("magpie:cli", Array.isArray(args) ? args : []),
+  /** 交互式命令：输出按 magpie:cli:event 回流，输入经 cliInput 写入。 */
+  cliStart: (args) => ipcRenderer.invoke("magpie:cli:start", Array.isArray(args) ? args : []),
+  cliInput: (runId, text) => ipcRenderer.invoke("magpie:cli:input", String(runId), String(text ?? "")),
+  cliKill: (runId) => ipcRenderer.invoke("magpie:cli:kill", String(runId)),
+  /** 在真终端里跑（OAuth 登录/备份口令）。 */
+  openTerminal: (args) => ipcRenderer.invoke("magpie:terminal", Array.isArray(args) ? args : []),
+  /** 订阅内核命令输出；返回取消订阅函数。 */
+  onCli: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("magpie:cli:event", listener);
+    return () => ipcRenderer.removeListener("magpie:cli:event", listener);
+  },
 });
 
 // 浏览器端没有这个桥，页面据此显示「仅桌面端可用」，绝不回退到云端读归档。

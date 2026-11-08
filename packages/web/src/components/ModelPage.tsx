@@ -277,7 +277,7 @@ export function ModelPage() {
           aria-label="模型页分区"
           className="inline-flex items-center gap-1 rounded-full bg-[#f2f3f5] p-1"
         >
-          {TABS.map((item) => (
+          {TABS.filter((item) => cli !== null || item.key !== "sources").map((item) => (
             <button
               key={item.key}
               type="button"
@@ -298,7 +298,7 @@ export function ModelPage() {
     >
       {!cli && (
         <div role="status" className="mb-4 rounded-xl border border-line bg-[#fafafa] p-3 ui-body-sm">
-          浏览器端可以查看可用模型；添加来源与账号需要在和鸣桌面端完成。
+          浏览器端只能查看可用模型。添加来源、登录账号与路由维护请打开和鸣桌面端——模型能力运行在你的电脑上。
         </div>
       )}
 

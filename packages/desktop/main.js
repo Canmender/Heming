@@ -26,6 +26,7 @@ const { buildChildEnv, createStdioBridge } = require("./mcp-stdio");
 const { createChildReclaimer } = require("./child-kill");
 const { createMagpieHost, resolveBinaryPath } = require("./magpie-host");
 const { startMagpieProxy } = require("./magpie-proxy");
+const { createMagpieCli, validateCliArgs, terminalCommand } = require("./magpie-cli");
 const { bundledPython } = require("./bundled-runtime");
 const { planStdioSpawn, probeLocalRuntime } = require("./local-runtime");
 
@@ -104,6 +105,11 @@ const TRUSTED_CHANNELS = [
   "magpie:start",
   "magpie:stop",
   "magpie:gateway",
+  "magpie:cli",
+  "magpie:cli:start",
+  "magpie:cli:input",
+  "magpie:cli:kill",
+  "magpie:terminal",
   // ── 界面插件（desktopWidget · d.98）──
   // 这些是**主窗专用**的安装/启停/设置通道（widget 窗口永远碰不到：它不是 mainWindow，
   // 且 widget 自己的桥在 widget-preload.js 里，只有窗口动作与环境）。
@@ -793,6 +799,56 @@ if (!gotLock) {
         status: magpieHost.status(),
         error: err instanceof Error ? err.message : String(err),
       };
+    }
+  });
+
+  // —— 模型页的内核命令桥（d.105）——
+  // 供应商/订阅账号/分组/用量/库/备份这些能力都在内核 CLI 里；模型页通过白名单
+  // 命令调用**我们自己的内核**，不重写一遍，也不经过 shell。
+  const magpieBinary = resolveBinaryPath({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDir: __dirname,
+  });
+  const magpieCli = createMagpieCli({
+    spawn: require("node:child_process").spawn,
+    binaryPath: magpieBinary,
+    send: (event) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send("magpie:cli:event", event);
+      }
+    },
+    log: (line) => console.warn(line),
+  });
+
+  secureIpc.handle("magpie:cli", (_event, args) => magpieCli.run(args));
+
+  secureIpc.handle("magpie:cli:start", (_event, args) => {
+    const checked = validateCliArgs(args);
+    if (!checked.ok) return { ok: false, error: checked.reason };
+    void magpieCli.start(args);
+    return { ok: true };
+  });
+
+  secureIpc.handle("magpie:cli:input", (_event, runId, text) =>
+    magpieCli.input(String(runId), String(text ?? "")),
+  );
+  secureIpc.handle("magpie:cli:kill", (_event, runId) => magpieCli.kill(String(runId)));
+
+  // 交互式命令（OAuth 登录、备份口令）：在真正的终端窗口里跑，用户能看到链接并输入。
+  secureIpc.handle("magpie:terminal", (_event, args) => {
+    const checked = validateCliArgs(args);
+    if (!checked.ok) return { ok: false, error: checked.reason };
+    try {
+      const command = terminalCommand(magpieBinary, args);
+      require("node:child_process").spawn("cmd.exe", ["/c", "start", "", "cmd", "/k", command], {
+        windowsHide: false,
+        detached: true,
+        stdio: "ignore",
+      }).unref();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.message ?? String(err) };
     }
   });
 
