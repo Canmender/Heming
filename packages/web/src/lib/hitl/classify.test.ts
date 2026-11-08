@@ -92,6 +92,55 @@ describe("风险分类", () => {
     expect(sourceOf("windows-mcp__Screenshot")).toBe("mcp");
     expect(sourceOf("random_tool")).toBe("unknown");
   });
+
+  it("团队工具来源是 team（d.109 D1），不再落到 unknown", () => {
+    for (const name of [
+      "team_list",
+      "team_get",
+      "team_create",
+      "team_update",
+      "team_member_add",
+      "team_plan_add",
+      "team_plan_update",
+      "team_task_add",
+      "team_task_update",
+    ]) {
+      expect(sourceOf(name)).toBe("team");
+    }
+  });
+});
+
+describe("团队工具的展示名与参数摘要（d.109 D1）", () => {
+  it("9 个 team_* 工具各有中文动作名，不再显示「外部工具 team_task_add」", () => {
+    expect(displayNameOf("team_list")).toBe("列出团队");
+    expect(displayNameOf("team_get")).toBe("查看团队");
+    expect(displayNameOf("team_create")).toBe("创建团队");
+    expect(displayNameOf("team_update")).toBe("修改团队");
+    expect(displayNameOf("team_member_add")).toBe("添加成员");
+    expect(displayNameOf("team_plan_add")).toBe("添加方案");
+    expect(displayNameOf("team_plan_update")).toBe("更新方案");
+    expect(displayNameOf("team_task_add")).toBe("派任务");
+    expect(displayNameOf("team_task_update")).toBe("更新任务");
+    // 以后新增的 team_* 走前缀兜底，也不会掉回「外部工具」
+    expect(displayNameOf("team_archive_create")).toBe("团队操作");
+  });
+
+  it("参数摘要能截到 title / team_id（仍走敏感词过滤）", () => {
+    expect(summarizeArgs('{"team_id":"t1","title":"写落地页"}')).toBe("写落地页");
+    expect(summarizeArgs('{"team_id":"t1"}')).toBe("t1");
+    // title 里夹带密钥同样被屏蔽（新字段不绕过敏感词检查）
+    expect(summarizeArgs('{"title":"sk-abcdefghijklmnop"}')).toBe("***");
+  });
+
+  it("classifyCall：派任务的风险仍由桥的 riskHint 决定，展示层用中文动作名", () => {
+    const call = classifyCall("team_task_add", '{"team_id":"t1","title":"写落地页"}', undefined, {
+      risk: "write",
+    });
+    expect(call.displayName).toBe("派任务");
+    expect(call.risk).toBe("write");
+    expect(call.source).toBe("team");
+    expect(call.summary).toBe("写落地页");
+  });
 });
 
 describe("参数摘要", () => {
@@ -165,6 +214,11 @@ describe("规则资源标识", () => {
   it("没有可识别字段时是通配", () => {
     expect(ruleResource("{}")).toBe("*");
     expect(ruleResource("{ 不是 json")).toBe("*");
+  });
+
+  it("团队工具按 team_id 记规则（不按每次都会变的标题碎片化）", () => {
+    expect(ruleResource('{"team_id":"t1","title":"写落地页"}')).toBe("t1");
+    expect(ruleResource('{"title":"只有标题没有团队"}')).toBe("只有标题没有团队");
   });
 
   it("超长资源截断，避免把长文本写进 localStorage", () => {

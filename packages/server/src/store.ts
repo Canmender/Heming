@@ -69,6 +69,7 @@ export interface TeamTaskCreateInput {
   planId?: string | null;
   assigneeId?: string | null;
   dueAt?: string | null;
+  attachmentFileId?: string | null;
 }
 
 export interface TeamTaskUpdateInput {
@@ -176,8 +177,18 @@ export interface Store {
    * 已存在返回 false（skipped），新写入返回 true（inserted）。
    */
   addTeamActivity(actorId: string, input: TeamActivityInput): boolean;
-  /** 动向流：按 occurredAt 倒序；before 为严格小于的游标，actorId 可过滤。 */
-  listTeamActivities(opts?: { limit?: number; before?: string; actorId?: string }): TeamActivity[];
+  /**
+   * 动向流：排序固定 `occurredAt DESC, id DESC`（两 Store 同语义，同刻用 id 兜底保证确定性）。
+   * `before` 为游标时间（严格小于）；给了 `beforeId` 时比较 `(occurredAt, id) < (before, beforeId)`，
+   * 使同一时间戳的剩余条目也能翻到（旧客户端只传 `before` = 旧语义）。
+   * `actorId` 可过滤。
+   */
+  listTeamActivities(opts?: {
+    limit?: number;
+    before?: string;
+    beforeId?: string;
+    actorId?: string;
+  }): TeamActivity[];
   /** 清空某位成员已上传的动向，返回删除条数。 */
   clearTeamActivities(actorId: string): number;
   // —— ②-3 团队用量：白名单摘要的服务端聚合 ——
@@ -593,8 +604,28 @@ export function createMemoryStore(): Store {
       const limit = Math.min(100, Math.max(1, opts.limit ?? 50));
       const rows = teamActivities
         .filter((a) => (opts.actorId ? a.actorId === opts.actorId : true))
-        .filter((a) => (opts.before ? a.occurredAt < opts.before : true))
-        .sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : a.occurredAt > b.occurredAt ? -1 : 0));
+        .filter((a) => {
+          if (!opts.before) return true;
+          // 无 beforeId：旧语义（严格小于 occurredAt），老客户端行为不变。
+          if (!opts.beforeId) return a.occurredAt < opts.before;
+          // 有 beforeId：同 occurredAt 的剩余条目按 id 继续翻（与 SQLite 同语义）。
+          return (
+            a.occurredAt < opts.before ||
+            (a.occurredAt === opts.before && a.id < opts.beforeId)
+          );
+        })
+        // 排序统一 `occurredAt DESC, id DESC`：同刻不再靠插入序（两 Store 曾相反）。
+        .sort((a, b) =>
+          a.occurredAt < b.occurredAt
+            ? 1
+            : a.occurredAt > b.occurredAt
+              ? -1
+              : a.id < b.id
+                ? 1
+                : a.id > b.id
+                  ? -1
+                  : 0,
+        );
       return rows.slice(0, limit).map((a) => ({ ...a }));
     },
     clearTeamActivities(actorId) {
@@ -798,7 +829,7 @@ export function createMemoryStore(): Store {
         createdAt: at,
         updatedAt: at,
         dueAt: body.dueAt ?? null,
-        attachmentFileId: null,
+        attachmentFileId: body.attachmentFileId ?? null,
       };
       teamTasks.set(task.id, task);
       touchTeam(teamId);

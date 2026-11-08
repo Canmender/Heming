@@ -410,7 +410,18 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       res.status(400).json({ error: "invalid before" });
       return;
     }
-    res.json({ activities: store.listTeamActivities({ limit, before, actorId }) });
+    // 唯一游标：before 只有毫秒精度，同一时间戳的剩余条目靠 beforeId 继续翻
+    //（客户端传上一页最后一条的 id）。只传 before = 旧语义；给了值但不合法 → 400。
+    const rawBeforeId = req.query.beforeId;
+    let beforeId: string | undefined;
+    if (rawBeforeId !== undefined) {
+      if (typeof rawBeforeId !== "string" || !rawBeforeId.trim()) {
+        res.status(400).json({ error: "beforeId 不合法" });
+        return;
+      }
+      beforeId = rawBeforeId.trim();
+    }
+    res.json({ activities: store.listTeamActivities({ limit, before, beforeId, actorId }) });
   });
 
   app.post("/api/team/activities", authOnly, (req, res) => {

@@ -124,6 +124,11 @@ describe("团队工具清单", () => {
     }
     expect(TEAM_TOOLS.find((t) => t.name === "team_list")!.description).toContain("先调用它");
     expect(TEAM_TOOLS.find((t) => t.name === "team_get")!.description).toContain("先调用 team_list");
+    // 工具总数 >20 时 team_* 可能被 tool_search 隐藏，描述里必须给出可发现性提示
+    for (const spec of TEAM_TOOLS) {
+      expect(spec.description).toContain("tool_search");
+      expect(spec.description).toContain("团队");
+    }
     for (const spec of TEAM_TOOLS.filter((t) => t.riskHint === "write")) {
       expect(spec.description).toContain("请用户确认");
     }
@@ -289,13 +294,21 @@ describe("写工具", () => {
     expect(apiMock.updateTeamPlan).toHaveBeenCalledTimes(1);
   });
 
-  it("team_task_add：派任务（标题/方案/负责人/截止），回显负责人名字", async () => {
+  it("team_task_add：派任务（标题/方案/负责人/截止/交付物），回显负责人名字", async () => {
+    // 参数契约：交付物是可选参数 attachmentFileId（d.109 D2，与 team_task_update 同名）
+    const spec = TEAM_TOOLS.find((t) => t.name === "team_task_add")!;
+    const props = (spec.parameters as { properties: Record<string, unknown> }).properties;
+    expect(props).toHaveProperty("attachmentFileId");
+    expect(props.attachmentFileId).toMatchObject({ type: "string" });
+    expect((spec.parameters as { required: string[] }).required).toEqual(["team_id", "title"]);
+
     const r = await bridge().run("team_task_add", {
       team_id: "t1",
       title: "写落地页",
       planId: "p1",
       assigneeId: "u2",
       dueAt: "2026-11-10T18:00:00.000Z",
+      attachmentFileId: "f9",
     });
     expect(r.ok).toBe(true);
     expect(apiMock.createTeamTask).toHaveBeenCalledWith("t1", {
@@ -303,9 +316,14 @@ describe("写工具", () => {
       planId: "p1",
       assigneeId: "u2",
       dueAt: "2026-11-10T18:00:00.000Z",
+      attachmentFileId: "f9",
     });
     expect(r.text).toContain("task_id：k1");
     expect(r.text).toContain("负责人：林晓");
+
+    // 不传交付物时字段不出现（不把 undefined 传给 API）
+    await bridge().run("team_task_add", { team_id: "t1", title: "无交付物" });
+    expect(apiMock.createTeamTask).toHaveBeenLastCalledWith("t1", { title: "无交付物" });
   });
 
   it("team_task_update：状态/负责人/交付物都能改；空串=清空为 null", async () => {

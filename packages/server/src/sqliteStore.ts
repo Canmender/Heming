@@ -624,8 +624,14 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       const where: string[] = [];
       const params: string[] = [];
       if (opts.before) {
-        where.push("occurred_at < ?");
-        params.push(opts.before);
+        if (opts.beforeId) {
+          // 组合游标：同 occurredAt 的剩余条目按 id 继续翻（内存 Store 同语义）
+          where.push("(occurred_at < ? OR (occurred_at = ? AND id < ?))");
+          params.push(opts.before, opts.before, opts.beforeId);
+        } else {
+          where.push("occurred_at < ?");
+          params.push(opts.before);
+        }
       }
       if (opts.actorId) {
         where.push("actor_id = ?");
@@ -634,7 +640,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       const sql = `SELECT id, actor_id, kind, title, detail, status, source_id, occurred_at, created_at
                    FROM team_activities
                    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-                   ORDER BY occurred_at DESC, created_at DESC
+                   ORDER BY occurred_at DESC, id DESC
                    LIMIT ?`;
       const rows = db.prepare(sql).all(...params, limit) as Array<{
         id: string;
@@ -886,7 +892,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
         at,
         at,
         body.dueAt ?? null,
-        null,
+        body.attachmentFileId ?? null,
       );
       touchTeam(teamId);
       const row = db.prepare("SELECT * FROM team_tasks WHERE id = ?").get(id) as TaskRow;

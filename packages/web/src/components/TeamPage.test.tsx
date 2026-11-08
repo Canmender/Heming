@@ -119,10 +119,10 @@ beforeEach(() => {
 
 async function renderPage() {
   render(<TeamPage />);
-  // 看板视图里也有一行「N 名真实成员」统计，所以这里用 getAllByText：
+  // 看板视图里也有一行「N 名成员」统计，所以这里用 getAllByText：
   // 页面加载完成与否看的是「至少出现一处成员统计」，不假设只有页头那一处。
   await waitFor(() =>
-    expect(screen.getAllByText(/名真实成员/).length).toBeGreaterThan(0),
+    expect(screen.getAllByText(/名成员/).length).toBeGreaterThan(0),
   );
 }
 
@@ -130,7 +130,7 @@ describe("团队用量：默认关闭只看本人", () => {
   it("默认关闭：不上传、不采集、不拉排行；用量区显示本机统计", async () => {
     await renderPage();
     // 三个开关默认关
-    expect(screen.getByLabelText("共享用量")).not.toBeChecked();
+    expect(screen.getByLabelText("用量排行")).not.toBeChecked();
 
     fireEvent.click(screen.getByRole("tab", { name: "用量" }));
     expect(screen.getByText("本机用量（仅自己可见）")).toBeInTheDocument();
@@ -145,7 +145,7 @@ describe("团队用量：默认关闭只看本人", () => {
 
   it("开启共享后：只上传白名单字段并展示排行（按 token 降序）", async () => {
     await renderPage();
-    fireEvent.click(screen.getByLabelText("共享用量"));
+    fireEvent.click(screen.getByLabelText("用量排行"));
 
     await waitFor(() => expect(uploadTeamUsage).toHaveBeenCalledTimes(1));
     const items = vi.mocked(uploadTeamUsage).mock.calls[0]![0];
@@ -176,14 +176,14 @@ describe("团队用量：默认关闭只看本人", () => {
   it("排行空态：没有成员共享时给可解释文案", async () => {
     vi.mocked(fetchTeamUsage).mockResolvedValue(usageResponse({ ranking: [] }));
     await renderPage();
-    fireEvent.click(screen.getByLabelText("共享用量"));
+    fireEvent.click(screen.getByLabelText("用量排行"));
     fireEvent.click(screen.getByRole("tab", { name: "用量" }));
     expect(await screen.findByText("还没有成员共享用量。")).toBeInTheDocument();
   });
 
   it("区间切换会带 range 重新拉取", async () => {
     await renderPage();
-    fireEvent.click(screen.getByLabelText("共享用量"));
+    fireEvent.click(screen.getByLabelText("用量排行"));
     await waitFor(() => expect(fetchTeamUsage).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("tab", { name: "用量" }));
@@ -204,7 +204,7 @@ describe("团队用量：清除已上传记录", () => {
     await waitFor(() => expect(fetchTeamUsage).toHaveBeenCalledTimes(1));
 
     // 关掉开关：只是停未来上传，绝不自动删（避免误伤）
-    fireEvent.click(screen.getByLabelText("共享用量"));
+    fireEvent.click(screen.getByLabelText("用量排行"));
     expect(clearMyTeamUsage).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("tab", { name: "用量" }));
@@ -225,7 +225,7 @@ describe("团队用量：清除已上传记录", () => {
       );
 
     await renderPage();
-    fireEvent.click(screen.getByLabelText("共享用量"));
+    fireEvent.click(screen.getByLabelText("用量排行"));
     await waitFor(() => expect(fetchTeamUsage).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("tab", { name: "用量" }));
 
@@ -398,7 +398,7 @@ describe("团队页布局（d.62-B）", () => {
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveClass("ui-page-title");
     expect(headings[0]).toHaveTextContent("团队");
-    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("名真实成员");
+    expect(document.querySelector(".ui-page-sub")?.textContent).toContain("名成员");
   });
 });
 
@@ -417,6 +417,8 @@ describe("团队页：看板 Tab（d.67 导航合并）", () => {
     expect(await screen.findByText("整理会议纪要")).toBeInTheDocument();
     expect(screen.getByText("周五交材料")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "看板" })).toHaveAttribute("aria-selected", "true");
+    // d.109：看板复用宿主已加载的数据，切过去不再产生第二次 /api/team/activities 请求
+    expect(vi.mocked(fetchTeamActivities).mock.calls.length).toBe(1);
 
     // 嵌入后不再出现第二个页面标题：看板不画自己的「团队看板」页头
     const headings = screen.getAllByRole("heading", { level: 1 });
@@ -444,5 +446,97 @@ describe("团队页：看板 Tab（d.67 导航合并）", () => {
     fireEvent.click(screen.getByRole("tab", { name: "动向" }));
     expect(screen.getByRole("tab", { name: "动向" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("搜索团队成员")).toBeInTheDocument();
+  });
+});
+
+describe("d.109 团队优化：深链 / 高亮 / 日程错误态", () => {
+  it("深链未命中：数据就绪后消费意图并说明，不会永远把团队页钉在动向", async () => {
+    useUiStore.setState({ teamFocusUserId: bob.id, teamFocusActivityId: "gone-1" });
+    await renderPage();
+    expect(await screen.findByText(/已不在最近的列表里/)).toBeInTheDocument();
+    await waitFor(() => expect(useUiStore.getState().teamFocusActivityId).toBeNull());
+  });
+
+  it("高亮 2.4 秒后褪去（d.91 规格；原来计时器被 cleanup 抵消）", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.mocked(fetchTeamActivities).mockResolvedValue({ activities: [activity({ id: "t-1" })] });
+    useUiStore.setState({ teamFocusActivityId: "t-1" });
+    await renderPage();
+    const row = await waitFor(() => {
+      const el = document.querySelector('[data-activity-id="t-1"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    await waitFor(() => expect(row.className).toContain("ring-1"));
+    await waitFor(() => expect(row.className).not.toContain("ring-1"), { timeout: 5000 });
+  }, 10_000);
+
+  it("团队日程加载失败：给 role=alert 与重试，而不是说成「没有共享的日程」", async () => {
+    vi.mocked(fetchTeamActivities).mockRejectedValue(new Error("网络异常"));
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "团队日程" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/日程加载失败/);
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
+    expect(screen.queryByText("还没有共享的日程")).not.toBeInTheDocument();
+  });
+});
+
+describe("d.109 撤回口径与共享说明", () => {
+  it("关闭用量共享后提示改用「清除我的用量」，不再指向「清除共享记录」", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    await renderPage();
+    fireEvent.click(screen.getByLabelText("用量排行"));
+    expect(await screen.findByText(/清除我的用量/)).toBeInTheDocument();
+    expect(screen.queryByText(/可用「清除共享记录」撤回/)).toBeNull();
+  });
+
+  it("共享 0/3 时页面有显式说明（不再只藏在 hover title 里）", async () => {
+    await renderPage();
+    expect(screen.getByText(/当前未共享任何内容/)).toBeInTheDocument();
+  });
+});
+
+describe("d.109 成员详情与条目可点", () => {
+  it("成员详情给出最近 3 条（超出只取 3）", async () => {
+    vi.mocked(fetchTeamActivities).mockResolvedValue({
+      activities: [
+        activity({ id: "b1", actorId: bob.id, title: "鲍勃事一" }),
+        activity({ id: "b2", actorId: bob.id, title: "鲍勃事二" }),
+        activity({ id: "b3", actorId: bob.id, title: "鲍勃事三" }),
+        activity({ id: "b4", actorId: bob.id, title: "鲍勃事四" }),
+      ],
+    });
+    await renderPage();
+    const roster = document.querySelector("aside") as HTMLElement;
+    fireEvent.click(within(roster).getByRole("button", { name: /鲍勃/ }));
+
+    const label = await screen.findByText("最近动向");
+    const list = label.parentElement as HTMLElement;
+    expect(within(list).getAllByRole("button")).toHaveLength(3);
+    expect(within(list).getByText("鲍勃事一")).toBeInTheDocument();
+    expect(within(list).queryByText("鲍勃事四")).toBeNull();
+  });
+
+  it("点动向条目 = 选中该成员（与首页/看板一致，且键盘可达）", async () => {
+    vi.mocked(fetchTeamActivities).mockResolvedValue({
+      activities: [activity({ id: "f1", actorId: bob.id, title: "鲍勃发版" })],
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /鲍勃发版/ }));
+    expect(await screen.findByText("@bob")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /返回全部/ })).toBeInTheDocument();
+  });
+
+  it("点用量排行里的成员 = 选中他并切到动向", async () => {
+    useTeamShareStore.setState({ settings: { ...DEFAULT_TEAM_SHARE, usage: true } });
+    await renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
+    const rank = await screen.findByRole("region", { name: "团队用量排行" });
+    vi.mocked(fetchTeamActivities).mockClear();
+    fireEvent.click(within(rank).getByRole("button", { name: /鲍勃/ }));
+    expect(await screen.findByText("@bob")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "动向" })).toHaveAttribute("aria-selected", "true");
+    expect(fetchTeamActivities).toHaveBeenCalledTimes(1);
   });
 });

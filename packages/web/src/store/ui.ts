@@ -538,6 +538,10 @@ export const useUiStore = create<UiState>((set, get) => ({
       // 未消费的任务投递跟着离开：切页后再自动发送会让用户莫名其妙多一条消息。
       taskDraft: null,
       taskFocusId: null,
+      // 团队的一次性定位意图也只在「这一次进入团队页」有效：首页点了动向却没命中的
+      // 情况如果不在这里清，之后每次进团队页都会被强制切到「动向」Tab（d.109 修复）。
+      teamFocusUserId: null,
+      teamFocusActivityId: null,
       automationFocusId: null,
       infohubIntent: null,
       automationIntent: null,

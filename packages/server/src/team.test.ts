@@ -138,6 +138,149 @@ describe("团队动向", () => {
     expect(res.status).toBe(400);
   });
 
+  it("beforeId 组合游标：同一 occurredAt 的条目翻页不丢不重", async () => {
+    const at = "2026-11-03T08:00:00.000Z";
+    await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({
+        items: [
+          activity({ sourceId: "task:a", occurredAt: at }),
+          activity({ sourceId: "task:b", occurredAt: at }),
+          activity({ sourceId: "task:c", occurredAt: at }),
+        ],
+      });
+
+    const page1 = await request(app)
+      .get("/api/team/activities")
+      .query({ limit: 2 })
+      .set(auth(token));
+    expect(page1.status).toBe(200);
+    expect(page1.body.activities).toHaveLength(2);
+    const firstIds = (page1.body.activities as Array<{ id: string }>).map((a) => a.id);
+    // 同刻按 id DESC，顺序确定（与 SQLite 一致）
+    expect(firstIds).toEqual([...firstIds].sort().reverse());
+    const last = page1.body.activities[1] as { id: string; occurredAt: string };
+
+    const page2 = await request(app)
+      .get("/api/team/activities")
+      .query({ limit: 2, before: last.occurredAt, beforeId: last.id })
+      .set(auth(token));
+    expect(page2.status).toBe(200);
+    expect(page2.body.activities).toHaveLength(1);
+    const secondIds = (page2.body.activities as Array<{ id: string }>).map((a) => a.id);
+
+    // 两页合集 = 三条，且无重复
+    expect([...firstIds, ...secondIds]).toHaveLength(3);
+    expect(new Set([...firstIds, ...secondIds]).size).toBe(3);
+    expect(secondIds[0]! < last.id).toBe(true);
+
+    // 旧客户端只传 before（不传 beforeId）→ 保持旧语义：同刻条目整体被跳过
+    const legacy = await request(app)
+      .get("/api/team/activities")
+      .query({ before: at })
+      .set(auth(token));
+    expect(legacy.status).toBe(200);
+    expect(legacy.body.activities).toEqual([]);
+  });
+
+  it("非法 beforeId 返回 400", async () => {
+    const empty = await request(app)
+      .get("/api/team/activities")
+      .query({ beforeId: "" })
+      .set(auth(token));
+    expect(empty.status).toBe(400);
+    expect(empty.body.error).toBe("beforeId 不合法");
+
+    const blank = await request(app)
+      .get("/api/team/activities")
+      .query({ beforeId: "   " })
+      .set(auth(token));
+    expect(blank.status).toBe(400);
+    expect(blank.body.error).toBe("beforeId 不合法");
+
+    // 重复参数会解析成数组（非字符串）→ 同样 400
+    const repeated = await request(app).get("/api/team/activities?beforeId=a&beforeId=b").set(auth(token));
+    expect(repeated.status).toBe(400);
+    expect(repeated.body.error).toBe("beforeId 不合法");
+  });
+
+  it("日程/任务摘要白名单（d.109 C1）：合法摘要可写，自由文本与非法状态 400", async () => {
+    const validAgenda = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({
+        items: [
+          activity({
+            kind: "agenda",
+            title: "周会",
+            detail: "日程 · 今天到期",
+            status: "today",
+            sourceId: "agenda:1",
+          }),
+        ],
+      });
+    expect(validAgenda.status).toBe(201);
+    expect(validAgenda.body).toEqual({ inserted: 1, skipped: 0 });
+
+    const validTask = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({
+        items: [
+          activity({
+            kind: "task",
+            detail: "任务 · 进行中",
+            status: "running",
+            sourceId: "task:valid",
+          }),
+        ],
+      });
+    expect(validTask.status).toBe(201);
+
+    // 日程正文 → 400（服务端不再原样回传客户端自由文本）
+    const agendaBody = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({
+        items: [
+          activity({ kind: "agenda", title: "周会", detail: "这是正文……", sourceId: "agenda:2" }),
+        ],
+      });
+    expect(agendaBody.status).toBe(400);
+    expect(agendaBody.body.error).toBe("只接受标题与状态摘要");
+
+    // 任务 detail 夹带正文 → 400
+    const taskDetail = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({
+        items: [activity({ detail: "任务 · 进行中（正文）", sourceId: "task:2" })],
+      });
+    expect(taskDetail.status).toBe(400);
+    expect(taskDetail.body.error).toBe("只接受标题与状态摘要");
+
+    // status 不在白名单 → 400（任务用 todo、日程用 later）
+    const badStatus = await request(app)
+      .post("/api/team/activities")
+      .set(auth(token))
+      .send({
+        items: [activity({ status: "todo", sourceId: "task:3" })],
+      });
+    expect(badStatus.status).toBe(400);
+    expect(badStatus.body.error).toBe("只接受标题与状态摘要");
+
+    // 被拒的条目一条都没落库
+    const list = await request(app)
+      .get("/api/team/activities")
+      .query({ actorId: self.id })
+      .set(auth(token));
+    expect(list.body.activities.map((a: { sourceId: string }) => a.sourceId).sort()).toEqual([
+      "agenda:1",
+      "task:valid",
+    ]);
+  });
+
   it("items 为空或字段越界返回 400", async () => {
     const empty = await request(app)
       .post("/api/team/activities")

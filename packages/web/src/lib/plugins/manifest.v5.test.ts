@@ -116,6 +116,9 @@ describe("parsePluginManifest · v5 合法清单", () => {
   it("bundle 清单仍能解析（是否可装由 web 安装管线判，不在解析器里拒绝）", () => {
     const bundle = v5({
       distribution: "bundle",
+      // d.111 审计修复①（P0-1）：bundle 必须绑定 packageSha256，让签名覆盖包内代码字节；
+      // 这里补一个合法哈希，本用例只验证「清单能解析」，可装性仍由安装管线判。
+      packageSha256: "a".repeat(64),
       permissions: { network: [], tools: "read", files: [], events: ["notify"], graphics: ["wasm"] },
       contributions: {
         commands: [{ id: "toggle", title: "开关桌宠", target: { kind: "plugin" } }],

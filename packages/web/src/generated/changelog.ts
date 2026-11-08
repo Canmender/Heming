@@ -12,6 +12,44 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.112.2.42.0",
+    "date": "2026-11-08",
+    "title": "团队功能优化：静默错误修复 · 协作闭环 · 口径收口",
+    "bullets": [
+      "**派任务交付物不再丢**（P0）：`CreateTeamTaskBodySchema` 补 `attachmentFileId`，内存/SQLite两 Store 的 `createTeamTask` 都写入（此前前端已发、后端 zod strip 后硬写 `null`，实测 201 返回",
+      "**截止时间按本地时区显示**：新增 `lib/format/datetime.ts`（`fmtLocalDateTime` / `isOverdue`），任务行不再直接切 UTC 字符串；未完成且过期显示文字「已逾期」。",
+      "**动向分页补唯一游标**：两 Store 排序统一 `occurredAt DESC, id DESC`；`GET /api/team/activities`支持可选 `beforeId`（同刻剩余条目按 id 继续翻，旧客户端只传 `before` 行为不变）。此前 3 条同时刻",
+      "**深链意图与高亮**：`setPage` 清理 `teamFocus*` 两个槽；高亮计时器从 focus effect 拆出（2.4s 真褪去）；数据就绪仍未命中时消费意图并如实说明，不再让团队页长期被钉在「动向」。",
+      "**团队日程错误态**：加载失败显示 `role=alert` + 重试，不再伪装成「还没有共享的日程」。",
+      "**「清除共享记录」口径**：关闭用量共享时提示改用「清除我的用量」；按钮 title / 确认弹窗只声称清团队动向；共享 0/3 时给持久说明「当前未共享任何内容」。",
+      "**工作台可刷新**：概况区加「刷新团队数据」；挂载期间 45s **静默**轮询（busy 跳过、空团队不轮询、切团队/卸载清计时器）；手动刷新给 3s 提示；notice 统一 `flash()`，「团队已创建」不再常驻。",
+      "**成员详情升级**：除条数与用量外，列出该成员最近 3 条动向（可点高亮）；用量排行行可点 = 选中该成员并切到动向。",
+      "**看板收敛为受控视图**：数据/名册/选中成员都由团队页提供，删除自己的取数与 30s 轮询；两套成员筛选互通；卡片与动向行可点选中成员（button 语义，键盘可达）；错误态 `role=alert`、chips `aria-pressed`、",
+      "**工作台确认框统一**：删团队/删方案/删任务由 `window.confirm` 改为应用内 `ConfirmDialog`；移除成员补二次确认（写明任务会解绑为待认领）；删除文案如实说明交付物文件仍留在文件库。",
+      "**非 owner 不再看到「编辑目标」**（真机审计补录）：此前成员点了保存才 403，现在入口按 owner 渲染。",
+      "**动向摘要不再直出客户端自由文本**：显示层改由 `kind + status` 派生（新 `lib/team/labels.ts`）；写侧契约收紧——task 的 `detail/status`、agenda 的 `detail/status` 只能取状态摘要白名单，否则 400",
+      "**文案去内部术语/收敛**：共享条承担完整口径；「证据/白名单/写操作/真实成员」改为用户语言；团队成员统计去掉「真实」二字；页头在线数加 title 说明「在线 = 当前打开着和鸣（有实时连接）」。",
+      "**可访问性**：第三个共享复选框去掉覆盖可见文字的 `aria-label`；看板错误态/筛选状态语义补齐。",
+      "HITL 确认弹窗登记 9 个 `team_*` 工具中文动作名与 `team_` 前缀「团队操作」，不再显示「外部工具team_task_add」；`sourceOf` 增加 `team`；参数摘要补 `title/team_id`；「记住允许」的规则资源",
+      "`team_task_add` 描述补「若看不到 team_* 先 tool_search」提示。",
+      "d.111 审计修复①（P0-1）把「bundle 清单必须带 `packageSha256`」落进了 shared 解析器与 shared 用例，但 web 的 `manifest.v5.test.ts` 仍按旧契约构造 bundle fixture（无哈希）→ `origin/main` 上该文件 1 例红。",
+      "全量门禁（2026-11-08，变基到 `e0dfff8` 后重跑）：`pnpm -r build` + 分包 test + `pnpm -r typecheck`全过——shared 6 文件 / 80 例，server 15 文件 / 245 例，web 273 文件 / 3760 例，",
+      "新增/改写用例覆盖：创建任务带交付物（双 Store + REST）、同刻分页不丢不重、双 Store 排序一致、摘要白名单拒绝正文、深链未命中与高亮褪去、日程错误态、成员详情 3 条、看板受控渲染与筛选互通、",
+      "真机复验（变基前的同内容提交）：隔离库 + CDP 逐项 13/13 通过、console 0 error；复验后仅补一处「白名单摘要 → 聚合摘要」文案，功能结论不受影响。证据：`browser-report-d109.md` + 43 张截图"
+    ],
+    "paragraphs": [
+      "用户要求「拉新分支优化团队功能，先调研再继续」。本轮先做**四路只读调研**（前端静态审计 279 行 /真机浏览器 311 行 + 58 张截图 / 服务端契约 410 行 / 历史待办 231 行），再从证据里挑出可判定的16 项修复，不动架构与权限主干、不做新功能。规格：`docs/superpowers/specs/2026-11-08-team-optimization.md`。分支 `feat/team-optimize` 立项于 `origin/main @ d702ea1`，收尾时变基到 `e0dfff8`（d.111.2.42.0），版本按「数字只增不减」顺延为 d.112（d.109 已被技能社区线占用）。",
+      "静默错误（改完会「看起来成功但数据不对」的那类）`attachmentFileId: null`）。`team_task_add` 工具同步支持（参数名与 `team_task_update` 统一为`attachmentFileId`）。只能取到 2 条，且内存与 SQLite 顺序相反。",
+      "协作闭环成员 chips 单行横向滚动、删除底部重复隐私句。",
+      "口径与隐私「只接受标题与状态摘要」；读侧不校验旧数据（旧自由文本不会再被渲染）。",
+      "智能体侧单独按 `team_id` 取，避免按标题碎片化。",
+      "顺带修复：变基后 main 上已存在的红本轮补齐合法哈希（仍只验证「清单能解析」，可装性由安装管线判），12 例恢复全绿。",
+      "验证desktop 38 个 node:test 文件 / 598 例（合计 332 文件 / 4683 例，5 包 typecheck 全绿）。工作台确认框与刷新、HITL 团队工具展示名、`setPage` 清槽、插件 bundle 清单哈希契约等。（版本号随变基顺延，报告文件名为立项时命名）。",
+      "明确不做（沿历史决策 + 本轮判断）",
+      "邀请/公开注册、多团队/组织树、任务评论/@/变更历史、看板拖拽、方案层级、交付物内嵌预览、给智能体的删除类工具、写侧配额/频控与 `occurredAt` 未来护栏、SQLite 事务、名册 avatar 轻量化、「有卡点」状态进入路径（browser P2-7）、删除后文件级联清理（browser P2-8，本轮只在文案说明）、favicon 404（browser P3-1）。均记录在规格 §4 与 `.tmp/team-research/*`。"
+    ]
+  },
+  {
     "version": "d.111.2.42.0",
     "date": "2026-11-08",
     "title": "模型页高级表单：来源设置 / 分组规则 / 模型属性",
