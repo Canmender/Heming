@@ -24,6 +24,7 @@ export type Page =
   | "staff"
   | "infohub"
   | "automations"
+  | "model"
   | "modelroute"
   | "plugins"
   | "memory"
@@ -72,6 +73,8 @@ export const DEFAULT_NAV_ORDER: NavPage[] = [
   "automations",
   // magpie 语义移植（d.84 模块）：候选链/策略/冷却/用量，与其它内置模块同组
   "modelroute",
+  // 模型页（d.99）：内核管理面（供应商/账号/分组/用量/备份/同步）的宿主页
+  "model",
   "plugins",
   "memory",
   "settings",

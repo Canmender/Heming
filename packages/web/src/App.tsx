@@ -51,6 +51,7 @@ const InfohubPage = lazy(() =>
 const AutomationPage = lazy(() =>
   import("./components/AutomationPage.js").then((m) => ({ default: m.AutomationPage })),
 );
+const ModelPage = lazy(() => import("./components/ModelPage.js").then((m) => ({ default: m.ModelPage })));
 const ModelRoutePage = lazy(() =>
   import("./components/ModelRoutePage.js").then((m) => ({ default: m.ModelRoutePage })),
 );
@@ -772,6 +773,9 @@ function AppShell({
     ) : currentPage === "automations" ? (
       // 自动化：本机定时同步/重扫，只在和鸣运行且信息中枢已连接时执行
       <AutomationPage />
+    ) : currentPage === "model" ? (
+      // 模型页（d.99）：内核管理面——供应商/订阅账号/分组/用量/备份/同步
+      <ModelPage />
     ) : currentPage === "modelroute" ? (
       // 模型路由（d.84，magpie 语义移植）：候选链、选路策略、冷却与用量
       <ModelRoutePage />

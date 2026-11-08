@@ -36,6 +36,11 @@ export const PALETTE_PAGES: PalettePage[] = [
     description: "候选链与选路策略、冷却与逐候选用量（magpie 语义移植）",
   },
   {
+    page: "model",
+    label: "模型",
+    description: "供应商、订阅账号、分组路由、用量、备份与同步（内核管理面）",
+  },
+  {
     page: "plugins",
     label: "插件区",
     description: "能力中心：插件包、技能池、工具与 MCP 服务",

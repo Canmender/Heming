@@ -75,6 +75,7 @@ const NAV_LABELS: Record<NavPage, string> = {
   staff: "幕僚",
   infohub: "信息中枢",
   automations: "自动化",
+  model: "模型",
   modelroute: "模型路由",
   plugins: "插件区",
   memory: "记忆区",

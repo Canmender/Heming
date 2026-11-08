@@ -2,6 +2,39 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.100.2.42.0（2026-11-08）— 导航栏「模型」页：内核管理面完整搬进和鸣
+
+模型内核（d.97 自建）已有全部能力，但界面只暴露了网关地址与模型目录。本轮新增导航页「模型」，
+把供应商、订阅账号、分组路由、模型、用量、备份与同步、库与搜索都做成和鸣自己的界面。
+
+### 页面
+
+- 九个分区：概览 / 供应商 / 订阅账号 / 分组路由 / 模型 / 用量 / 备份与同步 / 库与搜索 / 终端；
+- 供应商：预置（只要 Key）与自定义 OpenAI 兼容端点增删、测试、详情、模型查看；
+- 订阅账号：Claude / ChatGPT(Codex) / Gemini / Antigravity / Copilot 一键在真终端登录，表格看额度；
+- 分组路由：增删改 + smart/order/rotate/usage/pace/weight/free/fast/cheap/drain/expiring 策略；
+- 模型属性：显示名、思考档、协议；用量：周期账本与 CSV；备份/恢复口令在终端输入；
+- 多机同步：WebDAV / S3 / GitHub 的 now/on/off/set；库同步与搜索源增删；
+- 终端：白名单命令直跑（流式输出、stdin、取消），覆盖尚未表单化的高级命令。
+
+### 桥与安全
+
+- 主进程新增 `magpie-cli.js`：命令白名单（拒 uninstall/serve/tui/web/autostart/agent 改写）、
+  数组参数不过 shell、超时与整树回收、stdout/stderr 流式事件、stdin 写入；
+- 五个新通道（cli/start/input/kill/terminal）全部登记 `TRUSTED_CHANNELS`；
+- 交互式登录/备份口令走真终端窗口，口令与验证码不进入页面状态；
+- preload 暴露 `__heming_magpie.cli/cliStart/cliInput/cliKill/openTerminal/onCli`。
+
+### 导航
+
+- 新增宿主页 `model`（显示名「模型」），位于「资料与能力」组（模型路由之后）；
+- NavRail/命令面板/导航顺序/设置区导航列表/App 路由同步接入。
+
+### 验证
+
+- 主进程 `magpie-cli.test` 7 例；真实桥接内核（隔离 APPDATA + mock 供应商）跑通 providers/accounts/白名单拒绝/流式；
+- 渲染层 `magpieCli.test` 8 例、`ModelPage.test` 5 例；导航相关用例更新；web typecheck 零错。
+
 ## d.99.2.42.0（2026-11-08）— 关于页更新进度条：下载时看得见进度
 
 用户要求：「应用内部在关于页面更新的时候，弄一个进度条，让用户能看到已经更新了多少」。
