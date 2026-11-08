@@ -12,6 +12,27 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.110.2.42.0",
+    "date": "2026-11-08",
+    "title": "视觉贴近原版 + 用量面板",
+    "bullets": [
+      "模型页内容区浅灰画布 + 20px 白卡；",
+      "实时链路：客户端卡片按名称取色做渐变与描边；账号行回答中黑边高亮；枢纽改为圆形「鸣」标记 + 1.8s 呼吸环 + 状态 pill；",
+      "动效参数取自原版实现（rtflow .7s / rtlive 1.8s / 入场 .3–.4s / hover 200ms），减少动效时全关。",
+      "读内核 `/v1/magpie/usage` 与 `/v1/magpie/usage/requests`（与 magpie 用量页同源）；",
+      "概览：请求/失败、输入输出 token、费用（含未定价）、缓存读；",
+      "每日柱状图（请求 / Token 切换）；按模型 / Agent / 账号拆分（调用数、token、费用、占比条）；",
+      "最近请求表（时间/Agent/模型/tokens/耗时/状态）；页面内导出 CSV；",
+      "空态与读取失败都有提示，不画空图。",
+      "`magpieUsage` 9 例、`ModelUsageView` 4 例；全量 web 271 文件 / 3713 例通过；typecheck 零错。"
+    ],
+    "paragraphs": [
+      "视觉连线 0.7s 虚线流动 + 1.6s 载波光点；候选链卡片（叠头像/成员/策略）;",
+      "用量面板",
+      "验证"
+    ]
+  },
+  {
     "version": "d.109.2.42.0",
     "date": "2026-11-08",
     "title": "技能社区接入（虾评）+ 插件阶段 C 收尾（bundle 命令物化 / 市场直装 / target 对齐）",
