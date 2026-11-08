@@ -12,6 +12,29 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.114.3.46.0",
+    "date": "2026-11-08",
+    "title": "智能体改模型、网关密钥与会话入口",
+    "bullets": [
+      "`magpie ls` 解析本机智能体（名称/当前模型/配置路径）；每行输入 `provider/model` → 应用 → **二次确认** → 写入；",
+      "「恢复默认」= `<agent> default`；",
+      "未映射到命令的智能体只读；提示「下次启动生效、先关会话」；",
+      "白名单只允许 `<agent>`、`<agent> <model>`、`<agent> default`；字段编辑拒绝。",
+      "新建（名称/只读）、列出、轮换、删除；只读密钥只能查用量与配额。",
+      "「会话与启动器」：最近会话 / 近 7 天（`sessions`）；",
+      "「资源库」：查看共享指令；「路由分组」：查看全部（含自动组）。",
+      "新增 `sessions`、`gateway-key` 与内置智能体 id 集合（22 个），只放行模型改写三形态。",
+      "`magpie-cli` 9 例；`magpieAgents` 解析/校验；`ModelPage` 智能体与网关用例；全量 web/desktop 门禁见发版记录。"
+    ],
+    "paragraphs": [
+      "智能体改模型（新分区）",
+      "网关密钥",
+      "会话与其它入口",
+      "白名单",
+      "验证"
+    ]
+  },
+  {
     "version": "d.113.3.46.0",
     "date": "2026-11-08",
     "title": "发布链路补一道闸：未签名/摘要不符的界面插件包不得进目录",

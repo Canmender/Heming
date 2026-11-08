@@ -23,6 +23,15 @@ function installBridge(overrides: Record<string, unknown> = {}) {
         stderr: "",
       };
     }
+    if (args[0] === "ls") {
+      return {
+        ok: true,
+        stdout:
+          "  Claude Code       —  ·  effort —                         ~/.claude/settings.json\n" +
+          "  Codex             space-bunny  ·  effort high            ~/.codex/config.toml\n",
+        stderr: "",
+      };
+    }
     if (args[0] === "accounts") {
       return {
         ok: true,
@@ -110,7 +119,7 @@ describe("ModelPage · 结构与主路径", () => {
     installBridge();
     render(<ModelPage />);
     expect(screen.getByRole("heading", { name: "模型" })).toBeInTheDocument();
-    for (const label of ["模型", "来源", "运行"]) {
+    for (const label of ["模型", "智能体", "来源", "运行"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
     }
     expect(await screen.findByText("deepseek/deepseek-chat")).toBeInTheDocument();
@@ -243,5 +252,46 @@ describe("ModelPage · 高级表单（来源 / 分组规则 / 模型属性）", 
     fireEvent.change(screen.getByLabelText("模型显示名"), { target: { value: "Mock 一号" } });
     fireEvent.click(screen.getByRole("button", { name: "应用" }));
     await waitFor(() => expect(calls).toContainEqual(["model", "name", "mock/mock-model", "Mock 一号"]));
+  });
+});
+
+describe("ModelPage · 智能体改模型", () => {
+  it("列出本机智能体；应用与恢复默认都要二次确认", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体" }));
+    expect(await screen.findByText("Claude Code")).toBeInTheDocument();
+    expect(screen.getByText(/space-bunny/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Claude Code 模型"), {
+      target: { value: "deepseek/deepseek-chat" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "应用" })[0]!);
+    expect(screen.getByText(/把 Claude Code 的模型改成/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认写入" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["claude", "deepseek/deepseek-chat"]),
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "恢复默认" })[1]!);
+    expect(screen.getByText(/恢复 Codex 原来的模型/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认写入" }));
+    await waitFor(() => expect(calls).toContainEqual(["codex", "default"]));
+  });
+});
+
+describe("ModelPage · 网关密钥与会话", () => {
+  it("新建网关密钥与查看会话都走对应命令", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
+    fireEvent.click(screen.getByText("网关密钥"));
+    fireEvent.change(screen.getByLabelText("新密钥名称"), { target: { value: "笔记本" } });
+    fireEvent.click(screen.getByRole("button", { name: "新建密钥" }));
+    await waitFor(() => expect(calls).toContainEqual(["gateway-key", "add", "笔记本"]));
+
+    fireEvent.click(screen.getByText("会话与启动器"));
+    fireEvent.click(screen.getByRole("button", { name: "查看最近会话" }));
+    await waitFor(() => expect(calls).toContainEqual(["sessions", "--limit", "10"]));
   });
 });

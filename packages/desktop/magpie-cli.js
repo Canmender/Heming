@@ -40,7 +40,42 @@ const ALLOWED_COMMANDS = new Set([
   "rename",
   "rm",
   "ls",
+  "sessions",
+  "gateway-key",
 ]);
+
+/**
+ * 可以改模型的本机智能体（magpie 的 agent 命令）。
+ *
+ * 只开放「查看 / 设模型 / 恢复默认」三种形态——这些命令会改本机其他 CLI 的配置，
+ * 不能把 magpie 的全部 agent 字段编辑透出去玩；模型 id 也只接受安全字符。
+ */
+const AGENT_COMMANDS = new Set([
+  "claude",
+  "codex",
+  "gemini",
+  "cursor",
+  "copilot",
+  "antigravity",
+  "opencode",
+  "mimo",
+  "qoder",
+  "workbuddy",
+  "dsh",
+  "crush",
+  "goose",
+  "cline",
+  "droid",
+  "devin",
+  "pi",
+  "raft",
+  "atomcode",
+  "commandcode",
+  "codebuddy",
+  "kiro",
+]);
+
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,200}$/;
 
 /** 交互式命令（需要用户输入/浏览器 OAuth），走「真终端」打开。 */
 const INTERACTIVE = [
@@ -66,6 +101,18 @@ function validateCliArgs(args) {
     if (arg.length > 4000) return { ok: false, reason: "参数过长" };
   }
   const head = args[0];
+  if (AGENT_COMMANDS.has(head)) {
+    // 查看一个智能体
+    if (args.length === 1) return { ok: true };
+    // <agent> default：断开 magpie，恢复该智能体原来的模型
+    if (args.length === 2 && args[1] === "default") return { ok: true };
+    // <agent> <provider/model>：设模型
+    if (args.length === 2 && MODEL_ID.test(args[1])) return { ok: true };
+    return {
+      ok: false,
+      reason: "智能体命令只支持：查看、<智能体> <模型>、<智能体> default",
+    };
+  }
   if (!ALLOWED_COMMANDS.has(head)) {
     return { ok: false, reason: `不允许的命令：${head}（模型页只开放管理命令）` };
   }
@@ -214,10 +261,22 @@ function createMagpieCli(opts) {
     return true;
   }
 
-  return { run, start, begin, input, kill, validateCliArgs, needsTerminal, terminalCommand, activeRuns: () => [...runs.keys()] };
+  return {
+    run,
+    start,
+    begin,
+    input,
+    kill,
+    validateCliArgs,
+    needsTerminal,
+    terminalCommand,
+    agents: () => [...AGENT_COMMANDS],
+    activeRuns: () => [...runs.keys()],
+  };
 }
 
 module.exports = {
+  AGENT_COMMANDS,
   ALLOWED_COMMANDS,
   INTERACTIVE,
   validateCliArgs,

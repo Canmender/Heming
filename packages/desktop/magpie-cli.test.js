@@ -24,12 +24,26 @@ test("白名单：管理命令放行，危险/无关命令拒绝", () => {
   for (const cmd of ["providers", "provider", "accounts", "groups", "usage", "backup", "webdav", "settings"]) {
     assert.equal(validateCliArgs([cmd]).ok, true, cmd);
   }
-  for (const cmd of ["uninstall", "serve", "tui", "web", "autostart", "claude", "rm-shell"]) {
+  for (const cmd of ["uninstall", "serve", "tui", "web", "autostart", "rm-shell"]) {
     assert.equal(validateCliArgs([cmd]).ok, false, cmd);
   }
   assert.equal(validateCliArgs([]).ok, false);
   assert.equal(validateCliArgs(["provider", "a\0b"]).ok, false);
   assert.equal(validateCliArgs([123]).ok, false);
+});
+
+test("智能体命令：只允许查看/设模型/恢复默认，字段编辑与怪参数被拒", () => {
+  assert.equal(validateCliArgs(["claude"]).ok, true);
+  assert.equal(validateCliArgs(["claude", "deepseek/deepseek-chat"]).ok, true);
+  assert.equal(validateCliArgs(["codex", "default"]).ok, true);
+  assert.equal(validateCliArgs(["claude", "effort", "high"]).ok, false);
+  assert.equal(validateCliArgs(["claude", "model; rm -rf"]).ok, false);
+  assert.equal(validateCliArgs(["claude", "--help"]).ok, false);
+});
+
+test("网关密钥与会话命令放行", () => {
+  assert.equal(validateCliArgs(["gateway-key", "list"]).ok, true);
+  assert.equal(validateCliArgs(["sessions", "--limit", "5"]).ok, true);
 });
 
 test("交互式命令走真终端（账号登录/备份口令）", () => {

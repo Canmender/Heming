@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.114.3.46.0",
+    "date": "2026-11-08",
+    "title": "能在这里给本机 Claude Code / Codex 选模型了",
+    "bullets": [
+      "「智能体」页会列出本机装着的 Claude Code、Codex 等，给它们选一个模型并确认后写进它们自己的配置；「恢复默认」可撤回。",
+      "写入前有二次确认，只在下一次启动生效；字段编辑之类的高风险操作不支持。",
+      "也可以给其他设备或 CI 发一条网关密钥（可只读），并在这里看最近会话与自动分组。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.113.3.46.0",
     "date": "2026-11-08",
     "title": "发布更稳：坏插件包不会再发出去",

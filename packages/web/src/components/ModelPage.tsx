@@ -17,6 +17,7 @@ import {
   type MagpieCliEvent,
   type ProviderRow,
 } from "../lib/magpieCli.js";
+import { isModelId, parseAgents, type LocalAgent } from "../lib/magpieAgents.js";
 
 /**
  * 模型页（d.104）：三个分区，加来源 → 选模型 → 看它怎么跑。
@@ -29,10 +30,11 @@ import {
  * - 动效克制：卡片 200ms 抬起、分区切换 300ms 淡入，尊重「减少动态效果」。
  */
 
-type TabKey = "models" | "sources" | "run";
+type TabKey = "models" | "agents" | "sources" | "run";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "models", label: "模型" },
+  { key: "agents", label: "智能体" },
   { key: "sources", label: "来源" },
   { key: "run", label: "运行" },
 ];
@@ -103,6 +105,13 @@ export function ModelPage() {
   const [output, setOutput] = useState<{ title: string; text: string; ok: boolean } | null>(null);
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  /** 本机智能体：ls 输出解析；改写会写入它们的配置文件，所以有二次确认。 */
+  const [agents, setAgents] = useState<LocalAgent[]>([]);
+  const [agentConfirm, setAgentConfirm] = useState<{ id: string; name: string; model: string } | null>(
+    null,
+  );
+  /** 每行待应用的模型输入（按智能体展示名索引，不持久化）。 */
+  const [agentModels, setAgentModels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [modelQuery, setModelQuery] = useState("");
   const [presetKey, setPresetKey] = useState<{ id: string; key: string } | null>(null);
@@ -141,6 +150,8 @@ export function ModelPage() {
   const [syncValues, setSyncValues] = useState("");
   const [searchForm, setSearchForm] = useState({ api: "", key: "", target: "" });
   const [termCommand, setTermCommand] = useState("");
+  /** 网关密钥（共享给其他设备/CI 用）的输入。 */
+  const [gatewayKeyForm, setGatewayKeyForm] = useState({ name: "", readOnly: false, target: "" });
 
   useEffect(() => {
     void ensureDesktopGateway();
@@ -172,6 +183,12 @@ export function ModelPage() {
     if (!cli) return;
     const result = await cli.cli(["accounts", "--json"]);
     setAccounts(parseAccounts(result.stdout || ""));
+  }, [cli]);
+
+  const loadAgents = useCallback(async () => {
+    if (!cli) return;
+    const result = await cli.cli(["ls"]);
+    setAgents(parseAgents(result.stdout || ""));
   }, [cli]);
 
   const run = useCallback(
@@ -224,7 +241,7 @@ export function ModelPage() {
     if (!cli) return;
     let alive = true;
     void (async () => {
-      await Promise.all([loadProviders(), loadAccounts()]);
+      await Promise.all([loadProviders(), loadAccounts(), loadAgents()]);
       if (alive) setLoading(false);
     })();
     return () => {
@@ -269,6 +286,10 @@ export function ModelPage() {
     const started = await cli.cliStart(args);
     if (!started.ok) setOutput({ title: "命令", text: started.error || "执行失败", ok: false });
   };
+
+  const agentModelOf = (agent: LocalAgent) => agentModels[agent.name] ?? "";
+  const setAgentModelInput = (name: string, value: string) =>
+    setAgentModels((current) => ({ ...current, [name]: value }));
 
   const providerOf = (model: string) => (model.includes("/") ? model.split("/")[0]! : "自定义");
 
@@ -448,6 +469,126 @@ export function ModelPage() {
                 应用
               </button>
             </details>
+          </section>
+        )}
+
+        {/* ── 智能体 ─────────────────────────────────────────── */}
+        {tab === "agents" && (
+          <section aria-label="智能体" className="space-y-4">
+            <div className="rounded-[20px] border border-[#fde6c8] bg-[#fffaf2] p-4">
+              <div className="text-[13px] font-bold">改模型会写入本机其他工具的配置</div>
+              <p className="mt-1 ui-caption">
+                这里给本机安装的 Claude Code、Codex 等选模型；模型服务会把网关地址与模型写进它们自己的配置文件。
+                已打开的会话保持原模型，下次启动生效；「恢复默认」会撤掉模型服务写入的内容。
+              </p>
+            </div>
+
+            <div className="rounded-[20px] border border-line bg-white p-4">
+              <div className="flex items-center justify-between">
+                <div className="text-[13px] font-bold">本机智能体（{agents.length}）</div>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  disabled={!cli}
+                  onClick={() => void loadAgents()}
+                >
+                  重新检测
+                </button>
+              </div>
+              <ul className="mt-2 divide-y divide-line">
+                {agents.map((agent) => (
+                  <li key={`${agent.name}-${agent.configPath}`} className="py-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Avatar name={agent.name} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-bold">{agent.name}</span>
+                        <span className="block truncate ui-caption">
+                          当前：{agent.model}
+                          {agent.detail ? ` · ${agent.detail}` : ""} · {agent.configPath}
+                        </span>
+                      </span>
+                      {agent.id ? (
+                        <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+                          <input
+                            aria-label={`${agent.name} 模型`}
+                            className="ui-input w-48 font-mono text-[12px]"
+                            placeholder="provider/model"
+                            value={agentModelOf(agent)}
+                            onChange={(event) => setAgentModelInput(agent.name, event.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="ui-btn ui-btn-sm ui-btn-primary"
+                            disabled={!cli || !isModelId(agentModelOf(agent))}
+                            onClick={() => {
+                              const model = agentModelOf(agent).trim();
+                              if (!agent.id || !model) return;
+                              setAgentConfirm({ id: agent.id, name: agent.name, model });
+                            }}
+                          >
+                            应用
+                          </button>
+                          <button
+                            type="button"
+                            className="ui-btn ui-btn-sm ui-btn-ghost"
+                            disabled={!cli}
+                            onClick={() => {
+                              if (!agent.id) return;
+                              setAgentConfirm({ id: agent.id, name: agent.name, model: "default" });
+                            }}
+                          >
+                            恢复默认
+                          </button>
+                        </span>
+                      ) : (
+                        <span className="shrink-0 ui-caption">只读（没有对应的模型命令）</span>
+                      )}
+                    </div>
+                  </li>
+                ))}
+                {agents.length === 0 && (
+                  <li className="py-2 ui-caption">
+                    没有检测到本机智能体。装一个 Claude Code / Codex 之类的工具后点「重新检测」。
+                  </li>
+                )}
+              </ul>
+
+              {agentConfirm && (
+                <div role="alert" className="rta-enter mt-3 rounded-xl border border-[#fde6c8] bg-[#fffaf2] p-3">
+                  <div className="text-[12px] font-bold">
+                    {agentConfirm.model === "default"
+                      ? `恢复 ${agentConfirm.name} 原来的模型？`
+                      : `把 ${agentConfirm.name} 的模型改成 ${agentConfirm.model}？`}
+                  </div>
+                  <p className="mt-1 ui-caption">
+                    会写入该工具自己的配置文件（下一次启动生效）。确认前请先关掉正在运行的会话。
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-sm ui-btn-primary"
+                      onClick={() => {
+                        const target = agentConfirm;
+                        setAgentConfirm(null);
+                        void run(
+                          target.model === "default" ? "恢复默认" : "设置模型",
+                          [target.id, target.model],
+                        ).then(() => void loadAgents());
+                      }}
+                    >
+                      确认写入
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-sm ui-btn-ghost"
+                      onClick={() => setAgentConfirm(null)}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </section>
         )}
 
@@ -1029,6 +1170,9 @@ export function ModelPage() {
                 <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void run("同步库", ["library", "sync"])}>
                   同步到智能体
                 </button>
+                <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void run("库指令", ["library", "instructions"])}>
+                  查看共享指令
+                </button>
               </div>
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
                 <input
@@ -1070,6 +1214,101 @@ export function ModelPage() {
               >
                 执行
               </button>
+            </details>
+
+            <details className="rounded-[20px] border border-line bg-white p-4">
+              <summary className="cursor-pointer text-[13px] font-bold">网关密钥</summary>
+              <p className="mt-1 ui-caption">
+                给其他设备、CI 或局域网内的工具发一条调用密钥；只读密钥只能查用量与配额。
+              </p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <input
+                  aria-label="新密钥名称"
+                  className="ui-input"
+                  placeholder="名称（如 我的笔记本）"
+                  value={gatewayKeyForm.name}
+                  onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, name: event.target.value })}
+                />
+                <label className="ui-caption flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={gatewayKeyForm.readOnly}
+                    onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, readOnly: event.target.checked })}
+                  />
+                  只读
+                </label>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-primary"
+                  disabled={!cli || !gatewayKeyForm.name.trim()}
+                  onClick={() => {
+                    const args = ["gateway-key", "add", gatewayKeyForm.name.trim()];
+                    if (gatewayKeyForm.readOnly) args.push("--read-only");
+                    void run("新建网关密钥", args);
+                  }}
+                >
+                  新建密钥
+                </button>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  disabled={!cli}
+                  onClick={() => void run("网关密钥", ["gateway-key", "list"])}
+                >
+                  列出密钥
+                </button>
+                <input
+                  aria-label="密钥 ID"
+                  className="ui-input"
+                  placeholder="密钥 ID（轮换/删除用）"
+                  value={gatewayKeyForm.target}
+                  onChange={(event) => setGatewayKeyForm({ ...gatewayKeyForm, target: event.target.value })}
+                />
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  disabled={!cli || !gatewayKeyForm.target.trim()}
+                  onClick={() => void run("轮换密钥", ["gateway-key", "rotate", gatewayKeyForm.target.trim()])}
+                >
+                  轮换
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-danger"
+                  disabled={!cli || !gatewayKeyForm.target.trim()}
+                  onClick={() => void run("删除密钥", ["gateway-key", "remove", gatewayKeyForm.target.trim()])}
+                >
+                  删除
+                </button>
+              </div>
+            </details>
+
+            <details className="rounded-[20px] border border-line bg-white p-4">
+              <summary className="cursor-pointer text-[13px] font-bold">会话与启动器</summary>
+              <p className="mt-1 ui-caption">
+                看各智能体最近的会话记录；启动器命令由模型服务提供（终端里 `claude-magpie` 之类），
+                只影响那一次会话，不改配置。
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  disabled={!cli}
+                  onClick={() => void run("最近会话", ["sessions", "--limit", "10"])}
+                >
+                  查看最近会话
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  disabled={!cli}
+                  onClick={() => void run("会话（7 天）", ["sessions", "--days", "7", "--limit", "20"])}
+                >
+                  近 7 天
+                </button>
+              </div>
             </details>
 
             <details className="rounded-[20px] border border-line bg-white p-4">
