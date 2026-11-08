@@ -181,6 +181,22 @@ describe("界面插件包（d.94 bundle）", () => {
     expect(catalog.list()[0].package).toBeUndefined();
     expect(catalog.readPackage("acme.plain", "1.0.0")).toBeNull();
   });
+
+  it("同版本 package.tgz 不可变（P1-2）：字节不同返回 conflict，相同幂等且不重写", () => {
+    writeBundle(root, "heming.immutable", "1.0.0", false);
+    const catalog = createPluginCatalog({ dir: root });
+
+    expect(catalog.publishPackage("heming.immutable", "1.0.0", Buffer.from("pkg-v1"))).toMatchObject({
+      created: true,
+    });
+    // 相同字节：幂等，created=false
+    expect(catalog.publishPackage("heming.immutable", "1.0.0", Buffer.from("pkg-v1"))).toMatchObject({
+      created: false,
+    });
+    // 不同字节：conflict，且已存字节不被覆盖
+    expect(catalog.publishPackage("heming.immutable", "1.0.0", Buffer.from("pkg-v2"))).toBe("conflict");
+    expect(catalog.readPackage("heming.immutable", "1.0.0")?.bytes.toString()).toBe("pkg-v1");
+  });
 });
 
 describe("GET /api/plugins（公开）", () => {
@@ -367,6 +383,42 @@ describe("仓库 REST（d.95）", () => {
       .set("x-publish-key", KEY)
       .send({ ...manifest, version: "1.0.1" });
     expect(next.status).toBe(201);
+  });
+
+  it("P1-2：PUT .../package 同版本改字节 409，相同字节 200 幂等", async () => {
+    const app = appWithRepo();
+    const manifest = v4("acme.pkg", "1.0.0", { distribution: "bundle" });
+    expect(
+      (await request(app).put("/api/plugins/acme.pkg/1.0.0").set("x-publish-key", KEY).send(manifest)).status,
+    ).toBe(201);
+
+    const first = await request(app)
+      .put("/api/plugins/acme.pkg/1.0.0/package")
+      .set("x-publish-key", KEY)
+      .set("content-type", "application/octet-stream")
+      .send(Buffer.from("tgz-v1"));
+    expect(first.status).toBe(201);
+    expect(first.body).toMatchObject({ created: true });
+
+    const again = await request(app)
+      .put("/api/plugins/acme.pkg/1.0.0/package")
+      .set("x-publish-key", KEY)
+      .set("content-type", "application/octet-stream")
+      .send(Buffer.from("tgz-v1"));
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ created: false });
+
+    const conflict = await request(app)
+      .put("/api/plugins/acme.pkg/1.0.0/package")
+      .set("x-publish-key", KEY)
+      .set("content-type", "application/octet-stream")
+      .send(Buffer.from("tgz-v2"));
+    expect(conflict.status).toBe(409);
+    expect(String(conflict.body.error)).toContain("同版本包内容不可变");
+
+    // 已存字节保持不变
+    const stored = createPluginCatalog({ dir: root }).readPackage("acme.pkg", "1.0.0");
+    expect(stored?.bytes.toString()).toBe("tgz-v1");
   });
 
   it("同内容但格式不同（缩进/换行）也幂等 200，且不重写已存字节", async () => {

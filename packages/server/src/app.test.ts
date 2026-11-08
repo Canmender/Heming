@@ -410,7 +410,7 @@ describe("CORS 兜底（浏览器直连场景，手写中间件无依赖）", ()
     expect(res.status).toBe(204);
     expect(res.headers["access-control-allow-origin"]).toBe("*");
     expect(res.headers["access-control-allow-methods"]).toBe("GET,POST,PUT,DELETE,OPTIONS");
-    expect(res.headers["access-control-allow-headers"]).toBe("Authorization,Content-Type");
+    expect(res.headers["access-control-allow-headers"]).toBe("Authorization,Content-Type,x-heming-client");
     expect(res.body).toEqual({});
   });
 
@@ -428,7 +428,7 @@ describe("CORS 兜底（浏览器直连场景，手写中间件无依赖）", ()
       .set("Origin", "http://elsewhere.example");
     expect(res.status).toBe(401);
     expect(res.headers["access-control-allow-origin"]).toBe("*");
-    expect(res.headers["access-control-allow-headers"]).toBe("Authorization,Content-Type");
+    expect(res.headers["access-control-allow-headers"]).toBe("Authorization,Content-Type,x-heming-client");
   });
 });
 

@@ -48,6 +48,12 @@ const CATEGORIES_TTL_MS = 10 * 60 * 1000;
 const LIST_TTL_MS = 30 * 1000;
 const CACHE_MAX_ENTRIES = 50;
 const UNSAFE_DOWNLOAD = "下载地址不安全，已拒绝";
+/** 一键注册的本机限流：每 IP 10 分钟最多 5 次（内存时间窗，service 重启即清空）。 */
+const REGISTER_WINDOW_MS = 10 * 60 * 1000;
+const REGISTER_MAX_ATTEMPTS = 5;
+/** 只允许和鸣客户端触发「上游建号」：必须带自定义头；有 Origin 时还必须来自本机/Electron。 */
+const HEMING_CLIENT_HEADER = "x-heming-client";
+const LOOPBACK_ORIGIN_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 /** 技能 id：上游是 uuid，但只按「URL 段安全」校验，不绑死格式（换源也能用）。 */
 const SKILL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -158,11 +164,23 @@ function normalizeSkill(raw: unknown): SkillHubSkill | null {
   };
 }
 
+/** 详情页 homepage 只保留 http(s) 绝对地址：上游是第三方内容，不能让 web 渲染 `javascript:`/`data:` 链接。 */
+function safeHomepage(value: unknown): string | undefined {
+  const candidate = text(value, 500).trim();
+  if (!candidate) return undefined;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "http:" || url.protocol === "https:" ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** 详情：在列表字段上补 created/version/security/homepage。 */
 function normalizeDetail(raw: Record<string, unknown>, skill: SkillHubSkill): SkillHubDetail {
   const securityStatus = text(raw.security_status, 32);
   const securityReport = text(raw.security_report, 20_000);
-  const homepage = text(raw.homepage, 500);
+  const homepage = safeHomepage(raw.homepage);
   return {
     ...skill,
     createdAt: text(raw.created_at, 40),
@@ -418,6 +436,36 @@ function queryText(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+/**
+ * 「是否和鸣客户端」的最小防线（P1-5）：自定义头 + Origin 约束。
+ *
+ * 不能只靠 CORS：`/register` 会**在上游真的建号**，一旦被任意网页/脚本直接打，
+ * 就是替别人刷账号。自定义头能挡住浏览器里的跨站表单/图片请求；Origin 再收一道到本机。
+ */
+function isHemingClient(req: Request): boolean {
+  if (String(req.header(HEMING_CLIENT_HEADER) ?? "").trim() !== "1") return false;
+  const origin = String(req.header("origin") ?? "").trim();
+  if (!origin) return true; // 非浏览器客户端（curl/桌面主进程）没有 Origin
+  if (origin === "null") return true; // Electron file:// / 沙箱页面
+  try {
+    const url = new URL(origin);
+    if (url.protocol === "app:") return true;
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    if (LOOPBACK_ORIGIN_HOSTS.has(url.hostname.replace(/^\[|\]$/g, ""))) return true;
+    // 同源（部署在远端域名/端口的 Web 版）：Origin 与本次请求的 Host 一致即视为已知来源。
+    const host = String(req.header("host") ?? "").trim().toLowerCase();
+    return Boolean(host) && url.host.toLowerCase() === host;
+  } catch {
+    return false;
+  }
+}
+
+/** 限流键：请求方 IP（supertest/本机是 `::ffff:127.0.0.1`，归一化成 IPv4 便于测试与日志）。 */
+function clientKeyOf(req: Request): string {
+  const raw = String(req.ip ?? req.socket.remoteAddress ?? "unknown");
+  return raw.startsWith("::ffff:") ? raw.slice("::ffff:".length) : raw;
+}
+
 function positiveInt(value: unknown, fallback: number): number {
   const numeric = typeof value === "string" ? Number(value) : typeof value === "number" ? value : NaN;
   return Number.isFinite(numeric) && numeric >= 1 ? Math.floor(numeric) : fallback;
@@ -447,6 +495,8 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
   /** 只缓存公开只读接口：分类 10 分钟、列表 30 秒（LRU 50 条）。 */
   const categoriesCache = createTtlCache<string[]>({ ttlMs: CATEGORIES_TTL_MS, max: 1, now });
   const listCache = createTtlCache<SkillHubPage>({ ttlMs: LIST_TTL_MS, max: CACHE_MAX_ENTRIES, now });
+  /** register 的本机限流窗口（P1-5）：只服务这一个接口，不波及列表/详情/下载。 */
+  const registerAttempts = new Map<string, number[]>();
   const router = Router();
 
   function fail(res: Response, status: number, error: string): void {
@@ -456,6 +506,23 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
   /** 上游限流：中文文案 + 保留 Retry-After（不把上游英文错误体透给用户）。 */
   function failRateLimited(res: Response, retryAfter: string | null, message = "上游限流，请稍后重试"): void {
     res.status(429).json({ error: message, ...(retryAfter ? { retryAfter } : {}) });
+  }
+
+  /**
+   * 本机限流：每 IP 10 分钟最多 5 次；命中返回 true（调用方 429）。
+   * 只统计通过客户端校验的 register 调用，正常用一次不会影响其它接口。
+   */
+  function registerLimited(req: Request): boolean {
+    const key = clientKeyOf(req);
+    const windowStart = now() - REGISTER_WINDOW_MS;
+    const history = (registerAttempts.get(key) ?? []).filter((at) => at > windowStart);
+    if (history.length >= REGISTER_MAX_ATTEMPTS) {
+      registerAttempts.set(key, history);
+      return true;
+    }
+    history.push(now());
+    registerAttempts.set(key, history);
+    return false;
   }
 
   /** 调上游 JSON 接口：统一超时 + 非 JSON 容错；网络错误交给调用方映射 502。 */
@@ -733,10 +800,19 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
       fail(res, 503, CLOSED);
       return;
     }
+    // P1-5：上游会真的建号，先确认调用方是和鸣客户端（自定义头 + 本机 Origin）。
+    if (!isHemingClient(req)) {
+      fail(res, 403, "仅限和鸣客户端调用");
+      return;
+    }
     const body = isObject(req.body) ? req.body : null;
     const name = typeof body?.name === "string" ? body.name.trim() : "";
     if (!name || name.length > 128 || !REGISTER_NAME_RE.test(name)) {
       fail(res, 400, "名称不合法：1–128 个字符，只能包含中英文、数字、空格、下划线或连字符");
+      return;
+    }
+    if (registerLimited(req)) {
+      fail(res, 429, "创建账号过于频繁，请稍后再试");
       return;
     }
     let upstream: UpstreamResponse;

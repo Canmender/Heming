@@ -286,6 +286,28 @@ describe("GET /api/skill-hub/skills/:id（详情）", () => {
     expect(badId.status).toBe(400);
     expect(calls).toHaveLength(1); // 坏 id 不打上游
   });
+
+  it("homepage 只保留 http(s)：javascript:/data:/ftp:/相对地址一律丢弃", async () => {
+    const cases: Array<[unknown, boolean]> = [
+      ["https://xiaping.coze.com/skills/abc", true],
+      ["http://example.com/x", true],
+      ["javascript:alert(1)", false],
+      ["data:text/html,<script>alert(1)</script>", false],
+      ["ftp://example.com/x", false],
+      ["/relative/path", false],
+      ["", false],
+      [null, false],
+    ];
+    for (const [homepage, kept] of cases) {
+      const { fetchImpl } = makeFetch(() => ({
+        body: { success: true, data: rawSkill({ homepage }) },
+      }));
+      const res = await request(makeApp(fetchImpl)).get("/api/skill-hub/skills/abc");
+      expect(res.status).toBe(200);
+      if (kept) expect(res.body.homepage).toBe(homepage);
+      else expect(res.body).not.toHaveProperty("homepage");
+    }
+  });
 });
 
 describe("GET /api/skill-hub/skills/:id/download（下载 + 解包）", () => {
@@ -392,6 +414,12 @@ describe("GET /api/skill-hub/skills/:id/download（下载 + 解包）", () => {
 });
 
 describe("POST /api/skill-hub/register（注册）", () => {
+  const CLIENT_HEADER = "x-heming-client";
+
+  function postRegister(app: ReturnType<typeof makeApp>, body: unknown) {
+    return request(app).post("/api/skill-hub/register").set(CLIENT_HEADER, "1").send(body);
+  }
+
   it("成功：只回 Key 与上游最终用户名", async () => {
     let sentBody: unknown;
     const { fetchImpl } = makeFetch((_url, init) => {
@@ -406,9 +434,7 @@ describe("POST /api/skill-hub/register（注册）", () => {
         },
       };
     });
-    const res = await request(makeApp(fetchImpl))
-      .post("/api/skill-hub/register")
-      .send({ name: "测试Agent" });
+    const res = await postRegister(makeApp(fetchImpl), { name: "测试Agent" });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ apiKey: "sk_abc12345", name: "可爱的测试Agent" });
     expect(sentBody).toEqual({ name: "测试Agent" });
@@ -418,7 +444,7 @@ describe("POST /api/skill-hub/register（注册）", () => {
     const { fetchImpl, calls } = makeFetch(() => ({ body: { success: true, data: {} } }));
     const app = makeApp(fetchImpl);
     for (const name of ["", "   ", "bad<script>", "x".repeat(129)]) {
-      const res = await request(app).post("/api/skill-hub/register").send({ name });
+      const res = await postRegister(app, { name });
       expect(res.status).toBe(400);
     }
     expect(calls).toHaveLength(0);
@@ -426,17 +452,93 @@ describe("POST /api/skill-hub/register（注册）", () => {
 
   it("上游 429 原样分类；400 带上游错误文案", async () => {
     const limited = makeFetch(() => ({ status: 429, body: { success: false } }));
-    const res1 = await request(makeApp(limited.fetchImpl))
-      .post("/api/skill-hub/register")
-      .send({ name: "测试Agent" });
+    const res1 = await postRegister(makeApp(limited.fetchImpl), { name: "测试Agent" });
     expect(res1.status).toBe(429);
 
     const rejected = makeFetch(() => ({ status: 400, body: { success: false, error: "用户名含敏感词" } }));
-    const res2 = await request(makeApp(rejected.fetchImpl))
-      .post("/api/skill-hub/register")
-      .send({ name: "测试Agent" });
+    const res2 = await postRegister(makeApp(rejected.fetchImpl), { name: "测试Agent" });
     expect(res2.status).toBe(400);
     expect(res2.body.error).toBe("用户名含敏感词");
+  });
+
+  it("缺少 x-heming-client 头 → 403「仅限和鸣客户端调用」，且不打上游", async () => {
+    const { fetchImpl, calls } = makeFetch(() => ({
+      body: { success: true, data: { api_key: "sk_abc12345" } },
+    }));
+    const res = await request(makeApp(fetchImpl))
+      .post("/api/skill-hub/register")
+      .send({ name: "测试Agent" });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain("仅限和鸣客户端");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("带自定义头但 Origin 不是本机 → 403；本机 Origin 放行", async () => {
+    const { fetchImpl, calls } = makeFetch(() => ({
+      body: { success: true, data: { user: { name: "测试Agent" }, api_key: "sk_abc12345" } },
+    }));
+    const app = makeApp(fetchImpl);
+
+    const evil = await request(app)
+      .post("/api/skill-hub/register")
+      .set(CLIENT_HEADER, "1")
+      .set("origin", "https://evil.example.com")
+      .send({ name: "测试Agent" });
+    expect(evil.status).toBe(403);
+    expect(calls).toHaveLength(0);
+
+    const local = await request(app)
+      .post("/api/skill-hub/register")
+      .set(CLIENT_HEADER, "1")
+      .set("origin", "http://localhost:5173")
+      .send({ name: "测试Agent" });
+    expect(local.status).toBe(200);
+    expect(calls).toHaveLength(1);
+
+    // 同源（远端部署的 Web 版）：Origin 与 Host 一致视为已知来源
+    const sameOrigin = await request(app)
+      .post("/api/skill-hub/register")
+      .set(CLIENT_HEADER, "1")
+      .set("host", "heming.example.com")
+      .set("origin", "https://heming.example.com")
+      .send({ name: "测试Agent" });
+    expect(sameOrigin.status).toBe(200);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("本机限流：10 分钟内第 6 次 → 429，窗口滑过后恢复", async () => {
+    let clockNow = Date.parse("2026-11-08T10:00:00.000Z");
+    let registerCalls = 0;
+    const { fetchImpl } = makeFetch((url) => {
+      if (!url.endsWith("/api/auth/register")) {
+        return { body: { success: true, skills: [], total: 0 } }; // 列表接口不参与计数
+      }
+      registerCalls += 1;
+      return {
+        body: { success: true, data: { user: { name: "测试Agent" }, api_key: "sk_abc12345" } },
+      };
+    });
+    const app = makeApp(fetchImpl, true, { now: () => clockNow });
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const res = await postRegister(app, { name: "测试Agent" });
+      expect(res.status, `第 ${attempt} 次`).toBe(200);
+    }
+    expect(registerCalls).toBe(5);
+
+    const sixth = await postRegister(app, { name: "测试Agent" });
+    expect(sixth.status).toBe(429);
+    expect(sixth.body.error).toContain("创建账号过于频繁");
+    expect(registerCalls).toBe(5); // 限流后不打上游
+
+    // 限流不影响其它接口
+    expect((await request(app).get("/api/skill-hub/skills")).status).toBe(200);
+
+    // 10 分钟窗口滑过后恢复
+    clockNow += 10 * 60 * 1000 + 1;
+    const afterWindow = await postRegister(app, { name: "测试Agent" });
+    expect(afterWindow.status).toBe(200);
+    expect(registerCalls).toBe(6);
   });
 });
 
@@ -729,8 +831,14 @@ describe("上游 TTL 缓存", () => {
     expect(calls.filter((call) => call.url.endsWith("/download"))).toHaveLength(2);
     expect(calls.filter((call) => call.url === "https://cdn.test/p.zip")).toHaveLength(2);
 
-    await request(app).post("/api/skill-hub/register").send({ name: "测试Agent" });
-    await request(app).post("/api/skill-hub/register").send({ name: "测试Agent" });
+    await request(app)
+      .post("/api/skill-hub/register")
+      .set("x-heming-client", "1")
+      .send({ name: "测试Agent" });
+    await request(app)
+      .post("/api/skill-hub/register")
+      .set("x-heming-client", "1")
+      .send({ name: "测试Agent" });
     expect(calls.filter((call) => call.url.endsWith("/api/auth/register"))).toHaveLength(2);
   });
 });

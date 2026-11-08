@@ -63,7 +63,7 @@ export function envFlagEnabled(value: string | undefined): boolean {
 function cors(req: Request, res: Response, next: NextFunction): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,x-heming-client");
   if (req.method === "OPTIONS") {
     res.status(204).end();
     return;
@@ -301,6 +301,10 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       }
       if (result === "missing_manifest") {
         res.status(409).json({ error: "先发布 plugin.json 再发布 package.tgz（同 id/版本）" });
+        return;
+      }
+      if (result === "conflict") {
+        res.status(409).json({ error: "同版本包内容不可变，请提升版本号" });
         return;
       }
       res.status(result.created ? 201 : 200).json(result);

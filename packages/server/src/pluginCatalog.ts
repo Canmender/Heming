@@ -65,7 +65,13 @@ export interface PluginCatalog {
     id: string,
     version: string,
     bytes: Buffer,
-  ): { created: boolean; sha256: string; size: number } | "invalid_id" | "invalid_version" | "too_large" | "missing_manifest";
+  ):
+    | { created: boolean; sha256: string; size: number }
+    | "invalid_id"
+    | "invalid_version"
+    | "too_large"
+    | "missing_manifest"
+    | "conflict";
   /** 某个插件在仓库里的全部版本（新→旧）；不存在返回 null。 */
   detail(id: string): PluginCatalogDetail | null;
   /**
@@ -342,13 +348,31 @@ export function createPluginCatalog(opts: { dir: string }): PluginCatalog {
       const targetDir = join(dir, id, version);
       if (!existsSync(join(targetDir, "plugin.json"))) return "missing_manifest";
       const targetFile = join(targetDir, "package.tgz");
-      const created = !existsSync(targetFile);
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      if (existsSync(targetFile)) {
+        /**
+         * 版本内容不可变（P1-2，与清单 PUT 的 409 同一条不变量）：同 id+version 的包
+         * 只能发布一次。字节相同 → 幂等 200 且**不重写**；字节不同 → `conflict`（路由映射 409）。
+         * 已安装用户手里的 sha256 是回滚/更新判定的依据，静默覆盖会让同一版本对应两份内容。
+         */
+        let existingSha: string | null = null;
+        let existingSize = 0;
+        try {
+          const existing = readFileSync(targetFile);
+          existingSha = createHash("sha256").update(existing).digest("hex");
+          existingSize = existing.length;
+        } catch {
+          existingSha = null;
+        }
+        if (existingSha !== sha256) return "conflict";
+        return { created: false, sha256: existingSha, size: existingSize };
+      }
       const tmp = join(targetDir, `.package.tgz.tmp-${process.pid}-${Date.now()}`);
       writeFileSync(tmp, bytes);
       renameSync(tmp, targetFile);
       return {
-        created,
-        sha256: createHash("sha256").update(bytes).digest("hex"),
+        created: true,
+        sha256,
         size: bytes.length,
       };
     },
