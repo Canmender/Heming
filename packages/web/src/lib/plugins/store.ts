@@ -290,12 +290,35 @@ function copyPlugin(plugin: InstalledPlugin): InstalledPlugin {
           target: { ...command.target },
         })),
         toolPacks: contributions.toolPacks.map((pack) => ({ ...pack, tools: [...pack.tools] })),
+        // d.94：界面插件声明（deep copy；web 只展示，安装/执行在主进程）
+        desktopWidgets: contributions.desktopWidgets.map((widget) => ({
+          ...widget,
+          scales: [...widget.scales],
+          position: { ...widget.position },
+          ...(widget.tray ? { tray: { ...widget.tray, items: [...widget.tray.items] } } : {}),
+          ...(widget.settings
+            ? {
+                settings: {
+                  ...widget.settings,
+                  fields: widget.settings.fields.map((field) => ({
+                    ...field,
+                    ...(field.options
+                      ? { options: field.options.map((option) => ({ ...option })) }
+                      : {}),
+                  })),
+                },
+              }
+            : {}),
+        })),
         llmPresets: [],
       },
       permissions: {
         network: [...permissions.network],
         tools: permissions.tools,
         files: [...permissions.files],
+        events: [...permissions.events],
+        graphics: [...permissions.graphics],
+        eval: permissions.eval,
       },
     },
     skillIds: [...plugin.skillIds],
@@ -314,17 +337,43 @@ function copyPlugin(plugin: InstalledPlugin): InstalledPlugin {
  * 会按旧版规则去找顶层 `skills`，必然解析失败；所以先按 v3 解析再把版本号还原。
  * 旧版本应用留下的记录（顶层 skills、无 contributions）仍走原来的旧版解析路径。
  */
+/**
+ * 读回本机存储里的清单。
+ *
+ * 存的是**归一化后的当前形状**（`contributions` / `permissions`，含 v4 的
+ * `desktopWidgets` / `events|graphics|eval`），但 `schemaVersion` 保留原始值
+ * （v1/v2/v3 包要能在界面上标「旧版清单」）。直接按原始版本号解析会踩两条坑：
+ * 旧版规则会去顶层找 `skills`；v3 规则会把归一化后的 v4 字段当成「v3 带新字段」拒绝。
+ * 所以先按**当前形状**（v4）解析，再把版本号还原成存储里的原始值。
+ */
 function parseStoredManifest(raw: unknown): PluginManifest {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const record = raw as Record<string, unknown>;
     if ("contributions" in record || "permissions" in record) {
       const version = record.schemaVersion;
-      const parsed = parsePluginManifest({ ...record, schemaVersion: 3 });
-      const legacy = version === 1 || version === 2;
-      return legacy ? { ...parsed, schemaVersion: version } : parsed;
+      const parsed = parsePluginManifest({ ...record, schemaVersion: 4 });
+      // 1/2/3 都只是「显示用的旧版本号」，归一化后的结构是当前形状。
+      return version === 1 || version === 2 || version === 3
+        ? { ...parsed, schemaVersion: version }
+        : parsed;
     }
   }
   return parsePluginManifest(raw);
+}
+
+/**
+ * 声明式安装管线只接受**不含代码**的清单（d.94）。
+ *
+ * 界面插件（`distribution: "bundle"` / 声明 `desktopWidgets`）的代码、窗口、签名校验
+ * 全在主进程的 `widgets:install` 里；把它塞进这里只会物化出技能/MCP 记录而没有窗口，
+ * 属于「半可用状态」。所以这里直接拒绝并指路到「桌面小组件」。
+ */
+function assertDeclarativeManifest(manifest: PluginManifest): void {
+  if (manifest.distribution === "bundle" || manifest.contributions.desktopWidgets.length > 0) {
+    throw new PluginManifestError(
+      `「${manifest.name}」是界面插件包（包含可执行界面代码），请到插件区「桌面小组件」安装；当前安装入口只处理不含代码的清单`,
+    );
+  }
 }
 
 /**
@@ -384,6 +433,7 @@ export class PluginStore {
    */
   preview(input: string | unknown): PluginInstallPreview {
     const manifest = parsePluginManifest(input);
+    assertDeclarativeManifest(manifest);
     const existing = this.data.plugins.find((p) => p.manifest.id === manifest.id) ?? null;
 
     const owned = this.skills.list().filter((s) => s.pluginId === manifest.id);
@@ -564,6 +614,7 @@ export class PluginStore {
    */
   install(input: string | unknown, options: PluginInstallOptions = {}): InstallResult {
     const manifest = parsePluginManifest(input);
+    assertDeclarativeManifest(manifest);
     const index = this.data.plugins.findIndex((p) => p.manifest.id === manifest.id);
     if (index < 0 && this.data.plugins.length >= MAX_PLUGINS) {
       throw new PluginManifestError(

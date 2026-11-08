@@ -38,3 +38,20 @@ test("插件目录只存在于仓库根，且带发布说明（publish-plugin.mj
   assert.match(publish, /HEMING_PLUGIN_DIR/);
   assert.match(publish, /plugins-catalog/);
 });
+
+test("界面插件（desktopWidget bundle）同样不随安装包分发（d.98）", () => {
+  // 桌宠已从本体拆成 heming.pet 界面插件：入口/资源在独立 package.tgz 里，
+  // 本体产物里不该再有 pet 资源，安装包也不该携带插件包或插件产物目录。
+  for (const source of packagedSources()) {
+    assert.ok(!/pet-widget/.test(source), `packaging 不应包含界面插件产物：${source}`);
+    assert.ok(!/package\.tgz$/.test(source), `packaging 不应包含插件包：${source}`);
+    assert.ok(!/plugins-catalog/.test(source), `packaging 不应包含发布目录：${source}`);
+  }
+  // 桌宠的渲染入口已删除：desktop 的 files 里只剩宿主运行时，没有 pet.html / pet.tsx
+  const files = Array.isArray(build.files) ? build.files : [];
+  assert.ok(!files.some((file) => /pet\.(html|tsx)/.test(file)), "本体不应再打包桌宠页面");
+  // 宿主运行时必须有 widget 相关模块（缺了就是装完插件起不了窗）
+  for (const required of ["plugin-window.js", "plugin-package.js", "plugin-store.js", "plugin-host.js", "widget-preload.js"]) {
+    assert.ok(files.includes(required), `安装包应包含 ${required}`);
+  }
+});

@@ -155,25 +155,37 @@ HEMING_SEED_USERS=admin:admin
   旧版桌面安装包（d.29 及以前）由主进程代拉、无 token，会拿不到 ICE 而回落公共 STUN；
   自动更新到 d.30 后即恢复正常。TURN 配不配都不影响登录与聊天。
 
-### 4.1 插件目录（d.88，云端插件分发）
+### 4.1 插件目录（d.88 云端分发 · d.94 界面插件包）
 
-插件包（信息采集 / magpie 网关等）**不随安装包分发**，由服务端目录提供：
+插件包（信息采集 / magpie 网关 / 桌宠等）**不随安装包分发**，由服务端目录提供：
 
 ```bash
-# 1) 本机把仓库里的插件包摆成服务端布局（原样字节）
+# 1) 本机把仓库里的插件包摆成服务端布局（声明式包 = 原样 plugin.json）
 node scripts/publish-plugin.mjs plugins/            # 缺省写到 ./plugins-catalog
+
+# 1b) 界面插件（d.94，带代码与资源）：先构建 → 再发布成 plugin.json + package.tgz
+node scripts/build-pet-widget.mjs
+node scripts/pack-plugin.mjs packages/pet-widget/dist/package     # → dist/package.tgz（确定性 sha）
+node scripts/publish-plugin.mjs packages/pet-widget/dist/package  # → plugins-catalog/heming.pet/1.0.0/{plugin.json,package.tgz}
+
 # 2) 同步到服务器（沿用现有部署账号；只读发布，不含用户数据）
 scp -r plugins-catalog/* root@<server>:/opt/heming/plugins/
 # 3) api.env 指到该目录并重启
 echo 'HEMING_PLUGIN_DIR=/opt/heming/plugins' >> /etc/heming/api.env
 systemctl restart heming-api
-curl -s http://127.0.0.1:8787/api/plugins | head -c 300   # 应看到插件列表
+curl -s http://127.0.0.1:8787/api/plugins | head -c 300   # 应看到插件列表（bundle 条目带 package.sha256）
 ```
 
-- 目录布局：`/opt/heming/plugins/<插件 id>/<版本>/plugin.json`；同 id 多版本时目录接口只返回最新版；
-- 接口公开（不含用户数据）：`GET /api/plugins` 与 `GET /api/plugins/:id/:version/manifest`（带 `X-Plugin-Sha256`）；
-- 客户端下载后**自行校验 sha256**，不一致拒绝安装；服务端只搬运、不解析执行；
-- 客户端发版与服务端插件发布相互独立：新增插件不需要重发包；清单只接受 v1/v2/v3（v4 的模型预设已在 d.90 收回）。
+- 目录布局：`/opt/heming/plugins/<插件 id>/<版本>/plugin.json`，界面插件另有 `package.tgz`；
+  同 id 多版本时目录接口只返回最新版；
+- 接口公开（不含用户数据）：`GET /api/plugins`（条目含 `distribution` 与 `package{sha256,size}`）、
+  `GET /api/plugins/:id/:version/manifest`（带 `X-Plugin-Sha256`）、
+  **`GET /api/plugins/:id/:version/package`（带 `X-Plugin-Package-Sha256`，仅 `distribution:"bundle"`）**；
+- 客户端下载后**自行校验 sha256**（清单与整包各一次），不一致拒绝安装；服务端只搬运、不解析执行；
+- **版本门槛**：`package` 路由需要服务端 ≥ d.94；桌面客户端 ≥ d.94 才有「桌面小组件」安装入口；
+  声明式清单仍只接受 v1/v2/v3（v4 的模型预设已在 d.90 收回），v4 现在的唯一用途是界面插件；
+- 界面插件安装落点是客户端 `<userData>/plugins/<id>/<版本>/`（服务端不保存插件运行期数据），
+  卸载/升级由客户端管，服务端只负责「有哪些包、哪个版本、指纹多少」。
 
 ## 5. 回滚
 

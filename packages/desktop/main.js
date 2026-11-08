@@ -13,10 +13,14 @@ const {
   DEFAULT_API_ORIGIN,
   INDEX_FILE,
   resolveRequest,
+  resolveWidgetRequest,
   contentTypeFor,
+  widgetCspHeaders,
 } = require("./app-protocol");
-const { isPetWindowUrl, parsePetStateJson } = require("./pet-window");
-const { createPetHost } = require("./pet-host");
+const { createPluginStore } = require("./plugin-store");
+const { createWidgetHost } = require("./plugin-host");
+const { readWidgetTheme, writeWidgetTheme } = require("./widget-theme");
+const { WIDGET_SCHEME } = require("./plugin-window");
 const { appVersion } = require("./app-version");
 const { buildChildEnv, createStdioBridge } = require("./mcp-stdio");
 const { createChildReclaimer } = require("./child-kill");
@@ -56,9 +60,9 @@ const EMBEDDED_URL = `${EMBEDDED_ORIGIN}/${INDEX_FILE}`;
 
 // ── IPC 来源守卫（③-4 安全复审）─────────────────────────────────────────
 // 只该由**主窗口**调用的通道清单：wiki/chart/export/file/secret/notify 这些
-// 「能碰本机文件、进程与密钥」的能力，桌宠窗口一律不该能调。桌宠窗口与主窗口
-// 同源、共用 preload 与 localStorage——它的 frame 一旦被导航到远端页面，远端脚本
-// 就等于拿到了这些桥。导航拦截（pet-host）是第一道，这里按通道再收一道。
+// 「能碰本机文件、进程与密钥」的能力，插件窗口一律不该能调。
+// 界面插件（widget://）是**独立 origin + 独立最小 preload**，天然拿不到这些通道；
+// 这里按通道再收一道：清单内通道只认 mainWindow，fail-closed。
 // 不在清单里的通道（如 `app:version` 是 preload 顶层 sendSync）原样透传。
 const TRUSTED_CHANNELS = [
   "wiki:info",
@@ -100,6 +104,22 @@ const TRUSTED_CHANNELS = [
   "magpie:start",
   "magpie:stop",
   "magpie:gateway",
+  // ── 界面插件（desktopWidget · d.98）──
+  // 这些是**主窗专用**的安装/启停/设置通道（widget 窗口永远碰不到：它不是 mainWindow，
+  // 且 widget 自己的桥在 widget-preload.js 里，只有窗口动作与环境）。
+  "widgets:list",
+  "widgets:pickPackage",
+  "widgets:install",
+  "widgets:installFromFile",
+  "widgets:uninstall",
+  "widgets:setEnabled",
+  "widgets:settingsGet",
+  "widgets:settingsSet",
+  "widgets:action",
+  "widgets:state",
+  "widgets:publish",
+  "widgets:migrateLegacy",
+  "widgets:chat-config-reply",
 ];
 
 // ── 崩溃兜底（d.30 · P0-4）─────────────────────────────────────────────
@@ -121,9 +141,17 @@ installCrashHandlers({
 console.log("[heming] 崩溃日志目录:", CRASH_LOG_DIR);
 
 // 必须在 app ready 之前注册，否则自定义协议拿不到 secure 语义。
+// 两个 scheme：
+// - `app://`：本体（主窗）的嵌入产物，与主窗同源；
+// - `widget://`：界面插件，`widget://<pluginId>/…` **每个插件一个独立 origin**
+//   （读不到 app://heming 的 localStorage：会话、记忆、偏好都在那边）。
 protocol.registerSchemesAsPrivileged([
   {
     scheme: EMBEDDED_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
+  },
+  {
+    scheme: WIDGET_SCHEME,
     privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
   },
 ]);
@@ -334,6 +362,144 @@ function installAppProtocol() {
   });
 }
 
+/* ────────────────────── 界面插件（desktopWidget · d.98） ────────────────────── */
+
+/** 插件目录根：`<userData>/plugins`（主进程独有；渲染层不经 localStorage 决定窗口）。 */
+function pluginsRoot() {
+  return path.join(app.getPath("userData"), "plugins");
+}
+
+/** 老 `pet-state.json`（d.46 桌宠时代的位置/缩放/穿透）：一次性种入 heming.pet 的 state.json。 */
+function readLegacyPetState() {
+  try {
+    const raw = fs.readFileSync(path.join(app.getPath("userData"), "pet-state.json"), "utf8");
+    return JSON.parse(raw.replace(/^\uFEFF/, ""));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 注册 `widget://` 资源处理器。
+ *
+ * `widget://<pluginId>/<path>` → `<userData>/plugins/<id>/<currentVersion>/<path>`：
+ * - host 段只接受**已安装插件**的 id（查注册表，不拼任意目录名）；
+ * - 路径解析复用 app-protocol 的防穿越逻辑，并且**不做 SPA 回落**
+ *   （入口在清单里显式声明，回落只会把 404 变成一块内容可疑的透明窗）；
+ * - 每个响应按该插件的清单 permissions 生成 CSP（不继承主窗的 https: 通配）。
+ */
+function installWidgetProtocol() {
+  protocol.handle(WIDGET_SCHEME, async (request) => {
+    let pluginId = "";
+    let urlPath = "/";
+    try {
+      const parsed = new URL(request.url);
+      pluginId = String(parsed.hostname || "").toLowerCase();
+      urlPath = parsed.pathname;
+    } catch {
+      return new Response("bad request", { status: 400 });
+    }
+    const record = widgetStore ? widgetStore.get(pluginId) : null;
+    const rootDir = widgetStore && record ? widgetStore.currentDir(pluginId) : null;
+    if (!record || !rootDir || record.error) {
+      return new Response("not found", { status: 404 });
+    }
+    const permissions = record.permissions || {};
+    const resolved = resolveWidgetRequest(urlPath, rootDir, (target) => {
+      try {
+        return fs.existsSync(target);
+      } catch {
+        return false;
+      }
+    });
+    if (!resolved) {
+      return new Response("not found", {
+        status: 404,
+        headers: { "Content-Type": "text/plain; charset=utf-8", ...widgetCspHeaders(permissions, cspOptions()) },
+      });
+    }
+    try {
+      const body = await fs.promises.readFile(resolved.file);
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "Content-Type": contentTypeFor(resolved.file),
+          // 插件版本目录里的产物每次安装都可能变；本地读盘、包体只有几 MB，
+          // 直接 no-store 比引入一套 ETag/版本失效语义更不容易出错。
+          "Cache-Control": "no-store",
+          ...widgetCspHeaders(permissions, cspOptions()),
+        },
+      });
+    } catch {
+      return new Response("read failed", {
+        status: 500,
+        headers: widgetCspHeaders(permissions, cspOptions()),
+      });
+    }
+  });
+}
+
+/** 主进程 → 主窗跳页（widget 气泡点击 / 托盘「设置」）。 */
+function openPageInMainWindow(payload) {
+  const main = mainWindow;
+  if (!main || main.isDestroyed()) return;
+  if (!payload || typeof payload !== "object") return;
+  const page = ["settings", "team", "tasks", "staff", "infohub"].includes(payload.page) ? payload.page : null;
+  if (!page) {
+    console.log("[widgets] 丢弃未知页面跳转:", JSON.stringify(payload));
+    return;
+  }
+  try {
+    if (main.isMinimized()) main.restore();
+    main.show();
+    main.focus();
+    main.webContents.send("widgets:open-page", {
+      page,
+      ...(typeof payload.settingsTab === "string" ? { settingsTab: payload.settingsTab } : {}),
+      ...(typeof payload.pluginId === "string" ? { pluginId: payload.pluginId } : {}),
+    });
+  } catch (err) {
+    console.log("[widgets] 页面跳转失败:", (err && err.message) || err);
+  }
+}
+
+/**
+ * chatConfig 的请求/应答（规格 §3.4）：主窗知道自己配了哪些智能体与绑定。
+ *
+ * 1s 超时与 30s 缓存由 plugin-host 负责；这里只做 requestId 关联与 pending 清理。
+ * 超时/主窗没接 → resolve(null)，widget 那边降级为空 agents（对话仍可用网关）。
+ */
+const chatConfigPending = new Map();
+let chatConfigRequestSeq = 0;
+
+function requestChatConfigFromMainWindow(timeoutMs) {
+  return new Promise((resolve) => {
+    const main = mainWindow;
+    if (!main || main.isDestroyed()) {
+      resolve(null);
+      return;
+    }
+    chatConfigRequestSeq += 1;
+    const requestId = `cc-${chatConfigRequestSeq}`;
+    const timer = setTimeout(() => {
+      chatConfigPending.delete(requestId);
+      resolve(null);
+    }, Math.max(1, Number(timeoutMs) || 1000));
+    chatConfigPending.set(requestId, (config) => {
+      clearTimeout(timer);
+      chatConfigPending.delete(requestId);
+      resolve(config);
+    });
+    try {
+      main.webContents.send("widgets:chat-config-request", { requestId });
+    } catch {
+      clearTimeout(timer);
+      chatConfigPending.delete(requestId);
+      resolve(null);
+    }
+  });
+}
+
 function displayWorkAreas() {
   try {
     return screen.getAllDisplays().map((d) => d.workArea);
@@ -393,7 +559,13 @@ function createSplashWindow(mainWin) {
 let mainWindow = null;
 
 // 桌宠宿主（d.46）：独立透明置顶窗 + 托盘。浏览器端没有这个概念。
-let petHost = null;
+let widgetStore = null;
+let widgetHost = null;
+
+/** 界面插件的主题记忆：主窗挂载后会把浅/深色推过来，下次启动先按它初始化（见 widget-theme.js）。 */
+function widgetThemeFile() {
+  return path.join(app.getPath("userData"), "widget-theme.json");
+}
 
 // ③-4 安全复审：只该由主窗口调用的通道统一收口（fail-closed）。
 // mainWindow 在 createWindow() 里赋值，闭包在调用时求值，此处只建门面。
@@ -422,33 +594,6 @@ if (!gotLock) {
 
   function windowStateFile() {
     return path.join(app.getPath("userData"), "window-state.json");
-  }
-
-  /* ── 桌宠状态文件（d.46）─────────────────────────────────────────────
-   * 与 window-state.json 分开放：桌宠有 scale / visible / clickThrough 三个
-   * 主窗口没有的字段，混在一个文件里迟早被对方的写入覆盖掉。
-   */
-  function petStateFile() {
-    return path.join(app.getPath("userData"), "pet-state.json");
-  }
-
-  function readPetState(file) {
-    try {
-      // 解析（含剥 BOM）在 pet-window.js 的纯函数里，有单测锁住：真机上踩过
-      // 「状态文件带 BOM → JSON.parse 抛错 → 桌宠静默不出现」的坑
-      return parsePetStateJson(fs.readFileSync(file, "utf8"));
-    } catch {
-      return null; // 缺文件：clampPetState 会回落默认落位
-    }
-  }
-
-  function writePetState(file, state) {
-    try {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n", "utf8");
-    } catch (err) {
-      console.log("[pet] 状态写入失败:", (err && err.message) || err);
-    }
   }
 
   function createWindow() {
@@ -511,17 +656,9 @@ if (!gotLock) {
       saveWindowState(windowStateFile(), win.getNormalBounds());
     });
 
-    // window.open / target=_blank 默认交给系统浏览器；**例外只有桌宠窗口**
-    // （同源 + `?hemingWindow=pet`）。其余一律 deny，保持「主窗口不开新页」的既有约束。
-    const appOriginForWindows = EMBEDDED_ORIGIN === originOf(appUrl) ? EMBEDDED_ORIGIN : appUrl;
+    // window.open / target=_blank 一律 deny 并转系统浏览器：主窗口不开新页。
+    // 界面插件窗口由主进程按清单建（独立 origin、透明置顶、单例），从不走 window.open。
     win.webContents.setWindowOpenHandler(({ url }) => {
-      // 桌宠窗口由主进程自己建（需要透明穿透、位置记忆与单例），不走 window.open。
-      // 这里 deny 掉并转去 host，避免它被当成外部链接丢给系统浏览器。
-      if (isPetWindowUrl(url, appOriginForWindows) || isPetWindowUrl(url, EMBEDDED_ORIGIN)) {
-        console.log("[heming] 桌宠窗口请求改由主进程托管");
-        if (petHost) petHost.show();
-        return { action: "deny" };
-      }
       console.log("[heming] 新窗口请求转系统浏览器打开:", url);
       openInSystemBrowser(url);
       return { action: "deny" };
@@ -588,11 +725,30 @@ if (!gotLock) {
   /** 反代按需创建：只有真的要用网关（且 magpie 已就绪）时才监听端口。 */
   let magpieProxy = null;
 
+  /**
+   * 界面插件 origin 能否用本机网关（d.98）。
+   *
+   * 只放行「已安装 + 已启用 + 文件完好 + 清单声明了渲染能力」的 widget：
+   * 插件窗口要直连 magpie 反代（对话），但反代不能变成任意本机页面都能读的网关。
+   * 不传这个判定 = 拒绝所有 widget（fail-closed），绝不放开 `widget://*` 通配。
+   */
+  const isWidgetOriginAllowed = (origin) => {
+    const match = /^widget:\/\/([a-z0-9][a-z0-9._-]{0,63})$/.exec(String(origin || ""));
+    if (!match) return false;
+    const record = widgetStore ? widgetStore.get(match[1]) : null;
+    if (!record || !record.enabled || record.error || !record.widget) return false;
+    const permissions = record.permissions || {};
+    const graphics = Array.isArray(permissions.graphics) ? permissions.graphics : [];
+    // 「需要渲染/执行能力」的界面插件才需要网关：全是静态展示的 widget 不用放行
+    return permissions.eval === true || graphics.includes("webgl") || graphics.includes("webgl2") || graphics.includes("wasm");
+  };
+
   const ensureMagpieProxy = async () => {
     if (!magpieProxy) {
       magpieProxy = await startMagpieProxy({
         upstreamPort: magpieHost.port,
         log: (line) => console.log(line),
+        isWidgetOriginAllowed,
       });
     }
     return `http://127.0.0.1:${magpieProxy.port}/v1`;
@@ -709,12 +865,10 @@ if (!gotLock) {
       // magpie 网关与它的反代：关闭时先停进程再关服务，避免端口悬挂。
       if (magpieHost.status().running) list.push(() => magpieHost.stop());
       if (magpieProxy) list.push(() => magpieProxy.close());
-      // 桌宠：同步销毁窗口与托盘（托盘不销毁会在托盘区留下一个幽灵图标）。
-      // 它不是子进程，但同属「退出前必须收口」的资源；放在这里统一收口，
+      // 界面插件窗口与托盘：同步销毁（托盘不销毁会在托盘区留下一个幽灵图标）。
+      // 它们不是子进程，但同属「退出前必须收口」的资源；放在这里统一收口，
       // 而不是再挂一个无 event 的 will-quit——那种处理器拦不住退出（见 main.test 的守卫）。
-      // 仅在桌宠真的被创建过时才入列：否则每次退出都白白多拦一次。
-      if (petHost) list.push(() => petHost.destroy());
-      return list;
+      if (widgetHost) list.push(() => widgetHost.destroyAll());
     },
     onQuit: () => app.quit(),
     log: (line) => console.warn(line),
@@ -862,7 +1016,15 @@ if (!gotLock) {
 
 app.whenReady().then(() => {
     // 自定义协议处理器须在创建窗口之前装好，否则首次 loadURL 会拿到空响应
+    // 插件注册表必须在协议与窗口之前就绪：widget:// 处理器要按它查插件目录
+    widgetStore = createPluginStore({
+      dir: pluginsRoot(),
+      log: (line) => console.log(line),
+    });
+    widgetStore.init();
+    // 自定义协议处理器须在创建窗口之前装好，否则首次 loadURL 会拿到空响应
     installAppProtocol();
+    installWidgetProtocol();
     setupMenu();
     // 个人知识库文件桥（卡帕西 LLM Wiki 标准）：必须在窗口创建前注册
     registerWikiIpc(secureIpc);
@@ -917,11 +1079,11 @@ app.whenReady().then(() => {
     });
     createWindow();
 
-    // ── 桌宠（d.46）──
-    // 独立透明置顶窗 + 托盘。**默认不显示**：持久化状态里 visible 为 false 时
-    // 就什么都不做，用户上次关掉的东西不该在重启后自己弹回来。
-    // 打开入口：设置区「桌宠」卡、托盘菜单、渲染层 __heming_pet.show()。
-    petHost = createPetHost({
+    // ── 界面插件宿主（d.98：桌宠已拆成 heming.pet 插件）──
+    // 只给「已安装 + enabled + 文件完好」的插件建窗。老 pet-state.json 一次性种入
+    // heming.pet 的 state.json（幂等；老文件保留一版不删，方便回滚）。
+    widgetStore.seedLegacyState("heming.pet", readLegacyPetState());
+    widgetHost = createWidgetHost({
       BrowserWindow,
       Tray,
       Menu,
@@ -929,24 +1091,120 @@ app.whenReady().then(() => {
       screen,
       ipcMain,
       app,
-      stateFile: petStateFile(),
-      preloadPath: path.join(__dirname, "preload.js"),
-      // 图标在 asar 内也能被 nativeImage 读到（Electron 对 asar 路径做了透明处理）
-      trayIconPath: path.join(__dirname, "assets", "pet-tray.png"),
-      resolveAppUrl: () => resolveAppUrl(),
+      store: widgetStore,
+      preloadPath: path.join(__dirname, "widget-preload.js"),
+      // 托盘兜底图标（插件没声明 tray.icon 时用）：沿用 d.46 的桌宠图标
+      defaultTrayIconPath: path.join(__dirname, "assets", "widget-tray.png"),
       getMainWindow: () => mainWindow,
-      // ③-4：桌宠窗口只允许停在应用自己的页面（导航到远端 = 远端脚本拿到 preload 桥）
-      isAllowedNavigation: (url) => isAllowedNavigation(url, resolveAppUrl()),
-      readState: readPetState,
-      writeState: writePetState,
+      appVersion: () => appVersion(),
+      getTheme: () => readWidgetTheme(widgetThemeFile()),
+      // 对话上下文只给本机网关（用户供应商 Key 不出主进程；P0 口径见规格 §3.4）
+      getGateway: async () => {
+        if (!magpieHost.status().running) return { baseUrl: null, key: "local" };
+        try {
+          return { baseUrl: await ensureMagpieProxy(), key: "local" };
+        } catch {
+          return { baseUrl: null, key: "local" };
+        }
+      },
+      requestChatConfig: (timeoutMs) => requestChatConfigFromMainWindow(timeoutMs),
+      openPage: (payload) => openPageInMainWindow(payload),
       log: (line) => console.log(line),
     });
-    petHost.start();
-    // 启动状态只打一行：桌宠不出现时，第一个要回答的问题就是「它到底启没启、上次是不是显示状态」
-    console.log(
-      "[heming] 桌宠:",
-      JSON.stringify({ visible: petHost.state.visible, scale: petHost.state.scale }),
+    widgetHost.start();
+
+    /* ── 主窗专用：界面插件安装/启停/设置/动作（secureIpc 只认 mainWindow） ── */
+    const pluginDialogFilters = [{ name: "界面插件包", extensions: ["tgz"] }];
+
+    const pickPluginFile = async () => {
+      const picked = await dialog.showOpenDialog(mainWindow, {
+        properties: ["openFile"],
+        filters: pluginDialogFilters,
+      });
+      if (picked.canceled || picked.filePaths.length === 0) return null;
+      return picked.filePaths[0];
+    };
+
+    /** 安装后统一收口：对账建窗 + 让 chatConfig 缓存失效（新插件的 agents 可能不同）。 */
+    const afterInstallChange = () => {
+      if (widgetHost) {
+        widgetHost.reconcile();
+        widgetHost.invalidateChatConfig();
+      }
+    };
+
+    secureIpc.handle("widgets:list", () => widgetStore.list());
+    secureIpc.handle("widgets:pickPackage", async () => {
+      const filePath = await pickPluginFile();
+      return filePath ? { canceled: false, path: filePath } : { canceled: true };
+    });
+    secureIpc.handle("widgets:install", (_event, payload) => {
+      const bytes = payload && payload.bytes;
+      if (!bytes) return { ok: false, error: "缺少插件包内容" };
+      const result = widgetStore.install({ bytes, expectedSha256: payload.expectedSha256 });
+      if (!result.ok) return { ok: false, error: result.error };
+      afterInstallChange();
+      return { ok: true, record: result.record };
+    });
+    secureIpc.handle("widgets:installFromFile", async () => {
+      const filePath = await pickPluginFile();
+      if (!filePath) return { ok: false, error: "已取消" };
+      let bytes;
+      try {
+        bytes = fs.readFileSync(filePath);
+      } catch (err) {
+        return { ok: false, error: `读取插件包失败：${(err && err.message) || err}` };
+      }
+      const result = widgetStore.install({ bytes });
+      if (!result.ok) return { ok: false, error: result.error };
+      afterInstallChange();
+      return { ok: true, record: result.record };
+    });
+    secureIpc.handle("widgets:uninstall", (_event, payload) => {
+      const id = payload && payload.id;
+      if (typeof id !== "string" || !id) return { ok: false, error: "缺少插件 id" };
+      const result = widgetStore.uninstall(id, { removeData: payload.removeData !== false });
+      afterInstallChange();
+      return result;
+    });
+    secureIpc.handle("widgets:setEnabled", (_event, payload) => {
+      const id = payload && payload.id;
+      if (typeof id !== "string" || !id) return { ok: false, error: "缺少插件 id" };
+      const result = widgetStore.setEnabled(id, payload.enabled === true);
+      afterInstallChange();
+      return result;
+    });
+    secureIpc.handle("widgets:settingsGet", (_event, payload) => widgetStore.readSettings(payload && payload.id));
+    secureIpc.handle("widgets:settingsSet", (_event, payload) => {
+      const id = payload && payload.id;
+      const next = widgetStore.patchSettings(id, payload && payload.patch);
+      // 设置变了 → chatConfig 缓存立刻失效（绑定/模型路径最多 30s 才生效是不可接受的）
+      if (widgetHost) widgetHost.invalidateChatConfig();
+      // 主窗改了设置也要让插件窗口立刻看到（widget 侧订阅 widget:settings）
+      const runtime = widgetHost ? widgetHost.runtimeFor(id) : null;
+      const win = runtime && runtime.window;
+      if (win && !win.isDestroyed()) win.webContents.send("widget:settings", next);
+      return next;
+    });
+    secureIpc.handle("widgets:action", (_event, payload) =>
+      widgetHost.action(payload && payload.id, payload && payload.action),
     );
+    secureIpc.handle("widgets:state", (_event, payload) => widgetHost.stateOf(payload && payload.id));
+    secureIpc.handle("widgets:publish", (_event, payload) => {
+      const result = widgetHost.publish(payload);
+      // 主题是唯一需要主进程记住的跨窗口状态：widget 窗口可能比主窗先建好
+      if (payload && payload.kind === "theme") writeWidgetTheme(widgetThemeFile(), payload.theme);
+      return result;
+    });
+    secureIpc.handle("widgets:migrateLegacy", (_event, payload) =>
+      widgetStore.migrateLegacy(payload && payload.prefs),
+    );
+    secureIpc.handle("widgets:chat-config-reply", (_event, payload) => {
+      const requestId = payload && payload.requestId;
+      const pending = typeof requestId === "string" ? chatConfigPending.get(requestId) : null;
+      if (pending) pending(payload && payload.config);
+      return { ok: true };
+    });
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

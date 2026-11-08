@@ -380,15 +380,70 @@ test("__heming_notify.onOpen 收到非函数回调时安全忽略", () => {
   assert.equal((listeners.get("notify:open") || new Set()).size, 0, "非函数回调不应注册监听");
 });
 
-// ── 桌宠桥（d.46；d.58 起 openSettings 支持直达页面）──
-test("桌宠 openSettings 可带目标页面（page 可选，复用既有通道）", () => {
+// ── 界面插件桥（d.98：桌宠拆成插件后，主窗只剩安装/管理面）──
+test("主窗暴露 __heming_widgets，且只调用 widgets: 前缀通道", async () => {
   const sent = [];
-  const pet = loadExposed({}, { sent }).__heming_pet;
-  assert.ok(pet, "应暴露 __heming_pet");
-  pet.openSettings("chat");
-  assert.deepEqual(sent.at(-1), ["pet:open-settings", "chat"]);
-  pet.openSettings();
-  assert.deepEqual(sent.at(-1), ["pet:open-settings", undefined]);
+  const invoked = [];
+  const bridge = loadExposed({}, { sent, invoked }).__heming_widgets;
+  assert.ok(bridge, "应暴露 __heming_widgets");
+  for (const fn of [
+    "list",
+    "pickPackage",
+    "install",
+    "installFromFile",
+    "uninstall",
+    "setEnabled",
+    "settingsGet",
+    "settingsSet",
+    "action",
+    "state",
+    "publish",
+    "migrateLegacy",
+    "onOpenPage",
+    "onChatConfigRequest",
+    "replyChatConfig",
+  ]) {
+    assert.equal(typeof bridge[fn], "function", `${fn} 应是函数`);
+  }
+
+  bridge.list();
+  assert.deepEqual(invoked.at(-1), ["widgets:list", undefined]);
+  bridge.action({ id: "heming.pet", action: "show" });
+  assert.deepEqual(invoked.at(-1), ["widgets:action", { id: "heming.pet", action: "show" }]);
+  bridge.setEnabled({ id: "heming.pet", enabled: false });
+  assert.deepEqual(invoked.at(-1), ["widgets:setEnabled", { id: "heming.pet", enabled: false }]);
+  bridge.publish({ kind: "notify", title: "任务完成" });
+  assert.deepEqual(sent.at(-1), ["widgets:publish", { kind: "notify", title: "任务完成" }]);
+  bridge.replyChatConfig("cc-1", { agents: [], binding: { agentId: null } });
+  assert.deepEqual(invoked.at(-1), [
+    "widgets:chat-config-reply",
+    { requestId: "cc-1", config: { agents: [], binding: { agentId: null } } },
+  ]);
+
+  // 所有通道都必须落在 widgets: 前缀（主窗专用；不会误用 widget 窗口的通道）
+  for (const [channel] of [...sent, ...invoked]) {
+    assert.ok(channel.startsWith("widgets:"), `主窗桥不应调非 widgets: 通道：${channel}`);
+  }
+});
+
+test("主窗 onOpenPage / onChatConfigRequest：非函数回调不注册监听，返回取消订阅", () => {
+  const listeners = new Map();
+  const bridge = loadExposed({}, { listeners }).__heming_widgets;
+  assert.doesNotThrow(() => {
+    assert.equal(typeof bridge.onOpenPage(null), "function");
+    assert.equal(typeof bridge.onChatConfigRequest(null), "function");
+  });
+  const received = [];
+  const off = bridge.onOpenPage((payload) => received.push(payload));
+  const on = bridge.onChatConfigRequest((payload) => received.push(payload));
+  const event = { sender: { id: 1 } };
+  listeners.get("widgets:open-page").forEach((fn) => fn(event, { page: "settings" }));
+  listeners.get("widgets:chat-config-request").forEach((fn) => fn(event, { requestId: "cc-9" }));
+  assert.deepEqual(received, [{ page: "settings" }, { requestId: "cc-9" }]);
+  off();
+  on();
+  assert.equal(listeners.get("widgets:open-page").size, 0);
+  assert.equal(listeners.get("widgets:chat-config-request").size, 0);
 });
 
 // ── 信息中枢 · InfoHub 本机桥（d.45）──

@@ -2,38 +2,86 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
-## d.97.2.42.0（2026-11-08）— 复用 magpie 源码，自建和鸣的模型网关内核
+## d.98.2.42.0（2026-11-08）— 桌宠拆成界面插件：从本体抽出，云端按需安装
 
-d.92 是「下载 magpie 官方 CLI 随包分发」——本质是分发别人的安装包，既不可改也不可审计。
-本轮改为：**把 magpie 的 MIT 源码裁剪进本仓库，由我们自己的构建脚本编译成内核**，作为应用本体的一部分发布。
-不是插件，也不是第三方安装包。
+用户指令：「和鸣的桌宠模块，把他拉出来做成一个插件，不再合并到本体程序」；分发口径：云端服务器下发、用户自行下载安装
+（另有并行会话在改服务端，本轮服务端改动克制、集中）。
 
-### 一、vendored 源码
+### 一、新增第二类插件：界面插件（`desktopWidget`）
 
-- `vendor/magpie-core/`：上游 `yetone/magpie` 标签 `v0.1.3246`（MIT）；
-  保留 `LICENSE`、`THIRD_PARTY_NOTICES`、`go.mod/go.sum`、`main.go`、`internal/**`、`plugins/`；
-- 裁剪掉与本应用无关的 `site/`、`docs/`、`native/`、`build/`、全部 `*_test.go`、`testdata/`、
-  `internal/gui/tests/`、上游 README/Dockerfile/Makefile/CI；
-- 新增 `PROVENANCE.md`：来源、裁剪口径、构建命令、升级上游步骤、许可说明。
+- 现有插件仍是**纯声明式**（不执行第三方代码）——这条红线不动。新增的是**唯一的例外**：
+  `schemaVersion: 4` + `distribution: "bundle"`，只允许 `contributions.desktopWidgets`（可带 `commands`），
+  带 skills/mcpServers/toolPacks 的 bundle 直接拒绝；
+- 包格式 `package.tgz`（tar + gzip9，**确定性**：固定 mtime/uid/gid/路径排序，同内容同 sha256）：
+  包根 `plugin.json` + `files/**`；安装校验 sha256 → 解包配额（≤20MB / ≤2000 文件 / 单文件 ≤8MB）→
+  禁绝对路径/`..`/符号链接/硬链接/NUL → `entry` 存在 → 原子切换 `current.json`；
+- 信任口径（P0）：只开放「官方云端目录的 bundle」与「用户本地显式导入」两个入口，安装二次确认
+  「包含可执行界面代码」；清单 `publisher/signature` 可选、带则结构校验并记 `signed`；逐包 Ed25519 列 P1。
 
-### 二、构建与打包
+### 二、宿主运行时（`packages/desktop`）
 
-- 新增 `scripts/build-magpie-core.mjs`：`go build -tags nogui -trimpath -ldflags "-s -w -X main.version=0.1.3246-heming.<应用版本>"`，
-  产物 `packages/desktop/resources/magpie/magpie-core.exe`（gitignore）；`--check/--force`，需要 Go ≥ 1.26.8；
-- `build-desktop.mjs` 打包前置检查改为「内核缺/旧则现场构建」，失败中止打包；
-- 删除 `scripts/fetch-magpie.mjs`；desktop 脚本 `magpie:fetch` → `magpie:build`；
-- host 默认二进制名改为 `magpie-core.exe`；设置页/文档同步措辞。
+- **独立 origin `widget://<id>`**：特权 scheme，按清单生成 CSP（`unsafe-eval` 仅在 `permissions.eval:true` 时放开；
+  `connect-src` 只给本机回环 + 清单 network，**不继承**主窗 `https:`/`wss:` 通配）；插件读不到 `app://heming` 的
+  localStorage / 会话 / 记忆；
+- **最小 preload `__heming_widget`**：窗口动作、宿主信息、设置、事件、页面跳转、`chatConfig`；
+  **不含** secrets / MCP / 文件 / 会话任何桥（旧实现给桌宠窗挂的是整份主窗 preload）；
+- **窗口/托盘/置顶/穿透/拖拽/位置记忆全在宿主**：`plugin-host.js` 按 sender 反查 runtime，`widget:*` 通道只认该 widget 自己的窗口；
+  `plugin-window.js` 由清单生成窗口参数（透明 → 强制 hasShadow:false）、几何/12px 吸附/可见性钳制/缩放档位；
+- **安装与注册表**：`plugin-store.js` 管 `userData/plugins/**`（`installed.json`、`<id>/<version>` + `current.json`、
+  `state.json`、`settings.json`、`.staging`），启动自检、升级清旧版、卸载清理；
+- **主窗通道** `widgets:*` 走 `secureIpc`（只认主窗）：list / pickPackage / install / installFromFile / uninstall /
+  setEnabled / settingsGet / settingsSet / action / state / publish / migrateLegacy / chat-config-reply；
+  反向推送 `widgets:open-page`、`widgets:chat-config-request`；
+- **本机 magpie 反代**：widget origin 由「已安装 + 已启用 + 清单声明渲染能力」判定放行（注入式判定、默认 fail-closed），
+  插件内 `/v1/models`、`/chat/completions` 才可用；
+- 主窗 CSP **移除** `unsafe-eval`（它只为旧 `pet.html` 存在）；`build-desktop-web.mjs` 反转为「web 产物出现 pet.html 即失败」。
 
-### 三、运行时不变量
+### 三、桌宠迁到 `packages/pet-widget`（不再并入本体）
 
-托管/探活/反代/渲染层桥/采用本机已有实例全部沿用；`/api/hello` 的 version 形如
-`0.1.3246-heming.d.97.2.42.0`，可据此辨认是自家内核。
+- 独立 workspace 包：`pet.html` / `src/pet.tsx` / `components/pet/**` / `lib/pet{Pose,Prefs,Event}.ts` /
+  `public/pet/**`（Hiyori + Cubism Core，5MB）整体迁出；`components/PetSettingsCard.tsx` 删除（能力改由通用设置表单承载）；
+- 渲染层零宿主依赖：偏好改宿主 `settings`（`agentId`/`modelPath`/`presence`），主题走 `info().theme`，
+  事件走 `onEvent`，对话走 `chatConfig()` + 本机网关 SSE（不碰任何供应商 Key）；透明窗拖拽/冻结/命中区/气泡语义原样保留；
+- `packages/web` 删除 pixi / pixi-live2d-display / pet 多入口 / 5MB 模型；首屏与安装包不再背桌宠资源。
 
-### 验证
+### 四、主窗（`packages/web`）
 
-- vendored 源码独立构建成功（产物约 69MB）；
-- 自建内核真实启动：`/api/hello` 版本带 `-heming.`、`/v1/models` 200；
-- host 7 例、magpie 相关 web 用例、`tsc` 零错；桌面应用真启动日志 `[magpie] 就绪`、退出后端口释放。
+- **主题同步（完善）**：widget 窗口在独立 origin，读不到主窗的浅/深色；主窗挂载后与每次切换都把
+  `{kind:"theme"}` 发布给主进程，主进程同时把最后一次主题落盘（`userData/widget-theme.json`），
+  下次启动建窗即用，不会出现「应用是暗色、桌宠先亮一下」；
+- 插件区新增「桌面小组件」：安装（云端 bundle / 本地 `.tgz`）、启用停用、卸载、打开设置；
+  `catalogClient` 默认只列纯声明式包，新增 `fetchWidgetCatalog` / `downloadPluginPackage`（下载后比 sha256 再交主进程安装）；
+- 设置区新增「外观 · 桌面小组件」：宿主通用动作（显示/隐藏、缩放、鼠标穿透、重置位置）+ 清单 `settings.fields`
+  通用表单（boolean/select/text/number/agent）；
+- 新增 `lib/widgetEvents.ts`：通知中心 → 脱敏（kind/title≤60/summary≤60/route/at，不带正文/附件/会话名/发送人）→ 转发；
+- 老数据迁移（一次性、幂等）：`heming.pet.v1`（agentId/modelPath）+ `heming.pet.presence.v1`（intensity）→ settings；
+  旧 `pet-state.json`（visible/scale/clickThrough/bounds）→ state；未安装时设置区/插件区一次性提示「桌宠已改为插件」。
+
+### 五、分发链路
+
+- **与并行会话的云端插件仓库（d.95 / d.96）合并**：界面插件沿用同一份仓库与发布密钥——
+  清单走既有 `PUT /api/plugins/:id/:version`，插件包走新增的 `PUT …/version/package`（先清单后包、缺清单 409）；
+  `publish-plugin.mjs --push` 一次把清单 + `package.tgz` 都发上去；
+- shared 目录契约新增 `distribution: "manifest"|"bundle"`、`package{sha256,size}`、`contributions.desktopWidgets` 计数；
+- 服务端新增 `GET /api/plugins/:id/:version/package`（`application/gzip` + `X-Plugin-Package-Sha256`）
+  与 `PUT` 同路由（发布密钥 `HEMING_PLUGIN_PUBLISH_KEY`，先清单后包、缺清单 409），
+  声明 bundle 却缺包的版本按坏包跳过；
+- `scripts/publish-plugin.mjs` 支持目录型 bundle（`plugin.json` + `files/**`）→ 确定性 `package.tgz` + 目录布局；
+- `packages/pet-widget`：`scripts/build-pet-widget.mjs`（vite → `dist/package/`）、`scripts/pack-plugin.mjs`
+  （复用宿主 `plugin-package.js` 的打包函数）；产物 28 文件 / 5.74MB（gzip 4.57MB）。
+
+### 六、门禁与文档
+
+- shared / server / web / desktop / pet-widget 全量 build + test + typecheck 全绿（desktop 34 套 `node --test`，新增 98 例；
+  pet-widget 132 例；server 目录用例 10 例含 bundle 指纹与包下载）
+- 验证：新增本机 Electron 冒烟（不入库，`.tmp`）：真实 Electron 里安装 `package.tgz` → 建 widget 窗口 →
+  `widget://` 加载 → preload 桥/probe → 设置落盘 → notify/theme 事件 → 主题切换，`console` 错误 0；
+  桌宠页在独立 origin 下 pixi/Live2D canvas 正常创建（456×636）。
+- 文档：`docs/PET.md` 重写为插件文档、`docs/PLUGINS.md` 新增 §10、`docs/INDEX.md` 增规格/计划条目、
+  `docs/HANDOFF.md` 补本轮条目；规格 `docs/superpowers/specs/2026-11-07-d98-pet-as-plugin.md`、
+  计划 `docs/superpowers/plans/2026-11-07-d98-pet-as-plugin.md`
+- **明确不做**：第三方界面插件（另立沙箱规格）、多 widget 并存、逐包 Ed25519 签名、宿主代发对话、远端 magpie 网关、
+  插件独立 session partition；Electron 真机的跨 DPI 拖动/菜单点击/对话联调仍需人工过一遍。
 
 ## d.96.2.42.0（2026-11-07）— 云端插件仓库：一份仓库、预留接口、插件页直接下载安装
 

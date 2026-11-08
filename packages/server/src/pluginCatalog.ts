@@ -35,6 +35,8 @@ import {
 
 /** 单个 plugin.json 上限：插件只声明能力，正常几 KB；超了说明不是插件包。 */
 const MAX_MANIFEST_BYTES = 256 * 1024;
+/** 界面插件包（`package.tgz`）上限：解包后还有 20MB/2000 文件的校验，这里只挡明显异常。 */
+const MAX_PACKAGE_BYTES = 40 * 1024 * 1024;
 
 const TOOLS = new Set(["none", "read", "write"]);
 
@@ -51,6 +53,19 @@ export interface PluginCatalog {
   list(): PluginCatalogEntry[];
   /** 读取某个 id/版本的原样清单字节；不存在或参数非法返回 null。 */
   read(id: string, version: string): PluginCatalogRead | null;
+  /** 读取某个 id/版本的界面插件包（`package.tgz`）字节；纯声明式包返回 null。 */
+  readPackage(id: string, version: string): PluginCatalogRead | null;
+  /**
+   * 发布界面插件包（d.98）：原样落盘 `package.tgz`。
+   *
+   * 与清单分开两次发布（先清单、再包）：包必须能找到同 id/版本的清单，避免「有包没清单」的孤儿；
+   * 不解析包内容——解包配额、清单结构、entry 存在性都由客户端安装时校验。
+   */
+  publishPackage(
+    id: string,
+    version: string,
+    bytes: Buffer,
+  ): { created: boolean; sha256: string; size: number } | "invalid_id" | "invalid_version" | "too_large" | "missing_manifest";
   /** 某个插件在仓库里的全部版本（新→旧）；不存在返回 null。 */
   detail(id: string): PluginCatalogDetail | null;
   /**
@@ -115,6 +130,8 @@ function contributionsOf(raw: Record<string, unknown>): PluginCatalogContributio
     mcpServers: countOf(declaredServers),
     commands: countOf(contributions.commands),
     toolPacks: countOf(contributions.toolPacks),
+
+    desktopWidgets: countOf(contributions.desktopWidgets),
   };
 }
 
@@ -132,7 +149,13 @@ function permissionsOf(raw: Record<string, unknown>): PluginCatalogPermissions {
 }
 
 /** 解析一份清单为目录条目；缺关键字段返回 null（该版本跳过）。 */
-function entryOf(id: string, version: string, bytes: Buffer, mtimeMs: number): PluginCatalogEntry | null {
+function entryOf(
+  id: string,
+  version: string,
+  bytes: Buffer,
+  mtimeMs: number,
+  pkg: { sha256: string; size: number } | null,
+): PluginCatalogEntry | null {
   let raw: unknown;
   try {
     raw = JSON.parse(bytes.toString("utf8"));
@@ -143,6 +166,9 @@ function entryOf(id: string, version: string, bytes: Buffer, mtimeMs: number): P
   const obj = raw as Record<string, unknown>;
   const schemaVersion = typeof obj.schemaVersion === "number" ? obj.schemaVersion : NaN;
   if (!Number.isInteger(schemaVersion) || schemaVersion < 1) return null;
+  const distribution = obj.distribution === "bundle" ? "bundle" : "manifest";
+  // 界面插件必须同时有 package.tgz，否则装上也起不来——按坏包跳过，不返回半可用条目
+  if (distribution === "bundle" && !pkg) return null;
   return {
     id,
     name: asString(obj.name, id).slice(0, 128) || id,
@@ -155,6 +181,8 @@ function entryOf(id: string, version: string, bytes: Buffer, mtimeMs: number): P
     size: bytes.length,
     permissions: permissionsOf(obj),
     contributions: contributionsOf(obj),
+    distribution,
+    ...(pkg ? { package: pkg } : {}),
   };
 }
 
@@ -173,6 +201,19 @@ export function createPluginCatalog(opts: { dir: string }): PluginCatalog {
     return names.sort(comparePluginVersions);
   }
 
+  /** 读 package.tgz 的指纹；不存在/超限返回 null。 */
+  function packageOf(id: string, version: string): { sha256: string; size: number } | null {
+    const file = join(dir, id, version, "package.tgz");
+    try {
+      const stat = statSync(file);
+      if (!stat.isFile() || stat.size === 0 || stat.size > MAX_PACKAGE_BYTES) return null;
+      const bytes = readFileSync(file);
+      return { sha256: createHash("sha256").update(bytes).digest("hex"), size: bytes.length };
+    } catch {
+      return null;
+    }
+  }
+
   function latestEntry(id: string): PluginCatalogEntry | null {
     const versions = versionDirsOf(id);
     for (let i = versions.length - 1; i >= 0; i -= 1) {
@@ -182,7 +223,7 @@ export function createPluginCatalog(opts: { dir: string }): PluginCatalog {
         const stat = statSync(file);
         if (!stat.isFile() || stat.size > MAX_MANIFEST_BYTES) continue;
         const bytes = readFileSync(file);
-        const entry = entryOf(id, version, bytes, stat.mtimeMs);
+        const entry = entryOf(id, version, bytes, stat.mtimeMs, packageOf(id, version));
         if (entry) return entry;
         console.warn(`[plugin-catalog] 跳过坏清单：${id}@${version}`);
       } catch {
@@ -200,7 +241,7 @@ export function createPluginCatalog(opts: { dir: string }): PluginCatalog {
       try {
         const stat = statSync(file);
         if (!stat.isFile() || stat.size > MAX_MANIFEST_BYTES) continue;
-        const entry = entryOf(id, version, readFileSync(file), stat.mtimeMs);
+        const entry = entryOf(id, version, readFileSync(file), stat.mtimeMs, packageOf(id, version));
         if (entry) out.push(entry);
       } catch {
         // 该版本不可读：跳过，继续看其它版本
@@ -251,6 +292,19 @@ export function createPluginCatalog(opts: { dir: string }): PluginCatalog {
         return null;
       }
     },
+    readPackage(id: string, version: string): PluginCatalogRead | null {
+      if (!PLUGIN_CATALOG_ID_RE.test(id) || !PLUGIN_CATALOG_VERSION_RE.test(version)) return null;
+      if (!existsSync(dir)) return null;
+      const file = join(dir, id, version, "package.tgz");
+      try {
+        const stat = statSync(file);
+        if (!stat.isFile() || stat.size === 0 || stat.size > MAX_PACKAGE_BYTES) return null;
+        const bytes = readFileSync(file);
+        return { bytes, sha256: createHash("sha256").update(bytes).digest("hex") };
+      } catch {
+        return null;
+      }
+    },
     detail(id: string): PluginCatalogDetail | null {
       if (!PLUGIN_CATALOG_ID_RE.test(id)) return null;
       const versions = allEntriesOf(id);
@@ -270,14 +324,32 @@ export function createPluginCatalog(opts: { dir: string }): PluginCatalog {
       const tmp = join(targetDir, `.plugin.json.tmp-${process.pid}-${Date.now()}`);
       writeFileSync(tmp, bytes);
       renameSync(tmp, targetFile);
-      const entry = entryOf(id, version, bytes, statSync(targetFile).mtimeMs);
-      if (!entry) return "mismatch";
+      // 注意：这里**不**用 entryOf 判成败——界面插件的 package.tgz 是清单之后第二次 PUT 才到，
+      // 那一瞬间 entryOf 会因为「声明 bundle 却没有包」返回 null；清单本身是否合法已由
+      // manifestMatches（可解析 + id/version 与路径一致）判过，故只做落盘与指纹。
       return {
         id,
         version,
         sha256: createHash("sha256").update(bytes).digest("hex"),
         size: bytes.length,
         created,
+      };
+    },
+    publishPackage(id, version, bytes) {
+      if (!PLUGIN_CATALOG_ID_RE.test(id)) return "invalid_id";
+      if (!PLUGIN_CATALOG_VERSION_RE.test(version)) return "invalid_version";
+      if (!bytes || bytes.length === 0 || bytes.length > MAX_PACKAGE_BYTES) return "too_large";
+      const targetDir = join(dir, id, version);
+      if (!existsSync(join(targetDir, "plugin.json"))) return "missing_manifest";
+      const targetFile = join(targetDir, "package.tgz");
+      const created = !existsSync(targetFile);
+      const tmp = join(targetDir, `.package.tgz.tmp-${process.pid}-${Date.now()}`);
+      writeFileSync(tmp, bytes);
+      renameSync(tmp, targetFile);
+      return {
+        created,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        size: bytes.length,
       };
     },
     remove(id, version) {

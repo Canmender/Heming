@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
@@ -12,8 +12,10 @@ const {
   buildCsp,
   contentTypeFor,
   cspHeadersFor,
+  buildWidgetCsp,
+  widgetCspHeaders,
+  resolveWidgetRequest,
   isAssetRequest,
-  isPetPath,
   normalizeCspMode,
   parseCspViolation,
   resolveAssetPath,
@@ -208,19 +210,57 @@ test("buildCsp：其余基线指令齐全", () => {
   assert.ok(directiveOf(policy, "font-src").includes("data:"));
 });
 
-test("buildCsp：桌宠独立策略（无表单，script 同样不放 inline）", () => {
-  const pet = buildCsp({ pet: true });
-  assert.deepEqual(directiveOf(pet, "form-action"), ["'none'"]);
-  assert.deepEqual(directiveOf(pet, "script-src"), ["'self'", "app:", "'unsafe-eval'", "'wasm-unsafe-eval'"]);
-  // 桌宠必须放 unsafe-eval：pixi 6 的 generateProgram 用 new Function（实测 enforce 下桌宠起不来）
-  assert.deepEqual(directiveOf(buildCsp(), "form-action"), ["'self'"]);
+test("buildCsp：主窗口**不放** unsafe-eval（pixi 已随桌宠搬进 widget 插件）", () => {
+  const policy = buildCsp();
+  assert.deepEqual(directiveOf(policy, "form-action"), ["'self'"]);
+  assert.deepEqual(directiveOf(policy, "script-src"), ["'self'", "app:", "'wasm-unsafe-eval'"]);
+  assert.ok(!policy.includes("'unsafe-eval'"), "主窗口不应出现 unsafe-eval");
 });
 
-test("isPetPath：只认 pet.html（不是 /pet 路由）", () => {
-  assert.equal(isPetPath("/pet.html"), true);
-  assert.equal(isPetPath("/foo/pet.html"), true);
-  assert.equal(isPetPath("/pet"), false);
-  assert.equal(isPetPath("/"), false);
+test("buildWidgetCsp：独立 origin 的最小策略（默认不放 eval、不继承 https: 通配）", () => {
+  const policy = buildWidgetCsp({ network: [], eval: false });
+  assert.deepEqual(directiveOf(policy, "default-src"), ["'self'"]);
+  assert.deepEqual(directiveOf(policy, "script-src"), ["'self'", "'wasm-unsafe-eval'"]);
+  assert.deepEqual(directiveOf(policy, "base-uri"), ["'none'"]);
+  assert.deepEqual(directiveOf(policy, "form-action"), ["'none'"]);
+  const connect = directiveOf(policy, "connect-src");
+  assert.ok(connect.includes("'self'"));
+  assert.ok(connect.includes("http://127.0.0.1:*"));
+  assert.ok(!connect.includes("https:"), "插件不继承主窗的 https: 通配");
+  assert.ok(!connect.includes("wss:"));
+});
+
+test("buildWidgetCsp：eval 只在清单声明 eval:true 时放开（pixi 6）", () => {
+  const policy = buildWidgetCsp({ network: [], eval: true });
+  assert.ok(directiveOf(policy, "script-src").includes("'unsafe-eval'"));
+});
+
+test("buildWidgetCsp：connect-src 只给本机回环 + 清单 network 逐 host", () => {
+  const policy = buildWidgetCsp({ network: ["api.acme.com", "127.0.0.1:3425", "https://mp.example.com/base"] });
+  const connect = directiveOf(policy, "connect-src");
+  assert.ok(connect.includes("http://api.acme.com"));
+  assert.ok(connect.includes("https://api.acme.com"));
+  assert.ok(connect.includes("http://127.0.0.1:3425"));
+  assert.ok(connect.includes("https://mp.example.com"));
+  assert.ok(!connect.includes("https:"), "仍是逐 host，不是通配");
+});
+
+test("widgetCspHeaders：灰度模式与 cspHeadersFor 同口径", () => {
+  assert.deepEqual(Object.keys(widgetCspHeaders({}, { mode: "enforce" })), [CSP_HEADER]);
+  assert.deepEqual(Object.keys(widgetCspHeaders({}, {})), [CSP_REPORT_ONLY_HEADER]);
+  assert.deepEqual(widgetCspHeaders({}, { mode: "off" }), {});
+});
+
+test("resolveWidgetRequest：不回落入口，越界/缺失都返回 null", () => {
+  const exists = (file) => file === path.join(ROOT, "files", "index.html");
+  assert.deepEqual(resolveWidgetRequest("/files/index.html", ROOT, exists), {
+    file: path.join(ROOT, "files", "index.html"),
+    spaFallback: false,
+  });
+  // 资源缺失：绝不回落入口（否则 404 会变成一块内容可疑的透明窗）
+  assert.equal(resolveWidgetRequest("/files/missing.js", ROOT, exists), null);
+  // 路径穿越
+  assert.equal(resolveWidgetRequest("/../../etc/passwd", ROOT, () => true), null);
 });
 
 test("cspHeadersFor：默认 report-only，enforce 换头名，off 不带头", () => {
@@ -233,9 +273,9 @@ test("cspHeadersFor：默认 report-only，enforce 换头名，off 不带头", (
   assert.deepEqual(Object.keys(cspHeadersFor("/", { mode: "随便" })), [CSP_REPORT_ONLY_HEADER]);
 });
 
-test("cspHeadersFor：桌宠路径拿到桌宠策略", () => {
+test("cspHeadersFor：app:// 不再按路径分叉（桌宠入口已删除）", () => {
   const headers = cspHeadersFor("/pet.html", { mode: "enforce" });
-  assert.ok(headers[CSP_HEADER].includes("form-action 'none'"));
+  assert.ok(headers[CSP_HEADER].includes("form-action 'self'"));
 });
 
 test("parseCspViolation：新措辞（Connecting to … violates … directive: \"connect-src …\"）", () => {

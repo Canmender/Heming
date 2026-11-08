@@ -2,14 +2,18 @@
 
 插件是**纯声明式能力包**：一个 `plugin.json` 声明「这个包带来哪些能力」，和鸣负责把它物化到现有系统里。插件不执行第三方代码，也不从网络下载可执行物——技能变成技能池里的技能，MCP 服务登记进接口区，命令出现在命令面板。
 
-> 版本口径：清单 `schemaVersion: 3`。v1/v2 旧包归一化后可装；d.88 短暂引入的 v4（模型预设）已在 d.90 收回——
-> 模型统一由 magpie 网关提供，插件不再声明模型连接。
+> **唯一的例外是界面插件（§10，d.98）**：它带一个独立窗口的可执行渲染包，清单用 `schemaVersion: 4` + `distribution: "bundle"`，
+> 只允许官方目录发布、用户在插件区二次确认后安装。第三方仍只能是纯声明式包。
+>
+> 版本口径：纯声明式清单 `schemaVersion: 3`（v1/v2 旧包归一化后可装）；d.88 短暂引入的 v4（模型预设）已在 d.90 收回——
+> 模型统一由 magpie 网关提供，插件不再声明模型连接。**v4 现在的唯一用途是界面插件**。
 >
 > 仓库自带的示例插件包（**不随安装包分发**，由云端插件目录发布、用户自行下载安装）：
 > `plugins/infohub-collector/`：把本机 InfoHub 采集桥声明成本机 MCP 服务 + 技能 + 命令。
 >
 > 分发链路：`node scripts/publish-plugin.mjs` 把包摆成服务端目录布局 → 服务端 `GET /api/plugins`
 > 列出目录 → 客户端「插件区 → 安装插件 → 从云端浏览」下载原文、**校验 sha256** 后走同一套安装预览。
+> 界面插件多一步：服务端 `GET /api/plugins/:id/:version/package` 分发 `package.tgz`，客户端比 sha256 后交主进程解包安装。
 
 ## 1. 最小清单
 
@@ -169,7 +173,7 @@
 - 工具束里的工具仍受 `permissions.tools` 风险上限约束：超过上限的工具照旧不注入。
 - 一个插件只声明工具束、不声明技能/MCP 也是合法的 v3 清单（清单 v3 对此**向后兼容**，旧应用会忽略该字段，不会坏）。
 
-## 云端插件仓库（d.95）
+## 9. 云端插件仓库（d.95）
 
 安装包**不内置**任何第三方插件；官网/服务端只维护**一份**插件仓库，客户端在「插件区 → 仓库」
 里浏览、下载、安装。仓库是静态目录，服务端只做「列目录 + 原样分发清单」，不执行插件代码。
@@ -209,3 +213,88 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugins/ --push h
 
 两种方式都会先做「能不能解析 / id 与版本是否合规 / schemaVersion 是否是整数 / 有没有名字」的基础校验，
 坏包不静默跳过（退出码非 0）。
+
+## 10. 界面插件（v4 · `distribution: "bundle"`，d.98）
+
+界面插件是**唯一带可执行内容**的插件：它提供一个独立窗口的渲染包（第一个也是当前唯一一个：桌宠 `heming.pet`，见 `docs/PET.md`）。
+因为「装插件 = 在本机运行代码」，它与纯声明式包走两套清单字段、两套安装链路，**只有官方目录发布的包才允许安装**（第三方仍只能是 §1–§8 的声明式包）。
+
+### 9.1 清单
+
+```jsonc
+{
+  "schemaVersion": 4,                 // 必须是 4；v1/2/3 客户端会明确拒绝带 desktopWidgets 的包
+  "id": "heming.pet",
+  "name": "桌宠",
+  "version": "1.0.0",
+  "distribution": "bundle",           // 缺省 manifest = 旧语义（纯声明式）
+  "permissions": {
+    "network": [],                    // 逐 host，仍需 ≤20
+    "tools": "none",
+    "files": [],
+    "events": ["notify"],             // 可接收主窗脱敏后转发的事件
+    "graphics": ["webgl", "wasm"],    // 渲染能力声明
+    "eval": false                     // true 只在渲染层确实需要 eval 时（pixi 6 的 shader 生成）
+  },
+  "contributions": {
+    "desktopWidgets": [{
+      "id": "pet",
+      "name": "桌宠",
+      "entry": "files/index.html",
+      "width": 300, "height": 420,
+      "scales": [0.6, 0.8, 1, 1.25, 1.5],
+      "transparent": true, "alwaysOnTop": true, "skipTaskbar": true,
+      "clickThrough": "auto",
+      "position": { "anchor": "bottom-right", "margin": 24, "remember": true },
+      "tray": { "icon": "files/tray.png", "items": ["toggle", "clickThrough", "resetPosition", "settings"] },
+      "settings": { "title": "桌宠", "fields": [
+        { "key": "agentId", "type": "agent", "label": "对话绑定智能体" },
+        { "key": "modelPath", "type": "text", "label": "Live2D 模型路径" }
+      ]}
+    }],
+    "commands": []
+  }
+}
+```
+
+约束：
+
+- `distribution: "bundle"` 的包**只允许** `desktopWidgets`（可选 `commands`）；声明 `skills` / `mcpServers` / `toolPacks` 一律拒绝。
+- `desktopWidgets` 本轮 **≤1 个**，字段校验见 `docs/superpowers/specs/2026-11-07-d98-pet-as-plugin.md` §2.3。
+- 字段类型只支持 `boolean` / `select` / `text` / `number` / `agent`；值由**主进程**持有（`userData/plugins/<id>/settings.json`），
+  渲染层经 IPC 读写、插件窗口经 preload 读，**不写 localStorage**。
+
+### 9.2 包格式（`package.tgz`）
+
+```
+package.tgz
+├── plugin.json
+└── files/**
+    ├── index.html        ← entry
+    ├── assets/*.js|css
+    └── …                 ← 模型等资源
+```
+
+- tar + gzip(9)，**确定性输出**（固定 mtime/uid/gid/路径排序）：同一份内容在任何机器上得到同一个 sha256。
+- 安装校验（主进程）：sha256 → gzip/tar 解析 → 配额（解包 ≤20MB、≤2000 文件、单文件 ≤8MB）→ 禁绝对路径 / `..` /
+  符号链接 / 硬链接 / NUL → `plugin.json` 在包根 → `entry` 存在且在包内 → 原子切换 `current.json`。
+  任一步失败都不产生「半装可用」状态。
+
+### 9.3 运行时边界
+
+- origin：`widget://<pluginId>/<path>`（独立 origin，**读不到** `app://heming` 的 localStorage / 会话 / 记忆）。
+- 窗口：宿主创建，`sandbox + contextIsolation`、无 nodeIntegration，挂**最小 preload** `__heming_widget`
+  （窗口动作 / 宿主信息 / 设置 / 事件 / 页面跳转 / `chatConfig`；不含 secrets、MCP、文件、会话任何桥）。
+- `widget:*` IPC 一律按 sender 自校验（只认该 widget 自己的窗口）；主窗 `widgets:*` 通道走 `secureIpc` 只认主窗。
+- CSP：按清单生成（`script-src` 仅在 `permissions.eval:true` 时放开 `'unsafe-eval'`；`connect-src` 只给本机回环 + 清单 `network`，
+  **不继承**主窗的 `https:`/`wss:` 通配）。
+- 数据：插件不得写会话 / 消息列表 / msgCache；对话不落盘。
+
+### 9.4 发布
+
+```bash
+node scripts/build-pet-widget.mjs          # 构建插件 → packages/pet-widget/dist/package/
+node scripts/publish-plugin.mjs packages/pet-widget/dist/package --dest <plugin-dir>
+# 把 <plugin-dir> 同步到服务器的 HEMING_PLUGIN_DIR，客户端「插件区 → 桌面小组件」即可看到
+```
+

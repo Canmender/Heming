@@ -20,7 +20,8 @@ const entry = (over: Partial<PluginCatalogEntry> = {}): PluginCatalogEntry => ({
   sha256: "a".repeat(64),
   size: 2048,
   permissions: { network: ["mcp.example.com"], tools: "read", files: [] },
-  contributions: { skills: 2, mcpServers: 1, commands: 0, toolPacks: 1 },
+  contributions: { skills: 2, mcpServers: 1, commands: 0, toolPacks: 1, desktopWidgets: 0 },
+  distribution: "manifest",
   ...over,
 });
 

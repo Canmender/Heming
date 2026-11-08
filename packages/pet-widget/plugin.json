@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 4,
+  "id": "heming.pet",
+  "name": "桌宠",
+  "version": "1.0.0",
+  "description": "桌面上的 Live2D 化身：关掉主窗口它还在，点它就能说话，有消息它会提醒。",
+  "author": "和鸣",
+  "distribution": "bundle",
+  "permissions": {
+    "network": [],
+    "tools": "none",
+    "files": [],
+    "events": ["notify"],
+    "graphics": ["webgl", "wasm"],
+    "eval": true
+  },
+  "contributions": {
+    "desktopWidgets": [
+      {
+        "id": "pet",
+        "name": "桌宠",
+        "entry": "files/index.html",
+        "width": 300,
+        "height": 420,
+        "scales": [0.6, 0.8, 1, 1.25, 1.5],
+        "defaultScale": 1,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "clickThrough": "auto",
+        "position": { "anchor": "bottom-right", "margin": 24, "remember": true },
+        "icon": "files/icon.png",
+        "tray": {
+          "icon": "files/tray.png",
+          "items": ["toggle", "clickThrough", "resetPosition", "settings"]
+        },
+        "settings": {
+          "title": "桌宠",
+          "fields": [
+            { "key": "agentId", "type": "agent", "label": "对话绑定智能体" },
+            {
+              "key": "modelPath",
+              "type": "text",
+              "label": "Live2D 模型路径",
+              "default": "pet/Hiyori/Hiyori.model3.json"
+            },
+            {
+              "key": "presence",
+              "type": "select",
+              "label": "打扰强度",
+              "default": "normal",
+              "options": [
+                { "value": "quiet", "label": "安静" },
+                { "value": "normal", "label": "正常" },
+                { "value": "eager", "label": "积极" }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "commands": [],
+    "skills": [],
+    "mcpServers": [],
+    "toolPacks": []
+  }
+}

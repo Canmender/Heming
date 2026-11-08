@@ -3,7 +3,7 @@ import { PALETTE_PAGES } from "../palette/pages.js";
 import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
 
 /**
- * 插件清单（`plugin.json`）的唯一解析入口（d.64 · 统一插件模型 v3）。
+ * 插件清单（`plugin.json`）的唯一解析入口（d.98 · 统一插件模型 v4）。
  *
  * 插件是纯声明式系统能力包：三类贡献面（技能 / 远程 MCP 服务 / 命令）统一收进
  * `contributions`，并显式声明 `permissions`（网络主机 / 工具风险上限 / 预留文件根）。
@@ -11,23 +11,27 @@ import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
  * 不做「尽量猜」的容错，否则坏包会在安装后以半可用状态存在，比直接拒绝更难排查。
  *
  * 版本策略：
- * - **v4**（`PLUGIN_SCHEMA_VERSION`）是当前契约：在 v3 的贡献面之上增加模型接入预设
- *   （`contributions.llmPresets`，只填地址/模型、不带 Key）；
- * - **v3** 仍可安装（技能 / MCP / 命令 / 工具束），但不接受预设——带预设的 v3 直接拒绝，
- *   不静默丢字段；
+ * - **v4**（`PLUGIN_SCHEMA_VERSION`）是当前契约：在 v3 之上增加**界面插件**声明
+ *   （`distribution` + `contributions.desktopWidgets` + `permissions.events/graphics/eval`）。
+ *   工具束 / 签名 / 权限语义一字未改；
+ * - **v3** 仍可安装（技能 / MCP / 命令 / 工具束），但**不接受 v4 新增字段**——带了
+ *   `distribution` / `contributions.desktopWidgets` / `permissions.events|graphics|eval`
+ *   的 v3 清单直接拒绝并给字段路径，不静默丢字段（d.88 的 v4 教训：zod 会静默 strip）；
  * - v1 / v2 继续按原规则解析并归一化；
- * - **v1 / v2 旧包继续按原规则解析**，随后归一化成 v3 结构：
- *   `commands` 空、`permissions.network` = 其服务 host 全集、`permissions.tools = "read"`
- *   （等于「安装时已确认的既有事实」——旧包不回溯拦截）；
- * - 归一化后 `PluginManifest` 恒定具备 `contributions.skills/mcpServers/commands` 与
- *   `permissions { network, tools, files }`，UI 不用再判空。
+ * - 归一化后 `PluginManifest` 恒定具备 `distribution`、`contributions.desktopWidgets`
+ *   与 `permissions { network, tools, files, events, graphics, eval }`，UI 不用再判空。
  *
  * 为什么仍拒绝 stdio/命令类 MCP：那会在用户机器上拉起进程，等于安装即执行
  * 第三方代码；本地进程类集成仍走接口区手动配置或 Registry 安装。
+ *
+ * ★ 界面插件（bundle）的**代码执行/签名/首方限制**不在这里判：
+ *   本文件只校验清单形状；「非第一方 bundle 拒绝」「tgz 配额/路径穿越」由主进程安装器
+ *   （`widgets:install`）在写盘前完成。web 侧的声明式安装管线见到 bundle 清单一律拒绝，
+ *   避免把「带可执行内容」的包装进只存技能/MCP 的本机插件存储。
  */
 
-export const PLUGIN_SCHEMA_VERSION = 3;
-export const PLUGIN_SCHEMA_VERSIONS = [1, 2, 3] as const;
+export const PLUGIN_SCHEMA_VERSION = 4;
+export const PLUGIN_SCHEMA_VERSIONS = [1, 2, 3, 4] as const;
 export const MAX_PLUGIN_SKILLS = 50;
 export const MAX_PLUGIN_MCP_SERVERS = 10;
 export const MAX_PLUGIN_COMMANDS = 30;
@@ -35,6 +39,14 @@ export const MAX_PLUGIN_PERMISSION_HOSTS = 20;
 /** 工具束上限（d.65 增补：第四类贡献面，只声明归属，不改执行）。 */
 export const MAX_PLUGIN_TOOL_PACKS = 10;
 export const MAX_TOOL_PACK_TOOLS = 50;
+/** 界面插件上限（d.98 P0：一个插件包本轮只允许 1 个桌面小组件）。 */
+export const MAX_PLUGIN_DESKTOP_WIDGETS = 1;
+/** 缩放档位上限（规格 §2.3：1–6 档）。 */
+export const MAX_DESKTOP_WIDGET_SCALES = 6;
+/** 通用设置表单最多字段数（防止清单把设置页撑爆）。 */
+export const MAX_WIDGET_SETTING_FIELDS = 20;
+/** `select` 字段最多选项数。 */
+export const MAX_WIDGET_SETTING_OPTIONS = 20;
 
 /** 预留文件根上限（本轮只校验与展示，不执行）。 */
 const MAX_PLUGIN_FILES = 5;
@@ -322,6 +334,23 @@ const PermissionsSchema = z.object(
         .max(MAX_PLUGIN_FILES, `预留文件根最多 ${MAX_PLUGIN_FILES} 个`)
         .default([]),
     ),
+    /**
+     * d.98 新增（v4）：界面插件可接收的事件类别。
+     *
+     * 用 `optional` 与 desktopWidgets 同理——v3 带这三个字段要能被识别并拒绝。
+     * 归一化后未声明即为空数组（不接收任何事件）。
+     */
+    events: z
+      .array(z.enum(["notify"], { error: 'permissions.events 目前只支持 "notify"' }), typeParams("事件列表必须是数组"))
+      .max(8, "事件最多 8 个")
+      .optional(),
+    /** d.98 新增（v4）：渲染能力声明（决定 widget 的 CSP，如 wasm → 'wasm-unsafe-eval'）。 */
+    graphics: z
+      .array(z.enum(["webgl", "wasm"], { error: 'permissions.graphics 只支持 "webgl" / "wasm"' }), typeParams("渲染能力列表必须是数组"))
+      .max(8, "渲染能力最多 8 个")
+      .optional(),
+    /** d.98 新增（v4）：是否允许 `unsafe-eval`（pixi6 需要 true；只对声明了的第一方 widget 放开）。 */
+    eval: z.boolean(typeParams("permissions.eval 必须是布尔值")).optional(),
   },
   typeParams("permissions 必须是 JSON 对象"),
 );
@@ -356,6 +385,315 @@ const ToolPackSpecSchema = z.object(
   typeParams("工具束必须是 JSON 对象"),
 );
 
+/* ══════════════════ d.98 · 界面插件声明（规格 §2.3） ══════════════════ */
+
+const WIDGET_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const WIDGET_NAME_MAX = 32;
+const WIDGET_ENTRY_MAX = 200;
+const WIDGET_DIMENSION_MIN = 96;
+const WIDGET_DIMENSION_MAX = 1024;
+const WIDGET_SCALE_MIN = 0.5;
+const WIDGET_SCALE_MAX = 2;
+const WIDGET_ANCHOR_MAX = 32;
+const WIDGET_POSITION_MARGIN_MAX = 512;
+const WIDGET_SETTING_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+const WIDGET_SETTING_LABEL_MAX = 32;
+const WIDGET_SETTING_OPTION_VALUE_MAX = 64;
+
+/** 包内入口：相对路径 + `.html`，禁止绝对路径 / `..` / scheme / 反斜杠。 */
+function isWidgetEntry(value: string): boolean {
+  if (!isRelativePath(value)) return false;
+  if (value.includes("\\") || value.includes("://") || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) {
+    return false;
+  }
+  return /\.html$/i.test(value);
+}
+
+/** 包内图片资源（托盘/图标）：相对路径 + `.png`。 */
+function isWidgetPng(value: string): boolean {
+  if (!isRelativePath(value)) return false;
+  if (value.includes("\\") || value.includes("://")) return false;
+  return /\.png$/i.test(value);
+}
+
+/** 缩放档位：0.5–2、最多 2 位小数（浮点比较留 1e-9 余量）。 */
+const WidgetScaleSchema = z
+  .number(
+    typeParams("缩放档位必须是数字", "缩放档位必须是数字"),
+  )
+  .min(WIDGET_SCALE_MIN, `缩放档位不能小于 ${WIDGET_SCALE_MIN}`)
+  .max(WIDGET_SCALE_MAX, `缩放档位不能大于 ${WIDGET_SCALE_MAX}`)
+  .refine(
+    (value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-9,
+    "缩放档位最多 2 位小数",
+  );
+
+const WidgetSettingsOptionSchema = z.object(
+  {
+    value: z
+      .string(typeParams("缺少选项值", "选项值必须是文本"))
+      .trim()
+      .min(1, "选项值不能为空")
+      .max(WIDGET_SETTING_OPTION_VALUE_MAX, `选项值最多 ${WIDGET_SETTING_OPTION_VALUE_MAX} 字`),
+    label: z
+      .string(typeParams("缺少选项名", "选项名必须是文本"))
+      .trim()
+      .min(1, "选项名不能为空")
+      .max(WIDGET_SETTING_LABEL_MAX, `选项名最多 ${WIDGET_SETTING_LABEL_MAX} 字`),
+  },
+  typeParams("设置选项必须是 JSON 对象"),
+);
+
+/**
+ * 通用表单字段（规格 §2.3 本轮支持的 5 种类型）。
+ *
+ * `select` 必须给 `options`，且 `default` 必须在选项里；其它类型给 `options` 视为写错
+ * （不静默忽略——宿主表单不会用它，留着只会让清单作者以为生效了）。
+ * 各类型的 `default` 形状也在这里钉死：坏默认值会让表单首帧显示错值。
+ */
+const WidgetSettingFieldSchema = z
+  .object(
+    {
+      key: z
+        .string(typeParams("缺少设置字段键", "设置字段键必须是文本"))
+        .trim()
+        .regex(WIDGET_SETTING_KEY_RE, "设置字段键只能由字母、数字和 . _ - 组成，且以字母或数字开头（≤64）"),
+      label: z
+        .string(typeParams("缺少设置字段名", "设置字段名必须是文本"))
+        .trim()
+        .min(1, "设置字段名不能为空")
+        .max(WIDGET_SETTING_LABEL_MAX, `设置字段名最多 ${WIDGET_SETTING_LABEL_MAX} 字`),
+      type: z.enum(["boolean", "select", "text", "number", "agent"], {
+        error: "设置字段类型只能是 boolean / select / text / number / agent",
+      }),
+      default: z.unknown().optional(),
+      options: z
+        .array(WidgetSettingsOptionSchema, typeParams("设置选项列表必须是数组"))
+        .max(MAX_WIDGET_SETTING_OPTIONS, `单个 select 字段最多 ${MAX_WIDGET_SETTING_OPTIONS} 个选项`)
+        .optional(),
+    },
+    typeParams("设置字段必须是 JSON 对象"),
+  )
+  .superRefine((field, ctx) => {
+    if (field.type === "select") {
+      if (!field.options || field.options.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["options"],
+          message: "select 字段必须提供 options（至少 1 项）",
+        });
+        return;
+      }
+      if (field.default !== undefined && !field.options.some((option) => option.value === field.default)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["default"],
+          message: "select 字段的 default 必须是 options 里的某个 value",
+        });
+      }
+    } else if (field.type === "boolean") {
+      if (field.default !== undefined && typeof field.default !== "boolean") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["default"],
+          message: "boolean 字段的 default 必须是布尔值",
+        });
+      }
+      if (field.options !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["options"],
+          message: "只有 select 字段可以声明 options",
+        });
+      }
+    } else if (field.type === "number") {
+      if (
+        field.default !== undefined &&
+        (typeof field.default !== "number" || !Number.isFinite(field.default))
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["default"],
+          message: "number 字段的 default 必须是数字",
+        });
+      }
+      if (field.options !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["options"],
+          message: "只有 select 字段可以声明 options",
+        });
+      }
+    } else if (field.type === "text" || field.type === "agent") {
+      // agent 的默认值是智能体 id（字符串）或空；text 同理。
+      if (field.default !== undefined && field.default !== null && typeof field.default !== "string") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["default"],
+          message: `${field.type} 字段的 default 必须是文本或 null`,
+        });
+      }
+      if (field.options !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["options"],
+          message: "只有 select 字段可以声明 options",
+        });
+      }
+    }
+  });
+
+const WidgetSettingsSchema = z
+  .object(
+    {
+      title: z
+        .string(typeParams("设置标题必须是文本"))
+        .trim()
+        .max(WIDGET_NAME_MAX, `设置标题最多 ${WIDGET_NAME_MAX} 字`)
+        .optional(),
+      fields: z
+        .array(WidgetSettingFieldSchema, typeParams("设置字段列表必须是数组"))
+        .max(MAX_WIDGET_SETTING_FIELDS, `单个小组件最多 ${MAX_WIDGET_SETTING_FIELDS} 个设置字段`),
+    },
+    typeParams("settings 必须是 JSON 对象"),
+  )
+  .superRefine((settings, ctx) => {
+    const seen = new Set<string>();
+    settings.fields.forEach((field, index) => {
+      if (seen.has(field.key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["fields", index, "key"],
+          message: `设置字段键重复：${field.key}`,
+        });
+      }
+      seen.add(field.key);
+    });
+  });
+
+const WidgetPositionSchema = z.object(
+  {
+    anchor: z
+      .string(typeParams("缺少落位锚点", "落位锚点必须是文本"))
+      .trim()
+      .min(1, "落位锚点不能为空")
+      .max(WIDGET_ANCHOR_MAX, `落位锚点最多 ${WIDGET_ANCHOR_MAX} 字`)
+      .default("bottom-right"),
+    margin: z
+      .number(typeParams("落位间距必须是数字", "落位间距必须是数字"))
+      .min(0, "落位间距不能为负")
+      .max(WIDGET_POSITION_MARGIN_MAX, `落位间距不能大于 ${WIDGET_POSITION_MARGIN_MAX}`)
+      .default(24),
+    remember: z.boolean(typeParams("是否记住位置必须是布尔值")).default(true),
+  },
+  typeParams("position 必须是 JSON 对象"),
+);
+
+/** 托盘菜单项：宿主已实现的四种动作（规格 §2.3）。 */
+const WidgetTrayItemSchema = z.enum(["toggle", "clickThrough", "resetPosition", "settings"], {
+  error: '托盘菜单项只能是 "toggle" / "clickThrough" / "resetPosition" / "settings"',
+});
+
+const WidgetTraySchema = z.object(
+  {
+    icon: z
+      .string(typeParams("缺少托盘图标", "托盘图标必须是文本"))
+      .trim()
+      .min(1, "托盘图标不能为空")
+      .refine(isWidgetPng, "托盘图标必须是包内相对路径的 .png"),
+    items: z
+      .array(WidgetTrayItemSchema, typeParams("托盘菜单项必须是数组"))
+      .max(8, "托盘菜单项最多 8 个")
+      .default(["toggle", "settings"]),
+  },
+  typeParams("tray 必须是 JSON 对象"),
+);
+
+/**
+ * 清单 `contributions.desktopWidgets[]` 的一项（界面插件的窗口规格）。
+ *
+ * 这里只做**形状**校验：窗口怎么建、透明/置顶/穿透怎么生效全在主进程；
+ * 渲染层拿到的 `WidgetRecord.widget` 就是这份规格（见 `src/types/widgets.ts`）。
+ */
+export const DesktopWidgetSpecSchema = z
+  .object(
+    {
+      id: z
+        .string(typeParams("缺少小组件 id", "小组件 id 必须是文本"))
+        .trim()
+        .regex(WIDGET_ID_RE, "小组件 id 只能用小写字母、数字和连字符，且以字母或数字开头（≤32）"),
+      name: z
+        .string(typeParams("缺少小组件名", "小组件名必须是文本"))
+        .trim()
+        .min(1, "小组件名不能为空")
+        .max(WIDGET_NAME_MAX, `小组件名最多 ${WIDGET_NAME_MAX} 字`),
+      entry: z
+        .string(typeParams("缺少入口", "入口必须是文本"))
+        .trim()
+        .min(1, "入口不能为空")
+        .max(WIDGET_ENTRY_MAX, `入口路径最多 ${WIDGET_ENTRY_MAX} 字符`)
+        .refine(
+          isWidgetEntry,
+          "入口必须是包内相对路径的 .html（不能以 / 或盘符开头，不能含 ..、反斜杠与 scheme）",
+        ),
+      width: z
+        .number(typeParams("缺少窗口宽度", "窗口宽度必须是数字"))
+        .int("窗口宽度必须是整数")
+        .min(WIDGET_DIMENSION_MIN, `窗口宽度不能小于 ${WIDGET_DIMENSION_MIN}`)
+        .max(WIDGET_DIMENSION_MAX, `窗口宽度不能大于 ${WIDGET_DIMENSION_MAX}`),
+      height: z
+        .number(typeParams("缺少窗口高度", "窗口高度必须是数字"))
+        .int("窗口高度必须是整数")
+        .min(WIDGET_DIMENSION_MIN, `窗口高度不能小于 ${WIDGET_DIMENSION_MIN}`)
+        .max(WIDGET_DIMENSION_MAX, `窗口高度不能大于 ${WIDGET_DIMENSION_MAX}`),
+      scales: z
+        .array(WidgetScaleSchema, typeParams("缩放档位必须是数组"))
+        .min(1, "缩放档位至少 1 档")
+        .max(
+          MAX_DESKTOP_WIDGET_SCALES,
+          `缩放档位最多 ${MAX_DESKTOP_WIDGET_SCALES} 档`,
+        )
+        .refine(
+          (scales) => scales.every((value, index) => index === 0 || value > scales[index - 1]),
+          "缩放档位必须严格递增",
+        ),
+      defaultScale: WidgetScaleSchema.default(1),
+      transparent: z.boolean(typeParams("transparent 必须是布尔值")).default(false),
+      alwaysOnTop: z.boolean(typeParams("alwaysOnTop 必须是布尔值")).default(false),
+      skipTaskbar: z.boolean(typeParams("skipTaskbar 必须是布尔值")).default(false),
+      resizable: z.boolean(typeParams("resizable 必须是布尔值")).default(false),
+      clickThrough: z
+        .enum(["none", "auto"], { error: 'clickThrough 只能是 "none" / "auto"' })
+        .default("none"),
+      position: WidgetPositionSchema.default({ anchor: "bottom-right", margin: 24, remember: true }),
+      icon: z
+        .string(typeParams("图标必须是文本"))
+        .trim()
+        .min(1, "图标不能为空")
+        .refine(isWidgetPng, "图标必须是包内相对路径的 .png")
+        .optional(),
+      tray: WidgetTraySchema.optional(),
+      settings: WidgetSettingsSchema.optional(),
+    },
+    typeParams("desktopWidget 必须是 JSON 对象"),
+  )
+  .superRefine((widget, ctx) => {
+    if (!widget.scales.includes(widget.defaultScale)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["defaultScale"],
+        message: "defaultScale 必须是 scales 里的一档",
+      });
+    }
+  });
+
+export type PluginWidgetSettingOption = z.infer<typeof WidgetSettingsOptionSchema>;
+export type PluginWidgetSettingField = z.infer<typeof WidgetSettingFieldSchema>;
+export type PluginWidgetSettings = z.infer<typeof WidgetSettingsSchema>;
+export type PluginWidgetPosition = z.infer<typeof WidgetPositionSchema>;
+export type PluginWidgetTrayItem = z.infer<typeof WidgetTrayItemSchema>;
+export type PluginWidgetTray = z.infer<typeof WidgetTraySchema>;
+
 const ContributionsSchema = z.object(
   {
     skills: z
@@ -374,6 +712,17 @@ const ContributionsSchema = z.object(
       .array(ToolPackSpecSchema, typeParams("工具束列表必须是数组"))
       .max(MAX_PLUGIN_TOOL_PACKS, `单个插件最多 ${MAX_PLUGIN_TOOL_PACKS} 个工具束`)
       .default([]),
+    /**
+     * 界面插件声明（d.98 / v4）。
+     *
+     * 用 `optional` 而不是 `.default([])`：v3 清单里**写没写这个字段**本身要能被识别
+     * （带新字段的 v3 必须明确拒绝，而不是被默认值抹平后静默通过）。
+     * 归一化时统一成数组（见 `PluginContributions`）。
+     */
+    desktopWidgets: z
+      .array(DesktopWidgetSpecSchema, typeParams("桌面小组件列表必须是数组"))
+      .max(MAX_PLUGIN_DESKTOP_WIDGETS, `本轮最多 ${MAX_PLUGIN_DESKTOP_WIDGETS} 个桌面小组件`)
+      .optional(),
   },
   typeParams("contributions 必须是 JSON 对象"),
 );
@@ -421,7 +770,7 @@ const SignatureSchema = z.object(
 const PluginManifestSchema = z
   .object(
     {
-      schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)], {
+      schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)], {
         // zod 4 去掉了 errorMap，直接给一个字符串即覆盖这一层的所有报错文案。
         error: `仅支持 schemaVersion: ${PLUGIN_SCHEMA_VERSIONS.join(" / ")}`,
       }),
@@ -452,6 +801,16 @@ const PluginManifestSchema = z
         .trim()
         .max(64, "作者名最多 64 字")
         .default(""),
+      /**
+       * d.98 新增（v4）：分发形态。
+       *
+       * `bundle` = 界面插件（带 files/** 可执行内容，走主进程安装）；
+       * `manifest` = 纯声明式包（既有全部插件；缺省值，v3 等价）。
+       * 同样用 `optional`：v3 写了这个字段要报错，而不是被默认值吞掉。
+       */
+      distribution: z
+        .enum(["bundle", "manifest"], { error: 'distribution 只能是 "bundle" / "manifest"' })
+        .optional(),
       // v1/v2 的顶层字段（仅旧包使用；v3 进来会被 parsePluginManifest 的迁移提示拦下）
       skills: z
         .array(SkillSpecSchema, typeParams("技能列表必须是数组"))
@@ -473,10 +832,45 @@ const PluginManifestSchema = z
   )
   .superRefine((manifest, ctx) => {
     const legacy = manifest.schemaVersion < 3;
+    const isV4 = manifest.schemaVersion === 4;
     const skills = legacy ? (manifest.skills ?? []) : (manifest.contributions?.skills ?? []);
     const servers = legacy ? (manifest.mcpServers ?? []) : (manifest.contributions?.mcpServers ?? []);
     const commands = legacy ? [] : (manifest.contributions?.commands ?? []);
     const toolPacks = legacy ? [] : (manifest.contributions?.toolPacks ?? []);
+    const desktopWidgets = legacy ? [] : (manifest.contributions?.desktopWidgets ?? []);
+    const distribution = manifest.distribution ?? "manifest";
+
+    /**
+     * v4 新增字段只属于 v4（d.88 的教训：zod 会静默 strip 未知字段，装完半可用）。
+     * v3 里写这些字段一律拒绝并给字段路径；v1/v2 的 contributions/permissions 已整块拒绝，
+     * 这里只补字段级提示，避免报错里出现一堆重复项。
+     */
+    if (manifest.schemaVersion === 3) {
+      if (manifest.distribution !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["distribution"],
+          message: "schemaVersion 3 不支持 distribution（界面插件分发形态），请升级到 schemaVersion 4",
+        });
+      }
+      if (manifest.contributions?.desktopWidgets !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "desktopWidgets"],
+          message:
+            "schemaVersion 3 不支持 contributions.desktopWidgets（界面插件），请升级到 schemaVersion 4",
+        });
+      }
+      (["events", "graphics", "eval"] as const).forEach((key) => {
+        if (manifest.permissions?.[key] !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["permissions", key],
+            message: `schemaVersion 3 不支持 permissions.${key}（界面插件权限），请升级到 schemaVersion 4`,
+          });
+        }
+      });
+    }
 
     if (legacy && manifest.contributions) {
       ctx.addIssue({
@@ -537,13 +931,18 @@ const PluginManifestSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["contributions"],
-          message: `schemaVersion ${manifest.schemaVersion} 必须声明 contributions（技能 / MCP 服务 / 命令 / 工具束至少一类）`,
+          message: `schemaVersion ${manifest.schemaVersion} 必须声明 contributions（技能 / MCP 服务 / 命令 / 工具束${isV4 ? " / 桌面小组件" : ""}至少一类）`,
         });
-      } else if (skills.length + servers.length + commands.length + toolPacks.length === 0) {
+      } else if (
+        skills.length + servers.length + commands.length + toolPacks.length + desktopWidgets.length ===
+        0
+      ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["contributions"],
-          message: "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令 / 工具束）",
+          message: isV4
+            ? "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令 / 工具束 / 桌面小组件）"
+            : "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令 / 工具束）",
         });
       }
     } else if (skills.length + servers.length === 0) {
@@ -552,6 +951,37 @@ const PluginManifestSchema = z
         path: ["skills"],
         message: "插件至少要包含 1 项能力（技能或 MCP 服务）",
       });
+    }
+
+    /**
+     * v4：bundle 包只允许「界面插件」这一种可执行形态（规格 §2.2 新增拒绝规则）。
+     *
+     * 拒绝理由不是洁癖：技能/MCP/工具束都会在本机物化成可被模型调用的能力，
+     * 而 bundle 的代码运行在独立 origin 的 widget 窗口里——两种权限模型混在一个包里，
+     * 用户点一次「安装」等于同时确认两套信任，没法说清边界。
+     */
+    if (isV4) {
+      if (distribution === "bundle") {
+        const forbidden: Array<[string, number, string]> = [
+          ["skills", skills.length, "技能"],
+          ["mcpServers", servers.length, "MCP 服务"],
+          ["toolPacks", toolPacks.length, "工具束"],
+        ];
+        for (const [key, count, label] of forbidden) {
+          if (count === 0) continue;
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["contributions", key],
+            message: `界面插件（distribution: "bundle"）只允许贡献 commands 与 desktopWidgets，不能声明${label}`,
+          });
+        }
+      } else if (desktopWidgets.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "desktopWidgets"],
+          message: '声明 contributions.desktopWidgets 时必须 distribution: "bundle"（界面插件需要随包文件）',
+        });
+      }
     }
 
     const seenSkills = new Set<string>();
@@ -665,25 +1095,44 @@ export interface PluginPermissions {
   tools: PluginToolRisk;
   /** 预留文件根（本轮只校验与展示，不执行）。 */
   files: string[];
+  /** d.98（v4）：界面插件可接收的事件类别；未声明为空数组（不接收任何事件）。 */
+  events: PluginWidgetEvent[];
+  /** d.98（v4）：渲染能力声明（webgl / wasm）；决定 widget 的 CSP。 */
+  graphics: PluginGraphicsCapability[];
+  /** d.98（v4）：是否允许 `unsafe-eval`（只对第一方 widget 放开）。 */
+  eval: boolean;
 }
 
+/** 界面插件可接收的事件类别（当前只有通知中心转发）。 */
+export type PluginWidgetEvent = "notify";
+/** widget 渲染能力声明。 */
+export type PluginGraphicsCapability = "webgl" | "wasm";
+
 /**
- * 五类贡献面：技能 / 远程 MCP 服务 / 命令 / 工具束 / 模型接入预设。
+ * 五类贡献面：技能 / 远程 MCP 服务 / 命令 / 工具束 / 桌面小组件。
  *
  * `toolPacks` 是 d.65 的**向后兼容增补**（schemaVersion 仍为 3）：老清单没有该字段
  * 照样合法；它只声明「哪些工具属于同一组」，不定义工具、不改变开关与 HITL。
+ *
+ * `desktopWidgets` 是 d.98（schemaVersion 4）的第五类贡献面：**界面插件**。
+ * web 侧只做清单校验与展示，安装/窗口/代码执行全部在主进程（见 `src/types/widgets.ts`）。
  */
 export interface PluginContributions {
   skills: PluginSkillSpec[];
   mcpServers: PluginMcpServerSpec[];
   commands: PluginCommandSpec[];
   toolPacks: PluginToolPackSpec[];
+  /** d.98（v4）：界面插件声明；v3 及更旧清单恒为空数组。 */
+  desktopWidgets: PluginDesktopWidgetSpec[];
   /**
    * 已废弃（d.90）：模型不再由插件声明，统一由 magpie 网关提供。
    * 字段恒为空数组，仅用于兼容既有消费方（统计/展示）；清单里不再接受该字段。
    */
   llmPresets: [];
 }
+
+/** 归一化后的 `desktopWidget` 规格（类型来源是 zod schema，避免两处手写漂移）。 */
+export type PluginDesktopWidgetSpec = z.infer<typeof DesktopWidgetSpecSchema>;
 
 /** 发布者声明（d.67，TOFU）：公钥只是内容，不证明身份；信任由首次安装确认。 */
 export interface PluginPublisher {
@@ -702,8 +1151,8 @@ export interface PluginSignature {
 /**
  * 归一化后的插件清单（唯一对外形态）。
  *
- * ★ `schemaVersion` 保留原始版本号（1/2/3）：安装弹窗要据此提示「旧版清单（v2）」；
- * 但 `contributions` / `permissions` 一定存在且为 v3 形状。
+ * ★ `schemaVersion` 保留原始版本号（1/2/3/4）：安装弹窗要据此提示「旧版清单（v2）」；
+ * 但 `distribution` / `contributions` / `permissions` 一定存在且为当前形状。
  */
 export interface PluginManifest {
   schemaVersion: PluginSchemaVersion;
@@ -712,12 +1161,17 @@ export interface PluginManifest {
   version: string;
   description: string;
   author: string;
+  /** d.98：分发形态。`bundle` = 界面插件（带可执行内容，由主进程安装）；缺省 `manifest`。 */
+  distribution: PluginDistribution;
   contributions: PluginContributions;
   permissions: PluginPermissions;
   /** 可选：发布者与签名（d.67；旧 v3 清单没有这两个字段）。 */
   publisher?: PluginPublisher;
   signature?: PluginSignature;
 }
+
+/** 分发形态（规格 §2.2）：纯声明式清单 / 带文件的界面插件包。 */
+export type PluginDistribution = "manifest" | "bundle";
 
 /** 清单错误：`message` 已是可直接展示的中文。 */
 export class PluginManifestError extends Error {
@@ -747,7 +1201,7 @@ function formatIssues(error: z.ZodError): string {
   return parts.join("；") + (rest > 0 ? `；另有 ${rest} 处错误` : "");
 }
 
-function uniq(items: string[]): string[] {
+function uniq<T extends string>(items: T[]): T[] {
   return [...new Set(items.filter(Boolean))];
 }
 
@@ -757,6 +1211,37 @@ function legacyPermissions(servers: PluginMcpServerSpec[]): PluginPermissions {
     network: uniq(servers.map((server) => hostOfUrl(server.url)).filter(Boolean)),
     tools: "read",
     files: [],
+    // 旧包没有界面插件权限概念：不接收事件、不声明渲染能力、不允许 eval。
+    events: [],
+    graphics: [],
+    eval: false,
+  };
+}
+
+/**
+ * 深拷贝小组件规格（含 scales / position / tray.items / settings.fields.options）。
+ *
+ * 解析结果是「唯一对外形态」，调用方（安装弹窗/详情/列表）只读；
+ * 但仍做一次深拷贝：这些对象会进本机存储与 IPC，浅拷贝留下的共享引用
+ * 会让「改了展示对象就改了记录」这类问题很难查。
+ */
+function copyWidgetSpec(spec: PluginDesktopWidgetSpec): PluginDesktopWidgetSpec {
+  return {
+    ...spec,
+    scales: [...spec.scales],
+    position: { ...spec.position },
+    ...(spec.tray ? { tray: { ...spec.tray, items: [...spec.tray.items] } } : {}),
+    ...(spec.settings
+      ? {
+          settings: {
+            ...spec.settings,
+            fields: spec.settings.fields.map((field) => ({
+              ...field,
+              ...(field.options ? { options: field.options.map((option) => ({ ...option })) } : {}),
+            })),
+          },
+        }
+      : {}),
   };
 }
 
@@ -818,6 +1303,8 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
           ...pack,
           tools: [...pack.tools],
         })),
+    // d.98：界面插件声明（v3 及更旧恒为空数组）；深拷贝避免调用方改到解析缓存。
+    desktopWidgets: legacy ? [] : (manifest.contributions?.desktopWidgets ?? []).map(copyWidgetSpec),
     // 插件不再能声明模型预设（d.90：模型统一由 magpie 网关提供）；字段保留为空数组以兼容既有消费方。
     llmPresets: [],
   };
@@ -827,6 +1314,9 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
         network: uniq((manifest.permissions?.network ?? []).map((host) => host.toLowerCase())),
         tools: manifest.permissions?.tools ?? "read",
         files: uniq(manifest.permissions?.files ?? []),
+        events: uniq(manifest.permissions?.events ?? []),
+        graphics: uniq(manifest.permissions?.graphics ?? []),
+        eval: manifest.permissions?.eval === true,
       };
   return {
     schemaVersion: manifest.schemaVersion,
@@ -835,6 +1325,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
     version: manifest.version,
     description: manifest.description,
     author: manifest.author,
+    distribution: manifest.distribution ?? "manifest",
     contributions,
     permissions,
     // 旧版清单不允许带签名（superRefine 已拒绝），这里只透传 v3 的可选字段。

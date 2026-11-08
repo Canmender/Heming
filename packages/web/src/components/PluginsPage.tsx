@@ -35,6 +35,7 @@ import { PluginStats } from "./plugins/PluginStats.js";
 import { SystemPluginCard } from "./plugins/SystemPluginCard.js";
 import { PluginToolPanel } from "./plugins/PluginToolPanel.js";
 import { ModulesView } from "./plugins/ModulesView.js";
+import { WidgetsView } from "./plugins/WidgetsView.js";
 import { SkillsView } from "./SkillsPage.js";
 import { InterfacesView } from "./InterfacesPage.js";
 import {
@@ -60,12 +61,14 @@ import { BTN_GHOST, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
  * 动作改为切 Tab，不再跨页 setPage——导航里也不再有这两个独立入口。
  */
 
-type TabKey = "plugins" | "repo" | "modules" | "skills" | "tools" | "mcp";
+type TabKey = "plugins" | "repo" | "widgets" | "modules" | "skills" | "tools" | "mcp";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "plugins", label: "插件" },
   // d.95：云端插件仓库（浏览/下载/安装）作为一等入口，不再只藏在安装弹窗里
   { key: "repo", label: "仓库" },
+  // d.98：界面插件（原桌宠）与声明式插件分开展示——安装路径、信任模型、生命周期都不同
+  { key: "widgets", label: "桌面小组件" },
   // d.70：内置能力模块（幕僚 / 信息中枢 / 自动化）与插件同区展示，可启用/停用
   { key: "modules", label: "模块" },
   { key: "skills", label: "技能" },
@@ -122,7 +125,7 @@ function hostOf(url: string): string {
 
 /** 插件区五个 Tab 的会话级记忆：刷新回到上次看的 Tab。 */
 const PLUGINS_TAB_KEY = "heming.tab.plugins.v1";
-const PLUGINS_TABS = ["plugins", "repo", "modules", "skills", "tools", "mcp"] as const satisfies readonly TabKey[];
+const PLUGINS_TABS = ["plugins", "repo", "widgets", "modules", "skills", "tools", "mcp"] as const satisfies readonly TabKey[];
 
 export function PluginsPage({
   plugins = pluginStore,
@@ -404,9 +407,11 @@ export function PluginsPage({
             ? `已启用 ${enabledCount}/${list.length} 个插件 · 同一 id 再次安装 = 覆盖更新`
             : tab === "repo"
               ? "云端同一份插件仓库：下载原样清单、校验指纹后走同一套安装预览"
-            : tab === "modules"
-              ? "内置模块 · 停用只收起入口与后台任务，不删除本机数据"
-              : ""}
+              : tab === "widgets"
+                ? "界面插件 · 含可执行代码，装后由宿主开独立窗口"
+                : tab === "modules"
+                  ? "内置模块 · 停用只收起入口与后台任务，不删除本机数据"
+                  : ""}
         </span>
       </div>
 
@@ -517,8 +522,8 @@ export function PluginsPage({
             )}
 
             <p className={`mt-3 max-w-[680px] ${HINT}`}>
-              插件只声明技能、MCP 服务和命令，不含代码、不带密钥。安装不会运行程序，也不会联网；
-              连接与工具启用仍由你手动确认。
+              这里安装的插件只声明技能、MCP 服务和命令，不含代码、不带密钥。安装不会运行程序，也不会联网；
+              连接与工具启用仍由你手动确认。带可执行界面代码的插件（如桌宠）请在「桌面小组件」安装。
             </p>
           </>
         )}
@@ -526,6 +531,9 @@ export function PluginsPage({
         {/* 技能 Tab：完整技能视图（原技能区页主体）。
             onChanged：技能池变更后让本页统计/能力快照同帧刷新（自检：新建技能后统计不涨）。 */}
         {tab === "modules" && <ModulesView />}
+
+        {/* d.94：界面插件（桌面小组件）——列表/启停/卸载/宿主动作/安装，数据来自主进程 IPC */}
+        {tab === "widgets" && <WidgetsView />}
 
         {tab === "skills" && (
           <SkillsView

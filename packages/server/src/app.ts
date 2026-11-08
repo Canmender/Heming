@@ -215,6 +215,61 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     }
     res.status(204).end();
   });
+  /**
+   * 发布界面插件包（d.98）：`PUT /api/plugins/:id/:version/package`，body 是 package.tgz 原始字节。
+   *
+   * 与清单分成两次 PUT（先清单、再包）：包必须能找到同 id/版本的清单，避免「有包没清单」的孤儿；
+   * 服务端只校验 id/版本字符集、大小（≤40MB）与清单已存在，**不解析包内容**——
+   * 解包配额、清单结构、entry 存在性都由客户端安装时再校验。
+   */
+  app.put(
+    "/api/plugins/:id/:version/package",
+    express.raw({ type: ["application/gzip", "application/x-gzip", "application/octet-stream"], limit: "40mb" }),
+    (req, res) => {
+      if (!publishKey) {
+        res.status(503).json({ error: "云端插件仓库未开启发布接口（未配置 HEMING_PLUGIN_PUBLISH_KEY）" });
+        return;
+      }
+      if (!publishAuthorized(req)) {
+        res.status(401).json({ error: "发布密钥不正确" });
+        return;
+      }
+      const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      if (bytes.length === 0) {
+        res.status(400).json({ error: "请求体必须是 package.tgz 原始字节" });
+        return;
+      }
+      const result = pluginCatalog.publishPackage(req.params.id, req.params.version, bytes);
+      if (result === "invalid_id" || result === "invalid_version") {
+        res.status(400).json({ error: "插件 id 或版本号格式不正确" });
+        return;
+      }
+      if (result === "too_large") {
+        res.status(413).json({ error: "插件包过大（上限 40MB）或为空" });
+        return;
+      }
+      if (result === "missing_manifest") {
+        res.status(409).json({ error: "先发布 plugin.json 再发布 package.tgz（同 id/版本）" });
+        return;
+      }
+      res.status(result.created ? 201 : 200).json(result);
+    },
+  );
+
+  /**
+   * 界面插件包（d.98）：`package.tgz` 原样分发，客户端先比目录里的 sha256 再解包。
+   * 纯声明式插件没有这个文件，返回 404（客户端据此按「只装清单」处理）。
+   */
+  app.get("/api/plugins/:id/:version/package", (req, res) => {
+    const found = pluginCatalog.readPackage(req.params.id, req.params.version);
+    if (!found) {
+      res.status(404).json({ error: "插件包不存在" });
+      return;
+    }
+    res.setHeader("Content-Type", "application/gzip");
+    res.setHeader("X-Plugin-Package-Sha256", found.sha256);
+    res.send(found.bytes);
+  });
 
   app.post("/api/auth/register", (req, res) => {
     if (!allowRegister) {

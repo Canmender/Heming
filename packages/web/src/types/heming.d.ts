@@ -1,3 +1,5 @@
+import type { WidgetsBridge } from "./widgets.js";
+
 /**
  * 桌面端 preload（packages/desktop/preload.js）通过 contextBridge 暴露在
  * `window.heming` 上的桥接 API。只有 Electron 里存在；浏览器直接打开时是 undefined，
@@ -155,51 +157,14 @@ declare global {
       onEvent: (cb: (event: unknown) => void) => () => void;
     };
     /**
-     * 桌宠桥（d.46）：preload 暴露，只有桌面端存在。
+     * 界面插件桥（d.94）：preload 暴露，只有桌面端**主窗**存在。
      *
-     * 桌宠窗口自己画 Live2D、自己直连本机 LLM，主进程只管「窗口在哪、
-     * 要不要挡鼠标、显示还是隐藏」。这里刻意**没有**通用的 move/resize/setAlwaysOnTop，
-     * 只给这一组语义明确的动作。
+     * 桌宠已从本体拆成界面插件（`heming.pet`），宿主只提供这组通道：
+     * 列出/安装/启停/卸载、窗口通用动作与设置表单读写、脱敏事件转发。
+     * 契约（字段/通道/返回形状）见 `src/types/widgets.ts` 与规格 §4.2.1；
+     * 浏览器里没有它，插件区「桌面小组件」必须显示「仅桌面端可用」。
      */
-    __heming_pet?: {
-      /** 当前状态。 */
-      state: () => Promise<{
-        visible: boolean;
-        scale: number;
-        clickThrough: boolean;
-        bounds: { x: number; y: number; width: number; height: number };
-      }>;
-      /** 缩放：`{dir:1}` 相对切档；数字为绝对档位。 */
-      setScale: (payload: { dir: number } | number) => Promise<number>;
-      /** 上报「光标此刻是否在可交互区」（仅在值变化时调用）。 */
-      setInteractive: (value: boolean) => void;
-      dragStart: () => void;
-      dragMove: () => void;
-      dragEnd: () => void;
-      /** 回到默认落位（工作区右下角，按当前缩放档位重算）。 */
-      resetPosition: () => void;
-      show: () => void;
-      hide: () => void;
-      toggle: () => void;
-      /** 鼠标穿透开关（设置区与托盘共用同一份状态）。 */
-      setClickThrough: (value: boolean) => void;
-      /** 重新加载桌宠页面（换模型后让新配置生效）。 */
-      reload: () => void;
-      /**
-       * 请求主窗口上前台并切到指定页面（未配置模型连接时的出口）。
-       * @param page 可选页面 id（settings/team/tasks/staff/infohub），不传 = 设置页。
-       */
-      openSettings: (page?: string) => void;
-      /**
-       * 订阅主进程推来的事件（桌宠窗口用）。
-       * 契约见 `lib/petEvent.ts` 的 PetEventPayload。
-       */
-      onEvent: (cb: (payload: unknown) => void) => () => void;
-      /** 主动发起一条推送（主窗口用；主进程校验来源后转发给桌宠）。 */
-      emit: (payload: unknown) => void;
-      /** 主窗口侧：订阅「桌宠要切换页面」。回调收到 page（可能为 undefined，表示设置页）。 */
-      onOpenSettings: (cb: (page?: string) => void) => () => void;
-    };
+    __heming_widgets?: WidgetsBridge;
     heming?: {
       /** 运行平台（process.platform），如 "win32" / "darwin"。 */
       platform?: string;

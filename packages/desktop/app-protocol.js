@@ -158,10 +158,9 @@ function wsOriginOf(origin) {
 }
 
 /**
- * 生成一条 CSP 策略串。
+ * 生成一条 CSP 策略串（主窗口用）。
  *
  * @param {object} [opts]
- * @param {boolean} [opts.pet] 桌宠独立入口（单独策略：无表单、无 frame）
  * @param {string} [opts.apiOrigin] 服务端源（缺省 `DEFAULT_API_ORIGIN`）
  * @param {string[]} [opts.extraConnect] 额外 connect-src 来源（运维用，来自 env）
  */
@@ -178,19 +177,10 @@ function buildCsp(opts = {}) {
      * ★ 主窗口：绝不放 'unsafe-inline' / 'unsafe-eval'；'wasm-unsafe-eval' 只放开 WASM 编译
      *   （shiki 代码高亮 oniguruma wasm / pdfjs 图像解码）。
      *
-     * ★ 桌宠窗口**必须**额外放 'unsafe-eval'：pixi 6 在 `generateProgram` 里用 `new Function`
-     *   生成着色器程序，实测（enforce 冒烟）报错「Current environment does not allow unsafe-eval,
-     *   please use @pixi/unsafe-eval」→ 桌宠模型直接起不来。pixi 8 才移除该依赖，而 pixi 8
-     *   被 `pixi-live2d-display` 硬绑 6 卡住（见 docs/plans 的依赖矩阵）。
-     *   桌宠窗口只加载 app:// 本地资源、不渲染用户 HTML，风险面远小于主窗口；
-     *   等 pixi 8 可升级后，这一条跟 `buildCsp({pet:true})` 一起删。
+     * ★ 桌宠的 pixi 6 需要 'unsafe-eval'（`new Function` 生成着色器）；它已不在主窗，
+     *   而是搬进 `widget://` 的界面插件，这条豁免跟着 widget CSP 走（见 buildWidgetCsp）。
      */
-    [
-      "script-src",
-      opts.pet
-        ? ["'self'", "app:", "'unsafe-eval'", "'wasm-unsafe-eval'"]
-        : ["'self'", "app:", "'wasm-unsafe-eval'"],
-    ],
+    ["script-src", ["'self'", "app:", "'wasm-unsafe-eval'"]],
     // ★ 唯一保留的 unsafe-inline：KaTeX / React style 属性 / 图表（理由见文件头）
     ["style-src", ["'self'", "app:", "'unsafe-inline'"]],
     ["img-src", ["'self'", "app:", "data:", "blob:"]],
@@ -201,21 +191,15 @@ function buildCsp(opts = {}) {
     ["object-src", ["'none'"]],
     ["base-uri", ["'self'"]],
     ["frame-ancestors", ["'none'"]],
-    ["form-action", opts.pet ? ["'none'"] : ["'self'"]],
+    ["form-action", ["'self'"]],
   ];
   return directives.map(([name, values]) => `${name} ${values.join(" ")}`).join("; ");
 }
 
-/** 桌宠入口路径（独立策略；`pet.html` 是 Vite 多入口产出的真实文件）。 */
-function isPetPath(urlPath) {
-  const p = String(urlPath || "").toLowerCase();
-  return p === "/pet.html" || p.endsWith("/pet.html");
-}
-
 /**
- * 一次 `app://` 响应要带的 CSP 头。
+ * 一次 `app://` 响应要带的 CSP 头（主窗口）。
  *
- * @param {string} urlPath 请求路径
+ * @param {string} urlPath 请求路径（保留参数：调用点多，主窗策略已不再按路径分叉）
  * @param {object} [opts]
  * @param {"off"|"report"|"enforce"} [opts.mode] 灰度模式
  * @returns {Record<string,string>} mode=off 时返回空对象（不加任何头）
@@ -224,12 +208,104 @@ function cspHeadersFor(urlPath, opts = {}) {
   const mode = normalizeCspMode(opts.mode);
   if (mode === "off") return {};
   const policy = buildCsp({
-    pet: isPetPath(urlPath),
     apiOrigin: opts.apiOrigin,
     extraConnect: opts.extraConnect,
   });
   const header = mode === "enforce" ? CSP_HEADER : CSP_REPORT_ONLY_HEADER;
   return { [header]: policy };
+}
+
+/* ─────────────────── 界面插件 `widget://` 的 CSP（d.98） ─────────────────── */
+/*
+ * 与主窗策略的三处**故意不同**（规格 §3.2）：
+ * 1. `connect-src` **不继承** `https:` / `wss:` 通配：插件只能连本机回环 + 清单
+ *    `permissions.network` 里逐个声明的主机。主窗需要的是"用户运行期配置的任意
+ *    供应商"，插件需要的是"它自己声明过的那几个"。
+ * 2. `'unsafe-eval'` 只在清单 `permissions.eval: true` 时放开（pixi 6 的着色器
+ *    生成需要），并且只有第一方签名包才可能走到这里（安装端拒绝未签名 bundle）。
+ * 3. `form-action 'none'` + `base-uri 'none'`：插件页没有表单提交与相对基址的正当用途。
+ */
+
+/** 把清单 `permissions.network` 的一项转成 CSP 来源；非法返回 null。 */
+function widgetConnectSource(host) {
+  if (typeof host !== "string") return null;
+  const raw = host.trim().toLowerCase();
+  if (!raw || raw.length > 253) return null;
+  try {
+    if (raw.includes("://")) {
+      const url = new URL(raw);
+      if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+      return `${url.protocol}//${url.host}`;
+    }
+    return [`http://${raw}`, `https://${raw}`];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 生成一个界面插件的 CSP 策略串。
+ *
+ * @param {{network?: string[], eval?: boolean}} [permissions] 清单里归一化后的 permissions
+ */
+function buildWidgetCsp(permissions = {}) {
+  const permissionsObject = permissions && typeof permissions === "object" ? permissions : {};
+  const script = ["'self'", "'wasm-unsafe-eval'"];
+  if (permissionsObject.eval === true) script.push("'unsafe-eval'");
+
+  const connect = ["'self'", ...LOOPBACK_SOURCES];
+  for (const host of Array.isArray(permissionsObject.network) ? permissionsObject.network : []) {
+    const source = widgetConnectSource(host);
+    if (Array.isArray(source)) connect.push(...source);
+    else if (source) connect.push(source);
+  }
+
+  const directives = [
+    ["default-src", ["'self'"]],
+    ["script-src", script],
+    ["style-src", ["'self'", "'unsafe-inline'"]],
+    ["img-src", ["'self'", "data:", "blob:"]],
+    ["font-src", ["'self'", "data:"]],
+    ["media-src", ["'self'", "blob:", "data:"]],
+    ["worker-src", ["'self'", "blob:"]],
+    ["connect-src", [...new Set(connect)]],
+    ["object-src", ["'none'"]],
+    ["base-uri", ["'none'"]],
+    ["frame-ancestors", ["'none'"]],
+    ["form-action", ["'none'"]],
+  ];
+  return directives.map(([name, values]) => `${name} ${values.join(" ")}`).join("; ");
+}
+
+/**
+ * 一次 `widget://` 响应要带的 CSP 头。
+ *
+ * @param {{network?: string[], eval?: boolean}} [permissions]
+ * @param {{mode?: "off"|"report"|"enforce"}} [opts]
+ */
+function widgetCspHeaders(permissions = {}, opts = {}) {
+  const mode = normalizeCspMode(opts.mode);
+  if (mode === "off") return {};
+  const header = mode === "enforce" ? CSP_HEADER : CSP_REPORT_ONLY_HEADER;
+  return { [header]: buildWidgetCsp(permissions) };
+}
+
+/**
+ * 解析一次 `widget://<id>/<path>` 的资源请求。
+ *
+ * 与 app:// 的区别：**不做 SPA 回落**（入口在清单里显式声明，回落只会把 404
+ * 变成一块加载了错误内容的透明窗），并且永远不允许越出插件自己的版本目录。
+ *
+ * @param {string} urlPath URL 路径（如 `/files/index.html`）
+ * @param {string} rootDir 插件版本目录（`<userData>/plugins/<id>/<version>`）
+ * @param {(filePath: string) => boolean} exists
+ * @returns {{ file: string, spaFallback: boolean } | null}
+ */
+function resolveWidgetRequest(urlPath, rootDir, exists) {
+  const target = resolveAssetPath(urlPath, rootDir);
+  if (target === null) return null;
+  if (!exists(target)) return null;
+  return { file: target, spaFallback: false };
 }
 
 /**
@@ -298,7 +374,10 @@ module.exports = {
   normalizeCspMode,
   wsOriginOf,
   buildCsp,
-  isPetPath,
   cspHeadersFor,
+  // 界面插件 widget://（d.98）
+  buildWidgetCsp,
+  widgetCspHeaders,
+  resolveWidgetRequest,
   parseCspViolation,
 };

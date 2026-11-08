@@ -7,7 +7,10 @@
  * `plugins/<名字>/plugin.json` 校验后摆成服务端要的目录布局：
  *
  *   <dest>/<插件 id>/<版本>/plugin.json      （原样字节）
+ *   <dest>/<插件 id>/<版本>/package.tgz      （仅界面插件：v4 distribution: "bundle"）
  *
+ * 界面插件（d.94）：输入 = 一个**包根目录**（含 `plugin.json` + `files/**`），
+ * 脚本把这两部分打成确定性 tar.gz，客户端下载后先比对目录里的 sha256 再解包。
  * 目录布局与读取逻辑见 `packages/server/src/pluginCatalog.ts`。
  *
  * 用法：
@@ -35,12 +38,52 @@
  * 退出码：0 全部成功；1 有坏包或写盘失败（不静默跳过）。
  */
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+
+/**
+ * 界面插件包（v4 `distribution: "bundle"`）的 tar 打包复用桌面端实现：
+ * 安装端解包与发布端打包必须是同一份代码（确定性 tar、路径安全、配额口径一致），
+ * 在这里 import 一份 ESM 版没有意义，直接 require CJS 纯函数模块。
+ */
+const require = createRequire(import.meta.url);
+const { packTarGz } = require("../packages/desktop/plugin-tar.js");
 
 const ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/;
+
+/**
+ * 界面插件包根目录 → tar 条目（plugin.json + files/**）。
+ * 只接受包根下的 `files/` 子树：规格 §2.1 的固定结构，多一层少一层都是坏包。
+ */
+function collectBundleEntries(rootDir) {
+  const entries = [];
+  const manifestPath = join(rootDir, "plugin.json");
+  entries.push({ path: "plugin.json", data: readFileSync(manifestPath) });
+  const filesDir = join(rootDir, "files");
+  if (!existsSync(filesDir) || !statSync(filesDir).isDirectory()) {
+    return { entries, error: "缺少 files/ 目录（界面插件包必须包含 files/**）" };
+  }
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      if (!entry.isFile()) return { error: `不允许符号链接/特殊文件：${abs}` };
+      const rel = relative(rootDir, abs).split("\\").join("/");
+      entries.push({ path: rel, data: readFileSync(abs) });
+    }
+    return null;
+  };
+  const walkError = walk(filesDir);
+  if (walkError) return { entries, error: walkError.error };
+  if (entries.length <= 1) return { entries, error: "files/ 目录为空" };
+  return { entries, error: null };
+}
 
 function usage() {
   console.error(
@@ -94,7 +137,7 @@ function validate(file) {
   if (!Number.isInteger(raw.schemaVersion)) return { error: "缺少整数 schemaVersion" };
   if (typeof raw.name !== "string" || !raw.name.trim()) return { error: "缺少插件名" };
   const bytes = readFileSync(file);
-  return {
+  const base = {
     id: raw.id,
     version: raw.version,
     schemaVersion: raw.schemaVersion,
@@ -102,6 +145,45 @@ function validate(file) {
     bytes,
     sha256: createHash("sha256").update(bytes).digest("hex"),
   };
+
+  // 界面插件（d.94）：结构化校验比纯声明式严——它带可执行代码，坏包必须拒绝而不是半装。
+  if (raw.distribution === "bundle") {
+    if (raw.schemaVersion !== 4) return { error: "distribution: bundle 需要 schemaVersion 4" };
+    const contributions = raw.contributions && typeof raw.contributions === "object" ? raw.contributions : {};
+    const widgets = Array.isArray(contributions.desktopWidgets) ? contributions.desktopWidgets : [];
+    if (widgets.length !== 1) return { error: "bundle 清单必须声明 1 个 contributions.desktopWidgets" };
+    for (const denied of ["skills", "mcpServers", "toolPacks"]) {
+      const list = contributions[denied];
+      if (Array.isArray(list) && list.length > 0) {
+        return { error: `界面插件不允许声明 contributions.${denied}（只能带 commands + desktopWidgets）` };
+      }
+    }
+    const entry = String(widgets[0].entry ?? "");
+    if (!entry.startsWith("files/") || entry.includes("..")) {
+      return { error: `desktopWidgets[0].entry 必须是 files/ 下的相对路径：${entry}` };
+    }
+    const root = dirname(file);
+    const { entries, error } = collectBundleEntries(root);
+    if (error) return { error };
+    const hasEntry = entries.some((item) => item.path === entry);
+    if (!hasEntry) return { error: `entry 指向的文件不存在：${entry}` };
+    let packageBytes;
+    try {
+      packageBytes = packTarGz(entries);
+    } catch (err) {
+      return { error: `打包失败：${err.message}` };
+    }
+    return {
+      ...base,
+      bundle: {
+        entries: entries.length,
+        bytes: packageBytes,
+        sha256: createHash("sha256").update(packageBytes).digest("hex"),
+      },
+    };
+  }
+
+  return base;
 }
 
 async function pushToRepo(apiBase, result) {
@@ -126,6 +208,24 @@ async function pushToRepo(apiBase, result) {
       return { error: `发布失败：${reason}` };
     }
     const body = await response.json();
+    // 界面插件：清单发布成功后再发 package.tgz（服务端要求同 id/版本的清单已存在）
+    if (result.bundle) {
+      const packageResponse = await fetch(`${url}/package`, {
+        method: "PUT",
+        headers: { "content-type": "application/gzip", "x-publish-key": key },
+        body: result.bundle.bytes,
+      });
+      if (!packageResponse.ok) {
+        let reason = `HTTP ${packageResponse.status}`;
+        try {
+          const packageBody = await packageResponse.json();
+          if (packageBody && typeof packageBody.error === "string") reason = `${reason} ${packageBody.error}`;
+        } catch {
+          /* 非 JSON 错误体：保留状态码 */
+        }
+        return { error: `清单已发布，但插件包发布失败：${reason}` };
+      }
+    }
     return { target: url, created: Boolean(body?.created) };
   } catch (err) {
     return { error: `请求失败：${err instanceof Error ? err.message : String(err)}` };
@@ -182,18 +282,26 @@ async function main(argv) {
       try {
         mkdirSync(targetDir, { recursive: true });
         copyFileSync(file, join(targetDir, "plugin.json"));
+        if (result.bundle) writeFileSync(join(targetDir, "package.tgz"), result.bundle.bytes);
       } catch (err) {
         failures.push(`${file}：写盘失败 ${err.message}`);
         continue;
       }
     }
-    ok.push({ ...result, source: file, target: join(targetDir, "plugin.json") });
+    ok.push({
+      ...result,
+      source: file,
+      target: result.bundle ? join(targetDir, "package.tgz") : join(targetDir, "plugin.json"),
+    });
   }
 
   for (const item of ok) {
+    const bundle = item.bundle
+      ? `，界面包 ${item.bundle.entries} 个文件 / ${item.bundle.bytes.length}B sha256=${item.bundle.sha256.slice(0, 16)}…`
+      : "";
     console.log(
       `${dryRun ? "[dry-run] " : ""}发布 ${item.id}@${item.version}（schemaVersion ${item.schemaVersion}）` +
-        ` sha256=${item.sha256.slice(0, 16)}… → ${item.target}` +
+        ` sha256=${item.sha256.slice(0, 16)}…${bundle} → ${item.target}` +
         (item.created === false ? "（覆盖已有版本）" : ""),
     );
   }

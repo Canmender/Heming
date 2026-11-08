@@ -47,6 +47,32 @@ test("Origin 判定：本机页面放行，其它源拒绝，无 Origin 的进�
   assert.equal(originAllowed("https://localhost.evil.com"), false);
 });
 
+test("Origin 判定：widget origin 默认拒绝（fail-closed），未接线不能放行插件", () => {
+  assert.equal(originAllowed("widget://heming.pet"), false);
+  assert.equal(originAllowed("widget://a"), false);
+  // 没接线 = 拒绝；接了但返回 false 也拒绝
+  assert.equal(originAllowed("widget://heming.pet", {}), false);
+  assert.equal(originAllowed("widget://heming.pet", { isWidgetOriginAllowed: () => false }), false);
+  // 判定函数抛错也按拒绝处理（不能因为一个坏插件把整条策略带崩）
+  assert.equal(originAllowed("widget://heming.pet", { isWidgetOriginAllowed: () => { throw new Error("x"); } }), false);
+});
+
+test("Origin 判定：已安装且启用的 widget 才放行（由主进程注入判定）", () => {
+  const allowed = { isWidgetOriginAllowed: (origin) => origin === "widget://heming.pet" };
+  assert.equal(originAllowed("widget://heming.pet", allowed), true);
+  assert.equal(originAllowed("widget://other.plugin", allowed), false);
+  // 形状不对的 origin 根本不会问判定函数（防绕过：带路径/大写/穿越都不算 origin）
+  let asked = 0;
+  const spy = { isWidgetOriginAllowed: () => { asked += 1; return true; } };
+  assert.equal(originAllowed("widget://a/b", spy), false);
+  assert.equal(originAllowed("widget://HEMING.pet", spy), false);
+  assert.equal(originAllowed("widget://../etc", spy), false);
+  assert.equal(originAllowed("widget://heming.pet:8080", spy), false);
+  assert.equal(asked, 0);
+  // app:// 主窗不受 widget 判定影响
+  assert.equal(originAllowed("app://heming", allowed), true);
+});
+
 test("请求头清洗：去掉 Host/Origin/Referer，其它原样转发", () => {
   const headers = filterRequestHeaders({
     host: "127.0.0.1:9999",
@@ -158,6 +184,45 @@ test("流式（SSE）逐块转发，不缓冲整段", async () => {
     assert.match(text, /"b"/);
   } finally {
     await proxy.close();
+    await close(upstream);
+  }
+});
+
+test("HTTP：widget origin 未放行 403，已装插件放行后 200（对话链的关键闸）", async () => {
+  const { server: upstream } = startStubUpstream();
+  const upstreamPort = await listen(upstream);
+  const denied = await startMagpieProxy({ upstreamPort });
+  const allowed = await startMagpieProxy({
+    upstreamPort,
+    isWidgetOriginAllowed: (origin) => origin === "widget://heming.pet",
+  });
+  try {
+    const blocked = await fetch(`http://127.0.0.1:${denied.port}/v1/models`, {
+      headers: { origin: "widget://heming.pet" },
+    });
+    assert.equal(blocked.status, 403);
+
+    const models = await fetch(`http://127.0.0.1:${allowed.port}/v1/models`, {
+      headers: { origin: "widget://heming.pet" },
+    });
+    assert.equal(models.status, 200);
+    assert.equal(models.headers.get("access-control-allow-origin"), "widget://heming.pet");
+
+    const chat = await fetch(`http://127.0.0.1:${allowed.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { origin: "widget://heming.pet", "content-type": "application/json" },
+      body: JSON.stringify({ model: "deepseek/deepseek-chat" }),
+    });
+    assert.equal(chat.status, 200);
+
+    // 别的插件 origin 仍被拒（不放通配）
+    const other = await fetch(`http://127.0.0.1:${allowed.port}/v1/models`, {
+      headers: { origin: "widget://other.plugin" },
+    });
+    assert.equal(other.status, 403);
+  } finally {
+    await denied.close();
+    await allowed.close();
     await close(upstream);
   }
 });

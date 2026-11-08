@@ -45,7 +45,7 @@ describe("registry 完整性", () => {
     expect(settingsCardById("hitl-policy")?.title).toBe("工具调用确认");
     expect(settingsCardById("nope")).toBeUndefined();
     expect(sectionLabelOf("appearance")).toBe("外观");
-    expect(settingsCardLabel(settingsCardById("pet")!)).toBe("桌宠 · 外观");
+    expect(settingsCardLabel(settingsCardById("widgets")!)).toBe("桌面小组件 · 外观");
   });
 });
 
@@ -69,7 +69,7 @@ describe("matchSettingsCards（跨分区匹配）", () => {
 
   it("分区名也参与匹配：搜「外观」命中该分区全部卡片（渲染顺序）", () => {
     const ids = matchSettingsCards("外观").map((c) => c.id);
-    expect(ids).toEqual(["theme-mode", "accent-color", "nav-mode", "pet"]);
+    expect(ids).toEqual(["theme-mode", "accent-color", "nav-mode", "widgets"]);
   });
 
   it("大小写不敏感、空格分词为 AND：搜「key 存储」→ 密钥存储", () => {

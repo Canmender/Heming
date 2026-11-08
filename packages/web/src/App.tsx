@@ -19,6 +19,9 @@ import { useAutomationScheduler } from "./lib/automation/scheduler.js";
 import { useStaffLoop } from "./lib/staff/loop.js";
 import { useModuleStore, isModuleEffective } from "./lib/modules/store.js";
 import { useAppPresence } from "./lib/appPresence.js";
+import { startWidgetEvents } from "./lib/widgetEvents.js";
+import { startWidgetThemeSync } from "./lib/widgetTheme.js";
+import { useLlmStore } from "./store/llm.js";
 import { isPageAvailable } from "./lib/modules/nav.js";
 import { hasOpenModal, useModalA11y } from "./components/useModalA11y.js";
 import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
@@ -33,7 +36,7 @@ import { NAV_HOTZONE_PX } from "./lib/navPrefs.js";
  * （改导出形态会波及全部引用与测试）。
  *
  * 为什么值得懒加载：设置区/任务区/信息中枢/记忆区这类重页面各自带着一坨只在
- * 本页用得到的依赖（设置区还牵着桌宠偏好，实测把 242KB 的 petPrefs 块拖进了首屏）。
+ * 本页用得到的依赖（设置区曾经牵着 242KB 的桌宠偏好块，d.98 拆插件后不再有这块）。
  * 拆开后这些块只在第一次切到该页时下载，启动帧只付壳的成本。
  */
 const HomePage = lazy(() => import("./components/HomePage.js").then((m) => ({ default: m.HomePage })));
@@ -586,34 +589,73 @@ function AppShell({
     if (page !== currentPage) setPage(currentPage);
   }, [page, currentPage, setPage]);
 
-  // 桌宠的「去设置 / 点气泡直达页面」出口（未登录时忽略）。
-  // 复用同一条通道：收到 page 时直达对应页面，无 page（旧的无参调用）仍落到设置页。
+  // 界面插件（原桌宠，d.98）的「打开设置 / 气泡直达页面」出口：主进程只转发白名单页面。
+  // 旧 preload 没有 onOpenPage 时自动跳过（页面跳转是便利功能，不是可用性前提）。
   useEffect(() => {
-    const bridge = typeof window !== "undefined" ? window.__heming_pet : undefined;
-    if (!bridge?.onOpenSettings) return;
-    return bridge.onOpenSettings((page) => {
+    const bridge = typeof window !== "undefined" ? window.__heming_widgets : undefined;
+    if (!bridge?.onOpenPage) return;
+    return bridge.onOpenPage((request) => {
+      const page = request?.page;
       const ui = useUiStore.getState();
       const moduleOn = (id: "staff" | "infohub") =>
         isModuleEffective(useModuleStore.getState(), id);
-      if (page === "team") ui.setPage("team");
+      if (page === "settings") {
+        // widget 的「打开设置」与托盘「设置」项都该落到外观页的小组件卡（不是个人资料）
+        ui.openSettings(request.settingsTab ?? "appearance");
+      } else if (page === "team") ui.setPage("team");
       else if (page === "tasks") ui.setPage("tasks");
-      // 模块被停用时落到「插件区 → 模块」，让用户能一键重新启用，而不是静默跳设置
+      // 模块被停用时落在插件区「模块」（能一键重新启用），而不是静默跳到一个不存在的页面
       else if (page === "staff") {
         if (moduleOn("staff")) ui.openStaff();
         else ui.openModuleManager();
       } else if (page === "infohub") {
         if (moduleOn("infohub")) ui.openInfohub();
         else ui.openModuleManager();
-      } else ui.openSettings("model");
+      }
+      // 白名单之外的 page（主进程已过滤过）一律忽略
     });
   }, []);
 
-  // 桌宠在场感（第二波）：订阅通知中心新增条目；主窗口不在前台时才让桌宠开口。
-  // 动态导入而不是静态：petEvent 契约层当前静态依赖 staff/model（30KB 源码），
-  // 静态引入会把整块 82.8KB(gzip) 拖进首屏并被两个入口预载。改成挂载后再加载，
-  // 在场感订阅晚一个 tick 生效（用户无感），首屏直接省掉这块。
+  // 界面插件的对话上下文（d.98 §3.4 `chatConfig`）：widget 要一句话短回复时向主进程要，
+  // 主进程再向主窗要一次「可用智能体 + 绑定」。Key 不出主进程——这里只给智能体列表与提示词，
+  // 网关地址/Key 由主进程补（用户供应商 Key 不经过这条通道）。
+  // ★ `binding.agentId` 固定回 null：桌宠绑哪个智能体是**插件设置**（主进程持有），
+  //   主进程转发给 widget 前会用 settings.agentId 覆盖；主窗不替它决定。
   useEffect(() => {
-    void import("./lib/petEvent.js").then((m) => m.startPetPresence());
+    const bridge = typeof window !== "undefined" ? window.__heming_widgets : undefined;
+    if (!bridge?.onChatConfigRequest || !bridge?.replyChatConfig) return;
+    return bridge.onChatConfigRequest((request) => {
+      const requestId = request?.requestId;
+      if (!requestId) return;
+      void (async () => {
+        try {
+          // 智能体名册（chat store）按需加载：它牵 api/ws 一整条链，没必要为首屏付钱。
+          // llm store 走静态导入——staff loop 等壳内模块已经静态引用它，动态导入不会分包。
+          const { useChatStore } = await import("./store/chat.js");
+          if (useChatStore.getState().agentsRoster.length === 0) {
+            try {
+              await useChatStore.getState().loadAgentsRoster();
+            } catch {
+              /* 名册拉不到就给空列表：widget 侧会回落到「没有可用智能体」 */
+            }
+          }
+          const prompts = useLlmStore.getState().prompts;
+          const agents = useChatStore.getState().agentsRoster.map((agent) => {
+            const prompt = prompts[agent.id]?.trim();
+            return { id: agent.id, name: agent.name, ...(prompt ? { prompt } : {}) };
+          });
+          bridge.replyChatConfig?.(requestId, { agents, binding: { agentId: null } });
+        } catch {
+          bridge.replyChatConfig?.(requestId, { agents: [], binding: { agentId: null } });
+        }
+      })();
+    });
+  }, []);
+
+  // 通知中心 → 界面插件的事件转发（脱敏后交给主进程；主进程再按 permissions.events 分发）。
+  // 静态引入：这只是几十行的纯逻辑，不牵任何重模块（首屏零负担）。
+  useEffect(() => {
+    return startWidgetEvents();
   }, []);
 
   // 右侧目录栏宽度：可拖动调节，落盘后下次启动保持（用户要求「支持拖动改变大小」）

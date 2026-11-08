@@ -25,8 +25,9 @@ const entry: PluginCatalogEntry = {
   publishedAt: "2026-11-07T12:00:00.000Z",
   sha256: "a".repeat(64),
   size: 12,
+  distribution: "manifest",
   permissions: { network: ["127.0.0.1:3425"], tools: "none", files: [] },
-  contributions: { skills: 1, mcpServers: 0, commands: 1, toolPacks: 0 },
+  contributions: { skills: 1, mcpServers: 0, commands: 1, toolPacks: 0, desktopWidgets: 0 },
 };
 
 const response = {
