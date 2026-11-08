@@ -283,7 +283,7 @@ export interface InstallResult {
 - **权限扩张必须重新确认（N4，学 Chrome「新增警告权限即停用」）**：更新若新增 `permissions.network` 主机、把 `tools` 上限从 `read` 放宽到 `write`、或新增贡献类别，安装预览强制进入「重新确认」态；用户拒绝 → **保留旧版**（并给出「回滚/保持旧版」入口），不允许「静默提权」。
 - **防降级（N7，学 TUF）**：记录每个 id 的 `highestVersion`；安装/回滚到更旧版本时，若低于 `highestVersion` 且用户没有显式点「降级安装」，一律拒绝并说明原因（防「被诱导装回有漏洞的旧版」）。`highestVersion` 只在本机，不联网。
 
-### 5.4 生命周期事件（界面插件，阶段 C）
+### 5.4 生命周期事件（界面插件，**d.108 已实现**）
 
 - 信任面：`permissions.events` 增加 `"lifecycle"`；未声明的插件收不到任何生命周期事件。
 - 宿主 → widget（`postMessage`，经 preload 暴露 `onLifecycle(cb)`）：
@@ -421,7 +421,7 @@ v2：
 |---|---|---|
 | 响应头名不一致 | 服务端发 `X-Plugin-Package-Sha256`，客户端读 `x-plugin-sha256` | 客户端优先读新名，兼容旧名 |
 | 上限不一致 | 客户端 20MB，目录允许 40MB | 统一 20MB（目录校验同步收紧） |
-| bundle 版 `commands` 被接受但不物化 | 清单接受、安装后命令不出现 | 选**物化**：web 经 `__heming_widgets.list()` 读已装 bundle 清单并入命令面板；因为 bundle 不允许 `skills`，target 收紧为 `page` / `plugin` / `settings`（自检 F7） |
+| bundle 版 `commands` 被接受但不物化 | 清单接受、安装后命令不出现 | 选**物化**：web 经 `__heming_widgets.list()` 读已装 bundle 清单并入命令面板（阶段 C 实现）；因为 bundle 不允许 `skills`，target 收紧为 `page` / `plugin`（`settings`/`unit` 属声明式扩展，bundle 不开放；自检 F7） |
 | 文档说「手工改过的技能不会被误删」 | 服务端只保护「改了 origin 的服务」 | 明知差异：文档改为「手工**新建**的技能不会误删；被插件带入后手工编辑的技能仍属插件」，并在详情页标注 |
 | widget CSP 无回归守卫（N11，对标 Figma/Chrome/Electron） | 现状按清单生成，但改坏了没有测试会红；且 widget 若嵌外部页面，`connect-src` 白名单只约束插件自己的请求（Figma 同款缺口） | ① 加**CSP 最小基线**回归用例：`script-src 'self'`（`eval:true` 才加 `'unsafe-eval'`）、`object-src 'none'`、禁远程脚本、`connect-src` 只回环 + 清单 network；② 文档写明「界面插件不得嵌外部页面」，并在 CSP `frame-src 'none'` 上固化；③ IPC 已在用 `sender === win.webContents` 身份比对（比 origin 更强），再补一层 `senderFrame.origin` 断言做纵深防御 |
 
