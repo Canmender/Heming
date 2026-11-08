@@ -1,4 +1,16 @@
 import { z } from "zod";
+import {
+  LEGACY_ENGINES,
+  PluginManifestInvalidError,
+  enginesStatus,
+  parsePluginManifestV5,
+  toV5View,
+  type EnginesStatus,
+  type LegacyNormalizedPlugin,
+  type PluginManifestV5,
+  type PluginMetaV5,
+  type PluginV5ParseResult,
+} from "@heming/shared";
 import { PALETTE_PAGES } from "../palette/pages.js";
 import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
 
@@ -11,7 +23,12 @@ import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
  * 不做「尽量猜」的容错，否则坏包会在安装后以半可用状态存在，比直接拒绝更难排查。
  *
  * 版本策略：
- * - **v4**（`PLUGIN_SCHEMA_VERSION`）是当前契约：在 v3 之上增加**界面插件**声明
+ * - **v5**（`packages/shared/src/plugin/manifest.ts` 的 `parsePluginManifestV5`）是当前契约：
+ *   在 v4 之上增加 `engines.heming`（最小宿主版本）与 `meta`（上架元数据），
+ *   并用分层严格度挡住「权限/贡献写错位置」的笔误（顶层未知键警告、敏感子对象 strict）。
+ *   解析结果的权威形状在 shared；本文件只补一件 web 独有的事：命令 `target.page`
+ *   必须存在于命令面板的 `PALETTE_PAGES`，然后投射到既有内部 `PluginManifest`。
+ * - **v4**（`PLUGIN_SCHEMA_VERSION`）仍可安装：界面插件声明
  *   （`distribution` + `contributions.desktopWidgets` + `permissions.events/graphics/eval`）。
  *   工具束 / 签名 / 权限语义一字未改；
  * - **v3** 仍可安装（技能 / MCP / 命令 / 工具束），但**不接受 v4 新增字段**——带了
@@ -20,6 +37,7 @@ import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
  * - v1 / v2 继续按原规则解析并归一化；
  * - 归一化后 `PluginManifest` 恒定具备 `distribution`、`contributions.desktopWidgets`
  *   与 `permissions { network, tools, files, events, graphics, eval }`，UI 不用再判空。
+ *   `engines` / `meta` 只对 v5 存在（可选字段），旧包不会凭空多出这两个字段。
  *
  * 为什么仍拒绝 stdio/命令类 MCP：那会在用户机器上拉起进程，等于安装即执行
  * 第三方代码；本地进程类集成仍走接口区手动配置或 Registry 安装。
@@ -31,7 +49,13 @@ import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
  */
 
 export const PLUGIN_SCHEMA_VERSION = 4;
-export const PLUGIN_SCHEMA_VERSIONS = [1, 2, 3, 4] as const;
+/**
+ * 可安装的清单版本。
+ *
+ * v5 的解析器在 `@heming/shared`（web / server / lint 共用一份），这里保留 v1–v4 的
+ * 旧解析路径（旧包的迁移提示与展示口径与 web 强绑定，搬去 shared 只会制造两份规则）。
+ */
+export const PLUGIN_SCHEMA_VERSIONS = [1, 2, 3, 4, 5] as const;
 export const MAX_PLUGIN_SKILLS = 50;
 export const MAX_PLUGIN_MCP_SERVERS = 10;
 export const MAX_PLUGIN_COMMANDS = 30;
@@ -1087,6 +1111,29 @@ export type PluginToolPackSpec = z.infer<typeof ToolPackSpecSchema>;
 export type PluginSchemaVersion = (typeof PLUGIN_SCHEMA_VERSIONS)[number];
 export type PluginToolRisk = "none" | "read" | "write";
 
+/**
+ * v5 的宿主兼容声明（`engines.heming`，必填）：最小应用版本，只做 `>=` 语义。
+ *
+ * 比较实现是 `@heming/shared` 的 `satisfiesEngines`（5 段 `d.特性.破坏性.修订.构建`，
+ * 不能用 semver）；web 侧只负责把「声明」翻译成「能不能装」。
+ */
+export interface PluginEngines {
+  heming: string;
+}
+
+/** v5 上架元数据的轻字段（规格 §4.2；`meta.icon` 建议用 https URL，data URI 占本机配额）。 */
+export interface PluginMeta {
+  icon?: string;
+  homepage?: string;
+  repository?: string;
+  license?: string;
+  category?: string;
+  tags?: string[];
+  keywords?: string[];
+  screenshots?: string[];
+  detail?: string;
+}
+
 /** 归一化后的权限声明（v1/v2 也会补全，UI 不用判空）。 */
 export interface PluginPermissions {
   /** 网络主机白名单（host 或 host:port）。 */
@@ -1151,8 +1198,9 @@ export interface PluginSignature {
 /**
  * 归一化后的插件清单（唯一对外形态）。
  *
- * ★ `schemaVersion` 保留原始版本号（1/2/3/4）：安装弹窗要据此提示「旧版清单（v2）」；
+ * ★ `schemaVersion` 保留原始版本号（1/2/3/4/5）：安装弹窗要据此提示「旧版清单（v2）」；
  * 但 `distribution` / `contributions` / `permissions` 一定存在且为当前形状。
+ * `engines` / `meta` 只在 v5 清单上出现（可选字段；旧包没有「兼容性声明」这回事）。
  */
 export interface PluginManifest {
   schemaVersion: PluginSchemaVersion;
@@ -1165,6 +1213,10 @@ export interface PluginManifest {
   distribution: PluginDistribution;
   contributions: PluginContributions;
   permissions: PluginPermissions;
+  /** v5：最小宿主版本（v1–v4 没有该字段；`pluginEnginesStatus` 对旧包按「不限制」处理）。 */
+  engines?: PluginEngines;
+  /** v5：上架元数据（市场页用；安装记录只留轻字段，见规格 §4.4）。 */
+  meta?: PluginMeta;
   /** 可选：发布者与签名（d.67；旧 v3 清单没有这两个字段）。 */
   publisher?: PluginPublisher;
   signature?: PluginSignature;
@@ -1245,23 +1297,123 @@ function copyWidgetSpec(spec: PluginDesktopWidgetSpec): PluginDesktopWidgetSpec 
   };
 }
 
+/* ══════════════════ v5：委托 shared 解析器 + web 独有校验 ══════════════════ */
+
+/** `meta` 深拷贝：数组会进安装记录与市场缓存，浅拷贝会留下共享引用。 */
+function copyMeta(meta: PluginMetaV5): PluginMeta {
+  const out: PluginMeta = {};
+  if (meta.icon !== undefined) out.icon = meta.icon;
+  if (meta.homepage !== undefined) out.homepage = meta.homepage;
+  if (meta.repository !== undefined) out.repository = meta.repository;
+  if (meta.license !== undefined) out.license = meta.license;
+  if (meta.category !== undefined) out.category = meta.category;
+  if (meta.tags) out.tags = [...meta.tags];
+  if (meta.keywords) out.keywords = [...meta.keywords];
+  if (meta.screenshots) out.screenshots = [...meta.screenshots];
+  if (meta.detail !== undefined) out.detail = meta.detail;
+  return out;
+}
+
 /**
- * 解析插件清单。接受 JSON 文本或已解析对象；失败抛 `PluginManifestError`。
- * 未知字段由 zod 丢弃，不会进入存储。
+ * v5 → web 内部 `PluginManifest`。
+ *
+ * `distribution / contributions / permissions` 一律用 shared 的归一化结果（缺省值已补全），
+ * 这里只做两件 web 侧的事：① 命令 `target.page` 必须在 `PALETTE_PAGES` 里；
+ * ② 把结果投射成既有内部类型（数组深拷贝，避免调用方改到解析缓存）。
+ *
+ * ★ `desktopWidgets` 是唯一的形状差异：shared 的 v5 schema 里 `scales/defaultScale/position`
+ * 是可选（界面插件的权威校验在主进程 `plugin-package.js`），web 内部类型是补全后的形状。
+ * web 的声明式安装管线本来就会拒绝 bundle（`assertDeclarativeManifest`），所以这里只做投射。
  */
-export function parsePluginManifest(input: string | unknown): PluginManifest {
-  let raw: unknown = input;
-  if (typeof input === "string") {
-    if (!input.trim()) throw new PluginManifestError("插件清单为空，请粘贴 plugin.json 内容");
-    try {
-      raw = JSON.parse(input);
-    } catch {
-      throw new PluginManifestError("不是有效的 JSON，请检查逗号、引号与括号是否配对");
+function fromV5(parsed: PluginV5ParseResult): PluginManifest {
+  const v5 = parsed.manifest;
+  v5.contributions.commands.forEach((command, index) => {
+    if (command.target.kind === "page" && !PAGE_IDS.has(command.target.page)) {
+      throw new PluginManifestError(
+        `contributions.commands[${index}].target.page：未知页面：${command.target.page}`,
+      );
     }
+  });
+  return {
+    schemaVersion: 5,
+    id: v5.id,
+    name: v5.name,
+    version: v5.version,
+    description: v5.description,
+    author: v5.author,
+    distribution: v5.distribution,
+    contributions: {
+      skills: v5.contributions.skills.map((skill) => ({
+        ...skill,
+        triggers: [...skill.triggers],
+        tags: [...skill.tags],
+      })),
+      mcpServers: v5.contributions.mcpServers.map((server) => ({ ...server })),
+      commands: v5.contributions.commands.map((command) => ({
+        ...command,
+        keywords: [...command.keywords],
+        target: { ...command.target },
+      })),
+      toolPacks: v5.contributions.toolPacks.map((pack) => ({ ...pack, tools: [...pack.tools] })),
+      desktopWidgets: v5.contributions.desktopWidgets as unknown as PluginDesktopWidgetSpec[],
+      llmPresets: [],
+    },
+    permissions: {
+      // v5 的 `PluginPermissionsV5` 是 zod 推断类型（字段可选）；`parsePluginManifestV5`
+      // 归一化时已补全缺省值，这里的 `??` 只是让类型与运行时口径一致。
+      network: [...(v5.permissions.network ?? [])],
+      tools: v5.permissions.tools ?? "read",
+      files: [...(v5.permissions.files ?? [])],
+      events: [...((v5.permissions.events ?? []) as PluginWidgetEvent[])],
+      graphics: [...((v5.permissions.graphics ?? []) as PluginGraphicsCapability[])],
+      eval: v5.permissions.eval ?? false,
+    },
+    engines: { heming: v5.engines.heming },
+    meta: copyMeta(v5.meta),
+    ...(v5.publisher ? { publisher: { ...v5.publisher } } : {}),
+    ...(v5.signature ? { signature: { ...v5.signature } } : {}),
+  };
+}
+
+/** 解析 JSON 文本；空/坏 JSON 的文案与历史逐字一致（安装弹窗依赖它们）。 */
+function parseJsonInput(input: string): unknown {
+  if (!input.trim()) throw new PluginManifestError("插件清单为空，请粘贴 plugin.json 内容");
+  try {
+    return JSON.parse(input);
+  } catch {
+    throw new PluginManifestError("不是有效的 JSON，请检查逗号、引号与括号是否配对");
   }
-  // v3 迁移提示必须在 zod 之前判：未知字段会被丢弃，schema 里看不到它们。
+}
+
+/**
+ * 解析插件清单并带上非阻断 warning（v5 的未知顶层字段等）。
+ *
+ * 为什么单独给一个入口：`parsePluginManifest` 的返回类型是既有的 `PluginManifest`，
+ * 加个 `warnings` 字段会污染所有消费方；安装预览/lint 需要把「忽略了未知字段 x」
+ * 展示出来，所以由这个函数负责。
+ */
+export function parsePluginManifestDetailed(input: string | unknown): {
+  manifest: PluginManifest;
+  warnings: string[];
+} {
+  let raw: unknown = input;
+  if (typeof input === "string") raw = parseJsonInput(input);
+
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const record = raw as Record<string, unknown>;
+    // v5 走 shared 的唯一权威解析器（strict 规则、engines 归一化、bundle 限制都在那里）。
+    if (record.schemaVersion === 5) {
+      let parsed: PluginV5ParseResult;
+      try {
+        parsed = parsePluginManifestV5(raw);
+      } catch (err) {
+        // shared 的错误类型与文案已经是中文 + 字段路径，换成 web 的既有错误类即可。
+        if (err instanceof PluginManifestInvalidError) throw new PluginManifestError(err.message);
+        throw err;
+      }
+      return { manifest: fromV5(parsed), warnings: parsed.warnings };
+    }
+    // v3 迁移提示必须在 zod 之前判：未知字段会被丢弃，schema 里看不到它们。
     if (record.schemaVersion === 3) {
       if ("skills" in record) {
         throw new PluginManifestError(
@@ -1275,6 +1427,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
       }
     }
   }
+
   const parsed = PluginManifestSchema.safeParse(raw);
   if (!parsed.success) throw new PluginManifestError(formatIssues(parsed.error));
   const manifest = parsed.data;
@@ -1319,17 +1472,79 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
         eval: manifest.permissions?.eval === true,
       };
   return {
-    schemaVersion: manifest.schemaVersion,
-    id: manifest.id,
-    name: manifest.name,
-    version: manifest.version,
-    description: manifest.description,
-    author: manifest.author,
-    distribution: manifest.distribution ?? "manifest",
-    contributions,
-    permissions,
-    // 旧版清单不允许带签名（superRefine 已拒绝），这里只透传 v3 的可选字段。
-    ...(manifest.publisher ? { publisher: { ...manifest.publisher } } : {}),
-    ...(manifest.signature ? { signature: { ...manifest.signature } } : {}),
+    manifest: {
+      schemaVersion: manifest.schemaVersion,
+      id: manifest.id,
+      name: manifest.name,
+      version: manifest.version,
+      description: manifest.description,
+      author: manifest.author,
+      distribution: manifest.distribution ?? "manifest",
+      contributions,
+      permissions,
+      // 旧版清单不允许带签名（superRefine 已拒绝），这里只透传 v3 的可选字段。
+      ...(manifest.publisher ? { publisher: { ...manifest.publisher } } : {}),
+      ...(manifest.signature ? { signature: { ...manifest.signature } } : {}),
+    },
+    warnings: [],
+  };
+}
+
+/**
+ * 解析插件清单。接受 JSON 文本或已解析对象；失败抛 `PluginManifestError`。
+ *
+ * v1–v4 的未知字段由 zod 丢弃（历史包袱，旧包有 `llmPresets` 这类遗留字段，strict 会误杀）；
+ * v5 的未知字段策略在 shared 里分层处理（顶层警告、敏感子对象报错）。
+ */
+export function parsePluginManifest(input: string | unknown): PluginManifest {
+  return parsePluginManifestDetailed(input).manifest;
+}
+
+/* ══════════════════ 兼容性判定（engines.heming） ══════════════════ */
+
+/**
+ * 当前应用版本（构建期注入的 5 段版本号，见 `vite-env.d.ts`）。
+ *
+ * 测试/非 vite 环境读不到时返回空串：`enginesStatus` 对空宿主版本会判 `needsNewerApp`，
+ * 失败关闭比「假装兼容」安全；调用方也可以显式传版本覆盖。
+ */
+export function currentAppVersion(): string {
+  try {
+    return typeof __APP_VERSION__ === "string" ? __APP_VERSION__.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 插件是否兼容当前应用（安装预览/市场/详情页共用口径）。
+ *
+ * - v1–v4：没有 `engines` 字段 ⇒ `compatible`（旧包按「不限制宿主版本」处理，规格 §4.5）；
+ * - v5：`engines.heming` 是必填，缺失按 `invalidEngines`（失败关闭，不静默放行）。
+ *
+ * @param appVersion 当前应用版本；默认 `__APP_VERSION__`，测试可注入。
+ */
+export function pluginEnginesStatus(
+  manifest: Pick<PluginManifest, "schemaVersion"> & { engines?: PluginEngines },
+  appVersion: string = currentAppVersion(),
+): EnginesStatus {
+  const required = manifest.engines?.heming;
+  if (manifest.schemaVersion === 5 && !required) return { status: "invalidEngines", required: "" };
+  return enginesStatus(required, appVersion);
+}
+
+/**
+ * 把 web 归一化清单投射成 shared 的 v5 读模型（单元投影/诊断/市场共用）。
+ *
+ * v1–v4 用 `toV5View`（`engines = d.0`、`meta = {}`）；v5 保留自身 `engines/meta`——
+ * 否则「兼容性判定」会把一个新包当成「不限制」。
+ */
+export function toPluginV5View(manifest: PluginManifest): PluginManifestV5 {
+  const view = toV5View(manifest as unknown as LegacyNormalizedPlugin);
+  if (manifest.schemaVersion !== 5) return view;
+  return {
+    ...view,
+    engines: { heming: manifest.engines?.heming ?? LEGACY_ENGINES },
+    meta: { ...(manifest.meta ?? {}) },
   };
 }

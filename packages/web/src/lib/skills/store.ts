@@ -145,6 +145,21 @@ export class SkillPool {
     return this.data.skills.map(copySkill);
   }
 
+  /**
+   * 重新读本机存储并重建内存态（安装事务回滚后必须调）。
+   *
+   * 为什么需要它：技能池只在构造期读一次存储，安装事务回滚只恢复了 localStorage，
+   * 内存里仍留着「刚装进去的技能」——插件记录说没装、技能池却说有，界面就成了半装态。
+   *
+   * 与构造函数的唯一区别：**不重放首启种子**。回滚场景下存储里本来就有数据；
+   * 若存储被清空（极端情况），重建为空池比「悄悄写回内置技能」更诚实。
+   */
+  reload(): void {
+    this.data = this.parsePool(this.read(SKILLS_KEY));
+    this.bindingMap = this.parseBindings(this.read(SKILL_BINDINGS_KEY));
+    this.assignmentMap = this.parseAssignments(this.read(SKILL_ASSIGNMENTS_KEY));
+  }
+
   get(id: string): SkillDefinition | undefined {
     const found = this.data.skills.find((s) => s.id === id);
     return found ? copySkill(found) : undefined;

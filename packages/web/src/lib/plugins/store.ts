@@ -1,12 +1,41 @@
-import { skillPool, type SkillPool, type StorageLike } from "../skills/index.js";
-import { mcpRegistry, type McpServerConfig, type ServerOrigin } from "../mcp/index.js";
 import {
+  CONTRIBUTION_LABELS,
+  comparePluginVersions,
+  enginesStatusText,
+  type ContributionKind,
+  type EnginesStatus,
+  type PluginManifestV5,
+} from "@heming/shared";
+import {
+  skillPool,
+  SKILLS_KEY,
+  SKILL_BINDINGS_KEY,
+  SKILL_ASSIGNMENTS_KEY,
+  type SkillPool,
+  type StorageLike,
+} from "../skills/index.js";
+import {
+  mcpRegistry,
+  MCP_SERVERS_KEY,
+  MCP_TOOLS_KEY,
+  MCP_ENABLED_TOOLS_KEY,
+  type McpServerConfig,
+  type ServerOrigin,
+} from "../mcp/index.js";
+import { DEFAULT_QUOTA_BYTES } from "../storageUsage.js";
+import { utf8Length } from "../memory/storage.js";
+import {
+  currentAppVersion,
   parsePluginManifest,
+  parsePluginManifestDetailed,
+  pluginEnginesStatus,
+  toPluginV5View,
   PluginManifestError,
   type PluginCommandSpec,
   type PluginManifest,
+  type PluginToolRisk,
 } from "./manifest.js";
-import { pluginIdFromServerId } from "./permissions.js";
+import { normalizeNetworkHost, pluginIdFromServerId } from "./permissions.js";
 import { contentFingerprint, FINGERPRINT_PREFIX } from "./integrity.js";
 import { PublisherTrustStore, type SignatureStatus } from "./signature.js";
 
@@ -21,10 +50,47 @@ export { pluginIdFromServerId } from "./permissions.js";
  * - 技能**物化进现有技能池**（`source: "imported"` + `pluginId`）；
  * - 远程 MCP 服务**登记进现有 MCP 注册表**（`origin: "plugin"`），连接、工具开关与 HITL 全沿用。
  * 本存储只记录「插件 → 技能 id / 服务 id」的归属与启用状态。
+ *
+ * ## 安装事务（d.105 / 规格 §5.1–§5.3）
+ * localStorage 没有真正事务，所以安装走显式三段式：
+ * `planInstall`（纯函数：差异 + engines + 权限扩张 + 体积预检，不写盘）→
+ * `applyPlan`（快照受影响键 → 逐段落盘 → 写失败逐键恢复 + 三个单例 `reload()`）→
+ * `changed` / `applied` 分开报告，回滚失败如实给 `rollback.ok=false`。
+ *
+ * 1. 插件记录这类关键写用 `saveOrThrow()`（配额失败必须可见）；
+ * 2. 技能池/MCP 注册表的 `save()` 仍吞异常（历史行为，不改），所以事务里
+ *    「读回校验」：预期会变的键若与快照逐字节相同，按写失败处理并回滚；
+ * 3. `previous` / `history` / `highestVersion` 支撑「回滚到上一版」与防降级（§5.3）。
  */
 
 export const PLUGINS_KEY = "heming.plugins.v1";
 export const MAX_PLUGINS = 50;
+
+/**
+ * 安装事务写放大预算（规格 §5.2 体积预检）。
+ *
+ * 为什么是 4MB：localStorage 同源预算保守按 5MB（`DEFAULT_QUOTA_BYTES`）算，
+ * 但插件记录之外还有消息缓存、记忆、任务等键——写满 5MB 时其它模块会先爆。
+ * 留 1MB 余量，把「装完这个插件还剩多少给别的模块」提前算给用户看。
+ */
+export const INSTALL_WRITE_BUDGET_BYTES = Math.floor(DEFAULT_QUOTA_BYTES * 0.8);
+
+/** 更新时保留上一版清单的单插件上限（规格 §5.3；最坏合法清单 1.2MB，超了就放弃回滚）。 */
+export const PREVIOUS_MANIFEST_MAX_BYTES = 128 * 1024;
+
+/** 全部插件 `previous` 的合计上限（规格 §5.3）。 */
+export const PREVIOUS_TOTAL_MAX_BYTES = 512 * 1024;
+
+/** 安装事务涉及的存储键（快照/恢复/体积预检的同一份清单）。 */
+export const PLUGIN_TXN_KEYS: readonly string[] = [
+  PLUGINS_KEY,
+  SKILLS_KEY,
+  SKILL_BINDINGS_KEY,
+  SKILL_ASSIGNMENTS_KEY,
+  MCP_SERVERS_KEY,
+  MCP_TOOLS_KEY,
+  MCP_ENABLED_TOOLS_KEY,
+];
 
 /** 插件依赖的 MCP 注册表面：窄接口让单测不必真的碰 localStorage 与预置服务。 */
 export interface PluginMcpPort {
@@ -39,6 +105,12 @@ export interface PluginMcpPort {
   }): McpServerConfig;
   update(id: string, patch: Partial<Omit<McpServerConfig, "id" | "createdAt">>): McpServerConfig;
   remove(id: string): void;
+  /**
+   * 重新读存储并重建内存态（真注册表才有；注入的假端口不实现）。
+   *
+   * 安装事务回滚后必须调：存储回滚了、内存不重读就是半装态。
+   */
+  reload?(): void;
 }
 
 /**
@@ -80,8 +152,41 @@ export interface InstalledPlugin {
    * 缺省 `[]`（旧记录兼容）；读口径一律走 `effectiveEnabled(plugin, kind)`。
    */
   disabledKinds: PluginContributionKind[];
+  /**
+   * 上一版清单（更新回滚用，规格 §5.3）。
+   *
+   * - 只在**更新成功**时写入；首装为 `undefined`；
+   * - 单插件 ≤ `PREVIOUS_MANIFEST_MAX_BYTES`、全量 ≤ `PREVIOUS_TOTAL_MAX_BYTES`，
+   *   超限放弃并如实标注「本插件未保留上一版」；
+   * - 回滚只用本机留存的这份清单，不联网、不查目录。
+   */
+  previous?: { manifest: PluginManifest; fingerprint: string; installedAt: string };
+  /** 版本历史（≤3 条，超限丢最旧；更新/回滚成功时追加）。 */
+  history?: Array<{ version: string; at: string }>;
+  /**
+   * 本机见过的最高版本（防降级，规格 §5.3 / N7）。
+   *
+   * 安装/回滚到更旧版本时，若低于它且没有显式 `allowDowngrade` 一律拒绝。
+   * 只在本机，不联网。
+   */
+  highestVersion?: string;
   installedAt: string;
   updatedAt: string;
+}
+
+/** 安装事务的诊断条目（结果语义 §5.5：失败必须给出可读原因）。 */
+export interface PluginDiagnostic {
+  severity: "error" | "warning" | "info";
+  code: string;
+  message: string;
+}
+
+/** 回滚报告：`ok=false` 表示补偿写失败（配额/隐私模式），绝不谎报成功。 */
+export interface InstallRollbackReport {
+  ok: boolean;
+  /** 参与补偿的键（快照覆盖的键全集）。 */
+  keys: string[];
+  error?: string;
 }
 
 export interface InstallResult {
@@ -94,6 +199,30 @@ export interface InstallResult {
   serversAdded: number;
   serversUpdated: number;
   serversRemoved: number;
+  /** 存储是否真的变了（同清单重复安装为 false，规格 §5.2 幂等）。 */
+  changed: boolean;
+  /** 是否生效；`failed` 时由 `PluginInstallError` 携带完整回滚报告。 */
+  applied: "applied" | "failed";
+  mode: "install" | "update";
+  rollback?: InstallRollbackReport;
+  diagnostics: PluginDiagnostic[];
+}
+
+/** `applyPlan` 的结果：失败时没有 `InstalledPlugin`（已回滚），所以 `plugin` 可空。 */
+export interface InstallApplyResult {
+  changed: boolean;
+  applied: "applied" | "failed";
+  mode: "install" | "update";
+  /** 成功时为落盘后的记录；失败（已回滚）为 null。 */
+  plugin: InstalledPlugin | null;
+  added: number;
+  updated: number;
+  removed: number;
+  serversAdded: number;
+  serversUpdated: number;
+  serversRemoved: number;
+  rollback?: InstallRollbackReport;
+  diagnostics: PluginDiagnostic[];
 }
 
 /** 更新预览：按「物化后的真实状态」算差异，与实际安装语义一致。 */
@@ -174,6 +303,116 @@ export interface PluginInstallPreview {
   limitReached: boolean;
 }
 
+/* ───────────────────────── 安装事务：plan → apply（规格 §5.1/§5.2） ───────────────────────── */
+
+export interface InstallPlanOptions extends PluginInstallOptions {
+  /**
+   * 用户已确认「权限扩张」（规格 §5.3 / N4）。
+   *
+   * 更新若新增 `permissions.network` 主机、把 `tools` 上限从 read 放宽到 write、
+   * 或新增贡献类别，预览必须进入「重新确认」态；未确认时 `applyPlan` 拒绝执行，
+   * 绝不静默提权。
+   */
+  confirmPermissionExpansion?: boolean;
+  /** 允许装回比 `highestVersion` 更旧的版本（规格 §5.3 / N7 防降级）。 */
+  allowDowngrade?: boolean;
+  /** 覆盖应用版本（默认 `__APP_VERSION__`；测试注入用）。 */
+  appVersion?: string;
+}
+
+/** plan 里的一笔写入（只是报告：真正落盘仍走各 store 的既有写入口）。 */
+export interface PlanWrite {
+  key: string;
+  action: "create" | "update" | "remove";
+  /** 估算写入后该键的字节数（体积预检明细，不参与判定）。 */
+  bytes?: number;
+}
+
+/** 计划被哪条硬规则挡住（非空则 `applyPlan` 不写任何存储）。 */
+export interface InstallPlanBlock {
+  code: "conflicts" | "engines" | "downgrade" | "size";
+  message: string;
+}
+
+/** 权限扩张检测结果（network 新增 host / tools 放宽 / 新贡献类别）。 */
+export interface InstallPermissionUpgrade {
+  expands: boolean;
+  /** 新增的网络主机（按声明原文，已归一化去重）。 */
+  networkAdded: string[];
+  /** 工具风险上限放宽（只会是 read → write）。 */
+  toolsWidened: { from: PluginToolRisk; to: PluginToolRisk } | null;
+  /** 新增的贡献类别（上次没有该类贡献、这次有了）。 */
+  newKinds: ContributionKind[];
+  /** 中文原因（安装预览直接展示）。 */
+  reasons: string[];
+}
+
+/** 体积预估（写入前算「受影响键写后总字节」，超阈值直接拒绝）。 */
+export interface InstallSizeEstimate {
+  /** 参与统计的键（`PLUGIN_TXN_KEYS` 里本次会写的部分）。 */
+  keys: string[];
+  /** 受影响键当前总字节。 */
+  currentBytes: number;
+  /** 估算写入后总字节。 */
+  afterBytes: number;
+  /** 本次写入的估算增量。 */
+  deltaBytes: number;
+  limitBytes: number;
+  exceeded: boolean;
+  /** 超限时的「先清理什么」建议。 */
+  suggestion?: string;
+}
+
+/**
+ * 安装计划（纯函数产物，不写任何存储）。
+ *
+ * 页面用法：`plan = store.planInstall(manifest)` → 展示 `diff/permissions/engines/size` →
+ * 用户确认后 `store.applyPlan(plan)`；不要绕过 plan 直接写。
+ */
+export interface InstallPlan {
+  /** 将要落盘的 web 归一化清单。 */
+  manifest: PluginManifest;
+  /** shared 的 v5 读模型（v1–v4 由 `toPluginV5View` 投射；兼容性/贡献类别读它）。 */
+  v5: PluginManifestV5;
+  mode: "install" | "update";
+  /** 安装前记录（首装为 null，供回滚对照）。 */
+  existing: InstalledPlugin | null;
+  /** 复用 `preview()` 的差异/冲突/信任提示。 */
+  diff: PluginInstallPreview;
+  conflicts: PluginServerConflict[];
+  writes: PlanWrite[];
+  warnings: string[];
+  engines: EnginesStatus;
+  permissionUpgrade: InstallPermissionUpgrade;
+  size: InstallSizeEstimate;
+  /** 非空则禁止 apply（冲突/不兼容/降级/超体积）。 */
+  blocked: InstallPlanBlock[];
+  /** 权限扩张且用户未确认（UI 应强制二次确认；applyPlan 会拒绝）。 */
+  needsConfirmation: boolean;
+  /** 将要写入的 `previous`（无更新/超限为 null）。 */
+  previous: InstalledPlugin["previous"] | null;
+  history: NonNullable<InstalledPlugin["history"]>;
+  highestVersion: string;
+  options: InstallPlanOptions;
+  /** 同清单重复安装：apply 不写存储，`changed=false`。 */
+  noop: boolean;
+}
+
+/**
+ * 安装失败（写失败/回滚）时抛出：`message` 可直接展示，`result` 带诚实报告。
+ *
+ * 与 `PluginManifestError`（清单/规则问题）区分：这里代表「包没问题，但本机写不进去」，
+ * UI 文案是「安装失败，已恢复到安装前状态」而不是「清单不合法」。
+ */
+export class PluginInstallError extends Error {
+  readonly result: InstallApplyResult;
+  constructor(message: string, result: InstallApplyResult) {
+    super(message);
+    this.name = "PluginInstallError";
+    this.result = result;
+  }
+}
+
 export interface PluginSkillInfo {
   id: string;
   name: string;
@@ -240,6 +479,170 @@ function sameSkill(
   );
 }
 
+/* ───────────────────────── 事务辅助（纯函数） ───────────────────────── */
+
+/**
+ * 是否**已归一化**的 web 清单（`parsePluginManifest` 的产物）。
+ *
+ * 判据是 `contributions.llmPresets`：它是 web 解析器补的兼容字段，手写清单里永远没有
+ * （v3/v4 的 superRefine 与 v5 的 strict 都会拒绝它）。回滚/重装走
+ * `previous.manifest` 时不能再过一次解析——那份清单的 `schemaVersion` 是旧的原始值、
+ * 结构却是当前形状，按旧规则重解析必然失败。
+ */
+function isNormalizedManifest(value: unknown): value is PluginManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "string" || typeof record.version !== "string") return false;
+  const contributions = record.contributions as Record<string, unknown> | undefined;
+  if (!contributions || typeof contributions !== "object") return false;
+  return Array.isArray(contributions.llmPresets);
+}
+
+/** 接受原始清单或已归一化清单：前者走完整解析（拿 warning），后者直接复用。 */
+function resolvePlanManifest(input: string | PluginManifest | unknown): {
+  manifest: PluginManifest;
+  warnings: string[];
+} {
+  if (isNormalizedManifest(input)) return { manifest: input, warnings: [] };
+  return parsePluginManifestDetailed(input);
+}
+
+const TOOL_RISK_RANK: Record<PluginToolRisk, number> = { none: 0, read: 1, write: 2 };
+
+/**
+ * 权限扩张检测（规格 §5.3 / N4）：只判「比上次更宽」的三类。
+ *
+ * 收紧（删主机、read 降 none、删贡献类别）不拦——用户不会被缩权伤害。
+ */
+function diffPermissionUpgrade(
+  before: PluginManifest | null,
+  after: PluginManifest,
+): InstallPermissionUpgrade {
+  const reasons: string[] = [];
+  // 首装没有「上一次」可比较：整份清单都已在安装弹窗展示过，不构成「扩张」。
+  if (!before) {
+    return { expands: false, networkAdded: [], toolsWidened: null, newKinds: [], reasons };
+  }
+  const beforeHosts = new Set(before.permissions.network.map(normalizeNetworkHostSafe));
+  const networkAdded = after.permissions.network.filter(
+    (host) => !beforeHosts.has(normalizeNetworkHostSafe(host)),
+  );
+  if (networkAdded.length > 0) {
+    reasons.push(`新增网络主机：${networkAdded.join("、")}`);
+  }
+
+  let toolsWidened: InstallPermissionUpgrade["toolsWidened"] = null;
+  if (TOOL_RISK_RANK[after.permissions.tools] > TOOL_RISK_RANK[before.permissions.tools]) {
+    toolsWidened = { from: before.permissions.tools, to: after.permissions.tools };
+    reasons.push(`工具权限上限从 ${before.permissions.tools} 放宽到 ${after.permissions.tools}`);
+  }
+
+  // 贡献类别按「上次没有任何该类条目、这次有了」判新增（条目增删属于常规更新）。
+  const kinds: Array<[ContributionKind, unknown[]]> = [
+    ["skills", after.contributions.skills],
+    ["mcpServers", after.contributions.mcpServers],
+    ["commands", after.contributions.commands],
+    ["toolPacks", after.contributions.toolPacks],
+    ["desktopWidgets", after.contributions.desktopWidgets],
+  ];
+  const newKinds: ContributionKind[] = [];
+  for (const [kind, items] of kinds) {
+    if (items.length === 0) continue;
+    const beforeItems = (before.contributions as unknown as Record<string, unknown[]>)[kind] ?? [];
+    if ((beforeItems?.length ?? 0) > 0) continue;
+    newKinds.push(kind);
+    reasons.push(`新增贡献类别「${CONTRIBUTION_LABELS[kind]}」`);
+  }
+
+  return {
+    expands: networkAdded.length > 0 || toolsWidened !== null || newKinds.length > 0,
+    networkAdded,
+    toolsWidened,
+    newKinds,
+    reasons,
+  };
+}
+
+/** 主机归一化：复用 `permissions.ts` 的口径（默认端口 80/443 视为同一个 host）。 */
+function normalizeNetworkHostSafe(value: string): string {
+  return normalizeNetworkHost(value);
+}
+
+function bytesOf(value: string | null): number {
+  return value ? utf8Length(value) : 0;
+}
+
+function formatMiB(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function isEmptySkillDiff(diff: PluginSkillDiff): boolean {
+  return diff.added.length === 0 && diff.changed.length === 0 && diff.removed.length === 0;
+}
+
+function isEmptyServerDiff(diff: PluginServerDiff): boolean {
+  return diff.added.length === 0 && diff.changed.length === 0 && diff.removed.length === 0;
+}
+
+/** 技能池是否真的会被写（「unchanged」也会被 update 写 version，但那不改变内容）。 */
+function diffTouchedSkills(diff: PluginInstallPreview): boolean {
+  return diff.skills.added.length + diff.skills.changed.length + diff.skills.removed.length > 0;
+}
+
+function diffTouchedServers(diff: PluginInstallPreview): boolean {
+  return diff.servers.added.length + diff.servers.changed.length + diff.servers.removed.length > 0;
+}
+
+/** 从预览差异推导「旧口径」的计数（含 unchanged：旧的 install 对每个匹配项都算 updated）。 */
+function countsFromDiff(diff: PluginInstallPreview): {
+  added: number;
+  updated: number;
+  removed: number;
+  serversAdded: number;
+  serversUpdated: number;
+  serversRemoved: number;
+} {
+  return {
+    added: diff.skills.added.length,
+    updated: diff.skills.changed.length + diff.skills.unchanged.length,
+    removed: diff.skills.removed.length,
+    serversAdded: diff.servers.added.length,
+    serversUpdated: diff.servers.changed.length + diff.servers.unchanged.length,
+    serversRemoved: diff.servers.removed.length,
+  };
+}
+
+/** 版本历史（≤3，超限丢最旧）：补上旧版本与本次版本，连续重复只留一条。 */
+function buildHistory(
+  existing: InstalledPlugin | null,
+  nextVersion: string,
+  at: string,
+): NonNullable<InstalledPlugin["history"]> {
+  const base = existing
+    ? existing.history
+      ? existing.history.map((entry) => ({ ...entry }))
+      : [{ version: existing.manifest.version, at: existing.installedAt }]
+    : [];
+  const next = [...base];
+  const last = next[next.length - 1];
+  if (!last || last.version !== nextVersion) next.push({ version: nextVersion, at });
+  return next.slice(-3);
+}
+
+/** 本机见过的最高版本（防降级口径；都用 shared 的 `comparePluginVersions`）。 */
+function highestPluginVersion(...versions: Array<string | undefined>): string {
+  let best = "";
+  for (const version of versions) {
+    if (!version) continue;
+    if (!best || comparePluginVersions(version, best) > 0) best = version;
+  }
+  return best;
+}
+
 interface PluginData {
   version: 1;
   plugins: InstalledPlugin[];
@@ -271,86 +674,156 @@ function uniq(items: string[]): string[] {
   return [...new Set(items.filter(Boolean))];
 }
 
+/** 清单深拷贝（含 v5 的 engines/meta 与界面插件规格；安装记录与 previous 共用）。 */
+function copyManifest(manifest: PluginManifest): PluginManifest {
+  const { contributions, permissions } = manifest;
+  return {
+    ...manifest,
+    contributions: {
+      skills: contributions.skills.map((skill) => ({
+        ...skill,
+        triggers: [...skill.triggers],
+        tags: [...skill.tags],
+      })),
+      mcpServers: contributions.mcpServers.map((server) => ({ ...server })),
+      commands: contributions.commands.map((command) => ({
+        ...command,
+        keywords: [...command.keywords],
+        target: { ...command.target },
+      })),
+      toolPacks: contributions.toolPacks.map((pack) => ({ ...pack, tools: [...pack.tools] })),
+      // d.94：界面插件声明（deep copy；web 只展示，安装/执行在主进程）
+      desktopWidgets: contributions.desktopWidgets.map((widget) => ({
+        ...widget,
+        scales: [...widget.scales],
+        position: { ...widget.position },
+        ...(widget.tray ? { tray: { ...widget.tray, items: [...widget.tray.items] } } : {}),
+        ...(widget.settings
+          ? {
+              settings: {
+                ...widget.settings,
+                fields: widget.settings.fields.map((field) => ({
+                  ...field,
+                  ...(field.options
+                    ? { options: field.options.map((option) => ({ ...option })) }
+                    : {}),
+                })),
+              },
+            }
+          : {}),
+      })),
+      llmPresets: [],
+    },
+    permissions: {
+      network: [...permissions.network],
+      tools: permissions.tools,
+      files: [...permissions.files],
+      events: [...permissions.events],
+      graphics: [...permissions.graphics],
+      eval: permissions.eval,
+    },
+    // v5：engines/meta 是可选字段，只对 v5 清单出现。
+    ...(manifest.engines ? { engines: { ...manifest.engines } } : {}),
+    ...(manifest.meta
+      ? {
+          meta: {
+            ...manifest.meta,
+            ...(manifest.meta.tags ? { tags: [...manifest.meta.tags] } : {}),
+            ...(manifest.meta.keywords ? { keywords: [...manifest.meta.keywords] } : {}),
+            ...(manifest.meta.screenshots ? { screenshots: [...manifest.meta.screenshots] } : {}),
+          },
+        }
+      : {}),
+    publisher: manifest.publisher ? { ...manifest.publisher } : undefined,
+    signature: manifest.signature ? { ...manifest.signature } : undefined,
+  };
+}
+
 function copyPlugin(plugin: InstalledPlugin): InstalledPlugin {
-  const { contributions, permissions } = plugin.manifest;
   return {
     ...plugin,
-    manifest: {
-      ...plugin.manifest,
-      contributions: {
-        skills: contributions.skills.map((skill) => ({
-          ...skill,
-          triggers: [...skill.triggers],
-          tags: [...skill.tags],
-        })),
-        mcpServers: contributions.mcpServers.map((server) => ({ ...server })),
-        commands: contributions.commands.map((command) => ({
-          ...command,
-          keywords: [...command.keywords],
-          target: { ...command.target },
-        })),
-        toolPacks: contributions.toolPacks.map((pack) => ({ ...pack, tools: [...pack.tools] })),
-        // d.94：界面插件声明（deep copy；web 只展示，安装/执行在主进程）
-        desktopWidgets: contributions.desktopWidgets.map((widget) => ({
-          ...widget,
-          scales: [...widget.scales],
-          position: { ...widget.position },
-          ...(widget.tray ? { tray: { ...widget.tray, items: [...widget.tray.items] } } : {}),
-          ...(widget.settings
-            ? {
-                settings: {
-                  ...widget.settings,
-                  fields: widget.settings.fields.map((field) => ({
-                    ...field,
-                    ...(field.options
-                      ? { options: field.options.map((option) => ({ ...option })) }
-                      : {}),
-                  })),
-                },
-              }
-            : {}),
-        })),
-        llmPresets: [],
-      },
-      permissions: {
-        network: [...permissions.network],
-        tools: permissions.tools,
-        files: [...permissions.files],
-        events: [...permissions.events],
-        graphics: [...permissions.graphics],
-        eval: permissions.eval,
-      },
-    },
+    manifest: copyManifest(plugin.manifest),
     skillIds: [...plugin.skillIds],
     serverIds: [...plugin.serverIds],
     publisher: plugin.publisher ? { ...plugin.publisher } : null,
     signature: plugin.signature ? { ...plugin.signature } : null,
     disabledKinds: [...plugin.disabledKinds],
+    ...(plugin.previous
+      ? {
+          previous: {
+            manifest: copyManifest(plugin.previous.manifest),
+            fingerprint: plugin.previous.fingerprint,
+            installedAt: plugin.previous.installedAt,
+          },
+        }
+      : {}),
+    ...(plugin.history ? { history: plugin.history.map((entry) => ({ ...entry })) } : {}),
+    ...(plugin.highestVersion ? { highestVersion: plugin.highestVersion } : {}),
   };
+}
+
+/**
+ * 把存储里的归一化清单还原成「能再过一次 v5 解析」的形状。
+ *
+ * 两处 web/共享的写读差异必须在这里抹平，否则所有 v5 记录重启后都读不回来：
+ * 1. web 内部形状恒定带 `contributions.llmPresets: []`（旧消费方兼容字段），
+ *    而 v5 的 `contributions` 是 strict（未知键=报错）；
+ * 2. shared 的 `trimmed()` 是 `min(1)`，但缺省值是 `""`（zod 的 `.default("")` 不跑校验）——
+ *    归一化后的记录一定写有 `description: ""` / `author: ""`，显式传回去会被判「至少 1 个字」。
+ *
+ * ★ 这是 web 侧的自保，不是正确契约：shared 的 v5 schema 应该允许这两个字段为空串
+ *   （或把缺省值改成不落盘）。shared 属只读范围，已在交付说明里提出。
+ */
+function stripWebCompatFields(record: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...record };
+  if (out.description === "") delete out.description;
+  if (out.author === "") delete out.author;
+  const contributions = record.contributions;
+  if (!contributions || typeof contributions !== "object" || Array.isArray(contributions)) {
+    return out;
+  }
+  const { llmPresets: _ignored, ...rest } = contributions as Record<string, unknown>;
+  const cleaned: Record<string, unknown> = { ...rest };
+  for (const key of ["skills", "mcpServers", "commands", "toolPacks"]) {
+    const list = cleaned[key];
+    if (!Array.isArray(list)) continue;
+    cleaned[key] = list.map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+      const item = { ...(entry as Record<string, unknown>) };
+      if (item.description === "") delete item.description;
+      return item;
+    });
+  }
+  out.contributions = cleaned;
+  return out;
 }
 
 /**
  * 读回本机存储里的清单。
  *
- * 存的是**归一化后的 v3 形状**（`contributions` / `permissions`），但 `schemaVersion`
- * 保留原始值（v1/v2 包要能在界面上标「旧版清单」）。直接交给 `parsePluginManifest`
- * 会按旧版规则去找顶层 `skills`，必然解析失败；所以先按 v3 解析再把版本号还原。
- * 旧版本应用留下的记录（顶层 skills、无 contributions）仍走原来的旧版解析路径。
- */
-/**
- * 读回本机存储里的清单。
- *
  * 存的是**归一化后的当前形状**（`contributions` / `permissions`，含 v4 的
- * `desktopWidgets` / `events|graphics|eval`），但 `schemaVersion` 保留原始值
- * （v1/v2/v3 包要能在界面上标「旧版清单」）。直接按原始版本号解析会踩两条坑：
- * 旧版规则会去顶层找 `skills`；v3 规则会把归一化后的 v4 字段当成「v3 带新字段」拒绝。
- * 所以先按**当前形状**（v4）解析，再把版本号还原成存储里的原始值。
+ * `desktopWidgets` / `events|graphics|eval` 与 v5 的 `engines/meta`），但 `schemaVersion`
+ * 保留原始值（旧包要能在界面上标「旧版清单」）。直接按原始版本号解析会踩三条坑：
+ * 旧版规则会去顶层找 `skills`；v3 规则会把归一化后的 v4 字段当成「v3 带新字段」拒绝；
+ * v5 的 `engines` 是必填，手改坏的记录会让整条插件消失。所以：
+ * v5 先按 v5 重读（判兼容性需要 engines），失败退回当前形状并保留版本号；
+ * v1–v4 先按**当前形状**（v4）解析，再把版本号还原成存储里的原始值。
  */
 function parseStoredManifest(raw: unknown): PluginManifest {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const record = raw as Record<string, unknown>;
+    const version = record.schemaVersion;
+    if (version === 5) {
+      try {
+        return parsePluginManifest(stripWebCompatFields(record));
+      } catch {
+        // 存储被手改坏（缺 engines 等）时不丢整条记录：按当前形状读出来，
+        // 保留版本号，等下次安装预览再把问题暴露给用户。
+        const parsed = parsePluginManifest({ ...record, schemaVersion: 4 });
+        return { ...parsed, schemaVersion: 5 };
+      }
+    }
     if ("contributions" in record || "permissions" in record) {
-      const version = record.schemaVersion;
       const parsed = parsePluginManifest({ ...record, schemaVersion: 4 });
       // 1/2/3 都只是「显示用的旧版本号」，归一化后的结构是当前形状。
       return version === 1 || version === 2 || version === 3
@@ -434,6 +907,16 @@ export class PluginStore {
   preview(input: string | unknown): PluginInstallPreview {
     const manifest = parsePluginManifest(input);
     assertDeclarativeManifest(manifest);
+    return this.previewOf(manifest);
+  }
+
+  /**
+   * 差异预览的纯计算（差异/冲突/信任提示），不解析、不写盘。
+   *
+   * 抽出来是为了让 `planInstall` 复用同一套口径：预览里说「服务 +1」，
+   * 计划与落盘就必须是同一件事——两处各算一遍是半装态的高发地。
+   */
+  private previewOf(manifest: PluginManifest): PluginInstallPreview {
     const existing = this.data.plugins.find((p) => p.manifest.id === manifest.id) ?? null;
 
     const owned = this.skills.list().filter((s) => s.pluginId === manifest.id);
@@ -608,12 +1091,66 @@ export class PluginStore {
   }
 
   /**
-   * 安装或更新。同一 `id` 再次安装视为更新：
-   * 同名技能原地刷新、新增技能创建、清单里消失的技能删除；启用状态保留用户选择。
-   * 清单不合法或数量超限时抛错，不落盘。
+   * 安装或更新（旧入口，对外语义与此前一致）。
+   *
+   * 内部改为 `planInstall` + `applyPlan`，但保留两点旧语义：
+   * 1. 该入口视为「用户已在安装弹窗确认过整份清单」（含权限扩张与降级），
+   *    所以强制 `confirmPermissionExpansion / allowDowngrade`；
+   * 2. 失败时抛错：清单/规则问题抛 `PluginManifestError`，写失败抛 `PluginInstallError`
+   *    （带完整回滚报告，`applied: "failed"` 的信息不丢）。
+   *
+   * 新界面应走 `planInstall` → 展示差异/权限/兼容性/体积 → `applyPlan`，
+   * 这样「权限扩张需要重新确认」「需要更新和鸣」才能展示给用户。
    */
   install(input: string | unknown, options: PluginInstallOptions = {}): InstallResult {
-    const manifest = parsePluginManifest(input);
+    const plan = this.planInstall(input, {
+      ...options,
+      confirmPermissionExpansion: true,
+      allowDowngrade: true,
+    });
+    // 硬规则（冲突/不兼容/超体积）属「包或规则问题」，沿用旧入口的 PluginManifestError。
+    const blocked = plan.blocked[0];
+    if (blocked) throw new PluginManifestError(blocked.message);
+    const result = this.applyPlan(plan);
+    if (result.applied === "failed" || !result.plugin) {
+      const error = result.diagnostics.find((item) => item.severity === "error");
+      throw new PluginInstallError(
+        error?.message ?? "安装失败，已恢复到安装前状态",
+        result,
+      );
+    }
+    return {
+      plugin: result.plugin,
+      created: plan.mode === "install",
+      added: result.added,
+      updated: result.updated,
+      removed: result.removed,
+      serversAdded: result.serversAdded,
+      serversUpdated: result.serversUpdated,
+      serversRemoved: result.serversRemoved,
+      changed: result.changed,
+      applied: "applied",
+      mode: plan.mode,
+      ...(result.rollback ? { rollback: result.rollback } : {}),
+      diagnostics: result.diagnostics,
+    };
+  }
+
+  /**
+   * 生成安装计划（规格 §5.1）：**纯函数，不写任何存储**。
+   *
+   * 做四件事：① 复用 `preview()` 算差异与冲突；② `engines` 兼容判定；
+   * ③ 权限扩张检测（network 新增 host / tools 放宽 / 新贡献类别）；
+   * ④ 体积预估（写前算「这类键写后总字节」，超预算直接拦在写阶段之前）。
+   *
+   * 硬规则（冲突/不兼容/降级/超体积）只进 `blocked`，不抛错——UI 需要在同一屏
+   * 把这些原因和差异一起展示；`applyPlan` 见到非空 `blocked` 会拒绝执行。
+   *
+   * @param input 原始清单（JSON 文本/对象，会完整校验并带回 warning），
+   *              或已归一化的清单（`previous.manifest` 回滚场景，不再二次解析）。
+   */
+  planInstall(input: string | PluginManifest | unknown, options: InstallPlanOptions = {}): InstallPlan {
+    const { manifest, warnings } = resolvePlanManifest(input);
     assertDeclarativeManifest(manifest);
     const index = this.data.plugins.findIndex((p) => p.manifest.id === manifest.id);
     if (index < 0 && this.data.plugins.length >= MAX_PLUGINS) {
@@ -622,150 +1159,601 @@ export class PluginStore {
       );
     }
 
-    // 服务 id 冲突必须在写入技能之前查完：否则会把技能改了一半再失败。
-    const nextServerIds = manifest.contributions.mcpServers.map((spec) =>
-      pluginServerId(manifest.id, spec.key),
+    const existing = index >= 0 ? copyPlugin(this.data.plugins[index]) : null;
+    const mode: InstallPlan["mode"] = existing ? "update" : "install";
+    const diff = this.previewOf(manifest);
+    const v5 = toPluginV5View(manifest);
+    const appVersion = options.appVersion ?? currentAppVersion();
+    const engines = pluginEnginesStatus(
+      { schemaVersion: manifest.schemaVersion, engines: manifest.engines },
+      appVersion,
     );
-    for (const id of nextServerIds) {
-      const current = this.mcp.get(id);
-      if (current && current.origin !== "plugin") {
-        throw new PluginManifestError(
-          `MCP 服务 id 冲突：${id} 已被其它来源的服务占用，请先在接口区删除或改名`,
-        );
-      }
+    const permissionUpgrade = diffPermissionUpgrade(existing?.manifest ?? null, manifest);
+    const at = this.iso();
+    const highestVersion = existing
+      ? highestPluginVersion(existing.highestVersion, existing.manifest.version, manifest.version)
+      : manifest.version;
+    const previousInfo = existing ? this.buildPrevious(existing) : { previous: null as InstalledPlugin["previous"] | null };
+    const history = buildHistory(existing, manifest.version, at);
+    const size = this.estimateInstallSize(manifest, existing, previousInfo.previous);
+    const blocked: InstallPlanBlock[] = [];
+    if (diff.conflicts.length > 0) {
+      blocked.push({
+        code: "conflicts",
+        message: `MCP 服务 id 冲突：${diff.conflicts[0].id} 已被其它来源的服务占用，请先在接口区删除或改名`,
+      });
+    }
+    if (engines.status !== "compatible") {
+      blocked.push({ code: "engines", message: enginesStatusText(engines) });
+    }
+    if (existing && comparePluginVersions(manifest.version, highestVersion) < 0 && !options.allowDowngrade) {
+      blocked.push({
+        code: "downgrade",
+        message: `拒绝降级安装：本机见过的最高版本是 ${highestVersion}，本次要装 ${manifest.version}（如确需降级请显式确认）`,
+      });
+    }
+    if (size.exceeded) {
+      blocked.push({ code: "size", message: size.suggestion ?? "安装体积超限，请先清理本机存储" });
     }
 
-    const existing = index >= 0 ? this.data.plugins[index] : undefined;
+    const planWarnings = [...warnings];
+    if (manifest.schemaVersion < 5) {
+      planWarnings.push(
+        `清单未标注兼容性（schemaVersion ${manifest.schemaVersion}）：按「不限宿主版本」处理`,
+      );
+    }
+    if (permissionUpgrade.expands) {
+      planWarnings.push(...permissionUpgrade.reasons.map((reason) => `权限扩张：${reason}`));
+    }
+    if (previousInfo.warning) planWarnings.push(previousInfo.warning);
+
+    // 幂等：同清单重复安装不写存储（changed=false）；版本历史与 previous 也不动。
+    const noop =
+      existing != null &&
+      existing.fingerprint === diff.trust.fingerprint &&
+      isEmptySkillDiff(diff.skills) &&
+      isEmptyServerDiff(diff.servers) &&
+      diff.conflicts.length === 0;
+
+    return {
+      manifest,
+      v5,
+      mode,
+      existing,
+      diff,
+      conflicts: [...diff.conflicts],
+      writes: noop ? [] : this.planWrites(manifest, existing, diff, previousInfo.previous),
+      warnings: planWarnings,
+      engines,
+      permissionUpgrade,
+      size,
+      blocked,
+      needsConfirmation:
+        mode === "update" && permissionUpgrade.expands && !options.confirmPermissionExpansion,
+      previous: previousInfo.previous,
+      history,
+      highestVersion,
+      options,
+      noop,
+    };
+  }
+
+  /**
+   * 执行安装计划（规格 §5.2 的三段式）：`prepare`（快照受影响键）→ `persist`（按计划写）
+   * → 失败 `rollback`（逐键恢复 + 三个单例 `reload()`）。
+   *
+   * 关键约束：
+   * - 写失败**必须可见**：插件记录用 `saveOrThrow()`；技能池/MCP 注册表的 `save()`
+   *   会吞配额异常（历史行为，不改），所以这里读回校验「该变的键确实变了」；
+   * - 回滚失败如实报 `rollback.ok=false`，绝不谎报成功；
+   * - `changed`（存储是否变）与 `applied`（是否生效）分开报告。
+   */
+  applyPlan(plan: InstallPlan): InstallApplyResult {
+    const mode = plan.mode;
+    const diagnostics: PluginDiagnostic[] = plan.warnings.map((message) => ({
+      severity: "warning",
+      code: "plan-warning",
+      message,
+    }));
+    for (const block of plan.blocked) {
+      diagnostics.push({ severity: "error", code: block.code, message: block.message });
+    }
+    if (plan.needsConfirmation) {
+      diagnostics.push({
+        severity: "error",
+        code: "confirm",
+        message: "本次更新扩大了权限（新增主机/放宽工具上限/新增贡献类别），需要重新确认后才能安装",
+      });
+    }
+    const fail = (rollback?: InstallRollbackReport): InstallApplyResult => ({
+      changed: false,
+      applied: "failed",
+      mode,
+      plugin: null,
+      added: 0,
+      updated: 0,
+      removed: 0,
+      serversAdded: 0,
+      serversUpdated: 0,
+      serversRemoved: 0,
+      ...(rollback ? { rollback } : {}),
+      diagnostics,
+    });
+    if (plan.blocked.length > 0 || plan.needsConfirmation) return fail();
+
+    // 计划与现状不一致（预览后插件被别处装/卸/改过）：拒绝执行，让 UI 重新预览。
+    const live = this.data.plugins.find((p) => p.manifest.id === plan.manifest.id) ?? null;
+    const stale =
+      plan.mode === "install"
+        ? live !== null
+        : live === null || (plan.existing != null && live.fingerprint !== plan.existing.fingerprint);
+    if (stale) {
+      diagnostics.push({
+        severity: "error",
+        code: "stale",
+        message: "安装计划已过期（插件状态在预览后发生了变化），请重新预览后再安装",
+      });
+      return fail();
+    }
+
+    // 幂等：同清单重复安装直接返回，不碰存储。
+    if (plan.noop && plan.existing) {
+      return {
+        changed: false,
+        applied: "applied",
+        mode,
+        plugin: live ? copyPlugin(live) : copyPlugin(plan.existing),
+        ...countsFromDiff(plan.diff),
+        diagnostics,
+      };
+    }
+
+    const manifest = plan.manifest;
+    const existing = plan.existing;
+    const snapshot = this.snapshotTransactionKeys();
     const enabled = existing?.enabled ?? true;
     // 覆盖更新保留贡献级停用选择；新装插件默认全部生效。
     const disabledKinds: PluginContributionKind[] = [...(existing?.disabledKinds ?? [])];
     const skillsEnabled = enabled && !disabledKinds.includes("skills");
     const serversEnabled = enabled && !disabledKinds.includes("mcpServers");
+    const nextServerIds = manifest.contributions.mcpServers.map((spec) =>
+      pluginServerId(manifest.id, spec.key),
+    );
+
+    try {
+      /* ── persist：先写「被依赖方」（技能/服务），最后写插件记录 ── */
+      const owned = this.skills.list().filter((s) => s.pluginId === manifest.id);
+      const byName = new Map(owned.map((s) => [s.name, s]));
+      const nextNames = new Set(manifest.contributions.skills.map((s) => s.name));
+      let added = 0;
+      let updated = 0;
+      let removed = 0;
+      const skillIds: string[] = [];
+      const createdIds: string[] = [];
+
+      for (const spec of manifest.contributions.skills) {
+        const match = byName.get(spec.name);
+        if (match) {
+          this.skills.update(match.id, {
+            description: spec.description,
+            instructions: spec.instructions,
+            triggers: [...spec.triggers],
+            tags: [...spec.tags],
+            version: manifest.version,
+            source: "imported",
+            enabled: skillsEnabled,
+          });
+          skillIds.push(match.id);
+          updated += 1;
+        } else {
+          const created = this.skills.create({
+            name: spec.name,
+            description: spec.description,
+            instructions: spec.instructions,
+            triggers: [...spec.triggers],
+            tags: [...spec.tags],
+            enabled: skillsEnabled,
+            version: manifest.version,
+            source: "imported",
+            pluginId: manifest.id,
+          });
+          skillIds.push(created.id);
+          createdIds.push(created.id);
+          added += 1;
+        }
+      }
+
+      for (const skill of owned) {
+        if (!nextNames.has(skill.name)) {
+          this.skills.remove(skill.id);
+          removed += 1;
+        }
+      }
+
+      // 技能池的 save() 吞配额异常：读回校验「该变的键确实变了」，
+      // 否则会把「技能没写进去」当成装成功（当前半装态的根因之一）。
+      if (diffTouchedSkills(plan.diff)) {
+        this.assertKeyChanged(SKILLS_KEY, snapshot, "技能");
+      }
+
+      // 新技能追加给已有显式分配记录的智能体；无记录者由默认分配（内置 + 插件）覆盖。
+      if (createdIds.length > 0) this.skills.assignToAllWithAssignments(createdIds);
+
+      // 服务随包登记：只覆盖名称/地址/启用位，**保留用户在接口区补的请求头**
+      // 与已启用的工具集合——那是用户配置，不属于清单。
+      let serversAdded = 0;
+      let serversUpdated = 0;
+      let serversRemoved = 0;
+      for (const spec of manifest.contributions.mcpServers) {
+        const id = pluginServerId(manifest.id, spec.key);
+        if (this.mcp.get(id)) {
+          this.mcp.update(id, {
+            name: spec.name,
+            transport: "http",
+            url: spec.url,
+            enabled: serversEnabled,
+            origin: "plugin",
+          });
+          serversUpdated += 1;
+        } else {
+          this.mcp.add({
+            id,
+            name: spec.name,
+            transport: "http",
+            url: spec.url,
+            enabled: serversEnabled,
+            origin: "plugin",
+          });
+          serversAdded += 1;
+        }
+      }
+
+      const nextServerSet = new Set(nextServerIds);
+      for (const oldId of existing?.serverIds ?? []) {
+        if (nextServerSet.has(oldId)) continue;
+        const current = this.mcp.get(oldId);
+        if (current && current.origin === "plugin") {
+          this.mcp.remove(oldId);
+          serversRemoved += 1;
+        }
+      }
+
+      // MCP 注册表同样会吞写异常；只有真注册表（实现了 reload）才做读回校验，
+      // 注入的假端口不落这个键，拿它做校验会误报。
+      if (diffTouchedServers(plan.diff) && typeof this.mcp.reload === "function") {
+        this.assertKeyChanged(MCP_SERVERS_KEY, snapshot, "MCP 服务");
+      }
+
+      const at = this.iso();
+      // 签名/信任结论由 UI 异步校验后通过 options 交进来；store 自身不验签。
+      // 有发布者才记录信任（否则 null）；已签名但没传验签结果时记 unsupported，
+      // 绝不默认 valid——「没验过」和「验过有效」必须能区分。
+      const publisher =
+        manifest.publisher && plan.options.publisher ? { ...plan.options.publisher } : null;
+      const signature = manifest.signature
+        ? {
+            status: plan.options.signatureStatus ?? ("unsupported" as SignatureStatus),
+            alg: manifest.signature.alg,
+          }
+        : null;
+      const plugin: InstalledPlugin = {
+        manifest,
+        enabled,
+        skillIds,
+        serverIds: nextServerIds,
+        fingerprint: contentFingerprint(manifest),
+        publisher,
+        signature,
+        disabledKinds,
+        ...(plan.previous ? { previous: plan.previous } : {}),
+        history: plan.history,
+        highestVersion: plan.highestVersion,
+        installedAt: existing?.installedAt ?? at,
+        updatedAt: at,
+      };
+      const index = this.data.plugins.findIndex((p) => p.manifest.id === manifest.id);
+      if (index >= 0) this.data.plugins[index] = plugin;
+      else this.data.plugins.push(plugin);
+      // 关键路径用 saveOrThrow：配额/隐私模式失败必须冒泡到回滚，不能吞。
+      this.saveOrThrow();
+
+      return {
+        changed: true,
+        applied: "applied",
+        mode,
+        plugin: copyPlugin(plugin),
+        added,
+        updated,
+        removed,
+        serversAdded,
+        serversUpdated,
+        serversRemoved,
+        diagnostics,
+      };
+    } catch (err) {
+      const rollback = this.rollbackTransaction(snapshot);
+      diagnostics.push({
+        severity: "error",
+        code: "apply-failed",
+        message: `安装失败${rollback.ok ? "，已恢复到安装前状态" : "，回滚未能完全恢复"}：${errorMessage(err)}`,
+      });
+      return fail(rollback);
+    }
+  }
+
+  /**
+   * 回滚到上一版（规格 §5.3）：用本机留存的旧清单走同一 `planInstall` + `applyPlan`。
+   *
+   * - 不联网、不校验目录；旧清单的内容指纹只用于提示「与记录不同」，不阻断；
+   * - 「回滚」本身就是用户显式发起的降级动作，因此默认 `allowDowngrade: true`
+   *   （普通安装路径仍受 `highestVersion` 防降级约束）；
+   * - 成功后 `applyPlan` 会把「刚被替换掉的较新清单」写成新的 `previous`，
+   *   等于完成了 previous 的交换。
+   */
+  rollbackToPrevious(id: string, options: InstallPlanOptions = {}): InstallResult {
+    const plugin = this.data.plugins.find((p) => p.manifest.id === id);
+    if (!plugin) throw new Error(`插件不存在：${id}`);
+    if (!plugin.previous) {
+      throw new Error(`「${plugin.manifest.name}」没有保留上一版，无法回滚`);
+    }
+    const previous = plugin.previous;
+    const plan = this.planInstall(previous.manifest, {
+      ...options,
+      allowDowngrade: options.allowDowngrade ?? true,
+      confirmPermissionExpansion: options.confirmPermissionExpansion ?? true,
+    });
+    const warnings = [...plan.warnings];
+    // 内容指纹只做提示（旧清单可能被手改过），不阻断回滚。
+    const currentFingerprint = contentFingerprint(previous.manifest);
+    if (previous.fingerprint && previous.fingerprint !== currentFingerprint) {
+      warnings.push("上一版清单的内容指纹与安装记录不同（可能被手动改过），仍按本机留存内容回滚");
+    }
+    const result = this.applyPlan({ ...plan, warnings });
+    if (result.applied === "failed" || !result.plugin) {
+      const error = result.diagnostics.find((item) => item.severity === "error");
+      throw new PluginInstallError(
+        error?.message ?? "回滚失败，已恢复到回滚前状态",
+        result,
+      );
+    }
+    return {
+      plugin: result.plugin,
+      created: false,
+      added: result.added,
+      updated: result.updated,
+      removed: result.removed,
+      serversAdded: result.serversAdded,
+      serversUpdated: result.serversUpdated,
+      serversRemoved: result.serversRemoved,
+      changed: result.changed,
+      applied: "applied",
+      mode: "update",
+      ...(result.rollback ? { rollback: result.rollback } : {}),
+      diagnostics: result.diagnostics,
+    };
+  }
+
+  /**
+   * 重新读本机存储里的插件记录（安装事务回滚后必须调；与构造期读取同口径）。
+   */
+  reload(): void {
+    this.backfilledFingerprint = false;
+    this.data = this.parse(this.read());
+    if (this.backfilledFingerprint) this.save();
+  }
+
+  /** 取 `previous` 候选（带 §5.3 的 128KB/512KB 限额判定）。 */
+  private buildPrevious(existing: InstalledPlugin): {
+    previous: InstalledPlugin["previous"] | null;
+    warning?: string;
+  } {
+    const candidate: NonNullable<InstalledPlugin["previous"]> = {
+      manifest: copyManifest(existing.manifest),
+      fingerprint: existing.fingerprint,
+      installedAt: existing.installedAt,
+    };
+    const bytes = utf8Length(JSON.stringify(candidate));
+    if (bytes > PREVIOUS_MANIFEST_MAX_BYTES) {
+      return {
+        previous: null,
+        warning: `本插件未保留上一版：旧清单 ${formatMiB(bytes)} 超过单插件上限 ${formatMiB(PREVIOUS_MANIFEST_MAX_BYTES)}`,
+      };
+    }
+    let total = bytes;
+    for (const other of this.data.plugins) {
+      if (other.manifest.id === existing.manifest.id || !other.previous) continue;
+      total += utf8Length(JSON.stringify(other.previous));
+    }
+    if (total > PREVIOUS_TOTAL_MAX_BYTES) {
+      return {
+        previous: null,
+        warning: `本插件未保留上一版：全部插件的回滚清单合计 ${formatMiB(total)} 超过上限 ${formatMiB(PREVIOUS_TOTAL_MAX_BYTES)}`,
+      };
+    }
+    return { previous: candidate };
+  }
+
+  /** 体积预估（规格 §5.2 步骤 0）：受影响键当前总字节 + 本次写入增量。 */
+  private estimateInstallSize(
+    manifest: PluginManifest,
+    existing: InstalledPlugin | null,
+    previous: InstalledPlugin["previous"] | null,
+  ): InstallSizeEstimate {
+    const keys = [...PLUGIN_TXN_KEYS];
+    let currentBytes = 0;
+    for (const key of keys) {
+      try {
+        currentBytes += bytesOf(this.storage.getItem(key));
+      } catch {
+        /* 读不到按 0 算：预检只是守卫，不因为读异常拒绝安装 */
+      }
+    }
+
+    // 插件记录：整份清单 + 记录外壳（时间戳/指纹/信任/历史）；更新时扣掉旧清单。
+    let delta = utf8Length(JSON.stringify(manifest)) + 512;
+    if (existing) delta -= utf8Length(JSON.stringify(existing.manifest));
+
+    // 技能池：按名字对齐新增/更新/删除（记录外壳约 160B：id/时间戳/启用位等）。
     const owned = this.skills.list().filter((s) => s.pluginId === manifest.id);
-    const byName = new Map(owned.map((s) => [s.name, s]));
-    const nextNames = new Set(manifest.contributions.skills.map((s) => s.name));
-
-    let added = 0;
-    let updated = 0;
-    let removed = 0;
-    const skillIds: string[] = [];
-    const createdIds: string[] = [];
-
+    const byName = new Map(owned.map((skill) => [skill.name, skill] as const));
     for (const spec of manifest.contributions.skills) {
+      const cost = utf8Length(JSON.stringify(spec)) + 160;
       const match = byName.get(spec.name);
       if (match) {
-        this.skills.update(match.id, {
-          description: spec.description,
-          instructions: spec.instructions,
-          triggers: [...spec.triggers],
-          tags: [...spec.tags],
-          version: manifest.version,
-          source: "imported",
-          enabled: skillsEnabled,
-        });
-        skillIds.push(match.id);
-        updated += 1;
+        delta += cost - (utf8Length(JSON.stringify(match)) + 160);
+        byName.delete(spec.name);
       } else {
-        const created = this.skills.create({
-          name: spec.name,
-          description: spec.description,
-          instructions: spec.instructions,
-          triggers: [...spec.triggers],
-          tags: [...spec.tags],
-          enabled: skillsEnabled,
-          version: manifest.version,
-          source: "imported",
-          pluginId: manifest.id,
-        });
-        skillIds.push(created.id);
-        createdIds.push(created.id);
-        added += 1;
+        // 新技能还会追加进「已有显式分配记录」的智能体（按 1 个智能体粗估）。
+        delta += cost + 64;
       }
     }
-
-    for (const skill of owned) {
-      if (!nextNames.has(skill.name)) {
-        this.skills.remove(skill.id);
-        removed += 1;
-      }
+    for (const leftover of byName.values()) {
+      delta -= utf8Length(JSON.stringify(leftover)) + 160;
     }
 
-    // 新技能追加给已有显式分配记录的智能体；无记录者由默认分配（内置 + 插件）覆盖。
-    if (createdIds.length > 0) this.skills.assignToAllWithAssignments(createdIds);
-
-    // 服务随包登记：只覆盖名称/地址/启用位，**保留用户在接口区补的请求头**
-    // 与已启用的工具集合——那是用户配置，不属于清单。
-    let serversAdded = 0;
-    let serversUpdated = 0;
-    let serversRemoved = 0;
+    // MCP 服务：按 key 对齐增改删。
+    const existingServers = new Map(
+      (existing?.manifest.contributions.mcpServers ?? []).map((server) => [server.key, server] as const),
+    );
     for (const spec of manifest.contributions.mcpServers) {
-      const id = pluginServerId(manifest.id, spec.key);
-      if (this.mcp.get(id)) {
-        this.mcp.update(id, {
-          name: spec.name,
-          transport: "http",
-          url: spec.url,
-          enabled: serversEnabled,
-          origin: "plugin",
-        });
-        serversUpdated += 1;
-      } else {
-        this.mcp.add({
-          id,
-          name: spec.name,
-          transport: "http",
-          url: spec.url,
-          enabled: serversEnabled,
-          origin: "plugin",
-        });
-        serversAdded += 1;
-      }
+      const cost = utf8Length(JSON.stringify(spec)) + 200;
+      const old = existingServers.get(spec.key);
+      delta += old ? cost - (utf8Length(JSON.stringify(old)) + 200) : cost;
+      existingServers.delete(spec.key);
+    }
+    for (const leftover of existingServers.values()) {
+      delta -= utf8Length(JSON.stringify(leftover)) + 200;
     }
 
-    const nextServerSet = new Set(nextServerIds);
-    for (const oldId of existing?.serverIds ?? []) {
-      if (nextServerSet.has(oldId)) continue;
-      const current = this.mcp.get(oldId);
-      if (current && current.origin === "plugin") {
-        this.mcp.remove(oldId);
-        serversRemoved += 1;
-      }
-    }
+    // 回滚清单 + 历史/最高版本等新字段外壳。
+    if (previous) delta += utf8Length(JSON.stringify(previous));
+    delta += 96;
 
-    const at = this.iso();
-    // 签名/信任结论由 UI 异步校验后通过 options 交进来；store 自身不验签。
-    // 有发布者才记录信任（否则 null）；已签名但没传验签结果时记 unsupported，
-    // 绝不默认 valid——「没验过」和「验过有效」必须能区分。
-    const publisher =
-      manifest.publisher && options.publisher ? { ...options.publisher } : null;
-    const signature = manifest.signature
-      ? { status: options.signatureStatus ?? ("unsupported" as SignatureStatus), alg: manifest.signature.alg }
-      : null;
-    const plugin: InstalledPlugin = {
-      manifest,
-      enabled,
-      skillIds,
-      serverIds: nextServerIds,
-      fingerprint: contentFingerprint(manifest),
-      publisher,
-      signature,
-      disabledKinds,
-      installedAt: existing?.installedAt ?? at,
-      updatedAt: at,
-    };
-    if (index >= 0) this.data.plugins[index] = plugin;
-    else this.data.plugins.push(plugin);
-    this.save();
-
+    const deltaBytes = Math.max(0, delta);
+    const afterBytes = currentBytes + deltaBytes;
+    const exceeded = afterBytes > INSTALL_WRITE_BUDGET_BYTES;
     return {
-      plugin: copyPlugin(plugin),
-      created: !existing,
-      added,
-      updated,
-      removed,
-      serversAdded,
-      serversUpdated,
-      serversRemoved,
+      keys,
+      currentBytes,
+      afterBytes,
+      deltaBytes,
+      limitBytes: INSTALL_WRITE_BUDGET_BYTES,
+      exceeded,
+      ...(exceeded
+        ? {
+            suggestion: `插件体系写后约 ${formatMiB(afterBytes)}，超过预算 ${formatMiB(INSTALL_WRITE_BUDGET_BYTES)}（本次新增约 ${formatMiB(deltaBytes)}）：请先清理消息缓存或卸载不用的插件`,
+          }
+        : {}),
+    };
+  }
+
+  /** 计划里将要写的键（只是报告；真正落盘仍走各 store 的既有写入口）。 */
+  private planWrites(
+    manifest: PluginManifest,
+    existing: InstalledPlugin | null,
+    diff: PluginInstallPreview,
+    previous: InstalledPlugin["previous"] | null,
+  ): PlanWrite[] {
+    const actionOf = (key: string): PlanWrite["action"] => {
+      try {
+        return this.storage.getItem(key) === null ? "create" : "update";
+      } catch {
+        return "update";
+      }
+    };
+    const recordBytes =
+      utf8Length(JSON.stringify(manifest)) + 512 + (previous ? utf8Length(JSON.stringify(previous)) : 0);
+    const writes: PlanWrite[] = [
+      { key: PLUGINS_KEY, action: existing ? "update" : "create", bytes: recordBytes },
+    ];
+    if (diffTouchedSkills(diff)) {
+      writes.push({ key: SKILLS_KEY, action: actionOf(SKILLS_KEY) });
+    }
+    if (diff.skills.removed.length > 0) {
+      writes.push({ key: SKILL_BINDINGS_KEY, action: actionOf(SKILL_BINDINGS_KEY) });
+    }
+    if (diff.skills.added.length > 0) {
+      writes.push({ key: SKILL_ASSIGNMENTS_KEY, action: actionOf(SKILL_ASSIGNMENTS_KEY) });
+    }
+    if (diffTouchedServers(diff)) {
+      writes.push({ key: MCP_SERVERS_KEY, action: actionOf(MCP_SERVERS_KEY) });
+    }
+    if (diff.servers.removed.length > 0) {
+      writes.push({ key: MCP_TOOLS_KEY, action: actionOf(MCP_TOOLS_KEY) });
+      writes.push({ key: MCP_ENABLED_TOOLS_KEY, action: actionOf(MCP_ENABLED_TOOLS_KEY) });
+    }
+    return writes;
+  }
+
+  /** 快照事务涉及的存储键原值（prepare 阶段；回滚逐键恢复的依据）。 */
+  private snapshotTransactionKeys(): Map<string, string | null> {
+    const snapshot = new Map<string, string | null>();
+    for (const key of PLUGIN_TXN_KEYS) {
+      try {
+        snapshot.set(key, this.storage.getItem(key));
+      } catch {
+        snapshot.set(key, null);
+      }
+    }
+    return snapshot;
+  }
+
+  /**
+   * 读回校验：预期会变的键若与快照逐字节相同，说明底层 store 的 `save()` 把写异常吞了。
+   *
+   * 这是 localStorage 无法真正事务下的次优检测；读不到（读也抛）时不做判断，
+   * 交给 `saveOrThrow` 的插件记录写入兜底。
+   */
+  private assertKeyChanged(
+    key: string,
+    before: Map<string, string | null>,
+    label: string,
+  ): void {
+    let next: string | null;
+    try {
+      next = this.storage.getItem(key);
+    } catch {
+      return;
+    }
+    if (next === (before.get(key) ?? null)) {
+      throw new Error(`${label}写入失败：${key} 读回与写入前相同（存储可能已满或被禁用）`);
+    }
+  }
+
+  /** 失败补偿：逐键恢复快照 + 三个单例 reload；恢复失败如实报 `ok=false`。 */
+  private rollbackTransaction(before: Map<string, string | null>): InstallRollbackReport {
+    const keys = [...before.keys()];
+    const writeErrors: string[] = [];
+    for (const [key, value] of before) {
+      try {
+        if (value === null) this.storage.removeItem(key);
+        else this.storage.setItem(key, value);
+      } catch (err) {
+        writeErrors.push(`${key}：${errorMessage(err)}`);
+      }
+    }
+    // 存储回滚了、内存不重读就是半装态：三个单例都按存储重建。
+    const memoryErrors: string[] = [];
+    try {
+      this.reload();
+    } catch (err) {
+      memoryErrors.push(`插件记录 reload：${errorMessage(err)}`);
+    }
+    try {
+      this.skills.reload();
+    } catch (err) {
+      memoryErrors.push(`技能池 reload：${errorMessage(err)}`);
+    }
+    try {
+      this.mcp.reload?.();
+    } catch (err) {
+      memoryErrors.push(`MCP 注册表 reload：${errorMessage(err)}`);
+    }
+    const ok = writeErrors.length === 0 && memoryErrors.length === 0;
+    return {
+      ok,
+      keys,
+      ...(ok ? {} : { error: [...writeErrors, ...memoryErrors].join("；") }),
     };
   }
 
@@ -828,7 +1816,12 @@ export class PluginStore {
     this.save();
   }
 
-  /** 卸载插件：删除其全部技能（含使用统计与绑定）与 MCP 服务，再删记录。 */
+  /**
+   * 卸载插件：删除其全部技能（含使用统计与绑定）与 MCP 服务，再删记录。
+   *
+   * 卸载属关键路径：改用 `saveOrThrow()`，写失败直接冒泡（此前吞异常会留下
+   * 「技能删了、插件记录还在」的半卸态）。
+   */
   remove(id: string): void {
     const plugin = this.data.plugins.find((p) => p.manifest.id === id);
     if (!plugin) return;
@@ -839,7 +1832,7 @@ export class PluginStore {
       if (current && current.origin === "plugin") this.mcp.remove(serverId);
     }
     this.data.plugins = this.data.plugins.filter((p) => p.manifest.id !== id);
-    this.save();
+    this.saveOrThrow();
   }
 
   private iso(): string {
@@ -854,12 +1847,26 @@ export class PluginStore {
     }
   }
 
-  private save(): void {
+  /**
+   * 非关键路径的写：返回 `{ ok, error }`，不抛（启停等操作失败只影响持久化，
+   * 不该让界面崩掉）。**安装/更新/卸载一律用 `saveOrThrow()`**。
+   */
+  private save(): { ok: boolean; error?: string } {
     try {
       this.storage.setItem(PLUGINS_KEY, JSON.stringify(this.data));
-    } catch {
-      // 写失败静默：配额/隐私模式下不影响本次会话的内存态
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errorMessage(err) };
     }
+  }
+
+  /**
+   * 关键路径的写：配额/隐私模式失败必须冒泡，让安装事务回滚而不是谎报成功。
+   *
+   * 这正是旧 `save()` 吞异常留下的半装态根因（规格 §5.2 第 3 条）。
+   */
+  saveOrThrow(): void {
+    this.storage.setItem(PLUGINS_KEY, JSON.stringify(this.data));
   }
 
   private parse(raw: string | null): PluginData {
@@ -904,6 +1911,8 @@ export class PluginStore {
         ? r.fingerprint
         : null;
     if (!rawFingerprint) this.backfilledFingerprint = true;
+    const previous = coercePrevious(r.previous, at);
+    const history = coerceHistory(r.history);
     return {
       manifest,
       enabled: r.enabled !== false,
@@ -917,10 +1926,56 @@ export class PluginStore {
       serverIds: Array.isArray(r.serverIds)
         ? uniq(r.serverIds.filter((x): x is string => typeof x === "string"))
         : [],
+      ...(previous ? { previous } : {}),
+      ...(history ? { history } : {}),
+      ...(typeof r.highestVersion === "string" && r.highestVersion
+        ? { highestVersion: r.highestVersion }
+        : {}),
       installedAt: typeof r.installedAt === "string" ? r.installedAt : at,
       updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : at,
     };
   }
+}
+
+/**
+ * 读回「上一版清单」：坏数据按 undefined（不丢整条插件记录）。
+ *
+ * 指纹缺失时按清单重算——它只用于提示「与记录不同」，不是安全边界。
+ */
+function coercePrevious(raw: unknown, fallbackAt: string): InstalledPlugin["previous"] | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  if (!record.manifest) return undefined;
+  let manifest: PluginManifest;
+  try {
+    manifest = parseStoredManifest(record.manifest);
+  } catch {
+    return undefined;
+  }
+  return {
+    manifest,
+    fingerprint:
+      typeof record.fingerprint === "string" && record.fingerprint
+        ? record.fingerprint
+        : contentFingerprint(manifest),
+    installedAt: typeof record.installedAt === "string" ? record.installedAt : fallbackAt,
+  };
+}
+
+/** 读回版本历史：只留 `{version, at}` 都合法的条目，最多 3 条（超限丢最旧）。 */
+function coerceHistory(raw: unknown): InstalledPlugin["history"] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: NonNullable<InstalledPlugin["history"]> = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.version !== "string" || !record.version) continue;
+    out.push({
+      version: record.version,
+      at: typeof record.at === "string" ? record.at : "",
+    });
+  }
+  return out.length > 0 ? out.slice(-3) : undefined;
 }
 
 /** 读回发布者记录：只接受完整字段，坏数据按 null（不丢整条插件记录）。 */

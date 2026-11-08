@@ -5,8 +5,8 @@
 > **唯一的例外是界面插件（§10，d.98）**：它带一个独立窗口的可执行渲染包，清单用 `schemaVersion: 4` + `distribution: "bundle"`，
 > 只允许官方目录发布、用户在插件区二次确认后安装。第三方仍只能是纯声明式包。
 >
-> 版本口径：纯声明式清单 `schemaVersion: 3`（v1/v2 旧包归一化后可装）；d.88 短暂引入的 v4（模型预设）已在 d.90 收回——
-> 模型统一由 magpie 网关提供，插件不再声明模型连接。**v4 现在的唯一用途是界面插件**。
+> 版本口径：纯声明式清单现行 `schemaVersion: 5`（v1–v3 旧包归一化后可装；**v5 见 §11**：最低宿主版本 `engines` + 上架元数据 `meta`，v5 是新增不是替换）；d.88 短暂引入的 v4（模型预设）已在 d.90 收回——
+> 模型统一由 magpie 网关提供，插件不再声明模型连接。**v4 现在的唯一用途是界面插件**（`distribution: "bundle"`，且必须首方签名）。
 >
 > 仓库自带的示例插件包（**不随安装包分发**，由云端插件目录发布、用户自行下载安装）：
 > `plugins/infohub-collector/`：把本机 InfoHub 采集桥声明成本机 MCP 服务 + 技能 + 命令。
@@ -45,7 +45,7 @@
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `schemaVersion` | 是 | 固定 `3`；`1`/`2` 为旧格式，解析时归一化 |
+| `schemaVersion` | 是 | 现行 `5`（v5 见 §11）；`3` 仍可装，`1`/`2` 为旧格式、解析时归一化 |
 | `id` | 是 | 小写字母/数字开头，允许 `.`/`_`/`-`，≤64；安装后不可改（视为另一个插件） |
 | `name` / `version` / `description` / `author` | `name`/`version` 必填 | 展示用；`version` 变化会走「更新」而不是新增 |
 | `permissions` | 含 MCP 时必填 | 见 §3 |
@@ -297,4 +297,86 @@ node scripts/build-pet-widget.mjs          # 构建插件 → packages/pet-widge
 node scripts/publish-plugin.mjs packages/pet-widget/dist/package --dest <plugin-dir>
 # 把 <plugin-dir> 同步到服务器的 HEMING_PLUGIN_DIR，客户端「插件区 → 桌面小组件」即可看到
 ```
+
+## 11. 清单 v5：版本兼容、上架元数据与安装事务（d.106）
+
+v5 相对 v3/v4 只加两件事：**最低宿主版本**（`engines.heming`）与**上架元数据**（`meta`）。
+但它同时把三件长期缺失的工程语义补齐了：安装前拦截不兼容、安装要么全成要么全不成、失败能回滚。
+
+### 11.1 清单增量
+
+```jsonc
+{
+  "schemaVersion": 5,
+  "id": "acme.report-kit",
+  "name": "报告工具箱",
+  "version": "1.2.0",
+  "description": "周报与数据源",
+  "author": "ACME",
+  "engines": { "heming": "d.106" },           // 必填：最低宿主版本（只支持最小版本语义）
+  "meta": {                                    // 可选：市场页展示
+    "icon": "https://cdn.acme.com/icon.png",   // https，或 ≤8KB 的 data:image/*;base64
+    "homepage": "https://acme.com/report-kit",
+    "repository": "https://github.com/acme/report-kit",
+    "license": "MIT",
+    "category": "efficiency",                  // 引用目录声明的分类 id
+    "tags": ["official"],                      // ≤8
+    "keywords": ["周报", "报告"],               // ≤20，搜索加权
+    "screenshots": ["https://cdn.acme.com/s1.png"], // ≤4
+    "detail": "report-kit.md"                  // 内联 markdown（≤16KB）或包内相对 .md 路径
+  },
+  "permissions": { "network": ["api.acme.com"], "tools": "read", "files": [] },
+  "contributions": { "skills": [], "mcpServers": [], "commands": [] }
+}
+```
+
+| 字段 | 规则 |
+|---|---|
+| `engines.heming` | 必填；`d.<特性>.<破坏性>.<修订>.<构建>`（缺段按 0 补，容忍 `-dev.N`）。**只支持最小版本**（`actual >= required`），不支持 semver range |
+| `meta.icon` | https URL 或 `data:image/(png|jpeg|webp|svg+xml);base64`；**安装记录只留轻字段**，大图不进 localStorage |
+| `meta.category` / `meta.tags` | 引用目录声明；未知值只告警不拒绝 |
+| `meta.detail` | 内联 ≤16KB，或包内相对 `.md` 路径（禁绝对路径/`..`） |
+| 未知字段 | **顶层剥掉 + 警告**；`engines`/`permissions`/`meta`/每个贡献条目**strict，未知键=不装**（防权限写错位置被静默忽略） |
+| 命名 | `heming` / `heming.*` / `heming-*` 保留；声明式包使用即拒绝，bundle 必须首方签名 |
+
+v5 的权威校验器在 `packages/shared/src/plugin/manifest.ts`（web 安装预览、服务端索引、CLI 三处共用）。
+本地校验：
+
+```bash
+node scripts/plugin-lint.mjs plugins/acme-report/plugin.json   # 中文报错 + 字段路径
+node scripts/plugin-lint.mjs --dir plugins                     # 批量
+node scripts/plugin-schema.mjs --check                         # 校验 docs/plugin.schema.json 是否最新（CI）
+```
+
+### 11.2 安装事务：要么全成、要么全不成
+
+安装/更新/回滚统一走 **`prepare → persist → rollback`**（学 Dify 的 `PreparePackage → PersistPackage → RollbackPackage`）：
+
+1. **prepare**：解析校验、冲突检查、`engines` 判定、权限扩张检测、**写入体积预估**（超阈值直接拒绝并给「先清理什么」，不进入写阶段）；
+2. **persist**：按计划写技能池 / MCP 注册表 / 插件记录（先依赖方后被依赖方）；
+3. **rollback**：任一步失败 → 恢复受影响键的快照 + **重载三个内存单例**（技能池 / MCP 注册表 / 插件 store），并如实报告 `rollback.ok=false`（配额/隐私模式下恢复也可能失败，不谎报成功）。
+
+结果语义：
+
+| 字段 | 含义 |
+|---|---|
+| `changed` | 存储是否真的变了（幂等 apply 为 false） |
+| `applied` | 是否生效（`applied` / `failed`） |
+| `warnings` | 非阻断问题（未知顶层字段、未标注兼容性…） |
+| `diagnostics` | 为什么没生效（停用/依赖缺失/超权限未注入/不兼容/半装风险） |
+
+### 11.3 更新、权限扩张与回滚
+
+- **权限扩张必须重新确认**：更新若新增 `permissions.network` 主机、把 `tools` 从 `read` 放宽到 `write`、或新增贡献类别 → 预览进入「重新确认」；拒绝则保留旧版（不允许静默提权）。
+- **防降级**：记录每个插件 `highestVersion`；安装更旧版本需显式「降级安装」确认（防被诱导装回有漏洞的旧版）。
+- **回滚到上一版**：更新时保留 `previous` 清单（单插件 ≤128KB、全量 ≤512KB，超限如实标注「未保留上一版」），详情页可一键回滚；回滚不联网、只用本机清单。
+- **不兼容不静默失效**：应用升级后已装插件若不满足 `engines`，进入「不兼容」状态并禁用其贡献，详情页写明「需要和鸣 d.X / 当前 d.Y」。
+
+### 11.4 兼容矩阵
+
+| 清单 | 旧版和鸣 | 新版和鸣 |
+|---|---|---|
+| v1 / v2 / v3 | 可装 | 可装（归一化到 v5 视图，`engines` 视为 `d.0`） |
+| v4（界面插件） | 可装（**不验签**，已知缺口） | 可装，**必须首方签名** |
+| v5 | 拒绝（schemaVersion 不认识） | 可装，按 `engines.heming` 判定 |
 

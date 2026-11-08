@@ -236,6 +236,20 @@ export class McpRegistry {
     if (this.serverList.length === 0) this.seedDefaults();
   }
 
+  /**
+   * 重新读本机存储并重建内存态（安装事务回滚后必须调）。
+   *
+   * 照 `refreshAfterHydrate` 的读法重建三份内存数据，但**不**做启动时序判断、
+   * 也**不**重放预置（`seedDefaults`）——回滚场景要的是「存储是什么，内存就是什么」，
+   * 顺带写盘会把刚恢复的快照又改掉。`serversMutated` 一并复位。
+   */
+  reload(): void {
+    this.serverList = this.readServers();
+    this.toolMap = this.readTools();
+    this.enabled = this.readEnabled();
+    this.serversMutated = false;
+  }
+
   private readRemovedPresets(): Set<string> {
     const raw = this.storage.getItem(MCP_REMOVED_PRESETS_KEY);
     if (!raw) return new Set();

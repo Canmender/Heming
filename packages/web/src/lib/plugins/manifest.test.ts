@@ -438,10 +438,12 @@ describe("parsePluginManifest · 通用校验（v1/v2/v3 共用）", () => {
     ).toContain("技能必须是 JSON 对象");
   });
 
-  it("schemaVersion 只接受 1 / 2 / 3 / 4；5 及以上明确拒绝", () => {
-    // d.94：v4 是当前契约（界面插件）；更旧的 1/2/3 语义不变。
-    expect(failure(meta({ schemaVersion: 5 }))).toContain("仅支持 schemaVersion: 1 / 2 / 3 / 4");
-    expect(failure(meta({ schemaVersion: 0 }))).toContain("仅支持 schemaVersion: 1 / 2 / 3 / 4");
+  it("schemaVersion 5 交给 shared v5 解析器；6 及以上明确拒绝", () => {
+    // d.105：v5 成为当前契约（解析器在 @heming/shared），不再按「版本号不认识」拒绝；
+    // 这里只钉住边界：5 走 v5 规则（报的是缺 engines/contributions），6 才报版本不支持。
+    expect(failure(meta({ schemaVersion: 5 }))).not.toContain("仅支持 schemaVersion");
+    expect(failure(meta({ schemaVersion: 6 }))).toContain("仅支持 schemaVersion: 1 / 2 / 3 / 4 / 5");
+    expect(failure(meta({ schemaVersion: 0 }))).toContain("仅支持 schemaVersion: 1 / 2 / 3 / 4 / 5");
     expect(failure({ ...meta(), schemaVersion: undefined })).toContain("schemaVersion");
   });
 

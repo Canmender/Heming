@@ -1,7 +1,9 @@
 import { create } from "zustand";
+import { resolveUnit } from "@heming/shared";
 import { createDefaultStorage, readJson, writeJson } from "../memory/storage.js";
 import type { StorageLike } from "../memory/types.js";
-import { MODULE_IDS, type ModuleId, type BuiltinModule, MODULE_BY_ID } from "./registry.js";
+import { projectBuiltinUnits } from "../units/projection.js";
+import { MODULE_IDS, type ModuleId, MODULE_BY_ID } from "./registry.js";
 
 /**
  * 内置能力模块的启用状态（本机）。
@@ -77,8 +79,13 @@ function persist(state: ModuleState): void {
 /**
  * 模块是否**实际生效**：自身启用，且依赖链上的模块都启用了。
  *
- * 递归带 seen 防环（当前注册表无环；新增模块时若误配成环，这里返回 false 而不是栈溢出，
- * 由依赖说明兜底提示，不让整个导航因为一条坏配置崩掉）。
+ * d.105 起委托给统一能力单元投影（`lib/units/projection.ts` + shared `resolveUnit`）：
+ * - 模块被投影成 `source: "builtin"` 的 `CapabilityUnit`，`requires` 即模块依赖；
+ * - 生效口径（总开关 × 依赖 × 贡献）与插件/系统/界面插件同源，不再各写一套；
+ * - 本函数保留为**薄封装**，签名与行为不变（含成环时返回 false），调用方无需改。
+ *
+ * 递归带 seen 防环；新增模块时若误配成环，`resolveUnit` 返回 `degraded` 且非生效，
+ * 不会栈溢出，也不会让整个导航因为一条坏配置崩掉。
  */
 export function isModuleEffective(
   state: ModuleState,
@@ -86,13 +93,13 @@ export function isModuleEffective(
   seen: ReadonlySet<ModuleId> = new Set(),
 ): boolean {
   if (!state.enabled[id]) return false;
+  if (!MODULE_BY_ID[id]) return false;
   if (seen.has(id)) return false;
-  const mod: BuiltinModule | undefined = MODULE_BY_ID[id];
-  const requires = mod?.requires ?? [];
-  if (requires.length === 0) return true;
-  const next = new Set(seen);
-  next.add(id);
-  return requires.every((dep) => isModuleEffective(state, dep, next));
+  const units = projectBuiltinUnits(state.enabled);
+  const byId = new Map(units.map((unit) => [unit.id, unit] as const));
+  const unit = byId.get(id);
+  if (!unit) return false;
+  return resolveUnit(unit, byId, new Set<string>(seen)).effective;
 }
 
 /** 当前实际生效的模块（按注册表顺序）。 */

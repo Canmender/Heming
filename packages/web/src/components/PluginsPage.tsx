@@ -41,13 +41,20 @@ import { InterfacesView } from "./InterfacesPage.js";
 import {
   describeBlockedTools,
   describeCapabilityStats,
-  filterPlugins,
   groupCatalogTools,
   groupToolPacks,
   installResultMessage,
-  type PluginStatusFilter,
 } from "./plugins/viewModel.js";
 import { BTN_GHOST, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
+import { BUILTIN_MODULES } from "../lib/modules/registry.js";
+import { useModuleStore } from "../lib/modules/store.js";
+import { refreshWidgets, useWidgetsStore } from "../lib/widgets/store.js";
+import {
+  buildUnitStatuses,
+  refreshUnits,
+} from "../lib/units/registry.js";
+import { UnitListView } from "./plugins/UnitListView.js";
+import { UnitDiagnostics } from "./plugins/UnitDiagnostics.js";
 
 /**
  * 插件区 · 统一能力中枢（d.64 · T2；d.67 导航合并）。
@@ -74,13 +81,6 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "skills", label: "技能" },
   { key: "tools", label: "工具" },
   { key: "mcp", label: "MCP 服务" },
-];
-
-/** 插件列表的状态筛选（d.77）：三档，默认「全部」。 */
-const STATUS_FILTERS: { key: PluginStatusFilter; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "enabled", label: "已启用" },
-  { key: "disabled", label: "已停用" },
 ];
 
 /**
@@ -148,9 +148,6 @@ export function PluginsPage({
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<InstalledPlugin | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  /** 插件列表筛选（d.77）：装到几十个后，按名字/技能/服务找得到；状态可只看已停用。 */
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<PluginStatusFilter>("all");
 
   /**
    * 一次性视图意图（d.67）：旧「技能区 / 接口区」链接、命令面板与桌宠气泡
@@ -187,20 +184,25 @@ export function PluginsPage({
     return () => window.clearTimeout(timer);
   }, [highlightPluginId]);
 
-  const bump = () => setTick((n) => n + 1);
+  /**
+   * d.105：界面插件列表由主进程持有，进入插件区时拉一次，保证「已安装」统一列表
+   * 能列出 bundle 来源。浏览器没有 `__heming_widgets` 桥时 refreshWidgets 是 no-op。
+   */
+  useEffect(() => {
+    void refreshWidgets();
+  }, []);
+
+  /**
+   * 安装/启停/卸载后：本页重算 + 统一单元投影失效（pluginStore 没有订阅 API，
+   * d.105 的投影快照需要显式刷新，否则「诊断/源徽标」会落后一拍）。
+   */
+  const bump = () => {
+    setTick((n) => n + 1);
+    refreshUnits();
+  };
 
   // 数据快照：tick 是「安装/启停后重算」的统一信号；catalog 传入时优先用注入值。
   const list = useMemo(() => plugins.list(), [plugins, tick]);
-  /** 过滤后的已装插件（系统能力卡不在其中，它是应用内置的只读条目）。 */
-  const visiblePlugins = useMemo(
-    () => filterPlugins(list, { query, status: statusFilter }),
-    [list, query, statusFilter],
-  );
-  const filterActive = query.trim().length > 0 || statusFilter !== "all";
-  const clearFilters = () => {
-    setQuery("");
-    setStatusFilter("all");
-  };
   const capabilityCatalog = useMemo(
     () => catalog ?? describeCapabilityCatalog({ plugins, mcp }),
     [catalog, plugins, mcp, tick],
@@ -210,6 +212,27 @@ export function PluginsPage({
     [capabilitiesProp, skills, mcp, plugins, tick],
   );
   const system = capabilities.system;
+
+  /**
+   * d.105 统一能力单元：系统 / 内置模块 / 声明式插件 / 界面插件。
+   *
+   * 数据源全部来自本页实际使用的 store（注入 props 优先），所以测试夹具与宿主一致的；
+   * 模块/界面插件用 zustand selector 订阅，任一变化都会触发下面的投影重算。
+   */
+  const moduleEnabled = useModuleStore((s) => s.enabled);
+  const widgetsRecords = useWidgetsStore((s) => s.records);
+  const unitStatuses = useMemo(
+    () =>
+      buildUnitStatuses({
+        system,
+        modules: BUILTIN_MODULES,
+        moduleEnabled,
+        plugins: list,
+        widgets: widgetsRecords,
+      }),
+    [system, moduleEnabled, list, widgetsRecords],
+  );
+
   const stats = useMemo(
     () => describeCapabilityStats({ plugins, capabilities }),
     [plugins, capabilities, tick],
@@ -410,7 +433,7 @@ export function PluginsPage({
               : tab === "widgets"
                 ? "界面插件 · 含可执行代码，装后由宿主开独立窗口"
                 : tab === "modules"
-                  ? "内置模块 · 停用只收起入口与后台任务，不删除本机数据"
+                  ? "内置模块 · 已并入「插件」Tab 的已安装统一列表（本 Tab 下版移除）· 停用只收起入口与后台任务，不删除本机数据"
                   : ""}
         </span>
       </div>
@@ -435,42 +458,34 @@ export function PluginsPage({
 
         {tab === "plugins" && (
           <>
-            {/* 列表筛选（d.77）：装到几十个后按名字/技能/服务找，状态可只看已停用。 */}
-            {list.length > 0 && (
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <input
-                  aria-label="搜索插件"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="按名称、id、作者、技能或服务搜索"
-                  className="ui-input min-w-[200px] max-w-[320px] flex-1"
-                />
-                <div role="group" aria-label="插件状态筛选" className="flex items-center gap-1">
-                  {STATUS_FILTERS.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      aria-pressed={statusFilter === item.key}
-                      onClick={() => setStatusFilter(item.key)}
-                      className={`ui-btn ui-btn-sm ${
-                        statusFilter === item.key ? "ui-btn-primary" : "ui-btn-ghost text-muted"
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-                <span className="ui-caption">
-                  {filterActive
-                    ? `匹配 ${visiblePlugins.length} / 共 ${list.length} 个`
-                    : `共 ${list.length} 个插件`}
-                </span>
-              </div>
-            )}
-            <SystemPluginCard system={system} />
-            {list.length === 0 ? (
+            {/* d.105：四类来源（系统 / 内置模块 / 声明式插件 / 界面插件）统一读投影。
+                系统卡与插件卡沿用既有组件，详情/启停/卸载入口不变；其余来源用默认行。 */}
+            <UnitListView
+              statuses={unitStatuses}
+              renderUnit={(status) => {
+                const unit = status.unit;
+                if (unit.source === "system") return <SystemPluginCard system={system} />;
+                if (unit.source !== "package") return null;
+                const plugin = plugins.get(unit.id);
+                if (!plugin) return null;
+                return (
+                  <PluginCard
+                    plugin={plugin}
+                    highlighted={highlightPluginId === plugin.manifest.id}
+                    onDetail={() => setDetailId(plugin.manifest.id)}
+                    onToggle={(next) => onToggle(plugin, next)}
+                    onRemove={() => setRemoveTarget(plugin)}
+                    onGoSkills={goSkills}
+                    onGoInterfaces={goInterfaces}
+                  />
+                );
+              }}
+            />
+
+            {/* 声明式插件为空时的入口保持原样（统一列表里仍有系统/内置单元，所以不能复用空列表态） */}
+            {list.length === 0 && (
               <section
-                className="flex flex-col items-center gap-2 rounded-xl border border-line bg-white py-10 text-center shadow-card"
+                className="mt-3 flex flex-col items-center gap-2 rounded-xl border border-line bg-white py-10 text-center shadow-card"
                 aria-label="暂无插件"
               >
                 <span className="text-muted" aria-hidden="true">
@@ -493,33 +508,9 @@ export function PluginsPage({
                   </button>
                 </div>
               </section>
-            ) : visiblePlugins.length === 0 ? (
-              <section
-                className="flex flex-col items-center gap-2 rounded-xl border border-line bg-white py-10 text-center shadow-card"
-                aria-label="筛选无结果"
-              >
-                <p className="ui-section-title">没有匹配的插件</p>
-                <p className="ui-caption">换个关键词，或清除筛选看全部。</p>
-                <button type="button" onClick={clearFilters} className="ui-btn ui-btn-md ui-btn-ghost mt-1">
-                  清除筛选
-                </button>
-              </section>
-            ) : (
-              <div className="grid gap-4">
-                {visiblePlugins.map((plugin) => (
-                  <PluginCard
-                    key={plugin.manifest.id}
-                    plugin={plugin}
-                    highlighted={highlightPluginId === plugin.manifest.id}
-                    onDetail={() => setDetailId(plugin.manifest.id)}
-                    onToggle={(next) => onToggle(plugin, next)}
-                    onRemove={() => setRemoveTarget(plugin)}
-                    onGoSkills={goSkills}
-                    onGoInterfaces={goInterfaces}
-                  />
-                ))}
-              </div>
             )}
+
+            <UnitDiagnostics statuses={unitStatuses} />
 
             <p className={`mt-3 max-w-[680px] ${HINT}`}>
               这里安装的插件只声明技能、MCP 服务和命令，不含代码、不带密钥。安装不会运行程序，也不会联网；

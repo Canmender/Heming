@@ -601,7 +601,8 @@ describe("PluginsPage · 插件列表筛选与安装定位（d.77）", () => {
     fireEvent.change(search, { target: { value: "天气" } });
     expect(screen.getByRole("region", { name: "插件 天气能力包" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "插件 财务助手包" })).toBeNull();
-    expect(screen.getByText("匹配 1 / 共 2 个")).toBeInTheDocument();
+    // d.105：列表改为四类来源统一单元，计数口径是「单元」而不是「插件」
+    expect(screen.getByText(/^匹配 1 \/ 共 \d+ 个单元$/)).toBeInTheDocument();
 
     // 搜的是技能名，不只是插件名
     fireEvent.change(search, { target: { value: "现金流" } });
@@ -610,7 +611,7 @@ describe("PluginsPage · 插件列表筛选与安装定位（d.77）", () => {
 
     fireEvent.change(search, { target: { value: "不存在的包" } });
     expect(screen.getByRole("region", { name: "筛选无结果" })).toBeInTheDocument();
-    expect(screen.getByText("没有匹配的插件")).toBeInTheDocument();
+    expect(screen.getByText("没有匹配的能力单元")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
     expect(screen.getByRole("region", { name: "插件 财务助手包" })).toBeInTheDocument();
@@ -644,8 +645,8 @@ describe("PluginsPage · 插件列表筛选与安装定位（d.77）", () => {
     expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
     const card = screen.getByRole("region", { name: "插件 财务助手包" });
     expect(card.className).toContain("ring-2");
-    // 筛选栏出现后总数说清楚（安装前没有插件，不显示筛选栏）
-    expect(screen.getByText("共 1 个插件")).toBeInTheDocument();
+    // 筛选栏出现后总数说清楚（安装前没有插件，不显示筛选栏）；d.105 起含系统/内置单元
+    expect(screen.getByText(/^共 \d+ 个单元$/)).toBeInTheDocument();
   });
 
   it("详情里本包未声明的贡献类别：开关禁用并写明原因", () => {
