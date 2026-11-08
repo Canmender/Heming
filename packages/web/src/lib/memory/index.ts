@@ -16,6 +16,8 @@ export * from "./runRecorder.js";
 export * from "./agentPrefs.js";
 export * from "./kb.js";
 export * from "./review.js";
+export * from "./vaultMemory.js";
+export * from "./memoryWriteBack.js";
 
 import { MemoryStore } from "./store.js";
 

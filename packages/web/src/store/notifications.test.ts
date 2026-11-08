@@ -212,6 +212,20 @@ describe("approval 通知与 removeByKey（d.34）", () => {
     ).toBeNull();
   });
 
+  it("memory 写回失败通知能落盘并读回（d.114，新 kind 不被归一化丢掉）", () => {
+    const id = useNotificationStore.getState().push({
+      kind: "memory",
+      key: "memory-vault-write:explicit:称呼:20261108",
+      title: "知识库写回失败：称呼",
+      body: "知识库当前对智能体只读（记忆条目已保存）",
+    });
+    expect(id).not.toBeNull();
+
+    const again = readNotifications(storage);
+    expect(again).toHaveLength(1);
+    expect(again[0].kind).toBe("memory");
+  });
+
   it("removeByKey 只删指定 key，其它通知不动", () => {
     useNotificationStore.setState({
       items: [

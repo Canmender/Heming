@@ -139,6 +139,7 @@ export function searchAll(keyword: string, members: TeamMember[]): SearchResult[
 
 export type PaletteItemKind =
   | "page"
+  | "vault"
   | "setting"
   | "action"
   | "plugin-command"
@@ -179,6 +180,8 @@ export interface PaletteItem {
   command?: PluginCommandInfo;
   /** page 项的 Alt 快捷键数字（无则 undefined）。 */
   digit?: string;
+  /** vault 项：笔记的库内相对路径（执行时投递 vaultIntent open）。 */
+  vaultRel?: string;
   /** member 项：成员 userId（执行时聚焦用）。 */
   userId?: string;
   /** member 项：头像与用户名。 */
@@ -191,6 +194,7 @@ export interface PaletteItem {
 export type PaletteGroupId =
   | "recent"
   | "page"
+  | "vault"
   | "setting"
   | "action"
   | "plugin-command"
@@ -212,6 +216,7 @@ export interface PaletteGroup {
 export const GROUP_LABELS: Record<PaletteGroupId, string> = {
   recent: "最近使用",
   page: "页面跳转",
+  vault: "知识库笔记",
   setting: "设置",
   action: "常用动作",
   "plugin-command": "插件命令",
@@ -227,6 +232,7 @@ export const GROUP_LABELS: Record<PaletteGroupId, string> = {
 export const GROUP_LIMITS: Record<PaletteGroupId, number> = {
   recent: 5,
   page: 8,
+  vault: 8,
   setting: 5,
   action: 4,
   "plugin-command": 5,
@@ -241,6 +247,7 @@ export const GROUP_LIMITS: Record<PaletteGroupId, number> = {
 /** 检索结果的组顺序（空查询只用前三个：最近 / 页面 / 动作）。 */
 const SEARCH_ORDER: PaletteGroupId[] = [
   "page",
+  "vault",
   "setting",
   "action",
   "plugin-command",
@@ -264,8 +271,7 @@ export function pageItem(p: PalettePage): PaletteItem {
   };
 }
 
-export function settingItem(s: PaletteSettingSection): PaletteItem {
-  return {
+export function settingItem(s: PaletteSettingSection): PaletteItem {  return {
     kind: "setting",
     id: `setting:${s.tab}`,
     name: s.label,
@@ -281,6 +287,30 @@ export function actionItem(a: (typeof PALETTE_ACTIONS)[number]): PaletteItem {
     name: a.label,
     detail: a.description,
     actionId: a.id,
+  };
+}
+
+/**
+ * 知识库笔记的一条面板结果（d.113 第二轮）。
+ *
+ * 数据由调用方（命令面板）用 W2 的 `rankQuickOpen(index, query, limit)` 预先算好传进来：
+ * 纯检索层不 import 索引实现，这样 `lib/palette` 的单测不需要搭 vault 引擎。
+ */
+export interface VaultNoteItem {
+  rel: string;
+  title: string;
+  /** 所属目录（副标题显示；库根为空串）。 */
+  dir: string;
+}
+
+export function vaultItem(note: VaultNoteItem): PaletteItem {
+  return {
+    kind: "vault",
+    id: `vault:${note.rel}`,
+    name: note.title,
+    // 副标题显示所属目录，空目录（库根）给一句人话
+    detail: note.dir ? `知识库 · ${note.dir}` : "知识库 · 库根",
+    vaultRel: note.rel,
   };
 }
 
@@ -431,6 +461,8 @@ export function searchPalette(
     commands?: PluginCommandInfo[];
     /** 可用页面目录（d.70：停用模块页不参与检索）；缺省为完整目录。 */
     pages?: readonly PalettePage[];
+    /** 知识库笔记命中（命令面板用 `rankQuickOpen` 预排序后传入）。 */
+    vaultNotes?: readonly VaultNoteItem[];
   },
 ): PaletteGroup[] {
   const q = keyword.trim().toLowerCase();
@@ -447,6 +479,10 @@ export function searchPalette(
       q,
     ),
   );
+  // 知识库笔记：排序/过滤由调用方的 rankQuickOpen 完成，这里只做形状转换，
+  // 避免把「哪个笔记最相关」的口径复制成两份。
+  const vaultNotes = [...(ctx.vaultNotes ?? [])];
+  found.set("vault", vaultNotes.map(vaultItem));
   found.set(
     "setting",
     rank(
@@ -499,6 +535,7 @@ export function searchPalette(
   const groups: PaletteGroup[] = [];
   const totals: Partial<Record<PaletteGroupId, number>> = {
     page: pageCatalog.filter((p) => matches(q, p.label, p.description)).length,
+    vault: vaultNotes.length,
     setting: PALETTE_SETTINGS.filter((s) => matches(q, s.label, s.description, s.keywords)).length,
     action: PALETTE_ACTIONS.filter((a) => matches(q, a.label, a.description, a.keywords)).length,
     "plugin-command": commandRes.total,

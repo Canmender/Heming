@@ -16,6 +16,7 @@ import type { SkillPool } from "../skills/store.js";
 import type { MemoryStore } from "./store.js";
 import { resolveAgentMemoryPrefs } from "./agentPrefs.js";
 import { containsSensitive } from "../selfEdit/guards.js";
+import { enqueueMemoryWrite } from "./memoryWriteBack.js";
 
 /** 复盘频率（对应 Hermes 的 `memory.nudge_frequency`）。 */
 export type ReviewFrequency = "always" | "after_complex_tasks" | "never";
@@ -352,6 +353,8 @@ export async function runReview(
         source: "review",
         confidence: cand.confidence,
       });
+      // 复盘沉淀写回知识库（d.114）：入队 + 异步落盘；失败上报但不影响记忆保存。
+      enqueueMemoryWrite({ kind: "review", key: cand.key, value: cand.value, agentId: input.agentId });
       chars += exists ? 0 : cost;
       report.memoryWritten += 1;
     }

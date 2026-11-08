@@ -20,6 +20,7 @@
 | [WEB-SCRAPING.md](WEB-SCRAPING.md) | 网页抓取：Scrapling 16 个工具的三层启用策略 |
 | [SELF-EDIT.md](SELF-EDIT.md) | 自我修改：`self_*` 工具、护栏、审计、快照回滚与开关 |
 | [PET.md](PET.md) | 桌宠（**d.98 起为界面插件 `heming.pet`**）：怎么装/用/卸、插件包结构、宿主运行时与三种边界、数据边界与老数据迁移、扩展指南（换形象/加姿态/加设置项）、已知限制与排查 |
+| [KNOWLEDGE.md](KNOWLEDGE.md) | 知识库（**d.114 起为原生 vault**）：多库/任意目录、与 Obsidian 共用同一份 md、双链与反链/标签/搜索语法、编辑器三态、与智能体记忆双向绑定（笔记进召回、沉淀写回 `inbox/`）、写入边界与安全限制、排查表 |
 | [PLUGINS.md](PLUGINS.md) | 插件（能力包）：清单 v3 字段表、权限声明（网络/工具风险上限/文件根）、命令 target、安装/更新/停用/卸载语义、v1/v2 兼容与红线；**§10 界面插件（v4 bundle）**；**§11 清单 v5（d.107）**：`engines` 版本兼容、上架元数据、`prepare→persist→rollback` 安装事务、权限扩张重确认、防降级、兼容矩阵 |
 | [PLUGIN-AUTHORING.md](PLUGIN-AUTHORING.md) | 插件作者指南（v5）：五分钟写出第一个插件、五个字段决定能不能装、贡献点准入、权限声明、分层严格度、发布/市场/弃用、调试三招、兼容速查 |
 | [SKILL-HUB.md](SKILL-HUB.md) | 技能社区（d.109）：接入国内技能平台「虾评」的契约与边界——为什么走服务端代理（CORS/归一化/解包上限）、5 条接口与上游字段映射、6 步安装流程与安全上限、Key 管理（安全存储/不持久化）、信任合规、失败降级、配置开关与接第二个源的做法 |
@@ -144,6 +145,7 @@
 | [specs/2026-11-08-d104-model-page-three-tabs.md](superpowers/specs/2026-11-08-d104-model-page-three-tabs.md) | **d.104 模型页三分区与动效**：融合成模型/来源/运行；分段控件、行卡片、骨架屏、空态示意；实时链路改为三列卡片 + 0.7s 虚线流动/1.8s 呼吸点/300ms 入场，尊重减少动效 |
 | [specs/2026-11-08-d103-model-page-refactor.md](superpowers/specs/2026-11-08-d103-model-page-refactor.md) | **d.103 模型页重构**：设置区去掉模型页签；模型页改为「模型/添加来源/账号/路由/更多」五分区，卡片式加来源、只填 Key/点一下登录；去掉服务启停、地址端口与第三方品牌；其余能力收进折叠区 |
 | [specs/2026-11-08-plugin-system-upgrade.md](superpowers/specs/2026-11-08-plugin-system-upgrade.md) | **插件体系升级（预计 d.104）**：对标 deepseek-harness 后定的契约——v5 清单（`engines` 版本兼容 + `meta` 上架元数据）、统一能力单元/贡献点注册表（撤销即停用/卸载）、安装事务与回滚、云端目录 v2 索引（分类/标签/版本/详情）、首方 bundle 签名；分 A/B/C/D 四阶段与测试计划 |
+| [specs/2026-11-08-d114-native-knowledge-vault.md](superpowers/specs/2026-11-08-d114-native-knowledge-vault.md) | **原生知识库（d.114）**：多库 vault 与路径安全模型（主进程注册根 + 每次重夹 + realpath + 双通道写）、双链解析口径（文件名优先/歧义/代码块排除）、索引与反链/标签/搜索语法/图谱、与记忆双向绑定（指针型条目、同步注入、沉淀写回 `inbox/`）、分两轮实施范围与测试计划 |
 | [specs/2026-11-08-d102-trace-filters.md](superpowers/specs/2026-11-08-d102-trace-filters.md) | **d.102 实时链路优化**：顶部统计（总数/进行中/成功/失败/平均耗时/token）、状态筛选、点击客户端或账号节点即筛选、最后读取时间、尊重减弱动效、筛选后空状态 |
 | [specs/2026-11-08-d101-live-trace-view.md](superpowers/specs/2026-11-08-d101-live-trace-view.md) | **d.101 模型页「实时链路」**：读内核 `/v1/magpie/trace`，画客户端→内核→账号的节点图；蓝流动=进行中、绿=成功、琥珀=换人，点击看尝试详情；纯函数建图 + SVG 视图 + 轮询暂停 |
 | [specs/2026-11-08-d100-model-page.md](superpowers/specs/2026-11-08-d100-model-page.md) | **d.100 导航「模型」页**：把 magpie 管理面（供应商/订阅账号/分组路由/模型/用量/备份同步/库与搜索/终端）做成一等页面；页面经主进程白名单命令桥调用自家内核（无 shell、流式、真终端登录）；含页面/桥/导航测试 |

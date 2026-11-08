@@ -63,8 +63,9 @@ describe("命令面板 v2 · 空查询分组", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(screen.getByText("页面跳转")).toBeInTheDocument();
     expect(screen.getByText("常用动作")).toBeInTheDocument();
-    // 11 个页面 + 5 个动作（d.67 合并后导航只剩宿主页；d.84 模型路由，d.100 模型页）
-    expect(screen.getAllByRole("option")).toHaveLength(16);
+    // 12 个页面 + 9 个动作（d.67 合并后导航只剩宿主页；d.84 模型路由，d.100 模型页，
+    // d.114 知识库：新增 4 个知识库动作）
+    expect(screen.getAllByRole("option")).toHaveLength(21);
     // 没有最近使用时不出现该组标题
     expect(screen.queryByText("最近使用")).not.toBeInTheDocument();
   });
@@ -487,5 +488,78 @@ describe("命令面板 · 焦点可见性", () => {
     // 面板的环只在 :focus-visible（键盘）时出现：鼠标打开面板不会常驻一圈黑框
     expect(panel.className).toContain("has-[:focus-visible]:outline-2");
     expect(panel.className).toContain("has-[:focus-visible]:outline-ink");
+  });
+});
+
+describe("命令面板 · 知识库（d.114）", () => {
+  beforeEach(() => {
+    resetStores();
+    useUiStore.setState({ vaultIntent: null });
+    vi.mocked(fetchTeam).mockReset();
+    vi.mocked(fetchTeam).mockResolvedValue({ members: [], onlineCount: 0 });
+    useInfohubStore.setState({ available: false, running: false, booted: true, error: "" });
+  });
+  afterEach(async () => {
+    cleanup();
+    const { useVaultStore } = await import("../lib/vault/store.js");
+    useVaultStore.setState({ index: null });
+    useUiStore.setState({ vaultIntent: null });
+  });
+
+  it("四个知识库动作：切到知识库页并投递对应 vaultIntent", async () => {
+    const cases: { query: string; label: string; kind: string }[] = [
+      { query: "新建笔记", label: "新建笔记", kind: "new" },
+      { query: "打开今天的日记", label: "打开今天的日记", kind: "daily" },
+      { query: "新建画布", label: "新建画布", kind: "canvas" },
+      { query: "知识库设置", label: "知识库设置", kind: "settings" },
+    ];
+    for (const item of cases) {
+      const view = render(<CommandPalette onClose={vi.fn()} />);
+      fireEvent.change(searchBox(), { target: { value: item.query } });
+      fireEvent.click(await screen.findByRole("option", { name: `选择 ${item.label}` }));
+      expect(useUiStore.getState().page).toBe("vault");
+      expect(useUiStore.getState().vaultIntent?.kind).toBe(item.kind);
+      view.unmount();
+      useUiStore.setState({ page: "home", vaultIntent: null });
+    }
+  });
+
+  it("知识库索引就绪时出「知识库笔记」组，点选投递 open 意图", async () => {
+    const { useVaultStore } = await import("../lib/vault/store.js");
+    const index = {
+      pages: new Map([
+        [
+          "notes/会议记录.md",
+          {
+            rel: "notes/会议记录.md",
+            title: "会议记录",
+            aliases: [],
+            tags: [],
+            headings: [],
+            mtime: "2026-11-08T08:00:00.000Z",
+            hash: "h",
+            frontmatter: {},
+            body: "",
+          },
+        ],
+      ]),
+      links: [],
+      backlinks: new Map(),
+      unresolved: [],
+      tags: new Map(),
+      orphans: [],
+      ambiguous: new Map(),
+    } as never;
+    useVaultStore.setState({ index });
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "会议" } });
+    const group = await screen.findByRole("group", { name: "知识库笔记" });
+    expect(group).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "选择 会议记录" }));
+    expect(useUiStore.getState().page).toBe("vault");
+    expect(useUiStore.getState().vaultIntent).toMatchObject({
+      kind: "open",
+      rel: "notes/会议记录.md",
+    });
   });
 });

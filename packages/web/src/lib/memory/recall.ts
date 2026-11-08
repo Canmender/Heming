@@ -19,6 +19,8 @@ import { NEUTRAL_USAGE } from "./usage.js";
 
 /** 语义层非 pinned 条目的召回上限。 */
 export const SEMANTIC_TOP = 5;
+/** 知识库条目在语义段里最多占几条（再多会把真正的长期记忆挤出预算）。 */
+export const VAULT_RECALL_TOP = 2;
 /** 情景层召回上限。 */
 export const EPISODIC_TOP = 3;
 /** 工作层召回轮数。 */
@@ -276,8 +278,99 @@ function rankEpisodic(
 }
 
 /**
+ * 知识库条目参与召回的选项（d.114）。
+ *
+ * 缺省从记忆仓库读指针条目与设置；`enabled/available/entries` 三个口子给集成侧覆盖：
+ * - `enabled` 的**唯一真源**仍是 `MemorySettings.vaultMemory`（这里只是允许显式传同一值）；
+ * - `available` 由集成侧告知「知识库源是否接入」，未接入时整体跳过但**可观测**；
+ * - `entries` 允许传一份快照（例如知识库页刚同步完、内存仓库还没刷新时）。
+ */
+export interface VaultRecallOptions {
+  enabled?: boolean;
+  available?: boolean;
+  entries?: SemanticEntry[];
+}
+
+/** 知识库层这次参与没参与、为什么没参与（可观测性，不静默变空）。 */
+export interface VaultRecallInfo {
+  /** 设置开关是否为开。 */
+  enabled: boolean;
+  /** 知识库源是否接入。 */
+  available: boolean;
+  /** 整体跳过的原因：设置关闭 / 源未接入 / 没有纳入任何笔记 / 读取异常；null = 正常参与。 */
+  skippedReason: "disabled" | "unavailable" | "empty" | "error" | null;
+  /** 记忆仓库里的知识库条目总数（候选池）。 */
+  candidates: number;
+  /** 这次真正进入召回候选的条数（≤ `VAULT_RECALL_TOP`）。 */
+  picked: number;
+}
+
+/**
+ * 知识库层排序：语义层同一套分数口径（重合度 × 90 天衰减 × 置信度 × 个性化），
+ * 外加**稳定 tie-break**（分数相同时按 rel 字典序）——同一份输入两次召回顺序一致。
+ *
+ * 它不参与「同主题键时效覆盖」：知识库条目的 key 是 rel，本来就不会和长期记忆撞键。
+ */
+function rankVault(
+  entries: SemanticEntry[],
+  queryTokens: string[],
+  nowMs: number,
+  usage: UsageView,
+): { picked: SemanticEntry[]; scores: Record<string, number>; boosts: Record<string, number> } {
+  const scores: Record<string, number> = {};
+  const boosts: Record<string, number> = {};
+  if (!entries.length) return { picked: [], scores, boosts };
+  const boostOf = (id: string) => usage.boostOf(id);
+  const decayed = (entry: SemanticEntry) =>
+    recencyScore(entry.updatedAt, nowMs, SEMANTIC_HALF_LIFE_DAYS) * (CONFIDENCE_FLOOR + entry.confidence);
+  const tieBreak = (a: { score: number; entry: SemanticEntry }, b: { score: number; entry: SemanticEntry }) =>
+    b.score - a.score || (a.entry.key < b.entry.key ? -1 : a.entry.key > b.entry.key ? 1 : 0);
+
+  if (!queryTokens.length) {
+    const scored = entries.map((entry) => ({ entry, score: decayed(entry) * boostOf(entry.id) })).sort(tieBreak);
+    const picked = scored.slice(0, VAULT_RECALL_TOP).map((item) => item.entry);
+    for (const item of scored.slice(0, VAULT_RECALL_TOP)) {
+      scores[item.entry.id] = roundScore(item.score);
+      if (boostOf(item.entry.id) > 1) boosts[item.entry.id] = boostOf(item.entry.id);
+    }
+    return { picked, scores, boosts };
+  }
+
+  const querySet = new Set(queryTokens);
+  const scored = entries
+    .map((entry) => {
+      const tokens = new Set(tokenize(`${entry.key} ${entry.value}`));
+      let hits = 0;
+      for (const token of querySet) if (tokens.has(token)) hits += 1;
+      return { entry, tokens, base: (hits / querySet.size) * decayed(entry) };
+    })
+    .filter((item) => item.base > 0)
+    .map((item) => ({ ...item, score: item.base * boostOf(item.entry.id) }))
+    .sort(tieBreak);
+  const chosen = pickDiverse(scored, VAULT_RECALL_TOP);
+  const picked = scored.filter((item) => chosen.has(item.entry.id)).map((item) => item.entry);
+  for (const item of scored) {
+    if (!chosen.has(item.entry.id)) continue;
+    scores[item.entry.id] = roundScore(item.base * boostOf(item.entry.id));
+    if (boostOf(item.entry.id) > 1) boosts[item.entry.id] = boostOf(item.entry.id);
+  }
+  return { picked, scores, boosts };
+}
+
+/** 读知识库条目；异常按「没有知识库」处理，绝不让它挡住记忆召回。 */
+function readVaultEntries(store: MemoryStore, options?: VaultRecallOptions): SemanticEntry[] {
+  if (options?.entries) return options.entries.filter((entry) => entry.source === "vault");
+  try {
+    return store.vaultEntries();
+  } catch {
+    return [];
+  }
+}
+
+/**
  * 三层召回入口：语义（同键时效覆盖 → pinned + top5）／情景（top3，多样性重排）／
- * 工作（最近 6 轮，按时间先后）。
+ * 工作（最近 6 轮，按时间先后）；知识库指针条目在语义段末尾参与（≤ `VAULT_RECALL_TOP` 条）。
+ *
  * 记忆总开关关闭、或任何异常 → 三层皆空（调用侧据此零注入）。
  *
  * `scores` / `superseded` 是给「召回可观测性」用的旁路信息（d.27）：
@@ -287,11 +380,15 @@ function rankEpisodic(
  * `usage`（d.28）是个性化加权视图：只改「同命中度之间谁排前面」和分数，
  * 不改取什么、不改预算，也不省略任何一层。缺省为 `NEUTRAL_USAGE`（全 ×1），
  * 此时 `scores` 与 d.27 逐字一致、`boosts` 为空表。
+ *
+ * `vaultOptions`（d.114）与前三参解耦：不传且仓库里没有知识库条目时，返回值形状
+ * 与 d.112 逐字相同（下方 `vault` 字段只在「有知识库条目或调用方显式传入」时出现）。
  */
 export function recallMemory(
   store: MemoryStore,
   input: { agentId: string; conversationId: string; query: string },
   usage: UsageView = NEUTRAL_USAGE,
+  vaultOptions?: VaultRecallOptions,
 ): {
   semantic: SemanticEntry[];
   episodic: EpisodicEntry[];
@@ -299,25 +396,58 @@ export function recallMemory(
   scores: Record<string, number>;
   boosts: Record<string, number>;
   superseded: SupersededInfo[];
+  /** 知识库层参与情况；没有知识库条目且未显式传入选项时缺省（老调用方形状不变）。 */
+  vault?: VaultRecallInfo;
 } {
   // 两条早退各回一份新表：共用一个对象会让调用方改一次影响下一次。
+  const empty = () => ({ semantic: [], episodic: [], working: [], scores: {}, boosts: {}, superseded: [] });
   try {
-    if (!store.getSettings().enabled) {
-      return { semantic: [], episodic: [], working: [], scores: {}, boosts: {}, superseded: [] };
-    }
+    const settings = store.getSettings();
+    if (!settings.enabled) return empty();
     const nowMs = store.nowMs();
     const queryTokens = tokenize(input.query ?? "");
-    const semantic = rankSemantic(store.semantic(input.agentId), queryTokens, nowMs, usage);
+    // 知识库指针条目单独排序：它们不参与「同主题键时效覆盖」，也不占普通语义记忆名额。
+    const allSemantic = store.semantic(input.agentId);
+    const semantic = rankSemantic(
+      allSemantic.filter((entry) => entry.source !== "vault"),
+      queryTokens,
+      nowMs,
+      usage,
+    );
     const episodic = rankEpisodic(store.episodic(input.agentId), queryTokens, nowMs, usage);
+
+    const vaultAll = readVaultEntries(store, vaultOptions);
+    const vaultEnabled = vaultOptions?.enabled ?? settings.vaultMemory !== false;
+    const vaultAvailable = vaultOptions?.available ?? true;
+    let skippedReason: VaultRecallInfo["skippedReason"] = null;
+    if (!vaultEnabled) skippedReason = "disabled";
+    else if (!vaultAvailable) skippedReason = "unavailable";
+    else if (!vaultAll.length) skippedReason = "empty";
+    const rankedVault = skippedReason
+      ? { picked: [] as SemanticEntry[], scores: {} as Record<string, number>, boosts: {} as Record<string, number> }
+      : rankVault(vaultAll, queryTokens, nowMs, usage);
+
+    const includeVaultInfo = vaultOptions !== undefined || vaultAll.length > 0;
     return {
-      semantic: semantic.picked,
+      semantic: [...semantic.picked, ...rankedVault.picked],
       episodic: episodic.picked,
       working: store.working(input.conversationId, input.agentId).slice(-WORKING_TOP),
-      scores: { ...semantic.scores, ...episodic.scores },
-      boosts: { ...semantic.boosts, ...episodic.boosts },
+      scores: { ...semantic.scores, ...episodic.scores, ...rankedVault.scores },
+      boosts: { ...semantic.boosts, ...episodic.boosts, ...rankedVault.boosts },
       superseded: semantic.superseded,
+      ...(includeVaultInfo
+        ? {
+            vault: {
+              enabled: vaultEnabled,
+              available: vaultAvailable,
+              skippedReason,
+              candidates: vaultAll.length,
+              picked: rankedVault.picked.length,
+            } satisfies VaultRecallInfo,
+          }
+        : {}),
     };
   } catch {
-    return { semantic: [], episodic: [], working: [], scores: {}, boosts: {}, superseded: [] };
+    return empty();
   }
 }

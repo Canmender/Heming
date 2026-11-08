@@ -19,6 +19,9 @@ import {
 } from "./storage.js";
 import { tokenize } from "./tokenize.js";
 import { SUMMARY_MAX, deterministicSummary, extractExplicitMemory, normalizeKey } from "./extract.js";
+import type { VaultMemoryPointer } from "../vault/types.js";
+import { VAULT_MEMORY_MAX } from "../vault/types.js";
+import { enqueueMemoryWrite } from "./memoryWriteBack.js";
 
 /**
  * 三层记忆核心库（设计 §2/§3/§8）：三层各自独立存储、独立淘汰，全部写本机
@@ -41,10 +44,42 @@ export const EXPLICIT_CONFIDENCE = 0.9;
 /** 导出格式版本。 */
 export const EXPORT_VERSION = 1;
 
+/**
+ * 知识库指针条目的写入入参（d.114）。
+ * 记忆层不 import `lib/vault/store`：由集成侧把 vault store 适配成 `VaultDocSource`，
+ * 同步逻辑（vaultMemory.ts）负责产出这些入参，store 只负责落库。
+ */
+export interface VaultEntryInput {
+  /** 库内相对路径，同时作为 `key`（≥ 24 字也原样保留，不归一化）。 */
+  rel: string;
+  vaultId: string;
+  /** 文件 mtime（ISO）：`updatedAt` 直接吃它，同步结果因此与机器时钟无关。 */
+  mtime: string;
+  /** 内容 hash：与 mtime 一起决定「跳过还是更新」。 */
+  hash: string;
+  /** 摘要（≤ 500 字）。 */
+  value: string;
+  /** 归属智能体，缺省 `GLOBAL_AGENT_ID`（知识库是所有智能体共用的）。 */
+  agentId?: string;
+}
+
+/** 知识库条目批量写入结果：**配额失败如实返回失败**，不静默吞掉。 */
+export interface VaultUpsertResult {
+  ok: boolean;
+  /** 真正落库的条数。 */
+  written: number;
+  /** 落库时被本机配额挤掉的条数（>0 说明资源不够，`ok` 同时为 false）。 */
+  dropped: number;
+  /** 失败原因（中文，给界面直接展示）。 */
+  error?: string;
+}
+
 export const DEFAULT_SETTINGS: MemorySettings = {
   enabled: true,
   autoCapture: true,
   retentionDays: 90,
+  // 老用户默认开启：没有知识库条目时它不产生任何注入，升级不改变既有行为。
+  vaultMemory: true,
 };
 
 const DAY_MS = 86_400_000;
@@ -61,6 +96,24 @@ let idSeq = 0;
 function newId(prefix: string, nowMs: number): string {
   idSeq += 1;
   return `${prefix}-${nowMs.toString(36)}-${idSeq.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/**
+ * 知识库指针条目的**稳定** id：同一 rel 跨刷新、跨同步保持不变。
+ *
+ * 为什么不用 newId（含时间与随机）：个性化权重账本、召回日志都按 id 记；
+ * 每次同步换 id 会让「这篇笔记被引用过几次」永远清零。用两段 FNV 变体凑够位数，
+ * 纯函数、无依赖，同一 rel 在任何机器上都得到同一个 id。
+ */
+function vaultEntryId(rel: string): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x1000193;
+  for (let i = 0; i < rel.length; i++) {
+    const code = rel.charCodeAt(i);
+    h1 = Math.imul(h1 ^ code, 0x01000193);
+    h2 = Math.imul(h2 ^ code, 0x85ebca6b);
+  }
+  return `v-${(h1 >>> 0).toString(36)}-${(h2 >>> 0).toString(36)}`;
 }
 
 /** 时间衰减：14 天半衰期（设计 §2.2/§4），未来时间按 1 计。 */
@@ -157,16 +210,23 @@ function pickSemantic(raw: unknown, nowMs: number): Record<string, SemanticEntry
       }
       const now = new Date(nowMs).toISOString();
       const updatedAt = typeof item.updatedAt === "string" ? item.updatedAt : now;
+      const vault = item.source === "vault" ? pickVaultPointer(item.vault) : null;
+      // 知识库条目是**指针型**：没有合法指针就无法定位文件，等同坏条目降级为普通手动记忆，
+      // 而不是整条丢弃（用户至少还能看到那段摘要并手动删掉）。
+      const isVault = vault !== null;
       items.push({
         id: item.id,
         agentId: item.agentId,
-        key: normalizeKey(item.key),
+        // vault 的 key 是 rel（可能含目录与 `.md`，长度远超 24 字）：
+        // 不能走 normalizeKey 的 24 字截断，否则不同目录下的同名文件会撞成一个键。
+        key: isVault ? String(item.key).slice(0, 300) : normalizeKey(item.key),
         value: item.value.slice(0, 500),
         scope: item.scope === "agent" ? "agent" : "user",
         confidence: typeof item.confidence === "number" && Number.isFinite(item.confidence) ? item.confidence : 0.5,
         pinned: item.pinned === true,
-        source:
-          item.source === "explicit" || item.source === "consolidate" || item.source === "manual"
+        source: isVault
+          ? "vault"
+          : item.source === "explicit" || item.source === "consolidate" || item.source === "manual"
             ? item.source
             : "manual",
         createdAt: typeof item.createdAt === "string" ? item.createdAt : now,
@@ -174,6 +234,7 @@ function pickSemantic(raw: unknown, nowMs: number): Record<string, SemanticEntry
         // 老数据没有 metaUpdatedAt：以 updatedAt 顶替，**不填成"现在"**。
         // 填成现在会凭空造出一批「刚刚整理过」的假象；顶替最稳（不迁移、不报错）。
         metaUpdatedAt: typeof item.metaUpdatedAt === "string" ? item.metaUpdatedAt : updatedAt,
+        ...(isVault ? { vault } : {}),
       });
     }
     if (items.length) out[key] = items;
@@ -181,8 +242,28 @@ function pickSemantic(raw: unknown, nowMs: number): Record<string, SemanticEntry
   return out;
 }
 
+/** 校验并归一一条知识库指针；字段缺失/类型不符视为没有指针（返回 null）。 */
+function pickVaultPointer(raw: unknown): VaultMemoryPointer | null {
+  if (!isPlainObject(raw)) return null;
+  if (
+    typeof raw.vaultId !== "string" ||
+    typeof raw.rel !== "string" ||
+    typeof raw.mtime !== "string" ||
+    typeof raw.hash !== "string" ||
+    !raw.vaultId ||
+    !raw.rel
+  ) {
+    return null;
+  }
+  return { vaultId: raw.vaultId, rel: raw.rel, mtime: raw.mtime, hash: raw.hash };
+}
+
 function pickSettings(raw: unknown): MemorySettings {
   if (!isPlainObject(raw)) return { ...DEFAULT_SETTINGS };
+  const vaultMemoryMax =
+    typeof raw.vaultMemoryMax === "number" && Number.isFinite(raw.vaultMemoryMax) && raw.vaultMemoryMax > 0
+      ? Math.floor(raw.vaultMemoryMax)
+      : undefined;
   return {
     enabled: typeof raw.enabled === "boolean" ? raw.enabled : DEFAULT_SETTINGS.enabled,
     autoCapture: typeof raw.autoCapture === "boolean" ? raw.autoCapture : DEFAULT_SETTINGS.autoCapture,
@@ -190,6 +271,10 @@ function pickSettings(raw: unknown): MemorySettings {
       typeof raw.retentionDays === "number" && Number.isFinite(raw.retentionDays) && raw.retentionDays > 0
         ? raw.retentionDays
         : DEFAULT_SETTINGS.retentionDays,
+    // 老数据没有该键 → 默认 true（不迁移、不报错；关掉它是用户显式动作，不由升级代劳）。
+    vaultMemory: typeof raw.vaultMemory === "boolean" ? raw.vaultMemory : DEFAULT_SETTINGS.vaultMemory,
+    // 可选字段：缺失时**不写空键**，让 getSettings() 与老版本导出的设置对象逐字相等。
+    ...(vaultMemoryMax !== undefined ? { vaultMemoryMax } : {}),
   };
 }
 
@@ -382,6 +467,8 @@ export class MemoryStore {
           source: "explicit",
           confidence: EXPLICIT_CONFIDENCE,
         });
+        // 沉淀写回知识库（d.114）：入队 + 异步落盘，失败只上报、不影响记忆本身。
+        enqueueMemoryWrite({ kind: "explicit", key: explicit.key, value: explicit.value, agentId });
       }
 
       const key = `${agentId}\u0000${conversationId}`;
@@ -581,16 +668,22 @@ export class MemoryStore {
     }
 
     if (next.length > SEMANTIC_LIMIT) {
-      const nowMs = this.now();
-      const excess = next.length - SEMANTIC_LIMIT;
-      const evictable = next
-        .filter((e) => !e.pinned)
-        .map((e) => ({ id: e.id, score: e.confidence * recencyScore(e.updatedAt, nowMs), at: e.updatedAt }))
-        .sort((a, b) => a.score - b.score || (a.at < b.at ? -1 : 1))
-        .slice(0, excess)
-        .map((x) => x.id);
-      const drop = new Set(evictable);
-      next = next.filter((e) => !drop.has(e.id));
+      // 配额只按「普通语义条目」算：知识库指针条目另有上限（`VAULT_MEMORY_MAX`）。
+      // 混在一起的话，同步一篇 500 条的知识库后随便再存一条普通记忆，
+      // 就会把用户的旧长期记忆按分数挤掉——那不是配额守卫该干的事。
+      const plain = next.filter((e) => e.source !== "vault");
+      const excess = plain.length - SEMANTIC_LIMIT;
+      if (excess > 0) {
+        const nowMs = this.now();
+        const evictable = plain
+          .filter((e) => !e.pinned)
+          .map((e) => ({ id: e.id, score: e.confidence * recencyScore(e.updatedAt, nowMs), at: e.updatedAt }))
+          .sort((a, b) => a.score - b.score || (a.at < b.at ? -1 : 1))
+          .slice(0, excess)
+          .map((x) => x.id);
+        const drop = new Set(evictable);
+        next = next.filter((e) => !drop.has(e.id));
+      }
     }
 
     this.data.semantic = { ...this.data.semantic, [bucket]: next };
@@ -675,6 +768,141 @@ export class MemoryStore {
     else delete next[bucket];
     this.data.semantic = next;
     this.saveSemantic();
+  }
+
+  /* --------------------------------------------------------------- vault */
+
+  /**
+   * 全部知识库指针条目（跨桶汇总，按 rel 升序）。
+   *
+   * 排序固定而不是按 updatedAt：同步与召回都要在同一份输入上得到同一份输出，
+   * 桶的遍历顺序不该影响行为（确定性契约）。
+   */
+  vaultEntries(): SemanticEntry[] {
+    const all: SemanticEntry[] = [];
+    for (const list of Object.values(this.data.semantic)) {
+      for (const entry of list) if (entry.source === "vault") all.push(entry);
+    }
+    return all.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  }
+
+  /** 知识库指针条目的上限：设置里的 `vaultMemoryMax`（缺省 = `VAULT_MEMORY_MAX`）。 */
+  vaultMemoryLimit(): number {
+    const raw = this.data.settings.vaultMemoryMax;
+    return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : VAULT_MEMORY_MAX;
+  }
+
+  /**
+   * 批量写入/更新知识库指针条目（**只碰 `source: "vault"`**，其它来源的条目原样不动）。
+   *
+   * 返回结构刻意区分「没写进去」的两种原因：
+   * - 本机配额把条目挤掉了 → `dropped > 0`；
+   * - localStorage 写失败（配额满/隐私模式）→ `ok: false` + `error`。
+   * 两者都必须让调用方（记忆页/同步结果）看见，静默失败会让用户以为知识库已纳入。
+   */
+  upsertVaultEntries(inputs: VaultEntryInput[]): VaultUpsertResult {
+    if (!inputs.length) return { ok: true, written: 0, dropped: 0 };
+    const bucket = GLOBAL_AGENT_ID;
+    const list = this.data.semantic[bucket] ?? [];
+    const inputByKey = new Map<string, VaultEntryInput>();
+    for (const input of inputs) {
+      const rel = String(input.rel ?? "");
+      if (!rel) continue;
+      inputByKey.set(rel, input);
+    }
+    if (!inputByKey.size) return { ok: true, written: 0, dropped: 0 };
+
+    const build = (prev: SemanticEntry | undefined, input: VaultEntryInput): SemanticEntry => {
+      const rel = String(input.rel);
+      const at = typeof input.mtime === "string" && input.mtime ? input.mtime : new Date(this.now()).toISOString();
+      return {
+        id: prev?.id ?? vaultEntryId(rel),
+        agentId: String(input.agentId ?? prev?.agentId ?? GLOBAL_AGENT_ID),
+        key: rel.slice(0, 300),
+        value: String(input.value ?? "").slice(0, 500),
+        scope: "user",
+        confidence: prev?.confidence ?? 0.6,
+        pinned: false,
+        source: "vault",
+        createdAt: prev?.createdAt ?? at,
+        // updatedAt 跟文件 mtime 走，不跟"同步时刻"走：知识库的时间语义属于文件。
+        updatedAt: at,
+        metaUpdatedAt: at,
+        vault: {
+          vaultId: String(input.vaultId ?? prev?.vault?.vaultId ?? ""),
+          rel,
+          mtime: String(input.mtime ?? ""),
+          hash: String(input.hash ?? ""),
+        },
+      };
+    };
+
+    const merged: SemanticEntry[] = [];
+    const replaced = new Set<string>();
+    for (const entry of list) {
+      if (entry.source !== "vault") {
+        merged.push(entry);
+        continue;
+      }
+      const input = inputByKey.get(entry.key);
+      if (!input) {
+        merged.push(entry);
+        continue;
+      }
+      merged.push(build(entry, input));
+      replaced.add(entry.key);
+    }
+    for (const [rel, input] of inputByKey) {
+      if (!replaced.has(rel)) merged.push(build(undefined, input));
+    }
+
+    this.data.semantic = { ...this.data.semantic, [bucket]: merged };
+    const persisted = this.saveSemantic();
+    // 配额守卫可能又挤掉条目：以落库后的真实状态为准回报，而不是报「我提交了几条」。
+    const present = new Set(
+      (this.data.semantic[bucket] ?? []).filter((e) => e.source === "vault").map((e) => e.key),
+    );
+    const dropped = [...inputByKey.keys()].filter((rel) => !present.has(rel.slice(0, 300))).length;
+    if (!persisted) {
+      return {
+        ok: false,
+        // 没写进本机存储 = 没有一条真正落库（内存态仍可用，但不算「已纳入」）。
+        written: 0,
+        dropped,
+        error: "本机存储配额不足：知识库条目未能写入本机（当前仅保留在内存里）",
+      };
+    }
+    if (dropped > 0) {
+      return {
+        ok: false,
+        written: inputByKey.size - dropped,
+        dropped,
+        error: `本机存储配额不足：有 ${dropped} 篇知识库笔记未能纳入记忆`,
+      };
+    }
+    return { ok: true, written: inputByKey.size, dropped: 0 };
+  }
+
+  /** 删除指定 rel 的知识库指针条目（只删 `source: "vault"`），返回删除条数。 */
+  removeVaultEntries(keys: Iterable<string>): number {
+    const drop = new Set(keys);
+    if (!drop.size) return 0;
+    let removed = 0;
+    const next: Record<string, SemanticEntry[]> = { ...this.data.semantic };
+    for (const [bucket, list] of Object.entries(this.data.semantic)) {
+      const kept = list.filter((entry) => {
+        const hit = entry.source === "vault" && drop.has(entry.key);
+        if (hit) removed += 1;
+        return !hit;
+      });
+      if (kept.length) next[bucket] = kept;
+      else delete next[bucket];
+    }
+    if (removed) {
+      this.data.semantic = next;
+      this.saveSemantic();
+    }
+    return removed;
   }
 
   /* ----------------------------------------------------------- 批量/导出 */
@@ -816,7 +1044,13 @@ export class MemoryStore {
     writeJson(this.storage, MEMORY_KEYS.episodic, guarded);
   }
 
-  private saveSemantic(): void {
+  /**
+   * 语义层落盘：返回「是否真的写进本机存储」。
+   *
+   * 以前这里忽略 writeJson 的返回值（静默降级）。知识库同步需要如实上报配额失败，
+   * 所以把布尔值返回给能用上它的调用方；其它既有调用方不读返回值，行为不变。
+   */
+  private saveSemantic(): boolean {
     const nowMs = this.now();
     const guarded = guardScoredSize<SemanticEntry>(
       this.data.semantic,
@@ -826,6 +1060,6 @@ export class MemoryStore {
       (e) => e.pinned,
     );
     this.data.semantic = guarded;
-    writeJson(this.storage, MEMORY_KEYS.semantic, guarded);
+    return writeJson(this.storage, MEMORY_KEYS.semantic, guarded);
   }
 }

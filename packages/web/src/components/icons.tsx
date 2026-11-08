@@ -307,3 +307,11 @@ export const SessionsIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M4 18h10" />
   </svg>
 );
+
+/** 知识库：摊开的书（vault 导航入口用）。 */
+export const BookIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M12 6.5C10.5 5 8.5 4.5 4 5v14c4.5-.5 6.5 0 8 1.5" />
+    <path d="M12 6.5C13.5 5 15.5 4.5 20 5v14c-4.5-.5-6.5 0-8 1.5" />
+  </svg>
+);

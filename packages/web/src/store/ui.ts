@@ -26,6 +26,7 @@ export type Page =
   | "automations"
   | "model"
   | "modelroute"
+  | "vault"
   | "plugins"
   | "memory"
   | "settings";
@@ -60,7 +61,7 @@ export type NavPage = Page;
  * 排法按「干活 → 智能模组 → 资料与能力 → 系统」：
  * - 工作台：先总览、再跟智能体对话、最后看团队；
  * - 智能模块：幕僚 / 信息中枢 / 自动化（d.70 的三个可插拔内置模块）；
- * - 资料与能力：插件区 / 记忆区；
+ * - 资料与能力：模型 / 知识库 / 插件区 / 记忆区；
  * - 系统：设置区。
  * 视觉分组见 `lib/navGroups.ts`。
  */
@@ -75,6 +76,8 @@ export const DEFAULT_NAV_ORDER: NavPage[] = [
   "modelroute",
   // 模型页（d.99）：内核管理面（供应商/账号/分组/用量/备份/同步）的宿主页
   "model",
+  // 知识库（d.114）：原生 vault（文件树/双链/标签/搜索/图谱），数据不出设备
+  "vault",
   "plugins",
   "memory",
   "settings",
@@ -97,6 +100,33 @@ const LEGACY_DEFAULT_NAV_ORDER: NavPage[] = [
   "plugins",
   "memory",
   "settings",
+];
+
+/**
+ * d.100–d.112 期间的默认顺序（10 个宿主页）。
+ *
+ * 这一段期间没动过顺序的用户，localStorage 里存的正是这一份；d.114 新增「知识库」后
+ * 必须把它也认成「旧默认」，否则这些用户会在末尾多出一个知识库入口（normalize 的补项
+ * 规则，视觉上落到设置区之后），看起来像导航顺序坏了。
+ */
+const LEGACY_DEFAULT_NAV_ORDER_MODEL: NavPage[] = [
+  "home",
+  "chat",
+  "team",
+  "staff",
+  "infohub",
+  "automations",
+  "modelroute",
+  "model",
+  "plugins",
+  "memory",
+  "settings",
+];
+
+/** 所有历史默认顺序：命中任意一份都跟随当前默认（用户亲手排过的不在此列）。 */
+const LEGACY_DEFAULT_NAV_ORDERS: NavPage[][] = [
+  LEGACY_DEFAULT_NAV_ORDER,
+  LEGACY_DEFAULT_NAV_ORDER_MODEL,
 ];
 
 function sameOrder(a: readonly NavPage[], b: readonly NavPage[]): boolean {
@@ -167,7 +197,8 @@ export function readStoredNavOrder(storage: Pick<Storage, "getItem"> | null): Na
     // 拿补完的结果去比旧默认永远不相等——d.84 新增「模型路由」时正是这样漏掉的。
     const stored = Array.isArray(parsed) ? parsed : null;
     const followsLegacyDefault =
-      stored !== null && sameOrder(stored as NavPage[], LEGACY_DEFAULT_NAV_ORDER);
+      stored !== null &&
+      LEGACY_DEFAULT_NAV_ORDERS.some((legacy) => sameOrder(stored as NavPage[], legacy));
     return followsLegacyDefault ? [...DEFAULT_NAV_ORDER] : order;
   } catch {
     return [...DEFAULT_NAV_ORDER];
@@ -210,6 +241,23 @@ export interface InfohubIntent {
 export interface AutomationIntent {
   kind: AutomationKind;
   sync?: SyncOptions;
+}
+
+/**
+ * 命令面板 → 知识库页的一次性意图（d.113 第二轮）。
+ *
+ * 照 `InfohubIntent` 的既有模式，但多带一个自增 `token`：日记/新建这类动作
+ * 「连着点两次」都要各触发一次，只靠 kind 相同会被 React effect 合并掉。
+ * 只放跳转/动作标识与目标 rel，**不放正文**；消费即清空，不落 localStorage。
+ */
+export type VaultIntentKind = "open" | "new" | "daily" | "canvas" | "settings";
+
+export interface VaultIntent {
+  kind: VaultIntentKind;
+  /** open 时为目标文件 rel。 */
+  rel?: string;
+  /** 自增序号：同类意图连点两次也能分别消费。 */
+  token: number;
 }
 
 /**
@@ -318,6 +366,8 @@ interface UiState {
   infohubIntent: InfohubIntent | null;
   /** 进入自动化页并预填新建表单的一次性意图；命中即消费。 */
   automationIntent: AutomationIntent | null;
+  /** 进入知识库页并执行动作（打开笔记 / 新建 / 日记 / 画布 / 设置）的一次性意图。 */
+  vaultIntent: VaultIntent | null;
   /**
    * 切页。接受合并前的旧页面 id（`workspace` / `tasks` / `skills` / `interfaces`），
    * 会折叠成宿主页并投递对应视图意图；`view` 省略即「不指定视图」。
@@ -335,6 +385,9 @@ interface UiState {
   /** 跳到自动化页；带意图时打开预填的新建表单。 */
   openAutomations: (intent?: AutomationIntent) => void;
   consumeAutomationIntent: () => void;
+  /** 进入知识库页并投递动作意图（笔记 / 新建 / 日记 / 画布 / 设置）。 */
+  openVault: (intent?: Omit<VaultIntent, "token">) => void;
+  consumeVaultIntent: () => void;
   /**
    * 设置页要打开的分组（null=保持默认「个人资料」）。
    * 桌宠未配置模型时的「去设置」用它直达「模型」分组，避免用户进来还要自己找。
@@ -399,6 +452,9 @@ function persistNavOrder(order: NavPage[]): void {
  * 每次投递 +1，消费端用 token 判断「这是一次新的点击」。
  */
 let paletteIntentToken = 0;
+
+/** 知识库动作意图的自增序号：日记/新建连点两次也要各消费一次。 */
+let vaultIntentToken = 0;
 
 /** 取 localStorage；SSR / 隐私模式禁用时返回 null（调用方各自回落默认值）。 */
 function uiStorage(): Pick<Storage, "getItem" | "setItem"> | null {
@@ -518,6 +574,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   automationFocusId: null,
   infohubIntent: null,
   automationIntent: null,
+  vaultIntent: null,
   settingsTab: null,
   paletteIntent: null,
   setPaletteIntent: (kind, data) => {
@@ -545,6 +602,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
       infohubIntent: null,
       automationIntent: null,
+      // 知识库动作意图同样一次性：切走就作废，回来不能莫名其妙弹一个新建框
+      vaultIntent: null,
     });
   },
   consumePageView: () => {
@@ -609,6 +668,23 @@ export const useUiStore = create<UiState>((set, get) => ({
     });
   },
   consumeAutomationIntent: () => set({ automationIntent: null }),
+  openVault: (intent) => {
+    vaultIntentToken += 1;
+    set({
+      page: "vault",
+      pageView: null,
+      activeConversationId: null,
+      pendingAttachment: null,
+      taskDraft: null,
+      taskFocusId: null,
+      automationFocusId: null,
+      infohubIntent: null,
+      automationIntent: null,
+      // 无 intent = 普通进入知识库页（清掉残留动作，不重复执行上次的「新建」）
+      vaultIntent: intent ? { ...intent, token: vaultIntentToken } : null,
+    });
+  },
+  consumeVaultIntent: () => set({ vaultIntent: null }),
   openSettings: (tab) => {
     get().setPage("settings");
     set({ settingsTab: tab ?? null });

@@ -2,7 +2,11 @@
  * 三层记忆的数据契约（设计 §2）。
  * 字段名与 `docs/superpowers/plans/2026-10-17-agent-memory-skills.md` Task 1 严格一致，
  * 后续任务（上下文组装/记忆页）直接复用这些类型。
+ *
+ * d.114 起语义层多一种**指针型**条目（`source: "vault"`）：知识库笔记不复制正文进来，
+ * 只把摘要放 `value`、位置与校验信息放 `vault` 指针（理由见 `lib/memory/vaultMemory.ts`）。
  */
+import type { VaultMemoryPointer } from "../vault/types.js";
 
 /** Working（工作记忆）：当前会话近若干轮，会话级 2h TTL / 40 轮环形缓冲。 */
 export interface WorkingTurn {
@@ -53,9 +57,21 @@ export interface SemanticEntry {
   confidence: number;
   /** 置顶：每次召回必带，且永不淘汰。 */
   pinned: boolean;
-  /** manual=手动添加；explicit=用户明说「记住…」；consolidate=规则沉淀；review=复盘分身自评写入。 */
-  source: "manual" | "explicit" | "consolidate" | "review";
+  /**
+   * manual=手动添加；explicit=用户明说「记住…」；consolidate=规则沉淀；review=复盘分身自评写入；
+   * vault=知识库笔记的**指针型**条目（正文留在 vault，这里只有摘要与指针）。
+   */
+  source: "manual" | "explicit" | "consolidate" | "review" | "vault";
   createdAt: string;
+  /**
+   * 知识库指针：仅 `source === "vault"` 的条目有值。
+   *
+   * **为什么不存正文**：知识库文件才是唯一事实来源，用户随时会在编辑器/Obsidian 里改它。
+   * 把正文复制进 localStorage 会立刻产生第二份真相——同步过期、GUID 漂移、改一处忘一处；
+   * 还会把「本机记忆配额」和「用户笔记量」绑死。只存指针 + ≤500 字摘要，
+   * 注入时用摘要（同步路径）、需要全文时再按指针去读文件。
+   */
+  vault?: VaultMemoryPointer;
   /**
    * **内容**变更时间：只在 `value` / `key` 真的变了时刷新。
    *
@@ -92,6 +108,19 @@ export interface MemorySettings {
   autoCapture: boolean;
   /** 情景记忆保留天数，读取时过滤超期条目。 */
   retentionDays: number;
+  /**
+   * 知识库参与记忆（d.114）：关闭只停**注入**，已纳入的指针条目照常保留
+   * （不删索引：用户关的是「别把它塞进提示词」，不是「别同步」）。
+   *
+   * 这是该开关的**唯一真源**：记忆页与设置区卡片都读这里，不另起 localStorage 键。
+   * 老数据没有该键 → 水合默认 true（老用户的语义召回行为不因升级而变，也没有知识库条目）。
+   */
+  vaultMemory: boolean;
+  /**
+   * 知识库纳入上限（篇）。可选：老数据没有，视为 `VAULT_MEMORY_MAX`。
+   * 上限是「指针条目最多多少条」，不是文件数；超过按 mtime 截断。
+   */
+  vaultMemoryMax?: number;
 }
 
 /** localStorage 抽象：可注入内存实现，也便于测试断言落盘与模拟配额异常。 */

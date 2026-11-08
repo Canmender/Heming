@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { capabilityRegistry, filesProvider, infohubProvider, selfProvider, teamProvider } from "./index.js";
+import {
+  capabilityRegistry,
+  filesProvider,
+  infohubProvider,
+  selfProvider,
+  teamProvider,
+  vaultProvider,
+} from "./index.js";
 import { TEAM_TOOLS } from "./teamTools.js";
 import { SelfEditBudget, type SelfEditStore } from "../selfEdit/index.js";
 
@@ -15,12 +22,24 @@ describe("内置能力提供者", () => {
       ["charts", "builtin"],
       ["tone", "builtin"],
       ["wiki", "builtin"],
+      ["vault", "builtin"],
       ["files", "builtin"],
       ["infohub", "builtin"],
       ["plugin-market", "plugin"],
       ["team", "builtin"],
       ["self", "self"],
     ]);
+  });
+
+  it("vault 提供者默认注入三个知识库工具（读优先 + 受限写）", () => {
+    const bridge = vaultProvider.build({ agentId: "a", conversationId: "c" });
+    expect(bridge).not.toBeNull();
+    const names = (bridge!.tools as { function: { name: string } }[]).map(
+      (tool) => tool.function.name,
+    );
+    expect(names).toEqual(["vault_search", "vault_read", "vault_write"]);
+    expect(bridge!.meta?.("vault_search")?.risk).toBe("read");
+    expect(bridge!.meta?.("vault_write")?.risk).toBe("write");
   });
 
   it("team 提供者始终注入团队工作台工具（不依赖桌面桥/模块开关）", () => {

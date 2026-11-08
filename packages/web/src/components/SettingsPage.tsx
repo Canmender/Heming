@@ -78,6 +78,7 @@ const NAV_LABELS: Record<NavPage, string> = {
   modelroute: "模型路由",
   plugins: "插件区",
   memory: "记忆区",
+  vault: "知识库",
   settings: "设置区",
 };
 
@@ -372,9 +373,41 @@ export function SettingsPage() {
             )}
             {tab === "appearance" && <AppearanceTab highlightedId={highlightId} />}
             {tab === "navigation" && (
-              <div data-settings-id="nav-order" className={anchorClass(highlightId === "nav-order")}>
-                <NavigationSection />
-              </div>
+              <>
+                <div data-settings-id="nav-order" className={anchorClass(highlightId === "nav-order")}>
+                  <NavigationSection />
+                </div>
+                {/* d.114 知识库与记忆：只做**入口**，开关本体在记忆页（单一真源）。 */}
+                <div
+                  data-settings-id="memory-vault"
+                  className={anchorClass(highlightId === "memory-vault")}
+                >
+                  <section className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
+                    <div className="text-[12px] font-bold text-muted">知识库与记忆</div>
+                    <p className="mt-1 ui-caption">
+                      知识库参与记忆的开关、已纳入篇数与同步状态都在记忆页；这里只做入口，
+                      两处共用同一个设置值，不做第二套开关。
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn-sm ui-btn-ghost"
+                        onClick={() => useUiStore.getState().setPage("memory")}
+                      >
+                        打开记忆页
+                      </button>
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn-sm ui-btn-ghost"
+                        // 知识库页由并行的界面任务接入 Page 联合（d.114 已合入 `"vault"`）。
+                        onClick={() => useUiStore.getState().setPage("vault")}
+                      >
+                        打开知识库
+                      </button>
+                    </div>
+                  </section>
+                </div>
+              </>
             )}
             {tab === "about" && <AboutSection highlightedId={highlightId} />}
             <p className="pt-1 ui-caption">和鸣 {appVersionLabel()}</p>

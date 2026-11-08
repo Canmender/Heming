@@ -1,4 +1,6 @@
 import { recallMemory } from "../memory/recall.js";
+import type { VaultRecallOptions } from "../memory/recall.js";
+import { isVaultSourceAvailable } from "../memory/vaultMemory.js";
 import { summarizeInjection } from "../memory/format.js";
 import type { MemoryObservability } from "../memory/format.js";
 import type { UsageView } from "../memory/usage.js";
@@ -38,6 +40,30 @@ export interface BuildContextInput {
    * 传账本实例时，被疑似引用过的条目在**同等相关度**下排前面（上限 +25%，不降权）。
    */
   usage?: UsageView;
+  /**
+   * 知识库参与记忆的可选接入点（d.114）。**缺省行为与不传时逐字相同**——
+   * 没有知识库、或设置关闭时，`systemPrompt === basePrompt` 这条契约不变。
+   *
+   * 为什么是同步快照：本函数被 `agentStream` 在流启动前**同步**调用，
+   * 注入只能用条目自带的 `value` 摘要（≤ 500 字）；按指针异步读正文
+   * （`resolveExcerpt`）留给记忆页预览等异步路径，注入路径不 await 读文件。
+   */
+  vaultMemory?: VaultMemoryInput;
+}
+
+/**
+ * 知识库参与注入的同步接入点。
+ *
+ * 三个字段都可选，且都只是「覆盖」：默认从记忆仓库与设置读，真实来源
+ * 由集成侧 `setVaultDocSource` 注册的 VaultDocSource 决定。
+ */
+export interface VaultMemoryInput {
+  /** 覆盖设置开关；缺省读 `MemorySettings.vaultMemory`（唯一真源，不另起键）。 */
+  enabled?: boolean;
+  /** 知识库源是否接入；缺省 `isVaultSourceAvailable()`。 */
+  available?: boolean;
+  /** 知识库条目快照（同步函数）；缺省读记忆仓库里的指针条目。 */
+  entries?: () => SemanticEntry[];
 }
 
 /** 三层召回明细（供记忆页预览/调试；原样透传 recallMemory 的结果）。 */
@@ -95,6 +121,25 @@ function recallQuery(memory: MemoryStore, input: BuildContextInput): string {
   }
 }
 
+/**
+ * 知识库层的召回选项：三个字段都从「记忆仓库 + 设置 + 注册中心」读默认值，
+ * 任何读取异常都降级为「源不可用」（可观测：旁路里能看到被跳过），不上抛。
+ */
+function vaultOptionsOf(input: BuildContextInput, memory: MemoryStore): VaultRecallOptions {
+  const bridge = input.vaultMemory;
+  let enabled = true;
+  let available = false;
+  let entries: SemanticEntry[] | undefined;
+  try {
+    enabled = bridge?.enabled ?? memory.getSettings().vaultMemory !== false;
+    available = bridge?.available ?? (bridge?.entries ? true : isVaultSourceAvailable());
+    if (bridge?.entries) entries = bridge.entries();
+  } catch {
+    available = false;
+  }
+  return { enabled, available, ...(entries ? { entries } : {}) };
+}
+
 /** 记忆段：召回 → 格式化（含注入旁路）；任何异常都降级为「无记忆」。 */
 function collectMemory(
   input: BuildContextInput,
@@ -102,11 +147,16 @@ function collectMemory(
 ): { section: string; recalled: RecalledMemory; trace: MemoryObservability } {
   if (!memory) return { section: "", recalled: emptyRecalled(), trace: emptyObservability() };
   try {
-    const found = recallMemory(memory, {
-      agentId: input.agentId,
-      conversationId: input.conversationId,
-      query: recallQuery(memory, input),
-    }, input.usage);
+    const found = recallMemory(
+      memory,
+      {
+        agentId: input.agentId,
+        conversationId: input.conversationId,
+        query: recallQuery(memory, input),
+      },
+      input.usage,
+      vaultOptionsOf(input, memory),
+    );
     const { text, observability } = summarizeInjection(found);
     return {
       section: text,

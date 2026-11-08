@@ -16,10 +16,26 @@ import {
   RecallRecorder,
   UsageLedger,
   recallMemory,
+  resetMemoryWriteBack,
+  setVaultDocSource,
   summarizeInjection,
   type RecallRun,
   type StorageLike,
+  type VaultDocSource,
+  type VaultSyncResult,
 } from "../lib/memory/index.js";
+
+// 知识库同步走 Lead 的粘合层（lib/vault/boot.ts）：页面用例只验证「怎么展示返回值」，
+// 真实适配/索引行为由 boot 与 vault 层自己的用例覆盖。
+const { syncVaultMemoryNowMock, lastVaultBootMock } = vi.hoisted(() => ({
+  syncVaultMemoryNowMock: vi.fn(),
+  lastVaultBootMock: vi.fn(() => null),
+}));
+
+vi.mock("../lib/vault/boot.js", () => ({
+  syncVaultMemoryNow: syncVaultMemoryNowMock,
+  lastVaultBoot: lastVaultBootMock,
+}));
 
 // 导出落盘是唯一会离开页面的动作：mock 掉桥接层，只断言页面交给它的内容。
 const { saveExportFileMock, hasDesktopExportBridgeMock } = vi.hoisted(() => ({
@@ -1135,5 +1151,125 @@ describe("记忆区入口摩擦（d.81）", () => {
     expect(wiki.textContent).toBe("个人知识库");
     // 数据库的徽标是真实条目数（这里 0 条也照实显示 0，因为口径准确）
     expect(screen.getByRole("tab", { name: "数据库" }).textContent).toBe("数据库0");
+  });
+});
+
+/* ------------------------------------------------------------------ 知识库参与记忆（d.114） */
+
+/** 内存知识库源：只需要 docs/read/write/allowedWriteDirs 四个面。 */
+function fakeVaultSource(files: Record<string, string> = {}): VaultDocSource & { writes: string[] } {
+  const writes: string[] = [];
+  const store = new Map(Object.entries(files));
+  return {
+    writes,
+    docs: async () =>
+      [...store.entries()].map(([rel, text]) => ({
+        vaultId: "v1",
+        rel,
+        mtime: ISO,
+        hash: `h-${rel}`,
+        text,
+      })),
+    read: async (rel) => store.get(rel) ?? null,
+    write: async (req) => {
+      writes.push(req.rel);
+      store.set(req.rel, req.text);
+    },
+    allowedWriteDirs: () => ["inbox"],
+  };
+}
+
+describe("MemoryPage · 知识库参与记忆", () => {
+  beforeEach(() => {
+    resetMemoryWriteBack();
+    setVaultDocSource(null);
+    syncVaultMemoryNowMock.mockReset();
+    lastVaultBootMock.mockReset();
+    lastVaultBootMock.mockReturnValue(null);
+  });
+
+  const syncResult = (overrides: Partial<VaultSyncResult> = {}): VaultSyncResult => ({
+    ok: true,
+    scanned: 1,
+    added: 1,
+    updated: 0,
+    removed: 0,
+    skipped: 0,
+    truncated: 0,
+    truncatedReason: "",
+    total: 1,
+    at: ISO,
+    ...overrides,
+  });
+
+  it("数据库 Tab：知识库卡片有开关与同步按钮，开关写 MemorySettings.vaultMemory", async () => {
+    mockApi({ agents: AGENTS });
+    renderPage();
+    await waitForAgentRoster();
+    openTab("数据库");
+
+    const card = screen.getByRole("region", { name: "知识库参与记忆" });
+    expect(card.textContent).toContain("已纳入");
+    const toggle = within(card).getByRole("switch", { name: "知识库参与记忆" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(toggle);
+    expect(memory.getSettings().vaultMemory).toBe(false);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("未接入知识库时点同步：如实说明原因，不静默无事发生", async () => {
+    mockApi({ agents: AGENTS });
+    syncVaultMemoryNowMock.mockResolvedValue(
+      syncResult({ ok: false, scanned: 0, added: 0, total: 0, error: "知识库未接入：没有本地库" }),
+    );
+    renderPage();
+    await waitForAgentRoster();
+    openTab("数据库");
+
+    fireEvent.click(screen.getByRole("button", { name: "同步知识库" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("知识库未接入");
+  });
+
+  it("已纳入条目显示篇数，并可按指针预览正文片段", async () => {
+    mockApi({ agents: AGENTS });
+    memory.upsertVaultEntries([
+      { rel: "notes/发布计划.md", vaultId: "v1", mtime: ISO, hash: "h1", value: "发布计划：周五前完成回归" },
+      { rel: "notes/端口.md", vaultId: "v1", mtime: ISO, hash: "h2", value: "端口：线上监听 8787" },
+    ]);
+    setVaultDocSource(fakeVaultSource({ "notes/发布计划.md": "# 发布计划\n\n周五前完成回归。" }));
+    renderPage();
+    await waitForAgentRoster();
+    openTab("数据库");
+
+    const card = screen.getByRole("region", { name: "知识库参与记忆" });
+    expect(within(card).getByText("2")).toBeInTheDocument(); // 已纳入 2 篇
+    expect(within(card).getByText("notes/发布计划.md")).toBeInTheDocument();
+
+    fireEvent.click(within(card).getByRole("button", { name: "预览笔记 notes/发布计划.md" }));
+    expect(await within(card).findByText(/周五前完成回归。/)).toBeInTheDocument();
+  });
+
+  it("同步按钮：调粘合层同步并回报数量（结果直接用返回值）", async () => {
+    mockApi({ agents: AGENTS });
+    syncVaultMemoryNowMock.mockResolvedValue(syncResult());
+    renderPage();
+    await waitForAgentRoster();
+    openTab("数据库");
+
+    fireEvent.click(screen.getByRole("button", { name: "同步知识库" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("新增 1"));
+    expect(syncVaultMemoryNowMock).toHaveBeenCalled();
+  });
+
+  it("个人知识库 Tab：主入口换成「打开知识库」入口卡，旧 WikiPanel 折叠保留", async () => {
+    mockApi({ agents: AGENTS });
+    renderPage();
+    await waitForAgentRoster();
+    openTab("个人知识库");
+
+    expect(screen.getByRole("region", { name: "打开知识库" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开知识库" })).toBeInTheDocument();
+    expect(screen.getByText("旧版知识库（Wiki 视图，保留可用）")).toBeInTheDocument();
   });
 });

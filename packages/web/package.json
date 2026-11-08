@@ -1,6 +1,6 @@
 {
   "name": "@heming/web",
-  "version": "114.3.46",
+  "version": "115.3.46",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
     "@heming/shared": "workspace:*",
     "katex": "^0.19.1",
     "officeparser": "~8.4.1",
@@ -38,5 +44,5 @@
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
-  "hemingVersion": "d.114.3.46.0"
+  "hemingVersion": "d.115.3.46.0"
 }

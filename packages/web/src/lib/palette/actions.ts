@@ -12,7 +12,15 @@ export type PaletteActionId =
   | "new-agent"
   | "notifications"
   | "settings"
-  | "modules";
+  | "modules"
+  /**
+   * d.113 第二轮：知识库四个动作。执行时统一切到知识库页并通过 `vaultIntent`
+   * 投递动作（新建 / 日记 / 画布 / 设置），页面消费后执行——不在这里直接读写文件。
+   */
+  | "vault-new-note"
+  | "vault-daily"
+  | "vault-new-canvas"
+  | "vault-settings";
 
 export interface PaletteAction {
   id: PaletteActionId;
@@ -55,6 +63,30 @@ export const PALETTE_ACTIONS: PaletteAction[] = [
     label: "模块管理",
     description: "启用 / 停用幕僚、信息中枢、自动化",
     keywords: ["模块", "内置模块", "模块管理", "module", "modules"],
+  },
+  {
+    id: "vault-new-note",
+    label: "新建笔记",
+    description: "在知识库里新建一篇笔记，可选模板",
+    keywords: ["知识库", "笔记", "新建", "vault", "note"],
+  },
+  {
+    id: "vault-daily",
+    label: "打开今天的日记",
+    description: "按日记设置打开今天那篇，没有就按模板创建",
+    keywords: ["知识库", "日记", "今天", "daily", "journal", "today"],
+  },
+  {
+    id: "vault-new-canvas",
+    label: "新建画布",
+    description: "在知识库里新建一个 .canvas 画布",
+    keywords: ["知识库", "画布", "canvas", "新建"],
+  },
+  {
+    id: "vault-settings",
+    label: "知识库设置",
+    description: "日记文件夹、日期格式与日记模板",
+    keywords: ["知识库", "设置", "日记", "模板", "vault", "settings"],
   },
 ];
 

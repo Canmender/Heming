@@ -111,6 +111,78 @@ contextBridge.exposeInMainWorld("__heming_wiki", {
   log: (kind, title, extra) => ipcRenderer.invoke("wiki:log", kind, title, extra),
 });
 
+// —— 原生知识库（多库 vault）文件桥（d.114）——
+// 与上面的 __heming_wiki 并存，互不影响：老 wiki 桥服务固定目录与既有 wiki 工具，
+// vault 桥服务用户在系统对话框里自选的多个库（Obsidian 风格，任意目录/层级）。
+//
+// 主进程的结果统一是 `{ok:true, value}` 或 `{ok:false, code, message}`：这里把失败
+// envelope 转成带 `code` 的 Error（message 已是中文），web 侧 `lib/vault/bridge.ts`
+// 再归一化成 `VaultBridgeError`。渲染层拿到的失败因此是 structured rejection，
+// 不会出现「Cannot read properties of undefined」这类主进程细节泄漏。
+function unwrapVaultResult(result) {
+  if (result && result.ok === true) return result.value;
+  const code = result && typeof result.code === "string" ? result.code : "io-error";
+  const message = result && typeof result.message === "string" ? result.message : "知识库操作失败";
+  const error = new Error(message);
+  error.name = "VaultBridgeError";
+  error.code = code;
+  throw error;
+}
+
+contextBridge.exposeInMainWorld("__heming_vault", {
+  /** 已登记的库列表。 */
+  list: () => ipcRenderer.invoke("vault:list").then(unwrapVaultResult),
+  /** 弹系统目录选择器新增一个库；用户取消返回 null。 */
+  pick: () => ipcRenderer.invoke("vault:pick").then(unwrapVaultResult),
+  /** 移除登记（不删磁盘文件）。 */
+  remove: (vaultId) => ipcRenderer.invoke("vault:remove", vaultId).then(unwrapVaultResult),
+  /** 改库展示名。 */
+  rename: (vaultId, name) => ipcRenderer.invoke("vault:rename", vaultId, name).then(unwrapVaultResult),
+  /** 目录树（懒加载：depth 默认 2，rel 为空表示库根）。 */
+  tree: (vaultId, treeOptions) => ipcRenderer.invoke("vault:tree", vaultId, treeOptions).then(unwrapVaultResult),
+  /** 读文本；不存在返回 null。 */
+  read: (vaultId, rel) => ipcRenderer.invoke("vault:read", vaultId, rel).then(unwrapVaultResult),
+  /** 读图片，主进程转 data URL。 */
+  readBinary: (vaultId, rel) => ipcRenderer.invoke("vault:readBinary", vaultId, rel).then(unwrapVaultResult),
+  /** 用户编辑通道：库内任意可写文本路径（expectMtime 防外部覆盖）。 */
+  write: (vaultId, rel, text, writeOptions) =>
+    ipcRenderer.invoke("vault:write", vaultId, rel, text, writeOptions).then(unwrapVaultResult),
+  /** 智能体通道：仅 writeDirs 内，越界失败（outside-write-dirs）。 */
+  apply: (request) => ipcRenderer.invoke("vault:apply", request).then(unwrapVaultResult),
+  /** 新建文件（父目录自动创建）。 */
+  create: (vaultId, rel, text) => ipcRenderer.invoke("vault:create", vaultId, rel, text).then(unwrapVaultResult),
+  /** 新建目录（多级 mkdir -p；已存在视为成功，失败仍是带 code 的结构化 Error）。 */
+  createDir: (vaultId, rel) => ipcRenderer.invoke("vault:createDir", vaultId, rel).then(unwrapVaultResult),
+  /** 库内移动/改名。 */
+  move: (vaultId, from, to) => ipcRenderer.invoke("vault:move", vaultId, from, to).then(unwrapVaultResult),
+  /** 删除单个文件（不递归）。 */
+  delete: (vaultId, rel) => ipcRenderer.invoke("vault:delete", vaultId, rel).then(unwrapVaultResult),
+  /** 在系统资源管理器中定位。 */
+  reveal: (vaultId, rel) => ipcRenderer.invoke("vault:reveal", vaultId, rel).then(unwrapVaultResult),
+  /**
+   * 订阅库变化（主进程已按 300ms 去抖）。返回取消订阅函数。
+   * 回调收到库内相对路径数组；空数组表示「变化太多，请全量重建索引」。
+   */
+  watch: (vaultId, onChange) => {
+    if (typeof onChange !== "function") return () => {};
+    const listener = (_event, payload) => {
+      if (!payload || payload.vaultId !== vaultId || !Array.isArray(payload.rels)) return;
+      onChange(payload.rels);
+    };
+    ipcRenderer.on("vault:changed", listener);
+    // 订阅是异步注册的：即便注册失败也不该在 preload 里抛未处理 rejection，
+    // 真正的失败会由后续读树/读文件暴露出来。
+    ipcRenderer.invoke("vault:watch", vaultId).catch(() => {});
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      ipcRenderer.removeListener("vault:changed", listener);
+      ipcRenderer.invoke("vault:unwatch", vaultId).catch(() => {});
+    };
+  },
+});
+
 // —— 图表导出桥 ——
 // 把生成的图表写到 ~/Heming/charts，并可用系统默认程序打开。
 // 浏览器端没有这个桥，渲染层会降级为「下载到浏览器默认目录」。
