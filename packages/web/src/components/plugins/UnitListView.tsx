@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   CONTRIBUTION_LABELS,
   UNIT_SOURCE_LABELS,
@@ -110,7 +110,6 @@ function UnitRow({ status }: { status: UnitStatus }) {
     <section
       role="region"
       aria-label={`能力单元 ${unit.name}`}
-      data-unit-id={unit.id}
       className="ui-card"
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -150,15 +149,58 @@ export interface UnitListViewProps {
    * 插件页用它复用既有 `PluginCard` / `SystemPluginCard`（保留详情与启停入口）。
    */
   renderUnit?: (status: UnitStatus) => ReactNode | null;
+  /**
+   * 外部定位某个单元（d.108 命令 `target=unit`）：清空筛选、滚动到该行并短暂高亮。
+   * `seq` 由投递方的意图 token 提供——同一条命令连点两次也能重新定位。
+   */
+  focusUnit?: { id: string; seq: number } | null;
 }
 
+/** 外部定位后的高亮时长（与设置页卡片高亮同口径）。 */
+const UNIT_HIGHLIGHT_MS = 2000;
+
 /** 插件区「已安装」区：统一能力单元列表 + 搜索/来源/状态筛选。 */
-export function UnitListView({ statuses, renderUnit }: UnitListViewProps) {
+export function UnitListView({ statuses, renderUnit, focusUnit }: UnitListViewProps) {
   const subscribed = useUnitStatuses();
   const all = statuses ?? subscribed;
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<UnitSource | "all">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
+  /** 外部定位命中的单元 id：短暂描边，滚动完不会残留。 */
+  const [highlightUnitId, setHighlightUnitId] = useState<string | null>(null);
+  const highlightTimer = useRef<number | null>(null);
+
+  // 命令面板 target=unit：先清筛选保证目标可见，等这一帧渲染完再滚动 + 高亮。
+  useEffect(() => {
+    if (!focusUnit) return;
+    setQuery("");
+    setSource("all");
+    setStatusFilter("all");
+    let cancelled = false;
+    const raf = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      const el = document.querySelector<HTMLElement>(`[data-unit-id="${focusUnit.id}"]`);
+      // jsdom 没有 scrollIntoView：可选调用，测试里由用例自己打桩断言
+      el?.scrollIntoView?.({ block: "center" });
+      setHighlightUnitId(focusUnit.id);
+      if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
+      highlightTimer.current = window.setTimeout(() => {
+        highlightTimer.current = null;
+        setHighlightUnitId(null);
+      }, UNIT_HIGHLIGHT_MS);
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+    };
+  }, [focusUnit]);
+
+  useEffect(
+    () => () => {
+      if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
+    },
+    [],
+  );
 
   const sourceUnits = useMemo(
     () => (source === "all" ? all : all.filter((item) => item.unit.source === source)),
@@ -247,7 +289,15 @@ export function UnitListView({ statuses, renderUnit }: UnitListViewProps) {
             const custom = renderUnit?.(status) ?? null;
             const label = unitStatusLabel(status);
             return (
-              <li key={`${status.unit.source}:${status.unit.id}`} className="min-w-0">
+              <li
+                key={`${status.unit.source}:${status.unit.id}`}
+                data-unit-id={status.unit.id}
+                className={`min-w-0 rounded-xl transition-shadow ${
+                  highlightUnitId === status.unit.id
+                    ? "outline outline-2 outline-offset-2 outline-ink"
+                    : ""
+                }`}
+              >
                 {custom ? (
                   <>
                     {/* 卡片自带的头部不统一（插件卡无来源徽标、系统卡写「内置」），

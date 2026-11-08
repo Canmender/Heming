@@ -1057,3 +1057,60 @@ describe("parsePluginManifest · v3 拒绝 v4 新增字段（不静默丢弃）"
     ).toContain("schemaVersion 3 不支持 permissions.eval");
   });
 });
+
+describe("parsePluginManifest · 命令 target 扩展（d.108）", () => {
+  /** 只带命令的最小 v5 清单（v5 起才允许 settings / unit 目标）。 */
+  function v5Command(target: Record<string, unknown>): Record<string, unknown> {
+    return {
+      schemaVersion: 5,
+      id: "acme.commands",
+      name: "命令包",
+      version: "1.0.0",
+      description: "只带命令",
+      author: "ACME",
+      engines: { heming: "d.103" },
+      contributions: { commands: [{ id: "go", title: "执行", target }] },
+    };
+  }
+
+  /** v3 清单只带一条命令（用来钉住「旧版本不接受新目标」）。 */
+  function v3Command(target: Record<string, unknown>): Record<string, unknown> {
+    return meta({
+      contributions: { commands: [{ id: "go", title: "执行", target }] },
+    });
+  }
+
+  it("settings：命中 SETTINGS_CARDS 的卡片解析后原样保留", () => {
+    const parsed = parsePluginManifest(v5Command({ kind: "settings", card: "theme-mode" }));
+    expect(parsed.contributions.commands[0].target).toEqual({
+      kind: "settings",
+      card: "theme-mode",
+    });
+  });
+
+  it("settings：未知卡片拒绝并给出字段路径（设置目录在 web，shared 不认识）", () => {
+    expect(failure(v5Command({ kind: "settings", card: "no-such-card" }))).toContain(
+      "contributions.commands[0].target.card：未知设置卡：no-such-card",
+    );
+  });
+
+  it("settings / unit 只属于 v5：v3 清单明确拒绝并提示升级", () => {
+    expect(failure(v3Command({ kind: "settings", card: "theme-mode" }))).toContain(
+      "schemaVersion 3 不支持 settings 目标，请升级到 schemaVersion 5",
+    );
+    expect(failure(v3Command({ kind: "unit", unitId: "heming.pet" }))).toContain(
+      "schemaVersion 3 不支持 unit 目标，请升级到 schemaVersion 5",
+    );
+  });
+
+  it("unit：合法 id 通过（不要求单元已安装），非法 id 报错", () => {
+    const parsed = parsePluginManifest(v5Command({ kind: "unit", unitId: "heming.pet" }));
+    expect(parsed.contributions.commands[0].target).toEqual({ kind: "unit", unitId: "heming.pet" });
+
+    // v3 的字符集由 web 旧 schema 校验（中文）；v5 由 shared 校验（含字段路径）。
+    expect(failure(v3Command({ kind: "unit", unitId: "Heming.Pet" }))).toContain("单元 id");
+    for (const unitId of ["Heming.Pet", "-pet", "pet unit", "a".repeat(65)]) {
+      expect(failure(v5Command({ kind: "unit", unitId })), unitId).toContain("target.unitId");
+    }
+  });
+});

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { CapabilityUnit, UnitStatus } from "@heming/shared";
 import { UnitListView } from "./UnitListView.js";
 import { UnitDiagnostics } from "./UnitDiagnostics.js";
@@ -114,6 +114,39 @@ describe("UnitListView", () => {
     fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
     expect(screen.getByRole("region", { name: "能力单元 系统能力" })).toBeInTheDocument();
     expect(search).toHaveValue("");
+  });
+
+  it("focusUnit：清空筛选、滚动到目标单元并短暂高亮（d.108 命令 target=unit）", async () => {
+    const scrollSpy = vi.fn();
+    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollSpy;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { rerender } = render(<UnitListView statuses={UNITS} />);
+      // 先让筛选把目标藏起来：focusUnit 必须自己清筛选，否则「点了没反应」
+      fireEvent.change(screen.getByLabelText("搜索插件"), { target: { value: "报告" } });
+      expect(screen.queryByRole("region", { name: "能力单元 桌宠" })).toBeNull();
+
+      rerender(<UnitListView statuses={UNITS} focusUnit={{ id: "heming.pet", seq: 1 }} />);
+      await act(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+
+      const row = document.querySelector<HTMLElement>('[data-unit-id="heming.pet"]')!;
+      expect(row).not.toBeNull();
+      expect(row.className).toContain("outline-ink");
+      expect(scrollSpy).toHaveBeenCalled();
+      // 筛选被清空，目标行真实可见（不是只改了 className）
+      expect(screen.getByLabelText("搜索插件")).toHaveValue("");
+      expect(screen.getByRole("region", { name: "能力单元 桌宠" })).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(2100);
+      });
+      expect(row.className).not.toContain("outline-ink");
+    } finally {
+      vi.useRealTimers();
+      delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 });
 

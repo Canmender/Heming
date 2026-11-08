@@ -565,6 +565,26 @@ describe("设置区 · 卡片搜索与定位（UX-E）", () => {
     ).not.toContain("outline-ink");
   });
 
+  it("命令面板 target=settings：投意图后直达卡片、高亮并消费意图（d.108）", async () => {
+    const scrollSpy = stubScrollIntoView();
+    render(<SettingsPage />);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    act(() => {
+      useUiStore.getState().setPaletteIntent("focus-settings", { card: "widgets" });
+    });
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    expect(screen.getByRole("tab", { name: "外观" })).toHaveAttribute("aria-selected", "true");
+    const anchor = document.querySelector<HTMLElement>('[data-settings-id="widgets"]')!;
+    expect(anchor.className).toContain("outline-ink");
+    expect(scrollSpy).toHaveBeenCalled();
+    // 一次性意图：消费后清空，不把设置页钉在这张卡上
+    expect(useUiStore.getState().paletteIntent).toBeNull();
+  });
+
   it("Esc：关闭结果面板并清空输入，回到普通分区视图", () => {
     render(<SettingsPage />);
     const input = screen.getByLabelText("搜索设置项");

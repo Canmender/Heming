@@ -247,7 +247,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         openInfohub({ tab: "search", query: query.trim() });
         break;
       case "plugin-command": {
-        // 只走既有能力：page → 切页；skill → 技能区定位意图；plugin → 插件详情意图。
+        // 只走既有能力：page → 切页；skill → 技能区定位意图；plugin → 插件详情意图；
+        // settings → 设置页定位卡片意图（d.108）；unit → 统一单元列表定位（复用 open-plugin 槽）。
         const command = item.command;
         if (!command) break;
         const target = command.target;
@@ -258,6 +259,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           const skill = skillPool.list().find((s) => s.name === target.name);
           if (skill) setPaletteIntent("focus-skill", { id: skill.id });
           setPage("skills");
+        } else if (target.kind === "settings") {
+          // 设置页是懒加载页：先投「定位卡片」意图再切页，页内消费后滚动 + 高亮该卡。
+          setPaletteIntent("focus-settings", { card: target.card });
+          setPage("settings");
+        } else if (target.kind === "unit") {
+          // 单元可能是系统/内置/界面插件，没有「插件详情」入口；投同一条 open-plugin 意图，
+          // 由 PluginsPage 判断：声明式插件开详情，其余来源在统一单元列表里定位。
+          setPaletteIntent("open-plugin", { id: target.unitId });
+          setPage("plugins");
         } else {
           setPaletteIntent("open-plugin", { id: command.pluginId });
           setPage("plugins");

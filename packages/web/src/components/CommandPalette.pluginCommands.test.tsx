@@ -170,3 +170,31 @@ describe("命令面板 · 插件命令的三种 target 分发", () => {
     expect(useUiStore.getState().page).toBe("settings");
   });
 });
+
+describe("命令面板 · d.108 新增 target（settings / unit）", () => {
+  it("settings → 切设置页并投「定位设置卡」意图", async () => {
+    commandsStub.current = [cmd({ target: { kind: "settings", card: "theme-mode" } })];
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "导出" } });
+    fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
+
+    await waitFor(() => expect(useUiStore.getState().page).toBe("settings"));
+    expect(useUiStore.getState().paletteIntent).toMatchObject({
+      kind: "focus-settings",
+      data: { card: "theme-mode" },
+    });
+  });
+
+  it("unit → 切插件区并复用 open-plugin 意图携带单元 id", async () => {
+    commandsStub.current = [cmd({ target: { kind: "unit", unitId: "heming.pet" } })];
+    render(<CommandPalette onClose={vi.fn()} />);
+    fireEvent.change(searchBox(), { target: { value: "导出" } });
+    fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
+
+    await waitFor(() => expect(useUiStore.getState().page).toBe("plugins"));
+    expect(useUiStore.getState().paletteIntent).toMatchObject({
+      kind: "open-plugin",
+      data: { id: "heming.pet" },
+    });
+  });
+});

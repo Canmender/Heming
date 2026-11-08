@@ -12,6 +12,7 @@ import {
   type PluginV5ParseResult,
 } from "@heming/shared";
 import { PALETTE_PAGES } from "../palette/pages.js";
+import { settingsCardById } from "../settings/registry.js";
 import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
 
 /**
@@ -26,8 +27,10 @@ import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
  * - **v5**（`packages/shared/src/plugin/manifest.ts` 的 `parsePluginManifestV5`）是当前契约：
  *   在 v4 之上增加 `engines.heming`（最小宿主版本）与 `meta`（上架元数据），
  *   并用分层严格度挡住「权限/贡献写错位置」的笔误（顶层未知键警告、敏感子对象 strict）。
- *   解析结果的权威形状在 shared；本文件只补一件 web 独有的事：命令 `target.page`
- *   必须存在于命令面板的 `PALETTE_PAGES`，然后投射到既有内部 `PluginManifest`。
+ *   解析结果的权威形状在 shared；本文件只补 web 独有的两件事：命令 `target.page`
+ *   必须存在于命令面板的 `PALETTE_PAGES`、`target.settings.card` 必须存在于
+ *   `SETTINGS_CARDS`（单元目标只校验 id 字符集，允许指向将来才安装的单元），
+ *   然后投射到既有内部 `PluginManifest`。
  * - **v4**（`PLUGIN_SCHEMA_VERSION`）仍可安装：界面插件声明
  *   （`distribution` + `contributions.desktopWidgets` + `permissions.events/graphics/eval`）。
  *   工具束 / 签名 / 权限语义一字未改；
@@ -116,6 +119,15 @@ function base64UrlByteLength(value: string): number {
 
 /** 命令 target 可指向的页面 id（单一真源：命令面板的页面目录）。 */
 const PAGE_IDS: ReadonlySet<string> = new Set(PALETTE_PAGES.map((page) => page.page));
+
+/**
+ * 命令 target 指向的能力单元 id：与插件/单元 id 同规则。
+ *
+ * 只校验字符集，**不要求单元已安装**——命令可以指向上架后才安装的单元，
+ * 否则「先装命令插件、后装它指向的单元」这种正常顺序会被解析器挡住。
+ */
+const UNIT_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const UNIT_ID_MESSAGE = "单元 id 只能用小写字母、数字、点、下划线、连字符，且以字母或数字开头（≤64）";
 
 /** 手写清单里的空字符串条目直接丢弃；非字符串保留，交给内层报类型错误。 */
 function dropBlankEntries<T extends z.ZodTypeAny>(schema: T) {
@@ -237,13 +249,21 @@ const McpServerSpecSchema = z
     });
   });
 
-/** 命令目标：页面 / 本插件技能 / 插件详情（打开自己的详情面板）。 */
+/**
+ * 命令目标：页面 / 本插件技能 / 插件详情 / 设置卡 / 能力单元（d.108 规格附录 A）。
+ *
+ * `settings.card` 的存在性不在这里判：schema 只认形状，卡片目录属于 settings 模块，
+ * 由下面的后置校验统一检查（和 `target.page` 对 `PALETTE_PAGES` 同一思路）。
+ */
 const CommandTargetSchema = z.discriminatedUnion(
   "kind",
   [
     z.object(
       {
-        kind: z.literal("page", typeParams("目标类型缺失", "目标类型必须是 page/skill/plugin")),
+        kind: z.literal(
+          "page",
+          typeParams("目标类型缺失", "目标类型必须是 page/skill/plugin/settings/unit"),
+        ),
         page: z.string(typeParams("缺少页面 id", "页面 id 必须是文本")).trim().min(1, "页面 id 不能为空"),
       },
       typeParams("命令目标必须是 JSON 对象"),
@@ -261,8 +281,29 @@ const CommandTargetSchema = z.discriminatedUnion(
       },
       typeParams("命令目标必须是 JSON 对象"),
     ),
+    z.object(
+      {
+        kind: z.literal("settings"),
+        card: z
+          .string(typeParams("缺少设置卡 id", "设置卡 id 必须是文本"))
+          .trim()
+          .min(1, "设置卡 id 不能为空")
+          .max(64, "设置卡 id 最多 64 字符"),
+      },
+      typeParams("命令目标必须是 JSON 对象"),
+    ),
+    z.object(
+      {
+        kind: z.literal("unit"),
+        unitId: z
+          .string(typeParams("缺少单元 id", "单元 id 必须是文本"))
+          .trim()
+          .regex(UNIT_ID_RE, UNIT_ID_MESSAGE),
+      },
+      typeParams("命令目标必须是 JSON 对象"),
+    ),
   ],
-  typeParams("命令目标必须是 JSON 对象（kind: page / skill / plugin）"),
+  typeParams("命令目标必须是 JSON 对象（kind: page / skill / plugin / settings / unit）"),
 );
 
 const CommandSpecSchema = z.object(
@@ -1059,6 +1100,19 @@ const PluginManifestSchema = z
         });
       }
       seenCommands.add(command.id);
+      // d.108：settings / unit 是 v5 新增目标。旧版清单按既有口径明确拒绝
+      // （与「v3 拒绝 v4 新增字段」一致：不静默接受新字段，也不静默降级）。
+      if (
+        manifest.schemaVersion < 5 &&
+        (command.target.kind === "settings" || command.target.kind === "unit")
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "commands", index, "target", "kind"],
+          message: `schemaVersion ${manifest.schemaVersion} 不支持 ${command.target.kind} 目标，请升级到 schemaVersion 5`,
+        });
+        return;
+      }
       if (command.target.kind === "page" && !PAGE_IDS.has(command.target.page)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -1331,6 +1385,12 @@ function fromV5(parsed: PluginV5ParseResult): PluginManifest {
     if (command.target.kind === "page" && !PAGE_IDS.has(command.target.page)) {
       throw new PluginManifestError(
         `contributions.commands[${index}].target.page：未知页面：${command.target.page}`,
+      );
+    }
+    // d.108：shared 只认形状；设置卡目录在 web，必须在这里补存在性校验。
+    if (command.target.kind === "settings" && !settingsCardById(command.target.card)) {
+      throw new PluginManifestError(
+        `contributions.commands[${index}].target.card：未知设置卡：${command.target.card}`,
       );
     }
   });

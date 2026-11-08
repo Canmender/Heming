@@ -230,16 +230,20 @@ export type PaletteIntentKind =
   /** d.61：命令面板本机搜索 → 记忆条目定位。 */
   | "focus-memory"
   /** d.61：命令面板本机搜索 → 插件卡片定位。 */
-  | "open-plugin";
+  | "open-plugin"
+  /** d.108：命令面板插件命令（target=settings）→ 设置页定位到某张卡。 */
+  | "focus-settings";
 
 /** 意图携带的定位信息（只含 id/层级，不含正文）。 */
 export interface PaletteIntentData {
-  /** open-plugin：插件 id。 */
+  /** open-plugin：插件 id（target=unit 时是单元 id）。 */
   id?: string;
   /** focus-memory：记忆条目 id。 */
   memoryId?: string;
   /** focus-memory：条目所在层（三层记忆）。 */
   layer?: "working" | "episodic" | "semantic";
+  /** focus-settings：设置卡 id（`SETTINGS_CARDS` 的 id）；设置页据此滚动+高亮。 */
+  card?: string;
 }
 
 export interface PaletteIntent {

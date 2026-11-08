@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
 import { KeyStorageCard } from "./KeyStorageCard.js";
@@ -124,6 +124,9 @@ function isSettingsTabId(value: unknown): value is SettingsTabId {
 export function SettingsPage() {
   const settingsTab = useUiStore((s) => s.settingsTab);
   const consumeSettingsTab = useUiStore((s) => s.consumeSettingsTab);
+  /** 命令面板投递的一次性意图（d.108：target=settings → 定位某张卡）。 */
+  const paletteIntent = useUiStore((s) => s.paletteIntent);
+  const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
   const [tab, setTab] = useState<SettingsTabId>(
     isSettingsTabId(settingsTab) ? settingsTab : "profile",
   );
@@ -188,11 +191,21 @@ export function SettingsPage() {
   );
 
   /** 跳到某张卡片：清空查询、切分组、把滚动/高亮交给上面的 effect。 */
-  const jumpToCard = (card: SettingsCardMeta) => {
+  const jumpToCard = useCallback((card: SettingsCardMeta) => {
     setQuery("");
     setTab(card.section);
     setFocusTarget(card.id);
-  };
+  }, []);
+
+  // d.108：命令面板 target=settings → 直达某张卡。消费即清；设置页已挂载时靠 store
+  // 订阅重渲染触发，未挂载时挂载后第一帧消费，两种情况落到同一段滚动+高亮逻辑。
+  useEffect(() => {
+    if (paletteIntent?.kind !== "focus-settings") return;
+    const cardId = paletteIntent.data?.card;
+    const card = cardId ? settingsCardById(cardId) : undefined;
+    if (card) jumpToCard(card);
+    consumePaletteIntent();
+  }, [paletteIntent, consumePaletteIntent, jumpToCard]);
 
   const searching = query.trim().length > 0;
 
