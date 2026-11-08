@@ -136,6 +136,7 @@
 | [specs/2026-11-07-file-panel-and-automation-presets.md](superpowers/specs/2026-11-07-file-panel-and-automation-presets.md) | **文件管理收进智能体页 + 自动化预设**：共享文件面板不再全局常驻（只在智能体页显示），窄窗入口同步收口；自动化新增 4 条一键预设（每日/每2小时/日程/周导出），编辑器保留为自定义入口 |
 | [specs/2026-11-07-installer-branding.md](superpowers/specs/2026-11-07-installer-branding.md) | **安装器品牌化**：NSIS 欢迎页/完成页文案、164×314 侧栏、150×57 页头、多尺寸应用图标；素材由 `scripts/make-installer-assets.py` 生成，附安装行为不变与未做项（签名/深色控件） |
 | [specs/2026-11-07-ui-polish-rounds.md](superpowers/specs/2026-11-07-ui-polish-rounds.md) | **20 轮 UI/UX 自检与优化**（进行中）：按「使用习惯 / 排版 / UI 一致性 / AI 腔文案」逐轮找证据并修复；含轮次看板、每轮问题与修法、验证口径与遗留清单 |
+| [specs/2026-11-08-d111-model-advanced-forms.md](superpowers/specs/2026-11-08-d111-model-advanced-forms.md) | **d.111 模型页高级表单**：来源高级设置（Key/routing/models/请求头/耐心/错误处理/备用）、分组规则（tokens/文件夹/时段/意图）、模型属性（显示名/思考档/协议）；刷新模型目录 |
 | [specs/2026-11-08-d110-usage-and-visual.md](superpowers/specs/2026-11-08-d110-usage-and-visual.md) | **d.110 视觉与用量**：模型页浅灰画布/渐变节点/呼吸枢纽/载波流动/候选链卡片对齐原版观感；新增用量面板（概览/每日柱状图/模型·Agent·账号拆分/最近请求/CSV）；附功能还原度差距清单 |
 | [specs/2026-11-08-d106-model-bridge-fix.md](superpowers/specs/2026-11-08-d106-model-bridge-fix.md) | **d.106 修复模型页「用不了」**：真机定位为命令桥改动未进提交（preload/main 只有旧四方法）；重接六个方法+五通道并加源码级回归守卫；浏览器端降级收口（只读模型/运行，隐藏来源） |
 | [specs/2026-11-08-d104-model-page-three-tabs.md](superpowers/specs/2026-11-08-d104-model-page-three-tabs.md) | **d.104 模型页三分区与动效**：融合成模型/来源/运行；分段控件、行卡片、骨架屏、空态示意；实时链路改为三列卡片 + 0.7s 虚线流动/1.8s 呼吸点/300ms 入场，尊重减少动效 |

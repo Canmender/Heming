@@ -111,6 +111,30 @@ export function ModelPage() {
   const [runId, setRunId] = useState<string | null>(null);
   const [terminalInput, setTerminalInput] = useState("");
   const [groupForm, setGroupForm] = useState({ name: "", models: "", routing: "smart", target: "" });
+  /** 来源高级设置（只在展开某个来源时显示）。 */
+  const [advancedProvider, setAdvancedProvider] = useState<string | null>(null);
+  const [providerForm, setProviderForm] = useState({
+    key: "",
+    routing: "",
+    fallback: "",
+    models: "",
+    modelsUrl: "",
+    headerName: "",
+    headerValue: "",
+    patience: "",
+    errors: "",
+  });
+  /** 路由分组规则（可选）：把某一类请求先交给组里指定模型。 */
+  const [ruleForm, setRuleForm] = useState({
+    group: "",
+    use: "",
+    tokens: "",
+    folders: "",
+    time: "",
+    intent: "",
+  });
+  /** 模型属性（显示名/思考档/协议）。 */
+  const [modelForm, setModelForm] = useState({ model: "", name: "", efforts: "", api: "auto" });
   const [syncKind, setSyncKind] = useState("webdav");
   const [syncCommand, setSyncCommand] = useState("now");
   const [syncValues, setSyncValues] = useState("");
@@ -370,6 +394,59 @@ export function ModelPage() {
                 </p>
               </div>
             )}
+
+            <details className="rounded-[20px] border border-line bg-white p-4">
+              <summary className="cursor-pointer text-[13px] font-bold">模型属性（可选）</summary>
+              <p className="mt-1 ui-caption">改显示名、思考档或请求协议；留空的项不动。</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <input
+                  aria-label="属性模型 ID"
+                  className="ui-input"
+                  placeholder="provider/model"
+                  value={modelForm.model}
+                  onChange={(event) => setModelForm({ ...modelForm, model: event.target.value })}
+                />
+                <input
+                  aria-label="模型显示名"
+                  className="ui-input"
+                  placeholder="显示名"
+                  value={modelForm.name}
+                  onChange={(event) => setModelForm({ ...modelForm, name: event.target.value })}
+                />
+                <input
+                  aria-label="模型思考档"
+                  className="ui-input"
+                  placeholder="思考档，如 low,medium,high"
+                  value={modelForm.efforts}
+                  onChange={(event) => setModelForm({ ...modelForm, efforts: event.target.value })}
+                />
+                <select
+                  aria-label="模型请求协议"
+                  className="ui-input"
+                  value={modelForm.api}
+                  onChange={(event) => setModelForm({ ...modelForm, api: event.target.value })}
+                >
+                  {["auto", "chat", "responses", "anthropic", "gemini"].map((api) => (
+                    <option key={api} value={api}>
+                      {api}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="ui-btn ui-btn-sm ui-btn-primary mt-2"
+                disabled={!cli || !modelForm.model.trim()}
+                onClick={() => {
+                  const model = modelForm.model.trim();
+                  if (modelForm.name.trim()) void run("重命名模型", ["model", "name", model, modelForm.name.trim()], { refresh: true });
+                  else if (modelForm.efforts.trim()) void run("设置思考档", ["model", "efforts", model, modelForm.efforts.trim()], { refresh: true });
+                  else void run("设置协议", ["model", "api", model, modelForm.api], { refresh: true });
+                }}
+              >
+                应用
+              </button>
+            </details>
           </section>
         )}
 
@@ -548,32 +625,177 @@ export function ModelPage() {
               <div className="text-[13px] font-bold">已添加的来源（{providers.length}）</div>
               <ul className="mt-2 divide-y divide-line">
                 {providers.map((row) => (
-                  <li key={row.id} className="flex items-center gap-3 py-2">
-                    <Avatar name={row.kind} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] font-bold">{row.id}</span>
-                      <span className="block ui-caption">
-                        {row.kind}
-                        {row.host ? ` · ${row.host}` : ""}
-                        {row.models !== null ? ` · ${row.models} 个模型` : ""}
+                  <li key={row.id} className="py-2">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={row.kind} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-bold">{row.id}</span>
+                        <span className="block ui-caption">
+                          {row.kind}
+                          {row.host ? ` · ${row.host}` : ""}
+                          {row.models !== null ? ` · ${row.models} 个模型` : ""}
+                        </span>
                       </span>
-                    </span>
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn-sm ui-btn-ghost"
-                      disabled={!cli}
-                      onClick={() => void run("测试来源", ["provider", "test", row.id])}
-                    >
-                      测试
-                    </button>
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn-sm ui-btn-danger"
-                      disabled={!cli}
-                      onClick={() => void run("删除来源", ["provider", "rm", row.id], { refresh: true })}
-                    >
-                      删除
-                    </button>
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn-sm ui-btn-ghost"
+                        disabled={!cli}
+                        aria-expanded={advancedProvider === row.id}
+                        onClick={() =>
+                          setAdvancedProvider((current) => (current === row.id ? null : row.id))
+                        }
+                      >
+                        高级
+                      </button>
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn-sm ui-btn-ghost"
+                        disabled={!cli}
+                        onClick={() => void run("测试来源", ["provider", "test", row.id])}
+                      >
+                        测试
+                      </button>
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn-sm ui-btn-danger"
+                        disabled={!cli}
+                        onClick={() => void run("删除来源", ["provider", "rm", row.id], { refresh: true })}
+                      >
+                        删除
+                      </button>
+                    </div>
+                    {advancedProvider === row.id && (
+                      <div className="rta-enter mt-2 rounded-xl border border-line bg-[#fafafa] p-3">
+                        <div className="text-[12px] font-bold">{row.id} 的高级设置</div>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          <input
+                            aria-label="更新 Key"
+                            className="ui-input"
+                            type="password"
+                            placeholder="换成新的 API Key（留空不改）"
+                            value={providerForm.key}
+                            onChange={(event) => setProviderForm({ ...providerForm, key: event.target.value })}
+                          />
+                          <select
+                            aria-label="来源分发策略"
+                            className="ui-input"
+                            value={providerForm.routing}
+                            onChange={(event) => setProviderForm({ ...providerForm, routing: event.target.value })}
+                          >
+                            <option value="">分发策略（保持默认）</option>
+                            {GROUP_ROUTING.map((routing) => (
+                              <option key={routing} value={routing}>
+                                {routing}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            aria-label="来源模型列表"
+                            className="ui-input"
+                            placeholder="模型 id，逗号分隔（覆盖现有列表）"
+                            value={providerForm.models}
+                            onChange={(event) => setProviderForm({ ...providerForm, models: event.target.value })}
+                          />
+                          <input
+                            aria-label="模型目录地址"
+                            className="ui-input"
+                            placeholder="模型目录 URL（可选）"
+                            value={providerForm.modelsUrl}
+                            onChange={(event) => setProviderForm({ ...providerForm, modelsUrl: event.target.value })}
+                          />
+                          <div className="flex gap-2">
+                            <input
+                              aria-label="请求头名称"
+                              className="ui-input"
+                              placeholder="请求头名（如 X-Trace）"
+                              value={providerForm.headerName}
+                              onChange={(event) => setProviderForm({ ...providerForm, headerName: event.target.value })}
+                            />
+                            <input
+                              aria-label="请求头值"
+                              className="ui-input"
+                              placeholder="请求头值"
+                              value={providerForm.headerValue}
+                              onChange={(event) => setProviderForm({ ...providerForm, headerValue: event.target.value })}
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <input
+                              aria-label="请求耐心"
+                              className="ui-input"
+                              placeholder="耐心（如 2m / off）"
+                              value={providerForm.patience}
+                              onChange={(event) => setProviderForm({ ...providerForm, patience: event.target.value })}
+                            />
+                            <select
+                              aria-label="错误处理"
+                              className="ui-input"
+                              value={providerForm.errors}
+                              onChange={(event) => setProviderForm({ ...providerForm, errors: event.target.value })}
+                            >
+                              <option value="">错误处理（默认）</option>
+                              <option value="magpie">统一处理</option>
+                              <option value="pass">原样透传</option>
+                            </select>
+                          </div>
+                          <input
+                            aria-label="备用模型"
+                            className="ui-input sm:col-span-2"
+                            placeholder="额度用完/故障时改用：provider/model1,provider/model2"
+                            value={providerForm.fallback}
+                            onChange={(event) => setProviderForm({ ...providerForm, fallback: event.target.value })}
+                          />
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="ui-btn ui-btn-sm ui-btn-primary"
+                            disabled={!cli || !providerForm.key.trim()}
+                            onClick={() => void run("更新 Key", ["provider", "key", row.id, providerForm.key.trim()])}
+                          >
+                            更新 Key
+                          </button>
+                          <button
+                            type="button"
+                            className="ui-btn ui-btn-sm ui-btn-primary"
+                            disabled={!cli}
+                            onClick={() => {
+                              const pairs: string[] = [];
+                              if (providerForm.routing) pairs.push(`routing=${providerForm.routing}`);
+                              if (providerForm.models.trim()) pairs.push(`models=${providerForm.models.trim()}`);
+                              if (providerForm.modelsUrl.trim()) pairs.push(`models.url=${providerForm.modelsUrl.trim()}`);
+                              if (providerForm.patience.trim()) pairs.push(`patience=${providerForm.patience.trim()}`);
+                              if (providerForm.errors) pairs.push(`errors=${providerForm.errors}`);
+                              if (providerForm.headerName.trim() && providerForm.headerValue.trim()) {
+                                pairs.push(`header.${providerForm.headerName.trim()}=${providerForm.headerValue.trim()}`);
+                              }
+                              if (!pairs.length) return;
+                              void run("保存来源设置", ["provider", "set", row.id, ...pairs], { refresh: true });
+                            }}
+                          >
+                            保存设置
+                          </button>
+                          <button
+                            type="button"
+                            className="ui-btn ui-btn-sm ui-btn-ghost"
+                            disabled={!cli || !providerForm.fallback.trim()}
+                            onClick={() =>
+                              void run("设置备用", [
+                                "provider",
+                                "fallback",
+                                row.id,
+                                ...providerForm.fallback
+                                  .split(/[,\s]+/)
+                                  .map((item) => item.trim())
+                                  .filter(Boolean),
+                              ])
+                            }
+                          >
+                            保存备用
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </li>
                 ))}
                 {providers.length === 0 && (
@@ -671,6 +893,79 @@ export function ModelPage() {
                 >
                   删除
                 </button>
+              </div>
+
+              <div className="mt-3 border-t border-line pt-3">
+                <div className="text-[12px] font-bold">规则（可选）：把某类请求先交给组里的指定模型</div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <input
+                    aria-label="规则分组"
+                    className="ui-input"
+                    placeholder="分组名"
+                    value={ruleForm.group}
+                    onChange={(event) => setRuleForm({ ...ruleForm, group: event.target.value })}
+                  />
+                  <input
+                    aria-label="规则模型"
+                    className="ui-input"
+                    placeholder="先交给：provider/model"
+                    value={ruleForm.use}
+                    onChange={(event) => setRuleForm({ ...ruleForm, use: event.target.value })}
+                  />
+                  <input
+                    aria-label="规则 token 阈值"
+                    className="ui-input"
+                    placeholder="够长才用：如 150k（可留空）"
+                    value={ruleForm.tokens}
+                    onChange={(event) => setRuleForm({ ...ruleForm, tokens: event.target.value })}
+                  />
+                  <input
+                    aria-label="规则文件夹"
+                    className="ui-input"
+                    placeholder="项目文件夹（逗号分隔，可留空）"
+                    value={ruleForm.folders}
+                    onChange={(event) => setRuleForm({ ...ruleForm, folders: event.target.value })}
+                  />
+                  <input
+                    aria-label="规则时段"
+                    className="ui-input"
+                    placeholder="时段（如 14:00-18:00，可留空）"
+                    value={ruleForm.time}
+                    onChange={(event) => setRuleForm({ ...ruleForm, time: event.target.value })}
+                  />
+                  <input
+                    aria-label="规则意图"
+                    className="ui-input"
+                    placeholder="意图（如 一个简单问题，可留空）"
+                    value={ruleForm.intent}
+                    onChange={(event) => setRuleForm({ ...ruleForm, intent: event.target.value })}
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn-sm ui-btn-primary"
+                    disabled={!cli || !ruleForm.group.trim() || !ruleForm.use.trim()}
+                    onClick={() => {
+                      const args = ["group", "rule", "add", ruleForm.group.trim(), `use=${ruleForm.use.trim()}`];
+                      if (ruleForm.tokens.trim()) args.push(`tokens=${ruleForm.tokens.trim()}`);
+                      if (ruleForm.folders.trim()) args.push(`folders=${ruleForm.folders.trim()}`);
+                      if (ruleForm.time.trim()) args.push(`time=${ruleForm.time.trim()}`);
+                      if (ruleForm.intent.trim()) args.push(`intent=${ruleForm.intent.trim()}`);
+                      void run("保存规则", args);
+                    }}
+                  >
+                    保存规则
+                  </button>
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn-sm ui-btn-ghost"
+                    disabled={!cli || !ruleForm.group.trim()}
+                    onClick={() => void run("查看规则", ["group", "rule", ruleForm.group.trim()])}
+                  >
+                    查看规则
+                  </button>
+                </div>
               </div>
             </details>
 

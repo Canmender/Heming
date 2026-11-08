@@ -183,3 +183,54 @@ describe("ModelPage · 账号与更多", () => {
     expect(calls).toContainEqual(["providers"]);
   });
 });
+
+describe("ModelPage · 高级表单（来源 / 分组规则 / 模型属性）", () => {
+  it("来源高级：更新 Key 与保存设置都走对应命令", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    await screen.findByText("mock");
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+    fireEvent.change(screen.getByLabelText("更新 Key"), { target: { value: "sk-new" } });
+    fireEvent.click(screen.getByRole("button", { name: "更新 Key" }));
+    await waitFor(() => expect(calls).toContainEqual(["provider", "key", "mock", "sk-new"]));
+
+    fireEvent.change(screen.getByLabelText("来源分发策略"), { target: { value: "rotate" } });
+    fireEvent.change(screen.getByLabelText("错误处理"), { target: { value: "pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["provider", "set", "mock", "routing=rotate", "errors=pass"]),
+    );
+  });
+
+  it("分组规则：把「够长的请求」先交给指定模型", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
+    fireEvent.click(screen.getByText("路由分组（可选）"));
+    fireEvent.change(screen.getByLabelText("规则分组"), { target: { value: "daily" } });
+    fireEvent.change(screen.getByLabelText("规则模型"), { target: { value: "mock/mock-model" } });
+    fireEvent.change(screen.getByLabelText("规则 token 阈值"), { target: { value: "150k" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存规则" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual([
+        "group",
+        "rule",
+        "add",
+        "daily",
+        "use=mock/mock-model",
+        "tokens=150k",
+      ]),
+    );
+  });
+
+  it("模型属性：改了显示名就走 model name", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByText("模型属性（可选）"));
+    fireEvent.change(screen.getByLabelText("属性模型 ID"), { target: { value: "mock/mock-model" } });
+    fireEvent.change(screen.getByLabelText("模型显示名"), { target: { value: "Mock 一号" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    await waitFor(() => expect(calls).toContainEqual(["model", "name", "mock/mock-model", "Mock 一号"]));
+  });
+});

@@ -12,6 +12,28 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.111.2.42.0",
+    "date": "2026-11-08",
+    "title": "模型页高级表单：来源设置 / 分组规则 / 模型属性",
+    "bullets": [
+      "更新 Key；分发策略（11 种 routing）；覆盖模型列表；模型目录 URL；",
+      "请求头（header.X-Foo=value）；耐心（patience）；错误处理（magpie|pass）；",
+      "备用模型（fallback）；",
+      "保存后自动刷新模型目录与来源列表。",
+      "规则表单：分组、先交给的模型，以及 tokens/文件夹/时段/意图四个可选条件；",
+      "支持「查看规则」；与分组增删查、策略同处。",
+      "显示名、思考档、请求协议（auto/chat/responses/anthropic/gemini），留空项不动。",
+      "`ModelPage` +3 例（来源命令、规则命令、模型属性命令）；全量 web 门禁与 typecheck 见发版记录。"
+    ],
+    "paragraphs": [
+      "把原版里此前只能在命令行做的三块搬进页面。",
+      "来源高级设置",
+      "分组规则",
+      "模型属性",
+      "验证"
+    ]
+  },
+  {
     "version": "d.110.2.42.0",
     "date": "2026-11-08",
     "title": "视觉贴近原版 + 用量面板",
