@@ -57,8 +57,21 @@ function asLocal(semver) { return fromSemver(semver, "d"); }
 /** 假 autoUpdater：记录调用，按脚本返回结果。 */
 function fakeAutoUpdater({ packaged = true, updateInfo = null, failWith = null } = {}) {
   const calls = { check: 0, download: 0, quitAndInstall: 0 };
+  /** 极简事件总线：electron-updater 是 EventEmitter，这里只需 on/emit/removeListener。 */
+  const handlers = new Map();
   return {
     calls,
+    handlers,
+    on(event, handler) {
+      if (!handlers.has(event)) handlers.set(event, new Set());
+      handlers.get(event).add(handler);
+    },
+    removeListener(event, handler) {
+      handlers.get(event)?.delete(handler);
+    },
+    emit(event, payload) {
+      for (const handler of handlers.get(event) ?? []) handler(payload);
+    },
     isPackaged: packaged,
     updateInfo,
     // 这两个由被测代码直接赋值，测试要读它们的最终值
@@ -239,4 +252,59 @@ test("定时检查可用且不吊住进程", () => {
   const timer = u.scheduleCheck(1000);
   assert.ok(timer);
   u.dispose();
+});
+
+test("下载进度：转发 percent/字节数并落进状态；非下载阶段为 null", async () => {
+  const au = fakeAutoUpdater({ updateInfo: { version: newerSemver() } });
+  const u = createUpdater({ autoUpdater: au, app: { isPackaged: true } });
+  assert.equal(u.getState().progress, null, "未开始下载时不应有进度");
+
+  await u.check();
+  const seen = [];
+  u.subscribe((s) => seen.push({ status: s.status, progress: s.progress }));
+  const pending = u.download();
+  // 模拟 electron-updater 在下载过程中推事件
+  au.emit("download-progress", {
+    percent: 42.5,
+    transferred: 10 * 1024 * 1024,
+    total: 250 * 1024 * 1024,
+    bytesPerSecond: 2 * 1024 * 1024,
+  });
+  const mid = u.getState();
+  assert.equal(mid.status, "downloading");
+  assert.equal(mid.progress.percent, 42.5);
+  assert.equal(mid.progress.total, 250 * 1024 * 1024);
+  assert.ok(
+    seen.some((s) => s.status === "downloading" && s.progress && s.progress.percent === 42.5),
+    "订阅者要收到带进度的状态",
+  );
+  await pending;
+  // 越界值夹紧到 0–100，避免界面进度条宽度算出负数/超宽
+  au.emit("download-progress", { percent: 250, transferred: 1, total: 1, bytesPerSecond: 0 });
+  assert.equal(u.getState().progress.percent, 100);
+});
+
+test("重新检查会清掉上一轮的下载进度", async () => {
+  const au = fakeAutoUpdater({ updateInfo: { version: newerSemver() } });
+  const u = createUpdater({ autoUpdater: au, app: { isPackaged: true } });
+  await u.check();
+  const pending = u.download();
+  au.emit("download-progress", { percent: 10, transferred: 1, total: 10, bytesPerSecond: 1 });
+  assert.equal(u.getState().progress.percent, 10);
+  await pending;
+  await u.check();
+  assert.equal(u.getState().progress, null, "新一轮检查不能带着陈旧的百分比");
+});
+
+test("dispose 会摘掉进度监听，之后事件不再更新状态", async () => {
+  const au = fakeAutoUpdater({ updateInfo: { version: newerSemver() } });
+  const u = createUpdater({ autoUpdater: au, app: { isPackaged: true } });
+  await u.check();
+  const pending = u.download();
+  au.emit("download-progress", { percent: 5, transferred: 1, total: 20, bytesPerSecond: 1 });
+  assert.equal(u.getState().progress.percent, 5);
+  u.dispose();
+  await pending;
+  const handlers = au.handlers.get("download-progress");
+  assert.equal(handlers.size, 0, "dispose 后不应还挂着监听");
 });

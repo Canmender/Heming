@@ -34,6 +34,25 @@ function buttonLabel(state: UpdateState | null, busy: boolean): string {
   }
 }
 
+/** 字节数 → 人类可读（1 位小数，够看就行；进度条不靠它算比例）。 */
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+  if (mb >= 10) return `${Math.round(mb)} MB`;
+  return `${mb.toFixed(1)} MB`;
+}
+
+/** 下载进度的文字说明：百分比 + 已下载/总量 + 速度。 */
+function describeProgress(progress: NonNullable<UpdateState["progress"]>): string {
+  const percent = Math.round(progress.percent);
+  if (progress.total > 0) {
+    const speed = progress.bytesPerSecond > 0 ? ` · ${formatBytes(progress.bytesPerSecond)}/s` : "";
+    return `已下载 ${percent}%（${formatBytes(progress.transferred)} / ${formatBytes(progress.total)}${speed}）`;
+  }
+  return `已下载 ${percent}%`;
+}
+
 /** 状态 → 说明文案。 */
 function describe(state: UpdateState | null): string {
   if (!state) return "点击检查是否有新版本";
@@ -43,7 +62,9 @@ function describe(state: UpdateState | null): string {
     case "available":
       return `发现新版本 ${state.available?.version ?? ""}`;
     case "downloading":
-      return "正在下载，请保持网络连接…";
+      return state.progress
+        ? `正在下载 ${Math.round(state.progress.percent)}%，请保持网络连接…`
+        : "正在下载，请保持网络连接…";
     case "downloaded":
       return "更新已下载完成，重启后生效";
     case "up-to-date":
@@ -107,6 +128,26 @@ export function UpdateCard({ currentVersion }: { currentVersion: string }) {
       </div>
 
       <div className="mt-1 ui-caption">{describe(state)}</div>
+
+      {/* 下载进度条：250MB 量级的包，只给「下载中…」三个字用户不知道是在动还是卡死 */}
+      {state?.status === "downloading" && state.progress && (
+        <div className="mt-2">
+          <div
+            role="progressbar"
+            aria-label="更新下载进度"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(state.progress.percent)}
+            className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--subtle-4)]"
+          >
+            <div
+              className="h-full rounded-full bg-ink transition-[width] duration-200"
+              style={{ width: `${state.progress.percent}%` }}
+            />
+          </div>
+          <div className="mt-1 ui-micro tabular-nums">{describeProgress(state.progress)}</div>
+        </div>
+      )}
 
       {hasUpdate && state?.available && (
         <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2 text-[12px]">

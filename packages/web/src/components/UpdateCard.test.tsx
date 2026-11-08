@@ -51,6 +51,7 @@ const baseState = (over: Partial<UpdateState> = {}): UpdateState => ({
   lastCheckedAt: null,
   lastError: null,
   canDownload: true,
+  progress: null,
   ...over,
 });
 
@@ -69,6 +70,61 @@ describe("UpdateCard", () => {
     render(<UpdateCard currentVersion="d.14.1.3.0" />);
     expect(screen.queryByLabelText("软件更新")).toBeNull();
     expect(screen.queryByLabelText("检查更新")).toBeNull();
+  });
+
+  it("下载中显示进度条：百分比与已下载/总量随主进程推送更新", async () => {
+    const h = makeBridge(
+      baseState({
+        status: "downloading",
+        canDownload: true,
+        available: { version: "d.15.0.0.0" },
+        progress: {
+          percent: 12.5,
+          transferred: 31 * 1024 * 1024,
+          total: 250 * 1024 * 1024,
+          bytesPerSecond: 2 * 1024 * 1024,
+        },
+      }),
+    );
+    window.__heming_update = h.bridge;
+    render(<UpdateCard currentVersion="d.14.1.3.0" />);
+
+    const bar = (await screen.findByRole("progressbar", { name: "更新下载进度" })) as HTMLElement;
+    expect(bar.getAttribute("aria-valuenow")).toBe("13");
+    expect(screen.getByText(/已下载 13%/)).toBeTruthy();
+    expect(screen.getByText(/250 MB/)).toBeTruthy();
+
+    // 主进程继续推送：进度与文案跟着走（不需要用户再点任何东西）
+    await act(async () => {
+      h.push(
+        baseState({
+          status: "downloading",
+          canDownload: true,
+          progress: {
+            percent: 68,
+            transferred: 170 * 1024 * 1024,
+            total: 250 * 1024 * 1024,
+            bytesPerSecond: 3 * 1024 * 1024,
+          },
+        }),
+      );
+    });
+    expect(screen.getByRole("progressbar", { name: "更新下载进度" }).getAttribute("aria-valuenow")).toBe("68");
+    expect(screen.getByText(/已下载 68%/)).toBeTruthy();
+  });
+
+  it("下载完成：进度条消失，按钮变成「重启并安装」", async () => {
+    const h = makeBridge(
+      baseState({
+        status: "downloaded",
+        available: { version: "d.15.0.0.0" },
+        progress: null,
+      }),
+    );
+    window.__heming_update = h.bridge;
+    render(<UpdateCard currentVersion="d.14.1.3.0" />);
+    expect(await screen.findByText("重启并安装")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
   it("有桥时渲染当前版本与检查按钮", async () => {

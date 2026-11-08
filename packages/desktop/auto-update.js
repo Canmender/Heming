@@ -151,6 +151,15 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
   let lastCheckedAt = null;
   let lastError = null;
   let timer = null;
+  /**
+   * 下载进度（electron-updater 的 `download-progress` 事件）。
+   *
+   * 为什么要有：安装包 250MB 量级，下载阶段界面只有「下载中…」三个字，
+   * 用户不知道是在动还是卡死，也不知道还要多久。percent 是 0–100 的数字，
+   * 由 electron-updater 按已接收/总大小算好；这里只负责转发 + 落进状态快照。
+   * 进度只在 downloading 阶段有意义，其它阶段一律 null（避免界面显示陈旧百分比）。
+   */
+  let progress = null;
 
   const listeners = new Set();
 
@@ -165,6 +174,27 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
     }
   };
 
+  /**
+   * 转发下载进度。只在 downloading 阶段采信：electron-updater 在某些路径上
+   * 会先发一次 0% 再开始，也可能在下载完成后补发 100%；状态机以 download() 的
+   * await 结果为准，进度只影响展示。
+   */
+  function onDownloadProgress(payload) {
+    if (!payload || typeof payload !== "object") return;
+    const percent = Number(payload.percent);
+    progress = {
+      percent: Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0,
+      transferred: Number(payload.transferred) || 0,
+      total: Number(payload.total) || 0,
+      bytesPerSecond: Number(payload.bytesPerSecond) || 0,
+    };
+    emit();
+  }
+
+  if (typeof autoUpdater?.on === "function") {
+    autoUpdater.on("download-progress", onDownloadProgress);
+  }
+
   function getState() {
     return {
       status,
@@ -174,6 +204,8 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
       lastError,
       /** 打包后才允许自动下载；开发态永远为 false */
       canDownload: isInstalledOnly(autoUpdater, app),
+      /** 下载进度；非 downloading 阶段为 null。 */
+      progress,
     };
   }
 
@@ -190,6 +222,7 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
    */
   async function check({ silent = false } = {}) {
     if (status === "checking") return getState();
+    progress = null;
     setStatus("checking");
     lastError = null;
 
@@ -233,6 +266,7 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
     }
     if (!available) return getState();
 
+    progress = null;
     setStatus("downloading");
     try {
       await autoUpdater.downloadUpdate();
@@ -268,6 +302,9 @@ function createUpdater({ autoUpdater, app, now = () => Date.now(), log = () => {
     if (timer) clearInterval(timer);
     timer = null;
     listeners.clear();
+    if (typeof autoUpdater?.removeListener === "function") {
+      autoUpdater.removeListener("download-progress", onDownloadProgress);
+    }
   }
 
   return {

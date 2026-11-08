@@ -18,6 +18,16 @@ declare global {
     lastError: string | null;
     /** 是否允许下载（打包后为 true，开发态为 false）。 */
     canDownload: boolean;
+    /**
+     * 下载进度（仅 downloading 阶段有值，其余为 null）。
+     * percent 已由主进程夹紧到 0–100；字节数用于展示「已下载/总量」。
+     */
+    progress: {
+      percent: number;
+      transferred: number;
+      total: number;
+      bytesPerSecond: number;
+    } | null;
   }
 
   interface Window {
