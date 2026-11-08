@@ -146,15 +146,22 @@ export const fetchFiles = () => api<SharedFileMeta[]>("/api/files");
 /** 团队名册：本实例全部注册用户 + 在线态 + 最近活跃。 */
 export const fetchTeam = () => api<TeamRoster>("/api/team");
 
-/** 团队动向流：默认 50 条，`before` 按 occurredAt 倒序翻页。 */
+/**
+ * 团队动向流：默认 50 条，按 `occurredAt DESC, id DESC` 倒序。
+ *
+ * 翻页游标是**组合游标**：`before` 取上一页最后一条的 `occurredAt`；同时间戳可能有多条，
+ * 再带上它的 `id` 作 `beforeId`，否则同刻的剩余条目永远翻不到（老调用只传 `before` 仍可用）。
+ */
 export const fetchTeamActivities = (opts: {
   limit?: number;
   before?: string;
+  beforeId?: string;
   actorId?: string;
 } = {}) => {
   const q = new URLSearchParams();
   if (opts.limit !== undefined) q.set("limit", String(opts.limit));
   if (opts.before) q.set("before", opts.before);
+  if (opts.beforeId) q.set("beforeId", opts.beforeId);
   if (opts.actorId) q.set("actorId", opts.actorId);
   const suffix = q.toString() ? `?${q.toString()}` : "";
   return api<TeamActivityList>(`/api/team/activities${suffix}`);

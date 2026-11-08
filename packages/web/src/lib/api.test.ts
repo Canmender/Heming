@@ -11,6 +11,7 @@ import {
   fetchFileBlobUrl,
   fetchFileBlobText,
   fetchFileUsage,
+  fetchTeamActivities,
   fetchWorkspaceTeams,
   fetchWorkspaceTeam,
   createWorkspaceTeam,
@@ -674,5 +675,55 @@ describe("团队工作台 REST（/api/teams）", () => {
     const missing = await fetchWorkspaceTeam("nope").catch((e: unknown) => e);
     expect((missing as ApiError).status).toBe(404);
     expect((missing as ApiError).message).toBe("团队不存在");
+  });
+});
+
+/** 团队动向流（d.109 A2）：组合游标 before + beforeId 必须真的拼进 query。 */
+describe("团队动向（/api/team/activities）", () => {
+  const jsonRes = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const lastUrl = () => {
+    const spy = vi.mocked(globalThis.fetch);
+    return String(spy.mock.calls[spy.mock.calls.length - 1]![0]);
+  };
+
+  beforeEach(() => {
+    setToken("t1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonRes({ activities: [] }));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setToken(null);
+  });
+
+  it("不带参数 = 裸路径（服务端默认 50 条）", async () => {
+    await fetchTeamActivities();
+    expect(lastUrl()).toBe("/api/team/activities");
+  });
+
+  it("旧调用只传 before / actorId：URL 与原来一致，不出现 beforeId", async () => {
+    await fetchTeamActivities({ limit: 20, before: "2026-11-02T08:00:00.000Z", actorId: "u1" });
+    const url = new URL(lastUrl(), "http://x");
+    expect(url.pathname).toBe("/api/team/activities");
+    expect(url.searchParams.get("limit")).toBe("20");
+    expect(url.searchParams.get("before")).toBe("2026-11-02T08:00:00.000Z");
+    expect(url.searchParams.get("actorId")).toBe("u1");
+    expect(url.searchParams.has("beforeId")).toBe(false);
+  });
+
+  it("组合游标：beforeId 与 before 一起拼进 query", async () => {
+    await fetchTeamActivities({
+      limit: 50,
+      before: "2026-11-02T08:00:00.000Z",
+      beforeId: "act-9",
+    });
+    const url = new URL(lastUrl(), "http://x");
+    expect(url.searchParams.get("limit")).toBe("50");
+    expect(url.searchParams.get("before")).toBe("2026-11-02T08:00:00.000Z");
+    expect(url.searchParams.get("beforeId")).toBe("act-9");
   });
 });

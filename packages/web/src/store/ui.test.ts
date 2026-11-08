@@ -134,6 +134,13 @@ describe("团队动向定位：focusTeamActivity（d.90）", () => {
     // 成员选中是另一条槽：消费动向 id 不应把它清掉
     expect(useUiStore.getState().teamFocusUserId).toBe("u2");
   });
+
+  it("切页（setPage）清掉两个团队定位槽，避免下次进团队页被旧意图钉住", () => {
+    useUiStore.setState({ teamFocusUserId: "u2", teamFocusActivityId: "act-9" });
+    useUiStore.getState().setPage("home");
+    expect(useUiStore.getState().teamFocusUserId).toBeNull();
+    expect(useUiStore.getState().teamFocusActivityId).toBeNull();
+  });
 });
 
 describe("ui store 导航顺序", () => {

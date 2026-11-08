@@ -23,6 +23,7 @@ import {
   useTeamShareStore,
 } from "../lib/team/share.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
+import { activitySummaryLabel } from "../lib/team/labels.js";
 import { useAuthStore } from "../store/auth.js";
 import { useUiStore } from "../store/ui.js";
 import { dayKeyOf, useTokenUsageStore } from "../store/tokenUsage.js";
@@ -128,6 +129,10 @@ export function TeamPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** 从首页点进来的那一条动向：滚动到它并高亮 2.4 秒（一次性，不落盘）。 */
   const [highlightActivityId, setHighlightActivityId] = useState<string | null>(null);
+  /** 深链未命中时的一次性说明（不落盘）。 */
+  const [linkNotice, setLinkNotice] = useState("");
+  /** 成员详情里点「最近动向」的滚动目标：等行渲染出来再滚（筛选可能刚被切回全部）。 */
+  const [scrollToActivityId, setScrollToActivityId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
   /**
@@ -171,7 +176,11 @@ export function TeamPage() {
       try {
         const data = await fetchTeamActivities({
           limit: PAGE_SIZE,
-          ...(!reset && cursor.length ? { before: cursor[cursor.length - 1].occurredAt } : {}),
+          // 游标必须带 id：只按 occurredAt 严格小于翻页，会漏掉与游标同一时刻的剩余条目
+          // （d.109 A2）。beforeId 是可选的新参数，旧服务端会忽略它、行为退回旧口径。
+          ...(!reset && cursor.length
+            ? { before: cursor[cursor.length - 1].occurredAt, beforeId: cursor[cursor.length - 1].id }
+            : {}),
           ...(selectedId ? { actorId: selectedId } : {}),
         });
         setActivities((prev) => {
@@ -353,12 +362,17 @@ export function TeamPage() {
     [activities],
   );
 
-  /** 成员详情升级（d.88）：除了「他是谁」，也给「他最近干了多少」——动向条数 + 排行里的用量。 */
+  /** 成员详情升级（d.88 / d.109）：除了「他是谁」，也给「他最近干了多少、最近三条是什么」——动向条数 + 最近 3 条 + 排行里的用量。 */
   const selectedMemberStats = useMemo(() => {
     if (!selectedMember) return null;
     const recent = humanActivities.filter((a) => a.actorId === selectedMember.user.id);
     const rank = usage?.ranking.find((r) => r.userId === selectedMember.user.id) ?? null;
-    return { recentCount: recent.length, latest: recent[0] ?? null, rank };
+    return {
+      recentCount: recent.length,
+      latest: recent[0] ?? null,
+      recentThree: recent.slice(0, 3),
+      rank,
+    };
   }, [selectedMember, humanActivities, usage]);
 
   const visibleActivities = useMemo(
@@ -367,18 +381,61 @@ export function TeamPage() {
   );
 
   // 首页动向条目 → 定位到那一条：切回「动向」视图、滚到它、临时高亮，读走即清。
+  //
+  // d.109 修复两个回归：
+  // 1) 原来高亮计时器与 consume 在同一个 effect 里——consume 让 focusActivityId 变 null，
+  //    effect 重跑 → cleanup clearTimeout → 高亮再也不褪（d.91 规格要求 2.4s）；
+  // 2) 原来只有命中才消费，条目不在一页/被筛选掉时意图永久残留，之后每次进团队页都被
+  //    强制切到「动向」。
   useEffect(() => {
     if (!focusActivityId) return;
     setTab("feed");
-    // 数据可能还没到/还在筛选中：等可见列表里出现这一条再滚（effect 会随 visibleActivities 重跑）
     const el = document.querySelector(`[data-activity-id="${focusActivityId}"]`);
     if (!el) return;
-    consumeTeamActivityFocus();
     setHighlightActivityId(focusActivityId);
+    consumeTeamActivityFocus();
     el.scrollIntoView({ block: "center" });
+  }, [focusActivityId, visibleActivities, consumeTeamActivityFocus]);
+
+  // 数据已就绪但仍找不到该条：可能是已被清理、超过最近一页，或被当前筛选排除。
+  // 这时消费意图并如实说明，而不是把它留到下一次进团队页再强制切 Tab。
+  // 加载失败时不要走这条兜底：那会把「网络挂了」说成「这条没了」。
+  useEffect(() => {
+    if (!focusActivityId || !feedReady || feedError) return;
+    if (document.querySelector(`[data-activity-id="${focusActivityId}"]`)) return;
+    consumeTeamActivityFocus();
+    setLinkNotice("该动向已不在最近的列表里，已为你打开团队动向。");
+  }, [focusActivityId, feedReady, feedError, visibleActivities, consumeTeamActivityFocus]);
+
+  // 高亮独立计时：跟 focus 消费解耦，2.4 秒后一定褪去。
+  useEffect(() => {
+    if (!highlightActivityId) return;
     const timer = window.setTimeout(() => setHighlightActivityId(null), 2400);
     return () => window.clearTimeout(timer);
-  }, [focusActivityId, visibleActivities, consumeTeamActivityFocus]);
+  }, [highlightActivityId]);
+
+  // 深链说明的消失计时（与 focus 解耦，避免被上面的 cleanup 顺手清掉）。
+  useEffect(() => {
+    if (!linkNotice) return;
+    const timer = window.setTimeout(() => setLinkNotice(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [linkNotice]);
+
+  // 成员详情「最近动向」点击：等筛选切回全部、目标行渲染后再滚动。
+  useEffect(() => {
+    if (!scrollToActivityId) return;
+    const el = document.querySelector(`[data-activity-id="${scrollToActivityId}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    setScrollToActivityId(null);
+  }, [scrollToActivityId, visibleActivities]);
+
+  /** 成员详情里点一条最近动向：切回「全部」筛选、高亮并滚过去。 */
+  const focusActivityRow = (id: string) => {
+    if (filter !== "all") setFilter("all");
+    setHighlightActivityId(id);
+    setScrollToActivityId(id);
+  };
 
 
 
@@ -446,7 +503,12 @@ export function TeamPage() {
     else if (kind === "agenda") updateShare({ agenda: false });
     else updateShare({ usage: false });
     const label = kind === "tasks" ? "任务摘要" : kind === "agenda" ? "日程摘要" : "用量排行";
-    setShareNotice(`已停止上报${label}；之前上传的内容仍留在团队里，可用「清除共享记录」撤回。`);
+    setShareNotice(
+      // 撤回路径必须如实：清理按钮只清团队动向，用量有独立的「清除我的用量」。
+      kind === "usage"
+        ? "已停止上报用量排行；已上传的记录仍在团队排行里，可在「用量」页点「清除我的用量」撤回。"
+        : `已停止上报${label}；之前上传的内容仍留在团队里，可用「清除共享记录」撤回。`,
+    );
     window.setTimeout(() => setShareNotice(""), 6000);
   };
 
@@ -456,7 +518,11 @@ export function TeamPage() {
       title="团队"
       subtitle={
         <>
-          全站一个团队 · {members.length} 名真实成员 · {onlineCount} 人在线 · 今日 {todayCount} 条动向
+          全站一个团队 · {members.length} 名成员 ·{" "}
+          <span title="在线 = 当前打开着和鸣（有实时连接）；关掉即离线">
+            {onlineCount} 人在线
+          </span>{" "}
+          · 今日 {todayCount} 条动向
         </>
       }
       actions={
@@ -478,7 +544,7 @@ export function TeamPage() {
         <div className="bg-[var(--subtle)] px-6 py-2">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <span className="ui-caption">
-              向团队共享（只上报摘要，不含对话与工具参数；关闭只停止上报，不撤回已上传的内容）：
+              向团队共享（只上报标题与状态摘要，不含对话、提示词与工具参数；关闭只停止上报，不撤回已上传的内容）：
             </span>
             <div className="flex items-center gap-3" role="group" aria-label="共享内容">
               <label className="flex items-center gap-1 ui-caption">
@@ -502,7 +568,6 @@ export function TeamPage() {
               <label className="flex items-center gap-1 ui-caption">
                 <input
                   type="checkbox"
-                  aria-label="共享用量"
                   className="h-3.5 w-3.5 accent-[#1a1a1a]"
                   checked={share.usage}
                   onChange={(e) => (e.target.checked ? updateShare({ usage: true }) : turnOffShare("usage"))}
@@ -525,7 +590,7 @@ export function TeamPage() {
               title={
                 shareCount === 0 && !share.lastSyncAt
                   ? "还没有可清除的共享记录"
-                  : "删除你已上传到团队动向/用量排行的全部摘要"
+                  : "删除你已上传到团队动向的全部摘要（用量记录请在「用量」页单独清除）"
               }
               className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted disabled:opacity-40"
               onClick={() => setConfirmClear(true)}
@@ -537,6 +602,9 @@ export function TeamPage() {
             <p role="status" className="mt-1 ui-micro text-[#92400e]">
               {shareNotice}
             </p>
+          )}
+          {shareCount === 0 && (
+            <p className="mt-1 ui-micro">当前未共享任何内容：团队看不到你的任务、日程或用量。</p>
           )}
           {members.length <= 1 && (
             <p className="mt-1 ui-micro">
@@ -651,36 +719,66 @@ export function TeamPage() {
 
         <main className="flex min-w-0 flex-1 flex-col">
           {tab !== "board" && tab !== "workspace" && selectedMember && (
-            <div className="flex items-center gap-3 border-b border-line-soft bg-white px-6 py-2.5">
-              <Avatar user={selectedMember.user} size={32} />
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate ui-section-title">
-                    {selectedMember.user.displayName}
-                  </span>
-                  <span className="truncate ui-caption">
-                    @{selectedMember.user.username}
-                  </span>
+            <div className="border-b border-line-soft bg-white px-6 py-2.5">
+              <div className="flex items-center gap-3">
+                <Avatar user={selectedMember.user} size={32} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate ui-section-title">
+                      {selectedMember.user.displayName}
+                    </span>
+                    <span className="truncate ui-caption">
+                      @{selectedMember.user.username}
+                    </span>
+                  </div>
+                  <div className="ui-caption">
+                    {selectedMember.online ? "在线" : fmtLastSeen(selectedMember.lastSeenAt)}
+                    {selectedMemberStats
+                      ? ` · 近 ${rangeDays} 天动向 ${selectedMemberStats.recentCount} 条`
+                      : ""}
+                    {selectedMemberStats?.rank
+                      ? ` · 用量 ${fmtTokens(selectedMemberStats.rank.tokens)}`
+                      : share.usage
+                        ? " · 用量暂无"
+                        : " · 用量未共享"}
+                  </div>
                 </div>
-                <div className="ui-caption">
-                  {selectedMember.online ? "在线" : fmtLastSeen(selectedMember.lastSeenAt)}
-                  {selectedMemberStats
-                    ? ` · 近 ${rangeDays} 天动向 ${selectedMemberStats.recentCount} 条`
-                    : ""}
-                  {selectedMemberStats?.rank
-                    ? ` · 用量 ${fmtTokens(selectedMemberStats.rank.tokens)}`
-                    : share.usage
-                      ? " · 用量暂无"
-                      : " · 用量未共享"}
-                </div>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted"
+                  onClick={() => setSelectedId(null)}
+                >
+                  返回全部
+                </button>
               </div>
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-muted"
-                onClick={() => setSelectedId(null)}
-              >
-                返回全部
-              </button>
+              {/* 成员详情升级（d.109）：从「只是个筛选器」变成「他最近在做什么」——
+                  近 3 条可点（点了在动向里高亮那条），没有就不编。 */}
+              {selectedMemberStats && (
+                <div className="mt-2">
+                  <span className="ui-caption">最近动向</span>
+                  {selectedMemberStats.recentThree.length === 0 ? (
+                    <p className="mt-0.5 ui-micro">该成员还没有可显示的动向。</p>
+                  ) : (
+                    <ul className="mt-0.5 space-y-0.5">
+                      {selectedMemberStats.recentThree.map((a) => (
+                        <li key={a.id}>
+                          <button
+                            type="button"
+                            onClick={() => focusActivityRow(a.id)}
+                            className="flex w-full items-baseline gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-[var(--subtle-2)]"
+                          >
+                            <span className="shrink-0 ui-chip">{KIND_LABEL[a.kind]}</span>
+                            <span className="min-w-0 flex-1 truncate text-[12px]">{a.title}</span>
+                            <time dateTime={a.occurredAt} className="shrink-0 ui-caption">
+                              {fmtTime(a.occurredAt)}
+                            </time>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -712,9 +810,20 @@ export function TeamPage() {
 
           {tab === "workspace" && <TeamWorkspace />}
 
-          {/* 看板：d.67 从独立页并进来的视图，自己取数、自己筛选，只借用这里的 Tab 位。
-              条件渲染意味着切走即卸载（轮询停止），不会在别的视图里偷偷占用带宽。 */}
-          {tab === "board" && <TeamBoardView />}
+          {/* 看板：d.67 从独立页并进来的视图；d.109 起改为受控视图——数据、名册、
+              选中成员都由本页提供，不再自己取数/轮询，两套成员筛选天然互通。 */}
+          {tab === "board" && (
+            <TeamBoardView
+              members={members}
+              onlineCount={onlineCount}
+              activities={humanActivities}
+              selectedId={selectedId}
+              onSelectMember={setSelectedId}
+              ready={feedReady}
+              error={feedError}
+              onRetry={() => void loadFeed(true)}
+            />
+          )}
 
           {tab === "feed" && (
             <>
@@ -740,6 +849,11 @@ export function TeamPage() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {linkNotice && (
+              <p role="status" className="mb-2 rounded-lg border border-line-soft bg-[var(--subtle)] px-2.5 py-1.5 text-[11px] leading-5 text-muted">
+                {linkNotice}
+              </p>
+            )}
             {!feedReady ? (
               <div role="status" aria-busy="true" aria-label="正在加载团队动向" className="space-y-2">
                 {[0, 1, 2].map((i) => (
@@ -776,27 +890,36 @@ export function TeamPage() {
                       highlightActivityId === a.id ? "bg-[var(--subtle-3)] ring-1 ring-[var(--line-strong)]" : ""
                     }`}
                   >
-                    <Avatar user={avatarOf(a.actorId)} size={26} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-1.5">
-                        <span className="shrink-0 ui-body-sm font-medium">
-                          {nameOf(a.actorId)}
+                    {/* 行可点 = 选中该成员（与首页/看板一致）；button 保证键盘可达。 */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(a.actorId)}
+                      className="flex w-full items-start gap-3 text-left"
+                    >
+                      <Avatar user={avatarOf(a.actorId)} size={26} />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline gap-1.5">
+                          <span className="shrink-0 ui-body-sm font-medium">
+                            {nameOf(a.actorId)}
+                          </span>
+                          <span className="ui-chip">
+                            {KIND_LABEL[a.kind]}
+                          </span>
+                          <span className="truncate ui-body-sm">{a.title}</span>
+                          <time
+                            dateTime={a.occurredAt}
+                            className="ml-auto shrink-0 ui-caption"
+                          >
+                            {fmtTime(a.occurredAt)}
+                          </time>
                         </span>
-                        <span className="ui-chip">
-                          {KIND_LABEL[a.kind]}
-                        </span>
-                        <span className="truncate ui-body-sm">{a.title}</span>
-                        <time
-                          dateTime={a.occurredAt}
-                          className="ml-auto shrink-0 ui-caption"
-                        >
-                          {fmtTime(a.occurredAt)}
-                        </time>
-                      </div>
-                      {a.detail && (
-                        <p className="mt-0.5 truncate ui-caption">{a.detail}</p>
-                      )}
-                    </div>
+                        {activitySummaryLabel(a) && (
+                          <span className="mt-0.5 block truncate ui-caption">
+                            {activitySummaryLabel(a)}
+                          </span>
+                        )}
+                      </span>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -823,10 +946,21 @@ export function TeamPage() {
           {tab === "agenda" && (
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
               <p className="rounded-lg border border-line-soft bg-[var(--subtle)] px-2.5 py-2 text-[11px] leading-5 text-muted">
-                团队日程只收成员共享的日程摘要（标题 + 到期档位）；不含日程正文、证据与发送人。
+                团队日程只显示成员共享的日程标题与到期档位；不含日程正文与来源信息。
               </p>
               {!feedReady ? (
                 <p role="status" className="mt-3 ui-caption">加载中…</p>
+              ) : feedError ? (
+                <div className="py-10 text-center text-[12px]">
+                  <p role="alert" className="text-[#b42318]">日程加载失败：{feedError}</p>
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
+                    onClick={() => void loadFeed(true)}
+                  >
+                    重试
+                  </button>
+                </div>
               ) : agendaActivities.length === 0 ? (
                 <div className="py-10 text-center text-[12px] leading-6 text-muted">
                   {!infohubRunning ? (
@@ -876,8 +1010,8 @@ export function TeamPage() {
                             {fmtTime(a.occurredAt)}
                           </time>
                         </div>
-                        {a.detail && (
-                          <p className="mt-0.5 truncate ui-caption">{a.detail}</p>
+                        {activitySummaryLabel(a) && (
+                          <p className="mt-0.5 truncate ui-caption">{activitySummaryLabel(a)}</p>
                         )}
                       </div>
                     </li>
@@ -891,7 +1025,7 @@ export function TeamPage() {
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="ui-caption leading-5">
-                  只统计 token 数、模型名与连接名；提示词、对话内容、工具参数与结果都不出本机。
+                  只统计日期、模型名、连接名与 token 数；不含提示词、对话内容与工具参数。
                 </span>
                 <div className="ml-auto flex items-center gap-1" role="group" aria-label="用量区间">
                   {(["7d", "30d"] as TeamUsageRange[]).map((r) => (
@@ -932,7 +1066,7 @@ export function TeamPage() {
                   <h2 className="ui-section-title">本机用量（仅自己可见）</h2>
                   <p className="mt-1 text-[11px] leading-5 text-muted">
                     「用量」共享未开启：不上传、不采集，全站排行也不会显示。开启后会同步近 30 天的
-                    白名单摘要（自然日 / 模型 / 连接名 / token 数 / 未上报轮数）。
+                    聚合摘要（自然日 / 模型 / 连接名 / token 数 / 未上报轮数）。
                   </p>
                   <div className="mt-2 flex flex-wrap items-baseline gap-4 text-[12px]">
                     <span>
@@ -1023,12 +1157,22 @@ export function TeamPage() {
                           <li key={row.userId} className="flex items-baseline gap-2">
                             <span className="w-5 shrink-0 tabular-nums text-muted">{i + 1}.</span>
                             <span
-                              className={`truncate ${
+                              className={`min-w-0 truncate ${
                                 row.userId === me?.id ? "font-bold" : "font-medium"
                               }`}
                             >
-                              {row.displayName}
-                              {row.userId === me?.id ? "（我）" : ""}
+                              {/* 排行行可点 = 选中该成员并切到动向（与名册同一行为）。 */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedId(row.userId);
+                                  setTab("feed");
+                                }}
+                                className="max-w-full truncate text-left hover:underline"
+                              >
+                                {row.displayName}
+                                {row.userId === me?.id ? "（我）" : ""}
+                              </button>
                             </span>
                             <span className="ml-auto shrink-0 tabular-nums">
                               {fmtTokens(row.tokens)}
@@ -1078,6 +1222,8 @@ export function TeamPage() {
         >
           <p className="text-[12px] leading-6">
             会删除你已上传到团队动向的全部摘要；共享开关保持不变，之后的新动向仍会继续同步。
+            <br />
+            用量记录不在这里清除——请到「用量」页点「清除我的用量」。
           </p>
         </ConfirmDialog>
       )}

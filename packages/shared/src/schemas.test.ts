@@ -17,6 +17,7 @@ import {
   ReencryptBodySchema,
   TeamActivityInputSchema,
   CreateTeamActivitiesBodySchema,
+  CreateTeamTaskBodySchema,
   TeamRosterSchema,
   TeamActivityListSchema,
   TeamUsageInputSchema,
@@ -248,6 +249,80 @@ describe("团队契约", () => {
     expect(TeamActivityInputSchema.safeParse({ kind: "task", title: "x".repeat(201), sourceId: "s", occurredAt: iso }).success).toBe(false);
     expect(TeamActivityInputSchema.safeParse({ kind: "task", title: "t", sourceId: "s", occurredAt: "nope" }).success).toBe(false);
     expect(TeamActivityInputSchema.safeParse({ kind: "task", title: "t", sourceId: "s".repeat(201), occurredAt: iso }).success).toBe(false);
+  });
+
+  it("动向输入：task/agenda 的 detail/status 只能是状态摘要（d.109 C1 写侧收紧）", () => {
+    const base = { title: "t", sourceId: "s", occurredAt: iso };
+    // 合法摘要：与 share.ts 实际输出一字不差
+    for (const [detail, status] of [
+      ["任务 · 进行中", "running"],
+      ["任务 · 已完成", "done"],
+      ["任务 · 失败", "failed"],
+      ["任务 · 已中断", "cancelled"],
+    ]) {
+      expect(TeamActivityInputSchema.safeParse({ ...base, kind: "task", detail, status }).success).toBe(true);
+    }
+    for (const [detail, status] of [
+      ["日程 · 已逾期", "overdue"],
+      ["日程 · 今天到期", "today"],
+      ["日程 · 24 小时内到期", "next24h"],
+    ]) {
+      expect(TeamActivityInputSchema.safeParse({ ...base, kind: "agenda", detail, status }).success).toBe(true);
+    }
+    // detail/status 都是可选的：只报标题也合法
+    expect(TeamActivityInputSchema.safeParse({ ...base, kind: "task" }).success).toBe(true);
+    expect(TeamActivityInputSchema.safeParse({ ...base, kind: "agenda" }).success).toBe(true);
+
+    // 自由文本 / 状态串不合法 → 拒绝，文案是给人看的中文
+    const badDetail = TeamActivityInputSchema.safeParse({ ...base, kind: "task", detail: "这是正文……" });
+    expect(badDetail.success).toBe(false);
+    if (!badDetail.success) {
+      expect(badDetail.error.issues[0]?.message).toBe("只接受标题与状态摘要");
+      expect(badDetail.error.issues[0]?.path).toEqual(["detail"]);
+    }
+    const badTaskStatus = TeamActivityInputSchema.safeParse({ ...base, kind: "task", status: "todo" });
+    expect(badTaskStatus.success).toBe(false);
+    if (!badTaskStatus.success) {
+      expect(badTaskStatus.error.issues[0]?.message).toBe("只接受标题与状态摘要");
+    }
+    // 精确集合而不是正则：夹带后缀的「任务 · 进行中（正文）」也不放过
+    expect(
+      TeamActivityInputSchema.safeParse({ ...base, kind: "task", detail: "任务 · 进行中（正文）" }).success,
+    ).toBe(false);
+    expect(TeamActivityInputSchema.safeParse({ ...base, kind: "agenda", detail: "日程 · 明天到期" }).success).toBe(false);
+    expect(TeamActivityInputSchema.safeParse({ ...base, kind: "agenda", status: "later" }).success).toBe(false);
+    // 其他 kind（agent/staff/join）保持自由文本现状
+    expect(
+      TeamActivityInputSchema.safeParse({ ...base, kind: "agent", detail: "和小鸣聊了 3 轮", status: "ok" }).success,
+    ).toBe(true);
+  });
+
+  it("读侧不校验旧数据：detail 是收紧前写入的自由文本也照样读出", () => {
+    expect(
+      TeamActivityListSchema.safeParse({
+        activities: [
+          {
+            id: "x",
+            actorId: "u1",
+            kind: "agenda",
+            title: "旧日程",
+            detail: "这是正文……",
+            status: "whatever",
+            sourceId: "s",
+            occurredAt: iso,
+            createdAt: iso,
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("创建任务契约接受交付物（d.109 A1）", () => {
+    expect(CreateTeamTaskBodySchema.safeParse({ title: "写落地页" }).success).toBe(true);
+    expect(CreateTeamTaskBodySchema.safeParse({ title: "写落地页", attachmentFileId: "f9" }).success).toBe(true);
+    expect(CreateTeamTaskBodySchema.safeParse({ title: "写落地页", attachmentFileId: null }).success).toBe(true);
+    // 空串不是合法文件 id（与 PATCH 的 UpdateTeamTaskBodySchema 同口径）
+    expect(CreateTeamTaskBodySchema.safeParse({ title: "写落地页", attachmentFileId: "" }).success).toBe(false);
   });
 
   it("批量写入 1..50 条", () => {

@@ -61,8 +61,8 @@ export type HitlMode = "strict" | "guarded" | "trusted";
 /** 策略作用域：按智能体分别授权 / 所有智能体共用一份授权。 */
 export type PolicyScope = "per-agent" | "global";
 
-/** 工具来源：MCP 外部服务 / 自我修改 / 图表 / 去 AI 味 / 认不出来。 */
-export type HitlSource = "mcp" | "self" | "chart" | "tone" | "unknown";
+/** 工具来源：MCP 外部服务 / 自我修改 / 图表 / 去 AI 味 / 团队工作台 / 认不出来。 */
+export type HitlSource = "mcp" | "self" | "chart" | "tone" | "team" | "unknown";
 
 /**
  * 策略层判定结果。

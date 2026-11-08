@@ -192,6 +192,55 @@ for (const f of factories) {
       expect(() => store.addTeamActivity("nope", { ...base, sourceId: "x" })).toThrow("user not found");
     });
 
+    it("团队动向：同 occurredAt 按 id DESC 稳定排序，beforeId 组合游标不丢不重", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const at = "2026-11-03T08:00:00.000Z";
+      for (const sid of ["task:a", "task:b", "task:c"]) {
+        store.addTeamActivity(a.id, { kind: "task", title: sid, sourceId: sid, occurredAt: at });
+      }
+
+      // 同刻不再靠插入序：两实现统一 occurredAt DESC, id DESC（曾一升一降）
+      const all = store.listTeamActivities();
+      expect(all).toHaveLength(3);
+      const ids = all.map((x) => x.id);
+      expect(ids).toEqual([...ids].sort().reverse());
+
+      // limit=2 分两页：合集三条、无重复、第二页严格在游标之后
+      const page1 = store.listTeamActivities({ limit: 2 });
+      expect(page1).toHaveLength(2);
+      const last = page1[1]!;
+      const page2 = store.listTeamActivities({
+        limit: 2,
+        before: last.occurredAt,
+        beforeId: last.id,
+      });
+      expect(page2).toHaveLength(1);
+      const union = [...page1, ...page2].map((x) => x.id);
+      expect(union).toHaveLength(3);
+      expect(new Set(union).size).toBe(3);
+      expect(page2[0]!.id < last.id).toBe(true);
+
+      // 旧客户端只传 before（无 beforeId）= 旧语义：同刻条目整体被跳过
+      expect(store.listTeamActivities({ before: at })).toEqual([]);
+    });
+
+    it("团队任务：创建时写入交付物（两实现同语义，d.109 A1）", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const team = store.createWorkspaceTeam(a.id, { name: "课程组" });
+      const withFile = store.createTeamTask(team.team.id, a.id, {
+        title: "带交付物",
+        attachmentFileId: "file-123",
+      });
+      expect(withFile).toMatchObject({ title: "带交付物", attachmentFileId: "file-123" });
+      const id = (withFile as { id: string }).id;
+      // 快照读回同一条：SQLite 与内存都不能把它丢成 null
+      const snap = store.getWorkspaceTeam(team.team.id, a.id)!;
+      expect(snap.tasks.find((t) => t.id === id)?.attachmentFileId).toBe("file-123");
+
+      const plain = store.createTeamTask(team.team.id, a.id, { title: "无交付物" });
+      expect(plain).toMatchObject({ attachmentFileId: null });
+    });
+
     it("团队用量：(actor, date, model) 覆盖式幂等、区间读、未知用户抛错", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       const b = store.createUser("bob", "h", "鲍勃");

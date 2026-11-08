@@ -426,8 +426,12 @@ const IsoTimeSchema = z
  *
  * 白名单字段是刻意的：正文、提示词、工具参数、任务结果、日程证据都不在契约里，
  * 服务端无从接收，客户端也无处夹带。
+ *
+ * ★ `detail` / `status` 不是自由文本：对 task/agenda 两类，它们只能是**标题与状态摘要**
+ *（服务端白名单见下方 `TASK_ACTIVITY_*` / `AGENDA_ACTIVITY_*`）。这样「不含正文」的
+ * 隐私承诺不再只靠客户端自觉——客户端即使想夹带也过不了闸。
  */
-export const TeamActivityInputSchema = z.object({
+const TeamActivityBaseSchema = z.object({
   kind: TeamActivityKindSchema,
   title: z.string().min(1).max(200),
   detail: z.string().max(500).optional(),
@@ -436,9 +440,59 @@ export const TeamActivityInputSchema = z.object({
   sourceId: z.string().min(1).max(200),
   occurredAt: IsoTimeSchema,
 });
-export type TeamActivityInput = z.infer<typeof TeamActivityInputSchema>;
+export type TeamActivityInput = z.infer<typeof TeamActivityBaseSchema>;
 
-export const TeamActivitySchema = TeamActivityInputSchema.extend({
+/** 任务摘要的合法 detail（与 `lib/team/share.ts` 的 `TASK_STATUS_LABEL` 一字不差）。 */
+const TASK_ACTIVITY_DETAILS = new Set([
+  "任务 · 进行中",
+  "任务 · 已完成",
+  "任务 · 失败",
+  "任务 · 已中断",
+]);
+/** 任务摘要的合法 status。 */
+const TASK_ACTIVITY_STATUSES = new Set(["running", "done", "failed", "cancelled"]);
+/** 日程摘要的合法 detail（与 `lib/team/share.ts` 的 `BUCKET_LABEL` 一字不差）。 */
+const AGENDA_ACTIVITY_DETAILS = new Set([
+  "日程 · 已逾期",
+  "日程 · 今天到期",
+  "日程 · 24 小时内到期",
+]);
+/** 日程摘要的合法 status。 */
+const AGENDA_ACTIVITY_STATUSES = new Set(["overdue", "today", "next24h"]);
+
+/** 摘要被拒时的统一中文文案（400 直接透给用户，不暴露字段路径）。 */
+const ACTIVITY_SUMMARY_ONLY = "只接受标题与状态摘要";
+
+/**
+ * 写侧动向输入：`kind` 为 task / agenda 时，`detail` 与 `status` 只能取状态摘要白名单
+ * （用精确集合而不是正则——正则容易放过「任务 · 进行中（正文…）」这类夹带）。
+ * 其他 kind（agent / staff / join）保持自由文本现状。
+ */
+export const TeamActivityInputSchema = TeamActivityBaseSchema.superRefine((v, ctx) => {
+  if (v.kind === "task") {
+    if (v.detail !== undefined && !TASK_ACTIVITY_DETAILS.has(v.detail)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["detail"], message: ACTIVITY_SUMMARY_ONLY });
+    }
+    if (v.status !== undefined && !TASK_ACTIVITY_STATUSES.has(v.status)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["status"], message: ACTIVITY_SUMMARY_ONLY });
+    }
+  } else if (v.kind === "agenda") {
+    if (v.detail !== undefined && !AGENDA_ACTIVITY_DETAILS.has(v.detail)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["detail"], message: ACTIVITY_SUMMARY_ONLY });
+    }
+    if (v.status !== undefined && !AGENDA_ACTIVITY_STATUSES.has(v.status)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["status"], message: ACTIVITY_SUMMARY_ONLY });
+    }
+  }
+});
+
+/**
+ * 读侧动向（服务端输出）：**不套用上面那条写侧白名单**。
+ *
+ * 老库存里可能已经有收紧前写入的自由文本，读出来再校验只会让整条列表 500；
+ * 展示层按 `status` 派生标签、不直出 `detail`（见 `lib/team/labels.ts`）。
+ */
+export const TeamActivitySchema = TeamActivityBaseSchema.extend({
   id: z.string().min(1),
   actorId: z.string().min(1),
   createdAt: IsoTimeSchema,
@@ -712,6 +766,8 @@ export const CreateTeamTaskBodySchema = z.object({
   planId: z.string().trim().min(1).nullable().optional(),
   assigneeId: z.string().trim().min(1).nullable().optional(),
   dueAt: IsoTimeSchema.nullable().optional(),
+  /** 交付物（共享文件库里的文件 id）；与 PATCH 的 `attachmentFileId` 同口径。 */
+  attachmentFileId: z.string().trim().min(1).nullable().optional(),
 });
 export type CreateTeamTaskBody = z.infer<typeof CreateTeamTaskBodySchema>;
 

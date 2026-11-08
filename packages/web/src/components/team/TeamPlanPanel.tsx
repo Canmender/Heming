@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { TeamItemStatus, TeamPlanItem, TeamWorkspaceSnapshot } from "@heming/shared";
 import {
   createTeamPlan,
@@ -7,6 +7,7 @@ import {
   updateTeamPlan,
 } from "../../lib/api.js";
 import { FOCUS_RING } from "../../lib/a11y/focus.js";
+import { ConfirmDialog } from "../ConfirmDialog.js";
 
 /** 方案项状态的中文与流转顺序（点一下切下一档，与任务一致）。 */
 export const PLAN_STATUS_LABEL: Record<TeamItemStatus, string> = {
@@ -52,6 +53,10 @@ export function TeamPlanPanel({
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
   const [adding, setAdding] = useState(false);
+  /** 待删除方案：先出应用内确认框，确认后才真的发请求（取消不发）。 */
+  const [pendingDelete, setPendingDelete] = useState<TeamPlanItem | null>(null);
+  /** 打开确认框时焦点落在「取消」：误按回车不会执行破坏性操作。 */
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
 
   const refresh = async () => onChanged(await fetchWorkspaceTeam(teamId));
 
@@ -86,13 +91,19 @@ export function TeamPlanPanel({
   };
 
   const remove = async (plan: TeamPlanItem) => {
-    if (!window.confirm(`删除方案「${plan.title}」？挂在它下面的任务会保留，但不再归属方案。`)) return;
     try {
       await deleteTeamPlan(teamId, plan.id);
       await refresh();
     } catch (err) {
       onError(err instanceof Error && err.message ? err.message : "删除方案失败");
     }
+  };
+
+  const confirmRemove = async () => {
+    const plan = pendingDelete;
+    if (!plan) return;
+    setPendingDelete(null);
+    await remove(plan);
   };
 
   return (
@@ -178,7 +189,7 @@ export function TeamPlanPanel({
                 type="button"
                 aria-label={`删除方案 ${plan.title}`}
                 className="shrink-0 text-[11px] text-muted hover:text-[var(--danger)]"
-                onClick={() => void remove(plan)}
+                onClick={() => setPendingDelete(plan)}
               >
                 删除
               </button>
@@ -186,6 +197,36 @@ export function TeamPlanPanel({
           ))}
         </ol>
       )}
+      {pendingDelete ? (
+        <ConfirmDialog
+          title="删除方案"
+          onCancel={() => setPendingDelete(null)}
+          initialFocusRef={cancelRef}
+          footer={
+            <>
+              <button
+                type="button"
+                ref={cancelRef}
+                className="ui-btn ui-btn-md ui-btn-ghost"
+                onClick={() => setPendingDelete(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn-md ui-btn-danger"
+                onClick={() => void confirmRemove()}
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            删除方案「{pendingDelete.title}」？方案本身删除后不可恢复；挂在它下面的任务会保留，但会解绑为「不挂方案」。
+          </p>
+        </ConfirmDialog>
+      ) : null}
     </section>
   );
 }

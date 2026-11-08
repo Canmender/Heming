@@ -16,6 +16,8 @@ import {
   uploadFile,
 } from "../../lib/api.js";
 import { NEXT_STATUS } from "./TeamPlanPanel.js";
+import { ConfirmDialog } from "../ConfirmDialog.js";
+import { fmtLocalDateTime, isOverdue } from "../../lib/format/datetime.js";
 
 const STATUS_LABEL: Record<TeamItemStatus, string> = {
   todo: "待开始",
@@ -67,6 +69,10 @@ export function TeamTaskPanel({
   const [uploading, setUploading] = useState(false);
   const [attachment, setAttachment] = useState<SharedFileMeta | null>(null);
   const [filter, setFilter] = useState<TaskFilter>("open");
+  /** 待删除任务：先出应用内确认框，确认后才真的发请求（取消不发）。 */
+  const [pendingDelete, setPendingDelete] = useState<TeamTask | null>(null);
+  /** 打开确认框时焦点落在「取消」：误按回车不会执行破坏性操作。 */
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const planName = useMemo(
@@ -165,13 +171,19 @@ export function TeamTaskPanel({
   };
 
   const remove = async (task: TeamTask) => {
-    if (!window.confirm(`删除任务「${task.title}」？不可恢复。`)) return;
     try {
       await deleteTeamTask(teamId, task.id);
       await refresh();
     } catch (err) {
       onError(err instanceof Error ? err.message : "删除任务失败");
     }
+  };
+
+  const confirmRemove = async () => {
+    const task = pendingDelete;
+    if (!task) return;
+    setPendingDelete(null);
+    await remove(task);
   };
 
   return (
@@ -342,7 +354,7 @@ export function TeamTaskPanel({
                   type="button"
                   aria-label={`删除任务 ${task.title}`}
                   className="shrink-0 text-[11px] text-muted hover:text-[var(--danger)]"
-                  onClick={() => void remove(task)}
+                  onClick={() => setPendingDelete(task)}
                 >
                   删除
                 </button>
@@ -356,7 +368,16 @@ export function TeamTaskPanel({
                 ) : (
                   <span>待认领</span>
                 )}
-                {task.dueAt && <span>截止 {task.dueAt.slice(0, 16).replace("T", " ")}</span>}
+                {task.dueAt && (
+                  <span>
+                    截止 {fmtLocalDateTime(task.dueAt)}
+                    {task.status !== "done" && isOverdue(task.dueAt) ? (
+                      <span className="ml-1 rounded-full border border-[var(--danger-line)] bg-[var(--danger-soft)] px-1.5 py-0.5 text-[10px] text-[var(--danger)]">
+                        已逾期
+                      </span>
+                    ) : null}
+                  </span>
+                )}
                 <span className="inline-flex items-center gap-1">
                   交付物：
                   {task.attachmentFileId ? (
@@ -383,6 +404,37 @@ export function TeamTaskPanel({
           ))}
         </ul>
       )}
+      {pendingDelete ? (
+        <ConfirmDialog
+          title="删除任务"
+          onCancel={() => setPendingDelete(null)}
+          initialFocusRef={cancelRef}
+          footer={
+            <>
+              <button
+                type="button"
+                ref={cancelRef}
+                className="ui-btn ui-btn-md ui-btn-ghost"
+                onClick={() => setPendingDelete(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn-md ui-btn-danger"
+                onClick={() => void confirmRemove()}
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <p className="text-[12px] leading-6">
+            删除任务「{pendingDelete.title}」？删除后不可恢复，负责人与截止时间等信息会一起消失。
+            交付物文件仍保留在共享文件库。
+          </p>
+        </ConfirmDialog>
+      ) : null}
     </section>
   );
 }

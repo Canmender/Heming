@@ -103,8 +103,21 @@ const DANGER_WORDS =
 /** 读意图启发（优先级 3.5，仅在危险词也没命中时使用）。 */
 const READ_WORDS = /get|list|read|fetch|query|search|view/i;
 
-/** 参数摘要优先读取的字段（按顺序取第一个命中的）。 */
-const SUMMARY_FIELDS = ["path", "file", "url", "query", "name", "server"];
+/**
+ * 参数摘要优先读取的字段（按顺序取第一个命中的）。
+ *
+ * ★ 这张表**同时被 `ruleResource` 复用**（「记住允许」的规则资源）：
+ * 新增字段会同时收窄规则粒度。`title` / `team_id` 排在末尾，是为了只影响
+ * 团队工作台这类本来没有可识别目标字段的工具（原先退化成通配 `*`）；
+ * 已有字段（path/url/query…）的匹配顺序与规则口径保持原样。
+ */
+const SUMMARY_FIELDS = ["path", "file", "url", "query", "name", "server", "title", "team_id"];
+
+/**
+ * 「记住允许」的规则资源键：团队工具优先按 `team_id`（同一团队记住一次，而不是按标题，
+ * 标题几乎每次都不同，会把规则碎片化）。其余工具沿用摘要字段的顺序。
+ */
+const RULE_RESOURCE_FIELDS = ["team_id", ...SUMMARY_FIELDS];
 
 /**
  * 字段名本身像敏感信息。
@@ -146,6 +159,7 @@ const SOURCE_PREFIX: { prefix: string; source: HitlSource }[] = [
   { prefix: "self_", source: "self" },
   { prefix: "chart_", source: "chart" },
   { prefix: "tone_", source: "tone" },
+  { prefix: "team_", source: "team" },
 ];
 
 /** 工具名 → 中文动作名（给人看）。 */
@@ -167,6 +181,16 @@ const DISPLAY_NAMES: Record<string, string> = {
   chart_types: "查询图表类型",
   chart_render: "生成图表",
   tone_detect: "检测 AI 味",
+  // 团队工作台（d.109 D1）：9 个 team_* 工具，弹窗里不再显示「外部工具 team_task_add」
+  team_list: "列出团队",
+  team_get: "查看团队",
+  team_create: "创建团队",
+  team_update: "修改团队",
+  team_member_add: "添加成员",
+  team_plan_add: "添加方案",
+  team_plan_update: "更新方案",
+  team_task_add: "派任务",
+  team_task_update: "更新任务",
 };
 
 /** 前缀兜底的中文动作名。 */
@@ -177,6 +201,8 @@ const PREFIX_DISPLAY: { prefix: string; label: string }[] = [
   { prefix: "self_mcp_", label: "MCP 配置操作" },
   { prefix: "chart_", label: "图表操作" },
   { prefix: "tone_", label: "文本检测" },
+  // 兜底：以后新增的 team_* 工具也不会掉回「外部工具」
+  { prefix: "team_", label: "团队操作" },
 ];
 
 /** 未知工具的兜底显示名。 */
@@ -357,7 +383,7 @@ export function summarizeArgs(argsJson: string): string {
  */
 export function ruleResource(argsJson: string): string {
   const args = parseArgs(argsJson);
-  for (const field of SUMMARY_FIELDS) {
+  for (const field of RULE_RESOURCE_FIELDS) {
     const value = args[field];
     if (typeof value !== "string" || !value.trim()) continue;
     if (isSensitive(field, value)) return "*";

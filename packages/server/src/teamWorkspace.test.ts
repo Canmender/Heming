@@ -342,6 +342,42 @@ describe("团队工作台 REST", () => {
     expect(del.status).toBe(204);
   });
 
+  it("创建任务支持交付物（d.109 A1）：带 attachmentFileId 落库并出现在团队快照里", async () => {
+    const team = await createTeam(alice.token);
+
+    // 带交付物创建 → 201 原样返回 id（原先被 zod strip 静默丢成 null）
+    const created = await request(app)
+      .post(`/api/teams/${team.team.id}/tasks`)
+      .set(auth(alice.token))
+      .send({ title: "带交付物", attachmentFileId: "file-123" });
+    expect(created.status).toBe(201);
+    expect(created.body.attachmentFileId).toBe("file-123");
+
+    // 快照（GET /api/teams/:id）能看到同一条任务带了交付物
+    const snap = await request(app).get(`/api/teams/${team.team.id}`).set(auth(alice.token));
+    expect(snap.status).toBe(200);
+    const inSnap = (snap.body.tasks as Array<{ id: string; attachmentFileId: string | null }>).find(
+      (t) => t.id === created.body.id,
+    );
+    expect(inSnap?.attachmentFileId).toBe("file-123");
+
+    // 不传 → null（无交付物的任务行为不变）
+    const plain = await request(app)
+      .post(`/api/teams/${team.team.id}/tasks`)
+      .set(auth(alice.token))
+      .send({ title: "无交付物" });
+    expect(plain.status).toBe(201);
+    expect(plain.body.attachmentFileId).toBeNull();
+
+    // 显式 null 也合法（表单清空时客户端会这么传）
+    const explicitNull = await request(app)
+      .post(`/api/teams/${team.team.id}/tasks`)
+      .set(auth(alice.token))
+      .send({ title: "显式 null", attachmentFileId: null });
+    expect(explicitNull.status).toBe(201);
+    expect(explicitNull.body.attachmentFileId).toBeNull();
+  });
+
   it("级联删除：删团队后 GET 404、列表为空、成员身份一并清掉", async () => {
     const team = await createTeam(alice.token);
     await request(app)

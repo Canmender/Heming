@@ -10,10 +10,13 @@ import { inflateRawSync } from "node:zlib";
  *
  * 限制（全部为硬拒绝，不是截断）：
  * - zip 总字节 ≤ 5MB；单文件解压后 ≤ 1MB；文件数 ≤ 200；解压总量 ≤ 16MB（zip bomb 兜底）；
- * - 拒绝路径穿越（`..`、绝对路径、盘符、NUL）、加密条目、ZIP64、未知压缩方法。
+ * - 拒绝路径穿越（`..`、绝对路径、盘符、NUL）、加密条目、ZIP64、未知压缩方法；
+ * - **拒绝重复条目**（同归一化 path 只允许出现一次：否则 `SKILL.md` 可能被后一条覆盖，
+ *   造成「声明一个、实际另一个」）；
+ * - **校验 CRC32**（store 与 deflate 两条路径都比对中央目录 CRC；central 与 local 不一致按损坏拒绝，
+ *   仅当条目声明 data descriptor（flag bit 3）时允许 local 的 crc 为 0）。
  *
- * 不校验 CRC：上游包由虾评生成，这里的目标是「安全地解出内容」，不是完整性校验；
- * 完整性由 HTTP 层的 `Content-Length`/长度上限与调用方的 sha256 记录负责。
+ * 校验上限与 CRC 的目标是「安全且不歧义地解出内容」；调用方仍应以 HTTP 层 sha256 作为最终指纹。
  */
 
 /** zip 字节上限（与技能社区契约 `SkillHubDownload.size` 上限一致）。 */
@@ -38,6 +41,7 @@ export type ZipErrorCode =
   | "too_large"
   | "too_many_entries"
   | "unsafe_path"
+  | "duplicate_entry"
   | "unsupported";
 
 /** 解包失败（调用方据此映射 HTTP 状态；消息可直接给用户看中文）。 */
@@ -73,8 +77,7 @@ function findEndOfCentralDirectory(buffer: Buffer): number {
 }
 
 /** 包内路径归一化 + 穿越守卫。 */
-function normalizeEntryPath(raw: string): string {
-  if (!raw || raw.includes("\0")) throw new ZipError("ZIP 条目路径含非法字符", "unsafe_path");
+function normalizeEntryPath(raw: string): string {  if (!raw || raw.includes("\0")) throw new ZipError("ZIP 条目路径含非法字符", "unsafe_path");
   if (raw.length > MAX_PATH_LENGTH) throw new ZipError("ZIP 条目路径过长", "unsafe_path");
   const unified = raw.replace(/\\/g, "/");
   if (unified.startsWith("/") || /^[A-Za-z]:/.test(unified)) {
@@ -88,7 +91,32 @@ function normalizeEntryPath(raw: string): string {
   return segments.join("/");
 }
 
-/** 读一个条目的解压后内容：只支持 STORE(0) / DEFLATE(8)。 */
+/** CRC32（IEEE 802.3）：zip 用的就是这一种；表预先按 256 项生成。 */
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < 256; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes: Buffer): number {
+  let value = 0xffffffff;
+  for (let index = 0; index < bytes.length; index += 1) {
+    value = CRC_TABLE[(value ^ bytes[index]) & 0xff] ^ (value >>> 8);
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * 读一个条目的解压后内容：只支持 STORE(0) / DEFLATE(8)，两条路径都做 CRC 校验。
+ *
+ * `expectedCrc` 来自中央目录；local header 的 crc 必须与之一致（data descriptor 条目除外）。
+ */
 function readEntryData(
   buffer: Buffer,
   localOffset: number,
@@ -96,9 +124,16 @@ function readEntryData(
   method: number,
   uncompressedSize: number,
   path: string,
+  expectedCrc: number,
+  flags: number,
 ): Buffer {
   if (localOffset + 30 > buffer.length || buffer.readUInt32LE(localOffset) !== LOCAL_SIGNATURE) {
     throw new ZipError(`ZIP 条目头损坏：${path}`, "invalid_zip");
+  }
+  const localCrc = buffer.readUInt32LE(localOffset + 14);
+  const usesDataDescriptor = (flags & 0x8) !== 0;
+  if (!usesDataDescriptor && localCrc !== expectedCrc) {
+    throw new ZipError(`ZIP 条目 CRC 头不一致：${path}`, "invalid_zip");
   }
   const nameLength = buffer.readUInt16LE(localOffset + 26);
   const extraLength = buffer.readUInt16LE(localOffset + 28);
@@ -107,22 +142,27 @@ function readEntryData(
   if (dataEnd > buffer.length) throw new ZipError(`ZIP 条目数据越界：${path}`, "invalid_zip");
   const compressed = buffer.subarray(dataStart, dataEnd);
 
+  let data: Buffer;
   if (method === 0) {
     if (compressed.length > MAX_ZIP_ENTRY_BYTES) {
       throw new ZipError(`ZIP 条目超过单文件上限（1MB）：${path}`, "too_large");
     }
-    return Buffer.from(compressed);
+    data = Buffer.from(compressed);
+  } else if (method === 8) {
+    try {
+      data = inflateRawSync(compressed, { maxOutputLength: MAX_ZIP_ENTRY_BYTES + 1 });
+    } catch {
+      throw new ZipError(`ZIP 条目解压失败：${path}`, "invalid_zip");
+    }
+    if (data.length > MAX_ZIP_ENTRY_BYTES || uncompressedSize > MAX_ZIP_ENTRY_BYTES) {
+      throw new ZipError(`ZIP 条目超过单文件上限（1MB）：${path}`, "too_large");
+    }
+  } else {
+    throw new ZipError(`不支持的 ZIP 压缩方法（${method}）：${path}`, "unsupported");
   }
-  if (method !== 8) throw new ZipError(`不支持的 ZIP 压缩方法（${method}）：${path}`, "unsupported");
 
-  let data: Buffer;
-  try {
-    data = inflateRawSync(compressed, { maxOutputLength: MAX_ZIP_ENTRY_BYTES + 1 });
-  } catch {
-    throw new ZipError(`ZIP 条目解压失败：${path}`, "invalid_zip");
-  }
-  if (data.length > MAX_ZIP_ENTRY_BYTES || uncompressedSize > MAX_ZIP_ENTRY_BYTES) {
-    throw new ZipError(`ZIP 条目超过单文件上限（1MB）：${path}`, "too_large");
+  if (crc32(data) !== expectedCrc) {
+    throw new ZipError(`ZIP 条目 CRC 校验失败：${path}`, "invalid_zip");
   }
   return data;
 }
@@ -155,6 +195,7 @@ export function readZipEntries(buffer: Buffer): ZipEntry[] {
   }
 
   const entries: ZipEntry[] = [];
+  const seenPaths = new Set<string>();
   let totalUncompressed = 0;
   let offset = centralOffset;
 
@@ -164,6 +205,7 @@ export function readZipEntries(buffer: Buffer): ZipEntry[] {
     }
     const flags = buffer.readUInt16LE(offset + 8);
     const method = buffer.readUInt16LE(offset + 10);
+    const crc = buffer.readUInt32LE(offset + 16);
     const compressedSize = buffer.readUInt32LE(offset + 20);
     const uncompressedSize = buffer.readUInt32LE(offset + 24);
     const nameLength = buffer.readUInt16LE(offset + 28);

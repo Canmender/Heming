@@ -46,7 +46,8 @@ const STATUS_ENUM = {
 
 const SHARED_HEAD =
   "这是「用户自建的团队工作台」（用户自己建的团队：名字、目标、方案、任务、成员），" +
-  "不是团队页那个「全站团队动向」。只操作用户自己的团队，不涉及全站名册与动向摘要。";
+  "不是团队页那个「全站团队动向」。只操作用户自己的团队，不涉及全站名册与动向摘要。" +
+  "若本轮工具列表里看不到 team_*，先调用 tool_search 搜「团队」再继续。";
 
 export const TEAM_TOOLS: TeamToolSpec[] = [
   {
@@ -181,6 +182,7 @@ export const TEAM_TOOLS: TeamToolSpec[] = [
         assigneeId: str("指给谁做：团队成员的 userId（必须是成员；不传 = 待认领）。"),
         planId: str("归属哪条方案（不传 = 独立任务）。"),
         dueAt: str("截止时间（ISO，例如 2026-11-10T18:00:00.000Z；不传 = 没定）。"),
+        attachmentFileId: str("交付物文件 id（来自共享文件库，可选）。"),
       },
       required: ["team_id", "title"],
     },
@@ -511,6 +513,7 @@ export function buildTeamToolBridge(): ToolBridge {
             const assigneeId = argOptStr(args, "assigneeId");
             const planId = argOptStr(args, "planId");
             const dueAt = argOptStr(args, "dueAt");
+            const attachmentFileId = argOptStr(args, "attachmentFileId");
             return write(async () => {
               const task = await createTeamTask(teamId, {
                 title,
@@ -518,6 +521,7 @@ export function buildTeamToolBridge(): ToolBridge {
                 ...(assigneeId ? { assigneeId } : {}),
                 ...(planId ? { planId } : {}),
                 ...(dueAt ? { dueAt } : {}),
+                ...(attachmentFileId ? { attachmentFileId } : {}),
               });
               // 指派了人时顺带确认它确实是成员，便于模型下一步引用。
               if (!task.assigneeId) return formatTask(task, []);
