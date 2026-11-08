@@ -177,6 +177,22 @@ function validate(file) {
     } catch (err) {
       return { error: `打包失败：${err.message}` };
     }
+    /**
+     * 发布前用**安装口径**复验（审计 P0-1 的收尾）：未签名 / 首方签名不符 /
+     * `packageSha256` 与 files/** 不一致的包，绝不能进目录。之前这里只做了
+     * 结构校验，导致「未签名包被发布、用户端才拒绝」；现在坏包在发布机就失败。
+     */
+    try {
+      const { readPackage } = require("../packages/desktop/plugin-package.js");
+      const check = readPackage(packageBytes, {
+        allowDevKeys: process.env.HEMING_ALLOW_DEV_PLUGIN_KEYS === "1",
+      });
+      if (!check.ok) {
+        return { error: `界面插件包未通过安装口径校验：${check.errors.join("；")}` };
+      }
+    } catch (err) {
+      return { error: `界面插件包复验失败：${err instanceof Error ? err.message : String(err)}` };
+    }
     return {
       ...base,
       bundle: {

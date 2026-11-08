@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.113.3.46.0",
+    "date": "2026-11-08",
+    "title": "发布更稳：坏插件包不会再发出去",
+    "bullets": [
+      "发布界面插件时会先按\"安装时的标准\"完整复验一遍（签名、包内容摘要、资源完整性）；不合格的包直接拦在发布机上，不会再出现\"能下载、装不上\"。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.113.3.45.0",
     "date": "2026-11-08",
     "title": "安全修复 + 插件\"健康检查/一键修复\"",

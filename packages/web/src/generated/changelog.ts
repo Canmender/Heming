@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.113.3.46.0",
+    "date": "2026-11-08",
+    "title": "发布链路补一道闸：未签名/摘要不符的界面插件包不得进目录",
+    "bullets": [
+      "发布前改用**安装口径**复验（`readPackage`：解包配额 / 路径 / 清单 / 首方验签 /`packageSha256` 重算 / entry 存在性）：不合格 → 直接非 0 退出并打印具体原因，不写目标目录。",
+      "反向实测：把签名从清单里去掉再发布 → `[失败] … 未通过首方签名（publisher: 未知），已拒绝安装：未签名`，exit 1。",
+      "本地目录已用签名版 `heming.pet 1.0.2` 重新发布（`plugins-catalog/heming.pet/1.0.2`，tgz sha256 `2d5e7cfb…05ee`，`readPackage ✓`）；该目录不入库，部署时同步到服务器 `HEMING_PLUGIN_DIR`。"
+    ],
+    "paragraphs": [
+      "d.113 收尾时发现：`publish-plugin.mjs` 对界面插件只做结构校验就打包发布，**未签名或 `packageSha256` 与 `files/**` 不一致的包会被发进目录，直到用户安装时才被拒绝**。"
+    ]
+  },
+  {
     "version": "d.113.3.45.0",
     "date": "2026-11-08",
     "title": "第二轮对抗审计修复（P0 数据外泄链）+ 插件健康检查/修复",
