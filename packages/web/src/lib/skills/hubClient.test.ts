@@ -188,6 +188,7 @@ describe("fetchHubDetail / downloadHubSkill / registerHubAccount", () => {
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(`${BASE}/api/skill-hub/register`);
     expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["x-heming-client"]).toBe("1");
     expect(JSON.parse(String(init.body))).toEqual({ name: "snake" });
   });
 });

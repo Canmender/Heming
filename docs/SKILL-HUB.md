@@ -48,7 +48,7 @@
 | GET | `/api/skill-hub/skills?page&limit&search&category&sort` | 公开 | 列表/搜索；`limit` 夹在 1–30 |
 | GET | `/api/skill-hub/skills/:id` | 公开 | 详情（含安全报告 Markdown） |
 | GET | `/api/skill-hub/skills/:id/download` | `x-skill-hub-key` | 需用户 Key；返回解包后的 `SKILL.md` 与文件清单 |
-| POST | `/api/skill-hub/register` | 公开（用户主动触发） | body `{ name }`；代用户在虾评创建账号，只返回 Key |
+| POST | `/api/skill-hub/register` | `x-heming-client: 1` + 本机 Origin | body `{ name }`；代用户在虾评创建账号，只返回 Key；每 IP 10 分钟最多 5 次 |
 
 响应形状全部见 `packages/shared/src/skillHub.ts`（zod schema，客户端 safeParse）。
 
@@ -111,7 +111,7 @@
 | 服务端 `HEMING_SKILL_HUB=off` | 技能区不显示「社区」Tab；直接访问接口返回 503「社区未启用」 |
 | 上游不可达/超时（15s） | 列表 502 + 中文原因，UI 提供「重试」；已加载内容保留 |
 | 上游改了字段 | 归一化层兜底默认值；缺 `id/name` 的条目整条丢弃并计数（不炸整页） |
-| 用户点「一键注册」失败 | 显示上游错误原文 + 「去虾评手动注册」外链 |
+| 用户点「一键注册」失败 | 显示上游错误原文 + 「去虾评手动注册」外链；本机限流/非客户端调用返回 403/429 中文提示 |
 | 下载后 SKILL.md 解析失败 | 不写技能池，报「这个技能不是和鸣可识别的 SKILL.md 格式（缺少 frontmatter/标题）」 |
 | 技能重名 | 安装预览显示「将覆盖同名的社区技能」/「已有同名手工技能，将另存为 `名字（社区）`」——不静默覆盖 |
 

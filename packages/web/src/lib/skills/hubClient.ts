@@ -172,7 +172,8 @@ export async function registerHubAccount(
     `${baseUrlOf(deps)}/api/skill-hub/register`,
     {
       method: "POST",
-      headers: { ...JSON_HEADERS, "content-type": "application/json" },
+      // 服务端要求 x-heming-client（防跨站/脚本批量建号；见 server skillHub.ts）。
+      headers: { ...JSON_HEADERS, "content-type": "application/json", "x-heming-client": "1" },
       body: JSON.stringify({ name }),
     },
     deps,
