@@ -4,6 +4,7 @@ import { buildInfohubToolsIfConnected } from "../infohub/tools.js";
 import { buildToolBridge } from "../mcp/index.js";
 import { mcpRegistry } from "../mcp/store.js";
 import { memoryStore } from "../memory/index.js";
+import { buildPluginToolBridge } from "../plugins/tools.js";
 import { makePluginToolFilter } from "../plugins/toolCeiling.js";
 import { buildSelfToolBridge } from "../selfEdit/index.js";
 import { skillPool } from "../skills/index.js";
@@ -66,6 +67,19 @@ export const infohubProvider: CapabilityProvider = {
   id: "infohub",
   origin: "builtin",
   build: () => buildInfohubToolsIfConnected(),
+};
+
+/**
+ * 插件市场只读工具（d.108 · 规格 §9）：`plugin_market_search` / `plugin_install_preview`。
+ *
+ * 免批：两者都只读索引/清单，不写存储、不碰主进程安装器；写路径（`plugin_install`）
+ * 留给 HITL，不在此提供。始终注入——市场索引不可用时工具自己降级为
+ * `{ unavailable: true, reason }`，不需要按连接状态决定是否出现。
+ */
+export const pluginMarketProvider: CapabilityProvider = {
+  id: "plugin-market",
+  origin: "plugin",
+  build: () => buildPluginToolBridge(),
 };
 
 /**

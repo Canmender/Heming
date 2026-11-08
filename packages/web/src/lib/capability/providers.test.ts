@@ -17,6 +17,7 @@ describe("内置能力提供者", () => {
       ["wiki", "builtin"],
       ["files", "builtin"],
       ["infohub", "builtin"],
+      ["plugin-market", "plugin"],
       ["team", "builtin"],
       ["self", "self"],
     ]);
