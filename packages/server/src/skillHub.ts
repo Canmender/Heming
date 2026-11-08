@@ -61,6 +61,10 @@ const SKILL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const API_KEY_RE = /^[A-Za-z0-9._-]{8,200}$/;
 /** 注册用户名白名单：中英文、数字、空格、下划线、连字符（防控制字符/HTML/路径注入）。 */
 const REGISTER_NAME_RE = /^[\p{L}\p{N}_ -]{1,128}$/u;
+/** 零宽字符：不可见却能让「同名」看起来不同（或藏内容），注册名一律拒绝。 */
+const ZERO_WIDTH_RE = /[\u200B\u200C\u200D\uFEFF]/;
+const REGISTER_NAME_RULE =
+  "名称不合法：去除首尾空白后 1–128 个字符，只能包含中英文、数字、空格、下划线或连字符；不允许零宽字符";
 /** 资源 id 只允许简单字符，避免拼 URL 时的编码歧义。 */
 const UPSTREAM_SORT_RE = /^[a-z_]{1,20}$/;
 
@@ -406,6 +410,8 @@ interface CacheEntry<T> {
 /** 极简 TTL + LRU 缓存：只放公开只读数据（下载/注册/带 Key 的请求永不经过它）。 */
 function createTtlCache<T>(options: { ttlMs: number; max: number; now: () => number }) {
   const entries = new Map<string, CacheEntry<T>>();
+  /** single-flight：同 key 并发只跑一个 loader，其余 await 同一个 promise。 */
+  const inflight = new Map<string, Promise<T>>();
   return {
     get(key: string): T | null {
       const hit = entries.get(key);
@@ -426,6 +432,27 @@ function createTtlCache<T>(options: { ttlMs: number; max: number; now: () => num
       }
       entries.set(key, { value, expiresAt: options.now() + options.ttlMs });
     },
+    /**
+     * 命中缓存直接返回；冷缓存时同 key 的并发调用共享同一次 loader。
+     * loader 抛错 → **不缓存**、in-flight 清理，下一次请求可重试（失败不会被钉死）。
+     */
+    async getOrLoad(key: string, loader: () => Promise<T>): Promise<T> {
+      const cached = this.get(key);
+      if (cached !== null) return cached;
+      const pending = inflight.get(key);
+      if (pending) return pending;
+      const promise = (async () => {
+        try {
+          const value = await loader();
+          this.set(key, value);
+          return value;
+        } finally {
+          inflight.delete(key);
+        }
+      })();
+      inflight.set(key, promise);
+      return promise;
+    },
     get size(): number {
       return entries.size;
     },
@@ -434,6 +461,22 @@ function createTtlCache<T>(options: { ttlMs: number; max: number; now: () => num
 
 function queryText(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+/**
+ * 注册名归一化（P2）：先 trim，再把连续空白折叠成单个空格；随后拒绝零宽字符、
+ * 非白名单字符，以及**按码点**超过 128 的名字（`String.length` 是 UTF-16 码元，emoji/生僻字会误判）。
+ */
+function normalizeRegisterName(raw: unknown): { ok: true; name: string } | { ok: false } {
+  if (typeof raw !== "string") return { ok: false };
+  // U+FEFF 在 JS 里算 `\s`（会被折叠成空格），所以零宽检查必须在折叠**之前**做。
+  if (ZERO_WIDTH_RE.test(raw)) return { ok: false };
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (!collapsed) return { ok: false };
+  if (ZERO_WIDTH_RE.test(collapsed)) return { ok: false };
+  if ([...collapsed].length > 128) return { ok: false };
+  if (!REGISTER_NAME_RE.test(collapsed)) return { ok: false };
+  return { ok: true, name: collapsed };
 }
 
 /**
@@ -483,6 +526,19 @@ interface UpstreamResponse {
   body: unknown;
   /** 上游 `Retry-After`（429 时可能带；只透传数值/HTTP-date 文本，不回显英文栈）。 */
   retryAfter: string | null;
+}
+
+/** 列表 loader 内部错误：携带要映射回客户端的状态码/文案；single-flight 的等待者会拿到同一个失败。 */
+class SkillHubUpstreamError extends Error {
+  readonly status: number;
+  readonly retryAfter: string | null;
+
+  constructor(status: number, message: string, retryAfter: string | null = null) {
+    super(message);
+    this.name = "SkillHubUpstreamError";
+    this.status = status;
+    this.retryAfter = retryAfter;
+  }
 }
 
 export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
@@ -551,15 +607,19 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
   }
 
   /** 上游连通性探测：分类接口成功才认为 reachable（成功结果缓存 10 分钟）。 */
+  /**
+   * 分类探测（10 分钟缓存 + single-flight）：并发冷缓存时只打一次上游。
+   * 失败抛错（不缓存），由调用方统一转成 `reachable:false` / 502。
+   */
   async function fetchCategories(): Promise<string[] | null> {
-    const cached = categoriesCache.get("categories");
-    if (cached) return cached;
     try {
-      const upstream = await callUpstream("/api/categories", { timeoutMs: 8_000 });
-      if (upstream.status !== 200 || !isObject(upstream.body) || upstream.body.success !== true) return null;
-      const categories = textList(upstream.body.data, 40, 32);
-      categoriesCache.set("categories", categories);
-      return categories;
+      return await categoriesCache.getOrLoad("categories", async () => {
+        const upstream = await callUpstream("/api/categories", { timeoutMs: 8_000 });
+        if (upstream.status !== 200 || !isObject(upstream.body) || upstream.body.success !== true) {
+          throw new SkillHubUpstreamError(502, "分类接口不可用");
+        }
+        return textList(upstream.body.data, 40, 32);
+      });
     } catch {
       return null;
     }
@@ -577,51 +637,52 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
     const rawSort = queryText(req.query.sort, 20);
     const sort = rawSort && UPSTREAM_SORT_RE.test(rawSort) ? rawSort : "";
     const cacheKey = JSON.stringify([page, limit, search, category, sort]);
-    const cached = listCache.get(cacheKey);
-    if (cached) {
-      // 命中缓存时 fetchedAt 保持「数据实际拉取时间」，不刷新成 now。
-      res.json(cached);
-      return;
-    }
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (search) params.set("search", search);
     if (category) params.set("category", category);
     if (sort) params.set("sort", sort);
 
-    let upstream: UpstreamResponse;
     try {
-      upstream = await callUpstream(`/api/skills?${params.toString()}`);
-    } catch {
+      // 命中缓存时 fetchedAt 保持「数据实际拉取时间」；冷缓存的并发请求共享同一次上游调用。
+      const result = await listCache.getOrLoad(cacheKey, async () => {
+        let upstream: UpstreamResponse;
+        try {
+          upstream = await callUpstream(`/api/skills?${params.toString()}`);
+        } catch {
+          throw new SkillHubUpstreamError(502, UNAVAILABLE);
+        }
+        if (upstream.status === 429) {
+          throw new SkillHubUpstreamError(429, "上游限流，请稍后重试", upstream.retryAfter);
+        }
+        if (upstream.status !== 200 || !isObject(upstream.body)) {
+          throw new SkillHubUpstreamError(502, UNAVAILABLE);
+        }
+        if (upstream.body.success === false) {
+          throw new SkillHubUpstreamError(502, messageOf(upstream.body) ?? UNAVAILABLE);
+        }
+        const rawSkills = Array.isArray(upstream.body.skills) ? upstream.body.skills : [];
+        const skills = rawSkills
+          .map(normalizeSkill)
+          .filter((skill): skill is SkillHubSkill => skill !== null);
+        const total = count(upstream.body.total);
+        const hasMore =
+          typeof upstream.body.hasMore === "boolean" ? upstream.body.hasMore : total > page * limit;
+        return {
+          skills,
+          total,
+          hasMore,
+          fetchedAt: new Date(now()).toISOString(),
+        } satisfies SkillHubPage;
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof SkillHubUpstreamError) {
+        if (error.status === 429) failRateLimited(res, error.retryAfter, error.message);
+        else fail(res, error.status, error.message);
+        return;
+      }
       fail(res, 502, UNAVAILABLE);
-      return;
     }
-    if (upstream.status === 429) {
-      failRateLimited(res, upstream.retryAfter);
-      return;
-    }
-    if (upstream.status !== 200 || !isObject(upstream.body)) {
-      fail(res, 502, UNAVAILABLE);
-      return;
-    }
-    if (upstream.body.success === false) {
-      fail(res, 502, messageOf(upstream.body) ?? UNAVAILABLE);
-      return;
-    }
-    const rawSkills = Array.isArray(upstream.body.skills) ? upstream.body.skills : [];
-    const skills = rawSkills
-      .map(normalizeSkill)
-      .filter((skill): skill is SkillHubSkill => skill !== null);
-    const total = count(upstream.body.total);
-    const hasMore =
-      typeof upstream.body.hasMore === "boolean" ? upstream.body.hasMore : total > page * limit;
-    const result: SkillHubPage = {
-      skills,
-      total,
-      hasMore,
-      fetchedAt: new Date(now()).toISOString(),
-    };
-    listCache.set(cacheKey, result);
-    res.json(result);
   }
 
   async function handleDetail(req: Request, res: Response): Promise<void> {
@@ -806,11 +867,12 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
       return;
     }
     const body = isObject(req.body) ? req.body : null;
-    const name = typeof body?.name === "string" ? body.name.trim() : "";
-    if (!name || name.length > 128 || !REGISTER_NAME_RE.test(name)) {
-      fail(res, 400, "名称不合法：1–128 个字符，只能包含中英文、数字、空格、下划线或连字符");
+    const normalized = normalizeRegisterName(body?.name);
+    if (!normalized.ok) {
+      fail(res, 400, REGISTER_NAME_RULE);
       return;
     }
+    const name = normalized.name;
     if (registerLimited(req)) {
       fail(res, 429, "创建账号过于频繁，请稍后再试");
       return;

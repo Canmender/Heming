@@ -29,7 +29,7 @@ interface MockCall {
   init?: RequestInit;
 }
 
-function makeFetch(handler: (url: string, init?: RequestInit) => MockResult) {
+function makeFetch(handler: (url: string, init?: RequestInit) => MockResult | Promise<MockResult>) {
   const calls: MockCall[] = [];
   const fetchImpl = (async (input: unknown, init?: RequestInit) => {
     const url =
@@ -39,7 +39,7 @@ function makeFetch(handler: (url: string, init?: RequestInit) => MockResult) {
           ? input.toString()
           : String((input as { url?: string }).url ?? input);
     calls.push({ url, init });
-    const result = handler(url, init);
+    const result = await handler(url, init);
     if (result.bytes) {
       return new Response(new Uint8Array(result.bytes), {
         status: result.status ?? 200,
@@ -93,7 +93,27 @@ interface ZipInput {
   method?: 0 | 8;
 }
 
-/** 最小 zip 构造（与 zip.test.ts 同构；不校验 CRC）。 */
+/** 最小 zip 构造（与 zip.test.ts 同构；读取端会校验 CRC，故必须写正确 CRC）。 */
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < 256; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes: Buffer): number {
+  let value = 0xffffffff;
+  for (let index = 0; index < bytes.length; index += 1) {
+    value = CRC_TABLE[(value ^ bytes[index]) & 0xff] ^ (value >>> 8);
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
 function makeZip(entries: ZipInput[]): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
@@ -103,11 +123,13 @@ function makeZip(entries: ZipInput[]): Buffer {
     const data = entry.data ?? Buffer.alloc(0);
     const method = entry.method ?? 0;
     const compressed = method === 8 ? deflateRawSync(data) : data;
+    const crc = crc32(data);
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
     local.writeUInt16LE(0x0800, 6);
     local.writeUInt16LE(method, 8);
+    local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(compressed.length, 18);
     local.writeUInt32LE(data.length, 22);
     local.writeUInt16LE(name.length, 26);
@@ -119,6 +141,7 @@ function makeZip(entries: ZipInput[]): Buffer {
     central.writeUInt16LE(20, 6);
     central.writeUInt16LE(0x0800, 8);
     central.writeUInt16LE(method, 10);
+    central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(compressed.length, 20);
     central.writeUInt32LE(data.length, 24);
     central.writeUInt16LE(name.length, 28);
@@ -411,6 +434,19 @@ describe("GET /api/skill-hub/skills/:id/download（下载 + 解包）", () => {
     expect(res3.status).toBe(502);
     expect(res3.body.error).toContain("无法解析");
   });
+
+  it("CRC 损坏的 zip → 502（CRC 校验失败的集成路径）", async () => {
+    const zip = Buffer.from(skillZip());
+    const central = zip.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    expect(central).toBeGreaterThan(0);
+    const originalCrc = zip.readUInt32LE(central + 16);
+    zip.writeUInt32LE((originalCrc ^ 0xffffffff) >>> 0, central + 16);
+    const res = await request(makeApp(okUpstream(zip).fetchImpl))
+      .get("/api/skill-hub/skills/abc/download")
+      .set("x-skill-hub-key", KEY);
+    expect(res.status).toBe(502);
+    expect(res.body.error).toContain("无法解析");
+  });
 });
 
 describe("POST /api/skill-hub/register（注册）", () => {
@@ -539,6 +575,45 @@ describe("POST /api/skill-hub/register（注册）", () => {
     const afterWindow = await postRegister(app, { name: "测试Agent" });
     expect(afterWindow.status).toBe(200);
     expect(registerCalls).toBe(6);
+  });
+
+  it("名称归一化：去首尾空白、连续空白折叠为单个空格", async () => {
+    let sentBody: unknown;
+    const { fetchImpl } = makeFetch((_url, init) => {
+      sentBody = init?.body ? JSON.parse(String(init.body)) : null;
+      return { body: { success: true, data: { user: { name: "测试 Agent" }, api_key: "sk_abc12345" } } };
+    });
+    const res = await postRegister(makeApp(fetchImpl), { name: " \t 测试 \n\n Agent  " });
+    expect(res.status).toBe(200);
+    expect(sentBody).toEqual({ name: "测试 Agent" });
+  });
+
+  it("零宽字符（U+200B/200C/200D/FEFF）→ 400 且不打上游", async () => {
+    const { fetchImpl, calls } = makeFetch(() => ({ body: { success: true, data: {} } }));
+    const app = makeApp(fetchImpl);
+    for (const zeroWidth of ["\u200B", "\u200C", "\u200D", "\uFEFF"]) {
+      const res = await postRegister(app, { name: `测${zeroWidth}试` });
+      expect(res.status, zeroWidth.codePointAt(0)?.toString(16)).toBe(400);
+      expect(res.body.error).toContain("零宽");
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("长度按码点：128 个可用、129 个拒绝", async () => {
+    const { fetchImpl, calls } = makeFetch(() => ({
+      body: { success: true, data: { user: { name: "测试" }, api_key: "sk_abc12345" } },
+    }));
+    const app = makeApp(fetchImpl);
+
+    const maxName = "测".repeat(128);
+    expect((await postRegister(app, { name: maxName })).status).toBe(200);
+    expect(calls).toHaveLength(1);
+
+    const tooLong = "测".repeat(129);
+    const rejected = await postRegister(app, { name: tooLong });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error).toContain("128");
+    expect(calls).toHaveLength(1); // 超长不打上游
   });
 });
 
@@ -840,6 +915,57 @@ describe("上游 TTL 缓存", () => {
       .set("x-heming-client", "1")
       .send({ name: "测试Agent" });
     expect(calls.filter((call) => call.url.endsWith("/api/auth/register"))).toHaveLength(2);
+  });
+
+  it("single-flight：同一查询并发冷缓存只打一次上游，三个响应 fetchedAt 一致", async () => {
+    let upstreamCalls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { fetchImpl } = makeFetch(async () => {
+      upstreamCalls += 1;
+      await gate;
+      return { body: { skills: [], total: 0, hasMore: false } };
+    });
+    const app = makeApp(fetchImpl);
+
+    // supertest 的 Test 是 lazy 的：调用 .then() 才会真正发请求（否则三个请求都没开始）
+    const pending = [1, 2, 3].map(() => request(app).get("/api/skill-hub/skills?search=并发词").then((response) => response));
+    // 等三个请求都进入路由（但 fetch 仍被 gate 挡住）
+    for (let attempt = 0; attempt < 100 && upstreamCalls === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    expect(upstreamCalls).toBe(1);
+    release();
+
+    const responses = await Promise.all(pending);
+    for (const response of responses) {
+      expect(response.status).toBe(200);
+      expect(response.body.fetchedAt).toBe(responses[0].body.fetchedAt);
+    }
+    expect(upstreamCalls).toBe(1); // 缓存已写入，之后同 key 命中缓存
+    const after = await request(app).get("/api/skill-hub/skills?search=并发词");
+    expect(after.status).toBe(200);
+    expect(upstreamCalls).toBe(1);
+  });
+
+  it("single-flight 失败不缓存：第一个请求 502 后，可立即重试成功", async () => {
+    let upstreamCalls = 0;
+    const { fetchImpl } = makeFetch(() => {
+      upstreamCalls += 1;
+      if (upstreamCalls === 1) throw new Error("上游抖动");
+      return { body: { skills: [], total: 1, hasMore: false } };
+    });
+    const app = makeApp(fetchImpl);
+
+    const failed = await request(app).get("/api/skill-hub/skills?search=重试");
+    expect(failed.status).toBe(502);
+
+    const retried = await request(app).get("/api/skill-hub/skills?search=重试");
+    expect(retried.status).toBe(200);
+    expect(retried.body.total).toBe(1);
+    expect(upstreamCalls).toBe(2);
   });
 });
 

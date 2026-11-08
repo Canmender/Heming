@@ -86,6 +86,7 @@
 | 解包文件数 | ≤ 200 |
 | 单文件 | ≤ 1MB（只解 `SKILL.md` 内容） |
 | 路径 | 拒绝对路径、`..`、NUL、反斜杠规范化后的穿越 |
+| zip 完整性 | **拒绝重复条目**（同归一化 path 只允许出现一次，防 `SKILL.md` 被后一条覆盖）；**校验 CRC32**（STORE/DEFLATE 两条路径都比对中央目录 CRC；central 与 local 不一致按损坏拒绝，data descriptor 条目除外） |
 | `SKILL.md` | 包内任意深度、取**最浅**的一个；≤128KB；UTF-8 |
 | 文件清单 | 只返回 path/size，不返回内容 |
 | 下载地址（SSRF） | 只允许 `https:`（`HEMING_SKILL_HUB_ALLOW_HTTP=1` 才放行 `http:`）；拒绝 `user:pass@`、`localhost`/`*.localhost`、回环/私网/链路本地/云元数据字面量（IPv4、IPv6、IPv4-mapped IPv6）；`redirect: "manual"` 最多跟随 3 次且**每跳重新校验**；违规返回 502「下载地址不安全，已拒绝」 |
@@ -110,6 +111,7 @@
 |---|---|
 | 服务端 `HEMING_SKILL_HUB=off` | 技能区不显示「社区」Tab；直接访问接口返回 503「社区未启用」 |
 | 上游不可达/超时（15s） | 列表 502 + 中文原因，UI 提供「重试」；已加载内容保留 |
+| 同一查询并发（冷缓存） | single-flight：同 key 并发只打一次上游，其余请求 await 同一个 promise（失败不缓存、可立即重试） |
 | 上游改了字段 | 归一化层兜底默认值；缺 `id/name` 的条目整条丢弃并计数（不炸整页） |
 | 用户点「一键注册」失败 | 显示上游错误原文 + 「去虾评手动注册」外链；本机限流/非客户端调用返回 403/429 中文提示 |
 | 下载后 SKILL.md 解析失败 | 不写技能池，报「这个技能不是和鸣可识别的 SKILL.md 格式（缺少 frontmatter/标题）」 |

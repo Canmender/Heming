@@ -77,7 +77,8 @@ function findEndOfCentralDirectory(buffer: Buffer): number {
 }
 
 /** 包内路径归一化 + 穿越守卫。 */
-function normalizeEntryPath(raw: string): string {  if (!raw || raw.includes("\0")) throw new ZipError("ZIP 条目路径含非法字符", "unsafe_path");
+function normalizeEntryPath(raw: string): string {
+  if (!raw || raw.includes("\0")) throw new ZipError("ZIP 条目路径含非法字符", "unsafe_path");
   if (raw.length > MAX_PATH_LENGTH) throw new ZipError("ZIP 条目路径过长", "unsafe_path");
   const unified = raw.replace(/\\/g, "/");
   if (unified.startsWith("/") || /^[A-Za-z]:/.test(unified)) {
@@ -239,8 +240,22 @@ export function readZipEntries(buffer: Buffer): ZipEntry[] {
     const isDirectory = rawName.endsWith("/") || rawName.endsWith("\\");
     const path = normalizeEntryPath(rawName);
     if (isDirectory) continue; // 目录项只为建目录，解包时不需要
+    if (seenPaths.has(path)) {
+      // 同名条目会让「解包结果」取决于遍历顺序（SKILL.md 可被后一条覆盖）——直接拒绝。
+      throw new ZipError(`ZIP 含重复条目：${path}`, "duplicate_entry");
+    }
+    seenPaths.add(path);
 
-    const data = readEntryData(buffer, localOffset, compressedSize, method, uncompressedSize, path);
+    const data = readEntryData(
+      buffer,
+      localOffset,
+      compressedSize,
+      method,
+      uncompressedSize,
+      path,
+      crc,
+      flags,
+    );
     totalUncompressed += data.length;
     if (totalUncompressed > MAX_ZIP_TOTAL_BYTES) {
       throw new ZipError("ZIP 解压总量超过上限（16MB）", "too_large");
