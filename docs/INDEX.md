@@ -20,7 +20,8 @@
 | [WEB-SCRAPING.md](WEB-SCRAPING.md) | 网页抓取：Scrapling 16 个工具的三层启用策略 |
 | [SELF-EDIT.md](SELF-EDIT.md) | 自我修改：`self_*` 工具、护栏、审计、快照回滚与开关 |
 | [PET.md](PET.md) | 桌宠（**d.98 起为界面插件 `heming.pet`**）：怎么装/用/卸、插件包结构、宿主运行时与三种边界、数据边界与老数据迁移、扩展指南（换形象/加姿态/加设置项）、已知限制与排查 |
-| [PLUGINS.md](PLUGINS.md) | 插件（能力包）：清单 v3 字段表、权限声明（网络/工具风险上限/文件根）、命令 target、安装/更新/停用/卸载语义、v1/v2 兼容与红线、可粘贴示例；**§10 界面插件（v4 bundle）**：`package.tgz`、独立 origin `widget://`、最小 preload、官方目录分发 |
+| [PLUGINS.md](PLUGINS.md) | 插件（能力包）：清单 v3 字段表、权限声明（网络/工具风险上限/文件根）、命令 target、安装/更新/停用/卸载语义、v1/v2 兼容与红线；**§10 界面插件（v4 bundle）**；**§11 清单 v5（d.107）**：`engines` 版本兼容、上架元数据、`prepare→persist→rollback` 安装事务、权限扩张重确认、防降级、兼容矩阵 |
+| [PLUGIN-AUTHORING.md](PLUGIN-AUTHORING.md) | 插件作者指南（v5）：五分钟写出第一个插件、五个字段决定能不能装、贡献点准入、权限声明、分层严格度、发布/市场/弃用、调试三招、兼容速查 |
 
 ## 3. 设计规格与实施记录
 

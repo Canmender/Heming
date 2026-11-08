@@ -222,7 +222,7 @@ const httpsUrl = (max = PLUGIN_LIMITS.homepageChars) =>
 
 const SkillSchema = z.strictObject({
   name: trimmed(32),
-  description: trimmed(200).optional().default(""),
+  description: trimmed(200, 0).optional().default(""),
   instructions: trimmed(8000),
   triggers: z.array(trimmed(64)).max(20, { error: "触发词最多 20 个" }).optional().default([]),
   tags: z.array(trimmed(32)).max(20, { error: "标签最多 20 个" }).optional().default([]),
@@ -233,7 +233,7 @@ const McpServerSchema = z
     key: z.string().regex(SERVER_KEY_RE, { error: "服务 key 只能是小写字母/数字/连字符，≤32" }),
     name: trimmed(64),
     url: z.string().max(2048, { error: "URL 最多 2048 字符" }),
-    description: trimmed(200).optional().default(""),
+    description: trimmed(200, 0).optional().default(""),
   })
   .superRefine((server, ctx) => {
     const problem = validateMcpUrl(server.url);
@@ -249,7 +249,7 @@ const CommandTargetSchema = z.discriminatedUnion("kind", [
 const CommandSchema = z.strictObject({
   id: z.string().regex(ID_RE, { error: "命令 id 只能是小写字母/数字/._-，≤64" }),
   title: trimmed(64),
-  description: trimmed(200).optional().default(""),
+  description: trimmed(200, 0).optional().default(""),
   keywords: z.array(trimmed(32)).max(20, { error: "关键词最多 20 个" }).optional().default([]),
   target: CommandTargetSchema,
 });
@@ -257,7 +257,7 @@ const CommandSchema = z.strictObject({
 const ToolPackSchema = z.strictObject({
   id: z.string().regex(ID_RE, { error: "工具束 id 只能是小写字母/数字/._-，≤64" }),
   name: trimmed(32),
-  description: trimmed(200).optional().default(""),
+  description: trimmed(200, 0).optional().default(""),
   tools: z.array(trimmed(128)).max(PLUGIN_LIMITS.toolsPerPack, { error: "每束最多 50 个工具" }),
 });
 
@@ -452,8 +452,8 @@ const ManifestV5Object = z.object({
   id: z.string().regex(ID_RE, { error: "插件 id 只能是小写字母/数字/._-，≤64" }),
   name: trimmed(64),
   version: trimmed(32),
-  description: trimmed(200).optional().default(""),
-  author: trimmed(64).optional().default(""),
+  description: trimmed(200, 0).optional().default(""),
+  author: trimmed(64, 0).optional().default(""),
   engines: EnginesSchema,
   meta: MetaSchema.optional(),
   permissions: PermissionsSchema.optional(),

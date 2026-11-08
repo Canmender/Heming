@@ -36,6 +36,18 @@ describe("parsePluginManifestV5", () => {
     expect(manifest.contributions.desktopWidgets).toEqual([]);
   });
 
+  it("显式空串的 description / author 合法（归一化记录会写空串）", () => {
+    const parsed = parsePluginManifestV5(baseManifest({ description: "", author: "" }));
+    expect(parsed.manifest.description).toBe("");
+    expect(parsed.manifest.author).toBe("");
+    const skillEmptyDesc = parsePluginManifestV5(
+      baseManifest({
+        contributions: { skills: [{ name: "周报", instructions: "x", description: "" }] },
+      }),
+    );
+    expect(skillEmptyDesc.manifest.contributions.skills[0].description).toBe("");
+  });
+
   it("engines 必填且必须合法", () => {
     const missing = baseManifest();
     delete missing.engines;

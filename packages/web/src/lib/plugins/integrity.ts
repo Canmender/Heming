@@ -80,6 +80,11 @@ export function canonicalManifestText(manifest: PluginManifest): string {
     author: manifest.author,
     permissions: manifest.permissions,
     contributions: manifest.contributions,
+    // v5 起把 engines/meta 纳入内容指纹（否则「同版本只改 engines 或上架元数据」
+    // 不会触发指纹变化，安装预览发现不了内容被改）。v1–v4 没有这两个字段，
+    // canonicalJsonText 会丢弃 undefined → 旧包指纹逐字节不变（现有测试钉住了这点）。
+    engines: manifest.engines,
+    meta: manifest.meta,
   });
 }
 

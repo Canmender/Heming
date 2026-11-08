@@ -3,7 +3,8 @@
 > 分支：`feat/d103-plugin-system`（基线 `9c4bfd2` / `d.103.2.42.0`（本分支上另一并行会话已提交 d.103 模型页重构；本升级预计占 d.104，以实际 bump 为准））
 > 对标调研：`docs/research/2026-11-08-plugin-system-benchmark.md`
 > 本文是**契约**：实施时字段名、存储键、路由、撤销语义以本文为准；改契约先改本文。
-> 状态：设计完成 + 已做可实现性自检（`docs/research/2026-11-08-plugin-upgrade-feasibility.md`）+ 跨生态对标（`docs/research/2026-11-08-plugin-ecosystem-cross-reference.md`），本规格已按自检 F1–F10 与对标 N1–N17 修订；待确认实施范围（阶段 A/B/C/D 见 §10）。
+> 状态：**阶段 A（地基）已实现于 `d.107.2.42.0`**（v5 清单/engines、统一能力单元与贡献点、安装事务与回滚、市场索引 v2 契约与服务端、首方 bundle 验签、校验工具链与作者指南）；阶段 B 的市场浏览 UI、阶段 C 的诊断深化/bundle 命令 target 扩展/Agent 工具仍待做。全量门禁（build/test/typecheck）已全绿。
+> 设计依据：可实现性自检（`docs/research/2026-11-08-plugin-upgrade-feasibility.md`）+ 跨生态对标（`docs/research/2026-11-08-plugin-ecosystem-cross-reference.md`），本规格已按自检 F1–F10 与对标 N1–N17 修订。
 
 ## 0. 决策（用户口径与本文边界）
 
@@ -552,3 +553,18 @@ export type CommandTarget =
 | 沙箱不是安全边界 → 动作级闸门 | 不引入沙箱承诺；用首方签名 + 权限上限 + 用户确认（§7） |
 | 不照搬 cordis / npm / slot 代数 | §0.4 明确不做 |
 | 官方踩坑（清理时序） | §3.3 撤销串行化 |
+
+## 13. 实施记录（d.107.2.42.0，阶段 A）
+
+| 契约 | 落点 | 状态 |
+|---|---|---|
+| 5 段版本 / `engines` | `packages/shared/src/plugin/version.ts`（+测试 10 例） | ✅ |
+| v5 清单 / 归一化 / 分层严格度 | `packages/shared/src/plugin/manifest.ts`（+测试 12 例）、web `lib/plugins/manifest.ts` 委托 | ✅ |
+| 统一能力单元 / 贡献点准入 / 诊断 | `packages/shared/src/plugin/unit.ts`（+测试 11 例）、web `lib/units/{projection,registry}.ts` + 插件页 `UnitListView`/`UnitDiagnostics` | ✅ |
+| 安装事务（plan→apply→rollback、体积预检、previous/highestVersion、reload） | web `lib/plugins/store.ts` + `skills/store.ts`、`mcp/store.ts` 的 `reload()`（+事务测试 17 例） | ✅ |
+| 市场索引 v2 契约 / 过滤 / 选版本 | `packages/shared/src/plugin/market.ts`（+测试 12 例） | ✅ |
+| 市场服务端路由（hostVersion/updatedSince/detail/assets/PUT、版本不可变 409） | `packages/server/src/pluginMarket.ts` + `app.ts`（+18 例） | ✅ |
+| 发布工具生成索引 | `scripts/publish-plugin.mjs --index/--push` | ✅ |
+| 首方 bundle 验签 + 命令 target 收紧 | `packages/desktop/plugin-signature.js`、`plugin-package.js`、`resources/official-keys.json`（+40 例；dev 钥生产拒绝） | ✅ |
+| 工具链 / 文档 | `scripts/plugin-lint.mjs`、`scripts/plugin-schema.mjs`、`docs/plugin.schema.json`、`plugins/examples/`、`docs/PLUGIN-AUTHORING.md`、`docs/PLUGINS.md` §11 | ✅ |
+| 阶段 B/C 未做 | 市场浏览 UI（分类/详情/版本选择）、bundle 生命周期事件、`settings`/`unit` 命令 target、Agent 侧 `plugin_*` 工具 | 待做 |

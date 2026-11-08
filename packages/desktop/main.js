@@ -30,6 +30,15 @@ const { createMagpieCli, validateCliArgs, terminalCommand } = require("./magpie-
 const { bundledPython } = require("./bundled-runtime");
 const { planStdioSpawn, probeLocalRuntime } = require("./local-runtime");
 
+/**
+ * 本地开发（未打包）允许使用内置的 dev-* 首方公钥，否则界面插件在 `electron .` 下装不上。
+ * 正式安装包不带这个环境变量 → `plugin-signature.js` 对「只有 dev-* 公钥」的表失败关闭，
+ * 必须在 `resources/official-keys.json` 里换成正式公钥（见该文件 _rotate 说明）。
+ */
+if (!app.isPackaged && !process.env.HEMING_ALLOW_DEV_PLUGIN_KEYS) {
+  process.env.HEMING_ALLOW_DEV_PLUGIN_KEYS = "1";
+}
+
 const pkg = require("./package.json");
 const { APP_DEFAULT_URL, originOf, secureOrigins, guardIpc, makeSenderCheck } = require("./secure-origins");
 const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");

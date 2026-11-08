@@ -13,9 +13,14 @@ export * from "./descriptors.js";
 export type { CapabilityOwnerKind } from "./descriptors.js";
 export {
   PluginStore,
+  PluginInstallError,
   PLUGINS_KEY,
   MAX_PLUGINS,
   PLUGIN_CONTRIBUTION_KINDS,
+  PLUGIN_TXN_KEYS,
+  INSTALL_WRITE_BUDGET_BYTES,
+  PREVIOUS_MANIFEST_MAX_BYTES,
+  PREVIOUS_TOTAL_MAX_BYTES,
   effectiveEnabled,
   pluginServerId,
   pluginIdFromServerId,
@@ -37,4 +42,13 @@ export type {
   PluginServerInfo,
   PluginContributionCounts,
   PluginCommandInfo,
+  InstallPlan,
+  InstallPlanOptions,
+  InstallPlanBlock,
+  InstallApplyResult,
+  InstallRollbackReport,
+  InstallSizeEstimate,
+  InstallPermissionUpgrade,
+  PluginDiagnostic,
+  PlanWrite,
 } from "./store.js";

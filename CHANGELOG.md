@@ -2,6 +2,79 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.107.2.42.0（2026-11-08）— 插件体系地基：v5 清单 / 统一能力单元 / 安装事务 / 市场 v2 / 首方验签
+
+目标不是「多加一类插件」，而是把四套并行机制（声明式插件、界面插件、内置模块、云端目录）收进同一套
+**能力单元 + 贡献点**契约，让以后加高级插件只需要注册一种贡献，而不是改四处。对标了 deepseek-harness、
+VS Code、Chrome MV3、Claude Code、Dify、n8n、Figma、Obsidian/Raycast 与 MCP Registry（调研文档见
+`docs/research/2026-11-08-*`）。
+
+### 新增（共享契约 / shared）
+
+- **5 段版本兼容**：`packages/shared/src/plugin/version.ts`——`engines.heming` 按和鸣 5 段版本做最小版本判定
+  （缺段补 0、容忍 `-dev.N`、非法值失败关闭）；安装预览、市场过滤、CLI 三处共用同一实现。
+- **v5 清单**：`plugin/manifest.ts`——新增必填 `engines.heming` 与可选 `meta`（图标/主页/仓库/分类/标签/
+  关键词/截图/详情）；**分层严格度**：顶层未知字段剥掉并告警，`engines`/`permissions`/`meta`/每个贡献条目 strict；
+  bundle 只允许 `commands` + `desktopWidgets`；MCP 主机必须被 `permissions.network` 覆盖；跨字段规则（重名、
+  工具跨束重复、命令指向不存在技能）全部中文报错带字段路径。
+- **统一能力单元与贡献点**：`plugin/unit.ts`——`system` / `builtin` / `package` / `bundle` 四类来源 ×
+  10 种贡献点的准入表；`resolveUnit(s)` 用「总开关 × 贡献级开关 × 依赖 × 阻断」算出生效状态与诊断
+  （停用 / 贡献级关 / 依赖未生效 / 不兼容 / 签名 / 孤儿 / 降级）。
+- **市场索引 v2**：`plugin/market.ts`——format 1 索引（分类/标签/排序键/每版本 `engines`/生命周期字段/
+  频道），坏条目只丢该条；`filterMarketByHostVersion`、`pickInstallVersion`（排除 deleted/不兼容/默认不推预发布）、
+  `hasCompatibleUpdate`。
+
+### 新增（web）
+
+- **安装事务**：`pluginStore.planInstall()`（纯函数：差异 + engines + 权限扩张 + 体积预检 + 降级/冲突阻断）→
+  `applyPlan()`（快照 7 个键 → 分段写 → 失败逐键恢复 + 技能池/MCP/插件三个单例 `reload()`）→
+  `rollbackToPrevious()`；`changed`/`applied` 分开报告、`rollback.ok=false` 如实上报；`previous`（≤128KB/插件、
+  ≤512KB 全量）/`history`（≤3）/`highestVersion`；`saveOrThrow()` 让配额失败可见。
+- **v5 接线**：v5 清单委托 shared 解析（v1–v4 行为一字未改），新增 `parsePluginManifestDetailed`、
+  `pluginEnginesStatus`、`toPluginV5View`；内容指纹把 v5 的 `engines`/`meta` 纳入（旧包指纹不变）。
+- **插件页统一单元列表 + 诊断**：四类来源统一展示（来源徽标/版本/状态/贡献摘要/搜索筛选），
+  「为什么没生效」用同一套 `blockReasonText` 文案；`lib/units/projection.ts` 纯函数投影（不 import store 单例，
+  避免依赖环）+ `lib/units/registry.ts` 撤销式挂载表（后注册先撤销、异步串行、失败进诊断）。
+- 内置模块的生效判定改走统一投影（`isModuleEffective` 变薄封装，行为不变）。
+
+### 新增（server / 发布工具）
+
+- **市场索引路由**：`GET /api/plugin-market`（原样字节；不存在 404；损坏 500）、`?hostVersion=` 服务端过滤、
+  `?updatedSince=` 增量、`:id/:version/detail`（≤64KB）、`assets`（白名单扩展名 + 2MB + 路径穿越守卫）、
+  `PUT /api/plugin-market`（发布密钥 + 4MB + 格式校验后原样落盘）。
+- **版本内容不可变**：`PUT /api/plugins/:id/:version` 同 id+版本字节不同 → **409**（要求提升版本号），
+  相同 → 200 幂等，格式差异但 JSON 等价 → 保留已存字节（sha256 不漂移）。
+- **发布工具**：`publish-plugin.mjs --index <dir>` 生成 `market.json`（含 engines/sha256/size/package/detail/
+  status/channel，sidecar `market.json` 覆盖展示字段），`--push` 先推索引再推包。
+
+### 新增（desktop）
+
+- **首方 bundle 验签**：`plugin-signature.js`——canonical-v1（v1–v4）/canonical-v2（v5，含 engines/meta）+
+  `node:crypto` Ed25519 验签；公钥只来自内置 `resources/official-keys.json`（**绝不用清单里自带的公钥**），
+  多钥轮换；`dev-*` 开发公钥在打包版**失败关闭**（本地 `electron .` 由主进程设 `HEMING_ALLOW_DEV_PLUGIN_KEYS=1`）。
+  `plugin-package.readPackage()` 在结构校验后强制验签，`widgets:install` 与本地 `.tgz` 安装同一路径。
+- bundle 的 `commands` target 收紧为 `page` / `plugin`（bundle 不允许 skills）。
+
+### 工具链与文档
+
+- `scripts/plugin-lint.mjs`：v5 权威校验（中文报错 + 字段路径；v1–v4 提示走应用内预览）；
+  `scripts/plugin-schema.mjs`：生成 `docs/plugin.schema.json`（**仅编辑器提示**，zod 的 refine 不进 JSON Schema，
+  `--check` 供 CI 比对）。
+- `plugins/examples/`：最小包 / 完整包 / 坏包三个样例（不参与发布）。
+- `docs/PLUGINS.md` 新增 §11（v5 字段、安装事务、权限扩张、防降级、兼容矩阵）；新增
+  `docs/PLUGIN-AUTHORING.md`（作者最短路径 + 常见坑 + 调试三招）。
+- 调研文档：`docs/research/2026-11-08-plugin-system-benchmark.md`（DSH 官方）、
+  `2026-11-08-plugin-ecosystem-cross-reference.md`（8 生态横向）、`2026-11-08-plugin-upgrade-feasibility.md`
+  （可实现性自检与 F1–F10 修正）；规格 `docs/superpowers/specs/2026-11-08-plugin-system-upgrade.md`。
+
+### 边界（明确未做）
+
+- 第三方仍**不能**贡献页面/首页卡/设置卡/后台任务（界面/后台能力需要可执行代码；官方 bundle 首方签名 + 沙箱，
+  第三方另立规格）；bundle 生命周期事件与 `settings`/`unit` 命令 target 留到下一轮。
+- 不做评分/推荐/自动更新/灰度发布；市场 UI 的完整浏览页（分类/详情/版本选择）下一轮接索引 v2（本轮服务端与
+  契约先就位）。
+- `docs/plugins` 的旧包（v1–v4）语义不变；v5 是新增不是替换。
+
 ## d.106.2.42.0（2026-11-08）— 修复模型页「用不了」：命令桥接线 + 浏览器降级
 
 用户反馈模型页不能用。真机（Electron dev + 本机服务 + CDP）复现：`window.__heming_magpie`
