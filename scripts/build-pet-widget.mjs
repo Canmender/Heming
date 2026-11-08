@@ -91,9 +91,6 @@ if (typeof widget.entry !== "string" || !widget.entry.startsWith("files/")) {
 const entryFile = join(DIST, widget.entry);
 if (!existsSync(entryFile)) fail(`entry 不存在于产物中：${widget.entry}（检查 vite build.outDir）`);
 
-// 规范化写入：固定 2 空格 + 结尾换行，让同一份源码产出同一串字节（发布侧 sha256 依赖它）
-writeFileSync(join(DIST, "plugin.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-
 // ── 配额自检（与安装端同一口径）─────────────────────────────────────────────
 const files = walkFiles(FILES);
 let total = 0;
@@ -103,6 +100,21 @@ for (const file of files) {
 }
 if (files.length > LIMITS.maxFiles) fail(`文件数超过上限：${files.length} > ${LIMITS.maxFiles}`);
 if (total > LIMITS.maxTotalBytes) fail(`解包总量超过 20MB：${total} 字节`);
+
+// ── 清单绑定包内容摘要（审计 P0-1）──────────────────────────────────────────
+// 首方签名只覆盖清单文本；把 files/** 的确定性摘要写进 packageSha256，签名才覆盖
+// 代码字节。算法与 `packages/desktop/plugin-package.js` 的 computeFilesDigest 同一实现。
+const requireFromRoot = createRequire(import.meta.url);
+const packageModule = requireFromRoot("../packages/desktop/plugin-package.js");
+if (typeof packageModule.computeFilesDigest !== "function") {
+  fail("desktop/plugin-package.js 缺少 computeFilesDigest（先更新仓库）");
+}
+manifest.packageSha256 = packageModule.computeFilesDigest(
+  files.map((file) => ({ path: `files/${file.path}`, data: readFileSync(join(FILES, file.path)) })),
+);
+
+// 规范化写入：固定 2 空格 + 结尾换行，让同一份源码产出同一串字节（发布侧 sha256 依赖它）
+writeFileSync(join(DIST, "plugin.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
 console.log(
   `[build-pet-widget] 已组装 ${DIST}\n` +

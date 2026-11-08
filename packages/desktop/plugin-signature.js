@@ -18,12 +18,14 @@ const { createPublicKey, verify: nodeVerify } = require("node:crypto");
  *
  * ## 签名覆盖哪些字节（版本化，别乱动）
  * - **canonical-v1**（`schemaVersion < 5`，即 v1–v4；bundle 目前只可能是 v4）：
- *   `{id,version,name,description,author,publisher,permissions,contributions}`。
+ *   `{id,version,name,description,author,publisher,permissions,contributions,packageSha256}`。
  *   与 web 的 `signedManifestText` 一致：**含 publisher、不含 signature**；
  *   其中 `publisher` 为 `{id, publicKey}` 或 `null`（未签名时）。
+ *   `packageSha256`（审计 P0-1）是 `files/**` 的内容摘要，让签名**间接覆盖代码字节**；
+ *   声明式包没有该字段（序列化时丢弃，旧签名文本不变）。
  * - **canonical-v2**（`schemaVersion >= 5`）：在 v1 字段之外再加
  *   `{engines,meta,distribution}`（规格 §7.1：v5 包用 canonical-v2，
- *   否则旧签名会集体失效）。
+ *   否则旧签名会集体失效）。`packageSha256` 两版都覆盖。
  *
  * 字段值先按 web 的归一化规则处理（trim / 去重 / 默认值 / 桌面小组件默认值），
  * 再走 `canonicalJsonText`（递归键排序、无空白、丢弃 `undefined`、数组保序）。
@@ -253,6 +255,10 @@ function canonicalManifestText(manifest) {
     publisher,
     permissions: normalized.permissions,
     contributions: normalized.contributions,
+    // 审计 P0-1：签名必须覆盖包内代码字节——`packageSha256` 是 files/** 的内容摘要，
+    // 放进签名文本即「间接签全部代码」。声明式包没有该字段，键被 canonicalJsonText
+    // 丢弃，旧签名文本不变（向后兼容）。
+    packageSha256: typeof manifest.packageSha256 === "string" ? manifest.packageSha256.trim() : undefined,
   };
   if (canonicalVersionOf(manifest) === 2) {
     fields.engines = manifest.engines;

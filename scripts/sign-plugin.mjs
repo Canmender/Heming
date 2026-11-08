@@ -8,18 +8,24 @@
  *   node scripts/sign-plugin.mjs sign <plugin.json> <private-key.b64url> [--id <发布者 id>] [--write]
  *       读取清单、按统一规范化算法签名，打印 { publisher, signature } 片段；
  *       带 --write 时就地写回 plugin.json（publisher 的 id 取清单已有的或 --id）。
+ *       **bundle（界面插件）会先把 files/** 的内容摘要写进 `packageSha256` 再签**
+ *       （审计 P0-1：让签名覆盖包内代码字节；默认从 plugin.json 同级的 files/ 算，
+ *       也可用 --package <tgz> 或 --dir <包根> 指定）。
  *
  * ★ 规范化算法必须与 `packages/web/src/lib/plugins/signature.ts` 的
  *   `signedManifestText` **逐字节一致**（同一套字段集合、键排序、无空白）。
  *   改任何一边都要同步另一边，否则本机验签会一直 invalid。
  */
 import {
+  createHash,
   createPrivateKey,
   createPublicKey,
   generateKeyPairSync,
   sign as nodeSign,
 } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /* ------------------------------------------------------------------ 规范化 */
@@ -40,6 +46,67 @@ function stableValue(value) {
 
 export function canonicalJsonText(value) {
   return JSON.stringify(stableValue(value));
+}
+
+/* ------------------------------------------------- 包内容摘要（审计 P0-1） */
+
+/**
+ * `files/**` 内容摘要，必须与 `packages/desktop/plugin-package.js` 的
+ * `computeFilesDigest` **逐字节一致**（同一条流：排序后的 path + 长度 + 内容 sha256）。
+ *
+ * 为什么不是整个 tgz 的 sha256：plugin.json 在 tgz 里、清单又要写自己的 tgz 摘要，
+ * 构成自引用；摘要只覆盖清单之外的代码字节，效果等价（换任何文件都会变）。
+ */
+export function computeFilesDigest(entries) {
+  const hash = createHash("sha256");
+  const files = (Array.isArray(entries) ? entries : [])
+    .filter((entry) => entry && typeof entry.path === "string" && entry.path.startsWith("files/"))
+    .slice()
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  for (const entry of files) {
+    const data = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(String(entry.data ?? ""), "utf8");
+    hash.update(entry.path);
+    hash.update("\0");
+    hash.update(String(data.length));
+    hash.update("\0");
+    hash.update(createHash("sha256").update(data).digest());
+    hash.update("\n");
+  }
+  return hash.digest("hex");
+}
+
+/** 递归读取目录下所有文件（返回 `{path, data}`，path 带传入的前缀）。 */
+function walkFiles(dir, base = "") {
+  const out = [];
+  for (const name of readdirSync(dir).sort()) {
+    const full = join(dir, name);
+    const rel = base ? `${base}/${name}` : name;
+    const info = statSync(full);
+    if (info.isSymbolicLink()) throw new Error(`包内不允许符号链接：${rel}`);
+    if (info.isDirectory()) out.push(...walkFiles(full, rel));
+    else if (info.isFile()) out.push({ path: rel, data: readFileSync(full) });
+  }
+  return out;
+}
+
+/** 从包根（含 files/）计算摘要。 */
+export function digestFromPackageRoot(root) {
+  const filesDir = join(root, "files");
+  if (!existsSync(filesDir)) throw new Error(`包根缺少 files/ 目录：${filesDir}`);
+  return computeFilesDigest(walkFiles(filesDir, "files"));
+}
+
+/** 从已打好的 tgz 计算摘要（复用桌面侧 tar 解包；缺位时要求改用 --dir）。 */
+export function digestFromTgz(tgzPath) {
+  const requireFromRoot = createRequire(import.meta.url);
+  let tar;
+  try {
+    tar = requireFromRoot("../packages/desktop/plugin-tar.js");
+  } catch {
+    throw new Error("找不到 packages/desktop/plugin-tar.js，无法从 tgz 计算摘要（改用 --dir <包根>）");
+  }
+  const entries = tar.unpackTarGz(readFileSync(tgzPath), tar.LIMITS);
+  return computeFilesDigest(entries);
 }
 
 /* -------------------------------------------------- 与 parsePluginManifest 对齐 */
@@ -202,7 +269,7 @@ function normalizeTarget(target) {
   return { kind };
 }
 
-/** 与 signature.ts 的 signedManifestText 逐字节一致：含 publisher、排除 signature。 */
+/** 与 signature.ts 的 signedManifestText 逐字节一致：含 publisher / packageSha256，排除 signature。 */
 export function signedManifestText(manifest) {
   const normalized = normalizeManifest(manifest);
   return canonicalJsonText({
@@ -216,6 +283,8 @@ export function signedManifestText(manifest) {
       : null,
     permissions: normalized.permissions,
     contributions: normalized.contributions,
+    // 审计 P0-1：让签名覆盖 files/** 代码字节；声明式包没有该字段（被 stableValue 丢弃）
+    packageSha256: trim(manifest.packageSha256) || undefined,
   });
 }
 
@@ -280,11 +349,13 @@ export function signManifest(manifest, privateKeyBase64Url) {
 
 const USAGE = `用法：
   node scripts/sign-plugin.mjs --gen-key
-  node scripts/sign-plugin.mjs sign <plugin.json> <private-key.b64url> [--id <发布者 id>] [--write]
+  node scripts/sign-plugin.mjs sign <plugin.json> <private-key.b64url> [--id <发布者 id>] [--write] [--package <tgz> | --dir <包根>]
 
 说明：
   --gen-key  生成 Ed25519 密钥对，打印私钥（base64url）与 publisher 片段
-  sign       给清单签名；--write 就地写回，否则只打印 { publisher, signature } 片段`;
+  sign       给清单签名；--write 就地写回，否则只打印 { publisher, signature } 片段
+             bundle 会先写 packageSha256（files/** 内容摘要，默认取 plugin.json 同级 files/；
+             也可 --package 指定已打好的 tgz，或 --dir 指定包根）`;
 
 function runCli(argv) {
   const args = argv.slice(2);
@@ -316,6 +387,10 @@ function runCli(argv) {
   const idFlag = args.indexOf("--id");
   const publisherId = idFlag >= 0 ? args[idFlag + 1] : undefined;
   const write = args.includes("--write");
+  const pkgFlag = args.indexOf("--package");
+  const packagePath = pkgFlag >= 0 ? args[pkgFlag + 1] : undefined;
+  const dirFlag = args.indexOf("--dir");
+  const dirPath = dirFlag >= 0 ? args[dirFlag + 1] : undefined;
 
   let manifest;
   try {
@@ -324,6 +399,19 @@ function runCli(argv) {
     throw new Error(`读不到或解析不了清单 ${file}：${error instanceof Error ? error.message : String(error)}`);
   }
   if (publisherId) manifest.publisher = { id: publisherId, publicKey: manifest.publisher?.publicKey ?? "" };
+
+  // 审计 P0-1：bundle 先把 files/** 内容摘要写进清单再签，签名即覆盖代码字节。
+  if (manifest.distribution === "bundle") {
+    let digest;
+    if (packagePath) digest = digestFromTgz(resolve(packagePath));
+    else digest = digestFromPackageRoot(dirPath ? resolve(dirPath) : dirname(resolve(file)));
+    manifest.packageSha256 = digest;
+    console.log(`packageSha256  ${digest}`);
+  } else if (manifest.packageSha256 !== undefined) {
+    delete manifest.packageSha256;
+    console.log("声明式包不写 packageSha256（已忽略）");
+  }
+
   const { publisher, signature } = signManifest(manifest, privateKey);
   const signed = { ...manifest, publisher, signature };
   if (write) {

@@ -67,6 +67,39 @@ function sha256Hex(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/**
+ * `files/**` 内容摘要（审计 P0-1：让首方签名间接覆盖代码字节）。
+ *
+ * 首方签名只覆盖 `canonicalManifestText(manifest)`，不含 `files/**` 的代码字节；
+ * 只保留官方清单 + 签名、替换包内 JS 就能过验签。把**包内容摘要**写进清单
+ * `packageSha256` 后，签名即覆盖全部代码字节；安装端解包后重算并比对。
+ *
+ * ★ 为什么不是「整个 tgz 字节的 sha256」：`plugin.json` 在 tgz 里，而清单又要写
+ *   自己的 tgz 摘要，会构成自引用（不存在不动点）。所以摘要只覆盖**清单之外**的
+ *   `files/**`：排序后的 `path`、字节长度、内容 sha256 的确定性流——
+ *   换任意一个文件（含同内容换路径）都会变，且与 tar/gzip 时间戳无关。
+ *
+ * @param {Array<{path: string, data: Buffer|string}>} entries 解包/打包用的条目表
+ * @returns {string} 64 位小写 hex
+ */
+function computeFilesDigest(entries) {
+  const hash = createHash("sha256");
+  const files = (Array.isArray(entries) ? entries : [])
+    .filter((entry) => entry && typeof entry.path === "string" && entry.path.startsWith(FILE_ROOT))
+    .slice()
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  for (const entry of files) {
+    const data = toBuffer(entry.data) || Buffer.from(entry.data == null ? "" : String(entry.data), "utf8");
+    hash.update(entry.path);
+    hash.update("\0");
+    hash.update(String(data.length));
+    hash.update("\0");
+    hash.update(createHash("sha256").update(data).digest());
+    hash.update("\n");
+  }
+  return hash.digest("hex");
+}
+
 function toBuffer(bytes) {
   if (Buffer.isBuffer(bytes)) return bytes;
   if (bytes instanceof ArrayBuffer) return Buffer.from(bytes);
@@ -146,6 +179,19 @@ function validateBundleManifest(raw, options = {}) {
   }
 
   const distribution = raw.distribution === undefined ? "manifest" : raw.distribution;
+
+  /* ── packageSha256（审计 P0-1）：bundle 必填，签名据此覆盖 files/** 代码字节 ── */
+  const packageSha256 = raw.packageSha256;
+  if (distribution === "bundle") {
+    if (packageSha256 === undefined) {
+      errors.push("distribution: \"bundle\" 必须提供 packageSha256（files/** 内容摘要，用于让首方签名覆盖包内代码字节）");
+    } else if (typeof packageSha256 !== "string" || !/^[0-9a-f]{64}$/.test(packageSha256)) {
+      errors.push("packageSha256 必须是 64 位小写 hex（files/** 内容摘要）");
+    }
+  } else if (packageSha256 !== undefined) {
+    errors.push("packageSha256 只对界面插件（distribution: \"bundle\"）有意义");
+  }
+
   if (distribution !== "bundle") {
     errors.push("界面插件清单必须声明 distribution: \"bundle\"（带文件）");
   }
@@ -415,6 +461,20 @@ function readPackage(bytes, options = {}) {
     };
   }
 
+  // 包内容摘要校验（审计 P0-1）：签名覆盖的是清单里的 packageSha256，这里再算**实际
+  // files/** 摘要**比对——只保留官方清单+签名、替换包内 JS 的「借壳包」会在这里被拒。
+  const filesDigest = computeFilesDigest(entries);
+  if (manifestRaw.packageSha256 !== filesDigest) {
+    return {
+      ok: false,
+      errors: [
+        `packageSha256 与插件包内容不一致（清单声明 ${String(manifestRaw.packageSha256).slice(0, 16)}…，实际 ${filesDigest.slice(0, 16)}…）：files/** 可能被替换，已拒绝安装`,
+      ],
+      sha256,
+      manifest: manifestRaw,
+    };
+  }
+
   const paths = new Set(entries.map((entry) => entry.path));
   const manifest = manifestCheck.manifest;
   const widget = manifestCheck.widget;
@@ -436,6 +496,8 @@ function readPackage(bytes, options = {}) {
     signed: manifestCheck.signed === true,
     publisherId: manifestCheck.publisherId,
     signatureKeyId: signatureCheck.keyId,
+    // 已核对的 files/** 内容摘要（与清单 packageSha256 一致）
+    filesDigest,
     // 命令面板物化用（d.109）：已按 bundle 允许的 target 收紧，web 侧直接消费
     commands: normalizeBundleCommands(manifest),
     files: entries.map((entry) => ({ path: entry.path, data: entry.data })),
@@ -459,6 +521,7 @@ module.exports = {
   FILE_ROOT,
   LIMITS,
   sha256Hex,
+  computeFilesDigest,
   toBuffer,
   validateLayout,
   validateBundleManifest,

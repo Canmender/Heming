@@ -8,7 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { createPrivateKey, sign: nodeSign } = require("node:crypto");
 const { createPluginStore } = require("./plugin-store");
-const { packPackage, sha256Hex } = require("./plugin-package");
+const { packPackage, sha256Hex, computeFilesDigest } = require("./plugin-package");
 const { canonicalManifestText } = require("./plugin-signature");
 
 /* ────────────────────────── 夹具 ────────────────────────── */
@@ -62,11 +62,14 @@ function manifest(overrides = {}) {
 function packageBytes(overrides) {
   // d.105：bundle 安装必须通过首方验签，所以夹具统一用开发/测试私钥签名
   // （公钥见 packages/desktop/resources/official-keys.json 的 dev-test-2026-11）。
-  return packPackage([
-    { path: "plugin.json", data: JSON.stringify(signForTest(manifest(overrides))) },
+  // d.111/P0-1：清单还要绑定 files/** 内容摘要（签名据此覆盖代码字节）。
+  const files = [
     { path: "files/index.html", data: "<!doctype html><canvas></canvas>" },
     { path: "files/assets/app.js", data: `console.log(${JSON.stringify(overrides && overrides.version)})` },
-  ]);
+  ];
+  const digest = computeFilesDigest(files);
+  const signed = signForTest(manifest({ ...overrides, packageSha256: digest }));
+  return packPackage([{ path: "plugin.json", data: JSON.stringify(signed) }, ...files]);
 }
 
 /* ── 首方签名夹具：与 resources/official-keys.json 的 dev-test-2026-11 对应 ── */

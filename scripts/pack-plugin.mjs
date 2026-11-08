@@ -136,7 +136,54 @@ function resolveHostModule() {
   return null;
 }
 
+/** 宿主模块缺位时的等价实现：必须与 desktop `computeFilesDigest` 逐字节一致。 */
+function fallbackFilesDigest(items) {
+  const hash = createHash("sha256");
+  const files = [...items]
+    .filter((item) => item.path.startsWith("files/"))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  for (const item of files) {
+    hash.update(item.path);
+    hash.update("\0");
+    hash.update(String(item.data.length));
+    hash.update("\0");
+    hash.update(createHash("sha256").update(item.data).digest());
+    hash.update("\n");
+  }
+  return hash.digest("hex");
+}
+
 const host = resolveHostModule();
+
+/* ── 清单绑定包内容摘要（审计 P0-1）────────────────────────────────────────── */
+/*
+ * 首方签名只覆盖清单文本；把 files/** 的内容摘要写进清单 `packageSha256`，签名才
+ * 覆盖代码字节。打包脚本是最后一道：即使源 plugin.json 没写，也在**产物清单**里补上。
+ *
+ * 为什么不是 sha256(整个 tgz)：清单在 tgz 里又要写自己的 tgz 摘要，是自引用；
+ * 摘要只覆盖清单之外的 files/**，换任意文件都会变（与 tar/gzip 时间戳无关）。
+ */
+const manifestEntry = entries.find((entry) => entry.path === "plugin.json");
+if (!manifestEntry) fail("包根缺少 plugin.json");
+let packedManifest;
+try {
+  packedManifest = JSON.parse(manifestEntry.data.toString("utf8").replace(/^\\uFEFF/, ""));
+} catch (err) {
+  fail(`plugin.json 不是合法 JSON：${(err && err.message) || err}`);
+}
+if (packedManifest.distribution === "bundle") {
+  const filesDigest =
+    host?.full && typeof host.mod.computeFilesDigest === "function"
+      ? host.mod.computeFilesDigest(entries)
+      : fallbackFilesDigest(entries);
+  packedManifest.packageSha256 = filesDigest;
+  const rewritten = Buffer.from(`${JSON.stringify(packedManifest, null, 2)}\n`, "utf8");
+  total += rewritten.length - manifestEntry.data.length;
+  manifestEntry.data = rewritten;
+  manifestEntry.size = rewritten.length;
+  console.log(`[pack-plugin] packageSha256 ${filesDigest}（已写入产物清单）`);
+}
+
 const packageBytes = host
   ? host.full
     ? host.mod.packPackage(entries)
@@ -148,7 +195,10 @@ if (!Buffer.isBuffer(packageBytes) || packageBytes.length === 0) fail("打包结
 
 let verification = "仅完成 tar 往返（宿主校验模块缺位）";
 if (host?.full && typeof host.mod.readPackage === "function") {
-  const result = host.mod.readPackage(packageBytes);
+  // 本地/CI 开发用 dev 公钥时需显式放开（与安装端同一开关）；正式发版由 check-release-keys 拦。
+  const result = host.mod.readPackage(packageBytes, {
+    allowDevKeys: process.env.HEMING_ALLOW_DEV_PLUGIN_KEYS === "1",
+  });
   if (!result.ok) fail(`包校验未通过：\n  - ${result.errors.join("\n  - ")}`);
   verification = `readPackage ✓（${result.files.length} 个文件，entry=${result.widget.entry}，sha256=${result.sha256.slice(0, 16)}…）`;
 }

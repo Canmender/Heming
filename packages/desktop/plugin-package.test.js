@@ -12,6 +12,7 @@ const {
   packPackage,
   validateLayout,
   validateBundleManifest,
+  computeFilesDigest,
   sha256Hex,
 } = require("./plugin-package");
 
@@ -26,6 +27,8 @@ function baseManifest(overrides = {}) {
     description: "桌面上的 Live2D 化身",
     author: "和鸣",
     distribution: "bundle",
+    // 审计 P0-1：bundle 必填；真实值由 packageFor 按 files/** 算出（这里只是合法占位）
+    packageSha256: "0".repeat(64),
     permissions: { network: [], tools: "none", files: [], events: ["notify"], graphics: ["webgl", "wasm"], eval: false },
     contributions: {
       desktopWidgets: [
@@ -75,9 +78,20 @@ function signManifestForTest(manifest, privateKeyBase64Url = DEV_PRIVATE_KEY) {
   return { ...withPublisher, signature: { alg: "ed25519", value } };
 }
 
-/** 已签名的 baseManifest（bundle 安装用例的默认夹具）。 */
-function signedBaseManifest(overrides = {}) {
-  return signManifestForTest(baseManifest(overrides));
+/**
+ * 构造一份「清单绑定包内容摘要」的合法包（审计 P0-1）：
+ * 先算 `files/**` 摘要 → 写进清单 → 签名（签名文本因此覆盖代码字节）→ 打包。
+ */
+function packageFor(overrides = {}, files) {
+  const draftEntries = packageEntries(baseManifest({ ...overrides, packageSha256: undefined }), files);
+  const digest = computeFilesDigest(draftEntries);
+  const signed = signManifestForTest(baseManifest({ ...overrides, packageSha256: digest }));
+  const entries = draftEntries.map((entry) =>
+    entry.path === "plugin.json"
+      ? { path: entry.path, data: Buffer.from(JSON.stringify(signed)) }
+      : entry,
+  );
+  return { manifest: signed, digest, entries, bytes: packPackage(entries) };
 }
 
 /** 手工拼一个带指定 typeflag 的 tar（用来构造符号链接/硬链接这类恶意条目）。 */
@@ -166,17 +180,20 @@ test("截断：缺少结束块拒绝；头部校验和错拒绝", () => {
 
 /* ────────────────────────── 包结构与清单 ────────────────────────── */
 
-test("包的合法形状：根 plugin.json + files/**，roundtrip 后可安装（bundle 需已签名）", () => {
-  const entries = packageEntries(signedBaseManifest());
-  const parsed = readPackage(packPackage(entries));
+test("包的合法形状：根 plugin.json + files/**，roundtrip 后可安装（bundle 需签名 + 包摘要）", () => {
+  const pkg = packageFor();
+  const parsed = readPackage(pkg.bytes);
   assert.equal(parsed.ok, true, parsed.errors && parsed.errors.join("；"));
   assert.equal(parsed.manifest.id, "heming.pet");
   assert.equal(parsed.widget.id, "pet");
   assert.equal(parsed.signed, true);
   assert.equal(parsed.publisherId, "heming");
   assert.equal(parsed.signatureKeyId, "dev-test-2026-11");
+  // P0-1：清单里的 packageSha256 就是 files/** 的实测摘要
+  assert.equal(parsed.filesDigest, pkg.digest);
+  assert.equal(parsed.manifest.packageSha256, pkg.digest);
   assert.ok(parsed.files.some((file) => file.path === "files/index.html"));
-  assert.equal(parsed.sha256, sha256Hex(packPackage(entries)));
+  assert.equal(parsed.sha256, sha256Hex(pkg.bytes));
 });
 
 test("包内结构：plugin.json 不在根 / 多余的顶层路径 / 没有 files/ 都拒绝", () => {
@@ -267,14 +284,17 @@ test("首方验签：无签名 / 冒名密钥 / 签名后篡改都拒绝；合�
   assert.match(forgedPkg.errors.join("；"), /不匹配/);
 
   // 4) 签名后改内容 → 拒绝
-  const signedManifest = signedBaseManifest();
-  const tampered = { ...signedManifest, description: "签名之后被改过的描述" };
-  const tamperedPkg = readPackage(packPackage(packageEntries(tampered)));
+  const signedPkg = packageFor();
+  const tampered = { ...signedPkg.manifest, description: "签名之后被改过的描述" };
+  const tamperedEntries = signedPkg.entries.map((entry) =>
+    entry.path === "plugin.json" ? { path: entry.path, data: Buffer.from(JSON.stringify(tampered)) } : entry,
+  );
+  const tamperedPkg = readPackage(packPackage(tamperedEntries));
   assert.equal(tamperedPkg.ok, false);
   assert.match(tamperedPkg.errors.join("；"), /未通过首方签名/);
 
   // 5) 合法签名 → 通过，记录 signed / publisherId / keyId
-  const signed = readPackage(packPackage(packageEntries(signedManifest)));
+  const signed = readPackage(signedPkg.bytes);
   assert.equal(signed.ok, true, signed.errors && signed.errors.join("；"));
   assert.equal(signed.signed, true);
   assert.equal(signed.publisherId, "heming");
@@ -283,23 +303,20 @@ test("首方验签：无签名 / 冒名密钥 / 签名后篡改都拒绝；合�
 
 test("entry / icon 必须真的在包里（不存在的入口 = 一块打不开的透明窗）", () => {
   const noEntry = readPackage(
-    packPackage([
-      { path: "plugin.json", data: JSON.stringify(signedBaseManifest()) },
-      { path: "files/other.txt", data: "not the entry" },
-    ]),
+    packageFor({}, [{ path: "files/other.txt", data: "not the entry" }]).bytes,
   );
   assert.equal(noEntry.ok, false);
   assert.match(noEntry.errors.join("；"), /entry 不存在/);
 
   const iconManifest = baseManifest();
   iconManifest.contributions.desktopWidgets[0].icon = "files/icon.png";
-  const noIcon = readPackage(packPackage(packageEntries(signManifestForTest(iconManifest))));
+  const noIcon = readPackage(packageFor({ contributions: iconManifest.contributions }).bytes);
   assert.equal(noIcon.ok, false);
   assert.match(noIcon.errors.join("；"), /icon 不存在/);
 });
 
 test("sha256：给了 expectedSha256 就必须一致，不一致拒绝且不返回内容", () => {
-  const bytes = packPackage(packageEntries(signedBaseManifest()));
+  const bytes = packageFor().bytes;
   const wrong = readPackage(bytes, { expectedSha256: "0".repeat(64) });
   assert.equal(wrong.ok, false);
   assert.match(wrong.errors.join("；"), /指纹不一致/);
@@ -357,7 +374,7 @@ test("bundle 命令 target：允许 page/plugin/settings/unit，拒绝 skill 并
     { kind: "page", page: "plugins" },
     { kind: "plugin" },
   ]);
-  const pkg = readPackage(packPackage(packageEntries(signManifestForTest(manifest))));
+  const pkg = readPackage(packageFor({ contributions: manifest.contributions }).bytes);
   assert.equal(pkg.ok, true, pkg.errors && pkg.errors.join("；"));
   assert.deepEqual(
     pkg.commands.map((item) => item.target),
@@ -370,6 +387,49 @@ test("bundle 命令 target：允许 page/plugin/settings/unit，拒绝 skill 并
   );
   assert.equal(pkg.commands[0].id, "open");
   assert.equal(pkg.commands[0].title, "打开");
+});
+
+/* ───────────────── 审计 P0-1：签名覆盖代码字节（packageSha256） ───────────────── */
+
+test("借壳包：保留官方清单+签名、替换 files/** → packageSha256 不一致，cloud/local 两条路径都拒绝", () => {
+  const pkg = packageFor();
+  // 只换包内 JS，清单与签名保持官方原样（P0-1 描述的借壳攻击）
+  const swapped = pkg.entries.map((entry) =>
+    entry.path === "files/assets/app.js"
+      ? { path: entry.path, data: Buffer.from("console.log('pwned')") }
+      : entry,
+  );
+  const bytes = packPackage(swapped);
+  // 云端安装会传 expectedSha256（tgz 指纹），本地安装不传——两条路都必须靠清单摘要拦住
+  for (const options of [{}, { expectedSha256: sha256Hex(bytes) }]) {
+    const result = readPackage(bytes, options);
+    assert.equal(result.ok, false, JSON.stringify(options));
+    assert.match(result.errors.join("；"), /packageSha256 与插件包内容不一致/);
+    assert.match(result.errors.join("；"), /files\/\*\* 可能被替换/);
+  }
+});
+
+test("缺 packageSha256 → 拒绝（旧 bundle 包不兼容，属预期收紧；旧安装记录不受影响）", () => {
+  const draftEntries = packageEntries(baseManifest({ packageSha256: undefined }));
+  const signed = signManifestForTest(baseManifest({ packageSha256: undefined }));
+  const entries = draftEntries.map((entry) =>
+    entry.path === "plugin.json" ? { path: entry.path, data: Buffer.from(JSON.stringify(signed)) } : entry,
+  );
+  const result = readPackage(packPackage(entries));
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("；"), /必须提供 packageSha256/);
+});
+
+test("packageSha256 格式非法（非 64 位小写 hex）→ 清单守卫拒绝", () => {
+  for (const bad of ["ABC", "0".repeat(63), "G".repeat(64)]) {
+    const errors = validateBundleManifest(baseManifest({ packageSha256: bad })).errors.join("；");
+    assert.match(errors, /packageSha256 必须是 64 位小写 hex/, bad);
+  }
+  // 声明式包不要求该字段（写了反而报「只对 bundle 有意义」）
+  assert.doesNotMatch(
+    validateBundleManifest(baseManifest({ distribution: "manifest", packageSha256: undefined })).errors.join("；"),
+    /packageSha256/,
+  );
 });
 
 test("纯声明式包不要求首方签名（bundle 专属要求；声明式走 web 侧 TOFU，不进这条链路）", () => {

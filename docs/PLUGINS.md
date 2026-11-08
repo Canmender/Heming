@@ -233,6 +233,7 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugins/ --push h
   "name": "桌宠",
   "version": "1.0.0",
   "distribution": "bundle",           // 缺省 manifest = 旧语义（纯声明式）
+  "packageSha256": "…64 位小写 hex…",  // bundle 必填：files/** 内容摘要（签名据此覆盖代码字节；构建/打包工具自动写）
   "permissions": {
     "network": [],                    // 逐 host，仍需 ≤20
     "tools": "none",
@@ -265,6 +266,9 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugins/ --push h
 约束：
 
 - `distribution: "bundle"` 的包**只允许** `desktopWidgets`（可选 `commands`）；声明 `skills` / `mcpServers` / `toolPacks` 一律拒绝。
+- **`packageSha256` 必填（审计 P0-1）**：它是包内 `files/**` 的确定性内容摘要（不是 tgz 自身字节的 sha256——清单在 tgz 里，写自己的 tgz 摘要会构成自引用）。
+  首方签名覆盖清单（含该字段）→ 签名**间接覆盖全部代码字节**；安装端解包后重算并比对，只换包内 JS、保留官方清单+签名的「借壳包」会被拒。
+  旧的无该字段的 bundle 包**不再允许新装**（已安装记录不受影响）；打包/签名脚本会自动写入/校验该字段。
 - `desktopWidgets` 本轮 **≤1 个**，字段校验见 `docs/superpowers/specs/2026-11-07-d98-pet-as-plugin.md` §2.3。
 - 字段类型只支持 `boolean` / `select` / `text` / `number` / `agent`；值由**主进程**持有（`userData/plugins/<id>/settings.json`），
   渲染层经 IPC 读写、插件窗口经 preload 读，**不写 localStorage**。
@@ -298,10 +302,16 @@ package.tgz
 ### 9.4 发布
 
 ```bash
-node scripts/build-pet-widget.mjs          # 构建插件 → packages/pet-widget/dist/package/
+node scripts/check-release-keys.mjs         # 发版前必跑：只有 dev-* 首方公钥 → 退出码 2 阻断（本地开发可加 --allow-dev）
+node scripts/build-pet-widget.mjs           # 构建插件 → packages/pet-widget/dist/package/（自动写入 packageSha256）
+node scripts/sign-plugin.mjs sign packages/pet-widget/dist/package/plugin.json <正式私钥> --id heming --write
+                                            # 签名前自动按 files/** 重算 packageSha256；签名因此覆盖代码字节
 node scripts/publish-plugin.mjs packages/pet-widget/dist/package --dest <plugin-dir>
 # 把 <plugin-dir> 同步到服务器的 HEMING_PLUGIN_DIR，客户端「插件区 → 桌面小组件」即可看到
 ```
+
+> 发版前跑 `node scripts/check-release-keys.mjs`：若 `resources/official-keys.json` 里只有 `dev-*` 公钥会以非 0 退出
+> 并提示「正式发版前必须换正式首方公钥（见文件 `_rotate`）」；本地/CI 开发可加 `--allow-dev`。
 
 ### 10.5 生命周期事件（d.108，仅 bundle）
 

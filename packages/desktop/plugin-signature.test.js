@@ -46,6 +46,8 @@ const PINNED_MANIFEST = {
   description: "桌面上的 Live2D 化身：关掉主窗口它还在，点它就能说话，有消息它会提醒。",
   author: "和鸣",
   distribution: "bundle",
+  // 审计 P0-1：签名覆盖的 files/** 内容摘要（真实值由打包/签名工具计算）
+  packageSha256: "ab".repeat(32),
   permissions: { network: [], tools: "none", files: [], events: ["notify"], graphics: ["webgl", "wasm"], eval: true },
   contributions: {
     desktopWidgets: [
@@ -89,11 +91,13 @@ const FIXTURE_TEXT =
   '"scales":[0.6,0.8,1,1.25,1.5],"skipTaskbar":true,"transparent":true,"width":300}],' +
   '"llmPresets":[],"mcpServers":[],"skills":[],"toolPacks":[]},' +
   '"description":"桌面上的 Live2D 化身：关掉主窗口它还在，点它就能说话，有消息它会提醒。",' +
-  '"id":"heming.pet","name":"桌宠","permissions":{"eval":true,"events":["notify"],"files":[],' +
+  '"id":"heming.pet","name":"桌宠",' +
+  '"packageSha256":"abababababababababababababababababababababababababababababababab",' +
+  '"permissions":{"eval":true,"events":["notify"],"files":[],' +
   '"graphics":["webgl","wasm"],"network":[],"tools":"none"},' +
   '"publisher":{"id":"heming","publicKey":"CwlX79Lc-Il4jvWK1sxhH-zxj9CLn5KD_CCpjp3rOl0"},"version":"1.0.1"}';
 const FIXTURE_SIGNATURE =
-  "TwM1m6evkDk0JqHJ3wFdb479pJ-TwQZ6vDh58ngd3VpBhTgQkgkteI9w5-GDDrGzlSff3Jt5rZMtBSLGmt45AA";
+  "JN1CLGXBw5Ejofxg18kdjZ52y5IXUhYvu4qY22IRnvnfRWqiWeCYQihgHdCzuuRUmZU9fytiRoD0EhAO_0_dBw";
 
 /** 带 publisher（+ 可选签名）的清单。 */
 function withPublisher(manifest, publisher = { id: "heming", publicKey: DEV_PUBLIC_KEY }) {
@@ -149,7 +153,25 @@ test("canonical 文本不受字段顺序 / 空白 / signature / 未覆盖字段�
   assert.equal(canonicalJsonText({ b: 1, a: undefined, c: [2, 1] }), '{"b":1,"c":[2,1]}');
 });
 
-test("canonical-v2：v5 清单额外覆盖 engines / meta / distribution", () => {
+test("canonical-v1：packageSha256 参与签名（审计 P0-1：签名绑定包内代码字节）", () => {
+  const changed = { ...withPublisher(PINNED_MANIFEST), packageSha256: "cd".repeat(32) };
+  assert.notEqual(canonicalManifestText(changed), FIXTURE_TEXT);
+  assert.ok(canonicalManifestText(changed).includes(`"packageSha256":"${"cd".repeat(32)}"`));
+
+  // 只改 packageSha256（保留原签名）→ 验签必须失败；反过来改动包内摘要无法逃过签名
+  const signed = { ...withPublisher(PINNED_MANIFEST), signature: { alg: "ed25519", value: FIXTURE_SIGNATURE } };
+  assert.equal(verifyOfficialSignature(signed).ok, true);
+  const tampered = { ...signed, packageSha256: "cd".repeat(32) };
+  assert.equal(verifyOfficialSignature(tampered).ok, false);
+  assert.match(verifyOfficialSignature(tampered).reason, /不匹配/);
+
+  // 声明式包没有该字段 → canonical 文本不变（旧签名不受影响）
+  const declarative = { ...withPublisher(PINNED_MANIFEST) };
+  delete declarative.packageSha256;
+  assert.ok(!canonicalManifestText(declarative).includes("packageSha256"));
+});
+
+test("canonical-v2：v5 清单额外覆盖 engines / meta / distribution / packageSha256", () => {
   const v5 = {
     schemaVersion: 5,
     id: "heming.pet",
@@ -160,6 +182,7 @@ test("canonical-v2：v5 清单额外覆盖 engines / meta / distribution", () =>
     distribution: "bundle",
     engines: { heming: "d.105" },
     meta: { category: "fun", tags: ["pet"] },
+    packageSha256: "ef".repeat(32),
     permissions: { network: [], tools: "none", files: [], events: [], graphics: [], eval: false },
     contributions: { desktopWidgets: [{ id: "pet", name: "桌宠", entry: "files/index.html", width: 300, height: 420 }] },
   };
@@ -169,6 +192,7 @@ test("canonical-v2：v5 清单额外覆盖 engines / meta / distribution", () =>
   assert.deepEqual(parsed.engines, { heming: "d.105" });
   assert.deepEqual(parsed.meta, { category: "fun", tags: ["pet"] });
   assert.equal(parsed.distribution, "bundle");
+  assert.equal(parsed.packageSha256, "ef".repeat(32));
   assert.equal(parsed.publisher.id, "heming");
 });
 
