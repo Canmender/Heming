@@ -88,6 +88,8 @@
 | 路径 | 拒绝对路径、`..`、NUL、反斜杠规范化后的穿越 |
 | `SKILL.md` | 包内任意深度、取**最浅**的一个；≤128KB；UTF-8 |
 | 文件清单 | 只返回 path/size，不返回内容 |
+| 下载地址（SSRF） | 只允许 `https:`（`HEMING_SKILL_HUB_ALLOW_HTTP=1` 才放行 `http:`）；拒绝 `user:pass@`、`localhost`/`*.localhost`、回环/私网/链路本地/云元数据字面量（IPv4、IPv6、IPv4-mapped IPv6）；`redirect: "manual"` 最多跟随 3 次且**每跳重新校验**；违规返回 502「下载地址不安全，已拒绝」 |
+| 上游缓存 | 只缓存公开只读接口：分类 10 分钟、列表 30 秒（键 = page/limit/search/category/sort，LRU 最多 50 条）；下载/注册/带 Key 请求**永不**缓存；缓存命中的 `fetchedAt` 保持「数据实际拉取时间」 |
 
 ## 5. Key 管理
 
@@ -119,6 +121,7 @@
 |---|---|---|
 | `HEMING_SKILL_HUB` | 开 | 设为 `off` 关闭整个社区功能（接口 503、UI 隐藏入口） |
 | `HEMING_SKILL_HUB_BASE` | `https://xiaping.coze.com` | 上游 base URL；只允许 http(s)，测试用注入 fetch |
+| `HEMING_SKILL_HUB_ALLOW_HTTP` | 关 | 设为 `1` 才允许下载地址用 `http:`（默认只允许 https；内网/回环地址永远拒绝） |
 
 ## 9. 接入第二个源（后续）
 

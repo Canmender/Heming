@@ -5,12 +5,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createMemoryStore } from "./store.js";
 import { createApp } from "./app.js";
-import { createSkillHubRouter } from "./skillHub.js";
+import { checkDownloadUrl, createSkillHubRouter, type SkillHubRouterOptions } from "./skillHub.js";
 
 /**
- * 技能社区代理（d.109）：归一化 / 分页 / 失败映射 / 下载解包 / Key 校验 / 注册透传。
+ * 技能社区代理（d.109/d.110）：归一化 / 分页 / 失败映射 / 下载解包 / Key 校验 / 注册透传 /
+ * SSRF 防护 / 上游 TTL 缓存。
  *
- * 全部用注入的假上游（`fetchImpl`），不打真实网络；zip 由测试手工构造。
+ * 全部用注入的假上游（`fetchImpl`）与注入时钟（`now`），不打真实网络、不真的等待；zip 由测试手工构造。
  */
 
 const BASE = "https://hub.test";
@@ -20,6 +21,7 @@ interface MockResult {
   status?: number;
   body?: unknown;
   bytes?: Buffer;
+  headers?: Record<string, string>;
 }
 
 interface MockCall {
@@ -39,20 +41,27 @@ function makeFetch(handler: (url: string, init?: RequestInit) => MockResult) {
     calls.push({ url, init });
     const result = handler(url, init);
     if (result.bytes) {
-      return new Response(new Uint8Array(result.bytes), { status: result.status ?? 200 });
+      return new Response(new Uint8Array(result.bytes), {
+        status: result.status ?? 200,
+        headers: result.headers,
+      });
     }
     return new Response(JSON.stringify(result.body ?? null), {
       status: result.status ?? 200,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...(result.headers ?? {}) },
     });
   }) as unknown as typeof fetch;
   return { fetchImpl, calls };
 }
 
-function makeApp(fetchImpl: typeof fetch, enabled = true) {
+function makeApp(
+  fetchImpl: typeof fetch,
+  enabled = true,
+  options: Pick<SkillHubRouterOptions, "allowHttp" | "now"> = {},
+) {
   const app = express();
   app.use(express.json());
-  app.use("/api/skill-hub", createSkillHubRouter({ baseUrl: BASE, enabled, fetchImpl }));
+  app.use("/api/skill-hub", createSkillHubRouter({ baseUrl: BASE, enabled, fetchImpl, ...options }));
   return app;
 }
 
@@ -459,5 +468,309 @@ describe("上游 base URL", () => {
     );
     const res = await request(app).get("/api/skill-hub/skills");
     expect(res.status).toBe(200);
+  });
+});
+
+describe("SSRF: checkDownloadUrl（下载地址第一道闸）", () => {
+  const blocked = [
+    "http://cdn.test/pack.zip", // 默认拒绝 http
+    "https://localhost/pack.zip",
+    "https://foo.localhost/pack.zip",
+    "https://127.0.0.1/pack.zip",
+    "https://127.8.9.10/pack.zip",
+    "https://10.1.2.3/pack.zip",
+    "https://172.16.0.9/pack.zip",
+    "https://172.31.255.1/pack.zip",
+    "https://192.168.1.1/pack.zip",
+    "https://169.254.169.254/latest/meta-data",
+    "https://0.0.0.0/pack.zip",
+    "https://[::1]/pack.zip",
+    "https://[fc00::1]/pack.zip",
+    "https://[fe80::1]/pack.zip",
+    "https://[::ffff:127.0.0.1]/pack.zip",
+    "https://[::ffff:169.254.169.254]/pack.zip",
+    "https://user:pass@cdn.test/pack.zip",
+    "ftp://cdn.test/pack.zip",
+    "file:///etc/passwd",
+    "not-a-url",
+  ];
+
+  it("回环/私网/链路本地/元数据/账号信息/非 https 一律拒绝", () => {
+    for (const url of blocked) {
+      const checked = checkDownloadUrl(url);
+      expect(checked.ok, url).toBe(false);
+    }
+  });
+
+  it("公网 https 放行；http 仅在显式开启时放行", () => {
+    const ok = checkDownloadUrl("https://cdn.test/pack.zip");
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.url.hostname).toBe("cdn.test");
+
+    expect(checkDownloadUrl("http://cdn.test/pack.zip")).toMatchObject({ ok: false });
+    expect(checkDownloadUrl("http://cdn.test/pack.zip", { allowHttp: true }).ok).toBe(true);
+    // 172.32/12 之外的地址不是私网
+    expect(checkDownloadUrl("https://172.32.0.1/pack.zip").ok).toBe(true);
+    expect(checkDownloadUrl("https://8.8.8.8/pack.zip").ok).toBe(true);
+  });
+});
+
+describe("SSRF: 下载路由（内网地址/重定向/次数上限）", () => {
+  const meta = (downloadUrl: string) => ({
+    body: { success: true, data: { download_url: downloadUrl, version: "1.0.0" } },
+  });
+
+  it("上游给内网/非 https 下载地址：502「下载地址不安全，已拒绝」且不发请求", async () => {
+    for (const downloadUrl of [
+      "http://localhost/pack.zip",
+      "https://127.0.0.1/pack.zip",
+      "https://10.0.0.5/pack.zip",
+      "https://169.254.169.254/latest/meta-data",
+      "https://user:pa@cdn.test/pack.zip",
+      "https://[::1]/pack.zip",
+    ]) {
+      const { fetchImpl, calls } = makeFetch(() => meta(downloadUrl));
+      const res = await request(makeApp(fetchImpl))
+        .get("/api/skill-hub/skills/abc/download")
+        .set("x-skill-hub-key", KEY);
+      expect(res.status, downloadUrl).toBe(502);
+      expect(res.body.error).toContain("下载地址不安全，已拒绝");
+      // 只有「取下载地址」这一跳；被拒的地址根本没有被 fetch
+      expect(calls.map((call) => call.url)).toEqual([`${BASE}/api/skills/abc/download`]);
+    }
+  });
+
+  it("HEMING_SKILL_HUB_ALLOW_HTTP 语义（注入 allowHttp=true）：http 下载地址可用", async () => {
+    const zip = skillZip();
+    const { fetchImpl, calls } = makeFetch((url) =>
+      url.endsWith("/download")
+        ? meta("http://cdn.test/pack.zip")
+        : { bytes: zip },
+    );
+    const res = await request(makeApp(fetchImpl, true, { allowHttp: true }))
+      .get("/api/skill-hub/skills/abc/download")
+      .set("x-skill-hub-key", KEY);
+    expect(res.status).toBe(200);
+    expect(calls[1].url).toBe("http://cdn.test/pack.zip");
+  });
+
+  it("HEMING_SKILL_HUB_ALLOW_HTTP=1 环境变量开启 http 下载", async () => {
+    const saved = process.env.HEMING_SKILL_HUB_ALLOW_HTTP;
+    process.env.HEMING_SKILL_HUB_ALLOW_HTTP = "1";
+    try {
+      const zip = skillZip();
+      const { fetchImpl } = makeFetch((url) =>
+        url.endsWith("/download") ? meta("http://cdn.test/pack.zip") : { bytes: zip },
+      );
+      const app = express();
+      app.use(express.json());
+      app.use("/api/skill-hub", createSkillHubRouter({ baseUrl: BASE, enabled: true, fetchImpl }));
+      const res = await request(app)
+        .get("/api/skill-hub/skills/abc/download")
+        .set("x-skill-hub-key", KEY);
+      expect(res.status).toBe(200);
+    } finally {
+      if (saved === undefined) delete process.env.HEMING_SKILL_HUB_ALLOW_HTTP;
+      else process.env.HEMING_SKILL_HUB_ALLOW_HTTP = saved;
+    }
+  });
+
+  it("跟随重定向：每一跳重新校验，跳回私网被拒", async () => {
+    const { fetchImpl, calls } = makeFetch((url) => {
+      if (url.endsWith("/download")) return meta("https://cdn.test/a.zip");
+      if (url === "https://cdn.test/a.zip") {
+        return { status: 302, headers: { location: "http://127.0.0.1/secret.zip" } };
+      }
+      return { bytes: skillZip() };
+    });
+    const res = await request(makeApp(fetchImpl, true, { allowHttp: true }))
+      .get("/api/skill-hub/skills/abc/download")
+      .set("x-skill-hub-key", KEY);
+    expect(res.status).toBe(502);
+    expect(res.body.error).toContain("下载地址不安全，已拒绝");
+    // 重定向目标被拦在发起请求之前
+    expect(calls.map((call) => call.url)).toEqual([
+      `${BASE}/api/skills/abc/download`,
+      "https://cdn.test/a.zip",
+    ]);
+  });
+
+  it("正常跟随 3 次重定向可以成功；第 4 次拒绝", async () => {
+    const zip = skillZip();
+    const chain = ["https://cdn.test/1.zip", "https://cdn.test/2.zip", "https://cdn.test/3.zip"];
+    const follow = (hop: number) => {
+      if (hop < chain.length) return { status: 302, headers: { location: chain[hop] } };
+      return { bytes: zip };
+    };
+    const okFetch = makeFetch((url) => {
+      if (url.endsWith("/download")) return meta("https://cdn.test/0.zip");
+      if (url === "https://cdn.test/0.zip") return follow(0);
+      if (url === "https://cdn.test/1.zip") return follow(1);
+      if (url === "https://cdn.test/2.zip") return follow(2);
+      return { bytes: zip };
+    });
+    const ok = await request(makeApp(okFetch.fetchImpl))
+      .get("/api/skill-hub/skills/abc/download")
+      .set("x-skill-hub-key", KEY);
+    expect(ok.status).toBe(200);
+
+    // 4 次重定向：0→1→2→3→4，跟随到第 3 次后仍有 302，拒绝
+    const badFetch = makeFetch((url) => {
+      if (url.endsWith("/download")) return meta("https://cdn.test/r0.zip");
+      const hop = Number(/\/r(\d+)\.zip$/.exec(url)?.[1] ?? "x");
+      if (Number.isInteger(hop) && hop < 4) {
+        return { status: 302, headers: { location: `https://cdn.test/r${hop + 1}.zip` } };
+      }
+      return { bytes: zip };
+    });
+    const bad = await request(makeApp(badFetch.fetchImpl))
+      .get("/api/skill-hub/skills/abc/download")
+      .set("x-skill-hub-key", KEY);
+    expect(bad.status).toBe(502);
+    expect(bad.body.error).toContain("重定向次数过多");
+  });
+});
+
+describe("上游 TTL 缓存", () => {
+  function clock(start = "2026-11-08T10:00:00.000Z") {
+    let value = Date.parse(start);
+    return {
+      now: () => value,
+      advance: (ms: number) => {
+        value += ms;
+      },
+    };
+  }
+
+  it("列表缓存 30 秒：命中不重复打上游，fetchedAt 保持实际拉取时间，过期后刷新", async () => {
+    const time = clock();
+    let calls = 0;
+    const { fetchImpl } = makeFetch(() => {
+      calls += 1;
+      return { body: { skills: [], total: 0, hasMore: false } };
+    });
+    const app = makeApp(fetchImpl, true, { now: time.now });
+
+    const first = await request(app).get("/api/skill-hub/skills?page=1&limit=20");
+    expect(calls).toBe(1);
+    const fetchedAt = first.body.fetchedAt as string;
+
+    time.advance(10_000);
+    const cached = await request(app).get("/api/skill-hub/skills?page=1&limit=20");
+    expect(calls).toBe(1);
+    expect(cached.body.fetchedAt).toBe(fetchedAt);
+
+    time.advance(30_000); // 累计 40s > 30s TTL
+    const refreshed = await request(app).get("/api/skill-hub/skills?page=1&limit=20");
+    expect(calls).toBe(2);
+    expect(refreshed.body.fetchedAt).not.toBe(fetchedAt);
+  });
+
+  it("不同参数用不同缓存键", async () => {
+    let calls = 0;
+    const { fetchImpl } = makeFetch(() => {
+      calls += 1;
+      return { body: { skills: [], total: 0 } };
+    });
+    const app = makeApp(fetchImpl);
+    await request(app).get("/api/skill-hub/skills?search=a");
+    await request(app).get("/api/skill-hub/skills?search=b");
+    await request(app).get("/api/skill-hub/skills?search=a");
+    expect(calls).toBe(2);
+  });
+
+  it("缓存最多 50 条：第 51 个键把最旧的淘汰", async () => {
+    let calls = 0;
+    const { fetchImpl } = makeFetch(() => {
+      calls += 1;
+      return { body: { skills: [], total: 0 } };
+    });
+    const app = makeApp(fetchImpl);
+    for (let index = 1; index <= 51; index += 1) {
+      await request(app).get(`/api/skill-hub/skills?search=k${index}`);
+    }
+    expect(calls).toBe(51);
+    await request(app).get("/api/skill-hub/skills?search=k1"); // 最旧，已被淘汰
+    expect(calls).toBe(52);
+    await request(app).get("/api/skill-hub/skills?search=k51"); // 最近，仍命中
+    expect(calls).toBe(52);
+  });
+
+  it("分类缓存 10 分钟（状态接口复用）", async () => {
+    const time = clock();
+    let calls = 0;
+    const { fetchImpl } = makeFetch(() => {
+      calls += 1;
+      return { body: { success: true, data: ["效率工具"] } };
+    });
+    const app = makeApp(fetchImpl, true, { now: time.now });
+    expect((await request(app).get("/api/skill-hub")).body.reachable).toBe(true);
+    expect((await request(app).get("/api/skill-hub")).body.reachable).toBe(true);
+    expect(calls).toBe(1);
+    time.advance(10 * 60 * 1000 + 1);
+    await request(app).get("/api/skill-hub");
+    expect(calls).toBe(2);
+  });
+
+  it("下载/注册不缓存：每次请求都打上游", async () => {
+    const zip = skillZip();
+    const { fetchImpl, calls } = makeFetch((url) => {
+      if (url.endsWith("/download")) {
+        return { body: { success: true, data: { download_url: "https://cdn.test/p.zip", version: "1.0.0" } } };
+      }
+      if (url.endsWith("/api/auth/register")) {
+        return { body: { success: true, data: { api_key: "sk_abc12345" } } };
+      }
+      return { bytes: zip };
+    });
+    const app = makeApp(fetchImpl);
+    await request(app).get("/api/skill-hub/skills/abc/download").set("x-skill-hub-key", KEY);
+    await request(app).get("/api/skill-hub/skills/abc/download").set("x-skill-hub-key", KEY);
+    expect(calls.filter((call) => call.url.endsWith("/download"))).toHaveLength(2);
+    expect(calls.filter((call) => call.url === "https://cdn.test/p.zip")).toHaveLength(2);
+
+    await request(app).post("/api/skill-hub/register").send({ name: "测试Agent" });
+    await request(app).post("/api/skill-hub/register").send({ name: "测试Agent" });
+    expect(calls.filter((call) => call.url.endsWith("/api/auth/register"))).toHaveLength(2);
+  });
+});
+
+describe("上游 429：中文限流文案 + Retry-After", () => {
+  it("列表/详情透传 429 + retryAfter", async () => {
+    const { fetchImpl } = makeFetch(() => ({
+      status: 429,
+      body: { success: false },
+      headers: { "retry-after": "60" },
+    }));
+    const app = makeApp(fetchImpl);
+    const list = await request(app).get("/api/skill-hub/skills");
+    expect(list.status).toBe(429);
+    expect(list.body.error).toContain("上游限流，请稍后重试");
+    expect(list.body.retryAfter).toBe("60");
+
+    const detail = await request(app).get("/api/skill-hub/skills/abc");
+    expect(detail.status).toBe(429);
+    expect(detail.body.retryAfter).toBe("60");
+  });
+
+  it("下载 429 也带 retryAfter；无 Retry-After 时不编造字段", async () => {
+    const withHeader = makeFetch(() => ({
+      status: 429,
+      body: { success: false },
+      headers: { "retry-after": "120" },
+    }));
+    const res = await request(makeApp(withHeader.fetchImpl))
+      .get("/api/skill-hub/skills/abc/download")
+      .set("x-skill-hub-key", KEY);
+    expect(res.status).toBe(429);
+    expect(res.body.error).toContain("上游限流，请稍后重试");
+    expect(res.body.retryAfter).toBe("120");
+
+    const noHeader = makeFetch(() => ({ status: 429, body: { success: false } }));
+    const res2 = await request(makeApp(noHeader.fetchImpl))
+      .get("/api/skill-hub/skills/abc/download")
+      .set("x-skill-hub-key", KEY);
+    expect(res2.status).toBe(429);
+    expect(res2.body).not.toHaveProperty("retryAfter");
   });
 });

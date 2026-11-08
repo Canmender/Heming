@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import {
   SKILL_HUB_SOURCES,
   type SkillHubDetail,
@@ -40,6 +41,13 @@ const MAX_DOWNLOAD_BYTES = MAX_ZIP_BYTES;
 const MAX_SKILL_MD_BYTES = 128 * 1024;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 30;
+/** 下载地址最多跟随的重定向次数（初始请求之外）。 */
+const MAX_DOWNLOAD_REDIRECTS = 3;
+/** 分类缓存 10 分钟；列表缓存 30 秒；条目上限 50（LRU）。 */
+const CATEGORIES_TTL_MS = 10 * 60 * 1000;
+const LIST_TTL_MS = 30 * 1000;
+const CACHE_MAX_ENTRIES = 50;
+const UNSAFE_DOWNLOAD = "下载地址不安全，已拒绝";
 
 /** 技能 id：上游是 uuid，但只按「URL 段安全」校验，不绑死格式（换源也能用）。 */
 const SKILL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -62,6 +70,10 @@ export interface SkillHubRouterOptions {
   enabled?: boolean;
   /** 注入 fetch（测试注入）；缺省用全局 fetch。 */
   fetchImpl?: typeof fetch;
+  /** 是否允许 http 下载地址（测试注入）；缺省读 `HEMING_SKILL_HUB_ALLOW_HTTP=1`。 */
+  allowHttp?: boolean;
+  /** 注入时钟（测试注入，控制 TTL 而不真的等待）。 */
+  now?: () => number;
 }
 
 /** 只接受 http(s) 的 base URL；非法值回落到默认（不抛，避免配置错误把服务打挂）。 */
@@ -185,13 +197,221 @@ function pickSkillMd(entries: Array<{ path: string; size: number; data: Buffer }
   return candidates[0];
 }
 
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
+/** 下载地址校验结果：`ok=false` 时 reason 只描述类别，不回显主机信息。 */
+export type DownloadUrlCheck = { ok: true; url: URL } | { ok: false; reason: string };
+
+function ipv4Parts(host: string): number[] | null {
+  const items = host.split(".");
+  if (items.length !== 4) return null;
+  const numbers = items.map((item) => (/^\d{1,3}$/.test(item) ? Number(item) : NaN));
+  if (numbers.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) return null;
+  return numbers;
+}
+
+/** 拒绝回环 / 私网 / 链路本地 / 未指定地址（169.254.169.254 云元数据也在这段）。 */
+function ipv4Blocked(parts: number[]): boolean {
+  const [a, b] = parts;
+  if (a === 0) return true; // 0.0.0.0/8
+  if (a === 10) return true; // 10/8
+  if (a === 127) return true; // 回环
+  if (a === 169 && b === 254) return true; // 链路本地（含元数据地址）
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
+  if (a === 192 && b === 168) return true; // 192.168/16
+  return false;
+}
+
+const HEXTET_RE = /^[0-9a-f]{1,4}$/;
+
+/** 展开 IPv6 为 8 个 16 位段；支持 `::` 压缩与内嵌 IPv4（URL 会把内嵌 IPv4 规范化成 hex）。 */
+function parseIpv6(host: string): number[] | null {
+  let text = host.toLowerCase();
+  const zone = text.indexOf("%");
+  if (zone >= 0) text = text.slice(0, zone);
+  let tail: number[] = [];
+  const embedded = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(text);
+  if (embedded) {
+    const parts = ipv4Parts(embedded[1]);
+    if (!parts) return null;
+    tail = [(parts[0] << 8) | parts[1], (parts[2] << 8) | parts[3]];
+    text = text.slice(0, text.length - embedded[1].length).replace(/:+$/, "");
+    if (!text) text = "::";
   }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const toHextets = (value: string): number[] | null => {
+    if (!value) return [];
+    const items = value.split(":");
+    return items.every((item) => HEXTET_RE.test(item)) ? items.map((item) => parseInt(item, 16)) : null;
+  };
+  const left = toHextets(halves[0]);
+  const right = halves.length === 2 ? toHextets(halves[1]) : [];
+  if (!left || !right) return null;
+  if (halves.length === 1) {
+    const all = [...left, ...tail];
+    return all.length === 8 ? all : null;
+  }
+  const missing = 8 - left.length - right.length - tail.length;
+  if (missing < 0) return null;
+  return [...left, ...Array.from({ length: missing }, () => 0), ...right, ...tail];
+}
+
+function ipv6Blocked(hextets: number[]): boolean {
+  const allZero = (values: number[]) => values.every((value) => value === 0);
+  if (allZero(hextets)) return true; // ::
+  if (allZero(hextets.slice(0, 7)) && hextets[7] === 1) return true; // ::1
+  // IPv4-mapped（::ffff:a.b.c.d）与已废弃的 IPv4-compatible（::a.b.c.d）：按内嵌 IPv4 再判一次
+  const firstFiveZero = allZero(hextets.slice(0, 5));
+  if (firstFiveZero && (allZero(hextets.slice(0, 6)) || hextets[5] === 0xffff)) {
+    const mapped = [hextets[6] >> 8, hextets[6] & 0xff, hextets[7] >> 8, hextets[7] & 0xff];
+    if (ipv4Blocked(mapped)) return true;
+  }
+  if ((hextets[0] & 0xfe00) === 0xfc00) return true; // fc00::/7（唯一本地）
+  if ((hextets[0] & 0xffc0) === 0xfe80) return true; // fe80::/10（链路本地）
+  return false;
+}
+
+/**
+ * 下载地址安全检查（SSRF 第一道闸）：协议 / 账号信息 / 内网字面量。
+ *
+ * 只检查 host 的**字面量**（不做 DNS 解析：解析结果本身不可控，且测试环境不能联网）。
+ * 残余面：DNS 重绑定（域名解析到内网）仍需要部署侧出口防火墙兜底。
+ */
+export function checkDownloadUrl(raw: string, opts: { allowHttp?: boolean } = {}): DownloadUrlCheck {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { ok: false, reason: "地址无法解析" };
+  }
+  const allowHttp = opts.allowHttp ?? false;
+  const protocol = url.protocol.toLowerCase();
+  if (protocol !== "https:" && !(protocol === "http:" && allowHttp)) {
+    return { ok: false, reason: allowHttp ? "只允许 http(s) 下载地址" : "只允许 HTTPS 下载地址" };
+  }
+  if (url.username || url.password) return { ok: false, reason: "地址不允许包含账号信息" };
+  const rawHost = url.hostname.toLowerCase().replace(/\.$/, "");
+  const host = rawHost.startsWith("[") && rawHost.endsWith("]") ? rawHost.slice(1, -1) : rawHost;
+  if (!host) return { ok: false, reason: "地址缺少主机名" };
+  if (host === "localhost" || host.endsWith(".localhost")) {
+    return { ok: false, reason: "不允许访问本机地址" };
+  }
+  const family = isIP(host);
+  if (family === 4) {
+    const parts = ipv4Parts(host);
+    if (!parts || ipv4Blocked(parts)) return { ok: false, reason: "不允许访问内网地址" };
+  } else if (family === 6) {
+    const hextets = parseIpv6(host);
+    if (!hextets) return { ok: false, reason: "地址无法解析" };
+    if (ipv6Blocked(hextets)) return { ok: false, reason: "不允许访问内网地址" };
+  }
+  return { ok: true, url };
+}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+type DownloadFetchResult = { ok: true; bytes: Buffer } | { ok: false; status: number; error: string };
+
+/**
+ * 下载 zip：`redirect: "manual"` + 每一跳重新做 SSRF 校验 + 最多 3 次跟随。
+ *
+ * 不用 `redirect: "follow"`：fetch 的自动重定向会绕开第一跳校验（上游/攻击者只要 302 到内网）。
+ */
+async function fetchZipBytes(
+  fetchImpl: typeof fetch,
+  initial: URL,
+  allowHttp: boolean,
+): Promise<DownloadFetchResult> {
+  let target = initial;
+  for (let redirects = 0; ; redirects += 1) {
+    let response: Awaited<ReturnType<typeof fetch>>;
+    try {
+      response = await fetchImpl(target.toString(), {
+        redirect: "manual",
+        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+      });
+    } catch {
+      return { ok: false, status: 502, error: "下载技能包超时，请稍后重试" };
+    }
+    if (REDIRECT_STATUSES.has(response.status)) {
+      const location = String(response.headers?.get?.("location") ?? "").trim();
+      if (!location) return { ok: false, status: 502, error: "下载地址重定向缺少目标" };
+      if (redirects >= MAX_DOWNLOAD_REDIRECTS) {
+        return { ok: false, status: 502, error: "下载地址重定向次数过多，已拒绝" };
+      }
+      let next: URL;
+      try {
+        next = new URL(location, target);
+      } catch {
+        return { ok: false, status: 502, error: `${UNSAFE_DOWNLOAD}（重定向地址无法解析）` };
+      }
+      const checked = checkDownloadUrl(next.toString(), { allowHttp });
+      if (!checked.ok) {
+        return { ok: false, status: 502, error: `${UNSAFE_DOWNLOAD}（${checked.reason}）` };
+      }
+      target = checked.url;
+      continue;
+    }
+    if (!response.ok) {
+      return { ok: false, status: 502, error: `下载技能包失败（虾评返回 ${response.status}）` };
+    }
+    const declaredLength = Number(response.headers?.get?.("content-length") ?? "0");
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_DOWNLOAD_BYTES) {
+      return {
+        ok: false,
+        status: 413,
+        error: `技能包超过 ${MAX_DOWNLOAD_BYTES / 1024 / 1024}MB 上限，无法安装`,
+      };
+    }
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(await response.arrayBuffer());
+    } catch {
+      return { ok: false, status: 502, error: "读取技能包内容失败，请稍后重试" };
+    }
+    if (bytes.length === 0) return { ok: false, status: 502, error: "技能包内容为空" };
+    if (bytes.length > MAX_DOWNLOAD_BYTES) {
+      return {
+        ok: false,
+        status: 413,
+        error: `技能包超过 ${MAX_DOWNLOAD_BYTES / 1024 / 1024}MB 上限，无法安装`,
+      };
+    }
+    return { ok: true, bytes };
+  }
+}
+
+interface CacheEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
+/** 极简 TTL + LRU 缓存：只放公开只读数据（下载/注册/带 Key 的请求永不经过它）。 */
+function createTtlCache<T>(options: { ttlMs: number; max: number; now: () => number }) {
+  const entries = new Map<string, CacheEntry<T>>();
+  return {
+    get(key: string): T | null {
+      const hit = entries.get(key);
+      if (!hit) return null;
+      if (hit.expiresAt <= options.now()) {
+        entries.delete(key);
+        return null;
+      }
+      entries.delete(key); // 命中即刷新 LRU 顺序（Map 迭代顺序 = 插入顺序）
+      entries.set(key, hit);
+      return hit.value;
+    },
+    set(key: string, value: T): void {
+      entries.delete(key);
+      if (entries.size >= options.max) {
+        const oldest = entries.keys().next().value;
+        if (oldest !== undefined) entries.delete(oldest);
+      }
+      entries.set(key, { value, expiresAt: options.now() + options.ttlMs });
+    },
+    get size(): number {
+      return entries.size;
+    },
+  };
 }
 
 function queryText(value: unknown, max: number): string {
@@ -213,6 +433,8 @@ interface UpstreamCall {
 interface UpstreamResponse {
   status: number;
   body: unknown;
+  /** 上游 `Retry-After`（429 时可能带；只透传数值/HTTP-date 文本，不回显英文栈）。 */
+  retryAfter: string | null;
 }
 
 export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
@@ -220,10 +442,20 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
   const enabled =
     opts.enabled ?? (process.env.HEMING_SKILL_HUB ?? "").trim().toLowerCase() !== "off";
   const fetchImpl: typeof fetch = opts.fetchImpl ?? fetch;
+  const allowHttp = opts.allowHttp ?? (process.env.HEMING_SKILL_HUB_ALLOW_HTTP ?? "").trim() === "1";
+  const now = opts.now ?? (() => Date.now());
+  /** 只缓存公开只读接口：分类 10 分钟、列表 30 秒（LRU 50 条）。 */
+  const categoriesCache = createTtlCache<string[]>({ ttlMs: CATEGORIES_TTL_MS, max: 1, now });
+  const listCache = createTtlCache<SkillHubPage>({ ttlMs: LIST_TTL_MS, max: CACHE_MAX_ENTRIES, now });
   const router = Router();
 
   function fail(res: Response, status: number, error: string): void {
     res.status(status).json({ error });
+  }
+
+  /** 上游限流：中文文案 + 保留 Retry-After（不把上游英文错误体透给用户）。 */
+  function failRateLimited(res: Response, retryAfter: string | null, message = "上游限流，请稍后重试"): void {
+    res.status(429).json({ error: message, ...(retryAfter ? { retryAfter } : {}) });
   }
 
   /** 调上游 JSON 接口：统一超时 + 非 JSON 容错；网络错误交给调用方映射 502。 */
@@ -238,6 +470,7 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
       ...(call.body ? { body: call.body } : {}),
       signal: AbortSignal.timeout(call.timeoutMs ?? UPSTREAM_TIMEOUT_MS),
     });
+    const retryAfter = String(response.headers?.get?.("retry-after") ?? "").trim().slice(0, 64);
     const raw = await response.text();
     let body: unknown = null;
     if (raw) {
@@ -247,15 +480,19 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
         body = null;
       }
     }
-    return { status: response.status, body };
+    return { status: response.status, body, retryAfter: retryAfter || null };
   }
 
-  /** 上游连通性探测：分类接口成功才认为 reachable。 */
+  /** 上游连通性探测：分类接口成功才认为 reachable（成功结果缓存 10 分钟）。 */
   async function fetchCategories(): Promise<string[] | null> {
+    const cached = categoriesCache.get("categories");
+    if (cached) return cached;
     try {
       const upstream = await callUpstream("/api/categories", { timeoutMs: 8_000 });
       if (upstream.status !== 200 || !isObject(upstream.body) || upstream.body.success !== true) return null;
-      return textList(upstream.body.data, 40, 32);
+      const categories = textList(upstream.body.data, 40, 32);
+      categoriesCache.set("categories", categories);
+      return categories;
     } catch {
       return null;
     }
@@ -268,19 +505,31 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
     }
     const page = positiveInt(req.query.page, 1);
     const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, positiveInt(req.query.limit, DEFAULT_PAGE_SIZE)));
-    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     const search = queryText(req.query.search, 100);
     const category = queryText(req.query.category, 32);
-    const sort = queryText(req.query.sort, 20);
+    const rawSort = queryText(req.query.sort, 20);
+    const sort = rawSort && UPSTREAM_SORT_RE.test(rawSort) ? rawSort : "";
+    const cacheKey = JSON.stringify([page, limit, search, category, sort]);
+    const cached = listCache.get(cacheKey);
+    if (cached) {
+      // 命中缓存时 fetchedAt 保持「数据实际拉取时间」，不刷新成 now。
+      res.json(cached);
+      return;
+    }
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (search) params.set("search", search);
     if (category) params.set("category", category);
-    if (sort && UPSTREAM_SORT_RE.test(sort)) params.set("sort", sort);
+    if (sort) params.set("sort", sort);
 
     let upstream: UpstreamResponse;
     try {
       upstream = await callUpstream(`/api/skills?${params.toString()}`);
     } catch {
       fail(res, 502, UNAVAILABLE);
+      return;
+    }
+    if (upstream.status === 429) {
+      failRateLimited(res, upstream.retryAfter);
       return;
     }
     if (upstream.status !== 200 || !isObject(upstream.body)) {
@@ -302,8 +551,9 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
       skills,
       total,
       hasMore,
-      fetchedAt: new Date().toISOString(),
+      fetchedAt: new Date(now()).toISOString(),
     };
+    listCache.set(cacheKey, result);
     res.json(result);
   }
 
@@ -326,6 +576,10 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
     }
     if (upstream.status === 404) {
       fail(res, 404, "技能不存在或已下架");
+      return;
+    }
+    if (upstream.status === 429) {
+      failRateLimited(res, upstream.retryAfter);
       return;
     }
     if (upstream.status !== 200 || !isObject(upstream.body)) {
@@ -389,7 +643,7 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
       return;
     }
     if (upstream.status === 429) {
-      fail(res, 429, "虾评请求过于频繁，请稍后再试");
+      failRateLimited(res, upstream.retryAfter, "虾评上游限流，请稍后重试");
       return;
     }
     if (upstream.status !== 200 || !isObject(upstream.body)) {
@@ -402,45 +656,27 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
     }
     const data = isObject(upstream.body.data) ? upstream.body.data : null;
     const downloadUrl = typeof data?.download_url === "string" ? data.download_url : "";
-    if (!downloadUrl || !isHttpUrl(downloadUrl)) {
+    if (!downloadUrl) {
       fail(res, 502, "虾评返回的下载地址不合法");
+      return;
+    }
+    // SSRF 第一道闸：协议只允许 https（http 需显式开启）、禁账号信息、禁内网字面量。
+    const urlCheck = checkDownloadUrl(downloadUrl, { allowHttp });
+    if (!urlCheck.ok) {
+      fail(res, 502, `${UNSAFE_DOWNLOAD}（${urlCheck.reason}）`);
       return;
     }
     const version = text(data?.version, 32);
     const coinsSpent = count(data?.coins_spent);
     void coinsSpent; // 只用于日志脱敏后的信息，不返回给客户端（避免误导「和鸣扣费」）
 
-    let zipResponse: Awaited<ReturnType<typeof fetch>>;
-    try {
-      zipResponse = await fetchImpl(downloadUrl, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
-    } catch {
-      fail(res, 502, "下载技能包超时，请稍后重试");
+    // 解包前先安全下载：manual 重定向 + 每跳复检 + 上限/超时都在 fetchZipBytes 里。
+    const zipResult = await fetchZipBytes(fetchImpl, urlCheck.url, allowHttp);
+    if (!zipResult.ok) {
+      fail(res, zipResult.status, zipResult.error);
       return;
     }
-    if (!zipResponse.ok) {
-      fail(res, 502, `下载技能包失败（虾评返回 ${zipResponse.status}）`);
-      return;
-    }
-    const declaredLength = Number(zipResponse.headers?.get?.("content-length") ?? "0");
-    if (Number.isFinite(declaredLength) && declaredLength > MAX_DOWNLOAD_BYTES) {
-      fail(res, 413, `技能包超过 ${MAX_DOWNLOAD_BYTES / 1024 / 1024}MB 上限，无法安装`);
-      return;
-    }
-    let bytes: Buffer;
-    try {
-      bytes = Buffer.from(await zipResponse.arrayBuffer());
-    } catch {
-      fail(res, 502, "读取技能包内容失败，请稍后重试");
-      return;
-    }
-    if (bytes.length === 0) {
-      fail(res, 502, "技能包内容为空");
-      return;
-    }
-    if (bytes.length > MAX_DOWNLOAD_BYTES) {
-      fail(res, 413, `技能包超过 ${MAX_DOWNLOAD_BYTES / 1024 / 1024}MB 上限，无法安装`);
-      return;
-    }
+    const bytes = zipResult.bytes;
 
     let entries;
     try {
@@ -519,7 +755,7 @@ export function createSkillHubRouter(opts: SkillHubRouterOptions = {}): Router {
       return;
     }
     if (upstream.status === 429) {
-      fail(res, 429, "虾评注册太频繁（同 IP 限流），请稍后再试");
+      failRateLimited(res, upstream.retryAfter, "虾评注册太频繁（上游限流，请稍后重试）");
       return;
     }
     if (upstream.status !== 200 || !isObject(upstream.body)) {
