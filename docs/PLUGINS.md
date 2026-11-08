@@ -67,6 +67,11 @@
 - **`network`**：`mcpServers` 实际会访问的主机白名单（host 或 host:port，≤20）。清单里每个服务的 host **必须**被覆盖，否则解析直接失败并报出缺失的 host——这是「安装即确认」的依据，不做「尽量放行」。比对前两侧都会规范化：小写，并去掉 http/https 的默认端口（`api.acme.com:443` 与 `api.acme.com` 等价；`:8443`/`:8787` 这类非默认端口照旧区分）。
 - **`tools`**：`"none" | "read" | "write"`，缺省 `"read"`。它是本插件 MCP 工具的风险上限：超过上限的工具**不注入**给模型——**执行期**在工具桥注入点过滤（不只是插件页「未注入」的展示），插件页工具目录里会以「插件声明 read，未注入」标注。这是收紧，**不会放宽 HITL**——`write` 上限意味着写工具仍会按 HITL 逐次确认。
 - **`files`**：预留字段（≤5 个相对路径）。当前版本只校验与展示，和鸣插件尚不能携带文件工具。
+- **`events`**：可订阅的宿主事件（`notify` / `lifecycle` / `theme` / `tray`）。**未声明的一律不投递**——
+  `theme` / `tray` 此前是无条件广播，d.113（P1-5）起与 `notify` 同一门禁：声明是约束，不是表单。
+- **`chat`**（**仅 bundle**，缺省 `false`）：是否允许 `chatConfig()` 拿到**本机网关 origin**与智能体 `{ id, name }`。
+  审计 P0-1：`prompt`（人设提示词）**永不下发**；未声明时 `chatConfig()` 返回空 agents + 可读原因，
+  widget CSP 也不放行网关 origin（不再有 `127.0.0.1:*` 通配）。
 
 安装弹窗会完整展示以上权限与贡献计数；用户点「安装」等于确认这份清单。
 
@@ -295,8 +300,9 @@ package.tgz
 - 窗口：宿主创建，`sandbox + contextIsolation`、无 nodeIntegration，挂**最小 preload** `__heming_widget`
   （窗口动作 / 宿主信息 / 设置 / 事件 / 页面跳转 / `chatConfig`；不含 secrets、MCP、文件、会话任何桥）。
 - `widget:*` IPC 一律按 sender 自校验（只认该 widget 自己的窗口）；主窗 `widgets:*` 通道走 `secureIpc` 只认主窗。
-- CSP：按清单生成（`script-src` 仅在 `permissions.eval:true` 时放开 `'unsafe-eval'`；`connect-src` 只给本机回环 + 清单 `network`，
-  **不继承**主窗的 `https:`/`wss:` 通配）。
+- CSP：按清单生成（`script-src` 仅在 `permissions.eval:true` 时放开 `'unsafe-eval'`；`connect-src` = `'self'`
+  + **本机网关精确 origin**（仅 `permissions.chat:true` 才放行，精确到端口）+ 清单 `network` 逐 host，
+  **不再有 `127.0.0.1:*` 回环通配**、**不继承**主窗的 `https:`/`wss:` 通配；`frame-src 'none'` 禁外部页面）。
 - 数据：插件不得写会话 / 消息列表 / msgCache；对话不落盘。
 
 ### 9.4 发布

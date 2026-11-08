@@ -211,6 +211,20 @@ describe("parsePluginManifestV5", () => {
     expect(parsed.manifest.permissions.graphics).toEqual(["webgl", "webgl2", "wasm"]);
   });
 
+  it("permissions.chat 只对界面插件有意义", () => {
+    const widget = [{ id: "pet", name: "桌宠", entry: "files/index.html", width: 300, height: 420 }];
+    const bundle = baseManifest({
+      distribution: "bundle",
+      packageSha256: "a".repeat(64),
+      permissions: { network: [], tools: "none", chat: true, events: ["theme"] },
+      contributions: { desktopWidgets: widget },
+    });
+    expect(parsePluginManifestV5(bundle).manifest.permissions.chat).toBe(true);
+
+    const declarative = baseManifest({ permissions: { network: [], tools: "read", chat: true } });
+    expect(() => parsePluginManifestV5(declarative)).toThrow(/只对界面插件/);
+  });
+
   it("命令 target 支持 settings / unit（v5 扩展）", () => {
     const parsed = parsePluginManifestV5(
       baseManifest({

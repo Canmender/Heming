@@ -398,6 +398,31 @@ function readLegacyPetState() {
 }
 
 /**
+ * 界面插件 CSP 里的「本机网关 origin」（审计 P0-1）。
+ *
+ * 不再放开 `127.0.0.1:*` / `localhost:*` 通配——只给网关自己的 `scheme//host:port`，
+ * 且反代启动后才知道端口，所以是「按需解析 + 缓存」：首个 widget 请求会触发
+ * ensureMagpieProxy（启动时已自动拉起），失败则该请求的 CSP 里没有网关来源。
+ */
+let widgetGatewayOrigin = null;
+let widgetGatewayOriginProvider = null;
+
+async function resolveWidgetGatewayOrigin() {
+  if (widgetGatewayOrigin) return widgetGatewayOrigin;
+  if (typeof widgetGatewayOriginProvider !== "function") return null;
+  try {
+    const baseUrl = await widgetGatewayOriginProvider();
+    if (typeof baseUrl === "string" && baseUrl) {
+      const url = new URL(baseUrl);
+      widgetGatewayOrigin = `${url.protocol}//${url.host}`;
+    }
+  } catch {
+    /* 网关没起来：CSP 不放行任何回环端点（fail-closed），chat 会失败但不越权 */
+  }
+  return widgetGatewayOrigin;
+}
+
+/**
  * 注册 `widget://` 资源处理器。
  *
  * `widget://<pluginId>/<path>` → `<userData>/plugins/<id>/<currentVersion>/<path>`：
@@ -423,6 +448,8 @@ function installWidgetProtocol() {
       return new Response("not found", { status: 404 });
     }
     const permissions = record.permissions || {};
+    // 本机网关 origin 精确到端口（审计 P0-1：不再有回环通配）
+    const widgetCspOpts = { ...cspOptions(), gatewayOrigin: await resolveWidgetGatewayOrigin() };
     const resolved = resolveWidgetRequest(urlPath, rootDir, (target) => {
       try {
         return fs.existsSync(target);
@@ -433,7 +460,7 @@ function installWidgetProtocol() {
     if (!resolved) {
       return new Response("not found", {
         status: 404,
-        headers: { "Content-Type": "text/plain; charset=utf-8", ...widgetCspHeaders(permissions, cspOptions()) },
+        headers: { "Content-Type": "text/plain; charset=utf-8", ...widgetCspHeaders(permissions, widgetCspOpts) },
       });
     }
     try {
@@ -445,13 +472,13 @@ function installWidgetProtocol() {
           // 插件版本目录里的产物每次安装都可能变；本地读盘、包体只有几 MB，
           // 直接 no-store 比引入一套 ETag/版本失效语义更不容易出错。
           "Cache-Control": "no-store",
-          ...widgetCspHeaders(permissions, cspOptions()),
+          ...widgetCspHeaders(permissions, widgetCspOpts),
         },
       });
     } catch {
       return new Response("read failed", {
         status: 500,
-        headers: widgetCspHeaders(permissions, cspOptions()),
+        headers: widgetCspHeaders(permissions, widgetCspOpts),
       });
     }
   });
@@ -769,8 +796,18 @@ if (!gotLock) {
         isWidgetOriginAllowed,
       });
     }
-    return `http://127.0.0.1:${magpieProxy.port}/v1`;
+    const baseUrl = `http://127.0.0.1:${magpieProxy.port}/v1`;
+    // widget CSP 只放行这个精确 origin（审计 P0-1：不再有 127.0.0.1:* 通配）
+    try {
+      const url = new URL(baseUrl);
+      widgetGatewayOrigin = `${url.protocol}//${url.host}`;
+    } catch {
+      widgetGatewayOrigin = null;
+    }
+    return baseUrl;
   };
+  // 首个 widget 请求若发生在反代之前，按需解析一次（启动时也会自动 startMagpieGateway）
+  widgetGatewayOriginProvider = async () => ensureMagpieProxy();
 
   /** 启动（若未运行）并确保反代存在；失败把原因带回去给设置页展示。 */
   const startMagpieGateway = async () => {
@@ -797,6 +834,7 @@ if (!gotLock) {
     if (magpieProxy) {
       await magpieProxy.close().catch(() => {});
       magpieProxy = null;
+      widgetGatewayOrigin = null; // 端口已释放：CSP 里不能再放旧 origin
     }
     return magpieHost.status();
   });

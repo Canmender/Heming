@@ -103,6 +103,9 @@ function createPluginStore(options = {}) {
   if (typeof dir !== "string" || !dir) throw new Error("plugin-store: 缺少 dir");
   const log = options.log || (() => {});
   const now = options.now || (() => Date.now());
+  // 注入点（审计 P1-4）：测试用来制造「注册表写失败」「目录删失败」，生产用默认实现。
+  const writeJson = options.writeJson || writeJsonAtomic;
+  const removeDirectory = options.removeDir || removeDir;
 
   let data = { plugins: [] };
 
@@ -128,7 +131,12 @@ function createPluginStore(options = {}) {
   }
 
   function save() {
-    writeJsonAtomic(registryPath(), data);
+    writeJson(registryPath(), data);
+  }
+
+  /** 事务化安装/卸载用：先写一份「候选注册表」，成功后再切换内存引用（审计 P1-4）。 */
+  function saveData(nextData) {
+    writeJson(registryPath(), nextData);
   }
 
   function init() {
@@ -224,12 +232,24 @@ function createPluginStore(options = {}) {
       return { ok: false, error: `写入插件文件失败：${(err && err.message) || err}` };
     }
 
+    // 覆盖同一版本时先把旧目录挪到备份位：任何后续步骤失败都能还原（审计 P1-4）
+    const backupDir = `${targetDir}.${process.pid}.bak`;
+    removeDir(backupDir);
+    let hadTarget = false;
     try {
-      removeDir(targetDir);
       fs.mkdirSync(pluginDir(id), { recursive: true });
+      if (fs.existsSync(targetDir)) {
+        fs.renameSync(targetDir, backupDir);
+        hadTarget = true;
+      }
       fs.renameSync(staging, targetDir);
     } catch (err) {
       removeDir(staging);
+      try {
+        if (hadTarget) fs.renameSync(backupDir, targetDir);
+      } catch {
+        /* 尽力还原 */
+      }
       return { ok: false, error: `落盘失败：${(err && err.message) || err}` };
     }
 
@@ -252,17 +272,53 @@ function createPluginStore(options = {}) {
       commands: Array.isArray(parsed.commands) ? parsed.commands : [],
       migratedAt: existing ? existing.migratedAt || null : null,
     };
-    if (existing) Object.assign(existing, record);
-    else data.plugins.push(record);
+    // 内存不原地改：先在候选注册表里生成，等两处落盘都成功后再切换（失败可完整回滚）
+    const nextPlugins = existing
+      ? data.plugins.map((item) => (item.id === id ? { ...item, ...record } : item))
+      : [...data.plugins, record];
+    const nextData = { plugins: nextPlugins };
+    const currentPath = path.join(pluginDir(id), CURRENT_FILE);
+    const previousCurrent = readJson(currentPath);
 
-    // 切指针（先写 current.json 再写注册表：中途失败时下次启动自检会发现目录齐但
-    // 注册表未更新，重新安装即可；不会出现"注册表指向不存在的版本"）
+    const rollbackInstall = () => {
+      try {
+        removeDir(targetDir);
+      } catch {
+        /* 尽力 */
+      }
+      if (hadTarget) {
+        try {
+          fs.renameSync(backupDir, targetDir);
+        } catch {
+          /* 尽力 */
+        }
+      }
+      try {
+        if (previousCurrent) writeJsonAtomic(currentPath, previousCurrent);
+        else fs.rmSync(currentPath, { force: true });
+      } catch {
+        /* 尽力 */
+      }
+    };
+
+    // 提交顺序：版本指针 → 注册表 → 内存。任一步失败：目录回到备份位、指针还原，
+    // 注册表保持旧内容（下次启动自检不会出现「指针指向不存在版本」的悬空态）。
     try {
-      writeJsonAtomic(path.join(pluginDir(id), CURRENT_FILE), { version });
+      writeJson(currentPath, { version });
     } catch (err) {
+      rollbackInstall();
+      removeDir(staging);
       return { ok: false, error: `写入版本指针失败：${(err && err.message) || err}` };
     }
-    save();
+    try {
+      saveData(nextData);
+    } catch (err) {
+      rollbackInstall();
+      removeDir(staging);
+      return { ok: false, error: `写入插件注册表失败：${(err && err.message) || err}` };
+    }
+    data = nextData; // 两处落盘成功后才切换内存
+    removeDir(backupDir);
 
     // 旧版本目录清理（升级路径）：只保留 current
     for (const entry of fs.readdirSync(pluginDir(id), { withFileTypes: true })) {
@@ -276,6 +332,14 @@ function createPluginStore(options = {}) {
     return { ok: true, record: recordOf(find(id)) };
   }
 
+  /**
+   * 卸载（审计 P1-4 事务化：先摘记录落盘，成功后再删文件）。
+   *
+   * - 注册表写失败 → 直接返回错误，**文件与记录都不动**（用户可重试）；
+   * - 记录摘除成功但删文件失败 → 记录以 `error` 状态写回（「卸载未完成」），
+   *   界面能看到并可重试，不会出现「文件还在、列表里却消失了」的空账；
+   * - 文件目录本来就不在（自检标 error 的记录）→ 只摘记录即可成功。
+   */
   function uninstall(id, uninstallOptions = {}) {
     const plugin = find(id);
     if (!plugin) return { ok: false, error: `插件不存在：${id}` };
@@ -287,31 +351,76 @@ function createPluginStore(options = {}) {
       settings = readJson(path.join(base, SETTINGS_FILE));
       state = readJson(path.join(base, STATE_FILE));
     }
-    // 先删文件目录（含 current.json 与所有版本），再删记录
+
+    // 1) 先在候选注册表里摘掉记录并落盘；失败则 untouched（文件/内存都不动）
+    const nextPlugins = data.plugins.filter((item) => item.id !== id);
+    const nextData = { plugins: nextPlugins };
+    try {
+      saveData(nextData);
+    } catch (err) {
+      return { ok: false, error: `卸载失败（未改动本机文件）：${(err && err.message) || err}` };
+    }
+    data = nextData;
+
+    // 2) 记录已摘除，再删文件。失败时把记录以 error 状态写回（不谎报成功）。
+    const deletionErrors = [];
+    const removeFile = (target) => {
+      try {
+        fs.rmSync(target, { force: true });
+      } catch (err) {
+        deletionErrors.push(`${path.basename(target)}：${(err && err.message) || err}`);
+      }
+    };
     let entries = [];
     try {
       entries = fs.readdirSync(base, { withFileTypes: true });
     } catch {
-      entries = []; // 目录已经不在（自检已标 error 的记录）：只删注册表记录即可
+      entries = []; // 目录已经不在（自检标 error 的记录）：只摘记录即可
     }
     for (const entry of entries) {
-      if (entry.isDirectory()) removeDir(path.join(base, entry.name));
-      else if (!keepData || (entry.name !== SETTINGS_FILE && entry.name !== STATE_FILE)) {
+      const target = path.join(base, entry.name);
+      if (entry.isDirectory()) {
         try {
-          fs.rmSync(path.join(base, entry.name), { force: true });
-        } catch {
-          /* 已不在 */
+          removeDirectory(target);
+        } catch (err) {
+          deletionErrors.push(`${entry.name}/：${(err && err.message) || err}`);
         }
+      } else if (!keepData || (entry.name !== SETTINGS_FILE && entry.name !== STATE_FILE)) {
+        removeFile(target);
       }
     }
     if (keepData) {
-      if (settings) writeJsonAtomic(path.join(base, SETTINGS_FILE), settings);
-      if (state) writeJsonAtomic(path.join(base, STATE_FILE), state);
+      try {
+        if (settings) writeJsonAtomic(path.join(base, SETTINGS_FILE), settings);
+        if (state) writeJsonAtomic(path.join(base, STATE_FILE), state);
+      } catch (err) {
+        deletionErrors.push(`保留设置/状态写回失败：${(err && err.message) || err}`);
+      }
     } else {
-      removeDir(base);
+      try {
+        removeDirectory(base);
+      } catch (err) {
+        deletionErrors.push(`插件目录：${(err && err.message) || err}`);
+      }
     }
-    data.plugins = data.plugins.filter((item) => item.id !== id);
-    save();
+
+    if (deletionErrors.length > 0) {
+      // 记录写回「卸载未完成」状态（写回失败只能靠日志，尽力而为）
+      const broken = {
+        ...plugin,
+        error: `卸载未完成：${deletionErrors.join("；")}（可重试卸载）`,
+        enabled: false,
+      };
+      data = { plugins: [...data.plugins, broken] };
+      try {
+        saveData(data);
+      } catch (err) {
+        log(`[widgets] ${id} 卸载后写回 error 记录失败：${(err && err.message) || err}`);
+      }
+      log(`[widgets] ${id} 卸载未完成：${deletionErrors.join("；")}`);
+      return { ok: false, error: `卸载未完成：${deletionErrors.join("；")}（可重试卸载）` };
+    }
+
     log(`[widgets] ${id} 已卸载`);
     return { ok: true };
   }
@@ -319,10 +428,21 @@ function createPluginStore(options = {}) {
   function setEnabled(id, enabled) {
     const plugin = find(id);
     if (!plugin) return { ok: false, error: `插件不存在：${id}` };
-    plugin.enabled = enabled === true;
-    plugin.updatedAt = new Date(now()).toISOString();
-    save();
-    return { ok: true, record: recordOf(plugin) };
+    // 与 install/uninstall 同一事务口径：先落盘候选注册表，成功后再切内存（P1-4 同类）
+    const nextData = {
+      plugins: data.plugins.map((item) =>
+        item.id === id
+          ? { ...item, enabled: enabled === true, updatedAt: new Date(now()).toISOString() }
+          : item,
+      ),
+    };
+    try {
+      saveData(nextData);
+    } catch (err) {
+      return { ok: false, error: `切换失败（未改动）：${(err && err.message) || err}` };
+    }
+    data = nextData;
+    return { ok: true, record: recordOf(find(id)) };
   }
 
   function settingsFile(id) {

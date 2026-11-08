@@ -570,8 +570,10 @@ test("畸形事件一律 invalid；不带 notify 权限的插件收不到", () =
   assert.equal(win.webContents._sent.filter((item) => item.ch === "widget:event").length, 0);
 });
 
-test("theme 事件：更新 info().theme 并推给窗口", () => {
-  const { host, created } = makeHost();
+test("theme 事件：更新宿主 theme（投递门禁见「theme / tray 事件」用例）", () => {
+  const store = makeStore();
+  store.setRecords([{ ...store._records[0], permissions: { events: ["notify", "theme"] } }]);
+  const { host, created } = makeHost({ store });
   host.start();
   host.action("heming.pet", "show");
   const win = onlyWindow(created);
@@ -620,12 +622,13 @@ test("widget:open-page：白名单外的页丢弃并记日志（进程边界不�
   assert.match(logs.join("\n"), /丢弃未知页面跳转/);
 });
 
-test("widget:chat-config：网关来自主进程、agents 来自主窗、30s 内缓存", async () => {
+test("widget:chat-config：网关来自主进程、agents 只含 id/name、30s 内缓存（P0-1 不下发 prompt）", async () => {
   let calls = 0;
   const { host } = makeHost({
     requestChatConfig: async () => {
       calls += 1;
-      return { agents: [{ id: "a1", name: "幕僚" }], binding: { agentId: "a1" } };
+      // 主窗即使给了 prompt，宿主也必须在 normalize 阶段剥掉（P0-1 数据外泄链）
+      return { agents: [{ id: "a1", name: "幕僚", prompt: "SECRET-PERSONA" }], binding: { agentId: "a1" } };
     },
   });
   const config = await host.getChatConfig();
@@ -634,6 +637,7 @@ test("widget:chat-config：网关来自主进程、agents 来自主窗、30s 内
     agents: [{ id: "a1", name: "幕僚" }],
     binding: { agentId: "a1" },
   });
+  assert.ok(!JSON.stringify(config).includes("SECRET-PERSONA"), "chatConfig 不得下发智能体 prompt");
   await host.getChatConfig();
   assert.equal(calls, 1, "30s 内应命中缓存");
   host.invalidateChatConfig();
@@ -649,6 +653,63 @@ test("widget:chat-config：主窗不应答时降级为空 agents，不抛错", a
   assert.deepEqual(config.agents, []);
   assert.deepEqual(config.binding, { agentId: null });
   assert.equal(invokeChannel("widget:chat-config", { sender: { fake: true } }), null);
+});
+
+test("widget:chat-config：未声明 permissions.chat 拿不到网关与智能体；声明后也不下发 prompt（P0-1）", async () => {
+  const store = makeStore();
+  store.setRecords([{ ...store._records[0], permissions: { events: ["notify"] } }]);
+  const { host, created } = makeHost({
+    store,
+    requestChatConfig: async () => ({
+      agents: [{ id: "a1", name: "幕僚", prompt: "SECRET-PERSONA" }],
+      binding: { agentId: "a1" },
+    }),
+  });
+  host.start();
+  host.action("heming.pet", "show");
+  const win = onlyWindow(created);
+
+  const denied = await invokeChannel("widget:chat-config", { sender: win.webContents });
+  assert.equal(denied.gateway, null);
+  assert.deepEqual(denied.agents, []);
+  assert.match(denied.reason, /permissions\.chat/);
+
+  // 升级到声明 chat:true 的版本 → 拿得到网关与 id/name，但 prompt 仍不下发
+  store.setRecords([{ ...store._records[0], version: "2.0.0", permissions: { events: ["notify"], chat: true } }]);
+  host.reconcile();
+  const nextWin = created[created.length - 1];
+  const config = await invokeChannel("widget:chat-config", { sender: nextWin.webContents });
+  assert.equal(config.gateway.baseUrl, "http://127.0.0.1:4242/v1");
+  assert.deepEqual(config.agents, [{ id: "a1", name: "幕僚" }]);
+  assert.ok(!("prompt" in config.agents[0]));
+});
+
+test("theme / tray 事件：必须由 permissions.events 声明才投递（P1-5）", () => {
+  const store = makeStore();
+  // 未声明 theme/tray → 不投递，但宿主仍记住主题（新窗口 info().theme 要正确）
+  const { host, created } = makeHost({ store });
+  host.start();
+  host.action("heming.pet", "show");
+  const first = onlyWindow(created);
+  assert.equal(host.publish({ kind: "theme", theme: "dark" }), "no-target");
+  assert.equal(host.publish({ kind: "tray", action: "toggle" }), "no-target");
+  assert.equal(first.webContents._sent.filter((item) => item.ch === "widget:event").length, 0);
+  assert.equal(invokeChannel("widget:info", { sender: first.webContents }).theme, "dark");
+
+  // 声明 theme / tray（版本变化触发重建）→ 对应事件才收到
+  store.setRecords([
+    { ...store._records[0], version: "2.0.0", permissions: { events: ["notify", "theme", "tray"] } },
+  ]);
+  host.reconcile();
+  const second = created[created.length - 1];
+  assert.equal(second.isDestroyed(), false);
+  assert.equal(host.publish({ kind: "theme", theme: "light" }), "delivered");
+  assert.equal(host.publish({ kind: "tray", action: "toggle" }), "delivered");
+  const sent = second.webContents._sent.filter((item) => item.ch === "widget:event").map((item) => item.payload);
+  assert.deepEqual(sent, [
+    { kind: "theme", theme: "light" },
+    { kind: "tray", action: "toggle" },
+  ]);
 });
 
 /* ────────────────────────────── 对账 ────────────────────────────── */
@@ -687,6 +748,7 @@ test("对账：文件缺失（error）的记录不建窗", () => {
 test("widget:chat-config：binding.agentId 由插件设置覆盖（主窗固定回 null），且覆盖不进缓存", async () => {
   let calls = 0;
   const store = makeStore();
+  store.setRecords([{ ...store._records[0], permissions: { events: ["notify"], chat: true } }]);
   const { host, created } = makeHost({
     store,
     requestChatConfig: async () => {

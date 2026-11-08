@@ -330,3 +330,120 @@ test("migrateLegacy：旧 enabled:true 但 state 缺失/visible=false 时兜底�
   third.migrateLegacy({ enabled: false });
   assert.equal(third.readState("heming.pet"), null);
 });
+
+/* ─────────────── 事务化 install / uninstall（审计 P1-4） ─────────────── */
+
+/** 注入用写盘：第 N 次之后的 installed.json 写失败；其余走真实 fs。 */
+function writerFailingRegistryAfter(limit) {
+  let calls = 0;
+  return (file, value) => {
+    if (file.endsWith("installed.json")) {
+      calls += 1;
+      if (calls > limit) throw new Error("disk full");
+    }
+    fs.writeFileSync(file, JSON.stringify(value));
+  };
+}
+
+test("install：首装时注册表写失败 → 目录/指针/内存全部回滚，不留半装", () => {
+  const dir = tempDir();
+  const store = createPluginStore({
+    dir,
+    // init 会写一次空注册表；install 的第二次写失败
+    writeJson: writerFailingRegistryAfter(1),
+  });
+  store.init();
+  const result = store.install({ bytes: packageBytes() });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /写入插件注册表失败/);
+  assert.deepEqual(store.list(), [], "内存不得残留记录");
+  assert.equal(fs.existsSync(path.join(dir, "heming.pet", "1.0.0")), false, "目录必须回滚");
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, "installed.json"), "utf8")).plugins, []);
+});
+
+test("install：升级时注册表写失败 → 保留旧版本、旧指针与旧注册表", () => {
+  const dir = tempDir();
+  const first = createPluginStore({ dir });
+  first.init();
+  assert.equal(first.install({ bytes: packageBytes() }).ok, true);
+
+  let armed = false;
+  const second = createPluginStore({
+    dir,
+    writeJson: (file, value) => {
+      if (armed && file.endsWith("installed.json")) throw new Error("disk full");
+      fs.writeFileSync(file, JSON.stringify(value));
+    },
+  });
+  second.init();
+  armed = true;
+  const bad = second.install({ bytes: packageBytes({ version: "1.1.0" }) });
+  assert.equal(bad.ok, false);
+  assert.equal(second.get("heming.pet").version, "1.0.0");
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, "heming.pet", "current.json"), "utf8")), {
+    version: "1.0.0",
+  });
+  assert.equal(fs.existsSync(path.join(dir, "heming.pet", "1.0.0", "plugin.json")), true);
+  assert.equal(fs.existsSync(path.join(dir, "heming.pet", "1.1.0")), false);
+});
+
+test("uninstall：注册表写失败 → 文件与记录都不动（可重试）", () => {
+  const dir = tempDir();
+  const first = createPluginStore({ dir });
+  first.init();
+  assert.equal(first.install({ bytes: packageBytes() }).ok, true);
+
+  let armed = false;
+  const second = createPluginStore({
+    dir,
+    writeJson: (file, value) => {
+      if (armed && file.endsWith("installed.json")) throw new Error("disk full");
+      fs.writeFileSync(file, JSON.stringify(value));
+    },
+  });
+  second.init();
+  armed = true;
+  const result = second.uninstall("heming.pet");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /未改动本机文件/);
+  assert.equal(second.list().length, 1, "记录必须还在");
+  assert.equal(fs.existsSync(path.join(dir, "heming.pet", "1.0.0", "plugin.json")), true, "文件必须还在");
+});
+
+test("uninstall：记录摘除后删文件失败 → 写回 error 记录并如实报告", () => {
+  const store = makeStore();
+  assert.equal(store.install({ bytes: packageBytes() }).ok, true);
+  const broken = createPluginStore({
+    dir: store.dir,
+    removeDir: () => {
+      throw new Error("EPERM");
+    },
+  });
+  broken.init();
+  const result = broken.uninstall("heming.pet");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /卸载未完成/);
+  const record = broken.get("heming.pet");
+  assert.ok(record, "必须写回一条记录（不让文件变孤儿）");
+  assert.match(record.error, /卸载未完成/);
+  assert.equal(record.enabled, false);
+  assert.equal(fs.existsSync(path.join(store.dir, "heming.pet", "1.0.0")), true);
+});
+
+test("setEnabled：注册表写失败 → 内存状态不变", () => {
+  const store = makeStore();
+  assert.equal(store.install({ bytes: packageBytes() }).ok, true);
+  let armed = false;
+  const broken = createPluginStore({
+    dir: store.dir,
+    writeJson: (file, value) => {
+      if (armed && file.endsWith("installed.json")) throw new Error("disk full");
+      fs.writeFileSync(file, JSON.stringify(value));
+    },
+  });
+  broken.init();
+  armed = true;
+  const result = broken.setEnabled("heming.pet", false);
+  assert.equal(result.ok, false);
+  assert.equal(broken.get("heming.pet").enabled, true);
+});

@@ -183,6 +183,10 @@ function normalizeManifest(manifest) {
       events: stringList(permissions.events),
       graphics: stringList(permissions.graphics),
       eval: permissions.eval === true,
+      // 审计 P0-1：permissions.chat 是受签名保护的权限位。**只在 true 时进入文本**：
+      // 声明式/未开通的包保持旧 canonical 字节（历史签名不失效），但任何人把
+      // false 翻成 true 都会改变签名文本 → 验签失败（无法悄悄提权）。
+      ...(permissions.chat === true ? { chat: true } : {}),
     },
     contributions: {
       skills: (Array.isArray(contributions.skills) ? contributions.skills : []).map((skill) => ({

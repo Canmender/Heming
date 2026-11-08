@@ -88,6 +88,8 @@ function normalizeEvent(raw) {
 
 function normalizeChatConfig(raw) {
   const input = raw && typeof raw === "object" ? raw : {};
+  // 审计 P0-1：**不下发 prompt**。widget CSP 曾含本机回环通配，智能体人设提示词一旦
+  // 落到插件页就能被 POST 到本机任意端口；绑定只需要 id/name，人设由主进程持有。
   const agents = Array.isArray(input.agents)
     ? input.agents
         .filter((agent) => agent && typeof agent.id === "string" && agent.id)
@@ -95,7 +97,6 @@ function normalizeChatConfig(raw) {
         .map((agent) => ({
           id: String(agent.id).slice(0, 64),
           name: text(agent.name, 64) || String(agent.id).slice(0, 64),
-          ...(typeof agent.prompt === "string" ? { prompt: agent.prompt.slice(0, 4000) } : {}),
         }))
     : [];
   const bindingRaw = input.binding && typeof input.binding === "object" ? input.binding : {};
@@ -867,6 +868,17 @@ function createWidgetHost(deps = {}) {
       withRuntime(
         event,
         async (rt) => {
+          // 审计 P0-1：对话上下文（网关地址 + 智能体列表）是**声明制**权限。
+          // 未在清单 permissions.chat 显式打开的插件一律拿不到（默认关闭）。
+          const permissions = (rt.record && rt.record.permissions) || {};
+          if (permissions.chat !== true) {
+            return {
+              gateway: null,
+              agents: [],
+              binding: { agentId: null },
+              reason: "该插件未声明 permissions.chat，宿主不下发对话上下文与网关地址",
+            };
+          }
           const base = await getChatConfig();
           // 「绑哪个智能体」属于**插件设置**（主进程持有），不是主窗的全局绑定：
           // 主窗固定回 binding.agentId = null，由这里用 settings.agentId 覆盖。
@@ -1160,28 +1172,53 @@ function createWidgetHost(deps = {}) {
   }
 
   /**
-   * 主窗发来的通知事件（`widgets:publish`）→ 声明了 `permissions.events` 含 notify 的 widget。
+   * 主窗发来的通知事件（`widgets:publish`）→ 声明了对应 `permissions.events` 的 widget。
    *
    * 渠道互斥（pet 时代的口径，保留）：主窗口在前台时只走通知中心，widget 不开口；
    * widget 隐藏时直接丢弃（错过不补发）。
+   *
+   * 审计 P1-5：`theme` / `tray` 不再是「无条件广播」——与 `notify` 一样必须由清单
+   * `permissions.events` 显式声明，否则不投递（声明是约束，不是表单）。
    */
+  function hasEventPermission(record, kind) {
+    const permissions = (record && record.permissions) || {};
+    return Array.isArray(permissions.events) && permissions.events.includes(kind);
+  }
+
   function publish(raw) {
     const event = normalizeEvent(raw);
     if (!event) return "invalid";
     if (event.kind === "theme") {
+      // 主题是宿主级状态：即使没有插件订阅也要记住（新窗口 info().theme 要正确）
       theme = event.theme;
+      let delivered = 0;
       for (const runtime of runtimes.values()) {
+        if (!hasEventPermission(runtime.record, "theme")) continue;
         const win = runtime.window;
-        if (win && !win.isDestroyed()) win.webContents.send("widget:event", event);
+        if (!win || win.isDestroyed()) continue;
+        try {
+          win.webContents.send("widget:event", event);
+          delivered += 1;
+        } catch {
+          /* 窗口刚销毁：丢弃 */
+        }
       }
-      return "delivered";
+      return delivered > 0 ? "delivered" : "no-target";
     }
     if (event.kind === "tray") {
+      let delivered = 0;
       for (const runtime of runtimes.values()) {
+        if (!hasEventPermission(runtime.record, "tray")) continue;
         const win = runtime.window;
-        if (win && !win.isDestroyed()) win.webContents.send("widget:event", event);
+        if (!win || win.isDestroyed()) continue;
+        try {
+          win.webContents.send("widget:event", event);
+          delivered += 1;
+        } catch {
+          /* 窗口刚销毁：丢弃 */
+        }
       }
-      return "delivered";
+      return delivered > 0 ? "delivered" : "no-target";
     }
     if (mainWindowForeground()) return "suppressed-foreground";
     let delivered = 0;

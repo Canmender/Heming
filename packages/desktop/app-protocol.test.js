@@ -217,7 +217,7 @@ test("buildCsp：主窗口**不放** unsafe-eval（pixi 已随桌宠搬进 widge
   assert.ok(!policy.includes("'unsafe-eval'"), "主窗口不应出现 unsafe-eval");
 });
 
-test("buildWidgetCsp：独立 origin 的最小策略（默认不放 eval、不继承 https: 通配）", () => {
+test("buildWidgetCsp：独立 origin 的最小策略（无回环通配、不继承 https: 通配）", () => {
   const policy = buildWidgetCsp({ network: [], eval: false });
   assert.deepEqual(directiveOf(policy, "default-src"), ["'self'"]);
   assert.deepEqual(directiveOf(policy, "script-src"), ["'self'", "'wasm-unsafe-eval'"]);
@@ -225,9 +225,17 @@ test("buildWidgetCsp：独立 origin 的最小策略（默认不放 eval、不�
   assert.deepEqual(directiveOf(policy, "form-action"), ["'none'"]);
   const connect = directiveOf(policy, "connect-src");
   assert.ok(connect.includes("'self'"));
-  assert.ok(connect.includes("http://127.0.0.1:*"));
+  // 审计 P0-1：不再放开本机回环通配（否则可 POST 到本机任意端口）
+  assert.ok(!connect.includes("http://127.0.0.1:*"));
+  assert.ok(!connect.includes("http://localhost:*"));
   assert.ok(!connect.includes("https:"), "插件不继承主窗的 https: 通配");
   assert.ok(!connect.includes("wss:"));
+  // 未声明 chat 时，即使主进程传了网关 origin 也不放行（fail-closed）
+  const denied = directiveOf(
+    buildWidgetCsp({ network: [], chat: false }, { gatewayOrigin: "http://127.0.0.1:4321" }),
+    "connect-src",
+  );
+  assert.ok(!denied.includes("http://127.0.0.1:4321"));
 });
 
 test("buildWidgetCsp：eval 只在清单声明 eval:true 时放开（pixi 6）", () => {
@@ -235,14 +243,35 @@ test("buildWidgetCsp：eval 只在清单声明 eval:true 时放开（pixi 6）",
   assert.ok(directiveOf(policy, "script-src").includes("'unsafe-eval'"));
 });
 
-test("buildWidgetCsp：connect-src 只给本机回环 + 清单 network 逐 host", () => {
-  const policy = buildWidgetCsp({ network: ["api.acme.com", "127.0.0.1:3425", "https://mp.example.com/base"] });
+test("buildWidgetCsp：connect-src = 本机网关 origin（精确端口）+ 清单 network 逐 host", () => {
+  const policy = buildWidgetCsp(
+    { network: ["api.acme.com", "127.0.0.1:3425", "https://mp.example.com/base"], chat: true },
+    { gatewayOrigin: "http://127.0.0.1:43210/v1" },
+  );
   const connect = directiveOf(policy, "connect-src");
+  assert.ok(connect.includes("http://127.0.0.1:43210"), "网关 origin 精确到端口");
+  assert.ok(!connect.includes("http://127.0.0.1:*"), "不得出现回环通配");
   assert.ok(connect.includes("http://api.acme.com"));
   assert.ok(connect.includes("https://api.acme.com"));
   assert.ok(connect.includes("http://127.0.0.1:3425"));
   assert.ok(connect.includes("https://mp.example.com"));
   assert.ok(!connect.includes("https:"), "仍是逐 host，不是通配");
+});
+
+test("buildWidgetCsp：审计 P0-1 外泄链——回环只剩网关 origin，非法/外网 origin 一律忽略", () => {
+  const policy = buildWidgetCsp({ network: [], eval: true, chat: true }, { gatewayOrigin: "http://127.0.0.1:51234/v1" });
+  assert.deepEqual(directiveOf(policy, "connect-src"), ["'self'", "http://127.0.0.1:51234"]);
+  assert.ok(!policy.includes("127.0.0.1:*"));
+  assert.ok(!policy.includes("localhost:*"));
+  // 非法 scheme / 非本机 host 都不接受（网关只可能在本机回环）
+  assert.deepEqual(
+    directiveOf(buildWidgetCsp({ chat: true }, { gatewayOrigin: "javascript:alert(1)" }), "connect-src"),
+    ["'self'"],
+  );
+  assert.deepEqual(
+    directiveOf(buildWidgetCsp({ chat: true }, { gatewayOrigin: "https://evil.example.com" }), "connect-src"),
+    ["'self'"],
+  );
 });
 
 test("buildWidgetCsp：CSP 最小基线不可退化（d.110 回归守卫；删任何一条都会红）", () => {

@@ -2,7 +2,7 @@
   "schemaVersion": 4,
   "id": "heming.pet",
   "name": "桌宠",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "桌面上的 Live2D 化身：关掉主窗口它还在，点它就能说话，有消息它会提醒。",
   "author": "和鸣",
   "distribution": "bundle",
@@ -12,13 +12,15 @@
     "tools": "none",
     "files": [],
     "events": [
-      "notify"
+      "notify",
+      "theme"
     ],
     "graphics": [
       "webgl",
       "wasm"
     ],
-    "eval": true
+    "eval": true,
+    "chat": true
   },
   "contributions": {
     "desktopWidgets": [

@@ -48,7 +48,16 @@ const PINNED_MANIFEST = {
   distribution: "bundle",
   // 审计 P0-1：签名覆盖的 files/** 内容摘要（真实值由打包/签名工具计算）
   packageSha256: "ab".repeat(32),
-  permissions: { network: [], tools: "none", files: [], events: ["notify"], graphics: ["webgl", "wasm"], eval: true },
+  // d.113：events 加 theme（P1-5 门禁）与 chat 权限位（P0-1，受签名保护）
+  permissions: {
+    network: [],
+    tools: "none",
+    files: [],
+    events: ["notify", "theme"],
+    graphics: ["webgl", "wasm"],
+    eval: true,
+    chat: true,
+  },
   contributions: {
     desktopWidgets: [
       {
@@ -93,11 +102,11 @@ const FIXTURE_TEXT =
   '"description":"桌面上的 Live2D 化身：关掉主窗口它还在，点它就能说话，有消息它会提醒。",' +
   '"id":"heming.pet","name":"桌宠",' +
   '"packageSha256":"abababababababababababababababababababababababababababababababab",' +
-  '"permissions":{"eval":true,"events":["notify"],"files":[],' +
+  '"permissions":{"chat":true,"eval":true,"events":["notify","theme"],"files":[],' +
   '"graphics":["webgl","wasm"],"network":[],"tools":"none"},' +
   '"publisher":{"id":"heming","publicKey":"CwlX79Lc-Il4jvWK1sxhH-zxj9CLn5KD_CCpjp3rOl0"},"version":"1.0.1"}';
 const FIXTURE_SIGNATURE =
-  "JN1CLGXBw5Ejofxg18kdjZ52y5IXUhYvu4qY22IRnvnfRWqiWeCYQihgHdCzuuRUmZU9fytiRoD0EhAO_0_dBw";
+  "iACOHMlR37PLKrDs_mzzI5NHCokTUIgVAXS6LS-orDA3bJa1NHfAx5PWSooh_XfbHfQADzmW0lBOtKqvJaG2CQ";
 
 /** 带 publisher（+ 可选签名）的清单。 */
 function withPublisher(manifest, publisher = { id: "heming", publicKey: DEV_PUBLIC_KEY }) {
@@ -169,6 +178,19 @@ test("canonical-v1：packageSha256 参与签名（审计 P0-1：签名绑定包�
   const declarative = { ...withPublisher(PINNED_MANIFEST) };
   delete declarative.packageSha256;
   assert.ok(!canonicalManifestText(declarative).includes("packageSha256"));
+});
+
+test("canonical：permissions.chat 受签名保护（审计 P0-1，翻转权限位必须验签失败）", () => {
+  const signed = signForTest(PINNED_MANIFEST);
+  assert.equal(verifyOfficialSignature(signed).ok, true);
+  // 把 chat 从 true 改 false（试图撤权）或反之都会改变 canonical 文本 → 验签失败
+  const flipped = { ...signed, permissions: { ...signed.permissions, chat: false } };
+  assert.equal(verifyOfficialSignature(flipped).ok, false);
+  assert.match(verifyOfficialSignature(flipped).reason, /不匹配/);
+  // 未开通（false/缺省）时不进 canonical 文本 → 旧签名不失效
+  const noChat = { ...withPublisher(PINNED_MANIFEST) };
+  noChat.permissions = { ...noChat.permissions, chat: false };
+  assert.ok(!canonicalManifestText(noChat).includes('"chat"'));
 });
 
 test("canonical-v2：v5 清单额外覆盖 engines / meta / distribution / packageSha256", () => {

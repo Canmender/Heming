@@ -250,17 +250,42 @@ function widgetConnectSource(host) {
   }
 }
 
+/** 网关 origin 归一化：只接受**本机回环**的 http(s) `scheme//host[:port]`；非法返回 null。 */
+function gatewaySourceOf(origin) {
+  if (typeof origin !== "string" || !origin) return null;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    const host = url.hostname.toLowerCase();
+    if (host !== "127.0.0.1" && host !== "localhost" && host !== "[::1]" && host !== "::1") return null;
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 生成一个界面插件的 CSP 策略串。
  *
- * @param {{network?: string[], eval?: boolean}} [permissions] 清单里归一化后的 permissions
+ * ★ 审计 P0-1：`connect-src` **不再含本机回环通配**（`127.0.0.1:*` / `localhost:*`）。
+ *   原来 widget 能把拿到的任何数据 POST 到本机任意端口，连无需 permissions.network
+ *   就能打和鸣自己的 API。现在只放行：
+ *   1. `'self'`；
+ *   2. **本机网关 origin**（由主进程动态传入，精确到端口）；
+ *   3. 清单 `permissions.network` 里显式声明的 host（逐条，仍无 `https:` 通配）。
+ *
+ * @param {{network?: string[], eval?: boolean, chat?: boolean}} [permissions] 归一化后的 permissions
+ * @param {{gatewayOrigin?: string}} [opts] 本机网关 origin（如 `http://127.0.0.1:4321`）
  */
-function buildWidgetCsp(permissions = {}) {
+function buildWidgetCsp(permissions = {}, opts = {}) {
   const permissionsObject = permissions && typeof permissions === "object" ? permissions : {};
   const script = ["'self'", "'wasm-unsafe-eval'"];
   if (permissionsObject.eval === true) script.push("'unsafe-eval'");
 
-  const connect = ["'self'", ...LOOPBACK_SOURCES];
+  const connect = ["'self'"];
+  // 本机网关：只有显式声明了 permissions.chat 的插件才拿得到，且精确到网关端口。
+  const gateway = gatewaySourceOf(opts.gatewayOrigin);
+  if (gateway && permissionsObject.chat === true) connect.push(gateway);
   for (const host of Array.isArray(permissionsObject.network) ? permissionsObject.network : []) {
     const source = widgetConnectSource(host);
     if (Array.isArray(source)) connect.push(...source);
@@ -289,14 +314,14 @@ function buildWidgetCsp(permissions = {}) {
 /**
  * 一次 `widget://` 响应要带的 CSP 头。
  *
- * @param {{network?: string[], eval?: boolean}} [permissions]
- * @param {{mode?: "off"|"report"|"enforce"}} [opts]
+ * @param {{network?: string[], eval?: boolean, chat?: boolean}} [permissions]
+ * @param {{mode?: "off"|"report"|"enforce", gatewayOrigin?: string}} [opts]
  */
 function widgetCspHeaders(permissions = {}, opts = {}) {
   const mode = normalizeCspMode(opts.mode);
   if (mode === "off") return {};
   const header = mode === "enforce" ? CSP_HEADER : CSP_REPORT_ONLY_HEADER;
-  return { [header]: buildWidgetCsp(permissions) };
+  return { [header]: buildWidgetCsp(permissions, { gatewayOrigin: opts.gatewayOrigin }) };
 }
 
 /**

@@ -367,6 +367,8 @@ const PermissionsSchema = z
     tools: z.enum(["none", "read", "write"], { error: "权限上限只能是 none / read / write" }).optional(),
     files: z.array(z.string()).max(PLUGIN_LIMITS.files, { error: "文件根最多 5 个" }).optional(),
     events: z.array(z.enum(["notify", "lifecycle", "theme", "tray"]), { error: "事件只支持 notify / lifecycle / theme / tray" }).max(8).optional(),
+    /** 界面插件：是否允许读取本机智能体名册与网关地址（chatConfig；默认 false）。 */
+    chat: z.boolean().optional(),
     graphics: z.array(z.enum(["webgl", "webgl2", "wasm"]), { error: "渲染能力只支持 webgl / webgl2 / wasm" }).max(8).optional(),
     eval: z.boolean().optional(),
   })
@@ -609,6 +611,10 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
       "界面插件（distribution: bundle）必须提供 packageSha256（files/** 的确定性内容摘要，用于让签名覆盖包内代码字节）",
     );
   }
+  if (distribution !== "bundle" && parsed.data.permissions?.chat === true) {
+    throw new PluginManifestInvalidError("permissions.chat 只对界面插件（distribution: bundle）有意义");
+  }
+
   if (distribution !== "bundle" && parsed.data.packageSha256) {
     throw new PluginManifestInvalidError("packageSha256 只对界面插件（distribution: bundle）有意义");
   }
@@ -662,6 +668,7 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
         events: permissions.events ?? [],
         graphics: permissions.graphics ?? [],
         eval: permissions.eval ?? false,
+        chat: permissions.chat ?? false,
       },
       contributions: { skills, mcpServers, commands, toolPacks, desktopWidgets },
       ...(parsed.data.publisher ? { publisher: parsed.data.publisher } : {}),
@@ -724,6 +731,7 @@ export function toV5View(legacy: LegacyNormalizedPlugin): PluginManifestV5 {
       events: (legacy.permissions.events ?? []) as PluginPermissionsV5["events"],
       graphics: (legacy.permissions.graphics ?? []) as PluginPermissionsV5["graphics"],
       eval: legacy.permissions.eval ?? false,
+      chat: false,
     },
     contributions: {
       skills: (legacy.contributions.skills ?? []) as PluginSkillV5[],

@@ -146,6 +146,9 @@
             ]
           }
         },
+        "chat": {
+          "type": "boolean"
+        },
         "graphics": {
           "maxItems": 8,
           "type": "array",

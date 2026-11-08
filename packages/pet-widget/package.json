@@ -1,6 +1,6 @@
 {
   "name": "@heming/pet-widget",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "description": "和鸣桌面小组件：桌宠（heming.pet 界面插件包）",

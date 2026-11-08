@@ -1213,6 +1213,8 @@ export interface PluginPermissions {
   graphics: PluginGraphicsCapability[];
   /** d.98（v4）：是否允许 `unsafe-eval`（只对第一方 widget 放开）。 */
   eval: boolean;
+  /** d.113：界面插件是否允许读取智能体名册与网关地址（默认 false）。 */
+  chat?: boolean;
 }
 
 /** 界面插件可接收的事件类别（当前只有通知中心转发）。 */
@@ -1440,6 +1442,7 @@ function fromV5(parsed: PluginV5ParseResult): PluginManifest {
       events: [...((v5.permissions.events ?? []) as PluginWidgetEvent[])],
       graphics: [...((v5.permissions.graphics ?? []) as PluginGraphicsCapability[])],
       eval: v5.permissions.eval ?? false,
+      chat: v5.permissions.chat ?? false,
     },
     engines: { heming: v5.engines.heming },
     meta: copyMeta(v5.meta),

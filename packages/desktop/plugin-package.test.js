@@ -234,13 +234,13 @@ test("清单守卫：permissions 逐项受控（events/graphics/eval/network）"
   assert.equal(validateBundleManifest(noTool).ok, false);
 });
 
-test("清单守卫：permissions.events 接受 lifecycle（d.108），未知事件仍拒绝", () => {
-  const withLifecycle = baseManifest({
-    permissions: { ...baseManifest().permissions, events: ["notify", "lifecycle"] },
+test("清单守卫：permissions.events 接受 lifecycle / theme / tray，未知事件仍拒绝", () => {
+  const all = baseManifest({
+    permissions: { ...baseManifest().permissions, events: ["notify", "lifecycle", "theme", "tray"] },
   });
-  const ok = validateBundleManifest(withLifecycle);
+  const ok = validateBundleManifest(all);
   assert.equal(ok.ok, true, ok.errors.join("；"));
-  assert.deepEqual(ok.permissions.events, ["notify", "lifecycle"]);
+  assert.deepEqual(ok.permissions.events, ["notify", "lifecycle", "theme", "tray"]);
 
   // 未知事件（如 hook）仍然拒绝，且错误文案列出允许值
   const unknown = baseManifest({
@@ -249,7 +249,33 @@ test("清单守卫：permissions.events 接受 lifecycle（d.108），未知事�
   const bad = validateBundleManifest(unknown);
   assert.equal(bad.ok, false);
   assert.match(bad.errors.join("；"), /events 含未知项：hook/);
-  assert.match(bad.errors.join("；"), /允许：notify \/ lifecycle/);
+  assert.match(bad.errors.join("；"), /允许：notify \/ lifecycle \/ theme \/ tray/);
+});
+
+test("清单守卫：permissions.chat 只能是 boolean 且仅对 bundle 有意义（P0-1）", () => {
+  // 缺省 false
+  assert.equal(validateBundleManifest(baseManifest()).permissions.chat, false);
+  // bundle 显式 true
+  const on = validateBundleManifest(baseManifest({
+    permissions: { ...baseManifest().permissions, chat: true },
+  }));
+  assert.equal(on.ok, true, on.errors.join("；"));
+  assert.equal(on.permissions.chat, true);
+  // 非 boolean → 拒绝
+  assert.match(
+    validateBundleManifest(baseManifest({
+      permissions: { ...baseManifest().permissions, chat: "yes" },
+    })).errors.join("；"),
+    /permissions\.chat 必须是 boolean/,
+  );
+  // 声明式包不支持该权限位
+  assert.match(
+    validateBundleManifest(baseManifest({
+      distribution: "manifest",
+      permissions: { ...baseManifest().permissions, chat: true },
+    })).errors.join("；"),
+    /permissions\.chat 只对界面插件/,
+  );
 });
 
 test("首方验签：无签名 / 冒名密钥 / 签名后篡改都拒绝；合法签名通过并记 keyId", () => {

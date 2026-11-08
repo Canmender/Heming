@@ -45,8 +45,10 @@ const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
  * - `notify`：主窗通知（既有）；
  * - `lifecycle`（d.108）：安装/启停/更新/卸载的生命周期事件。**未声明就收不到任何
  *   生命周期事件**（规格 §5.4）；声明了也只表示「允许接收通知」，不带来任何新能力。
+ * - `theme` / `tray`（d.113，审计 P1-5）：主题切换与托盘动作事件。此前宿主对这两类
+ *   无条件广播，绕过 `permissions.events`；现在同样必须显式声明。
  */
-const ALLOWED_EVENTS = new Set(["notify", "lifecycle"]);
+const ALLOWED_EVENTS = new Set(["notify", "lifecycle", "theme", "tray"]);
 const ALLOWED_GRAPHICS = new Set(["webgl", "webgl2", "wasm"]);
 const ALLOWED_TOOLS = new Set(["none", "read", "write"]);
 /**
@@ -258,6 +260,14 @@ function validateBundleManifest(raw, options = {}) {
   const graphics = Array.isArray(permissionsRaw.graphics) ? permissionsRaw.graphics : [];
   const badGraphics = graphics.filter((item) => !ALLOWED_GRAPHICS.has(item));
   if (badGraphics.length > 0) errors.push(`permissions.graphics 含未知项：${badGraphics.join(", ")}`);
+  // 审计 P0-1：对话上下文（网关地址 + 智能体 id/name）改成声明制；只有 bundle 有意义。
+  if (permissionsRaw.chat !== undefined && typeof permissionsRaw.chat !== "boolean") {
+    errors.push("permissions.chat 必须是 boolean（默认 false）");
+  }
+  if (permissionsRaw.chat === true && distribution !== "bundle") {
+    errors.push("permissions.chat 只对界面插件（distribution: \"bundle\"）有意义");
+  }
+  const chat = permissionsRaw.chat === true;
 
   /* ── contributions：只允许 commands + desktopWidgets（界面插件不贡献技能/服务/工具束） ── */
   const contributionsRaw = isPlainObject(raw.contributions) ? raw.contributions : {};
@@ -330,6 +340,7 @@ function validateBundleManifest(raw, options = {}) {
     events: events.filter((item) => ALLOWED_EVENTS.has(item)),
     graphics: graphics.filter((item) => ALLOWED_GRAPHICS.has(item)),
     eval: permissionsRaw.eval === true,
+    chat,
   };
 
   return {
