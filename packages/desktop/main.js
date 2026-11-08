@@ -573,7 +573,7 @@ if (!gotLock) {
   });
 
   // —— 内置 magpie 网关（d.91 原生模型组件）——
-  // 模型统一由 magpie 提供（d.90）；桌面端随包带 `resources/magpie/magpie-cli.exe`，
+  // 模型统一由内置网关提供（d.90）；桌面端随包带本仓库编译的 `resources/magpie/magpie-core.exe`，
   // 主进程负责启动/探活/退出回收，并在本机回环上开一个带 CORS 的反代给渲染层用
   // （magpie 默认拒绝网页跨源请求，渲染层也不能自己起 HTTP 服务）。
   const magpieHost = createMagpieHost({

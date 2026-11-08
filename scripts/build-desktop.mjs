@@ -54,21 +54,21 @@ if (webBuilt.status !== 0) {
   process.exit(1);
 }
 
-// 内置 magpie CLI（d.91）：安装包里要带 `resources/magpie/magpie-cli.exe`，
-// 否则用户装完和鸣没有模型网关可用。二进制不进仓库（约 70MB），打包前在这里确保就位：
-// 已有就校验 sha256；没有就按 scripts/fetch-magpie.mjs 的钉死版本下载。
-const magpieChecked = spawnSync(
+// 内置模型网关内核（d.97）：安装包里要带 `resources/magpie/magpie-core.exe`。
+// 它由 vendor/magpie-core 的源码（MIT，见 PROVENANCE.md）在本仓库编译产出，不再下载第三方二进制；
+// 打包前确保产物存在且不比源码旧，缺/旧就现场构建（需要 Go ≥ 1.26.8）。
+const coreChecked = spawnSync(
   process.execPath,
-  [join(root, "scripts", "fetch-magpie.mjs"), "--check"],
+  [join(root, "scripts", "build-magpie-core.mjs"), "--check"],
   { stdio: "inherit" },
 );
-if (magpieChecked.status !== 0) {
-  console.log("[build-desktop] 内置 magpie 未就位，开始下载…");
-  const fetched = spawnSync(process.execPath, [join(root, "scripts", "fetch-magpie.mjs")], {
+if (coreChecked.status !== 0) {
+  console.log("[build-desktop] 模型网关内核未就位/已过期，开始构建…");
+  const built = spawnSync(process.execPath, [join(root, "scripts", "build-magpie-core.mjs")], {
     stdio: "inherit",
   });
-  if (fetched.status !== 0) {
-    console.error("[build-desktop] 内置 magpie 下载/校验失败，已中止打包（安装包里不能缺模型网关）");
+  if (built.status !== 0) {
+    console.error("[build-desktop] 模型网关内核构建失败，已中止打包（安装包里不能缺模型网关）");
     process.exit(1);
   }
 }

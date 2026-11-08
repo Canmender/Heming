@@ -2,14 +2,16 @@
 /**
  * 内置 magpie 网关托管（d.91）：把 magpie 当成和鸣的原生组件。
  *
- * 背景：和鸣的模型层已改为「只连本机 magpie 网关」（见 d.90）。桌面端随包携带
- * `resources/magpie/magpie-cli.exe`，由主进程负责：
+ * 背景：和鸣的模型层已改为「只连本机网关」（见 d.90）。网关内核是**本仓库自己的**：
+ * 由 `vendor/magpie-core` 的源码（MIT，见 PROVENANCE）经 `scripts/build-magpie-core.mjs`
+ * 编译成 `resources/magpie/magpie-core.exe`，随应用本体发布。主进程负责：
  *   1. 启动 `magpie serve`（不弹窗、后台进程）；
  *   2. 轮询 `GET /api/hello` 等到网关就绪（拿到版本）；
  *   3. 退出时回收整棵子进程树（Windows 用 taskkill /T /F，POSIX 用进程组）。
  *
- * 为什么二进制不在仓库里：约 70MB，构建时由 `scripts/fetch-magpie.mjs` 下载并校验 SHA256SUMS
- * 放进 `packages/desktop/resources/magpie/`（打包后随 extraResources 进安装包）。
+ * 为什么产物不在仓库里：编译产物约 70MB，由 `scripts/build-magpie-core.mjs` 从 vendored 源码
+ * 现场构建到 `packages/desktop/resources/magpie/`（打包后随 extraResources 进安装包）；
+ * 仓库里只有可审计的源码，没有第三方二进制。
  *
  * 边界：
  * - 只在本机回环上跑，不对外开放端口；
@@ -30,7 +32,7 @@ function resolveBinaryPath({ isPackaged, resourcesPath, appDir, platform = proce
   if (env.HEMING_MAGPIE_BIN && String(env.HEMING_MAGPIE_BIN).trim()) {
     return String(env.HEMING_MAGPIE_BIN).trim();
   }
-  const exe = platform === "win32" ? "magpie-cli.exe" : "magpie-cli";
+  const exe = platform === "win32" ? "magpie-core.exe" : "magpie-core";
   if (isPackaged) return path.join(resourcesPath, "magpie", exe);
   return path.join(appDir, "resources", "magpie", exe);
 }
@@ -129,7 +131,7 @@ function createMagpieHost(opts) {
     if (starting) return starting;
     if (!exists(binaryPath)) {
       throw new Error(
-        `没有找到内置 magpie（${binaryPath}）。开发态先运行 node scripts/fetch-magpie.mjs 下载；` +
+        `没有找到内置模型网关内核（${binaryPath}）。开发态先运行 node scripts/build-magpie-core.mjs 构建；` +
           "或在设置里改用手动网关地址。",
       );
     }

@@ -42,7 +42,7 @@ function hostWith(overrides = {}) {
   // 同一个假时钟：now 与 sleep 必须共享时间轴，否则就绪轮询永远等不到 deadline。
   const fakeClock = clock();
   const host = createMagpieHost({
-    binaryPath: "C:/fake/magpie-cli.exe",
+    binaryPath: "C:/fake/magpie-core.exe",
     spawn: () => child,
     fetchImpl: async () => ({ ok: false, json: async () => ({}) }),
     sleep: fakeClock.sleep,
@@ -62,15 +62,15 @@ function hostWith(overrides = {}) {
 test("resolveBinaryPath：打包/开发/环境变量覆盖", () => {
   assert.equal(
     resolveBinaryPath({ isPackaged: true, resourcesPath: "R", appDir: "A", platform: "win32", env: {} }),
-    require("node:path").join("R", "magpie", "magpie-cli.exe"),
+    require("node:path").join("R", "magpie", "magpie-core.exe"),
   );
   assert.equal(
     resolveBinaryPath({ isPackaged: false, resourcesPath: "R", appDir: "A", platform: "win32", env: {} }),
-    require("node:path").join("A", "resources", "magpie", "magpie-cli.exe"),
+    require("node:path").join("A", "resources", "magpie", "magpie-core.exe"),
   );
   assert.equal(
     resolveBinaryPath({ isPackaged: true, resourcesPath: "R", appDir: "A", platform: "linux", env: {} }),
-    require("node:path").join("R", "magpie", "magpie-cli"),
+    require("node:path").join("R", "magpie", "magpie-core"),
   );
   assert.equal(
     resolveBinaryPath({
@@ -88,7 +88,7 @@ test("没有二进制：启动给出可执行提示，不自称运行中", async
   const { host } = hostWith({ exists: () => false });
   assert.equal(host.status().available, false);
   assert.equal(host.status().running, false);
-  await assert.rejects(() => host.start(), /没有找到内置 magpie/);
+  await assert.rejects(() => host.start(), /没有找到内置模型网关内核/);
 });
 
 test("端口上已有 magpie（用户自己开的）→ 直接采用：不 spawn、stop 不杀它", async () => {

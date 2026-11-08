@@ -2,6 +2,39 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.97.2.42.0（2026-11-08）— 复用 magpie 源码，自建和鸣的模型网关内核
+
+d.92 是「下载 magpie 官方 CLI 随包分发」——本质是分发别人的安装包，既不可改也不可审计。
+本轮改为：**把 magpie 的 MIT 源码裁剪进本仓库，由我们自己的构建脚本编译成内核**，作为应用本体的一部分发布。
+不是插件，也不是第三方安装包。
+
+### 一、vendored 源码
+
+- `vendor/magpie-core/`：上游 `yetone/magpie` 标签 `v0.1.3246`（MIT）；
+  保留 `LICENSE`、`THIRD_PARTY_NOTICES`、`go.mod/go.sum`、`main.go`、`internal/**`、`plugins/`；
+- 裁剪掉与本应用无关的 `site/`、`docs/`、`native/`、`build/`、全部 `*_test.go`、`testdata/`、
+  `internal/gui/tests/`、上游 README/Dockerfile/Makefile/CI；
+- 新增 `PROVENANCE.md`：来源、裁剪口径、构建命令、升级上游步骤、许可说明。
+
+### 二、构建与打包
+
+- 新增 `scripts/build-magpie-core.mjs`：`go build -tags nogui -trimpath -ldflags "-s -w -X main.version=0.1.3246-heming.<应用版本>"`，
+  产物 `packages/desktop/resources/magpie/magpie-core.exe`（gitignore）；`--check/--force`，需要 Go ≥ 1.26.8；
+- `build-desktop.mjs` 打包前置检查改为「内核缺/旧则现场构建」，失败中止打包；
+- 删除 `scripts/fetch-magpie.mjs`；desktop 脚本 `magpie:fetch` → `magpie:build`；
+- host 默认二进制名改为 `magpie-core.exe`；设置页/文档同步措辞。
+
+### 三、运行时不变量
+
+托管/探活/反代/渲染层桥/采用本机已有实例全部沿用；`/api/hello` 的 version 形如
+`0.1.3246-heming.d.97.2.42.0`，可据此辨认是自家内核。
+
+### 验证
+
+- vendored 源码独立构建成功（产物约 69MB）；
+- 自建内核真实启动：`/api/hello` 版本带 `-heming.`、`/v1/models` 200；
+- host 7 例、magpie 相关 web 用例、`tsc` 零错；桌面应用真启动日志 `[magpie] 就绪`、退出后端口释放。
+
 ## d.96.2.42.0（2026-11-07）— 云端插件仓库：一份仓库、预留接口、插件页直接下载安装
 
 用户要求：「云端用一个插件仓库，预留好接口，用户可以在这里下载插件使用」；

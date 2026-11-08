@@ -12,6 +12,17 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.97.2.42.0",
+    "date": "2026-11-08",
+    "title": "模型网关是和鸣自己的内核了",
+    "bullets": [
+      "和鸣不再随包分发 magpie 的官方安装包：改用其 MIT 源码，由我们的构建编译成自己的网关内核。",
+      "用起来没有区别：装完仍会自动启动、自动接上，设置里看「内置 magpie 运行中 / 已接入本机 magpie」。",
+      "认版本：设置里 magpie 版本号带 `-heming.` 前缀，就说明跑的是和鸣自己编的内核。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.96.2.42.0",
     "date": "2026-11-07",
     "title": "插件区有了「下载安装」和云端插件库",
