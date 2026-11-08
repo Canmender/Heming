@@ -28,6 +28,7 @@ import { useModalA11y } from "../useModalA11y.js";
 import { XIcon } from "../icons.js";
 import { BTN_GHOST, BTN_GHOST_SM, BTN_PRIMARY, CHIP, ERROR_TEXT, HINT } from "../plugins/shared.js";
 import { EmptyState } from "../ui/EmptyState.js";
+import { useUiStore } from "../../store/ui.js";
 
 /**
  * 技能社区（虾评）面板（d.109）。
@@ -85,11 +86,28 @@ interface InstallPreview {
   sameName?: SkillDefinition;
 }
 
+/** 一条「社区有新版」的已装技能（d.110 聚合 + 批量更新）。 */
+interface CommunityUpdateRow {
+  skill: SkillDefinition;
+  localVersion: string;
+  remoteVersion: string;
+  author: string;
+}
+
+/** 批量更新的逐条结果（成功/跳过/失败，失败不中断后续）。 */
+export interface BulkUpdateOutcome {
+  kind: "ok" | "skipped" | "failed";
+  name: string;
+  detail?: string;
+}
+
 export interface SkillHubPanelProps {
   skills: SkillPool;
   deps?: SkillHubClientDeps;
   /** 安装/更新后通知宿主刷新技能列表。 */
   onInstalled?: () => void;
+  /** 「去技能区分配」：由宿主把技能视图切到技能池 Tab（不新增全局状态）。 */
+  onGoAssign?: () => void;
 }
 
 /* ─────────────────────────────── Key 弹窗 ─────────────────────────────── */
@@ -550,9 +568,116 @@ function InstallPreviewDialog({
   );
 }
 
+/* ─────────────────────────── 批量更新确认弹窗 ─────────────────────────── */
+
+function BulkUpdateDialog({
+  rows,
+  running,
+  results,
+  done,
+  onConfirm,
+  onClose,
+  onGoAssign,
+}: {
+  rows: CommunityUpdateRow[];
+  running: boolean;
+  results: BulkUpdateOutcome[];
+  done: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+  onGoAssign: () => void;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalA11y(panelRef, onClose, { active: !running });
+  const ok = results.filter((item) => item.kind === "ok").length;
+  const failed = results.filter((item) => item.kind === "failed").length;
+  const skipped = results.filter((item) => item.kind === "skipped").length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="presentation">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="批量更新社区技能"
+        className="flex max-h-[86vh] w-[min(620px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-white shadow-xl"
+      >
+        <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
+          <span className="text-[13px] font-bold">批量更新社区技能</span>
+          <button
+            type="button"
+            aria-label="关闭批量更新"
+            className="ml-auto rounded-sm p-1 text-muted hover:bg-[#f0f0f0]"
+            onClick={onClose}
+          >
+            <XIcon width={14} height={14} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <p className="ui-body-sm">
+            将按顺序更新 {rows.length} 个社区技能；同名手工技能会跳过、不会被覆盖。
+          </p>
+          <ul className="mt-2 divide-y divide-line-soft">
+            {rows.map((row) => (
+              <li key={row.skill.id} className="flex flex-wrap items-center gap-2 py-1.5 ui-body-sm">
+                <span className="font-medium">{row.skill.name}</span>
+                <span className={HINT}>
+                  v{row.localVersion} → v{row.remoteVersion}
+                </span>
+                <span className={`ml-auto ${HINT}`}>{row.author || "未知作者"}</span>
+              </li>
+            ))}
+          </ul>
+
+          {(running || results.length > 0) && (
+            <div className="mt-3 border-t border-line-soft pt-2">
+              <p className="ui-body-sm font-medium">
+                {running
+                  ? `正在更新…（已完成 ${results.length} / ${rows.length}）`
+                  : `更新完成：成功 ${ok} / 失败 ${failed}${skipped > 0 ? ` / 跳过 ${skipped}` : ""}`}
+              </p>
+              <ul className="mt-1 grid gap-1 ui-caption">
+                {results.map((item, index) => (
+                  <li key={`${item.name}:${index}`} className="flex flex-wrap items-baseline gap-1.5">
+                    <span className="rounded-sm border border-line px-1.5 py-0.5 text-[10px]">
+                      {item.kind === "ok" ? "成功" : item.kind === "skipped" ? "跳过" : "失败"}
+                    </span>
+                    <span>{item.name}</span>
+                    {item.detail && <span className="text-muted">{item.detail}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-line-soft px-4 py-2.5">
+          <button type="button" className={BTN_GHOST} onClick={onClose}>
+            {done ? "完成" : "取消"}
+          </button>
+          {!done && (
+            <button
+              type="button"
+              className={BTN_PRIMARY}
+              disabled={running || rows.length === 0}
+              onClick={onConfirm}
+            >
+              {running ? "更新中…" : "确认更新"}
+            </button>
+          )}
+          {done && ok > 0 && (
+            <button type="button" className={BTN_PRIMARY} onClick={onGoAssign}>
+              去技能区分配
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─────────────────────────────── 主面板 ─────────────────────────────── */
 
-export function SkillHubPanel({ skills, deps, onInstalled }: SkillHubPanelProps) {
+export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHubPanelProps) {
   const fetchImpl = deps?.fetchImpl;
   const baseUrl = deps?.baseUrl;
 
@@ -578,6 +703,18 @@ export function SkillHubPanel({ skills, deps, onInstalled }: SkillHubPanelProps)
   const [busyId, setBusyId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [tick, setTick] = useState(0);
+  /** d.110：社区技能的远程版本（列表条目 + 对已装但不在当前页的 id 单独拉详情）。 */
+  const [remoteVersions, setRemoteVersions] = useState<Record<string, string>>({});
+  /** d.110：批量更新确认/执行状态。 */
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkResults, setBulkResults] = useState<BulkUpdateOutcome[]>([]);
+  const [bulkDone, setBulkDone] = useState(false);
+  const [pendingBulk, setPendingBulk] = useState(false);
+  /** 冻结的批量更新清单：执行中本地版本会变，弹窗列表不能跟着缩水。 */
+  const [bulkRows, setBulkRows] = useState<CommunityUpdateRow[]>([]);
+  /** 安装/更新成功后提供「去技能区分配」出口。 */
+  const [showGoAssign, setShowGoAssign] = useState(false);
 
   /** 状态：挂载与手动重试时拉。 */
   useEffect(() => {
@@ -663,6 +800,79 @@ export function SkillHubPanel({ skills, deps, onInstalled }: SkillHubPanelProps)
     // tick：安装后强制重算
   }, [skills, status, tick]);
 
+  /* ─────────── d.110：已装社区技能聚合 + 可更新判定 + 全部更新 ─────────── */
+
+  const sourceId = status?.source.id ?? "xiaping";
+  const installedCommunity = useMemo(
+    () => skills.list().filter((skill) => skill.community?.source === sourceId),
+    [skills, sourceId, tick],
+  );
+
+  /** 列表条目已知的远程版本直接合并；减少对详情接口的额外请求。 */
+  useEffect(() => {
+    if (list.items.length === 0) return;
+    setRemoteVersions((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const item of list.items) {
+        if (next[item.id] !== item.version) {
+          next[item.id] = item.version;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [list.items]);
+
+  /** 已装但不在当前列表页的 id：单独拉详情补远程版本（失败只记一次，避免无限重试）。 */
+  const remoteProbed = useRef(new Set<string>());
+  useEffect(() => {
+    if (!enabled) return;
+    const missing = installedCommunity
+      .map((skill) => skill.community?.skillId ?? "")
+      .filter((id) => id && remoteVersions[id] === undefined && !remoteProbed.current.has(id));
+    if (missing.length === 0) return;
+    for (const id of missing) remoteProbed.current.add(id);
+    let cancelled = false;
+    void Promise.all(
+      missing.map((id) =>
+        fetchHubDetail(id, { fetchImpl, baseUrl })
+          .then((detail) => ({ id, version: detail.version }))
+          .catch(() => null),
+      ),
+    ).then((rows) => {
+      if (cancelled) return;
+      const found = rows.filter((row): row is { id: string; version: string } => row !== null);
+      if (found.length === 0) return;
+      setRemoteVersions((prev) => {
+        const next = { ...prev };
+        for (const row of found) next[row.id] = row.version;
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, installedCommunity, remoteVersions, fetchImpl, baseUrl]);
+
+  /** 有远程新版本的已装技能（按 community.skillId 对齐）。 */
+  const communityUpdates = useMemo<CommunityUpdateRow[]>(() => {
+    const rows: CommunityUpdateRow[] = [];
+    for (const skill of installedCommunity) {
+      const hubId = skill.community?.skillId ?? "";
+      const remote = hubId ? remoteVersions[hubId] : undefined;
+      const local = skill.community?.version ?? "";
+      if (!remote || remote === local) continue;
+      rows.push({
+        skill,
+        localVersion: local || "—",
+        remoteVersion: remote,
+        author: skill.community?.author ?? "",
+      });
+    }
+    return rows;
+  }, [installedCommunity, remoteVersions]);
+
   const startInstall = async (target: InstallTarget) => {
     setBusyId(target.id);
     setMsg(null);
@@ -734,10 +944,111 @@ export function SkillHubPanel({ skills, deps, onInstalled }: SkillHubPanelProps)
       }
       setPreview(null);
       setTick((n) => n + 1);
+      setShowGoAssign(true);
       setMsg({ kind: "ok", text: `已安装「${parsed.name}」；默认未分配给任何智能体。` });
       onInstalled?.();
     } catch (err) {
       setMsg({ kind: "error", text: `安装失败：${errorText(err)}` });
+    }
+  };
+
+  /** 「去技能区分配」：切到技能区 → 技能池 Tab（宿主回调负责页内 Tab，不新增全局状态）。 */
+  const goAssign = () => {
+    useUiStore.getState().setPage("skills");
+    onGoAssign?.();
+  };
+
+  /**
+   * 批量更新：逐个下载/解析/覆盖（失败不中断），同名手工技能跳过不覆盖。
+   * 先确认 Key；无 Key 时交给 Key 弹窗，保存后继续（pendingBulk）。
+   */
+  const openBulkUpdate = async () => {
+    setMsg(null);
+    let state = keyInfo;
+    if (!state) {
+      state = await readHubKeyState();
+      setKeyInfo(state);
+    }
+    if (state.kind !== "encrypted" && state.kind !== "plain") {
+      setPendingBulk(true);
+      setKeyOpen(true);
+      return;
+    }
+    setBulkRows([...communityUpdates]);
+    setBulkResults([]);
+    setBulkDone(false);
+    setBulkOpen(true);
+  };
+
+  const runBulkUpdate = async (key: string, rows: CommunityUpdateRow[] = communityUpdates) => {
+    setBulkRunning(true);
+    setBulkDone(false);
+    setBulkResults([]);
+    const results: BulkUpdateOutcome[] = [];
+    for (const row of rows) {
+      const hubId = row.skill.community?.skillId ?? "";
+      try {
+        const download = await downloadHubSkill(hubId, key, { fetchImpl, baseUrl });
+        const parsedList = parseImportText(download.skillMd);
+        const parsed = parsedList[0];
+        if (parsedList.length !== 1 || !parsed || !parsed.instructions.trim()) {
+          throw new SkillHubError("下载内容不是单个有效技能");
+        }
+        const target = skills
+          .list()
+          .find(
+            (item) => item.community?.source === sourceId && item.community.skillId === hubId,
+          );
+        if (!target) {
+          results.push({ kind: "skipped", name: row.skill.name, detail: "找不到对应的已装技能" });
+          setBulkResults([...results]);
+          continue;
+        }
+        // 不静默覆盖手工技能：同名但没有社区归属的，跳过并说明。
+        const nameOwner = skills.list().find((item) => item.name === parsed.name);
+        if (nameOwner && nameOwner.id !== target.id && !nameOwner.community) {
+          results.push({ kind: "skipped", name: parsed.name, detail: "同名手工技能，未覆盖" });
+          setBulkResults([...results]);
+          continue;
+        }
+        const version = download.version || parsed.version || row.remoteVersion;
+        skills.update(target.id, {
+          name: parsed.name,
+          description: parsed.description ?? "",
+          instructions: parsed.instructions,
+          triggers: parsed.triggers ?? [],
+          tags: parsed.tags ?? [],
+          version,
+          source: "imported",
+          community: {
+            source: sourceId,
+            skillId: hubId,
+            name: row.skill.community?.name ?? parsed.name,
+            author: row.skill.community?.author ?? "",
+            version,
+            ...(row.skill.community?.homepage ? { homepage: row.skill.community.homepage } : {}),
+            installedAt: row.skill.community?.installedAt ?? new Date().toISOString(),
+          },
+        });
+        results.push({ kind: "ok", name: parsed.name, detail: `v${row.localVersion} → v${version}` });
+      } catch (err) {
+        results.push({ kind: "failed", name: row.skill.name, detail: errorText(err) });
+      }
+      setBulkResults([...results]);
+      setTick((n) => n + 1);
+    }
+    setBulkRunning(false);
+    setBulkDone(true);
+    const ok = results.filter((item) => item.kind === "ok").length;
+    const failed = results.filter((item) => item.kind === "failed").length;
+    const skipped = results.filter((item) => item.kind === "skipped").length;
+    setMsg({
+      kind: failed > 0 ? "error" : "ok",
+      text: `社区技能更新完成：成功 ${ok} / 失败 ${failed}${skipped > 0 ? ` / 跳过 ${skipped}` : ""}`,
+    });
+    if (ok > 0) {
+      setShowGoAssign(true);
+      onInstalled?.();
     }
   };
 
@@ -799,6 +1110,23 @@ export function SkillHubPanel({ skills, deps, onInstalled }: SkillHubPanelProps)
           技能来自第三方社区，内容是指令文本；和鸣不执行随技能下发的代码，安装后默认不分配给任何智能体。
           {!status!.reachable ? " 上游暂不可达，列表可能来自缓存。" : ""}
         </p>
+      </div>
+
+      {/* d.110：已装社区技能聚合 + 全部更新（只更新社区来源的同 id 技能） */}
+      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-white p-2.5">
+        <span role="status" className="ui-body-sm">
+          已装 {installedCommunity.length} 个社区技能 · {communityUpdates.length} 个可更新
+        </span>
+        {communityUpdates.length > 0 && (
+          <button type="button" className={BTN_GHOST_SM} onClick={() => void openBulkUpdate()}>
+            全部更新
+          </button>
+        )}
+        {showGoAssign && (
+          <button type="button" className={BTN_GHOST_SM} onClick={goAssign}>
+            去技能区分配
+          </button>
+        )}
       </div>
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -980,27 +1308,61 @@ export function SkillHubPanel({ skills, deps, onInstalled }: SkillHubPanelProps)
           onClose={() => {
             setKeyOpen(false);
             setPending(null);
+            setPendingBulk(false);
           }}
           onSaved={() => {
             refreshKey();
-            if (pending) {
-              const target = pending.target;
-              setPending(null);
-              setKeyOpen(false);
-              void readHubKeyState().then((state) => {
-                if (state.kind === "encrypted" || state.kind === "plain") {
-                  runDownload(target, state.key).catch((err: unknown) =>
-                    setMsg({ kind: "error", text: errorText(err) }),
-                  );
-                }
-              });
-            }
+            const wantsBulk = pendingBulk;
+            const wantedInstall = pending;
+            setPending(null);
+            setPendingBulk(false);
+            if (wantsBulk || wantedInstall) setKeyOpen(false);
+            void readHubKeyState().then((state) => {
+              if (state.kind !== "encrypted" && state.kind !== "plain") return;
+              if (wantsBulk) {
+                setBulkOpen(true);
+                void runBulkUpdate(state.key, bulkRows);
+              } else if (wantedInstall) {
+                runDownload(wantedInstall.target, state.key).catch((err: unknown) =>
+                  setMsg({ kind: "error", text: errorText(err) }),
+                );
+              }
+            });
           }}
         />
       )}
 
       {preview && (
         <InstallPreviewDialog preview={preview} onConfirm={confirmInstall} onCancel={() => setPreview(null)} />
+      )}
+
+      {bulkOpen && (
+        <BulkUpdateDialog
+          rows={bulkRows}
+          running={bulkRunning}
+          results={bulkResults}
+          done={bulkDone}
+          onConfirm={() => {
+            void (async () => {
+              const state = keyInfo ?? (await readHubKeyState());
+              setKeyInfo(state);
+              if (state.kind !== "encrypted" && state.kind !== "plain") {
+                setBulkOpen(false);
+                setPendingBulk(true);
+                setKeyOpen(true);
+                return;
+              }
+              await runBulkUpdate(state.key, bulkRows);
+            })();
+          }}
+          onClose={() => {
+            setBulkOpen(false);
+            setBulkDone(false);
+            setBulkResults([]);
+            setBulkRows([]);
+          }}
+          onGoAssign={goAssign}
+        />
       )}
     </section>
   );

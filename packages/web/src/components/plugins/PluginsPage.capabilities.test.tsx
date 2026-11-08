@@ -366,6 +366,11 @@ function installV3(manifest: Record<string, unknown> = v3Manifest()) {
   return result;
 }
 
+/** 页面上可能有多个 role=status（孤儿提示 + 安装结果）：按文本找目标。 */
+function statusWithText(fragment: string): HTMLElement | undefined {
+  return screen.getAllByRole("status").find((el) => el.textContent?.includes(fragment));
+}
+
 function openInstall() {
   fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
   return screen.getByRole("dialog", { name: "安装插件" });
@@ -502,7 +507,7 @@ describe("插件页 · 安装预览（v3）", () => {
     expect(within(dialog).getByText("命令 · 生成周报")).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "确认安装" }));
-    expect(screen.getByRole("status")).toHaveTextContent("已安装插件「报告工具箱」");
+    expect(statusWithText("已安装插件「报告工具箱」")).toHaveTextContent("已安装插件「报告工具箱」");
     const card = screen.getByRole("region", { name: "插件 报告工具箱" });
     expect(card).toHaveTextContent("权限：主机 1 · 风险上限 只读");
   });
@@ -518,7 +523,7 @@ describe("插件页 · 安装预览（v3）", () => {
     expect(within(dialog).getByText(/网络访问：mcp\.example\.com/)).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "确认安装" }));
-    expect(screen.getByRole("status")).toHaveTextContent("已安装插件「天气能力包」");
+    expect(statusWithText("已安装插件「天气能力包」")).toHaveTextContent("已安装插件「天气能力包」");
   });
 });
 
@@ -667,6 +672,59 @@ describe("插件页 · 系统能力卡（d.65）", () => {
   });
 });
 
+
+describe("插件页 · 孤儿记录诊断（d.110）", () => {
+  function seedOrphans() {
+    pool.create({
+      name: "残留技能",
+      description: "插件记录丢失后留下的技能",
+      instructions: "内容",
+      triggers: [],
+      tags: [],
+      enabled: true,
+      version: "1.0.0",
+      source: "imported",
+      pluginId: "acme.gone",
+    });
+    registry.add({
+      id: "plugin:acme.gone:old",
+      name: "残留服务",
+      transport: "http",
+      url: "https://old.example/mcp",
+      enabled: false,
+      origin: "plugin",
+    });
+  }
+
+  it("有孤儿：显示计数提示与两个跳转按钮（只读，不自动删除）", () => {
+    seedOrphans();
+    renderPage();
+    const banner = screen.getByRole("status", { name: "孤儿记录提示" });
+    expect(banner).toHaveTextContent("发现 1 个无主技能 / 2 个无主服务");
+    expect(banner).toHaveTextContent("插件记录已丢失");
+    expect(within(banner).getByRole("button", { name: "去技能区清理无主技能" })).toBeInTheDocument();
+    expect(within(banner).getByRole("button", { name: "去接口区清理无主服务" })).toBeInTheDocument();
+    // 只读：孤儿技能/服务仍在
+    expect(pool.list().some((skill) => skill.pluginId === "acme.gone")).toBe(true);
+    expect(registry.get("plugin:acme.gone:old")).toBeTruthy();
+  });
+
+  it("孤儿提示的两个按钮分别跳到技能 Tab / MCP Tab；没有孤儿时不显示", () => {
+    const first = (installV3(), renderPage());
+    expect(screen.queryByRole("status", { name: "孤儿记录提示" })).toBeNull();
+    first.unmount();
+
+    seedOrphans();
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "去技能区清理无主技能" }));
+    expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("tab", { name: "插件" }));
+    fireEvent.click(screen.getByRole("button", { name: "去接口区清理无主服务" }));
+    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
 describe("插件页 · 工具束（d.65）", () => {
   it("工具 Tab 展示工具束：matched 工具 + unresolved 标注", () => {
     installV3();
@@ -776,7 +834,7 @@ describe("插件页 · 安装信任行", () => {
     expect(within(dialog).getByRole("button", { name: "确认更新" })).toBeEnabled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "确认更新" }));
-    expect(screen.getByRole("status")).toHaveTextContent("已更新插件「报告工具箱」");
+    expect(statusWithText("已更新插件「报告工具箱」")).toHaveTextContent("已更新插件「报告工具箱」");
   });
 
   it("作者变化：标红「作者：旧 → 新」并同样要求勾选确认", () => {

@@ -48,7 +48,7 @@ import {
   groupToolPacks,
   installResultMessage,
 } from "./plugins/viewModel.js";
-import { BTN_GHOST, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
+import { BTN_GHOST, BTN_GHOST_SM, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
 import { BUILTIN_MODULES } from "../lib/modules/registry.js";
 import { useModuleStore } from "../lib/modules/store.js";
 import { refreshWidgets, useWidgetsStore } from "../lib/widgets/store.js";
@@ -56,6 +56,7 @@ import {
   buildUnitStatuses,
   refreshUnits,
 } from "../lib/units/registry.js";
+import { detectUnitOrphans } from "../lib/units/projection.js";
 import { UnitListView } from "./plugins/UnitListView.js";
 import { UnitDiagnostics } from "./plugins/UnitDiagnostics.js";
 
@@ -268,6 +269,20 @@ export function PluginsPage({
     ],
     [list, widgetsRecords],
   );
+  /**
+   * d.110 孤儿记录：插件记录丢失后仍留在技能池 / MCP 注册表里的物化实体。
+   * 只读检测 + 提示，不自动删除（避免误删用户资产）。
+   */
+  const orphans = useMemo(
+    () =>
+      detectUnitOrphans({
+        plugins: list,
+        skills: skills.list(),
+        servers: mcp.servers(),
+      }),
+    [list, skills, mcp, tick],
+  );
+  const orphanTotal = orphans.skills.length + orphans.servers.length;
   const toolGroups = useMemo(() => groupCatalogTools(capabilityCatalog), [capabilityCatalog]);
   const toolPackGroups = useMemo(() => groupToolPacks(capabilityCatalog), [capabilityCatalog]);
   /** serverId → 服务名（详情里「所属服务」列；缺失时退回 id）。 */
@@ -539,6 +554,36 @@ export function PluginsPage({
 
         {tab === "plugins" && (
           <>
+            {orphanTotal > 0 && (
+              <div
+                role="status"
+                className="mb-3 rounded-lg border border-[#f3d2ce] bg-[#fffafa] p-3"
+                aria-label="孤儿记录提示"
+              >
+                <p className="ui-body-sm">
+                  发现 {orphans.skills.length} 个无主技能 / {orphans.servers.length} 个无主服务
+                  （插件记录已丢失），可到技能区/接口区清理。
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={BTN_GHOST_SM}
+                    aria-label="去技能区清理无主技能"
+                    onClick={goSkills}
+                  >
+                    去技能区
+                  </button>
+                  <button
+                    type="button"
+                    className={BTN_GHOST_SM}
+                    aria-label="去接口区清理无主服务"
+                    onClick={goInterfaces}
+                  >
+                    去接口区
+                  </button>
+                </div>
+              </div>
+            )}
             {/* d.105：四类来源（系统 / 内置模块 / 声明式插件 / 界面插件）统一读投影。
                 系统卡与插件卡沿用既有组件，详情/启停/卸载入口不变；其余来源用默认行。 */}
             <UnitListView

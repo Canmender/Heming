@@ -1250,6 +1250,7 @@ export function SkillsView({
               setTick((n) => n + 1);
               onChanged?.();
             }}
+            onGoAssign={() => setTab("pool")}
           />
         )}
       </div>

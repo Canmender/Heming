@@ -10,6 +10,7 @@ import {
 } from "@heming/shared";
 import { BUILTIN_MODULES, type BuiltinModule, type ModuleId } from "../modules/registry.js";
 import { contentFingerprint } from "../plugins/integrity.js";
+import { pluginIdFromServerId } from "../plugins/permissions.js";
 import type { InstalledPlugin } from "../plugins/store.js";
 import type { SystemPlugin } from "../plugins/system.js";
 import type { WidgetRecord } from "../../types/widgets.js";
@@ -317,6 +318,63 @@ export function projectUnits(sources: UnitProjectionSources = {}): CapabilityUni
 /** 投影 + 生效判定（依赖/停用/阻断一次算完；测试与 UI 共用）。 */
 export function projectUnitStatuses(sources: UnitProjectionSources = {}): UnitStatus[] {
   return resolveUnits(projectUnits(sources));
+}
+
+/* ─────────────────── 孤儿记录（插件记录丢失后的残留） ─────────────────── */
+
+/** 无主技能：技能池里带 `pluginId`，但插件列表里已经没有这个 id。 */
+export interface UnitOrphanSkill {
+  id: string;
+  name: string;
+  pluginId: string;
+}
+
+/** 无主服务：MCP 注册表里 id 形如 `plugin:<id>:<key>`，但插件记录已不存在。 */
+export interface UnitOrphanServer {
+  id: string;
+  name: string;
+}
+
+export interface UnitOrphans {
+  skills: UnitOrphanSkill[];
+  servers: UnitOrphanServer[];
+}
+
+/** 孤儿检测输入：全部注入，便于纯函数单测；缺省视为「没有数据」。 */
+export interface UnitOrphanSources {
+  /** 已装插件（`pluginStore.list()`）。 */
+  plugins?: readonly InstalledPlugin[];
+  /** 技能池（只需 id/name/pluginId）。 */
+  skills?: readonly { id: string; name: string; pluginId?: string }[];
+  /** MCP 注册表（只需 id/name）。 */
+  servers?: readonly { id: string; name: string }[];
+}
+
+/**
+ * 检测「插件记录已丢失、但物化实体还在」的孤儿（d.110）。
+ *
+ * 只读：返回清单给 UI 提示，**不删除任何东西**。判定口径与卸载/归属同源：
+ * - 技能看 `pluginId`（`skillPool` 里的插件技能字段）；
+ * - 服务看 id 前缀 `plugin:<pluginId>:`（`pluginIdFromServerId` 的同一实现）。
+ *
+ * 顺序按名称/id 排序，保证 UI 与测试输出稳定。
+ */
+export function detectUnitOrphans(sources: UnitOrphanSources = {}): UnitOrphans {
+  const pluginIds = new Set((sources.plugins ?? []).map((plugin) => plugin.manifest.id));
+  const skills = (sources.skills ?? [])
+    .filter((skill) => !!skill.pluginId && !pluginIds.has(skill.pluginId))
+    .map((skill) => ({ id: skill.id, name: skill.name, pluginId: skill.pluginId as string }))
+    .sort((a, b) => (a.name === b.name ? a.id.localeCompare(b.id) : a.name.localeCompare(b.name)));
+
+  const servers = (sources.servers ?? [])
+    .filter((server) => {
+      const pluginId = pluginIdFromServerId(server.id);
+      return pluginId !== null && !pluginIds.has(pluginId);
+    })
+    .map((server) => ({ id: server.id, name: server.name }))
+    .sort((a, b) => (a.name === b.name ? a.id.localeCompare(b.id) : a.name.localeCompare(b.name)));
+
+  return { skills, servers };
 }
 
 /** 类型再导出，避免消费方直接依赖 shared 的深层路径。 */

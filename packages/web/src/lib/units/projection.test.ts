@@ -8,6 +8,7 @@ import type { SystemPlugin } from "../plugins/system.js";
 import type { WidgetRecord, WidgetSpec } from "../../types/widgets.js";
 import {
   currentAppVersion,
+  detectUnitOrphans,
   pluginBlocks,
   pluginEngines,
   projectBuiltinUnits,
@@ -340,6 +341,40 @@ describe("projectBundleUnits · 界面插件", () => {
       appVersion: APP_VERSION,
     });
     expect(status!.reason).toEqual({ kind: "disabled" });
+  });
+});
+
+
+describe("detectUnitOrphans（d.110 孤儿记录）", () => {
+  it("插件记录缺失时，技能与 plugin: 服务都算孤儿；有归属的不算", () => {
+    const orphans = detectUnitOrphans({
+      plugins: [installedPlugin()],
+      skills: [
+        { id: "s-keep", name: "有主技能", pluginId: "acme.report-kit" },
+        { id: "s-gone", name: "无主技能", pluginId: "acme.gone" },
+        { id: "s-manual", name: "手工技能" },
+      ],
+      servers: [
+        { id: "plugin:acme.report-kit:report", name: "有主服务" },
+        { id: "plugin:acme.gone:old", name: "无主服务" },
+        { id: "mcp-manual", name: "手工服务" },
+      ],
+    });
+    expect(orphans.skills).toEqual([
+      { id: "s-gone", name: "无主技能", pluginId: "acme.gone" },
+    ]);
+    expect(orphans.servers).toEqual([{ id: "plugin:acme.gone:old", name: "无主服务" }]);
+  });
+
+  it("没有孤儿时返回空数组；空输入也不抛", () => {
+    expect(detectUnitOrphans({})).toEqual({ skills: [], servers: [] });
+    expect(
+      detectUnitOrphans({
+        plugins: [installedPlugin()],
+        skills: [{ id: "s", name: "技能", pluginId: "acme.report-kit" }],
+        servers: [{ id: "plugin:acme.report-kit:report", name: "服务" }],
+      }),
+    ).toEqual({ skills: [], servers: [] });
   });
 });
 
