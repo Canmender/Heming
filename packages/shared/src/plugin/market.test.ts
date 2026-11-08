@@ -6,6 +6,7 @@ import {
   hasCompatibleUpdate,
   parseMarketIndex,
   pickInstallVersion,
+  isVersionCompatible,
   type MarketIndex,
 } from "./market.js";
 
@@ -119,6 +120,13 @@ describe("版本排序与兼容过滤", () => {
     const filtered = filterMarketByHostVersion(parsed as MarketIndex, "d.104.2.42.0");
     expect(filtered.plugins.map((plugin) => plugin.id)).toEqual(["mixed"]);
     expect(filtered.plugins[0].versions.map((item) => item.version)).toEqual(["1.0.0"]);
+  });
+
+  it("非法 engines.heming 视为不兼容（失败关闭，审计 P1-6）", () => {
+    expect(isVersionCompatible({ ...version(), engines: { heming: "v1" } }, "d.104.2.42.0")).toBe(false);
+    expect(isVersionCompatible({ ...version(), engines: { heming: "d.100" } }, "d.104.2.42.0")).toBe(true);
+    // 宿主版本读不到时仍不误杀（客户端兜底）
+    expect(isVersionCompatible({ ...version(), engines: { heming: "v1" } }, "bad")).toBe(true);
   });
 
   it("宿主版本非法时不过滤（交给客户端兜底）", () => {

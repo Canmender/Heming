@@ -9,6 +9,10 @@
       "type": "number",
       "const": 5
     },
+    "packageSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"

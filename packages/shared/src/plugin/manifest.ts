@@ -457,6 +457,18 @@ const ContributionsSchema = z
 
 const ManifestV5Object = z.object({
   schemaVersion: z.literal(PLUGIN_SCHEMA_VERSION_V5),
+  /**
+   * 界面插件（bundle）必填：整个 `package.tgz` 字节的 sha256。
+   *
+   * 为什么放进清单：首方签名只覆盖清单文本（`canonicalManifestText`），
+   * 不包含 `files/**` 的代码字节——攻击者可以保留官方清单与签名、替换包内
+   * JS。「清单里绑住包摘要」之后，签名会**间接覆盖全部代码字节**；
+   * 桌面安装器解包后计算 tgz sha256 与它比对（审计 P0-1）。
+   */
+  packageSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/, { error: "packageSha256 必须是 64 位小写 hex（整个 package.tgz 的 sha256）" })
+    .optional(),
   id: z.string().regex(ID_RE, { error: "插件 id 只能是小写字母/数字/._-，≤64" }),
   name: trimmed(64),
   version: trimmed(32),
@@ -486,6 +498,7 @@ const KNOWN_TOP_LEVEL = new Set([
   "contributions",
   "publisher",
   "signature",
+  "packageSha256",
 ]);
 
 export type PluginSkillV5 = z.infer<typeof SkillSchema>;
@@ -518,6 +531,8 @@ export interface PluginManifestV5 {
   };
   publisher?: { id: string; publicKey: string };
   signature?: { alg: "ed25519"; value: string };
+  /** 界面插件：整个 package.tgz 的 sha256（见 schema 注释）。 */
+  packageSha256?: string;
 }
 
 export interface PluginV5ParseResult {
@@ -583,6 +598,15 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
     );
   }
 
+  if (distribution === "bundle" && !parsed.data.packageSha256) {
+    throw new PluginManifestInvalidError(
+      "界面插件（distribution: bundle）必须提供 packageSha256（整个 package.tgz 的 sha256，用于让签名覆盖包内代码字节）",
+    );
+  }
+  if (distribution !== "bundle" && parsed.data.packageSha256) {
+    throw new PluginManifestInvalidError("packageSha256 只对界面插件（distribution: bundle）有意义");
+  }
+
   if (skills.length + mcpServers.length + commands.length + toolPacks.length + desktopWidgets.length === 0) {
     throw new PluginManifestInvalidError("至少要让 contributions 里有一类非空（技能 / 服务 / 命令 / 工具束 / 小组件）");
   }
@@ -636,6 +660,7 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
       contributions: { skills, mcpServers, commands, toolPacks, desktopWidgets },
       ...(parsed.data.publisher ? { publisher: parsed.data.publisher } : {}),
       ...(parsed.data.signature ? { signature: parsed.data.signature } : {}),
+      ...(parsed.data.packageSha256 ? { packageSha256: parsed.data.packageSha256 } : {}),
     },
     warnings,
   };

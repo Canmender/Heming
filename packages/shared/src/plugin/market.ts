@@ -197,6 +197,15 @@ export function comparePluginVersions(a: string, b: string): number {
 /** 单个版本对宿主是否兼容（`engines.heming` 最小版本语义）。 */
 export function isVersionCompatible(version: MarketVersion, hostVersion: string): boolean {
   if (!parseHemingVersion(hostVersion)) return true; // 宿主版本读不到：不误杀，由客户端兜底
+  /**
+   * 插件写的 `engines.heming` 非法 → **不兼容**（失败关闭）。
+   *
+   * 历史实现直接把非法值丢给 `compareHemingVersion`，而它把非法版本当「最小」，
+   * 于是「非法 engines」被判成「任何宿主都满足」——市场显示可装、点安装却被
+   * 客户端 `invalidEngines` 拦下（口径不一致，审计 P1-6）。正常索引在
+   * `parseMarketIndex` 就会丢掉这种条目，这里是给「未经解析直接喂进来的索引」兜底。
+   */
+  if (!parseHemingVersion(version.engines.heming)) return false;
   return compareHemingVersion(hostVersion, version.engines.heming) >= 0;
 }
 

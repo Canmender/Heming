@@ -91,6 +91,7 @@ describe("parsePluginManifestV5", () => {
   it("bundle 只允许 commands + desktopWidgets，且必须真的带小组件", () => {
     const bundleBase = {
       distribution: "bundle",
+      packageSha256: "a".repeat(64),
       permissions: { network: [], tools: "none", events: ["notify"], graphics: ["webgl"], eval: false },
       contributions: {
         desktopWidgets: [
@@ -109,7 +110,11 @@ describe("parsePluginManifestV5", () => {
     });
     expect(() => parsePluginManifestV5(withSkills)).toThrow(/只允许 commands \+ desktopWidgets/);
 
-    const emptyWidgets = baseManifest({ distribution: "bundle", contributions: { desktopWidgets: [] } });
+    const emptyWidgets = baseManifest({
+      distribution: "bundle",
+      packageSha256: "a".repeat(64),
+      contributions: { desktopWidgets: [] },
+    });
     expect(() => parsePluginManifestV5(emptyWidgets)).toThrow(/必须声明至少 1 个/);
 
     const widgetWithoutBundle = baseManifest({
@@ -119,6 +124,31 @@ describe("parsePluginManifestV5", () => {
       },
     });
     expect(() => parsePluginManifestV5(widgetWithoutBundle)).toThrow(/distribution: "bundle"/);
+  });
+
+  it("界面插件必须绑定 packageSha256（签名覆盖代码字节，审计 P0-1）", () => {
+    const widget = [{ id: "pet", name: "桌宠", entry: "files/index.html", width: 300, height: 420 }];
+    const withHash = baseManifest({
+      distribution: "bundle",
+      packageSha256: "b".repeat(64),
+      contributions: { desktopWidgets: widget },
+    });
+    expect(parsePluginManifestV5(withHash).manifest.packageSha256).toBe("b".repeat(64));
+
+    const missingHash = baseManifest({ distribution: "bundle", contributions: { desktopWidgets: widget } });
+    expect(() => parsePluginManifestV5(missingHash)).toThrow(/必须提供 packageSha256/);
+
+    // 非 bundle 声明 packageSha256 没意义
+    expect(() =>
+      parsePluginManifestV5(baseManifest({ packageSha256: "b".repeat(64) })),
+    ).toThrow(/只对界面插件/);
+
+    // 格式必须 64 位小写 hex
+    expect(() =>
+      parsePluginManifestV5(
+        baseManifest({ distribution: "bundle", packageSha256: "ABC", contributions: { desktopWidgets: widget } }),
+      ),
+    ).toThrow(/packageSha256/);
   });
 
   it("未知顶层字段：剥掉 + warning；敏感子对象未知键：报错", () => {
