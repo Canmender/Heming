@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { CapabilityUnit, UnitStatus } from "@heming/shared";
+import type { PluginHealth } from "../../lib/plugins/index.js";
 import { UnitListView } from "./UnitListView.js";
 import { UnitDiagnostics } from "./UnitDiagnostics.js";
 
@@ -199,5 +200,127 @@ describe("UnitDiagnostics", () => {
       within(panel).getByText("需要和鸣 d.106 或更高，当前 d.105"),
     ).toBeInTheDocument();
     expect(within(panel).getAllByRole("listitem")).toHaveLength(3);
+  });
+});
+
+/* ───────────────────── 健康度与修复入口（d.113） ───────────────────── */
+
+const degradedHealth: PluginHealth = {
+  pluginId: "acme.report-kit",
+  level: "degraded",
+  issues: [
+    {
+      code: "fingerprint-mismatch",
+      severity: "degraded",
+      message: "记录里的内容指纹与清单不一致（清单可能被手工修改）",
+    },
+  ],
+  danglingSkills: 0,
+  danglingServers: 0,
+};
+
+const brokenHealth: PluginHealth = {
+  pluginId: "acme.report-kit",
+  level: "broken",
+  issues: [
+    {
+      code: "invalid-record",
+      severity: "broken",
+      message: "安装记录损坏：v5 清单记录损坏：engines 必填",
+    },
+    {
+      code: "dangling-skill",
+      severity: "degraded",
+      message: "技能引用悬空：skill-gone 已不在技能池",
+      target: "skill-gone",
+    },
+  ],
+  danglingSkills: 1,
+  danglingServers: 0,
+};
+
+describe("UnitListView · 健康徽标与修复记录（d.113）", () => {
+  it("按单元显示健康徽标（降级/损坏可扫读，正常也带徽标）", () => {
+    render(
+      <UnitListView
+        statuses={UNITS}
+        healthByUnitId={{
+          "acme.report-kit": degradedHealth,
+          "heming.core": {
+            pluginId: "heming.core",
+            level: "ok",
+            issues: [],
+            danglingSkills: 0,
+            danglingServers: 0,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByLabelText("健康度 降级")).toBeInTheDocument();
+    expect(screen.getByLabelText("健康度 正常")).toBeInTheDocument();
+    // 悬停提示带 issue 明细
+    expect(screen.getByLabelText("健康度 降级").getAttribute("title")).toContain(
+      "内容指纹与清单不一致",
+    );
+  });
+
+  it("broken 单元显示「修复记录」按钮，点击回调插件 id", () => {
+    const onRepair = vi.fn();
+    render(
+      <UnitListView
+        statuses={UNITS}
+        healthByUnitId={{ "acme.report-kit": brokenHealth }}
+        onRepair={onRepair}
+      />,
+    );
+    expect(screen.getByLabelText("健康度 损坏")).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "修复记录 报告工具箱" });
+    fireEvent.click(button);
+    expect(onRepair).toHaveBeenCalledWith("acme.report-kit");
+  });
+
+  it("degraded 单元不显示修复按钮（只有 broken 需要修记录）", () => {
+    render(
+      <UnitListView statuses={UNITS} healthByUnitId={{ "acme.report-kit": degradedHealth }} onRepair={vi.fn()} />,
+    );
+    expect(screen.queryByRole("button", { name: /修复记录/ })).toBeNull();
+  });
+
+  it("修复中：按钮禁用并显示「修复中…」", () => {
+    render(
+      <UnitListView
+        statuses={UNITS}
+        healthByUnitId={{ "acme.report-kit": brokenHealth }}
+        onRepair={vi.fn()}
+        repairingPluginId="acme.report-kit"
+      />,
+    );
+    const button = screen.getByRole("button", { name: "修复记录 报告工具箱" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent("修复中…");
+  });
+});
+
+describe("UnitDiagnostics · 健康问题明细（d.113）", () => {
+  it("逐条列出健康 issue，broken 单元带修复入口", () => {
+    const onRepair = vi.fn();
+    render(
+      <UnitDiagnostics
+        statuses={UNITS}
+        healthByUnitId={{ "acme.report-kit": brokenHealth }}
+        onRepair={onRepair}
+      />,
+    );
+    const panel = screen.getByRole("region", { name: "能力单元诊断" });
+    expect(within(panel).getByText(/健康度损坏：安装记录损坏/)).toBeInTheDocument();
+    expect(within(panel).getByText(/技能引用悬空：skill-gone/)).toBeInTheDocument();
+    const button = within(panel).getByRole("button", { name: "修复记录 报告工具箱（诊断）" });
+    fireEvent.click(button);
+    expect(onRepair).toHaveBeenCalledWith("acme.report-kit");
+  });
+
+  it("没有问题时仍给「全部正常」文案", () => {
+    render(<UnitDiagnostics statuses={UNITS} />);
+    expect(screen.getByText(/没有发现问题/)).toBeInTheDocument();
   });
 });

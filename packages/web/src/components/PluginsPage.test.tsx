@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, within, act, waitFor } from "@testing-library/react";
 import { PluginsPage } from "./PluginsPage.js";
-import { PluginStore, pluginServerId, type PluginMcpPort } from "../lib/plugins/index.js";
+import { PluginStore, PLUGINS_KEY, pluginServerId, type PluginMcpPort } from "../lib/plugins/index.js";
 import { SkillPool, type StorageLike } from "../lib/skills/index.js";
 import { McpRegistry, type McpServerConfig } from "../lib/mcp/index.js";
 import { useUiStore } from "../store/ui.js";
@@ -768,5 +768,62 @@ describe("PluginsPage · 桌面小组件 Tab（d.94）", () => {
     );
     // 桌面小组件 Tab 自己的安装入口（与声明式「安装插件」不是同一个按钮）
     expect(screen.queryByRole("button", { name: /安装桌面小组件/ })).toBeNull();
+  });
+});
+
+/* ------------------------------------------------ 插件健康与修复（d.113） */
+
+describe("PluginsPage · 插件健康修复（d.113）", () => {
+  it("broken 单元显示损坏徽标与「修复记录」；修复后摘掉悬空引用并进消息条", () => {
+    store.install(manifest());
+    const pluginId = "acme.finance";
+    const installed = store.get(pluginId)!;
+    // 制造损坏：记录声称的技能全部悬空（模拟被 LRU 淘汰/手工删除）
+    for (const skillId of installed.skillIds) pool.remove(skillId);
+
+    renderPage();
+
+    expect(screen.getByLabelText("健康度 损坏")).toBeInTheDocument();
+    // 诊断区同样列出问题（悬空技能）
+    expect(screen.getByRole("region", { name: "能力单元诊断" })).toHaveTextContent(
+      /技能引用悬空/,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "修复记录 财务助手包" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("财务助手包");
+    expect(screen.getByRole("status")).toHaveTextContent("摘掉 2 条悬空引用");
+    // 只摘记录里的悬空引用，不动技能池（技能本来就是测试里删掉的，修复不应复活血）
+    expect(store.get(pluginId)!.skillIds).toEqual([]);
+    expect(store.get(pluginId)!.serverIds).toEqual([]);
+    expect(pool.list().filter((skill) => skill.pluginId === pluginId)).toEqual([]);
+    expect(store.health(pluginId)!.level).not.toBe("broken");
+  });
+
+  it("修复写失败：消息条如实提示「修复失败」并回滚记录", () => {
+    // 独立存储：安装完成后让 PLUGINS_KEY 的写入开始抛错（模拟配额满）
+    const map = new Map<string, string>();
+    let failPlugins = false;
+    const storage: StorageLike = {
+      getItem: (key) => (map.has(key) ? (map.get(key) as string) : null),
+      setItem: (key, value) => {
+        if (failPlugins && key === PLUGINS_KEY) throw new Error("QuotaExceededError");
+        map.set(key, value);
+      },
+      removeItem: (key) => void map.delete(key),
+    };
+    const failingPool = new SkillPool(storage, () => T0);
+    const failingMcp = fakeMcp();
+    const failingStore = new PluginStore(storage, failingPool, () => T0, failingMcp.port);
+    failingStore.install(manifest());
+    const pluginId = "acme.finance";
+    for (const skillId of failingStore.get(pluginId)!.skillIds) failingPool.remove(skillId);
+    failPlugins = true;
+    render(<PluginsPage plugins={failingStore} skills={failingPool} mcp={registry} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "修复记录 财务助手包" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(/修复失败/);
+    // 回滚后记录仍是修复前的悬空状态（没有半修）
+    expect(failingStore.get(pluginId)!.skillIds).toHaveLength(2);
   });
 });

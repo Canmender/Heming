@@ -12,6 +12,7 @@ import {
   type PluginInstallPreview,
   type PluginManifest,
   type PluginStore,
+  type PluginHealth,
   type PublisherTrustStore,
   type SignatureCheck,
   PublisherTrustStore as PublisherTrustStoreClass,
@@ -155,6 +156,8 @@ export function PluginsPage({
   const [repoDialogOpen, setRepoDialogOpen] = useState(false);
   const [text, setText] = useState("");
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  /** d.113：正在「修复记录」的插件 id（按钮禁用并显示「修复中…」）。 */
+  const [repairingId, setRepairingId] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<InstalledPlugin | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   /** d.108：市场不可用时回落到「仓库」的原因（仓库 Tab 顶部提示）。 */
@@ -258,6 +261,68 @@ export function PluginsPage({
     () => describeCapabilityStats({ plugins, capabilities }),
     [plugins, capabilities, tick],
   );
+
+  /**
+   * d.113：声明式插件的健康度（每个单元一个徽标；broken 单元给「修复记录」）。
+   *
+   * 走 `plugins.health()` 而不是在页面里直接拼引用数组：健康判定要读**该 store 自己**
+   * 的技能池/MCP 端口（测试里插件 store 可能与 `mcp` prop 不是同一个实例）。
+   */
+  const healthByUnitId = useMemo(() => {
+    const out: Record<string, PluginHealth> = {};
+    for (const plugin of list) {
+      const health = plugins.health(plugin.manifest.id);
+      if (health) out[plugin.manifest.id] = health;
+    }
+    return out;
+  }, [plugins, list]);
+
+  /** d.113：修复记录（只修记录，不删技能/服务）；结果进顶部消息条。 */
+  const onRepair = (pluginId: string) => {
+    setRepairingId(pluginId);
+    try {
+      const result = plugins.repairPlugin(pluginId);
+      bump();
+      const name = plugins.get(pluginId)?.manifest.name ?? pluginId;
+      if (!result.ok) {
+        setMsg({
+          kind: "error",
+          text: `修复失败${result.rollback?.ok ? "，已恢复到修复前状态" : "，回滚未能完全恢复"}：${
+            result.error ?? "写入本机存储失败"
+          }`,
+        });
+        return;
+      }
+      const actions: Record<string, string> = {
+        manifest: "清单",
+        skillIds: "技能引用",
+        serverIds: "服务引用",
+        fingerprint: "内容指纹",
+      };
+      const parts: string[] = [];
+      if (result.repaired.length > 0) {
+        parts.push(`已修复 ${result.repaired.map((code) => actions[code] ?? code).join("、")}`);
+      }
+      if (result.dropped.length > 0) {
+        parts.push(`摘掉 ${result.dropped.length} 条悬空引用`);
+      }
+      if (result.remainingIssues.length > 0) {
+        setMsg({
+          kind: "error",
+          text: `「${name}」${parts.length > 0 ? `${parts.join("；")}；` : ""}仍有 ${
+            result.remainingIssues.length
+          } 个问题：${result.remainingIssues[0].message}`,
+        });
+        return;
+      }
+      setMsg({
+        kind: "ok",
+        text: `「${name}」${parts.join("；") || "记录已是最新"}`,
+      });
+    } finally {
+      setRepairingId(null);
+    }
+  };
   /** 市场「已安装/可更新」徽标：声明式插件 + 已装界面插件（bundle 只提示去小组件装）。 */
   const installedForMarket = useMemo(
     () => [
@@ -606,6 +671,9 @@ export function PluginsPage({
             <UnitListView
               statuses={unitStatuses}
               focusUnit={focusUnit}
+              healthByUnitId={healthByUnitId}
+              onRepair={onRepair}
+              repairingPluginId={repairingId}
               renderUnit={(status) => {
                 const unit = status.unit;
                 if (unit.source === "system") return <SystemPluginCard system={system} />;
@@ -654,7 +722,12 @@ export function PluginsPage({
               </section>
             )}
 
-            <UnitDiagnostics statuses={unitStatuses} />
+            <UnitDiagnostics
+              statuses={unitStatuses}
+              healthByUnitId={healthByUnitId}
+              onRepair={onRepair}
+              repairingPluginId={repairingId}
+            />
 
             <p className={`mt-3 max-w-[680px] ${HINT}`}>
               这里安装的插件只声明技能、MCP 服务和命令，不含代码、不带密钥。安装不会运行程序，也不会联网；

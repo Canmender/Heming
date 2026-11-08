@@ -121,6 +121,13 @@ export interface PluginMcpPort {
   update(id: string, patch: Partial<Omit<McpServerConfig, "id" | "createdAt">>): McpServerConfig;
   remove(id: string): void;
   /**
+   * 列出全部服务（真注册表才有；注入的假端口不实现）。
+   *
+   * 健康修复要按 `origin: "plugin"` + `plugin:<id>:` 前缀重建 `serverIds`，
+   * 没有这个能力时只能「删悬空引用」、发现不了记录里漏登的孤儿服务。
+   */
+  servers?(): McpServerConfig[];
+  /**
    * 重新读存储并重建内存态（真注册表才有；注入的假端口不实现）。
    *
    * 安装事务回滚后必须调：存储回滚了、内存不重读就是半装态。
@@ -263,6 +270,22 @@ export interface StoreMutationResult {
   /** 失败原因（中文，可直接展示）。 */
   error?: string;
   rollback?: InstallRollbackReport;
+}
+
+/**
+ * 修复结果（d.113）。
+ *
+ * - `repaired`：实际执行过的修复动作码（`manifest` / `skillIds` / `serverIds` / `fingerprint`）；
+ * - `dropped`：从记录里摘掉的悬空引用，`skill:<id>` / `server:<id>`——**只摘引用，
+ *   不删除技能/服务本身**（用户数据不动）；
+ * - `remainingIssues`：修完之后仍然存在的问题（如清单依旧无法解析），UI 如实展示。
+ */
+export interface PluginRepairResult extends StoreMutationResult {
+  repaired: string[];
+  dropped: string[];
+  remainingIssues: PluginHealthIssue[];
+  /** 修复后的健康快照（失败时是回滚后的现状）。 */
+  health?: PluginHealth;
 }
 
 /** 更新预览：按「物化后的真实状态」算差异，与实际安装语义一致。 */
@@ -946,6 +969,243 @@ export function effectiveEnabled(
   kind: PluginContributionKind,
 ): boolean {
   return plugin.enabled && !plugin.disabledKinds.includes(kind);
+}
+
+/* ───────────────────────── 插件健康度与修复（d.113） ───────────────────────── */
+
+/**
+ * 健康问题代码（d.113）。
+ *
+ * 前六项是审计要求的最小集；`signature-unverified` 是补充项：`unsupported`
+ * （有签名但本机没验过）不等于 `invalid`，但同样值得在健康度里如实提示，
+ * 不能混成「签名正常」。
+ */
+export type PluginHealthIssueCode =
+  /** v5 清单解析失败被抢救出来的记录（P1-7）。 */
+  | "invalid-record"
+  /** `skillIds` 指向的技能已不在技能池（LRU 淘汰 / 手工删除 / 旧版本残留）。 */
+  | "dangling-skill"
+  /** `serverIds` 指向的服务已不在 MCP 注册表（或已被改成手填）。 */
+  | "dangling-server"
+  /** 记录里的内容指纹与清单实际内容不一致（手改存储）。 */
+  | "fingerprint-mismatch"
+  /** 签名验证失败（`status: "invalid"`）。 */
+  | "signature-invalid"
+  /** 有签名但本机未验证（`status: "unsupported"`，受限环境/旧记录）。 */
+  | "signature-unverified"
+  /** 插件已启用，但所有贡献类别都被单独停用（或清单根本没有贡献）。 */
+  | "all-contributions-off"
+  /** `engines.heming` 不满足当前应用版本（复用 `pluginEnginesStatus`）。 */
+  | "incompatible";
+
+/** 健康分级：`broken` 需要修复动作，`degraded` 只需提示。 */
+export type PluginHealthLevel = "ok" | "degraded" | "broken";
+
+export const PLUGIN_HEALTH_LABELS: Record<PluginHealthLevel, string> = {
+  ok: "正常",
+  degraded: "降级",
+  broken: "损坏",
+};
+
+/** 单条健康问题。 */
+export interface PluginHealthIssue {
+  code: PluginHealthIssueCode;
+  /** `broken` 会让整体变 broken；其余只降级。 */
+  severity: "degraded" | "broken";
+  /** 中文说明（UI 诊断区直接展示）。 */
+  message: string;
+  /** 关联 id（悬空技能/服务 id 等）。 */
+  target?: string;
+}
+
+/** 健康判定输入的技能引用（纯函数不依赖 SkillPool 实例）。 */
+export interface PluginHealthSkillRef {
+  id: string;
+  pluginId?: string;
+}
+
+/** 健康判定输入的服务引用（纯函数不依赖 McpRegistry 实例）。 */
+export interface PluginHealthServerRef {
+  id: string;
+  origin?: ServerOrigin;
+}
+
+export interface PluginHealth {
+  pluginId: string;
+  level: PluginHealthLevel;
+  issues: PluginHealthIssue[];
+  /** 悬空技能引用条数（修复后进 `dropped`）。 */
+  danglingSkills: number;
+  /** 悬空服务引用条数。 */
+  danglingServers: number;
+}
+
+export interface InspectPluginHealthOptions {
+  /** 覆盖应用版本（默认 `__APP_VERSION__`；测试注入）。 */
+  appVersion?: string;
+}
+
+/** 清单里某一类贡献的条目数（健康判定与投影同口径）。 */
+function manifestContributionCount(manifest: PluginManifest, kind: PluginContributionKind): number {
+  switch (kind) {
+    case "skills":
+      return manifest.contributions.skills.length;
+    case "mcpServers":
+      return manifest.contributions.mcpServers.length;
+    case "commands":
+      return manifest.contributions.commands.length;
+    case "toolPacks":
+      return manifest.contributions.toolPacks.length;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * 插件健康度判定（纯函数，只读）。
+ *
+ * 分级口径：
+ * - `broken`：`invalidRecord`（清单已不可信），或记录声称的贡献**全部**悬空
+ *   （技能/服务引用一条都对不上）——这两种只能靠修复/重装/卸载，不能当正常插件用；
+ * - `degraded`：其余问题（部分悬空、指纹不一致、签名异常/未验证、全部贡献级停用、
+ *   engines 不兼容）——仍可用，但必须在诊断区说清楚；
+ * - `ok`：没有任何问题。
+ *
+ * 注意：`all-contributions-off` 只在**已启用**时上报；用户主动停用的插件不该被报健康问题。
+ */
+export function inspectPluginHealth(
+  plugin: InstalledPlugin,
+  skills: readonly PluginHealthSkillRef[],
+  servers: readonly PluginHealthServerRef[],
+  options: InspectPluginHealthOptions = {},
+): PluginHealth {
+  const pluginId = plugin.manifest.id;
+  const issues: PluginHealthIssue[] = [];
+  const skillById = new Map(skills.map((skill) => [skill.id, skill] as const));
+  const serverById = new Map(servers.map((server) => [server.id, server] as const));
+
+  let danglingSkills = 0;
+  for (const skillId of plugin.skillIds) {
+    const skill = skillById.get(skillId);
+    if (!skill) {
+      danglingSkills += 1;
+      issues.push({
+        code: "dangling-skill",
+        severity: "degraded",
+        target: skillId,
+        message: `技能引用悬空：${skillId} 已不在技能池（可能被淘汰或手工删除）`,
+      });
+      continue;
+    }
+    // 存在但归属不是本插件：同样不能算本插件的贡献（否则修复会互相抢技能）。
+    if (skill.pluginId !== pluginId) {
+      danglingSkills += 1;
+      issues.push({
+        code: "dangling-skill",
+        severity: "degraded",
+        target: skillId,
+        message: `技能引用不属于本插件：${skillId}（归属 ${skill.pluginId ?? "用户"}）`,
+      });
+    }
+  }
+
+  let danglingServers = 0;
+  for (const serverId of plugin.serverIds) {
+    const server = serverById.get(serverId);
+    if (!server) {
+      danglingServers += 1;
+      issues.push({
+        code: "dangling-server",
+        severity: "degraded",
+        target: serverId,
+        message: `MCP 服务引用悬空：${serverId} 已不在注册表（可能被手工删除）`,
+      });
+      continue;
+    }
+    if (server.origin !== "plugin") {
+      danglingServers += 1;
+      issues.push({
+        code: "dangling-server",
+        severity: "degraded",
+        target: serverId,
+        message: `MCP 服务引用已不属于插件：${serverId}（已被改成手填服务）`,
+      });
+    }
+  }
+
+  if (plugin.invalidRecord) {
+    issues.push({
+      code: "invalid-record",
+      severity: "broken",
+      message: `安装记录损坏：${plugin.invalidReason ?? "清单无法解析"}（可先尝试「修复记录」，否则建议重装或卸载）`,
+    });
+  } else {
+    try {
+      if (plugin.fingerprint && contentFingerprint(plugin.manifest) !== plugin.fingerprint) {
+        issues.push({
+          code: "fingerprint-mismatch",
+          severity: "degraded",
+          message: "记录里的内容指纹与清单不一致（清单可能被手工修改）；「修复记录」会按当前清单重算",
+        });
+      }
+    } catch {
+      /* 指纹/清单异常不应让健康检查本身抛错 */
+    }
+
+    const engines = pluginEnginesStatus(
+      { schemaVersion: plugin.manifest.schemaVersion, engines: plugin.manifest.engines },
+      options.appVersion ?? currentAppVersion(),
+    );
+    if (engines.status !== "compatible") {
+      issues.push({
+        code: "incompatible",
+        severity: "degraded",
+        message: enginesStatusText(engines),
+      });
+    }
+  }
+
+  if (plugin.signature?.status === "invalid") {
+    issues.push({
+      code: "signature-invalid",
+      severity: "degraded",
+      message: "清单签名未通过验证：插件仍处于启用状态，但内容不可信，建议重装官方签名版本",
+    });
+  } else if (plugin.signature?.status === "unsupported") {
+    issues.push({
+      code: "signature-unverified",
+      severity: "degraded",
+      message: "清单带签名但本机尚未验证（受限环境或旧记录）：无法确认来源",
+    });
+  }
+
+  if (plugin.enabled) {
+    const declared = PLUGIN_CONTRIBUTION_KINDS.filter(
+      (kind) => manifestContributionCount(plugin.manifest, kind) > 0,
+    );
+    const active = declared.filter((kind) => !plugin.disabledKinds.includes(kind));
+    if (active.length === 0) {
+      issues.push({
+        code: "all-contributions-off",
+        severity: "degraded",
+        message:
+          declared.length > 0
+            ? "插件已启用，但所有贡献类别都被单独停用，实际不生效"
+            : "插件已启用，但清单没有任何贡献，实际不生效",
+      });
+    }
+  }
+
+  const totalRefs = plugin.skillIds.length + plugin.serverIds.length;
+  const danglingRefs = danglingSkills + danglingServers;
+  const broken = plugin.invalidRecord === true || (totalRefs > 0 && danglingRefs === totalRefs);
+  return {
+    pluginId,
+    level: broken ? "broken" : issues.length > 0 ? "degraded" : "ok",
+    issues,
+    danglingSkills,
+    danglingServers,
+  };
 }
 
 export class PluginStore {
@@ -2034,6 +2294,179 @@ export class PluginStore {
       }
       this.data.plugins = this.data.plugins.filter((p) => p.manifest.id !== id);
     });
+  }
+
+  /**
+   * 读取某个插件的健康度（只读，不写存储）。
+   *
+   * 与 `inspectPluginHealth` 同口径，只是替调用方把技能池/MCP 注册表拍成引用数组；
+   * 插件不存在返回 null。UI 用它算徽标，测试可直接用纯函数夹具。
+   */
+  health(id: string, options: InspectPluginHealthOptions = {}): PluginHealth | null {
+    const plugin = this.data.plugins.find((p) => p.manifest.id === id);
+    if (!plugin) return null;
+    return this.healthOf(plugin, options);
+  }
+
+  /**
+   * 修复插件记录（d.113，整笔事务：snapshot → 改记录 → saveOrThrow，失败逐键回滚）。
+   *
+   * 修复动作（只动**记录**，不动用户数据）：
+   * 1. `invalidRecord`：重新读存储里的原始清单，能被当前解析器完整解析才清标记，
+   *    否则保持并写进 `remainingIssues` 说明原因；
+   * 2. `skillIds`：按技能池里 `pluginId === id` 的技能重建（补回漏登、摘掉悬空）；
+   * 3. `serverIds`：按 MCP 注册表 `origin: "plugin"` + `plugin:<id>:` 前缀重建
+   *    （真注册表才有 `servers()`；假端口只能摘悬空引用）；
+   * 4. `fingerprint`：清单可解析时按当前内容重算。
+   *
+   * 返回 `repaired`（做过的动作）、`dropped`（只摘掉的引用，`skill:<id>`/`server:<id>`）、
+   * `remainingIssues`（修完仍存在的问题）。
+   */
+  repairPlugin(id: string, options: InspectPluginHealthOptions = {}): PluginRepairResult {
+    const plugin = this.data.plugins.find((p) => p.manifest.id === id);
+    if (!plugin) {
+      return {
+        ok: false,
+        error: `插件不存在：${id}`,
+        repaired: [],
+        dropped: [],
+        remainingIssues: [],
+      };
+    }
+    const snapshot = this.snapshotTransactionKeys();
+    const repaired: string[] = [];
+    const dropped: string[] = [];
+    const markRepaired = (code: string) => {
+      if (!repaired.includes(code)) repaired.push(code);
+    };
+    try {
+      // 1) 清单恢复：只有原始清单能被完整解析时才清 invalidRecord。
+      if (plugin.invalidRecord) {
+        const recovered = this.recoverManifestFromStorage(id);
+        if (recovered) {
+          plugin.manifest = recovered;
+          delete plugin.invalidRecord;
+          delete plugin.invalidReason;
+          markRepaired("manifest");
+        }
+      }
+
+      // 2) skillIds：以技能池为准重建（含补回漏登 / 摘掉悬空与错归属）。
+      const liveSkillIds = this.skills
+        .list()
+        .filter((skill) => skill.pluginId === id)
+        .map((skill) => skill.id);
+      for (const oldId of plugin.skillIds) {
+        if (!liveSkillIds.includes(oldId)) dropped.push(`skill:${oldId}`);
+      }
+      if (!sameStringList(plugin.skillIds, liveSkillIds)) {
+        plugin.skillIds = liveSkillIds;
+        markRepaired("skillIds");
+      }
+
+      // 3) serverIds：以 MCP 注册表为准重建（真注册表能补回漏登；假端口只摘悬空）。
+      const prefix = `plugin:${id}:`;
+      const listedServers =
+        typeof this.mcp.servers === "function" ? this.mcp.servers() : null;
+      const liveServerIds = listedServers
+        ? listedServers
+            .filter((server) => server.origin === "plugin" && server.id.startsWith(prefix))
+            .map((server) => server.id)
+        : plugin.serverIds.filter((serverId) => {
+            if (!serverId.startsWith(prefix)) return false;
+            const current = this.mcp.get(serverId);
+            return current !== undefined && current.origin === "plugin";
+          });
+      for (const oldId of plugin.serverIds) {
+        if (!liveServerIds.includes(oldId)) dropped.push(`server:${oldId}`);
+      }
+      if (!sameStringList(plugin.serverIds, liveServerIds)) {
+        plugin.serverIds = liveServerIds;
+        markRepaired("serverIds");
+      }
+
+      // 4) fingerprint：清单可解析时按当前内容重算（损坏记录留给重装）。
+      if (!plugin.invalidRecord) {
+        const expected = contentFingerprint(plugin.manifest);
+        if (plugin.fingerprint !== expected) {
+          plugin.fingerprint = expected;
+          markRepaired("fingerprint");
+        }
+      }
+
+      if (repaired.length > 0 || dropped.length > 0) {
+        plugin.updatedAt = this.iso();
+        this.saveOrThrow();
+      }
+    } catch (err) {
+      const rollback = this.rollbackTransaction(snapshot);
+      return {
+        ok: false,
+        error: errorMessage(err),
+        rollback,
+        repaired: [],
+        dropped: [],
+        remainingIssues: this.healthOf(plugin, options).issues,
+      };
+    }
+
+    const health = this.healthOf(plugin, options);
+    return {
+      ok: true,
+      repaired,
+      dropped,
+      remainingIssues: health.issues,
+      health,
+    };
+  }
+
+  /** 健康判定：把技能池/MCP 注册表拍成引用数组后调纯函数。 */
+  private healthOf(plugin: InstalledPlugin, options: InspectPluginHealthOptions): PluginHealth {
+    const skills = this.skills.list().map((skill) => ({ id: skill.id, pluginId: skill.pluginId }));
+    const servers: PluginHealthServerRef[] =
+      typeof this.mcp.servers === "function"
+        ? this.mcp.servers().map((server) => ({ id: server.id, origin: server.origin }))
+        : // 假端口没有列出能力：只能按记录声称的插件服务当作「存在但未验证」，
+          // 避免把真实存在的服务误报成悬空。
+          plugin.serverIds.map((serverId) => ({ id: serverId, origin: "plugin" as ServerOrigin }));
+    return inspectPluginHealth(plugin, skills, servers, options);
+  }
+
+  /**
+   * 从存储原始 JSON 里找该插件的清单并重解析（修复 `invalidRecord` 用）。
+   *
+   * 为什么回存储读而不是用内存里的清单：内存里已经是抢救出来的占位清单；
+   * 只有存储里的原始内容「能被当前解析器完整解析」时才可以清损坏标记。
+   */
+  private recoverManifestFromStorage(id: string): PluginManifest | null {
+    let raw: string | null = null;
+    try {
+      raw = this.storage.getItem(PLUGINS_KEY);
+    } catch {
+      return null;
+    }
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+      const list = (parsed as Record<string, unknown>).plugins;
+      if (!Array.isArray(list)) return null;
+      for (const item of list) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+        const record = item as Record<string, unknown>;
+        const manifestRaw = record.manifest;
+        if (!manifestRaw || typeof manifestRaw !== "object" || Array.isArray(manifestRaw)) continue;
+        if ((manifestRaw as Record<string, unknown>).id !== id) continue;
+        try {
+          return parseStoredManifest(manifestRaw);
+        } catch {
+          return null; // 找到这条但仍解析失败：不可修复，保持损坏标记
+        }
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 
   private iso(): string {

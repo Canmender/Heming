@@ -7,6 +7,11 @@ import {
   type UnitStatus,
 } from "@heming/shared";
 import { useUnitStatuses } from "../../lib/units/registry.js";
+import {
+  PLUGIN_HEALTH_LABELS,
+  type PluginHealth,
+  type PluginHealthLevel,
+} from "../../lib/plugins/index.js";
 import { BTN_GHOST_SM, CHIP, HINT } from "./shared.js";
 
 /**
@@ -70,6 +75,55 @@ const STATUS_TONE: Record<string, string> = {
   未生效: "border-line bg-[#f7f7f7] text-muted",
 };
 
+/* ───────────────────── 健康度徽标与修复入口（d.113） ───────────────────── */
+
+const HEALTH_TONE: Record<PluginHealthLevel, string> = {
+  ok: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  degraded: "border-amber-200 bg-amber-50 text-amber-700",
+  broken: "border-red-200 bg-red-50 text-red-700",
+};
+
+/** 健康度徽标：正常/降级/损坏；悬停展示全部 issue（诊断区另有明细）。 */
+export function HealthBadge({ health }: { health: PluginHealth }) {
+  const label = PLUGIN_HEALTH_LABELS[health.level];
+  const title =
+    health.issues.length > 0
+      ? health.issues.map((issue) => issue.message).join("；")
+      : "没有发现问题";
+  return (
+    <span
+      aria-label={`健康度 ${label}`}
+      title={title}
+      className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${HEALTH_TONE[health.level]}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+/** 「修复记录」按钮（仅 broken 单元显示；只修记录，不删技能/服务）。 */
+export function RepairRecordButton({
+  pluginName,
+  busy,
+  onRepair,
+}: {
+  pluginName: string;
+  busy: boolean;
+  onRepair: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`修复记录 ${pluginName}`}
+      disabled={busy}
+      onClick={onRepair}
+      className={BTN_GHOST_SM}
+    >
+      {busy ? "修复中…" : "修复记录"}
+    </button>
+  );
+}
+
 function unitSearchText(status: UnitStatus): string {
   const unit = status.unit;
   return [
@@ -102,7 +156,15 @@ function contributionSummary(status: UnitStatus): string {
 }
 
 /** 默认行：来源徽标 / 名称 / 版本 / 状态 / 贡献摘要 / 阻断原因。 */
-function UnitRow({ status }: { status: UnitStatus }) {
+function UnitRow({
+  status,
+  health,
+  repair,
+}: {
+  status: UnitStatus;
+  health?: PluginHealth;
+  repair?: ReactNode;
+}) {
   const unit = status.unit;
   const label = unitStatusLabel(status);
   const reason = status.reason ? blockReasonText(status.reason) : "";
@@ -122,6 +184,8 @@ function UnitRow({ status }: { status: UnitStatus }) {
         >
           {label}
         </span>
+        {health && <HealthBadge health={health} />}
+        {repair}
         {unit.readonly && <span className={CHIP}>只读</span>}
       </div>
       <div className={`mt-0.5 ${HINT}`}>
@@ -154,13 +218,26 @@ export interface UnitListViewProps {
    * `seq` 由投递方的意图 token 提供——同一条命令连点两次也能重新定位。
    */
   focusUnit?: { id: string; seq: number } | null;
+  /** d.113：按单元 id 注入健康度（只对声明式插件单元有值）。 */
+  healthByUnitId?: Record<string, PluginHealth>;
+  /** d.113：「修复记录」动作（broken 单元显示按钮）。 */
+  onRepair?: (pluginId: string) => void;
+  /** 正在修复的插件 id（按钮禁用并显示「修复中…」）。 */
+  repairingPluginId?: string | null;
 }
 
 /** 外部定位后的高亮时长（与设置页卡片高亮同口径）。 */
 const UNIT_HIGHLIGHT_MS = 2000;
 
 /** 插件区「已安装」区：统一能力单元列表 + 搜索/来源/状态筛选。 */
-export function UnitListView({ statuses, renderUnit, focusUnit }: UnitListViewProps) {
+export function UnitListView({
+  statuses,
+  renderUnit,
+  focusUnit,
+  healthByUnitId,
+  onRepair,
+  repairingPluginId,
+}: UnitListViewProps) {
   const subscribed = useUnitStatuses();
   const all = statuses ?? subscribed;
   const [query, setQuery] = useState("");
@@ -288,6 +365,15 @@ export function UnitListView({ statuses, renderUnit, focusUnit }: UnitListViewPr
           {visible.map((status) => {
             const custom = renderUnit?.(status) ?? null;
             const label = unitStatusLabel(status);
+            const health = healthByUnitId?.[status.unit.id];
+            const repair =
+              health?.level === "broken" && onRepair ? (
+                <RepairRecordButton
+                  pluginName={status.unit.name}
+                  busy={repairingPluginId === status.unit.id}
+                  onRepair={() => onRepair(status.unit.id)}
+                />
+              ) : null;
             return (
               <li
                 key={`${status.unit.source}:${status.unit.id}`}
@@ -301,7 +387,7 @@ export function UnitListView({ statuses, renderUnit, focusUnit }: UnitListViewPr
                 {custom ? (
                   <>
                     {/* 卡片自带的头部不统一（插件卡无来源徽标、系统卡写「内置」），
-                        统一列表在卡片上方补一行来源/状态，扫读时四类来源才一致。 */}
+                        统一列表在卡片上方补一行来源/状态/健康度，扫读时四类来源才一致。 */}
                     <div className="mb-1 flex flex-wrap items-center gap-1.5">
                       <span className={CHIP}>{UNIT_SOURCE_LABELS[status.unit.source]}</span>
                       <span
@@ -310,12 +396,14 @@ export function UnitListView({ statuses, renderUnit, focusUnit }: UnitListViewPr
                       >
                         {label}
                       </span>
+                      {health && <HealthBadge health={health} />}
+                      {repair}
                       {status.unit.readonly && <span className={CHIP}>只读</span>}
                     </div>
                     {custom}
                   </>
                 ) : (
-                  <UnitRow status={status} />
+                  <UnitRow status={status} health={health} repair={repair} />
                 )}
               </li>
             );
