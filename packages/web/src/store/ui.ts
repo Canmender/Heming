@@ -26,6 +26,7 @@ export type Page =
   | "automations"
   | "model"
   | "modelroute"
+  | "vault"
   | "plugins"
   | "memory"
   | "settings";
@@ -60,7 +61,7 @@ export type NavPage = Page;
  * 排法按「干活 → 智能模组 → 资料与能力 → 系统」：
  * - 工作台：先总览、再跟智能体对话、最后看团队；
  * - 智能模块：幕僚 / 信息中枢 / 自动化（d.70 的三个可插拔内置模块）；
- * - 资料与能力：插件区 / 记忆区；
+ * - 资料与能力：模型 / 知识库 / 插件区 / 记忆区；
  * - 系统：设置区。
  * 视觉分组见 `lib/navGroups.ts`。
  */
@@ -75,6 +76,8 @@ export const DEFAULT_NAV_ORDER: NavPage[] = [
   "modelroute",
   // 模型页（d.99）：内核管理面（供应商/账号/分组/用量/备份/同步）的宿主页
   "model",
+  // 知识库（d.114）：原生 vault（文件树/双链/标签/搜索/图谱），数据不出设备
+  "vault",
   "plugins",
   "memory",
   "settings",
@@ -97,6 +100,33 @@ const LEGACY_DEFAULT_NAV_ORDER: NavPage[] = [
   "plugins",
   "memory",
   "settings",
+];
+
+/**
+ * d.100–d.112 期间的默认顺序（10 个宿主页）。
+ *
+ * 这一段期间没动过顺序的用户，localStorage 里存的正是这一份；d.114 新增「知识库」后
+ * 必须把它也认成「旧默认」，否则这些用户会在末尾多出一个知识库入口（normalize 的补项
+ * 规则，视觉上落到设置区之后），看起来像导航顺序坏了。
+ */
+const LEGACY_DEFAULT_NAV_ORDER_MODEL: NavPage[] = [
+  "home",
+  "chat",
+  "team",
+  "staff",
+  "infohub",
+  "automations",
+  "modelroute",
+  "model",
+  "plugins",
+  "memory",
+  "settings",
+];
+
+/** 所有历史默认顺序：命中任意一份都跟随当前默认（用户亲手排过的不在此列）。 */
+const LEGACY_DEFAULT_NAV_ORDERS: NavPage[][] = [
+  LEGACY_DEFAULT_NAV_ORDER,
+  LEGACY_DEFAULT_NAV_ORDER_MODEL,
 ];
 
 function sameOrder(a: readonly NavPage[], b: readonly NavPage[]): boolean {
@@ -167,7 +197,8 @@ export function readStoredNavOrder(storage: Pick<Storage, "getItem"> | null): Na
     // 拿补完的结果去比旧默认永远不相等——d.84 新增「模型路由」时正是这样漏掉的。
     const stored = Array.isArray(parsed) ? parsed : null;
     const followsLegacyDefault =
-      stored !== null && sameOrder(stored as NavPage[], LEGACY_DEFAULT_NAV_ORDER);
+      stored !== null &&
+      LEGACY_DEFAULT_NAV_ORDERS.some((legacy) => sameOrder(stored as NavPage[], legacy));
     return followsLegacyDefault ? [...DEFAULT_NAV_ORDER] : order;
   } catch {
     return [...DEFAULT_NAV_ORDER];

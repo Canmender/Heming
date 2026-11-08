@@ -36,10 +36,12 @@ const KIND_LABEL: Record<AppNotification["kind"], string> = {
   staff: "幕僚",
   // 自动化任务执行失败——点开去自动化页并选中那条任务（运行记录在那儿）。
   automation: "自动化",
+  // d.114：记忆写回知识库失败——记忆条目已保存，只是没落进 vault；点开去记忆页。
+  memory: "记忆",
 };
 
 /**
- * 类型筛选（d.61 · UX 第二轮 F 轨）：全部 / 任务 / 待确认 / 幕僚。
+ * 类型筛选（d.61 · UX 第二轮 F 轨）：全部 / 任务 / 待确认 / 幕僚 / 记忆。
  *
  * 筛选只影响**列表展示**：铃铛未读数与「全部已读」始终按全部通知算——
  * 筛选是「看哪一类」，不是「哪些算未读」。筛选状态只存组件内（不持久化）。
@@ -51,6 +53,7 @@ const FILTERS: { id: NotificationFilter; label: string }[] = [
   { id: "task", label: "任务" },
   { id: "approval", label: "待确认" },
   { id: "staff", label: "幕僚" },
+  { id: "memory", label: "记忆" },
 ];
 
 export function NotificationCenter() {
@@ -103,6 +106,11 @@ export function NotificationCenter() {
   const jump = (item: AppNotification) => {
     markRead(item.id);
     setOpen(false);
+    if (item.kind === "memory") {
+      // 记忆写回失败：去记忆页看「知识库参与记忆」卡的状态与重试入口。
+      useUiStore.getState().setPage("memory");
+      return;
+    }
     if (item.kind === "staff") {
       // 幕僚模块停用时落到模块管理，而不是 setPage 后被路由重定向回主页
       useUiStore.getState().openStaff();

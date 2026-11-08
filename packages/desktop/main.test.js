@@ -351,6 +351,7 @@ test("main.js：受信通道清单覆盖能力型 IPC，且经 guardIpc 按主�
   // 能力模块必须用守卫门面注册（而不是裸 ipcMain）
   for (const reg of [
     "registerWikiIpc(secureIpc)",
+    "registerVaultIpc(secureIpc",
     "registerChartIpc(secureIpc)",
     "registerExportIpc(secureIpc)",
     "registerSecretIpc(secureIpc)",
@@ -392,6 +393,7 @@ test("main.js：IPC 通道不变量（新通道不能绕过 secureIpc 门面）"
   // 能力模块各自的注册通道：必须全在 TRUSTED_CHANNELS（新增通道忘了登记 → 红）
   const moduleFiles = [
     "wiki-fs.js",
+    "vault-fs.js",
     "chart-fs.js",
     "export-fs.js",
     "secret-store.js",

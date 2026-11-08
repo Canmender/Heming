@@ -1,5 +1,6 @@
-import type { SupersededInfo } from "./recall.js";
+import type { SupersededInfo, VaultRecallInfo } from "./recall.js";
 import type { EpisodicEntry, SemanticEntry, WorkingTurn } from "./types.js";
+import { VAULT_INJECT_PER_NOTE_CHARS } from "../vault/types.js";
 
 /**
  * 记忆注入格式（设计 §4）：三段标题 + 逐条要点 + 页脚声明。
@@ -99,7 +100,13 @@ function buildGroups(recalled: Recalled): Group[] {
       heading: MEMORY_HEADINGS.semantic,
       items: (recalled.semantic ?? []).map((entry) => ({
         id: entry.id,
-        text: `${entry.key}：${entry.value}`,
+        // 知识库条目（d.114）：必须让模型看出「这是笔记摘录，不是用户档案」，
+        // 否则它会把某篇文档里的一句话当成关于用户的既定事实。
+        // 单条摘要按注入预算上限（400 字）截断，整轮仍受 1200 字总预算约束。
+        text:
+          entry.source === "vault"
+            ? `来自知识库《${entry.vault?.rel ?? entry.key}》：${truncate(entry.value, VAULT_INJECT_PER_NOTE_CHARS)}`
+            : `${entry.key}：${entry.value}`,
       })),
     },
     {
@@ -154,6 +161,18 @@ function render(groups: { heading: string; lines: string[] }[]): string {
   return out.join("\n");
 }
 
+/**
+ * 知识库层在本次注入里的参与情况（d.114）。
+ *
+ * 为什么单独一行统计而不混进 `counts`：`counts` 的语义是「三层召回各几条」，
+ * 知识库是语义层里的一类**指针条目**，混进去会让既有三层口径失真；
+ * 单独一块既保持老字段不变，又能让记忆页看出「关闭/未接入/被预算截掉」。
+ */
+export interface VaultInjectStats extends VaultRecallInfo {
+  /** 真有知识库条目进了提示词的行数（可小于 `picked`：预算可能截掉）。 */
+  injected: number;
+}
+
 /** 一次生成的注入旁路：召回与注入的差集 + 打分与覆盖信息（可观测性的数据结构）。 */
 export interface MemoryObservability {
   /** 实际注入的每一行（含来源 id、是否被截断）。 */
@@ -172,6 +191,11 @@ export interface MemoryObservability {
   superseded: SupersededInfo[];
   /** 三层召回条数（注入前）——与 `injected.length` 可以不相等。 */
   counts: { semantic: number; episodic: number; working: number };
+  /**
+   * 知识库层参与情况（**可选**：没有知识库条目且调用方没传选项时缺省，
+   * 既有调用点与用例的形状不变）。
+   */
+  vault?: VaultInjectStats;
 }
 
 /** 召回了却没注入的原因：被同键新值覆盖（正常）／被预算裁掉（额度不够）。 */
@@ -194,6 +218,7 @@ export function summarizeInjection(
     scores?: Record<string, number>;
     boosts?: Record<string, number>;
     superseded?: SupersededInfo[];
+    vault?: VaultRecallInfo;
   },
 ): MemoryTrace & { observability: MemoryObservability } {
   const trace = formatMemorySectionWithTrace(recalled);
@@ -221,6 +246,10 @@ export function summarizeInjection(
   visit(semantic.map((entry) => entry.id), "semantic");
   visit(episodic.map((entry) => entry.id), "episodic");
   visit(working.map((turn) => turn.id), "working");
+  // 知识库条目也走「召回 ≠ 注入」口径：picked 里可能有几条被预算截掉，
+  // 记忆页要能区分「没纳入」与「纳入了但这次没进提示词」。
+  const vaultIds = new Set(semantic.filter((entry) => entry.source === "vault").map((entry) => entry.id));
+  const vaultInjected = trace.injected.filter((item) => vaultIds.has(item.id)).length;
   return {
     ...trace,
     observability: {
@@ -230,6 +259,7 @@ export function summarizeInjection(
       boosts: recalled.boosts ?? {},
       superseded,
       counts: { semantic: semantic.length, episodic: episodic.length, working: working.length },
+      ...(recalled.vault ? { vault: { ...recalled.vault, injected: vaultInjected } } : {}),
     },
   };
 }

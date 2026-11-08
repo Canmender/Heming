@@ -31,8 +31,10 @@ export const NOTIFICATIONS_BYTE_LIMIT = Math.floor(64 * 1024);
  *   它的语义是「还没发生」——点开是回到待确认的智能体会话，不是去读一条历史。
  * - `staff`：常驻幕僚的主动简报（d.48），点开去幕僚页。
  * - `automation`：自动化任务执行失败（d.47），点开去自动化页并选中那条任务。
+ * - `memory`：记忆写回知识库失败（d.114）——记忆条目已保存，只是没写进 vault，
+ *   点开去记忆页看同步/写回状态。
  */
-export type NotificationKind = "task" | "approval" | "staff" | "automation";
+export type NotificationKind = "task" | "approval" | "staff" | "automation" | "memory";
 
 export interface AppNotification {
   id: string;
@@ -80,7 +82,8 @@ export function normalizeNotification(raw: unknown): AppNotification | null {
     raw.kind !== "task" &&
     raw.kind !== "approval" &&
     raw.kind !== "staff" &&
-    raw.kind !== "automation"
+    raw.kind !== "automation" &&
+    raw.kind !== "memory"
   ) {
     return null;
   }

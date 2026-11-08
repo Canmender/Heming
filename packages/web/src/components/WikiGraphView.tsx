@@ -33,11 +33,17 @@ export function WikiGraphView({
   pages,
   selected,
   onSelect,
+  showLegend = true,
+  emptyHint,
 }: {
   graph: WikiGraph;
   pages: WikiPage[];
   selected: string | null;
   onSelect: (path: string) => void;
+  /** 是否显示右侧的类别图例。vault 图谱只有「笔记」一类，传 false 让调用方自己标题。 */
+  showLegend?: boolean;
+  /** 空图时的提示文案（缺省沿用 wiki 页的说法）。 */
+  emptyHint?: string;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ w: 800, h: 480 });
@@ -128,7 +134,7 @@ export function WikiGraphView({
   if (graph.nodes.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-[12px] text-muted">
-        还没有页面。建一页就会出现在图谱里。
+        {emptyHint ?? "还没有页面。建一页就会出现在图谱里。"}
       </div>
     );
   }
@@ -142,15 +148,17 @@ export function WikiGraphView({
           <span className="text-[#b45309]">{orphans} 个孤儿页（无任何链接）</span>
         )}
         <span className="ml-auto flex items-center gap-2.5">
-          {WIKI_LEGEND.map((k) => (
-            <span key={k} className="flex items-center gap-1">
-              <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ backgroundColor: KIND_COLOR[k] }}
-              />
-              {KIND_LABEL[k]}
-            </span>
-          ))}
+          {showLegend
+            ? WIKI_LEGEND.map((k) => (
+                <span key={k} className="flex items-center gap-1">
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ backgroundColor: KIND_COLOR[k] }}
+                  />
+                  {KIND_LABEL[k]}
+                </span>
+              ))
+            : null}
         </span>
       </div>
 
@@ -198,7 +206,22 @@ export function WikiGraphView({
               if (!p) return null;
               const active = hover === node.id || selected === node.id;
               return (
-                <g key={node.id} transform={`translate(${p.x} ${p.y})`}>
+                // 点节点打开页面：整组（圆 + 文字）都是点击区，点击半径比 circle 大，好点
+                <g
+                  key={node.id}
+                  transform={`translate(${p.x} ${p.y})`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`打开页面 ${node.title}`}
+                  onClick={() => onSelect(node.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onSelect(node.id);
+                    }
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
                   <circle
                     r={nodeRadius(node.degree)}
                     fill={active ? KIND_COLOR[node.kind] : "#fff"}

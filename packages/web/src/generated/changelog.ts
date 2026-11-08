@@ -12,6 +12,45 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.114.3.45.0",
+    "date": "2026-11-08",
+    "title": "原生知识库：Obsidian 级多库 vault + 智能体记忆双向绑定",
+    "bullets": [
+      "新增 `packages/desktop/vault-fs.js`（15 个 IPC：list/pick/remove/rename/tree/read/readBinary/write/apply/create/move/delete/reveal/watch/unwatch）与 `vault-watch.js`；preload 加 `__heming_vault`（老 `__heming_wiki` 不动），main 把 `vault:*` 与 `wiki:*` 同级收口为**只认主窗口**。",
+      "**多库**：库根只能来自 `vault:pick` 的系统目录对话框，注册表在主进程 `~/Heming/vaults.json`（坏 JSON 回退空表并备份原文件，不覆盖）；首次启动把 `~/Heming/wiki` 自动登记为「和鸣知识库」。",
+      "**路径安全**：每次操作重新 `resolveInsideRoot` + `realpath` 复核（符号链接/目录联接逃逸拒绝）、Windows 保留名/NUL/300 字上限、扩展名双向白名单（文本 `.md/.canvas/.json/.txt/.csv` ≤2MB；",
+      "**双通道写**：用户编辑通道 `vault:write`（库内任意文本路径 + `expectMtime` 防外部覆盖 → `stale-mtime`）；智能体通道 `vault:apply` **只允许 `writeDirs`**（默认 `inbox`，显式 `[]` = 只读），越界 `outside-write-dirs`。",
+      "删除只删单文件（不递归、不删目录）；watch 300ms 去抖、单批 >200 条要求全量重建。",
+      "**解析**：frontmatter（`aliases`/`alias`、`tags` 数组/逗号串/空格串/`- item` 列表）、`[[页面]]`/`[[页面|别名]]`/`[[页面#标题]]`/`![[嵌入]]`、行内标签 `#a/b`、标题大纲；",
+      "**链接解析**：文件名优先 → 路径 → 别名；同名歧义「同目录 > 公共前缀 > 层级 > 字典序」取最近者并**同时给出完整候选**（界面标黄）；未解析链接进 `unresolved`（**图片目标不算待建页面**）；反链对称、自链计入、未解析不进反链。",
+      "**搜索**：`tag:` `path:` `file:` `line:` `content:`、双引号短语、`-` 排除、CJK 二元组（复用 `lib/wiki/query.ts`）；`tag:` 按 Obsidian 语义做**层级前缀**（`tag:#构建` 命中 `构建/知识库`），≤200 条、稳定 tie-break、同输入同输出。",
+      "**图谱**：`buildGraph(index,{localOf?,depth?})` 全库/局部 1–3 跳，复用 `lib/wiki/layout.ts` 力导向。",
+      "**store**：zustand 实现 `VaultStoreApi`（多库/树/tabs/三态/dirty/索引分片与进度/watch 增量/>200 全量/大文件 skipped/浏览器内存降级）。",
+      "**工具**：`vault_search` / `vault_read` / `vault_write` 注册为默认注入能力（写走 `vault:apply` + 既有 HITL 逐次确认）。",
+      "三栏：左「库切换 + 文件树 + 搜索/标签」、中「多标签 + 源码/分栏/阅读（CodeMirror 6 懒加载）+ 面包屑」、右「反链/出链/未解析/大纲/属性」。空库态给「打开本地库」并说明数据不出设备；浏览器无桥时明确标临时模式。",
+      "预览层把 `[[双链]]` 渲染成可点击 chip（未解析→建页），`![[图片]]` 走 `readBinary`，`![[笔记]]` 限深 1；不注入 raw HTML，外链只放行 http(s)/mailto。",
+      "未保存拦截（切文件/关标签/关页面）、保存冲突显示中文原因、大目录懒加载、删除走应用内二次确认。",
+      "**笔记 → 记忆**：笔记转为**指针型语义条目**（`source:\"vault\"`，存 `库 id + 路径 + mtime + hash + 摘要 ≤500`，**不复制正文**）；增量同步（hash+mtime 未变跳过、消失即删、超 500 篇按 mtime 截断并回报原因）；",
+      "**记忆 → 笔记**：`explicit` / `consolidate` / `review` 三类沉淀写回 `inbox/memory-<key>-<yyyymmdd>.md`，同 key 追加「## 更新」小节；只写 `writeDirs`；失败如实上报（新增通知 kind `memory`），记忆条目本身照常保存。",
+      "注入保持**同步**（`buildAgentContext` 不变 async、无 vault 时 `systemPrompt === basePrompt` 逐字不变）。",
+      "记忆页新增「知识库参与记忆」开关、已纳入 N 篇/截断状态、手动同步（`lib/vault/boot.ts` 是唯一跨层粘合文件）。",
+      "桌面：`vault-fs.test.js` 39 例（越界/符号链接/扩展名/大小/writeDirs/expectMtime/删除不递归/坏 JSON/watch），desktop 全量 141 例通过，`node --check` 全绿。",
+      "web：`lib/vault` 7 文件 **131 例**、`lib/memory` 13 文件 **233 例**、`components/knowledge` 9 文件 **94 例**、`capability/plugins/wiki` 回归 366 例；`tsc --noEmit` 全包 0 错误。",
+      "新增 `scripts/make-demo-vault.mjs`：确定性演示库（代码块假链接、同名歧义、`.obsidian`、图片嵌入、`.canvas`、inbox），供真机验收与回归。"
+    ],
+    "paragraphs": [
+      "在和鸣内部做**原生知识库**（不是插件、不嵌入 Obsidian 本体、不复制其闭源代码）：直接读写磁盘上真实 markdown 文件，功能语义对齐 Obsidian（任意目录多库、双链反链、标签、搜索语法、图谱、编辑器三态），并与智能体记忆打通。规格 `docs/superpowers/specs/2026-11-08-d114-native-knowledge-vault.md`，上手文档 `docs/KNOWLEDGE.md`。",
+      "> 版本说明：本轮从 `d.112.3.45.0` 拉出；主线同期已占用 `d.113`（插件审计），故取 `d.114`，合入时以实际发布号为准。",
+      "知识库（桌面文件桥）图片 `.png/.jpg/.jpeg/.gif/.webp/.svg` ≤8MB 只读）、隐藏目录与 `.obsidian/.git/node_modules` 不扫描、**永不写 `.obsidian/`**。",
+      "索引引擎（`packages/web/src/lib/vault/`）**代码块与行内代码一律不算链接/标签/标题**，并按 CommonMark 补齐四空格缩进代码块、引用块内围栏、列表项/嵌套列表围栏、容器结束即围栏结束（对抗复核发现索引与预览层不一致后修）。",
+      "界面（`packages/web/src/components/knowledge/`，导航「知识库」）",
+      "记忆双向绑定语义召回末尾最多 2 条、标注「来自知识库《rel》」，`disabled|unavailable|empty|error` 跳过原因在返回值与旁路可见。",
+      "测试",
+      "已知限制（第二轮）",
+      "跨行行内代码不屏蔽；锚点未命中无独立状态（需扩 `WikiLink` 契约）；`[[#同页标题]]` 忽略；非 ASCII frontmatter 键、空 frontmatter、引用块标题；单引号短语；`index.ts` 与 `store.ts` 循环依赖（已在桶文件注明）；界面暂无「新建文件夹」（桥无 mkdir）、嵌入笔记仅从已打开文档取、树懒加载需 store 暴露按 rel 拉子树。"
+    ]
+  },
+  {
     "version": "d.112.3.45.0",
     "date": "2026-11-08",
     "title": "P1 收口：正式首方公钥上线，dev 公钥在打包版被忽略",

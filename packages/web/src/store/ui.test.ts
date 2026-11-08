@@ -142,7 +142,7 @@ describe("ui store 导航顺序", () => {
     useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("默认顺序（d.72 重排、d.100 加模型页后的 10 个宿主页）", () => {
+  it("默认顺序（d.72 重排、d.100 加模型页、d.114 加知识库后的 11 个宿主页）", () => {
     // 工作台（主页 → 智能体 → 团队）→ 智能模块 → 资料与能力 → 系统
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
@@ -153,6 +153,7 @@ describe("ui store 导航顺序", () => {
       "automations",
       "modelroute",
       "model",
+      "vault",
       "plugins",
       "memory",
       "settings",
@@ -161,9 +162,9 @@ describe("ui store 导航顺序", () => {
 
   it("moveNav 上移/下移生效并落盘", () => {
     useUiStore.getState().moveNav("memory", -1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(8);
-    useUiStore.getState().moveNav("memory", 1);
     expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(9);
+    useUiStore.getState().moveNav("memory", 1);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(10);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
       useUiStore.getState().navOrder,
     );
@@ -197,6 +198,7 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "automations",
       "modelroute",
       "model",
+      "vault",
       "plugins",
       "settings",
     ]);
@@ -227,6 +229,7 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "automations",
       "modelroute",
       "model",
+      "vault",
     ]);
   });
 
@@ -243,6 +246,7 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "automations",
       "modelroute",
       "model",
+      "vault",
       "plugins",
       "memory",
     ]);
@@ -274,6 +278,7 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "automations",
       "modelroute",
       "model",
+      "vault",
       "plugins",
     ]);
   });

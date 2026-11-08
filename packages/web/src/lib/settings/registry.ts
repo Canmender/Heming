@@ -136,6 +136,26 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
     section: "navigation",
   },
   {
+    // d.114：知识库与记忆是**入口卡**，不是第二套开关——
+    // 真正的开关只有 MemorySettings.vaultMemory 一个（记忆页承载），
+    // 这里只负责把用户送到记忆页/知识库页，避免两处各存一份口径。
+    id: "memory-vault",
+    title: "知识库与记忆",
+    keywords: [
+      "知识库",
+      "vault",
+      "记忆",
+      "双向绑定",
+      "同步",
+      "纳入",
+      "笔记",
+      "markdown",
+      "obsidian",
+      "wiki",
+    ],
+    section: "navigation",
+  },
+  {
     id: "update",
     title: "软件更新",
     keywords: ["更新", "升级", "版本", "下载", "安装包", "检查更新"],

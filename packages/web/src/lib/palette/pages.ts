@@ -1,16 +1,16 @@
 import type { Page } from "../../store/ui.js";
 
 /**
- * 命令面板 · 页面跳转目录（d.67 合并后的 9 个宿主页）。
+ * 命令面板 · 页面跳转目录（d.67 合并后的宿主页，d.114 加知识库）。
  *
  * 为什么单独放一份而不是从 NavRail 里 import：NavRail 的 ITEMS 里带 JSX 图标，
  * 且没有导出；命令面板需要的是「名字 + 一句描述 + Alt 快捷键」这类纯数据。
- * 代价是两处可能漂移，所以用一个测试把「9 项、页面集合与 store 的 DEFAULT_NAV_ORDER 一致、
+ * 代价是两处可能漂移，所以用一个测试把「页面集合与 store 的 DEFAULT_NAV_ORDER 一致、
  * 快捷键与 App 的映射一致」钉住（见 lib/palette/palette.test.ts）。
  *
  * 快捷键口径与 `App.tsx` 的 `SHORTCUT_PAGES`、`NavRail` 的 `digit` 保持一致：
  * 1 主页 / 2 团队 / 5 记忆区 / 6 设置区 / 8 智能体 / 0 插件区。
- * 没有数字键的页面（幕僚 / 信息中枢 / 自动化）是后加的，不占键位；
+ * 没有数字键的页面（幕僚 / 信息中枢 / 自动化 / 模型路由 / 模型 / 知识库）不占键位；
  * 原 3 技能区 / 4 接口区随合并取消，两个键位空着不用。
  */
 export interface PalettePage {
@@ -39,6 +39,11 @@ export const PALETTE_PAGES: PalettePage[] = [
     page: "model",
     label: "模型",
     description: "供应商、订阅账号、分组路由、用量、备份与同步（内核管理面）",
+  },
+  {
+    page: "vault",
+    label: "知识库",
+    description: "本地 vault：文件树、双链、标签、搜索与图谱，数据不出设备",
   },
   {
     page: "plugins",

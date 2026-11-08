@@ -9,6 +9,7 @@ import { makePluginToolFilter } from "../plugins/toolCeiling.js";
 import { buildSelfToolBridge } from "../selfEdit/index.js";
 import { skillPool } from "../skills/index.js";
 import { buildToneToolBridge } from "../tone/tools.js";
+import { buildVaultToolBridge } from "../vault/tools.js";
 import { buildWikiToolBridge } from "../wiki/tools.js";
 import type { CapabilityProvider } from "./types.js";
 
@@ -46,6 +47,21 @@ export const wikiProvider: CapabilityProvider = {
   id: "wiki",
   origin: "builtin",
   build: () => buildWikiToolBridge(),
+};
+
+/**
+ * 原生知识库（vault）工具：`vault_search` / `vault_read` / `vault_write`。
+ *
+ * 默认注入（与 wikiProvider 同口径，模型始终能看到知识库能力）：
+ * - 只读优先：`vault_search` / `vault_read` 风险 `read`；
+ * - 写只进库的 `writeDirs`（主进程 `vault:apply` 再判一次），风险 `write`，
+ *   由既有工具桥在每次调用前走人工确认；
+ * - 浏览器临时模式里 `vault_write` 会明确拒绝（内存改动不落盘，不能给假承诺）。
+ */
+export const vaultProvider: CapabilityProvider = {
+  id: "vault",
+  origin: "builtin",
+  build: () => buildVaultToolBridge(),
 };
 
 /**

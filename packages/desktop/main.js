@@ -43,6 +43,7 @@ const pkg = require("./package.json");
 const { APP_DEFAULT_URL, originOf, secureOrigins, guardIpc, makeSenderCheck } = require("./secure-origins");
 const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
 const { registerWikiIpc } = require("./wiki-fs");
+const { registerVaultIpc } = require("./vault-fs");
 const { registerChartIpc } = require("./chart-fs");
 const { registerExportIpc } = require("./export-fs");
 const { registerFileIpc } = require("./file-fs");
@@ -81,6 +82,23 @@ const TRUSTED_CHANNELS = [
   "wiki:write",
   "wiki:remove",
   "wiki:log",
+  // 原生知识库（多库 vault，d.114）：根只来自系统目录对话框，所有路径在主进程重新夹取。
+  // 与 wiki:* 同级收口——同样能碰用户文件，只认主窗口。
+  "vault:list",
+  "vault:pick",
+  "vault:remove",
+  "vault:rename",
+  "vault:tree",
+  "vault:read",
+  "vault:readBinary",
+  "vault:write",
+  "vault:apply",
+  "vault:create",
+  "vault:move",
+  "vault:delete",
+  "vault:reveal",
+  "vault:watch",
+  "vault:unwatch",
   "chart:export",
   "chart:list",
   "chart:open",
@@ -1129,6 +1147,13 @@ app.whenReady().then(() => {
     setupMenu();
     // 个人知识库文件桥（卡帕西 LLM Wiki 标准）：必须在窗口创建前注册
     registerWikiIpc(secureIpc);
+    // 原生知识库（多库 vault，d.114）：注册表在 ~/Heming/vaults.json，根只来自系统目录对话框。
+    // 首次启动会把既有 ~/Heming/wiki 自动登记为「和鸣知识库」（不移动文件）。
+    registerVaultIpc(secureIpc, {
+      dialog,
+      shell,
+      getMainWindow: () => mainWindow,
+    });
     // 图表导出桥：把生成的图表写到 ~/Heming/charts
     registerChartIpc(secureIpc);
     // 记忆导出文件桥（d.35）：把记忆 JSON 写到 ~/Heming/exports

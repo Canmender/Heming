@@ -54,7 +54,17 @@ describe("模块开关 · 导航与路由过滤", () => {
   it("命令面板页面目录同样过滤（停用页不出现）", () => {
     const state = off({ staff: false, infohub: false, automations: false });
     const pages = filterPalettePages(PALETTE_PAGES, state).map((p) => p.page);
-    expect(pages).toEqual(["home", "chat", "team", "modelroute", "model", "plugins", "memory", "settings"]);
+    expect(pages).toEqual([
+      "home",
+      "chat",
+      "team",
+      "modelroute",
+      "model",
+      "vault",
+      "plugins",
+      "memory",
+      "settings",
+    ]);
   });
 
   it("当前页被停用时落到主页；可用时原样返回", () => {

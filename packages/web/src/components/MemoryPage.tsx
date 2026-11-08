@@ -18,6 +18,12 @@ import {
   recallMemory,
   summarizeInjection,
   usageBoost,
+  enqueueMemoryWrite,
+  flushMemoryWriteBack,
+  getVaultDocSource,
+  isVaultSourceAvailable,
+  lastVaultSync,
+  resolveExcerpt,
   type AgentMemoryPrefs,
   type AgentPrefsStore,
   type EntryUsage,
@@ -29,8 +35,11 @@ import {
   type MemoryStore,
   type RecallRun,
   type SemanticEntry,
+  type VaultSyncResult,
   type WorkingTurn,
 } from "../lib/memory/index.js";
+// 知识库与应用的粘合层（Lead 集成点）：记忆页只经它触发同步，不直接碰 lib/vault/store。
+import { lastVaultBoot, syncVaultMemoryNow } from "../lib/vault/boot.js";
 import { recallRecorder, type RecallRecorder } from "../lib/memory/runRecorder.js";
 import { buildMemoryExport } from "../lib/memory/exportBundle.js";
 import { hasDesktopExportBridge, saveExportFile } from "../lib/export/file.js";
@@ -141,6 +150,8 @@ export function consolidateEpisodic(
       source: "consolidate",
       confidence: 0.7,
     });
+    // 整理出来的记忆写回知识库（d.114）：入队 + 异步落盘；写不进去只上报，不影响记忆本身。
+    enqueueMemoryWrite({ kind: "consolidate", key, value: fact?.value ?? entry.summary, agentId });
   }
   return { added, updated };
 }
@@ -194,7 +205,11 @@ function byRecent<T extends { at: string }>(a: T, b: T): number {
 function loadLayers(memory: MemoryStore, agentId: string): Layers {
   const data = snapshot(memory);
   const now = memory.nowMs();
-  const globalSemantic = memory.semanticGlobal();
+  // 知识库指针条目（source=vault）不混进「记忆条目」列表：它们是笔记的索引摘要，
+  // 有独立的「知识库参与记忆」卡片展示（纳入篇数/截断/同步），
+  // 混进来会让数据库列表冒出几百条不可编辑、且下次同步就会被覆盖的行。
+  const isNotVault = (entry: SemanticEntry) => entry.source !== "vault";
+  const globalSemantic = memory.semanticGlobal().filter(isNotVault);
   const working = Object.values(data?.working ?? {})
     .flat()
     .filter((turn) => !agentId || turn.agentId === agentId)
@@ -207,7 +222,7 @@ function loadLayers(memory: MemoryStore, agentId: string): Layers {
     return {
       working,
       episodic: memory.episodic(agentId),
-      semantic: memory.semantic(agentId),
+      semantic: memory.semantic(agentId).filter(isNotVault),
       globalSemantic,
     };
   }
@@ -216,6 +231,7 @@ function loadLayers(memory: MemoryStore, agentId: string): Layers {
     episodic: Object.values(data?.episodic ?? {}).flat().sort(byRecent),
     semantic: Object.values(data?.semantic ?? {})
       .flat()
+      .filter(isNotVault)
       .sort((a, b) =>
         a.pinned === b.pinned ? byRecent({ at: a.updatedAt }, { at: b.updatedAt }) : a.pinned ? -1 : 1,
       ),
@@ -274,6 +290,7 @@ const SOURCE_LABEL: Record<SemanticEntry["source"], string> = {
   explicit: "对话识别",
   consolidate: "整理提炼",
   review: "复盘沉淀",
+  vault: "知识库",
 };
 
 const KB_SOURCE_LABEL: Record<KnowledgeEntry["source"], string> = {
@@ -1003,9 +1020,14 @@ export function MemoryPage({
     // 工作记忆按会话召回：取当前选中智能体最近一轮所在会话
     const conversationId =
       layers.working.find((turn) => !agentId || turn.agentId === agentId)?.conversationId ?? "";
-    // 预览与真实生成走同一条路：把个性化账本一起传进去，
-    // 否则「预览里看到的排序」和「实际注入的排序」会是两套（体感缺口）。
-    const recalled = recallMemory(memory, { agentId, conversationId, query: recallQuery }, recorder.usageView);
+    // 预览与真实生成走同一条路：把个性化账本与知识库选项一起传进去，
+    // 否则「预览里看到的排序/条目」和「实际注入的」会是两套（体感缺口）。
+    const recalled = recallMemory(
+      memory,
+      { agentId, conversationId, query: recallQuery },
+      recorder.usageView,
+      { enabled: settings.vaultMemory !== false, available: isVaultSourceAvailable() },
+    );
     const { text, observability } = summarizeInjection(recalled);
     setRecall({ ...recalled, text, trace: observability });
   };
@@ -1223,11 +1245,168 @@ export function MemoryPage({
     </section>
   );
 
+  /* ---------------------------------------------------- 知识库参与记忆 */
+
+  // 开关唯一真源：MemorySettings.vaultMemory（设置区卡片与这里读同一个值，不另起键）。
+  const vaultEntries = useMemo(() => {
+    try {
+      return memory.vaultEntries();
+    } catch {
+      return [] as SemanticEntry[];
+    }
+  }, [memory, tick]);
+  const [vaultSync, setVaultSync] = useState<VaultSyncResult | null>(
+    () => lastVaultBoot()?.sync ?? lastVaultSync(),
+  );
+  const [vaultBusy, setVaultBusy] = useState(false);
+  const [vaultMsg, setVaultMsg] = useState<Message | null>(null);
+  const [vaultPreview, setVaultPreview] = useState<{ rel: string; text: string } | null>(null);
+
+  const onVaultMemoryToggle = (next: boolean) => {
+    memory.updateSettings({ vaultMemory: next });
+    bump();
+    setVaultMsg({ kind: "ok", text: next ? "知识库将参与记忆注入" : "已停止注入（已纳入的条目保留）" });
+  };
+
+  /**
+   * 手动同步：交给粘合层 `boot.syncVaultMemoryNow()`（它保证 source 已注册、失败只回结果不抛）。
+   * 记忆页只负责展示返回值——不再在这里重复判断「有没有库/有没有桥」。
+   */
+  const doSyncVault = async () => {
+    setVaultBusy(true);
+    setVaultMsg(null);
+    try {
+      const result = await syncVaultMemoryNow();
+      setVaultSync(result);
+      // 顺手把积压的沉淀写回落盘（用户点了同步，就不该让队列继续等下一次触发）。
+      void flushMemoryWriteBack();
+      bump();
+      setVaultMsg(
+        result.ok
+          ? {
+              kind: "ok",
+              text: `已同步：新增 ${result.added} / 更新 ${result.updated} / 删除 ${result.removed} / 跳过 ${result.skipped}${
+                result.truncated ? ` / 截断 ${result.truncated}` : ""
+              }`,
+            }
+          : { kind: "error", text: result.error ?? "知识库同步失败" },
+      );
+    } finally {
+      setVaultBusy(false);
+    }
+  };
+
+  /** 预览一条笔记的正文片段（单条 ≤400 字）：注入路径不走这里，只给「人」看。 */
+  const previewVaultExcerpt = async (entry: SemanticEntry) => {
+    const source = getVaultDocSource();
+    if (!source) {
+      setVaultMsg({ kind: "error", text: "知识库未接入，无法读取笔记正文" });
+      return;
+    }
+    const excerpt = await resolveExcerpt(source, entry);
+    if (!excerpt) {
+      setVaultMsg({ kind: "error", text: `读取失败：${entry.key}` });
+      return;
+    }
+    setVaultPreview({ rel: excerpt.rel, text: excerpt.text || "（笔记正文为空）" });
+  };
+
+  const vaultStatusRows = (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="text-[12px]">
+        已纳入 <strong>{vaultEntries.length}</strong> 篇
+      </span>
+      <span aria-hidden="true" className="h-4 w-px bg-line-soft" />
+      {vaultSync?.truncated ? (
+        <span role="status" className="text-[12px] text-[#b45309]">
+          被截断 {vaultSync.truncated} 篇：{vaultSync.truncatedReason}
+        </span>
+      ) : (
+        <span className={hintCls}>{vaultEntries.length ? "未截断" : "还没有纳入任何笔记"}</span>
+      )}
+      <span className={hintCls}>{isVaultSourceAvailable() ? "知识库已接入" : "知识库未接入（先在知识库页打开本地库）"}</span>
+      <span className={hintCls}>
+        {settings.vaultMemory ? "注入已开启" : "注入已关闭（条目保留，可随时再开）"}
+      </span>
+      <button
+        type="button"
+        onClick={() => void doSyncVault()}
+        disabled={vaultBusy}
+        className={`${btnGhost} disabled:opacity-50`}
+      >
+        {vaultBusy ? "同步中…" : "同步知识库"}
+      </button>
+    </div>
+  );
+
+  const vaultMsgRow = vaultMsg ? (
+    <span role={vaultMsg.kind === "error" ? "alert" : "status"} className={vaultMsg.kind === "error" ? errorCls : okCls}>
+      {vaultMsg.text}
+    </span>
+  ) : null;
+
+  const vaultCard = (
+    <section aria-label="知识库参与记忆" className={`${cardCls} mt-3`}>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Switch
+            label="知识库参与记忆"
+            checked={settings.vaultMemory}
+            onChange={onVaultMemoryToggle}
+          />
+          <span className="ui-section-title">知识库参与记忆</span>
+        </div>
+        <span className={hintCls}>
+          知识库笔记按「指针 + 摘要」纳入长期记忆，注入时标注来源；关闭只停注入，不删已纳入的条目。
+        </span>
+      </div>
+      {vaultStatusRows}
+      {vaultMsgRow && <div className="mt-2">{vaultMsgRow}</div>}
+      {vaultEntries.length > 0 && (
+        <ul className="mt-3 divide-y divide-line-soft border-t border-line-soft">
+          {vaultEntries.slice(0, 5).map((entry) => (
+            <li key={entry.id} className="flex items-start justify-between gap-2 py-2">
+              <div className="min-w-0">
+                <div className="truncate text-[12px] font-bold">{entry.key}</div>
+                <div className="mt-0.5 break-words text-[11px] text-muted">{entry.value}</div>
+              </div>
+              <button
+                type="button"
+                aria-label={`预览笔记 ${entry.key}`}
+                onClick={() => void previewVaultExcerpt(entry)}
+                className={btnGhostSm}
+              >
+                预览片段
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {vaultEntries.length > 5 && (
+        <div className={`mt-1 ${hintCls}`}>只列出最近 5 篇；完整清单见知识库页。</div>
+      )}
+      {vaultPreview && (
+        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] p-2 text-[11px] leading-5 text-[#555]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate font-bold">{vaultPreview.rel}</span>
+            <button type="button" onClick={() => setVaultPreview(null)} className={btnGhostSm}>
+              关闭预览
+            </button>
+          </div>
+          <div className="mt-1 whitespace-pre-wrap break-words">{vaultPreview.text}</div>
+        </div>
+      )}
+    </section>
+  );
+
   /* ---------------------------------------------------------- 数据库记忆 */
 
   const databasePanel = (
     <>
-      <section aria-label="数据库记忆概览" className={cardCls}>
+      {/* 知识库指针条目（source=vault）也属于长期记忆，卡片放在概览之后、条目列表之前：
+          先看「纳入多少/有没有截断」，再看具体记忆，口径才连得上。 */}
+      {vaultCard}
+      <section aria-label="数据库记忆概览" className={`${cardCls} mt-3`}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="ui-section-title">数据库 · 长期记忆</div>
@@ -2202,6 +2381,70 @@ export function MemoryPage({
   );
 
   /**
+   * 「个人知识库」标签（d.114）：主入口换成新的知识库页（多库/双链/图谱/编辑器），
+   * 老的 WikiPanel 折叠保留——旧链接与老用户习惯不 404，但不再是主路径。
+   */
+  const openVaultPage = () => {
+    // 知识库页已接入 Page 联合（d.114）。
+    useUiStore.getState().setPage("vault");
+  };
+
+  const wikiEntryPanel = (
+    <div className="flex flex-col gap-3">
+      <section aria-label="打开知识库" className={cardCls}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="ui-section-title">知识库</div>
+            <div className={`mt-1 ${hintCls}`}>
+              多库、双链反链、标签、搜索、图谱与即时预览都在独立的知识库页。库文件仍是普通
+              markdown，可以继续用 Obsidian 打开同一个目录。
+            </div>
+            <div className={`mt-2 ${hintCls}`}>
+              已纳入记忆 <strong>{vaultEntries.length}</strong> 篇 ·{" "}
+              {isVaultSourceAvailable() ? "知识库已接入" : "尚未接入本地库"}
+            </div>
+          </div>
+          <button type="button" onClick={openVaultPage} className={btnPrimary}>
+            打开知识库
+          </button>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line-soft pt-3">
+          <div className="flex items-center gap-2">
+            <Switch
+              label="知识库参与记忆"
+              checked={settings.vaultMemory}
+              onChange={onVaultMemoryToggle}
+            />
+            <span className="ui-section-title">知识库参与记忆</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void doSyncVault()}
+            disabled={vaultBusy}
+            className={`${btnGhost} disabled:opacity-50`}
+          >
+            {vaultBusy ? "同步中…" : "同步知识库到记忆"}
+          </button>
+          {vaultMsgRow}
+        </div>
+        {vaultSync?.truncated ? (
+          <div className="mt-2 text-[12px] text-[#b45309]">
+            被截断 {vaultSync.truncated} 篇：{vaultSync.truncatedReason}
+          </div>
+        ) : null}
+      </section>
+      <details className={cardCls}>
+        <summary className="cursor-pointer select-none text-[13px] font-bold">
+          旧版知识库（Wiki 视图，保留可用）
+        </summary>
+        <div className="mt-3">
+          <WikiPanel />
+        </div>
+      </details>
+    </div>
+  );
+
+  /**
    * Tab 徽标：只给「本页真能算出条目数」的分类。
    *
    * wiki 的页数由 WikiPanel 自管（走文件层，不在本页统计）——原来写死 0，
@@ -2292,7 +2535,7 @@ export function MemoryPage({
           </div>
         )}
         {tab === "database" && databasePanel}
-        {tab === "wiki" && <WikiPanel />}
+        {tab === "wiki" && wikiEntryPanel}
         </div>
       </div>
 

@@ -14,6 +14,7 @@ import {
   ModelIcon,
   RouteIcon,
   PinIcon,
+  BookIcon,
 } from "./icons.js";
 import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -53,6 +54,8 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
   // 模型路由（d.84，magpie 语义移植）：候选链/选路/冷却/用量；不占数字键
   { page: "model", label: "模型", icon: <ModelIcon width={17} height={17} /> },
   { page: "modelroute", label: "模型路由", icon: <RouteIcon width={17} height={17} /> },
+  // 知识库（d.114）：本地 vault，与模型同属「资料与能力」；不占数字键
+  { page: "vault", label: "知识库", icon: <BookIcon width={17} height={17} /> },
   // 插件区（d.62 统一插件模型，d.67 起并入技能区与接口区）：能力中心
   { page: "plugins", label: "插件区", icon: <PackageIcon width={17} height={17} />, digit: "0" },
   { page: "memory", label: "记忆区", icon: <MemoryIcon width={17} height={17} />, digit: "5" },

@@ -59,6 +59,10 @@ const PluginsPage = lazy(() =>
   import("./components/PluginsPage.js").then((m) => ({ default: m.PluginsPage })),
 );
 const MemoryPage = lazy(() => import("./components/MemoryPage.js").then((m) => ({ default: m.MemoryPage })));
+// 知识库（d.114）：整个 knowledge 目录（含 CodeMirror 编辑器）只在进这页时才下载。
+const KnowledgePage = lazy(() =>
+  import("./components/knowledge/KnowledgePage.js").then((m) => ({ default: m.KnowledgePage })),
+);
 const SettingsPage = lazy(() =>
   import("./components/SettingsPage.js").then((m) => ({ default: m.SettingsPage })),
 );
@@ -321,6 +325,17 @@ export function App() {
   // 浏览器没有这个桥，ensureDesktopGateway 直接返回 supported:false，不影响手动网关。
   useEffect(() => {
     void ensureDesktopGateway();
+  }, []);
+
+  // 原生知识库（d.114）：启动时懒加载启动粘合层（`bootVault()` 幂等、失败不抛）。
+  // 动态 import 保证 vault 索引与 CodeMirror 编辑器不进首屏 chunk；浏览器无文件桥时
+  // bootVault 内部切到内存临时模式，不在这里分叉。
+  useEffect(() => {
+    void import("./lib/vault/boot.js")
+      .then((m) => m.bootVault())
+      .catch(() => {
+        /* 知识库起不来不影响聊天与其它页面（启动期失败只写进 boot 的返回值） */
+      });
   }, []);
 
   // 全局搜索：Ctrl/⌘+K。启动动画期间不响应（与 Alt+N 同一套纪律：
@@ -779,6 +794,9 @@ function AppShell({
     ) : currentPage === "modelroute" ? (
       // 模型路由（d.84，magpie 语义移植）：候选链、选路策略、冷却与用量
       <ModelRoutePage />
+    ) : currentPage === "vault" ? (
+      // 知识库（d.114）：本地 vault 三栏界面（文件树 / 编辑器 / 反链标签图谱），数据不出设备
+      <KnowledgePage />
     ) : currentPage === "plugins" ? (
       // 插件区（能力中心）：插件包 + 技能池 + 工具 + MCP 服务，四个 Tab
       <PluginsPage />

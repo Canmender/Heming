@@ -63,8 +63,8 @@ describe("命令面板 v2 · 空查询分组", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(screen.getByText("页面跳转")).toBeInTheDocument();
     expect(screen.getByText("常用动作")).toBeInTheDocument();
-    // 11 个页面 + 5 个动作（d.67 合并后导航只剩宿主页；d.84 模型路由，d.100 模型页）
-    expect(screen.getAllByRole("option")).toHaveLength(16);
+    // 12 个页面 + 5 个动作（d.67 合并后导航只剩宿主页；d.84 模型路由，d.100 模型页，d.114 知识库）
+    expect(screen.getAllByRole("option")).toHaveLength(17);
     // 没有最近使用时不出现该组标题
     expect(screen.queryByText("最近使用")).not.toBeInTheDocument();
   });
