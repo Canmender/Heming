@@ -3,7 +3,7 @@
 > 分支：`feat/d103-plugin-system`（基线 `9c4bfd2` / `d.103.2.42.0`（本分支上另一并行会话已提交 d.103 模型页重构；本升级预计占 d.104，以实际 bump 为准））
 > 对标调研：`docs/research/2026-11-08-plugin-system-benchmark.md`
 > 本文是**契约**：实施时字段名、存储键、路由、撤销语义以本文为准；改契约先改本文。
-> 状态：设计完成，待确认实施范围（阶段 A/B/C/D 见 §10）。
+> 状态：设计完成 + 已做可实现性自检（`docs/research/2026-11-08-plugin-upgrade-feasibility.md`）+ 跨生态对标（`docs/research/2026-11-08-plugin-ecosystem-cross-reference.md`），本规格已按自检 F1–F10 与对标 N1–N14 修订；待确认实施范围（阶段 A/B/C/D 见 §10）。
 
 ## 0. 决策（用户口径与本文边界）
 
@@ -68,6 +68,17 @@ heming.core（内置）─┘    contributionRegistry.mount(kind,id,fn)     命�
 | `hook` | 生命周期订阅 | — | — | — | ✓（阶段 C） |
 
 「✗」不是永久禁令，而是**本阶段对第三方关闭**：第三方贡献 UI/后台等于在本机跑代码，必须先有首方签名 + 沙箱（详见 §7）。
+
+**冲突规则（N10，跨生态对标补）**：VS Code 只有「命令重名硬失败」有统一规则，其余贡献点各自为政——这是它的设计空白，和鸣贡献点少，正好一次定全：
+
+| 贡献点 | 冲突处理 |
+|---|---|
+| `commands` | 命令 id 在**全单元范围**唯一；重复即解析期拒绝并点名两处插件 |
+| `skills` | 技能名唯一；与手工技能同名时**插件技能让位**（不覆盖手工资产） |
+| `mcpServers` | 服务 id `plugin:<id>:<key>` 天然隔离；与手工服务冲突时拒绝安装（不抢占） |
+| `toolPacks` | 同一工具名跨束重复 → 解析期拒绝（沿用现状） |
+| `page` / `homeCard` / `settingsCard` / `backgroundJob` | **注册表独占**：只允许内置/首方单元注册，同一 id 二次注册直接抛错 |
+| `desktopWidgets` | 每包 ≤1、id 在插件内唯一（现状） |
 
 ### 3.3 撤销（dispose）契约
 
@@ -197,7 +208,8 @@ export function satisfiesEngines(required: string, actual: string): boolean;  //
 
 - 详情文档来源优先级：`meta.detail`（内联）> 包内 `meta.detail` 路径 > 无。**不读 README**（和鸣包没有 README 约定，读它等于让市场页依赖不存在的东西）。
 - 市场页展示：图标、标题、描述、作者、分类、标签、版本列表、兼容性、详细介绍（markdown 渲染，禁原始 HTML，图片只允许 https 或包内 assets）。
-- 图标与截图的 `https:` 来源由客户端直接加载（不代理、不落盘）；`data:` 内联只用于无法外链的场景。
+- 图标与截图的 `https:` 来源由客户端直接加载（不代理、不落盘）；`data:` 内联只用于无法外链的场景，**且 ≤8KB**。
+- **上架元数据不进安装记录**：`InstalledPlugin.manifest` 是整份存 localStorage 的（实测最坏 1.2MB/插件），所以 `meta.icon` 的 data URI 与 `meta.detail` 的内联 markdown 只进目录缓存（≤256KB，LRU），安装记录里只留 `meta.title/iconUrl/keywords` 等轻字段。
 
 ### 4.5 兼容与归一化（v1–v4 → v5 视图）
 
@@ -210,7 +222,8 @@ export function satisfiesEngines(required: string, actual: string): boolean;  //
 
 - 归一化只发生在**读模型**：`InstalledPlugin` 记录里的 `schemaVersion` 保留原值，不静默改写（沿用 `store.ts:349-362` 的既有口径）。
 - 新增安装仍接受 v1–v4，但**新特性（meta/engines 兼容判定）只对 v5 生效**；v3/v4 包在市场页以「未标注兼容性」展示，可安装但提示一次。
-- 存储：`heming.plugins.v1` 结构不变，新增可选字段 `previous?: { manifest; fingerprint; installedAt }`（更新回滚用，见 5.3）与 `history: Array<{ version: string; at: string }>`（≤3 条）。
+- **合并语义写进 v5（N12，学 Claude Code）**：技能按 `name` 追加或更新（同名即更新指令/触发词，保留用户对该技能的启用状态与绑定）；MCP 服务按 `key` 追加或更新（保留用户请求头与工具开关）；工具束按 `id` 替换整束；命令按 `id` 替换；清单里消失的条目按归属删除。**「替换默认扫描」不适用**——和鸣没有目录扫描。
+- 存储：`heming.plugins.v1` 结构不变，新增可选字段 `previous?: { manifest; fingerprint; installedAt }`（更新回滚用，见 5.3；**单插件 ≤128KB、全量 ≤512KB**，超限放弃回滚并如实标注）与 `history: Array<{ version: string; at: string }>`（≤3 条）。
 
 ### 4.6 拒绝规则（v5 新增，全部中文报错 + 字段路径）
 
@@ -221,6 +234,8 @@ export function satisfiesEngines(required: string, actual: string): boolean;  //
 5. `meta.screenshots` 超过 4 或非 https → 拒绝。
 6. `distribution: "bundle"` 仍只允许 `commands` + `desktopWidgets`；`page/homeCard/settingsCard/backgroundJob/hook` 对 `package` 与 `bundle` 一律拒绝。
 7. `requires` 引用自身、或引用不存在的单元 id → 拒绝（内置模块注册表里没有对应 id 时也拒绝）。
+8. **未知字段分层（N9，修订自检 F2）**：顶层未知键**剥掉 + 警告**（装前预览与 lint 都显示「忽略了未知字段 x」）；`permissions`、`contributions.*`、`meta`、`engines` 这些**敏感子对象用 strict，未知键=报错=不装**。理由：跨版本兼容交给 `engines`，strict 只用来挡住「作者把权限写错位置」这类危险笔误。
+9. **命名保留（N8，学 Claude Code/Dify）**：`heming` / `heming.*` / `heming-*` 前缀保留给首方；声明式包使用即拒绝安装（「该命名保留给官方」）；bundle 使用该前缀时**必须通过首方签名**，否则拒绝。冒充官方市场名（索引 `title` 含「和鸣官方」但来源非首方）时，客户端拒绝加载该索引并提示。
 
 ## 5. 安装事务与生命周期
 
@@ -251,17 +266,21 @@ export interface InstallResult {
 
 ### 5.2 事务实现（关键改动）
 
+0. **体积预检**：写入前估算受影响键的总字节（复用 `lib/storageUsage.ts` 的 `utf8Length`），超阈值直接拒绝并给出「先清理什么」，不进入写阶段（自检 F4；最坏合法清单 1.2MB/插件，20 个插件就能占满 5MB 配额）。
 1. **快照**：apply 前把受影响的键原值整体读出——`heming.plugins.v1`、`heming.skills.v1`、`heming.skillBindings.v1`、`heming.mcp.servers.v1`、`heming.mcp.enabledTools.v1`。（`heming.plugin.publishers.v1` 只在用户确认信任后写，放到 commit 之后。）
-2. **顺序**：先算完整 plan（含冲突、配额预估），再按 plan 写；任何一步抛错 → 用快照**逐键恢复**（`removeItem` 对原值为空的情况）。
+2. **顺序（N5，对齐 Dify 三段式）**：`prepare`（预检：解析/冲突/配额/engines/签名）→ `persist`（按 plan 写存储，先写「依赖方」后写「被依赖方」）→ 失败时 `rollback`（显式补偿清单：删本次新建的技能/服务/记录 + 恢复快照 + 三个单例 `reload()`）。任何一步抛错都走完整补偿，不做「尽力而为」。
 3. **写失败必须可见**：新增 `saveOrThrow()`；`save()` 保留给「非关键路径」但内部改为返回 `{ ok, error }`，安装/更新/卸载路径一律用 `saveOrThrow`。**禁止**再用「吞掉异常继续用内存态」的写法（`store.ts:857-863` 是当前半装态的根因之一）。
 4. **原子性边界**：localStorage 没有真正事务，快照+恢复是能做到的最强保证；恢复失败（隐私模式/配额耗尽）要在结果里如实报告 `rollback.ok=false` 并进诊断，不允许谎报成功。
 5. **幂等**：同 manifest 重复 apply 结果应为 `changed=false`。
+6. **内存态同步**：回滚后必须调 `pluginStore.reload()` / `skillPool.reload()` / `mcpRegistry.reload()`（三者目前只有构造期加载，没有 reload —— 自检 §2.5）；否则存储回滚了、内存还是脏的。
 
 ### 5.3 更新与回滚到上一版
 
-- 更新时把**旧 manifest 原样**写入 `previous`（含 fingerprint 与安装时间），`history` 追加 `{version, at}`（≤3，超限丢最旧）。
+- 更新时把**旧 manifest 原样**写入 `previous`（含 fingerprint 与安装时间），`history` 追加 `{version, at}`（≤3，超限丢最旧）。**成本上限**：`previous` 单插件 ≤128KB、全量 ≤512KB（实测典型清单 11.4KB、最坏 1.2MB），超限不保存并在详情页写「本插件未保留上一版」（自检 F5）。
 - 插件详情页新增「回滚到上一版」：仅当 `previous` 存在；用旧 manifest 走同一 `planInstall` + `applyPlan`（语义等同再装一次旧版），成功后交换 `previous`。
 - 回滚不联网、不校验目录：**只用本机留存的旧清单**（内容指纹用于提示「与当前记录不同」，不阻断）。
+- **权限扩张必须重新确认（N4，学 Chrome「新增警告权限即停用」）**：更新若新增 `permissions.network` 主机、把 `tools` 上限从 `read` 放宽到 `write`、或新增贡献类别，安装预览强制进入「重新确认」态；用户拒绝 → **保留旧版**（并给出「回滚/保持旧版」入口），不允许「静默提权」。
+- **防降级（N7，学 TUF）**：记录每个 id 的 `highestVersion`；安装/回滚到更旧版本时，若低于 `highestVersion` 且用户没有显式点「降级安装」，一律拒绝并说明原因（防「被诱导装回有漏洞的旧版」）。`highestVersion` 只在本机，不联网。
 
 ### 5.4 生命周期事件（界面插件，阶段 C）
 
@@ -285,6 +304,8 @@ export interface InstallResult {
 - 成功且生效：`已安装「报告工具箱」1.2.0：技能 +2，服务 +1`
 - 成功但另有原因未生效：`已安装，但需要「信息中枢」启用后才生效`
 - 失败并已回滚：`安装失败，已恢复到安装前状态：贡献服务 id 冲突（plugin:acme.report-kit:report）`
+- **不兼容（N3，学 VS Code）**：升级应用后已装插件变得不兼容时，进入「不兼容」状态并**禁用其贡献**，详情页写明「需要和鸣 d.X 或更高 / 当前 d.Y」，绝不静默失效；重新装兼容版本即恢复，本机数据不动。
+- **生效语义要如实写（N14）**：声明式插件的启停/更新**即时生效**（技能路由、工具注入、命令面板立刻变）；界面插件的启停/更新需要**重建窗口**（若窗口正在运行，提示「正在运行的窗口会在重建后使用新版本」）。
 
 ## 6. 云端目录 v2（市场索引）
 
@@ -311,6 +332,7 @@ export interface InstallResult {
 | GET | `/api/plugin-market/assets/:id/:version/:file` | 公开 | 白名单扩展名 + 路径穿越守卫；`Cache-Control: public, max-age=600` |
 | PUT | `/api/plugin-market` | `x-publish-key` | 替换索引（body ≤4MB，必须是合法 JSON 对象）；未配置密钥 503 |
 
+- 索引请求可带宿主版本（N2，学 n8n）：`GET /api/plugin-market?hostVersion=d.104.2.42.0` → 服务端按索引里每个版本的 `engines.heming` 过滤掉不兼容版本（只读索引里的字符串，不解析插件包）；不带参数 = 返回全量。客户端仍用同一 `satisfiesEngines` 兜底（双保险）。
 - 既有 `/api/plugins*` 五条路由**原样保留**（旧客户端、旧目录、离线降级都靠它）。
 
 ### 6.2 索引格式（`market.json`）
@@ -354,6 +376,7 @@ export interface InstallResult {
 - 客户端用 zod 校验索引（`packages/shared/src/plugin/index.ts`）；**任何一条不合法只丢弃该条并计数告警**，不让整份索引失效（市场不可用是产品事故）。
 - `versions` 按 SemVer 序展示；`engines` 不满足的版本标「需要更新和鸣」并禁用安装；默认选最高兼容版本。
 - 兼容性判定用 §4.3 的同一实现。
+- **生命周期字段（N1，学 Dify/Claude Code）**：每个插件条目可带 `status: "active" | "deprecated" | "removed"`、`deprecatedReason`、`alternativeId`（建议迁到哪个插件）、`renames`（旧 id → 新 id）、`channel: "release" | "prerelease"`。`removed` 的条目从市场列表隐藏但保留版本信息，已安装用户看到「已下架，建议迁移到 X」。
 
 ### 6.3 客户端市场 UI
 
@@ -363,20 +386,22 @@ export interface InstallResult {
 - 详情页：图标、标题、描述、作者、来源（主页/仓库）、分类/标签、版本列表（推荐/已安装/不兼容标记）、详细介绍（markdown，禁原始 HTML）、**安装**按钮。
 - 安装流程复用现有 `InstallDialog`：预览（权限/贡献/engines/签名）→ 确认 → 进度 → 结果三态。**下载后仍校验 sha256**，不因来自索引而跳过。
 - 离线/索引 404：回落现有「仓库」面板（v1 `/api/plugins`），并提示「目录暂时不可用，已切换到兼容列表」。
+- **版本选择与预发布（N13，学 VS Code）**：详情页版本列表可取「安装指定版本」；`channel: prerelease` 的版本默认折叠在「预发布」分组里，需用户在设置或详情页显式允许才展示（不默认推送预发布）。
 
 ## 7. 信任升级
 
 ### 7.1 首方签名（把「只允许官方」变成结构保证）
 
-现状：bundle 的「官方」只是「谁拿到 `HEMING_PLUGIN_PUBLISH_KEY`」+ 用户点一次确认（`plugin-package.js:130-139`、`app.ts:149-154`），代码里**没有发布者白名单**（审计 §7 G8）。
+现状（自检 §2.10 实证）：bundle 的「官方」只是「谁拿到 `HEMING_PLUGIN_PUBLISH_KEY`」+ 用户点一次确认（`plugin-package.js:130-139`、`app.ts:149-154`），代码里**没有发布者白名单**；而且**验签根本没有实现**——`plugin-package.js:21-22` 明说不验签，web 对 bundle 清单直接拒绝（`store.ts:371`），两端注释互相以为对方在验。所以这是**从零实现**，不是收紧。
 
 v2：
 
 1. 应用内置**首方公钥表**（`packages/desktop/src/first-party-keys.json`，构建时可被环境变量覆盖用于换钥；公钥只用于验签，不是秘密）。
-2. `plugin.json` 的 `signature` 对**规范化后的清单字节**做 Ed25519 签名（保留现有 `publisher` + `signature` 字段形状）。
+2. `plugin.json` 的 `signature` 对**规范化后的清单字节**做 Ed25519 签名（保留现有 `publisher` + `signature` 字段形状）。规范化**版本化**：v4 包继续用现有 canonical 规则（`signedManifestText`），v5 包用 `canonical-v2`（覆盖 `engines`/`meta`），否则旧签名会集体失效。主进程用 `node:crypto` 验签（Node 24 实测可用），canonicalizer 复制一份并配 pinned fixture 交叉校验（自检 F6）。
 3. bundle 安装：签名必须由首方公钥验签通过；失败 → 拒绝安装，文案「未通过首方签名（publisher: xxx），已拒绝安装」。
 4. 声明式包：保留 TOFU（首次确认后记住公钥指纹）——**不变**，因为声明式包不执行代码，签名只用于来源提示。
-5. 过渡：内置首方密钥上线前已发布的 bundle（如 `heming.pet 1.0.0`）在升级后**不再允许新装**；发布签名后的新版本（1.0.1）。已安装的不受回滚影响。
+5. **本地 `.tgz` 安装同样要求首方签名**；否则「只允许官方」名不副实。
+6. 过渡：内置首方密钥上线前已发布的 bundle（如 `heming.pet 1.0.0`）在升级后**不再允许新装**；发布签名后的新版本（1.0.1）。已安装的不受回滚影响。
 
 ### 7.2 发布者身份（最小可用）
 
@@ -390,8 +415,9 @@ v2：
 |---|---|---|
 | 响应头名不一致 | 服务端发 `X-Plugin-Package-Sha256`，客户端读 `x-plugin-sha256` | 客户端优先读新名，兼容旧名 |
 | 上限不一致 | 客户端 20MB，目录允许 40MB | 统一 20MB（目录校验同步收紧） |
-| bundle 版 `commands` 被接受但不物化 | 清单接受、安装后命令不出现 | 要么物化（命令 target 只允许 page/skill/plugin），要么解析期拒绝；选**物化**，与声明式语义一致 |
+| bundle 版 `commands` 被接受但不物化 | 清单接受、安装后命令不出现 | 选**物化**：web 经 `__heming_widgets.list()` 读已装 bundle 清单并入命令面板；因为 bundle 不允许 `skills`，target 收紧为 `page` / `plugin` / `settings`（自检 F7） |
 | 文档说「手工改过的技能不会被误删」 | 服务端只保护「改了 origin 的服务」 | 明知差异：文档改为「手工**新建**的技能不会误删；被插件带入后手工编辑的技能仍属插件」，并在详情页标注 |
+| widget CSP 无回归守卫（N11，对标 Figma/Chrome/Electron） | 现状按清单生成，但改坏了没有测试会红；且 widget 若嵌外部页面，`connect-src` 白名单只约束插件自己的请求（Figma 同款缺口） | ① 加**CSP 最小基线**回归用例：`script-src 'self'`（`eval:true` 才加 `'unsafe-eval'`）、`object-src 'none'`、禁远程脚本、`connect-src` 只回环 + 清单 network；② 文档写明「界面插件不得嵌外部页面」，并在 CSP `frame-src 'none'` 上固化 |
 
 ## 8. 插件区 UI（阶段 C）
 
@@ -415,12 +441,12 @@ v2：
 
 | 产物 | 内容 | 阶段 |
 |---|---|---|
-| `docs/plugin.schema.json` | 由 zod v5 schema 生成（`z.toJSONSchema`），供编辑器补全与 CI | A |
+| `docs/plugin.schema.json` | 由 zod v5 schema 生成（`z.toJSONSchema`），**只作编辑器补全提示**：实测 `.refine()` 不会进 schema，权威校验仍走 zod 解析器；CI 比对生成物防漂移（自检 F1） | A |
 | `scripts/plugin-lint.mjs` | 校验任意 `plugin.json`（复用 shared 解析器）：字段路径错误、engines、meta、贡献限额、重名 | A |
 | `docs/PLUGIN-AUTHORING.md` | 从零写一个插件、v5 字段速查、市场上架、常见拒绝原因、调试三招 | C |
 | `plugins/demo-*` fixtures | 最小技能包 / 技能+MCP+命令包 / 坏包（供 lint 与测试用） | A |
 | `scripts/publish-plugin.mjs` 扩展 | 生成 `market.json`、打包 detail/assets、上传索引 | B |
-| Agent 工具（`plugin_market_search` / `plugin_install_preview` / `plugin_install_apply`） | 只读检索 + 预览 + 走 HITL 的应用 | C（可选） |
+| Agent 工具（`plugin_market_search` / `plugin_install_preview`） | **默认只读**：检索 + 预览（差异/权限/兼容性）；写操作（apply）要等 HITL 支持非聊天页确认后再开（自检 F8） | C（可选） |
 | `docs/PLUGINS.md` 更新 | v5 字段、市场、事务语义、信任 | A/B 完成后 |
 
 ## 10. 分阶段实施计划
@@ -431,13 +457,13 @@ v2：
 |---|---|---|
 | A1 版本比较 | `packages/shared/src/plugin/version.ts` + 测试 | `d.104` vs `d.104.2.42.0` 等 12 例；`-dev.n` 容忍 |
 | A2 v5 清单核心 | `packages/shared/src/plugin/manifest.ts`（v5 zod + 归一化 + engines 判定） | v5 合法/非法用例 30+；v1–v4 归一化视图逐字段断言 |
-| A3 web 接线 | `packages/web/src/lib/plugins/manifest.ts`（v5 委托 shared，保留 v1–v4） | 既有 53 例全绿 + v5 新增 20 例；未知字段拒绝（不再静默 strip） |
-| A4 单元投影 + 撤销 | `packages/web/src/lib/units/registry.ts`（新）、`modules/*` 适配 | 四类来源都能列出；停用单元撤销全部 mount；撤销失败进诊断 |
-| A5 安装事务 | `store.ts`：`planInstall` / `applyPlan` / `saveOrThrow` / `previous` | 注入 `save` 失败 → 回滚到安装前（快照逐键比对）；幂等 apply |
+| A3 web 接线 | `packages/web/src/lib/plugins/manifest.ts`（v5 委托 shared，保留 v1–v4） | 既有 53 例全绿 + v5 新增 20 例；**v5 strict、v1–v4 保持 strip** |
+| A4 单元投影（纯函数） | `packages/web/src/lib/units/registry.ts`（新）+ 单测 | 四类来源都能列出；生效/阻塞原因可计算；**不做运行时接线**（接线放阶段 C，避开 `App.tsx` 冲突） |
+| A5 安装事务 | `store.ts`：`planInstall` / `applyPlan` / `saveOrThrow` / `previous` / 体积预检 + 三个单例 `reload()` | 注入 `save` 失败 → 回滚到安装前（快照逐键比对 + 内存 reload）；幂等 apply |
 | A6 修已知不一致 | `catalogClient.ts`、`pluginCatalog.ts`、`plugin-package.js` 等 | 头名/上限/命令物化三处回归用例 |
 | A7 工具链 | schema 生成、lint 脚本、fixtures | `node scripts/plugin-lint.mjs plugins/demo-bad/plugin.json` 非 0 且中文报错 |
 
-**A 的门槛**：`pnpm -r build && pnpm -r test && pnpm -r typecheck` 全绿；既有插件（infohub-collector / heming.pet）安装、更新、停用、卸载行为逐条不变（回归用例）。
+**A 的门槛**：开工前先跑一次全量基线（自检 §2.13 只验了 shared build + web typecheck）；完成时 `pnpm -r build && pnpm -r test && pnpm -r typecheck` 全绿；既有插件（infohub-collector / heming.pet）安装、更新、停用、卸载行为逐条不变（回归用例）。
 
 ### 阶段 B：分发与市场（≈1 轮）
 

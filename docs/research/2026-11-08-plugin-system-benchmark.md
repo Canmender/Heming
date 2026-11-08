@@ -4,6 +4,7 @@
 > 对象：官方仓库 [`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness)（commit `fcc0ad46`，release `dsh-0.2.2-rc.1`）与和鸣 `D:/Heming`（`feat/d103-plugin-system`，HEAD `9c4bfd2` / `d.103.2.42.0`；该分支同时有另一并行会话的模型页重构提交）。
 > 方法：浅克隆官方仓库后只读源码 + 官方文档 + `.agents/notes` 决策记录；和鸣侧做代码级审计。所有关键论断带 `path:line` 证据，证据索引见附录 A。
 > 本文只回答「官方怎么做的、和鸣差在哪、哪些能借」。**升级契约与实施计划见 `docs/superpowers/specs/2026-11-08-plugin-system-upgrade.md`。**
+> 跨生态（VS Code / Chrome / Claude Code / Dify / n8n / Figma / Obsidian / Raycast）的横向对标见 `docs/research/2026-11-08-plugin-ecosystem-cross-reference.md`；可实现性自检见 `docs/research/2026-11-08-plugin-upgrade-feasibility.md`。
 
 ## 0. 结论速览
 
