@@ -1,5 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from "express";
-import { scryptSync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { scryptSync, randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto";
 import { join } from "node:path";
 import {
   RegisterBodySchema,
@@ -27,6 +27,7 @@ import { issueToken, userIdFromToken } from "./auth.js";
 import { presence } from "./presence.js";
 import { dayKeyUtc, parseDayKey, summarizeTeamUsage, usageRangeBounds } from "./teamUsage.js";
 import { createPluginCatalog } from "./pluginCatalog.js";
+import { createPluginMarketRouter } from "./pluginMarket.js";
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -92,6 +93,16 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
 
   const app = express();
   app.use(cors);
+  /**
+   * 发布密钥：仓库写操作只认它，不认用户登录态（目录本身是公开的）。
+   * 提前声明：市场索引路由挂在 `express.json` 之前，也要用同一份密钥逻辑。
+   */
+  const publishKey = (process.env.HEMING_PLUGIN_PUBLISH_KEY ?? "").trim();
+  /**
+   * 市场索引 v2（d.105）：索引是发布工具生成的静态 JSON，服务端只原样分发。
+   * 必须挂在 `express.json` **之前**——PUT 的 body 要原样落盘，全局 json 解析会重排字节。
+   */
+  app.use("/api/plugin-market", createPluginMarketRouter({ dir: pluginCatalog.dir, publishKey }));
   app.use(express.json({ limit: "8mb" }));
 
   // 注：req 参数类型不能用默认的 Request（P=ParamsDictionary，值为 string|string[]），
@@ -146,7 +157,6 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   });
 
   /** 发布密钥：仓库写操作只认它，不认用户登录态（目录本身是公开的）。 */
-  const publishKey = (process.env.HEMING_PLUGIN_PUBLISH_KEY ?? "").trim();
   function publishAuthorized(req: Request<{ [key: string]: string }>): boolean {
     if (!publishKey) return false; // 未配置 = 关闭发布接口
     const given = String(req.header("x-publish-key") ?? "");
@@ -182,6 +192,40 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     const bytes = Buffer.from(JSON.stringify(body, null, 2), "utf8");
+    /**
+     * 版本内容不可变（N15，学 MCP Registry）：同 id+版本已存在时，内容必须完全一致。
+     * 内容变了就要求提升版本号——否则已安装用户记录的 sha256 会和目录里同一版本的字节对不上，
+     * 更新/回滚判定全部失效。
+     *
+     * 比较分两层：字节 sha256 相同 → 幂等；字节不同但 JSON 内容相同（缩进/换行差异）→ 也幂等，
+     * 且**保留已存字节不重写**（否则服务端会把同一版本改成另一份字节，sha256 反而变了）。
+     */
+    const existing = pluginCatalog.read(id, version);
+    if (existing) {
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      if (existing.sha256 !== sha256) {
+        let sameContent = false;
+        try {
+          sameContent = JSON.stringify(JSON.parse(existing.bytes.toString("utf8"))) === JSON.stringify(body);
+        } catch {
+          sameContent = false;
+        }
+        if (!sameContent) {
+          res.status(409).json({
+            error: "版本内容不可变：同 id/版本已发布且内容不同，请提升版本号后重新发布",
+          });
+          return;
+        }
+        res.status(200).json({
+          id,
+          version,
+          sha256: existing.sha256,
+          size: existing.bytes.length,
+          created: false,
+        });
+        return;
+      }
+    }
     const result = pluginCatalog.publish(id, version, bytes);
     if (result === "invalid_id" || result === "invalid_version") {
       res.status(400).json({ error: "插件 id 或版本号格式不正确" });

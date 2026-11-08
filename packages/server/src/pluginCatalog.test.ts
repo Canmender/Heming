@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -331,6 +331,58 @@ describe("仓库 REST（d.95）", () => {
 
     const manifestRes = await request(app).get("/api/plugins/acme.push/0.3.0/manifest");
     expect(manifestRes.status).toBe(200);
+  });
+
+  it("版本内容不可变（N15）：同 id+版本字节不同 409，字节相同 200 幂等，提版本号可发", async () => {
+    const app = appWithRepo();
+    const manifest = v4("acme.immutable", "1.0.0");
+
+    const first = await request(app)
+      .put("/api/plugins/acme.immutable/1.0.0")
+      .set("x-publish-key", KEY)
+      .send(manifest);
+    expect(first.status).toBe(201);
+
+    // 同样的对象重发 = 同样字节 = 幂等（旧行为保留）
+    const again = await request(app)
+      .put("/api/plugins/acme.immutable/1.0.0")
+      .set("x-publish-key", KEY)
+      .send(manifest);
+    expect(again.status).toBe(200);
+    expect(again.body.created).toBe(false);
+
+    // 同 id+版本改内容 = 409，且目录里的旧字节不被覆盖
+    const changed = await request(app)
+      .put("/api/plugins/acme.immutable/1.0.0")
+      .set("x-publish-key", KEY)
+      .send({ ...manifest, description: "改过的包" });
+    expect(changed.status).toBe(409);
+    expect(String(changed.body.error)).toMatch(/版本内容不可变/);
+    const stored = await request(app).get("/api/plugins/acme.immutable/1.0.0/manifest");
+    expect(JSON.parse(stored.text).description).toBe("测试包");
+
+    // 提升版本号即可发布
+    const next = await request(app)
+      .put("/api/plugins/acme.immutable/1.0.1")
+      .set("x-publish-key", KEY)
+      .send({ ...manifest, version: "1.0.1" });
+    expect(next.status).toBe(201);
+  });
+
+  it("同内容但格式不同（缩进/换行）也幂等 200，且不重写已存字节", async () => {
+    const dir = join(root, "acme.fmt", "1.0.0");
+    mkdirSync(dir, { recursive: true });
+    const manifest = v4("acme.fmt", "1.0.0");
+    // 目录里是 4 空格 + 尾随换行；服务端 PUT 会按 2 空格重排——内容相同应视作幂等
+    const pretty = `${JSON.stringify(manifest, null, 4)}\n`;
+    writeFileSync(join(dir, "plugin.json"), pretty, "utf8");
+    const app = appWithRepo();
+    const res = await request(app).put("/api/plugins/acme.fmt/1.0.0").set("x-publish-key", KEY).send(manifest);
+    expect(res.status).toBe(200);
+    expect(res.body.created).toBe(false);
+    expect(res.body.sha256).toMatch(/^[0-9a-f]{64}$/);
+    // 关键：不能把「同一版本」悄悄改写成另一份字节（sha256 / 市场索引指纹会变）
+    expect(readFileSync(join(dir, "plugin.json"), "utf8")).toBe(pretty);
   });
 
   it("未配置发布密钥时发布/下线一律 503（接口关闭），读接口照常", async () => {
