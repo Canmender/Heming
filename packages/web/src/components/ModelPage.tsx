@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageShell } from "./layout/PageShell.js";
+import { ModelTraceView } from "./ModelTraceView.js";
 import { useLlmStore } from "../store/llm.js";
 import { useUiStore } from "../store/ui.js";
 import { ensureDesktopGateway, getMagpieBridge, type MagpieHostStatus } from "../lib/magpieHost.js";
@@ -33,6 +34,7 @@ import {
 
 type TabKey =
   | "overview"
+  | "trace"
   | "providers"
   | "accounts"
   | "groups"
@@ -44,6 +46,7 @@ type TabKey =
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "overview", label: "概览" },
+  { key: "trace", label: "实时链路" },
   { key: "providers", label: "供应商" },
   { key: "accounts", label: "订阅账号" },
   { key: "groups", label: "分组路由" },
@@ -332,6 +335,8 @@ export function ModelPage() {
           </div>
         </section>
       )}
+
+      {tab === "trace" && <ModelTraceView />}
 
       {tab === "providers" && (
         <section aria-label="供应商" className="space-y-4">

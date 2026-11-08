@@ -12,6 +12,28 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.101.2.42.0",
+    "date": "2026-11-08",
+    "title": "模型页「实时链路」：节点化的路由视图",
+    "bullets": [
+      "读内核 `GET /v1/magpie/trace`（与 magpie Routing 页同一份记录），经本机反代访问；",
+      "三列节点：客户端 → 和鸣内核 → 账号/Key·模型；每条请求一条曲线：蓝色流动=进行中（沿路径移动的圆点）、绿色=成功、琥珀=失败/换人；",
+      "悬停高亮、点击打开详情（候选数/每次尝试/耗时/token/错误），下方列表联动；可暂停轮询；",
+      "空状态给出引导，读不到 trace 时显示错误而非空图。",
+      "`lib/magpieTrace.ts`：快照读取 + `buildTraceGraph()` 纯函数（去重、落点取最后尝试、状态口径）；",
+      "`components/ModelTraceView.tsx`：SVG 节点图 + 请求列表 + 详情 + 2.5s 轮询/暂停；",
+      "`ModelPage` 新增「实时链路」分区。",
+      "真实链路：自家内核 + 隔离 APPDATA + mock 供应商 + 反代，发一次对话后`/v1/magpie/trace` 返回 `{agent:\"heming\", model:\"mock/mock-model\", provider:\"mock\", status:200, done:true, order:[\"mock\"], tries:[…]}`；",
+      "`magpieTrace` 11 例、`ModelTraceView` 4 例；web 全量门禁与 typecheck 见提交记录。"
+    ],
+    "paragraphs": [
+      "magpie 原版最直观的是 Routing 实时图；d.100 的模型页只有表格。本轮把节点视图补上。",
+      "数据与视图",
+      "代码",
+      "验证"
+    ]
+  },
+  {
     "version": "d.100.2.42.0",
     "date": "2026-11-08",
     "title": "导航栏「模型」页：内核管理面完整搬进和鸣",

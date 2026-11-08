@@ -134,6 +134,7 @@
 | [specs/2026-11-07-file-panel-and-automation-presets.md](superpowers/specs/2026-11-07-file-panel-and-automation-presets.md) | **文件管理收进智能体页 + 自动化预设**：共享文件面板不再全局常驻（只在智能体页显示），窄窗入口同步收口；自动化新增 4 条一键预设（每日/每2小时/日程/周导出），编辑器保留为自定义入口 |
 | [specs/2026-11-07-installer-branding.md](superpowers/specs/2026-11-07-installer-branding.md) | **安装器品牌化**：NSIS 欢迎页/完成页文案、164×314 侧栏、150×57 页头、多尺寸应用图标；素材由 `scripts/make-installer-assets.py` 生成，附安装行为不变与未做项（签名/深色控件） |
 | [specs/2026-11-07-ui-polish-rounds.md](superpowers/specs/2026-11-07-ui-polish-rounds.md) | **20 轮 UI/UX 自检与优化**（进行中）：按「使用习惯 / 排版 / UI 一致性 / AI 腔文案」逐轮找证据并修复；含轮次看板、每轮问题与修法、验证口径与遗留清单 |
+| [specs/2026-11-08-d101-live-trace-view.md](superpowers/specs/2026-11-08-d101-live-trace-view.md) | **d.101 模型页「实时链路」**：读内核 `/v1/magpie/trace`，画客户端→内核→账号的节点图；蓝流动=进行中、绿=成功、琥珀=换人，点击看尝试详情；纯函数建图 + SVG 视图 + 轮询暂停 |
 | [specs/2026-11-08-d100-model-page.md](superpowers/specs/2026-11-08-d100-model-page.md) | **d.100 导航「模型」页**：把 magpie 管理面（供应商/订阅账号/分组路由/模型/用量/备份同步/库与搜索/终端）做成一等页面；页面经主进程白名单命令桥调用自家内核（无 shell、流式、真终端登录）；含页面/桥/导航测试 |
 | [specs/2026-11-08-d97-magpie-core-vendored.md](superpowers/specs/2026-11-08-d97-magpie-core-vendored.md) | **d.97 复用 magpie 源码自建内核**：`vendor/magpie-core`（MIT，v0.1.3246 裁剪）+ `scripts/build-magpie-core.mjs` 编译 `magpie-core.exe` 随本体发布；删除下载官方二进制的 fetch 脚本；打包前置检查改为构建；版本串带 `-heming.` 可辨认 |
 | [specs/2026-11-07-d95-adopt-existing-magpie.md](superpowers/specs/2026-11-07-d95-adopt-existing-magpie.md) | **d.95 采用本机已有 magpie**：启动前先 `/api/hello` 探活，已有实例则接入不 spawn（external 状态、stop 不杀外部进程）；设置页分「运行中/已接入」两套文案与按钮 |
