@@ -26,9 +26,13 @@ import { API_BASE } from "../api.js";
  */
 
 export class SkillHubError extends Error {
-  constructor(message: string) {
+  /** 原始 HTTP 状态（网络/超时/取消为空）；调用方按状态做补救时用。 */
+  readonly status?: number;
+
+  constructor(message: string, status?: number) {
     super(message);
     this.name = "SkillHubError";
+    this.status = status;
   }
 }
 
@@ -36,7 +40,14 @@ export interface SkillHubClientDeps {
   fetchImpl?: typeof fetch;
   /** 测试注入；缺省 `API_BASE`（空串 = 同源相对路径）。 */
   baseUrl?: string;
+  /** 外部取消信号（批量更新「停止」用）；与内部超时信号合并。 */
+  signal?: AbortSignal;
+  /** 单请求超时（毫秒，默认 `SKILL_HUB_TIMEOUT_MS`）；≤0 关闭超时。 */
+  timeoutMs?: number;
 }
+
+/** 单请求超时（d.113 P1-8）：社区是外部依赖，不能无限挂住 UI。 */
+export const SKILL_HUB_TIMEOUT_MS = 15_000;
 
 export type SkillHubSort = "downloads" | "stars" | "updated";
 
@@ -66,6 +77,66 @@ function parseShape<T>(schema: ZodType<T>, raw: unknown, what: string): T {
   return parsed.data;
 }
 
+function isAbortError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  return (err as { name?: unknown }).name === "AbortError";
+}
+
+/** 组合「超时 + 外部取消」信号；容器不支持 `AbortSignal.any` 时退化为其中一个。 */
+function combineSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
+  const list = signals.filter((item): item is AbortSignal => !!item);
+  if (list.length === 0) return undefined;
+  if (list.length === 1) return list[0];
+  const anyFn = (AbortSignal as unknown as { any?: (items: AbortSignal[]) => AbortSignal }).any;
+  if (typeof anyFn === "function") return anyFn(list);
+  return list[0];
+}
+
+function timeoutSignal(ms: number): AbortSignal | null {
+  if (!(ms > 0)) return null;
+  try {
+    const timeoutFn = (AbortSignal as unknown as { timeout?: (value: number) => AbortSignal }).timeout;
+    if (typeof timeoutFn === "function") return timeoutFn(ms);
+  } catch {
+    /* 个别环境没有/禁用 AbortSignal.timeout：退化为不设超时 */
+  }
+  return null;
+}
+
+interface ServerFailure {
+  message: string | null;
+  retryAfter: number | null;
+}
+
+/**
+ * 读非 2xx 的响应体：服务端约定 `{ error, retryAfter }`（中文）。
+ * 读不出/不是 JSON/没有字段都按 null，由调用方回落通用文案。
+ */
+async function readServerFailure(response: Response): Promise<ServerFailure> {
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  let message: string | null = null;
+  let retryAfter: number | null = null;
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const record = body as Record<string, unknown>;
+    if (typeof record.error === "string" && record.error.trim()) message = record.error.trim();
+    if (typeof record.retryAfter === "number" && Number.isFinite(record.retryAfter)) {
+      retryAfter = record.retryAfter;
+    } else if (typeof record.retryAfter === "string" && /^\d+$/.test(record.retryAfter.trim())) {
+      retryAfter = Number(record.retryAfter.trim());
+    }
+  }
+  if (retryAfter === null) {
+    const header = Number(response.headers.get("retry-after"));
+    if (Number.isFinite(header) && header >= 0) retryAfter = header;
+  }
+  return { message, retryAfter: retryAfter !== null && retryAfter >= 0 ? retryAfter : null };
+}
+
 async function requestJson(
   url: string,
   init: RequestInit,
@@ -73,24 +144,56 @@ async function requestJson(
   what: string,
 ): Promise<unknown> {
   const fetchImpl = deps.fetchImpl ?? fetch;
+  // 外部已取消：不再发请求（批量「停止」后不会再发新请求）。
+  if (deps.signal?.aborted) throw new SkillHubError("请求已取消");
+  const timeoutMs = deps.timeoutMs ?? SKILL_HUB_TIMEOUT_MS;
+  const signal = combineSignals([timeoutSignal(timeoutMs), deps.signal]);
   let response: Response;
   try {
-    response = await fetchImpl(url, init);
+    response = await fetchImpl(url, signal ? { ...init, signal } : init);
   } catch (err) {
+    if (deps.signal?.aborted) throw new SkillHubError("请求已取消");
+    if (isAbortError(err)) {
+      const duration =
+        timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)} 秒` : `${timeoutMs} 毫秒`;
+      throw new SkillHubError(`技能社区请求超时（${duration}），请重试`);
+    }
     throw new SkillHubError(`技能社区请求失败：${reasonOf(err)}`);
   }
-  if (response.status === 401) {
-    throw new SkillHubError("需要虾评 API Key：请先在「社区 Key」里粘贴，或用名字创建账号");
-  }
-  if (response.status === 503) {
-    throw new SkillHubError("技能社区未启用：服务端没有开启该源，请稍后再试或联系管理员");
-  }
-  if (response.status === 404) {
-    throw new SkillHubError(`${what}不存在或已下架`);
-  }
+
   if (!response.ok) {
-    throw new SkillHubError(`技能社区请求失败：HTTP ${response.status}`);
+    const failure = await readServerFailure(response);
+    const status = response.status;
+    if (status === 401) {
+      throw new SkillHubError(
+        "需要虾评 API Key：请先在「社区 Key」里粘贴，或用名字创建账号",
+        status,
+      );
+    }
+    if (status === 503) {
+      throw new SkillHubError(
+        "技能社区未启用：服务端没有开启该源，请稍后再试或联系管理员",
+        status,
+      );
+    }
+    if (status === 404) {
+      throw new SkillHubError(`${what}不存在或已下架`, status);
+    }
+    if (status === 429) {
+      throw new SkillHubError(
+        failure.retryAfter !== null
+          ? `上游限流，请约 ${failure.retryAfter} 秒后重试`
+          : "上游限流，请稍后重试",
+        status,
+      );
+    }
+    // 402/400/5xx：优先透出服务端中文 error（如「余额不足，请充值」），不再吞成 HTTP 状态码。
+    throw new SkillHubError(
+      failure.message ?? `技能社区请求失败：HTTP ${status}`,
+      status,
+    );
   }
+
   try {
     return await response.json();
   } catch (err) {

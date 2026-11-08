@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type {
   SkillHubDetail,
   SkillHubDownload,
@@ -109,7 +109,7 @@ interface Routes {
   detail?: unknown | (() => Promise<Response>);
   download?: unknown | (() => Promise<Response>);
   register?: unknown | (() => Promise<Response>);
-  downloadFor?: (url: string) => Promise<Response>;
+  downloadFor?: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 function makeFetch(routes: Routes = {}) {
@@ -124,7 +124,7 @@ function makeFetch(routes: Routes = {}) {
     calls.push({ url, ...(init ? { init } : {}) });
     if (url.includes("/register")) return resolve(routes.register, { apiKey: "xp-key-register-1", name: "snake" });
     if (url.includes("/download")) {
-      if (routes.downloadFor) return routes.downloadFor(url);
+      if (routes.downloadFor) return routes.downloadFor(url, init);
       return resolve(routes.download, DOWNLOAD);
     }
     if (url.includes("/skills/")) return resolve(routes.detail, DETAIL);
@@ -552,5 +552,127 @@ describe("SkillHubPanel · Key 与安装", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "清除 Key" }));
     expect(localStorage.getItem(HUB_KEY_STORAGE_KEY)).toBeNull();
     expect(await within(dialog).findByText(/已清除本机保存的社区 Key/)).toBeInTheDocument();
+  });
+});
+
+describe("SkillHubPanel · d.113 并发 / Key 续跑 / 停止", () => {
+  function addCommunity(pool: SkillPool, name: string, version: string, skillId: string) {
+    return pool.create({
+      name,
+      description: "社区技能",
+      instructions: "内容",
+      triggers: [],
+      tags: [],
+      enabled: true,
+      version,
+      source: "imported",
+      community: {
+        source: "xiaping",
+        skillId,
+        name,
+        author: "虾评",
+        version,
+        installedAt: "2026-11-01T00:00:00.000Z",
+      },
+    });
+  }
+
+  it("无 Key 点全部更新：保存 Key 后执行冻结的清单（不是 0 条）", async () => {
+    const pool = new SkillPool(memoryStorage());
+    addCommunity(pool, "周报助手", "1.0.0", "xp-1");
+    const page = {
+      skills: [{ ...SKILL, version: "1.2.0" }],
+      total: 1,
+      hasMore: false,
+      fetchedAt: "2026-11-08T00:00:00.000Z",
+    };
+    renderPanel({ page }, pool);
+    expect(await screen.findByText("已装 1 个社区技能 · 1 个可更新")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "全部更新" }));
+    const keyDialog = await screen.findByRole("dialog", { name: "社区 Key" });
+    fireEvent.change(within(keyDialog).getByLabelText("社区 API Key"), {
+      target: { value: "xp-user-key" },
+    });
+    fireEvent.click(within(keyDialog).getByRole("button", { name: "保存 Key" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "批量更新社区技能" });
+    expect(dialog).toHaveTextContent("周报助手");
+    expect(dialog).toHaveTextContent("v1.0.0 → v1.2.0");
+    // 保存 Key 后会自动续跑（P1-2），所以这里直接等完成汇总而不是再点一次确认。
+    expect(await within(dialog).findByText(/更新完成：成功 1/)).toBeInTheDocument();
+    expect(
+      pool.list().find((skill) => skill.community?.skillId === "xp-1")?.community?.version,
+    ).toBe("1.2.0");
+  });
+
+  it("全局单飞：下载期间其它条目的安装按钮也禁用", async () => {
+    localStorage.setItem(HUB_KEY_STORAGE_KEY, JSON.stringify({ key: "k" }));
+    let release!: (value: Response) => void;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    renderPanel({ downloadFor: () => gate });
+    await screen.findByText("周报助手");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "安装" })[0]!);
+    const busy = await screen.findByRole("button", { name: "处理中…" });
+    expect(busy).toBeDisabled();
+    for (const button of screen.getAllByRole("button", { name: /安装|重新安装|处理中/ })) {
+      expect(button).toBeDisabled();
+    }
+
+    await act(async () => {
+      release(jsonResponse(DOWNLOAD));
+    });
+    const preview = await screen.findByRole("dialog", { name: "安装社区技能" });
+    fireEvent.click(within(preview).getByRole("button", { name: "关闭安装预览" }));
+  });
+
+  it("批量停止：取消在途请求、不再发新请求、已完成结果保留", async () => {
+    localStorage.setItem(HUB_KEY_STORAGE_KEY, JSON.stringify({ key: "k" }));
+    const pool = new SkillPool(memoryStorage());
+    addCommunity(pool, "技能一", "1.0.0", "xp-1");
+    addCommunity(pool, "技能二", "1.0.0", "xp-2");
+    addCommunity(pool, "技能三", "1.0.0", "xp-3");
+    const page = {
+      skills: [
+        { ...SKILL, id: "xp-1", name: "技能一", version: "1.1.0" },
+        { ...SKILL, id: "xp-2", name: "技能二", version: "1.1.0" },
+        { ...SKILL, id: "xp-3", name: "技能三", version: "1.1.0" },
+      ],
+      total: 3,
+      hasMore: false,
+      fetchedAt: "2026-11-08T00:00:00.000Z",
+    };
+    let downloadCalls = 0;
+    renderPanel(
+      {
+        page,
+        downloadFor: (_url, init) => {
+          downloadCalls += 1;
+          return new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              const abort = new Error("aborted");
+              abort.name = "AbortError";
+              reject(abort);
+            });
+          });
+        },
+      },
+      pool,
+    );
+    expect(await screen.findByText("已装 3 个社区技能 · 3 个可更新")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "全部更新" }));
+    const dialog = await screen.findByRole("dialog", { name: "批量更新社区技能" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认更新" }));
+
+    expect(await within(dialog).findByText(/正在更新/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "关闭批量更新" })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "停止" }));
+
+    expect(await within(dialog).findByText(/更新已停止/)).toBeInTheDocument();
+    expect(downloadCalls).toBe(1);
+    expect(within(dialog).getByRole("button", { name: "关闭批量更新" })).not.toBeDisabled();
   });
 });

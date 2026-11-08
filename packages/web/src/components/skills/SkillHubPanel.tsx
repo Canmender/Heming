@@ -577,18 +577,22 @@ function InstallPreviewDialog({
 function BulkUpdateDialog({
   rows,
   running,
+  stopped,
   results,
   done,
   onConfirm,
   onClose,
+  onStop,
   onGoAssign,
 }: {
   rows: CommunityUpdateRow[];
   running: boolean;
+  stopped: boolean;
   results: BulkUpdateOutcome[];
   done: boolean;
   onConfirm: () => void;
   onClose: () => void;
+  onStop: () => void;
   onGoAssign: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -611,7 +615,8 @@ function BulkUpdateDialog({
           <button
             type="button"
             aria-label="关闭批量更新"
-            className="ml-auto rounded-sm p-1 text-muted hover:bg-[#f0f0f0]"
+            className="ml-auto rounded-sm p-1 text-muted hover:bg-[#f0f0f0] disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={running}
             onClick={onClose}
           >
             <XIcon width={14} height={14} />
@@ -638,7 +643,9 @@ function BulkUpdateDialog({
               <p className="ui-body-sm font-medium">
                 {running
                   ? `正在更新…（已完成 ${results.length} / ${rows.length}）`
-                  : `更新完成：成功 ${ok} / 失败 ${failed}${skipped > 0 ? ` / 跳过 ${skipped}` : ""}`}
+                  : stopped
+                    ? `更新已停止：成功 ${ok} / 失败 ${failed} / 跳过 ${skipped}`
+                    : `更新完成：成功 ${ok} / 失败 ${failed}${skipped > 0 ? ` / 跳过 ${skipped}` : ""}`}
               </p>
               <ul className="mt-1 grid gap-1 ui-caption">
                 {results.map((item, index) => (
@@ -655,9 +662,14 @@ function BulkUpdateDialog({
           )}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-line-soft px-4 py-2.5">
-          <button type="button" className={BTN_GHOST} onClick={onClose}>
+          <button type="button" className={BTN_GHOST} onClick={onClose} disabled={running}>
             {done ? "完成" : "取消"}
           </button>
+          {running && (
+            <button type="button" className={BTN_GHOST} onClick={onStop}>
+              停止
+            </button>
+          )}
           {!done && (
             <button
               type="button"
@@ -714,9 +726,13 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkResults, setBulkResults] = useState<BulkUpdateOutcome[]>([]);
   const [bulkDone, setBulkDone] = useState(false);
+  /** 用户点了「停止」：弹窗文案如实写「已停止」，已完成结果保留。 */
+  const [bulkStopped, setBulkStopped] = useState(false);
   const [pendingBulk, setPendingBulk] = useState(false);
   /** 冻结的批量更新清单：执行中本地版本会变，弹窗列表不能跟着缩水。 */
   const [bulkRows, setBulkRows] = useState<CommunityUpdateRow[]>([]);
+  /** 批量更新「停止」：AbortController 终止在途与后续请求（d.113 P1-8）。 */
+  const bulkAbortRef = useRef<AbortController | null>(null);
   /** 安装/更新成功后提供「去技能区分配」出口。 */
   const [showGoAssign, setShowGoAssign] = useState(false);
 
@@ -878,6 +894,8 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
   }, [installedCommunity, remoteVersions]);
 
   const startInstall = async (target: InstallTarget) => {
+    // 全局单飞（P1-8）：同一时间只允许一个安装/下载，避免并发写技能池与重复下载。
+    if (busyId || bulkRunning) return;
     setBusyId(target.id);
     setMsg(null);
     try {
@@ -968,6 +986,10 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
    */
   const openBulkUpdate = async () => {
     setMsg(null);
+    setBulkStopped(false);
+    const rows = [...communityUpdates];
+    // 先冻结这批清单：无 Key 时走 Key 弹窗，保存后要继续更新它们而不是空数组（P1-2）。
+    setBulkRows(rows);
     let state = keyInfo;
     if (!state) {
       state = await readHubKeyState();
@@ -978,21 +1000,28 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
       setKeyOpen(true);
       return;
     }
-    setBulkRows([...communityUpdates]);
     setBulkResults([]);
     setBulkDone(false);
     setBulkOpen(true);
   };
 
   const runBulkUpdate = async (key: string, rows: CommunityUpdateRow[] = communityUpdates) => {
+    const controller = new AbortController();
+    bulkAbortRef.current = controller;
+    setBulkStopped(false);
     setBulkRunning(true);
     setBulkDone(false);
     setBulkResults([]);
     const results: BulkUpdateOutcome[] = [];
     for (const row of rows) {
+      if (controller.signal.aborted) break;
       const hubId = row.skill.community?.skillId ?? "";
       try {
-        const download = await downloadHubSkill(hubId, key, { fetchImpl, baseUrl });
+        const download = await downloadHubSkill(hubId, key, {
+          fetchImpl,
+          baseUrl,
+          signal: controller.signal,
+        });
         const parsedList = parseImportText(download.skillMd);
         const parsed = parsedList[0];
         if (parsedList.length !== 1 || !parsed || !parsed.instructions.trim()) {
@@ -1038,11 +1067,17 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
         });
         results.push({ kind: "ok", name: parsed.name, detail: `v${row.localVersion} → v${version}` });
       } catch (err) {
+        if (controller.signal.aborted) {
+          results.push({ kind: "skipped", name: row.skill.name, detail: "已停止（未完成）" });
+          setBulkResults([...results]);
+          break;
+        }
         results.push({ kind: "failed", name: row.skill.name, detail: errorText(err) });
       }
       setBulkResults([...results]);
       setTick((n) => n + 1);
     }
+    bulkAbortRef.current = null;
     setBulkRunning(false);
     setBulkDone(true);
     const ok = results.filter((item) => item.kind === "ok").length;
@@ -1050,12 +1085,20 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
     const skipped = results.filter((item) => item.kind === "skipped").length;
     setMsg({
       kind: failed > 0 ? "error" : "ok",
-      text: `社区技能更新完成：成功 ${ok} / 失败 ${failed}${skipped > 0 ? ` / 跳过 ${skipped}` : ""}`,
+      text: controller.signal.aborted
+        ? `社区技能更新已停止：成功 ${ok} / 失败 ${failed} / 跳过 ${skipped}`
+        : `社区技能更新完成：成功 ${ok} / 失败 ${failed}${skipped > 0 ? ` / 跳过 ${skipped}` : ""}`,
     });
     if (ok > 0) {
       setShowGoAssign(true);
       onInstalled?.();
     }
+  };
+
+  /** 停止批量更新：终止在途请求，已完成结果保留（未开始的不会再发）。 */
+  const stopBulkUpdate = () => {
+    setBulkStopped(true);
+    bulkAbortRef.current?.abort();
   };
 
   /* ── 渲染 ── */
@@ -1261,7 +1304,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
                     <button
                       type="button"
                       className="ui-btn ui-btn-sm ui-btn-primary"
-                      disabled={busyId === item.id}
+                      disabled={Boolean(busyId) || bulkRunning}
                       onClick={() =>
                         void startInstall({
                           id: item.id,
@@ -1327,7 +1370,8 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
               if (state.kind !== "encrypted" && state.kind !== "plain") return;
               if (wantsBulk) {
                 setBulkOpen(true);
-                void runBulkUpdate(state.key, bulkRows);
+                // 无 Key 分支在 openBulkUpdate 里已冻结 bulkRows；这里再兜底一次空数组。
+                void runBulkUpdate(state.key, bulkRows.length > 0 ? bulkRows : communityUpdates);
               } else if (wantedInstall) {
                 runDownload(wantedInstall.target, state.key).catch((err: unknown) =>
                   setMsg({ kind: "error", text: errorText(err) }),
@@ -1346,6 +1390,7 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
         <BulkUpdateDialog
           rows={bulkRows}
           running={bulkRunning}
+          stopped={bulkStopped}
           results={bulkResults}
           done={bulkDone}
           onConfirm={() => {
@@ -1362,11 +1407,14 @@ export function SkillHubPanel({ skills, deps, onInstalled, onGoAssign }: SkillHu
             })();
           }}
           onClose={() => {
+            if (bulkRunning) return;
             setBulkOpen(false);
             setBulkDone(false);
+            setBulkStopped(false);
             setBulkResults([]);
             setBulkRows([]);
           }}
+          onStop={stopBulkUpdate}
           onGoAssign={goAssign}
         />
       )}

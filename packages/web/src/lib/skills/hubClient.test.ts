@@ -268,3 +268,49 @@ describe("社区 Key 本机存储", () => {
     await expect(readHubKeyState()).resolves.toEqual({ kind: "missing" });
   });
 });
+
+describe("错误透传与超时/取消（d.113 P1-3 / P1-8）", () => {
+  it("429 带 retryAfter：透出「上游限流，请约 N 秒后重试」，并保留原 status", async () => {
+    const fetchImpl = async () => jsonResponse({ error: "too many requests", retryAfter: 5 }, 429);
+    const error = await fetchHubStatus({ fetchImpl }).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(SkillHubError);
+    expect((error as SkillHubError).status).toBe(429);
+    expect((error as Error).message).toContain("上游限流，请约 5 秒后重试");
+  });
+
+  it("402：透出服务端中文 error；坏 JSON 错误体回落 HTTP 状态", async () => {
+    const fetchImpl = async () => jsonResponse({ error: "余额不足，请充值后再下载" }, 402);
+    const error = await fetchHubStatus({ fetchImpl }).catch((err: unknown) => err);
+    expect((error as SkillHubError).status).toBe(402);
+    expect((error as Error).message).toContain("余额不足，请充值后再下载");
+
+    const brokenBody = async () => new Response("oops", { status: 500 });
+    const fallback = await fetchHubStatus({ fetchImpl: brokenBody }).catch((err: unknown) => err);
+    expect((fallback as SkillHubError).status).toBe(500);
+    expect((fallback as Error).message).toContain("HTTP 500");
+  });
+
+  it("超时（可注入 timeoutMs）：转中文「请求超时」而不是挂死", async () => {
+    const fetchImpl = ((_: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const abort = new Error("aborted");
+          abort.name = "AbortError";
+          reject(abort);
+        });
+      })) as unknown as typeof fetch;
+    await expect(fetchHubStatus({ fetchImpl, timeoutMs: 20 })).rejects.toThrow(
+      /技能社区请求超时/,
+    );
+  });
+
+  it("外部取消：已 abort 的 signal 不再发请求，错误是「请求已取消」", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchImpl = vi.fn();
+    await expect(
+      fetchHubStatus({ fetchImpl: fetchImpl as unknown as typeof fetch, signal: controller.signal }),
+    ).rejects.toThrow(/请求已取消/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
