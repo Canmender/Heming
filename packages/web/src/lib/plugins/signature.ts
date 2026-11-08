@@ -49,6 +49,9 @@ export function signedManifestText(manifest: PluginManifest): string {
     publisher: manifest.publisher ?? null,
     permissions: manifest.permissions,
     contributions: manifest.contributions,
+    // 界面插件（bundle）把 files/** 摘要绑进清单，签名因此覆盖代码字节。
+    // 声明式包没有该字段 → canonicalJsonText 丢弃 undefined，旧包签名逐字节不变。
+    packageSha256: manifest.packageSha256,
   });
 }
 

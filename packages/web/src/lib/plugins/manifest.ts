@@ -1285,6 +1285,8 @@ export interface PluginManifest {
   /** 可选：发布者与签名（d.67；旧 v3 清单没有这两个字段）。 */
   publisher?: PluginPublisher;
   signature?: PluginSignature;
+  /** 界面插件：`files/**` 的确定性内容摘要（被签名覆盖；桌面安装器重算比对）。 */
+  packageSha256?: string;
 }
 
 /** 分发形态（规格 §2.2）：纯声明式清单 / 带文件的界面插件包。 */
@@ -1443,6 +1445,7 @@ function fromV5(parsed: PluginV5ParseResult): PluginManifest {
     meta: copyMeta(v5.meta),
     ...(v5.publisher ? { publisher: { ...v5.publisher } } : {}),
     ...(v5.signature ? { signature: { ...v5.signature } } : {}),
+    ...(v5.packageSha256 ? { packageSha256: v5.packageSha256 } : {}),
   };
 }
 

@@ -458,16 +458,22 @@ const ContributionsSchema = z
 const ManifestV5Object = z.object({
   schemaVersion: z.literal(PLUGIN_SCHEMA_VERSION_V5),
   /**
-   * 界面插件（bundle）必填：整个 `package.tgz` 字节的 sha256。
+   * 界面插件（bundle）必填：`files/**` 的**确定性内容摘要**（不是 tgz 自身哈希）。
+   *
+   * 算法：按路径排序后对每条 `path len sha256(content)
+` 再取 sha256；
+   * 与 tar/gzip 的时间戳、压缩级别无关，换任一文件或路径都会变。
+   * 为什么不用「整个 tgz 的 sha256」：清单本身在 tgz 里，写自己的包哈希会构成
+   * 自引用（不存在不动点）。
    *
    * 为什么放进清单：首方签名只覆盖清单文本（`canonicalManifestText`），
    * 不包含 `files/**` 的代码字节——攻击者可以保留官方清单与签名、替换包内
-   * JS。「清单里绑住包摘要」之后，签名会**间接覆盖全部代码字节**；
-   * 桌面安装器解包后计算 tgz sha256 与它比对（审计 P0-1）。
+   * JS。「清单里绑住 files 摘要」之后，签名会**间接覆盖全部代码字节**；
+   * 桌面安装器解包后重算摘要与它比对（审计 P0-1）。
    */
   packageSha256: z
     .string()
-    .regex(/^[0-9a-f]{64}$/, { error: "packageSha256 必须是 64 位小写 hex（整个 package.tgz 的 sha256）" })
+    .regex(/^[0-9a-f]{64}$/, { error: "packageSha256 必须是 64 位小写 hex（files/** 的确定性内容摘要）" })
     .optional(),
   id: z.string().regex(ID_RE, { error: "插件 id 只能是小写字母/数字/._-，≤64" }),
   name: trimmed(64),
@@ -600,7 +606,7 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
 
   if (distribution === "bundle" && !parsed.data.packageSha256) {
     throw new PluginManifestInvalidError(
-      "界面插件（distribution: bundle）必须提供 packageSha256（整个 package.tgz 的 sha256，用于让签名覆盖包内代码字节）",
+      "界面插件（distribution: bundle）必须提供 packageSha256（files/** 的确定性内容摘要，用于让签名覆盖包内代码字节）",
     );
   }
   if (distribution !== "bundle" && parsed.data.packageSha256) {
