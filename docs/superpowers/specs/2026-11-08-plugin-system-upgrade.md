@@ -3,7 +3,7 @@
 > 分支：`feat/d103-plugin-system`（基线 `9c4bfd2` / `d.103.2.42.0`（本分支上另一并行会话已提交 d.103 模型页重构；本升级预计占 d.104，以实际 bump 为准））
 > 对标调研：`docs/research/2026-11-08-plugin-system-benchmark.md`
 > 本文是**契约**：实施时字段名、存储键、路由、撤销语义以本文为准；改契约先改本文。
-> 状态：设计完成 + 已做可实现性自检（`docs/research/2026-11-08-plugin-upgrade-feasibility.md`）+ 跨生态对标（`docs/research/2026-11-08-plugin-ecosystem-cross-reference.md`），本规格已按自检 F1–F10 与对标 N1–N14 修订；待确认实施范围（阶段 A/B/C/D 见 §10）。
+> 状态：设计完成 + 已做可实现性自检（`docs/research/2026-11-08-plugin-upgrade-feasibility.md`）+ 跨生态对标（`docs/research/2026-11-08-plugin-ecosystem-cross-reference.md`），本规格已按自检 F1–F10 与对标 N1–N17 修订；待确认实施范围（阶段 A/B/C/D 见 §10）。
 
 ## 0. 决策（用户口径与本文边界）
 
@@ -332,6 +332,7 @@ export interface InstallResult {
 | GET | `/api/plugin-market/assets/:id/:version/:file` | 公开 | 白名单扩展名 + 路径穿越守卫；`Cache-Control: public, max-age=600` |
 | PUT | `/api/plugin-market` | `x-publish-key` | 替换索引（body ≤4MB，必须是合法 JSON 对象）；未配置密钥 503 |
 
+- **版本内容不可变（N15，学 MCP Registry）**：同 `id` + `version` 重复 PUT 时，若字节 sha256 与已存不同 → **409**（要求提升版本号），字节相同 → 200 幂等。已发布版本不再被静默改写；客户端仍以目录 sha256 为准。
 - 索引请求可带宿主版本（N2，学 n8n）：`GET /api/plugin-market?hostVersion=d.104.2.42.0` → 服务端按索引里每个版本的 `engines.heming` 过滤掉不兼容版本（只读索引里的字符串，不解析插件包）；不带参数 = 返回全量。客户端仍用同一 `satisfiesEngines` 兜底（双保险）。
 - 既有 `/api/plugins*` 五条路由**原样保留**（旧客户端、旧目录、离线降级都靠它）。
 
@@ -376,6 +377,9 @@ export interface InstallResult {
 - 客户端用 zod 校验索引（`packages/shared/src/plugin/index.ts`）；**任何一条不合法只丢弃该条并计数告警**，不让整份索引失效（市场不可用是产品事故）。
 - `versions` 按 SemVer 序展示；`engines` 不满足的版本标「需要更新和鸣」并禁用安装；默认选最高兼容版本。
 - 兼容性判定用 §4.3 的同一实现。
+- **版本级状态位（N15）**：每个版本可带 `status: "active" | "deprecated" | "deleted"` 与 `statusMessage`（≤500 字符）；`deprecated` 仍可安装但详情页醒目提示，`deleted` 不再可安装、已装用户看到迁移提示。
+- **弃用分两层（学 Obsidian + MCP Registry）**：① 整插件下架 → 索引条目 `status: "removed"` + `deprecatedReason` + `alternativeId`（留档、仍可查历史版本）；② 单版本废弃 → 该版本 `deprecated` + `statusMessage`。不要用「删条目」表达弃用。
+- **latest 指针与增量同步（N16，学 MCP Registry）**：索引顶层给每个插件 `latest`（版本号）与 `updatedAt`；`GET /api/plugin-market?updatedSince=<ISO>` 只返回该时间后变更的条目（服务端比时间、不发网络请求），客户端可低频增量刷新。
 - **生命周期字段（N1，学 Dify/Claude Code）**：每个插件条目可带 `status: "active" | "deprecated" | "removed"`、`deprecatedReason`、`alternativeId`（建议迁到哪个插件）、`renames`（旧 id → 新 id）、`channel: "release" | "prerelease"`。`removed` 的条目从市场列表隐藏但保留版本信息，已安装用户看到「已下架，建议迁移到 X」。
 
 ### 6.3 客户端市场 UI
@@ -386,6 +390,7 @@ export interface InstallResult {
 - 详情页：图标、标题、描述、作者、来源（主页/仓库）、分类/标签、版本列表（推荐/已安装/不兼容标记）、详细介绍（markdown，禁原始 HTML）、**安装**按钮。
 - 安装流程复用现有 `InstallDialog`：预览（权限/贡献/engines/签名）→ 确认 → 进度 → 结果三态。**下载后仍校验 sha256**，不因来自索引而跳过。
 - 离线/索引 404：回落现有「仓库」面板（v1 `/api/plugins`），并提示「目录暂时不可用，已切换到兼容列表」。
+- **详情页三块（N17，学 VS Code/Raycast）**：概述（图标/描述/作者/来源/分类标签）+ 贡献（技能/服务/命令/工具明细）+ 版本历史（每版状态、时间、大小、指纹）；版本下拉可选「安装指定版本」，并提供「回滚到上一版（last-known-good）」入口（有 `previous` 时）。
 - **版本选择与预发布（N13，学 VS Code）**：详情页版本列表可取「安装指定版本」；`channel: prerelease` 的版本默认折叠在「预发布」分组里，需用户在设置或详情页显式允许才展示（不默认推送预发布）。
 
 ## 7. 信任升级
@@ -417,7 +422,7 @@ v2：
 | 上限不一致 | 客户端 20MB，目录允许 40MB | 统一 20MB（目录校验同步收紧） |
 | bundle 版 `commands` 被接受但不物化 | 清单接受、安装后命令不出现 | 选**物化**：web 经 `__heming_widgets.list()` 读已装 bundle 清单并入命令面板；因为 bundle 不允许 `skills`，target 收紧为 `page` / `plugin` / `settings`（自检 F7） |
 | 文档说「手工改过的技能不会被误删」 | 服务端只保护「改了 origin 的服务」 | 明知差异：文档改为「手工**新建**的技能不会误删；被插件带入后手工编辑的技能仍属插件」，并在详情页标注 |
-| widget CSP 无回归守卫（N11，对标 Figma/Chrome/Electron） | 现状按清单生成，但改坏了没有测试会红；且 widget 若嵌外部页面，`connect-src` 白名单只约束插件自己的请求（Figma 同款缺口） | ① 加**CSP 最小基线**回归用例：`script-src 'self'`（`eval:true` 才加 `'unsafe-eval'`）、`object-src 'none'`、禁远程脚本、`connect-src` 只回环 + 清单 network；② 文档写明「界面插件不得嵌外部页面」，并在 CSP `frame-src 'none'` 上固化 |
+| widget CSP 无回归守卫（N11，对标 Figma/Chrome/Electron） | 现状按清单生成，但改坏了没有测试会红；且 widget 若嵌外部页面，`connect-src` 白名单只约束插件自己的请求（Figma 同款缺口） | ① 加**CSP 最小基线**回归用例：`script-src 'self'`（`eval:true` 才加 `'unsafe-eval'`）、`object-src 'none'`、禁远程脚本、`connect-src` 只回环 + 清单 network；② 文档写明「界面插件不得嵌外部页面」，并在 CSP `frame-src 'none'` 上固化；③ IPC 已在用 `sender === win.webContents` 身份比对（比 origin 更强），再补一层 `senderFrame.origin` 断言做纵深防御 |
 
 ## 8. 插件区 UI（阶段 C）
 
@@ -446,7 +451,7 @@ v2：
 | `docs/PLUGIN-AUTHORING.md` | 从零写一个插件、v5 字段速查、市场上架、常见拒绝原因、调试三招 | C |
 | `plugins/demo-*` fixtures | 最小技能包 / 技能+MCP+命令包 / 坏包（供 lint 与测试用） | A |
 | `scripts/publish-plugin.mjs` 扩展 | 生成 `market.json`、打包 detail/assets、上传索引 | B |
-| Agent 工具（`plugin_market_search` / `plugin_install_preview`） | **默认只读**：检索 + 预览（差异/权限/兼容性）；写操作（apply）要等 HITL 支持非聊天页确认后再开（自检 F8） | C（可选） |
+| Agent 工具（`plugin_market_search` / `plugin_install_preview` / `plugin_install`） | **三级权限（N17，参照 DSH 保守边界）**：`search`/`preview` 免批（只读）；`install` 走一次性批准（HITL pending，确认卡复用 UI 预览）；运行期不重复批。写操作要等 HITL 支持非聊天页确认后再开（自检 F8） | C（可选） |
 | `docs/PLUGINS.md` 更新 | v5 字段、市场、事务语义、信任 | A/B 完成后 |
 
 ## 10. 分阶段实施计划

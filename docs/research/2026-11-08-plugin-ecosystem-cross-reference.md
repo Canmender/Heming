@@ -2,7 +2,7 @@
 
 > 目的：在「官方 DSH 对标」（`2026-11-08-plugin-system-benchmark.md`）之外，把**声明式插件市场**、**代码型扩展平台**、**界面插件沙箱**三类生态放在一起看，回答三个问题：① 哪些设计是跨生态共识；② 和鸣该借哪一条；③ 哪些只是某个生态的包袱不要抄。
 > 证据：4 份调研笔记（约 1380 行，均带 URL 或 `repo/path:line`）＋本次对和鸣代码的可行性探针。笔记原文见文末「证据来源」。
-> 结论落点：本文件 §4 的 N1–N14 已并入 `docs/superpowers/specs/2026-11-08-plugin-system-upgrade.md`。
+> 结论落点：本文件 §4 的 N1–N17 已并入 `docs/superpowers/specs/2026-11-08-plugin-system-upgrade.md`。
 
 ## 0. 结论速览
 
@@ -160,7 +160,24 @@
 - 弃用/下架：Dify 的 `alternative_plugin_id` 是最好的产品语义（告诉用户迁到哪个），必须进索引字段。
 - 预发布渠道 + 版本选择器（VS Code）：和鸣市场 v2 可选加 `channel: release|prerelease` 与「安装指定版本」，成本低。
 
-## 4. 对和鸣的 14 条增量设计（已并入规格）
+### 3.8 市场 UX 与 MCP Registry（补调研）
+
+> 证据：`notes-x-market-ux.md`（VS Code 官方文档、Raycast 官方页面实测、MCP Registry 官方 API 实调）。Chrome/Figma/Dify/n8n/Obsidian 的列表页字段本轮网络不可达，表中明写「未获取到」，不做推测。
+
+- **市场 v2 的最小可用形态是四件事**：能筛（分类/状态/关键词）、能看详情、知道有更新、能选版本——不是评分/推荐/AI 导购。VS Code 的列表项只需「简介 + 发布者 + 下载量 + 评分」就能支撑发现；和鸣没有评分数据，用「安装数（服务端可统计）+ 官方/首方标记」即可。
+- **详情页骨架**：VS Code = README + Feature Contributions + Changelog + Dependencies；Raycast = `Overview / Commands / Version History` 三页签（实测）。和鸣可落成「概述 / 贡献 / 版本历史」三块。
+- **回滚 = 装旧版本**：VS Code 是右键 `Install Another Version`，Raycast 是 Version History 页签逐条 changelog；**两家都没有「一键回滚」**。和鸣已有 `previous` 清单，可以做得更好：版本下拉 + 「回滚到上一版」（标注 last-known-good）。
+- **更新三段式**：检查（`@updates` 过滤 + 徽标）→ 单个/批量更新 → 重启宿主提示。VS Code 的自动更新默认「延迟一小段再装」（防刚发布的坏版本立刻扩散）——和鸣应保持**手动更新 + 明确提示**，不默认自动。
+- **禁用是一等状态**：VS Code 有 `@installed/@enabled/@disabled/@updates/@deprecated` 过滤，说明「装/启用/停用/卸」是四个状态而不是两个；和鸣的模块/插件已经接近，市场 v2 补状态筛选即可。
+- **弃用做成版本级状态位（最该抄的一条）**：MCP Registry 用 `status: active | deprecated | deleted` + `statusMessage`（≤500 字），可以 PATCH 到**具体版本**；VS Code 有 `@deprecated` 过滤。和鸣目录若没有 status，弃用只能删条目。
+- **MCP Registry 是「元数据层 + 包指针」不是商店**：托管 `server.json`（name/description/version/packages[]/remotes[]），安装指向 npm/pypi/nuget/cargo/oci/mcpb；官方明确「不托管代码、不做评级、curation 交给下游」。版本字符串**发布后不可变**、**禁止版本范围**、支持 `version=latest` 与 `updated_since` 增量同步、`include_deleted`。
+- **Agent 装插件的权限要按「读/写/装」分级**：DSH 连 `list_*` 都要求全权限/审批（保守侧）；推荐和鸣分三级——`search` 免批、`preview` 免批、`install` 一次性批准、运行期不再重复批。
+- **Obsidian 的目录是「纯数据层」最好抄的一家**：`community-plugins.json`（10,085 条：id/name/author/description/repo）+ `community-plugins-removed.json`（175 条，**带人类可读 `reason`**）+ `community-plugin-stats.json`（下载量/更新时间/逐版本下载数）+ `community-plugin-deprecation.json`（**id → 被废弃的版本号数组**）。→ 列表页的「作者/下载量/更新时间」可直接从数据算，不需要后端；**弃用分两层**：整插件下架写 reason，单版本拉黑只列版本号。
+- **Chrome 的更新语义（不借但要知道）**：已上架 item 可按百分比灰度、提高比例不需重审、送审期间旧版继续服务、版本号必须递增；用户侧**没有回滚**。和鸣插件是手动更新、无流量规模，**不引入灰度**，但「版本号不可复用」与「更新新增权限要重新同意」两条已并入规格（N4/N15）。
+- **和鸣的弃用模型定为两层**（学 Obsidian + MCP Registry）：① 整插件 `status: removed` + `deprecatedReason` + `alternativeId`；② 单版本 `status: deprecated` + `statusMessage`（≤500 字），版本仍可查看/安装但灰标提示。这比「删条目」对私有源/企业源友好，也让已装用户能收到迁移通知。
+
+
+## 4. 对和鸣的 17 条增量设计（已并入规格）
 
 | # | 来源 | 设计增量 | 落点 |
 |---|---|---|---|
@@ -178,6 +195,9 @@
 | N12 | Claude Code | 声明合并语义写进 v5：技能/服务/工具束**按名追加或更新**，命令**按 id 替换**，删除即移除（现状按名匹配，需在规范里写明） | 规格 §4.5 |
 | N13 | Chrome/VS Code | 预发布渠道 + 「安装指定版本」+ 版本选择器 | 规格 §6.3（阶段 C） |
 | N14 | VS Code | 生效语义如实交代：声明式即时生效；bundle 启停/更新需重建窗口（UI 文案写明） | 规格 §5.5 |
+| N15 | MCP Registry / VS Code | 索引**版本级状态位**：`status(active/deprecated/deleted)` + `statusMessage(≤500)`；发布版本**内容不可变**（同 id+version 内容变了必须提版本号） | 规格 §6.1/§6.2 |
+| N16 | MCP Registry | `latest` 指针 + `includeDeleted` / `updatedSince` 增量同步参数（服务端只读索引，不发请求） | 规格 §6.1 |
+| N17 | VS Code / Raycast / DSH | 详情页三块（概述/贡献/版本历史）+ 版本下拉与「回滚到上一版（last-known-good）」；Agent 侧权限三级（search 免批 / preview 免批 / install 一次性批准） | 规格 §6.3/§9 |
 
 ## 5. 与 DSH 调研的合并判断
 
@@ -196,7 +216,7 @@
 1. 本机 `web_search` 返回 401、`raw.githubusercontent.com` 被重置 → 部分结论来自官方文档镜像与 `api.github.com`，未做「线上页面」二次核对。
 2. Claude Code 的 `marketplace.schema.json` 实测 404；「Claude Code 无宿主版本字段」是**逐字段核对后的文档结论**，不是绝对不存在。
 3. VS Code Marketplace 是否已对公开市场强制签名、审核 SLA；Chrome Web Store 费用与 2FA 细节；n8n verified 的完整标准页未逐页拉取；Dify marketplace 后台生成器闭源（字段从 API 与实体模型反推）。
-4. 专门的市场 UX 横向（7 家列表页/详情页截图级对照）本轮未完整完成；§3.3/§3.7 的字段结论来自官方文档与 API，不是 UI 像素级对照。
+4. 市场 UX 横向只拿到 VS Code/Raycast 两家的字段级证据与 MCP Registry 的 API 实测；Chrome/Figma/Dify/n8n/Obsidian 的列表页因网络不可达未获取，§3.8 表内已逐格标注。
 5. 未获取到任何生态的「恶意插件真实事故统计」，因此本文不引用未核实的安全事件（Obsidian CVE 有 NVD 编号，属可核实条目）。
 
 ## 证据来源
@@ -204,5 +224,6 @@
 - `D:/_research/notes-x-declarative-marketplaces.md`（329 行）：Claude Code / Dify / n8n，含 Dify 市场 API 实调与 daemon 源码行号。
 - `D:/_research/notes-x-vscode-chrome.md`（338 行）：VS Code 贡献点/激活/签名/兼容 + Chrome 权限/CRX3/商店审核。
 - `D:/_research/notes-x-sandbox-trust.md`（410 行）：Figma/Obsidian/Raycast 沙箱与审核 + TUF/provenance/Ed25519 方案 + Electron 安全清单。
+- `D:/_research/notes-x-market-ux.md`（305 行）：VS Code/Raycast 市场页字段与生命周期、MCP Registry 条目/版本/API 实测、Agent 安装审批。
 - `D:/_research/notes-dsh-plugin-system.md`、`notes-dsh-cordis-model.md`、`notes-heming-plugin-audit.md`：DSH 体系与和鸣审计（见另一篇 benchmark 文档）。
 - 和鸣代码探针与实测数据：`docs/research/2026-11-08-plugin-upgrade-feasibility.md`。
