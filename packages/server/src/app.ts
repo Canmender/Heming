@@ -28,6 +28,7 @@ import { presence } from "./presence.js";
 import { dayKeyUtc, parseDayKey, summarizeTeamUsage, usageRangeBounds } from "./teamUsage.js";
 import { createPluginCatalog } from "./pluginCatalog.js";
 import { createPluginMarketRouter } from "./pluginMarket.js";
+import { createSkillHubRouter } from "./skillHub.js";
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -104,6 +105,12 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
    */
   app.use("/api/plugin-market", createPluginMarketRouter({ dir: pluginCatalog.dir, publishKey }));
   app.use(express.json({ limit: "8mb" }));
+  /**
+   * 技能社区（d.109）：服务端代理虾评（上游没有 CORS 头，浏览器不能直连）。
+   * 挂在 `express.json` 之后：`POST /api/skill-hub/register` 需要解析 JSON body。
+   * 上游 base / 开关由 `HEMING_SKILL_HUB_BASE` / `HEMING_SKILL_HUB` 控制（见 skillHub.ts）。
+   */
+  app.use("/api/skill-hub", createSkillHubRouter());
 
   // 注：req 参数类型不能用默认的 Request（P=ParamsDictionary，值为 string|string[]），
   // 否则会作为 P 的推断候选把路由参数拖成 string|string[]，导致 req.params.id 类型报错。
