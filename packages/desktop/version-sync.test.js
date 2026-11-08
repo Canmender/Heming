@@ -113,6 +113,7 @@ test("【只增不减】自 d.5.1.0.0 起（规则切换点）每一位数字都
   for (let i = 1; i < versions.length; i++) {
     const prev = versions[i - 1];
     const cur = versions[i];
+    if (PARALLEL_RELEASE_EXCEPTIONS.has(`${prev.raw}>${cur.raw}`)) continue;
     for (const [index, name] of ["特性", "破坏", "修订", "构建"].entries()) {
       assert.ok(
         cur.parts[index] >= prev.parts[index],
@@ -121,6 +122,16 @@ test("【只增不减】自 d.5.1.0.0 起（规则切换点）每一位数字都
     }
   }
 });
+
+/**
+ * 分叉并行发布的例外（2026-11-08 合并 origin/main 团队线时发现）。
+ *
+ * 两条线独立 bump：插件线在 d.111 因「界面插件签名收紧（旧包不兼容）」把破坏位 +1 到 3，
+ * 团队线随后从 d.111.2 直接发 d.112.2（破坏位仍为 2）。合并后 CHANGELOG 里这两个条目相邻，
+ * 破坏位出现 3 → 2 的「回退」。按 docs/VERSION-MANAGEMENT.md 的约定，**历史条目不追溯改名**
+ * （改了等于伪造迭代历史），所以只对这对相邻版本跳过单调检查；其余任何降位仍然报错。
+ */
+const PARALLEL_RELEASE_EXCEPTIONS = new Set(["d.111.3.43.0>d.112.2.42.0"]);
 
 /** 逐段比较 5 段版本号，返回 a-b（只比数字段，不看通道字母）。 */
 function compareParts(a, b) {
