@@ -211,6 +211,44 @@ function onlyWindow(created) {
   return created[0];
 }
 
+/* ── 生命周期事件（d.108）测试小工具 ── */
+
+/** 声明了 lifecycle 权限的记录（默认启停/可见状态由用例覆盖）。 */
+function lifecycleRecord(overrides = {}) {
+  return {
+    id: "heming.pet",
+    name: "桌宠",
+    version: "1.0.0",
+    enabled: true,
+    widget: SPEC,
+    permissions: { events: ["notify", "lifecycle"] },
+    settings: { bubble: true },
+    installedAt: "2026-11-07T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** 一台只装了「声明 lifecycle」插件的 store。 */
+function lifecycleStore() {
+  const store = makeStore();
+  store.setRecords([lifecycleRecord()]);
+  return store;
+}
+
+/** 某窗口收到的生命周期事件载荷（按投递顺序）。 */
+function lifecycleEvents(win) {
+  return win.webContents._sent
+    .filter((item) => item.ch === "widget:lifecycle")
+    .map((item) => item.payload);
+}
+
+/** 触发页面加载完成（真实环境由 Electron 在 loadURL 完成后触发）。 */
+function finishLoad(win) {
+  const listener = win.webContents._listeners["did-finish-load"];
+  assert.ok(listener, "窗口应注册 did-finish-load");
+  listener();
+}
+
 /* ────────────────────────────── 启动与显隐 ────────────────────────────── */
 
 test("启动：默认不自动显示（用户上次关掉的东西不该自己弹回来）", () => {
@@ -669,4 +707,124 @@ test("widget:chat-config：binding.agentId 由插件设置覆盖（主窗固定�
   assert.equal(after.binding.agentId, "a1");
   // 覆盖不进缓存：设置变更会让缓存失效，主窗被重新问一次
   assert.equal(calls, 2);
+});
+
+/* ──────────────────── 生命周期事件（d.108，规格 §5.4） ──────────────────── */
+
+test("生命周期：首装 installed 在窗口加载完成后投递一次，重载不重放", () => {
+  const store = lifecycleStore();
+  store.setRecords([]); // 启动时没有任何插件 → 补种阶段为空
+  const { host, created } = makeHost({ store });
+  host.start();
+
+  // 运行中首装一只新插件（真实链路：widgetStore.install 之后 main 调 reconcile）
+  store.setRecords([lifecycleRecord({ id: "heming.clock", name: "时钟" })]);
+  host.reconcile();
+  assert.equal(created.length, 0, "默认不自动显示，首装这一轮不必建窗");
+
+  // 用户显示 → 建窗 → 页面加载完成才投递（窗口没建好前排队）
+  host.action("heming.clock", "show");
+  const win = onlyWindow(created);
+  assert.deepEqual(lifecycleEvents(win), [], "页面还没加载完，不应提前投递");
+  finishLoad(win);
+  assert.deepEqual(lifecycleEvents(win), [{ event: "installed", version: "1.0.0" }]);
+
+  // 重载/窗口重建不重放（事件「取走即清空」）
+  finishLoad(win);
+  assert.deepEqual(lifecycleEvents(win), [{ event: "installed", version: "1.0.0" }]);
+  host.destroyAll();
+});
+
+test("生命周期：启用发 enabled、停用发 disabled；未声明 lifecycle 的插件一条都收不到", () => {
+  const store = lifecycleStore();
+  store.writeState("heming.pet", { scale: 1, visible: true });
+  store.setRecords([lifecycleRecord({ enabled: false })]);
+  const { host, created } = makeHost({ store });
+  host.start();
+  assert.equal(created.length, 0, "停用的插件不建窗");
+
+  // 启用 → 建窗 → 加载完成投递 enabled
+  store.setRecords([lifecycleRecord({ enabled: true })]);
+  host.reconcile();
+  const win = onlyWindow(created);
+  finishLoad(win);
+  assert.deepEqual(lifecycleEvents(win), [{ event: "enabled", version: "1.0.0" }]);
+
+  // 停用 → 最后一条 disabled，随后销毁（测试夹具的 setTimeout 同步执行）
+  store.setRecords([lifecycleRecord({ enabled: false })]);
+  host.reconcile();
+  assert.deepEqual(lifecycleEvents(win), [
+    { event: "enabled", version: "1.0.0" },
+    { event: "disabled", version: "1.0.0" },
+  ]);
+  assert.equal(win.isDestroyed(), true);
+
+  // 同一套流程换成「未声明 lifecycle」的插件 → 启停都不产生生命周期事件
+  const plain = makeStore();
+  plain.writeState("heming.pet", { scale: 1, visible: true });
+  plain.setRecords([{ ...plain._records[0], enabled: false }]);
+  const second = makeHost({ store: plain });
+  second.host.start();
+  plain.setRecords([{ ...plain._records[0], enabled: true }]);
+  second.host.reconcile();
+  const plainWin = onlyWindow(second.created);
+  finishLoad(plainWin);
+  assert.deepEqual(lifecycleEvents(plainWin), []);
+  plain.setRecords([{ ...plain._records[0], enabled: false }]);
+  second.host.reconcile();
+  assert.deepEqual(lifecycleEvents(plainWin), []);
+  assert.equal(plainWin.isDestroyed(), true);
+});
+
+test("生命周期：未声明 lifecycle 的插件连 installed 也收不到", () => {
+  const store = makeStore();
+  store.setRecords([]);
+  const { host, created } = makeHost({ store });
+  host.start();
+
+  const plain = { ...makeStore()._records[0], id: "heming.plain", name: "普通插件" };
+  plain.permissions = { events: ["notify"] };
+  store.setRecords([plain]);
+  host.reconcile();
+  host.action("heming.plain", "show");
+  const win = onlyWindow(created);
+  finishLoad(win);
+  assert.deepEqual(lifecycleEvents(win), []);
+});
+
+test("生命周期：版本变化发 updated（带 from），窗口按新版本重建，旧窗口收不到", () => {
+  const store = lifecycleStore();
+  store.writeState("heming.pet", { scale: 1, visible: true });
+  const { host, created } = makeHost({ store });
+  host.start();
+  const first = onlyWindow(created);
+  finishLoad(first);
+  assert.deepEqual(lifecycleEvents(first), [], "宿主启动时已装的插件不补发 installed");
+
+  store.setRecords([lifecycleRecord({ version: "2.0.0" })]);
+  host.reconcile();
+  assert.equal(created.length, 2, "版本变化应重建窗口");
+  assert.equal(first.isDestroyed(), true);
+  const second = created[1];
+  finishLoad(second);
+  assert.deepEqual(lifecycleEvents(second), [{ event: "updated", version: "2.0.0", from: "1.0.0" }]);
+  assert.deepEqual(lifecycleEvents(first), [], "旧窗口已被销毁，不该收到 updated");
+  // 重建后不重放
+  finishLoad(second);
+  assert.equal(lifecycleEvents(second).length, 1);
+});
+
+test("生命周期：卸载发 uninstalled（最后一条）后销毁窗口；宿主重启不补发", () => {
+  const store = lifecycleStore();
+  store.writeState("heming.pet", { scale: 1, visible: true });
+  const { host, created } = makeHost({ store });
+  host.start();
+  const win = onlyWindow(created);
+  finishLoad(win);
+  assert.deepEqual(lifecycleEvents(win), [], "重启不补发 installed");
+
+  store.setRecords([]); // 卸载：注册表里已经没有这条
+  host.reconcile();
+  assert.deepEqual(lifecycleEvents(win), [{ event: "uninstalled", version: "1.0.0" }]);
+  assert.equal(win.isDestroyed(), true);
 });

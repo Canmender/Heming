@@ -161,6 +161,21 @@ export interface WidgetNotifyEvent {
   at: string;
 }
 
+/**
+ * 宿主 → widget 的生命周期事件（d.108，规格 §5.4；`widget:lifecycle` 通道）。
+ *
+ * 只投递给清单 `permissions.events` 含 `"lifecycle"` 的界面插件；**是通知不是授权**
+ * （不会因此多出任何宿主能力），且窗口重建/宿主重启后不重放历史事件。
+ * widget 侧的获取方式是 `window.__heming_widget.onLifecycle(cb)`（packages/desktop/widget-preload.js）。
+ */
+export interface WidgetLifecycleEvent {
+  event: "installed" | "enabled" | "disabled" | "updated" | "uninstalled";
+  /** 事件发生时的插件版本；`updated` 为**新**版本。 */
+  version: string;
+  /** 仅 `updated`：被替换掉的旧版本。 */
+  from?: string;
+}
+
 /** 安装结果（`widgets:install` / `widgets:installFromFile`）。 */
 export type WidgetInstallResult =
   | { ok: true; record: WidgetRecord }

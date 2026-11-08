@@ -217,6 +217,24 @@ test("清单守卫：permissions 逐项受控（events/graphics/eval/network）"
   assert.equal(validateBundleManifest(noTool).ok, false);
 });
 
+test("清单守卫：permissions.events 接受 lifecycle（d.108），未知事件仍拒绝", () => {
+  const withLifecycle = baseManifest({
+    permissions: { ...baseManifest().permissions, events: ["notify", "lifecycle"] },
+  });
+  const ok = validateBundleManifest(withLifecycle);
+  assert.equal(ok.ok, true, ok.errors.join("；"));
+  assert.deepEqual(ok.permissions.events, ["notify", "lifecycle"]);
+
+  // 未知事件（如 hook）仍然拒绝，且错误文案列出允许值
+  const unknown = baseManifest({
+    permissions: { ...baseManifest().permissions, events: ["lifecycle", "hook"] },
+  });
+  const bad = validateBundleManifest(unknown);
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors.join("；"), /events 含未知项：hook/);
+  assert.match(bad.errors.join("；"), /允许：notify \/ lifecycle/);
+});
+
 test("首方验签：无签名 / 冒名密钥 / 签名后篡改都拒绝；合法签名通过并记 keyId", () => {
   // 1) 未签名 bundle → 拒绝（d.105 起不再「结构上带签名即可」）
   const unsigned = readPackage(packPackage(packageEntries(baseManifest())));

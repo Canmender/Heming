@@ -47,6 +47,17 @@ const NOTIFY_SUMMARY_MAX = 60;
 /** 托盘「打开设置」落在设置区的哪个 tab（T3 按 settingsTab 落到「外观 · 桌面小组件」）。 */
 const SETTINGS_TAB = "appearance";
 
+/**
+ * 宿主 → widget 的生命周期事件通道（d.108，规格 §5.4）。
+ *
+ * 与 `widget:event`（notify/theme/tray）分开：生命周期有自己的载荷形状
+ * `{ event, version, from? }`，且权限门禁不同（`permissions.events` 含 `lifecycle`）。
+ */
+const LIFECYCLE_CHANNEL = "widget:lifecycle";
+
+/** 窗口未建好前最多排队多少条生命周期事件（窗口一直不打开时防止无限增长）。 */
+const MAX_PENDING_LIFECYCLE = 8;
+
 function text(value, max) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -147,6 +158,19 @@ function createWidgetHost(deps = {}) {
   let displaysWatched = false;
   let theme = getTheme();
   let chatCache = null;
+
+  /**
+   * 生命周期对账状态（d.108，规格 §5.4）。
+   *
+   * - `lifecycleKnown`：上一轮对账看到的每个插件状态（version/enabled/lifecycle 声明）；
+   * - `lifecycleSeeded`：启动后第一轮只「补种」，启动前已装的插件不补发 installed；
+   * - `pendingLifecycle`：窗口还没 did-finish-load 时先排队，加载完成再投递（不重放）；
+   * - `retiring`：已发「最后一条」事件、销毁挪到下一 tick 的 runtime（让 IPC 出队）。
+   */
+  const lifecycleKnown = new Map();
+  let lifecycleSeeded = false;
+  const pendingLifecycle = new Map();
+  const retiring = new Map();
 
   /* ───────────────────────── 公共小工具 ───────────────────────── */
 
@@ -387,6 +411,14 @@ function createWidgetHost(deps = {}) {
         // 重载后渲染层的 interactive 状态归零，主进程也要对齐，否则会卡在"不穿透"
         interactive = false;
         applyMouseIgnore();
+        // 生命周期事件：窗口没建好时排队，页面加载完成再投递（取走即清空 → 重载不重放）
+        for (const payload of takeLifecycle(key)) {
+          try {
+            win.webContents.send(LIFECYCLE_CHANNEL, payload);
+          } catch {
+            /* 窗口刚被销毁：丢弃，不重放 */
+          }
+        }
       });
 
       if (url) win.loadURL(url);
@@ -882,9 +914,97 @@ function createWidgetHost(deps = {}) {
     }
   }
 
+  /* ───────────────────── 生命周期事件（d.108，规格 §5.4） ───────────────────── */
+
+  /** 从注册表记录里取「对账需要比较」的几件事（不保留整份记录，避免持有旧引用）。 */
+  function lifecycleSnapshot(record) {
+    const permissions = (record && record.permissions) || {};
+    const events = Array.isArray(permissions.events) ? permissions.events : [];
+    return {
+      version: typeof record.version === "string" ? record.version : "",
+      enabled: record.enabled === true,
+      /** 只有清单声明了 `permissions.events: ["lifecycle"]` 才允许收生命周期事件。 */
+      lifecycle: events.includes("lifecycle"),
+      /** 用于清理「窗口还没建就卸载」时残留的排队事件。 */
+      widgetId: record.widget && typeof record.widget.id === "string" ? record.widget.id : "",
+    };
+  }
+
+  /** 统一载荷形状 `{ event, version, from? }`（`from` 只有 updated 带）。 */
+  function lifecyclePayload(event, version, from) {
+    const payload = { event, version: typeof version === "string" ? version : "" };
+    if (typeof from === "string" && from) payload.from = from;
+    return payload;
+  }
+
+  /** 窗口还没建好：先排队，等 did-finish-load 再发（窗口重建后不会重放）。 */
+  function queueLifecycle(runtimeKey, payload) {
+    const list = pendingLifecycle.get(runtimeKey) || [];
+    if (list.length >= MAX_PENDING_LIFECYCLE) list.shift();
+    list.push(payload);
+    pendingLifecycle.set(runtimeKey, list);
+  }
+
+  /** 取走并清空某插件排队中的事件（「取走」即保证只投递一次）。 */
+  function takeLifecycle(runtimeKey) {
+    const list = pendingLifecycle.get(runtimeKey) || [];
+    pendingLifecycle.delete(runtimeKey);
+    return list;
+  }
+
+  function pluginRuntime(pluginId) {
+    return [...runtimes.values()].find((item) => item.pluginId === pluginId) || null;
+  }
+
+  /** 直接投递一条生命周期事件；窗口不在/刚销毁返回 false（丢弃，不重放）。 */
+  function sendLifecycle(runtime, payload) {
+    const win = runtime && runtime.window;
+    if (!win || win.isDestroyed()) return false;
+    try {
+      win.webContents.send(LIFECYCLE_CHANNEL, payload);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 发最后一条事件后再销毁窗口（disabled / uninstalled）。
+   *
+   * 为什么不在同一 tick `destroy()`：`webContents.send` 只是把 IPC 排进渲染进程队列，
+   * 紧接着销毁会把还没处理的消息一起带走，插件永远收不到「我要被停用/卸载了」。
+   * 把销毁挪到下一 tick（`setTimer` 已注入，测试里是同步执行，不影响断言）。
+   */
+  function retireRuntime(runtime, payload) {
+    if (!runtime || retiring.has(runtime.key)) return;
+    const delivered = payload ? sendLifecycle(runtime, payload) : false;
+    if (!delivered) {
+      destroyRuntime(runtime);
+      return;
+    }
+    let ran = false;
+    const timer = setTimer(() => {
+      ran = true;
+      retiring.delete(runtime.key);
+      // 状态在「销毁前一 tick」又被改回来（用户手速极快地重新启用/重装）→ 保留窗口
+      const current = typeof store.get === "function" ? store.get(runtime.pluginId) : null;
+      const stillGone = !current;
+      const stillDisabled = !!current && current.enabled === false;
+      if (!stillGone && !stillDisabled) return;
+      if (runtimes.get(runtime.key) === runtime) destroyRuntime(runtime);
+    }, 0);
+    // 注入的 setTimeout 可能是同步执行（测试夹具）：跑过了就不要留下过期条目
+    if (!ran) retiring.set(runtime.key, timer);
+  }
+
   /* ───────────────────────── 生命周期：对账 ───────────────────────── */
 
   function destroyRuntime(runtime) {
+    const timer = retiring.get(runtime.key);
+    if (timer !== undefined) {
+      clearTimer(timer);
+      retiring.delete(runtime.key);
+    }
     runtime.destroy();
     runtimes.delete(runtime.key);
   }
@@ -892,20 +1012,79 @@ function createWidgetHost(deps = {}) {
   /**
    * 按注册表对账：只给「已启用 + 清单有 widget + 文件没坏」的插件建窗；
    * 版本变化就重建；停用/卸载就销毁（保留文件与设置由 store 负责）。
+   *
+   * d.108 起对账同时负责**生命周期事件**（规格 §5.4）：
+   * - 首装 → `installed`（窗口建好、页面加载完成后投递）；
+   * - 启用/停用 → `enabled` / `disabled`；
+   * - 版本变化 → `updated`（载荷带 `from`，窗口已按新版本重建）；
+   * - 从注册表消失 → `uninstalled`（销毁前最后一条，尽力投递）。
+   * 只有清单 `permissions.events` 含 `lifecycle` 的插件才会收到；事件是**通知**，
+   * 不改变任何权限，也不在窗口重建/宿主重启后重放。
    */
   function reconcile() {
     const records = store.list();
+    const recordsById = new Map();
+    for (const record of records) recordsById.set(record.id, record);
+
+    /* ── 1) 卸载：上一轮认识、这一轮注册表里没有 → uninstalled（销毁前最后一次） ── */
+    for (const [pluginId, snapshot] of [...lifecycleKnown.entries()]) {
+      if (recordsById.has(pluginId)) continue;
+      lifecycleKnown.delete(pluginId);
+      // 即便窗口还没建（安装后一直没显示），也要清掉残留的排队事件，避免下次重装误投
+      if (snapshot.widgetId) pendingLifecycle.delete(`${pluginId}:${snapshot.widgetId}`);
+      const runtime = pluginRuntime(pluginId);
+      if (!runtime) continue;
+      retireRuntime(runtime, snapshot.lifecycle ? lifecyclePayload("uninstalled", snapshot.version) : null);
+    }
+
+    /* ── 2) 首装 / 启用 / 停用 / 版本更新 ── */
+    for (const [pluginId, record] of recordsById) {
+      const snapshot = lifecycleSnapshot(record);
+      const previous = lifecycleKnown.get(pluginId);
+      lifecycleKnown.set(pluginId, snapshot);
+      // 启动后第一轮只补种：启动前已装好的插件不补发 installed（规格 §5.4）
+      if (!lifecycleSeeded) continue;
+
+      const widgetId = record.widget && record.widget.id;
+      if (!widgetId) continue;
+      const runtimeKey = `${pluginId}:${widgetId}`;
+
+      if (!previous) {
+        // 运行中新出现的插件 → 首装；窗口还没建，先排队等 did-finish-load
+        if (snapshot.lifecycle) queueLifecycle(runtimeKey, lifecyclePayload("installed", snapshot.version));
+        continue;
+      }
+      if (snapshot.version !== previous.version && snapshot.enabled && previous.enabled) {
+        if (snapshot.lifecycle) queueLifecycle(runtimeKey, lifecyclePayload("updated", snapshot.version, previous.version));
+      }
+      if (!previous.enabled && snapshot.enabled) {
+        if (snapshot.lifecycle) queueLifecycle(runtimeKey, lifecyclePayload("enabled", snapshot.version));
+      }
+      if (previous.enabled && !snapshot.enabled) {
+        const runtime = pluginRuntime(pluginId);
+        if (runtime) pendingLifecycle.delete(runtime.key);
+        retireRuntime(
+          runtime,
+          runtime && previous.lifecycle ? lifecyclePayload("disabled", previous.version) : null,
+        );
+      }
+    }
+    lifecycleSeeded = true;
+
+    /* ── 3) 建窗 / 重建（既有口径） ── */
     const desired = new Map();
     for (const record of records) {
       if (!record.enabled || record.error || !record.widget) continue;
       desired.set(`${record.id}:${record.widget.id}`, record);
     }
     for (const [key, runtime] of [...runtimes.entries()]) {
+      if (retiring.has(key)) continue; // 已排队销毁（disabled/uninstalled），别重复处理
       const next = desired.get(key);
       if (!next || next.version !== runtime.record.version) destroyRuntime(runtime);
     }
     for (const [key, record] of desired) {
       if (runtimes.has(key)) continue;
+      if (retiring.has(key)) continue;
       const runtime = createRuntime(record);
       runtimes.set(key, runtime);
       runtime.loadState();
@@ -924,6 +1103,7 @@ function createWidgetHost(deps = {}) {
 
   function destroyAll() {
     for (const runtime of [...runtimes.values()]) destroyRuntime(runtime);
+    pendingLifecycle.clear();
     unwatchDisplays();
   }
 

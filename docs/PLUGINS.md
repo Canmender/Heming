@@ -301,6 +301,39 @@ node scripts/publish-plugin.mjs packages/pet-widget/dist/package --dest <plugin-
 # 把 <plugin-dir> 同步到服务器的 HEMING_PLUGIN_DIR，客户端「插件区 → 桌面小组件」即可看到
 ```
 
+### 10.5 生命周期事件（d.108，仅 bundle）
+
+界面插件可以在清单里订阅宿主生命周期事件（**未声明就收不到任何一条**）：
+
+```jsonc
+"permissions": { "events": ["lifecycle"] }
+```
+
+| 事件 | 时机 | 载荷 |
+|---|---|---|
+| `installed` | 首装完成、首个窗口页面加载完成后 | `{ event, version }` |
+| `enabled` / `disabled` | 启停生效后（`disabled` 是窗口销毁前最后一条） | `{ event, version }` |
+| `updated` | 版本切换完成、窗口已按新版本重建 | `{ event, version, from }` |
+| `uninstalled` | 卸载时（窗口销毁前最后一条） | `{ event, version }` |
+
+widget 侧订阅（`widget-preload.js` 的 `__heming_widget`）：
+
+```js
+const off = window.__heming_widget.onLifecycle((e) => {
+  // e.event / e.version；updated 时还有 e.from
+});
+```
+
+边界：
+
+- **通知不是授权**：事件不带来任何新能力，权限仍由清单与宿主判定；插件不能靠事件「申请」什么。
+- **权限门禁**：`permissions.events` 不含 `"lifecycle"` 的插件即使安装/启停/更新/卸载也不会收到事件。
+- **不重放**：事件只在状态变化时发一次；窗口重建、页面重载、宿主重启都不补发历史事件——
+  插件状态请用 `info()` / `settings()` 自检（`installed` 在宿主重启后不会重发）。
+- 窗口还没建好时事件先排队，页面 `did-finish-load` 后再投递；单个插件最多排队 8 条，超出丢最早的。
+- 传输通道：宿主 `webContents.send("widget:lifecycle", payload)` → preload `onLifecycle(cb)`（返回取消订阅函数）。
+- 声明式包没有生命周期钩子（永不执行代码），本条只适用于 `distribution: "bundle"` 的界面插件。
+
 ## 11. 清单 v5：版本兼容、上架元数据与安装事务（d.106）
 
 v5 相对 v3/v4 只加两件事：**最低宿主版本**（`engines.heming`）与**上架元数据**（`meta`）。

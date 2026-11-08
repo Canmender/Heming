@@ -66,6 +66,16 @@ contextBridge.exposeInMainWorld("__heming_widget", {
   /* ── 事件：{kind:"notify"|"theme"|"tray"}，只带标题级文案，不落盘 ── */
   onEvent: (callback) => subscribe("widget:event", callback),
 
+  /**
+   * 生命周期事件（d.108，规格 §5.4）：只给清单 `permissions.events` 含 `"lifecycle"` 的插件投递。
+   * 载荷 `{ event: "installed"|"enabled"|"disabled"|"updated"|"uninstalled", version, from? }`。
+   *
+   * ★ 语义边界：事件是**通知**不是授权——收到 `enabled` 不会多出任何能力；
+   *   窗口重建/宿主重启后不会重放历史事件，插件状态请用 `info()` / `settings()` 自检。
+   * ★ 返回取消订阅函数，语义与其他 `on*` 一致。
+   */
+  onLifecycle: (callback) => subscribe("widget:lifecycle", callback),
+
   /* ── 跳转（主窗白名单页面；主进程再按白名单归一化一次） ── */
   openSettings: () => ipcRenderer.send("widget:open-settings"),
   openPage: (page) => ipcRenderer.send("widget:open-page", page),

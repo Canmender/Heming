@@ -39,7 +39,14 @@ const ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/;
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 
-const ALLOWED_EVENTS = new Set(["notify"]);
+/**
+ * 允许订阅的宿主事件。
+ *
+ * - `notify`：主窗通知（既有）；
+ * - `lifecycle`（d.108）：安装/启停/更新/卸载的生命周期事件。**未声明就收不到任何
+ *   生命周期事件**（规格 §5.4）；声明了也只表示「允许接收通知」，不带来任何新能力。
+ */
+const ALLOWED_EVENTS = new Set(["notify", "lifecycle"]);
 const ALLOWED_GRAPHICS = new Set(["webgl", "webgl2", "wasm"]);
 const ALLOWED_TOOLS = new Set(["none", "read", "write"]);
 /**
@@ -196,7 +203,9 @@ function validateBundleManifest(raw, options = {}) {
   if (files.length > 5) errors.push("permissions.files 最多 5 项（本轮仅展示）");
   const events = Array.isArray(permissionsRaw.events) ? permissionsRaw.events : [];
   const badEvents = events.filter((item) => !ALLOWED_EVENTS.has(item));
-  if (badEvents.length > 0) errors.push(`permissions.events 含未知项：${badEvents.join(", ")}`);
+  if (badEvents.length > 0) {
+    errors.push(`permissions.events 含未知项：${badEvents.join(", ")}（允许：${[...ALLOWED_EVENTS].join(" / ")}）`);
+  }
   const graphics = Array.isArray(permissionsRaw.graphics) ? permissionsRaw.graphics : [];
   const badGraphics = graphics.filter((item) => !ALLOWED_GRAPHICS.has(item));
   if (badGraphics.length > 0) errors.push(`permissions.graphics 含未知项：${badGraphics.join(", ")}`);
