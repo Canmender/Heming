@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageShell } from "./layout/PageShell.js";
 import { ModelTraceView } from "./ModelTraceView.js";
+import { ModelUsageView } from "./ModelUsageView.js";
 import { useLlmStore } from "../store/llm.js";
 import { useUiStore } from "../store/ui.js";
 import { ensureDesktopGateway } from "../lib/magpieHost.js";
@@ -110,7 +111,6 @@ export function ModelPage() {
   const [runId, setRunId] = useState<string | null>(null);
   const [terminalInput, setTerminalInput] = useState("");
   const [groupForm, setGroupForm] = useState({ name: "", models: "", routing: "smart", target: "" });
-  const [usagePeriod, setUsagePeriod] = useState("30d");
   const [syncKind, setSyncKind] = useState("webdav");
   const [syncCommand, setSyncCommand] = useState("now");
   const [syncValues, setSyncValues] = useState("");
@@ -674,39 +674,11 @@ export function ModelPage() {
               </div>
             </details>
 
-            <details className="rounded-[20px] border border-line bg-white p-4">
-              <summary className="cursor-pointer text-[13px] font-bold">用量</summary>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <select
-                  aria-label="用量时间范围"
-                  className="ui-input"
-                  value={usagePeriod}
-                  onChange={(event) => setUsagePeriod(event.target.value)}
-                >
-                  {["today", "7d", "30d", "all"].map((period) => (
-                    <option key={period} value={period}>
-                      {period === "today" ? "今天" : period === "7d" ? "近 7 天" : period === "30d" ? "近 30 天" : "全部"}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
-                  disabled={!cli}
-                  onClick={() => void run(`用量 ${usagePeriod}`, ["usage", usagePeriod])}
-                >
-                  查看用量
-                </button>
-                <button
-                  type="button"
-                  className="ui-btn ui-btn-sm ui-btn-ghost"
-                  disabled={!cli}
-                  onClick={() => void run("导出用量", ["usage", "--csv", usagePeriod])}
-                >
-                  导出 CSV
-                </button>
-              </div>
-            </details>
+            <div className="rounded-[20px] border border-line bg-white p-4">
+              <ModelUsageView
+                onExportCsv={(period) => void run("导出用量", ["usage", "--csv", period])}
+              />
+            </div>
 
             <details className="rounded-[20px] border border-line bg-white p-4">
               <summary className="cursor-pointer text-[13px] font-bold">备份与恢复</summary>
