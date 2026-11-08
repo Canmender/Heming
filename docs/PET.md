@@ -72,6 +72,10 @@
 3. **包边界**：插件是用户机器上的文件（`userData/plugins/heming.pet/`），主进程建窗/定 CSP 前会**再校验一次清单**
    （web 侧 zod 校验是安装预览，主进程校验是纵深防御，两边职责不同）。
 
+**主题**：widget 读不到主窗的浅/深色（不同 origin）。主窗挂载时与每次切换 `data-theme` 都会把
+`{kind:"theme"}` 发布给主进程（`lib/widgetTheme.ts`），主进程把最后一次主题写进
+`userData/widget-theme.json`，下次启动建窗直接用——所以「暗色应用 + 桌宠」不会先亮一帧。
+
 ---
 
 ## 3. 数据边界

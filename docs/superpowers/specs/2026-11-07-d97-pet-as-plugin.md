@@ -189,6 +189,9 @@ window.__heming_widget = {
 
 - 所有 `widget:*` 通道在**主进程按 sender 自校验**：`BrowserWindow.fromWebContents(event.sender) === 本 widget 窗口`，
   不匹配直接拒绝（照 `pet-host.js` 的 `fromPetWindow`）。插件无法操作别的窗口、主窗、文件、密钥、MCP。
+- **主题**：主进程读不到主窗 localStorage 里的浅/深色，故主窗挂载与每次切换时发布 `{kind:"theme"}`；
+  主进程把最后一次主题落盘到 `userData/widget-theme.json`，建窗时用它初始化（避免暗色应用下桌宠先亮一帧），
+  `info().theme` 也来自这份缓存。
 - `chatConfig` 的数据由**主窗渲染层**提供（`useLlmStore` 派生）：主进程向主窗请求一次并缓存 30s；
   gateway 是主进程托管的本机 magpie 反代地址 + 网关 Key（本机默认值，不是用户供应商 Key）。
 
@@ -284,4 +287,6 @@ widget 窗口通道（主进程按 sender 自校验，通道名以 `widget:` 开
 - 安装 `heming.pet` 后：桌面出现角色、可点、可拖、可穿透、右键菜单、托盘、设置表单生效、对话可用、事件气泡可用。
 - 卸载后：窗口/托盘/设置/文件全部消失，主窗无报错。
 - 旧 `pet-state.json` / `heming.pet.v1` 迁移后位置、缩放、穿透、绑定不丢。
+- 本机 Electron 冒烟（真实 Chromium、非 CI）：安装包 → 建窗 → `widget://` 加载 → preload 桥与
+  `info/settings/state/chatConfig` → 设置落盘 → notify/theme 事件 → 主题切换，全程 0 console 错误。
 - IPC 不变量用例（`main.test.js`）覆盖 `widget:` 前缀与自校验；`packaging.plugins.test.js` 覆盖 bundle 包不进安装包。

@@ -20,6 +20,7 @@ import { useStaffLoop } from "./lib/staff/loop.js";
 import { useModuleStore, isModuleEffective } from "./lib/modules/store.js";
 import { useAppPresence } from "./lib/appPresence.js";
 import { startWidgetEvents } from "./lib/widgetEvents.js";
+import { startWidgetThemeSync } from "./lib/widgetTheme.js";
 import { useLlmStore } from "./store/llm.js";
 import { isPageAvailable } from "./lib/modules/nav.js";
 import { hasOpenModal, useModalA11y } from "./components/useModalA11y.js";

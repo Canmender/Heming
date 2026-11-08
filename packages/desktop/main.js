@@ -19,6 +19,7 @@ const {
 } = require("./app-protocol");
 const { createPluginStore } = require("./plugin-store");
 const { createWidgetHost } = require("./plugin-host");
+const { readWidgetTheme, writeWidgetTheme } = require("./widget-theme");
 const { WIDGET_SCHEME } = require("./plugin-window");
 const { appVersion } = require("./app-version");
 const { buildChildEnv, createStdioBridge } = require("./mcp-stdio");
@@ -561,6 +562,11 @@ let mainWindow = null;
 let widgetStore = null;
 let widgetHost = null;
 
+/** 界面插件的主题记忆：主窗挂载后会把浅/深色推过来，下次启动先按它初始化（见 widget-theme.js）。 */
+function widgetThemeFile() {
+  return path.join(app.getPath("userData"), "widget-theme.json");
+}
+
 // ③-4 安全复审：只该由主窗口调用的通道统一收口（fail-closed）。
 // mainWindow 在 createWindow() 里赋值，闭包在调用时求值，此处只建门面。
 const secureIpc = guardIpc(ipcMain, {
@@ -1091,7 +1097,7 @@ app.whenReady().then(() => {
       defaultTrayIconPath: path.join(__dirname, "assets", "widget-tray.png"),
       getMainWindow: () => mainWindow,
       appVersion: () => appVersion(),
-      getTheme: () => "light",
+      getTheme: () => readWidgetTheme(widgetThemeFile()),
       // 对话上下文只给本机网关（用户供应商 Key 不出主进程；P0 口径见规格 §3.4）
       getGateway: async () => {
         if (!magpieHost.status().running) return { baseUrl: null, key: "local" };
@@ -1185,7 +1191,10 @@ app.whenReady().then(() => {
     );
     secureIpc.handle("widgets:state", (_event, payload) => widgetHost.stateOf(payload && payload.id));
     secureIpc.handle("widgets:publish", (_event, payload) => {
-      widgetHost.publish(payload);
+      const result = widgetHost.publish(payload);
+      // 主题是唯一需要主进程记住的跨窗口状态：widget 窗口可能比主窗先建好
+      if (payload && payload.kind === "theme") writeWidgetTheme(widgetThemeFile(), payload.theme);
+      return result;
     });
     secureIpc.handle("widgets:migrateLegacy", (_event, payload) =>
       widgetStore.migrateLegacy(payload && payload.prefs),

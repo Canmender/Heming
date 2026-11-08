@@ -58,7 +58,8 @@ T3 主窗（web：插件区/设置/事件/删桌宠）┘
 - [x] `CHANGELOG.md` + `docs/RELEASE-NOTES.md` + `node scripts/build-changelog.mjs`
 - [x] `node scripts/bump-version.mjs auto feature`
 - [x] 全量门禁 `pnpm -r build && pnpm -r test && pnpm -r typecheck`
-- [ ] 真机：Electron 安装插件 → 起窗/拖拽/穿透/对话/事件（自动化只覆盖纯函数与 jsdom，真机待人工）
+- [x] 本机 Electron 冒烟（脚本留在 `.tmp`、不入库）：安装 → 建窗 → widget:// 加载 → 桥/设置/事件/主题，0 console 错误
+- [ ] 真机人工：拖拽/穿透/右键菜单/对话的实际手感（自动化覆盖不到鼠标与合成层观感）
 
 ## 明确不做（本轮）
 
