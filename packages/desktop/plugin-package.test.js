@@ -1,8 +1,12 @@
 "use strict";
+// 测试用开发公钥（正式包默认拒绝 dev-* 公钥，这里显式放开）。
+process.env.HEMING_ALLOW_DEV_PLUGIN_KEYS = "1";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const zlib = require("node:zlib");
+const { createPrivateKey, sign: nodeSign } = require("node:crypto");
 const { packTarGz, writeTar, readTar, safeRelativePath } = require("./plugin-tar");
+const { canonicalManifestText } = require("./plugin-signature");
 const {
   readPackage,
   packPackage,
@@ -50,6 +54,30 @@ function packageEntries(manifest = baseManifest(), files) {
     { path: "files/assets/app.js", data: "console.log('pet')" },
   ];
   return [{ path: "plugin.json", data: JSON.stringify(manifest) }, ...extraFiles];
+}
+
+/* ── 首方签名夹具（d.105）：与 resources/official-keys.json 的 dev-test-2026-11 对应 ── */
+
+/** Ed25519 私钥原始种子的 PKCS#8 DER 前缀。 */
+const PKCS8_ED25519_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
+const DEV_PRIVATE_KEY = "eQpmY52b_n7e7rpNrJzr4jT5U5CUZuZCuVe08XRGc7Q";
+const DEV_PUBLIC_KEY = "CwlX79Lc-Il4jvWK1sxhH-zxj9CLn5KD_CCpjp3rOl0";
+
+/** 用开发/测试私钥给清单签名（正式发布用 scripts/sign-plugin.mjs，算法逐字节同一套）。 */
+function signManifestForTest(manifest, privateKeyBase64Url = DEV_PRIVATE_KEY) {
+  const withPublisher = { ...manifest, publisher: { id: "heming", publicKey: DEV_PUBLIC_KEY } };
+  const privateKey = createPrivateKey({
+    key: Buffer.concat([PKCS8_ED25519_PREFIX, Buffer.from(privateKeyBase64Url, "base64url")]),
+    format: "der",
+    type: "pkcs8",
+  });
+  const value = nodeSign(null, Buffer.from(canonicalManifestText(withPublisher), "utf8"), privateKey).toString("base64url");
+  return { ...withPublisher, signature: { alg: "ed25519", value } };
+}
+
+/** 已签名的 baseManifest（bundle 安装用例的默认夹具）。 */
+function signedBaseManifest(overrides = {}) {
+  return signManifestForTest(baseManifest(overrides));
 }
 
 /** 手工拼一个带指定 typeflag 的 tar（用来构造符号链接/硬链接这类恶意条目）。 */
@@ -138,14 +166,17 @@ test("截断：缺少结束块拒绝；头部校验和错拒绝", () => {
 
 /* ────────────────────────── 包结构与清单 ────────────────────────── */
 
-test("包的合法形状：根 plugin.json + files/**，roundtrip 后可安装", () => {
-  const parsed = readPackage(packPackage(packageEntries()));
+test("包的合法形状：根 plugin.json + files/**，roundtrip 后可安装（bundle 需已签名）", () => {
+  const entries = packageEntries(signedBaseManifest());
+  const parsed = readPackage(packPackage(entries));
   assert.equal(parsed.ok, true, parsed.errors && parsed.errors.join("；"));
   assert.equal(parsed.manifest.id, "heming.pet");
   assert.equal(parsed.widget.id, "pet");
-  assert.equal(parsed.signed, false);
+  assert.equal(parsed.signed, true);
+  assert.equal(parsed.publisherId, "heming");
+  assert.equal(parsed.signatureKeyId, "dev-test-2026-11");
   assert.ok(parsed.files.some((file) => file.path === "files/index.html"));
-  assert.equal(parsed.sha256, sha256Hex(packPackage(packageEntries())));
+  assert.equal(parsed.sha256, sha256Hex(packPackage(entries)));
 });
 
 test("包内结构：plugin.json 不在根 / 多余的顶层路径 / 没有 files/ 都拒绝", () => {
@@ -186,11 +217,14 @@ test("清单守卫：permissions 逐项受控（events/graphics/eval/network）"
   assert.equal(validateBundleManifest(noTool).ok, false);
 });
 
-test("签名可选：无签名可装（signed:false）；带坏结构直接拒；带合法结构记 signed:true", () => {
-  const unsigned = readPackage(packPackage(packageEntries()));
-  assert.equal(unsigned.ok, true);
-  assert.equal(unsigned.signed, false);
+test("首方验签：无签名 / 冒名密钥 / 签名后篡改都拒绝；合法签名通过并记 keyId", () => {
+  // 1) 未签名 bundle → 拒绝（d.105 起不再「结构上带签名即可」）
+  const unsigned = readPackage(packPackage(packageEntries(baseManifest())));
+  assert.equal(unsigned.ok, false);
+  assert.match(unsigned.errors.join("；"), /未通过首方签名（publisher: 未知）/);
+  assert.match(unsigned.errors.join("；"), /未签名/);
 
+  // 2) 结构不对的签名 → 清单守卫先给字段级错误（不进入密码学验签）
   const signatureOnly = baseManifest({
     signature: { alg: "ed25519", value: "A".repeat(86) },
   });
@@ -202,40 +236,105 @@ test("签名可选：无签名可装（signed:false）；带坏结构直接拒�
   });
   assert.match(validateBundleManifest(badAlg).errors.join("；"), /signature\.alg 只支持 ed25519/);
 
-  const signedManifest = baseManifest({
-    publisher: { id: "heming", publicKey: "B".repeat(43) },
-    signature: { alg: "ed25519", value: "C".repeat(86) },
-  });
+  // 3) 用非首方私钥签名、却自称 heming → 拒绝（信任锚是内置公钥表，不是 publisher 字段）
+  const attacker = createPrivateKey({ key: Buffer.concat([PKCS8_ED25519_PREFIX, Buffer.alloc(32, 7)]), format: "der", type: "pkcs8" });
+  const forged = { ...baseManifest(), publisher: { id: "heming", publicKey: DEV_PUBLIC_KEY } };
+  forged.signature = {
+    alg: "ed25519",
+    value: nodeSign(null, Buffer.from(canonicalManifestText(forged), "utf8"), attacker).toString("base64url"),
+  };
+  const forgedPkg = readPackage(packPackage(packageEntries(forged)));
+  assert.equal(forgedPkg.ok, false);
+  assert.match(forgedPkg.errors.join("；"), /未通过首方签名（publisher: heming）/);
+  assert.match(forgedPkg.errors.join("；"), /不匹配/);
+
+  // 4) 签名后改内容 → 拒绝
+  const signedManifest = signedBaseManifest();
+  const tampered = { ...signedManifest, description: "签名之后被改过的描述" };
+  const tamperedPkg = readPackage(packPackage(packageEntries(tampered)));
+  assert.equal(tamperedPkg.ok, false);
+  assert.match(tamperedPkg.errors.join("；"), /未通过首方签名/);
+
+  // 5) 合法签名 → 通过，记录 signed / publisherId / keyId
   const signed = readPackage(packPackage(packageEntries(signedManifest)));
-  assert.equal(signed.ok, true);
+  assert.equal(signed.ok, true, signed.errors && signed.errors.join("；"));
   assert.equal(signed.signed, true);
   assert.equal(signed.publisherId, "heming");
+  assert.equal(signed.signatureKeyId, "dev-test-2026-11");
 });
 
 test("entry / icon 必须真的在包里（不存在的入口 = 一块打不开的透明窗）", () => {
   const noEntry = readPackage(
     packPackage([
-      { path: "plugin.json", data: JSON.stringify(baseManifest()) },
+      { path: "plugin.json", data: JSON.stringify(signedBaseManifest()) },
       { path: "files/other.txt", data: "not the entry" },
     ]),
   );
   assert.equal(noEntry.ok, false);
   assert.match(noEntry.errors.join("；"), /entry 不存在/);
 
-  const manifestWithIcon = baseManifest();
-  manifestWithIcon.contributions.desktopWidgets[0].icon = "files/icon.png";
-  const noIcon = readPackage(packPackage(packageEntries(manifestWithIcon)));
+  const iconManifest = baseManifest();
+  iconManifest.contributions.desktopWidgets[0].icon = "files/icon.png";
+  const noIcon = readPackage(packPackage(packageEntries(signManifestForTest(iconManifest))));
   assert.equal(noIcon.ok, false);
   assert.match(noIcon.errors.join("；"), /icon 不存在/);
 });
 
 test("sha256：给了 expectedSha256 就必须一致，不一致拒绝且不返回内容", () => {
-  const bytes = packPackage(packageEntries());
+  const bytes = packPackage(packageEntries(signedBaseManifest()));
   const wrong = readPackage(bytes, { expectedSha256: "0".repeat(64) });
   assert.equal(wrong.ok, false);
   assert.match(wrong.errors.join("；"), /指纹不一致/);
   const right = readPackage(bytes, { expectedSha256: sha256Hex(bytes) });
-  assert.equal(right.ok, true);
+  assert.equal(right.ok, true, right.errors && right.errors.join("；"));
+});
+
+test("bundle 命令 target 收紧：只允许 page / plugin，skill / settings 拒绝并给字段路径", () => {
+  const command = (target) => ({ id: "open", title: "打开", target });
+  const withCommands = (targets) =>
+    baseManifest({ contributions: { ...baseManifest().contributions, commands: targets.map(command) } });
+
+  // 合法：页面目标与「插件自身」目标
+  const ok = validateBundleManifest(withCommands([{ kind: "page", page: "plugins" }, { kind: "plugin" }]));
+  assert.equal(ok.ok, true, ok.errors.join("；"));
+
+  // bundle 不允许技能，所以 target.kind: "skill" 无意义 → 拒绝（带字段路径）
+  const skill = validateBundleManifest(withCommands([{ kind: "skill", name: "x" }]));
+  assert.equal(skill.ok, false);
+  assert.match(skill.errors.join("；"), /contributions\.commands\[0\]\.target\.kind 只允许 page \/ plugin/);
+  assert.match(skill.errors.join("；"), /收到 skill/);
+
+  // settings 等宿主页目标属阶段 C：本轮明确拒绝，避免声明了永不生效的「假命令」
+  const settings = validateBundleManifest(withCommands([{ kind: "settings" }]));
+  assert.equal(settings.ok, false);
+  assert.match(settings.errors.join("；"), /收到 settings/);
+
+  const missingKind = validateBundleManifest(withCommands([{ page: "plugins" }]));
+  assert.equal(missingKind.ok, false);
+  assert.match(missingKind.errors.join("；"), /contributions\.commands\[0\]\.target 必须是/);
+
+  const pageNoPath = validateBundleManifest(withCommands([{ kind: "page" }]));
+  assert.match(pageNoPath.errors.join("；"), /target\.page 必须是非空文本/);
+
+  const pluginWithName = validateBundleManifest(withCommands([{ kind: "plugin", name: "x" }]));
+  assert.match(pluginWithName.errors.join("；"), /不应再带 name/);
+
+  // 合法命令 + 已签名 → 可安装
+  const pkg = readPackage(packPackage(packageEntries(signManifestForTest(withCommands([{ kind: "plugin" }])))));
+  assert.equal(pkg.ok, true, pkg.errors && pkg.errors.join("；"));
+});
+
+test("纯声明式包不要求首方签名（bundle 专属要求；声明式走 web 侧 TOFU，不进这条链路）", () => {
+  const declarative = baseManifest({ distribution: "manifest" });
+  const check = validateBundleManifest(declarative);
+  assert.equal(check.ok, false);
+  assert.match(check.errors.join("；"), /必须声明 distribution: "bundle"/);
+  assert.doesNotMatch(check.errors.join("；"), /首方签名|signature/);
+
+  // 安装链路同样只报 distribution 错误，不会要求签名（防止把纯声明式包误伤）
+  const pkg = readPackage(packPackage(packageEntries(declarative)));
+  assert.equal(pkg.ok, false);
+  assert.doesNotMatch(pkg.errors.join("；"), /未通过首方签名/);
 });
 
 test("坏包：不是 gzip / 空内容都拒绝，且不抛错", () => {

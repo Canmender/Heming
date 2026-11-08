@@ -3,6 +3,7 @@
 const { createHash } = require("node:crypto");
 const { packTarGz, unpackTarGz, LIMITS } = require("./plugin-tar");
 const { normalizeWidgetSpec, MAX_WIDGETS_PER_PLUGIN } = require("./plugin-window");
+const { verifyOfficialSignature } = require("./plugin-signature");
 
 /**
  * 界面插件包（`package.tgz`）的读取、结构校验与清单守卫（纯函数 + node:crypto）。
@@ -18,9 +19,12 @@ const { normalizeWidgetSpec, MAX_WIDGETS_PER_PLUGIN } = require("./plugin-window
  *   主进程里独立再判一次「我能拿它做什么」（纵深防御）。完整语义校验（安装预览、
  *   错误路径展示、信任弹窗）仍归 web 侧 `manifest.ts`——两边职责不同，不是重复。
  *
- * ★ 本文件不校验 ed25519 签名本身（那是 web 侧 `signature.ts` + 官方公钥白名单的事）；
- *   主进程只要求 bundle **结构上带 publisher + signature**，并由可信主窗通道断言
- *   「已验签 / 第一方」。原因见 `docs/PLUGINS.md` 信任模型：主窗已经是安装流程的信任根。
+ * ★ d.105 起 bundle **必须通过首方验签**（`plugin-signature.js` + 内置
+ *   `resources/official-keys.json` 公钥表）。旧口径「结构上带 publisher + signature 即可、
+ *   验签归 web」已被证明是漏洞：web 对 bundle 清单一律拒绝、主进程又不验，
+ *   等于任何拿到发布密钥或本地 `.tgz` 的人都能装进可执行界面插件（规格 §7.1）。
+ *   现在验签在**主进程**做（本地 `.tgz` 与云端下载同一条路），失败关闭。
+ *   纯声明式包不经过本文件（它们不执行代码，走 web 侧 TOFU，规格 §7.1 第 4 条）。
  */
 
 /** 包里允许的两种顶层路径：根清单与 files/ 下的资源。 */
@@ -38,6 +42,15 @@ const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 const ALLOWED_EVENTS = new Set(["notify"]);
 const ALLOWED_GRAPHICS = new Set(["webgl", "webgl2", "wasm"]);
 const ALLOWED_TOOLS = new Set(["none", "read", "write"]);
+/**
+ * bundle 的命令只能指向「页面」或「插件自身」。
+ *
+ * 界面插件不允许贡献 skills（见上），所以 `target.kind: "skill"` 对 bundle 无意义；
+ * `settings` 等宿主页目标属阶段 C（规格 §7.3 / 可行性 §2.11），本轮一律拒绝，
+ * 避免声明了却永远不生效的「假命令」。
+ */
+const BUNDLE_COMMAND_TARGET_KINDS = new Set(["page", "plugin"]);
+const MAX_COMMANDS = 30;
 
 /** sha256 十六进制（整包字节的完整性指纹；发布侧算的也是这个）。 */
 function sha256Hex(bytes) {
@@ -127,23 +140,22 @@ function validateBundleManifest(raw, options = {}) {
     errors.push("界面插件清单必须声明 distribution: \"bundle\"（带文件）");
   }
 
-  /* ── 来源：签名**可选**，带则做结构校验 ── */
+  /* ── 来源：bundle **必须**有 publisher + signature；这里只做结构校验，密码学验签在 readPackage ── */
   /*
-   * 为什么不强制签名（P0 口径，规格 §6.7）：本轮没有官方密钥管理与签名分发链，
-   * `lib/plugins/signature.ts` 是 TOFU（首次安装由主窗弹窗确认是否信任该发布者）。
-   * 硬性要求签名会让 `heming.pet` 只能靠开发态开关安装，真机与发布链路都不成立。
-   *
-   * 信任门在**主窗侧**：只有「官方云端目录的 bundle」或「用户本地显式导入并二次确认」
-   * 才允许调 `widgets:install`；主进程这条通道只认可信主窗（见文件头 trust root 说明），
-   * 这里只负责「结构坏了直接拒」与「记录 signed 供 UI 展示」。
+   * 结构校验与验签分开的原因：
+   * - 结构错（缺 publisher、alg 不是 ed25519、base64url 非法）要给用户**字段级**错误，
+   *   比「签名不匹配」可行动得多；
+   * - 真实验签要读公钥表，属于安装链路（readPackage）职责，且失败关闭。
+   * 注意 publisher.publicKey 只是「发布者自称的公钥」，**验签不用它**（用内置首方公钥表），
+   * 否则任何人都能自造密钥对冒充官方。
    */
   const publisher = raw.publisher;
   const signature = raw.signature;
   const signed = signature !== undefined;
   if (signed) {
-    // 有签名必须有发布者：验签公钥只能来自 publisher，缺了就无法判断签名有效性
+    // 有签名必须有发布者：用于错误文案与后续展示，不是验签输入
     if (!isPlainObject(publisher)) {
-      errors.push("有 signature 时必须同时提供 publisher（否则无法确定验签公钥）");
+      errors.push("有 signature 时必须同时提供 publisher（发布者 id 用于错误文案与展示）");
     } else {
       if (typeof publisher.id !== "string" || !publisher.id.trim()) {
         errors.push("publisher.id 必须是非空文本");
@@ -199,6 +211,33 @@ function validateBundleManifest(raw, options = {}) {
   }
   if (contributionsRaw.commands !== undefined && !Array.isArray(contributionsRaw.commands)) {
     errors.push("contributions.commands 必须是数组");
+  } else if (Array.isArray(contributionsRaw.commands)) {
+    const commands = contributionsRaw.commands;
+    if (commands.length > MAX_COMMANDS) errors.push(`contributions.commands 最多 ${MAX_COMMANDS} 条`);
+    commands.forEach((command, index) => {
+      const at = `contributions.commands[${index}]`;
+      if (!isPlainObject(command)) {
+        errors.push(`${at} 必须是对象`);
+        return;
+      }
+      const target = command.target;
+      if (!isPlainObject(target) || typeof target.kind !== "string" || !target.kind) {
+        errors.push(`${at}.target 必须是 { kind: "page" | "plugin" }`);
+        return;
+      }
+      if (!BUNDLE_COMMAND_TARGET_KINDS.has(target.kind)) {
+        errors.push(
+          `${at}.target.kind 只允许 page / plugin（界面插件不允许引用 skill；settings 等阶段 C 再做），收到 ${target.kind}`,
+        );
+        return;
+      }
+      if (target.kind === "page" && (typeof target.page !== "string" || !target.page.trim())) {
+        errors.push(`${at}.target.page 必须是非空文本`);
+      }
+      if (target.kind === "plugin" && target.name !== undefined) {
+        errors.push(`${at}.target 为 plugin 时不应再带 name（bundle 命令只能指向自身）`);
+      }
+    });
   }
   const widgetsRaw = contributionsRaw.desktopWidgets;
   let widget = null;
@@ -238,10 +277,11 @@ function validateBundleManifest(raw, options = {}) {
  *
  * 顺序（任一步失败都不产生半可用状态）：
  * sha256（调用方先做）→ gunzip/tar 配额 → 包内结构 → plugin.json 解析 → 清单守卫 →
- * entry/图标存在性。
+ * **首方验签（失败关闭）** → entry/图标存在性。
  *
  * @param {Buffer|ArrayBuffer|Uint8Array} bytes
- * @param {{ expectedSha256?: string, limits?: object }} [options]
+ * @param {{ expectedSha256?: string, limits?: object, keysFile?: string, allowDevKeys?: boolean }} [options]
+ *   `keysFile` 仅测试/换钥排障用；生产走 `plugin-signature.js` 的默认路径。
  */
 function readPackage(bytes, options = {}) {
   const buffer = toBuffer(bytes);
@@ -274,6 +314,25 @@ function readPackage(bytes, options = {}) {
   const manifestCheck = validateBundleManifest(manifestRaw);
   if (!manifestCheck.ok) return { ok: false, errors: manifestCheck.errors, sha256, manifest: manifestRaw };
 
+  // 首方验签（规格 §7.1 第 3/5 条）：bundle 必须由内置公钥表验过，失败关闭。
+  // 放在 entry/图标存在性检查之前：真实性不过关的包不必再谈结构完整性。
+  // 纯声明式包走 web 侧 TOFU，不经过本文件（validateBundleManifest 已要求 distribution: bundle）。
+  const signatureCheck = verifyOfficialSignature(manifestRaw, {
+    keysFile: options.keysFile,
+    allowDevKeys: options.allowDevKeys,
+  });
+  if (!signatureCheck.ok) {
+    const who = manifestCheck.publisherId
+      ? `publisher: ${manifestCheck.publisherId.slice(0, 64)}`
+      : "publisher: 未知";
+    return {
+      ok: false,
+      errors: [`未通过首方签名（${who}），已拒绝安装：${signatureCheck.reason}`],
+      sha256,
+      manifest: manifestRaw,
+    };
+  }
+
   const paths = new Set(entries.map((entry) => entry.path));
   const manifest = manifestCheck.manifest;
   const widget = manifestCheck.widget;
@@ -294,6 +353,7 @@ function readPackage(bytes, options = {}) {
     permissions: manifestCheck.permissions,
     signed: manifestCheck.signed === true,
     publisherId: manifestCheck.publisherId,
+    signatureKeyId: signatureCheck.keyId,
     files: entries.map((entry) => ({ path: entry.path, data: entry.data })),
     totalBytes: entries.reduce((sum, entry) => sum + entry.data.length, 0),
   };

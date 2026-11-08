@@ -239,7 +239,7 @@ function createPluginStore(options = {}) {
       updatedAt: timestamp,
       widget,
       permissions,
-      // 包是否带 ed25519 签名（结构上带即记 true；验签结论由 web 侧 signature.ts 负责）
+      // 包是否带 ed25519 签名；d.105 起 readPackage 已强制首方验签，能走到这里即已通过
       signed: parsed.signed === true,
       publisherId: parsed.publisherId,
       migratedAt: existing ? existing.migratedAt || null : null,

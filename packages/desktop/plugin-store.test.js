@@ -1,11 +1,15 @@
 "use strict";
+// 测试用开发公钥（正式包默认拒绝 dev-* 公钥，这里显式放开）。
+process.env.HEMING_ALLOW_DEV_PLUGIN_KEYS = "1";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { createPrivateKey, sign: nodeSign } = require("node:crypto");
 const { createPluginStore } = require("./plugin-store");
 const { packPackage, sha256Hex } = require("./plugin-package");
+const { canonicalManifestText } = require("./plugin-signature");
 
 /* ────────────────────────── 夹具 ────────────────────────── */
 
@@ -56,11 +60,30 @@ function manifest(overrides = {}) {
 }
 
 function packageBytes(overrides) {
+  // d.105：bundle 安装必须通过首方验签，所以夹具统一用开发/测试私钥签名
+  // （公钥见 packages/desktop/resources/official-keys.json 的 dev-test-2026-11）。
   return packPackage([
-    { path: "plugin.json", data: JSON.stringify(manifest(overrides)) },
+    { path: "plugin.json", data: JSON.stringify(signForTest(manifest(overrides))) },
     { path: "files/index.html", data: "<!doctype html><canvas></canvas>" },
     { path: "files/assets/app.js", data: `console.log(${JSON.stringify(overrides && overrides.version)})` },
   ]);
+}
+
+/* ── 首方签名夹具：与 resources/official-keys.json 的 dev-test-2026-11 对应 ── */
+
+const PKCS8_ED25519_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
+const DEV_PRIVATE_KEY = "eQpmY52b_n7e7rpNrJzr4jT5U5CUZuZCuVe08XRGc7Q";
+const DEV_PUBLIC_KEY = "CwlX79Lc-Il4jvWK1sxhH-zxj9CLn5KD_CCpjp3rOl0";
+
+function signForTest(rawManifest) {
+  const withPublisher = { ...rawManifest, publisher: { id: "heming", publicKey: DEV_PUBLIC_KEY } };
+  const privateKey = createPrivateKey({
+    key: Buffer.concat([PKCS8_ED25519_PREFIX, Buffer.from(DEV_PRIVATE_KEY, "base64url")]),
+    format: "der",
+    type: "pkcs8",
+  });
+  const value = nodeSign(null, Buffer.from(canonicalManifestText(withPublisher), "utf8"), privateKey).toString("base64url");
+  return { ...withPublisher, signature: { alg: "ed25519", value } };
 }
 
 function tempDir() {
@@ -101,7 +124,7 @@ test("install：包落盘到 <id>/<version>/，切 current 指针，list 给出 
   assert.equal(record.version, "1.0.0");
   assert.equal(record.enabled, true);
   assert.equal(record.widget.id, "pet");
-  assert.equal(record.signed, false);
+  assert.equal(record.signed, true);
   assert.deepEqual(record.settings, {
     agentId: null,
     modelPath: "pet/Hiyori/Hiyori.model3.json",

@@ -1,0 +1,6 @@
+{
+  "_comment": "首方 bundle 签名公钥表（{ keyId: base64url(raw 32B Ed25519 公钥) }，`_` 开头的键为注释）。仅用于验证官方界面插件包，公钥不是秘密，可随应用分发。",
+  "_dev_only": "★ 当前 keyId `dev-test-2026-11` 是开发/测试用密钥：私钥只存在于 packages/desktop/plugin-signature.test.js 与 plugin-store.test.js 的测试夹具里，绝不可用于真实发布。上线前必须替换为正式公钥（离线生成的发布私钥只存在于发布 CI 的 secret / HSM 中）。",
+  "_rotate": "换正式钥流程：1) 离线/在发布 CI 用 Ed25519 生成一对密钥（node -e 'console.log(require(\"node:crypto\").generateKeyPairSync(\"ed25519\").privateKey.export({format:\"pem\",type:\"pkcs8\"}))' 或复用 scripts/sign-plugin.mjs --gen-key）；2) 把 base64url(raw 32B 公钥) 以新 keyId（如 official-2026-11）加入本文件，**保留旧键至少一个大版本**（旧键继续能验旧包，TUF 式双钥过渡）；3) 发布新版应用后，用新私钥重签 bundle（heming.pet 1.0.1 起），旧包不再允许新装；4) 确认旧版本应用比例足够低后，再在下个版本删除旧 keyId。吊销只能靠「发版移除公钥 / 提高最低允许版本」，离线客户端无法实时吊销（规格 §7.1/§7.2）。",
+  "dev-test-2026-11": "CwlX79Lc-Il4jvWK1sxhH-zxj9CLn5KD_CCpjp3rOl0"
+}
