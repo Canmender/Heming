@@ -774,3 +774,71 @@ samp {
 [data-theme="dark"] .bg-\[\#fff1a8\] {
   background-color: var(--subtle-3);
 }
+
+/* ── 模型页 / 实时链路的动效（d.104）─────────────────────────────────
+ * 参考 magpie 的路由页：连线用 0.7s 循环的虚线流动表示「正在传输」，节点行 hover
+ * 200ms 抬起，卡片入场 300ms ease-out；全部尊重 prefers-reduced-motion。
+ * 只动 transform / opacity / stroke 等合成层友好的属性，不动布局。
+ */
+@keyframes rta-flow {
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+.rta-flow {
+  animation: rta-flow 0.7s linear infinite;
+}
+@keyframes rta-live {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.rta-live-dot {
+  animation: rta-live 1.8s ease-in-out infinite;
+}
+@keyframes rta-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rta-enter {
+  animation: rta-enter 0.3s ease-out both;
+}
+.rta-hit {
+  transition:
+    transform 0.2s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    opacity 0.25s ease;
+}
+.rta-hit:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.06);
+}
+/* 分段标签：当前项白底浮起，其余透明；切换只过渡颜色/阴影 */
+.rta-segment {
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rta-flow,
+  .rta-live-dot,
+  .rta-enter {
+    animation: none !important;
+  }
+  .rta-hit,
+  .rta-segment {
+    transition: none !important;
+  }
+}

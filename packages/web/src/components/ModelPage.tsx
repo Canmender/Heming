@@ -17,30 +17,24 @@ import {
 } from "../lib/magpieCli.js";
 
 /**
- * 模型页（d.103）：把「加来源 → 选模型」做成三步就能完成的事。
+ * 模型页（d.104）：三个分区，加来源 → 选模型 → 看它怎么跑。
  *
- * 设计原则（回应「操作太繁琐」）：
- * - 主路径只有两件事：加一个来源、看能用哪些模型；其余（分组、用量、备份…）收进「更多」；
- * - 加来源用卡片：订阅点一下就去登录，厂商点一下只填一个 Key，自定义才展开地址与模型；
- * - 不出现服务状态/启停/地址/端口——模型能力是应用的一部分，用户不需要管理它；
- * - 不出现第三方产品的名字：对用户来说它就是和鸣的模型能力。
- *
- * 边界：
- * - 浏览器端没有命令桥：只读模型目录，写操作提示仅桌面端可用；
- * - 登录/备份口令在真终端里完成，不经过页面。
+ * 设计参考（magpie 的路由/供应商页，以及与用户四轮反馈）：
+ * - 只保留三个大分区：模型 / 来源 / 运行；其余能力都折进「运行」；
+ * - 加来源用卡片：订阅点一下去登录，厂商点一下只填一个 Key；
+ * - 模型与账号用行卡片（头像 + 名称 + 说明 + 状态），比表格更像「在选东西」；
+ * - 不出现服务状态、地址、端口与启停按钮；也不出现第三方产品名；
+ * - 动效克制：卡片 200ms 抬起、分区切换 300ms 淡入，尊重「减少动态效果」。
  */
 
-type TabKey = "models" | "sources" | "accounts" | "routing" | "more";
+type TabKey = "models" | "sources" | "run";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "models", label: "模型" },
-  { key: "sources", label: "添加来源" },
-  { key: "accounts", label: "账号" },
-  { key: "routing", label: "路由" },
-  { key: "more", label: "更多" },
+  { key: "sources", label: "来源" },
+  { key: "run", label: "运行" },
 ];
 
-/** 订阅登录：点一下在终端完成厂商自己的浏览器登录。 */
 const SUBSCRIPTIONS = [
   { agent: "claude", label: "Claude", desc: "Pro / Max / Team" },
   { agent: "codex", label: "ChatGPT", desc: "Plus / Pro / Business" },
@@ -49,7 +43,6 @@ const SUBSCRIPTIONS = [
   { agent: "antigravity", label: "Antigravity", desc: "Google 账号" },
 ];
 
-/** 预置厂商：点卡片 → 只填一个 Key。 */
 const PRESETS = [
   { id: "deepseek", label: "DeepSeek", desc: "官方 API" },
   { id: "openai", label: "OpenAI", desc: "官方 API" },
@@ -77,6 +70,26 @@ const GROUP_ROUTING = [
   "expiring",
 ];
 
+const AVATAR_COLORS = ["#7c6bd6", "#2f6feb", "#0f9d8a", "#d97706", "#db2777", "#4b5563"];
+
+function avatarColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length]!;
+}
+
+function Avatar({ name }: { name: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white"
+      style={{ backgroundColor: avatarColor(name) }}
+    >
+      {name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
 export function ModelPage() {
   const profiles = useLlmStore((s) => s.profiles);
   const refreshCatalog = useLlmStore((s) => s.refreshCatalog);
@@ -88,6 +101,7 @@ export function ModelPage() {
   const [output, setOutput] = useState<{ title: string; text: string; ok: boolean } | null>(null);
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [modelQuery, setModelQuery] = useState("");
   const [presetKey, setPresetKey] = useState<{ id: string; key: string } | null>(null);
   const [custom, setCustom] = useState({ open: false, id: "", url: "", key: "", models: "" });
@@ -95,14 +109,23 @@ export function ModelPage() {
   const liveRef = useRef("");
   const [runId, setRunId] = useState<string | null>(null);
   const [terminalInput, setTerminalInput] = useState("");
+  const [groupForm, setGroupForm] = useState({ name: "", models: "", routing: "smart", target: "" });
+  const [usagePeriod, setUsagePeriod] = useState("30d");
+  const [syncKind, setSyncKind] = useState("webdav");
+  const [syncCommand, setSyncCommand] = useState("now");
+  const [syncValues, setSyncValues] = useState("");
+  const [searchForm, setSearchForm] = useState({ api: "", key: "", target: "" });
+  const [termCommand, setTermCommand] = useState("");
 
-  // 惰性接入：模型能力随应用启动，这里只确保目录可用，不展示任何启停入口。
   useEffect(() => {
     void ensureDesktopGateway();
   }, []);
 
   useEffect(() => {
-    if (!cli) return;
+    if (!cli) {
+      setLoading(false);
+      return;
+    }
     return cli.onCli((event: MagpieCliEvent) => {
       if (event.type === "start") {
         setRunId(event.runId);
@@ -166,7 +189,7 @@ export function ModelPage() {
     setOutput({
       title,
       text: result.ok
-        ? "已打开登录窗口：按里面的提示在浏览器完成登录，完成后回到这里刷新即可。"
+        ? "已打开登录窗口：按提示在浏览器完成登录，完成后回到这里刷新即可。"
         : result.error || "无法打开登录窗口",
       ok: result.ok,
     });
@@ -174,8 +197,14 @@ export function ModelPage() {
 
   useEffect(() => {
     if (!cli) return;
-    void loadProviders();
-    void loadAccounts();
+    let alive = true;
+    void (async () => {
+      await Promise.all([loadProviders(), loadAccounts()]);
+      if (alive) setLoading(false);
+    })();
+    return () => {
+      alive = false;
+    };
   }, [cli, loadProviders, loadAccounts]);
 
   const visibleModels = profiles.filter((profile) => {
@@ -207,14 +236,6 @@ export function ModelPage() {
     }
   };
 
-  const [groupForm, setGroupForm] = useState({ name: "", models: "", routing: "smart", target: "" });
-  const [usagePeriod, setUsagePeriod] = useState("30d");
-  const [syncKind, setSyncKind] = useState("webdav");
-  const [syncCommand, setSyncCommand] = useState("now");
-  const [syncValues, setSyncValues] = useState("");
-  const [searchForm, setSearchForm] = useState({ api: "", key: "", target: "" });
-  const [termCommand, setTermCommand] = useState("");
-
   const startTerminalRun = async () => {
     const args = termCommand.trim().split(/\s+/).filter(Boolean);
     if (!args.length || !cli) return;
@@ -224,6 +245,8 @@ export function ModelPage() {
     if (!started.ok) setOutput({ title: "命令", text: started.error || "执行失败", ok: false });
   };
 
+  const providerOf = (model: string) => (model.includes("/") ? model.split("/")[0]! : "自定义");
+
   return (
     <PageShell
       title="模型"
@@ -232,12 +255,13 @@ export function ModelPage() {
       actions={
         <button
           type="button"
-          className="ui-btn ui-btn-md ui-btn-primary"
+          className="ui-btn ui-btn-md ui-btn-ghost"
           onClick={async () => {
             setBusy("refresh");
             try {
               await refreshCatalog();
               await loadProviders();
+              await loadAccounts();
             } finally {
               setBusy(null);
             }
@@ -248,14 +272,22 @@ export function ModelPage() {
         </button>
       }
       headerExtra={
-        <div role="tablist" aria-label="模型页分区" className="flex flex-wrap gap-1">
+        <div
+          role="tablist"
+          aria-label="模型页分区"
+          className="inline-flex items-center gap-1 rounded-full bg-[#f2f3f5] p-1"
+        >
           {TABS.map((item) => (
             <button
               key={item.key}
               type="button"
               role="tab"
               aria-selected={tab === item.key}
-              className={`ui-btn ui-btn-sm ${tab === item.key ? "ui-btn-primary" : "ui-btn-ghost"}`}
+              className={`rta-segment rounded-full px-4 py-1.5 text-[13px] ${
+                tab === item.key
+                  ? "bg-white font-bold text-ink shadow-card"
+                  : "text-muted hover:text-ink"
+              }`}
               onClick={() => setTab(item.key)}
             >
               {item.label}
@@ -265,580 +297,504 @@ export function ModelPage() {
       }
     >
       {!cli && (
-        <div role="status" className="mb-4 rounded-lg border border-line bg-[#fafafa] p-3 ui-body-sm">
+        <div role="status" className="mb-4 rounded-xl border border-line bg-[#fafafa] p-3 ui-body-sm">
           浏览器端可以查看可用模型；添加来源与账号需要在和鸣桌面端完成。
         </div>
       )}
 
-      {/* ── 模型 ─────────────────────────────────────────────── */}
-      {tab === "models" && (
-        <section aria-label="可用模型" className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <StatCard label="可用模型" value={profiles.length} hint="智能体可选的模型" />
-            <StatCard label="已添加来源" value={providers.length} hint="订阅、厂商或自定义地址" />
-            <StatCard label="订阅账号" value={accounts.length} hint="登录后可用的额度" />
-          </div>
-
-          {profiles.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-line bg-[#fcfcfd] p-8 text-center">
-              <div className="text-[15px] font-bold">还没有可用的模型</div>
-              <p className="mx-auto mt-1 max-w-[420px] ui-caption">
-                先添加一个来源：订阅一个账号，或填一个厂商的 API Key。加完模型会自动出现。
-              </p>
-              <button
-                type="button"
-                className="ui-btn ui-btn-md ui-btn-primary mt-3"
-                onClick={() => setTab("sources")}
-              >
-                添加来源
-              </button>
+      <div key={tab} className="rta-enter">
+        {/* ── 模型 ───────────────────────────────────────────── */}
+        {tab === "models" && (
+          <section aria-label="可用模型" className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <StatCard label="可用模型" value={profiles.length} hint="智能体可选的模型" />
+              <StatCard label="已添加来源" value={providers.length} hint="订阅、厂商或自定义地址" />
+              <StatCard label="订阅账号" value={accounts.length} hint="登录后可用的额度" />
             </div>
-          ) : (
-            <div className="rounded-2xl border border-line bg-white p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-[13px] font-bold">可用模型</div>
-                <input
-                  aria-label="搜索模型"
-                  className="ui-input w-56"
-                  placeholder="搜索模型…"
-                  value={modelQuery}
-                  onChange={(event) => setModelQuery(event.target.value)}
-                />
+
+            {loading ? (
+              <div className="space-y-2" aria-label="读取模型">
+                {[0, 1, 2].map((index) => (
+                  <div key={index} className="h-14 animate-pulse rounded-2xl bg-[#f2f3f5]" />
+                ))}
               </div>
-              <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {visibleModels.map((profile) => {
-                  const provider = profile.model.includes("/")
-                    ? profile.model.split("/")[0]
-                    : "自定义";
-                  return (
-                    <li key={profile.model} className="rounded-xl border border-line bg-[#fbfbfc] p-3">
-                      <div className="truncate text-[13px] font-bold" title={profile.model}>
-                        {profile.model}
-                      </div>
-                      <div className="mt-0.5 ui-caption">来源 {provider}</div>
-                    </li>
-                  );
-                })}
-                {visibleModels.length === 0 && (
-                  <li className="ui-caption p-2">没有匹配的模型。</li>
-                )}
-              </ul>
-              <p className="mt-3 ui-caption">
-                在智能体的设置里选这里的模型；想把多个模型串成候选链，去「模型路由」页。
-              </p>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* ── 添加来源 ─────────────────────────────────────────── */}
-      {tab === "sources" && (
-        <section aria-label="添加来源" className="space-y-5">
-          <div>
-            <div className="text-[13px] font-bold">订阅（登录即可，不用填 Key）</div>
-            <p className="mt-0.5 ui-caption">
-              点一下会在登录窗口里打开厂商自己的页面，登录完成后账号自动出现。
-            </p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {SUBSCRIPTIONS.map((item) => (
+            ) : profiles.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-line bg-[#fcfcfd] px-6 py-10 text-center">
+                <div className="text-[15px] font-bold">还没有可用的模型</div>
+                <p className="mx-auto mt-1 max-w-[420px] ui-caption">
+                  添加一个来源：订阅一个账号，或填一个厂商的 API Key。加完模型会自动出现。
+                </p>
                 <button
-                  key={item.agent}
                   type="button"
-                  className="ui-btn ui-btn-md justify-start rounded-xl border border-line bg-white px-3 py-2 text-left"
-                  disabled={!cli}
-                  onClick={() => void runTerminal(`登录 ${item.label}`, ["accounts", "add", item.agent])}
+                  className="ui-btn ui-btn-md ui-btn-primary mt-4"
+                  onClick={() => setTab("sources")}
                 >
-                  <span className="flex-1">
-                    <span className="block text-[13px] font-bold">{item.label}</span>
-                    <span className="block ui-caption">{item.desc}</span>
-                  </span>
-                  <span className="ui-caption">登录 →</span>
+                  添加来源
                 </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[13px] font-bold">API Key 服务商</div>
-            <p className="mt-0.5 ui-caption">点一个服务商，填它给你的 Key；模型会自动读出来。</p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
-              {PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  aria-pressed={presetKey?.id === preset.id}
-                  className={`rounded-xl border p-3 text-left ${
-                    presetKey?.id === preset.id
-                      ? "border-ink bg-[#f4f7ff]"
-                      : "border-line bg-white hover:bg-[#fafafa]"
-                  }`}
-                  disabled={!cli}
-                  onClick={() => setPresetKey({ id: preset.id, key: "" })}
-                >
-                  <span className="block text-[13px] font-bold">{preset.label}</span>
-                  <span className="block ui-caption">{preset.desc}</span>
-                </button>
-              ))}
-            </div>
-            {presetKey && (
-              <div className="mt-3 rounded-xl border border-line bg-[#fafafa] p-3">
-                <div className="text-[12px] font-bold">
-                  添加 {PRESETS.find((item) => item.id === presetKey.id)?.label}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <input
-                    aria-label="API Key"
-                    className="ui-input flex-1"
-                    type="password"
-                    placeholder="粘贴 API Key"
-                    value={presetKey.key}
-                    onChange={(event) => setPresetKey({ ...presetKey, key: event.target.value })}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") void addPreset();
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="ui-btn ui-btn-md ui-btn-primary"
-                    disabled={!presetKey.key.trim()}
-                    onClick={() => void addPreset()}
-                  >
-                    保存
-                  </button>
-                  <button
-                    type="button"
-                    className="ui-btn ui-btn-md ui-btn-ghost"
-                    onClick={() => setPresetKey(null)}
-                  >
-                    取消
-                  </button>
-                </div>
               </div>
-            )}
-          </div>
-
-          <div>
-            <div className="text-[13px] font-bold">其他服务商 / 自定义地址</div>
-            <p className="mt-0.5 ui-caption">任何 OpenAI 兼容接口都可以接进来。</p>
-            {!custom.open ? (
-              <button
-                type="button"
-                className="ui-btn ui-btn-md ui-btn-ghost mt-2"
-                disabled={!cli}
-                onClick={() => setCustom({ ...custom, open: true })}
-              >
-                + 添加自定义地址
-              </button>
             ) : (
-              <div className="mt-2 grid gap-2 rounded-xl border border-line bg-white p-3 sm:grid-cols-2">
-                <input
-                  aria-label="来源名称"
-                  className="ui-input"
-                  placeholder="名称（如 relay）"
-                  value={custom.id}
-                  onChange={(event) => setCustom({ ...custom, id: event.target.value })}
-                />
-                <input
-                  aria-label="接口地址"
-                  className="ui-input"
-                  placeholder="https://host/v1"
-                  value={custom.url}
-                  onChange={(event) => setCustom({ ...custom, url: event.target.value })}
-                />
-                <input
-                  aria-label="自定义 Key"
-                  className="ui-input"
-                  type="password"
-                  placeholder="API Key"
-                  value={custom.key}
-                  onChange={(event) => setCustom({ ...custom, key: event.target.value })}
-                />
-                <input
-                  aria-label="模型列表"
-                  className="ui-input"
-                  placeholder="模型 id，逗号分隔（可留空自动读取）"
-                  value={custom.models}
-                  onChange={(event) => setCustom({ ...custom, models: event.target.value })}
-                />
-                <div className="flex gap-2 sm:col-span-2">
-                  <button
-                    type="button"
-                    className="ui-btn ui-btn-md ui-btn-primary"
-                    disabled={!custom.id.trim()}
-                    onClick={() => void addCustom()}
-                  >
-                    保存
-                  </button>
-                  <button
-                    type="button"
-                    className="ui-btn ui-btn-md ui-btn-ghost"
-                    onClick={() => setCustom({ open: false, id: "", url: "", key: "", models: "" })}
-                  >
-                    取消
-                  </button>
+              <div className="rounded-2xl border border-line bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[13px] font-bold">可用模型</div>
+                  <input
+                    aria-label="搜索模型"
+                    className="ui-input w-56"
+                    placeholder="搜索模型…"
+                    value={modelQuery}
+                    onChange={(event) => setModelQuery(event.target.value)}
+                  />
                 </div>
+                <ul className="mt-2">
+                  {visibleModels.map((profile) => (
+                    <li
+                      key={profile.model}
+                      className="rta-hit flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-[#fafafa]"
+                    >
+                      <Avatar name={providerOf(profile.model)} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-bold" title={profile.model}>
+                          {profile.model}
+                        </span>
+                        <span className="block ui-caption">来源 {providerOf(profile.model)}</span>
+                      </span>
+                    </li>
+                  ))}
+                  {visibleModels.length === 0 && <li className="ui-caption px-2 py-2">没有匹配的模型。</li>}
+                </ul>
+                <p className="mt-2 ui-caption">
+                  在智能体设置里选这里的模型；多个模型串成候选链，去「模型路由」页。
+                </p>
               </div>
             )}
-          </div>
+          </section>
+        )}
 
-          <div className="rounded-2xl border border-line bg-white p-4">
-            <div className="text-[13px] font-bold">已添加的来源（{providers.length}）</div>
-            <ul className="mt-2 divide-y divide-line">
-              {providers.map((row) => (
-                <li key={row.id} className="flex items-center gap-3 py-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-bold">{row.id}</span>
-                    <span className="block ui-caption">
-                      {row.kind}
-                      {row.host ? ` · ${row.host}` : ""}
-                      {row.models !== null ? ` · ${row.models} 个模型` : ""}
+        {/* ── 来源 ───────────────────────────────────────────── */}
+        {tab === "sources" && (
+          <section aria-label="来源" className="space-y-4">
+            <div className="rounded-2xl border border-line bg-white p-4">
+              <div className="text-[13px] font-bold">订阅与账号</div>
+              <p className="mt-0.5 ui-caption">
+                点一下登录厂商自己的页面，登录完成后账号与额度自动出现；多个账号会自动分担。
+              </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {SUBSCRIPTIONS.map((item) => (
+                  <button
+                    key={item.agent}
+                    type="button"
+                    className="rta-hit flex items-center gap-2 rounded-xl border border-line bg-white px-3 py-2 text-left disabled:opacity-50"
+                    disabled={!cli}
+                    onClick={() => void runTerminal(`登录 ${item.label}`, ["accounts", "add", item.agent])}
+                  >
+                    <Avatar name={item.label} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] font-bold">{item.label}</span>
+                      <span className="block ui-caption">{item.desc}</span>
                     </span>
-                  </span>
-                  <button
-                    type="button"
-                    className="ui-btn ui-btn-sm ui-btn-ghost"
-                    disabled={!cli}
-                    onClick={() => void run("测试来源", ["provider", "test", row.id])}
-                  >
-                    测试
+                    <span className="shrink-0 text-[11px] text-muted">登录 →</span>
                   </button>
-                  <button
-                    type="button"
-                    className="ui-btn ui-btn-sm ui-btn-danger"
-                    disabled={!cli}
-                    onClick={() =>
-                      void run("删除来源", ["provider", "rm", row.id], { refresh: true })
-                    }
-                  >
-                    删除
-                  </button>
-                </li>
-              ))}
-              {providers.length === 0 && (
-                <li className="py-2 ui-caption">还没有来源，从上面选一个开始。</li>
-              )}
-            </ul>
-          </div>
-        </section>
-      )}
-
-      {/* ── 账号 ─────────────────────────────────────────────── */}
-      {tab === "accounts" && (
-        <section aria-label="账号" className="space-y-4">
-          <div className="rounded-2xl border border-line bg-white p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-[13px] font-bold">已登录的账号（{accounts.length}）</div>
-              <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" onClick={() => void loadAccounts()}>
-                刷新
-              </button>
-            </div>
-            <table className="mt-2 w-full text-left text-[13px]">
-              <thead className="ui-caption">
-                <tr>
-                  <th className="py-1 pr-3">类别</th>
-                  <th className="py-1 pr-3">账号</th>
-                  <th className="py-1 pr-3">额度</th>
-                </tr>
-              </thead>
-              <tbody>
+                ))}
+              </div>
+              <ul className="mt-3 divide-y divide-line border-t border-line">
                 {accounts.map((row, index) => (
-                  <tr key={`${row.agent}-${row.label}-${index}`} className="border-t border-line">
-                    <td className="py-1.5 pr-3">{row.agent}</td>
-                    <td className="py-1.5 pr-3">{row.label}</td>
-                    <td className="py-1.5 pr-3">{row.allowance ?? "—"}</td>
-                  </tr>
+                  <li key={`${row.agent}-${row.label}-${index}`} className="flex items-center gap-3 py-2">
+                    <Avatar name={row.agent} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-bold">{row.label}</span>
+                      <span className="block ui-caption">{row.agent}</span>
+                    </span>
+                    <span className="shrink-0 ui-caption">{row.allowance ?? "额度未知"}</span>
+                  </li>
                 ))}
                 {accounts.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="py-2 ui-caption">
-                      还没有账号。用下面的按钮登录一个订阅，额度会显示在这里。
-                    </td>
-                  </tr>
+                  <li className="py-2 ui-caption">还没有账号，从上面对应的服务登录一个。</li>
                 )}
-              </tbody>
-            </table>
-          </div>
-          <div className="rounded-2xl border border-line bg-white p-4">
-            <div className="text-[13px] font-bold">再登录一个</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {SUBSCRIPTIONS.map((item) => (
-                <button
-                  key={item.agent}
-                  type="button"
-                  className="ui-btn ui-btn-sm ui-btn-primary"
-                  disabled={!cli}
-                  onClick={() => void runTerminal(`登录 ${item.label}`, ["accounts", "add", item.agent])}
-                >
-                  登录 {item.label}
-                </button>
-              ))}
+              </ul>
             </div>
-            <p className="mt-2 ui-caption">多个账号会自动轮流分担额度，不需要手动切换。</p>
-          </div>
-        </section>
-      )}
 
-      {/* ── 路由 ─────────────────────────────────────────────── */}
-      {tab === "routing" && (
-        <section aria-label="路由" className="space-y-4">
-          <ModelTraceView />
-          <div className="rounded-2xl border border-line bg-white p-4">
-            <div className="flex items-center justify-between">
+            <div className="rounded-2xl border border-line bg-white p-4">
+              <div className="text-[13px] font-bold">API Key 服务商</div>
+              <p className="mt-0.5 ui-caption">点一个服务商，粘贴它给你的 Key；模型会自动读出来。</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                {PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    aria-pressed={presetKey?.id === preset.id}
+                    className={`rta-hit rounded-xl border px-3 py-2.5 text-left disabled:opacity-50 ${
+                      presetKey?.id === preset.id
+                        ? "border-ink bg-[#f4f7ff]"
+                        : "border-line bg-white"
+                    }`}
+                    disabled={!cli}
+                    onClick={() => setPresetKey({ id: preset.id, key: "" })}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Avatar name={preset.label} />
+                      <span className="min-w-0">
+                        <span className="block text-[13px] font-bold">{preset.label}</span>
+                        <span className="block ui-caption">{preset.desc}</span>
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {presetKey && (
+                <div className="rta-enter mt-3 rounded-xl border border-line bg-[#fafafa] p-3">
+                  <div className="text-[12px] font-bold">
+                    添加 {PRESETS.find((item) => item.id === presetKey.id)?.label}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <input
+                      aria-label="API Key"
+                      className="ui-input flex-1"
+                      type="password"
+                      placeholder="粘贴 API Key"
+                      value={presetKey.key}
+                      onChange={(event) => setPresetKey({ ...presetKey, key: event.target.value })}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") void addPreset();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-md ui-btn-primary"
+                      disabled={!presetKey.key.trim()}
+                      onClick={() => void addPreset()}
+                    >
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-md ui-btn-ghost"
+                      onClick={() => setPresetKey(null)}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-line bg-white p-4">
+              <div className="text-[13px] font-bold">其他服务商 / 自定义地址</div>
+              <p className="mt-0.5 ui-caption">任何 OpenAI 兼容接口都可以接进来。</p>
+              {!custom.open ? (
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-md ui-btn-ghost mt-2"
+                  disabled={!cli}
+                  onClick={() => setCustom({ ...custom, open: true })}
+                >
+                  + 添加自定义地址
+                </button>
+              ) : (
+                <div className="rta-enter mt-2 grid gap-2 sm:grid-cols-2">
+                  <input
+                    aria-label="来源名称"
+                    className="ui-input"
+                    placeholder="名称（如 relay）"
+                    value={custom.id}
+                    onChange={(event) => setCustom({ ...custom, id: event.target.value })}
+                  />
+                  <input
+                    aria-label="接口地址"
+                    className="ui-input"
+                    placeholder="https://host/v1"
+                    value={custom.url}
+                    onChange={(event) => setCustom({ ...custom, url: event.target.value })}
+                  />
+                  <input
+                    aria-label="自定义 Key"
+                    className="ui-input"
+                    type="password"
+                    placeholder="API Key"
+                    value={custom.key}
+                    onChange={(event) => setCustom({ ...custom, key: event.target.value })}
+                  />
+                  <input
+                    aria-label="模型列表"
+                    className="ui-input"
+                    placeholder="模型 id，逗号分隔（可留空自动读取）"
+                    value={custom.models}
+                    onChange={(event) => setCustom({ ...custom, models: event.target.value })}
+                  />
+                  <div className="flex gap-2 sm:col-span-2">
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-md ui-btn-primary"
+                      disabled={!custom.id.trim()}
+                      onClick={() => void addCustom()}
+                    >
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-md ui-btn-ghost"
+                      onClick={() => setCustom({ open: false, id: "", url: "", key: "", models: "" })}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-line bg-white p-4">
+              <div className="text-[13px] font-bold">已添加的来源（{providers.length}）</div>
+              <ul className="mt-2 divide-y divide-line">
+                {providers.map((row) => (
+                  <li key={row.id} className="flex items-center gap-3 py-2">
+                    <Avatar name={row.kind} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-bold">{row.id}</span>
+                      <span className="block ui-caption">
+                        {row.kind}
+                        {row.host ? ` · ${row.host}` : ""}
+                        {row.models !== null ? ` · ${row.models} 个模型` : ""}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-sm ui-btn-ghost"
+                      disabled={!cli}
+                      onClick={() => void run("测试来源", ["provider", "test", row.id])}
+                    >
+                      测试
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-sm ui-btn-danger"
+                      disabled={!cli}
+                      onClick={() => void run("删除来源", ["provider", "rm", row.id], { refresh: true })}
+                    >
+                      删除
+                    </button>
+                  </li>
+                ))}
+                {providers.length === 0 && (
+                  <li className="py-2 ui-caption">还没有来源，从上面选一个开始。</li>
+                )}
+              </ul>
+            </div>
+          </section>
+        )}
+
+        {/* ── 运行 ───────────────────────────────────────────── */}
+        {tab === "run" && (
+          <section aria-label="运行" className="space-y-4">
+            <ModelTraceView />
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-line bg-white px-4 py-3">
               <div className="text-[13px] font-bold">候选链</div>
-              <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" onClick={() => setPage("modelroute")}>
+              <button
+                type="button"
+                className="rta-segment rounded-full bg-[#f2f3f5] px-3 py-1 text-[12px] text-muted hover:bg-[#e9ebef]"
+                onClick={() => setPage("modelroute")}
+              >
                 打开模型路由 →
               </button>
             </div>
-            <p className="mt-1 ui-caption">
-              把多个模型串成一条候选链：第一个答不了会自动换下一个。上面是实时链路，这里是入口。
-            </p>
-          </div>
-          <details className="rounded-2xl border border-line bg-white p-4">
-            <summary className="cursor-pointer text-[13px] font-bold">高级：路由分组（可选）</summary>
-            <p className="mt-1 ui-caption">多个模型或账号合成一个名字，按策略分配。一般不需要手动建。</p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              <input
-                aria-label="分组名称"
-                className="ui-input"
-                placeholder="分组名"
-                value={groupForm.name}
-                onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })}
-              />
-              <input
-                aria-label="分组模型列表"
-                className="ui-input"
-                placeholder="provider/model,provider/model2"
-                value={groupForm.models}
-                onChange={(event) => setGroupForm({ ...groupForm, models: event.target.value })}
-              />
-              <select
-                aria-label="分组选路策略"
-                className="ui-input"
-                value={groupForm.routing}
-                onChange={(event) => setGroupForm({ ...groupForm, routing: event.target.value })}
-              >
-                {GROUP_ROUTING.map((routing) => (
-                  <option key={routing} value={routing}>
-                    {routing}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
+
+            <details className="rounded-2xl border border-line bg-white p-4">
+              <summary className="cursor-pointer text-[13px] font-bold">路由分组（可选）</summary>
+              <p className="mt-1 ui-caption">多个模型或账号合成一个名字，按策略分配。一般不需要手动建。</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <input
+                  aria-label="分组名称"
+                  className="ui-input"
+                  placeholder="分组名"
+                  value={groupForm.name}
+                  onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })}
+                />
+                <input
+                  aria-label="分组模型列表"
+                  className="ui-input"
+                  placeholder="provider/model,provider/model2"
+                  value={groupForm.models}
+                  onChange={(event) => setGroupForm({ ...groupForm, models: event.target.value })}
+                />
+                <select
+                  aria-label="分组选路策略"
+                  className="ui-input"
+                  value={groupForm.routing}
+                  onChange={(event) => setGroupForm({ ...groupForm, routing: event.target.value })}
+                >
+                  {GROUP_ROUTING.map((routing) => (
+                    <option key={routing} value={routing}>
+                      {routing}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-primary"
+                  disabled={!cli || !groupForm.name.trim() || !groupForm.models.trim()}
+                  onClick={() =>
+                    void run("保存分组", [
+                      "group",
+                      "add",
+                      groupForm.name.trim(),
+                      `models=${groupForm.models.trim()}`,
+                      `routing=${groupForm.routing}`,
+                    ])
+                  }
+                >
+                  保存分组
+                </button>
+                <input
+                  aria-label="分组 ID"
+                  className="ui-input"
+                  placeholder="分组名（查看/删除用）"
+                  value={groupForm.target}
+                  onChange={(event) => setGroupForm({ ...groupForm, target: event.target.value })}
+                />
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  disabled={!cli || !groupForm.target.trim()}
+                  onClick={() => void run("分组详情", ["group", groupForm.target.trim()])}
+                >
+                  详情
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-danger"
+                  disabled={!cli || !groupForm.target.trim()}
+                  onClick={() => void run("删除分组", ["group", "rm", groupForm.target.trim()])}
+                >
+                  删除
+                </button>
+              </div>
+            </details>
+
+            <details className="rounded-2xl border border-line bg-white p-4">
+              <summary className="cursor-pointer text-[13px] font-bold">用量</summary>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="用量时间范围"
+                  className="ui-input"
+                  value={usagePeriod}
+                  onChange={(event) => setUsagePeriod(event.target.value)}
+                >
+                  {["today", "7d", "30d", "all"].map((period) => (
+                    <option key={period} value={period}>
+                      {period === "today" ? "今天" : period === "7d" ? "近 7 天" : period === "30d" ? "近 30 天" : "全部"}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  disabled={!cli}
+                  onClick={() => void run(`用量 ${usagePeriod}`, ["usage", usagePeriod])}
+                >
+                  查看用量
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  disabled={!cli}
+                  onClick={() => void run("导出用量", ["usage", "--csv", usagePeriod])}
+                >
+                  导出 CSV
+                </button>
+              </div>
+            </details>
+
+            <details className="rounded-2xl border border-line bg-white p-4">
+              <summary className="cursor-pointer text-[13px] font-bold">备份与恢复</summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" className="ui-btn ui-btn-sm ui-btn-primary" disabled={!cli} onClick={() => void runTerminal("备份", ["backup"])}>
+                  新建备份
+                </button>
+                <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void runTerminal("恢复备份", ["restore"])}>
+                  恢复备份
+                </button>
+              </div>
+              <p className="mt-1 ui-caption">口令在终端里输入，不经过页面。</p>
+            </details>
+
+            <details className="rounded-2xl border border-line bg-white p-4">
+              <summary className="cursor-pointer text-[13px] font-bold">多机同步</summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <select aria-label="同步类型" className="ui-input" value={syncKind} onChange={(event) => setSyncKind(event.target.value)}>
+                  {["webdav", "s3", "github"].map((kind) => (
+                    <option key={kind} value={kind}>
+                      {kind}
+                    </option>
+                  ))}
+                </select>
+                <select aria-label="同步动作" className="ui-input" value={syncCommand} onChange={(event) => setSyncCommand(event.target.value)}>
+                  {["now", "on", "off", "set"].map((command) => (
+                    <option key={command} value={command}>
+                      {command}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  aria-label="同步参数"
+                  className="ui-input"
+                  placeholder="set 的参数：key=value key2=value2"
+                  value={syncValues}
+                  onChange={(event) => setSyncValues(event.target.value)}
+                />
+              </div>
               <button
                 type="button"
-                className="ui-btn ui-btn-sm ui-btn-primary"
-                disabled={!cli || !groupForm.name.trim() || !groupForm.models.trim()}
+                className="ui-btn ui-btn-sm ui-btn-primary mt-2"
+                disabled={!cli}
                 onClick={() =>
-                  void run("保存分组", [
-                    "group",
-                    "add",
-                    groupForm.name.trim(),
-                    `models=${groupForm.models.trim()}`,
-                    `routing=${groupForm.routing}`,
+                  void run(`${syncKind} ${syncCommand}`, [
+                    syncKind,
+                    syncCommand,
+                    ...syncValues.trim().split(/\s+/).filter(Boolean),
                   ])
                 }
               >
-                保存分组
+                执行
               </button>
-              <input
-                aria-label="分组 ID"
-                className="ui-input"
-                placeholder="分组名（查看/删除用）"
-                value={groupForm.target}
-                onChange={(event) => setGroupForm({ ...groupForm, target: event.target.value })}
-              />
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
-                disabled={!cli || !groupForm.target.trim()}
-                onClick={() => void run("分组详情", ["group", groupForm.target.trim()])}
-              >
-                详情
-              </button>
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-danger"
-                disabled={!cli || !groupForm.target.trim()}
-                onClick={() => void run("删除分组", ["group", "rm", groupForm.target.trim()])}
-              >
-                删除
-              </button>
-            </div>
-          </details>
-        </section>
-      )}
+            </details>
 
-      {/* ── 更多 ─────────────────────────────────────────────── */}
-      {tab === "more" && (
-        <section aria-label="更多" className="space-y-3">
-          <details className="rounded-2xl border border-line bg-white p-4">
-            <summary className="cursor-pointer text-[13px] font-bold">用量</summary>
-            <p className="mt-1 ui-caption">按时间看 token 与费用，可导出 CSV。</p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <select
-                aria-label="用量时间范围"
-                className="ui-input"
-                value={usagePeriod}
-                onChange={(event) => setUsagePeriod(event.target.value)}
-              >
-                {["today", "7d", "30d", "all"].map((period) => (
-                  <option key={period} value={period}>
-                    {period === "today"
-                      ? "今天"
-                      : period === "7d"
-                        ? "近 7 天"
-                        : period === "30d"
-                          ? "近 30 天"
-                          : "全部"}
-                  </option>
-                ))}
-              </select>
+            <details className="rounded-2xl border border-line bg-white p-4">
+              <summary className="cursor-pointer text-[13px] font-bold">资源库与网页搜索</summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void run("库状态", ["library"])}>
+                  查看库
+                </button>
+                <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void run("同步库", ["library", "sync"])}>
+                  同步到智能体
+                </button>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <input
+                  aria-label="搜索 API"
+                  className="ui-input"
+                  placeholder="搜索 API（如 tavily）"
+                  value={searchForm.api}
+                  onChange={(event) => setSearchForm({ ...searchForm, api: event.target.value })}
+                />
+                <input
+                  aria-label="搜索 Key"
+                  className="ui-input"
+                  type="password"
+                  placeholder="Key"
+                  value={searchForm.key}
+                  onChange={(event) => setSearchForm({ ...searchForm, key: event.target.value })}
+                />
+                <input
+                  aria-label="删除搜索 API"
+                  className="ui-input"
+                  placeholder="要删除的 API 名称"
+                  value={searchForm.target}
+                  onChange={(event) => setSearchForm({ ...searchForm, target: event.target.value })}
+                />
+              </div>
               <button
                 type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
-                disabled={!cli}
-                onClick={() => void run(`用量 ${usagePeriod}`, ["usage", usagePeriod])}
-              >
-                查看用量
-              </button>
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
-                disabled={!cli}
-                onClick={() => void run("导出用量", ["usage", "--csv", usagePeriod])}
-              >
-                导出 CSV
-              </button>
-            </div>
-          </details>
-
-          <details className="rounded-2xl border border-line bg-white p-4">
-            <summary className="cursor-pointer text-[13px] font-bold">备份与恢复</summary>
-            <p className="mt-1 ui-caption">
-              备份包含来源、Key、设置与账号登录，用口令加密；口令在终端里输入，不经过页面。
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-primary"
-                disabled={!cli}
-                onClick={() => void runTerminal("备份", ["backup"])}
-              >
-                新建备份
-              </button>
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
-                disabled={!cli}
-                onClick={() => void runTerminal("恢复备份", ["restore"])}
-              >
-                恢复备份
-              </button>
-            </div>
-          </details>
-
-          <details className="rounded-2xl border border-line bg-white p-4">
-            <summary className="cursor-pointer text-[13px] font-bold">多机同步</summary>
-            <p className="mt-1 ui-caption">让几台电脑上的来源与账号保持一致。</p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              <select
-                aria-label="同步类型"
-                className="ui-input"
-                value={syncKind}
-                onChange={(event) => setSyncKind(event.target.value)}
-              >
-                {["webdav", "s3", "github"].map((kind) => (
-                  <option key={kind} value={kind}>
-                    {kind}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="同步动作"
-                className="ui-input"
-                value={syncCommand}
-                onChange={(event) => setSyncCommand(event.target.value)}
-              >
-                {["now", "on", "off", "set"].map((command) => (
-                  <option key={command} value={command}>
-                    {command}
-                  </option>
-                ))}
-              </select>
-              <input
-                aria-label="同步参数"
-                className="ui-input"
-                placeholder="set 的参数：key=value key2=value2"
-                value={syncValues}
-                onChange={(event) => setSyncValues(event.target.value)}
-              />
-            </div>
-            <button
-              type="button"
-              className="ui-btn ui-btn-sm ui-btn-primary mt-2"
-              disabled={!cli}
-              onClick={() =>
-                void run(`${syncKind} ${syncCommand}`, [
-                  syncKind,
-                  syncCommand,
-                  ...syncValues.trim().split(/\s+/).filter(Boolean),
-                ])
-              }
-            >
-              执行
-            </button>
-          </details>
-
-          <details className="rounded-2xl border border-line bg-white p-4">
-            <summary className="cursor-pointer text-[13px] font-bold">资源库与网页搜索</summary>
-            <p className="mt-1 ui-caption">把指令、MCP、技能同步给各智能体；也可以配一个网页搜索来源。</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
-                disabled={!cli}
-                onClick={() => void run("库状态", ["library"])}
-              >
-                查看库
-              </button>
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
-                disabled={!cli}
-                onClick={() => void run("同步库", ["library", "sync"])}
-              >
-                同步到智能体
-              </button>
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              <input
-                aria-label="搜索 API"
-                className="ui-input"
-                placeholder="搜索 API（如 tavily）"
-                value={searchForm.api}
-                onChange={(event) => setSearchForm({ ...searchForm, api: event.target.value })}
-              />
-              <input
-                aria-label="搜索 Key"
-                className="ui-input"
-                type="password"
-                placeholder="Key"
-                value={searchForm.key}
-                onChange={(event) => setSearchForm({ ...searchForm, key: event.target.value })}
-              />
-              <input
-                aria-label="删除搜索 API"
-                className="ui-input"
-                placeholder="要删除的 API 名称"
-                value={searchForm.target}
-                onChange={(event) => setSearchForm({ ...searchForm, target: event.target.value })}
-              />
-            </div>
-            <div className="mt-2 flex gap-2">
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-primary"
+                className="ui-btn ui-btn-sm ui-btn-primary mt-2"
                 disabled={!cli}
                 onClick={() => {
                   if (searchForm.api.trim()) {
@@ -852,72 +808,66 @@ export function ModelPage() {
               >
                 执行
               </button>
-            </div>
-          </details>
+            </details>
 
-          <details className="rounded-2xl border border-line bg-white p-4">
-            <summary className="cursor-pointer text-[13px] font-bold">高级命令</summary>
-            <p className="mt-1 ui-caption">
-              给熟悉命令行的用户：直接执行上面没覆盖到的操作。危险命令会被拒绝。
-            </p>
-            <div className="mt-2 flex gap-2">
+            <details className="rounded-2xl border border-line bg-white p-4">
+              <summary className="cursor-pointer text-[13px] font-bold">高级命令</summary>
+              <div className="mt-2 flex gap-2">
+                <input
+                  aria-label="命令"
+                  className="ui-input flex-1 font-mono text-[12px]"
+                  placeholder="providers"
+                  value={termCommand}
+                  onChange={(event) => setTermCommand(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void startTerminalRun();
+                  }}
+                />
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-primary"
+                  disabled={!cli || !termCommand.trim()}
+                  onClick={() => void startTerminalRun()}
+                >
+                  运行
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  disabled={!runId}
+                  onClick={() => {
+                    if (runId) void cli?.cliKill(runId);
+                    setRunId(null);
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+              <pre aria-label="命令输出" className="mt-2 h-56 overflow-auto rounded-xl bg-[#111] p-3 text-[12px] text-[#e8e8e8]">
+                {live || "（输出会出现在这里）"}
+              </pre>
               <input
-                aria-label="命令"
-                className="ui-input flex-1 font-mono text-[12px]"
-                placeholder="providers"
-                value={termCommand}
-                onChange={(event) => setTermCommand(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void startTerminalRun();
+                aria-label="命令输入"
+                className="ui-input mt-2 w-full font-mono text-[12px]"
+                placeholder="回车把这一行发给正在运行的命令"
+                value={terminalInput}
+                onChange={(event) => setTerminalInput(event.target.value)}
+                onKeyDown={async (event) => {
+                  if (event.key !== "Enter" || !runId || !cli) return;
+                  const text = `${terminalInput}\n`;
+                  setTerminalInput("");
+                  await cli.cliInput(runId, text);
                 }}
               />
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-primary"
-                disabled={!cli || !termCommand.trim()}
-                onClick={() => void startTerminalRun()}
-              >
-                运行
-              </button>
-              <button
-                type="button"
-                className="ui-btn ui-btn-sm ui-btn-ghost"
-                disabled={!runId}
-                onClick={() => {
-                  if (runId) void cli?.cliKill(runId);
-                  setRunId(null);
-                }}
-              >
-                取消
-              </button>
-            </div>
-            <pre
-              aria-label="命令输出"
-              className="mt-2 h-56 overflow-auto rounded-xl bg-[#111] p-3 text-[12px] text-[#e8e8e8]"
-            >
-              {live || "（输出会出现在这里）"}
-            </pre>
-            <input
-              aria-label="命令输入"
-              className="ui-input mt-2 w-full font-mono text-[12px]"
-              placeholder="回车把这一行发给正在运行的命令"
-              value={terminalInput}
-              onChange={(event) => setTerminalInput(event.target.value)}
-              onKeyDown={async (event) => {
-                if (event.key !== "Enter" || !runId || !cli) return;
-                const text = `${terminalInput}\n`;
-                setTerminalInput("");
-                await cli.cliInput(runId, text);
-              }}
-            />
-          </details>
-        </section>
-      )}
+            </details>
+          </section>
+        )}
+      </div>
 
       {output && (
         <div
           role={output.ok ? "status" : "alert"}
-          className={`mt-4 rounded-xl border p-3 ${
+          className={`rta-enter mt-4 rounded-xl border p-3 ${
             output.ok ? "border-line bg-[#fafafa]" : "border-[#f3c9c9] bg-[#fff6f6]"
           }`}
         >

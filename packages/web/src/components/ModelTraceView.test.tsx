@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ModelTraceView } from "./ModelTraceView.js";
 import { useLlmStore, DEFAULT_GATEWAY } from "../store/llm.js";
 
-/** 实时链路节点视图（d.101）：快照 → 节点/连线/列表/详情。 */
+/** 实时链路节点图（d.104）：节点/连线/状态色/筛选/详情/空态。 */
 
 const snapshot = {
   seq: 5,
@@ -16,7 +16,9 @@ const snapshot = {
       agent: "claude",
       model: "deepseek/deepseek-chat",
       provider: "deepseek",
-      order: [{ id: "k1", provider: "deepseek", name: "DeepSeek", who: "工作号", kind: "key", model: "deepseek-chat" }],
+      order: [
+        { id: "k1", provider: "deepseek", name: "DeepSeek", who: "工作号", kind: "key", model: "deepseek-chat" },
+      ],
       tries: [{ id: "k1", done: true, status: 200, ms: 900 }],
       done: true,
       status: 200,
@@ -30,7 +32,9 @@ const snapshot = {
       agent: "codex",
       model: "gpt-4o",
       provider: "openai",
-      order: [{ id: "a2", provider: "openai", name: "OpenAI", who: "备用号", kind: "account", model: "gpt-4o" }],
+      order: [
+        { id: "a2", provider: "openai", name: "OpenAI", who: "备用号", kind: "account", model: "gpt-4o" },
+      ],
       tries: [{ id: "a2", done: false }],
       done: false,
     },
@@ -40,7 +44,13 @@ const snapshot = {
 function mockFetch(body: unknown, status = 200) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })),
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+    ),
   );
 }
 
@@ -54,42 +64,44 @@ afterEach(() => {
 });
 
 describe("ModelTraceView", () => {
-  it("画出客户端/账号节点、统计进行中，并列出请求", async () => {
+  it("画出客户端/账号节点与状态色；进行中的连线有流动效果", async () => {
     mockFetch(snapshot);
     render(<ModelTraceView />);
-    expect(await screen.findByText(/2 个请求 · 1 进行中 · 1 成功 · 0 失败/)).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "路由节点图" })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "路由节点图" })).toBeInTheDocument();
+    expect(screen.getByText(/模型服务正在做的决定/)).toBeInTheDocument();
     expect(screen.getAllByText("claude").length).toBeGreaterThan(0);
     expect(screen.getAllByText("工作号").length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/deepseek\/deepseek-chat/).length).toBeGreaterThan(0);
-    // 进行中的请求有流动圆点，成功/失败没有
-    expect(screen.getByTestId("trace-edge-2").querySelector("animateMotion")).not.toBeNull();
-    expect(screen.getByTestId("trace-edge-1").querySelector("animateMotion")).toBeNull();
+    // 进行中的连线带 rta-flow；完成的没有
+    expect(screen.getByTestId("trace-edge-2").querySelector(".rta-flow")).not.toBeNull();
+    expect(screen.getByTestId("trace-edge-1").querySelector(".rta-flow")).toBeNull();
+    // 最近请求记录
+    expect(screen.getByText("最近请求是怎么走的")).toBeInTheDocument();
+    // 统计大数字
+    expect(screen.getByText("请求")).toBeInTheDocument();
+    expect(screen.getByText("改道")).toBeInTheDocument();
   });
 
-  it("点行打开详情（尝试列表、token）；关闭按钮收回", async () => {
+  it("点最近请求打开详情；关闭收回", async () => {
     mockFetch(snapshot);
     render(<ModelTraceView />);
-    await screen.findByText(/2 个请求/);
-    fireEvent.click(screen.getByText("deepseek/deepseek-chat"));
-    expect(screen.getByText("请求 #1")).toBeInTheDocument();
-    expect(screen.getByText(/k1/)).toBeInTheDocument();
-    expect(screen.getByText("320")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "关闭详情" }));
-    expect(screen.queryByText("请求 #1")).not.toBeInTheDocument();
+    await screen.findByRole("img", { name: "路由节点图" });
+    fireEvent.click(screen.getByText(/由 工作号 回答/));
+    expect(screen.getByText("请求详情")).toBeInTheDocument();
+    expect(screen.getByText(/落点：工作号/)).toBeInTheDocument();
+    expect(screen.getByText(/token：320/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByText("请求详情")).not.toBeInTheDocument();
   });
 
-  it("按状态筛选：只看进行中/失败，清除筛选恢复", async () => {
+  it("按状态筛选：只看进行中，再切回全部", async () => {
     mockFetch(snapshot);
     render(<ModelTraceView />);
-    await screen.findByText(/2 个请求/);
+    await screen.findByRole("img", { name: "路由节点图" });
     fireEvent.click(screen.getByRole("button", { name: "进行中" }));
     expect(screen.getByTestId("trace-edge-2")).toBeInTheDocument();
     expect(screen.queryByTestId("trace-edge-1")).toBeNull();
-    // 关闭了过滤后两条都在
-    fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
+    fireEvent.click(screen.getByRole("button", { name: "全部" }));
     expect(screen.getByTestId("trace-edge-1")).toBeInTheDocument();
-    expect(screen.getByTestId("trace-edge-2")).toBeInTheDocument();
   });
 
   it("没有请求时给引导，不伪造节点", async () => {
@@ -99,7 +111,7 @@ describe("ModelTraceView", () => {
     expect(screen.queryByRole("img", { name: "路由节点图" })).toBeNull();
   });
 
-  it("停掉网关/读不到 trace：显示错误而不是空图", async () => {
+  it("读不到路由记录：显示错误而不是空图", async () => {
     mockFetch({ error: "no" }, 403);
     render(<ModelTraceView />);
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/HTTP 403/));

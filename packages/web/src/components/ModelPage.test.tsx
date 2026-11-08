@@ -99,7 +99,7 @@ describe("ModelPage · 结构与主路径", () => {
     installBridge();
     render(<ModelPage />);
     expect(screen.getByRole("heading", { name: "模型" })).toBeInTheDocument();
-    for (const label of ["模型", "添加来源", "账号", "路由", "更多"]) {
+    for (const label of ["模型", "来源", "运行"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
     }
     expect(await screen.findByText("deepseek/deepseek-chat")).toBeInTheDocument();
@@ -110,10 +110,11 @@ describe("ModelPage · 结构与主路径", () => {
     expect(screen.queryByText(/网关地址/)).toBeNull();
   });
 
-  it("搜索只留下匹配的模型", () => {
+  it("搜索只留下匹配的模型", async () => {
     installBridge();
     render(<ModelPage />);
-    fireEvent.change(screen.getByLabelText("搜索模型"), { target: { value: "gpt" } });
+    const search = await screen.findByLabelText("搜索模型");
+    fireEvent.change(search, { target: { value: "gpt" } });
     expect(screen.getByText("openai/gpt-4o")).toBeInTheDocument();
     expect(screen.queryByText("deepseek/deepseek-chat")).toBeNull();
   });
@@ -129,7 +130,7 @@ describe("ModelPage · 添加来源", () => {
   it("点服务商卡片只填一个 Key 就能保存，并刷新模型目录", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "添加来源" }));
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     fireEvent.click(screen.getByRole("button", { name: /DeepSeek/ }));
     fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-x" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -142,7 +143,7 @@ describe("ModelPage · 添加来源", () => {
   it("订阅卡片走登录窗口", async () => {
     const { bridge } = installBridge();
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "添加来源" }));
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     fireEvent.click(screen.getByRole("button", { name: /Claude/ }));
     await waitFor(() =>
       expect(bridge.openTerminal).toHaveBeenCalledWith(["accounts", "add", "claude"]),
@@ -152,7 +153,7 @@ describe("ModelPage · 添加来源", () => {
   it("已添加来源可删除", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "添加来源" }));
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     expect(await screen.findByText("mock")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() => expect(calls).toContainEqual(["provider", "rm", "mock"]));
@@ -160,18 +161,18 @@ describe("ModelPage · 添加来源", () => {
 });
 
 describe("ModelPage · 账号与更多", () => {
-  it("账号表显示登录结果", async () => {
+  it("来源页同时展示已登录账号与额度", async () => {
     installBridge();
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "账号" }));
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
     expect(await screen.findByText("工作号")).toBeInTheDocument();
     expect(screen.getByText("82% used")).toBeInTheDocument();
   });
 
-  it("高级命令在「更多」里：流式输出写进面板", async () => {
+  it("高级命令在「运行」里：流式输出写进面板", async () => {
     const { bridge, calls, emit } = installBridge();
     render(<ModelPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "更多" }));
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
     fireEvent.click(screen.getByText("高级命令"));
     fireEvent.change(screen.getByLabelText("命令"), { target: { value: "providers" } });
     fireEvent.click(screen.getByRole("button", { name: "运行" }));

@@ -134,6 +134,7 @@
 | [specs/2026-11-07-file-panel-and-automation-presets.md](superpowers/specs/2026-11-07-file-panel-and-automation-presets.md) | **文件管理收进智能体页 + 自动化预设**：共享文件面板不再全局常驻（只在智能体页显示），窄窗入口同步收口；自动化新增 4 条一键预设（每日/每2小时/日程/周导出），编辑器保留为自定义入口 |
 | [specs/2026-11-07-installer-branding.md](superpowers/specs/2026-11-07-installer-branding.md) | **安装器品牌化**：NSIS 欢迎页/完成页文案、164×314 侧栏、150×57 页头、多尺寸应用图标；素材由 `scripts/make-installer-assets.py` 生成，附安装行为不变与未做项（签名/深色控件） |
 | [specs/2026-11-07-ui-polish-rounds.md](superpowers/specs/2026-11-07-ui-polish-rounds.md) | **20 轮 UI/UX 自检与优化**（进行中）：按「使用习惯 / 排版 / UI 一致性 / AI 腔文案」逐轮找证据并修复；含轮次看板、每轮问题与修法、验证口径与遗留清单 |
+| [specs/2026-11-08-d104-model-page-three-tabs.md](superpowers/specs/2026-11-08-d104-model-page-three-tabs.md) | **d.104 模型页三分区与动效**：融合成模型/来源/运行；分段控件、行卡片、骨架屏、空态示意；实时链路改为三列卡片 + 0.7s 虚线流动/1.8s 呼吸点/300ms 入场，尊重减少动效 |
 | [specs/2026-11-08-d103-model-page-refactor.md](superpowers/specs/2026-11-08-d103-model-page-refactor.md) | **d.103 模型页重构**：设置区去掉模型页签；模型页改为「模型/添加来源/账号/路由/更多」五分区，卡片式加来源、只填 Key/点一下登录；去掉服务启停、地址端口与第三方品牌；其余能力收进折叠区 |
 | [specs/2026-11-08-plugin-system-upgrade.md](superpowers/specs/2026-11-08-plugin-system-upgrade.md) | **插件体系升级（预计 d.104）**：对标 deepseek-harness 后定的契约——v5 清单（`engines` 版本兼容 + `meta` 上架元数据）、统一能力单元/贡献点注册表（撤销即停用/卸载）、安装事务与回滚、云端目录 v2 索引（分类/标签/版本/详情）、首方 bundle 签名；分 A/B/C/D 四阶段与测试计划 |
 | [specs/2026-11-08-d102-trace-filters.md](superpowers/specs/2026-11-08-d102-trace-filters.md) | **d.102 实时链路优化**：顶部统计（总数/进行中/成功/失败/平均耗时/token）、状态筛选、点击客户端或账号节点即筛选、最后读取时间、尊重减弱动效、筛选后空状态 |
