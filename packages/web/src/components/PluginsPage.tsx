@@ -28,6 +28,8 @@ import { InstallDialog } from "./plugins/InstallDialog.js";
 import { PluginRepositoryPanel } from "./plugins/PluginRepositoryPanel.js";
 import { PluginRepositoryDialog } from "./plugins/PluginRepositoryDialog.js";
 import { downloadPluginManifest } from "../lib/plugins/catalogClient.js";
+import type { MarketClientDeps } from "../lib/plugins/marketClient.js";
+import { MarketView } from "./plugins/MarketView.js";
 import { PluginCard } from "./plugins/PluginCard.js";
 import { PluginDetailDialog } from "./plugins/PluginDetailDialog.js";
 import { RemovePluginDialog } from "./plugins/RemovePluginDialog.js";
@@ -68,11 +70,13 @@ import { UnitDiagnostics } from "./plugins/UnitDiagnostics.js";
  * 动作改为切 Tab，不再跨页 setPage——导航里也不再有这两个独立入口。
  */
 
-type TabKey = "plugins" | "repo" | "widgets" | "modules" | "skills" | "tools" | "mcp";
+type TabKey = "plugins" | "market" | "repo" | "widgets" | "modules" | "skills" | "tools" | "mcp";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "plugins", label: "插件" },
-  // d.95：云端插件仓库（浏览/下载/安装）作为一等入口，不再只藏在安装弹窗里
+  // d.108：市场索引 v2 作为浏览/安装主入口；不可用时回落下面的「仓库」
+  { key: "market", label: "市场" },
+  // d.95：云端插件仓库（v1 目录，市场不可用时的兼容回落）
   { key: "repo", label: "仓库" },
   // d.98：界面插件（原桌宠）与声明式插件分开展示——安装路径、信任模型、生命周期都不同
   { key: "widgets", label: "桌面小组件" },
@@ -112,6 +116,8 @@ export interface PluginsPageProps {
   verify?: (manifest: PluginManifest) => Promise<SignatureCheck>;
   /** 公钥指纹实现（测试注入；默认 SHA-256）。 */
   fingerprintOf?: (publicKey: string) => Promise<string>;
+  /** 市场索引客户端（测试注入；缺省走真实 fetch）。 */
+  market?: MarketClientDeps;
 }
 
 /** 主机名（含端口）；清单已校验合法，这里只用于展示。 */
@@ -125,7 +131,7 @@ function hostOf(url: string): string {
 
 /** 插件区五个 Tab 的会话级记忆：刷新回到上次看的 Tab。 */
 const PLUGINS_TAB_KEY = "heming.tab.plugins.v1";
-const PLUGINS_TABS = ["plugins", "repo", "widgets", "modules", "skills", "tools", "mcp"] as const satisfies readonly TabKey[];
+const PLUGINS_TABS = ["plugins", "market", "repo", "widgets", "modules", "skills", "tools", "mcp"] as const satisfies readonly TabKey[];
 
 export function PluginsPage({
   plugins = pluginStore,
@@ -136,6 +142,7 @@ export function PluginsPage({
   publishers: publishersProp,
   verify = verifyManifestSignature,
   fingerprintOf = publicKeyFingerprint,
+  market,
 }: PluginsPageProps = {}) {
   const [tick, setTick] = useState(0);
   const [tab, setTab] = useSessionTab<TabKey>(PLUGINS_TAB_KEY, "plugins", PLUGINS_TABS);
@@ -148,6 +155,10 @@ export function PluginsPage({
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<InstalledPlugin | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  /** d.108：市场不可用时回落到「仓库」的原因（仓库 Tab 顶部提示）。 */
+  const [marketFallback, setMarketFallback] = useState<string | null>(null);
+  /** 本次安装从哪来：市场装完回市场列表并标「已安装」，其它入口回插件 Tab。 */
+  const [installSource, setInstallSource] = useState<"market" | "repo" | "manual" | null>(null);
 
   /**
    * 一次性视图意图（d.67）：旧「技能区 / 接口区」链接、命令面板与桌宠气泡
@@ -162,19 +173,27 @@ export function PluginsPage({
   }, [pageView]);
 
   // 命令面板「插件」结果跳转：打开该插件详情并短暂高亮卡片（d.61 起的既有行为）。
+  // d.108：`open-plugin` 意图也被 target=unit 复用（id 是单元 id）；声明式插件仍开详情，
+  // 其它来源（系统 / 内置模块 / 界面插件）没有插件详情，改为在统一单元列表里定位。
   const paletteIntent = useUiStore((s) => s.paletteIntent);
   const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
   const [highlightPluginId, setHighlightPluginId] = useState<string | null>(null);
+  /** 统一单元列表的外部定位请求（seq 用意图 token：连点同一条命令也能重新定位）。 */
+  const [focusUnit, setFocusUnit] = useState<{ id: string; seq: number } | null>(null);
   useEffect(() => {
     if (paletteIntent?.kind !== "open-plugin") return;
     const id = paletteIntent.data?.id;
     if (id) {
       setTab("plugins");
-      setDetailId(id);
-      setHighlightPluginId(id);
+      if (plugins.get(id)) {
+        setDetailId(id);
+        setHighlightPluginId(id);
+      } else {
+        setFocusUnit({ id, seq: paletteIntent.token });
+      }
     }
     consumePaletteIntent();
-  }, [paletteIntent, consumePaletteIntent]);
+  }, [paletteIntent, consumePaletteIntent, plugins]);
 
   useEffect(() => {
     if (!highlightPluginId) return;
@@ -237,6 +256,17 @@ export function PluginsPage({
     () => describeCapabilityStats({ plugins, capabilities }),
     [plugins, capabilities, tick],
   );
+  /** 市场「已安装/可更新」徽标：声明式插件 + 已装界面插件（bundle 只提示去小组件装）。 */
+  const installedForMarket = useMemo(
+    () => [
+      ...list.map((plugin) => ({
+        id: plugin.manifest.id,
+        version: plugin.manifest.version,
+      })),
+      ...widgetsRecords.map((record) => ({ id: record.id, version: record.version })),
+    ],
+    [list, widgetsRecords],
+  );
   const toolGroups = useMemo(() => groupCatalogTools(capabilityCatalog), [capabilityCatalog]);
   const toolPackGroups = useMemo(() => groupToolPacks(capabilityCatalog), [capabilityCatalog]);
   /** serverId → 服务名（详情里「所属服务」列；缺失时退回 id）。 */
@@ -273,17 +303,20 @@ export function PluginsPage({
   );
 
   const openInstall = () => {
+    setInstallSource("manual");
     setText("");
     setMsg(null);
     setInstallOpen(true);
   };
 
   /**
-   * 从仓库载入清单（d.95）：下载原样 plugin.json（catalogClient 已校验 sha256），
-   * 填进同一个安装弹窗——安装预览/信任确认/写入语义与手动粘贴完全一致。
+   * 从仓库/市场载入清单（d.95/d.108）：下载原样 plugin.json（catalogClient 已校验
+   * sha256），填进同一个安装弹窗——安装预览/信任确认/写入语义完全一致。
+   * `source` 只影响装完回到哪个 Tab（市场装完回市场列表并标已安装）。
    */
-  const loadFromRepository = async (entry: PluginCatalogEntry) => {
+  const loadFromRepository = async (entry: PluginCatalogEntry, source: "repo" | "market" = "repo") => {
     const key = `${entry.id}@${entry.version}`;
+    setInstallSource(source);
     setRepoLoadingKey(key);
     setMsg(null);
     try {
@@ -316,15 +349,21 @@ export function PluginsPage({
   const onInstall = (options: PluginInstallOptions = {}) => {
     if (!preview) return;
     const before = preview;
+    const fromMarket = installSource === "market";
     try {
       const result = plugins.install(text, options);
       bump();
       setText("");
       setInstallOpen(false);
-      // 安装/更新后回到插件 Tab 并高亮这张卡：从「技能 / 工具 / MCP」Tab 点安装时，
-      // 装完还停在原 Tab 会让人以为没生效（高亮与滚动沿用命令面板的同一套机制）。
-      setTab("plugins");
-      setHighlightPluginId(result.plugin.manifest.id);
+      setInstallSource(null);
+      // 安装/更新后回到来源页：市场装完回市场列表（徽标变「已安装」），
+      // 其它入口回插件 Tab 并高亮这张卡（沿用命令面板的同一套机制）。
+      if (fromMarket) {
+        setTab("market");
+      } else {
+        setTab("plugins");
+        setHighlightPluginId(result.plugin.manifest.id);
+      }
       setMsg({ kind: "ok", text: installResultMessage(result, before) });
     } catch (err) {
       setMsg({
@@ -428,9 +467,11 @@ export function PluginsPage({
         <span className="ml-auto self-center ui-caption">
           {tab === "plugins"
             ? `已启用 ${enabledCount}/${list.length} 个插件 · 同一 id 再次安装 = 覆盖更新`
-            : tab === "repo"
-              ? "云端同一份插件仓库：下载原样清单、校验指纹后走同一套安装预览"
-              : tab === "widgets"
+            : tab === "market"
+              ? "云端市场 · 分类/标签/版本与兼容性；目录不可用时自动回落到「仓库」"
+              : tab === "repo"
+                ? "云端同一份插件仓库：下载原样清单、校验指纹后走同一套安装预览"
+                : tab === "widgets"
                 ? "界面插件 · 含可执行代码，装后由宿主开独立窗口"
                 : tab === "modules"
                   ? "内置模块 · 已并入「插件」Tab 的已安装统一列表（本 Tab 下版移除）· 停用只收起入口与后台任务，不删除本机数据"
@@ -444,16 +485,36 @@ export function PluginsPage({
         aria-labelledby={`plugins-${tab}-tab`}
         className="mt-4"
       >
-        {tab === "repo" && (
-          <PluginRepositoryPanel
-            installed={list.map((plugin) => ({
-              id: plugin.manifest.id,
-              version: plugin.manifest.version,
-            }))}
-            loadingKey={repoLoadingKey}
-            onLoad={loadFromRepository}
-            onError={(message) => setMsg({ kind: "error", text: message })}
+        {tab === "market" && (
+          <MarketView
+            installed={installedForMarket}
+            deps={market}
+            onUnavailable={(reason) => {
+              // 市场不可用 = 回落语义：切到「仓库」并在面板顶部说明原因（不再叠一条页面级提示）
+              setMarketFallback(reason);
+              setTab("repo");
+            }}
+            onInstall={(entry) => loadFromRepository(entry, "market")}
           />
+        )}
+
+        {tab === "repo" && (
+          <>
+            {marketFallback && (
+              <p role="status" className={`mb-2 ${HINT}`}>
+                目录暂时不可用，已切换到兼容列表（{marketFallback}）。
+              </p>
+            )}
+            <PluginRepositoryPanel
+              installed={list.map((plugin) => ({
+                id: plugin.manifest.id,
+                version: plugin.manifest.version,
+              }))}
+              loadingKey={repoLoadingKey}
+              onLoad={loadFromRepository}
+              onError={(message) => setMsg({ kind: "error", text: message })}
+            />
+          </>
         )}
 
         {tab === "plugins" && (
@@ -462,6 +523,7 @@ export function PluginsPage({
                 系统卡与插件卡沿用既有组件，详情/启停/卸载入口不变；其余来源用默认行。 */}
             <UnitListView
               statuses={unitStatuses}
+              focusUnit={focusUnit}
               renderUnit={(status) => {
                 const unit = status.unit;
                 if (unit.source === "system") return <SystemPluginCard system={system} />;

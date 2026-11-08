@@ -40,7 +40,16 @@ vi.mock("../lib/plugins/catalogClient.js", async (importOriginal) => {
         contributions: { skills: 0, mcpServers: 0, commands: 0, toolPacks: 0 },
       },
     ]),
-    downloadPluginManifest: vi.fn(async () => JSON.stringify({ schemaVersion: 3, id: "acme.repo", name: "仓库插件", version: "1.0.0" })),
+    downloadPluginManifest: vi.fn(async () =>
+      JSON.stringify({
+        schemaVersion: 3,
+        id: "acme.repo",
+        name: "仓库插件",
+        version: "1.0.0",
+        permissions: { network: [], tools: "read", files: [] },
+        contributions: { skills: [{ name: "仓库技能", instructions: "从仓库装进来的技能。" }] },
+      }),
+    ),
   };
 });
 
@@ -199,6 +208,86 @@ describe("PluginsPage · 仓库 Tab（d.95）", () => {
     const textarea = await screen.findByLabelText("插件清单 JSON");
     await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toContain("acme.repo"));
     expect(screen.getByRole("button", { name: "确认安装" })).toBeInTheDocument();
+  });
+});
+
+describe("PluginsPage · 市场 Tab（d.108）", () => {
+  const marketResponse = (): Record<string, unknown> => ({
+    format: 1,
+    title: "和鸣插件目录",
+    generatedAt: "2026-11-08T00:00:00.000Z",
+    categories: { efficiency: { title: "效率" } },
+    tags: {},
+    plugins: [
+      {
+        id: "acme.repo",
+        title: "仓库插件",
+        description: "从市场安装",
+        author: "ACME",
+        updatedAt: "2026-11-08T00:00:00.000Z",
+        versions: [
+          {
+            version: "1.0.0",
+            publishedAt: "2026-11-08T00:00:00.000Z",
+            schemaVersion: 3,
+            engines: { heming: "d.100" },
+            distribution: "manifest",
+            sha256: "b".repeat(64),
+            size: 1024,
+          },
+        ],
+      },
+    ],
+  });
+
+  function marketFetch(): typeof fetch {
+    return (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/detail")) return new Response("## 市场详情", { status: 200 });
+      return new Response(JSON.stringify(marketResponse()), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  it("市场索引可用：列表 → 详情 → 复用安装预览，装完回市场并标已安装", async () => {
+    render(
+      <PluginsPage plugins={store} skills={pool} mcp={registry} market={{ fetchImpl: marketFetch() }} />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "市场" }));
+    expect(await screen.findByText("仓库插件")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看 仓库插件 详情" }));
+    const detail = await screen.findByRole("dialog", { name: "市场详情 仓库插件" });
+    fireEvent.click(within(detail).getByRole("button", { name: "安装" }));
+    // 复用既有安装预览：清单来自 catalogClient.downloadPluginManifest（测试里已 mock）
+    const dialog = await screen.findByRole("dialog", { name: "安装插件" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认安装" }));
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "市场" })).toHaveAttribute("aria-selected", "true"),
+    );
+    expect(screen.getByText("已安装 v1.0.0")).toBeInTheDocument();
+  });
+
+  it("市场索引不可用：提示「已切换到兼容列表」并落到仓库 Tab", async () => {
+    render(
+      <PluginsPage
+        plugins={store}
+        skills={pool}
+        mcp={registry}
+        market={{
+          fetchImpl: (async () =>
+            new Response(JSON.stringify({ error: "市场索引不存在" }), {
+              status: 404,
+              headers: { "content-type": "application/json" },
+            })) as unknown as typeof fetch,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "市场" }));
+    expect(await screen.findByText(/已切换到兼容列表/)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "仓库" })).toHaveAttribute("aria-selected", "true");
   });
 });
 
