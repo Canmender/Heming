@@ -3,7 +3,7 @@
 > 分支：`feat/d103-plugin-system`（基线 `9c4bfd2` / `d.103.2.42.0`（本分支上另一并行会话已提交 d.103 模型页重构；本升级预计占 d.104，以实际 bump 为准））
 > 对标调研：`docs/research/2026-11-08-plugin-system-benchmark.md`
 > 本文是**契约**：实施时字段名、存储键、路由、撤销语义以本文为准；改契约先改本文。
-> 状态：**阶段 A（地基）已实现于 `d.107.2.42.0`**（v5 清单/engines、统一能力单元与贡献点、安装事务与回滚、市场索引 v2 契约与服务端、首方 bundle 验签、校验工具链与作者指南）；阶段 B 的市场浏览 UI、阶段 C 的诊断深化/bundle 命令 target 扩展/Agent 工具仍待做。全量门禁（build/test/typecheck）已全绿。
+> 状态：**阶段 A 已于 `d.107.2.42.0` 实现**（v5 清单/engines、统一能力单元与贡献点、安装事务与回滚、市场索引 v2 契约与服务端、首方 bundle 验签、校验工具链与作者指南）；**阶段 B 市场 UI 与阶段 C（命令 target 扩展、Agent 只读工具、bundle 生命周期事件）已于 `d.108.2.42.0` 实现**。剩余：市场里 bundle 直装、`settings`/`unit` 对 bundle 开放、Agent 写安装（需 HITL 非聊天页确认）、诊断深化。全量门禁（build/test/typecheck）全绿。
 > 设计依据：可实现性自检（`docs/research/2026-11-08-plugin-upgrade-feasibility.md`）+ 跨生态对标（`docs/research/2026-11-08-plugin-ecosystem-cross-reference.md`），本规格已按自检 F1–F10 与对标 N1–N17 修订。
 
 ## 0. 决策（用户口径与本文边界）
@@ -567,4 +567,8 @@ export type CommandTarget =
 | 发布工具生成索引 | `scripts/publish-plugin.mjs --index/--push` | ✅ |
 | 首方 bundle 验签 + 命令 target 收紧 | `packages/desktop/plugin-signature.js`、`plugin-package.js`、`resources/official-keys.json`（+40 例；dev 钥生产拒绝） | ✅ |
 | 工具链 / 文档 | `scripts/plugin-lint.mjs`、`scripts/plugin-schema.mjs`、`docs/plugin.schema.json`、`plugins/examples/`、`docs/PLUGIN-AUTHORING.md`、`docs/PLUGINS.md` §11 | ✅ |
-| 阶段 B/C 未做 | 市场浏览 UI（分类/详情/版本选择）、bundle 生命周期事件、`settings`/`unit` 命令 target、Agent 侧 `plugin_*` 工具 | 待做 |
+| 阶段 B：市场 UI（d.108） | `lib/plugins/marketClient.ts`、`components/plugins/{MarketView,MarketDetailDialog}.tsx`、PluginsPage「市场」Tab（+51 例） | ✅ |
+| 阶段 C：命令 target `settings`/`unit`（d.108） | shared `manifest.ts` + web 校验 + `CommandPalette`/`SettingsPage`/`UnitListView`（+176 例） | ✅ |
+| 阶段 C：Agent 只读工具（d.108） | `lib/plugins/tools.ts` + capability provider（`plugin_market_search` / `plugin_install_preview`，+23 例） | ✅ |
+| 阶段 C：bundle 生命周期事件（d.108） | desktop `plugin-host.js`/`widget-preload.js`/`plugin-package.js`（+6 例，55 例全绿） | ✅ |
+| 剩余未做 | 市场里 bundle 直装、`settings`/`unit` 对 bundle 开放、Agent 写安装（HITL）、诊断深化与健康检查 | 待做 |
