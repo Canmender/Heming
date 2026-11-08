@@ -383,7 +383,15 @@ function verifyOfficialSignature(manifest, options = {}) {
     }
 
     const data = Buffer.from(canonicalManifestText(manifest), "utf8");
+    /**
+     * 打包版**跳过 dev-* 公钥**：即使公钥表里同时有正式钥，也不能让「仓库里公开的
+     * 测试私钥」签出的包被正式版接受（否则 dev 私钥 = 后门）。本地开发由
+     * `main.js` 在未打包时设 HEMING_ALLOW_DEV_PLUGIN_KEYS=1 显式放开。
+     */
+    let triedKeys = 0;
     for (const { keyId, key } of loaded.keys) {
+      if (!allowDevKeys && isDevKeyId(keyId)) continue;
+      triedKeys += 1;
       let valid = false;
       try {
         valid = nodeVerify(null, data, key, signatureBytes);
@@ -391,6 +399,14 @@ function verifyOfficialSignature(manifest, options = {}) {
         valid = false; // 单把公钥验签抛错按「这把不匹配」处理，继续试下一把
       }
       if (valid) return { ok: true, keyId };
+    }
+    if (triedKeys === 0) {
+      return {
+        ok: false,
+        reason:
+          "公钥表里只有开发调试公钥（dev-*），打包版不接受；本地开发可设 HEMING_ALLOW_DEV_PLUGIN_KEYS=1" +
+          "（正式发版必须用 official-* 公钥签名）",
+      };
     }
     const publisherId =
       manifest.publisher && typeof manifest.publisher.id === "string"

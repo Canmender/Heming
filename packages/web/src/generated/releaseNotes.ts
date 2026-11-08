@@ -23,7 +23,7 @@ export const RELEASE_NOTES: ReleaseNoteEntry[] = [
     "paragraphs": []
   },
   {
-    "version": "d.111.3.44.0",
+    "version": "d.112.3.45.0",
     "date": "2026-11-08",
     "title": "界面插件正式签名上线（桌宠 1.0.1）",
     "bullets": [

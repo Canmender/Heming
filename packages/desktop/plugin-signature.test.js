@@ -278,17 +278,31 @@ test("公钥表：缺失 / 非 JSON / 公钥损坏 / 空表 都失败关闭", ()
 test("公钥表：loadOfficialKeys 跳过 `_` 注释键，出厂文件可加载", () => {
   const loaded = loadOfficialKeys(DEFAULT_KEYS_FILE);
   assert.equal(loaded.ok, true);
-  assert.deepEqual(loaded.keys.map((item) => item.keyId), ["dev-test-2026-11"]);
+  assert.deepEqual(loaded.keys.map((item) => item.keyId), ["official-2026-11", "dev-test-2026-11"]);
+  assert.equal(loaded.hasProductionKey, true);
 });
 
-test("开发公钥保护：只有 dev-* 公钥时正式环境拒绝，显式放开/存在正式公钥才通过", () => {
+test("开发公钥保护：打包版忽略 dev-* 公钥，显式放开/正式钥才通过", () => {
   const manifest = signForTest(PINNED_MANIFEST);
 
+  // 出厂表里同时有 official 与 dev：dev 签名在正式环境必须**不匹配**（不能因表里有正式钥就接受 dev 签名）
   const refused = verifyOfficialSignature(manifest, { allowDevKeys: false });
   assert.equal(refused.ok, false);
-  assert.match(refused.reason, /只有开发调试公钥/);
+  assert.match(refused.reason, /签名与任何首方公钥都不匹配/);
 
   assert.equal(verifyOfficialSignature(manifest, { allowDevKeys: true }).ok, true);
+
+  // 只有 dev 键的表 + 正式环境：明确报「只有开发调试公钥」
+  const onlyDevDir = fs.mkdtempSync(path.join(os.tmpdir(), "heming-dev-only-keys-"));
+  const onlyDev = path.join(onlyDevDir, "keys.json");
+  const devPublic = JSON.parse(fs.readFileSync(DEFAULT_KEYS_FILE, "utf8"))["dev-test-2026-11"];
+  fs.writeFileSync(onlyDev, JSON.stringify({ "dev-only-x": devPublic }));
+  const onlyDevRefused = verifyOfficialSignature(manifest, {
+    keysFile: onlyDev,
+    allowDevKeys: false,
+  });
+  assert.equal(onlyDevRefused.ok, false);
+  assert.match(onlyDevRefused.reason, /只有开发调试公钥|签名与任何首方公钥都不匹配/);
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "heming-mixed-keys-"));
   const mixed = path.join(dir, "keys.json");

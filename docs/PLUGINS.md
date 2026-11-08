@@ -312,6 +312,17 @@ node scripts/publish-plugin.mjs packages/pet-widget/dist/package --dest <plugin-
 
 > 发版前跑 `node scripts/check-release-keys.mjs`：若 `resources/official-keys.json` 里只有 `dev-*` 公钥会以非 0 退出
 > 并提示「正式发版前必须换正式首方公钥（见文件 `_rotate`）」；本地/CI 开发可加 `--allow-dev`。
+**正式签名私钥在哪**：不在仓库里。发布机上放在 `D:/Heming-release-keys/official-plugin-signing.seed.txt`
+（base64url 原始 32 字节种子，权限仅本用户可读）；**上线前必须移入发布 CI 的 secret / HSM**，并按
+`resources/official-keys.json` 的 `_rotate` 做双钥过渡。丢失私钥 = 已安装用户永久无法接收新签名包。
+
+**签名后自检**：`node scripts/pack-plugin.mjs packages/pet-widget/dist/package` 会以**安装口径**
+（`readPackage`：解包配额 / 路径 / 清单 / 首方验签 / `packageSha256` 重算 / entry 存在）回读校验；
+输出 `校验 readPackage ✓` 才算可发布。`d.111` 的 `heming.pet 1.0.1` 即按此流程用 `official-2026-11` 签出。
+
+**dev 公钥不进正式版**：打包版会**跳过所有 `dev-*` 公钥**（即使表里同时有正式钥），
+所以「仓库里公开的测试私钥」签出的包在正式版一律不认；本地 `electron .` 由主进程设
+`HEMING_ALLOW_DEV_PLUGIN_KEYS=1` 放开。
 
 ### 10.5 生命周期事件（d.108，仅 bundle）
 

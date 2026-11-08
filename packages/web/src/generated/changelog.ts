@@ -12,6 +12,26 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.112.3.45.0",
+    "date": "2026-11-08",
+    "title": "P1 收口：正式首方公钥上线，dev 公钥在打包版被忽略",
+    "bullets": [
+      "`packages/desktop/resources/official-keys.json` 新增正式公钥 `official-2026-11`（Ed25519：`ZARHK4iibpO7Obf5SRFpt8esKip2CJz4bhuanQvrVtk`）；`dev-test-2026-11` 保留给本机测试。",
+      "**打包版跳过全部 `dev-*` 公钥**：即使公钥表里同时有正式钥，用仓库公开的测试私钥签出的包也不会被接受（此前只判断「表里有没有正式钥」，会让 dev 私钥变成后门）。本地 `electron .` 由主进程设",
+      "`node scripts/check-release-keys.mjs` 现在通过（exit 0）；只有 dev 键时仍以 exit 2 阻断发版。",
+      "`heming.pet` 升到 **1.0.1** 并用 `official-2026-11` 签出：`packageSha256``bb746541…f6a782`（`files/**` 内容摘要）、`publisher: heming`、`signature(ed25519)`；",
+      "发布链路文档化（`docs/PLUGINS.md` §9.4）：`check-release-keys → build → sign → pack(自检) → publish`，并写明私钥位置、双钥过渡、丢钥后果与「签名后必须 readPackage 自检」。",
+      "没有 `packageSha256` / 没有正式签名的旧 bundle 仍不能新装；已安装记录不受影响。",
+      "`engines`/v1–v4/声明式插件语义未变；本版为修订位 +1。"
+    ],
+    "paragraphs": [
+      "审计 P1-1（正式公钥未就位 → 打包版拒绝安装所有界面插件）已完成，并非只加检查脚本：",
+      "首方密钥正式私钥**不在仓库**：发布机路径 `D:/Heming-release-keys/official-plugin-signing.seed.txt`（口令/权限说明见文件 `_release_private_key`），上线前应移入发布 CI secret / HSM。`HEMING_ALLOW_DEV_PLUGIN_KEYS=1` 显式放开。",
+      "签名版桌宠`pack-plugin` 以安装口径回读校验通过（28 文件 / entry=files/index.html /tgz sha256 `236c2e1c…b2b201`）。产物在 `packages/pet-widget/dist/package.tgz`（不入库）。",
+      "兼容性"
+    ]
+  },
+  {
     "version": "d.112.3.44.0",
     "date": "2026-11-08",
     "title": "备份与恢复页面化 + 布局优化",
@@ -36,31 +56,11 @@ export const CHANGELOG: ChangelogEntry[] = [
     ]
   },
   {
-    "version": "d.111.3.44.0",
-    "date": "2026-11-08",
-    "title": "P1 收口：正式首方公钥上线，dev 公钥在打包版被忽略",
-    "bullets": [
-      "`packages/desktop/resources/official-keys.json` 新增正式公钥 `official-2026-11`（Ed25519：`ZARHK4iibpO7Obf5SRFpt8esKip2CJz4bhuanQvrVtk`）；`dev-test-2026-11` 保留给本机测试。",
-      "**打包版跳过全部 `dev-*` 公钥**：即使公钥表里同时有正式钥，用仓库公开的测试私钥签出的包也不会被接受（此前只判断「表里有没有正式钥」，会让 dev 私钥变成后门）。本地 `electron .` 由主进程设",
-      "`node scripts/check-release-keys.mjs` 现在通过（exit 0）；只有 dev 键时仍以 exit 2 阻断发版。",
-      "`heming.pet` 升到 **1.0.1** 并用 `official-2026-11` 签出：`packageSha256``bb746541…f6a782`（`files/**` 内容摘要）、`publisher: heming`、`signature(ed25519)`；",
-      "发布链路文档化（`docs/PLUGINS.md` §9.4）：`check-release-keys → build → sign → pack(自检) → publish`，并写明私钥位置、双钥过渡、丢钥后果与「签名后必须 readPackage 自检」。",
-      "没有 `packageSha256` / 没有正式签名的旧 bundle 仍不能新装；已安装记录不受影响。",
-      "`engines`/v1–v4/声明式插件语义未变；本版为修订位 +1。"
-    ],
-    "paragraphs": [
-      "审计 P1-1（正式公钥未就位 → 打包版拒绝安装所有界面插件）已完成，并非只加检查脚本：",
-      "首方密钥正式私钥**不在仓库**：发布机路径 `D:/Heming-release-keys/official-plugin-signing.seed.txt`（口令/权限说明见文件 `_release_private_key`），上线前应移入发布 CI secret / HSM。`HEMING_ALLOW_DEV_PLUGIN_KEYS=1` 显式放开。",
-      "签名版桌宠`pack-plugin` 以安装口径回读校验通过（28 文件 / entry=files/index.html /tgz sha256 `236c2e1c…b2b201`）。产物在 `packages/pet-widget/dist/package.tgz`（不入库）。",
-      "兼容性"
-    ]
-  },
-  {
     "version": "d.111.3.43.0",
     "date": "2026-11-08",
     "title": "插件/技能社区安全与健壮性修复轮（对抗审计：2 个 P0 + 8 个 P1）",
     "bullets": [
-      "**P0-1 界面插件签名只覆盖清单、不覆盖代码**：bundle 清单新增必填 `packageSha256`（`files/**` 的确定性内容摘要：按路径排序后 `path\u0000len\u0000sha256(content)",
+      "**P0-1 界面插件签名只覆盖清单、不覆盖代码**：bundle 清单新增必填 `packageSha256`（`files/**` 的确定性内容摘要：按路径排序后 `pathNULlenNULsha256(content)",
       "**P0-2 卸载没有事务**：`remove()` 改为与安装同一套快照/回滚/内存 `reload()`，`skills.remove` 吞配额异常时用读回校验兜住；失败如实报 `rollback.ok` 并给用户提示，",
       "**P1-4 可点击 XSS**：社区/市场的 `homepage`/`repository` 等外链服务端只留 http(s)，客户端渲染前再过一道白名单（`lib/safeUrl.ts`）；`javascript:`/`data:` 不渲染链接。",
       "**P1-5 社区注册接口滥用**：`POST /api/skill-hub/register` 要求 `x-heming-client: 1`且本机 Origin，每 IP 10 分钟最多 5 次（403/429 中文提示）。",

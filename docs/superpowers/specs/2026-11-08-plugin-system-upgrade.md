@@ -3,7 +3,7 @@
 > 分支：`feat/d103-plugin-system`（基线 `9c4bfd2` / `d.103.2.42.0`（本分支上另一并行会话已提交 d.103 模型页重构；本升级预计占 d.104，以实际 bump 为准））
 > 对标调研：`docs/research/2026-11-08-plugin-system-benchmark.md`
 > 本文是**契约**：实施时字段名、存储键、路由、撤销语义以本文为准；改契约先改本文。
-> 状态：**阶段 A 已于 `d.107.2.42.0` 实现**（v5 清单/engines、统一能力单元与贡献点、安装事务与回滚、市场索引 v2 契约与服务端、首方 bundle 验签、校验工具链与作者指南）；**阶段 B 市场 UI 与阶段 C（命令 target 扩展、Agent 只读工具、bundle 生命周期事件）已于 `d.108.2.42.0` 实现**。**`d.109` 补齐 bundle 命令物化、市场直装界面插件、bundle 的 `settings`/`unit` target 对齐**；**`d.111` 对抗审计轮**修掉 2 个 P0（界面插件签名不覆盖代码 → 清单绑定 `files/**` 摘要；卸载无事务）与 8 个 P1（包不可变、启停写失败、外链 XSS、register 限流、兼容口径、坏 v5 记录、技能池预算、发版公钥检查），并补 widget CSP `frame-src` 回归守卫与生命周期队列上限。剩余：Agent 写安装（需 HITL 非聊天页确认）、插件健康检查/自动禁用、bundle 多窗口与更细的沙箱贡献点、正式公钥替换。全量门禁（build/test/typecheck）全绿。
+> 状态：**阶段 A 已于 `d.107.2.42.0` 实现**（v5 清单/engines、统一能力单元与贡献点、安装事务与回滚、市场索引 v2 契约与服务端、首方 bundle 验签、校验工具链与作者指南）；**阶段 B 市场 UI 与阶段 C（命令 target 扩展、Agent 只读工具、bundle 生命周期事件）已于 `d.108.2.42.0` 实现**。**`d.109` 补齐 bundle 命令物化、市场直装界面插件、bundle 的 `settings`/`unit` target 对齐**；**`d.111` 对抗审计轮**修掉 2 个 P0（界面插件签名不覆盖代码 → 清单绑定 `files/**` 摘要；卸载无事务）与 8 个 P1（包不可变、启停写失败、外链 XSS、register 限流、兼容口径、坏 v5 记录、技能池预算、发版公钥检查），并补 widget CSP `frame-src` 回归守卫与生命周期队列上限。剩余：Agent 写安装（需 HITL 非聊天页确认）、插件健康检查/自动禁用、bundle 多窗口与更细的沙箱贡献点。全量门禁（build/test/typecheck）全绿。
 > 设计依据：可实现性自检（`docs/research/2026-11-08-plugin-upgrade-feasibility.md`）+ 跨生态对标（`docs/research/2026-11-08-plugin-ecosystem-cross-reference.md`），本规格已按自检 F1–F10 与对标 N1–N17 修订。
 
 ## 0. 决策（用户口径与本文边界）
