@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 5,
+  "id": "heming.demo-bad",
+  "name": "坏包示例",
+  "version": "0.0.1",
+  "description": "故意写错的 v5 清单：缺 engines、MCP 主机未被权限覆盖（用于验证 lint 与非 0 退出码）",
+  "author": "和鸣",
+  "permissions": {
+    "network": [],
+    "tools": "read"
+  },
+  "contributions": {
+    "skills": [
+      { "name": "坏技能", "instructions": "这条本身合法" }
+    ],
+    "mcpServers": [
+      { "key": "bad", "name": "未声明主机的服务", "url": "https://api.not-declared.example/mcp" }
+    ]
+  }
+}

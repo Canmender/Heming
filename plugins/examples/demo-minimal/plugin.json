@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 5,
+  "id": "heming.demo-minimal",
+  "name": "最小示例",
+  "version": "1.0.0",
+  "description": "只带一条技能的 v5 最小插件包（用于 lint 与测试）",
+  "author": "和鸣",
+  "engines": { "heming": "d.105" },
+  "contributions": {
+    "skills": [
+      {
+        "name": "写周报",
+        "description": "按本周任务与日程生成周报大纲",
+        "instructions": "汇总本周完成的任务、未完成的风险与下周计划，输出三段式大纲。不要编造没有记录的事情。",
+        "triggers": ["周报", "写周报"],
+        "tags": ["汇报"]
+      }
+    ]
+  }
+}

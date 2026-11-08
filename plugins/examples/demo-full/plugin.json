@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 5,
+  "id": "heming.demo-full",
+  "name": "完整示例",
+  "version": "1.2.0",
+  "description": "技能 + 本机 MCP 服务 + 命令 + 工具束的 v5 完整示例（不随安装包分发）",
+  "author": "和鸣",
+  "engines": { "heming": "d.105" },
+  "meta": {
+    "license": "MIT",
+    "category": "efficiency",
+    "tags": ["official"],
+    "keywords": ["报告", "周报", "数据"],
+    "homepage": "https://example.com/heming-demo"
+  },
+  "permissions": {
+    "network": ["127.0.0.1:3999"],
+    "tools": "read",
+    "files": []
+  },
+  "contributions": {
+    "skills": [
+      {
+        "name": "报告工具箱",
+        "description": "用本机演示服务汇总数据并生成报告",
+        "instructions": "先调 demo_summary 拿本周数据，再按「进展 / 风险 / 下周计划」输出。数据来自本机演示服务，不联网。",
+        "triggers": ["报告", "汇总"],
+        "tags": ["汇报", "数据"]
+      }
+    ],
+    "mcpServers": [
+      {
+        "key": "demo",
+        "name": "演示服务",
+        "url": "http://127.0.0.1:3999/mcp",
+        "description": "本机演示 MCP 服务（只读示例数据）"
+      }
+    ],
+    "commands": [
+      {
+        "id": "demo-report",
+        "title": "生成示例报告",
+        "description": "打开「报告工具箱」技能",
+        "keywords": ["报告", "示例"],
+        "target": { "kind": "skill", "name": "报告工具箱" }
+      }
+    ],
+    "toolPacks": [
+      {
+        "id": "demo-tools",
+        "name": "演示工具",
+        "description": "示例服务提供的只读工具",
+        "tools": ["demo_summary"]
+      }
+    ]
+  }
+}
