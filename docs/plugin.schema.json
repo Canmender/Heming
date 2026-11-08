@@ -26,13 +26,13 @@
     "description": {
       "default": "",
       "type": "string",
-      "minLength": 1,
+      "minLength": 0,
       "maxLength": 200
     },
     "author": {
       "default": "",
       "type": "string",
-      "minLength": 1,
+      "minLength": 0,
       "maxLength": 64
     },
     "engines": {
@@ -180,7 +180,7 @@
               "description": {
                 "default": "",
                 "type": "string",
-                "minLength": 1,
+                "minLength": 0,
                 "maxLength": 200
               },
               "instructions": {
@@ -241,7 +241,7 @@
               "description": {
                 "default": "",
                 "type": "string",
-                "minLength": 1,
+                "minLength": 0,
                 "maxLength": 200
               }
             },
@@ -272,7 +272,7 @@
               "description": {
                 "default": "",
                 "type": "string",
-                "minLength": 1,
+                "minLength": 0,
                 "maxLength": 200
               },
               "keywords": {
@@ -369,7 +369,7 @@
               "description": {
                 "default": "",
                 "type": "string",
-                "minLength": 1,
+                "minLength": 0,
                 "maxLength": 200
               },
               "tools": {
