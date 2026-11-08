@@ -190,6 +190,27 @@ describe("parsePluginManifestV5", () => {
     expect(() => parsePluginManifestV5(badCommand)).toThrow(/不在本插件 contributions\.skills/);
   });
 
+  it("bundle 权限枚举与桌面运行时对齐（lifecycle/theme/tray、webgl2）", () => {
+    const parsed = parsePluginManifestV5(
+      baseManifest({
+        distribution: "bundle",
+        packageSha256: "a".repeat(64),
+        permissions: {
+          network: [],
+          tools: "none",
+          events: ["notify", "lifecycle", "theme", "tray"],
+          graphics: ["webgl", "webgl2", "wasm"],
+          eval: false,
+        },
+        contributions: {
+          desktopWidgets: [{ id: "pet", name: "桌宠", entry: "files/index.html", width: 300, height: 420 }],
+        },
+      }),
+    );
+    expect(parsed.manifest.permissions.events).toEqual(["notify", "lifecycle", "theme", "tray"]);
+    expect(parsed.manifest.permissions.graphics).toEqual(["webgl", "webgl2", "wasm"]);
+  });
+
   it("命令 target 支持 settings / unit（v5 扩展）", () => {
     const parsed = parsePluginManifestV5(
       baseManifest({

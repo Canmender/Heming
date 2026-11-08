@@ -1216,9 +1216,9 @@ export interface PluginPermissions {
 }
 
 /** 界面插件可接收的事件类别（当前只有通知中心转发）。 */
-export type PluginWidgetEvent = "notify";
+export type PluginWidgetEvent = "notify" | "lifecycle" | "theme" | "tray";
 /** widget 渲染能力声明。 */
-export type PluginGraphicsCapability = "webgl" | "wasm";
+export type PluginGraphicsCapability = "webgl" | "webgl2" | "wasm";
 
 /**
  * 五类贡献面：技能 / 远程 MCP 服务 / 命令 / 工具束 / 桌面小组件。

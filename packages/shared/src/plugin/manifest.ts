@@ -366,8 +366,8 @@ const PermissionsSchema = z
     network: z.array(z.string()).max(PLUGIN_LIMITS.networkHosts, { error: "网络主机最多 20 个" }).optional(),
     tools: z.enum(["none", "read", "write"], { error: "权限上限只能是 none / read / write" }).optional(),
     files: z.array(z.string()).max(PLUGIN_LIMITS.files, { error: "文件根最多 5 个" }).optional(),
-    events: z.array(z.enum(["notify"]), { error: "事件只支持 notify" }).max(8).optional(),
-    graphics: z.array(z.enum(["webgl", "wasm"]), { error: "渲染能力只支持 webgl / wasm" }).max(8).optional(),
+    events: z.array(z.enum(["notify", "lifecycle", "theme", "tray"]), { error: "事件只支持 notify / lifecycle / theme / tray" }).max(8).optional(),
+    graphics: z.array(z.enum(["webgl", "webgl2", "wasm"]), { error: "渲染能力只支持 webgl / webgl2 / wasm" }).max(8).optional(),
     eval: z.boolean().optional(),
   })
   .superRefine((permissions, ctx) => {
@@ -460,7 +460,7 @@ const ManifestV5Object = z.object({
   /**
    * 界面插件（bundle）必填：`files/**` 的**确定性内容摘要**（不是 tgz 自身哈希）。
    *
-   * 算法：按路径排序后对每条 `path len sha256(content)
+   * 算法：按路径排序后对每条 `pathNULlenNULsha256(content)
 ` 再取 sha256；
    * 与 tar/gzip 的时间戳、压缩级别无关，换任一文件或路径都会变。
    * 为什么不用「整个 tgz 的 sha256」：清单本身在 tgz 里，写自己的包哈希会构成

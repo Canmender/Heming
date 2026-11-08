@@ -139,7 +139,10 @@
           "items": {
             "type": "string",
             "enum": [
-              "notify"
+              "notify",
+              "lifecycle",
+              "theme",
+              "tray"
             ]
           }
         },
@@ -150,6 +153,7 @@
             "type": "string",
             "enum": [
               "webgl",
+              "webgl2",
               "wasm"
             ]
           }

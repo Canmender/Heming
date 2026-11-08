@@ -201,7 +201,7 @@ module.exports = { crashLogDir, writeCrashLog(kind, error, extra), installCrashH
 
 **新键**：`heming.memory.pending.v1`（几十字节，`{ [会话键]: 计数 }`）。
 
-- 键的形状沿用现有的 `${agentId} ${conversationId}`（内存里就是它）。
+- 键的形状沿用现有的 `${agentId}NUL${conversationId}`（内存里就是它）。
 - 落盘时机：每次计数变化时写一次（这是低频操作——每轮对话一次）。
 - **清空时机**：`clearConversation(conversationId)` 要清掉对应会话的计数（会话删了，计数不该留着）。
   `clearAgent(agentId)` 同样要清该 agent 的计数。
