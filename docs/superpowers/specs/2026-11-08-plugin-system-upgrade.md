@@ -423,7 +423,7 @@ v2：
 | 上限不一致 | 客户端 20MB，目录允许 40MB | 统一 20MB（目录校验同步收紧） |
 | bundle 版 `commands` 被接受但不物化 | 清单接受、安装后命令不出现 | 选**物化**：web 经 `__heming_widgets.list()` 读已装 bundle 清单并入命令面板（d.109 实现，`lib/widgets/commands.ts`）；bundle 不允许 `skills`，但 target 与声明式对齐为 `page` / `plugin` / `settings` / `unit`（**不允许**指向技能的 `skill`）；主进程安装器与 web 解析两侧同口径收紧 |
 | 文档说「手工改过的技能不会被误删」 | 服务端只保护「改了 origin 的服务」 | 明知差异：文档改为「手工**新建**的技能不会误删；被插件带入后手工编辑的技能仍属插件」，并在详情页标注 |
-| widget CSP 无回归守卫（N11，对标 Figma/Chrome/Electron） | 现状按清单生成，但改坏了没有测试会红；且 widget 若嵌外部页面，`connect-src` 白名单只约束插件自己的请求（Figma 同款缺口） | ① 加**CSP 最小基线**回归用例：`script-src 'self'`（`eval:true` 才加 `'unsafe-eval'`）、`object-src 'none'`、禁远程脚本、`connect-src` 只回环 + 清单 network；② 文档写明「界面插件不得嵌外部页面」，并在 CSP `frame-src 'none'` 上固化；③ IPC 已在用 `sender === win.webContents` 身份比对（比 origin 更强），再补一层 `senderFrame.origin` 断言做纵深防御 |
+| widget CSP 无回归守卫（N11，对标 Figma/Chrome/Electron） | 现状按清单生成，但改坏了没有测试会红；且 widget 若嵌外部页面，`connect-src` 白名单只约束插件自己的请求（Figma 同款缺口） | ① 加**CSP 最小基线**回归用例：`script-src 'self'`（`eval:true` 才加 `'unsafe-eval'`）、`object-src 'none'`、禁远程脚本、`connect-src` 只回环 + 清单 network（**d.110 已补：`app-protocol.test.js` 基线守卫**）；② 文档写明「界面插件不得嵌外部页面」，并在 CSP `frame-src 'none'` 上固化（**d.110 已补：`frame-src 'none'` + 回归守卫**）；③ IPC 已在用 `sender === win.webContents` 身份比对（比 origin 更强），再补一层 `senderFrame.origin` 断言做纵深防御 |
 
 ## 8. 插件区 UI（阶段 C）
 

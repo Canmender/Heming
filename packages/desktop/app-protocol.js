@@ -215,15 +215,22 @@ function cspHeadersFor(urlPath, opts = {}) {
   return { [header]: policy };
 }
 
-/* ─────────────────── 界面插件 `widget://` 的 CSP（d.98） ─────────────────── */
+/* ─────────────────── 界面插件 `widget://` 的 CSP（d.98 · d.110 加固） ─────────────────── */
 /*
- * 与主窗策略的三处**故意不同**（规格 §3.2）：
+ * 与主窗策略的四处**故意不同**（规格 §3.2 / N11）：
  * 1. `connect-src` **不继承** `https:` / `wss:` 通配：插件只能连本机回环 + 清单
  *    `permissions.network` 里逐个声明的主机。主窗需要的是"用户运行期配置的任意
  *    供应商"，插件需要的是"它自己声明过的那几个"。
  * 2. `'unsafe-eval'` 只在清单 `permissions.eval: true` 时放开（pixi 6 的着色器
  *    生成需要），并且只有第一方签名包才可能走到这里（安装端拒绝未签名 bundle）。
  * 3. `form-action 'none'` + `base-uri 'none'`：插件页没有表单提交与相对基址的正当用途。
+ * 4. `frame-src 'none'`（d.110）：界面插件**不得嵌外部页面**（含 `widget://` 互嵌）。
+ *    `connect-src` 白名单只约束插件自己的请求，管不到 iframe 里第三方页面的子资源
+ *    （Figma 同款缺口，见 docs/PLUGINS.md §10）；直接禁止开 frame 比事后审计可靠。
+ *
+ * ★ 最小基线（`object-src` / `base-uri` / `frame-ancestors` / `frame-src` /
+ *   `form-action` 全 `'none'`，`default-src 'self'`）有回归用例钉住
+ *   （app-protocol.test.js「CSP 最小基线」）；删任何一条都会变红。
  */
 
 /** 把清单 `permissions.network` 的一项转成 CSP 来源；非法返回 null。 */
@@ -272,6 +279,8 @@ function buildWidgetCsp(permissions = {}) {
     ["object-src", ["'none'"]],
     ["base-uri", ["'none'"]],
     ["frame-ancestors", ["'none'"]],
+    // d.110：界面插件不得嵌外部页面（也不允许 widget:// 互嵌）
+    ["frame-src", ["'none'"]],
     ["form-action", ["'none'"]],
   ];
   return directives.map(([name, values]) => `${name} ${values.join(" ")}`).join("; ");

@@ -245,6 +245,51 @@ test("buildWidgetCsp：connect-src 只给本机回环 + 清单 network 逐 host"
   assert.ok(!connect.includes("https:"), "仍是逐 host，不是通配");
 });
 
+test("buildWidgetCsp：CSP 最小基线不可退化（d.110 回归守卫；删任何一条都会红）", () => {
+  // 这组指令是「界面插件不得做的事」的运行时强制点，任何一条丢失都等于放开一类攻击面：
+  // object-src/base-uri/frame-ancestors/frame-src/form-action 全 'none'，default-src 只 self。
+  const baseline = {
+    "default-src": ["'self'"],
+    "object-src": ["'none'"],
+    "base-uri": ["'none'"],
+    "frame-ancestors": ["'none'"],
+    "frame-src": ["'none'"],
+    "form-action": ["'none'"],
+  };
+  const cases = [
+    { network: [], eval: false },
+    { network: [], eval: true },
+    // 非默认端口 + 带路径的声明：端口必须原样保留，不能被压成域名/通配
+    { network: ["api.acme.com", "127.0.0.1:3425", "https://mp.example.com/base"], eval: true },
+  ];
+  for (const permissions of cases) {
+    const where = JSON.stringify(permissions);
+    const policy = buildWidgetCsp(permissions);
+
+    for (const [name, values] of Object.entries(baseline)) {
+      assert.deepEqual(directiveOf(policy, name), values, `${name} 基线丢了：${where}`);
+    }
+
+    // script-src：只 self（+ wasm），unsafe-eval 严格跟随清单
+    const script = directiveOf(policy, "script-src");
+    assert.ok(script.includes("'self'"), where);
+    assert.equal(script.includes("'unsafe-eval'"), permissions.eval === true, `unsafe-eval 开关不对：${where}`);
+
+    // connect-src：无 https:/wss:/任意通配；非默认端口保留
+    const connect = directiveOf(policy, "connect-src");
+    for (const forbidden of ["https:", "wss:", "*", "http:", "ws:"]) {
+      assert.ok(!connect.includes(forbidden), `connect-src 不得出现通配 ${forbidden}：${where}`);
+    }
+    if (permissions.network.includes("127.0.0.1:3425")) {
+      assert.ok(connect.includes("http://127.0.0.1:3425"), where);
+      assert.ok(connect.includes("https://127.0.0.1:3425"), where);
+    }
+    // 整条策略里也不允许出现「任意来源」写法
+    assert.ok(!policy.includes("frame-src *"), where);
+    assert.ok(!policy.includes("default-src *"), where);
+  }
+});
+
 test("widgetCspHeaders：灰度模式与 cspHeadersFor 同口径", () => {
   assert.deepEqual(Object.keys(widgetCspHeaders({}, { mode: "enforce" })), [CSP_HEADER]);
   assert.deepEqual(Object.keys(widgetCspHeaders({}, {})), [CSP_REPORT_ONLY_HEADER]);

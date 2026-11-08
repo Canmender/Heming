@@ -332,7 +332,10 @@ const off = window.__heming_widget.onLifecycle((e) => {
 - **权限门禁**：`permissions.events` 不含 `"lifecycle"` 的插件即使安装/启停/更新/卸载也不会收到事件。
 - **不重放**：事件只在状态变化时发一次；窗口重建、页面重载、宿主重启都不补发历史事件——
   插件状态请用 `info()` / `settings()` 自检（`installed` 在宿主重启后不会重发）。
-- 窗口还没建好时事件先排队，页面 `did-finish-load` 后再投递；单个插件最多排队 8 条，超出丢最早的。
+- 窗口还没建好时事件先排队，页面 `did-finish-load` 后再投递；单个插件最多排队 **20 条**（d.110），
+  超出丢最旧的并在宿主日志记一条——保证投递的是最新状态而不是无限堆积。
+- **CSP 基线含 `frame-src 'none'`：界面插件不得嵌外部页面**（含 `widget://` 互嵌；
+  `connect-src` 白名单只约束插件自己的请求，管不到 iframe 里的第三方子资源，所以直接禁 frame）。
 - 传输通道：宿主 `webContents.send("widget:lifecycle", payload)` → preload `onLifecycle(cb)`（返回取消订阅函数）。
 - 声明式包没有生命周期钩子（永不执行代码），本条只适用于 `distribution: "bundle"` 的界面插件。
 

@@ -828,3 +828,37 @@ test("生命周期：卸载发 uninstalled（最后一条）后销毁窗口；�
   assert.deepEqual(lifecycleEvents(win), [{ event: "uninstalled", version: "1.0.0" }]);
   assert.equal(win.isDestroyed(), true);
 });
+
+test("生命周期：排队上限 20 条，溢出丢最旧，投递顺序仍是最新状态（d.110）", () => {
+  const store = lifecycleStore();
+  store.setRecords([]);
+  const { host, created, logs } = makeHost({ store });
+  host.start();
+
+  // 首装（默认不显示 → 不建窗，事件全部排队）
+  store.setRecords([lifecycleRecord({ version: "1.0.0" })]);
+  host.reconcile();
+  // 连续 24 次版本变化（每次一个 updated，窗口始终没加载完）
+  for (let v = 2; v <= 25; v += 1) {
+    store.setRecords([lifecycleRecord({ version: `${v}.0.0` })]);
+    host.reconcile();
+  }
+  assert.equal(created.length, 0, "未显示前不建窗");
+
+  // 显示 → 建窗 → did-finish-load 才投递；队列截断到 20 条，最旧的 5 条被丢弃
+  host.action("heming.pet", "show");
+  const win = onlyWindow(created);
+  finishLoad(win);
+  const events = lifecycleEvents(win);
+  assert.equal(events.length, 20, "队列不得超过上限");
+  assert.deepEqual(events[0], { event: "updated", version: "6.0.0", from: "5.0.0" });
+  assert.deepEqual(events[events.length - 1], { event: "updated", version: "25.0.0", from: "24.0.0" });
+  assert.ok(!events.some((item) => item.event === "installed"), "过期的 installed 应被丢弃");
+
+  // 不重放：再次 did-finish-load 不会重复投递
+  finishLoad(win);
+  assert.equal(lifecycleEvents(win).length, 20);
+
+  // 丢弃是显式记录，不是静默截断
+  assert.match(logs.join("\n"), /生命周期事件排队超过 20 条/);
+});

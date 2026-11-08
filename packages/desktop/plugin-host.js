@@ -55,8 +55,8 @@ const SETTINGS_TAB = "appearance";
  */
 const LIFECYCLE_CHANNEL = "widget:lifecycle";
 
-/** 窗口未建好前最多排队多少条生命周期事件（窗口一直不打开时防止无限增长）。 */
-const MAX_PENDING_LIFECYCLE = 8;
+/** 窗口未建好前最多排队多少条生命周期事件（d.110：8 → 20；溢出丢最旧，避免投递过期状态）。 */
+const MAX_PENDING_LIFECYCLE = 20;
 
 function text(value, max) {
   if (typeof value !== "string") return null;
@@ -940,7 +940,14 @@ function createWidgetHost(deps = {}) {
   /** 窗口还没建好：先排队，等 did-finish-load 再发（窗口重建后不会重放）。 */
   function queueLifecycle(runtimeKey, payload) {
     const list = pendingLifecycle.get(runtimeKey) || [];
-    if (list.length >= MAX_PENDING_LIFECYCLE) list.shift();
+    if (list.length >= MAX_PENDING_LIFECYCLE) {
+      // d.110：队列有上限（20）。窗口长期不加载时，最早的几条已经过时（例如 installed
+      // 之后又更新了 20 次），丢掉最旧的能保证投递的是「最新状态」，且队列不会无限涨。
+      const dropped = list.shift();
+      log(
+        `[widgets] 生命周期事件排队超过 ${MAX_PENDING_LIFECYCLE} 条（${runtimeKey}），丢弃最旧一条：${dropped && dropped.event}`,
+      );
+    }
     list.push(payload);
     pendingLifecycle.set(runtimeKey, list);
   }
