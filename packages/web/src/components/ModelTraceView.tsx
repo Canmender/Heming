@@ -57,7 +57,21 @@ export function ModelTraceView() {
   const [paused, setPaused] = useState(false);
   const [hovered, setHovered] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  const [filter, setFilter] = useState<EdgeState | "all">("all");
+  const [nodeFilter, setNodeFilter] = useState<{ kind: "agent" | "account"; id: string } | null>(
+    null,
+  );
+  const [reducedMotion, setReducedMotion] = useState(false);
   const listedRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(query.matches);
+    update();
+    query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, []);
 
   useEffect(() => {
     if (paused) return;
@@ -104,15 +118,58 @@ export function ModelTraceView() {
 
   const selectedRoute = graph.rows.find((row) => row.route.id === selected)?.route ?? null;
   const liveCount = graph.edges.filter((edge) => edge.state === "live").length;
+  const stats = useMemo(() => {
+    const done = graph.rows.filter((row) => row.route.done);
+    const avgMs = done.length
+      ? Math.round(done.reduce((sum, row) => sum + (row.route.ms ?? 0), 0) / done.length)
+      : 0;
+    return {
+      total: graph.rows.length,
+      live: liveCount,
+      ok: graph.rows.filter((row) => row.state === "ok").length,
+      failed: graph.rows.filter((row) => row.state === "failed").length,
+      avgMs,
+      tokens: graph.rows.reduce((sum, row) => sum + (row.route.tokens ?? 0), 0),
+    };
+  }, [graph, liveCount]);
+
+  /** 按状态 + 选中的节点过滤；节点过滤只影响图与列表，不影响顶部统计。 */
+  const visibleRows = graph.rows.filter((row) => {
+    if (filter !== "all" && row.state !== filter) return false;
+    if (nodeFilter) {
+      const edge = graph.edges.find((item) => item.routeId === row.route.id);
+      if (!edge) return false;
+      if (nodeFilter.kind === "agent" && edge.from !== nodeFilter.id) return false;
+      if (nodeFilter.kind === "account" && edge.to !== nodeFilter.id) return false;
+    }
+    return true;
+  });
+  const visibleRouteIds = new Set(visibleRows.map((row) => row.route.id));
+  const nodeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const edge of graph.edges) {
+      counts.set(edge.from, (counts.get(edge.from) ?? 0) + 1);
+      counts.set(edge.to, (counts.get(edge.to) ?? 0) + 1);
+    }
+    return counts;
+  }, [graph]);
 
   return (
     <section aria-label="实时链路" className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="text-[12px] font-bold text-muted">路由实时图</div>
           <span className="ui-caption">
-            {snapshot ? `${graph.rows.length} 个请求 · ${liveCount} 个进行中` : "读取中…"}
+            {snapshot
+              ? `${stats.total} 个请求 · ${stats.live} 进行中 · ${stats.ok} 成功 · ${stats.failed} 失败`
+              : "读取中…"}
           </span>
+          {snapshot && stats.avgMs > 0 && (
+            <span className="ui-caption">
+              平均 {stats.avgMs}ms · {stats.tokens} tokens
+            </span>
+          )}
+          <span className="ui-caption">最后读取 {snapshot ? shortTime(snapshot.now) : "—"}</span>
           {(Object.keys(EDGE_STATE_LABEL) as EdgeState[]).map((state) => (
             <span key={state} className="ui-caption flex items-center gap-1">
               <span
@@ -124,7 +181,30 @@ export function ModelTraceView() {
             </span>
           ))}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {(["all", "live", "ok", "failed"] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={filter === key}
+              className={`ui-btn ui-btn-sm ${filter === key ? "ui-btn-primary" : "ui-btn-ghost"}`}
+              onClick={() => setFilter(key)}
+            >
+              {key === "all" ? "全部" : EDGE_STATE_LABEL[key]}
+            </button>
+          ))}
+          {(filter !== "all" || nodeFilter) && (
+            <button
+              type="button"
+              className="ui-btn ui-btn-sm ui-btn-ghost"
+              onClick={() => {
+                setFilter("all");
+                setNodeFilter(null);
+              }}
+            >
+              清除筛选
+            </button>
+          )}
           <button
             type="button"
             className="ui-btn ui-btn-sm ui-btn-ghost"
@@ -152,12 +232,15 @@ export function ModelTraceView() {
       )}
 
       <div className="overflow-x-auto rounded-xl border border-line bg-white">
-        {graph.rows.length === 0 ? (
+        {visibleRows.length === 0 ? (
           <div className="flex min-h-[260px] flex-col items-center justify-center gap-2 p-6 text-center">
-            <div className="text-[13px] font-bold text-muted">还没有请求经过</div>
+            <div className="text-[13px] font-bold text-muted">
+              {graph.rows.length === 0 ? "还没有请求经过" : "当前筛选下没有请求"}
+            </div>
             <p className="ui-caption max-w-[420px]">
-              发一次智能体对话（或让任意客户端调用网关），这里会实时画出它从哪个客户端出发、
-              经过内核、最终落到哪个账号；失败换人也会画出来。
+              {graph.rows.length === 0
+                ? "发一次智能体对话（或让任意客户端调用网关），这里会实时画出它从哪个客户端出发、经过内核、最终落到哪个账号；失败换人也会画出来。"
+                : "换个筛选条件，或点「清除筛选」看全部请求。"}
             </p>
           </div>
         ) : (
@@ -170,7 +253,9 @@ export function ModelTraceView() {
             className="min-w-[900px]"
           >
             {/* 连线先画：节点覆盖在上面，读起来是「穿过内核」 */}
-            {graph.edges.map((edge) => {
+            {graph.edges
+              .filter((edge) => visibleRouteIds.has(edge.routeId))
+              .map((edge) => {
               const y1 = agentPositions.get(edge.from) ?? centerY;
               const y2 = accountPositions.get(edge.to) ?? centerY;
               const d = curve(AGENT_X + NODE_W, y1 + NODE_H / 2, ACCOUNT_X, y2 + NODE_H / 2, CENTER_X, centerY);
@@ -187,7 +272,7 @@ export function ModelTraceView() {
                     strokeDasharray={edge.state === "live" ? "6 5" : undefined}
                     className={edge.state === "live" ? "animate-[dash_1.2s_linear_infinite]" : undefined}
                   />
-                  {edge.state === "live" && (
+                  {edge.state === "live" && !reducedMotion && (
                     <circle r={4} fill={COLORS.live} opacity={opacity}>
                       <animateMotion dur="1.8s" repeatCount="indefinite" path={d} />
                     </circle>
@@ -209,7 +294,7 @@ export function ModelTraceView() {
                   </path>
                 </g>
               );
-            })}
+              })}
 
             {/* 中间：内核 */}
             <g>
@@ -232,14 +317,28 @@ export function ModelTraceView() {
             {/* 左：客户端 */}
             {graph.agents.map((node) => {
               const y = agentPositions.get(node.id)!;
+              const active = nodeFilter?.kind === "agent" && nodeFilter.id === node.id;
               return (
-                <g key={node.id}>
-                  <rect x={AGENT_X} y={y} width={NODE_W} height={NODE_H} rx={10} fill="#f4f6fb" stroke="#c9d3e6" />
+                <g
+                  key={node.id}
+                  className="cursor-pointer"
+                  onClick={() => setNodeFilter(active ? null : { kind: "agent", id: node.id })}
+                >
+                  <rect
+                    x={AGENT_X}
+                    y={y}
+                    width={NODE_W}
+                    height={NODE_H}
+                    rx={10}
+                    fill={active ? "#e4ecfb" : "#f4f6fb"}
+                    stroke={active ? COLORS.live : "#c9d3e6"}
+                    strokeWidth={active ? 2 : 1}
+                  />
                   <text x={AGENT_X + 12} y={y + 19} fontSize="12" fontWeight="700" fill="#222">
                     {node.label.length > 18 ? `${node.label.slice(0, 18)}…` : node.label}
                   </text>
                   <text x={AGENT_X + 12} y={y + 34} fontSize="10" fill="#666">
-                    发请求的客户端
+                    {nodeCounts.get(node.id) ?? 0} 个请求 · 点击筛选
                   </text>
                 </g>
               );
@@ -248,14 +347,29 @@ export function ModelTraceView() {
             {/* 右：账号 / Key */}
             {graph.accounts.map((node) => {
               const y = accountPositions.get(node.id)!;
+              const active = nodeFilter?.kind === "account" && nodeFilter.id === node.id;
               return (
-                <g key={node.id}>
-                  <rect x={ACCOUNT_X} y={y} width={NODE_W} height={NODE_H} rx={10} fill="#f3faf5" stroke="#bcdcc8" />
+                <g
+                  key={node.id}
+                  className="cursor-pointer"
+                  onClick={() => setNodeFilter(active ? null : { kind: "account", id: node.id })}
+                >
+                  <rect
+                    x={ACCOUNT_X}
+                    y={y}
+                    width={NODE_W}
+                    height={NODE_H}
+                    rx={10}
+                    fill={active ? "#e3f5ea" : "#f3faf5"}
+                    stroke={active ? COLORS.ok : "#bcdcc8"}
+                    strokeWidth={active ? 2 : 1}
+                  />
                   <text x={ACCOUNT_X + 12} y={y + 19} fontSize="12" fontWeight="700" fill="#222">
                     {node.label.length > 18 ? `${node.label.slice(0, 18)}…` : node.label}
                   </text>
                   <text x={ACCOUNT_X + 12} y={y + 34} fontSize="10" fill="#666">
-                    {node.sub.length > 24 ? `${node.sub.slice(0, 24)}…` : node.sub}
+                    {node.sub.length > 24 ? `${node.sub.slice(0, 24)}…` : node.sub} ·{" "}
+                    {nodeCounts.get(node.id) ?? 0} 请求
                   </text>
                 </g>
               );
@@ -280,7 +394,7 @@ export function ModelTraceView() {
               </tr>
             </thead>
             <tbody>
-              {[...graph.rows].reverse().slice(0, 30).map(({ route, account, state }) => (
+              {[...visibleRows].reverse().slice(0, 30).map(({ route, account, state }) => (
                 <tr
                   key={route.id}
                   className={`cursor-pointer border-t border-line ${

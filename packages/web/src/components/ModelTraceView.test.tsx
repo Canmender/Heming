@@ -57,7 +57,7 @@ describe("ModelTraceView", () => {
   it("画出客户端/账号节点、统计进行中，并列出请求", async () => {
     mockFetch(snapshot);
     render(<ModelTraceView />);
-    expect(await screen.findByText(/2 个请求 · 1 个进行中/)).toBeInTheDocument();
+    expect(await screen.findByText(/2 个请求 · 1 进行中 · 1 成功 · 0 失败/)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "路由节点图" })).toBeInTheDocument();
     expect(screen.getAllByText("claude").length).toBeGreaterThan(0);
     expect(screen.getAllByText("工作号").length).toBeGreaterThan(0);
@@ -77,6 +77,19 @@ describe("ModelTraceView", () => {
     expect(screen.getByText("320")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "关闭详情" }));
     expect(screen.queryByText("请求 #1")).not.toBeInTheDocument();
+  });
+
+  it("按状态筛选：只看进行中/失败，清除筛选恢复", async () => {
+    mockFetch(snapshot);
+    render(<ModelTraceView />);
+    await screen.findByText(/2 个请求/);
+    fireEvent.click(screen.getByRole("button", { name: "进行中" }));
+    expect(screen.getByTestId("trace-edge-2")).toBeInTheDocument();
+    expect(screen.queryByTestId("trace-edge-1")).toBeNull();
+    // 关闭了过滤后两条都在
+    fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
+    expect(screen.getByTestId("trace-edge-1")).toBeInTheDocument();
+    expect(screen.getByTestId("trace-edge-2")).toBeInTheDocument();
   });
 
   it("没有请求时给引导，不伪造节点", async () => {
