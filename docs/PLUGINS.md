@@ -93,7 +93,9 @@
 | `unit` | `unitId` | 跳到插件区并打开某个能力单元详情（不要求已安装；单元可能稍后才出现） |
 
 命令在命令面板的「插件命令」分组里出现；插件停用/卸载后命令立即消失。
-界面插件（bundle）的命令**只允许** `page` / `plugin`（bundle 不能声明技能，主进程安装器会二次收紧）。
+界面插件（bundle）的命令 target 允许 `page` / `plugin` / `settings` / `unit`（d.109 起与声明式对齐），
+**仍不允许 `skill`**（bundle 不贡献技能，指向技能的命令没有可解析对象）；主进程安装器按同一集合二次收紧，
+web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `lib/widgets/commands.ts`）。
 
 ## 5. 生命周期与数据
 
