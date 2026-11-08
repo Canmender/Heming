@@ -22,13 +22,16 @@ describe("getMagpieCliBridge", () => {
     expect(getMagpieCliBridge()).toBeNull();
   });
 
-  it("六个方法齐全才认作命令桥", () => {
+  it("命令桥方法齐全才认作可用", () => {
     const bridge = {
       cli: vi.fn(),
       cliStart: vi.fn(),
+      cliBegin: vi.fn(),
       cliInput: vi.fn(),
       cliKill: vi.fn(),
       openTerminal: vi.fn(),
+      backupInfo: vi.fn(),
+      backupPick: vi.fn(),
       onCli: vi.fn(),
     };
     (window as unknown as { __heming_magpie?: unknown }).__heming_magpie = bridge;

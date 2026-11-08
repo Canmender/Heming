@@ -361,6 +361,12 @@ contextBridge.exposeInMainWorld("__heming_magpie", {
   cli: (args) => ipcRenderer.invoke("magpie:cli", Array.isArray(args) ? args : []),
   /** 交互式命令：输出按 magpie:cli:event 回流，输入经 cliInput 写入。 */
   cliStart: (args) => ipcRenderer.invoke("magpie:cli:start", Array.isArray(args) ? args : []),
+  /** 交互式命令（立刻返回 runId，事件里带同一个 id）。 */
+  cliBegin: (args) => ipcRenderer.invoke("magpie:cli:begin", Array.isArray(args) ? args : []),
+  /** 备份目录与已有备份文件（应用自己的目录）。 */
+  backupInfo: () => ipcRenderer.invoke("magpie:backup:info"),
+  /** 选一个备份文件（系统文件选择器）。 */
+  backupPick: () => ipcRenderer.invoke("magpie:backup:pick"),
   cliInput: (runId, text) => ipcRenderer.invoke("magpie:cli:input", String(runId), String(text ?? "")),
   cliKill: (runId) => ipcRenderer.invoke("magpie:cli:kill", String(runId)),
   /** 在真终端里跑（OAuth 登录/备份口令）。 */

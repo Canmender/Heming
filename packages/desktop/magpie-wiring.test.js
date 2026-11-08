@@ -17,7 +17,7 @@ const read = (name) => readFileSync(join(HERE, name), "utf8");
 test("preload 暴露 __heming_magpie 的六个命令桥方法", () => {
   const source = read("preload.js");
   assert.match(source, /exposeInMainWorld\("__heming_magpie"/);
-  for (const method of ["status", "start", "stop", "gateway", "cli", "cliStart", "cliInput", "cliKill", "openTerminal", "onCli"]) {
+  for (const method of ["status", "start", "stop", "gateway", "cli", "cliStart", "cliBegin", "cliInput", "cliKill", "openTerminal", "backupInfo", "backupPick", "onCli"]) {
     assert.match(source, new RegExp(`\\b${method}:`), `preload 缺少 ${method}`);
   }
 });
@@ -27,7 +27,16 @@ test("主进程注册命令桥通道，且全部登记在 TRUSTED_CHANNELS", () 
   assert.match(source, /require\("\.\/magpie-cli"\)/);
   const trusted = source.match(/const TRUSTED_CHANNELS = \[([\s\S]*?)\];/);
   assert.ok(trusted, "main.js 必须有 TRUSTED_CHANNELS");
-  const channels = ["magpie:cli", "magpie:cli:start", "magpie:cli:input", "magpie:cli:kill", "magpie:terminal"];
+  const channels = [
+    "magpie:cli",
+    "magpie:cli:begin",
+    "magpie:cli:start",
+    "magpie:cli:input",
+    "magpie:cli:kill",
+    "magpie:terminal",
+    "magpie:backup:info",
+    "magpie:backup:pick",
+  ];
   for (const channel of channels) {
     assert.match(trusted[1], new RegExp(`"${channel}"`), `${channel} 不在 TRUSTED_CHANNELS`);
     assert.match(

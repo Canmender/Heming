@@ -121,11 +121,14 @@ function createMagpieCli(opts) {
     }
   };
 
-  function run(args, { stdin = false, timeout = timeoutMs } = {}) {
+  /** 启动一次命令；返回 runId（供页面配对事件）与 done（命令结束时 resolve）。 */
+  function launch(args, { stdin = false, timeout = timeoutMs } = {}) {
     const checked = validateCliArgs(args);
-    if (!checked.ok) return Promise.resolve({ ok: false, error: checked.reason });
+    if (!checked.ok) {
+      return { ok: false, error: checked.reason, done: Promise.resolve({ ok: false, error: checked.reason }) };
+    }
     const runId = `cli-${++seq}`;
-    return new Promise((resolve) => {
+    const done = new Promise((resolve) => {
       let child;
       try {
         child = spawn(binaryPath, args, {
@@ -144,6 +147,7 @@ function createMagpieCli(opts) {
         settled = true;
         runs.delete(runId);
         clearTimeout(timer);
+        emit(runId, "exit", { code: result.code ?? null, ok: result.ok === true, error: result.error });
         resolve(result);
       };
       const timer = setTimeout(() => {
@@ -169,10 +173,22 @@ function createMagpieCli(opts) {
       runs.set(runId, child);
       emit(runId, "start", { args });
     });
+    return { ok: true, runId, done };
+  }
+
+  function run(args, opts) {
+    return launch(args, opts).done;
   }
 
   function start(args, opts = {}) {
     return run(args, { ...opts, stdin: opts.stdin ?? true });
+  }
+
+  /** 交互式命令：立刻返回 runId，页面按事件配对，输入经 input 写回。 */
+  function begin(args, opts = {}) {
+    const launched = launch(args, { ...opts, stdin: opts.stdin ?? true });
+    if (!launched.ok) return { ok: false, error: launched.error };
+    return { ok: true, runId: launched.runId };
   }
 
   function input(runId, text) {
@@ -198,7 +214,7 @@ function createMagpieCli(opts) {
     return true;
   }
 
-  return { run, start, input, kill, validateCliArgs, needsTerminal, terminalCommand, activeRuns: () => [...runs.keys()] };
+  return { run, start, begin, input, kill, validateCliArgs, needsTerminal, terminalCommand, activeRuns: () => [...runs.keys()] };
 }
 
 module.exports = {

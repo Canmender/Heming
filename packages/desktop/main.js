@@ -115,10 +115,13 @@ const TRUSTED_CHANNELS = [
   "magpie:stop",
   "magpie:gateway",
   "magpie:cli",
+  "magpie:cli:begin",
   "magpie:cli:start",
   "magpie:cli:input",
   "magpie:cli:kill",
   "magpie:terminal",
+  "magpie:backup:info",
+  "magpie:backup:pick",
   // ── 界面插件（desktopWidget · d.98）──
   // 这些是**主窗专用**的安装/启停/设置通道（widget 窗口永远碰不到：它不是 mainWindow，
   // 且 widget 自己的桥在 widget-preload.js 里，只有窗口动作与环境）。
@@ -859,6 +862,39 @@ if (!gotLock) {
     } catch (err) {
       return { ok: false, error: err?.message ?? String(err) };
     }
+  });
+
+  // 交互式命令：立刻拿 runId，页面用事件流 + 输入框完成口令等交互。
+  secureIpc.handle("magpie:cli:begin", (_event, args) => magpieCli.begin(args));
+
+  // —— 模型备份（d.112）：备份文件放在应用自己的目录，页面列出来、点一下恢复 ——
+  const fs = require("node:fs");
+  const backupDir = require("node:path").join(app.getPath("userData"), "model-backups");
+  const listBackups = () => {
+    try {
+      fs.mkdirSync(backupDir, { recursive: true });
+      return fs
+        .readdirSync(backupDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => {
+          const full = require("node:path").join(backupDir, entry.name);
+          const stat = fs.statSync(full);
+          return { name: entry.name, path: full, size: stat.size, mtime: stat.mtimeMs };
+        })
+        .sort((a, b) => b.mtime - a.mtime);
+    } catch {
+      return [];
+    }
+  };
+  secureIpc.handle("magpie:backup:info", () => ({ dir: backupDir, files: listBackups() }));
+  secureIpc.handle("magpie:backup:pick", async () => {
+    const target = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    const result = await dialog.showOpenDialog(target, {
+      title: "选择模型备份文件",
+      properties: ["openFile"],
+      filters: [{ name: "模型备份", extensions: ["backup", "enc", "*"] }],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
   });
 
   // 登录后自动拉起（不阻塞窗口）：失败只记日志，设置页会显示「未运行 + 原因」。

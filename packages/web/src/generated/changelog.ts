@@ -12,6 +12,50 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.112.3.44.0",
+    "date": "2026-11-08",
+    "title": "备份与恢复页面化 + 布局优化",
+    "bullets": [
+      "应用自己的备份目录（`userData/model-backups`）在页面里列出：文件名/时间/大小；",
+      "新建备份：生成 `model-<时间>.backup`，交互面板里输口令（只在内存里，不落盘）；",
+      "恢复：列表「恢复」或「从文件恢复…」（系统选择器）→ 二次确认 → 交互面板输口令；",
+      "命令输出逐块显示，完成后刷新列表；关闭面板终止未完成命令。",
+      "主进程新增 `magpie:cli:begin` / `magpie:backup:info` / `magpie:backup:pick` 通道（全部进 TRUSTED_CHANNELS）；",
+      "preload 暴露 `cliBegin / backupInfo / backupPick`；命令桥新增 `exit` 事件；",
+      "新组件 `model/SectionCard`、`model/ConsolePanel`、`model/BackupPanel`。",
+      "来源页四张卡宽屏两列、窄屏单列；",
+      "运行页：链路与用量通栏，路由分组通栏，同步/库/高级命令两列；备份独立成块；",
+      "统一 20px 圆角与卡片头排版。",
+      "`BackupPanel` 4 例；wiring 守卫 13 方法 / 8 通道；全量 web 与 desktop 门禁见发版记录。"
+    ],
+    "paragraphs": [
+      "备份与恢复",
+      "基础设施",
+      "布局",
+      "验证"
+    ]
+  },
+  {
+    "version": "d.111.3.44.0",
+    "date": "2026-11-08",
+    "title": "P1 收口：正式首方公钥上线，dev 公钥在打包版被忽略",
+    "bullets": [
+      "`packages/desktop/resources/official-keys.json` 新增正式公钥 `official-2026-11`（Ed25519：`ZARHK4iibpO7Obf5SRFpt8esKip2CJz4bhuanQvrVtk`）；`dev-test-2026-11` 保留给本机测试。",
+      "**打包版跳过全部 `dev-*` 公钥**：即使公钥表里同时有正式钥，用仓库公开的测试私钥签出的包也不会被接受（此前只判断「表里有没有正式钥」，会让 dev 私钥变成后门）。本地 `electron .` 由主进程设",
+      "`node scripts/check-release-keys.mjs` 现在通过（exit 0）；只有 dev 键时仍以 exit 2 阻断发版。",
+      "`heming.pet` 升到 **1.0.1** 并用 `official-2026-11` 签出：`packageSha256``bb746541…f6a782`（`files/**` 内容摘要）、`publisher: heming`、`signature(ed25519)`；",
+      "发布链路文档化（`docs/PLUGINS.md` §9.4）：`check-release-keys → build → sign → pack(自检) → publish`，并写明私钥位置、双钥过渡、丢钥后果与「签名后必须 readPackage 自检」。",
+      "没有 `packageSha256` / 没有正式签名的旧 bundle 仍不能新装；已安装记录不受影响。",
+      "`engines`/v1–v4/声明式插件语义未变；本版为修订位 +1。"
+    ],
+    "paragraphs": [
+      "审计 P1-1（正式公钥未就位 → 打包版拒绝安装所有界面插件）已完成，并非只加检查脚本：",
+      "首方密钥正式私钥**不在仓库**：发布机路径 `D:/Heming-release-keys/official-plugin-signing.seed.txt`（口令/权限说明见文件 `_release_private_key`），上线前应移入发布 CI secret / HSM。`HEMING_ALLOW_DEV_PLUGIN_KEYS=1` 显式放开。",
+      "签名版桌宠`pack-plugin` 以安装口径回读校验通过（28 文件 / entry=files/index.html /tgz sha256 `236c2e1c…b2b201`）。产物在 `packages/pet-widget/dist/package.tgz`（不入库）。",
+      "兼容性"
+    ]
+  },
+  {
     "version": "d.111.3.43.0",
     "date": "2026-11-08",
     "title": "插件/技能社区安全与健壮性修复轮（对抗审计：2 个 P0 + 8 个 P1）",

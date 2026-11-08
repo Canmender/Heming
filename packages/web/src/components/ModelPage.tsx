@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageShell } from "./layout/PageShell.js";
 import { ModelTraceView } from "./ModelTraceView.js";
 import { ModelUsageView } from "./ModelUsageView.js";
+import { BackupPanel } from "./model/BackupPanel.js";
 import { useLlmStore } from "../store/llm.js";
 import { useUiStore } from "../store/ui.js";
 import { ensureDesktopGateway } from "../lib/magpieHost.js";
@@ -452,7 +453,7 @@ export function ModelPage() {
 
         {/* ── 来源 ───────────────────────────────────────────── */}
         {tab === "sources" && (
-          <section aria-label="来源" className="space-y-4">
+          <section aria-label="来源" className="grid items-start gap-4 lg:grid-cols-2">
             <div className="rounded-[20px] border border-line bg-white p-4">
               <div className="text-[13px] font-bold">订阅与账号</div>
               <p className="mt-0.5 ui-caption">
@@ -822,7 +823,8 @@ export function ModelPage() {
               </button>
             </div>
 
-            <details className="rounded-[20px] border border-line bg-white p-4">
+            <div className="grid items-start gap-3 lg:grid-cols-2">
+            <details className="rounded-[20px] border border-line bg-white p-4 lg:col-span-2">
               <summary className="cursor-pointer text-[13px] font-bold">路由分组（可选）</summary>
               <p className="mt-1 ui-caption">多个模型或账号合成一个名字，按策略分配。一般不需要手动建。</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
@@ -975,18 +977,7 @@ export function ModelPage() {
               />
             </div>
 
-            <details className="rounded-[20px] border border-line bg-white p-4">
-              <summary className="cursor-pointer text-[13px] font-bold">备份与恢复</summary>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" className="ui-btn ui-btn-sm ui-btn-primary" disabled={!cli} onClick={() => void runTerminal("备份", ["backup"])}>
-                  新建备份
-                </button>
-                <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void runTerminal("恢复备份", ["restore"])}>
-                  恢复备份
-                </button>
-              </div>
-              <p className="mt-1 ui-caption">口令在终端里输入，不经过页面。</p>
-            </details>
+            <BackupPanel />
 
             <details className="rounded-[20px] border border-line bg-white p-4">
               <summary className="cursor-pointer text-[13px] font-bold">多机同步</summary>
@@ -1131,6 +1122,7 @@ export function ModelPage() {
                 }}
               />
             </details>
+            </div>
           </section>
         )}
       </div>

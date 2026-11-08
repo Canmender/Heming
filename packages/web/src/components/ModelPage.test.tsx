@@ -42,6 +42,17 @@ function installBridge(overrides: Record<string, unknown> = {}) {
       calls.push(args);
       return { ok: true };
     }),
+    cliBegin: vi.fn(async (args: string[]) => {
+      calls.push(args);
+      return { ok: true, runId: "cli-1" };
+    }),
+    backupInfo: vi.fn(async () => ({
+      dir: "D:/backups",
+      files: [
+        { name: "model-20261108.backup", path: "D:/backups/model-20261108.backup", size: 2048, mtime: Date.now() },
+      ],
+    })),
+    backupPick: vi.fn(async () => null),
     cliInput: vi.fn(async () => true),
     cliKill: vi.fn(async () => true),
     openTerminal: vi.fn(async () => ({ ok: true })),

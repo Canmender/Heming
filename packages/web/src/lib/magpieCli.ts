@@ -23,12 +23,25 @@ export interface MagpieCliEvent {
   args?: string[];
 }
 
+export interface CloudBackupFile {
+  name: string;
+  path: string;
+  size: number;
+  mtime: number;
+}
+
 export interface MagpieCliBridge {
   cli(args: string[]): Promise<MagpieCliResult>;
   cliStart(args: string[]): Promise<{ ok: boolean; error?: string }>;
+  /** 立刻返回 runId（交互式命令用），输出经 onCli 事件回流。 */
+  cliBegin(args: string[]): Promise<{ ok: boolean; runId?: string; error?: string }>;
   cliInput(runId: string, text: string): Promise<boolean>;
   cliKill(runId: string): Promise<boolean>;
   openTerminal(args: string[]): Promise<{ ok: boolean; error?: string }>;
+  /** 应用自己的备份目录与已有备份文件。 */
+  backupInfo(): Promise<{ dir: string; files: CloudBackupFile[] }>;
+  /** 选一个备份文件（系统文件选择器）；取消返回 null。 */
+  backupPick(): Promise<string | null>;
   onCli(callback: (event: MagpieCliEvent) => void): () => void;
 }
 
@@ -36,6 +49,9 @@ type BridgeWindow = {
   __heming_magpie?: {
     cli?: unknown;
     cliStart?: unknown;
+    cliBegin?: unknown;
+    backupInfo?: unknown;
+    backupPick?: unknown;
     cliInput?: unknown;
     cliKill?: unknown;
     openTerminal?: unknown;
@@ -51,9 +67,12 @@ export function getMagpieCliBridge(): MagpieCliBridge | null {
   if (
     typeof bridge.cli !== "function" ||
     typeof bridge.cliStart !== "function" ||
+    typeof bridge.cliBegin !== "function" ||
     typeof bridge.cliInput !== "function" ||
     typeof bridge.cliKill !== "function" ||
     typeof bridge.openTerminal !== "function" ||
+    typeof bridge.backupInfo !== "function" ||
+    typeof bridge.backupPick !== "function" ||
     typeof bridge.onCli !== "function"
   ) {
     return null;
