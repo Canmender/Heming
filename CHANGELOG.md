@@ -2,6 +2,32 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.99.2.42.0（2026-11-08）— 关于页更新进度条：下载时看得见进度
+
+用户要求：「应用内部在关于页面更新的时候，弄一个进度条，让用户能看到已经更新了多少」。
+
+### 一、数据链路
+
+- 主进程 `auto-update.js` 订阅 electron-updater 的 `download-progress`：状态快照新增
+  `progress { percent, transferred, total, bytesPerSecond }`（percent 夹紧 0–100），
+  事件驱动既有 `update:state` 推送——不新增 IPC 通道、preload 桥不变；
+- `check()` / `download()` 开始都清空进度（不让界面显示上一轮的陈旧百分比）；
+  `dispose()` 摘掉监听，主进程收尾不留钩子。
+
+### 二、界面（设置区「关于」）
+
+- `downloading` 阶段渲染 `role="progressbar"`（`aria-label="更新下载进度"`、`aria-valuenow`），
+  随推送实时更新宽度；
+- 进度说明：`已下载 N%（x / y MB · 速度/s）`；总量未知时只显示百分比；
+- 说明文案同步为「正在下载 42%…」；下载完成进度条消失、按钮转为「重启并安装」（沿用既有状态机）。
+
+### 三、测试
+
+- `packages/desktop/auto-update.test.js` +3：进度事件转发与越界夹紧、重新检查清空、
+  `dispose` 摘监听；
+- `packages/web/src/components/UpdateCard.test.tsx` +2：进度条随推送从 12.5% 更新到 68%、
+  下载完成后进度条消失且按钮为「重启并安装」。
+
 ## d.98.2.42.0（2026-11-08）— 桌宠拆成界面插件：从本体抽出，云端按需安装
 
 用户指令：「和鸣的桌宠模块，把他拉出来做成一个插件，不再合并到本体程序」；分发口径：云端服务器下发、用户自行下载安装

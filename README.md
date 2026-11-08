@@ -3,7 +3,7 @@
 原生电脑端智能体应用平台（云端团队名册）：本机智能体 + 真实团队动向。
 
 <<<<<<< HEAD
-> **当前版本**：`d.98.2.42.0`　查看最新：`node scripts/version.mjs`（或 `pnpm version:show`）
+> **当前版本**：`d.99.2.42.0`　查看最新：`node scripts/version.mjs`（或 `pnpm version:show`）
 =======
 > **当前版本**：`d.94.2.42.0`　查看最新：`node scripts/version.mjs`（或 `pnpm version:show`）
 >>>>>>> 56af2e1 (feat(pet): d.94.2.42.0 桌宠拆成界面插件——从本体抽出、云端按需安装)

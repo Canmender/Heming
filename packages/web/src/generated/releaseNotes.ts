@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.99.2.42.0",
+    "date": "2026-11-08",
+    "title": "更新下载时能看到进度条了",
+    "bullets": [
+      "设置·关于里点「下载更新」时，会显示进度条和「已下载 42%（105 MB / 250 MB · 2.0 MB/s）」。",
+      "下载完成后进度条消失，按钮变成「重启并安装」。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.98.2.42.0",
     "date": "2026-11-08",
     "title": "桌宠改成插件了：在插件区下载安装，不再跟着主程序",
