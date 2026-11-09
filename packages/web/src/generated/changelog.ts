@@ -32,8 +32,9 @@ export const CHANGELOG: ChangelogEntry[] = [
       "web 侧 v4 解析的 `permissions.events` / `graphics` 枚举补齐为宿主真实全集（notify/lifecycle/theme/tray、webgl/webgl2/wasm），此前合法 bundle 会被误拒。",
       "`plugin-package.js` 的 `validateBundleManifest` 增加 `{ dev: true }` 模式（打包前缺 `packageSha256` 不算错），安装链路不传 dev、判定不变；新增 2 条用例。",
       "shared：8 文件 / 93 例全绿（新增 `$schema` 回归、widget 一致性 4 例、清单对齐 6 例）；`pnpm plugin:check` 退出 0（批量 lint 跳过 `_template`/`examples`，schema 已最新）。",
+      "打包门禁（`release.mjs --desktop` 实跑，2026-11-09 21:04–21:10）：web 331 文件 / 4717 例、server 16 文件 / 264 例、shared 8 文件 / 93 例、pet-widget 11 文件 / 138 例、desktop 44 个",
       "实跑脚手架：`plugin:new acme.demo`（声明式）生成即 lint 通过；`--kind bundle` 生成 v4 骨架，lint 报「bundle 校验通过（安装口径，打包前模式）」；用 dev 密钥走 `lint → sign → pack`，",
-      "web / desktop 全量门禁由本轮打包脚本（`release.mjs --desktop`）复跑，结果见证据清单与 HANDOFF §2。",
+      "顺手修一处测试脆弱性：更新日志卡片原先拿**原始 bullet** 比对文本，用户版说明里出现行内代码（如 `docs/PLUGIN-STANDARD.md`）时会误报；改为按渲染口径 `stripInline()` 归一后比对。",
       "第三方仍**不能**发布界面插件（签名红线不变）；bundle 清单仍是 v4，不与 v5 合并。",
       "`permissions.files` 仍只校验与展示（未实现文件根）；`graphics` 仍是渲染类声明（影响网关放行与 CSP），不是沙箱能力。",
       "`openPage` 白名单目前存在于三处（shared 类型 / 主进程 / preload），本轮未合并为单一真源。"
@@ -44,7 +45,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "工具链（方便做插件）与 `engines.heming`（当前版本前缀），生成后立刻跑权威校验。用 `createRequire` 加载主进程 `plugin-package.js` 的 `validateBundleManifest(raw, { dev: true })`（打包前允许缺 `packageSha256`，格式给了仍严格校验），并校 entry 存在性与摘要一致。",
       "标准类型与一致性`WidgetLifecycleEvent` / `WidgetSettings` / `WidgetPage` 等类型（无运行时代码）。",
       "清单与运行时对齐（修真实不一致）",
-      "验证`pack-plugin` 输出 `readPackage ✓（4 个文件，entry=files/index.html）`。",
+      "验证node:test 文件 / 706 例，5/5 包通过、无重试。`pack-plugin` 输出 `readPackage ✓（4 个文件，entry=files/index.html）`。",
       "边界（本轮没做）"
     ]
   },

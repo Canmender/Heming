@@ -56,10 +56,14 @@
 
 - shared：8 文件 / 93 例全绿（新增 `$schema` 回归、widget 一致性 4 例、清单对齐 6 例）；
   `pnpm plugin:check` 退出 0（批量 lint 跳过 `_template`/`examples`，schema 已最新）。
+- 打包门禁（`release.mjs --desktop` 实跑，2026-11-09 21:04–21:10）：web 331 文件 / 4717 例、
+  server 16 文件 / 264 例、shared 8 文件 / 93 例、pet-widget 11 文件 / 138 例、desktop 44 个
+  node:test 文件 / 706 例，5/5 包通过、无重试。
 - 实跑脚手架：`plugin:new acme.demo`（声明式）生成即 lint 通过；`--kind bundle` 生成 v4 骨架，
   lint 报「bundle 校验通过（安装口径，打包前模式）」；用 dev 密钥走 `lint → sign → pack`，
   `pack-plugin` 输出 `readPackage ✓（4 个文件，entry=files/index.html）`。
-- web / desktop 全量门禁由本轮打包脚本（`release.mjs --desktop`）复跑，结果见证据清单与 HANDOFF §2。
+- 顺手修一处测试脆弱性：更新日志卡片原先拿**原始 bullet** 比对文本，用户版说明里出现行内代码
+  （如 `docs/PLUGIN-STANDARD.md`）时会误报；改为按渲染口径 `stripInline()` 归一后比对。
 
 ### 边界（本轮没做）
 
