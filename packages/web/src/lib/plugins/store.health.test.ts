@@ -139,6 +139,27 @@ const skillRefs = (ids: string[], pluginId = "acme.health") =>
   ids.map((id) => ({ id, pluginId }));
 const serverRefs = (ids: string[]) => ids.map((id) => ({ id, origin: "plugin" as const }));
 
+describe("PluginStore · v5 清单读回", () => {
+  it("list() 的清单与落盘记录指纹一致（permissions.chat 不能漏拷）", () => {
+    const { store } = fresh();
+    store.install(rawV5());
+
+    const listed = store.list()[0];
+    // v5 归一化后 permissions 一定带 chat（缺省 false）；拷贝时漏掉它会让指纹漂移。
+    expect(listed.manifest.permissions.chat).toBe(false);
+    expect(listed.fingerprint).toBe(contentFingerprint(listed.manifest));
+
+    const health = inspectPluginHealth(
+      listed,
+      listed.skillIds.map((id) => ({ id, pluginId: listed.manifest.id })),
+      [],
+      { appVersion: "d.121.3.47.0" },
+    );
+    expect(health.issues.map((issue) => issue.code)).not.toContain("fingerprint-mismatch");
+    expect(health.level).toBe("ok");
+  });
+});
+
 describe("inspectPluginHealth · 7 类问题与分级", () => {
   it("全绿：引用都在、指纹一致、签名无异常 → ok", () => {
     const plugin = fixture({ skillIds: ["skill-1"], serverIds: ["plugin:acme.health:report"] });

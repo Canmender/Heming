@@ -5,7 +5,7 @@ import {
   type CatalogClientDeps,
 } from "../../lib/plugins/catalogClient.js";
 import { FOCUS_RING } from "../../lib/a11y/focus.js";
-import { SearchIcon } from "../icons.js";
+import { PackageIcon, SearchIcon } from "../icons.js";
 import { EmptyState } from "../ui/EmptyState.js";
 
 /**
@@ -117,6 +117,7 @@ export function PluginRepositoryPanel({
         </p>
       ) : filtered.length === 0 ? (
         <EmptyState
+          icon={<PackageIcon width={20} height={20} />}
           title={entries && entries.length > 0 ? "没有匹配的插件" : "仓库里还没有插件"}
           desc={
             entries && entries.length > 0

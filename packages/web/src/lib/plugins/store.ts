@@ -790,6 +790,9 @@ function copyManifest(manifest: PluginManifest): PluginManifest {
       events: [...permissions.events],
       graphics: [...permissions.graphics],
       eval: permissions.eval,
+      // d.113 的 v5 字段：漏拷会让 `list()` 的清单与落盘清单指纹不一致，
+      // 所有 v5 插件一装完就被判「降级」。
+      chat: permissions.chat,
     },
     // v5：engines/meta 是可选字段，只对 v5 清单出现。
     ...(manifest.engines ? { engines: { ...manifest.engines } } : {}),
