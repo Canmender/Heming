@@ -37,6 +37,7 @@ import { PluginStats } from "./plugins/PluginStats.js";
 import { SystemPluginCard } from "./plugins/SystemPluginCard.js";
 import { PluginToolPanel } from "./plugins/PluginToolPanel.js";
 import { ModulePluginCard } from "./plugins/ModulePluginCard.js";
+import { CloudModulesDialog } from "./plugins/CloudModulesDialog.js";
 import { WidgetsView } from "./plugins/WidgetsView.js";
 import { SkillsView } from "./SkillsPage.js";
 import { InterfacesView } from "./InterfacesPage.js";
@@ -233,18 +234,25 @@ export function PluginsPage({
    */
   const moduleEnabled = useModuleStore((s) => s.enabled);
   const moduleInstalled = useModuleStore((s) => s.installed);
+  const installModule = useModuleStore((s) => s.install);
+  /** 只有「已安装」的模块才进统一列表；未安装的模块不渲染（原生应用不携带模块）。 */
+  const installedModules = useMemo(
+    () => BUILTIN_MODULES.filter((mod) => moduleInstalled[mod.id]),
+    [moduleInstalled],
+  );
+  const [cloudModulesOpen, setCloudModulesOpen] = useState(false);
   const widgetsRecords = useWidgetsStore((s) => s.records);
   const unitStatuses = useMemo(
     () =>
       buildUnitStatuses({
         system,
-        modules: BUILTIN_MODULES,
+        modules: installedModules,
         moduleEnabled,
         moduleInstalled,
         plugins: list,
         widgets: widgetsRecords,
       }),
-    [system, moduleEnabled, moduleInstalled, list, widgetsRecords],
+    [system, installedModules, moduleEnabled, moduleInstalled, list, widgetsRecords],
   );
 
   const stats = useMemo(
@@ -538,7 +546,7 @@ export function PluginsPage({
         })}
         <span className="ml-auto self-center ui-caption">
           {tab === "plugins"
-            ? `已启用 ${enabledCount}/${list.length} 个插件 · 内置模块可安装 / 删除 / 启停`
+            ? `已启用 ${enabledCount}/${list.length} 个插件 · 模块从云端安装`
             : tab === "repo"
               ? "云端插件仓库：下载原样清单、校验指纹后走同一套安装预览"
               : tab === "widgets"
@@ -578,6 +586,13 @@ export function PluginsPage({
               </button>
               <button type="button" onClick={openInstall} className="ui-btn ui-btn-sm ui-btn-ghost">
                 手动粘贴清单
+              </button>
+              <button
+                type="button"
+                onClick={() => setCloudModulesOpen(true)}
+                className="ui-btn ui-btn-sm ui-btn-ghost"
+              >
+                从云端安装模块
               </button>
             </div>
 
@@ -717,6 +732,17 @@ export function PluginsPage({
           onLoad={loadFromRepository}
           onClose={() => setRepoDialogOpen(false)}
           onError={(message) => setMsg({ kind: "error", text: message })}
+        />
+      )}
+
+      {cloudModulesOpen && (
+        <CloudModulesDialog
+          installed={moduleInstalled}
+          onInstall={(id) => {
+            installModule(id);
+            bump();
+          }}
+          onClose={() => setCloudModulesOpen(false)}
         />
       )}
 

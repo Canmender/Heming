@@ -12,10 +12,10 @@ import { ConfirmDialog } from "../ConfirmDialog.js";
 import { BTN_DANGER_SM, BTN_GHOST, BTN_PRIMARY, CHIP, HINT, Switch } from "./shared.js";
 
 /**
- * 内置模块卡片（插件页 · 插件 Tab）。
+ * 模块卡片（插件页 · 插件 Tab）。
  *
- * 模块是**随应用发布、可安装/删除/启停**的插件：安装包里默认一个都不带，
- * 用户在这里「安装」后才出现在已安装列表里，并可打开页面或停用。
+ * 模块由**云端目录**提供（`GET /api/modules`），用户在「从云端安装模块」弹窗里选择；
+ * 安装包里不携带任何模块。装过之后才在本列表里出现，可打开页面、停用或删除。
  * 每个卡片回答四个问题：**它是什么、带了什么、依赖谁、删除会怎样**。
  *
  * 状态只写 `heming.modules.v1`（`installed` / `enabled`）；页面/导航的过滤在
@@ -94,7 +94,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="ui-section-title">{mod.name}</span>
-            <span className={CHIP}>内置</span>
+            <span className={CHIP}>模块</span>
             <span className="ui-micro text-muted">{mod.version}</span>
             <span className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${statusTone}`}>
               {statusLabel}
@@ -201,7 +201,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
           </>
         ) : (
           <span className="ui-caption">
-            安装只注册入口与后台任务；带引擎的模块（信息中枢）首次启用时才下载官方签名模块包。
+            模块由云端目录提供；安装只注册入口与后台任务，带引擎的模块（信息中枢）首次启用时才下载官方签名模块包。
           </span>
         )}
         {notice ? (

@@ -82,7 +82,7 @@ describe("UnitListView", () => {
     expect(screen.getByText("桌宠")).toBeInTheDocument();
     // 来源徽标
     expect(screen.getAllByText("插件").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("内置模块").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("模块").length).toBeGreaterThan(0);
     expect(screen.getAllByText("界面插件").length).toBeGreaterThan(0);
     // 贡献摘要与只读标记
     const system = screen.getByRole("region", { name: "能力单元 系统能力" });
