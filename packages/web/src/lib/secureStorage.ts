@@ -205,6 +205,32 @@ function notePendingPlain(key: string, plain: string): () => void {
   };
 }
 
+/**
+ * 某个键「写后立即读」会拿到的值（未落盘时是待写明文，落盘后由 raw 负责）。
+ *
+ * 为什么需要导出：异步桥下 `secureSetItem` 只**排队**加密落盘，底层 raw 这一刻还是旧值。
+ * 事务类调用方写后要校验「这笔写真的被接受」，只能按读路径（`secureGetItem` 的口径）
+ * 比对；直接读 raw 会把「已排队的写」误判成写失败（d.119 修的真实缺陷）。
+ * 没有排队中的写时返回 `null`，调用方回落自己的 raw 读。
+ */
+export function pendingSecurePlain(key: string): string | null {
+  return pendingPlain.get(key)?.plain ?? null;
+}
+
+/**
+ * 丢弃某键排队中、尚未落盘的写（事务回滚用）。
+ *
+ * 只删记录还不够：已在途的 `writeEnvelopeAsync` 醒来后仍会写盘，等于把回滚后的旧值
+ * 又覆盖成新值。`writeEnvelopeAsync` 写盘前会核对「自己的序号仍是最新」，
+ * 记录被删/被后写的覆盖即视为失效、自行放弃。主进程侧的解密缓存也要同步失效，
+ * 否则回滚后读到的是新明文。
+ */
+export function discardPendingSecureWrite(key: string): void {
+  const had = pendingPlain.delete(key);
+  if (!had) return;
+  bridge()?.cacheDelete?.(key);
+}
+
 function bridge(): SecretBridge | undefined {
   if (typeof window === "undefined") return undefined;
   const b = window.__heming_secrets;
@@ -276,6 +302,8 @@ async function writeEnvelopeAsync(
   value: string,
   base: StorageLike,
   b: SecretBridge,
+  /** 这笔写是否仍是最新一笔（被回滚丢弃/被后写的覆盖时返回 false）。 */
+  stillLatest: () => boolean = () => true,
 ): Promise<void> {
   try {
     const cipher = typeof b.encryptAsync === "function" ? await b.encryptAsync(value) : null;
@@ -283,6 +311,7 @@ async function writeEnvelopeAsync(
     const roundTrip =
       cipher && typeof b.decryptAsync === "function" ? await b.decryptAsync(cipher) : null;
     if (cipher && roundTrip === value) {
+      if (!stillLatest()) return;
       try {
         base.setItem(key, envelopeOf(cipher));
         b.cacheSet?.(key, value);
@@ -298,6 +327,7 @@ async function writeEnvelopeAsync(
     /* 加密/自校验抛错：按失败处理，走下面的明文兜底 */
   }
   plaintextKeys.add(key);
+  if (!stillLatest()) return;
   try {
     base.setItem(key, value);
     cachePlainAfterWrite(key, value, base);
@@ -538,7 +568,10 @@ export function secureSetItem(
      */
     b.cacheSet?.(key, value);
     const clearPending = notePendingPlain(key, value);
-    trackSecureWrite(writeEnvelopeAsync(key, value, base, b).finally(clearPending));
+    // 序号仍是自己才写盘：被 discardPendingSecureWrite 丢弃、或被后一笔覆盖时自行放弃，
+    // 否则回滚后的旧值会被这笔迟到的写重新盖成新值（「显示已回滚、重启又变回去」）。
+    const stillLatest = () => pendingPlain.get(key)?.plain === value;
+    trackSecureWrite(writeEnvelopeAsync(key, value, base, b, stillLatest).finally(clearPending));
     return;
   }
   if (b && canSyncCrypto(b)) {

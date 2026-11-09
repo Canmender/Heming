@@ -25,6 +25,7 @@ import {
 } from "../mcp/index.js";
 import { DEFAULT_QUOTA_BYTES } from "../storageUsage.js";
 import { utf8Length } from "../memory/storage.js";
+import { discardPendingSecureWrite, pendingSecurePlain, readSecureValueAsync } from "../secureStorage.js";
 import {
   currentAppVersion,
   parsePluginManifest,
@@ -2070,12 +2071,29 @@ export class PluginStore {
     return writes;
   }
 
+  /**
+   * 事务键的「当前值」：**按读路径取**，而不是裸读 localStorage。
+   *
+   * `heming.mcp.servers.v1` 走安全存储（`secureStorageFor`），桌面桥默认异步加密落盘：
+   * `setItem` 只排队，底层 raw 这一刻还是旧值（见 `secureStorage.pendingSecurePlain`）。
+   * 快照与读回都按同一口径取，才能比出「这笔写有没有被接受」；
+   * 只读 raw 会把已排队的写误判成写失败并整笔回滚（d.119 真实缺陷）。
+   *
+   * 代价（如实记下）：异步桥下这一校验只能证明「写已入队」，不能证明「已落盘」。
+   * 落盘失败由安全层自己的 fail-open（加密失败退明文、明文也失败才算丢）负责，
+   * 「读回一致」不再是它与配额之间的唯一防线。
+   */
+  private readTransactionKey(key: string): string | null {
+    const pending = pendingSecurePlain(key);
+    return pending !== null ? pending : this.storage.getItem(key);
+  }
+
   /** 快照事务涉及的存储键原值（prepare 阶段；回滚逐键恢复的依据）。 */
   private snapshotTransactionKeys(): Map<string, string | null> {
     const snapshot = new Map<string, string | null>();
     for (const key of PLUGIN_TXN_KEYS) {
       try {
-        snapshot.set(key, this.storage.getItem(key));
+        snapshot.set(key, this.readTransactionKey(key));
       } catch {
         snapshot.set(key, null);
       }
@@ -2096,7 +2114,7 @@ export class PluginStore {
   ): void {
     let next: string | null;
     try {
-      next = this.storage.getItem(key);
+      next = this.readTransactionKey(key);
     } catch {
       return;
     }
@@ -2111,6 +2129,9 @@ export class PluginStore {
     const writeErrors: string[] = [];
     for (const [key, value] of before) {
       try {
+        // 安全存储的写是排队的：先丢弃在途那一笔，否则它落盘时会把刚恢复的旧值
+        // 再盖回新值——界面说「已回滚」、重启却变回去，正是这类鬼影。
+        discardPendingSecureWrite(key);
         if (value === null) this.storage.removeItem(key);
         else this.storage.setItem(key, value);
       } catch (err) {
@@ -2119,6 +2140,27 @@ export class PluginStore {
     }
     // 存储回滚了、内存不重读就是半装态：三个单例都按存储重建。
     const memoryErrors: string[] = [];
+    this.reloadInMemoryAfterRollback(before, memoryErrors);
+    const ok = writeErrors.length === 0 && memoryErrors.length === 0;
+    return {
+      ok,
+      keys,
+      ...(ok ? {} : { error: [...writeErrors, ...memoryErrors].join("；") }),
+    };
+  }
+
+  /**
+   * 回滚后的内存重读。
+   *
+   * 异步安全存储上有一处时序不对称：刚恢复回去的 `heming.mcp.servers.v1` 是**旧信封**，
+   * 而异步桥不支持同步解密（首次读会返回 null），直接 reload 会让服务列表在内存里
+   * 短暂变空。所以先按既有读路径重建一次（普通键立即正确），再异步把旧信封解密
+   * 回填缓存、重读一次 MCP 注册表——用户看到的最终状态必须是「回滚前那样」。
+   */
+  private reloadInMemoryAfterRollback(
+    before: Map<string, string | null>,
+    memoryErrors: string[],
+  ): void {
     try {
       this.reload();
     } catch (err) {
@@ -2129,17 +2171,21 @@ export class PluginStore {
     } catch (err) {
       memoryErrors.push(`技能池 reload：${errorMessage(err)}`);
     }
-    try {
-      this.mcp.reload?.();
-    } catch (err) {
-      memoryErrors.push(`MCP 注册表 reload：${errorMessage(err)}`);
-    }
-    const ok = writeErrors.length === 0 && memoryErrors.length === 0;
-    return {
-      ok,
-      keys,
-      ...(ok ? {} : { error: [...writeErrors, ...memoryErrors].join("；") }),
+    const reloadMcp = (): void => {
+      try {
+        this.mcp.reload?.();
+      } catch (err) {
+        memoryErrors.push(`MCP 注册表 reload：${errorMessage(err)}`);
+      }
     };
+    reloadMcp();
+    // 只有恢复出来的旧值存在时才需要补读；被删掉的键（null）不该被重新造出来。
+    if (before.get(MCP_SERVERS_KEY) == null) return;
+    void readSecureValueAsync(MCP_SERVERS_KEY, this.storage)
+      .then(() => reloadMcp())
+      .catch(() => {
+        /* 解不开就保持同步读的结果：不谎报、也不再抛 */
+      });
   }
 
   /**

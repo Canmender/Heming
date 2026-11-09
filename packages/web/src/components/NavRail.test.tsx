@@ -32,12 +32,38 @@ describe("NavRail 图标轨（A 方案）", () => {
     }
   });
 
-  it("导航固定 8 项：幕僚 / 信息中枢 / 自动化 / 模型路由都不在轨上", () => {
-    useModuleStore.getState().install("infohub");
+  it("没装模块时导航只有 8 个宿主页：幕僚 / 信息中枢 / 自动化 / 工作流都不在轨上", () => {
     render(<NavRail />);
-    for (const name of ["幕僚", "信息中枢", "自动化", "模型路由"]) {
+    for (const name of ["幕僚", "信息中枢", "自动化", "工作流", "模型路由"]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
+  });
+
+  it("装上并启用模块后，导航里立刻出现入口（排在「插件」之后），停用后消失", () => {
+    useModuleStore.getState().install("workflows");
+    render(<NavRail />);
+    const labels = screen
+      .getAllByRole("button")
+      .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
+      .filter((label) => ["插件", "工作流", "记忆"].includes(label));
+    expect(labels).toEqual(["插件", "工作流", "记忆"]);
+
+    // 停用（不是删除）→ 入口下线；重新启用 → 回来
+    act(() => useModuleStore.getState().setEnabled("workflows", false));
+    expect(screen.queryByRole("button", { name: "工作流" })).not.toBeInTheDocument();
+    act(() => useModuleStore.getState().setEnabled("workflows", true));
+    expect(screen.getByRole("button", { name: "工作流" })).toBeInTheDocument();
+
+    // 删除 → 入口消失
+    act(() => useModuleStore.getState().uninstall("workflows"));
+    expect(screen.queryByRole("button", { name: "工作流" })).not.toBeInTheDocument();
+  });
+
+  it("点模块入口能切到对应页面（模块页不需要从插件卡绕）", () => {
+    useModuleStore.getState().install("infohub");
+    render(<NavRail />);
+    fireEvent.click(screen.getByRole("button", { name: "信息中枢" }));
+    expect(useUiStore.getState().page).toBe("infohub");
   });
 
   it("导航区不出现产品名文字（A 方案无品牌位）", () => {

@@ -64,3 +64,6 @@ module-catalog/
 # 模块引擎依赖下载与下载测试的临时产物
 .tmp-engine-wheels/
 .tmp-module-dl/
+
+# tsc -b 的增量构建信息（每次 typecheck 都会重写，不入库）
+*.tsbuildinfo

@@ -11,6 +11,10 @@ import {
   ModelIcon,
   PinIcon,
   BookIcon,
+  StaffIcon,
+  InfoHubIcon,
+  AutomationIcon,
+  WorkflowIcon,
 } from "./icons.js";
 import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -20,16 +24,17 @@ import { GlobalFocusRing } from "./a11y/GlobalFocusRing.js";
 import { hasOpenModal } from "./useModalA11y.js";
 import { NAV_HIDE_DELAY_MS, NAV_HOTZONE_PX, otherNavMode } from "../lib/navPrefs.js";
 import { useModuleStore } from "../lib/modules/store.js";
-import { filterNavOrder } from "../lib/modules/nav.js";
+import { filterNavOrder, withModuleNav } from "../lib/modules/nav.js";
 import { navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
 
 /**
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
  * 而 digit 固定绑定页本身——所以排序后 Alt+N 快捷键不变。
  *
- * **固定 8 项**：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置。
- * 幕僚 / 信息中枢 / 自动化是可安装的内置插件，入口在插件页的模块卡；
- * 模型路由已由 magpie 路由组取代（页面删除）。
+ * **默认可视 8 项**：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置。
+ * 另外还有 4 个**模块入口**（幕僚 / 信息中枢 / 自动化 / 工作流）：它们默认不出现，
+ * 装好且启用后才由 `withModuleNav()` 插到「插件」之后（d.119 用户口径：
+ * 装上就要在导航里看得到，不能只藏在插件页的模块卡里）。模块页不占数字快捷键。
  *
  * 数字键沿用既有绑定：1 主页、2 团队、5 记忆、6 设置、8 智能体、0 插件；
  * 3 / 4 原是技能区 / 接口区，合并后空着不用——不给现有页凭空换号。
@@ -42,6 +47,11 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
   { page: "chat", label: "智能体", icon: <AssistantIcon width={17} height={17} />, digit: "8" },
   // 插件（能力中枢）：插件包 + 可安装的内置插件 + 技能 / 工具 / MCP / 组件
   { page: "plugins", label: "插件", icon: <PackageIcon width={17} height={17} />, digit: "0" },
+  // 模块入口（装好才进轨，排在「插件」之后；无数字键）
+  { page: "staff", label: "幕僚", icon: <StaffIcon width={17} height={17} /> },
+  { page: "infohub", label: "信息中枢", icon: <InfoHubIcon width={17} height={17} /> },
+  { page: "automations", label: "自动化", icon: <AutomationIcon width={17} height={17} /> },
+  { page: "workflows", label: "工作流", icon: <WorkflowIcon width={17} height={17} /> },
   { page: "memory", label: "记忆", icon: <MemoryIcon width={17} height={17} />, digit: "5" },
   // 知识库：本地 vault（文件树/双链/标签/搜索/图谱），数据不出设备
   { page: "vault", label: "知识库", icon: <BookIcon width={17} height={17} /> },
@@ -108,11 +118,15 @@ export function NavRail({
   const rawNavOrder = normalizeNavOrder(useUiStore((s) => s.navOrder));
   const moduleEnabled = useModuleStore((s) => s.enabled);
   const moduleInstalled = useModuleStore((s) => s.installed);
-  // 模块页不在导航顺序里；这里过滤是为旧存储里残留的模块页兜底（未安装/停用即撤下）
-  const navOrder = filterNavOrder(rawNavOrder, {
-    installed: moduleInstalled,
-    enabled: moduleEnabled,
-  });
+  // 先按个性化顺序排好宿主页（旧存储里残留的模块页在这里被过滤），
+  // 再把「已装且启用」的模块入口插到「插件」之后（不写进个性化顺序，见 withModuleNav）。
+  const navOrder = withModuleNav(
+    filterNavOrder(rawNavOrder, {
+      installed: moduleInstalled,
+      enabled: moduleEnabled,
+    }),
+    { installed: moduleInstalled, enabled: moduleEnabled },
+  );
   const navMode = useUiStore((s) => s.navMode);
   const navOpen = useUiStore((s) => s.navOpen);
   const setNavMode = useUiStore((s) => s.setNavMode);
@@ -265,12 +279,12 @@ export function NavRail({
         </div>
       </div>
 
-      {/* 中组：8 个导航页，垂直居中（组内间距 8px；组间用一条细线分隔，见 lib/navGroups） */}
+      {/* 中组：导航页（宿主页 + 已装模块入口），垂直居中（组内间距 8px；组间用一条细线分隔，见 lib/navGroups） */}
       <div className="flex flex-1 flex-col items-center justify-center gap-2">
         {visibleItems.map((it, index) => {
           const active = page === it.page;
           const shortcut = it.digit ? `Alt${it.digit}` : "";
-          // 显示名固定在本文件（导航项不再包含模块页）
+          // 显示名固定在本文件（含模块入口，模块页也要能在这条轨上被点到）
           const label = it.label;
           // 按「工作台 / 能力 / 资料 / 系统」分组画分隔线。
           // 用可见相邻项算，所以不会出现空组或悬空线。

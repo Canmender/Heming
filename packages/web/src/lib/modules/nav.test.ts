@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { defaultModuleState, type ModuleState } from "./store.js";
-import { fallbackPage, filterNavOrder, filterPalettePages, isPageAvailable } from "./nav.js";
+import {
+  fallbackPage,
+  filterNavOrder,
+  filterPalettePages,
+  isPageAvailable,
+  moduleNavPages,
+  withModuleNav,
+} from "./nav.js";
 import { PALETTE_PAGES } from "../palette/pages.js";
 import { BUILTIN_MODULES, MODULE_IDS } from "./registry.js";
 import { DEFAULT_NAV_ORDER, type NavPage } from "../../store/ui.js";
@@ -104,5 +111,48 @@ describe("模块注册表与页面目录同源", () => {
       expect(DEFAULT_NAV_ORDER).not.toContain(mod.page);
       expect(PALETTE_PAGES.some((p) => p.page === mod.page)).toBe(false);
     }
+  });
+});
+
+describe("已装模块的导航入口（d.119）", () => {
+  it("未安装/停用的模块不给入口", () => {
+    expect(moduleNavPages(defaultModuleState())).toEqual([]);
+    expect(withModuleNav(DEFAULT_NAV_ORDER, defaultModuleState())).toEqual(DEFAULT_NAV_ORDER);
+    const off = on({ workflows: false });
+    expect(moduleNavPages(off)).not.toContain("workflows");
+    expect(withModuleNav(DEFAULT_NAV_ORDER, off)).not.toContain("workflows");
+  });
+
+  it("已装且启用的模块排在「插件」之后，顺序按注册表稳定", () => {
+    const state = on();
+    const order = withModuleNav(DEFAULT_NAV_ORDER, state);
+    expect(order.slice(3, 8)).toEqual(["plugins", "staff", "infohub", "automations", "workflows"]);
+    // 宿主页数量与相对顺序不变，模块入口不写进个性化顺序
+    expect(order.filter((p) => !moduleNavPages(state).includes(p))).toEqual(DEFAULT_NAV_ORDER);
+    expect(DEFAULT_NAV_ORDER).not.toContain("workflows");
+  });
+
+  it("只装一个模块时只多一项（不多塞未装的）", () => {
+    const state = defaultModuleState();
+    state.installed.workflows = true;
+    state.enabled.workflows = true;
+    expect(moduleNavPages(state)).toEqual(["workflows"]);
+    expect(withModuleNav(DEFAULT_NAV_ORDER, state)).toEqual([
+      "home",
+      "team",
+      "chat",
+      "plugins",
+      "workflows",
+      "memory",
+      "vault",
+      "model",
+      "settings",
+    ]);
+  });
+
+  it("幂等：顺序里已有模块页时不重复插", () => {
+    const state = on();
+    const once = withModuleNav(DEFAULT_NAV_ORDER, state);
+    expect(withModuleNav(once, state)).toEqual(once);
   });
 });
