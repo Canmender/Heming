@@ -1,5 +1,10 @@
 # 插件（能力包）编写与安装
 
+> **规范在哪**：契约（字段语义 / 权限强制点 / 生命周期 / 运行时 API / 兼容规则）以
+> [PLUGIN-STANDARD.md](PLUGIN-STANDARD.md) 为准；怎么写以 [PLUGIN-AUTHORING.md](PLUGIN-AUTHORING.md) 为准。
+> 本文是**实现说明**：宿主内部怎么装、怎么物化、边界与红线、分发链路。三者冲突时以
+> `packages/shared/src/plugin/manifest.ts` 的 `parsePluginManifestV5()` 为准。
+
 插件是**纯声明式能力包**：一个 `plugin.json` 声明「这个包带来哪些能力」，和鸣负责把它物化到现有系统里。插件不执行第三方代码，也不从网络下载可执行物——技能变成技能池里的技能，MCP 服务登记进接口区，命令出现在命令面板。
 
 > **唯一的例外是界面插件（§10，d.98）**：它带一个独立窗口的可执行渲染包，清单用 `schemaVersion: 4` + `distribution: "bundle"`，
@@ -19,12 +24,14 @@
 
 ```json
 {
-  "schemaVersion": 3,
+  "$schema": "../docs/plugin.schema.json",
+  "schemaVersion": 5,
   "id": "acme.report-kit",
   "name": "报告工具箱",
   "version": "1.0.0",
   "description": "周报与数据源",
   "author": "ACME",
+  "engines": { "heming": "d.117" },
   "contributions": {
     "skills": [
       {
@@ -128,12 +135,13 @@ web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 5,
   "id": "demo.report-kit",
   "name": "报告工具箱",
   "version": "1.0.0",
   "description": "示例插件：技能 + MCP + 命令",
   "author": "和鸣",
+  "engines": { "heming": "d.117" },
   "permissions": { "network": ["localhost:3999"], "tools": "read", "files": [] },
   "contributions": {
     "skills": [

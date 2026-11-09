@@ -1026,15 +1026,26 @@ describe("parsePluginManifest · v4 界面插件", () => {
   it("permissions 新字段只接受协议内的值", () => {
     expect(
       failure(bundle({ permissions: { network: [], tools: "none", files: [], events: ["evil"] } })),
-    ).toContain('permissions.events 目前只支持 "notify"');
+    ).toContain('permissions.events 只支持 "notify" / "lifecycle" / "theme" / "tray"');
     expect(
       failure(
         bundle({ permissions: { network: [], tools: "none", files: [], graphics: ["cuda"] } }),
       ),
-    ).toContain('permissions.graphics 只支持 "webgl" / "wasm"');
+    ).toContain('permissions.graphics 只支持 "webgl" / "webgl2" / "wasm"');
     expect(
       failure(bundle({ permissions: { network: [], tools: "none", files: [], eval: "yes" } })),
     ).toContain("permissions.eval 必须是布尔值");
+    // d.119：枚举补齐为宿主真实支持的全集后，之前被误拒的合法值应能通过
+    const full = bundle({
+      permissions: {
+        network: [],
+        tools: "none",
+        files: [],
+        events: ["notify", "lifecycle", "theme", "tray"],
+        graphics: ["webgl", "webgl2", "wasm"],
+      },
+    });
+    expect(() => parsePluginManifest(full)).not.toThrow();
   });
 });
 

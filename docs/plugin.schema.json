@@ -5,6 +5,10 @@
   "description": "只用于编辑器补全。权威校验走 parsePluginManifestV5（node scripts/plugin-lint.mjs 会做完整校验，包括跨字段规则）。",
   "type": "object",
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "编辑器补全用的 schema 路径：仓库内可写相对路径（如 ../../docs/plugin.schema.json），对外发布可写 https://heming.app/schemas/plugin.schema.json。只作提示，权威校验仍走 parsePluginManifestV5；解析器已知并忽略该字段，不会告警。"
+    },
     "schemaVersion": {
       "type": "number",
       "const": 5
@@ -508,11 +512,7 @@
                   "anchor": {
                     "type": "string",
                     "enum": [
-                      "bottom-right",
-                      "bottom-left",
-                      "top-right",
-                      "top-left",
-                      "center"
+                      "bottom-right"
                     ]
                   },
                   "margin": {
@@ -546,7 +546,9 @@
                         "toggle",
                         "clickThrough",
                         "resetPosition",
-                        "settings"
+                        "settings",
+                        "scaleUp",
+                        "scaleDown"
                       ]
                     }
                   }
@@ -695,10 +697,8 @@
     "id",
     "name",
     "version",
-    "description",
-    "author",
     "engines",
     "contributions"
   ],
-  "additionalProperties": false
+  "additionalProperties": true
 }

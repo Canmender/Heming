@@ -159,7 +159,15 @@ function isPlainObject(value) {
  * @param {unknown} raw 解析后的 plugin.json
  * @param {{}} [options] 预留（本轮无强制签名开关；信任门在主窗侧）
  */
+/**
+ * @param {object} raw 解析后的清单对象
+ * @param {{ dev?: boolean }} [options] `dev: true` 用于**打包/签名之前**的本地校验
+ *   （`scripts/plugin-lint.mjs --kind bundle` 走这条）：此时 `packageSha256` 尚未由
+ *   打包脚本写入，缺失不算错误；格式一旦给出仍然严格校验。
+ *   安装链路（`readPackage`）永远不传 dev，所以「能否安装」的判定不变。
+ */
 function validateBundleManifest(raw, options = {}) {
+  const dev = options.dev === true;
   const errors = [];
   if (!isPlainObject(raw)) return { ok: false, errors: ["plugin.json 必须是 JSON 对象"], manifest: null };
 
@@ -186,7 +194,11 @@ function validateBundleManifest(raw, options = {}) {
   const packageSha256 = raw.packageSha256;
   if (distribution === "bundle") {
     if (packageSha256 === undefined) {
-      errors.push("distribution: \"bundle\" 必须提供 packageSha256（files/** 内容摘要，用于让首方签名覆盖包内代码字节）");
+      // 打包前（dev 校验）这个字段由 pack-plugin 回写，缺失不是清单错误；
+      // 安装链路不传 dev，仍然强制要求。
+      if (!dev) {
+        errors.push("distribution: \"bundle\" 必须提供 packageSha256（files/** 内容摘要，用于让首方签名覆盖包内代码字节）");
+      }
     } else if (typeof packageSha256 !== "string" || !/^[0-9a-f]{64}$/.test(packageSha256)) {
       errors.push("packageSha256 必须是 64 位小写 hex（files/** 内容摘要）");
     }

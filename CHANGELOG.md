@@ -2,6 +2,72 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.120.3.47.0（2026-11-09）— 插件体系落标准：一份契约 + 一份编写标准 + 一键脚手架/校验，清单与运行时对齐
+
+用户要求：「完善好插件功能，确认一个标准插件接口和编写插件的标准，方便做插件」。
+本轮把散在四份文档与若干脚本里的插件规则收成**一份可执行的标准**，并把作者最缺的工具补齐。
+
+### 标准接口（规范）
+
+- 新增 `docs/PLUGIN-STANDARD.md`（normative，519 行）：接口版本与兼容矩阵、清单字段全表、
+  贡献点准入矩阵与物化语义、权限声明与**执行期强制点表**、安装事务/更新/启停/卸载生命周期、
+  界面插件运行时 API（27 个方法）、插件数据目录、校验与诊断口径、分发与不可变版本、评审清单。
+- `docs/PLUGIN-AUTHORING.md` 重写为**编写标准**：三条命令起步、五个字段怎么定、
+  技能/MCP/命令/工具束/bundle 菜谱、权限最小化、校验与调试、发布顺序、
+  **常见错误→修法表**、提交前检查清单、反模式。
+- `docs/PLUGINS.md` 定位改为「实现说明」并与标准互链；README / docs/INDEX 补入口；
+  修掉两处仍写着 `schemaVersion: 3` 的过期示例（补 `engines` 与 `$schema`）。
+
+### 工具链（方便做插件）
+
+- 新增 `scripts/new-plugin.mjs` 脚手架：`pnpm plugin:new acme.hello [--name …] [--kind manifest|bundle]`，
+  从 `plugins/_template/` 生成骨架（v5 声明式 / v4 bundle），自动填 `$schema`（按输出目录算仓库内相对路径）
+  与 `engines.heming`（当前版本前缀），生成后立刻跑权威校验。
+- 新增模板目录 `plugins/_template/{manifest,bundle}`；bundle 骨架按「包根只能 `plugin.json` + `files/**`」
+  把 README/脚本放进 `files/`（CSP `script-src` 只放 `'self'`，脚本必须外置）。
+- `scripts/plugin-lint.mjs`：位置参数支持**目录**；`--skip <名字[,名字]>`（批量时跳过 `examples,_template`）；
+  `--strict`（warning 也算失败）；`--json` 带 `strict`/`skipped`；**v4 bundle 走安装口径**——
+  用 `createRequire` 加载主进程 `plugin-package.js` 的 `validateBundleManifest(raw, { dev: true })`
+  （打包前允许缺 `packageSha256`，格式给了仍严格校验），并校 entry 存在性与摘要一致。
+- `scripts/plugin-schema.mjs`：生成物补顶层 `$schema`；按解析器真实口径修正 `required`
+  （`description`/`author` 可省略）与 `additionalProperties: true`（顶层未知字段是「剥掉+警告」而非拒绝）。
+- 根 `package.json` 新增 `plugin:new` / `plugin:lint` / `plugin:schema` / `plugin:check` /
+  `plugin:pack` / `plugin:publish`。
+
+### 标准类型与一致性
+
+- 新增 `packages/shared/src/plugin/widget.ts`：`HemingWidgetApi`（27 个方法，与 preload 一一对应）+
+  `WIDGET_API_METHODS` + `WidgetState` / `WidgetHostInfo` / `WidgetChatConfig` / `WidgetEvent` /
+  `WidgetLifecycleEvent` / `WidgetSettings` / `WidgetPage` 等类型（无运行时代码）。
+- 新增 `widget.test.ts`：剥注释后结构化解析 `widget-preload.js` 的 `exposeInMainWorld("__heming_widget")`，
+  与 `WIDGET_API_METHODS` 集合严格比对（preload 多/少一个方法即红），并钉住全局名与无重复方法名。
+
+### 清单与运行时对齐（修真实不一致）
+
+- `tray.items` 补上运行时就支持的 `scaleUp` / `scaleDown`（此前作者写得出、清单却拒收）。
+- `position.anchor` 收紧为 `bottom-right`（宿主只实现这一种）：写别的值现在**明确报错**，不再静默当右下。
+- `meta.detail` 增加路径形态校验：包内 `.md` 相对路径不得含 `..` / 绝对路径（内联文本不受影响）。
+- web 侧 v4 解析的 `permissions.events` / `graphics` 枚举补齐为宿主真实全集
+  （notify/lifecycle/theme/tray、webgl/webgl2/wasm），此前合法 bundle 会被误拒。
+- `plugin-package.js` 的 `validateBundleManifest` 增加 `{ dev: true }` 模式（打包前缺 `packageSha256` 不算错），
+  安装链路不传 dev、判定不变；新增 2 条用例。
+
+### 验证
+
+- shared：8 文件 / 93 例全绿（新增 `$schema` 回归、widget 一致性 4 例、清单对齐 6 例）；
+  `pnpm plugin:check` 退出 0（批量 lint 跳过 `_template`/`examples`，schema 已最新）。
+- 实跑脚手架：`plugin:new acme.demo`（声明式）生成即 lint 通过；`--kind bundle` 生成 v4 骨架，
+  lint 报「bundle 校验通过（安装口径，打包前模式）」；用 dev 密钥走 `lint → sign → pack`，
+  `pack-plugin` 输出 `readPackage ✓（4 个文件，entry=files/index.html）`。
+- web / desktop 全量门禁由本轮打包脚本（`release.mjs --desktop`）复跑，结果见证据清单与 HANDOFF §2。
+
+### 边界（本轮没做）
+
+- 第三方仍**不能**发布界面插件（签名红线不变）；bundle 清单仍是 v4，不与 v5 合并。
+- `permissions.files` 仍只校验与展示（未实现文件根）；`graphics` 仍是渲染类声明（影响网关放行与 CSP），
+  不是沙箱能力。
+- `openPage` 白名单目前存在于三处（shared 类型 / 主进程 / preload），本轮未合并为单一真源。
+
 ## d.119.3.47.0（2026-11-09）— 导航顺序收口：模块入口追加在 8 项之后，不插在中间
 
 用户 2026-11-09 明确口径：左侧导航从上到下固定是

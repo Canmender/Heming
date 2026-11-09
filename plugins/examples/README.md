@@ -16,6 +16,9 @@ node scripts/plugin-lint.mjs --dir plugins/examples
 node scripts/plugin-lint.mjs plugins/examples/demo-minimal/plugin.json
 ```
 
-v1–v4 旧包仍可安装，但本脚本只做 v5 权威校验；旧包请用应用内的安装预览验证。
+v1–v4 旧包仍可安装，但本脚本只做 v5 权威校验（v4 的 `distribution: "bundle"` 除外，走安装口径）；旧包请用应用内的安装预览验证。
 `scripts/publish-plugin.mjs` 发布的是 `plugins/` 下真实插件包（如 `infohub-collector/`），
-`examples/` 不参与发布。
+`examples/` 不参与发布，`pnpm plugin:lint` 的批量校验也默认跳过它（`--skip examples,_template`）。
+
+> 约定：`plugins/` 下**下划线开头**的目录（如 `plugins/_template/`）是模板，不参与批量校验；
+> 需要显式校验时直接传它的 `plugin.json` 或目录路径。

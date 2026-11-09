@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 4,
+  "id": "{{id}}",
+  "name": "{{name}}",
+  "version": "0.1.0",
+  "description": "{{description}}",
+  "author": "{{author}}",
+  "distribution": "bundle",
+  "permissions": {
+    "network": [],
+    "tools": "none",
+    "files": [],
+    "events": [],
+    "graphics": [],
+    "eval": false,
+    "chat": false
+  },
+  "contributions": {
+    "desktopWidgets": [
+      {
+        "id": "{{widgetId}}",
+        "name": "{{widgetName}}",
+        "entry": "files/index.html",
+        "width": 360,
+        "height": 240,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
+      }
+    ]
+  }
+}

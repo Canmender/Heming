@@ -161,6 +161,16 @@ describe("parsePluginManifestV5", () => {
     ).toThrow(/permissions.*未知字段/);
   });
 
+  it("顶层 $schema 是已知字段：解析通过且不产生「未知字段」warning", () => {
+    const { manifest, warnings } = parsePluginManifestV5(
+      baseManifest({ $schema: "../../docs/plugin.schema.json" }),
+    );
+    expect(warnings).toEqual([]);
+    expect(warnings.join("\n")).not.toContain("未知");
+    // 只作编辑器补全提示，不进归一化后的清单
+    expect("$schema" in (manifest as unknown as Record<string, unknown>)).toBe(false);
+  });
+
   it("重名与重复工具会被点名；命令指向不存在的技能被拒", () => {
     const dupSkills = baseManifest({
       contributions: {

@@ -221,6 +221,25 @@ test("清单守卫：schemaVersion 必须 4、distribution 必须 bundle、不�
   }
 });
 
+test("清单守卫：dev 模式放行「尚未打包」的 packageSha256，安装口径仍强制", () => {
+  // 作者在打包/签名之前用 plugin-lint 校验：此刻 packageSha256 还没由 pack-plugin 写入。
+  const unpacked = baseManifest({ packageSha256: undefined });
+  assert.equal(validateBundleManifest(unpacked).ok, false);
+  assert.match(validateBundleManifest(unpacked).errors.join("；"), /必须提供 packageSha256/);
+
+  const devOk = validateBundleManifest(unpacked, { dev: true });
+  assert.equal(devOk.ok, true);
+  assert.equal(devOk.errors.length, 0);
+
+  // 但格式一旦给出就必须合法：dev 模式不放宽校验本身
+  const badFormat = baseManifest({ packageSha256: "ABC" });
+  assert.equal(validateBundleManifest(badFormat, { dev: true }).ok, false);
+  assert.match(validateBundleManifest(badFormat, { dev: true }).errors.join("；"), /64 位小写 hex/);
+
+  // 非 bundle 声明不受 dev 影响
+  assert.equal(validateBundleManifest(baseManifest({ schemaVersion: 3 }), { dev: true }).ok, false);
+});
+
 test("清单守卫：permissions 逐项受控（events/graphics/eval/network）", () => {
   const ok = validateBundleManifest(baseManifest());
   assert.deepEqual(ok.permissions.events, ["notify"]);

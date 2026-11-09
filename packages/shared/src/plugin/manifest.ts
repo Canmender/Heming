@@ -244,7 +244,9 @@ const McpServerSchema = z
  * 命令 target（v5 起扩展两类，见规格附录 A）：
  * - `settings`：打开设置区某张卡（`card` 是 `SETTINGS_CARDS` 的 id，web 侧校验存在性）；
  * - `unit`：打开某个能力单元的详情（`unitId` 与单元 id 同规则）。
- * `bundle` 包仍只允许 `page` / `plugin`（由主进程安装器二次收紧）。
+ * `bundle` 包允许 `page` / `plugin` / `settings` / `unit`（d.109 起与声明式对齐；
+ * 主进程安装器 `plugin-package.js` 的 `BUNDLE_COMMAND_TARGET_KINDS` 是权威收紧点），
+ * 但**不允许 `skill`**——bundle 不贡献技能，指向技能的目标没有可解析对象。
  */
 const CommandTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("page"), page: z.string().min(1).max(64) }),
@@ -305,7 +307,12 @@ const DesktopWidgetSchema = z.strictObject({
   clickThrough: z.enum(["none", "auto"]).optional(),
   position: z
     .strictObject({
-      anchor: z.enum(["bottom-right", "bottom-left", "top-right", "top-left", "center"]).optional(),
+      /**
+       * 落位锚点。当前宿主实现只支持右下（`plugin-window.js` 的 `normalizeWidgetSpec`），
+       * 清单层就按**实现能力**收紧（d.119）：写别的值不会被静默忽略成右下，
+       * 而是明确报错，避免作者以为自己的锚点生效了。
+       */
+      anchor: z.enum(["bottom-right"], { error: 'position.anchor 目前只支持 "bottom-right"' }).optional(),
       margin: z.number().int().min(0).max(200).optional(),
       remember: z.boolean().optional(),
     })
@@ -314,7 +321,14 @@ const DesktopWidgetSchema = z.strictObject({
   tray: z
     .strictObject({
       icon: z.string().max(200),
-      items: z.array(z.enum(["toggle", "clickThrough", "resetPosition", "settings"])).max(8).optional(),
+      /**
+       * 托盘菜单项。全集以宿主实现为准（`plugin-window.js` 的 `TRAY_ITEMS`，6 项）：
+       * d.119 补上运行时就有的 `scaleUp` / `scaleDown`，否则作者写得出、清单却拒收。
+       */
+      items: z
+        .array(z.enum(["toggle", "clickThrough", "resetPosition", "settings", "scaleUp", "scaleDown"]))
+        .max(8)
+        .optional(),
     })
     .optional(),
   settings: z
@@ -358,6 +372,17 @@ const MetaSchema = z.strictObject({
   detail: z
     .string()
     .max(PLUGIN_LIMITS.detailInlineChars, { error: "内联详情最多 16384 字（或改用包内 .md 路径）" })
+    .refine(
+      (value) => {
+        // 两种形态：内联 Markdown 文本，或包内 `.md` 相对路径。
+        // 路径形态必须是 DETAIL_PATH_RE 且不含 `..`（否则市场读详情时会穿越包目录）。
+        const text = value.trim();
+        const looksLikePath = !text.includes("\n") && /\.md$/i.test(text);
+        if (!looksLikePath) return true;
+        return DETAIL_PATH_RE.test(text) && !text.includes("..");
+      },
+      { error: "meta.detail 作为包内路径时，必须是不含 .. 的相对 .md 路径（或写成内联文本）" },
+    )
     .optional(),
 });
 

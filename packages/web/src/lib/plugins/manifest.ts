@@ -406,12 +406,17 @@ const PermissionsSchema = z.object(
      * 归一化后未声明即为空数组（不接收任何事件）。
      */
     events: z
-      .array(z.enum(["notify"], { error: 'permissions.events 目前只支持 "notify"' }), typeParams("事件列表必须是数组"))
+      .array(
+        z.enum(["notify", "lifecycle", "theme", "tray"], {
+          error: 'permissions.events 只支持 "notify" / "lifecycle" / "theme" / "tray"',
+        }),
+        typeParams("事件列表必须是数组"),
+      )
       .max(8, "事件最多 8 个")
       .optional(),
-    /** d.98 新增（v4）：渲染能力声明（决定 widget 的 CSP，如 wasm → 'wasm-unsafe-eval'）。 */
+    /** d.98 新增（v4）：渲染能力声明（决定 widget 的 CSP / 网关放行，如 wasm → 'wasm-unsafe-eval'）。 */
     graphics: z
-      .array(z.enum(["webgl", "wasm"], { error: 'permissions.graphics 只支持 "webgl" / "wasm"' }), typeParams("渲染能力列表必须是数组"))
+      .array(z.enum(["webgl", "webgl2", "wasm"], { error: 'permissions.graphics 只支持 "webgl" / "webgl2" / "wasm"' }), typeParams("渲染能力列表必须是数组"))
       .max(8, "渲染能力最多 8 个")
       .optional(),
     /** d.98 新增（v4）：是否允许 `unsafe-eval`（pixi6 需要 true；只对声明了的第一方 widget 放开）。 */

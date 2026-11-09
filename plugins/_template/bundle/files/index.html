@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{name}}</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        font: 14px/1.6 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      main {
+        box-sizing: border-box;
+        height: 100%;
+        padding: 16px;
+        display: grid;
+        align-content: start;
+        gap: 12px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 16px;
+      }
+      p {
+        margin: 0;
+        opacity: 0.8;
+      }
+      button {
+        justify-self: start;
+        font: inherit;
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>{{name}}</h1>
+      <p id="status">正在读取宿主信息…</p>
+      <button id="log" type="button">写一条日志</button>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

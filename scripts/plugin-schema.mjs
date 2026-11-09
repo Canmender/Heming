@@ -27,6 +27,21 @@ if (!existsSync(distEntry)) {
 
 const { pluginManifestV5JsonSchema } = await import(`file://${distEntry.replace(/\\/g, "/")}`);
 const schema = pluginManifestV5JsonSchema();
+/**
+ * 顶层 `$schema` 是「已知但忽略」的编辑器补全字段（`KNOWN_TOP_LEVEL` 里已白名单），
+ * 解析器不会为它产生「未知字段」warning。这里把它补进 schema 的 properties，
+ * 否则编辑器按 JSON Schema 校验时会把它当未知字段（`additionalProperties: false`）。
+ */
+const schemaProperties =
+  schema.properties && typeof schema.properties === "object" ? schema.properties : {};
+/**
+ * `required` 修正：zod 用 `io: "output"` 生成的 `required` 会把**带缺省值**的字段
+ * （`description` / `author`）也算成必填，但解析器接受省略（缺省 `""`）。
+ * 编辑器据此标红一个合法清单，比没有补全更糟，所以这里按**解析器的真实口径**剔除。
+ */
+const outputRequired = Array.isArray(schema.required) ? schema.required : [];
+const OPTIONAL_WITH_DEFAULT = new Set(["description", "author"]);
+const required = outputRequired.filter((key) => !OPTIONAL_WITH_DEFAULT.has(key));
 const payload = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://heming.app/schemas/plugin.schema.json",
@@ -34,6 +49,18 @@ const payload = {
   description:
     "只用于编辑器补全。权威校验走 parsePluginManifestV5（node scripts/plugin-lint.mjs 会做完整校验，包括跨字段规则）。",
   ...schema,
+  // 顶层未知字段的**权威口径是「剥掉并给 warning」，不阻断安装**（见 manifest.ts 分层严格度）；
+  // schema 若写死 additionalProperties:false，编辑器会对「能装但被忽略」的字段标红，与真实行为冲突。
+  additionalProperties: true,
+  required,
+  properties: {
+    $schema: {
+      type: "string",
+      description:
+        "编辑器补全用的 schema 路径：仓库内可写相对路径（如 ../../docs/plugin.schema.json），对外发布可写 https://heming.app/schemas/plugin.schema.json。只作提示，权威校验仍走 parsePluginManifestV5；解析器已知并忽略该字段，不会告警。",
+    },
+    ...schemaProperties,
+  },
 };
 const text = `${JSON.stringify(payload, null, 2)}\n`;
 

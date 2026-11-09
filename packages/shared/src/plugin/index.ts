@@ -12,3 +12,4 @@ export * from "./version.js";
 export * from "./manifest.js";
 export * from "./unit.js";
 export * from "./market.js";
+export * from "./widget.js";
