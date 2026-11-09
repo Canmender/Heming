@@ -5,7 +5,7 @@ import { useAuthStore } from "../store/auth.js";
 import { useThemeStore } from "../store/theme.js";
 import { DEFAULT_NAV_ORDER, useUiStore } from "../store/ui.js";
 import { setToken } from "../lib/api.js";
-import { CHANGELOG } from "../generated/changelog.js";
+import { CHANGELOG, stripInline } from "../lib/changelog.js";
 import { RELEASE_NOTES } from "../generated/releaseNotes.js";
 import { getThemeMode, setThemeMode } from "../lib/theme.js";
 import { resetSecureStorageState, secureGetItem, secureSetItem } from "../lib/secureStorage.js";
@@ -441,9 +441,11 @@ describe("设置区 · 更新日志卡", () => {
     const btn = screen.getByRole("button", { name: `更新日志 ${CHANGELOG[0].version}` });
     // 当前版本默认展开
     expect(btn).toHaveAttribute("aria-expanded", "true");
-    // 用户版说明的要点可见；工程细节（如测试统计/文件名）不出现
+    // 用户版说明的要点可见；工程细节（如测试统计/文件名）不出现。
+    // 断言按**渲染口径**比对（`stripInline` 会把 `code`/加粗去掉）：用户版说明里
+    // 可以出现 `docs/PLUGIN-STANDARD.md` 这类行内代码，直接拿原始 bullet 比会误报。
     const card = screen.getByRole("region", { name: "更新日志" });
-    expect(card).toHaveTextContent(latestNotes!.bullets[0]);
+    expect(card).toHaveTextContent(stripInline(latestNotes!.bullets[0]));
     expect(card).not.toHaveTextContent(/web \d+ 文件/);
 
     fireEvent.click(btn);
