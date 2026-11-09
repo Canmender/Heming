@@ -331,7 +331,8 @@ function appendCspReport(violation) {
     }
     const line =
       `[${new Date().toISOString()}] directive=${violation.directive} ` +
-      `blocked=${violation.blockedUri} source=${violation.source || "inline"}:${violation.line}\n`;
+      `blocked=${violation.blockedUri} source=${violation.source || "inline"}:${violation.line}
+`;
     fs.appendFileSync(file, line, "utf8");
   } catch {
     /* 日志失败绝不影响界面：CSP 本身仍生效 */
@@ -513,6 +514,8 @@ function openPageInMainWindow(payload) {
   const main = mainWindow;
   if (!main || main.isDestroyed()) return;
   if (!payload || typeof payload !== "object") return;
+  // 白名单真源在 shared（WIDGET_ALLOWED_PAGES）；这里是第二份运行期副本，
+  // 由 widget-pages.test.js 与 plugin-window.js 一起钉住，三处必须同步。
   const page = ["settings", "team", "tasks", "staff", "infohub"].includes(payload.page) ? payload.page : null;
   if (!page) {
     console.log("[widgets] 丢弃未知页面跳转:", JSON.stringify(payload));

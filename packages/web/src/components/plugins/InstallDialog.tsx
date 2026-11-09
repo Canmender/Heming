@@ -10,7 +10,7 @@ import {
   type SignatureCheck,
 } from "../../lib/plugins/index.js";
 import { useModalA11y } from "../useModalA11y.js";
-import { XIcon } from "../icons.js";
+import { PackageIcon, ShieldIcon, XIcon } from "../icons.js";
 import type { PluginCatalogEntry } from "@heming/shared";
 import { PluginPermissionList } from "./PluginPermissionList.js";
 import { OnlineCatalogPanel } from "./OnlineCatalogPanel.js";
@@ -88,6 +88,19 @@ export function InstallDialog({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+  /** 拖入 plugin.json：与选文件走同一个落点（填进 textarea，再走同一套预览）。 */
+  const [dragging, setDragging] = useState(false);
+  const onDropFile = async (event: React.DragEvent<HTMLDivElement>): Promise<void> => {
+    event.preventDefault();
+    setDragging(false);
+    const file = event.dataTransfer.files?.[0];
+    if (!file) return;
+    try {
+      onTextChange(await file.text());
+    } catch {
+      // 读取失败没有独立错误通道：保持原清单不动，预览错误仍由上层给出
+    }
+  };
 
   /**
    * 云端插件目录（d.86）：首次展开才联网（不在挂载时请求），失败只影响本面板，
@@ -248,56 +261,80 @@ export function InstallDialog({
         role="dialog"
         aria-modal="true"
         aria-label="安装插件"
-        className="flex max-h-[88vh] w-[min(620px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-white shadow-card"
+        className="plugin-dialog-pop flex max-h-[88vh] w-[min(660px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-[var(--surface)] shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
-          <span className="ui-section-title">安装 / 更新插件</span>
+        <div className="flex items-start gap-2.5 border-b border-line-soft px-4 py-3">
+          <span className="plugin-icon-tile h-9 w-9" aria-hidden="true">
+            <PackageIcon width={17} height={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <span className="ui-section-title">安装 / 更新插件</span>
+            <p className="mt-0.5 ui-caption">粘贴、拖入或从云端载入清单；先校验，再安装。</p>
+          </div>
           <button
             type="button"
             aria-label="关闭安装面板"
             onClick={onClose}
-            className="rounded-sm p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
+            className="rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             <XIcon width={14} height={14} aria-hidden="true" />
           </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          <label className="block ui-caption">
-            插件清单 JSON
-            <textarea
-              ref={textareaRef}
-              aria-label="插件清单 JSON"
-              value={text}
-              onChange={(e) => onTextChange(e.target.value)}
-              placeholder={`{\n  "schemaVersion": 3,\n  "id": "acme.finance",\n  "name": "财务助手包",\n  "version": "1.0.0",\n  "permissions": { "network": [], "tools": "read", "files": [] },\n  "contributions": {\n    "skills": [ ... ],\n    "mcpServers": [ ... ],\n    "commands": [ ... ]\n  }\n}`}
-              className="mt-1 block min-h-[160px] w-full resize-y rounded-lg border border-line-strong px-3 py-2 font-mono text-[11px] outline-hidden focus:border-ink"
-            />
-          </label>
+          <div
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(event) => void onDropFile(event)}
+            className={`mt-3 rounded-xl border border-dashed p-3 transition-colors ${
+              dragging
+                ? "border-ink bg-[var(--subtle-2)]"
+                : "border-line-strong bg-[var(--subtle)]"
+            }`}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="ui-micro">插件清单</span>
+              <span className="ui-micro text-muted">· 拖入 plugin.json 也可以</span>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <input
+                  id="plugin-file-input"
+                  type="file"
+                  accept=".json,application/json"
+                  aria-label="选择插件文件"
+                  onChange={onFile}
+                  className="hidden"
+                />
+                <label htmlFor="plugin-file-input" className={`cursor-pointer ${BTN_GHOST_SM}`}>
+                  选择 plugin.json 文件
+                </label>
+                <button
+                  type="button"
+                  aria-label={catalogOpen ? "收起云端插件目录" : "从云端浏览插件"}
+                  aria-expanded={catalogOpen}
+                  onClick={toggleCatalog}
+                  className={BTN_GHOST_SM}
+                >
+                  {catalogOpen ? "收起云端目录" : "从云端浏览"}
+                </button>
+              </div>
+            </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <input
-              id="plugin-file-input"
-              type="file"
-              accept=".json,application/json"
-              aria-label="选择插件文件"
-              onChange={onFile}
-              className="hidden"
-            />
-            <label htmlFor="plugin-file-input" className={`cursor-pointer ${BTN_GHOST_SM}`}>
-              选择 plugin.json 文件
+            <label className="mt-2 block ui-caption">
+              插件清单 JSON
+              <textarea
+                ref={textareaRef}
+                aria-label="插件清单 JSON"
+                value={text}
+                onChange={(e) => onTextChange(e.target.value)}
+                placeholder={`{\n  "schemaVersion": 3,\n  "id": "acme.finance",\n  "name": "财务助手包",\n  "version": "1.0.0",\n  "permissions": { "network": [], "tools": "read", "files": [] },\n  "contributions": {\n    "skills": [ ... ],\n    "mcpServers": [ ... ],\n    "commands": [ ... ]\n  }\n}`}
+                className="mt-1 block min-h-[150px] w-full resize-y rounded-lg border border-line-strong bg-[var(--surface)] px-3 py-2 font-mono text-[11px] text-ink outline-hidden focus:border-ink"
+              />
             </label>
-            <button
-              type="button"
-              aria-label={catalogOpen ? "收起云端插件目录" : "从云端浏览插件"}
-              aria-expanded={catalogOpen}
-              onClick={toggleCatalog}
-              className={BTN_GHOST_SM}
-            >
-              {catalogOpen ? "收起云端目录" : "从云端浏览"}
-            </button>
-            <span className={HINT}>只读取本地 JSON；不会上传，也不会执行其中的内容。</span>
+            <p className="mt-1 ui-caption">只读取本地 JSON；不会上传，也不会执行其中的内容。</p>
           </div>
 
           {catalogOpen && (
@@ -320,82 +357,104 @@ export function InstallDialog({
           )}
 
           {preview && (
-            <div className="mt-3 rounded-lg border border-line bg-[#fafafa] p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="ui-body-sm font-bold">{preview.manifest.name}</span>
-                <span className={CHIP}>v{preview.manifest.version}</span>
-                <span className={CHIP}>{updating ? "将覆盖更新" : "新插件"}</span>
-                <span className={CHIP}>schemaVersion {preview.manifest.schemaVersion}</span>
-              </div>
-              <div className={`mt-0.5 ${HINT}`}>{preview.manifest.id}</div>
-              <p className="mt-1 break-words ui-body-sm text-[#555]">
-                {preview.manifest.description || "暂无描述"}
-              </p>
-
-              {/* 信任行（d.66）：内容指纹 + 首装/与上次相同/不同；不是签名，只发现悄悄改动 */}
-              <div className="mt-1 flex flex-wrap items-center gap-2 ui-caption">
+            <div className="plugin-rise mt-3 overflow-hidden rounded-xl border border-line bg-[var(--surface)]">
+              <div className="flex flex-wrap items-start gap-3 border-b border-line-soft bg-[var(--subtle-2)] px-3 py-3">
                 <span
-                  className="font-mono"
-                  title={`内容指纹：用来发现内容是否被改过，不代表已审核来源：${preview.trust.fingerprint}`}
+                  className="plugin-icon-tile h-9 w-9 text-[13px] font-bold"
+                  aria-hidden="true"
                 >
-                  内容指纹 {shortFingerprint(preview.trust.fingerprint)}
+                  {Array.from(preview.manifest.name)[0]?.toUpperCase() ?? "?"}
                 </span>
-                <span className={CHIP}>{trustStatusText(preview.trust)}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="ui-body-sm font-bold">{preview.manifest.name}</span>
+                    <span className={CHIP}>v{preview.manifest.version}</span>
+                    <span className={CHIP}>{updating ? "将覆盖更新" : "新插件"}</span>
+                    <span className={CHIP}>schemaVersion {preview.manifest.schemaVersion}</span>
+                  </div>
+                  <div className={`mt-0.5 ${HINT}`}>{preview.manifest.id}</div>
+                </div>
               </div>
-              {authorChangedTip && (
-                <p role="alert" className={`mt-1 ${ERROR_TEXT}`}>
-                  {authorChangedTip}
-                </p>
-              )}
-              {preview.trust.sameVersionContentChanged && (
-                <p role="alert" className={`mt-1 ${ERROR_TEXT}`}>
-                  版本未变，但内容有变化
-                </p>
-              )}
 
-              {/* 签名行（d.67）：异步 WebCrypto 验签；未验完不许装，失败绝不绕过 */}
-              <div className="mt-1 flex flex-wrap items-center gap-2 ui-caption">
-                <span>
-                  签名：
-                  <span role="status">
-                    {verifying ? "校验中…" : signatureStatusLabel(signatureCheck?.status ?? "unsupported")}
-                  </span>
-                </span>
-                {manifest?.publisher && (
-                  <span
-                    className="font-mono"
-                    title={publisherFingerprint ? `发布者公钥指纹：${publisherFingerprint}` : undefined}
-                  >
-                    发布者：{manifest.publisher.id}
-                    {publisherFingerprint ? ` · ${shortFingerprint(publisherFingerprint)}` : " · 指纹不可用"}
-                  </span>
-                )}
-              </div>
-              {signatureCheck?.reason && signatureCheck.status !== "valid" && (
-                <p className={invalidSignature ? `mt-1 ${ERROR_TEXT}` : `mt-1 ${HINT}`}>
-                  {signatureCheck.reason}
+              <div className="px-3 py-3">
+                <p className="break-words ui-body-sm text-muted">
+                  {preview.manifest.description || "暂无描述"}
                 </p>
-              )}
-              {invalidSignature && (
-                <p role="alert" className={`mt-1 ${ERROR_TEXT}`}>
-                  签名与清单内容不匹配，已拒绝安装。
-                </p>
-              )}
-              {needsKeyAck && (
-                <p role="alert" className={`mt-1 ${ERROR_TEXT}`}>
-                  发布者公钥已变更：核对指纹后勾选下方「我已核对发布者公钥变更」才能继续。
-                </p>
-              )}
 
-              {/* 贡献计数：与插件卡同一口径 */}
-              <p className={`mt-1 ${HINT}`}>
-                贡献：{contributionText(manifestContributionCounts(preview.manifest))}
-              </p>
+                {/* 校验摘要：内容指纹 + 签名 + 发布者；只展示结论，不在此处二次判定 */}
+                <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2">
+                  <div className="flex items-start gap-2">
+                    <span className="mt-0.5 shrink-0 text-muted" aria-hidden="true">
+                      <ShieldIcon width={13} height={13} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {/* 信任行（d.66）：内容指纹 + 首装/与上次相同/不同；不是签名，只发现悄悄改动 */}
+                      <div className="flex flex-wrap items-center gap-2 ui-caption">
+                        <span
+                          className="font-mono"
+                          title={`内容指纹：用来发现内容是否被改过，不代表已审核来源：${preview.trust.fingerprint}`}
+                        >
+                          内容指纹 {shortFingerprint(preview.trust.fingerprint)}
+                        </span>
+                        <span className={CHIP}>{trustStatusText(preview.trust)}</span>
+                      </div>
+                      {authorChangedTip && (
+                        <p role="alert" className={`mt-1 ${ERROR_TEXT}`}>
+                          {authorChangedTip}
+                        </p>
+                      )}
+                      {preview.trust.sameVersionContentChanged && (
+                        <p role="alert" className={`mt-1 ${ERROR_TEXT}`}>
+                          版本未变，但内容有变化
+                        </p>
+                      )}
 
-              <PluginPermissionList
-                view={permissionViewOf(preview.manifest)}
-                schemaVersion={preview.manifest.schemaVersion}
-              />
+                      {/* 签名行（d.67）：异步 WebCrypto 验签；未验完不许装，失败绝不绕过 */}
+                      <div className="mt-1 flex flex-wrap items-center gap-2 ui-caption">
+                        <span>
+                          签名：
+                          <span role="status">
+                            {verifying ? "校验中…" : signatureStatusLabel(signatureCheck?.status ?? "unsupported")}
+                          </span>
+                        </span>
+                        {manifest?.publisher && (
+                          <span
+                            className="font-mono"
+                            title={publisherFingerprint ? `发布者公钥指纹：${publisherFingerprint}` : undefined}
+                          >
+                            发布者：{manifest.publisher.id}
+                            {publisherFingerprint ? ` · ${shortFingerprint(publisherFingerprint)}` : " · 指纹不可用"}
+                          </span>
+                        )}
+                      </div>
+                      {signatureCheck?.reason && signatureCheck.status !== "valid" && (
+                        <p className={invalidSignature ? `mt-1 ${ERROR_TEXT}` : `mt-1 ${HINT}`}>
+                          {signatureCheck.reason}
+                        </p>
+                      )}
+                      {invalidSignature && (
+                        <p role="alert" className={`mt-1 ${ERROR_TEXT}`}>
+                          签名与清单内容不匹配，已拒绝安装。
+                        </p>
+                      )}
+                      {needsKeyAck && (
+                        <p role="alert" className={`mt-1 ${ERROR_TEXT}`}>
+                          发布者公钥已变更：核对指纹后勾选下方「我已核对发布者公钥变更」才能继续。
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 贡献计数：与插件卡同一口径 */}
+                  <p className={`mt-2 border-t border-line-soft pt-2 ${HINT}`}>
+                    贡献：{contributionText(manifestContributionCounts(preview.manifest))}
+                  </p>
+                </div>
+
+                <PluginPermissionList
+                  view={permissionViewOf(preview.manifest)}
+                  schemaVersion={preview.manifest.schemaVersion}
+                />
 
               {updating ? (
                 <div className="mt-2 space-y-2">
@@ -455,7 +514,7 @@ export function InstallDialog({
               )}
 
               {needsTrustConfirm && (
-                <div className="mt-3 rounded-lg border border-[#f3d2ce] bg-[#fffafa] p-2.5">
+                <div className="mt-3 rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] p-2.5">
                   <label className="flex items-start gap-2 ui-body-sm">
                     <input
                       type="checkbox"
@@ -479,7 +538,7 @@ export function InstallDialog({
               )}
 
               {(needsPublisherTrust || needsKeyAck) && (
-                <div className="mt-3 rounded-lg border border-[#f3d2ce] bg-[#fffafa] p-2.5">
+                <div className="mt-3 rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] p-2.5">
                   {needsPublisherTrust && manifest?.publisher && (
                     <label className="flex items-start gap-2 ui-body-sm">
                       <input
@@ -508,11 +567,18 @@ export function InstallDialog({
                   </p>
                 </div>
               )}
+              </div>
             </div>
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-line-soft px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 border-t border-line-soft bg-[var(--subtle-2)] px-4 py-2.5">
+          <span className="mr-auto ui-caption">
+            {preview
+              ? `${updating ? "更新" : "安装"}「${preview.manifest.name}」v${preview.manifest.version}`
+              : "粘贴清单、拖入文件或从云端载入"}
+            {preview && blocked ? " · 需先完成上方确认" : ""}
+          </span>
           <button type="button" onClick={onClose} className={BTN_GHOST}>
             取消
           </button>

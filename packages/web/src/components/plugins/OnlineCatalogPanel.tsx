@@ -68,7 +68,7 @@ export function OnlineCatalogPanel({
   return (
     <section
       aria-label="云端插件目录"
-      className="mt-2 rounded-lg border border-line bg-[#fafafa] p-3"
+      className="mt-2 rounded-lg border border-line bg-[var(--subtle)] p-3"
     >
       <div className="flex items-center justify-between gap-2">
         <div>
@@ -89,7 +89,7 @@ export function OnlineCatalogPanel({
 
       {!loading && error && (
         <div className="mt-2">
-          <p role="alert" className="ui-body-sm text-[#b42318]">
+          <p role="alert" className="ui-body-sm text-[var(--danger)]">
             {error}
           </p>
           <button type="button" onClick={onRefresh} className={`${BTN} mt-1`}>
@@ -112,7 +112,7 @@ export function OnlineCatalogPanel({
               <li
                 key={key}
                 aria-label={`云端插件 ${entry.name}`}
-                className="rounded-lg border border-line bg-white p-2.5"
+                className="rounded-lg border border-line bg-[var(--surface)] p-2.5"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[12px] font-bold">{entry.name}</span>
@@ -120,7 +120,7 @@ export function OnlineCatalogPanel({
                   <span
                     className={
                       state.tone === "update"
-                        ? "ui-caption text-amber-700"
+                        ? "ui-caption text-[var(--warn)]"
                         : "ui-caption"
                     }
                   >

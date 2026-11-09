@@ -649,6 +649,17 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
   }
 
   const permissions = parsed.data.permissions ?? {};
+  /*
+   * `permissions.files` 是 d.64 留下的**预留字段**：声明式插件不携带文件工具、
+   * bundle 也只能读写自己的 data/，所以宿主**没有任何执行点**能按它收紧文件访问。
+   * 老实口径（d.122）：仍接受并校验形状（≤5 个包内相对路径，兼容已发布清单），
+   * 但**非空就明确警告「不生效」**——不能让作者与用户以为它限制了文件访问。
+   */
+  if ((permissions.files ?? []).length > 0) {
+    warnings.push(
+      "permissions.files 是预留字段：当前没有执行点（不生效）。插件不带文件工具、界面插件也只能读写自己的 data/；建议从清单里删掉，避免用户误以为限制了文件访问",
+    );
+  }
   const declaredHosts = new Set(
     (permissions.network ?? []).map((host) => normalizeDeclaredHost(host)).filter((host): host is string => !!host),
   );

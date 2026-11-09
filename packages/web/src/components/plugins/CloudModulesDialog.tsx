@@ -68,7 +68,7 @@ export function CloudModulesDialog({
         role="dialog"
         aria-modal="true"
         aria-label="从云端安装模块"
-        className="flex max-h-[80vh] w-[min(720px,94vw)] flex-col rounded-xl border border-line bg-white shadow-xl"
+        className="plugin-dialog-pop flex max-h-[80vh] w-[min(720px,94vw)] flex-col rounded-2xl border border-line bg-[var(--surface)] shadow-xl"
       >
         <header className="flex items-start gap-3 border-b border-line-soft px-4 py-3">
           <span className="mt-0.5 text-muted" aria-hidden="true">
@@ -116,7 +116,7 @@ export function CloudModulesDialog({
                 return (
                   <li
                     key={entry.id}
-                    className="rounded-lg border border-line-soft bg-white p-3"
+                    className="rounded-lg border border-line-soft bg-[var(--surface)] p-3"
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[13px] font-extrabold">{entry.name}</span>
@@ -154,7 +154,7 @@ export function CloudModulesDialog({
             </ul>
           )}
           {notice ? (
-            <p role="status" className="ui-caption mt-2 text-[#1d6b3a]">
+            <p role="status" className="ui-caption mt-2 text-[var(--success)]">
               {notice}
             </p>
           ) : null}

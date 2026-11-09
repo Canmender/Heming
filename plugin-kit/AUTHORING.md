@@ -30,8 +30,8 @@
 pnpm plugin:new acme.hello --name 问候工具
 
 # ② 校验（与安装预览同一个权威解析器；--strict 让 warning 也失败）
-pnpm plugin:lint                 # 批量校验 plugins/ 与 plugin-kit/examples
-node scripts/plugin-lint.mjs plugins/hello/plugin.json --strict
+pnpm plugin:lint                 # 批量校验 plugin-kit/plugins 与 plugin-kit/examples
+node scripts/plugin-lint.mjs plugin-kit/plugins/hello/plugin.json --strict
 
 # ③ 在应用里试装：插件区 → 安装 → 选文件/粘贴 plugin.json → 先看预览，再点安装
 ```
@@ -39,7 +39,7 @@ node scripts/plugin-lint.mjs plugins/hello/plugin.json --strict
 生成后的目录（声明式）：
 
 ```
-plugins/hello/
+plugin-kit/plugins/hello/
 ├── plugin.json       # 清单（唯一必填产物）
 └── README.md         # 说明：装了什么、要什么权限、数据放哪
 ```
@@ -48,7 +48,7 @@ plugins/hello/
 所以脚手架把 README 放进 `files/README.md`：
 
 ```
-plugins/demo-widget/
+plugin-kit/plugins/demo-widget/
 ├── plugin.json
 └── files/
     ├── index.html    # entry
@@ -151,7 +151,7 @@ plugins/demo-widget/
    先 pack 后 sign 会被 `readPackage` 拒绝（缺签名），这是预期顺序。
 5. 发版前跑 `node scripts/check-release-keys.mjs`（正式版不认 dev 公钥）。
 
-参考实现：`packages/pet-widget`（官方桌宠）。
+参考实现：`plugin-kit/plugins/pet-widget`（官方桌宠）。
 
 ---
 
@@ -186,7 +186,7 @@ plugins/demo-widget/
 | 手段 | 命令/位置 | 用途 |
 |---|---|---|
 | 权威校验 | `pnpm plugin:lint` / `node scripts/plugin-lint.mjs <file\|dir> [--strict] [--json]` | 中文报错 + 字段路径，CI 可挡坏包 |
-| 编辑器补全 | `plugin.json` 里 `"$schema": "../../plugin-kit/plugin.schema.json"`（从 `plugins/` 下相对到 kit） | 字段提示（**不等于**能装） |
+| 编辑器补全 | `plugin.json` 里 `"$schema": "../../plugin.schema.json"`（从 `plugin-kit/plugins/<包>/` 相对到 kit） | 字段提示（**不等于**能装） |
 | 安装预览 | 插件区 → 安装 → 粘贴/选文件 | 只读差异、冲突、权限、兼容性；不点安装不写盘 |
 | 诊断 | 插件详情 →「诊断」 | 为什么没生效：停用/贡献级关/依赖/需更新/签名/超权限/孤儿 |
 | 健康检查 | 插件区 → 健康检查 →「修复记录」 | 记录损坏、技能或服务对不上 |

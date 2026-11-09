@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+release/
+*.log
+.DS_Store
+
+# 临时解压目录（发布包自检用）
+.tmp-extract/

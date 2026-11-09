@@ -82,11 +82,26 @@ const TAR_EXCLUDES = [
   ".workbuddy",
   "packages/desktop/runtime",
   "packages/desktop/web-dist",
+  /*
+   * 云端只用三样东西：`packages/web/dist`（静态页）、`packages/{server,shared}/dist`（node 进程）、
+   * `module-catalog` / `plugins-catalog`（目录接口的数据源）。
+   * 桌面侧资源、插件工具包（plugin-kit）、vendor 源码与引擎构建缓存都不需要上云——
+   * 它们曾把部署包从 5MB 量级撑到 183MB（`packages/desktop/resources/magpie` 的
+   * magpie-core.exe ×2 就占约 144MB），每次上传与 `keep` 都白花磁盘与时间。
+   * 加「只在本地用」的大目录时，先把裸段名加到这里，再由 `TAR_FORBIDDEN` 兜底核对。
+   */
+  "packages/desktop/resources",
+  "packages/infohub",
+  "plugin-kit",
+  "vendor",
+  ".tmp-engine-lib",
+  ".tmp-engine-wheels",
+  ".tmp-module-dl",
   "@hemingdesktop",
 ];
 
 /** deploy.md §2 的两条校验：不该有的必须为 0，必须有的至少 1。 */
-const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp\/|\.workbuddy|packages\/desktop\/(runtime|web-dist)/;
+const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|plugin-kit\/|(^|\/)release\/|\.tmp|\.workbuddy|packages\/desktop\/(runtime|web-dist|resources)/;
 const TAR_REQUIRED = [
   "packages/web/dist/index.html",
   "packages/server/dist/",

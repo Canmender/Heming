@@ -14,8 +14,9 @@
 > 版本口径：纯声明式清单现行 `schemaVersion: 5`（v1–v3 旧包归一化后可装；**v5 见 §11**：最低宿主版本 `engines` + 上架元数据 `meta`，v5 是新增不是替换）；d.88 短暂引入的 v4（模型预设）已在 d.90 收回——
 > 模型统一由 magpie 网关提供，插件不再声明模型连接。**v4 现在的唯一用途是界面插件**（`distribution: "bundle"`，且必须首方签名）。
 >
-> 仓库自带的示例插件包（**不随安装包分发**，由云端插件目录发布、用户自行下载安装）：
-> `plugins/infohub-collector/`：把本机 InfoHub 采集桥声明成本机 MCP 服务 + 技能 + 命令。
+> 仓库自带的真实插件包（**不随安装包分发**，由云端插件目录发布、用户自行下载安装）：
+> `plugin-kit/plugins/infohub-collector/`（本机 InfoHub 采集桥）、`plugin-kit/plugins/workflow-kit/`（工作流引擎）、
+> `plugin-kit/plugins/pet-widget/`（桌宠，v4 bundle）。源码索引见 [`plugin-kit/plugins/README.md`](../plugin-kit/plugins/README.md)。
 >
 > 分发链路：`node scripts/publish-plugin.mjs` 把包摆成服务端目录布局 → 服务端 `GET /api/plugins`
 > 列出目录 → 客户端「插件区 → 安装插件 → 从云端浏览」下载原文、**校验 sha256** 后走同一套安装预览。
@@ -124,7 +125,7 @@ web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `
 - v1（仅技能）与 v2（技能 + MCP）旧包继续可安装：归一化后 `permissions.network` = 其服务 host 全集、`tools = "read"`，等于「安装时已确认的既有事实」，不回溯拦截。
 - 插件**不执行代码**、不支持 stdio/命令类 MCP；插件包可由**云端插件目录**分发（只下载声明式清单并校验指纹），
   但不支持「URL 直接安装」或随包携带脚本；本地进程类集成仍走接口区手动配置或 Registry 安装。
-- 插件包**不随安装包分发**：`plugins/` 目录只在仓库里维护，由 `scripts/publish-plugin.mjs` 发布到服务端目录
+- 插件包**不随安装包分发**：`plugin-kit/plugins/` 目录只在仓库里维护，由 `scripts/publish-plugin.mjs` 发布到服务端目录
   （`HEMING_PLUGIN_DIR`，部署时同步到服务器）。
 - 模型接入不由插件声明：d.90 起模型统一来自本机 magpie 网关（见 README「智能体对话」与
   `docs/superpowers/specs/2026-11-07-d90-magpie-native-model-layer.md`）。
@@ -224,10 +225,10 @@ web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `
 
 ```bash
 # 1) 写本地发布目录（沿用「同步目录到服务器」的部署链）
-node scripts/publish-plugin.mjs plugins/infohub-collector/plugin.json --dest /opt/heming/plugins
+node scripts/publish-plugin.mjs plugin-kit/plugins/infohub-collector/plugin.json --dest /opt/heming/plugins
 
 # 2) 或直接推到云端仓库（CI 用；需服务端已配置发布密钥）
-HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugins/ --push https://heming.example.com
+HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugins/ --push https://heming.example.com
 ```
 
 两种方式都会先做「能不能解析 / id 与版本是否合规 / schemaVersion 是否是整数 / 有没有名字」的基础校验，
@@ -320,10 +321,10 @@ package.tgz
 
 ```bash
 node scripts/check-release-keys.mjs         # 发版前必跑：只有 dev-* 首方公钥 → 退出码 2 阻断（本地开发可加 --allow-dev）
-node scripts/build-pet-widget.mjs           # 构建插件 → packages/pet-widget/dist/package/（自动写入 packageSha256）
-node scripts/sign-plugin.mjs sign packages/pet-widget/dist/package/plugin.json <正式私钥> --id heming --write
+node scripts/build-pet-widget.mjs           # 构建插件 → plugin-kit/plugins/pet-widget/dist/package/（自动写入 packageSha256）
+node scripts/sign-plugin.mjs sign plugin-kit/plugins/pet-widget/dist/package/plugin.json <正式私钥> --id heming --write
                                             # 签名前自动按 files/** 重算 packageSha256；签名因此覆盖代码字节
-node scripts/publish-plugin.mjs packages/pet-widget/dist/package --dest <plugin-dir>
+node scripts/publish-plugin.mjs plugin-kit/plugins/pet-widget/dist/package --dest <plugin-dir>
 # 把 <plugin-dir> 同步到服务器的 HEMING_PLUGIN_DIR，客户端「插件区 → 桌面小组件」即可看到
 ```
 
@@ -333,7 +334,7 @@ node scripts/publish-plugin.mjs packages/pet-widget/dist/package --dest <plugin-
 （base64url 原始 32 字节种子，权限仅本用户可读）；**上线前必须移入发布 CI 的 secret / HSM**，并按
 `resources/official-keys.json` 的 `_rotate` 做双钥过渡。丢失私钥 = 已安装用户永久无法接收新签名包。
 
-**签名后自检**：`node scripts/pack-plugin.mjs packages/pet-widget/dist/package` 会以**安装口径**
+**签名后自检**：`node scripts/pack-plugin.mjs plugin-kit/plugins/pet-widget/dist/package` 会以**安装口径**
 （`readPackage`：解包配额 / 路径 / 清单 / 首方验签 / `packageSha256` 重算 / entry 存在）回读校验；
 输出 `校验 readPackage ✓` 才算可发布。`d.111` 的 `heming.pet 1.0.1` 即按此流程用 `official-2026-11` 签出。
 
@@ -474,8 +475,9 @@ v5 的权威校验器在 `packages/shared/src/plugin/manifest.ts`（web 安装�
 本地校验：
 
 ```bash
-node scripts/plugin-lint.mjs plugins/acme-report/plugin.json   # 中文报错 + 字段路径
-node scripts/plugin-lint.mjs --dir plugins                     # 批量
+node scripts/plugin-lint.mjs plugin-kit/plugins/acme-report/plugin.json   # 中文报错 + 字段路径
+node scripts/plugin-lint.mjs --dir plugin-kit/plugins --skip dist,release  # 批量（源码工程用 --source 单独校验）
+node scripts/plugin-lint.mjs plugin-kit/plugins/pet-widget/plugin.json --source  # 界面插件源码工程：不比对 files/
 node scripts/plugin-schema.mjs --check                         # 校验 plugin-kit/plugin.schema.json 是否最新（CI）
 ```
 

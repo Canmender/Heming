@@ -17,17 +17,22 @@ import type { StorageLike } from "../memory/types.js";
  */
 
 /**
- * 仓库根下的 `plugins/`：vitest 的 cwd 是 `packages/web`（根脚本与 --filter 都如此），
+ * 插件源码目录 `plugin-kit/plugins/`：vitest 的 cwd 是 `packages/web`（根脚本与 --filter 都如此），
  * 用 cwd 解析而不是 `import.meta.url`——jsdom 环境下它不是 file: 协议。
  */
 const PLUGIN_DIR_CANDIDATES = [
-  resolve(process.cwd(), "../../plugins"),
-  resolve(process.cwd(), "plugins"),
+  resolve(process.cwd(), "../../plugin-kit/plugins"),
+  resolve(process.cwd(), "plugin-kit/plugins"),
 ];
 const PLUGINS_DIR = PLUGIN_DIR_CANDIDATES.find((dir) => existsSync(dir)) ?? PLUGIN_DIR_CANDIDATES[0];
 
 function readPlugin(dir: string): { text: string; json: Record<string, unknown> } {
   const text = readFileSync(`${PLUGINS_DIR}/${dir}/plugin.json`, "utf8");
+  return { text, json: JSON.parse(text) as Record<string, unknown> };
+}
+
+function readPluginAt(relativePath: string): { text: string; json: Record<string, unknown> } {
+  const text = readFileSync(`${PLUGINS_DIR}/${relativePath}`, "utf8");
   return { text, json: JSON.parse(text) as Record<string, unknown> };
 }
 
@@ -79,10 +84,14 @@ function previewPlugin(text: string) {
   return { store, skills, preview: store.preview(text) };
 }
 
-// `plugins/` 只放真实插件包（示例已迁到 `plugin-kit/examples/`，不进这里）：
-// 这里只枚举「真的带清单的包目录」。
+// `plugin-kit/plugins/` 放真实插件包（示例在 `plugin-kit/examples/`，不进这里）：
+// 这里只枚举「真的带清单的声明式包」；界面插件（v4 bundle）由桌面端安装，单独测清单形状。
 const BUNDLED = readdirSync(PLUGINS_DIR, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && existsSync(resolve(PLUGINS_DIR, entry.name, "plugin.json")))
+  .filter((entry) => {
+    const manifest = JSON.parse(readFileSync(resolve(PLUGINS_DIR, entry.name, "plugin.json"), "utf8"));
+    return manifest.distribution !== "bundle";
+  })
   .map((entry) => entry.name)
   .sort();
 
@@ -109,12 +118,13 @@ describe("仓库自带插件包 · 目录与共性", () => {
   });
 });
 
-describe("plugins/infohub-collector · 采集桥（v3）", () => {
+describe("plugin-kit/plugins/infohub-collector · 采集桥（v5）", () => {
   it("声明一个本机回环 MCP 服务，风险上限 write", () => {
     const { text } = readPlugin("infohub-collector");
     const manifest = parsePluginManifest(JSON.parse(text));
     expect(manifest.id).toBe("heming.infohub-collector");
-    expect(manifest.schemaVersion).toBe(3);
+    expect(manifest.schemaVersion).toBe(5);
+    expect(manifest.engines).toEqual({ heming: "d.117" });
     expect(manifest.contributions.mcpServers).toHaveLength(1);
     expect(manifest.contributions.mcpServers[0]).toMatchObject({
       key: "infohub",
@@ -130,5 +140,31 @@ describe("plugins/infohub-collector · 采集桥（v3）", () => {
     const { preview } = previewPlugin(text);
     expect(preview.skills.added.length).toBe(1);
     expect(preview.servers.added.map((s) => s.key)).toEqual(["infohub"]);
+  });
+});
+
+describe("plugin-kit/plugins/workflow-kit · 工作流引擎（v5）", () => {
+  it("清单收在本机回环，技能与命令都可解析", () => {
+    const { text } = readPluginAt("workflow-kit/plugin/plugin.json");
+    const manifest = parsePluginManifest(JSON.parse(text));
+    expect(manifest.id).toBe("heming.workflow-kit");
+    expect(manifest.schemaVersion).toBe(5);
+    expect(manifest.engines).toEqual({ heming: "d.117" });
+    expect(manifest.permissions.network).toEqual(["127.0.0.1:8777"]);
+    expect(manifest.contributions.mcpServers[0].url).toBe("http://127.0.0.1:8777/mcp");
+    expect(manifest.contributions.skills).toHaveLength(3);
+    expect(manifest.contributions.commands[0].target).toEqual({ kind: "plugin" });
+  });
+});
+
+describe("plugin-kit/plugins/pet-widget · 桌宠（v4 bundle）", () => {
+  it("只声明桌面小组件，不混入声明式贡献", () => {
+    const { json } = readPlugin("pet-widget");
+    expect(json.schemaVersion).toBe(4);
+    expect(json.distribution).toBe("bundle");
+    const contributions = json.contributions as Record<string, unknown[]>;
+    expect(contributions.desktopWidgets).toHaveLength(1);
+    expect(contributions.skills ?? []).toEqual([]);
+    expect(contributions.mcpServers ?? []).toEqual([]);
   });
 });

@@ -30,12 +30,18 @@ export const WIDGET_API_GLOBAL = "__heming_widget" as const;
 export type WidgetTheme = "light" | "dark";
 
 /**
- * `openPage()` 可跳转的主窗页面白名单。
+ * `openPage()` 可跳转的主窗页面白名单（**唯一真源**）。
  *
- * 主进程在 `widget:open-page` 上还会再归一化一次（`normalizeWidgetPage`），
+ * 主进程侧有两份副本：`packages/desktop/plugin-window.js` 的 `WIDGET_PAGE_ALLOWLIST`
+ * 与 `main.js` 的 `widget:open-page` 校验数组；它们由
+ * `packages/desktop/widget-pages.test.js` 与本常量逐项比对（多一个/少一个都红），
+ * 所以加页面时**只改这里 + 两处副本**，别让三份名单各自漂移。
  * 白名单外的值被静默丢弃并记一条宿主日志，不会抛错。
  */
-export type WidgetPage = "settings" | "team" | "tasks" | "staff" | "infohub";
+export const WIDGET_ALLOWED_PAGES = ["settings", "team", "tasks", "staff", "infohub"] as const;
+
+/** 可跳转的页面 id（由白名单派生，避免类型与运行期名单分叉）。 */
+export type WidgetPage = (typeof WIDGET_ALLOWED_PAGES)[number];
 
 /**
  * 窗口运行态（`state()` / `show()` 的返回，对应 `plugin-host.js` 的 `statePayload()`）。

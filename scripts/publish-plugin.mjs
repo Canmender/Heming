@@ -4,7 +4,7 @@
  *
  * 为什么需要：信息采集 / magpie 网关这类插件**不随安装包分发**——它们是独立产物，
  * 由服务端 `/api/plugins` 列出来、用户自行下载安装。本脚本只负责把仓库里的
- * `plugins/<名字>/plugin.json` 校验后摆成服务端要的目录布局：
+ * `plugin-kit/plugins/<名字>/plugin.json` 校验后摆成服务端要的目录布局：
  *
  *   <dest>/<插件 id>/<版本>/plugin.json      （原样字节）
  *   <dest>/<插件 id>/<版本>/package.tgz      （仅界面插件：v4 distribution: "bundle"）
@@ -14,11 +14,11 @@
  * 目录布局与读取逻辑见 `packages/server/src/pluginCatalog.ts`。
  *
  * 用法：
- *   node scripts/publish-plugin.mjs plugins/magpie-gateway/plugin.json
- *   node scripts/publish-plugin.mjs plugins/                     # 目录下每个并包
- *   node scripts/publish-plugin.mjs plugins/magpie-gateway/plugin.json --dry-run
- *   node scripts/publish-plugin.mjs plugins/ --dest D:/tmp/plugins-catalog
- *   node scripts/publish-plugin.mjs plugins/ --push https://heming.example.com
+ *   node scripts/publish-plugin.mjs plugin-kit/plugins/infohub-collector/plugin.json
+ *   node scripts/publish-plugin.mjs plugin-kit/plugins/                 # 目录下每个并包
+ *   node scripts/publish-plugin.mjs plugin-kit/plugins/infohub-collector/plugin.json --dry-run
+ *   node scripts/publish-plugin.mjs plugin-kit/plugins/ --dest D:/tmp/plugins-catalog
+ *   node scripts/publish-plugin.mjs plugin-kit/plugins/ --push https://heming.example.com
  *
  * 两种目标：
  * - 缺省写本地目录（沿用「同步目录到服务器」的部署链）；

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>工作流引擎 · 本机编辑器</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/canvas.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        工作流引擎
+        <span id="health-badge" class="health-badge" role="status">连接中…</span>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="主导航">
+        <button
+          type="button"
+          class="tab"
+          role="tab"
+          id="tab-workflows"
+          data-tab="workflows"
+          aria-controls="app"
+          aria-selected="true"
+        >
+          工作流
+        </button>
+        <button
+          type="button"
+          class="tab"
+          role="tab"
+          id="tab-executions"
+          data-tab="executions"
+          aria-controls="app"
+          aria-selected="false"
+        >
+          执行记录
+        </button>
+        <button
+          type="button"
+          class="tab"
+          role="tab"
+          id="tab-credentials"
+          data-tab="credentials"
+          aria-controls="app"
+          aria-selected="false"
+        >
+          凭据
+        </button>
+        <button
+          type="button"
+          class="tab"
+          role="tab"
+          id="tab-settings"
+          data-tab="settings"
+          aria-controls="app"
+          aria-selected="false"
+        >
+          设置
+        </button>
+      </nav>
+    </header>
+
+    <main id="app" class="app-main" tabindex="-1"></main>
+    <div id="modal-root"></div>
+    <div id="toast-root" class="toast-root" role="status" aria-live="polite"></div>
+
+    <!-- 经典脚本顺序加载：canvas.js 提供 window.WFCanvas，app.js 负责页面与数据 -->
+    <script src="/static/canvas.js"></script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

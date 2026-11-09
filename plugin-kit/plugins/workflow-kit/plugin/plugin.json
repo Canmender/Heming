@@ -1,0 +1,93 @@
+{
+  "$schema": "../../../plugin.schema.json",
+  "schemaVersion": 5,
+  "id": "heming.workflow-kit",
+  "name": "工作流引擎",
+  "version": "1.4.0",
+  "description": "节点式自动化：在本机独立运行的工作流服务（自带 Web 编辑器），和鸣通过 MCP 工具创建、运行与查看工作流。服务包与安装说明：http://47.92.39.184/updates/plugins/heming.workflow-kit/",
+  "author": "独立插件作者",
+  "engines": {
+    "heming": "d.117"
+  },
+  "permissions": {
+    "network": [
+      "127.0.0.1:8777"
+    ],
+    "tools": "write",
+    "files": []
+  },
+  "contributions": {
+    "mcpServers": [
+      {
+        "key": "workflow",
+        "name": "工作流引擎",
+        "url": "http://127.0.0.1:8777/mcp",
+        "description": "本机工作流引擎（独立进程；先启动服务，再从接口区连接并授权工具）"
+      }
+    ],
+    "skills": [
+      {
+        "name": "工作流设计",
+        "description": "把一段自动化需求设计成节点图，并通过 MCP 工具创建/修改工作流",
+        "instructions": "前置步骤（只需一次）：本插件依赖一个在本机运行的工作流服务。\n1) 打开 http://47.92.39.184/updates/plugins/heming.workflow-kit/ 下载服务包（zip）并解压；\n2) Windows 双击 start.cmd（或在该目录执行 `node dist/server/main.js`；需要 Node.js ≥ 24）；\n3) 看到「工作流引擎（独立插件）已启动 · http://127.0.0.1:8777」即就绪；\n4) 在和鸣接口区连接「工作流引擎」并授权工具。\n编辑器地址 http://127.0.0.1:8777/（不想让智能体操作时，也可以直接在网页里搭流程、点运行）。\n\n你要用「工作流引擎」MCP 工具帮用户搭节点式自动化。\n\n第一步：先调用 node_types 看当前支持哪些节点（type、显示名、参数表）；如果用户只是描述目标、不要求逐节点控制，可先用 workflow_generate 生成草稿，再按本流程校验/试跑/修改。不要凭记忆猜节点名或参数名；节点库会更新。写参数前，用 node_type_detail {type} 拿该节点的完整 schema（每个参数的 type/default/required/options/placeholder/displayOptions 都在里面）；不确定 JSON 字段或表达式变量时先看 workflow_sdk_reference。\n\n第二步：把需求画成一条有向图：\n- 必须有一个触发器节点：manualTrigger（手动触发）、scheduleTrigger（定时触发，参数 triggerInterval 取 seconds/minutes/hours/days/weeks/cron，配合 intervalCount / triggerAtHour / triggerAtMinute / triggerAtDayOfWeek / cronExpression）、webhookTrigger（本机 HTTP 触发：POST /webhook/<路径>，path 可留空=工作流 id，method 选方法，authToken 可选；只有启用状态的工作流会响应）、errorTrigger（错误工作流入口）或 executeWorkflowTrigger（被别的流程调用）。\n- 中间用数据/流程节点：set（改字段）、filter、sort、limit、removeDuplicates、aggregate、splitOut、itemLists、if（两个输出 true/false）、switch（多输出，最后一个是兜底）、merge（多输入）、splitInBatches（循环）、wait、code（本机沙箱 JS）、httpRequest（调接口）、dateTime、crypto、xml、llm（本机配置的大模型连接）、mcpTool（调用其它本机 MCP 服务；写之前先调 mcp_list_tools {url} 发现工具名与参数）、notification（本机通知）、executeWorkflow（子流程）、stopAndError。\n- 数据形状是 items 数组：每个节点输入输出都是 [{json:{...}}]。表达式写在参数字符串里，用 {{ }}：$json 当前条数据、$items 全部、$node[\"节点名\"].json、$now/$today（可 .format(\"yyyy-MM-dd\") / .plus(1,\"day\")）、$vars 全局变量、$parameter。\n\n第三步：生成工作流 JSON（结构）：{name, description, tags, nodes:[{id,name,type,position:{x,y},parameters,...}], connections:{源节点id:{main:[[{node:目标节点id,type:\"main\",index:0}]]}}, settings:{timezone:\"local\",saveDataSuccessExecution:\"all\",saveDataErrorExecution:\"all\",saveManualExecutions:true,callerPolicy:\"any\"}, active:false}。connections 用节点 id 作键；同一输出口多条连接就多个对象；if 的第 0 个输出是 true、第 1 个是 false；switch 按规则顺序对应输出。节点级设置可选：retryOnFail/maxTries/waitBetweenTries/onError（stopWorkflow|continueRegularOutput|continueErrorOutput）/executeOnce/disabled/pinData/credentials。\n\n第四步：先调 workflow_validate 校验，再 workflow_create（新建）或 workflow_update（改已有）。校验有 error 就按提示修，不要跳过。\n\n约定：节点名用中文、组内唯一；位置按从左到右 x+240、从上到下 y+120 排；不要在参数里写明文密码，需要鉴权就提示用户在编辑器「凭据」页创建，先用 credential_list 看本机已有凭据（只返回 id/名称/类型，不含密钥；没有合适的就提示用户在编辑器「凭据」页创建），再用 credentials.凭据类型 引用凭据 id（HTTP 节点参数 credentials: {httpAuth:\"凭据id\"}）。",
+        "triggers": [
+          "工作流",
+          "workflow",
+          "自动化",
+          "n8n",
+          "节点"
+        ],
+        "tags": [
+          "自动化",
+          "工作流"
+        ]
+      },
+      {
+        "name": "运行工作流",
+        "description": "运行工作流、轮询执行状态、解读每个节点的输入输出与错误",
+        "instructions": "前置步骤（只需一次）：本插件依赖一个在本机运行的工作流服务。\n1) 打开 http://47.92.39.184/updates/plugins/heming.workflow-kit/ 下载服务包（zip）并解压；\n2) Windows 双击 start.cmd（或在该目录执行 `node dist/server/main.js`；需要 Node.js ≥ 24）；\n3) 看到「工作流引擎（独立插件）已启动 · http://127.0.0.1:8777」即就绪；\n4) 在和鸣接口区连接「工作流引擎」并授权工具。\n编辑器地址 http://127.0.0.1:8777/（不想让智能体操作时，也可以直接在网页里搭流程、点运行）。\n\n用「工作流引擎」MCP 工具运行与排查工作流。注意：Webhook 触发器只有在工作流「启用」后才响应；本机地址形如 http://127.0.0.1:8777/webhook/<路径>。\n\n1) 找目标：workflow_list 看列表（名称/节点数/是否启用/最近执行）；不确定内容就 workflow_get 读完整 JSON。\n2) 试跑（推荐）：workflow_test {id, pinData} 用固定数据同步验证逻辑——把触发器/HTTP/通知等有副作用的节点用 pinData 固定输出（这些节点不执行），返回值含逐节点状态和输出预览。默认 10 秒、最长 15 秒。\n3) 正式运行：workflow_run {id} 是**异步**的，立即返回 executionId（服务端单次 MCP 调用 20 秒会超时，不要用同步等待工具）。需要只跑某一步时传 startNodeId（从该节点开始，输入为空）。\n4) 轮询：workflow_run_status {executionId}，间隔 1–2 秒，直到 status 变成 success / error / canceled。返回里每个节点有 status、itemsTotal、error；大对象不回传，需要细节让用户去 Web 编辑器看执行记录。\n5) 失败排查：先看 error.nodeName/message；需要看「哪条数据、哪个字段」错时用 workflow_execution_detail（默认脱敏：token/password/authorization 等打码，单条超 4KB 截断）；常见原因：表达式引用了不存在的字段（补 set 节点或改表达式）、HTTP 非 2xx（把 neverError 打开让分支处理）、信息中枢/模型连接未配置、代码节点语法错误或超时。修好后 workflow_update 保存，再运行。\n6) 启用/发布：需要定时运行时调 workflow_set_active {id, active:true}（等价「发布」；有错误会被拒绝），暂停传 false；手动运行不受影响。\n7) 历史与回滚：workflow_runs {workflowId?, limit?} 看最近执行；workflow_versions 看每次保存留的上一版（最多 10 版），workflow_version_get 读旧版，workflow_restore 回滚（会先把当前版本也留成快照）；需要完整数据用 workflow_get + 让用户打开编辑器 http://127.0.0.1:8777/ 的「执行记录」。\n\n注意：运行会真的产生副作用（HTTP 写请求、发通知、同步归档）。执行写操作前先向用户确认目标和参数；不要为了试探反复触发写操作。",
+        "triggers": [
+          "运行工作流",
+          "执行工作流",
+          "workflow run",
+          "排查工作流"
+        ],
+        "tags": [
+          "自动化",
+          "工作流"
+        ]
+      },
+      {
+        "name": "从 n8n 迁移工作流",
+        "description": "把 n8n 导出的工作流 JSON 导入本引擎，并说明节点映射与差异",
+        "instructions": "前置步骤（只需一次）：本插件依赖一个在本机运行的工作流服务。\n1) 打开 http://47.92.39.184/updates/plugins/heming.workflow-kit/ 下载服务包（zip）并解压；\n2) Windows 双击 start.cmd（或在该目录执行 `node dist/server/main.js`；需要 Node.js ≥ 24）；\n3) 看到「工作流引擎（独立插件）已启动 · http://127.0.0.1:8777」即就绪；\n4) 在和鸣接口区连接「工作流引擎」并授权工具。\n编辑器地址 http://127.0.0.1:8777/（不想让智能体操作时，也可以直接在网页里搭流程、点运行）。\n\n用户给你一份 n8n 导出的工作流 JSON（{name,nodes,connections,...}）时：\n\n1) 直接调 workflow_import {json}：服务端会剥掉 n8n-nodes-base. 前缀、把节点名映射成本仓类型、按名字重映射连接，返回 warnings（未识别的节点被丢弃）。\n2) 按 warnings 逐个补（补之前可用 workflow_sdk_reference 对照本引擎的 JSON 结构与表达式）：n8n 的 Set/Edit Fields → set；IF → if；Switch → switch；Merge → merge；Split In Batches → splitInBatches；Wait → wait；HTTP Request → httpRequest；Code → code（本引擎代码节点跑在 node:vm 沙箱里，只支持同步代码、无网络/文件）；Schedule Trigger → scheduleTrigger（注意参数名不同，需要按 node_types 重填）；Cron → scheduleTrigger + triggerInterval=cron；Webhook → **本引擎暂不支持**，请改用「手动触发 + 外部定时调用」或让用户先运行/MCP 触发；Email/Slack 等第三方节点 → httpRequest 调对应 API；n8n 的 AI Agent/LangChain → 用 llm 节点 + executeWorkflow 组合代替。\n3) 导入后 workflow_validate 一遍，逐节点用 node_type_detail 核对参数名与取值（n8n 与本引擎的参数名不同），再用 workflow_test + pinData 试跑；用 workflow_versions 保留导入前后版本、必要时 workflow_restore 回滚；把 error 修完，并告诉用户哪些节点被降级/替换、哪些没迁移。\n4) n8n 的凭据不会迁移：提示用户在编辑器「凭据」页重建，再在工作流里引用。\n\n输出：把导入结果（新工作流 id/名称、warnings、还需要用户做的两三条事）说清楚，不要只回一句「导入成功」。",
+        "triggers": [
+          "n8n",
+          "导入工作流",
+          "迁移工作流",
+          "n8n 导出"
+        ],
+        "tags": [
+          "自动化",
+          "迁移"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "id": "workflow-plugin-help",
+        "title": "工作流插件说明",
+        "description": "本机服务怎么启动、编辑器地址与数据边界",
+        "keywords": [
+          "工作流",
+          "workflow",
+          "插件说明",
+          "8777"
+        ],
+        "target": {
+          "kind": "plugin"
+        }
+      }
+    ]
+  }
+}

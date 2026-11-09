@@ -35,7 +35,7 @@ export default defineConfig({
     },
   },
   build: {
-    // 单入口（d.94：桌宠拆成界面插件，独立构建为 packages/pet-widget 的 package.tgz；
+    // 单入口（d.94：桌宠拆成界面插件，独立构建为 plugin-kit/plugins/pet-widget 的 package.tgz；
     // 主窗产物里不再有 pet 入口 / pixi / Live2D）。
   },
   test: {

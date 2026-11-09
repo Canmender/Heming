@@ -44,7 +44,7 @@ function usage(code = 2, stream = console.error) {
       "  --name     显示名（缺省取 id 最后一段）",
       "  --author   作者（缺省留空）",
       "  --kind     manifest（缺省，纯声明式 v5）或 bundle（界面插件 v4，仅首方）",
-      "  --dir      父目录（缺省 plugins；相对路径按仓库根解析），插件建在 <父目录>/<id 最后一段>",
+      "  --dir      父目录（缺省 plugin-kit/plugins；相对路径按仓库根解析），插件建在 <父目录>/<id 最后一段>",
       "  --force    目标目录已存在且非空时覆盖生成",
       "  --no-lint  生成后不自动跑 scripts/plugin-lint.mjs",
       "",
@@ -135,7 +135,7 @@ const parentDir = dirArg
   ? isAbsolute(dirArg)
     ? resolve(dirArg)
     : resolve(root, dirArg)
-  : join(root, "plugins");
+  : join(root, "plugin-kit", "plugins");
 const targetDir = join(parentDir, segment);
 
 const insideRoot = !relative(root, targetDir).startsWith("..") && !isAbsolute(relative(root, targetDir));

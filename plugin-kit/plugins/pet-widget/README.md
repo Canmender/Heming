@@ -13,7 +13,7 @@
 ## 1. 目录结构
 
 ```
-packages/pet-widget/
+plugin-kit/plugins/pet-widget/
 ├── plugin.json                 # 清单 v4（schemaVersion 4 / distribution: "bundle"）
 ├── index.html                  # Vite 入口（产物名 files/index.html）
 ├── vite.config.ts              # base "./"、outDir dist/package/files、pixi/live2d 动态 import
@@ -42,7 +42,7 @@ packages/pet-widget/
 构建产物（不入库，`.gitignore` 的 `dist/` 覆盖）：
 
 ```
-packages/pet-widget/dist/
+plugin-kit/plugins/pet-widget/dist/
 ├── package/                    # ← 本地安装/联调直接用这个目录
 │   ├── plugin.json
 │   └── files/                  # index.html + assets/*.js + pet/** + tray.png + icon.png
@@ -54,17 +54,19 @@ packages/pet-widget/dist/
 ## 2. 构建 / 打包 / 测试
 
 ```bash
-# 依赖（workspace 包在 packages/* 通配里，装一次即可）
+# 依赖（本包在根 pnpm-workspace.yaml 里单独声明，装一次即可）
 pnpm install --prefer-offline
 
 # 构建：vite → 组装 dist/package/{plugin.json,files/**}
 pnpm --filter @heming/pet-widget build
 
-# 打包：确定性 tar+gzip9 → dist/package.tgz（打印 sha256/size）
-pnpm --filter @heming/pet-widget pack
+# 打包：先首方签名，再确定性 tar+gzip9 → dist/package.tgz（打印 sha256/size）
+pnpm --filter @heming/pet-widget build
+node scripts/sign-plugin.mjs sign plugin-kit/plugins/pet-widget/dist/package/plugin.json <正式私钥> --id heming --write
+pnpm --filter @heming/pet-widget run pack
 
 # 单测 / 类型
-pnpm --filter @heming/pet-widget test        # 10 文件 / 132 例
+pnpm --filter @heming/pet-widget test        # 11 文件 / 138 例
 pnpm --filter @heming/pet-widget typecheck
 ```
 
@@ -198,12 +200,12 @@ pnpm --filter @heming/pet-widget typecheck
 
 ---
 
-## 9. 门禁基线（2026-11 拆包时）
+## 9. 门禁基线（2026-11-10 迁入 `plugin-kit` 后复跑）
 
 | 项 | 结果 |
 |---|---|
 | `pnpm --filter @heming/pet-widget build` | ✓ 产物 `dist/package/files`（27 文件 / 5.73 MB） |
 | `pnpm --filter @heming/pet-widget typecheck` | ✓ |
-| `pnpm --filter @heming/pet-widget test` | ✓ 10 文件 / 132 例（含迁移的 petPose/live2dFit/petInteraction 与 3 套 PetWindow jsdom 用例） |
-| `pnpm --filter @heming/pet-widget pack` | ✓ 通过宿主 `plugin-package.readPackage()` 安装口径校验；sha256 见输出 |
+| `pnpm --filter @heming/pet-widget test` | ✓ 11 文件 / 138 例（含 petPose/live2dFit/petInteraction 与 3 套 PetWindow jsdom 用例） |
+| `node scripts/pack-plugin.mjs dist/package` | 需先首方签名（`readPackage` 按 d.105 口径硬拒未签名包）；签名产物的 sha256 见输出 |
 | 主窗包体 | 本体不再含 pet 入口 / pixi / Live2D / 5MB 模型（验收项见规格 §8） |

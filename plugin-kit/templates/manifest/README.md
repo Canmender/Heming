@@ -14,7 +14,7 @@
 node scripts/plugin-lint.mjs {{dir}}              # 单个目录；中文报错 + 字段路径
 node scripts/plugin-lint.mjs {{dir}} --strict     # warning 也算失败（CI 可选）
 node scripts/plugin-lint.mjs {{dir}} --json       # 机器可读（CI）
-pnpm plugin:lint                                  # 批量校验 plugins/ 与 plugin-kit/examples
+pnpm plugin:lint                                  # 批量校验 plugin-kit/plugins 与 plugin-kit/examples
 pnpm plugin:check                                 # shared 构建 + 批量 lint + schema 一致性
 ```
 

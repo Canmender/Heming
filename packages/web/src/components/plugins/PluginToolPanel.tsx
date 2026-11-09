@@ -98,7 +98,7 @@ export function PluginToolPanel({
             {toolPacks.map((group) => (
               <div
                 key={group.pluginId}
-                className="rounded-lg border border-line-soft bg-white p-3"
+                className="rounded-lg border border-line-soft bg-[var(--surface)] p-3"
                 aria-label={`工具束组 ${group.pluginName}`}
               >
                 <div className="flex flex-wrap items-center gap-2">
@@ -124,7 +124,7 @@ export function PluginToolPanel({
                         {pack.unresolved.map((name) => (
                           <span
                             key={`unresolved:${name}`}
-                            className={`${CHIP} text-[#8a5a00]`}
+                            className={`${CHIP} text-[var(--warn)]`}
                             title="服务未连接或未提供该工具"
                           >
                             {name} · 未连接/未提供

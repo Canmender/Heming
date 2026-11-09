@@ -62,6 +62,9 @@ const DEFAULT_TRAY_ITEMS = Object.freeze(["toggle", "clickThrough", "resetPositi
 const SETTINGS_FIELD_TYPES = Object.freeze(["boolean", "select", "text", "number", "agent"]);
 
 /** 气泡/跳转可直达的主窗口页面（与命令面板页面目录子集对齐；白名单在进程边界上判）。 */
+// ★ 唯一真源在 shared：`packages/shared/src/plugin/widget.ts` 的 WIDGET_ALLOWED_PAGES。
+// 这里是运行期副本（CommonJS 不 import shared 构建产物）；与 main.js 的第二份副本
+// 一起由 packages/desktop/widget-pages.test.js 逐项比对，改名单时三处同步。
 const WIDGET_PAGE_ALLOWLIST = Object.freeze(["settings", "team", "tasks", "staff", "infohub"]);
 
 /**

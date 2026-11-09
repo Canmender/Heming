@@ -165,8 +165,8 @@ node scripts/publish-plugin.mjs plugins/            # 缺省写到 ./plugins-cat
 
 # 1b) 界面插件（d.94，带代码与资源）：先构建 → 再发布成 plugin.json + package.tgz
 node scripts/build-pet-widget.mjs
-node scripts/pack-plugin.mjs packages/pet-widget/dist/package     # → dist/package.tgz（确定性 sha）
-node scripts/publish-plugin.mjs packages/pet-widget/dist/package  # → plugins-catalog/heming.pet/1.0.0/{plugin.json,package.tgz}
+node scripts/pack-plugin.mjs plugin-kit/plugins/pet-widget/dist/package     # → dist/package.tgz（确定性 sha）
+node scripts/publish-plugin.mjs plugin-kit/plugins/pet-widget/dist/package  # → plugins-catalog/heming.pet/1.0.0/{plugin.json,package.tgz}
 
 # 2) 同步到服务器（沿用现有部署账号；只读发布，不含用户数据）
 scp -r plugins-catalog/* root@<server>:/opt/heming/plugins/

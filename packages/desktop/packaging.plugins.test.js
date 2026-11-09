@@ -9,7 +9,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
+const { readFileSync, existsSync } = require("node:fs");
 const { join } = require("node:path");
 
 const pkg = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf8"));
@@ -24,19 +24,24 @@ function packagedSources() {
   );
 }
 
-test("安装包不携带仓库根 plugins/ 目录（插件走云端分发）", () => {
+test("安装包不携带插件源码目录（插件走云端分发）", () => {
   for (const source of packagedSources()) {
     assert.ok(
       !/(^|\/)plugins?(\/|$)/.test(source) && !source.startsWith("../plugins"),
       `packaging 不应包含插件目录：${source}`,
     );
+    assert.ok(
+      !/(^|[\\/])plugin-kit([\\/]|$)/.test(source),
+      `packaging 不应包含插件工具包/源码：${source}`,
+    );
   }
 });
 
-test("插件目录只存在于仓库根，且带发布说明（publish-plugin.mjs 是唯一入口）", () => {
+test("插件源码只在 plugin-kit/plugins，且发布走 publish-plugin.mjs", () => {
   const publish = readFileSync(join(__dirname, "..", "..", "scripts", "publish-plugin.mjs"), "utf8");
   assert.match(publish, /HEMING_PLUGIN_DIR/);
   assert.match(publish, /plugins-catalog/);
+  assert.ok(existsSync(join(__dirname, "..", "..", "plugin-kit", "plugins")));
 });
 
 test("界面插件（desktopWidget bundle）同样不随安装包分发（d.98）", () => {

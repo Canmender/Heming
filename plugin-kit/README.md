@@ -9,8 +9,8 @@
 ## 30 秒上手
 
 ```bash
-pnpm plugin:new acme.hello --name 问候工具   # 生成骨架并自动校验
-pnpm plugin:lint                              # 批量校验（含 plugin-kit/examples）
+pnpm plugin:new acme.hello --name 问候工具   # 生成到 plugin-kit/plugins/ 并自动校验
+pnpm plugin:lint                              # 批量校验（真实插件 + examples）
 pnpm plugin:check                             # CI 口径：构建 + 校验 + schema 一致性
 ```
 
@@ -22,6 +22,7 @@ pnpm plugin:check                             # CI 口径：构建 + 校验 + sc
 
 | 你想…… | 看这里 |
 |---|---|
+| 看/改真实插件源码 | [`plugins/`](plugins/README.md)：InfoHub 采集桥、桌宠、工作流引擎 |
 | 先跑起来、抄一份能用的 | [`examples/`](examples/README.md)，四份可 lint 通过的完整示例 |
 | 知道字段与语义（契约） | [`STANDARD.md`](STANDARD.md) |
 | 知道怎么做（操作标准 + 检查清单） | [`AUTHORING.md`](AUTHORING.md) |
@@ -68,7 +69,7 @@ node scripts/plugin-lint.mjs plugin-kit/examples/_invalid/demo-bad/plugin.json
 
 | 命令 | 作用 |
 |---|---|
-| `pnpm plugin:new <id> [--name …] [--kind manifest\|bundle]` | 生成骨架（v5 声明式 / v4 界面插件），自动填 `$schema` 与 `engines.heming` |
+| `pnpm plugin:new <id> [--name …] [--kind manifest\|bundle]` | 生成骨架到 `plugin-kit/plugins/`（v5 声明式 / v4 界面插件），自动填 `$schema` 与 `engines.heming` |
 | `pnpm plugin:lint` | 批量校验仓库里的插件与示例 |
 | `pnpm plugin:check` | 构建 shared → 批量校验 → schema 一致性（CI 用，失败即非 0） |
 | `pnpm plugin:schema` | 重新生成 `plugin-kit/plugin.schema.json`（改了清单字段才需要） |

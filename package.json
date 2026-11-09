@@ -1,16 +1,16 @@
 {
   "name": "heming",
   "private": true,
-  "version": "121.3.47",
+  "version": "122.3.47",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r build && pnpm -r test",
     "typecheck": "pnpm -r build && pnpm -r typecheck",
     "dist:desktop": "pnpm --filter @heming/desktop dist",
     "plugin:new": "node scripts/new-plugin.mjs",
-    "plugin:lint": "node scripts/plugin-lint.mjs --dir plugins && node scripts/plugin-lint.mjs --dir plugin-kit/examples --skip _invalid",
+    "plugin:lint": "node scripts/plugin-lint.mjs --dir plugin-kit/plugins --skip dist,release,pet-widget && node scripts/plugin-lint.mjs plugin-kit/plugins/pet-widget/plugin.json --source && node scripts/plugin-lint.mjs --dir plugin-kit/examples --skip _invalid",
     "plugin:schema": "node scripts/plugin-schema.mjs",
-    "plugin:check": "pnpm --filter @heming/shared build && node scripts/plugin-lint.mjs --dir plugins && node scripts/plugin-lint.mjs --dir plugin-kit/examples --skip _invalid && node scripts/plugin-schema.mjs --check",
+    "plugin:check": "pnpm --filter @heming/shared build && node scripts/plugin-lint.mjs --dir plugin-kit/plugins --skip dist,release,pet-widget && node scripts/plugin-lint.mjs plugin-kit/plugins/pet-widget/plugin.json --source && node scripts/plugin-lint.mjs --dir plugin-kit/examples --skip _invalid && node scripts/plugin-schema.mjs --check",
     "plugin:pack": "node scripts/pack-plugin.mjs",
     "plugin:publish": "node scripts/publish-plugin.mjs",
     "version:bump": "node scripts/bump-version.mjs",
@@ -24,5 +24,5 @@
       "electron"
     ]
   },
-  "hemingVersion": "d.121.3.47.0"
+  "hemingVersion": "d.122.3.47.0"
 }

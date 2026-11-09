@@ -22,7 +22,15 @@ import {
 import { mcpRegistry, type McpRegistry } from "../lib/mcp/index.js";
 import { skillPool, type SkillPool } from "../lib/skills/index.js";
 import { useUiStore, type PageView } from "../store/ui.js";
-import { PackageIcon } from "./icons.js";
+import {
+  AlertIcon,
+  CheckIcon,
+  DownloadIcon,
+  FileIcon,
+  PackageIcon,
+  PlugIcon,
+  XIcon,
+} from "./icons.js";
 import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { InstallDialog } from "./plugins/InstallDialog.js";
@@ -520,8 +528,33 @@ export function PluginsPage({
       <PluginStats stats={stats} />
 
       {msg && (
-        <div role="status" className={`mb-4 ${msg.kind === "error" ? ERROR_TEXT : OK_TEXT}`}>
-          {msg.text}
+        <div
+          role="status"
+          className={`plugin-rise mb-4 flex items-start gap-2.5 rounded-xl border px-3 py-2.5 ${
+            msg.kind === "error"
+              ? "border-[var(--danger-line)] bg-[var(--danger-soft)]"
+              : "border-line-soft bg-[var(--subtle-2)]"
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className={`mt-0.5 shrink-0 ${
+              msg.kind === "error" ? "text-[var(--danger)]" : "text-[var(--success)]"
+            }`}
+          >
+            {msg.kind === "error" ? <AlertIcon width={14} height={14} /> : <CheckIcon width={14} height={14} />}
+          </span>
+          <p className={`min-w-0 flex-1 ${msg.kind === "error" ? ERROR_TEXT : OK_TEXT}`}>
+            {msg.text}
+          </p>
+          <button
+            type="button"
+            aria-label="关闭提示"
+            onClick={() => setMsg(null)}
+            className="shrink-0 rounded-sm p-0.5 text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
+          >
+            <XIcon width={13} height={13} />
+          </button>
         </div>
       )}
 
@@ -576,15 +609,17 @@ export function PluginsPage({
         {tab === "plugins" && (
           <>
             {/* 安装入口放在列表上方（页头右上角的全局按钮已移除）：云端优先，粘贴清单兜底。 */}
-            <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] p-2.5">
               <button
                 type="button"
                 onClick={() => setRepoDialogOpen(true)}
                 className="ui-btn ui-btn-sm ui-btn-primary"
               >
+                <DownloadIcon width={13} height={13} aria-hidden="true" />
                 从云端安装
               </button>
               <button type="button" onClick={openInstall} className="ui-btn ui-btn-sm ui-btn-ghost">
+                <FileIcon width={13} height={13} aria-hidden="true" />
                 手动粘贴清单
               </button>
               <button
@@ -592,8 +627,12 @@ export function PluginsPage({
                 onClick={() => setCloudModulesOpen(true)}
                 className="ui-btn ui-btn-sm ui-btn-ghost"
               >
+                <PlugIcon width={13} height={13} aria-hidden="true" />
                 从云端安装模块
               </button>
+              <span className="ml-auto hidden ui-micro sm:inline">
+                安装只写本机清单，不运行代码
+              </span>
             </div>
 
             {orphanTotal > 0 && (
@@ -662,11 +701,11 @@ export function PluginsPage({
             {/* 声明式插件为空时的入口保持原样（统一列表里仍有系统/内置单元，所以不能复用空列表态） */}
             {list.length === 0 && (
               <section
-                className="mt-3 flex flex-col items-center gap-2 rounded-xl border border-line bg-white py-10 text-center shadow-card"
+                className="mt-3 flex flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] py-10 text-center shadow-card"
                 aria-label="暂无插件"
               >
-                <span className="text-muted" aria-hidden="true">
-                  <PackageIcon width={28} height={28} />
+                <span className="plugin-icon-tile mb-1 h-11 w-11" aria-hidden="true">
+                  <PackageIcon width={20} height={20} />
                 </span>
                 <p className="ui-section-title">还没有安装插件</p>
                 <p className="ui-caption">

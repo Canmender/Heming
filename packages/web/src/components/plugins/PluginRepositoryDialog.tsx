@@ -37,7 +37,7 @@ export function PluginRepositoryDialog({
         role="dialog"
         aria-modal="true"
         aria-label="云端插件库"
-        className="flex max-h-[86vh] w-full max-w-[860px] flex-col rounded-xl bg-white shadow-xl"
+        className="plugin-dialog-pop flex max-h-[86vh] w-full max-w-[860px] flex-col rounded-2xl border border-line bg-[var(--surface)] shadow-xl"
       >
         <div className="flex items-start gap-2 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">

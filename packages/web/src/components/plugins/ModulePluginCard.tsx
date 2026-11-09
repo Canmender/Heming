@@ -78,20 +78,21 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
 
   const statusLabel = !installed ? "未安装" : !enabled ? "已停用" : missing.length ? "待依赖" : "已启用";
   const statusTone = !installed
-    ? "border-line bg-[#f7f7f7] text-muted"
+    ? "plugin-tone-neutral"
     : effective
-      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-      : "border-amber-200 bg-amber-50 text-amber-700";
+      ? "plugin-tone-ok"
+      : "plugin-tone-warn";
 
   return (
     <section
       role="region"
       aria-label={`插件模块 ${mod.name}`}
       data-module-card={mod.id}
-      className="rounded-xl border border-line bg-white p-4 shadow-card"
+      data-enabled={installed && enabled}
+      className="ui-card plugin-card p-4"
     >
       <div className="flex flex-wrap items-start gap-3">
-        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line-soft bg-[#fafafa] text-ink">
+        <span className="plugin-icon-tile mt-0.5 h-9 w-9">
           <Icon width={18} height={18} />
         </span>
         <div className="min-w-0 flex-1">
@@ -137,11 +138,11 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
       <dl className="mt-3 grid gap-1.5 text-[11px] leading-5 sm:grid-cols-2">
         <div>
           <dt className="font-semibold text-muted">贡献</dt>
-          <dd className="text-[#444]">{moduleContributionText(mod)}</dd>
+          <dd className="text-[var(--body)]">{moduleContributionText(mod)}</dd>
         </div>
         <div>
           <dt className="font-semibold text-muted">本机数据（删除不清理）</dt>
-          <dd className="text-[#444]">
+          <dd className="text-[var(--body)]">
             {mod.storageKeys.length > 0
               ? `本机数据 ${mod.storageKeys.length} 项 · ${fmtBytes(occupancy)}`
               : "不占和鸣存储"}
@@ -153,7 +154,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
         {mod.requires?.length ? (
           <div className="sm:col-span-2">
             <dt className="font-semibold text-muted">依赖</dt>
-            <dd className={missing.length ? "text-[#8a5a00]" : "text-[#444]"}>
+            <dd className={missing.length ? "text-[var(--warn)]" : "text-[var(--body)]"}>
               需要「{mod.requires.map((id) => MODULE_BY_ID[id]?.name ?? id).join("、")}」启用
               {missing.length
                 ? `（当前未满足：${missing.map((id) => MODULE_BY_ID[id]?.name ?? id).join("、")}）`
@@ -163,7 +164,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
         ) : (
           <div className="sm:col-span-2">
             <dt className="font-semibold text-muted">依赖</dt>
-            <dd className="text-[#444]">
+            <dd className="text-[var(--body)]">
               无模块依赖，可独立安装/启停
               {mod.id === "automations"
                 ? "；运行时若信息中枢未连接，任务会如实报错，不影响本插件安装/启停"
@@ -208,7 +209,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
           </span>
         )}
         {notice ? (
-          <span role="status" className="ui-caption text-[#8a5a00]">
+          <span role="status" className="ui-caption text-[var(--warn)]">
             {notice}
           </span>
         ) : null}

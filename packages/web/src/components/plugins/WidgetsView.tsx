@@ -13,7 +13,7 @@ import {
   shouldShowPetMigrationHint,
 } from "../../lib/widgets/legacy.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
-import { PackageIcon, PlusIcon } from "../icons.js";
+import { AlertIcon, MinusIcon, PackageIcon, PlusIcon, RefreshIcon, SparkIcon } from "../icons.js";
 import { PluginInstallDialog } from "../PluginInstallDialog.js";
 import { ERROR_TEXT, HINT, Switch } from "./shared.js";
 
@@ -25,6 +25,9 @@ import { ERROR_TEXT, HINT, Switch } from "./shared.js";
  * - 宿主动作：显示隐藏、放大缩小、鼠标穿透、重置位置、打开设置（通用动作，不用插件声明）；
  * - 生命周期：启用/停用、卸载（二次确认，文案写明会删文件与设置）；
  * - 安装：云端目录 bundle / 本地 `.tgz`（新弹窗，与声明式安装分开）。
+ *
+ * 2026-11 UI/UX 轮：卡片按「身份 / 运行状态 / 动作」三层排布，缩放做成步进器，
+ * 窗口与交互状态用一格一格的状态条扫读；可访问名与动作名保持不变。
  *
  * 数据全部来自主进程（`widgets:list` 等），本页不读也不写 localStorage 的插件数据。
  */
@@ -98,9 +101,15 @@ export function WidgetsView() {
 
   if (!available) {
     return (
-      <section className="rounded-xl border border-line bg-white p-4 shadow-card" aria-label="桌面小组件">
-        <p className="ui-body-sm font-medium">桌面小组件</p>
-        <p className={`mt-1 ${HINT}`}>
+      <section
+        className="flex flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] py-10 text-center shadow-card"
+        aria-label="桌面小组件"
+      >
+        <span className="plugin-icon-tile mb-1 h-11 w-11" aria-hidden="true">
+          <AlertIcon width={20} height={20} />
+        </span>
+        <p className="ui-section-title">桌面小组件只在安装版里可用</p>
+        <p className={`max-w-[520px] ${HINT}`}>
           界面插件需要桌面窗口能力：装好后会在桌面上开一个独立窗口。浏览器里没有这个能力，
           本页只在安装版里可用。
         </p>
@@ -110,7 +119,7 @@ export function WidgetsView() {
 
   return (
     <div aria-label="桌面小组件">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] p-2.5">
         <button
           type="button"
           onClick={() => {
@@ -128,20 +137,35 @@ export function WidgetsView() {
           disabled={loading}
           className="ui-btn ui-btn-sm ui-btn-ghost"
         >
+          <RefreshIcon width={12} height={12} aria-hidden="true" />
           刷新
         </button>
-        <span className="ui-caption">
+        <span className="ml-auto ui-caption">
           {records.length > 0 ? `已安装 ${records.length} 个 · 界面插件含可执行代码` : "界面插件含可执行代码"}
         </span>
       </div>
 
       {msg && (
-        <p
+        <div
           role="status"
-          className={`mb-3 ${msg.kind === "error" ? ERROR_TEXT : "ui-body-sm text-muted"}`}
+          className={`plugin-rise mb-3 flex items-start gap-2.5 rounded-xl border px-3 py-2.5 ${
+            msg.kind === "error"
+              ? "border-[var(--danger-line)] bg-[var(--danger-soft)]"
+              : "border-line-soft bg-[var(--subtle-2)]"
+          }`}
         >
-          {msg.text}
-        </p>
+          <span
+            aria-hidden="true"
+            className={`mt-0.5 shrink-0 ${
+              msg.kind === "error" ? "text-[var(--danger)]" : "text-[var(--success)]"
+            }`}
+          >
+            <AlertIcon width={14} height={14} />
+          </span>
+          <p className={`min-w-0 flex-1 ${msg.kind === "error" ? ERROR_TEXT : "ui-body-sm text-muted"}`}>
+            {msg.text}
+          </p>
+        </div>
       )}
 
       {listError && (
@@ -153,45 +177,50 @@ export function WidgetsView() {
       {petHint && (
         <section
           aria-label="桌宠迁移提示"
-          className="mb-3 rounded-xl border border-[#e6e6e6] bg-[#fafafa] p-3"
+          className="plugin-rise mb-3 flex items-start gap-3 rounded-xl border border-line-soft bg-[var(--subtle-2)] p-3.5"
         >
-          <p className="ui-body-sm font-medium">桌宠已改为插件</p>
-          <p className={`mt-1 ${HINT}`}>
-            桌宠不再随本体安装，改成可安装的界面插件（`heming.pet`）。点「安装桌面小组件」→
-            云端目录或本地 `.tgz` 安装；装好后的设置与旧偏好会自动迁移。
-          </p>
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setMsg(null);
-                setInstallOpen(true);
-              }}
-              className="ui-btn ui-btn-sm ui-btn-primary"
-            >
-              去安装
-            </button>
-            <button
-              type="button"
-              onClick={() => setPetHint(false)}
-              className="ui-btn ui-btn-sm ui-btn-ghost"
-            >
-              知道了
-            </button>
+          <span className="plugin-icon-tile h-9 w-9" aria-hidden="true">
+            <SparkIcon width={16} height={16} />
+          </span>
+          <div className="min-w-0">
+            <p className="ui-body-sm font-medium">桌宠已改为插件</p>
+            <p className={`mt-1 ${HINT}`}>
+              桌宠不再随本体安装，改成可安装的界面插件（`heming.pet`）。点「安装桌面小组件」→
+              云端目录或本地 `.tgz` 安装；装好后的设置与旧偏好会自动迁移。
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMsg(null);
+                  setInstallOpen(true);
+                }}
+                className="ui-btn ui-btn-sm ui-btn-primary"
+              >
+                去安装
+              </button>
+              <button
+                type="button"
+                onClick={() => setPetHint(false)}
+                className="ui-btn ui-btn-sm ui-btn-ghost"
+              >
+                知道了
+              </button>
+            </div>
           </div>
         </section>
       )}
 
       {loaded && records.length === 0 ? (
         <section
-          className="flex flex-col items-center gap-2 rounded-xl border border-line bg-white py-10 text-center shadow-card"
+          className="flex flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] py-10 text-center shadow-card"
           aria-label="暂无桌面小组件"
         >
-          <span className="text-muted" aria-hidden="true">
-            <PackageIcon width={28} height={28} />
+          <span className="plugin-icon-tile mb-1 h-11 w-11" aria-hidden="true">
+            <PackageIcon width={20} height={20} />
           </span>
           <p className="ui-section-title">还没有安装桌面小组件</p>
-          <p className="ui-caption">
+          <p className="ui-caption max-w-[520px]">
             桌宠（`heming.pet`）就是一个桌面小组件：它会在桌面上开一个独立窗口，
             位置、缩放、鼠标穿透与设置都由宿主管理。
           </p>
@@ -211,35 +240,69 @@ export function WidgetsView() {
           {records.map((record) => {
             const state = states[record.id];
             const scale = state?.scale ?? record.widget.defaultScale;
+            const actionsDisabled = !record.enabled || Boolean(record.error);
+            const initial = Array.from(record.name)[0]?.toUpperCase() ?? "?";
             return (
               <section
                 key={record.id}
                 aria-label={`桌面小组件 ${record.name}`}
                 data-widget-id={record.id}
-                className="rounded-xl border border-line bg-white p-4 shadow-card"
+                data-enabled={record.enabled}
+                className="ui-card plugin-card p-4"
               >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="ui-body-sm font-bold">{record.name}</span>
-                  <span className="ui-chip">v{record.version}</span>
-                  <span className="ui-chip">{record.enabled ? "已启用" : "已停用"}</span>
-                  <span className="ui-chip">{state?.visible ? "显示中" : "已隐藏"}</span>
-                  <span className="ui-chip">{Math.round(scale * 100)}%</span>
-                  <span className="ui-chip">
-                    {state?.clickThrough ? "鼠标穿透" : "可点击"}
+                <div className="flex flex-wrap items-start gap-3">
+                  <span className="plugin-icon-tile h-10 w-10 text-[14px] font-bold" aria-hidden="true">
+                    {initial}
                   </span>
-                  <span className="ml-auto ui-caption">{record.id}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="ui-body-sm font-bold">{record.name}</span>
+                      <span className="ui-chip">v{record.version}</span>
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted">
+                        <span
+                          aria-hidden="true"
+                          className="plugin-dot"
+                          data-off={record.enabled ? undefined : "true"}
+                          data-warn={record.error ? "true" : undefined}
+                        />
+                        {record.enabled ? "已启用" : "已停用"}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 ui-caption">{record.id}</div>
+                  </div>
+                  <Switch
+                    label={`启用「${record.name}」`}
+                    checked={record.enabled}
+                    onChange={(next) => void onToggle(record.id, record.name, next)}
+                  />
                 </div>
 
                 {record.error && (
-                  <p role="alert" className={`mt-2 ${ERROR_TEXT}`}>
+                  <p
+                    role="alert"
+                    className={`mt-2 rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] px-3 py-2 ${ERROR_TEXT}`}
+                  >
                     这个小组件当前无法运行：{record.error}
                   </p>
                 )}
 
-                <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:max-w-[420px]">
+                  <div className="rounded-lg border border-line-soft bg-[var(--subtle-2)] px-2.5 py-1.5">
+                    <div className="ui-micro">窗口</div>
+                    <div className="ui-body-sm font-medium">{state?.visible ? "显示中" : "已隐藏"}</div>
+                  </div>
+                  <div className="rounded-lg border border-line-soft bg-[var(--subtle-2)] px-2.5 py-1.5">
+                    <div className="ui-micro">交互</div>
+                    <div className="ui-body-sm font-medium">
+                      {state?.clickThrough ? "鼠标穿透" : "可点击"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line-soft pt-3">
                   <button
                     type="button"
-                    disabled={!record.enabled || Boolean(record.error)}
+                    disabled={actionsDisabled}
                     onClick={() => void onAction(record.id, "toggle")}
                     className="ui-btn ui-btn-sm ui-btn-ghost"
                   >
@@ -247,36 +310,45 @@ export function WidgetsView() {
                   </button>
                   <button
                     type="button"
-                    disabled={!record.enabled || Boolean(record.error)}
-                    onClick={() => void onAction(record.id, "scaleUp")}
-                    className="ui-btn ui-btn-sm ui-btn-ghost"
-                  >
-                    放大一档
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!record.enabled || Boolean(record.error)}
-                    onClick={() => void onAction(record.id, "scaleDown")}
-                    className="ui-btn ui-btn-sm ui-btn-ghost"
-                  >
-                    缩小一档
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!record.enabled || Boolean(record.error)}
-                    onClick={() => void onAction(record.id, "toggleClickThrough")}
-                    className="ui-btn ui-btn-sm ui-btn-ghost"
-                  >
-                    {state?.clickThrough ? "关闭鼠标穿透" : "开启鼠标穿透"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!record.enabled || Boolean(record.error)}
+                    disabled={actionsDisabled}
                     onClick={() => void onAction(record.id, "resetPosition")}
                     className="ui-btn ui-btn-sm ui-btn-ghost"
                   >
                     重置位置
                   </button>
+                  <button
+                    type="button"
+                    disabled={actionsDisabled}
+                    onClick={() => void onAction(record.id, "toggleClickThrough")}
+                    className="ui-btn ui-btn-sm ui-btn-ghost"
+                  >
+                    {state?.clickThrough ? "关闭鼠标穿透" : "开启鼠标穿透"}
+                  </button>
+
+                  <div className="inline-flex items-center rounded-lg border border-line-soft bg-[var(--subtle-2)] p-0.5">
+                    <button
+                      type="button"
+                      aria-label="缩小一档"
+                      disabled={actionsDisabled}
+                      onClick={() => void onAction(record.id, "scaleDown")}
+                      className="rounded-md p-1 text-muted transition-colors hover:bg-[var(--surface)] hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <MinusIcon width={12} height={12} />
+                    </button>
+                    <span className="min-w-[42px] text-center ui-micro ui-numeric font-medium">
+                      {Math.round(scale * 100)}%
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="放大一档"
+                      disabled={actionsDisabled}
+                      onClick={() => void onAction(record.id, "scaleUp")}
+                      className="rounded-md p-1 text-muted transition-colors hover:bg-[var(--surface)] hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <PlusIcon width={12} height={12} />
+                    </button>
+                  </div>
+
                   <button
                     type="button"
                     onClick={openSettings}
@@ -287,17 +359,10 @@ export function WidgetsView() {
                   <button
                     type="button"
                     onClick={() => setRemoveTarget(record.id)}
-                    className="ui-btn ui-btn-sm ui-btn-ghost text-[#b42318]"
+                    className="ui-btn ui-btn-sm ui-btn-ghost ml-auto text-[#b42318]"
                   >
                     卸载
                   </button>
-                  <div className="ml-auto flex items-center gap-2">
-                    <Switch
-                      label={`启用「${record.name}」`}
-                      checked={record.enabled}
-                      onChange={(next) => void onToggle(record.id, record.name, next)}
-                    />
-                  </div>
                 </div>
 
                 <p className={`mt-2 ${HINT}`}>

@@ -87,17 +87,17 @@ JSON Schema 只描述形状，**不表达跨字段规则**（bundle 组合、MCP
 先 `pnpm --filter @heming/shared build`（或直接用 `pnpm plugin:check`，它会先构建）。
 
 **Q22：`pnpm plugin:check` 会校验模板吗？**
-不会：它校验 `plugins/` 与 `plugin-kit/examples/`，跳过 `_invalid` 与模板（模板里有 `{{id}}` 占位符，本就不是合法清单）。
+不会：它校验 `plugin-kit/plugins/` 与 `plugin-kit/examples/`，跳过 `_invalid` 与模板（模板里有 `{{id}}` 占位符，本就不是合法清单）。
 
 **Q23：示例里的 `_invalid/demo-bad` 为什么故意写错？**
 用来演示校验器怎么点名错误（缺 `engines`、host 未声明），并保证错误提示不会退化。别抄它。
 
 **Q24：插件应该放在仓库哪里？**
 ```
-plugins/<目录>/plugin.json        # 真实要发布/安装的包
+plugin-kit/plugins/<目录>/plugin.json   # 真实要发布/安装的包
 plugin-kit/examples/<目录>/       # 示例（不发布）
 ```
-`plugins/` 下带 `plugin.json` 的目录会被测试逐一校验（能解析、不含代码/密钥）。
+`plugin-kit/plugins/` 下带 `plugin.json` 的目录会被测试逐一校验（能解析、不含代码/密钥）。
 
 **Q25：改完清单要跑什么？**
 `pnpm plugin:lint`（单包也可 `node scripts/plugin-lint.mjs <目录>`）→ 应用里安装预览 → 发布前 `pnpm plugin:check`。

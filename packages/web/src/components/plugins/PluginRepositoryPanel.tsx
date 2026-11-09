@@ -5,6 +5,7 @@ import {
   type CatalogClientDeps,
 } from "../../lib/plugins/catalogClient.js";
 import { FOCUS_RING } from "../../lib/a11y/focus.js";
+import { SearchIcon } from "../icons.js";
 import { EmptyState } from "../ui/EmptyState.js";
 
 /**
@@ -72,14 +73,22 @@ export function PluginRepositoryPanel({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          aria-label="搜索插件仓库"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索插件名称 / id / 描述 / 作者…"
-          className="w-[280px] rounded-lg border border-line px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
-        />
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] p-2.5">
+        <div className="relative w-[280px] max-w-full">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted"
+          >
+            <SearchIcon width={13} height={13} />
+          </span>
+          <input
+            aria-label="搜索插件仓库"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索插件名称 / id / 描述 / 作者…"
+            className="ui-input h-8 pl-7 text-[12px]"
+          />
+        </div>
         <span className="ui-caption">
           {filtered ? `共 ${filtered.length} 个` : "正在读取目录…"} · 云端同一份插件仓库
         </span>
@@ -134,8 +143,14 @@ export function PluginRepositoryPanel({
             const key = `${entry.id}@${entry.version}`;
             const busy = loadingKey === key;
             return (
-              <li key={key} className="ui-card p-3">
+              <li key={key} className="ui-card plugin-card p-3">
                 <div className="flex flex-wrap items-start gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="plugin-icon-tile h-8 w-8 text-[12px] font-bold"
+                  >
+                    {Array.from(entry.name)[0]?.toUpperCase() ?? "?"}
+                  </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-[13px] font-bold">{entry.name}</span>
@@ -145,10 +160,10 @@ export function PluginRepositoryPanel({
                       <span
                         className={`ui-micro rounded-full border px-1.5 ${
                           state.tone === "new"
-                            ? "border-line text-muted"
+                            ? "plugin-tone-neutral"
                             : state.tone === "same"
-                              ? "border-[#abefc6] bg-[#ecfdf3] text-[#067647]"
-                              : "border-[#b2ddff] bg-[#eff8ff] text-[#175cd3]"
+                              ? "plugin-tone-ok"
+                              : "plugin-tone-info"
                         }`}
                       >
                         {state.text}

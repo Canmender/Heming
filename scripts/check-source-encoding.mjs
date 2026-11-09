@@ -9,7 +9,7 @@
  * - 带 NUL 的文件如果恰好是安全敏感路径（如 `shared/src/plugin/manifest.ts` 的清单解析器），
  *   review 工具看不到改动，恶意篡改更容易藏。
  *
- * 规则：`packages/**`、`docs/**`、`scripts/**`、`plugins/**`、`plugin-kit/**` 下 `.ts/.tsx/.js/.mjs/.md/.json/.css`
+ * 规则：`packages/**`、`docs/**`、`scripts/**`、`plugin-kit/**` 下 `.ts/.tsx/.js/.mjs/.md/.json/.css`
  * 不允许出现 0x00。注释里的转义应写成两个字符 `\0`（反斜杠 + 0），不是 NUL 字节。
  *
  * 用法：node scripts/check-source-encoding.mjs   （有 NUL → 退出码 1）
@@ -19,7 +19,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const ROOTS = ["packages", "docs", "scripts", "plugins", "plugin-kit"];
+const ROOTS = ["packages", "docs", "scripts", "plugin-kit"];
 const EXTS = new Set([".ts", ".tsx", ".js", ".mjs", ".md", ".json", ".css"]);
 const SKIP_DIRS = new Set(["node_modules", "dist", "release", "web-dist", ".git", "catalog"]);
 

@@ -67,3 +67,6 @@ module-catalog/
 
 # tsc -b 的增量构建信息（每次 typecheck 都会重写，不入库）
 *.tsbuildinfo
+
+# 本地 UI 自检临时目录（Electron userData / 截图，不入库）
+.ui-check-tmp/

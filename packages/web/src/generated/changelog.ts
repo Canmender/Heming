@@ -12,6 +12,32 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.122.3.47.0",
+    "date": "2026-11-10",
+    "title": "插件区新一轮打磨 + 插件源码收进 `plugin-kit/plugins`；程序侧补齐权限口径、部署包从 183MB 瘦到 26MB",
+    "bullets": [
+      "**迁移**：`plugins/infohub-collector` → `plugin-kit/plugins/infohub-collector`（清单 v3 → v5，`0.2.0`，技能/MCP/命令语义不变）；`packages/pet-widget` → `plugin-kit/plugins/pet-widget`（v4 bundle，",
+      "**插件区 UI**：能力概览改成 hero（图标 + 数值 + 构成说明）；安装面板改版（支持把 `plugin.json`拖进来、分区提示、权限区与校验区统一）；技能 / 工具 / MCP / 桌面小组件列表统一卡片式布局与空态；",
+      "**工具链**：`plugin:new` 默认输出改到 `plugin-kit/plugins`；`plugin-lint` 新增 `--source`（源码工程只校验清单，entry / packageSha256 交给 build+pack 的安装口径）；`build-pet-widget` /",
+      "**`permissions.files` 诚实口径**：它一直是预留字段、没有任何执行点，但界面只写「本轮只展示」，容易被当成「限制了文件访问」。现在非空即给 warning「不生效，建议删掉」，安装预览/详情改为",
+      "**`openPage` 白名单单一真源**：`shared/src/plugin/widget.ts` 新增 `WIDGET_ALLOWED_PAGES`（`WidgetPage` 由它派生），主进程两处运行期副本由新增的 `packages/desktop/widget-pages.test.js`",
+      "**部署包瘦身**：`release.mjs` 的排除表补上云端用不到的 `packages/desktop/resources`（magpie-core.exe ×2约 144MB）、`plugin-kit`、`vendor`、`.tmp-engine-*` 等，并让 `TAR_FORBIDDEN` 同步兜底；",
+      "**更新源清理**：远端 `/opt/heming/updates` 删掉 d.114（旧版），只留 d.115（上一版）+ 当前版。",
+      "`pnpm -r build` 通过；`pnpm -r test`：web / shared / pet-widget / desktop 全绿，server 首轮遇到Windows 上已知的 vitest worker 偶发崩溃（`0xC0000409`），单独重跑与随后两次全量重跑均 16 文件 / 264 例通过。",
+      "`pnpm -r typecheck` 六包零错误（含新位置的 pet-widget）；`pnpm plugin:check` 退出 0（Infohub/工作流 v5 + pet 源码工程 `--source` + 4 份示例 + schema 最新）；编码守卫覆盖 `plugin-kit`。",
+      "发布链路验证：`release.mjs --desktop --deploy` 实跑（见 HANDOFF §2 证据行）；`publish-update.mjs`发布新安装包并按远端大小 + sha512 校验。",
+      "工作流引擎仍是独立服务（自带构建/发布脚本），不随安装包分发；pet-widget 源码类型仍用手写桥类型，改用 `HemingWidgetApi` 需重打包签名（待办）。",
+      "`permissions.files` 只是「明示不生效」，没有实现文件权限——真要文件能力需另立规格（权限 + 沙箱 + 工具）。"
+    ],
+    "paragraphs": [
+      "两条线并行的一轮：插件内容（源码迁移 + 插件区 UI）与程序本体（权限口径、白名单单一真源、发布链瘦身）一起提交、一起上线。",
+      "插件内容（`plugin-kit/plugins` 成为唯一源）pnpm workspace 路径、构建脚本相对路径与 tsconfig `extends` 同步）；外部 n8n 工作流源码受控迁入`plugin-kit/plugins/workflow-kit`（`1.4.0`，独立服务，清单在 `plugin/plugin.json`）。深色模式补齐插件区皮肤变量（`index.css`）。`pack-plugin` 默认路径同步；`packaging.plugins.test.js` 的「插件不进安装包」守卫覆盖 `plugin-kit`。",
+      "程序本体「预留字段：当前不生效」，标准与 FAQ 同步。逐项比对——三处任何一处多一个/少一个都红。实测部署包 **183.3MB → 25.8MB**（清单 4000 → 约 1500 项，必需产物齐全）。",
+      "验证",
+      "边界"
+    ]
+  },
+  {
     "version": "d.121.3.47.0",
     "date": "2026-11-09",
     "title": "插件工具包落位：标准 / 编写 / 菜谱 / FAQ / 示例 / 模板 / schema 收进 `plugin-kit/`",

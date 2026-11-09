@@ -325,3 +325,49 @@ export const BookIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M12 6.5C13.5 5 15.5 4.5 20 5v14c-4.5-.5-6.5 0-8 1.5" />
   </svg>
 );
+
+/** 通过 / 正常：对勾。 */
+export const CheckIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </svg>
+);
+
+/** 提醒 / 异常：三角感叹号。 */
+export const AlertIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M12 4.5 21 20H3L12 4.5z" />
+    <path d="M12 10v4.5M12 17.5h.01" />
+  </svg>
+);
+
+/** 签名 / 权限：盾牌。 */
+export const ShieldIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M12 3.5 19 6v6c0 4.4-3 7.5-7 8.5-4-1-7-4.1-7-8.5V6l7-2.5z" />
+    <path d="M9 12l2 2 4-4" />
+  </svg>
+);
+
+/** 能力中枢：四角星。 */
+export const SparkIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M12 3.5l1.8 5.2L19 10.5l-5.2 1.8L12 17.5l-1.8-5.2L5 10.5l5.2-1.8L12 3.5z" />
+    <path d="M18.5 16.5l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z" />
+  </svg>
+);
+
+/** 缩小：减号。 */
+export const MinusIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5 12h14" />
+  </svg>
+);
+
+/** 刷新 / 重试：顺时针回转箭头。 */
+export const RefreshIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M20 11a8 8 0 1 0-2.3 6.3" />
+    <path d="M20 5v6h-6" />
+  </svg>
+);

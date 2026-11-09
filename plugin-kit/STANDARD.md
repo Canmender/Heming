@@ -518,7 +518,7 @@ bundle 包额外有 `package.tgz`（确定性 tar+gzip），由 `GET /api/plugin
 
 ### B. 完整声明式示例（技能 + MCP + 命令 + 工具束）
 
-见 `plugins/infohub-collector/plugin.json`（本机 MCP 服务）与 [`plugin-kit/examples/02-mcp-and-commands/`](examples/02-mcp-and-commands/)（技能 + MCP + 命令 + 工具束）。
+见 `plugin-kit/plugins/infohub-collector/plugin.json`（本机 MCP 服务）与 [`plugin-kit/examples/02-mcp-and-commands/`](examples/02-mcp-and-commands/)（技能 + MCP + 命令 + 工具束）。
 
 ### C. 字段速查
 

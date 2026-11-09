@@ -47,7 +47,16 @@ export function PluginPermissionList({
           {view.ceiling === "read" ? "（写工具不注入）" : ""}
         </dd>
         <dt className="text-muted">文件根</dt>
-        <dd>{view.files.length > 0 ? view.files.join("、") : "未声明（本轮只展示，不执行）"}</dd>
+        <dd>
+          {view.files.length > 0 ? (
+            <>
+              {view.files.join("、")}
+              <span className="ui-micro block text-muted">预留字段：当前不生效（插件不带文件工具）</span>
+            </>
+          ) : (
+            "未声明（预留字段，当前不生效）"
+          )}
+        </dd>
       </dl>
 
       {view.legacy && (

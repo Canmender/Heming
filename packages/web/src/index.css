@@ -446,6 +446,180 @@ samp {
       animation: none;
     }
   }
+
+  /*
+   * ── 插件区视觉层（2026-11 UI/UX 轮）──────────────────────────────
+   *
+   * 目标不是换一套配色，而是把「能力中枢」做出层次：
+   *   · hero 用主题色 4% 光晕托住概览，不抢正文；
+   *   · 图标砖统一 8% 主题色底，卡片之间靠留白与状态点区分；
+   *   · 悬浮只抬 1px + 柔和阴影，避免整页「弹跳」；
+   *   · 暗色下同样用变量混合，不写死亮色。
+   */
+  .plugin-hero {
+    position: relative;
+    overflow: hidden;
+    border-radius: 16px;
+    border: 1px solid var(--line-soft);
+    background-color: var(--surface);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.055);
+  }
+  .plugin-hero::after {
+    content: "";
+    position: absolute;
+    top: -120px;
+    right: -60px;
+    width: 300px;
+    height: 300px;
+    border-radius: 9999px;
+    background: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--heming-accent) 16%, transparent) 0%,
+      transparent 68%
+    );
+    pointer-events: none;
+  }
+  [data-theme="dark"] .plugin-hero {
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  }
+  [data-theme="dark"] .plugin-hero::after {
+    background: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--heming-accent) 10%, transparent) 0%,
+      transparent 68%
+    );
+  }
+  .plugin-icon-tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--heming-accent) 14%, var(--line-soft));
+    background: color-mix(in srgb, var(--heming-accent) 8%, var(--surface));
+    color: var(--ink);
+  }
+  .plugin-card {
+    position: relative;
+    overflow: hidden;
+    transition:
+      transform 160ms ease,
+      box-shadow 160ms ease,
+      border-color 160ms ease;
+  }
+  .plugin-card:hover {
+    transform: translateY(-1px);
+    border-color: var(--line);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.085);
+  }
+  [data-theme="dark"] .plugin-card:hover {
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  }
+  /* 启用态只用一条 2px 的左侧竖条提示，不整卡染色。 */
+  .plugin-card[data-enabled="true"]::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 14px;
+    bottom: 14px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--heming-accent);
+    opacity: 0.8;
+  }
+  .plugin-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--success);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 16%, transparent);
+  }
+  .plugin-dot[data-off="true"] {
+    background: var(--muted);
+    box-shadow: none;
+  }
+  .plugin-dot[data-warn="true"] {
+    background: var(--warn);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent);
+  }
+  .plugin-segment {
+    @apply inline-flex items-center rounded-md px-2.5 text-[11px] font-medium leading-6 transition-colors;
+    color: var(--muted);
+  }
+  .plugin-segment:hover {
+    color: var(--ink);
+  }
+  .plugin-segment[aria-pressed="true"] {
+    background-color: var(--surface);
+    color: var(--ink);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+  /* 状态徽标：用主题变量混色，亮/暗都保持同一语义，不再写死粉彩底色。 */
+  .plugin-tone-neutral {
+    border-color: var(--line);
+    background-color: var(--subtle-2);
+    color: var(--muted);
+  }
+  .plugin-tone-ok {
+    border-color: color-mix(in srgb, var(--success) 30%, transparent);
+    background-color: color-mix(in srgb, var(--success) 10%, transparent);
+    color: var(--success);
+  }
+  .plugin-tone-info {
+    border-color: color-mix(in srgb, var(--heming-accent) 26%, transparent);
+    background-color: color-mix(in srgb, var(--heming-accent) 8%, transparent);
+    color: var(--ink);
+  }
+  .plugin-tone-warn {
+    border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+    background-color: color-mix(in srgb, var(--warn) 10%, transparent);
+    color: var(--warn);
+  }
+  .plugin-tone-danger {
+    border-color: var(--danger-line);
+    background-color: var(--danger-soft);
+    color: var(--danger);
+  }
+  .plugin-rise {
+    animation: plugin-rise 280ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  .plugin-dialog-pop {
+    animation: plugin-dialog-pop 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .plugin-card,
+    .plugin-card:hover {
+      transform: none;
+      transition: none;
+    }
+    .plugin-rise,
+    .plugin-dialog-pop {
+      animation: none;
+    }
+  }
+}
+
+@keyframes plugin-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes plugin-dialog-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @keyframes ui-skeleton-pulse {

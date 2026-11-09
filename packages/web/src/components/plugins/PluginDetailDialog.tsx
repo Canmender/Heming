@@ -7,7 +7,7 @@ import type {
 } from "../../lib/plugins/index.js";
 import type { ToolPackGroup } from "./viewModel.js";
 import { useModalA11y } from "../useModalA11y.js";
-import { XIcon } from "../icons.js";
+import { PackageIcon, XIcon } from "../icons.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { PluginPermissionList } from "./PluginPermissionList.js";
 import {
@@ -89,16 +89,19 @@ export function PluginDetailDialog({
         role="dialog"
         aria-modal="true"
         aria-label={`插件详情 ${plugin.manifest.name}`}
-        className="flex max-h-[88vh] w-[min(640px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-white shadow-card"
+        className="plugin-dialog-pop flex max-h-[88vh] w-[min(660px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-[var(--surface)] shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
+        <div className="flex items-center gap-2.5 border-b border-line-soft px-4 py-3">
+          <span className="plugin-icon-tile h-8 w-8" aria-hidden="true">
+            <PackageIcon width={15} height={15} />
+          </span>
           <span className="ui-section-title">插件详情</span>
           <button
             type="button"
             aria-label="关闭插件详情"
             onClick={onClose}
-            className="rounded-sm p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
+            className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             <XIcon width={14} height={14} aria-hidden="true" />
           </button>
@@ -115,7 +118,7 @@ export function PluginDetailDialog({
             {plugin.manifest.id}
             {plugin.manifest.author ? ` · ${plugin.manifest.author}` : ""}
           </div>
-          <p className="mt-2 break-words ui-body-sm text-[#555]">
+          <p className="mt-2 break-words ui-body-sm text-muted">
             {plugin.manifest.description || "暂无描述"}
           </p>
           <div className={`mt-2 ${HINT}`}>
@@ -261,7 +264,7 @@ export function PluginDetailDialog({
                           className="flex flex-wrap items-center gap-2 ui-caption"
                         >
                           <span className="font-mono ui-body-sm">{name}</span>
-                          <span className={`${CHIP} text-[#8a5a00]`}>未连接/未提供</span>
+                          <span className={`${CHIP} text-[var(--warn)]`}>未连接/未提供</span>
                           <Switch
                             label={`启用工具 ${name}`}
                             checked={false}
@@ -310,7 +313,7 @@ export function PluginDetailDialog({
           </section>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-soft px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-soft bg-[var(--subtle-2)] px-4 py-2.5">
           <button type="button" onClick={onGoSkills} className={BTN_GHOST_SM}>
             查看技能
           </button>

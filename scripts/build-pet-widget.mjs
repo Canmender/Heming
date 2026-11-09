@@ -3,7 +3,7 @@
  * 桌宠界面插件包：构建（vite）→ 组装包根（plugin.json + files/**）。
  *
  * 产物：
- *   packages/pet-widget/dist/package/
+ *   plugin-kit/plugins/pet-widget/dist/package/
  *   ├── plugin.json      # 清单 v4（源文件在包根，这里重写为规范化 JSON）
  *   └── files/**         # vite 产物 + public/pet 资源 + 托盘图标
  *
@@ -19,7 +19,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const PKG = join(ROOT, "packages", "pet-widget");
+const PKG = join(ROOT, "plugin-kit", "plugins", "pet-widget");
 const DIST = join(PKG, "dist", "package");
 const FILES = join(DIST, "files");
 
@@ -121,5 +121,5 @@ console.log(
     `  plugin.json    ${manifest.id}@${manifest.version}\n` +
     `  files          ${files.length} 个文件 / ${(total / 1024 / 1024).toFixed(2)} MB（未压缩）\n` +
     `  入口           ${widget.entry}\n` +
-    `  下一步         pnpm --filter @heming/pet-widget pack`,
+    `  下一步         签名后 pnpm --filter @heming/pet-widget run pack（未签名会被 readPackage 拒绝）`,
 );

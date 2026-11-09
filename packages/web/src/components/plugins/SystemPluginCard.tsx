@@ -1,4 +1,5 @@
 import type { SystemPlugin } from "../../lib/plugins/index.js";
+import { ShieldIcon } from "../icons.js";
 import { CHIP } from "./shared.js";
 
 /**
@@ -14,9 +15,12 @@ export function SystemPluginCard({ system }: { system: SystemPlugin }) {
     <section
       aria-label="系统能力"
       data-testid="system-plugin-card"
-      className="mb-4 rounded-xl border border-line bg-panel p-4 shadow-card"
+      className="ui-card plugin-card mb-4 bg-[var(--panel)] p-4"
     >
       <div className="flex flex-wrap items-center gap-2">
+        <span className="plugin-icon-tile h-8 w-8" aria-hidden="true">
+          <ShieldIcon width={15} height={15} />
+        </span>
         <span className="text-[13px] font-extrabold">{system.name}</span>
         <span className={CHIP}>内置</span>
         <span className={CHIP}>置顶</span>

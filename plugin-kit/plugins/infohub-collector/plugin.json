@@ -1,10 +1,14 @@
 {
-  "schemaVersion": 3,
+  "$schema": "../../plugin.schema.json",
+  "schemaVersion": 5,
   "id": "heming.infohub-collector",
   "name": "InfoHub 采集桥",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "把本机 InfoHub（QQ/微信归档）接成和鸣的采集能力：采集状态、增量采集、归档检索、会话与日程。只连本机 127.0.0.1；采集会写本机归档，执行前仍要你确认。",
   "author": "和鸣",
+  "engines": {
+    "heming": "d.117"
+  },
   "permissions": {
     "network": ["127.0.0.1:8776"],
     "tools": "write",

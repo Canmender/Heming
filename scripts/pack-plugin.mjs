@@ -4,7 +4,7 @@
  *
  * 用法：
  *   node scripts/pack-plugin.mjs [包根目录] [--out <输出文件>]
- *   默认包根 = packages/pet-widget/dist/package
+ *   默认包根 = plugin-kit/plugins/pet-widget/dist/package
  *   默认输出 = <包根>/../package.tgz
  *
  * 为什么确定性：发布链路按 `sha256(package.tgz)` 做完整性校验，安装端要先比指纹再解包。
@@ -60,7 +60,7 @@ for (let i = 0; i < argv.length; i += 1) {
 // 只有缺省值才按仓库根定位标准产物目录。
 const PACKAGE_ROOT = rootArg
   ? resolve(process.cwd(), rootArg)
-  : resolve(ROOT, "packages/pet-widget/dist/package");
+  : resolve(ROOT, "plugin-kit/plugins/pet-widget/dist/package");
 const OUT_FILE = outArg
   ? resolve(process.cwd(), outArg)
   : resolve(PACKAGE_ROOT, "..", "package.tgz");

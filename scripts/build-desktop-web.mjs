@@ -49,7 +49,7 @@ if (!existsSync(join(WEB_DIST, "index.html"))) {
 }
 
 // 桌宠已从本体拆成界面插件（d.94）：本体的产物里**不应该**再有 pet.html——
-// 它的入口/资源现在由独立插件包（`packages/pet-widget` → `package.tgz`）提供，
+// 它的入口/资源现在由独立插件包（`plugin-kit/plugins/pet-widget` → `package.tgz`）提供，
 // 由 `widget://` 协议加载。这里反过来钉住「本体不再合并桌宠」：
 // 如果哪天有人把 pet 入口加回 vite.config 或 public/pet 没删，安装包会白白变大。
 if (existsSync(join(WEB_DIST, "pet.html"))) {

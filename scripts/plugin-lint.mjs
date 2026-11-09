@@ -7,12 +7,13 @@
  * 而不是装一次才知道哪一行错了。CI 也可以用它挡坏包。
  *
  * 用法：
- *   node scripts/plugin-lint.mjs plugins/infohub-collector/plugin.json
- *   node scripts/plugin-lint.mjs plugins/hello                 # 目录（找目录下的 plugin.json）
- *   node scripts/plugin-lint.mjs --dir plugins                 # 递归校验目录下所有 plugin.json
+ *   node scripts/plugin-lint.mjs plugin-kit/plugins/infohub-collector/plugin.json
+ *   node scripts/plugin-lint.mjs plugin-kit/plugins/infohub-collector   # 目录（找目录下的 plugin.json）
+ *   node scripts/plugin-lint.mjs --dir plugin-kit/plugins --skip dist,release   # 递归校验目录下所有 plugin.json
  *   node scripts/plugin-lint.mjs --dir plugin-kit/examples --skip _invalid
+ *   node scripts/plugin-lint.mjs plugin-kit/plugins/pet-widget/plugin.json --source
  *   node scripts/plugin-lint.mjs --json a.json                 # 机器可读输出（CI 用）
- *   node scripts/plugin-lint.mjs --dir plugins --strict        # warning 也算失败（CI 可选）
+ *   node scripts/plugin-lint.mjs --dir plugin-kit/plugins --strict        # warning 也算失败（CI 可选）
  *
  * 批量递归时**始终**跳过 `node_modules` 与点目录；`--skip` 按目录 basename 再跳过
  * 指定的名字（默认命令里对示例目录用 `--skip _invalid`：故意非法的样例不参与批量校验）。
@@ -21,6 +22,8 @@
  * `packages/desktop/plugin-package.js` 的 `validateBundleManifest(raw, { dev: true })`
  * （打包前模式：缺 `packageSha256` 不算错，格式给了仍严格校验），与安装端同一份规则。
  * 拿不到主进程模块时降级为「跳过 bundle 深度校验」并给出提示（退出码仍按 v5 结果算）。
+ * `--source` 用于界面插件的**源码工程**（清单与 `files/` 不同目录，产物在 `dist/package`）：
+ * 只校验清单本身，entry/`files/`/packageSha256 的磁盘比对交给 build + pack 后的产物。
  *
  * 退出码：0 = 全部通过（可能有 warning）；1 = 有错误（--strict 时 warning 也算）；
  *        2 = 用法 / 环境问题。
@@ -50,11 +53,12 @@ function usage() {
   console.error(
     [
       "用法：node scripts/plugin-lint.mjs <plugin.json...> | <目录...> | --dir <目录>",
-      "       [--skip <名字[,名字]>] [--strict] [--json]",
+      "       [--skip <名字[,名字]>] [--strict] [--source] [--json]",
       "",
       "  --dir     递归校验目录下所有 plugin.json（相对路径按仓库根解析）",
       "  --skip    递归时按目录 basename 跳过（始终跳过 node_modules 与点目录）",
       "  --strict  warning 也算失败（CI 可选）",
+      "  --source  源码工程模式：bundle 包根内容（entry/files/packageSha256）不在原地校验",
       "  --json    输出机器可读 JSON（含 strict 与跳过的目录名）",
     ].join("\n"),
   );
@@ -64,6 +68,7 @@ function usage() {
 const argv = process.argv.slice(2);
 let asJson = false;
 let strict = false;
+let sourceMode = false;
 let dirArg = null;
 const skipNames = new Set();
 const positionals = [];
@@ -76,6 +81,10 @@ for (let index = 0; index < argv.length; index += 1) {
   }
   if (arg === "--strict") {
     strict = true;
+    continue;
+  }
+  if (arg === "--source") {
+    sourceMode = true;
     continue;
   }
   if (arg === "--dir") {
@@ -236,26 +245,30 @@ function lintBundle(raw, display, file) {
 
   if (check.ok) {
     const dir = dirname(file);
-    // 安装端还会检查 entry 确实在包里；这里按磁盘上的包根提前暴露同一个问题。
-    const entry = check.widget && typeof check.widget.entry === "string" ? check.widget.entry : "";
-    if (entry) {
-      const entryFile = join(dir, ...entry.split("/"));
-      if (!existsSync(entryFile)) errors.push(`desktopWidgets[0].entry 指向的文件不存在：${entry}`);
-    }
-    if (raw.packageSha256 === undefined) {
-      warnings.push(
-        "打包前模式：尚未写 packageSha256（由 scripts/pack-plugin.mjs 在产物清单里写入、sign-plugin.mjs 写回源清单）；签名打包前不能安装。",
-      );
+    if (sourceMode) {
+      warnings.push("源码工程模式：跳过 entry/files/packageSha256 的磁盘比对（build + pack 后由产物清单校验）。");
     } else {
-      const entries = collectFilesEntries(dir);
-      if (!entries) {
-        errors.push("缺少 files/ 目录（界面插件包必须包含 files/**）。");
+      // 安装端还会检查 entry 确实在包里；这里按磁盘上的包根提前暴露同一个问题。
+      const entry = check.widget && typeof check.widget.entry === "string" ? check.widget.entry : "";
+      if (entry) {
+        const entryFile = join(dir, ...entry.split("/"));
+        if (!existsSync(entryFile)) errors.push(`desktopWidgets[0].entry 指向的文件不存在：${entry}`);
+      }
+      if (raw.packageSha256 === undefined) {
+        warnings.push(
+          "打包前模式：尚未写 packageSha256（由 scripts/pack-plugin.mjs 在产物清单里写入、sign-plugin.mjs 写回源清单）；签名打包前不能安装。",
+        );
       } else {
-        const actual = mod.computeFilesDigest(entries);
-        if (actual !== raw.packageSha256) {
-          errors.push(
-            `packageSha256 与 files/** 实际内容不一致（清单 ${String(raw.packageSha256).slice(0, 16)}…，实际 ${actual.slice(0, 16)}…）。`,
-          );
+        const entries = collectFilesEntries(dir);
+        if (!entries) {
+          errors.push("缺少 files/ 目录（界面插件包必须包含 files/**）。");
+        } else {
+          const actual = mod.computeFilesDigest(entries);
+          if (actual !== raw.packageSha256) {
+            errors.push(
+              `packageSha256 与 files/** 实际内容不一致（清单 ${String(raw.packageSha256).slice(0, 16)}…，实际 ${actual.slice(0, 16)}…）。`,
+            );
+          }
         }
       }
     }
@@ -271,9 +284,11 @@ function lintBundle(raw, display, file) {
     warnings,
     manifest: check.ok ? { id: String(raw.id ?? ""), version: String(raw.version ?? "") } : undefined,
     note: check.ok
-      ? raw.packageSha256 === undefined
-        ? "bundle 校验通过（安装口径，打包前模式）"
-        : "bundle 校验通过（安装口径；签名在安装链路验证）"
+      ? sourceMode
+        ? "bundle 清单校验通过（源码工程模式）"
+        : raw.packageSha256 === undefined
+          ? "bundle 校验通过（安装口径，打包前模式）"
+          : "bundle 校验通过（安装口径；签名在安装链路验证）"
       : undefined,
   };
 }

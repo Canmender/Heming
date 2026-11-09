@@ -1,0 +1,319 @@
+/*
+ * 工作流画布（public/canvas.js 的配套样式）。
+ *
+ * 为什么单独一份 CSS：canvas.js 是「无构建的经典脚本」，样式不能写在 JS 里靠工具抽取；
+ * 页面壳（app.js/style.css）只负责页面骨架与工具栏，画布内部结构（节点卡片、端口、
+ * 连线层、框选、画布工具条）的观感全在这里，改画布不用碰页面壳。
+ *
+ * 视觉口径按 docs/CONTRACT.md §7：字体 13–14px、卡片圆角 10px、边框 #e5e5e0、
+ * 主色 #1a1a1a；无 emoji，状态只用描边/底色表达。
+ */
+
+.wf-canvas {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  outline: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  color: #1a1a1a;
+  font: 13px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  /* 点阵网格：背景尺寸/偏移由 canvas.js 按缩放与平移实时改写 */
+  background-color: #fbfbf9;
+  background-image: radial-gradient(circle, #d8d8d1 1px, transparent 1px);
+  background-position: 0 0;
+  background-repeat: repeat;
+}
+
+.wf-canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(26, 26, 26, 0.28);
+}
+
+/* 空格按住表示「随时可平移」，光标先切 grab；真的拖动时换 grabbing。 */
+.wf-canvas--space {
+  cursor: grab;
+}
+.wf-canvas--panning {
+  cursor: grabbing;
+}
+
+/* ── 连线层 ─────────────────────────────────────────────────────────── */
+
+.wf-canvas__edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.wf-edge {
+  /* stroke 颜色/宽度由 canvas.js 按选中态写内联属性（SVG 属性比 class 稳） */
+  pointer-events: none;
+}
+
+.wf-edge--temp {
+  opacity: 0.85;
+}
+
+/* ── 世界层（跟随缩放/平移） ──────────────────────────────────────── */
+
+.wf-canvas__world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* ── 节点卡片 ─────────────────────────────────────────────────────── */
+
+.wf-node {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #e5e5e0;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  cursor: grab;
+}
+
+.wf-node:focus-visible {
+  outline: 2px solid #1a1a1a;
+  outline-offset: 2px;
+}
+
+.wf-node--selected {
+  border-color: #1a1a1a;
+  box-shadow: 0 0 0 2px rgba(26, 26, 26, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+/* 禁用节点：变淡 + 虚线边，一眼能看出「不会跑」 */
+.wf-node--disabled {
+  opacity: 0.55;
+  border-style: dashed;
+  cursor: default;
+}
+
+/* 运行态描边：running 的呼吸动画只在 CSS 里，测试只断言 data-run-state，不依赖动画 */
+.wf-node[data-run-state="running"] {
+  border-color: #1a1a1a;
+  animation: wf-node-pulse 1.6s ease-in-out infinite;
+}
+.wf-node[data-run-state="success"] {
+  border-color: #2f7d4f;
+}
+.wf-node[data-run-state="error"] {
+  border-color: #c43d3d;
+}
+
+@keyframes wf-node-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(26, 26, 26, 0.22);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(26, 26, 26, 0.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wf-node[data-run-state="running"] {
+    animation: none;
+  }
+}
+
+/* 类型字形（无图标库：按节点 type 映射 1–3 个字/字母，未知用类型缩写） */
+.wf-node__glyph {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #f1f1ec;
+  color: #4a4a44;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+}
+
+.wf-node__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.wf-node__title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-node__sub {
+  font-size: 11px;
+  color: #8a8a82;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-node__badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.wf-node__items {
+  font-size: 10px;
+  line-height: 16px;
+  color: #4a4a44;
+  background: #f1f1ec;
+  border-radius: 5px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
+.wf-node__items[hidden] {
+  display: none;
+}
+
+/* pinData 小标记：一根小图钉，不抢节点名的视觉重心 */
+.wf-node__pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: #6a6a62;
+}
+
+.wf-node__pin[hidden] {
+  display: none;
+}
+
+/* ── 端口 ─────────────────────────────────────────────────────────── */
+
+.wf-node__port {
+  position: absolute;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid #b9b9b1;
+  border-radius: 50%;
+  background: #ffffff;
+  transform: translateY(-50%);
+  cursor: crosshair;
+}
+
+.wf-node__port--input {
+  left: -7px;
+}
+
+.wf-node__port--output {
+  right: -7px;
+}
+
+.wf-node:hover .wf-node__port {
+  border-color: #1a1a1a;
+}
+
+/* 拖线时最近的可落输入口：实心高亮 */
+.wf-node__port--active {
+  border-color: #1a1a1a;
+  background: #1a1a1a;
+}
+
+/* ── 框选 ─────────────────────────────────────────────────────────── */
+
+.wf-canvas__box {
+  position: absolute;
+  display: block;
+  border: 1px solid #1a1a1a;
+  background: rgba(26, 26, 26, 0.06);
+  pointer-events: none;
+}
+
+.wf-canvas__box[hidden] {
+  display: none;
+}
+
+/* ── 画布内工具条（缩放/适配；页面壳不需要再提供） ───────────────── */
+
+.wf-canvas__toolbar {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #e5e5e0;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.wf-canvas__btn {
+  box-sizing: border-box;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #4a4a44;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wf-canvas__btn:hover {
+  background: #f1f1ec;
+}
+
+.wf-canvas__btn:focus-visible {
+  outline: 2px solid #1a1a1a;
+  outline-offset: 1px;
+}
+
+.wf-canvas__zoom {
+  min-width: 46px;
+  text-align: center;
+  font-size: 11px;
+  color: #6a6a62;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 空态 ─────────────────────────────────────────────────────────── */
+
+.wf-canvas__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a8a82;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.wf-canvas__empty[hidden] {
+  display: none;
+}

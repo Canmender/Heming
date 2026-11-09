@@ -5,7 +5,7 @@
 > **d.98 起桌宠不再内置在主程序里**：它是和鸣的第一个**界面插件**，从云端插件目录下载安装，
 > 代码、Live2D 模型与 Cubism Core 全部随插件包走，主程序里没有 pet 入口、没有 pixi、没有 5MB 模型。
 > 设计契约见 [`superpowers/specs/2026-11-07-d98-pet-as-plugin.md`](superpowers/specs/2026-11-07-d98-pet-as-plugin.md)；
-> 插件通用规则见 [`PLUGINS.md`](PLUGINS.md) §10，插件包自身说明见 `packages/pet-widget/README.md`。
+> 插件通用规则见 [`PLUGINS.md`](PLUGINS.md) §10，插件包自身说明见 `plugin-kit/plugins/pet-widget/README.md`。
 
 本文面向两类读者：**使用者**（怎么装、怎么用、哪里调）与 **维护者**（改哪里、怎么打包、怎么排查）。
 
@@ -41,7 +41,7 @@
 ## 2. 架构：谁负责什么
 
 ```
-插件包 packages/pet-widget/                       ← 独立 workspace 包，构建成 plugin.json + files/**
+插件包 plugin-kit/plugins/pet-widget/          ← 独立 workspace 包，构建成 plugin.json + files/**
    ├─ src/main.tsx / index.html                   ← 独立渲染入口（React + pixi6 + Live2D）
    ├─ src/components/pet/**                       ← 画面/输入/气泡/角标/右键菜单/拖拽
    ├─ src/lib/widgetBridge.ts                     ← window.__heming_widget 契约（容错包装）
@@ -104,9 +104,9 @@
 - 构建与发布：
 
 ```bash
-node scripts/build-pet-widget.mjs                     # → packages/pet-widget/dist/package/
-node scripts/pack-plugin.mjs packages/pet-widget/dist/package   # → dist/package.tgz（sha256 可复现）
-node scripts/publish-plugin.mjs packages/pet-widget/dist/package --dest <plugin-dir>
+node scripts/build-pet-widget.mjs                     # → plugin-kit/plugins/pet-widget/dist/package/
+node scripts/pack-plugin.mjs plugin-kit/plugins/pet-widget/dist/package   # → dist/package.tgz（sha256 可复现）
+node scripts/publish-plugin.mjs plugin-kit/plugins/pet-widget/dist/package --dest <plugin-dir>
 # 把 <plugin-dir> 同步到服务器 HEMING_PLUGIN_DIR，客户端「插件区 → 桌面小组件 → 从云端浏览」即可看到
 ```
 
@@ -116,13 +116,13 @@ node scripts/publish-plugin.mjs packages/pet-widget/dist/package --dest <plugin-
 
 ### 5.1 换形象
 
-把标准 Cubism 3/4 模型放进插件包的 `files/pet/<名字>/`（构建前放 `packages/pet-widget/public/pet/<名字>/`），
+把标准 Cubism 3/4 模型放进插件包的 `files/pet/<名字>/`（构建前放 `plugin-kit/plugins/pet-widget/public/pet/<名字>/`），
 在设置区「Live2D 模型路径」填 `pet/<名字>/<名字>.model3.json`（相对插件包 `files/`）。
 换完自动重载插件窗口。模型缺某个动作组不会报错——`playMotion` 找不到就静默跳过。
 
 ### 5.2 加一种姿态
 
-打开 `packages/pet-widget/src/lib/petPose.ts`：`PetPose` 联合里加一项 → `PET_POSES` 里给 `enterMotion`/`mouth` 映射 →
+打开 `plugin-kit/plugins/pet-widget/src/lib/petPose.ts`：`PetPose` 联合里加一项 → `PET_POSES` 里给 `enterMotion`/`mouth` 映射 →
 `resolvePose` 优先级链里决定何时生效。测试会检查「每个姿态都有映射」。**克制**：只有「开心」配了进入动作，
 常驻窗口里每种状态都播动作会变噪音。
 

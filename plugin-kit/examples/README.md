@@ -1,6 +1,6 @@
 # 插件示例（不发布，只用于学习与校验）
 
-五份示例都放在 `plugin-kit/examples/` 下；真实要发布/安装的插件放仓库根的 `plugins/`。
+五份示例都放在 `plugin-kit/examples/` 下；真实要发布/安装的插件放 [`plugin-kit/plugins/`](../plugins/README.md)。
 
 | 示例 | 形态 | 教会你 |
 |---|---|---|
@@ -13,7 +13,7 @@
 ```bash
 # 校验全部合法示例（_invalid 默认跳过）
 node scripts/plugin-lint.mjs --dir plugin-kit/examples --skip _invalid
-pnpm plugin:lint          # 等价：批量校验 plugins/ + plugin-kit/examples
+pnpm plugin:lint          # 等价：批量校验 plugin-kit/plugins + plugin-kit/examples
 
 # 看故意报错长什么样（退出码 1）
 node scripts/plugin-lint.mjs plugin-kit/examples/_invalid/demo-bad/plugin.json

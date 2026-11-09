@@ -12,6 +12,7 @@ import {
   type PluginHealth,
   type PluginHealthLevel,
 } from "../../lib/plugins/index.js";
+import { SearchIcon } from "../icons.js";
 import { BTN_GHOST_SM, CHIP, HINT } from "./shared.js";
 
 /**
@@ -67,23 +68,23 @@ export function unitStatusLabel(status: UnitStatus): string {
 }
 
 const STATUS_TONE: Record<string, string> = {
-  生效: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  未安装: "border-line bg-[#f7f7f7] text-muted",
-  已停用: "border-line bg-[#f7f7f7] text-muted",
-  待依赖: "border-amber-200 bg-amber-50 text-amber-700",
-  不兼容: "border-red-200 bg-red-50 text-red-700",
-  部分停用: "border-amber-200 bg-amber-50 text-amber-700",
-  签名异常: "border-red-200 bg-red-50 text-red-700",
-  降级: "border-amber-200 bg-amber-50 text-amber-700",
-  未生效: "border-line bg-[#f7f7f7] text-muted",
+  生效: "plugin-tone-ok",
+  未安装: "plugin-tone-neutral",
+  已停用: "plugin-tone-neutral",
+  待依赖: "plugin-tone-warn",
+  不兼容: "plugin-tone-danger",
+  部分停用: "plugin-tone-warn",
+  签名异常: "plugin-tone-danger",
+  降级: "plugin-tone-warn",
+  未生效: "plugin-tone-neutral",
 };
 
 /* ───────────────────── 健康度徽标与修复入口（d.113） ───────────────────── */
 
 const HEALTH_TONE: Record<PluginHealthLevel, string> = {
-  ok: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  degraded: "border-amber-200 bg-amber-50 text-amber-700",
-  broken: "border-red-200 bg-red-50 text-red-700",
+  ok: "plugin-tone-ok",
+  degraded: "plugin-tone-warn",
+  broken: "plugin-tone-danger",
 };
 
 /** 健康度徽标：正常/降级/损坏；悬停展示全部 issue（诊断区另有明细）。 */
@@ -171,39 +172,47 @@ function UnitRow({
   const unit = status.unit;
   const label = unitStatusLabel(status);
   const reason = status.reason ? blockReasonText(status.reason) : "";
+  const initial = Array.from(unit.name)[0]?.toUpperCase() ?? "?";
   return (
     <section
       role="region"
       aria-label={`能力单元 ${unit.name}`}
-      className="ui-card"
+      className="ui-card plugin-card p-4"
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className={CHIP}>{UNIT_SOURCE_LABELS[unit.source]}</span>
-        <span className="truncate text-[13px] font-extrabold">{unit.name}</span>
-        <span className={CHIP}>v{unit.version}</span>
-        <span
-          className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${STATUS_TONE[label] ?? ""}`}
-          title={reason || label}
-        >
-          {label}
+      <div className="flex items-start gap-3">
+        <span aria-hidden="true" className="plugin-icon-tile h-9 w-9 text-[13px] font-bold">
+          {initial}
         </span>
-        {health && <HealthBadge health={health} />}
-        {repair}
-        {unit.readonly && <span className={CHIP}>只读</span>}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={CHIP}>{UNIT_SOURCE_LABELS[unit.source]}</span>
+            <span className="truncate text-[13px] font-extrabold">{unit.name}</span>
+            <span className={CHIP}>v{unit.version}</span>
+            <span
+              className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${STATUS_TONE[label] ?? ""}`}
+              title={reason || label}
+            >
+              {label}
+            </span>
+            {health && <HealthBadge health={health} />}
+            {repair}
+            {unit.readonly && <span className={CHIP}>只读</span>}
+          </div>
+          <div className={`mt-0.5 ${HINT}`}>
+            {unit.id}
+            {unit.source === "builtin" && unit.storageKeys?.length
+              ? ` · 本机数据 ${unit.storageKeys.length} 项`
+              : ""}
+          </div>
+          <p className="mt-1 ui-body-sm text-muted">{unit.description || "暂无描述"}</p>
+          <p className={`mt-1 ${HINT}`}>贡献：{contributionSummary(status)}</p>
+          {reason && (
+            <p className={`mt-1 ${HINT}`} role="note">
+              {reason}
+            </p>
+          )}
+        </div>
       </div>
-      <div className={`mt-0.5 ${HINT}`}>
-        {unit.id}
-        {unit.source === "builtin" && unit.storageKeys?.length
-          ? ` · 本机数据 ${unit.storageKeys.length} 项`
-          : ""}
-      </div>
-      <p className="mt-1 ui-body-sm text-muted">{unit.description || "暂无描述"}</p>
-      <p className={`mt-1 ${HINT}`}>贡献：{contributionSummary(status)}</p>
-      {reason && (
-        <p className={`mt-1 ${HINT}`} role="note">
-          {reason}
-        </p>
-      )}
     </section>
   );
 }
@@ -315,45 +324,57 @@ export function UnitListView({
 
   return (
     <div aria-label="已安装能力单元">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <input
-          aria-label="搜索插件"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="按名称、id、描述或贡献搜索"
-          className="ui-input min-w-[200px] max-w-[320px] flex-1"
-        />
-        <div role="group" aria-label="按来源筛选" className="flex flex-wrap items-center gap-1">
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] p-2.5">
+        <div className="relative min-w-[200px] max-w-[320px] flex-1">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted"
+          >
+            <SearchIcon width={13} height={13} />
+          </span>
+          <input
+            aria-label="搜索插件"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="按名称、id、描述或贡献搜索"
+            className="ui-input pl-7"
+          />
+        </div>
+        <div
+          role="group"
+          aria-label="按来源筛选"
+          className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-0.5"
+        >
           {sourceFilters.map((item) => (
             <button
               key={item.key}
               type="button"
               aria-pressed={source === item.key}
               onClick={() => setSource(item.key)}
-              className={`ui-btn ui-btn-sm ${
-                source === item.key ? "ui-btn-primary" : "ui-btn-ghost text-muted"
-              }`}
+              className="plugin-segment"
             >
               {item.label}
             </button>
           ))}
         </div>
-        <div role="group" aria-label="按状态筛选" className="flex items-center gap-1">
+        <div
+          role="group"
+          aria-label="按状态筛选"
+          className="inline-flex items-center gap-0.5 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-0.5"
+        >
           {STATUS_FILTERS.map((item) => (
             <button
               key={item.key}
               type="button"
               aria-pressed={statusFilter === item.key}
               onClick={() => setStatusFilter(item.key)}
-              className={`ui-btn ui-btn-sm ${
-                statusFilter === item.key ? "ui-btn-primary" : "ui-btn-ghost text-muted"
-              }`}
+              className="plugin-segment"
             >
               {item.label}
             </button>
           ))}
         </div>
-        <span className="ui-caption">
+        <span aria-live="polite" className="ml-auto ui-caption ui-numeric">
           {filterActive
             ? `匹配 ${visible.length} / 共 ${sourceUnits.length} 个单元`
             : `共 ${sourceUnits.length} 个单元`}
@@ -364,8 +385,11 @@ export function UnitListView({
         <section
           role="region"
           aria-label="筛选无结果"
-          className="flex flex-col items-center gap-2 rounded-xl border border-line bg-white py-10 text-center shadow-card"
+          className="flex flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] py-10 text-center shadow-card"
         >
+          <span aria-hidden="true" className="plugin-icon-tile mb-1 h-10 w-10">
+            <SearchIcon width={18} height={18} />
+          </span>
           <p className="ui-section-title">没有匹配的能力单元</p>
           <p className="ui-caption">换个关键词或来源，或清除筛选看全部。</p>
           <button type="button" onClick={clearFilters} className={`mt-1 ${BTN_GHOST_SM}`}>
@@ -374,7 +398,7 @@ export function UnitListView({
         </section>
       ) : (
         <ul className="grid gap-3">
-          {visible.map((status) => {
+          {visible.map((status, index) => {
             const custom = renderUnit?.(status) ?? null;
             const label = unitStatusLabel(status);
             const health = healthByUnitId?.[status.unit.id];
@@ -390,7 +414,8 @@ export function UnitListView({
               <li
                 key={`${status.unit.source}:${status.unit.id}`}
                 data-unit-id={status.unit.id}
-                className={`min-w-0 rounded-xl transition-shadow ${
+                style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
+                className={`plugin-rise min-w-0 rounded-xl transition-shadow ${
                   highlightUnitId === status.unit.id
                     ? "outline outline-2 outline-offset-2 outline-ink"
                     : ""
@@ -400,7 +425,7 @@ export function UnitListView({
                   <>
                     {/* 卡片自带的头部不统一（插件卡无来源徽标、系统卡写「内置」），
                         统一列表在卡片上方补一行来源/状态/健康度，扫读时四类来源才一致。 */}
-                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                    <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-1">
                       <span className={CHIP}>{UNIT_SOURCE_LABELS[status.unit.source]}</span>
                       <span
                         className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${STATUS_TONE[label] ?? ""}`}
