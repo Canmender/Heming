@@ -9,7 +9,7 @@ import { createApp } from "./app.js";
 
 /**
  * 云端模块目录（d.117）：原生应用不再写死「内置模块」，只显示服务端真实提供的模块。
- * 目录可被 HEMING_MODULE_DIR / CreateAppOptions.moduleDir 覆盖；缺省回落到三条可选模块。
+ * 目录可被 HEMING_MODULE_DIR / CreateAppOptions.moduleDir 覆盖；缺省回落到四条可选模块。
  */
 
 let root = "";
@@ -29,9 +29,9 @@ function writeModule(dir: string, id: string, version: string, body: Record<stri
 }
 
 describe("createModuleCatalog", () => {
-  it("目录为空时回落到随服务端发布的三条可选模块", () => {
+  it("目录为空时回落到随服务端发布的四条可选模块", () => {
     const ids = createModuleCatalog({ dir: root }).list().map((entry) => entry.id);
-    expect(ids).toEqual(["automations", "infohub", "staff"]);
+    expect(ids).toEqual(["automations", "infohub", "staff", "workflows"]);
   });
 
   it("目录里的同名模块覆盖默认项；同一 id 只取最新版本；坏条目跳过", () => {

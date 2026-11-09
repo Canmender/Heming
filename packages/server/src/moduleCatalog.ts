@@ -18,7 +18,7 @@ import {
  * 来源优先级：
  * 1. `HEMING_MODULE_DIR`（或默认 `<cwd>/module-catalog`）里每个
  *    `<id>/<version>/module.json`（我们的目录条目形状，不是 module.tgz 里的清单）；
- * 2. 内置的三条目录项（随服务端发布，保证新部署也能看到可选模块）。
+ * 2. 内置的四条目录项（随服务端发布，保证新部署也能看到可选模块）。
  *
  * 服务端不解析模块代码、不执行任何东西；只回答「有哪些模块、版本、是否需要下载引擎」。
  */
@@ -49,11 +49,19 @@ const DEFAULT_MODULES: readonly ModuleCatalogEntry[] = [
     author: "和鸣",
     engine: null,
   },
+  {
+    id: "workflows",
+    name: "工作流",
+    version: "1.0.0",
+    description: "节点式自动化：触发器、分支、HTTP、代码、大模型与子流程，把要做的事一步步接起来。",
+    author: "和鸣",
+    engine: null,
+  },
 ];
 
 export interface ModuleCatalog {
   dir: string;
-  /** 每个 id 只给最新版本；目录不存在/为空时回落到随服务端发布的三条。 */
+  /** 每个 id 只给最新版本；目录不存在/为空时回落到随服务端发布的四条。 */
   list(): ModuleCatalogEntry[];
 }
 
