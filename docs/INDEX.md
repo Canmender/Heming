@@ -23,7 +23,6 @@
 | [KNOWLEDGE.md](KNOWLEDGE.md) | 知识库（**d.114 起为原生 vault**）：多库/任意目录、与 Obsidian 共用同一份 md、双链与反链/标签/搜索语法、编辑器三态、与智能体记忆双向绑定（笔记进召回、沉淀写回 `inbox/`）、写入边界与安全限制、排查表 |
 | [../plugin-kit/README.md](../plugin-kit/README.md) | **插件工具包（插件作者唯一入口）**：标准接口 [`STANDARD.md`](../plugin-kit/STANDARD.md)（版本/清单/贡献点/权限强制点/生命周期/运行时 API/分发）、编写标准 [`AUTHORING.md`](../plugin-kit/AUTHORING.md)、场景菜谱 [`COOKBOOK.md`](../plugin-kit/COOKBOOK.md)、[`FAQ.md`](../plugin-kit/FAQ.md)、四份可验证示例 [`examples/`](../plugin-kit/examples/README.md)、脚手架模板与编辑器 schema | 
 | [PLUGINS.md](PLUGINS.md) | 插件（能力包）实现说明：清单 v3 字段表、权限声明（网络/工具风险上限/文件根）、命令 target、安装/更新/停用/卸载语义、v1/v2 兼容与红线；**§10 界面插件（v4 bundle）**；**§11 清单 v5（d.107）**：`engines` 版本兼容、上架元数据、`prepare→persist→rollback` 安装事务、权限扩张重确认、防降级、兼容矩阵 |
-
 | [SKILL-HUB.md](SKILL-HUB.md) | 技能社区（d.109）：接入国内技能平台「虾评」的契约与边界——为什么走服务端代理（CORS/归一化/解包上限）、5 条接口与上游字段映射、6 步安装流程与安全上限、Key 管理（安全存储/不持久化）、信任合规、失败降级、配置开关与接第二个源的做法 |
 
 ## 3. 设计规格与实施记录
