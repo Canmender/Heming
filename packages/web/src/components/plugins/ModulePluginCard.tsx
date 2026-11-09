@@ -173,7 +173,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
         )}
       </dl>
 
-      <p className={`mt-2 ${HINT}`}>{installed ? mod.disableNote : "未安装：安装后即启用，同时出现在左侧导航里，可随时停用或删除。"}</p>
+      <p className={`mt-2 ${HINT}`}>{installed ? mod.disableNote : "未安装：安装后即启用，同时追加到左侧导航最下面，可随时停用或删除。"}</p>
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {installed ? (

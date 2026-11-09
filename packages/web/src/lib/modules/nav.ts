@@ -58,25 +58,25 @@ export function fallbackPage(page: Page, state: ModuleState): Page {
  *
  * 顺序按注册表（幕僚 / 信息中枢 / 自动化 / 工作流）而不是安装顺序：同一台设备每次
  * 启动的入口顺序必须稳定，否则用户会觉得导航「自己会动」。
- */
-export function moduleNavPages(state: ModuleState): NavPage[] {
+ */export function moduleNavPages(state: ModuleState): NavPage[] {
   return BUILTIN_MODULES.filter(
     (mod) => mod.contributions.page && isModuleEffective(state, mod.id),
   ).map((mod) => mod.page as NavPage);
 }
 
 /**
- * 把「已装模块」的入口并进导航顺序：紧跟在「插件」之后（能力组内），位置固定。
+ * 把「已装模块」的入口并进导航顺序：追加在**最后**（8 个宿主页的顺序原样不动）。
  *
- * 这是 d.119 的用户口径：**装上就在左侧导航看得到入口**，不用回插件页找「打开页面」。
- * 但它不写进 `heming.navOrder.v1`——个性化排序排的是宿主页，模块入口是「装出来的」，
+ * 口径（用户 2026-11-09 明确）：导航从上到下固定是
+ * 主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置，模块入口**不插在中间**，
+ * 只能挂在末尾（也在头像之上）。这样装了模块不会把「记忆 / 知识库」这些常用页往下推。
+ *
+ * 它不写进 `heming.navOrder.v1`——个性化排序排的是宿主页，模块入口是「装出来的」，
  * 参与排序会让同一份顺序在不同设备/不同安装状态下含义不一致（设置区也只排那 8 项）。
  * 卸载/停用模块后它自然消失（`isModuleEffective` 不成立）。
  */
 export function withModuleNav(order: readonly NavPage[], state: ModuleState): NavPage[] {
   const pages = moduleNavPages(state).filter((page) => !order.includes(page));
   if (pages.length === 0) return [...order];
-  const at = order.indexOf("plugins");
-  const insertAt = at >= 0 ? at + 1 : order.length;
-  return [...order.slice(0, insertAt), ...pages, ...order.slice(insertAt)];
+  return [...order, ...pages];
 }

@@ -123,12 +123,18 @@ describe("已装模块的导航入口（d.119）", () => {
     expect(withModuleNav(DEFAULT_NAV_ORDER, off)).not.toContain("workflows");
   });
 
-  it("已装且启用的模块排在「插件」之后，顺序按注册表稳定", () => {
+  it("已装且启用的模块追加在导航最后，8 个宿主页顺序原样不动", () => {
     const state = on();
     const order = withModuleNav(DEFAULT_NAV_ORDER, state);
-    expect(order.slice(3, 8)).toEqual(["plugins", "staff", "infohub", "automations", "workflows"]);
-    // 宿主页数量与相对顺序不变，模块入口不写进个性化顺序
-    expect(order.filter((p) => !moduleNavPages(state).includes(p))).toEqual(DEFAULT_NAV_ORDER);
+    // 前 8 项仍是用户期望的固定顺序（主页 → 设置），模块只挂在末尾
+    expect(order.slice(0, DEFAULT_NAV_ORDER.length)).toEqual(DEFAULT_NAV_ORDER);
+    expect(order.slice(DEFAULT_NAV_ORDER.length)).toEqual([
+      "staff",
+      "infohub",
+      "automations",
+      "workflows",
+    ]);
+    // 模块入口不写进个性化顺序
     expect(DEFAULT_NAV_ORDER).not.toContain("workflows");
   });
 
@@ -137,17 +143,7 @@ describe("已装模块的导航入口（d.119）", () => {
     state.installed.workflows = true;
     state.enabled.workflows = true;
     expect(moduleNavPages(state)).toEqual(["workflows"]);
-    expect(withModuleNav(DEFAULT_NAV_ORDER, state)).toEqual([
-      "home",
-      "team",
-      "chat",
-      "plugins",
-      "workflows",
-      "memory",
-      "vault",
-      "model",
-      "settings",
-    ]);
+    expect(withModuleNav(DEFAULT_NAV_ORDER, state)).toEqual([...DEFAULT_NAV_ORDER, "workflows"]);
   });
 
   it("幂等：顺序里已有模块页时不重复插", () => {

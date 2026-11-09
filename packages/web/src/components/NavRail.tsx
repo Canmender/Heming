@@ -33,8 +33,8 @@ import { navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
  *
  * **默认可视 8 项**：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置。
  * 另外还有 4 个**模块入口**（幕僚 / 信息中枢 / 自动化 / 工作流）：它们默认不出现，
- * 装好且启用后才由 `withModuleNav()` 插到「插件」之后（d.119 用户口径：
- * 装上就要在导航里看得到，不能只藏在插件页的模块卡里）。模块页不占数字快捷键。
+ * 装好且启用后才由 `withModuleNav()` 追加到**最下面**（d.119 用户口径：上面这 8 项
+ * 从上到下的顺序原样不动，模块入口不许插在中间）。模块页不占数字快捷键。
  *
  * 数字键沿用既有绑定：1 主页、2 团队、5 记忆、6 设置、8 智能体、0 插件；
  * 3 / 4 原是技能区 / 接口区，合并后空着不用——不给现有页凭空换号。
@@ -47,7 +47,7 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
   { page: "chat", label: "智能体", icon: <AssistantIcon width={17} height={17} />, digit: "8" },
   // 插件（能力中枢）：插件包 + 可安装的内置插件 + 技能 / 工具 / MCP / 组件
   { page: "plugins", label: "插件", icon: <PackageIcon width={17} height={17} />, digit: "0" },
-  // 模块入口（装好才进轨，排在「插件」之后；无数字键）
+  // 模块入口（装好才进轨，追加在导航末尾；无数字键）
   { page: "staff", label: "幕僚", icon: <StaffIcon width={17} height={17} /> },
   { page: "infohub", label: "信息中枢", icon: <InfoHubIcon width={17} height={17} /> },
   { page: "automations", label: "自动化", icon: <AutomationIcon width={17} height={17} /> },

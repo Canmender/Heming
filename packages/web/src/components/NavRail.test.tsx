@@ -39,14 +39,15 @@ describe("NavRail 图标轨（A 方案）", () => {
     }
   });
 
-  it("装上并启用模块后，导航里立刻出现入口（排在「插件」之后），停用后消失", () => {
+  it("装上并启用模块后，入口追加在导航最下面（8 项顺序不变），停用后消失", () => {
     useModuleStore.getState().install("workflows");
     render(<NavRail />);
     const labels = screen
       .getAllByRole("button")
       .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
-      .filter((label) => ["插件", "工作流", "记忆"].includes(label));
-    expect(labels).toEqual(["插件", "工作流", "记忆"]);
+      .filter((label) => ["主页", "插件", "记忆", "设置", "工作流"].includes(label));
+    // 宿主页顺序原样；模块只挂在最后（设置之后）
+    expect(labels).toEqual(["主页", "插件", "记忆", "设置", "工作流"]);
 
     // 停用（不是删除）→ 入口下线；重新启用 → 回来
     act(() => useModuleStore.getState().setEnabled("workflows", false));

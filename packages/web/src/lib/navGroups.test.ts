@@ -39,10 +39,9 @@ describe("导航分组", () => {
     expect(needsGroupDivider("plugins", "memory")).toBe(true);
     expect(needsGroupDivider("memory", "vault")).toBe(false);
     expect(needsGroupDivider("vault", "model")).toBe(false);
-    // 资料 → 系统
+    // 已装模块追加在末尾（设置之后）：与设置跨组画线，模块之间同组不画
     expect(needsGroupDivider("model", "settings")).toBe(true);
-    // 已装模块插在「插件」之后：与插件同组（不画线），与后面的资料之间画线
-    expect(needsGroupDivider("plugins", "workflows")).toBe(false);
-    expect(needsGroupDivider("workflows", "memory")).toBe(true);
+    expect(needsGroupDivider("settings", "workflows")).toBe(true);
+    expect(needsGroupDivider("staff", "workflows")).toBe(false);
   });
 });
