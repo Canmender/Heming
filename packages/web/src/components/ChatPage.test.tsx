@@ -3100,10 +3100,13 @@ describe("ChatPage", () => {
     render(<ChatPage />);
     await act(async () => {});
 
-    const scrollSpy = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
-    scrollSpy.mockClear();
+    const list = screen.getByTestId("message-list");
+    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    list.scrollTop = 1000; // 贴底
+    fireEvent.scroll(list);
 
-    // 贴底（默认）时新消息继续跟随
+    // 贴底（默认）时新消息继续跟随：只改消息容器的 scrollTop，不调用 scrollIntoView
     act(() => {
       lastHandlers().onEvent({
         type: "message_new",
@@ -3111,15 +3114,14 @@ describe("ChatPage", () => {
       });
     });
     expect(await screen.findByText("贴底新消息")).toBeInTheDocument();
-    expect(scrollSpy).toHaveBeenCalled();
+    expect(list.scrollTop).toBe(1000);
+    // 关键回归：贴底跟随只改消息容器的 scrollTop，绝不调用 scrollIntoView——
+    // 后者会连带滚动 App 里 overflow-hidden 的包裹层，把整页往上顶（「页面异常抬高」）。
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
 
     // 用户上滑：距底 500px（>80）→ 不再贴在底部
-    const list = screen.getByTestId("message-list");
-    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
-    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
     list.scrollTop = 100;
     fireEvent.scroll(list);
-    scrollSpy.mockClear();
 
     act(() => {
       lastHandlers().onEvent({
@@ -3128,11 +3130,11 @@ describe("ChatPage", () => {
       });
     });
     expect(await screen.findByText("离底新消息")).toBeInTheDocument();
-    expect(scrollSpy).not.toHaveBeenCalled(); // 不强行拽底
+    expect(list.scrollTop).toBe(100); // 不强行拽底
     const jump = screen.getByRole("button", { name: "滚动到最新消息" });
 
     fireEvent.click(jump);
-    expect(scrollSpy).toHaveBeenCalled(); // 点浮动按钮才回到底部
+    expect(list.scrollTop).toBe(1000); // 点浮动按钮才回到底部
     expect(screen.queryByRole("button", { name: "滚动到最新消息" })).not.toBeInTheDocument();
   });
 

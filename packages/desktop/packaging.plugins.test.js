@@ -64,6 +64,11 @@ test("选装模块（信息中枢引擎）不随安装包分发（d.116）", () 
       !/(^|[\\/])infohub([\\/]|$)/.test(source),
       `安装包不应携带模块引擎目录：${source}`,
     );
+    // 构建产物目录也不该被打进安装包（它们是发布到更新源的独立文件）
+    assert.ok(
+      !/(^|[\\/])module-catalog([\\/]|$)/.test(source),
+      `安装包不应携带模块发布目录：${source}`,
+    );
   }
   // 安装链路本身必须在本体里：缺了就是「点了安装也不会动」。
   const files = Array.isArray(build.files) ? build.files : [];

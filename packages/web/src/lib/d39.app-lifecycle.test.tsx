@@ -219,10 +219,10 @@ describe("F. 未知会话点击", () => {
     });
     expect(useUiStore.getState().page).toBe("chat");
     expect(useUiStore.getState().activeConversationId).toBe("ghost-conv");
-    // 会话行已不存在 → 智能体页回落到「选择一个智能体开始」，而不是崩或挂一个空壳聊天。
-    // 限定在主内容区：左侧名册也含「智能体」字样，全局查会命中多个。
+    // 会话行已不存在 → 智能体页回落到智能体选择页，而不是崩或挂一个空壳聊天。
+    // 限定在主内容区：左侧对话栏也可能出现「智能体」字样，全局查会命中多个。
     expect(
-      await within(screen.getByRole("main")).findByText("选择一个智能体开始"),
+      await within(screen.getByRole("main")).findByRole("heading", { name: "选择智能体" }),
     ).toBeInTheDocument();
   });
 });

@@ -1135,6 +1135,24 @@ export function ChatPage({
    */
   const [windowCount, setWindowCount] = useState(DEFAULT_WINDOW);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * 只滚消息容器本身，绝不调用 `scrollIntoView`。
+   *
+   * `scrollIntoView` 会把**所有可滚动祖先**一起滚动——包括 App 里
+   * `overflow-hidden` 的内容包裹层（overflow:hidden 仍然能被程序滚动）。
+   * 流式回答每来一段文本就调用一次时，整个页面会被往上顶几百像素，
+   * 表现就是「智能体一回答，页面异常抬高」。直接改本容器的 scrollTop
+   * 只影响消息列表，页面其它部分纹丝不动。
+   */
+  const scrollListToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (behavior === "smooth" && typeof el.scrollTo === "function") {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
   /** 追加历史前的 scrollHeight：渲染完成后据它补偿 scrollTop，避免内容整体下移一屏。 */
   const prevScrollHeightRef = useRef<number | null>(null);
   const windowedMessages = useMemo(
@@ -1168,8 +1186,8 @@ export function ChatPage({
     }
     atBottomRef.current = true;
     setWindowCount(DEFAULT_WINDOW);
-    bottomRef.current?.scrollIntoView({ behavior: "auto" });
-  }, [convId]);
+    scrollListToBottom("auto");
+  }, [convId, scrollListToBottom]);
 
   /**
    * 落位：消息到齐、DOM 高度足够后再设 scrollTop。
@@ -1264,7 +1282,19 @@ export function ChatPage({
         return;
       }
     }
-    document.getElementById(`msg-${activeSearchId}`)?.scrollIntoView({ block: "center" });
+    // 同样不用 scrollIntoView：它会把祖先的 overflow-hidden 包裹层也滚起来，
+    // 命中一条历史消息就整页抬高。这里按两个元素的相对位置只调消息列表的 scrollTop。
+    const list = scrollRef.current;
+    const node = document.getElementById(`msg-${activeSearchId}`);
+    if (!list || !node) return;
+    const listRect = list.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    const centered =
+      list.scrollTop +
+      (nodeRect.top - listRect.top) -
+      Math.max(0, (list.clientHeight - nodeRect.height) / 2);
+    const max = Math.max(0, list.scrollHeight - list.clientHeight);
+    list.scrollTop = Math.max(0, Math.min(centered, max));
   }, [searchOpen, activeSearchId, visibleMessages, windowCount]);
 
   const closeSearch = () => {
@@ -1930,11 +1960,12 @@ export function ChatPage({
     .join(",");
   useEffect(() => {
     if (atBottomRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      // 跟随新内容：直接贴底，不用 scrollIntoView（见 scrollListToBottom 注释）。
+      scrollListToBottom("auto");
     } else {
       setNewBelow(true);
     }
-  }, [messages.length, streamTick]);
+  }, [messages.length, streamTick, scrollListToBottom]);
 
   // I1 挂载清扫：上一轮卸载中止流后 socket 已关，finish/echo 收不到，store（整页刷新
   // 才会清空）里可能残留本会话的「生成中」孤儿项与 streamOwner 键。新挂载时 runsRef
@@ -2506,11 +2537,14 @@ export function ChatPage({
   // —— A3：滚动贴底与「↓ 新消息」 ——
 
   /** 主动回到底部（浮动按钮/切会话用）：同时重置贴底状态，后续继续跟随。 */
-  const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
-    atBottomRef.current = true;
-    setNewBelow(false);
-    bottomRef.current?.scrollIntoView({ behavior });
-  }, []);
+  const scrollToLatest = useCallback(
+    (behavior: ScrollBehavior = "smooth") => {
+      atBottomRef.current = true;
+      setNewBelow(false);
+      scrollListToBottom(behavior);
+    },
+    [scrollListToBottom],
+  );
 
   /**
    * 阅读位置写盘（d.83）：滚动时采样，节流 200ms 写一次；页面隐藏/卸载时补最后一次。
