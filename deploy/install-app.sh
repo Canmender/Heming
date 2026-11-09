@@ -31,6 +31,11 @@ echo "== 1/5 存档 $VERSION =="
 cp -f "$TAR" "$KEEP/heming-$VERSION.tar.gz"
 
 echo "== 2/5 解包与产物校验 =="
+# 解包是**覆盖式**（`tar -x` 到已有目录），所以上一版存在、这一版已删除/改名的目录会残留下来。
+# 残留目录仍在 `packages/*` / workspace 里时，`pnpm install --frozen-lockfile` 会把它当成多出来的
+# workspace 项目（清单与 lock 对不上）而失败——d.122 把 pet-widget 迁到 `plugin-kit/plugins/` 时就撞上了。
+# 已知的迁移清扫放在这里（幂等）：
+rm -rf "$APP/packages/pet-widget"   # d.122：迁至 plugin-kit/plugins/pet-widget
 tar -xzf "$KEEP/heming-$VERSION.tar.gz" -C "$APP"
 # 空站点/缺编译产物都不会在启动时报错，只会白屏或 502——比缺文件更难查，当场拦住。
 [ -f "$APP/packages/web/dist/index.html" ] || { echo "包里缺 packages/web/dist/index.html" >&2; exit 1; }
