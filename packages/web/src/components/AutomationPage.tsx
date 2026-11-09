@@ -203,7 +203,7 @@ export function AutomationPage() {
       )}
       {desktop && booted && !infohubRunning && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line-soft bg-[#fffdf5] px-3 py-2 ui-caption text-[#8a6d3b]">
-          <span>信息中枢未连接：到点的任务会被记为跳过并顺延，不会自动拉起本机进程。</span>
+          <span>信息中枢未连接：到点的任务会如实记为失败并顺延，不会自动拉起本机进程。</span>
           <button
             type="button"
             onClick={() => openInfohub()}
@@ -862,7 +862,7 @@ function AutomationEditor({
           </p>
 
           <div className="mt-4 rounded-lg border border-line-soft bg-[#fffdf5] p-3 text-[10px] leading-5 text-[#8a6d3b]">
-            执行前提：桌面端且信息中枢已连接。未连接时任务记为跳过并顺延，不会自动拉起本机进程；
+            执行前提：桌面端且信息中枢已连接。未连接时任务会如实记为失败并顺延，不会自动拉起本机进程；
             和鸣关闭期间错过的时刻不会补跑。
           </div>
 

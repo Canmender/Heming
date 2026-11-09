@@ -4,8 +4,10 @@ import {
   getMagpieCliBridge,
   parseAccounts,
   parseProviders,
+  readProviderShow,
   stripAnsi,
   tailText,
+  type MagpieCliBridge,
 } from "./magpieCli.js";
 
 /** 模型页命令桥的纯函数（d.99）：桥探测、输出解析、展示清洗。 */
@@ -75,6 +77,35 @@ describe("parseAccounts", () => {
     expect(parseAccounts("")).toEqual([]);
     expect(parseAccounts("not json")).toEqual([]);
     expect(parseAccounts("{}")).toEqual([]);
+  });
+});
+
+describe("readProviderShow", () => {
+  /** 按 `provider …` 的参数拼出回复；没列出的参数一律失败。 */
+  const fakeBridge = (replies: Record<string, string>) =>
+    ({
+      cli: vi.fn(async (args: string[]) => {
+        const text = replies[args.join(" ")];
+        return { ok: text !== undefined, stdout: text ?? "", stderr: text ? "" : "no such provider" };
+      }),
+    }) as unknown as MagpieCliBridge;
+
+  it("优先用 provider show <id>", async () => {
+    const cli = fakeBridge({ "provider show zhipu": "  chat  https://open.bigmodel.cn/api/paas/v4" });
+    const text = await readProviderShow(cli, "zhipu");
+    expect(text).toContain("open.bigmodel.cn");
+    expect(cli.cli).toHaveBeenCalledTimes(1);
+  });
+
+  it("内核没有 show 动词时退回 provider <id>", async () => {
+    const cli = fakeBridge({ "provider zhipu": "  chat  https://open.bigmodel.cn/api/paas/v4" });
+    const text = await readProviderShow(cli, "zhipu");
+    expect(text).toContain("chat");
+    expect(cli.cli).toHaveBeenCalledWith(["provider", "zhipu"]);
+  });
+
+  it("两条都失败返回空串（页面按普通地址展示）", async () => {
+    expect(await readProviderShow(fakeBridge({}), "gone")).toBe("");
   });
 });
 

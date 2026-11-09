@@ -3,10 +3,11 @@ import { useInfohubStore, canUseInfohub } from "./store.js";
 import type { InfohubBridgeInfo, InfohubStatus } from "./client.js";
 
 /**
- * 共享运行态（d.46）的两条硬约束：
+ * 共享运行态（d.115）的两条约束：
  *
- * 1. `boot()` 只探测，**绝不**拉起 Python 子进程——自动 spawn 会越过用户意图；
- * 2. 只有 `connect()`（用户显式点连接）才能启动，失败必须回可读错误。
+ * 1. `boot()` 只探测，不拉起 Python 子进程；
+ * 2. `ensureRunning()` 是模块生效后的自动入口：拉起 → 刷新 → 空库自动采集一次；
+ *    重复调用不会重复启动或重复采集，失败必须回可读错误。
  *
  * 其余用例钉住「停止后不残留旧数据」：否则首页卡会拿上一次连接的日程继续展示，
  * 工具也可能在进程已退出时仍被注入。
@@ -27,6 +28,12 @@ const agenda = {
   summary: { overdue: 0, today: 0, week: 0, total: 0 },
 };
 
+/** config.detect 的返回：微信 + QQNT 都识别到。 */
+const detectSources = {
+  wechat: { db_dir: "D:\wx", detected: true },
+  qq: { nt_db: "D:\qq\nt_msg.db", nt_account: "123", export_dir: "", detected: true },
+};
+
 function info(overrides: Partial<InfohubBridgeInfo> = {}): InfohubBridgeInfo {
   return {
     packageDir: "D:\\Heming\\packages\\infohub",
@@ -43,11 +50,29 @@ function info(overrides: Partial<InfohubBridgeInfo> = {}): InfohubBridgeInfo {
   };
 }
 
-function installBridge(options: { running?: boolean; startError?: Error } = {}) {
-  const call = vi.fn(async (method: string) => {
+function installBridge(
+  options: { running?: boolean; startError?: Error; engineError?: Error; engineInstalled?: boolean } = {},
+) {
+  const call = vi.fn(async (method: string): Promise<unknown> => {
     if (method === "status") return status;
     if (method === "agenda") return agenda;
+    if (method === "config.detect") {
+      return { applied: true, sources: detectSources, summary: { autoSyncOnStart: true } };
+    }
     return undefined;
+  });
+  let engineOn = options.engineInstalled ?? true;
+  const engineInfo = vi.fn(async () => ({
+    id: "heming.infohub-engine",
+    expectedVersion: "1.0.0",
+    installed: engineOn,
+    version: engineOn ? "1.0.0" : "",
+    base: "http://47.92.39.184/updates/modules",
+  }));
+  const ensureEngine = vi.fn(async () => {
+    if (options.engineError) throw options.engineError;
+    engineOn = true;
+    return { ...(await engineInfo()), installed: true, updated: true };
   });
   const bridge = {
     info: vi.fn(async () => info({ running: options.running ?? false })),
@@ -65,10 +90,13 @@ function installBridge(options: { running?: boolean; startError?: Error } = {}) 
     stop: vi.fn(async () => true),
     pickHome: vi.fn(async () => null),
     pickPython: vi.fn(async () => null),
+    engineInfo,
+    ensureEngine,
+    onEngine: vi.fn(() => () => {}),
     onEvent: vi.fn(() => () => {}),
   } as unknown as Bridge;
   (window as unknown as { __heming_infohub?: Bridge }).__heming_infohub = bridge;
-  return { bridge, call };
+  return { bridge, call, ensureEngine };
 }
 
 function resetStore() {
@@ -79,6 +107,9 @@ function resetStore() {
     info: null,
     status: null,
     agenda: null,
+    detected: null,
+    autoCollected: false,
+    autoNote: "",
     busy: "",
     error: "",
   });
@@ -132,7 +163,11 @@ describe("信息中枢共享状态", () => {
     await useInfohubStore.getState().connect();
 
     expect(bridge.start).toHaveBeenCalledWith({ home: HOME });
-    expect(call).toHaveBeenCalledWith("status", {}, { home: HOME });
+    expect(call).toHaveBeenCalledWith(
+      "status",
+      {},
+      { home: HOME, python: "C:\\py\\python.exe" },
+    );
     expect(useInfohubStore.getState()).toMatchObject({ running: true, busy: "", error: "" });
     expect(canUseInfohub()).toBe(true);
   });
@@ -151,6 +186,137 @@ describe("信息中枢共享状态", () => {
       error: "未找到可用的 Python 解释器",
     });
     expect(canUseInfohub()).toBe(false);
+  });
+
+  it("ensureRunning：模块生效即自动拉起，并空库自动采集一次", async () => {
+    const emptyStatus = {
+      home: HOME,
+      hasDb: false,
+      dbBytes: 0,
+      stats: { conversations: 0, messages: 0, per_source: {} },
+      config: {
+        autoDetect: true,
+        autoSyncOnStart: true,
+        wechat: { enabled: true, dbDir: "D:\\wx", detected: true },
+        qq: {
+          enabled: true,
+          mode: "nt",
+          ntAccount: "123",
+          ntDb: "D:\\qq\\nt_msg.db",
+          exportDir: "",
+          detected: true,
+          exportDetected: false,
+        },
+      },
+    } as unknown as InfohubStatus;
+    const { bridge, call } = installBridge();
+    call.mockImplementation(async (method: string) => {
+      if (method === "status") return emptyStatus;
+      if (method === "agenda") return agenda;
+      if (method === "sync") {
+        return { reports: [{ source: "qq", added: 3, errors: [] }], agenda: 1, kb: null };
+      }
+      return undefined;
+    });
+
+    await useInfohubStore.getState().ensureRunning();
+
+    expect(bridge.start).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledWith(
+      "sync",
+      { sources: ["qq", "wechat"], full: false, archive: false },
+      expect.anything(),
+    );
+    expect(useInfohubStore.getState()).toMatchObject({
+      running: true,
+      autoCollected: true,
+      autoNote: "自动采集完成：新增 3 条消息",
+    });
+  });
+
+  it("ensureRunning 重复调用：不重复启动、不重复采集", async () => {
+    const emptyStatus = {
+      home: HOME,
+      hasDb: false,
+      dbBytes: 0,
+      stats: { conversations: 0, messages: 0, per_source: {} },
+      config: {
+        autoDetect: true,
+        autoSyncOnStart: true,
+        wechat: { enabled: true, dbDir: "D:\\wx", detected: true },
+        qq: { enabled: true, mode: "nt", ntDb: "", exportDir: "", detected: false },
+      },
+    } as unknown as InfohubStatus;
+    const { bridge, call } = installBridge();
+    call.mockImplementation(async (method: string) => {
+      if (method === "status") return emptyStatus;
+      if (method === "agenda") return agenda;
+      if (method === "sync") return { reports: [], agenda: 0, kb: null };
+      return undefined;
+    });
+
+    await useInfohubStore.getState().ensureRunning();
+    await useInfohubStore.getState().ensureRunning();
+
+    expect(bridge.start).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls.filter(([method]) => method === "sync")).toHaveLength(1);
+  });
+
+  it("并发 ensureRunning（App 与页面同时进入）：共用一次启动，不误报失败", async () => {
+    const { bridge, ensureEngine } = installBridge();
+
+    await Promise.all([
+      useInfohubStore.getState().ensureRunning(),
+      useInfohubStore.getState().ensureRunning(),
+    ]);
+
+    expect(bridge.start).toHaveBeenCalledTimes(1);
+    expect(ensureEngine).toHaveBeenCalledTimes(1);
+    expect(useInfohubStore.getState()).toMatchObject({ running: true, error: "" });
+  });
+
+  it("引擎未装：先下载安装再启动，进度写进自动状态", async () => {
+    const { bridge, ensureEngine } = installBridge({ engineInstalled: false });
+    const pending = useInfohubStore.getState().ensureRunning();
+    await pending;
+
+    expect(ensureEngine).toHaveBeenCalledTimes(1);
+    expect(bridge.start).toHaveBeenCalledTimes(1);
+    expect(useInfohubStore.getState()).toMatchObject({ running: true, error: "" });
+    expect(useInfohubStore.getState().autoNote).not.toContain("引擎");
+  });
+
+  it("引擎下载/验签失败：不拉起进程，错误按原样给用户看", async () => {
+    const { bridge } = installBridge({
+      engineInstalled: false,
+      engineError: new Error(
+        "Error invoking remote method 'infohub:engine-ensure': Error: 模块包未通过首方签名，已拒绝安装",
+      ),
+    });
+
+    await useInfohubStore.getState().ensureRunning();
+
+    expect(bridge.start).not.toHaveBeenCalled();
+    expect(useInfohubStore.getState()).toMatchObject({
+      running: false,
+      error: "模块包未通过首方签名，已拒绝安装",
+      autoNote: "信息中枢引擎未就绪：模块包未通过首方签名，已拒绝安装",
+    });
+  });
+
+  it("ensureRunning 启动失败：给出可读错误，不 pretend 已连接", async () => {
+    installBridge({
+      startError: new Error(
+        "Error invoking remote method 'infohub:start': Error: 未找到可用的 Python 解释器",
+      ),
+    });
+
+    await useInfohubStore.getState().ensureRunning();
+
+    expect(useInfohubStore.getState()).toMatchObject({
+      running: false,
+      error: "未找到可用的 Python 解释器",
+    });
   });
 
   it("disconnect：回收进程并清掉依赖连接的数据", async () => {
@@ -190,6 +356,57 @@ describe("信息中枢共享状态", () => {
     useInfohubStore.setState({ available: true });
     await useInfohubStore.getState().refresh();
     expect(call).not.toHaveBeenCalled();
+  });
+
+  it("detect：调用 config.detect，把来源状态与摘要写回共享状态", async () => {
+    const summary = { ...status.config, autoSyncOnStart: true };
+    const sources = {
+      wechat: { db_dir: "D:\\wx", detected: true },
+      qq: { nt_db: "D:\\qq\\nt_msg.db", nt_account: "123", export_dir: "", detected: true },
+    };
+    const { call } = installBridge();
+    call.mockImplementation(async (method: string) => {
+      if (method === "config.detect") return { applied: true, sources, summary };
+      if (method === "status") return status;
+      if (method === "agenda") return agenda;
+      return undefined;
+    });
+    useInfohubStore.setState({ available: true, running: true, status });
+
+    const result = await useInfohubStore.getState().detect();
+
+    expect(call).toHaveBeenCalledWith("config.detect", {}, expect.anything());
+    expect(result).toEqual(sources);
+    expect(useInfohubStore.getState().detected).toEqual(sources);
+    expect(useInfohubStore.getState().status?.config).toEqual(summary);
+    expect(useInfohubStore.getState().error).toBe("");
+  });
+
+  it("detect 失败：保留可读错误，不覆盖已有识别结果", async () => {
+    const previous = {
+      wechat: { db_dir: "D:\\wx", detected: true },
+      qq: { nt_db: "", nt_account: "", export_dir: "", detected: false },
+    };
+    const { call } = installBridge();
+    call.mockImplementation(async () => {
+      throw new Error("Error invoking remote method 'infohub:call': Error: 边车未就绪");
+    });
+    useInfohubStore.setState({ available: true, running: true, detected: previous });
+
+    const result = await useInfohubStore.getState().detect();
+
+    expect(result).toBeNull();
+    expect(useInfohubStore.getState().detected).toEqual(previous);
+    expect(useInfohubStore.getState().error).toBe("边车未就绪");
+  });
+
+  it("autoCollected：每轮重新连接重置为 false，可再尝试一次自动采集", async () => {
+    installBridge();
+    useInfohubStore.setState({ autoCollected: true, running: false });
+
+    await useInfohubStore.getState().connect();
+
+    expect(useInfohubStore.getState().autoCollected).toBe(false);
   });
 
   it("canUseInfohub 同时要求桌面桥与运行态", async () => {

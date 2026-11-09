@@ -56,3 +56,11 @@ plugins-catalog/
 # GitHub 密钥扫描会把整条历史拦下；而它只是「编译 magpie-core.exe」的输入，不是运行时内容。
 # 需要重建内核时：把上游裁剪后的源码放到 vendor/magpie-core/，再 `node scripts/build-magpie-core.mjs --force`。
 vendor/magpie-core/
+
+# 选装模块包（信息中枢引擎等）的构建输入与发布产物：依赖来自 PyPI，不入库
+.tmp-engine-lib/
+module-catalog/
+
+# 模块引擎依赖下载与下载测试的临时产物
+.tmp-engine-wheels/
+.tmp-module-dl/

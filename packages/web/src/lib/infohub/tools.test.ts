@@ -143,9 +143,13 @@ describe("信息中枢工具提供者", () => {
       info: null,
       status: null,
       agenda: null,
+      detected: null,
+      autoCollected: false,
       busy: "",
       error: "",
     });
+    // 信息中枢是独立模块：装过之后才谈「启用/停用」。
+    useModuleStore.getState().install("infohub");
   });
 
   afterEach(() => {
@@ -173,13 +177,13 @@ describe("信息中枢工具提供者", () => {
   it("信息中枢模块停用后不再注入工具（页面关了，模型也不该还能查归档）", () => {
     installBridge();
     useInfohubStore.setState({ available: true, running: true });
-    // 默认启用时注入
-    useModuleStore.getState().reset();
+    // 安装并启用时注入
+    useModuleStore.getState().install("infohub");
     expect(buildInfohubToolsIfConnected()).not.toBeNull();
 
     useModuleStore.getState().setEnabled("infohub", false);
     expect(buildInfohubToolsIfConnected()).toBeNull();
-    useModuleStore.getState().reset();
+    useModuleStore.getState().install("infohub");
   });
 
   it("sync 不暴露为工具（写归档只从信息中枢页发起）", () => {
@@ -201,14 +205,14 @@ describe("信息中枢工具提供者", () => {
     expect(out).toEqual({ text: "信息中枢仅桌面端可用，无法读取本机归档。", ok: false });
   });
 
-  it("未连接执行：给连接指引并拒绝（不自动 spawn）", async () => {
+  it("未就绪执行：给自动启动指引并拒绝（工具不负责 spawn）", async () => {
     const { bridge, call } = installBridge();
     useInfohubStore.setState({ available: true, running: false });
 
     const out = await run("infohub_search", { query: "免检单" });
 
     expect(out.ok).toBe(false);
-    expect(out.text).toContain("请先在「信息中枢」页连接本机归档");
+    expect(out.text).toContain("信息中枢正在自动启动本机归档");
     expect(bridge.start).not.toHaveBeenCalled();
     expect(call).not.toHaveBeenCalled();
   });

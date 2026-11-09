@@ -447,3 +447,109 @@ test("setEnabled：注册表写失败 → 内存状态不变", () => {
   assert.equal(result.ok, false);
   assert.equal(broken.get("heming.pet").enabled, true);
 });
+
+/* ────────────────────────── 插件数据目录（data/） ────────────────────────── */
+
+test("data：目录在安装目录下，读写/列举/删除走 JSON 文件", () => {
+  const store = makeStore();
+  store.install({ bytes: packageBytes() });
+
+  const dir = store.dataDirOf("heming.pet");
+  assert.equal(dir, path.join(store.dir, "heming.pet", "data"));
+  assert.equal(fs.existsSync(dir), false, "dataDirOf 只给路径，不建目录");
+
+  assert.deepEqual(store.writeData("heming.pet", "config", { theme: "dark", n: 2 }), {
+    key: "config",
+    bytes: fs.statSync(path.join(dir, "config.json")).size,
+  });
+  assert.ok(fs.existsSync(path.join(dir, "config.json")), "写盘应按需创建 data/");
+  assert.deepEqual(store.readData("heming.pet", "config"), { theme: "dark", n: 2 });
+
+  assert.equal(store.writeData("heming.pet", "notes.2026-11-08", ["a"]).key, "notes.2026-11-08");
+  assert.deepEqual(store.listDataKeys("heming.pet"), ["config", "notes.2026-11-08"]);
+
+  assert.equal(store.deleteData("heming.pet", "config"), true);
+  assert.equal(store.deleteData("heming.pet", "config"), false);
+  assert.deepEqual(store.listDataKeys("heming.pet"), ["notes.2026-11-08"]);
+  assert.equal(store.readData("heming.pet", "notes.2026-11-08").length, 1);
+});
+
+test("data：listDataKeys 只认 *.json，忽略 tmp 与其他文件；目录不存在返回空数组", () => {
+  const store = makeStore();
+  store.install({ bytes: packageBytes() });
+  assert.deepEqual(store.listDataKeys("heming.pet"), [], "data/ 还没建");
+
+  store.writeData("heming.pet", "keep", 1);
+  const dir = store.dataDirOf("heming.pet");
+  fs.writeFileSync(path.join(dir, "keep.json.123.tmp"), "{}");
+  fs.writeFileSync(path.join(dir, "readme.txt"), "hi");
+  fs.mkdirSync(path.join(dir, "sub.json"));
+  assert.deepEqual(store.listDataKeys("heming.pet"), ["keep"]);
+});
+
+test("data：非法 key（路径穿越 / 分隔符 / 空 / 超长）一律抛可读错误", () => {
+  const store = makeStore();
+  store.install({ bytes: packageBytes() });
+  const bad = ["", ".", "..", "../escape", "a/b", "a\b", "a..b", "x".repeat(65), 42, null, undefined];
+  for (const key of bad) {
+    assert.throws(() => store.readData("heming.pet", key), /key/, `readData 应拒绝 ${String(key)}`);
+    assert.throws(() => store.writeData("heming.pet", key, 1), /key/, `writeData 应拒绝 ${String(key)}`);
+    assert.throws(() => store.deleteData("heming.pet", key), /key/, `deleteData 应拒绝 ${String(key)}`);
+  }
+  // 没有写出任何越界文件
+  assert.deepEqual(fs.readdirSync(path.join(store.dir, "heming.pet")).sort(), ["1.0.0", "current.json"]);
+});
+
+test("data：坏 JSON / 缺文件读回 null（不抛），写失败要抛", () => {
+  const store = makeStore();
+  store.install({ bytes: packageBytes() });
+  assert.equal(store.readData("heming.pet", "missing"), null);
+
+  const dir = store.dataDirOf("heming.pet");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "broken.json"), "{ not json");
+  assert.equal(store.readData("heming.pet", "broken"), null);
+
+  assert.throws(() => store.writeData("heming.pet", "fn", () => {}), /JSON/);
+  assert.throws(() => store.writeData("heming.pet", "undef", undefined), /JSON/);
+  const cyclic = {};
+  cyclic.self = cyclic;
+  assert.throws(() => store.writeData("heming.pet", "cyclic", cyclic), /JSON/);
+});
+
+test("data：单文件 1MB 上限，超限抛错且不落盘（不静默截断）", () => {
+  const store = makeStore();
+  store.install({ bytes: packageBytes() });
+  const dir = store.dataDirOf("heming.pet");
+
+  const okPayload = "x".repeat(512 * 1024);
+  assert.ok(store.writeData("heming.pet", "big", okPayload).bytes > 512 * 1024);
+
+  assert.throws(() => store.writeData("heming.pet", "huge", "x".repeat(1024 * 1024)), /1MB/);
+  assert.equal(fs.existsSync(path.join(dir, "huge.json")), false, "超限不能留下半个文件");
+});
+
+test("data：升级保留 data/；卸载（默认与 removeData:false）都删除 data/", () => {
+  const store = makeStore();
+  store.install({ bytes: packageBytes() });
+  store.writeData("heming.pet", "cache", { hits: 3 });
+
+  const upgraded = store.install({ bytes: packageBytes({ version: "1.1.0" }) });
+  assert.equal(upgraded.ok, true, upgraded.error);
+  assert.deepEqual(store.readData("heming.pet", "cache"), { hits: 3 }, "升级不能清空插件数据");
+
+  assert.deepEqual(store.uninstall("heming.pet", { removeData: false }), { ok: true });
+  assert.equal(fs.existsSync(path.join(store.dir, "heming.pet", "data")), false, "保留设置也不保留 data/");
+
+  store.install({ bytes: packageBytes() });
+  store.writeData("heming.pet", "cache", 1);
+  assert.deepEqual(store.uninstall("heming.pet"), { ok: true });
+  assert.equal(fs.existsSync(path.join(store.dir, "heming.pet")), false);
+});
+
+test("data：未安装的插件不写盘（避免留孤儿目录）", () => {
+  const store = makeStore();
+  assert.throws(() => store.writeData("acme.ghost", "k", 1), /插件不存在/);
+  assert.equal(fs.existsSync(path.join(store.dir, "acme.ghost")), false);
+  assert.equal(store.readData("acme.ghost", "k"), null);
+});

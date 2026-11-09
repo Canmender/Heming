@@ -29,9 +29,9 @@
  *   每第 5 个请求给一个未测速候选先手（防饿死）；数据源 lib/llmSpeed.ts（纯内存）；
  * - `rotate`：醒着的按序轮换（magpie「In turn」），休息的跳过。
  *
- * **模块闸门**：本机 `modelroute` 模块停用时，无论 `RouteGroup.strategy` 写什么，
- * 一律按 `order` 走——停用只下线高级选路，候选链与失败切换照常工作，
- * 数据一个不删（与模块「停用不删数据」的语义一致）。见 `effectiveRouteStrategy`。
+ * **没有模块闸门**：本地「模型路由」页已下线（由 magpie 的路由组/路由界面取代），
+ * 八档策略恒定生效——无论 `RouteGroup.strategy` 选哪一档都按该档选路，
+ * 候选链与失败切换照常工作，数据一个不删（见 `effectiveRouteStrategy`）。
  *
  * ## 刻意不做（本仓没有数据来源，不装样子）
  *
@@ -58,7 +58,6 @@ import {
 import { accountKey, keyForVerdict, llmHealth, modelKey } from "./llmHealth.js";
 import { lookupCapability } from "./modelCaps.js";
 import { llmSpeed } from "./llmSpeed.js";
-import { isModuleOn } from "./modules/store.js";
 import {
   decayedMonthTokensOf,
   monthElapsedFraction,
@@ -190,14 +189,13 @@ export function resetRouteStrategyState(): void {
 }
 
 /**
- * 模块闸门 + 老数据兜底。
+ * 老数据兜底。
  *
- * `modelroute` 模块停用时，无论 `RouteGroup.strategy` 写什么都按 `order`——
- * 停用只下线高级选路，候选链与失败切换照常工作（模块语义「停用不删数据」）。
- * 认不出的档位（手改坏的 localStorage、将来回滚版本留下的值）也按 order，绝不抛。
+ * 本地模型路由页已由 magpie 路由组取代（页面、内置模块都删除），所以这里**不再有模块闸门**：
+ * 候选链策略恒定生效，只是对认不出的档位（手改坏的 localStorage、将来回滚版本留下的值）
+ * 一律按 `order`，绝不抛。
  */
 export function effectiveRouteStrategy(raw: RouteStrategy | undefined): RouteStrategy {
-  if (!isModuleOn("modelroute")) return "order";
   return raw ?? "order";
 }
 

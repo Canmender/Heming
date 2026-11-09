@@ -334,10 +334,13 @@ describe("HomePage", () => {
     expect(screen.queryByText("文件目录：未绑定")).toBeNull();
   });
 
-  it("停用幕僚 / 信息中枢模块后，首页对应的卡一起下线（不留假入口）", async () => {
-    // jsdom 没有 InfoHub 桥，默认 available=false 卡本来就不渲染；先给一个「未连接」状态让卡出现
-    useInfohubStore.setState({ available: true, running: false });
-    // 先确认默认渲染时有这两张卡（否则下面的 queryBy 断言没有意义）
+  it("未安装或停用幕僚 / 信息中枢模块后，首页对应的卡一起下线（不留假入口）", async () => {
+    // jsdom 没有 InfoHub 桥，默认 available=false 卡本来就不渲染；先给一个「未连接」状态让卡出现。
+    // booted=true 挡住卡内兜底 boot()（没有桥时它会把 available 改回 false）。
+    useInfohubStore.setState({ available: true, running: false, booted: true });
+    // 内置模块默认未安装：先装上，确认默认渲染时有这两张卡（否则下面的 queryBy 断言没有意义）
+    useModuleStore.getState().install("staff");
+    useModuleStore.getState().install("infohub");
     const first = render(<HomePage />);
     await act(async () => {});
     expect(screen.getByRole("region", { name: "幕僚" })).toBeInTheDocument();

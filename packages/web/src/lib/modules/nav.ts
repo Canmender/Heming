@@ -12,11 +12,18 @@ import { isModuleEffective, type ModuleState } from "./store.js";
  * - 五个地方都要能单测，而组件测试又重又慢——纯函数是唯一能低成本钉住口径的形态。
  */
 
-/** 页面当前是否可用：非模块页恒可用；模块页要求其模块**实际生效**。
+/**
+ * 页面当前是否可用：非模块页恒可用；模块页要求其模块**已安装且实际生效**。
  *
  * d.105 起「实际生效」由统一能力单元投影判定（`modules/store.ts` 的
- * `isModuleEffective` 是薄封装，内部走 `lib/units/projection.ts`），导航与
- * 插件页统一列表因此读同一个口径；本文件仍是纯函数（便于单测）。 */
+ * `isModuleEffective` 是薄封装：已安装 && 已启用 && 依赖链满足，内部走
+ * `lib/units/projection.ts`），导航与插件页统一列表因此读同一个口径；
+ * 本文件仍是纯函数（便于单测）。
+ *
+ * 注意：模块页（幕僚/信息中枢/自动化）**不在导航顺序里**（导航固定 8 项），
+ * 但这条判断仍被 `App.tsx` 的路由守卫与命令面板使用——未安装模块页绝不能被渲染，
+ * 只能从插件页的模块卡「打开页面」进去。
+ */
 export function isPageAvailable(page: Page, state: ModuleState): boolean {
   const mod = moduleForPage(page);
   return mod ? isModuleEffective(state, mod.id) : true;

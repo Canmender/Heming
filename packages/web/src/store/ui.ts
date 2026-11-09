@@ -8,12 +8,13 @@ import {
 } from "../lib/navPrefs.js";
 
 /**
- * 导航页（d.67 合并后的 9 个入口）。
+ * 导航页（固定 8 项：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
  *
- * 合并掉的 4 个旧页面名不再进导航，但**不能从类型里删掉**：
- * 旧链接、旧 `heming.navOrder.v1`、命令面板与通知中心的跳转、桌宠气泡的 route
- * 都还在产出这些字符串。删掉它们只会把兼容处理逼进 `as never` 之类的强转里，
- * 于是保留为 `LegacyPage`，由 `resolvePage` 统一折叠到「宿主页 + 视图」。
+ * 前三类「模块页」不再进导航，但**不能从类型里删掉**：
+ * 旧链接、命令面板与通知中心的跳转、桌宠气泡的 route 都还在产出这些字符串，
+ * 插件页的模块卡也仍要用 `setPage("staff")` 之类打开已安装模块的页面。
+ * 删掉它们只会把兼容处理逼进 `as never` 之类的强转里，所以保留在 `Page` 里，
+ * 由 `App.tsx` 的路由守卫（`isPageAvailable`）保证未安装模块页不会被渲染。
  *
  * 智能体页沿用内部名 `chat`（会话链路的既有锚点），显示名由 NavRail 决定。
  */
@@ -49,37 +50,30 @@ export type PageId = Page | LegacyPage;
  * 的 Tab 是局部 state；把 Tab 长期放 store 又会让「切走再回来」被钉在上次的位置，
  * 那超出了跳转方的意图。消费一次即清，与 `automationIntent` / `paletteIntent` 同口径。
  */
-export type PageView = "board" | "tasks" | "skills" | "interfaces" | "modules" | "chat";
+export type PageView = "board" | "tasks" | "skills" | "interfaces" | "modules" | "plugins" | "chat";
 
 /** 导航项：所有页面都可排进导航轨（只含合并后的宿主页）。 */
 export type NavPage = Page;
 
 /**
- * 导航默认顺序（d.72 重排）；快捷键数字由 App/NavRail 按页面固定绑定
- * （显示顺序改了不影响快捷键）。
+ * 导航默认顺序：固定 8 项（主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
+ * 快捷键数字由 App/NavRail 按页面固定绑定（显示顺序改了不影响快捷键）。
  *
- * 排法按「干活 → 智能模组 → 资料与能力 → 系统」：
- * - 工作台：先总览、再跟智能体对话、最后看团队；
- * - 智能模块：幕僚 / 信息中枢 / 自动化（d.70 的三个可插拔内置模块）；
- * - 资料与能力：模型 / 知识库 / 插件区 / 记忆区；
- * - 系统：设置区。
- * 视觉分组见 `lib/navGroups.ts`。
+ * 幕僚 / 信息中枢 / 自动化 / 模型路由**不再进导航**：前三个是可安装的内置插件，
+ * 入口在插件页的模块卡（「打开页面」）；模型路由页已由 magpie 路由组取代、彻底删除。
+ * `Page` 类型仍保留这些字符串，供旧链接、通知跳转与模块卡路由使用。
+ *
+ * 视觉分组见 `lib/navGroups.ts`：工作台（主页/团队/智能体）→ 能力（插件）→
+ * 资料（记忆/知识库/模型）→ 系统（设置）。
  */
 export const DEFAULT_NAV_ORDER: NavPage[] = [
   "home",
-  "chat",
   "team",
-  "staff",
-  "infohub",
-  "automations",
-  // magpie 语义移植（d.84 模块）：候选链/策略/冷却/用量，与其它内置模块同组
-  "modelroute",
-  // 模型页（d.99）：内核管理面（供应商/账号/分组/用量/备份/同步）的宿主页
-  "model",
-  // 知识库（d.114）：原生 vault（文件树/双链/标签/搜索/图谱），数据不出设备
-  "vault",
+  "chat",
   "plugins",
   "memory",
+  "vault",
+  "model",
   "settings",
 ];
 
@@ -123,10 +117,33 @@ const LEGACY_DEFAULT_NAV_ORDER_MODEL: NavPage[] = [
   "settings",
 ];
 
+/**
+ * d.114–d.115 期间的默认顺序（12 个宿主页，含幕僚/信息中枢/自动化/模型路由）。
+ *
+ * 导航收口成固定 8 项后，这一段期间没动过顺序的用户必须也迁到新默认；否则
+ * 他们的存储里会留下 4 个已不进导航的页面，`normalizeNavOrder` 会把它们丢掉，
+ * 而「已丢弃」与「用户自定义」无法区分——所以要在迁移判定里显式认成旧默认。
+ */
+const LEGACY_DEFAULT_NAV_ORDER_MODULES: NavPage[] = [
+  "home",
+  "chat",
+  "team",
+  "staff",
+  "infohub",
+  "automations",
+  "modelroute",
+  "model",
+  "vault",
+  "plugins",
+  "memory",
+  "settings",
+];
+
 /** 所有历史默认顺序：命中任意一份都跟随当前默认（用户亲手排过的不在此列）。 */
 const LEGACY_DEFAULT_NAV_ORDERS: NavPage[][] = [
   LEGACY_DEFAULT_NAV_ORDER,
   LEGACY_DEFAULT_NAV_ORDER_MODEL,
+  LEGACY_DEFAULT_NAV_ORDER_MODULES,
 ];
 
 function sameOrder(a: readonly NavPage[], b: readonly NavPage[]): boolean {
@@ -376,9 +393,9 @@ interface UiState {
   /** 取走宿主的视图意图并清空（页面 effect 消费一次）。 */
   consumePageView: () => PageView | null;
   /** 跳到信息中枢并投递意图；不传意图即普通进入。 */
-  /** 打开「插件区 → 模块」：停用模块的通知/旧链接统一落到这里，而不是静默不动。 */
+  /** 跳转到插件页（插件 Tab）：未安装/停用模块的通知与旧链接统一落到这里，而不是静默不动。 */
   openModuleManager: () => void;
-  /** 打开幕僚页；模块停用时落到模块管理（不再 setPage 后被路由重定向回主页）。 */
+  /** 打开幕僚页；模块未安装/未启用时落到插件页（可一键安装）。 */
   openStaff: () => void;
   openInfohub: (intent?: InfohubIntent) => void;
   consumeInfohubIntent: () => void;
@@ -613,8 +630,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   openModuleManager: () =>
     set({
+      // 模块已并入插件页：统一落到「插件」Tab（pageView 让插件页把 Tab 钉到插件，
+      // 而不是用户上次看的仓库/技能）。旧入口点进来能一键安装。
       page: "plugins",
-      pageView: "modules",
+      pageView: "plugins",
       activeConversationId: null,
       pendingAttachment: null,
       taskDraft: null,
@@ -631,7 +650,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ page: "staff", pageView: null });
   },
   openInfohub: (intent) => {
-    // d.70：模块被停用时不再切到一个不该存在的页面；落到「模块」Tab 让用户能启用它
+    // 模块未安装/未启用时不再切到一个不该存在的页面；落到插件页让用户能安装/启用它
     if (!isModuleOn("infohub")) {
       get().openModuleManager();
       return;

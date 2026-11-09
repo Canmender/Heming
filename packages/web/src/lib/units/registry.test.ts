@@ -120,22 +120,19 @@ describe("mountContribution / disposeUnit", () => {
 });
 
 describe("读投影（registry 薄层）", () => {
-  it("buildUnitStatuses 用注入数据源计算，内置模块依赖关系正确", () => {
+  it("buildUnitStatuses 用注入数据源计算，自动化不依赖信息中枢", () => {
     const statuses = buildUnitStatuses({
       modules: BUILTIN_MODULES,
-      moduleEnabled: { staff: true, infohub: false, automations: true, modelroute: true },
+      moduleEnabled: { staff: true, infohub: false, automations: true },
     });
     const byId = new Map(statuses.map((status) => [status.unit.id, status] as const));
     expect(statuses).toHaveLength(BUILTIN_MODULES.length);
     expect(byId.get("infohub")!.reason).toEqual({ kind: "disabled" });
-    expect(byId.get("automations")!.reason).toEqual({
-      kind: "missingRequirement",
-      unitId: "infohub",
-    });
+    expect(byId.get("automations")!.effective).toBe(true);
     expect(byId.get("staff")!.effective).toBe(true);
   });
 
-  it("useUnitStatuses 列出四类来源，并订阅模块开关变化", () => {
+  it("useUnitStatuses 列出四类来源，并订阅模块安装/开关变化", () => {
     refreshUnits();
     const { result } = renderHook(() => useUnitStatuses());
     const ids = result.current.map((status) => status.unit.id);
@@ -145,11 +142,21 @@ describe("读投影（registry 薄层）", () => {
 
     act(() => {
       useModuleStore.setState({
-        enabled: { staff: false, infohub: true, automations: true, modelroute: true },
+        installed: { staff: true, infohub: true, automations: true },
+        enabled: { staff: false, infohub: true, automations: true },
       });
     });
     const staff = result.current.find((status) => status.unit.id === "staff");
     expect(staff!.effective).toBe(false);
     expect(staff!.reason).toEqual({ kind: "disabled" });
+
+    act(() => {
+      useModuleStore.setState({
+        installed: { staff: true, infohub: false, automations: true },
+        enabled: { staff: false, infohub: false, automations: true },
+      });
+    });
+    const infohub = result.current.find((status) => status.unit.id === "infohub");
+    expect(infohub!.reason).toEqual({ kind: "notInstalled" });
   });
 });

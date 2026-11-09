@@ -372,7 +372,7 @@ function statusWithText(fragment: string): HTMLElement | undefined {
 }
 
 function openInstall() {
-  fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
+  fireEvent.click(screen.getByRole("button", { name: "手动粘贴清单" }));
   return screen.getByRole("dialog", { name: "安装插件" });
 }
 

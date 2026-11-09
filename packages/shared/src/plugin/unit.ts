@@ -175,6 +175,7 @@ export interface UnitContribution {
 
 /** 单元被什么挡住（`resolveUnit` 输出；诊断区直接展示）。 */
 export type UnitBlockReason =
+  | { kind: "notInstalled" }
   | { kind: "disabled" }
   | { kind: "kindDisabled"; contribution: ContributionKind }
   | { kind: "missingRequirement"; unitId: string }
@@ -206,6 +207,12 @@ export interface CapabilityUnit {
   contributions: UnitContribution[];
   /** 总开关（存储里的 enabled）。 */
   enabled: boolean;
+  /**
+   * 是否已安装（目前只有内置模块用：安装包里默认不带任何模块，用户在插件页「安装」后才出现）。
+   * 缺省视为已安装——声明式插件/界面插件/系统能力都由「已装记录」投影出来，只有内置模块
+   * 可以在未安装时仍出现在列表里（作为「可安装」项）。
+   */
+  installed?: boolean;
   /** 贡献级停用（声明式插件的 `disabledKinds`）。 */
   disabledKinds?: ContributionKind[];
   /** 其它阻断状态（签名失败/不兼容/孤儿记录…），由投影层在构造时带上。 */
@@ -244,10 +251,11 @@ function sortedContributions(contributions: readonly UnitContribution[]): UnitCo
  *
  * 判定顺序（**短路**，第一条原因即列表行的 reason）：
  * 1. 无贡献 → 不算生效（孤单元不占「已生效」）；
- * 2. 总开关关 → disabled；
- * 3. 依赖未生效 → missingRequirement（开关保留，依赖恢复后自动恢复）；
- * 4. 自身阻断（不兼容/签名/孤儿）→ 对应原因；
- * 5. 逐类贡献判定：贡献级停用 → kindDisabled；否则计入 activeKinds。
+ * 2. 未安装 → notInstalled（内置模块默认不随安装包携带；装了才有总开关）；
+ * 3. 总开关关 → disabled；
+ * 4. 依赖未生效 → missingRequirement（开关保留，依赖恢复后自动恢复）；
+ * 5. 自身阻断（不兼容/签名/孤儿）→ 对应原因；
+ * 6. 逐类贡献判定：贡献级停用 → kindDisabled；否则计入 activeKinds。
  *
  * `unitsById` 只需包含「可能被依赖」的单元；递归带 seen 防环（误配成环时返回
  * `missingRequirement` 而不是栈溢出）。
@@ -262,6 +270,16 @@ export function resolveUnit(
 
   if (contributions.length === 0) {
     return { unit, effective: false, activeKinds: [], reason: undefined, diagnostics };
+  }
+
+  if (unit.installed === false) {
+    return {
+      unit,
+      effective: false,
+      activeKinds: [],
+      reason: { kind: "notInstalled" },
+      diagnostics: [{ kind: "notInstalled" }],
+    };
   }
 
   if (!unit.enabled) {
@@ -329,6 +347,8 @@ export function hasActiveContribution(statuses: readonly UnitStatus[], kind: Con
 /** 阻断原因 → 中文一句话（列表行/诊断区共用；测试钉死措辞）。 */
 export function blockReasonText(reason: UnitBlockReason): string {
   switch (reason.kind) {
+    case "notInstalled":
+      return "未安装";
     case "disabled":
       return "已停用";
     case "kindDisabled":

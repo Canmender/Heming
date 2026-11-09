@@ -19,13 +19,14 @@ export function InfohubHomeCard() {
   const agenda = useInfohubStore((s) => s.agenda);
   const busy = useInfohubStore((s) => s.busy);
   const error = useInfohubStore((s) => s.error);
-  const connect = useInfohubStore((s) => s.connect);
   const openInfohub = useUiStore((s) => s.openInfohub);
 
-  // App 已 boot 过一次；这里兜底，保证单独渲染首页时也能拿到桥状态。
+  // 卡片只露出：模块装好就自动拉起，不在首页再放一个「连接」按钮。
+  // 不能用 available 作门槛：首帧 available 一定是 false，boot 完才会变 true。
   useEffect(() => {
-    void useInfohubStore.getState().boot();
-  }, []);
+    if (running) return;
+    void useInfohubStore.getState().ensureRunning();
+  }, [running]);
 
   if (!available) return null;
 
@@ -34,20 +35,21 @@ export function InfohubHomeCard() {
       <section className={CARD} aria-label="本机归档">
         <div className="flex items-center gap-2">
           <div className="text-[12px] font-bold text-muted">本机归档</div>
-          <span className="rounded-sm border border-line px-1.5 text-[10px] text-muted">未连接</span>
-          <button
-            type="button"
-            disabled={busy === "connecting"}
-            onClick={() => void connect()}
-            className="ml-auto rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa] disabled:opacity-50"
-          >
-            {busy === "connecting" ? "连接中…" : "连接"}
-          </button>
+          <span className="rounded-sm border border-line px-1.5 text-[10px] text-muted">自动启动中</span>
         </div>
         <p className="mt-1 text-[11px] leading-relaxed text-muted">
-          读本机的 QQ / 微信聊天记录；连接后智能体能检索归档、看日程。
+          正在后台连接本机 QQ / 微信归档，完成后可直接检索归档、看日程。
         </p>
         {error && <p role="alert" className="mt-1 text-[11px] text-[#b42318]">{error}</p>}
+        {error && (
+          <button
+            type="button"
+            onClick={() => void useInfohubStore.getState().ensureRunning()}
+            className="mt-1.5 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
+          >
+            重试
+          </button>
+        )}
       </section>
     );
   }

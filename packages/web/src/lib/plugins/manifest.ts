@@ -11,7 +11,7 @@ import {
   type PluginMetaV5,
   type PluginV5ParseResult,
 } from "@heming/shared";
-import { PALETTE_PAGES } from "../palette/pages.js";
+import { ROUTABLE_PAGE_IDS } from "../palette/pages.js";
 import { settingsCardById } from "../settings/registry.js";
 import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
 
@@ -28,7 +28,7 @@ import { hostOfUrl, normalizeNetworkHost } from "./permissions.js";
  *   在 v4 之上增加 `engines.heming`（最小宿主版本）与 `meta`（上架元数据），
  *   并用分层严格度挡住「权限/贡献写错位置」的笔误（顶层未知键警告、敏感子对象 strict）。
  *   解析结果的权威形状在 shared；本文件只补 web 独有的两件事：命令 `target.page`
- *   必须存在于命令面板的 `PALETTE_PAGES`、`target.settings.card` 必须存在于
+ *   必须存在于可路由页面目录（导航页 + 内置插件页）、`target.settings.card` 必须存在于
  *   `SETTINGS_CARDS`（单元目标只校验 id 字符集，允许指向将来才安装的单元），
  *   然后投射到既有内部 `PluginManifest`。
  * - **v4**（`PLUGIN_SCHEMA_VERSION`）仍可安装：界面插件声明
@@ -117,8 +117,8 @@ function base64UrlByteLength(value: string): number {
   return Math.floor((value.length * 3) / 4);
 }
 
-/** 命令 target 可指向的页面 id（单一真源：命令面板的页面目录）。 */
-const PAGE_IDS: ReadonlySet<string> = new Set(PALETTE_PAGES.map((page) => page.page));
+/** 命令 target 可指向的页面 id（单一真源：命令面板目录 + 内置插件页）。 */
+const PAGE_IDS: ReadonlySet<string> = ROUTABLE_PAGE_IDS;
 
 /**
  * 命令 target 指向的能力单元 id：与插件/单元 id 同规则。
@@ -1282,7 +1282,7 @@ export interface PluginManifest {
   permissions: PluginPermissions;
   /** v5：最小宿主版本（v1–v4 没有该字段；`pluginEnginesStatus` 对旧包按「不限制」处理）。 */
   engines?: PluginEngines;
-  /** v5：上架元数据（市场页用；安装记录只留轻字段，见规格 §4.4）。 */
+  /** v5：上架元数据（仓库卡片展示用；安装记录只留轻字段，见规格 §4.4）。 */
   meta?: PluginMeta;
   /** 可选：发布者与签名（d.67；旧 v3 清单没有这两个字段）。 */
   publisher?: PluginPublisher;

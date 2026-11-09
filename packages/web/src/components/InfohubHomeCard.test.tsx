@@ -3,13 +3,14 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { InfohubHomeCard } from "./InfohubHomeCard.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { useUiStore } from "../store/ui.js";
+import { useModuleStore } from "../lib/modules/store.js";
 import type { InfohubAgendaItem, InfohubBridgeInfo, InfohubStatus } from "../lib/infohub/client.js";
 
 /**
  * 首页「本机归档」卡（d.46）只做露出：
  *
- * - 浏览器端没有本机桥 → 整张卡不渲染（绝不出现「连接」按钮诱导用户点空）；
- * - 未连接 → 一个连接入口 + 隐私说明；
+ * - 浏览器端没有本机桥 → 整张卡不渲染；
+ * - 未连接 → 自动拉起 + 隐私说明（没有手动「连接」入口）；
  * - 已连接 → 日程摘要/规模 + 两个入口，点入口只投递意图，不复制页面状态机。
  */
 
@@ -92,6 +93,8 @@ function installBridge(options: { running?: boolean; startError?: Error } = {}) 
 describe("首页本机归档卡", () => {
   beforeEach(() => {
     localStorage.clear();
+    useModuleStore.getState().reset();
+    useModuleStore.getState().install("infohub");
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
     useInfohubStore.setState({
       available: false,
@@ -100,6 +103,8 @@ describe("首页本机归档卡", () => {
       info: null,
       status: null,
       agenda: null,
+      autoCollected: false,
+      autoNote: "",
       busy: "",
       error: "",
     });
@@ -115,15 +120,12 @@ describe("首页本机归档卡", () => {
     expect(view.container).toBeEmptyDOMElement();
   });
 
-  it("未连接：给出连接入口与隐私说明，连接后展示摘要", async () => {
+  it("未连接：卡片自动拉起，没有手动连接入口，连上后展示摘要", async () => {
     const { bridge } = installBridge();
     render(<InfohubHomeCard />);
 
     expect(await screen.findByText("本机归档")).toBeInTheDocument();
-    expect(screen.getByText("未连接")).toBeInTheDocument();
-    expect(screen.getByText(/读本机的 QQ \/ 微信聊天记录/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "连接" }));
+    expect(screen.queryByRole("button", { name: "连接" })).not.toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByText("已连接")).toBeInTheDocument());
     expect(bridge.start).toHaveBeenCalledTimes(1);
@@ -162,18 +164,15 @@ describe("首页本机归档卡", () => {
     expect(useUiStore.getState().infohubIntent).toEqual({ tab: "search" });
   });
 
-  it("连接失败：展示可读错误且仍可重试", async () => {
+  it("自动启动失败：展示可读错误且卡片上可重试", async () => {
     installBridge({
       startError: new Error(
         "Error invoking remote method 'infohub:start': Error: 未找到可用的 Python 解释器",
       ),
     });
     render(<InfohubHomeCard />);
-    await screen.findByText("未连接");
-
-    fireEvent.click(screen.getByRole("button", { name: "连接" }));
 
     expect(await screen.findByText("未找到可用的 Python 解释器")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "连接" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 });

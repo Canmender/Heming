@@ -1,5 +1,5 @@
 import type { PluginCommandInfo } from "../plugins/index.js";
-import { PALETTE_PAGES } from "../palette/pages.js";
+import { ROUTABLE_PAGE_IDS } from "../palette/pages.js";
 import { settingsCardById } from "../settings/registry.js";
 import type { WidgetCommand, WidgetRecord } from "../../types/widgets.js";
 
@@ -21,7 +21,7 @@ import type { WidgetCommand, WidgetRecord } from "../../types/widgets.js";
 /** 命令来源标签（副标题里标明「界面插件」，与声明式插件区分）。 */
 export const WIDGET_COMMAND_SOURCE = "界面插件";
 
-const PAGE_IDS: ReadonlySet<string> = new Set(PALETTE_PAGES.map((page) => page.page));
+const PAGE_IDS: ReadonlySet<string> = ROUTABLE_PAGE_IDS;
 const UNIT_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const MAX_TITLE = 80;
 const MAX_DESCRIPTION = 200;

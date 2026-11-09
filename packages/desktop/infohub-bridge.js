@@ -21,8 +21,12 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { bundledPython } = require("./bundled-runtime");
 const { teardownChild } = require("./child-kill");
+
+/** 引擎缺失时给用户的下一步：模块是选装的，装好后自动启动，不需要任何配置界面。 */
+const ENGINE_MISSING_MESSAGE =
+  "信息中枢引擎未安装（选装模块）。请到「插件」页安装「信息中枢」，装好后会自动启动；" +
+  "安装需要联网下载模块包。";
 
 /** 与 packages/infohub/infohub/bridge.py 的 `_ALLOWED_METHODS` 保持一致。 */
 const ALLOWED_METHODS = new Set([
@@ -34,6 +38,7 @@ const ALLOWED_METHODS = new Set([
   "agenda",
   "sync",
   "config.summary",
+  "config.detect",
   "shutdown",
 ]);
 
@@ -54,15 +59,14 @@ const MAX_LINE_BYTES = 4 * 1024 * 1024;
 const MAX_STDERR_TAIL = 4_000;
 
 /**
- * InfoHub Python 包所在目录。
+ * 开发态 InfoHub 源码目录：`packages/desktop/../infohub`。
  *
- * 开发态：`packages/desktop/../infohub`
- * 打包后：`<安装目录>/resources/infohub`（electron-builder extraResources）
- *
- * 两种形态都由这里算，调用方不必判断自己跑在哪。
+ * 打包后**不再有内置引擎**（d.116：模块是选装的，由 `module-store` 从更新源装到
+ * `<userData>/modules`），所以这里返回空串；调用方据此给出「请安装模块」的提示，
+ * 而不是去一个不存在的 `resources/infohub` 里撞运气。
  */
-function resolveInfohubPackageDir({ isPackaged, resourcesPath, dirname }) {
-  if (isPackaged) return path.join(resourcesPath, "infohub");
+function resolveInfohubPackageDir({ isPackaged, dirname }) {
+  if (isPackaged) return "";
   return path.join(dirname, "..", "infohub");
 }
 
@@ -146,7 +150,9 @@ function isValidMethod(method, allowShutdown = false) {
  *
  * @param {object} deps
  * @param {(cmd: string, args: string[], opts: object) => any} deps.spawn
- * @param {string} deps.packageDir InfoHub 包目录（同时作为 cwd 与 PYTHONPATH）
+ * @param {string|(() => string)} deps.packageDir 引擎包目录（同时作为 cwd 与 PYTHONPATH）。
+ *   传函数是为了「模块装好后再启动」：安装完成前返回空串，`start()` 会给出可读提示。
+ * @param {string|(() => string)} [deps.libraryDir] 随模块分发的 site-packages 目录
  * @param {string} deps.defaultHome 用户未指定时的数据目录
  * @param {string|null} [deps.bundledPythonPath] 内置解释器
  * @param {(target: string) => boolean} [deps.exists]
@@ -159,6 +165,7 @@ function isValidMethod(method, allowShutdown = false) {
 function createInfohubBridge({
   spawn,
   packageDir,
+  libraryDir = "",
   defaultHome,
   bundledPythonPath = null,
   exists = defaultExists,
@@ -169,7 +176,7 @@ function createInfohubBridge({
 }) {
   /** 当前子进程与它对应的配置。 */
   let child = null;
-  let current = null; // { home, python, pythonSource }
+  let current = null; // { home, python, pythonSource, packageDir, libraryDir }
   let buffer = "";
   let nextId = 1;
   let hello = null;
@@ -188,6 +195,20 @@ function createInfohubBridge({
    */
   const teardowns = new Set();
 
+  function resolveDirs() {
+    const read = (value) => {
+      try {
+        return typeof value === "function" ? value() : value;
+      } catch {
+        return "";
+      }
+    };
+    return {
+      packageDir: normalizeHome(read(packageDir), ""),
+      libraryDir: normalizeHome(read(libraryDir), ""),
+    };
+  }
+
   function resolveTarget(config = {}) {
     const home = normalizeHome(config.home, defaultHome);
     const picked = resolvePython({
@@ -195,7 +216,7 @@ function createInfohubBridge({
       bundled: bundledPythonPath,
       exists,
     });
-    return { home, python: picked.python, pythonSource: picked.source };
+    return { ...resolveDirs(), home, python: picked.python, pythonSource: picked.source };
   }
 
   function emitEvent(event) {
@@ -295,9 +316,9 @@ function createInfohubBridge({
     buffer = "";
     stderrTail = "";
     hello = null;
-    const pythonPath = process.env.PYTHONPATH
-      ? packageDir + path.delimiter + process.env.PYTHONPATH
-      : packageDir;
+    const paths = [target.packageDir, target.libraryDir].filter(Boolean);
+    if (process.env.PYTHONPATH) paths.push(process.env.PYTHONPATH);
+    const pythonPath = paths.join(path.delimiter);
     const env = {
       ...process.env,
       INFOHUB_HOME: target.home,
@@ -311,7 +332,7 @@ function createInfohubBridge({
     // Windows 上没有进程组，拔树交给 taskkill /T（见 child-kill.js）。
     // 代价是子进程不再随父进程自然收口——所以 stop/dispose 必须自己把它杀干净。
     const spawnOpts = {
-      cwd: packageDir,
+      cwd: target.packageDir,
       env,
       stdio: ["pipe", "pipe", "pipe"],
       shell: false,
@@ -360,8 +381,11 @@ function createInfohubBridge({
   }
 
   function info() {
+    const dirs = resolveDirs();
     return {
-      packageDir,
+      packageDir: dirs.packageDir,
+      libraryDir: dirs.libraryDir,
+      engineInstalled: Boolean(dirs.packageDir && exists(dirs.packageDir)),
       defaultHome,
       bundledPython: bundledPythonPath,
       running: Boolean(child),
@@ -379,7 +403,9 @@ function createInfohubBridge({
       child &&
         current &&
         current.home === target.home &&
-        current.python === target.python
+        current.python === target.python &&
+        current.packageDir === target.packageDir &&
+        current.libraryDir === target.libraryDir
     );
   }
 
@@ -389,9 +415,11 @@ function createInfohubBridge({
    */
   async function start(config = {}) {
     const target = resolveTarget(config);
+    if (!target.packageDir || !exists(target.packageDir)) throw new Error(ENGINE_MISSING_MESSAGE);
     if (!target.python) {
       throw new Error(
-        "未找到可用的 Python 解释器。请把「Python 解释器」指向 InfoHub 的虚拟环境，或先构建内置运行时。"
+        "未找到可用的 Python 解释器（内置运行时缺失）。请重新安装应用；" +
+          "本地开发可先构建内置运行时。"
       );
     }
 
@@ -611,6 +639,7 @@ function registerInfohubIpc(ipcMain, { bridge, dialog, windowFromEvent = () => n
 
 module.exports = {
   ALLOWED_METHODS,
+  ENGINE_MISSING_MESSAGE,
   RENDERER_METHODS,
   createInfohubBridge,
   encodeMessage,

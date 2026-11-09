@@ -1,5 +1,6 @@
 import {
   callInfohub,
+  isInfohubAvailable,
   readInfohubConfig,
   type InfohubAgendaResult,
   type InfohubSyncResult,
@@ -16,9 +17,15 @@ import type { AutomationResult } from "./store.js";
  * gating 与分发。两个执行函数原样从 runner.ts 搬来——不新增动作、不加网络、
  * 不执行任意脚本，改的只是分发方式。
  *
+ * 独立性：本插件不依赖信息中枢模块的安装/启停；但动作运行时需要本机边车。
+ * 未连接就返回结构化 error（原因可读），不假装成功，也不借桥自动拉起进程。
+ *
  * 这里对 `AutomationResult` 只用 type-only import：结果类型的落点仍在 store.ts
  * （`finishRun` 把它写进任务），type-only 在编译后消失，不会形成运行时环。
  */
+
+/** 未连接时的统一失败原因（runner 也复用它）。 */
+export const INFOHUB_OFFLINE = "信息中枢未连接，本任务未执行；请先安装并连接信息中枢";
 
 export interface AutomationAction {
   kind: AutomationKind;
@@ -38,7 +45,17 @@ function result(status: AutomationResult["status"], detail: string): AutomationR
   return { status, detail: clipText(detail, MAX_DETAIL_CHARS) };
 }
 
+/** 运行时复核一次连接态：runner 放行后进程可能已退出。 */
+function offlineResult(): AutomationResult | null {
+  if (!isInfohubAvailable() || !useInfohubStore.getState().running) {
+    return result("error", INFOHUB_OFFLINE);
+  }
+  return null;
+}
+
 async function runSync(task: AutomationTask): Promise<AutomationResult> {
+  const offline = offlineResult();
+  if (offline) return offline;
   const data = await callInfohub<InfohubSyncResult>(
     "sync",
     {
@@ -71,6 +88,8 @@ async function runSync(task: AutomationTask): Promise<AutomationResult> {
 }
 
 async function runAgendaRebuild(): Promise<AutomationResult> {
+  const offline = offlineResult();
+  if (offline) return offline;
   const data = await callInfohub<InfohubAgendaResult>(
     "agenda",
     { days: AGENDA_DAYS, overdue: AGENDA_OVERDUE, rebuild: true },

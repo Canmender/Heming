@@ -8,11 +8,7 @@ import {
   UserIcon,
   PackageIcon,
   SearchIcon,
-  InfoHubIcon,
-  AutomationIcon,
-  StaffIcon,
   ModelIcon,
-  RouteIcon,
   PinIcon,
   BookIcon,
 } from "./icons.js";
@@ -25,42 +21,33 @@ import { hasOpenModal } from "./useModalA11y.js";
 import { NAV_HIDE_DELAY_MS, NAV_HOTZONE_PX, otherNavMode } from "../lib/navPrefs.js";
 import { useModuleStore } from "../lib/modules/store.js";
 import { filterNavOrder } from "../lib/modules/nav.js";
-import { moduleForPage } from "../lib/modules/registry.js";
 import { navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
 
 /**
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
  * 而 digit 固定绑定页本身——所以排序后 Alt+N 快捷键不变。
  *
- * d.67 合并后只剩 9 个宿主页：团队看板 / 通用智能体 / 技能区 / 接口区不再单独占位。
- * - 团队看板 → 团队页「看板」视图
- * - 通用智能体 → 智能体页「任务」视图
- * - 技能区、接口区 → 插件区（能力中心）的「技能」「MCP」视图
- * 数字键沿用被合并页的旧键位（2 团队看板、8 通用智能体），保住肌肉记忆；
- * 技能区 3 / 接口区 4 没有承接页，空出来不用——不给现有页凭空换号。
+ * **固定 8 项**：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置。
+ * 幕僚 / 信息中枢 / 自动化是可安装的内置插件，入口在插件页的模块卡；
+ * 模型路由已由 magpie 路由组取代（页面删除）。
+ *
+ * 数字键沿用既有绑定：1 主页、2 团队、5 记忆、6 设置、8 智能体、0 插件；
+ * 3 / 4 原是技能区 / 接口区，合并后空着不用——不给现有页凭空换号。
  */
 const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }[] = [
   { page: "home", label: "主页", icon: <HomeIcon width={17} height={17} />, digit: "1" },
-  // 团队（d.54）：名册 + 动向；d.67 起还承接原「团队看板」的看板视图
+  // 团队：名册 + 动向；还承接原「团队看板」的看板视图
   { page: "team", label: "团队", icon: <TeamIcon width={17} height={17} />, digit: "2" },
-  // 智能体（本机运行）：d.67 起承接原「通用智能体」的任务视图
+  // 智能体（本机运行）：承接原「通用智能体」的任务视图
   { page: "chat", label: "智能体", icon: <AssistantIcon width={17} height={17} />, digit: "8" },
-  // 幕僚（d.48）：常驻主动简报，与信息中枢同口径，不占数字键
-  { page: "staff", label: "幕僚", icon: <StaffIcon width={17} height={17} /> },
-  // 信息中枢（d.45）：1–9 已排满，新页不再占用快捷键，只从导航点开
-  { page: "infohub", label: "信息中枢", icon: <InfoHubIcon width={17} height={17} /> },
-  // 自动化（d.47）：与信息中枢同口径，不占数字键
-  { page: "automations", label: "自动化", icon: <AutomationIcon width={17} height={17} /> },
-  // 模型路由（d.84，magpie 语义移植）：候选链/选路/冷却/用量；不占数字键
-  { page: "model", label: "模型", icon: <ModelIcon width={17} height={17} /> },
-  { page: "modelroute", label: "模型路由", icon: <RouteIcon width={17} height={17} /> },
-  // 知识库（d.114）：本地 vault，与模型同属「资料与能力」；不占数字键
+  // 插件（能力中枢）：插件包 + 可安装的内置插件 + 技能 / 工具 / MCP / 组件
+  { page: "plugins", label: "插件", icon: <PackageIcon width={17} height={17} />, digit: "0" },
+  { page: "memory", label: "记忆", icon: <MemoryIcon width={17} height={17} />, digit: "5" },
+  // 知识库：本地 vault（文件树/双链/标签/搜索/图谱），数据不出设备
   { page: "vault", label: "知识库", icon: <BookIcon width={17} height={17} /> },
-  // 插件区（d.62 统一插件模型，d.67 起并入技能区与接口区）：能力中心
-  { page: "plugins", label: "插件区", icon: <PackageIcon width={17} height={17} />, digit: "0" },
-  { page: "memory", label: "记忆区", icon: <MemoryIcon width={17} height={17} />, digit: "5" },
+  { page: "model", label: "模型", icon: <ModelIcon width={17} height={17} /> },
   // digit 绑定页面不随显示顺序变：改老页的编号等于换掉用户肌肉记忆里的快捷键。
-  { page: "settings", label: "设置区", icon: <GearIcon width={17} height={17} />, digit: "6" },
+  { page: "settings", label: "设置", icon: <GearIcon width={17} height={17} />, digit: "6" },
 ];
 
 /** 悬停黑色胶囊浮签：淡入 + 轻微左移进入（group-hover，150ms）。 */
@@ -120,8 +107,12 @@ export function NavRail({
   // 渲染前再规整一次：手改过 localStorage 或旧版本残留时，缺项也会被补齐，绝不漏掉某个入口
   const rawNavOrder = normalizeNavOrder(useUiStore((s) => s.navOrder));
   const moduleEnabled = useModuleStore((s) => s.enabled);
-  // d.70：内置能力模块停用后，其页面入口从导航中撤下（重新启用按原顺序回来）
-  const navOrder = filterNavOrder(rawNavOrder, { enabled: moduleEnabled });
+  const moduleInstalled = useModuleStore((s) => s.installed);
+  // 模块页不在导航顺序里；这里过滤是为旧存储里残留的模块页兜底（未安装/停用即撤下）
+  const navOrder = filterNavOrder(rawNavOrder, {
+    installed: moduleInstalled,
+    enabled: moduleEnabled,
+  });
   const navMode = useUiStore((s) => s.navMode);
   const navOpen = useUiStore((s) => s.navOpen);
   const setNavMode = useUiStore((s) => s.setNavMode);
@@ -274,15 +265,15 @@ export function NavRail({
         </div>
       </div>
 
-      {/* 中组：9 个宿主页，垂直居中（组内间距 8px；组间用一条细线分隔，见 lib/navGroups） */}
+      {/* 中组：8 个导航页，垂直居中（组内间距 8px；组间用一条细线分隔，见 lib/navGroups） */}
       <div className="flex flex-1 flex-col items-center justify-center gap-2">
         {visibleItems.map((it, index) => {
           const active = page === it.page;
           const shortcut = it.digit ? `Alt${it.digit}` : "";
-          // d.70：模块页的显示名以模块注册表为准（与插件区卡片同源，改一处不会两处漂移）
-          const label = moduleForPage(it.page)?.name ?? it.label;
-          // d.72：按「工作台 / 智能模块 / 资料与能力 / 系统」分组画分隔线。
-          // 用可见相邻项算（模块停用会跳过若干项），所以不会出现空组或悬空线。
+          // 显示名固定在本文件（导航项不再包含模块页）
+          const label = it.label;
+          // 按「工作台 / 能力 / 资料 / 系统」分组画分隔线。
+          // 用可见相邻项算，所以不会出现空组或悬空线。
           const divider = needsGroupDivider(visibleItems[index - 1]?.page ?? null, it.page);
           return (
             <Fragment key={it.page}>

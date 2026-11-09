@@ -21,37 +21,22 @@ describe("NavRail 图标轨（A 方案）", () => {
     });
   });
 
-  it("带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键），其余页只有名称", () => {
+  it("带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键），无数字键的页只有名称", () => {
     render(<NavRail />);
-    for (const name of [
-      "主页 Alt1",
-      "团队 Alt2",
-      "记忆区 Alt5",
-      "设置区 Alt6",
-      "智能体 Alt8",
-      "插件区 Alt0",
-    ]) {
+    for (const name of ["主页 Alt1", "团队 Alt2", "记忆 Alt5", "设置 Alt6", "智能体 Alt8", "插件 Alt0"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
-    // 幕僚/信息中枢/自动化不占数字键：只有名称
-    for (const name of ["幕僚", "信息中枢", "自动化"]) {
+    // 知识库 / 模型不占数字键：只有名称
+    for (const name of ["知识库", "模型"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
   });
 
-  it("停用的内置模块从导航撤下；重新启用后按原顺序回来", () => {
-    useModuleStore.getState().setEnabled("infohub", false);
-    render(<NavRail />);
-    expect(screen.queryByRole("button", { name: "信息中枢" })).not.toBeInTheDocument();
-    // 自动化依赖信息中枢：依赖停用时也一并撤下
-    expect(screen.queryByRole("button", { name: "自动化" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "幕僚" })).toBeInTheDocument();
-  });
-
-  it("全部启用的默认状态下四个模块入口都在（与改造前一致）", () => {
+  it("导航固定 8 项：幕僚 / 信息中枢 / 自动化 / 模型路由都不在轨上", () => {
+    useModuleStore.getState().install("infohub");
     render(<NavRail />);
     for (const name of ["幕僚", "信息中枢", "自动化", "模型路由"]) {
-      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
   });
 
@@ -68,10 +53,10 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(homeBtn.className).toContain("text-white");
     expect(homeBtn).toHaveAttribute("aria-current", "page");
 
-    fireEvent.click(screen.getByRole("button", { name: "插件区 Alt0" }));
+    fireEvent.click(screen.getByRole("button", { name: "插件 Alt0" }));
     expect(useUiStore.getState().page).toBe("plugins");
 
-    const pluginsBtn = screen.getByRole("button", { name: "插件区 Alt0" });
+    const pluginsBtn = screen.getByRole("button", { name: "插件 Alt0" });
     expect(pluginsBtn.className).toContain("bg-ink");
     expect(pluginsBtn.className).toContain("text-white");
     expect(pluginsBtn).toHaveAttribute("aria-current", "page");
@@ -166,14 +151,8 @@ describe("NavRail 图标轨（A 方案）", () => {
   it("图标列包在垂直居中容器内，头像在容器外", () => {
     render(<NavRail />);
     const nav = screen.getByLabelText("主导航");
-    const items = [
-      "主页 Alt1",
-      "团队 Alt2",
-      "插件区 Alt0",
-      "记忆区 Alt5",
-      "设置区 Alt6",
-    ].map(
-      (l) => screen.getByLabelText(l),
+    const items = ["主页 Alt1", "团队 Alt2", "插件 Alt0", "记忆 Alt5", "设置 Alt6"].map((l) =>
+      screen.getByLabelText(l),
     );
     const wrapper = items[0].closest("div")!.parentElement!;
     expect(wrapper.className).toContain("flex-1");
@@ -198,11 +177,11 @@ describe("NavRail 导航顺序可自定义", () => {
     const labels = screen
       .getAllByRole("button")
       .map((b) => b.getAttribute("aria-label"))
-      .filter((l): l is string => Boolean(l?.startsWith("主页") || l?.startsWith("团队") || l?.startsWith("智能体") || l?.startsWith("插件区") || l?.startsWith("记忆区") || l?.startsWith("设置区")));
+      .filter((l): l is string => Boolean(l?.startsWith("主页") || l?.startsWith("团队") || l?.startsWith("智能体") || l?.startsWith("插件") || l?.startsWith("记忆") || l?.startsWith("设置")));
     // 顺序跟着 store 走
-    expect(labels[0]).toContain("设置区");
+    expect(labels[0]).toContain("设置");
     expect(labels[1]).toContain("主页");
-    // 但 Alt 键位仍按页固定：设置区永远是 Alt6、主页永远是 Alt1
+    // 但 Alt 键位仍按页固定：设置永远是 Alt6、主页永远是 Alt1
     expect(labels[0]).toContain("Alt6");
     expect(labels[1]).toContain("Alt1");
   });
@@ -210,7 +189,7 @@ describe("NavRail 导航顺序可自定义", () => {
   it("存储里缺项时自动补齐，不漏渲染任何导航", () => {
     useUiStore.setState({ navOrder: ["memory", "home"] });
     render(<NavRail />);
-    for (const name of ["主页", "团队", "智能体", "幕僚", "信息中枢", "自动化", "模型路由", "知识库", "插件区", "记忆区", "设置区"]) {
+    for (const name of ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(name) }).length).toBeGreaterThan(0);
     }
   });
@@ -235,15 +214,11 @@ describe("NavRail 导航顺序可自定义", () => {
       "plugins",
       "chat",
       "memory",
-      "staff",
-      "infohub",
-      "automations",
-      "modelroute",
-      "model",
       "vault",
+      "model",
     ]);
-    // 团队/插件区/智能体各只出现一次
-    for (const name of ["团队", "插件区", "智能体"]) {
+    // 团队/插件/智能体各只出现一次
+    for (const name of ["团队", "插件", "智能体"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(`^${name}( |$)`) }).length).toBe(1);
     }
   });
@@ -393,7 +368,7 @@ describe("NavRail 导航自动隐藏（d.68）", () => {
     render(<NavRail />);
 
     fireEvent.mouseEnter(screen.getByRole("button", { name: "展开导航" }));
-    const item = screen.getByLabelText("记忆区 Alt5");
+    const item = screen.getByLabelText("记忆 Alt5");
     // 真实鼠标点击顺序：pointerdown（标记鼠标交互）→ click
     fireEvent.pointerDown(item);
     fireEvent.click(item);
@@ -430,28 +405,15 @@ describe("NavRail 导航自动隐藏（d.68）", () => {
   });
 });
 
-describe("NavRail 分组重排（d.72）", () => {
+describe("NavRail 分组（固定 8 项）", () => {
   beforeEach(() => {
     useModuleStore.getState().reset();
     useUiStore.setState({ page: "home", navOrder: [...NEW_DEFAULT] });
   });
 
-  const PAGE_LABELS = [
-    "主页",
-    "智能体",
-    "团队",
-    "幕僚",
-    "信息中枢",
-    "自动化",
-    "模型路由",
-    "模型",
-    "知识库",
-    "插件区",
-    "记忆区",
-    "设置区",
-  ];
+  const PAGE_LABELS = ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"];
 
-  it("默认顺序：先工作台、再智能模块、再资料、最后系统", () => {
+  it("默认顺序：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置", () => {
     render(<NavRail />);
     const labels = screen
       .getAllByRole("button")
@@ -460,28 +422,13 @@ describe("NavRail 分组重排（d.72）", () => {
     expect(labels).toEqual(PAGE_LABELS);
   });
 
-  it("组间画 3 条细线；模块停用后按可见项只剩 2 条", () => {
-    const { container, unmount } = render(<NavRail />);
-    const dividers = () => container.querySelectorAll("[data-nav-group]");
-    expect(dividers()).toHaveLength(12);
+  it("组间画 3 条细线：工作台 → 能力 → 资料 → 系统", () => {
+    const { container } = render(<NavRail />);
+    expect(container.querySelectorAll("[data-nav-group]")).toHaveLength(8);
     // 分隔线是 aria-hidden 的纯视觉元素，不参与读屏
-    const lines = () =>
-      [...container.querySelectorAll("div[aria-hidden='true']")].filter((el) =>
-        el.className.includes("h-px"),
-      );
-    expect(lines()).toHaveLength(3);
-
-    unmount();
-    // 停用信息中枢（连带自动化）与幕僚：智能模块整组消失，只剩 工作台 → 资料 → 系统 两条线
-    useModuleStore.getState().setEnabled("infohub", false);
-    useModuleStore.getState().setEnabled("staff", false);
-    useModuleStore.getState().setEnabled("modelroute", false);
-    const second = render(<NavRail />);
-    expect(second.container.querySelectorAll("[data-nav-group]")).toHaveLength(8);
-    expect(
-      [...second.container.querySelectorAll("div[aria-hidden='true']")].filter((el) =>
-        el.className.includes("h-px"),
-      ),
-    ).toHaveLength(2);
+    const lines = [...container.querySelectorAll("div[aria-hidden='true']")].filter((el) =>
+      el.className.includes("h-px"),
+    );
+    expect(lines).toHaveLength(3);
   });
 });

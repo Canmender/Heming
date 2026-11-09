@@ -73,6 +73,7 @@ function makeBridge(overrides = {}) {
       return child;
     },
     packageDir: overrides.packageDir ?? path.join(process.cwd(), "infohub"),
+    libraryDir: overrides.libraryDir ?? "",
     defaultHome: overrides.defaultHome ?? path.join(process.cwd(), "home"),
     bundledPythonPath: overrides.bundledPythonPath ?? "C:\\Python312\\python.exe",
     exists: overrides.exists ?? (() => true),
@@ -94,20 +95,18 @@ test("协议编码/切分：半包留到下一次，坏行忽略", () => {
   assert.equal(second.rest, "");
 });
 
-test("路径解析：开发态/打包后指向不同的 InfoHub 包目录", () => {
+test("路径解析：开发态指向仓库源码，打包后没有内置引擎", () => {
   const dev = resolveInfohubPackageDir({
     isPackaged: false,
-    resourcesPath: "C:\\app\\resources",
     dirname: path.join("C:\\app", "packages", "desktop"),
   });
   assert.equal(dev, path.join("C:\\app", "packages", "infohub"));
 
   const packaged = resolveInfohubPackageDir({
     isPackaged: true,
-    resourcesPath: "C:\\app\\resources",
     dirname: "C:\\app\\resources\\app.asar",
   });
-  assert.equal(packaged, path.join("C:\\app\\resources", "infohub"));
+  assert.equal(packaged, "");
 
   assert.equal(resolveDefaultHome(path.join("C:\\app", "data")), path.join("C:\\app", "data", "infohub"));
 });
@@ -163,6 +162,55 @@ test("启动：用 -m infohub.bridge 拉起，带 INFOHUB_HOME/PYTHONPATH，等 
   assert.equal(info.home, home);
 });
 
+test("启动：模块自带的 site-packages 也在 PYTHONPATH 里（顺序：引擎 → 库）", async () => {
+  const engine = path.join(process.cwd(), "modules", "engine", "files", "app");
+  const lib = path.join(process.cwd(), "modules", "engine", "files", "lib");
+  const { bridge, spawned } = makeBridge({ packageDir: engine, libraryDir: lib });
+  const pending = bridge.start();
+  const { opts, child } = spawned[0];
+  assert.equal(opts.cwd, engine);
+  assert.ok(opts.env.PYTHONPATH.startsWith(`${engine}${path.delimiter}${lib}`));
+  reply(child, { event: "hello", app: "infohub", version: "0.1.0", protocol: 1 });
+  await pending;
+});
+
+test("引擎未安装：启动报可读错误，不 spawn", async () => {
+  const spawned = [];
+  const bridge = createInfohubBridge({
+    spawn: (...args) => {
+      spawned.push(args);
+      return fakeChild().child;
+    },
+    packageDir: "",
+    defaultHome: path.join(process.cwd(), "home"),
+    bundledPythonPath: "C:\\bundled\\python.exe",
+    exists: () => true,
+    isWindows: true,
+    teardown: fakeTeardown(),
+  });
+  await assert.rejects(() => bridge.start(), /信息中枢引擎未安装/);
+  assert.equal(spawned.length, 0);
+  assert.equal(bridge.info().engineInstalled, false);
+});
+
+test("引擎后装：packageDir 传函数时，装好后下一次启动即生效", async () => {
+  let current = "";
+  const engine = path.join(process.cwd(), "modules", "engine");
+  const { bridge, spawned } = makeBridge({ packageDir: () => current });
+
+  await assert.rejects(() => bridge.start(), /信息中枢引擎未安装/);
+  assert.equal(spawned.length, 0);
+
+  current = engine;
+  const pending = bridge.start();
+  assert.equal(spawned.length, 1);
+  assert.equal(spawned[0].opts.cwd, engine);
+  reply(spawned[0].child, { event: "hello", app: "infohub", version: "0.1.0", protocol: 1 });
+  await pending;
+  assert.equal(bridge.info().packageDir, engine);
+  assert.equal(bridge.info().engineInstalled, true);
+});
+
 test("缺解释器：启动直接报可读错误，不 spawn", async () => {
   const spawned = [];
   const bridge = createInfohubBridge({
@@ -170,7 +218,8 @@ test("缺解释器：启动直接报可读错误，不 spawn", async () => {
     packageDir: process.cwd(),
     defaultHome: process.cwd(),
     bundledPythonPath: null,
-    exists: () => false,
+    // 引擎目录在、解释器不在：才轮到「缺解释器」这条提示
+    exists: (target) => target === process.cwd(),
   });
   await assert.rejects(bridge.start({}), /未找到可用的 Python 解释器/);
   assert.equal(spawned.length, 0);

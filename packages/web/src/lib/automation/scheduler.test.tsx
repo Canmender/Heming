@@ -6,8 +6,8 @@ import { DEFAULT_SYNC, type AutomationTask } from "./model.js";
 import { useInfohubStore } from "../infohub/store.js";
 
 /**
- * 调度器的约定：只在「桌面端 + 登录后 + 信息中枢已连接」时执行；
- * 错过的时刻只顺延不补跑；未连接时到点记为跳过，绝不拉起 Python。
+ * 调度器的约定：登录且自动化模块启用就挂载（与信息中枢模块启停无关）；
+ * 错过的时刻只顺延不补跑；未连接时到点记为失败并顺延，绝不拉起 Python。
  */
 
 type Bridge = NonNullable<Window["__heming_infohub"]>;
@@ -59,6 +59,8 @@ function resetStores() {
     info: null,
     status: null,
     agenda: null,
+    detected: null,
+    autoCollected: false,
     busy: "",
     error: "",
   });
@@ -125,7 +127,7 @@ describe("自动化调度器", () => {
     unmount();
   });
 
-  it("未连接：记为跳过并顺延，不拉起进程、不发请求", async () => {
+  it("未连接：记为失败并顺延，不拉起进程、不发请求", async () => {
     const { bridge } = installBridge();
     useInfohubStore.setState({ available: true, booted: true, running: false });
     useAutomationStore.setState({ tasks: [makeTask({ nextRunAt: Date.now() + 10_000 })] });
@@ -134,7 +136,7 @@ describe("自动化调度器", () => {
     await vi.advanceTimersByTimeAsync(AUTOMATION_TICK_MS);
 
     const [task] = useAutomationStore.getState().tasks;
-    expect(task.lastStatus).toBe("skipped");
+    expect(task.lastStatus).toBe("error");
     expect(task.lastDetail).toContain("信息中枢未连接");
     expect(task.nextRunAt).toBeGreaterThan(Date.now());
     expect(bridge.start).not.toHaveBeenCalled();

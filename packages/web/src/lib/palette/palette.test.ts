@@ -38,8 +38,8 @@ function member(id: string, displayName: string, over: Partial<TeamMember> = {})
 }
 
 describe("palette · 页面目录", () => {
-  it("覆盖 12 个导航页，且与 store 的默认导航顺序是同一集合", () => {
-    expect(PALETTE_PAGES).toHaveLength(12);
+  it("覆盖 8 个导航页，且与 store 的默认导航顺序是同一集合", () => {
+    expect(PALETTE_PAGES).toHaveLength(8);
     expect(PALETTE_PAGES.map((p) => p.page).sort()).toEqual([...DEFAULT_NAV_ORDER].sort());
   });
 
@@ -104,7 +104,7 @@ describe("palette · 设置分区与动作目录", () => {
       "vault-settings",
     ]);
     expect(findPaletteAction("new-task")?.label).toBe("新建任务");
-    expect(findPaletteAction("modules")?.label).toBe("模块管理");
+    expect(findPaletteAction("modules")?.label).toBe("插件与模块");
     expect(findPaletteAction("vault-daily")?.label).toBe("打开今天的日记");
     expect(findPaletteAction("nope")).toBeUndefined();
   });
@@ -180,7 +180,7 @@ describe("palette · 空查询分组", () => {
   it("无最近使用时只有「页面跳转」与「常用动作」两组", () => {
     const groups = buildEmptyGroups([]);
     expect(groups.map((g) => g.id)).toEqual(["page", "action"]);
-    expect(groups[0].items).toHaveLength(12);
+    expect(groups[0].items).toHaveLength(8);
     expect(groups[1].items).toHaveLength(9);
   });
 
@@ -214,10 +214,10 @@ describe("palette · 输入检索", () => {
     expect(pageGroup?.items.some((i) => i.page === "settings")).toBe(true);
   });
 
-  it("按页面描述命中：搜「归档」能命中信息中枢（描述里才有归档）", () => {
-    const groups = searchPalette("归档", { members: [], archiveHits: [] });
+  it("按页面描述命中：搜「双链」能命中知识库（描述里才有）", () => {
+    const groups = searchPalette("双链", { members: [], archiveHits: [] });
     const pageGroup = groups.find((g) => g.id === "page");
-    expect(pageGroup?.items.some((i) => i.page === "infohub")).toBe(true);
+    expect(pageGroup?.items.some((i) => i.page === "vault")).toBe(true);
   });
 
   it("按设置分区关键词命中：搜「主题」出「外观」分区", () => {
@@ -293,7 +293,7 @@ describe("palette · 输入检索", () => {
 
   it("flattenGroups 只摊平结果项，便于键盘游标", () => {
     const groups = buildEmptyGroups([]);
-    expect(flattenGroups(groups)).toHaveLength(21);
+    expect(flattenGroups(groups)).toHaveLength(17);
   });
 
   it("知识库笔记：vault 组排在页面之后，副标题显示所属目录", () => {

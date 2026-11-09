@@ -14,6 +14,7 @@ const { readPackage, normalizeBundleCommands } = require("./plugin-package");
  * heming.pet/1.0.0/plugin.json + files/**
  * heming.pet/state.json          # 窗口几何/缩放/穿透/可见（原 pet-state.json 迁移）
  * heming.pet/settings.json       # 表单值（原 heming.pet.v1 迁移）
+ * heming.pet/data/<key>.json     # 插件自有业务数据（通用 data API，单文件 ≤1MB）
  * .staging/<id>-<version>-<pid>  # 解包中转，全部校验通过后 rename 到位
  * ```
  *
@@ -30,16 +31,49 @@ const STATE_FILE = "state.json";
 const SETTINGS_FILE = "settings.json";
 const STAGING_DIR = ".staging";
 
-function writeJsonAtomic(file, value) {
+/** 插件自有数据（不是用户偏好）：`<userData>/plugins/<id>/data/<key>.json`。 */
+const DATA_DIR = "data";
+/** key 允许字符：小写/大写字母、数字、点、下划线、连字符；长度 1–64（见 `assertDataKey`）。 */
+const DATA_KEY_RE = /^[A-Za-z0-9._-]{1,64}$/;
+/** 单文件上限 1MB：超了报错而不是截断（截断的 JSON 比报错更难查）。 */
+const DATA_MAX_BYTES = 1024 * 1024;
+const DATA_EXT = ".json";
+/** 插件 id 的形状（与 plugin-package 的 ID_RE 同源）：`data` 路径拼接前再兜一次。 */
+const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+function writeTextAtomic(file, text) {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  fs.writeFileSync(tmp, text, "utf8");
   try {
     fs.rmSync(file, { force: true });
   } catch {
     /* 目标不存在 */
   }
   fs.renameSync(tmp, file);
+}
+
+function writeJsonAtomic(file, value) {
+  writeTextAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/**
+ * 校验插件数据 key，非法直接抛可读错误（读写删一律先过这一关）。
+ *
+ * 规则：`[A-Za-z0-9._-]{1,64}`，且不允许 `..` / `.` / 空。路径分隔符本来就不在
+ * 字符集里，这里显式挡 `..` 是为了「即使以后有人放宽字符集」也不至于穿越。
+ */
+function assertDataKey(key) {
+  if (typeof key !== "string" || key.length === 0) {
+    throw new Error("插件数据 key 必须是非空字符串");
+  }
+  if (key.length > 64) {
+    throw new Error(`插件数据 key 过长（上限 64，实际 ${key.length}）：${key.slice(0, 32)}…`);
+  }
+  if (key === "." || key.includes("..") || !DATA_KEY_RE.test(key)) {
+    throw new Error(`插件数据 key 不合法：${JSON.stringify(key)}（只允许字母/数字/./_/-，不含 ".."，长度 1–64）`);
+  }
+  return key;
 }
 
 function readJson(file) {
@@ -320,10 +354,11 @@ function createPluginStore(options = {}) {
     data = nextData; // 两处落盘成功后才切换内存
     removeDir(backupDir);
 
-    // 旧版本目录清理（升级路径）：只保留 current
+    // 旧版本目录清理（升级路径）：只保留 current。
+    // ★ `data/` 是用户/插件数据，不是版本目录，升级必须原样保留（否则一升级就清空）。
     for (const entry of fs.readdirSync(pluginDir(id), { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      if (entry.name === version) continue;
+      if (entry.name === version || entry.name === DATA_DIR) continue;
       removeDir(path.join(pluginDir(id), entry.name));
     }
 
@@ -339,6 +374,9 @@ function createPluginStore(options = {}) {
    * - 记录摘除成功但删文件失败 → 记录以 `error` 状态写回（「卸载未完成」），
    *   界面能看到并可重试，不会出现「文件还在、列表里却消失了」的空账；
    * - 文件目录本来就不在（自检标 error 的记录）→ 只摘记录即可成功。
+   *
+   * ★ `removeData:false` 只保留 `settings.json` / `state.json`（用户偏好），
+   *   其余目录——包括插件自己的 `data/`——一样随插件删除（卸载即删）。
    */
   function uninstall(id, uninstallOptions = {}) {
     const plugin = find(id);
@@ -485,6 +523,92 @@ function createPluginStore(options = {}) {
     writeJsonAtomic(stateFile(id), state && typeof state === "object" ? state : {});
   }
 
+  /* ───────────────────── 插件自有数据（通用 data API） ───────────────────── */
+
+  /**
+   * 插件数据目录：`<userData>/plugins/<id>/data`（绝对路径，不保证已存在）。
+   *
+   * ★ 这是「插件自己的业务数据」的默认落点：与 settings/state 同属安装目录，
+   *   卸载即随插件删除，不写 localStorage、不随插件包分发、不上云。
+   */
+  function dataDirOf(id) {
+    if (typeof id !== "string" || !PLUGIN_ID_RE.test(id)) {
+      throw new Error(`插件 id 不合法，拒绝解析数据目录：${JSON.stringify(id)}`);
+    }
+    return path.join(pluginDir(id), DATA_DIR);
+  }
+
+  /** key → 绝对文件路径；key 非法一律抛可读错误（所有读写删先过这里）。 */
+  function dataFileOf(id, key) {
+    assertDataKey(key);
+    const dir = dataDirOf(id);
+    const file = path.join(dir, `${key}${DATA_EXT}`);
+    // 字符集已经排除分隔符，这里再确认落点确实在 data/ 内（纵深防御）
+    if (path.dirname(file) !== dir) {
+      throw new Error(`插件数据 key 不合法：${JSON.stringify(key)}`);
+    }
+    return file;
+  }
+
+  /** 读一个 key；文件不存在 / JSON 坏了都返回 null（读失败不该把插件页面搞崩）。 */
+  function readData(id, key) {
+    return readJson(dataFileOf(id, key));
+  }
+
+  /**
+   * 写一个 key（JSON only，单文件 ≤1MB）。
+   *
+   * 写失败**抛错**（与读相反）：插件必须知道自己没存上，而不是以为存上了。
+   * @returns {{ key: string, bytes: number }}
+   */
+  function writeData(id, key, value) {
+    const file = dataFileOf(id, key);
+    if (!find(id)) throw new Error(`插件不存在：${id}`);
+    let serialized;
+    try {
+      serialized = JSON.stringify(value, null, 2);
+    } catch (err) {
+      throw new Error(`插件数据无法序列化为 JSON（${key}）：${(err && err.message) || err}`);
+    }
+    if (serialized === undefined) {
+      throw new Error(`插件数据必须是可 JSON 序列化的值（${key}）：不接受 undefined / 函数 / Symbol`);
+    }
+    const text = `${serialized}\n`;
+    const bytes = Buffer.byteLength(text, "utf8");
+    if (bytes > DATA_MAX_BYTES) {
+      throw new Error(`插件数据超过单文件上限 1MB（${key}）：${bytes} 字节`);
+    }
+    writeTextAtomic(file, text);
+    return { key, bytes };
+  }
+
+  /** 删一个 key；返回「是否真的删掉了文件」（不存在 = false，不算错误）。 */
+  function deleteData(id, key) {
+    const file = dataFileOf(id, key);
+    if (!fs.existsSync(file)) return false;
+    fs.rmSync(file, { force: true });
+    return true;
+  }
+
+  /** 列出已有 key（只认 `*.json`，tmp/其他文件一律忽略；文件系统不支持时返回空数组）。 */
+  function listDataKeys(id) {
+    const dir = dataDirOf(id);
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return []; // data/ 还没建
+    }
+    const keys = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(DATA_EXT)) continue;
+      const key = entry.name.slice(0, -DATA_EXT.length);
+      if (key === "." || key.includes("..") || !DATA_KEY_RE.test(key)) continue;
+      keys.push(key);
+    }
+    return keys.sort();
+  }
+
   /** 老 `pet-state.json` 一次性种入（只在 state.json 不存在时写；幂等）。 */
   function seedLegacyState(id, legacyState) {
     if (!find(id)) return false;
@@ -547,6 +671,12 @@ function createPluginStore(options = {}) {
     patchSettings,
     readState,
     writeState,
+    // 插件自有数据（通用 data API）：默认落 `<userData>/plugins/<id>/data/`
+    dataDirOf,
+    readData,
+    writeData,
+    deleteData,
+    listDataKeys,
     seedLegacyState,
     migrateLegacy,
     _internal: { resolveSettings, coerceSetting },
@@ -554,4 +684,15 @@ function createPluginStore(options = {}) {
   return api;
 }
 
-module.exports = { createPluginStore, resolveSettings, coerceSetting, REGISTRY_FILE, CURRENT_FILE, STATE_FILE, SETTINGS_FILE };
+module.exports = {
+  createPluginStore,
+  resolveSettings,
+  coerceSetting,
+  assertDataKey,
+  REGISTRY_FILE,
+  CURRENT_FILE,
+  STATE_FILE,
+  SETTINGS_FILE,
+  DATA_DIR,
+  DATA_MAX_BYTES,
+};

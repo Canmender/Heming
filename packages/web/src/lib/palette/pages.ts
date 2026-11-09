@@ -1,7 +1,7 @@
 import type { Page } from "../../store/ui.js";
 
 /**
- * 命令面板 · 页面跳转目录（d.67 合并后的宿主页，d.114 加知识库）。
+ * 命令面板 · 页面跳转目录（固定 8 个导航页）。
  *
  * 为什么单独放一份而不是从 NavRail 里 import：NavRail 的 ITEMS 里带 JSX 图标，
  * 且没有导出；命令面板需要的是「名字 + 一句描述 + Alt 快捷键」这类纯数据。
@@ -9,9 +9,9 @@ import type { Page } from "../../store/ui.js";
  * 快捷键与 App 的映射一致」钉住（见 lib/palette/palette.test.ts）。
  *
  * 快捷键口径与 `App.tsx` 的 `SHORTCUT_PAGES`、`NavRail` 的 `digit` 保持一致：
- * 1 主页 / 2 团队 / 5 记忆区 / 6 设置区 / 8 智能体 / 0 插件区。
- * 没有数字键的页面（幕僚 / 信息中枢 / 自动化 / 模型路由 / 模型 / 知识库）不占键位；
- * 原 3 技能区 / 4 接口区随合并取消，两个键位空着不用。
+ * 1 主页 / 2 团队 / 5 记忆 / 6 设置 / 8 智能体 / 0 插件。
+ * 幕僚 / 信息中枢 / 自动化是可安装的内置插件（入口在插件页的模块卡），
+ * 模型路由页已删除——它们都不在页面目录里。
  */
 export interface PalettePage {
   page: Page;
@@ -25,15 +25,19 @@ export interface PalettePage {
 
 export const PALETTE_PAGES: PalettePage[] = [
   { page: "home", label: "主页", description: "统计、最近动向与今日概览", digit: "1" },
-  { page: "chat", label: "智能体", description: "与智能体对话，或新建/运行一个任务", digit: "8" },
   { page: "team", label: "团队", description: "成员名册、动向流与团队看板", digit: "2" },
-  { page: "staff", label: "幕僚", description: "常驻简报：日程与任务摘要" },
-  { page: "infohub", label: "信息中枢", description: "本机 QQ / 微信归档检索与日程" },
-  { page: "automations", label: "自动化", description: "本机定时同步与重扫日程" },
+  { page: "chat", label: "智能体", description: "与智能体对话，或新建/运行一个任务", digit: "8" },
   {
-    page: "modelroute",
-    label: "模型路由",
-    description: "候选链与选路策略、冷却与逐候选用量",
+    page: "plugins",
+    label: "插件",
+    description: "安装插件与内置模块：技能、工具、MCP 服务与命令",
+    digit: "0",
+  },
+  { page: "memory", label: "记忆", description: "三层记忆与本机数据", digit: "5" },
+  {
+    page: "vault",
+    label: "知识库",
+    description: "本地 vault：文件树、双链、标签、搜索与图谱，数据不出设备",
   },
   {
     page: "model",
@@ -41,24 +45,26 @@ export const PALETTE_PAGES: PalettePage[] = [
     description: "供应商、订阅账号、分组路由、用量、备份与同步（内核管理面）",
   },
   {
-    page: "vault",
-    label: "知识库",
-    description: "本地 vault：文件树、双链、标签、搜索与图谱，数据不出设备",
-  },
-  {
-    page: "plugins",
-    label: "插件区",
-    description: "能力中心：插件包、技能池、工具与 MCP 服务",
-    digit: "0",
-  },
-  { page: "memory", label: "记忆区", description: "三层记忆与本机数据", digit: "5" },
-  {
     page: "settings",
-    label: "设置区",
+    label: "设置",
     description: "个人资料、模型、外观、导航与关于",
     digit: "6",
   },
 ];
+
+/**
+ * 内置插件页：不在导航轨与页面目录里，但模块装好后仍可路由。
+ *
+ * 插件命令允许指向它们（例如信息中枢插件的「搜索归档」直接落到信息中枢页），
+ * 所以「可路由页面」比「面板页面目录」多这一组；面板自身不会把它们列出来。
+ */
+export const ROUTABLE_PLUGIN_PAGES = ["staff", "infohub", "automations"] as const;
+
+/** 命令 target 可指向的页面 id：导航页 + 内置插件页（唯一真源）。 */
+export const ROUTABLE_PAGE_IDS: ReadonlySet<string> = new Set<string>([
+  ...PALETTE_PAGES.map((p) => p.page),
+  ...ROUTABLE_PLUGIN_PAGES,
+]);
 
 /** 按 page 查目录项；找不到返回 undefined（旧链接/坏数据时安全跳过）。 */
 export function findPalettePage(page: string): PalettePage | undefined {

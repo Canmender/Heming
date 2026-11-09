@@ -141,6 +141,29 @@ export function parseAccounts(stdout: string): AccountRow[] {
     });
 }
 
+/**
+ * 读一个来源的详细地址：`provider show <id>`。
+ *
+ * 早先的内核没有 show 动词（传 `show` 会被当成 id 去查），所以拿不到输出时
+ * 退回 `provider <id>` —— 同样打印 chat / responses / anthropic 三行。
+ * 两条都失败就返回空串，调用方按「普通地址」展示，不打扰用户。
+ */
+export async function readProviderShow(cli: MagpieCliBridge, id: string): Promise<string> {
+  for (const args of [
+    ["provider", "show", id],
+    ["provider", id],
+  ]) {
+    try {
+      const result = await cli.cli(args);
+      const text = stripAnsi(result.stdout || "").trim();
+      if (result.ok && text) return text;
+    } catch {
+      // 换下一种写法再试
+    }
+  }
+  return "";
+}
+
 /** 把参数数组拼成可读命令（仅展示用，不执行）。 */
 export function formatCommand(args: readonly string[]): string {
   return `magpie-core ${args.join(" ")}`;

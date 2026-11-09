@@ -1,5 +1,7 @@
 /**
- * 选路策略（magpie 移植第二批）：八档各自的排序规则 + 轮询状态 + 模块闸门。
+ * 选路策略（magpie 移植第二批）：八档各自的排序规则 + 轮询状态。
+ *
+ * 本地「模型路由」模块已删除（由 magpie 路由组取代），所以这里不再有模块闸门用例。
  *
  * 断言口径：用假 `streamChat` 把「候选被问的顺序」原样记录下来——
  * 让所有候选都 429（4xx 里明确是限流的那类，不会触发同候选重试），
@@ -19,7 +21,6 @@ import {
   type RouteMember,
   type RouteStrategy,
 } from "../store/llm.js";
-import { useModuleStore } from "./modules/store.js";
 import { useTokenUsageStore, type UsageRecord } from "../store/tokenUsage.js";
 
 vi.mock("./llmClient.js", async (importOriginal) => {
@@ -111,7 +112,6 @@ beforeEach(() => {
   llmHealth.reset();
   llmSpeed.reset();
   resetRouteStrategyState();
-  useModuleStore.getState().reset();
   useTokenUsageStore.setState({ records: [] });
   useLlmStore.setState({ profiles: [], routes: [], bindings: {} });
 });
@@ -434,69 +434,6 @@ describe("fast（速度优先：首 token + 200 token 用时）", () => {
     expect(await orderOf(routed([{ profileId: "p2" }, { profileId: "p1" }], "fast"))).toEqual([
       "p1",
       "p2",
-    ]);
-  });
-});
-
-describe("模块闸门（modelroute 停用 → 高级选路全部退回声明顺序）", () => {
-  it("停用时 smart/usage/pace/weight/fast 一律按声明序，rotate 也不轮换", async () => {
-    setProfiles([
-      ["p1", MODELS_PRICED.expensive],
-      ["p2", MODELS_PRICED.cheap],
-    ]);
-    // 数据刻意让各档都想先选 p2：p2 更便宜、更少用、测过速、权重更大
-    useTokenUsageStore.setState({
-      records: [usage("p1", MODELS_PRICED.expensive, 100_000, hoursAgo(1))],
-    });
-    llmSpeed.record("p2", MODELS_PRICED.cheap, { ttftMs: 0, outputTokens: 200, elapsedMs: 1_000 });
-
-    useModuleStore.getState().setEnabled("modelroute", false);
-    try {
-      const strategies: RouteStrategy[] = ["smart", "usage", "pace", "weight", "fast"];
-      for (const strategy of strategies) {
-        resetRouteStrategyState();
-        expect(await orderOf(routed([{ profileId: "p1" }, { profileId: "p2" }], strategy))).toEqual([
-          "p1",
-          "p2",
-        ]);
-      }
-      // rotate 第一次本来就选中声明首位，所以看第二次是否还在原序
-      resetRouteStrategyState();
-      answerAll();
-      const rotateHead = routed(
-        [
-          { profileId: "p1" },
-          { profileId: "p2", weight: 100 },
-        ],
-        "rotate",
-      );
-      expect([await pick(rotateHead), await pick(rotateHead)]).toEqual(["p1", "p1"]);
-    } finally {
-      useModuleStore.getState().setEnabled("modelroute", true);
-    }
-  });
-
-  it("重新启用后策略恢复（停用只下线高级选路，不删数据）", async () => {
-    setProfiles([
-      ["p1", MODELS_PRICED.expensive],
-      ["p2", MODELS_PRICED.cheap],
-    ]);
-    // usage 档：p2 本月没用量、p1 有 → 启用时 p2 先；停用时退回声明序 p1 先
-    useTokenUsageStore.setState({
-      records: [usage("p1", MODELS_PRICED.expensive, 100_000, hoursAgo(1))],
-    });
-    useModuleStore.getState().setEnabled("modelroute", false);
-    expect(await orderOf(routed([{ profileId: "p1" }, { profileId: "p2" }], "usage"))).toEqual([
-      "p1",
-      "p2",
-    ]);
-
-    useModuleStore.getState().setEnabled("modelroute", true);
-    // 上一轮 429 给两个候选都留下了休息账；先清掉，只看「策略是否恢复」
-    llmHealth.reset();
-    expect(await orderOf(routed([{ profileId: "p1" }, { profileId: "p2" }], "usage"))).toEqual([
-      "p2",
-      "p1",
     ]);
   });
 });

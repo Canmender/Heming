@@ -167,6 +167,7 @@ function readDefaultSources(): UnitProjectionSources {
     system: describeSystemPlugin(),
     modules: BUILTIN_MODULES,
     moduleEnabled: useModuleStore.getState().enabled,
+    moduleInstalled: useModuleStore.getState().installed,
     plugins: pluginStore.list(),
     widgets: useWidgetsStore.getState().records,
     appVersion: currentAppVersion(),

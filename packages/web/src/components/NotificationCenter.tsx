@@ -112,7 +112,7 @@ export function NotificationCenter() {
       return;
     }
     if (item.kind === "staff") {
-      // 幕僚模块停用时落到模块管理，而不是 setPage 后被路由重定向回主页
+      // 幕僚模块停用时落到插件页，而不是 setPage 后被路由重定向回主页
       useUiStore.getState().openStaff();
       return;
     }

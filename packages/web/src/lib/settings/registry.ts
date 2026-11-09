@@ -44,12 +44,6 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
   },
 
   {
-    id: "route-groups",
-    title: "候选链",
-    keywords: ["路由", "路由组", "候选", "failover", "备用", "切换", "用量", "休息中"],
-    section: "model",
-  },
-  {
     id: "key-storage",
     title: "密钥存储",
     keywords: ["安全存储", "密钥", "key", "加密", "safestorage", "本机"],

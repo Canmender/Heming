@@ -1,21 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AssistantPage } from "./AssistantPage.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
-import { setTaskStorage, useTaskStore } from "../lib/tasks/store.js";
-import { setTemplateStorage, useTemplateStore } from "../lib/tasks/templates.js";
-import { createMemoryStorage } from "../lib/memory/storage.js";
 import { useLlmStore } from "../store/llm.js";
 
 /**
- * 智能体页（d.67 导航合并）：
- * 「对话 / 任务」两个 Tab，任务视图复用原「通用智能体」页（TaskAreaPage 嵌入态）。
+ * 智能体页（本轮改为「任务 / 协作」两个视图）：
+ * - 任务 = 左名册 + ChatPage（会话驱动）；
+ * - 协作 = CollabView（多智能体编排工作台）。
  *
- * 两个 Tab 都嵌 ChatPage，所以这里把它换成探针，重点验证：
- * - 切 Tab 时另一个 ChatPage **卸载**（同一时刻只有一个实例，不会两份消息列表抢流）；
- * - 嵌入后页头只有一个 h1（任务视图不再画自己的标题）；
- * - 一次性视图意图 pageView="tasks" 能切 Tab 并消费。
+ * ChatPage 换成探针，重点验证：
+ * - 两个视图**同一时刻只挂载一个**（不会两份消息列表抢流）；
+ * - 旧 Tab 值 chat/tasks 归一为任务视图；pageView 意图（tasks/chat）都落到任务；
+ * - 协作视图在可用智能体不足时给出引导。
  */
 vi.mock("./ChatPage.js", () => ({
   ChatPage: ({ embedded }: { embedded?: boolean }) => (
@@ -33,22 +31,22 @@ const agent = {
   avatar: null,
   description: "",
 };
+const agent2 = {
+  id: "a2",
+  owner_id: "u1",
+  name: "小研",
+  avatar: null,
+  description: "负责调研",
+};
 
-function seedTask(prompt = "梳理模块依赖") {
-  return useTaskStore.getState().create({
-    conversationId: "c1",
-    agentId: "a1",
-    agentName: "和小鸣",
-    prompt,
-  });
+const TAB_KEY = "heming.tab.assistant.v1";
+
+function tab(name: "任务" | "协作") {
+  return screen.getByRole("tab", { name });
 }
 
 beforeEach(() => {
   localStorage.clear();
-  setTaskStorage(createMemoryStorage());
-  setTemplateStorage(createMemoryStorage());
-  useTaskStore.setState({ tasks: [] });
-  useTemplateStore.setState({ templates: [] });
   useUiStore.setState({
     page: "chat",
     pageView: null,
@@ -70,7 +68,12 @@ beforeEach(() => {
     loadAgentsRoster: vi.fn(async () => undefined),
     openAgent: vi.fn(async () => "c1"),
   });
-  useLlmStore.setState({ profiles: [profile], bindings: { a1: "p1" } });
+  useLlmStore.setState({
+    profiles: [profile],
+    bindings: { a1: "p1" },
+    prompts: {},
+    routes: [],
+  });
 });
 
 describe("智能体名册：搜索 / 分组 / 编辑常显（d.87）", () => {
@@ -125,71 +128,119 @@ describe("智能体名册：搜索 / 分组 / 编辑常显（d.87）", () => {
     expect(edit.className).not.toContain("opacity-0");
     expect(edit).toHaveAttribute("title", "编辑智能体");
   });
+
+  it("名册可折叠：收起后只剩头像入口，再展开恢复名称", () => {
+    render(<AssistantPage />);
+    fireEvent.click(screen.getByRole("button", { name: "收起智能体名册" }));
+    expect(screen.getByRole("button", { name: "展开智能体名册" })).toBeInTheDocument();
+    // 折叠态仍可直接点选智能体
+    expect(screen.getByRole("button", { name: "与智能体 和小鸣 对话" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开智能体名册" }));
+    expect(screen.getByRole("button", { name: "收起智能体名册" })).toBeInTheDocument();
+  });
 });
 
-describe("智能体页：对话 / 任务 两个 Tab", () => {
-  it("默认落在对话；切到任务渲染原通用智能体主体，且页面只有一个 h1", async () => {
-    seedTask();
+describe("智能体页：任务 / 协作 两个视图", () => {
+  it("默认落在任务；页面只有一个 h1，空态给出选择与新建入口", () => {
     render(<AssistantPage />);
 
-    // 宿主页页头唯一标题
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveTextContent("智能体");
-    expect(screen.getByRole("tab", { name: "对话" })).toHaveAttribute("aria-selected", "true");
-
-    fireEvent.click(screen.getByRole("tab", { name: "任务" }));
-    expect(screen.getByRole("tab", { name: "任务" })).toHaveAttribute("aria-selected", "true");
-
-    // 任务视图内容在（运行列表 + 搜索/筛选），但不再画自己的「通用智能体」页头
-    expect(screen.getByRole("button", { name: "运行 梳理模块依赖" })).toBeInTheDocument();
-    expect(screen.getByLabelText("搜索运行记录")).toBeInTheDocument();
-    expect(screen.queryByText("通用智能体")).not.toBeInTheDocument();
-    // 嵌入后全页仍只有一个 ui-page-title（PageShell 的 h1），不重复
+    expect(tab("任务")).toHaveAttribute("aria-selected", "true");
+    expect(tab("协作")).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByText("选择一个智能体开始")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新建一个智能体" })).toBeInTheDocument();
     expect(document.querySelectorAll(".ui-page-title")).toHaveLength(1);
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
-  it("同一时刻只有一个 ChatPage 实例：切 Tab 时另一个卸载", () => {
+  it("有会话时显示任务状态条与 ChatPage；切到协作时 ChatPage 卸载", () => {
     useUiStore.setState({ activeConversationId: "c1" });
-    seedTask();
+    // 两位可用智能体：协作视图才会渲染设置表单
+    useChatStore.setState({ agentsRoster: [agent, agent2] as never });
+    useLlmStore.setState({ bindings: { a1: "p1", a2: "p1" } });
     render(<AssistantPage />);
 
     expect(screen.getByTestId("chat-standalone")).toBeInTheDocument();
-    expect(screen.queryByTestId("chat-embed")).not.toBeInTheDocument();
+    expect(screen.getByText("与 和小鸣 的会话")).toBeInTheDocument();
+    expect(screen.getByText("模型已绑定")).toBeInTheDocument();
 
-    // 切到任务：对话态 ChatPage 卸载；选中运行后嵌入式实例才挂载
-    fireEvent.click(screen.getByRole("tab", { name: "任务" }));
+    fireEvent.click(tab("协作"));
     expect(screen.queryByTestId("chat-standalone")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "运行 梳理模块依赖" }));
-    expect(screen.getByTestId("chat-embed")).toHaveTextContent("embedded");
-    expect(screen.queryByTestId("chat-standalone")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("协作设置")).toBeInTheDocument();
 
-    // 切回对话：嵌入式实例卸载，对话实例回来
-    fireEvent.click(screen.getByRole("tab", { name: "对话" }));
+    fireEvent.click(tab("任务"));
     expect(screen.getByTestId("chat-standalone")).toBeInTheDocument();
-    expect(screen.queryByTestId("chat-embed")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("协作设置")).not.toBeInTheDocument();
   });
 
-  it("pageView=tasks 意图：自动切到任务 Tab 并消费（旧链接 setPage(\"tasks\") 等价写法）", async () => {
+  it("旧 Tab 值 chat/tasks 归一为任务视图（保留会话记忆，不空白）", () => {
+    for (const legacy of ["chat", "tasks"]) {
+      window.sessionStorage.setItem(TAB_KEY, JSON.stringify(legacy));
+      const { unmount } = render(<AssistantPage />);
+      expect(tab("任务")).toHaveAttribute("aria-selected", "true");
+      unmount();
+    }
+
+    window.sessionStorage.setItem(TAB_KEY, JSON.stringify("collab"));
+    render(<AssistantPage />);
+    expect(tab("协作")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("pageView=tasks 意图：切到任务并消费；之后手动切走不被钉住", async () => {
     useUiStore.setState({ pageView: "tasks" });
     render(<AssistantPage />);
 
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: "任务" })).toHaveAttribute("aria-selected", "true"),
-    );
+    await waitFor(() => expect(tab("任务")).toHaveAttribute("aria-selected", "true"));
     expect(useUiStore.getState().pageView).toBeNull();
 
-    // 消费过一次后不再被钉住：手动切回对话就停在对话
-    fireEvent.click(screen.getByRole("tab", { name: "对话" }));
-    expect(screen.getByRole("tab", { name: "对话" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(tab("协作"));
+    expect(tab("协作")).toHaveAttribute("aria-selected", "true");
   });
 
-  it("pageView 为其他视图意图时不动 Tab（只消费属于本页的 board/tasks 语义）", () => {
+  it("通知中心 openConversation（pageView=chat）会把协作切回任务并显示会话", async () => {
+    render(<AssistantPage />);
+    fireEvent.click(tab("协作"));
+    expect(tab("协作")).toHaveAttribute("aria-selected", "true");
+
+    act(() => useUiStore.getState().openConversation("c1"));
+    await waitFor(() => expect(tab("任务")).toHaveAttribute("aria-selected", "true"));
+    expect(screen.getByTestId("chat-standalone")).toBeInTheDocument();
+    expect(screen.getByText("与 和小鸣 的会话")).toBeInTheDocument();
+  });
+
+  it("pageView 为其他视图意图时不动 Tab（只消费属于本页的 board/tasks/chat 语义）", () => {
     useUiStore.setState({ pageView: "board" });
     render(<AssistantPage />);
-    // 不属于智能体页的意图：不切 Tab，但也不会导致崩溃/重复消费
-    expect(screen.getByRole("tab", { name: "对话" })).toHaveAttribute("aria-selected", "true");
+    expect(tab("任务")).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("智能体页 · 协作视图入口", () => {
+  it("可用智能体不足 2 个时给出新建/绑定引导", () => {
+    render(<AssistantPage />);
+    fireEvent.click(tab("协作"));
+    expect(screen.getByText("至少需要 2 个已绑定模型的智能体")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "去绑定模型" })).toBeInTheDocument();
+    // 未绑定模型也会在说明里点出来
+    expect(screen.getByText(/当前可用 1 个/)).toBeInTheDocument();
+  });
+
+  it("两个已绑定智能体时显示设置表单，任务为空时开始按钮禁用", () => {
+    useChatStore.setState({ agentsRoster: [agent, agent2] as never });
+    useLlmStore.setState({ bindings: { a1: "p1", a2: "p1" } });
+    render(<AssistantPage />);
+    fireEvent.click(tab("协作"));
+
+    expect(screen.getByLabelText("协作设置")).toBeInTheDocument();
+    const start = screen.getByRole("button", { name: "开始协作" });
+    expect(start).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("任务描述（必填）"), {
+      target: { value: "整理季度复盘" },
+    });
+    // 默认选中两位已绑定参与者
+    expect(start).toBeEnabled();
   });
 });
 
@@ -220,7 +271,7 @@ describe("智能体页：新建入口与创建后直接开聊（d.68 简化）",
     expect(screen.getByLabelText("名称")).toHaveFocus();
   });
 
-  it("创建成功后直接开始对话：复用 openAgent + 激活会话，不新增页面/路由", async () => {
+  it("创建成功后直接开始对话：切回任务并激活会话，不新增页面/路由", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({ id: "a9", owner_id: "u1", name: "新助手", avatar: null, description: "" }),
@@ -228,6 +279,7 @@ describe("智能体页：新建入口与创建后直接开聊（d.68 简化）",
       ),
     );
     render(<AssistantPage />);
+    fireEvent.click(tab("协作"));
 
     fireEvent.click(screen.getByRole("button", { name: "新建智能体" }));
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "新助手" } });
@@ -235,7 +287,8 @@ describe("智能体页：新建入口与创建后直接开聊（d.68 简化）",
 
     await waitFor(() => expect(useUiStore.getState().activeConversationId).toBe("c1"));
     expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("a9");
-    // 会话已激活：右栏直接进入对话（ChatPage 探针），不是停在「选择一个智能体开始」
+    // 会话已激活：切回任务视图并直接进入对话（ChatPage 探针）
+    expect(tab("任务")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("chat-standalone")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "新建智能体" })).not.toBeInTheDocument();
   });

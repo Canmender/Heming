@@ -6,6 +6,8 @@
  * ★ 这个包跑在**独立 origin** `widget://heming.pet/...` 下：读不到 `app://heming` 的
  *   localStorage，也没有 Node / fs / 会话 / 密钥桥。所以这里不出现任何宿主存储模块：
  *   - 偏好 → `settings()/setSetting()/onSettings()`（宿主存 userData/plugins/<id>/settings.json）
+ *   - 业务数据 → `dataGet()/dataSet()/dataDelete()/dataKeys()/dataDir()`
+ *     （宿主存 userData/plugins/<id>/data/<key>.json；JSON、单文件 ≤1MB、卸载即删）
  *   - 主题 → `info().theme` / `onEvent({kind:"theme"})`
  *   - 事件 → `onEvent()`（宿主主窗脱敏转发）
  *   - 对话 → `chatConfig()`（本机 magpie 网关地址 + 网关 Key；用户供应商 Key 不经过这里）
@@ -47,6 +49,22 @@ export type WidgetEvent =
   | { kind: "theme"; theme: "light" | "dark" }
   | { kind: "tray"; action: string };
 
+/**
+ * 插件数据目录（`<userData>/plugins/<id>/data/`）。
+ *
+ * key 规则 `[A-Za-z0-9._-]{1,64}`（不含 `..`），值必须可 JSON 序列化且单文件 ≤1MB；
+ * 读不到/坏 JSON 得 `null`，写失败会 reject——**别吞掉写失败**。卸载即删。
+ */
+export interface WidgetDataDir {
+  dir: string;
+}
+
+/** `dataSet()` 的回执：存了哪个 key、落盘多少字节。 */
+export interface WidgetDataSetResult {
+  key: string;
+  bytes: number;
+}
+
 export interface WidgetBridge {
   // 窗口
   state(): Promise<WidgetState>;
@@ -67,6 +85,12 @@ export interface WidgetBridge {
   setSetting(key: string, value: unknown): Promise<Record<string, unknown>>;
   onSettings(cb: (settings: Record<string, unknown>) => void): () => void;
   onEvent(cb: (event: unknown) => void): () => void;
+  // 插件自有数据（宿主按 sender 的 pluginId 隔离；JSON only、≤1MB/文件）
+  dataGet<T = unknown>(key: string): Promise<T | null>;
+  dataSet(key: string, value: unknown): Promise<WidgetDataSetResult>;
+  dataDelete(key: string): Promise<boolean>;
+  dataKeys(): Promise<string[]>;
+  dataDir(): Promise<WidgetDataDir>;
   // 跳转
   openSettings(): void;
   openPage(page: string): void;
@@ -102,6 +126,12 @@ export interface WidgetApi {
   setSetting(key: string, value: unknown): Promise<Record<string, unknown>>;
   onSettings(cb: (settings: Record<string, unknown>) => void): () => void;
   onEvent(cb: (event: unknown) => void): () => void;
+  /** 数据目录桥：旧宿主缺方法时降级（null / false / []），不白屏；写失败也收敛成 null。 */
+  dataGet<T = unknown>(key: string): Promise<T | null>;
+  dataSet(key: string, value: unknown): Promise<WidgetDataSetResult | null>;
+  dataDelete(key: string): Promise<boolean>;
+  dataKeys(): Promise<string[]>;
+  dataDir(): Promise<WidgetDataDir | null>;
   openSettings(): void;
   openPage(page: string): void;
   chatConfig(): Promise<ChatConfig | null>;
@@ -216,6 +246,50 @@ export function createWidgetApi(override?: Partial<WidgetBridge> | null): Widget
         return raw?.onEvent?.(cb) ?? NOOP_UNSUBSCRIBE;
       } catch {
         return NOOP_UNSUBSCRIBE;
+      }
+    },
+    // 数据目录：旧宿主没这几个方法时按「不可用」降级（null / false / []），不白屏。
+    // 不走 call()：数据值合法的 false / 0 / "" 不能被 `??` 收敛成兜底值。
+    dataGet: async <T,>(key: string): Promise<T | null> => {
+      if (!raw?.dataGet) return null;
+      try {
+        return ((await raw.dataGet(key)) ?? null) as T | null;
+      } catch {
+        return null;
+      }
+    },
+    dataSet: async (key, value) => {
+      if (!raw?.dataSet) return null;
+      try {
+        return (await raw.dataSet(key, value)) ?? null;
+      } catch {
+        return null; // 写失败（超限/坏 key）由调用方按 null 判断，日志走宿主
+      }
+    },
+    dataDelete: async (key) => {
+      if (!raw?.dataDelete) return false;
+      try {
+        return (await raw.dataDelete(key)) === true;
+      } catch {
+        return false;
+      }
+    },
+    dataKeys: async () => {
+      if (!raw?.dataKeys) return [];
+      try {
+        const keys = await raw.dataKeys();
+        return Array.isArray(keys) ? keys.filter((key) => typeof key === "string") : [];
+      } catch {
+        return [];
+      }
+    },
+    dataDir: async () => {
+      if (!raw?.dataDir) return null;
+      try {
+        const value = await raw.dataDir();
+        return value && typeof value.dir === "string" && value.dir ? value : null;
+      } catch {
+        return null;
       }
     },
     openSettings: () => {

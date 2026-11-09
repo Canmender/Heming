@@ -22,7 +22,14 @@ from typing import Any, Callable
 
 from . import __version__
 from . import agenda as agenda_mod
-from .config import CONFIG_PATH, HOME, load_config
+from .config import (
+    CONFIG_PATH,
+    HOME,
+    detect_sources,
+    ensure_detected_config,
+    load_config,
+    source_status,
+)
 from .store import Store
 
 PROTOCOL_VERSION = 1
@@ -39,6 +46,7 @@ _ALLOWED_METHODS = {
     "agenda",
     "sync",
     "config.summary",
+    "config.detect",
     "shutdown",
 }
 
@@ -153,21 +161,34 @@ def _open_store(cfg: Any, create: bool = False) -> Store | None:
 
 
 def _config_summary(cfg: Any) -> dict:
-    """只回非敏感配置；密钥、口令、Webhook 一律不出桥。"""
+    """只回非敏感配置；密钥、口令、Webhook 一律不出桥。
+
+    路径（微信目录 / QQNT 库 / 导出目录）是本机路径，回给本机 UI 用于展示
+    「已识别 / 未找到」，不属于敏感信息。
+    """
     raw = cfg.raw
     push = raw.get("push") or {}
     llm = raw.get("llm") or {}
+    # 已配置路径优先；缺失时做一次本机检测（只读，不写配置）。
+    detected = source_status(cfg)
     return {
         "dataDir": str(cfg.data_dir),
         "configPath": str(CONFIG_PATH),
+        "autoDetect": bool(raw.get("auto_detect", True)),
+        "autoSyncOnStart": bool(raw.get("auto_sync_on_start", True)),
         "wechat": {
             "enabled": bool((raw.get("wechat") or {}).get("enabled", True)),
-            "dbDir": (raw.get("wechat") or {}).get("db_dir", ""),
+            "dbDir": detected["wechat"]["db_dir"],
+            "detected": detected["wechat"]["detected"],
         },
         "qq": {
             "enabled": bool((raw.get("qq") or {}).get("enabled", True)),
             "mode": (raw.get("qq") or {}).get("mode", "nt"),
-            "ntAccount": (raw.get("qq") or {}).get("nt_account", ""),
+            "ntAccount": detected["qq"]["nt_account"],
+            "ntDb": detected["qq"]["nt_db"],
+            "exportDir": detected["qq"]["export_dir"],
+            "detected": detected["qq"]["detected"],
+            "exportDetected": detected["qq"]["export_detected"],
         },
         "voice": {"enabled": bool((raw.get("voice") or {}).get("enabled", True))},
         "kb": {
@@ -442,6 +463,21 @@ class Bridge:
     def config_summary(self, _params: dict) -> dict:
         return _config_summary(self.cfg)
 
+    def config_detect(self, _params: dict) -> dict:
+        """自动识别 QQ / 微信信息目录；必要时把空配置项写回 config.json。
+
+        只做识别与配置补全，**不采集**——采集仍由 `sync` 显式触发，
+        前端据此决定是否在「首次连接」时调用一次 sync。
+        """
+        cfg = load_config(create=True)
+        sources = detect_sources()
+        applied = ensure_detected_config(cfg)
+        return {
+            "applied": bool(applied),
+            "sources": sources,
+            "summary": _config_summary(cfg),
+        }
+
     def shutdown(self, _params: dict) -> dict:
         self._stop = True
         return {"stopped": True}
@@ -459,6 +495,7 @@ def _dispatch(bridge: Bridge, method: str, params: dict) -> Any:
         "agenda": bridge.agenda,
         "sync": bridge.sync,
         "config.summary": bridge.config_summary,
+        "config.detect": bridge.config_detect,
         "shutdown": bridge.shutdown,
     }[method]
     return handler(params)

@@ -403,8 +403,8 @@ function runCli(argv) {
   }
   if (publisherId) manifest.publisher = { id: publisherId, publicKey: manifest.publisher?.publicKey ?? "" };
 
-  // 审计 P0-1：bundle 先把 files/** 内容摘要写进清单再签，签名即覆盖代码字节。
-  if (manifest.distribution === "bundle") {
+  // 审计 P0-1：bundle / module 先把 files/** 内容摘要写进清单再签，签名即覆盖代码字节。
+  if (manifest.distribution === "bundle" || manifest.distribution === "module") {
     let digest;
     if (packagePath) digest = digestFromTgz(resolve(packagePath));
     else digest = digestFromPackageRoot(dirPath ? resolve(dirPath) : dirname(resolve(file)));

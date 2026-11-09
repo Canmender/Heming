@@ -772,6 +772,26 @@ function createWidgetHost(deps = {}) {
     return fn(runtime);
   }
 
+  /** `{ key }` 载荷校验（get/delete 用）：形状不对给可读错误，invoke 侧 reject。 */
+  function dataKeyOf(payload, channel) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error(`${channel}：载荷必须是 { key }`);
+    }
+    if (typeof payload.key !== "string" || !payload.key) {
+      throw new Error(`${channel}：缺少字符串 key`);
+    }
+    return payload.key;
+  }
+
+  /** `{ key, value }` 载荷校验（set 用）：`value: undefined` 也当错误，避免「静默存成 null」。 */
+  function dataPayloadOf(payload, channel) {
+    const key = dataKeyOf(payload, channel);
+    if (!Object.prototype.hasOwnProperty.call(payload, "value")) {
+      throw new Error(`${channel}：缺少 value（要存 null 请显式传 null）`);
+    }
+    return { key, value: payload.value };
+  }
+
   function registerIpc() {
     if (ipcRegistered) return;
     ipcRegistered = true;
@@ -842,6 +862,39 @@ function createWidgetHost(deps = {}) {
         }),
         null,
       ),
+    );
+    /* ── 插件自有数据（`<userData>/plugins/<id>/data/`，按 sender 的 pluginId 隔离） ── */
+    ipcMain.handle("widget:data-get", (event, payload) =>
+      withRuntime(
+        event,
+        (rt) => {
+          const key = dataKeyOf(payload, "widget:data-get");
+          return store.readData(rt.pluginId, key);
+        },
+        null,
+      ),
+    );
+    ipcMain.handle("widget:data-set", (event, payload) =>
+      withRuntime(
+        event,
+        (rt) => {
+          const { key, value } = dataPayloadOf(payload, "widget:data-set");
+          // key 规则 / JSON 序列化 / 1MB 上限 / 写盘失败都由 store 抛可读错误 → invoke 侧 reject
+          return store.writeData(rt.pluginId, key, value);
+        },
+        null,
+      ),
+    );
+    ipcMain.handle("widget:data-delete", (event, payload) =>
+      withRuntime(
+        event,
+        (rt) => store.deleteData(rt.pluginId, dataKeyOf(payload, "widget:data-delete")),
+        false,
+      ),
+    );
+    ipcMain.handle("widget:data-keys", (event) => withRuntime(event, (rt) => store.listDataKeys(rt.pluginId), []));
+    ipcMain.handle("widget:data-dir", (event) =>
+      withRuntime(event, (rt) => ({ dir: store.dataDirOf(rt.pluginId) }), null),
     );
     ipcMain.on("widget:open-settings", (event) =>
       withRuntime(

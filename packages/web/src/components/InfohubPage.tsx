@@ -2,24 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import {
   callInfohub,
   describeInfohubError,
+  detectedSourcesFromSummary,
   formatInfohubBytes,
   formatInfohubTime,
-  infohubInfo,
   isInfohubAvailable,
   onInfohubEvent,
-  pickInfohubHome,
-  pickInfohubPython,
   readInfohubConfig,
-  startInfohub,
-  stopInfohub,
-  writeInfohubConfig,
   type InfohubAgendaResult,
-  type InfohubBridgeInfo,
   type InfohubConfig,
+  type InfohubDetectedSources,
   type InfohubProgressEvent,
   type InfohubSearchHit,
   type InfohubSearchResult,
   type InfohubStatus,
+  type InfohubSyncResult,
 } from "../lib/infohub/client.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { useUiStore, type InfohubIntent } from "../store/ui.js";
@@ -76,19 +72,123 @@ function Snippet({ text }: { text: string }) {
 }
 
 /**
+ * 「采集来源」小节：微信目录 / QQNT 库 / QQ 导出目录的识别状态。
+ *
+ * 识别与采集都在边车启动时自动完成，这里只展示结果与自动采集说明；
+ * 路径默认折叠，展开后可复制——长路径一上来就铺满会挤掉真正要看的状态。
+ */
+function SourceSection({
+  detected,
+  autoNote,
+}: {
+  detected: InfohubDetectedSources | null;
+  autoNote: string;
+}) {
+  const [showPaths, setShowPaths] = useState(false);
+  const [copied, setCopied] = useState("");
+
+  async function copy(key: string, value: string) {
+    if (!value) return;
+    try {
+      await navigator.clipboard?.writeText(value);
+      setCopied(key);
+      window.setTimeout(() => setCopied(""), 1500);
+    } catch {
+      /* 剪贴板不可用（无权限/浏览器）：路径仍然可在展开区看到 */
+    }
+  }
+
+  const rows: Array<{ key: string; label: string; path: string; detected: boolean }> = [
+    {
+      key: "wechat",
+      label: "微信目录",
+      path: detected?.wechat.db_dir ?? "",
+      detected: Boolean(detected?.wechat.detected),
+    },
+    {
+      key: "qqnt",
+      label: "QQNT 消息库",
+      path: detected?.qq.nt_db ?? "",
+      detected: Boolean(detected?.qq.detected && detected?.qq.nt_db),
+    },
+    {
+      key: "qqexport",
+      label: "QQ 导出目录",
+      path: detected?.qq.export_dir ?? "",
+      detected: Boolean(detected?.qq.export_detected ?? (detected?.qq.export_dir && detected?.qq.detected)),
+    },
+  ];
+
+  return (
+    <div className="border-b border-line-soft bg-panel px-6 py-2.5" data-testid="infohub-sources">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 ui-caption">
+        <span className="font-medium text-[#555]">采集来源</span>
+        {rows.map((row) => (
+          <span key={row.key} className="flex items-center gap-1.5" data-testid={`source-${row.key}`}>
+            <span>{row.label}</span>
+            <span
+              className={`rounded-sm px-1 py-0.5 ui-micro font-medium ${
+                row.detected ? "bg-[#e6f4ea] text-[#1f7a43]" : "bg-[#fdecea] text-[#b42318]"
+              }`}
+            >
+              {row.detected ? "已识别" : "未找到"}
+            </span>
+            {row.key === "qqnt" && detected?.qq.nt_account ? (
+              <span className="ui-micro">账号 {detected.qq.nt_account}</span>
+            ) : null}
+          </span>
+        ))}
+        <button
+          type="button"
+          onClick={() => setShowPaths((v) => !v)}
+          className="ui-micro underline-offset-2 hover:underline"
+          aria-expanded={showPaths}
+        >
+          {showPaths ? "收起路径" : "查看路径"}
+        </button>
+      </div>
+      {autoNote && (
+        <p className="mt-1 ui-micro text-[#555]" role="status">
+          {autoNote}
+        </p>
+      )}
+      {showPaths && (
+        <ul className="mt-1.5 flex flex-col gap-1">
+          {rows.map((row) => (
+            <li key={row.key} className="flex min-w-0 items-center gap-2 ui-micro">
+              <span className="w-24 shrink-0 text-[#666]">{row.label}</span>
+              <code className="min-w-0 flex-1 truncate rounded-sm bg-white px-1 py-0.5" title={row.path || "未找到"}>
+                {row.path || "未找到"}
+              </code>
+              <button
+                type="button"
+                disabled={!row.path}
+                aria-label={`复制${row.label}`}
+                onClick={() => void copy(row.key, row.path)}
+                className="shrink-0 underline-offset-2 hover:underline disabled:opacity-40"
+              >
+                {copied === row.key ? "已复制" : "复制"}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
  * 信息中枢（d.45）：把 InfoHub 的本机 QQ/微信归档接进和鸣。
  *
  * 红线：
  * - 只读：归档以 `mode=ro` 打开，检索与重扫不会写库；
  * - 数据不出本机：不调用任何云端接口，浏览器环境直接显示「仅桌面端可用」；
- * - 不自动采集：进程由用户点「连接」拉起，同步由用户显式勾选来源后触发。
+ * - 全自动：模块生效后自动拉起边车、自动识别目录、空库时自动采集一次；
+ *   页面不提供目录/解释器/连接表单，识别与采集结果仍完整展示（失败原因不吞）。
  */
 export function InfohubPage() {
   const available = isInfohubAvailable();
 
-  const [info, setInfo] = useState<InfohubBridgeInfo | null>(null);
-  const [home, setHome] = useState(() => readInfohubConfig().home ?? "");
-  const [python, setPython] = useState(() => readInfohubConfig().python ?? "");
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
 
@@ -106,7 +206,8 @@ export function InfohubPage() {
   const [syncArchive, setSyncArchive] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState<InfohubProgressEvent | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  /** 自动采集说明由共享 store 产出：首页卡与页面看到同一条结果。 */
+  const autoNote = useInfohubStore((s) => s.autoNote);
 
   /** 首页卡/命令面板投递的一次性意图：检索词或日程页。 */
   const intent = useUiStore((s) => s.infohubIntent);
@@ -116,21 +217,24 @@ export function InfohubPage() {
   const automationsOn = useModuleStore((s) => isModuleEffective(s, "automations"));
   const pendingIntentRef = useRef<InfohubIntent | null>(null);
 
-  /** 当前连接配置：未填目录时交给主进程用默认目录。 */
+  /** 连接配置来自主进程落盘的解析结果（默认目录 / 内置运行时），页面不再手填。 */
   function currentConfig(): InfohubConfig {
-    const trimmedHome = home.trim();
-    const trimmedPython = python.trim();
-    return {
-      ...(trimmedHome ? { home: trimmedHome } : {}),
-      ...(trimmedPython ? { python: trimmedPython } : {}),
-    };
+    return readInfohubConfig();
   }
 
-  async function loadStatus(config: InfohubConfig) {
+  async function loadStatus(config: InfohubConfig, applyDetected = false) {
     const next = await callInfohub<InfohubStatus>("status", {}, config);
     setStatus(next);
+    if (applyDetected) {
+      // 默认勾选检测到的来源；未识别的来源在同步面板里置灰并提示。
+      const detected = detectedSourcesFromSummary(next.config);
+      setSyncSources({ qq: detected.qq.detected, wechat: detected.wechat.detected });
+    }
     // 首页卡与归档工具读共享 store：页面里刷新过的规模/连接态要立刻可见
-    useInfohubStore.setState({ status: next });
+    useInfohubStore.setState({
+      status: next,
+      detected: detectedSourcesFromSummary(next.config),
+    });
     return next;
   }
 
@@ -145,20 +249,27 @@ export function InfohubPage() {
     }
   }
 
-  async function connect(override?: InfohubConfig) {
+  /**
+   * 自动就绪：拉起（或复用）边车 → 读状态 → 空库自动采集。
+   * 进入页面、模块被重新启用、失败后点「重试」都走这里，不需要用户配置任何路径。
+   */
+  async function autoStart() {
     if (phase === "connecting") return;
-    const config = override ?? currentConfig();
     setPhase("connecting");
     setError("");
     try {
-      const next = await startInfohub(config);
-      setInfo(next);
-      useInfohubStore.getState().syncInfo(next);
-      if (next.running) void useInfohubStore.getState().refresh();
-      if (next.home) setHome(next.home);
-      if (next.python) setPython(next.python);
-      writeInfohubConfig({ home: next.home ?? config.home, python: next.python ?? config.python });
-      await loadStatus(config);
+      await useInfohubStore.getState().ensureRunning();
+      const state = useInfohubStore.getState();
+      if (!state.running) {
+        setPhase("error");
+        setError(state.error || "本机归档没能启动");
+        return;
+      }
+      const next = state.status ?? (await loadStatus(currentConfig(), true));
+      setStatus(next);
+      const detected = detectedSourcesFromSummary(next.config);
+      setSyncSources({ qq: detected.qq.detected, wechat: detected.wechat.detected });
+      if (state.error) setError(state.error);
       setPhase("ready");
     } catch (err) {
       setPhase("error");
@@ -166,39 +277,11 @@ export function InfohubPage() {
     }
   }
 
-  // 首次进入：只读取静态信息与已保存配置。进程已经在跑（例如从别的页面切回来）才重新挂上，
-  // 否则保持 idle——拉起子进程必须由用户点「连接」。
+  // 进入页面即自动就绪：模块已生效时不需要任何「连接」点击。
   useEffect(() => {
     if (!available) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const bridgeInfo = await infohubInfo();
-        if (cancelled) return;
-        setInfo(bridgeInfo);
-        useInfohubStore.getState().syncInfo(bridgeInfo);
-        if (bridgeInfo.running) void useInfohubStore.getState().refresh();
-        const saved = readInfohubConfig();
-        if (!saved.home) setHome(bridgeInfo.home ?? "");
-        if (bridgeInfo.running && bridgeInfo.home) {
-          setHome(bridgeInfo.home);
-          if (bridgeInfo.python) setPython(bridgeInfo.python);
-          setPhase("connecting");
-          const config: InfohubConfig = { home: bridgeInfo.home };
-          await loadStatus(config);
-          setPhase("ready");
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setPhase("error");
-          setError(describeInfohubError(err));
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // 只在可用性变化时初始化一次：其余状态由用户显式操作驱动。
+    void autoStart();
+    // 只在可用性变化时初始化一次；运行态变化由 store 与页面操作驱动。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [available]);
 
@@ -257,38 +340,6 @@ export function InfohubPage() {
     }
   }
 
-  async function disconnect() {
-    try {
-      await stopInfohub();
-    } catch {
-      /* 进程可能已经退出：断开仍然是「回到未连接状态」 */
-    }
-    setPhase("idle");
-    useInfohubStore.getState().markStopped();
-    setStatus(null);
-    setAgenda(null);
-    setHits([]);
-    setProgress(null);
-  }
-
-  async function chooseHome() {
-    try {
-      const picked = await pickInfohubHome();
-      if (picked) setHome(picked);
-    } catch (err) {
-      setError(describeInfohubError(err));
-    }
-  }
-
-  async function choosePython() {
-    try {
-      const picked = await pickInfohubPython();
-      if (picked) setPython(picked);
-    } catch (err) {
-      setError(describeInfohubError(err));
-    }
-  }
-
   async function runSearch(term?: string) {
     const trimmed = (term ?? query).trim();
     if (!trimmed || phase !== "ready") return;
@@ -329,9 +380,14 @@ export function InfohubPage() {
     }
   }
 
+  /** 手动采集一次：来源走同步面板的勾选。自动采集在 store 里，与本函数共用同一协议。 */
   async function runSync() {
-    if (phase !== "ready" || syncing) return;
-    const sources = [syncSources.qq ? "qq" : "", syncSources.wechat ? "wechat" : ""].filter(Boolean);
+    if (syncing) return;
+    if (phase !== "ready") return;
+    const config = currentConfig();
+    const sources = [syncSources.qq ? "qq" : "", syncSources.wechat ? "wechat" : ""].filter(
+      (s): s is "qq" | "wechat" => Boolean(s),
+    );
     if (sources.length === 0) {
       setError("至少选择一个采集来源");
       return;
@@ -340,12 +396,14 @@ export function InfohubPage() {
     setError("");
     setProgress(null);
     try {
-      await callInfohub(
+      const result = await callInfohub<InfohubSyncResult>(
         "sync",
         { sources, full: syncFull, archive: syncArchive },
-        currentConfig(),
+        config,
       );
-      const config = currentConfig();
+      const reports = Array.isArray(result?.reports) ? result.reports : [];
+      const errors = reports.flatMap((report) => report.errors ?? []);
+      if (errors.length) setError(errors.join("；"));
       await loadStatus(config);
       setAgenda(null);
       // 同步会写归档：共享 store 的规模与日程立即重算，首页卡不显示旧数据
@@ -402,6 +460,8 @@ export function InfohubPage() {
   }
 
   const ready = phase === "ready";
+  // status.config 里带着 Python 的识别结果：已配置路径优先，缺失时用检测值。
+  const detected = detectedSourcesFromSummary(status?.config);
   const lastMessageText = status?.lastMessageTs ? formatInfohubTime(status.lastMessageTs) : "";
 
   const statusLine = syncing
@@ -411,8 +471,8 @@ export function InfohubPage() {
     : ready
       ? "已连接 · 只读归档"
       : phase === "connecting"
-        ? "正在连接…"
-        : "未连接";
+        ? "自动启动中…"
+        : "未就绪";
 
   return (
     <PageShell
@@ -467,19 +527,12 @@ export function InfohubPage() {
               >
                 刷新
               </button>
-              <button
-                type="button"
-                onClick={() => void disconnect()}
-                className="ui-btn ui-btn-sm ui-btn-ghost text-[#666]"
-              >
-                断开
-              </button>
             </>
           )}
         </>
       }
     >
-      {error && (
+      {error && ready && (
         <div
           role="alert"
           className="flex items-start justify-between gap-3 border-b border-[var(--danger-line)] bg-[var(--danger-soft)] px-6 py-2 ui-caption text-[var(--danger)]"
@@ -491,97 +544,36 @@ export function InfohubPage() {
         </div>
       )}
 
-      {/* 未连接：数据目录与解释器设置。默认目录来自主进程，可浏览选择已有 InfoHub 目录。 */}
+      {/* 未就绪：不给任何路径/解释器表单。装上模块就自动连、自动识别、空库自动采集。 */}
       {!ready && (
-        <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
-          <div className="mx-auto max-w-[620px] rounded-xl border border-line bg-white p-5 shadow-card">
-            <h2 className="ui-section-title">连接本机归档</h2>
-            <p className="mt-1 text-[12px] leading-6 text-muted">
-              指向已有的 InfoHub 数据目录（里面有 <code className="rounded-sm bg-[#f4f4f4] px-1">config.json</code> 和{" "}
-              <code className="rounded-sm bg-[#f4f4f4] px-1">data/archive.db</code>）。
-              首次使用也可以直接用默认目录，同步后自动建库。
-            </p>
-
-            <label className="ui-caption mt-4 block font-medium text-[#555]" htmlFor="infohub-home">
-              数据目录
-            </label>
-            <div className="mt-1 flex gap-1.5">
-              <input
-                id="infohub-home"
-                value={home}
-                onChange={(e) => setHome(e.target.value)}
-                placeholder={info?.defaultHome ?? "例如 D:\\wohaolei"}
-                className="ui-input min-w-0 flex-1"
-              />
-              <button
-                type="button"
-                onClick={() => void chooseHome()}
-                className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
-              >
-                浏览…
-              </button>
-            </div>
-            {info?.defaultHome && home !== info.defaultHome && (
-              <button
-                type="button"
-                onClick={() => setHome(info.defaultHome)}
-                className="ui-micro underline-offset-2 hover:underline"
-              >
-                使用默认目录 {info.defaultHome}
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((v) => !v)}
-              className="mt-4 text-[11px] text-[#555] hover:text-ink"
-              aria-expanded={showAdvanced}
-            >
-              {showAdvanced ? "收起高级设置" : "高级设置（Python 解释器）"}
-            </button>
-            {showAdvanced && (
-              <div className="mt-2 rounded-lg border border-line-soft bg-panel p-3">
-                <label className="ui-caption block font-medium text-[#555]" htmlFor="infohub-python">
-                  Python 解释器
-                </label>
-                <div className="mt-1 flex gap-1.5">
-                  <input
-                    id="infohub-python"
-                    value={python}
-                    onChange={(e) => setPython(e.target.value)}
-                    placeholder={info?.bundledPython ?? "内置运行时不可用，请选择 python.exe"}
-                    className="ui-input min-w-0 flex-1"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void choosePython()}
-                    className="ui-btn ui-btn-sm ui-btn-ghost shrink-0"
-                  >
-                    浏览…
-                  </button>
-                </div>
-                <p className="ui-micro mt-1">
-                  浏览/检索只需要标准库；<strong>同步采集</strong>需要 InfoHub 的虚拟环境
-                  （含 wechatauto-replica / zstandard 等依赖）。留空则使用内置运行时。
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 py-10">
+          <div className="w-full max-w-[460px] rounded-xl border border-line bg-white p-6 text-center shadow-card">
+            {phase === "error" ? (
+              <>
+                <h2 className="text-[15px] font-semibold">本机归档没能启动</h2>
+                <p role="alert" className="mt-2 break-words text-[12px] leading-6 text-[#b42318]">
+                  {error || "未知原因"}
                 </p>
-              </div>
+                <p className="mt-2 ui-micro">
+                  数据目录与解释器由主进程自动解析，不需要手动设置；重试仍失败时请重启应用。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void autoStart()}
+                  className="mt-4 rounded-md bg-ink px-4 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90"
+                >
+                  重试
+                </button>
+              </>
+            ) : (
+              <>
+                <h2 className="text-[15px] font-semibold">正在启动本机归档</h2>
+                <p className="mt-2 text-[12px] leading-6 text-muted">
+                  {autoNote ||
+                    "信息中枢会在后台自动识别 QQ / 微信目录，并在归档为空时采集一次；全程只在本机运行，不需要任何设置。"}
+                </p>
+              </>
             )}
-
-            <div className="mt-5 flex items-center gap-2">
-              <button
-                type="button"
-                disabled={phase === "connecting"}
-                onClick={() => void connect()}
-                className="rounded-md bg-ink px-4 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                {phase === "connecting" ? "连接中…" : "连接"}
-              </button>
-              {info?.bundledPython ? (
-                <span className="ui-micro">内置运行时可用</span>
-              ) : (
-                <span className="text-[10px] text-[#b42318]">未找到内置运行时</span>
-              )}
-            </div>
           </div>
         </div>
       )}
@@ -596,24 +588,40 @@ export function InfohubPage() {
             <Stat label="归档大小" value={formatInfohubBytes(status.dbBytes)} />
           </div>
 
+          <SourceSection detected={detected} autoNote={autoNote} />
+
           {syncOpen && (
             <div className="border-b border-line-soft bg-panel px-6 py-3">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 ui-caption">
-                <span className="font-medium text-[#555]">采集来源</span>
-                <label className="flex items-center gap-1.5">
+                <span className="font-medium text-[#555]">同步来源</span>
+                <label
+                  className="flex items-center gap-1.5"
+                  title={
+                    detected.qq.detected
+                      ? undefined
+                      : "未识别到 QQ 目录：启动时会自动扫描，也可在来源区展开路径确认"
+                  }
+                >
                   <input
                     type="checkbox"
                     checked={syncSources.qq}
-                    disabled={syncing}
+                    disabled={syncing || !detected.qq.detected}
                     onChange={(e) => setSyncSources((s) => ({ ...s, qq: e.target.checked }))}
                   />
                   QQ
                 </label>
-                <label className="flex items-center gap-1.5">
+                <label
+                  className="flex items-center gap-1.5"
+                  title={
+                    detected.wechat.detected
+                      ? undefined
+                      : "未识别到微信目录：启动时会自动扫描，也可在来源区展开路径确认"
+                  }
+                >
                   <input
                     type="checkbox"
                     checked={syncSources.wechat}
-                    disabled={syncing}
+                    disabled={syncing || !detected.wechat.detected}
                     onChange={(e) => setSyncSources((s) => ({ ...s, wechat: e.target.checked }))}
                   />
                   微信

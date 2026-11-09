@@ -11,11 +11,16 @@ import { useLlmStore, DEFAULT_GATEWAY, type LlmProfile } from "../store/llm.js";
  */
 
 type CliCall = string[];
-function installBridge(overrides: Record<string, unknown> = {}) {
+function installBridge(
+  overrides: Record<string, unknown> = {},
+  replies: Record<string, { ok: boolean; stdout: string; stderr: string }> = {},
+) {
   const calls: CliCall[] = [];
   const listeners: ((event: Record<string, unknown>) => void)[] = [];
   const cli = vi.fn(async (args: string[]) => {
     calls.push(args);
+    const reply = replies[args.join(" ")];
+    if (reply) return reply;
     if (args[0] === "providers") {
       return {
         ok: true,
@@ -124,9 +129,9 @@ describe("ModelPage · 结构与主路径", () => {
     }
     expect(await screen.findByText("deepseek/deepseek-chat")).toBeInTheDocument();
     expect(screen.getByText("openai/gpt-4o")).toBeInTheDocument();
-    // 内置能力：不提供启停/地址/第三方品牌
+    // 内置能力：不提供启停/地址/第三方品牌（magpie 是内置内核的名字，正文里可以出现）
     expect(screen.queryByRole("button", { name: /启动|停止|重启/ })).toBeNull();
-    expect(screen.queryByText(/magpie/i)).toBeNull();
+    expect(screen.queryByText(/magpie-core/i)).toBeNull();
     expect(screen.queryByText(/网关地址/)).toBeNull();
   });
 
@@ -147,7 +152,7 @@ describe("ModelPage · 结构与主路径", () => {
 });
 
 describe("ModelPage · 添加来源", () => {
-  it("点服务商卡片只填一个 Key 就能保存，并刷新模型目录", async () => {
+  it("点服务商卡片只填一个 Key 就能保存，留在来源页并给出成功提示", async () => {
     const { calls } = installBridge();
     render(<ModelPage />);
     fireEvent.click(screen.getByRole("tab", { name: "来源" }));
@@ -155,8 +160,45 @@ describe("ModelPage · 添加来源", () => {
     fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-x" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(calls).toContainEqual(["provider", "add", "deepseek", "sk-x"]));
+    // 用户还要接着加别的来源，所以不跳页，只在顶部说一句
+    await waitFor(() => expect(screen.getByText(/已添加 DeepSeek/)).toBeInTheDocument());
+    expect(screen.getByRole("tab", { name: "来源" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("普通地址不传 region；选 Coding Plan 才传 region=coding 并给出提示条", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    fireEvent.click(screen.getByRole("button", { name: /智谱 GLM/ }));
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-glm" } });
+
+    // 默认普通地址：没有地址类型提示条
+    expect(screen.queryByText(/只接受 Coding Plan 的 Key/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Coding Plan" }));
+    expect(screen.getByText(/只接受 Coding Plan 的 Key/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: "模型" })).toHaveAttribute("aria-selected", "true"),
+      expect(calls).toContainEqual([
+        "provider",
+        "add",
+        "zhipu",
+        "sk-glm",
+        "region=coding",
+      ]),
+    );
+  });
+
+  it("miniMax 的 Coding Plan 与普通地址同一个：不传 region", async () => {
+    const { calls } = installBridge();
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    fireEvent.click(screen.getByRole("button", { name: /MiniMax/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Coding Plan Key" }));
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-cp-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(["provider", "add", "minimax", "sk-cp-1"]),
     );
   });
 
@@ -177,6 +219,26 @@ describe("ModelPage · 添加来源", () => {
     expect(await screen.findByText("mock")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() => expect(calls).toContainEqual(["provider", "rm", "mock"]));
+  });
+
+  it("展开高级时读详细地址：Coding Plan 来源显示套餐徽标", async () => {
+    installBridge(
+      {},
+      {
+        "provider show mock": {
+          ok: true,
+          stdout: "  chat       https://open.bigmodel.cn/api/coding/paas/v4\n",
+          stderr: "",
+        },
+      },
+    );
+    render(<ModelPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "来源" }));
+    expect(await screen.findByText("mock")).toBeInTheDocument();
+    // 没读地址之前按普通地址展示
+    expect(screen.getByText("普通地址")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "高级" }));
+    await waitFor(() => expect(screen.getByText("Coding Plan")).toBeInTheDocument());
   });
 });
 

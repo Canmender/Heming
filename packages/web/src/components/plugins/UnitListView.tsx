@@ -46,6 +46,8 @@ const STATUS_FILTERS: { key: "all" | "enabled" | "disabled"; label: string }[] =
 export function unitStatusLabel(status: UnitStatus): string {
   if (status.effective) return "生效";
   switch (status.reason?.kind) {
+    case "notInstalled":
+      return "未安装";
     case "disabled":
       return "已停用";
     case "missingRequirement":
@@ -66,6 +68,7 @@ export function unitStatusLabel(status: UnitStatus): string {
 
 const STATUS_TONE: Record<string, string> = {
   生效: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  未安装: "border-line bg-[#f7f7f7] text-muted",
   已停用: "border-line bg-[#f7f7f7] text-muted",
   待依赖: "border-amber-200 bg-amber-50 text-amber-700",
   不兼容: "border-red-200 bg-red-50 text-red-700",

@@ -4,6 +4,7 @@ import { NotificationCenter, formatRelativeTime } from "./NotificationCenter.js"
 import { setNotificationStorage, useNotificationStore } from "../store/notifications.js";
 import { createMemoryStorage } from "../lib/memory/storage.js";
 import { useUiStore } from "../store/ui.js";
+import { useModuleStore } from "../lib/modules/store.js";
 import type { AppNotification } from "../store/notifications.js";
 
 function makeItem(overrides: Partial<AppNotification> = {}): AppNotification {
@@ -22,6 +23,11 @@ function makeItem(overrides: Partial<AppNotification> = {}): AppNotification {
 
 beforeEach(() => {
   localStorage.clear();
+  // 模块默认未安装：通知跳转要落到模块页，先装上幕僚与自动化
+  useModuleStore.getState().reset();
+  useModuleStore.getState().install("staff");
+  useModuleStore.getState().install("infohub");
+  useModuleStore.getState().install("automations");
   setNotificationStorage(createMemoryStorage());
   useNotificationStore.setState({ items: [] });
   useUiStore.setState({

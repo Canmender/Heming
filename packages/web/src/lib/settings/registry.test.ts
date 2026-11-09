@@ -18,8 +18,8 @@ import {
 const SETTINGS_TAB_IDS = new Set(["profile", "model", "appearance", "navigation", "about"]);
 
 describe("registry 完整性", () => {
-  it("15 张卡（模型接入移出设置区后 + d.114 知识库与记忆入口卡）、id 唯一、分区合法、标题与关键词非空", () => {
-    expect(SETTINGS_CARDS).toHaveLength(15);
+  it("14 张卡（模型路由页下线后移除「候选链」卡）、id 唯一、分区合法、标题与关键词非空", () => {
+    expect(SETTINGS_CARDS).toHaveLength(14);
     const ids = SETTINGS_CARDS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const card of SETTINGS_CARDS) {

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { InfohubPage } from "./InfohubPage.js";
 import { useUiStore } from "../store/ui.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
+import { useModuleStore } from "../lib/modules/store.js";
 import type {
   InfohubAgendaItem,
   InfohubBridgeInfo,
@@ -20,8 +21,22 @@ const status: InfohubStatus = {
   config: {
     dataDir: `${HOME}\\data`,
     configPath: `${HOME}\\config.json`,
-    wechat: { enabled: true, dbDir: "" },
-    qq: { enabled: true, mode: "nt", ntAccount: "" },
+    autoDetect: true,
+    autoSyncOnStart: true,
+    wechat: {
+      enabled: true,
+      dbDir: "C:\\Users\\x\\Documents\\xwechat_files",
+      detected: true,
+    },
+    qq: {
+      enabled: true,
+      mode: "nt",
+      ntAccount: "123456",
+      ntDb: "C:\\Users\\x\\Documents\\Tencent Files\\123456\\nt_qq\\nt_db\\nt_msg.db",
+      exportDir: "",
+      detected: true,
+      exportDetected: false,
+    },
     voice: { enabled: true },
     kb: { vault: "", autoExport: true },
     digest: { enabled: true, intervalMin: 60 },
@@ -35,6 +50,33 @@ const status: InfohubStatus = {
   media: {},
   dbBytes: 2048,
   lastMessageTs: 1800000100,
+};
+
+/** 归档为空 + 只识别到 QQ：用来验证「首次自动采集」。 */
+const emptyStatus: InfohubStatus = {
+  ...status,
+  hasDb: false,
+  dbBytes: 0,
+  stats: { conversations: 0, messages: 0, per_source: {} },
+  config: {
+    ...status.config,
+    wechat: { enabled: true, dbDir: "", detected: false },
+  },
+};
+
+const detectResult = {
+  applied: true,
+  sources: {
+    wechat: { db_dir: "C:\\Users\\x\\Documents\\xwechat_files", detected: true },
+    qq: {
+      nt_db: "C:\\Users\\x\\Documents\\Tencent Files\\123456\\nt_qq\\nt_db\\nt_msg.db",
+      nt_account: "123456",
+      export_dir: "",
+      export_detected: false,
+      detected: true,
+    },
+  },
+  summary: status.config,
 };
 
 const agendaItem: InfohubAgendaItem = {
@@ -75,6 +117,7 @@ function bridgeInfo(overrides: Partial<InfohubBridgeInfo> = {}): InfohubBridgeIn
 function installBridge(overrides: Partial<Bridge> = {}) {
   const call = vi.fn(async (method: string) => {
     if (method === "status") return status;
+    if (method === "config.detect") return detectResult;
     if (method === "search") {
       return {
         items: [
@@ -121,7 +164,7 @@ function installBridge(overrides: Partial<Bridge> = {}) {
 
 async function connectPage() {
   render(<InfohubPage />);
-  fireEvent.click(screen.getByRole("button", { name: "连接" }));
+  // 装上模块即自动启动：没有「连接」按钮，等运行态出现即可。
   await waitFor(() => expect(screen.getByText("已连接 · 只读归档")).toBeInTheDocument());
 }
 
@@ -129,6 +172,8 @@ describe("信息中枢页", () => {
   beforeEach(() => {
     localStorage.clear();
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
+    // 自动化模块是独立插件：这里只验证「定时」入口在模块安装后可用。
+    useModuleStore.getState().install("automations");
     useUiStore.setState({
       page: "home",
       activeConversationId: null,
@@ -142,6 +187,9 @@ describe("信息中枢页", () => {
       info: null,
       status: null,
       agenda: null,
+      detected: null,
+      autoCollected: false,
+      autoNote: "",
       busy: "",
       error: "",
     });
@@ -234,26 +282,129 @@ describe("信息中枢页", () => {
     expect(bridge.call).toHaveBeenCalled();
   });
 
-  it("断开：回收进程并回到连接面板", async () => {
-    const { bridge } = installBridge();
+  it("没有任何手动连接/断开入口：运行态由模块安装驱动", async () => {
+    installBridge();
     await connectPage();
 
-    fireEvent.click(screen.getByRole("button", { name: "断开" }));
-    await waitFor(() => expect(bridge.stop).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("button", { name: "连接" })).toBeInTheDocument();
-    expect(useInfohubStore.getState()).toMatchObject({ running: false, status: null, agenda: null });
+    expect(screen.queryByRole("button", { name: "连接" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "断开" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("数据目录")).not.toBeInTheDocument();
+    expect(screen.queryByText(/高级设置/)).not.toBeInTheDocument();
   });
 
-  it("连接失败：显示可读错误并可重试", async () => {
+  it("启动失败：显示可读错误并可重试", async () => {
     installBridge({
       start: vi.fn(async () => {
         throw new Error("Error invoking remote method 'infohub:start': Error: 未找到可用的 Python 解释器");
       }),
     });
     render(<InfohubPage />);
-    fireEvent.click(screen.getByRole("button", { name: "连接" }));
     expect(await screen.findByText("未找到可用的 Python 解释器")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "连接" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("未找到可用的 Python 解释器"),
+    );
+  });
+
+  it("采集来源：展示识别状态，路径默认折叠、展开后可复制", async () => {
+    installBridge();
+    await connectPage();
+
+    expect(screen.getByTestId("infohub-sources")).toBeInTheDocument();
+    expect(screen.getByTestId("source-wechat")).toHaveTextContent("已识别");
+    expect(screen.getByTestId("source-qqnt")).toHaveTextContent("已识别");
+    expect(screen.getByTestId("source-qqnt")).toHaveTextContent("账号 123456");
+    expect(screen.getByTestId("source-qqexport")).toHaveTextContent("未找到");
+    // 长路径默认不铺开
+    expect(screen.queryByText(status.config.wechat.dbDir)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看路径" }));
+    expect(screen.getByText(status.config.wechat.dbDir)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "复制微信目录" })).toBeEnabled();
+  });
+
+  it("目录识别随启动自动完成：没有「自动识别」按钮，结果直接展示", async () => {
+    installBridge();
+    await connectPage();
+
+    expect(screen.queryByRole("button", { name: "自动识别" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("source-wechat")).toHaveTextContent("已识别");
+    expect(screen.getByTestId("source-qqnt")).toHaveTextContent("已识别");
+  });
+
+  it("首次连接自动采集：归档为空且识别到来源时只触发一次", async () => {
+    const call = vi.fn(async (method: string) => {
+      if (method === "status") return emptyStatus;
+      if (method === "config.detect") return detectResult;
+      if (method === "agenda") return { items: [], summary: { overdue: 0, today: 0, week: 0, total: 0 } };
+      if (method === "sync") {
+        return {
+          reports: [{ source: "qq", conversations: 1, added: 3, updated: 0, skipped: 0, errors: [], elapsed: 0.1 }],
+          agenda: {},
+          kb: null,
+        };
+      }
+      return undefined;
+    });
+    installBridge({ call });
+    await connectPage();
+
+    await waitFor(() =>
+      expect(call.mock.calls.filter(([method]) => method === "sync")).toHaveLength(1),
+    );
+    expect(call).toHaveBeenCalledWith(
+      "sync",
+      { sources: ["qq"], full: false, archive: false },
+      expect.anything(),
+    );
+    expect(await screen.findByText(/自动采集完成：新增 3 条消息/)).toBeInTheDocument();
+
+    // 刷新不会重复触发自动采集
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() =>
+      expect(call.mock.calls.filter(([method]) => method === "status").length).toBeGreaterThan(2),
+    );
+    expect(call.mock.calls.filter(([method]) => method === "sync")).toHaveLength(1);
+  });
+
+  it("首次连接自动采集失败：显示原因，不吞错误", async () => {
+    const call = vi.fn(async (method: string) => {
+      if (method === "status") return emptyStatus;
+      if (method === "agenda") return { items: [], summary: { overdue: 0, today: 0, week: 0, total: 0 } };
+      if (method === "sync") {
+        throw new Error("Error invoking remote method 'infohub:call': Error: 信息中枢未连接");
+      }
+      return undefined;
+    });
+    installBridge({ call });
+    await connectPage();
+
+    expect(await screen.findByText(/自动采集失败：信息中枢未连接/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("信息中枢未连接");
+  });
+
+  it("未识别到目录的来源：同步面板置灰并提示先自动识别", async () => {
+    installBridge({
+      call: vi.fn(async (method: string) => {
+        if (method === "status") {
+          return {
+            ...status,
+            config: {
+              ...status.config,
+              wechat: { enabled: true, dbDir: "", detected: false },
+            },
+          };
+        }
+        if (method === "agenda") return { items: [], summary: { overdue: 0, today: 0, week: 0, total: 0 } };
+        return undefined;
+      }),
+    });
+    await connectPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "同步" }));
+    expect(screen.getByLabelText("微信")).toBeDisabled();
+    expect(screen.getByLabelText("QQ")).toBeEnabled();
+    expect(screen.getByTestId("source-wechat")).toHaveTextContent("未找到");
   });
 
   it("跨页意图：带检索词进入页面后自动检索并消费意图", async () => {

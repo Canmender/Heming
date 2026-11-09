@@ -3,21 +3,28 @@ import type { Page } from "../../store/ui.js";
 /**
  * 内置能力模块（d.70）：把「幕僚 / 信息中枢 / 自动化」从导航里写死的页面，
  * 改成**可插拔的能力模块**——插件区能看到它们的版本、贡献、依赖与本机数据，
- * 用开关启用/停用；停用后入口、页面、首页卡、后台常驻任务与相关工具注入一起下线。
+ * 用「安装 / 启用 / 停用 / 删除」管理；停用或删除后入口、页面、首页卡、
+ * 后台常驻任务与相关工具注入一起下线（删除不碰本机已有数据）。
+ *
+ * 安装包**默认不携带任何模块**：三个模块都只是「可安装项」，用户装过才有开关。
+ * 系统能力（`heming.core`）不属于这一层，它由插件区的系统卡只读展示。
  *
  * 为什么不是第三方插件：
  * - 第三方插件清单（`plugin.json` v3）**只声明技能 / 远程 MCP / 命令 / 工具束**，
  *   不执行随包代码，也不贡献 React 页面（否则等于安装即执行任意 UI 代码）；
  * - 这三个模块的页面是本应用代码的一部分，能做的是「装配开关」而不是「装进来」。
- *   所以它们走**同一套插件区展示与启用语义**（卡片、版本、贡献、启用/停用），
+ *   所以它们走**同一套插件区展示与启用语义**（卡片、版本、贡献、安装/启停/删除），
  *   但注册表与存储独立（`heming.modules.v1`），不写进 `heming.plugins.v1`。
  *
- * 边界：停用**只下线入口与运行时挂载，不删除本机数据**（简报、归档配置、自动化任务仍在），
- * 重新启用即恢复；也不改变 HITL / E2E / 数据出设备边界。
+ * 边界：停用/删除**只下线入口与运行时挂载，不删除本机数据**（简报、归档配置、自动化任务仍在），
+ * 重新安装/启用即恢复；也不改变 HITL / E2E / 数据出设备边界。
+ *
+ * 模型路由已不在这一层：本地模型路由页下线，路由组由 magpie 路由界面管理（`lib/llmRoute.ts`
+ * 的候选链与 failover 照常工作）。
  */
 
 /** 可插拔的内置模块 id。新增模块时只加注册表项 + 页面 + 接线点。 */
-export type ModuleId = "staff" | "infohub" | "automations" | "modelroute";
+export type ModuleId = "staff" | "infohub" | "automations";
 
 export type ModuleHomeCard = "staff" | "infohub";
 export type ModuleBackgroundLoop = "staff-loop" | "automation-scheduler";
@@ -44,7 +51,10 @@ export interface BuiltinModule {
   /** 宿主页面 id（导航与 `setPage` 用的同一个 Page）。 */
   page: Page;
   contributions: ModuleContributions;
-  /** 依赖的其它模块：依赖项停用时本模块**实际不生效**（开关保留，卡片说明原因）。 */
+  /**
+   * 依赖的其它模块：依赖项未安装/停用时本模块**实际不生效**（开关保留，卡片说明原因）。
+   * 当前三个模块互不依赖——自动化已独立成插件，不再依赖信息中枢。
+   */
   requires?: ModuleId[];
   /** 和鸣本机存储里的数据键（仅用于展示占用；停用不删除）。 */
   storageKeys: string[];
@@ -80,9 +90,12 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
       toolPrefixes: ["infohub_"],
     },
     storageKeys: [],
-    externalData: ["InfoHub 配置与归档数据库在本机由 InfoHub 管理（不在和鸣存储内，也不会被和鸣删除）"],
+    externalData: [
+      "InfoHub 配置与归档数据库在本机由 InfoHub 管理（不在和鸣存储内，也不会被和鸣删除）",
+      "采集引擎为选装模块：首次启用时按需从更新源下载官方签名引擎包（约 2MB），装在本机模块目录",
+    ],
     disableNote:
-      "停用后导航入口、首页归档卡与 infohub_* 工具下线；不会自动启动或删除任何本机归档。重新启用后可再连接。",
+      "停用后导航入口、首页归档卡与 infohub_* 工具下线；不会自动启动或删除任何本机归档。重新启用后会自动复用已安装的引擎。",
   },
   {
     id: "automations",
@@ -92,23 +105,9 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
       "定时同步归档、重扫日程；只跑两种固定动作，不执行脚本。",
     page: "automations",
     contributions: { page: true, backgroundLoop: "automation-scheduler" },
-    requires: ["infohub"],
     storageKeys: ["heming.automations.v1", "heming.automations.runs.v1"],
     disableNote:
-      "停用后不再到点执行、导航入口下线；任务与运行记录仍保留在本机。依赖「信息中枢」启用后才生效。",
-  },
-  {
-    id: "modelroute",
-    name: "模型路由",
-    version: "v1.0.0",
-    description:
-      "把多条模型连接串成候选链，按策略挑一个；失败自动换人，冷却与用量都在本机算。",
-    page: "modelroute",
-    contributions: { page: true },
-    storageKeys: ["heming.llmRoutes.v1", "heming.llmHealth.v1"],
-    externalData: ["选路测速样本（fast 档）只在内存里，重启清零，不落盘、不进导出"],
-    disableNote:
-      "停用后「模型路由」页与导航入口下线，选路退回声明顺序；候选链与失败切换照常工作，路由组、冷却与用量数据都保留在本机。",
+      "停用后不再到点执行、导航入口下线；任务与运行记录仍保留在本机。本插件独立安装/启停，不依赖信息中枢（运行时若信息中枢未连接，任务会如实报错）。",
   },
 ];
 

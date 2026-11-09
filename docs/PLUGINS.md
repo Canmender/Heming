@@ -298,12 +298,14 @@ package.tgz
 
 - origin：`widget://<pluginId>/<path>`（独立 origin，**读不到** `app://heming` 的 localStorage / 会话 / 记忆）。
 - 窗口：宿主创建，`sandbox + contextIsolation`、无 nodeIntegration，挂**最小 preload** `__heming_widget`
-  （窗口动作 / 宿主信息 / 设置 / 事件 / 页面跳转 / `chatConfig`；不含 secrets、MCP、文件、会话任何桥）。
+  （窗口动作 / 宿主信息 / 设置 / 插件数据 `data*` / 事件 / 页面跳转 / `chatConfig`；不含 secrets、MCP、文件、会话任何桥）。
 - `widget:*` IPC 一律按 sender 自校验（只认该 widget 自己的窗口）；主窗 `widgets:*` 通道走 `secureIpc` 只认主窗。
 - CSP：按清单生成（`script-src` 仅在 `permissions.eval:true` 时放开 `'unsafe-eval'`；`connect-src` = `'self'`
   + **本机网关精确 origin**（仅 `permissions.chat:true` 才放行，精确到端口）+ 清单 `network` 逐 host，
   **不再有 `127.0.0.1:*` 回环通配**、**不继承**主窗的 `https:`/`wss:` 通配；`frame-src 'none'` 禁外部页面）。
-- 数据：插件不得写会话 / 消息列表 / msgCache；对话不落盘。
+- 数据：插件自有业务数据走 `data*` API，默认落 `<userData>/plugins/<id>/data/`（见 §10.6）；
+  插件不得写会话 / 消息列表 / msgCache；对话不落盘；**不得把密钥写进 data**（密钥属于宿主设置/密钥存储）。
+  界面插件在独立 origin 下**没有可用的 localStorage 持久化**（清缓存/崩溃即丢），别再拿它当存储。
 
 ### 9.4 发布
 
@@ -366,6 +368,58 @@ const off = window.__heming_widget.onLifecycle((e) => {
 - 传输通道：宿主 `webContents.send("widget:lifecycle", payload)` → preload `onLifecycle(cb)`（返回取消订阅函数）。
 - 声明式包没有生命周期钩子（永不执行代码），本条只适用于 `distribution: "bundle"` 的界面插件。
 
+### 10.6 插件数据目录（`data/`，通用 data API）
+
+界面插件的**业务数据默认放在安装目录**，不写 localStorage、不进主窗存储：
+
+```
+<userData>/plugins/<pluginId>/data/<key>.json     # 例：C:/Users/<你>/AppData/Roaming/和鸣/plugins/heming.pet/data/cache.json
+```
+
+`dataDirOf(id)` 由主进程持有；widget 侧通过 `__heming_widget` 的五个方法读写（全部按 sender 的 `pluginId` 隔离，
+插件 A 读不到插件 B 的同名 key）：
+
+| 方法 | 返回 | 说明 |
+|---|---|---|
+| `dataGet(key)` | `Promise<unknown \| null>` | 不存在 / JSON 坏了 → `null`（读失败不抛） |
+| `dataSet(key, value)` | `Promise<{ key, bytes }>` | 覆盖写（tmp + rename 原子落盘）；**失败会 reject** |
+| `dataDelete(key)` | `Promise<boolean>` | 是否真的删掉了文件（不存在 = `false`，不算错误） |
+| `dataKeys()` | `Promise<string[]>` | 已有 key（只含 `*.json`，已排序；忽略临时文件） |
+| `dataDir()` | `Promise<{ dir: string }>` | 数据目录**绝对路径**（放不进 JSON 的大文件也放这里；别展示给终端用户） |
+
+约束（由主进程执行，插件绕不过）：
+
+- **key 规则**：`[A-Za-z0-9._-]{1,64}`，不含 `..`、不含路径分隔符；非法 key 直接 reject（可读错误），不做路径归一化。
+- **JSON only**：值按 `JSON.stringify` 落盘（不接受 `undefined` / 函数 / Symbol / 循环引用）。
+- **单文件 1MB 上限**：超过 reject 并提示字节数，**不静默截断**（截断的 JSON 比报错更难查）。
+- **目录按需创建**：第一次 `dataSet` 时建 `data/`；`dataDirOf` 只给路径，不建目录。
+- **升级保留**：换版本只替换 `<version>/`，`data/` 原样保留。
+- **卸载即删**：`data/` 随插件删除（即使卸载时勾选「保留设置」，也只保留 `settings.json` / `state.json`）。
+- 未安装的 id 不允许写入（避免孤儿目录）；读/列/删对不存在的目录分别降级为 `null` / `[]` / `false`。
+
+widget 侧示例：
+
+```js
+const data = window.__heming_widget;
+
+const cache = (await data.dataGet("cache")) ?? { hits: 0 };
+cache.hits += 1;
+await data.dataSet("cache", cache);        // 超 1MB / 坏 key 会 reject，别吞异常
+
+console.log(await data.dataKeys());        // ["cache", ...]
+console.log((await data.dataDir()).dir);   // .../plugins/<id>/data
+await data.dataDelete("cache");
+```
+
+边界与隐私：
+
+- **只在本机**：数据不随插件包分发、不上云、不进会话/消息列表；卸载即删。
+- **别存密钥**：`data/` 是明文文件，密钥应走宿主设置/密钥存储（`settings()` 里也不应出现明文密钥）。
+- **偏好仍用 settings**：用户能在设置区看到并回滚的偏好（模型、绑定、打扰强度）走 `settings()/setSetting()`；
+  `data*` 只用于插件自己的业务数据（缓存、索引、草稿）。桌宠现有 `settings()/setSetting()` 用法不变。
+- **旧宿主兼容**：`data*` 是后加的方法，插件作者按「可能不存在」探测（`typeof data.dataGet === "function"`），
+  或在包装层按 `null` / `false` / `[]` 降级；不要因为缺方法白屏。
+
 ## 11. 清单 v5：版本兼容、上架元数据与安装事务（d.106）
 
 v5 相对 v3/v4 只加两件事：**最低宿主版本**（`engines.heming`）与**上架元数据**（`meta`）。
@@ -382,7 +436,7 @@ v5 相对 v3/v4 只加两件事：**最低宿主版本**（`engines.heming`）�
   "description": "周报与数据源",
   "author": "ACME",
   "engines": { "heming": "d.106" },           // 必填：最低宿主版本（只支持最小版本语义）
-  "meta": {                                    // 可选：市场页展示
+  "meta": {                                    // 可选：仓库卡片展示
     "icon": "https://cdn.acme.com/icon.png",   // https，或 ≤8KB 的 data:image/*;base64
     "homepage": "https://acme.com/report-kit",
     "repository": "https://github.com/acme/report-kit",
@@ -447,4 +501,60 @@ node scripts/plugin-schema.mjs --check                         # 校验 docs/plu
 | v1 / v2 / v3 | 可装 | 可装（归一化到 v5 视图，`engines` 视为 `d.0`） |
 | v4（界面插件） | 可装（**不验签**，已知缺口） | 可装，**必须首方签名** |
 | v5 | 拒绝（schemaVersion 不认识） | 可装，按 `engines.heming` 判定 |
+
+## 12. 选装模块（可执行能力：信息中枢引擎，d.116）
+
+界面插件（bundle）是声明 + 沙箱页面；**模块**是另一类产物：带可执行代码与依赖，由宿主用
+stdio 子进程拉起。当前唯一模块是 `heming.infohub-engine`（信息中枢的 QQ / 微信归档引擎）。
+
+**安装包不携带模块**：`build.extraResources` 里没有 `../infohub`，打包边界由
+`packaging.plugins.test.js` 钉住。用户启用「信息中枢」时，应用按需从更新源下载模块包 →
+首方验签 → 解包到 `<userData>/modules`，随后自动启动，没有任何配置界面。
+
+### 12.1 包格式（`module.tgz`）
+
+```
+module.json
+files/app/infohub/**      # Python 包（meta.entry = "app"）
+files/lib/**              # 可选第三方依赖（meta.lib = "lib"，加进 PYTHONPATH）
+```
+
+清单是 **schemaVersion 4**（走 canonical-v1，与 `sign-plugin.mjs` / `plugin-signature.js`
+逐字节一致），并额外声明：
+
+```jsonc
+{
+  "distribution": "module",
+  "meta": { "kind": "module", "entry": "app", "lib": "lib" },
+  "packageSha256": "<files/** 内容摘要>"
+}
+```
+
+`packageSha256` 让首方签名间接覆盖全部代码字节；安装端（`module-package.js`）重新计算并比对，
+不一致直接拒绝。打包版**拒绝 `dev-*` 公钥**，与界面插件同一把信任锚。
+
+### 12.2 落盘与启动
+
+`<userData>/modules/<id>/<version>/files/{app,lib}`，版本切换后旧版本会被清理；
+目录被手工删除时按「未安装」处理。桥（`infohub-bridge.js`）用内置 Python 3.12 拉起
+`python -m infohub.bridge`，`PYTHONPATH = app + lib`，**不开端口、不走网络**。
+
+### 12.3 构建与发布
+
+```bash
+# 依赖目录（.tmp-engine-lib/）需先按内置 Python 版本下载 cp312 wheel 并解包：
+#   pip download --no-deps --only-binary=:all: --python-version 312 \
+#     --platform win_amd64 --implementation cp --abi cp312 -d <tmp> <包名>
+node scripts/build-module.mjs                  # 默认：packages/infohub + .tmp-engine-lib
+node scripts/build-module.mjs --install <modulesDir>   # 构建后装到本机模块目录自检
+```
+
+产物默认在 `module-catalog/<id>/<version>/module.tgz`，脚本会用**安装端口径**
+（`readModulePackage`：配额 / 布局 / 验签 / 摘要）回读校验并打印 keyId。
+发布时把 `module-catalog/<id>/<version>/module.tgz` 放到模块源
+`http://47.92.39.184/updates/modules/<id>/<version>/module.tgz`；上传属于部署动作，需单独确认。
+
+开发态若模块未装、但仓库里有 `packages/infohub`，主进程直接退回源码目录（`electron .`
+不必每次构建模块包）；打包版没有这条退路。
+
 

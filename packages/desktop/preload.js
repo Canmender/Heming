@@ -474,6 +474,20 @@ contextBridge.exposeInMainWorld("__heming_infohub", {
   pickHome: () => ipcRenderer.invoke("infohub:pick-home"),
   /** 选 Python 解释器（采集依赖通常只装在 InfoHub 的 venv 里）。 */
   pickPython: () => ipcRenderer.invoke("infohub:pick-python"),
+  /** 引擎模块状态：是否已装、期望版本、模块源。 */
+  engineInfo: () => ipcRenderer.invoke("infohub:engine-info"),
+  /** 确保引擎装好（缺则下载官签名模块包；已装则直接返回）。 */
+  ensureEngine: (version) =>
+    ipcRenderer.invoke("infohub:engine-ensure", {
+      version: typeof version === "string" ? version : undefined,
+    }),
+  /** 订阅引擎下载/安装进度。返回取消订阅函数。 */
+  onEngine: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("infohub:engine", listener);
+    return () => ipcRenderer.removeListener("infohub:engine", listener);
+  },
   /** 订阅采集/导出进度事件。返回取消订阅函数。 */
   onEvent: (callback) => {
     if (typeof callback !== "function") return () => {};

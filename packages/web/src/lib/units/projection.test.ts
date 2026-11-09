@@ -146,7 +146,7 @@ describe("projectUnits · 四类来源", () => {
   it("按 系统 → 内置 → 声明式 → 界面插件 的稳定顺序产出，id 不混淆", () => {
     const units = projectUnits({
       system: systemFixture(),
-      moduleEnabled: { staff: true, infohub: true, automations: true, modelroute: true },
+      moduleEnabled: { staff: true, infohub: true, automations: true },
       plugins: [installedPlugin()],
       widgets: [widgetRecord()],
       appVersion: APP_VERSION,
@@ -190,35 +190,41 @@ describe("projectUnits · 四类来源", () => {
   });
 });
 
-describe("projectBuiltinUnits · 模块依赖与开关", () => {
-  it("四个模块都有 page 贡献，automations 声明依赖 infohub", () => {
+describe("projectBuiltinUnits · 模块依赖、安装与开关", () => {
+  it("三个模块都有 page 贡献，且互不依赖（自动化已独立成插件）", () => {
     const units = projectBuiltinUnits({});
-    expect(units).toHaveLength(4);
+    expect(units).toHaveLength(3);
     for (const unit of units) {
       expect(unit.source).toBe("builtin");
       expect(unit.contributions.some((item) => item.kind === "page")).toBe(true);
     }
-    expect(byId(units).get("automations")!.requires).toEqual(["infohub"]);
+    expect(byId(units).get("automations")!.requires).toBeUndefined();
   });
 
-  it("依赖未启用：automations 不生效但开关保留，infohub 本身仍生效", () => {
+  it("信息中枢停用不影响自动化：两者互不依赖，各自按开关判定", () => {
     const statuses = projectUnitStatuses({
-      moduleEnabled: { staff: true, infohub: false, automations: true, modelroute: true },
+      moduleEnabled: { staff: true, infohub: false, automations: true },
     });
     const map = new Map(statuses.map((status) => [status.unit.id, status] as const));
     expect(map.get("infohub")!.effective).toBe(false);
     expect(map.get("infohub")!.reason).toEqual({ kind: "disabled" });
-    expect(map.get("automations")!.effective).toBe(false);
-    expect(map.get("automations")!.reason).toEqual({
-      kind: "missingRequirement",
-      unitId: "infohub",
+    expect(map.get("automations")!.effective).toBe(true);
+  });
+
+  it("未安装：notInstalled 短路，即使 enabled=true 也不生效", () => {
+    const statuses = projectUnitStatuses({
+      moduleEnabled: { staff: true, infohub: true, automations: true },
+      moduleInstalled: { staff: false, infohub: false, automations: false },
     });
-    expect(map.get("automations")!.unit.enabled).toBe(true);
+    for (const status of statuses) {
+      expect(status.effective).toBe(false);
+      expect(status.reason).toEqual({ kind: "notInstalled" });
+    }
   });
 
   it("总开关关闭：只报 disabled，不报依赖缺失", () => {
     const statuses = projectUnitStatuses({
-      moduleEnabled: { staff: false, infohub: true, automations: true, modelroute: true },
+      moduleEnabled: { staff: false, infohub: true, automations: true },
     });
     const staff = statuses.find((status) => status.unit.id === "staff")!;
     expect(staff.effective).toBe(false);

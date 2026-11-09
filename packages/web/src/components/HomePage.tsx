@@ -162,9 +162,11 @@ export function HomePage() {
   }, []);
 
   const moduleEnabled = useModuleStore((s) => s.enabled);
+  const moduleInstalled = useModuleStore((s) => s.installed);
+  // 内置模块默认未安装：卡片只在「已安装 + 已启用 + 依赖满足」时出现。
   const moduleState = {
-    staff: isModuleEffective({ enabled: moduleEnabled }, "staff"),
-    infoHub: isModuleEffective({ enabled: moduleEnabled }, "infohub"),
+    staff: isModuleEffective({ installed: moduleInstalled, enabled: moduleEnabled }, "staff"),
+    infoHub: isModuleEffective({ installed: moduleInstalled, enabled: moduleEnabled }, "infohub"),
   };
 
   const monthKey = useMemo(() => monthKeyOf(new Date().toISOString()), []);
@@ -224,8 +226,8 @@ export function HomePage() {
     if (!first) return;
     const ui = useUiStore.getState();
     if (first.kind === "task" && first.taskId) ui.focusTask(first.taskId, first.conversationId);
-    else if (first.kind === "staff") ui.setPage("staff");
-    else if (first.kind === "automation") ui.setPage("automations");
+    else if (first.kind === "staff") ui.openStaff();
+    else if (first.kind === "automation") ui.openAutomations();
     else if (first.conversationId) ui.openConversation(first.conversationId);
   };
 

@@ -149,29 +149,25 @@ describe("ui store 导航顺序", () => {
     useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("默认顺序（d.72 重排、d.100 加模型页、d.114 加知识库后的 11 个宿主页）", () => {
-    // 工作台（主页 → 智能体 → 团队）→ 智能模块 → 资料与能力 → 系统
+  it("默认顺序：固定 8 项（主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）", () => {
+    // 工作台（主页 → 团队 → 智能体）→ 能力（插件）→ 资料（记忆/知识库/模型）→ 系统（设置）
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
-      "chat",
       "team",
-      "staff",
-      "infohub",
-      "automations",
-      "modelroute",
-      "model",
-      "vault",
+      "chat",
       "plugins",
       "memory",
+      "vault",
+      "model",
       "settings",
     ]);
   });
 
   it("moveNav 上移/下移生效并落盘", () => {
     useUiStore.getState().moveNav("memory", -1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(9);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(3);
     useUiStore.getState().moveNav("memory", 1);
-    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(10);
+    expect(useUiStore.getState().navOrder.indexOf("memory")).toBe(4);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
       useUiStore.getState().navOrder,
     );
@@ -200,13 +196,9 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "chat",
       "home",
       "team",
-      "staff",
-      "infohub",
-      "automations",
-      "modelroute",
-      "model",
-      "vault",
       "plugins",
+      "vault",
+      "model",
       "settings",
     ]);
   });
@@ -231,12 +223,8 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "plugins",
       "chat",
       "memory",
-      "staff",
-      "infohub",
-      "automations",
-      "modelroute",
-      "model",
       "vault",
+      "model",
     ]);
   });
 
@@ -246,16 +234,12 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
     expect(readStoredNavOrder({ getItem: () => '["settings","home"]' })).toEqual([
       "settings",
       "home",
-      "chat",
       "team",
-      "staff",
-      "infohub",
-      "automations",
-      "modelroute",
-      "model",
-      "vault",
+      "chat",
       "plugins",
       "memory",
+      "vault",
+      "model",
     ]);
     expect(readStoredNavOrder(null)).toEqual([...DEFAULT_NAV_ORDER]);
   });
@@ -278,15 +262,11 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "memory",
       "settings",
       "home",
-      "chat",
       "team",
-      "staff",
-      "infohub",
-      "automations",
-      "modelroute",
-      "model",
-      "vault",
+      "chat",
       "plugins",
+      "vault",
+      "model",
     ]);
   });
 });
@@ -352,6 +332,9 @@ describe("d.67 页面合并：旧页面 id 折叠成宿主页 + 视图意图", (
 
 describe("ui store 自动化意图", () => {
   beforeEach(() => {
+    useModuleStore.getState().reset();
+    useModuleStore.getState().install("infohub");
+    useModuleStore.getState().install("automations");
     useUiStore.setState({
       page: "home",
       activeConversationId: null,
@@ -503,43 +486,40 @@ describe("模块停用时的跳转落点", () => {
     useUiStore.setState({ page: "home", pageView: null, infohubIntent: null, automationIntent: null });
   });
 
-  it("openInfohub：模块停用 → 插件区模块 Tab；启用 → 信息中枢页", () => {
-    useModuleStore.getState().setEnabled("infohub", false);
+  it("openInfohub：未安装/停用 → 插件页；启用 → 信息中枢页", () => {
     useUiStore.getState().openInfohub({ tab: "agenda" });
     let s = useUiStore.getState();
     expect(s.page).toBe("plugins");
-    expect(s.pageView).toBe("modules");
+    expect(s.pageView).toBe("plugins");
     expect(s.infohubIntent).toBeNull();
 
-    useModuleStore.getState().setEnabled("infohub", true);
+    useModuleStore.getState().install("infohub");
     useUiStore.getState().openInfohub({ tab: "agenda" });
     s = useUiStore.getState();
     expect(s.page).toBe("infohub");
     expect(s.infohubIntent).toEqual({ tab: "agenda" });
   });
 
-  it("openAutomations / focusAutomation：模块停用 → 模块管理，不留下选中态", () => {
-    useModuleStore.getState().setEnabled("automations", false);
+  it("openAutomations / focusAutomation：未安装/停用 → 插件页，不留下选中态", () => {
     useUiStore.getState().openAutomations({ kind: "infohub.agenda" });
     expect(useUiStore.getState().page).toBe("plugins");
-    expect(useUiStore.getState().pageView).toBe("modules");
+    expect(useUiStore.getState().pageView).toBe("plugins");
 
     useUiStore.getState().focusAutomation("a1");
     expect(useUiStore.getState()).toMatchObject({
       page: "plugins",
-      pageView: "modules",
+      pageView: "plugins",
       automationFocusId: null,
       automationIntent: null,
     });
   });
 
-  it("openStaff：停用 → 模块管理；启用 → 幕僚页", () => {
-    useModuleStore.getState().setEnabled("staff", false);
+  it("openStaff：未安装/停用 → 插件页；启用 → 幕僚页", () => {
     useUiStore.getState().openStaff();
     expect(useUiStore.getState().page).toBe("plugins");
-    expect(useUiStore.getState().pageView).toBe("modules");
+    expect(useUiStore.getState().pageView).toBe("plugins");
 
-    useModuleStore.getState().setEnabled("staff", true);
+    useModuleStore.getState().install("staff");
     useUiStore.getState().openStaff();
     expect(useUiStore.getState().page).toBe("staff");
   });

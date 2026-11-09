@@ -134,6 +134,7 @@ declare global {
     __heming_infohub?: {
       info: () => Promise<{
         packageDir: string;
+        libraryDir?: string;
         defaultHome: string;
         bundledPython: string | null;
         running: boolean;
@@ -143,6 +144,7 @@ declare global {
         pythonSource: string | null;
         startedAt: number;
         methods: string[];
+        engineInstalled?: boolean;
         hello?: { app: string; version: string; protocol: number } | null;
       }>;
       start: (config?: { home?: string; python?: string }) => Promise<unknown>;
@@ -154,6 +156,17 @@ declare global {
       stop: () => Promise<boolean>;
       pickHome: () => Promise<string | null>;
       pickPython: () => Promise<string | null>;
+      /** 选装引擎模块：状态 / 按需下载安装 / 进度。 */
+      engineInfo?: () => Promise<{
+        id: string;
+        expectedVersion: string;
+        installed: boolean;
+        version: string;
+        base: string;
+        updated?: boolean;
+      }>;
+      ensureEngine?: (version?: string) => Promise<unknown>;
+      onEngine?: (cb: (event: unknown) => void) => () => void;
       onEvent: (cb: (event: unknown) => void) => () => void;
     };
     /**

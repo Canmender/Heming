@@ -77,14 +77,18 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const setPaletteIntent = useUiStore((s) => s.setPaletteIntent);
   const focusTask = useUiStore((s) => s.focusTask);
   const infohubRunning = useInfohubStore((s) => s.running);
-  // d.70：内置模块停用后，其页面从「页面跳转」与插件命令目标里一起消失
+  // 模块页面目录过滤：内置模块未安装/停用时其页面不在「页面跳转」里出现
   const moduleEnabled = useModuleStore((s) => s.enabled);
+  const moduleInstalled = useModuleStore((s) => s.installed);
   const pages = useMemo(
-    () => filterPalettePages(PALETTE_PAGES, { enabled: moduleEnabled }),
-    [moduleEnabled],
+    () => filterPalettePages(PALETTE_PAGES, { installed: moduleInstalled, enabled: moduleEnabled }),
+    [moduleInstalled, moduleEnabled],
   );
-  /** 「模块管理」动作的副标题显示实际生效数（依赖未满足的不计），与模块卡同一口径。 */
-  const effectiveModuleCount = effectiveModuleIds({ enabled: moduleEnabled }).length;
+  /** 「插件与模块」动作的副标题显示实际生效数（依赖未满足/未安装的不计）。 */
+  const effectiveModuleCount = effectiveModuleIds({
+    installed: moduleInstalled,
+    enabled: moduleEnabled,
+  }).length;
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -254,8 +258,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         openSettings();
         break;
       case "modules":
-        // 插件区 + 模块 Tab 的一次性意图（d.70 的 openModuleManager），
-        // 与停用模块后的跳转落点同一入口。
+        // 直达插件页的「插件」Tab（模块已并入插件页，可一键安装/启停），
+        // 与未安装/停用模块时的跳转落点同一入口。
         openModuleManager();
         break;
       // d.113 第二轮：知识库四个动作统一「切页 + 投意图」，由知识库页执行；

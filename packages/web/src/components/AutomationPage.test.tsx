@@ -11,6 +11,7 @@ import {
 import { createMemoryStorage } from "../lib/memory/storage.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { useUiStore } from "../store/ui.js";
+import { useModuleStore } from "../lib/modules/store.js";
 
 /**
  * 自动化页：任务可建、可改、可删；未连接时立即运行只记跳过，不拉起进程；
@@ -45,6 +46,8 @@ function resetStores() {
     info: null,
     status: null,
     agenda: null,
+    detected: null,
+    autoCollected: false,
     busy: "",
     error: "",
   });
@@ -197,7 +200,7 @@ describe("自动化页", () => {
     expect(JSON.parse(localStorage.getItem("heming.automations.v1") as string)).toEqual([]);
   });
 
-  it("未连接时立即运行：记跳过并顺延，不拉起本机进程", async () => {
+  it("未连接时立即运行：记为失败并顺延，不拉起本机进程", async () => {
     const { bridge } = installBridge(false);
     useInfohubStore.setState({ available: true, booted: true, running: false });
     seedTask();
@@ -205,9 +208,9 @@ describe("自动化页", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "立即运行 夜间归档" }));
 
-    expect(await screen.findByText(/「夜间归档」已跳过/)).toBeInTheDocument();
+    expect(await screen.findByText(/「夜间归档」失败/)).toBeInTheDocument();
     const [task] = useAutomationStore.getState().tasks;
-    expect(task.lastStatus).toBe("skipped");
+    expect(task.lastStatus).toBe("error");
     expect(task.nextRunAt).toBeGreaterThan(Date.now());
     expect(useAutomationStore.getState().runningId).toBeNull();
     expect(bridge.start).not.toHaveBeenCalled();
@@ -215,6 +218,8 @@ describe("自动化页", () => {
   });
 
   it("未连接提示里的「去连接」跳到信息中枢页", () => {
+    // 信息中枢是独立模块：装过后入口才存在，「去连接」应直达该页而不是插件页。
+    useModuleStore.getState().install("infohub");
     installBridge(false);
     useInfohubStore.setState({ available: true, booted: true, running: false });
     render(<AutomationPage />);
@@ -310,9 +315,9 @@ describe("自动化页", () => {
     await waitFor(() => expect(useAutomationRunsStore.getState().runs).toHaveLength(1));
     const [run] = useAutomationRunsStore.getState().runs;
     expect(run.trigger).toBe("manual");
-    expect(run.status).toBe("skipped");
+    expect(run.status).toBe("error");
     expect(run.taskName).toBe("夜间归档");
-    expect(screen.getByText(/「夜间归档」已跳过/)).toBeInTheDocument();
+    expect(screen.getByText(/「夜间归档」失败/)).toBeInTheDocument();
   });
 
   it("从通知跳转：展开目标任务并消费焦点", () => {

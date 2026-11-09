@@ -52,9 +52,6 @@ const AutomationPage = lazy(() =>
   import("./components/AutomationPage.js").then((m) => ({ default: m.AutomationPage })),
 );
 const ModelPage = lazy(() => import("./components/ModelPage.js").then((m) => ({ default: m.ModelPage })));
-const ModelRoutePage = lazy(() =>
-  import("./components/ModelRoutePage.js").then((m) => ({ default: m.ModelRoutePage })),
-);
 const PluginsPage = lazy(() =>
   import("./components/PluginsPage.js").then((m) => ({ default: m.PluginsPage })),
 );
@@ -127,9 +124,9 @@ export function PageFallback() {
 }
 
 /**
- * Alt+数字键目标页。d.67 导航合并后只剩 9 个宿主页：
- * 1 主页、2 团队（承接原团队看板）、5 记忆区、6 设置区、8 智能体（承接原通用智能体）、
- * 0 插件区。原先的 3 技能区 / 4 接口区没有承接页——两个页面都并进了插件区的 Tab，
+ * Alt+数字键目标页。导航固定 8 项，其中 6 个带数字键：
+ * 1 主页、2 团队（承接原团队看板）、5 记忆、6 设置、8 智能体（承接原通用智能体）、
+ * 0 插件。原先的 3 技能区 / 4 接口区没有承接页——两个页面都并进了插件页的 Tab，
  * 不给已有页凭空换号，让 3/4 空着比让人重新记「3 现在是什么」更省心。
  *
  * 这里的键位必须与 NavRail 的 `digit` 严格对应（那边是快捷键提示的唯一来源）。
@@ -563,9 +560,10 @@ function AppShell({
 
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
-  // d.70：内置能力模块的启用状态。页面可用性、后台循环与跨页跳转都读这一份。
+  // 内置能力模块的安装/启用状态。页面可用性、后台循环与跨页跳转都读这一份。
   const moduleEnabled = useModuleStore((s) => s.enabled);
-  const moduleState = { enabled: moduleEnabled };
+  const moduleInstalled = useModuleStore((s) => s.installed);
+  const moduleState = { installed: moduleInstalled, enabled: moduleEnabled };
   /** auto 模式下给左缘热区留一条 8px 空档，避免热区盖住内容最左侧的可点元素（列表整行按钮等）。 */
   const navMode = useUiStore((s) => s.navMode);
 
@@ -575,18 +573,21 @@ function AppShell({
   // 常驻幕僚（d.48）：登录后巡检日程与任务，只读、只递简报；模块停用即停止巡检。
   useStaffLoop(Boolean(authUser) && isModuleEffective(moduleState, "staff"));
 
-  // d.70：信息中枢模块被停用 = 运行时一起下线。已连接的本机边车进程在停用后释放，
-  // 不删任何归档数据；重新启用后可再次连接。（不自动拉起进程的既有约束不变。）
+  // d.115：信息中枢模块生效 = 自动拉起本机边车（不依赖页面挂载），并自动识别、
+  // 空库时采集一次；模块停用 = 运行时一起下线（不删任何归档数据）。
   const infohubModuleOn = isModuleEffective(moduleState, "infohub");
   useEffect(() => {
-    if (infohubModuleOn) return;
-    if (!useInfohubStore.getState().running) return;
-    void useInfohubStore
-      .getState()
-      .disconnect()
-      .catch(() => {
-        /* 停用时的进程回收失败不该影响界面：页面入口已下线，下次连接会重试 */
-      });
+    if (!infohubModuleOn) {
+      if (!useInfohubStore.getState().running) return;
+      void useInfohubStore
+        .getState()
+        .disconnect()
+        .catch(() => {
+          /* 停用时的进程回收失败不该影响界面：页面入口已下线，重新启用会再拉起 */
+        });
+      return;
+    }
+    void useInfohubStore.getState().ensureRunning();
   }, [infohubModuleOn]);
 
   // 系统通知点击 → 主进程回传会话 id → 打开会话（未登录时忽略，登录后再点即可）
@@ -599,8 +600,10 @@ function AppShell({
     });
   }, []);
 
-  // 模块页被停用（或被通知/桌宠/旧链接指到）时统一回主页，不渲染不该存在的页面。
-  const currentPage = isPageAvailable(page, moduleState) ? page : "home";
+  // 模块页被停用/未安装（或被通知/桌宠/旧链接指到）时统一回主页，不渲染不该存在的页面。
+  // 模型路由页已删除：旧存储/旧链接里的 `modelroute` 同样回落主页。
+  const resolvedPage: Page = page === "modelroute" ? "home" : page;
+  const currentPage = isPageAvailable(resolvedPage, moduleState) ? resolvedPage : "home";
   useEffect(() => {
     if (page !== currentPage) setPage(currentPage);
   }, [page, currentPage, setPage]);
@@ -620,7 +623,7 @@ function AppShell({
         ui.openSettings(request.settingsTab ?? "appearance");
       } else if (page === "team") ui.setPage("team");
       else if (page === "tasks") ui.setPage("tasks");
-      // 模块被停用时落在插件区「模块」（能一键重新启用），而不是静默跳到一个不存在的页面
+      // 模块未安装/停用时落在插件页（能一键安装/启用），而不是静默跳到一个不存在的页面
       else if (page === "staff") {
         if (moduleOn("staff")) ui.openStaff();
         else ui.openModuleManager();
@@ -789,11 +792,8 @@ function AppShell({
       // 自动化：本机定时同步/重扫，只在和鸣运行且信息中枢已连接时执行
       <AutomationPage />
     ) : currentPage === "model" ? (
-      // 模型页（d.99）：内核管理面——供应商/订阅账号/分组/用量/备份/同步
+      // 模型页：内核管理面——供应商/订阅账号/分组/用量/备份/同步
       <ModelPage />
-    ) : currentPage === "modelroute" ? (
-      // 模型路由（d.84，magpie 语义移植）：候选链、选路策略、冷却与用量
-      <ModelRoutePage />
     ) : currentPage === "vault" ? (
       // 知识库（d.114）：本地 vault 三栏界面（文件树 / 编辑器 / 反链标签图谱），数据不出设备
       <KnowledgePage />

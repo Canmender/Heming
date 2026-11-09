@@ -58,11 +58,10 @@ export const PALETTE_ACTIONS: PaletteAction[] = [
   },
   {
     id: "modules",
-    // d.74：模块是 d.70 新概念，但此前命令面板搜「模块」一条结果都没有——
-    // 用户知道有这个能力，却只能去插件区里再找 Tab。这里给一个直达入口。
-    label: "模块管理",
-    description: "启用 / 停用幕僚、信息中枢、自动化",
-    keywords: ["模块", "内置模块", "模块管理", "module", "modules"],
+    // 模块已并入插件页：这里给一个直达入口（插件 Tab），可一键安装/启停内置插件。
+    label: "插件与模块",
+    description: "安装、删除或启停内置插件：幕僚、信息中枢、自动化",
+    keywords: ["模块", "内置模块", "模块管理", "插件", "安装", "module", "modules", "plugin"],
   },
   {
     id: "vault-new-note",

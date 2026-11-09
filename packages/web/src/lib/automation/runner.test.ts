@@ -5,7 +5,8 @@ import { useInfohubStore } from "../infohub/store.js";
 import type { InfohubBridgeInfo, InfohubStatus } from "../infohub/client.js";
 
 /**
- * 自动化执行器的红线：未连接时只回 skipped，绝不借桥的 `call()` 自动拉起 Python。
+ * 自动化执行器的红线：未连接时回结构化 error（原因可读），绝不借桥的 `call()`
+ * 自动拉起 Python，也不假装成功。
  * 其余用例钉住三种结果留痕与参数透传（来源/全量/导出、日程重扫）。
  */
 
@@ -80,6 +81,8 @@ function resetStores() {
     info: null,
     status: null,
     agenda: null,
+    detected: null,
+    autoCollected: false,
     busy: "",
     error: "",
   });
@@ -96,19 +99,22 @@ describe("自动化执行器", () => {
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
   });
 
-  it("浏览器端：直接跳过，不发任何请求", async () => {
-    expect(automationBlockedReason()).toBe("信息中枢仅桌面端可用，自动化未执行");
+  it("浏览器端：直接失败并提示安装/连接，不发任何请求", async () => {
+    expect(automationBlockedReason()).toBe("信息中枢未连接，本任务未执行；请先安装并连接信息中枢");
     const outcome = await runAutomationTask(task());
-    expect(outcome).toEqual({ status: "skipped", detail: "信息中枢仅桌面端可用，自动化未执行" });
+    expect(outcome).toEqual({
+      status: "error",
+      detail: "信息中枢未连接，本任务未执行；请先安装并连接信息中枢",
+    });
   });
 
-  it("桌面端但未连接：跳过且不拉起进程", async () => {
+  it("桌面端但未连接：结构化失败且不拉起进程", async () => {
     const { bridge } = installBridge();
     useInfohubStore.setState({ available: true, booted: true, running: false });
 
     const outcome = await runAutomationTask(task());
 
-    expect(outcome.status).toBe("skipped");
+    expect(outcome.status).toBe("error");
     expect(outcome.detail).toContain("信息中枢未连接");
     expect(bridge.start).not.toHaveBeenCalled();
     expect(bridge.call).not.toHaveBeenCalled();

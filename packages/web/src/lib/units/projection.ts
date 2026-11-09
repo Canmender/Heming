@@ -39,8 +39,14 @@ export interface UnitProjectionSources {
   system?: SystemPlugin | null;
   /** 内置模块注册表（默认 `BUILTIN_MODULES`，测试可传子集）。 */
   modules?: readonly BuiltinModule[];
-  /** 模块开关（`heming.modules.v1` 的 enabled，缺省全开）。 */
+  /** 模块开关（`heming.modules.v1` 的 enabled，缺省视为开）。 */
   moduleEnabled?: Partial<Record<ModuleId, boolean>>;
+  /**
+   * 模块安装状态（`heming.modules.v1` 的 installed）。
+   * 缺省（整个来源不传）视为「已安装」——纯投影调用不关心安装态；
+   * 一旦传入，缺项的模块按**未安装**处理（安装包默认不携带任何插件）。
+   */
+  moduleInstalled?: Partial<Record<ModuleId, boolean>>;
   /** 已装声明式插件（`pluginStore.list()`）。 */
   plugins?: readonly InstalledPlugin[];
   /** 已装界面插件（`useWidgetsStore().records`）。 */
@@ -59,13 +65,22 @@ export function currentAppVersion(): string {
   return "d.0";
 }
 
-/** 模块开关缺省值：与 `modules/store.ts` 的「默认全开」一致。 */
+/** 模块开关缺省值：与 `modules/store.ts` 的「装了就是开着」一致（缺项视为开）。 */
 function moduleOn(
   enabled: Partial<Record<ModuleId, boolean>> | undefined,
   id: ModuleId,
 ): boolean {
   if (!enabled) return true;
   return enabled[id] !== false;
+}
+
+/** 模块安装状态：未传来源视为已安装；传了则缺项按未安装处理。 */
+function moduleInstalled(
+  installed: Partial<Record<ModuleId, boolean>> | undefined,
+  id: ModuleId,
+): boolean {
+  if (!installed) return true;
+  return installed[id] === true;
 }
 
 function contribution(
@@ -96,14 +111,19 @@ export function projectSystemUnit(system: SystemPlugin): CapabilityUnit {
 
 /**
  * 内置模块单元：`page` / `homeCard` / `backgroundJob` 是它们真实贡献的运行时能力，
- * `requires` 直接映射模块依赖（automations → infohub）。开关来自 `heming.modules.v1`。
+ * `requires` 直接映射模块依赖（当前三个模块互不依赖）。开关来自 `heming.modules.v1`。
+ *
+ * 未安装的模块**照样投影出来**（插件页要把它列为可安装项），但 `installed=false`
+ * 且 `enabled=false`——`resolveUnit` 会以 `notInstalled` 短路，不生效。
  */
 export function projectBuiltinUnits(
   enabled: Partial<Record<ModuleId, boolean>> = {},
   modules: readonly BuiltinModule[] = BUILTIN_MODULES,
+  installed?: Partial<Record<ModuleId, boolean>>,
 ): CapabilityUnit[] {
   return modules.map((mod) => {
-    const on = moduleOn(enabled, mod.id);
+    const isInstalled = moduleInstalled(installed, mod.id);
+    const on = isInstalled && moduleOn(enabled, mod.id);
     const contributions = [
       contribution("page", mod.contributions.page ? 1 : 0, on),
       contribution("homeCard", mod.contributions.homeCard ? 1 : 0, on),
@@ -120,6 +140,7 @@ export function projectBuiltinUnits(
       version: mod.version,
       description: mod.description,
       enabled: on,
+      installed: isInstalled,
       requires: mod.requires ? [...mod.requires] : undefined,
       contributions,
       storageKeys: mod.storageKeys.length > 0 ? [...mod.storageKeys] : undefined,
@@ -313,7 +334,11 @@ export function projectUnits(sources: UnitProjectionSources = {}): CapabilityUni
   const units: CapabilityUnit[] = [];
   if (sources.system) units.push(projectSystemUnit(sources.system));
   units.push(
-    ...projectBuiltinUnits(sources.moduleEnabled ?? {}, sources.modules ?? BUILTIN_MODULES),
+    ...projectBuiltinUnits(
+      sources.moduleEnabled ?? {},
+      sources.modules ?? BUILTIN_MODULES,
+      sources.moduleInstalled,
+    ),
   );
   const appVersion = sources.appVersion ?? currentAppVersion();
   if (sources.plugins && sources.plugins.length > 0) {

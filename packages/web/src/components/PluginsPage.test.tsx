@@ -158,7 +158,7 @@ function renderPage() {
 }
 
 function openInstall(): void {
-  fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
+  fireEvent.click(screen.getByRole("button", { name: "手动粘贴清单" }));
 }
 
 function installNow(): void {
@@ -169,10 +169,10 @@ function installNow(): void {
   fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
 }
 
-describe("PluginsPage · 下载安装弹窗（d.96）", () => {
-  it("插件页「下载安装」直接列出云端插件库，选中后关闭弹窗并进入安装预览", async () => {
+describe("PluginsPage · 云端安装弹窗（d.96）", () => {
+  it("「从云端安装」直接列出云端插件库，选中后关闭弹窗并进入安装预览", async () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "下载安装" }));
+    fireEvent.click(screen.getByRole("button", { name: "从云端安装" }));
     const dialog = await screen.findByRole("dialog", { name: "云端插件库" });
     expect(await within(dialog).findByText("仓库插件")).toBeInTheDocument();
     expect(within(dialog).getByLabelText("搜索插件仓库")).toBeInTheDocument();
@@ -185,7 +185,7 @@ describe("PluginsPage · 下载安装弹窗（d.96）", () => {
     expect(screen.getByRole("dialog", { name: "安装插件" })).toBeInTheDocument();
   });
 
-  it("空插件页给出「从云端安装」与「手动粘贴清单」两个入口", async () => {
+  it("空插件页：列表上方仍给出「从云端安装」与「手动粘贴清单」两个入口", async () => {
     renderPage();
     expect(screen.getByText("还没有安装插件")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "从云端安装" })).toBeInTheDocument();
@@ -211,122 +211,55 @@ describe("PluginsPage · 仓库 Tab（d.95）", () => {
   });
 });
 
-describe("PluginsPage · 市场 Tab（d.108）", () => {
-  const marketResponse = (): Record<string, unknown> => ({
-    format: 1,
-    title: "和鸣插件目录",
-    generatedAt: "2026-11-08T00:00:00.000Z",
-    categories: { efficiency: { title: "效率" } },
-    tags: {},
-    plugins: [
-      {
-        id: "acme.repo",
-        title: "仓库插件",
-        description: "从市场安装",
-        author: "ACME",
-        updatedAt: "2026-11-08T00:00:00.000Z",
-        versions: [
-          {
-            version: "1.0.0",
-            publishedAt: "2026-11-08T00:00:00.000Z",
-            schemaVersion: 3,
-            engines: { heming: "d.100" },
-            distribution: "manifest",
-            sha256: "b".repeat(64),
-            size: 1024,
-          },
-        ],
-      },
-    ],
-  });
-
-  function marketFetch(): typeof fetch {
-    return (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/detail")) return new Response("## 市场详情", { status: 200 });
-      return new Response(JSON.stringify(marketResponse()), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }) as unknown as typeof fetch;
-  }
-
-  it("市场索引可用：列表 → 详情 → 复用安装预览，装完回市场并标已安装", async () => {
-    render(
-      <PluginsPage plugins={store} skills={pool} mcp={registry} market={{ fetchImpl: marketFetch() }} />,
-    );
-    fireEvent.click(screen.getByRole("tab", { name: "市场" }));
-    expect(await screen.findByText("仓库插件")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "查看 仓库插件 详情" }));
-    const detail = await screen.findByRole("dialog", { name: "市场详情 仓库插件" });
-    fireEvent.click(within(detail).getByRole("button", { name: "安装" }));
-    // 复用既有安装预览：清单来自 catalogClient.downloadPluginManifest（测试里已 mock）
-    const dialog = await screen.findByRole("dialog", { name: "安装插件" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "确认安装" }));
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: "市场" })).toHaveAttribute("aria-selected", "true"),
-    );
-    expect(screen.getByText("已安装 v1.0.0")).toBeInTheDocument();
-  });
-
-  it("市场索引不可用：提示「已切换到兼容列表」并落到仓库 Tab", async () => {
-    render(
-      <PluginsPage
-        plugins={store}
-        skills={pool}
-        mcp={registry}
-        market={{
-          fetchImpl: (async () =>
-            new Response(JSON.stringify({ error: "市场索引不存在" }), {
-              status: 404,
-              headers: { "content-type": "application/json" },
-            })) as unknown as typeof fetch,
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByRole("tab", { name: "市场" }));
-    expect(await screen.findByText(/已切换到兼容列表/)).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "仓库" })).toHaveAttribute("aria-selected", "true");
-  });
-});
-
-describe("PluginsPage · 模块 Tab（d.70）", () => {
-  it("通过一次性视图意图（pageView=modules）进入时直接落在模块 Tab（停用模块的兜底落点）", () => {
+describe("PluginsPage · 内置模块并入插件 Tab", () => {
+  it("pageView=modules 直接落在插件 Tab（旧模块页入口的兜底落点）", () => {
     useModuleStore.getState().reset();
     renderPage();
     act(() => {
       useUiStore.getState().setPage("plugins", "modules");
     });
-    expect(screen.getByRole("tab", { name: "模块" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("region", { name: "模块 幕僚" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: "插件模块 幕僚" })).toBeInTheDocument();
   });
 
-  it("模块 Tab 展示四个内置能力模块，并可停用/恢复", () => {
+  it("三个内置模块默认未安装；安装后可启用/停用，删除回到未安装", () => {
     useModuleStore.getState().reset();
     renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "模块" }));
-    expect(screen.getByRole("tab", { name: "模块" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("region", { name: "模块 幕僚" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "模块 信息中枢" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "模块 自动化" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "模块 模型路由" })).toBeInTheDocument();
+    for (const name of ["幕僚", "信息中枢", "自动化"]) {
+      expect(screen.getByRole("region", { name: `插件模块 ${name}` })).toBeInTheDocument();
+    }
+    // 自动化不再依赖信息中枢：卡片上不再出现「需要…启用」
+    expect(screen.getByRole("region", { name: "插件模块 自动化" })).toHaveTextContent(
+      "无模块依赖",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "安装模块 幕僚" }));
+    expect(useModuleStore.getState().installed.staff).toBe(true);
+    expect(useModuleStore.getState().enabled.staff).toBe(true);
 
     fireEvent.click(screen.getByRole("switch", { name: "停用模块 幕僚" }));
     expect(useModuleStore.getState().enabled.staff).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "删除模块 幕僚" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "删除「幕僚」" })).getByRole("button", {
+        name: "删除",
+      }),
+    );
+    expect(useModuleStore.getState().installed.staff).toBe(false);
     useModuleStore.getState().reset();
   });
 });
 
-describe("PluginsPage 插件区", () => {
+describe("PluginsPage 插件", () => {
   it("空态与安装面板：没有清单时确认按钮禁用", () => {
     renderPage();
 
-    expect(screen.getByRole("heading", { name: "插件区" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "插件" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "暂无插件" })).toBeInTheDocument();
     expect(screen.getByText("还没有安装插件")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
+    fireEvent.click(screen.getByRole("button", { name: "手动粘贴清单" }));
     const dialog = screen.getByRole("dialog", { name: "安装插件" });
     expect(within(dialog).getByLabelText("插件清单 JSON")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "确认安装" })).toBeDisabled();
@@ -335,7 +268,7 @@ describe("PluginsPage 插件区", () => {
 
   it("粘贴清单后预览，确认安装写入技能池并显示插件卡", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
+    fireEvent.click(screen.getByRole("button", { name: "手动粘贴清单" }));
     fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
       target: { value: JSON.stringify(manifest()) },
     });
@@ -360,7 +293,7 @@ describe("PluginsPage 插件区", () => {
 
   it("非法清单给出中文错误，且不能确认", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
+    fireEvent.click(screen.getByRole("button", { name: "手动粘贴清单" }));
     fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
       target: { value: '{"schemaVersion":1,"id":"Bad ID"}' },
     });
@@ -406,7 +339,7 @@ describe("PluginsPage 插件区", () => {
     renderPage();
     installNow();
 
-    fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
+    fireEvent.click(screen.getByRole("button", { name: "手动粘贴清单" }));
     fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
       target: { value: JSON.stringify(manifest({ version: "1.1.0", skills: [{ name: "财报速读", instructions: "v2" }] })) },
     });
@@ -426,7 +359,7 @@ describe("PluginsPage 插件区", () => {
 
   it("v2 能力包：预览网络主机、服务标签与接口区入口", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "手动安装" }));
+    fireEvent.click(screen.getByRole("button", { name: "手动粘贴清单" }));
     fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
       target: {
         value: JSON.stringify(
@@ -591,7 +524,7 @@ describe("PluginsPage 导航合并", () => {
   it("四个 Tab：技能与 MCP 渲染完整视图，页面级标题始终只有一个", () => {
     renderPage();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("插件区");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("插件");
     expect(screen.queryByRole("heading", { name: "技能区" })).toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "技能" }));
@@ -726,13 +659,16 @@ describe("PluginsPage · 插件列表筛选与安装定位（d.77）", () => {
     expect(screen.getByRole("region", { name: "插件 天气能力包" })).toBeInTheDocument();
   });
 
-  it("从别的 Tab 安装后回到插件 Tab，并高亮新装的卡片", () => {
+  it("从仓库 Tab 安装后回到插件 Tab，并高亮新装的卡片", async () => {
     renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "工具" }));
-    installNow();
+    fireEvent.click(screen.getByRole("tab", { name: "仓库" }));
+    fireEvent.click(await screen.findByRole("button", { name: "安装" }));
+    const textarea = await screen.findByLabelText("插件清单 JSON");
+    await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toContain("acme.repo"));
+    fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
 
     expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
-    const card = screen.getByRole("region", { name: "插件 财务助手包" });
+    const card = screen.getByRole("region", { name: "插件 仓库插件" });
     expect(card.className).toContain("ring-2");
     // 筛选栏出现后总数说清楚（安装前没有插件，不显示筛选栏）；d.105 起含系统/内置单元
     expect(screen.getByText(/^共 \d+ 个单元$/)).toBeInTheDocument();

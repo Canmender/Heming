@@ -18,8 +18,8 @@ import { PlusIcon } from "./icons.js";
 /**
  * 选路档的中文名与一行说明（语义照 magpie；本仓是客户端，不读供应商配额）。
  *
- * 名字与「模型路由」模块页（ModelRoutePage 的 STRATEGY_NOTES）保持一致——
- * 同一个功能在两处出现时不能有两套叫法；改档位说明时两处一起改。
+ * 本地「模型路由」页已下线（magpie 路由组取代），这里就是档位说明的唯一来源；
+ * 改档位说明只改这一处。
  */
 const STRATEGY_OPTIONS: readonly { value: RouteStrategy; label: string; desc: string }[] = [
   {
@@ -383,7 +383,7 @@ export function RouteGroupsCard() {
             </div>
             <div className="mt-1 ui-caption">
               所有档都只用本机数据（不读供应商配额）：休息中的候选永远排最后、绝不删除；
-              本机「模型路由」模块停用时一律退回按声明顺序，候选链与失败切换照常工作。
+              选路策略恒定生效，候选链与失败切换照常工作。
             </div>
           </fieldset>
 

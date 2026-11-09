@@ -63,9 +63,8 @@ describe("命令面板 v2 · 空查询分组", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(screen.getByText("页面跳转")).toBeInTheDocument();
     expect(screen.getByText("常用动作")).toBeInTheDocument();
-    // 12 个页面 + 9 个动作（d.67 合并后导航只剩宿主页；d.84 模型路由，d.100 模型页，
-    // d.114 知识库：新增 4 个知识库动作）
-    expect(screen.getAllByRole("option")).toHaveLength(21);
+    // 8 个导航页 + 9 个动作（模型路由页与模块 Tab 已删除；模块并入插件页）
+    expect(screen.getAllByRole("option")).toHaveLength(17);
     // 没有最近使用时不出现该组标题
     expect(screen.queryByText("最近使用")).not.toBeInTheDocument();
   });
@@ -73,9 +72,9 @@ describe("命令面板 v2 · 空查询分组", () => {
   it("页面项标注 Alt 快捷键，无快捷键的页面不标注", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     expect(OPTION("主页").textContent).toContain("Alt+1");
-    expect(OPTION("插件区").textContent).toContain("Alt+0");
-    // 幕僚没有数字键（2 已给团队、8 已给智能体）
-    expect(OPTION("幕僚").textContent).not.toContain("Alt+");
+    expect(OPTION("插件").textContent).toContain("Alt+0");
+    // 知识库没有数字键（2 已给团队、8 已给智能体）
+    expect(OPTION("知识库").textContent).not.toContain("Alt+");
   });
 
   it("结果项是 option，首项默认 aria-selected，输入框用 aria-activedescendant 指向它", () => {
@@ -187,8 +186,8 @@ describe("命令面板 v2 · 检索", () => {
   it("按页面名检索并跳转", () => {
     const onClose = vi.fn();
     render(<CommandPalette onClose={onClose} />);
-    fireEvent.change(searchBox(), { target: { value: "记忆区" } });
-    fireEvent.click(OPTION("记忆区"));
+    fireEvent.change(searchBox(), { target: { value: "记忆" } });
+    fireEvent.click(OPTION("记忆"));
     expect(useUiStore.getState().page).toBe("memory");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -266,25 +265,31 @@ describe("命令面板 v2 · 四个动作的分发", () => {
     expect(useUiStore.getState().settingsTab).toBeNull();
   });
 
-  it("模块管理 → 插件区 + 模块 Tab 意图（与停用模块后的跳转落点同一入口）", () => {
+  it("「插件与模块」→ 插件页 + 插件 Tab 意图（与未安装/停用模块后的跳转落点同一入口）", () => {
     render(<CommandPalette onClose={vi.fn()} />);
-    fireEvent.click(OPTION("模块管理"));
+    fireEvent.click(OPTION("插件与模块"));
     const s = useUiStore.getState();
     expect(s.page).toBe("plugins");
-    expect(s.pageView).toBe("modules");
+    expect(s.pageView).toBe("plugins");
   });
 
-  it("模块管理动作显示实际生效数（依赖未满足的不计）", () => {
-    useModuleStore.getState().setEnabled("infohub", false);
+  it("「插件与模块」动作按安装/启用状态显示实际生效数", () => {
+    // 默认全部未安装 → 0/3
     render(<CommandPalette onClose={vi.fn()} />);
-    // 停信息中枢会连带自动化失效（依赖），只剩幕僚与模型路由 2/4
-    expect(screen.getByText(/已启用 2\/4/)).toBeInTheDocument();
+    expect(screen.getByText(/已启用 0\/3/)).toBeInTheDocument();
+
+    // 安装三个后停信息中枢：幕僚与自动化仍生效（自动化不依赖信息中枢）→ 2/3
+    const store = useModuleStore.getState();
+    for (const id of ["staff", "infohub", "automations"] as const) store.install(id);
+    store.setEnabled("infohub", false);
+    render(<CommandPalette onClose={vi.fn()} />);
+    expect(screen.getAllByText(/已启用 2\/3/).length).toBeGreaterThan(0);
   });
 
-  it("搜「模块」能命中模块管理动作（此前一条结果都没有）", async () => {
+  it("搜「模块」能命中「插件与模块」动作（此前一条结果都没有）", async () => {
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "模块" } });
-    expect(await screen.findByRole("option", { name: "选择 模块管理" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "选择 插件与模块" })).toBeInTheDocument();
   });
 
   it("连续两次「新智能体」意图的 token 不同（不会被合并成一次）", () => {
@@ -317,7 +322,7 @@ describe("命令面板 v2 · 最近使用", () => {
 
   it("执行页面跳转后落盘，下次打开在「最近使用」组置顶", () => {
     const first = render(<CommandPalette onClose={vi.fn()} />);
-    fireEvent.click(OPTION("设置区"));
+    fireEvent.click(OPTION("设置"));
     expect(JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]")).toEqual([
       { kind: "page", id: "settings" },
     ]);

@@ -1,8 +1,12 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { createWidgetHost } = require("./plugin-host");
 const { normalizeWidgetSpec, widgetWindowSize, defaultWidgetPosition } = require("./plugin-window");
+// data API 的 key 规则/上限与真 store 同源：假 store 复用同一份校验，避免测试替身放宽口径。
+const { assertDataKey, DATA_MAX_BYTES } = require("./plugin-store");
 
 /* ────────────────────────────── 假对象 ────────────────────────────── */
 
@@ -146,10 +150,14 @@ function makeStore(overrides = {}) {
   ];
   const state = new Map();
   const settings = new Map();
+  // 假 data 目录：`<id>/data/<key>.json`，值按 JSON 文本存（模拟落盘后的类型收敛）
+  const dataFiles = new Map();
+  const dataPath = (id, key) => `${id}\u0000${key}`;
   return {
     _records: records,
     _state: state,
     _settings: settings,
+    _data: dataFiles,
     list: () => records.map((record) => ({ ...record })),
     get: (id) => records.find((record) => record.id === id) || null,
     currentDir: (id) => (records.some((record) => record.id === id) ? `/plugins/${id}/1.0.0` : null),
@@ -160,6 +168,33 @@ function makeStore(overrides = {}) {
       const next = { ...(settings.get(id) ?? {}), ...patch };
       settings.set(id, next);
       return next;
+    },
+    dataDirOf: (id) => `/plugins/${id}/data`,
+    readData: (id, key) => {
+      assertDataKey(key);
+      const text = dataFiles.get(dataPath(id, key));
+      return text === undefined ? null : JSON.parse(text);
+    },
+    writeData: (id, key, value) => {
+      assertDataKey(key);
+      if (!records.some((record) => record.id === id)) throw new Error(`插件不存在：${id}`);
+      const serialized = JSON.stringify(value, null, 2);
+      if (serialized === undefined) throw new Error(`插件数据必须是可 JSON 序列化的值（${key}）`);
+      const bytes = Buffer.byteLength(serialized, "utf8");
+      if (bytes > DATA_MAX_BYTES) throw new Error(`插件数据超过单文件上限 1MB（${key}）：${bytes} 字节`);
+      dataFiles.set(dataPath(id, key), serialized);
+      return { key, bytes };
+    },
+    deleteData: (id, key) => {
+      assertDataKey(key);
+      return dataFiles.delete(dataPath(id, key));
+    },
+    listDataKeys: (id) => {
+      const prefix = `${id}\u0000`;
+      return [...dataFiles.keys()]
+        .filter((entry) => entry.startsWith(prefix))
+        .map((entry) => entry.slice(prefix.length))
+        .sort();
     },
     setRecords: (next) => {
       records.length = 0;
@@ -923,4 +958,105 @@ test("生命周期：排队上限 20 条，溢出丢最旧，投递顺序仍是�
 
   // 丢弃是显式记录，不是静默截断
   assert.match(logs.join("\n"), /生命周期事件排队超过 20 条/);
+});
+
+/* ────────────────────────── 插件数据目录（widget:data-*） ────────────────────────── */
+
+test("widget:data-*：按 sender 的 pluginId 隔离，目录指向各自安装目录", () => {
+  const store = makeStore();
+  const base = { ...store.list()[0] };
+  store.setRecords([base, { ...base, id: "acme.demo", name: "示例插件" }]);
+  const { host } = makeHost({ store });
+  host.start();
+  host.action("heming.pet", "show");
+  host.action("acme.demo", "show");
+  const petWin = host.runtimeFor("heming.pet").window;
+  const demoWin = host.runtimeFor("acme.demo").window;
+  assert.notEqual(petWin, demoWin);
+
+  const petEvent = { sender: petWin.webContents };
+  const demoEvent = { sender: demoWin.webContents };
+
+  assert.deepEqual(invokeChannel("widget:data-set", petEvent, { key: "cache", value: { hits: 2 } }), {
+    key: "cache",
+    bytes: Buffer.byteLength(JSON.stringify({ hits: 2 }, null, 2), "utf8"),
+  });
+  assert.deepEqual(invokeChannel("widget:data-get", petEvent, { key: "cache" }), { hits: 2 });
+  assert.deepEqual(invokeChannel("widget:data-keys", petEvent), ["cache"]);
+
+  // 另一个插件拿不到：同 key 读不到、列表为空、删除是 no-op
+  assert.equal(invokeChannel("widget:data-get", demoEvent, { key: "cache" }), null);
+  assert.deepEqual(invokeChannel("widget:data-keys", demoEvent), []);
+  assert.equal(invokeChannel("widget:data-delete", demoEvent, { key: "cache" }), false);
+  assert.deepEqual(invokeChannel("widget:data-get", petEvent, { key: "cache" }), { hits: 2 });
+
+  assert.deepEqual(invokeChannel("widget:data-dir", petEvent), { dir: "/plugins/heming.pet/data" });
+  assert.deepEqual(invokeChannel("widget:data-dir", demoEvent), { dir: "/plugins/acme.demo/data" });
+
+  assert.equal(invokeChannel("widget:data-delete", petEvent, { key: "cache" }), true);
+  assert.equal(invokeChannel("widget:data-get", petEvent, { key: "cache" }), null);
+});
+
+test("widget:data-*：非法 key / 坏载荷 / 超 1MB 一律抛可读错误，不落盘", () => {
+  const { host, store } = makeHost();
+  host.start();
+  host.action("heming.pet", "show");
+  const win = host.runtimeFor("heming.pet").window;
+  const sender = { sender: win.webContents };
+
+  // 载荷形状
+  assert.throws(() => invokeChannel("widget:data-get", sender, null), /载荷必须是 \{ key \}/);
+  assert.throws(() => invokeChannel("widget:data-set", sender, null), /载荷必须是 \{ key \}/);
+  assert.throws(() => invokeChannel("widget:data-set", sender, { key: 42, value: 1 }), /缺少字符串 key/);
+  assert.throws(() => invokeChannel("widget:data-set", sender, { key: "ok" }), /缺少 value/);
+  assert.throws(() => invokeChannel("widget:data-delete", sender, { key: "" }), /缺少字符串 key/);
+
+  // key 规则（穿越 / 分隔符 / 超长）
+  for (const key of ["../escape", "a/b", "a\b", "..", "x".repeat(65)]) {
+    assert.throws(() => invokeChannel("widget:data-get", sender, { key }), /key/, `get 应拒绝 ${key}`);
+    assert.throws(() => invokeChannel("widget:data-set", sender, { key, value: 1 }), /key/, `set 应拒绝 ${key}`);
+    assert.throws(() => invokeChannel("widget:data-delete", sender, { key }), /key/, `delete 应拒绝 ${key}`);
+  }
+
+  // 不可序列化 / 超限
+  assert.throws(() => invokeChannel("widget:data-set", sender, { key: "fn", value: () => {} }), /JSON/);
+  assert.throws(
+    () => invokeChannel("widget:data-set", sender, { key: "huge", value: "x".repeat(1024 * 1024) }),
+    /1MB/,
+  );
+
+  assert.deepEqual(invokeChannel("widget:data-keys", sender), [], "失败调用不能留下任何 key");
+  assert.equal(store._data.size, 0);
+});
+
+test("widget:data-*：未知窗口（sender 不属于任何 widget）一律拒绝", () => {
+  const { host } = makeHost();
+  host.start();
+  host.action("heming.pet", "show");
+  const stranger = { sender: { fake: true } };
+  assert.equal(invokeChannel("widget:data-get", stranger, { key: "k" }), null);
+  assert.equal(invokeChannel("widget:data-set", stranger, { key: "k", value: 1 }), null);
+  assert.equal(invokeChannel("widget:data-delete", stranger, { key: "k" }), false);
+  assert.deepEqual(invokeChannel("widget:data-keys", stranger), []);
+  assert.equal(invokeChannel("widget:data-dir", stranger), null);
+  // 窗口销毁后也不认（fail-closed）
+  host.runtimeFor("heming.pet").window.destroy();
+  const win = host.runtimeFor("heming.pet").window;
+  assert.equal(invokeChannel("widget:data-get", { sender: win.webContents }, { key: "k" }), null);
+});
+
+test("widget-preload 暴露 data* 方法且只调用 widget: 通道", () => {
+  const src = fs.readFileSync(path.join(__dirname, "widget-preload.js"), "utf8");
+  for (const method of ["dataGet", "dataSet", "dataDelete", "dataKeys", "dataDir"]) {
+    assert.ok(src.includes(`${method}:`), `widget-preload 应暴露 ${method}`);
+  }
+  for (const channel of [
+    "widget:data-get",
+    "widget:data-set",
+    "widget:data-delete",
+    "widget:data-keys",
+    "widget:data-dir",
+  ]) {
+    assert.ok(src.includes(`"${channel}"`), `widget-preload 应调用 ${channel}`);
+  }
 });

@@ -55,3 +55,25 @@ test("界面插件（desktopWidget bundle）同样不随安装包分发（d.98�
     assert.ok(files.includes(required), `安装包应包含 ${required}`);
   }
 });
+
+test("选装模块（信息中枢引擎）不随安装包分发（d.116）", () => {
+  // 模块功能是选装的：安装包只带共享运行时，引擎由用户在插件页安装后从更新源下载。
+  // 旧口径把 packages/infohub 塞进 extraResources——那样「不携带内置模块」就是一句空话。
+  for (const source of packagedSources()) {
+    assert.ok(
+      !/(^|[\\/])infohub([\\/]|$)/.test(source),
+      `安装包不应携带模块引擎目录：${source}`,
+    );
+  }
+  // 安装链路本身必须在本体里：缺了就是「点了安装也不会动」。
+  const files = Array.isArray(build.files) ? build.files : [];
+  for (const required of [
+    "infohub-bridge.js",
+    "infohub-engine.js",
+    "module-package.js",
+    "module-store.js",
+    "module-download.js",
+  ]) {
+    assert.ok(files.includes(required), `安装包应包含选装模块安装链路：${required}`);
+  }
+});

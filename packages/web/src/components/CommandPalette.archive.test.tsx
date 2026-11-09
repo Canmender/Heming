@@ -4,6 +4,7 @@ import { CommandPalette } from "./CommandPalette.js";
 import type { TeamMember } from "@heming/shared";
 import { useUiStore } from "../store/ui.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
+import { useModuleStore } from "../lib/modules/store.js";
 import type { InfohubBridgeInfo, InfohubSearchHit } from "../lib/infohub/client.js";
 import { fetchTeam } from "../lib/api.js";
 
@@ -73,6 +74,9 @@ describe("命令面板 · 本机归档检索", () => {
     vi.mocked(fetchTeam).mockReset();
     vi.mocked(fetchTeam).mockResolvedValue({ members: [], onlineCount: 0 });
     useUiStore.setState({ page: "home", activeConversationId: null, infohubIntent: null });
+    // 内置模块默认未安装；归档命中要落到信息中枢页，先把模块装上
+    useModuleStore.getState().reset();
+    useModuleStore.getState().install("infohub");
     useInfohubStore.setState({ available: true, running: true, booted: true, error: "" });
   });
 

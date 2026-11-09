@@ -63,6 +63,26 @@ contextBridge.exposeInMainWorld("__heming_widget", {
   /** 设置被别处（主窗设置区）改动时的推送。返回取消订阅函数。 */
   onSettings: (callback) => subscribe("widget:settings", callback),
 
+  /**
+   * 本插件自己的业务数据：`<userData>/plugins/<id>/data/<key>.json`。
+   *
+   * ★ 为什么不是 localStorage：插件窗口是独立 origin，重启/清缓存都会丢；
+   *   数据默认放**安装目录**（与 settings/state 同处），升级保留、卸载即删。
+   * ★ key 只允许 `[A-Za-z0-9._-]{1,64}`（不含 `..`），值必须是 JSON，单文件 ≤1MB；
+   *   超限/非法 key 会 reject（可读 message），不会静默截断。
+   * ★ 读失败（不存在 / JSON 坏了）返回 null；写失败抛错——别吞掉写失败。
+   * ★ 不要在这里存密钥：密钥属于宿主设置/密钥存储，数据目录是明文文件。
+   */
+  dataGet: (key) => ipcRenderer.invoke("widget:data-get", { key }),
+  /** 写一个 key，resolve `{ key, bytes }`；上限/序列化/写盘失败都会 reject。 */
+  dataSet: (key, value) => ipcRenderer.invoke("widget:data-set", { key, value }),
+  /** 删一个 key，resolve 是否真的删掉了文件。 */
+  dataDelete: (key) => ipcRenderer.invoke("widget:data-delete", { key }),
+  /** 已有 key 列表（只含 `*.json`，已排序）。 */
+  dataKeys: () => ipcRenderer.invoke("widget:data-keys", {}),
+  /** 数据目录绝对路径 `{ dir }`（放不进 JSON 的大文件也放这里；别展示给终端用户）。 */
+  dataDir: () => ipcRenderer.invoke("widget:data-dir", {}),
+
   /* ── 事件：{kind:"notify"|"theme"|"tray"}，只带标题级文案，不落盘 ── */
   onEvent: (callback) => subscribe("widget:event", callback),
 

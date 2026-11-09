@@ -76,10 +76,10 @@ const NAV_LABELS: Record<NavPage, string> = {
   automations: "自动化",
   model: "模型",
   modelroute: "模型路由",
-  plugins: "插件区",
-  memory: "记忆区",
+  plugins: "插件",
+  memory: "记忆",
   vault: "知识库",
-  settings: "设置区",
+  settings: "设置",
 };
 
 /**
@@ -314,26 +314,6 @@ export function SettingsPage() {
             )}
             {tab === "model" && (
               <>
-                {/* 候选链已搬到「模型路由」页（d.84 模块）：这里只留入口，
-                    免得同一个编辑器在设置区与模块页各渲染一份、口径漂移。 */}
-                <div
-                  data-settings-id="route-groups"
-                  className={anchorClass(highlightId === "route-groups")}
-                >
-                  <section className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
-                    <div className="text-[12px] font-bold text-muted">模型路由</div>
-                    <p className="mt-1 ui-caption">
-                      候选链与选路策略已移到导航里的「模型路由」页；连接（Key / Base URL / 模型）仍在这里管理。
-                    </p>
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
-                      onClick={() => useUiStore.getState().setPage("modelroute")}
-                    >
-                      打开模型路由
-                    </button>
-                  </section>
-                </div>
                 <div
                   data-settings-id="key-storage"
                   className={anchorClass(highlightId === "key-storage")}
@@ -808,8 +788,9 @@ function NavigationSection() {
   const setNavOrder = useUiStore((u) => u.setNavOrder);
   const resetNavOrder = useUiStore((u) => u.resetNavOrder);
   const moduleEnabled = useModuleStore((u) => u.enabled);
-  const moduleState = { enabled: moduleEnabled };
-  // d.70：停用的内置模块页不在列表里出现；上下移动只在可见项之间交换，
+  const moduleInstalled = useModuleStore((u) => u.installed);
+  const moduleState = { installed: moduleInstalled, enabled: moduleEnabled };
+  // 未安装/停用的内置模块页不在列表里出现；上下移动只在可见项之间交换，
   // 隐藏页占的位置不动（否则用户点一次「下移」看着没反应——实际是和隐藏页换了位）。
   const navOrder = filterNavOrder(fullOrder, moduleState);
   const move = (page: NavPage, dir: -1 | 1) => {
@@ -838,7 +819,8 @@ function NavigationSection() {
       </div>
       <div className="mt-1 ui-caption">
         只改左侧导航的显示顺序；数字快捷键仍对应原来的页面（Alt+1 / 2 / 5 / 6 / 8 / 0）。
-        导航按「工作台 / 智能模块 / 资料与能力 / 系统」用细线分组，移动时细线跟着组变化走。
+        导航固定 8 项，按「工作台 / 能力 / 资料 / 系统」用细线分组，移动时细线跟着组变化走。
+        幕僚、信息中枢、自动化不在导航里——到「插件」页安装/启停后从模块卡打开。
       </div>
       <ul className="mt-2 flex flex-col gap-1">
         {navOrder.map((page, index) => (

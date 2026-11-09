@@ -369,26 +369,22 @@ describe("设置区 · 导航顺序", () => {
   it("上移/下移改变顺序并落盘，首项上移与末项下移禁用", () => {
     render(<SettingsPage />);
     goTab("导航");
-    fireEvent.click(screen.getByRole("button", { name: "上移 插件区" }));
+    fireEvent.click(screen.getByRole("button", { name: "上移 插件" }));
     expect(useUiStore.getState().navOrder).toEqual([
       "home",
-      "chat",
       "team",
-      "staff",
-      "infohub",
-      "automations",
-      "modelroute",
-      "model",
       "plugins",
-      "vault",
+      "chat",
       "memory",
+      "vault",
+      "model",
       "settings",
     ]);
     expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
       useUiStore.getState().navOrder,
     );
     expect(screen.getByRole("button", { name: "上移 主页" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "下移 设置区" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下移 设置" })).toBeDisabled();
   });
 
   it("恢复默认导航顺序", () => {

@@ -49,6 +49,7 @@ const { registerExportIpc } = require("./export-fs");
 const { registerFileIpc } = require("./file-fs");
 const { registerSecretIpc } = require("./secret-store");
 const { registerNotifyIpc } = require("./notify-bridge");
+const { createInfohubEngine } = require("./infohub-engine");
 const { createInfohubBridge, registerInfohubIpc, resolveDefaultHome, resolveInfohubPackageDir } =
   require("./infohub-bridge");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
@@ -129,6 +130,8 @@ const TRUSTED_CHANNELS = [
   "infohub:stop",
   "infohub:pick-home",
   "infohub:pick-python",
+  "infohub:engine-info",
+  "infohub:engine-ensure",
   "magpie:status",
   "magpie:start",
   "magpie:stop",
@@ -961,9 +964,39 @@ if (!gotLock) {
 
   // —— InfoHub 本机进程桥（d.45 信息中枢）——
   // 归档数据只留在本机：主进程用 stdio 拉起 Python 桥，不开端口、不走网络。
-  // 打包后 Python 包在 resources/infohub；开发态直接用 packages/infohub。
-  // 解释器默认用内置运行时（浏览/检索只需标准库）；采集依赖缺失时界面会提示改路径。
+  // d.116 起引擎是**选装模块**：安装包里不再携带 Python 包，启用模块时从更新源
+  // 下载官签名模块包，落到 `<userData>/modules` 后自动拉起。开发态若模块未装，
+  // 退回仓库源码，避免每次改前端都得先构建模块包。
   let infohubBridge = null;
+
+  const infohubEngine = createInfohubEngine({
+    dir: path.join(app.getPath("userData"), "modules"),
+    log: (line) => console.log(line),
+    broadcast: (payload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.send("infohub:engine", payload);
+    },
+  });
+
+  /** 开发态仓库里的引擎源码；打包版恒为空（模块必须走下载）。 */
+  const devEngineDir = () => {
+    if (app.isPackaged) return "";
+    const repo = resolveInfohubPackageDir({
+      isPackaged: false,
+      resourcesPath: process.resourcesPath,
+      dirname: __dirname,
+    });
+    return fs.existsSync(repo) ? repo : "";
+  };
+
+  /** 引擎目录：已安装模块优先；未打包时退回仓库源码。 */
+  const infohubEngineDirs = () => {
+    const dirs = infohubEngine.dirs();
+    if (dirs.packageDir) return dirs;
+    const repo = devEngineDir();
+    if (repo) return { packageDir: repo, libraryDir: "", version: "dev" };
+    return { packageDir: "", libraryDir: "", version: "" };
+  };
 
   /** 首次用到某服务时先握手（initialize → notifications/initialized）。 */
   const ensureStdioReady = async (serverId, config) => {
@@ -1224,11 +1257,8 @@ app.whenReady().then(() => {
     infohubBridge = createInfohubBridge({
       spawn: require("node:child_process").spawn,
       log: (line) => console.log(line),
-      packageDir: resolveInfohubPackageDir({
-        isPackaged: app.isPackaged,
-        resourcesPath: process.resourcesPath,
-        dirname: __dirname,
-      }),
+      packageDir: () => infohubEngineDirs().packageDir,
+      libraryDir: () => infohubEngineDirs().libraryDir,
       defaultHome: resolveDefaultHome(path.join(os.homedir(), "Heming")),
       bundledPythonPath: bundledPython(),
     });
@@ -1241,6 +1271,19 @@ app.whenReady().then(() => {
       bridge: infohubBridge,
       dialog,
       windowFromEvent: (event) => BrowserWindow.fromWebContents(event.sender),
+    });
+    // 选装引擎：状态 / 按需安装（下载 → 验签 → 解包）。安装完成后收掉旧进程，
+    // 下一次调用会按新目录重新拉起，不需要用户点「重连」。
+    secureIpc.handle("infohub:engine-info", () => infohubEngine.info());
+    secureIpc.handle("infohub:engine-ensure", async (_event, payload) => {
+      // 开发态有仓库源码就不必联网下载：直接按「已就绪」返回，改代码即时生效。
+      if (!infohubEngine.info().installed && devEngineDir()) {
+        return { ...infohubEngine.info(), installed: true, version: "dev", updated: false };
+      }
+      const requested = payload && typeof payload === "object" ? payload.version : undefined;
+      const result = await infohubEngine.ensure(requested);
+      if (result.updated) infohubBridge?.stop({ killDelayMs: 0, silent: true });
+      return result;
     });
     createWindow();
 

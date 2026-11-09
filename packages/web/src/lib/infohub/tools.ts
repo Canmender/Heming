@@ -144,7 +144,7 @@ function config(): InfohubConfig {
 function notReady(): string | null {
   if (!isInfohubAvailable()) return "信息中枢仅桌面端可用，无法读取本机归档。";
   if (!useInfohubStore.getState().running) {
-    return "信息中枢尚未连接。请先在「信息中枢」页连接本机归档，再让我检索。";
+    return "信息中枢正在自动启动本机归档；稍后再试，或到「信息中枢」页查看启动失败原因。";
   }
   return null;
 }

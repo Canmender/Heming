@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLlmStore } from "../store/llm.js";
-import { useUiStore } from "../store/ui.js";
 import {
   EDGE_STATE_LABEL,
   buildTraceGraph,
@@ -146,7 +145,6 @@ export function ModelTraceView() {
 
   const storeProfiles = useLlmStore((s) => s.profiles);
   const storeRoutes = useLlmStore((s) => s.routes);
-  const setPage = useUiStore((s) => s.setPage);
   const candidates = useMemo(
     () =>
       storeRoutes.map((route) => ({
@@ -420,13 +418,6 @@ export function ModelTraceView() {
         <div className="rounded-[20px] border border-line bg-white p-4">
           <div className="flex items-center justify-between">
             <div className="text-[13px] font-bold">候选链</div>
-            <button
-              type="button"
-              className="rta-segment rounded-full bg-[#f2f3f5] px-3 py-1 text-[12px] text-muted hover:bg-[#e9ebef]"
-              onClick={() => setPage("modelroute")}
-            >
-              管理候选链 →
-            </button>
           </div>
           <ul className="mt-2 divide-y divide-line">
             {candidates.map((route) => (

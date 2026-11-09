@@ -8,6 +8,7 @@ import { useInfohubStore } from "../lib/infohub/store.js";
 import { useNotificationStore } from "../store/notifications.js";
 import { useLlmStore } from "../store/llm.js";
 import { useUiStore } from "../store/ui.js";
+import { useModuleStore } from "../lib/modules/store.js";
 
 /**
  * 幕僚页（d.48）：
@@ -88,6 +89,10 @@ describe("StaffPage", () => {
   beforeEach(() => {
     localStorage.clear();
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
+    // 模块默认未安装：幕僚页的「看日程」要跳到信息中枢，先把两个模块装上
+    useModuleStore.getState().reset();
+    useModuleStore.getState().install("staff");
+    useModuleStore.getState().install("infohub");
     resetStores();
   });
 
