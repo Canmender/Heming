@@ -27,6 +27,7 @@ export type Page =
   | "automations"
   | "model"
   | "modelroute"
+  | "workflows"
   | "vault"
   | "plugins"
   | "memory"

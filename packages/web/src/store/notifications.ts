@@ -34,7 +34,7 @@ export const NOTIFICATIONS_BYTE_LIMIT = Math.floor(64 * 1024);
  * - `memory`：记忆写回知识库失败（d.114）——记忆条目已保存，只是没写进 vault，
  *   点开去记忆页看同步/写回状态。
  */
-export type NotificationKind = "task" | "approval" | "staff" | "automation" | "memory";
+export type NotificationKind = "task" | "approval" | "staff" | "automation" | "memory" | "workflow";
 
 export interface AppNotification {
   id: string;
@@ -53,6 +53,8 @@ export interface AppNotification {
   taskId?: string;
   /** 自动化失败通知要跳到的任务 id（与 taskId 分开：任务区的 taskId 语义是「任务记录」，不是自动化任务）。 */
   automationId?: string;
+  /** 工作流失败通知要跳到的**工作流** id（点开直达工作流页并选中它）。 */
+  workflowId?: string;
 }
 
 let seq = 0;
@@ -83,7 +85,8 @@ export function normalizeNotification(raw: unknown): AppNotification | null {
     raw.kind !== "approval" &&
     raw.kind !== "staff" &&
     raw.kind !== "automation" &&
-    raw.kind !== "memory"
+    raw.kind !== "memory" &&
+    raw.kind !== "workflow"
   ) {
     return null;
   }
@@ -100,6 +103,7 @@ export function normalizeNotification(raw: unknown): AppNotification | null {
     ...(typeof raw.conversationId === "string" ? { conversationId: raw.conversationId } : {}),
     ...(typeof raw.taskId === "string" ? { taskId: raw.taskId } : {}),
     ...(typeof raw.automationId === "string" ? { automationId: raw.automationId } : {}),
+    ...(typeof raw.workflowId === "string" ? { workflowId: raw.workflowId } : {}),
   };
 }
 
@@ -141,6 +145,7 @@ export interface PushInput {
   conversationId?: string;
   taskId?: string;
   automationId?: string;
+  workflowId?: string;
   now?: number;
 }
 
@@ -185,7 +190,7 @@ function persist(items: AppNotification[]): AppNotification[] {
 export const useNotificationStore = create<NotificationState>((set, get) => ({
   items: readNotifications(),
 
-  push: ({ kind, key, title, body = "", conversationId, taskId, automationId, now = Date.now() }) => {
+  push: ({ kind, key, title, body = "", conversationId, taskId, automationId, workflowId, now = Date.now() }) => {
     const cleanTitle = oneLine(title);
     if (!key || !cleanTitle) return null;
     if (get().items.some((n) => n.key === key)) return null;
@@ -200,6 +205,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       ...(conversationId ? { conversationId } : {}),
       ...(taskId ? { taskId } : {}),
       ...(automationId ? { automationId } : {}),
+      ...(workflowId ? { workflowId } : {}),
     };
     set({ items: persist([item, ...get().items]) });
     return item.id;

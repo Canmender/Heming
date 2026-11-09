@@ -143,8 +143,8 @@ describe("读投影（registry 薄层）", () => {
 
     act(() => {
       useModuleStore.setState({
-        installed: { staff: true, infohub: true, automations: true },
-        enabled: { staff: false, infohub: true, automations: true },
+        installed: { staff: true, infohub: true, automations: true, workflows: true },
+        enabled: { staff: false, infohub: true, automations: true, workflows: true },
       });
     });
     const installedIds = result.current.map((status) => status.unit.id);
@@ -155,8 +155,8 @@ describe("读投影（registry 薄层）", () => {
 
     act(() => {
       useModuleStore.setState({
-        installed: { staff: true, infohub: false, automations: true },
-        enabled: { staff: false, infohub: false, automations: true },
+        installed: { staff: true, infohub: false, automations: true, workflows: true },
+        enabled: { staff: false, infohub: false, automations: true, workflows: true },
       });
     });
     const infohub = result.current.find((status) => status.unit.id === "infohub");

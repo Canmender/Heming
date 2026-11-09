@@ -191,14 +191,15 @@ describe("projectUnits · 四类来源", () => {
 });
 
 describe("projectBuiltinUnits · 模块依赖、安装与开关", () => {
-  it("三个模块都有 page 贡献，且互不依赖（自动化已独立成插件）", () => {
+  it("四个模块都有 page 贡献，且互不依赖（自动化已独立成插件）", () => {
     const units = projectBuiltinUnits({});
-    expect(units).toHaveLength(3);
+    expect(units).toHaveLength(4);
     for (const unit of units) {
       expect(unit.source).toBe("builtin");
       expect(unit.contributions.some((item) => item.kind === "page")).toBe(true);
     }
     expect(byId(units).get("automations")!.requires).toBeUndefined();
+    expect(byId(units).get("workflows")!.requires).toBeUndefined();
   });
 
   it("信息中枢停用不影响自动化：两者互不依赖，各自按开关判定", () => {

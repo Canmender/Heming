@@ -5,6 +5,7 @@ import {
   type AppNotification,
 } from "../store/notifications.js";
 import { useUiStore } from "../store/ui.js";
+import { useWorkflowStore } from "../lib/workflow/store.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useModalA11y } from "./useModalA11y.js";
 
@@ -38,6 +39,8 @@ const KIND_LABEL: Record<AppNotification["kind"], string> = {
   automation: "自动化",
   // d.114：记忆写回知识库失败——记忆条目已保存，只是没落进 vault；点开去记忆页。
   memory: "记忆",
+  // 工作流执行失败——点开去工作流页并选中那条工作流（执行记录在那儿）。
+  workflow: "工作流",
 };
 
 /**
@@ -118,6 +121,11 @@ export function NotificationCenter() {
     }
     // 放在 staff 之后、task 之前：automation 与 task 都带 id，顺序反了会先命中 task 分支
     // 走进任务区（自动化任务的 id 在任务区里根本不存在）。
+    if (item.kind === "workflow" && item.workflowId) {
+      useWorkflowStore.getState().select(item.workflowId);
+      useUiStore.getState().setPage("workflows");
+      return;
+    }
     if (item.kind === "automation" && item.automationId) {
       useUiStore.getState().focusAutomation(item.automationId);
       return;

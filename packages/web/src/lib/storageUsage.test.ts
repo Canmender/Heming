@@ -30,6 +30,9 @@ describe("moduleOf（键名 → 模块）", () => {
     expect(moduleOf("heming.automations.v1")).toBe("自动化");
     expect(moduleOf("heming.automations.runs.v1")).toBe("自动化");
     expect(moduleOf("heming.staff.v1")).toBe("幕僚");
+    // 工作流：定义、执行记录、凭据、变量与静态数据都归「工作流」
+    expect(moduleOf("heming.workflows.v1")).toBe("工作流");
+    expect(moduleOf("heming.workflows.executions.v1")).toBe("工作流");
     expect(moduleOf("heming.msgCache.c1")).toBe("消息缓存");
     expect(moduleOf("heming.e2e.identity")).toBe("加密会话");
     expect(moduleOf("heming.hitl.v1")).toBe("HITL");

@@ -28,8 +28,8 @@ function memoryStorage(initial: Record<string, string> = {}): StorageLike & { ma
 describe("内置能力模块 · 状态规整", () => {
   it("缺省全部未安装：安装包默认不携带任何模块", () => {
     const state = defaultModuleState();
-    expect(state.installed).toEqual({ staff: false, infohub: false, automations: false });
-    expect(state.enabled).toEqual({ staff: false, infohub: false, automations: false });
+    expect(state.installed).toEqual({ staff: false, infohub: false, automations: false, workflows: false });
+    expect(state.enabled).toEqual({ staff: false, infohub: false, automations: false, workflows: false });
     expect(effectiveModuleIds(state)).toEqual([]);
   });
 
@@ -51,8 +51,8 @@ describe("内置能力模块 · 状态规整", () => {
       installed: { ghost: true, staff: true },
       enabled: { ghost: true, staff: true },
     });
-    expect(state.installed).toEqual({ staff: true, infohub: false, automations: false });
-    expect(state.enabled).toEqual({ staff: true, infohub: false, automations: false });
+    expect(state.installed).toEqual({ staff: true, infohub: false, automations: false, workflows: false });
+    expect(state.enabled).toEqual({ staff: true, infohub: false, automations: false, workflows: false });
   });
 
   it("旧版本残留的已安装状态一次性归零，之后安装的状态正常保留", () => {
@@ -71,8 +71,8 @@ describe("内置能力模块 · 状态规整", () => {
     storage.setItem(
       MODULES_KEY,
       JSON.stringify({
-        installed: { staff: true, infohub: false, automations: false },
-        enabled: { staff: true, infohub: false, automations: false },
+        installed: { staff: true, infohub: false, automations: false, workflows: false },
+        enabled: { staff: true, infohub: false, automations: false, workflows: false },
       }),
     );
     const kept = readModuleStateWithMigration(storage);
@@ -126,8 +126,8 @@ describe("内置能力模块 · 存储", () => {
     const raw = storage.map.get(MODULES_KEY);
     expect(raw).toBeTruthy();
     expect(JSON.parse(raw as string)).toEqual({
-      installed: { staff: false, infohub: true, automations: false },
-      enabled: { staff: false, infohub: true, automations: false },
+      installed: { staff: false, infohub: true, automations: false, workflows: false },
+      enabled: { staff: false, infohub: true, automations: false, workflows: false },
     });
     expect(readModuleState(storage).installed.infohub).toBe(true);
   });

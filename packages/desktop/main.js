@@ -49,6 +49,7 @@ const { registerExportIpc } = require("./export-fs");
 const { registerFileIpc } = require("./file-fs");
 const { registerSecretIpc } = require("./secret-store");
 const { registerNotifyIpc } = require("./notify-bridge");
+const { registerWorkflowHttpIpc } = require("./http-bridge");
 const { createInfohubEngine } = require("./infohub-engine");
 const { createInfohubBridge, registerInfohubIpc, resolveDefaultHome, resolveInfohubPackageDir } =
   require("./infohub-bridge");
@@ -117,6 +118,7 @@ const TRUSTED_CHANNELS = [
   "secret:decryptMany",
   "secret:encryptMany",
   "notify:message",
+  "workflow:http",
   "mcp:stdio:request",
   "mcp:stdio:stop",
   "runtime:probe",
@@ -1244,6 +1246,9 @@ app.whenReady().then(() => {
     // 本机密钥信封桥（d.36）：preload 在页面加载时用 sendSync 问可用性，
     // 所以必须早于 createWindow()。
     registerSecretIpc(secureIpc);
+    // 工作流 HTTP 桥（d.87）：渲染层 fetch 受 CORS 限制，由主进程代发给
+    // 工作流「HTTP 请求」节点；只放行 http/https，响应体 20MB 上限。
+    registerWorkflowHttpIpc(secureIpc);
     // 系统通知桥（d.39）：消息提醒只在窗口不在前台时由渲染层请求；
     // 点击通知显式聚焦主窗口（桌宠窗口不能截走通知跳转）。
     registerNotifyIpc(secureIpc, {

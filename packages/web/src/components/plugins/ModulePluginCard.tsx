@@ -7,7 +7,7 @@ import {
   type ModuleId,
 } from "../../lib/modules/registry.js";
 import { missingRequirements, useModuleStore } from "../../lib/modules/store.js";
-import { AutomationIcon, InfoHubIcon, StaffIcon } from "../icons.js";
+import { AutomationIcon, InfoHubIcon, StaffIcon, WorkflowIcon } from "../icons.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { BTN_DANGER_SM, BTN_GHOST, BTN_PRIMARY, CHIP, HINT, Switch } from "./shared.js";
 
@@ -31,6 +31,7 @@ const MODULE_ICONS: Record<ModuleId, ComponentType<SVGProps<SVGSVGElement>>> = {
   staff: StaffIcon,
   infohub: InfoHubIcon,
   automations: AutomationIcon,
+  workflows: WorkflowIcon,
 };
 
 /** 字节 → 便于扫读的「约 x KB / x MB」（0 显示「无数据」）。 */
@@ -49,6 +50,8 @@ export function moduleContributionText(mod: BuiltinModule): string {
   if (mod.contributions.backgroundLoop === "staff-loop") parts.push("后台巡检（每 60 秒）");
   if (mod.contributions.backgroundLoop === "automation-scheduler")
     parts.push("后台调度（每 15 秒）");
+  if (mod.contributions.backgroundLoop === "workflow-scheduler")
+    parts.push("定时触发（每 15 秒检查）");
   if (mod.contributions.toolPrefixes?.length)
     parts.push(`模型工具：${mod.contributions.toolPrefixes.join("、")}*`);
   return parts.join(" · ") || "—";

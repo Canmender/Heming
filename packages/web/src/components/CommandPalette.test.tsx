@@ -274,16 +274,16 @@ describe("命令面板 v2 · 四个动作的分发", () => {
   });
 
   it("「插件与模块」动作按安装/启用状态显示实际生效数", () => {
-    // 默认全部未安装 → 0/3
+    // 默认全部未安装 → 0/4
     render(<CommandPalette onClose={vi.fn()} />);
-    expect(screen.getByText(/已启用 0\/3/)).toBeInTheDocument();
+    expect(screen.getByText(/已启用 0\/4/)).toBeInTheDocument();
 
-    // 安装三个后停信息中枢：幕僚与自动化仍生效（自动化不依赖信息中枢）→ 2/3
+    // 安装三个后停信息中枢：幕僚与自动化仍生效（自动化不依赖信息中枢）→ 2/4
     const store = useModuleStore.getState();
     for (const id of ["staff", "infohub", "automations"] as const) store.install(id);
     store.setEnabled("infohub", false);
     render(<CommandPalette onClose={vi.fn()} />);
-    expect(screen.getAllByText(/已启用 2\/3/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/已启用 2\/4/).length).toBeGreaterThan(0);
   });
 
   it("搜「模块」能命中「插件与模块」动作（此前一条结果都没有）", async () => {

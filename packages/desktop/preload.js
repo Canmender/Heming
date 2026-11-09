@@ -341,6 +341,14 @@ contextBridge.exposeInMainWorld("__heming_secrets", {
   },
 });
 
+// —— 工作流 HTTP 桥（d.87）——
+// 渲染层的 fetch 受同源策略限制；工作流的「HTTP 请求」节点在桌面端改由主进程代发。
+// 只暴露一个 request，入参是普通对象（方法/地址/头/字符串体），不含任何本地能力。
+contextBridge.exposeInMainWorld("__heming_http", {
+  available: true,
+  request: (options) => ipcRenderer.invoke("workflow:http", options),
+});
+
 // —— 系统通知桥（d.39）——
 // 消息提醒：窗口不在前台时由渲染层请求主进程弹系统通知；点击主进程聚焦窗口并回传会话 id。
 contextBridge.exposeInMainWorld("__heming_notify", {
