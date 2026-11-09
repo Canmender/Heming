@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { StorageLike } from "../memory/types.js";
 import {
   MODULES_KEY,
+  MODULES_SCHEMA_KEY,
   defaultModuleState,
   effectiveModuleIds,
   isModuleEffective,
@@ -9,6 +10,7 @@ import {
   normalizeModuleState,
   parseModuleState,
   readModuleState,
+  readModuleStateWithMigration,
   setModuleStorage,
   useModuleStore,
 } from "./store.js";
@@ -51,6 +53,31 @@ describe("内置能力模块 · 状态规整", () => {
     });
     expect(state.installed).toEqual({ staff: true, infohub: false, automations: false });
     expect(state.enabled).toEqual({ staff: true, infohub: false, automations: false });
+  });
+
+  it("旧版本残留的已安装状态一次性归零，之后安装的状态正常保留", () => {
+    const storage = memoryStorage({
+      [MODULES_KEY]: JSON.stringify({
+        installed: { staff: true, infohub: true, automations: false },
+        enabled: { staff: true, infohub: true, automations: false },
+      }),
+    });
+    // 第一次读：没有 v2 标记 → 归零并写标记；业务数据不归本模块管
+    expect(readModuleStateWithMigration(storage)).toEqual(defaultModuleState());
+    expect(storage.getItem(MODULES_SCHEMA_KEY)).toBe("1");
+    expect(JSON.parse(storage.getItem(MODULES_KEY) as string)).toEqual(defaultModuleState());
+
+    // 归零后用户从云端安装：标记已存在，状态正常保留
+    storage.setItem(
+      MODULES_KEY,
+      JSON.stringify({
+        installed: { staff: true, infohub: false, automations: false },
+        enabled: { staff: true, infohub: false, automations: false },
+      }),
+    );
+    const kept = readModuleStateWithMigration(storage);
+    expect(kept.installed.staff).toBe(true);
+    expect(kept.enabled.staff).toBe(true);
   });
 });
 

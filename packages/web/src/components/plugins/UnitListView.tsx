@@ -31,7 +31,7 @@ import { BTN_GHOST_SM, CHIP, HINT } from "./shared.js";
 const SOURCE_FILTERS: { key: UnitSource | "all"; label: string }[] = [
   { key: "all", label: "全部来源" },
   { key: "system", label: "系统" },
-  { key: "builtin", label: "内置模块" },
+  { key: "builtin", label: "模块" },
   { key: "package", label: "插件" },
   { key: "bundle", label: "界面插件" },
 ];
@@ -282,9 +282,18 @@ export function UnitListView({
     [],
   );
 
+  /** 当前列表里真实出现的来源：没有的筛选按钮不渲染（例如原生应用没有模块）。 */
+  const presentSources = useMemo(() => new Set(all.map((item) => item.unit.source)), [all]);
+  const sourceFilters = useMemo(
+    () => SOURCE_FILTERS.filter((item) => item.key === "all" || presentSources.has(item.key)),
+    [presentSources],
+  );
   const sourceUnits = useMemo(
-    () => (source === "all" ? all : all.filter((item) => item.unit.source === source)),
-    [all, source],
+    () =>
+      source === "all" || !presentSources.has(source)
+        ? all
+        : all.filter((item) => item.unit.source === source),
+    [all, source, presentSources],
   );
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const visible = useMemo(
@@ -315,7 +324,7 @@ export function UnitListView({
           className="ui-input min-w-[200px] max-w-[320px] flex-1"
         />
         <div role="group" aria-label="按来源筛选" className="flex flex-wrap items-center gap-1">
-          {SOURCE_FILTERS.map((item) => (
+          {sourceFilters.map((item) => (
             <button
               key={item.key}
               type="button"

@@ -28,7 +28,7 @@ export const UNIT_SOURCES: readonly UnitSource[] = ["system", "builtin", "packag
 /** 来源的中文标签（插件页徽标与诊断文案共用，避免各处手写）。 */
 export const UNIT_SOURCE_LABELS: Record<UnitSource, string> = {
   system: "系统",
-  builtin: "内置模块",
+  builtin: "模块",
   package: "插件",
   bundle: "界面插件",
 };

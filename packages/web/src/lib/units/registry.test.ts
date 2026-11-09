@@ -132,12 +132,13 @@ describe("读投影（registry 薄层）", () => {
     expect(byId.get("staff")!.effective).toBe(true);
   });
 
-  it("useUnitStatuses 列出四类来源，并订阅模块安装/开关变化", () => {
+  it("useUnitStatuses 只列已安装模块，并订阅模块安装/开关变化", () => {
     refreshUnits();
     const { result } = renderHook(() => useUnitStatuses());
     const ids = result.current.map((status) => status.unit.id);
     expect(ids).toContain("heming.core");
-    for (const mod of BUILTIN_MODULES) expect(ids).toContain(mod.id);
+    // 原生应用不显示未安装模块：默认一个都不在投影里
+    for (const mod of BUILTIN_MODULES) expect(ids).not.toContain(mod.id);
     expect(result.current.every((status) => status.unit.source !== "bundle")).toBe(true);
 
     act(() => {
@@ -146,6 +147,8 @@ describe("读投影（registry 薄层）", () => {
         enabled: { staff: false, infohub: true, automations: true },
       });
     });
+    const installedIds = result.current.map((status) => status.unit.id);
+    for (const mod of BUILTIN_MODULES) expect(installedIds).toContain(mod.id);
     const staff = result.current.find((status) => status.unit.id === "staff");
     expect(staff!.effective).toBe(false);
     expect(staff!.reason).toEqual({ kind: "disabled" });
@@ -157,6 +160,7 @@ describe("读投影（registry 薄层）", () => {
       });
     });
     const infohub = result.current.find((status) => status.unit.id === "infohub");
-    expect(infohub!.reason).toEqual({ kind: "notInstalled" });
+    // 未安装的模块不再投影（原生应用不显示「内置模块」卡片）
+    expect(infohub).toBeUndefined();
   });
 });

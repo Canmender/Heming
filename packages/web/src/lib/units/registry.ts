@@ -163,11 +163,13 @@ export function buildUnitStatuses(sources: UnitProjectionSources = {}): UnitStat
 }
 
 function readDefaultSources(): UnitProjectionSources {
+  const installed = useModuleStore.getState().installed;
   return {
     system: describeSystemPlugin(),
-    modules: BUILTIN_MODULES,
+    // 只投影已安装的模块：原生应用不显示任何「内置模块」，模块从云端目录安装。
+    modules: BUILTIN_MODULES.filter((mod) => installed[mod.id]),
     moduleEnabled: useModuleStore.getState().enabled,
-    moduleInstalled: useModuleStore.getState().installed,
+    moduleInstalled: installed,
     plugins: pluginStore.list(),
     widgets: useWidgetsStore.getState().records,
     appVersion: currentAppVersion(),

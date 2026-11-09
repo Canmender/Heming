@@ -22,6 +22,15 @@ import { MODULE_IDS, type ModuleId, MODULE_BY_ID } from "./registry.js";
  */
 
 export const MODULES_KEY = "heming.modules.v1";
+/**
+ * 模块状态版本标记（d.117）。
+ *
+ * d.115 及以前模块默认随应用「已安装」，用户升级后 localStorage 里会残留
+ * `installed/enabled=true`，插件页因此仍显示幕僚/信息中枢/自动化。d.117 起
+ * 模块改为**云端目录 + 用户显式安装**：首次读到没有标记的旧状态时，一次性把
+ * `installed/enabled` 归零（**不删任何业务数据**），之后用户从云端重新安装即可。
+ */
+export const MODULES_SCHEMA_KEY = "heming.modules.schema.v2";
 /** 两组布尔值，4KB 绰绰有余；写满/写失败静默（下次打开回到默认未安装）。 */
 const MODULES_BYTE_LIMIT = 4 * 1024;
 
@@ -93,6 +102,26 @@ export function readModuleState(store: StorageLike = getStorage()): ModuleState 
   return readJson(store, MODULES_KEY, defaultModuleState(), normalizeModuleState);
 }
 
+/**
+ * 启动时读取模块状态，并把 d.115 及以前「随应用已安装」的旧状态一次性归零。
+ *
+ * 只归零 `installed/enabled`，**不删任何业务数据**（简报、归档配置、自动化任务仍在）；
+ * 标记写入后不再重复执行，用户从云端重新安装的状态会正常保留。
+ * 存储不可用（隐私模式/配额）时按旧状态继续，不清任何东西。
+ */
+export function readModuleStateWithMigration(store: StorageLike = getStorage()): ModuleState {
+  const state = readModuleState(store);
+  try {
+    if (store.getItem(MODULES_SCHEMA_KEY)) return state;
+    const next = defaultModuleState();
+    writeJson(store, MODULES_KEY, next, MODULES_BYTE_LIMIT);
+    store.setItem(MODULES_SCHEMA_KEY, "1");
+    return next;
+  } catch {
+    return state;
+  }
+}
+
 function persist(state: ModuleState): void {
   writeJson(getStorage(), MODULES_KEY, state, MODULES_BYTE_LIMIT);
 }
@@ -155,7 +184,7 @@ function sameState(a: ModuleState, b: ModuleState): boolean {
 }
 
 export const useModuleStore = create<ModuleStore>((set, get) => ({
-  ...readModuleState(),
+  ...readModuleStateWithMigration(),
   setEnabled: (id, enabled) => {
     if (!MODULE_IDS.includes(id)) return;
     const current = get();
