@@ -163,7 +163,7 @@ describe("parsePluginManifestV5", () => {
 
   it("顶层 $schema 是已知字段：解析通过且不产生「未知字段」warning", () => {
     const { manifest, warnings } = parsePluginManifestV5(
-      baseManifest({ $schema: "../../docs/plugin.schema.json" }),
+      baseManifest({ $schema: "../../plugin-kit/plugin.schema.json" }),
     );
     expect(warnings).toEqual([]);
     expect(warnings.join("\n")).not.toContain("未知");

@@ -10,12 +10,12 @@
  *   node scripts/plugin-lint.mjs plugins/infohub-collector/plugin.json
  *   node scripts/plugin-lint.mjs plugins/hello                 # 目录（找目录下的 plugin.json）
  *   node scripts/plugin-lint.mjs --dir plugins                 # 递归校验目录下所有 plugin.json
- *   node scripts/plugin-lint.mjs --dir plugins --skip examples,_template
+ *   node scripts/plugin-lint.mjs --dir plugin-kit/examples --skip _invalid
  *   node scripts/plugin-lint.mjs --json a.json                 # 机器可读输出（CI 用）
  *   node scripts/plugin-lint.mjs --dir plugins --strict        # warning 也算失败（CI 可选）
  *
  * 批量递归时**始终**跳过 `node_modules` 与点目录；`--skip` 按目录 basename 再跳过
- * 指定的名字（默认命令里用 `--skip examples,_template`，示例与模板不参与批量校验）。
+ * 指定的名字（默认命令里对示例目录用 `--skip _invalid`：故意非法的样例不参与批量校验）。
  *
  * v4 的 `distribution: "bundle"` 是界面插件（仅首方签名）：这里的校验直接加载主进程
  * `packages/desktop/plugin-package.js` 的 `validateBundleManifest(raw, { dev: true })`

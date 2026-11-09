@@ -7,7 +7,7 @@
   "properties": {
     "$schema": {
       "type": "string",
-      "description": "编辑器补全用的 schema 路径：仓库内可写相对路径（如 ../../docs/plugin.schema.json），对外发布可写 https://heming.app/schemas/plugin.schema.json。只作提示，权威校验仍走 parsePluginManifestV5；解析器已知并忽略该字段，不会告警。"
+      "description": "编辑器补全用的 schema 路径：仓库内可写相对路径（如 ../../plugin.schema.json），对外发布可写 https://heming.app/schemas/plugin.schema.json。只作提示，权威校验仍走 parsePluginManifestV5；解析器已知并忽略该字段，不会告警。"
     },
     "schemaVersion": {
       "type": "number",

@@ -79,7 +79,7 @@ function previewPlugin(text: string) {
   return { store, skills, preview: store.preview(text) };
 }
 
-// `plugins/examples/` 是给 lint/文档用的示例，没有 plugin.json、也不是发布物：
+// `plugins/` 只放真实插件包（示例已迁到 `plugin-kit/examples/`，不进这里）：
 // 这里只枚举「真的带清单的包目录」。
 const BUNDLED = readdirSync(PLUGINS_DIR, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && existsSync(resolve(PLUGINS_DIR, entry.name, "plugin.json")))

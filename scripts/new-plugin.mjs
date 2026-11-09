@@ -4,7 +4,7 @@
  *
  * 为什么需要：插件作者第一步总是「拷一份示例再改」，拷贝过程中最容易漏 `engines`、
  * 把 `permissions` 写错位置、或忘记 `$schema`。这里把「合法骨架」固化在
- * `plugins/_template/`，只做简单占位符替换（`{{id}}` 这类），不引第三方依赖，
+ * `plugin-kit/templates/`，只做简单占位符替换（`{{id}}` 这类），不引第三方依赖，
  * 生成后立刻用权威校验器（`scripts/plugin-lint.mjs`）跑一遍——模板坏了当场发现。
  *
  * 用法：
@@ -24,7 +24,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const templateRoot = join(root, "plugins", "_template");
+const templateRoot = join(root, "plugin-kit", "templates");
 const distEntry = join(root, "packages", "shared", "dist", "index.js");
 const lintScript = join(root, "scripts", "plugin-lint.mjs");
 const ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -186,7 +186,7 @@ function currentEngines() {
 }
 
 const engines = currentEngines();
-const schemaAbs = join(root, "docs", "plugin.schema.json");
+const schemaAbs = join(root, "plugin-kit", "plugin.schema.json");
 let schemaPath = relative(targetDir, schemaAbs).split(sep).join("/");
 if (!schemaPath.startsWith("./") && !schemaPath.startsWith("../")) schemaPath = `./${schemaPath}`;
 if (schemaPath.startsWith("./../")) schemaPath = schemaPath.slice(2);
@@ -234,8 +234,8 @@ const editGuide =
 
 const schemaNote =
   kind === "bundle"
-    ? "界面插件清单是 v4 格式，`docs/plugin.schema.json`（v5 编辑器补全）不适用；字段口径以安装器 `packages/desktop/plugin-package.js` 为准。"
-    : "`$schema` 指向仓库内 `docs/plugin.schema.json`，只用于编辑器补全，**不等于**能装；对外发布时可以换成绝对 URL。权威校验永远是 `parsePluginManifestV5` / `plugin-lint`。";
+    ? "界面插件清单是 v4 格式，`plugin-kit/plugin.schema.json`（v5 编辑器补全）不适用；字段口径以安装器 `packages/desktop/plugin-package.js` 为准。"
+    : "`$schema` 指向仓库内 `plugin-kit/plugin.schema.json`，只用于编辑器补全，**不等于**能装；对外发布时可以换成绝对 URL。权威校验永远是 `parsePluginManifestV5` / `plugin-lint`。";
 
 const installGuide =
   kind === "bundle"
@@ -327,7 +327,7 @@ const outputs = [];
 if (kind === "bundle") {
   outputs.push({ path: "plugin.json", content: render(readTemplate("bundle/plugin.json"), textValues, { json: true }) });
   const filesRoot = join(templateRoot, "bundle", "files");
-  if (!existsSync(filesRoot)) fail("模板缺目录：plugins/_template/bundle/files（仓库不完整？）", 2);
+  if (!existsSync(filesRoot)) fail("模板缺目录：plugin-kit/templates/bundle/files（仓库不完整？）", 2);
   for (const rel of walkFiles(filesRoot)) {
     outputs.push({
       path: `files/${rel}`,

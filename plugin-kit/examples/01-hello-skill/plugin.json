@@ -1,0 +1,21 @@
+{
+  "$schema": "../../plugin.schema.json",
+  "schemaVersion": 5,
+  "id": "acme.hello-skill",
+  "name": "周报助手",
+  "version": "1.0.0",
+  "description": "最小可用插件：一条技能，教会智能体按固定结构写周报。",
+  "author": "ACME",
+  "engines": { "heming": "d.117" },
+  "contributions": {
+    "skills": [
+      {
+        "name": "写周报",
+        "description": "按本周任务与日程生成三段式周报大纲",
+        "instructions": "用户要写周报时用这条技能。\n\n步骤：\n1. 先汇总本周完成的任务（来自任务记录与日程）。\n2. 再列出未完成或延期的项，并写明风险。\n3. 最后给下周计划，按优先级排 3 条以内。\n\n输出形状：三段（进展 / 风险 / 下周计划），每段不超过三句。\n边界：数据不足时直接说明缺什么，不要编造；不要替用户承诺任何事。",
+        "triggers": ["周报", "写周报", "本周总结"],
+        "tags": ["汇报", "写作"]
+      }
+    ]
+  }
+}

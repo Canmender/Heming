@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 4,
+  "id": "heming.demo-widget",
+  "name": "示例小组件",
+  "version": "1.0.0",
+  "description": "界面插件最小可运行骨架：读取宿主信息、写设置、存一条业务数据。仅首方可发布。",
+  "author": "和鸣",
+  "distribution": "bundle",
+  "permissions": {
+    "network": [],
+    "tools": "none",
+    "files": [],
+    "events": ["lifecycle"],
+    "graphics": [],
+    "eval": false,
+    "chat": false
+  },
+  "contributions": {
+    "desktopWidgets": [
+      {
+        "id": "demo",
+        "name": "示例小组件",
+        "entry": "files/index.html",
+        "width": 360,
+        "height": 260,
+        "scales": [0.8, 1, 1.25],
+        "defaultScale": 1,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "clickThrough": "auto",
+        "position": { "anchor": "bottom-right", "margin": 24, "remember": true },
+        "settings": {
+          "title": "示例小组件",
+          "fields": [
+            { "key": "greeting", "type": "text", "label": "问候语", "default": "你好" },
+            {
+              "key": "density",
+              "type": "select",
+              "label": "信息密度",
+              "default": "normal",
+              "options": [
+                { "value": "quiet", "label": "精简" },
+                { "value": "normal", "label": "标准" }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "commands": [
+      {
+        "id": "demo-focus",
+        "title": "唤出示例小组件",
+        "description": "打开插件区并定位本插件",
+        "keywords": ["示例", "小组件"],
+        "target": { "kind": "plugin" }
+      }
+    ]
+  }
+}

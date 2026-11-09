@@ -12,6 +12,47 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.121.3.47.0",
+    "date": "2026-11-09",
+    "title": "插件工具包落位：标准 / 编写 / 菜谱 / FAQ / 示例 / 模板 / schema 收进 `plugin-kit/`",
+    "bullets": [
+      "`scripts/new-plugin.mjs` 模板根改为 `plugin-kit/templates`，`$schema` 与提示文案按新路径动态算；两种形态实跑：声明式生成即 lint 通过、bundle 生成后报「安装口径，打包前模式」。",
+      "`scripts/plugin-schema.mjs` 输出改 `plugin-kit/plugin.schema.json`；`plugin-kit/plugin.schema.json` 重新生成。",
+      "`pnpm plugin:lint` / `plugin:check`：分别校验 `plugins/` 与 `plugin-kit/examples/`（示例跳过 `_invalid`）。",
+      "全量更新引用：`README.md`、`docs/INDEX.md`、`docs/PLUGINS.md`、`docs/RELEASE-NOTES.md`、模板 README、`bundledPlugins.test.ts` 注释、shared 的 `$schema` 测试夹具；示例目录不再混在 `plugins/`（那里只放真实插件包）。",
+      "`plugins/` 现只剩真实发布包 `infohub-collector/`（示例已迁出）。",
+      "`pnpm plugin:check` 退出 0：`plugins/` 1 个包通过；`plugin-kit/examples` 4 个合法示例通过、跳过 `_invalid` 1 个；schema `--check` 最新。",
+      "脚手架实跑：`node scripts/new-plugin.mjs acme.kitdemo --dir .tmp/...` 与`--kind bundle` 均生成并 lint 通过，`$schema` 相对路径正确指向 `plugin-kit/plugin.schema.json`。",
+      "shared 与 web 的受影响测试（`manifest.test.ts` / `SettingsPage.test.tsx`）由本轮门禁复跑。",
+      "本轮是文档/示例/工具链整理，**不改**插件运行时与安装链路；`PLUGINS.md` 仍是实现说明。",
+      "安装包未重出：应用内可见的变化只有「关于 → 更新日志」多一条本版说明。"
+    ],
+    "paragraphs": [
+      "用户要求「自优化，写好文档和示例，单独创建一个文件夹存放」。上一轮把插件规则写成了标准，但文档、示例、模板、schema 分散在 `docs/` 与 `plugins/`；这一轮把它们收成**一个工具箱**。",
+      "新目录 `plugin-kit/`（插件作者的唯一入口）",
+      "```",
+      "plugin-kit/",
+      "├── README.md            入口：30 秒上手、目录导航、学习路径、命令速查、三条红线",
+      "├── STANDARD.md          标准接口（规范；原 docs/PLUGIN-STANDARD.md）",
+      "├── AUTHORING.md         编写标准（原 docs/PLUGIN-AUTHORING.md，新增「从哪份示例抄」）",
+      "├── COOKBOOK.md          新增：9 组场景配方（好技能写法、MCP 接入、命令 target、工具束、",
+      "│                        固定流程、v3→v5 迁移、界面插件、团队内分发、反模式）",
+      "├── FAQ.md               新增：25 问（清单/权限/安装生效/界面插件/工具链与发布）",
+      "├── plugin.schema.json   编辑器补全 schema（原 docs/plugin.schema.json，生成器路径同步）",
+      "├── templates/           脚手架模板（原 plugins/_template，manifest / bundle 两套）",
+      "└── examples/            四份合法示例 + 一份故意非法示例（原 plugins/examples 三个迁入并扩写）",
+      "    ├── 01-hello-skill/          v5：最小技能包（instructions 四段结构）",
+      "    ├── 02-mcp-and-commands/     v5：MCP + 命令 + 工具束（权限最小化）",
+      "    ├── 03-commands/             v5：五种命令 target 的适用场景",
+      "    ├── 04-widget-bundle/        v4 bundle：界面插件最小闭环（外置脚本、设置/数据 API、发布顺序）",
+      "    └── _invalid/demo-bad/       故意非法（校验报错样例，`plugin:check` 默认跳过）",
+      "```",
+      "联动改动",
+      "验证",
+      "边界"
+    ]
+  },
+  {
     "version": "d.120.3.47.0",
     "date": "2026-11-09",
     "title": "插件体系落标准：一份契约 + 一份编写标准 + 一键脚手架/校验，清单与运行时对齐",

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 生成 `docs/plugin.schema.json`（插件清单 v5 的编辑器补全 schema）。
+ * 生成 `plugin-kit/plugin.schema.json`（插件清单 v5 的编辑器补全 schema）。
  *
  * ★ 重要边界：这份 JSON Schema **只用于编辑器补全/提示**，不是权威校验。
  *   zod 的 `toJSONSchema` 不会输出 `.superRefine()` 里的跨字段规则（bundle 只许
@@ -9,7 +9,7 @@
  *   与安装预览都走它）。本脚本在 CI 里用 `--check` 比对生成物，防止有人手改漂移。
  *
  * 用法：
- *   node scripts/plugin-schema.mjs            # 写入 docs/plugin.schema.json
+ *   node scripts/plugin-schema.mjs            # 写入 plugin-kit/plugin.schema.json
  *   node scripts/plugin-schema.mjs --check    # 只比对，不一致退出码 1（CI 用）
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -17,7 +17,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const outFile = join(root, "docs", "plugin.schema.json");
+const outFile = join(root, "plugin-kit", "plugin.schema.json");
 const distEntry = join(root, "packages", "shared", "dist", "index.js");
 
 if (!existsSync(distEntry)) {
@@ -57,7 +57,7 @@ const payload = {
     $schema: {
       type: "string",
       description:
-        "编辑器补全用的 schema 路径：仓库内可写相对路径（如 ../../docs/plugin.schema.json），对外发布可写 https://heming.app/schemas/plugin.schema.json。只作提示，权威校验仍走 parsePluginManifestV5；解析器已知并忽略该字段，不会告警。",
+        "编辑器补全用的 schema 路径：仓库内可写相对路径（如 ../../plugin.schema.json），对外发布可写 https://heming.app/schemas/plugin.schema.json。只作提示，权威校验仍走 parsePluginManifestV5；解析器已知并忽略该字段，不会告警。",
     },
     ...schemaProperties,
   },
@@ -67,12 +67,12 @@ const text = `${JSON.stringify(payload, null, 2)}\n`;
 const check = process.argv.includes("--check");
 if (check) {
   if (!existsSync(outFile)) {
-    console.error("docs/plugin.schema.json 不存在，请跑 node scripts/plugin-schema.mjs");
+    console.error("plugin-kit/plugin.schema.json 不存在，请跑 node scripts/plugin-schema.mjs");
     process.exit(1);
   }
   const current = readFileSync(outFile, "utf8");
   if (current !== text) {
-    console.error("docs/plugin.schema.json 与 v5 schema 不一致，请重新生成并提交。");
+    console.error("plugin-kit/plugin.schema.json 与 v5 schema 不一致，请重新生成并提交。");
     process.exit(1);
   }
   console.log("plugin.schema.json 已是最新。");

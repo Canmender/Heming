@@ -1,10 +1,25 @@
 # 和鸣插件编写标准（PLUGIN-AUTHORING）
 
 > 这份文件是**操作标准**：从零到发布怎么做、每条命令干什么、提交前逐条过什么。
-> 契约与语义见 [PLUGIN-STANDARD.md](PLUGIN-STANDARD.md)（字段为什么这样、宿主怎么强制）；
-> 实现细节与红线见 [PLUGINS.md](PLUGINS.md)。三者冲突时以 `parsePluginManifestV5()` 的代码为准。
+> 契约与语义见 [STANDARD.md](STANDARD.md)（字段为什么这样、宿主怎么强制）；
+> 场景菜谱见 [COOKBOOK.md](COOKBOOK.md)，卡住时查 [FAQ.md](FAQ.md)；实现细节与红线见 [../docs/PLUGINS.md](../docs/PLUGINS.md)。
+> 三者冲突时以 `parsePluginManifestV5()` 的代码为准。
 >
 > 现行：声明式插件 `schemaVersion: 5`；界面插件 `schemaVersion: 4` + `distribution: "bundle"`（仅首方）。
+
+---
+
+## 0. 从哪份示例抄
+
+| 你的需求 | 抄这份 | 形态 |
+|---|---|---|
+| 只要「会做某件事」 | [`examples/01-hello-skill/`](examples/01-hello-skill/) | v5 声明式 |
+| 要查外部/本机服务、要快捷入口 | [`examples/02-mcp-and-commands/`](examples/02-mcp-and-commands/) | v5 声明式 |
+| 只想加命令跳转（页面/设置/单元/插件/技能） | [`examples/03-commands/`](examples/03-commands/) | v5 声明式 |
+| 要做桌面窗口（仅首方） | [`examples/04-widget-bundle/`](examples/04-widget-bundle/) | v4 bundle |
+| 想看校验怎么报错 | [`examples/_invalid/demo-bad/`](examples/_invalid/demo-bad/)（别抄） | 故意非法 |
+
+所有合法示例都能过 `pnpm plugin:lint`；`_invalid` 由 `plugin:check` 默认跳过。
 
 ---
 
@@ -15,7 +30,7 @@
 pnpm plugin:new acme.hello --name 问候工具
 
 # ② 校验（与安装预览同一个权威解析器；--strict 让 warning 也失败）
-pnpm plugin:lint                 # 批量校验 plugins/ 下所有插件
+pnpm plugin:lint                 # 批量校验 plugins/ 与 plugin-kit/examples
 node scripts/plugin-lint.mjs plugins/hello/plugin.json --strict
 
 # ③ 在应用里试装：插件区 → 安装 → 选文件/粘贴 plugin.json → 先看预览，再点安装
@@ -41,7 +56,7 @@ plugins/demo-widget/
     └── README.md
 ```
 
-没有 MCP 服务时可以整段省略 `permissions`；合法最小清单见 [PLUGIN-STANDARD.md §9.A](PLUGIN-STANDARD.md)。
+没有 MCP 服务时可以整段省略 `permissions`；合法最小清单见 [STANDARD.md §9.A](STANDARD.md)。
 
 ---
 
@@ -124,7 +139,7 @@ plugins/demo-widget/
 
 ### 3.4 界面插件（bundle，仅首方）
 
-第三方不开放 bundle（安全红线，见 [PLUGIN-STANDARD.md §6.4](PLUGIN-STANDARD.md)）。首方流程：
+第三方不开放 bundle（安全红线，见 [STANDARD.md §6.4](STANDARD.md)）。首方流程：
 
 1. 用 `--kind bundle` 生成骨架：`pnpm plugin:new heming.demo --kind bundle`（生成 `files/index.html` + `files/app.js` + `files/README.md`）。
 2. 清单：`schemaVersion: 4` + `distribution: "bundle"`；**`packageSha256` 不手写**——由打包/签名脚本写入。
@@ -171,7 +186,7 @@ plugins/demo-widget/
 | 手段 | 命令/位置 | 用途 |
 |---|---|---|
 | 权威校验 | `pnpm plugin:lint` / `node scripts/plugin-lint.mjs <file\|dir> [--strict] [--json]` | 中文报错 + 字段路径，CI 可挡坏包 |
-| 编辑器补全 | `plugin.json` 里 `"$schema": "../../docs/plugin.schema.json"` | 字段提示（**不等于**能装） |
+| 编辑器补全 | `plugin.json` 里 `"$schema": "../../plugin-kit/plugin.schema.json"`（从 `plugins/` 下相对到 kit） | 字段提示（**不等于**能装） |
 | 安装预览 | 插件区 → 安装 → 粘贴/选文件 | 只读差异、冲突、权限、兼容性；不点安装不写盘 |
 | 诊断 | 插件详情 →「诊断」 | 为什么没生效：停用/贡献级关/依赖/需更新/签名/超权限/孤儿 |
 | 健康检查 | 插件区 → 健康检查 →「修复记录」 | 记录损坏、技能或服务对不上 |

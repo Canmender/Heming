@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>示例小组件</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        font: 13px/1.6 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+        background: transparent;
+      }
+      main {
+        box-sizing: border-box;
+        height: 100%;
+        padding: 14px;
+        display: grid;
+        align-content: start;
+        gap: 10px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 15px;
+      }
+      p,
+      output {
+        margin: 0;
+        opacity: 0.85;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      button {
+        font: inherit;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">示例小组件</h1>
+      <p id="status">正在读取宿主信息…</p>
+      <p id="greeting"></p>
+      <div class="row">
+        <button id="save" type="button">改问候语</button>
+        <button id="count" type="button">记一笔（data）</button>
+      </div>
+      <output id="log"></output>
+    </main>
+    <!-- CSP 的 script-src 只放 'self'：脚本必须外置，不能写内联脚本 -->
+    <script src="app.js"></script>
+  </body>
+</html>

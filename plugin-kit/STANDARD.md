@@ -1,8 +1,9 @@
 # 和鸣插件标准接口（PLUGIN-STANDARD）
 
 > **这份文件是规范（normative）**：插件能声明什么、声明的含义、宿主如何校验与强制、升级时谁对谁负责。
-> 写插件请配 [PLUGIN-AUTHORING.md](PLUGIN-AUTHORING.md)（操作标准 + 检查清单）；实现细节与内部边界见
-> [PLUGINS.md](PLUGINS.md)；机器可读的编辑器补全用 [`plugin.schema.json`](plugin.schema.json)。
+> 写插件请配 [AUTHORING.md](AUTHORING.md)（操作标准 + 检查清单）、[COOKBOOK.md](COOKBOOK.md)（场景菜谱）、
+> [FAQ.md](FAQ.md)（常见问题）；实现细节与内部边界见 [docs/PLUGINS.md](../docs/PLUGINS.md)；
+> 机器可读的编辑器补全用 [`plugin.schema.json`](plugin.schema.json)。
 >
 > 现行标准：**声明式插件 `schemaVersion: 5`**；**界面插件 `schemaVersion: 4` + `distribution: "bundle"`**
 > （仅首方签名）。本文中的「必须 / 不得 / 应」按 RFC 2119 语义理解。
@@ -10,16 +11,30 @@
 > 唯一权威校验器：`packages/shared/src/plugin/manifest.ts` 的 `parsePluginManifestV5()`。
 > 任何文档、schema、脚本与它冲突时，**以它为准**，并应提 PR 修文档。
 
+## 目录
+
+- [0. 文档分工](#0-文档分工四份文件不要互相抄)
+- [1. 接口版本与兼容](#1-接口版本与兼容)
+- [2. 清单接口（Manifest）](#2-清单接口manifest)
+- [3. 贡献点接口](#3-贡献点接口)
+- [4. 权限接口（Permissions）](#4-权限接口permissions)
+- [5. 生命周期接口](#5-生命周期接口)
+- [6. 运行时接口（仅界面插件 bundle）](#6-运行时接口仅界面插件-bundle)
+- [7. 校验、诊断与错误口径](#7-校验诊断与错误口径)
+- [8. 分发接口](#8-分发接口)
+- [9. 附录](#9-附录)
+
 ---
 
 ## 0. 文档分工（四份文件不要互相抄）
 
 | 文件 | 定位 | 读者 | 是否可执行 |
 |---|---|---|---|
-| `docs/PLUGIN-STANDARD.md`（本文） | **契约**：字段语义、权限、生命周期、运行时 API、兼容规则 | 插件作者 / 宿主开发者 / 评审 | 规范，靠 `plugin-lint` 与测试落地 |
-| `docs/PLUGIN-AUTHORING.md` | **操作标准**：从零到发布的步骤、模板、检查清单、常见错误 | 插件作者 | 是（命令可直接跑） |
+| `plugin-kit/STANDARD.md`（本文） | **契约**：字段语义、权限、生命周期、运行时 API、兼容规则 | 插件作者 / 宿主开发者 / 评审 | 规范，靠 `plugin-lint` 与测试落地 |
+| `plugin-kit/AUTHORING.md` | **操作标准**：从零到发布的步骤、模板、检查清单、常见错误 | 插件作者 | 是（命令可直接跑） |
+| `plugin-kit/COOKBOOK.md` / `FAQ.md` | **场景菜谱 / 常见问题**：按需求查怎么写、卡住时查为什么 | 插件作者 | 是（片段可直接粘） |
 | `docs/PLUGINS.md` | **实现说明**：宿主内部怎么装、怎么物化、边界与红线、分发链路 | 维护者 | 否 |
-| `docs/plugin.schema.json` | **编辑器补全**（JSON Schema） | 编辑器 / IDE | 仅补全，**不是权威校验** |
+| `plugin-kit/plugin.schema.json` | **编辑器补全**（JSON Schema） | 编辑器 / IDE | 仅补全，**不是权威校验** |
 
 生成关系：`plugin.schema.json` 由 `node scripts/plugin-schema.mjs` 从 zod 定义生成，CI 用 `--check` 防漂移。
 
@@ -426,7 +441,7 @@ const value = data ? await data.dataGet("cache") : loadFromMemory();
 | `node scripts/plugin-lint.mjs <file\|dir>` | 作者本地 / CI 离线校验，中文 + 字段路径 | ✅（同一函数） |
 | 应用内「安装 → 预览」 | 用户装之前的差异/冲突/权限/兼容性预览 | ✅（同一函数） |
 
-`docs/plugin.schema.json` **只做编辑器补全**：zod 的 JSON Schema 不表达跨字段规则（bundle 组合、host 覆盖、
+`plugin-kit/plugin.schema.json` **只做编辑器补全**：zod 的 JSON Schema 不表达跨字段规则（bundle 组合、host 覆盖、
 工具名跨束唯一…），不要把「编辑器不报错」当成「能装」。
 
 ### 7.2 错误文案约定
@@ -503,7 +518,7 @@ bundle 包额外有 `package.tgz`（确定性 tar+gzip），由 `GET /api/plugin
 
 ### B. 完整声明式示例（技能 + MCP + 命令 + 工具束）
 
-见 `plugins/infohub-collector/plugin.json`（本机 MCP 服务）与 `plugins/examples/demo-full/plugin.json`。
+见 `plugins/infohub-collector/plugin.json`（本机 MCP 服务）与 [`plugin-kit/examples/02-mcp-and-commands/`](examples/02-mcp-and-commands/)（技能 + MCP + 命令 + 工具束）。
 
 ### C. 字段速查
 

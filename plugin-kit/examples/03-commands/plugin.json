@@ -1,0 +1,58 @@
+{
+  "$schema": "../../plugin.schema.json",
+  "schemaVersion": 5,
+  "id": "acme.shortcuts",
+  "name": "快捷入口集",
+  "version": "1.0.0",
+  "description": "演示五种命令 target：页面 / 设置卡 / 能力单元 / 插件详情 / 本插件技能。",
+  "author": "ACME",
+  "engines": { "heming": "d.117" },
+  "contributions": {
+    "skills": [
+      {
+        "name": "整理待办",
+        "description": "把散落的待办整理成按优先级排序的清单",
+        "instructions": "用户说「整理待办 / 列一下要做什么」时用。\n\n步骤：先收集用户提到的所有事项，再按「今天 / 本周 / 以后」分档，每档按影响排序。\n边界：不替用户承诺截止时间；没提到的信息不要补。",
+        "triggers": ["待办", "整理待办"],
+        "tags": ["效率"]
+      }
+    ],
+    "commands": [
+      {
+        "id": "shortcut-todo",
+        "title": "整理待办",
+        "description": "打开「整理待办」技能",
+        "keywords": ["待办", "清单"],
+        "target": { "kind": "skill", "name": "整理待办" }
+      },
+      {
+        "id": "shortcut-plugins-page",
+        "title": "打开插件区",
+        "description": "跳到插件页（看看还装了什么、哪里能配）",
+        "keywords": ["插件"],
+        "target": { "kind": "page", "page": "plugins" }
+      },
+      {
+        "id": "shortcut-theme",
+        "title": "调整主题",
+        "description": "跳到设置区的外观卡片",
+        "keywords": ["主题", "外观"],
+        "target": { "kind": "settings", "card": "theme-mode" }
+      },
+      {
+        "id": "shortcut-staff-unit",
+        "title": "查看幕僚模块",
+        "description": "跳到插件区并展开「幕僚」能力单元",
+        "keywords": ["幕僚", "模块"],
+        "target": { "kind": "unit", "unitId": "staff" }
+      },
+      {
+        "id": "shortcut-self",
+        "title": "关于快捷入口集",
+        "description": "打开本插件详情（权限与贡献一览）",
+        "keywords": ["关于", "快捷入口"],
+        "target": { "kind": "plugin" }
+      }
+    ]
+  }
+}

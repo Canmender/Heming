@@ -1,7 +1,8 @@
 # 插件（能力包）编写与安装
 
 > **规范在哪**：契约（字段语义 / 权限强制点 / 生命周期 / 运行时 API / 兼容规则）以
-> [PLUGIN-STANDARD.md](PLUGIN-STANDARD.md) 为准；怎么写以 [PLUGIN-AUTHORING.md](PLUGIN-AUTHORING.md) 为准。
+> [../plugin-kit/STANDARD.md](../plugin-kit/STANDARD.md) 为准；怎么写以 [../plugin-kit/AUTHORING.md](../plugin-kit/AUTHORING.md) 为准
+> （菜谱与示例见 [../plugin-kit/COOKBOOK.md](../plugin-kit/COOKBOOK.md)、[../plugin-kit/examples/](../plugin-kit/examples/README.md)）。
 > 本文是**实现说明**：宿主内部怎么装、怎么物化、边界与红线、分发链路。三者冲突时以
 > `packages/shared/src/plugin/manifest.ts` 的 `parsePluginManifestV5()` 为准。
 
@@ -24,7 +25,7 @@
 
 ```json
 {
-  "$schema": "../docs/plugin.schema.json",
+  "$schema": "../plugin-kit/plugin.schema.json",
   "schemaVersion": 5,
   "id": "acme.report-kit",
   "name": "报告工具箱",
@@ -475,7 +476,7 @@ v5 的权威校验器在 `packages/shared/src/plugin/manifest.ts`（web 安装�
 ```bash
 node scripts/plugin-lint.mjs plugins/acme-report/plugin.json   # 中文报错 + 字段路径
 node scripts/plugin-lint.mjs --dir plugins                     # 批量
-node scripts/plugin-schema.mjs --check                         # 校验 docs/plugin.schema.json 是否最新（CI）
+node scripts/plugin-schema.mjs --check                         # 校验 plugin-kit/plugin.schema.json 是否最新（CI）
 ```
 
 ### 11.2 安装事务：要么全成、要么全不成
