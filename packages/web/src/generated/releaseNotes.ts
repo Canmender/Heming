@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.129.3.53.0",
+    "date": "2026-11-10",
+    "title": "模块页和插件 MCP 页深色更统一",
+    "bullets": [
+      "自动化、信息中枢、幕僚、工作流，以及插件页的 MCP / 接口视图，颜色统一到同一套主题色；深色下不再出现浅色服务卡、发白的错误条或刺眼的状态色。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.129.3.52.0",
     "date": "2026-11-10",
     "title": "对话页深色下更干净",

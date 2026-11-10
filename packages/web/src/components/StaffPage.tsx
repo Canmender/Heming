@@ -28,17 +28,17 @@ import { EmptyState } from "./ui/EmptyState.js";
  * 开关/预算/模型等设置、手动跑一次与历史简报的展示。
  */
 
-const CARD = "rounded-xl border border-[#ececec] bg-white p-3 shadow-card";
+const CARD = "rounded-xl border border-line-soft bg-[var(--surface)] p-3 shadow-card";
 const INPUT =
-  "rounded-md border border-line bg-white px-2 py-1 text-[12px] shadow-card outline-hidden focus:border-ink";
+  "rounded-md border border-line bg-[var(--surface)] px-2 py-1 text-[12px] shadow-card outline-hidden focus:border-ink";
 const BTN =
   "ui-btn ui-btn-md ui-btn-ghost";
 const BTN_PRIMARY =
   "ui-btn ui-btn-md ui-btn-primary";
 
 const SEVERITY_CLASS: Record<StaffFinding["severity"], string> = {
-  urgent: "border-[#fecdca] bg-[#fef3f2] text-[#b42318]",
-  warn: "border-[#fed7aa] bg-[#fffbeb] text-[#b45309]",
+  urgent: "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]",
+  warn: "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]",
   info: "border-line bg-panel text-muted",
 };
 
@@ -105,16 +105,16 @@ function FindingRow({ finding }: { finding: StaffFinding }) {
 function RunItem({ run }: { run: StaffRun }) {
   const [open, setOpen] = useState(run.findings.length > 0);
   return (
-    <li className="rounded-xl border border-line bg-white px-4 py-3 shadow-card">
+    <li className="rounded-xl border border-line bg-[var(--surface)] px-4 py-3 shadow-card">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] text-muted">{formatStaffTime(run.startedAt)}</span>
-        <span className="rounded-sm border border-line px-1.5 py-0.5 ui-micro text-[#555]">
+        <span className="rounded-sm border border-line px-1.5 py-0.5 ui-micro text-[var(--body)]">
           {triggerLabel(run.trigger)}
         </span>
         <span
           className={`rounded-sm border px-1.5 py-0.5 ui-micro ${
             run.mode === "fallback"
-              ? "border-[#fecdca] bg-[#fef3f2] text-[#b42318]"
+              ? "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
               : "border-line bg-panel text-muted"
           }`}
         >
@@ -134,7 +134,7 @@ function RunItem({ run }: { run: StaffRun }) {
         )}
       </div>
       <p className="mt-1 break-words text-[12px] leading-5">{run.summary}</p>
-      {run.error && <p className="mt-0.5 text-[10px] text-[#b42318]">模型总结失败：{run.error}</p>}
+      {run.error && <p className="mt-0.5 text-[10px] text-[var(--danger)]">模型总结失败：{run.error}</p>}
       {open && run.findings.length > 0 && (
         <div className="mt-2 flex flex-col gap-1.5">
           {run.findings.map((finding) => (
@@ -283,7 +283,7 @@ export function StaffPage() {
         <span
           className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
             settings.enabled
-              ? "border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]"
+              ? "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]"
               : "border-line bg-panel text-muted"
           }`}
         >
@@ -440,7 +440,7 @@ export function StaffPage() {
 
         {runs.length === 0 ? (
           <div className="flex flex-1 items-center justify-center py-8">
-          <div className="w-full max-w-[560px] rounded-xl border border-line bg-white shadow-card">
+          <div className="w-full max-w-[560px] ui-card">
             <EmptyState
               icon={<StaffIcon width={22} height={22} />}
               title="还没有简报"

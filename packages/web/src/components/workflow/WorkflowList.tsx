@@ -37,11 +37,11 @@ const STATUS_LABEL: Record<WorkflowExecution["status"], string> = {
 
 const STATUS_CLASS: Record<WorkflowExecution["status"], string> = {
   new: "border-line bg-panel text-muted",
-  running: "border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]",
-  success: "border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]",
-  error: "border-[#fecdca] bg-[#fef3f2] text-[#b42318]",
+  running: "border-[var(--info-line)] bg-[var(--info-soft)] text-[var(--info)]",
+  success: "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]",
+  error: "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]",
   canceled: "border-line bg-panel text-muted",
-  waiting: "border-[#fed7aa] bg-[#fffbeb] text-[#b45309]",
+  waiting: "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]",
 };
 
 function formatTime(at: number | undefined): string {
@@ -229,7 +229,7 @@ export function WorkflowList({ onOpen }: WorkflowListProps) {
                     <button
                       type="button"
                       onClick={() => setDeleteTarget(workflow)}
-                      className="ui-btn ui-btn-sm ui-btn-ghost text-[#b42318]"
+                      className="ui-btn ui-btn-sm ui-btn-ghost text-[var(--danger)]"
                       aria-label={`删除工作流 ${workflow.name}`}
                     >
                       <TrashIcon width={13} height={13} />

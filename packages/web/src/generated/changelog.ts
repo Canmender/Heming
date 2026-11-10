@@ -12,6 +12,23 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.129.3.53.0",
+    "date": "2026-11-10",
+    "title": "模块页与插件 MCP/接口视图写死颜色收口",
+    "bullets": [
+      "**模块页**：自动化、信息中枢、幕僚、工作流执行/列表——卡片壳统一 `.ui-card`，写死的绿/红/蓝/琥珀状态色改成 `--success` / `--danger` / `--info` / `--warn` 的 soft/line/text 组合；",
+      "**插件 MCP / 接口视图**（PluginsPage 的 MCP Tab）：连接态、已验证/未验证、告警与错误提示、服务卡、空态同样改 token；深色下不再出现浅色服务卡与发白的错误条。",
+      "相关的两个空态布局测试从 `div.rounded-xl` 改为 `div.ui-card` 定位（行为未变）。",
+      "亮/暗截图核对 Plugins → MCP / 技能两个 Tab（截图 `.tmp/d130/polish/plugins-mcp*-*.png`）。",
+      "模块页相关测试 66 例全绿（自动化/信息中枢/幕僚/接口/工作流）；",
+      "`web` 全量回归通过；`pnpm -r typecheck` 六包零错误。"
+    ],
+    "paragraphs": [
+      "搜索高亮、采集提示条、告警块、输入框、代码路径等底色/文字色改 token。",
+      "验证"
+    ]
+  },
+  {
     "version": "d.129.3.52.0",
     "date": "2026-11-10",
     "title": "对话页（ChatPage）写死颜色收口",

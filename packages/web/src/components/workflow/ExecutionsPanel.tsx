@@ -41,11 +41,11 @@ const STATUS_LABEL: Record<WorkflowExecution["status"], string> = {
 
 const STATUS_CLASS: Record<WorkflowExecution["status"], string> = {
   new: "border-line bg-panel text-muted",
-  running: "border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]",
-  success: "border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]",
-  error: "border-[#fecdca] bg-[#fef3f2] text-[#b42318]",
+  running: "border-[var(--info-line)] bg-[var(--info-soft)] text-[var(--info)]",
+  success: "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]",
+  error: "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]",
   canceled: "border-line bg-panel text-muted",
-  waiting: "border-[#fed7aa] bg-[#fffbeb] text-[#b45309]",
+  waiting: "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]",
 };
 
 const MODE_LABEL: Record<WorkflowExecution["mode"], string> = {
@@ -105,8 +105,8 @@ function RunEntry({ execution, nodeId, run, index }: { execution: WorkflowExecut
         <span
           className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${
             run.status === "error"
-              ? "border-[#fecdca] bg-[#fef3f2] text-[#b42318]"
-              : "border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]"
+              ? "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]"
+              : "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]"
           }`}
         >
           {run.status === "error" ? "失败" : run.status === "waiting" ? "等待" : "成功"}
@@ -174,7 +174,7 @@ export function ExecutionsPanel({ onRerun, onClose, className = "" }: Executions
               <button
                 type="button"
                 onClick={() => setClearOpen(true)}
-                className="ui-btn ui-btn-sm ui-btn-ghost text-[#b42318]"
+                className="ui-btn ui-btn-sm ui-btn-ghost text-[var(--danger)]"
               >
                 清空
               </button>
@@ -198,7 +198,7 @@ export function ExecutionsPanel({ onRerun, onClose, className = "" }: Executions
                   className={`w-full rounded-lg border px-2 py-1.5 text-left ${
                     selected?.id === execution.id
                       ? "border-[color:var(--line)] bg-[color:var(--panel)]"
-                      : "border-transparent hover:bg-[#fafafa]"
+                      : "border-transparent hover:bg-[var(--subtle-2)]"
                   }`}
                 >
                   <span className="flex items-center justify-between gap-2">
@@ -246,7 +246,7 @@ export function ExecutionsPanel({ onRerun, onClose, className = "" }: Executions
                 <button
                   type="button"
                   onClick={() => setDeleteTarget(selected.id)}
-                  className="ui-btn ui-btn-sm ui-btn-ghost text-[#b42318]"
+                  className="ui-btn ui-btn-sm ui-btn-ghost text-[var(--danger)]"
                   aria-label="删除这条执行记录"
                 >
                   <TrashIcon width={13} height={13} />

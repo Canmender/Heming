@@ -180,7 +180,7 @@ describe("StaffPage 空态布局（d.73）", () => {
   it("空态卡在剩余空间垂直居中（不是贴顶留一大片空白）", () => {
     render(<StaffPage />);
     const title = screen.getByText("还没有简报");
-    const card = title.closest("div.rounded-xl") as HTMLElement;
+    const card = title.closest("div.ui-card") as HTMLElement;
     expect(card.className).toContain("max-w-[560px]");
     // 外层是 flex-1 + items-center 的居中容器；此前是 mt-8 贴顶
     expect(card.parentElement?.className).toContain("flex-1");

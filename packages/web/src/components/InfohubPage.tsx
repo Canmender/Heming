@@ -60,7 +60,7 @@ function Snippet({ text }: { text: string }) {
           return null;
         }
         return highlight ? (
-          <mark key={index} className="rounded-sm bg-[#fff1a8] px-0.5 text-ink">
+          <mark key={index} className="rounded-sm bg-[var(--warn-soft)] px-0.5 text-ink">
             {part}
           </mark>
         ) : (
@@ -122,13 +122,13 @@ function SourceSection({
   return (
     <div className="border-b border-line-soft bg-panel px-6 py-2.5" data-testid="infohub-sources">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 ui-caption">
-        <span className="font-medium text-[#555]">采集来源</span>
+        <span className="font-medium text-[var(--body)]">采集来源</span>
         {rows.map((row) => (
           <span key={row.key} className="flex items-center gap-1.5" data-testid={`source-${row.key}`}>
             <span>{row.label}</span>
             <span
               className={`rounded-sm px-1 py-0.5 ui-micro font-medium ${
-                row.detected ? "bg-[#e6f4ea] text-[#1f7a43]" : "bg-[#fdecea] text-[#b42318]"
+                row.detected ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[var(--danger-soft)] text-[var(--danger)]"
               }`}
             >
               {row.detected ? "已识别" : "未找到"}
@@ -148,7 +148,7 @@ function SourceSection({
         </button>
       </div>
       {autoNote && (
-        <p className="mt-1 ui-micro text-[#555]" role="status">
+        <p className="mt-1 ui-micro text-[var(--body)]" role="status">
           {autoNote}
         </p>
       )}
@@ -156,8 +156,8 @@ function SourceSection({
         <ul className="mt-1.5 flex flex-col gap-1">
           {rows.map((row) => (
             <li key={row.key} className="flex min-w-0 items-center gap-2 ui-micro">
-              <span className="w-24 shrink-0 text-[#666]">{row.label}</span>
-              <code className="min-w-0 flex-1 truncate rounded-sm bg-white px-1 py-0.5" title={row.path || "未找到"}>
+              <span className="w-24 shrink-0 text-muted">{row.label}</span>
+              <code className="min-w-0 flex-1 truncate rounded-sm bg-[var(--surface)] px-1 py-0.5" title={row.path || "未找到"}>
                 {row.path || "未找到"}
               </code>
               <button
@@ -444,7 +444,7 @@ export function InfohubPage() {
         scroll={false}
       >
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
-          <div className="w-full max-w-[460px] rounded-xl border border-line bg-white p-6 shadow-card">
+          <div className="w-full max-w-[460px] rounded-xl border border-line bg-[var(--surface)] p-6 shadow-card">
             <h2 className="text-[16px] font-semibold">信息中枢仅桌面端可用</h2>
             <p className="mt-2 text-[12px] leading-6 text-muted">
               QQ / 微信归档要读取本机数据库，需要由桌面版启动本机进程。
@@ -481,7 +481,7 @@ export function InfohubPage() {
           信息中枢
           <span
             className={`inline-block h-1.5 w-1.5 rounded-full ${
-              ready ? "bg-[#1f9d55]" : phase === "error" ? "bg-[#b42318]" : "bg-[#bbb]"
+              ready ? "bg-[var(--success)]" : phase === "error" ? "bg-[var(--danger)]" : "bg-[var(--line-strong)]"
             }`}
             aria-hidden
           />
@@ -547,11 +547,11 @@ export function InfohubPage() {
       {/* 未就绪：不给任何路径/解释器表单。装上模块就自动连、自动识别、空库自动采集。 */}
       {!ready && (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 py-10">
-          <div className="w-full max-w-[460px] rounded-xl border border-line bg-white p-6 text-center shadow-card">
+          <div className="w-full max-w-[460px] rounded-xl border border-line bg-[var(--surface)] p-6 text-center shadow-card">
             {phase === "error" ? (
               <>
                 <h2 className="text-[15px] font-semibold">本机归档没能启动</h2>
-                <p role="alert" className="mt-2 break-words text-[12px] leading-6 text-[#b42318]">
+                <p role="alert" className="mt-2 break-words text-[12px] leading-6 text-[var(--danger)]">
                   {error || "未知原因"}
                 </p>
                 <p className="mt-2 ui-micro">
@@ -593,7 +593,7 @@ export function InfohubPage() {
           {syncOpen && (
             <div className="border-b border-line-soft bg-panel px-6 py-3">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 ui-caption">
-                <span className="font-medium text-[#555]">同步来源</span>
+                <span className="font-medium text-[var(--body)]">同步来源</span>
                 <label
                   className="flex items-center gap-1.5"
                   title={
@@ -665,7 +665,7 @@ export function InfohubPage() {
               </div>
               {syncing && (
                 <div className="mt-2">
-                  <div className="h-1 overflow-hidden rounded-full bg-[#e8e8e8]">
+                  <div className="h-1 overflow-hidden rounded-full bg-[var(--line-soft)]">
                     <div
                       className="h-full rounded-full bg-ink transition-[width] duration-200"
                       style={{
@@ -696,11 +696,11 @@ export function InfohubPage() {
                 role="tab"
                 aria-selected={tab === value}
                 onClick={() => setTab(value)}
-                className={`ui-btn ui-btn-sm ${tab === value ? "ui-btn-primary" : "ui-btn-ghost text-[#666]"}`}
+                className={`ui-btn ui-btn-sm ${tab === value ? "ui-btn-primary" : "ui-btn-ghost text-muted"}`}
               >
                 {label}
                 {value === "agenda" && agenda?.summary.overdue ? (
-                  <span className="ml-1 rounded-full bg-[#fdecea] px-1 ui-micro font-semibold text-[#b42318]">
+                  <span className="ml-1 rounded-full bg-[var(--danger-soft)] px-1 ui-micro font-semibold text-[var(--danger)]">
                     {agenda.summary.overdue}
                   </span>
                 ) : null}
@@ -717,7 +717,7 @@ export function InfohubPage() {
           </div>
 
           {!status.hasDb && (
-            <div className="border-b border-line-soft bg-[#fffdf5] px-6 py-2 ui-caption text-[#8a6d3b]">
+            <div className="border-b border-line-soft bg-[var(--warn-soft)] px-6 py-2 ui-caption text-[var(--warn)]">
               该目录还没有归档库。先在「同步」里选择来源并开始采集；采集完成后这里会自动刷新。
             </div>
           )}
@@ -759,9 +759,9 @@ export function InfohubPage() {
                     <ul className="flex flex-col gap-1.5">
                       {hits.map((hit) => (
                         <li key={hit.id}>
-                          <div className="ui-list-row rounded-lg bg-white">
+                          <div className="ui-list-row rounded-lg bg-[var(--surface)]">
                             <div className="flex items-baseline gap-2 ui-micro">
-                              <span className="font-medium text-[#555]">{hit.convName}</span>
+                              <span className="font-medium text-[var(--body)]">{hit.convName}</span>
                               <span>{sourceLabel(hit.source)}</span>
                               <span className="ml-auto">{formatInfohubTime(hit.ts, true)}</span>
                             </div>
@@ -788,7 +788,7 @@ export function InfohubPage() {
                 </span>
                 {agenda && (
                   <span className="flex gap-2 ui-micro">
-                    <span className="text-[#b42318]">逾期 {agenda.summary.overdue}</span>
+                    <span className="text-[var(--danger)]">逾期 {agenda.summary.overdue}</span>
                     <span>今天 {agenda.summary.today}</span>
                     <span>本周 {agenda.summary.week}</span>
                   </span>
@@ -827,11 +827,11 @@ export function InfohubPage() {
                       return (
                         <li
                           key={item.id}
-                          className="ui-list-row items-start gap-3 rounded-lg bg-white"
+                          className="ui-list-row items-start gap-3 rounded-lg bg-[var(--surface)]"
                         >
                           <span
                             className={`mt-0.5 shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
-                              overdue ? "bg-[#fdecea] text-[#b42318]" : "bg-[#f2f2f2] text-[#555]"
+                              overdue ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--subtle-3)] text-[var(--body)]"
                             }`}
                           >
                             {item.dueText || (item.dueTs ? formatInfohubTime(item.dueTs) : "未定")}
@@ -839,7 +839,7 @@ export function InfohubPage() {
                           <div className="min-w-0 flex-1">
                             <div className="truncate ui-body-sm font-medium text-ink">{item.title}</div>
                             {item.detail && (
-                              <div className="mt-0.5 line-clamp-2 ui-caption leading-5 text-[#666]">{item.detail}</div>
+                              <div className="mt-0.5 line-clamp-2 ui-caption leading-5 text-muted">{item.detail}</div>
                             )}
                             <div className="mt-0.5 ui-micro">
                               {item.convName}
@@ -857,7 +857,7 @@ export function InfohubPage() {
           )}
 
           <details className="shrink-0 border-t border-line-soft bg-panel px-6 py-2 ui-caption">
-            <summary className="cursor-pointer text-[#555]">本机配置（已脱敏）</summary>
+            <summary className="cursor-pointer text-[var(--body)]">本机配置（已脱敏）</summary>
             <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 ui-micro sm:grid-cols-4">
               <span>QQ：{status.config.qq.enabled ? "启用" : "停用"}</span>
               <span>微信：{status.config.wechat.enabled ? "启用" : "停用"}</span>

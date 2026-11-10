@@ -42,9 +42,9 @@ import { EmptyState } from "./ui/EmptyState.js";
 
 /** 无 emoji 的状态胶囊。 */
 function statusClass(status: AutomationTask["lastStatus"]): string {
-  if (status === "ok") return "border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]";
-  if (status === "error") return "border-[#fecdca] bg-[#fef3f2] text-[#b42318]";
-  if (status === "skipped") return "border-[#fed7aa] bg-[#fffbeb] text-[#b45309]";
+  if (status === "ok") return "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]";
+  if (status === "error") return "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]";
+  if (status === "skipped") return "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]";
   return "border-line bg-panel text-muted";
 }
 
@@ -197,17 +197,17 @@ export function AutomationPage() {
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 max-[1199px]:px-4">
       <div className="mx-auto flex min-h-full w-full max-w-[960px] flex-col">
       {!desktop && (
-        <div className="mb-4 rounded-lg border border-line-soft bg-[#fffdf5] px-3 py-2 ui-caption text-[#8a6d3b]">
+        <div className="mb-4 rounded-lg border border-line-soft bg-[var(--warn-soft)] px-3 py-2 ui-caption text-[var(--warn)]">
           自动化只在桌面端执行。浏览器里可以创建和查看任务，但到点不会运行。
         </div>
       )}
       {desktop && booted && !infohubRunning && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line-soft bg-[#fffdf5] px-3 py-2 ui-caption text-[#8a6d3b]">
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line-soft bg-[var(--warn-soft)] px-3 py-2 ui-caption text-[var(--warn)]">
           <span>信息中枢未连接：到点的任务会如实记为失败并顺延，不会自动拉起本机进程。</span>
           <button
             type="button"
             onClick={() => openInfohub()}
-            className="rounded-sm border border-[#e5d5a8] px-2 py-0.5 text-[10px] hover:bg-[#fff8e1]"
+            className="rounded-sm border border-[var(--warn-line)] px-2 py-0.5 text-[10px] hover:bg-[var(--warn-soft)]"
           >
             去连接
           </button>
@@ -243,7 +243,7 @@ export function AutomationPage() {
           <button
             type="button"
             onClick={() => setClearRunsOpen(true)}
-            className="shrink-0 self-stretch rounded-lg border border-line px-3 text-[11px] text-[#555] hover:bg-[#fafafa]"
+            className="shrink-0 self-stretch rounded-lg border border-line px-3 text-[11px] text-[var(--body)] hover:bg-[var(--subtle-2)]"
           >
             清空记录
           </button>
@@ -292,7 +292,7 @@ export function AutomationPage() {
       <div className="flex flex-1 flex-col">
         {tasks.length === 0 ? (
           <div className="flex flex-1 items-center justify-center py-8">
-          <div className="w-full max-w-[520px] rounded-xl border border-line bg-white shadow-card">
+          <div className="w-full max-w-[520px] ui-card">
             <EmptyState
               icon={<AutomationIcon width={22} height={22} />}
               title="还没有自动化任务"
@@ -320,7 +320,7 @@ export function AutomationPage() {
                   <li
                     key={task.id}
                     id={`automation-task-${task.id}`}
-                    className={`rounded-xl border bg-white px-4 py-3 shadow-card ${
+                    className={`rounded-xl border bg-[var(--surface)] px-4 py-3 shadow-card ${
                       task.enabled ? "border-line" : "border-line-soft opacity-75"
                     } ${highlightId === task.id ? "ring-2 ring-[#bbb]" : ""}`}
                   >
@@ -329,7 +329,7 @@ export function AutomationPage() {
                       <span
                         className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 ui-micro font-semibold ${
                           task.enabled
-                            ? "border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]"
+                            ? "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]"
                             : "border-line bg-panel text-muted"
                         }`}
                       >
@@ -341,11 +341,11 @@ export function AutomationPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-[13px] font-semibold">{task.name}</span>
-                        <span className="rounded-sm border border-line px-1.5 py-0.5 ui-micro text-[#555]">
+                        <span className="rounded-sm border border-line px-1.5 py-0.5 ui-micro text-[var(--body)]">
                           {actionLabel(task.kind)}
                         </span>
                       </div>
-                      <div className="mt-1 text-[11px] text-[#555]">{describeAction(task)}</div>
+                      <div className="mt-1 text-[11px] text-[var(--body)]">{describeAction(task)}</div>
                       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted">
                         <span>{describeSchedule(task.schedule)}</span>
                         <span>
@@ -361,7 +361,7 @@ export function AutomationPage() {
                         )}
                       </div>
                       {task.lastDetail && task.lastStatus && (
-                        <div className="mt-1 break-words text-[10px] leading-4 text-[#666]">
+                        <div className="mt-1 break-words text-[10px] leading-4 text-muted">
                           {task.lastDetail}
                         </div>
                       )}
@@ -376,7 +376,7 @@ export function AutomationPage() {
                               [task.id]: !current[task.id],
                             }))
                           }
-                          className="text-[10px] text-[#555] hover:text-ink"
+                          className="text-[10px] text-[var(--body)] hover:text-ink"
                         >
                           {runsOpen ? "收起运行记录" : `运行记录（${taskRuns.length}）`}
                         </button>
@@ -388,7 +388,7 @@ export function AutomationPage() {
                               {taskRuns.slice(0, 8).map((run) => (
                                 <li
                                   key={run.id}
-                                  className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-line-soft bg-panel px-2 py-1 text-[10px] text-[#555]"
+                                  className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-line-soft bg-panel px-2 py-1 text-[10px] text-[var(--body)]"
                                 >
                                   <span
                                     className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${statusClass(run.status)}`}
@@ -403,7 +403,7 @@ export function AutomationPage() {
                                     耗时 {formatDuration(run.durationMs)}
                                   </span>
                                   {run.detail && (
-                                    <span className="min-w-0 basis-full break-words leading-4 text-[#666]">
+                                    <span className="min-w-0 basis-full break-words leading-4 text-muted">
                                       {run.detail}
                                     </span>
                                   )}
@@ -433,7 +433,7 @@ export function AutomationPage() {
                         type="button"
                         aria-label={`${task.enabled ? "停用" : "启用"} ${task.name}`}
                         onClick={() => setEnabled(task.id, !task.enabled)}
-                        className="rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa]"
+                        className="rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[var(--subtle-2)]"
                       >
                         {task.enabled ? "停用" : "启用"}
                       </button>
@@ -441,7 +441,7 @@ export function AutomationPage() {
                         type="button"
                         aria-label={`编辑 ${task.name}`}
                         onClick={() => openEdit(task)}
-                        className="rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[#fafafa]"
+                        className="rounded-md border border-line px-2.5 py-1 text-[11px] hover:bg-[var(--subtle-2)]"
                       >
                         编辑
                       </button>
@@ -449,7 +449,7 @@ export function AutomationPage() {
                         type="button"
                         aria-label={`删除 ${task.name}`}
                         onClick={() => setDeleteTarget(task)}
-                        className="flex items-center gap-1 rounded-md border border-line px-2.5 py-1 text-[11px] text-[#b42318] hover:bg-[#fdf3f2]"
+                        className="flex items-center gap-1 rounded-md border border-line px-2.5 py-1 text-[11px] text-[var(--danger)] hover:bg-[var(--danger-soft)]"
                       >
                         <TrashIcon width={12} height={12} />
                         删除
@@ -649,21 +649,21 @@ function AutomationEditor({
         aria-label={taskId ? "编辑自动化" : "新建自动化"}
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="flex max-h-[88vh] w-[min(600px,94vw)] flex-col overflow-hidden rounded-xl border border-[#ececec] bg-white shadow-card"
+        className="flex max-h-[88vh] w-[min(600px,94vw)] flex-col overflow-hidden rounded-xl border border-line-soft bg-[var(--surface)] shadow-card"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
           <span className="truncate text-[13px] font-bold">{taskId ? "编辑自动化" : "新建自动化"}</span>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-sm px-2 py-0.5 text-[11px] text-muted hover:bg-[#f2f2f2] hover:text-ink"
+            className="rounded-sm px-2 py-0.5 text-[11px] text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             关闭
           </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
-          <label className="block text-[11px] font-medium text-[#555]" htmlFor="automation-name">
+          <label className="block text-[11px] font-medium text-[var(--body)]" htmlFor="automation-name">
             名称
           </label>
           <input
@@ -674,7 +674,7 @@ function AutomationEditor({
             className="mt-1 w-full rounded-md border border-line-strong px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
           />
 
-          <label className="mt-3 block text-[11px] font-medium text-[#555]" htmlFor="automation-kind">
+          <label className="mt-3 block text-[11px] font-medium text-[var(--body)]" htmlFor="automation-kind">
             动作
           </label>
           <select
@@ -688,7 +688,7 @@ function AutomationEditor({
                 kind: isAutomationKind(next) ? next : "infohub.sync",
               }));
             }}
-            className="mt-1 w-full rounded-md border border-line-strong bg-white px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
+            className="mt-1 w-full rounded-md border border-line-strong bg-[var(--surface)] px-2.5 py-1.5 text-[12px] outline-hidden focus:border-ink"
           >
             {listKindMeta().map((meta) => (
               <option key={meta.kind} value={meta.kind}>
@@ -701,7 +701,7 @@ function AutomationEditor({
           {kindMeta(draft.kind).hasSyncParams && (
             <div className="mt-2 rounded-lg border border-line-soft bg-panel p-3">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
-                <span className="font-medium text-[#555]">同步选项</span>
+                <span className="font-medium text-[var(--body)]">同步选项</span>
                 <label className="flex items-center gap-1.5">
                   <input
                     type="checkbox"
@@ -741,7 +741,7 @@ function AutomationEditor({
             </div>
           )}
 
-          <div className="mt-4 text-[11px] font-medium text-[#555]">触发方式</div>
+          <div className="mt-4 text-[11px] font-medium text-[var(--body)]">触发方式</div>
           <div role="radiogroup" aria-label="触发方式" className="mt-1 flex gap-2">
             <button
               type="button"
@@ -761,7 +761,7 @@ function AutomationEditor({
                 }))
               }
               className={`rounded-md border px-3 py-1 text-[11px] ${
-                schedule.type === "daily" ? "border-ink bg-ink text-white" : "border-line hover:bg-[#fafafa]"
+                schedule.type === "daily" ? "border-ink bg-ink text-white" : "border-line hover:bg-[var(--subtle-2)]"
               }`}
             >
               每天定时
@@ -780,7 +780,7 @@ function AutomationEditor({
                 }))
               }
               className={`rounded-md border px-3 py-1 text-[11px] ${
-                schedule.type === "interval" ? "border-ink bg-ink text-white" : "border-line hover:bg-[#fafafa]"
+                schedule.type === "interval" ? "border-ink bg-ink text-white" : "border-line hover:bg-[var(--subtle-2)]"
               }`}
             >
               按间隔
@@ -790,7 +790,7 @@ function AutomationEditor({
           {schedule.type === "daily" ? (
             <div className="mt-2">
               <div className="flex flex-wrap items-center gap-2">
-                <label className="text-[11px] text-[#555]" htmlFor="automation-time">
+                <label className="text-[11px] text-[var(--body)]" htmlFor="automation-time">
                   执行时间
                 </label>
                 <input
@@ -808,7 +808,7 @@ function AutomationEditor({
                 />
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[11px] text-[#555]">星期</span>
+                <span className="mr-1 text-[11px] text-[var(--body)]">星期</span>
                 {ALL_WEEKDAYS.map((day) => {
                   const active = schedule.weekdays.includes(day);
                   return (
@@ -821,7 +821,7 @@ function AutomationEditor({
                       className={`h-[26px] w-[26px] rounded-full border text-[11px] transition-colors ${
                         active
                           ? "border-ink bg-ink text-white"
-                          : "border-line text-[#666] hover:bg-[#fafafa]"
+                          : "border-line text-muted hover:bg-[var(--subtle-2)]"
                       }`}
                     >
                       {WEEKDAY_LABEL[day]}
@@ -832,7 +832,7 @@ function AutomationEditor({
             </div>
           ) : (
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <label className="text-[11px] text-[#555]" htmlFor="automation-interval">
+              <label className="text-[11px] text-[var(--body)]" htmlFor="automation-interval">
                 间隔分钟
               </label>
               <input
@@ -861,12 +861,12 @@ function AutomationEditor({
             下次执行：{formatAutomationTime(preview)}（保存后按此刻重新排期）
           </p>
 
-          <div className="mt-4 rounded-lg border border-line-soft bg-[#fffdf5] p-3 text-[10px] leading-5 text-[#8a6d3b]">
+          <div className="mt-4 rounded-lg border border-line-soft bg-[var(--warn-soft)] p-3 text-[10px] leading-5 text-[var(--warn)]">
             执行前提：桌面端且信息中枢已连接。未连接时任务会如实记为失败并顺延，不会自动拉起本机进程；
             和鸣关闭期间错过的时刻不会补跑。
           </div>
 
-          {error && <p role="alert" className="mt-2 text-[11px] text-[#b42318]">{error}</p>}
+          {error && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">{error}</p>}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-line-soft px-4 py-2.5">
