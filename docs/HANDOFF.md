@@ -24,10 +24,10 @@
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-10） | `d.129.3.48.0`（`main`，**未出包/未部署**）——会话管理补齐：左栏会话行「⋯」重命名/删除（删除二次确认、消息一并删），新增 `DELETE /api/conversations/:id`（成员校验、事务删除）。详见 §5 首条 |
-| 安装包（最新） | **仍是 `d.123.3.48.0`（r90，247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`）**；`d.124.3.48.0` / `d.125.3.48.0` / `d.126.3.48.0` / `d.127.3.48.0` / `d.128.3.48.0` / `d.129.3.48.0` 代码已合入 `main` 但**未打包、未部署、未发布更新源**（需要时按 `docs/deploy.md` 走 `release.mjs --desktop --deploy` + `publish-update.mjs`）。 |
-| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.129.3.48.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
-| 测试 | 2026-11-10 19:1x 实跑（d.129.3.48.0 门禁）：**web 341 文件 / 4840 例、shared 8 / 106、server 16 / 270、desktop 46 个 node:test 文件 / 772 例**；`pnpm -r typecheck` 六包零错误；`plugin:check` 通过（含 infohub-page 0.2.0 源码模式）；`check-source-encoding` OK。真实浏览器（本地 dev，admin）核对会话「⋯」菜单与行内改名。 |
+| 当前版本（2026-11-10） | `d.129.3.49.0`（`main`，**未出包/未部署**）——首页「最近对话」显示会话名（与智能体页左栏同口径）；团队/看板/工作台/记忆/设置/首页的写死颜色收口到主题 token（`ui-card`、`--subtle*`、`--success/warn/danger/info`）。详见 §5 首条 |
+| 安装包（最新） | **仍是 `d.123.3.48.0`（r90，247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`）**；`d.124.3.48.0` / `d.125.3.48.0` / `d.126.3.48.0` / `d.127.3.48.0` / `d.128.3.48.0` / `d.129.3.48.0` / `d.129.3.49.0` 代码已合入 `main` 但**未打包、未部署、未发布更新源**（需要时按 `docs/deploy.md` 走 `release.mjs --desktop --deploy` + `publish-update.mjs`）。 |
+| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.129.3.49.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
+| 测试 | 2026-11-10 21:0x 实跑（d.129.3.49.0 门禁）：**web 341 文件 / 4841 例、shared 8 / 106、server 16 / 270、desktop 46 个 node:test 文件 / 772 例**；`pnpm -r typecheck` 六包零错误；`plugin:check` 通过（含 infohub-page 0.2.0 源码模式）；`check-source-encoding` OK。真实浏览器（本地 dev，admin）核对首页最近对话标题、团队/记忆/设置亮暗。 |
 | 线上 | **`d.123.3.48.0` 已于 2026-11-10 10:05–10:07 部署**（`release.mjs --desktop --deploy`：7 OK / 2 SKIP；备份 `heming-data-2026-11-10-d.123.3.48.0.tar.gz` 111.1KB 落本机；`INSTALL DONE: d.123.3.48.0`，install + smoke 通过）。人工校验：公网 `/api/health` 200；首页主 bundle `index-DO9EqyCD.js` 与本机 `packages/web/dist` **同名同 md5**；线上 SettingsPage chunk 含 `d.123.3.48.0`；部署包 30.6MB / 1802 项（不该有的 0 项）。 |
 | 安装包（已发布） | **`和鸣 Setup d.123.3.48.0.exe`（`r90`，247,030,505 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs`（`HEMING_RELEASE_DIR=…/r90`）上传 3 个文件并按远端大小 + sha512 校验通过。 |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **当前指向 123.3.48**（sha512 `7Plv…Mdoxug==`，size 247030505）；远端只留 `d.122.3.48.0` + `d.123.3.48.0` 两版（更早版本已按策略清理）。 |
@@ -229,6 +229,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 
 ## 5. 下一步候选
+**首页会话名 + 团队/记忆/设置 token 收口（`d.129.3.49.0`，2026-11-10；`main`，未出包/未部署）**：① 首页「最近对话」一级改为服务端会话名（无标题回落智能体名），副行「智能体 · 时间」，与智能体页左栏同口径；② 团队页/看板/工作台、记忆页、设置页、首页的卡壳统一 `.ui-card`，写死底色/文字色/状态点改 token（`--surface`/`--subtle*`/body/`--danger`/`--warn`/`--success`），团队计划/任务状态胶囊改 info/success/warn soft/line；③ 亮/暗截图核对主页、团队 5 个子页、记忆、设置、插件。**下一步**：① 团队看板两个空面板可补图标空态；② 团队/记忆仍有少量 `bg-white` 类在弹窗/编辑器内，继续按 token 收；③ 插件独立化 P2 迁移（自动化/幕僚页面搬出本体，基线 143 只减不增）。
+
 **会话管理补齐（`d.129.3.48.0`，2026-11-10；`main`，未出包/未部署）**：左栏会话行悬停「⋯」→ 重命名（行内输入，Enter 保存/Esc 取消）或删除（二次确认，消息一并删除、不可恢复）；停在被删会话时回选择页。服务端新增 `DELETE /api/conversations/:id`（成员 204 / 非成员 403 / 不存在 404，内存+sqlite 双实现，显式事务删 messages/message_reads/成员/agent 关联/会话）。测试：server +3（270）、web +4（4840）；真实浏览器核对菜单/改名态。**边界**：无回收站；删除不可恢复；仅成员可操作。**下一步**：① 会话搜索已可用，考虑分页；② 手动新建会话时的命名（当前首条消息自动命名）；③ 插件独立化 P2 迁移（自动化/幕僚页面搬出本体，基线 143→ 只减不增）。
 
 **智能体多段会话 + 会话名已完成（`d.128.3.48.0`，2026-11-10；`main`，未出包/未部署）**：① **会话模型**：`Conversation` 增加可选 `title`（≤80）；sqlite `conversations` 幂等补列；`POST /api/conversations` 支持 `fresh: true`（新建一段）/缺省幂等复用（老客户端不变）/可带 title；新增 `PATCH /api/conversations/:id`（成员校验，空串清除）。② **客户端**：左栏分组右侧 `＋` 新建该智能体会话；首条消息发送成功后自动写标题（只写一次、失败下次再试），换设备/重启后仍显示；`conversationTitle` 优先服务端 title，旧会话继续按首条消息/时间兜底。③ **测试**：shared +2、server +3（内存/sqlite 双实现 + REST）、web +3；真实浏览器核对左栏 3 段带名称会话。**边界**：暂无手动改名 UI（接口已具备）；标题是列表元数据明文，不含消息正文。**下一步**：① 手动改名/删除会话 UI；② 会话列表分页（当前全量拉取）与未读/已读语义（人类 IM 删除后一直为 0）。

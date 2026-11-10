@@ -599,7 +599,7 @@ export function TeamPage() {
             </button>
           </div>
           {shareNotice && (
-            <p role="status" className="mt-1 ui-micro text-[#92400e]">
+            <p role="status" className="mt-1 ui-micro text-[var(--warn)]">
               {shareNotice}
             </p>
           )}
@@ -664,7 +664,7 @@ export function TeamPage() {
                 </div>
               ) : rosterError ? (
                 <div className="p-2 text-[12px]">
-                  <p role="alert" className="text-[#b42318]">名册加载失败：{rosterError}</p>
+                  <p role="alert" className="text-[var(--danger)]">名册加载失败：{rosterError}</p>
                   <button
                     type="button"
                     className="ui-btn ui-btn-sm ui-btn-ghost mt-1"
@@ -685,14 +685,14 @@ export function TeamPage() {
                       key={m.user.id}
                       type="button"
                       onClick={() => setSelectedId(selected ? null : m.user.id)}
-                      className={`ui-list-row w-full text-left ${selected ? "bg-[#f2f2f2]" : ""}`}
+                      className={`ui-list-row w-full text-left ${selected ? "bg-[var(--subtle-2)]" : ""}`}
                     >
                       <span className="relative shrink-0">
                         <Avatar user={m.user} size={28} />
                         <span
                           aria-hidden="true"
                           className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white ${
-                            m.online ? "bg-[#12b76a]" : "bg-[#c4c4c4]"
+                            m.online ? "bg-[var(--success)]" : "bg-[var(--line-strong)]"
                           }`}
                         />
                       </span>
@@ -719,7 +719,7 @@ export function TeamPage() {
 
         <main className="flex min-w-0 flex-1 flex-col">
           {tab !== "board" && tab !== "workspace" && selectedMember && (
-            <div className="border-b border-line-soft bg-white px-6 py-2.5">
+            <div className="border-b border-line-soft bg-[var(--surface)] px-6 py-2.5">
               <div className="flex items-center gap-3">
                 <Avatar user={selectedMember.user} size={32} />
                 <div className="min-w-0">
@@ -862,7 +862,7 @@ export function TeamPage() {
               </div>
             ) : feedError ? (
               <div className="py-6 text-center text-[12px]">
-                <p role="alert" className="text-[#b42318]">动向加载失败：{feedError}</p>
+                <p role="alert" className="text-[var(--danger)]">动向加载失败：{feedError}</p>
                 <button
                   type="button"
                   className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
@@ -952,7 +952,7 @@ export function TeamPage() {
                 <p role="status" className="mt-3 ui-caption">加载中…</p>
               ) : feedError ? (
                 <div className="py-10 text-center text-[12px]">
-                  <p role="alert" className="text-[#b42318]">日程加载失败：{feedError}</p>
+                  <p role="alert" className="text-[var(--danger)]">日程加载失败：{feedError}</p>
                   <button
                     type="button"
                     className="ui-btn ui-btn-sm ui-btn-ghost mt-2"
@@ -1053,7 +1053,7 @@ export function TeamPage() {
                     <button
                       type="button"
                       onClick={() => setConfirmClearUsage(true)}
-                      className="rounded-sm border border-[#fecdca] px-2 py-1 text-[11px] text-[#b42318] hover:bg-[#fef3f2]"
+                      className="rounded-sm border border-[var(--danger-line)] px-2 py-1 text-[11px] text-[var(--danger)] hover:bg-[var(--danger-soft)]"
                     >
                       清除我的用量
                     </button>
@@ -1094,7 +1094,7 @@ export function TeamPage() {
                     <button
                       type="button"
                       onClick={() => setConfirmClearUsage(true)}
-                      className="mx-0.5 underline underline-offset-2 hover:text-[#b42318]"
+                      className="mx-0.5 underline underline-offset-2 hover:text-[var(--danger)]"
                     >
                       清除我的用量
                     </button>
@@ -1105,7 +1105,7 @@ export function TeamPage() {
                 <p role="status" className="mt-3 ui-caption">加载中…</p>
               ) : usageError ? (
                 <div className="py-6 text-center text-[12px]">
-                  <p role="alert" className="text-[#b42318]">用量加载失败：{usageError}</p>
+                  <p role="alert" className="text-[var(--danger)]">用量加载失败：{usageError}</p>
                   <button
                     type="button"
                     className="ui-btn ui-btn-sm ui-btn-ghost mt-2"

@@ -55,7 +55,7 @@ function BoardCard({
     <button
       type="button"
       onClick={onSelect}
-      className="w-full rounded-xl border border-line-soft bg-white px-3 py-2.5 text-left transition-colors hover:border-[var(--line-strong)] focus-visible:ring-2"
+      className="w-full rounded-xl border border-line-soft bg-[var(--surface)] px-3 py-2.5 text-left transition-colors hover:border-[var(--line-strong)] focus-visible:ring-2"
     >
       <span className="flex items-start gap-2">
         <span className="min-w-0 flex-1">
@@ -65,7 +65,7 @@ function BoardCard({
         <span className="shrink-0 text-[10px] text-muted">{fmtTime(activity.occurredAt)}</span>
       </span>
       {summary && (
-        <span className="mt-1 block truncate text-[11px] leading-5 text-[#666]">{summary}</span>
+        <span className="mt-1 block truncate text-[11px] leading-5 text-[var(--body)]">{summary}</span>
       )}
     </button>
   );
@@ -142,7 +142,7 @@ export function TeamBoardView({
 
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
-      <div className="shrink-0 border-b border-line-soft bg-[#fbfbfb] px-6 py-2.5">
+      <div className="shrink-0 border-b border-line-soft bg-[var(--subtle)] px-6 py-2.5">
         {/* 成员 chips 单行横向滚动：1100 窄窗下不再折成两行占掉内容高度。 */}
         <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-0.5">
           <button
@@ -152,7 +152,7 @@ export function TeamBoardView({
             className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] ${
               selectedId === null
                 ? "border-ink bg-ink text-white"
-                : "border-line text-muted hover:bg-white"
+                : "border-line text-muted hover:bg-[var(--surface)]"
             }`}
           >
             全部成员
@@ -166,7 +166,7 @@ export function TeamBoardView({
               className={`flex shrink-0 items-center gap-1.5 rounded-full border py-0.5 pl-0.5 pr-2 text-[11px] ${
                 m.user.id === selectedId
                   ? "border-ink bg-ink text-white"
-                  : "border-line text-[#555] hover:bg-white"
+                  : "border-line text-[var(--body)] hover:bg-[var(--surface)]"
               }`}
             >
               <span className="relative">
@@ -174,7 +174,7 @@ export function TeamBoardView({
                 <span
                   aria-hidden="true"
                   className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white ${
-                    m.online ? "bg-[#12b76a]" : "bg-[#c4c4c4]"
+                    m.online ? "bg-[var(--success)]" : "bg-[var(--line-strong)]"
                   }`}
                 />
               </span>
@@ -196,7 +196,7 @@ export function TeamBoardView({
                 aria-pressed={range === value}
                 onClick={() => setRange(value)}
                 className={`rounded-md px-2 py-0.5 ${
-                  range === value ? "bg-[#ececec] text-ink" : "text-muted hover:bg-[#f2f2f2]"
+                  range === value ? "bg-[var(--subtle-3)] text-ink" : "text-muted hover:bg-[var(--subtle-2)]"
                 }`}
               >
                 {label}
@@ -217,7 +217,7 @@ export function TeamBoardView({
           <button
             type="button"
             onClick={onRetry}
-            className="rounded-lg border border-line bg-white px-2.5 py-1 ui-caption hover:bg-[#f5f5f5]"
+            className="rounded-lg border border-line bg-[var(--surface)] px-2.5 py-1 ui-caption hover:bg-[var(--subtle-2)]"
           >
             刷新
           </button>
@@ -237,7 +237,7 @@ export function TeamBoardView({
           </div>
         ) : error ? (
           <div className="py-10 text-center text-[12px]">
-            <p role="alert" className="text-[#b42318]">看板加载失败：{error}</p>
+            <p role="alert" className="text-[var(--danger)]">看板加载失败：{error}</p>
             <button
               type="button"
               onClick={onRetry}
@@ -248,7 +248,7 @@ export function TeamBoardView({
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            <section aria-label="任务" className={`flex flex-col rounded-xl bg-[#f7f7f7] p-3 ${tasks.length === 0 ? "" : "min-h-[160px]"}`}>
+            <section aria-label="任务" className={`flex flex-col rounded-xl bg-[var(--subtle-2)] p-3 ${tasks.length === 0 ? "" : "min-h-[160px]"}`}>
               <div className="mb-2 flex items-center gap-1.5 ui-section-title">
                 <TaskIcon width={14} height={14} />
                 任务
@@ -274,9 +274,9 @@ export function TeamBoardView({
               )}
             </section>
 
-            <section aria-label="日程" className={`flex flex-col rounded-xl bg-[#f7f7f7] p-3 ${agenda.length === 0 ? "" : "min-h-[160px]"}`}>
+            <section aria-label="日程" className={`flex flex-col rounded-xl bg-[var(--subtle-2)] p-3 ${agenda.length === 0 ? "" : "min-h-[160px]"}`}>
               <div className="mb-2 flex items-center gap-1.5 ui-section-title">
-                <span className="h-2 w-2 rounded-full bg-[#98a2b3]" aria-hidden="true" />
+                <span className="h-2 w-2 rounded-full bg-[var(--line-strong)]" aria-hidden="true" />
                 日程
                 <span className="ui-micro font-normal">{agenda.length}</span>
               </div>

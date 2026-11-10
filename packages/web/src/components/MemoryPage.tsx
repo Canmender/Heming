@@ -79,13 +79,13 @@ export interface MemoryPageProps {
 
 /* ------------------------------------------------------------------ 样式 */
 
-const cardCls = "rounded-xl border border-line bg-white p-4 shadow-card";
+const cardCls = "ui-card p-4";
 const inputCls = "mt-1 block w-full ui-input";
 const inputSmCls = "mt-1 block w-full ui-input";
 const labelCls = "block ui-caption";
 const btnGhost = "ui-btn ui-btn-md ui-btn-ghost";
 const btnGhostSm = "ui-btn ui-btn-sm ui-btn-ghost";
-const btnDangerSm = "ui-btn ui-btn-sm ui-btn-ghost text-[#b42318]";
+const btnDangerSm = "ui-btn ui-btn-sm ui-btn-ghost text-[var(--danger)]";
 const btnPrimary = "ui-btn ui-btn-md ui-btn-primary";
 const btnPrimarySm = "ui-btn ui-btn-sm ui-btn-primary";
 const hintCls = "ui-caption";
@@ -362,7 +362,7 @@ function Modal({
         aria-modal="true"
         aria-label={label}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[86vh] w-[min(460px,92vw)] overflow-y-auto rounded-xl border border-line bg-white p-5 shadow-card"
+        className="max-h-[86vh] w-[min(460px,92vw)] overflow-y-auto ui-card p-5"
       >
         <div className="mb-3 flex items-center justify-between gap-3">
           <h3 className="text-[14px] font-bold">{title}</h3>
@@ -370,7 +370,7 @@ function Modal({
             type="button"
             aria-label="关闭"
             onClick={onClose}
-            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             <XIcon width={16} height={16} aria-hidden="true" />
           </button>
@@ -632,7 +632,7 @@ function RecallGroup({ title, lines }: { title: string; lines: RecallLine[] }) {
       ) : (
         <ul className="mt-0.5 space-y-1">
           {lines.map((line, i) => (
-            <li key={i} className="break-words text-[11px] text-[#555]">
+            <li key={i} className="break-words text-[11px] text-[var(--body)]">
               {line.text}
               <span className="ml-1 text-[10px] text-muted">
                 {line.score !== undefined && `· 打分 ${line.score.toFixed(3)} `}
@@ -658,7 +658,7 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
     <li className="rounded-lg border border-line px-3 py-2">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="break-words text-[12px] text-[#555]">{clip(run.query, 60) || "（空提问）"}</div>
+          <div className="break-words text-[12px] text-[var(--body)]">{clip(run.query, 60) || "（空提问）"}</div>
           <div className="mt-0.5 text-[10px] text-muted">
             {run.at.slice(0, 10)} {run.at.slice(11, 16)} · 召回 语义{run.recalled.semantic}/情景{run.recalled.episodic}/短期
             {run.recalled.working} → 注入 {run.injected.length} 条
@@ -671,9 +671,9 @@ function RecallRunRow({ run, expanded, onToggle }: { run: RecallRun; expanded: b
         </button>
       </div>
       {expanded && (
-        <div className="mt-2 space-y-1 border-t border-[#ececec] pt-2">
+        <div className="mt-2 space-y-1 border-t border-line-soft pt-2">
           {run.injected.map((item) => (
-            <div key={`${item.layer}-${item.id}`} className="break-words text-[11px] text-[#555]">
+            <div key={`${item.layer}-${item.id}`} className="break-words text-[11px] text-[var(--body)]">
               <span className="text-muted">
                 {item.layer === "semantic" ? "语义" : item.layer === "episodic" ? "情景" : "短期"}
                 {item.score !== undefined && ` ${item.score.toFixed(3)}`}
@@ -1219,7 +1219,7 @@ export function MemoryPage({
                     <div
                       key={turn.id}
                       data-memory-id={turn.id}
-                      className={`rounded-lg border border-line-soft bg-[#fafafa] px-2.5 py-2 ${
+                      className={`rounded-lg border border-line-soft bg-[var(--subtle-2)] px-2.5 py-2 ${
                         highlightMemoryId === turn.id ? "ring-2 ring-[#1a1a1a]/25" : ""
                       }`}
                     >
@@ -1228,10 +1228,10 @@ export function MemoryPage({
                         {turn.partial && " · 中断"}
                         {!agentId && ` · ${agentName(turn.agentId)}`}
                       </div>
-                      <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-[#555]">
+                      <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-[var(--body)]">
                         用户：{turn.userText}
                       </div>
-                      <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-[#555]">
+                      <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-[var(--body)]">
                         助手：{turn.assistantText}
                       </div>
                     </div>
@@ -1318,7 +1318,7 @@ export function MemoryPage({
       </span>
       <span aria-hidden="true" className="h-4 w-px bg-line-soft" />
       {vaultSync?.truncated ? (
-        <span role="status" className="text-[12px] text-[#b45309]">
+        <span role="status" className="text-[12px] text-[var(--warn)]">
           被截断 {vaultSync.truncated} 篇：{vaultSync.truncatedReason}
         </span>
       ) : (
@@ -1386,7 +1386,7 @@ export function MemoryPage({
         <div className={`mt-1 ${hintCls}`}>只列出最近 5 篇；完整清单见知识库页。</div>
       )}
       {vaultPreview && (
-        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] p-2 text-[11px] leading-5 text-[#555]">
+        <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-2 text-[11px] leading-5 text-[var(--body)]">
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate font-bold">{vaultPreview.rel}</span>
             <button type="button" onClick={() => setVaultPreview(null)} className={btnGhostSm}>
@@ -1411,7 +1411,7 @@ export function MemoryPage({
           <div>
             <div className="ui-section-title">数据库 · 长期记忆</div>
             <div className={`mt-1 ${hintCls}`}>
-              这是<strong className="font-medium text-[#666]">所有智能体共用</strong>的长期记忆；
+              这是<strong className="font-medium text-[var(--body)]">所有智能体共用</strong>的长期记忆；
               情景记忆按智能体分开，记的是每次对话的过程。
             </div>
           </div>
@@ -1566,7 +1566,7 @@ export function MemoryPage({
             readOnly
             aria-label="手动复制记忆 JSON"
             value={manualCopy}
-            className="mt-2 h-[120px] w-full rounded-lg border border-line-strong bg-[#fafafa] p-2 text-[11px]"
+            className="mt-2 h-[120px] w-full rounded-lg border border-line-strong bg-[var(--subtle-2)] p-2 text-[11px]"
           />
         )}
         {importOpen && (
@@ -1677,7 +1677,7 @@ export function MemoryPage({
                           <span className="text-[10px] text-muted">{agentName(entry.agentId)}</span>
                         )}
                       </div>
-                      <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-[#555]">
+                      <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-[var(--body)]">
                         {entry.value}
                       </div>
                       <div className="mt-1 text-[10px] text-muted">
@@ -1754,7 +1754,7 @@ export function MemoryPage({
                     {entry.at.slice(0, 10)}
                     {!agentId && ` · ${agentName(entry.agentId)}`} · {entry.sourceTurns} 轮
                   </div>
-                  <div className="mt-0.5 break-words text-[12px] text-[#555]">{entry.summary}</div>
+                  <div className="mt-0.5 break-words text-[12px] text-[var(--body)]">{entry.summary}</div>
                   {personalNote(usage[entry.id]) && (
                     <div className="mt-0.5 break-words text-[10px] text-muted">
                       {personalNote(usage[entry.id])}
@@ -1847,7 +1847,7 @@ export function MemoryPage({
                 readOnly
                 aria-label="将被注入的记忆段"
                 value={recall.text}
-                className="mt-3 h-[140px] w-full rounded-lg border border-line-strong bg-[#fafafa] p-2 text-[11px]"
+                className="mt-3 h-[140px] w-full rounded-lg border border-line-strong bg-[var(--subtle-2)] p-2 text-[11px]"
               />
             ) : (
               <div className={`mt-3 ${hintCls}`}>三层皆无命中：不会注入任何记忆段</div>
@@ -1920,7 +1920,7 @@ export function MemoryPage({
               >
                 <div className="min-w-0">
                   <div className="truncate text-[12px] font-bold">{row.title}</div>
-                  <div className="mt-0.5 break-words text-[12px] text-[#555]">{row.body}</div>
+                  <div className="mt-0.5 break-words text-[12px] text-[var(--body)]">{row.body}</div>
                   <div className="mt-0.5 text-[10px] text-muted">
                     {row.layer}
                     {!agentId && ` · ${agentName(row.agentId)}`}
@@ -2186,8 +2186,8 @@ export function MemoryPage({
             onClick={() => patchReview({ frequency: value })}
             className={`rounded-lg border px-2 py-1 text-[11px] ${
               reviewSettings.frequency === value
-                ? "border-[#1a1a1a] bg-ink text-white"
-                : "border-line hover:bg-[#fafafa]"
+                ? "border-ink bg-ink text-[var(--surface)]"
+                : "border-line hover:bg-[var(--subtle-2)]"
             }`}
           >
             {label}
@@ -2219,7 +2219,7 @@ export function MemoryPage({
               {capacity.used} / {capacity.limit} 字符
             </span>
           </div>
-          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#eee]">
+          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[var(--subtle-3)]">
             <div
               className="h-full rounded-full bg-ink"
               style={{
@@ -2304,10 +2304,10 @@ export function MemoryPage({
                     </td>
                   </tr>
                   {pendingDbOff === agent.id && (
-                    <tr className="bg-[#fafafa]">
+                    <tr className="bg-[var(--subtle-2)]">
                       <td colSpan={4} className="px-2 py-2" >
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[11px] text-[#b45309]">
+                          <span className="text-[11px] text-[var(--warn)]">
                             关闭后该智能体将不能读取个人知识库。个人知识库默认允许使用，确认关闭？
                           </span>
                           <button
@@ -2428,7 +2428,7 @@ export function MemoryPage({
           {vaultMsgRow}
         </div>
         {vaultSync?.truncated ? (
-          <div className="mt-2 text-[12px] text-[#b45309]">
+          <div className="mt-2 text-[12px] text-[var(--warn)]">
             被截断 {vaultSync.truncated} 篇：{vaultSync.truncatedReason}
           </div>
         ) : null}
@@ -2487,7 +2487,7 @@ export function MemoryPage({
               与设置区同一做法，标签与内容收进 1200px 居中列，宽屏阅读更稳。 */}
           <div className="mx-auto w-full max-w-[1200px]">
           {rosterError && (
-            <div role="status" className="mb-2 text-[12px] text-[#b45309]">
+            <div role="status" className="mb-2 text-[12px] text-[var(--warn)]">
               {rosterError}
             </div>
           )}

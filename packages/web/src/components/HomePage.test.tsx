@@ -268,7 +268,9 @@ describe("HomePage", () => {
     // 重复的「在线成员」卡已从右栏删除（页头副标题里的在线人数仍在）
     expect(screen.queryByText("全部名册")).toBeNull();
 
-    fireEvent.click(within(recent).getByRole("button", { name: "继续与 我的智能体甲 对话" }));
+    fireEvent.click(
+      within(recent).getByRole("button", { name: "继续与 我的智能体甲 的对话：我的智能体甲" }),
+    );
     expect(useUiStore.getState().page).toBe("chat");
     expect(useUiStore.getState().activeConversationId).toBe("c-new");
   });

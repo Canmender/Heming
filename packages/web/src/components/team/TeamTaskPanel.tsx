@@ -28,9 +28,9 @@ const STATUS_LABEL: Record<TeamItemStatus, string> = {
 
 const STATUS_STYLE: Record<TeamItemStatus, string> = {
   todo: "border-line text-muted",
-  doing: "border-[#b2ddff] bg-[#eff8ff] text-[#175cd3]",
-  done: "border-[#abefc6] bg-[#ecfdf3] text-[#067647]",
-  blocked: "border-[#fedf89] bg-[#fffaeb] text-[#b45309]",
+  doing: "border-[var(--info-line)] bg-[var(--info-soft)] text-[var(--info)]",
+  done: "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]",
+  blocked: "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]",
 };
 
 /** 任务筛选：默认看未完成的（完成的多起来会淹掉真正要做的）。 */

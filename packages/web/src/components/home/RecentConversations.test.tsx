@@ -57,6 +57,24 @@ describe("RecentConversations", () => {
     expect(useUiStore.getState().activeConversationId).toBe("c-mid");
   });
 
+  it("有服务端标题时：一级显示会话名，副行是智能体 + 时间", () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          ...conv("c-title", "和小鸣", new Date(Date.now() - 60_000).toISOString()),
+          title: "周报整理",
+        },
+      ] as never,
+    });
+    render(<RecentConversations />);
+    const card = screen.getByRole("region", { name: "最近对话" });
+    const button = within(card).getByRole("button", {
+      name: "继续与 和小鸣 的对话：周报整理",
+    });
+    expect(button.textContent).toContain("周报整理");
+    expect(button.textContent).toContain("和小鸣");
+  });
+
   it("还没有消息的会话显示「还没有消息」，不会被当成最近（排在后面）", () => {
     useChatStore.setState({
       conversations: [

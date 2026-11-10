@@ -65,11 +65,16 @@ export function RecentConversations() {
         </div>
       ) : (
         <ul className="flex flex-col">
-          {recent.map((conv) => (
+          {recent.map((conv) => {
+            // d.128 起会话有名字：首页与智能体页左栏同一口径——一级是会话名，副行才是智能体 + 时间。
+            const title = (conv.title ?? "").trim() || conv.agent.name;
+            const timeText = conv.lastMessageAt ? fmtRelative(conv.lastMessageAt) : "还没有消息";
+            const meta = title === conv.agent.name ? timeText : `${conv.agent.name} · ${timeText}`;
+            return (
             <li key={conv.id}>
               <button
                 type="button"
-                aria-label={`继续与 ${conv.agent.name} 对话`}
+                aria-label={`继续与 ${conv.agent.name} 的对话：${title}`}
                 onClick={() => openConversation(conv.id)}
                 className={`flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-[var(--subtle-2)] ${FOCUS_RING}`}
               >
@@ -78,10 +83,8 @@ export function RecentConversations() {
                   size={22}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12px] font-medium">{conv.agent.name}</span>
-                  <span className="block truncate ui-caption">
-                    {conv.lastMessageAt ? fmtRelative(conv.lastMessageAt) : "还没有消息"}
-                  </span>
+                  <span className="block truncate text-[12px] font-medium">{title}</span>
+                  <span className="block truncate ui-caption">{meta}</span>
                 </span>
                 {conv.unreadCount > 0 ? (
                   <span className="shrink-0 rounded-full bg-[var(--danger)] px-1.5 text-[10px] font-semibold text-white">
@@ -90,7 +93,8 @@ export function RecentConversations() {
                 ) : null}
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </section>

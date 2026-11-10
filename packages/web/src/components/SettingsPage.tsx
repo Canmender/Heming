@@ -58,7 +58,7 @@ function InlineText({ text }: { text: string }) {
             {seg.text}
           </strong>
         ) : seg.kind === "code" ? (
-          <code key={i} className="rounded-sm bg-[#f2f2f2] px-1 font-mono text-[11px]">
+          <code key={i} className="rounded-sm bg-[var(--subtle-2)] px-1 font-mono text-[11px]">
             {seg.text}
           </code>
         ) : (
@@ -294,7 +294,7 @@ export function SettingsPage() {
                         <button
                           type="button"
                           onClick={() => jumpToCard(card)}
-                          className={`flex w-full items-center gap-2 rounded-lg border border-line-soft bg-white px-3 py-2 text-left ui-body-sm hover:border-line hover:bg-[#fafafa] ${FOCUS_RING}`}
+                          className={`flex w-full items-center gap-2 rounded-lg border border-line-soft bg-[var(--surface)] px-3 py-2 text-left ui-body-sm hover:border-line hover:bg-[var(--subtle-2)] ${FOCUS_RING}`}
                         >
                           <span className="min-w-0 flex-1 truncate">
                             {settingsCardById(card.id)?.title ?? card.title}
@@ -372,7 +372,7 @@ export function SettingsPage() {
                   data-settings-id="memory-vault"
                   className={anchorClass(highlightId === "memory-vault")}
                 >
-                  <section className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
+                  <section className="mt-3 ui-card p-4">
                     <div className="text-[12px] font-bold text-muted">知识库与记忆</div>
                     <p className="mt-1 ui-caption">
                       知识库参与记忆的开关、已纳入篇数与同步状态都在记忆页；这里只做入口，
@@ -457,11 +457,11 @@ function ProfileSection() {
   };
 
   return (
-    <section className="max-w-full rounded-xl border border-line bg-white p-4 shadow-card">
+    <section className="max-w-full ui-card p-4">
       <div className="ui-section-title">个人资料</div>
 
       <div className="mt-3 flex items-center gap-4">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f0f0f0] text-muted">
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--subtle-3)] text-muted">
           {avatar ? (
             <img src={avatar} alt="当前头像" className="h-full w-full object-cover" />
           ) : (
@@ -489,7 +489,7 @@ function ProfileSection() {
             setAvatar(undefined);
             setSaved(false);
           }}
-          className="mt-2 rounded-lg border border-line px-3 py-1 text-[12px] shadow-card hover:bg-[#fafafa]"
+          className="mt-2 rounded-lg border border-line px-3 py-1 text-[12px] shadow-card hover:bg-[var(--subtle-2)]"
         >
           恢复默认头像
         </button>
@@ -728,7 +728,7 @@ function AppearanceSection() {
   return (
     <section
       aria-label="主题色"
-      className="max-w-full rounded-xl border border-line bg-white p-4 shadow-card"
+      className="max-w-full ui-card p-4"
     >
       <div className="flex items-center gap-2">
         <span className="ui-section-title">主题色</span>
@@ -811,7 +811,7 @@ function NavigationSection() {
   return (
     <section
       aria-label="导航顺序"
-      className="max-w-full rounded-xl border border-line bg-white p-4 shadow-card"
+      className="max-w-full ui-card p-4"
     >
       <div className="ui-section-title">导航顺序</div>
       <div className="mt-1 ui-caption">
@@ -884,7 +884,7 @@ function AboutSection({ highlightedId }: { highlightedId: string | null }) {
       <div data-settings-id="changelog" className={anchorClass(highlightedId === "changelog")}>
         <section
           aria-label="更新日志"
-          className="max-w-full rounded-xl border border-line bg-white p-4 shadow-card"
+          className="max-w-full ui-card p-4"
         >
       <div className="flex items-center justify-between gap-3">
         <div className="ui-section-title">更新日志</div>

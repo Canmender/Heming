@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.129.3.49.0",
+    "date": "2026-11-10",
+    "title": "首页最近对话有名字了，团队/记忆/设置更顺眼",
+    "bullets": [
+      "首页右下角「最近对话」现在直接显示会话名（比如「周报整理」），下面小字是智能体和时间；点进去就是那段对话。",
+      "团队、记忆、设置、首页的卡片与颜色统一了一遍，深色模式下不再有发白的块或刺眼的蓝/绿/琥珀色。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.129.3.48.0",
     "date": "2026-11-10",
     "title": "对话可以改名、可以删除了",

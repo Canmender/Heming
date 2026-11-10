@@ -12,6 +12,25 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.129.3.49.0",
+    "date": "2026-11-10",
+    "title": "首页最近对话显示会话名；团队/记忆/设置/首页收口到主题 token",
+    "bullets": [
+      "一级信息从智能体名改为**会话名**（d.128 起服务端有 `title`）；副行显示「智能体 · 时间」，没有标题的旧会话回落智能体名；`aria-label` 同步为「继续与 <智能体> 的对话：<会话名>」。",
+      "首页与智能体页左栏现在同一口径：点哪段进哪段，标题一致。",
+      "卡壳 `rounded-xl border border-line bg-white … shadow-card` → `.ui-card`；`bg-white` / `#f7f7f7` /`#fafafa` / `#f2f2f2` 等写死底色 → `--surface` / `--subtle*`；`text-[#555]` / `#666` → `body`，",
+      "团队计划/任务状态胶囊（蓝/绿/琥珀）改成 `--info` / `--success` / `--warn` 的 soft/line/text 组合，浅色不变、深色下不再刺眼。",
+      "真实浏览器亮/暗截图核对：主页、团队（工作台/动向/看板/日程/用量）、记忆、设置、插件。",
+      "`web` 全量测试通过；`pnpm -r typecheck` 六包零错误；编码检查 OK（具体数字见 HANDOFF）。",
+      "本轮只改样式与首页展示，不动接口/存储行为。"
+    ],
+    "paragraphs": [
+      "① 首页「最近对话」与会话名对齐",
+      "② UI/UX token 收口（团队 / 看板 / 工作台 / 记忆 / 设置 / 首页）错误提示 → `--danger`，警告 → `--warn`，在线状态点 → `--success`。",
+      "验证"
+    ]
+  },
+  {
     "version": "d.129.3.48.0",
     "date": "2026-11-10",
     "title": "对话可以改名、可以删除（会话行「⋯」）",
