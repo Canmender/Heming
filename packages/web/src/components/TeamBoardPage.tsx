@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { TeamActivity, TeamActivityKind, TeamMember } from "@heming/shared";
 import { Avatar } from "./Avatar.js";
-import { TaskIcon } from "./icons.js";
+import { CalendarIcon, TaskIcon } from "./icons.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { SkeletonCard } from "./ui/Skeleton.js";
 import { activitySummaryLabel } from "../lib/team/labels.js";
@@ -258,6 +258,7 @@ export function TeamBoardView({
                 <EmptyState
                   compact
                   className="px-0 py-6"
+                  icon={<TaskIcon width={20} height={20} />}
                   title={selectedMember ? "该成员没有符合条件的任务。" : "还没有任务摘要。"}
                 />
               ) : (
@@ -284,6 +285,7 @@ export function TeamBoardView({
                 <EmptyState
                   compact
                   className="px-0 py-6"
+                  icon={<CalendarIcon width={20} height={20} />}
                   title={selectedMember ? "该成员没有符合条件的日程。" : "还没有日程摘要。"}
                 />
               ) : (

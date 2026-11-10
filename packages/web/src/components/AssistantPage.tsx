@@ -10,6 +10,7 @@ import { CollabView } from "./collaboration/CollabView.js";
 import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { clearDraft } from "../lib/drafts.js";
 import { ConversationRail } from "./assistant/ConversationRail.js";
 import { AgentPicker } from "./assistant/AgentPicker.js";
 import { AgentRosterView } from "./assistant/AgentRosterView.js";
@@ -183,6 +184,7 @@ export function AssistantPage() {
     setDeleteTarget(null);
     try {
       await deleteConversation(id);
+      clearDraft(id);
       if (activeConversationId === id) useUiStore.setState({ activeConversationId: null });
     } catch (err) {
       setError(err instanceof Error && err.message ? `删除会话失败：${err.message}` : "删除会话失败");

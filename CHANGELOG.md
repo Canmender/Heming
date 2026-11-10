@@ -2,6 +2,30 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.129.3.50.0（2026-11-10）— 空状态统一图标砖；删除对话清干净本机残留
+
+### ① 空状态统一（EmptyState → `.ui-icon-tile`）
+
+- `EmptyState` 的图标槽从写死 32px / `text-[#98a2b3]` 改为 d.125 的 `.ui-icon-tile`（40px、accent 8% 底、
+  muted 图标），全站空态（团队、插件、知识库、自动化等）自动统一。
+- 团队看板「任务 / 日程」两个空面板补图标（任务用任务图标、日程新增 `CalendarIcon`），
+  不再是一大块空白灰区里只有一行字。
+- 首页、插件页最后几处写死色收口；`Home / Team / Memory / Settings / Plugins` 五个页面的
+  `bg-[#…] / text-[#…] / border-[#…] / shadow-[…] / bg-white` 审计计数均为 0。
+
+### ② 删除对话时清本机会话级残留
+
+`deleteConversation` 现在除了删服务端会话，还会在本机清掉：
+
+- `heming.transcript.<convId>`（思考/工具转录缓存）；
+- 该会话的打字机流与流归属（复用 `clearStreamsForConversation`，不会留「生成中」孤儿）；
+- 草稿（AssistantPage 删除确认后 `clearDraft`，rail 上不会再有「草稿」chip 残留）。
+
+### 验证
+
+- `web` 全量测试通过；新增/扩展用例：store 删除清转录/流式、AssistantPage 删除清草稿；
+- `pnpm -r typecheck` 六包零错误；真实浏览器亮/暗截图核对空态与团队看板。
+
 ## d.129.3.49.0（2026-11-10）— 首页最近对话显示会话名；团队/记忆/设置/首页收口到主题 token
 
 ### ① 首页「最近对话」与会话名对齐

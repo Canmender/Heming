@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AssistantPage } from "./AssistantPage.js";
 import { useChatStore } from "../store/chat.js";
+import { hasDraft, setDraft } from "../lib/drafts.js";
 import { useUiStore } from "../store/ui.js";
 import { useLlmStore } from "../store/llm.js";
 import { useAuthStore } from "../store/auth.js";
@@ -605,6 +606,7 @@ describe("会话左栏 · 改名与删除（d.128）", () => {
   });
 
   it("⋯ → 删除：二次确认后调用 deleteConversation 并清空当前会话", async () => {
+    setDraft("c2", "还没发的草稿");
     render(<AssistantPage />);
     fireEvent.click(screen.getByRole("button", { name: "会话操作：竞品调研" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
@@ -612,5 +614,7 @@ describe("会话左栏 · 改名与删除（d.128）", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() => expect(useChatStore.getState().deleteConversation).toHaveBeenCalledWith("c2"));
     expect(useUiStore.getState().activeConversationId).toBeNull();
+    // 该会话的草稿也不该留在 rail 上（无「草稿」chip 残留）
+    expect(hasDraft("c2")).toBe(false);
   });
 });

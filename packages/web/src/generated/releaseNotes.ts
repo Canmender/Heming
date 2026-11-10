@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.129.3.50.0",
+    "date": "2026-11-10",
+    "title": "空状态更统一；删对话不留本机垃圾",
+    "bullets": [
+      "「空状态」的图标统一成同一尺寸/底色，团队看板的「任务 / 日程」空面板也补上了图标，不再是空白灰块。",
+      "删除一段对话时，本机的草稿、思考/工具缓存、生成中状态会一起清掉，不会在左栏或存储里留残影。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.129.3.49.0",
     "date": "2026-11-10",
     "title": "首页最近对话有名字了，团队/记忆/设置更顺眼",

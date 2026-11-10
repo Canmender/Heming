@@ -371,3 +371,11 @@ export const RefreshIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M20 5v6h-6" />
   </svg>
 );
+
+/** 日历（团队日程/看板空态用）：线框 + 两根挂钉。 */
+export const CalendarIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+    <path d="M3.5 9.5h17M8 3.5v3M16 3.5v3" />
+  </svg>
+);

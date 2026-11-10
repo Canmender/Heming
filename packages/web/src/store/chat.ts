@@ -556,10 +556,20 @@ export const useChatStore = create<ChatState>((set, get) => {
   },
   async deleteConversation(convId) {
     await deleteConversationApi(convId);
-    set({ conversations: get().conversations.filter((c) => c.id !== convId) });
+    // 本机会话级残留一起清：转录缓存、该会话的流式项与流归属；否则换设备前一直占 localStorage。
+    try {
+      localStorage.removeItem(TRANSCRIPT_STORAGE_PREFIX + convId);
+    } catch {
+      /* 隐私模式/无 storage：删服务器成功即算成功，本地清不掉不影响结果 */
+    }
+    // 该会话的打字机项与流归属复用已有清理动作（与 ChatPage 卸载时同一口径）。
+    get().clearStreamsForConversation(convId);
     const nextMessages = { ...get().messages };
     delete nextMessages[convId];
-    set({ messages: nextMessages });
+    set({
+      conversations: get().conversations.filter((c) => c.id !== convId),
+      messages: nextMessages,
+    });
   },
   async loadAgentsRoster() {
     const agentsRoster = await listAgents();

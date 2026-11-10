@@ -21,10 +21,9 @@ describe("EmptyState 统一空态", () => {
       "ui-empty-desc",
     );
     expect(screen.getByRole("button", { name: "新建自动化" })).toBeInTheDocument();
-    // 图标槽是 32px 的装饰件：读屏不重复念
+    // 图标槽走 d.125 的统一图标砖（.ui-icon-tile，40px/accent 8% 底）：读屏不重复念
     const iconSlot = screen.getByTestId("empty-icon").parentElement as HTMLElement;
-    expect(iconSlot.className).toContain("h-8");
-    expect(iconSlot.className).toContain("w-8");
+    expect(iconSlot.className).toContain("ui-icon-tile");
     expect(iconSlot).toHaveAttribute("aria-hidden", "true");
   });
 

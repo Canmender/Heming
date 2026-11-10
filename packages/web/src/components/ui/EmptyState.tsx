@@ -43,10 +43,7 @@ export function EmptyState({
   return (
     <div className={`ui-empty${compact ? " gap-1 py-5" : ""}${className ? ` ${className}` : ""}`}>
       {icon ? (
-        <div
-          className="flex h-8 w-8 shrink-0 items-center justify-center text-[#98a2b3]"
-          aria-hidden="true"
-        >
+        <div className="ui-icon-tile" aria-hidden="true">
           {icon}
         </div>
       ) : null}

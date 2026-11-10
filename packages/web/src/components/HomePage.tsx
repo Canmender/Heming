@@ -533,7 +533,7 @@ export function HomePage() {
               <div className="ml-auto flex items-center gap-1 text-[10px] text-muted">
                 少
                 {["var(--heat-0)", "var(--heat-1)", "var(--heat-2)", "var(--heat-3)", "var(--heat-4)"].map((c) => (
-                  <span key={c} style={{ backgroundColor: c }} className="h-2.5 w-2.5 rounded-[2px]" />
+                  <span key={c} style={{ backgroundColor: c }} className="h-2.5 w-2.5 rounded-sm" />
                 ))}
                 多
               </div>

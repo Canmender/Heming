@@ -645,7 +645,7 @@ export function PluginsPage({
             {orphanTotal > 0 && (
               <div
                 role="status"
-                className="mb-3 rounded-lg border border-[#f3d2ce] bg-[#fffafa] p-3"
+                className="mb-3 rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] p-3"
                 aria-label="孤儿记录提示"
               >
                 <p className="ui-body-sm">

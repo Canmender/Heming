@@ -761,11 +761,30 @@ describe("chat store · 删除会话（d.128）", () => {
       ] as never,
       messages: { c1: [msg("m1", "你好")] } as never,
     });
+    localStorage.setItem("heming.transcript.c1", JSON.stringify([{ id: "m1", thinking: "旧思考" }]));
+    useChatStore.setState({
+      streaming: {
+        s1: {
+          agentId: "a1",
+          conversationId: "c1",
+          text: "半截",
+          reasoning: "",
+          tools: [],
+          status: "running",
+          startedAt: Date.now(),
+        },
+      } as never,
+      streamOwner: { s1: true } as never,
+    });
     const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
     await useChatStore.getState().deleteConversation("c1");
     expect(spy).toHaveBeenCalledWith("/api/conversations/c1", expect.objectContaining({ method: "DELETE" }));
     expect(useChatStore.getState().conversations).toEqual([]);
     expect(useChatStore.getState().messages.c1).toBeUndefined();
+    // 本机会话级残留：转录缓存、该会话的打字机项与流归属
+    expect(localStorage.getItem("heming.transcript.c1")).toBeNull();
+    expect(useChatStore.getState().streaming).toEqual({});
+    expect(useChatStore.getState().streamOwner).toEqual({});
   });
 
   it("deleteConversation：接口失败时抛错、本地不删（保证与服务端一致）", async () => {
