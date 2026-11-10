@@ -24,15 +24,14 @@
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-09） | `d.121.3.47.0`（`main`，**已部署 + 更新源已发布**）——插件工具包落位（`plugin-kit/`：标准/编写/菜谱/FAQ/示例/模板/schema）；d.120 插件体系落标准、d.119 插件保存失败修复 + 已装模块进导航。详见 §5 首条 |
-| 安装包（最新） | **`d.121.3.47.0`（r87）已出包并发布到更新源**：`packages/desktop/release/r87/和鸣 Setup d.121.3.47.0.exe`（247,025,226 字节，sha512 `vixklJUg1Tedqb365j0UXneK62LcdIJFjr3xIQhbAAN7drwuVgTA7a1po/4SnHSLiGIsuwb3mKKjT/HwzQikQw==`，与 r87 `latest.yml` 及远端一致）。`release.mjs --desktop --deploy` 于 2026-11-09 22:0x–22:16 实跑：7 步 OK / 2 步 SKIP（构建 20.3s、逐包测试 2m09s、打包 3m26s、部署 4m15s）；内嵌 web 含 `d.121.3.47.0`。更早的 r83–r86 保留对照。 |
-| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.121.3.47.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
-| 测试 | 2026-11-09 21:5x 实跑（d.121 门禁）：**web 331 文件 / 4717 例、server 16 / 264、shared 8 / 93、pet-widget 11 / 138、desktop 44 个 node:test 文件 / 706 例**；`pnpm -r typecheck` 五包零错误（desktop 为 `node --check`）。同日真实浏览器冒烟：登录 → 主页 → 插件页 → 从云端安装模块（列表 4 项）→ 装「工作流」后导航末尾出现入口 → 工作流页渲染 → 设置·关于显示版本与更新日志。 |
-| 线上 | **`d.121.3.47.0` 已于 2026-11-09 22:11–22:16 部署**（`release.mjs --desktop --deploy`：7 OK / 2 SKIP；备份 `heming-data-2026-11-09-d.121.3.47.0.tar.gz` 110.5KB 落本机；install + smoke 通过，服务器本机 `/api/health` = `{"ok":true}`）。人工校验：公网 `/api/health` 200 `{"ok":true}`；`/api/modules` 返回 4 项（含 `workflows`）；首页主 bundle `index-BZ3G8BL8.js` 与本机 `packages/web/dist` **同名同 md5**（`35A239732E5AA5B90370B5BD204D7A84`）、无注入 IP。⚠ 部署包 183.3MB（预期 5MB 量级）：`packages/desktop/resources/magpie/` 的 `magpie-core.exe` 与 `.exe~` 共约 144MB 未在排除表里——不影响运行，但每次上传/`keep` 占盘，列为下一步候选。 |
-| 安装包（已发布） | **`和鸣 Setup d.121.3.47.0.exe`（`r87`，247,025,226 字节）已发布到 `/opt/heming/updates`**：`node scripts/publish-update.mjs`（`HEMING_RELEASE_DIR=…/r87`）上传 3 个文件并按远端大小 + sha512 逐个校验通过；yml 与安装包逐字节一致。 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **当前指向 121.3.47**（sha512 `vixk…kQw==`，size 247025226，与安装包实测一致）。远端目录现有 d.114 / d.115 / d.121 三版；按「只留最近 2 版」策略应清理 d.114（待办，不影响客户端）。 |
-| 发布标签 | **`d.121.3.47.0` 本轮未打 tag**（部署/发布已完成，补 tag 属收尾项）。历史：`d.66.2.25.0`（`1f4d591`）、`d.67.2.25.0`（`7299ff2`）、`d.68.2.26.0`（`e36c15e`）三条 annotated tag 已推送；`archive/claude-4be1ab-2026-10-20` 保留未合并功能线。远端只剩 `main`；本地保留 `main`、当前 `feat/d68-pet-nav-custom`、未合并的 `claude/awesome-franklin-4be1ab` 与各工具工作树分支。 |
-| 账号 | 只有 `admin/admin`（`HEMING_SEED_USERS` 播种；注册默认关闭）。**重置把旧库连同 `zhoukang` 等账号一起清掉了**，历史会话/消息不可恢复 |
+| 当前版本（2026-11-10） | `d.122.3.47.0`（`main`，**已部署 + 更新源已发布 + 已打 tag**）——插件区 UI 打磨与插件源码收进 `plugin-kit/plugins`（`plugin-kit/plugins/{infohub-collector,pet-widget,workflow-kit}`）；程序侧 `permissions.files` 诚实口径、`openPage` 白名单单一真源、部署包 183.3MB→30.6MB。详见 §5 首条 |
+| 安装包（最新） | **`d.122.3.47.0`（r88）已出包并发布到更新源**：`packages/desktop/release/r88/和鸣 Setup d.122.3.47.0.exe`（247,029,104 字节，sha512 `JdBrfJLBgYXsBMjZQ+6lrwfAmV0XBNhEgKB4SN+X50I2B9qtmlggQ7Qix0MUYNMtnBzVnZIr3Uzrrub+vGy13w==`，与 r88 `latest.yml` 及远端一致）；`release.mjs --desktop --deploy` 于 2026-11-10 07:46–07:56 实跑（构建 / 测试 / 打包通过；首轮部署因安装脚本失败，详见 §5 A/B 条），内嵌 web 含 `d.122.3.47.0`。 |
+| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.122.3.47.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
+| 测试 | 2026-11-10 07:4x 实跑（d.122 门禁）：**web 331 文件 / 4719 例、shared 8 / 95、pet-widget 11 / 138、desktop 44 个 node:test 文件 / 706 例**；server 首轮遇 Windows 已知 vitest worker 偶发崩溃（`0xC0000409`），单独重跑与两次全量重跑均 **16 / 264 通过**；`pnpm -r typecheck` 六包零错误（含新位置的 pet-widget）；`pnpm plugin:check` 退出 0。 |
+| 线上 | **`d.122.3.47.0` 已于 2026-11-10 07:57–08:00 部署**（`release.mjs --deploy --skip tests,desktop`：5 OK / 4 SKIP；备份 `heming-data-2026-11-10-d.122.3.47.0.tar.gz` 110.5KB 落本机；`INSTALL DONE: d.122.3.47.0`，smoke 通过）。人工校验：公网 `/api/health` 200 `{"ok":true}`；首页主 bundle `index-CqeWGy2h.js` 与本机 `packages/web/dist` 同名同 md5（`964AAC8F1164D2F973328F03001AC0DF`）。**部署包 30.6MB / 1802 项**（上一版 183.3MB；`TAR_FORBIDDEN` 0 项）。 |
+| 安装包（已发布） | **`和鸣 Setup d.122.3.47.0.exe`（`r88`，247,029,104 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs`（`HEMING_RELEASE_DIR=…/r88`）上传 3 个文件并按远端大小 + sha512 校验通过。 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **当前指向 122.3.47**（sha512 `JdBr…y13w==`，size 247029104）；远端只留 d.121 + d.122 两版（d.114/d.115 已按策略清理）。 |
+| 发布标签 | **`d.122.3.47.0` annotated tag 已打并推送**；`main` 已推送（`3fdd6f5`）。历史：`d.66.2.25.0`、`d.67.2.25.0`、`d.68.2.26.0` 三条 tag 已推送。
 
 ### 已完成里程碑
 
@@ -232,12 +231,12 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 
 ## 5. 下一步候选
-**程序侧 A/B 收口（`d.122.3.47.0`，2026-11-10；`main`，已部署）**：用户要求做 A（插件缺口）与 B（发布链瘦身）。
+**程序侧 A/B 收口（`d.122.3.47.0`，2026-11-10；`main`，已部署 + 已发布 + 已打 tag）**：用户要求做 A（插件缺口）与 B（发布链瘦身）。
 A① **`permissions.files` 诚实口径**：该字段自 d.64 起只是预留、没有执行点，界面却只写「本轮只展示」，容易被当成限制了文件访问；现在 v5 解析对**非空** `files` 给 warning（不生效、建议删掉），安装预览/详情改成「预留字段：当前不生效（插件不带文件工具）」，标准/FAQ 同步（`manifest.alignment.test.ts` +2 例）。
 A② **`openPage` 白名单单一真源**：`shared/src/plugin/widget.ts` 新增 `WIDGET_ALLOWED_PAGES`（`WidgetPage` 由它派生），主进程 `plugin-window.js` / `main.js` 两处运行期副本由新增 `packages/desktop/widget-pages.test.js` 逐项比对（多/少即红）。
 A③ pet-widget 源码类型改用 `HemingWidgetApi` 属插件内容，未在本轮做（需重打包签名）。
 B① **部署包瘦身**：`release.mjs` 排除表补 `packages/desktop/resources`（magpie-core.exe ×2 约 144MB）、`plugin-kit`、`vendor`、`.tmp-engine-*`，`TAR_FORBIDDEN` 同步；本地同参数实测 **183.3MB → 25.8MB**（条目 4000 → 约 1500，必需产物齐全）。
-B② **更新源清理**：远端 `/opt/heming/updates` 删除 d.114，只留 d.115 + 当前版。B③ **补 tag**：提交后打 annotated tag 并推送（连同 main）。
+B② **更新源清理**：远端 `/opt/heming/updates` 按「只留最近 2 版」清到 d.121 + d.122（先清 d.114，发布后清 d.115）。B③ **补 tag**：`d.122.3.47.0` annotated tag 已打并推送，`main` 已推送。**部署踩坑（已修）**：① 部署包不能整目录排除 `plugin-kit`——`pnpm-workspace.yaml` 把它列为 workspace 项目，云端 `pnpm install --frozen-lockfile` 会校验清单，缺目录直接 `ERR_PNPM_OUTDATED_LOCKFILE`；改为只排 `pet-widget/dist`、`workflow-kit/dist` 后包 30.6MB 且必需产物齐全。② 安装脚本是**覆盖式解包**，上一版残留的 `packages/pet-widget` 会被 `packages/*` glob 当成第七个 workspace 项目导致同样错误；`install-app.sh` 解包前 `rm -rf "$APP/packages/pet-widget"`（幂等清扫），修后 `INSTALL DONE: d.122.3.47.0`。
 验证：组合树 `pnpm -r build` 通过、`pnpm -r test` web 331/4719 + shared 8/95 + pet-widget 11/138 + desktop 44/706、server 首轮遇已知 `0xC0000409` worker 偶发、重跑 16/264 通过；`pnpm -r typecheck` 六包零错误；`pnpm plugin:check` 退出 0；真实浏览器冒烟新插件页（能力中枢 hero、安装面板拖入提示、权限区「文件根：notes 预留字段：当前不生效」、预览可装）。
 
 
