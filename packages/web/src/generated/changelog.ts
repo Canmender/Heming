@@ -20,6 +20,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "删除正停在的会话时自动回智能体选择页；其它会话与智能体本身不受影响。",
       "新增 `DELETE /api/conversations/:id`：成员才可删（非成员 403、不存在 404），后台 204。",
       "Store 删除实现（内存/sqlite 双份）：显式事务里删 `messages` / `message_reads` / `conversation_members` /`conversation_agents` / `conversations`，中途失败回滚，不留半截会话。",
+      "「思考过程」「工具调用」两块去掉写死的浅色边框/底色/文字色，改走 `--line-soft` / `--subtle-2` /`--surface` / `body` / `--success` / `--warn` / `--danger` token；深色模式下不再出现白底块，",
       "server：内存与 sqlite 双 Store 的「成员可删 / 非成员 forbidden / 不存在 not found」+ REST 用例（+3，共 270）；",
       "web：会话行改名提交、删除二次确认、store 删除成功/失败一致性（+4，共 4840）；",
       "真实浏览器（本地 dev）：⋯ 菜单、行内改名态截图核对。",
@@ -31,7 +32,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       "上一版把「同一智能体多段会话 + 会话名」做出来了，这一版补上会话管理：",
       "① 会话行操作",
       "② 服务端删除",
-      "③ 测试",
+      "③ 对话转录块暗色与视觉统一（⑤ 延续）工具结果成功/失败底色也随主题切换。真实浏览器亮/暗截图核对展开态。",
+      "④ 测试",
       "验证",
       "边界"
     ]

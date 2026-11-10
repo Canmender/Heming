@@ -18,7 +18,13 @@
 - Store 删除实现（内存/sqlite 双份）：显式事务里删 `messages` / `message_reads` / `conversation_members` /
   `conversation_agents` / `conversations`，中途失败回滚，不留半截会话。
 
-### ③ 测试
+### ③ 对话转录块暗色与视觉统一（⑤ 延续）
+
+- 「思考过程」「工具调用」两块去掉写死的浅色边框/底色/文字色，改走 `--line-soft` / `--subtle-2` /
+  `--surface` / `body` / `--success` / `--warn` / `--danger` token；深色模式下不再出现白底块，
+  工具结果成功/失败底色也随主题切换。真实浏览器亮/暗截图核对展开态。
+
+### ④ 测试
 
 - server：内存与 sqlite 双 Store 的「成员可删 / 非成员 forbidden / 不存在 not found」+ REST 用例（+3，共 270）；
 - web：会话行改名提交、删除二次确认、store 删除成功/失败一致性（+4，共 4840）；
