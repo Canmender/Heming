@@ -34,7 +34,7 @@ import {
 import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { InstallDialog } from "./plugins/InstallDialog.js";
-import { PluginRepositoryPanel } from "./plugins/PluginRepositoryPanel.js";
+
 import { PluginRepositoryDialog } from "./plugins/PluginRepositoryDialog.js";
 import { downloadPluginManifest } from "../lib/plugins/catalogClient.js";
 import { installBundleFromMarket } from "../lib/widgets/marketInstall.js";
@@ -73,24 +73,25 @@ import { UnitDiagnostics } from "./plugins/UnitDiagnostics.js";
  *
  * 插件 = 能力包：技能 / 工具 / MCP 服务 / 命令，外加随应用发布的**可安装内置模块**
  * （幕僚 / 信息中枢 / 自动化）。本页把此前散在插件区、技能区、接口区的口径合并成
- * 六个 Tab，数据全部只读本机（插件存储、技能池、能力目录、MCP 注册表），不发起网络请求。
+ * 三个 Tab（插件 / 技能 / MCP），数据全部只读本机（插件存储、技能池、能力目录、MCP 注册表），不发起网络请求。
  *
  * 市场页与模块页已删除：市场只保留「仓库」一条安装路径（同一份云端清单），
- * 模块并入「插件」Tab 的统一列表（可安装/删除/启停/打开页面）。
+ * 官方页面插件、声明式插件与界面插件统一放在「插件」Tab（可安装/删除/启停/打开页面），全部由我们的服务器仓库分发。
  * 「技能」「MCP」两个 Tab 是完整的 `SkillsView` / `InterfacesView`，页内动作只切 Tab、不跨页。
  */
 
-type TabKey = "plugins" | "repo" | "widgets" | "skills" | "tools" | "mcp";
+type TabKey = "plugins" | "skills" | "mcp";
 
+/**
+ * 能力只有三类（d.123 用户口径）：
+ * - **插件**：可安装的包（声明式插件 / 官方页面插件 / 界面插件），全部由我们的服务器仓库分发；
+ * - **技能**：和鸣自带 + 社区（论坛）安装，嵌完整的技能视图；
+ * - **MCP**：和鸣自带/预置 + 注册表社区安装；工具授权也在这一页（工具只是 MCP 的明细）。
+ */
 const TABS: { key: TabKey; label: string }[] = [
   { key: "plugins", label: "插件" },
-  // 云端插件仓库：下载原样清单、校验指纹后走同一套安装预览（市场删除后的唯一在线入口）
-  { key: "repo", label: "仓库" },
-  // 界面插件（原桌宠）与声明式插件分开展示——安装路径、信任模型、生命周期都不同
-  { key: "widgets", label: "桌面小组件" },
   { key: "skills", label: "技能" },
-  { key: "tools", label: "工具" },
-  { key: "mcp", label: "MCP 服务" },
+  { key: "mcp", label: "MCP" },
 ];
 
 /**
@@ -134,9 +135,9 @@ function hostOf(url: string): string {
   }
 }
 
-/** 插件区六个 Tab 的会话级记忆：刷新回到上次看的 Tab。 */
+/** 插件区三个 Tab 的会话级记忆：刷新回到上次看的 Tab。 */
 const PLUGINS_TAB_KEY = "heming.tab.plugins.v1";
-const PLUGINS_TABS = ["plugins", "repo", "widgets", "skills", "tools", "mcp"] as const satisfies readonly TabKey[];
+const PLUGINS_TABS = ["plugins", "skills", "mcp"] as const satisfies readonly TabKey[];
 
 export function PluginsPage({
   plugins = pluginStore,
@@ -405,7 +406,7 @@ export function PluginsPage({
         }
         const name = outcome.record?.name ?? entry.name;
         const version = outcome.record?.version ?? entry.version;
-        setTab("widgets");
+        setTab("plugins");
         bump();
         setMsg({
           kind: "ok",
@@ -579,12 +580,10 @@ export function PluginsPage({
         })}
         <span className="ml-auto self-center ui-caption">
           {tab === "plugins"
-            ? `已启用 ${enabledCount}/${list.length} 个插件 · 可安装插件从云端获取`
-            : tab === "repo"
-              ? "云端插件仓库：下载原样清单、校验指纹后走同一套安装预览"
-              : tab === "widgets"
-                ? "界面插件 · 含可执行代码，装后由宿主开独立窗口"
-                : ""}
+            ? `已启用 ${enabledCount}/${list.length} 个插件 · 全部由我们的服务器仓库分发`
+            : tab === "skills"
+              ? "和鸣自带 + 社区（论坛）快捷安装"
+              : "和鸣自带/预置 + 注册表社区安装 · 工具授权也在本页"}
         </span>
       </div>
 
@@ -594,21 +593,9 @@ export function PluginsPage({
         aria-labelledby={`plugins-${tab}-tab`}
         className="mt-4"
       >
-        {tab === "repo" && (
-          <PluginRepositoryPanel
-            installed={list.map((plugin) => ({
-              id: plugin.manifest.id,
-              version: plugin.manifest.version,
-            }))}
-            loadingKey={repoLoadingKey}
-            onLoad={loadFromRepository}
-            onError={(message) => setMsg({ kind: "error", text: message })}
-          />
-        )}
-
         {tab === "plugins" && (
           <>
-            {/* 安装入口放在列表上方（页头右上角的全局按钮已移除）：云端优先，粘贴清单兜底。 */}
+            {/* 安装入口放在列表上方：插件包与官方页面插件都来自我们自己的服务器仓库。 */}
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] p-2.5">
               <button
                 type="button"
@@ -616,7 +603,7 @@ export function PluginsPage({
                 className="ui-btn ui-btn-sm ui-btn-primary"
               >
                 <DownloadIcon width={13} height={13} aria-hidden="true" />
-                从云端安装
+                从插件仓库安装
               </button>
               <button type="button" onClick={openInstall} className="ui-btn ui-btn-sm ui-btn-ghost">
                 <FileIcon width={13} height={13} aria-hidden="true" />
@@ -628,7 +615,7 @@ export function PluginsPage({
                 className="ui-btn ui-btn-sm ui-btn-ghost"
               >
                 <PlugIcon width={13} height={13} aria-hidden="true" />
-                从云端安装插件
+                安装官方插件
               </button>
               <span className="ml-auto hidden ui-micro sm:inline">
                 安装只写本机清单，不运行代码
@@ -709,7 +696,7 @@ export function PluginsPage({
                 </span>
                 <p className="ui-section-title">还没有安装插件</p>
                 <p className="ui-caption">
-                  一份插件清单可以一次带入一组技能、远程 MCP 服务与命令；用上方的「从云端安装」或
+                  一份插件清单可以一次带入一组技能、远程 MCP 服务与命令；用上方的「从插件仓库安装」或
                   「手动粘贴清单」开始。
                 </p>
               </section>
@@ -724,13 +711,21 @@ export function PluginsPage({
 
             <p className={`mt-3 max-w-[680px] ${HINT}`}>
               这里安装的插件只声明技能、MCP 服务和命令，不含代码、不带密钥。安装不会运行程序，也不会联网；
-              连接与工具启用仍由你手动确认。带可执行界面代码的插件（如桌宠）请在「桌面小组件」安装。
+              连接与工具启用仍由你手动确认。
             </p>
+
+            {/* 界面插件（原「桌面小组件」Tab）并入插件列表末尾：它也是插件，只是带可执行界面。 */}
+            <section aria-label="界面插件" className="mt-6 border-t border-line-soft pt-4">
+              <div className="mb-2 flex flex-wrap items-baseline gap-2">
+                <h2 className="ui-section-title">界面插件</h2>
+                <span className="ui-micro text-muted">
+                  含可执行界面代码（首方签名）；装后由宿主开独立窗口
+                </span>
+              </div>
+              <WidgetsView />
+            </section>
           </>
         )}
-
-        {/* d.94：界面插件（桌面小组件）——列表/启停/卸载/宿主动作/安装，数据来自主进程 IPC */}
-        {tab === "widgets" && <WidgetsView />}
 
         {/* 技能 Tab：完整技能视图（原技能区页主体）。
             onChanged：技能池变更后让本页统计/能力快照同帧刷新（自检：新建技能后统计不涨）。 */}
@@ -743,21 +738,28 @@ export function PluginsPage({
           />
         )}
 
-        {tab === "tools" && (
-          <PluginToolPanel
-            groups={toolGroups}
-            blocked={blockedTools}
-            toolPacks={toolPackGroups}
-            onToggleTool={(serverId, toolName, enabled) => {
-              mcp.setToolEnabled(serverId, toolName, enabled);
-              bump();
-            }}
-          />
-        )}
-
-        {/* MCP Tab：完整接口视图（原接口区页主体）。 */}
+        {/* MCP Tab：注册表 / 预置服务 + 工具授权（工具只是 MCP 的明细，不再单独成 Tab）。 */}
         {tab === "mcp" && (
-          <InterfacesView registry={mcp} plugins={plugins} onOpenPlugin={openPluginDetail} />
+          <>
+            <InterfacesView registry={mcp} plugins={plugins} onOpenPlugin={openPluginDetail} />
+            <section aria-label="工具授权" className="mt-6 border-t border-line-soft pt-4">
+              <div className="mb-2 flex flex-wrap items-baseline gap-2">
+                <h2 className="ui-section-title">工具授权</h2>
+                <span className="ui-micro text-muted">
+                  按服务逐个开启；写操作仍逐次人工确认，插件声明的风险上限在这里执行
+                </span>
+              </div>
+              <PluginToolPanel
+                groups={toolGroups}
+                blocked={blockedTools}
+                toolPacks={toolPackGroups}
+                onToggleTool={(serverId, toolName, enabled) => {
+                  mcp.setToolEnabled(serverId, toolName, enabled);
+                  bump();
+                }}
+              />
+            </section>
+          </>
         )}
       </div>
 

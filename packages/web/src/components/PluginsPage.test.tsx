@@ -202,7 +202,7 @@ function installNow(): void {
 describe("PluginsPage · 云端安装弹窗（d.96）", () => {
   it("「从云端安装」直接列出云端插件库，选中后关闭弹窗并进入安装预览", async () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "从云端安装" }));
+    fireEvent.click(screen.getByRole("button", { name: "从插件仓库安装" }));
     const dialog = await screen.findByRole("dialog", { name: "云端插件库" });
     expect(await within(dialog).findByText("仓库插件")).toBeInTheDocument();
     expect(within(dialog).getByLabelText("搜索插件仓库")).toBeInTheDocument();
@@ -218,10 +218,10 @@ describe("PluginsPage · 云端安装弹窗（d.96）", () => {
   it("空插件页：列表上方仍给出「从云端安装」与「手动粘贴清单」两个入口", async () => {
     renderPage();
     expect(screen.getByText("还没有安装插件")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "从云端安装" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "从插件仓库安装" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "手动粘贴清单" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "从云端安装" }));
+    fireEvent.click(screen.getByRole("button", { name: "从插件仓库安装" }));
     expect(await screen.findByRole("dialog", { name: "云端插件库" })).toBeInTheDocument();
   });
 });
@@ -229,7 +229,7 @@ describe("PluginsPage · 云端安装弹窗（d.96）", () => {
 describe("PluginsPage · 仓库 Tab（d.95）", () => {
   it("仓库 Tab 展示云端目录；点「安装」下载清单并打开同一个安装预览", async () => {
     renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "仓库" }));
+    fireEvent.click(screen.getByRole("button", { name: "从插件仓库安装" }));
     expect(await screen.findByLabelText("搜索插件仓库")).toBeInTheDocument();
     expect(await screen.findByText("仓库插件")).toBeInTheDocument();
 
@@ -253,14 +253,14 @@ describe("PluginsPage · 插件从云端安装", () => {
     for (const name of ["幕僚", "信息中枢", "自动化"]) {
       expect(screen.queryByRole("region", { name: `插件 ${name}` })).toBeNull();
     }
-    expect(screen.getByRole("button", { name: "从云端安装插件" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "安装官方插件" })).toBeInTheDocument();
   });
 
   it("从云端安装插件：目录里的模块才出现；安装后可启停/删除", async () => {
     useModuleStore.getState().reset();
     renderPage();
 
-    fireEvent.click(screen.getByRole("button", { name: "从云端安装插件" }));
+    fireEvent.click(screen.getByRole("button", { name: "安装官方插件" }));
     const dialog = screen.getByRole("dialog", { name: "从云端安装插件" });
     expect(await within(dialog).findByText("幕僚")).toBeInTheDocument();
     expect(within(dialog).getByText("信息中枢")).toBeInTheDocument();
@@ -386,7 +386,7 @@ describe("PluginsPage 插件", () => {
     expect(within(dialog).getByText("将覆盖更新")).toBeInTheDocument();
     expect(within(dialog).getByText("~ 财报速读")).toBeInTheDocument();
     expect(within(dialog).getByText("- 现金流检查")).toBeInTheDocument();
-    expect(within(dialog).getByText(/确认后将保留：在「MCP 服务」Tab 补的请求头/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/确认后将保留：在「MCP」Tab 补的请求头/)).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "确认更新" }));
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -420,7 +420,7 @@ describe("PluginsPage 插件", () => {
     const dialog = screen.getByRole("dialog", { name: "安装插件" });
     expect(within(dialog).getByText("MCP · 天气服务")).toBeInTheDocument();
     expect(within(dialog).getByText(/网络访问：mcp\.example\.com/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/安装后需到「MCP 服务」Tab 连接/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/安装后需到「MCP」Tab 连接/)).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "确认安装" }));
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -431,10 +431,10 @@ describe("PluginsPage 插件", () => {
     expect(card).toHaveTextContent("1 台 MCP 服务");
     expect(card).toHaveTextContent("MCP · 天气服务");
 
-    // d.67：接口区已并入本页「MCP 服务」Tab，按钮变成切 Tab，不再跨页
+    // d.67：接口区已并入本页「MCP」Tab，按钮变成切 Tab，不再跨页
     fireEvent.click(within(card).getByRole("button", { name: "查看插件 MCP 服务 财务助手包" }));
     expect(useUiStore.getState().page).toBe("home");
-    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute("aria-selected", "true");
 
     // 切回「插件」Tab 继续卸载流程（切走即卸载，卡片要重新查）
     fireEvent.click(screen.getByRole("tab", { name: "插件" }));
@@ -524,12 +524,12 @@ describe("PluginsPage 插件", () => {
     expect(within(dialog).getByText("MCP 服务（1）")).toBeInTheDocument();
     expect(within(dialog).getByText("天气服务")).toBeInTheDocument();
     expect(within(dialog).getByText("mcp.example.com")).toBeInTheDocument();
-    expect(within(dialog).getByText(/连接与工具授权在「MCP 服务」Tab 进行/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/连接与工具授权在「MCP」Tab 进行/)).toBeInTheDocument();
 
-    // d.67：不再跳接口区页，改为切到本页「MCP 服务」Tab
+    // d.67：不再跳接口区页，改为切到本页「MCP」Tab
     fireEvent.click(within(dialog).getByRole("button", { name: "查看 MCP 服务" }));
     expect(useUiStore.getState().page).toBe("home");
-    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("dialog", { name: "插件详情 天气能力包" })).not.toBeInTheDocument();
   });
 
@@ -560,7 +560,7 @@ describe("PluginsPage 插件", () => {
 /* ------------------------------------------------ 导航合并（d.67） */
 
 describe("PluginsPage 导航合并", () => {
-  it("四个 Tab：技能与 MCP 渲染完整视图，页面级标题始终只有一个", () => {
+  it("三个 Tab：技能与 MCP 渲染完整视图，页面级标题始终只有一个", () => {
     renderPage();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("插件");
@@ -577,8 +577,8 @@ describe("PluginsPage 导航合并", () => {
     expect(screen.queryByRole("heading", { name: "技能区" })).toBeNull();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("tab", { name: "MCP 服务" }));
-    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
+    expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute("aria-selected", "true");
     // 原接口区页的完整能力都在：新增服务、Registry 发现、协议说明
     expect(screen.getByRole("button", { name: /添加 MCP 服务/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "从 Registry 发现" })).toBeInTheDocument();
@@ -598,7 +598,7 @@ describe("PluginsPage 导航合并", () => {
   it("消费一次性视图意图：旧 setPage(\"interfaces\") 落到 MCP Tab", () => {
     useUiStore.getState().setPage("interfaces");
     renderPage();
-    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute("aria-selected", "true");
     expect(useUiStore.getState().pageView).toBeNull();
   });
 
@@ -700,7 +700,7 @@ describe("PluginsPage · 插件列表筛选与安装定位（d.77）", () => {
 
   it("从仓库 Tab 安装后回到插件 Tab，并高亮新装的卡片", async () => {
     renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "仓库" }));
+    fireEvent.click(screen.getByRole("button", { name: "从插件仓库安装" }));
     fireEvent.click(await screen.findByRole("button", { name: "安装" }));
     const textarea = await screen.findByLabelText("插件清单 JSON");
     await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toContain("acme.repo"));
@@ -729,20 +729,22 @@ describe("PluginsPage · 插件列表筛选与安装定位（d.77）", () => {
   });
 });
 
-/* ------------------------------------------------ 桌面小组件（d.94） */
+/* ------------------------------------------------ 界面插件（并入插件 Tab，d.123） */
 
-describe("PluginsPage · 桌面小组件 Tab（d.94）", () => {
-  it("声明的 Tab 与声明式插件分开；浏览器里给「仅桌面端可用」", () => {
+describe("PluginsPage · 界面插件（原桌面小组件 Tab）", () => {
+  it("界面插件并入「插件」Tab 末尾，不再单独占 Tab；浏览器里给「仅桌面端可用」", () => {
     delete window.__heming_widgets;
     renderPage();
-    const tab = screen.getByRole("tab", { name: "桌面小组件" });
-    fireEvent.click(tab);
-    expect(tab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("region", { name: "桌面小组件" })).toHaveTextContent(
+    // 不再有「桌面小组件」Tab，只剩三 Tab
+    expect(screen.queryByRole("tab", { name: "桌面小组件" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
+    // 内容直接出现在插件 Tab：有一段界面插件区域 + 它的浏览器降级提示
+    const section = screen.getByRole("region", { name: "界面插件" });
+    expect(within(section).getByRole("region", { name: "桌面小组件" })).toHaveTextContent(
       /界面插件需要桌面窗口能力/,
     );
-    // 桌面小组件 Tab 自己的安装入口（与声明式「安装插件」不是同一个按钮）
-    expect(screen.queryByRole("button", { name: /安装桌面小组件/ })).toBeNull();
+    // 界面插件的安装入口（与声明式「安装插件」不是同一个按钮）
+    expect(within(section).queryByRole("button", { name: /安装桌面小组件/ })).toBeNull();
   });
 });
 

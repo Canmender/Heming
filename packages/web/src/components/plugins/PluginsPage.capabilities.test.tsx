@@ -27,7 +27,7 @@ vi.mock("../../lib/agentsApi.js", () => ({
  * 插件页统一能力中枢（d.64 · T2；d.67 导航合并）用例。
  *
  * 数据源全部注入：真实 PluginStore + SkillPool + McpRegistry（内存存储）与固定能力目录，
- * 断言「四个统计数、四个 Tab（技能/MCP 换成完整视图）、权限摘要、v3 预览、v2 旧包提示、
+ * 断言「四个统计数、三个 Tab（技能/MCP 换成完整视图）、权限摘要、v3 预览、v2 旧包提示、
  * 工具分组与 blocked 标注、视图意图消费」。
  */
 
@@ -401,7 +401,7 @@ describe("插件页 · 能力统计", () => {
   });
 });
 
-describe("插件页 · 四个 Tab", () => {
+describe("插件页 · 三个 Tab", () => {
   it("默认插件 Tab；技能/MCP Tab 渲染完整视图，页面级标题始终只有一个", () => {
     installV3();
     renderPage();
@@ -424,24 +424,20 @@ describe("插件页 · 四个 Tab", () => {
     expect(screen.queryByRole("button", { name: /在技能区管理/ })).toBeNull();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("tab", { name: "工具" }));
-    expect(screen.getByRole("tabpanel", { name: "工具" })).toHaveAttribute(
-      "id",
-      "plugins-tools-panel",
-    );
-    expect(screen.getByRole("region", { name: "工具分组 系统能力" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("tab", { name: "MCP 服务" }));
-    expect(screen.getByRole("tabpanel", { name: "MCP 服务" })).toHaveAttribute(
+    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
+    expect(screen.getByRole("tabpanel", { name: "MCP" })).toHaveAttribute(
       "id",
       "plugins-mcp-panel",
     );
+    // 工具授权并入 MCP Tab（不再单独占一个 Tab）
+    expect(screen.getByRole("region", { name: "工具授权" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "工具分组 系统能力" })).toBeInTheDocument();
     // 完整接口视图：服务卡片、新增入口、协议说明都在（旧的只读摘要已删除）
     expect(screen.getByRole("region", { name: "MCP 服务 报告服务" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /添加 MCP 服务/ })).toBeInTheDocument();
     expect(screen.getByText(/MCP 协议 \d{4}-\d{2}-\d{2}/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /在接口区管理/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /在 MCP 服务 Tab 管理/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /在 MCP Tab 管理/ })).toBeNull();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
@@ -457,7 +453,7 @@ describe("插件页 · 四个 Tab", () => {
     useUiStore.getState().setPage("interfaces");
     expect(useUiStore.getState().page).toBe("plugins");
     renderPage();
-    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute("aria-selected", "true");
     expect(useUiStore.getState().pageView).toBeNull();
   });
 });
@@ -531,7 +527,7 @@ describe("插件页 · 工具目录", () => {
   it("按归属分组，数字列与分组标题正确", () => {
     installV3();
     renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "工具" }));
+    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
 
     expect(screen.getByRole("region", { name: "工具分组 系统能力" })).toHaveTextContent("系统能力（3）");
     expect(screen.getByRole("region", { name: "工具分组 MCP 服务" })).toHaveTextContent("MCP 服务（1）");
@@ -544,7 +540,7 @@ describe("插件页 · 工具目录", () => {
   it("被插件风险上限拦下的工具以只读行标注「插件声明 read，未注入」", () => {
     installV3();
     renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "工具" }));
+    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
 
     const blocked = screen.getByRole("region", { name: "未注入的工具" });
     expect(blocked).toHaveTextContent("dangerous_write");
@@ -586,7 +582,7 @@ describe("插件页 · MCP Tab（内嵌完整接口视图）", () => {
   it("服务卡片按来源展示连接态，逐工具授权写同一份注册表，插件徽标打开详情", () => {
     installV3();
     renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "MCP 服务" }));
+    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
 
     const report = screen.getByRole("region", { name: "MCP 服务 报告服务" });
     expect(report).toHaveTextContent("已连接");
@@ -721,15 +717,15 @@ describe("插件页 · 孤儿记录诊断（d.110）", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "插件" }));
     fireEvent.click(screen.getByRole("button", { name: "去接口区清理无主服务" }));
-    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute("aria-selected", "true");
   });
 });
 
 describe("插件页 · 工具束（d.65）", () => {
-  it("工具 Tab 展示工具束：matched 工具 + unresolved 标注", () => {
+  it("MCP Tab 的工具授权区展示工具束：matched 工具 + unresolved 标注", () => {
     installV3();
     renderPage();
-    fireEvent.click(screen.getByRole("tab", { name: "工具" }));
+    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
 
     const section = screen.getByRole("region", { name: "工具束" });
     expect(section).toHaveTextContent("报告工具箱");
@@ -744,7 +740,7 @@ describe("插件页 · 工具束（d.65）", () => {
     const catalog = fixedCatalog();
     catalog.toolPacks = catalog.toolPacks.map((pack) => ({ ...pack, enabled: false }));
     renderPage({ catalog, capabilities: fixedCapabilities(catalog) });
-    fireEvent.click(screen.getByRole("tab", { name: "工具" }));
+    fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
 
     const section = screen.getByRole("region", { name: "工具束" });
     expect(section).toHaveTextContent("插件已停用");
@@ -760,7 +756,7 @@ describe("插件页 · 工具束（d.65）", () => {
     expect(within(dialog).getByText(/工具束 1 · 工具 2/)).toBeInTheDocument();
   });
 
-  it("详情抽屉有「工具束」段：工具列表 + 在 MCP 服务 Tab 管理切到 MCP Tab", () => {
+  it("详情抽屉有「工具束」段：工具列表 + 在 MCP Tab 管理切到 MCP Tab", () => {
     installV3();
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "查看插件详情 报告工具箱" }));
@@ -772,12 +768,12 @@ describe("插件页 · 工具束（d.65）", () => {
     expect(section).toHaveTextContent("report_export");
     expect(section).toHaveTextContent("未连接/未提供");
 
-    const manageButtons = within(section).getAllByRole("button", { name: "在 MCP 服务 Tab 管理" });
+    const manageButtons = within(section).getAllByRole("button", { name: "在 MCP Tab 管理" });
     expect(manageButtons.length).toBeGreaterThan(0);
     fireEvent.click(manageButtons[manageButtons.length - 1]!);
-    // d.67：接口区已并入本页「MCP 服务」Tab，动作变成切 Tab，不再跨页
+    // d.67：接口区已并入本页「MCP」Tab，动作变成切 Tab，不再跨页
     expect(useUiStore.getState().page).toBe("home");
-    expect(screen.getByRole("tab", { name: "MCP 服务" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "MCP" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("region", { name: "MCP 服务 报告服务" })).toBeInTheDocument();
   });
 });
@@ -863,7 +859,7 @@ describe("插件页 · 工具束逐个授权", () => {
     return within(dialog).getByRole("region", { name: "插件工具束" });
   }
 
-  it("本插件工具给 role=switch，非本插件工具只有「在 MCP 服务 Tab 管理」", () => {
+  it("本插件工具给 role=switch，非本插件工具只有「在 MCP Tab 管理」", () => {
     const section = openDetailToolPacks();
     expect(section).toHaveTextContent("服务：报告服务");
     expect(section).toHaveTextContent("服务：手填服务");
@@ -876,7 +872,7 @@ describe("插件页 · 工具束逐个授权", () => {
       within(section).queryByRole("switch", { name: /manual_echo/ }),
     ).toBeNull();
     expect(
-      within(section).getAllByRole("button", { name: "在 MCP 服务 Tab 管理" }).length,
+      within(section).getAllByRole("button", { name: "在 MCP Tab 管理" }).length,
     ).toBeGreaterThan(0);
   });
 

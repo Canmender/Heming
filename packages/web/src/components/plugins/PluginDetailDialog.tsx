@@ -252,7 +252,7 @@ export function PluginDetailDialog({
                               />
                             ) : (
                               <button type="button" onClick={onGoInterfaces} className={BTN_GHOST_SM}>
-                                在 MCP 服务 Tab 管理
+                                在 MCP Tab 管理
                               </button>
                             )}
                           </li>
@@ -279,12 +279,12 @@ export function PluginDetailDialog({
               </ul>
             )}
             <p className="mt-1 ui-caption">
-              工具束只声明归属，不改变任何工具开关；逐项确认后才会切到「MCP 服务」Tab 的真实开关，
+              工具束只声明归属，不改变任何工具开关；逐项确认后才会切到「MCP」Tab 的真实开关，
               每次调用仍按 HITL 确认。{pluginEnabled ? "" : "插件已停用：工具开关暂不可操作。"}
             </p>
             {toolPacks.length > 0 && (
               <button type="button" onClick={onGoInterfaces} className={`mt-1 ${BTN_GHOST_SM}`}>
-                在 MCP 服务 Tab 管理
+                在 MCP Tab 管理
               </button>
             )}
           </section>
@@ -308,7 +308,7 @@ export function PluginDetailDialog({
               </ul>
             )}
             <p className={`mt-1 ${HINT}`}>
-              连接与工具授权在「MCP 服务」Tab 进行；本页只读，不发起网络请求。
+              连接与工具授权在「MCP」Tab 进行；本页只读，不发起网络请求。
             </p>
           </section>
         </div>
