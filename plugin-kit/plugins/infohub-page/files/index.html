@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>聊天记录</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar" aria-label="会话列表">
+        <div class="side-head">
+          <div class="segmented" role="group" aria-label="来源筛选">
+            <button type="button" class="seg is-active" data-source="">全部</button>
+            <button type="button" class="seg" data-source="qq">QQ</button>
+            <button type="button" class="seg" data-source="wechat">微信</button>
+          </div>
+          <button type="button" class="icon-btn" id="refreshConvs" title="刷新会话列表" aria-label="刷新会话列表">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" /></svg>
+          </button>
+        </div>
+        <label class="search" for="convSearch">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
+          <input id="convSearch" type="search" placeholder="搜索会话名" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="conv-list" id="convList" role="listbox" aria-label="会话"></div>
+        <div class="side-foot" id="convFoot" hidden>
+          <span class="count" id="convCount"></span>
+          <button type="button" class="link-btn" id="moreConvs" hidden>加载更多</button>
+        </div>
+      </aside>
+
+      <main class="detail" aria-label="消息">
+        <section class="empty" id="detailEmpty">
+          <span class="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 6.5h16v10H8l-4 4z" /><path d="M8 10h8M8 13h5" /></svg>
+          </span>
+          <p class="empty-title">选一个会话看消息</p>
+          <p class="empty-desc">左边是本机归档里的 QQ / 微信会话，按最近消息时间排序。</p>
+        </section>
+
+        <section class="conversation" id="detail" hidden aria-label="消息流">
+          <header class="detail-head">
+            <span class="avatar" id="detailAvatar" aria-hidden="true"></span>
+            <div class="who">
+              <h2 id="detailName"></h2>
+              <p id="detailMeta"></p>
+            </div>
+            <button type="button" class="icon-btn" id="refreshMsgs" title="刷新消息" aria-label="刷新消息">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" /></svg>
+            </button>
+          </header>
+          <div class="stream" id="stream" tabindex="0" aria-label="消息"></div>
+        </section>
+      </main>
+    </div>
+
+    <section class="offline" id="offline" hidden>
+      <div class="offline-card">
+        <span class="empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16v10H8l-4 3z" /><path d="m9 10 6 4M15 10l-6 4" /></svg>
+        </span>
+        <h2>连不上 InfoHub 本机服务</h2>
+        <p>这个页面通过 InfoHub 的采集桥读聊天记录，地址是 <code id="offlineUrl"></code>。请确认：</p>
+        <ol>
+          <li>InfoHub 已经采集过消息（归档里有内容）；</li>
+          <li>本机终端里运行了 <code>infohub mcp</code>，并保持窗口不关；</li>
+          <li>如果改过端口，把页面地址（localStorage 的 <code>infohub.mcpUrl</code>）改成 <code>http://127.0.0.1:端口/mcp</code>。</li>
+        </ol>
+        <p class="offline-detail" id="offlineDetail"></p>
+        <button type="button" class="ui-act primary" id="offlineRetry">重新连接</button>
+      </div>
+    </section>
+
+    <div class="banner" id="banner" role="alert" hidden>
+      <span id="bannerText"></span>
+      <button type="button" class="link-btn" id="bannerRetry" hidden>重试</button>
+      <button type="button" class="link-btn" id="bannerClose">知道了</button>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
