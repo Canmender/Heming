@@ -44,13 +44,35 @@
   路由 id `plugin:<pluginId>`；入口消失/停用/卸载时拨回主页；刷新恢复对插件页回落主页（不把运行时入口写进会话态）。
 - 插件卡/详情新增「页面 1」贡献行与「打开页面」；安装预览贡献行同步；设置区导航说明追加已装插件页面。
 
+### ⑤ 程序侧修复（发布 / 打包 / 签名；插件作者侧复现报告的三项）
+
+- **`publish-plugin.mjs` 放行纯页面插件**：bundle 校验与安装端 `plugin-package.js` 对齐——至少
+  `desktopWidgets` 或 `page` 之一（每类最多 1 个），并校验 `page.entry` 必须是 `files/` 下真实存在的文件。
+  此前写死「必须 1 个 desktopWidgets」，纯页面插件在发布机 dry-run 就被误拒。
+- **`pack-plugin.mjs` 不再崩**：页面插件回读时 `readPackage` 的 `widget` 是 `null`，脚本直接读
+  `widget.entry` 抛 TypeError；改为 `widget?.entry ?? page?.entry`，纯页面包可正常打包并自检
+  （`entry=files/page/index.html`）。
+- **签名覆盖页面字段**：`scripts/sign-plugin.mjs`、`packages/desktop/plugin-signature.js`、
+  `packages/web/src/lib/plugins/signature.ts` 三方 canonicalizer 同步纳入 `contributions.page`
+  （title/icon/summary/entry，声明式 blocks 六种块与 action 的 settings/unit 目标），且**只在声明页面时进文本**——
+  无页面旧包的 canonical 字节与历史签名逐字不变。改页面标题/入口/摘要/块内容都会验签失败。
+- 顺带对齐：v5 权限 `chat: false` 不再进 web 签名文本（与脚本口径一致），修掉「脚本签的 v5 包
+  在应用里因多一个 `"chat":false` 验不过」的潜在坑。
+- 文档：`plugin-kit/AUTHORING.md` 明确「README/截图等临时文件必须移出包根（或放 `files/README.md`）
+  再打包」——包根只接受 `plugin.json` + `files/**`。
+- 端到端实跑（两个临时包 + 真实 `infohub-page` 副本）：纯页面 bundle → `sign-plugin --write`（写
+  `packageSha256` + 签名）→ `pack-plugin`（`readPackage ✓`，entry=页面入口）→ `publish-plugin --dry-run`
+  通过（此前发布这一步会被拒）；另用插件作者侧的真实页面包复核「包根混入 README → 打包拒绝（提示准确）→
+  移出后 `readPackage ✓` 且签名仍有效」。
+
 ### 验证
 
-- `shared` 8 文件 / **104 例**、`web` **335 文件 / 4765 例**、`server` 16 / 264 例、`desktop` 全量（含新增
-  widget-preload 用例）全绿；`pnpm -r typecheck` 六包零错误；`pnpm plugin:check` 退出 0；
+- `shared` 8 文件 / **104 例**、`web` **335 文件 / 4768 例**、`server` 16 / 264 例、`desktop` 45 个
+  node:test 文件 / **740 例**全绿；`pnpm -r typecheck` 六包零错误；`pnpm plugin:check` 退出 0；
   `node scripts/check-source-encoding.mjs` OK；`plugin.schema.json` 已随 shared 重新生成。
-- 新增测试约 75 例：shared 9（v5 页面/块校验）、web 约 60（注册表 9、声明式页 13、bundle 页 12、
-  App 接线 2、插件页/设置区/命令面板/安装预览/存储透传等）、desktop 28（包校验/记录/视图运行时/preload）。
+- 新增测试约 81 例：shared 9（v5 页面/块校验）、web 约 63（注册表 9、声明式页 13、bundle 页 12、
+  App 接线 2、签名覆盖页面 3、插件页/设置区/命令面板/安装预览/存储透传等）、desktop 31
+  （包校验/记录/视图运行时/preload/签名覆盖页面 3）。
 
 ### 边界（明确不做 / 已知限制）
 

@@ -57,6 +57,11 @@ plugin-kit/plugins/demo-widget/
     └── README.md
 ```
 
+> **打包前把临时文件移出包根**：作者习惯在包根放 README/截图/草稿，但 `pack-plugin`
+> 与安装端都只接受「`plugin.json` + `files/**`」这两类根内容，混进 README 之类会直接
+> 拒绝（入口 `entry` 找不到只是其中一种表现）。正确做法是把作者说明放到 `files/README.md`
+> （会随包分发），或打包前挪到包根**之外**（如 `dist/README.md`）再跑 `pack-plugin`。
+
 没有 MCP 服务时可以整段省略 `permissions`；合法最小清单见 [STANDARD.md §9.A](STANDARD.md)。
 
 ---

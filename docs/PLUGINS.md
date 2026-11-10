@@ -672,6 +672,10 @@ node scripts/build-module.mjs --install <modulesDir>   # 构建后装到本机�
 - 失败态：视图创建失败（entry 缺失/包损坏）→ 返回 `{ ok:false, error }`，web 显示原因 +「重建视图 / 打开插件详情」，不白屏。
 - 浏览器（无桌面桥）：bundle 页不可用（导航不出现入口；宿主缺 `pageMount` 时显示「插件页面只在安装版里可用」降级说明），不渲染空壳。
 - 主题：复用 `widget:info` 的 `theme`，主窗切主题按现有 `widget:event` 推送（不新增通道）。
+- **签名覆盖（d.124 修复）**：`contributions.page` 进入首方签名文本——bundle 的 `title/icon/summary/entry`
+  被 canonical-v1 覆盖，签名后改标题/入口/摘要验签必失败；`page.entry` 指向的代码字节仍由 `packageSha256` 覆盖。
+  canonicalizer 三处（`scripts/sign-plugin.mjs` / `packages/desktop/plugin-signature.js` /
+  `packages/web/src/lib/plugins/signature.ts`）逐字节一致，且**页面只在声明时才进文本**，无页面的旧包历史签名不受影响。
 
 ### 13.5 安装 / 更新 / 卸载
 

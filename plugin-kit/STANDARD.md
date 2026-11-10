@@ -314,6 +314,9 @@ bundle 额外约束：
 - bundle 允许的贡献 = `commands` + `desktopWidgets` + `page`；仍**不允许** `skills` / `mcpServers` / `toolPacks`。
   `page` 与 `desktopWidgets` 可并存（同一插件既能有浮窗又能有页面），每类最多 1 个。
 - 包内页面的代码由 `packageSha256` + 首方签名间接覆盖（§8.3）；声明式页零代码。
+- **签名覆盖页面元数据**：`page` 进入首方签名文本（canonical-v1/v2 的 `contributions.page`，含
+  `title/icon/summary/entry` 与声明式 `blocks`）——签名后改页面标题/入口/摘要/块内容，验签必失败。
+  只在声明 `page` 时才进文本，没有页面的旧包 canonical 字节与历史签名逐字不变。
 - 页面**不新增权限**：`permissions` 不变；bundle 页面仍按清单生成 CSP（`connect-src` 跟随 `permissions.network`），
   能调到的宿主能力 = 既有 `__heming_widget` 白名单桥，没有新增 secrets / files / MCP / 会话桥。
 - 页面**只能拥有自己**：不能改宿主现有页面/布局/导航顺序、不能注入宿主 DOM、不能给宿主页加卡片（首页卡/设置卡仍不做）。

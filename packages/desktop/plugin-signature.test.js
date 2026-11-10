@@ -332,3 +332,83 @@ test("开发公钥保护：打包版忽略 dev-* 公钥，显式放开/正式钥
   fs.writeFileSync(mixed, JSON.stringify({ "official-test": devKey }));
   assert.equal(verifyOfficialSignature(manifest, { keysFile: mixed, allowDevKeys: false }).ok, true);
 });
+
+/* ─────────────────── d.124：页面进入签名覆盖 ─────────────────── */
+
+/**
+ * 纯页面界面插件（bundle 只声明 page，没有桌面浮窗）。
+ *
+ * 这是本轮报告里的真实场景：发布侧要能校验、打包不能崩、签名要覆盖
+ * `contributions.page` 的 title/icon/summary/entry——只靠「包里 entry 文件存在」
+ * 挡不住「签名后换标题/换入口」。
+ */
+const PAGE_BUNDLE_MANIFEST = {
+  schemaVersion: 4,
+  id: "acme.page-bundle",
+  name: "页面插件",
+  version: "1.0.0",
+  description: "只有页面的界面插件",
+  author: "Acme",
+  distribution: "bundle",
+  packageSha256: "ef".repeat(32),
+  permissions: { network: [], tools: "none", files: [], events: [], graphics: [], eval: false, chat: false },
+  contributions: {
+    page: {
+      title: "采集看板",
+      icon: "chart",
+      summary: "本机采集状态",
+      entry: "files/page/index.html",
+    },
+    desktopWidgets: [],
+    commands: [
+      { id: "go-settings", title: "去设置", keywords: [], target: { kind: "settings", card: "profile" } },
+      { id: "go-unit", title: "看单元", keywords: [], target: { kind: "unit", unitId: "acme.page-bundle" } },
+    ],
+    skills: [],
+    mcpServers: [],
+    toolPacks: [],
+  },
+};
+
+test("canonical-v1：page（title/icon/summary/entry）进入签名文本；无 page 的历史文本逐字不变", () => {
+  const text = canonicalManifestText(withPublisher(PAGE_BUNDLE_MANIFEST));
+  assert.deepEqual(JSON.parse(text).contributions.page, {
+    title: "采集看板",
+    icon: "chart",
+    summary: "本机采集状态",
+    entry: "files/page/index.html",
+  });
+  // 老夹具（桌宠 1.0.1）没有 page：canonical 字节必须与 pinned 文本一致，历史签名不失效
+  assert.equal(canonicalManifestText(withPublisher(PINNED_MANIFEST)), FIXTURE_TEXT);
+});
+
+test("canonical-v1：页面与 settings/unit target 与 scripts/sign-plugin.mjs 逐字节一致", async () => {
+  const { pathToFileURL } = require("node:url");
+  const scriptUrl = pathToFileURL(path.join(__dirname, "..", "..", "scripts", "sign-plugin.mjs")).href;
+  const scriptApi = await import(scriptUrl);
+  assert.equal(
+    scriptApi.signedManifestText(withPublisher(PAGE_BUNDLE_MANIFEST)),
+    canonicalManifestText(withPublisher(PAGE_BUNDLE_MANIFEST)),
+  );
+});
+
+test("验签：签了页面后改标题 / 入口 / 摘要 → 失败（页面字段受签名保护）", () => {
+  const signed = signForTest(PAGE_BUNDLE_MANIFEST);
+  assert.deepEqual(verifyOfficialSignature(signed), { ok: true, keyId: "dev-test-2026-11" });
+
+  const basePage = PAGE_BUNDLE_MANIFEST.contributions.page;
+  for (const page of [
+    { ...basePage, title: "被改标题" },
+    { ...basePage, entry: "files/page/other.html" },
+    { ...basePage, summary: "被改摘要" },
+    { ...basePage, icon: "activity" },
+  ]) {
+    const tampered = {
+      ...signed,
+      contributions: { ...signed.contributions, page },
+    };
+    const result = verifyOfficialSignature(tampered);
+    assert.equal(result.ok, false, JSON.stringify(page));
+    assert.match(result.reason, /不匹配/);
+  }
+});

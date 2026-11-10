@@ -38,8 +38,123 @@ interface PublisherData {
   publishers: Record<string, PublisherRecord>;
 }
 
+/**
+ * 权限 → 签名用的确定性形状（d.113 口径）。
+ *
+ * ★ 与 scripts/sign-plugin.mjs 一致：`permissions.chat` **只在 true 时进入文本**。
+ *   应用归一化后的 v5 权限对象恒有 `chat: false`，若原样签进去，脚本签出的 v5 包
+ *   在应用里会因多一个 `"chat":false` 而验签失败（历史遗留口径陷阱，d.124 顺手对齐）。
+ */
+function canonicalPermissions(permissions: PluginManifest["permissions"]): Record<string, unknown> {
+  const record = permissions as unknown as Record<string, unknown>;
+  const { chat, ...rest } = record;
+  return { ...rest, ...(chat === true ? { chat: true } : {}) };
+}
+
+/** 签名文本里统一用 trim 后的纯文本（数字/缺失一律空串）。 */
+function trimText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function stringListOf(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => trimText(item)) : [];
+}
+
+/** 命令/页面动作的 target → 与 `scripts/sign-plugin.mjs` 完全一致的形状。 */
+function canonicalTarget(target: unknown): Record<string, unknown> {
+  const record = target && typeof target === "object" ? (target as Record<string, unknown>) : {};
+  const kind = typeof record.kind === "string" ? record.kind : "";
+  if (kind === "page") return { kind, page: trimText(record.page) };
+  if (kind === "skill") return { kind, name: trimText(record.name) };
+  if (kind === "settings") return { kind, card: trimText(record.card) };
+  if (kind === "unit") return { kind, unitId: trimText(record.unitId) };
+  return { kind };
+}
+
+/**
+ * 页面块 → 签名用的确定性形状（d.124）。
+ *
+ * ★ 与 `scripts/sign-plugin.mjs` / `packages/desktop/plugin-signature.js` 的同名函数
+ *   逐字段一致：三方 canonicalizer 必须对同一份清单产出同一串字节，否则
+ *   「脚本签的包在应用里验不过」。这里输入是**应用归一化后**的清单形状
+ *   （list 项已有 `description` 缺省 "" 等），所以只做 trim/投影，不补默认值。
+ */
+function canonicalPageBlock(block: unknown): Record<string, unknown> {
+  const record = block && typeof block === "object" ? (block as Record<string, unknown>) : {};
+  const type = typeof record.type === "string" ? record.type : "";
+  const title = trimText(record.title);
+  const head: Record<string, unknown> = title ? { type, title } : { type };
+  if (type === "markdown") return { ...head, text: trimText(record.text) };
+  if (type === "stats") {
+    return {
+      ...head,
+      items: (Array.isArray(record.items) ? record.items : []).map((item) => {
+        const entry = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+        return { label: trimText(entry.label), value: trimText(entry.value) };
+      }),
+    };
+  }
+  if (type === "table") {
+    return {
+      ...head,
+      columns: stringListOf(record.columns),
+      rows: (Array.isArray(record.rows) ? record.rows : []).map((row) => stringListOf(row)),
+    };
+  }
+  if (type === "list") {
+    return {
+      ...head,
+      items: (Array.isArray(record.items) ? record.items : []).map((item) => {
+        const entry = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+        return {
+          title: trimText(entry.title),
+          description: trimText(entry.description),
+          ...(trimText(entry.badge) ? { badge: trimText(entry.badge) } : {}),
+        };
+      }),
+    };
+  }
+  if (type === "actions") {
+    return {
+      ...head,
+      items: (Array.isArray(record.items) ? record.items : []).map((item) => {
+        const entry = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+        return { label: trimText(entry.label), target: canonicalTarget(entry.target) };
+      }),
+    };
+  }
+  if (type === "contributions") return { ...head, kind: trimText(record.kind) };
+  return head;
+}
+
+/**
+ * 页面 → 签名用的确定性形状（d.124）。
+ *
+ * 空 icon/summary/entry/blocks 不进文本（与 shared 的「缺省即空」口径一致）。
+ */
+function canonicalPage(page: unknown): Record<string, unknown> | undefined {
+  if (!page || typeof page !== "object") return undefined;
+  const record = page as Record<string, unknown>;
+  const title = trimText(record.title);
+  if (!title) return undefined;
+  const out: Record<string, unknown> = { title };
+  const icon = trimText(record.icon);
+  if (icon) out.icon = icon;
+  const summary = trimText(record.summary);
+  if (summary) out.summary = summary;
+  const entry = trimText(record.entry);
+  if (entry) out.entry = entry;
+  const blocks = Array.isArray(record.blocks) ? record.blocks.map(canonicalPageBlock) : [];
+  if (blocks.length > 0) out.blocks = blocks;
+  return out;
+}
+
 /** 规范化签名文本：与内容指纹同款排序，但**包含 publisher、排除 signature**。 */
 export function signedManifestText(manifest: PluginManifest): string {
+  // d.124：页面（title/icon/summary/entry/blocks）必须进签名，否则「签名后换页面入口/
+  // 换标题」验不出来。仅声明页面时才出现该键——旧包 canonical 字节逐字不变。
+  const { page, ...restContributions } = manifest.contributions;
+  const signedPage = canonicalPage(page);
   return canonicalJsonText({
     id: manifest.id,
     version: manifest.version,
@@ -47,8 +162,11 @@ export function signedManifestText(manifest: PluginManifest): string {
     description: manifest.description,
     author: manifest.author,
     publisher: manifest.publisher ?? null,
-    permissions: manifest.permissions,
-    contributions: manifest.contributions,
+    permissions: canonicalPermissions(manifest.permissions),
+    contributions: {
+      ...restContributions,
+      ...(signedPage ? { page: signedPage } : {}),
+    },
     // 界面插件（bundle）把 files/** 摘要绑进清单，签名因此覆盖代码字节。
     // 声明式包没有该字段 → canonicalJsonText 丢弃 undefined，旧包签名逐字节不变。
     packageSha256: manifest.packageSha256,

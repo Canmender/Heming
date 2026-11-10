@@ -200,7 +200,10 @@ if (host?.full && typeof host.mod.readPackage === "function") {
     allowDevKeys: process.env.HEMING_ALLOW_DEV_PLUGIN_KEYS === "1",
   });
   if (!result.ok) fail(`包校验未通过：\n  - ${result.errors.join("\n  - ")}`);
-  verification = `readPackage ✓（${result.files.length} 个文件，entry=${result.widget.entry}，sha256=${result.sha256.slice(0, 16)}…）`;
+  // d.124：纯页面插件没有桌面浮窗（`result.widget === null`），此时用页面入口做说明；
+  // 之前直接读 `result.widget.entry` 会在页面插件上抛 TypeError。
+  const entryLabel = result.widget?.entry ?? result.page?.entry ?? "（无浮窗/无页面）";
+  verification = `readPackage ✓（${result.files.length} 个文件，entry=${entryLabel}，sha256=${result.sha256.slice(0, 16)}…）`;
 }
 
 writeFileSync(OUT_FILE, packageBytes);

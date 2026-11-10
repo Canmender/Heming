@@ -258,6 +258,10 @@ function normalizeManifest(manifest) {
         ? contributions.desktopWidgets
         : []
       ).map(normalizeDesktopWidget),
+      // d.124：插件页面。**只在声明时进入签名文本**——没有页面的旧包 canonical 字节
+      // 逐字不变、历史签名不失效；有页面时 title/icon/summary/entry/blocks 全部受签，
+      // 不能只靠包里「entry 文件存在」兜底（换标题/换入口地址本身就该让验签失败）。
+      ...(normalizePage(contributions.page) ? { page: normalizePage(contributions.page) } : {}),
       // d.90：模型预设已收回——清单里写 llmPresets 会被应用丢弃，签名文本同样恒为空数组。
       llmPresets: [],
     },
@@ -268,8 +272,89 @@ function normalizeTarget(target) {
   const kind = target?.kind;
   if (kind === "page") return { kind, page: trim(target.page) };
   if (kind === "skill") return { kind, name: trim(target.name) };
+  // v5 扩展的两类 target（d.108）：页面动作块与命令共用同一形状，签名必须一起覆盖，
+  // 否则「签名后把 settings 卡改成别的」不会被发现。
+  if (kind === "settings") return { kind, card: trim(target.card) };
+  if (kind === "unit") return { kind, unitId: trim(target.unitId) };
   if (kind === "plugin") return { kind };
   return { kind };
+}
+
+/**
+ * 页面块 → 签名用的确定性形状（d.124）。
+ *
+ * 必须与应用归一化（shared `PageSchema`）后的形状一致：web 侧验签拿到的清单已经过
+ * zod 归一化（trim、`list.items[].description` 缺省 "" 等），这里对原始清单补同一套
+ * 默认值，三份 canonicalizer（本文件 / 桌面端 / web）才能逐字节相等。
+ */
+function normalizePageBlock(block) {
+  const raw = block && typeof block === "object" ? block : {};
+  const type = String(raw.type ?? "");
+  const title = trim(raw.title);
+  const head = title ? { type, title } : { type };
+  if (type === "markdown") return { ...head, text: trim(raw.text) };
+  if (type === "stats") {
+    return {
+      ...head,
+      items: (Array.isArray(raw.items) ? raw.items : []).map((item) => ({
+        label: trim(item?.label),
+        value: trim(item?.value),
+      })),
+    };
+  }
+  if (type === "table") {
+    return {
+      ...head,
+      columns: stringList(raw.columns),
+      rows: (Array.isArray(raw.rows) ? raw.rows : []).map((row) => stringList(row)),
+    };
+  }
+  if (type === "list") {
+    return {
+      ...head,
+      items: (Array.isArray(raw.items) ? raw.items : []).map((item) => ({
+        title: trim(item?.title),
+        // 应用归一化给缺省 ""（zod .default("")）——这里必须补，否则与 web 文本不一致
+        description: trim(item?.description),
+        ...(trim(item?.badge) ? { badge: trim(item?.badge) } : {}),
+      })),
+    };
+  }
+  if (type === "actions") {
+    return {
+      ...head,
+      items: (Array.isArray(raw.items) ? raw.items : []).map((item) => ({
+        label: trim(item?.label),
+        target: normalizeTarget(item?.target),
+      })),
+    };
+  }
+  if (type === "contributions") return { ...head, kind: String(raw.kind ?? "") };
+  // 未知块 type 在应用解析阶段就会被拒；签名文本保持最小形状，避免把垃圾数据签进去。
+  return head;
+}
+
+/**
+ * 页面 → 签名用的确定性形状。
+ *
+ * 两种形态统一成同一份：声明式（blocks）/ 界面插件（entry）。空 `icon`/`summary`/
+ * `entry`/`blocks` **不进文本**——与 shared 的「缺省即空」口径一致，也让没写这些字段的
+ * 清单与写了空串的清单签出同一串字节（避免作者手滑多一个 `""` 就验签失败）。
+ */
+function normalizePage(page) {
+  if (!page || typeof page !== "object" || Array.isArray(page)) return null;
+  const title = trim(page.title);
+  if (!title) return null;
+  const out = { title };
+  const icon = trim(page.icon);
+  if (icon) out.icon = icon;
+  const summary = trim(page.summary);
+  if (summary) out.summary = summary;
+  const entry = trim(page.entry);
+  if (entry) out.entry = entry;
+  const blocks = (Array.isArray(page.blocks) ? page.blocks : []).map(normalizePageBlock);
+  if (blocks.length > 0) out.blocks = blocks;
+  return out;
 }
 
 /** 与 signature.ts 的 signedManifestText 逐字节一致：含 publisher / packageSha256，排除 signature。 */

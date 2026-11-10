@@ -155,22 +155,45 @@ function validate(file) {
     if (raw.schemaVersion !== 4) return { error: "distribution: bundle 需要 schemaVersion 4" };
     const contributions = raw.contributions && typeof raw.contributions === "object" ? raw.contributions : {};
     const widgets = Array.isArray(contributions.desktopWidgets) ? contributions.desktopWidgets : [];
-    if (widgets.length !== 1) return { error: "bundle 清单必须声明 1 个 contributions.desktopWidgets" };
+    /**
+     * d.124：bundle 可以只声明页面（纯页面插件，没有桌面浮窗）。
+     *
+     * 规则与安装端 `plugin-package.js` 一致：至少 `desktopWidgets` 或 `page` 之一，
+     * 每类最多 1 个——发布脚本此前写死「必须 1 个 desktopWidgets」，页面插件在
+     * 发布机上就被误拒（安装端其实已经接受）。
+     */
+    const page =
+      contributions.page && typeof contributions.page === "object" && !Array.isArray(contributions.page)
+        ? contributions.page
+        : null;
+    if (widgets.length > 1) return { error: "bundle 清单最多声明 1 个 contributions.desktopWidgets" };
+    if (widgets.length === 0 && !page) {
+      return { error: "bundle 清单必须声明 1 个 contributions.desktopWidgets 或 contributions.page" };
+    }
     for (const denied of ["skills", "mcpServers", "toolPacks"]) {
       const list = contributions[denied];
       if (Array.isArray(list) && list.length > 0) {
-        return { error: `界面插件不允许声明 contributions.${denied}（只能带 commands + desktopWidgets）` };
+        return { error: `界面插件不允许声明 contributions.${denied}（只能带 commands + desktopWidgets + page）` };
       }
-    }
-    const entry = String(widgets[0].entry ?? "");
-    if (!entry.startsWith("files/") || entry.includes("..")) {
-      return { error: `desktopWidgets[0].entry 必须是 files/ 下的相对路径：${entry}` };
     }
     const root = dirname(file);
     const { entries, error } = collectBundleEntries(root);
     if (error) return { error };
-    const hasEntry = entries.some((item) => item.path === entry);
-    if (!hasEntry) return { error: `entry 指向的文件不存在：${entry}` };
+    const paths = new Set(entries.map((item) => item.path));
+    if (widgets.length === 1) {
+      const entry = String(widgets[0].entry ?? "");
+      if (!entry.startsWith("files/") || entry.includes("..")) {
+        return { error: `desktopWidgets[0].entry 必须是 files/ 下的相对路径：${entry}` };
+      }
+      if (!paths.has(entry)) return { error: `entry 指向的文件不存在：${entry}` };
+    }
+    if (page) {
+      const entry = String(page.entry ?? "");
+      if (!entry.startsWith("files/") || entry.includes("..")) {
+        return { error: `contributions.page.entry 必须是 files/ 下的相对路径：${entry}` };
+      }
+      if (!paths.has(entry)) return { error: `页面入口指向的文件不存在：${entry}` };
+    }
     let packageBytes;
     try {
       packageBytes = packTarGz(entries);

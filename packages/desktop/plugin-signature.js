@@ -160,8 +160,82 @@ function normalizeCommandTarget(target) {
   const kind = target && target.kind;
   if (kind === "page") return { kind, page: trim(target.page) };
   if (kind === "skill") return { kind, name: trim(target.name) };
+  // d.108 的两类 target：只在声明时出现（老包没有这两类，文本不变）。
+  if (kind === "settings") return { kind, card: trim(target.card) };
+  if (kind === "unit") return { kind, unitId: trim(target.unitId) };
   if (kind === "plugin") return { kind };
   return { kind };
+}
+
+/**
+ * 页面块 → 签名用的确定性形状（d.124）。
+ *
+ * ★ 与 `scripts/sign-plugin.mjs` 的 `normalizePageBlock` 逐字段一致：web 侧验签拿到的是
+ *   应用归一化后的清单（trim / `list.items[].description` 缺省 "" 等），这里对原始清单
+ *   补同一套默认值，三份 canonicalizer 才会逐字节相等。
+ */
+function normalizePageBlock(block) {
+  const raw = block && typeof block === "object" ? block : {};
+  const type = String(raw.type == null ? "" : raw.type);
+  const title = trim(raw.title);
+  const head = title ? { type, title } : { type };
+  if (type === "markdown") return Object.assign(head, { text: trim(raw.text) });
+  if (type === "stats") {
+    return Object.assign(head, {
+      items: (Array.isArray(raw.items) ? raw.items : []).map((item) => ({
+        label: trim(item && item.label),
+        value: trim(item && item.value),
+      })),
+    });
+  }
+  if (type === "table") {
+    return Object.assign(head, {
+      columns: stringList(raw.columns),
+      rows: (Array.isArray(raw.rows) ? raw.rows : []).map((row) => stringList(row)),
+    });
+  }
+  if (type === "list") {
+    return Object.assign(head, {
+      items: (Array.isArray(raw.items) ? raw.items : []).map((item) => ({
+        title: trim(item && item.title),
+        // 应用归一化给缺省 ""（zod .default("")）——不补会与 web 文本不一致
+        description: trim(item && item.description),
+        ...(trim(item && item.badge) ? { badge: trim(item.badge) } : {}),
+      })),
+    });
+  }
+  if (type === "actions") {
+    return Object.assign(head, {
+      items: (Array.isArray(raw.items) ? raw.items : []).map((item) => ({
+        label: trim(item && item.label),
+        target: normalizeCommandTarget(item && item.target),
+      })),
+    });
+  }
+  if (type === "contributions") return Object.assign(head, { kind: String(raw.kind == null ? "" : raw.kind) });
+  return head;
+}
+
+/**
+ * 页面 → 签名用的确定性形状（d.124）。
+ *
+ * 声明式（blocks）与界面插件（entry）统一成同一份；空 icon/summary/entry/blocks 不进文本，
+ * 与 shared「缺省即空」口径一致（也避免作者写了空串就验签失败）。
+ */
+function normalizePage(page) {
+  if (!page || typeof page !== "object" || Array.isArray(page)) return null;
+  const title = trim(page.title);
+  if (!title) return null;
+  const out = { title };
+  const icon = trim(page.icon);
+  if (icon) out.icon = icon;
+  const summary = trim(page.summary);
+  if (summary) out.summary = summary;
+  const entry = trim(page.entry);
+  if (entry) out.entry = entry;
+  const blocks = (Array.isArray(page.blocks) ? page.blocks : []).map(normalizePageBlock);
+  if (blocks.length > 0) out.blocks = blocks;
+  return out;
 }
 
 /** 清单 → 参与签名 v1 字段的归一化形状（复制自 sign-plugin.mjs，勿单独改）。 */
@@ -225,6 +299,9 @@ function normalizeManifest(manifest) {
         ? contributions.desktopWidgets
         : []
       ).map(normalizeDesktopWidget),
+      // d.124：插件页面——只在声明时进入签名文本（旧包 canonical 字节不变）。
+      // 与 scripts/sign-plugin.mjs 的 normalizePage 逐字段一致，见 normalizePage 注释。
+      ...(normalizePage(contributions.page) ? { page: normalizePage(contributions.page) } : {}),
       // d.90：清单里的 llmPresets 会被应用丢弃，签名文本恒为空数组。
       llmPresets: [],
     },

@@ -291,3 +291,93 @@ describe("PublisherTrustStore · TOFU 信任表", () => {
     expect(new PublisherTrustStore(storage).list()).toEqual([]);
   });
 });
+
+/* ───────────────────── d.124：页面字段进入签名覆盖 ───────────────────── */
+
+/**
+ * v5 声明式页面清单（故意用「不写默认值」的写法）：
+ * - list 项省略 description（应用归一化会补 ""）；
+ * - actions 用 settings / unit 两类 target（旧版脚本 canonicalizer 会丢字段）；
+ * 这两点正是「脚本签的包在应用里验不过」的高发区，这里一起钉住。
+ */
+const V5_PAGE_MANIFEST: Record<string, unknown> = {
+  schemaVersion: 5,
+  id: "acme.page-signed",
+  name: "页面签名包",
+  version: "1.0.0",
+  description: "带页面签名的示例",
+  author: "Acme",
+  engines: { heming: "d.123" },
+  permissions: { network: [], tools: "read" },
+  contributions: {
+    skills: [{ name: "页面技能", instructions: "做点什么。" }],
+    page: {
+      title: " 采集看板 ",
+      icon: "chart",
+      summary: "本机采集状态",
+      blocks: [
+        { type: "markdown", title: " 怎么用 ", text: "  先填来源。  " },
+        { type: "stats", items: [{ label: " 已采集 ", value: "12 条" }] },
+        { type: "table", columns: ["来源", "状态"], rows: [["QQ", "就绪"]] },
+        { type: "list", items: [{ title: "开始同步", badge: "命令" }] },
+        {
+          type: "actions",
+          items: [
+            { label: "去设置", target: { kind: "settings", card: "profile" } },
+            { label: "看单元", target: { kind: "unit", unitId: "acme.page-signed" } },
+            { label: "去主页", target: { kind: "page", page: "home" } },
+          ],
+        },
+        { type: "contributions", kind: "skills" },
+      ],
+    },
+  },
+};
+
+describe("signedManifestText · d.124 页面字段", () => {
+  it("v5 页面清单：应用与 scripts/sign-plugin.mjs 逐字节一致", () => {
+    const parsed = parsePluginManifest(V5_PAGE_MANIFEST);
+    expect(parsed.contributions.page?.kind).toBe("blocks");
+    expect(scriptApi.signedManifestText(V5_PAGE_MANIFEST)).toBe(signedManifestText(parsed));
+  });
+
+  it("页面 title / summary / 块内容 / 动作 target 任一被改，签名文本都变", () => {
+    const parsed = parsePluginManifest(V5_PAGE_MANIFEST);
+    const base = signedManifestText(parsed);
+    if (parsed.contributions.page?.kind !== "blocks") throw new Error("应为声明式页面");
+
+    const title = { ...parsed, contributions: { ...parsed.contributions, page: { ...parsed.contributions.page, title: "被改的标题" } } };
+    expect(signedManifestText(title as PluginManifest)).not.toBe(base);
+
+    const blockText = {
+      ...parsed,
+      contributions: {
+        ...parsed.contributions,
+        page: {
+          ...parsed.contributions.page,
+          blocks: [{ type: "markdown" as const, text: "被改的正文" }],
+        },
+      },
+    };
+    expect(signedManifestText(blockText as PluginManifest)).not.toBe(base);
+  });
+
+  it("脚本签 v5 页面包 → 应用验签有效；改页面标题后验签失败", async () => {
+    const pair = scriptApi.generateEd25519KeyPair();
+    const unsigned = { ...V5_PAGE_MANIFEST, publisher: { id: "acme", publicKey: pair.publicKey } };
+    const { publisher, signature } = scriptApi.signManifest(unsigned, pair.privateKey);
+    const signed = parsePluginManifest({ ...unsigned, publisher, signature });
+    expect(await verifyManifestSignature(signed)).toEqual({ status: "valid" });
+
+    if (signed.contributions.page?.kind !== "blocks") throw new Error("应为声明式页面");
+    const tampered = {
+      ...signed,
+      contributions: {
+        ...signed.contributions,
+        page: { ...signed.contributions.page, title: "被改过的页面标题" },
+      },
+    } as PluginManifest;
+    const check = await verifyManifestSignature(tampered);
+    expect(check.status).toBe("invalid");
+  });
+});
