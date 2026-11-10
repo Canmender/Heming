@@ -401,9 +401,9 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
     ratio >= DANGER_RATIO ? "danger" : ratio >= WARN_RATIO ? "warn" : "ok";
 
   const barColor =
-    level === "danger" ? "bg-[#b42318]" : level === "warn" ? "bg-[#d97706]" : "bg-muted";
+    level === "danger" ? "bg-[var(--danger)]" : level === "warn" ? "bg-[var(--warn)]" : "bg-muted";
   const statusColor =
-    level === "danger" ? "text-[#b42318]" : level === "warn" ? "text-[#b45309]" : "text-muted";
+    level === "danger" ? "text-[var(--danger)]" : level === "warn" ? "text-[var(--warn)]" : "text-muted";
   const statusText =
     level === "danger"
       ? "本机存储快满了。继续写入很可能失败，记忆权重、任务记录会悄悄回退或消失，请立刻清理。"
@@ -483,9 +483,9 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
   };
 
   return (
-    <section aria-label="本机存储" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
+    <section aria-label="本机存储" className="mt-3 rounded-xl border border-line bg-[var(--surface)] p-4 shadow-card">
       <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted">
-        <StorageIcon className="text-[#999]" />
+        <StorageIcon className="text-muted" />
         本机存储
       </div>
       <div className="mt-1 ui-caption">
@@ -512,7 +512,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
           aria-valuetext={`已用 ${formatExactBytes(usage.totalBytes)} 字节（${formatBytes(
             usage.totalBytes,
           )}），占配额 ${Math.round(percent)}%（配额 ${formatExactBytes(quota.bytes)} 字节）`}
-          className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[#eee]"
+          className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--subtle-3)]"
         >
           <div
             className={`h-full rounded-full ${barColor}`}
@@ -539,7 +539,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
                 key={m.name}
                 className="flex items-baseline justify-between gap-2 border-b border-line-soft pb-1 text-[11px] last:border-b-0"
               >
-                <span className="min-w-0 truncate text-[#555]">
+                <span className="min-w-0 truncate text-[var(--body)]">
                   {m.name}
                   <span className="ml-1 text-[10px] text-muted">{m.keys} 键</span>
                 </span>
@@ -571,7 +571,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             setNotice(null);
             setPending("cache");
           }}
-          className="ui-btn ui-btn-md ui-btn-ghost text-[#b42318]"
+          className="ui-btn ui-btn-md ui-btn-ghost text-[var(--danger)]"
         >
           清理消息缓存
         </button>
@@ -581,7 +581,7 @@ export function StorageUsageCard({ storage }: { storage?: EnumerableStorage }) {
             setNotice(null);
             setPending("tasks");
           }}
-          className="ui-btn ui-btn-md ui-btn-ghost text-[#b42318]"
+          className="ui-btn ui-btn-md ui-btn-ghost text-[var(--danger)]"
         >
           清理任务记录
         </button>

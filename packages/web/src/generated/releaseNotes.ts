@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.129.3.51.0",
+    "date": "2026-11-10",
+    "title": "设置卡片、弹窗和导航栏深色更一致",
+    "bullets": [
+      "设置里的「工具调用确认 / 本机存储 / 文件编辑」、插件安装与技能社区弹窗、工具确认弹窗、通知中心、文件预览和左侧导航栏，颜色都换成了同一套主题色；深色模式下不再出现浅色块或刺眼的状态色。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.129.3.50.0",
     "date": "2026-11-10",
     "title": "空状态更统一；删对话不留本机垃圾",

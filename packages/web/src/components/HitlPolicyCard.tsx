@@ -106,7 +106,7 @@ export function HitlPolicyCard({
   };
 
   return (
-    <section aria-label="工具调用确认" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
+    <section aria-label="工具调用确认" className="mt-3 rounded-xl border border-line bg-[var(--surface)] p-4 shadow-card">
       <div className="text-[12px] font-bold text-muted">工具调用确认</div>
       <div className="mt-1 ui-caption">
         智能体调用有副作用的工具前先问你一句。只读操作默认不打扰，写入与危险操作必问。
@@ -169,7 +169,7 @@ export function HitlPolicyCard({
       </label>
 
       {clampedNotice && (
-        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 ui-caption">
+        <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 ui-caption">
           为避免危险操作被自动放行，这一项已调整为「写入」：危险操作现在都会先询问你
           （原先的「危险」档等同于不设边界，已移除）。
         </div>
@@ -203,7 +203,7 @@ export function HitlPolicyCard({
           <button
             type="button"
             onClick={() => setConfirmClearRules(true)}
-            className="ui-btn ui-btn-md ui-btn-ghost text-[#b42318]"
+            className="ui-btn ui-btn-md ui-btn-ghost text-[var(--danger)]"
           >
             清空记住的规则
           </button>
@@ -219,8 +219,8 @@ export function HitlPolicyCard({
       {sessionMsg && (
         <div
           role="status"
-          className={`mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 text-[11px] ${
-            sessionMsg.kind === "ok" ? "text-[#1d6b3a]" : "text-muted"
+          className={`mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 text-[11px] ${
+            sessionMsg.kind === "ok" ? "text-[var(--success)]" : "text-muted"
           }`}
         >
           {sessionMsg.text}
@@ -245,13 +245,13 @@ export function HitlPolicyCard({
                 <span
                   className={`rounded-sm px-1 ${
                     rule.effect === "deny"
-                      ? "bg-[#fdf0ef] text-[#b42318]"
-                      : "bg-[#eef6f0] text-[#1d6b3a]"
+                      ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+                      : "bg-[var(--success-soft)] text-[var(--success)]"
                   }`}
                 >
                   {rule.effect === "deny" ? "拒绝" : "允许"}
                 </span>
-                <span className="font-mono text-[#555]">{rule.tool}</span>
+                <span className="font-mono text-[var(--body)]">{rule.tool}</span>
                 <span className="min-w-0 flex-1 truncate text-muted" title={rule.resource}>
                   {rule.resource === "*" ? "所有调用" : rule.resource}
                 </span>
@@ -392,13 +392,13 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
     <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]">
       <span className="text-muted">{time}</span>
       <span
-        className={`rounded-sm px-1 text-muted ${approved ? "bg-[#eef6f0] text-[#1d6b3a]" : "bg-[#fdf0ef] text-[#b42318]"}`}
+        className={`rounded-sm px-1 text-muted ${approved ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[var(--danger-soft)] text-[var(--danger)]"}`}
       >
         {approved ? "已允许" : "已拒绝"}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[#555]">{entry.target}</span>
+      <span className="min-w-0 flex-1 truncate text-[var(--body)]">{entry.target}</span>
       {entry.rejected ? (
-        <span className="text-[#b45309]" title={entry.rejected}>
+        <span className="text-[var(--warn)]" title={entry.rejected}>
           {entry.rejected}
         </span>
       ) : null}

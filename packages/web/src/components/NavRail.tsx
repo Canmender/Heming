@@ -66,7 +66,7 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
 /** 悬停黑色胶囊浮签：淡入 + 轻微左移进入（group-hover，150ms）。 */
 function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
   return (
-    <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-1.5 whitespace-nowrap rounded-[7px] bg-ink px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-[0_2px_6px_rgba(0,0,0,0.25)] transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100">
+    <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-1.5 whitespace-nowrap rounded-lg bg-ink px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-card transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100">
       <span>{label}</span>
       {shortcut && (
         <kbd className="rounded-sm border border-current px-1 text-[10px] font-normal opacity-70">
@@ -284,7 +284,7 @@ export function NavRail({
             type="button"
             aria-label="全局搜索 Ctrl K"
             onClick={() => onOpenSearch?.()}
-            className="flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-[#666] transition-colors duration-150 hover:bg-[#f0f0f0] hover:text-ink"
+            className="flex h-[34px] w-[34px] items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             <SearchIcon width={17} height={17} />
           </button>
@@ -298,7 +298,7 @@ export function NavRail({
             aria-label="快捷键帮助"
             title="快捷键"
             onClick={() => onOpenShortcuts?.()}
-            className="flex h-[26px] w-[34px] items-center justify-center rounded-[9px] text-[13px] font-bold text-[#666] transition-colors duration-150 hover:bg-[#f0f0f0] hover:text-ink"
+            className="flex h-[26px] w-[34px] items-center justify-center rounded-lg text-[13px] font-bold text-muted transition-colors duration-150 hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             ?
           </button>
@@ -318,7 +318,7 @@ export function NavRail({
           const divider = needsGroupDivider(visibleItems[index - 1]?.page ?? null, it.page);
           return (
             <Fragment key={it.page}>
-              {divider ? <div aria-hidden="true" className="h-px w-6 bg-[#e6e6e6]" /> : null}
+              {divider ? <div aria-hidden="true" className="h-px w-6 bg-[var(--line-soft)]" /> : null}
               <div className="group relative" data-nav-group={navGroupOf(it.page)}>
                 <button
                   type="button"
@@ -330,8 +330,8 @@ export function NavRail({
                     // 键盘激活（Enter）保留浮层，让焦点连续、可继续 Tab/Esc。
                     if (auto && !keyboardFocusRef.current) closeOverlay();
                   }}
-                  className={`relative flex h-[34px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
-                    active ? "bg-ink text-white" : "text-[#666] hover:bg-[#f0f0f0] hover:text-ink"
+                  className={`relative flex h-[34px] w-[34px] items-center justify-center rounded-lg transition-colors duration-150 ${
+                    active ? "bg-ink text-white" : "text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
                   }`}
                 >
                   {it.icon}
@@ -353,8 +353,8 @@ export function NavRail({
             aria-pressed={pinned}
             title={pinned ? "自动隐藏导航栏（Ctrl+B）" : "固定导航栏常显（Ctrl+B）"}
             onClick={() => setNavMode(otherNavMode(navMode))}
-            className={`flex h-[26px] w-[34px] items-center justify-center rounded-[9px] transition-colors duration-150 ${
-              pinned ? "text-[#555] hover:bg-[#f0f0f0] hover:text-ink" : "text-[#888] hover:bg-[#f0f0f0] hover:text-ink"
+            className={`flex h-[26px] w-[34px] items-center justify-center rounded-lg transition-colors duration-150 ${
+              pinned ? "text-[var(--body)] hover:bg-[var(--subtle-3)] hover:text-ink" : "text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
             }`}
           >
             <PinIcon width={15} height={15} />
@@ -368,7 +368,7 @@ export function NavRail({
             aria-label={`账户：${who} · 退出登录`}
             title="退出登录"
             onClick={() => setConfirmLogout(true)}
-            className="flex h-[28px] w-[28px] items-center justify-center overflow-hidden rounded-full bg-[#ececec] text-[12px] font-bold text-[#555] transition-colors duration-150 hover:bg-[#f0f0f0]"
+            className="flex h-[28px] w-[28px] items-center justify-center overflow-hidden rounded-full bg-[var(--subtle-3)] text-[12px] font-bold text-[var(--body)] transition-colors duration-150 hover:bg-[var(--subtle-3)]"
           >
             {avatar ? (
               <img src={avatar} alt="" className="h-full w-full rounded-full object-cover" />
@@ -417,7 +417,7 @@ export function NavRail({
     return (
       <nav
         aria-label="主导航"
-        className={`flex ${RAIL_WIDTH} shrink-0 flex-col items-center border-r border-line-soft bg-[#fafafa] py-3`}
+        className={`flex ${RAIL_WIDTH} shrink-0 flex-col items-center border-r border-line-soft bg-[var(--subtle-2)] py-3`}
       >
         {railInner}
       </nav>
@@ -469,7 +469,7 @@ export function NavRail({
           if (next && (navRef.current?.contains(next) || hotzoneRef.current?.contains(next))) return;
           scheduleHide();
         }}
-        className={`absolute inset-y-0 left-0 z-30 flex ${RAIL_WIDTH} flex-col items-center border-r border-line-soft bg-[#fafafa] py-3 ui-overlay-shadow transition-[transform,opacity] duration-[160ms] ease-out motion-reduce:transition-none ${
+        className={`absolute inset-y-0 left-0 z-30 flex ${RAIL_WIDTH} flex-col items-center border-r border-line-soft bg-[var(--subtle-2)] py-3 ui-overlay-shadow transition-[transform,opacity] duration-[160ms] ease-out motion-reduce:transition-none ${
           navOpen ? "translate-x-0 opacity-100" : "pointer-events-none -translate-x-full opacity-0"
         }`}
       >

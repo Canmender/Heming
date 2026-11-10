@@ -56,8 +56,8 @@ export function UnboundModelNotice({
   const canQuickBind = Boolean(onBind) && (connections?.length ?? 0) > 0;
   const base =
     variant === "card"
-      ? "rounded-lg border border-[#fed7aa] bg-[#fffbeb] px-3 py-2 text-[12px] leading-5 text-[#b45309]"
-      : "border-l-2 border-[#d97706] bg-[#fffbeb] px-2 py-1.5 text-[12px] leading-5 text-[#b45309]";
+      ? "rounded-lg border border-[var(--warn-line)] bg-[var(--warn-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warn)]"
+      : "border-l-2 border-[var(--warn)] bg-[var(--warn-soft)] px-2 py-1.5 text-[12px] leading-5 text-[var(--warn)]";
   return (
     <div
       id={id}
@@ -94,7 +94,7 @@ export function UnboundModelNotice({
         <button
           type="button"
           onClick={onGoSettings}
-          className={`shrink-0 rounded-sm border border-[#e6b3ae] px-2 py-0.5 text-[11px] text-[#92400e] hover:bg-[#fef3f2] ${FOCUS_RING_TIGHT}`}
+          className={`shrink-0 rounded-sm border border-[var(--warn-line)] px-2 py-0.5 text-[11px] text-[var(--warn)] hover:bg-[var(--warn-soft)] ${FOCUS_RING_TIGHT}`}
         >
           {canQuickBind ? "管理连接" : "去设置"}
         </button>

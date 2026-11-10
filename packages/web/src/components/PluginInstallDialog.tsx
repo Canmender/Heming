@@ -162,7 +162,7 @@ export function PluginInstallDialog({
         aria-modal="true"
         aria-label="安装桌面小组件"
         onClick={(event) => event.stopPropagation()}
-        className="flex max-h-[85vh] w-[min(640px,94vw)] flex-col overflow-hidden rounded-xl border border-[#ececec] bg-white shadow-card"
+        className="flex max-h-[85vh] w-[min(640px,94vw)] flex-col overflow-hidden rounded-xl border border-line-soft bg-[var(--surface)] shadow-card"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
           <span className="truncate ui-section-title">安装桌面小组件</span>
@@ -170,7 +170,7 @@ export function PluginInstallDialog({
             type="button"
             aria-label="关闭安装弹窗"
             onClick={onClose}
-            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             <XIcon width={16} height={16} aria-hidden="true" />
           </button>
@@ -178,8 +178,8 @@ export function PluginInstallDialog({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {/* 风险声明常驻：这不是普通清单插件，包里有会跑起来的界面代码 */}
-          <div className="rounded-lg border border-[#f3d2ce] bg-[#fffafa] p-3">
-            <p className="ui-body-sm font-medium text-[#b42318]">
+          <div className="rounded-lg border border-[var(--danger-line)] bg-[var(--danger-soft)] p-3">
+            <p className="ui-body-sm font-medium text-[var(--danger)]">
               本插件包含可执行界面代码
             </p>
             <p className="mt-1 ui-caption">
@@ -191,19 +191,19 @@ export function PluginInstallDialog({
           </div>
 
           {!available && (
-            <p className="mt-3 rounded-lg bg-[#f7f7f7] px-3 py-2 ui-caption">
+            <p className="mt-3 rounded-lg bg-[var(--subtle-2)] px-3 py-2 ui-caption">
               浏览器里没有桌面窗口与安装能力，桌面小组件只在安装版里可用。
             </p>
           )}
 
           {error && (
-            <p role="alert" className="mt-3 ui-body-sm text-[#b42318]">
+            <p role="alert" className="mt-3 ui-body-sm text-[var(--danger)]">
               {error}
             </p>
           )}
 
           {phase.kind === "done" && (
-            <div className="mt-3 rounded-lg border border-line bg-[#fafafa] p-3">
+            <div className="mt-3 rounded-lg border border-line bg-[var(--subtle-2)] p-3">
               <p className="ui-body-sm font-medium">{phase.message}</p>
               <p className="mt-1 ui-caption">
                 可以在「桌面小组件」列表里启用/停用、显示/隐藏、调设置；卸载会删除插件文件与设置。
@@ -228,7 +228,7 @@ export function PluginInstallDialog({
                 </div>
                 {loading && <p className="mt-2 ui-caption">正在读取云端插件目录…</p>}
                 {loadError && (
-                  <p role="alert" className="mt-2 ui-caption text-[#b42318]">
+                  <p role="alert" className="mt-2 ui-caption text-[var(--danger)]">
                     {loadError}
                   </p>
                 )}
@@ -240,13 +240,13 @@ export function PluginInstallDialog({
                     {entries.map((entry) => (
                       <li
                         key={`${entry.id}@${entry.version}`}
-                        className="rounded-lg border border-line bg-white p-3"
+                        className="rounded-lg border border-line bg-[var(--surface)] p-3"
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="ui-body-sm font-bold">{entry.name}</span>
                           <span className="ui-chip">v{entry.version}</span>
                           <span className="ui-chip">官方目录</span>
-                          <span className="ui-chip text-[#b42318]">包含可执行界面代码</span>
+                          <span className="ui-chip text-[var(--danger)]">包含可执行界面代码</span>
                           <span className="ml-auto ui-caption">
                             {sizeText(entry.package?.size)}
                           </span>
@@ -287,7 +287,7 @@ export function PluginInstallDialog({
           )}
 
           {phase.kind === "confirm-cloud" && (
-            <div className="mt-4 rounded-lg border border-line bg-[#fafafa] p-3">
+            <div className="mt-4 rounded-lg border border-line bg-[var(--subtle-2)] p-3">
               <p className="ui-body-sm font-medium">
                 确认安装「{phase.entry.name}」v{phase.entry.version}？
               </p>
@@ -316,7 +316,7 @@ export function PluginInstallDialog({
           )}
 
           {phase.kind === "confirm-local" && (
-            <div className="mt-4 rounded-lg border border-line bg-[#fafafa] p-3">
+            <div className="mt-4 rounded-lg border border-line bg-[var(--subtle-2)] p-3">
               <p className="ui-body-sm font-medium">确认安装本地插件包？</p>
               <ul className="mt-2 list-disc space-y-1 pl-5 ui-caption">
                 <li>本地包来源由你自己确认，宿主无法判断它是否可靠。</li>

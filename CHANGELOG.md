@@ -2,6 +2,26 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.129.3.51.0（2026-11-10）— 设置子卡 / 对话框 / 导航栏的写死颜色收口
+
+上一轮把团队/记忆/设置主页面收口后，这轮清「设置子卡 + 弹窗 + 全局导航」里的最后一批写死样式：
+
+- **设置子卡**：工具调用确认（HitlPolicyCard）、本机存储（StorageUsageCard）、文件编辑（FileEditCard）——
+  卡片壳统一 `.ui-card`，写死的浅底/文字色/状态点改为 `--surface` / `--subtle*` / `body` /
+  `--danger` / `--warn` / `--success`，会话消息/规则列表的成功/失败底色改 soft token。
+- **弹窗**：插件安装（PluginInstallDialog）、技能社区（SkillHubPanel）、工具确认（ToolApprovalModal）、
+  文件预览（FilePreviewModal）——危险提示、可执行代码徽标、风险档位、结果块全部语义色；
+  不再使用 `#fdf6f6` / `#f2fbf4` / `#f3f0e6` 等写死底色。
+- **全局**：导航栏（NavRail）悬停/选中/分隔线/账户头像/提示气泡改 token（`--subtle-3`、`--line-soft`、
+  `shadow-card`）；未绑定模型提示（UnboundModelNotice）与通知中心（NotificationCenter）同步。
+- 审计结果：上述 10 个文件 `bg-[#…]/text-[#…]/border-[#…]/bg-white` 计数均为 **0**；
+  StorageUsageCard 的两条旧断言同步改为 token 类名。
+
+### 验证
+
+- 相关组件测试全绿（HITL/存储/文件编辑/安装弹窗/工具确认/通知中心/技能面板/文件预览）；
+- `web` 全量回归通过；`pnpm -r typecheck` 六包零错误；真实浏览器亮/暗截图核对设置「高级」区块与导航栏。
+
 ## d.129.3.50.0（2026-11-10）— 空状态统一图标砖；删除对话清干净本机残留
 
 ### ① 空状态统一（EmptyState → `.ui-icon-tile`）

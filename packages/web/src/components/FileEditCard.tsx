@@ -92,7 +92,7 @@ export function FileEditCard({
   const rules = policy.rules().filter((rule) => isFileEditTool(rule.tool));
 
   return (
-    <section aria-label="文件编辑" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
+    <section aria-label="文件编辑" className="mt-3 rounded-xl border border-line bg-[var(--surface)] p-4 shadow-card">
       <div className="text-[12px] font-bold text-muted">文件编辑</div>
       <div className="mt-1 ui-caption">
         允许智能体在你圈定的目录内用补丁改文件。默认没有任何可写根，
@@ -100,7 +100,7 @@ export function FileEditCard({
       </div>
 
       {!fileBridge ? (
-        <div className="mt-2 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 ui-caption">
+        <div className="mt-2 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 ui-caption">
           仅桌面端可用：浏览器里没有文件系统访问能力，因此不提供文件编辑工具。
         </div>
       ) : (
@@ -115,7 +115,7 @@ export function FileEditCard({
               )}
             </div>
             {config.roots.length === 0 ? (
-              <div className="mt-1 rounded-lg border border-line-soft bg-[#fafafa] px-3 py-2 ui-caption">
+              <div className="mt-1 rounded-lg border border-line-soft bg-[var(--subtle-2)] px-3 py-2 ui-caption">
                 还没有可写根。智能体目前不能改任何文件（若添加只读根，它可以读取那些目录）。建议选一个你希望它维护的目录
                 （例如 Obsidian 库的某个子目录），不要选整个盘。
               </div>
@@ -143,7 +143,7 @@ export function FileEditCard({
                       type="button"
                       aria-label={`删除根 ${root.name}`}
                       onClick={() => removeRoot(root.path)}
-                      className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-red-600 hover:bg-[#fafafa]"
+                      className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-red-600 hover:bg-[var(--subtle-2)]"
                     >
                       删除
                     </button>
@@ -237,13 +237,13 @@ export function FileEditCard({
                     <span
                       className={`rounded-sm px-1 ${
                         rule.effect === "deny"
-                          ? "bg-[#fdf0ef] text-[#b42318]"
-                          : "bg-[#eef6f0] text-[#1d6b3a]"
+                          ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+                          : "bg-[var(--success-soft)] text-[var(--success)]"
                       }`}
                     >
                       {rule.effect === "deny" ? "拒绝" : "允许"}
                     </span>
-                    <span className="font-mono text-[#555]">{rule.tool}</span>
+                    <span className="font-mono text-[var(--body)]">{rule.tool}</span>
                     <span className="min-w-0 flex-1 truncate font-mono text-muted" title={rule.resource}>
                       {rule.resource}
                     </span>

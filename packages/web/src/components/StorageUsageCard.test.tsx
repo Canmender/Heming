@@ -163,9 +163,9 @@ describe("StorageUsageCard", () => {
 
     const status = screen.getByRole("status", { name: "存储水位" });
     expect(status.textContent).toContain("本机存储已用掉八成以上");
-    expect(status.className).toContain("text-[#b45309]");
+    expect(status.className).toContain("text-[var(--warn)]");
     // 黄，不是红
-    expect(status.className).not.toContain("text-[#b42318]");
+    expect(status.className).not.toContain("text-[var(--danger)]");
   });
 
   it("用量 ≥ 95% ⇒ 变红并给提示", () => {
@@ -176,7 +176,7 @@ describe("StorageUsageCard", () => {
 
     const status = screen.getByRole("status", { name: "存储水位" });
     expect(status.textContent).toContain("本机存储快满了");
-    expect(status.className).toContain("text-[#b42318]");
+    expect(status.className).toContain("text-[var(--danger)]");
   });
 
   it("用量 < 80% ⇒ 正常态（不用红黄）", () => {
