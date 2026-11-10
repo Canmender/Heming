@@ -15,10 +15,9 @@ import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
 import { useInfohubStore } from "./lib/infohub/store.js";
 import { ensureDesktopGateway } from "./lib/magpieHost.js";
-import { useAutomationScheduler } from "./lib/automation/scheduler.js";
-import { useWorkflowScheduler } from "./lib/workflow/scheduler.js";
-import { useStaffLoop } from "./lib/staff/loop.js";
 import { useModuleStore, isModuleEffective } from "./lib/modules/store.js";
+// d.128：内置模块的页面/后台循环由运行时注册表统一装配，App 不再直连模块实现。
+import { ModulePage, modulePageOf, useModuleBackgroundLoops } from "./lib/modules/runtime.js";
 import { useAppPresence } from "./lib/appPresence.js";
 import { startWidgetEvents } from "./lib/widgetEvents.js";
 import { refreshWidgets } from "./lib/widgets/store.js";
@@ -48,17 +47,6 @@ const HomePage = lazy(() => import("./components/HomePage.js").then((m) => ({ de
 const TeamPage = lazy(() => import("./components/TeamPage.js").then((m) => ({ default: m.TeamPage })));
 const AssistantPage = lazy(() =>
   import("./components/AssistantPage.js").then((m) => ({ default: m.AssistantPage })),
-);
-const StaffPage = lazy(() => import("./components/StaffPage.js").then((m) => ({ default: m.StaffPage })));
-const InfohubPage = lazy(() =>
-  import("./components/InfohubPage.js").then((m) => ({ default: m.InfohubPage })),
-);
-const AutomationPage = lazy(() =>
-  import("./components/AutomationPage.js").then((m) => ({ default: m.AutomationPage })),
-);
-// 工作流（d.87）：画布编辑器与执行引擎，只在进这页时才下载。
-const WorkflowPage = lazy(() =>
-  import("./components/workflow/WorkflowPage.js").then((m) => ({ default: m.WorkflowPage })),
 );
 const ModelPage = lazy(() => import("./components/ModelPage.js").then((m) => ({ default: m.ModelPage })));
 const PluginsPage = lazy(() =>
@@ -576,12 +564,8 @@ function AppShell({
   /** auto 模式下给左缘热区留一条 8px 空档，避免热区盖住内容最左侧的可点元素（列表整行按钮等）。 */
   const navMode = useUiStore((s) => s.navMode);
 
-  // 本机自动化：只在登录后的桌面端到点执行，不补跑、不自动拉起 InfoHub。
-  // d.70：自动化模块停用（或依赖的信息中枢停用）后不再挂载调度器。
-  useAutomationScheduler(Boolean(authUser) && isModuleEffective(moduleState, "automations"));
-  useWorkflowScheduler(Boolean(authUser) && isModuleEffective(moduleState, "workflows"));
-  // 常驻幕僚（d.48）：登录后巡检日程与任务，只读、只递简报；模块停用即停止巡检。
-  useStaffLoop(Boolean(authUser) && isModuleEffective(moduleState, "staff"));
+  // 本机自动化 / 工作流调度 / 常驻幕僚：实现收在 lib/modules/runtime，App 只按生效状态统一挂载。
+  useModuleBackgroundLoops(Boolean(authUser), moduleState);
 
   // d.115：信息中枢模块生效 = 自动拉起本机边车（不依赖页面挂载），并自动识别、
   // 空库时采集一次；模块停用 = 运行时一起下线（不删任何归档数据）。
@@ -617,6 +601,8 @@ function AppShell({
   const resolvedPage: Page = page === "modelroute" ? "home" : page;
   const pluginPageAvailable =
     !isPluginPagePage(resolvedPage) || pluginPageEntry(pluginPageEntries, resolvedPage)?.available === true;
+  // 内置模块页（幕僚/信息中枢/自动化/工作流）统一走 ModulePage；迁移到插件后只换 runtime 条目。
+  const modulePage = modulePageOf(resolvedPage);
   const currentPage: Page =
     isPageAvailable(resolvedPage, moduleState) && pluginPageAvailable ? resolvedPage : "home";
   useEffect(() => {
@@ -815,18 +801,9 @@ function AppShell({
     ) : currentPage === "chat" ? (
       // 智能体（本机运行）：左侧智能体名册 + 右侧对话；d.67 起承接「任务」视图
       <AssistantPage />
-    ) : currentPage === "staff" ? (
-      // 幕僚：常驻主动简报（只读采集 + 一键跳转）
-      <StaffPage />
-    ) : currentPage === "infohub" ? (
-      // 信息中枢：本机 QQ/微信归档（桌面端 Python 子进程，数据不出本机）
-      <InfohubPage />
-    ) : currentPage === "automations" ? (
-      // 自动化：本机定时同步/重扫，只在和鸣运行且信息中枢已连接时执行
-      <AutomationPage />
-    ) : currentPage === "workflows" ? (
-      // 工作流（d.87）：节点式自动化，画布编排 + 本机执行引擎 + 定时触发
-      <WorkflowPage />
+    ) : modulePage ? (
+      // 内置模块页：幕僚 / 信息中枢 / 自动化 / 工作流（实现见 lib/modules/runtime.tsx）
+      <ModulePage moduleId={modulePage} />
     ) : currentPage === "model" ? (
       // 模型页：内核管理面——供应商/订阅账号/分组/用量/备份/同步
       <ModelPage />

@@ -47,6 +47,8 @@
     "lib/modules/nav.test.ts",
     "lib/modules/nav.ts",
     "lib/modules/registry.ts",
+    "lib/modules/runtime.test.tsx",
+    "lib/modules/runtime.tsx",
     "lib/modules/store.test.ts",
     "lib/modules/store.ts",
     "lib/staff/llm.test.ts",

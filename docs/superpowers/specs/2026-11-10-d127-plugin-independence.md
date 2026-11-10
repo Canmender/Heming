@@ -105,9 +105,11 @@ P1（`b919ba1`）已合入：`contributions.engine`、`permissions.kb`、后台�
    - **信息中枢**：页面已有 `infohub-page 0.2.0` 作为替代，先评估「停用内置页面 → 插件页接管」，
      再把采集/议程工具迁到引擎方法，最后删 `lib/infohub`；
    - **工作流放最后**：画布 ~184KB + 引擎 ~676KB + 独立服务，包体与凭据迁移最重。
-3. **迁移棘轮已建立**：`packages/web/src/lib/modules/coupling-baseline.json` 记录 141 个仍在本体的
-   模块业务文件；`coupling.test.ts` 断言「只减不增」——往本体新增插件代码会红，迁走文件必须同步删基线条目。
-   P2 的每个 PR 都应让这个数字变小，而不是绕过它。
+3. **迁移棘轮已建立**：`packages/web/src/lib/modules/coupling-baseline.json` 记录 143 个仍在本体的
+   模块业务文件（含新加的运行时接缝 2 个；其余 141 个为待迁模块代码）；`coupling.test.ts` 断言「只减不增」——
+   往本体新增插件代码会红，迁走文件必须同步删基线条目。P2 的每个 PR 都应让这个数字变小，而不是绕过它。
+4. **App 与模块实现已解耦**：新增 `lib/modules/runtime.tsx` 统一提供模块页面（懒加载）与后台循环
+   （自动化调度/工作流调度/幕僚巡检），`App.tsx` 不再 import 四个页面或三个 hook；迁移时只替换 runtime 条目。
 
 > 下一步 P2 的第一刀建议：自动化。把 `lib/automation/*` 的调度/执行改为「插件引擎方法 + 宿主生命周期」，
 > 页面搬进首方 bundle 插件包，`App.tsx` 顶层 `useAutomationScheduler` 删除，同步收紧基线。
