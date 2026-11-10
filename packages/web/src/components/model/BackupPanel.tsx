@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getMagpieCliBridge, type CloudBackupFile } from "../../lib/magpieCli.js";
+import { ArchiveIcon, AlertIcon } from "../icons.js";
 import { SectionCard } from "./SectionCard.js";
 import { ConsolePanel } from "./ConsolePanel.js";
 
@@ -76,6 +77,7 @@ export function BackupPanel() {
 
   return (
     <SectionCard
+      icon={<ArchiveIcon width={16} height={16} />}
       title="备份与恢复"
       description="备份包含来源、Key 与账号登录，用口令加密；口令只在下面的面板里输入。"
       action={
@@ -100,14 +102,15 @@ export function BackupPanel() {
       }
     >
       {error && (
-        <div role="alert" className="rounded-xl border border-[#f3c9c9] bg-[#fff6f6] p-2 text-[12px]">
-          {error}
+        <div role="alert" className="ui-alert ui-alert-danger">
+          <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
       {loading ? (
         <div className="space-y-2" aria-label="读取备份">
           {[0, 1].map((index) => (
-            <div key={index} className="h-12 animate-pulse rounded-xl bg-[#f2f3f5]" />
+            <div key={index} className="h-12 animate-pulse rounded-xl bg-[var(--subtle-3)]" />
           ))}
         </div>
       ) : files.length === 0 ? (
@@ -137,25 +140,30 @@ export function BackupPanel() {
       )}
 
       {confirmRestore && (
-        <div role="alert" className="rta-enter mt-3 rounded-xl border border-[#f3c9c9] bg-[#fff6f6] p-3">
-          <div className="text-[12px] font-bold">确认恢复这个备份？</div>
-          <p className="mt-1 ui-caption break-all">{confirmRestore}</p>
-          <p className="mt-1 ui-caption">恢复会覆盖当前的来源、账号与设置。系统会先保留一份自动备份。</p>
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              className="ui-btn ui-btn-sm ui-btn-danger"
-              onClick={() => startRestore(confirmRestore)}
-            >
-              确认恢复
-            </button>
-            <button
-              type="button"
-              className="ui-btn ui-btn-sm ui-btn-ghost"
-              onClick={() => setConfirmRestore(null)}
-            >
-              取消
-            </button>
+        <div role="alert" className="ui-alert ui-alert-danger rta-enter mt-3 block">
+          <div className="flex items-start gap-2">
+            <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[12px] font-bold">确认恢复这个备份？</div>
+              <p className="mt-1 ui-caption break-all">{confirmRestore}</p>
+              <p className="mt-1 ui-caption">恢复会覆盖当前的来源、账号与设置。系统会先保留一份自动备份。</p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-danger"
+                  onClick={() => startRestore(confirmRestore)}
+                >
+                  确认恢复
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-sm ui-btn-ghost"
+                  onClick={() => setConfirmRestore(null)}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -81,7 +81,7 @@ export function ConsolePanel({
   };
 
   return (
-    <div className="rta-enter mt-3 rounded-xl border border-line bg-[#fafafa] p-3">
+    <div className="rta-enter mt-3 rounded-lg border border-line-soft bg-[var(--subtle)] p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-[12px] font-bold">
           {title}
@@ -105,10 +105,10 @@ export function ConsolePanel({
         </div>
       </div>
       {hint && <p className="mt-1 ui-caption">{hint}</p>}
-      {error && <p className="mt-1 text-[12px] text-[#b42318]">{error}</p>}
+      {error && <p className="mt-1 text-[12px] text-[var(--danger)]">{error}</p>}
       <pre
         aria-label="命令输出"
-        className="mt-2 h-44 overflow-auto rounded-xl bg-[#111] p-3 text-[12px] text-[#e8e8e8]"
+        className="mt-2 h-44 overflow-auto rounded-lg bg-[var(--console-bg)] p-3 text-[12px] text-[var(--console-ink)]"
       >
         {output || "（输出会出现在这里）"}
       </pre>

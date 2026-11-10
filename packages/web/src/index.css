@@ -85,6 +85,30 @@
      暗色必须单独给（否则轨道是浅灰、滑块被 .bg-white 兼容层映射成深色，观感怪异）。 */
   --switch-off: #d8d8d8;
   --switch-knob: #ffffff;
+  /*
+   * 模型页视觉层（d.124 UI/UX 轮）：图表、头像、插图、语义软底此前散落在组件里写死
+   * 亮色十六进制，暗色下要么白块要么看不清。统一收成 token，组件只引用变量。
+   */
+  --chart-1: #2f6feb;
+  --chart-2: #7c6bd6;
+  --chart-grid: #e4e7ec;
+  --chart-label: #98a2b3;
+  --avatar-1: #7c6bd6;
+  --avatar-2: #2f6feb;
+  --avatar-3: #0f9d8a;
+  --avatar-4: #d97706;
+  --avatar-5: #db2777;
+  --avatar-6: #4b5563;
+  --info: #2f6feb;
+  --info-soft: #e8f1ff;
+  --info-line: #cfe0ff;
+  --warn-soft: #fffaf2;
+  --warn-line: #fde6c8;
+  --success-soft: #f4fbf6;
+  --success-line: #cfe8d8;
+  /* 控制台输出：两套主题都保持深底（终端语义），亮色下也不跟随白底 */
+  --console-bg: #111214;
+  --console-ink: #e8e8e8;
   /* 中文字体栈（d.68）：纯系统字体，不加载外部字体；理由见文件顶部 @theme 段。
      顺序是「拉丁在前、CJK 在后」：Windows 上让 Segoe UI 管英文/数字（字宽、字重更稳），
      中文回落到 Microsoft YaHei UI。纯 CJK 优先会让英文被中文字体接管，观感明显变差。 */
@@ -126,7 +150,149 @@
   /* 暗色开关：关闭态轨道用深灰、滑块用浅色（开启态仍走 accent/on-accent）。 */
   --switch-off: #3a3d43;
   --switch-knob: #e8eaed;
+  /* 模型页视觉层（d.124）：暗色下图表/头像/语义软底单独一套，保证对比度与层次。 */
+  --chart-1: #7aa2ff;
+  --chart-2: #a997ff;
+  --chart-grid: #303339;
+  --chart-label: #9aa0a8;
+  --avatar-1: #9a8cf0;
+  --avatar-2: #6f9bff;
+  --avatar-3: #3fbfa9;
+  --avatar-4: #e8a33d;
+  --avatar-5: #ee7ab0;
+  --avatar-6: #8b929c;
+  --info: #8db4ff;
+  --info-soft: #16233a;
+  --info-line: #2a3f63;
+  --warn-soft: #2a2418;
+  --warn-line: #4a3a1c;
+  --success-soft: #16241b;
+  --success-line: #24402e;
+  --console-bg: #0c0d0f;
+  --console-ink: #d8dbe0;
   color-scheme: dark;
+}
+
+/*
+ * ── 模型页视觉层（d.124 UI/UX 轮）────────────────────────────────────
+ *
+ * 用户反馈「图标规范不统一、阴影效果很差」。这里只补**通用基元**，样式全部走
+ * token/CSS 变量，暗色自动跟随（不再靠按类名一一覆盖亮色字面量）：
+ *   · 分段控件（tab / 指标切换）只有一套：底部灰槽 + 选中项浮起；
+ *   · 过滤胶囊只有一套：选中用主题色填充，未选中透明；
+ *   · 折叠区（details）统一去掉浏览器原生三角，换成同一枚 Chevron 图标；
+ *   · 语义提示条统一四色（danger / warn / info / success），圆角与内边距一致；
+ *   · 图标砖统一 40px 圆角方块 + 8% 主题色底，供空态/分区标题复用。
+ */
+@layer components {
+  /* 可点击卡片：抬 1px + 柔和阴影（不是整页弹跳；列表行不用它） */
+  .ui-card-interactive {
+    transition:
+      box-shadow 0.2s ease,
+      border-color 0.2s ease,
+      transform 0.2s ease;
+  }
+  .ui-card-interactive:hover {
+    border-color: var(--line-strong);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+  }
+  [data-theme="dark"] .ui-card-interactive:hover {
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+  }
+
+  /* 分段控件：tab、指标切换、粒度切换同一种视觉 */
+  .ui-segment-group {
+    @apply inline-flex items-center gap-1 rounded-full p-1;
+    background-color: var(--subtle-3);
+  }
+  .ui-segment {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] leading-5 text-muted transition-colors;
+  }
+  .ui-segment:hover {
+    color: var(--ink);
+  }
+  .ui-segment[aria-selected="true"],
+  .ui-segment[aria-pressed="true"] {
+    background-color: var(--surface);
+    color: var(--ink);
+    font-weight: 700;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  [data-theme="dark"] .ui-segment[aria-selected="true"],
+  [data-theme="dark"] .ui-segment[aria-pressed="true"] {
+    /* 暗色下 --surface(#16171a) 比轨道(#232529)更暗，选中项会「陷进去」；
+       改用更亮一档的 subtle-4 保持「浮起」的层次。 */
+    background-color: var(--subtle-4);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  }
+
+  /* 过滤胶囊：全部/进行中/成功… 默认浅底可点，选中态用主题色填充（与分段控件区分语义） */
+  .ui-filter-chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-transparent px-2.5 py-1 text-[12px] leading-5 text-muted transition-colors;
+    background-color: var(--subtle-2);
+  }
+  .ui-filter-chip:hover {
+    background-color: var(--subtle-3);
+    color: var(--ink);
+  }
+  .ui-filter-chip[aria-pressed="true"] {
+    background-color: var(--heming-accent);
+    color: var(--heming-on-accent);
+    font-weight: 600;
+  }
+
+  /* 折叠区：去掉原生三角，统一 Chevron（图标来自 icons.tsx，与全站同一套描边） */
+  .ui-disclosure > summary {
+    @apply flex cursor-pointer list-none items-center gap-2 rounded-lg px-1 py-1 text-[13px] font-bold;
+  }
+  .ui-disclosure > summary::-webkit-details-marker {
+    display: none;
+  }
+  .ui-disclosure > summary::marker {
+    content: "";
+  }
+  .ui-disclosure > summary:hover {
+    background-color: var(--subtle);
+  }
+  .ui-disclosure-chevron {
+    @apply shrink-0 text-muted transition-transform duration-150;
+  }
+  .ui-disclosure[open] > summary .ui-disclosure-chevron {
+    transform: rotate(90deg);
+  }
+
+  /* 语义提示条：四色一套圆角/内边距/字号 */
+  .ui-alert {
+    @apply flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] leading-5;
+  }
+  .ui-alert-danger {
+    border-color: var(--danger-line);
+    background-color: var(--danger-soft);
+    color: var(--danger);
+  }
+  .ui-alert-warn {
+    border-color: var(--warn-line);
+    background-color: var(--warn-soft);
+    color: var(--warn);
+  }
+  .ui-alert-info {
+    border-color: var(--info-line);
+    background-color: var(--info-soft);
+    color: var(--info);
+  }
+  .ui-alert-success {
+    border-color: var(--success-line);
+    background-color: var(--success-soft);
+    color: var(--success);
+  }
+
+  /* 图标砖：空态/分区标题的 40px 圆角底（8% 主题色，暗色自动混合） */
+  .ui-icon-tile {
+    @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl;
+    background-color: color-mix(in srgb, var(--heming-accent) 8%, transparent);
+    color: var(--muted);
+  }
 }
 
 body {
@@ -987,32 +1153,18 @@ samp {
 .rta-enter {
   animation: rta-enter 0.3s ease-out both;
 }
-.rta-hit {
-  transition:
-    transform 0.2s ease,
-    border-color 0.3s ease,
-    box-shadow 0.3s ease,
-    opacity 0.25s ease;
-}
-.rta-hit:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.06);
-}
-/* 分段标签：当前项白底浮起，其余透明；切换只过渡颜色/阴影 */
-.rta-segment {
-  transition:
-    background-color 0.2s ease,
-    color 0.2s ease,
-    box-shadow 0.2s ease;
-}
+/* 说明（d.124）：原来的 `.rta-hit`（列表行 hover 抬升 + 裸阴影）与 `.rta-segment`
+ * 已删除——行不必抬升，卡片抬升走 `.ui-card-interactive`，分段控件走 `.ui-segment`，
+ * 阴影统一由 token 提供（暗色也有对应值）。保留上面三条纯动效类。 */
 @media (prefers-reduced-motion: reduce) {
   .rta-flow,
   .rta-live-dot,
   .rta-enter {
     animation: none !important;
   }
-  .rta-hit,
-  .rta-segment {
+  .ui-card-interactive,
+  .ui-segment,
+  .ui-disclosure-chevron {
     transition: none !important;
   }
 }

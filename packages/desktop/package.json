@@ -1,6 +1,6 @@
 {
   "name": "@heming/desktop",
-  "version": "124.3.48",
+  "version": "125.3.48",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -124,7 +124,7 @@
       "uninstallerSidebar": "uninstallerSidebar.bmp"
     }
   },
-  "hemingVersion": "d.124.3.48.0",
-  "shortVersion": "124.3.48.0",
-  "shortVersionWindows": "124.3.48.0"
+  "hemingVersion": "d.125.3.48.0",
+  "shortVersion": "125.3.48.0",
+  "shortVersionWindows": "125.3.48.0"
 }

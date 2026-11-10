@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLlmStore } from "../store/llm.js";
+import { AlertIcon, WorkflowIcon } from "./icons.js";
 import {
   EDGE_STATE_LABEL,
   buildTraceGraph,
@@ -22,10 +23,14 @@ import {
  * 数据来自模型服务自己的路由记录，页面不推断、不补数据；没有请求时显示引导。
  */
 
+/**
+ * 连线/节点颜色走 CSS 变量（d.124）：亮色/暗色两套由 index.css 提供，
+ * SVG 用 `stroke="var(--…)"` 即可跟随主题，不再写死十六进制。
+ */
 const COLORS: Record<EdgeState, string> = {
-  live: "#2f6feb",
-  ok: "#16a34a",
-  failed: "#d97706",
+  live: "var(--info)",
+  ok: "var(--success)",
+  failed: "var(--warn)",
 };
 
 const W = 960;
@@ -39,7 +44,14 @@ const HUB_X = (W - HUB_W) / 2;
 const RIGHT_X = W - RIGHT_W;
 const HUB_H = 116;
 
-const AVATAR_COLORS = ["#7c6bd6", "#2f6feb", "#0f9d8a", "#d97706", "#db2777", "#4b5563"];
+const AVATAR_COLORS = [
+  "var(--avatar-1)",
+  "var(--avatar-2)",
+  "var(--avatar-3)",
+  "var(--avatar-4)",
+  "var(--avatar-5)",
+  "var(--avatar-6)",
+];
 
 const STRATEGY_LABELS: Record<string, string> = {
   order: "按声明顺序",
@@ -180,7 +192,7 @@ export function ModelTraceView() {
           <span
             aria-hidden="true"
             className={`inline-block h-2 w-2 rounded-full ${
-              paused ? "bg-[#98a2b3]" : "rta-live-dot bg-[#12b76a]"
+              paused ? "bg-[var(--line-strong)]" : "rta-live-dot bg-[var(--success)]"
             }`}
           />
           <span className="text-[13px] font-bold">实时</span>
@@ -189,49 +201,37 @@ export function ModelTraceView() {
             {snapshot ? ` · 最后读取 ${shortTime(snapshot.now)}` : ""}
           </span>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1">
           {(["all", "live", "ok", "failed"] as const).map((key) => (
             <button
               key={key}
               type="button"
               aria-pressed={filter === key}
-              className={`rta-segment rounded-full px-3 py-1 text-[12px] ${
-                filter === key ? "bg-ink text-white" : "bg-[#f2f3f5] text-muted hover:bg-[#e9ebef]"
-              }`}
+              className="ui-filter-chip"
               onClick={() => setFilter(key)}
             >
               {key === "all" ? "全部" : EDGE_STATE_LABEL[key]}
             </button>
           ))}
-          <button
-            type="button"
-            className="rta-segment rounded-full bg-[#f2f3f5] px-3 py-1 text-[12px] text-muted hover:bg-[#e9ebef]"
-            onClick={() => setPaused((value) => !value)}
-          >
+          <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost ml-1" onClick={() => setPaused((value) => !value)}>
             {paused ? "继续" : "暂停"}
           </button>
         </div>
       </div>
 
       {error && (
-        <div role="alert" className="rounded-xl border border-[#f3c9c9] bg-[#fff6f6] p-2 text-[12px]">
-          {error}
+        <div role="alert" className="ui-alert ui-alert-danger">
+          <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-[20px] border border-line bg-[#f8f9fb] p-4">
+      <div className="ui-card overflow-x-auto p-4">
         {visibleRows.length === 0 ? (
           <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 text-center">
-            <svg aria-hidden="true" width="160" height="72" viewBox="0 0 160 72">
-              <rect x="2" y="22" width="44" height="26" rx="8" fill="#f2f3f5" stroke="#e4e7ec" />
-              <rect x="114" y="2" width="44" height="26" rx="8" fill="#f2f3f5" stroke="#e4e7ec" />
-              <rect x="114" y="44" width="44" height="26" rx="8" fill="#f2f3f5" stroke="#e4e7ec" />
-              <rect x="62" y="22" width="36" height="26" rx="8" fill="#eef2f8" stroke="#d9e2ef" />
-              <path d="M46 35 C54 35 54 15 62 15" stroke="#d0d5dd" strokeDasharray="4 4" fill="none" />
-              <path d="M46 35 C54 35 54 57 62 57" stroke="#d0d5dd" strokeDasharray="4 4" fill="none" />
-              <path d="M98 15 C106 15 106 35 114 35" stroke="#d0d5dd" strokeDasharray="4 4" fill="none" />
-              <path d="M98 57 C106 57 106 35 114 35" stroke="#d0d5dd" strokeDasharray="4 4" fill="none" />
-            </svg>
+            <span className="ui-icon-tile mb-1">
+              <WorkflowIcon width={20} height={20} />
+            </span>
             <div className="text-[13px] font-bold">
               {graph.rows.length === 0 ? "还没有请求经过" : "当前筛选下没有请求"}
             </div>
@@ -267,7 +267,7 @@ export function ModelTraceView() {
                       key={edge.id}
                       data-testid={`trace-edge-${edge.routeId}`}
                       stroke={COLORS[edge.state]}
-                      strokeWidth={active ? 2.2 : 1.4}
+                      strokeWidth={active ? 2 : 1.5}
                       fill="none"
                       opacity={opacity}
                     >
@@ -302,7 +302,7 @@ export function ModelTraceView() {
               <button
                 key={node.id}
                 type="button"
-                className="rta-hit rta-enter absolute rounded-2xl border border-line bg-white px-3 text-left"
+                className="ui-card ui-card-interactive rta-enter absolute px-3 text-left"
                 style={{ left: 0, top: rowY(index) - ROW_H / 2, width: LEFT_W, height: ROW_H }}
                 onMouseEnter={() => setHovered(graph.edges.find((edge) => edge.from === node.id)?.routeId ?? null)}
                 onMouseLeave={() => setHovered(null)}
@@ -323,21 +323,21 @@ export function ModelTraceView() {
             ))}
 
             <div
-              className="absolute flex flex-col items-center justify-center rounded-[20px] border border-ink bg-white shadow-[0_10px_30px_rgba(16,24,40,0.08)]"
+              className="ui-card ui-overlay-shadow absolute flex flex-col items-center justify-center border-ink"
               style={{ left: HUB_X, top: hubY - HUB_H / 2, width: HUB_W, height: HUB_H }}
             >
               <span className="relative flex h-8 w-8 items-center justify-center">
-                <span className="absolute inset-0 rounded-full bg-[#f2f3f5]" />
+                <span className="absolute inset-0 rounded-full bg-[var(--subtle-3)]" />
                 <span
                   aria-hidden="true"
                   className={`absolute inset-0 rounded-full border ${
-                    stats.live > 0 ? "rta-live-dot border-[#2f6feb]" : "border-line"
+                    stats.live > 0 ? "rta-live-dot border-[var(--info)]" : "border-line"
                   }`}
                 />
                 <span className="relative text-[13px] font-bold">鸣</span>
               </span>
               <div className="mt-1 text-[14px] font-bold tracking-wide">和鸣</div>
-              <span className="mt-1 rounded-full bg-[#111] px-2.5 py-0.5 text-[11px] text-white">
+              <span className="mt-1 rounded-full bg-[var(--heming-accent)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--heming-on-accent)]">
                 {stats.live > 0 ? "回答中" : "待命"}
               </span>
             </div>
@@ -355,8 +355,8 @@ export function ModelTraceView() {
                 <button
                   key={node.id}
                   type="button"
-                  className={`rta-hit rta-enter absolute rounded-[18px] border bg-white px-3 text-left ${
-                    active ? "border-ink shadow-[0_6px_18px_rgba(16,24,40,0.06)]" : "border-line"
+                  className={`ui-card ui-card-interactive rta-enter absolute px-3 text-left ${
+                    active ? "border-ink" : ""
                   }`}
                   style={{ left: RIGHT_X, top: rowY(index) - ROW_H / 2, width: RIGHT_W, height: ROW_H }}
                   onMouseEnter={() => setHovered(routeId)}
@@ -382,7 +382,7 @@ export function ModelTraceView() {
                       </span>
                       <span className="block ui-caption">{accountCount(node.id)} 个请求</span>
                     </span>
-                    <span className={`shrink-0 text-[11px] ${active ? "text-[#2f6feb]" : "text-muted"}`}>
+                    <span className={`shrink-0 text-[11px] ${active ? "text-[var(--info)]" : "text-muted"}`}>
                       {active ? "回答中…" : visibleRows.some((row) => row.account === node.label) ? "已就绪" : "待命"}
                     </span>
                   </span>
@@ -394,7 +394,7 @@ export function ModelTraceView() {
       </div>
 
       {graph.rows.length > 0 && (
-        <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-line bg-white px-4 py-3">
+        <div className="ui-card flex flex-wrap items-end justify-between gap-3 px-4 py-3">
           <div className="text-[13px]">{summary}</div>
           <div className="flex items-end gap-6">
             {[
@@ -406,7 +406,7 @@ export function ModelTraceView() {
               },
             ].map((item) => (
               <span key={item.label} className="text-right">
-                <span className="block text-[20px] font-bold leading-none">{item.value}</span>
+                <span className="ui-numeric block text-[20px] font-bold leading-none">{item.value}</span>
                 <span className="block ui-caption">{item.label}</span>
               </span>
             ))}
@@ -415,7 +415,7 @@ export function ModelTraceView() {
       )}
 
       {candidates.length > 0 && (
-        <div className="rounded-[20px] border border-line bg-white p-4">
+        <div className="ui-card p-4">
           <div className="flex items-center justify-between">
             <div className="text-[13px] font-bold">候选链</div>
           </div>
@@ -426,7 +426,7 @@ export function ModelTraceView() {
                   {route.members.slice(0, 3).map((member) => (
                     <span
                       key={member.id}
-                      className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white"
+                      className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--surface)] text-[10px] font-bold text-white"
                       style={{ backgroundColor: avatarColor(member.provider) }}
                       title={member.model}
                     >
@@ -440,7 +440,7 @@ export function ModelTraceView() {
                     {route.members.map((member) => member.model).join(" · ") || "还没有候选"}
                   </span>
                 </span>
-                <span className="shrink-0 rounded-full bg-[#f2f3f5] px-2.5 py-0.5 text-[11px] text-muted">
+                <span className="shrink-0 rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-[11px] text-muted">
                   {STRATEGY_LABELS[route.strategy ?? "order"] ?? route.strategy}
                 </span>
               </li>
@@ -450,7 +450,7 @@ export function ModelTraceView() {
       )}
 
       {graph.rows.length > 0 && (
-        <div ref={listRef} className="rounded-[20px] border border-line bg-white p-4">
+        <div ref={listRef} className="ui-card p-4">
           <div className="text-[13px] font-bold">最近请求是怎么走的</div>
           <ul className="mt-2 space-y-2">
             {[...visibleRows]
@@ -460,7 +460,7 @@ export function ModelTraceView() {
                 <li key={route.id}>
                   <button
                     type="button"
-                    className="flex w-full items-start gap-2 text-left"
+                    className="-mx-1 flex w-full items-start gap-2 rounded-lg px-1 py-1 text-left transition-colors hover:bg-[var(--subtle)]"
                     onClick={() => setSelected(route.id)}
                     onMouseEnter={() => setHovered(route.id)}
                     onMouseLeave={() => setHovered(null)}
@@ -491,7 +491,7 @@ export function ModelTraceView() {
       )}
 
       {selected && (
-        <div className="rounded-xl border border-line bg-[#fafafa] p-3 text-[12px]">
+        <div className="rounded-lg border border-line-soft bg-[var(--subtle)] p-3 text-[12px]">
           <div className="flex items-center justify-between">
             <div className="font-bold">请求详情</div>
             <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" onClick={() => setSelected(null)}>
@@ -508,7 +508,7 @@ export function ModelTraceView() {
               <span>状态：{seen.route.status ?? (seen.route.done ? "完成" : "进行中")}</span>
             </div>
           )}
-          {seen?.route.error && <div className="mt-1 text-[#b42318]">{seen.route.error}</div>}
+          {seen?.route.error && <div className="mt-1 text-[var(--danger)]">{seen.route.error}</div>}
         </div>
       )}
     </section>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLlmStore } from "../store/llm.js";
+import { AlertIcon, DownloadIcon, SparkIcon } from "./icons.js";
 import {
   breakdownOf,
   bucketLabel,
@@ -35,7 +36,14 @@ const BREAKDOWNS: { key: UsageBreakdownKind; label: string }[] = [
   { key: "accounts", label: "按账号" },
 ];
 
-const AVATAR_COLORS = ["#7c6bd6", "#2f6feb", "#0f9d8a", "#d97706", "#db2777", "#4b5563"];
+const AVATAR_COLORS = [
+  "var(--avatar-1)",
+  "var(--avatar-2)",
+  "var(--avatar-3)",
+  "var(--avatar-4)",
+  "var(--avatar-5)",
+  "var(--avatar-6)",
+];
 
 function avatarColor(name: string): string {
   let hash = 0;
@@ -109,27 +117,26 @@ export function ModelUsageView({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-[13px] font-bold">用量</div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 rounded-full bg-[#f2f3f5] p-1">
+          <div role="group" aria-label="统计区间" className="ui-segment-group">
             {PERIODS.map((item) => (
               <button
                 key={item.key}
                 type="button"
                 aria-pressed={period === item.key}
-                className={`rta-segment rounded-full px-3 py-1 text-[12px] ${
-                  period === item.key ? "bg-white font-bold text-ink shadow-card" : "text-muted hover:text-ink"
-                }`}
+                className="ui-segment"
                 onClick={() => setPeriod(item.key)}
               >
                 {item.label}
               </button>
             ))}
-          </span>
+          </div>
           {onExportCsv && (
             <button
               type="button"
-              className="rta-segment rounded-full bg-[#f2f3f5] px-3 py-1 text-[12px] text-muted hover:bg-[#e9ebef]"
+              className="ui-btn ui-btn-sm ui-btn-ghost"
               onClick={() => onExportCsv(period)}
             >
+              <DownloadIcon width={14} height={14} />
               导出 CSV
             </button>
           )}
@@ -137,19 +144,23 @@ export function ModelUsageView({
       </div>
 
       {error && (
-        <div role="alert" className="rounded-xl border border-[#f3c9c9] bg-[#fff6f6] p-2 text-[12px]">
-          {error}
+        <div role="alert" className="ui-alert ui-alert-danger">
+          <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
 
       {loading && !summary ? (
         <div className="grid gap-3 sm:grid-cols-4" aria-label="读取用量">
           {[0, 1, 2, 3].map((index) => (
-            <div key={index} className="h-[86px] animate-pulse rounded-[20px] bg-[#eef0f3]" />
+            <div key={index} className="h-[86px] animate-pulse rounded-xl bg-[var(--subtle-3)]" />
           ))}
         </div>
       ) : summary && summary.calls === 0 ? (
-        <div className="rounded-[20px] border border-dashed border-line bg-white px-6 py-10 text-center">
+        <div className="ui-card border-dashed px-6 py-10 text-center">
+          <span className="ui-icon-tile mx-auto mb-3">
+            <SparkIcon width={20} height={20} />
+          </span>
           <div className="text-[14px] font-bold">这个时间段还没有调用</div>
           <p className="mx-auto mt-1 max-w-[420px] ui-caption">
             智能体通过模型服务发出的请求会自动记账；发一次对话再回来看。
@@ -182,24 +193,22 @@ export function ModelUsageView({
               />
             </div>
 
-            <div className="rounded-[20px] border border-line bg-white p-4">
+            <div className="ui-card p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-[13px] font-bold">{metric === "calls" ? "每天请求数" : "每天 Token"}</div>
-                <span className="inline-flex items-center gap-1 rounded-full bg-[#f2f3f5] p-0.5">
+                <div role="group" aria-label="图表指标" className="ui-segment-group p-0.5">
                   {(["calls", "tokens"] as const).map((key) => (
                     <button
                       key={key}
                       type="button"
                       aria-pressed={metric === key}
-                      className={`rta-segment rounded-full px-2.5 py-0.5 text-[11px] ${
-                        metric === key ? "bg-white font-bold text-ink" : "text-muted"
-                      }`}
+                      className="ui-segment px-2.5 py-0.5 text-[11px]"
                       onClick={() => setMetric(key)}
                     >
                       {key === "calls" ? "请求" : "Token"}
                     </button>
                   ))}
-                </span>
+                </div>
               </div>
               <svg
                 role="img"
@@ -209,7 +218,7 @@ export function ModelUsageView({
                 height={150}
                 className="mt-3"
               >
-                <line x1="0" y1="120" x2={Math.max(320, bars.length * 22)} y2="120" stroke="#e4e7ec" />
+                <line x1="0" y1="120" x2={Math.max(320, bars.length * 22)} y2="120" stroke="var(--chart-grid)" />
                 {bars.map((bar, index) => {
                   const height = Math.max(bar.value > 0 ? 3 : 0, Math.round(bar.ratio * 100));
                   const x = index * 22 + 4;
@@ -221,13 +230,13 @@ export function ModelUsageView({
                         width={14}
                         height={height}
                         rx={3}
-                        fill={metric === "calls" ? "#2f6feb" : "#7c6bd6"}
+                        fill={metric === "calls" ? "var(--chart-1)" : "var(--chart-2)"}
                         opacity={0.85}
                       >
                         <title>{`${bar.label}：${bar.value}`}</title>
                       </rect>
                       {bar.showLabel && (
-                        <text x={x + 7} y={138} textAnchor="middle" fontSize="9" fill="#98a2b3">
+                        <text x={x + 7} y={138} textAnchor="middle" fontSize="9" fill="var(--chart-label)">
                           {bar.label}
                         </text>
                       )}
@@ -237,24 +246,22 @@ export function ModelUsageView({
               </svg>
             </div>
 
-            <div className="rounded-[20px] border border-line bg-white p-4">
+            <div className="ui-card p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-[13px] font-bold">用在哪</div>
-                <span className="inline-flex items-center gap-1 rounded-full bg-[#f2f3f5] p-0.5">
+                <div role="group" aria-label="拆分维度" className="ui-segment-group p-0.5">
                   {BREAKDOWNS.map((item) => (
                     <button
                       key={item.key}
                       type="button"
                       aria-pressed={breakdown === item.key}
-                      className={`rta-segment rounded-full px-2.5 py-0.5 text-[11px] ${
-                        breakdown === item.key ? "bg-white font-bold text-ink" : "text-muted"
-                      }`}
+                      className="ui-segment px-2.5 py-0.5 text-[11px]"
                       onClick={() => setBreakdown(item.key)}
                     >
                       {item.label}
                     </button>
                   ))}
-                </span>
+                </div>
               </div>
               <ul className="mt-2 space-y-2">
                 {rows.map((row) => (
@@ -268,9 +275,9 @@ export function ModelUsageView({
                           {row.cost > 0 ? ` · ${formatCost(row.cost, row.unpriced)}` : ""}
                         </span>
                       </span>
-                      <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-[#f2f3f5]">
+                      <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-[var(--subtle-3)]">
                         <span
-                          className="block h-full rounded-full bg-[#111]"
+                          className="block h-full rounded-full bg-[var(--heming-accent)]"
                           style={{ width: `${Math.max(3, (row.calls / maxCalls) * 100)}%` }}
                         />
                       </span>
@@ -282,7 +289,7 @@ export function ModelUsageView({
             </div>
 
             {requests && requests.rows.length > 0 && (
-              <div className="overflow-x-auto rounded-[20px] border border-line bg-white p-4">
+              <div className="overflow-x-auto ui-card p-4">
                 <div className="flex items-center justify-between">
                   <div className="text-[13px] font-bold">最近请求</div>
                   <span className="ui-caption">共 {requests.total} 条</span>
@@ -300,16 +307,16 @@ export function ModelUsageView({
                   </thead>
                   <tbody>
                     {requests.rows.map((row) => (
-                      <tr key={row.route_id} className="border-t border-line">
-                        <td className="py-1.5 pr-3 text-muted">
+                      <tr key={row.route_id} className="border-t border-line transition-colors hover:bg-[var(--subtle)]">
+                        <td className="ui-numeric py-1.5 pr-3 text-muted">
                           {new Date(row.t).toLocaleTimeString("zh-CN", { hour12: false })}
                         </td>
                         <td className="py-1.5 pr-3">{row.agentName || row.agent || "—"}</td>
                         <td className="py-1.5 pr-3 font-mono text-[11px]">{row.req || row.model}</td>
-                        <td className="py-1.5 pr-3">
+                        <td className="ui-numeric py-1.5 pr-3">
                           {row.in}/{row.out}
                         </td>
-                        <td className="py-1.5 pr-3">{row.ms ? `${row.ms}ms` : "—"}</td>
+                        <td className="ui-numeric py-1.5 pr-3">{row.ms ? `${row.ms}ms` : "—"}</td>
                         <td className="py-1.5 pr-3 text-muted">{row.status || "—"}</td>
                       </tr>
                     ))}
@@ -336,10 +343,10 @@ function SummaryCard({
   tone?: "warn";
 }) {
   return (
-    <div className="rounded-[20px] border border-line bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-      <div className="text-[11px] font-bold uppercase tracking-wide text-muted">{label}</div>
-      <div className="mt-1.5 text-[22px] font-bold leading-none">{value}</div>
-      <div className={`mt-1.5 ${tone === "warn" ? "text-[11px] text-[#b54708]" : "ui-caption"}`}>{hint}</div>
+    <div className="ui-card p-4">
+      <div className="text-[12px] font-medium text-muted">{label}</div>
+      <div className="ui-numeric mt-1.5 text-[22px] font-bold leading-none">{value}</div>
+      <div className={`mt-1.5 ${tone === "warn" ? "text-[11px] text-[var(--warn)]" : "ui-caption"}`}>{hint}</div>
     </div>
   );
 }

@@ -1,5 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PageShell } from "./layout/PageShell.js";
+import {
+  AlertIcon,
+  AssistantIcon,
+  CheckIcon,
+  ChevronIcon,
+  ModelIcon,
+  PlugIcon,
+  RefreshIcon,
+  WorkflowIcon,
+} from "./icons.js";
 import { ModelTraceView } from "./ModelTraceView.js";
 import { ModelUsageView } from "./ModelUsageView.js";
 import { BackupPanel } from "./model/BackupPanel.js";
@@ -42,11 +52,15 @@ import {
 
 type TabKey = "models" | "agents" | "sources" | "run";
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "models", label: "模型" },
-  { key: "agents", label: "智能体" },
-  { key: "sources", label: "来源" },
-  { key: "run", label: "运行" },
+/**
+ * 四个分区：图标与全站同一套描边（icons.tsx），尺寸统一 14px；不再用文字代替图标。
+ * 「来源」在浏览器端没有 CLI 时会被过滤掉，所以图标也只在可进入时渲染。
+ */
+const TABS: { key: TabKey; label: string; icon: ReactNode }[] = [
+  { key: "models", label: "模型", icon: <ModelIcon width={14} height={14} /> },
+  { key: "agents", label: "智能体", icon: <AssistantIcon width={14} height={14} /> },
+  { key: "sources", label: "来源", icon: <PlugIcon width={14} height={14} /> },
+  { key: "run", label: "运行", icon: <WorkflowIcon width={14} height={14} /> },
 ];
 
 const SUBSCRIPTIONS = [
@@ -59,8 +73,8 @@ const SUBSCRIPTIONS = [
 
 /** 来源行的计划徽标：普通地址保持灰，Coding Plan 用蓝（不用红：它不是错误）。 */
 const PLAN_BADGE: Record<PlanKind, { label: string; className: string }> = {
-  normal: { label: "普通地址", className: "bg-[#f2f3f5] text-muted" },
-  coding: { label: "Coding Plan", className: "bg-[#e8f1ff] text-[#2f6feb]" },
+  normal: { label: "普通地址", className: "bg-[var(--subtle-3)] text-muted" },
+  coding: { label: "Coding Plan", className: "bg-[var(--info-soft)] text-[var(--info)]" },
 };
 
 const GROUP_ROUTING = [
@@ -77,7 +91,18 @@ const GROUP_ROUTING = [
   "expiring",
 ];
 
-const AVATAR_COLORS = ["#7c6bd6", "#2f6feb", "#0f9d8a", "#d97706", "#db2777", "#4b5563"];
+/**
+ * 头像色板走 CSS 变量（d.124）：暗色下有一整套更亮的同色相版本，
+ * 写死十六进制会让暗色头像发闷、与主题不搭。
+ */
+const AVATAR_COLORS = [
+  "var(--avatar-1)",
+  "var(--avatar-2)",
+  "var(--avatar-3)",
+  "var(--avatar-4)",
+  "var(--avatar-5)",
+  "var(--avatar-6)",
+];
 
 function avatarColor(name: string): string {
   let hash = 0;
@@ -334,7 +359,7 @@ export function ModelPage() {
       title="模型"
       subtitle="所有模型在一个地方：加一个来源，智能体就能选它的模型。"
       width="wide"
-      bodyClassName="bg-[#f7f8fa]"
+      bodyClassName="bg-[var(--subtle-2)]"
       actions={
         <button
           type="button"
@@ -351,28 +376,22 @@ export function ModelPage() {
           }}
           disabled={busy === "refresh"}
         >
+          <RefreshIcon width={14} height={14} />
           {busy === "refresh" ? "刷新中…" : "刷新模型"}
         </button>
       }
       headerExtra={
-        <div
-          role="tablist"
-          aria-label="模型页分区"
-          className="inline-flex items-center gap-1 rounded-full bg-[#f2f3f5] p-1"
-        >
+        <div role="tablist" aria-label="模型页分区" className="ui-segment-group">
           {TABS.filter((item) => cli !== null || item.key !== "sources").map((item) => (
             <button
               key={item.key}
               type="button"
               role="tab"
               aria-selected={tab === item.key}
-              className={`rta-segment rounded-full px-4 py-1.5 text-[13px] ${
-                tab === item.key
-                  ? "bg-white font-bold text-ink shadow-card"
-                  : "text-muted hover:text-ink"
-              }`}
+              className="ui-segment"
               onClick={() => setTab(item.key)}
             >
+              {item.icon}
               {item.label}
             </button>
           ))}
@@ -380,8 +399,11 @@ export function ModelPage() {
       }
     >
       {!cli && (
-        <div role="status" className="mb-4 rounded-xl border border-line bg-[#fafafa] p-3 ui-body-sm">
-          浏览器端只能查看可用模型。添加来源、登录账号与路由维护请打开和鸣桌面端——模型能力运行在你的电脑上。
+        <div role="status" className="ui-alert ui-alert-info mb-4">
+          <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+          <span>
+            浏览器端只能查看可用模型。添加来源、登录账号与路由维护请打开和鸣桌面端——模型能力运行在你的电脑上。
+          </span>
         </div>
       )}
 
@@ -398,11 +420,14 @@ export function ModelPage() {
             {loading ? (
               <div className="space-y-2" aria-label="读取模型">
                 {[0, 1, 2].map((index) => (
-                  <div key={index} className="h-14 animate-pulse rounded-2xl bg-[#f2f3f5]" />
+                  <div key={index} className="h-14 animate-pulse rounded-2xl bg-[var(--subtle-3)]" />
                 ))}
               </div>
             ) : profiles.length === 0 ? (
-              <div className="rounded-[20px] border border-dashed border-line bg-white px-6 py-10 text-center">
+              <div className="ui-card border-dashed px-6 py-10 text-center">
+                <span className="ui-icon-tile mx-auto mb-3">
+                  <ModelIcon width={20} height={20} />
+                </span>
                 <div className="text-[15px] font-bold">还没有可用的模型</div>
                 <p className="mx-auto mt-1 max-w-[420px] ui-caption">
                   添加一个来源：订阅一个账号，或填一个厂商的 API Key。加完模型会自动出现。
@@ -416,7 +441,7 @@ export function ModelPage() {
                 </button>
               </div>
             ) : (
-              <div className="rounded-[20px] border border-line bg-white p-4">
+              <div className="ui-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-[13px] font-bold">可用模型</div>
                   <input
@@ -431,7 +456,7 @@ export function ModelPage() {
                   {visibleModels.map((profile) => (
                     <li
                       key={profile.model}
-                      className="rta-hit flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-[#fafafa]"
+                      className="flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-[var(--subtle)]"
                     >
                       <Avatar name={providerOf(profile.model)} />
                       <span className="min-w-0 flex-1">
@@ -440,7 +465,7 @@ export function ModelPage() {
                         </span>
                         <span className="block ui-caption">来源 {providerOf(profile.model)}</span>
                       </span>
-                      <span className="shrink-0 rounded-full bg-[#f2f3f5] px-2.5 py-0.5 text-[11px] text-muted">
+                      <span className="shrink-0 rounded-full bg-[var(--subtle-3)] px-2.5 py-0.5 text-[11px] text-muted">
                         可用
                       </span>
                     </li>
@@ -453,8 +478,8 @@ export function ModelPage() {
               </div>
             )}
 
-            <details className="rounded-[20px] border border-line bg-white p-4">
-              <summary className="cursor-pointer text-[13px] font-bold">模型属性（可选）</summary>
+            <details className="ui-disclosure ui-card p-4">
+              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />模型属性（可选）</summary>
               <p className="mt-1 ui-caption">改显示名、思考档或请求协议；留空的项不动。</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <input
@@ -511,15 +536,20 @@ export function ModelPage() {
         {/* ── 智能体 ─────────────────────────────────────────── */}
         {tab === "agents" && (
           <section aria-label="智能体" className="space-y-4">
-            <div className="rounded-[20px] border border-[#fde6c8] bg-[#fffaf2] p-4">
-              <div className="text-[13px] font-bold">改模型会写入本机其他工具的配置</div>
-              <p className="mt-1 ui-caption">
-                这里给本机安装的 Claude Code、Codex 等选模型；模型服务会把网关地址与模型写进它们自己的配置文件。
-                已打开的会话保持原模型，下次启动生效；「恢复默认」会撤掉模型服务写入的内容。
-              </p>
+            <div className="ui-alert ui-alert-warn block p-4">
+              <div className="flex items-start gap-2">
+                <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[13px] font-bold">改模型会写入本机其他工具的配置</div>
+                  <p className="mt-1 ui-caption">
+                    这里给本机安装的 Claude Code、Codex 等选模型；模型服务会把网关地址与模型写进它们自己的配置文件。
+                    已打开的会话保持原模型，下次启动生效；「恢复默认」会撤掉模型服务写入的内容。
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="rounded-[20px] border border-line bg-white p-4">
+            <div className="ui-card p-4">
               <div className="flex items-center justify-between">
                 <div className="text-[13px] font-bold">本机智能体（{agents.length}）</div>
                 <button
@@ -590,37 +620,42 @@ export function ModelPage() {
               </ul>
 
               {agentConfirm && (
-                <div role="alert" className="rta-enter mt-3 rounded-xl border border-[#fde6c8] bg-[#fffaf2] p-3">
-                  <div className="text-[12px] font-bold">
-                    {agentConfirm.model === "default"
-                      ? `恢复 ${agentConfirm.name} 原来的模型？`
-                      : `把 ${agentConfirm.name} 的模型改成 ${agentConfirm.model}？`}
-                  </div>
-                  <p className="mt-1 ui-caption">
-                    会写入该工具自己的配置文件（下一次启动生效）。确认前请先关掉正在运行的会话。
-                  </p>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn-sm ui-btn-primary"
-                      onClick={() => {
-                        const target = agentConfirm;
-                        setAgentConfirm(null);
-                        void run(
-                          target.model === "default" ? "恢复默认" : "设置模型",
-                          [target.id, target.model],
-                        ).then(() => void loadAgents());
-                      }}
-                    >
-                      确认写入
-                    </button>
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn-sm ui-btn-ghost"
-                      onClick={() => setAgentConfirm(null)}
-                    >
-                      取消
-                    </button>
+                <div role="alert" className="ui-alert ui-alert-warn rta-enter mt-3 block">
+                  <div className="flex items-start gap-2">
+                    <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-bold">
+                        {agentConfirm.model === "default"
+                          ? `恢复 ${agentConfirm.name} 原来的模型？`
+                          : `把 ${agentConfirm.name} 的模型改成 ${agentConfirm.model}？`}
+                      </div>
+                      <p className="mt-1 ui-caption">
+                        会写入该工具自己的配置文件（下一次启动生效）。确认前请先关掉正在运行的会话。
+                      </p>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          className="ui-btn ui-btn-sm ui-btn-primary"
+                          onClick={() => {
+                            const target = agentConfirm;
+                            setAgentConfirm(null);
+                            void run(
+                              target.model === "default" ? "恢复默认" : "设置模型",
+                              [target.id, target.model],
+                            ).then(() => void loadAgents());
+                          }}
+                        >
+                          确认写入
+                        </button>
+                        <button
+                          type="button"
+                          className="ui-btn ui-btn-sm ui-btn-ghost"
+                          onClick={() => setAgentConfirm(null)}
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -634,9 +669,12 @@ export function ModelPage() {
             {notice && (
               <div
                 role="status"
-                className="rta-enter flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#cfe8d8] bg-[#f4fbf6] px-3 py-2"
+                className="ui-alert ui-alert-success rta-enter items-center justify-between"
               >
-                <span className="text-[12px]">{notice}</span>
+                <span className="flex items-center gap-2 text-[12px]">
+                  <CheckIcon width={14} height={14} className="shrink-0" />
+                  {notice}
+                </span>
                 <button
                   type="button"
                   className="ui-btn ui-btn-sm ui-btn-ghost"
@@ -648,7 +686,7 @@ export function ModelPage() {
             )}
 
             {/* 主卡片：厂商 → 地址类型（普通 / Coding Plan）→ 一个 Key */}
-            <div className="rounded-[20px] border border-line bg-white p-4">
+            <div className="ui-card p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <div className="text-[13px] font-bold">API Key 服务商</div>
                 <span className="ui-caption">Coding Plan 请选套餐类型，否则会提示余额为 0</span>
@@ -662,10 +700,10 @@ export function ModelPage() {
                     key={preset.id}
                     type="button"
                     aria-pressed={presetKey?.id === preset.id}
-                    className={`rta-hit rounded-xl border px-3 py-2.5 text-left disabled:opacity-50 ${
+                    className={`ui-card ui-card-interactive px-3 py-2.5 text-left disabled:opacity-50 ${
                       presetKey?.id === preset.id
-                        ? "border-ink bg-[#f4f7ff]"
-                        : "border-line bg-white"
+                        ? "border-ink bg-[var(--info-soft)]"
+                        : ""
                     }`}
                     disabled={!cli}
                     onClick={() =>
@@ -684,7 +722,7 @@ export function ModelPage() {
               </div>
 
               {presetKey && activePreset && activePlan && (
-                <div className="rta-enter mt-3 rounded-xl border border-line bg-[#fafafa] p-3">
+                <div className="rta-enter mt-3 rounded-lg border border-line bg-[var(--subtle)] p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2 text-[12px] font-bold">
                       添加 {activePreset.name}
@@ -706,21 +744,13 @@ export function ModelPage() {
                   {activePreset.planOptions.length > 1 && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <span className="ui-caption">地址类型</span>
-                      <div
-                        role="group"
-                        aria-label="地址类型"
-                        className="inline-flex items-center gap-1 rounded-full bg-[#f2f3f5] p-1"
-                      >
+                      <div role="group" aria-label="地址类型" className="ui-segment-group">
                         {activePreset.planOptions.map((option) => (
                           <button
                             key={option.id}
                             type="button"
                             aria-pressed={activePlan.id === option.id}
-                            className={`rta-segment rounded-full px-3 py-1 text-[12px] ${
-                              activePlan.id === option.id
-                                ? "bg-white font-bold text-ink shadow-card"
-                                : "text-muted hover:text-ink"
-                            }`}
+                            className="ui-segment"
                             onClick={() =>
                               setPresetKey((current) =>
                                 current ? { ...current, plan: option.id } : current,
@@ -766,12 +796,12 @@ export function ModelPage() {
                     {activePlan.hint ?? "保存后会自动读取这个 Key 能用的模型。"}
                   </p>
                   {activePlan.kind === "coding" && (
-                    <div
-                      role="note"
-                      className="mt-2 rounded-lg border border-[#cfe0ff] bg-[#f2f7ff] px-3 py-2 text-[12px] text-[#2f6feb]"
-                    >
-                      {activePlan.notice ??
-                        "该地址只接受 Coding Plan 的 Key；普通按量 Key 会报「余额为 0」。"}
+                    <div role="note" className="ui-alert ui-alert-info mt-2">
+                      <AlertIcon width={14} height={14} className="mt-0.5 shrink-0" />
+                      <span>
+                        {activePlan.notice ??
+                          "该地址只接受 Coding Plan 的 Key；普通按量 Key 会报「余额为 0」。"}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -779,7 +809,7 @@ export function ModelPage() {
             </div>
 
             <div className="grid items-start gap-4 lg:grid-cols-2">
-              <div className="rounded-[20px] border border-line bg-white p-4">
+              <div className="ui-card p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div className="text-[13px] font-bold">订阅账号</div>
                   <span className="ui-caption">多个账号自动分担</span>
@@ -789,7 +819,7 @@ export function ModelPage() {
                     <button
                       key={item.agent}
                       type="button"
-                      className="rta-hit flex items-center gap-2 rounded-xl border border-line bg-white px-3 py-2 text-left disabled:opacity-50"
+                      className="ui-card ui-card-interactive flex items-center gap-2 px-3 py-2 text-left disabled:opacity-50"
                       disabled={!cli}
                       onClick={() =>
                         void runTerminal(`登录 ${item.label}`, ["accounts", "add", item.agent])
@@ -800,7 +830,10 @@ export function ModelPage() {
                         <span className="block text-[13px] font-bold">{item.label}</span>
                         <span className="block ui-caption">{item.desc}</span>
                       </span>
-                      <span className="shrink-0 text-[11px] text-muted">登录 →</span>
+                      <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-muted">
+                        登录
+                        <ChevronIcon width={13} height={13} />
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -821,7 +854,7 @@ export function ModelPage() {
                 </ul>
               </div>
 
-              <div className="rounded-[20px] border border-line bg-white p-4">
+              <div className="ui-card p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div className="text-[13px] font-bold">其他地址</div>
                   <span className="ui-caption">中转、局域网或自建接口</span>
@@ -829,7 +862,7 @@ export function ModelPage() {
                 {!custom.open ? (
                   <button
                     type="button"
-                    className="rta-hit mt-2 flex w-full items-center justify-between gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-left disabled:opacity-50"
+                    className="mt-2 flex w-full items-center justify-between gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-left transition-colors hover:bg-[var(--subtle)] disabled:opacity-50"
                     disabled={!cli}
                     onClick={() => setCustom({ ...custom, open: true })}
                   >
@@ -837,7 +870,10 @@ export function ModelPage() {
                       <span className="block text-[13px] font-bold">其他 OpenAI 兼容地址</span>
                       <span className="block ui-caption">填名称与地址即可，模型可留空自动读取</span>
                     </span>
-                    <span className="shrink-0 text-[12px] text-muted">展开 →</span>
+                    <span className="flex shrink-0 items-center gap-0.5 text-[12px] text-muted">
+                      展开
+                      <ChevronIcon width={13} height={13} className="rotate-90" />
+                    </span>
                   </button>
                 ) : (
                   <div className="rta-enter mt-2 grid gap-2 sm:grid-cols-2">
@@ -892,14 +928,14 @@ export function ModelPage() {
               </div>
             </div>
 
-            <div className="rounded-[20px] border border-line bg-white p-4">
+            <div className="ui-card p-4">
               <div className="text-[13px] font-bold">已添加的来源（{providers.length}）</div>
               <ul className="mt-2 divide-y divide-line">
                 {providers.map((row) => {
                   const info = showCache[row.id];
                   const badge =
                     showLoading === row.id
-                      ? { label: "读取地址…", className: "bg-[#f2f3f5] text-muted" }
+                      ? { label: "读取地址…", className: "bg-[var(--subtle-3)] text-muted" }
                       : PLAN_BADGE[info?.plan ?? "normal"];
                   return (
                     <li key={row.id} className="py-2">
@@ -947,7 +983,7 @@ export function ModelPage() {
                         </button>
                       </div>
                       {advancedProvider === row.id && (
-                        <div className="rta-enter mt-2 rounded-xl border border-line bg-[#fafafa] p-3">
+                        <div className="rta-enter mt-2 rounded-lg border border-line bg-[var(--subtle)] p-3">
                           <div className="flex flex-wrap items-baseline justify-between gap-2">
                             <div className="text-[12px] font-bold">{row.id} 的高级设置</div>
                             {showCache[row.id]?.chat && (
@@ -1040,8 +1076,8 @@ export function ModelPage() {
                             </button>
                           </div>
 
-                          <details className="mt-3 rounded-lg border border-line bg-white px-3 py-2">
-                            <summary className="cursor-pointer text-[11px] font-bold tracking-wide text-muted">
+                          <details className="ui-disclosure mt-3 rounded-lg border border-line bg-[var(--subtle)] px-3 py-2">
+                            <summary className="cursor-pointer text-[11px] font-bold tracking-wide text-muted"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />
                               请求（请求头 / 耐心 / 错误处理）
                             </summary>
                             <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -1124,8 +1160,8 @@ export function ModelPage() {
             <ModelTraceView />
 
             <div className="grid items-start gap-3 lg:grid-cols-2">
-            <details className="rounded-[20px] border border-line bg-white p-4 lg:col-span-2">
-              <summary className="cursor-pointer text-[13px] font-bold">路由分组（可选）</summary>
+            <details className="ui-disclosure ui-card p-4 lg:col-span-2">
+              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />路由分组（可选）</summary>
               <p className="mt-1 ui-caption">多个模型或账号合成一个名字，按策略分配。一般不需要手动建。</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <input
@@ -1271,16 +1307,16 @@ export function ModelPage() {
               </div>
             </details>
 
-            <div className="rounded-[20px] border border-line bg-white p-4">
-              <ModelUsageView
-                onExportCsv={(period) => void run("导出用量", ["usage", "--csv", period])}
-              />
-            </div>
+            {/* 用量不再包一层卡片：它自身就是「标题行 + 指标卡 + 图表卡」的区块，
+                再套一张 .ui-card 会形成卡中卡（d.124 视觉审计） */}
+            <ModelUsageView
+              onExportCsv={(period) => void run("导出用量", ["usage", "--csv", period])}
+            />
 
             <BackupPanel />
 
-            <details className="rounded-[20px] border border-line bg-white p-4">
-              <summary className="cursor-pointer text-[13px] font-bold">多机同步</summary>
+            <details className="ui-disclosure ui-card p-4">
+              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />多机同步</summary>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <select aria-label="同步类型" className="ui-input" value={syncKind} onChange={(event) => setSyncKind(event.target.value)}>
                   {["webdav", "s3", "github"].map((kind) => (
@@ -1320,8 +1356,8 @@ export function ModelPage() {
               </button>
             </details>
 
-            <details className="rounded-[20px] border border-line bg-white p-4">
-              <summary className="cursor-pointer text-[13px] font-bold">资源库与网页搜索</summary>
+            <details className="ui-disclosure ui-card p-4">
+              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />资源库与网页搜索</summary>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" disabled={!cli} onClick={() => void run("库状态", ["library"])}>
                   查看库
@@ -1375,8 +1411,8 @@ export function ModelPage() {
               </button>
             </details>
 
-            <details className="rounded-[20px] border border-line bg-white p-4">
-              <summary className="cursor-pointer text-[13px] font-bold">网关密钥</summary>
+            <details className="ui-disclosure ui-card p-4">
+              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />网关密钥</summary>
               <p className="mt-1 ui-caption">
                 给其他设备、CI 或局域网内的工具发一条调用密钥；只读密钥只能查用量与配额。
               </p>
@@ -1444,8 +1480,8 @@ export function ModelPage() {
               </div>
             </details>
 
-            <details className="rounded-[20px] border border-line bg-white p-4">
-              <summary className="cursor-pointer text-[13px] font-bold">会话与启动器</summary>
+            <details className="ui-disclosure ui-card p-4">
+              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />会话与启动器</summary>
               <p className="mt-1 ui-caption">
                 看各智能体最近的会话记录；启动器命令由模型服务提供（终端里 `claude-magpie` 之类），
                 只影响那一次会话，不改配置。
@@ -1470,8 +1506,8 @@ export function ModelPage() {
               </div>
             </details>
 
-            <details className="rounded-[20px] border border-line bg-white p-4">
-              <summary className="cursor-pointer text-[13px] font-bold">高级命令</summary>
+            <details className="ui-disclosure ui-card p-4">
+              <summary className="cursor-pointer text-[13px] font-bold"><ChevronIcon width={14} height={14} className="ui-disclosure-chevron" />高级命令</summary>
               <div className="mt-2 flex gap-2">
                 <input
                   aria-label="命令"
@@ -1503,7 +1539,7 @@ export function ModelPage() {
                   取消
                 </button>
               </div>
-              <pre aria-label="命令输出" className="mt-2 h-56 overflow-auto rounded-xl bg-[#111] p-3 text-[12px] text-[#e8e8e8]">
+              <pre aria-label="命令输出" className="mt-2 h-56 overflow-auto rounded-xl bg-[var(--console-bg)] p-3 text-[12px] text-[var(--console-ink)]">
                 {live || "（输出会出现在这里）"}
               </pre>
               <input
@@ -1528,17 +1564,22 @@ export function ModelPage() {
       {output && (
         <div
           role={output.ok ? "status" : "alert"}
-          className={`rta-enter mt-4 rounded-xl border p-3 ${
-            output.ok ? "border-line bg-[#fafafa]" : "border-[#f3c9c9] bg-[#fff6f6]"
-          }`}
+          className={`rta-enter mt-4 block ${output.ok ? "ui-alert ui-alert-info" : "ui-alert ui-alert-danger"}`}
         >
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-[12px] font-bold text-muted">{output.title}</div>
+          <div className="flex w-full items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-[12px] font-bold">
+              {output.ok ? (
+                <CheckIcon width={14} height={14} className="shrink-0" />
+              ) : (
+                <AlertIcon width={14} height={14} className="shrink-0" />
+              )}
+              {output.title}
+            </div>
             <button type="button" className="ui-btn ui-btn-sm ui-btn-ghost" onClick={() => setOutput(null)}>
               关闭
             </button>
           </div>
-          <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap text-[12px]">{output.text}</pre>
+          <pre className="mt-1 max-h-64 w-full overflow-auto whitespace-pre-wrap text-[12px]">{output.text}</pre>
         </div>
       )}
     </PageShell>
@@ -1547,9 +1588,9 @@ export function ModelPage() {
 
 function StatCard({ label, value, hint }: { label: string; value: number; hint: string }) {
   return (
-    <div className="rounded-[20px] border border-line bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-      <div className="text-[11px] font-bold uppercase tracking-wide text-muted">{label}</div>
-      <div className="mt-1.5 text-[26px] font-bold leading-none">{value}</div>
+    <div className="ui-card p-4">
+      <div className="text-[12px] font-medium text-muted">{label}</div>
+      <div className="ui-numeric mt-1.5 text-[26px] font-bold leading-none">{value}</div>
       <div className="mt-1.5 ui-caption">{hint}</div>
     </div>
   );

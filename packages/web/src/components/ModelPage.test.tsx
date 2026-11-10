@@ -144,6 +144,20 @@ describe("ModelPage · 结构与主路径", () => {
     expect(screen.queryByText("deepseek/deepseek-chat")).toBeNull();
   });
 
+  it("视觉规范：Tab 统一带图标；折叠区用统一 Chevron（不再是浏览器原生三角）", async () => {
+    installBridge();
+    render(<ModelPage />);
+    for (const label of ["模型", "智能体", "来源", "运行"]) {
+      const tab = screen.getByRole("tab", { name: label });
+      expect(tab.querySelector("svg"), `${label} tab 缺图标`).not.toBeNull();
+    }
+    // 折叠区的翻页箭头走 icons.tsx 的 ChevronIcon（带统一类名），CSS 负责展开旋转
+    const summary = (await screen.findByText("模型属性（可选）")).closest("summary");
+    expect(summary?.querySelector("svg.ui-disclosure-chevron")).not.toBeNull();
+    // 统计卡走统一卡片基元（阴影/圆角由 token 提供，不再各写 bg-white + 任意 shadow）
+    expect(screen.getAllByText("可用模型").some((el) => el.closest(".ui-card") !== null)).toBe(true);
+  });
+
   it("浏览器没有命令桥：提示只能在桌面端添加，但仍可看模型", () => {
     render(<ModelPage />);
     expect(screen.getByRole("status")).toHaveTextContent(/请打开和鸣桌面端/);
