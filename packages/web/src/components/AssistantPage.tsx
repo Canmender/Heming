@@ -57,6 +57,9 @@ export function AssistantPage() {
   const openAgent = useChatStore((s) => s.openAgent);
   const renameConversation = useChatStore((s) => s.renameConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
+  const conversationsHasMore = useChatStore((s) => s.conversationsHasMore);
+  const conversationsLoadingMore = useChatStore((s) => s.conversationsLoadingMore);
+  const loadMoreConversations = useChatStore((s) => s.loadMoreConversations);
   const activeConversationId = useUiStore((s) => s.activeConversationId);
   const openingConversation = useUiStore((s) => s.openConversation);
   /** 一次性视图意图（d.67）：旧「通用智能体」链接折叠成 chat + pageView="tasks"。 */
@@ -243,6 +246,13 @@ export function AssistantPage() {
         onNewForAgent={(agentId) => void startChat(agentId, { fresh: true })}
         onRename={(id, title) => renameConversationTitle(id, title)}
         onDeleteRequest={(conv) => setDeleteTarget(conv)}
+        hasMore={conversationsHasMore}
+        loadingMore={conversationsLoadingMore}
+        onLoadMore={() => {
+          void loadMoreConversations().catch((err) => {
+            setError(err instanceof Error && err.message ? `加载更多失败：${err.message}` : "加载更多失败");
+          });
+        }}
       />
 
       <section className="flex min-w-0 flex-1 flex-col">

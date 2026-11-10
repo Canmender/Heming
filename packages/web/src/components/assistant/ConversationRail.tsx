@@ -39,6 +39,10 @@ export interface ConversationRailProps {
   onRename: (conversationId: string, title: string) => void | Promise<void>;
   /** 请求删除会话（调用方弹二次确认，rail 不直接删）。 */
   onDeleteRequest: (conv: Conversation) => void;
+  /** 还有下一页会话（服务端 limit 分页）；搜索时不显示。 */
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 /** 最近活跃排序键：没有消息的排最后。 */
@@ -89,6 +93,9 @@ export function ConversationRail({
   onNewForAgent,
   onRename,
   onDeleteRequest,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
 }: ConversationRailProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -437,11 +444,10 @@ export function ConversationRail({
                   <button
                     type="button"
                     aria-label={`新建与 ${group.agentName} 的对话`}
-                    // 服务端对同一智能体幂等（已有会话直接复用），提示里说实话，别让用户以为会多出一段
-                    title={`新建与 ${group.agentName} 的对话（已有会话会直接打开）`}
+                    title={`新建与 ${group.agentName} 的对话`}
                     disabled={openingId === group.agentId}
                     onClick={() => onNewForAgent(group.agentId)}
-                    className="flex h-5 w-5 items-center justify-center rounded-sm text-[#666] hover:bg-[var(--subtle-3)] hover:text-ink disabled:opacity-50"
+                    className="flex h-5 w-5 items-center justify-center rounded-sm text-muted hover:bg-[var(--subtle-3)] hover:text-ink disabled:opacity-50"
                   >
                     <PlusIcon width={12} height={12} />
                   </button>
@@ -453,6 +459,16 @@ export function ConversationRail({
           <p className="ui-caption px-2 py-1">
             {groups.reduce((n, g) => n + g.items.length, 0)} 条匹配
           </p>
+        ) : null}
+        {hasMore && !hasQuery ? (
+          <button
+            type="button"
+            disabled={loadingMore}
+            onClick={onLoadMore}
+            className="ui-btn ui-btn-sm ui-btn-ghost mt-1 w-full"
+          >
+            {loadingMore ? "加载中…" : "加载更多对话"}
+          </button>
         ) : null}
       </div>
 

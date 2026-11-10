@@ -153,6 +153,9 @@ export const MAX_TRANSCRIPTS_PER_CONVERSATION = 120;
 /** 转录落盘键（本机 localStorage，与 E2E msgCache/草稿同层；不是服务端契约）。 */
 const TRANSCRIPT_STORAGE_PREFIX = "heming.transcript.";
 
+/** 会话列表每页条数（d.130）：首屏只拉一页，翻到底再续。 */
+const CONVERSATIONS_PAGE_SIZE = 30;
+
 const TOOL_STATUSES = new Set<ToolTrace["status"]>(["running", "ok", "error", "denied"]);
 
 /** localStorage 兜底读取（隐私模式/无 DOM 环境返回 null，绝不让转录读写打断对话）。 */
@@ -365,9 +368,14 @@ interface ChatState {
    * 「暂无会话」——把失败说成没数据，用户不知道该重试还是该去建会话。
    */
   workspaceReady: boolean;
+  /** 会话列表是否还有下一页（服务端按 limit 返回，等于页大小即「可能有」）。 */
+  conversationsHasMore: boolean;
+  conversationsLoadingMore: boolean;
   /** 首帧失败原因（服务端/网络错误原文）；成功一次后清空。后台刷新失败不写这里。 */
   workspaceError: string | null;
   loadWorkspace: () => Promise<void>;
+  /** 翻下一页会话（按最近活跃序；没有更多/正在加载时是 no-op）。 */
+  loadMoreConversations: () => Promise<void>;
   /** 开智能体一对一会话（幂等，服务端已存在则复用），返回会话 id。 */
   /** 打开/新建与某智能体的会话。fresh=true 时新建一段（同一智能体多段对话）。 */
   openAgent: (agentId: string, options?: { fresh?: boolean; title?: string }) => Promise<string>;
@@ -525,18 +533,47 @@ export const useChatStore = create<ChatState>((set, get) => {
   plainById: {},
   pendingE2e: {},
   workspaceReady: false,
+  conversationsHasMore: false,
+  conversationsLoadingMore: false,
   workspaceError: null,
   async loadWorkspace() {
     // 首帧才管状态：之后的每次刷新（WS 事件、建会话后）都只更新数据，
     // 失败也保留旧列表——为一次后台刷新失败把整页打回重试态是倒退。
     const first = !get().workspaceReady;
     try {
-      const conversations = await fetchConversations();
-      set({ conversations, workspaceReady: true, workspaceError: null });
+      // 已有更多页时按当前长度续拉（刷新不能把用户翻出来的历史又缩回一页）。
+      const limit = Math.max(CONVERSATIONS_PAGE_SIZE, get().conversations.length);
+      const conversations = await fetchConversations({ limit });
+      set({
+        conversations,
+        conversationsHasMore: conversations.length === limit,
+        workspaceReady: true,
+        workspaceError: null,
+      });
     } catch (err) {
       if (first) {
         set({ workspaceError: err instanceof Error && err.message ? err.message : "网络异常" });
       }
+      throw err;
+    }
+  },
+  async loadMoreConversations() {
+    const { conversations, conversationsHasMore, conversationsLoadingMore } = get();
+    if (!conversationsHasMore || conversationsLoadingMore) return;
+    set({ conversationsLoadingMore: true });
+    try {
+      const page = await fetchConversations({
+        limit: CONVERSATIONS_PAGE_SIZE,
+        offset: conversations.length,
+      });
+      const seen = new Set(conversations.map((c) => c.id));
+      set({
+        conversations: [...conversations, ...page.filter((c) => !seen.has(c.id))],
+        conversationsHasMore: page.length === CONVERSATIONS_PAGE_SIZE,
+        conversationsLoadingMore: false,
+      });
+    } catch (err) {
+      set({ conversationsLoadingMore: false });
       throw err;
     }
   },

@@ -186,6 +186,33 @@ describe("auth + team API", () => {
     expect(forbidden.status).toBe(403);
   });
 
+  it("d.130：会话列表按 limit/offset 分页，不传 limit 返回全部", async () => {
+    const a = await register(app, "alicepaging");
+    const auth = { Authorization: `Bearer ${a.token}` };
+    const agent = await request(app).post("/api/agents").set(auth).send({ name: "分页助手", description: "" });
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const conv = await request(app)
+        .post("/api/conversations")
+        .set(auth)
+        .send({ agentId: agent.body.id, fresh: true, title: `会话 ${i}` });
+      ids.push(conv.body.id);
+    }
+
+    const all = await request(app).get("/api/conversations").set(auth);
+    expect(all.body).toHaveLength(5);
+
+    const page1 = await request(app).get("/api/conversations?limit=2&offset=0").set(auth);
+    const page2 = await request(app).get("/api/conversations?limit=2&offset=2").set(auth);
+    const page3 = await request(app).get("/api/conversations?limit=2&offset=4").set(auth);
+    expect(page1.body).toHaveLength(2);
+    expect(page2.body).toHaveLength(2);
+    expect(page3.body).toHaveLength(1);
+    const got = [...page1.body, ...page2.body, ...page3.body].map((c: { id: string }) => c.id);
+    expect(new Set(got).size).toBe(5);
+    expect(new Set(got)).toEqual(new Set(ids));
+  });
+
   it("d.128：DELETE 会话——成员 204、非成员 403、不存在 404", async () => {
     const a = await register(app, "alicethree");
     const auth = { Authorization: `Bearer ${a.token}` };

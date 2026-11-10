@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.130.3.53.0",
+    "date": "2026-11-10",
+    "title": "对话多了也不卡：会话列表开始分页",
+    "bullets": [
+      "左栏先显示最近 30 段对话，底部有「加载更多对话」，需要再往下翻；不会一次性把所有对话都拉下来。",
+      "服务端按最近活跃排序后分页，翻页顺序稳定；搜索目前只搜已加载的那部分对话。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.129.3.53.0",
     "date": "2026-11-10",
     "title": "模块页和插件 MCP 页深色更统一",

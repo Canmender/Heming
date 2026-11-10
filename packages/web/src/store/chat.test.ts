@@ -129,7 +129,7 @@ describe("chat store", () => {
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       if (fail) return Promise.reject(new Error("网关超时"));
       const url = String(input);
-      if (url === "/api/conversations") return json([]);
+      if (url.startsWith("/api/conversations")) return json([]);
       if (url === "/api/friends") return json([]);
       if (url === "/api/friends/requests") return json([]);
       return json({ error: "not found" }, 404);
@@ -802,5 +802,47 @@ describe("chat store · 删除会话（d.128）", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("网络中断"));
     await expect(useChatStore.getState().deleteConversation("c2")).rejects.toThrow();
     expect(useChatStore.getState().conversations).toHaveLength(1);
+  });
+});
+
+describe("chat store · 会话分页（d.130）", () => {
+  const conv = (id: string) => ({
+    id,
+    type: "agent",
+    agent: { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" },
+    unreadCount: 0,
+    lastMessageAt: null,
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("loadMoreConversations：按 offset 续页、去重并维护 hasMore", async () => {
+    useChatStore.setState({
+      conversations: [conv("c1")] as never,
+      conversationsHasMore: true,
+      conversationsLoadingMore: false,
+    });
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([conv("c1"), conv("c2")]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await useChatStore.getState().loadMoreConversations();
+    const url = String(spy.mock.calls[0][0]);
+    expect(url).toContain("limit=30");
+    expect(url).toContain("offset=1");
+    expect(useChatStore.getState().conversations.map((c) => c.id)).toEqual(["c1", "c2"]);
+    // 返回条数 < 页大小 → 没有更多
+    expect(useChatStore.getState().conversationsHasMore).toBe(false);
+  });
+
+  it("没有更多/正在加载时 loadMoreConversations 是 no-op", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    useChatStore.setState({ conversations: [], conversationsHasMore: false });
+    await useChatStore.getState().loadMoreConversations();
+    expect(spy).not.toHaveBeenCalled();
   });
 });

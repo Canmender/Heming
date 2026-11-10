@@ -760,7 +760,24 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
   });
 
   app.get("/api/conversations", authOnly, (req, res) => {
-    res.json(store.listConversations(userId(req)));
+    const all = store.listConversations(userId(req));
+    // d.130：客户端按页拉取（limit/offset）；不传 limit 保持旧行为返回全部，
+    // 供旧客户端与测试使用。服务端先按最近活跃排序再切片——分页必须按同一序，
+    // 否则「第一页」会随插入顺序变，翻页会漏/重。
+    if (req.query.limit === undefined) {
+      res.json(all);
+      return;
+    }
+    const rawLimit = Number(req.query.limit);
+    const rawOffset = Number(req.query.offset);
+    const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, Math.trunc(rawLimit))) : 30;
+    const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.trunc(rawOffset)) : 0;
+    const sorted = [...all].sort((a, b) => {
+      const at = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
+      const bt = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
+      return bt - at;
+    });
+    res.json(sorted.slice(offset, offset + limit));
   });
 
   // d.54：人类私聊/群聊已删除，会话入口只剩「与某个助手的一对一」。

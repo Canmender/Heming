@@ -618,3 +618,25 @@ describe("会话左栏 · 改名与删除（d.128）", () => {
     expect(hasDraft("c2")).toBe(false);
   });
 });
+
+describe("会话列表分页（d.130）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useUiStore.setState({ page: "chat", activeConversationId: null });
+    useChatStore.setState({
+      conversations: [{ ...conv2, title: "竞品调研" }] as never,
+      messages: {} as never,
+      agentsRoster: [] as never,
+      workspaceReady: true,
+      conversationsHasMore: true,
+      conversationsLoadingMore: false,
+      loadMoreConversations: vi.fn(async () => undefined),
+    });
+  });
+
+  it("还有下一页时显示「加载更多对话」，点击调用 loadMoreConversations", () => {
+    render(<AssistantPage />);
+    fireEvent.click(screen.getByRole("button", { name: "加载更多对话" }));
+    expect(useChatStore.getState().loadMoreConversations).toHaveBeenCalledTimes(1);
+  });
+});

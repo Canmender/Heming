@@ -250,7 +250,7 @@ describe("App 右栏云端共享（仅智能体页显示）", () => {
       if (url === "/api/files") return Promise.resolve(jsonRes([]));
       if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
       if (
-        url === "/api/conversations" ||
+        (url === "/api/conversations" || url.startsWith("/api/conversations?")) ||
         url === "/api/friends" ||
         url === "/api/friends/requests"
       )
@@ -283,7 +283,7 @@ describe("App 右栏云端共享（仅智能体页显示）", () => {
       // HomePage 挂载时的 health/工作区探测，正常应答避免噪声告警
       if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
       if (
-        url === "/api/conversations" ||
+        (url === "/api/conversations" || url.startsWith("/api/conversations?")) ||
         url === "/api/friends" ||
         url === "/api/friends/requests"
       )

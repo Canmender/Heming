@@ -12,6 +12,24 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.130.3.53.0",
+    "date": "2026-11-10",
+    "title": "会话列表分页（不再全量拉取）",
+    "bullets": [
+      "**服务端**：`GET /api/conversations` 支持 `limit` / `offset`：先按最近活跃（`lastMessageAt` 倒序）排序再切片，保证翻页按同一序列；不传 `limit` 保持旧行为返回全部（旧客户端与测试不受影响）。",
+      "**客户端**：首屏只拉 30 条；`chatStore` 新增 `conversationsHasMore` / `conversationsLoadingMore` 与`loadMoreConversations()`（按已加载数量作 offset、按 id 去重）；后台刷新按「当前已加载长度」续拉，",
+      "**左栏**：列表底部出现「加载更多对话」（搜索中隐藏，加载中禁用/显示「加载中…」），失败在页内错误条提示。",
+      "测试：服务端分页用例 +1（271）；web 侧 `loadWorkspace` 续页/去重/无更多 no-op、AssistantPage 加载更多按钮（+3）。",
+      "`web` 全量回归通过；`server` 16 文件 / 271 例；`pnpm -r typecheck` 六包零错误。",
+      "分页按「最近活跃」动态排序：翻页期间有新消息会重排，极端情况下跨页可能重复（已按 id 去重）或漏一条；会话搜索仍只过滤**已加载**的会话（后续可改为服务端搜索）。"
+    ],
+    "paragraphs": [
+      "不会把用户翻出来的历史又缩回一页。",
+      "验证",
+      "边界"
+    ]
+  },
+  {
     "version": "d.129.3.53.0",
     "date": "2026-11-10",
     "title": "模块页与插件 MCP/接口视图写死颜色收口",

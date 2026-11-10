@@ -64,7 +64,7 @@ function mockFetch() {
     if (url === "/api/files/usage")
       return Promise.resolve(jsonRes({ used: 0, quota: 200 * 1024 * 1024 }));
     if (url === "/api/health") return Promise.resolve(jsonRes({ ok: true }));
-    if (url === "/api/conversations") return Promise.resolve(jsonRes([c1]));
+    if ((url === "/api/conversations" || url.startsWith("/api/conversations?"))) return Promise.resolve(jsonRes([c1]));
     if (url === "/api/agents") return Promise.resolve(jsonRes([]));
     if (url.startsWith("/api/e2e/keys")) return Promise.resolve(jsonRes({ ok: true }));
     if (/^\/api\/conversations\/[^/]+\/messages$/.test(url)) return Promise.resolve(jsonRes([]));

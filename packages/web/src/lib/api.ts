@@ -128,7 +128,13 @@ export const updateProfile = (displayName: string, avatar?: string) =>
     method: "PUT",
     body: JSON.stringify({ displayName, ...(avatar !== undefined ? { avatar } : {}) }),
   });
-export const fetchConversations = () => api<Conversation[]>("/api/conversations");
+export const fetchConversations = (options: { limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.offset !== undefined) query.set("offset", String(options.offset));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return api<Conversation[]>(`/api/conversations${suffix}`);
+  };
 /**
  * 建智能体会话。
  *

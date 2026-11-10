@@ -24,10 +24,10 @@
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-10） | `d.129.3.53.0`（`main`，**未出包/未部署**）——模块页（自动化/信息中枢/幕僚/工作流）与插件 MCP/接口视图的写死状态色/卡壳收口到 token；空态布局测试改 ui-card 定位。详见 §5 首条 |
-| 安装包（最新） | **仍是 `d.123.3.48.0`（r90，247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`）**；`d.124.3.48.0` / `d.125.3.48.0` / `d.126.3.48.0` / `d.127.3.48.0` / `d.128.3.48.0` / `d.129.3.48.0` / `d.129.3.49.0` / `d.129.3.50.0` / `d.129.3.51.0` / `d.129.3.52.0` / `d.129.3.53.0` 代码已合入 `main` 但**未打包、未部署、未发布更新源**（需要时按 `docs/deploy.md` 走 `release.mjs --desktop --deploy` + `publish-update.mjs`）。 |
-| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.129.3.53.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
-| 测试 | 2026-11-10 21:5x 实跑（d.129.3.53.0 门禁）：**web 341 文件 / 4841 例、shared 8 / 106、server 16 / 270、desktop 46 个 node:test 文件 / 772 例**；`pnpm -r typecheck` 六包零错误；`check-source-encoding` OK。真实浏览器（本地 dev，admin）核对插件 MCP/技能 Tab 亮暗。 |
+| 当前版本（2026-11-10） | `d.130.3.53.0`（`main`，**未出包/未部署**）——会话列表分页：服务端 `limit/offset` 按最近活跃排序切片，客户端首屏 30 条 + 左栏「加载更多对话」，刷新按已加载长度续拉。详见 §5 首条 |
+| 安装包（最新） | **仍是 `d.123.3.48.0`（r90，247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`）**；`d.124.3.48.0` / `d.125.3.48.0` / `d.126.3.48.0` / `d.127.3.48.0` / `d.128.3.48.0` / `d.129.3.48.0` / `d.129.3.49.0` / `d.129.3.50.0` / `d.129.3.51.0` / `d.129.3.52.0` / `d.129.3.53.0` / `d.130.3.53.0` 代码已合入 `main` 但**未打包、未部署、未发布更新源**（需要时按 `docs/deploy.md` 走 `release.mjs --desktop --deploy` + `publish-update.mjs`）。 |
+| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.130.3.53.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
+| 测试 | 2026-11-10 22:1x 实跑（d.130.3.53.0 门禁）：**web 341 文件 / 4844 例、shared 8 / 106、server 16 / 271、desktop 46 个 node:test 文件 / 772 例**；`pnpm -r typecheck` 六包零错误；`check-source-encoding` OK。 |
 | 线上 | **`d.123.3.48.0` 已于 2026-11-10 10:05–10:07 部署**（`release.mjs --desktop --deploy`：7 OK / 2 SKIP；备份 `heming-data-2026-11-10-d.123.3.48.0.tar.gz` 111.1KB 落本机；`INSTALL DONE: d.123.3.48.0`，install + smoke 通过）。人工校验：公网 `/api/health` 200；首页主 bundle `index-DO9EqyCD.js` 与本机 `packages/web/dist` **同名同 md5**；线上 SettingsPage chunk 含 `d.123.3.48.0`；部署包 30.6MB / 1802 项（不该有的 0 项）。 |
 | 安装包（已发布） | **`和鸣 Setup d.123.3.48.0.exe`（`r90`，247,030,505 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs`（`HEMING_RELEASE_DIR=…/r90`）上传 3 个文件并按远端大小 + sha512 校验通过。 |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **当前指向 123.3.48**（sha512 `7Plv…Mdoxug==`，size 247030505）；远端只留 `d.122.3.48.0` + `d.123.3.48.0` 两版（更早版本已按策略清理）。 |
@@ -229,6 +229,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 
 ## 5. 下一步候选
+**会话列表分页（`d.130.3.53.0`，2026-11-10；`main`，未出包/未部署）**：`GET /api/conversations` 支持 `limit/offset`（按 lastMessageAt 倒序后再切片，不传 limit 保持旧行为）；web store 首屏 30 条、`loadMoreConversations()` 按 offset 续页并按 id 去重、`conversationsHasMore`/`conversationsLoadingMore`；后台刷新按当前已加载长度续拉；ConversationRail 底部「加载更多对话」（搜索时隐藏）。测试：server +1（271）、web +3（chat store 续页/去重/无更多 no-op、AssistantPage 加载更多）。**边界**：分页按最近活跃动态排序，翻页期间有新消息会重排（已按 id 去重）；搜索只过滤已加载会话，后续可改服务端搜索。**下一步**：① 插件独立化 P2（自动化/幕僚页面搬出本体，基线 143 只减不增）；② 死代码确认（TaskAreaPage/RolloutTimeline）；③ 服务端会话搜索（配合分页）。
+
 **模块页 + 插件 MCP/接口视图 token 收口（`d.129.3.53.0`，2026-11-10；`main`，未出包/未部署）**：自动化/信息中枢/幕僚/工作流执行/列表与 InterfacesView 的写死绿/红/蓝/琥珀状态色改 success/danger/info/warn soft/line；卡壳统一 ui-card；搜索高亮/告警条/输入框 token 化；两处空态布局测试改 div.ui-card 定位。测试 66 例模块页全绿、web 4841 全量通过。**下一步**：① 会话列表分页（当前全量）；② 知识库长列表/标签分页（如有必要）；③ 插件独立化 P2（自动化/幕僚页面搬出本体，基线 143 只减不增）；④ TaskAreaPage/RolloutTimeline 等疑似未路由页面先确认是否死码再决定 token 或删除。
 
 **对话页 ChatPage token 收口（`d.129.3.52.0`，2026-11-10；`main`，未出包/未部署）**：消息区/工具栏/输入区/搜索条/附件条/导出菜单/滚动条/错误横幅的写死色改 token（body/muted、surface/subtle*、line-soft、danger/warn/success、warn-soft/line）；搜索高亮一条测试断言同步；ChatPage 123 例 + AgentStreamBubble 14 例全绿；亮/暗截图核对。**下一步**：① 模块页（Automation/Infohub/Staff/Workflow）低风险 token 收口；② 会话列表分页；③ 插件独立化 P2（自动化/幕僚页面搬出本体，基线 143 只减不增）。
