@@ -67,8 +67,32 @@
 | P3 | 信息中枢迁（Python 边车生命周期由插件服务负责） | 未安装时本体不再 spawn Python；健康检查/端口冲突行为与现在一致 |
 | P4 | 工作流迁（大包 + 凭据/执行数据），`lib/modules/registry.ts` 删除 | 安装包体积显著下降；模块目录只列已装插件 |
 
-## 4. 风险与取舍
+## 3.5 与并行会话实际进展的对齐（2026-11-10 晚）
 
+并行会话（插件作者线）已在做「插件自带本机引擎」这一步，工作区里有未提交实现（`packages/desktop/plugin-engine.js`
+与 `plugin-package.js`/`plugin-host.js`/`plugin-kit/plugins/infohub-page/` 的改动，截至本文件更新时未提交）。
+其契约与本方案一致，值得直接吸收为 P1 基础：
+
+- `contributions.engine`（仅首方签名 bundle）：`{ entry: 包内 .py, lib?: 包内目录 }`；解释器固定用应用内置
+  Python 运行时，**不接受命令字符串**；通信走 stdin/stdout 换行 JSON（与 `infohub-bridge.js` 同协议）。
+- 能力闸门：`permissions.chat: true` 才下发本机模型网关（后台任务模型）；`permissions.kb: true` 才下发知识库根
+  与 `writeDirs`；用户自己的供应商 Key 永不下发。
+- 完整性：启动前按盘上 `files/**` 重算摘要（与安装同算法）比对，改包拒启动；摘要按 `id@version` 缓存。
+- 页面侧：`__heming_widget` 增加 `engine` 调用面与 `backgroundModel`；设置区新增「后台任务模型」卡。
+
+对迁移表的直接影响：
+
+1. **信息中枢**可以直接走 `contributions.engine`（Python 引擎随插件包分发），不再需要在主进程保留
+   `infohub-engine.js` 的启动逻辑——这是 P3 的第一块，等并行工作合入后按本方案收口。
+2. **自动化 / 工作流**的引擎同样可走 engine 贡献点（工作流已是独立 Node 服务，可先保留本机服务 + MCP，
+   再统一成引擎贡献）；本体的调度器仍需改为「插件引擎托管 + 生命周期启停」。
+3. **幕僚**是纯 UI + 本机数据只读消费，优先级最低；可先留在本体，或等 d.124 页面宿主 + 宿主数据桥补齐后再迁。
+4. 本体删除清单：四个 `lib/*` 模块、四个页面组件、`App.tsx` 顶层 `useStaffLoop`/`useAutomationScheduler`/
+   `useWorkflowScheduler`、`SETTINGS_CARDS` 里的模块专属卡，都要随迁移逐项删；每删一项加一条「安装包不含它」的守卫测试。
+
+> 边界：本节只做对齐记录。并行会话的实现仍未提交，本轮**不改**这些文件；合入后再按 P1–P4 推进。
+
+## 4. 风险与取舍
 - **本机数据访问**：插件页面在独立 origin，不能直接读本体 localStorage（记忆/任务/模型密钥）。必须走宿主受控桥，
   按权限最小化；否则会为了「独立」把密钥/记忆暴露给插件页——这条红线不能破。
 - **后台任务**：必须独立进程；bundle 页面不适合承载定时/长任务（页面销毁即停）。

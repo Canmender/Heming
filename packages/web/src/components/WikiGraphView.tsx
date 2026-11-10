@@ -241,7 +241,7 @@ export function WikiGraphView({
         <span className="font-bold text-muted">图谱</span>
         <span>{graph.nodes.length} 页 · {graph.edges.length} 条链接</span>
         {orphans > 0 && (
-          <span className="text-[#b45309]">{orphans} 个孤儿页（无任何链接）</span>
+          <span className="text-[var(--warn)]">{orphans} 个孤儿页（无任何链接）</span>
         )}
         <span className="ml-auto flex items-center gap-2.5">
           {showLegend
@@ -270,7 +270,7 @@ export function WikiGraphView({
         onPointerUp={onUp}
         onPointerCancel={onUp}
         onDoubleClick={reset}
-        className="relative min-h-[320px] flex-1 cursor-grab overflow-hidden rounded-xl border border-line bg-[#fcfcfc] touch-none"
+        className="relative min-h-[320px] flex-1 cursor-grab overflow-hidden rounded-xl border border-line-soft bg-[var(--subtle)] touch-none"
         style={{ cursor: panning ? "grabbing" : undefined }}
       >
         <svg width={size.w} height={size.h} className="block">
@@ -294,7 +294,7 @@ export function WikiGraphView({
                   y1={a.y}
                   x2={b.x}
                   y2={b.y}
-                  stroke={active ? "#9ca3af" : "#e3e3e3"}
+                  stroke={active ? "var(--line-strong)" : "var(--line)"}
                   strokeWidth={active ? 1.4 : 0.9}
                 />
               );
@@ -323,7 +323,7 @@ export function WikiGraphView({
                 >
                   <circle
                     r={nodeRadius(node.degree)}
-                    fill={active ? KIND_COLOR[node.kind] : "#fff"}
+                    fill={active ? KIND_COLOR[node.kind] : "var(--surface)"}
                     stroke={KIND_COLOR[node.kind]}
                     strokeWidth={node.orphan ? 1 : 1.8}
                     // 孤儿页用虚线圈：一眼看出「这篇谁都没链接」
@@ -335,7 +335,7 @@ export function WikiGraphView({
                     textAnchor="middle"
                     fontSize={active ? 11 : 9.5}
                     fontWeight={active ? 700 : 400}
-                    fill={active ? "#1a1a1a" : "#777"}
+                    fill={active ? "var(--ink)" : "var(--muted)"}
                     style={{ pointerEvents: "none", userSelect: "none" }}
                   >
                     {(titleById.get(node.id) ?? node.title).length > 12
@@ -349,12 +349,12 @@ export function WikiGraphView({
         </svg>
 
         {/* 缩放控件：−/百分比/＋ + 重置视图（双击复位保留为快捷手势） */}
-        <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg border border-line bg-white px-1 py-0.5 shadow-card">
+        <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg border border-line-soft bg-[var(--surface)] px-1 py-0.5 shadow-card">
           <button
             type="button"
             aria-label="缩小图谱"
             onClick={() => zoomBy(-ZOOM_BUTTON_STEP)}
-            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
+            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             −
           </button>
@@ -369,7 +369,7 @@ export function WikiGraphView({
             type="button"
             aria-label="放大图谱"
             onClick={() => zoomBy(ZOOM_BUTTON_STEP)}
-            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
+            className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             ＋
           </button>
@@ -377,7 +377,7 @@ export function WikiGraphView({
             type="button"
             aria-label="重置视图"
             onClick={reset}
-            className="ml-0.5 rounded-sm px-1.5 py-0.5 text-[10px] text-muted hover:bg-[#f3f3f3]"
+            className="ml-0.5 rounded-sm px-1.5 py-0.5 text-[10px] text-muted transition-colors hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             重置
           </button>
