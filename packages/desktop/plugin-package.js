@@ -217,6 +217,53 @@ function normalizePageSpec(raw) {
   return { ok: true, errors: [], page: { title, icon, summary, entry } };
 }
 
+/** 引擎入口/依赖目录的最大长度（清单是落盘文件，别让它把环境变量撑爆）。 */
+const ENGINE_PATH_MAX = 200;
+
+/**
+ * 归一化插件自带引擎（`contributions.engine`）。
+ *
+ * ★ 只允许 `.py` 入口并强制落在 `files/**`：解释器由宿主固定为内置运行时，
+ *   清单里**没有命令字符串**可写——即使 plugin.json 落盘后被改，也拼不出 `cmd /c …`。
+ * ★ `lib` 是随包分发的 site-packages 目录（可缺省）：只进 PYTHONPATH，不是新的命令面。
+ * ★ 存在性在 `readPackage` 里对着包内文件清单再查一次；这里只做形状与路径约束。
+ */
+function normalizeEngineSpec(raw) {
+  const at = "contributions.engine";
+  if (!isPlainObject(raw)) return { ok: false, errors: [`${at} 必须是对象`], engine: null };
+  const errors = [];
+
+  const entry = typeof raw.entry === "string" ? raw.entry.trim() : "";
+  if (!entry) {
+    errors.push(`${at}.entry 必须是非空文本（包内 .py 入口，如 files/engine/bridge.py）`);
+  } else if (entry.length > ENGINE_PATH_MAX) {
+    errors.push(`${at}.entry 过长（≤${ENGINE_PATH_MAX} 字符）`);
+  } else if (entry.includes("\\") || entry.includes("\0") || entry.split("/").includes("..")) {
+    errors.push(`${at}.entry 不能含反斜杠 / NUL / ..`);
+  } else if (!entry.startsWith("files/") || !/\.py$/i.test(entry)) {
+    errors.push(`${at}.entry 必须是 files/ 下的 .py 文件`);
+  }
+
+  let lib = "";
+  if (raw.lib !== undefined) {
+    lib = typeof raw.lib === "string" ? raw.lib.trim() : "";
+    if (!lib) {
+      errors.push(`${at}.lib 必须是非空文本（随包分发的依赖目录，可省略）`);
+    } else if (lib.length > ENGINE_PATH_MAX) {
+      errors.push(`${at}.lib 过长（≤${ENGINE_PATH_MAX} 字符）`);
+    } else if (lib.includes("\\") || lib.includes("\0") || lib.split("/").includes("..")) {
+      errors.push(`${at}.lib 不能含反斜杠 / NUL / ..`);
+    } else if (!lib.startsWith("files/")) {
+      errors.push(`${at}.lib 必须在 files/ 下`);
+    } else if (lib === entry || entry.startsWith(lib + "/")) {
+      errors.push(`${at}.lib 不能是入口文件或其上级目录`);
+    }
+  }
+
+  if (errors.length > 0) return { ok: false, errors, engine: null };
+  return { ok: true, errors: [], engine: { entry, ...(lib ? { lib } : {}) } };
+}
+
 /**
  * 主进程侧的清单守卫（v4 / bundle / desktopWidgets / page / permissions / 签名标记）。
  *
@@ -347,6 +394,15 @@ function validateBundleManifest(raw, options = {}) {
     errors.push("permissions.chat 只对界面插件（distribution: \"bundle\"）有意义");
   }
   const chat = permissionsRaw.chat === true;
+  // d.125：写和鸣知识库（`permissions.kb`）。只有随插件分发的本机引擎会用得上，
+  // 但这里仍按「声明制」收口：没写就是 false，引擎环境里不会出现知识库路径。
+  if (permissionsRaw.kb !== undefined && typeof permissionsRaw.kb !== "boolean") {
+    errors.push("permissions.kb 必须是 boolean（默认 false）");
+  }
+  if (permissionsRaw.kb === true && distribution !== "bundle") {
+    errors.push("permissions.kb 只对界面插件（distribution: \"bundle\"）有意义");
+  }
+  const kb = permissionsRaw.kb === true;
 
   /* ── contributions：只允许 commands + desktopWidgets + page（界面插件不贡献技能/服务/工具束） ── */
   const contributionsRaw = isPlainObject(raw.contributions) ? raw.contributions : {};
@@ -425,6 +481,18 @@ function validateBundleManifest(raw, options = {}) {
     );
   }
 
+  // d.125：插件自带本机引擎（第一方签名 bundle 专用，见 plugin-engine.js）。
+  let engine = null;
+  if (contributionsRaw.engine !== undefined) {
+    const normalized = normalizeEngineSpec(contributionsRaw.engine);
+    if (!normalized.ok) errors.push(...normalized.errors);
+    else engine = normalized.engine;
+  }
+  // 知识库写入没有引擎就无处落地：把「声明了能力却没人用」当成清单错误，早报比运行时空转好。
+  if (kb && !engine) {
+    errors.push('permissions.kb 需要同时声明 contributions.engine（写入由插件自带引擎执行）');
+  }
+
   const permissions = {
     network: networkHosts,
     tools,
@@ -433,6 +501,7 @@ function validateBundleManifest(raw, options = {}) {
     graphics: graphics.filter((item) => ALLOWED_GRAPHICS.has(item)),
     eval: permissionsRaw.eval === true,
     chat,
+    kb,
   };
 
   return {
@@ -441,6 +510,7 @@ function validateBundleManifest(raw, options = {}) {
     manifest: raw,
     widget,
     page,
+    engine,
     permissions,
     distribution,
     signed: signed === true,
@@ -592,6 +662,17 @@ function readPackage(bytes, options = {}) {
   }
   // d.124：页面入口同样必须在包内——安装时校验，别等到用户点进页面才白屏。
   if (page && !paths.has(page.entry)) errors.push(`页面入口不存在于插件包：${page.entry}`);
+  // d.125：引擎入口必须在包内（解释器由宿主固定，缺文件只会让页面永久「引擎启动失败」）。
+  const engine = manifestCheck.engine;
+  if (engine && !paths.has(engine.entry)) errors.push(`引擎入口不存在于插件包：${engine.entry}`);
+  // 依赖目录同理：写了 lib 却一个文件都没打进包，引擎起来后 import 必失败。
+  if (
+    engine &&
+    engine.lib &&
+    !entries.some((item) => item.path === engine.lib || item.path.startsWith(engine.lib + "/"))
+  ) {
+    errors.push(`引擎依赖目录不存在于插件包：${engine.lib}`);
+  }
   if (errors.length > 0) return { ok: false, errors, sha256, manifest };
 
   return {
@@ -602,6 +683,7 @@ function readPackage(bytes, options = {}) {
     manifest,
     widget,
     page,
+    engine,
     permissions: manifestCheck.permissions,
     signed: manifestCheck.signed === true,
     publisherId: manifestCheck.publisherId,
@@ -639,6 +721,7 @@ module.exports = {
   validateBundleManifest,
   normalizeBundleCommands,
   normalizePageSpec,
+  normalizeEngineSpec,
   readPackage,
   packPackage,
 };

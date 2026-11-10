@@ -107,6 +107,8 @@ const KEY_LEGACY_CONFIGS = "heming.llmConfigs";
 const KEY_LEGACY_HEALTH = "heming.llmHealth.v1";
 /** 迁移只做一次：标记落盘后即使有旧键残留也不再清空用户的新绑定。 */
 const KEY_MIGRATED = "heming.magpie.migrated.v1";
+/** d.125：后台任务模型（归档/摘要等不抢主对话的任务用）。空串 = 未设置。 */
+const KEY_BACKGROUND_MODEL = "heming.backgroundModel.v1";
 
 /** 智能体绑定指向路由组时的前缀（绑定值仍是字符串，老数据零迁移）。 */
 export const ROUTE_PREFIX = "route.";
@@ -159,6 +161,12 @@ function loadModels(): GatewayModel[] {
           (m) => m && typeof m.id === "string" && typeof m.name === "string",
         )
       : [],
+  );
+}
+
+function loadBackgroundModel(): string | null {
+  return loadJson<string | null>(KEY_BACKGROUND_MODEL, null, (raw) =>
+    typeof raw === "string" && raw.trim() ? raw.trim() : null,
   );
 }
 
@@ -267,6 +275,11 @@ interface LlmState {
   models: GatewayModel[];
   /** 最近一次成功读到的 magpie 版本（展示用）。 */
   gatewayVersion?: string;
+  /**
+   * 后台任务模型（d.125）：归档、摘要、议程提取这类后台任务用的模型 id。
+   * `null` = 未设置（插件不会自动调用模型）；只存 id，模型目录变化后由 UI 判失效。
+   */
+  backgroundModel: string | null;
   /** 由目录派生的模型档案（不落盘）。 */
   profiles: LlmProfile[];
   bindings: Record<string, string>;
@@ -279,6 +292,8 @@ interface LlmState {
   refreshCatalog: () => Promise<GatewayCatalogResult>;
   /** 直接写入目录（测试与离线恢复用）。 */
   setModels: (models: GatewayModel[], version?: string) => void;
+  /** 设置后台任务模型；传 null / 空串表示不设置。 */
+  setBackgroundModel: (modelId: string | null) => void;
   setBinding: (agentId: string, profileId: string | null) => void;
   setPrompt: (agentId: string, text: string) => void;
   getProfile: (id: string) => LlmProfile | undefined;
@@ -298,6 +313,7 @@ export const useLlmStore = create<LlmState>((set, get) => ({
   gateway: initialGateway,
   models: initialModels,
   gatewayVersion: undefined,
+  backgroundModel: loadBackgroundModel(),
   profiles: profilesOf(initialGateway, initialModels),
   bindings: loadRecord(KEY_BINDINGS),
   prompts: loadRecord(KEY_PROMPTS),
@@ -345,6 +361,11 @@ export const useLlmStore = create<LlmState>((set, get) => ({
       gatewayVersion: version,
       profiles: profilesOf(get().gateway, models),
     });
+  },
+  setBackgroundModel(modelId) {
+    const next = typeof modelId === "string" && modelId.trim() ? modelId.trim() : null;
+    writeJson(createDefaultStorage(), KEY_BACKGROUND_MODEL, next, 512);
+    set({ backgroundModel: next });
   },
   setBinding(agentId, profileId) {
     const bindings = { ...get().bindings };

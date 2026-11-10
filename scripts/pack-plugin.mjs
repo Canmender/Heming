@@ -25,11 +25,11 @@ import { gzipSync } from "node:zlib";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const requireFromRoot = createRequire(import.meta.url);
 
-/** 与规格 §2.1 一致的安装配额（宿主模块可用时以它的为准）。 */
+/** 与宿主 plugin-tar.js 一致的安装配额（d.125 起带本机引擎的包要携带纯 Python 依赖）。 */
 const LIMITS = Object.freeze({
-  maxTotalBytes: 20 * 1024 * 1024,
-  maxFiles: 2000,
-  maxFileBytes: 8 * 1024 * 1024,
+  maxTotalBytes: 64 * 1024 * 1024,
+  maxFiles: 4000,
+  maxFileBytes: 16 * 1024 * 1024,
 });
 
 function fail(message) {
@@ -87,11 +87,11 @@ function walk(dir, base = "") {
 const entries = walk(PACKAGE_ROOT);
 let total = 0;
 for (const entry of entries) {
-  if (entry.size > LIMITS.maxFileBytes) fail(`单文件超过 8MB：${entry.path}（${entry.size} 字节）`);
+  if (entry.size > LIMITS.maxFileBytes) fail(`单文件超过 16MB：${entry.path}（${entry.size} 字节）`);
   total += entry.size;
 }
 if (entries.length > LIMITS.maxFiles) fail(`文件数超过上限：${entries.length} > ${LIMITS.maxFiles}`);
-if (total > LIMITS.maxTotalBytes) fail(`解包总量超过 20MB：${total} 字节`);
+if (total > LIMITS.maxTotalBytes) fail(`解包总量超过 64MB：${total} 字节`);
 
 /* ── 确定性 tar：优先宿主实现 ───────────────────────────────────────────── */
 

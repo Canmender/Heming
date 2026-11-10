@@ -56,6 +56,12 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
     section: "model",
   },
   {
+    id: "background-model",
+    title: "后台任务模型",
+    keywords: ["后台", "任务", "模型", "归档", "摘要", "议程", "便宜", "插件", "background"],
+    section: "model",
+  },
+  {
     id: "hitl-policy",
     title: "工具调用确认",
     keywords: ["hitl", "确认", "免问", "审批", "拒绝", "规则", "危险", "工具", "放行", "档位"],

@@ -268,7 +268,9 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugin
     "files": [],
     "events": ["notify"],             // 可接收主窗脱敏后转发的事件
     "graphics": ["webgl", "wasm"],    // 渲染能力声明
-    "eval": false                     // true 只在渲染层确实需要 eval 时（pixi 6 的 shader 生成）
+    "eval": false,                    // true 只在渲染层确实需要 eval 时（pixi 6 的 shader 生成）
+    "chat": false,                    // true 才下发本机模型网关/后台任务模型
+    "kb": false                       // true 才下发知识库根；必须同时声明 contributions.engine
   },
   "contributions": {
     "desktopWidgets": [{
@@ -293,7 +295,7 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugin
 
 约束：
 
-- `distribution: "bundle"` 的包**只允许** `desktopWidgets` + `commands` + `page`；声明 `skills` / `mcpServers` / `toolPacks` 一律拒绝。
+- `distribution: "bundle"` 的包**只允许** `desktopWidgets` + `commands` + `page` + `engine`；声明 `skills` / `mcpServers` / `toolPacks` 一律拒绝。
   `page` 与 `desktopWidgets` 可并存（同一插件既能有浮窗又能有页面），每类最多 1 个；`page.entry` 必须是包内 `.html` 且出现在 `files` 里。
 - **`packageSha256` 必填（审计 P0-1）**：它是包内 `files/**` 的确定性内容摘要（不是 tgz 自身字节的 sha256——清单在 tgz 里，写自己的 tgz 摘要会构成自引用）。
   首方签名覆盖清单（含该字段）→ 签名**间接覆盖全部代码字节**；安装端解包后重算并比对，只换包内 JS、保留官方清单+签名的「借壳包」会被拒。
@@ -314,7 +316,7 @@ package.tgz
 ```
 
 - tar + gzip(9)，**确定性输出**（固定 mtime/uid/gid/路径排序）：同一份内容在任何机器上得到同一个 sha256。
-- 安装校验（主进程）：sha256 → gzip/tar 解析 → 配额（解包 ≤20MB、≤2000 文件、单文件 ≤8MB）→ 禁绝对路径 / `..` /
+- 安装校验（主进程）：sha256 → gzip/tar 解析 → 配额（解包 ≤**64MB**、≤**4000** 文件、单文件 ≤**16MB**；带自带引擎/纯 Python 依赖的包需要）→ 禁绝对路径 / `..` /
   符号链接 / 硬链接 / NUL → `plugin.json` 在包根 → `entry` 存在且在包内 → 原子切换 `current.json`。
   任一步失败都不产生「半装可用」状态。
 
@@ -330,6 +332,30 @@ package.tgz
 - 数据：插件自有业务数据走 `data*` API，默认落 `<userData>/plugins/<id>/data/`（见 §10.6）；
   插件不得写会话 / 消息列表 / msgCache；对话不落盘；**不得把密钥写进 data**（密钥属于宿主设置/密钥存储）。
   界面插件在独立 origin 下**没有可用的 localStorage 持久化**（清缓存/崩溃即丢），别再拿它当存储。
+
+### 9.3.1 插件自带本机引擎（d.127，仅首方 bundle）
+
+「读本机归档、写知识库」这类能力浏览器沙箱做不到，而塞进应用本体又违背「插件不占本体代码」，因此允许
+首方签名的 bundle 随包携带一个本机进程：
+
+```jsonc
+"permissions": { "chat": true, "kb": true },   // kb 必须同时声明 engine
+"contributions": {
+  "engine": { "entry": "files/engine/bridge.py", "lib": "files/engine/lib" }
+}
+```
+
+- **入口固定**：`entry` 必须是包内 `.py`；解释器由宿主固定为应用内置 Python 运行时，清单里**没有命令字符串**可写；
+  `lib` 可省略，写了必须真有文件落在该目录下（安装期检查）。
+- **通信**：页面 → 宿主 → 引擎 stdin/stdout 换行 JSON（`{id,method,params}` ↔ `{id,ok,result}`）；不开端口、不收外部连接。
+  页面 API：`engineStatus()` / `engineCall(method, params, {timeoutMs})` / `onEngineEvent(cb)`（默认 60s，上限 30 分钟）。
+- **能力**：数据目录恒有；`permissions.chat` 才下发本机模型网关 + 后台任务模型 id（不下发用户供应商 Key）；
+  `permissions.kb` 才下发知识库根与 `writeDirs`，且声明了 kb 却没有 engine → **装不上**。
+- **完整性**：启动前按盘上 `files/**` 重算摘要（与安装同算法）比对；`engine.entry/lib` 与 `permissions.kb`
+  都进入首方签名文本——签名后改入口、删依赖、补 kb 都会验签失败。
+- **生命周期**：插件停用/卸载/更新、页面与窗口关闭时回收引擎进程；`readPackage` 与页面视图失败态都会给出中文原因。
+- 参考实现与构建：`plugin-kit/plugins/infohub-page/`（`build.mjs` 把 Python 依赖 staging 到
+  `files/engine/lib` 后再 `pack-plugin`；包体上限 64MB / 4000 文件 / 单文件 16MB）。
 
 ### 9.4 发布
 

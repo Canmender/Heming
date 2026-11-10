@@ -12,7 +12,8 @@ const zlib = require("node:zlib");
  * 边界（调用方 plugin-package.js 还会按配额再校验一遍）：
  * - 只接受普通文件（typeflag `0` 或 `\0`）与目录（`5`，跳过）；符号链接/硬链接/设备一律拒；
  * - 路径必须是相对 POSIX 路径：禁绝对路径、禁 `..` 段、禁 NUL、禁反斜杠；总长 ≤ 100（USTAR name）；
- * - 解包上限：≤ 20MB、≤ 2000 个文件、单文件 ≤ 8MB（与规格 §2.1 一致，可被入参覆盖）。
+ * - 解包上限：≤ 64MB、≤ 4000 个文件、单文件 ≤ 16MB（可被入参覆盖）。
+ *   d.125 起带「本机引擎」的插件要随包携带纯 Python 依赖，20MB 装不下；
  *
  * ★ 只做「格式正确 + 边界安全」，不做「这是不是一个合法插件包」——清单校验在
  *   plugin-package.js 里，两者分开才能各自单测。
@@ -21,9 +22,9 @@ const zlib = require("node:zlib");
 const BLOCK = 512;
 const MAX_NAME = 100;
 const LIMITS = Object.freeze({
-  maxTotalBytes: 20 * 1024 * 1024,
-  maxFiles: 2000,
-  maxFileBytes: 8 * 1024 * 1024,
+  maxTotalBytes: 64 * 1024 * 1024,
+  maxFiles: 4000,
+  maxFileBytes: 16 * 1024 * 1024,
 });
 
 /** 规范化并校验一个包内相对路径；非法返回 null。 */

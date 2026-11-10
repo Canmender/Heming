@@ -14,6 +14,7 @@ const {
   settleWidgetPosition,
   normalizeWidgetPage,
 } = require("./plugin-window");
+const { createPluginEngine } = require("./plugin-engine");
 
 /**
  * 界面插件（desktopWidget）的宿主运行时：按清单规格建窗、托盘、穿透、拖拽、位置记忆，
@@ -117,7 +118,21 @@ function normalizeChatConfig(raw) {
     : [];
   const bindingRaw = input.binding && typeof input.binding === "object" ? input.binding : {};
   const binding = { agentId: typeof bindingRaw.agentId === "string" && bindingRaw.agentId ? bindingRaw.agentId : null };
-  return { agents, binding };
+  // d.125：模型目录与「后台任务模型」随同一份应答下发。
+  // 目录是用户**已经能用**的模型（magpie `/v1/models`），不含价格——别在宿主里猜「最便宜」。
+  const models = Array.isArray(input.models)
+    ? input.models
+        .filter((model) => model && typeof model.id === "string" && model.id)
+        .slice(0, 200)
+        .map((model) => ({
+          id: String(model.id).slice(0, 128),
+          name: text(model.name, 128) || String(model.id).slice(0, 128),
+        }))
+    : [];
+  const backgroundRaw = typeof input.backgroundModel === "string" ? input.backgroundModel.trim() : "";
+  // 只认目录里还在的模型：下架后残留的 id 会让引擎发一个必然 404 的请求
+  const backgroundModel = backgroundRaw && models.some((m) => m.id === backgroundRaw) ? backgroundRaw : null;
+  return { agents, binding, models, backgroundModel };
 }
 
 /**
@@ -163,6 +178,10 @@ function createWidgetHost(deps = {}) {
     getGateway,
     requestChatConfig,
     openPage,
+    // d.125：插件自带引擎（本机进程）。spawn 与内置解释器由 main.js 注入，便于单测替换。
+    spawn,
+    bundledPythonPath = null,
+    getKbRoots,
     log = () => {},
     setTimeout: setTimer = setTimeout,
     clearTimeout: clearTimer = clearTimeout,
@@ -265,7 +284,13 @@ function createWidgetHost(deps = {}) {
   async function getChatConfig() {
     if (chatCache && now() - chatCache.at < CHAT_CONFIG_TTL_MS) return chatCache.value;
     const [gateway, extras] = await Promise.all([resolveGateway(), resolveChatExtras()]);
-    const value = { gateway, agents: extras.agents, binding: extras.binding };
+    const value = {
+      gateway,
+      agents: extras.agents,
+      binding: extras.binding,
+      models: extras.models,
+      backgroundModel: extras.backgroundModel,
+    };
     chatCache = { at: now(), value };
     return value;
   }
@@ -274,6 +299,53 @@ function createWidgetHost(deps = {}) {
   function invalidateChatConfig() {
     chatCache = null;
   }
+
+  /* ─────────────────── 插件自带引擎（d.125，第一方 bundle 专用） ─────────────────── */
+
+  /**
+   * 引擎事件（`{event:"progress",…}`）只投给**该插件自己**的渲染面：页面视图与浮窗。
+   * 别的插件收不到；没有引擎的插件也收不到（它们没有订阅通道）。
+   */
+  function sendEngineEvent(pluginId, payload) {
+    let delivered = 0;
+    if (pageInfo && pageInfo.id === pluginId && !pageInfo.closed) {
+      try {
+        pageInfo.webContents.send("widget:engine-event", payload);
+        delivered += 1;
+      } catch {
+        /* 页面刚卸载 */
+      }
+    }
+    for (const runtime of runtimes.values()) {
+      if (runtime.pluginId !== pluginId) continue;
+      const win = runtime.window;
+      if (!win || win.isDestroyed()) continue;
+      try {
+        win.webContents.send("widget:engine-event", payload);
+        delivered += 1;
+      } catch {
+        /* 窗口刚销毁 */
+      }
+    }
+    return delivered;
+  }
+
+  const engineHost = createPluginEngine({
+    spawn,
+    bundledPythonPath,
+    pluginDirFor: (id) => (typeof store.currentDir === "function" ? store.currentDir(id) : null),
+    dataDirOf: (id) => store.dataDirOf(id),
+    readSettings: (id) => store.readSettings(id),
+    // 引擎拿到的网关/后台模型与页面 chatConfig 是同一份（缓存口径一致）
+    getChatConfig,
+    getKbRoots,
+    appVersion: () => appVersion(),
+    onEvent: (pluginId, payload) => sendEngineEvent(pluginId, payload),
+    log,
+    now,
+    setTimeout: setTimer,
+    clearTimeout: clearTimer,
+  });
 
   /* ───────────────────────── 单个 widget 的运行时 ───────────────────────── */
 
@@ -1355,6 +1427,8 @@ function createWidgetHost(deps = {}) {
               gateway: null,
               agents: [],
               binding: { agentId: null },
+              models: [],
+              backgroundModel: null,
               reason: "该插件未声明 permissions.chat，宿主不下发对话上下文与网关地址",
             };
           }
@@ -1366,6 +1440,31 @@ function createWidgetHost(deps = {}) {
           const settings = store.readSettings(rt.pluginId);
           const agentId = typeof settings.agentId === "string" && settings.agentId ? settings.agentId : null;
           return { ...base, binding: { agentId } };
+        },
+        null,
+      ),
+    );
+    /* ── 插件自带引擎（d.125）：只认该插件自己的页面/窗口（sender 反查，fail-closed） ── */
+    ipcMain.handle("widget:engine-status", (event) =>
+      withRuntimeOrPage(event, (rt) => engineHost.status(rt.pluginId, rt.record), null),
+    );
+    ipcMain.handle("widget:engine-call", (event, payload) =>
+      withRuntimeOrPage(
+        event,
+        (rt) => {
+          const input = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+          const method = typeof input.method === "string" ? input.method.trim() : "";
+          if (!method) throw new Error("engine-call：缺少 method");
+          const params = input.params === undefined ? {} : input.params;
+          let encoded = "";
+          try {
+            encoded = JSON.stringify(params);
+          } catch {
+            throw new Error("engine-call：params 不能序列化为 JSON");
+          }
+          if (encoded.length > 1024 * 1024) throw new Error("engine-call：params 超过 1MB");
+          const timeoutMs = Number(input.timeoutMs);
+          return engineHost.call(rt.record, method, params, { timeoutMs });
         },
         null,
       ),
@@ -1592,6 +1691,11 @@ function createWidgetHost(deps = {}) {
     }
     // 页面视图对账放在最后：停用/卸载/版本更新/页面入口变化都在这里收口（不留孤儿视图）
     syncPageView();
+    // 引擎对账：停用/卸载/版本变化/入口变化 → 回收进程。失败只记日志：
+    // 引擎是插件的可选能力，回收异常不该让整个插件宿主起不来。
+    engineHost.reconcile(records).catch((err) => {
+      log(`[widgets] 引擎对账失败：${(err && err.message) || err}`);
+    });
     return { count: runtimes.size };
   }
 
@@ -1607,6 +1711,10 @@ function createWidgetHost(deps = {}) {
     for (const runtime of [...runtimes.values()]) destroyRuntime(runtime);
     pendingLifecycle.clear();
     unwatchDisplays();
+    // 返回 Promise 交给 will-quit 的回收闸：子进程（Python 引擎）必须真的死掉再退出
+    return engineHost.stopAll().catch((err) => {
+      log(`[widgets] 引擎回收失败：${(err && err.message) || err}`);
+    });
   }
 
   /** 主窗 `widgets:action` 的入口。 */

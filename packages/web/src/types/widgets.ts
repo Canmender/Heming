@@ -206,6 +206,16 @@ export interface WidgetChatAgent {
 export interface WidgetChatConfigReply {
   agents: WidgetChatAgent[];
   binding: { agentId: string | null };
+  /** d.125：网关模型目录（id + 显示名）。 */
+  models: WidgetChatModel[];
+  /** d.125：设置选定的后台任务模型 id；未设置为 null。 */
+  backgroundModel: string | null;
+}
+
+/** 网关模型目录的一项（chatConfig 应答里的 `models[]`）。 */
+export interface WidgetChatModel {
+  id: string;
+  name: string;
 }
 
 /** 主窗转发给主进程的事件（脱敏后；主进程再转给声明了 `permissions.events: ["notify"]` 的 widget）。 */

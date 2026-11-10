@@ -582,3 +582,94 @@ test("normalizePageSpec：纯函数兜住落盘清单（非对象/缺字段给�
   assert.equal(ok.ok, true);
   assert.deepEqual(ok.page, { title: "我的面板", icon: "layout", summary: "插件页面", entry: "files/index.html" });
 });
+
+/* ───────────────────── d.125 插件自带本机引擎 ───────────────────── */
+
+function engineContribution(overrides = {}) {
+  return { entry: "files/engine/bridge.py", ...overrides };
+}
+
+test("引擎：bundle 可声明 contributions.engine，page-only 包也合法", () => {
+  const check = validateBundleManifest(
+    baseManifest({
+      contributions: { page: pageContribution(), engine: engineContribution({ lib: "files/engine/lib" }) },
+    }),
+  );
+  assert.equal(check.ok, true, check.errors.join("；"));
+  assert.deepEqual(check.engine, { entry: "files/engine/bridge.py", lib: "files/engine/lib" });
+  assert.equal(check.permissions.kb, false);
+});
+
+test("引擎：entry / lib 逐项校验（必须 files/ 下的 .py，禁反斜杠与 ..）", () => {
+  const bad = (overrides) =>
+    validateBundleManifest(
+      baseManifest({ contributions: { page: pageContribution(), engine: engineContribution(overrides) } }),
+    ).errors.join("；");
+  for (const entry of [undefined, "", "../evil.py", "a\b.py", "/abs.py", "files/x.js", "files/x", "x".repeat(201)]) {
+    assert.match(bad({ entry }), /contributions\.engine\.entry/, String(entry));
+  }
+  assert.match(bad({ entry: "files/x.py", lib: "lib" }), /contributions\.engine\.lib/);
+  assert.match(bad({ entry: "files/x.py", lib: "" }), /contributions\.engine\.lib/);
+  assert.match(bad({ entry: "files/x.py", lib: "files/x.py" }), /不能是入口文件或其上级目录/);
+  assert.match(bad({ entry: "files/engine/x.py", lib: "files/engine" }), /不能是入口文件或其上级目录/);
+});
+
+test("知识库权限：permissions.kb 必须是 boolean，且必须同时声明引擎", () => {
+  const withKb = (permissions, contributions = { page: pageContribution(), engine: engineContribution() }) =>
+    validateBundleManifest(
+      baseManifest({ permissions: { ...baseManifest().permissions, ...permissions }, contributions }),
+    );
+  const ok = withKb({ kb: true });
+  assert.equal(ok.ok, true, ok.errors.join("；"));
+  assert.equal(ok.permissions.kb, true);
+
+  assert.match(withKb({ kb: "yes" }).errors.join("；"), /permissions\.kb 必须是 boolean/);
+  assert.match(withKb({ kb: true }, { page: pageContribution() }).errors.join("；"), /permissions\.kb 需要同时声明/);
+});
+
+test("引擎：readPackage 要求入口真的在包里，并回传归一化 engine", () => {
+  const missing = readPackage(
+    packageFor({
+      contributions: { page: pageContribution(), engine: engineContribution({ entry: "files/engine/nope.py" }) },
+    }).bytes,
+  );
+  assert.equal(missing.ok, false);
+  assert.match(missing.errors.join("；"), /引擎入口不存在于插件包：files\/engine\/nope\.py/);
+
+  const files = [
+    { path: "files/page/index.html", data: "<!doctype html><title>panel</title>" },
+    { path: "files/engine/bridge.py", data: "print('engine')" },
+    // 依赖目录必须真的有文件；只写 lib 路径、包里没内容会让 import 必失败
+    { path: "files/engine/lib/site/pkg.py", data: "# dependency" },
+  ];
+  const pkg = packageFor(
+    {
+      permissions: { ...baseManifest().permissions, kb: true, chat: true },
+      contributions: {
+        page: pageContribution({ entry: "files/page/index.html" }),
+        engine: engineContribution({ lib: "files/engine/lib" }),
+      },
+    },
+    files,
+  );
+  const parsed = readPackage(pkg.bytes);
+  assert.equal(parsed.ok, true, parsed.errors && parsed.errors.join("；"));
+  assert.deepEqual(parsed.engine, { entry: "files/engine/bridge.py", lib: "files/engine/lib" });
+  assert.equal(parsed.permissions.kb, true);
+  assert.equal(parsed.permissions.chat, true);
+});
+
+test("引擎：声明了 lib 但包里一个依赖文件都没有 → 拒绝（import 必失败）", () => {
+  const pkg = packageFor(
+    {
+      contributions: { page: pageContribution(), engine: engineContribution({ lib: "files/engine/lib" }) },
+    },
+    [
+      { path: "files/page/index.html", data: "<!doctype html><title>panel</title>" },
+      { path: "files/engine/bridge.py", data: "print('engine')" },
+    ],
+  );
+  const parsed = readPackage(pkg.bytes);
+  assert.equal(parsed.ok, false);
+  assert.match(parsed.errors.join("；"), /引擎依赖目录不存在于插件包：files\/engine\/lib/);
+});

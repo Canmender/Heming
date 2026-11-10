@@ -311,7 +311,7 @@ bundle 额外约束：
 
 - 写 `page` 的包应把 `engines.heming` 提到 `d.124`：`contributions` 是 strict 对象，旧版宿主不认识 `page`，含该字段的清单在旧版会被拒绝安装；**不带 `page` 的旧包不受影响**。
 - 仅声明式可写 `blocks`，仅 bundle 可写 `entry`；混写直接拒绝（声明式写 `entry` →「改用 blocks 或 `distribution: "bundle"`」；bundle 写 `blocks` → 拒绝）。
-- bundle 允许的贡献 = `commands` + `desktopWidgets` + `page`；仍**不允许** `skills` / `mcpServers` / `toolPacks`。
+- bundle 允许的贡献 = `commands` + `desktopWidgets` + `page` + `engine`；仍**不允许** `skills` / `mcpServers` / `toolPacks`。
   `page` 与 `desktopWidgets` 可并存（同一插件既能有浮窗又能有页面），每类最多 1 个。
 - 包内页面的代码由 `packageSha256` + 首方签名间接覆盖（§8.3）；声明式页零代码。
 - **签名覆盖页面元数据**：`page` 进入首方签名文本（canonical-v1/v2 的 `contributions.page`，含
@@ -331,6 +331,40 @@ bundle 额外约束：
 `notInstalled` / `disabled` / `kindDisabled` / `missingRequirement` / `incompatible` / `invalidEngines` /
 `signature` / `orphan` / `degraded`。UI 展示文案与这套枚举一一对应，禁止各页面另写判断。
 
+### 3.9 插件自带本机引擎（`contributions.engine`，bundle，仅首方）
+
+**为什么**：像「读本机聊天归档、写知识库」这种能力，浏览器沙箱里做不到，而放进应用本体又违背
+「插件不占本体代码」。所以允许**首方签名的 bundle** 随包携带一个本机进程：
+
+```json
+{
+  "contributions": {
+    "engine": { "entry": "files/engine/bridge.py", "lib": "files/engine/lib" }
+  },
+  "permissions": { "chat": true, "kb": true }
+}
+```
+
+| 字段 | 限制 |
+|---|---|
+| `entry` | 必须是 `files/` 下的 `.py` 文件；禁反斜杠 / NUL / `..` / 协议前缀，≤200 字符；**必须出现在包内文件清单** |
+| `lib` | 可省略；同路径规则，且**不能是入口文件或其上级目录**；写了就必须真的有文件落在该目录下 |
+
+- 解释器由宿主固定为**应用内置 Python 运行时**，清单里没有命令字符串可写——改了落盘清单也拼不出
+  第二条命令；启动前按盘上 `files/**` 重算摘要（与安装同算法）比对，改包即拒绝启动。
+- 通信走 stdin/stdout 换行 JSON（`{id, method, params}` / `{id, ok, result|error}` + 主动事件），
+  不开端口、不收外部连接；页面用 `engineStatus()` / `engineCall(method, params, {timeoutMs})` /
+  `onEngineEvent(cb)` 调用。
+- 能力闸门：`HEMING_PLUGIN_DATA_DIR` 恒有；`permissions.chat: true` 才下发本机模型网关与
+  **后台任务模型** `HEMING_CHAT.backgroundModel`（只给 id，不下发用户供应商 Key）；`permissions.kb: true`
+  才下发知识库根 + `writeDirs`（`HEMING_KB_ROOTS`），且**必须同时声明 engine**，否则安装期就拒绝。
+- 大小口径随引擎放宽：解包 ≤ **64MB**、文件 ≤ **4000**、单文件 ≤ **16MB**（原 20MB/2000/8MB；
+  带纯 Python 依赖的包 20MB 装不下）。
+- 签名覆盖：`contributions.engine` 的 `entry` / `lib` 与 `permissions.kb` 进入首方签名文本——
+  签名后换引擎入口、删依赖目录、补 kb 权限都会验签失败；未声明它们的旧包 canonical 字节不变。
+- 生命周期：插件停用/卸载/更新/页面与窗口全部关闭时引擎进程回收；长任务必须显式传 `timeoutMs`
+  （默认 60s，上限 30 分钟）。
+
 ---
 
 ## 4. 权限接口（Permissions）
@@ -344,6 +378,7 @@ bundle 额外约束：
 | `files` | 包内相对路径数组，≤5（禁绝对路径/盘符/`..`） | `[]` | 两者（当前只校验与展示） |
 | `events` | `notify` / `lifecycle` / `theme` / `tray`，≤8 | `[]` | 主要 bundle |
 | `chat` | boolean | `false` | 仅 bundle；声明式包写 `true` 直接拒绝 |
+| `kb` | boolean | `false` | 仅 bundle，且必须同时声明 `contributions.engine`（写和鸣知识库由插件自带引擎执行） |
 | `graphics` | `webgl` / `webgl2` / `wasm`，≤8 | `[]` | bundle |
 | `eval` | boolean | `false` | bundle（仅确需 eval 时） |
 
@@ -358,6 +393,7 @@ bundle 额外约束：
 | `tools` | 工具注入点 `lib/plugins/toolCeiling.ts` → `buildToolBridge(toolAllowed)` | 超上限工具**不注入给模型**；写工具仍逐次 HITL。记录缺失按 `none`（失败关闭） |
 | `events` | 主进程 `plugin-host.js` 投递前门禁 | 未声明的事件**一律不投递**（`theme`/`tray` 也不再无条件广播） |
 | `chat` | `widget:chat-config` IPC + CSP | 未声明时返回空智能体名册与可读原因，CSP 不放行网关 origin；**人设提示词永不下发** |
+| `kb` | 引擎启动环境变量 `HEMING_KB_ROOTS` + 安装期校验 | 未声明不下发知识库路径；声明了但没有 `contributions.engine` → **装不上**；写入仍受各库 `writeDirs` 约束 |
 | `graphics` / `eval` | widget CSP 生成 + 网关放行判定 | 未声明 `eval` 不放 `'unsafe-eval'`；`graphics` 决定「这个 widget 是否算渲染/执行类」从而是否给网关 origin（不是沙箱能力声明）；`frame-src` 恒为 `'none'`（界面插件不得嵌外部页面） |
 | `files` | 预留 | 当前只校验与展示，不授予文件工具 |
 

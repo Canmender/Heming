@@ -1,35 +1,35 @@
 /*
- * 聊天记录页面：两栏浏览本机 InfoHub 归档。
+ * 聊天记录页面：两栏浏览本机 InfoHub 归档，顶部一键采集 / 存入知识库。
  *
- * 数据来源只有 InfoHub 的 MCP 采集桥（POST /mcp，两个只读工具
- * infohub_conversations / infohub_archive_messages）。页面不直接读文件、不碰
+ * 数据全部来自插件自带的本机引擎（window.__heming_widget.engineCall）：宿主用内置
+ * Python 拉起包内 engine/bridge.py，不开端口、不收外部连接。页面不直接读文件、不碰
  * 宿主 DOM；所有文案都用 textContent 写入，不拼 innerHTML。
+ *
+ * 引擎返回 InfoHub 核心的 snake_case 行（conversations.items / messages.items），
+ * 这里统一映射成渲染用的 camelCase，渲染层不关心来源格式。
  */
 (() => {
   "use strict";
 
-  const DEFAULT_MCP_URL = "http://127.0.0.1:8776/mcp";
-  const MCP_URL_KEY = "infohub.mcpUrl";
   const CONV_PAGE = 200;
   const MSG_PAGE = 80;
-  const RPC_TIMEOUT = 10_000;
+  const SYNC_TIMEOUT = 30 * 60 * 1000; // 采集可能跑几分钟，放宽到协议上限
+  const ARCHIVE_TIMEOUT = 10 * 60 * 1000;
   const SOURCE_NAMES = { qq: "QQ", wechat: "微信" };
+  const VAULT_KEY = "vaultId";
 
   const bridge = window.__heming_widget || null;
 
-  /** 默认端口可用 localStorage 覆盖（换端口调试 / 与别的实例并存时用）。 */
-  const mcpUrl = (() => {
-    try {
-      const custom = localStorage.getItem(MCP_URL_KEY);
-      if (custom && /^https?:\/\//i.test(custom)) return custom;
-    } catch {
-      /* 存储不可用：用默认地址 */
-    }
-    return DEFAULT_MCP_URL;
-  })();
-
   const $ = (id) => document.getElementById(id);
   const dom = {
+    engineDot: $("engineDot"),
+    modelHint: $("modelHint"),
+    vaultSelect: $("vaultSelect"),
+    archiveBtn: $("archiveBtn"),
+    syncBtn: $("syncBtn"),
+    progress: $("progress"),
+    progressText: $("progressText"),
+    progressFill: $("progressFill"),
     convList: $("convList"),
     convFoot: $("convFoot"),
     convCount: $("convCount"),
@@ -43,10 +43,11 @@
     detailName: $("detailName"),
     detailMeta: $("detailMeta"),
     stream: $("stream"),
-    offline: $("offline"),
-    offlineUrl: $("offlineUrl"),
-    offlineDetail: $("offlineDetail"),
-    offlineRetry: $("offlineRetry"),
+    engineError: $("engineError"),
+    engineErrorTitle: $("engineErrorTitle"),
+    engineErrorDesc: $("engineErrorDesc"),
+    engineErrorDetail: $("engineErrorDetail"),
+    engineRetry: $("engineRetry"),
     banner: $("banner"),
     bannerText: $("bannerText"),
     bannerRetry: $("bannerRetry"),
@@ -56,6 +57,7 @@
   const state = {
     conversations: [],
     convTotal: 0,
+    convLimit: CONV_PAGE,
     source: "",
     keyword: "",
     selected: null,
@@ -63,10 +65,15 @@
     messageTotal: 0,
     hasMore: false,
     nextBeforeTs: null,
-    nextBeforeId: null,
     loadingConvs: false,
     loadingMsgs: false,
     bootstrapped: false,
+    dbMissing: false,
+    vaults: [],
+    vaultId: "",
+    chatModel: "",
+    chatAvailable: false,
+    busy: false,
   };
 
   let convSeq = 0;
@@ -74,17 +81,7 @@
   let searchTimer = 0;
   let bannerTimer = 0;
 
-  /* ─────────────────────────── MCP 客户端 ─────────────────────────── */
-
-  class RpcError extends Error {
-    constructor(message, offline) {
-      super(message);
-      this.offline = offline === true;
-    }
-  }
-
-  let rpcId = 0;
-  let ready = null;
+  /* ─────────────────────────── 引擎客户端 ─────────────────────────── */
 
   function log(line) {
     try {
@@ -94,79 +91,50 @@
     }
   }
 
-  async function post(payload) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT);
+  /**
+   * 调插件引擎。首次调用宿主会懒启动进程；启动失败 / 超时 / 进程退出这类「引擎不可用」
+   * 错误打上 engineDown 标记，页面据此弹整屏提示而不是普通提示条。
+   */
+  async function engineCall(method, params = {}, options = {}) {
+    if (!bridge || typeof bridge.engineCall !== "function") {
+      const error = new Error("请在和鸣桌面端里打开此页面：浏览器预览连不上插件本机引擎。");
+      error.engineDown = true;
+      throw error;
+    }
     try {
-      return await fetch(mcpUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json, text/event-stream",
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
+      return await bridge.engineCall(method, params, options);
     } catch (error) {
-      const reason = error && error.name === "AbortError" ? "请求超时" : "网络不可达";
-      throw new RpcError(`连不上 InfoHub 本机服务（${reason}）`, true);
-    } finally {
-      clearTimeout(timer);
+      const message = error && error.message ? error.message : String(error);
+      if (/^(引擎|插件「)/.test(message)) error.engineDown = true;
+      throw error;
     }
   }
 
-  async function rpc(method, params) {
-    const response = await post({ jsonrpc: "2.0", id: ++rpcId, method, params });
-    if (!response.ok) {
-      throw new RpcError(`InfoHub 返回 HTTP ${response.status}`, response.status >= 500);
-    }
-    let payload;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new RpcError("InfoHub 返回的内容不是 JSON", false);
-    }
-    if (payload && payload.error) {
-      throw new RpcError(payload.error.message || "InfoHub 返回错误", false);
-    }
-    return payload ? payload.result : null;
+  /* ─────────────────────────── 行映射 ─────────────────────────── */
+
+  function mapConv(row) {
+    return {
+      id: row.id,
+      name: row.name || "",
+      source: row.source || "",
+      kind: row.kind || "",
+      avatar: row.avatar || "",
+      messageCount: Number(row.message_count) || 0,
+      lastTs: Number(row.last_ts) || 0,
+      meta: row.meta || {},
+    };
   }
 
-  function ensureReady() {
-    if (!ready) {
-      ready = (async () => {
-        await rpc("initialize", {
-          protocolVersion: "2025-06-18",
-          capabilities: {},
-          clientInfo: { name: "heming.infohub-page", version: "0.1.0" },
-        });
-        try {
-          // 采集桥是无状态的最小实现；通知失败不影响 tools/call，故吞掉异常。
-          await post({ jsonrpc: "2.0", method: "notifications/initialized" });
-        } catch {
-          /* 同上 */
-        }
-      })();
-      ready.catch(() => {
-        ready = null;
-      });
-    }
-    return ready;
-  }
-
-  async function callTool(name, args) {
-    await ensureReady();
-    const result = await rpc("tools/call", { name, arguments: args });
-    const text =
-      result && Array.isArray(result.content) && result.content[0]
-        ? String(result.content[0].text || "")
-        : "";
-    if (result && result.isError) throw new RpcError(text || "工具执行失败", false);
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new RpcError("工具返回的内容不是 JSON", false);
-    }
+  function mapMsg(row) {
+    return {
+      id: row.id,
+      ts: Number(row.ts) || 0,
+      from: row.sender_name || "",
+      text: row.content || "",
+      type: row.type_label || "",
+      isSelf: row.is_self === true ? true : row.is_self === false ? false : null,
+      media: row.media || null,
+    };
   }
 
   /* ─────────────────────────── 小工具 ─────────────────────────── */
@@ -265,7 +233,11 @@
     return value && typeof value === "object" && Number.isFinite(Number(value.id));
   }
 
-  /* ─────────────────────────── 提示 / 离线 ─────────────────────────── */
+  function writableVaults() {
+    return state.vaults.filter((vault) => vault.writable);
+  }
+
+  /* ─────────────────────────── 提示 / 引擎错误 ─────────────────────────── */
 
   function showBanner(message, retry) {
     clearTimeout(bannerTimer);
@@ -289,26 +261,185 @@
     dom.banner.hidden = true;
   }
 
-  function showOffline(message) {
-    dom.offlineUrl.textContent = mcpUrl;
-    dom.offlineDetail.textContent = message || "";
-    dom.offline.hidden = false;
-    log(`离线：${message || "未知原因"}`);
+  function showEngineError(title, detail) {
+    dom.engineErrorTitle.textContent = title || "本机引擎没有运行";
+    dom.engineErrorDetail.textContent = detail || "";
+    dom.engineError.hidden = false;
+    dom.engineDot.classList.add("is-down");
+    log(`引擎不可用：${detail || title}`);
   }
 
-  function hideOffline() {
-    dom.offline.hidden = true;
-    dom.offlineDetail.textContent = "";
+  function hideEngineError() {
+    dom.engineError.hidden = true;
+    dom.engineErrorDetail.textContent = "";
+    dom.engineDot.classList.remove("is-down");
   }
 
   function handleError(error, retry) {
     const message = error && error.message ? error.message : String(error);
     log(`失败：${message}`);
-    if (error && error.offline) {
-      showOffline(message);
+    if (error && error.engineDown) {
+      showEngineError("本机引擎没有运行", message);
       return;
     }
     showBanner(message, retry);
+  }
+
+  /* ─────────────────────────── 顶部工具栏 ─────────────────────────── */
+
+  function renderModelHint() {
+    if (state.chatModel && state.chatAvailable) {
+      dom.modelHint.textContent = `摘要模型：${state.chatModel}`;
+      dom.modelHint.classList.remove("is-warn");
+    } else if (state.chatModel) {
+      dom.modelHint.textContent = `后台模型 ${state.chatModel} 暂不可用`;
+      dom.modelHint.classList.add("is-warn");
+    } else {
+      dom.modelHint.textContent = "未配置后台模型 · 摘要用规则生成";
+      dom.modelHint.classList.add("is-warn");
+    }
+  }
+
+  function renderVaults() {
+    const writable = writableVaults();
+    const select = dom.vaultSelect;
+    select.textContent = "";
+    if (writable.length === 0) {
+      select.append(el("option", "", "无可写知识库"));
+      select.disabled = true;
+      dom.archiveBtn.disabled = true;
+      dom.archiveBtn.title = "请先在和鸣「知识库」里添加一个库（默认允许写入 inbox）";
+      return;
+    }
+    for (const vault of writable) {
+      const option = el("option", "", vault.name || vault.id);
+      option.value = vault.id;
+      option.title = vault.target || vault.root || "";
+      select.append(option);
+    }
+    if (!writable.some((vault) => vault.id === state.vaultId)) {
+      state.vaultId = writable[0].id;
+    }
+    select.value = state.vaultId;
+    select.disabled = state.busy;
+    dom.archiveBtn.disabled = state.busy;
+    const current = writable.find((vault) => vault.id === state.vaultId);
+    dom.archiveBtn.title = `存入 ${(current && current.target) || "知识库"}`;
+  }
+
+  function showProgress(text, ratio) {
+    dom.progress.hidden = false;
+    dom.progressText.textContent = text;
+    if (ratio == null) {
+      dom.progressFill.style.width = "100%";
+      dom.progressFill.classList.add("is-indeterminate");
+    } else {
+      dom.progressFill.classList.remove("is-indeterminate");
+      dom.progressFill.style.width = `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
+    }
+  }
+
+  function clearProgress() {
+    dom.progress.hidden = true;
+    dom.progressFill.style.width = "0%";
+    dom.progressFill.classList.remove("is-indeterminate");
+  }
+
+  function setBusy(busy, kind) {
+    state.busy = busy;
+    dom.syncBtn.disabled = busy;
+    dom.syncBtn.classList.toggle("is-loading", busy && kind === "sync");
+    dom.archiveBtn.classList.toggle("is-loading", busy && kind === "archive");
+    renderVaults();
+    if (!busy) clearProgress();
+  }
+
+  function summarizeArchive(kb) {
+    if (!kb) return "";
+    if (kb.empty) return "知识库已是最新（窗口内无新消息）";
+    const bits = [];
+    if (kb.vault && kb.vault.name) bits.push(`已存入「${kb.vault.name}」`);
+    const work = Number(kb.work) || 0;
+    const life = Number(kb.life) || 0;
+    if (work || life) bits.push(`工作 ${work} 条 · 生活 ${life} 条`);
+    if (kb.ai && kb.ai.enabled) bits.push(kb.ai.ok ? "AI 摘要已生成" : "AI 摘要失败，已用规则摘要");
+    return bits.join("，");
+  }
+
+  /** 拉取引擎状态：后台模型可用性 + 可写知识库列表 + 上次入库游标。 */
+  async function refreshMeta() {
+    try {
+      const status = await engineCall("status", {});
+      state.dbMissing = status.hasDb === false;
+      state.chatModel = (status.chat && status.chat.model) || "";
+      state.chatAvailable = Boolean(status.chat && status.chat.available);
+      state.vaults = Array.isArray(status.kb && status.kb.vaults) ? status.kb.vaults : [];
+      let saved = "";
+      try {
+        if (bridge && typeof bridge.dataGet === "function") saved = (await bridge.dataGet(VAULT_KEY)) || "";
+      } catch {
+        /* 读不到就用第一个可写库 */
+      }
+      if (typeof saved === "string" && saved) state.vaultId = saved;
+      renderModelHint();
+      renderVaults();
+    } catch (error) {
+      handleError(error, refreshMeta);
+    }
+  }
+
+  async function doSync() {
+    if (state.busy) return;
+    setBusy(true, "sync");
+    showProgress("正在采集本机 QQ / 微信消息…", null);
+    try {
+      const result = await engineCall(
+        "sync",
+        { sources: ["qq", "wechat"], archive: true, vaultId: state.vaultId || undefined },
+        { timeoutMs: SYNC_TIMEOUT },
+      );
+      hideEngineError();
+      const added = (Array.isArray(result.reports) ? result.reports : []).reduce(
+        (sum, report) => sum + (Number(report.added) || 0),
+        0,
+      );
+      const parts = [`采集完成：新增 ${added} 条消息`];
+      const archived = summarizeArchive(result.kb);
+      if (archived) parts.push(archived);
+      showBanner(parts.join(" · "));
+      state.convLimit = CONV_PAGE;
+      state.bootstrapped = false;
+      await loadConversations({ reset: true });
+      await refreshMeta();
+    } catch (error) {
+      handleError(error, doSync);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doArchive() {
+    if (state.busy) return;
+    if (writableVaults().length === 0) {
+      showBanner("没有可写的知识库：请先在和鸣「知识库」里添加一个库（默认允许写入 inbox）。");
+      return;
+    }
+    setBusy(true, "archive");
+    showProgress("正在生成摘要并存入知识库…", null);
+    try {
+      const result = await engineCall(
+        "kb.archive",
+        { vaultId: state.vaultId || undefined },
+        { timeoutMs: ARCHIVE_TIMEOUT },
+      );
+      hideEngineError();
+      showBanner(summarizeArchive(result) || "已存入知识库");
+      await refreshMeta();
+    } catch (error) {
+      handleError(error, doArchive);
+    } finally {
+      setBusy(false);
+    }
   }
 
   /* ─────────────────────────── 会话列表 ─────────────────────────── */
@@ -346,10 +477,13 @@
     if (state.conversations.length === 0) {
       if (state.loadingConvs) return;
       const note = el("div", "stream-note");
-      note.textContent =
-        state.keyword || state.source
-          ? "没有匹配的会话"
-          : "还没有采集到会话。先在 InfoHub 里运行一次采集，再点右上角刷新。";
+      if (state.keyword || state.source) {
+        note.textContent = "没有匹配的会话";
+      } else if (state.dbMissing) {
+        note.textContent = "还没有归档库。点右上角「采集」同步本机 QQ / 微信消息。";
+      } else {
+        note.textContent = "还没有采集到会话。点右上角「采集」同步本机 QQ / 微信消息。";
+      }
       list.append(note);
       dom.convFoot.hidden = true;
       return;
@@ -397,6 +531,7 @@
     if (reset) {
       state.conversations = [];
       state.convTotal = 0;
+      state.convLimit = CONV_PAGE;
       renderConvSkeletons();
     }
     const seq = ++convSeq;
@@ -405,21 +540,19 @@
     dom.refreshConvs.disabled = true;
     dom.moreConvs.disabled = true;
 
-    const args = {
-      limit: CONV_PAGE,
-      offset: reset ? 0 : state.conversations.length,
-    };
-    if (state.source) args.source = state.source;
-    if (state.keyword) args.keyword = state.keyword;
+    const params = { limit: state.convLimit };
+    if (state.source) params.source = state.source;
+    if (state.keyword) params.keyword = state.keyword;
 
     try {
-      const data = await callTool("infohub_conversations", args);
+      const data = await engineCall("conversations", params);
       if (seq !== convSeq) return;
       state.loadingConvs = false; // 空结果也要渲染空态，不能停在骨架
-      const incoming = (Array.isArray(data.conversations) ? data.conversations : []).filter(isConversation);
-      state.conversations = reset ? incoming : state.conversations.concat(incoming);
-      state.convTotal = Number(data.total) || state.conversations.length;
-      hideOffline();
+      state.dbMissing = data.dbMissing === true;
+      const incoming = (Array.isArray(data.items) ? data.items : []).map(mapConv).filter(isConversation);
+      state.conversations = incoming;
+      state.convTotal = Number(data.total) || incoming.length;
+      hideEngineError();
       refreshSelectedFromList();
       renderConversations();
 
@@ -554,18 +687,15 @@
       renderMsgSkeletons();
     }
 
-    const args = { conversationId: target.id, limit: MSG_PAGE };
-    if (older) {
-      args.beforeTs = state.nextBeforeTs;
-      args.beforeId = state.nextBeforeId;
-    }
+    const params = { conversationId: target.id, limit: MSG_PAGE };
+    if (older) params.beforeTs = state.nextBeforeTs;
 
     try {
-      const data = await callTool("infohub_archive_messages", args);
+      const data = await engineCall("messages", params);
       if (seq !== msgSeq) return;
       if (!state.selected || Number(state.selected.id) !== Number(target.id)) return;
 
-      const incoming = (Array.isArray(data.messages) ? data.messages : []).filter(isMessage);
+      const incoming = (Array.isArray(data.items) ? data.items : []).map(mapMsg).filter(isMessage);
       const beforeHeight = dom.stream.scrollHeight;
       const beforeTop = dom.stream.scrollTop;
 
@@ -576,18 +706,16 @@
         state.messages = incoming;
       }
 
-      state.messageTotal = Number(data.total) || state.messages.length;
-      state.hasMore =
-        data.hasMore === true &&
-        Number.isFinite(Number(data.nextBeforeTs)) &&
-        Number.isFinite(Number(data.nextBeforeId));
-      state.nextBeforeTs = data.nextBeforeTs;
-      state.nextBeforeId = data.nextBeforeId;
       if (data.conversation) {
-        state.selected = { ...state.selected, ...data.conversation };
+        state.selected = { ...state.selected, ...mapConv(data.conversation) };
+        state.messageTotal = state.selected.messageCount || state.messages.length;
         renderDetailHead();
+      } else {
+        state.messageTotal = state.messages.length;
       }
-      hideOffline();
+      state.hasMore = data.hasMore === true && Number.isFinite(Number(data.beforeTs));
+      state.nextBeforeTs = Number(data.beforeTs) || null;
+      hideEngineError();
       state.loadingMsgs = false;
       renderMessages();
 
@@ -619,10 +747,9 @@
     msgSeq += 1; // 取消上一次会话还在路上的消息请求
     state.selected = conv;
     state.messages = [];
-    state.messageTotal = Number(conv.messageCount) || 0;
+    state.messageTotal = conv.messageCount || 0;
     state.hasMore = false;
     state.nextBeforeTs = null;
-    state.nextBeforeId = null;
     state.loadingMsgs = false;
 
     dom.detailEmpty.hidden = true;
@@ -637,9 +764,22 @@
   /* ─────────────────────────── 事件接线 ─────────────────────────── */
 
   function bind() {
-    dom.offlineRetry.addEventListener("click", () => {
-      hideOffline();
-      loadConversations({ reset: true });
+    dom.engineRetry.addEventListener("click", () => {
+      hideEngineError();
+      bootstrap();
+    });
+
+    dom.syncBtn.addEventListener("click", doSync);
+    dom.archiveBtn.addEventListener("click", doArchive);
+
+    dom.vaultSelect.addEventListener("change", () => {
+      state.vaultId = dom.vaultSelect.value;
+      renderVaults();
+      try {
+        if (bridge && typeof bridge.dataSet === "function") bridge.dataSet(VAULT_KEY, state.vaultId);
+      } catch {
+        /* 存不住偏好不影响本次入库 */
+      }
     });
 
     dom.refreshConvs.addEventListener("click", () => loadConversations({ reset: true }));
@@ -651,6 +791,7 @@
 
     dom.moreConvs.addEventListener("click", () => {
       if (state.loadingConvs || state.conversations.length >= state.convTotal) return;
+      state.convLimit = Math.min(5000, state.convLimit + CONV_PAGE);
       loadConversations({ reset: false });
     });
 
@@ -692,6 +833,17 @@
         selectConversation(state.conversations[0]);
       }
     });
+
+    if (bridge && typeof bridge.onEngineEvent === "function") {
+      bridge.onEngineEvent((event) => {
+        if (!event || event.event !== "progress") return;
+        const total = Number(event.total) || 0;
+        const current = Number(event.current) || 0;
+        const ratio = total > 0 ? current / total : null;
+        const label = event.phase === "kb" ? "入库" : "采集";
+        showProgress(`${label}：${event.stage || "处理中…"}`, ratio);
+      });
+    }
   }
 
   function applyTheme(theme) {
@@ -721,8 +873,31 @@
     }
   }
 
+  /** 首屏：懒启动引擎（ping）→ 成功后拉会话与元信息；失败弹整屏提示。 */
+  async function bootstrap() {
+    if (!bridge || typeof bridge.engineCall !== "function") {
+      showEngineError(
+        "请在和鸣里打开此页面",
+        "浏览器预览连不上插件本机引擎。请在和鸣桌面端的插件页里打开「聊天记录」。",
+      );
+      return;
+    }
+    renderConvSkeletons();
+    try {
+      await engineCall("ping", {});
+      hideEngineError();
+    } catch (error) {
+      handleError(error, bootstrap);
+      return;
+    }
+    dom.search.focus();
+    loadConversations({ reset: true });
+    refreshMeta();
+  }
+
   bind();
   initTheme();
-  dom.search.focus();
-  loadConversations({ reset: true });
+  renderModelHint();
+  renderVaults();
+  bootstrap();
 })();

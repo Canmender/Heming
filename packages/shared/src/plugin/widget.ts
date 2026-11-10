@@ -108,15 +108,45 @@ export interface WidgetChatBinding {
  * 边界：
  * - 用户真实供应商 Key 不在这里（P0 口径）；
  * - 面向主窗的探测有 1 秒超时、结果缓存 30 秒，设置变更（`setSetting`）会立即失效缓存；
- * - 当前载荷**没有**模型 id 字段：插件要自己按网关 `/v1/models` 或自身设置选模型。
+ * - `models` 是网关目录（用户已经能用的模型），`backgroundModel` 是设置里选的
+ *   「后台任务模型」（归档/摘要这类不抢主对话的任务用），未设置时为 `null`。
  */
 export interface WidgetChatConfig {
   gateway: WidgetChatGateway | null;
   agents: WidgetChatAgent[];
   binding: WidgetChatBinding;
+  /** 网关模型目录（id + 显示名）；主窗没连上时为空数组。 */
+  models: WidgetChatModel[];
+  /** 设置里选定的后台任务模型 id；未设置或已下架为 `null`。 */
+  backgroundModel: string | null;
   /** 只在「未声明 `permissions.chat`」时出现：宿主拒绝下发的原因。 */
   reason?: string;
 }
+
+/** `chatConfig().models[]` 的一项：网关目录里的一个模型。 */
+export interface WidgetChatModel {
+  id: string;
+  name: string;
+}
+
+/** `engineStatus()`：插件自带引擎的运行态（未声明时 `declared: false`）。 */
+export interface WidgetEngineStatus {
+  declared: boolean;
+  running: boolean;
+  pid: number | null;
+  /** 进程启动时间（毫秒时间戳）；没启动为 `null`。 */
+  startedAt: number | null;
+  /** 最近一次启动/退出失败的可读原因（中文）；正常为空串。 */
+  error: string;
+}
+
+/**
+ * 引擎主动上报（`widget:engine-event`）。
+ *
+ * 形状由插件引擎自己定义（宿主只保证是对象），约定字段：
+ * `{ event: string, ... }`，例如 `{ event: "progress", phase: "sync", stage: "…" }`。
+ */
+export type WidgetEngineEvent = Record<string, unknown>;
 
 /** `notify` 事件：主窗脱敏转发，只带标题级文案，不落盘。 */
 export interface WidgetNotifyEvent {
@@ -368,8 +398,35 @@ export interface HemingWidgetApi {
    */
   openPage(page: WidgetPage): void;
 
-  /** 读对话上下文（`widget:chat-config`，invoke）：本机网关 + 可用智能体 + 当前绑定。 */
+  /** 读对话上下文（`widget:chat-config`，invoke）：本机网关 + 模型目录 + 可用智能体 + 当前绑定。 */
   chatConfig(): Promise<WidgetChatConfig>;
+
+  /* ── 插件自带引擎（d.125） ── */
+
+  /**
+   * 读本机引擎运行态（`widget:engine-status`，invoke）。
+   *
+   * 只有清单声明 `contributions.engine` 的插件才有 `declared: true`；
+   * 未声明时其余字段为 false/null，不会启动任何进程。
+   */
+  engineStatus(): Promise<WidgetEngineStatus>;
+
+  /**
+   * 调用本机引擎的一个方法（`widget:engine-call`，invoke）。
+   *
+   * 首次调用会懒启动插件自己的进程（宿主固定用内置 Python 运行时装，
+   * 只跑插件包内的 `.py` 入口），`method` 由插件引擎自己定义。
+   * 长任务（采集、归档）请显式传 `{ timeoutMs }`；默认 60s，上限 30 分钟。
+   * 引擎没写这个方法、进程起不来、超时都会 reject（可读中文原因）。
+   */
+  engineCall<T = unknown>(
+    method: string,
+    params?: Record<string, unknown>,
+    options?: { timeoutMs?: number },
+  ): Promise<T>;
+
+  /** 订阅引擎主动上报（推送通道 `widget:engine-event`，例如 `{ event: "progress" }`）。 */
+  onEngineEvent(callback: (payload: WidgetEngineEvent) => void): () => void;
 
   /* ── 日志 ── */
 
@@ -418,6 +475,9 @@ export const WIDGET_API_METHODS = [
   "openSettings",
   "openPage",
   "chatConfig",
+  "engineStatus",
+  "engineCall",
+  "onEngineEvent",
   "log",
 ] as const satisfies readonly (keyof HemingWidgetApi)[];
 

@@ -412,3 +412,89 @@ test("验签：签了页面后改标题 / 入口 / 摘要 → 失败（页面字
     assert.match(result.reason, /不匹配/);
   }
 });
+
+/* ─────────────────── d.125：引擎声明 / kb 权限进入签名 ─────────────────── */
+
+/**
+ * 带「自带本机引擎 + 知识库写权限」的界面插件清单（第一方 bundle）。
+ *
+ * 这两个字段是 d.125 新增的能力面：如果签名不覆盖，攻击者可以保留官方清单与签名、
+ * 只改 `engine.entry`（包内另一个 .py，files 摘要不变）或补一个 `permissions.kb: true`，
+ * 就能让插件拿到没被签过的入口/知识库写权限。
+ */
+const ENGINE_BUNDLE_MANIFEST = {
+  schemaVersion: 4,
+  id: "heming.engine-demo",
+  name: "带引擎的插件",
+  version: "1.0.0",
+  description: "测试用",
+  author: "和鸣",
+  distribution: "bundle",
+  packageSha256: "aa".repeat(32),
+  permissions: {
+    network: [],
+    tools: "none",
+    files: [],
+    events: [],
+    graphics: [],
+    eval: false,
+    chat: true,
+    kb: true,
+  },
+  contributions: {
+    page: { title: "引擎页", icon: "message", summary: "s", entry: "files/page/index.html" },
+    engine: { entry: "files/engine/bridge.py", lib: "files/engine/lib" },
+    desktopWidgets: [],
+    commands: [],
+    skills: [],
+    mcpServers: [],
+    toolPacks: [],
+  },
+};
+
+test("canonical-v1：engine（entry/lib）与 permissions.kb 进入签名文本；无它们的历史文本不变", () => {
+  const text = canonicalManifestText(withPublisher(ENGINE_BUNDLE_MANIFEST));
+  assert.deepEqual(JSON.parse(text).contributions.engine, {
+    entry: "files/engine/bridge.py",
+    lib: "files/engine/lib",
+  });
+  assert.equal(JSON.parse(text).permissions.kb, true);
+  // 老夹具没有 engine/kb：canonical 字节必须与 pinned 文本一致
+  assert.equal(canonicalManifestText(withPublisher(PINNED_MANIFEST)), FIXTURE_TEXT);
+});
+
+test("canonical-v1：engine/kb 与 scripts/sign-plugin.mjs 逐字节一致", async () => {
+  const { pathToFileURL } = require("node:url");
+  const scriptUrl = pathToFileURL(path.join(__dirname, "..", "..", "scripts", "sign-plugin.mjs")).href;
+  const scriptApi = await import(scriptUrl);
+  assert.equal(
+    scriptApi.signedManifestText(withPublisher(ENGINE_BUNDLE_MANIFEST)),
+    canonicalManifestText(withPublisher(ENGINE_BUNDLE_MANIFEST)),
+  );
+});
+
+test("验签：签了引擎/kb 后改入口、删依赖、补 kb → 全部失败", () => {
+  const signed = signForTest(ENGINE_BUNDLE_MANIFEST);
+  assert.deepEqual(verifyOfficialSignature(signed), { ok: true, keyId: "dev-test-2026-11" });
+
+  const withEngine = (engine) => ({
+    ...signed,
+    contributions: { ...signed.contributions, engine },
+  });
+  const cases = [
+    // 换入口到包内另一个 .py（files 摘要没变，只有签名文本能挡）
+    withEngine({ entry: "files/engine/other.py", lib: "files/engine/lib" }),
+    // 删掉依赖目录
+    withEngine({ entry: "files/engine/bridge.py" }),
+    // 补一个没签过的知识库写权限
+    { ...signed, permissions: { ...signed.permissions, kb: false } },
+    { ...signed, permissions: { ...signed.permissions, kb: undefined } },
+    // 撤掉 chat 同样应失败（既有口径复核）
+    { ...signed, permissions: { ...signed.permissions, chat: false } },
+  ];
+  for (const tampered of cases) {
+    const result = verifyOfficialSignature(tampered);
+    assert.equal(result.ok, false, JSON.stringify(tampered.permissions));
+    assert.match(result.reason, /不匹配/);
+  }
+});

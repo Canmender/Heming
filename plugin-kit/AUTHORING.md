@@ -216,6 +216,33 @@ plugin-kit/plugins/demo-widget/
 - 没有 `page` 贡献的纯能力包照旧不新增导航入口；有 `page` 的才多一项，入口固定在模块入口之后、不受插件加载顺序影响。
 - 想改成首方 bundle 自带页：按 §3.4 的清单格式，把 `page` 换成 `{ "title": "…", "entry": "files/page.html" }`，`entry` 必须出现在 `files` 里；页面与桌面小组件可并存。可抄 [`examples/05-plugin-page/README.md`](examples/05-plugin-page/README.md) 的改法说明。
 
+### 3.6 给插件加一个本机引擎（bundle，仅首方）
+
+页面只能展示，**读本机文件/归档/知识库要写引擎**。首方 bundle 可以让插件自带一个本机进程，而不是把业务代码塞进应用本体：
+
+```jsonc
+{
+  "distribution": "bundle",
+  "permissions": { "chat": true, "kb": true },   // kb 必须同时有 engine
+  "contributions": {
+    "page":   { "title": "聊天记录", "entry": "files/index.html" },
+    "engine": { "entry": "files/engine/bridge.py", "lib": "files/engine/lib" }
+  }
+}
+```
+
+- `entry` 必须是包内 `.py` 文件；解释器固定用应用内置 Python（清单里**没有命令字符串**可写）；
+  `lib` 是随包分发的依赖目录，可省略，写了就必须真有文件。
+- 页面调用：`__heming_widget.engineStatus()` / `engineCall(method, params, { timeoutMs })` /
+  `onEngineEvent(cb)`；引擎协议是 stdin/stdout 换行 JSON（`{id, method, params}` ↔ `{id, ok, result}`）。
+- 能拿到什么：自己的数据目录恒有；`permissions.chat` 才下发本机模型网关 +「后台任务模型」id；
+  `permissions.kb` 才下发知识库根与 `writeDirs`（写知识库仍只允许写入 `writeDirs` 内）。
+- 引擎代码与依赖都在 `files/**` 里，`packageSha256` + 首方签名覆盖代码字节；
+  `engine.entry/lib`、`permissions.kb` 也进入签名文本——签名后改入口/补权限会验签失败。
+- 包体上限随引擎放宽：解包 ≤64MB、≤4000 文件、单文件 ≤16MB。
+- 参考实现：`plugin-kit/plugins/infohub-page/`（`engine/bridge.py` + `build.mjs`：把 Python 依赖
+  staging 进 `files/engine/lib` 后再 `pack-plugin`）。
+
 ---
 
 ## 4. 权限最小化（评审必看）

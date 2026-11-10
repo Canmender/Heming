@@ -293,6 +293,10 @@ function makeHost(overrides = {}) {
     getTheme: () => "light",
     getGateway: overrides.getGateway || (async () => ({ baseUrl: "http://127.0.0.1:4242/v1", key: "local" })),
     requestChatConfig: overrides.requestChatConfig,
+    // 引擎能力：默认给一个「不会被调用」的假解释器；要测引擎的用例自己注入 spawn
+    spawn: overrides.spawn || (() => { throw new Error("测试未预期启动引擎"); }),
+    bundledPythonPath: overrides.bundledPythonPath === undefined ? "/tmp/python" : overrides.bundledPythonPath,
+    getKbRoots: overrides.getKbRoots,
     openPage: (payload) => openedPages.push(payload),
     log: (line) => logs.push(line),
     setTimeout: (fn) => { fn(); return 1; },
@@ -745,6 +749,8 @@ test("widget:chat-config：网关来自主进程、agents 只含 id/name、30s �
     gateway: { baseUrl: "http://127.0.0.1:4242/v1", key: "local" },
     agents: [{ id: "a1", name: "幕僚" }],
     binding: { agentId: "a1" },
+    models: [],
+    backgroundModel: null,
   });
   assert.ok(!JSON.stringify(config).includes("SECRET-PERSONA"), "chatConfig 不得下发智能体 prompt");
   await host.getChatConfig();
@@ -752,6 +758,62 @@ test("widget:chat-config：网关来自主进程、agents 只含 id/name、30s �
   host.invalidateChatConfig();
   await host.getChatConfig();
   assert.equal(calls, 2);
+});
+
+test("widget:chat-config：模型目录剥掉坏项、后台模型只认目录内 id（d.125）", async () => {
+  const { host } = makeHost({
+    requestChatConfig: async () => ({
+      agents: [],
+      models: [
+        { id: "cheap", name: "便宜模型" },
+        { id: "", name: "无 id" },
+        { id: "no-name" },
+        { id: "x".repeat(200), name: "y".repeat(300) },
+        { id: 42, name: "非字符串" },
+      ],
+      backgroundModel: "cheap",
+    }),
+  });
+  const config = await host.getChatConfig();
+  assert.deepEqual(config.models, [
+    { id: "cheap", name: "便宜模型" },
+    { id: "no-name", name: "no-name" },
+    { id: "x".repeat(128), name: "y".repeat(128) + "…" },
+  ]);
+  assert.equal(config.backgroundModel, "cheap");
+});
+
+test("widget:chat-config：后台模型已下架 → 置空（不发必然 404 的请求）", async () => {
+  const { host } = makeHost({
+    requestChatConfig: async () => ({ agents: [], models: [{ id: "a", name: "A" }], backgroundModel: "gone" }),
+  });
+  const config = await host.getChatConfig();
+  assert.equal(config.backgroundModel, null);
+});
+
+test("widget:engine-status：没有引擎的插件返回 declared=false，不报错", () => {
+  const { host, created } = makeHost();
+  host.start();
+  host.action("heming.pet", "show");
+  const win = onlyWindow(created);
+  const status = invokeChannel("widget:engine-status", { sender: win.webContents });
+  assert.deepEqual(status, { declared: false, running: false, pid: null, startedAt: null, error: "" });
+});
+
+test("widget:engine-call：未声明引擎 → 拒绝；非本插件 sender → 拒绝（fail-closed）", async () => {
+  const { host, created } = makeHost();
+  host.start();
+  host.action("heming.pet", "show");
+  const win = onlyWindow(created);
+  await assert.rejects(
+    () => invokeChannel("widget:engine-call", { sender: win.webContents }, { method: "ping", params: {} }),
+    /没有声明本机引擎/,
+  );
+  // 未知 sender：withRuntimeOrPage 走 fail-closed 的 null（不回调用方任何东西）
+  assert.equal(
+    invokeChannel("widget:engine-call", { sender: {} }, { method: "ping", params: {} }),
+    null,
+  );
 });
 
 test("widget:chat-config：主窗不应答时降级为空 agents，不抛错", async () => {

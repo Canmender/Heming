@@ -159,12 +159,28 @@ contextBridge.exposeInMainWorld("__heming_widget", {
   openPage: (page) => ipcRenderer.send("widget:open-page", page),
 
   /**
-   * 对话上下文：本机 magpie 反代地址 + 网关 Key + 可用智能体与绑定。
+   * 对话上下文：本机 magpie 反代地址 + 网关 Key + 模型目录 + 后台任务模型 + 可用智能体与绑定。
    *
    * ★ 用户自己的供应商 Key **不在这里**（P0 口径，规格 §3.4）：网关 Key 是本机默认值，
    *   widget 拿不到用户的真实凭据。P1 若改宿主代发，这里会退化成只剩 agents/binding。
    */
   chatConfig: () => ipcRenderer.invoke("widget:chat-config"),
+
+  /* ── 插件自带引擎（d.125；只有清单 contributions.engine 的插件会真正启动进程） ── */
+  /** 运行态 `{declared,running,pid,startedAt,error}`；未声明时 declared=false，不启动任何东西。 */
+  engineStatus: () => ipcRenderer.invoke("widget:engine-status"),
+  /**
+   * 调插件自己的引擎方法。首次调用懒启动（宿主固定用内置 Python 跑包内 .py 入口）。
+   * 长任务传 `{ timeoutMs }`：默认 60s，上限 30 分钟；超时/启动失败会 reject。
+   */
+  engineCall: (method, params, options) =>
+    ipcRenderer.invoke("widget:engine-call", {
+      method,
+      params,
+      timeoutMs: options && typeof options === "object" ? options.timeoutMs : undefined,
+    }),
+  /** 引擎主动上报（`{event:"progress",…}`）；返回取消订阅函数。 */
+  onEngineEvent: (callback) => subscribe("widget:engine-event", callback),
 
   /** 插件自己的日志（主进程统一加前缀，限长 500）。 */
   log: (line) => ipcRenderer.send("widget:log", typeof line === "string" ? line : String(line ?? "")),

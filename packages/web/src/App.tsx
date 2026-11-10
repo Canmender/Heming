@@ -673,14 +673,26 @@ function AppShell({
               /* 名册拉不到就给空列表：widget 侧会回落到「没有可用智能体」 */
             }
           }
-          const prompts = useLlmStore.getState().prompts;
+          const llm = useLlmStore.getState();
+          const prompts = llm.prompts;
           const agents = useChatStore.getState().agentsRoster.map((agent) => {
             const prompt = prompts[agent.id]?.trim();
             return { id: agent.id, name: agent.name, ...(prompt ? { prompt } : {}) };
           });
-          bridge.replyChatConfig?.(requestId, { agents, binding: { agentId: null } });
+          bridge.replyChatConfig?.(requestId, {
+            agents,
+            binding: { agentId: null },
+            // d.125：后台任务模型（归档/摘要）与模型目录一起下发；主进程再按目录校验 id
+            models: llm.models.map((model) => ({ id: model.id, name: model.name })),
+            backgroundModel: llm.backgroundModel,
+          });
         } catch {
-          bridge.replyChatConfig?.(requestId, { agents: [], binding: { agentId: null } });
+          bridge.replyChatConfig?.(requestId, {
+            agents: [],
+            binding: { agentId: null },
+            models: [],
+            backgroundModel: null,
+          });
         }
       })();
     });

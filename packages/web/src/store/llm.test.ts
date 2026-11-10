@@ -28,6 +28,7 @@ beforeEach(() => {
     gateway: { ...DEFAULT_GATEWAY },
     models: [],
     gatewayVersion: undefined,
+    backgroundModel: null,
     profiles: [],
     bindings: {},
     prompts: {},
@@ -163,6 +164,19 @@ describe("llm store · magpie 网关与模型档案", () => {
     useLlmStore.getState().removeRoute("g1");
     expect(useLlmStore.getState().routes).toEqual([]);
     expect(useLlmStore.getState().bindings["agent-1"]).toBeUndefined();
+  });
+});
+
+describe("后台任务模型（d.125）", () => {
+  it("设置后落盘；空串/空白 = 清空", () => {
+    useLlmStore.getState().setBackgroundModel("  deepseek/deepseek-chat  ");
+    expect(useLlmStore.getState().backgroundModel).toBe("deepseek/deepseek-chat");
+    expect(JSON.parse(localStorage.getItem("heming.backgroundModel.v1")!)).toBe(
+      "deepseek/deepseek-chat",
+    );
+    useLlmStore.getState().setBackgroundModel("   ");
+    expect(useLlmStore.getState().backgroundModel).toBeNull();
+    expect(JSON.parse(localStorage.getItem("heming.backgroundModel.v1")!)).toBeNull();
   });
 });
 

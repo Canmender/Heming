@@ -238,6 +238,22 @@ function normalizePage(page) {
   return out;
 }
 
+/**
+ * 引擎声明 → 签名用的确定性形状（d.125）。
+ *
+ * 只在声明时进入文本（旧包 canonical 字节不变）。有引擎时 `entry` / `lib` 都受签：
+ * 否则「保留官方清单与签名、把 engine.entry 指到包内另一个 .py」不会改变签名文本
+ * （files 摘要没变），等于绕过验签换入口。
+ * 与 scripts/sign-plugin.mjs 的 normalizeEngine 逐字段一致。
+ */
+function normalizeEngine(engine) {
+  if (!engine || typeof engine !== "object" || Array.isArray(engine)) return null;
+  const entry = trim(engine.entry);
+  if (!entry) return null;
+  const lib = trim(engine.lib);
+  return { entry, ...(lib ? { lib } : {}) };
+}
+
 /** 清单 → 参与签名 v1 字段的归一化形状（复制自 sign-plugin.mjs，勿单独改）。 */
 function normalizeManifest(manifest) {
   const permissions = (manifest && manifest.permissions) || {};
@@ -261,6 +277,9 @@ function normalizeManifest(manifest) {
       // 声明式/未开通的包保持旧 canonical 字节（历史签名不失效），但任何人把
       // false 翻成 true 都会改变签名文本 → 验签失败（无法悄悄提权）。
       ...(permissions.chat === true ? { chat: true } : {}),
+      // d.125：permissions.kb（写和鸣知识库）同 chat 口径——只在 true 时进文本，
+      // 未声明/旧包的 canonical 字节不变；擅自补一个 `kb: true` 会让验签失败。
+      ...(permissions.kb === true ? { kb: true } : {}),
     },
     contributions: {
       skills: (Array.isArray(contributions.skills) ? contributions.skills : []).map((skill) => ({
@@ -302,6 +321,9 @@ function normalizeManifest(manifest) {
       // d.124：插件页面——只在声明时进入签名文本（旧包 canonical 字节不变）。
       // 与 scripts/sign-plugin.mjs 的 normalizePage 逐字段一致，见 normalizePage 注释。
       ...(normalizePage(contributions.page) ? { page: normalizePage(contributions.page) } : {}),
+      // d.125：插件自带引擎——只在声明时进入签名文本。否则「签名后把 engine.entry
+      // 指到包内另一个 .py」不会改变签名（files 摘要没变），等于绕过验签拿到新入口。
+      ...(normalizeEngine(contributions.engine) ? { engine: normalizeEngine(contributions.engine) } : {}),
       // d.90：清单里的 llmPresets 会被应用丢弃，签名文本恒为空数组。
       llmPresets: [],
     },

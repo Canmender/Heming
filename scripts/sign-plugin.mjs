@@ -219,6 +219,8 @@ function normalizeManifest(manifest) {
       // d.113 审计 P0-1：chat 是受签名保护的权限位；只在 true 时进入文本，
       // 未开通的包保持旧 canonical 字节（历史签名不失效），翻成 true 则签名必坏。
       ...(permissions.chat === true ? { chat: true } : {}),
+      // d.125：permissions.kb（写和鸣知识库）同 chat 口径——只在 true 时入文本。
+      ...(permissions.kb === true ? { kb: true } : {}),
     },
     contributions: {
       skills: (Array.isArray(contributions.skills) ? contributions.skills : []).map((skill) => ({
@@ -262,10 +264,28 @@ function normalizeManifest(manifest) {
       // 逐字不变、历史签名不失效；有页面时 title/icon/summary/entry/blocks 全部受签，
       // 不能只靠包里「entry 文件存在」兜底（换标题/换入口地址本身就该让验签失败）。
       ...(normalizePage(contributions.page) ? { page: normalizePage(contributions.page) } : {}),
+      // d.125：插件自带引擎。只在声明时进文本；否则「签名后改 engine.entry 指向包内
+      // 另一个 .py」不会改变签名（files 摘要没变），等于绕过验签换入口。
+      ...(normalizeEngine(contributions.engine) ? { engine: normalizeEngine(contributions.engine) } : {}),
       // d.90：模型预设已收回——清单里写 llmPresets 会被应用丢弃，签名文本同样恒为空数组。
       llmPresets: [],
     },
   };
+}
+
+/**
+ * 引擎声明 → 签名用的确定性形状（d.125）。
+ *
+ * 只在声明时进入文本（旧包 canonical 字节不变）。entry/lib 都受签：否则「签名后把
+ * engine.entry 指到包内另一个 .py」不改变签名（files 摘要没变），等于绕过验签换入口。
+ * 与 packages/desktop/plugin-signature.js 的 normalizeEngine 逐字段一致。
+ */
+function normalizeEngine(engine) {
+  if (!engine || typeof engine !== "object" || Array.isArray(engine)) return null;
+  const entry = trim(engine.entry);
+  if (!entry) return null;
+  const lib = trim(engine.lib);
+  return { entry, ...(lib ? { lib } : {}) };
 }
 
 function normalizeTarget(target) {

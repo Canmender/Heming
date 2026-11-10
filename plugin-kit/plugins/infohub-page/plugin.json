@@ -2,25 +2,30 @@
   "schemaVersion": 4,
   "id": "heming.infohub-page",
   "name": "聊天记录",
-  "version": "0.1.0",
-  "description": "把本机 InfoHub 归档里的 QQ / 微信聊天记录放进和鸣：左边选会话，右边看消息，支持搜索与向前翻页。",
+  "version": "0.2.0",
+  "description": "自带本机引擎的聊天记录插件：采集本机 QQ / 微信归档，左边选会话、右边看消息，支持搜索与向前翻页；可调用和鸣「后台任务模型」生成摘要，并自动存入和鸣内置知识库。装完即用，不依赖外部服务。",
   "author": "和鸣",
   "distribution": "bundle",
   "permissions": {
-    "network": ["http://127.0.0.1:8776"],
+    "network": [],
     "tools": "none",
     "files": [],
     "events": ["theme"],
     "graphics": [],
     "eval": false,
-    "chat": false
+    "chat": true,
+    "kb": true
   },
   "contributions": {
     "page": {
       "title": "聊天记录",
       "icon": "message",
-      "summary": "浏览本机归档的 QQ / 微信会话与消息（数据来自 InfoHub 采集桥）",
+      "summary": "浏览本机归档的 QQ / 微信会话与消息，一键采集并按需存入和鸣知识库",
       "entry": "files/index.html"
+    },
+    "engine": {
+      "entry": "files/engine/bridge.py",
+      "lib": "files/engine/lib"
     }
   }
 }

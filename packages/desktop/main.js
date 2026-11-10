@@ -43,7 +43,7 @@ const pkg = require("./package.json");
 const { APP_DEFAULT_URL, originOf, secureOrigins, guardIpc, makeSenderCheck } = require("./secure-origins");
 const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
 const { registerWikiIpc } = require("./wiki-fs");
-const { registerVaultIpc } = require("./vault-fs");
+const { registerVaultIpc, readRegistry, defaultRegistryFile } = require("./vault-fs");
 const { registerChartIpc } = require("./chart-fs");
 const { registerExportIpc } = require("./export-fs");
 const { registerFileIpc } = require("./file-fs");
@@ -1338,6 +1338,19 @@ app.whenReady().then(() => {
         }
       },
       requestChatConfig: (timeoutMs) => requestChatConfigFromMainWindow(timeoutMs),
+      // d.125：插件自带引擎（第一方签名 bundle）用内置 Python 运行时；
+      // 知识库只读注册表、只把「根 + writeDirs」交给声明过 permissions.kb 的插件。
+      spawn: require("node:child_process").spawn,
+      bundledPythonPath: bundledPython(),
+      getKbRoots: async () => {
+        const registry = await readRegistry(defaultRegistryFile());
+        return (registry.vaults || []).map((vault) => ({
+          id: vault.id,
+          name: vault.name,
+          root: vault.root,
+          writeDirs: [...(vault.writeDirs || [])],
+        }));
+      },
       openPage: (payload) => openPageInMainWindow(payload),
       log: (line) => console.log(line),
     });

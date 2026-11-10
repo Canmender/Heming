@@ -2,6 +2,63 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.127.3.48.0（2026-11-10）— 插件独立化第一步：插件可以自带本机引擎（不占本体代码）
+
+用户要求「所有插件独立化，不和本体程序挂钩，不要占用本体程序代码」。本轮落地第一块基础：
+**首方签名的界面插件可以随包携带一个本机进程（`contributions.engine`）**，插件自己的业务逻辑
+（读本机归档、写知识库）不再需要写进应用本体。方案与迁移表见
+`docs/superpowers/specs/2026-11-10-d127-plugin-independence.md`（P1 已完成，P2–P4 仍待排期）。
+
+### ① 插件自带本机引擎（`contributions.engine`，仅首方 bundle）
+
+- 清单：`contributions.engine = { entry: "files/engine/bridge.py", lib?: "files/engine/lib" }`；
+  `entry` 必须是包内 `.py`，`lib`（可省略）必须是 `files/` 下**真有文件**的目录（安装期检查，
+  缺文件直接拒绝，不再等用户点开才「引擎启动失败」）。
+- 解释器由宿主固定为**应用内置 Python 运行时**，清单里没有任何命令字符串可写；通信走 stdin/stdout
+  换行 JSON（`{id,method,params}` ↔ `{id,ok,result}` + 主动事件），不开端口、不收外部连接。
+- 启动前按盘上 `files/**` 重算摘要（与安装同算法）比对，落盘后改包即拒绝启动；摘要按 `id@version` 缓存。
+- 页面能力：`engineStatus()` / `engineCall(method, params, { timeoutMs })` / `onEngineEvent(cb)`
+  （默认 60s，上限 30 分钟）；插件停用/卸载/更新、页面与窗口关闭、应用退出时回收引擎进程。
+
+### ② 权限与后台任务模型
+
+- **`permissions.kb`**（写和鸣知识库）：仅 bundle 可声明，且**必须同时声明 engine**（否则装不上）；
+  引擎环境只拿到知识库根 + `writeDirs`（`HEMING_KB_ROOTS`），用户供应商 Key 永不下发。
+- **`permissions.chat`** 的载荷补齐：除网关地址/智能体名册外，新增模型目录与**后台任务模型 id**
+  （`HEMING_CHAT.backgroundModel`），供归档/摘要这类后台任务使用，不抢主对话模型。
+- 设置区新增「后台任务模型」卡（只在本机保存模型 id，Key 仍由网关保管；目录里已下架的旧选择照实提示）。
+
+### ③ 签名与包体
+
+- **签名覆盖新能力**：`engine.entry/lib` 与 `permissions.kb` 进入首方签名文本——签名后换引擎入口、
+  删依赖目录、补 kb 权限都会验签失败；未声明它们的旧包 canonical 字节不变（历史签名不失效）。
+- 包体配额放宽到 **64MB / 4000 文件 / 单文件 16MB**（带纯 Python 依赖的插件 20MB 装不下），
+  `plugin-tar` / `pack-plugin` / 文档三处同口径。
+
+### ④ 第一个真实迁移样本
+
+`plugin-kit/plugins/infohub-page` 升到 **0.2.0**：从「只读页面 + 依赖外部采集服务」改为
+**自带 Python 引擎**（`files/engine/bridge.py` + 构建期把 infohub 核心与纯依赖 staging 进
+`files/engine/lib`），页面直接浏览本机归档、按需生成摘要并写入知识库；不再需要本体里的信息中枢引擎。
+
+### ⑤ UI/UX
+
+- 新的「后台任务模型」设置卡走 d.125 的 `.ui-card` / token，不再写死 `bg-white`/`#bbb`；
+  新增 3 例组件测试（无目录提示、选择落盘、目录下架后照实提示且不静默改写）。
+
+### 验证
+
+- `desktop` **772 例**（新增 `plugin-engine.test.js` 7 例、签名 engine/kb 3 例、包校验 lib 1 例）、
+  `web` **339 文件 / 4828 例**、`shared` 8 / 104、`server` 16 / 264 全绿；`pnpm -r typecheck` 六包零错误；
+  `plugin:check` 通过（含 `infohub-page 0.2.0` 源码工程模式校验）；编码检查 OK。
+
+### 边界
+
+- 引擎仍只对**首方签名 bundle** 开放（第三方插件仍是零代码声明式）；四个内置模块（幕僚/信息中枢/自动化/工作流）
+  迁出本体属 P2–P4，本轮只完成「插件可以自带引擎」这一基础设施与一个真实样本。
+- 引擎可选能力：`chat` 只下发后台任务模型 id，不给用户供应商 Key；`kb` 只到 `writeDirs` 边界。
+- 本版本未出包/未部署。
+
 ## d.126.3.48.0（2026-11-10）— 知识库落到 wiki 文件夹（卡帕西标准）、智能体页三 Tab、对话去头像；「去 AI 味」不再单独占卡片
 
 用户一次性提了五件事：知识库目录与标准、插件独立化、智能体页面结构、对话界面、继续打磨 UI/UX。

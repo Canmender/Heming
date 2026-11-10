@@ -2,7 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { readPackage, normalizeBundleCommands } = require("./plugin-package");
+const { readPackage, normalizeBundleCommands, normalizeEngineSpec } = require("./plugin-package");
 
 /**
  * 界面插件的本机注册表（主进程持有，规格 §3.1）。
@@ -190,7 +190,12 @@ function createPluginStore(options = {}) {
       }
       // d.109：命令面板物化读的是注册表记录；旧安装记录没有 `commands`，
       // 从当前版本的 plugin.json 回填一次（纯函数会逐项收紧，磁盘被改也不怕）。
-      plugin.commands = normalizeBundleCommands(readJson(manifestPath));
+      const manifest = readJson(manifestPath);
+      plugin.commands = normalizeBundleCommands(manifest);
+      // d.125：引擎声明同理回填；路径约束仍由 plugin-engine 在每次启动时重查。
+      const engine = normalizeEngineSpec((manifest && manifest.contributions && manifest.contributions.engine) || {});
+      if (engine.ok && engine.engine) plugin.engine = engine.engine;
+      else delete plugin.engine;
     }
     save();
     return api;
@@ -206,6 +211,8 @@ function createPluginStore(options = {}) {
       widget: plugin.widget || null,
       // d.124：页面（B 路径）只在清单声明过时出现；旧安装记录没有这个键 → undefined
       ...(plugin.page ? { page: plugin.page } : {}),
+      // d.125：随插件分发的本机引擎（入口/依赖目录，已由 plugin-package 归一化）
+      ...(plugin.engine ? { engine: plugin.engine } : {}),
       permissions: plugin.permissions || null,
       settings: resolveSettings(plugin.widget, stored),
       installedAt: plugin.installedAt,
@@ -242,7 +249,7 @@ function createPluginStore(options = {}) {
       return { ok: false, error: parsed.errors.join("；") };
     }
 
-    const { manifest, widget, page, permissions, sha256, files } = parsed;
+    const { manifest, widget, page, engine, permissions, sha256, files } = parsed;
     const id = manifest.id;
     const version = manifest.version;
     const existing = find(id);
@@ -303,6 +310,8 @@ function createPluginStore(options = {}) {
       // d.124：界面插件页面（清单 contributions.page 的归一化视图）。缺省**不写这个键**，
       // 旧记录/无页面插件保持原样（web 侧按 `page?: WidgetPageSpec` 兼容）。
       ...(page ? { page } : {}),
+      // d.125：随插件分发的本机引擎（readPackage 已校验入口在包内；启动时再复核盘上摘要）
+      ...(engine ? { engine } : {}),
       permissions,
       // 包是否带 ed25519 签名；d.105 起 readPackage 已强制首方验签，能走到这里即已通过
       signed: parsed.signed === true,
