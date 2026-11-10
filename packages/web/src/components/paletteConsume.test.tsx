@@ -14,12 +14,14 @@ vi.mock("./ChatPage.js", () => ({ ChatPage: () => null }));
  * 命令面板意图消费点（d.60）。
  *
  * 命令面板（可能在被懒加载的页面里）只投内存意图，真正的开关在
- * `AssistantPage`（新建智能体弹窗）与 `NotificationCenter`（通知中心浮层）里。
- * 这两个用例锁住：**意图到达 → 浮层打开 → 意图被清空**（幂等、不重复打开）。
+ * `AssistantPage`（新建智能体的**编辑页**，d.126 起不再弹窗）与
+ * `NotificationCenter`（通知中心浮层）里。
+ * 这两个用例锁住：**意图到达 → 视图打开 → 意图被清空**（幂等、不重复打开）。
  */
 describe("命令面板意图消费 · 新建智能体", () => {
   beforeEach(() => {
     localStorage.clear();
+    window.sessionStorage.clear();
     useUiStore.setState({ page: "chat", paletteIntent: null });
     // 名册/会话加载是网络操作，这里直接替换成空实现，避免测试打真实接口。
     useChatStore.setState({
@@ -32,33 +34,35 @@ describe("命令面板意图消费 · 新建智能体", () => {
   });
   afterEach(() => cleanup());
 
-  it("收到 agent-create 意图后打开新建智能体弹窗，并清空意图", async () => {
+  it("收到 agent-create 意图后打开新建智能体编辑页，并清空意图", async () => {
     render(<AssistantPage />);
-    expect(screen.queryByRole("dialog", { name: "新建智能体" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "新建智能体" })).not.toBeInTheDocument();
 
     act(() => {
       useUiStore.getState().setPaletteIntent("agent-create");
     });
 
     await waitFor(() =>
-      expect(screen.getByRole("dialog", { name: "新建智能体" })).toBeInTheDocument(),
+      expect(screen.getByRole("heading", { name: "新建智能体" })).toBeInTheDocument(),
     );
+    // d.126：编辑智能体是页内视图，不再是模态弹窗
+    expect(screen.queryByRole("dialog", { name: "新建智能体" })).not.toBeInTheDocument();
     expect(useUiStore.getState().paletteIntent).toBeNull();
   });
 
-  it("意图被消费后不会再次打开（关掉弹窗后保持关闭）", async () => {
+  it("意图被消费后不会再次打开（关掉编辑页后保持关闭）", async () => {
     render(<AssistantPage />);
     act(() => {
       useUiStore.getState().setPaletteIntent("agent-create");
     });
     await waitFor(() =>
-      expect(screen.getByRole("dialog", { name: "新建智能体" })).toBeInTheDocument(),
+      expect(screen.getByRole("heading", { name: "新建智能体" })).toBeInTheDocument(),
     );
     act(() => {
       screen.getByRole("button", { name: "取消" }).click();
     });
     await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "新建智能体" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("heading", { name: "新建智能体" })).not.toBeInTheDocument(),
     );
   });
 });

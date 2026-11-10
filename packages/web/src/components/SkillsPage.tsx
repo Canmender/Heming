@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listAgents } from "../lib/agentsApi.js";
 import { SelfEditCard } from "./SelfEditCard.js";
-import { ToneCard } from "./ToneCard.js";
 import { PlusIcon, XIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useModalA11y } from "./useModalA11y.js";
@@ -1316,8 +1315,8 @@ export function SkillsView({
         </div>
       )}
 
-      {/* 写作能力：去 AI 味的规则集与即时检测。与「技能」同属能力配置，故放这里 */}
-      <ToneCard />
+      {/* 写作能力（去 AI 味）不再单独占卡片：规则已并入内置「写作润色」技能的默认流程，
+          技能池里的「去 AI 味」技能与 tone_detect 工具仍可直接使用（d.126）。 */}
 
       {/* 自我优化：让智能体改自己的记忆/技能/MCP。与「技能」同属能力配置，故放这里 */}
       <SelfEditCard

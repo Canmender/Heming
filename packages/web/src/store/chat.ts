@@ -90,7 +90,7 @@ function plainOfExisting(m: Message): PlainEnvelope {
 }
 
 /** 单条流式生成的打字机状态（key=streamId）。 */
-/** 一次工具调用的可视化轨迹（只在前端展示，不落库、不上行）。 */
+/** 一次工具调用的可视化轨迹（流式时给本机界面看；会话结束后随消息转录保留）。 */
 export interface ToolTrace {
   id: string;
   name: string;
@@ -107,6 +107,199 @@ export interface ToolTrace {
   result?: string;
   startedAt: number;
   endedAt?: number;
+}
+
+/**
+ * 一条消息的转录附加信息（d.126-C）：思考过程 + 工具调用轨迹。
+ *
+ * 这是**消息转录的一部分**，不是临时 UI 状态：流式收口时把当时的 reasoning/tools
+ * 快照写进消息（本机持久化），切走会话、重开、重启后拉历史仍能展开查看。
+ * 两个字段都可选——旧消息/旧服务端没有它们，渲染层按「没有」降级，不占位也不崩。
+ *
+ * 为什么不进服务端消息体：共享 `MessageSchema` 是服务端入库契约（E2E 下正文在密文里、
+ * 服务端只见信封），往里加展示字段会同时改服务端与共享 schema；本轮写范围只到本文件，
+ * 因此落本机 localStorage（与草稿/滚动位置同层），历史拉取映射时重新贴回消息对象。
+ */
+export interface MessageTranscript {
+  thinking?: string;
+  tools?: ToolTrace[];
+}
+
+/** 带转录字段的消息：字段可选 ⇒ 与共享 `Message` 结构兼容；运行时才可能带这两个键。 */
+export type TranscriptMessage = Message & MessageTranscript;
+
+/**
+ * 转录体积上限（防止长工具结果把 localStorage 与消息内存撑爆）。
+ *
+ * 只用于**持久化/展示**：流式进行中的 `AgentStreamState` 保有全量（实时展示要完整），
+ * 收口写消息时才按这里截断。数值按「够用户回看」定，不做无损存档。
+ */
+export const TRANSCRIPT_LIMITS = {
+  /** 思考过程最多保留字符数（约 1.5k 汉字，够回看推理脉络）。 */
+  thinkingChars: 3000,
+  /** 单条消息最多保留的工具调用条数（多轮长任务只留前 12 次，避免一条消息几十 KB）。 */
+  tools: 12,
+  /** 单个工具入参最多保留字符数。 */
+  argsChars: 400,
+  /** 单个工具结果最多保留字符数（长文档/网页抓取结果必须截断）。 */
+  resultChars: 800,
+} as const;
+
+/** 单会话转录落盘条数上限：超出淘汰最早写入的（等于消息窗口的两倍量级）。 */
+export const MAX_TRANSCRIPTS_PER_CONVERSATION = 120;
+
+/** 转录落盘键（本机 localStorage，与 E2E msgCache/草稿同层；不是服务端契约）。 */
+const TRANSCRIPT_STORAGE_PREFIX = "heming.transcript.";
+
+const TOOL_STATUSES = new Set<ToolTrace["status"]>(["running", "ok", "error", "denied"]);
+
+/** localStorage 兜底读取（隐私模式/无 DOM 环境返回 null，绝不让转录读写打断对话）。 */
+function transcriptStorage(): Storage | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** 单条工具轨迹清洗+截断：形状不合法的条目直接丢弃（防御手改/旧格式 JSON）。 */
+function sanitizeToolTrace(raw: unknown): ToolTrace | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string" || !r.id) return null;
+  if (typeof r.name !== "string" || !r.name) return null;
+  const status =
+    typeof r.status === "string" && TOOL_STATUSES.has(r.status as ToolTrace["status"])
+      ? (r.status as ToolTrace["status"])
+      : "error";
+  const tool: ToolTrace = {
+    id: r.id,
+    name: r.name,
+    args: typeof r.args === "string" ? r.args.slice(0, TRANSCRIPT_LIMITS.argsChars) : "",
+    status,
+    startedAt:
+      typeof r.startedAt === "number" && Number.isFinite(r.startedAt) ? r.startedAt : 0,
+  };
+  if (typeof r.result === "string") tool.result = r.result.slice(0, TRANSCRIPT_LIMITS.resultChars);
+  if (typeof r.endedAt === "number" && Number.isFinite(r.endedAt)) tool.endedAt = r.endedAt;
+  return tool;
+}
+
+/**
+ * 截断/清洗一条转录：空字段丢弃，超长字段截断，空转录返回 undefined。
+ * 收口写消息、落盘、读盘三个入口共用（体积上限的唯一口径）。
+ */
+export function truncateTranscript(t: MessageTranscript | undefined): MessageTranscript | undefined {
+  if (!t) return undefined;
+  const thinking =
+    typeof t.thinking === "string" && t.thinking.trim().length > 0
+      ? t.thinking.slice(0, TRANSCRIPT_LIMITS.thinkingChars)
+      : undefined;
+  const tools: ToolTrace[] = [];
+  const rawTools = Array.isArray(t.tools) ? t.tools : [];
+  for (const raw of rawTools) {
+    if (tools.length >= TRANSCRIPT_LIMITS.tools) break;
+    const tool = sanitizeToolTrace(raw);
+    if (tool) tools.push(tool);
+  }
+  if (!thinking && tools.length === 0) return undefined;
+  return {
+    ...(thinking ? { thinking } : {}),
+    ...(tools.length > 0 ? { tools } : {}),
+  };
+}
+
+/** 读一条消息的转录附加信息：没有（旧消息）返回 undefined。 */
+export function transcriptOf(m: Message): MessageTranscript | undefined {
+  const t = m as TranscriptMessage;
+  if (!t.thinking && !(t.tools && t.tools.length > 0)) return undefined;
+  return {
+    ...(t.thinking ? { thinking: t.thinking } : {}),
+    ...(t.tools && t.tools.length > 0 ? { tools: t.tools } : {}),
+  };
+}
+
+/**
+ * 给消息贴上转录字段（返回**新对象**；转录为空则原样返回，保持引用稳定）。
+ *
+ * 字段挂在运行时对象上，共享 `Message` 类型不变——服务端消息体/WS 帧照旧，
+ * 渲染层用 `transcriptOf` 读。旧消息读出来是 undefined，不渲染任何块。
+ */
+export function withTranscript(m: Message, t: MessageTranscript | undefined): Message {
+  const clean = truncateTranscript(t);
+  if (!clean) return m;
+  return { ...m, ...clean } as TranscriptMessage;
+}
+
+/** 落盘条目：id + 转录字段（数组顺序 = 写入顺序，末位最新）。 */
+type PersistedTranscriptItem = MessageTranscript & { id: string };
+
+/** 读某会话已落盘的转录条目（清洗后；坏 JSON/坏条目静默跳过）。 */
+function readPersistedTranscriptItems(convId: string): PersistedTranscriptItem[] {
+  const storage = transcriptStorage();
+  if (!storage) return [];
+  let raw: string | null = null;
+  try {
+    raw = storage.getItem(TRANSCRIPT_STORAGE_PREFIX + convId);
+  } catch {
+    return [];
+  }
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  // 兼容两种形状：裸数组（当前）与 {items:[...]}（旧/外部写入）
+  const items = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object" && Array.isArray((parsed as { items?: unknown }).items)
+      ? ((parsed as { items: unknown[] }).items ?? [])
+      : [];
+  const out: PersistedTranscriptItem[] = [];
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r.id !== "string" || !r.id) continue;
+    const clean = truncateTranscript({
+      thinking: typeof r.thinking === "string" ? r.thinking : undefined,
+      tools: Array.isArray(r.tools) ? (r.tools as ToolTrace[]) : undefined,
+    });
+    if (clean) out.push({ id: r.id, ...clean });
+  }
+  return out;
+}
+
+/** 把某会话已落盘的转录按消息 id 建索引（loadMessages 历史回放用）。 */
+function readPersistedTranscripts(convId: string): Record<string, MessageTranscript> {
+  const out: Record<string, MessageTranscript> = {};
+  for (const item of readPersistedTranscriptItems(convId)) {
+    const { id, ...rest } = item;
+    out[id] = rest;
+  }
+  return out;
+}
+
+/** 写一条消息的转录（同 id 覆盖；超单会话上限淘汰最早写入的）。 */
+function writePersistedTranscript(
+  convId: string,
+  messageId: string,
+  transcript: MessageTranscript,
+): void {
+  const storage = transcriptStorage();
+  if (!storage) return;
+  const items = readPersistedTranscriptItems(convId);
+  const at = items.findIndex((x) => x.id === messageId);
+  const entry: PersistedTranscriptItem = { id: messageId, ...transcript };
+  if (at >= 0) items[at] = entry;
+  else items.push(entry);
+  const capped = items.slice(-MAX_TRANSCRIPTS_PER_CONVERSATION);
+  try {
+    storage.setItem(TRANSCRIPT_STORAGE_PREFIX + convId, JSON.stringify(capped));
+  } catch {
+    // 配额满/隐私模式：转录落盘失败不影响对话本身（当前会话内仍可展开）
+  }
 }
 
 export interface AgentStreamState {
@@ -177,7 +370,15 @@ interface ChatState {
   openAgent: (agentId: string) => Promise<string>;
   loadAgentsRoster: () => Promise<void>;
   appendMessage: (m: Message) => void;
+  /** 历史消息入列（按 id 与本地独有条目合并；不改动消息的转录字段）。 */
   setMessages: (convId: string, msgs: Message[]) => void;
+  /**
+   * 记录一条消息的转录附加信息（思考过程 + 工具调用轨迹）：
+   * 清洗截断后写本机 localStorage（`heming.transcript.<convId>`），
+   * 并给内存里同 id 的消息贴上字段——刚收口的回复与历史回放都能展开查看。
+   * 旧消息没有转录 → 不调用即不渲染任何块（向后兼容）。
+   */
+  recordTranscript: (convId: string, messageId: string, transcript: MessageTranscript) => void;
   /**
    * 注入 E2E 解密 handler（ChatPage 挂载时组装 e2eSession 依赖后调用；卸载置 null）。
    * 注入非 null 时冲刷全部 pendingE2e——handler 建立前到达的占位由此补齐。
@@ -376,6 +577,18 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
     set({ messages: { ...get().messages, [convId]: merged } });
   },
+  recordTranscript(convId, messageId, transcript) {
+    const clean = truncateTranscript(transcript);
+    if (!clean) return; // 空转录（既没思考也没工具）不落盘：旧消息没有字段 = 正常状态
+    writePersistedTranscript(convId, messageId, clean);
+    // 内存里同 id 消息同步贴字段：消息已渲染时（历史回放/他机流收口）展开块立刻可点
+    const list = get().messages[convId] ?? [];
+    const at = list.findIndex((m) => m.id === messageId);
+    if (at === -1) return;
+    const next = [...list];
+    next[at] = withTranscript(next[at], clean);
+    set({ messages: { ...get().messages, [convId]: next } });
+  },
   setOpenHandler(fn) {
     set({ openHandler: fn });
     // 注入即冲刷：handler 建立前到达的 e2e 占位（loadMessages/WS 竞态窗口）现在可解
@@ -444,14 +657,18 @@ export const useChatStore = create<ChatState>((set, get) => {
         dropPending(convId, m.id); // skip → 过滤出列表（非本机 chaindist 等）
       }
     }
-    if (alive && !alive()) return resolved; // 卸载/切会话后晚到：结果返回但不写 store
-    get().setMessages(convId, resolved);
+    // 历史回放带上转录（d.126-C）：思考/工具轨迹按消息 id 从本机落盘取回并贴到消息对象上。
+    // 旧消息/旧会话没有条目 → withTranscript 原样返回，渲染层不渲染任何块（向后兼容）。
+    const persistedTranscripts = readPersistedTranscripts(convId);
+    const withTranscripts = resolved.map((m) => withTranscript(m, persistedTranscripts[m.id]));
+    if (alive && !alive()) return withTranscripts; // 卸载/切会话后晚到：结果返回但不写 store
+    get().setMessages(convId, withTranscripts);
     set({
       messagesLoading: { ...get().messagesLoading, [convId]: false },
       messagesError: { ...get().messagesError, [convId]: null },
     });
     if (landed) void retryPending(convId);
-    return resolved;
+    return withTranscripts;
   },
   async migrateOwnPlain(convId, members, deps, attempted, meId, alive) {
     const targets = (get().messages[convId] ?? []).filter(

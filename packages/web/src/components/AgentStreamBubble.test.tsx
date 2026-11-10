@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { AgentStreamBubble } from "./AgentStreamBubble.js";
+import { AgentStreamBubble, ReasoningBlock, ToolTraceGroup } from "./AgentStreamBubble.js";
 
 describe("AgentStreamBubble", () => {
   it("streaming 态显示名字与累积文本", () => {
@@ -201,5 +201,61 @@ describe("AgentStreamBubble · 失败原因说人话", () => {
     expect(hint.textContent).toContain("稍等");
     expect(hint.textContent).not.toContain("rate_limit_error");
     expect(hint.getAttribute("title")).toBe(raw);
+  });
+});
+
+describe("历史消息转录块（d.126-C：思考/工具调用默认折叠）", () => {
+  it("ReasoningBlock：非流式（历史消息）默认折叠，点击展开再收起", () => {
+    render(<ReasoningBlock text="先查资料再回答" streaming={false} />);
+    const toggle = screen.getByRole("button", { name: "思考过程" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText(/7 字/)).toBeInTheDocument(); // 折叠态仍给一行摘要
+    expect(screen.queryByText("先查资料再回答")).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("先查资料再回答")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.queryByText("先查资料再回答")).not.toBeInTheDocument();
+  });
+
+  it("ToolTraceGroup：一行摘要（次数 + 成败计数），展开看逐条轨迹", () => {
+    render(
+      <ToolTraceGroup
+        tools={[
+          {
+            id: "t1",
+            name: "wiki_search",
+            args: '{"q":"发布计划"}',
+            status: "ok",
+            result: "找到 3 条",
+            startedAt: 1000,
+            endedAt: 1120,
+          },
+          {
+            id: "t2",
+            name: "srv__boom",
+            args: "{}",
+            status: "error",
+            result: "连接断了",
+            startedAt: 2000,
+            endedAt: 2500,
+          },
+        ]}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: "工具调用" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.textContent).toContain("工具调用 · 2 次");
+    expect(toggle.textContent).toContain("1 完成 · 1 失败");
+    expect(screen.queryByText("wiki_search")).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("wiki_search")).toBeInTheDocument();
+    expect(screen.getByText("srv · boom")).toBeInTheDocument();
+    expect(screen.getByText("找到 3 条")).toBeInTheDocument();
+    expect(screen.getByText("连接断了")).toBeInTheDocument();
   });
 });

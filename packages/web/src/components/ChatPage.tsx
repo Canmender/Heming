@@ -13,8 +13,11 @@ import {
 import type { Conversation, Message, MessagePayload } from "@heming/shared";
 import {
   useChatStore,
+  transcriptOf,
+  withTranscript,
   type E2eOpenHandler,
   type E2eOpenOutcome,
+  type MessageTranscript,
   type ToolTrace,
 } from "../store/chat.js";
 import { useUiStore, type TaskDraft } from "../store/ui.js";
@@ -85,8 +88,11 @@ import { connectWs, type WsHandle } from "../lib/ws.js";
 import { registerChatSocket } from "../lib/chatSocketPresence.js";
 import { VideoIcon, ChevronIcon, MenuIcon, SmileIcon, ImageIcon, FileIcon, MicIcon, PhoneIcon, DownloadIcon, SearchIcon, SelectIcon } from "./icons.js";
 import { findMessageHits, hitPosition, stepHit } from "../lib/chat/search.js";
-import { Avatar } from "./Avatar.js";
-import { AgentStreamBubble } from "./AgentStreamBubble.js";
+import {
+  AgentStreamBubble,
+  ReasoningBlock,
+  ToolTraceGroup,
+} from "./AgentStreamBubble.js";
 import { EmojiPicker } from "./EmojiPicker.js";
 import { capabilityRegistry } from "../lib/capability/index.js";
 import {
@@ -806,10 +812,33 @@ export function ChatPage({
   /** 消息署名：自己「我」；智能体会话为智能体名。 */
   const displaySenderName = (m: Message) =>
     m.senderId === me?.id ? "我" : conv?.agent.name;
-  /** 智能体气泡左侧头像数据（无 avatar 走首字回退）。 */
-  const bubbleAvatar = (m: Message): { displayName: string; avatar?: string } | undefined => {
-    if (m.senderId === me?.id) return undefined;
-    return conv ? { displayName: conv.agent.name, avatar: conv.agent.avatar ?? undefined } : undefined;
+  /**
+   * 流式收口时把「思考 + 工具轨迹」快照成消息转录（d.126-C）。
+   *
+   * 收口时机很关键：`message_new{streamId}` 一到，store 的 onWsEvent 会立刻移除
+   * `streaming[streamId]`，之后就拿不到 reasoning 了——所以必须在转发事件**之前**取。
+   * `toolTraceRef` 是本机流的完整轨迹；他机流没有（store 不累积 tools），自然返回 undefined。
+   *
+   * 中断/异常收口时仍可能是 `running`（没等到 tool_end）：历史里不该显示「调用中」，
+   * 统一按「已中断、未拿到结果」的失败态落下，用户回看时不会以为工具还在跑。
+   */
+  const collectStreamTranscript = (streamId: string): MessageTranscript | undefined => {
+    const reasoning = useChatStore.getState().streaming[streamId]?.reasoning;
+    const tools = (toolTraceRef.current[streamId] ?? []).map((t) =>
+      t.status === "running"
+        ? {
+            ...t,
+            status: "error" as const,
+            result: t.result ?? "（生成已中断，未拿到工具结果）",
+            endedAt: t.endedAt ?? Date.now(),
+          }
+        : t,
+    );
+    if (!reasoning?.trim() && tools.length === 0) return undefined;
+    return {
+      ...(reasoning?.trim() ? { thinking: reasoning } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
+    };
   };
   /**
    * 导出（本机生成）：只导出本机已解密的明文，解不开的信封直接跳过，
@@ -1889,10 +1918,18 @@ export function ChatPage({
     setRecovered(false);
     const handle = connectWs({
       onEvent: (e) => {
+        // d.126-C：流式收口前把思考/工具轨迹快照下来。onWsEvent 会移除 streaming 项，
+        // 之后再取就只剩正文了（转录要随消息落盘，会话结束后仍可展开）。
+        const finishedTranscript =
+          e.type === "message_new" && e.streamId ? collectStreamTranscript(e.streamId) : undefined;
         // 流式三事件收口（chunk 累积/message_new{streamId} 移除/agent_error 分态）在 store 统一处理
         useChatStore.getState().onWsEvent(e);
         if (e.type === "message_new" && e.message.conversationId === convId) {
-          appendMessage(e.message);
+          if (finishedTranscript) {
+            // 先落盘再入列：切会话/刷新后拉历史能按消息 id 贴回这两个字段
+            useChatStore.getState().recordTranscript(convId, e.message.id, finishedTranscript);
+          }
+          appendMessage(withTranscript(e.message, finishedTranscript));
         } else if (e.type === "error") {
           console.warn(`[${e.code}] ${e.message}`);
         }
@@ -2666,12 +2703,7 @@ export function ChatPage({
             <ChevronIcon width={15} height={15} className="rotate-180" />
           </button>
         )}
-        {conv && (
-          <Avatar
-            user={{ displayName: conv.agent.name, avatar: conv.agent.avatar ?? undefined }}
-            size={28}
-          />
-        )}
+        {/* d.126-C：对话界面不再展示头像（智能体身份由标题承载），消息流是纯转录 */}
         <span className="ui-section-title min-w-0 truncate">{headerTitle}</span>
         <span className="ui-caption flex items-center gap-1">
           <span
@@ -2953,14 +2985,50 @@ export function ChatPage({
           const showSeparator = needsTimeSeparator(prevMsg?.createdAt, m.createdAt);
           // 署名：自己「我」；智能体消息显示智能体名。
           const senderName = displaySenderName(m);
-          // 左侧头像：智能体回复固定用智能体头像。
-          const senderAvatarUser = bubbleAvatar(m);
+          // 转录（d.126-C）：思考过程 + 工具调用轨迹。旧消息没有这两个字段 → undefined，不渲染。
+          const transcript = mine ? undefined : transcriptOf(m);
           // 图表：正文里的 ```chart 围栏块。解析失败的块被跳过（不显示也不报错——
           // 模型偶尔会写出不合法的 JSON，那是它的问题，不该让整条消息看起来坏了）。
           const messageCharts = extractCharts(m.payload.text).map((c, i) => ({
             key: `${m.id}-chart-${i}`,
             spec: c.spec,
           }));
+          /** 正文块：用户输入与助手输出共用（markdown + 图表 + 附件；e2e 解不开时是占位）。 */
+          const messageBody =
+            m.enc === "e2e" && !plainOf[m.id] ? (
+              // E2E Task 4 / 设计 §8：解不开的信封渲染占位（不吞不崩），且不进 LLM 提示词。
+              // 文案不写「密钥缺失」：设备钥匙通常还在，缺的是这条消息所属链的窗口钥匙。
+              // 三类来源并列写全（换设备 / 本机清过缓存 / 生成中途退出），别只列其中一类。
+              <div
+                className="text-muted"
+                title="本机没有这条消息对应的解密密钥：可能来自其他设备、本机缓存被清理过，或这条消息在生成时被中断。"
+              >
+                本机解不开这条消息
+                <span className="ml-1 text-[11px]">
+                  （可能来自其他设备、本机缓存被清理，或消息在生成时被中断）
+                </span>
+              </div>
+            ) : (
+              <>
+                <MarkdownMessage text={stripChartFences(m.payload.text)} />
+                {/* 图表：正文里的 ```chart 围栏块渲染成卡片（正文已剥离围栏） */}
+                {messageCharts.map((c) => (
+                  <ChatChart key={c.key} spec={c.spec} />
+                ))}
+                {/* 附件：audio/* 先于 image/文件卡路由到播放器气泡（Task 5） */}
+                {m.payload.file ? (
+                  m.payload.file.mime.startsWith("audio/") ? (
+                    <AudioBubble
+                      fileId={m.payload.file.id}
+                      fileKey={m.payload.file.key}
+                      mime={m.payload.file.mime}
+                    />
+                  ) : (
+                    <AttachmentPreview file={m.payload.file} />
+                  )
+                ) : null}
+              </>
+            );
           return (
             <Fragment key={m.id}>
               {/* A4：间隔 ≥5 分钟或跨天的消息之间插一条时间分隔（首条渲染的消息也带，定位阅读段起点） */}
@@ -2971,119 +3039,79 @@ export function ChatPage({
                   </span>
                 </div>
               ) : null}
-              {/* 消息行：气泡窄长条（max-w 收到 62%），行内 mb-5 留出消息间距。
-                  对方头像用 mt-1「略低于气泡顶」而不是顶齐——顶齐时头像圆顶与气泡圆角顶边
-                  平齐，看着像顶到了上边缘，很生硬；低一点更像气泡的「肩」。 */}
+              {/* 消息行（d.126-C）：不展示头像、不用左右气泡；按「普通 agent 工具输出」排列——
+                  用户输入是一块浅底提示，助手输出是「正文 + 思考块 + 工具调用块」顺次转录
+                  （旧消息没有后两块 → 只渲染正文，不占位也不崩）。 */}
               <div
                 id={`msg-${m.id}`}
-                className={`mb-5 flex items-start gap-2.5 ${mine ? "justify-end" : ""}${
+                className={`group relative mb-5 flex items-start gap-2${
                   searchOpen && activeSearchId === m.id
                     ? " rounded-lg bg-[#fff9e6] ring-1 ring-[#f0d58c]"
                     : ""
                 }`}
               >
-              {/* 多选态：勾选列放在最左（含自己的消息），保证一列对齐、好连点 */}
-              {selectMode && (
-                <label
-                  className="mt-1.5 flex shrink-0 cursor-pointer items-center justify-center"
-                  title="选择这条消息"
-                >
-                  <input
-                    type="checkbox"
-                    aria-label={`选择这条消息（${senderName || (mine ? "我" : "对方")}）`}
-                    checked={selectedIds.includes(m.id)}
-                    onChange={() => toggleSelected(m.id)}
-                    className="h-3.5 w-3.5 cursor-pointer accent-[#1a1a1a]"
-                  />
-                </label>
-              )}
-              {/* 对方消息：头像贴左缘但与气泡留 gap-2.5，mt-1 让它略低于气泡顶（见上方说明） */}
-              {!mine && senderAvatarUser && (
-                <Avatar user={senderAvatarUser} size={26} className="mt-1 shrink-0" />
-              )}
-              {/* 气泡：窄长条（62% 上限）+ 一侧大圆角一侧小圆角，
-                  圆角朝头像那侧收拢，视觉上像从头像方向伸出去的一条。
-                  含图表时放宽到 86%：图表需要横向空间，压在 62% 里会变形。 */}
-              <div
-                data-message-bubble=""
-                className={`group relative max-w-[62%] rounded-xl rounded-bl-md px-3.5 py-2 text-[13px] leading-relaxed shadow-card ${
-                  messageCharts.length > 0 ? "max-w-[86%]" : ""
-                } ${
-                  mine
-                    ? "rounded-br-md bg-white"
-                    : "rounded-tl-md border border-line bg-[#f7f7f7]"
-                }`}
-              >
-                {senderName ? (
-                  <div className="mb-0.5 flex items-baseline gap-2 text-[10px] text-muted">
-                    <span>{senderName}</span>
-                    <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
-                      {formatClock(m.createdAt)}
-                    </time>
-                  </div>
-                ) : (
-                  <div className="mb-0.5 text-right text-[10px] text-muted">
-                    <time dateTime={m.createdAt} className="tabular-nums">
-                      {formatClock(m.createdAt)}
-                    </time>
-                  </div>
-                )}
-                {m.enc === "e2e" && !plainOf[m.id] ? (
-                  // E2E Task 4 / 设计 §8：解不开的信封渲染占位（不吞不崩），且不进 LLM 提示词。
-                  // 文案不写「密钥缺失」：设备钥匙通常还在，缺的是这条消息所属链的窗口钥匙。
-                  // 三类来源并列写全（换设备 / 本机清过缓存 / 生成中途退出），别只列其中一类。
-                  <div
-                    className="text-muted"
-                    title="本机没有这条消息对应的解密密钥：可能来自其他设备、本机缓存被清理过，或这条消息在生成时被中断。"
+                {/* 多选态：勾选列放在最左（含自己的消息），保证一列对齐、好连点 */}
+                {selectMode && (
+                  <label
+                    className="mt-1.5 flex shrink-0 cursor-pointer items-center justify-center"
+                    title="选择这条消息"
                   >
-                    本机解不开这条消息
-                    <span className="ml-1 text-[11px]">
-                      （可能来自其他设备、本机缓存被清理，或消息在生成时被中断）
-                    </span>
-                  </div>
-                ) : (
-                  <>
-                    <MarkdownMessage text={stripChartFences(m.payload.text)} />
-                    {/* 图表：正文里的 ```chart 围栏块渲染成卡片（正文已剥离围栏） */}
-                    {messageCharts.map((c) => (
-                      <ChatChart key={c.key} spec={c.spec} />
-                    ))}
-                    {/* 附件：audio/* 先于 image/文件卡路由到播放器气泡（Task 5） */}
-                    {m.payload.file ? (
-                      m.payload.file.mime.startsWith("audio/") ? (
-                        <AudioBubble
-                          fileId={m.payload.file.id}
-                          fileKey={m.payload.file.key}
-                          mime={m.payload.file.mime}
-                        />
-                      ) : (
-                        <AttachmentPreview file={m.payload.file} />
-                      )
-                    ) : null}
-                  </>
+                    <input
+                      type="checkbox"
+                      aria-label={`选择这条消息（${senderName || (mine ? "我" : "对方")}）`}
+                      checked={selectedIds.includes(m.id)}
+                      onChange={() => toggleSelected(m.id)}
+                      className="h-3.5 w-3.5 cursor-pointer accent-[#1a1a1a]"
+                    />
+                  </label>
                 )}
+                <div
+                  data-message-bubble=""
+                  className={`min-w-0 text-[13px] leading-relaxed ${
+                    mine ? "max-w-[92%]" : "flex-1"
+                  }`}
+                >
+                  {mine ? (
+                    // 用户输入：一块提示（浅底 + 细边框），不占头像列、不挤右侧气泡
+                    <div className="rounded-lg border border-line bg-[#f7f7f7] px-3.5 py-2.5">
+                      <div className="mb-1 flex items-baseline gap-2 text-[10px] text-muted">
+                        <span>我</span>
+                        <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
+                          {formatClock(m.createdAt)}
+                        </time>
+                      </div>
+                      {messageBody}
+                    </div>
+                  ) : (
+                    // 助手输出：署名一行 + 思考块 + 工具调用块 + 正文（无气泡底色/圆角）
+                    <div className="px-0.5">
+                      <div className="mb-1 flex items-baseline gap-2 text-[10px] text-muted">
+                        <span>{senderName || "智能体"}</span>
+                        <time dateTime={m.createdAt} className="ml-auto shrink-0 tabular-nums">
+                          {formatClock(m.createdAt)}
+                        </time>
+                      </div>
+                      {transcript?.thinking ? (
+                        <ReasoningBlock text={transcript.thinking} streaming={false} />
+                      ) : null}
+                      {transcript?.tools && transcript.tools.length > 0 ? (
+                        <ToolTraceGroup tools={transcript.tools} />
+                      ) : null}
+                      <div className="mt-1 break-words">{messageBody}</div>
+                    </div>
+                  )}
+                </div>
                 {/* A5 整条复制：有文本才出（附件只有元信息，复制结果没意义） */}
                 {(m.payload.text?.length ?? 0) > 0 && (
                   <button
                     type="button"
                     aria-label="复制消息"
-                    className={`absolute -top-2 ${
-                      mine ? "right-0" : "left-0"
-                    } hidden rounded-sm border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block`}
+                    className="absolute -top-2 right-0 hidden rounded-sm border border-line bg-white px-1.5 py-0.5 text-[10px] text-muted shadow-card hover:text-ink group-hover:block group-focus-within:block"
                     onClick={() => void copyMessage(m)}
                   >
                     {copiedMsgId === m.id ? "已复制" : "复制"}
                   </button>
                 )}
-              </div>
-              {/* 自己的消息：气泡在左、头像贴右缘，与对方左右镜像（同样 mt-1 低一点、gap-2.5 隔开） */}
-              {mine && (
-                <Avatar
-                  user={{ displayName: me?.displayName ?? "我", avatar: me?.avatar }}
-                  size={26}
-                  className="mt-1 shrink-0"
-                />
-              )}
               </div>
             </Fragment>
           );

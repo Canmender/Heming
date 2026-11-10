@@ -25,6 +25,19 @@ export interface VaultMeta {
    */
   writeDirs: string[];
   addedAt: string;
+  /**
+   * 是否为应用默认管理的库（安装目录/数据根下的 `wiki/`，见计划 §0.1）。
+   *
+   * 由主进程在 `vault:list` 里**现算**，不写进 registry（用户可以手动改注册表，
+   * 不该被程序塞进来的展示字段污染）。缺省（false）表示用户自己登记的普通库。
+   */
+  managed?: boolean;
+  /**
+   * 根路径说明（中文，直接展示给用户）。空串/缺省 = 一切正常；
+   * 非空 = 根目录回落或不可写的原因（如「安装目录不可写，已回落到 …」）。
+   * 同样只在 `vault:list` 现算，不落盘。
+   */
+  rootNote?: string;
 }
 
 /** 文本类文件上限：与 wiki-fs 的 2MB 同口径。 */

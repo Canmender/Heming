@@ -2,7 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WikiGraph, WikiPage, WikiKind } from "../lib/wiki/index.js";
 import { KIND_LABEL } from "../lib/wiki/index.js";
 import { layoutGraph, nodeRadius } from "../lib/wiki/layout.js";
-import { Avatar } from "./Avatar.js";
+import {
+  ZOOM_BUTTON_STEP,
+  isDragBeyondThreshold,
+  resetViewport,
+  stepZoom,
+  viewportTransform,
+  wheelViewport,
+  zoomPercent,
+  type GraphViewport,
+  type ViewportPoint,
+} from "./graphViewport.js";
 
 /**
  * 知识库图谱视图（参照 Obsidian graph view）。
@@ -12,12 +22,17 @@ import { Avatar } from "./Avatar.js";
  *
  * 交互沿用雷达图的成熟做法（缩放 + 拖动平移 + 双击复位），
  * 因为那两个手势用户已经在别处习惯了，不必重新学。
+ *
+ * 本轮（d.126）把「一格一格跳」的滚轮缩放改成**以光标为中心的连续缩放**：
+ * 滚轮下面那一点在缩放前后不动，用户才觉得"放大的是我这里"；
+ * 换算全在 `graphViewport.ts` 的纯函数里（可单测，不靠截图验收）。
+ * 尊重 `prefers-reduced-motion`：系统要求减少动效时不加过渡动画。
  */
 
-const MIN_ZOOM = 0.4;
-const MAX_ZOOM = 2.4;
-const ZOOM_STEP = 0.15;
-const DRAG_THRESHOLD = 4;
+/** 容器尺寸兜底：jsdom/首帧拿不到布局时用 4:3 的默认画布，而不是 0×0 的空白。 */
+const FALLBACK_SIZE = { w: 800, h: 480 };
+/** 滚轮缩放期间暂停 CSS 过渡：过渡会让"以光标为中心"在动画过程中看起来像漂移。 */
+const WHEEL_SETTLE_MS = 140;
 
 /** 类别 → 颜色。与雷达图扇区的低饱和风格保持一致，不喧宾夺主。 */
 const KIND_COLOR: Record<WikiKind, string> = {
@@ -27,6 +42,16 @@ const KIND_COLOR: Record<WikiKind, string> = {
   synthesis: "#f59e0b",
   notes: "#94a3b8",
 };
+
+/** 系统是否要求减少动效（不支持 matchMedia 的环境按 false 处理）。 */
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
 
 export function WikiGraphView({
   graph,
@@ -46,19 +71,31 @@ export function WikiGraphView({
   emptyHint?: string;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [size, setSize] = useState({ w: 800, h: 480 });
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [size, setSize] = useState(FALLBACK_SIZE);
+  const [viewport, setViewport] = useState<GraphViewport>(resetViewport);
   const [panning, setPanning] = useState(false);
+  const [wheelActive, setWheelActive] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(prefersReducedMotion);
   const [hover, setHover] = useState<string | null>(null);
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const draggedRef = useRef(false);
+  /** 拖拽松手的位置：浏览器随后补发的 click 与它重合，据此吞掉那一次点击。 */
+  const dragEndRef = useRef<{ x: number; y: number } | null>(null);
+  const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 尺寸给滚轮监听用：effect 里拿最新值，避免每次 resize 重建监听器。 */
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
 
   // 容器尺寸：图谱要铺满可用区域，得跟着窗口走
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const read = () => setSize({ w: el.clientWidth, h: el.clientHeight });
+    const read = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      // 布局还没算出来（jsdom / 首帧）时保留兜底尺寸，别把画布缩成 0×0
+      setSize({ w: w > 0 ? w : FALLBACK_SIZE.w, h: h > 0 ? h : FALLBACK_SIZE.h });
+    };
     read();
     // ResizeObserver 在 jsdom 里不存在，浏览器端才有；缺失时退回 window.resize
     if (typeof ResizeObserver !== "undefined") {
@@ -70,41 +107,69 @@ export function WikiGraphView({
     return () => window.removeEventListener("resize", read);
   }, []);
 
+  // 系统动效偏好：跟随变化（用户中途改设置也生效）
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    let mq: MediaQueryList;
+    try {
+      mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    } catch {
+      return;
+    }
+    const onChange = () => setReduceMotion(mq.matches);
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, []);
+
   const points = useMemo(() => layoutGraph(graph, size.w, size.h), [graph, size.w, size.h]);
   const pointById = useMemo(() => new Map(points.map((p) => [p.id, p])), [points]);
   const titleById = useMemo(() => new Map(pages.map((p) => [p.path, p.title])), [pages]);
 
-  const clampZoom = useCallback((z: number) => {
-    if (!Number.isFinite(z)) return 1;
-    return Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 100) / 100;
-  }, []);
-
   const reset = useCallback(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
+    setViewport(resetViewport());
   }, []);
 
-  const zoomBy = useCallback(
-    (delta: number) => setZoom((z) => clampZoom(z + delta)),
-    [clampZoom],
+  const zoomBy = useCallback((delta: number) => {
+    setViewport((current) => stepZoom(current, delta, sizeRef.current));
+  }, []);
+
+  /** 滚轮缩放期间把过渡关掉：锚点缩放是逐帧计算，过渡只会让内容"糊着漂"。 */
+  const markWheelActive = useCallback(() => {
+    setWheelActive(true);
+    if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+    wheelTimerRef.current = setTimeout(() => {
+      wheelTimerRef.current = null;
+      setWheelActive(false);
+    }, WHEEL_SETTLE_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+    },
+    [],
   );
 
-  // Ctrl/⌘ + 滚轮缩放：普通滚轮留给页面滚动，不劫持
+  // 滚轮 = 以光标为中心的连续缩放。
+  // 不用 Ctrl 修饰键：图谱面板是独立视图（不叠在长页面上），滚轮缩放正是这里的常规手势；
+  // 也不用 passive 监听——必须 preventDefault 才能阻止"滚轮缩放同时把页面滚走"。
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      setZoom((z) => clampZoom(z + (e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP)));
+      const rect = el.getBoundingClientRect();
+      const anchor: ViewportPoint = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      setViewport((current) => wheelViewport(current, e, anchor, sizeRef.current));
+      markWheelActive();
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [clampZoom]);
+  }, [markWheelActive]);
 
   const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
     draggedRef.current = false;
-    dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+    dragRef.current = { x: e.clientX, y: e.clientY, panX: viewport.pan.x, panY: viewport.pan.y };
     setPanning(true);
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
@@ -114,14 +179,20 @@ export function WikiGraphView({
     if (!d) return;
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
-    if (!draggedRef.current && Math.hypot(dx, dy) > DRAG_THRESHOLD) draggedRef.current = true;
-    setPan({ x: d.panX + dx, y: d.panY + dy });
+    if (!draggedRef.current && isDragBeyondThreshold(dx, dy)) draggedRef.current = true;
+    setViewport((current) => ({
+      ...current,
+      pan: { x: d.panX + dx, y: d.panY + dy },
+    }));
   };
 
   const onUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragRef.current) return;
     dragRef.current = null;
     setPanning(false);
+    // 只有真的拖动过才记「松手点」：没拖动的点击不该被吞
+    dragEndRef.current = draggedRef.current ? { x: e.clientX, y: e.clientY } : null;
+    draggedRef.current = false;
     try {
       e.currentTarget.releasePointerCapture?.(e.pointerId);
     } catch {
@@ -129,7 +200,32 @@ export function WikiGraphView({
     }
   };
 
+  /**
+   * 拖拽结束后浏览器仍会补发一次 click：不拦的话「拖动平移」会顺手打开一个页面。
+   *
+   * 用「click 坐标是否等于松手坐标」判断而不是无脑吞下一次点击：
+   * 用户拖动后立刻点另一个节点（坐标不同）应该照常打开，不该被吃掉一次操作。
+   */
+  const selectNode = useCallback(
+    (path: string, event: { clientX: number; clientY: number } | null) => {
+      const end = dragEndRef.current;
+      dragEndRef.current = null;
+      if (
+        event &&
+        end &&
+        Math.abs(event.clientX - end.x) <= 2 &&
+        Math.abs(event.clientY - end.y) <= 2
+      ) {
+        return;
+      }
+      onSelect(path);
+    },
+    [onSelect],
+  );
+
   const orphans = graph.nodes.filter((n) => n.orphan).length;
+  const percent = zoomPercent(viewport.zoom);
+  const animate = !reduceMotion && !panning && !wheelActive;
 
   if (graph.nodes.length === 0) {
     return (
@@ -167,6 +263,8 @@ export function WikiGraphView({
         role="application"
         aria-label="知识库图谱，可缩放与拖动"
         data-panning={panning ? "on" : "off"}
+        data-zoom={viewport.zoom}
+        data-testid="wiki-graph-canvas"
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
@@ -177,8 +275,9 @@ export function WikiGraphView({
       >
         <svg width={size.w} height={size.h} className="block">
           <g
-            transform={`translate(${size.w / 2 + pan.x} ${size.h / 2 + pan.y}) scale(${zoom}) translate(${-size.w / 2} ${-size.h / 2})`}
-            style={{ transition: panning ? "none" : "transform .15s ease" }}
+            transform={viewportTransform(viewport, size)}
+            // 拖拽/滚轮期间不加过渡（见文件头）；其余情况给按钮缩放一个短过渡
+            style={{ transition: animate ? "transform .15s ease" : "none" }}
           >
             {/* 连线 */}
             {graph.edges.map((edge, i) => {
@@ -213,11 +312,11 @@ export function WikiGraphView({
                   role="button"
                   tabIndex={0}
                   aria-label={`打开页面 ${node.title}`}
-                  onClick={() => onSelect(node.id)}
+                  onClick={(e) => selectNode(node.id, e)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      onSelect(node.id);
+                      selectNode(node.id, null);
                     }
                   }}
                   style={{ cursor: "pointer" }}
@@ -239,7 +338,9 @@ export function WikiGraphView({
                     fill={active ? "#1a1a1a" : "#777"}
                     style={{ pointerEvents: "none", userSelect: "none" }}
                   >
-                    {node.title.length > 12 ? `${node.title.slice(0, 12)}…` : node.title}
+                    {(titleById.get(node.id) ?? node.title).length > 12
+                      ? `${(titleById.get(node.id) ?? node.title).slice(0, 12)}…`
+                      : (titleById.get(node.id) ?? node.title)}
                   </text>
                 </g>
               );
@@ -247,35 +348,42 @@ export function WikiGraphView({
           </g>
         </svg>
 
-        {/* 缩放控件 */}
+        {/* 缩放控件：−/百分比/＋ + 重置视图（双击复位保留为快捷手势） */}
         <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg border border-line bg-white px-1 py-0.5 shadow-card">
           <button
             type="button"
             aria-label="缩小图谱"
-            onClick={() => zoomBy(-ZOOM_STEP)}
+            onClick={() => zoomBy(-ZOOM_BUTTON_STEP)}
             className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
           >
             −
           </button>
-          <button
-            type="button"
-            aria-label="复位图谱"
-            onClick={reset}
-            className="min-w-[38px] rounded-sm px-1 py-0.5 text-[10px] text-muted hover:bg-[#f3f3f3]"
+          <span
+            aria-live="polite"
+            data-testid="graph-zoom-percent"
+            className="min-w-[38px] text-center text-[10px] tabular-nums text-muted"
           >
-            {Math.round(zoom * 100)}%
-          </button>
+            {percent}%
+          </span>
           <button
             type="button"
             aria-label="放大图谱"
-            onClick={() => zoomBy(ZOOM_STEP)}
+            onClick={() => zoomBy(ZOOM_BUTTON_STEP)}
             className="rounded-sm px-1.5 py-0.5 text-[12px] text-muted hover:bg-[#f3f3f3]"
           >
             ＋
           </button>
+          <button
+            type="button"
+            aria-label="重置视图"
+            onClick={reset}
+            className="ml-0.5 rounded-sm px-1.5 py-0.5 text-[10px] text-muted hover:bg-[#f3f3f3]"
+          >
+            重置
+          </button>
         </div>
         <div className="pointer-events-none absolute bottom-2 left-2 text-[10px] text-muted">
-          拖动平移 · Ctrl+滚轮缩放 · 双击复位 · 点节点打开页面
+          拖动平移 · 滚轮缩放（以光标为中心） · 双击复位 · 点节点打开页面
         </div>
       </div>
     </div>

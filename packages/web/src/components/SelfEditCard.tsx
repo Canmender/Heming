@@ -74,7 +74,7 @@ export function SelfEditCard({
   };
 
   return (
-    <section aria-label="自我优化" className="mt-3 rounded-xl border border-line bg-white p-4 shadow-card">
+    <section aria-label="自我优化" className="ui-card mt-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-[12px] font-bold text-muted">自我优化</div>
@@ -104,16 +104,16 @@ export function SelfEditCard({
       </div>
 
       {!agentId && (
-        <div className="mt-2 text-[11px] text-[#b45309]">先在上方选择一个智能体，才能配置它的自我优化。</div>
+        <div className="mt-2 text-[11px] text-[var(--warn)]">先在上方选择一个智能体，才能配置它的自我优化。</div>
       )}
       {agentId && !enabled && (
-        <div className="mt-2 text-[11px] text-[#b45309]">
+        <div className="mt-2 text-[11px] text-[var(--warn)]">
           该智能体当前拿不到 self.* 工具，无法自行改动配置。
         </div>
       )}
 
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-[11px] font-bold text-muted">
+        <div className="text-[12px] font-medium text-muted">
           变更记录{audit.length ? `（最近 ${audit.length} 条）` : ""}
         </div>
         {audit.length === 0 ? (
@@ -128,7 +128,7 @@ export function SelfEditCard({
       </div>
 
       <div className="mt-3 border-t border-line-soft pt-2">
-        <div className="text-[11px] font-bold text-muted">
+        <div className="text-[12px] font-medium text-muted">
           可回滚的修改{snaps.length ? `（${snaps.length} 条）` : ""}
         </div>
         <div className="mt-0.5 ui-caption">
@@ -146,11 +146,11 @@ export function SelfEditCard({
                 className="flex flex-wrap items-center gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]"
               >
                 <span className="text-muted">{snap.at.slice(0, 16).replace("T", " ")}</span>
-                <span className="min-w-0 flex-1 truncate text-[#555]">{snap.label}</span>
+                <span className="min-w-0 flex-1 truncate text-[var(--body)]">{snap.label}</span>
                 <button
                   type="button"
                   aria-label={`回滚 ${snap.label}`}
-                  className="rounded-sm border border-line px-1.5 py-0.5 text-[#555] hover:bg-[#f7f7f7]"
+                  className="rounded-sm border border-line px-1.5 py-0.5 text-[var(--body)] hover:bg-[var(--subtle-2)]"
                   onClick={() => rollback(snap)}
                 >
                   回滚
@@ -162,7 +162,7 @@ export function SelfEditCard({
         {notice && (
           <div
             role="status"
-            className={`mt-1 text-[11px] ${notice.ok ? "text-[#15803d]" : "text-[#b45309]"}`}
+            className={`mt-1 text-[11px] ${notice.ok ? "text-[#15803d]" : "text-[var(--warn)]"}`}
           >
             {notice.text}
           </div>
@@ -228,12 +228,12 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
   return (
     <li className="flex flex-wrap items-baseline gap-1.5 rounded-sm border border-line-soft px-2 py-1 text-[11px]">
       <span className="text-muted">{time}</span>
-      <span className="rounded-sm bg-[#f3f3f3] px-1 text-muted">
+      <span className="rounded-sm bg-[var(--subtle-3)] px-1 text-muted">
         {SCOPE_LABEL[entry.scope]}·{ACTION_LABEL[entry.action] ?? entry.action}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[#555]">{entry.target}</span>
+      <span className="min-w-0 flex-1 truncate text-[var(--body)]">{entry.target}</span>
       {entry.rejected && (
-        <span className="text-[#b45309]" title={entry.rejected}>
+        <span className="text-[var(--warn)]" title={entry.rejected}>
           {entry.rejected}
         </span>
       )}

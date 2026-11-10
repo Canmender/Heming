@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { VaultDoc, VaultEntry, VaultMeta } from "../../lib/vault/types.js";
+import type { VaultBridge, VaultDoc, VaultEntry, VaultMeta } from "../../lib/vault/types.js";
+import { createMemoryVaultBridge } from "../../lib/vault/bridge.js";
 import { DEFAULT_DAILY_CONFIG, dailyNotePath } from "../../lib/vault/daily.js";
 import { useUiStore } from "../../store/ui.js";
 import { KnowledgePage, type KnowledgeStore } from "./KnowledgePage.js";
@@ -115,9 +116,9 @@ const fakeLoader: EditorLoader = vi.fn(async (_host: HTMLElement, options) => ({
   destroy: vi.fn(),
 }));
 
-function renderPage(over: Partial<KnowledgeStore> = {}) {
+function renderPage(over: Partial<KnowledgeStore> = {}, bridge?: VaultBridge) {
   const store = fakeStore(over);
-  const view = render(<KnowledgePage store={store} editorLoader={fakeLoader} />);
+  const view = render(<KnowledgePage store={store} editorLoader={fakeLoader} bridge={bridge} />);
   return { store, view };
 }
 
@@ -251,7 +252,126 @@ describe("知识库页 · 未保存拦截", () => {
   });
 });
 
-/* ============================ 第二轮（d.114）============================ */
+/* ============================ d.126：安装目录 wiki + 标准检查 ============================ */
+
+/** 造一个「memory」库的 store 覆盖项（注入的内存桥唯一库 id 就是 memory）。 */
+function memoryVaultStore(over: Partial<KnowledgeStore> = {}): Partial<KnowledgeStore> {
+  return {
+    vaults: [{ ...vault, id: "memory", name: "和鸣知识库" }],
+    activeVaultId: "memory",
+    ...over,
+  };
+}
+
+describe("知识库页 · 默认库根与「打开目录」", () => {
+  it("页脚展示当前根路径；默认库带「默认库」标识；回落原因原样展示", () => {
+    renderPage({
+      vaults: [
+        {
+          ...vault,
+          managed: true,
+          rootNote: "安装目录不可写（没有写权限），默认知识库已回落到 D:/Heming/wiki。",
+        },
+      ],
+    });
+    expect(screen.getByText(/默认库：D:\/Notes/)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("安装目录不可写");
+    expect(screen.getByText(/已回落到 D:\/Heming\/wiki/)).toBeInTheDocument();
+  });
+
+  it("「打开目录」把库根交给文件桥（rel 传空串 = 打开根目录）", () => {
+    const reveal = vi.fn(async () => true);
+    const bridge = { ...createMemoryVaultBridge(), reveal };
+    renderPage({}, bridge);
+    fireEvent.click(screen.getByRole("button", { name: "在资源管理器中打开知识库根目录" }));
+    expect(reveal).toHaveBeenCalledWith("v1", "");
+  });
+});
+
+describe("知识库页 · 卡帕西标准检查", () => {
+  it("页头入口打开检查：列出缺目录/缺根文件，一键补齐只建缺失结构", async () => {
+    const bridge = createMemoryVaultBridge();
+    const { store } = renderPage(memoryVaultStore({ index: null }), bridge);
+    fireEvent.click(screen.getByRole("button", { name: "标准检查" }));
+
+    expect(await screen.findByRole("dialog", { name: "标准检查" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/缺目录/)).toBeInTheDocument());
+    expect(screen.getByText(/缺根文件/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "一键补齐结构" }));
+    await waitFor(() => expect(screen.getByText(/已补齐/)).toBeInTheDocument());
+
+    // 结构真的落到桥上（不是只改界面状态），且缺项已消失
+    const tree = await bridge.tree("memory", { depth: 4 });
+    const names = (entries: VaultEntry[]): string[] =>
+      entries.flatMap((entry) => [entry.rel, ...(entry.children ? names(entry.children) : [])]);
+    expect(names(tree)).toEqual(expect.arrayContaining(["raw", "wiki", "wiki/entities", "index.md", "schema.md"]));
+    expect(await bridge.read("memory", "schema.md")).not.toBeNull();
+    await waitFor(() => expect(screen.queryByText(/缺目录/)).not.toBeInTheDocument());
+    expect(store.refreshTree).toHaveBeenCalled();
+  });
+
+  it("检查失败（例如库目录被删）如实报错，不显示空白结论", async () => {
+    const bridge = {
+      ...createMemoryVaultBridge(),
+      tree: vi.fn(async () => {
+        throw new Error("知识库目录不存在");
+      }),
+    };
+    renderPage(memoryVaultStore(), bridge);
+    fireEvent.click(screen.getByRole("button", { name: "标准检查" }));
+    await waitFor(() => expect(screen.getByText(/检查失败/)).toBeInTheDocument());
+  });
+
+  it("已有文件不会被补齐覆盖", async () => {
+    const userIndex = "---\ntitle: 我自己写的\ncreated: 2025-01-01\ntags: [mine]\n---\n\n正文\n";
+    const bridge = createMemoryVaultBridge({ files: { "index.md": userIndex } });
+    renderPage(memoryVaultStore({ index: null }), bridge);
+    fireEvent.click(screen.getByRole("button", { name: "标准检查" }));
+    await waitFor(() => expect(screen.getByText(/缺目录/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "一键补齐结构" }));
+    await waitFor(() => expect(screen.getByText(/已补齐/)).toBeInTheDocument());
+    expect((await bridge.read("memory", "index.md"))?.text).toBe(userIndex);
+  });
+});
+
+describe("知识库页 · raw/ 只读", () => {
+  const rawDoc: VaultDoc = {
+    vaultId: "v1",
+    rel: "raw/论文.md",
+    text: "---\ntitle: 论文\ncreated: 2026-01-01\ntags: [source]\n---\n\n原始材料原文",
+    mtime: MTIME,
+    size: 60,
+  };
+
+  function rawPage(over: Partial<KnowledgeStore> = {}) {
+    return renderPage({
+      activeRel: "raw/论文.md",
+      openFiles: ["raw/论文.md"],
+      docs: new Map([["raw/论文.md", rawDoc]]),
+      index: makeIndex([
+        pageInfo({ rel: "raw/论文.md", title: "论文", body: "原始材料原文" }),
+      ]),
+      ...over,
+    });
+  }
+
+  it("打开 raw/ 文件：说明只读原因，不给编辑（源码/分栏）入口", () => {
+    rawPage();
+    expect(screen.getByText(/raw\/ 放的是原始来源/)).toBeInTheDocument();
+    expect(screen.getByText("只读来源")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "源码" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("vault-editor-host")).not.toBeInTheDocument();
+    // 用预览渲染原文，内容仍然可读
+    expect(screen.getByTestId("vault-preview-pane")).toBeInTheDocument();
+  });
+
+  it("普通笔记不受影响：仍可切三态", () => {
+    renderPage();
+    expect(screen.getByRole("button", { name: "源码" })).toBeInTheDocument();
+  });
+});
+
 
 describe("知识库页 · 快速切换（Ctrl+O）", () => {
   afterEach(() => {

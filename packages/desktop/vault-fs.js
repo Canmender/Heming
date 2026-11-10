@@ -65,6 +65,318 @@ const MAX_VAULT_NAME = 64;
 const MAX_ROOT_CHARS = 1000;
 /** 智能体默认可写目录（规格 §4：默认 inbox）。显式空数组表示「智能体对本库只读」。 */
 const DEFAULT_WRITE_DIRS = ["inbox"];
+
+/* ------------------------------------------------------------------ 卡帕西标准 */
+
+/**
+ * 卡帕西 LLM Wiki 标准的目录清单（默认知识库初始化时落盘）。
+ *
+ * 为什么桌面端也要有一份：默认库落在「应用可写根」（见 `resolveDefaultVaultRoot`），
+ * 首次登记时由主进程直接把结构建好，用户一进知识库页就有可用的库，而不是先看到一片 404。
+ * 界面侧的「标准检查 / 一键补齐」（`packages/web/src/lib/vault/standard.ts`）用同一口径，
+ * 两处的目录清单与模板必须一致——**改一处必须改两处**（本仓 `TEXT_EXTS` 也是这个约定）。
+ */
+const STANDARD_VAULT_DIRS = [
+  "raw",
+  "wiki/entities",
+  "wiki/concepts",
+  "wiki/sources",
+  "wiki/synthesis",
+  "wiki/notes",
+];
+
+/** 标准的四个根文件（缺什么补什么，**绝不覆盖已有内容**）。 */
+const STANDARD_VAULT_FILES = ["index.md", "log.md", "schema.md", "首页.md"];
+
+/** 默认库展示名（与旧 wiki 迁移口径一致：用户升级后看到的是同一个名字）。 */
+const DEFAULT_VAULT_NAME = "和鸣知识库";
+
+/**
+ * 默认库给智能体的可写目录：`wiki/` 下由智能体维护页面（标准要求），`inbox/` 留给
+ * 「随手记」类写回；`raw/` 是事实基准，任何通道都不该写它，所以不在名单里。
+ */
+const DEFAULT_VAULT_WRITE_DIRS = ["wiki", "inbox"];
+
+/**
+ * 生成标准根文件的初始模板。
+ *
+ * 口径与老 `wiki-fs.js`（卡帕西标准落地层）和 web 侧 `DEFAULT_SCHEMA` 一致：
+ * 同样的三层结构、同样的页面格式与 ingest/query/lint 流程；差别只有 frontmatter
+ * 多了 `created` / `tags`（本轮要求「每个 .md 都有 created + tags」）。
+ *
+ * @param {string} rel 根文件相对路径
+ * @param {string} today `YYYY-MM-DD`
+ * @returns {string|null} 模板文本；未知文件返回 null（调用方跳过）
+ */
+function buildStandardFile(rel, today) {
+  const frontmatter = (title, tag) =>
+    `---\ntitle: ${title}\ncreated: ${today}\ntags: [${tag}]\nupdated: ${today}\n---\n`;
+  switch (rel) {
+    case "index.md":
+      return `${frontmatter("索引", "index")}
+# 索引
+
+> 这是知识库的目录，由智能体维护：每新建或更新一个页面，就在对应类别下补一行
+> \`- [[页面名]] —— 一句话摘要\`。人先读它定位相关页，再钻进具体页面。
+
+## 实体（entities）
+
+## 概念（concepts）
+
+## 来源（sources）
+
+## 综合（synthesis）
+
+## 笔记（notes）
+`;
+    case "log.md":
+      return `${frontmatter("时间流水", "log")}
+# 时间流水
+
+> 只追加、不改历史。每条以 \`## [YYYY-MM-DD] <类型> | <标题>\` 开头
+> （类型如 init / ingest / query / lint），便于 grep 出「什么时候、因为什么动了知识库」。
+
+## [${today}] init | 初始化知识库
+
+- 建好 raw/、wiki/<类别>/、index.md、log.md、schema.md、首页.md。
+- 之后缺什么，知识库页的「标准检查」会列出来。
+`;
+    case "schema.md":
+      return `${frontmatter("知识库规约", "schema")}
+# 知识库规约
+
+本文件是知识库的维护规约，**LLM 与人共同演进**：改之前先读它，写完记得同步更新。
+
+## 三层结构
+
+- \`raw/<名称>.md\`：**原始来源，只读**。文章、论文、访谈记录等一手材料。
+  LLM 读它、引用它，但**绝不修改它**——它是全部结论的事实基准。
+- \`wiki/<类别>/<页面>.md\`：**LLM 生成的页面**，可改。类别：
+  - \`entities\` 实体：人、组织、产品、地点等具体对象
+  - \`concepts\` 概念：抽象观点、方法、模式
+  - \`sources\` 来源：单份原始材料的摘要页
+  - \`synthesis\` 综合：跨页面的综合结论、演进中的论点
+  - \`notes\` 笔记：其他零散内容
+- \`index.md\` / \`log.md\`：索引与流水，见下。
+
+## 页面格式
+
+每个页面带 YAML frontmatter，且必须有 \`created\`（创建日期）与 \`tags\`（分类标签）；
+正文用 markdown，页面之间用 Obsidian 双向链接 \`[[页面名]]\` 交叉引用（可写别名 \`[[目标|显示文字]]\`）。
+
+## 操作流程
+
+**Ingest（摄入）**
+1. 读 \`raw/\` 下的新材料，与我确认关键收获。
+2. 在 \`wiki/\` 写或更新相关页面——一份材料常会触及十几页，不止新建一页。
+3. 更新 \`index.md\`（按类别加条目 + 一句话摘要）。
+4. 追加 \`log.md\`：\`## [YYYY-MM-DD] ingest | 材料标题\`。
+
+**Query（提问）**
+1. 先读 \`index.md\` 定位相关页，再钻进具体页面读全文。
+2. 回答带引用（标明来自哪个页面）。
+3. **有价值的回答要归档回 wiki**：新建页面或追加到已有页面，让探索成果沉淀而非消失在聊天记录里。
+
+**Lint（体检）**
+定期检查：页面间矛盾、被新资料推翻的旧结论、无入链的孤儿页、
+被反复提及却没有独立页面的概念、缺失的交叉引用。
+体检结论与待查方向追加到 \`log.md\`。
+
+## 底线
+
+- 不改 \`raw/\`。
+- 每条长期结论都要能追溯到某个 \`raw/\` 来源或某次提问。
+- 矛盾不要掩盖：新旧结论冲突时，两个都写上并注明时间，说明哪个更新。
+`;
+    case "首页.md":
+      return `${frontmatter("首页", "index")}
+# 欢迎使用知识库
+
+这里按卡帕西 LLM Wiki 标准组织：**人负责判断，LLM 负责整理**。
+
+## 从这里开始
+
+- [[索引]]：全库目录，回答提问前先查这里。
+- \`raw/\`：放原始材料（文章、论文、访谈记录）。**只读**——智能体读它但不改它。
+- \`wiki/\`：智能体维护的页面，按实体 / 概念 / 来源 / 综合 / 笔记分类。
+- \`schema.md\`：维护规约；\`log.md\`：时间流水。
+
+## 怎么用
+
+1. 把材料丢进 \`raw/\`；
+2. 在对话里让智能体「摄入」这份材料；
+3. 它会更新 \`wiki/\` 页面、\`index.md\` 与 \`log.md\`；
+4. 有疑问直接问；答案有长期价值时让它归档回 wiki。
+`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * 默认知识库根：应用可写根（计划 §0.1）。
+ *
+ * 选择顺序（每一步都**真实试写**，不是猜权限）：
+ * 1. 打包版：`<可执行文件目录>/wiki`——装机目录随安装位置走，便携版/自定义目录都能用；
+ * 2. 开发版（`electron .` 或普通 node）：`~/Heming/wiki`，绝不往 node_modules 里写；
+ * 3. 第 1 步不可写（典型是装在 `C:\Program Files`）→ 回落 `~/Heming/wiki`，并在
+ *    `note` 里写明「哪里不可写、回落到了哪里」，界面原样展示，不静默；
+ * 4. 两处都不可写 → 仍返回 `~/Heming/wiki` 并标 `writable:false`：读旧笔记还能用，
+ *    但新建/保存会失败，界面必须显式提示（规格 §10 风险表）。
+ *
+ * @param {{homeDir?: string, execDir?: string, isPackaged?: boolean}} [options] 测试注入
+ * @returns {Promise<{root: string, writable: boolean, note: string}>}
+ */
+async function resolveDefaultVaultRoot(options) {
+  const opts = options && typeof options === "object" ? options : {};
+  const home = path.resolve(opts.homeDir || os.homedir());
+  const homeWiki = path.join(home, "Heming", "wiki");
+  const packaged = opts.isPackaged === undefined ? detectPackagedRuntime() : Boolean(opts.isPackaged);
+  const execDir = opts.execDir || (process.execPath ? path.dirname(process.execPath) : "");
+
+  /** 候选根：打包版先试安装目录，再退用户目录。 */
+  const candidates = [];
+  if (packaged && execDir) candidates.push({ root: path.join(execDir, "wiki"), label: "安装目录" });
+  candidates.push({ root: homeWiki, label: "用户目录" });
+
+  let firstFailure = null;
+  for (const candidate of candidates) {
+    const probe = await probeWritableDir(candidate.root);
+    if (probe.ok) {
+      return {
+        root: candidate.root,
+        writable: true,
+        note: firstFailure
+          ? `${firstFailure.label}不可写（${firstFailure.reason}），默认知识库已回落到 ${candidate.root}。`
+          : "",
+      };
+    }
+    if (!firstFailure) firstFailure = { label: candidate.label, reason: probe.reason };
+  }
+  const last = candidates[candidates.length - 1];
+  return {
+    root: last.root,
+    writable: false,
+    note: `默认知识库目录不可写（${firstFailure ? firstFailure.reason : "未知原因"}）：新建与保存会失败，请检查目录权限，或把知识库换到可写目录。`,
+  };
+}
+
+/**
+ * 是否打包版运行。
+ *
+ * Electron 把「用 electron 可执行文件跑脚本」标记成 `process.defaultApp === true`，
+ * 打包后被删掉——比 `app.isPackaged` 更适合在本模块用（本模块不 require electron，
+ * 否则单测得伪造整个 electron 模块）。
+ * 普通 node（单测/脚本）没有该标记，按开发态处理：绝不往 node 安装目录里写知识库。
+ */
+function detectPackagedRuntime() {
+  if (typeof process.defaultApp === "boolean") return !process.defaultApp;
+  return false;
+}
+
+/** 把写盘底层错误翻成用户能看懂的中文原因（界面会把 note 原样展示）。 */
+function describeWriteFailure(error) {
+  const code = error && error.code;
+  if (code === "EACCES" || code === "EPERM") return "没有写权限";
+  if (code === "EROFS") return "所在磁盘是只读的";
+  if (code === "ENOSPC") return "磁盘空间不足";
+  if (code === "ENOTDIR") return "路径上有一级不是目录";
+  if (code === "EEXIST") return "同名文件已存在";
+  return textOf(error);
+}
+
+/**
+ * 试写一个目录，判断「知识库根能不能落在这里」。
+ *
+ * 为什么用真实写文件而不是 `fs.access(W_OK)`：Windows 上 access 会受 ACL 继承与
+ * 安装器虚拟化影响，可能报可写但实际写不进去（或反过来）。探针文件写完立刻删；
+ * mkdir 失败时连目录都不会留下，所以探测本身不污染安装目录。
+ *
+ * @param {string} dir
+ * @returns {Promise<{ok: boolean, reason: string}>}
+ */
+async function probeWritableDir(dir) {
+  const probe = path.join(dir, `.heming-write-probe-${crypto.randomBytes(4).toString("hex")}`);
+  try {
+    await fsp.mkdir(dir, { recursive: true });
+    const handle = await fsp.open(probe, "w");
+    try {
+      await handle.writeFile("ok", "utf8");
+    } finally {
+      await handle.close();
+    }
+    await fsp.unlink(probe);
+    return { ok: true, reason: "" };
+  } catch (error) {
+    try {
+      await fsp.unlink(probe);
+    } catch {
+      /* 探针本来就没写成功：清理失败不改变结论 */
+    }
+    return { ok: false, reason: describeWriteFailure(error) };
+  }
+}
+
+/**
+ * 幂等初始化知识库的标准结构（只补缺，**绝不覆盖已有文件**）。
+ *
+ * 写文件用 `flag:"wx"` 而不是「先 stat 再写」：两个和鸣实例同时首启时，
+ * 「先查后写」的窗口会让后写的一方盖掉先写的一方（此时用户可能已经开始写了）。
+ * `EEXIST` 视为「已经有了」，不算失败也不报警。
+ *
+ * @param {string} root 库根绝对路径
+ * @returns {Promise<{createdDirs: string[], createdFiles: string[], failures: {rel: string, message: string}[]}>}
+ */
+async function ensureStandardVault(root) {
+  const today = new Date().toISOString().slice(0, 10);
+  const result = { createdDirs: [], createdFiles: [], failures: [] };
+  for (const rel of STANDARD_VAULT_DIRS) {
+    const abs = path.join(root, ...rel.split("/"));
+    try {
+      const stat = await fsp.stat(abs).catch(() => null);
+      if (stat && stat.isDirectory()) continue;
+      if (stat) {
+        result.failures.push({ rel, message: "同名文件已存在，无法创建目录" });
+        continue;
+      }
+      await fsp.mkdir(abs, { recursive: true });
+      result.createdDirs.push(rel);
+    } catch (error) {
+      result.failures.push({ rel, message: describeWriteFailure(error) });
+    }
+  }
+  for (const rel of STANDARD_VAULT_FILES) {
+    const text = buildStandardFile(rel, today);
+    if (text === null) continue;
+    const abs = path.join(root, rel);
+    try {
+      // Windows 上对已存在的目录 writeFile(flag:"wx") 报的是 EEXIST（不是 EISDIR），
+      // 只看错误码会把「同名目录占位」当成「文件已存在」静默跳过；所以先看清占位者是谁。
+      const stat = await fsp.stat(abs).catch(() => null);
+      if (stat) {
+        if (!stat.isFile()) {
+          result.failures.push({ rel, message: "同名目录已存在，无法创建文件" });
+        }
+        continue; // 已有文件：一字不动
+      }
+      await fsp.writeFile(abs, text, { encoding: "utf8", flag: "wx" });
+      result.createdFiles.push(rel);
+    } catch (error) {
+      if (error && error.code === "EEXIST") continue; // 并发下别人刚建好：视为已有
+      result.failures.push({ rel, message: describeWriteFailure(error) });
+    }
+  }
+  return result;
+}
+
+/** 标准初始化结果 → 一行中文日志（首启失败要可观测，但不能挡住界面）。 */
+function describeInitResult(root, init) {
+  const parts = [];
+  if (init.createdDirs.length) parts.push(`目录 ${init.createdDirs.length} 个`);
+  if (init.createdFiles.length) parts.push(`文件 ${init.createdFiles.length} 个`);
+  if (init.failures.length) parts.push(`失败 ${init.failures.length} 项`);
+  return `[heming] 默认知识库「${root}」标准结构已就绪：${parts.join("，") || "无需变更"}`;
+}
 /** 目录树里恒定跳过的目录名（隐藏目录另按 `.` 前缀判断）。 */
 const IGNORED_TREE_NAMES = new Set(["node_modules"]);
 /** 图片扩展名 → data URL 的 mime。 */
@@ -324,10 +636,12 @@ function sanitizeMeta(raw) {
 /**
  * 读注册表。
  *
- * 返回 `{ vaults, corrupt, missing, legacyMigrated }`：
+ * 返回 `{ vaults, corrupt, missing, legacyMigrated, defaultHidden }`：
  * - 文件不存在 → 空表 + `missing`；
  * - JSON 坏了/形状不对 → 空表 + `corrupt`（**不覆盖原文件**；后续写注册表会先把它备份）；
  * - 读文件的其他 IO 失败也按 corrupt 处理：宁可保守地不覆盖，也不要把用户的注册表写丢。
+ * - `defaultHidden`：用户把默认库从列表里移除了。**必须尊重**，否则「移除」下一次
+ *   列库就被自动登记回来，按钮等于失效（见 `ensureDefaultVault`）。
  *
  * @param {string} registryFile
  */
@@ -337,20 +651,22 @@ async function readRegistry(registryFile) {
     raw = await fsp.readFile(registryFile, "utf8");
   } catch (error) {
     if (error && error.code === "ENOENT") {
-      return { vaults: [], corrupt: false, missing: true, legacyMigrated: false };
+      return { vaults: [], corrupt: false, missing: true, legacyMigrated: false, defaultHidden: false };
     }
-    return { vaults: [], corrupt: true, missing: false, legacyMigrated: false };
+    return { vaults: [], corrupt: true, missing: false, legacyMigrated: false, defaultHidden: false };
   }
   try {
     const parsed = JSON.parse(raw);
     let list = null;
     let legacyMigrated = false;
+    let defaultHidden = false;
     if (Array.isArray(parsed)) {
       // 兼容最早可能出现的裸数组形态（本分支尚未发布，但读旧文件不亏）
       list = parsed;
     } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.vaults)) {
       list = parsed.vaults;
       legacyMigrated = parsed.legacyMigrated === true;
+      defaultHidden = parsed.defaultHidden === true;
     }
     if (!list) throw new Error("vaults 不是数组");
     const vaults = [];
@@ -360,9 +676,9 @@ async function readRegistry(registryFile) {
       if (vaults.some((existing) => samePath(existing.root, meta.root))) continue;
       vaults.push(meta);
     }
-    return { vaults, corrupt: false, missing: false, legacyMigrated };
+    return { vaults, corrupt: false, missing: false, legacyMigrated, defaultHidden };
   } catch {
-    return { vaults: [], corrupt: true, missing: false, legacyMigrated: false };
+    return { vaults: [], corrupt: true, missing: false, legacyMigrated: false, defaultHidden: false };
   }
 }
 
@@ -374,7 +690,7 @@ async function readRegistry(registryFile) {
  *
  * @param {string} registryFile
  * @param {Array} vaults 已规整的库列表
- * @param {{legacyMigrated?: boolean}} [extra]
+ * @param {{legacyMigrated?: boolean, defaultHidden?: boolean}} [extra]
  */
 async function saveRegistry(registryFile, vaults, extra) {
   const file = path.resolve(registryFile);
@@ -396,6 +712,7 @@ async function saveRegistry(registryFile, vaults, extra) {
   const payload = {
     version: 1,
     legacyMigrated: Boolean(extra && extra.legacyMigrated),
+    defaultHidden: Boolean(extra && extra.defaultHidden),
     vaults,
   };
   const tmp = `${file}.tmp-${crypto.randomBytes(6).toString("hex")}`;
@@ -412,13 +729,13 @@ async function saveRegistry(registryFile, vaults, extra) {
   }
 }
 
-/** 新建库条目的默认值。 */
-function createMeta(root, name) {
+/** 新建库条目的默认值（`writeDirs` 可显式给，默认仍是 inbox）。 */
+function createMeta(root, name, writeDirs) {
   return {
     id: crypto.randomUUID(),
     name,
     root,
-    writeDirs: [...DEFAULT_WRITE_DIRS],
+    writeDirs: writeDirs ? [...writeDirs] : [...DEFAULT_WRITE_DIRS],
     addedAt: new Date().toISOString(),
   };
 }
@@ -473,6 +790,9 @@ function entryKindOf(name) {
  * @param {string} [options.registryFile] 注册表路径（测试注入）
  * @param {{showOpenDialog: Function}} [options.dialog] Electron dialog
  * @param {{showItemInFolder: Function, openPath?: Function}} [options.shell] Electron shell
+ * @param {() => Promise<{root: string, writable?: boolean, note?: string}>} [options.defaultRootResolver]
+ *   默认知识库根解析器。**显式传入才启用**「默认库自动登记 + 标准结构初始化」：
+ *   生产由 `registerVaultIpc` 传真实解析器；单测传假解析器，避免碰真实用户目录。
  */
 function createVaultService(options) {
   const opts = options && typeof options === "object" ? options : {};
@@ -480,6 +800,67 @@ function createVaultService(options) {
   const dialog = opts.dialog;
   const shell = opts.shell;
   const activeWatchers = new Set();
+  const defaultRootResolver =
+    typeof opts.defaultRootResolver === "function" ? opts.defaultRootResolver : null;
+
+  /**
+   * 默认根信息（进程内只算一次）。
+   *
+   * 为什么缓存：解析要真实试写（见 `probeWritableDir`），知识库页每次列库都跑一遍
+   * 等于每次进页面都往安装目录写一个探针文件；根在本次运行里不会变，算一次就够。
+   * 失败也不抛：默认库建不出来最多是空库态，不能让 vault:list 整个失败。
+   */
+  let defaultRootPromise = null;
+  function defaultRootInfo() {
+    if (!defaultRootResolver) return Promise.resolve(null);
+    if (!defaultRootPromise) {
+      defaultRootPromise = Promise.resolve()
+        .then(() => defaultRootResolver())
+        .then((info) => {
+          if (!info || typeof info.root !== "string" || !path.isAbsolute(info.root)) {
+            throw new Error("默认知识库根不是绝对路径");
+          }
+          return {
+            root: path.resolve(info.root),
+            writable: info.writable !== false,
+            note: typeof info.note === "string" ? info.note : "",
+          };
+        })
+        .catch((error) => {
+          console.log("[heming] 解析默认知识库根失败：", textOf(error));
+          return null;
+        });
+    }
+    return defaultRootPromise;
+  }
+
+  /**
+   * 首次登记默认知识库（应用可写根 + 卡帕西标准结构）。
+   *
+   * 幂等：同根目录已登记就直接返回（用户自己登记的也不会被重复加一份）；
+   * 已有文件一字不动（`ensureStandardVault` 只补缺）；注册表坏 JSON 时什么都不做
+   * ——宁可下次再试，也不要在读不懂用户数据时覆盖它。
+   * 用户把它移除过（`defaultHidden`）就不再自动登记：否则「移除」按钮等于失效。
+   */
+  async function ensureDefaultVault() {
+    if (!defaultRootResolver) return null;
+    const info = await defaultRootInfo();
+    if (!info) return null;
+    return mutate(async () => {
+      const registry = await readRegistry(registryFile);
+      if (registry.corrupt || registry.defaultHidden) return null;
+      const existing = registry.vaults.find((item) => samePath(item.root, info.root));
+      if (existing) return existing;
+      const init = await ensureStandardVault(info.root);
+      console.log(describeInitResult(info.root, init));
+      const meta = createMeta(info.root, DEFAULT_VAULT_NAME, DEFAULT_VAULT_WRITE_DIRS);
+      await saveRegistry(registryFile, registry.vaults.concat(meta), {
+        legacyMigrated: registry.legacyMigrated,
+        defaultHidden: false,
+      });
+      return meta;
+    });
+  }
 
   /** 注册表变更串行化：并发 pick/rename/remove 时不能丢更新。 */
   let mutationQueue = Promise.resolve();
@@ -723,11 +1104,38 @@ function createVaultService(options) {
   return {
     registryFile,
 
-    /** 已登记的库列表；注册表坏 JSON 时按空表返回（不炸渲染层）。 */
+    /**
+     * 已登记的库列表；注册表坏 JSON 时按空表返回（不炸渲染层）。
+     *
+     * 顺带保证默认库存在（应用可写根 + 标准结构，见 `ensureDefaultVault`）。
+     * 默认库那条会多带两个**不落盘**的展示字段：
+     * - `managed: true`：这是应用自己管理的标准库；
+     * - `rootNote`：根路径说明（空串=一切正常；非空=回落/不可写原因，界面原样展示）。
+     * 这两个字段每次读注册表时现算，不写回 json——用户手动编辑注册表也不会被污染。
+     */
     async list() {
+      if (defaultRootResolver) {
+        try {
+          await ensureDefaultVault();
+        } catch (error) {
+          // 默认库建不出来不能拖垮已有库：用户原有的库照常列出
+          console.log("[heming] 初始化默认知识库失败：", textOf(error));
+        }
+      }
       const registry = await readRegistry(registryFile);
       if (registry.corrupt) console.log("[heming] 知识库注册表无法解析，按空表处理（原文件保留）：", registryFile);
-      return registry.vaults;
+      const info = await defaultRootInfo();
+      if (!info) return registry.vaults;
+      return registry.vaults.map((meta) =>
+        samePath(meta.root, info.root)
+          ? { ...meta, managed: true, rootNote: info.note || "" }
+          : meta,
+      );
+    },
+
+    /** 当前默认知识库根信息（诊断/测试用；界面走 list() 里的 managed/rootNote）。 */
+    async defaultRoot() {
+      return defaultRootInfo();
     },
 
     /** 取一个库的元信息（供 IPC watch 等内部使用）。 */
@@ -760,7 +1168,19 @@ function createVaultService(options) {
       return mutate(async () => {
         const registry = await readRegistry(registryFile);
         const existing = registry.vaults.find((item) => samePath(item.root, root));
-        if (existing) return existing;
+        // 用户手动把默认库目录加回来：解除「不再自动登记」标记（他显然又想要它了）
+        const info = defaultRootResolver ? await defaultRootInfo() : null;
+        const defaultHidden =
+          info && samePath(info.root, root) ? false : registry.defaultHidden;
+        if (existing) {
+          if (defaultHidden !== registry.defaultHidden) {
+            await saveRegistry(registryFile, registry.vaults, {
+              legacyMigrated: registry.legacyMigrated,
+              defaultHidden,
+            });
+          }
+          return existing;
+        }
         let baseName = path.basename(root);
         try {
           baseName = normalizeVaultName(baseName);
@@ -770,19 +1190,31 @@ function createVaultService(options) {
         const meta = createMeta(root, baseName);
         await saveRegistry(registryFile, registry.vaults.concat(meta), {
           legacyMigrated: registry.legacyMigrated,
+          defaultHidden,
         });
         return meta;
       });
     },
 
-    /** 移除登记（只删列表条目，绝不删磁盘文件）。 */
+    /**
+     * 移除登记（只删列表条目，绝不删磁盘文件）。
+     *
+     * 移除的是默认库时要记 `defaultHidden`：不记的话下一次 `list()` 又把它自动登记
+     * 回来，用户会觉得「移除」按钮坏了。之后手动把那个目录加回来就会解除标记。
+     */
     async remove(vaultId) {
       if (typeof vaultId !== "string" || !vaultId.trim()) return false;
       return mutate(async () => {
         const registry = await readRegistry(registryFile);
+        const removed = registry.vaults.find((item) => item.id === vaultId);
         const next = registry.vaults.filter((item) => item.id !== vaultId);
         if (next.length === registry.vaults.length) return false;
-        await saveRegistry(registryFile, next, { legacyMigrated: registry.legacyMigrated });
+        const info = defaultRootResolver && removed ? await defaultRootInfo() : null;
+        const hidesDefault = Boolean(info && removed && samePath(info.root, removed.root));
+        await saveRegistry(registryFile, next, {
+          legacyMigrated: registry.legacyMigrated,
+          defaultHidden: hidesDefault ? true : registry.defaultHidden,
+        });
         return true;
       });
     },
@@ -796,7 +1228,10 @@ function createVaultService(options) {
         if (index < 0) fail("no-vault", "知识库不存在（可能已被移除）");
         const next = registry.vaults.slice();
         next[index] = { ...next[index], name: nextName };
-        await saveRegistry(registryFile, next, { legacyMigrated: registry.legacyMigrated });
+        await saveRegistry(registryFile, next, {
+          legacyMigrated: registry.legacyMigrated,
+          defaultHidden: registry.defaultHidden,
+        });
         return next[index];
       });
     },
@@ -1069,9 +1504,31 @@ function createVaultService(options) {
       return true;
     },
 
-    /** 在系统资源管理器中定位（只定位库内路径；不打开文件内容）。 */
+    /**
+     * 在系统资源管理器中定位（只定位库内路径；不打开文件内容）。
+     *
+     * `rel` 为空 = 打开**库根目录**：知识库页要显示「当前根路径 + 打开目录」，
+     * 而用户点它想看的正是那个文件夹本身（计划 §0.1）。指令是用户显式点的，
+     * 所以这里允许没有具体文件；目录存在性与真实路径仍按库根校验。
+     */
     async reveal(vaultId, rel) {
       const meta = await requireVault(vaultId);
+      const rawRel = typeof rel === "string" ? rel.trim() : "";
+      if (!rawRel) {
+        let rootStat;
+        try {
+          rootStat = await fsp.stat(meta.root);
+        } catch (error) {
+          fail("not-found", `知识库目录不存在或无法访问：${textOf(error)}`);
+        }
+        if (!rootStat.isDirectory()) fail("not-found", "知识库根不是目录");
+        if (!shell || typeof shell.openPath !== "function") {
+          fail("io-error", "当前环境不支持打开资源管理器");
+        }
+        const problem = await shell.openPath(meta.root);
+        if (problem) fail("io-error", `打开目录失败：${problem}`);
+        return true;
+      }
       const norm = checkRel(rel, { forRead: true, allowDir: true });
       const { abs } = await clampPath(meta, norm, { allowMissing: true });
       const stat = await statOrNull(abs);
@@ -1156,7 +1613,10 @@ function createVaultService(options) {
           meta = createMeta(legacy, "和鸣知识库");
           next.push(meta);
         }
-        await saveRegistry(registryFile, next, { legacyMigrated: true });
+        await saveRegistry(registryFile, next, {
+          legacyMigrated: true,
+          defaultHidden: registry.defaultHidden,
+        });
         return meta;
       });
     },
@@ -1181,17 +1641,28 @@ function startsWithDir(rel, dir) {
  *
  * @param {object} ipcMain Electron ipcMain（生产环境传 secureIpc 门面，按主窗口来源收口）
  * @param {object} [deps]
- * @param {string} [deps.registryFile] 注册表路径（测试注入；显式传入时跳过首次迁移）
+ * @param {string} [deps.registryFile] 注册表路径（测试注入；显式传入时跳过首次迁移与默认库探测）
  * @param {{showOpenDialog: Function}} [deps.dialog]
  * @param {{showItemInFolder: Function, openPath?: Function}} [deps.shell]
  * @param {() => any} [deps.getMainWindow] 目录对话框的父窗口
+ * @param {() => Promise<{root: string, writable?: boolean, note?: string}>} [deps.defaultRootResolver]
+ *   默认根解析器（单测注入；缺省时用真实的「应用可写根」探测）
  */
 function registerVaultIpc(ipcMain, deps) {
   const options = deps && typeof deps === "object" ? deps : {};
+  // 单测注入 registryFile 时默认库探测也一并关掉：测试绝不能去写真实用户目录/安装目录。
+  // 想测默认库逻辑就显式传 defaultRootResolver（假解析器）。
+  const defaultRootResolver =
+    options.defaultRootResolver !== undefined
+      ? options.defaultRootResolver
+      : options.registryFile
+        ? null
+        : () => resolveDefaultVaultRoot();
   const service = createVaultService({
     registryFile: options.registryFile,
     dialog: options.dialog,
     shell: options.shell,
+    defaultRootResolver,
   });
   const getMainWindow = typeof options.getMainWindow === "function" ? options.getMainWindow : () => null;
 
@@ -1353,8 +1824,14 @@ module.exports = {
   checkRel,
   defaultRegistryFile,
   toFailureEnvelope,
+  resolveDefaultVaultRoot,
+  ensureStandardVault,
+  buildStandardFile,
   VaultError,
   DEFAULT_WRITE_DIRS,
+  DEFAULT_VAULT_WRITE_DIRS,
+  STANDARD_VAULT_DIRS,
+  STANDARD_VAULT_FILES,
   TEXT_EXTS,
   IMAGE_EXTS,
   MAX_TEXT_BYTES,

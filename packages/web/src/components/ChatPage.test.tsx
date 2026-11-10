@@ -133,6 +133,13 @@ const msg = (id: string, text: string, createdAt: string): Message => ({
   enc: "plain",
 });
 
+/** 智能体历史消息（senderType=agent）：d.126-C 的思考/工具转录块只挂在助手消息上。 */
+const agentMsg = (id: string, text: string, createdAt: string): Message => ({
+  ...msg(id, text, createdAt),
+  senderType: "agent",
+  senderId: "system-assistant",
+});
+
 function jsonRes(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -297,7 +304,9 @@ describe("ChatPage", () => {
       if (
         k.startsWith("heming.msgCache.") ||
         k.startsWith("heming.e2e.") ||
-        k.startsWith("heming.draft.")
+        k.startsWith("heming.draft.") ||
+        // d.126-C：思考/工具转录按消息落盘（按 convId 复用），不清理会把上个用例的块带进来
+        k.startsWith("heming.transcript.")
       ) {
         localStorage.removeItem(k);
       }
@@ -3410,6 +3419,133 @@ describe("ChatPage", () => {
         expect.objectContaining({ type: "agent_error", code: "aborted" }),
       ),
     );
+  });
+
+  // —— d.126-C：对话去头像 + 思考/工具调用转录（历史可展开） ——
+
+  it("d.126-C 消息区不再渲染头像（智能体/用户都不出图片或首字圆底）", async () => {
+    // 两端都配了头像：万一还渲染 Avatar，就会在 DOM 里出现图片
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: {
+            id: "system-assistant",
+            name: "和小鸣",
+            avatar: "data:image/png;base64,AGENTAVATAR",
+            owner_id: null,
+            description: "",
+          },
+          unreadCount: 0,
+        },
+      ],
+    });
+    useAuthStore.setState({ user: { ...me, avatar: "data:image/png;base64,MEAVATAR" } });
+    mockMessagesFetch([
+      { ...msg("u-1", "用户的话", "2026-10-14T01:00:00.000Z"), senderId: "u1" },
+      agentMsg("a-1", "助手的话", "2026-10-14T01:01:00.000Z"),
+    ]);
+
+    const { container } = render(<ChatPage />);
+    expect(await screen.findByText("助手的话")).toBeInTheDocument();
+    expect(screen.getByText("用户的话")).toBeInTheDocument();
+    // 无头像：整棵消息树里没有任何图片（历史消息没有附件）
+    expect(container.querySelectorAll("img")).toHaveLength(0);
+    expect(container.querySelector('img[src*="AGENTAVATAR"]')).toBeNull();
+    expect(container.querySelector('img[src*="MEAVATAR"]')).toBeNull();
+  });
+
+  it("d.126-C 历史消息：思考块/工具块默认折叠成一行摘要，点击展开（会话结束后仍可见）", async () => {
+    // 模拟「上一次会话收口时已落盘」的转录：历史拉取时按消息 id 贴回
+    useChatStore.getState().recordTranscript("c1", "a-1", {
+      thinking: "先在资料里查一下发布计划",
+      tools: [
+        {
+          id: "t1",
+          name: "wiki_search",
+          args: '{"q":"发布计划"}',
+          status: "ok",
+          result: "找到 3 条相关页",
+          startedAt: 1000,
+          endedAt: 1120,
+        },
+      ],
+    });
+    mockMessagesFetch([
+      { ...msg("u-1", "帮我查发布计划", "2026-10-14T01:00:00.000Z"), senderId: "u1" },
+      agentMsg("a-1", "查到了，共三条", "2026-10-14T01:01:00.000Z"),
+    ]);
+
+    render(<ChatPage />);
+    expect(await screen.findByText("查到了，共三条")).toBeInTheDocument();
+
+    // 思考块：默认折叠（正文不在 DOM），一行摘要可展开
+    const thinking = screen.getByRole("button", { name: "思考过程" });
+    expect(thinking).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("先在资料里查一下发布计划")).not.toBeInTheDocument();
+    fireEvent.click(thinking);
+    expect(screen.getByText("先在资料里查一下发布计划")).toBeInTheDocument();
+
+    // 工具块：默认折叠成「工具调用 · 1 次 / 1 完成」，展开看工具名与结果
+    const tools = screen.getByRole("button", { name: "工具调用" });
+    expect(tools).toHaveAttribute("aria-expanded", "false");
+    expect(tools.textContent).toContain("工具调用 · 1 次");
+    expect(tools.textContent).toContain("1 完成");
+    expect(screen.queryByText("wiki_search")).not.toBeInTheDocument();
+    fireEvent.click(tools);
+    expect(screen.getByText("wiki_search")).toBeInTheDocument();
+    expect(screen.getByText(/找到 3 条相关页/)).toBeInTheDocument();
+    // 落盘仍在：切走再回来还能展开
+    expect(localStorage.getItem("heming.transcript.c1")).toContain("先在资料里查一下发布计划");
+  });
+
+  it("d.126-C 流式结束后：思考写入该条消息（折叠可展开）并落盘，流气泡收口", async () => {
+    const send = await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockImplementation(async (_p, _m, o) => {
+      o.onReasoning?.("先想一下怎么答");
+      o.onDelta("答案");
+      return "答案";
+    });
+
+    await pickAndSend("@和小鸣 答一下");
+    const finish = await waitFor(() => {
+      const f = framesOf(send, "agent_finish")[0];
+      expect(f?.streamId).toBeTruthy();
+      return f as { streamId: string };
+    });
+
+    // 服务端入库后的 message_new（带 streamId）：ChatPage 在移除流项前快照转录
+    act(() => {
+      lastHandlers().onEvent({
+        type: "message_new",
+        streamId: finish.streamId,
+        message: agentMsg("a-new", "答案", "2026-10-14T01:05:00.000Z"),
+      });
+    });
+    await waitFor(() => expect(screen.getAllByText("答案").length).toBeGreaterThan(0));
+    expect(screen.queryByText("生成中…")).not.toBeInTheDocument(); // 流气泡已收口
+
+    // 转录写进消息：默认折叠，展开可见；且已落盘（刷新后拉历史仍能贴回）
+    const thinking = screen.getByRole("button", { name: "思考过程" });
+    expect(thinking).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("先想一下怎么答")).not.toBeInTheDocument();
+    fireEvent.click(thinking);
+    expect(screen.getByText("先想一下怎么答")).toBeInTheDocument();
+    expect(localStorage.getItem("heming.transcript.c1")).toContain("先想一下怎么答");
+    // 消息对象本身带上字段（store 侧口供：渲染层读的就是它）
+    const stored = useChatStore.getState().messages.c1.find((m) => m.id === "a-new");
+    expect((stored as { thinking?: string } | undefined)?.thinking).toBe("先想一下怎么答");
+  });
+
+  it("d.126-C 旧消息没有思考/工具字段：正常渲染、不显示折叠块（向后兼容）", async () => {
+    mockMessagesFetch([msg("m1", "旧消息，没有转录", "2026-10-14T01:00:00.000Z")]);
+
+    render(<ChatPage />);
+    expect(await screen.findByText("旧消息，没有转录")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "思考过程" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "工具调用" })).not.toBeInTheDocument();
   });
 
 

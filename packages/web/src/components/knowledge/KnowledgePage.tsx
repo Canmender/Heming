@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SearchHit, VaultStoreApi } from "../../lib/vault/types.js";
+import type { SearchHit, VaultBridge, VaultStoreApi } from "../../lib/vault/types.js";
 import { useVaultStore } from "../../lib/vault/store.js";
 import { runSearch } from "../../lib/vault/search.js";
 import { applyTemplate } from "../../lib/vault/template.js";
-import { resolveVaultBridge } from "../../lib/vault/bridge.js";
+import { resolveVaultBridge, describeVaultError } from "../../lib/vault/bridge.js";
+import {
+  applyStandardRepair,
+  inspectStandard,
+  isRawRel,
+  type StandardReport,
+} from "../../lib/vault/standard.js";
 import { useUiStore } from "../../store/ui.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { hasOpenModal } from "../useModalA11y.js";
@@ -16,6 +22,7 @@ import { NewNoteDialog } from "./NewNoteDialog.js";
 import { PreviewPane } from "./PreviewPane.js";
 import { QuickOpen } from "./QuickOpen.js";
 import { SearchPanel } from "./SearchPanel.js";
+import { StandardCheckDialog } from "./StandardCheckDialog.js";
 import { TagPanel } from "./TagPanel.js";
 import { VaultSettingsDialog } from "./VaultSettingsDialog.js";
 import {
@@ -60,6 +67,11 @@ export interface KnowledgePageProps {
   store?: KnowledgeStore;
   /** 测试注入编辑器加载器；缺省懒加载 CodeMirror 6。 */
   editorLoader?: EditorLoader;
+  /**
+   * 测试注入文件桥（标准检查/补齐用）；缺省 `resolveVaultBridge()`。
+   * 与 store 分开注入：检查是「按当前磁盘状态看一眼」，不依赖 store 的树/索引是否最新。
+   */
+  bridge?: VaultBridge;
 }
 
 type LeftTab = "files" | "search" | "tags";
@@ -70,7 +82,7 @@ type PendingAction = { label: string; run: () => void | Promise<void> };
 /* ------------------------------------------------------------------ 实时 store 外壳 */
 
 /** 真实 store 版本：启动粘合层（幂等）+ 首屏视图。 */
-function LiveKnowledgePage({ editorLoader }: { editorLoader?: EditorLoader }) {
+function LiveKnowledgePage({ editorLoader, bridge }: { editorLoader?: EditorLoader; bridge?: VaultBridge }) {
   const store = useVaultStore() as KnowledgeStore;
 
   // 从导航直接进来时再调一次 bootVault（幂等；App 启动时已经调过一次）
@@ -82,13 +94,13 @@ function LiveKnowledgePage({ editorLoader }: { editorLoader?: EditorLoader }) {
       });
   }, []);
 
-  return <KnowledgePageShell store={store} editorLoader={editorLoader} />;
+  return <KnowledgePageShell store={store} editorLoader={editorLoader} bridge={bridge} />;
 }
 
 /** 页面入口：有注入 store 走注入（测试 / 嵌入场景），否则走真实 store。 */
-export function KnowledgePage({ store, editorLoader }: KnowledgePageProps = {}) {
-  if (store) return <KnowledgePageShell store={store} editorLoader={editorLoader} />;
-  return <LiveKnowledgePage editorLoader={editorLoader} />;
+export function KnowledgePage({ store, editorLoader, bridge }: KnowledgePageProps = {}) {
+  if (store) return <KnowledgePageShell store={store} editorLoader={editorLoader} bridge={bridge} />;
+  return <LiveKnowledgePage editorLoader={editorLoader} bridge={bridge} />;
 }
 
 /* ------------------------------------------------------------------ 三栏外壳 */
@@ -96,9 +108,11 @@ export function KnowledgePage({ store, editorLoader }: KnowledgePageProps = {}) 
 function KnowledgePageShell({
   store,
   editorLoader,
+  bridge: bridgeOverride,
 }: {
   store: KnowledgeStore;
   editorLoader?: EditorLoader;
+  bridge?: VaultBridge;
 }) {
   const [leftTab, setLeftTab] = useState<LeftTab>("files");
   const [activeTag, setActiveTag] = useState<string | null>(null);
@@ -113,6 +127,13 @@ function KnowledgePageShell({
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [newNoteDir, setNewNoteDir] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 卡帕西标准：检查结果、动作进度、失败项（弹窗里的展示状态）
+  const [standardOpen, setStandardOpen] = useState(false);
+  const [standardReport, setStandardReport] = useState<StandardReport | null>(null);
+  const [standardChecking, setStandardChecking] = useState(false);
+  const [standardRepairing, setStandardRepairing] = useState(false);
+  const [standardMessage, setStandardMessage] = useState<string | null>(null);
+  const [standardFailures, setStandardFailures] = useState<{ rel: string; message: string }[]>([]);
   const [dailyConfig, setDailyConfig] = useState<DailyConfig>(() =>
     readDailyConfig(store.activeVaultId),
   );
@@ -123,6 +144,13 @@ function KnowledgePageShell({
   const activePage = activeRel ? (store.index?.pages.get(activeRel) ?? null) : null;
   const activeDoc = activeRel ? (store.docs.get(activeRel) ?? null) : null;
   const activeDirty = activeRel ? store.dirty.has(activeRel) : false;
+  /**
+   * raw/ 只读：标准里 raw 是「事实基准」，任何人（包括智能体）都不该改它。
+   * 现役文件桥没有按目录分读写权限的通道，所以在界面这一层强制阅读态：
+   * 编辑器不挂载、不提供保存，并明确告诉用户为什么。
+   */
+  const rawReadOnly = activeRel ? isRawRel(activeRel) : false;
+  const effectiveMode = rawReadOnly ? "read" : store.mode;
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
@@ -226,12 +254,16 @@ function KnowledgePageShell({
     (target: string) => {
       const dir = activeRel ? parentOf(activeRel) : "";
       const rel = joinRel(dir, ensureMdExt(target));
+      if (isRawRel(rel)) {
+        showNotice("raw/ 是只读来源目录，请在 wiki/ 下新建页面。");
+        return;
+      }
       void (async () => {
         const ok = await store.createFile(rel);
         if (ok) await store.openFile(rel);
       })();
     },
-    [store, activeRel],
+    [store, activeRel, showNotice],
   );
 
   /** 大纲/搜索结果跳行：行号已由 store 还原（搜索走 lineOffsetOf），这里只负责滚动。 */
@@ -246,17 +278,34 @@ function KnowledgePageShell({
   const createFile = useCallback(
     (dirRel: string, fileName: string) => {
       const rel = joinRel(dirRel, fileName);
+      // raw/ 只读（标准口径）：入口直接挡掉，别让用户写完才发现不该改来源材料
+      if (isRawRel(rel)) {
+        showNotice("raw/ 是只读来源目录：原始材料不该改。要写笔记请放到 wiki/ 下。");
+        return;
+      }
       void (async () => {
         const ok = await store.createFile(rel);
         if (ok) await store.openFile(rel);
       })();
     },
-    [store],
+    [store, showNotice],
+  );
+
+  /** 重命名/移动文件：raw/ 是只读来源，不允许改名或移进移出。 */
+  const renameFile = useCallback(
+    (from: string, to: string) => {
+      if (isRawRel(from) || isRawRel(to)) {
+        showNotice("raw/ 是只读来源目录，不能改名或移到别处。");
+        return;
+      }
+      void store.renameFile(from, to);
+    },
+    [store, showNotice],
   );
 
   const revealInOs = useCallback(
     (rel: string) => {
-      const bridge = resolveVaultBridge();
+      const bridge = bridgeOverride ?? resolveVaultBridge();
       const vaultId = store.activeVaultId;
       if (!bridge || !vaultId) {
         showNotice("浏览器临时模式没有系统文件管理器入口。");
@@ -266,8 +315,93 @@ function KnowledgePageShell({
         .reveal(vaultId, rel)
         .catch(() => showNotice("无法在资源管理器中定位：路径可能已失效。"));
     },
-    [store.activeVaultId, showNotice],
+    [bridgeOverride, store.activeVaultId, showNotice],
   );
+
+  /** 「打开目录」：默认库根（安装目录/数据根下的 wiki）常被问「到底存哪了」，一键定位过去。 */
+  const revealRoot = useCallback(() => {
+    const bridge = bridgeOverride ?? resolveVaultBridge();
+    const vaultId = store.activeVaultId;
+    if (store.ephemeral || !bridge || !vaultId) {
+      showNotice("浏览器临时模式没有系统文件管理器入口。");
+      return;
+    }
+    void bridge
+      .reveal(vaultId, "")
+      .catch(() => showNotice("打不开知识库目录：可能已被移动或删除。"));
+  }, [bridgeOverride, store.activeVaultId, store.ephemeral, showNotice]);
+
+  /* ── 卡帕西标准检查：结构（目录 + 根文件）+ 页面 frontmatter ── */
+
+  /**
+   * 跑一次标准检查。
+   *
+   * 为什么目录树现读 bridge 而不是用 store.tree：用户可能刚在资源管理器里删了目录，
+   * 「检查」的意义就是看磁盘现在的样子；frontmatter 则用已经解析好的索引（不重复读盘）。
+   */
+  const runStandardCheck = useCallback(async () => {
+    const bridge = bridgeOverride ?? resolveVaultBridge();
+    const vaultId = store.activeVaultId;
+    if (!vaultId) {
+      setStandardMessage("还没有打开知识库，无法检查。");
+      setStandardReport(null);
+      return;
+    }
+    setStandardChecking(true);
+    setStandardMessage(null);
+    setStandardFailures([]);
+    try {
+      const tree = await bridge.tree(vaultId, { depth: 4 });
+      setStandardReport(inspectStandard({ tree, pages: store.index?.pages ?? null }));
+    } catch (err) {
+      setStandardReport(null);
+      setStandardMessage(`检查失败：${describeVaultError(err)}`);
+    } finally {
+      setStandardChecking(false);
+    }
+  }, [bridgeOverride, store.activeVaultId, store.index]);
+
+  const openStandardCheck = useCallback(() => {
+    setStandardOpen(true);
+    void runStandardCheck();
+  }, [runStandardCheck]);
+
+  /**
+   * 一键补齐结构。只补缺失项（`applyStandardRepair` 不覆盖已有文件），
+   * 完成后刷新文件树并重跑检查——用户能立刻看到「还差什么」而不是相信一句成功提示。
+   */
+  const runStandardRepair = useCallback(async () => {
+    const bridge = bridgeOverride ?? resolveVaultBridge();
+    const vaultId = store.activeVaultId;
+    if (!vaultId || !standardReport) return;
+    setStandardRepairing(true);
+    setStandardMessage(null);
+    setStandardFailures([]);
+    try {
+      const result = await applyStandardRepair(bridge, vaultId, standardReport);
+      setStandardFailures(result.failures);
+      const parts: string[] = [];
+      if (result.createdDirs.length) parts.push(`${result.createdDirs.length} 个目录`);
+      if (result.createdFiles.length) parts.push(`${result.createdFiles.length} 个根文件`);
+      if (result.failures.length > 0) {
+        setStandardMessage(`补齐完了，但有 ${result.failures.length} 项没成功（见下）。`);
+      } else {
+        const suffix = store.ephemeral ? "（浏览器临时模式：只改当前页面，刷新即丢。）" : "";
+        setStandardMessage(
+          parts.length > 0
+            ? `已补齐 ${parts.join("、")}；已有的文件一个都没动。${suffix}`
+            : "没有需要补齐的内容。",
+        );
+      }
+      await store.refreshTree();
+      const tree = await bridge.tree(vaultId, { depth: 4 });
+      setStandardReport(inspectStandard({ tree, pages: store.index?.pages ?? null }));
+    } catch (err) {
+      setStandardMessage(`补齐失败：${describeVaultError(err)}`);
+    } finally {
+      setStandardRepairing(false);
+    }
+  }, [bridgeOverride, store, standardReport]);
 
   // ── 第二轮新增能力：模板 / 日记 / 快速切换 / 画布 / 新建文件夹 ──
 
@@ -319,11 +453,15 @@ function KnowledgePageShell({
   /** 新建并打开一篇笔记（模板可空）。 */
   const createNoteAt = useCallback(
     async (rel: string, templateRel: string | null) => {
+      if (isRawRel(rel)) {
+        showNotice("raw/ 是只读来源目录，请在 wiki/ 下新建笔记。");
+        return;
+      }
       const text = await buildNoteText(rel, templateRel);
       const ok = await store.createFile(rel, text);
       if (ok) await store.openFile(rel);
     },
-    [buildNoteText, store],
+    [buildNoteText, store, showNotice],
   );
 
   /** 「今天」：日记存在就打开，不存在就按模板创建。 */
@@ -548,6 +686,14 @@ function KnowledgePageShell({
           </button>
           <button
             type="button"
+            title="按卡帕西 LLM Wiki 标准检查目录、根文件与页面 frontmatter"
+            onClick={openStandardCheck}
+            className="ui-btn ui-btn-sm ui-btn-ghost"
+          >
+            标准检查
+          </button>
+          <button
+            type="button"
             aria-label="知识库设置"
             className="ui-btn ui-btn-sm ui-btn-ghost"
             onClick={() => setSettingsOpen(true)}
@@ -577,6 +723,13 @@ function KnowledgePageShell({
       {store.ephemeral ? (
         <p className="ui-alert ui-alert-muted mx-3 mt-2" role="status">
           浏览器临时模式：没有桌面文件桥，笔记只存在当前页面，刷新即丢；要保存请用桌面版打开本地库。
+        </p>
+      ) : null}
+
+      {/* 默认库根说明：安装目录不可写回落/两处都不可写时由主进程给出中文原因，原样展示不静默 */}
+      {activeMeta?.rootNote ? (
+        <p className="ui-alert ui-alert-muted mx-3 mt-2" role="status">
+          {activeMeta.rootNote}
         </p>
       ) : null}
 
@@ -659,7 +812,7 @@ function KnowledgePageShell({
                   onOpen={requestOpen}
                   onCreateFile={createFile}
                   onCreateFolder={(dirRel, folderName) => void createFolder(dirRel, folderName)}
-                  onRename={(from, to) => void store.renameFile(from, to)}
+                  onRename={(from, to) => renameFile(from, to)}
                   onDelete={(rel) => void store.deleteFile(rel)}
                   onReveal={revealInOs}
                   onExpandDir={(rel) => {
@@ -756,37 +909,76 @@ function KnowledgePageShell({
             </div>
           ) : activeRel ? (
             <>
-              {/* 面包屑 + 三态切换 */}
+              {/* 面包屑 + 三态切换（raw/ 只读时换成只读徽标与原因） */}
               <div className="flex shrink-0 items-center gap-2 border-b border-line-soft px-3 py-1.5">
                 <span className="min-w-0 flex-1 truncate text-[11px] text-muted" title={activeRel}>
                   {parentOf(activeRel) ? `${parentOf(activeRel)} / ` : ""}
                   <span className="text-ink">{baseName(activeRel)}</span>
                 </span>
-                <span role="group" aria-label="编辑模式" className="flex items-center gap-0.5">
-                  {(
-                    [
-                      ["source", "源码"],
-                      ["split", "分栏"],
-                      ["read", "阅读"],
-                    ] as const
-                  ).map(([mode, label]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      aria-pressed={store.mode === mode}
-                      onClick={() => store.setMode(mode)}
-                      className={`ui-btn ui-btn-sm ${
-                        store.mode === mode ? "ui-btn-primary" : "ui-btn-ghost"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </span>
+                {rawReadOnly ? (
+                  <span className="ui-caption flex items-center gap-1 text-muted">
+                    <span className="rounded-sm bg-subtle-3 px-1.5 py-0.5 text-[10px] text-ink">只读来源</span>
+                    raw/ 是事实基准，编辑与保存已关闭
+                  </span>
+                ) : (
+                  <span role="group" aria-label="编辑模式" className="flex items-center gap-0.5">
+                    {(
+                      [
+                        ["source", "源码"],
+                        ["split", "分栏"],
+                        ["read", "阅读"],
+                      ] as const
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={store.mode === mode}
+                        onClick={() => store.setMode(mode)}
+                        className={`ui-btn ui-btn-sm ${
+                          store.mode === mode ? "ui-btn-primary" : "ui-btn-ghost"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </span>
+                )}
               </div>
 
+              {/* index.md / log.md 由智能体维护：人可以改，但给出提醒，避免和它的索引口径打架 */}
+              {activeRel === "index.md" || activeRel === "log.md" ? (
+                <p className="ui-caption mx-3 mt-1.5 text-muted">
+                  {activeRel === "index.md" ? "index.md" : "log.md"} 由智能体维护
+                  （{activeRel === "index.md" ? "按类别补条目 + 一句话摘要" : "只追加、不改历史"}）；
+                  手动改也可以，但请保持同样的写法。
+                </p>
+              ) : null}
+
               <div className="min-h-0 flex-1">
-                {activeRel.toLowerCase().endsWith(".canvas") ? (
+                {rawReadOnly ? (
+                  // raw/：不挂载编辑器（连脏标记都不该产生），只用预览渲染原文
+                  <div className="flex h-full min-h-0 flex-col">
+                    <p className="ui-alert ui-alert-muted mx-3 mt-2" role="status">
+                      raw/ 放的是原始来源（文章、论文、访谈记录）。标准要求它只读，保证每条结论都能追溯回原文；
+                      需要记笔记请放到 wiki/ 下。
+                    </p>
+                    <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="vault-preview-pane">
+                      <PreviewPane
+                        rel={activeRel}
+                        text={activeDoc?.text ?? activePage?.body ?? ""}
+                        index={store.index}
+                        onOpenLink={requestOpen}
+                        onCreatePage={createPage}
+                        resolveImage={resolveImage}
+                        resolveDoc={resolveDoc}
+                        loadDoc={async (rel) => {
+                          const text = await readTextOf(rel);
+                          return text === null ? null : { rel, text };
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : activeRel.toLowerCase().endsWith(".canvas") ? (
                   // Canvas 接入：`.canvas` 用画布组件替换编辑器；onChange 只写缓存，
                   // 落盘仍走 Ctrl+S / store.saveFile（与 markdown 同一套脏标记与保存链路）。
                   <CanvasPane
@@ -800,7 +992,7 @@ function KnowledgePageShell({
                   <EditorPane
                     rel={activeRel}
                     text={activeDoc?.text ?? activePage?.body ?? ""}
-                    mode={store.mode}
+                    mode={effectiveMode}
                     dirty={activeDirty}
                     loader={editorLoader}
                     onChange={(text) => store.editFile(activeRel, text)}
@@ -886,11 +1078,26 @@ function KnowledgePageShell({
         ) : null}
       </div>
 
-      {/* 状态栏：脏文件计数 + 快捷键提示 */}
+      {/* 状态栏：脏文件计数 + 快捷键提示 + 当前库根（默认库就是安装目录/数据根下的 wiki） */}
       <footer className="flex shrink-0 items-center gap-3 border-t border-line-soft px-3 py-1 text-[10px] text-muted">
         <span>{dirtyCount > 0 ? `${dirtyCount} 个文件未保存` : "全部已保存"}</span>
         <span>Ctrl+S 保存 · Ctrl+F 编辑器内搜索 · Ctrl+O 快速切换</span>
-        <span className="ml-auto">{activeMeta?.root ?? ""}</span>
+        <span className="ml-auto flex min-w-0 items-center gap-2">
+          <span className="truncate" title={activeMeta?.root ?? ""}>
+            {activeMeta?.managed ? "默认库：" : ""}
+            {activeMeta?.root ?? ""}
+          </span>
+          {activeMeta ? (
+            <button
+              type="button"
+              className="ui-link shrink-0"
+              aria-label="在资源管理器中打开知识库根目录"
+              onClick={revealRoot}
+            >
+              打开目录
+            </button>
+          ) : null}
+        </span>
       </footer>
 
       {pending ? (
@@ -991,6 +1198,21 @@ function KnowledgePageShell({
           templates={templates}
           onCancel={() => setSettingsOpen(false)}
           onSave={saveSettings}
+        />
+      ) : null}
+
+      {/* 卡帕西标准检查：只报告 + 补齐缺失结构，绝不改写已有内容 */}
+      {standardOpen ? (
+        <StandardCheckDialog
+          rootPath={activeMeta?.root ?? ""}
+          report={standardReport}
+          checking={standardChecking}
+          repairing={standardRepairing}
+          message={standardMessage}
+          failures={standardFailures}
+          onCheck={() => void runStandardCheck()}
+          onRepair={() => void runStandardRepair()}
+          onClose={() => setStandardOpen(false)}
         />
       ) : null}
     </div>

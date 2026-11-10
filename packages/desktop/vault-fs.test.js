@@ -24,7 +24,13 @@ const {
   saveRegistry,
   normalizeWriteDirs,
   checkRel,
+  resolveDefaultVaultRoot,
+  ensureStandardVault,
+  buildStandardFile,
   DEFAULT_WRITE_DIRS,
+  DEFAULT_VAULT_WRITE_DIRS,
+  STANDARD_VAULT_DIRS,
+  STANDARD_VAULT_FILES,
   MAX_TEXT_BYTES,
   MAX_IMAGE_BYTES,
 } = require("./vault-fs");
@@ -1033,7 +1039,293 @@ test("vault-fs：saveRegistry 原子写不产生 tmp 残留", async (t) => {
   assert.deepEqual(leftovers, []);
 });
 
+/* ────────────────────────── 默认根与标准初始化 ────────────────────────── */
+
+/** 临时目录夹具：home / 安装目录 / 注册表各一份，收尾统一删。 */
+function makeDefaultRootWorkspace(t) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "heming-vault-default-"));
+  const home = path.join(base, "home");
+  const install = path.join(base, "install");
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(install, { recursive: true });
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  return { base, home, install, registryFile: path.join(base, "vaults.json") };
+}
+
+test("默认根：开发版（非打包）用 ~/Heming/wiki，且探针不留残留文件", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  const info = await resolveDefaultVaultRoot({ homeDir: ws.home, isPackaged: false });
+  assert.equal(info.root, path.join(ws.home, "Heming", "wiki"));
+  assert.equal(info.writable, true);
+  assert.equal(info.note, "", "开发版一路顺利时不该有多余提示");
+  assert.ok(fs.statSync(info.root).isDirectory());
+  assert.deepEqual(
+    fs.readdirSync(path.dirname(info.root)).filter((name) => name.includes("probe")),
+    [],
+    "试写探针必须清理干净（否则会残留在用户的 wiki 目录里）",
+  );
+});
+
+test("默认根：打包版用安装目录/wiki（便携版也能用）", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  const info = await resolveDefaultVaultRoot({
+    homeDir: ws.home,
+    execDir: ws.install,
+    isPackaged: true,
+  });
+  assert.equal(info.root, path.join(ws.install, "wiki"));
+  assert.equal(info.writable, true);
+  assert.equal(info.note, "");
+});
+
+test("默认根：安装目录不可写时回落用户目录，并在 note 里写明原因", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  // 用一个「文件」当安装目录：mkdir 它下面的 wiki 必然失败（ENOTDIR），跨平台可复现
+  const notADir = path.join(ws.base, "不是目录");
+  fs.writeFileSync(notADir, "x");
+  const info = await resolveDefaultVaultRoot({
+    homeDir: ws.home,
+    execDir: notADir,
+    isPackaged: true,
+  });
+  assert.equal(info.root, path.join(ws.home, "Heming", "wiki"), "必须回落到用户目录");
+  assert.equal(info.writable, true);
+  assert.match(info.note, /安装目录不可写/);
+  assert.match(info.note, /回落/);
+});
+
+test("默认根：两处都不可写时如实标 writable:false，不假装成功", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  // home 也指向一个文件：~/Heming/wiki 建不出来
+  const badHome = path.join(ws.base, "坏home");
+  fs.writeFileSync(badHome, "x");
+  const info = await resolveDefaultVaultRoot({ homeDir: badHome, isPackaged: false });
+  assert.equal(info.root, path.join(badHome, "Heming", "wiki"));
+  assert.equal(info.writable, false);
+  assert.match(info.note, /不可写/);
+});
+
+test("标准初始化：建齐目录与四个根文件，文档带 created+tags frontmatter", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  const root = path.join(ws.base, "默认库");
+  const first = await ensureStandardVault(root);
+  assert.deepEqual(first.createdDirs.sort(), [...STANDARD_VAULT_DIRS].sort());
+  assert.deepEqual(first.createdFiles.sort(), [...STANDARD_VAULT_FILES].sort());
+  assert.deepEqual(first.failures, []);
+
+  for (const dir of STANDARD_VAULT_DIRS) {
+    assert.ok(fs.statSync(path.join(root, ...dir.split("/"))).isDirectory(), `目录 ${dir} 应该存在`);
+  }
+  for (const rel of STANDARD_VAULT_FILES) {
+    const text = fs.readFileSync(path.join(root, rel), "utf8");
+    assert.match(text, /^---\n/, `${rel} 必须有 frontmatter`);
+    assert.match(text, /\ncreated: \d{4}-\d{2}-\d{2}/, `${rel} 必须有 created`);
+    assert.match(text, /\ntags: \[[^\]]+\]/, `${rel} 必须有非空 tags`);
+  }
+  // 模板与 wiki-fs 口径一致的关键记号（三层结构 / 流程），防止两边文案漂移
+  const schema = fs.readFileSync(path.join(root, "schema.md"), "utf8");
+  assert.match(schema, /raw\//);
+  assert.match(schema, /wiki\/<类别>\//);
+  assert.match(schema, /Ingest/);
+  assert.ok(buildStandardFile("不存在的文件.md", "2026-01-01") === null);
+});
+
+test("标准初始化：幂等，已有文件一字不动（用户内容绝不覆盖）", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  const root = path.join(ws.base, "默认库");
+  fs.mkdirSync(root, { recursive: true });
+  const userIndex = "---\ntitle: 用户自己写的索引\ncreated: 2025-01-01\ntags: [mine]\n---\n\n用户内容\n";
+  fs.writeFileSync(path.join(root, "index.md"), userIndex, "utf8");
+  // 用户把 log.md 建成目录：初始化不能因此崩掉，只能记一条失败
+  fs.mkdirSync(path.join(root, "log.md"));
+
+  const first = await ensureStandardVault(root);
+  assert.equal(fs.readFileSync(path.join(root, "index.md"), "utf8"), userIndex, "已有文件必须原样保留");
+  assert.ok(first.createdFiles.includes("schema.md"), "缺的文件要补齐");
+  assert.ok(first.createdFiles.includes("首页.md"));
+  assert.ok(!first.createdFiles.includes("index.md"));
+  assert.ok(first.failures.some((item) => item.rel === "log.md"), "log.md 被占成目录应如实报失败");
+
+  const second = await ensureStandardVault(root);
+  assert.deepEqual(second.createdDirs, [], "第二次不应再建目录");
+  assert.deepEqual(second.createdFiles, [], "第二次不应再写文件");
+  assert.equal(fs.readFileSync(path.join(root, "index.md"), "utf8"), userIndex);
+});
+
+test("默认库：list() 自动登记（managed+rootNote），结构落盘；再列一次不重复登记", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  const defaultRoot = path.join(ws.base, "app-wiki");
+  const service = createVaultService({
+    registryFile: ws.registryFile,
+    defaultRootResolver: async () => ({ root: defaultRoot, writable: true, note: "" }),
+  });
+  t.after(() => service.closeAllWatchers());
+
+  const first = await service.list();
+  assert.equal(first.length, 1);
+  assert.equal(first[0].name, "和鸣知识库");
+  assert.equal(first[0].root, defaultRoot);
+  assert.equal(first[0].managed, true);
+  assert.equal(first[0].rootNote, "");
+  assert.deepEqual(first[0].writeDirs, DEFAULT_VAULT_WRITE_DIRS);
+  assert.ok(fs.existsSync(path.join(defaultRoot, "schema.md")), "首启就要有标准结构");
+  assert.ok(fs.existsSync(path.join(defaultRoot, "wiki", "entities")));
+
+  const second = await service.list();
+  assert.equal(second.length, 1, "重复列库不能重复登记");
+  assert.equal(second[0].id, first[0].id);
+
+  // 展示字段不落盘：注册表 json 里只有库的稳定字段
+  const registry = JSON.parse(fs.readFileSync(ws.registryFile, "utf8"));
+  assert.equal(registry.vaults.length, 1);
+  assert.equal(registry.vaults[0].managed, undefined);
+  assert.equal(registry.vaults[0].rootNote, undefined);
+});
+
+test("默认库：注册表里已有同根库时不再登记，也不动用户文件", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  const defaultRoot = path.join(ws.base, "已有库");
+  fs.mkdirSync(defaultRoot, { recursive: true });
+  fs.writeFileSync(path.join(defaultRoot, "index.md"), "用户旧索引\n", "utf8");
+  const oldMeta = {
+    id: "old",
+    name: "用户自己的库",
+    root: defaultRoot,
+    writeDirs: ["inbox"],
+    addedAt: "2026-01-01T00:00:00.000Z",
+  };
+  saveRegistrySync(ws.registryFile, [oldMeta]);
+
+  const service = createVaultService({
+    registryFile: ws.registryFile,
+    defaultRootResolver: async () => ({ root: defaultRoot, writable: true, note: "回落说明" }),
+  });
+  t.after(() => service.closeAllWatchers());
+
+  const list = await service.list();
+  assert.equal(list.length, 1, "同根目录不能登记两份");
+  assert.equal(list[0].id, "old");
+  assert.equal(list[0].managed, true, "它就是默认根，界面应把它当默认库展示说明");
+  assert.equal(list[0].rootNote, "回落说明");
+  assert.equal(list[0].writeDirs.length, 1, "不擅自改用户已有的 writeDirs");
+  assert.equal(fs.readFileSync(path.join(defaultRoot, "index.md"), "utf8"), "用户旧索引\n");
+});
+
+test("默认库：解析器失败时 list() 仍返回已有库（不炸渲染层）", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  const userRoot = path.join(ws.base, "用户的库");
+  fs.mkdirSync(userRoot, { recursive: true });
+  saveRegistrySync(ws.registryFile, [
+    { id: "v1", name: "用户的库", root: userRoot, writeDirs: ["inbox"], addedAt: "2026-01-01T00:00:00.000Z" },
+  ]);
+  const service = createVaultService({
+    registryFile: ws.registryFile,
+    defaultRootResolver: async () => {
+      throw new Error("探测失败");
+    },
+  });
+  t.after(() => service.closeAllWatchers());
+  const list = await service.list();
+  assert.equal(list.length, 1);
+  assert.equal(list[0].id, "v1", "已有库照常列出");
+  assert.equal(await service.defaultRoot(), null, "解析失败时默认根信息为 null");
+});
+
+test("默认库：用户可以移除它，移除后不会被自动登记回来；再手动打开该目录则恢复", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  const defaultRoot = path.join(ws.base, "app-wiki");
+  let pickResult = null;
+  const service = createVaultService({
+    registryFile: ws.registryFile,
+    defaultRootResolver: async () => ({ root: defaultRoot, writable: true, note: "" }),
+    dialog: {
+      async showOpenDialog() {
+        return pickResult;
+      },
+    },
+  });
+  t.after(() => service.closeAllWatchers());
+
+  const first = await service.list();
+  assert.equal(first.length, 1);
+  assert.equal(await service.remove(first[0].id), true);
+  assert.deepEqual(await service.list(), [], "移除后不能被自动登记回来（否则「移除」按钮等于失效）");
+  assert.equal(JSON.parse(fs.readFileSync(ws.registryFile, "utf8")).defaultHidden, true);
+
+  // 用户又手动把那个目录加回来：解除隐藏标记，仍按默认库展示说明
+  pickResult = { canceled: false, filePaths: [defaultRoot] };
+  const picked = await service.pick();
+  assert.equal(path.resolve(picked.root), path.resolve(defaultRoot));
+  const list = await service.list();
+  assert.equal(list.length, 1);
+  assert.equal(list[0].managed, true);
+  assert.equal(JSON.parse(fs.readFileSync(ws.registryFile, "utf8")).defaultHidden, false);
+});
+
+test("默认库：注册表坏 JSON 时不动原文件、也不登记默认库", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  fs.mkdirSync(path.dirname(ws.registryFile), { recursive: true });
+  fs.writeFileSync(ws.registryFile, "{ 这不是 json", "utf8");
+  const service = createVaultService({
+    registryFile: ws.registryFile,
+    defaultRootResolver: async () => ({ root: path.join(ws.base, "app-wiki"), writable: true, note: "" }),
+  });
+  t.after(() => service.closeAllWatchers());
+  assert.deepEqual(await service.list(), []);
+  assert.equal(fs.readFileSync(ws.registryFile, "utf8"), "{ 这不是 json");
+  assert.ok(!fs.existsSync(path.join(ws.base, "app-wiki")), "读不懂注册表时不应动磁盘");
+});
+
+test("IPC：默认库经 vault:list 露出 managed/rootNote（生产走这条通道）", async (t) => {
+  const ws = makeDefaultRootWorkspace(t);
+  const ipc = fakeIpc();
+  const service = registerVaultIpc(ipc, {
+    registryFile: ws.registryFile,
+    defaultRootResolver: async () => ({ root: path.join(ws.base, "app-wiki"), writable: true, note: "" }),
+    shell: { showItemInFolder() {}, async openPath() { return ""; } },
+  });
+  t.after(() => service.closeAllWatchers());
+  const listed = await ipc.invoke("vault:list", {});
+  assert.equal(listed.ok, true);
+  assert.equal(listed.value.length, 1);
+  assert.equal(listed.value[0].managed, true);
+  assert.equal(typeof listed.value[0].rootNote, "string");
+});
+
+test("reveal：rel 为空 = 打开库根目录（知识库页「打开目录」用）", async (t) => {
+  const ws = makeWorkspace(t);
+  const opened = [];
+  const service = createVaultService({
+    registryFile: ws.registryFile,
+    shell: {
+      showItemInFolder(target) {
+        opened.push(target);
+      },
+      async openPath(target) {
+        opened.push(target);
+        return "";
+      },
+    },
+  });
+  t.after(() => service.closeAllWatchers());
+
+  assert.equal(await service.reveal("v1", ""), true);
+  assert.equal(opened.length, 1);
+  assert.equal(path.resolve(opened[0]), path.resolve(ws.root), "打开的必须是库根，不是它的上级");
+
+  // 根不存在时结构化失败，不抛裸异常
+  const missingRegistry = path.join(ws.base, "missing-vaults.json");
+  saveRegistrySync(missingRegistry, [{ ...ws.meta, id: "gone", root: path.join(ws.base, "已删除的库") }]);
+  const goneService = createVaultService({
+    registryFile: missingRegistry,
+    shell: { showItemInFolder() {}, async openPath() { return ""; } },
+  });
+  t.after(() => goneService.closeAllWatchers());
+  await rejectsWith(goneService.reveal("gone", ""), "not-found");
+});
+
 /* ────────────────────────────── 清理检查 ────────────────────────────── */
+
 
 test("收尾：所有夹具清理后临时目录不残留（smoke）", async (t) => {
   const ws = makeWorkspace(t);

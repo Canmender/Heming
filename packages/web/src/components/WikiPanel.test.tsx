@@ -166,6 +166,8 @@ describe("WikiPanel 三视图", () => {
     expect(graph).toBeInTheDocument();
     expect(screen.getByLabelText("放大图谱")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("放大图谱"));
-    expect(screen.getByRole("button", { name: "复位图谱" })).toHaveTextContent("115%");
+    // d.126：缩放百分比独立展示，复位拆成显式按钮（原「点百分比复位」不再隐藏语义）
+    expect(screen.getByTestId("graph-zoom-percent")).toHaveTextContent("120%");
+    expect(screen.getByRole("button", { name: "重置视图" })).toBeInTheDocument();
   });
 });
