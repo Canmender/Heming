@@ -5,6 +5,7 @@ import {
   createAgentConversation,
   fetchMessages,
   reencryptMessage,
+  updateConversationTitle,
 } from "../lib/api.js";
 import { listAgents } from "../lib/agentsApi.js";
 import type { RouteAttempt } from "../lib/llmClient.js";
@@ -367,7 +368,10 @@ interface ChatState {
   workspaceError: string | null;
   loadWorkspace: () => Promise<void>;
   /** 开智能体一对一会话（幂等，服务端已存在则复用），返回会话 id。 */
-  openAgent: (agentId: string) => Promise<string>;
+  /** 打开/新建与某智能体的会话。fresh=true 时新建一段（同一智能体多段对话）。 */
+  openAgent: (agentId: string, options?: { fresh?: boolean; title?: string }) => Promise<string>;
+  /** 改会话标题（空串 = 清除）；成功后同步本地会话列表，失败抛错由调用方决定是否提示。 */
+  renameConversation: (convId: string, title: string) => Promise<void>;
   loadAgentsRoster: () => Promise<void>;
   appendMessage: (m: Message) => void;
   /** 历史消息入列（按 id 与本地独有条目合并；不改动消息的转录字段）。 */
@@ -533,12 +537,19 @@ export const useChatStore = create<ChatState>((set, get) => {
       throw err;
     }
   },
-  async openAgent(agentId) {
-    const conv = await createAgentConversation(agentId);
+  async openAgent(agentId, options = {}) {
+    const conv = await createAgentConversation(agentId, options);
     // 服务端幂等：已存在则返回原会话。这里仍走一次全量刷新而不是就地插入——
     // 就地插入要自己补 unreadCount 等字段，与服务端口径容易漂移。
     await get().loadWorkspace();
     return conv.id;
+  },
+  async renameConversation(convId, title) {
+    const updated = await updateConversationTitle(convId, title);
+    // 服务端口径为准（trim/截断在服务端做），本地只替换这一条，避免整表刷新打断正在看的会话。
+    set({
+      conversations: get().conversations.map((c) => (c.id === convId ? { ...c, ...(updated.title ? { title: updated.title } : {}) } : c)),
+    });
   },
   async loadAgentsRoster() {
     const agentsRoster = await listAgents();

@@ -419,11 +419,11 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     listConversations(userId) {
       const convs = db
         .prepare(
-          `SELECT c.id FROM conversations c
+          `SELECT c.id, c.title FROM conversations c
            JOIN conversation_members m ON m.conv_id = c.id
            WHERE m.member_id = ? AND c.kind = 'agent'`,
         )
-        .all(userId) as { id: string }[];
+        .all(userId) as { id: string; title: string | null }[];
       const lastMessageAtOf = (convId: string): string | null => {
         const row = db
           .prepare("SELECT created_at FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1")
@@ -446,6 +446,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
             id: c.id,
             type: "agent",
             agent: rowToAgent(agent),
+            ...(c.title ? { title: c.title } : {}),
             // 智能体会话没有「别人发来」的概念，未读恒为 0（读状态随人类 IM 一起删除）。
             unreadCount: 0,
             lastMessageAt: lastMessageAtOf(c.id),
@@ -453,7 +454,18 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       }
       return out;
     },
-    createAgentConversation(userId, agentId) {
+    updateConversationTitle(conversationId, userId, title) {
+      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
+      if (!conv) return false;
+      const member = db
+        .prepare("SELECT 1 FROM conversation_members WHERE conv_id = ? AND member_id = ?")
+        .get(conversationId, userId);
+      if (!member) return false;
+      const next = title.trim().slice(0, 80);
+      db.prepare("UPDATE conversations SET title = ? WHERE id = ?").run(next || null, conversationId);
+      return true;
+    },
+    createAgentConversation(userId, agentId, options = {}) {
       mustUser(userId);
       const row = db
         .prepare("SELECT id, owner_id, name, avatar, description FROM agents WHERE id = ?")
@@ -465,17 +477,20 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       const agent = rowToAgent(row);
       // 幂等：同用户与同 agent 只留一个会话。conversation_agents 存「会话挂了哪些 agent」，
       // agent 一对一恰好只挂一个，据此反查即可，不必另建映射表。
-      const existing = db
-        .prepare(
-          `SELECT c.id FROM conversations c
-           JOIN conversation_members m ON m.conv_id = c.id AND m.member_id = ?
-           JOIN conversation_agents ca ON ca.conv_id = c.id AND ca.agent_id = ?
-           WHERE c.kind = 'agent'`,
-        )
-        .get(userId, agentId) as { id: string } | undefined;
-      if (existing) return { id: existing.id, type: "agent", agent };
+      const title = (options.title ?? "").trim().slice(0, 80);
+      if (!options.fresh) {
+        const existing = db
+          .prepare(
+            `SELECT c.id FROM conversations c
+             JOIN conversation_members m ON m.conv_id = c.id AND m.member_id = ?
+             JOIN conversation_agents ca ON ca.conv_id = c.id AND ca.agent_id = ?
+             WHERE c.kind = 'agent'`,
+          )
+          .get(userId, agentId) as { id: string } | undefined;
+        if (existing) return { id: existing.id, type: "agent", agent };
+      }
       const id = randomUUID();
-      db.prepare("INSERT INTO conversations (id, kind) VALUES (?, 'agent')").run(id);
+      db.prepare("INSERT INTO conversations (id, kind, title) VALUES (?, 'agent', ?)").run(id, title || null);
       db.prepare("INSERT INTO conversation_members (conv_id, member_id) VALUES (?, ?)").run(id, userId);
       db.prepare("INSERT OR IGNORE INTO conversation_agents (conv_id, agent_id) VALUES (?, ?)").run(id, agentId);
       return { id, type: "agent", agent };

@@ -113,8 +113,11 @@ export interface Store {
   createAgentConversation(
     userId: string,
     agentId: string,
+    options?: { fresh?: boolean; title?: string },
   ): { id: string; type: "agent"; agent: Agent };
   listConversations(userId: string): Conversation[];
+  /** 改会话标题（空串 = 清除）；调用者需先确认成员身份。返回是否落库。 */
+  updateConversationTitle(conversationId: string, userId: string, title: string): boolean;
   isMember(conversationId: string, userId: string): boolean;
   /** 智能体会话对应的 agent id（非 agent 会话 / 不存在返回 null）。 */
   conversationAgentId(conversationId: string): string | null;
@@ -300,6 +303,8 @@ export function createMemoryStore(): Store {
       kind: "agent";
       /** 对方 agent id（sqlite 侧对应 conversation_agents 关联）。 */
       agentPeerId?: string;
+      /** d.128：会话标题（空 = 未命名，界面按首条消息/时间兜底）。 */
+      title?: string;
     }
   >();
   const messages = new Map<string, Message[]>();
@@ -414,7 +419,7 @@ export function createMemoryStore(): Store {
       users.set(userId, { user, passwordHash: row.passwordHash });
       return user;
     },
-    createAgentConversation(userId, agentId) {
+    createAgentConversation(userId, agentId, options = {}) {
       const agent = agents.get(agentId);
       if (!agent) throw new Error("agent not found");
       // 只能和自己名下的智能体私聊：系统预设 agent（owner_id 为 null）属于公共资源，
@@ -422,14 +427,22 @@ export function createMemoryStore(): Store {
       if (agent.owner_id !== null && agent.owner_id !== userId) {
         throw new Error("not your agent");
       }
-      // 幂等：同一用户与同一 agent 只保留一个会话（复用 lookup，不另建 pairToConv——
-      // 那张表是 user↔user 好友对的键，agent 对混进去会污染 direct 的复用逻辑）
-      const found = [...conversations].find(
-        ([, c]) => c.kind === "agent" && c.agentPeerId === agentId && c.members.includes(userId),
-      );
-      if (found) return { id: found[0], type: "agent", agent };
+      // 旧行为（fresh 缺省）：同一用户 × 同一 agent 幂等复用；`fresh: true` 则每次新开一段
+      // （Claude Code 式「同一智能体多段对话」；老客户端/旧链接不受影响）。
+      const title = (options.title ?? "").trim().slice(0, 80);
+      if (!options.fresh) {
+        const found = [...conversations].find(
+          ([, c]) => c.kind === "agent" && c.agentPeerId === agentId && c.members.includes(userId),
+        );
+        if (found) return { id: found[0], type: "agent", agent };
+      }
       const id = randomUUID();
-      conversations.set(id, { members: [userId], kind: "agent", agentPeerId: agentId });
+      conversations.set(id, {
+        members: [userId],
+        kind: "agent",
+        agentPeerId: agentId,
+        ...(title ? { title } : {}),
+      });
       messages.set(id, []);
       return { id, type: "agent", agent };
     },
@@ -445,12 +458,21 @@ export function createMemoryStore(): Store {
             id,
             type: "agent",
             agent,
+            ...(conv.title ? { title: conv.title } : {}),
             // 智能体会话没有「别人发来」的概念，未读恒为 0（读状态随人类 IM 一起删除）。
             unreadCount: 0,
             lastMessageAt: messages.get(id)?.at(-1)?.createdAt ?? null,
           });
       }
       return out;
+    },
+    updateConversationTitle(conversationId, userId, title) {
+      const conv = conversations.get(conversationId);
+      if (!conv || !conv.members.includes(userId)) return false;
+      const next = title.trim().slice(0, 80);
+      if (next) conv.title = next;
+      else delete conv.title;
+      return true;
     },
     isMember(conversationId, userId) {
       return conversations.get(conversationId)?.members.includes(userId) ?? false;

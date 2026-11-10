@@ -6,6 +6,7 @@ import {
   MessagePayloadSchema,
   ConversationSchema,
   AgentConversationBodySchema,
+  UpdateConversationBodySchema,
   RegisterBodySchema,
   LoginBodySchema,
   CreateFileBodySchema,
@@ -67,6 +68,29 @@ describe("WsClientEventSchema", () => {
     expect(WsClientEventSchema.safeParse({ type: "auth" }).success).toBe(false);
     expect(WsClientEventSchema.safeParse({ type: "auth", token: "" }).success).toBe(false);
     expect(WsClientEventSchema.safeParse({ type: "auth", token: "x".repeat(513) }).success).toBe(false);
+  });
+});
+
+describe("Conversation 标题与多段会话字段（d.128）", () => {
+  it("ConversationSchema.title 可选且 ≤80", () => {
+    const base = {
+      type: "agent" as const,
+      id: "c1",
+      agent: { id: "a1", owner_id: null, name: "助理", avatar: null, description: "" },
+      unreadCount: 0,
+    };
+    expect(ConversationSchema.safeParse(base).success).toBe(true);
+    expect(ConversationSchema.safeParse({ ...base, title: "周报整理" }).success).toBe(true);
+    expect(ConversationSchema.safeParse({ ...base, title: "x".repeat(81) }).success).toBe(false);
+  });
+
+  it("AgentConversationBodySchema 支持 fresh/title；UpdateConversationBodySchema 只收 title", () => {
+    expect(AgentConversationBodySchema.safeParse({ agentId: "a1" }).success).toBe(true);
+    expect(AgentConversationBodySchema.safeParse({ agentId: "a1", fresh: true, title: "t" }).success).toBe(true);
+    expect(AgentConversationBodySchema.safeParse({ agentId: "a1", fresh: "yes" }).success).toBe(false);
+    expect(UpdateConversationBodySchema.safeParse({ title: "" }).success).toBe(true);
+    expect(UpdateConversationBodySchema.safeParse({ title: "x".repeat(81) }).success).toBe(false);
+    expect(UpdateConversationBodySchema.safeParse({}).success).toBe(false);
   });
 });
 

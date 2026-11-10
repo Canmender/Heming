@@ -163,6 +163,12 @@ export function initSchema(db: DatabaseSyncType): void {
     db.exec("ALTER TABLE messages ADD COLUMN n INTEGER");
   }
 
+  // d.128：会话标题（Claude Code 式「按会话名找」；旧库无该列 → 幂等补）。
+  const convCols = db.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>;
+  if (!convCols.some((c) => c.name === "title")) {
+    db.exec("ALTER TABLE conversations ADD COLUMN title TEXT");
+  }
+
   // 归档：**按成员存**而不是按会话存。
   // 群聊里 A 归档了不该影响 B——归档是「我不想再在列表里看到它」，
   // 属于个人视图偏好，跟会话本身的状态无关。

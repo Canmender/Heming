@@ -451,6 +451,7 @@ export function ChatPage({
   const [historyLoaded, setHistoryLoaded] = useState<Record<string, boolean>>({});
   const plainById = useChatStore((s) => s.plainById);
   const appendMessage = useChatStore((s) => s.appendMessage);
+  const renameConversation = useChatStore((s) => s.renameConversation);
   const streaming = useChatStore((s) => s.streaming);
   const streamOwner = useChatStore((s) => s.streamOwner);
   const upsertStream = useChatStore((s) => s.upsertStream);
@@ -771,6 +772,8 @@ export function ChatPage({
 
   /** 本机流 → 工具调用轨迹（只用于 UI 展示，不进消息、不上行）。 */
   const toolTraceRef = useRef<Record<string, ToolTrace[]>>({});
+  /** 已经尝试写过标题的会话 id：防止首条消息连发时重复 PATCH（失败会移除，下次再试）。 */
+  const titleSetRef = useRef<Set<string>>(new Set());
   /** 本机流 → 候选链留痕（d.48 路由组）：同样只用于 UI 展示，不进消息、不上行。 */
   const routeTraceRef = useRef<Record<string, RouteAttempt[]>>({});
   /** 本轮工具调用次数（复盘判「复杂任务」用；onTurnComplete 拿不到 streamId，故按轮次累计）。 */
@@ -2265,6 +2268,16 @@ export function ChatPage({
         setSendNotice(result.error, "error", () => void retryTextSend(text, mentions));
       }
       return;
+    }
+    // 会话名：首条消息后写一次服务端标题（换设备也能看到）；之后不再覆盖用户的意图。
+    const titleText = text.replace(/\s+/g, " ").trim().slice(0, 24);
+    const conv = conversations.find((c) => c.id === convId);
+    if (titleText && !conv?.title && !titleSetRef.current.has(convId)) {
+      titleSetRef.current.add(convId);
+      void renameConversation(convId, titleText).catch(() => {
+        // 写标题失败不影响发送；下次发消息再试（不把失败记成已写）
+        titleSetRef.current.delete(convId);
+      });
     }
     resetComposer();
   };

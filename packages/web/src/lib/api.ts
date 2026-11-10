@@ -130,14 +130,25 @@ export const updateProfile = (displayName: string, avatar?: string) =>
   });
 export const fetchConversations = () => api<Conversation[]>("/api/conversations");
 /**
- * 建智能体一对一会话（幂等：服务端已存在则返回原会话）。
- * 走同一个 POST /api/conversations，靠 body 的 agentId 分支区分——不新开路由，
- * 免得「会话列表刷新后新会话不在其中」这类口径分叉。
+ * 建智能体会话。
+ *
+ * 缺省仍是幂等语义（同一智能体复用原会话，老入口行为不变）；传 `fresh: true` 则每次新开
+ * 一段会话（Claude Code 式「同一智能体多段对话」）。标题可在创建时带上，也可之后 PATCH。
  */
-export const createAgentConversation = (agentId: string) =>
+export const createAgentConversation = (
+  agentId: string,
+  options: { fresh?: boolean; title?: string } = {},
+) =>
   api<Conversation>("/api/conversations", {
     method: "POST",
-    body: JSON.stringify({ agentId }),
+    body: JSON.stringify({ agentId, ...options }),
+  });
+
+/** 改会话标题（空串 = 清除）；返回更新后的会话。 */
+export const updateConversationTitle = (convId: string, title: string) =>
+  api<Conversation>(`/api/conversations/${encodeURIComponent(convId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
   });
 export const fetchMessages = (convId: string) =>
   api<Message[]>(`/api/conversations/${convId}/messages`);

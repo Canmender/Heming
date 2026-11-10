@@ -144,14 +144,14 @@ export function AssistantPage() {
     [llmBindings, llmRoutes, llmProfiles],
   );
 
-  /** 打开/复用与某智能体的会话；成功后切回「对话」Tab（从名册过来也能直接进对话）。 */
-  const startChat = async (agentId: string) => {
+  /** 打开/复用与某智能体的会话；fresh=true 时新建一段（Claude Code 式多段对话）。 */
+  const startChat = async (agentId: string, options: { fresh?: boolean } = {}) => {
     if (openingId) return;
     setOpeningId(agentId);
     setError("");
     try {
-      // 服务端幂等：已有会话直接复用，不重复建
-      const convId = await openAgent(agentId);
+      // 缺省幂等复用已有会话；组标题旁「＋」传 fresh 新开一段。
+      const convId = options.fresh ? await openAgent(agentId, { fresh: true }) : await openAgent(agentId);
       openingConversation(convId);
       setTab("chat");
     } catch (err) {
@@ -210,7 +210,7 @@ export function AssistantPage() {
         error={error}
         onOpen={openingConversation}
         onNewConversation={backToPicker}
-        onNewForAgent={(agentId) => void startChat(agentId)}
+        onNewForAgent={(agentId) => void startChat(agentId, { fresh: true })}
       />
 
       <section className="flex min-w-0 flex-1 flex-col">

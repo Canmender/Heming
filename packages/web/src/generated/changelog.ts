@@ -12,6 +12,34 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.128.3.48.0",
+    "date": "2026-11-10",
+    "title": "智能体支持多段会话与会话名（Claude Code 式）",
+    "bullets": [
+      "`POST /api/conversations` 新增可选 `fresh: true`：每次新建一段会话；不传仍保持旧的幂等语义，老客户端/旧入口不受影响。",
+      "左栏分组右侧 `＋` 改为**新建该智能体的一段新会话**（此前是「打开/复用」）；点已有会话仍打开原会话。",
+      "`Conversation` 增加可选 `title`（≤80 字）；`conversations` 表幂等补 `title` 列（旧库自动迁移）。",
+      "新增 `PATCH /api/conversations/:id`（成员才可改，空串 = 清除标题）；内存/sqlite 两套 Store 同实现。",
+      "客户端在**首条消息发送成功后**自动把消息摘要写成标题（只写一次，失败下次再试），因此换设备/重启后左栏仍显示同一会话名；没有标题的旧会话继续按首条消息/时间兜底，不丢历史。",
+      "左栏排序/搜索/当前高亮/草稿标识不变；服务端返回 title 后优先显示标题。",
+      "shared：`ConversationSchema.title`、`fresh/title`、`PATCH` body 校验（+2）；",
+      "server：内存/sqlite 双 Store 的「fresh 多段 / 标题可设可清 / 非成员不可改」+ REST 用例（+3）；",
+      "web：组 `＋` 走 fresh、标题优先显示、`renameConversation` 只替换单条（+3）。",
+      "真实浏览器（本地 dev，admin 登录）核对：左栏同一智能体下列出 3 段带名称的会话，分组计数正确。",
+      "`web` **341 文件 / 4836 例**、`shared` 8 / **106**、`server` 16 / **267**、`desktop` 46 / 772 全绿；`pnpm -r typecheck` 六包零错误；编码检查 OK。",
+      "会话名由首条消息自动生成，暂不提供手动改名 UI（接口已具备，改名 UI 后续接）；",
+      "标题存服务端明文（会话名属于列表元数据，不含消息正文）。"
+    ],
+    "paragraphs": [
+      "用户对智能体页的要求是「对话左侧显示对话名称，参考 Claude Code」。此前一个智能体只能有一段会话（服务端幂等复用），左栏名称只能从已加载消息临时推导，没打开过的会话显示「新的对话」。本版把会话模型补齐：",
+      "① 同一智能体多段会话",
+      "② 会话标题（名称）持久化",
+      "③ 测试",
+      "验证",
+      "边界"
+    ]
+  },
+  {
     "version": "d.127.3.48.0",
     "date": "2026-11-10",
     "title": "插件独立化第一步：插件可以自带本机引擎（不占本体代码）",

@@ -337,13 +337,30 @@ export const ConversationSchema = z.object({
   id: z.string().min(1),
   agent: AgentSchema,
   unreadCount: z.number().int().min(0),
+  /** 会话名（用户/客户端起的标题；空 = 尚未命名，界面按首条消息或时间兜底）。 */
+  title: z.string().max(80).optional(),
   /** 最后一条消息时间（ISO）；无消息为 null。 */
   lastMessageAt: z.string().nullable().optional(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 
-/** 建智能体一对一：agentId 指向名册项，owner 校验在服务端做（schema 只管形状）。 */
-export const AgentConversationBodySchema = z.object({ agentId: z.string().min(1) });
+/**
+ * 建智能体会话：agentId 指向名册项，owner 校验在服务端做（schema 只管形状）。
+ *
+ * - 缺省保持旧行为：同一用户 × 同一 agent 幂等复用（老客户端/旧链接不受影响）；
+ * - `fresh: true` = 新建一段新会话（Claude Code 式「同一智能体多段对话」）；
+ * - `title` 可选，创建时即可带标题（界面后续也会在首条消息后 PATCH）。
+ */
+export const AgentConversationBodySchema = z.object({
+  agentId: z.string().min(1),
+  fresh: z.boolean().optional(),
+  title: z.string().max(80).optional(),
+});
+
+/** 改会话标题（PATCH /api/conversations/:id）：空串 = 清除标题。 */
+export const UpdateConversationBodySchema = z.object({
+  title: z.string().max(80),
+});
 
 export const SharedFileMetaSchema = z.object({
   id: z.string().min(1),

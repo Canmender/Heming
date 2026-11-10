@@ -140,6 +140,51 @@ describe("auth + team API", () => {
     expect(msgs.status).toBe(200);
     expect(msgs.body).toEqual([]);
   });
+
+  it("d.128：fresh 新建多段会话、PATCH 标题、非成员 403", async () => {
+    const a = await register(app, "alicetwo");
+    const auth = { Authorization: `Bearer ${a.token}` };
+    const agent = await request(app).post("/api/agents").set(auth).send({ name: "助手2", description: "" });
+    expect(agent.status).toBe(201);
+
+    const first = await request(app)
+      .post("/api/conversations")
+      .set(auth)
+      .send({ agentId: agent.body.id, fresh: true });
+    const second = await request(app)
+      .post("/api/conversations")
+      .set(auth)
+      .send({ agentId: agent.body.id, fresh: true, title: "第二段" });
+    expect(second.status).toBe(201);
+    expect(second.body.id).not.toBe(first.body.id);
+    expect(second.body.title).toBe("第二段");
+
+    const patched = await request(app)
+      .patch(`/api/conversations/${first.body.id}`)
+      .set(auth)
+      .send({ title: "改过的名字" });
+    expect(patched.status).toBe(200);
+    expect(patched.body.title).toBe("改过的名字");
+
+    const list = await request(app).get("/api/conversations").set(auth);
+    expect(list.body.some((c: { id: string; title?: string }) => c.id === first.body.id && c.title === "改过的名字")).toBe(true);
+
+    // 非法 body → 400；非成员 → 403
+    expect(
+      (
+        await request(app)
+          .patch(`/api/conversations/${first.body.id}`)
+          .set(auth)
+          .send({ title: "x".repeat(81) })
+      ).status,
+    ).toBe(400);
+    const bob = await register(app, "bobtwo");
+    const forbidden = await request(app)
+      .patch(`/api/conversations/${first.body.id}`)
+      .set("Authorization", `Bearer ${bob.token}`)
+      .send({ title: "bob 改的" });
+    expect(forbidden.status).toBe(403);
+  });
 });
 
 describe("PUT /api/me 个人资料", () => {

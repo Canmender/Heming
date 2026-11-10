@@ -35,6 +35,7 @@ const msgAt = (id: string, text: string, createdAt: string): Message => ({
 
 describe("chat store", () => {
   beforeEach(() => {
+    vi.clearAllMocks(); // 模块 mock（fetchMessages/listAgents）的调用历史逐例归零  beforeEach(() => {
     vi.clearAllMocks(); // 模块 mock（fetchMessages/listAgents）的调用历史逐例归零
     useChatStore.setState({
       conversations: [],
@@ -694,5 +695,50 @@ describe("chat store", () => {
     });
     await flush();
     expect(useChatStore.getState().streaming["sE4"]?.errorMessage).toBe("not a member");
+  });
+});
+
+describe("chat store · 会话标题（d.128）", () => {
+  beforeEach(() => {
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" },
+          unreadCount: 0,
+          lastMessageAt: null,
+        },
+      ] as never,
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renameConversation：PATCH 成功后只替换这一条的 title（不整表刷新）", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "c1",
+          type: "agent",
+          agent: { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" },
+          unreadCount: 0,
+          title: "周报整理",
+          lastMessageAt: null,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    await useChatStore.getState().renameConversation("c1", "周报整理");
+    expect(spy).toHaveBeenCalledWith("/api/conversations/c1", expect.objectContaining({ method: "PATCH" }));
+    expect(useChatStore.getState().conversations[0].title).toBe("周报整理");
+  });
+
+  it("renameConversation：接口失败时抛错、本地标题不变", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("网络中断"));
+    await expect(useChatStore.getState().renameConversation("c1", "x")).rejects.toThrow();
+    expect(useChatStore.getState().conversations[0].title).toBeUndefined();
   });
 });

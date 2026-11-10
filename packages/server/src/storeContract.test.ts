@@ -62,6 +62,29 @@ for (const f of factories) {
       expect(() => store.createAgentConversation(b.id, sys.id)).not.toThrow();
     });
 
+    it("d.128：fresh 新建多段会话；标题可设可清；非成员不能改", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const agent = store.createAgent(a.id, { name: "助理", description: "" });
+      const c1 = store.createAgentConversation(a.id, agent.id, { title: "第一段" });
+      const c2 = store.createAgentConversation(a.id, agent.id, { fresh: true, title: "第二段" });
+      expect(c2.id).not.toBe(c1.id);
+
+      const withTitles = store.listConversations(a.id);
+      expect(withTitles.find((c) => c.id === c1.id)?.title).toBe("第一段");
+      expect(withTitles.find((c) => c.id === c2.id)?.title).toBe("第二段");
+
+      expect(store.updateConversationTitle(c1.id, a.id, "改过的名字")).toBe(true);
+      expect(store.listConversations(a.id).find((c) => c.id === c1.id)?.title).toBe("改过的名字");
+      // 空串 = 清除标题（列表里该字段消失，不写空串）
+      expect(store.updateConversationTitle(c1.id, a.id, "")).toBe(true);
+      expect(store.listConversations(a.id).find((c) => c.id === c1.id)?.title).toBeUndefined();
+
+      // 非成员 / 不存在
+      expect(store.updateConversationTitle(c1.id, b.id, "bob 改的")).toBe(false);
+      expect(store.updateConversationTitle("nope", a.id, "x")).toBe(false);
+    });
+
     it("agent 不存在报错；agent 被删后该会话从列表消失", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       expect(() => store.createAgentConversation(a.id, "nope")).toThrow("agent not found");

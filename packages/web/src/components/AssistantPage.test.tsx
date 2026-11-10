@@ -225,12 +225,26 @@ describe("对话 Tab · Claude Code 风格会话栏", () => {
     ).toBeInTheDocument();
   });
 
+  it("服务端会话有 title 时优先显示标题（不再从消息推导）", () => {
+    useChatStore.setState({
+      conversations: [{ ...conv2, title: "竞品调研（第二段）" }] as never,
+      messages: {} as never,
+    });
+    render(<AssistantPage />);
+    expect(
+      screen.getByRole("button", { name: "打开与 小研 的对话：竞品调研（第二段）" }),
+    ).toBeInTheDocument();
+  });
+
   it("组右侧 + 直接新建该智能体的会话；顶部「新建对话」回到选择页", async () => {
     seedConversations();
     render(<AssistantPage />);
 
     fireEvent.click(screen.getByRole("button", { name: "新建与 小研 的对话" }));
-    await waitFor(() => expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("a2"));
+    // d.128：组右侧「＋」是新建一段会话（fresh），不是复用已有会话
+    await waitFor(() =>
+      expect(useChatStore.getState().openAgent).toHaveBeenCalledWith("a2", { fresh: true }),
+    );
     expect(useUiStore.getState().activeConversationId).toBe("c1");
     expect(tab("对话")).toHaveAttribute("aria-selected", "true");
 

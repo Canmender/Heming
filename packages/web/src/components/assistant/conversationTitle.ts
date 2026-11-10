@@ -1,8 +1,8 @@
 /**
  * 会话名称：Claude Code 侧栏把「会话名」当作一级信息（而不是智能体名）。
  *
- * 本仓的服务端会话模型（`ConversationSchema`）没有 title 字段，也不为了改名去动
- * `store/chat.ts`（阶段 C 归另一个任务）。所以名称**从已有数据确定性推导**：
+ * d.128 起服务端会话模型有可选 `title`（首条消息后由客户端 PATCH 写入），优先用它；
+ * 没有 title（旧会话/尚未发消息）时**从已有数据确定性推导**：
  *
  * 1. 已加载消息里的**首条用户消息**（正文或附件名）→ 截断成一句摘要；
  * 2. 没有可读正文（消息还没加载 / 全是密文 / 只有助手消息）→ 最后活跃时间兜底；
@@ -47,9 +47,11 @@ function firstUserText(messages: readonly Message[] | undefined): string {
  * @param messages 该会话已加载的消息（store.messages[convId]，未加载传 undefined）
  */
 export function conversationTitle(
-  conv: Pick<Conversation, "lastMessageAt">,
+  conv: Pick<Conversation, "lastMessageAt" | "title">,
   messages?: readonly Message[],
 ): string {
+  const custom = (conv.title ?? "").trim();
+  if (custom) return clip(custom, 32);
   const text = firstUserText(messages);
   if (text) return clip(text);
   const at = conv.lastMessageAt;

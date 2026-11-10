@@ -6,6 +6,7 @@ import {
   LoginBodySchema,
   UpdateProfileBodySchema,
   AgentConversationBodySchema,
+  UpdateConversationBodySchema,
   CreateFileBodySchema,
   AgentBodySchema,
   PutE2eKeysBodySchema,
@@ -770,12 +771,38 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       return;
     }
     try {
-      const created = store.createAgentConversation(userId(req), parsed.data.agentId);
+      const created = store.createAgentConversation(userId(req), parsed.data.agentId, {
+        fresh: parsed.data.fresh,
+        title: parsed.data.title,
+      });
       const row = store.listConversations(userId(req)).find((c) => c.id === created.id);
       res.status(201).json(row ?? { ...created, unreadCount: 0 });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }
+  });
+
+  // d.128：改会话标题（客户端在首条消息后写入；空串 = 清除）。成员之外一律 403。
+  app.patch("/api/conversations/:id", authOnly, (req, res) => {
+    const parsed = UpdateConversationBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid body" });
+      return;
+    }
+    if (!store.isMember(req.params.id, userId(req))) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    if (!store.updateConversationTitle(req.params.id, userId(req), parsed.data.title)) {
+      res.status(404).json({ error: "conversation not found" });
+      return;
+    }
+    const row = store.listConversations(userId(req)).find((c) => c.id === req.params.id);
+    if (!row) {
+      res.status(404).json({ error: "conversation not found" });
+      return;
+    }
+    res.json(row);
   });
 
   app.get("/api/conversations/:id/messages", authOnly, (req, res) => {
