@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.129.3.52.0",
+    "date": "2026-11-10",
+    "title": "对话页深色下更干净",
+    "bullets": [
+      "对话页的工具栏、搜索条、附件条、下拉菜单、错误提示、滚动条都换成同一套主题色；深色模式下不再出现浅色块或发白的菜单。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.129.3.51.0",
     "date": "2026-11-10",
     "title": "设置卡片、弹窗和导航栏深色更一致",

@@ -24,10 +24,10 @@
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-10） | `d.129.3.51.0`（`main`，**未出包/未部署**）——设置子卡（HITL/存储/文件编辑）、插件安装/技能社区/工具确认/文件预览弹窗、通知中心、未绑定模型提示、NavRail 全部 token 化；上述文件写死视觉类审计归零。详见 §5 首条 |
-| 安装包（最新） | **仍是 `d.123.3.48.0`（r90，247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`）**；`d.124.3.48.0` / `d.125.3.48.0` / `d.126.3.48.0` / `d.127.3.48.0` / `d.128.3.48.0` / `d.129.3.48.0` / `d.129.3.49.0` / `d.129.3.50.0` / `d.129.3.51.0` 代码已合入 `main` 但**未打包、未部署、未发布更新源**（需要时按 `docs/deploy.md` 走 `release.mjs --desktop --deploy` + `publish-update.mjs`）。 |
-| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.129.3.51.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
-| 测试 | 2026-11-10 21:3x 实跑（d.129.3.51.0 门禁）：**web 341 文件 / 4841 例、shared 8 / 106、server 16 / 270、desktop 46 个 node:test 文件 / 772 例**；`pnpm -r typecheck` 六包零错误；`check-source-encoding` OK。真实浏览器（本地 dev，admin）核对设置「高级」区块与导航栏亮暗。 |
+| 当前版本（2026-11-10） | `d.129.3.52.0`（`main`，**未出包/未部署**）——ChatPage 的工具栏/搜索/输入区/附件条/下拉/错误条/滚动条写死颜色收口到 token；深色下不再有浅色弹层与发白错误条。详见 §5 首条 |
+| 安装包（最新） | **仍是 `d.123.3.48.0`（r90，247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`）**；`d.124.3.48.0` / `d.125.3.48.0` / `d.126.3.48.0` / `d.127.3.48.0` / `d.128.3.48.0` / `d.129.3.48.0` / `d.129.3.49.0` / `d.129.3.50.0` / `d.129.3.51.0` / `d.129.3.52.0` 代码已合入 `main` 但**未打包、未部署、未发布更新源**（需要时按 `docs/deploy.md` 走 `release.mjs --desktop --deploy` + `publish-update.mjs`）。 |
+| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.129.3.52.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
+| 测试 | 2026-11-10 21:3x 实跑（d.129.3.52.0 门禁）：**web 341 文件 / 4841 例、shared 8 / 106、server 16 / 270、desktop 46 个 node:test 文件 / 772 例**；`pnpm -r typecheck` 六包零错误；`check-source-encoding` OK。真实浏览器（本地 dev，admin）核对对话页思考/工具块与消息区亮暗。 |
 | 线上 | **`d.123.3.48.0` 已于 2026-11-10 10:05–10:07 部署**（`release.mjs --desktop --deploy`：7 OK / 2 SKIP；备份 `heming-data-2026-11-10-d.123.3.48.0.tar.gz` 111.1KB 落本机；`INSTALL DONE: d.123.3.48.0`，install + smoke 通过）。人工校验：公网 `/api/health` 200；首页主 bundle `index-DO9EqyCD.js` 与本机 `packages/web/dist` **同名同 md5**；线上 SettingsPage chunk 含 `d.123.3.48.0`；部署包 30.6MB / 1802 项（不该有的 0 项）。 |
 | 安装包（已发布） | **`和鸣 Setup d.123.3.48.0.exe`（`r90`，247,030,505 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs`（`HEMING_RELEASE_DIR=…/r90`）上传 3 个文件并按远端大小 + sha512 校验通过。 |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **当前指向 123.3.48**（sha512 `7Plv…Mdoxug==`，size 247030505）；远端只留 `d.122.3.48.0` + `d.123.3.48.0` 两版（更早版本已按策略清理）。 |
@@ -229,6 +229,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 
 ## 5. 下一步候选
+**对话页 ChatPage token 收口（`d.129.3.52.0`，2026-11-10；`main`，未出包/未部署）**：消息区/工具栏/输入区/搜索条/附件条/导出菜单/滚动条/错误横幅的写死色改 token（body/muted、surface/subtle*、line-soft、danger/warn/success、warn-soft/line）；搜索高亮一条测试断言同步；ChatPage 123 例 + AgentStreamBubble 14 例全绿；亮/暗截图核对。**下一步**：① 模块页（Automation/Infohub/Staff/Workflow）低风险 token 收口；② 会话列表分页；③ 插件独立化 P2（自动化/幕僚页面搬出本体，基线 143 只减不增）。
+
 **设置子卡 / 弹窗 / 导航栏 token 收口（`d.129.3.51.0`，2026-11-10；`main`，未出包/未部署）**：HitlPolicyCard / StorageUsageCard / FileEditCard / PluginInstallDialog / SkillHubPanel / ToolApprovalModal / FilePreviewModal / NotificationCenter / UnboundModelNotice / NavRail 共 10 个文件的写死视觉类全部改 token（状态色 → danger/warn/success soft/line，底色 → surface/subtle，提示气泡用 shadow-card）；StorageUsageCard 两条旧断言同步改 token 类名；审计计数 0。**下一步**：① ChatPage / TaskAreaPage / 模块页（Automation/Infohub/Staff/Workflow）仍有个位到几十处写死色，按页面逐步收（ChatPage 优先）；② 会话列表分页（当前全量）；③ 插件独立化 P2 迁移（自动化/幕僚页面搬出本体，基线 143 只减不增）。
 
 **空状态统一 + 删除会话本地清理（`d.129.3.50.0`，2026-11-10；`main`，未出包/未部署）**：① `EmptyState` 图标槽改 `.ui-icon-tile`（40px/accent 8%），全站空态自动统一；团队看板任务/日程空态补图标（新增 `CalendarIcon`）；② 删除会话时清 `heming.transcript.<convId>`、打字机流/流归属、草稿，避免本机残留；③ Home/Team/Memory/Settings/Plugins 五页的 `bg-[#…]/text-[#…]/border-[#…]/shadow-[…]/bg-white` 审计计数归零；④ 测试：store 删除清理、AssistantPage 草稿清理、EmptyState 图标砖断言；web 341/4841 全绿。**下一步**：① 设置子卡（HitlPolicyCard/StorageUsageCard/FileEditCard/ContextSettingsCard）与插件弹窗仍有个位写死色；② 会话列表分页（当前全量拉取）；③ 团队看板/插件页空态文案可再顺手；④ 插件独立化 P2 迁移（自动化/幕僚页面搬出本体，基线 143 只减不增）。

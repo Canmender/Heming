@@ -399,11 +399,11 @@ describe("ChatPage", () => {
     fireEvent.change(input, { target: { value: "发布" } });
 
     expect(await screen.findByText("1/2")).toBeInTheDocument();
-    expect(document.getElementById("msg-m1")?.className).toContain("ring-[#f0d58c]");
+    expect(document.getElementById("msg-m1")?.className).toContain("ring-[var(--warn-line)]");
 
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("2/2")).toBeInTheDocument();
-    expect(document.getElementById("msg-m3")?.className).toContain("ring-[#f0d58c]");
+    expect(document.getElementById("msg-m3")?.className).toContain("ring-[var(--warn-line)]");
 
     // 再按一次循环回第一条
     fireEvent.keyDown(input, { key: "Enter" });
@@ -497,7 +497,7 @@ describe("ChatPage", () => {
 
     // 扩窗后节点出现且被高亮
     expect(await screen.findByText("老消息 目标命中")).toBeInTheDocument();
-    expect(document.getElementById("msg-s5")?.className).toContain("ring-[#f0d58c]");
+    expect(document.getElementById("msg-s5")?.className).toContain("ring-[var(--warn-line)]");
   });
 
   it("切会话后窗口回到初始值（d.33）", async () => {

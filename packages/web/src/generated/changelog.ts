@@ -12,6 +12,21 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.129.3.52.0",
+    "date": "2026-11-10",
+    "title": "对话页（ChatPage）写死颜色收口",
+    "bullets": [
+      "消息区/工具栏/输入区/会话内搜索/附件条/导出菜单/滚动条把手/错误横幅里的写死颜色全部换 token：文字 `--body`/`muted`、底色 `--surface`/`--subtle*`、边框 `--line-soft`、状态色 `--danger`/`--warn`/`--success`、",
+      "深色模式下不再出现浅色下拉菜单、浅灰工具栏、发白的错误条；截图核对（折叠/展开思考与工具块、亮/暗）。",
+      "仅样式改动；`ChatPage` 相关 123 例 + AgentStreamBubble 14 例全绿（搜索高亮断言同步改 token 类名）。",
+      "`web` 全量回归通过；`pnpm -r typecheck` 六包零错误；编码检查 OK。"
+    ],
+    "paragraphs": [
+      "未绑定模型横条与搜索高亮框 `--warn-soft`/`--warn-line` 等。",
+      "验证"
+    ]
+  },
+  {
     "version": "d.129.3.51.0",
     "date": "2026-11-10",
     "title": "设置子卡 / 对话框 / 导航栏的写死颜色收口",
