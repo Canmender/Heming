@@ -24,15 +24,14 @@
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-10） | `d.122.3.48.0`（`main`，**已部署 + 更新源已发布 + 已打 tag**）——导航顺序彻底固定（不再读自定义顺序）、插件页统一叫「插件」且装完入口追加导航末位；上一版 `d.122.3.47.0` 为插件源码收进 `plugin-kit/plugins` + 插件区 UI 打磨。详见 §5 首两条 |
-| 安装包（最新） | **`d.122.3.48.0`（r89）已出包并发布到更新源**：`packages/desktop/release/r89/和鸣 Setup d.122.3.48.0.exe`（247,029,830 字节，sha512 `xscH2ewqnc87PG1a6acoI9kzGqJtblISdS/9CPmtCMovw3MpwZc9SgtxfZKQLs5UUpInxD5U3kuwXDhLjXXP8Q==`，与 r89 `latest.yml` 及远端一致）。`release.mjs --desktop --deploy` 于 2026-11-10 09:20–09:28 实跑：7 步 OK / 2 步 SKIP（构建 15.0s、逐包测试 2m22s、打包 3m05s、部署 1m24s），内嵌 web 含 `d.122.3.48.0`。 |
-| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.122.3.48.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
-| 测试 | 2026-11-10 09:2x 实跑（d.122.3.48.0 门禁）：**web 331 文件 / 4720 例、shared 8 / 95、pet-widget 11 / 138、desktop 44 个 node:test 文件 / 706 例**（server 16 / 264 含在逐包门禁中）；`pnpm -r typecheck` 六包零错误；`pnpm plugin:check` 退出 0。真实浏览器（dev）复验：默认 8 项顺序、装「工作流」后导航第 9 位出现入口、设置区「导航顺序」只读且标注「已装插件 · 固定末位」。 |
-| 线上 | **`d.122.3.48.0` 已于 2026-11-10 09:25–09:28 部署**（`release.mjs --desktop --deploy`：7 OK / 2 SKIP；备份 `heming-data-2026-11-10-d.122.3.48.0.tar.gz` 111.1KB 落本机；`INSTALL DONE: d.122.3.48.0`，install + smoke 通过）。人工校验：公网 `/api/health` 200；首页主 bundle `index-BWByYHif.js` 与本机 `packages/web/dist` **同名同 md5**；线上 SettingsPage chunk 含 `d.122.3.48.0`；部署包 30.6MB / 1802 项（不该有的 0 项）。 |
-| 安装包（已发布） | **`和鸣 Setup d.122.3.48.0.exe`（`r89`，247,029,830 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs`（`HEMING_RELEASE_DIR=…/r89`）上传 3 个文件并按远端大小 + sha512 校验通过。 |
-| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **当前指向 122.3.48**（sha512 `xscH…P8Q==`，size 247029830）；远端只留 `d.122.3.47.0` + `d.122.3.48.0` 两版（d.121 已按策略清理）。 |
-| 发布标签 | **`d.122.3.48.0` annotated tag 已打并推送**；`main` 已推送。历史：`d.122.3.47.0` 未单独打 tag（并入本版发布记录）。
-### 已完成里程碑
+| 当前版本（2026-11-10） | `d.123.3.48.0`（`main`，**已部署 + 更新源已发布 + 已打 tag**）——能力三类（插件 / 技能 / MCP）：插件页六 Tab 收敛为三 Tab，插件统一由自家服务器仓库分发，工具并入 MCP、界面插件并入插件；上一版 `d.122.3.48.0` 为导航固定 + 插件概念统一。详见 §5 首条 |
+| 安装包（最新） | **`d.123.3.48.0`（r90）已出包并发布到更新源**：`packages/desktop/release/r90/和鸣 Setup d.123.3.48.0.exe`（247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`，与 r90 `latest.yml` 及远端一致）。`release.mjs --desktop --deploy` 于 2026-11-10 10:00–10:07 实跑：7 步 OK / 2 步 SKIP（构建 22.7s、逐包测试 2m17s、打包 3m50s、部署 1m29s），内嵌 web 含 `d.123.3.48.0`。 |
+| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.123.3.48.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
+| 测试 | 2026-11-10 10:0x 实跑（d.123.3.48.0 门禁）：**web 331 文件 / 4720 例、shared 8 / 95、pet-widget 11 / 138、desktop 44 个 node:test 文件 / 706 例、server 16 / 264**；`pnpm -r typecheck` 六包零错误。真实浏览器（dev）复验：插件页只有 插件 / 技能 / MCP 三 Tab，安装入口三个按钮，插件 Tab 末尾「界面插件」区带浏览器降级说明。 |
+| 线上 | **`d.123.3.48.0` 已于 2026-11-10 10:05–10:07 部署**（`release.mjs --desktop --deploy`：7 OK / 2 SKIP；备份 `heming-data-2026-11-10-d.123.3.48.0.tar.gz` 111.1KB 落本机；`INSTALL DONE: d.123.3.48.0`，install + smoke 通过）。人工校验：公网 `/api/health` 200；首页主 bundle `index-DO9EqyCD.js` 与本机 `packages/web/dist` **同名同 md5**；线上 SettingsPage chunk 含 `d.123.3.48.0`；部署包 30.6MB / 1802 项（不该有的 0 项）。 |
+| 安装包（已发布） | **`和鸣 Setup d.123.3.48.0.exe`（`r90`，247,030,505 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs`（`HEMING_RELEASE_DIR=…/r90`）上传 3 个文件并按远端大小 + sha512 校验通过。 |
+| 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **当前指向 123.3.48**（sha512 `7Plv…Mdoxug==`，size 247030505）；远端只留 `d.122.3.48.0` + `d.123.3.48.0` 两版（更早版本已按策略清理）。 |
+| 发布标签 | **`d.123.3.48.0` annotated tag 已打并推送**；`main` 已推送。历史：`d.122.3.48.0`、`d.122.3.47.0` 已打 tag 并推送。
 
 1. **M1 骨架**：monorepo（shared/server/web/desktop）、三栏壳与视觉规范、账号/好友/1:1/WS 实时、共享文件库。
 2. **M2 IM**：SQLite 固化、群聊、预设混合群、已读回执、圆形雷达通讯录。

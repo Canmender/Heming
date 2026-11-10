@@ -5,7 +5,7 @@
 
 | 目录 | 插件 id | 形态 | 说明 | 构建 / 测试 |
 |---|---|---|---|---|
-| [`infohub-collector/`](infohub-collector/) | `heming.infohub-collector` | v5 声明式 | 本机 InfoHub 采集桥（技能 + MCP + 命令） | `node scripts/plugin-lint.mjs plugin-kit/plugins/infohub-collector/plugin.json` |
+| [`infohub-collector/`](infohub-collector/) | `heming.infohub-collector` | v5 声明式 | 本机 InfoHub 采集桥（技能 + MCP + 命令 + 工具束） | `node scripts/plugin-lint.mjs plugin-kit/plugins/infohub-collector/plugin.json` |
 | [`pet-widget/`](pet-widget/) | `heming.pet` | v4 bundle（仅首方） | 桌宠界面插件；pnpm workspace 包 | `pnpm --filter @heming/pet-widget build` / `test`；发布前签名后 `run pack` |
 | [`workflow-kit/`](workflow-kit/) | `heming.workflow-kit` | v5 声明式 + 独立服务 | 节点式工作流引擎；清单在 `plugin/plugin.json` | `cd plugin-kit/plugins/workflow-kit && pnpm install && pnpm build && pnpm test` |
 
