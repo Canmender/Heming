@@ -54,8 +54,13 @@ function walk(dir: string, out: string[]): void {
 }
 
 function isGuardFile(file: string): boolean {
-  // 基线/守卫自身就在被扫描的目录里，不能把自己算成「耦合代码」。
-  return file.endsWith("coupling-baseline.json") || file.endsWith("coupling.test.ts");
+  // 基线/守卫自身、以及**宿主模块运行时**（loader/SDK/回退装配）都在被扫描目录里：
+  // 它们是插件系统运行时代码，不属于「插件业务代码」，不能算耦合。
+  return (
+    file.endsWith("coupling-baseline.json") ||
+    file.endsWith("coupling.test.ts") ||
+    /^lib\/modules\/(runtime|host-sdk|webModules)(\.test)?\.[tj]sx?$/.test(file)
+  );
 }
 
 function currentCouplingFiles(): string[] {

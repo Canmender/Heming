@@ -12,6 +12,29 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.131.3.54.0",
+    "date": "2026-11-10",
+    "title": "模块包完全独立化 M1：宿主加载式首方模块包基础设施",
+    "bullets": [
+      "新增 `packages/modules/`（README + `sdk/` + `hello-page/` 样例）与`scripts/build-web-module.mjs`：Vite lib 模式产出 ESM `entry.js`；",
+      "`react` / `react/jsx-runtime` 构建期 alias 到 `packages/modules/sdk/` shim，运行时从`globalThis.__hemingHost` 取宿主 React（同一实例），模块包不携带 React。",
+      "`lib/modules/host-sdk.ts`：`installHostSdk()` 幂等挂载宿主 React/JSX 与共享文件命名空间；",
+      "`lib/modules/webModules.ts`：模块包 `import()` 加载 + 形状校验（manifest id 一致、至少一个页面组件）、缓存/失败重试、开发/安装版 URL 基址可覆盖；",
+      "`packages/web/vite.config.ts` 新增 `modulesDevServer`：把 `packages/modules/<id>/dist` 挂到`/__modules__/<id>/*`（路径夹取、no-store），开发态与安装版同一路径语义。",
+      "`hello-page` 构建产物 1.3KB、无 React 标记；浏览器 dev（CDP）实测 `/__modules__/hello-page/entry.js`200、`loadWebModule('hello-page')` 返回 manifest/pages 且页面是函数；",
+      "新增 host-sdk/webModules 测试 6 例；耦合基线排除宿主运行时文件后 **143 → 141**（只减不增）；",
+      "`web` 全量回归通过；`pnpm -r typecheck` 六包零错误。"
+    ],
+    "paragraphs": [
+      "目标：把幕僚/信息中枢/自动化/工作流的 UI 与业务逻辑从 `packages/web` 迁出，改为**安装后才存在、由主窗口动态加载**的首方签名 ESM 模块包（与沙箱 bundle 不同，共享宿主 React/stores，不重写 UI）。本轮完成 M1 基础设施，迁移本身从下一轮开始。",
+      "① 模块包构建链构建门禁检查「必须含 export / 不得打包 React 本体 / ≤2.5MB」。",
+      "② 宿主 SDK 与加载器",
+      "③ 验证",
+      "下一步（M2–M6）",
+      "幕僚 → 自动化 → 信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。"
+    ]
+  },
+  {
     "version": "d.130.3.54.0",
     "date": "2026-11-10",
     "title": "删除未路由死代码；剩余可见组件 token 收口",

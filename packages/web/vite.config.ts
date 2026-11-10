@@ -3,6 +3,9 @@
 // vitest 的 defineConfig 同时接受 vite 配置项（plugins/build/server 等），行为不变。
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { extname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import appPkg from "../desktop/package.json";
 
 // 缓存落工作区 .tmp：默认写系统临时目录在沙箱下会 EPERM（见 shared/server 同理）
@@ -14,9 +17,43 @@ import appPkg from "../desktop/package.json";
 // 且与路径无关——指到工作区 .tmp/tmp 一样被拦。
 // 所以它属于环境噪音，不要在这里试各种绕法；server/shared 两包同理。
 
+
+/** 开发态模块包：把 packages/modules/<id>/dist 以 /__modules__/<id>/* 挂到 vite dev server。
+ * 生产桌面走 app:// 协议；两者路径语义一致，便于浏览器里直接验证模块包。 */
+function modulesDevServer() {
+  const root = fileURLToPath(new URL("../modules", import.meta.url));
+  return {
+    name: "heming-modules-dev",
+    apply: "serve" as const,
+    configureServer(server: { middlewares: { use: (route: string, fn: (req: { url?: string }, res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (b?: string | Buffer) => void; }, next: () => void) => void) => void } }) {
+      server.middlewares.use("/__modules__", (req, res, next) => {
+        const url = decodeURIComponent((req.url || "").split("?")[0] || "");
+        const match = /^\/([a-z0-9][a-z0-9._-]{0,63})\/(.+)$/.exec(url);
+        if (!match) return next();
+        const [, id, rel] = match;
+        if (rel.includes("..") || rel.startsWith("/") || rel.includes("\\")) {
+          res.statusCode = 400;
+          res.end("bad path");
+          return;
+        }
+        const file = resolve(root, id, "dist", rel);
+        if (!existsSync(file) || !statSync(file).isFile()) {
+          res.statusCode = 404;
+          res.end("module build not found");
+          return;
+        }
+        const type = extname(file) === ".js" ? "text/javascript; charset=utf-8" : "application/octet-stream";
+        res.setHeader("Content-Type", type);
+        res.setHeader("Cache-Control", "no-store");
+        res.end(readFileSync(file));
+      });
+    },
+  };
+}
+
 export default defineConfig({
   cacheDir: "../../.tmp/vite/web",
-  plugins: [react()],
+  plugins: [react(), modulesDevServer()],
   define: {
     // 注入**应用**版本（5 段 d.x.y.z.w），不是 web 包自己的 version。
     // 早先这里读 `./package.json`，拿到的是 @heming/web 的版本，主页徽标因此
