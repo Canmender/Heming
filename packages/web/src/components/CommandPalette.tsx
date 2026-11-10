@@ -11,6 +11,7 @@ import {
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { readLocalSnapshot, type LocalSnapshot } from "../lib/palette/local.js";
 import { PALETTE_PAGES, shortcutLabel } from "../lib/palette/pages.js";
+import { runPluginCommandTarget } from "../lib/palette/pluginCommands.js";
 import { pluginStore } from "../lib/plugins/index.js";
 import { effectiveModuleIds, useModuleStore } from "../lib/modules/store.js";
 import { MODULE_IDS } from "../lib/modules/registry.js";
@@ -320,29 +321,18 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       case "plugin-command": {
         // 只走既有能力：page → 切页；skill → 技能区定位意图；plugin → 插件详情意图；
         // settings → 设置页定位卡片意图（d.108）；unit → 统一单元列表定位（复用 open-plugin 槽）。
+        // d.124：分发抽到 `runPluginCommandTarget`，声明式插件页的 `actions` 块共用同一套落点，
+        // 避免两处各写一遍 target → 页面/意图的映射。
         const command = item.command;
         if (!command) break;
-        const target = command.target;
-        if (target.kind === "page") {
-          // 页面 id 非法时忽略（解析期已校验，这里再兜一层，避免把任意字符串塞进 store）
-          if (pages.some((p) => p.page === target.page)) setPage(target.page as never);
-        } else if (target.kind === "skill") {
-          const skill = skillPool.list().find((s) => s.name === target.name);
-          if (skill) setPaletteIntent("focus-skill", { id: skill.id });
-          setPage("skills");
-        } else if (target.kind === "settings") {
-          // 设置页是懒加载页：先投「定位卡片」意图再切页，页内消费后滚动 + 高亮该卡。
-          setPaletteIntent("focus-settings", { card: target.card });
-          setPage("settings");
-        } else if (target.kind === "unit") {
-          // 单元可能是系统/内置/界面插件，没有「插件详情」入口；投同一条 open-plugin 意图，
-          // 由 PluginsPage 判断：声明式插件开详情，其余来源在统一单元列表里定位。
-          setPaletteIntent("open-plugin", { id: target.unitId });
-          setPage("plugins");
-        } else {
-          setPaletteIntent("open-plugin", { id: command.pluginId });
-          setPage("plugins");
-        }
+        runPluginCommandTarget(command.target, {
+          pluginId: command.pluginId,
+          // 页面白名单不在这里复制：用已按「模块已装/启用」过滤过的面板页面目录。
+          canOpenPage: (page) => pages.some((p) => p.page === page),
+          skillIdOf: (name) => skillPool.list().find((s) => s.name === name)?.id ?? null,
+          setPage,
+          setPaletteIntent,
+        });
         break;
       }
       case "task":

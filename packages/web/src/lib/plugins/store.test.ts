@@ -1115,3 +1115,102 @@ describe("PluginStore · URL 协议名大小写（d.77 半安装修复）", () =
     expect(mcp.servers.has(pluginServerId("acme.upper", "svc"))).toBe(true);
   });
 });
+
+/* ───────────────────── d.124 插件页面（清单透传/订阅） ───────────────────── */
+
+describe("PluginStore · 插件页面（d.124）", () => {
+  function pageManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      schemaVersion: 5,
+      id: "acme.page-kit",
+      name: "带页面的包",
+      version: "1.0.0",
+      engines: { heming: "d.123" },
+      permissions: { network: [], tools: "read" },
+      contributions: {
+        skills: [{ name: "页面技能", instructions: "做点什么。" }],
+        page: {
+          title: "采集看板",
+          icon: "chart",
+          summary: "本机采集状态",
+          blocks: [
+            { type: "stats", items: [{ label: "已采集", value: "12 条" }] },
+            { type: "markdown", text: "## 用法\n先填来源。" },
+          ],
+        },
+      },
+      ...overrides,
+    };
+  }
+
+  it("安装后清单里的页面被完整保留，且从存储读回仍一致", () => {
+    const { store, storage } = fresh();
+    store.install(pageManifest());
+
+    const page = store.get("acme.page-kit")?.manifest.contributions.page;
+    expect(page).toMatchObject({ kind: "blocks", title: "采集看板", icon: "chart", summary: "本机采集状态" });
+    if (page?.kind !== "blocks") throw new Error("应为声明式页面");
+    expect(page.blocks).toHaveLength(2);
+
+    // 重启读回：stripWebCompatFields 只剥 llmPresets，页面不能被丢掉
+    const reloaded = new PluginStore(storage, new SkillPool(storage, clock()), clock(), fakeMcp().port);
+    expect(reloaded.get("acme.page-kit")?.manifest.contributions.page).toMatchObject({
+      kind: "blocks",
+      title: "采集看板",
+    });
+  });
+
+  it("list()/get() 返回的是深拷贝：改返回值不会污染下一次读取", () => {
+    const { store } = fresh();
+    store.install(pageManifest());
+    const first = store.get("acme.page-kit")!;
+    if (first.manifest.contributions.page?.kind !== "blocks") throw new Error("应为声明式页面");
+    first.manifest.contributions.page.blocks.length = 0;
+    first.manifest.contributions.page.title = "被改了";
+
+    const second = store.get("acme.page-kit")!;
+    expect(second.manifest.contributions.page).toMatchObject({ title: "采集看板", kind: "blocks" });
+    if (second.manifest.contributions.page?.kind === "blocks") {
+      expect(second.manifest.contributions.page.blocks).toHaveLength(2);
+    }
+  });
+
+  it("变更订阅：安装/启停/卸载都会通知，且 revision 递增", () => {
+    const { store } = fresh();
+    let calls = 0;
+    const unsubscribe = store.subscribe(() => {
+      calls += 1;
+    });
+    const before = store.revision;
+
+    store.install(pageManifest());
+    store.setEnabled("acme.page-kit", false);
+    store.setEnabled("acme.page-kit", true);
+    store.remove("acme.page-kit");
+
+    expect(calls).toBeGreaterThanOrEqual(4);
+    expect(store.revision).toBeGreaterThan(before);
+    unsubscribe();
+    const frozen = store.revision;
+    store.remove("acme.page-kit"); // 已卸载：即使写盘也不再通知
+    expect(store.revision).toBe(frozen);
+  });
+
+  it("没有页面的旧清单不会凭空多出 page 字段", () => {
+    const { store } = fresh();
+    store.install(v3ManifestForPageTest());
+    expect(store.get("acme.finance")?.manifest.contributions.page).toBeUndefined();
+  });
+});
+
+/** 与 v3Manifest 同形的最小 v3 清单（不依赖其它 describe 内的局部函数）。 */
+function v3ManifestForPageTest(): Record<string, unknown> {
+  return {
+    schemaVersion: 3,
+    id: "acme.finance",
+    name: "财务助手包",
+    version: "1.0.0",
+    permissions: { network: [], tools: "read", files: [] },
+    contributions: { skills: [{ name: "财报速读", instructions: "先看收入。" }] },
+  };
+}

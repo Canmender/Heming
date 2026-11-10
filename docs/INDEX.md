@@ -21,7 +21,7 @@
 | [SELF-EDIT.md](SELF-EDIT.md) | 自我修改：`self_*` 工具、护栏、审计、快照回滚与开关 |
 | [PET.md](PET.md) | 桌宠（**d.98 起为界面插件 `heming.pet`**）：怎么装/用/卸、插件包结构、宿主运行时与三种边界、数据边界与老数据迁移、扩展指南（换形象/加姿态/加设置项）、已知限制与排查 |
 | [KNOWLEDGE.md](KNOWLEDGE.md) | 知识库（**d.114 起为原生 vault**）：多库/任意目录、与 Obsidian 共用同一份 md、双链与反链/标签/搜索语法、编辑器三态、与智能体记忆双向绑定（笔记进召回、沉淀写回 `inbox/`）、写入边界与安全限制、排查表 |
-| [../plugin-kit/README.md](../plugin-kit/README.md) | **插件工具包（插件作者唯一入口）**：标准接口 [`STANDARD.md`](../plugin-kit/STANDARD.md)（版本/清单/贡献点/权限强制点/生命周期/运行时 API/分发）、编写标准 [`AUTHORING.md`](../plugin-kit/AUTHORING.md)、场景菜谱 [`COOKBOOK.md`](../plugin-kit/COOKBOOK.md)、[`FAQ.md`](../plugin-kit/FAQ.md)、四份可验证示例 [`examples/`](../plugin-kit/examples/README.md)、真实插件源码 [`plugins/`](../plugin-kit/plugins/README.md)、脚手架模板与编辑器 schema | 
+| [../plugin-kit/README.md](../plugin-kit/README.md) | **插件工具包（插件作者唯一入口）**：标准接口 [`STANDARD.md`](../plugin-kit/STANDARD.md)（版本/清单/贡献点/权限强制点/生命周期/运行时 API/分发）、编写标准 [`AUTHORING.md`](../plugin-kit/AUTHORING.md)、场景菜谱 [`COOKBOOK.md`](../plugin-kit/COOKBOOK.md)、[`FAQ.md`](../plugin-kit/FAQ.md)、五份可验证示例 [`examples/`](../plugin-kit/examples/README.md)（含 d.124 插件页面示例）、真实插件源码 [`plugins/`](../plugin-kit/plugins/README.md)、脚手架模板与编辑器 schema | 
 | [../plugin-kit/plugins/README.md](../plugin-kit/plugins/README.md) | **真实插件源码**：InfoHub 采集桥（v5 声明式）、桌宠（v4 bundle 源码工程）、工作流引擎（v5 声明式 + 独立本机服务）；各自的构建/测试/发布入口与目录约定 |
 | [PLUGINS.md](PLUGINS.md) | 插件（能力包）实现说明：清单 v3 字段表、权限声明（网络/工具风险上限/文件根）、命令 target、安装/更新/停用/卸载语义、v1/v2 兼容与红线；**§10 界面插件（v4 bundle）**；**§11 清单 v5（d.107）**：`engines` 版本兼容、上架元数据、`prepare→persist→rollback` 安装事务、权限扩张重确认、防降级、兼容矩阵 |
 | [SKILL-HUB.md](SKILL-HUB.md) | 技能社区（d.109）：接入国内技能平台「虾评」的契约与边界——为什么走服务端代理（CORS/归一化/解包上限）、5 条接口与上游字段映射、6 步安装流程与安全上限、Key 管理（安全存储/不持久化）、信任合规、失败降级、配置开关与接第二个源的做法 |
@@ -178,6 +178,7 @@
 | [specs/2026-11-08-update-progress.md](superpowers/specs/2026-11-08-update-progress.md) | **关于页更新进度条（d.99）**：主进程订阅 electron-updater `download-progress` → 状态快照 `progress`（percent 夹紧、重查/重下清空、dispose 摘监听）→ 既有 `update:state` 推送；UpdateCard 渲染 `role=progressbar` 与「已下载 N%（x/y MB · 速度）」 |
 | [specs/2026-11-05-nav-layout.md](superpowers/specs/2026-11-05-nav-layout.md) | **d.72 导航分组重排与页面布局收口**：9 个导航项按「工作台 → 智能模块 → 资料与能力 → 系统」重排并加组间细线；老默认顺序迁移、自定义顺序保留、Alt 键位不变；设置区正文/标签/搜索收进 760px 居中列；信息中枢浏览器空态真正垂直居中；d.73 收尾把幕僚/自动化空态改为剩余空间垂直居中、主页「近 30 日用量」并入 Token 用量卡。附真实浏览器多档宽度截图证据与不做清单 |
 | [specs/2026-11-04-d70-pluggable-modules.md](superpowers/specs/2026-11-04-d70-pluggable-modules.md) | **d.70 内置能力模块可插拔**：幕僚 / 信息中枢 / 自动化改为插件区「模块」Tab 的开关；模块注册表 + `heming.modules.v1` + 依赖语义（自动化依赖信息中枢）+ 导航/路由/首页卡/命令面板/设置/后台循环/工具注入/边车的接线矩阵；第三方页面贡献明确不做；d.74 补命令面板「模块管理」直达入口（含实际生效数） |
+| [specs/2026-11-10-d124-plugin-pages.md](superpowers/specs/2026-11-10-d124-plugin-pages.md) | **d.124 插件页面（页贡献点）**：装插件 → 导航末位多入口 → 点进去是该插件页面；两条渲染路径 A 声明式（清单 `contributions.page` 的 blocks 由宿主受控渲染、零代码、第三方与浏览器可用）与 B 界面插件自带 HTML（`widget://` 独立 origin 沙箱 + 主窗内嵌 `WebContentsView` + 既有能力桥），共用页面注册表/导航追加/卸载即撤；含安全不变量、安装事务、测试计划与明确不做项（不注入宿主界面、不做多页面、第三方 bundle 页面留 C 阶段） |
 
 ## 4. 调研
 

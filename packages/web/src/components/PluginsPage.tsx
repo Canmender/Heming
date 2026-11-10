@@ -59,7 +59,8 @@ import {
 import { BTN_GHOST_SM, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
 import { BUILTIN_MODULES, MODULE_BY_ID, type ModuleId } from "../lib/modules/registry.js";
 import { useModuleStore } from "../lib/modules/store.js";
-import { refreshWidgets, useWidgetsStore } from "../lib/widgets/store.js";
+import { refreshWidgets, useWidgetsStore, widgetsAvailable } from "../lib/widgets/store.js";
+import { pluginPageEntries } from "../lib/pages/registry.js";
 import {
   buildUnitStatuses,
   refreshUnits,
@@ -150,6 +151,7 @@ export function PluginsPage({
   fingerprintOf = publicKeyFingerprint,
 }: PluginsPageProps = {}) {
   const [tick, setTick] = useState(0);
+  const setPage = useUiStore((s) => s.setPage);
   const [tab, setTab] = useSessionTab<TabKey>(PLUGINS_TAB_KEY, "plugins", PLUGINS_TABS);
   const [installOpen, setInstallOpen] = useState(false);
   /** 仓库面板正在下载的包（id@version）：只禁那一张卡的按钮。 */
@@ -251,6 +253,22 @@ export function PluginsPage({
   );
   const [cloudModulesOpen, setCloudModulesOpen] = useState(false);
   const widgetsRecords = useWidgetsStore((s) => s.records);
+  /**
+   * d.124：插件页面入口（与导航轨、App 路由、设置区导航说明读**同一份注册表投影**）。
+   *
+   * 卡片只是入口：点「打开页面」跳 `plugin:<id>`，能不能进由注册表判定
+   * （插件停用/记录损坏时 `available=false`，按钮不渲染），避免页面里再写一套可用性规则。
+   */
+  const pluginPages = useMemo(
+    () =>
+      pluginPageEntries({
+        plugins: list,
+        widgets: widgetsRecords,
+        desktop: widgetsAvailable(),
+      }),
+    [list, widgetsRecords],
+  );
+  const pageEntryOf = (pluginId: string) => pluginPages.find((entry) => entry.pluginId === pluginId);
   const unitStatuses = useMemo(
     () =>
       buildUnitStatuses({
@@ -370,6 +388,8 @@ export function PluginsPage({
 
   const preview = previewState.data;
   const detail = detailId ? plugins.get(detailId) : undefined;
+  /** 详情里的「打开页面」：同样只认注册表判为可用的入口。 */
+  const detailPageEntry = detail ? pageEntryOf(detail.manifest.id) : undefined;
   const detailSkills = useMemo(
     () => (detailId ? plugins.skillsOf(detailId) : []),
     [plugins, detailId, tick],
@@ -671,6 +691,8 @@ export function PluginsPage({
                 if (unit.source !== "package") return null;
                 const plugin = plugins.get(unit.id);
                 if (!plugin) return null;
+                // d.124：只有注册表判定可用的页面才给「打开页面」；停用插件保留贡献行但不给入口。
+                const pageEntry = pageEntryOf(plugin.manifest.id);
                 return (
                   <PluginCard
                     plugin={plugin}
@@ -680,6 +702,9 @@ export function PluginsPage({
                     onRemove={() => setRemoveTarget(plugin)}
                     onGoSkills={goSkills}
                     onGoInterfaces={goInterfaces}
+                    onOpenPage={
+                      pageEntry?.available ? () => setPage(pageEntry.pageId) : undefined
+                    }
                   />
                 );
               }}
@@ -840,6 +865,14 @@ export function PluginsPage({
             setDetailId(null);
             goInterfaces();
           }}
+          onOpenPage={
+            detailPageEntry?.available
+              ? () => {
+                  setDetailId(null);
+                  setPage(detailPageEntry.pageId);
+                }
+              : undefined
+          }
         />
       )}
 

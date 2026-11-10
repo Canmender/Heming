@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, Menu, Tray, nativeImage, dialog, shell, screen, ipcMain, Notification, protocol, net } = require("electron");
+const { app, BrowserWindow, Menu, Tray, nativeImage, dialog, shell, screen, ipcMain, Notification, protocol, net, WebContentsView } = require("electron");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -162,6 +162,11 @@ const TRUSTED_CHANNELS = [
   "widgets:publish",
   "widgets:migrateLegacy",
   "widgets:chat-config-reply",
+  // d.124 B 路径：插件自带页面的视图运行时（挂载/边界/卸载）。
+  // 只认主窗口：页面 rect 与视图归属由主窗决定，插件窗口/页面视图自己都碰不到。
+  "widgets:page-mount",
+  "widgets:page-bounds",
+  "widgets:page-unmount",
 ];
 
 // ── 崩溃兜底（d.30 · P0-4）─────────────────────────────────────────────
@@ -702,6 +707,10 @@ if (!gotLock) {
     mainWindow = win;
     // CSP 违例收集（report-only 期的主要证据来源；enforce 期也能看到被挡了什么）
     attachCspReportLogger(win);
+    win.on("close", () => {
+      // d.124 B 路径：主窗关闭前先销毁页面视图（视图生命周期不能长过宿主窗口）
+      if (widgetHost) widgetHost.pageUnmount();
+    });
     win.on("closed", () => {
       if (mainWindow === win) mainWindow = null;
     });
@@ -808,7 +817,10 @@ if (!gotLock) {
     const match = /^widget:\/\/([a-z0-9][a-z0-9._-]{0,63})$/.exec(String(origin || ""));
     if (!match) return false;
     const record = widgetStore ? widgetStore.get(match[1]) : null;
-    if (!record || !record.enabled || record.error || !record.widget) return false;
+    if (!record || !record.enabled || record.error) return false;
+    // d.124：只带页面的 bundle（没有浮窗）同样是一个可渲染的插件 origin，按同一口径放行；
+    // 完全没有渲染面的记录（将来可能的纯数据包）仍然拒绝。
+    if (!record.widget && !record.page) return false;
     const permissions = record.permissions || {};
     const graphics = Array.isArray(permissions.graphics) ? permissions.graphics : [];
     // 「需要渲染/执行能力」的界面插件才需要网关：全是静态展示的 widget 不用放行
@@ -1306,6 +1318,8 @@ app.whenReady().then(() => {
       nativeImage,
       screen,
       ipcMain,
+      // d.124 B 路径：页面视图用（独立 origin 的 WebContentsView，嵌在主窗内容区）
+      WebContentsView,
       app,
       store: widgetStore,
       preloadPath: path.join(__dirname, "widget-preload.js"),
@@ -1396,16 +1410,22 @@ app.whenReady().then(() => {
       const next = widgetStore.patchSettings(id, payload && payload.patch);
       // 设置变了 → chatConfig 缓存立刻失效（绑定/模型路径最多 30s 才生效是不可接受的）
       if (widgetHost) widgetHost.invalidateChatConfig();
-      // 主窗改了设置也要让插件窗口立刻看到（widget 侧订阅 widget:settings）
-      const runtime = widgetHost ? widgetHost.runtimeFor(id) : null;
-      const win = runtime && runtime.window;
-      if (win && !win.isDestroyed()) win.webContents.send("widget:settings", next);
+      // 主窗改了设置也要让插件的**所有渲染面**立刻看到（widget 窗口 + d.124 页面视图）
+      if (widgetHost) widgetHost.notifySettings(id, next);
       return next;
     });
     secureIpc.handle("widgets:action", (_event, payload) =>
       widgetHost.action(payload && payload.id, payload && payload.action),
     );
     secureIpc.handle("widgets:state", (_event, payload) => widgetHost.stateOf(payload && payload.id));
+    /* ── d.124 B 路径：界面插件自带页面的视图（只认主窗口；rect 由 web 侧算，这里钳制） ── */
+    secureIpc.handle("widgets:page-mount", (_event, payload) => widgetHost.pageMount(payload));
+    secureIpc.on("widgets:page-bounds", (_event, payload) => {
+      widgetHost.pageBounds(payload);
+    });
+    secureIpc.on("widgets:page-unmount", () => {
+      widgetHost.pageUnmount();
+    });
     secureIpc.handle("widgets:publish", (_event, payload) => {
       const result = widgetHost.publish(payload);
       // 主题是唯一需要主进程记住的跨窗口状态：widget 窗口可能比主窗先建好

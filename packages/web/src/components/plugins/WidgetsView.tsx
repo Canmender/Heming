@@ -239,8 +239,9 @@ export function WidgetsView() {
         <div className="grid gap-4">
           {records.map((record) => {
             const state = states[record.id];
-            const scale = state?.scale ?? record.widget.defaultScale;
-            const actionsDisabled = !record.enabled || Boolean(record.error);
+            const scale = state?.scale ?? record.widget?.defaultScale ?? 1;
+            // 页面型界面插件没有浮窗：窗口动作整体禁用（d.124）
+            const actionsDisabled = !record.enabled || Boolean(record.error) || !record.widget;
             const initial = Array.from(record.name)[0]?.toUpperCase() ?? "?";
             return (
               <section
@@ -258,6 +259,7 @@ export function WidgetsView() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="ui-body-sm font-bold">{record.name}</span>
                       <span className="ui-chip">v{record.version}</span>
+                      {!record.widget && record.page && <span className="ui-chip">页面插件</span>}
                       <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted">
                         <span
                           aria-hidden="true"

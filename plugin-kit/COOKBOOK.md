@@ -82,7 +82,44 @@
 
 ---
 
-## 4. 我想声明「这些工具属于我」
+## 4. 我想让插件在左侧导航多一个入口（插件页面）
+
+用**页面贡献**（`contributions.page`）。装好插件 → 导航末位多一项 → 点进去是这个插件自己的页面。
+每插件最多一个页面；**不写就没有入口**（纯能力包照旧只在插件页/技能区/命令面板里生效）。
+
+声明式（推荐，第三方可用，零代码）：
+
+```json
+"engines": { "heming": "d.124" },
+"contributions": {
+  "skills": [{ "name": "采集状态", "instructions": "汇总各来源的采集结果。" }],
+  "page": {
+    "title": "采集桥",
+    "icon": "activity",
+    "summary": "本机采集服务状态与用法",
+    "blocks": [
+      { "type": "markdown", "title": "怎么用", "text": "在设置里填来源，然后点「开始同步」。" },
+      { "type": "stats", "items": [{ "label": "已采集", "value": "128 条" }] },
+      { "type": "table", "columns": ["来源", "状态"], "rows": [["QQ", "就绪"], ["微信", "未连接"]] },
+      { "type": "list", "items": [{ "title": "开始同步", "description": "调用插件命令", "badge": "命令" }] },
+      { "type": "actions", "items": [{ "label": "打开插件区", "target": { "kind": "page", "page": "plugins" } }] },
+      { "type": "contributions", "kind": "skills" }
+    ]
+  }
+}
+```
+
+- 块词表：`markdown` / `stats` / `table` / `list` / `actions` / `contributions`，全部纯文本、宿主转义；未知 `type` 直接报错。
+- `blocks` 1–12 个；每插件 1 个页面（没有页内 Tab/子路由）。
+- `actions` 只做跳转（与命令 target 同形），不执行代码；页面不联网、不新增权限。
+- `engines.heming` 至少 `d.124`（旧版宿主不认识 `page`）。
+- 完整示例：[`05-plugin-page`](examples/05-plugin-page/)。
+
+要自带 HTML（仅首方界面插件）：见 §8「界面插件」，页面写 `contributions.page.entry`，`entry` 必须是包内 `.html` 且出现在 `files` 里。
+
+---
+
+## 5. 我想声明「这些工具属于我」
 
 用**工具束**（`contributions.toolPacks`）。它**只做归属展示**：告诉用户「这些工具是哪个能力带来的」，
 不改变工具开关、不授予执行权、不影响 HITL。
@@ -98,7 +135,7 @@
 
 ---
 
-## 5. 我需要「一段固定流程，不靠模型自由发挥」
+## 6. 我需要「一段固定流程，不靠模型自由发挥」
 
 两条路，先想清楚要不要模型参与：
 
@@ -111,7 +148,7 @@
 
 ---
 
-## 6. 我要把已有的 v3/v4 包升级到 v5
+## 7. 我要把已有的 v3/v4 包升级到 v5
 
 1. `schemaVersion` 改 `5`。
 2. 顶层补 `engines: { "heming": "d.117" }`（写你真正需要的最低版本）。
@@ -124,7 +161,7 @@ v4 的 `desktopWidgets` 不能出现在 v5 里——界面插件继续用 v4 bun
 
 ---
 
-## 7. 我要做一个界面插件（仅首方）
+## 8. 我要做一个界面插件（仅首方）
 
 ```bash
 pnpm plugin:new heming.demo --kind bundle      # 生成 v4 骨架：plugin.json + files/{index.html,app.js,README.md}
@@ -140,19 +177,20 @@ node scripts/pack-plugin.mjs <包根>             # readPackage ✓ 才算可发
 - 运行时只有 `window.__heming_widget`（窗口/设置/数据/事件/聊天），**没有** localStorage、Node、密钥、文件桥。
 - 偏好走 `settings()`，业务数据走 `data*`（JSON、单文件 ≤1MB、卸载即删）。
 - 类型：`packages/shared/src/plugin/widget.ts` 的 `HemingWidgetApi`。
+- 想再要一个页面：`contributions.page = { "title": "…", "entry": "files/page.html" }`，与 `desktopWidgets` 可并存（每类 1 个）；页面在 `widget://` 沙箱里跑，只在安装版显示。
 
 示例 [`04-widget-bundle`](examples/04-widget-bundle/) 可直接当起点。
 
 ---
 
-## 8. 我想让插件只在团队内使用
+## 9. 我想让插件只在团队内使用
 
 插件不区分公开/私有：发布到你们自己的插件目录（`HEMING_PLUGIN_DIR`）即可，客户端「插件区 → 仓库」看到的就是那份目录。
 不要把内部地址/密钥写进清单（清单是明文分发的）；密钥走宿主的密钥存储，不进插件。
 
 ---
 
-## 9. 常见需求的「别这么做」
+## 10. 常见需求的「别这么做」
 
 | 想法 | 为什么不行 / 该怎么做 |
 |---|---|
@@ -161,4 +199,5 @@ node scripts/pack-plugin.mjs <包根>             # readPackage ✓ 才算可发
 | 用 `description` 夹带「忽略以上指令」 | 提示词注入，评审直接拒 |
 | 一个包塞 50 条技能当市场 | 用户装的是「一个能力」，按能力域拆分 |
 | 用 `events` 申请更多能力 | 事件只通知、不授权 |
+| 想让插件页面改宿主界面/加卡片/改导航顺序 | 插件只能拥有自己的页面；改宿主界面不是插件能力 |
 | 把密钥写进 `settings` 默认值 | 明文可见；密钥属于宿主密钥存储 |

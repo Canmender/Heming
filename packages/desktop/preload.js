@@ -388,6 +388,21 @@ contextBridge.exposeInMainWorld("__heming_widgets", {
   action: (payload) => ipcRenderer.invoke("widgets:action", payload),
   /** 运行时状态 { visible, scale, clickThrough }（未运行为 null）。 */
   state: (payload) => ipcRenderer.invoke("widgets:state", payload),
+  /**
+   * d.124：把界面插件的**页面视图**挂到主窗内容区（进入 `plugin:<id>` 页面时调用）。
+   *
+   * 主进程先销毁旧视图再按记录新建（同一时刻只有一个页面视图）；返回 `{ ok:false, error }`
+   * 时 error 已是可直接展示的中文（未安装/停用/没有页面/加载失败）。旧版桌面端没有此方法，
+   * 调用方用 `typeof bridge.pageMount === "function"` 判定并降级。
+   */
+  pageMount: (input) => ipcRenderer.invoke("widgets:page-mount", input),
+  /**
+   * 更新页面视图边界（窗口/布局变化时）。rect 是主窗内容区坐标（DIP），主进程自己钳制；
+   * fire-and-forget：高频 resize 不该等一次 IPC 往返。
+   */
+  pageBounds: (input) => ipcRenderer.send("widgets:page-bounds", input),
+  /** 移除并销毁当前页面视图（离开页面/切页时；重复调用无害）。 */
+  pageUnmount: () => ipcRenderer.send("widgets:page-unmount"),
   /** 把通知中心的新条目脱敏后转发给声明了 permissions.events 含 notify 的 widget。 */
   publish: (payload) => ipcRenderer.send("widgets:publish", payload),
   /** 老 localStorage["heming.pet.v1"] 一次性并入 heming.pet 的设置（幂等）。 */

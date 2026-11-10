@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { SettingsPage, SETTINGS_HIGHLIGHT_MS, appVersionLabel } from "./SettingsPage.js";
 import { useAuthStore } from "../store/auth.js";
 import { useThemeStore } from "../store/theme.js";
 import { DEFAULT_NAV_ORDER, useUiStore } from "../store/ui.js";
 import { setToken } from "../lib/api.js";
+import { pluginStore } from "../lib/plugins/index.js";
 import { CHANGELOG, stripInline } from "../lib/changelog.js";
 import { RELEASE_NOTES } from "../generated/releaseNotes.js";
 import { getThemeMode, setThemeMode } from "../lib/theme.js";
@@ -388,6 +389,53 @@ describe("设置区 · 导航顺序（固定不可改，d.123）", () => {
     const labels = [...region.querySelectorAll("li")].map((li) => li.textContent ?? "");
     expect(labels[0]).toContain("主页");
     expect(labels[7]).toContain("设置");
+  });
+});
+
+describe("设置区 · 导航顺序（含已装插件页面，d.124）", () => {
+  /** 最小 v5 声明式插件：只声明一个页面，用来验证导航说明卡的「已装插件页面」一段。 */
+  const pageManifest = {
+    schemaVersion: 5,
+    id: "acme.collector",
+    name: "采集桥",
+    version: "1.0.0",
+    engines: { heming: "d.100" },
+    permissions: { network: [], tools: "read", files: [] },
+    contributions: {
+      page: {
+        title: "采集桥",
+        icon: "activity",
+        summary: "本机采集服务状态与用法",
+        blocks: [{ type: "markdown", text: "本机采集服务状态。" }],
+      },
+      skills: [{ name: "整理采集结果", instructions: "把采集结果整理成列表。" }],
+    },
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
+  });
+
+  afterEach(() => {
+    // 先卸载再摘记录：store 的通知落到已挂载组件上会触发 act 警告
+    cleanup();
+    // 全局插件存储是单例：用例装进去的页面必须摘掉，避免影响其它用例的导航说明
+    pluginStore.remove("acme.collector");
+  });
+
+  it("在 8 项与模块页之后追加已装插件页面，只读展示且标明固定末位", () => {
+    pluginStore.install(JSON.stringify(pageManifest));
+    render(<SettingsPage />);
+    goTab("导航");
+
+    const region = screen.getByRole("region", { name: "导航顺序" });
+    const labels = [...region.querySelectorAll("li")].map((li) => li.textContent ?? "");
+    expect(labels).toHaveLength(9);
+    expect(labels[7]).toContain("设置");
+    expect(labels[8]).toContain("采集桥");
+    expect(labels[8]).toContain("插件页面 · 固定末位");
+    expect(region.textContent).toContain("带页面的插件会自动追加在最下面");
   });
 });
 

@@ -294,3 +294,157 @@ describe("parsePluginManifestV5", () => {
     expect(properties).toHaveProperty("contributions");
   });
 });
+
+/* ───────────────────────── d.124 插件页面 ───────────────────────── */
+
+function bundleManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schemaVersion: 5,
+    id: "acme.panel",
+    name: "面板",
+    version: "1.0.0",
+    engines: { heming: "d.124" },
+    distribution: "bundle",
+    packageSha256: "b".repeat(64),
+    permissions: { network: [], tools: "none" },
+    contributions: {
+      page: { title: "面板", entry: "page/index.html" },
+      ...overrides,
+    },
+  };
+}
+
+describe("parsePluginManifestV5 · 插件页面", () => {
+  it("声明式页面：blocks 归一化为 kind=blocks，缺省 icon/summary 补空串", () => {
+    const parsed = parsePluginManifestV5(
+      baseManifest({
+        contributions: {
+          page: {
+            title: "采集桥",
+            blocks: [
+              { type: "markdown", text: "## 用法\n先填来源。" },
+              {
+                type: "stats",
+                items: [{ label: "已采集", value: "128 条" }],
+              },
+              { type: "table", columns: ["来源", "状态"], rows: [["QQ", "就绪"]] },
+              { type: "list", items: [{ title: "开始同步", badge: "命令" }] },
+              { type: "actions", items: [{ label: "打开信息中枢", target: { kind: "page", page: "infohub" } }] },
+              { type: "contributions", kind: "skills" },
+            ],
+          },
+          skills: [{ name: "周报", instructions: "x" }],
+        },
+      }),
+    );
+    const page = parsed.manifest.contributions.page;
+    expect(page).toMatchObject({ kind: "blocks", title: "采集桥", icon: "", summary: "" });
+    if (page?.kind !== "blocks") throw new Error("应为 blocks 形态");
+    expect(page.blocks.map((block) => block.type)).toEqual([
+      "markdown",
+      "stats",
+      "table",
+      "list",
+      "actions",
+      "contributions",
+    ]);
+  });
+
+  it("未声明 page 时 contributions.page 缺省（向后兼容）", () => {
+    const parsed = parsePluginManifestV5(baseManifest());
+    expect(parsed.manifest.contributions.page).toBeUndefined();
+  });
+
+  it("界面插件可以只声明 page（不强制 desktopWidgets），归一化为 kind=entry", () => {
+    const parsed = parsePluginManifestV5(bundleManifest());
+    expect(parsed.manifest.contributions.desktopWidgets).toEqual([]);
+    expect(parsed.manifest.contributions.page).toMatchObject({
+      kind: "entry",
+      title: "面板",
+      entry: "page/index.html",
+    });
+  });
+
+  it("界面插件可以同时声明 desktopWidgets + page", () => {
+    const parsed = parsePluginManifestV5(
+      bundleManifest({
+        desktopWidgets: [{ id: "panel", name: "面板", entry: "widget/index.html", width: 300, height: 420 }],
+      }),
+    );
+    expect(parsed.manifest.contributions.desktopWidgets).toHaveLength(1);
+    expect(parsed.manifest.contributions.page?.kind).toBe("entry");
+  });
+
+  it("bundle 的页面必须写 entry；写了 blocks 直接拒绝", () => {
+    expect(() =>
+      parsePluginManifestV5(
+        bundleManifest({ page: { title: "面板", blocks: [{ type: "markdown", text: "x" }] } }),
+      ),
+    ).toThrow(/必须写 contributions\.page\.entry/);
+    expect(() =>
+      parsePluginManifestV5(
+        bundleManifest({
+          page: { title: "面板", entry: "page/index.html", blocks: [{ type: "markdown", text: "x" }] },
+        }),
+      ),
+    ).toThrow(/不能再写 contributions\.page\.blocks/);
+  });
+
+  it("声明式页面必须写 blocks；写了 entry 会提示改用 bundle", () => {
+    expect(() =>
+      parsePluginManifestV5(
+        baseManifest({ contributions: { page: { title: "页", blocks: [] }, skills: [{ name: "s", instructions: "x" }] } }),
+      ),
+    ).toThrow(/必须提供至少 1 个 contributions\.page\.blocks/);
+    expect(() =>
+      parsePluginManifestV5(
+        baseManifest({ contributions: { page: { title: "页", entry: "page/index.html" } } }),
+      ),
+    ).toThrow(/不能写 contributions\.page\.entry/);
+  });
+
+  it("页面块严格校验：未知 type、超限、表格行列不一致都点名", () => {
+    const withBlock = (block: unknown) =>
+      baseManifest({
+        contributions: { page: { title: "页", blocks: [block] }, skills: [{ name: "s", instructions: "x" }] },
+      });
+    expect(() => parsePluginManifestV5(withBlock({ type: "chart", data: [] }))).toThrow(/type/);
+    expect(() =>
+      parsePluginManifestV5(
+        withBlock({
+          type: "stats",
+          items: Array.from({ length: 9 }, (_, i) => ({ label: `L${i}`, value: "v" })),
+        }),
+      ),
+    ).toThrow(/8 项/);
+    expect(() =>
+      parsePluginManifestV5(withBlock({ type: "table", columns: ["a", "b"], rows: [["只有一格"]] })),
+    ).toThrow(/第 1 行/);
+    expect(() =>
+      parsePluginManifestV5(
+        withBlock({ type: "markdown", text: Array.from({ length: 10 }, () => "x").join("") }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("页面 icon 只接受宿主图标 id", () => {
+    const withIcon = (icon: string) =>
+      baseManifest({
+        contributions: { page: { title: "页", icon, blocks: [{ type: "markdown", text: "x" }] } },
+      });
+    expect(parsePluginManifestV5(withIcon("activity")).manifest.contributions.page?.icon).toBe("activity");
+    for (const icon of ["Activity", "有中文", "a b", "-bad", ""]) {
+      expect(() => parsePluginManifestV5(withIcon(icon))).toThrow(/图标/);
+    }
+  });
+
+  it("页面数量每插件最多一个（page 是对象，写成数组直接拒绝）", () => {
+    expect(() =>
+      parsePluginManifestV5(
+        baseManifest({
+          contributions: { page: [{ title: "页", blocks: [{ type: "markdown", text: "x" }] }] },
+        }),
+      ),
+    ).toThrow();
+  });
+});

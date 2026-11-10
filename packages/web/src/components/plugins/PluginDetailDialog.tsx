@@ -53,6 +53,7 @@ export function PluginDetailDialog({
   onRemove,
   onGoSkills,
   onGoInterfaces,
+  onOpenPage,
   onKindToggle,
 }: {
   plugin: InstalledPlugin;
@@ -69,6 +70,8 @@ export function PluginDetailDialog({
   onRemove: () => void;
   onGoSkills: () => void;
   onGoInterfaces: () => void;
+  /** 打开插件自己的页面（d.124）；没声明页面或页面当前不可用时省略。 */
+  onOpenPage?: () => void;
   /** 贡献级开关（技能/服务/命令/工具束），受主开关控制。 */
   onKindToggle: (kind: PluginContributionKind, enabled: boolean) => void;
 }) {
@@ -78,6 +81,8 @@ export function PluginDetailDialog({
   const permission = permissionViewOf(plugin.manifest);
   const [pending, setPending] = useState<PendingToolToggle | null>(null);
   const pluginEnabled = plugin.enabled;
+  /** 清单声明的页面（每插件最多 1 个）。 */
+  const page = plugin.manifest.contributions.page;
 
   return (
     <div
@@ -129,7 +134,10 @@ export function PluginDetailDialog({
 
           <section className="mt-4" aria-label="插件贡献">
             <h3 className="ui-section-title">贡献</h3>
-            <p className="mt-1 ui-body-sm">{contributionText(counts)}</p>
+            <p className="mt-1 ui-body-sm">
+              {contributionText(counts)}
+              {page ? " · 页面 1" : ""}
+            </p>
             <ul className="mt-2 flex flex-col gap-1.5">
               {contributionKindRows(plugin).map((row) => {
                 // 本包没声明的类别：开关照常显示当前值，但置灰并写明「本包未声明」——
@@ -160,6 +168,27 @@ export function PluginDetailDialog({
                   </li>
                 );
               })}
+              {/* d.124 页面：第五类贡献面，但不是可单独启停的「类别」——它只有 1 个，
+                  跟着插件总开关走，所以这一行给「打开页面」而不是 Switch。 */}
+              {page ? (
+                <li className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft px-3 py-1.5">
+                  <span className="ui-body-sm font-medium">页面</span>
+                  <span className={`${CHIP} ui-numeric`}>1</span>
+                  <span className="ml-auto ui-caption">{page.title}</span>
+                  {onOpenPage ? (
+                    <button
+                      type="button"
+                      aria-label="打开插件页面"
+                      onClick={onOpenPage}
+                      className={BTN_GHOST_SM}
+                    >
+                      打开页面
+                    </button>
+                  ) : (
+                    <span className="ui-caption">{plugin.enabled ? "暂不可用" : "主开关已关闭"}</span>
+                  )}
+                </li>
+              ) : null}
             </ul>
             <p className="mt-1 ui-caption">
               主开关关闭时不可单独调整；这里的切换只影响这一类贡献，
@@ -317,6 +346,11 @@ export function PluginDetailDialog({
           <button type="button" onClick={onGoSkills} className={BTN_GHOST_SM}>
             查看技能
           </button>
+          {page && onOpenPage ? (
+            <button type="button" onClick={onOpenPage} className={BTN_GHOST_SM}>
+              打开页面
+            </button>
+          ) : null}
           {servers.length > 0 && (
             <button type="button" onClick={onGoInterfaces} className={BTN_GHOST_SM}>
               查看 MCP 服务

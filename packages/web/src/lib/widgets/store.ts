@@ -71,6 +71,9 @@ export async function refreshWidgets(
   useWidgetsStore.setState({ loading: true });
   try {
     const listed = await bridge.list();
+    // d.124：记录里的 `page`（界面插件页面）由 `widgets:list` 带回，这里**原样透传**——
+    // 导航入口投影与 `PluginBundlePage` 都直接读它，本层不裁剪、不补默认值
+    // （旧安装记录没有该字段，缺省即 undefined = 没有页面入口）。
     const records = Array.isArray(listed) ? listed : [];
     const states: Record<string, WidgetState> = {};
     await Promise.all(

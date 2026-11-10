@@ -1,6 +1,6 @@
 # 插件示例（不发布，只用于学习与校验）
 
-五份示例都放在 `plugin-kit/examples/` 下；真实要发布/安装的插件放 [`plugin-kit/plugins/`](../plugins/README.md)。
+示例都放在 `plugin-kit/examples/` 下；真实要发布/安装的插件放 [`plugin-kit/plugins/`](../plugins/README.md)。
 
 | 示例 | 形态 | 教会你 |
 |---|---|---|
@@ -8,7 +8,9 @@
 | [`02-mcp-and-commands`](02-mcp-and-commands/) | v5 声明式 | 接 MCP + 命令 + 工具束；`permissions.network` 与 `tools` 上限 |
 | [`03-commands`](03-commands/) | v5 声明式 | 五种命令 target 的适用场景与限制 |
 | [`04-widget-bundle`](04-widget-bundle/) | v4 bundle（仅首方） | 界面插件最小闭环：结构、外置脚本、设置/数据 API、发布顺序 |
+| [`05-plugin-page`](05-plugin-page/) | v5 声明式 | 插件页面：导航入口 + 六种受控块；怎么改成 bundle 自带页 |
 | [`_invalid/demo-bad`](_invalid/demo-bad/) | 故意非法 | 校验器怎么点名错误（缺 `engines`、主机未声明）——**不要抄** |
+| [`_invalid/page-entry-on-declarative`](_invalid/page-entry-on-declarative/) | 故意非法 | 声明式页写了 `entry` 的报错与两种正确写法——**不要抄** |
 
 ```bash
 # 校验全部合法示例（_invalid 默认跳过）

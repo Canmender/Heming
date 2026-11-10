@@ -21,9 +21,13 @@ import { useStaffLoop } from "./lib/staff/loop.js";
 import { useModuleStore, isModuleEffective } from "./lib/modules/store.js";
 import { useAppPresence } from "./lib/appPresence.js";
 import { startWidgetEvents } from "./lib/widgetEvents.js";
+import { refreshWidgets } from "./lib/widgets/store.js";
 import { startWidgetThemeSync } from "./lib/widgetTheme.js";
 import { useLlmStore } from "./store/llm.js";
 import { isPageAvailable } from "./lib/modules/nav.js";
+import { usePluginPageEntries } from "./lib/pages/usePluginPages.js";
+import { isPluginPagePage, pluginPageEntry } from "./lib/pages/registry.js";
+import { PluginPageHost } from "./components/plugins/PluginPageHost.js";
 import { hasOpenModal, useModalA11y } from "./components/useModalA11y.js";
 import { SkeletonBlock, SkeletonLine } from "./components/ui/Skeleton.js";
 import { useViewport } from "./lib/viewport.js";
@@ -608,8 +612,13 @@ function AppShell({
 
   // 模块页被停用/未安装（或被通知/桌宠/旧链接指到）时统一回主页，不渲染不该存在的页面。
   // 模型路由页已删除：旧存储/旧链接里的 `modelroute` 同样回落主页。
+  // d.124：插件页面同一条纪律——入口不在注册表里、或已停用/卸载，一律回主页。
+  const pluginPageEntries = usePluginPageEntries();
   const resolvedPage: Page = page === "modelroute" ? "home" : page;
-  const currentPage = isPageAvailable(resolvedPage, moduleState) ? resolvedPage : "home";
+  const pluginPageAvailable =
+    !isPluginPagePage(resolvedPage) || pluginPageEntry(pluginPageEntries, resolvedPage)?.available === true;
+  const currentPage: Page =
+    isPageAvailable(resolvedPage, moduleState) && pluginPageAvailable ? resolvedPage : "home";
   useEffect(() => {
     if (page !== currentPage) setPage(currentPage);
   }, [page, currentPage, setPage]);
@@ -681,6 +690,12 @@ function AppShell({
   // 静态引入：这只是几十行的纯逻辑，不牵任何重模块（首屏零负担）。
   useEffect(() => {
     return startWidgetEvents();
+  }, []);
+
+  // d.124：界面插件的页面入口由主进程记录驱动，进入应用时先拉一次列表
+  // （浏览器里没有 `__heming_widgets`，refreshWidgets 是 no-op，不会多发请求）。
+  useEffect(() => {
+    void refreshWidgets();
   }, []);
 
   // 右侧目录栏宽度：可拖动调节，落盘后下次启动保持（用户要求「支持拖动改变大小」）
@@ -812,6 +827,10 @@ function AppShell({
     ) : currentPage === "memory" ? (
       // 记忆区：三层记忆 + 技能池（全部数据只在本机 localStorage）
       <MemoryPage />
+    ) : isPluginPagePage(currentPage) ? (
+      // 插件页面（d.124）：入口来自已装插件的页面贡献，渲染路径由来源决定
+      // （声明式 = 宿主按 blocks 渲染；界面插件 = 主进程 widget:// 沙箱视图）
+      <PluginPageHost page={currentPage} />
     ) : (
       <SettingsPage />
     );

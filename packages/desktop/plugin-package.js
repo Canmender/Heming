@@ -2,7 +2,7 @@
 
 const { createHash } = require("node:crypto");
 const { packTarGz, unpackTarGz, LIMITS } = require("./plugin-tar");
-const { normalizeWidgetSpec, MAX_WIDGETS_PER_PLUGIN } = require("./plugin-window");
+const { normalizeWidgetSpec, normalizeRelativeAssetPath, MAX_WIDGETS_PER_PLUGIN } = require("./plugin-window");
 const { verifyOfficialSignature } = require("./plugin-signature");
 
 /**
@@ -11,7 +11,7 @@ const { verifyOfficialSignature } = require("./plugin-signature");
  * 分工（见规格 §2.1 / §2.2）：
  * - `plugin-tar.js` 只负责「tar/gzip 格式正确 + 单条边界安全」；
  * - **本文件**负责「这是不是一个合法的界面插件包」：包内结构（`plugin.json` 在根 +
- *   `files/**`）、清单里**宿主真正会用到**的字段（v4 / bundle / desktopWidgets /
+ *   `files/**`）、清单里**宿主真正会用到**的字段（v4 / bundle / desktopWidgets / page /
  *   permissions / 第一方签名标记）、entry 与图标确实在包里。
  *
  * ★ 为什么不复用 web 侧的 zod 清单校验：`plugin.json` 落盘后是用户机器上的文件，
@@ -63,6 +63,14 @@ const MAX_COMMANDS = 30;
 const MAX_COMMAND_ID = 64;
 const MAX_COMMAND_TITLE = 80;
 const MAX_COMMAND_KEYWORDS = 10;
+
+/* ── d.124 插件页面（B 路径：界面插件自带 HTML） ── */
+/** 页面标题上限（规格 §3.2，与导航项同一口径）。 */
+const PAGE_TITLE_MAX = 40;
+/** 页面副标题上限。 */
+const PAGE_SUMMARY_MAX = 200;
+/** 宿主图标词表 id 的形状（与 shared `PAGE_ICON_RE` 同源；未知 id 由 web 侧回落 package）。 */
+const PAGE_ICON_RE = /^[a-z][a-z0-9-]{0,31}$/;
 
 /** sha256 十六进制（整包字节的完整性指纹；发布侧算的也是这个）。 */
 function sha256Hex(bytes) {
@@ -151,7 +159,66 @@ function isPlainObject(value) {
 }
 
 /**
- * 主进程侧的清单守卫（v4 / bundle / desktopWidgets / permissions / 签名标记）。
+ * 归一化界面插件的页面贡献（`contributions.page`，d.124 §3.2）。
+ *
+ * 页面在**独立 origin 的沙箱视图**里跑插件的 HTML：宿主只把它当成一个入口地址，
+ * 所以这里只校验「宿主敢加载什么」——标题/图标/副标题用于导航展示，`entry` 必须落在
+ * 包内 `files/**` 且是 `.html`（真正的存在性检查在 `readPackage` 里对着文件清单比对）。
+ *
+ * ★ 与声明式页的区别：bundle 页面只能写 `entry`，出现 `blocks` 直接拒绝
+ *   （同一份清单不能在「宿主渲染」与「插件自带 HTML」两条路之间摇摆）。
+ * ★ 错误一律中文 + 字段路径 `contributions.page.*`，可直接展示给插件作者。
+ *
+ * @param {unknown} raw 清单里的 `contributions.page`
+ * @returns {{ ok: boolean, errors: string[], page: {title:string,icon:string,summary:string,entry:string}|null }}
+ */
+function normalizePageSpec(raw) {
+  const errors = [];
+  const at = "contributions.page";
+  if (!isPlainObject(raw)) return { ok: false, errors: [`${at} 必须是对象`], page: null };
+
+  const title = typeof raw.title === "string" ? raw.title.trim() : "";
+  if (!title || title.length > PAGE_TITLE_MAX) {
+    errors.push(`${at}.title 必须是 1–${PAGE_TITLE_MAX} 字的文本`);
+  }
+
+  // 图标只做「形状」校验：具体词表在 web 侧 `lib/pages/icons.ts`，未知 id 回落 package 默认图标。
+  let icon = "";
+  if (raw.icon !== undefined) {
+    if (typeof raw.icon !== "string" || !PAGE_ICON_RE.test(raw.icon.trim())) {
+      errors.push(`${at}.icon 只接受宿主图标 id（小写字母/数字/连字符，≤32）`);
+    } else {
+      icon = raw.icon.trim();
+    }
+  }
+
+  let summary = "";
+  if (raw.summary !== undefined) {
+    if (typeof raw.summary !== "string" || raw.summary.trim().length > PAGE_SUMMARY_MAX) {
+      errors.push(`${at}.summary 必须是不超过 ${PAGE_SUMMARY_MAX} 字的文本`);
+    } else {
+      summary = raw.summary.trim();
+    }
+  }
+
+  const entry = normalizeRelativeAssetPath(raw.entry);
+  if (!entry || !entry.endsWith(".html")) {
+    errors.push(
+      `${at}.entry 必须是包内相对 .html 入口（禁绝对路径 / .. / 反斜杠 / 协议前缀，≤200 字符）`,
+    );
+  }
+
+  // bundle 页面由插件自己的 HTML 渲染；再写 blocks 会让「谁来渲染」变得不确定。
+  if (raw.blocks !== undefined && (!Array.isArray(raw.blocks) || raw.blocks.length > 0)) {
+    errors.push(`${at} 是界面插件页面，只能写 entry，不能再写 blocks（声明式页请用 distribution: "manifest"）`);
+  }
+
+  if (errors.length > 0) return { ok: false, errors, page: null };
+  return { ok: true, errors: [], page: { title, icon, summary, entry } };
+}
+
+/**
+ * 主进程侧的清单守卫（v4 / bundle / desktopWidgets / page / permissions / 签名标记）。
  *
  * 返回 `{ ok, errors, manifest, widget, permissions, distribution }`；
  * `widget` 只有在 `ok` 时才可用（已过 `normalizeWidgetSpec`）。
@@ -281,7 +348,7 @@ function validateBundleManifest(raw, options = {}) {
   }
   const chat = permissionsRaw.chat === true;
 
-  /* ── contributions：只允许 commands + desktopWidgets（界面插件不贡献技能/服务/工具束） ── */
+  /* ── contributions：只允许 commands + desktopWidgets + page（界面插件不贡献技能/服务/工具束） ── */
   const contributionsRaw = isPlainObject(raw.contributions) ? raw.contributions : {};
   for (const kind of ["skills", "mcpServers", "toolPacks"]) {
     const value = contributionsRaw[kind];
@@ -335,14 +402,27 @@ function validateBundleManifest(raw, options = {}) {
   }
   const widgetsRaw = contributionsRaw.desktopWidgets;
   let widget = null;
-  if (!Array.isArray(widgetsRaw) || widgetsRaw.length === 0) {
-    errors.push("界面插件必须声明 contributions.desktopWidgets（至少 1 个）");
-  } else if (widgetsRaw.length > MAX_WIDGETS_PER_PLUGIN) {
+  if (widgetsRaw !== undefined && !Array.isArray(widgetsRaw)) {
+    errors.push("contributions.desktopWidgets 必须是数组");
+  } else if (Array.isArray(widgetsRaw) && widgetsRaw.length > MAX_WIDGETS_PER_PLUGIN) {
     errors.push(`本轮一个插件最多声明 ${MAX_WIDGETS_PER_PLUGIN} 个 desktopWidget`);
-  } else {
+  } else if (Array.isArray(widgetsRaw) && widgetsRaw.length > 0) {
     const normalized = normalizeWidgetSpec(widgetsRaw[0], 0);
     if (!normalized.ok) errors.push(...normalized.errors);
     widget = normalized.spec;
+  }
+
+  // d.124：页面（B 路径）。bundle 可以是「只有页面」的插件——没有浮窗，只有导航入口。
+  let page = null;
+  if (contributionsRaw.page !== undefined) {
+    const normalized = normalizePageSpec(contributionsRaw.page);
+    if (!normalized.ok) errors.push(...normalized.errors);
+    else page = normalized.page;
+  }
+  if (!widget && !page) {
+    errors.push(
+      'distribution: "bundle" 必须声明至少 1 个 contributions.desktopWidgets 或 contributions.page（否则就是纯声明式包）',
+    );
   }
 
   const permissions = {
@@ -360,6 +440,7 @@ function validateBundleManifest(raw, options = {}) {
     errors,
     manifest: raw,
     widget,
+    page,
     permissions,
     distribution,
     signed: signed === true,
@@ -501,11 +582,16 @@ function readPackage(bytes, options = {}) {
   const paths = new Set(entries.map((entry) => entry.path));
   const manifest = manifestCheck.manifest;
   const widget = manifestCheck.widget;
+  const page = manifestCheck.page;
   const errors = [];
   // entry 必须存在于包里（规格 §2.1）：一个不存在的 entry 会变成一块打不开的透明窗
-  if (!paths.has(widget.entry)) errors.push(`entry 不存在于插件包：${widget.entry}`);
-  if (widget.icon && !paths.has(widget.icon)) errors.push(`icon 不存在于插件包：${widget.icon}`);
-  if (widget.tray.icon && !paths.has(widget.tray.icon)) errors.push(`tray.icon 不存在于插件包：${widget.tray.icon}`);
+  if (widget && !paths.has(widget.entry)) errors.push(`entry 不存在于插件包：${widget.entry}`);
+  if (widget && widget.icon && !paths.has(widget.icon)) errors.push(`icon 不存在于插件包：${widget.icon}`);
+  if (widget && widget.tray.icon && !paths.has(widget.tray.icon)) {
+    errors.push(`tray.icon 不存在于插件包：${widget.tray.icon}`);
+  }
+  // d.124：页面入口同样必须在包内——安装时校验，别等到用户点进页面才白屏。
+  if (page && !paths.has(page.entry)) errors.push(`页面入口不存在于插件包：${page.entry}`);
   if (errors.length > 0) return { ok: false, errors, sha256, manifest };
 
   return {
@@ -515,6 +601,7 @@ function readPackage(bytes, options = {}) {
     bytes: buffer,
     manifest,
     widget,
+    page,
     permissions: manifestCheck.permissions,
     signed: manifestCheck.signed === true,
     publisherId: manifestCheck.publisherId,
@@ -543,12 +630,15 @@ module.exports = {
   MANIFEST_PATH,
   FILE_ROOT,
   LIMITS,
+  PAGE_TITLE_MAX,
+  PAGE_SUMMARY_MAX,
   sha256Hex,
   computeFilesDigest,
   toBuffer,
   validateLayout,
   validateBundleManifest,
   normalizeBundleCommands,
+  normalizePageSpec,
   readPackage,
   packPackage,
 };

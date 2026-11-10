@@ -501,3 +501,37 @@ test("main.js：IPC 通道不变量（新通道不能绕过 secureIpc 门面）"
   assert.ok(!mainCode.includes("createPetHost("), "桌宠宿主已删除（改为界面插件宿主）");
   assert.ok(!mainCode.includes("isPetWindowUrl("), "桌宠窗口特判已删除（widget 走独立 origin + 清单）");
 });
+
+// ── d.124 B 路径：界面插件自带页面的视图运行时接线（主窗内容区 WebContentsView）──
+test("main.js：页面视图通道经 secureIpc 注册且只认主窗口（widgets:page-* 进受信清单）", () => {
+  const trusted = mainCode.match(/const TRUSTED_CHANNELS = \[([\s\S]*?)\];/);
+  assert.ok(trusted, "必须有 TRUSTED_CHANNELS 清单");
+  for (const ch of ["widgets:page-mount", "widgets:page-bounds", "widgets:page-unmount"]) {
+    assert.ok(trusted[1].includes(`"${ch}"`), `受信清单应含 ${ch}`);
+  }
+  assert.ok(/secureIpc\.handle\("widgets:page-mount"/.test(mainCode), "挂载走 secureIpc.handle");
+  assert.ok(/secureIpc\.on\("widgets:page-bounds"/.test(mainCode), "边界上报走 secureIpc.on（fire-and-forget）");
+  assert.ok(/secureIpc\.on\("widgets:page-unmount"/.test(mainCode), "卸载走 secureIpc.on");
+});
+
+test("main.js：页面视图把 WebContentsView 注入宿主，并在主窗关闭前销毁视图", () => {
+  assert.ok(mainCode.includes("WebContentsView"), "主进程需要 electron.WebContentsView");
+  assert.ok(
+    /createWidgetHost\(\{[\s\S]{0,400}WebContentsView/.test(mainCode),
+    "createWidgetHost 依赖里必须注入 WebContentsView",
+  );
+  assert.ok(
+    /win\.on\("close",\s*\(\)\s*=>\s*\{[\s\S]{0,200}pageUnmount\(\)/.test(mainCode),
+    "主窗关闭前必须先销毁页面视图（不留孤儿）",
+  );
+  // 页面视图仍由 widget:// 协议处理器提供内容：CSP 按插件 permissions 生成
+  const protocol = mainCode.match(/function installWidgetProtocol\(\)[\s\S]*?\n\}/);
+  assert.ok(protocol, "未找到 installWidgetProtocol");
+  assert.ok(protocol[0].includes("widgetCspHeaders(permissions"), "页面与浮窗共用同一份 widget CSP");
+});
+
+test("main.js：只带页面的 bundle（无浮窗）origin 也允许用本机网关（按渲染能力判定）", () => {
+  const fn = mainCode.match(/const isWidgetOriginAllowed = \(origin\) => \{[\s\S]*?\n {2}\};/);
+  assert.ok(fn, "未找到 isWidgetOriginAllowed");
+  assert.ok(fn[0].includes("!record.widget && !record.page"), "没有浮窗但有页面的记录不能被当成不可渲染");
+});

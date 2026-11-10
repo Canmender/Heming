@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { isModuleOn } from "../lib/modules/store.js";
 import type { AutomationKind, SyncOptions } from "../lib/automation/model.js";
+import type { PluginPageId } from "../lib/pages/ids.js";
 import {
   persistNavMode,
   readStoredNavMode,
@@ -31,7 +32,10 @@ export type Page =
   | "vault"
   | "plugins"
   | "memory"
-  | "settings";
+  | "settings"
+  // d.124：插件页面（插件包声明的页面入口）。具体有哪些由 `lib/pages/registry.ts`
+  // 按「已装且启用」投影；这里只表达「页面 id 可以是插件页」这一形状事实。
+  | PluginPageId;
 
 /**
  * 已合并页面的旧 id（只保留在类型与解析里，不再出现在导航中）：

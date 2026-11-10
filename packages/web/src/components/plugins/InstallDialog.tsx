@@ -445,9 +445,10 @@ export function InstallDialog({
                     </div>
                   </div>
 
-                  {/* 贡献计数：与插件卡同一口径 */}
+                  {/* 贡献计数：与插件卡同一口径；页面是 d.124 新增的一类贡献（有/无） */}
                   <p className={`mt-2 border-t border-line-soft pt-2 ${HINT}`}>
                     贡献：{contributionText(manifestContributionCounts(preview.manifest))}
+                    {preview.manifest.contributions.page ? " · 页面 1" : ""}
                   </p>
                 </div>
 

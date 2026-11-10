@@ -804,3 +804,82 @@ describe("PluginsPage · 插件健康修复（d.113）", () => {
     expect(failingStore.get(pluginId)!.skillIds).toHaveLength(2);
   });
 });
+
+/* ------------------------------------------------ 插件页面入口（d.124） */
+
+describe("PluginsPage · 插件页面入口", () => {
+  /** v5 声明式插件 + 一个页面（页面内容本身由 PluginDeclarativePage 的用例覆盖）。 */
+  function pageManifest(): Record<string, unknown> {
+    return {
+      schemaVersion: 5,
+      id: "acme.collector",
+      name: "采集桥",
+      version: "1.0.0",
+      description: "本机采集服务状态与用法",
+      author: "Acme",
+      engines: { heming: "d.100" },
+      permissions: { network: [], tools: "read", files: [] },
+      contributions: {
+        page: {
+          title: "采集桥",
+          icon: "activity",
+          summary: "本机采集服务状态与用法",
+          blocks: [{ type: "markdown", text: "本机采集服务状态。" }],
+        },
+        skills: [{ name: "整理采集结果", instructions: "把采集结果整理成列表。" }],
+      },
+    };
+  }
+
+  function installManifest(m: Record<string, unknown>): void {
+    fireEvent.click(screen.getByRole("button", { name: "手动粘贴清单" }));
+    fireEvent.change(screen.getByLabelText("插件清单 JSON"), {
+      target: { value: JSON.stringify(m) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
+  }
+
+  it("卡片显示「页面 1」贡献行与「打开页面」，点击跳到 plugin:<id>", () => {
+    renderPage();
+    installManifest(pageManifest());
+
+    const card = screen.getByRole("region", { name: "插件 采集桥" });
+    expect(card).toHaveTextContent("页面 1");
+    fireEvent.click(within(card).getByRole("button", { name: "打开插件页面 采集桥" }));
+    expect(useUiStore.getState().page).toBe("plugin:acme.collector");
+  });
+
+  it("详情弹窗显示「页面」贡献行与「打开页面」，点击关闭弹窗并跳转", () => {
+    renderPage();
+    installManifest(pageManifest());
+    fireEvent.click(screen.getByRole("button", { name: "查看插件详情 采集桥" }));
+
+    const dialog = screen.getByRole("dialog", { name: "插件详情 采集桥" });
+    expect(within(dialog).getByText("页面")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "打开插件页面" }));
+
+    expect(useUiStore.getState().page).toBe("plugin:acme.collector");
+    expect(screen.queryByRole("dialog", { name: "插件详情 采集桥" })).toBeNull();
+  });
+
+  it("没有声明页面的旧插件行为不变：没有页面贡献行，也没有打开页面入口", () => {
+    renderPage();
+    installNow();
+
+    const card = screen.getByRole("region", { name: "插件 财务助手包" });
+    expect(card).not.toHaveTextContent("页面 1");
+    expect(within(card).queryByRole("button", { name: /打开插件页面/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /打开插件页面/ })).toBeNull();
+  });
+
+  it("插件停用：页面入口不渲染（可用性由注册表统一判定）", () => {
+    renderPage();
+    installManifest(pageManifest());
+    fireEvent.click(screen.getByRole("switch", { name: "启用插件 采集桥" }));
+
+    const card = screen.getByRole("region", { name: "插件 采集桥" });
+    // 停用是「现在不生效」，贡献行照常显示页面，但不给可点的入口
+    expect(card).toHaveTextContent("页面 1");
+    expect(within(card).queryByRole("button", { name: /打开插件页面/ })).toBeNull();
+  });
+});

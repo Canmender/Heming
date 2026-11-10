@@ -1,0 +1,80 @@
+{
+  "$schema": "../../plugin.schema.json",
+  "schemaVersion": 5,
+  "id": "acme.ops-board",
+  "name": "运维看板",
+  "version": "1.0.0",
+  "description": "演示声明式插件页面：装好后左侧导航末位多一个入口，页面内容全部由清单里的受控块渲染。",
+  "author": "ACME",
+  "engines": { "heming": "d.124" },
+  "contributions": {
+    "skills": [
+      {
+        "name": "汇总采集状态",
+        "description": "按今天各采集来源的结果生成一句话状态",
+        "instructions": "用户问「采集怎么样 / 有没有问题」时用。\n\n步骤：先按来源列出成功与失败条数，再给一句结论（正常 / 需处理），最后指出需要人工处理的来源。\n边界：不编造没有记录的数字；数据缺失就直说缺哪个来源。",
+        "triggers": ["采集状态", "同步情况"],
+        "tags": ["运维"]
+      }
+    ],
+    "page": {
+      "title": "运维看板",
+      "icon": "activity",
+      "summary": "本机采集服务的状态、用法与快捷入口",
+      "blocks": [
+        {
+          "type": "markdown",
+          "title": "这个页面能做什么",
+          "text": "页面内容写在插件清单里，由和鸣按块渲染：不执行代码、不联网，安装版和浏览器版都能看。\n\n下面几块分别演示指标、表格、列表、动作与贡献清单。"
+        },
+        {
+          "type": "stats",
+          "title": "今天",
+          "items": [
+            { "label": "采集来源", "value": "3 个" },
+            { "label": "成功写入", "value": "128 条" },
+            { "label": "待处理", "value": "2 条" }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "来源状态",
+          "columns": ["来源", "状态", "最近同步"],
+          "rows": [
+            ["QQ", "就绪", "10:24"],
+            ["微信", "未连接", "—"],
+            ["邮件", "就绪", "10:20"]
+          ]
+        },
+        {
+          "type": "list",
+          "title": "接下来可以做什么",
+          "items": [
+            {
+              "title": "查看采集日志",
+              "description": "在插件页打开本插件的命令入口",
+              "badge": "命令"
+            },
+            {
+              "title": "补填未连接的来源",
+              "description": "在设置区完成授权后再回来刷新"
+            }
+          ]
+        },
+        {
+          "type": "actions",
+          "title": "快捷跳转",
+          "items": [
+            { "label": "打开插件区", "target": { "kind": "page", "page": "plugins" } },
+            { "label": "调整外观", "target": { "kind": "settings", "card": "theme-mode" } },
+            { "label": "本插件详情", "target": { "kind": "plugin" } }
+          ]
+        },
+        {
+          "type": "contributions",
+          "kind": "skills"
+        }
+      ]
+    }
+  }
+}

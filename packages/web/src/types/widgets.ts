@@ -124,14 +124,49 @@ export interface WidgetRecord {
   name: string;
   version: string;
   enabled: boolean;
-  widget: WidgetSpec;
+  /**
+   * 桌面浮窗规格；**页面型界面插件为 `null`**（d.124：清单只声明 `page`、没有
+   * `desktopWidgets` 时，主进程不建浮窗）。消费方必须先判空再取 `.name/.settings`。
+   */
+  widget: WidgetSpec | null;
   settings: Record<string, unknown>;
   /** ISO 时间。 */
   installedAt: string;
   /** 清单里的命令（d.109；旧安装记录缺省 `[]`，主进程启动时会回填）。 */
   commands?: WidgetCommand[];
+  /** d.124：界面插件页面（清单 `contributions.page`）；旧记录没有该字段。 */
+  page?: WidgetPageSpec;
   error?: string;
 }
+
+/**
+ * 界面插件页面（d.124，清单 `contributions.page` 的归一化视图）。
+ *
+ * 与声明式页面不同：页面内容全部由插件自己的 HTML 渲染，宿主只给一个
+ * `widget://` 独立 origin 的沙箱视图与既有能力桥。web 侧只用它做导航入口、
+ * 标题/图标展示与「打开页面」入口；真正的视图在主进程。
+ */
+export interface WidgetPageSpec {
+  /** 导航项与页面标题（≤40 字）。 */
+  title: string;
+  /** 宿主图标 id（已归一化；未知值回落 `package`）。 */
+  icon: string;
+  /** 页面副标题（≤200 字；可空）。 */
+  summary: string;
+  /** 包内相对 `.html` 入口。 */
+  entry: string;
+}
+
+/** 页面视图的位置与尺寸（主窗内容区坐标，CSS px = DIP）。 */
+export interface WidgetPageRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 页面视图挂载结果（失败时 error 已是可直接展示的中文）。 */
+export type WidgetPageMountResult = { ok: true } | { ok: false; error: string };
 
 /** 宿主动作（规格 §2.3「窗口通用动作」）：全部由主进程执行，渲染层不碰窗口 API。 */
 export type WidgetHostAction =
@@ -233,6 +268,17 @@ export interface WidgetsBridge {
   action(input: { id: string; action: WidgetHostAction }): Promise<{ ok: boolean; state?: WidgetState; error?: string }>;
   /** 读窗口状态；未安装/记录损坏时主进程返回 `null`（不是伪造的默认值）。 */
   state(input: { id: string }): Promise<WidgetState | null>;
+  /**
+   * d.124：把界面插件的页面视图挂到主窗内容区（进入 `plugin:<id>` 页面时调用）。
+   *
+   * 主进程会先销毁上一个页面视图再创建；无 `page` 贡献/已停用的插件会被拒绝。
+   * 旧版桌面端没有该方法 —— 调用方必须降级而不是假定存在。
+   */
+  pageMount?(input: { id: string; rect: WidgetPageRect }): Promise<WidgetPageMountResult>;
+  /** 更新页面视图边界（窗口/布局变化时；fire-and-forget，主进程自己钳制）。 */
+  pageBounds?(input: { rect: WidgetPageRect }): void;
+  /** 移除并销毁当前页面视图（离开页面/切页时；重复调用无害）。 */
+  pageUnmount?(): void;
   /** 脱敏事件转发（fire-and-forget；主进程按权限决定是否转给 widget）。 */
   publish(event: WidgetNotifyEvent): void;
   /**

@@ -6,6 +6,28 @@
 
 {{editGuide}}
 
+## 可选：让插件在左侧导航多一个入口（插件页面，d.124）
+
+**不写 `page` 就没有入口**——纯能力包照旧只在插件页/技能区/命令面板里生效。想加页面时，在 `plugin.json` 的
+`contributions` 里加 `page`（其它部分不用动）：
+
+```json
+"page": {
+  "title": "插件名",
+  "icon": "activity",
+  "summary": "一句话说明这个页面能看什么",
+  "blocks": [
+    { "type": "markdown", "title": "怎么用", "text": "写清入口与下一步。" }
+  ]
+}
+```
+
+- `blocks` 1–12 个，词表 `markdown` / `stats` / `table` / `list` / `actions` / `contributions`；
+  字段与限制见 `plugin-kit/STANDARD.md` §3.7，可抄 `plugin-kit/examples/05-plugin-page/`。
+- 写 `page` 时把 `engines.heming` 提到 `d.124`（旧版宿主不认识该字段）。
+- 页面不新增权限、不联网、不执行代码；每插件最多一个页面。
+- 界面插件（`--kind bundle`）要自带页时写 `page.entry = "files/page.html"`（`entry` 必须在 `files` 里，仅首方签名包可装）。
+
 {{schemaNote}}
 
 ## 怎么校验

@@ -1,4 +1,5 @@
 import type { NavPage } from "../store/ui.js";
+import { isPluginPagePage } from "./pages/ids.js";
 
 /**
  * 导航分组：53px 图标轨放不下分组标题，用「组内紧凑 + 组间细线」表达。
@@ -48,8 +49,10 @@ export const NAV_GROUP_OF: Partial<Record<NavPage, NavGroupId>> = {
   settings: "system",
 };
 
-/** 分组查询：不在表里的页（理论上没有）回落到系统组，不抛。 */
+/** 分组查询：插件页面一律算「能力」；不在表里的页回落到系统组，不抛。 */
 export function navGroupOf(page: NavPage): NavGroupId {
+  // d.124：插件页面是「装出来的能力」，与插件/模块同一组（导航末尾的分隔线口径不变）。
+  if (isPluginPagePage(page)) return "capability";
   return NAV_GROUP_OF[page] ?? "system";
 }
 

@@ -9,6 +9,8 @@ import {
   type LegacyNormalizedPlugin,
   type PluginManifestV5,
   type PluginMetaV5,
+  type PluginPageBlockV5,
+  type PluginPageV5,
   type PluginV5ParseResult,
 } from "@heming/shared";
 import { ROUTABLE_PAGE_IDS } from "../palette/pages.js";
@@ -1244,11 +1246,19 @@ export interface PluginContributions {
   /** d.98（v4）：界面插件声明；v3 及更旧清单恒为空数组。 */
   desktopWidgets: PluginDesktopWidgetSpec[];
   /**
+   * d.124：插件页面（每插件最多 1 个）。声明式写 blocks，界面插件写 entry；
+   * 没声明就没有导航入口。缺省 `undefined`（旧清单不会凭空多出页面）。
+   */
+  page?: PluginPageSpec;
+  /**
    * 已废弃（d.90）：模型不再由插件声明，统一由 magpie 网关提供。
    * 字段恒为空数组，仅用于兼容既有消费方（统计/展示）；清单里不再接受该字段。
    */
   llmPresets: [];
 }
+
+/** 归一化后的插件页面（形状由 shared 的 v5 解析器给出，web 只消费）。 */
+export type PluginPageSpec = PluginPageV5;
 
 /** 归一化后的 `desktopWidget` 规格（类型来源是 zod schema，避免两处手写漂移）。 */
 export type PluginDesktopWidgetSpec = z.infer<typeof DesktopWidgetSpecSchema>;
@@ -1399,21 +1409,80 @@ function copyMeta(meta: PluginMetaV5): PluginMeta {
  * 是可选（界面插件的权威校验在主进程 `plugin-package.js`），web 内部类型是补全后的形状。
  * web 的声明式安装管线本来就会拒绝 bundle（`assertDeclarativeManifest`），所以这里只做投射。
  */
+function copyPageBlock(block: PluginPageBlockV5): PluginPageBlockV5 {
+  switch (block.type) {
+    case "markdown":
+      return { ...block };
+    case "stats":
+      return { ...block, items: block.items.map((item) => ({ ...item })) };
+    case "table":
+      return { ...block, columns: [...block.columns], rows: block.rows.map((row) => [...row]) };
+    case "list":
+      return { ...block, items: block.items.map((item) => ({ ...item })) };
+    case "actions":
+      return { ...block, items: block.items.map((item) => ({ ...item, target: { ...item.target } })) };
+    case "contributions":
+      return { ...block };
+  }
+}
+
+/** 页面深拷贝（安装记录/回滚快照复用同一份清单时不得共享数组）。 */
+export function copyPage(page: PluginPageV5): PluginPageV5 {
+  if (page.kind === "entry") return { ...page };
+  return { ...page, blocks: page.blocks.map(copyPageBlock) };
+}
+
+/** 页面/设置卡/技能目标的存在性校验（页面白名单在 web，清单层不复制）。 */
+function assertTargetUsable(
+  target:
+    | { kind: "page"; page: string }
+    | { kind: "settings"; card: string }
+    | { kind: "skill"; name: string }
+    | { kind: "plugin" }
+    | { kind: "unit"; unitId: string },
+  at: string,
+  skillNames: ReadonlySet<string>,
+): void {
+  if (target.kind === "page") {
+    if (!PAGE_IDS.has(target.page)) {
+      throw new PluginManifestError(`${at}.page：未知页面：${target.page}`);
+    }
+    return;
+  }
+  // d.108：shared 只认形状；设置卡目录在 web，必须在这里补存在性校验。
+  if (target.kind === "settings") {
+    if (!settingsCardById(target.card)) {
+      throw new PluginManifestError(`${at}.card：未知设置卡：${target.card}`);
+    }
+    return;
+  }
+  // 命令的技能目标 shared 已校验；页面动作块（d.124）是同一 target 形状，这里补齐。
+  if (target.kind === "skill" && !skillNames.has(target.name)) {
+    throw new PluginManifestError(`${at}：技能 ${target.name} 不在本插件 contributions.skills 里`);
+  }
+}
+
 function fromV5(parsed: PluginV5ParseResult): PluginManifest {
   const v5 = parsed.manifest;
+  const skillNames = new Set(v5.contributions.skills.map((skill) => skill.name));
   v5.contributions.commands.forEach((command, index) => {
-    if (command.target.kind === "page" && !PAGE_IDS.has(command.target.page)) {
-      throw new PluginManifestError(
-        `contributions.commands[${index}].target.page：未知页面：${command.target.page}`,
-      );
-    }
-    // d.108：shared 只认形状；设置卡目录在 web，必须在这里补存在性校验。
-    if (command.target.kind === "settings" && !settingsCardById(command.target.card)) {
-      throw new PluginManifestError(
-        `contributions.commands[${index}].target.card：未知设置卡：${command.target.card}`,
-      );
-    }
+    assertTargetUsable(command.target, `contributions.commands[${index}].target`, skillNames);
   });
+  const page = v5.contributions.page;
+  if (page?.kind === "blocks") {
+    // 页面动作块与命令共用同一套 target：页面白名单/设置卡/技能名必须在安装时存在，
+    // 而不是等用户点下去才发现「跳到一个不存在的页面」。
+    page.blocks.forEach((block, blockIndex) => {
+      if (block.type !== "actions") return;
+      block.items.forEach((item, itemIndex) => {
+        assertTargetUsable(
+          item.target,
+          `contributions.page.blocks[${blockIndex}].items[${itemIndex}].target`,
+          skillNames,
+        );
+      });
+    });
+  }
   return {
     schemaVersion: 5,
     id: v5.id,
@@ -1436,6 +1505,7 @@ function fromV5(parsed: PluginV5ParseResult): PluginManifest {
       })),
       toolPacks: v5.contributions.toolPacks.map((pack) => ({ ...pack, tools: [...pack.tools] })),
       desktopWidgets: v5.contributions.desktopWidgets as unknown as PluginDesktopWidgetSpec[],
+      ...(v5.contributions.page ? { page: copyPage(v5.contributions.page) } : {}),
       llmPresets: [],
     },
     permissions: {

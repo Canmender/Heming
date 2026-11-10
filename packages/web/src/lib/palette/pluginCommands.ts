@@ -1,4 +1,5 @@
 import type { PluginCommandInfo } from "../plugins/index.js";
+import type { PageId, PaletteIntentData, PaletteIntentKind } from "../../store/ui.js";
 import { matchScore } from "./local.js";
 
 /**
@@ -57,4 +58,68 @@ export function searchPluginCommands(
     hits: scored.slice(0, limit).map((s) => s.command),
     total: scored.length,
   };
+}
+
+/**
+ * target 分发所需的宿主能力（由调用方注入，本模块不直接读 store）。
+ *
+ * 为什么用注入而不是在这里 import store：命令面板与插件页（声明式页的 `actions` 块）
+ * 都要执行同一套 target，但两者的「页面能不能去」判断来源不同——面板按「已装模块
+ * 过滤后的页面目录」，插件页按「可路由页面白名单」。把判断留在调用方，跳转口径
+ * （page → 切页 / settings / unit / plugin → 意图槽）留在这里，才是一份真源。
+ */
+export interface PluginCommandTargetDeps {
+  /** 触发这条动作的插件 id（`target: "plugin"` 时指向它自己的详情）。 */
+  pluginId: string;
+  /** 该页面现在能不能去（调用方传自己的投影，页面白名单不在这里复制）。 */
+  canOpenPage: (page: string) => boolean;
+  /** 技能名 → 本机技能 id（找不到返回 null，面板与插件页同口径）。 */
+  skillIdOf: (name: string) => string | null;
+  setPage: (page: PageId) => void;
+  setPaletteIntent: (kind: PaletteIntentKind, data?: PaletteIntentData) => void;
+}
+
+/**
+ * 执行一条插件命令 / 声明式页动作的 target（d.108 / d.124）。
+ *
+ * 落点与既有语义逐字一致：
+ * - `page` → 直接切页（页面不可用时静默忽略，与面板原来一致）；
+ * - `skill` → 查技能池 id 投 `focus-skill`，再切技能视图；
+ * - `settings` → 投 `focus-settings` 定位设置卡，再切设置页；
+ * - `unit` → 复用 `open-plugin` 槽，由插件页判断开详情还是在统一单元列表里定位；
+ * - `plugin` → 打开本插件详情。
+ *
+ * 返回是否真的执行了跳转（`page` 不可路由时为 false），供调用方决定要不要给提示。
+ */
+export function runPluginCommandTarget(
+  target: PluginCommandTarget,
+  deps: PluginCommandTargetDeps,
+): boolean {
+  if (!target || typeof target !== "object") return false;
+  switch (target.kind) {
+    case "page":
+      if (!deps.canOpenPage(target.page)) return false;
+      deps.setPage(target.page as PageId);
+      return true;
+    case "skill": {
+      const skillId = deps.skillIdOf(target.name);
+      if (skillId) deps.setPaletteIntent("focus-skill", { id: skillId });
+      deps.setPage("skills");
+      return true;
+    }
+    case "settings":
+      deps.setPaletteIntent("focus-settings", { card: target.card });
+      deps.setPage("settings");
+      return true;
+    case "unit":
+      deps.setPaletteIntent("open-plugin", { id: target.unitId });
+      deps.setPage("plugins");
+      return true;
+    case "plugin":
+      deps.setPaletteIntent("open-plugin", { id: deps.pluginId });
+      deps.setPage("plugins");
+      return true;
+    default:
+      return false;
+  }
 }

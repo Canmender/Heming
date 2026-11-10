@@ -60,7 +60,7 @@ export function WidgetSettingsCard() {
   const needsAgents = useMemo(
     () =>
       records.some((record) =>
-        (record.widget.settings?.fields ?? []).some((field) => field.type === "agent"),
+        (record.widget?.settings?.fields ?? []).some((field) => field.type === "agent"),
       ),
     [records],
   );
@@ -203,8 +203,9 @@ function WidgetBlock({
   onAction: (id: string, action: Parameters<typeof runWidgetAction>[1]) => Promise<void>;
   onCommit: (field: WidgetSettingField, raw: unknown) => void;
 }) {
-  const fields = record.widget.settings?.fields ?? [];
-  const title = record.widget.settings?.title ?? record.name;
+  // 页面型界面插件没有浮窗（d.124）：没有窗口设置表单，也不提供窗口动作
+  const fields = record.widget?.settings?.fields ?? [];
+  const title = record.widget?.settings?.title ?? record.name;
   const disabled = !record.enabled || Boolean(record.error);
 
   return (
@@ -224,28 +225,33 @@ function WidgetBlock({
         </p>
       )}
 
-      {/* 宿主动作：与插件区列表同一套通道，状态共用主进程真源 */}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => void onAction(record.id, "toggle")}
-          className="ui-btn ui-btn-sm ui-btn-ghost"
-        >
-          {state?.visible ? "隐藏" : "显示"}
-        </button>
-        {HOST_ACTIONS.map((item) => (
+      {/* 宿主动作：与插件区列表同一套通道，状态共用主进程真源。
+          页面型界面插件没有浮窗，不渲染窗口动作（d.124）。 */}
+      {record.widget ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
-            key={item.action}
             type="button"
             disabled={disabled}
-            onClick={() => void onAction(record.id, item.action)}
+            onClick={() => void onAction(record.id, "toggle")}
             className="ui-btn ui-btn-sm ui-btn-ghost"
           >
-            {item.label}
+            {state?.visible ? "隐藏" : "显示"}
           </button>
-        ))}
-      </div>
+          {HOST_ACTIONS.map((item) => (
+            <button
+              key={item.action}
+              type="button"
+              disabled={disabled}
+              onClick={() => void onAction(record.id, item.action)}
+              className="ui-btn ui-btn-sm ui-btn-ghost"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 ui-caption">这个界面插件只提供插件页面，没有桌面浮窗。</p>
+      )}
 
       {fields.length > 0 && (
         <div className="mt-3 space-y-2.5">

@@ -10,6 +10,8 @@ import { WidgetSettingsCard } from "./settings/WidgetSettingsCard.js";import { T
 import { DEFAULT_NAV_ORDER, useUiStore, type NavPage } from "../store/ui.js";
 import { useModuleStore } from "../lib/modules/store.js";
 import { withModuleNav } from "../lib/modules/nav.js";
+import { usePluginPageEntries } from "../lib/pages/usePluginPages.js";
+import { PluginPageIcon } from "./plugins/PluginPageIcon.js";
 import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
 import { setThemeMode, watchThemeMode } from "../lib/theme.js";
 import { DEFAULT_NAV_MODE, type NavMode } from "../lib/navPrefs.js";
@@ -791,6 +793,13 @@ function NavigationSection() {
   // 已装且启用的模块入口追加在 8 项之后（与 NavRail 同源：modules/nav.ts 的 withModuleNav）
   const navOrder = withModuleNav([...DEFAULT_NAV_ORDER], moduleState);
   const installedPages = navOrder.slice(DEFAULT_NAV_ORDER.length);
+  /**
+   * d.124：已装插件页面（声明式 + 界面插件）也追加在模块页之后。
+   *
+   * 读的是导航轨/路由同一份注册表投影 `usePluginPageEntries()`，不在设置页里
+   * 再判一遍「有没有页面、能不能进」——那会变成第四套口径。
+   */
+  const pluginPages = usePluginPageEntries().filter((entry) => entry.available);
 
   return (
     <section
@@ -800,7 +809,7 @@ function NavigationSection() {
       <div className="ui-section-title">导航顺序</div>
       <div className="mt-1 ui-caption">
         导航固定 8 项、顺序不可调整（数字快捷键仍对应原来的页面：Alt+1 / 2 / 5 / 6 / 8 / 0）。
-        已安装的插件页面（幕僚、信息中枢、自动化、工作流）会自动追加在最下面，
+        已安装的模块页面（幕僚、信息中枢、自动化、工作流）与带页面的插件会自动追加在最下面，
         不改变上面 8 项的顺序；停用或删除后入口随之消失。
       </div>
       <ol className="mt-2 flex flex-col gap-1">
@@ -818,8 +827,21 @@ function NavigationSection() {
             )}
           </li>
         ))}
+        {pluginPages.map((entry, index) => (
+          <li
+            key={entry.pageId}
+            className="flex items-center gap-2 rounded-lg border border-line-soft px-2 py-1.5"
+          >
+            <span className="w-[18px] ui-caption">
+              {DEFAULT_NAV_ORDER.length + installedPages.length + index + 1}
+            </span>
+            <PluginPageIcon icon={entry.icon} size={14} />
+            <span className="flex-1 text-[12px]">{entry.title}</span>
+            <span className="ui-micro shrink-0 text-muted">插件页面 · 固定末位</span>
+          </li>
+        ))}
       </ol>
-      {installedPages.length === 0 ? (
+      {installedPages.length === 0 && pluginPages.length === 0 ? (
         <p className="mt-2 ui-caption">当前没有已安装的插件页面；到「插件」页安装后会自动出现在导航最下面。</p>
       ) : null}
     </section>

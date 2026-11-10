@@ -27,6 +27,7 @@ import { DEFAULT_QUOTA_BYTES } from "../storageUsage.js";
 import { utf8Length } from "../memory/storage.js";
 import { discardPendingSecureWrite, pendingSecurePlain, readSecureValueAsync } from "../secureStorage.js";
 import {
+  copyPage,
   currentAppVersion,
   parsePluginManifest,
   parsePluginManifestDetailed,
@@ -781,6 +782,8 @@ function copyManifest(manifest: PluginManifest): PluginManifest {
             }
           : {}),
       })),
+      // d.124：页面（声明式 blocks / 界面插件 entry）；不拷贝会丢页面且指纹不一致
+      ...(contributions.page ? { page: copyPage(contributions.page) } : {}),
       llmPresets: [],
     },
     permissions: {
@@ -835,16 +838,42 @@ function copyPlugin(plugin: InstalledPlugin): InstalledPlugin {
 }
 
 /**
+ * 把 web 归一化后的页面对象还原成 shared v5 schema 认得的**原始清单形状**（d.124）。
+ *
+ * 存储里的是「归一化后的 web 清单」：页面已经是 `{ kind: "blocks" | "entry", ... }`，
+ * 而 shared 的 `PageSchema` 只认 `{ title, icon?, summary?, entry?, blocks? }`（strict，
+ * 多一个 `kind` 就是未知字段）。不还原的话，装完带页面的插件一重启就整条记录解析失败
+ * （走 `invalidRecord` 抢救路径），表现为页面入口与技能全部失效——比丢页面更糟。
+ *
+ * 还原规则：`kind` 只是区分形状的标记，丢掉；`icon`/`summary` 为空串时删掉
+ * （v5 的 icon 有正则，显式空串会被判非法；summary 缺省就是空串）。
+ */
+function denormalizePage(page: unknown): unknown {
+  if (!page || typeof page !== "object" || Array.isArray(page)) return page;
+  const record = page as Record<string, unknown>;
+  const kind = record.kind;
+  if (kind !== "blocks" && kind !== "entry") return page; // 已是原始形状（手写/旧版）
+  const out: Record<string, unknown> = { title: record.title };
+  if (typeof record.icon === "string" && record.icon) out.icon = record.icon;
+  if (typeof record.summary === "string" && record.summary) out.summary = record.summary;
+  if (kind === "entry") out.entry = record.entry;
+  else out.blocks = record.blocks;
+  return out;
+}
+
+/**
  * 把存储里的归一化清单还原成「能再过一次 v5 解析」的形状。
  *
- * 两处 web/共享的写读差异必须在这里抹平，否则所有 v5 记录重启后都读不回来：
+ * 三处 web/共享的写读差异必须在这里抹平，否则所有 v5 记录重启后都读不回来：
  * 1. web 内部形状恒定带 `contributions.llmPresets: []`（旧消费方兼容字段），
  *    而 v5 的 `contributions` 是 strict（未知键=报错）；
  * 2. shared 的 `trimmed()` 是 `min(1)`，但缺省值是 `""`（zod 的 `.default("")` 不跑校验）——
  *    归一化后的记录一定写有 `description: ""` / `author: ""`，显式传回去会被判「至少 1 个字」。
+ * 3. d.124：归一化后的 `contributions.page` 带 `kind` 标记，由 `denormalizePage()` 还原。
  *
- * ★ 这是 web 侧的自保，不是正确契约：shared 的 v5 schema 应该允许这两个字段为空串
- *   （或把缺省值改成不落盘）。shared 属只读范围，已在交付说明里提出。
+ * ★ 这是 web 侧的自保，不是正确契约：shared 的 v5 schema 本可以接受归一化形状
+ *   （或允许这两类空串）。shared 当前把「归一化产物能否被自己再解析」这条
+ *   写读闭环当作待修事项，改动未做前这里必须保持自保。
  */
 function stripWebCompatFields(record: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...record };
@@ -866,6 +895,7 @@ function stripWebCompatFields(record: Record<string, unknown>): Record<string, u
       return item;
     });
   }
+  if (cleaned.page !== undefined) cleaned.page = denormalizePage(cleaned.page);
   out.contributions = cleaned;
   return out;
 }
@@ -1221,6 +1251,35 @@ export class PluginStore {
   private data: PluginData;
   /** 读取时发现旧记录缺指纹 → 构造完成后补写一次（不视为错误）。 */
   private backfilledFingerprint = false;
+  /**
+   * d.124：变更订阅（导航轨/路由要随安装/启停/卸载即时更新）。
+   *
+   * 本 store 一直是「显式调用 + 页面自己 setTick」的形态（没有响应式订阅）；
+   * 插件页面入口由 NavRail/App 消费，它们不经过插件页，只能靠订阅感知。
+   * 只发「有变化」信号，不传快照——消费者自己读 `list()`，避免两套真相。
+   */
+  private listeners = new Set<() => void>();
+  /** 变更计数（`useSyncExternalStore` 的快照；每次通知 +1）。 */
+  revision = 0;
+
+  /** 订阅变更；返回取消订阅函数。订阅者异常不影响业务。 */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private emitChange(): void {
+    this.revision += 1;
+    for (const listener of [...this.listeners]) {
+      try {
+        listener();
+      } catch {
+        /* 单个订阅者抛错不影响其它消费者 */
+      }
+    }
+  }
 
   constructor(
     storage?: StorageLike,
@@ -1910,6 +1969,7 @@ export class PluginStore {
     this.backfilledFingerprint = false;
     this.data = this.parse(this.read());
     if (this.backfilledFingerprint) this.save();
+    this.emitChange();
   }
 
   /** 取 `previous` 候选（带 §5.3 的 128KB/512KB 限额判定）。 */
@@ -2537,6 +2597,7 @@ export class PluginStore {
   private save(): { ok: boolean; error?: string } {
     try {
       this.storage.setItem(PLUGINS_KEY, JSON.stringify(this.data));
+      this.emitChange();
       return { ok: true };
     } catch (err) {
       return { ok: false, error: errorMessage(err) };
@@ -2550,6 +2611,7 @@ export class PluginStore {
    */
   saveOrThrow(): void {
     this.storage.setItem(PLUGINS_KEY, JSON.stringify(this.data));
+    this.emitChange();
   }
 
   private parse(raw: string | null): PluginData {

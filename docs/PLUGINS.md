@@ -8,6 +8,11 @@
 
 插件是**纯声明式能力包**：一个 `plugin.json` 声明「这个包带来哪些能力」，和鸣负责把它物化到现有系统里。插件不执行第三方代码，也不从网络下载可执行物——技能变成技能池里的技能，MCP 服务登记进接口区，命令出现在命令面板。
 
+> **d.124 起多了一类贡献点：页面（`page`）**。插件可以给自己在左侧导航末位要一个入口，点进去是插件自己的页面。
+> 两条渲染路径：**声明式页**（`contributions.page.blocks`，宿主按受控块渲染，零代码、浏览器版也能看）与
+> **自带页**（界面插件 bundle 的 `contributions.page.entry`，包内 HTML 在 `widget://` 沙箱里跑，仅首方）。
+> 页面只能拥有自己，不能改宿主界面；不新增任何权限。详见 §13。
+
 > **唯一的例外是界面插件（§10，d.98）**：它带一个独立窗口的可执行渲染包，清单用 `schemaVersion: 4` + `distribution: "bundle"`，
 > 只允许官方目录发布、用户在插件区二次确认后安装。第三方仍只能是纯声明式包。
 >
@@ -50,6 +55,8 @@
 
 只有技能时 `permissions` 可以省略。安装入口：插件区 → 安装 → 粘贴/导入 `plugin.json`。
 
+需要导航入口时，在 `contributions` 里再加一个 `page`（声明式写 `blocks`，界面插件写 `entry`）——不写就没有入口，见 §13。
+
 ## 2. 清单字段
 
 | 字段 | 必填 | 说明 |
@@ -62,6 +69,7 @@
 | `contributions.mcpServers` | 可选 | 远程 MCP（仅 https；http 只允许 localhost/127.0.0.1/[::1]），≤10；`key` 小写字母数字连字符 ≤32 |
 | `contributions.commands` | 可选 | 插件命令，≤30；见 §4 |
 | `contributions.toolPacks` | 可选 | 工具束，≤10（只声明归属，不改开关）；见 §8 |
+| `contributions.page` | 可选 | 插件页面，每插件最多 1 个；声明式写 `blocks`（零代码），界面插件写 `entry`（包内 `.html`，仅首方）；见 §13 |
 
 ## 3. 权限：声明即约束
 
@@ -83,6 +91,7 @@
   widget CSP 也不放行网关 origin（不再有 `127.0.0.1:*` 通配）。
 
 安装弹窗会完整展示以上权限与贡献计数；用户点「安装」等于确认这份清单。
+插件页面（§13）**不引入新权限**：页面只是展示与导航，能调到的宿主能力仍以这份 `permissions` 为准。
 
 ## 4. 命令
 
@@ -119,6 +128,7 @@ web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `
 - **更新**：同 `id` 再次安装 = 更新；弹窗会展示技能/服务的增删改差异与服务 id 冲突。
 - **停用**：技能与服务保留记录但不生效，命令消失；重新启用即恢复。
 - **卸载**：级联收回本插件物化的技能与服务；用户手工改过的技能/服务不会被误删（按归属判断）。
+- **页面（d.124）**：声明式页随清单即时生效（停用撤入口、更新按新清单重渲染、卸载撤入口并清路由，正停在页上则回主页）；bundle 页由主进程创建/销毁视图，停用、卸载、更新与主窗关闭都不留孤儿视图。详见 §13.5。
 
 ## 6. 兼容与红线
 
@@ -130,6 +140,9 @@ web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `
 - 模型接入不由插件声明：d.90 起模型统一来自本机 magpie 网关（见 README「智能体对话」与
   `docs/superpowers/specs/2026-11-07-d90-magpie-native-model-layer.md`）。
 - 报错一律中文并给出字段路径（如 `contributions.mcpServers[0].url`），坏包直接拒绝安装，不进入「半可用」状态。
+- **页面红线（d.124）**：插件只能拥有自己的页面。**没有 `page` 贡献的纯能力包不新增导航页**（d.122 的口径只对它们继续成立）；
+  有 `page` 的插件才在导航末位多一个入口。插件页面不能改宿主现有页面/布局/导航顺序、不能注入宿主 DOM、不能给宿主页加卡片；
+  声明式页永不执行代码、不联网；bundle 页只在 `widget://` 沙箱里跑，且仅首方签名包可装。
 
 ## 7. 示例（仓库自带）
 
@@ -234,9 +247,9 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugin
 两种方式都会先做「能不能解析 / id 与版本是否合规 / schemaVersion 是否是整数 / 有没有名字」的基础校验，
 坏包不静默跳过（退出码非 0）。
 
-## 10. 界面插件（v4 · `distribution: "bundle"`，d.98）
+## 10. 界面插件（v4 · `distribution: "bundle"`，d.98；d.124 起可带页面）
 
-界面插件是**唯一带可执行内容**的插件：它提供一个独立窗口的渲染包（第一个也是当前唯一一个：桌宠 `heming.pet`，见 `docs/PET.md`）。
+界面插件是**唯一带可执行内容**的插件：它提供一个独立窗口的渲染包（第一个也是当前唯一一个：桌宠 `heming.pet`，见 `docs/PET.md`）；d.124 起还可以在**主窗内容区**嵌一个自己的页面（`contributions.page.entry`，见 §13.4）。
 因为「装插件 = 在本机运行代码」，它与纯声明式包走两套清单字段、两套安装链路，**只有官方目录发布的包才允许安装**（第三方仍只能是 §1–§8 的声明式包）。
 
 ### 9.1 清单
@@ -280,7 +293,8 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugin
 
 约束：
 
-- `distribution: "bundle"` 的包**只允许** `desktopWidgets`（可选 `commands`）；声明 `skills` / `mcpServers` / `toolPacks` 一律拒绝。
+- `distribution: "bundle"` 的包**只允许** `desktopWidgets` + `commands` + `page`；声明 `skills` / `mcpServers` / `toolPacks` 一律拒绝。
+  `page` 与 `desktopWidgets` 可并存（同一插件既能有浮窗又能有页面），每类最多 1 个；`page.entry` 必须是包内 `.html` 且出现在 `files` 里。
 - **`packageSha256` 必填（审计 P0-1）**：它是包内 `files/**` 的确定性内容摘要（不是 tgz 自身字节的 sha256——清单在 tgz 里，写自己的 tgz 摘要会构成自引用）。
   首方签名覆盖清单（含该字段）→ 签名**间接覆盖全部代码字节**；安装端解包后重算并比对，只换包内 JS、保留官方清单+签名的「借壳包」会被拒。
   旧的无该字段的 bundle 包**不再允许新装**（已安装记录不受影响）；打包/签名脚本会自动写入/校验该字段。
@@ -430,10 +444,17 @@ await data.dataDelete("cache");
 - **旧宿主兼容**：`data*` 是后加的方法，插件作者按「可能不存在」探测（`typeof data.dataGet === "function"`），
   或在包装层按 `null` / `false` / `[]` 降级；不要因为缺方法白屏。
 
+### 10.7 界面插件页面（d.124）
+
+`contributions.page = { title, icon?, summary?, entry }`：`entry` 是包内 `.html`，宿主在**主窗内容区**用
+`WebContentsView` 拉起一个 `widget://<插件 id>/` 沙箱视图（同 `preload`、同 CSP，`rect` 由宿主算并钳制）。
+它与桌面小组件可并存；停用/卸载/更新/切页时视图销毁，不留孤儿。清单字段、导航入口与安全边界见 §13.3–§13.6。
+
 ## 11. 清单 v5：版本兼容、上架元数据与安装事务（d.106）
 
 v5 相对 v3/v4 只加两件事：**最低宿主版本**（`engines.heming`）与**上架元数据**（`meta`）。
 但它同时把三件长期缺失的工程语义补齐了：安装前拦截不兼容、安装要么全成要么全不成、失败能回滚。
+d.124 又在 v5 里**增补**了可选贡献点 `contributions.page`（声明式页面，见 §13.2）；不写 `page` 的旧包行为完全不变。
 
 ### 11.1 清单增量
 
@@ -568,4 +589,118 @@ node scripts/build-module.mjs --install <modulesDir>   # 构建后装到本机�
 开发态若模块未装、但仓库里有 `packages/infohub`，主进程直接退回源码目录（`electron .`
 不必每次构建模块包）；打包版没有这条退路。
 
+## 13. 插件页面（d.124）
 
+插件可以在左侧导航**末位**要一个入口，点进去是它自己的页面。每插件**最多一个页面**（`page` 是对象不是数组，
+页内没有 Tab/子路由）。导航入口就是它，插件页里另有「页面」贡献行与「打开页面」。
+
+### 13.1 两条渲染路径
+
+| 路径 | 清单字段 | 渲染位置 | 执行代码 | 可用范围 |
+|---|---|---|---|---|
+| **A · 声明式页** | v5 `contributions.page.blocks` | web 组件 `PluginDeclarativePage`（宿主按受控块渲染） | 否（内容是数据，全部转义） | 安装版 + 浏览器版 |
+| **B · 自带页** | v4 bundle `contributions.page.entry` | 主进程 `WebContentsView`，嵌在主窗内容区的 `widget://<插件 id>/` 沙箱 | 是（同 widget 沙箱与 CSP，仅首方签名包） | 仅安装版（浏览器版给降级说明） |
+
+两条路径共用同一份**页面注册表**：已装且启用的模块页 + 声明式页 + 自带页被投影成导航/路由/命令面板的同一份数据，
+各处只读这份投影、不各自判断。
+
+### 13.2 声明式页（v5）
+
+```jsonc
+"contributions": {
+  "page": {
+    "title": "采集桥",                    // 必填，1–40 字；导航项与页面标题共用
+    "icon": "activity",                  // 可选，宿主图标词表 id；未知值回落 package，不报错
+    "summary": "本机采集服务状态与用法",   // 可选，≤200 字；页面副标题
+    "blocks": [                          // 必填，1–12 个；未知 type 直接拒绝（不静默丢弃）
+      { "type": "markdown", "title": "怎么用", "text": "在设置里填来源，然后点「开始同步」。" },
+      { "type": "stats", "items": [{ "label": "已采集", "value": "128 条" }] },
+      { "type": "table", "columns": ["来源", "状态"], "rows": [["QQ", "就绪"]] },
+      { "type": "list", "items": [{ "title": "开始同步", "description": "调用插件命令", "badge": "命令" }] },
+      { "type": "actions", "items": [{ "label": "打开插件区", "target": { "kind": "page", "page": "plugins" } }] },
+      { "type": "contributions", "kind": "skills" }
+    ]
+  }
+}
+```
+
+块词表（v1，全部纯文本，宿主转义后渲染；上限唯一来源 `PLUGIN_LIMITS`）：
+
+| type | 字段 | 限制 | 渲染 |
+|---|---|---|---|
+| `markdown` | `title?`、`text` | text ≤4000 字 | 复用聊天消息的 markdown 渲染器（**禁原始 HTML**） |
+| `stats` | `title?`、`items[{label,value}]` | ≤8 项，各 ≤40 字 | 指标卡横排 |
+| `table` | `title?`、`columns[]`、`rows[][]` | 列 ≤6、行 ≤50、单元格 ≤120 字；每行格数 = 列数 | 只读表格 |
+| `list` | `title?`、`items[{title,description?,badge?}]` | ≤20 项；标题 ≤60 / 描述 ≤160 / badge ≤12 | 列表行 |
+| `actions` | `title?`、`items[{label,target}]` | ≤6 项；label ≤24；target 与命令 target 同形 | 按钮，只做导航 |
+| `contributions` | `title?`、`kind` | `skills` / `mcpServers` / `commands` / `toolPacks` | 自动列本插件该类贡献（名称 + 数量），空则一句空态 |
+
+实现口径：
+
+- 数据来源是已装插件记录里的 `manifest.contributions.page`（安装时已由 zod 校验）；渲染层仍逐块容错，
+  未知/非法块跳过并记开发日志，生产不白屏。
+- 页头 = 图标 + `title` + `summary` + 来源徽标「声明式插件」+ 版本。
+- `actions` 的跳转复用命令面板的同一套跳转函数（单一真源，不复制页面白名单）。
+- 页面**只读**：不提供编辑清单的能力（清单靠更新插件）；**不代拉数据、不发起任何网络请求**。
+
+完整可 lint 通过的示例：`plugin-kit/examples/05-plugin-page/`；故意写错的对照：`plugin-kit/examples/_invalid/page-entry-on-declarative/`。
+
+### 13.3 页面注册表、导航与路由
+
+| 项 | 口径 |
+|---|---|
+| 路由 id | `plugin:<插件 id>`；`Page` 联合类型加模板字面量，`normalizePage` 放行 `plugin:` 前缀 |
+| 有效性 | 由路由守卫判：未装/停用/记录损坏 → 入口不出现，直开路由 `fallbackPage` 回主页；浏览器版里 bundle 页不可用（入口不出现；宿主缺页面视图能力时显示降级说明）；**不写进 `navOrder`** |
+| 导航顺序 | 8 个宿主页 → 模块页（注册表顺序）→ 声明式插件页（首次安装时间升序）→ bundle 插件页（同序）；同刻按 pluginId 字典序 |
+| 稳定性 | 插件升级不改位置（沿用首次 `installedAt`）；卸载后重装排到末尾 |
+| 分组 / 快捷键 | 归「能力」组；**不分配快捷键**（数字键仍只绑 8 个宿主页） |
+| 命令面板 | **不新增**「插件页面」跳转组（v1 明确不做，避免双入口漂移） |
+| 其它入口 | 插件卡/详情显示「页面」贡献行 + 「打开页面」（仅已装且启用可用）；设置区「导航顺序」只读列表追加「已装插件页面」 |
+
+### 13.4 自带页运行时（桌面端）
+
+- IPC：`widgets:page-mount { id, rect }`、`widgets:page-bounds { rect }`、`widgets:page-unmount`。
+  web 侧占位 div 用 `ResizeObserver` + `getBoundingClientRect()` 上报内容区坐标。
+- 主进程建/复用 `WebContentsView`：`preload = widget-preload.js`、`sandbox: true`、`contextIsolation: true`、
+  `nodeIntegration: false`，`loadURL("widget://<id>/<entry>")`，CSP 用 `widgetCspHeaders(record.permissions)`。
+- 坐标口径：主窗 `contentView` 坐标系（CSS px = DIP）；主进程对 rect 做边界钳制（宽高 ≥1、超出内容区裁掉）。
+- 身份校验：页面视图的 `webContents.id` 登记进 runtime map，任何 IPC 先按 sender 反查，查不到即拒绝；
+  页面视图**不允许**拖拽/托盘/穿透类通道（返回「不适用于页面」）。
+- 导航守卫：`will-navigate` 只允许同 origin；`setWindowOpenHandler` 一律 deny；`will-download` 取消。
+- 生命周期对账：切页 / 主窗 resize / 最小化恢复 / 插件停用 / 卸载 / 更新 → 销毁视图；主窗关闭先销毁视图再关窗，
+  **不留孤儿视图**。
+- 失败态：视图创建失败（entry 缺失/包损坏）→ 返回 `{ ok:false, error }`，web 显示原因 +「重建视图 / 打开插件详情」，不白屏。
+- 浏览器（无桌面桥）：bundle 页不可用（导航不出现入口；宿主缺 `pageMount` 时显示「插件页面只在安装版里可用」降级说明），不渲染空壳。
+- 主题：复用 `widget:info` 的 `theme`，主窗切主题按现有 `widget:event` 推送（不新增通道）。
+
+### 13.5 安装 / 更新 / 卸载
+
+| 场景 | 声明式 | bundle |
+|---|---|---|
+| 安装预览 | 贡献行多一项「页面 1」 | 同左（`page` 计入预览） |
+| 存储 | 不新增键（页面从 `heming.plugins.v1` 的清单派生） | 主进程 `installed.json` 记录增加 `page`，`widgets:list` 暴露 |
+| 更新 | 清单替换即生效；正停在该页按新清单重渲染 | `entry`/`page` 变化或版本更新 → 主进程销毁旧视图，下次进入重建；设置与 `data/` 保留 |
+| 停用 | 入口消失，页面不渲染 | 入口消失 + 视图立即销毁 |
+| 卸载 | 记录删除 → 入口与路由消失；正停在该页 → 回主页 | 同左 + 删除包目录（现有事务），视图先销毁 |
+| 降级 | 沿用现有口径 | 沿用现有口径；页面随包回旧版 |
+| 新增权限 | 页面不新增权限，无需重新确认 | 页面**不**新增权限项（CSP 仍按 `permissions.network`），无需重新确认 |
+
+### 13.6 安全边界与明确不做
+
+**安全边界**：
+
+1. 声明式页：禁止任何 HTML/脚本入口（markdown 渲染器沿用聊天侧「禁原始 HTML」配置）；链接只允许 `http(s)` 与宿主页面跳转，
+   外链走系统浏览器确认。
+2. 自带页：只能在 `widget://<id>/` 内导航；`frame-src 'none'` 不变（不自嵌外网、不互嵌）；`connect-src` 仍按
+   `permissions.network` 白名单；`script-src 'self'`；无 `nodeIntegration`；**无新增桥方法**（页面场景不写窗口几何）。
+3. 视图隔离：页面视图的 `webContents.id` 登记进 runtime map；任何 IPC 先按 sender 反查，查不到即拒绝。
+4. 反冒充：`heming.*` 仍是首方保留命名；bundle 页面只有首方签名包能装（现有 `plugin-package.js` + `official-keys.json`）；
+   第三方页面在 v1 只能走声明式（零代码）。
+5. 隐私：页面不上传任何数据；声明式页展示的是本机清单数据；自带页的数据读写仍只到
+   `<userData>/plugins/<id>/data/`（单文件 ≤1MB 配额）。
+
+**本轮明确不做**：插件修改宿主现有界面（注入 DOM、改导航顺序/分组/快捷键、给宿主页加卡片）；每插件多页面或页内 Tab/子路由；
+命令面板的「插件页面」跳转组；第三方 bundle 页面的信任链（另立规格）；页面内嵌外部网页/iframe/视频/下载；
+声明式页的数据绑定或远程请求；浏览器版渲染自带页（只给不可用/降级说明）。
+
+版本口径：插件页面是新功能 → 特性位 +1（`d.124.3.48.0`）。

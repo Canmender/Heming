@@ -12,6 +12,7 @@ const {
   packPackage,
   validateLayout,
   validateBundleManifest,
+  normalizePageSpec,
   computeFilesDigest,
   sha256Hex,
 } = require("./plugin-package");
@@ -494,4 +495,90 @@ test("坏包：不是 gzip / 空内容都拒绝，且不抛错", () => {
   assert.equal(readPackage(Buffer.from("not a tgz")).ok, false);
   assert.equal(readPackage(Buffer.alloc(0)).ok, false);
   assert.equal(readPackage(null).ok, false);
+});
+
+
+/* ───────────────────── d.124 插件页面（bundle · B 路径） ───────────────────── */
+
+function pageContribution(overrides = {}) {
+  return { title: "我的面板", icon: "layout", summary: "插件页面", entry: "files/index.html", ...overrides };
+}
+
+test("页面：bundle 可声明 page（与 desktopWidgets 并存），page-only 包也合法", () => {
+  const both = baseManifest({
+    contributions: { ...baseManifest().contributions, page: pageContribution() },
+  });
+  const check = validateBundleManifest(both);
+  assert.equal(check.ok, true, check.errors.join("；"));
+  assert.deepEqual(check.page, { title: "我的面板", icon: "layout", summary: "插件页面", entry: "files/index.html" });
+  assert.equal(check.widget.id, "pet");
+
+  // 只有页面、没有浮窗：从「必须 desktopWidgets」放宽为「二者至少一个」
+  const pageOnly = baseManifest({ contributions: { page: pageContribution() } });
+  const pageCheck = validateBundleManifest(pageOnly);
+  assert.equal(pageCheck.ok, true, pageCheck.errors.join("；"));
+  assert.equal(pageCheck.widget, null);
+  assert.equal(pageCheck.page.entry, "files/index.html");
+
+  // 两个都没有 → 还是纯声明式包，拒绝
+  const empty = validateBundleManifest(baseManifest({ contributions: {} }));
+  assert.equal(empty.ok, false);
+  assert.match(empty.errors.join("；"), /必须声明至少 1 个 contributions\.desktopWidgets 或 contributions\.page/);
+});
+
+test("页面：title / icon / summary / entry 逐项校验，错误带 contributions.page 字段路径", () => {
+  const bad = (overrides) =>
+    validateBundleManifest(baseManifest({ contributions: { page: pageContribution(overrides) } })).errors.join("；");
+  assert.match(bad({ title: "" }), /contributions\.page\.title/);
+  assert.match(bad({ title: "x".repeat(41) }), /contributions\.page\.title/);
+  assert.match(bad({ icon: "Layout" }), /contributions\.page\.icon/);
+  assert.match(bad({ icon: "layout!" }), /contributions\.page\.icon/);
+  assert.match(bad({ summary: "x".repeat(201) }), /contributions\.page\.summary/);
+  for (const entry of [undefined, "../evil.html", "a\\b.html", "https://evil/x.html", "/abs.html", "files/x.js", "files/x.htm", "x".repeat(201)]) {
+    assert.match(bad({ entry }), /contributions\.page\.entry/, String(entry));
+  }
+  // icon/summary 可缺省；blocks: [] 允许（bundle 页只拒绝非空 blocks）
+  const ok = validateBundleManifest(
+    baseManifest({ contributions: { page: pageContribution({ icon: undefined, summary: undefined, blocks: [] }) } }),
+  );
+  assert.equal(ok.ok, true, ok.errors.join("；"));
+  assert.deepEqual(ok.page, { title: "我的面板", icon: "", summary: "", entry: "files/index.html" });
+});
+
+test("页面：bundle 页面不能再写 blocks（同一份清单不能在两条渲染路径之间摇摆）", () => {
+  const errors = validateBundleManifest(
+    baseManifest({ contributions: { page: pageContribution({ blocks: [{ type: "markdown", text: "x" }] }) } }),
+  ).errors.join("；");
+  assert.match(errors, /只能写 entry，不能再写 blocks/);
+});
+
+test("页面：entry 必须真的在 files/ 里（安装链路校验，不等到点进页面才白屏）", () => {
+  const missing = readPackage(
+    packageFor({ contributions: { page: pageContribution({ entry: "files/page/nope.html" }) } }).bytes,
+  );
+  assert.equal(missing.ok, false);
+  assert.match(missing.errors.join("；"), /页面入口不存在于插件包：files\/page\/nope.html/);
+
+  // entry 在包里 → 可安装，readPackage 返回归一化 page
+  const files = [
+    { path: "files/page/index.html", data: "<!doctype html><title>panel</title>" },
+    { path: "files/page/app.js", data: "console.log('panel')" },
+  ];
+  const pkg = packageFor(
+    { contributions: { page: pageContribution({ entry: "files/page/index.html" }) } },
+    files,
+  );
+  const parsed = readPackage(pkg.bytes);
+  assert.equal(parsed.ok, true, parsed.errors && parsed.errors.join("；"));
+  assert.deepEqual(parsed.page, { title: "我的面板", icon: "layout", summary: "插件页面", entry: "files/page/index.html" });
+  assert.equal(parsed.widget, null);
+});
+
+test("normalizePageSpec：纯函数兜住落盘清单（非对象/缺字段给中文错误，非法返回 page=null）", () => {
+  assert.equal(normalizePageSpec(null).ok, false);
+  assert.equal(normalizePageSpec([]).ok, false);
+  assert.match(normalizePageSpec({ title: "面板" }).errors.join("；"), /entry/);
+  const ok = normalizePageSpec(pageContribution());
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.page, { title: "我的面板", icon: "layout", summary: "插件页面", entry: "files/index.html" });
 });

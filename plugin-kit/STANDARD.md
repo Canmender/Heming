@@ -47,7 +47,7 @@
 | 形态 | `schemaVersion` | `distribution` | 可执行代码 | 谁能发布 |
 |---|---|---|---|---|
 | **声明式包**（manifest） | `5`（v1–v3 旧包可装） | 省略或 `"manifest"` | 无 | 任何人 |
-| **界面插件**（bundle） | `4` | `"bundle"` | 有（独立窗口渲染包） | 仅首方（必须首方签名） |
+| **界面插件**（bundle） | `4` | `"bundle"` | 有（独立窗口 / 主窗内嵌页面） | 仅首方（必须首方签名） |
 
 两种形态是**两条安装链路**：声明式包由 web 侧解析物化；bundle 由主进程解包、验签、按 `packageSha256` 复核后安装。
 第三方**不得**发布 bundle 包——这是安全红线，不是暂缺（见 §6.4）。
@@ -103,7 +103,7 @@
 | `meta` | 否 | 见 2.2，strict | 上架展示元数据（图标/分类/标签/详情…） |
 | `permissions` | 否 | 见 §4，strict | 权限声明；含 `mcpServers` 时实际必填（§4.1） |
 | `distribution` | 否 | `"manifest" \| "bundle"` | 缺省 `manifest` |
-| `contributions` | 是 | 至少一类非空 | 贡献点，见 §3 |
+| `contributions` | 是 | 至少一类非空 | 贡献点，见 §3（技能 / 服务 / 命令 / 工具束 / 桌面小组件 / 页面） |
 | `publisher` | 否 | `{ id, publicKey }` | 发布者公钥（签名用） |
 | `signature` | 否 | `{ alg: "ed25519", value }` | 首方/发布者签名；有签名必须有 publisher |
 | `packageSha256` | bundle 必填 | 64 位小写 hex | `files/**` 的确定性内容摘要（§3.6） |
@@ -125,6 +125,8 @@
 
 - 数量上限（唯一来源 `PLUGIN_LIMITS`）：技能 50、MCP 服务 10、命令 30、工具束 10（每束工具 50）、网络主机 20、
   文件根 5、桌面小组件 1、缩放档 6、设置字段 20、分类标签 8、关键词 20、截图 4。
+- 页面（§3.7）：每插件 1 个；`title` ≤40 字、`summary` ≤200 字、`blocks` ≤12 个
+  （markdown 正文 ≤4000 字；指标 ≤8 项；表格 ≤6 列 × ≤50 行、单元格 ≤120 字；列表 ≤20 项；动作 ≤6 项）。
 - 同一清单内：技能名 / 服务 key / 命令 id / 工具束 id **必须唯一**；工具名**不得跨束重复**（重复会点名两处）。
 - 名称类字段会 trim；`description` 这类允许空串的字段写成 `""` 合法。
 
@@ -148,7 +150,10 @@
     eval: boolean,                // 缺省 false
     chat: boolean,                // 缺省 false，仅 bundle
   },
-  contributions: { skills, mcpServers, commands, toolPacks, desktopWidgets },
+  contributions: {
+    skills, mcpServers, commands, toolPacks, desktopWidgets,
+    page?,   // 只有声明了页面才有：{ kind: "blocks" | "entry", title, icon, summary, … }（§3.7）
+  },
   publisher?, signature?, packageSha256?,
 }
 ```
@@ -166,8 +171,9 @@
 | `commands` | ✅ | ✅ | ✅ | ✅（target 受限） |
 | `toolPacks` | ❌ | ❌ | ✅ | ❌ |
 | `desktopWidgets` | ❌ | ❌ | ❌ | ✅（首方） |
+| `page`（插件页面，每插件 1 个） | ❌ | ✅（模块页，非插件声明） | ✅（声明式 `blocks`） | ✅（`entry` 自带页，仅首方） |
 | `hook`（生命周期订阅） | ❌ | ❌ | ❌ | ✅ |
-| `page` / `homeCard` / `settingsCard` / `backgroundJob` | ❌ | ✅ | ❌ | ❌ |
+| `homeCard` / `settingsCard` / `backgroundJob` | ❌ | ✅ | ❌ | ❌ |
 
 声明超出准入的贡献点 → **解析期直接拒绝**并给中文原因（不是静默不生效）。
 
@@ -243,11 +249,79 @@
 | `settings` | 否 | `{ title, fields[≤20] }`；字段类型 boolean/select/text/number/agent，`options` ≤20 |
 
 bundle 额外约束：
-- `distribution: "bundle"` 时**只允许** `commands` + `desktopWidgets`（声明 `skills`/`mcpServers`/`toolPacks` 一律拒绝）。
+- `distribution: "bundle"` 时**只允许** `commands` + `desktopWidgets` + `page`（声明 `skills`/`mcpServers`/`toolPacks` 一律拒绝）。
 - 必须提供 `packageSha256`：`files/**` 的**确定性内容摘要**（不是 tgz 自身哈希，避免自引用）。
   算法：按路径排序后对每条 `pathNULlenNULsha256(content)` 再取 sha256。签名的清单因此**间接覆盖全部代码字节**。
 
-### 3.7 生效判定（谁在什么时候算「生效」）
+### 3.7 `page`（插件页面，每插件 1 个）
+
+装好插件 → 左侧导航**末位**（模块页之后）多一个入口 → 点进去是该插件自己的页面。
+`page` 是**对象不是数组**：每插件最多 1 个，页内没有 Tab/子路由。两种形态由 `distribution` 决定且**互斥**。
+
+**A · 声明式页（v5，`distribution: "manifest"`）**：内容写在清单里，宿主渲染受控块，**永不执行代码**。
+
+```json
+"contributions": {
+  "page": {
+    "title": "采集桥",
+    "icon": "activity",
+    "summary": "本机采集服务状态与用法",
+    "blocks": [
+      { "type": "markdown", "title": "怎么用", "text": "在设置里填来源，然后点「开始同步」。" },
+      { "type": "stats", "items": [{ "label": "已采集", "value": "128 条" }] },
+      { "type": "table", "columns": ["来源", "状态"], "rows": [["QQ", "就绪"]] },
+      { "type": "list", "items": [{ "title": "开始同步", "description": "调用插件命令", "badge": "命令" }] },
+      { "type": "actions", "items": [{ "label": "打开插件区", "target": { "kind": "page", "page": "plugins" } }] },
+      { "type": "contributions", "kind": "skills" }
+    ]
+  }
+}
+```
+
+| 字段 | 必填 | 限制 / 语义 |
+|---|---|---|
+| `title` | 是 | 1–40 字；导航项与页面标题共用 |
+| `icon` | 否 | 宿主图标词表 id（`^[a-z][a-z0-9-]{0,31}$`）：`activity` / `book` / `calendar` / `chart` / `database` / `file` / `folder` / `globe` / `grid` / `hammer` / `key` / `layers` / `layout` / `link` / `list` / `message` / `package` / `play` / `settings` / `shield` / `terminal`；未知值回落 `package`，不报错 |
+| `summary` | 否 | ≤200 字；页面副标题 |
+| `blocks` | 是 | 1–12 个；未知 `type` 直接拒绝（严格，**不做静默丢弃**） |
+
+块词表（v1，全部纯文本，宿主转义后渲染）：
+
+| type | 字段 | 限制 | 渲染 |
+|---|---|---|---|
+| `markdown` | `title?`（≤40）、`text` | `text` ≤4000 字 | 复用聊天消息的 markdown 渲染器（禁原始 HTML） |
+| `stats` | `title?`、`items[{label,value}]` | ≤8 项；label / value 各 ≤40 字 | 指标卡横排 |
+| `table` | `title?`、`columns[]`、`rows[][]` | 列 ≤6、行 ≤50、单元格 ≤120 字；**每行格数必须等于列数** | 只读表格 |
+| `list` | `title?`、`items[{title,description?,badge?}]` | ≤20 项；标题 ≤60 / 描述 ≤160 / badge ≤12 | 列表行 |
+| `actions` | `title?`、`items[{label,target}]` | ≤6 项；label ≤24；target 与命令 target 同形（`page` / `plugin` / `settings` / `unit`） | 按钮；只做导航，不执行代码 |
+| `contributions` | `title?`、`kind` | `skills` / `mcpServers` / `commands` / `toolPacks` 之一 | 自动列出本插件该类贡献（名称 + 数量），空则一句空态 |
+
+声明式页**不新增权限、不发起网络请求**：宿主不代拉数据，页面只展示清单文本与本地投影（贡献计数、安装信息）。
+
+**B · 自带页（v4，`distribution: "bundle"`）**：包内 HTML 在 `widget://<插件 id>/` 沙箱里渲染，仅首方签名包可装。
+
+| 字段 | 限制 |
+|---|---|
+| `title` | 1–40 字 |
+| `icon` | 同 A 的图标词表 |
+| `summary` | ≤200 字 |
+| `entry` | 包内相对路径，必须 `.html`、≤200 字符；禁绝对路径 / `..` / 反斜杠 / 协议前缀；**必须出现在 `files` 里** |
+
+共同规则：
+
+- 写 `page` 的包应把 `engines.heming` 提到 `d.124`：`contributions` 是 strict 对象，旧版宿主不认识 `page`，含该字段的清单在旧版会被拒绝安装；**不带 `page` 的旧包不受影响**。
+- 仅声明式可写 `blocks`，仅 bundle 可写 `entry`；混写直接拒绝（声明式写 `entry` →「改用 blocks 或 `distribution: "bundle"`」；bundle 写 `blocks` → 拒绝）。
+- bundle 允许的贡献 = `commands` + `desktopWidgets` + `page`；仍**不允许** `skills` / `mcpServers` / `toolPacks`。
+  `page` 与 `desktopWidgets` 可并存（同一插件既能有浮窗又能有页面），每类最多 1 个。
+- 包内页面的代码由 `packageSha256` + 首方签名间接覆盖（§8.3）；声明式页零代码。
+- 页面**不新增权限**：`permissions` 不变；bundle 页面仍按清单生成 CSP（`connect-src` 跟随 `permissions.network`），
+  能调到的宿主能力 = 既有 `__heming_widget` 白名单桥，没有新增 secrets / files / MCP / 会话桥。
+- 页面**只能拥有自己**：不能改宿主现有页面/布局/导航顺序、不能注入宿主 DOM、不能给宿主页加卡片（首页卡/设置卡仍不做）。
+- 导航口径：宿主 8 页 → 模块页 → 声明式插件页 → bundle 插件页（按首次安装时间升序，插件升级不改位置）；
+  不分配快捷键，命令面板不新增「插件页面」跳转组。
+- 浏览器版（无桌面桥）**只渲染声明式页**；bundle 页在浏览器里不可用（导航不出现入口；宿主缺少页面视图能力时给「只在安装版可用」的降级说明，不渲染空壳）。
+
+### 3.8 生效判定（谁在什么时候算「生效」）
 
 一个插件的某类贡献「生效」= 已安装 × 插件总开关 × 该贡献级开关；再叠加上兼容性 / 签名 / 依赖单元。
 诊断用 `resolveUnit()` 的 `UnitBlockReason` 统一回答「为什么没生效」：
@@ -300,7 +374,7 @@ bundle 额外约束：
 
 声明式包的安装是一个事务：快照存储 → 写技能/服务 → 读回校验 → 写插件记录 → 失败**逐键回滚**并如实报告
 （`ok` / `error` / `rollback.ok`）。用户在安装前看到的是只读预览：差异（技能/服务的新增/变更/不变/移除）、
-服务 id 冲突、体积预算、权限与兼容性。**只读预览不写任何存储**。
+服务 id 冲突、体积预算、权限与兼容性（声明了页面时贡献行多一项「页面 1」）。**只读预览不写任何存储**。
 
 ### 5.2 更新
 
@@ -309,10 +383,13 @@ bundle 额外约束：
 - **权限扩张必须重新确认**：新版本声明的权限比已装版本更宽时，安装器要求用户再确认一次；拒绝则不更新。
 - **防降级**：默认拒绝安装比已装版本更旧的版本（除非显式确认）。
 - 签名/摘要不符、包内容与清单不符 → 拒绝，不产生半装状态。
+- **页面（§3.7）**：声明式页随清单替换**即时生效**（正停在该页则按新清单重渲染）；bundle 页在 `entry`/`page`
+  变化或版本更新时由主进程**销毁旧视图**，下次进入按新包重建（设置与 `data/` 保留）。
+  没有 `page` 贡献的纯能力包**不会**新增导航入口（d.122 的口径只对这类旧插件继续成立）。
 
 ### 5.3 启停与贡献级停用
 
-- 插件总开关关闭 = 全部贡献不生效：技能退出路由、服务不再连接、命令消失；**不删数据**。
+- 插件总开关关闭 = 全部贡献不生效：技能退出路由、服务不再连接、命令消失、**页面入口消失**（bundle 页视图立即销毁）；**不删数据**。
 - 贡献级停用只关某一类（`skills` / `mcpServers` / `commands` / `toolPacks`），重新打开时**仍尊重贡献级选择**
   （总开关不会偷偷把单独停用的项恢复）。
 - 每次启停都是事务：写失败会回滚并明确提示「保存失败」，不会出现「界面停了、重启又回来」。
@@ -322,6 +399,7 @@ bundle 额外约束：
 - 级联收回本插件物化的技能、MCP 服务、工具清单与工具启用状态，再删插件记录，整笔事务。
 - 只删**仍归插件所有**的对象：用户把服务改成手填/转正后视为用户资产，不动。
 - 卸载不清理插件贡献之外的业务数据（声明式包本就没有自有数据目录）。
+- 有页面的插件：卸载即撤导航入口与路由；若用户正停在该页 → 回主页；bundle 页视图先销毁再删包目录，不留孤儿视图。
 
 ### 5.5 界面插件生命周期事件（bundle）
 
@@ -353,6 +431,7 @@ bundle 额外约束：
 | 导航闸 | `will-navigate` 只允许本插件 origin；`window.open` 一律 deny |
 | 拿不到 | 密钥/`safeStorage`、MCP 桥、文件桥、会话与消息、主窗存储、任意 Node API/`fs`/`child_process`；用户供应商 Key 不出主进程 |
 | 窗口几何 | 坐标不上报：拖拽只发「按下/移动/抬起」，位移由主进程按屏幕光标算；插件不能查绝对位置、不能自由缩放（只能按清单档位 ±1） |
+| 页面视图 | bundle 的 `page.entry` 在主窗内容区嵌一个 `WebContentsView`：与 widget 同 origin（`widget://`）、同 preload、同 CSP；`rect` 由宿主算并钳制，插件只上报内容区坐标，**页面场景不适用于拖拽/托盘/穿透类通道** |
 
 ### 6.2 `window.__heming_widget` API
 
@@ -427,7 +506,8 @@ const value = data ? await data.dataGet("cache") : loadFromMemory();
 
 「装插件 = 在本机运行代码」，所以 bundle 只对**首方签名**开放：签名覆盖清单（含 `packageSha256`）→ 间接覆盖
 全部代码字节；正式版**忽略所有 `dev-*` 公钥**。第三方若需要界面，正确路径是：先把能力做成声明式包
-（技能/命令/MCP），确有可执行界面需求时另立「沙箱 + 权限 + 独立规格」，不得绕过签名安装。
+（技能/命令/MCP + **声明式页面 `blocks`**，零代码），确有可执行界面需求时另立「沙箱 + 权限 + 独立规格」，
+不得绕过签名安装。
 
 ---
 
@@ -452,7 +532,7 @@ const value = data ? await data.dataGet("cache") : loadFromMemory();
 
 ### 7.3 装完不生效怎么查
 
-插件详情 →「诊断」会给出原因枚举（§3.7）与可执行建议（去技能区/去接口区/更新和鸣/修记录）。
+插件详情 →「诊断」会给出原因枚举（§3.8）与可执行建议（去技能区/去接口区/更新和鸣/修记录）。
 插件页还有「健康检查 / 修复记录」（损坏记录、技能或服务对不上、权限不兼容、孤儿记录）。
 
 ---
@@ -520,11 +600,15 @@ bundle 包额外有 `package.tgz`（确定性 tar+gzip），由 `GET /api/plugin
 
 见 `plugin-kit/plugins/infohub-collector/plugin.json`（本机 MCP 服务）与 [`plugin-kit/examples/02-mcp-and-commands/`](examples/02-mcp-and-commands/)（技能 + MCP + 命令 + 工具束）。
 
+页面：声明式见 [`plugin-kit/examples/05-plugin-page/`](examples/05-plugin-page/)；界面插件自带页的清单格式见
+[`plugin-kit/examples/04-widget-bundle/`](examples/04-widget-bundle/)（把 `desktopWidgets` 换成 `page.entry`）。
+
 ### C. 字段速查
 
 - 必填：`schemaVersion` / `id` / `name` / `version` / `engines` / `contributions`（至少一类非空）。
 - 含 `mcpServers` 时：`permissions.network` 必须覆盖每个服务 host。
-- bundle：`schemaVersion: 4` + `distribution: "bundle"` + `packageSha256` + 仅 `commands`/`desktopWidgets`。
+- bundle：`schemaVersion: 4` + `distribution: "bundle"` + `packageSha256` + 仅 `commands`/`desktopWidgets`/`page`。
+- 页面（§3.7）：声明式写 `blocks`（1–12 个，零代码），bundle 写 `entry`（包内 `.html`，须在 `files` 里）；混写直接拒绝。
 - 上限：见 §2.3。
 - 严格度：顶层多余键 = warning；敏感子对象多余键 = 错误。
 
@@ -537,3 +621,4 @@ bundle 包额外有 `package.tgz`（确定性 tar+gzip），由 `GET /api/plugin
 5. `engines.heming` 只写「真正需要的最低版本」，不写近似当前版本。
 6. 文档：README 说清「装了什么、要什么权限、数据放哪」；市场 `meta` 无 `data:` 大图。
 7. bundle：首方签名 + `packageSha256` + 事件/数据/设置的权限声明与代码一致。
+8. 页面：声明式页每块都在词表内且不超限；bundle 页的 `entry` 在 `files` 里、能在沙箱里加载；页面没有改宿主界面的企图（不允许）。

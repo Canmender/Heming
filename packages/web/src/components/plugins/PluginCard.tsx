@@ -35,6 +35,7 @@ export function PluginCard({
   onRemove,
   onGoSkills,
   onGoInterfaces,
+  onOpenPage,
 }: {
   plugin: InstalledPlugin;
   highlighted: boolean;
@@ -43,6 +44,11 @@ export function PluginCard({
   onRemove: () => void;
   onGoSkills: () => void;
   onGoInterfaces: () => void;
+  /**
+   * 打开插件自己的页面（d.124）；没声明页面或页面当前不可用时省略。
+   * 跳转由调用方（插件页）按注册表投影执行，卡片只负责一个按钮。
+   */
+  onOpenPage?: () => void;
 }) {
   const manifest = plugin.manifest;
   const counts = contributionCountsOf(plugin);
@@ -50,6 +56,8 @@ export function PluginCard({
   const skillNames = manifest.contributions.skills.map((skill) => skill.name);
   const partiallyDisabled = isPartiallyDisabled(plugin);
   const initial = Array.from(manifest.name)[0]?.toUpperCase() ?? "?";
+  /** 清单声明的页面（每插件最多 1 个）；没有就没有「打开页面」入口。 */
+  const page = manifest.contributions.page;
 
   return (
     <section
@@ -106,7 +114,10 @@ export function PluginCard({
       <dl className="mt-2 grid gap-x-4 gap-y-1 ui-caption sm:grid-cols-2">
         <div className="min-w-0">
           <dt className="inline text-muted">贡献：</dt>
-          <dd className="inline">{contributionText(counts)}</dd>
+          <dd className="inline">
+            {contributionText(counts)}
+            {page ? " · 页面 1" : ""}
+          </dd>
         </div>
         <div className="min-w-0">
           <dt className="inline text-muted">权限：</dt>
@@ -136,6 +147,16 @@ export function PluginCard({
         <span className="text-muted">安装于 {formatAt(plugin.installedAt)}</span>
         <span className="text-muted">· 更新于 {formatAt(plugin.updatedAt)}</span>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          {page && onOpenPage ? (
+            <button
+              type="button"
+              aria-label={`打开插件页面 ${manifest.name}`}
+              onClick={onOpenPage}
+              className={BTN_GHOST_SM}
+            >
+              打开页面
+            </button>
+          ) : null}
           <button
             type="button"
             aria-label={`查看插件详情 ${manifest.name}`}

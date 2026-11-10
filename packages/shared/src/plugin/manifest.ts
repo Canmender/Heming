@@ -41,6 +41,17 @@ export const PLUGIN_LIMITS = {
   widgetScales: 6,
   widgetSettingFields: 20,
   widgetSettingOptions: 20,
+  /** d.124 插件页面（声明式 blocks / 界面插件 entry）。 */
+  pageTitleChars: 40,
+  pageSummaryChars: 200,
+  pageIconChars: 32,
+  pageBlocks: 12,
+  pageMarkdownChars: 4_000,
+  pageStats: 8,
+  pageTableColumns: 6,
+  pageTableRows: 50,
+  pageListItems: 20,
+  pageActions: 6,
   tags: 8,
   keywords: 20,
   screenshots: 4,
@@ -341,6 +352,119 @@ const DesktopWidgetSchema = z.strictObject({
     .optional(),
 });
 
+/* ───────────────────── 插件页面（d.124） ───────────────────── */
+
+const PAGE_ICON_RE = /^[a-z][a-z0-9-]{0,31}$/;
+const PAGE_ENTRY_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+
+/** 页面入口：包内相对 .html（禁绝对路径 / .. / 反斜杠 / 协议前缀）。 */
+const PageEntrySchema = z
+  .string({ error: "页面入口必须是文本" })
+  .max(200, { error: "页面入口最多 200 字符" })
+  .refine(
+    (value) =>
+      value.endsWith(".html") &&
+      PAGE_ENTRY_RE.test(value) &&
+      !value.startsWith("/") &&
+      !value.includes("..") &&
+      !value.includes("\\") &&
+      !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value),
+    { error: "页面入口必须是包内相对 .html 路径（禁绝对路径 / .. / 反斜杠 / 协议前缀）" },
+  );
+
+const PageBlockMarkdownSchema = z.strictObject({
+  type: z.literal("markdown"),
+  title: trimmed(40, 0).optional(),
+  text: trimmed(PLUGIN_LIMITS.pageMarkdownChars),
+});
+
+const PageBlockStatsSchema = z.strictObject({
+  type: z.literal("stats"),
+  title: trimmed(40, 0).optional(),
+  items: z
+    .array(z.strictObject({ label: trimmed(40), value: trimmed(40) }))
+    .min(1, { error: "指标卡至少 1 项" })
+    .max(PLUGIN_LIMITS.pageStats, { error: "指标卡最多 8 项" }),
+});
+
+const PageBlockTableSchema = z
+  .strictObject({
+    type: z.literal("table"),
+    title: trimmed(40, 0).optional(),
+    columns: z
+      .array(trimmed(40))
+      .min(1, { error: "表格至少 1 列" })
+      .max(PLUGIN_LIMITS.pageTableColumns, { error: "表格最多 6 列" }),
+    rows: z
+      .array(z.array(trimmed(120)).max(PLUGIN_LIMITS.pageTableColumns, { error: "表格每行最多 6 格" }))
+      .max(PLUGIN_LIMITS.pageTableRows, { error: "表格最多 50 行" }),
+  })
+  .superRefine((block, ctx) => {
+    block.rows.forEach((row, index) => {
+      if (row.length !== block.columns.length) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["rows", index],
+          message: `第 ${index + 1} 行有 ${row.length} 格，应与列数 ${block.columns.length} 一致`,
+        });
+      }
+    });
+  });
+
+const PageBlockListSchema = z.strictObject({
+  type: z.literal("list"),
+  title: trimmed(40, 0).optional(),
+  items: z
+    .array(
+      z.strictObject({
+        title: trimmed(60),
+        description: trimmed(160, 0).optional().default(""),
+        badge: trimmed(12, 0).optional(),
+      }),
+    )
+    .min(1, { error: "列表至少 1 项" })
+    .max(PLUGIN_LIMITS.pageListItems, { error: "列表最多 20 项" }),
+});
+
+const PageBlockActionsSchema = z.strictObject({
+  type: z.literal("actions"),
+  title: trimmed(40, 0).optional(),
+  items: z
+    .array(z.strictObject({ label: trimmed(24), target: CommandTargetSchema }))
+    .min(1, { error: "动作区至少 1 项" })
+    .max(PLUGIN_LIMITS.pageActions, { error: "动作区最多 6 项" }),
+});
+
+const PageBlockContributionsSchema = z.strictObject({
+  type: z.literal("contributions"),
+  title: trimmed(40, 0).optional(),
+  kind: z.enum(["skills", "mcpServers", "commands", "toolPacks"], {
+    error: "贡献块只支持 skills / mcpServers / commands / toolPacks",
+  }),
+});
+
+const PageBlockSchema = z.discriminatedUnion("type", [
+  PageBlockMarkdownSchema,
+  PageBlockStatsSchema,
+  PageBlockTableSchema,
+  PageBlockListSchema,
+  PageBlockActionsSchema,
+  PageBlockContributionsSchema,
+]);
+
+const PageSchema = z.strictObject({
+  title: trimmed(PLUGIN_LIMITS.pageTitleChars),
+  icon: z
+    .string({ error: "页面图标必须是文本" })
+    .regex(PAGE_ICON_RE, { error: "页面图标只接受宿主图标 id（小写字母/数字/连字符，≤32）" })
+    .optional(),
+  summary: trimmed(PLUGIN_LIMITS.pageSummaryChars, 0).optional().default(""),
+  /** 仅界面插件：包内 HTML 入口。 */
+  entry: PageEntrySchema.optional(),
+  /** 仅声明式插件：宿主渲染的块。 */
+  blocks: z.array(PageBlockSchema).max(PLUGIN_LIMITS.pageBlocks, { error: "页面块最多 12 个" }).optional(),
+});
+
 const IconSchema = z
   .string()
   .max(PLUGIN_LIMITS.iconChars, { error: "图标字符串过长（建议用 https URL）" })
@@ -444,6 +568,8 @@ const ContributionsSchema = z
       .array(DesktopWidgetSchema)
       .max(PLUGIN_LIMITS.desktopWidgets, { error: "本轮每包最多 1 个桌面小组件" })
       .optional(),
+    /** d.124 插件页面：声明式写 `blocks`，界面插件写 `entry`（互斥，见解析器规则）。 */
+    page: PageSchema.optional(),
   })
   .superRefine((contributions, ctx) => {
     // 同一清单内的重名一律点名两处（与 web 侧既有规则一致）。
@@ -539,6 +665,19 @@ export type PluginMcpServerV5 = z.infer<typeof McpServerSchema>;
 export type PluginCommandV5 = z.infer<typeof CommandSchema>;
 export type PluginToolPackV5 = z.infer<typeof ToolPackSchema>;
 export type PluginDesktopWidgetV5 = z.infer<typeof DesktopWidgetSchema>;
+export type PluginPageBlockV5 = z.infer<typeof PageBlockSchema>;
+
+/**
+ * 归一化后的插件页面（d.124）。
+ *
+ * - `kind: "blocks"`：声明式页面，宿主按块渲染（零代码）；
+ * - `kind: "entry"`：界面插件页面，宿主在 `widget://` 沙箱里加载包内 HTML。
+ *
+ * 两种形态互斥：声明式只允许 blocks，bundle 只允许 entry（解析器强制）。
+ */
+export type PluginPageV5 =
+  | { kind: "blocks"; title: string; icon: string; summary: string; blocks: PluginPageBlockV5[] }
+  | { kind: "entry"; title: string; icon: string; summary: string; entry: string };
 export type PluginMetaV5 = z.infer<typeof MetaSchema>;
 export type PluginPermissionsV5 = z.infer<typeof PermissionsSchema>;
 export type PluginDistributionV5 = "manifest" | "bundle";
@@ -561,6 +700,8 @@ export interface PluginManifestV5 {
     commands: PluginCommandV5[];
     toolPacks: PluginToolPackV5[];
     desktopWidgets: PluginDesktopWidgetV5[];
+    /** d.124：声明了页面才有；每插件最多一个。 */
+    page?: PluginPageV5;
   };
   publisher?: { id: string; publicKey: string };
   signature?: { alg: "ed25519"; value: string };
@@ -612,23 +753,44 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
   const commands = contributions.commands ?? [];
   const toolPacks = contributions.toolPacks ?? [];
   const desktopWidgets = contributions.desktopWidgets ?? [];
+  const page = contributions.page;
 
   if (distribution === "bundle") {
     if (skills.length > 0 || mcpServers.length > 0 || toolPacks.length > 0) {
       throw new PluginManifestInvalidError(
-        "界面插件（distribution: bundle）只允许 commands + desktopWidgets，不允许声明 skills / mcpServers / toolPacks" +
+        "界面插件（distribution: bundle）只允许 commands + desktopWidgets + page，不允许声明 skills / mcpServers / toolPacks" +
           "（见 contributions）",
       );
     }
-    if (desktopWidgets.length === 0) {
+    if (desktopWidgets.length === 0 && !page) {
       throw new PluginManifestInvalidError(
-        "distribution: bundle 必须声明至少 1 个 contributions.desktopWidgets（否则就是纯声明式包）",
+        "distribution: bundle 必须声明至少 1 个 contributions.desktopWidgets 或 contributions.page（否则就是纯声明式包）",
       );
     }
-  } else if (desktopWidgets.length > 0) {
-    throw new PluginManifestInvalidError(
-      "声明了 contributions.desktopWidgets 时必须写 distribution: \"bundle\"",
-    );
+  } else {
+    if (desktopWidgets.length > 0) {
+      throw new PluginManifestInvalidError(
+        "声明了 contributions.desktopWidgets 时必须写 distribution: \"bundle\"",
+      );
+    }
+    if (page?.entry) {
+      throw new PluginManifestInvalidError(
+        '声明式插件（distribution: manifest）的页面用 contributions.page.blocks 渲染，不能写 contributions.page.entry；需要自带 HTML 请改用 distribution: "bundle"',
+      );
+    }
+  }
+
+  if (page) {
+    if (distribution === "bundle") {
+      if (!page.entry) {
+        throw new PluginManifestInvalidError("界面插件的页面必须写 contributions.page.entry（包内 .html 入口）");
+      }
+      if ((page.blocks ?? []).length > 0) {
+        throw new PluginManifestInvalidError("界面插件的页面由 entry 渲染，不能再写 contributions.page.blocks");
+      }
+    } else if (!page.blocks || page.blocks.length === 0) {
+      throw new PluginManifestInvalidError("声明式插件的页面必须提供至少 1 个 contributions.page.blocks");
+    }
   }
 
   if (distribution === "bundle" && !parsed.data.packageSha256) {
@@ -644,8 +806,13 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
     throw new PluginManifestInvalidError("packageSha256 只对界面插件（distribution: bundle）有意义");
   }
 
-  if (skills.length + mcpServers.length + commands.length + toolPacks.length + desktopWidgets.length === 0) {
-    throw new PluginManifestInvalidError("至少要让 contributions 里有一类非空（技能 / 服务 / 命令 / 工具束 / 小组件）");
+  if (
+    skills.length + mcpServers.length + commands.length + toolPacks.length + desktopWidgets.length + (page ? 1 : 0) ===
+    0
+  ) {
+    throw new PluginManifestInvalidError(
+      "至少要让 contributions 里有一类非空（技能 / 服务 / 命令 / 工具束 / 小组件 / 页面）",
+    );
   }
 
   const permissions = parsed.data.permissions ?? {};
@@ -706,7 +873,26 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
         eval: permissions.eval ?? false,
         chat: permissions.chat ?? false,
       },
-      contributions: { skills, mcpServers, commands, toolPacks, desktopWidgets },
+      contributions: {
+        skills,
+        mcpServers,
+        commands,
+        toolPacks,
+        desktopWidgets,
+        ...(page
+          ? {
+              page: page.entry
+                ? { kind: "entry" as const, title: page.title, icon: page.icon ?? "", summary: page.summary, entry: page.entry }
+                : {
+                    kind: "blocks" as const,
+                    title: page.title,
+                    icon: page.icon ?? "",
+                    summary: page.summary,
+                    blocks: page.blocks ?? [],
+                  },
+            }
+          : {}),
+      },
       ...(parsed.data.publisher ? { publisher: parsed.data.publisher } : {}),
       ...(parsed.data.signature ? { signature: parsed.data.signature } : {}),
       ...(parsed.data.packageSha256 ? { packageSha256: parsed.data.packageSha256 } : {}),

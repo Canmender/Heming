@@ -1,0 +1,16 @@
+{
+  "$schema": "../../../plugin.schema.json",
+  "schemaVersion": 5,
+  "id": "heming.demo-bad-page",
+  "name": "坏页面示例",
+  "version": "0.0.1",
+  "description": "故意写错：声明式插件（缺省 distribution: manifest）的页面写了 entry，应被解析器拒绝",
+  "author": "和鸣",
+  "engines": { "heming": "d.124" },
+  "contributions": {
+    "page": {
+      "title": "坏页面",
+      "entry": "page/index.html"
+    }
+  }
+}

@@ -30,7 +30,10 @@ const {
  *
  * ★ 安全模型（规格 §6.1）：`widget:*` 全部按 `BrowserWindow.fromWebContents(event.sender)`
  *   反查 runtime，**查不到就拒绝**（fail-closed）。插件无法操作别的窗口、主窗、文件、密钥。
- * ★ 依赖全部注入（BrowserWindow/Tray/screen/ipcMain/store…），可以用假对象单测整条状态机。
+ * ★ d.124 B 路径：除 widget 窗口外，本文件还托管一个**页面视图**（`WebContentsView`，嵌在
+ *   主窗内容区）。页面视图登记在 `pageInfo` 里供 IPC 按 sender 反查 info/settings/data/
+ *   openPage/log；窗口几何/拖拽/穿透类通道对页面显式拒绝（页面没有独立窗口）。
+ * ★ 依赖全部注入（BrowserWindow/WebContentsView/Tray/screen/ipcMain/store…），可以用假对象单测整条状态机。
  */
 
 /** 拖拽落盘与 move 事件的防抖：拖拽时 move 是高频的，每次都写盘会拖慢手感。 */
@@ -57,6 +60,19 @@ const LIFECYCLE_CHANNEL = "widget:lifecycle";
 
 /** 窗口未建好前最多排队多少条生命周期事件（d.110：8 → 20；溢出丢最旧，避免投递过期状态）。 */
 const MAX_PENDING_LIFECYCLE = 20;
+
+/* ────────────────────── 插件页面视图（d.124 B 路径） ────────────────────── */
+
+/**
+ * 页面视图的 preload 标记参数：主进程建 `WebContentsView` 时传给 `widget-preload.js`。
+ *
+ * 页面视图复用同一份最小桥（info/settings/data/openPage…），但它**不是一个窗口**：
+ * 拖拽/显隐/缩放/穿透这些窗口动作在页面里没有意义。preload 看到这个参数就把那些
+ * 方法变成「明确的不支持错误」，插件作者能立刻知道这段代码只对浮窗有效。
+ */
+const PAGE_VIEW_FLAG = "--heming-page-view";
+/** 页面视图允许占用的 contentView 最小尺寸（宽高各至少 1 DIP，否则 Chromium 不给合成）。 */
+const PAGE_MIN_SIZE = 1;
 
 function text(value, max) {
   if (typeof value !== "string") return null;
@@ -112,6 +128,7 @@ function normalizeChatConfig(raw) {
  * @param {object} deps.nativeImage electron.nativeImage
  * @param {object} deps.screen electron.screen
  * @param {object} deps.ipcMain electron.ipcMain
+ * @param {object} [deps.WebContentsView] electron.WebContentsView（d.124 页面视图；注入便于单测）
  * @param {object} deps.app electron.app（托盘「退出」用）
  * @param {object} deps.store plugin-store 实例（读状态/设置、当前版本目录）
  * @param {string} deps.preloadPath widget-preload.js 绝对路径
@@ -135,6 +152,7 @@ function createWidgetHost(deps = {}) {
     nativeImage,
     screen,
     ipcMain,
+    WebContentsView,
     app,
     store,
     preloadPath,
@@ -159,6 +177,15 @@ function createWidgetHost(deps = {}) {
   let displaysWatched = false;
   let theme = getTheme();
   let chatCache = null;
+
+  /**
+   * 当前挂载的**页面视图**（d.124 B 路径：界面插件自带的 HTML 页面）。
+   *
+   * 同一时刻只允许一个（产品上「每插件最多一个页面」，主窗同一时刻也只显示一页）；
+   * `id/version/entry` 记下来供对账：插件停用/卸载/更新/页面入口变化 → 销毁视图。
+   * 页面视图与 widget 窗口共用 `widget-preload.js` 桥，IPC 靠 sender 反查归属。
+   */
+  let pageInfo = null;
 
   /**
    * 生命周期对账状态（d.108，规格 §5.4）。
@@ -748,6 +775,339 @@ function createWidgetHost(deps = {}) {
     };
   }
 
+  /* ───────────────────────── 页面视图运行时（d.124 B 路径） ───────────────────────── */
+
+  /**
+   * 主窗内容区尺寸（DIP）。rect 的坐标系就是 `win.contentView`：左上角 (0,0)，
+   * 单位 DIP（主窗 `zoomFactor` 恒为 1，见 main.js），所以这里直接拿 contentBounds 的宽高。
+   */
+  function pageContentSize(main) {
+    try {
+      const bounds = typeof main.getContentBounds === "function" ? main.getContentBounds() : main.getBounds();
+      if (bounds && Number.isFinite(bounds.width) && Number.isFinite(bounds.height)) {
+        const width = Math.round(bounds.width);
+        const height = Math.round(bounds.height);
+        if (width > 0 && height > 0) return { width, height };
+      }
+    } catch {
+      /* 窗口正在销毁：没有可信的内容区尺寸 */
+    }
+    return null;
+  }
+
+  /**
+   * 钳制页面视图 rect（规格 §5.3）：宽高 ≥1，越出内容区的部分裁掉。
+   *
+   * 渲染层上报的是 `getBoundingClientRect()`（DIP），窗口缩放/DPI 变化时可能短暂越界；
+   * 一律在主进程收口，不让 WebContentsView 画到侧栏/标题栏上或负坐标处。
+   */
+  function clampPageRect(raw, main) {
+    const input = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    const round = (value, fallback) =>
+      typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback;
+    let x = Math.max(0, round(input.x, 0));
+    let y = Math.max(0, round(input.y, 0));
+    let width = Math.max(PAGE_MIN_SIZE, round(input.width, PAGE_MIN_SIZE));
+    let height = Math.max(PAGE_MIN_SIZE, round(input.height, PAGE_MIN_SIZE));
+    const content = main ? pageContentSize(main) : null;
+    if (content) {
+      x = Math.min(x, content.width - PAGE_MIN_SIZE);
+      y = Math.min(y, content.height - PAGE_MIN_SIZE);
+      width = Math.min(width, content.width - x);
+      height = Math.min(height, content.height - y);
+    }
+    return {
+      x,
+      y,
+      width: Math.max(PAGE_MIN_SIZE, width),
+      height: Math.max(PAGE_MIN_SIZE, height),
+    };
+  }
+
+  /**
+   * 页面视图的 webPreferences：与 widget 窗口**同级**的沙箱配置（规格 §2.2 / §5.1）。
+   *
+   * CSP 不在这里：`widget://` 的响应头由 main.js 的协议处理器按
+   * `widgetCspHeaders(record.permissions)` 生成，页面与浮窗共用同一套网络白名单。
+   */
+  function pageWebPreferences() {
+    return {
+      preload: preloadPath,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      spellcheck: false,
+      // preload 据此把「窗口几何类」API 变成明确的不支持（页面没有独立窗口）
+      additionalArguments: [PAGE_VIEW_FLAG],
+    };
+  }
+
+  /** 导航/开窗/下载守卫：页面只能在 `widget://<id>/` 内翻页，不能开新窗、不能下载。 */
+  function attachPageGuards(info) {
+    const wc = info.webContents;
+    if (wc && typeof wc.on === "function") {
+      const guardNavigation = (event, target) => {
+        if (isSameWidgetOrigin(target, info.id)) return;
+        log(`[widgets:${info.id}] 拦截插件页面离开自身 origin 的导航：${target}`);
+        event.preventDefault();
+      };
+      wc.on("will-navigate", guardNavigation);
+      wc.on("will-redirect", guardNavigation);
+      wc.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
+        // 子资源失败不算页面失败（404 的图片不该被当成「页面坏了」）
+        if (isMainFrame === false) return;
+        log(`[widgets:${info.id}] 插件页面加载失败（${code} ${description}）：${url}`);
+      });
+    }
+    if (wc && typeof wc.setWindowOpenHandler === "function") {
+      wc.setWindowOpenHandler(({ url: target }) => {
+        log(`[widgets:${info.id}] 拦截插件页面的新窗口请求：${target}`);
+        return { action: "deny" };
+      });
+    }
+    // will-download 是 session 级事件：按「发起下载的 webContents」过滤，别误伤同 session 的主窗。
+    const session = wc && wc.session;
+    if (session && typeof session.on === "function") {
+      const onWillDownload = (event, item, sender) => {
+        if (sender && sender !== wc) return;
+        const target = item && typeof item.getURL === "function" ? item.getURL() : "";
+        log(`[widgets:${info.id}] 拦截插件页面下载：${target}`);
+        try {
+          event.preventDefault();
+        } catch {
+          /* 事件对象异常：至少已记录 */
+        }
+      };
+      try {
+        session.on("will-download", onWillDownload);
+        info.detachDownload = () => {
+          try {
+            session.removeListener("will-download", onWillDownload);
+          } catch {
+            /* session 已销毁 */
+          }
+        };
+      } catch (err) {
+        log(`[widgets:${info.id}] 页面下载守卫挂载失败：${(err && err.message) || err}`);
+      }
+    }
+  }
+
+  /**
+   * 销毁当前页面视图（幂等）。顺序：先从 contentView 摘掉，再 close webContents。
+   * 只 removeChildView 不 close 会留下一个没有宿主的渲染进程（内存/进程孤儿）。
+   */
+  function destroyPageView() {
+    const info = pageInfo;
+    pageInfo = null;
+    if (!info) return false;
+    info.closed = true;
+    if (typeof info.detachDownload === "function") info.detachDownload();
+    const main = typeof getMainWindow === "function" ? getMainWindow() : null;
+    if (main && !main.isDestroyed() && main.contentView && typeof main.contentView.removeChildView === "function") {
+      try {
+        main.contentView.removeChildView(info.view);
+      } catch (err) {
+        log(`[widgets:${info.id}] 移除页面视图失败：${(err && err.message) || err}`);
+      }
+    }
+    try {
+      const wc = info.webContents;
+      if (wc && typeof wc.close === "function") wc.close();
+    } catch (err) {
+      log(`[widgets:${info.id}] 关闭页面视图失败：${(err && err.message) || err}`);
+    }
+    return true;
+  }
+
+  /**
+   * 挂载插件页面视图（`widgets:page-mount`）：
+   * 「先销毁旧视图 → 找已装且启用的 bundle 记录 → 建 WebContentsView → 嵌进主窗内容区」。
+   *
+   * 返回 `{ ok:true }` 或 `{ ok:false, error }`（error 已是可直接展示的中文）；
+   * 加载失败也会把刚建的视图销毁——失败不留一块白屏/空视图。
+   */
+  async function pageMount(payload) {
+    const id =
+      payload && typeof payload === "object" && typeof payload.id === "string" ? payload.id.trim() : "";
+    if (!id) return { ok: false, error: "页面挂载失败：缺少插件 id" };
+
+    const record = typeof store.get === "function" ? store.get(id) : null;
+    if (!record) return { ok: false, error: `页面挂载失败：插件未安装（${id}）` };
+    if (record.error) return { ok: false, error: `页面挂载失败：${record.error}` };
+    if (record.enabled !== true) {
+      return { ok: false, error: `页面挂载失败：插件「${record.name || id}」已停用，启用后才能显示页面` };
+    }
+    const spec = record.page;
+    if (!spec || typeof spec !== "object") {
+      return { ok: false, error: `页面挂载失败：插件「${record.name || id}」没有声明页面（contributions.page）` };
+    }
+    const main = typeof getMainWindow === "function" ? getMainWindow() : null;
+    if (!main || main.isDestroyed()) return { ok: false, error: "页面挂载失败：主窗口不可用" };
+    if (!main.contentView || typeof main.contentView.addChildView !== "function") {
+      return { ok: false, error: "页面挂载失败：主窗口不支持内容视图" };
+    }
+    if (typeof WebContentsView !== "function") {
+      return { ok: false, error: "页面挂载失败：当前 Electron 版本不支持 WebContentsView" };
+    }
+    // 再归一化一次入口：落盘清单可能被外部改过，不能假设 store 里的值一定合法
+    const url = widgetUrl(id, spec.entry);
+    if (!url) return { ok: false, error: `页面挂载失败：页面入口非法（${String(spec.entry)}）` };
+
+    const rect = clampPageRect(payload.rect, main);
+    // 先销毁旧视图：切插件/重进页面/更新后重建都走同一入口，同一时刻只留一个页面视图
+    destroyPageView();
+
+    let view;
+    try {
+      view = new WebContentsView({ webPreferences: pageWebPreferences() });
+    } catch (err) {
+      return { ok: false, error: `页面挂载失败：无法创建页面视图（${(err && err.message) || err}）` };
+    }
+
+    const info = {
+      id,
+      version: record.version,
+      entry: spec.entry,
+      record,
+      view,
+      webContents: view.webContents,
+      rect,
+      closed: false,
+      detachDownload: null,
+    };
+    pageInfo = info;
+    attachPageGuards(info);
+
+    try {
+      main.contentView.addChildView(view);
+      if (typeof view.setBounds === "function") view.setBounds(rect);
+    } catch (err) {
+      destroyPageView();
+      return { ok: false, error: `页面挂载失败：无法嵌入主窗（${(err && err.message) || err}）` };
+    }
+
+    try {
+      await info.webContents.loadURL(url);
+    } catch (err) {
+      // 加载失败：只要还是当前视图就销毁，回错误让 web 显示错误态而不是白屏
+      if (pageInfo === info) destroyPageView();
+      return { ok: false, error: `页面加载失败：${(err && err.message) || err}` };
+    }
+    // 加载期间用户已经切页/卸载：不要谎报成功，也不要去动别人的新视图
+    if (pageInfo !== info) return { ok: false, error: "页面已卸载（加载期间离开了页面）" };
+    return { ok: true };
+  }
+
+  /** 更新页面视图边界（`widgets:page-bounds`，fire-and-forget；主进程自己钳制）。 */
+  function pageBounds(payload) {
+    const info = pageInfo;
+    if (!info) return false;
+    const main = typeof getMainWindow === "function" ? getMainWindow() : null;
+    if (!main || main.isDestroyed()) {
+      destroyPageView();
+      return false;
+    }
+    const rect = clampPageRect(payload && payload.rect, main);
+    try {
+      info.view.setBounds(rect);
+    } catch (err) {
+      log(`[widgets:${info.id}] 更新页面视图边界失败：${(err && err.message) || err}`);
+      return false;
+    }
+    info.rect = rect;
+    return true;
+  }
+
+  /** 卸载页面视图（`widgets:page-unmount`，重复调用无害）。 */
+  function pageUnmount() {
+    return destroyPageView();
+  }
+
+  /**
+   * 页面视图对账：插件停用/卸载/更新/页面入口变化 → 立即销毁（规格 §5.1 / §7）。
+   * 由 `reconcile()` 每轮调用；返回是否真的销毁了视图。
+   */
+  function syncPageView() {
+    const info = pageInfo;
+    if (!info) return false;
+    const record = typeof store.get === "function" ? store.get(info.id) : null;
+    const page = record && record.page;
+    const alive =
+      record && record.enabled === true && !record.error && page && page.entry === info.entry;
+    if (!alive || record.version !== info.version) {
+      destroyPageView();
+      return true;
+    }
+    return false;
+  }
+
+  /** 按 sender 反查页面视图（查不到 = 不是页面视图；fail-closed）。 */
+  function pageTargetForEvent(event) {
+    const info = pageInfo;
+    const sender = event && event.sender;
+    if (!info || !sender || info.closed) return null;
+    if (sender !== info.webContents) return null;
+    return {
+      isPage: true,
+      pluginId: info.id,
+      record: info.record,
+      view: info.view,
+      webContents: info.webContents,
+    };
+  }
+
+  /** widget 运行时对应的 webContents（页面目标直接带 webContents）。 */
+  function targetWebContents(target) {
+    if (!target) return null;
+    if (target.webContents) return target.webContents;
+    const win = target.window;
+    if (!win || win.isDestroyed()) return null;
+    return win.webContents;
+  }
+
+  /**
+   * 把一份最新设置推给该插件的所有渲染面（widget 窗口 + 页面视图）。
+   * 主窗设置区改设置、插件页面自己 setSetting 都走这里，避免「一个界面热更新、另一个不更新」。
+   */
+  function notifySettings(pluginId, next) {
+    let delivered = 0;
+    for (const runtime of runtimes.values()) {
+      if (runtime.pluginId !== pluginId) continue;
+      const wc = targetWebContents(runtime);
+      if (!wc) continue;
+      try {
+        wc.send("widget:settings", next);
+        delivered += 1;
+      } catch {
+        /* 窗口刚销毁：丢弃 */
+      }
+    }
+    if (pageInfo && pageInfo.id === pluginId) {
+      try {
+        pageInfo.webContents.send("widget:settings", next);
+        delivered += 1;
+      } catch {
+        /* 页面刚卸载：丢弃 */
+      }
+    }
+    return delivered;
+  }
+
+  /**
+   * 页面视图**不支持**的 IPC：窗口几何/拖拽/穿透类。
+   *
+   * 这些通道在 widget 窗口上由 `withRuntime` 按 sender 反查后执行；页面视图虽然也登记
+   * 了 sender 映射（info/settings/data 可用），但**没有独立窗口**，所以这里显式拒绝并
+   * 留日志，而不是让调用静默地什么也没做。
+   */
+  function rejectPageWindowOp(event, channel) {
+    const page = pageTargetForEvent(event);
+    if (!page) return false;
+    log(`[widgets:${page.pluginId}] 页面视图不支持窗口操作通道：${channel}`);
+    return true;
+  }
+
   /* ───────────────────────── IPC（一次注册，按 sender 分发） ───────────────────────── */
 
   /** 反查：这个 event.sender 属于哪个 widget 窗口；查不到 = 拒绝（fail-closed）。 */
@@ -770,6 +1130,20 @@ function createWidgetHost(deps = {}) {
     const runtime = runtimeForEvent(event);
     if (!runtime) return denied;
     return fn(runtime);
+  }
+
+  /**
+   * 同时接受 widget 窗口与页面视图的通道（info/settings/data/openPage/log…）。
+   *
+   * 页面视图登记在 `pageTargetForEvent` 里（不是 BrowserWindow），所以不能走
+   * `runtimeForEvent`；两条路都查不到 = 拒绝（fail-closed，与 d.98 同一纪律）。
+   */
+  function withRuntimeOrPage(event, fn, denied) {
+    const runtime = runtimeForEvent(event);
+    if (runtime) return fn(runtime);
+    const page = pageTargetForEvent(event);
+    if (page) return fn(page);
+    return denied;
   }
 
   /** `{ key }` 载荷校验（get/delete 用）：形状不对给可读错误，invoke 侧 reject。 */
@@ -796,23 +1170,45 @@ function createWidgetHost(deps = {}) {
     if (ipcRegistered) return;
     ipcRegistered = true;
 
-    ipcMain.handle("widget:state", (event) => withRuntime(event, (rt) => rt.statePayload(), null));
-    ipcMain.handle("widget:show", (event) =>
-      withRuntime(
+    /* ── 窗口几何 / 拖拽 / 穿透：widget 窗口专用；页面视图显式拒绝（不适用） ── */
+
+    ipcMain.handle("widget:state", (event) => {
+      // 页面视图没有独立窗口：状态读出来只能是 null（与「未运行」同形，语义上是 unsupported）
+      if (pageTargetForEvent(event)) {
+        rejectPageWindowOp(event, "widget:state");
+        return null;
+      }
+      return withRuntime(event, (rt) => rt.statePayload(), null);
+    });
+    ipcMain.handle("widget:show", (event) => {
+      if (rejectPageWindowOp(event, "widget:show")) {
+        throw new Error("页面视图不支持窗口操作：widget:show（插件页面由宿主布局管理）");
+      }
+      return withRuntime(
         event,
         (rt) => {
           rt.show();
           return rt.statePayload();
         },
         null,
-      ),
-    );
-    ipcMain.on("widget:hide", (event) => withRuntime(event, (rt) => rt.hide(), undefined));
-    ipcMain.on("widget:toggle", (event) => withRuntime(event, (rt) => rt.toggle(), undefined));
-    ipcMain.handle("widget:set-scale", (event, payload) =>
-      withRuntime(event, (rt) => ({ scale: rt.setScale(payload) }), null),
-    );
-    ipcMain.on("widget:set-interactive", (event, value) =>
+      );
+    });
+    ipcMain.on("widget:hide", (event) => {
+      if (rejectPageWindowOp(event, "widget:hide")) return;
+      withRuntime(event, (rt) => rt.hide(), undefined);
+    });
+    ipcMain.on("widget:toggle", (event) => {
+      if (rejectPageWindowOp(event, "widget:toggle")) return;
+      withRuntime(event, (rt) => rt.toggle(), undefined);
+    });
+    ipcMain.handle("widget:set-scale", (event, payload) => {
+      if (rejectPageWindowOp(event, "widget:set-scale")) {
+        throw new Error("页面视图不支持窗口操作：widget:set-scale（插件页面由宿主布局管理）");
+      }
+      return withRuntime(event, (rt) => ({ scale: rt.setScale(payload) }), null);
+    });
+    ipcMain.on("widget:set-interactive", (event, value) => {
+      if (rejectPageWindowOp(event, "widget:set-interactive")) return;
       withRuntime(
         event,
         (rt) => {
@@ -822,19 +1218,48 @@ function createWidgetHost(deps = {}) {
           rt.setInteractive(value === true);
         },
         undefined,
-      ),
+      );
+    });
+    ipcMain.on("widget:drag-start", (event) => {
+      if (rejectPageWindowOp(event, "widget:drag-start")) return;
+      withRuntime(event, (rt) => rt._internal.beginDrag(), undefined);
+    });
+    ipcMain.on("widget:drag-move", (event) => {
+      if (rejectPageWindowOp(event, "widget:drag-move")) return;
+      withRuntime(event, (rt) => rt._internal.dragTo(), undefined);
+    });
+    ipcMain.on("widget:drag-end", (event) => {
+      if (rejectPageWindowOp(event, "widget:drag-end")) return;
+      withRuntime(event, (rt) => rt._internal.endDrag(), undefined);
+    });
+    ipcMain.on("widget:reset-position", (event) => {
+      if (rejectPageWindowOp(event, "widget:reset-position")) return;
+      withRuntime(event, (rt) => rt.resetPosition(), undefined);
+    });
+    ipcMain.handle("widget:set-click-through", (event, value) => {
+      if (rejectPageWindowOp(event, "widget:set-click-through")) {
+        throw new Error("页面视图不支持窗口操作：widget:set-click-through（插件页面由宿主布局管理）");
+      }
+      return withRuntime(event, (rt) => rt.setClickThrough(value === true), false);
+    });
+    ipcMain.on("widget:reload", (event) => {
+      // 页面视图重载自己：不是窗口几何操作，允许；浮窗仍走 runtime
+      const page = pageTargetForEvent(event);
+      if (page) {
+        try {
+          page.webContents.reload();
+        } catch (err) {
+          log(`[widgets:${page.pluginId}] 页面重载失败：${(err && err.message) || err}`);
+        }
+        return;
+      }
+      withRuntime(event, (rt) => rt.reload(), undefined);
+    });
+    ipcMain.handle("widget:settings-get", (event) =>
+      withRuntimeOrPage(event, (rt) => store.readSettings(rt.pluginId), {}),
     );
-    ipcMain.on("widget:drag-start", (event) => withRuntime(event, (rt) => rt._internal.beginDrag(), undefined));
-    ipcMain.on("widget:drag-move", (event) => withRuntime(event, (rt) => rt._internal.dragTo(), undefined));
-    ipcMain.on("widget:drag-end", (event) => withRuntime(event, (rt) => rt._internal.endDrag(), undefined));
-    ipcMain.on("widget:reset-position", (event) => withRuntime(event, (rt) => rt.resetPosition(), undefined));
-    ipcMain.handle("widget:set-click-through", (event, value) =>
-      withRuntime(event, (rt) => rt.setClickThrough(value === true), false),
-    );
-    ipcMain.on("widget:reload", (event) => withRuntime(event, (rt) => rt.reload(), undefined));
-    ipcMain.handle("widget:settings-get", (event) => withRuntime(event, (rt) => store.readSettings(rt.pluginId), {}));
     ipcMain.handle("widget:settings-set", (event, payload) =>
-      withRuntime(
+      withRuntimeOrPage(
         event,
         (rt) => {
           const key = payload && typeof payload === "object" ? payload.key : undefined;
@@ -843,16 +1268,15 @@ function createWidgetHost(deps = {}) {
           const next = store.patchSettings(rt.pluginId, patch);
           // 绑定/模型路径等设置变了：chatConfig 缓存立刻失效（不等 30s 过期）
           invalidateChatConfig();
-          // 设置变更同时推给该插件所有窗口（本轮只有 1 个），渲染层据此热更新
-          const win = rt.window;
-          if (win && !win.isDestroyed()) win.webContents.send("widget:settings", next);
+          // 设置变更同时推给该插件所有窗口/页面视图（本轮各 1 个），渲染层据此热更新
+          notifySettings(rt.pluginId, next);
           return next;
         },
         {},
       ),
     );
     ipcMain.handle("widget:info", (event) =>
-      withRuntime(
+      withRuntimeOrPage(
         event,
         (rt) => ({
           pluginId: rt.pluginId,
@@ -865,7 +1289,7 @@ function createWidgetHost(deps = {}) {
     );
     /* ── 插件自有数据（`<userData>/plugins/<id>/data/`，按 sender 的 pluginId 隔离） ── */
     ipcMain.handle("widget:data-get", (event, payload) =>
-      withRuntime(
+      withRuntimeOrPage(
         event,
         (rt) => {
           const key = dataKeyOf(payload, "widget:data-get");
@@ -875,7 +1299,7 @@ function createWidgetHost(deps = {}) {
       ),
     );
     ipcMain.handle("widget:data-set", (event, payload) =>
-      withRuntime(
+      withRuntimeOrPage(
         event,
         (rt) => {
           const { key, value } = dataPayloadOf(payload, "widget:data-set");
@@ -886,25 +1310,27 @@ function createWidgetHost(deps = {}) {
       ),
     );
     ipcMain.handle("widget:data-delete", (event, payload) =>
-      withRuntime(
+      withRuntimeOrPage(
         event,
         (rt) => store.deleteData(rt.pluginId, dataKeyOf(payload, "widget:data-delete")),
         false,
       ),
     );
-    ipcMain.handle("widget:data-keys", (event) => withRuntime(event, (rt) => store.listDataKeys(rt.pluginId), []));
+    ipcMain.handle("widget:data-keys", (event) =>
+      withRuntimeOrPage(event, (rt) => store.listDataKeys(rt.pluginId), []),
+    );
     ipcMain.handle("widget:data-dir", (event) =>
-      withRuntime(event, (rt) => ({ dir: store.dataDirOf(rt.pluginId) }), null),
+      withRuntimeOrPage(event, (rt) => ({ dir: store.dataDirOf(rt.pluginId) }), null),
     );
     ipcMain.on("widget:open-settings", (event) =>
-      withRuntime(
+      withRuntimeOrPage(
         event,
         (rt) => emitOpenPage({ page: "settings", settingsTab: SETTINGS_TAB, pluginId: rt.pluginId }),
         undefined,
       ),
     );
     ipcMain.on("widget:open-page", (event, payload) =>
-      withRuntime(
+      withRuntimeOrPage(
         event,
         (rt) => {
           const page = normalizeWidgetPage(payload);
@@ -918,7 +1344,7 @@ function createWidgetHost(deps = {}) {
       ),
     );
     ipcMain.handle("widget:chat-config", (event) =>
-      withRuntime(
+      withRuntimeOrPage(
         event,
         async (rt) => {
           // 审计 P0-1：对话上下文（网关地址 + 智能体列表）是**声明制**权限。
@@ -945,7 +1371,7 @@ function createWidgetHost(deps = {}) {
       ),
     );
     ipcMain.on("widget:log", (event, line) =>
-      withRuntime(
+      withRuntimeOrPage(
         event,
         (rt) => {
           const message = typeof line === "string" ? line.slice(0, 500) : "";
@@ -1164,6 +1590,8 @@ function createWidgetHost(deps = {}) {
       if (runtime.state.visible) runtime.show();
       log(`[widgets] ${record.id} 已就绪（${record.widget.id}@${record.version}）`);
     }
+    // 页面视图对账放在最后：停用/卸载/版本更新/页面入口变化都在这里收口（不留孤儿视图）
+    syncPageView();
     return { count: runtimes.size };
   }
 
@@ -1174,6 +1602,8 @@ function createWidgetHost(deps = {}) {
   }
 
   function destroyAll() {
+    // 页面视图先销毁：主窗关闭 / app.quit 都不该留下一个没有宿主的渲染进程
+    destroyPageView();
     for (const runtime of [...runtimes.values()]) destroyRuntime(runtime);
     pendingLifecycle.clear();
     unwatchDisplays();
@@ -1256,6 +1686,15 @@ function createWidgetHost(deps = {}) {
           /* 窗口刚销毁：丢弃 */
         }
       }
+      // d.124 §5.2：页面视图复用同一通道拿主题（不新增通道）；页面在显示中，直接投递。
+      if (pageInfo && hasEventPermission(pageInfo.record, "theme")) {
+        try {
+          pageInfo.webContents.send("widget:event", event);
+          delivered += 1;
+        } catch {
+          /* 页面刚卸载：丢弃 */
+        }
+      }
       return delivered > 0 ? "delivered" : "no-target";
     }
     if (event.kind === "tray") {
@@ -1298,11 +1737,19 @@ function createWidgetHost(deps = {}) {
     publish,
     action,
     stateOf,
+    // d.124 B 路径：插件自带页面视图（主窗经 secureIpc 的 widgets:page-* 调用）
+    pageMount,
+    pageBounds,
+    pageUnmount,
+    notifySettings,
     getChatConfig,
     invalidateChatConfig,
     runtimeFor: (id) => [...runtimes.values()].find((item) => item.pluginId === id) || null,
     get size() {
       return runtimes.size;
+    },
+    get pageCount() {
+      return pageInfo ? 1 : 0;
     },
     _internal: { registerIpc, normalizeEvent, normalizeChatConfig, setTheme: (next) => (theme = next) },
   };

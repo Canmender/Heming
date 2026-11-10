@@ -2,6 +2,64 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.124.3.48.0（2026-11-10）— 插件页面：装完导航多一个入口，插件能带自己的页面
+
+用户口径：「安装插件后导航栏多一个入口，点进去查看具体内容」。插件从「纯能力包」扩展出**第五类贡献点：页面**，
+两条渲染路径共用一套页面注册表；声明式包仍是零代码，界面插件仍是沙箱执行（红线不变）。规格
+`docs/superpowers/specs/2026-11-10-d124-plugin-pages.md`（A 声明式 + B 界面插件一起做，文档先行）。
+
+### ① 清单与解析
+
+- **声明式 v5 增补 `contributions.page`**（对象，每插件最多 1 个，向后兼容）：`title` / `icon?` / `summary?` +
+  `blocks[]`（1–12 个）。块词表：`markdown`（≤4000 字）/`stats`（≤8 项）/`table`（≤6 列 ×50 行）/`list`（≤20 项）/
+  `actions`（≤6 项，target 与命令同形）/`contributions`（自动列出本插件技能/服务/命令/工具束）。未知块 type、
+  表格行列不一致、图标非法一律中文点名报错；声明式写 `entry`、界面插件写 `blocks` 均被拒。
+- **界面插件（bundle）增补 `contributions.page`**：`{ title, icon?, summary?, entry }`；bundle 允许
+  `commands + desktopWidgets + page`（至少其一；可与浮窗并存），`entry` 必须包内相对 `.html` 且出现在 `files/**`；
+  `packageSha256` 继续覆盖页面代码字节（首方签名间接覆盖）。
+- 页面**不新增任何权限**：`permissions` 不变，声明式页永不执行代码、不联网。
+
+### ② 宿主渲染（A · 声明式页，零代码）
+
+- `PluginDeclarativePage` 按块渲染：markdown 复用聊天渲染器（禁原始 HTML）、指标卡、只读表格、列表、
+  动作按钮、贡献清单；坏块跳过并记一条警告，不白屏；页面只读。
+- `actions.target` 在**安装时**校验存在性（页面白名单/设置卡/技能名），与命令 target 单一真源；
+  跳转复用新增的 `runPluginCommandTarget()`，命令面板改为调用它（行为逐字不变）。
+
+### ③ 沙箱运行时（B · 界面插件页，桌面端）
+
+- 主进程新增页面视图（`WebContentsView` 嵌主窗内容区）：独立 origin `widget://<id>/<entry>`、
+  `sandbox/contextIsolation` 开、`nodeIntegration` 关、preload 仍是 `widget-preload.js` 那份最小桥；
+  CSP 沿用 `widgetCspHeaders(permissions)`；`will-navigate` 仅同 origin、`window.open` deny、下载取消。
+- IPC：`widgets:page-mount {id,rect}` / `page-bounds` / `page-unmount`；页面视图 webContents 登记进
+  runtime 映射供 sender 反查；窗口几何/拖拽/穿透类方法在页面模式显式 unsupported（preload + 主进程双层拒绝）。
+- 生命周期：停用/卸载/更新/主窗关闭/退出即销毁视图；切页/尺寸变化上报 rect（DIP，主进程钳制），不留孤儿。
+- 页面型界面插件（只声明 page、没有浮窗）记录 `widget: null`，web 侧列表/设置卡按「页面插件」降级展示。
+
+### ④ 页面注册表与导航/路由
+
+- `lib/pages/registry.ts`：已装插件 → 页面入口（声明式按安装时间、再 bundle；`available` = 已装+启用+未损坏+桌面桥），
+  导航/路由/插件卡/设置区同一份投影；`PluginStore` 新增订阅（安装/启停/卸载即时生效）。
+- 导航：8 个宿主页 → 已装模块页 → 插件页面（稳定末位、不占数字键、不写 navOrder）；
+  路由 id `plugin:<pluginId>`；入口消失/停用/卸载时拨回主页；刷新恢复对插件页回落主页（不把运行时入口写进会话态）。
+- 插件卡/详情新增「页面 1」贡献行与「打开页面」；安装预览贡献行同步；设置区导航说明追加已装插件页面。
+
+### 验证
+
+- `shared` 8 文件 / **104 例**、`web` **335 文件 / 4765 例**、`server` 16 / 264 例、`desktop` 全量（含新增
+  widget-preload 用例）全绿；`pnpm -r typecheck` 六包零错误；`pnpm plugin:check` 退出 0；
+  `node scripts/check-source-encoding.mjs` OK；`plugin.schema.json` 已随 shared 重新生成。
+- 新增测试约 75 例：shared 9（v5 页面/块校验）、web 约 60（注册表 9、声明式页 13、bundle 页 12、
+  App 接线 2、插件页/设置区/命令面板/安装预览/存储透传等）、desktop 28（包校验/记录/视图运行时/preload）。
+
+### 边界（明确不做 / 已知限制）
+
+- 插件**不能修改宿主现有界面**（不注入 DOM、不加首页/设置卡、不改导航顺序）：只能拥有自己的页面。
+- 每插件最多 1 个页面、页内无 Tab；命令面板不加「插件页面」跳转组；页面不自嵌外网/iframe/下载。
+- 第三方 bundle 页面仍未开放（首方签名）；第三方要页面目前用声明式。浏览器版只渲染声明式页，
+  界面插件页显示「只在安装版可用」。
+- 未做真机 Electron 渲染验证（`WebContentsView` 需安装版；单测用替身），装包后需人工复验页面尺寸/主题/切页。
+
 ## d.123.3.48.0（2026-11-10）— 能力只有三类：插件 / 技能 / MCP；插件统一由我们自己的服务器分发
 
 按用户确认的产品模型重排「插件」页：**能力分三类**，来源各归其位。

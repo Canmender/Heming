@@ -204,6 +204,8 @@ function createPluginStore(options = {}) {
       version: plugin.version,
       enabled: plugin.enabled === true,
       widget: plugin.widget || null,
+      // d.124：页面（B 路径）只在清单声明过时出现；旧安装记录没有这个键 → undefined
+      ...(plugin.page ? { page: plugin.page } : {}),
       permissions: plugin.permissions || null,
       settings: resolveSettings(plugin.widget, stored),
       installedAt: plugin.installedAt,
@@ -240,7 +242,7 @@ function createPluginStore(options = {}) {
       return { ok: false, error: parsed.errors.join("；") };
     }
 
-    const { manifest, widget, permissions, sha256, files } = parsed;
+    const { manifest, widget, page, permissions, sha256, files } = parsed;
     const id = manifest.id;
     const version = manifest.version;
     const existing = find(id);
@@ -298,6 +300,9 @@ function createPluginStore(options = {}) {
       installedAt: existing ? existing.installedAt : timestamp,
       updatedAt: timestamp,
       widget,
+      // d.124：界面插件页面（清单 contributions.page 的归一化视图）。缺省**不写这个键**，
+      // 旧记录/无页面插件保持原样（web 侧按 `page?: WidgetPageSpec` 兼容）。
+      ...(page ? { page } : {}),
       permissions,
       // 包是否带 ed25519 签名；d.105 起 readPackage 已强制首方验签，能走到这里即已通过
       signed: parsed.signed === true,

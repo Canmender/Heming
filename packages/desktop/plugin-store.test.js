@@ -553,3 +553,68 @@ test("data：未安装的插件不写盘（避免留孤儿目录）", () => {
   assert.equal(fs.existsSync(path.join(store.dir, "acme.ghost")), false);
   assert.equal(store.readData("acme.ghost", "k"), null);
 });
+
+/* ───────────────────── d.124 插件页面（B 路径：界面插件自带 HTML） ───────────────────── */
+
+test("页面：安装记录落 page（归一化视图），无页面插件不写这个键", () => {
+  const store = makeStore();
+  const page = { title: "我的面板", icon: "layout", summary: "插件页面", entry: "files/index.html" };
+  const installed = store.install({ bytes: packageBytes({ contributions: { page } }) });
+  assert.equal(installed.ok, true, installed.error);
+  assert.deepEqual(installed.record.page, page);
+  assert.equal(installed.record.widget, null, "只有页面的 bundle 没有浮窗");
+
+  const [record] = store.list();
+  assert.deepEqual(record.page, page);
+  // installed.json 里也要落（主进程重启后仍能建页面视图）
+  const registry = JSON.parse(fs.readFileSync(path.join(store.dir, "installed.json"), "utf8"));
+  assert.deepEqual(registry.plugins[0].page, page);
+
+  // 无页面插件：记录与注册表都不出现 page 键（旧记录/旧包行为不变）
+  const plain = makeStore();
+  plain.install({ bytes: packageBytes() });
+  assert.equal("page" in plain.list()[0], false);
+  const plainRegistry = JSON.parse(fs.readFileSync(path.join(plain.dir, "installed.json"), "utf8"));
+  assert.equal("page" in plainRegistry.plugins[0], false);
+});
+
+test("页面：升级替换 page；旧安装记录缺 page 字段仍兼容（不报错，页面入口按缺省处理）", () => {
+  const store = makeStore();
+  const first = store.install({
+    bytes: packageBytes({ contributions: { page: { title: "旧面板", entry: "files/index.html" } } }),
+  });
+  assert.equal(first.ok, true, first.error);
+  assert.equal(store.get("heming.pet").page.title, "旧面板");
+
+  const upgraded = store.install({
+    bytes: packageBytes({ version: "1.1.0", contributions: { page: { title: "新面板", icon: "grid", entry: "files/index.html" } } }),
+  });
+  assert.equal(upgraded.ok, true, upgraded.error);
+  assert.deepEqual(store.get("heming.pet").page, {
+    title: "新面板",
+    icon: "grid",
+    summary: "",
+    entry: "files/index.html",
+  });
+
+  // 老版本写下的注册表记录没有 page：重新 init 后 list/get 不炸，page 为 undefined
+  const registryPath = path.join(store.dir, "installed.json");
+  const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+  delete registry.plugins[0].page;
+  fs.writeFileSync(registryPath, JSON.stringify(registry));
+  const reopened = createPluginStore({ dir: store.dir });
+  reopened.init();
+  const record = reopened.get("heming.pet");
+  assert.ok(record, "旧记录仍可读");
+  assert.equal("page" in record, false);
+  assert.equal(reopened.list().length, 1);
+});
+
+test("页面：page-only 包卸载与普通包同一事务语义", () => {
+  const store = makeStore();
+  store.install({ bytes: packageBytes({ contributions: { page: { title: "面板", entry: "files/index.html" } } }) });
+  assert.equal("page" in store.get("heming.pet"), true);
+  assert.deepEqual(store.uninstall("heming.pet"), { ok: true });
+  assert.deepEqual(store.list(), []);
+  assert.equal(fs.existsSync(path.join(store.dir, "heming.pet", "1.0.0")), false);
+});

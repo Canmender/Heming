@@ -16,8 +16,9 @@
 | 只要「会做某件事」 | [`examples/01-hello-skill/`](examples/01-hello-skill/) | v5 声明式 |
 | 要查外部/本机服务、要快捷入口 | [`examples/02-mcp-and-commands/`](examples/02-mcp-and-commands/) | v5 声明式 |
 | 只想加命令跳转（页面/设置/单元/插件/技能） | [`examples/03-commands/`](examples/03-commands/) | v5 声明式 |
+| 想在左侧导航多一个插件页面（导航入口） | [`examples/05-plugin-page/`](examples/05-plugin-page/) | v5 声明式 |
 | 要做桌面窗口（仅首方） | [`examples/04-widget-bundle/`](examples/04-widget-bundle/) | v4 bundle |
-| 想看校验怎么报错 | [`examples/_invalid/demo-bad/`](examples/_invalid/demo-bad/)（别抄） | 故意非法 |
+| 想看校验怎么报错 | [`examples/_invalid/demo-bad/`](examples/_invalid/demo-bad/)、[`examples/_invalid/page-entry-on-declarative/`](examples/_invalid/page-entry-on-declarative/)（别抄） | 故意非法 |
 
 所有合法示例都能过 `pnpm plugin:lint`；`_invalid` 由 `plugin:check` 默认跳过。
 
@@ -153,6 +154,63 @@ plugin-kit/plugins/demo-widget/
 
 参考实现：`plugin-kit/plugins/pet-widget`（官方桌宠）。
 
+### 3.5 给插件加一个页面（导航里多一个入口，d.124）
+
+装好插件 → 左侧导航**末位**（模块入口之后）多一项 → 点进去是插件自己的页面。每插件最多一个页面。
+
+先选形态：
+
+| 形态 | 清单里写什么 | 能不能带代码 | 谁能用 / 在哪看得见 |
+|---|---|---|---|
+| **声明式页**（默认，推荐） | `contributions.page.blocks`（受控块） | 不能（宿主渲染，全部纯文本转义） | 任何作者；安装版 + 浏览器版都能看 |
+| **自带页**（仅首方 bundle） | `contributions.page.entry`（包内 `.html`） | 能（`widget://` 沙箱里跑，必须首方签名） | 仅首方；只在安装版显示（浏览器版给降级说明） |
+
+声明式最小示例（`engines.heming` 至少 `d.124`，旧版宿主不认识 `page`）：
+
+```json
+{
+  "schemaVersion": 5,
+  "id": "acme.collector",
+  "name": "采集桥",
+  "version": "1.0.0",
+  "engines": { "heming": "d.124" },
+  "contributions": {
+    "skills": [{ "name": "采集状态", "instructions": "汇总各来源的采集结果，缺数据就直说。" }],
+    "page": {
+      "title": "采集桥",
+      "icon": "activity",
+      "summary": "本机采集服务状态与用法",
+      "blocks": [
+        { "type": "markdown", "title": "怎么用", "text": "在设置里填来源，然后点「开始同步」。" },
+        { "type": "stats", "items": [{ "label": "已采集", "value": "128 条" }] },
+        { "type": "table", "columns": ["来源", "状态"], "rows": [["QQ", "就绪"], ["微信", "未连接"]] },
+        { "type": "list", "items": [{ "title": "开始同步", "description": "调用插件命令", "badge": "命令" }] },
+        { "type": "actions", "items": [{ "label": "打开插件区", "target": { "kind": "page", "page": "plugins" } }] },
+        { "type": "contributions", "kind": "skills" }
+      ]
+    }
+  }
+}
+```
+
+块怎么选（全部纯文本，宿主转义；未知 `type` 直接报错，不静默丢弃）：
+
+| 想展示 | 用 | 上限 |
+|---|---|---|
+| 说明 / 用法 | `markdown` | 正文 ≤4000 字，禁原始 HTML |
+| 几个数字 | `stats` | ≤8 项，label/value 各 ≤40 字 |
+| 对照表 | `table` | ≤6 列 × ≤50 行，单元格 ≤120 字，每行格数 = 列数 |
+| 条目列表 | `list` | ≤20 项；标题 ≤60 / 描述 ≤160 / badge ≤12 |
+| 跳转按钮 | `actions` | ≤6 项；只做导航，不执行代码 |
+| 本插件贡献清单 | `contributions` | `skills` / `mcpServers` / `commands` / `toolPacks` |
+
+注意：
+
+- `blocks` 至少 1 个、最多 12 个；`page` 是对象不是数组（没有多页面/Tab/子路由）。
+- 页面**不新增权限、不联网**：它是**静态展示**（清单文本 + 本地贡献清单），宿主不代拉数据；要展示会变化的信息，用技能/命令产出结果，发版时更新清单文本。
+- 没有 `page` 贡献的纯能力包照旧不新增导航入口；有 `page` 的才多一项，入口固定在模块入口之后、不受插件加载顺序影响。
+- 想改成首方 bundle 自带页：按 §3.4 的清单格式，把 `page` 换成 `{ "title": "…", "entry": "files/page.html" }`，`entry` 必须出现在 `files` 里；页面与桌面小组件可并存。可抄 [`examples/05-plugin-page/README.md`](examples/05-plugin-page/README.md) 的改法说明。
+
 ---
 
 ## 4. 权限最小化（评审必看）
@@ -194,6 +252,9 @@ plugin-kit/plugins/demo-widget/
 装完不生效的排查顺序：**总开关 → 贡献级开关 → 兼容性（需更新和鸣）→ 签名/信任 → 工具上限（未注入）→ 孤儿记录**。
 不要靠猜，诊断区直接写原因。
 
+装了带页面的插件却没多出导航入口：① 插件是否启用（停用即撤入口）；② 宿主版本是否 ≥ `d.124`（`page` 是 d.124 增补）；
+③ 清单里是否真的写了 `contributions.page`（纯能力包照旧没有入口）；④ 浏览器版只有声明式页，bundle 自带页会显示「只在安装版可用」，不是坏包。
+
 ---
 
 ## 7. 发布
@@ -222,7 +283,11 @@ HEMING_PLUGIN_PUBLISH_KEY=*** pnpm plugin:publish -- <目录> --push https://hem
 | `技能名重复：与第 N 项同名` | 同清单内重名 | 改名，保持插件内唯一 |
 | `工具 X 同时出现在工具束 A 与 B` | 工具归属重复 | 只放在一个束里，或合并束 |
 | `命令 target：技能 X 不在本插件 contributions.skills 里` | 指向外部技能 | 命令只能指向本插件自己的技能 |
-| `distribution: bundle 只允许 commands + desktopWidgets` | bundle 声明了技能/MCP | 拆成声明式包，或删掉越界贡献 |
+| `distribution: bundle 只允许 commands + desktopWidgets + page` | bundle 声明了技能/MCP | 拆成声明式包，或删掉越界贡献 |
+| `声明式插件的页面必须提供至少 1 个 contributions.page.blocks` | 写了 `page` 但没写块 | 补 1–12 个 `blocks`；自带 HTML 才用 bundle |
+| `声明式插件…不能写 contributions.page.entry` | 把 bundle 的 `entry` 写进了 v5 清单 | 改用 `blocks`，或改 `distribution: "bundle"`（仅首方） |
+| `界面插件的页面必须写 contributions.page.entry` | bundle 的 `page` 没有入口 | 补包内 `.html` 的 `entry`，并确认它在 `files` 里 |
+| `页面块最多 12 个` / `不支持的字面量` 类 | 块数超限或 `type` 写错 | 按 §3.5 块词表改；未知 `type` 不会静默丢弃 |
 | `必须提供 packageSha256` | bundle 没跑打包脚本 | 用构建/打包脚本生成，不要手写 |
 | `已忽略未知字段 X`（warning） | 顶层多写了字段 | 删掉；若认为该字段有用，提 PR 到标准 |
 | 解析报 `包含未知字段`（error） | 敏感子对象（permissions/meta/贡献条目）写错位置 | 按 §2 字段表归位 |
@@ -236,6 +301,7 @@ HEMING_PLUGIN_PUBLISH_KEY=*** pnpm plugin:publish -- <目录> --push https://hem
 - [ ] `permissions` 最小化：`network` 覆盖全部服务 host 且无冗余；`tools` 不高于需要。
 - [ ] 技能 `instructions` 有步骤与边界；触发词不泛滥。
 - [ ] 命令 target 指向的对象真实存在（技能名/页面/设置卡/单元）。
+- [ ] 加了页面：`engines.heming` ≥ `d.124`；`blocks` 在词表内且不超限；页面没想改宿主界面（不允许）。
 - [ ] 工具束内工具名与其它束不重复。
 - [ ] `README.md` 写清：装了什么、要什么权限、数据放哪、怎么卸载。
 - [ ] `meta` 图标用 https、详情不超限；截图/标签不超标。
@@ -252,3 +318,4 @@ HEMING_PLUGIN_PUBLISH_KEY=*** pnpm plugin:publish -- <目录> --push https://hem
 - ❌ 靠 `events`/`hook` 申请能力——事件只是通知，不是授权。
 - ❌ 第三方想通过 bundle 绕签名——不存在这条路（正式版忽略 dev 公钥）。
 - ❌ 依赖「编辑器 schema 不报错」当验收——权威校验是 `parsePluginManifestV5` / `plugin-lint`。
+- ❌ 想让页面改宿主界面（注入 DOM、改导航顺序、给宿主页加卡片）——插件只能拥有自己的页面，这些都不做。

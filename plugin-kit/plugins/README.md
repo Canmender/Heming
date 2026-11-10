@@ -13,7 +13,8 @@
 
 - **目录名 = 插件 id 最后一段**（`workflow-kit` 保留其独立项目的 `plugin/` 布局，清单不在目录根）。
 - 新增插件用 `pnpm plugin:new <id>`，默认生成到本目录；生成后立刻 lint。
-- 声明式插件现行 `schemaVersion: 5`（旧 v3 包按 [COOKBOOK §6](../COOKBOOK.md) 升级）；界面插件仍是 v4 bundle，只对首方开放。
+- 声明式插件现行 `schemaVersion: 5`（旧 v3 包按 [COOKBOOK §7](../COOKBOOK.md) 升级）；界面插件仍是 v4 bundle，只对首方开放。
+- 想让插件在左侧导航多一个入口：加 `contributions.page`（声明式写 `blocks`；仅首方 bundle 写 `entry`），见 [COOKBOOK §4](../COOKBOOK.md)。
 - 发布：`node scripts/publish-plugin.mjs <包目录或 plugin.json> --dest <插件目录>`。
   工作流引擎是独立服务，使用它自己的 `scripts/build-release.mjs` 出包、`scripts/publish-cloud.mjs` 上传。
 - 这些包**不随和鸣安装包分发**（`packages/desktop/packaging.plugins.test.js` 守着这条边界）。

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type JSX } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
   HomeIcon,
   TeamIcon,
@@ -26,6 +26,9 @@ import { NAV_HIDE_DELAY_MS, NAV_HOTZONE_PX, otherNavMode } from "../lib/navPrefs
 import { useModuleStore } from "../lib/modules/store.js";
 import { withModuleNav } from "../lib/modules/nav.js";
 import { navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
+import { usePluginPageEntries } from "../lib/pages/usePluginPages.js";
+import { withPluginNav } from "../lib/pages/registry.js";
+import { PluginPageIcon } from "./plugins/PluginPageIcon.js";
 
 /**
  * 导航项目录（顺序无关）：展示顺序由设置区的「导航顺序」决定（store.navOrder），
@@ -116,18 +119,41 @@ export function NavRail({
   const setPage = useUiStore((s) => s.setPage);
   const moduleEnabled = useModuleStore((s) => s.enabled);
   const moduleInstalled = useModuleStore((s) => s.installed);
+  /** d.124：已装插件声明的页面入口（声明式 + 界面插件由注册表统一投影）。 */
+  const pluginEntries = usePluginPageEntries();
   /*
    * 导航顺序**完全固定**（d.123 用户口径：从上到下永远是
    * 主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
    *
    * 不再读取 `heming.navOrder.v1`：旧版允许拖拽排序，用户的存储里可能留着与固定顺序不同的
    * 旧排列（升级/换设备后表现为「顺序不对」），继续沿用会让「永远固定」落空。
-   * 已装且启用的插件页面仍追加在这 8 项之后（withModuleNav），不改变上面 8 项的顺序。
+   * 已装且启用的模块页与插件页面仍追加在这 8 项之后（d.124：模块页在前、插件页在后），
+   * 不改变上面 8 项的顺序。
    */
-  const navOrder = withModuleNav([...DEFAULT_NAV_ORDER], {
-    installed: moduleInstalled,
-    enabled: moduleEnabled,
-  });
+  const navOrder = withPluginNav(
+    withModuleNav([...DEFAULT_NAV_ORDER], {
+      installed: moduleInstalled,
+      enabled: moduleEnabled,
+    }),
+    pluginEntries,
+  );
+  /**
+   * 导航项目录 = 固定 8 宿主页 + 4 模块页（ITEMS） + 插件页面（按清单标题/图标生成）。
+   *
+   * 插件页面是运行时才知道的页面，不能塞进模块级常量 ITEMS；这里用注册表投影
+   * 生成，再用同一个 `find` 口径把顺序映射成可见项，避免两处各判一次「能不能进」。
+   */
+  const items = useMemo(() => {
+    const fixed = new Set(ITEMS.map((item) => item.page));
+    const pluginItems = pluginEntries
+      .filter((entry) => entry.available && !fixed.has(entry.pageId))
+      .map((entry) => ({
+        page: entry.pageId,
+        label: entry.title,
+        icon: <PluginPageIcon icon={entry.icon} size={17} />,
+      }));
+    return [...ITEMS, ...pluginItems];
+  }, [pluginEntries]);
   const navMode = useUiStore((s) => s.navMode);
   const navOpen = useUiStore((s) => s.navOpen);
   const setNavMode = useUiStore((s) => s.setNavMode);
@@ -243,7 +269,7 @@ export function NavRail({
    * 抽成变量是为了让分隔线能看「上一项是谁」——内联 map 里拿不到过滤后的前一项。
    */
   const visibleItems = navOrder
-    .map((navPage) => ITEMS.find((it) => it.page === navPage))
+    .map((navPage) => items.find((it) => it.page === navPage))
     .filter((it): it is (typeof ITEMS)[number] => Boolean(it));
 
   /** 导航轨内容：常显与浮层共用一份，避免两种模式的行为慢慢分叉。 */
