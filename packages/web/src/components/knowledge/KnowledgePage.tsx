@@ -26,6 +26,17 @@ import { StandardCheckDialog } from "./StandardCheckDialog.js";
 import { TagPanel } from "./TagPanel.js";
 import { VaultSettingsDialog } from "./VaultSettingsDialog.js";
 import {
+  BookIcon,
+  CheckIcon,
+  ChevronIcon,
+  FolderIcon,
+  GearIcon,
+  PlusIcon,
+  RouteIcon,
+  SearchIcon,
+  TrashIcon,
+} from "../icons.js";
+import {
   DEFAULT_DAILY_TEMPLATE,
   dailyRelOf,
   readDailyConfig,
@@ -638,6 +649,7 @@ function KnowledgePageShell({
           className="ui-btn ui-btn-sm ui-btn-ghost"
           onClick={() => void store.pickVault()}
         >
+          <FolderIcon width={14} height={14} />
           打开其它库
         </button>
         {activeMeta ? (
@@ -647,6 +659,7 @@ function KnowledgePageShell({
             aria-label={`移除知识库 ${activeMeta.name}（不删除文件）`}
             onClick={() => setRemoveConfirm(true)}
           >
+            <TrashIcon width={13} height={13} />
             移除
           </button>
         ) : null}
@@ -667,13 +680,15 @@ function KnowledgePageShell({
             className="ui-btn ui-btn-sm ui-btn-ghost"
             onClick={() => void openToday()}
           >
+            <BookIcon width={14} height={14} />
             今天
           </button>
           <button
             type="button"
-            className="ui-btn ui-btn-sm ui-btn-ghost"
+            className="ui-btn ui-btn-sm ui-btn-primary"
             onClick={() => setNewNoteDir(activeRel ? parentOf(activeRel) : "")}
           >
+            <PlusIcon width={14} height={14} />
             新建笔记
           </button>
           <button
@@ -682,6 +697,7 @@ function KnowledgePageShell({
             onClick={() => setQuickOpenOpen(true)}
             className="ui-btn ui-btn-sm ui-btn-ghost"
           >
+            <SearchIcon width={14} height={14} />
             快速切换
           </button>
           <button
@@ -690,6 +706,7 @@ function KnowledgePageShell({
             onClick={openStandardCheck}
             className="ui-btn ui-btn-sm ui-btn-ghost"
           >
+            <CheckIcon width={14} height={14} />
             标准检查
           </button>
           <button
@@ -698,6 +715,7 @@ function KnowledgePageShell({
             className="ui-btn ui-btn-sm ui-btn-ghost"
             onClick={() => setSettingsOpen(true)}
           >
+            <GearIcon width={14} height={14} />
             设置
           </button>
           <button
@@ -706,6 +724,7 @@ function KnowledgePageShell({
             className={`ui-btn ui-btn-sm ${graphOpen ? "ui-btn-primary" : "ui-btn-ghost"}`}
             onClick={() => setGraphOpen((prev) => !prev)}
           >
+            <RouteIcon width={14} height={14} />
             图谱
           </button>
           <button
@@ -713,9 +732,10 @@ function KnowledgePageShell({
             aria-pressed={rightOpen}
             className="ui-btn ui-btn-sm ui-btn-ghost"
             aria-label={rightOpen ? "折叠右侧面板" : "展开右侧面板"}
+            title={rightOpen ? "收起右栏" : "展开右栏"}
             onClick={() => setRightOpen((prev) => !prev)}
           >
-            {rightOpen ? "收起右栏" : "展开右栏"}
+            <ChevronIcon width={14} height={14} className={rightOpen ? "rotate-180" : ""} />
           </button>
         </span>
       </header>

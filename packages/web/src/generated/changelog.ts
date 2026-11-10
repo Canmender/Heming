@@ -26,6 +26,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       "**签名覆盖新能力**：`engine.entry/lib` 与 `permissions.kb` 进入首方签名文本——签名后换引擎入口、删依赖目录、补 kb 权限都会验签失败；未声明它们的旧包 canonical 字节不变（历史签名不失效）。",
       "包体配额放宽到 **64MB / 4000 文件 / 单文件 16MB**（带纯 Python 依赖的插件 20MB 装不下），`plugin-tar` / `pack-plugin` / 文档三处同口径。",
       "新的「后台任务模型」设置卡走 d.125 的 `.ui-card` / token，不再写死 `bg-white`/`#bbb`；新增 3 例组件测试（无目录提示、选择落盘、目录下架后照实提示且不静默改写）。",
+      "知识库顶栏收口：`打开其它库 / 移除 / 今天 / 快速切换 / 标准检查 / 设置 / 图谱 / 右栏折叠` 全部补同一套图标，「新建笔记」提升为唯一主操作，右栏折叠改图标按钮（aria-label 不变），暗色同样核对。",
+      "新增 `packages/web/src/lib/modules/coupling.test.ts` + `coupling-baseline.json`：把当前仍欠在 web 包里的内置模块业务代码（幕僚/信息中枢/自动化/工作流，**141 个文件**）记为基线；新增文件（往本体塞插件代码）→ 测试红，",
       "`desktop` **772 例**（新增 `plugin-engine.test.js` 7 例、签名 engine/kb 3 例、包校验 lib 1 例）、`web` **339 文件 / 4828 例**、`shared` 8 / 104、`server` 16 / 264 全绿；`pnpm -r typecheck` 六包零错误；",
       "引擎仍只对**首方签名 bundle** 开放（第三方插件仍是零代码声明式）；四个内置模块（幕僚/信息中枢/自动化/工作流）迁出本体属 P2–P4，本轮只完成「插件可以自带引擎」这一基础设施与一个真实样本。",
       "引擎可选能力：`chat` 只下发后台任务模型 id，不给用户供应商 Key；`kb` 只到 `writeDirs` 边界。",
@@ -39,6 +41,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "④ 第一个真实迁移样本",
       "`plugin-kit/plugins/infohub-page` 升到 **0.2.0**：从「只读页面 + 依赖外部采集服务」改为**自带 Python 引擎**（`files/engine/bridge.py` + 构建期把 infohub 核心与纯依赖 staging 进`files/engine/lib`），页面直接浏览本机归档、按需生成摘要并写入知识库；不再需要本体里的信息中枢引擎。",
       "⑤ UI/UX",
+      "⑥ 迁移棘轮（防止「插件继续占本体代码」）迁走文件（P2 删除）→ 必须同步删基线条目，**只减不增**。这样 P2–P4 迁移有可度量的进度，也不会再变坏。",
       "验证`plugin:check` 通过（含 `infohub-page 0.2.0` 源码工程模式校验）；编码检查 OK。",
       "边界"
     ]
