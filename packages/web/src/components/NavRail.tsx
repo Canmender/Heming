@@ -16,7 +16,7 @@ import {
   AutomationIcon,
   WorkflowIcon,
 } from "./icons.js";
-import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
+import { DEFAULT_NAV_ORDER, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { NotificationCenter } from "./NotificationCenter.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
@@ -24,7 +24,7 @@ import { GlobalFocusRing } from "./a11y/GlobalFocusRing.js";
 import { hasOpenModal } from "./useModalA11y.js";
 import { NAV_HIDE_DELAY_MS, NAV_HOTZONE_PX, otherNavMode } from "../lib/navPrefs.js";
 import { useModuleStore } from "../lib/modules/store.js";
-import { filterNavOrder, withModuleNav } from "../lib/modules/nav.js";
+import { withModuleNav } from "../lib/modules/nav.js";
 import { navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
 
 /**
@@ -114,19 +114,20 @@ export function NavRail({
 } = {}) {
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
-  // 渲染前再规整一次：手改过 localStorage 或旧版本残留时，缺项也会被补齐，绝不漏掉某个入口
-  const rawNavOrder = normalizeNavOrder(useUiStore((s) => s.navOrder));
   const moduleEnabled = useModuleStore((s) => s.enabled);
   const moduleInstalled = useModuleStore((s) => s.installed);
-  // 先按个性化顺序排好宿主页（旧存储里残留的模块页在这里被过滤），
-  // 再把「已装且启用」的模块入口插到「插件」之后（不写进个性化顺序，见 withModuleNav）。
-  const navOrder = withModuleNav(
-    filterNavOrder(rawNavOrder, {
-      installed: moduleInstalled,
-      enabled: moduleEnabled,
-    }),
-    { installed: moduleInstalled, enabled: moduleEnabled },
-  );
+  /*
+   * 导航顺序**完全固定**（d.123 用户口径：从上到下永远是
+   * 主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
+   *
+   * 不再读取 `heming.navOrder.v1`：旧版允许拖拽排序，用户的存储里可能留着与固定顺序不同的
+   * 旧排列（升级/换设备后表现为「顺序不对」），继续沿用会让「永远固定」落空。
+   * 已装且启用的插件页面仍追加在这 8 项之后（withModuleNav），不改变上面 8 项的顺序。
+   */
+  const navOrder = withModuleNav([...DEFAULT_NAV_ORDER], {
+    installed: moduleInstalled,
+    enabled: moduleEnabled,
+  });
   const navMode = useUiStore((s) => s.navMode);
   const navOpen = useUiStore((s) => s.navOpen);
   const setNavMode = useUiStore((s) => s.setNavMode);

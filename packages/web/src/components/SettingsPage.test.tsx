@@ -360,39 +360,34 @@ describe("设置区 · 页面颜色", () => {
   });
 });
 
-describe("设置区 · 导航顺序", () => {
+describe("设置区 · 导航顺序（固定不可改，d.123）", () => {
   beforeEach(() => {
     localStorage.clear();
     useUiStore.setState({ navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("上移/下移改变顺序并落盘，首项上移与末项下移禁用", () => {
+  it("按固定顺序展示 8 项，不再提供上移/下移/恢复默认按钮", () => {
     render(<SettingsPage />);
     goTab("导航");
-    fireEvent.click(screen.getByRole("button", { name: "上移 插件" }));
-    expect(useUiStore.getState().navOrder).toEqual([
-      "home",
-      "team",
-      "plugins",
-      "chat",
-      "memory",
-      "vault",
-      "model",
-      "settings",
-    ]);
-    expect(JSON.parse(localStorage.getItem("heming.navOrder.v1") as string)).toEqual(
-      useUiStore.getState().navOrder,
-    );
-    expect(screen.getByRole("button", { name: "上移 主页" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "下移 设置" })).toBeDisabled();
+    const region = screen.getByRole("region", { name: "导航顺序" });
+    const labels = [...region.querySelectorAll("li")].map((li) => li.textContent ?? "");
+    const expected = ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"];
+    expect(labels).toHaveLength(8);
+    for (const [index, name] of expected.entries()) expect(labels[index]).toContain(name);
+    expect(screen.queryByRole("button", { name: /^上移 / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^下移 / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "恢复默认导航顺序" })).not.toBeInTheDocument();
+    expect(region.textContent).toContain("顺序不可调整");
   });
 
-  it("恢复默认导航顺序", () => {
+  it("存储里残留自定义顺序时，展示的仍是固定 8 项（旧的拖拽排序不再生效）", () => {
     useUiStore.getState().setNavOrder(["settings", "memory", "home", "team", "plugins"]);
     render(<SettingsPage />);
     goTab("导航");
-    fireEvent.click(screen.getByRole("button", { name: "恢复默认导航顺序" }));
-    expect(useUiStore.getState().navOrder).toEqual([...DEFAULT_NAV_ORDER]);
+    const region = screen.getByRole("region", { name: "导航顺序" });
+    const labels = [...region.querySelectorAll("li")].map((li) => li.textContent ?? "");
+    expect(labels[0]).toContain("主页");
+    expect(labels[7]).toContain("设置");
   });
 });
 

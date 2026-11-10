@@ -579,7 +579,7 @@ export function PluginsPage({
         })}
         <span className="ml-auto self-center ui-caption">
           {tab === "plugins"
-            ? `已启用 ${enabledCount}/${list.length} 个插件 · 模块从云端安装`
+            ? `已启用 ${enabledCount}/${list.length} 个插件 · 可安装插件从云端获取`
             : tab === "repo"
               ? "云端插件仓库：下载原样清单、校验指纹后走同一套安装预览"
               : tab === "widgets"
@@ -628,7 +628,7 @@ export function PluginsPage({
                 className="ui-btn ui-btn-sm ui-btn-ghost"
               >
                 <PlugIcon width={13} height={13} aria-hidden="true" />
-                从云端安装模块
+                从云端安装插件
               </button>
               <span className="ml-auto hidden ui-micro sm:inline">
                 安装只写本机清单，不运行代码

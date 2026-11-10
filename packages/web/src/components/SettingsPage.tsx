@@ -7,9 +7,9 @@ import { FileEditCard } from "./FileEditCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
 import { WidgetSettingsCard } from "./settings/WidgetSettingsCard.js";import { ThemeModeCard } from "./settings/ThemeModeCard.js";
-import { normalizeNavOrder, useUiStore, type NavPage } from "../store/ui.js";
+import { DEFAULT_NAV_ORDER, useUiStore, type NavPage } from "../store/ui.js";
 import { useModuleStore } from "../lib/modules/store.js";
-import { filterNavOrder } from "../lib/modules/nav.js";
+import { withModuleNav } from "../lib/modules/nav.js";
 import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
 import { setThemeMode, watchThemeMode } from "../lib/theme.js";
 import { DEFAULT_NAV_MODE, type NavMode } from "../lib/navPrefs.js";
@@ -783,49 +783,27 @@ function AppearanceSection() {
   );
 }
 
-/** 导航分组：左侧导航显示顺序（上移/下移，不做拖拽——按钮在键盘与触屏下都可靠）。 */
+/** 导航分组：左侧导航顺序**固定**（d.123 用户口径），这里只展示，不再提供排序操作。 */
 function NavigationSection() {
-  const fullOrder = normalizeNavOrder(useUiStore((u) => u.navOrder));
-  const setNavOrder = useUiStore((u) => u.setNavOrder);
-  const resetNavOrder = useUiStore((u) => u.resetNavOrder);
   const moduleEnabled = useModuleStore((u) => u.enabled);
   const moduleInstalled = useModuleStore((u) => u.installed);
   const moduleState = { installed: moduleInstalled, enabled: moduleEnabled };
-  // 未安装/停用的内置模块页不在列表里出现；上下移动只在可见项之间交换，
-  // 隐藏页占的位置不动（否则用户点一次「下移」看着没反应——实际是和隐藏页换了位）。
-  const navOrder = filterNavOrder(fullOrder, moduleState);
-  const move = (page: NavPage, dir: -1 | 1) => {
-    const index = navOrder.indexOf(page);
-    const target = index + dir;
-    if (index < 0 || target < 0 || target >= navOrder.length) return;
-    const nextVisible = [...navOrder];
-    [nextVisible[index], nextVisible[target]] = [nextVisible[target], nextVisible[index]];
-    let cursor = 0;
-    const merged = fullOrder.map((item) =>
-      navOrder.includes(item) ? nextVisible[cursor++] : item,
-    );
-    setNavOrder(merged);
-  };
+  // 已装且启用的模块入口追加在 8 项之后（与 NavRail 同源：modules/nav.ts 的 withModuleNav）
+  const navOrder = withModuleNav([...DEFAULT_NAV_ORDER], moduleState);
+  const installedPages = navOrder.slice(DEFAULT_NAV_ORDER.length);
 
   return (
     <section
       aria-label="导航顺序"
       className="max-w-full rounded-xl border border-line bg-white p-4 shadow-card"
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="ui-section-title">导航顺序</div>
-        <button type="button" aria-label="恢复默认导航顺序" onClick={resetNavOrder} className={btnGhost}>
-          恢复默认
-        </button>
-      </div>
+      <div className="ui-section-title">导航顺序</div>
       <div className="mt-1 ui-caption">
-        只改左侧导航的显示顺序；数字快捷键仍对应原来的页面（Alt+1 / 2 / 5 / 6 / 8 / 0）。
-        宿主页固定 8 项（主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置），
-        按「工作台 / 能力 / 资料 / 系统」用细线分组，移动时细线跟着组变化走。
-        已安装的模块（幕僚、信息中枢、自动化、工作流）固定追加在**最下面**（设置之后），
-        不参与这里的排序；停用或删除模块后入口随之消失。
+        导航固定 8 项、顺序不可调整（数字快捷键仍对应原来的页面：Alt+1 / 2 / 5 / 6 / 8 / 0）。
+        已安装的插件页面（幕僚、信息中枢、自动化、工作流）会自动追加在最下面，
+        不改变上面 8 项的顺序；停用或删除后入口随之消失。
       </div>
-      <ul className="mt-2 flex flex-col gap-1">
+      <ol className="mt-2 flex flex-col gap-1">
         {navOrder.map((page, index) => (
           <li
             key={page}
@@ -833,28 +811,17 @@ function NavigationSection() {
           >
             <span className="w-[18px] ui-caption">{index + 1}</span>
             <span className="flex-1 text-[12px]">{NAV_LABELS[page]}</span>
-            <span className="ui-micro shrink-0 text-muted">{NAV_GROUP_LABEL[navGroupOf(page)]}</span>
-            <button
-              type="button"
-              aria-label={`上移 ${NAV_LABELS[page]}`}
-              disabled={index === 0}
-              onClick={() => move(page, -1)}
-              className={`${btnGhost} px-2 py-0.5 disabled:opacity-35`}
-            >
-              上移
-            </button>
-            <button
-              type="button"
-              aria-label={`下移 ${NAV_LABELS[page]}`}
-              disabled={index === navOrder.length - 1}
-              onClick={() => move(page, 1)}
-              className={`${btnGhost} px-2 py-0.5 disabled:opacity-35`}
-            >
-              下移
-            </button>
+            {index >= DEFAULT_NAV_ORDER.length ? (
+              <span className="ui-micro shrink-0 text-muted">已装插件 · 固定末位</span>
+            ) : (
+              <span className="ui-micro shrink-0 text-muted">{NAV_GROUP_LABEL[navGroupOf(page)]}</span>
+            )}
           </li>
         ))}
-      </ul>
+      </ol>
+      {installedPages.length === 0 ? (
+        <p className="mt-2 ui-caption">当前没有已安装的插件页面；到「插件」页安装后会自动出现在导航最下面。</p>
+      ) : null}
     </section>
   );
 }

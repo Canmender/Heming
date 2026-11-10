@@ -241,7 +241,7 @@ describe("PluginsPage · 仓库 Tab（d.95）", () => {
   });
 });
 
-describe("PluginsPage · 模块从云端安装", () => {
+describe("PluginsPage · 插件从云端安装", () => {
   it("原生页面不显示任何模块卡片；pageView=modules 只落到插件 Tab", () => {
     useModuleStore.getState().reset();
     renderPage();
@@ -251,41 +251,41 @@ describe("PluginsPage · 模块从云端安装", () => {
     expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
     // 未安装的模块不再写死渲染
     for (const name of ["幕僚", "信息中枢", "自动化"]) {
-      expect(screen.queryByRole("region", { name: `插件模块 ${name}` })).toBeNull();
+      expect(screen.queryByRole("region", { name: `插件 ${name}` })).toBeNull();
     }
-    expect(screen.getByRole("button", { name: "从云端安装模块" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "从云端安装插件" })).toBeInTheDocument();
   });
 
-  it("从云端安装模块：目录里的模块才出现；安装后可启停/删除", async () => {
+  it("从云端安装插件：目录里的模块才出现；安装后可启停/删除", async () => {
     useModuleStore.getState().reset();
     renderPage();
 
-    fireEvent.click(screen.getByRole("button", { name: "从云端安装模块" }));
-    const dialog = screen.getByRole("dialog", { name: "从云端安装模块" });
+    fireEvent.click(screen.getByRole("button", { name: "从云端安装插件" }));
+    const dialog = screen.getByRole("dialog", { name: "从云端安装插件" });
     expect(await within(dialog).findByText("幕僚")).toBeInTheDocument();
     expect(within(dialog).getByText("信息中枢")).toBeInTheDocument();
     expect(within(dialog).getByText("自动化")).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "安装模块 幕僚" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "安装插件 幕僚" }));
     expect(useModuleStore.getState().installed.staff).toBe(true);
     expect(useModuleStore.getState().enabled.staff).toBe(true);
 
     fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
-    const card = screen.getByRole("region", { name: "插件模块 幕僚" });
+    const card = screen.getByRole("region", { name: "插件 幕僚" });
     expect(card).toHaveTextContent("模块");
     expect(card).toHaveTextContent("无模块依赖");
 
-    fireEvent.click(within(card).getByRole("switch", { name: "停用模块 幕僚" }));
+    fireEvent.click(within(card).getByRole("switch", { name: "停用插件 幕僚" }));
     expect(useModuleStore.getState().enabled.staff).toBe(false);
 
-    fireEvent.click(within(card).getByRole("button", { name: "删除模块 幕僚" }));
+    fireEvent.click(within(card).getByRole("button", { name: "删除插件 幕僚" }));
     fireEvent.click(
       within(screen.getByRole("dialog", { name: "删除「幕僚」" })).getByRole("button", {
         name: "删除",
       }),
     );
     expect(useModuleStore.getState().installed.staff).toBe(false);
-    expect(screen.queryByRole("region", { name: "插件模块 幕僚" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "插件 幕僚" })).toBeNull();
     useModuleStore.getState().reset();
   });
 });

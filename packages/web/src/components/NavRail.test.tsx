@@ -191,39 +191,24 @@ describe("NavRail 图标轨（A 方案）", () => {
 });
 
 
-describe("NavRail 导航顺序可自定义", () => {
+describe("NavRail 导航顺序固定（d.123：不可自定义）", () => {
   beforeEach(() => {
     useUiStore.setState({ page: "home", navOrder: [...DEFAULT_NAV_ORDER] });
   });
 
-  it("按 store.navOrder 渲染，且快捷键徽标仍绑页本身", () => {
-    useUiStore.setState({
-      navOrder: ["settings", "home", "team", "chat", "plugins", "memory"],
-    });
+  it("始终按固定顺序渲染 8 项：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置", () => {
     render(<NavRail />);
     const labels = screen
       .getAllByRole("button")
-      .map((b) => b.getAttribute("aria-label"))
-      .filter((l): l is string => Boolean(l?.startsWith("主页") || l?.startsWith("团队") || l?.startsWith("智能体") || l?.startsWith("插件") || l?.startsWith("记忆") || l?.startsWith("设置")));
-    // 顺序跟着 store 走
-    expect(labels[0]).toContain("设置");
-    expect(labels[1]).toContain("主页");
-    // 但 Alt 键位仍按页固定：设置永远是 Alt6、主页永远是 Alt1
-    expect(labels[0]).toContain("Alt6");
-    expect(labels[1]).toContain("Alt1");
+      .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
+      .filter((label) => ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"].includes(label));
+    expect(labels).toEqual(["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"]);
+    // 数字键仍绑页本身
+    expect(screen.getByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "设置 Alt6" })).toBeInTheDocument();
   });
 
-  it("存储里缺项时自动补齐，不漏渲染任何导航", () => {
-    useUiStore.setState({ navOrder: ["memory", "home"] });
-    render(<NavRail />);
-    for (const name of ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"]) {
-      expect(screen.getAllByRole("button", { name: new RegExp(name) }).length).toBeGreaterThan(0);
-    }
-  });
-
-  it("旧导航顺序里的已合并页（团队看板/技能区/接口区/通用智能体）折叠成宿主页，不重复渲染", () => {
-    // 老用户的 localStorage 里可能还留着合并前的 13 项：读回时必须折叠、去重，
-    // 否则导航轨会凭空多出几个点不开的入口。
+  it("存储里残留自定义顺序/旧页 id 时不生效，导航仍是固定 8 项且不重复", () => {
     useUiStore.getState().setNavOrder([
       "settings",
       "workspace",
@@ -234,20 +219,24 @@ describe("NavRail 导航顺序可自定义", () => {
       "memory",
     ] as never);
     render(<NavRail />);
-    expect(useUiStore.getState().navOrder).toEqual([
-      "settings",
-      "team",
-      "home",
-      "plugins",
-      "chat",
-      "memory",
-      "vault",
-      "model",
-    ]);
-    // 团队/插件/智能体各只出现一次
+    const labels = screen
+      .getAllByRole("button")
+      .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
+      .filter((label) => ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"].includes(label));
+    expect(labels).toEqual(["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"]);
     for (const name of ["团队", "插件", "智能体"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(`^${name}( |$)`) }).length).toBe(1);
     }
+  });
+
+  it("已装模块入口追加在 8 项之后，不改变前 8 项顺序", () => {
+    useModuleStore.getState().install("workflows");
+    render(<NavRail />);
+    const labels = screen
+      .getAllByRole("button")
+      .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
+      .filter((label) => ["主页", "设置", "工作流"].includes(label));
+    expect(labels).toEqual(["主页", "设置", "工作流"]);
   });
 });
 

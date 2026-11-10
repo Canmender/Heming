@@ -14,7 +14,7 @@ import { BTN_DANGER_SM, BTN_GHOST, BTN_PRIMARY, CHIP, HINT, Switch } from "./sha
 /**
  * 模块卡片（插件页 · 插件 Tab）。
  *
- * 模块由**云端目录**提供（`GET /api/modules`），用户在「从云端安装模块」弹窗里选择；
+ * 模块由**云端目录**提供（`GET /api/modules`），用户在「从云端安装插件」弹窗里选择；
  * 安装包里不携带任何模块。装过之后才在本列表里出现，可打开页面、停用或删除。
  * 每个卡片回答四个问题：**它是什么、带了什么、依赖谁、删除会怎样**。
  *
@@ -86,7 +86,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
   return (
     <section
       role="region"
-      aria-label={`插件模块 ${mod.name}`}
+      aria-label={`插件 ${mod.name}`}
       data-module-card={mod.id}
       data-enabled={installed && enabled}
       className="ui-card plugin-card p-4"
@@ -98,7 +98,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="ui-section-title">{mod.name}</span>
-            <span className={CHIP}>模块</span>
+            <span className={CHIP}>插件</span>
             <span className="ui-micro text-muted">{mod.version}</span>
             <span className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${statusTone}`}>
               {statusLabel}
@@ -110,7 +110,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
         <div className="flex shrink-0 items-center gap-2">
           {installed ? (
             <Switch
-              label={`${enabled ? "停用" : "启用"}模块 ${mod.name}`}
+              label={`${enabled ? "停用" : "启用"}插件 ${mod.name}`}
               checked={enabled}
               onChange={(next) => {
                 setEnabled(mod.id, next);
@@ -121,12 +121,12 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
           ) : (
             <button
               type="button"
-              aria-label={`安装模块 ${mod.name}`}
+              aria-label={`安装插件 ${mod.name}`}
               className={BTN_PRIMARY}
               onClick={() => {
                 install(mod.id);
                 setTick((n) => n + 1);
-                setNotice(`已安装「${mod.name}」`);
+                setNotice(`已安装「${mod.name}」，入口已加到左侧导航最下面`);
               }}
             >
               安装
@@ -193,7 +193,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
             </span>
             <button
               type="button"
-              aria-label={`删除模块 ${mod.name}`}
+              aria-label={`删除插件 ${mod.name}`}
               className={`${BTN_DANGER_SM} ml-auto`}
               onClick={() => {
                 setNotice(null);
