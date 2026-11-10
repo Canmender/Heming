@@ -81,17 +81,17 @@ const GROUPS: readonly GroupMeta[] = [
 
 /* ------------------------------------------------------------------ 样式 */
 
-const cardCls = "rounded-xl border border-line bg-white p-4 shadow-card";
+const cardCls = "ui-card p-4";
 const cardInnerCls = "rounded-lg border border-line p-3";
 const chipCls = "ui-chip";
 const badgeCls = "ui-chip";
 const btnGhost = "ui-btn ui-btn-md ui-btn-ghost";
 const btnGhostSm = "ui-btn ui-btn-sm ui-btn-ghost";
-const btnDangerSm = "ui-btn ui-btn-sm ui-btn-ghost text-[#b42318]";
+const btnDangerSm = "ui-btn ui-btn-sm ui-btn-ghost text-[var(--danger)]";
 const btnPrimarySm = "ui-btn ui-btn-sm ui-btn-primary";
 const inputSmCls = "ui-input";
 const hintCls = "ui-caption";
-const errorCls = "ui-body-sm text-[#b42318]";
+const errorCls = "ui-body-sm text-[var(--danger)]";
 const okCls = "ui-body-sm text-muted";
 /** 技能内容的输入框：与「导入 SKILL.md」的 textarea 同款（既有样式，不新增档位）。 */
 const contentTextareaCls =
@@ -222,7 +222,7 @@ function SkillCreateDialog({
         aria-modal="true"
         aria-label="新建技能"
         onSubmit={submit}
-        className="max-h-[90vh] w-[440px] max-w-full overflow-y-auto rounded-xl border border-line bg-white p-4 shadow-card"
+        className="max-h-[90vh] w-[440px] max-w-full overflow-y-auto ui-card p-4"
       >
         <div className="mb-3 flex items-center gap-2">
           <h2 className="text-[13px] font-bold">新建技能</h2>
@@ -231,13 +231,13 @@ function SkillCreateDialog({
             type="button"
             aria-label="关闭新建技能"
             onClick={onClose}
-            className="ml-auto rounded-sm p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
+            className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
           >
             <XIcon width={14} height={14} aria-hidden="true" />
           </button>
         </div>
 
-        <div className="mb-3 rounded-lg border border-line-soft bg-[#fafafa] p-2.5">
+        <div className="mb-3 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-2.5">
           <div className={hintCls}>从模板开始（可选）</div>
           <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="技能模板">
             {SKILL_TEMPLATES.map((template) => (
@@ -481,7 +481,7 @@ function SkillDetailDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={`技能详情 ${skill.name}`}
-        className="relative flex h-full w-[380px] max-w-[92vw] flex-col border-l border-line bg-white shadow-card"
+        className="relative flex h-full w-[380px] max-w-[92vw] flex-col border-l border-line bg-[var(--surface)] shadow-card"
       >
         <div className="flex items-start justify-between gap-3 border-b border-line-soft px-4 py-3">
           <div className="min-w-0">
@@ -506,7 +506,7 @@ function SkillDetailDrawer({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <div className="text-[12px] font-bold text-muted">描述</div>
-          <p className="mt-1 break-words text-[12px] text-[#555]">
+          <p className="mt-1 break-words text-[12px] text-[var(--body)]">
             {skill.description || "暂无描述"}
           </p>
 
@@ -521,7 +521,7 @@ function SkillDetailDrawer({
           </div>
 
           <div className="mt-3 text-[12px] font-bold text-muted">指令</div>
-          <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-line bg-[#fafafa] p-2 font-sans text-[11px] leading-5 text-[#333]">
+          <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-line bg-[var(--subtle-2)] p-2 font-sans text-[11px] leading-5 text-[var(--body)]">
             {skill.instructions || "暂无指令"}
           </pre>
         </div>
@@ -802,7 +802,7 @@ export function SkillsView({
                   setMsg(null);
                   setAddFor(group.key);
                 }}
-                className="flex h-5 w-5 items-center justify-center rounded-sm border border-line text-muted hover:bg-[#f3f3f3] disabled:opacity-40"
+                className="flex h-5 w-5 items-center justify-center rounded-sm border border-line text-muted hover:bg-[var(--subtle-3)] disabled:opacity-40"
               >
                 <PlusIcon width={12} height={12} />
               </button>
@@ -854,7 +854,7 @@ export function SkillsView({
                     key={skill.id}
                     role="group"
                     aria-label={`技能卡 ${skill.name}`}
-                    className={`group flex flex-col ${cardInnerCls} transition-colors duration-150 hover:bg-[#fcfcfc]`}
+                    className={`group flex flex-col ${cardInnerCls} transition-colors duration-150 hover:bg-[var(--subtle-2)]`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -1083,7 +1083,7 @@ export function SkillsView({
                             onChange={(next) => toggleEnabled(skill, next)}
                           />
                         </td>
-                        <td className="ui-numeric text-right text-[#555]">
+                        <td className="ui-numeric text-right text-[var(--body)]">
                           {usages[skill.id]?.count ?? 0}
                         </td>
                         <td className="ui-caption">{formatAt(usages[skill.id]?.at)}</td>
@@ -1264,7 +1264,7 @@ export function SkillsView({
             role="dialog"
             aria-modal="true"
             aria-label="添加技能"
-            className="w-[440px] max-w-full rounded-xl border border-line bg-white p-4 shadow-card"
+            className="w-[440px] max-w-full ui-card p-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-2">
@@ -1275,7 +1275,7 @@ export function SkillsView({
                 type="button"
                 aria-label="关闭添加面板"
                 onClick={() => setAddFor(null)}
-                className="ml-auto rounded-sm p-1 text-muted hover:bg-[#f3f3f3] hover:text-ink"
+                className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
               >
                 <XIcon width={14} height={14} aria-hidden="true" />
               </button>

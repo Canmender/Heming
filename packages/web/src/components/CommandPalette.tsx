@@ -416,7 +416,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
          * 用 `has-[:focus-visible]` 让环只在**键盘**聚焦时出现：鼠标打开面板不出环，
          * 与全站「鼠标不加噪音」的口径一致；也不再用 JS 状态跟踪焦点。
          */
-        className="w-[560px] max-w-[92vw] overflow-hidden rounded-xl border border-line bg-white shadow-[0_12px_40px_rgba(0,0,0,0.18)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ink"
+        className="w-[560px] max-w-[92vw] overflow-hidden rounded-xl border border-line bg-[var(--surface)] shadow-[0_12px_40px_rgba(0,0,0,0.18)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ink"
         onMouseDown={(e) => e.stopPropagation()}
         // 键盘约定挂在面板容器上而不是输入框：焦点移到结果项后（Tab/方向键），
         // Esc 与上下选择仍然生效，不需要先把焦点移回输入框。
@@ -443,7 +443,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
            * Windows 高对比模式下的可见性（2.4.7/1.4.11），这里保持一致。
            */
           style={{ outline: "2px solid transparent" }}
-          className="w-full border-b border-line-strong px-3.5 py-2.5 text-[13px] outline-hidden placeholder:text-[#bbb]"
+          className="w-full border-b border-line-strong px-3.5 py-2.5 text-[13px] outline-hidden placeholder:text-muted"
         />
 
         <div
@@ -475,13 +475,13 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     onMouseEnter={() => setCursor(index)}
                     onClick={() => execute(item)}
                     className={`flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-[12px] ${
-                      selected ? "bg-[#f4f4f4]" : ""
+                      selected ? "bg-[var(--subtle-3)]" : ""
                     }`}
                   >
                     {item.kind === "member" ? (
                       <Avatar user={{ displayName: item.name, avatar: item.avatar }} size={22} />
                     ) : (
-                      <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm bg-[#f0f0f0] text-[10px] text-muted">
+                      <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm bg-[var(--subtle-3)] text-[10px] text-muted">
                         {kindGlyph(item.kind)}
                       </span>
                     )}

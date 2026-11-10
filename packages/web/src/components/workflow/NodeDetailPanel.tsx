@@ -109,7 +109,7 @@ export function NodeDetailPanel({
   return (
     <aside
       aria-label={`节点详情：${node.name}`}
-      className="flex h-full w-[340px] shrink-0 flex-col border-l border-line-soft bg-white"
+      className="flex h-full w-[340px] shrink-0 flex-col border-l border-line-soft bg-[var(--surface)]"
     >
       <div className="flex shrink-0 items-start justify-between gap-2 border-b border-line-soft px-3 py-2">
         <div className="min-w-0">
@@ -122,7 +122,7 @@ export function NodeDetailPanel({
           type="button"
           onClick={onClose}
           aria-label="关闭节点详情"
-          className="shrink-0 rounded-sm p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
+          className="shrink-0 rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
         >
           <XIcon width={16} height={16} />
         </button>
@@ -277,7 +277,7 @@ export function NodeDetailPanel({
                           delete next[type];
                           onChange({ credentials: Object.keys(next).length > 0 ? next : undefined });
                         }}
-                        className="shrink-0 text-[11px] text-[#b42318] hover:underline"
+                        className="shrink-0 text-[11px] text-[var(--danger)] hover:underline"
                       >
                         移除
                       </button>
@@ -334,7 +334,7 @@ export function NodeDetailPanel({
               className="ui-input w-full font-mono text-[11px] leading-5"
             />
             {pinError ? (
-              <p role="alert" className="mt-1 ui-body-sm text-[#b42318]">
+              <p role="alert" className="mt-1 ui-body-sm text-[var(--danger)]">
                 {pinError}
               </p>
             ) : null}
@@ -375,7 +375,7 @@ export function NodeDetailPanel({
                     className={`rounded-sm border px-1.5 py-0.5 text-[11px] ${
                       ioView === key
                         ? "border-[color:var(--line)] bg-[color:var(--panel)] font-medium"
-                        : "border-transparent text-muted hover:bg-[#f5f5f5]"
+                        : "border-transparent text-muted hover:bg-[var(--subtle-2)]"
                     }`}
                   >
                     {label}

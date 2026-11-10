@@ -20,7 +20,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
   return (
     <section
       aria-label="开始使用"
-      className="rounded-xl border border-[#e6e6e6] bg-white p-4 shadow-card"
+      className="rounded-xl border border-line-soft bg-[var(--surface)] p-4 shadow-card"
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
@@ -46,7 +46,7 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
             key={step.id}
             aria-label={`${step.title}${step.done ? "（已完成）" : "（未完成）"}`}
             className={`flex flex-col gap-1.5 rounded-lg border px-3 py-2.5 ${
-              step.done ? "border-[#abefc6] bg-[#ecfdf3]" : "border-line-soft bg-[#fafafa]"
+              step.done ? "border-[var(--success-line)] bg-[var(--success-soft)]" : "border-line-soft bg-[var(--subtle-2)]"
             }`}
           >
             <div className="flex items-center gap-2">
@@ -54,15 +54,15 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
                 aria-hidden="true"
                 className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold ${
                   step.done
-                    ? "border-[#067647] bg-[#067647] text-white"
-                    : "border-[#c4c4c4] bg-white text-[#555]"
+                    ? "border-[var(--success)] bg-[var(--success)] text-white"
+                    : "border-[var(--line-strong)] bg-[var(--surface)] text-[var(--body)]"
                 }`}
               >
                 {index + 1}
               </span>
               <span className="min-w-0 truncate text-[12px] font-bold">{step.title}</span>
               {step.done && (
-                <span className="ml-auto shrink-0 text-[10px] font-medium text-[#067647]">
+                <span className="ml-auto shrink-0 text-[10px] font-medium text-[var(--success)]">
                   已完成
                 </span>
               )}

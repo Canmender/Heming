@@ -123,7 +123,7 @@ export function ExpressionInput({
         <label htmlFor={inputId} className="ui-caption mb-1 block font-medium text-ink">
           {label}
           {required ? (
-            <span className="ml-0.5 text-[#b42318]" aria-hidden="true">
+            <span className="ml-0.5 text-[var(--danger)]" aria-hidden="true">
               *
             </span>
           ) : null}
@@ -170,7 +170,7 @@ export function ExpressionInput({
               disabled={disabled}
               aria-expanded={showVariables}
               onClick={() => setShowVariables((current) => !current)}
-              className="rounded-sm border border-line px-1.5 py-0.5 text-[11px] text-muted hover:bg-[#f5f5f5] disabled:opacity-40"
+              className="rounded-sm border border-line px-1.5 py-0.5 text-[11px] text-muted hover:bg-[var(--subtle-2)] disabled:opacity-40"
             >
               插入变量
             </button>
@@ -189,7 +189,7 @@ export function ExpressionInput({
           <div
             role="listbox"
             aria-label="常用变量"
-            className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-line-soft bg-white p-1 shadow-card"
+            className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-line-soft bg-[var(--surface)] p-1 shadow-card"
           >
             {COMMON_VARIABLES.map((variable) => (
               <button
@@ -198,7 +198,7 @@ export function ExpressionInput({
                 role="option"
                 aria-selected={false}
                 onClick={() => insert(variable.value)}
-                className="flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-1 text-left hover:bg-[#f5f5f5]"
+                className="flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-1 text-left hover:bg-[var(--subtle-2)]"
               >
                 <span className="text-[12px]">{variable.label}</span>
                 <span className="ui-caption font-mono text-[10px]">{variable.value}</span>
@@ -211,7 +211,7 @@ export function ExpressionInput({
         <p className="ui-caption mt-1">整段就是一个表达式：求值结果保留原始类型（数字/数组/对象）。</p>
       ) : null}
       {unclosed ? (
-        <p className="mt-1 ui-body-sm text-[#b45309]">
+        <p className="mt-1 ui-body-sm text-[var(--warn)]">
           {"表达式少了右括号 `}}`，请补全。"}
         </p>
       ) : null}
@@ -221,7 +221,7 @@ export function ExpressionInput({
         </p>
       ) : null}
       {error ? (
-        <p id={errorId} role="alert" className="mt-1 ui-body-sm text-[#b42318]">
+        <p id={errorId} role="alert" className="mt-1 ui-body-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}

@@ -96,14 +96,14 @@ function CodeBlock({
   const label = lang?.trim() || "text";
 
   return (
-    <div className="my-1.5 overflow-hidden rounded-lg border border-line bg-[#fafafa]">
+    <div className="my-1.5 overflow-hidden rounded-lg border border-line bg-[var(--subtle-2)]">
       <div className="flex items-center justify-between border-b border-line-soft px-2 py-1">
         <span className="text-[10px] font-medium text-muted">{label}</span>
         <button
           type="button"
           aria-label="复制代码"
           onClick={() => void copy()}
-          className="rounded-sm px-1.5 py-0.5 text-[10px] text-muted hover:bg-[#f0f0f0] hover:text-[#333]"
+          className="rounded-sm px-1.5 py-0.5 text-[10px] text-muted hover:bg-[var(--subtle-3)] hover:text-[var(--body)]"
         >
           {copied ? "已复制" : "复制"}
         </button>
@@ -115,7 +115,7 @@ function CodeBlock({
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="overflow-x-auto p-2 font-mono text-[12px] leading-relaxed text-[#333]">
+        <pre className="overflow-x-auto p-2 font-mono text-[12px] leading-relaxed text-[var(--body)]">
           <code>{code}</code>
         </pre>
       )}
@@ -126,7 +126,7 @@ function CodeBlock({
 /** 内联代码：浅底等宽，与正文区分但不喧宾夺主。 */
 function InlineCode({ children }: { children?: React.ReactNode }) {
   return (
-    <code className="rounded-sm bg-[#f2f2f2] px-1 py-[1px] font-mono text-[0.92em] text-[#c7254e]">
+    <code className="rounded-sm bg-[var(--subtle-3)] px-1 py-[1px] font-mono text-[0.92em] text-[var(--danger)]">
       {children}
     </code>
   );
@@ -217,7 +217,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
           href={href}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-[#2563eb] underline underline-offset-2 hover:text-[#1d4ed8]"
+          className="text-[var(--info)] underline underline-offset-2 hover:text-[var(--info)]"
         >
           {children}
         </a>
@@ -242,7 +242,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
         </div>
       ),
       th: ({ children }: any) => (
-        <th className="border border-line-soft bg-[#fafafa] px-1.5 py-1 text-left font-bold">
+        <th className="border border-line-soft bg-[var(--subtle-2)] px-1.5 py-1 text-left font-bold">
           {children}
         </th>
       ),

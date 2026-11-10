@@ -12,6 +12,25 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.130.3.54.0",
+    "date": "2026-11-10",
+    "title": "删除未路由死代码；剩余可见组件 token 收口",
+    "bullets": [
+      "删除 `TaskAreaPage` 与 `RolloutTimeline`（组件 + 测试）：全仓已无生产引用（任务区早已并入智能体页），两者合计 115 处写死样式与一批只服务自身的测试，删掉后维护面更小。",
+      "`RegistryPage` 保留（PluginsPage 的 MCP 注册表发现流程在用）。",
+      "RegistryPage / RegistryInstallCard、SkillsPage、OnboardingCard、MarkdownMessage、InfohubHomeCard、ChatEmptyState、WidgetSettingsCard、PreviewPane、ExpressionInput、NodeDetailPanel、CommandPalette：",
+      "全 `components` 目录写死视觉类剩余约 96 处，集中在工作流画布节点色板、图表数据色、个别弹窗/表单（属于数据可视化或刻意品牌色，不再强行套语义 token）。",
+      "Core 页面（Home / Team / Memory / Settings / Plugins / 对话 / 知识库 / 模型）与模块页审计均为 0。",
+      "`web` 339 文件 / 4802 例（删除 2 个死代码测试文件后）全绿；`server` 271、`shared` 106、`desktop` 772；`pnpm -r typecheck` 六包零错误；编码检查 OK。"
+    ],
+    "paragraphs": [
+      "① 死代码清理",
+      "② 剩余可见组件 token 收口绿/红/琥珀状态色、链接色、代码块、卡壳、搜索选中态全部改 token；`rounded-xl bg-white shadow-card` → `.ui-card`。",
+      "③ 收尾审计",
+      "验证"
+    ]
+  },
+  {
     "version": "d.130.3.53.0",
     "date": "2026-11-10",
     "title": "会话列表分页（不再全量拉取）",

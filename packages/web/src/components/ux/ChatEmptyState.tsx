@@ -16,7 +16,7 @@ export interface ChatEmptyStateProps {
 export function ChatEmptyState({ examples, onPick }: ChatEmptyStateProps) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-      <div className="rounded-2xl border border-line-soft bg-white p-3 text-muted" aria-hidden="true">
+      <div className="rounded-2xl border border-line-soft bg-[var(--surface)] p-3 text-muted" aria-hidden="true">
         <svg
           width={22}
           height={22}
@@ -30,7 +30,7 @@ export function ChatEmptyState({ examples, onPick }: ChatEmptyStateProps) {
           <path d="M4 5h16v11H8l-4 3z" />
         </svg>
       </div>
-      <div className="mt-3 text-[13px] font-bold text-[#555]">还没有消息</div>
+      <div className="mt-3 text-[13px] font-bold text-[var(--body)]">还没有消息</div>
       <div className="mt-1 text-[11px] text-muted">发送第一条消息，开始这段对话。</div>
 
       <div className="mt-4 w-full max-w-[520px]">
@@ -41,7 +41,7 @@ export function ChatEmptyState({ examples, onPick }: ChatEmptyStateProps) {
               <button
                 type="button"
                 onClick={() => onPick(example.text)}
-                className={`w-full rounded-lg border border-line bg-white px-3 py-2 text-left text-[12px] leading-5 text-[#555] hover:border-[#c4c4c4] hover:bg-[#fafafa] ${FOCUS_RING_TIGHT}`}
+                className={`w-full rounded-lg border border-line bg-[var(--surface)] px-3 py-2 text-left text-[12px] leading-5 text-[var(--body)] hover:border-[var(--line-strong)] hover:bg-[var(--subtle-2)] ${FOCUS_RING_TIGHT}`}
               >
                 {example.text}
               </button>

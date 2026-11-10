@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.130.3.54.0",
+    "date": "2026-11-10",
+    "title": "清掉不再使用的旧任务页，颜色收尾",
+    "bullets": [
+      "删除已被智能体页替代的旧「任务区 / 回放时间线」代码，减少无用界面与维护负担。",
+      "插件注册表、技能页、首页引导卡、Markdown、信息中枢首页卡、命令面板等剩余浅色块统一主题色，深色模式更一致。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.130.3.53.0",
     "date": "2026-11-10",
     "title": "对话多了也不卡：会话列表开始分页",

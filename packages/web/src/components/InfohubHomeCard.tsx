@@ -9,7 +9,7 @@ import { useUiStore } from "../store/ui.js";
  * 这里不复制那套状态机。浏览器端没有本机桥，整张卡不渲染。
  */
 
-const CARD = "rounded-xl border border-[#ececec] bg-white p-3 shadow-card";
+const CARD = "rounded-xl border border-line-soft bg-[var(--surface)] p-3 shadow-card";
 const LINK = "ui-link";
 
 export function InfohubHomeCard() {
@@ -40,12 +40,12 @@ export function InfohubHomeCard() {
         <p className="mt-1 text-[11px] leading-relaxed text-muted">
           正在后台连接本机 QQ / 微信归档，完成后可直接检索归档、看日程。
         </p>
-        {error && <p role="alert" className="mt-1 text-[11px] text-[#b42318]">{error}</p>}
+        {error && <p role="alert" className="mt-1 text-[11px] text-[var(--danger)]">{error}</p>}
         {error && (
           <button
             type="button"
             onClick={() => void useInfohubStore.getState().ensureRunning()}
-            className="mt-1.5 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
+            className="mt-1.5 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[var(--subtle-2)]"
           >
             重试
           </button>
@@ -62,7 +62,7 @@ export function InfohubHomeCard() {
     <section className={CARD} aria-label="本机归档">
       <div className="mb-1.5 flex items-center gap-2">
         <div className="text-[12px] font-bold text-muted">本机归档</div>
-        <span className="rounded-sm border border-line bg-[#fafafa] px-1.5 text-[10px] text-muted">已连接</span>
+        <span className="rounded-sm border border-line bg-[var(--subtle-2)] px-1.5 text-[10px] text-muted">已连接</span>
         <div className="ml-auto flex items-center gap-1">
           <button type="button" className={LINK} onClick={() => openInfohub({ tab: "search" })}>
             检索归档
@@ -74,7 +74,7 @@ export function InfohubHomeCard() {
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-        <span className={`rounded-full border border-line px-2 py-0.5 ${summary && summary.overdue > 0 ? "text-[#b42318]" : "text-muted"}`}>
+        <span className={`rounded-full border border-line px-2 py-0.5 ${summary && summary.overdue > 0 ? "text-[var(--danger)]" : "text-muted"}`}>
           逾期 {summary?.overdue ?? 0}
         </span>
         <span className="rounded-full border border-line px-2 py-0.5 text-muted">今天 {summary?.today ?? 0}</span>
@@ -98,7 +98,7 @@ export function InfohubHomeCard() {
               key={item.id}
               type="button"
               onClick={() => openInfohub({ tab: "agenda" })}
-              className="flex items-center gap-2 rounded-md px-1.5 py-1 text-left text-[11px] hover:bg-[#f7f7f7]"
+              className="flex items-center gap-2 rounded-md px-1.5 py-1 text-left text-[11px] hover:bg-[var(--subtle-2)]"
             >
               <span className="min-w-0 flex-1 truncate">
                 <span className="font-medium">{item.title}</span>
@@ -111,7 +111,7 @@ export function InfohubHomeCard() {
         </div>
       )}
 
-      {error && <p role="alert" className="mt-1.5 text-[11px] text-[#b42318]">{error}</p>}
+      {error && <p role="alert" className="mt-1.5 text-[11px] text-[var(--danger)]">{error}</p>}
     </section>
   );
 }

@@ -114,7 +114,7 @@ export function WidgetSettingsCard() {
 
   if (!available) {
     return (
-      <section aria-label="桌面小组件" className="rounded-xl border border-line bg-white p-4 shadow-card">
+      <section aria-label="桌面小组件" className="ui-card p-4">
         <p className="ui-body-sm font-medium">桌面小组件</p>
         <p className="mt-1 ui-caption">仅桌面端可用：浏览器里没有桌面窗口能力。</p>
       </section>
@@ -122,7 +122,7 @@ export function WidgetSettingsCard() {
   }
 
   return (
-    <section aria-label="桌面小组件" className="rounded-xl border border-line bg-white p-4 shadow-card">
+    <section aria-label="桌面小组件" className="ui-card p-4">
       <div className="flex items-center gap-2">
         <span className="ui-body-sm font-bold">桌面小组件</span>
         {saved && (
@@ -136,13 +136,13 @@ export function WidgetSettingsCard() {
       </p>
 
       {error && (
-        <p role="alert" className="mt-2 ui-body-sm text-[#b42318]">
+        <p role="alert" className="mt-2 ui-body-sm text-[var(--danger)]">
           {error}
         </p>
       )}
 
       {petHint && (
-        <div className="mt-3 rounded-lg border border-line bg-[#fafafa] p-3">
+        <div className="mt-3 rounded-lg border border-line bg-[var(--subtle-2)] p-3">
           <p className="ui-body-sm font-medium">桌宠已改为插件</p>
           <p className="mt-1 ui-caption">
             桌宠不再随本体安装，改成可安装的界面插件（`heming.pet`）。装好后设置会出现在这里。
@@ -160,7 +160,7 @@ export function WidgetSettingsCard() {
       {!loaded ? (
         <p className="mt-3 ui-caption">正在读取桌面小组件…</p>
       ) : records.length === 0 ? (
-        <div className="mt-3 rounded-lg bg-[#f7f7f7] px-3 py-2">
+        <div className="mt-3 rounded-lg bg-[var(--subtle-2)] px-3 py-2">
           <p className="ui-caption">
             还没有安装桌面小组件。桌宠已改为插件，装好后这里会出现它的设置。
           </p>
@@ -220,7 +220,7 @@ function WidgetBlock({
       </div>
 
       {record.error && (
-        <p role="alert" className="mt-2 ui-body-sm text-[#b42318]">
+        <p role="alert" className="mt-2 ui-body-sm text-[var(--danger)]">
           无法运行：{record.error}
         </p>
       )}

@@ -72,10 +72,10 @@ function WikiChip({
       className={`mx-0.5 inline-flex max-w-full items-baseline gap-1 truncate rounded-sm border px-1 py-0 align-baseline text-[12px] leading-5 transition-colors ${
         resolved
           ? anchorMiss
-            ? "border-dashed border-warn text-[#b45309] hover:bg-subtle-3"
-            : "border-line text-[#2563eb] hover:border-[#2563eb] hover:bg-subtle-3"
+            ? "border-dashed border-warn text-[var(--warn)] hover:bg-subtle-3"
+            : "border-line text-[var(--info)] hover:border-[var(--info)] hover:bg-subtle-3"
           : ambiguous
-            ? "border-dashed border-warn text-[#b45309] hover:bg-subtle-3"
+            ? "border-dashed border-warn text-[var(--warn)] hover:bg-subtle-3"
             : "border-dashed border-line-strong text-muted hover:border-ink hover:text-ink"
       }`}
     >
@@ -281,7 +281,7 @@ export function PreviewPane({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-[#2563eb] underline underline-offset-2 hover:text-[#1d4ed8]"
+            className="text-[var(--info)] underline underline-offset-2 hover:text-[var(--info)]"
           >
             {children}
           </a>

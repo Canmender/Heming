@@ -37,9 +37,9 @@ export interface RegistryInstallDialogProps {
 const RISK_LABEL = { low: "低风险", medium: "中风险", high: "高风险" } as const;
 
 const RISK_STYLE = {
-  low: "border-[#d7e9dc] bg-[#f2faf5] text-[#1d6b3a]",
-  medium: "border-[#f0e0b8] bg-[#fff8e6] text-[#8a5a00]",
-  high: "border-[#f3c2bd] bg-[#fdf6f6] text-[#b42318]",
+  low: "border-[var(--success-line)] bg-[var(--success-soft)] text-[var(--success)]",
+  medium: "border-[var(--warn-line)] bg-[var(--warn-soft)] text-[var(--warn)]",
+  high: "border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)]",
 } as const;
 
 export function RegistryInstallDialog({ requestId, preview, onDecide }: RegistryInstallDialogProps) {
@@ -73,7 +73,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
         type="button"
         ref={cancelRef}
         onClick={() => finish({ approved: false })}
-        className="ui-btn ui-btn-md ui-btn-ghost text-[#b42318]"
+        className="ui-btn ui-btn-md ui-btn-ghost text-[var(--danger)]"
       >
         取消安装
       </button>
@@ -145,7 +145,7 @@ export function RegistryInstallDialog({ requestId, preview, onDecide }: Registry
         )}
 
         {error && (
-          <p role="alert" className="text-[11px] text-[#b42318]">
+          <p role="alert" className="text-[11px] text-[var(--danger)]">
             {error}
           </p>
         )}
