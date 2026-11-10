@@ -805,6 +805,17 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.json(row);
   });
 
+  // d.128：删除整段会话（消息一并删）。非成员 403、不存在 404。
+  app.delete("/api/conversations/:id", authOnly, (req, res) => {
+    try {
+      store.deleteConversation(req.params.id, userId(req));
+      res.status(204).end();
+    } catch (e) {
+      const msg = (e as Error).message;
+      res.status(msg === "forbidden" ? 403 : msg === "conversation not found" ? 404 : 400).json({ error: msg });
+    }
+  });
+
   app.get("/api/conversations/:id/messages", authOnly, (req, res) => {
     if (!store.isMember(req.params.id, userId(req))) {
       res.status(403).json({ error: "forbidden" });

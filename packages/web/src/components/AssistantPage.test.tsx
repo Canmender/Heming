@@ -115,6 +115,8 @@ beforeEach(() => {
     loadWorkspace: vi.fn(async () => undefined),
     loadAgentsRoster: vi.fn(async () => undefined),
     openAgent: vi.fn(async () => "c1"),
+    renameConversation: vi.fn(async () => undefined),
+    deleteConversation: vi.fn(async () => undefined),
   });
   useLlmStore.setState({
     profiles: [profile],
@@ -571,5 +573,44 @@ describe("智能体页 · 协作 Tab 与意图跳转", () => {
     await waitFor(() => expect(tab("智能体")).toHaveAttribute("aria-selected", "true"));
     expect(screen.getByRole("heading", { name: "新建智能体" })).toBeInTheDocument();
     expect(useUiStore.getState().paletteIntent).toBeNull();
+  });
+});
+
+describe("会话左栏 · 改名与删除（d.128）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useUiStore.setState({ activeConversationId: "c2" });
+    useChatStore.setState({
+      conversations: [{ ...conv2, title: "竞品调研" }] as never,
+      messages: {} as never,
+      agentsRoster: [] as never,
+      loadWorkspace: vi.fn(async () => undefined),
+      loadAgentsRoster: vi.fn(async () => undefined),
+      openAgent: vi.fn(async () => "c2"),
+      renameConversation: vi.fn(async () => undefined),
+      deleteConversation: vi.fn(async () => undefined),
+    });
+  });
+
+  it("⋯ → 重命名：行内输入提交后调用 renameConversation", async () => {
+    render(<AssistantPage />);
+    fireEvent.click(screen.getByRole("button", { name: "会话操作：竞品调研" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "重命名" }));
+    const input = screen.getByLabelText("会话名称");
+    fireEvent.change(input, { target: { value: "竞品调研（新）" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存会话名称" }));
+    await waitFor(() =>
+      expect(useChatStore.getState().renameConversation).toHaveBeenCalledWith("c2", "竞品调研（新）"),
+    );
+  });
+
+  it("⋯ → 删除：二次确认后调用 deleteConversation 并清空当前会话", async () => {
+    render(<AssistantPage />);
+    fireEvent.click(screen.getByRole("button", { name: "会话操作：竞品调研" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
+    expect(screen.getByRole("dialog", { name: "删除这段对话" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    await waitFor(() => expect(useChatStore.getState().deleteConversation).toHaveBeenCalledWith("c2"));
+    expect(useUiStore.getState().activeConversationId).toBeNull();
   });
 });

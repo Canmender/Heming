@@ -144,6 +144,10 @@ export const createAgentConversation = (
     body: JSON.stringify({ agentId, ...options }),
   });
 
+/** 删除整段会话（消息一并删，服务端 204 无响应体）。 */
+export const deleteConversation = (convId: string) =>
+  api<void>(`/api/conversations/${encodeURIComponent(convId)}`, { method: "DELETE" });
+
 /** 改会话标题（空串 = 清除）；返回更新后的会话。 */
 export const updateConversationTitle = (convId: string, title: string) =>
   api<Conversation>(`/api/conversations/${encodeURIComponent(convId)}`, {

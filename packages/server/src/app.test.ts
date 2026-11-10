@@ -185,6 +185,34 @@ describe("auth + team API", () => {
       .send({ title: "bob 改的" });
     expect(forbidden.status).toBe(403);
   });
+
+  it("d.128：DELETE 会话——成员 204、非成员 403、不存在 404", async () => {
+    const a = await register(app, "alicethree");
+    const auth = { Authorization: `Bearer ${a.token}` };
+    const agent = await request(app).post("/api/agents").set(auth).send({ name: "助手3", description: "" });
+    const conv = await request(app)
+      .post("/api/conversations")
+      .set(auth)
+      .send({ agentId: agent.body.id, fresh: true });
+    expect(conv.status).toBe(201);
+
+    const bob = await register(app, "bobthree");
+    expect(
+      (
+        await request(app)
+          .delete(`/api/conversations/${conv.body.id}`)
+          .set("Authorization", `Bearer ${bob.token}`)
+      ).status,
+    ).toBe(403);
+
+    expect(
+      (await request(app).delete(`/api/conversations/${conv.body.id}`).set(auth)).status,
+    ).toBe(204);
+    expect((await request(app).get("/api/conversations").set(auth)).body).toEqual([]);
+    expect(
+      (await request(app).delete(`/api/conversations/${conv.body.id}`).set(auth)).status,
+    ).toBe(404);
+  });
 });
 
 describe("PUT /api/me 个人资料", () => {

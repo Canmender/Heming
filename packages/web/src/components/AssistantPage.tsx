@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Agent } from "@heming/shared";
+import type { Agent, Conversation } from "@heming/shared";
 import { useSessionTab } from "../lib/sessionState.js";
 import { useChatStore } from "../store/chat.js";
 import { useUiStore } from "../store/ui.js";
@@ -9,6 +9,7 @@ import { ChatPage } from "./ChatPage.js";
 import { CollabView } from "./collaboration/CollabView.js";
 import { PageShell } from "./layout/PageShell.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 import { ConversationRail } from "./assistant/ConversationRail.js";
 import { AgentPicker } from "./assistant/AgentPicker.js";
 import { AgentRosterView } from "./assistant/AgentRosterView.js";
@@ -53,6 +54,8 @@ export function AssistantPage() {
   const loadWorkspace = useChatStore((s) => s.loadWorkspace);
   const loadAgentsRoster = useChatStore((s) => s.loadAgentsRoster);
   const openAgent = useChatStore((s) => s.openAgent);
+  const renameConversation = useChatStore((s) => s.renameConversation);
+  const deleteConversation = useChatStore((s) => s.deleteConversation);
   const activeConversationId = useUiStore((s) => s.activeConversationId);
   const openingConversation = useUiStore((s) => s.openConversation);
   /** 一次性视图意图（d.67）：旧「通用智能体」链接折叠成 chat + pageView="tasks"。 */
@@ -67,6 +70,8 @@ export function AssistantPage() {
   const [error, setError] = useState("");
   /** 智能体 Tab 的页面态：null = 名册；有值 = 编辑页（新建/编辑）。 */
   const [editor, setEditor] = useState<AgentEditorState | null>(null);
+  /** 待确认删除的会话（d.128）：rail 只发请求，二次确认在页面上统一做。 */
+  const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
 
   /**
    * 默认落在「对话」。key 沿用 v1 以保留会话记忆；旧值 `work` / `chat` / `tasks`
@@ -161,6 +166,29 @@ export function AssistantPage() {
     }
   };
 
+  /** 会话改名：失败时把原因放进页内错误条（rail 保留输入供重试）。 */
+  const renameConversationTitle = async (convId: string, title: string) => {
+    try {
+      await renameConversation(convId, title);
+    } catch (err) {
+      setError(err instanceof Error && err.message ? `改名失败：${err.message}` : "改名失败");
+      throw err;
+    }
+  };
+
+  /** 删除会话（二次确认后）：删的是整段对话与消息；正停在这段时回选择页。 */
+  const confirmDeleteConversation = async () => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    setDeleteTarget(null);
+    try {
+      await deleteConversation(id);
+      if (activeConversationId === id) useUiStore.setState({ activeConversationId: null });
+    } catch (err) {
+      setError(err instanceof Error && err.message ? `删除会话失败：${err.message}` : "删除会话失败");
+    }
+  };
+
   /** 回到选择页：清空当前会话，主区显示智能体列表（对话仍在左栏，随时可点回来）。 */
   const backToPicker = () => {
     useUiStore.setState({ activeConversationId: null });
@@ -211,6 +239,8 @@ export function AssistantPage() {
         onOpen={openingConversation}
         onNewConversation={backToPicker}
         onNewForAgent={(agentId) => void startChat(agentId, { fresh: true })}
+        onRename={(id, title) => renameConversationTitle(id, title)}
+        onDeleteRequest={(conv) => setDeleteTarget(conv)}
       />
 
       <section className="flex min-w-0 flex-1 flex-col">
@@ -337,6 +367,35 @@ export function AssistantPage() {
         ) : (
           renderAgentsTab()
         )}
+        {deleteTarget ? (
+          <ConfirmDialog
+            title="删除这段对话"
+            onCancel={() => setDeleteTarget(null)}
+            footer={
+              <>
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(null)}
+                  className="ui-btn ui-btn-md ui-btn-ghost ui-caption"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmDeleteConversation()}
+                  className="ui-btn ui-btn-sm ui-btn-danger"
+                >
+                  删除
+                </button>
+              </>
+            }
+          >
+            <p className="text-[12px] leading-6">
+              删除「{deleteTarget.title ?? "这段对话"}」？这段对话的消息会一起删除，**不可恢复**；
+              智能体本身与其他对话不受影响。
+            </p>
+          </ConfirmDialog>
+        ) : null}
       </div>
     </PageShell>
   );

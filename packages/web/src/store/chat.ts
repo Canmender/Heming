@@ -6,6 +6,7 @@ import {
   fetchMessages,
   reencryptMessage,
   updateConversationTitle,
+  deleteConversation as deleteConversationApi,
 } from "../lib/api.js";
 import { listAgents } from "../lib/agentsApi.js";
 import type { RouteAttempt } from "../lib/llmClient.js";
@@ -372,6 +373,8 @@ interface ChatState {
   openAgent: (agentId: string, options?: { fresh?: boolean; title?: string }) => Promise<string>;
   /** 改会话标题（空串 = 清除）；成功后同步本地会话列表，失败抛错由调用方决定是否提示。 */
   renameConversation: (convId: string, title: string) => Promise<void>;
+  /** 删除整段会话（服务端删除消息；本地同步移除会话与缓存消息）。 */
+  deleteConversation: (convId: string) => Promise<void>;
   loadAgentsRoster: () => Promise<void>;
   appendMessage: (m: Message) => void;
   /** 历史消息入列（按 id 与本地独有条目合并；不改动消息的转录字段）。 */
@@ -550,6 +553,13 @@ export const useChatStore = create<ChatState>((set, get) => {
     set({
       conversations: get().conversations.map((c) => (c.id === convId ? { ...c, ...(updated.title ? { title: updated.title } : {}) } : c)),
     });
+  },
+  async deleteConversation(convId) {
+    await deleteConversationApi(convId);
+    set({ conversations: get().conversations.filter((c) => c.id !== convId) });
+    const nextMessages = { ...get().messages };
+    delete nextMessages[convId];
+    set({ messages: nextMessages });
   },
   async loadAgentsRoster() {
     const agentsRoster = await listAgents();

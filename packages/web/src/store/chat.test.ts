@@ -742,3 +742,46 @@ describe("chat store · 会话标题（d.128）", () => {
     expect(useChatStore.getState().conversations[0].title).toBeUndefined();
   });
 });
+
+describe("chat store · 删除会话（d.128）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("deleteConversation：DELETE 成功后移除会话与缓存消息", async () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c1",
+          type: "agent",
+          agent: { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" },
+          unreadCount: 0,
+          lastMessageAt: null,
+        },
+      ] as never,
+      messages: { c1: [msg("m1", "你好")] } as never,
+    });
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await useChatStore.getState().deleteConversation("c1");
+    expect(spy).toHaveBeenCalledWith("/api/conversations/c1", expect.objectContaining({ method: "DELETE" }));
+    expect(useChatStore.getState().conversations).toEqual([]);
+    expect(useChatStore.getState().messages.c1).toBeUndefined();
+  });
+
+  it("deleteConversation：接口失败时抛错、本地不删（保证与服务端一致）", async () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "c2",
+          type: "agent",
+          agent: { id: "a1", owner_id: null, name: "和小鸣", avatar: null, description: "" },
+          unreadCount: 0,
+          lastMessageAt: null,
+        },
+      ] as never,
+    });
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("网络中断"));
+    await expect(useChatStore.getState().deleteConversation("c2")).rejects.toThrow();
+    expect(useChatStore.getState().conversations).toHaveLength(1);
+  });
+});

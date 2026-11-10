@@ -12,6 +12,31 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.129.3.48.0",
+    "date": "2026-11-10",
+    "title": "对话可以改名、可以删除（会话行「⋯」）",
+    "bullets": [
+      "左栏会话行悬停/聚焦出现「⋯」菜单：**重命名**（行内输入，Enter 保存、Esc 取消，空值/未改自动取消）、**删除**（二次确认，文案写明「消息一起删除，不可恢复」）。",
+      "删除正停在的会话时自动回智能体选择页；其它会话与智能体本身不受影响。",
+      "新增 `DELETE /api/conversations/:id`：成员才可删（非成员 403、不存在 404），后台 204。",
+      "Store 删除实现（内存/sqlite 双份）：显式事务里删 `messages` / `message_reads` / `conversation_members` /`conversation_agents` / `conversations`，中途失败回滚，不留半截会话。",
+      "server：内存与 sqlite 双 Store 的「成员可删 / 非成员 forbidden / 不存在 not found」+ REST 用例（+3，共 270）；",
+      "web：会话行改名提交、删除二次确认、store 删除成功/失败一致性（+4，共 4840）；",
+      "真实浏览器（本地 dev）：⋯ 菜单、行内改名态截图核对。",
+      "`web` **341 文件 / 4840 例**、`server` **270**、`shared` 106、`desktop` 772 全绿；`pnpm -r typecheck` 六包零错误；编码检查 OK。",
+      "删除不可恢复（无回收站）；这是用户显式操作，二次确认已写明后果；",
+      "会话改名/删除仅成员可做；标题是列表元数据明文，不含消息正文。"
+    ],
+    "paragraphs": [
+      "上一版把「同一智能体多段会话 + 会话名」做出来了，这一版补上会话管理：",
+      "① 会话行操作",
+      "② 服务端删除",
+      "③ 测试",
+      "验证",
+      "边界"
+    ]
+  },
+  {
     "version": "d.128.3.48.0",
     "date": "2026-11-10",
     "title": "智能体支持多段会话与会话名（Claude Code 式）",

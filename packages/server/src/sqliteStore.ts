@@ -454,6 +454,27 @@ export function createSqliteStore(dbPath: string): SqliteStore {
       }
       return out;
     },
+    deleteConversation(conversationId, userId) {
+      const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      const member = db
+        .prepare("SELECT 1 FROM conversation_members WHERE conv_id = ? AND member_id = ?")
+        .get(conversationId, userId);
+      if (!member) throw new Error("forbidden");
+      // 先删消息/关联再删会话；显式事务保证中途失败不留半截会话（node:sqlite 无 transaction 助手）。
+      db.exec("BEGIN");
+      try {
+        db.prepare("DELETE FROM messages WHERE conv_id = ?").run(conversationId);
+        db.prepare("DELETE FROM message_reads WHERE conv_id = ?").run(conversationId);
+        db.prepare("DELETE FROM conversation_members WHERE conv_id = ?").run(conversationId);
+        db.prepare("DELETE FROM conversation_agents WHERE conv_id = ?").run(conversationId);
+        db.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+    },
     updateConversationTitle(conversationId, userId, title) {
       const conv = db.prepare("SELECT id FROM conversations WHERE id = ?").get(conversationId);
       if (!conv) return false;

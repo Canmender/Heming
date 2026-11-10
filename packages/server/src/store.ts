@@ -118,6 +118,8 @@ export interface Store {
   listConversations(userId: string): Conversation[];
   /** 改会话标题（空串 = 清除）；调用者需先确认成员身份。返回是否落库。 */
   updateConversationTitle(conversationId: string, userId: string, title: string): boolean;
+  /** 删除整段会话（消息一并删）；非成员 forbidden、不存在 conversation not found。 */
+  deleteConversation(conversationId: string, userId: string): void;
   isMember(conversationId: string, userId: string): boolean;
   /** 智能体会话对应的 agent id（非 agent 会话 / 不存在返回 null）。 */
   conversationAgentId(conversationId: string): string | null;
@@ -473,6 +475,13 @@ export function createMemoryStore(): Store {
       if (next) conv.title = next;
       else delete conv.title;
       return true;
+    },
+    deleteConversation(conversationId, userId) {
+      const conv = conversations.get(conversationId);
+      if (!conv) throw new Error("conversation not found");
+      if (!conv.members.includes(userId)) throw new Error("forbidden");
+      conversations.delete(conversationId);
+      messages.delete(conversationId);
     },
     isMember(conversationId, userId) {
       return conversations.get(conversationId)?.members.includes(userId) ?? false;

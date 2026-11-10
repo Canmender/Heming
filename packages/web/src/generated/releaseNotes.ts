@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.129.3.48.0",
+    "date": "2026-11-10",
+    "title": "对话可以改名、可以删除了",
+    "bullets": [
+      "左栏每段对话悬停会出现「⋯」：可以直接改名（回车保存、Esc 取消），也可以删除（会再确认一次，删了不可恢复）。",
+      "删除一段对话只删它自己的消息，智能体和其他对话不受影响。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.128.3.48.0",
     "date": "2026-11-10",
     "title": "智能体可以开多段对话，而且有名字了",

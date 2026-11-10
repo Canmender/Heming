@@ -85,6 +85,22 @@ for (const f of factories) {
       expect(store.updateConversationTitle("nope", a.id, "x")).toBe(false);
     });
 
+    it("deleteConversation：成员可删（消息一起删）、非成员 forbidden、不存在 not found", () => {
+      const a = store.createUser("alice", "h", "爱丽丝");
+      const b = store.createUser("bob", "h", "鲍勃");
+      const agent = store.createAgent(a.id, { name: "助理", description: "" });
+      const c1 = store.createAgentConversation(a.id, agent.id);
+      const c2 = store.createAgentConversation(a.id, agent.id, { fresh: true });
+      store.addMessage(c1.id, "user", a.id, { text: "这条消息应随会话删除" });
+
+      expect(() => store.deleteConversation(c1.id, b.id)).toThrow("forbidden");
+      expect(() => store.deleteConversation("nope", a.id)).toThrow("conversation not found");
+      store.deleteConversation(c1.id, a.id);
+      expect(() => store.listMessages(c1.id)).toThrow("conversation not found");
+      const left = store.listConversations(a.id);
+      expect(left.map((c) => c.id)).toEqual([c2.id]);
+    });
+
     it("agent 不存在报错；agent 被删后该会话从列表消失", () => {
       const a = store.createUser("alice", "h", "爱丽丝");
       expect(() => store.createAgentConversation(a.id, "nope")).toThrow("agent not found");

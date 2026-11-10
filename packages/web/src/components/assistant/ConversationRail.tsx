@@ -16,8 +16,8 @@ import { conversationTitle } from "./conversationTitle.js";
  * - 当前会话高亮（`aria-current`），有草稿的会话带「草稿」标识；
  * - 可折叠成头像窄栏，把横向空间让给对话；整个列表保持 Tab 可达。
  *
- * 会话名由 `conversationTitle` 从已加载消息推导（服务端没有 title 字段，
- * 也不在本轮扩 store），未加载消息的会话回落为最后活跃时间。
+ * 会话名优先用服务端 `title`（d.128）；没有标题时由 `conversationTitle` 从已加载消息推导，
+ * 未加载消息的会话回落为最后活跃时间。悬停行尾「⋯」可改名/删除（删除由调用方二次确认）。
  */
 
 export interface ConversationRailProps {
@@ -33,8 +33,12 @@ export interface ConversationRailProps {
   onOpen: (conversationId: string) => void;
   /** 顶部「新建对话」：回到主区的智能体选择页（由用户挑智能体）。 */
   onNewConversation: () => void;
-  /** 组右侧 `＋`：直接打开/新建与该智能体的会话。 */
+  /** 组右侧 `＋`：直接新建与该智能体的一段新会话。 */
   onNewForAgent: (agentId: string) => void;
+  /** 会话改名（行内菜单）：服务端 PATCH 由调用方负责。 */
+  onRename: (conversationId: string, title: string) => void | Promise<void>;
+  /** 请求删除会话（调用方弹二次确认，rail 不直接删）。 */
+  onDeleteRequest: (conv: Conversation) => void;
 }
 
 /** 最近活跃排序键：没有消息的排最后。 */
@@ -83,6 +87,8 @@ export function ConversationRail({
   onOpen,
   onNewConversation,
   onNewForAgent,
+  onRename,
+  onDeleteRequest,
 }: ConversationRailProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -114,35 +120,160 @@ export function ConversationRail({
   const titleOf = (conv: Conversation): string =>
     conversationTitle(conv, messages[conv.id]);
 
-  /** 会话行：一级信息 = 会话名，右侧时间；有草稿时补「草稿」标识。 */
+  /** d.128：会话行操作菜单 + 行内改名。 */
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  // 点菜单外关闭（回退焦点不抢：菜单只是轻量操作壳）
+  useEffect(() => {
+    if (!menuFor) return;
+    const onDown = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest("[data-conv-menu]")) setMenuFor(null);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [menuFor]);
+
+  const startRename = (conv: Conversation) => {
+    setMenuFor(null);
+    setRenamingId(conv.id);
+    setRenameValue(titleOf(conv));
+  };
+  const cancelRename = () => {
+    setRenamingId(null);
+    setRenameValue("");
+  };
+  const commitRename = async (conv: Conversation) => {
+    const next = renameValue.trim();
+    if (!next || next === titleOf(conv)) {
+      cancelRename();
+      return;
+    }
+    try {
+      await onRename(conv.id, next);
+      cancelRename();
+    } catch {
+      /* 失败保留输入：用户可改完再试，错误提示由调用方（AssistantPage）负责 */
+    }
+  };
+
+  /** 会话行：一级信息 = 会话名，右侧时间；悬停/聚焦出「⋯」操作（改名/删除）。 */
   const renderRow = (conv: Conversation) => {
     const active = conv.id === activeConversationId;
     const title = titleOf(conv);
     const draft = hasDraft(conv.id);
+
+    if (renamingId === conv.id) {
+      return (
+        <div
+          key={conv.id}
+          className="mb-0.5 flex items-center gap-1 rounded-md bg-[var(--subtle-3)] px-2 py-1"
+        >
+          <input
+            aria-label="会话名称"
+            autoFocus
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void commitRename(conv);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelRename();
+              }
+            }}
+            className="ui-input h-7 min-w-0 flex-1 text-[12px]"
+          />
+          <button
+            type="button"
+            aria-label="保存会话名称"
+            className="ui-btn ui-btn-sm ui-btn-primary"
+            onClick={() => void commitRename(conv)}
+          >
+            保存
+          </button>
+          <button
+            type="button"
+            aria-label="取消重命名"
+            className="ui-btn ui-btn-sm ui-btn-ghost"
+            onClick={cancelRename}
+          >
+            取消
+          </button>
+        </div>
+      );
+    }
+
     return (
-      <button
+      <div
         key={conv.id}
-        type="button"
-        title={draft ? `${title}（有草稿）` : title}
-        aria-label={`打开与 ${conv.agent.name} 的对话：${title}`}
-        aria-current={active ? "true" : undefined}
-        onClick={() => onOpen(conv.id)}
-        className={`mb-0.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors ${
+        className={`group relative mb-0.5 flex items-center rounded-md transition-colors ${
           active ? "bg-[var(--subtle-4)]" : "hover:bg-[var(--subtle-2)]"
         }`}
       >
-        <span className="ui-body-sm min-w-0 flex-1 truncate">{title}</span>
-        {draft ? (
-          <span className="ui-chip shrink-0" title="有未发送的草稿">
-            草稿
-          </span>
+        <button
+          type="button"
+          title={draft ? `${title}（有草稿）` : title}
+          aria-label={`打开与 ${conv.agent.name} 的对话：${title}`}
+          aria-current={active ? "true" : undefined}
+          onClick={() => onOpen(conv.id)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left"
+        >
+          <span className="ui-body-sm min-w-0 flex-1 truncate">{title}</span>
+          {draft ? (
+            <span className="ui-chip shrink-0" title="有未发送的草稿">
+              草稿
+            </span>
+          ) : null}
+          {conv.lastMessageAt ? (
+            <span className="ui-micro shrink-0 text-muted">
+              {formatClock(conv.lastMessageAt)}
+            </span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          aria-label={`会话操作：${title}`}
+          aria-haspopup="menu"
+          aria-expanded={menuFor === conv.id}
+          onClick={() => setMenuFor((cur) => (cur === conv.id ? null : conv.id))}
+          className={`mr-1 rounded-sm p-1 text-muted transition-opacity hover:bg-[var(--subtle-3)] hover:text-ink focus:opacity-100 ${
+            menuFor === conv.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}
+        >
+          ⋯
+        </button>
+        {menuFor === conv.id ? (
+          <div
+            role="menu"
+            data-conv-menu
+            className="absolute right-1 top-full z-30 mt-1 w-32 rounded-lg border border-line bg-[var(--surface)] p-1 text-[12px] shadow-card"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full rounded-sm px-2 py-1 text-left hover:bg-[var(--subtle-3)]"
+              onClick={() => startRename(conv)}
+            >
+              重命名
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full rounded-sm px-2 py-1 text-left text-[var(--danger)] hover:bg-[var(--subtle-3)]"
+              onClick={() => {
+                setMenuFor(null);
+                onDeleteRequest(conv);
+              }}
+            >
+              删除
+            </button>
+          </div>
         ) : null}
-        {conv.lastMessageAt ? (
-          <span className="ui-micro shrink-0 text-muted">
-            {formatClock(conv.lastMessageAt)}
-          </span>
-        ) : null}
-      </button>
+      </div>
     );
   };
 
