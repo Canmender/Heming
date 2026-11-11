@@ -56,7 +56,7 @@ describe("模块包下载（d.133）", () => {
 describe("createModuleCatalog", () => {
   it("目录为空时回落到随服务端发布的四条可选模块", () => {
     const ids = createModuleCatalog({ dir: root }).list().map((entry) => entry.id);
-    expect(ids).toEqual(["automations", "infohub", "staff", "workflows"]);
+    expect(ids).toEqual(["automations", "infohub"]);
   });
 
   it("目录里的同名模块覆盖默认项；同一 id 只取最新版本；坏条目跳过", () => {

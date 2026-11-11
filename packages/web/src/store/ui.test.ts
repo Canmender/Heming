@@ -519,9 +519,11 @@ describe("模块停用时的跳转落点", () => {
     expect(useUiStore.getState().page).toBe("plugins");
     expect(useUiStore.getState().pageView).toBe("plugins");
 
-    useModuleStore.getState().install("staff");
+    useModuleStore.getState().install("automations");
     useUiStore.getState().openStaff();
-    expect(useUiStore.getState().page).toBe("staff");
+    // d.134：幕僚简报并入自动化单页，属「简报」Tab
+    expect(useUiStore.getState().page).toBe("automations");
+    expect(useUiStore.getState().automationTab).toBe("briefing");
   });
 });
 

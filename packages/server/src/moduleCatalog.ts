@@ -26,10 +26,10 @@ import {
 /** 随服务端发布的可选模块目录。 */
 const DEFAULT_MODULES: readonly ModuleCatalogEntry[] = [
   {
-    id: "staff",
-    name: "幕僚",
+    id: "automations",
+    name: "自动化",
     version: "1.0.0",
-    description: "每天检查日程和任务，有要紧事才提醒；只读，不替你操作。",
+    description: "一个页面管定时任务、工作流与简报：快速创建普通定时任务，或完整创建工作流并指定时间与次数。",
     author: "和鸣",
     engine: null,
   },
@@ -37,25 +37,9 @@ const DEFAULT_MODULES: readonly ModuleCatalogEntry[] = [
     id: "infohub",
     name: "信息中枢",
     version: "1.0.0",
-    description: "在本机浏览、检索 QQ / 微信聊天记录和日程；归档不出本机。",
+    description: "在本机采集、浏览、检索 QQ / 微信聊天记录和日程；采集引擎随插件安装，归档不出本机。",
     author: "和鸣",
     engine: "infohub",
-  },
-  {
-    id: "automations",
-    name: "自动化",
-    version: "1.0.0",
-    description: "定时同步归档、重扫日程；只跑两种固定动作，不执行脚本。",
-    author: "和鸣",
-    engine: null,
-  },
-  {
-    id: "workflows",
-    name: "工作流",
-    version: "1.0.0",
-    description: "节点式自动化：触发器、分支、HTTP、代码、大模型与子流程，把要做的事一步步接起来。",
-    author: "和鸣",
-    engine: null,
   },
 ];
 

@@ -27,10 +27,11 @@ beforeEach(() => {
 });
 
 describe("modulePageOf", () => {
-  it("四个模块页 id 都认（实现已全部迁出，不能再依赖内置页面表）", () => {
-    for (const id of ["staff", "infohub", "automations", "workflows"]) {
-      expect(modulePageOf(id)).toBe(id);
-    }
+  it("旧 staff/workflows 页面 id 重定向到统一的自动化页", () => {
+    expect(modulePageOf("staff")).toBe("automations");
+    expect(modulePageOf("workflows")).toBe("automations");
+    expect(modulePageOf("automations")).toBe("automations");
+    expect(modulePageOf("infohub")).toBe("infohub");
   });
 
   it("非模块页返回 null", () => {
@@ -109,7 +110,7 @@ describe("ModuleHomeCard", () => {
 });
 
 describe("ModuleBackgroundSlots", () => {
-  it("按模块生效状态挂载模块后台组件（不再由宿主直接调用 hook）", () => {
+  it("只挂自动化插件的统一后台组件（内部负责巡检/调度/工作流）", () => {
     const calls: boolean[] = [];
     useWebModuleEntry.mockImplementation((id: string) => ({
       entry: {
@@ -125,15 +126,12 @@ describe("ModuleBackgroundSlots", () => {
       loading: false,
       error: "",
     }));
-    for (const id of ["staff", "automations", "workflows"] as const) {
-      useModuleStore.getState().install(id);
-    }
+    useModuleStore.getState().install("automations");
     render(
       <ModuleBackgroundSlots authUser moduleState={useModuleStore.getState()} />,
     );
-    expect(screen.getByTestId("bg-staff")).toBeInTheDocument();
     expect(screen.getByTestId("bg-automations")).toBeInTheDocument();
-    expect(screen.getByTestId("bg-workflows")).toBeInTheDocument();
-    expect(calls).toEqual([true, true, true]);
+    expect(screen.queryByTestId("bg-staff")).toBeNull();
+    expect(calls).toEqual([true]);
   });
 });

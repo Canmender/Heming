@@ -60,7 +60,7 @@ export function fallbackPage(page: Page, state: ModuleState): Page {
  * 启动的入口顺序必须稳定，否则用户会觉得导航「自己会动」。
  */export function moduleNavPages(state: ModuleState): NavPage[] {
   return BUILTIN_MODULES.filter(
-    (mod) => mod.contributions.page && isModuleEffective(state, mod.id),
+    (mod) => mod.contributions.page && !mod.contributions.hidden && isModuleEffective(state, mod.id),
   ).map((mod) => mod.page as NavPage);
 }
 

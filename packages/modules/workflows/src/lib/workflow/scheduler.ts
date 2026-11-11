@@ -140,6 +140,14 @@ export function useWorkflowScheduler(enabled: boolean): void {
       const started = Date.now();
       // 先记账再跑：跑的过程中下一次 tick 不会把同一条工作流再挑出来。
       useWorkflowStore.getState().markRun(workflow.id, started);
+      const live = useWorkflowStore.getState().workflows.find((item) => item.id === workflow.id);
+      const runCount = (live?.runCount ?? 0) + 1;
+      const reached = typeof workflow.maxRuns === "number" && workflow.maxRuns > 0 && runCount >= workflow.maxRuns;
+      useWorkflowStore.getState().update(
+        workflow.id,
+        { runCount, ...(reached ? { active: false } : {}) },
+        started,
+      );
       let executionId = `wf-exec-${started.toString(36)}`;
       try {
         const execution = await runtime.run(workflow, {

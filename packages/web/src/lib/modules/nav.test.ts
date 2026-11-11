@@ -128,22 +128,18 @@ describe("已装模块的导航入口（d.119）", () => {
     const order = withModuleNav(DEFAULT_NAV_ORDER, state);
     // 前 8 项仍是用户期望的固定顺序（主页 → 设置），模块只挂在末尾
     expect(order.slice(0, DEFAULT_NAV_ORDER.length)).toEqual(DEFAULT_NAV_ORDER);
-    expect(order.slice(DEFAULT_NAV_ORDER.length)).toEqual([
-      "staff",
-      "infohub",
-      "automations",
-      "workflows",
-    ]);
+    // d.134：幕僚/工作流并入自动化插件，导航只多「信息中枢 + 自动化」两项
+    expect(order.slice(DEFAULT_NAV_ORDER.length)).toEqual(["infohub", "automations"]);
     // 模块入口不写进个性化顺序
-    expect(DEFAULT_NAV_ORDER).not.toContain("workflows");
+    expect(DEFAULT_NAV_ORDER).not.toContain("automations");
   });
 
   it("只装一个模块时只多一项（不多塞未装的）", () => {
     const state = defaultModuleState();
-    state.installed.workflows = true;
-    state.enabled.workflows = true;
-    expect(moduleNavPages(state)).toEqual(["workflows"]);
-    expect(withModuleNav(DEFAULT_NAV_ORDER, state)).toEqual([...DEFAULT_NAV_ORDER, "workflows"]);
+    state.installed.automations = true;
+    state.enabled.automations = true;
+    expect(moduleNavPages(state)).toEqual(["automations"]);
+    expect(withModuleNav(DEFAULT_NAV_ORDER, state)).toEqual([...DEFAULT_NAV_ORDER, "automations"]);
   });
 
   it("幂等：顺序里已有模块页时不重复插", () => {

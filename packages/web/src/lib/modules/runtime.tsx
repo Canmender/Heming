@@ -17,6 +17,8 @@ import { useWebModuleEntry } from "./useWebModule.js";
 
 /** Page 是否属于某个模块；是则返回 moduleId，否则 null。 */
 export function modulePageOf(page: string): ModuleId | null {
+  // 幕僚/工作流页面已并入自动化插件：旧链接/通知点进来统一落到 automations 页。
+  if (page === "staff" || page === "workflows") return "automations";
   return MODULE_IDS.includes(page as ModuleId) ? (page as ModuleId) : null;
 }
 
@@ -76,24 +78,7 @@ export function ModuleBackgroundSlots({
   authUser: boolean;
   moduleState: ModuleState;
 }) {
-  return (
-    <>
-      <StaffBackgroundSlot active={authUser && isModuleEffective(moduleState, "staff")} />
-      <AutomationBackgroundSlot active={authUser && isModuleEffective(moduleState, "automations")} />
-      <WorkflowBackgroundSlot active={authUser && isModuleEffective(moduleState, "workflows")} />
-    </>
-  );
-}
-
-function StaffBackgroundSlot({ active }: { active: boolean }) {
-  const { entry } = useWebModuleEntry("staff");
-  const WebBackground = entry?.background?.staff;
-  if (!WebBackground) return null;
-  return (
-    <ModuleBoundary fallback={null}>
-      <WebBackground active={active} />
-    </ModuleBoundary>
-  );
+  return <AutomationBackgroundSlot active={authUser && isModuleEffective(moduleState, "automations")} />;
 }
 
 function AutomationBackgroundSlot({ active }: { active: boolean }) {
@@ -107,13 +92,3 @@ function AutomationBackgroundSlot({ active }: { active: boolean }) {
   );
 }
 
-function WorkflowBackgroundSlot({ active }: { active: boolean }) {
-  const { entry } = useWebModuleEntry("workflows");
-  const WebBackground = entry?.background?.workflows;
-  if (!WebBackground) return null;
-  return (
-    <ModuleBoundary fallback={null}>
-      <WebBackground active={active} />
-    </ModuleBoundary>
-  );
-}

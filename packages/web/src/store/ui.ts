@@ -391,6 +391,8 @@ interface UiState {
   automationFocusId: string | null;
   /** 进入工作流页并定位到某条工作流（通知/命令面板用；消费即清）。 */
   workflowFocusId: string | null;
+  /** 自动化插件页内的一次性 Tab 意图（旧 staff/workflows 入口重定向到这里）。 */
+  automationTab: "tasks" | "workflows" | "briefing" | null;
   /** 进入信息中枢的一次性意图（检索词/日程页）；命中即消费。 */
   infohubIntent: InfohubIntent | null;
   /** 进入自动化页并预填新建表单的一次性意图；命中即消费。 */
@@ -409,6 +411,7 @@ interface UiState {
   openModuleManager: () => void;
   /** 打开幕僚页；模块未安装/未启用时落到插件页（可一键安装）。 */
   openStaff: () => void;
+  consumeAutomationTab: () => void;
   openInfohub: (intent?: InfohubIntent) => void;
   consumeInfohubIntent: () => void;
   /** 跳到自动化页；带意图时打开预填的新建表单。 */
@@ -594,6 +597,7 @@ const INITIAL_SESSION_VIEW = readSessionView();
 export const useUiStore = create<UiState>((set, get) => ({
   page: INITIAL_SESSION_VIEW?.page ?? "home",
   pageView: null,
+  automationTab: null,
   workflowFocusId: null,
   navOrder: INITIAL_NAV_ORDER,
   navMode: readStoredNavMode(uiStorage()),
@@ -661,11 +665,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     workflowFocusId: null,
     }),
   openStaff: () => {
-    if (!isModuleOn("staff")) {
+    if (!isModuleOn("automations")) {
       get().openModuleManager();
       return;
     }
-    set({ page: "staff", pageView: null });
+    set({ page: "automations", pageView: null, automationTab: "briefing", workflowFocusId: null });
   },
   openInfohub: (intent) => {
     // 模块未安装/未启用时不再切到一个不该存在的页面；落到插件页让用户能安装/启用它
@@ -695,6 +699,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({
       page: "automations",
       pageView: null,
+      automationTab: "tasks",
       activeConversationId: null,
       pendingAttachment: null,
       taskDraft: null,
@@ -708,13 +713,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   consumeAutomationIntent: () => set({ automationIntent: null }),
   focusWorkflow: (workflowId) => {
-    if (!isModuleOn("workflows")) {
+    if (!isModuleOn("automations")) {
       get().openModuleManager();
       return;
     }
     set({
-      page: "workflows",
+      page: "automations",
       pageView: null,
+      automationTab: "workflows",
       activeConversationId: null,
       workflowFocusId: workflowId,
       automationFocusId: null,
@@ -725,6 +731,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       pendingAttachment: null,
     });
   },
+  consumeAutomationTab: () => set({ automationTab: null }),
   consumeWorkflowFocus: () => set({ workflowFocusId: null }),
   openVault: (intent) => {
     vaultIntentToken += 1;

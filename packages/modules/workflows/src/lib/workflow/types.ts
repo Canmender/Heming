@@ -420,6 +420,10 @@ export interface Workflow {
   updatedAt: number;
   /** 上次被触发的时间（调度判断「错过不补跑」用）。 */
   lastRunAt?: number;
+  /** 定时任务的最多执行次数（0/undefined = 不限）。 */
+  maxRuns?: number;
+  /** 已执行次数（定时触发计数）。 */
+  runCount?: number;
 }
 
 /** 持久化上限与常用尺寸常量（集中一处，测试与 UI 共用）。 */

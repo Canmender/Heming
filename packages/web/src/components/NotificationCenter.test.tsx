@@ -148,7 +148,9 @@ describe("通知中心面板", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
     fireEvent.click(screen.getByRole("button", { name: "打开通知：幕僚简报" }));
-    expect(useUiStore.getState().page).toBe("staff");
+    // d.134：幕僚简报并入自动化页的「简报」Tab
+    expect(useUiStore.getState().page).toBe("automations");
+    expect(useUiStore.getState().automationTab).toBe("briefing");
   });
 
   it("自动化失败通知点进去：进自动化页并投递要选中的任务", () => {
@@ -177,7 +179,7 @@ describe("通知中心面板", () => {
   });
 
   it("工作流失败通知点进去：进工作流页并投递定位意图（宿主不再 import 模块 store）", () => {
-    useModuleStore.getState().install("workflows");
+    useModuleStore.getState().install("automations");
     const workflowId = "w1";
     const item = makeItem({
       kind: "workflow",
@@ -195,8 +197,9 @@ describe("通知中心面板", () => {
     expect(within(dialog).getByText("工作流")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "打开通知：工作流「抓取接口」执行失败" }));
 
-    expect(useUiStore.getState().page).toBe("workflows");
-    // 宿主只投递一次性意图；工作流模块页加载后自己 select 并消费
+    expect(useUiStore.getState().page).toBe("automations");
+    expect(useUiStore.getState().automationTab).toBe("workflows");
+    // 宿主只投递一次性意图；自动化页加载后自己 select 并消费
     expect(useUiStore.getState().workflowFocusId).toBe(workflowId);
   });
 

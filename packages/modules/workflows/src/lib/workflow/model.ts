@@ -61,6 +61,7 @@ export function createWorkflow(opts: { name?: string; id?: string; now?: number 
     versionId: newId("ver", now),
     createdAt: now,
     updatedAt: now,
+    runCount: 0,
   };
 }
 
@@ -480,6 +481,10 @@ export function normalizeWorkflow(raw: unknown, now: number = Date.now()): Workf
     ...(typeof raw.lastRunAt === "number" && Number.isFinite(raw.lastRunAt)
       ? { lastRunAt: raw.lastRunAt }
       : {}),
+    ...(Number.isInteger(raw.maxRuns) && (raw.maxRuns as number) > 0
+      ? { maxRuns: Math.min(999, raw.maxRuns as number) }
+      : {}),
+    runCount: Number.isInteger(raw.runCount) && (raw.runCount as number) > 0 ? (raw.runCount as number) : 0,
   };
 }
 

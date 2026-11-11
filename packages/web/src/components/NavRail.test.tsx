@@ -40,23 +40,23 @@ describe("NavRail 图标轨（A 方案）", () => {
   });
 
   it("装上并启用模块后，入口追加在导航最下面（8 项顺序不变），停用后消失", () => {
-    useModuleStore.getState().install("workflows");
+    useModuleStore.getState().install("automations");
     render(<NavRail />);
     const labels = screen
       .getAllByRole("button")
       .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
-      .filter((label) => ["主页", "插件", "记忆", "设置", "工作流"].includes(label));
+      .filter((label) => ["主页", "插件", "记忆", "设置", "自动化"].includes(label));
     // 宿主页顺序原样；模块只挂在最后（设置之后）
-    expect(labels).toEqual(["主页", "插件", "记忆", "设置", "工作流"]);
+    expect(labels).toEqual(["主页", "插件", "记忆", "设置", "自动化"]);
 
     // 停用（不是删除）→ 入口下线；重新启用 → 回来
-    act(() => useModuleStore.getState().setEnabled("workflows", false));
-    expect(screen.queryByRole("button", { name: "工作流" })).not.toBeInTheDocument();
-    act(() => useModuleStore.getState().setEnabled("workflows", true));
-    expect(screen.getByRole("button", { name: "工作流" })).toBeInTheDocument();
+    act(() => useModuleStore.getState().setEnabled("automations", false));
+    expect(screen.queryByRole("button", { name: "自动化" })).not.toBeInTheDocument();
+    act(() => useModuleStore.getState().setEnabled("automations", true));
+    expect(screen.getByRole("button", { name: "自动化" })).toBeInTheDocument();
 
     // 删除 → 入口消失
-    act(() => useModuleStore.getState().uninstall("workflows"));
+    act(() => useModuleStore.getState().uninstall("automations"));
     expect(screen.queryByRole("button", { name: "工作流" })).not.toBeInTheDocument();
   });
 
@@ -230,13 +230,13 @@ describe("NavRail 导航顺序固定（d.123：不可自定义）", () => {
   });
 
   it("已装模块入口追加在 8 项之后，不改变前 8 项顺序", () => {
-    useModuleStore.getState().install("workflows");
+    useModuleStore.getState().install("automations");
     render(<NavRail />);
     const labels = screen
       .getAllByRole("button")
       .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
-      .filter((label) => ["主页", "设置", "工作流"].includes(label));
-    expect(labels).toEqual(["主页", "设置", "工作流"]);
+      .filter((label) => ["主页", "设置", "自动化"].includes(label));
+    expect(labels).toEqual(["主页", "设置", "自动化"]);
   });
 });
 

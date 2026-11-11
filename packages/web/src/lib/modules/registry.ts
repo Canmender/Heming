@@ -37,9 +37,9 @@ export interface PluginGroup {
 export const PLUGIN_GROUPS: readonly PluginGroup[] = [
   {
     id: "assistant",
-    name: "助理",
-    description: "幕僚巡检、定时任务与工作流：一个插件里的三块自动化能力，安装/启停/删除都按整体。",
-    moduleIds: ["staff", "automations", "workflows"],
+    name: "自动化",
+    description: "一个页面管定时任务、工作流与简报：快速创建普通定时任务，或完整创建工作流并指定时间与次数。",
+    moduleIds: ["automations"],
   },
   {
     id: "infohub",
@@ -58,8 +58,10 @@ export type ModuleBackgroundLoop = "staff-loop" | "automation-scheduler" | "work
 
 /** 模块贡献面：插件区卡片按这个展示「它到底带了什么」。 */
 export interface ModuleContributions {
-  /** 导航入口 + 页面（当前三个模块都是 true；保留字段给未来「只带后台任务」的模块）。 */
+  /** 页面贡献（true = 有宿主页面；旧模块并入新插件后仍为 true，但 hidden 时不进导航）。 */
   page: boolean;
+  /** 导航/命令面板不展示（页面已并入另一个插件）。 */
+  hidden?: boolean;
   /** 首页卡片 id（HomePage 内嵌卡）。 */
   homeCard?: ModuleHomeCard;
   /** 登录后常驻的后台循环（幕僚巡检 / 自动化调度）。 */
@@ -100,7 +102,8 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     description:
       "每天检查日程和任务，有要紧事才提醒；只读，不替你操作。",
     page: "staff",
-    contributions: { page: true, homeCard: "staff", backgroundLoop: "staff-loop" },
+    // 幕僚已并入「自动化」插件（同一页面内「简报」Tab），旧模块 id 只保留数据兼容。
+    contributions: { page: true, hidden: true, backgroundLoop: "staff-loop" },
     storageKeys: ["heming.staff.v1", "heming.staff.runs.v1", "heming.staff.seen.v1"],
     disableNote: "停用后不再后台巡检、首页幕僚卡与导航入口下线；已生成的简报仍保留在本机。",
   },
@@ -129,12 +132,23 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     name: "自动化",
     version: "v1.0.0",
     description:
-      "定时同步归档、重扫日程；只跑两种固定动作，不执行脚本。",
+      "一个页面管定时任务、工作流与简报：快速创建普通定时任务，或完整创建工作流并指定时间与次数。",
     page: "automations",
-    contributions: { page: true, backgroundLoop: "automation-scheduler" },
-    storageKeys: ["heming.automations.v1", "heming.automations.runs.v1"],
+    contributions: { page: true, homeCard: "staff", backgroundLoop: "automation-scheduler" },
+    storageKeys: [
+      "heming.automations.v1",
+      "heming.automations.runs.v1",
+      "heming.workflows.v1",
+      "heming.workflows.executions.v1",
+      "heming.workflows.credentials.v1",
+      "heming.workflows.vars.v1",
+      "heming.workflows.static.v1",
+      "heming.staff.v1",
+      "heming.staff.runs.v1",
+      "heming.staff.seen.v1",
+    ],
     disableNote:
-      "停用后不再到点执行、导航入口下线；任务与运行记录仍保留在本机。本插件独立安装/启停，不依赖信息中枢（运行时若信息中枢未连接，任务会如实报错）。",
+      "停用后不再到点执行/巡检、导航入口与首页卡下线；任务、工作流、执行记录与简报仍保留在本机，重新启用即恢复。",
   },
   {
     id: "workflows",
@@ -143,7 +157,8 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     description:
       "节点式自动化：触发器、分支、HTTP、代码、大模型与子流程，把要做的事一步步接起来。",
     page: "workflows",
-    contributions: { page: true, backgroundLoop: "workflow-scheduler" },
+    // 工作流已并入「自动化」插件（同一页面内「工作流」Tab），旧模块 id 只保留数据兼容。
+    contributions: { page: true, hidden: true, backgroundLoop: "workflow-scheduler" },
     storageKeys: [
       "heming.workflows.v1",
       "heming.workflows.executions.v1",

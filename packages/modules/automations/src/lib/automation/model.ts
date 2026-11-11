@@ -41,6 +41,8 @@ export interface AutomationTask {
   lastStatus?: AutomationRunStatus;
   lastDetail?: string;
   runCount: number;
+  /** 最多执行次数（undefined / 0 = 不限）。 */
+  maxRuns?: number;
 }
 
 /** 新建/编辑表单提交的形状（id 与运行态由 store 维护）。 */
@@ -49,6 +51,8 @@ export interface AutomationDraft {
   kind: AutomationKind;
   schedule: AutomationSchedule;
   sync: SyncOptions;
+  /** 最多执行次数（0 / undefined = 不限）。 */
+  maxRuns?: number;
 }
 
 export const MAX_AUTOMATIONS = 20;
@@ -208,11 +212,13 @@ export function normalizeDraft(draft: AutomationDraft): AutomationDraft {
         };
   // 未知 kind 落回清单第一项（即原来的默认动作 infohub.sync），与改造前一致。
   const kind = isAutomationKind(draft.kind) ? draft.kind : AUTOMATION_KINDS[0];
+  const maxRuns = Math.max(0, Math.min(999, Math.round(Number(draft.maxRuns) || 0)));
   return {
     name: clipText(draft.name, MAX_NAME_CHARS),
     kind,
     schedule,
     sync: normalizeSync(draft.sync),
+    ...(maxRuns > 0 ? { maxRuns } : {}),
   };
 }
 
@@ -278,6 +284,9 @@ export function normalizeTask(raw: unknown, now: number = Date.now()): Automatio
       ? { lastDetail: clipText(raw.lastDetail, MAX_DETAIL_CHARS) }
       : {}),
     runCount: Number.isInteger(raw.runCount) && (raw.runCount as number) > 0 ? (raw.runCount as number) : 0,
+    ...(Number.isInteger(raw.maxRuns) && (raw.maxRuns as number) > 0
+      ? { maxRuns: Math.min(999, raw.maxRuns as number) }
+      : {}),
   };
 }
 

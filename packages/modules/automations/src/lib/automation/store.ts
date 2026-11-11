@@ -245,19 +245,20 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
         }
       }
     }
-    const tasks = current.map((task) =>
-      task.id === id
-        ? {
-            ...task,
-            lastRunAt: now,
-            lastStatus: result.status,
-            lastDetail: detail,
-            runCount: task.runCount + 1,
-            updatedAt: now,
-            nextRunAt: nextRunAt(task.schedule, now),
-          }
-        : task,
-    );
+    const tasks = current.map((task) => {
+      if (task.id !== id) return task;
+      const runCount = task.runCount + 1;
+      const reached = typeof task.maxRuns === "number" && task.maxRuns > 0 && runCount >= task.maxRuns;
+      return {
+        ...task,
+        lastRunAt: now,
+        lastStatus: result.status,
+        lastDetail: detail,
+        runCount,
+        updatedAt: now,
+        ...(reached ? { enabled: false } : { nextRunAt: nextRunAt(task.schedule, now) }),
+      };
+    });
     persist(tasks);
     set({
       tasks,

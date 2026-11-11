@@ -16,7 +16,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MODULES = join(ROOT, "packages", "modules");
 const idsArg = process.argv.indexOf("--only");
 const only = idsArg >= 0 ? String(process.argv[idsArg + 1] || "").split(",").filter(Boolean) : null;
-const ids = only ?? ["staff", "automations", "infohub", "workflows"];
+const ids = only ?? ["automations", "infohub"];
 
 function run(args) {
   const result = spawnSync(process.execPath, args, { cwd: ROOT, stdio: "inherit" });
