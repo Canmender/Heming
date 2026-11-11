@@ -44,8 +44,9 @@ import { RemovePluginDialog } from "./plugins/RemovePluginDialog.js";
 import { PluginStats } from "./plugins/PluginStats.js";
 import { SystemPluginCard } from "./plugins/SystemPluginCard.js";
 import { PluginToolPanel } from "./plugins/PluginToolPanel.js";
-import { ModulePluginCard } from "./plugins/ModulePluginCard.js";
+import { PluginGroupCard } from "./plugins/PluginGroupCard.js";
 import { CloudModulesDialog } from "./plugins/CloudModulesDialog.js";
+import { installPluginPackage } from "../lib/modules/cloudInstall.js";
 import { WidgetsView } from "./plugins/WidgetsView.js";
 import { SkillsView } from "./SkillsPage.js";
 import { InterfacesView } from "./InterfacesPage.js";
@@ -57,7 +58,7 @@ import {
   installResultMessage,
 } from "./plugins/viewModel.js";
 import { BTN_GHOST_SM, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
-import { BUILTIN_MODULES, MODULE_BY_ID, type ModuleId } from "../lib/modules/registry.js";
+import { BUILTIN_MODULES, MODULE_BY_ID, pluginGroupOf, type ModuleId } from "../lib/modules/registry.js";
 import { useModuleStore } from "../lib/modules/store.js";
 import { refreshWidgets, useWidgetsStore, widgetsAvailable } from "../lib/widgets/store.js";
 import { pluginPageEntries } from "../lib/pages/registry.js";
@@ -686,7 +687,10 @@ export function PluginsPage({
                 // 内置模块（幕僚 / 信息中枢 / 自动化）：可安装 / 删除 / 启停，投影里已按顺序排好。
                 if (unit.source === "builtin") {
                   const mod = MODULE_BY_ID[unit.id as ModuleId];
-                  return mod ? <ModulePluginCard mod={mod} /> : null;
+                  const group = mod ? pluginGroupOf(mod.id) : null;
+                  // 一个插件贡献多个页面：只在组首模块渲染一张插件卡，其余单元不重复出卡。
+                  if (!mod || !group || group.moduleIds[0] !== mod.id) return null;
+                  return <PluginGroupCard group={group} />;
                 }
                 if (unit.source !== "package") return null;
                 const plugin = plugins.get(unit.id);
@@ -804,7 +808,8 @@ export function PluginsPage({
       {cloudModulesOpen && (
         <CloudModulesDialog
           installed={moduleInstalled}
-          onInstall={(id) => {
+          onInstall={async (id, version) => {
+            await installPluginPackage(id, version);
             installModule(id);
             bump();
           }}

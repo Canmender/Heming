@@ -96,9 +96,10 @@ describe("UnitListView", () => {
     fireEvent.click(screen.getByRole("button", { name: "插件" }));
     expect(screen.getByRole("region", { name: "能力单元 报告工具箱" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "能力单元 系统能力" })).toBeNull();
-    expect(screen.getByText("匹配 1 / 共 1 个单元")).toBeInTheDocument();
+    // d.133：内置模块/声明式/界面插件不再分来源，统一算插件
+    expect(screen.getByText("匹配 3 / 共 3 个单元")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "全部来源" }));
+    fireEvent.click(screen.getByRole("button", { name: "全部插件" }));
     expect(screen.getByText("共 4 个单元")).toBeInTheDocument();
   });
 

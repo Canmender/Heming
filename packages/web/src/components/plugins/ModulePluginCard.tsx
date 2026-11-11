@@ -7,6 +7,7 @@ import {
   type ModuleId,
 } from "../../lib/modules/registry.js";
 import { missingRequirements, useModuleStore } from "../../lib/modules/store.js";
+import { installPluginPackage, removePluginPackage } from "../../lib/modules/cloudInstall.js";
 import { AutomationIcon, InfoHubIcon, StaffIcon, WorkflowIcon } from "../icons.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { BTN_DANGER_SM, BTN_GHOST, BTN_PRIMARY, CHIP, HINT, Switch } from "./shared.js";
@@ -72,6 +73,8 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
   const Icon = MODULE_ICONS[mod.id];
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
   /** tick 只用来在状态变化后重算占用（占用不是响应式数据）。 */
   const [tick, setTick] = useState(0);
   const occupancy = useMemo(() => moduleStorageBytes(mod), [mod, tick]);
@@ -123,13 +126,23 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
               type="button"
               aria-label={`安装插件 ${mod.name}`}
               className={BTN_PRIMARY}
+              disabled={busy}
               onClick={() => {
-                install(mod.id);
-                setTick((n) => n + 1);
-                setNotice(`已安装「${mod.name}」，入口已加到左侧导航最下面`);
+                setBusy(true);
+                setInstallError(null);
+                void installPluginPackage(mod.id, mod.version)
+                  .then(() => {
+                    install(mod.id);
+                    setTick((n) => n + 1);
+                    setNotice(`已安装「${mod.name}」，入口已加到左侧导航最下面`);
+                  })
+                  .catch((err: unknown) =>
+                    setInstallError(err instanceof Error ? err.message : "插件下载/安装失败"),
+                  )
+                  .finally(() => setBusy(false));
               }}
             >
-              安装
+              {busy ? "正在下载…" : "安装"}
             </button>
           )}
         </div>
@@ -145,7 +158,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
           <dd className="text-[var(--body)]">
             {mod.storageKeys.length > 0
               ? `本机数据 ${mod.storageKeys.length} 项 · ${fmtBytes(occupancy)}`
-              : "不占和鸣存储"}
+              : "数据由插件在本机管理"}
             {mod.externalData?.length ? (
               <span className="block text-[10px] text-muted">{mod.externalData.join("；")}</span>
             ) : null}
@@ -205,12 +218,17 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
           </>
         ) : (
           <span className="ui-caption">
-            模块由云端目录提供；安装只注册入口与后台任务，带引擎的模块（信息中枢）首次启用时才下载官方签名模块包。
+            插件由云端目录提供：点安装会下载官方签名插件包，装完即启用；带引擎的信息插件会一并安装引擎。
           </span>
         )}
         {notice ? (
           <span role="status" className="ui-caption text-[var(--warn)]">
             {notice}
+          </span>
+        ) : null}
+        {installError ? (
+          <span role="alert" className="ui-caption text-[var(--danger)]">
+            {installError}
           </span>
         ) : null}
       </div>
@@ -228,10 +246,16 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
                 type="button"
                 className="ui-btn ui-btn-md ui-btn-danger"
                 onClick={() => {
-                  uninstall(mod.id);
-                  setConfirmingRemove(false);
-                  setTick((n) => n + 1);
-                  setNotice(`已删除「${mod.name}」，本机已有数据未删除`);
+                  setBusy(true);
+                  void removePluginPackage(mod.id)
+                    .catch(() => null)
+                    .then(() => {
+                      uninstall(mod.id);
+                      setConfirmingRemove(false);
+                      setTick((n) => n + 1);
+                      setNotice(`已删除「${mod.name}」，本机已有数据未删除`);
+                    })
+                    .finally(() => setBusy(false));
                 }}
               >
                 删除
@@ -246,7 +270,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
             <li>下线的贡献：{moduleContributionText(mod)}</li>
             <li>
               保留的数据：
-              {mod.storageKeys.length > 0 ? `本机 ${mod.storageKeys.length} 项数据` : "不占和鸣存储"}
+              {mod.storageKeys.length > 0 ? `本机 ${mod.storageKeys.length} 项数据` : "插件本机数据"}
               {mod.externalData?.length ? "；外部归档/库文件原样保留" : ""}
             </li>
           </ul>

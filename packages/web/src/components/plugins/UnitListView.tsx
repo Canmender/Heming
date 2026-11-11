@@ -29,12 +29,15 @@ import { BTN_GHOST_SM, CHIP, HINT } from "./shared.js";
  *   可访问名），其余来源用本文件的默认行；阶段 C 再统一卡片样式。
  */
 
-const SOURCE_FILTERS: { key: UnitSource | "all"; label: string }[] = [
-  { key: "all", label: "全部来源" },
+/**
+ * 来源筛选（d.133）：用户口径「全部是插件」——不再区分内置模块/声明式/界面插件，
+ * 只保留「系统能力（只读）」和「插件」两档。
+ */
+type SourceFilter = "all" | "system" | "plugin";
+const SOURCE_FILTERS: { key: SourceFilter; label: string }[] = [
+  { key: "all", label: "全部插件" },
   { key: "system", label: "系统" },
-  { key: "builtin", label: "模块" },
-  { key: "package", label: "插件" },
-  { key: "bundle", label: "界面插件" },
+  { key: "plugin", label: "插件" },
 ];
 
 const STATUS_FILTERS: { key: "all" | "enabled" | "disabled"; label: string }[] = [
@@ -253,7 +256,7 @@ export function UnitListView({
   const subscribed = useUnitStatuses();
   const all = statuses ?? subscribed;
   const [query, setQuery] = useState("");
-  const [source, setSource] = useState<UnitSource | "all">("all");
+  const [source, setSource] = useState<SourceFilter>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
   /** 外部定位命中的单元 id：短暂描边，滚动完不会残留。 */
   const [highlightUnitId, setHighlightUnitId] = useState<string | null>(null);
@@ -294,16 +297,21 @@ export function UnitListView({
   /** 当前列表里真实出现的来源：没有的筛选按钮不渲染（例如原生应用没有模块）。 */
   const presentSources = useMemo(() => new Set(all.map((item) => item.unit.source)), [all]);
   const sourceFilters = useMemo(
-    () => SOURCE_FILTERS.filter((item) => item.key === "all" || presentSources.has(item.key)),
+    () =>
+      SOURCE_FILTERS.filter(
+        (item) =>
+          item.key === "all" ||
+          (item.key === "plugin"
+            ? [...presentSources].some((value) => value !== "system")
+            : presentSources.has("system")),
+      ),
     [presentSources],
   );
-  const sourceUnits = useMemo(
-    () =>
-      source === "all" || !presentSources.has(source)
-        ? all
-        : all.filter((item) => item.unit.source === source),
-    [all, source, presentSources],
-  );
+  const sourceUnits = useMemo(() => {
+    if (source === "all") return all;
+    if (source === "plugin") return all.filter((item) => item.unit.source !== "system");
+    return all.filter((item) => item.unit.source === "system");
+  }, [all, source]);
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const visible = useMemo(
     () =>

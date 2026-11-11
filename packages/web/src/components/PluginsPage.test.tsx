@@ -80,6 +80,14 @@ vi.mock("../lib/modules/catalogClient.js", () => ({
       author: "和鸣",
       engine: null,
     },
+    {
+      id: "workflows",
+      name: "工作流",
+      version: "1.0.0",
+      description: "节点式自动化。",
+      author: "和鸣",
+      engine: null,
+    },
   ]),
 }));
 
@@ -262,30 +270,34 @@ describe("PluginsPage · 插件从云端安装", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "安装官方插件" }));
     const dialog = screen.getByRole("dialog", { name: "从云端安装插件" });
-    expect(await within(dialog).findByText("幕僚")).toBeInTheDocument();
-    expect(within(dialog).getByText("信息中枢")).toBeInTheDocument();
-    expect(within(dialog).getByText("自动化")).toBeInTheDocument();
+    // d.133：云端目录按插件分组——助理（幕僚/自动化/工作流）+ 信息
+    expect(await within(dialog).findByText("助理")).toBeInTheDocument();
+    expect(within(dialog).getByText("信息")).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "安装插件 幕僚" }));
-    expect(useModuleStore.getState().installed.staff).toBe(true);
+    fireEvent.click(within(dialog).getByRole("button", { name: "安装插件 助理" }));
+    // 安装是异步的（桌面端还要下载插件包）
+    await waitFor(() => expect(useModuleStore.getState().installed.staff).toBe(true));
+    expect(useModuleStore.getState().installed.automations).toBe(true);
+    expect(useModuleStore.getState().installed.workflows).toBe(true);
     expect(useModuleStore.getState().enabled.staff).toBe(true);
 
     fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
-    const card = screen.getByRole("region", { name: "插件 幕僚" });
-    expect(card).toHaveTextContent("模块");
-    expect(card).toHaveTextContent("无模块依赖");
+    const card = screen.getByRole("region", { name: "插件 助理" });
+    expect(card).toHaveTextContent("这个插件带来");
 
-    fireEvent.click(within(card).getByRole("switch", { name: "停用插件 幕僚" }));
+    fireEvent.click(within(card).getByRole("switch", { name: "停用插件 助理" }));
     expect(useModuleStore.getState().enabled.staff).toBe(false);
+    expect(useModuleStore.getState().enabled.workflows).toBe(false);
 
-    fireEvent.click(within(card).getByRole("button", { name: "删除插件 幕僚" }));
+    fireEvent.click(within(card).getByRole("button", { name: "删除插件 助理" }));
     fireEvent.click(
-      within(screen.getByRole("dialog", { name: "删除「幕僚」" })).getByRole("button", {
+      within(screen.getByRole("dialog", { name: "删除插件 助理" })).getByRole("button", {
         name: "删除",
       }),
     );
-    expect(useModuleStore.getState().installed.staff).toBe(false);
-    expect(screen.queryByRole("region", { name: "插件 幕僚" })).toBeNull();
+    await waitFor(() => expect(useModuleStore.getState().installed.staff).toBe(false));
+    expect(useModuleStore.getState().installed.workflows).toBe(false);
+    expect(screen.queryByRole("region", { name: "插件 助理" })).toBeNull();
     useModuleStore.getState().reset();
   });
 });

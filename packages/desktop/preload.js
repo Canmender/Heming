@@ -67,6 +67,10 @@ contextBridge.exposeInMainWorld("__heming_runtime", {
 // 真正的文件读取在 app:// 协议层做「已安装 + 路径夹取」双重校验，这里不传任意路径。
 contextBridge.exposeInMainWorld("__heming_modules", {
   webList: () => ipcRenderer.invoke("modules:web-list"),
+  /** 下载 + 验签 + 安装官方模块包；返回安装记录。 */
+  install: (id, version) => ipcRenderer.invoke("modules:install", { id, version }),
+  /** 卸载模块包（只删安装目录记录，不删业务数据）。 */
+  remove: (id) => ipcRenderer.invoke("modules:remove", id),
 });
 
 // —— 版本号 ——

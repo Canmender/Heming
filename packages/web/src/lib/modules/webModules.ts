@@ -43,7 +43,7 @@ export function webModuleBaseUrl(): string {
   return "app://heming/modules";
 }
 
-interface InstalledWebModule {
+export interface InstalledWebModule {
   id: string;
   version: string;
   name?: string;
@@ -53,7 +53,12 @@ interface InstalledWebModule {
 declare global {
   interface Window {
     /** 桌面 preload 注入（d.131）；浏览器/测试没有。 */
-    __heming_modules?: { webList: () => Promise<InstalledWebModule[]> };
+    __heming_modules?: {
+      webList: () => Promise<InstalledWebModule[]>;
+      /** 下载 + 验签 + 安装官方插件包（d.133）。 */
+      install?: (id: string, version: string) => Promise<{ id: string; version: string }>;
+      remove?: (id: string) => Promise<boolean>;
+    };
   }
 }
 

@@ -26,6 +26,33 @@ import type { Page } from "../../store/ui.js";
 /** 可插拔的内置模块 id。新增模块时只加注册表项 + 页面 + 接线点。 */
 export type ModuleId = "staff" | "infohub" | "automations" | "workflows";
 
+/** 用户可见的「插件」：一个插件可以贡献多个页面/后台任务（d.133）。 */
+export interface PluginGroup {
+  id: "assistant" | "infohub";
+  name: string;
+  description: string;
+  moduleIds: ModuleId[];
+}
+
+export const PLUGIN_GROUPS: readonly PluginGroup[] = [
+  {
+    id: "assistant",
+    name: "助理",
+    description: "幕僚巡检、定时任务与工作流：一个插件里的三块自动化能力，安装/启停/删除都按整体。",
+    moduleIds: ["staff", "automations", "workflows"],
+  },
+  {
+    id: "infohub",
+    name: "信息",
+    description: "在本机采集、浏览、检索聊天记录与日程；采集引擎与归档都由这个插件管理。",
+    moduleIds: ["infohub"],
+  },
+];
+
+export function pluginGroupOf(moduleId: ModuleId): PluginGroup | null {
+  return PLUGIN_GROUPS.find((group) => group.moduleIds.includes(moduleId)) ?? null;
+}
+
 export type ModuleHomeCard = "staff" | "infohub";
 export type ModuleBackgroundLoop = "staff-loop" | "automation-scheduler" | "workflow-scheduler";
 

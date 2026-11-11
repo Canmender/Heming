@@ -20,6 +20,7 @@ const {
 } = require("./app-protocol");
 const { createPluginStore } = require("./plugin-store");
 const { createModuleStore } = require("./module-store");
+const { createModuleInstaller } = require("./module-installer");
 const { createWidgetHost } = require("./plugin-host");
 const { readWidgetTheme, writeWidgetTheme } = require("./widget-theme");
 const { WIDGET_SCHEME } = require("./plugin-window");
@@ -152,6 +153,8 @@ const TRUSTED_CHANNELS = [
   "mcp:stdio:stop",
   "runtime:probe",
   "modules:web-list",
+  "modules:install",
+  "modules:remove",
   "update:check",
   "update:download",
   "update:install",
@@ -1056,6 +1059,17 @@ if (!gotLock) {
   // 只读 registry 供 app:// 路由与渲染层查询；安装/验签仍走 module-store。
   const webModulesRoot = path.join(app.getPath("userData"), "modules");
   const webModuleStore = createModuleStore({ dir: webModulesRoot, log: (line) => console.log(line) });
+  const webModuleInstaller = createModuleInstaller({
+    store: webModuleStore,
+    feed: process.env.HEMING_MODULE_FEED || undefined,
+    log: (line) => console.log(line),
+  });
+  secureIpc.handle("modules:install", (_event, payload) => {
+    const id = payload && typeof payload.id === "string" ? payload.id : "";
+    const version = payload && typeof payload.version === "string" ? payload.version : "";
+    return webModuleInstaller.install(id, version);
+  });
+  secureIpc.handle("modules:remove", (_event, id) => webModuleInstaller.remove(String(id || "")));
   secureIpc.handle("modules:web-list", () =>
     webModuleStore
       .registry()

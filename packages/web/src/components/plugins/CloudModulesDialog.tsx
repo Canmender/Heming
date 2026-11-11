@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ModuleCatalogEntry } from "@heming/shared";
 import { fetchModuleCatalog } from "../../lib/modules/catalogClient.js";
-import { MODULE_BY_ID, type ModuleId } from "../../lib/modules/registry.js";
+import { MODULE_BY_ID, pluginGroupOf, type ModuleId } from "../../lib/modules/registry.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { PackageIcon, XIcon } from "../icons.js";
 import { BTN_GHOST, BTN_PRIMARY, CHIP, ERROR_TEXT, HINT } from "./shared.js";
@@ -23,7 +23,7 @@ export function CloudModulesDialog({
 }: {
   onClose: () => void;
   installed: Record<string, boolean>;
-  onInstall: (id: ModuleId) => void;
+  onInstall: (id: ModuleId, version: string) => Promise<void>;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   useModalA11y(dialogRef, onClose, { active: true });
@@ -55,11 +55,40 @@ export function CloudModulesDialog({
   const install = (entry: ModuleCatalogEntry) => {
     const known = MODULE_BY_ID[entry.id as ModuleId];
     if (!known) return;
-    setBusyId(entry.id);
-    onInstall(known.id);
-    setBusyId(null);
-    setNotice(`已安装「${entry.name}」，入口已加到左侧导航最下面`);
+    const group = pluginGroupOf(known.id);
+    const members = group
+      ? group.moduleIds
+          .map((id) => entries?.find((item) => item.id === id))
+          .filter((item): item is ModuleCatalogEntry => Boolean(item))
+      : [entry];
+    setBusyId(group ? group.id : entry.id);
+    setError(null);
+    void (async () => {
+      for (const member of members) {
+        const mod = MODULE_BY_ID[member.id as ModuleId];
+        if (!mod) continue;
+        // eslint-disable-next-line no-await-in-loop
+        await onInstall(mod.id, member.version);
+      }
+    })()
+      .then(() => setNotice(`已安装「${group ? group.name : entry.name}」，入口已加到左侧导航最下面`))
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "插件下载/安装失败"))
+      .finally(() => setBusyId(null));
   };
+
+  const visibleEntries = (() => {
+    const list = entries ?? [];
+    const seen = new Set<string>();
+    return list.filter((entry) => {
+      const mod = MODULE_BY_ID[entry.id as ModuleId];
+      if (!mod) return true;
+      const group = pluginGroupOf(mod.id);
+      if (!group) return true;
+      if (seen.has(group.id)) return false;
+      seen.add(group.id);
+      return true;
+    });
+  })();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
@@ -77,7 +106,7 @@ export function CloudModulesDialog({
           <div className="min-w-0 flex-1">
             <h2 className="ui-section-title">从云端安装插件</h2>
             <p className={`mt-1 ${HINT}`}>
-              插件由云端目录提供，安装包里不携带；装过才生效。带引擎的插件首次启用时才下载引擎。
+              插件由云端目录提供，安装包里不携带；点安装会下载官方签名插件包，装过才生效。信息插件会一并安装引擎。
             </p>
           </div>
           <button
@@ -109,17 +138,22 @@ export function CloudModulesDialog({
             </div>
           ) : (
             <ul className="flex flex-col gap-2">
-              {entries.map((entry) => {
+              {visibleEntries.map((entry) => {
                 const known = Boolean(MODULE_BY_ID[entry.id as ModuleId]);
-                const isInstalled = Boolean(installed[entry.id]);
-                const busy = busyId === entry.id;
+                const mod = MODULE_BY_ID[entry.id as ModuleId];
+                const group = mod ? pluginGroupOf(mod.id) : null;
+                const isInstalled = group
+                  ? group.moduleIds.every((id) => Boolean(installed[id]))
+                  : Boolean(installed[entry.id]);
+                const busy = busyId === (group ? group.id : entry.id);
+                const title = group ? group.name : entry.name;
                 return (
                   <li
                     key={entry.id}
                     className="rounded-lg border border-line-soft bg-[var(--surface)] p-3"
                   >
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[13px] font-extrabold">{entry.name}</span>
+                      <span className="text-[13px] font-extrabold">{title}</span>
                       <span className={CHIP}>v{entry.version}</span>
                       {entry.engine ? <span className={CHIP}>含引擎</span> : null}
                       {isInstalled ? <span className={CHIP}>已安装</span> : null}
@@ -131,7 +165,7 @@ export function CloudModulesDialog({
                             type="button"
                             disabled={!known || busy}
                             title={known ? undefined : "当前版本不支持这个插件"}
-                            aria-label={`安装插件 ${entry.name}`}
+                            aria-label={`安装插件 ${title}`}
                             onClick={() => install(entry)}
                             className={`${BTN_PRIMARY} disabled:cursor-not-allowed disabled:opacity-40`}
                           >
@@ -145,7 +179,7 @@ export function CloudModulesDialog({
                     </p>
                     {entry.engine ? (
                       <p className={`mt-1 ${HINT}`}>
-                        安装只注册入口；首次启用时从更新源下载官方签名引擎包，引擎不进安装包。
+                        安装会下载官方签名插件包；安装包本身不携带任何插件。
                       </p>
                     ) : null}
                   </li>
