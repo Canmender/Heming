@@ -739,20 +739,12 @@ export function PluginsPage({
             />
 
             <p className={`mt-3 max-w-[680px] ${HINT}`}>
-              这里安装的插件只声明技能、MCP 服务和命令，不含代码、不带密钥。安装不会运行程序，也不会联网；
-              连接与工具启用仍由你手动确认。
+              插件可以声明技能、MCP 服务与命令，也可以带可执行界面（首方签名，装后由宿主开独立窗口）；
+              安装本身不会自动运行程序。连接与工具启用仍由你手动确认。
             </p>
 
-            {/* 界面插件（原「桌面小组件」Tab）并入插件列表末尾：它也是插件，只是带可执行界面。 */}
-            <section aria-label="插件" className="mt-6 border-t border-line-soft pt-4">
-              <div className="mb-2 flex flex-wrap items-baseline gap-2">
-                <h2 className="ui-section-title">插件</h2>
-                <span className="ui-micro text-muted">
-                  含可执行界面代码（首方签名）；装后由宿主开独立窗口
-                </span>
-              </div>
-              <WidgetsView />
-            </section>
+            {/* 桌面小组件也是插件的一种，直接并入同一插件区，不再单独重复一个「插件」标题。 */}
+            <WidgetsView />
           </>
         )}
 

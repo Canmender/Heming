@@ -82,8 +82,8 @@ describe("UnitListView", () => {
     expect(screen.getByText("桌宠")).toBeInTheDocument();
     // 来源徽标
     expect(screen.getAllByText("插件").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("模块").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("插件").length).toBeGreaterThan(0);
+    // d.134：所有非系统来源统一显示「插件」
+    expect(screen.getAllByText("插件").length).toBeGreaterThan(2);
     // 贡献摘要与只读标记
     const system = screen.getByRole("region", { name: "能力单元 系统能力" });
     expect(system).toHaveTextContent("技能 2 · 工具服务 1");

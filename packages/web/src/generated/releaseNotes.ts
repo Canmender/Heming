@@ -12,6 +12,24 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.134.3.54.3",
+    "date": "2026-11-11",
+    "title": "插件页只有一个插件区",
+    "bullets": [
+      "插件列表中的来源徽标统一显示「插件」，不再出现「模块 / 界面插件」；页面不再上下重复出现两个插件区块。"
+    ],
+    "paragraphs": []
+  },
+  {
+    "version": "d.134.3.54.2",
+    "date": "2026-11-11",
+    "title": "插件区只剩一块",
+    "bullets": [
+      "插件页不再上下出现两个「插件」区域：桌面小组件并入同一插件区，页面更清爽。功能不变。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.134.3.54.1",
     "date": "2026-11-11",
     "title": "「助理」改名为「自动化」，一个页面建任务",

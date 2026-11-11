@@ -25,12 +25,15 @@ export type UnitSource = "system" | "builtin" | "package" | "bundle";
 
 export const UNIT_SOURCES: readonly UnitSource[] = ["system", "builtin", "package", "bundle"];
 
-/** 来源的中文标签（插件页徽标与诊断文案共用，避免各处手写）。 */
+/**
+ * 用户可见来源标签（d.134）：不再区分模块/声明式/界面插件，统一叫「插件」；
+ * 只有宿主内置的系统能力单独标「系统」。
+ */
 export const UNIT_SOURCE_LABELS: Record<UnitSource, string> = {
   system: "系统",
-  builtin: "模块",
+  builtin: "插件",
   package: "插件",
-  bundle: "界面插件",
+  bundle: "插件",
 };
 
 /**

@@ -44,5 +44,5 @@
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
-  "hemingVersion": "d.134.3.54.1"
+  "hemingVersion": "d.134.3.54.3"
 }

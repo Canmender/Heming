@@ -730,13 +730,11 @@ describe("PluginsPage · 插件（原桌面小组件 Tab）", () => {
     // 不再有「桌面小组件」Tab，只剩三 Tab
     expect(screen.queryByRole("tab", { name: "桌面小组件" })).toBeNull();
     expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
-    // 内容直接出现在插件 Tab：有一段插件区域 + 它的浏览器降级提示
-    const section = screen.getByRole("region", { name: "插件" });
-    expect(within(section).getByRole("region", { name: "桌面小组件" })).toHaveTextContent(
-      /插件需要桌面窗口能力/,
-    );
-    // 插件的安装入口（与声明式「安装插件」不是同一个按钮）
-    expect(within(section).queryByRole("button", { name: /安装桌面小组件/ })).toBeNull();
+    // d.134：桌面小组件直接并入插件区，不再单独重复一个「插件」区块
+    const widget = screen.getByRole("region", { name: "桌面小组件" });
+    expect(widget).toHaveTextContent(/插件需要桌面窗口能力/);
+    // 浏览器里没有桌面窗口能力：不显示安装入口
+    expect(screen.queryByRole("button", { name: /安装桌面小组件/ })).toBeNull();
   });
 });
 
