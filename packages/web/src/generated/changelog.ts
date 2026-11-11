@@ -12,6 +12,17 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.134.3.54.4",
+    "date": "2026-11-11",
+    "title": "模型页卡片与全站统一",
+    "bullets": [
+      "模型页原来给内容区套了一层 `bg-[var(--subtle-2)]` 灰底、内容宽度用 wide 档，导致卡片像浮在灰块上、阴影与其它页面观感不一致；现在改成全宽、无灰底，卡片就是全站统一的 `.ui-card`"
+    ],
+    "paragraphs": [
+      "（12px 圆角 / token 阴影 / 暗色自动跟随），统计卡、来源卡、运行卡与其它页面一致。"
+    ]
+  },
+  {
     "version": "d.134.3.54.3",
     "date": "2026-11-11",
     "title": "插件区徽标也统一为「插件」",

@@ -358,8 +358,7 @@ export function ModelPage() {
     <PageShell
       title="模型"
       subtitle="所有模型在一个地方：加一个来源，智能体就能选它的模型。"
-      width="wide"
-      bodyClassName="bg-[var(--subtle-2)]"
+      width="full"
       actions={
         <button
           type="button"

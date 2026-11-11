@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.134.3.54.4",
+    "date": "2026-11-11",
+    "title": "模型页卡片和别的页面一致了",
+    "bullets": [
+      "去掉模型页内容区的灰底与窄栏，卡片使用全站统一的卡片样式与阴影；暗色下也一致。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.134.3.54.3",
     "date": "2026-11-11",
     "title": "插件页只有一个插件区",
