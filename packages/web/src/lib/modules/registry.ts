@@ -91,11 +91,11 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     },
     storageKeys: [],
     externalData: [
-      "InfoHub 配置与归档数据库在本机由 InfoHub 管理（不在和鸣存储内，也不会被和鸣删除）",
-      "采集引擎为选装模块：首次启用时按需从更新源下载官方签名引擎包（约 2MB），装在本机模块目录",
+      "信息插件是独立的和鸣插件：采集引擎随插件安装与运行，不依赖用户电脑上另行安装的 InfoHub 或 Python",
+      "归档数据库由信息插件在本机管理；停用/卸载只撤销入口，不会自动删除归档",
     ],
     disableNote:
-      "停用后导航入口、首页归档卡与 infohub_* 工具下线；不会自动启动或删除任何本机归档。重新启用后会自动复用已安装的引擎。",
+      "停用后导航入口、首页归档卡与 infohub_* 工具下线；不会自动启动或删除任何归档。重新启用即恢复。",
   },
   {
     id: "automations",

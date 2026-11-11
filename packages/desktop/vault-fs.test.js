@@ -1066,14 +1066,14 @@ test("默认根：开发版（非打包）用 ~/Heming/wiki，且探针不留残
   );
 });
 
-test("默认根：打包版用安装目录/wiki（便携版也能用）", async (t) => {
+test("默认根：打包版用安装目录/data/wiki（数据区随安装目录，便携版也能用）", async (t) => {
   const ws = makeDefaultRootWorkspace(t);
   const info = await resolveDefaultVaultRoot({
     homeDir: ws.home,
     execDir: ws.install,
     isPackaged: true,
   });
-  assert.equal(info.root, path.join(ws.install, "wiki"));
+  assert.equal(info.root, path.join(ws.install, "data", "wiki"));
   assert.equal(info.writable, true);
   assert.equal(info.note, "");
 });
@@ -1090,7 +1090,7 @@ test("默认根：安装目录不可写时回落用户目录，并在 note 里�
   });
   assert.equal(info.root, path.join(ws.home, "Heming", "wiki"), "必须回落到用户目录");
   assert.equal(info.writable, true);
-  assert.match(info.note, /安装目录不可写/);
+  assert.match(info.note, /安装目录数据区不可写/);
   assert.match(info.note, /回落/);
 });
 

@@ -35,6 +35,9 @@ interface StaffState {
   settings: StaffSettings;
   runs: StaffRun[];
   seen: StaffSeen;
+  /** 手动巡检是否正在前台运行。放在 store 里而不是页面 state：切页卸载后回来仍能显示「正在生成…」 */
+  running: boolean;
+  setRunning: (running: boolean) => void;
   /** 局部更新设置：落盘的是归一后的合并值，UI 与存储始终一致。 */
   updateSettings: (patch: StaffSettingsPatch) => StaffSettings;
   /** 记一份简报；晨报会自动把 `lastDailyDate` 记为今天。 */
@@ -98,6 +101,8 @@ export const useStaffStore = create<StaffState>((set, get) => ({
   settings: readStaffSettings(),
   runs: readStaffRuns(),
   seen: readStaffSeen(),
+  running: false,
+  setRunning: (running) => set({ running }),
 
   updateSettings: (patch) => {
     const current = get().settings;

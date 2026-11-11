@@ -42,10 +42,36 @@ if (!app.isPackaged && !process.env.HEMING_ALLOW_DEV_PLUGIN_KEYS) {
 }
 
 const pkg = require("./package.json");
+
+/**
+ * 数据根（d.133）：打包版默认 <安装目录>/data（数据库/插件/知识库/日志都在这里），
+ * 首次启用时从旧 userData 迁移登录态/插件/模块（只补缺，不覆盖）。开发态不改变默认。
+ */
+let dataWikiRoot = "";
+const DATA_ROOT = resolveDataRoot({
+  isPackaged: app.isPackaged,
+  execDir: path.dirname(process.execPath),
+  env: process.env,
+});
+if (DATA_ROOT) {
+  try {
+    // 先确认目录真的可建（装到 Program Files 等只读位置时不要先把 userData 指过去）
+    const layout = ensureDataLayout(DATA_ROOT);
+    migrateUserData(app.getPath("userData"), DATA_ROOT);
+    app.setPath("userData", DATA_ROOT);
+    dataWikiRoot = layout.wikiRoot;
+    seedWikiRules(layout.wikiRoot, path.join(__dirname, "resources", "llm-wiki.md"));
+    process.env.HEMING_WIKI_DIR = layout.wikiRoot;
+    process.env.HEMING_CRASH_DIR = layout.logsDir;
+    console.log("[heming] 数据目录:", DATA_ROOT);
+  } catch (err) {
+    console.log("[heming] 数据目录初始化失败，继续使用默认 userData：", (err && err.message) || err);
+  }
+}
 const { APP_DEFAULT_URL, originOf, secureOrigins, guardIpc, makeSenderCheck } = require("./secure-origins");
 const { titleBarOptions, WINDOW_BACKGROUND } = require("./title-bar");
 const { registerWikiIpc } = require("./wiki-fs");
-const { registerVaultIpc, readRegistry, defaultRegistryFile } = require("./vault-fs");
+const { registerVaultIpc, readRegistry, defaultRegistryFile, ensureStandardVault } = require("./vault-fs");
 const { registerChartIpc } = require("./chart-fs");
 const { registerExportIpc } = require("./export-fs");
 const { registerFileIpc } = require("./file-fs");
@@ -56,6 +82,7 @@ const { createInfohubEngine } = require("./infohub-engine");
 const { createInfohubBridge, registerInfohubIpc, resolveDefaultHome, resolveInfohubPackageDir } =
   require("./infohub-bridge");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
+const { ensureDataLayout, migrateUserData, resolveDataRoot, seedWikiRules } = require("./data-root");
 
 // Windows 系统通知要求进程 AUMID 与安装快捷方式一致（electron-builder 使用 build.appId）。
 // 不设置时 Notification 可能静默不弹（本仓此前只有来电通知，未真机验证过）。
@@ -315,7 +342,10 @@ function cspOptions() {
 
 /** 违例日志目录：`~/Heming/logs`（与崩溃日志同根，但**不是崩溃日志**）。 */
 function cspReportFile() {
-  return path.join(os.homedir(), "Heming", "logs", "csp-report.log");
+  const override = String(process.env.HEMING_CRASH_DIR || "").trim();
+  return override
+    ? path.join(override, "csp-report.log")
+    : path.join(os.homedir(), "Heming", "logs", "csp-report.log");
 }
 
 /**
@@ -1279,6 +1309,11 @@ app.whenReady().then(() => {
     widgetStore.init();
     // 自定义协议处理器须在创建窗口之前装好，否则首次 loadURL 会拿到空响应
     installAppProtocol(webModuleStore, webModulesRoot);
+    if (dataWikiRoot) {
+      void ensureStandardVault(dataWikiRoot).catch((err) => {
+        console.warn("[heming] 初始化默认知识库结构失败：", (err && err.message) || err);
+      });
+    }
     installWidgetProtocol();
     setupMenu();
     // 个人知识库文件桥（卡帕西 LLM Wiki 标准）：必须在窗口创建前注册

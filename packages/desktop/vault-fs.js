@@ -236,6 +236,7 @@ async function resolveDefaultVaultRoot(options) {
 
   /** 候选根：打包版先试安装目录，再退用户目录。 */
   const candidates = [];
+  if (packaged && execDir) candidates.push({ root: path.join(execDir, "data", "wiki"), label: "安装目录数据区" });
   if (packaged && execDir) candidates.push({ root: path.join(execDir, "wiki"), label: "安装目录" });
   candidates.push({ root: homeWiki, label: "用户目录" });
 

@@ -181,7 +181,8 @@ export function StaffPage() {
   const profiles = useLlmStore((s) => s.profiles);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [running, setRunning] = useState(false);
+  const running = useStaffStore((s) => s.running);
+  const setRunning = useStaffStore((s) => s.setRunning);
   const [firstRun, setFirstRun] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
