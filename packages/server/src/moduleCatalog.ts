@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import {
   PLUGIN_CATALOG_ID_RE,
   PLUGIN_CATALOG_VERSION_RE,
@@ -63,6 +63,8 @@ export interface ModuleCatalog {
   dir: string;
   /** 每个 id 只给最新版本；目录不存在/为空时回落到随服务端发布的四条。 */
   list(): ModuleCatalogEntry[];
+  /** 模块包文件绝对路径（不存在/越界返回 null）；供客户端下载安装。 */
+  packagePath(id: string, version: string): string | null;
 }
 
 function readEntry(dir: string, id: string, version: string): ModuleCatalogEntry | null {
@@ -81,6 +83,17 @@ export function createModuleCatalog(opts: { dir?: string } = {}): ModuleCatalog 
 
   return {
     dir,
+    packagePath(id, version) {
+      if (!PLUGIN_CATALOG_ID_RE.test(id) || !PLUGIN_CATALOG_VERSION_RE.test(version)) return null;
+      const root = resolve(dir);
+      const file = resolve(root, id, version, "module.tgz");
+      if (file !== root && !file.startsWith(root + sep)) return null;
+      try {
+        return statSync(file).isFile() ? file : null;
+      } catch {
+        return null;
+      }
+    },
     list() {
       const byId = new Map<string, ModuleCatalogEntry[]>();
       if (existsSync(dir)) {

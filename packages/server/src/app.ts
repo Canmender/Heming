@@ -158,6 +158,21 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
     res.json({ modules: moduleCatalog.list(), generatedAt: new Date().toISOString() });
   });
 
+  /**
+   * 模块包下载（d.133）：客户端「从云端安装插件」直接拿官方签名 module.tgz。
+   * 只服务目录里真实存在的 id@version；路径由 moduleCatalog 夹取，不接受任意文件名。
+   */
+  app.get("/api/modules/:id/:version/module.tgz", (req, res) => {
+    const file = moduleCatalog.packagePath(req.params.id, req.params.version);
+    if (!file) {
+      res.status(404).json({ error: "模块包不存在" });
+      return;
+    }
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.sendFile(file);
+  });
+
   app.get("/api/plugins/:id/:version/manifest", (req, res) => {
     const found = pluginCatalog.read(req.params.id, req.params.version);
     if (!found) {

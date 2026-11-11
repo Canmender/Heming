@@ -28,6 +28,31 @@ function writeModule(dir: string, id: string, version: string, body: Record<stri
   writeFileSync(join(path, "module.json"), JSON.stringify(body), "utf8");
 }
 
+describe("模块包下载（d.133）", () => {
+  it("packagePath：只认目录里真实存在的 module.tgz，非法 id/版本/穿越返回 null", () => {
+    const dir = join(root, "staff", "1.0.0");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "module.tgz"), Buffer.from("signed-module"));
+    const catalog = createModuleCatalog({ dir: root });
+    expect(catalog.packagePath("staff", "1.0.0")).toBe(join(dir, "module.tgz"));
+    expect(catalog.packagePath("../staff", "1.0.0")).toBeNull();
+    expect(catalog.packagePath("staff", "../1.0.0")).toBeNull();
+    expect(catalog.packagePath("staff", "2.0.0")).toBeNull();
+  });
+
+  it("GET /api/modules/:id/:version/module.tgz 公开返回包字节", async () => {
+    const dir = join(root, "staff", "1.0.0");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "module.tgz"), Buffer.from("signed-module"));
+    const app = createApp(createMemoryStore(), { moduleDir: root, allowRegister: true });
+    const ok = await request(app).get("/api/modules/staff/1.0.0/module.tgz");
+    expect(ok.status).toBe(200);
+    expect(ok.headers["content-type"]).toContain("application/octet-stream");
+    expect(ok.body.toString()).toBe("signed-module");
+    expect((await request(app).get("/api/modules/staff/9.9.9/module.tgz")).status).toBe(404);
+  });
+});
+
 describe("createModuleCatalog", () => {
   it("目录为空时回落到随服务端发布的四条可选模块", () => {
     const ids = createModuleCatalog({ dir: root }).list().map((entry) => entry.id);

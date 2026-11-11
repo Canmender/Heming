@@ -1061,7 +1061,9 @@ if (!gotLock) {
   const webModuleStore = createModuleStore({ dir: webModulesRoot, log: (line) => console.log(line) });
   const webModuleInstaller = createModuleInstaller({
     store: webModuleStore,
-    feed: process.env.HEMING_MODULE_FEED || undefined,
+    feed:
+      process.env.HEMING_MODULE_FEED ||
+      `${String(APP_DEFAULT_URL).replace(/\/+$/, "")}/api/modules`,
     log: (line) => console.log(line),
   });
   secureIpc.handle("modules:install", (_event, payload) => {

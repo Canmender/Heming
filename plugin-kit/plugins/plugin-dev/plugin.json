@@ -87,9 +87,9 @@
           "title": "速览",
           "items": [
             { "label": "清单版本", "value": "v5（声明式）" },
+            { "label": "页面块", "value": "7 个" },
             { "label": "界面插件", "value": "v4（仅首方）" },
-            { "label": "红线", "value": "3 条" },
-            { "label": "本插件权限", "value": "无" }
+            { "label": "本插件联网", "value": "不联网" }
           ]
         },
         {
