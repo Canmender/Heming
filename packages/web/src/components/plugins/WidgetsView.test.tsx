@@ -64,9 +64,9 @@ beforeEach(() => {
 });
 
 describe("WidgetsView · 浏览器降级", () => {
-  it("没有界面插件桥时只说明「仅桌面端可用」", () => {
+  it("没有插件桥时只说明「仅桌面端可用」", () => {
     render(<WidgetsView />);
-    expect(screen.getByText(/界面插件需要桌面窗口能力/)).toBeTruthy();
+    expect(screen.getByText(/插件需要桌面窗口能力/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /安装桌面小组件/ })).toBeNull();
   });
 });
@@ -79,7 +79,7 @@ describe("WidgetsView · 列表与宿主动作", () => {
     expect(screen.getByText("v1.0.0")).toBeTruthy();
     expect(screen.getByText("已启用")).toBeTruthy();
     expect(screen.getByText("已隐藏")).toBeTruthy();
-    expect(screen.getAllByText(/界面插件含可执行代码/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/插件含可执行代码/).length).toBeGreaterThan(0);
   });
 
   it("显示/隐藏、缩放、穿透、重置位置都走 widgets:action", async () => {

@@ -20,7 +20,7 @@ import { ERROR_TEXT, HINT, Switch } from "./shared.js";
 /**
  * 插件区「桌面小组件」Tab（d.98 · 规格 §4.2）。
  *
- * 界面插件（原桌宠是第一例）的宿主管理面：
+ * 插件（原桌宠是第一例）的宿主管理面：
  * - 列表：名称/版本/启用状态/窗口状态；损坏的记录显示 `error` 而不是静默消失；
  * - 宿主动作：显示隐藏、放大缩小、鼠标穿透、重置位置、打开设置（通用动作，不用插件声明）；
  * - 生命周期：启用/停用、卸载（二次确认，文案写明会删文件与设置）；
@@ -110,7 +110,7 @@ export function WidgetsView() {
         </span>
         <p className="ui-section-title">桌面小组件只在安装版里可用</p>
         <p className={`max-w-[520px] ${HINT}`}>
-          界面插件需要桌面窗口能力：装好后会在桌面上开一个独立窗口。浏览器里没有这个能力，
+          这个插件需要桌面窗口能力：装好后会在桌面上开一个独立窗口。浏览器里没有这个能力，
           本页只在安装版里可用。
         </p>
       </section>
@@ -141,7 +141,7 @@ export function WidgetsView() {
           刷新
         </button>
         <span className="ml-auto ui-caption">
-          {records.length > 0 ? `已安装 ${records.length} 个 · 界面插件含可执行代码` : "界面插件含可执行代码"}
+          {records.length > 0 ? `已安装 ${records.length} 个 · 插件含可执行代码` : "插件含可执行代码"}
         </span>
       </div>
 
@@ -185,7 +185,7 @@ export function WidgetsView() {
           <div className="min-w-0">
             <p className="ui-body-sm font-medium">桌宠已改为插件</p>
             <p className={`mt-1 ${HINT}`}>
-              桌宠不再随本体安装，改成可安装的界面插件（`heming.pet`）。点「安装桌面小组件」→
+              桌宠不再随本体安装，改成可安装的插件（`heming.pet`）。点「安装桌面小组件」→
               云端目录或本地 `.tgz` 安装；装好后的设置与旧偏好会自动迁移。
             </p>
             <div className="mt-2 flex items-center gap-2">
@@ -240,7 +240,7 @@ export function WidgetsView() {
           {records.map((record) => {
             const state = states[record.id];
             const scale = state?.scale ?? record.widget?.defaultScale ?? 1;
-            // 页面型界面插件没有浮窗：窗口动作整体禁用（d.124）
+            // 页面型插件没有浮窗：窗口动作整体禁用（d.124）
             const actionsDisabled = !record.enabled || Boolean(record.error) || !record.widget;
             const initial = Array.from(record.name)[0]?.toUpperCase() ?? "?";
             return (

@@ -63,7 +63,7 @@ function installedPlugin(input: {
   };
 }
 
-/** 最小界面插件记录（`widget` 只为满足类型；本文件不碰窗口规格）。 */
+/** 最小插件记录（`widget` 只为满足类型；本文件不碰窗口规格）。 */
 function widgetRecord(input: {
   id: string;
   page?: { title: string; icon?: string } | null;
@@ -125,7 +125,7 @@ describe("pluginPageEntries", () => {
     expect(entries).toEqual([]);
   });
 
-  it("界面插件页面：排在声明式之后；浏览器里 available=false；损坏记录/停用不可用", () => {
+  it("插件页面：排在声明式之后；浏览器里 available=false；损坏记录/停用不可用", () => {
     const entries = pluginPageEntries({
       plugins: [installedPlugin({ id: "a.kit", page: { title: "A" }, installedAt: "2026-11-10T03:00:00.000Z" })],
       widgets: [

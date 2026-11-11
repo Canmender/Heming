@@ -143,7 +143,7 @@ function byId(units: CapabilityUnit[]): Map<string, CapabilityUnit> {
 }
 
 describe("projectUnits · 四类来源", () => {
-  it("按 系统 → 内置 → 声明式 → 界面插件 的稳定顺序产出，id 不混淆", () => {
+  it("按 系统 → 内置 → 声明式 → 插件 的稳定顺序产出，id 不混淆", () => {
     const units = projectUnits({
       system: systemFixture(),
       moduleEnabled: { staff: true, infohub: true, automations: true },
@@ -333,7 +333,7 @@ describe("projectPackageUnits · engines / 签名 / 指纹阻断", () => {
   });
 });
 
-describe("projectBundleUnits · 界面插件", () => {
+describe("projectBundleUnits · 插件", () => {
   it("每包一个桌面小组件；启用的记录生效", () => {
     const [unit] = projectBundleUnits([widgetRecord()], APP_VERSION);
     expect(unit!.source).toBe("bundle");
@@ -354,7 +354,7 @@ describe("projectBundleUnits · 界面插件", () => {
     expect(status!.reason).toEqual({ kind: "degraded", detail: "插件文件缺失，请重新安装" });
   });
 
-  it("停用的界面插件：disabled，不伪造已完成状态", () => {
+  it("停用的插件：disabled，不伪造已完成状态", () => {
     const [status] = projectUnitStatuses({
       widgets: [widgetRecord({ enabled: false })],
       modules: [],

@@ -5,7 +5,7 @@ import type { DownloadedPluginPackage } from "../plugins/catalogClient.js";
 import type { WidgetInstallOutcome } from "./store.js";
 
 /**
- * 市场里直接安装界面插件（d.109）。
+ * 市场里直接安装插件（d.109）。
  *
  * 两层都注入：下载（deps 里再验 sha256）与桌面桥安装（主进程验签/落盘）。
  * 这里只钉住「顺序 + 传参 + 结果三态」，真实 IPC 由 desktop 侧用例覆盖。
@@ -51,14 +51,14 @@ function outcome(overrides: Partial<WidgetInstallOutcome> = {}): WidgetInstallOu
 }
 
 describe("installBundleFromMarket", () => {
-  it("非界面插件条目直接拒绝（不尝试下载）", async () => {
+  it("非插件条目直接拒绝（不尝试下载）", async () => {
     const download = vi.fn();
     const result = await installBundleFromMarket(
       { ...ENTRY, distribution: "manifest", package: undefined } as PluginCatalogEntry,
       { download: download as never },
     );
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("不是界面插件包");
+    expect(result.error).toContain("不是插件包");
     expect(download).not.toHaveBeenCalled();
   });
 

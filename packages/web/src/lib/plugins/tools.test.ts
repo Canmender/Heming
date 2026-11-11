@@ -238,7 +238,7 @@ describe("plugin_market_search", () => {
       status: "active",
       tags: ["效率", "天气"],
     });
-    // 界面插件包不能走「下载清单 → 预览」这条路：installable=false，但仍兼容。
+    // 插件包不能走「下载清单 → 预览」这条路：installable=false，但仍兼容。
     expect(items[1]).toMatchObject({ id: "acme.widget", compatible: true, installable: false });
   });
 
@@ -388,7 +388,7 @@ describe("plugin_install_preview", () => {
     expect(store.list()).toEqual([]);
   });
 
-  it("界面插件包（bundle）拒绝预览，提示去插件页安装", async () => {
+  it("插件包（bundle）拒绝预览，提示去插件页安装", async () => {
     const { store } = makeStore();
     const bridge = bridgeWith(
       market([
@@ -401,7 +401,7 @@ describe("plugin_install_preview", () => {
 
     const { payload, ok } = await call(bridge, "plugin_install_preview", { id: "acme.weather" });
     expect(ok).toBe(true);
-    expect((payload as { error: string }).error).toContain("界面插件包");
+    expect((payload as { error: string }).error).toContain("插件包");
   });
 
   it("清单指纹不一致：拒绝预览（不把没校验的内容交给 planInstall）", async () => {

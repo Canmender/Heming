@@ -802,7 +802,7 @@ describe("模型预设已废弃（d.90：模型统一由 magpie 网关提供）"
   });
 });
 
-/* ══════════════ d.94 · v4：界面插件（desktopWidget）清单 ══════════════ */
+/* ══════════════ d.94 · v4：插件（desktopWidget）清单 ══════════════ */
 
 /** 一个完整合法的桌面小组件声明（对齐 packages/pet-widget/plugin.json）。 */
 const widget = {
@@ -846,7 +846,7 @@ const widget = {
   },
 };
 
-/** 合法 v4 bundle 清单（界面插件）。 */
+/** 合法 v4 bundle 清单（插件）。 */
 function bundle(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     schemaVersion: 4,
@@ -875,7 +875,7 @@ function bundle(overrides: Record<string, unknown> = {}): Record<string, unknown
   };
 }
 
-describe("parsePluginManifest · v4 界面插件", () => {
+describe("parsePluginManifest · v4 插件", () => {
   it("bundle 清单归一化：distribution / desktopWidgets / permissions 新字段", () => {
     const parsed = parsePluginManifest(bundle());
     expect(parsed.schemaVersion).toBe(4);
@@ -1125,7 +1125,7 @@ describe("parsePluginManifest · 命令 target 扩展（d.108）", () => {
     }
   });
 
-  it("bundle（v4 界面插件）例外：允许 settings / unit；声明式 v4 仍拒绝", () => {
+  it("bundle（v4 插件）例外：允许 settings / unit；声明式 v4 仍拒绝", () => {
     const bundleCommand = (target: Record<string, unknown>) =>
       bundle({
         contributions: {

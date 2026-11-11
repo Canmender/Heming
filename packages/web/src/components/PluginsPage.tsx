@@ -744,9 +744,9 @@ export function PluginsPage({
             </p>
 
             {/* 界面插件（原「桌面小组件」Tab）并入插件列表末尾：它也是插件，只是带可执行界面。 */}
-            <section aria-label="界面插件" className="mt-6 border-t border-line-soft pt-4">
+            <section aria-label="插件" className="mt-6 border-t border-line-soft pt-4">
               <div className="mb-2 flex flex-wrap items-baseline gap-2">
-                <h2 className="ui-section-title">界面插件</h2>
+                <h2 className="ui-section-title">插件</h2>
                 <span className="ui-micro text-muted">
                   含可执行界面代码（首方签名）；装后由宿主开独立窗口
                 </span>

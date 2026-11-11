@@ -132,7 +132,7 @@ export function WidgetSettingsCard() {
         )}
       </div>
       <p className="mt-1 ui-caption">
-        桌宠等界面插件装好后在这里调：宿主动作（显示/缩放/穿透/位置）与插件声明的设置项。
+        桌宠等插件装好后在这里调：宿主动作（显示/缩放/穿透/位置）与插件声明的设置项。
       </p>
 
       {error && (
@@ -145,7 +145,7 @@ export function WidgetSettingsCard() {
         <div className="mt-3 rounded-lg border border-line bg-[var(--subtle-2)] p-3">
           <p className="ui-body-sm font-medium">桌宠已改为插件</p>
           <p className="mt-1 ui-caption">
-            桌宠不再随本体安装，改成可安装的界面插件（`heming.pet`）。装好后设置会出现在这里。
+            桌宠不再随本体安装，改成可安装的插件（`heming.pet`）。装好后设置会出现在这里。
           </p>
           <button
             type="button"
@@ -203,7 +203,7 @@ function WidgetBlock({
   onAction: (id: string, action: Parameters<typeof runWidgetAction>[1]) => Promise<void>;
   onCommit: (field: WidgetSettingField, raw: unknown) => void;
 }) {
-  // 页面型界面插件没有浮窗（d.124）：没有窗口设置表单，也不提供窗口动作
+  // 页面型插件没有浮窗（d.124）：没有窗口设置表单，也不提供窗口动作
   const fields = record.widget?.settings?.fields ?? [];
   const title = record.widget?.settings?.title ?? record.name;
   const disabled = !record.enabled || Boolean(record.error);
@@ -226,7 +226,7 @@ function WidgetBlock({
       )}
 
       {/* 宿主动作：与插件区列表同一套通道，状态共用主进程真源。
-          页面型界面插件没有浮窗，不渲染窗口动作（d.124）。 */}
+          页面型插件没有浮窗，不渲染窗口动作（d.124）。 */}
       {record.widget ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
@@ -250,7 +250,7 @@ function WidgetBlock({
           ))}
         </div>
       ) : (
-        <p className="mt-2 ui-caption">这个界面插件只提供插件页面，没有桌面浮窗。</p>
+        <p className="mt-2 ui-caption">这个插件只提供插件页面，没有桌面浮窗。</p>
       )}
 
       {fields.length > 0 && (

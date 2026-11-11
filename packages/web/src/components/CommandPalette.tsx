@@ -179,7 +179,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     [vaultIndex, query],
   );
   /**
-   * 插件命令：声明式插件（每次打开面板现读 store，停用后自然消失）+ 已装界面插件
+   * 插件命令：声明式插件（每次打开面板现读 store，停用后自然消失）+ 已装插件
    * （d.109：主进程注册表经 `widgets:list()` 同步到 zustand，本文件只做投影，不执行插件代码）。
    *
    * 浏览器端没有桌面桥 → `widgetsAvailable()` 为 false，列表恒为空；只是少一组命令，不报错。

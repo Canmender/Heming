@@ -85,7 +85,7 @@ function previewPlugin(text: string) {
 }
 
 // `plugin-kit/plugins/` 放真实插件包（示例在 `plugin-kit/examples/`，不进这里）：
-// 这里只枚举「真的带清单的声明式包」；界面插件（v4 bundle）由桌面端安装，单独测清单形状。
+// 这里只枚举「真的带清单的声明式包」；插件（v4 bundle）由桌面端安装，单独测清单形状。
 const BUNDLED = readdirSync(PLUGINS_DIR, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && existsSync(resolve(PLUGINS_DIR, entry.name, "plugin.json")))
   .filter((entry) => {

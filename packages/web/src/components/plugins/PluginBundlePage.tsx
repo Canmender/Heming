@@ -13,7 +13,7 @@ import { AlertIcon, PackageIcon, RefreshIcon } from "../icons.js";
 import { ERROR_TEXT, HINT } from "./shared.js";
 
 /**
- * 界面插件页面（d.124 B 路径）的 web 宿主（规格 §5.2）。
+ * 插件页面（d.124 B 路径）的 web 宿主（规格 §5.2）。
  *
  * 职责边界很窄：**页面内容不归渲染层**。插件自带 HTML 由主进程在 `widget://` 独立
  * origin 的沙箱 `WebContentsView` 里跑，主窗只做三件事：
@@ -184,14 +184,14 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
   // ── 降级：浏览器 / 旧版桌面端没有页面视图方法（规格 §2.8、§5.2.3） ──
   if (!canMount) {
     return (
-      <section aria-label="界面插件页面" className="flex h-full items-center justify-center p-6">
+      <section aria-label="插件页面" className="flex h-full items-center justify-center p-6">
         <div className="flex max-w-[520px] flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] px-6 py-10 text-center shadow-card">
           <span className="plugin-icon-tile mb-1 h-11 w-11" aria-hidden="true">
             <AlertIcon width={20} height={20} />
           </span>
           <p className="ui-section-title">插件页面只在安装版里可用</p>
           <p className={HINT}>
-            界面插件的页面是插件包自带的 HTML，必须在桌面端的独立沙箱视图里渲染；
+            插件的页面是插件包自带的 HTML，必须在桌面端的独立沙箱视图里渲染；
             浏览器里没有这个能力，也不会退化成只读的文字页。
           </p>
         </div>
@@ -202,8 +202,8 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
   // ── 列表还没读到：先别急着实例化视图（记录是挂载的前提） ──
   if (!loaded) {
     return (
-      <section aria-label="界面插件页面" className="flex h-full items-center justify-center p-6">
-        <p className="ui-caption">正在读取界面插件…</p>
+      <section aria-label="插件页面" className="flex h-full items-center justify-center p-6">
+        <p className="ui-caption">正在读取插件…</p>
       </section>
     );
   }
@@ -211,17 +211,17 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
   // ── 空态：无记录 / 已停用 / 清单没有 page ──
   if (!usable) {
     const detail = !record
-      ? "没有找到这个界面插件的安装记录，可能已被卸载。"
+      ? "没有找到这个插件的安装记录，可能已被卸载。"
       : !record.enabled
         ? `「${record.name}」已被停用，启用后才会显示它的页面。`
         : `「${record.name}」的清单里没有声明页面（contributions.page）。`;
     return (
-      <section aria-label="界面插件页面" className="flex h-full items-center justify-center p-6">
+      <section aria-label="插件页面" className="flex h-full items-center justify-center p-6">
         <div className="flex max-w-[520px] flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] px-6 py-10 text-center shadow-card">
           <span className="plugin-icon-tile mb-1 h-11 w-11" aria-hidden="true">
             <PackageIcon width={20} height={20} />
           </span>
-          <p className="ui-section-title">这个界面插件没有页面或已被停用</p>
+          <p className="ui-section-title">这个插件没有页面或已被停用</p>
           <p className={HINT}>{detail}</p>
           <button
             type="button"
@@ -237,7 +237,7 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
 
   // ── 正常态：页头工具条（占位区外，不会被视图遮住）+ 占位区（视图叠在它上面） ──
   return (
-    <section aria-label="界面插件页面" className="flex h-full min-h-0 flex-col gap-2 p-3">
+    <section aria-label="插件页面" className="flex h-full min-h-0 flex-col gap-2 p-3">
       <header className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] px-3 py-2">
         <span className="plugin-icon-tile h-7 w-7" aria-hidden="true">
           <PackageIcon width={14} height={14} />
@@ -245,7 +245,7 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
             <h2 className="ui-section-title truncate">{page?.title || record?.name || pluginId}</h2>
-            <span className="ui-chip">界面插件</span>
+            <span className="ui-chip">插件</span>
             <span className="ui-micro ui-numeric">v{version}</span>
           </div>
           {page?.summary ? <p className="ui-caption truncate">{page.summary}</p> : null}

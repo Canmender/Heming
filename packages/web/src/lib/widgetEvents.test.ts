@@ -12,7 +12,7 @@ import type { AppNotification } from "../store/notifications.js";
 import type { WidgetNotifyEvent, WidgetsBridge } from "../types/widgets.js";
 
 /**
- * 通知中心 → 界面插件事件转发（d.98 §4.2）。
+ * 通知中心 → 插件事件转发（d.98 §4.2）。
  *
  * 这层唯一的职责是**脱敏**：只把 kind/title/summary/route/at 交出去，
  * 不带正文、附件、会话名、发送人、conversationId/taskId。
@@ -186,7 +186,7 @@ describe("startWidgetEvents", () => {
     delete window.__heming_widgets;
   });
 
-  it("无界面插件桥 → 空操作", () => {
+  it("无插件桥 → 空操作", () => {
     const dispose = startWidgetEvents({}, undefined);
     expect(typeof dispose).toBe("function");
     dispose();

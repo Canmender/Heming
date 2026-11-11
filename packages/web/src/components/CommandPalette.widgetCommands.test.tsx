@@ -7,7 +7,7 @@ import { useInfohubStore } from "../lib/infohub/store.js";
 import { useWidgetsStore } from "../lib/widgets/store.js";
 
 /**
- * d.109：界面插件（bundle）命令进入命令面板。
+ * d.109：插件（bundle）命令进入命令面板。
  *
  * 数据流：主进程 `widgets:list()` → `useWidgetsStore.records` → `widgetCommands()` →
  * 面板的「插件命令」分组。这里不走桌面桥（jsdom 里没有 `window.__heming_widgets`），
@@ -64,14 +64,14 @@ afterEach(() => {
   useWidgetsStore.setState({ records: [], states: {}, loading: false, loaded: false, error: null });
 });
 
-describe("命令面板 · 界面插件命令", () => {
-  it("bundle 命令出现在「插件命令」分组，副标题标明「界面插件」", () => {
+describe("命令面板 · 插件命令", () => {
+  it("bundle 命令出现在「插件命令」分组，副标题标明「插件」", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "插件区" } });
 
     expect(screen.getByText("插件命令")).toBeInTheDocument();
     const item = screen.getByRole("option", { name: "选择 打开插件区" });
-    expect(item.textContent).toContain("桌宠（界面插件）");
+    expect(item.textContent).toContain("桌宠（插件）");
     expect(item.textContent).toContain("去插件列表");
   });
 

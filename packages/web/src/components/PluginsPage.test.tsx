@@ -306,7 +306,7 @@ describe("PluginsPage 插件", () => {
   it("空态与安装面板：没有清单时确认按钮禁用", () => {
     renderPage();
 
-    expect(screen.getByRole("heading", { name: "插件" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "插件" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("region", { name: "暂无插件" })).toBeInTheDocument();
     expect(screen.getByText("还没有安装插件")).toBeInTheDocument();
 
@@ -741,21 +741,21 @@ describe("PluginsPage · 插件列表筛选与安装定位（d.77）", () => {
   });
 });
 
-/* ------------------------------------------------ 界面插件（并入插件 Tab，d.123） */
+/* ------------------------------------------------ 插件（并入插件 Tab，d.123） */
 
-describe("PluginsPage · 界面插件（原桌面小组件 Tab）", () => {
-  it("界面插件并入「插件」Tab 末尾，不再单独占 Tab；浏览器里给「仅桌面端可用」", () => {
+describe("PluginsPage · 插件（原桌面小组件 Tab）", () => {
+  it("插件并入「插件」Tab 末尾，不再单独占 Tab；浏览器里给「仅桌面端可用」", () => {
     delete window.__heming_widgets;
     renderPage();
     // 不再有「桌面小组件」Tab，只剩三 Tab
     expect(screen.queryByRole("tab", { name: "桌面小组件" })).toBeNull();
     expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
-    // 内容直接出现在插件 Tab：有一段界面插件区域 + 它的浏览器降级提示
-    const section = screen.getByRole("region", { name: "界面插件" });
+    // 内容直接出现在插件 Tab：有一段插件区域 + 它的浏览器降级提示
+    const section = screen.getByRole("region", { name: "插件" });
     expect(within(section).getByRole("region", { name: "桌面小组件" })).toHaveTextContent(
-      /界面插件需要桌面窗口能力/,
+      /插件需要桌面窗口能力/,
     );
-    // 界面插件的安装入口（与声明式「安装插件」不是同一个按钮）
+    // 插件的安装入口（与声明式「安装插件」不是同一个按钮）
     expect(within(section).queryByRole("button", { name: /安装桌面小组件/ })).toBeNull();
   });
 });

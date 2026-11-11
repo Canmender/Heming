@@ -3,7 +3,7 @@ import type { WidgetRecord } from "../../types/widgets.js";
 import { WIDGET_COMMAND_SOURCE, widgetCommands } from "./commands.js";
 
 /**
- * 界面插件命令 → 命令面板条目（d.109）。
+ * 插件命令 → 命令面板条目（d.109）。
  *
  * 纯函数：输入是主进程注册表记录（`widgets:list()`），输出是命令面板的
  * `PluginCommandInfo[]`。用例钉住四件事：过滤（停用/损坏/坏 target）、
@@ -33,7 +33,7 @@ function record(overrides: Partial<WidgetRecord> = {}): WidgetRecord {
 }
 
 describe("widgetCommands · 映射与来源", () => {
-  it("把 bundle 命令转成面板条目：id 带 widget 前缀、副标题标「界面插件」", () => {
+  it("把 bundle 命令转成面板条目：id 带 widget 前缀、副标题标「插件」", () => {
     const [command] = widgetCommands([record()]);
     expect(command).toMatchObject({
       id: "widget:heming.pet:open-plugins",

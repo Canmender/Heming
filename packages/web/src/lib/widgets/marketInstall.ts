@@ -50,7 +50,7 @@ export async function installBundleFromMarket(
   options: InstallBundleFromMarketOptions = {},
 ): Promise<InstallBundleOutcome> {
   if (!entry || entry.distribution !== "bundle" || !entry.package) {
-    return { ok: false, error: "该条目不是界面插件包，不能按界面插件安装" };
+    return { ok: false, error: "该条目不是插件包，不能按插件安装" };
   }
   const download = options.download ?? downloadPluginPackage;
   const install = options.install ?? installWidgetFromBytes;

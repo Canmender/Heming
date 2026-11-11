@@ -112,7 +112,7 @@ export function PluginInstallDialog({
       }
       const message = record
         ? `已${outcome.updated ? "更新" : "安装"}桌面小组件「${record.name}」v${record.version}`
-        : "界面插件已安装";
+        : "插件已安装";
       onInstalled?.(message);
       setPhase({ kind: "done", message });
     },
@@ -216,7 +216,7 @@ export function PluginInstallDialog({
               {/* 云端目录（bundle） */}
               <section className="mt-4" aria-label="云端插件目录">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="ui-section-title">云端目录 · 界面插件</span>
+                  <span className="ui-section-title">云端目录 · 插件</span>
                   <button
                     type="button"
                     onClick={() => void loadCatalog()}
@@ -233,7 +233,7 @@ export function PluginInstallDialog({
                   </p>
                 )}
                 {!loading && !loadError && entries !== null && entries.length === 0 && (
-                  <p className="mt-2 ui-caption">云端目录里暂时没有界面插件。</p>
+                  <p className="mt-2 ui-caption">云端目录里暂时没有插件。</p>
                 )}
                 {entries && entries.length > 0 && (
                   <ul className="mt-2 space-y-2">
@@ -273,7 +273,7 @@ export function PluginInstallDialog({
               <section className="mt-4 border-t border-line-soft pt-4" aria-label="本地插件包">
                 <span className="ui-section-title">本地插件包</span>
                 <p className="mt-1 ui-caption">
-                  选择你从可信来源拿到的 <code>.tgz</code> 界面插件包；安装前会展示确认。
+                  选择你从可信来源拿到的 <code>.tgz</code> 插件包；安装前会展示确认。
                 </p>
                 <button
                   type="button"

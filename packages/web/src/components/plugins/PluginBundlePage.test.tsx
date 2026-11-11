@@ -14,7 +14,7 @@ import type {
 } from "../../types/widgets.js";
 
 /**
- * 界面插件页面 host（d.124 B 路径，规格 §5.2）：
+ * 插件页面 host（d.124 B 路径，规格 §5.2）：
  * - 视图在主进程（沙箱 WebContentsView），web 侧只负责「量矩形 + 上报 + 清理」；
  * - 无桥 / 旧桌面端 → 降级说明；主进程回 `{ ok:false, error }` → 错误态两个可执行动作；
  * - 停用 / 无 page / 无记录 → 空态，不发任何 IPC。
@@ -139,7 +139,7 @@ afterEach(() => {
 });
 
 describe("PluginBundlePage · 降级（浏览器 / 旧桌面端）", () => {
-  it("没有界面插件桥时说明「插件页面只在安装版里可用」", () => {
+  it("没有插件桥时说明「插件页面只在安装版里可用」", () => {
     render(<PluginBundlePage pluginId="heming.panel" />);
     expect(screen.getByText("插件页面只在安装版里可用")).toBeTruthy();
     // 降级时不该出现占位区，也不该有可点击的挂载入口
@@ -170,7 +170,7 @@ describe("PluginBundlePage · 挂载与页头", () => {
     });
     expect(screen.getByText("我的面板")).toBeTruthy();
     expect(screen.getByText("v1.2.0")).toBeTruthy();
-    expect(screen.getByText("界面插件")).toBeTruthy();
+    expect(screen.getByText("插件")).toBeTruthy();
     expect(screen.getByText("本机状态一览")).toBeTruthy();
 
     const host = screen.getByTestId("plugin-page-host");
@@ -297,12 +297,12 @@ describe("PluginBundlePage · 空态", () => {
 
     render(<PluginBundlePage pluginId="heming.gone" />);
 
-    expect(await screen.findByText("这个界面插件没有页面或已被停用")).toBeTruthy();
-    expect(screen.getByText(/没有找到这个界面插件的安装记录/)).toBeTruthy();
+    expect(await screen.findByText("这个插件没有页面或已被停用")).toBeTruthy();
+    expect(screen.getByText(/没有找到这个插件的安装记录/)).toBeTruthy();
     expect(pageMount).not.toHaveBeenCalled();
   });
 
-  it("停用的界面插件不给入口，也不挂视图", async () => {
+  it("停用的插件不给入口，也不挂视图", async () => {
     const pageMount = vi.fn(
       async (_input: { id: string; rect: WidgetPageRect }) => ({ ok: true as const }),
     );
@@ -313,12 +313,12 @@ describe("PluginBundlePage · 空态", () => {
 
     render(<PluginBundlePage pluginId="heming.panel" />);
 
-    expect(await screen.findByText("这个界面插件没有页面或已被停用")).toBeTruthy();
+    expect(await screen.findByText("这个插件没有页面或已被停用")).toBeTruthy();
     expect(screen.getByText(/已被停用，启用后才会显示/)).toBeTruthy();
     expect(pageMount).not.toHaveBeenCalled();
   });
 
-  it("清单没有 page 的界面插件给空态", async () => {
+  it("清单没有 page 的插件给空态", async () => {
     const pageMount = vi.fn(
       async (_input: { id: string; rect: WidgetPageRect }) => ({ ok: true as const }),
     );
@@ -329,7 +329,7 @@ describe("PluginBundlePage · 空态", () => {
 
     render(<PluginBundlePage pluginId="heming.panel" />);
 
-    expect(await screen.findByText("这个界面插件没有页面或已被停用")).toBeTruthy();
+    expect(await screen.findByText("这个插件没有页面或已被停用")).toBeTruthy();
     expect(screen.getByText(/没有声明页面/)).toBeTruthy();
     expect(pageMount).not.toHaveBeenCalled();
   });
