@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 4,
+  "id": "workflows",
+  "name": "工作流",
+  "version": "1.0.0",
+  "description": "节点式自动化：触发器、分支、HTTP、代码、大模型与子流程，把要做的事一步步接起来。",
+  "author": "和鸣",
+  "distribution": "module",
+  "meta": { "kind": "module" },
+  "web": {
+    "entry": "files/web/entry.js",
+    "contributions": ["page", "background"]
+  }
+}

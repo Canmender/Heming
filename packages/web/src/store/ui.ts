@@ -389,6 +389,8 @@ interface UiState {
    * 与 taskFocusId 同思路：只到「进入自动化页」为止，页面命中该 id 即选中并消费。
    */
   automationFocusId: string | null;
+  /** 进入工作流页并定位到某条工作流（通知/命令面板用；消费即清）。 */
+  workflowFocusId: string | null;
   /** 进入信息中枢的一次性意图（检索词/日程页）；命中即消费。 */
   infohubIntent: InfohubIntent | null;
   /** 进入自动化页并预填新建表单的一次性意图；命中即消费。 */
@@ -451,6 +453,9 @@ interface UiState {
   /** 从通知中心跳到自动化页的某条自动化任务（看它的运行记录）。 */
   focusAutomation: (taskId: string) => void;
   consumeAutomationFocus: () => void;
+  /** 打开工作流页并定位到某条工作流（模块未安装则去插件页）。 */
+  focusWorkflow: (workflowId: string) => void;
+  consumeWorkflowFocus: () => void;
   /** 回到助手选择列表（保持助手页，不选会话）。 */
   leaveConversation: () => void;
   /** 置入待投递槽（单槽：后写覆盖先写）。 */
@@ -589,6 +594,7 @@ const INITIAL_SESSION_VIEW = readSessionView();
 export const useUiStore = create<UiState>((set, get) => ({
   page: INITIAL_SESSION_VIEW?.page ?? "home",
   pageView: null,
+  workflowFocusId: null,
   navOrder: INITIAL_NAV_ORDER,
   navMode: readStoredNavMode(uiStorage()),
   navOpen: false,
@@ -627,6 +633,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       teamFocusUserId: null,
       teamFocusActivityId: null,
       automationFocusId: null,
+    workflowFocusId: null,
       infohubIntent: null,
       automationIntent: null,
       // 知识库动作意图同样一次性：切走就作废，回来不能莫名其妙弹一个新建框
@@ -651,6 +658,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       infohubIntent: null,
       automationIntent: null,
       automationFocusId: null,
+    workflowFocusId: null,
     }),
   openStaff: () => {
     if (!isModuleOn("staff")) {
@@ -673,6 +681,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       taskDraft: null,
       taskFocusId: null,
       automationFocusId: null,
+    workflowFocusId: null,
       infohubIntent: intent ?? null,
       automationIntent: null,
     });
@@ -692,11 +701,31 @@ export const useUiStore = create<UiState>((set, get) => ({
       taskFocusId: null,
       // 从这里进来是「去新建/看列表」，不该再落在一个旧的选中任务上。
       automationFocusId: null,
+    workflowFocusId: null,
       infohubIntent: null,
       automationIntent: intent ?? null,
     });
   },
   consumeAutomationIntent: () => set({ automationIntent: null }),
+  focusWorkflow: (workflowId) => {
+    if (!isModuleOn("workflows")) {
+      get().openModuleManager();
+      return;
+    }
+    set({
+      page: "workflows",
+      pageView: null,
+      activeConversationId: null,
+      workflowFocusId: workflowId,
+      automationFocusId: null,
+      automationIntent: null,
+      infohubIntent: null,
+      vaultIntent: null,
+      taskDraft: null,
+      pendingAttachment: null,
+    });
+  },
+  consumeWorkflowFocus: () => set({ workflowFocusId: null }),
   openVault: (intent) => {
     vaultIntentToken += 1;
     set({
@@ -707,6 +736,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       taskDraft: null,
       taskFocusId: null,
       automationFocusId: null,
+    workflowFocusId: null,
       infohubIntent: null,
       automationIntent: null,
       // 无 intent = 普通进入知识库页（清掉残留动作，不重复执行上次的「新建」）
@@ -731,6 +761,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       activeConversationId: id,
       taskDraft: null,
       automationFocusId: null,
+    workflowFocusId: null,
       infohubIntent: null,
       automationIntent: null,
     }),
@@ -744,6 +775,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       pageView: "tasks",
       taskFocusId: taskId,
       automationFocusId: null,
+    workflowFocusId: null,
       taskDraft: null,
       pendingAttachment: null,
       infohubIntent: null,

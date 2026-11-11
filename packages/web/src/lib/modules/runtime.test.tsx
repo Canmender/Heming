@@ -1,66 +1,139 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
-import type { ModuleState } from "./store.js";
-import { MODULE_IDS } from "./registry.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { useModuleStore } from "./store.js";
+import type { WebModuleEntry } from "./webModules.js";
 
-const useWorkflowScheduler = vi.fn();
+/**
+ * 模块宿主接缝（d.131 M2–M5）：页面/首页卡/后台循环全部来自模块包，
+ * 模块包缺失或抛错时只显示失败原因/不渲染，绝不回退到本体实现。
+ */
 
-vi.mock("../workflow/scheduler.js", () => ({ useWorkflowScheduler: (...a: unknown[]) => useWorkflowScheduler(...a) }));
-// 模块包加载 hook 在 jsdom 下不可用：显式返回 null entry，走内置回退路径
-const useWebModuleEntry = vi.fn(() => ({ entry: null, loading: false, error: "" }));
+const useWebModuleEntry = vi.fn((_id: string) => ({
+  entry: null as WebModuleEntry | null,
+  loading: false,
+  error: "模块包未安装",
+}));
 vi.mock("./useWebModule.js", () => ({
-  useWebModuleEntry: (...a: unknown[]) => useWebModuleEntry(...(a as [])),
+  useWebModuleEntry: (...args: unknown[]) => useWebModuleEntry(...(args as [string])),
 }));
 
-const { MODULE_PAGES, ModuleBackgroundSlots, modulePageOf, useModuleBackgroundLoops } = await import("./runtime.js");
+const { ModuleBackgroundSlots, ModuleHomeCard, ModulePage, modulePageOf } = await import(
+  "./runtime.js"
+);
 
-function state(partial: Partial<Record<keyof ModuleState, unknown>> = {}): ModuleState {
-  return {
-    installed: { staff: true, infohub: true, automations: true, workflows: true },
-    enabled: { staff: true, infohub: true, automations: true, workflows: true },
-    ...partial,
-  } as ModuleState;
-}
+beforeEach(() => {
+  useWebModuleEntry.mockClear();
+  useWebModuleEntry.mockReturnValue({ entry: null, loading: false, error: "模块包未安装" });
+});
 
-function Host({ authUser, moduleState }: { authUser: boolean; moduleState: ModuleState }) {
-  useModuleBackgroundLoops(authUser, moduleState);
-  return null;
-}
-
-describe("模块运行时注册表（App 与模块实现之间的唯一接缝）", () => {
-  beforeEach(() => {
-    useWorkflowScheduler.mockClear();
+describe("modulePageOf", () => {
+  it("四个模块页 id 都认（实现已全部迁出，不能再依赖内置页面表）", () => {
+    for (const id of ["staff", "infohub", "automations", "workflows"]) {
+      expect(modulePageOf(id)).toBe(id);
+    }
   });
 
-  it("除已迁出模块外，每个内置模块仍有页面回退；id 与 registry 一致", () => {
-    // staff 已迁到模块包（d.131 M2），其余三个仍是内置回退。
-    expect(Object.keys(MODULE_PAGES).sort()).toEqual(
-      MODULE_IDS.filter((id) => id === "workflows").sort(),
-    );
-    for (const id of Object.keys(MODULE_PAGES)) expect(MODULE_PAGES[id as keyof typeof MODULE_PAGES]).toBeTruthy();
-  });
-
-  it("modulePageOf：模块页返回 id，其它页面返回 null", () => {
-    expect(modulePageOf("staff")).toBe("staff");
-    expect(modulePageOf("infohub")).toBe("infohub");
-    expect(modulePageOf("automations")).toBe("automations");
-    expect(modulePageOf("workflows")).toBe("workflows");
+  it("非模块页返回 null", () => {
+    expect(modulePageOf("home")).toBeNull();
     expect(modulePageOf("chat")).toBeNull();
-    expect(modulePageOf("plugin:acme.ops")).toBeNull();
+    expect(modulePageOf("settings")).toBeNull();
+  });
+});
+
+describe("ModulePage", () => {
+  it("模块包缺失：显示未就绪原因，不渲染空壳", () => {
+    render(<ModulePage moduleId="staff" />);
+    expect(screen.getByText("模块「staff」未就绪")).toBeInTheDocument();
+    expect(screen.getByText("模块包未安装")).toBeInTheDocument();
   });
 
-  it("后台循环按登录态与模块生效状态挂载（停用/未登录 → false）", () => {
-    const allOn = state();
-    render(<Host authUser moduleState={allOn} />);
-    expect(useWorkflowScheduler).toHaveBeenLastCalledWith(true);
-    // d.131 M2：幕僚循环已随模块包迁出，宿主 hook 不再直接挂（只由模块后台导出提供）。
+  it("模块包提供页面：渲染模块页面", () => {
+    useWebModuleEntry.mockReturnValue({
+      entry: {
+        manifest: { id: "workflows", version: "1.0.0" },
+        pages: { workflows: () => <div>工作流模块页</div> },
+      },
+      loading: false,
+      error: "",
+    });
+    render(<ModulePage moduleId="workflows" />);
+    expect(screen.getByText("工作流模块页")).toBeInTheDocument();
+  });
 
-    const staffOff = state({ enabled: { staff: false, infohub: true, automations: false, workflows: true } } as Partial<ModuleState>);
-    render(<Host authUser={false} moduleState={staffOff} />);
-    expect(useWorkflowScheduler).toHaveBeenLastCalledWith(false);
+  it("模块页面抛错：错误边界兜底，不打白整棵 App", () => {
+    useWebModuleEntry.mockReturnValue({
+      entry: {
+        manifest: { id: "workflows", version: "1.0.0" },
+        pages: {
+          workflows: () => {
+            throw new Error("module boom");
+          },
+        },
+      },
+      loading: false,
+      error: "",
+    });
+    render(<ModulePage moduleId="workflows" />);
+    expect(screen.getByText("模块「workflows」未就绪")).toBeInTheDocument();
+  });
+});
 
-    // 模块包未加载（mock entry=null）→ 槽位不渲染任何循环，也不崩
-    render(<ModuleBackgroundSlots authUser moduleState={allOn} />);
-    render(<ModuleBackgroundSlots authUser={false} moduleState={staffOff} />);
+describe("ModuleHomeCard", () => {
+  it("模块未生效 → 不渲染（即使模块包有卡）", () => {
+    useWebModuleEntry.mockReturnValue({
+      entry: {
+        manifest: { id: "staff", version: "1.0.0" },
+        pages: { staff: () => null },
+        homeCards: { staff: () => <div>幕僚卡</div> },
+      },
+      loading: false,
+      error: "",
+    });
+    render(<ModuleHomeCard moduleId="staff" active={false} />);
+    expect(screen.queryByText("幕僚卡")).toBeNull();
+  });
+
+  it("模块生效且加载成功 → 渲染模块卡", () => {
+    useWebModuleEntry.mockReturnValue({
+      entry: {
+        manifest: { id: "staff", version: "1.0.0" },
+        pages: { staff: () => null },
+        homeCards: { staff: () => <div>幕僚卡</div> },
+      },
+      loading: false,
+      error: "",
+    });
+    render(<ModuleHomeCard moduleId="staff" active />);
+    expect(screen.getByText("幕僚卡")).toBeInTheDocument();
+  });
+});
+
+describe("ModuleBackgroundSlots", () => {
+  it("按模块生效状态挂载模块后台组件（不再由宿主直接调用 hook）", () => {
+    const calls: boolean[] = [];
+    useWebModuleEntry.mockImplementation((id: string) => ({
+      entry: {
+        manifest: { id, version: "1.0.0" },
+        pages: { [id]: () => null },
+        background: {
+          [id]: ({ active }: { active: boolean }) => {
+            calls.push(active);
+            return <div data-testid={`bg-${id}`} />;
+          },
+        },
+      },
+      loading: false,
+      error: "",
+    }));
+    for (const id of ["staff", "automations", "workflows"] as const) {
+      useModuleStore.getState().install(id);
+    }
+    render(
+      <ModuleBackgroundSlots authUser moduleState={useModuleStore.getState()} />,
+    );
+    expect(screen.getByTestId("bg-staff")).toBeInTheDocument();
+    expect(screen.getByTestId("bg-automations")).toBeInTheDocument();
+    expect(screen.getByTestId("bg-workflows")).toBeInTheDocument();
+    expect(calls).toEqual([true, true, true]);
   });
 });

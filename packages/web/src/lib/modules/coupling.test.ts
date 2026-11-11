@@ -26,8 +26,6 @@ const WEB_SRC = resolve(HERE, "..", "..");
 const COUPLING_ROOTS = [
   "lib/modules",
   "lib/infohub",
-  "lib/workflow",
-  "components/workflow",
   "components/staff",
   "components/infohub",
   "components/automation",

@@ -5,7 +5,6 @@ import {
   type AppNotification,
 } from "../store/notifications.js";
 import { useUiStore } from "../store/ui.js";
-import { useWorkflowStore } from "../lib/workflow/store.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { useModalA11y } from "./useModalA11y.js";
 
@@ -122,8 +121,7 @@ export function NotificationCenter() {
     // 放在 staff 之后、task 之前：automation 与 task 都带 id，顺序反了会先命中 task 分支
     // 走进任务区（自动化任务的 id 在任务区里根本不存在）。
     if (item.kind === "workflow" && item.workflowId) {
-      useWorkflowStore.getState().select(item.workflowId);
-      useUiStore.getState().setPage("workflows");
+      useUiStore.getState().focusWorkflow(item.workflowId);
       return;
     }
     if (item.kind === "automation" && item.automationId) {

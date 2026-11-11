@@ -41,7 +41,12 @@ export const CHANGELOG: ChangelogEntry[] = [
       "新增 `packages/modules/infohub/`（页面 + 首页卡），入口导出 `pages.infohub / homeCards.infohub`；构建 40.5KB、无 React，已签成 10.8KB module.tgz。",
       "删除本体 `InfohubPage` / `InfohubHomeCard` 与测试；首页归档卡改由 `ModuleHomeCard` 读取模块包；`MODULE_PAGES` 只剩工作流回退；耦合基线 **108 → 107**。",
       "**刻意保留** `lib/infohub/client.ts` / `store.ts` / `tools.ts` 在本体：它们是宿主与 Python 引擎的本机桥（命令面板、团队页、`infohub_*` 工具、自动化模块都依赖），属于「宿主桥」而非模块 UI；引擎仍由",
-      "浏览器 dev 实测：信息中枢页面由 `/__modules__/infohub/entry.js` 渲染（浏览器无本机桥时显示桌面端提示）。"
+      "浏览器 dev 实测：信息中枢页面由 `/__modules__/infohub/entry.js` 渲染（浏览器无本机桥时显示桌面端提示）。",
+      "新增 `packages/modules/workflows/`（67 个源文件：画布/编辑器/引擎/执行记录/凭据/调度器/节点库），入口导出 `pages.workflows / background.workflows`；构建 **419KB**、无 React，签成 **114.2KB module.tgz**。",
+      "宿主运行时彻底收口：删除 `MODULE_PAGES` 内置页面回退与 `useModuleBackgroundLoops`直接 hook；`ModulePage` 只从模块包取页面、`ModuleBackgroundSlots` 统一挂三个后台组件。",
+      "解耦宿主对模块 store 的最后依赖：通知中心「工作流失败」不再 import 模块 store，改为`ui.focusWorkflow(id)` 一次性意图；工作流模块页加载后自己 select 并消费意图。",
+      "删除本体 `lib/workflow/**`、`components/workflow/**` 及测试；耦合基线 **107 → 12**（剩余条目是宿主模块注册表/store/nav 与 infohub 引擎桥，M6 重新归类后归零）。",
+      "浏览器 dev 实测：工作流页面（列表/执行记录/凭据/新建）由 `/__modules__/workflows/entry.js` 渲染。"
     ],
     "paragraphs": [
       "目标：把幕僚/信息中枢/自动化/工作流的 UI 与业务逻辑从 `packages/web` 迁出，改为**安装后才存在、由主窗口动态加载**的首方签名 ESM 模块包（与沙箱 bundle 不同，共享宿主 React/stores，不重写 UI）。本轮完成 M1 基础设施，迁移本身从下一轮开始。",
@@ -52,8 +57,9 @@ export const CHANGELOG: ChangelogEntry[] = [
       "⑤ M3：自动化模块迁出本体",
       "⑥ 生产分发链：模块包签名 / 安装 / app:// 只读路由 / loader 解析改入口/贡献集即验签失败；`module-package.js` 校验 entry 在包内，返回 `web`。",
       "⑦ M4：信息中枢 UI 迁出本体（宿主保留引擎桥）`heming.infohub-engine` 选装模块提供，不在安装包里。",
-      "下一步（M5–M6）",
-      "工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。"
+      "⑧ M5：工作流整体迁出本体",
+      "下一步（M6）",
+      "工作流已迁出 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。"
     ]
   },
   {

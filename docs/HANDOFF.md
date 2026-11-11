@@ -24,10 +24,10 @@
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-11） | `d.131.3.54.0`（`main`，**未出包/未部署**）——模块包独立化 M1–M4 + 生产分发链：幕僚/自动化/信息中枢 UI 已迁出本体；模块包签名/安装/app:// 路由/loader 桌面解析打通；耦合基线 143→107。详见 §5 首条 |
+| 当前版本（2026-11-11） | `d.131.3.54.0`（`main`，**未出包/未部署**）——模块包独立化 M1–M5 + 生产分发链：四个模块 UI/调度/业务逻辑全部迁出本体；模块包签名/安装/app:// 路由/loader 桌面解析打通；耦合基线 143→12（剩余为宿主模块运行时/引擎桥，M6 归零）。详见 §5 首条 |
 | 安装包（最新） | **仍是 `d.123.3.48.0`（r90，247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`）**；`d.124.3.48.0` / `d.125.3.48.0` / `d.126.3.48.0` / `d.127.3.48.0` / `d.128.3.48.0` / `d.129.3.48.0` / `d.129.3.49.0` / `d.129.3.50.0` / `d.129.3.51.0` / `d.129.3.52.0` / `d.129.3.53.0` / `d.130.3.53.0` / `d.130.3.54.0` / `d.131.3.54.0` 代码已合入 `main` 但**未打包、未部署、未发布更新源**（需要时按 `docs/deploy.md` 走 `release.mjs --desktop --deploy` + `publish-update.mjs`）。 |
 | 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.131.3.54.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
-| 测试 | 2026-11-11 09:2x 实跑（d.131.3.54.0 门禁）：**web 322 文件 / 4632 例、shared 8 / 106、server 16 / 271、desktop 47 个 node:test 文件 / 778 例**；`pnpm -r typecheck` 六包零错误；编码检查 OK。staff/automations 20.5KB、infohub 10.8KB module.tgz 已签并实测；耦合基线 **107**。 |
+| 测试 | 2026-11-11 09:3x 实跑（d.131.3.54.0 门禁）：**web 294 文件 / 4231 例、shared 8 / 106、server 16 / 271、desktop 47 个 node:test 文件 / 778 例**；`pnpm -r typecheck` 六包零错误；编码检查 OK。四个模块包：staff 20.5 / automations 20.4 / infohub 10.8 / workflows 114.2 KB 已签；耦合基线 **12**。 |
 | 线上 | **`d.123.3.48.0` 已于 2026-11-10 10:05–10:07 部署**（`release.mjs --desktop --deploy`：7 OK / 2 SKIP；备份 `heming-data-2026-11-10-d.123.3.48.0.tar.gz` 111.1KB 落本机；`INSTALL DONE: d.123.3.48.0`，install + smoke 通过）。人工校验：公网 `/api/health` 200；首页主 bundle `index-DO9EqyCD.js` 与本机 `packages/web/dist` **同名同 md5**；线上 SettingsPage chunk 含 `d.123.3.48.0`；部署包 30.6MB / 1802 项（不该有的 0 项）。 |
 | 安装包（已发布） | **`和鸣 Setup d.123.3.48.0.exe`（`r90`，247,030,505 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs`（`HEMING_RELEASE_DIR=…/r90`）上传 3 个文件并按远端大小 + sha512 校验通过。 |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **当前指向 123.3.48**（sha512 `7Plv…Mdoxug==`，size 247030505）；远端只留 `d.122.3.48.0` + `d.123.3.48.0` 两版（更早版本已按策略清理）。 |
@@ -229,6 +229,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 
 ## 5. 下一步候选
+**模块包独立化 M1–M5 + 生产分发链（`d.131.3.54.0`，2026-11-11；`main`，未出包/未部署）**：四个模块（staff 20.5 / automations 20.4 / infohub 10.8 / workflows 114.2 KB module.tgz）UI/调度/业务逻辑全部迁出，模块包首方签名、安装记录、app:// 只读路由、loader 桌面解析已打通；宿主 runtime 不再 import 任何模块实现，通知/命令面板通过 ui 意图解耦。耦合基线 **143→12**（剩余 `lib/modules` 注册表/store/nav/catalog 与 `lib/infohub` 引擎桥，M6 重新归类为宿主运行时/桥后归零）。**下一步（M6）**：① 基线归零与安装包守卫（安装包不得含模块源码/引擎）；② 补模块包测试（现有单测随源码迁出，需在模块包内恢复）；③ 全量门禁 + 真机验证；④ 出 Windows 安装包并部署云端。
+
 **模块包独立化 M1–M4 + 生产分发链（`d.131.3.54.0`，2026-11-11；`main`，未出包/未部署）**：① M1 基础设施；② M2 幕僚（141→124）；③ M3 自动化（124→108）；④ M4 信息中枢 UI（页面/首页卡迁出，基线 108→107，构建 40.5KB、module.tgz 10.8KB）；`lib/infohub/client|store|tools` **刻意留在本体**——它们是命令面板/团队页/工具/自动化共用的宿主引擎桥，不是模块 UI；⑤ 生产分发链（签名/安装/app:// 路由/loader 桌面解析）已打通。**下一步（M5–M6）**：① 工作流迁出（画布 + lib/workflow + 服务托管）；② 删静态模块表、基线归零、补模块测试；③ 全绿后出安装包并部署云端。
 
 **模块包独立化 M1+M2+M3 + 生产分发链（`d.131.3.54.0`，2026-11-11；`main`，未出包/未部署）**：① M1 基础设施（构建/SDK shim/loader/dev 中间件）；② M2 幕僚迁移（141→124）；③ M3 自动化迁移（124→108）；④ 生产分发：`module.json web` 贡献进入 canonical-v1 签名、`module-package` 校验与返回 web、`module-store` 支持纯 UI 模块、app:// `/modules/<id>/<version>/files/web/**` 只读路由（3 组路径安全测试）、preload `__heming_modules.webList()`、loader 桌面 app:// 解析、`scripts/pack-web-module.mjs` 签名打包（staff/automations 20.5KB 实测安装）。**下一步（M4–M6）**：① 信息中枢迁出（页面 + client/store + 工具 provider；注意自动化模块已通过 SDK 依赖 infohub client/store，需先设计共享桥）；② 工作流迁出；③ 删静态模块表、基线归零、补模块测试；④ 全绿后出安装包并部署云端。

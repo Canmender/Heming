@@ -21,7 +21,6 @@ import {
   ModuleBackgroundSlots,
   ModulePage,
   modulePageOf,
-  useModuleBackgroundLoops,
 } from "./lib/modules/runtime.js";
 import { useAppPresence } from "./lib/appPresence.js";
 import { startWidgetEvents } from "./lib/widgetEvents.js";
@@ -570,7 +569,6 @@ function AppShell({
   const navMode = useUiStore((s) => s.navMode);
 
   // 本机自动化 / 工作流调度 / 常驻幕僚：实现收在 lib/modules/runtime，App 只按生效状态统一挂载。
-  useModuleBackgroundLoops(Boolean(authUser), moduleState);
 
   // d.115：信息中枢模块生效 = 自动拉起本机边车（不依赖页面挂载），并自动识别、
   // 空库时采集一次；模块停用 = 运行时一起下线（不删任何归档数据）。

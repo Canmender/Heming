@@ -6,7 +6,6 @@ import { createMemoryStorage } from "../lib/memory/storage.js";
 import { useUiStore } from "../store/ui.js";
 import { useModuleStore } from "../lib/modules/store.js";
 import type { AppNotification } from "../store/notifications.js";
-import { useWorkflowStore } from "../lib/workflow/store.js";
 
 function makeItem(overrides: Partial<AppNotification> = {}): AppNotification {
   return {
@@ -37,7 +36,6 @@ beforeEach(() => {
     taskFocusId: null,
     automationFocusId: null,
   });
-  useWorkflowStore.setState({ workflows: [], selectedId: null });
 });
 
 describe("formatRelativeTime", () => {
@@ -178,9 +176,9 @@ describe("通知中心面板", () => {
     expect(useUiStore.getState().activeConversationId).toBeNull();
   });
 
-  it("工作流失败通知点进去：进工作流页并选中那条工作流", () => {
-    const created = useWorkflowStore.getState().create({ name: "抓取接口" });
-    const workflowId = created.ok ? created.workflow.id : "";
+  it("工作流失败通知点进去：进工作流页并投递定位意图（宿主不再 import 模块 store）", () => {
+    useModuleStore.getState().install("workflows");
+    const workflowId = "w1";
     const item = makeItem({
       kind: "workflow",
       key: "workflow:w1:error:1000",
@@ -198,7 +196,8 @@ describe("通知中心面板", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开通知：工作流「抓取接口」执行失败" }));
 
     expect(useUiStore.getState().page).toBe("workflows");
-    expect(useWorkflowStore.getState().selectedId).toBe(workflowId);
+    // 宿主只投递一次性意图；工作流模块页加载后自己 select 并消费
+    expect(useUiStore.getState().workflowFocusId).toBe(workflowId);
   });
 
   it("逐条已读 / 删除只影响那一条", () => {

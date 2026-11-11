@@ -77,9 +77,21 @@
   `heming.infohub-engine` 选装模块提供，不在安装包里。
 - 浏览器 dev 实测：信息中枢页面由 `/__modules__/infohub/entry.js` 渲染（浏览器无本机桥时显示桌面端提示）。
 
-### 下一步（M5–M6）
+### ⑧ M5：工作流整体迁出本体
 
-工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，
+- 新增 `packages/modules/workflows/`（67 个源文件：画布/编辑器/引擎/执行记录/凭据/调度器/节点库），
+  入口导出 `pages.workflows / background.workflows`；构建 **419KB**、无 React，签成 **114.2KB module.tgz**。
+- 宿主运行时彻底收口：删除 `MODULE_PAGES` 内置页面回退与 `useModuleBackgroundLoops`
+  直接 hook；`ModulePage` 只从模块包取页面、`ModuleBackgroundSlots` 统一挂三个后台组件。
+- 解耦宿主对模块 store 的最后依赖：通知中心「工作流失败」不再 import 模块 store，改为
+  `ui.focusWorkflow(id)` 一次性意图；工作流模块页加载后自己 select 并消费意图。
+- 删除本体 `lib/workflow/**`、`components/workflow/**` 及测试；耦合基线 **107 → 12**
+  （剩余条目是宿主模块注册表/store/nav 与 infohub 引擎桥，M6 重新归类后归零）。
+- 浏览器 dev 实测：工作流页面（列表/执行记录/凭据/新建）由 `/__modules__/workflows/entry.js` 渲染。
+
+### 下一步（M6）
+
+工作流已迁出 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，
 最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。
 
 ## d.130.3.54.0（2026-11-10）— 删除未路由死代码；剩余可见组件 token 收口
