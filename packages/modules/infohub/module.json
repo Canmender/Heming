@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 4,
+  "id": "infohub",
+  "name": "信息中枢",
+  "version": "1.0.0",
+  "description": "在本机浏览、检索 QQ / 微信聊天记录和日程；归档不出本机。",
+  "author": "和鸣",
+  "distribution": "module",
+  "meta": { "kind": "module" },
+  "web": {
+    "entry": "files/web/entry.js",
+    "contributions": ["page", "homeCard"]
+  }
+}

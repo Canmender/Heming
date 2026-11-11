@@ -37,7 +37,11 @@ export const CHANGELOG: ChangelogEntry[] = [
       "`module-store` 记录 `web`，无 `files/app` 的纯 UI 模块也能安装（当前记录按 web.entry 存在性判定）。",
       "app:// 新增 `/modules/<id>/<version>/files/web/**` 只读路由：只服务已安装且声明 web 的 id@version，路径夹取禁 `..`/反斜杠/非法编码（纯函数 + 3 组测试）。",
       "preload 新增 `__heming_modules.webList()`；web loader 有桌面桥时拼`app://heming/modules/<id>/<version>/<entry>`，无安装记录明确报「未安装」，绝不回退内置。",
-      "新增 `scripts/pack-web-module.mjs`：构建产物打成首方签名 `module.tgz`（含回读验签）。staff/automations 各 20.5KB，已实测安装到本机模块目录并解析出 app:// 文件路径。"
+      "新增 `scripts/pack-web-module.mjs`：构建产物打成首方签名 `module.tgz`（含回读验签）。staff/automations 各 20.5KB，已实测安装到本机模块目录并解析出 app:// 文件路径。",
+      "新增 `packages/modules/infohub/`（页面 + 首页卡），入口导出 `pages.infohub / homeCards.infohub`；构建 40.5KB、无 React，已签成 10.8KB module.tgz。",
+      "删除本体 `InfohubPage` / `InfohubHomeCard` 与测试；首页归档卡改由 `ModuleHomeCard` 读取模块包；`MODULE_PAGES` 只剩工作流回退；耦合基线 **108 → 107**。",
+      "**刻意保留** `lib/infohub/client.ts` / `store.ts` / `tools.ts` 在本体：它们是宿主与 Python 引擎的本机桥（命令面板、团队页、`infohub_*` 工具、自动化模块都依赖），属于「宿主桥」而非模块 UI；引擎仍由",
+      "浏览器 dev 实测：信息中枢页面由 `/__modules__/infohub/entry.js` 渲染（浏览器无本机桥时显示桌面端提示）。"
     ],
     "paragraphs": [
       "目标：把幕僚/信息中枢/自动化/工作流的 UI 与业务逻辑从 `packages/web` 迁出，改为**安装后才存在、由主窗口动态加载**的首方签名 ESM 模块包（与沙箱 bundle 不同，共享宿主 React/stores，不重写 UI）。本轮完成 M1 基础设施，迁移本身从下一轮开始。",
@@ -47,8 +51,9 @@ export const CHANGELOG: ChangelogEntry[] = [
       "④ M2：幕僚模块迁出本体",
       "⑤ M3：自动化模块迁出本体",
       "⑥ 生产分发链：模块包签名 / 安装 / app:// 只读路由 / loader 解析改入口/贡献集即验签失败；`module-package.js` 校验 entry 在包内，返回 `web`。",
-      "下一步（M4–M6）",
-      "信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。"
+      "⑦ M4：信息中枢 UI 迁出本体（宿主保留引擎桥）`heming.infohub-engine` 选装模块提供，不在安装包里。",
+      "下一步（M5–M6）",
+      "工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。"
     ]
   },
   {

@@ -66,9 +66,20 @@
 - 新增 `scripts/pack-web-module.mjs`：构建产物打成首方签名 `module.tgz`（含回读验签）。
   staff/automations 各 20.5KB，已实测安装到本机模块目录并解析出 app:// 文件路径。
 
-### 下一步（M4–M6）
+### ⑦ M4：信息中枢 UI 迁出本体（宿主保留引擎桥）
 
-信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，
+- 新增 `packages/modules/infohub/`（页面 + 首页卡），入口导出 `pages.infohub / homeCards.infohub`；
+  构建 40.5KB、无 React，已签成 10.8KB module.tgz。
+- 删除本体 `InfohubPage` / `InfohubHomeCard` 与测试；首页归档卡改由 `ModuleHomeCard` 读取模块包；
+  `MODULE_PAGES` 只剩工作流回退；耦合基线 **108 → 107**。
+- **刻意保留** `lib/infohub/client.ts` / `store.ts` / `tools.ts` 在本体：它们是宿主与 Python 引擎的本机桥
+  （命令面板、团队页、`infohub_*` 工具、自动化模块都依赖），属于「宿主桥」而非模块 UI；引擎仍由
+  `heming.infohub-engine` 选装模块提供，不在安装包里。
+- 浏览器 dev 实测：信息中枢页面由 `/__modules__/infohub/entry.js` 渲染（浏览器无本机桥时显示桌面端提示）。
+
+### 下一步（M5–M6）
+
+工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，
 最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。
 
 ## d.130.3.54.0（2026-11-10）— 删除未路由死代码；剩余可见组件 token 收口

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useInfohubStore } from "../lib/infohub/store.js";
-import { useUiStore } from "../store/ui.js";
+import { useInfohubStore } from "@heming/sdk";
+import { useUiStore } from "@heming/sdk";
 
 /**
  * 首页「本机归档」卡（d.46）。

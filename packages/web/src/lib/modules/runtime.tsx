@@ -16,17 +16,13 @@ import { useWorkflowScheduler } from "../workflow/scheduler.js";
  */
 
 /** 懒加载的模块页面（每个模块单独成 chunk，首屏不下载）。 */
-const InfohubPage = lazy(() =>
-  import("../../components/InfohubPage.js").then((m) => ({ default: m.InfohubPage })),
-);
 const WorkflowPage = lazy(() =>
   import("../../components/workflow/WorkflowPage.js").then((m) => ({ default: m.WorkflowPage })),
 );
 
 /** moduleId → 页面组件（必须与 registry 的 page 一一对应）。 */
-/** staff / automations 已迁出（d.131 M2/M3）；其余模块迁移前仍保留内置回退。 */
+/** staff / automations / infohub 已迁出（d.131 M2–M4）；工作流迁移前仍保留内置回退。 */
 export const MODULE_PAGES: Readonly<Partial<Record<ModuleId, LazyExoticComponent<ComponentType>>>> = {
-  infohub: InfohubPage,
   workflows: WorkflowPage,
 };
 

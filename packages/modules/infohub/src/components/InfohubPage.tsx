@@ -16,11 +16,11 @@ import {
   type InfohubSearchResult,
   type InfohubStatus,
   type InfohubSyncResult,
-} from "../lib/infohub/client.js";
-import { useInfohubStore } from "../lib/infohub/store.js";
-import { useUiStore, type InfohubIntent } from "../store/ui.js";
-import { isModuleEffective, useModuleStore } from "../lib/modules/store.js";
-import { PageShell } from "./layout/PageShell.js";
+} from "@heming/sdk";
+import { useInfohubStore } from "@heming/sdk";
+import { useUiStore, type InfohubIntent } from "@heming/sdk";
+import { isModuleEffective, useModuleStore } from "@heming/sdk";
+import { PageShell } from "@heming/sdk";
 
 const SEARCH_LIMIT = 100;
 

@@ -1,7 +1,6 @@
 {
   "note": "P2 迁移棘轮：这些文件仍属于内置模块（插件）业务代码，迁出本体时同步删除基线条目；新增条目必须评审。",
   "files": [
-    "components/InfohubPage.tsx",
     "components/workflow/CredentialsPanel.tsx",
     "components/workflow/DataPreview.tsx",
     "components/workflow/ExecutionsPanel.tsx",

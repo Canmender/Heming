@@ -23,7 +23,6 @@ import { Avatar } from "./Avatar.js";
 import { PageShell } from "./layout/PageShell.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { SkeletonLine } from "./ui/Skeleton.js";
-import { InfohubHomeCard } from "./InfohubHomeCard.js";
 import { ModuleHomeCard } from "../lib/modules/runtime.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
 import { OnboardingCard } from "./ux/OnboardingCard.js";
@@ -547,7 +546,7 @@ export function HomePage() {
 
       {/* 2.6 本机归档：日程摘要与归档规模（仅桌面端渲染）。
           d.70：信息中枢模块停用后整张卡下线，不在首页留假入口。 */}
-      {moduleState.infoHub && <InfohubHomeCard />}
+      <ModuleHomeCard moduleId="infohub" active={moduleState.infoHub} fallback={null} />
 
       {/* 2.7 幕僚：最近一份主动简报（d.48）；d.131 起优先由模块包提供卡片，未加载回退内置 */}
       <ModuleHomeCard moduleId="staff" active={moduleState.staff} fallback={null} />

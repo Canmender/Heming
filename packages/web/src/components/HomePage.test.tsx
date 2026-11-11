@@ -344,9 +344,9 @@ describe("HomePage", () => {
     useModuleStore.getState().install("infohub");
     const first = render(<HomePage />);
     await act(async () => {});
-    expect(screen.getByRole("region", { name: "本机归档" })).toBeInTheDocument();
-    // d.131 M2：幕僚卡已由模块包提供；jsdom 没有模块构建，首页不再渲染内置回退
+    // d.131 M2–M4：幕僚/信息中枢卡都由模块包提供；jsdom 没有模块构建，首页不再渲染内置回退
     expect(screen.queryByRole("region", { name: "幕僚" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "本机归档" })).toBeNull();
     first.unmount();
 
     useModuleStore.getState().setEnabled("infohub", false);

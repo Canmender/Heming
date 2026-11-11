@@ -35,7 +35,7 @@ describe("模块运行时注册表（App 与模块实现之间的唯一接缝）
   it("除已迁出模块外，每个内置模块仍有页面回退；id 与 registry 一致", () => {
     // staff 已迁到模块包（d.131 M2），其余三个仍是内置回退。
     expect(Object.keys(MODULE_PAGES).sort()).toEqual(
-      MODULE_IDS.filter((id) => id !== "staff" && id !== "automations").sort(),
+      MODULE_IDS.filter((id) => id === "workflows").sort(),
     );
     for (const id of Object.keys(MODULE_PAGES)) expect(MODULE_PAGES[id as keyof typeof MODULE_PAGES]).toBeTruthy();
   });
