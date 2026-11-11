@@ -44,7 +44,9 @@ export function PluginRepositoryPanel({
     setLoading(true);
     setError("");
     try {
-      setEntries(await fetchPluginCatalog(catalog));
+      // 仓库里既可能有声明式包，也可能有首方界面插件（bundle，如桌宠/画布/建模）；
+      // 统一仓库必须全部列出，否则用户只看到声明式那一条路径。
+      setEntries(await fetchPluginCatalog(catalog, { distribution: "all" }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

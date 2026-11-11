@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.135.3.54.5",
+    "date": "2026-11-11",
+    "title": "插件仓库能看见所有插件了",
+    "bullets": [
+      "修复插件仓库只显示声明式插件、看不到桌宠 / 画布 / 建模等界面插件的问题；现在同一列表显示所有插件。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.135.3.54.4",
     "date": "2026-11-11",
     "title": "插件页只有一个仓库、一个入口",

@@ -12,6 +12,17 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.135.3.54.5",
+    "date": "2026-11-11",
+    "title": "插件仓库显示全部插件（含界面插件）",
+    "bullets": [
+      "修复：插件仓库面板只请求 `distribution=manifest`，把桌宠 / 画布 / 建模这些界面插件（bundle）过滤掉了，界面显示「仓库里还没有插件」，只剩两个官方插件。现在拉全部分发形态并在同一列表展示；"
+    ],
+    "paragraphs": [
+      "安装时仍按 distribution 走各自校验 / 安装路径。"
+    ]
+  },
+  {
     "version": "d.135.3.54.4",
     "date": "2026-11-11",
     "title": "只有一份插件仓库；桌面小组件并入插件",
