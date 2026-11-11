@@ -46,7 +46,13 @@ export const CHANGELOG: ChangelogEntry[] = [
       "宿主运行时彻底收口：删除 `MODULE_PAGES` 内置页面回退与 `useModuleBackgroundLoops`直接 hook；`ModulePage` 只从模块包取页面、`ModuleBackgroundSlots` 统一挂三个后台组件。",
       "解耦宿主对模块 store 的最后依赖：通知中心「工作流失败」不再 import 模块 store，改为`ui.focusWorkflow(id)` 一次性意图；工作流模块页加载后自己 select 并消费意图。",
       "删除本体 `lib/workflow/**`、`components/workflow/**` 及测试；耦合基线 **107 → 12**（剩余条目是宿主模块注册表/store/nav 与 infohub 引擎桥，M6 重新归类后归零）。",
-      "浏览器 dev 实测：工作流页面（列表/执行记录/凭据/新建）由 `/__modules__/workflows/entry.js` 渲染。"
+      "浏览器 dev 实测：工作流页面（列表/执行记录/凭据/新建）由 `/__modules__/workflows/entry.js` 渲染。",
+      "**耦合基线 12 → 0**：剩余条目均重新归类——`lib/modules`（模块注册表/store/nav/catalog）是宿主模块运行时，`lib/infohub/client|store|tools` 是宿主与 Python 引擎的本机桥，不属于模块实现。",
+      "`coupling.test.ts` 从「只减不增」棘轮改为**最终不变量守卫**：本体不得出现已迁出的模块目录/页面；四个模块包必须存在且声明 web 入口；本体 web 源码不得直接 import 模块包。",
+      "安装包守卫（`packaging.plugins.test.js`）新增：安装包不携带 `packages/modules` / module-catalog，但必须包含模块运行时（module-store/module-package/app-protocol）。",
+      "新增 `scripts/check-module-packages.mjs`（`pnpm module:check`）：校验 4 个模块包的清单/贡献/SDK依赖（不得指向已迁出目录）/dist 体积与「不打包 React」；当前全部通过。",
+      "全量门禁：web 294 文件 / 4233 例、desktop 47 / 779、shared 106、server 271 全绿；typecheck 六包零错误。",
+      "已知：随源码迁出的模块单测尚未在模块包内恢复，暂由 `module:check` 契约检查 + 浏览器实测覆盖；发布前如需补模块内单测可另开一轮。"
     ],
     "paragraphs": [
       "目标：把幕僚/信息中枢/自动化/工作流的 UI 与业务逻辑从 `packages/web` 迁出，改为**安装后才存在、由主窗口动态加载**的首方签名 ESM 模块包（与沙箱 bundle 不同，共享宿主 React/stores，不重写 UI）。本轮完成 M1 基础设施，迁移本身从下一轮开始。",
@@ -58,7 +64,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       "⑥ 生产分发链：模块包签名 / 安装 / app:// 只读路由 / loader 解析改入口/贡献集即验签失败；`module-package.js` 校验 entry 在包内，返回 `web`。",
       "⑦ M4：信息中枢 UI 迁出本体（宿主保留引擎桥）`heming.infohub-engine` 选装模块提供，不在安装包里。",
       "⑧ M5：工作流整体迁出本体",
-      "下一步（M6）",
+      "⑨ M6：耦合基线归零 + 发布守卫",
+      "下一步：打包与部署",
       "工作流已迁出 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。"
     ]
   },

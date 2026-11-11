@@ -87,3 +87,23 @@ test("选装模块（信息中枢引擎）不随安装包分发（d.116）", () 
     assert.ok(files.includes(required), `安装包应包含选装模块安装链路：${required}`);
   }
 });
+
+test("宿主加载式模块（d.131）不随安装包分发：模块目录/产物只能进插件目录", () => {
+  for (const source of packagedSources()) {
+    // 注意：module-store.js / module-package.js 是宿主运行时，必须保留；
+    // 这里禁的是「模块实现目录」「构建产物目录」，不是模块运行时文件。
+    assert.ok(
+      !/(^|[\\/])packages[\\/]modules([\\/]|$)/.test(source),
+      `安装包不应携带模块实现目录：${source}`,
+    );
+    assert.ok(
+      !/(^|[\\/])module-catalog([\\/]|$)/.test(source),
+      `安装包不应携带模块发布目录：${source}`,
+    );
+  }
+  const files = Array.isArray(build.files) ? build.files : [];
+  // 安装链路本身必须在：缺了就是「装完模块加载不出来」。
+  for (const required of ["module-store.js", "module-package.js", "app-protocol.js"]) {
+    assert.ok(files.includes(required), `安装包应包含模块运行时 ${required}`);
+  }
+});

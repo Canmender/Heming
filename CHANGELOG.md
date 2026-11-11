@@ -89,7 +89,21 @@
   （剩余条目是宿主模块注册表/store/nav 与 infohub 引擎桥，M6 重新归类后归零）。
 - 浏览器 dev 实测：工作流页面（列表/执行记录/凭据/新建）由 `/__modules__/workflows/entry.js` 渲染。
 
-### 下一步（M6）
+### ⑨ M6：耦合基线归零 + 发布守卫
+
+- **耦合基线 12 → 0**：剩余条目均重新归类——`lib/modules`（模块注册表/store/nav/catalog）是宿主
+  模块运行时，`lib/infohub/client|store|tools` 是宿主与 Python 引擎的本机桥，不属于模块实现。
+- `coupling.test.ts` 从「只减不增」棘轮改为**最终不变量守卫**：本体不得出现已迁出的模块目录/页面；
+  四个模块包必须存在且声明 web 入口；本体 web 源码不得直接 import 模块包。
+- 安装包守卫（`packaging.plugins.test.js`）新增：安装包不携带 `packages/modules` / module-catalog，
+  但必须包含模块运行时（module-store/module-package/app-protocol）。
+- 新增 `scripts/check-module-packages.mjs`（`pnpm module:check`）：校验 4 个模块包的清单/贡献/SDK
+  依赖（不得指向已迁出目录）/dist 体积与「不打包 React」；当前全部通过。
+- 全量门禁：web 294 文件 / 4233 例、desktop 47 / 779、shared 106、server 271 全绿；typecheck 六包零错误。
+- 已知：随源码迁出的模块单测尚未在模块包内恢复，暂由 `module:check` 契约检查 + 浏览器实测覆盖；
+  发布前如需补模块内单测可另开一轮。
+
+### 下一步：打包与部署
 
 工作流已迁出 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，
 最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。

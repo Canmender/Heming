@@ -13,7 +13,8 @@
     "plugin:check": "pnpm --filter @heming/shared build && node scripts/plugin-lint.mjs --dir plugin-kit/plugins --skip dist,release,pet-widget && node scripts/plugin-lint.mjs plugin-kit/plugins/pet-widget/plugin.json --source && node scripts/plugin-lint.mjs --dir plugin-kit/examples --skip _invalid && node scripts/plugin-schema.mjs --check",
     "plugin:pack": "node scripts/pack-plugin.mjs",
     "plugin:publish": "node scripts/publish-plugin.mjs",
-    "version:bump": "node scripts/bump-version.mjs",
+    "module:check": "node scripts/check-module-packages.mjs",
+  "version:bump": "node scripts/bump-version.mjs",
     "version:show": "node scripts/version.mjs"
   },
   "engines": {

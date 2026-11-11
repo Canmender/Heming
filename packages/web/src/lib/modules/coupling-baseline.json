@@ -1,17 +1,4 @@
 {
-  "note": "P2 迁移棘轮：这些文件仍属于内置模块（插件）业务代码，迁出本体时同步删除基线条目；新增条目必须评审。",
-  "files": [
-    "lib/infohub/client.test.ts",
-    "lib/infohub/client.ts",
-    "lib/infohub/store.test.ts",
-    "lib/infohub/store.ts",
-    "lib/infohub/tools.test.ts",
-    "lib/infohub/tools.ts",
-    "lib/modules/catalogClient.ts",
-    "lib/modules/nav.test.ts",
-    "lib/modules/nav.ts",
-    "lib/modules/registry.ts",
-    "lib/modules/store.test.ts",
-    "lib/modules/store.ts"
-  ]
+  "note": "d.131 M6：四个内置模块已全部迁出 packages/web；基线归零。此文件保留为空数组，作为「模块实现不得再进本体」的历史锚点，守卫见 coupling.test.ts。",
+  "files": []
 }
