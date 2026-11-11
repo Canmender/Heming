@@ -1068,12 +1068,26 @@ if (!gotLock) {
     feed: moduleFeed,
     log: (line) => console.log(line),
   });
-  secureIpc.handle("modules:install", (_event, payload) => {
+  /** 安装/卸载信息插件前先停引擎：Windows 上运行中的 Python 会锁住模块目录，导致覆盖安装 EPERM。 */
+  async function stopInfohubForModuleChange() {
+    try {
+      infohubBridge?.stop({ killDelayMs: 0, silent: true });
+    } catch {
+      /* 没在跑就无需停 */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  }
+  secureIpc.handle("modules:install", async (_event, payload) => {
     const id = payload && typeof payload.id === "string" ? payload.id : "";
     const version = payload && typeof payload.version === "string" ? payload.version : "";
+    if (id === "infohub") await stopInfohubForModuleChange();
     return webModuleInstaller.install(id, version);
   });
-  secureIpc.handle("modules:remove", (_event, id) => webModuleInstaller.remove(String(id || "")));
+  secureIpc.handle("modules:remove", async (_event, id) => {
+    const target = String(id || "");
+    if (target === "infohub") await stopInfohubForModuleChange();
+    return webModuleInstaller.remove(target);
+  });
   secureIpc.handle("modules:web-list", () =>
     webModuleStore
       .registry()
