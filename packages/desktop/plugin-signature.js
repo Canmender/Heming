@@ -281,6 +281,7 @@ function normalizeManifest(manifest) {
       // 未声明/旧包的 canonical 字节不变；擅自补一个 `kb: true` 会让验签失败。
       ...(permissions.kb === true ? { kb: true } : {}),
     },
+    ...(normalizeModuleWeb(manifest.web) ? { web: normalizeModuleWeb(manifest.web) } : {}),
     contributions: {
       skills: (Array.isArray(contributions.skills) ? contributions.skills : []).map((skill) => ({
         name: trim(skill.name),
@@ -330,6 +331,18 @@ function normalizeManifest(manifest) {
   };
 }
 
+/**
+ * 宿主加载式模块的 web 贡献（d.131）→ 签名用的确定性形状。
+ * 只在声明时进入文本；entry/contributions 受签，签名后换入口或改贡献集都会验签失败。
+ */
+function normalizeModuleWeb(web) {
+  if (!web || typeof web !== "object" || Array.isArray(web)) return null;
+  const entry = trim(web.entry);
+  if (!entry) return null;
+  const contributions = Array.isArray(web.contributions) ? web.contributions.map(trim).filter(Boolean) : [];
+  return { entry, contributions };
+}
+
 /** 清单用哪一版 canonical：v5 起用 v2（覆盖 engines/meta/distribution），否则 v1。 */
 function canonicalVersionOf(manifest) {
   const version = Number(manifest && manifest.schemaVersion);
@@ -358,6 +371,7 @@ function canonicalManifestText(manifest) {
     publisher,
     permissions: normalized.permissions,
     contributions: normalized.contributions,
+    ...(normalized.web ? { web: normalized.web } : {}),
     // 审计 P0-1：签名必须覆盖包内代码字节——`packageSha256` 是 files/** 的内容摘要，
     // 放进签名文本即「间接签全部代码」。声明式包没有该字段，键被 canonicalJsonText
     // 丢弃，旧签名文本不变（向后兼容）。

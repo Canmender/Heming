@@ -4,6 +4,7 @@ import {
   resetWebModuleCacheForTests,
   webModuleBaseUrl,
   webModuleEntryUrl,
+  resolveWebModuleEntryUrl,
 } from "./webModules.js";
 import { resetHostSdkForTests } from "./host-sdk.js";
 
@@ -13,6 +14,7 @@ afterEach(() => {
   resetWebModuleCacheForTests();
   resetHostSdkForTests();
   delete (globalThis as { __HEMING_MODULE_BASE?: unknown }).__HEMING_MODULE_BASE;
+  delete (globalThis as { __heming_modules?: unknown }).__heming_modules;
 });
 
 describe("模块包 loader 契约（d.131）", () => {
@@ -45,5 +47,21 @@ describe("模块包 loader 契约（d.131）", () => {
     expect(() =>
       assertWebModule("staff", { manifest: { id: "staff", version: "1" }, pages: { staff: "x" } }),
     ).toThrow(/不是 React 组件/);
+  });
+});
+
+describe("模块包生产路径（桌面桥）", () => {
+  it("已安装记录 → app://heming/modules/<id>/<version>/<entry>", async () => {
+    (globalThis as { __heming_modules?: unknown }).__heming_modules = {
+      webList: async () => [{ id: "staff", version: "1.0.0", entry: "files/web/entry.js" }],
+    };
+    await expect(resolveWebModuleEntryUrl("staff")).resolves.toBe(
+      "app://heming/modules/staff/1.0.0/files/web/entry.js",
+    );
+  });
+
+  it("没有安装记录 → 报未安装（不回退内置实现）", async () => {
+    (globalThis as { __heming_modules?: unknown }).__heming_modules = { webList: async () => [] };
+    await expect(resolveWebModuleEntryUrl("staff")).rejects.toThrow(/未安装|没有 web 入口/);
   });
 });

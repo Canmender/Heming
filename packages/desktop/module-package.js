@@ -131,6 +131,27 @@ function readModulePackage(bytes, options = {}) {
       throw new ModulePackageError(`meta.${key} 必须是 files/ 下的单层目录名`);
     }
   }
+  // 宿主加载式模块（d.131）：可选 web 贡献，entry 必须是 files/web 下的 .js。
+  // 与 meta.entry（Python 引擎目录）不同，web.entry 是文件路径，必须逐项夹取。
+  let web = null;
+  if (manifest.web !== undefined) {
+    if (!manifest.web || typeof manifest.web !== "object" || Array.isArray(manifest.web)) {
+      throw new ModulePackageError("module.json 的 web 必须是对象");
+    }
+    const entry = typeof manifest.web.entry === "string" ? manifest.web.entry.trim() : "";
+    if (!/^files\/web\/[A-Za-z0-9._/-]+\.js$/.test(entry) || entry.includes("..") || entry.includes("\\")) {
+      throw new ModulePackageError("web.entry 必须是 files/web/ 下的 .js 文件（禁 .. / 反斜杠）");
+    }
+    const contributions = Array.isArray(manifest.web.contributions)
+      ? manifest.web.contributions.filter((item) => typeof item === "string")
+      : [];
+    const allowed = new Set(["page", "homeCard", "background", "settings", "tools"]);
+    for (const item of contributions) {
+      if (!allowed.has(item)) throw new ModulePackageError(`web.contributions 含未知项：${item}`);
+    }
+    if (contributions.length === 0) throw new ModulePackageError("web.contributions 不能为空");
+    web = { entry, contributions };
+  }
   if (typeof manifest.id !== "string" || !ID_RE.test(manifest.id)) {
     throw new ModulePackageError(`module.json 的 id 不合法：${String(manifest.id)}`);
   }
@@ -161,7 +182,10 @@ function readModulePackage(bytes, options = {}) {
     );
   }
 
-  return { manifest, entries: fileEntries, filesDigest, keyId: signature.keyId };
+  if (web && !fileEntries.some((entry) => entry.path === web.entry)) {
+    throw new ModulePackageError(`web.entry 不在模块包内：${web.entry}`);
+  }
+  return { manifest, entries: fileEntries, filesDigest, keyId: signature.keyId, web };
 }
 
 module.exports = {

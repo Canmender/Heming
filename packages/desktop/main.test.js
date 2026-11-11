@@ -262,7 +262,7 @@ test("main.js：系统浏览器白名单不放行 app://（否则页面链接会
 });
 
 test("main.js：协议处理器在创建窗口之前装好", () => {
-  const install = mainCode.indexOf("installAppProtocol();");
+  const install = mainCode.indexOf("installAppProtocol(");
   const create = mainCode.indexOf("createWindow();", mainCode.indexOf("app.whenReady("));
   assert.ok(install > 0 && create > 0);
   assert.ok(install < create, "installAppProtocol 必须在 createWindow 之前调用");

@@ -121,3 +121,61 @@ test("模块包：清单字段齐全（id/version/meta）", () => {
   assert.equal(manifest.meta.entry, "app");
   assert.equal(manifest.meta.lib, "lib");
 });
+
+test("模块包：web 贡献合法 → 返回 web 入口；文件必须在包内", () => {
+  const { bytes, keysFile } = makeSignedModule({
+    files: { "web/entry.js": "export const page = () => null;\n" },
+    manifest: {
+      web: { entry: "files/web/entry.js", contributions: ["page"] },
+    },
+  });
+  const pkg = readModulePackage(bytes, { keysFile, allowDevKeys: true });
+  assert.deepEqual(pkg.web, { entry: "files/web/entry.js", contributions: ["page"] });
+
+  const missing = makeSignedModule({
+    files: { "web/other.js": "x" },
+    manifest: { web: { entry: "files/web/entry.js", contributions: ["page"] } },
+  });
+  assert.throws(
+    () => readModulePackage(missing.bytes, { keysFile: missing.keysFile, allowDevKeys: true }),
+    /web.entry 不在模块包内/,
+  );
+});
+
+test("模块包：web 路径穿越 / 未知贡献项 → 拒绝", () => {
+  const traversal = makeSignedModule({
+    files: { "web/entry.js": "x" },
+    manifest: { web: { entry: "files/web/../app/entry.js", contributions: ["page"] } },
+  });
+  assert.throws(
+    () => readModulePackage(traversal.bytes, { keysFile: traversal.keysFile, allowDevKeys: true }),
+    /web.entry 必须是 files\/web/,
+  );
+  const unknown = makeSignedModule({
+    files: { "web/entry.js": "x" },
+    manifest: { web: { entry: "files/web/entry.js", contributions: ["admin"] } },
+  });
+  assert.throws(
+    () => readModulePackage(unknown.bytes, { keysFile: unknown.keysFile, allowDevKeys: true }),
+    /未知项/,
+  );
+});
+
+test("模块包：签名后改 web.entry → 验签失败（入口受签）", () => {
+  const { bytes, keysFile } = makeSignedModule({
+    files: { "web/entry.js": "x", "web/evil.js": "y" },
+    manifest: { web: { entry: "files/web/entry.js", contributions: ["page"] } },
+  });
+  const tampered = repack(bytes, (entries) =>
+    entries.map((entry) => {
+      if (entry.path !== "module.json") return entry;
+      const manifest = JSON.parse(entry.data.toString("utf8"));
+      manifest.web.entry = "files/web/evil.js";
+      return { ...entry, data: Buffer.from(JSON.stringify(manifest, null, 2), "utf8") };
+    }),
+  );
+  assert.throws(
+    () => readModulePackage(tampered, { keysFile, allowDevKeys: true }),
+    /首方签名/,
+  );
+});

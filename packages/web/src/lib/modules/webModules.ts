@@ -43,6 +43,42 @@ export function webModuleBaseUrl(): string {
   return "app://heming/modules";
 }
 
+interface InstalledWebModule {
+  id: string;
+  version: string;
+  name?: string;
+  entry: string;
+}
+
+declare global {
+  interface Window {
+    /** 桌面 preload 注入（d.131）；浏览器/测试没有。 */
+    __heming_modules?: { webList: () => Promise<InstalledWebModule[]> };
+  }
+}
+
+/**
+ * 解析模块入口 URL：
+ * - 桌面安装版：问主进程要已安装清单，拼 app://heming/modules/<id>/<version>/<entry>
+ *   （app:// 协议层会再校验「已安装 + 路径夹取」）；
+ * - 浏览器 dev：`/__modules__/<id>/entry.js`（vite 中间件从 packages/modules/<id>/dist 提供）；
+ * - 其它环境没有模块包来源，直接报未安装（不静默回退到内置实现——迁移完成后本体不再有实现）。
+ */
+export async function resolveWebModuleEntryUrl(id: string): Promise<string> {
+  const bridge = typeof window !== "undefined" ? window.__heming_modules : undefined;
+  if (bridge?.webList) {
+    const list = await bridge.webList();
+    const record = list.find((item) => item && item.id === id);
+    if (!record || typeof record.entry !== "string" || !record.version) {
+      throw new Error(`模块「${id}」未安装或没有 web 入口`);
+    }
+    const entry = record.entry.replace(/^\/+/, "");
+    return `app://heming/modules/${encodeURIComponent(id)}/${encodeURIComponent(record.version)}/${entry}`;
+  }
+  if (import.meta.env?.DEV) return webModuleEntryUrl(id);
+  throw new Error(`模块「${id}」不可用：当前环境没有模块包来源`);
+}
+
 export function webModuleEntryUrl(id: string): string {
   return `${webModuleBaseUrl()}/${encodeURIComponent(id)}/entry.js`;
 }
@@ -75,7 +111,8 @@ export function loadWebModule(id: string): Promise<WebModuleEntry> {
   if (existing) return existing;
   const task = (async () => {
     installHostSdk();
-    const mod = (await import(/* @vite-ignore */ webModuleEntryUrl(id))) as unknown;
+    const url = await resolveWebModuleEntryUrl(id);
+    const mod = (await import(/* @vite-ignore */ url)) as unknown;
     return assertWebModule(id, mod);
   })().catch((err) => {
     cache.delete(id);

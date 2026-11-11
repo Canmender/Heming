@@ -18,6 +18,7 @@ const {
   widgetCspHeaders,
 } = require("./app-protocol");
 const { createPluginStore } = require("./plugin-store");
+const { createModuleStore } = require("./module-store");
 const { createWidgetHost } = require("./plugin-host");
 const { readWidgetTheme, writeWidgetTheme } = require("./widget-theme");
 const { WIDGET_SCHEME } = require("./plugin-window");
@@ -122,6 +123,7 @@ const TRUSTED_CHANNELS = [
   "mcp:stdio:request",
   "mcp:stdio:stop",
   "runtime:probe",
+  "modules:web-list",
   "update:check",
   "update:download",
   "update:install",
@@ -366,13 +368,46 @@ function attachCspReportLogger(win) {
  * 注册 app:// 的资源处理器（须在 app ready 之后）。逻辑下沉到 app-protocol.js 的
  * 纯函数，这里只做「解析 → 读文件 → 回响应」。
  */
-function installAppProtocol() {
+function installAppProtocol(moduleStore, modulesDir) {
   protocol.handle(EMBEDDED_SCHEME, async (request) => {
     let urlPath = "/";
     try {
       urlPath = new URL(request.url).pathname;
     } catch {
       return new Response("bad request", { status: 400 });
+    }
+    // 宿主加载式模块包（d.131）：只读、只服务已安装且声明 web 的 id@version。
+    if (urlPath.startsWith("/modules/")) {
+      const exists = (f) => {
+        try {
+          return fs.existsSync(f);
+        } catch {
+          return false;
+        }
+      };
+      const file = resolveModuleAssetPath(urlPath, {
+        modulesDir,
+        installed: moduleStore ? moduleStore.registry() : [],
+      });
+      if (!file || !exists(file)) {
+        return new Response("module asset not found", {
+          status: 404,
+          headers: { "Content-Type": "text/plain; charset=utf-8", ...cspHeadersFor(urlPath, cspOptions()) },
+        });
+      }
+      try {
+        const body = await fs.promises.readFile(file);
+        return new Response(body, {
+          status: 200,
+          headers: {
+            "Content-Type": contentTypeFor(file),
+            "Cache-Control": "public, max-age=31536000, immutable",
+            ...cspHeadersFor(urlPath, cspOptions()),
+          },
+        });
+      } catch {
+        return new Response("read failed", { status: 500 });
+      }
     }
     const root = webDistDir();
     const resolved = resolveRequest(urlPath, root, (f) => {
@@ -986,6 +1021,17 @@ if (!gotLock) {
   // 退回仓库源码，避免每次改前端都得先构建模块包。
   let infohubBridge = null;
 
+  // 宿主加载式模块包（d.131）：与 infohub 引擎共用 <userData>/modules 目录。
+  // 只读 registry 供 app:// 路由与渲染层查询；安装/验签仍走 module-store。
+  const webModulesRoot = path.join(app.getPath("userData"), "modules");
+  const webModuleStore = createModuleStore({ dir: webModulesRoot, log: (line) => console.log(line) });
+  secureIpc.handle("modules:web-list", () =>
+    webModuleStore
+      .registry()
+      .filter((item) => item && item.web && typeof item.web.entry === "string")
+      .map((item) => ({ id: item.id, version: item.version, name: item.name, entry: item.web.entry })),
+  );
+
   const infohubEngine = createInfohubEngine({
     dir: path.join(app.getPath("userData"), "modules"),
     log: (line) => console.log(line),
@@ -1231,7 +1277,7 @@ app.whenReady().then(() => {
     });
     widgetStore.init();
     // 自定义协议处理器须在创建窗口之前装好，否则首次 loadURL 会拿到空响应
-    installAppProtocol();
+    installAppProtocol(webModuleStore, webModulesRoot);
     installWidgetProtocol();
     setupMenu();
     // 个人知识库文件桥（卡帕西 LLM Wiki 标准）：必须在窗口创建前注册

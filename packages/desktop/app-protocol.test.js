@@ -19,6 +19,7 @@ const {
   normalizeCspMode,
   parseCspViolation,
   resolveAssetPath,
+  resolveModuleAssetPath,
   resolveRequest,
   wsOriginOf,
 } = require("./app-protocol");
@@ -124,6 +125,38 @@ test("resolveRequest：不带扩展名的隐藏文件请求视为资源（如 /.
   // 属可接受行为（回落的是自家首页，不泄漏任何文件内容）。
   const r = resolveRequest("/.env", ROOT, fakeFs(["index.html"]));
   assert.equal(r.file, path.join(ROOT, "index.html"));
+});
+
+// ── 宿主加载式模块包路由（d.131）──
+
+const MODULES_DIR = path.resolve("/tmp/heming-modules");
+const MODULE_RECORD = { id: "staff", version: "1.0.0", web: { entry: "files/web/entry.js" } };
+const resolveModule = (urlPath, installed = [MODULE_RECORD]) =>
+  resolveModuleAssetPath(urlPath, { modulesDir: MODULES_DIR, installed });
+
+test("resolveModuleAssetPath：入口与子资源解析到模块版本目录", () => {
+  assert.equal(
+    resolveModule("/modules/staff/1.0.0/files/web/entry.js"),
+    path.join(MODULES_DIR, "staff/1.0.0/files/web/entry.js"),
+  );
+  assert.equal(
+    resolveModule("/modules/staff/1.0.0/files/web/chunks/a.js"),
+    path.join(MODULES_DIR, "staff/1.0.0/files/web/chunks/a.js"),
+  );
+});
+
+test("resolveModuleAssetPath：未安装记录 / 未声明 web / 版本不符都拒绝", () => {
+  assert.equal(resolveModule("/modules/staff/1.0.0/files/web/entry.js", []), null);
+  assert.equal(resolveModule("/modules/staff/1.0.0/files/web/entry.js", [{ id: "staff", version: "1.0.0" }]), null);
+  assert.equal(resolveModule("/modules/staff/2.0.0/files/web/entry.js"), null);
+  assert.equal(resolveModule("/modules/staff/1.0.0/files/app/x.js"), null);
+});
+
+test("resolveModuleAssetPath：目录穿越/反斜杠/非法编码拒绝", () => {
+  assert.equal(resolveModule("/modules/staff/1.0.0/files/web/../app/secret.js"), null);
+  assert.equal(resolveModule("/modules/staff/1.0.0/files/web/a/../../app/x.js"), null);
+  assert.equal(resolveModule("/modules/staff/1.0.0/files/web/..%5capp%5cx.js"), null);
+  assert.equal(resolveModule("/modules/staff/1.0.0/files/web/%E0%A4%A"), null);
 });
 
 // ───────────────────────────── CSP 基线（P0-6，d.60） ─────────────────────────────

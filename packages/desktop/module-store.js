@@ -86,6 +86,13 @@ function createModuleStore(options = {}) {
     if (!record) return null;
     const root = versionDir(id, record.version);
     const files = path.join(root, "files");
+    // 宿主加载式模块（d.131）没有 files/app 引擎目录，只有 files/web/**。
+    // 有效性按 web.entry 文件存在判定，不能套引擎的 app 目录口径。
+    if (record.web && typeof record.web.entry === "string") {
+      const webEntry = path.join(root, ...record.web.entry.split("/"));
+      if (!exists(webEntry)) return null;
+      return { id, version: record.version, root, appDir: "", libDir: "", web: record.web };
+    }
     const entry = typeof record.entry === "string" && record.entry ? record.entry : "app";
     const lib = typeof record.lib === "string" && record.lib ? record.lib : "lib";
     const appDir = path.join(files, entry);
@@ -172,6 +179,7 @@ function createModuleStore(options = {}) {
           name: typeof manifest.name === "string" ? manifest.name : id,
           entry,
           lib,
+          ...(pkg.web ? { web: pkg.web } : {}),
           packageSha256: pkg.filesDigest,
           installedAt: new Date(now()).toISOString(),
         },

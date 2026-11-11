@@ -91,6 +91,39 @@ function resolveRequest(urlPath, rootDir, exists) {
   return null;
 }
 
+/**
+ * 宿主加载式模块包的 app:// 路由（d.131）：
+ * `/modules/<id>/<version>/files/web/<file>` → 模块目录里的只读文件。
+ *
+ * 安全边界：只服务**已安装记录里存在且声明了 web 贡献**的 id@version；路径必须在
+ * 该模块的 files/web 目录内（禁 .. / 反斜杠 / 绝对路径）。返回 null 由调用方回 404。
+ *
+ * @param {string} urlPath 请求路径
+ * @param {{ modulesDir: string, installed: Array<{id: string, version: string, web?: {entry?: string}}> }} ctx
+ * @returns {string | null} 磁盘绝对路径
+ */
+function resolveModuleAssetPath(urlPath, ctx) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(String(urlPath || ""));
+  } catch {
+    return null;
+  }
+  const match = /^\/modules\/([a-z0-9][a-z0-9._-]{0,63})\/([0-9A-Za-z][0-9A-Za-z.+_-]{0,63})\/files\/web\/(.+)$/.exec(
+    decoded,
+  );
+  if (!match) return null;
+  const [, id, version, rawRel] = match;
+  const record = (ctx.installed || []).find((item) => item && item.id === id && item.version === version);
+  if (!record || !record.web || typeof record.web.entry !== "string") return null;
+  const rel = rawRel.replace(/\\/g, "/");
+  if (!rel || rel.split("/").some((part) => part === ".." || part === "." || part === "")) return null;
+  const root = path.resolve(ctx.modulesDir, id, version, "files", "web");
+  const full = path.resolve(root, rel);
+  if (full !== root && !full.startsWith(root + path.sep)) return null;
+  return full;
+}
+
 // ───────────────────────────── CSP 基线（P0-6，d.60） ─────────────────────────────
 /**
  * `app://` 响应头里的 CSP（纯函数，便于单测）。
@@ -395,6 +428,7 @@ module.exports = {
   contentTypeFor,
   isAssetRequest,
   resolveAssetPath,
+  resolveModuleAssetPath,
   resolveRequest,
   INDEX_FILE,
   // CSP 基线（d.60）

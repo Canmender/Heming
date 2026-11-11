@@ -53,6 +53,19 @@
   改成宿主结构类型（不再 import 模块代码）；耦合基线 **124 → 108**。
 - 浏览器 dev 实测：自动化页面由 `/__modules__/automations/entry.js` 渲染（预置任务/空态均正常）。
 
+### ⑥ 生产分发链：模块包签名 / 安装 / app:// 只读路由 / loader 解析
+
+- `module.json` 新增可选 `web: { entry, contributions }`：entry 必须是 `files/web/*.js`，
+  contributions 白名单（page/homeCard/background/settings/tools）；canonical-v1 把它纳入签名，
+  改入口/贡献集即验签失败；`module-package.js` 校验 entry 在包内，返回 `web`。
+- `module-store` 记录 `web`，无 `files/app` 的纯 UI 模块也能安装（当前记录按 web.entry 存在性判定）。
+- app:// 新增 `/modules/<id>/<version>/files/web/**` 只读路由：只服务已安装且声明 web 的 id@version，
+  路径夹取禁 `..`/反斜杠/非法编码（纯函数 + 3 组测试）。
+- preload 新增 `__heming_modules.webList()`；web loader 有桌面桥时拼
+  `app://heming/modules/<id>/<version>/<entry>`，无安装记录明确报「未安装」，绝不回退内置。
+- 新增 `scripts/pack-web-module.mjs`：构建产物打成首方签名 `module.tgz`（含回读验签）。
+  staff/automations 各 20.5KB，已实测安装到本机模块目录并解析出 app:// 文件路径。
+
 ### 下一步（M4–M6）
 
 信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，

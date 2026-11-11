@@ -62,6 +62,13 @@ contextBridge.exposeInMainWorld("__heming_runtime", {
   probe: () => ipcRenderer.invoke("runtime:probe"),
 });
 
+// —— 宿主加载式模块包（d.131）——
+// 只读已安装模块清单（含 web 入口），供主窗口拼 app://heming/modules/<id>/<version>/files/web/... URL。
+// 真正的文件读取在 app:// 协议层做「已安装 + 路径夹取」双重校验，这里不传任意路径。
+contextBridge.exposeInMainWorld("__heming_modules", {
+  webList: () => ipcRenderer.invoke("modules:web-list"),
+});
+
 // —— 版本号 ——
 // 展示与更新比较都用 5 段版本（d.特性.破坏性.修订.构建），不在渲染层重复读 package.json。
 contextBridge.exposeInMainWorld("__heming_version", readAppVersion());

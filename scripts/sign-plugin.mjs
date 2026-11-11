@@ -222,6 +222,7 @@ function normalizeManifest(manifest) {
       // d.125：permissions.kb（写和鸣知识库）同 chat 口径——只在 true 时入文本。
       ...(permissions.kb === true ? { kb: true } : {}),
     },
+    ...(normalizeModuleWeb(manifest.web) ? { web: normalizeModuleWeb(manifest.web) } : {}),
     contributions: {
       skills: (Array.isArray(contributions.skills) ? contributions.skills : []).map((skill) => ({
         name: trim(skill.name),
@@ -286,6 +287,15 @@ function normalizeEngine(engine) {
   if (!entry) return null;
   const lib = trim(engine.lib);
   return { entry, ...(lib ? { lib } : {}) };
+}
+
+/** 宿主加载式模块 web 贡献（d.131）→ canonical 形状；与 plugin-signature.js 逐字段一致。 */
+function normalizeModuleWeb(web) {
+  if (!web || typeof web !== "object" || Array.isArray(web)) return null;
+  const entry = trim(web.entry);
+  if (!entry) return null;
+  const contributions = Array.isArray(web.contributions) ? web.contributions.map(trim).filter(Boolean) : [];
+  return { entry, contributions };
 }
 
 function normalizeTarget(target) {
@@ -391,6 +401,7 @@ export function signedManifestText(manifest) {
       : null,
     permissions: normalized.permissions,
     contributions: normalized.contributions,
+    ...(normalized.web ? { web: normalized.web } : {}),
     // 审计 P0-1：让签名覆盖 files/** 代码字节；声明式包没有该字段（被 stableValue 丢弃）
     packageSha256: trim(manifest.packageSha256) || undefined,
   });
