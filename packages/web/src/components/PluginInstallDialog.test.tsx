@@ -104,12 +104,12 @@ beforeEach(() => {
 });
 
 describe("PluginInstallDialog · 风险声明与来源", () => {
-  it("常驻声明「包含可执行界面代码」并列出云端 bundle（官方目录 / 可执行 / 指纹）", async () => {
+  it("常驻声明「包含可执行界面代码」并列出云端 bundle（插件仓库 / 可执行 / 指纹）", async () => {
     window.__heming_widgets = makeBridge();
     render(<PluginInstallDialog onClose={() => {}} catalog={catalogDeps()} />);
     expect(screen.getByText("本插件包含可执行界面代码")).toBeTruthy();
     expect(await screen.findByText("桌宠")).toBeTruthy();
-    expect(screen.getByText("官方目录")).toBeTruthy();
+    expect(screen.getAllByText("插件仓库").length).toBeGreaterThan(0);
     expect(screen.getByText(/指纹 cccccccc/)).toBeTruthy();
   });
 
@@ -138,7 +138,7 @@ describe("PluginInstallDialog · 云端安装", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "下载并安装" }));
     // 确认面板：来源与风险都要再写一遍
-    expect(screen.getByText(/来源：官方云端目录/)).toBeTruthy();
+    expect(screen.getByText(/来源：插件仓库/)).toBeTruthy();
     expect(screen.getByText(/包含可执行界面代码，安装后会在独立窗口里运行/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
 

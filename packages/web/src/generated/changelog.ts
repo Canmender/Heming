@@ -12,6 +12,15 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.135.3.54.7",
+    "date": "2026-11-11",
+    "title": "插件界面不再出现「官方」前缀",
+    "bullets": [
+      "插件仓库、安装预览、MCP 发现页、模块卡里的「官方插件 / 官方目录 / 官方云端目录」等字样全部去掉；统一叫「插件」「插件仓库」。功能不变，只统一用户看到的名词。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.135.3.54.6",
     "date": "2026-11-11",
     "title": "插件仓库只有一个列表",

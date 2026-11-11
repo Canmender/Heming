@@ -184,7 +184,7 @@ export function PluginInstallDialog({
             </p>
             <p className="mt-1 ui-caption">
               装好后会在独立窗口里运行（独立 origin、沙箱、无 Node/文件权限）。只允许安装
-              <strong className="mx-0.5">官方云端目录</strong>或
+              <strong className="mx-0.5">插件仓库</strong>或
               <strong className="mx-0.5">你本地确认过的 .tgz</strong>；
               无签名或来源不明的包一律不会安装。
             </p>
@@ -245,7 +245,7 @@ export function PluginInstallDialog({
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="ui-body-sm font-bold">{entry.name}</span>
                           <span className="ui-chip">v{entry.version}</span>
-                          <span className="ui-chip">官方目录</span>
+                          <span className="ui-chip">插件仓库</span>
                           <span className="ui-chip text-[var(--danger)]">包含可执行界面代码</span>
                           <span className="ml-auto ui-caption">
                             {sizeText(entry.package?.size)}
@@ -292,7 +292,7 @@ export function PluginInstallDialog({
                 确认安装「{phase.entry.name}」v{phase.entry.version}？
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 ui-caption">
-                <li>来源：官方云端目录（下载后会校验 sha256 与包大小）。</li>
+                <li>来源：插件仓库（下载后会校验 sha256 与包大小）。</li>
                 <li>包含可执行界面代码，安装后会在独立窗口里运行。</li>
                 <li>会写入本机插件目录，并创建该插件的窗口与托盘图标。</li>
               </ul>

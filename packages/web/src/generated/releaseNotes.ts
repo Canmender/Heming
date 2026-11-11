@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.135.3.54.7",
+    "date": "2026-11-11",
+    "title": "插件就是插件，没有「官方」前缀",
+    "bullets": [
+      "插件相关界面统一叫「插件 / 插件仓库」，不再出现「官方插件」「官方目录」等区分字样。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.135.3.54.6",
     "date": "2026-11-11",
     "title": "插件仓库只有一个列表",

@@ -218,7 +218,7 @@ export function ModulePluginCard({ mod }: { mod: BuiltinModule }) {
           </>
         ) : (
           <span className="ui-caption">
-            插件由云端目录提供：点安装会下载官方签名插件包，装完即启用；带引擎的信息插件会一并安装引擎。
+            插件由云端目录提供：点安装会下载签名插件包，装完即启用；带引擎的信息插件会一并安装引擎。
           </span>
         )}
         {notice ? (

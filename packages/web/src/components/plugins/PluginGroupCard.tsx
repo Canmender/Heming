@@ -199,7 +199,7 @@ export function PluginGroupCard({ group }: { group: PluginGroup }) {
           </button>
         ) : (
           <span className={HINT}>
-            从云端安装；点安装会下载官方签名插件包，安装包本身不携带任何插件。
+            从云端安装；点安装会下载签名插件包，安装包本身不携带任何插件。
           </span>
         )}
         {notice ? (
