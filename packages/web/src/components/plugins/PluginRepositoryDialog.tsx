@@ -1,23 +1,45 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModuleCatalogEntry, PluginCatalogEntry } from "@heming/shared";
-import type { CatalogClientDeps } from "../../lib/plugins/catalogClient.js";
-import { useModalA11y } from "../useModalA11y.js";
-import { XIcon } from "../icons.js";
-import { PluginRepositoryPanel } from "./PluginRepositoryPanel.js";
+import {
+  fetchPluginCatalog,
+  type CatalogClientDeps,
+} from "../../lib/plugins/catalogClient.js";
 import { fetchModuleCatalog } from "../../lib/modules/catalogClient.js";
-import { MODULE_BY_ID, PLUGIN_GROUPS, type ModuleId } from "../../lib/modules/registry.js";
+import { MODULE_BY_ID, pluginGroupOf, type ModuleId } from "../../lib/modules/registry.js";
+import { useModalA11y } from "../useModalA11y.js";
+import { PackageIcon, SearchIcon, XIcon } from "../icons.js";
 import { BTN_GHOST, BTN_PRIMARY, CHIP, ERROR_TEXT, HINT } from "./shared.js";
+import { EmptyState } from "../ui/EmptyState.js";
 
 /**
- * 「从插件仓库安装」弹窗（d.135 合并版）：
+ * 「从插件仓库安装」弹窗（d.135.6）。
  *
- * 和鸣只有**一份云端插件仓库**。这里把两类可安装项放在同一个弹窗里：
- * - 官方插件（自动化 / 信息）：下载签名 module.tgz，安装到本机模块目录；
- * - 更多插件：声明式插件 / 首方签名界面插件（含桌面小组件），走原有清单安装预览。
- *
- * 之前分成「从插件仓库安装」和「安装官方插件」两个入口，用户看到的是两个仓库，
- * 实际都来自同一台服务器——现在只留一个入口、一个弹窗。
+ * 用户口径：没有「官方插件 / 更多插件」之分，**全部统称为插件**。
+ * 这里把官方模块与声明式/界面插件合并成**一个列表**：同一个搜索框、同一个刷新、
+ * 同一张卡片样式；安装时后台按来源走各自的下载/验签路径。
  */
+
+type RepoItem =
+  | {
+      kind: "module";
+      key: string;
+      id: string;
+      name: string;
+      version: string;
+      description: string;
+      installed: boolean;
+    }
+  | {
+      kind: "plugin";
+      key: string;
+      id: string;
+      name: string;
+      version: string;
+      description: string;
+      entry: PluginCatalogEntry;
+      installed: boolean;
+    };
+
 export function PluginRepositoryDialog({
   installed,
   loadingKey,
@@ -34,56 +56,97 @@ export function PluginRepositoryDialog({
   onClose: () => void;
   onError?: (message: string) => void;
   catalog?: CatalogClientDeps;
-  /** 已安装的模块 id → 是否启用（官方插件区用）。 */
   moduleInstalled?: Record<string, boolean>;
-  /** 安装官方插件：下载 + 验签 + 落盘（由插件页提供）。 */
   onInstallModule?: (id: ModuleId, version: string) => Promise<void>;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalA11y(dialogRef, onClose, { active: true });
   const [modules, setModules] = useState<ModuleCatalogEntry[] | null>(null);
-  const [moduleError, setModuleError] = useState<string | null>(null);
-  const [busyGroup, setBusyGroup] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [plugins, setPlugins] = useState<PluginCatalogEntry[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [moduleEntries, pluginEntries] = await Promise.all([
+        onInstallModule ? fetchModuleCatalog() : Promise.resolve([] as ModuleCatalogEntry[]),
+        fetchPluginCatalog(catalog, { distribution: "all" }),
+      ]);
+      setModules(moduleEntries);
+      setPlugins(pluginEntries);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "插件仓库读取失败");
+    } finally {
+      setLoading(false);
+    }
+  }, [catalog, onInstallModule]);
 
   useEffect(() => {
-    if (!onInstallModule) return;
-    let alive = true;
-    fetchModuleCatalog()
-      .then((entries) => alive && setModules(entries))
-      .catch((err: unknown) => alive && setModuleError(err instanceof Error ? err.message : "读取官方插件目录失败"));
-    return () => {
-      alive = false;
-    };
-  }, [onInstallModule]);
+    void load();
+  }, [load]);
 
-  const officialGroups = onInstallModule
-    ? PLUGIN_GROUPS.map((group) => {
-        const members = group.moduleIds
-          .map((id) => modules?.find((entry) => entry.id === id))
-          .filter((entry): entry is ModuleCatalogEntry => Boolean(entry));
-        const installedAll = group.moduleIds.every((id) => Boolean(moduleInstalled?.[id]));
-        return { group, members, installedAll, version: members[0]?.version ?? "" };
-      }).filter((item) => item.members.length > 0)
-    : [];
+  const items = useMemo<RepoItem[]>(() => {
+    const moduleItems: RepoItem[] = (modules ?? [])
+      .map((entry): RepoItem | null => {
+        const mod = MODULE_BY_ID[entry.id as ModuleId];
+        if (!mod) return null;
+        const group = pluginGroupOf(mod.id);
+        return {
+          kind: "module" as const,
+          key: `module:${entry.id}`,
+          id: entry.id,
+          name: group?.name ?? mod.name,
+          version: entry.version,
+          description: group?.description ?? mod.description,
+          installed: Boolean(moduleInstalled?.[mod.id]),
+        };
+      })
+      .filter((item): item is RepoItem => Boolean(item));
+    const pluginItems: RepoItem[] = (plugins ?? []).map((entry) => ({
+      kind: "plugin" as const,
+      key: `plugin:${entry.id}@${entry.version}`,
+      id: entry.id,
+      name: entry.name,
+      version: entry.version,
+      description: entry.description,
+      entry,
+      installed: installed.some((item) => item.id === entry.id),
+    }));
+    return [...moduleItems, ...pluginItems];
+  }, [modules, plugins, moduleInstalled, installed]);
 
-  const installOfficial = async (group: (typeof officialGroups)[number]) => {
-    if (!onInstallModule) return;
-    setBusyGroup(group.group.id);
-    setNotice(null);
-    setModuleError(null);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(
+      (item) =>
+        item.id.toLowerCase().includes(q) ||
+        item.name.toLowerCase().includes(q) ||
+        item.description.toLowerCase().includes(q),
+    );
+  }, [items, query]);
+
+  const install = async (item: RepoItem) => {
+    setBusyKey(item.key);
+    setError(null);
     try {
-      for (const member of group.members) {
-        const mod = MODULE_BY_ID[member.id as ModuleId];
-        if (!mod || moduleInstalled?.[mod.id]) continue;
-        // eslint-disable-next-line no-await-in-loop
-        await onInstallModule(mod.id, member.version);
+      if (item.kind === "module") {
+        if (!onInstallModule) throw new Error("当前环境不支持安装这个插件");
+        await onInstallModule(item.id as ModuleId, item.version);
+      } else {
+        await onLoad(item.entry);
       }
-      setNotice(`已安装「${group.group.name}」`);
     } catch (err) {
-      setModuleError(err instanceof Error ? err.message : "官方插件下载/安装失败");
+      const message = err instanceof Error ? err.message : "插件安装失败";
+      setError(message);
+      onError?.(message);
     } finally {
-      setBusyGroup(null);
+      setBusyKey(null);
+      void load();
     }
   };
 
@@ -100,7 +163,7 @@ export function PluginRepositoryDialog({
           <div className="min-w-0">
             <h2 className="ui-section-title">插件仓库</h2>
             <p className="ui-caption">
-              和鸣只有一份云端插件仓库：官方插件与扩展插件都从这里安装；下载的原样清单/签名包会在安装前校验。
+              和鸣只有一份云端插件仓库；下面都是插件，安装时按类型自动走对应的验签/安装流程。
             </p>
           </div>
           <button
@@ -113,64 +176,83 @@ export function PluginRepositoryDialog({
           </button>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
+          <div className="relative w-[280px] max-w-full">
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted"
+            >
+              <SearchIcon width={13} height={13} />
+            </span>
+            <input
+              aria-label="搜索插件仓库"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜索插件名称 / id / 描述…"
+              className="ui-input h-8 pl-7 text-[12px]"
+            />
+          </div>
+          <span className="ui-caption">
+            {loading ? "正在读取插件仓库…" : `共 ${filtered.length} 个插件`}
+          </span>
+          <button
+            type="button"
+            className={`${BTN_GHOST} ml-auto`}
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            {loading ? "刷新中…" : "刷新"}
+          </button>
+        </div>
+
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          {onInstallModule ? (
-            <section aria-label="官方插件" className="mb-4">
-              <div className="mb-2 flex flex-wrap items-baseline gap-2">
-                <h3 className="ui-section-title">官方插件</h3>
-                <span className={`${CHIP}`}>随仓库分发</span>
-                <span className={`ml-auto ${HINT}`}>下载官方签名插件包，安装后即启用</span>
-              </div>
-              {moduleError ? (
-                <p role="alert" className={ERROR_TEXT}>{moduleError}</p>
-              ) : !modules ? (
-                <p className="ui-caption">正在读取官方插件目录…</p>
-              ) : officialGroups.length === 0 ? (
-                <p className="ui-caption">云端暂未提供官方插件。</p>
-              ) : (
-                <ul className="grid gap-2 sm:grid-cols-2">
-                  {officialGroups.map((item) => (
-                    <li key={item.group.id} className="ui-card flex items-center gap-3 p-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[13px] font-bold">{item.group.name}</span>
-                          <span className={CHIP}>{item.version}</span>
-                          {item.installedAll ? <span className={CHIP}>已安装</span> : null}
-                        </div>
-                        <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-muted">{item.group.description}</p>
-                      </div>
-                      <button
-                        type="button"
-                        className={item.installedAll ? BTN_GHOST : BTN_PRIMARY}
-                        disabled={busyGroup === item.group.id || item.installedAll}
-                        aria-label={`安装插件 ${item.group.name}`}
-                        onClick={() => void installOfficial(item)}
-                      >
-                        {busyGroup === item.group.id ? "正在下载…" : item.installedAll ? "已安装" : "安装"}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {notice ? (
-                <p role="status" className="mt-1 ui-caption text-[var(--success)]">{notice}</p>
-              ) : null}
-            </section>
+          {error ? (
+            <div className={`mb-3 ${ERROR_TEXT}`}>
+              <p role="alert">{error}</p>
+              <button type="button" className="ui-link mt-1" onClick={() => void load()}>
+                重试
+              </button>
+            </div>
           ) : null}
 
-          <section aria-label="更多插件">
-            <div className="mb-2 flex flex-wrap items-baseline gap-2">
-              <h3 className="ui-section-title">更多插件</h3>
-              <span className={`ml-auto ${HINT}`}>声明式插件与首方签名界面插件</span>
-            </div>
-            <PluginRepositoryPanel
-              catalog={catalog}
-              installed={installed}
-              loadingKey={loadingKey}
-              onLoad={onLoad}
-              onError={onError}
+          {loading && items.length === 0 ? (
+            <p role="status" className="ui-caption">正在读取插件仓库…</p>
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={<PackageIcon width={20} height={20} />}
+              title={items.length > 0 ? "没有匹配的插件" : "仓库里还没有插件"}
+              desc={
+                items.length > 0
+                  ? "换个关键词试试，或清空搜索。"
+                  : "管理员用发布接口往云端仓库推一个插件，这里就会出现。"
+              }
             />
-          </section>
+          ) : (
+            <ul className="grid gap-2 sm:grid-cols-2" aria-label="插件列表">
+              {filtered.map((item) => (
+                <li key={item.key} className="ui-card flex flex-col gap-2 p-3">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[13px] font-bold">{item.name}</span>
+                    <span className={CHIP}>v{item.version}</span>
+                    {item.installed ? <span className={CHIP}>已安装</span> : null}
+                  </div>
+                  <p className="line-clamp-2 text-[12px] leading-5 text-muted">{item.description}</p>
+                  <div className="mt-auto flex items-center justify-between gap-2">
+                    <span className={HINT}>安装前会校验签名/指纹</span>
+                    <button
+                      type="button"
+                      className={item.installed ? BTN_GHOST : BTN_PRIMARY}
+                      disabled={item.installed || busyKey === item.key}
+                      aria-label={`安装插件 ${item.name}`}
+                      onClick={() => void install(item)}
+                    >
+                      {busyKey === item.key ? "安装中…" : item.installed ? "已安装" : "安装"}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>

@@ -199,7 +199,7 @@ describe("PluginsPage · 云端安装弹窗（d.96）", () => {
     expect(await within(dialog).findByText("仓库插件")).toBeInTheDocument();
     expect(within(dialog).getByLabelText("搜索插件仓库")).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "安装" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "安装插件 仓库插件" }));
     // 下载完成后弹窗关闭，清单进同一个安装预览
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "插件仓库" })).toBeNull());
     const textarea = (await screen.findByLabelText("插件清单 JSON")) as HTMLTextAreaElement;
@@ -225,7 +225,7 @@ describe("PluginsPage · 仓库 Tab（d.95）", () => {
     expect(await screen.findByLabelText("搜索插件仓库")).toBeInTheDocument();
     expect(await screen.findByText("仓库插件")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "安装" }));
+    fireEvent.click(screen.getByRole("button", { name: "安装插件 仓库插件" }));
     // 下载后的清单填进安装弹窗：与手动粘贴/选文件走同一条预览管线
     const textarea = await screen.findByLabelText("插件清单 JSON");
     await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toContain("acme.repo"));
@@ -693,7 +693,7 @@ describe("PluginsPage · 插件列表筛选与安装定位（d.77）", () => {
   it("从仓库 Tab 安装后回到插件 Tab，并高亮新装的卡片", async () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "从插件仓库安装" }));
-    fireEvent.click(await screen.findByRole("button", { name: "安装" }));
+    fireEvent.click(await screen.findByRole("button", { name: "安装插件 仓库插件" }));
     const textarea = await screen.findByLabelText("插件清单 JSON");
     await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toContain("acme.repo"));
     fireEvent.click(screen.getByRole("button", { name: "确认安装" }));
