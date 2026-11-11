@@ -1,7 +1,7 @@
 {
   "name": "heming",
   "private": true,
-  "version": "131.3.54",
+  "version": "132.3.54",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r build && pnpm -r test",
@@ -14,7 +14,7 @@
     "plugin:pack": "node scripts/pack-plugin.mjs",
     "plugin:publish": "node scripts/publish-plugin.mjs",
     "module:check": "node scripts/check-module-packages.mjs",
-  "version:bump": "node scripts/bump-version.mjs",
+    "version:bump": "node scripts/bump-version.mjs",
     "version:show": "node scripts/version.mjs"
   },
   "engines": {
@@ -25,5 +25,5 @@
       "electron"
     ]
   },
-  "hemingVersion": "d.131.3.54.0"
+  "hemingVersion": "d.132.3.54.0"
 }

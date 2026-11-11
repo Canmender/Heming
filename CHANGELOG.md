@@ -2,6 +2,33 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.132.3.54.0（2026-11-11）— 插件完全独立化：四个内置模块迁出本体
+
+用户口径（2026-11-10）：「所有插件独立化，不和本体程序挂钩，不要占用本体程序代码」。
+本轮把幕僚 / 信息中枢 / 自动化 / 工作流的**页面、调度与业务逻辑**全部迁出 `packages/web`，
+改为**安装后才存在、由宿主运行时加载**的首方签名模块包；本体只保留模块运行时与宿主桥。
+
+### 交付
+
+- 四个模块包：`packages/modules/{staff,automations,infohub,workflows}`，入口为 ESM，
+  与宿主共享同一 React 实例与 stores；构建产物 66.7 / 70.5 / 40.5 / 419KB，均不打包 React。
+- 生产分发链：`module.json` 的 `web` 贡献进入 canonical-v1 签名；module-package/module-store
+  支持纯 UI 模块；app:// `/modules/<id>/<version>/files/web/**` 只读路由（已安装 + 路径夹取）；
+  preload `__heming_modules.webList()`；loader 桌面经 app://、开发经 vite 中间件加载。
+- `scripts/build-web-module.mjs` + `scripts/pack-web-module.mjs`：构建/签名 4 个 `module.tgz`
+  （20.5 / 20.4 / 10.8 / 114.2KB），已实测安装到本机模块目录并由 app:// 路由解析。
+- 宿主运行时收口：`ModulePage` / `ModuleHomeCard` / `ModuleBackgroundSlots` 只从模块包取实现；
+  通知中心/命令面板经 `ui.focusWorkflow` 等一次性意图解耦；本体不再 import 任何模块实现。
+- 守卫：耦合基线 **143 → 0**（最终不变量测试）；安装包守卫禁止携带 `packages/modules` /
+  module-catalog；`pnpm module:check` 校验模块包清单/SDK/构建体积。
+
+### 验证
+
+- web 294 文件 / 4233 例、desktop 47 / 779、shared 106、server 271 全绿；`pnpm -r typecheck`
+  六包零错误；编码检查 OK；四个模块页面均在浏览器 dev 实测由模块 entry 渲染。
+- 已知：随源码迁出的模块单测尚未在模块包内恢复，暂由 `module:check` 与浏览器实测覆盖。
+
+
 ## d.131.3.54.0（2026-11-10）— 模块包完全独立化 M1：宿主加载式首方模块包基础设施
 
 目标：把幕僚/信息中枢/自动化/工作流的 UI 与业务逻辑从 `packages/web` 迁出，改为**安装后才存在、

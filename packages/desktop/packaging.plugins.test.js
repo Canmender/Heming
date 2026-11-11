@@ -56,7 +56,7 @@ test("界面插件（desktopWidget bundle）同样不随安装包分发（d.98�
   const files = Array.isArray(build.files) ? build.files : [];
   assert.ok(!files.some((file) => /pet\.(html|tsx)/.test(file)), "本体不应再打包桌宠页面");
   // 宿主运行时必须有 widget 相关模块（缺了就是装完插件起不了窗）
-  for (const required of ["plugin-window.js", "plugin-package.js", "plugin-signature.js", "resources/official-keys.json", "plugin-store.js", "plugin-host.js", "widget-preload.js"]) {
+  for (const required of ["plugin-window.js", "plugin-package.js", "plugin-signature.js", "resources/official-keys.json", "plugin-store.js", "plugin-host.js", "plugin-engine.js", "widget-preload.js"]) {
     assert.ok(files.includes(required), `安装包应包含 ${required}`);
   }
 });

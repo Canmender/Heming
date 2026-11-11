@@ -13,6 +13,7 @@ const {
   DEFAULT_API_ORIGIN,
   INDEX_FILE,
   resolveRequest,
+  resolveModuleAssetPath,
   resolveWidgetRequest,
   contentTypeFor,
   widgetCspHeaders,

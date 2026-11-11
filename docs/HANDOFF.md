@@ -24,10 +24,10 @@
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-11） | `d.131.3.54.0`（`main`，**未出包/未部署**）——模块包独立化 M1–M6 完成：四个模块 UI/调度/业务逻辑全部迁出本体，生产分发链（签名/安装/app:// 路由/loader）打通，耦合基线 **143→0**，安装包/模块包守卫就位。详见 §5 首条 |
-| 安装包（最新） | **仍是 `d.123.3.48.0`（r90，247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`）**；`d.124.3.48.0` / `d.125.3.48.0` / `d.126.3.48.0` / `d.127.3.48.0` / `d.128.3.48.0` / `d.129.3.48.0` / `d.129.3.49.0` / `d.129.3.50.0` / `d.129.3.51.0` / `d.129.3.52.0` / `d.129.3.53.0` / `d.130.3.53.0` / `d.130.3.54.0` / `d.131.3.54.0` 代码已合入 `main` 但**未打包、未部署、未发布更新源**（需要时按 `docs/deploy.md` 走 `release.mjs --desktop --deploy` + `publish-update.mjs`）。 |
-| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.131.3.54.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
-| 测试 | 2026-11-11 09:4x 实跑（d.131.3.54.0 门禁）：**web 294 文件 / 4233 例、shared 8 / 106、server 16 / 271、desktop 47 个 node:test 文件 / 779 例**；`pnpm -r typecheck` 六包零错误；编码检查 OK；`pnpm module:check` 4 包通过；耦合基线 **0**。 |
+| 当前版本（2026-11-11） | `d.132.3.54.0`（`main`，**安装包已出，未部署**）——插件完全独立化 M1–M6 完成：四个模块迁出本体、首方签名模块包分发；Windows NSIS 安装包已产出并经**打包版真机验证**模块加载；耦合基线 **143→0**。详见 §5 首条 |
+| 安装包（最新） | **仍是 `d.123.3.48.0`（r90，247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`）**；`d.124.3.48.0` / `d.125.3.48.0` / `d.126.3.48.0` / `d.127.3.48.0` / `d.128.3.48.0` / `d.129.3.48.0` / `d.129.3.49.0` / `d.129.3.50.0` / `d.129.3.51.0` / `d.129.3.52.0` / `d.129.3.53.0` / `d.130.3.53.0` / `d.130.3.54.0` / `d.131.3.54.0` / `d.132.3.54.0` 代码已合入 `main` 但**未打包、未部署、未发布更新源**（需要时按 `docs/deploy.md` 走 `release.mjs --desktop --deploy` + `publish-update.mjs`）。 |
+| 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.132.3.54.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
+| 测试 | 2026-11-11 09:4x 实跑（d.131.3.54.0 门禁）：**web 294 文件 / 4233 例、shared 8 / 106、server 16 / 271、desktop 47 个 node:test 文件 / 779 例**；`pnpm -r typecheck` 六包零错误；编码检查 OK；`pnpm module:check` 4 包通过；耦合基线 **0**。打包版真机（win-unpacked）实测：webList 返回 4 个模块、app:// entry 200、幕僚/工作流页面正常渲染。 |
 | 线上 | **`d.123.3.48.0` 已于 2026-11-10 10:05–10:07 部署**（`release.mjs --desktop --deploy`：7 OK / 2 SKIP；备份 `heming-data-2026-11-10-d.123.3.48.0.tar.gz` 111.1KB 落本机；`INSTALL DONE: d.123.3.48.0`，install + smoke 通过）。人工校验：公网 `/api/health` 200；首页主 bundle `index-DO9EqyCD.js` 与本机 `packages/web/dist` **同名同 md5**；线上 SettingsPage chunk 含 `d.123.3.48.0`；部署包 30.6MB / 1802 项（不该有的 0 项）。 |
 | 安装包（已发布） | **`和鸣 Setup d.123.3.48.0.exe`（`r90`，247,030,505 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs`（`HEMING_RELEASE_DIR=…/r90`）上传 3 个文件并按远端大小 + sha512 校验通过。 |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **当前指向 123.3.48**（sha512 `7Plv…Mdoxug==`，size 247030505）；远端只留 `d.122.3.48.0` + `d.123.3.48.0` 两版（更早版本已按策略清理）。 |
@@ -229,6 +229,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 
 ## 5. 下一步候选
+**插件完全独立化完成 + Windows 安装包已出（`d.132.3.54.0`，2026-11-11；`main`，安装包已出、未部署）**：四个模块（staff/automations/infohub/workflows）UI/调度/业务逻辑全部迁出，签名 module.tgz 随插件区分发；耦合基线 143→0；守卫（本体不变量、安装包不携带模块、`module:check`）就位；安装包 `packages/desktop/release/和鸣 Setup d.132.3.54.0.exe`（约 247MB）+ latest.yml 已出，**打包版真机验证**：`webList` 返回 4 模块、app:// entry 200、幕僚/工作流页面由模块包渲染。打包中修掉两个真机缺陷：`plugin-engine.js` 未进 electron-builder files、`main.js` 漏 import `resolveModuleAssetPath`。**下一步（部署）**：① 云端口径重建 web（`pnpm --filter @heming/web build`）→ 打部署 tar；② 更新 `.superpowers/deploy-bare.py` 的 VERSION 为 d.132.3.54.0 → backup/upload/install/smoke；③ `HEMING_RELEASE_DIR=packages/desktop/release node scripts/publish-update.mjs` 发布更新源；④ 回填部署证据。
+
 **模块包独立化 M1–M6 完成（`d.131.3.54.0`，2026-11-11；`main`，未出包/未部署）**：四个模块（staff 66.7KB/20.5KB tgz、automations 70.5/20.4、infohub 40.5/10.8、workflows 419/114.2）UI/调度/业务逻辑全部迁出本体；生产分发链打通（首方签名 module.tgz、module-store 安装、app:// 只读路由、preload webList、loader app:// 解析）；宿主 runtime 不再 import 任何模块实现；通知/命令面板经 ui 意图解耦。耦合基线 **143→0**，守卫：本体不得再有模块实现、安装包不得携带 modules/module-catalog、`pnpm module:check` 校验模块包契约。**下一步**：① 打包前置：全量 build + 真机（Electron）验证模块从安装包加载；② 出 Windows 安装包（NSIS）；③ 按 `docs/deploy.md` 部署云端、发布更新源；④ 版本号在打包时统一 bump。
 
 **模块包独立化 M1–M5 + 生产分发链（`d.131.3.54.0`，2026-11-11；`main`，未出包/未部署）**：四个模块（staff 20.5 / automations 20.4 / infohub 10.8 / workflows 114.2 KB module.tgz）UI/调度/业务逻辑全部迁出，模块包首方签名、安装记录、app:// 只读路由、loader 桌面解析已打通；宿主 runtime 不再 import 任何模块实现，通知/命令面板通过 ui 意图解耦。耦合基线 **143→12**（剩余 `lib/modules` 注册表/store/nav/catalog 与 `lib/infohub` 引擎桥，M6 重新归类为宿主运行时/桥后归零）。**下一步（M6）**：① 基线归零与安装包守卫（安装包不得含模块源码/引擎）；② 补模块包测试（现有单测随源码迁出，需在模块包内恢复）；③ 全量门禁 + 真机验证；④ 出 Windows 安装包并部署云端。

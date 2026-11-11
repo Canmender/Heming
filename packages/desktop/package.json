@@ -1,6 +1,6 @@
 {
   "name": "@heming/desktop",
-  "version": "131.3.54",
+  "version": "132.3.54",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -34,6 +34,7 @@
       "plugin-signature.js",
       "plugin-store.js",
       "plugin-host.js",
+      "plugin-engine.js",
       "widget-preload.js",
       "splash.html",
       "title-bar.js",
@@ -124,7 +125,7 @@
       "uninstallerSidebar": "uninstallerSidebar.bmp"
     }
   },
-  "hemingVersion": "d.131.3.54.0",
-  "shortVersion": "131.3.54.0",
-  "shortVersionWindows": "131.3.54.0"
+  "hemingVersion": "d.132.3.54.0",
+  "shortVersion": "132.3.54.0",
+  "shortVersionWindows": "132.3.54.0"
 }
