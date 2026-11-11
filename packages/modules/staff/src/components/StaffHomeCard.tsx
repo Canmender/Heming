@@ -1,6 +1,6 @@
 import { describeNextCheck, formatStaffTime, severityLabel, triggerLabel } from "../lib/staff/model.js";
 import { useStaffStore } from "../lib/staff/store.js";
-import { useUiStore } from "../store/ui.js";
+import { useUiStore } from "@heming/sdk";
 
 /**
  * 首页「幕僚」卡（d.48）：只露出最近一份简报与入口。

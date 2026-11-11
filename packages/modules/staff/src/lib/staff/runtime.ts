@@ -1,6 +1,6 @@
-import { isInfohubAvailable } from "../infohub/client.js";
-import { useInfohubStore } from "../infohub/store.js";
-import { useTaskStore } from "../tasks/store.js";
+import { isInfohubAvailable } from "@heming/sdk";
+import { useInfohubStore } from "@heming/sdk";
+import { useTaskStore } from "@heming/sdk";
 import {
   collectFacts,
   filterFactsBySources,

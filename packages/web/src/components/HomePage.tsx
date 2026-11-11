@@ -24,7 +24,7 @@ import { PageShell } from "./layout/PageShell.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { SkeletonLine } from "./ui/Skeleton.js";
 import { InfohubHomeCard } from "./InfohubHomeCard.js";
-import { StaffHomeCard } from "./StaffHomeCard.js";
+import { ModuleHomeCard } from "../lib/modules/runtime.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
 import { OnboardingCard } from "./ux/OnboardingCard.js";
 import { HomeTeamUsage } from "./HomeTeamUsage.js";
@@ -549,8 +549,8 @@ export function HomePage() {
           d.70：信息中枢模块停用后整张卡下线，不在首页留假入口。 */}
       {moduleState.infoHub && <InfohubHomeCard />}
 
-      {/* 2.7 幕僚：最近一份主动简报（d.48）；模块停用后同样下线 */}
-      {moduleState.staff && <StaffHomeCard />}
+      {/* 2.7 幕僚：最近一份主动简报（d.48）；d.131 起优先由模块包提供卡片，未加载回退内置 */}
+      <ModuleHomeCard moduleId="staff" active={moduleState.staff} fallback={null} />
 
       {/* 3/4/5/6. 两栏：左团队动向；右智能体动态 + 在线成员 + 系统状态。
           窄窗（<1200）折成单列：1.5fr/1fr 的比例在 1000px 出头的窗口里会把左栏压得读不完整。 */}

@@ -14,7 +14,7 @@ export const STAFF_SEEN_KEY = "heming.staff.seen.v1";
 
 // 日程临期判据与桌宠事件派生共用，已抽到 `lib/agendaBucket.ts`（避免桌宠事件层拖进整个幕僚模型）。
 // 这里 re-export 保持既有导入路径不变：`import { agendaBucket } from "./model.js"` 仍可用。
-import { AGENDA_LOOKAHEAD_MS, agendaBucket, type AgendaBucket } from "../agendaBucket.js";
+import { AGENDA_LOOKAHEAD_MS, agendaBucket, type AgendaBucket } from "@heming/sdk";
 export { AGENDA_LOOKAHEAD_MS, agendaBucket };
 export type { AgendaBucket };
 

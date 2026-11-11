@@ -1,7 +1,7 @@
-import type { LlmProfile } from "../../store/llm.js";
-import { useNotificationStore } from "../../store/notifications.js";
-import { useTokenUsageStore } from "../../store/tokenUsage.js";
-import { notifyDesktop } from "../desktopNotify.js";
+import type { LlmProfile } from "@heming/sdk";
+import { useNotificationStore } from "@heming/sdk";
+import { useTokenUsageStore } from "@heming/sdk";
+import { notifyDesktop } from "@heming/sdk";
 import {
   agendaKey,
   buildRuleBrief,

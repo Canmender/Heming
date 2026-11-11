@@ -1,4 +1,4 @@
-import { useLlmStore } from "../../store/llm.js";
+import { useLlmStore } from "@heming/sdk";
 import { inQuietHours, tokensToday, type StaffRun, type StaffTrigger } from "./model.js";
 import { releaseStaffRun, tryAcquireStaffRun } from "./lock.js";
 import { runStaffBrief } from "./runner.js";

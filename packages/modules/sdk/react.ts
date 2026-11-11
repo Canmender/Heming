@@ -11,6 +11,13 @@ type HostReact = Record<string, unknown> & {
   useMemo: (...args: unknown[]) => unknown;
   useCallback: (...args: unknown[]) => unknown;
   useRef: (...args: unknown[]) => unknown;
+  useReducer: (...args: unknown[]) => unknown;
+  useContext: (...args: unknown[]) => unknown;
+  useLayoutEffect: (...args: unknown[]) => unknown;
+  useSyncExternalStore: (...args: unknown[]) => unknown;
+  useDebugValue: (...args: unknown[]) => unknown;
+  useId: (...args: unknown[]) => unknown;
+  useDeferredValue: (...args: unknown[]) => unknown;
   startTransition: (...args: unknown[]) => unknown;
 };
 
@@ -28,5 +35,12 @@ export const useEffect = ((...args: unknown[]) => hostReact().useEffect(...args)
 export const useMemo = ((...args: unknown[]) => hostReact().useMemo(...args)) as never;
 export const useCallback = ((...args: unknown[]) => hostReact().useCallback(...args)) as never;
 export const useRef = ((...args: unknown[]) => hostReact().useRef(...args)) as never;
+export const useReducer = ((...args: unknown[]) => hostReact().useReducer(...args)) as never;
+export const useContext = ((...args: unknown[]) => hostReact().useContext(...args)) as never;
+export const useLayoutEffect = ((...args: unknown[]) => hostReact().useLayoutEffect(...args)) as never;
+export const useSyncExternalStore = ((...args: unknown[]) => hostReact().useSyncExternalStore(...args)) as never;
+export const useDebugValue = ((...args: unknown[]) => hostReact().useDebugValue(...args)) as never;
+export const useId = ((...args: unknown[]) => hostReact().useId(...args)) as never;
+export const useDeferredValue = ((...args: unknown[]) => hostReact().useDeferredValue(...args)) as never;
 export const startTransition = ((...args: unknown[]) => hostReact().startTransition(...args)) as never;
 export default hostReact;

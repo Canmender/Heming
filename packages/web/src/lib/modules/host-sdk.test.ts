@@ -17,7 +17,9 @@ describe("host-sdk（模块包与宿主共享 React 的入口）", () => {
     expect(typeof first.react.useState).toBe("function");
     expect(typeof first.react.createElement).toBe("function");
     expect(typeof first.jsx.jsx).toBe("function");
-    expect(first.files).toEqual({});
+    // d.131：files 预填宿主共享模块（模块包从同一实例取，不能是空表）
+    expect(first.files["store/llm"]).toBeTruthy();
+    expect(first.files["components/ConfirmDialog"]).toBeTruthy();
   });
 
   it("未初始化时 getHostSdk 抛可读错误", () => {

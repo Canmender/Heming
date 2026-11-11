@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useLlmStore } from "../../store/llm.js";
+import { useLlmStore } from "@heming/sdk";
 import {
   STAFF_AGENDA_REFRESH_MS,
   STAFF_TICK_MS,

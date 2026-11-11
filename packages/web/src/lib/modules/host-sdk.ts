@@ -1,5 +1,6 @@
 import * as React from "react";
 import * as jsx from "react/jsx-runtime";
+import { HOST_FILES } from "./host-sdk.generated.js";
 
 /**
  * 宿主侧「模块包 SDK」：把宿主 React/共享模块挂到 `globalThis.__hemingHost`，
@@ -20,6 +21,13 @@ export interface HostReactApi {
   useMemo: typeof React.useMemo;
   useCallback: typeof React.useCallback;
   useRef: typeof React.useRef;
+  useReducer: typeof React.useReducer;
+  useContext: typeof React.useContext;
+  useLayoutEffect: typeof React.useLayoutEffect;
+  useSyncExternalStore: typeof React.useSyncExternalStore;
+  useDebugValue: typeof React.useDebugValue;
+  useId: typeof React.useId;
+  useDeferredValue: typeof React.useDeferredValue;
   startTransition: typeof React.startTransition;
 }
 
@@ -52,10 +60,17 @@ export function installHostSdk(): HostSdk {
       useMemo: React.useMemo,
       useCallback: React.useCallback,
       useRef: React.useRef,
+      useReducer: React.useReducer,
+      useContext: React.useContext,
+      useLayoutEffect: React.useLayoutEffect,
+      useSyncExternalStore: React.useSyncExternalStore,
+      useDebugValue: React.useDebugValue,
+      useId: React.useId,
+      useDeferredValue: React.useDeferredValue,
       startTransition: React.startTransition,
     },
     jsx: { jsx: jsx.jsx, jsxs: jsx.jsxs, Fragment: jsx.Fragment },
-    files: {},
+    files: HOST_FILES,
   };
   globalThis.__hemingHost = sdk;
   return sdk;

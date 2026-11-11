@@ -17,7 +17,12 @@ import { useInfohubStore } from "./lib/infohub/store.js";
 import { ensureDesktopGateway } from "./lib/magpieHost.js";
 import { useModuleStore, isModuleEffective } from "./lib/modules/store.js";
 // d.128：内置模块的页面/后台循环由运行时注册表统一装配，App 不再直连模块实现。
-import { ModulePage, modulePageOf, useModuleBackgroundLoops } from "./lib/modules/runtime.js";
+import {
+  ModuleBackgroundSlots,
+  ModulePage,
+  modulePageOf,
+  useModuleBackgroundLoops,
+} from "./lib/modules/runtime.js";
 import { useAppPresence } from "./lib/appPresence.js";
 import { startWidgetEvents } from "./lib/widgetEvents.js";
 import { refreshWidgets } from "./lib/widgets/store.js";
@@ -771,6 +776,8 @@ function AppShell({
       <div className="flex h-screen flex-col overflow-hidden">
         {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
         <TitleBar />
+        {/* 模块包后台循环槽位（d.131）：幕僚等模块迁出后由模块 entry 提供，未加载时回退内置。 */}
+        <ModuleBackgroundSlots authUser={Boolean(authUser)} moduleState={moduleState} />
         <div className="flex min-h-0 flex-1">
           {hasToken ? (
             authStatus === "pending" && !restoreError ? (

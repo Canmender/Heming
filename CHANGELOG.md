@@ -31,9 +31,21 @@
 - 新增 host-sdk/webModules 测试 6 例；耦合基线排除宿主运行时文件后 **143 → 141**（只减不增）；
 - `web` 全量回归通过；`pnpm -r typecheck` 六包零错误。
 
-### 下一步（M2–M6）
+### ④ M2：幕僚模块迁出本体
 
-幕僚 → 自动化 → 信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，
+- 新增 `packages/modules/staff/`（页面 + `lib/staff` + 首页卡 + 后台巡检入口）与 `module.json`；
+  入口导出 `pages.staff / homeCards.staff / background.staff`。
+- `@heming/sdk` 由 `scripts/generate-module-sdk.mjs` 按 `module.sdk.json` 生成（宿主 React/stores/组件的
+  同一实例转发）；staff 构建产物 66.7KB、无 React。
+- 宿主侧：`ModulePage` / `ModuleHomeCard` / `ModuleBackgroundSlots` 优先用模块包，模块包抛错有错误边界
+  （不再把整棵 App 打白）；staff 定位改由 registry 的模块 id 决定（不再依赖内置页面表）。
+- 删除本体 `components/StaffPage`、`StaffHomeCard`、`lib/staff/*`、已无引用的 `lib/modules/lifecycle.ts`；
+  耦合基线 **141 → 124**。浏览器 dev 实测：staff 页面由 `/__modules__/staff/entry.js` 渲染，导航/首页卡正常。
+- 已知：staff 单测尚未随模块迁移（随 M6 统一补模块测试）；生产 app:// 路由与模块安装/签名分发在下一阶段。
+
+### 下一步（M3–M6）
+
+自动化 → 信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，
 最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。
 
 ## d.130.3.54.0（2026-11-10）— 删除未路由死代码；剩余可见组件 token 收口

@@ -10,18 +10,25 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 const moduleId = process.env.MODULE_ID;
 if (!moduleId) throw new Error("缺少 MODULE_ID（由 scripts/build-web-module.mjs 注入）");
 
 const moduleRoot = fileURLToPath(new URL(`../modules/${moduleId}`, import.meta.url));
 const sdkRoot = fileURLToPath(new URL("../modules/sdk", import.meta.url));
+// 模块内允许的第三方依赖从 web 包解析（模块目录本身没有 package.json）：
+// 目前仅 zustand（staff 自己的 store）；其它第三方库应尽量走宿主 SDK。
+const webRequire = createRequire(fileURLToPath(new URL("./package.json", import.meta.url)));
+const ZUSTAND_ENTRY = webRequire.resolve("zustand");
 
 export default defineConfig({
   root: moduleRoot,
   plugins: [react()],
   resolve: {
     alias: [
+      { find: "@heming/sdk", replacement: `${sdkRoot}/index.ts` },
+      { find: /^zustand$/, replacement: ZUSTAND_ENTRY },
       { find: /^react\/jsx-runtime$/, replacement: `${sdkRoot}/jsx-runtime.ts` },
       { find: /^react$/, replacement: `${sdkRoot}/react.ts` },
     ],

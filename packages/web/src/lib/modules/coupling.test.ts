@@ -25,7 +25,6 @@ const WEB_SRC = resolve(HERE, "..", "..");
 /** 仍属于模块业务的目录（相对 packages/web/src）。 */
 const COUPLING_ROOTS = [
   "lib/modules",
-  "lib/staff",
   "lib/infohub",
   "lib/automation",
   "lib/workflow",
@@ -37,7 +36,6 @@ const COUPLING_ROOTS = [
 
 /** 顶层模块页面（不在上面目录里的那几个）。 */
 const COUPLING_FILES = [
-  "components/StaffPage.tsx",
   "components/InfohubPage.tsx",
   "components/AutomationPage.tsx",
   "components/WorkflowPage.tsx",
@@ -59,7 +57,7 @@ function isGuardFile(file: string): boolean {
   return (
     file.endsWith("coupling-baseline.json") ||
     file.endsWith("coupling.test.ts") ||
-    /^lib\/modules\/(runtime|host-sdk|webModules)(\.test)?\.[tj]sx?$/.test(file)
+    /^lib\/modules\/(runtime|host-sdk|host-sdk\.generated|webModules|useWebModule)(\.test)?\.[tj]sx?$/.test(file)
   );
 }
 

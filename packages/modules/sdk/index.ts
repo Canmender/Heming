@@ -1,0 +1,33 @@
+/** 由 `scripts/generate-module-sdk.mjs` 生成，请勿手改。模块包从宿主同一实例取导出。 */
+interface ModuleHostSdk {
+  files?: Record<string, Record<string, unknown>>;
+}
+function hostFiles(): Record<string, Record<string, unknown>> {
+  const host = (globalThis as { __hemingHost?: ModuleHostSdk }).__hemingHost;
+  if (!host?.files) throw new Error("模块包 SDK 未初始化：宿主应先 installHostSdk()");
+  return host.files;
+}
+
+export const AGENDA_LOOKAHEAD_MS = (hostFiles()["lib/agendaBucket"] as Record<string, unknown>)["AGENDA_LOOKAHEAD_MS"] as never;
+export const AgendaBucket = (hostFiles()["lib/agendaBucket"] as Record<string, unknown>)["AgendaBucket"] as never;
+export const ChatMessage = (hostFiles()["lib/llmClient"] as Record<string, unknown>)["ChatMessage"] as never;
+export const ConfirmDialog = (hostFiles()["components/ConfirmDialog"] as Record<string, unknown>)["ConfirmDialog"] as never;
+export const EmptyState = (hostFiles()["components/ui/EmptyState"] as Record<string, unknown>)["EmptyState"] as never;
+export const PageShell = (hostFiles()["components/layout/PageShell"] as Record<string, unknown>)["PageShell"] as never;
+export const StaffIcon = (hostFiles()["components/icons"] as Record<string, unknown>)["StaffIcon"] as never;
+export const UsageTotals = (hostFiles()["lib/llmClient"] as Record<string, unknown>)["UsageTotals"] as never;
+export const agendaBucket = (hostFiles()["lib/agendaBucket"] as Record<string, unknown>)["agendaBucket"] as never;
+export const createDefaultStorage = (hostFiles()["lib/memory/storage"] as Record<string, unknown>)["createDefaultStorage"] as never;
+export const isInfohubAvailable = (hostFiles()["lib/infohub/client"] as Record<string, unknown>)["isInfohubAvailable"] as never;
+export const isModuleEffective = (hostFiles()["lib/modules/store"] as Record<string, unknown>)["isModuleEffective"] as never;
+export const notifyDesktop = (hostFiles()["lib/desktopNotify"] as Record<string, unknown>)["notifyDesktop"] as never;
+export const readJson = (hostFiles()["lib/memory/storage"] as Record<string, unknown>)["readJson"] as never;
+export const streamChat = (hostFiles()["lib/llmClient"] as Record<string, unknown>)["streamChat"] as never;
+export const useInfohubStore = (hostFiles()["lib/infohub/store"] as Record<string, unknown>)["useInfohubStore"] as never;
+export const useLlmStore = (hostFiles()["store/llm"] as Record<string, unknown>)["useLlmStore"] as never;
+export const useModuleStore = (hostFiles()["lib/modules/store"] as Record<string, unknown>)["useModuleStore"] as never;
+export const useNotificationStore = (hostFiles()["store/notifications"] as Record<string, unknown>)["useNotificationStore"] as never;
+export const useTaskStore = (hostFiles()["lib/tasks/store"] as Record<string, unknown>)["useTaskStore"] as never;
+export const useTokenUsageStore = (hostFiles()["store/tokenUsage"] as Record<string, unknown>)["useTokenUsageStore"] as never;
+export const useUiStore = (hostFiles()["store/ui"] as Record<string, unknown>)["useUiStore"] as never;
+export const writeJson = (hostFiles()["lib/memory/storage"] as Record<string, unknown>)["writeJson"] as never;

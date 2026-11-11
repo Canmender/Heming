@@ -23,15 +23,21 @@ export const CHANGELOG: ChangelogEntry[] = [
       "`packages/web/vite.config.ts` 新增 `modulesDevServer`：把 `packages/modules/<id>/dist` 挂到`/__modules__/<id>/*`（路径夹取、no-store），开发态与安装版同一路径语义。",
       "`hello-page` 构建产物 1.3KB、无 React 标记；浏览器 dev（CDP）实测 `/__modules__/hello-page/entry.js`200、`loadWebModule('hello-page')` 返回 manifest/pages 且页面是函数；",
       "新增 host-sdk/webModules 测试 6 例；耦合基线排除宿主运行时文件后 **143 → 141**（只减不增）；",
-      "`web` 全量回归通过；`pnpm -r typecheck` 六包零错误。"
+      "`web` 全量回归通过；`pnpm -r typecheck` 六包零错误。",
+      "新增 `packages/modules/staff/`（页面 + `lib/staff` + 首页卡 + 后台巡检入口）与 `module.json`；入口导出 `pages.staff / homeCards.staff / background.staff`。",
+      "`@heming/sdk` 由 `scripts/generate-module-sdk.mjs` 按 `module.sdk.json` 生成（宿主 React/stores/组件的同一实例转发）；staff 构建产物 66.7KB、无 React。",
+      "宿主侧：`ModulePage` / `ModuleHomeCard` / `ModuleBackgroundSlots` 优先用模块包，模块包抛错有错误边界（不再把整棵 App 打白）；staff 定位改由 registry 的模块 id 决定（不再依赖内置页面表）。",
+      "删除本体 `components/StaffPage`、`StaffHomeCard`、`lib/staff/*`、已无引用的 `lib/modules/lifecycle.ts`；耦合基线 **141 → 124**。浏览器 dev 实测：staff 页面由 `/__modules__/staff/entry.js` 渲染，导航/首页卡正常。",
+      "已知：staff 单测尚未随模块迁移（随 M6 统一补模块测试）；生产 app:// 路由与模块安装/签名分发在下一阶段。"
     ],
     "paragraphs": [
       "目标：把幕僚/信息中枢/自动化/工作流的 UI 与业务逻辑从 `packages/web` 迁出，改为**安装后才存在、由主窗口动态加载**的首方签名 ESM 模块包（与沙箱 bundle 不同，共享宿主 React/stores，不重写 UI）。本轮完成 M1 基础设施，迁移本身从下一轮开始。",
       "① 模块包构建链构建门禁检查「必须含 export / 不得打包 React 本体 / ≤2.5MB」。",
       "② 宿主 SDK 与加载器",
       "③ 验证",
-      "下一步（M2–M6）",
-      "幕僚 → 自动化 → 信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。"
+      "④ M2：幕僚模块迁出本体",
+      "下一步（M3–M6）",
+      "自动化 → 信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。"
     ]
   },
   {

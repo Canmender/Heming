@@ -1,5 +1,5 @@
-import { streamChat, type ChatMessage, type UsageTotals } from "../llmClient.js";
-import type { LlmProfile } from "../../store/llm.js";
+import { streamChat, type ChatMessage, type UsageTotals } from "@heming/sdk";
+import type { LlmProfile } from "@heming/sdk";
 import {
   MAX_LLM_DETAIL_CHARS,
   MAX_LLM_TITLE_CHARS,

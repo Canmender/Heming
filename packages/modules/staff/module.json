@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 4,
+  "id": "staff",
+  "name": "幕僚",
+  "version": "1.0.0",
+  "description": "每天检查日程和任务，有要紧事才提醒；只读，不替你操作。",
+  "author": "和鸣",
+  "distribution": "module",
+  "meta": { "kind": "module" },
+  "web": {
+    "entry": "files/web/entry.js",
+    "contributions": ["page", "homeCard", "background"]
+  }
+}

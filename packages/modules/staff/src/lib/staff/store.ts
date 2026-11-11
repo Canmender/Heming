@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { createDefaultStorage, readJson, writeJson } from "../memory/storage.js";
-import type { StorageLike } from "../memory/types.js";
+import { createDefaultStorage, readJson, writeJson } from "@heming/sdk";
+import type { StorageLike } from "@heming/sdk";
 import {
   STAFF_RUNS_BYTE_LIMIT,
   STAFF_RUNS_KEY,

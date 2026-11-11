@@ -12,6 +12,15 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.131.3.54.0",
+    "date": "2026-11-10",
+    "title": "插件模块开始独立打包",
+    "bullets": [
+      "插件模块的独立打包与宿主加载基础已经就位（先内部完成，用户界面暂不变）；后续会把幕僚/信息中枢/自动化/工作流逐步改成可独立安装的模块包。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.130.3.54.0",
     "date": "2026-11-10",
     "title": "清掉不再使用的旧任务页，颜色收尾",

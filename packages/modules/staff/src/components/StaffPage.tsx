@@ -13,13 +13,13 @@ import {
 } from "../lib/staff/model.js";
 import { runStaffNow } from "../lib/staff/manual.js";
 import { useStaffStore, type StaffSettingsPatch } from "../lib/staff/store.js";
-import { useLlmStore } from "../store/llm.js";
-import { useUiStore } from "../store/ui.js";
-import { isModuleEffective, useModuleStore } from "../lib/modules/store.js";
-import { ConfirmDialog } from "./ConfirmDialog.js";
-import { StaffIcon } from "./icons.js";
-import { PageShell } from "./layout/PageShell.js";
-import { EmptyState } from "./ui/EmptyState.js";
+import { useLlmStore } from "@heming/sdk";
+import { useUiStore } from "@heming/sdk";
+import { isModuleEffective, useModuleStore } from "@heming/sdk";
+import { ConfirmDialog } from "@heming/sdk";
+import { StaffIcon } from "@heming/sdk";
+import { PageShell } from "@heming/sdk";
+import { EmptyState } from "@heming/sdk";
 
 /**
  * 幕僚页（d.48）：只递简报 + 一键跳转。

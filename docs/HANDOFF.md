@@ -24,10 +24,10 @@
 
 | 项 | 状态 |
 |---|---|
-| 当前版本（2026-11-10） | `d.131.3.54.0`（`main`，**未出包/未部署**）——模块包完全独立化 M1：宿主加载式首方模块包基础设施（packages/modules、构建门禁、React shim、宿主 SDK、loader、Vite dev 中间件），hello-page 已在浏览器 dev 验证；耦合基线 143→141。详见 §5 首条 |
+| 当前版本（2026-11-10） | `d.131.3.54.0`（`main`，**未出包/未部署**）——模块包独立化 M1+M2：宿主加载式模块包基础设施 + 幕僚已完整迁出本体（packages/modules/staff，页面/首页卡/后台巡检走模块包），耦合基线 143→124。详见 §5 首条 |
 | 安装包（最新） | **仍是 `d.123.3.48.0`（r90，247,030,505 字节，sha512 `7PlvOCfYJEJHLMUJOwYg4ncJz2A9fe7fQ3p7PipgWTevVCnBLLZwXBh4lSzGhsFBsibo6yxWaeITxrDuMdoxug==`）**；`d.124.3.48.0` / `d.125.3.48.0` / `d.126.3.48.0` / `d.127.3.48.0` / `d.128.3.48.0` / `d.129.3.48.0` / `d.129.3.49.0` / `d.129.3.50.0` / `d.129.3.51.0` / `d.129.3.52.0` / `d.129.3.53.0` / `d.130.3.53.0` / `d.130.3.54.0` / `d.131.3.54.0` 代码已合入 `main` 但**未打包、未部署、未发布更新源**（需要时按 `docs/deploy.md` 走 `release.mjs --desktop --deploy` + `publish-update.mjs`）。 |
 | 版本 | 5 段（`d.特性.破坏性.修订.构建`，五包同步）；当前 `d.131.3.54.0`。规则见 `docs/VERSION-MANAGEMENT.md`，历史见 `CHANGELOG.md`。 |
-| 测试 | 2026-11-10 22:5x 实跑（d.131.3.54.0 门禁）：**web 341 文件 / 4808 例、shared 8 / 106、server 16 / 271、desktop 46 个 node:test 文件 / 772 例**；`pnpm -r typecheck` 六包零错误；`check-source-encoding` OK。模块包 hello-page 构建 1.3KB、浏览器 dev loader 实测 200/导出正确。 |
+| 测试 | 2026-11-11 08:1x 实跑（d.131.3.54.0 门禁）：**web 332 文件 / 4733 例、shared 8 / 106、server 16 / 271、desktop 46 个 node:test 文件 / 772 例**；`pnpm -r typecheck` 六包零错误；编码检查 OK。staff 模块包构建 66.7KB、浏览器 dev 页面由模块 entry 渲染；耦合基线 **124**。 |
 | 线上 | **`d.123.3.48.0` 已于 2026-11-10 10:05–10:07 部署**（`release.mjs --desktop --deploy`：7 OK / 2 SKIP；备份 `heming-data-2026-11-10-d.123.3.48.0.tar.gz` 111.1KB 落本机；`INSTALL DONE: d.123.3.48.0`，install + smoke 通过）。人工校验：公网 `/api/health` 200；首页主 bundle `index-DO9EqyCD.js` 与本机 `packages/web/dist` **同名同 md5**；线上 SettingsPage chunk 含 `d.123.3.48.0`；部署包 30.6MB / 1802 项（不该有的 0 项）。 |
 | 安装包（已发布） | **`和鸣 Setup d.123.3.48.0.exe`（`r90`，247,030,505 字节）已发布到 `/opt/heming/updates`**：`publish-update.mjs`（`HEMING_RELEASE_DIR=…/r90`）上传 3 个文件并按远端大小 + sha512 校验通过。 |
 | 自动更新源 | `http://47.92.39.184/updates/latest.yml` → **当前指向 123.3.48**（sha512 `7Plv…Mdoxug==`，size 247030505）；远端只留 `d.122.3.48.0` + `d.123.3.48.0` 两版（更早版本已按策略清理）。 |
@@ -229,6 +229,8 @@ Wiki 在桌面端写 `~/Heming/wiki/`（`wiki-fs.js`），图表导出写 `~/Hem
 
 
 ## 5. 下一步候选
+**模块包独立化 M1+M2（`d.131.3.54.0`，2026-11-11；`main`，未出包/未部署）**：① M1 基础设施：`packages/modules/` + `scripts/build-web-module.mjs`（Vite lib ESM、React/JSX shim、构建门禁）、`lib/modules/host-sdk.ts`（宿主 React/JSX + 共享模块 files 表）、`lib/modules/webModules.ts`（import/形状校验/缓存）、vite `modulesDevServer`（`/__modules__/<id>/*`）。② M2 幕僚迁出：`packages/modules/staff/`（页面 + lib/staff + 首页卡 + 后台巡检入口，`module.json`/`module.sdk.json`），`@heming/sdk` 由 `scripts/generate-module-sdk.mjs` 生成；宿主 `ModulePage`/`ModuleHomeCard`/`ModuleBackgroundSlots` 优先模块包、错误边界回退；删除本体 StaffPage/StaffHomeCard/lib/staff/lifecycle，耦合基线 141→124；浏览器 dev 实测 staff 页面/导航/首页卡由模块 entry 渲染。**下一步（M3–M6）**：① app:// 只读模块路由 + 模块包安装/签名/分发（生产路径）；② 自动化迁出；③ 信息中枢迁出；④ 工作流迁出；⑤ 删除静态模块表、基线归零、补模块测试；全绿后出安装包并部署云端。
+
 **模块包完全独立化 M1（`d.131.3.54.0`，2026-11-10；`main`，未出包/未部署）**：新增 `packages/modules/` 与 `scripts/build-web-module.mjs`（Vite lib ESM、React/JSX shim、构建门禁）；`lib/modules/host-sdk.ts` 挂载宿主 React/JSX；`lib/modules/webModules.ts` 负责 import/形状校验/缓存；vite `modulesDevServer` 提供 `/__modules__/<id>/*`。hello-page 构建 1.3KB、浏览器 dev 实测 loader 正常；耦合基线剔除宿主运行时后 143→141。**下一步（M2–M6）**：① app:// 只读模块路由 + module.json 扩展 `web` 贡献 + 模块包签名/分发；② 幕僚迁入（页面+lib/staff+首页卡+loop），web 删除对应文件；③ 自动化；④ 信息中枢；⑤ 工作流；⑥ 删除静态模块表、基线归零；全绿后出安装包并部署云端。
 
 **死代码清理 + 剩余组件 token 收口（`d.130.3.54.0`，2026-11-10；`main`，未出包/未部署）**：删除全仓无生产引用的 TaskAreaPage/RolloutTimeline（组件+测试，115 处写死类）；RegistryPage/RegistryInstallCard/SkillsPage/OnboardingCard/MarkdownMessage/InfohubHomeCard/ChatEmptyState/WidgetSettingsCard/PreviewPane/ExpressionInput/NodeDetailPanel/CommandPalette token 化；全 components 写死视觉类剩 96 处，集中在工作流画布/图表色板与个别弹窗（属数据可视化/品牌色，不再强套语义 token）；core 页面审计 0。测试：web 339/4802（少 2 个删掉的死代码测试文件）、server 271、shared 106、desktop 772。**下一步**：① 插件独立化 P2（四个内置模块页面搬出本体，耦合基线 143 只减不增）；② 剩余画布/图表色板如要深色统一可做专项；③ 服务端会话搜索（配合分页）。

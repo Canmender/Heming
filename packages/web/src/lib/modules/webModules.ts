@@ -23,8 +23,8 @@ export interface WebModuleEntry {
   manifest: WebModuleManifest;
   /** page id → React 组件（与 module registry 的 page 对齐）。 */
   pages?: Record<string, ComponentType>;
-  /** 登录后常驻的后台 hook（宿主在 AppShell 挂载；未安装/停用即卸载）。 */
-  background?: Record<string, (active: boolean) => void>;
+  /** 登录后常驻的后台组件（宿主按生效状态渲染 <Background active={...}/>；未安装/停用即卸载）。 */
+  background?: Record<string, ComponentType<{ active: boolean }>>;
   /** 首页卡片组件（宿主按槽位渲染）。 */
   homeCards?: Record<string, ComponentType>;
   /** 设置卡：{ id, title, Component }[]。 */
