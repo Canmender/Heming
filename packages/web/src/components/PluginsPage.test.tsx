@@ -195,13 +195,13 @@ describe("PluginsPage · 云端安装弹窗（d.96）", () => {
   it("「从云端安装」直接列出云端插件库，选中后关闭弹窗并进入安装预览", async () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "从插件仓库安装" }));
-    const dialog = await screen.findByRole("dialog", { name: "云端插件库" });
+    const dialog = await screen.findByRole("dialog", { name: "插件仓库" });
     expect(await within(dialog).findByText("仓库插件")).toBeInTheDocument();
     expect(within(dialog).getByLabelText("搜索插件仓库")).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "安装" }));
     // 下载完成后弹窗关闭，清单进同一个安装预览
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "云端插件库" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "插件仓库" })).toBeNull());
     const textarea = (await screen.findByLabelText("插件清单 JSON")) as HTMLTextAreaElement;
     expect(textarea.value).toContain("acme.repo");
     expect(screen.getByRole("dialog", { name: "安装插件" })).toBeInTheDocument();
@@ -214,7 +214,7 @@ describe("PluginsPage · 云端安装弹窗（d.96）", () => {
     expect(screen.getByRole("button", { name: "手动粘贴清单" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "从插件仓库安装" }));
-    expect(await screen.findByRole("dialog", { name: "云端插件库" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "插件仓库" })).toBeInTheDocument();
   });
 });
 
@@ -245,15 +245,15 @@ describe("PluginsPage · 插件从云端安装", () => {
     for (const name of ["幕僚", "信息中枢", "自动化"]) {
       expect(screen.queryByRole("region", { name: `插件 ${name}` })).toBeNull();
     }
-    expect(screen.getByRole("button", { name: "安装官方插件" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "从插件仓库安装" })).toBeInTheDocument();
   });
 
   it("从云端安装插件：目录里的模块才出现；安装后可启停/删除", async () => {
     useModuleStore.getState().reset();
     renderPage();
 
-    fireEvent.click(screen.getByRole("button", { name: "安装官方插件" }));
-    const dialog = screen.getByRole("dialog", { name: "从云端安装插件" });
+    fireEvent.click(screen.getByRole("button", { name: "从插件仓库安装" }));
+    const dialog = await screen.findByRole("dialog", { name: "插件仓库" });
     // d.134：云端目录只剩「自动化」「信息」两个插件
     expect(await within(dialog).findByText("自动化")).toBeInTheDocument();
     expect(within(dialog).getByText("信息")).toBeInTheDocument();
@@ -730,11 +730,10 @@ describe("PluginsPage · 插件（原桌面小组件 Tab）", () => {
     // 不再有「桌面小组件」Tab，只剩三 Tab
     expect(screen.queryByRole("tab", { name: "桌面小组件" })).toBeNull();
     expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
-    // d.134：桌面小组件直接并入插件区，不再单独重复一个「插件」区块
-    const widget = screen.getByRole("region", { name: "桌面小组件" });
-    expect(widget).toHaveTextContent(/插件需要桌面窗口能力/);
-    // 浏览器里没有桌面窗口能力：不显示安装入口
+    // d.135：桌面小组件不再单独成区，作为普通插件从同一个仓库安装/管理
+    expect(screen.queryByRole("region", { name: "桌面小组件" })).toBeNull();
     expect(screen.queryByRole("button", { name: /安装桌面小组件/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "从插件仓库安装" })).toBeInTheDocument();
   });
 });
 

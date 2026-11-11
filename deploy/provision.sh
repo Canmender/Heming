@@ -83,9 +83,15 @@ PORT=8787
 HEMING_DB_PATH=/var/lib/heming/heming.db
 HEMING_SEED_USERS=admin:admin
 HEMING_FILE_QUOTA_MB=200
+# 云端插件仓库（发布接口写入这里；和鸣客户端从 /api/plugins 读取）
+HEMING_PLUGIN_DIR=/opt/heming/plugins
 ENV
   chmod 640 /etc/heming/api.env
 fi
+
+# 插件仓库目录（publish 接口需要写权限）
+mkdir -p /opt/heming/plugins
+chown heming:heming /opt/heming/plugins
 
 echo "== 6/6 nginx 站点 =="
 REPO="${REPO:-/opt/heming/app}"

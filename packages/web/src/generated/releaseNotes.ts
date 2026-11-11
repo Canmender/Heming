@@ -12,6 +12,16 @@ export interface ReleaseNoteEntry {
 /** 用户版发布说明（与 CHANGELOG 同版本号；未收录的版本，应用内只显示标题）。 */
 export const RELEASE_NOTES: ReleaseNoteEntry[] = [
   {
+    "version": "d.135.3.54.4",
+    "date": "2026-11-11",
+    "title": "插件页只有一个仓库、一个入口",
+    "bullets": [
+      "插件仓库与官方插件合并成一个「插件仓库」入口：官方插件和扩展插件在同一个弹窗里安装。",
+      "桌面小组件不再单独一块，它就是一个插件：从同一个仓库安装，安装后在插件列表里出现；窗口设置仍在外观设置里。"
+    ],
+    "paragraphs": []
+  },
+  {
     "version": "d.134.3.54.4",
     "date": "2026-11-11",
     "title": "模型页卡片和别的页面一致了",

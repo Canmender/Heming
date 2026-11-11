@@ -45,9 +45,7 @@ import { PluginStats } from "./plugins/PluginStats.js";
 import { SystemPluginCard } from "./plugins/SystemPluginCard.js";
 import { PluginToolPanel } from "./plugins/PluginToolPanel.js";
 import { PluginGroupCard } from "./plugins/PluginGroupCard.js";
-import { CloudModulesDialog } from "./plugins/CloudModulesDialog.js";
 import { installPluginPackage } from "../lib/modules/cloudInstall.js";
-import { WidgetsView } from "./plugins/WidgetsView.js";
 import { SkillsView } from "./SkillsPage.js";
 import { InterfacesView } from "./InterfacesPage.js";
 import {
@@ -252,7 +250,6 @@ export function PluginsPage({
     () => BUILTIN_MODULES.filter((mod) => moduleInstalled[mod.id]),
     [moduleInstalled],
   );
-  const [cloudModulesOpen, setCloudModulesOpen] = useState(false);
   const widgetsRecords = useWidgetsStore((s) => s.records);
   /**
    * d.124：插件页面入口（与导航轨、App 路由、设置区导航说明读**同一份注册表投影**）。
@@ -630,14 +627,6 @@ export function PluginsPage({
                 <FileIcon width={13} height={13} aria-hidden="true" />
                 手动粘贴清单
               </button>
-              <button
-                type="button"
-                onClick={() => setCloudModulesOpen(true)}
-                className="ui-btn ui-btn-sm ui-btn-ghost"
-              >
-                <PlugIcon width={13} height={13} aria-hidden="true" />
-                安装官方插件
-              </button>
               <span className="ml-auto hidden ui-micro sm:inline">
                 安装只写本机清单，不运行代码
               </span>
@@ -743,8 +732,6 @@ export function PluginsPage({
               安装本身不会自动运行程序。连接与工具启用仍由你手动确认。
             </p>
 
-            {/* 桌面小组件也是插件的一种，直接并入同一插件区，不再单独重复一个「插件」标题。 */}
-            <WidgetsView />
           </>
         )}
 
@@ -794,18 +781,12 @@ export function PluginsPage({
           onLoad={loadFromRepository}
           onClose={() => setRepoDialogOpen(false)}
           onError={(message) => setMsg({ kind: "error", text: message })}
-        />
-      )}
-
-      {cloudModulesOpen && (
-        <CloudModulesDialog
-          installed={moduleInstalled}
-          onInstall={async (id, version) => {
+          moduleInstalled={moduleInstalled}
+          onInstallModule={async (id, version) => {
             await installPluginPackage(id, version);
             installModule(id);
             bump();
           }}
-          onClose={() => setCloudModulesOpen(false)}
         />
       )}
 

@@ -1,6 +1,6 @@
 {
   "name": "@heming/web",
-  "version": "134.3.54",
+  "version": "135.3.54",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -44,5 +44,5 @@
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
-  "hemingVersion": "d.134.3.54.4"
+  "hemingVersion": "d.135.3.54.4"
 }
