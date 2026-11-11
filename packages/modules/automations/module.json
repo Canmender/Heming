@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 4,
+  "id": "automations",
+  "name": "自动化",
+  "version": "1.0.0",
+  "description": "定时同步归档、重扫日程；只跑两种固定动作，不执行脚本。",
+  "author": "和鸣",
+  "distribution": "module",
+  "meta": { "kind": "module" },
+  "web": {
+    "entry": "files/web/entry.js",
+    "contributions": ["page", "background"]
+  }
+}

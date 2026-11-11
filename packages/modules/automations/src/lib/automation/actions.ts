@@ -4,8 +4,8 @@ import {
   readInfohubConfig,
   type InfohubAgendaResult,
   type InfohubSyncResult,
-} from "../infohub/client.js";
-import { AGENDA_DAYS, AGENDA_OVERDUE, useInfohubStore } from "../infohub/store.js";
+} from "@heming/sdk";
+import { AGENDA_DAYS, AGENDA_OVERDUE, useInfohubStore } from "@heming/sdk";
 import type { AutomationKind } from "./kinds.js";
 import { clipText, MAX_DETAIL_CHARS, type AutomationTask } from "./model.js";
 import type { AutomationResult } from "./store.js";

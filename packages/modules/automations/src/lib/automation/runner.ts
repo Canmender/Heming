@@ -1,5 +1,5 @@
-import { describeInfohubError, isInfohubAvailable } from "../infohub/client.js";
-import { useInfohubStore } from "../infohub/store.js";
+import { describeInfohubError, isInfohubAvailable } from "@heming/sdk";
+import { useInfohubStore } from "@heming/sdk";
 import { getAction, INFOHUB_OFFLINE } from "./actions.js";
 import { clipText, MAX_DETAIL_CHARS, type AutomationTask } from "./model.js";
 import type { AutomationResult } from "./store.js";

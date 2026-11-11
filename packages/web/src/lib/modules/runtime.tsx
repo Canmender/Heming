@@ -1,7 +1,6 @@
 import { Component, lazy, type ComponentType, type LazyExoticComponent, type ReactNode } from "react";
 import { MODULE_IDS, type ModuleId } from "./registry.js";
 import { isModuleEffective, type ModuleState } from "./store.js";
-import { useAutomationScheduler } from "../automation/scheduler.js";
 import { useWebModuleEntry } from "./useWebModule.js";
 import { useWorkflowScheduler } from "../workflow/scheduler.js";
 
@@ -20,18 +19,14 @@ import { useWorkflowScheduler } from "../workflow/scheduler.js";
 const InfohubPage = lazy(() =>
   import("../../components/InfohubPage.js").then((m) => ({ default: m.InfohubPage })),
 );
-const AutomationPage = lazy(() =>
-  import("../../components/AutomationPage.js").then((m) => ({ default: m.AutomationPage })),
-);
 const WorkflowPage = lazy(() =>
   import("../../components/workflow/WorkflowPage.js").then((m) => ({ default: m.WorkflowPage })),
 );
 
 /** moduleId → 页面组件（必须与 registry 的 page 一一对应）。 */
-/** staff 已迁出（d.131 M2）；其余模块迁移前仍保留内置回退。 */
+/** staff / automations 已迁出（d.131 M2/M3）；其余模块迁移前仍保留内置回退。 */
 export const MODULE_PAGES: Readonly<Partial<Record<ModuleId, LazyExoticComponent<ComponentType>>>> = {
   infohub: InfohubPage,
-  automations: AutomationPage,
   workflows: WorkflowPage,
 };
 
@@ -123,9 +118,8 @@ export function ModuleHomeCard({
  * 进程级开关而不是模块内部循环）。三个 hook 都是「effect 挂载/卸载」，互不读取彼此状态。
  */
 export function useModuleBackgroundLoops(authUser: boolean, state: ModuleState): void {
-  useAutomationScheduler(authUser && isModuleEffective(state, "automations"));
   useWorkflowScheduler(authUser && isModuleEffective(state, "workflows"));
-  // 幕僚循环从 d.131 M2 起由模块包后台导出提供（见 ModuleBackgroundSlots）。
+  // 幕僚 / 自动化循环从 d.131 M2/M3 起由模块包后台导出提供（见 ModuleBackgroundSlots）。
 }
 
 /**
@@ -139,7 +133,23 @@ export function ModuleBackgroundSlots({
   authUser: boolean;
   moduleState: ModuleState;
 }) {
-  return <StaffBackgroundSlot active={authUser && isModuleEffective(moduleState, "staff")} />;
+  return (
+    <>
+      <StaffBackgroundSlot active={authUser && isModuleEffective(moduleState, "staff")} />
+      <AutomationBackgroundSlot active={authUser && isModuleEffective(moduleState, "automations")} />
+    </>
+  );
+}
+
+function AutomationBackgroundSlot({ active }: { active: boolean }) {
+  const { entry } = useWebModuleEntry("automations");
+  const WebBackground = entry?.background?.automations;
+  if (!WebBackground) return null;
+  return (
+    <ModuleBoundary fallback={null}>
+      <WebBackground active={active} />
+    </ModuleBoundary>
+  );
 }
 
 function StaffBackgroundSlot({ active }: { active: boolean }) {

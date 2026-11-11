@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { isInfohubAvailable } from "../lib/infohub/client.js";
-import { useInfohubStore } from "../lib/infohub/store.js";
+import { isInfohubAvailable } from "@heming/sdk";
+import { useInfohubStore } from "@heming/sdk";
 import {
   ALL_WEEKDAYS,
   MAX_INTERVAL_MINUTES,
@@ -26,12 +26,12 @@ import {
 } from "../lib/automation/runs.js";
 import { runAutomationTask } from "../lib/automation/runner.js";
 import { useAutomationStore } from "../lib/automation/store.js";
-import { useUiStore } from "../store/ui.js";
-import { useModalA11y } from "./useModalA11y.js";
-import { ConfirmDialog } from "./ConfirmDialog.js";
-import { AutomationIcon, PlusIcon, TrashIcon } from "./icons.js";
-import { PageShell } from "./layout/PageShell.js";
-import { EmptyState } from "./ui/EmptyState.js";
+import { useUiStore } from "@heming/sdk";
+import { useModalA11y } from "@heming/sdk";
+import { ConfirmDialog } from "@heming/sdk";
+import { AutomationIcon, PlusIcon, TrashIcon } from "@heming/sdk";
+import { PageShell } from "@heming/sdk";
+import { EmptyState } from "@heming/sdk";
 
 /**
  * 自动化页（d.47）：把信息中枢的本机同步/日程重扫变成可定时的任务。

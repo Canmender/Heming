@@ -5,8 +5,8 @@ import {
   readJson,
   utf8Length,
   writeJson,
-} from "../memory/storage.js";
-import type { StorageLike } from "../memory/types.js";
+} from "@heming/sdk";
+import type { StorageLike } from "@heming/sdk";
 import { isAutomationKind } from "./kinds.js";
 import {
   MAX_DETAIL_CHARS,

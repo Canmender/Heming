@@ -43,9 +43,19 @@
   耦合基线 **141 → 124**。浏览器 dev 实测：staff 页面由 `/__modules__/staff/entry.js` 渲染，导航/首页卡正常。
 - 已知：staff 单测尚未随模块迁移（随 M6 统一补模块测试）；生产 app:// 路由与模块安装/签名分发在下一阶段。
 
-### 下一步（M3–M6）
+### ⑤ M3：自动化模块迁出本体
 
-自动化 → 信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，
+- 新增 `packages/modules/automations/`（页面 + `lib/automation` + 调度入口），入口导出
+  `pages.automations / background.automations`；构建 70.5KB、无 React。
+- 宿主 `ModuleBackgroundSlots` 增加自动化槽位，`useModuleBackgroundLoops` 不再直接挂
+  `useAutomationScheduler`；`MODULE_PAGES` 移除自动化回退，路由按 registry id 仍认它是模块页。
+- 删除本体 `components/AutomationPage` 与 `lib/automation/*`；`store/ui.ts` 的自动化意图类型
+  改成宿主结构类型（不再 import 模块代码）；耦合基线 **124 → 108**。
+- 浏览器 dev 实测：自动化页面由 `/__modules__/automations/entry.js` 渲染（预置任务/空态均正常）。
+
+### 下一步（M4–M6）
+
+信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，
 最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。
 
 ## d.130.3.54.0（2026-11-10）— 删除未路由死代码；剩余可见组件 token 收口

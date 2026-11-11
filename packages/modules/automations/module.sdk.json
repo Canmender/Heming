@@ -1,0 +1,27 @@
+{
+  "exports": {
+    "callInfohub": "lib/infohub/client",
+    "isInfohubAvailable": "lib/infohub/client",
+    "readInfohubConfig": "lib/infohub/client",
+    "InfohubAgendaResult": "lib/infohub/client",
+    "InfohubSyncResult": "lib/infohub/client",
+    "AGENDA_DAYS": "lib/infohub/store",
+    "AGENDA_OVERDUE": "lib/infohub/store",
+    "useInfohubStore": "lib/infohub/store",
+    "describeInfohubError": "lib/infohub/client",
+    "createDefaultStorage": "lib/memory/storage",
+    "isPlainObject": "lib/memory/storage",
+    "readJson": "lib/memory/storage",
+    "utf8Length": "lib/memory/storage",
+    "writeJson": "lib/memory/storage",
+    "useNotificationStore": "store/notifications",
+    "useUiStore": "store/ui",
+    "useModalA11y": "components/useModalA11y",
+    "ConfirmDialog": "components/ConfirmDialog",
+    "AutomationIcon": "components/icons",
+    "PlusIcon": "components/icons",
+    "TrashIcon": "components/icons",
+    "PageShell": "components/layout/PageShell",
+    "EmptyState": "components/ui/EmptyState"
+  }
+}

@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { isModuleOn } from "../lib/modules/store.js";
-import type { AutomationKind, SyncOptions } from "../lib/automation/model.js";
 import type { PluginPageId } from "../lib/pages/ids.js";
 import {
   persistNavMode,
@@ -262,9 +261,13 @@ export interface InfohubIntent {
  * 进入自动化页时的一次性意图（d.47）：信息中枢页把「当前同步选项」或
  * 「重扫日程」交给新建表单，不把任务状态复制到全局。
  */
+/**
+ * 自动化跨页意图（d.131 M3：自动化模块已迁出本体）。
+ * 宿主只负责透传「动作 id + 同步参数」，不再 import 模块类型；具体校验在模块页内完成。
+ */
 export interface AutomationIntent {
-  kind: AutomationKind;
-  sync?: SyncOptions;
+  kind: string;
+  sync?: { sources?: string[]; full?: boolean; archive?: boolean; [key: string]: unknown };
 }
 
 /**

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { isInfohubAvailable } from "../infohub/client.js";
-import { useInfohubStore } from "../infohub/store.js";
+import { isInfohubAvailable } from "@heming/sdk";
+import { useInfohubStore } from "@heming/sdk";
 import { runAutomationTask } from "./runner.js";
 import { useAutomationStore } from "./store.js";
 

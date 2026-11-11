@@ -28,7 +28,11 @@ export const CHANGELOG: ChangelogEntry[] = [
       "`@heming/sdk` 由 `scripts/generate-module-sdk.mjs` 按 `module.sdk.json` 生成（宿主 React/stores/组件的同一实例转发）；staff 构建产物 66.7KB、无 React。",
       "宿主侧：`ModulePage` / `ModuleHomeCard` / `ModuleBackgroundSlots` 优先用模块包，模块包抛错有错误边界（不再把整棵 App 打白）；staff 定位改由 registry 的模块 id 决定（不再依赖内置页面表）。",
       "删除本体 `components/StaffPage`、`StaffHomeCard`、`lib/staff/*`、已无引用的 `lib/modules/lifecycle.ts`；耦合基线 **141 → 124**。浏览器 dev 实测：staff 页面由 `/__modules__/staff/entry.js` 渲染，导航/首页卡正常。",
-      "已知：staff 单测尚未随模块迁移（随 M6 统一补模块测试）；生产 app:// 路由与模块安装/签名分发在下一阶段。"
+      "已知：staff 单测尚未随模块迁移（随 M6 统一补模块测试）；生产 app:// 路由与模块安装/签名分发在下一阶段。",
+      "新增 `packages/modules/automations/`（页面 + `lib/automation` + 调度入口），入口导出`pages.automations / background.automations`；构建 70.5KB、无 React。",
+      "宿主 `ModuleBackgroundSlots` 增加自动化槽位，`useModuleBackgroundLoops` 不再直接挂`useAutomationScheduler`；`MODULE_PAGES` 移除自动化回退，路由按 registry id 仍认它是模块页。",
+      "删除本体 `components/AutomationPage` 与 `lib/automation/*`；`store/ui.ts` 的自动化意图类型改成宿主结构类型（不再 import 模块代码）；耦合基线 **124 → 108**。",
+      "浏览器 dev 实测：自动化页面由 `/__modules__/automations/entry.js` 渲染（预置任务/空态均正常）。"
     ],
     "paragraphs": [
       "目标：把幕僚/信息中枢/自动化/工作流的 UI 与业务逻辑从 `packages/web` 迁出，改为**安装后才存在、由主窗口动态加载**的首方签名 ESM 模块包（与沙箱 bundle 不同，共享宿主 React/stores，不重写 UI）。本轮完成 M1 基础设施，迁移本身从下一轮开始。",
@@ -36,8 +40,9 @@ export const CHANGELOG: ChangelogEntry[] = [
       "② 宿主 SDK 与加载器",
       "③ 验证",
       "④ M2：幕僚模块迁出本体",
-      "下一步（M3–M6）",
-      "自动化 → 信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。"
+      "⑤ M3：自动化模块迁出本体",
+      "下一步（M4–M6）",
+      "信息中枢 → 工作流逐个迁入 `packages/modules/`，补 app:// 只读路由与模块包签名/分发，最后删除本体静态模块表并归零耦合基线；全绿后出安装包并部署云端。"
     ]
   },
   {

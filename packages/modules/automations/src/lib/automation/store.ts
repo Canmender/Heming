@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { useNotificationStore } from "../../store/notifications.js";
-import { createDefaultStorage, readJson, writeJson } from "../memory/storage.js";
-import type { StorageLike } from "../memory/types.js";
+import { useNotificationStore } from "@heming/sdk";
+import { createDefaultStorage, readJson, writeJson } from "@heming/sdk";
+import type { StorageLike } from "@heming/sdk";
 import {
   MAX_AUTOMATIONS,
   clipText,

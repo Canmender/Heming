@@ -26,7 +26,6 @@ const WEB_SRC = resolve(HERE, "..", "..");
 const COUPLING_ROOTS = [
   "lib/modules",
   "lib/infohub",
-  "lib/automation",
   "lib/workflow",
   "components/workflow",
   "components/staff",
@@ -37,7 +36,6 @@ const COUPLING_ROOTS = [
 /** 顶层模块页面（不在上面目录里的那几个）。 */
 const COUPLING_FILES = [
   "components/InfohubPage.tsx",
-  "components/AutomationPage.tsx",
   "components/WorkflowPage.tsx",
 ];
 
