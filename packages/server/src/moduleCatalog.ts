@@ -39,7 +39,7 @@ const DEFAULT_MODULES: readonly ModuleCatalogEntry[] = [
     version: "1.0.0",
     description: "在本机浏览、检索 QQ / 微信聊天记录和日程；归档不出本机。",
     author: "和鸣",
-    engine: "heming.infohub-engine",
+    engine: "infohub",
   },
   {
     id: "automations",

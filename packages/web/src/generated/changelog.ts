@@ -12,6 +12,25 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.133.3.54.0",
+    "date": "2026-11-11",
+    "title": "插件统一为「可下载的插件」：信息/助理两个插件、数据落安装目录",
+    "bullets": [
+      "**插件统一管理**：插件区只出现「助理」（幕僚/自动化/工作流整体安装/启停/删除）与「信息」两个插件卡；云端安装弹窗按插件分组，一次安装整组页面；来源筛选改为「全部插件 / 系统 / 插件」。",
+      "**真正的云端插件下载**：服务端新增 `GET /api/modules/:id/:version/module.tgz`（只服务目录内真实包、路径夹取）；新增 `scripts/build-modules.mjs` 构建并签名 4 个插件包到 `module-catalog`；",
+      "**信息插件自带引擎**：`infohub` 插件包同时包含 `files/web/entry.js` 与 Python 采集引擎`files/app/infohub/**` + `files/lib/**`（14.1MB / 808 文件）；`module-store` 记录 engine，",
+      "**数据目录**：打包版默认 `<安装目录>/data`（登录态/插件/模块/日志/知识库），首次从旧 userData只补缺迁移；知识库默认 `data/wiki`，幂等补齐卡帕西结构并放入 `llm-wiki.md`。",
+      "**跨页运行态**：幕僚手动巡检/开启的运行中状态移入 store，切页回来仍显示「正在生成…」。",
+      "安装包仍不携带任何插件；打包守卫覆盖模块运行时与规则文件。",
+      "web 294 文件 / 4233 例、desktop 786 例、server 273 例、shared 106 全绿；typecheck 六包零错误；`module:check` 4 包通过；本地端到端实测 staff 20.8KB、infohub 14.1MB 插件包下载/验签/安装成功。"
+    ],
+    "paragraphs": [
+      "用户口径（2026-11-11）：插件不再分「界面插件 / 普通插件 / 模块」，全部叫插件；信息采集 + 聊天记录合并为「信息」插件；幕僚 + 自动化 + 工作流合并为「助理」插件；安装包默认不携带插件；修跨页运行态；数据库落安装目录并内置卡帕西 LLM Wiki 规则。",
+      "交付主进程 `module-installer.js` 下载 → 首方验签 → 落模块目录。此前「安装」只改本地开关、包根本不下载，现在端到端实测通过（本地 200 → 安装 → current 返回 web 入口）。`infohub-engine` 的引擎 id 统一为 `infohub`，装一次插件即含 UI+引擎，不再单独下载引擎。",
+      "验证"
+    ]
+  },
+  {
     "version": "d.132.3.54.0",
     "date": "2026-11-11",
     "title": "插件完全独立化：四个内置模块迁出本体",

@@ -64,7 +64,35 @@ function walk(dir, prefix, out) {
   return out;
 }
 const files = walk(distRoot, "files/web", []);
-if (files.length === 0) fail("dist 为空");
+
+// 可选：把本机 Python 引擎一起装进同一个插件包（信息插件）。
+// 引擎目录布局与 build-module.mjs 一致：packages/infohub/infohub → files/app/infohub，
+// 依赖只收采集必需的那批（GUI 专用的不进包）。
+const engineApp = option("engine-app");
+const engineLib = option("engine-lib");
+const hasEngine = Boolean(engineApp);
+if (hasEngine) {
+  const appRoot = resolve(ROOT, engineApp);
+  const packageDir = join(appRoot, "infohub");
+  if (!existsSync(packageDir)) fail(`引擎入口不存在：${packageDir}`);
+  walk(packageDir, "files/app/infohub", files);
+  if (engineLib) {
+    const libRoot = resolve(ROOT, engineLib);
+    if (existsSync(libRoot)) {
+      const ESSENTIAL_LIB = /^(wechatauto|zstandard|uiautomation|comtypes|colorama|cryptography|cffi|pycparser|PIL|pillow|psutil|pyperclip)([-_.]|$)/i;
+      for (const name of readdirSync(libRoot).sort()) {
+        if (!ESSENTIAL_LIB.test(name)) continue;
+        const full = join(libRoot, name);
+        const st = statSync(full);
+        if (st.isDirectory()) walk(full, `files/lib/${name}`, files);
+        else if (st.isFile()) files.push({ path: `files/lib/${name}`, data: readFileSync(full) });
+      }
+    } else {
+      console.warn(`[pack-web-module] 引擎依赖目录不存在：${libRoot}`);
+    }
+  }
+}
+files.length === 0 && fail("dist 为空");
 
 /* ── 摘要（与 desktop computeFilesDigest 同一算法） ── */
 function filesDigest(items) {
@@ -101,7 +129,7 @@ const manifest = {
   author: source.author ?? "和鸣",
   publisher: { id: "heming", publicKey },
   distribution: "module",
-  meta: { kind: "module" },
+  meta: { kind: "module", ...(hasEngine ? { entry: "app", lib: "lib" } : {}) },
   web: { entry: webSource.entry, contributions },
   packageSha256,
   // canonical-v1 会规范化这些字段；显式空集合避免与发布工具默认值漂移。

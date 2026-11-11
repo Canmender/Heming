@@ -1,6 +1,6 @@
 {
   "name": "@heming/desktop",
-  "version": "132.3.54",
+  "version": "133.3.54",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -23,7 +23,7 @@
     "productName": "和鸣",
     "files": [
       "main.js",
-    "data-root.js",
+      "data-root.js",
       "window-state.js",
       "secure-origins.js",
       "splash-config.js",
@@ -58,13 +58,13 @@
       "infohub-engine.js",
       "module-package.js",
       "module-store.js",
-    "module-installer.js",
+      "module-installer.js",
       "module-download.js",
       "crash-log.js",
       "secret-store.js",
       "preload.js",
       "resources/official-keys.json",
-    "resources/llm-wiki.md",
+      "resources/llm-wiki.md",
       "assets/**/*",
       "magpie-host.js",
       "magpie-proxy.js",
@@ -128,7 +128,7 @@
       "uninstallerSidebar": "uninstallerSidebar.bmp"
     }
   },
-  "hemingVersion": "d.132.3.54.0",
-  "shortVersion": "132.3.54.0",
-  "shortVersionWindows": "132.3.54.0"
+  "hemingVersion": "d.133.3.54.0",
+  "shortVersion": "133.3.54.0",
+  "shortVersionWindows": "133.3.54.0"
 }

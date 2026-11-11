@@ -43,6 +43,8 @@ if (!app.isPackaged && !process.env.HEMING_ALLOW_DEV_PLUGIN_KEYS) {
 }
 
 const pkg = require("./package.json");
+// 数据根模块必须在下面立即使用前 require（不能等文件后部的 import 行，否则 TDZ）。
+const { ensureDataLayout, migrateUserData, resolveDataRoot, seedWikiRules } = require("./data-root");
 
 /**
  * 数据根（d.133）：打包版默认 <安装目录>/data（数据库/插件/知识库/日志都在这里），
@@ -83,7 +85,6 @@ const { createInfohubEngine } = require("./infohub-engine");
 const { createInfohubBridge, registerInfohubIpc, resolveDefaultHome, resolveInfohubPackageDir } =
   require("./infohub-bridge");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
-const { ensureDataLayout, migrateUserData, resolveDataRoot, seedWikiRules } = require("./data-root");
 
 // Windows 系统通知要求进程 AUMID 与安装快捷方式一致（electron-builder 使用 build.appId）。
 // 不设置时 Notification 可能静默不弹（本仓此前只有来电通知，未真机验证过）。
@@ -1059,11 +1060,12 @@ if (!gotLock) {
   // 只读 registry 供 app:// 路由与渲染层查询；安装/验签仍走 module-store。
   const webModulesRoot = path.join(app.getPath("userData"), "modules");
   const webModuleStore = createModuleStore({ dir: webModulesRoot, log: (line) => console.log(line) });
+  const moduleFeed =
+    process.env.HEMING_MODULE_FEED ||
+    `${String(APP_DEFAULT_URL).replace(/\/+$/, "")}/api/modules`;
   const webModuleInstaller = createModuleInstaller({
     store: webModuleStore,
-    feed:
-      process.env.HEMING_MODULE_FEED ||
-      `${String(APP_DEFAULT_URL).replace(/\/+$/, "")}/api/modules`,
+    feed: moduleFeed,
     log: (line) => console.log(line),
   });
   secureIpc.handle("modules:install", (_event, payload) => {
@@ -1081,6 +1083,7 @@ if (!gotLock) {
 
   const infohubEngine = createInfohubEngine({
     dir: path.join(app.getPath("userData"), "modules"),
+    base: moduleFeed,
     log: (line) => console.log(line),
     broadcast: (payload) => {
       if (!mainWindow || mainWindow.isDestroyed()) return;

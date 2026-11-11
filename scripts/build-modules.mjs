@@ -36,12 +36,16 @@ for (const id of ids) {
   }
   console.log(`\n[modules] 构建 ${id}@${manifest.version}`);
   run(["scripts/build-web-module.mjs", "--id", id]);
-  run([
+  const packArgs = [
     "scripts/pack-web-module.mjs",
     "--id",
     id,
     "--out",
     join("module-catalog", id, manifest.version, "module.tgz"),
-  ]);
+  ];
+  if (id === "infohub") {
+    packArgs.push("--engine-app", "packages/infohub", "--engine-lib", ".tmp-engine-lib");
+  }
+  run(packArgs);
 }
 console.log(`\n[modules] 完成：${ids.join(", ")}`);

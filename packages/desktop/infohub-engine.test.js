@@ -24,7 +24,7 @@ function writeFeed(feedDir, fixture, version = ENGINE_VERSION) {
 test("ensure：从模块源下载、验签、装好并给出 app/lib", async () => {
   const feed = tempDir("heming-feed-");
   const dir = tempDir("heming-modules-");
-  const fixture = makeSignedModule();
+  const fixture = makeSignedModule({ manifest: { id: ENGINE_ID } });
   writeFeed(feed, fixture);
   try {
     const stages = [];
@@ -75,7 +75,7 @@ test("ensure：模块源里没有包 → 可读错误，且不留下半个版本
 test("并发 ensure：共用一次下载安装", async () => {
   const feed = tempDir("heming-feed-");
   const dir = tempDir("heming-modules-");
-  const fixture = makeSignedModule();
+  const fixture = makeSignedModule({ manifest: { id: ENGINE_ID } });
   writeFeed(feed, fixture);
   try {
     const engine = createInfohubEngine({ dir, base: feed, keysFile: fixture.keysFile, allowDevKeys: true });

@@ -91,6 +91,22 @@ function createModuleStore(options = {}) {
     if (record.web && typeof record.web.entry === "string") {
       const webEntry = path.join(root, ...record.web.entry.split("/"));
       if (!exists(webEntry)) return null;
+      const engineEntry =
+        record.engine && typeof record.engine.entry === "string" ? record.engine.entry : "";
+      if (engineEntry) {
+        const appDir = path.join(files, engineEntry);
+        if (!exists(appDir)) return null;
+        const libDir = path.join(files, record.engine.lib || "lib");
+        return {
+          id,
+          version: record.version,
+          root,
+          appDir,
+          libDir: exists(libDir) ? libDir : "",
+          web: record.web,
+          engine: record.engine,
+        };
+      }
       return { id, version: record.version, root, appDir: "", libDir: "", web: record.web };
     }
     const entry = typeof record.entry === "string" && record.entry ? record.entry : "app";
@@ -148,6 +164,7 @@ function createModuleStore(options = {}) {
     const meta = manifest.meta && typeof manifest.meta === "object" ? manifest.meta : {};
     const entry = typeof meta.entry === "string" && meta.entry ? meta.entry : "app";
     const lib = typeof meta.lib === "string" && meta.lib ? meta.lib : "lib";
+    const hasEngine = typeof meta.entry === "string" && meta.entry !== "";
 
     const staging = stagingDir(id, version);
     try {
@@ -180,6 +197,7 @@ function createModuleStore(options = {}) {
           entry,
           lib,
           ...(pkg.web ? { web: pkg.web } : {}),
+          ...(hasEngine ? { engine: { entry, lib } } : {}),
           packageSha256: pkg.filesDigest,
           installedAt: new Date(now()).toISOString(),
         },

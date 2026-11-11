@@ -17,7 +17,7 @@ const path = require("node:path");
 const { createModuleStore } = require("./module-store");
 const { downloadModule, moduleUrl } = require("./module-download");
 
-const ENGINE_ID = "heming.infohub-engine";
+const ENGINE_ID = "infohub";
 /** 应用期望的引擎版本；升级引擎时改这里（模块自己的 version 必须一致）。 */
 const ENGINE_VERSION = "1.0.0";
 const DEFAULT_FEED = process.env.HEMING_MODULE_FEED || "http://47.92.39.184/updates/modules";
@@ -74,7 +74,8 @@ function createInfohubEngine(options = {}) {
   async function ensure(version) {
     const target = normalizeVersion(version);
     const current = store.current(ENGINE_ID);
-    if (current && current.version === target) {
+    // 只装了 Web UI、没装引擎的旧记录不算就绪：补下载同一插件包（含 app/ 引擎）。
+    if (current && current.version === target && current.appDir) {
       return { ...info(), updated: false };
     }
     if (pending) return pending;
