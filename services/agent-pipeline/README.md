@@ -141,6 +141,17 @@ curl -s http://localhost:8000/v1/runs \
 14.9 run/s、P50 600ms / P95 749ms、内存峰值 4.76MB（结束 1.78MB）、`episodes` 稳定在 5000。
 这条比单跑一条路径更接近真实流量：审批闸、取消标记、工具线程池、SQLite、指标都在同一时刻被用。
 
+### 在真实仓库文档上试过
+
+```
+agent-pipeline ingest <repo>/docs --prefix repo/ --ext .md
+→ 知识库写入：202/202 个文件、4659 个切片
+   查询「安装器通用外壳」→ 命中 setup-installer 规格与 deploy.md（分数 33 / 24 / 22）
+   查询「容器化部署 Prometheus 监控」→ 命中 HANDOFF 里的交付物自检与压测记录
+```
+`doc_id = prefix + 相对路径`，所以引用里能直接看到来源文件；空文件/非 UTF-8 会被跳过并在输出里报数。
+注意库文件默认落在**当前工作目录**（`AGENT_PIPELINE_DB` 可改），不要在多处混用一个相对路径。
+
 ## 幂等在并发下也成立
 
 同一个 `run_id` 8 个线程同时提交：全部 202、只会真跑一次（`pipeline_runs_total{status="ok"}` 只加 1）。

@@ -92,6 +92,8 @@
 
 - **部署产物用真 YAML 解析器校验**（`tests/test_deploy_yaml.py` 5 例）：以前 `test_packaging.py` 只用字符串断言「文件里写了什么」，缩进错一个空格也能过——但 Prometheus 起不来、compose 起不来。现在 `yaml.safe_load` 真解析 `prometheus.yml`、`alerts.yml`、`docker-compose.yml`，并校验 7 条告警都有 expr/severity/summary、工具失败率分子分母都带 status 过滤（不混 cached）、compose 的服务/端口/卷/prometheus 依赖齐全、Dockerfile HEALTHCHECK 指向 `/health`。
 
+- **RAG 在真实仓库文档上验证**：`agent-pipeline ingest docs --prefix repo/ --ext .md` → 202 个文件 / 4,659 个切片；查询「安装器通用外壳」「容器化部署 Prometheus 监控」都能命中文档原文并带 `repo/<文件>` 引用（`doc_id = 前缀 + 相对路径`）。**最终代码回归压测**：`soak.py --runs 4000 --concurrency 8 --tools --cancel-rate 0.1` → 3,651 次工具执行 / 349 次取消 / 21,972 次模型调用 / **0 失败** / 12.7 run/s / P50 680ms / P95 768ms / 内存峰值 5.75MB / episodes 稳定 5000（这是第 12–17 轮所有改动之后的代码）。
+
 已知边界（下一轮可继续）：stdio 请求超时只发取消通知、单次不硬杀（连续 3 次才回收子进程，见 `RECYCLE_AFTER_TIMEOUTS`）；记忆有容量上限（超限先删低重要性、同重要性比新旧），时间过期要显式开 `AGENT_MAX_EPISODE_AGE_DAYS`（默认 0）；仍没有「按检索命中率反向淘汰」；工具审批的等待只在本进程内有效（`AGENT_APPROVAL_MODE=write` 时 run 线程阻塞等裁决，重启后待审批随线程消失，跨重启续跑要 LangGraph `interrupt` + checkpointer）；pipeline 与桌面端的实际对接（目前是独立服务 + 设计文档，未接进 ChatPage 的生成链路）；本机无 docker，容器文件未构建验证。知识库检索以词面为主（BM25+哈希向量），同义改写召回不如真正的 embedding 服务，中文短查询容易放大无关片段。
 
 ---
