@@ -187,6 +187,10 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 `--fail-rate` 是确定性的：`fail_every = round(1 / fail_rate)`，每第 N 次模型调用抛 `LLMError`，所以同一组参数结果可复现。配合 `--canary` 时，灰度版本承接全部流量，错误率超过 `error_threshold` 后 `maybe_rollback` 会把它挪回 `archived`，而 active 版本继续可用——实测 `--runs 200 --fail-rate 0.5` 得到 `rollbacks: 1`、`canary_stage: "archived"`、退出码 0。
 
+`--tools` 会让假模型在 `execute` 轮真的发起一次工具调用（默认调只读的 `knowledge_search`），从而把 `ToolRuntime`（schema 校验 → 幂等缓存 → 断路器 → 超时 → Observation）也压进浸泡里。**参数里必须带调用序号**（脚本已带）：同参调用会命中幂等缓存，工具根本没执行，测出来的「工具调用次数」是假的——第一版没带序号时 60 个 run 只记到 2 次工具调用，带上后 60/60。
+
+`--approval` 再往前一步：把工具换成写工具 `run_command`、开启审批闸（`ApprovalGate`），并起一个线程每 5ms 自动批准，模拟「用户一直点允许」。实测 `--runs 30 --concurrency 2 --tools --approval` → 30 次工具调用、30 次自动批准、0 失败、P50 75.7ms（不卡在等待裁决上）。
+
 `--concurrency N` 会让 N 个工作线程同时跑 run（默认 1 = 顺序）。它验证的是状态机、SQLite 记忆、指标与配置存储**在并发下不互相踩**：实测 `--runs 8000 --concurrency 8` → 0 失败、40,000 次模型调用、17.5 run/s、P50 462ms / P95 496ms、内存峰值 4.1MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。并发 + 注入失败也一起验过：`--runs 400 --concurrency 4 --fail-rate 0.25 --canary` → 自动回滚 1 次、canary 归档 `archived`。
 
 > 服务侧并发口径：`POST /v1/runs` 超过 `AGENT_MAX_CONCURRENCY` 时**直接 429 + `Retry-After`**，不排队（排队会让客户端超时掩盖背压）；同一个 `run_id` 重复提交是幂等的，只跑一次。`tests/test_concurrency.py` 覆盖了 429/放行/幂等三条。

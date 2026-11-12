@@ -52,9 +52,14 @@ class CycleLLM(LLMClient):
     这条链路真的会在负载下触发（单测只覆盖了 ConfigStore 的窗口计算）。
     """
 
-    def __init__(self, fail_every: int = 0) -> None:
+    def __init__(self, fail_every: int = 0, *, tools: bool = False) -> None:
         self.calls = 0
         self.fail_every = fail_every
+        # tools=True 时，每个步骤的第一次 execute 轮发一个工具调用（走真实的
+        # ToolRuntime：schema 校验 → 幂等缓存 → 断路器 → 超时 → Observation），
+        # 第二次才说「不需要工具」。这样工具链路（含审批闸）真的会在浸泡里被压。
+        self.tools = tools
+        self.tool_name = "knowledge_search"
         self._lock = threading.Lock()
         self._by_prompt = {
             PROMPTS["plan"]: {"steps": [{"goal": "直接回答", "done_when": "有一句结论"}]},
@@ -74,6 +79,31 @@ class CycleLLM(LLMClient):
             raise LLMError("模拟上游 500（浸泡测试注入）")
         system = str(messages[0].get("content", "")) if messages else ""
         if system == PROMPTS["execute"]:
+            if self.tools:
+                # execute 的 user 消息里带「本步骤剩余工具调用预算：N」：
+                # N 等于满额就说明这一步还没调过工具 → 发一个调用；否则收尾。
+                tail = str(messages[-1].get("content", "")) if messages else ""
+                match = re.search(r"剩余工具调用预算：(\d+)", tail)
+                if match and int(match.group(1)) >= 6:
+                    name = self.tool_name
+                    return LLMResponse(
+                        text="",
+                        tool_calls=[
+                            {
+                                "id": f"call-{calls}",
+                                "name": name,
+                                # 参数带上调用序号：否则幂等缓存会命中，工具根本没真的跑
+                                # （浸泡就变成了「只测缓存」，测不到 ToolRuntime 与 SQLite）。
+                                "arguments": (
+                                    {"query": f"安装器 通用外壳 {calls}"}
+                                    if name == "knowledge_search"
+                                    else {"command": f"echo soak {calls}"}
+                                ),
+                            }
+                        ],
+                        prompt_tokens=40,
+                        completion_tokens=8,
+                    )
             return LLMResponse(text="这一步不需要工具。", prompt_tokens=40, completion_tokens=8)
         payload = self._by_prompt.get(system, {"answer": "完成。", "citations": []})
         return LLMResponse(
@@ -102,6 +132,16 @@ def main(argv: list[str] | None = None) -> int:
         help="并发跑 run 的工作线程数（默认 1 = 顺序；用来验证状态机/SQLite/指标在并发下不互相踩）",
     )
     parser.add_argument(
+        "--tools",
+        action="store_true",
+        help="每个步骤真的调用一次工具（knowledge_search；配合 --approval 走写工具），验证工具链路在负载下不飘",
+    )
+    parser.add_argument(
+        "--approval",
+        action="store_true",
+        help="开启工具审批闸并自动批准（验证 HITL 挂起/裁决在负载下可用）",
+    )
+    parser.add_argument(
         "--canary",
         action="store_true",
         help="注册一个灰度版本并让全部流量走它（配合 --fail-rate 验证回滚真的会发生）",
@@ -109,13 +149,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     fail_every = round(1 / args.fail_rate) if args.fail_rate > 0 else 0
+    if args.approval:
+        os.environ["AGENT_PIPELINE_ALLOW_COMMANDS"] = "1"  # 只为--approval 打开 run_command（命令固定 echo）
     settings = Settings(
         log_path=os.devnull,
         db_path=":memory:",
         # 灰度验证：全量走 canary，样本门槛压低到 20（与线上默认一致），阈值仍用默认
         **({"canary_ratio": 1.0} if args.canary else {}),
     )
-    llm = CycleLLM(fail_every=fail_every)
+    llm = CycleLLM(fail_every=fail_every, tools=args.tools)
+    if args.approval:
+        llm.tool_name = "run_command"  # 写工具才会挂审批闸
     memory = MemoryStore(":memory:")
     metrics = Metrics()
     config_store = ConfigStore(":memory:")
@@ -127,6 +171,29 @@ def main(argv: list[str] | None = None) -> int:
         config_store=config_store,
         log_sink=lambda _row: None,
     )
+    gate = None
+    approver_stop = threading.Event()
+    approved_lock = threading.Lock()
+    approved_count = {"n": 0}
+    if args.approval:
+        from agent_pipeline.approval import ApprovalGate
+
+        gate = ApprovalGate(timeout_s=30.0)
+        runtime.approval = gate
+
+        approved_count = {"n": 0}
+
+        def _auto_approve() -> None:
+            """模拟用户一直点「允许」：把挂起的裁决立刻批准，避免浸泡卡在超时上。"""
+            while not approver_stop.is_set():
+                for item in gate.pending():
+                    if gate.resolve(item["run_id"], item["call_id"], True):
+                        with approved_lock:
+                            approved_count["n"] += 1
+                approver_stop.wait(0.005)
+
+        threading.Thread(target=_auto_approve, daemon=True).start()
+
     canary_id = None
     if args.canary:
         config_store.register(PROMPTS, promote=True)  # 先有一个 active 版本可回滚
@@ -179,8 +246,14 @@ def main(argv: list[str] | None = None) -> int:
         float(match.group(1))
         for match in re.finditer(r'pipeline_rollback_total\{[^}]*\}\s+([0-9.]+)', metrics.expose().decode() if isinstance(metrics.expose(), bytes) else metrics.expose())
     )
+    metrics_text = metrics.expose().decode() if isinstance(metrics.expose(), bytes) else metrics.expose()
+    tool_calls = sum(
+        float(match.group(1)) for match in re.finditer(r'pipeline_tool_calls_total\{[^}]*\}\s+([0-9.]+)', metrics_text)
+    )
     summary = {
         "runs": args.runs,
+        "tool_calls": int(tool_calls),
+        "approvals": approved_count["n"],
         "concurrency": max(1, args.concurrency),
         "rollbacks": rollbacks,
         "canary_stage": (
@@ -208,10 +281,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  失败            : {summary['failures']} {summary['failure_samples']}")
         print(f"  P50 / P95       : {summary['p50_ms']}ms / {summary['p95_ms']}ms")
         print(f"  模型调用次数    : {summary['llm_calls']}")
+        if args.tools:
+            print(
+                f"  工具调用次数    : {summary['tool_calls']}"
+                f"（审批{'开启，自动批准 ' + str(summary['approvals']) + ' 次' if args.approval else '关闭'}）"
+            )
         print(f"  记忆条目        : {summary['memory_rows']}（有上限：超过 max_episodes 会 prune 最旧）")
         if args.canary:
             print(f"  自动回滚        : {summary['rollbacks']} 次（canary 版本最终 {summary['canary_stage']}）")
         print(f"  内存峰值/当前   : {summary['peak_mem_mb']}MB / {summary['current_mem_mb']}MB")
+    approver_stop.set()
     return 0 if len(failures) <= args.max_failures else 1
 
 
