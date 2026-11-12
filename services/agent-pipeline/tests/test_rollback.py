@@ -117,3 +117,28 @@ def test_maybe_rollback_needs_enough_samples() -> None:
     assert store.maybe_rollback(error_threshold=0.2, latency_threshold_s=60, min_samples=5) is None
     assert store.canary() is not None, "样本不足时不能擅自回滚"
     store.close()
+
+def test_outcomes_are_capped(tmp_path):
+    """outcome 行按上限裁剪：10 万次调用不会让回滚库单调变大，窗口仍只看最近 50 条。"""
+    from agent_pipeline.rollback import ConfigStore
+
+    store = ConfigStore(tmp_path / "o.db", outcome_limit=5)
+    version = store.register({"prompts": {"plan": "x"}})
+    for i in range(12):
+        store.record_outcome(version.id, ok=(i % 2 == 0), latency_s=0.1 * i)
+    assert store.outcome_count() == 5
+    window = store.window(version.id)
+    assert window["samples"] == 5
+    assert window["errors"] >= 1
+    store.close()
+
+
+def test_outcome_limit_zero_means_no_prune(tmp_path):
+    from agent_pipeline.rollback import ConfigStore
+
+    store = ConfigStore(tmp_path / "o.db", outcome_limit=0)
+    version = store.register({"prompts": {"plan": "x"}})
+    for _ in range(7):
+        store.record_outcome(version.id, ok=True, latency_s=0.2)
+    assert store.outcome_count() == 7
+    store.close()

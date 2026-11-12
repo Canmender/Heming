@@ -45,7 +45,11 @@ class Version:
 
 
 class ConfigStore:
-    def __init__(self, path: str | Path = ":memory:") -> None:
+    def __init__(self, path: str | Path = ":memory:", outcome_limit: int = 5_000) -> None:
+        # 每个 run 都会落一条 outcome，10 万次调用就是 10 万行：不封顶的话
+        # 这个库只增不减，磁盘和 window() 的读放大都跟着涨。窗口只看最近 50 条，
+        # 留 5000 条已经足够回滚判定，其余按 id 裁掉。
+        self.outcome_limit = max(0, int(outcome_limit))
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -144,7 +148,17 @@ class ConfigStore:
                 "INSERT INTO outcomes (version_id, ok, latency_s, created_at) VALUES (?,?,?,?)",
                 (version_id, 1 if ok else 0, float(latency_s), time.time()),
             )
+            if self.outcome_limit:
+                self._conn.execute(
+                    "DELETE FROM outcomes WHERE id NOT IN (SELECT id FROM outcomes ORDER BY id DESC LIMIT ?)",
+                    (self.outcome_limit,),
+                )
             self._conn.commit()
+
+    def outcome_count(self) -> int:
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) AS n FROM outcomes").fetchone()
+        return int(row["n"] if isinstance(row, sqlite3.Row) else row[0])
 
     def window(self, version_id: int, limit: int = 50) -> dict[str, Any]:
         with self._lock:

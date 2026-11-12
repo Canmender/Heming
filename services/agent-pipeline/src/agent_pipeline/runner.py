@@ -53,7 +53,7 @@ def _cmd_tune(args: argparse.Namespace) -> int:
     from .rollback import ConfigStore
 
     settings = Settings.from_env()
-    store = ConfigStore(settings.db_path)
+    store = ConfigStore(settings.db_path, outcome_limit=settings.outcome_limit)
     report = tune(
         log_path=args.log,
         out_path=args.out,

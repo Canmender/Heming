@@ -81,7 +81,7 @@ def build_runtime(
         max_documents=settings.max_documents,
         max_episode_age_days=settings.max_episode_age_days,
     )
-    config_store = config_store or ConfigStore(settings.db_path)
+    config_store = config_store or ConfigStore(settings.db_path, outcome_limit=settings.outcome_limit)
     registry = build_default_registry(
         allow_commands=os.environ.get("AGENT_PIPELINE_ALLOW_COMMANDS") == "1",
         memory=memory,

@@ -96,6 +96,7 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_MAX_EPISODES` | `5000` | 情景记忆上限（超限删最旧；0 = 不限制） |
 | `AGENT_MAX_DOCUMENTS` | `2000` | 知识库文档上限（超限删最旧并连带删块） |
 | `AGENT_MAX_EPISODE_AGE_DAYS` | `0` | 情景记忆按天数过期（0＝不按时间淘汰，只受条数上限约束） |
+| `AGENT_OUTCOME_LIMIT` | `5000` | 回滚判定用的 outcome 行数上限（窗口只看最近 50 条；0＝不裁） |
 | `AGENT_CANARY_RATIO` | `0.1` | 灰度比例（按 run_id 稳定分桶） |
 | `AGENT_MAX_CONCURRENCY` | `4` | 并发上限 |
 | `AGENT_ERROR_THRESHOLD` | `0.2` | 自动回滚错误率阈值 |
@@ -209,6 +210,8 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 - **run 历史有上限**：`AGENT_RUN_HISTORY_LIMIT`（默认 500）控制服务内存里保留多少个已结束 run；超出按完成顺序丢最旧，正在跑的 run 不动。`/health` 的 `runs_retained` 可以看当前占用。没有这一步时，每个请求都会把完整结果（含整份日志行）留在进程里，跑久了就是稳定泄漏。
 - **JSONL 日志会轮转**：`AGENT_LOG_MAX_BYTES`（默认 64MB）是单文件上限，超了整份改名为 `runs.jsonl.1`（只留一代）。10 万次调用 ≈ 10 万行，不轮转的话调优读日志、运维 `tail` 都会变慢。
 - **并发浸泡实测**：`scripts/soak.py --runs 20000 --concurrency 8` → **100,000 次模型调用、0 失败**、17.0 run/s、P50 471.65ms / P95 511.1ms、内存峰值 4.55MB / 结束 3.11MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。
+
+- **回滚库也有上限**：每个 run 落一条 outcome，`AGENT_OUTCOME_LIMIT`（默认 5000）按 id 裁旧的——窗口只看最近 50 条，留 5000 条足够判定，磁盘不会随调用量单调涨。
 
 ## 交付物自检
 
