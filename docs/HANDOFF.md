@@ -43,7 +43,7 @@
 - **截断提示的换行是真换行**（`lib/agentStream.ts` 第 936/944 行）：这两条文案早先用脚本补进文件时被过度转义成 `"\\n\\n…"`，TS 里是字面量反斜杠 + n，用户会在气泡里看到 `\n\n（回复被输出长度上限截断…` 而不是换行。已改回 `"\n\n…"`，并在 `agentStream.tools.test.ts` 的截断用例里加「必须含真换行、不含反斜杠」的断言防回归（全仓 `packages/**/*.ts*` 扫过，只此两处）。
 - **流水线有了桌面端客户端（默认不启用）**（`lib/pipeline/client.ts`）：`services/agent-pipeline` 之前只有 HTTP 协议、没有前端入口，接不接只能靠手写 fetch。新增薄客户端：提交→轮询→终态一次 `await`，`snake_case`→`camelCase`，429 退避重提一次，run 超时先 `POST /cancel` 再抛 `timeout`，`onPendingApproval` 接桌面端确认弹窗（服务端 404/409 说明这条审批已经不在，不再把整个 run 抛错）；429 按服务端 `Retry-After` 的秒数退避（以前忽略响应头、固定等 1 秒继续撞）。**默认不构造**——流水线要单独部署（地址/密钥/回退策略属产品决策），未部署不该让聊天链路超时。12 例测试。
 
-验证：`pnpm --filter @heming/web test` → **296 文件 / 4328 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 38 例全绿（含超时取消、连续超时回收、服务端请求回应）。
+验证：`pnpm --filter @heming/web test` → **297 文件 / 4333 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 38 例全绿（含超时取消、连续超时回收、服务端请求回应）。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
 ### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）
@@ -93,6 +93,8 @@
 - **部署产物用真 YAML 解析器校验**（`tests/test_deploy_yaml.py` 5 例）：以前 `test_packaging.py` 只用字符串断言「文件里写了什么」，缩进错一个空格也能过——但 Prometheus 起不来、compose 起不来。现在 `yaml.safe_load` 真解析 `prometheus.yml`、`alerts.yml`、`docker-compose.yml`，并校验 7 条告警都有 expr/severity/summary、工具失败率分子分母都带 status 过滤（不混 cached）、compose 的服务/端口/卷/prometheus 依赖齐全、Dockerfile HEALTHCHECK 指向 `/health`。
 
 - **RAG 在真实仓库文档上验证**：`agent-pipeline ingest docs --prefix repo/ --ext .md` → 202 个文件 / 4,659 个切片；查询「安装器通用外壳」「容器化部署 Prometheus 监控」都能命中文档原文并带 `repo/<文件>` 引用（`doc_id = 前缀 + 相对路径`）。**最终代码回归压测**：`soak.py --runs 4000 --concurrency 8 --tools --cancel-rate 0.1` → 3,651 次工具执行 / 349 次取消 / 21,972 次模型调用 / **0 失败** / 12.7 run/s / P50 680ms / P95 768ms / 内存峰值 5.75MB / episodes 稳定 5000（这是第 12–17 轮所有改动之后的代码）。
+
+- **跨语言联调测试**（`packages/web/src/lib/pipeline/live.test.ts`）：真正起 `agent_pipeline.runner serve` 子进程（上游换成本地假 OpenAI 服务），用 `createPipelineClient` 跑完一次任务——提交 → 轮询 → `status=ok`、`answer` 含模型结论、`stopReason`/`llmCalls`/`tokens` 都被正确读成 camelCase、`/health` 报得出工具清单。两边各自的单测都过，也可能字段名对不上（`stop_reason` vs `stopReason`），这条补的是「真进程 + 真 HTTP」那一层；本机没有 venv 时自动跳过，不让 CI 变红。web 测试数因此到 **297 文件 / 4333 例**。
 
 已知边界（下一轮可继续）：stdio 请求超时只发取消通知、单次不硬杀（连续 3 次才回收子进程，见 `RECYCLE_AFTER_TIMEOUTS`）；记忆有容量上限（超限先删低重要性、同重要性比新旧），时间过期要显式开 `AGENT_MAX_EPISODE_AGE_DAYS`（默认 0）；仍没有「按检索命中率反向淘汰」；工具审批的等待只在本进程内有效（`AGENT_APPROVAL_MODE=write` 时 run 线程阻塞等裁决，重启后待审批随线程消失，跨重启续跑要 LangGraph `interrupt` + checkpointer）；pipeline 与桌面端的实际对接（目前是独立服务 + 设计文档，未接进 ChatPage 的生成链路）；本机无 docker，容器文件未构建验证。知识库检索以词面为主（BM25+哈希向量），同义改写召回不如真正的 embedding 服务，中文短查询容易放大无关片段。
 

@@ -360,6 +360,10 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 `tests/test_e2e_serve.py` 真的用子进程起服务（`python -m agent_pipeline.runner serve`，与 Dockerfile 的 `CMD` 同一条路），上游模型换成本地桩 HTTP 服务，然后从外面走一遍：`/health` 起来 → `POST /v1/runs` 202 → 轮询到 `ok` → `/metrics` 里有 `pipeline_runs_total{status="ok"}` → `AGENT_LOG_PATH` 指的文件里确实落了 1 行 JSONL。再加上 `uv build --wheel` 产出的 wheel 里带 `entry_points.txt`（`agent-pipeline = agent_pipeline.runner:main`）与 16 个模块，容器里那套「装包 → 起进程 → 接请求」的路径就算被覆盖了；真正没覆盖的只有镜像层（基础镜像、卷挂载、非 root 用户）。
 
+联调有测试：`packages/web/src/lib/pipeline/live.test.ts` 会真起一个 `agent_pipeline.runner serve` 子进程
+（上游换成本地假 OpenAI 服务），用桌面端客户端跑完一次任务，断言 `status/answer/stopReason/llmCalls/tokens`
+与 `/health` 字段都对得上。两边各有单测也可能字段名对不上，这条补的是「真进程 + 真 HTTP」那一层。
+
 ## 桌面端接入（可选，默认不启用）
 
 和鸣的渲染进程里有一个薄客户端：`packages/web/src/lib/pipeline/client.ts`。它遵守同一套协议，把「提交 → 轮询 → 终态」收敛成一次 `await`，并把服务端的 snake_case 转成前端习惯的 camelCase。
