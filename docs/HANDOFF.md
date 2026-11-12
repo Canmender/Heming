@@ -41,8 +41,9 @@
 
 - **历史里的图片只挂 user 行、同文重发不再重复**（`components/ChatPage.tsx` 的 `fetchHistory`）：图片内容片原先按「任意带 file 的行」挂，助手行一旦同时有 `tool_calls`，`content` 变成数组会被供应商当非法请求拒掉；现在只挂 user 行。去重原先比 `content`，带附件时 content 拼了文件块 → 永远不相等 → 失败重发时当前这轮在提示词里出现两遍；改为比正文（`payload.text`）。
 - **截断提示的换行是真换行**（`lib/agentStream.ts` 第 936/944 行）：这两条文案早先用脚本补进文件时被过度转义成 `"\\n\\n…"`，TS 里是字面量反斜杠 + n，用户会在气泡里看到 `\n\n（回复被输出长度上限截断…` 而不是换行。已改回 `"\n\n…"`，并在 `agentStream.tools.test.ts` 的截断用例里加「必须含真换行、不含反斜杠」的断言防回归（全仓 `packages/**/*.ts*` 扫过，只此两处）。
+- **流水线有了桌面端客户端（默认不启用）**（`lib/pipeline/client.ts`）：`services/agent-pipeline` 之前只有 HTTP 协议、没有前端入口，接不接只能靠手写 fetch。新增薄客户端：提交→轮询→终态一次 `await`，`snake_case`→`camelCase`，429 退避重提一次，run 超时先 `POST /cancel` 再抛 `timeout`，`onPendingApproval` 接桌面端确认弹窗。**默认不构造**——流水线要单独部署（地址/密钥/回退策略属产品决策），未部署不该让聊天链路超时。12 例测试。
 
-验证：`pnpm --filter @heming/web test` → **295 文件 / 4316 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 38 例全绿（含超时取消、连续超时回收、服务端请求回应）。
+验证：`pnpm --filter @heming/web test` → **296 文件 / 4328 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 38 例全绿（含超时取消、连续超时回收、服务端请求回应）。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
 ### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）

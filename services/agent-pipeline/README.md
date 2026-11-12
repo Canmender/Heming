@@ -276,6 +276,30 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 `tests/test_e2e_serve.py` 真的用子进程起服务（`python -m agent_pipeline.runner serve`，与 Dockerfile 的 `CMD` 同一条路），上游模型换成本地桩 HTTP 服务，然后从外面走一遍：`/health` 起来 → `POST /v1/runs` 202 → 轮询到 `ok` → `/metrics` 里有 `pipeline_runs_total{status="ok"}` → `AGENT_LOG_PATH` 指的文件里确实落了 1 行 JSONL。再加上 `uv build --wheel` 产出的 wheel 里带 `entry_points.txt`（`agent-pipeline = agent_pipeline.runner:main`）与 16 个模块，容器里那套「装包 → 起进程 → 接请求」的路径就算被覆盖了；真正没覆盖的只有镜像层（基础镜像、卷挂载、非 root 用户）。
 
+## 桌面端接入（可选，默认不启用）
+
+和鸣的渲染进程里有一个薄客户端：`packages/web/src/lib/pipeline/client.ts`。它遵守同一套协议，把「提交 → 轮询 → 终态」收敛成一次 `await`，并把服务端的 snake_case 转成前端习惯的 camelCase。
+
+```ts
+import { createPipelineClient } from "../lib/pipeline/client.js";
+
+const client = createPipelineClient({
+  baseUrl: "http://127.0.0.1:8000",
+  apiKey: process.env.AGENT_PIPELINE_API_KEY,  // 与服务端 AGENT_PIPELINE_API_KEY 同一个值
+  onPendingApproval: async (approval) => {
+    // 这里接桌面端自己的确认弹窗（与 agentStream 的 HITL 是两套：这套问的是流水线里的工具）
+    return window.confirm(`允许流水线执行 ${approval.tool}？`);
+  },
+});
+
+const run = await client.run({ goal: "把安装器补成通用外壳", mode: "react" }, { signal });
+run.answer; run.citations; run.coverage; run.stopReason;
+```
+
+- **默认不接**：界面不会自动连它。流水线要单独部署（地址、密钥、回退策略都得定），未部署时不该让聊天链路出现超时；接不接、接到哪个地址，是产品决策，不是代码默认值能替用户拍的板。
+- 客户端自己的口径：并发满（429）按退避**重提一次**再报错；run 超过 `runTimeoutMs`（默认 30 分钟）会先 `POST /cancel` 再抛 `timeout`，不让服务端继续白烧模型；`signal` 中止立刻停轮询。
+- 12 个用例在 `packages/web/src/lib/pipeline/client.test.ts`，覆盖 429 重提、非 2xx 带 `detail`、连不上、用户中止、run 超时（含请求取消）、待审批回填、`normalizeRun` 的字段容错。
+
 ## 测试与覆盖率门槛
 
 ```bash
