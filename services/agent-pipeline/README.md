@@ -439,7 +439,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **251 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **252 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

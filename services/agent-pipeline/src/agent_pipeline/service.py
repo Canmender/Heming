@@ -50,7 +50,9 @@ class RunRequest(BaseModel):
 
 
 class TuneRequest(BaseModel):
-    since_hours: int = 24
+    # 负数/0 会算出「未来」的窗口 → 读到 0 行、报告 0 个失败样本，看起来像「系统很健康」；
+    # 上限 30 天是为了不让一次调用扫完全部历史日志（读放大）。
+    since_hours: int = Field(default=24, ge=1, le=720)
 
 
 class ApproveRequest(BaseModel):

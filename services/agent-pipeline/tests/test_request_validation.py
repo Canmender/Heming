@@ -54,3 +54,13 @@ def test_blank_goal_is_rejected(runtime_factory) -> None:
     with _client(runtime_factory) as client:
         assert client.post("/v1/runs", json={"goal": ""}).status_code == 422
         assert client.post("/v1/runs", json={"goal": "长" * 4001}).status_code == 422
+
+def test_tune_window_is_bounded(runtime_factory, tmp_path) -> None:
+    """negative/0 的 since_hours 会算出「未来」窗口 → 报告 0 个失败样本，看起来像很健康。"""
+    log = tmp_path / "runs.jsonl"
+    log.write_text("", encoding="utf-8")
+    with _client(runtime_factory) as client:
+        for bad in (-1, 0, 721):
+            response = client.post("/v1/tune", json={"since_hours": bad})
+            assert response.status_code == 422, (bad, response.status_code, response.text)
+        assert client.post("/v1/tune", json={"since_hours": 1}).status_code == 200
