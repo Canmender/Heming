@@ -286,6 +286,16 @@ def plan_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _cancel_requested(runtime: Runtime, state: dict[str, Any]) -> bool:
+    """用户是否已经取消了这个 run（协作式标记，只读不阻塞）。"""
+    if runtime.cancel is None:
+        return False
+    try:
+        return bool(runtime.cancel(str(state.get("run_id", ""))))
+    except Exception:  # noqa: BLE001 - 取消标记读失败不能把 run 弄崩
+        return False
+
+
 def execute_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     if not _budget_left(state, runtime):
         return {**state, "status": "budget"}
@@ -360,7 +370,28 @@ def execute_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     # tools_allowed 是「本次允许用哪些工具」的硬约束：模型仍可能凭上下文发出别的名字
     # （尤其是上一次对话里见过的写工具），所以除了下发 schema 时过滤，这里再挡一次执行。
     allowed_names = set(task.tools_allowed) if task.tools_allowed else known
-    for call in calls:
+    cancelled = False
+    for position, call in enumerate(calls):
+        if _cancel_requested(runtime, state):
+            # 用户在工具轮中途点了取消：每次工具调用可能要几十秒（http_get/run_command），
+            # 以前要等整个节点跑完才在下一个节点边界收口。现在立刻停手，但把没跑的调用
+            # 逐个记成观测，下一轮/日志里能看出「取消时做到哪一步」。
+            for rest in calls[position:]:
+                rest_name = str(rest.get("name") or "（未命名工具）")
+                rest_id = str(
+                    rest.get("id")
+                    or f"call_cancelled_{hashlib.sha1((rest_name + str(position)).encode()).hexdigest()[:8]}"
+                )
+                note = Observation(
+                    call_id=rest_id,
+                    tool=rest_name,
+                    ok=False,
+                    error="这次调用没有执行：用户取消了本次运行。",
+                )
+                observations.append(note)
+                new_observations.append(note)
+            cancelled = True
+            break
         name = str(call.get("name") or "")
         raw_arguments = call.get("arguments")
         bad_arguments: str | None = None
@@ -427,13 +458,17 @@ def execute_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
 
     step.status = "running"
     plan[index] = step
-    return {
+    updates: dict[str, Any] = {
         **state,
         "plan": [s.to_dict() for s in plan],
         "observations": [o.to_dict() for o in observations],
         "step_tool_calls": int(state.get("step_tool_calls", 0)) + len(new_observations),
         "last_had_tool_calls": bool(new_observations),
     }
+    if cancelled:
+        # 直接收口成 aborted：不必再等 route/下一个节点才发现取消，省掉一次模型调用。
+        updates.update(status="aborted", stop_reason="cancelled")
+    return updates
 
 
 def reflect_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:

@@ -40,6 +40,10 @@ def test_log_failure_is_counted_and_exposed(runtime_factory, tmp_path) -> None:
     assert health["log_failures"] >= 1
     assert health["log_last_error"]
 
+    # 光有 /health 字段没人盯；必须进 Prometheus 指标才能告警（PipelineLogWriteFailing）。
+    exposed = runtime.metrics.expose().decode("utf-8")
+    assert "pipeline_log_failures_total" in exposed
+
 
 def test_healthy_log_path_reports_zero_failures(runtime_factory, tmp_path) -> None:
     log = tmp_path / "runs.jsonl"

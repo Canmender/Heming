@@ -57,6 +57,11 @@ class Metrics:
             "最近一次调优注册的灰度版本号（0 = 没注册）",
             registry=self.registry,
         )
+        # 日志写失败：run 结果照常返回，但调优/回滚窗口读的是这份日志，
+        # 静默失败会让人拿着空日志出「0 个失败样本」的报告——要能告警。
+        self.log_failures = Counter(
+            "pipeline_log_failures_total", "run 日志写入失败次数", registry=self.registry
+        )
 
     # ---- 记录 -------------------------------------------------------------
 
@@ -76,6 +81,9 @@ class Metrics:
 
     def set_coverage(self, value: float) -> None:
         self.coverage.set(value)
+
+    def record_log_failure(self) -> None:
+        self.log_failures.inc()
 
     def record_rollback(self, reason: str) -> None:
         self.rollbacks.labels(reason=reason).inc()

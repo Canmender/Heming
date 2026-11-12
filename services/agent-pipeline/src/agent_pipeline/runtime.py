@@ -261,5 +261,10 @@ def _write_log(runtime: Runtime, row: dict[str, Any]) -> None:
         # 静默失败会让人拿着空日志出「0 个失败样本」的报告。
         runtime.log_failures += 1
         runtime.log_last_error = f"{type(exc).__name__}: {exc}"
+        # 计数进指标，才能被 Prometheus 告警；只有 /health 的话，没人会去盯它。
+        try:
+            runtime.metrics.record_log_failure()
+        except Exception:  # noqa: BLE001 - 埋点失败绝不能影响 run
+            pass
         if runtime.log_failures == 1:
             print(f"[agent-pipeline] 警告：run 日志写不进去（{runtime.log_last_error}），调优会读不到数据", file=sys.stderr)

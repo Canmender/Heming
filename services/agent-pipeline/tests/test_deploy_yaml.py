@@ -39,7 +39,7 @@ def test_alert_rules_parse_and_are_well_formed() -> None:
     groups = data["groups"]
     assert isinstance(groups, list) and groups
     rules = [rule for group in groups for rule in group["rules"]]
-    assert len(rules) >= 7, len(rules)
+    assert len(rules) >= 9, len(rules)
 
     names = {rule["alert"] for rule in rules}
     for expected in (
@@ -49,6 +49,8 @@ def test_alert_rules_parse_and_are_well_formed() -> None:
         "PipelineRollbackSpike",
         "AgentPipelineDown",
         "CoverageBelowTarget",
+        "PipelineLogWriteFailing",
+        "PipelineTuneFailing",
         "PipelineNoCompletedRuns",
     ):
         assert expected in names, f"缺少告警 {expected}"

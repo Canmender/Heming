@@ -134,7 +134,7 @@ curl -s http://localhost:8000/v1/runs \
 
 - 已完成/失败的 run 再取消返回 409；不存在的 run 返回 404；
 - **卡在等审批会被立刻放出来**：取消同时把该 run 的待审批全部按拒绝收口，执行线程不再干等 `AGENT_APPROVAL_TIMEOUT_S`（默认 300s）。否则用户点了取消，界面两三分钟没反应，看起来就是「取消坏了」；run 正常结束时也会清掉残留审批，`/health` 的 `pending_approvals` 不会只增不减。`tests/test_cancel_approval.py` 2 例钉住；
-- 取消是协作式的：卡在**工具调用**里的 run 要等这次工具超时（`AGENT_TOOL_TIMEOUT_S`）才走到下一个边界（工具线程没法安全打断）；
+- 取消是协作式的：正在跑的那一次工具调用不会被硬杀（`ToolRuntime` 的线程池没法安全打断），但**工具轮里剩下的调用不再启动**——每次 `http_get`/`run_command` 可能要几十秒，以前用户点了取消要等整轮跑完才收口。现在执行节点在每次调用前查取消标记，剩下的调用逐个记成 `ok=False` 观测（「这次调用没有执行：用户取消了本次运行。」），并直接以 `aborted` 收口，省掉一次模型调用；`tests/test_cancel_tool_round.py` 1 例钉住「第一个跑、后两个不跑、有痕迹」；
 - `tests/test_cancel.py` 4 例覆盖（跑到一半取消、未知 run、已结束 run、重复取消）。
 
 **四路叠加压测**（工具 + 审批 + 中途取消 + 8 线程并发）：
@@ -305,7 +305,7 @@ curl -s http://localhost:8000/v1/tools -H "Authorization: Bearer $AGENT_SERVICE_
 
 ## 可观测与回滚
 
-- 指标：`pipeline_runs_total{status}`、`pipeline_run_duration_seconds`、`pipeline_node_duration_seconds{node}`、`pipeline_tool_calls_total{tool,status}`（**`tool` 标签有界**：已注册工具名最多 32 个，其余归 `other`；模型幻觉出来的不存在工具归 `unknown`——否则模型每次编个新名字就是一个新时序，Prometheus 会被撑爆。`status` 里 `cached` 表示幂等缓存命中、没真的执行，`ok`/`error` 才是真实执行；工具失败率告警的分母只取 `ok|error`，否则缓存命中会把失败率稀释成不告警）、`pipeline_llm_tokens_total{kind}`、`pipeline_coverage_ratio`、`pipeline_rollback_total{reason}`、`pipeline_config_version`。
+- 指标：`pipeline_runs_total{status}`、`pipeline_run_duration_seconds`、`pipeline_node_duration_seconds{node}`、`pipeline_tool_calls_total{tool,status}`（**`tool` 标签有界**：已注册工具名最多 32 个，其余归 `other`；模型幻觉出来的不存在工具归 `unknown`——否则模型每次编个新名字就是一个新时序，Prometheus 会被撑爆。`status` 里 `cached` 表示幂等缓存命中、没真的执行，`ok`/`error` 才是真实执行；工具失败率告警的分母只取 `ok|error`，否则缓存命中会把失败率稀释成不告警）、`pipeline_llm_tokens_total{kind}`、`pipeline_coverage_ratio`、`pipeline_rollback_total{reason}`、`pipeline_config_version`、`pipeline_tune_runs_total{status}`、`pipeline_log_failures_total`（run 日志写失败次数——日志写不进去时 `tune` 只会读到空文件并出「0 个失败样本」的报告，这条必须能告警）。
 - 每次 run 结束写一行 JSON 到 `runs.jsonl`，字段含 `status/stop_reason/llm_calls/tokens/coverage/replans/steps_executed/adversarial_round/adversarial_passed/plan/observations`——`tune` 和回滚窗口都只读这份日志。
 - 灰度：`/v1/tune` 产出候选配置 → 注册为 canary（按 `run_id` 哈希分流）→ 窗口内错误率或 P95 超阈值自动回滚到 active（`ConfigStore.maybe_rollback`）。
 - **这条链路有 HTTP 闭环测试**（`tests/test_auto_rollback_service.py`）：真服务里灰度版本连续失败 → 自动回滚 → `GET /v1/config` 的 active 换回稳定版、canary 变 `archived`、`/metrics` 出现 `pipeline_rollback_total{reason="error_rate"}`；样本数不够时不动（不因为一次上游抖动就判死刑）。
@@ -323,6 +323,7 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 - **滚动更新**：`docker compose up --build` 时旧容器收到 SIGTERM，uvicorn 走 lifespan 关停——`AGENT_SHUTDOWN_GRACE_S` 内把在跑的 run 收口成 `aborted`/`error` 再退出，不会留下「日志里有半截、客户端只看到断连」的 run。
 - `docker-compose.yml`：`agent-pipeline` + `prometheus`，数据卷持久化 `runs.jsonl` 与 SQLite。
 - `prometheus/prometheus.yml`、`prometheus/alerts.yml`：错误率 > 20%、P95 > 120s、单工具失败率 > 30%、发生自动回滚、服务掉线、覆盖率 < 0.9、在线但 30 分钟没有 run 结束（共七条）。
+- **告警一共 9 条**：错误率、P95 延迟、工具失败率、自动回滚、长时间无 run、服务下线、覆盖率不达标，外加本轮补的两条「不该静默」告警——`PipelineLogWriteFailing`（run 日志写不进去，10 分钟窗口）与 `PipelineTuneFailing`（每日调优 6 小时内有失败）。
 - **零样本兜底**：带标签的 counter 在第一次自增之前不会出现在 `/metrics` 里（Prometheus 抓到的就是 no data）。所以「工具失败率」「自动回滚」两条告警的表达式外层都套了 `or vector(0)`——没有流量时是 0 而不是空，避免开了 nodata 处理的告警误报或哑掉。`tests/test_metrics_scrape.py` 3 例用 `prometheus_client.parser` 真解析 `/metrics` 文本（格式坏了 Prometheus 就抓不动，字符串包含检查看不出来），并断言零工具流量时确实没有 tool 样本、告警文件里有兜底。
 
 > 本机（Windows 开发机）没有 docker，这份容器配置只写不可本地构建验证；语义已按 compose v2 写。
@@ -435,7 +436,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **245 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **246 passed / 覆盖率 95.2%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

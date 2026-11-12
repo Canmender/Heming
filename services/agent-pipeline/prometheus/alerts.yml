@@ -77,6 +77,27 @@ groups:
           summary: "agent-pipeline 抓取失败"
           description: "容器可能已退出：docker compose ps / docker compose logs agent-pipeline。"
 
+      # run 日志写失败：run 照常返回，但 tune/回滚窗口读的就是这份日志。
+      # 静默失败会让人拿着空日志出「0 个失败样本」的报告，必须让人知道。
+      - alert: PipelineLogWriteFailing
+        expr: (increase(pipeline_log_failures_total[10m]) or vector(0)) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "10 分钟内 run 日志写入失败 {{ $value }} 次"
+          description: "看 /health 的 log_last_error（权限/磁盘/路径变了）；不修的话每日调优读不到数据，只会出一份空报告。"
+
+      # 每日调优连续失败：候选生成/评测有 bug 时，流水线不会自己变好，也不会告警。
+      - alert: PipelineTuneFailing
+        expr: (increase(pipeline_tune_runs_total{status="error"}[6h]) or vector(0)) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "每日调优最近 6 小时有失败"
+          description: "看 /health 的 tuner.last_error 与调优报告；日志格式变了/评测器起不来都会落到这里。"
+
       # 覆盖率长期不达标（对抗模式的核心目标）。
       - alert: CoverageBelowTarget
         expr: pipeline_coverage_ratio > 0 and pipeline_coverage_ratio < 0.9
