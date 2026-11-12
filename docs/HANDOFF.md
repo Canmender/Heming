@@ -27,6 +27,7 @@
 - **超时不再是写死的 20s/30s**（`lib/mcp/{types,httpClient,stdioClient}.ts`、`packages/desktop/mcp-stdio.js`）：`McpServerConfig.timeoutMs` 可按服务配置（夹在 [2s, 600s]），界面在添加服务时填「单次超时（秒）」，空＝缺省；`store` 的 `coerceServer` 白名单必须显式带过该字段，否则重开应用就丢。
 - **stdio 超时会按协议发 `notifications/cancelled`**（`mcp-stdio.js`）：以前超时只是本地 reject，子进程里工具照跑、副作用照发生。现在先通知服务端取消，文案明说「若它不理会，子进程里可能仍在执行」——不假装已经停了。
 - **连续超时不再无限白等**（`mcp-stdio.js` 的 `RECYCLE_AFTER_TIMEOUTS`）：单个请求超时只发取消通知、不硬杀（正在收尾的工具不该被误杀）；但同一个子进程连续 3 次一条消息都不回，就认定它主循环已假死，关 stdin 并回收整棵进程树，下次调用重新拉起——否则之后每次工具调用都要白等满一个超时。
+- **用户中断会真的取消 stdio 工具**（`packages/desktop/{mcp-stdio,preload,main}.js`、`lib/mcp/stdioClient.ts`）：以前渲染层 abort 只是「我方不再等」，主进程里的子进程仍把这次调用跑完（弹窗关了、副作用照旧）。现在渲染层给每条请求分配 `requestId`，中断时走新增的 `mcp:stdio:cancel`：主进程按规范发 `notifications/cancelled`、把该条 promise 以「已取消」立刻拒绝，进程保留（同一服务上别的调用还在跑）；没有 `cancel` 的老版本桌面端自动退回旧文案「子进程可能仍在运行」，不假装已经停了。
 - **服务端发起的请求会被明确拒绝**（`mcp-stdio.js` 的 `answerServerMessage`）：原来带 `method` 的消息会被当成「配不上的响应」直接丢掉，服务端（roots/list、sampling/createMessage）一直等 → 表现为「工具调用莫名超时」。现在 `ping` 回 `{}`，其余按 JSON-RPC 回 **-32601**，并记一行日志。
 - **未知工具会给出近邻名字**（`lib/mcp/bridge.ts` 的 `nearestToolNames`）：模型把工具名记岔时只回「未知工具 x」等于让它再猜一轮；现在附「相近的有：…（共 N 个可用工具）」，编辑距离归一 <0.5 的不提。
 - **确认弹窗里 MCP 工具不再一律叫「外部工具」**（`lib/hitl/classify.ts` 的 `displayNameOf`）：`服务__工具` 显示成「服务 · 工具」，用户能看懂自己正要允许什么。
@@ -43,7 +44,7 @@
 - **截断提示的换行是真换行**（`lib/agentStream.ts` 第 936/944 行）：这两条文案早先用脚本补进文件时被过度转义成 `"\\n\\n…"`，TS 里是字面量反斜杠 + n，用户会在气泡里看到 `\n\n（回复被输出长度上限截断…` 而不是换行。已改回 `"\n\n…"`，并在 `agentStream.tools.test.ts` 的截断用例里加「必须含真换行、不含反斜杠」的断言防回归（全仓 `packages/**/*.ts*` 扫过，只此两处）。
 - **流水线有了桌面端客户端（默认不启用）**（`lib/pipeline/client.ts`）：`services/agent-pipeline` 之前只有 HTTP 协议、没有前端入口，接不接只能靠手写 fetch。新增薄客户端：提交→轮询→终态一次 `await`，`snake_case`→`camelCase`，429 退避重提一次，run 超时先 `POST /cancel` 再抛 `timeout`，`onPendingApproval` 接桌面端确认弹窗（服务端 404/409 说明这条审批已经不在，不再把整个 run 抛错）；429 按服务端 `Retry-After` 的秒数退避（以前忽略响应头、固定等 1 秒继续撞）。**默认不构造**——流水线要单独部署（地址/密钥/回退策略属产品决策），未部署不该让聊天链路超时。12 例测试。
 
-验证：`pnpm --filter @heming/web test` → **297 文件 / 4333 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 38 例全绿（含超时取消、连续超时回收、服务端请求回应）。
+验证：`pnpm --filter @heming/web test` → **297 文件 / 4335 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
 ### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）

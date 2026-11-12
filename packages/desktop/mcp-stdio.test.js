@@ -159,6 +159,46 @@ test("超时会发 notifications/cancelled，并在文案里说明子进程可�
   assert.match(cancelled.params.reason, /超时/);
 });
 
+test("用户中断：取消在途请求（发通知 + 立刻拒绝），进程留着给别的调用用", async () => {
+  const { child, writes } = fakeChild();
+  const bridge = makeBridge({ spawn: () => child, timeoutMs: 5_000 });
+
+  const pending = bridge.request("s1", { command: "x" }, "tools/call", { name: "slow" }, { requestId: 42 });
+  assert.equal(JSON.parse(writes[0].trim()).id, 42, "渲染层指定的 id 用作 JSON-RPC id");
+  assert.equal(bridge.cancel("s1", 42), true);
+  await assert.rejects(pending, /已取消/);
+
+  const cancelled = writes
+    .map((line) => JSON.parse(line.trim()))
+    .find((msg) => msg.method === "notifications/cancelled");
+  assert.ok(cancelled, "应当发出取消通知（服务端据此中止）");
+  assert.equal(cancelled.params.requestId, 42);
+  assert.equal(cancelled.params.reason, "用户中断");
+  assert.equal(child.stdin.ended, false, "只取消这一条，不杀进程");
+  assert.equal(bridge.cancel("s1", 42), false, "同一条不能取消两次");
+  assert.equal(bridge.cancel("s1", 999), false, "没有这条在途请求");
+
+  // 进程还在，下一条请求照常走，且 id 不会撞回 42
+  const next = bridge.request("s1", { command: "x" }, "tools/list", {});
+  const sent = JSON.parse(writes[writes.length - 1].trim());
+  assert.ok(sent.id > 42, "自增 id 要跳过渲染层指定的那些");
+  reply(child, { jsonrpc: "2.0", id: sent.id, result: { tools: [] } });
+  assert.deepEqual(await next, { tools: [] });
+});
+
+test("没有在途请求时取消不影响进程；取消后迟到的响应被丢弃", async () => {
+  const { child } = fakeChild();
+  const bridge = makeBridge({ spawn: () => child, timeoutMs: 5_000 });
+
+  assert.equal(bridge.cancel("s1", 1), false, "进程还没起来");
+  const pending = bridge.request("s1", { command: "x" }, "tools/call", {}, { requestId: 7 });
+  bridge.cancel("s1", 7);
+  await assert.rejects(pending, /已取消/);
+  // 服务端不理会取消、照样算出了结果：我们没有 waiter，不能崩
+  reply(child, { jsonrpc: "2.0", id: 7, result: { content: [] } });
+  assert.equal(bridge.running().length, 1);
+});
+
 test("连续超时到上限 → 回收该进程，下次调用重新拉起", async () => {
   const kids = [];
   const bridge = makeBridge({

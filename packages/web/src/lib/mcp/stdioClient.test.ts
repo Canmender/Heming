@@ -99,6 +99,35 @@ describe("stdio 客户端", () => {
     expect(config).not.toHaveProperty("timeoutMs");
   });
 
+  it("用户中断：带着 requestId 调桥的 cancel，并立刻以「已中断」拒绝", async () => {
+    const bridge = installBridge();
+    (bridge as unknown as { cancel: Mock }).cancel = vi.fn(async () => true);
+    // 永不 resolve：模拟服务端在跑长任务
+    bridge.request.mockImplementation(() => new Promise(() => undefined));
+    const client = createStdioMcpClient(SERVER);
+    const controller = new AbortController();
+    const pending = client.callTool("slow", {}, { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const requestId = bridge.request.mock.calls[0][4] as number;
+    expect(typeof requestId).toBe("number");
+    controller.abort();
+    await expect(pending).rejects.toThrow(/已通知服务端中止/);
+    expect((bridge as unknown as { cancel: Mock }).cancel).toHaveBeenCalledWith("s1", requestId);
+  });
+
+  it("老版本桌面端没有 cancel：中断仍然收口，但文案说明子进程可能还在跑", async () => {
+    const bridge = installBridge();
+    bridge.request.mockImplementation(() => new Promise(() => undefined));
+    const client = createStdioMcpClient(SERVER);
+    const controller = new AbortController();
+    const pending = client.callTool("slow", {}, { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    controller.abort();
+    await expect(pending).rejects.toThrow(/子进程可能仍在运行/);
+  });
+
   it("缺命令直接抛错（不把空命令交给主进程）", () => {
     installBridge();
     expect(() => createStdioMcpClient({ ...SERVER, command: "" })).toThrow(/启动命令/);

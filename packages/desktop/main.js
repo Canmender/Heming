@@ -150,6 +150,7 @@ const TRUSTED_CHANNELS = [
   "notify:message",
   "workflow:http",
   "mcp:stdio:request",
+  "mcp:stdio:cancel",
   "mcp:stdio:stop",
   "runtime:probe",
   // web 模块体系（d.131）已下线：模块页/模块包全部改由插件体系承担，
@@ -1073,16 +1074,27 @@ if (!gotLock) {
   };
 
   secureIpc.handle("mcp:stdio:request", async (_event, payload) => {
-    const { serverId, config, method, params } = payload || {};
+    const { serverId, config, method, params, requestId } = payload || {};
     if (typeof serverId !== "string" || !serverId) throw new Error("缺少 serverId");
     if (typeof method !== "string" || !method) throw new Error("缺少 method");
     const fresh = !mcpStdio.running().includes(serverId);
     if (fresh && method !== "initialize") await ensureStdioReady(serverId, config);
-    const result = await mcpStdio.request(serverId, config, method, params);
+    const result = await mcpStdio.request(serverId, config, method, params, {
+      ...(Number.isInteger(requestId) && requestId > 0 ? { requestId } : {}),
+    });
     if (fresh && method === "initialize") {
       mcpStdio.notify(serverId, config, "notifications/initialized");
     }
     return result;
+  });
+
+  // 用户点「中断」：只取消这一条在途请求（发 notifications/cancelled、立刻拒绝），
+  // 不杀进程——同一服务上别的调用可能还在跑。
+  secureIpc.handle("mcp:stdio:cancel", (_event, payload) => {
+    const { serverId, requestId } = payload || {};
+    if (typeof serverId !== "string" || !serverId) throw new Error("缺少 serverId");
+    if (!Number.isInteger(requestId) || requestId <= 0) throw new Error("缺少 requestId");
+    return mcpStdio.cancel(serverId, requestId);
   });
 
   secureIpc.handle("mcp:stdio:stop", (_event, serverId) => mcpStdio.stop(String(serverId)));

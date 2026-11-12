@@ -343,6 +343,7 @@ test("main.js：受信通道清单覆盖能力型 IPC，且经 guardIpc 按主�
     "secret:decryptAsync",
     "notify:message",
     "mcp:stdio:request",
+    "mcp:stdio:cancel",
     "update:install",
     "infohub:start",
   ]) {

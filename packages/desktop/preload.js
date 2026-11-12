@@ -46,9 +46,16 @@ contextBridge.exposeInMainWorld("__mcp_stdio", {
    * @param {{command: string, args?: string[]}} config 首次拉起进程用的启动信息
    * @param {string} method JSON-RPC 方法名
    * @param {unknown} params 参数
+   * @param {number} [requestId] 渲染层指定的请求 id（取消时要用同一个）
    */
-  request: (serverId, config, method, params) =>
-    ipcRenderer.invoke("mcp:stdio:request", { serverId, config, method, params }),
+  request: (serverId, config, method, params, requestId) =>
+    ipcRenderer.invoke("mcp:stdio:request", { serverId, config, method, params, requestId }),
+  /**
+   * 取消一条在途请求（用户点了「中断」）：主进程发 `notifications/cancelled`
+   * 并立刻让对应 promise 以「已取消」拒绝，不杀子进程。
+   */
+  cancel: (serverId, requestId) =>
+    ipcRenderer.invoke("mcp:stdio:cancel", { serverId, requestId }),
   /** 停止并回收某服务的子进程。 */
   stop: (serverId) => ipcRenderer.invoke("mcp:stdio:stop", serverId),
 });

@@ -15,7 +15,10 @@ export interface McpStdioBridgeApi {
     config: { command: string; args?: string[]; timeoutMs?: number },
     method: string,
     params?: unknown,
+    requestId?: number,
   ) => Promise<unknown>;
+  /** 取消一条在途请求（老版本桌面端没有这个能力，所以是可选的）。 */
+  cancel?: (serverId: string, requestId: number) => Promise<boolean>;
   stop: (serverId: string) => Promise<boolean>;
 }
 
@@ -35,6 +38,7 @@ export function createStdioMcpClient(server: McpServerConfig): HttpMcpClient {
   if (!bridge) throw new Error("stdio 传输需要桌面端运行（浏览器不支持拉起本地进程）");
   const command = server.command?.trim();
   if (!command) throw new Error("stdio 服务缺少启动命令");
+  const serverId = server.id;
   // 超时随配置一并发给主进程：stdio 侧的超时在主进程计时（见 mcp-stdio.js）。
   const config = {
     command,
@@ -42,19 +46,29 @@ export function createStdioMcpClient(server: McpServerConfig): HttpMcpClient {
     ...(typeof server.timeoutMs === "number" ? { timeoutMs: server.timeoutMs } : {}),
   };
   let sessionId: string | null = null;
+  /** 请求 id 由渲染层分配：用户中断时要用同一个 id 通知主进程取消。 */
+  let nextRequestId = 1;
 
   const call = async <T>(method: string, params?: unknown, signal?: AbortSignal): Promise<T> => {
-    const request = bridge.request(server.id, config, method, params);
+    const requestId = nextRequestId++;
+    const request = bridge.request(serverId, config, method, params, requestId);
     if (!signal) return ((await request) ?? {}) as T;
     if (signal.aborted) throw new Error("工具调用已中断");
     /**
-     * stdio 侧的中断只能「**我方不再等**」：IPC 没有取消语义，主进程里的子进程
-     * 仍会把这次调用跑完。所以文案必须说清「子进程可能仍在运行」——
-     * 否则用户以为已经停了，实际副作用照旧发生。
+     * 中断要真的传到主进程：`cancel` 会让它发 `notifications/cancelled` 并按
+     * 「已取消」拒绝这条调用，我们就能立刻拿到确定结果而不是干等超时。
+     * 老版本桌面端没有 `cancel`（预加载脚本是随应用版本走的），那时只能
+     * 「我方不再等」——文案必须说清「子进程可能仍在运行」。
      */
     return await new Promise<T>((resolve, reject) => {
       const onAbort = () => {
         signal.removeEventListener("abort", onAbort);
+        if (bridge.cancel) {
+          // 发出去就行：真正拒掉这条请求的是主进程那边，本地立刻收口给用户看。
+          void bridge.cancel(serverId, requestId).catch(() => undefined);
+          reject(new Error("工具调用已中断（已通知服务端中止）"));
+          return;
+        }
         reject(new Error("工具调用已中断（子进程可能仍在运行）"));
       };
       signal.addEventListener("abort", onAbort, { once: true });

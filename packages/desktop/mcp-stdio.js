@@ -382,11 +382,18 @@ function createStdioBridge({
   /**
    * 发一条 JSON-RPC 请求并等响应。
    * `config` 只在首次调用时用于拉起进程；已存在则忽略。
+   *
+   * `options.requestId` 由渲染层指定时就用它当 JSON-RPC id：用户点「中断」后
+   * 渲染层要靠这个 id 调 `cancel()`（见下），自增 id 只留在主进程里的话，
+   * 渲染层根本不知道要取消哪一条。
    */
-  function request(serverId, config, method, params) {
+  function request(serverId, config, method, params, options) {
     let entry = servers.get(serverId);
     if (!entry) entry = start(serverId, config);
-    const id = entry.nextId++;
+    const supplied = options?.requestId;
+    const id =
+      Number.isInteger(supplied) && supplied > 0 ? supplied : entry.nextId++;
+    if (id >= entry.nextId) entry.nextId = id + 1;
     const requestTimeout = clampTimeout(config?.timeoutMs, timeoutMs);
     const message = { jsonrpc: "2.0", id, method };
     if (params !== undefined) message.params = params;
@@ -439,6 +446,41 @@ function createStdioBridge({
         reject(new Error(`写入 MCP 进程失败：${err.message}`));
       }
     });
+  }
+
+  /**
+   * 取消一条在途请求（用户点了「中断」）。
+   *
+   * 和超时回收不同，这里**不杀进程**：同一个服务上别的调用可能还在跑，
+   * 用户中断的只是这一条。按 MCP 规范先发 `notifications/cancelled` 告诉
+   * 服务端「这条别做了」，再把待决 promise 以「已取消」拒绝，调用方立刻
+   * 拿到确定结果，不用等到超时。合规实现会中止工具；不理会通知的实现会
+   * 继续跑，所以文案同样要说清「服务端可能仍在执行」。
+   *
+   * @returns {boolean} 是否真有一条在途请求被取消
+   */
+  function cancel(serverId, requestId) {
+    const entry = servers.get(serverId);
+    if (!entry) return false;
+    const waiter = entry.pending.get(requestId);
+    if (!waiter) return false;
+    entry.pending.delete(requestId);
+    clearTimeout(waiter.timer);
+    try {
+      entry.child.stdin.write(
+        encodeMessage({
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { requestId, reason: "用户中断" },
+        }),
+      );
+    } catch {
+      /* 子进程已退出：没有可通知的对象 */
+    }
+    waiter.reject(
+      new Error("工具调用已取消（已通知服务端中止；若它不理会，服务端里可能仍在执行）"),
+    );
+    return true;
   }
 
   /** 只发通知（无响应），如 `notifications/initialized`。 */
@@ -507,7 +549,7 @@ function createStdioBridge({
     return servers.size === 0 && teardowns.size === 0;
   }
 
-  return { start, request, notify, stop, disposeAll, running, idle };
+  return { start, request, cancel, notify, stop, disposeAll, running, idle };
 }
 
 module.exports = {
