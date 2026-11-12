@@ -261,9 +261,20 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 `tests/test_e2e_serve.py` 真的用子进程起服务（`python -m agent_pipeline.runner serve`，与 Dockerfile 的 `CMD` 同一条路），上游模型换成本地桩 HTTP 服务，然后从外面走一遍：`/health` 起来 → `POST /v1/runs` 202 → 轮询到 `ok` → `/metrics` 里有 `pipeline_runs_total{status="ok"}` → `AGENT_LOG_PATH` 指的文件里确实落了 1 行 JSONL。再加上 `uv build --wheel` 产出的 wheel 里带 `entry_points.txt`（`agent-pipeline = agent_pipeline.runner:main`）与 16 个模块，容器里那套「装包 → 起进程 → 接请求」的路径就算被覆盖了；真正没覆盖的只有镜像层（基础镜像、卷挂载、非 root 用户）。
 
+## 测试与覆盖率门槛
+
+```bash
+./.venv/Scripts/python.exe -m pytest --cov            # Windows
+.venv/bin/python -m pytest --cov                      # Linux / 容器
+```
+
+- 当前 **184 passed / 覆盖率 94.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
+- 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
+
 ## 已知边界
 
-1. **记忆有容量上限、没有 TTL**：`MemoryStore` 每次写入后按 `max_episodes` / `max_documents` 删最旧的（删文档连带删块，同一事务），所以磁盘与检索延迟有界；但「三个月前的经验自动过期」还没做——需要按重要性/时间的淘汰策略，而不是只看新旧。
+1. **记忆有容量上限、没有「价值淘汰」**：`MemoryStore` 每次写入后按 `max_episodes` / `max_documents` 删（先删超龄的 `AGENT_MAX_EPISODE_AGE_DAYS`，再按 `importance`/时间裁容量，删文档连带删块，同一事务），所以磁盘与检索延迟有界；但没有「按任务相关性在线学习该留哪些经验」的机制——目前靠 `importance` 人工/启发式打标。
 2. **对抗模式的覆盖率必须来自真实命令**：没配 `coverage_runner` 时 `coverage=None`，此时 `adversarial_passed` 永远为 False，不会假装达标。
 3. **HITL 只在单进程内有效**：`AGENT_APPROVAL_MODE=write` 的等待是在执行线程里阻塞，服务重启/进程崩溃后待审批的调用会随线程一起消失（客户端会看到该 run 变 `error`）；跨重启续跑需要 LangGraph `interrupt` + checkpointer，还没做。
 4. **知识库检索是词面为主**：BM25 + 哈希向量的混合检索，对同义改写不如真正的 embedding 模型；中文靠单字/双字切词，短查询容易放大无关片段。要更好的语义召回，需要接一个 embedding 服务（当前没有外部依赖）。

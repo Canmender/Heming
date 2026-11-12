@@ -26,9 +26,10 @@ from .rollback import ConfigStore
 from .tools import ToolRuntime, build_default_registry, run_shell
 
 _COVERAGE_PATTERNS = (
-    re.compile(r"(?i)\btotal\b[^\n%]*?(\d{1,3}(?:\.\d+)?)\s*%"),
-    re.compile(r"(?i)coverage[^\n%]*?(\d{1,3}(?:\.\d+)?)\s*%"),
-    re.compile(r"(?i)all files[^\n%]*?(\d{1,3}(?:\.\d+)?)\s*%"),
+    # (?<!-) 是必须的：`TOTAL -5%` 这种输出里 "-5" 会被读成 5%，等于把负数当覆盖率。
+    re.compile(r"(?i)\btotal\b[^\n%]*?(?<!-)(\d{1,3}(?:\.\d+)?)\s*%"),
+    re.compile(r"(?i)coverage[^\n%]*?(?<!-)(\d{1,3}(?:\.\d+)?)\s*%"),
+    re.compile(r"(?i)all files[^\n%]*?(?<!-)(\d{1,3}(?:\.\d+)?)\s*%"),
 )
 
 
