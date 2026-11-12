@@ -151,7 +151,22 @@ def _plan_of(state: dict[str, Any]) -> list[PlanStep]:
 
 
 def _observations_of(state: dict[str, Any]) -> list[Observation]:
-    return [Observation(**o) if isinstance(o, dict) else o for o in state.get("observations", [])]
+    """把状态里的观测还原成对象。
+
+    ``Observation.to_dict()`` 会把 ``citations`` 也摊成 dict，直接 ``Observation(**o)``
+    会留下 dict 形式的引用，后面 ``c.doc_id`` 就会炸——这里一并还原。
+    """
+    out: list[Observation] = []
+    for item in state.get("observations", []):
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        data = dict(item)
+        data["citations"] = [
+            Citation(**c) if isinstance(c, dict) else c for c in data.get("citations") or []
+        ]
+        out.append(Observation(**data))
+    return out
 
 
 def _budget_left(state: dict[str, Any], runtime: Runtime) -> bool:

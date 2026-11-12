@@ -278,6 +278,14 @@ class MemoryStore:
                 self._conn.commit()
         return {"episodes": removed_episodes, "documents": removed_documents}
 
+    def remove_document(self, doc_id: str) -> bool:
+        """删掉一份文档及其全部片段；返回是否真的删到了。"""
+        with self._lock:
+            self._conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
+            cur = self._conn.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+            self._conn.commit()
+            return bool(cur.rowcount)
+
     def count(self) -> dict[str, int]:
         with self._lock:
             docs = self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]

@@ -81,7 +81,10 @@ def build_runtime(
         max_documents=settings.max_documents,
     )
     config_store = config_store or ConfigStore(settings.db_path)
-    registry = build_default_registry(allow_commands=os.environ.get("AGENT_PIPELINE_ALLOW_COMMANDS") == "1")
+    registry = build_default_registry(
+        allow_commands=os.environ.get("AGENT_PIPELINE_ALLOW_COMMANDS") == "1",
+        memory=memory,
+    )
     tools = ToolRuntime(
         registry,
         circuit_threshold=settings.circuit_threshold,

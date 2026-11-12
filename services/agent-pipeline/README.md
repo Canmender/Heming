@@ -71,6 +71,9 @@ AGENT_TUNE_ENABLED=1 .venv/Scripts/python.exe -m agent_pipeline.runner serve --p
 | POST | `/v1/config/rollback` | 手动回滚（幂等） |
 | POST | `/v1/tune` | 基于日志生成候选配置（可选 evaluator 决定是否上灰度） |
 | GET | `/v1/tools` | 已注册工具与 schema |
+| POST | `/v1/knowledge` | 往知识库写一份文档 `{doc_id, text, title?}`（同 id 整体替换，返回切块数与统计） |
+| GET | `/v1/knowledge` | 知识库规模 `{documents, chunks, episodes}` |
+| DELETE | `/v1/knowledge/{doc_id}` | 删掉一份文档及其全部片段（不存在 404） |
 
 ```bash
 curl -s http://localhost:8000/v1/runs \
@@ -104,6 +107,21 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_APPROVAL_TIMEOUT_S` | `300` | 等审批的时限；超时按**拒绝**处理（绝不悄悄放行） |
 
 预算（`Budget`）：`max_steps=8`、`max_llm_calls=40`、`max_tokens=120_000`、`max_wall_clock_s=600`、`step_tool_budget=6`、`max_replans=2`、`max_adversarial_rounds=2`。超预算时流水线**不硬失败**，而是带 `status="budget"` 和 `stop_reason` 返回已完成的部分。
+
+## 知识库（RAG）
+
+记忆层同时是知识库：`POST /v1/knowledge` 写入文档后，run 里会多出一个只读工具
+
+- `knowledge_search`：`{query, limit?}` → 命中的片段（`text` 截断 600 字）+ 每条命中的 `citations`；
+- 检索是 BM25 与哈希向量混合（`alpha=0.6`），中文按单字/双字切词，不依赖外部分词器；
+- 工具结果里的 `citations` 会被搬进 `Observation.citations`，摘要阶段只保留「观测里真的出现过」的来源——模型编造的出处会被丢掉（`test_knowledge.py::test_react_run_cites_only_observed_knowledge` 盯着这条）；
+- 没有 `memory` 时注册表里不会出现这个工具（`build_default_registry()` 的默认形态只有 `http_get` / `run_command`）。
+
+```bash
+curl -s http://localhost:8000/v1/knowledge \
+  -H 'content-type: application/json' \
+  -d '{"doc_id":"installer","title":"安装器手册","text":"通用外壳只适用于在线版……"}'
+```
 
 ## 工具审批（HITL）
 
@@ -180,4 +198,5 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 1. **记忆有容量上限、没有 TTL**：`MemoryStore` 每次写入后按 `max_episodes` / `max_documents` 删最旧的（删文档连带删块，同一事务），所以磁盘与检索延迟有界；但「三个月前的经验自动过期」还没做——需要按重要性/时间的淘汰策略，而不是只看新旧。
 2. **对抗模式的覆盖率必须来自真实命令**：没配 `coverage_runner` 时 `coverage=None`，此时 `adversarial_passed` 永远为 False，不会假装达标。
 3. **HITL 只在单进程内有效**：`AGENT_APPROVAL_MODE=write` 的等待是在执行线程里阻塞，服务重启/进程崩溃后待审批的调用会随线程一起消失（客户端会看到该 run 变 `error`）；跨重启续跑需要 LangGraph `interrupt` + checkpointer，还没做。
-4. **调优不自动上线**：每日调度器（`AGENT_TUNE_ENABLED=1`）会自动跑 `tune`，但只产出候选 + 注册灰度；提升到 active 仍需要 `/v1/config/promote` 或人工看板。自动转正的条件（连续 N 轮灰度指标更好）还没做。回放评测器默认关闭（`AGENT_TUNE_EVAL=1` 才开），因为它会真跑流水线、花真钱。
+4. **知识库检索是词面为主**：BM25 + 哈希向量的混合检索，对同义改写不如真正的 embedding 模型；中文靠单字/双字切词，短查询容易放大无关片段。要更好的语义召回，需要接一个 embedding 服务（当前没有外部依赖）。
+5. **调优不自动上线**：每日调度器（`AGENT_TUNE_ENABLED=1`）会自动跑 `tune`，但只产出候选 + 注册灰度；提升到 active 仍需要 `/v1/config/promote` 或人工看板。自动转正的条件（连续 N 轮灰度指标更好）还没做。回放评测器默认关闭（`AGENT_TUNE_EVAL=1` 才开），因为它会真跑流水线、花真钱。

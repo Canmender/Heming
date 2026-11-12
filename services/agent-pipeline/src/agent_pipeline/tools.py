@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
-from .protocol import Observation, Risk, ToolRequest, idempotency_key
+from .protocol import Citation, Observation, Risk, ToolRequest, idempotency_key
 
 
 class ToolError(Exception):
@@ -190,6 +190,25 @@ class ToolStats:
         }
 
 
+def _citations_of(result: Any) -> list[Citation]:
+    """工具结果里可以带 ``citations``（RAG 检索的来源）：转成 Citation，字段坏的丢掉。"""
+    if not isinstance(result, dict):
+        return []
+    raw = result.get("citations")
+    if not isinstance(raw, list):
+        return []
+    out: list[Citation] = []
+    for item in raw[:16]:
+        if not isinstance(item, dict):
+            continue
+        doc_id = str(item.get("doc_id", "") or "")
+        chunk = item.get("chunk", 0)
+        if not doc_id or not isinstance(chunk, int):
+            continue
+        out.append(Citation(doc_id=doc_id, chunk=chunk, quote=str(item.get("quote", ""))[:400]))
+    return out
+
+
 class ToolRuntime:
     """执行工具，并把所有异常路径收敛成 Observation。"""
 
@@ -331,6 +350,7 @@ class ToolRuntime:
             result=result,
             error=error,
             duration_ms=duration_ms,
+            citations=_citations_of(result),
         )
 
     def stats(self) -> dict[str, dict[str, int]]:
@@ -346,7 +366,7 @@ class ToolRuntime:
 # ---------------------------------------------------------------------------
 
 
-def build_default_registry(*, allow_commands: bool = False) -> ToolRegistry:
+def build_default_registry(*, allow_commands: bool = False, memory: Any = None) -> ToolRegistry:
     registry = ToolRegistry()
 
     @registry.tool(
@@ -392,6 +412,46 @@ def build_default_registry(*, allow_commands: bool = False) -> ToolRegistry:
         if not allow_commands:
             raise ToolError("run_command 未启用（服务端需显式开启）")
         return run_shell(str(args["command"]), timeout_s=float(args.get("timeout_s", 60)))
+
+    if memory is not None:
+        # RAG：让模型能主动翻知识库（而不是只能靠 plan 阶段被动注入的记忆）。
+        # 返回里带 citations，摘要阶段只保留「观测里真的出现过」的来源，避免编造出处。
+        @registry.tool(
+            name="knowledge_search",
+            description="在知识库里检索相关片段，返回命中文本与来源编号。",
+            risk="read",
+            schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        )
+        def knowledge_search(args: dict[str, Any]) -> Any:
+            query = str(args["query"]).strip()
+            if not query:
+                raise ToolError("query 不能为空")
+            limit = int(args.get("limit", 5))
+            limit = max(1, min(10, limit))
+            hits = memory.search(query, limit=limit)
+            return {
+                "hits": [
+                    {
+                        "text": hit.text[:600],
+                        "kind": hit.kind,
+                        "citations": [c.to_dict() for c in hit.citations],
+                    }
+                    for hit in hits
+                ],
+                "citations": [
+                    citation
+                    for hit in hits
+                    for citation in (c.to_dict() for c in hit.citations)
+                ],
+            }
 
     return registry
 

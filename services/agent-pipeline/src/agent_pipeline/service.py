@@ -26,6 +26,14 @@ from .runtime import build_runtime, make_coverage_runner, run_once
 from .scheduler import DailyTuner, build_replay_evaluator
 
 
+class KnowledgeDoc(BaseModel):
+    """往知识库里写一份文档（RAG 的入口）。同一个 ``doc_id`` 再写会整体替换。"""
+
+    doc_id: str = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=200_000)
+    title: str = Field(default="", max_length=300)
+
+
 class RunRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
     cwd: str = "."
@@ -253,6 +261,24 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
     @app.get("/v1/tools")
     def list_tools() -> dict[str, Any]:
         return {"tools": runtime.tools.registry.describe()}
+
+    # ---- 知识库（RAG 的写入口；检索由 knowledge_search 工具在 run 里做）---------
+
+    @app.post("/v1/knowledge")
+    def add_knowledge(body: KnowledgeDoc) -> dict[str, Any]:
+        chunks = runtime.memory.add_document(body.doc_id, body.text, title=body.title)
+        return {"doc_id": body.doc_id, "chunks": len(chunks), "stats": runtime.memory.count()}
+
+    @app.get("/v1/knowledge")
+    def knowledge_stats() -> dict[str, Any]:
+        return runtime.memory.count()
+
+    @app.delete("/v1/knowledge/{doc_id}")
+    def delete_knowledge(doc_id: str) -> dict[str, Any]:
+        removed = runtime.memory.remove_document(doc_id)
+        if not removed:
+            raise HTTPException(status_code=404, detail=f"知识库里没有这份文档：{doc_id}")
+        return {"doc_id": doc_id, "removed": removed, "stats": runtime.memory.count()}
 
     return app
 
