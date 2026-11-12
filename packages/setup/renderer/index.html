@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'" />
+<title>安装 和鸣</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="sheet">
+
+  <header class="titlebar" id="titlebar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">和</span>
+      <span class="brand-name">和鸣</span>
+      <span class="brand-sep" aria-hidden="true"></span>
+      <span class="brand-kind">安装程序</span>
+    </div>
+    <div class="window-controls">
+      <button class="win-button" id="btn-minimize" type="button" title="最小化" aria-label="最小化">&#8212;</button>
+      <button class="win-button win-button-close" id="btn-close" type="button" title="关闭" aria-label="关闭">&#215;</button>
+    </div>
+  </header>
+
+  <main class="body">
+    <section class="column-main" id="column-main">
+      <svg class="wordmark" id="wordmark" viewBox="0 0 400 150" role="img" aria-label="Heming">
+        <g id="wordmark-strokes"></g>
+        <circle class="wordmark-dot" id="wordmark-dot" cx="371" cy="101" r="4"></circle>
+      </svg>
+
+      <p class="step-label" id="step-label">第 1 步 · 安装位置</p>
+
+      <div class="screen is-current" id="screen-ready">
+        <h1 class="headline">把它装在这台电脑上。</h1>
+        <p class="lede">装完就能用，不需要另外配置。默认装进你的用户目录，不碰系统目录。</p>
+        <div class="path-row">
+          <span class="path-value" id="install-path">&#8212;</span>
+          <button class="text-button" id="btn-choose" type="button">更改&#8230;</button>
+        </div>
+        <p class="hint" id="path-hint">装在这里不需要管理员权限。</p>
+        <label class="check">
+          <input type="checkbox" id="launch-after" checked />
+          <span class="check-box" aria-hidden="true"></span>
+          <span>安装完成后打开 和鸣</span>
+        </label>
+        <div class="actions">
+          <button class="primary-button" id="btn-start" type="button">开始安装</button>
+          <button class="text-button" id="btn-quit" type="button">退出</button>
+        </div>
+      </div>
+
+      <div class="screen" id="screen-work" hidden>
+        <h1 class="headline" id="work-headline">正在准备。</h1>
+        <div class="metric">
+          <span class="metric-value" id="metric-value">&#8212;</span>
+          <span class="metric-unit" id="metric-unit"></span>
+        </div>
+        <p class="metric-sub" id="metric-sub">&nbsp;</p>
+        <div class="wave" id="wave" aria-hidden="true"></div>
+        <div class="progress" id="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+          <span class="progress-fill" id="progress-fill"></span>
+        </div>
+        <p class="status" id="status" aria-live="polite">&nbsp;</p>
+        <div class="actions">
+          <button class="text-button" id="btn-cancel" type="button">取消</button>
+        </div>
+      </div>
+
+      <div class="screen" id="screen-done" hidden>
+        <h1 class="headline">装好了。</h1>
+        <div class="seal" id="seal" aria-hidden="true">和</div>
+        <p class="done-line" id="done-line">&nbsp;</p>
+        <div class="actions">
+          <button class="primary-button" id="btn-open" type="button">打开 和鸣</button>
+          <button class="text-button" id="btn-open-folder" type="button">打开文件夹</button>
+        </div>
+      </div>
+
+      <div class="screen" id="screen-error" hidden>
+        <h1 class="headline">没能装完。</h1>
+        <p class="lede" id="error-message">安装程序提前停下了。</p>
+        <pre class="detail" id="error-detail"></pre>
+        <div class="actions">
+          <button class="primary-button" id="btn-retry" type="button">重试</button>
+          <button class="text-button" id="btn-pick-payload" type="button">选择安装包&#8230;</button>
+          <button class="text-button" id="btn-open-log" type="button">打开日志</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="column-note" aria-label="安装信息">
+      <dl class="facts">
+        <div class="fact">
+          <dt>版本</dt>
+          <dd id="fact-version">&#8212;</dd>
+        </div>
+        <div class="fact">
+          <dt>需要空间</dt>
+          <dd id="fact-space">&#8212;</dd>
+        </div>
+        <div class="fact">
+          <dt>现有版本</dt>
+          <dd id="fact-existing">&#8212;</dd>
+        </div>
+        <div class="fact">
+          <dt>安装包</dt>
+          <dd id="fact-source">&#8212;</dd>
+        </div>
+      </dl>
+      <p class="note">下载和安装都在这个窗口里完成。中途失败不会留下半装的程序，可以放心重试。</p>
+      <p class="note-sig">和鸣 &#183; 桌面工作站</p>
+    </aside>
+  </main>
+
+  <footer class="footline">
+    <span class="foot-quote">鹤鸣于九皋，声闻于天。</span>
+    <span class="foot-mark">H E M I N G</span>
+  </footer>
+
+</div>
+<script src="wordmark.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

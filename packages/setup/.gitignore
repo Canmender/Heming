@@ -1,0 +1,7 @@
+# 构建期生成，不入库
+config/generated.json
+# 内嵌的内层安装包（离线版才存在；在线版由 build-setup.mjs 主动删除）
+payload/inner-setup.exe
+# 打包产物
+release/
+package-lock.json

@@ -68,6 +68,7 @@
 | [specs/2026-10-18-boot-animation-design.md](superpowers/specs/2026-10-18-boot-animation-design.md) | 4.5s 四段式启动动画 |
 | [specs/2026-10-18-wordmark-login-design.md](superpowers/specs/2026-10-18-wordmark-login-design.md) | 手写「Heming」字样与登录分栏 |
 | [specs/2026-10-18-embed-web-in-client-design.md](superpowers/specs/2026-10-18-embed-web-in-client-design.md) | `app://heming` 嵌入产物与安全上下文 |
+| [specs/2026-11-12-setup-installer.md](superpowers/specs/2026-11-12-setup-installer.md) | **自绘安装器（`packages/setup`）**：为什么不用 NSIS 向导、portable 外壳 + 自绘 Electron 窗口 + 静默 NSIS 的架构、`/D=`/退出码/sha512/进度与取消语义、unslop 设计口径（纸白墨黑朱砂、手写 wordmark 逐笔描画）、构建与验证、已知限制 |
 
 ### 安全与新能力
 
