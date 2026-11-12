@@ -401,6 +401,23 @@ docker compose up --build               # 服务 :8000 + Prometheus :9090
 
 `tests/test_e2e_serve.py` 真的用子进程起服务（`python -m agent_pipeline.runner serve`，与 Dockerfile 的 `CMD` 同一条路），上游模型换成本地桩 HTTP 服务，然后从外面走一遍：`/health` 起来 → `POST /v1/runs` 202 → 轮询到 `ok` → `/metrics` 里有 `pipeline_runs_total{status="ok"}` → `AGENT_LOG_PATH` 指的文件里确实落了 1 行 JSONL。再加上 `uv build --wheel` 产出的 wheel 里带 `entry_points.txt`（`agent-pipeline = agent_pipeline.runner:main`）与 16 个模块，容器里那套「装包 → 起进程 → 接请求」的路径就算被覆盖了；真正没覆盖的只有镜像层（基础镜像、卷挂载、非 root 用户）。
 
+另有一条**不依赖 docker 的容器形态冒烟**：`python scripts/smoke_install.py` 把 wheel 装进一个全新的 venv（uv 建，无开发依赖），按 Dockerfile 的 `CMD` 起 `serve`（带 `AGENT_SERVICE_TOKEN`），再从外面验证：`/health` 的 `auth` 必须是 `on` 且工具清单含 `knowledge_search`、无令牌访问 `/v1/tools` 必须 401、带令牌必须 200、知识库写入/规模/删除走一遍、`/metrics` 里有 `pipeline_runs_total`。实测输出：
+
+```text
+[1/5] 打 wheel：services/agent-pipeline
+[2/5] 建干净 venv 并装入 agent_pipeline-0.1.0-py3-none-any.whl
+[3/5] 按 Dockerfile 的 CMD 起 serve（带入站令牌）
+      /health ok=True auth=on tools=['http_get', 'knowledge_search', 'run_command']
+[4/5] 入站鉴权：无令牌必须 401、带令牌必须 200
+[5/5] 知识库：写入 → 规模 → 查询 → 删除
+冒烟通过：装包 → 起进程 → 鉴权 → 知识库 → /metrics 全部正常
+```
+
+脚本把 uv 的缓存与解包临时目录都指到仓库内的临时目录（受限环境里子进程对 `%TEMP%`、`%LOCALAPPDATA%` 没有写权限，会报「拒绝访问」），跑完自动清理，`--keep` 可留现场排查。
+
+Dockerfile 另用 `hadolint 2.12.0` 静态检查过：无告警（`exit 0`、无输出）。它挡的是语法与最佳实践类问题，**不代替真构建**——镜像层（基础镜像拉取、卷挂载、非 root 用户）仍需一台有 docker 的机器。
+
+
 联调有测试：`packages/web/src/lib/pipeline/live.test.ts` 会真起一个 `agent_pipeline.runner serve` 子进程
 （上游换成本地假 OpenAI 服务），用桌面端客户端跑完一次任务，断言 `status/answer/stopReason/llmCalls/tokens`
 与 `/health` 字段都对得上。两边各有单测也可能字段名对不上，这条补的是「真进程 + 真 HTTP」那一层。
@@ -439,7 +456,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **252 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **253 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

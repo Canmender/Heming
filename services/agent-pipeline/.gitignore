@@ -9,3 +9,4 @@ runs.jsonl
 .coverage
 .coverage.*
 htmlcov/
+.tmp-smoke-*/

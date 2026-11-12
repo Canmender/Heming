@@ -150,3 +150,14 @@ def test_pyproject_exposes_console_script_used_by_docker() -> None:
     settings = Settings.from_env()
     assert settings.base_url.startswith("http")
     assert settings.max_concurrent_runs >= 1
+
+
+def test_no_docker_smoke_script_covers_auth_and_knowledge() -> None:
+    """容器形态冒烟脚本必须真的验到「鉴权 + 知识库」这两条，而不只是起个进程。"""
+    script = ROOT / "scripts" / "smoke_install.py"
+    assert script.exists(), "缺少 scripts/smoke_install.py（没有 docker 时唯一能跑通装包→起进程的证据）"
+    text = script.read_text(encoding="utf-8")
+    assert "AGENT_SERVICE_TOKEN" in text, "冒烟没带入站令牌，验不到鉴权"
+    assert "/v1/tools" in text and "401" in text, "冒烟没验证无令牌必须 401"
+    assert "/v1/knowledge" in text, "冒烟没走知识库写入/删除"
+    assert "pipeline_runs_total" in text, "冒烟没验 /metrics 有指标"
