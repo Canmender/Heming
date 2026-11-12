@@ -157,6 +157,25 @@ class Settings:
     # 容器滚动更新/重启时太短会把 run 硬砍成 error，太长又把部署拖住。
     shutdown_grace_s: float = 5.0
 
+    def __post_init__(self) -> None:
+        """把「手滑写错的环境变量」收成安全值，别让服务悄悄进死状态。
+
+        - `AGENT_MAX_CONCURRENCY=0` 会让信号量永远是 0：每个请求都 429，看起来像服务挂了；
+        - `AGENT_CANARY_RATIO=2` 等于永久全量灰度，`-1` 等于灰度永不生效，都不该静默通过；
+        - `AGENT_SHUTDOWN_GRACE_S` 为负数没有意义（`_drain_runs` 里已经 max(0)，这里统一收口）；
+        - `AGENT_APPROVAL_MODE` 拼错（如 `wrtie`）时**必须报错**：静默当成 off 等于把审批闸关了却没人知道。
+        """
+        if self.max_concurrent_runs < 1:
+            object.__setattr__(self, "max_concurrent_runs", 1)
+        if self.run_history_limit < 1:
+            object.__setattr__(self, "run_history_limit", 1)
+        if self.shutdown_grace_s < 0:
+            object.__setattr__(self, "shutdown_grace_s", 0.0)
+        if not 0.0 <= self.canary_ratio <= 1.0:
+            object.__setattr__(self, "canary_ratio", min(1.0, max(0.0, self.canary_ratio)))
+        if self.approval_mode not in {"off", "write"}:
+            raise ValueError(f"AGENT_APPROVAL_MODE 只能是 off 或 write，实际是 {self.approval_mode!r}")
+
     @classmethod
     def from_env(cls) -> "Settings":
         budget = Budget(

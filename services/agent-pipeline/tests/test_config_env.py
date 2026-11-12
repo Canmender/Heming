@@ -56,5 +56,33 @@ def test_with_budget_overrides_only_given_fields() -> None:
     assert settings.budget.max_llm_calls == Budget().max_llm_calls, "原设置不能被改动"
 
 
+
+def test_misconfigured_env_is_normalized_or_rejected(monkeypatch):
+    """手滑写的环境变量不能把服务悄悄带进死状态。"""
+    # 并发 0 会让每个请求都 429（信号量永远是 0），收成 1
+    monkeypatch.setenv("AGENT_MAX_CONCURRENCY", "0")
+    assert Settings.from_env().max_concurrent_runs == 1
+    monkeypatch.setenv("AGENT_MAX_CONCURRENCY", "8")
+    assert Settings.from_env().max_concurrent_runs == 8
+
+    # 灰度比例越界要夹回 0-1（2 = 永久全量灰度，-1 = 灰度永不生效）
+    monkeypatch.setenv("AGENT_CANARY_RATIO", "2")
+    assert Settings.from_env().canary_ratio == 1.0
+    monkeypatch.setenv("AGENT_CANARY_RATIO", "-1")
+    assert Settings.from_env().canary_ratio == 0.0
+
+    # 关停宽限期为负没有意义，收成 0（不等待）
+    monkeypatch.setenv("AGENT_SHUTDOWN_GRACE_S", "-3")
+    assert Settings.from_env().shutdown_grace_s == 0.0
+
+    # 审批模式拼错必须报错：静默 off 等于把闸关了没人知道
+    monkeypatch.setenv("AGENT_APPROVAL_MODE", "wrtie")
+    try:
+        Settings.from_env()
+    except ValueError as exc:
+        assert "AGENT_APPROVAL_MODE" in str(exc)
+    else:  # pragma: no cover - 只在回归时走到
+        raise AssertionError("拼错的审批模式应当直接报错")
+
 def test_approval_mode_defaults_to_off() -> None:
     assert Settings().approval_mode == "off"
