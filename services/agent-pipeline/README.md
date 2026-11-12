@@ -38,7 +38,19 @@ set AGENT_PIPELINE_API_KEY=sk-...
 
 # 让服务自己每天跑一次（默认关闭，需显式打开；见下方「每日调优调度」）
 AGENT_TUNE_ENABLED=1 .venv/Scripts/python.exe -m agent_pipeline.runner serve --port 8000
+
+# 把自己的文档灌进知识库（RAG）：目录递归、按扩展名过滤、doc_id = 前缀 + 相对路径
+.venv/Scripts/python.exe -m agent_pipeline.runner ingest docs/ README.md --prefix "repo/"
 ```
+
+## 知识库（RAG）的灌入方式
+
+两条路，写的是同一张 SQLite 表：
+
+- **CLI**：`agent-pipeline ingest <文件或目录>... [--prefix 前缀] [--ext .md,.txt]`。目录递归、按扩展名过滤（默认 `.md/.txt/.rst/.py/.ts/.json/.yaml/.yml`），`doc_id` = 前缀 + 相对路径，所以同一份输入重跑得到同一批 id（幂等覆盖）。空文件与非 UTF-8 文件跳过并报告；超过 20 万字符的截断（与 `POST /v1/knowledge` 的上限一致）。
+- **HTTP**：`POST /v1/knowledge`（`{doc_id, text, title}`，同 id 整体替换）、`GET /v1/knowledge`（规模）、`DELETE /v1/knowledge/{doc_id}`。
+
+灌进去之后，`knowledge_search`（只读工具，模型自己会调）才会命中并带 `citations`；摘要阶段只保留「观测里真的出现过」的 `doc_id`，编造的引用会被过滤掉。
 
 ## 每日调优调度
 

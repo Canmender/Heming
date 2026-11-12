@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import time
 
-from agent_pipeline.runner import main
+import pytest
+
+from agent_pipeline.memory import MemoryStore
+from agent_pipeline.runner import ingest_paths, iter_knowledge_files, main
 
 
 def test_doctor_reports_tools_and_paths(tmp_path, monkeypatch, capsys) -> None:
@@ -60,3 +63,46 @@ def test_tune_reads_log_and_reports(tmp_path, capsys) -> None:
     report = json.loads(capsys.readouterr().out)
     assert report["total_runs"] == 3
     assert report["failure_modes"] == {"max_steps": 2}
+
+def test_ingest_walks_directory_and_filters_extensions(tmp_path, monkeypatch, capsys) -> None:
+    """目录递归 + 扩展名过滤 + doc_id 用相对路径（同一份输入永远喂出同一批 doc_id）。"""
+    docs = tmp_path / "docs"
+    (docs / "sub").mkdir(parents=True)
+    (docs / "a.md").write_text("# 安装器\n通用外壳读 latest.yml。", encoding="utf-8")
+    (docs / "sub" / "b.md").write_text("# 记忆\n容量有上限。", encoding="utf-8")
+    (docs / "skip.bin").write_bytes(b"\x00\x01binary")
+    monkeypatch.setenv("AGENT_PIPELINE_DB", str(tmp_path / "kb.db"))
+
+    assert main(["ingest", str(docs), "--prefix", "docs/", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["files"] == 2, "只认 .md 这类文本扩展名"
+    assert payload["ingested"] == 2
+    assert payload["chunks"] >= 2
+    assert payload["stats"]["documents"] == 2
+
+    memory = MemoryStore(str(tmp_path / "kb.db"))
+    try:
+        hits = memory.search("通用外壳 latest.yml", limit=3)
+        assert [hit.citations[0].doc_id for hit in hits][:1] == ["docs/a.md"]
+    finally:
+        memory.close()
+
+
+def test_ingest_skips_empty_and_binary_and_flags_truncated(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "empty.md").write_text("   \n", encoding="utf-8")
+    (tmp_path / "large.md").write_text("字" * 50, encoding="utf-8")
+    monkeypatch.setenv("AGENT_PIPELINE_DB", ":memory:")
+
+    memory = MemoryStore(":memory:")
+    try:
+        results = ingest_paths(memory, [str(tmp_path / "empty.md"), str(tmp_path / "large.md")], max_chars=20)
+    finally:
+        memory.close()
+    assert results[0]["skipped"] == "空文件"
+    assert results[1]["trimmed"] is True
+    assert results[1]["chars"] == 20
+
+
+def test_ingest_missing_path_raises(tmp_path) -> None:
+    with pytest.raises(FileNotFoundError):
+        list(iter_knowledge_files([str(tmp_path / "nope")]))
