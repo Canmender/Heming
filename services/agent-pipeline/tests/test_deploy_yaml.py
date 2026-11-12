@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import pytest
 from pathlib import Path
 
 import yaml
@@ -70,6 +71,19 @@ def test_error_rate_alert_ignores_user_cancellations() -> None:
     expr = rules["PipelineErrorRateHigh"]["expr"]
     assert 'status=~"error|budget"' in expr, expr
     assert 'status!="ok"' not in expr, expr
+
+
+def test_alert_expressions_are_valid_promql() -> None:
+    """YAML 合法不等于 PromQL 合法：缩进对了但表达式写错，Prometheus 加载规则时才报错。
+
+    以前只有「字符串包含」断言：`rate(...)` 拼错一个括号、`by (le)` 写错位置都能过，
+    但 `promtool check rules` 会直接拒绝。用 promql-parser 在单测里做同一层检查。
+    """
+    parser = pytest.importorskip("promql_parser")
+    data = _load("prometheus/alerts.yml")
+    for group in data["groups"]:
+        for rule in group["rules"]:
+            parser.parse(rule["expr"].strip())
 
 
 def test_alert_expressions_use_bounded_labels() -> None:

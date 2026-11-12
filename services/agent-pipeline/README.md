@@ -316,16 +316,18 @@ curl -s http://localhost:8000/v1/tools -H "Authorization: Bearer $AGENT_SERVICE_
 ## 容器化
 
 ```bash
-export AGENT_PIPELINE_API_KEY=sk-...
-docker compose up --build      # 服务 :8000 + Prometheus :9090
+export AGENT_PIPELINE_API_KEY=sk-...   # 上游模型（DeepSeek 等）的 Key
+export AGENT_SERVICE_TOKEN=<随机串>     # 这个服务自己的入站令牌（不设 = 谁都能提交 run）
+docker compose up --build               # 服务 :8000 + Prometheus :9090
 ```
 
 - `Dockerfile`：python:3.12-slim，非 root 用户，`HEALTHCHECK` 打 `/health`。
 - **滚动更新**：`docker compose up --build` 时旧容器收到 SIGTERM，uvicorn 走 lifespan 关停——`AGENT_SHUTDOWN_GRACE_S` 内把在跑的 run 收口成 `aborted`/`error` 再退出，不会留下「日志里有半截、客户端只看到断连」的 run。
 - `docker-compose.yml`：`agent-pipeline` + `prometheus`，数据卷持久化 `runs.jsonl` 与 SQLite。
-- `prometheus/prometheus.yml`、`prometheus/alerts.yml`：错误率 > 20%、P95 > 120s、单工具失败率 > 30%、发生自动回滚、服务掉线、覆盖率 < 0.9、在线但 30 分钟没有 run 结束（共七条）。
+- `prometheus/prometheus.yml`、`prometheus/alerts.yml`：错误率 > 20%、P95 > 120s、单工具失败率 > 30%、发生自动回滚、服务掉线、覆盖率 < 0.9、在线但 30 分钟没有 run 结束，见下条合计 9 条。
 - **告警一共 9 条**：错误率、P95 延迟、工具失败率、自动回滚、长时间无 run、服务下线、覆盖率不达标，外加本轮补的两条「不该静默」告警——`PipelineLogWriteFailing`（run 日志写不进去，10 分钟窗口）与 `PipelineTuneFailing`（每日调优 6 小时内有失败）。
 - **零样本兜底**：带标签的 counter 在第一次自增之前不会出现在 `/metrics` 里（Prometheus 抓到的就是 no data）。所以「工具失败率」「自动回滚」两条告警的表达式外层都套了 `or vector(0)`——没有流量时是 0 而不是空，避免开了 nodata 处理的告警误报或哑掉。`tests/test_metrics_scrape.py` 3 例用 `prometheus_client.parser` 真解析 `/metrics` 文本（格式坏了 Prometheus 就抓不动，字符串包含检查看不出来），并断言零工具流量时确实没有 tool 样本、告警文件里有兜底。
+- **告警表达式用真 PromQL 解析器校验**（`tests/test_deploy_yaml.py` 的 `test_alert_expressions_are_valid_promql`，依赖 `promql-parser`）：YAML 合法不等于 PromQL 合法——括号写错、`by (le)` 位置错，字符串断言全过但 Prometheus 加载规则时才报错。
 
 > 本机（Windows 开发机）没有 docker，这份容器配置只写不可本地构建验证；语义已按 compose v2 写。
 
@@ -437,7 +439,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **249 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **251 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

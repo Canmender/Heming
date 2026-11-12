@@ -1,7 +1,14 @@
 # agent-pipeline：Plan → Execute → Reflect → Critic → (Adversarial) → Summarize
 #
 # 构建：docker build -t agent-pipeline:0.1.0 services/agent-pipeline
-# 运行：docker run --rm -p 8000:8000 -e AGENT_PIPELINE_API_KEY=... agent-pipeline:0.1.0
+# 运行：docker run --rm -p 8000:8000 \
+#         -e AGENT_PIPELINE_API_KEY=sk-... \
+#         -e AGENT_SERVICE_TOKEN=<随机串> \
+#         agent-pipeline:0.1.0
+#
+# 两个 Key 不是一回事：AGENT_PIPELINE_API_KEY 是上游模型（DeepSeek 等）的 Key，
+# AGENT_SERVICE_TOKEN 是这个服务自己的入站令牌。-p 8000:8000 会把端口暴露到宿主机，
+# 不设 AGENT_SERVICE_TOKEN 等于谁都能提交 run（run 能执行命令、读知识库）。
 FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

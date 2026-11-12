@@ -55,6 +55,19 @@ def test_dockerfile_shape_matches_entry_point() -> None:
     assert "/health" in routes and "/metrics" in routes
 
 
+def test_dockerfile_run_example_mentions_inbound_token() -> None:
+    """照抄 Dockerfile 头部的 docker run 示例必须带上入站令牌。
+
+    `-p 8000:8000` 把端口暴露到宿主机；示例里只有上游模型的 Key 的话，照抄部署就是
+    一个无鉴权、能执行命令的服务。
+    """
+    dockerfile = _read("Dockerfile")
+    header = dockerfile.split("FROM ", 1)[0]
+    assert "docker run" in header
+    assert "AGENT_SERVICE_TOKEN" in header, header
+    assert "AGENT_PIPELINE_API_KEY" in header, header
+
+
 def test_dockerfile_and_compose_env_names_are_read_by_code() -> None:
     code_names = _code_env_names()
     assert "AGENT_LOG_PATH" in code_names and "AGENT_PIPELINE_DB" in code_names
