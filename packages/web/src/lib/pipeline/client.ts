@@ -300,6 +300,16 @@ export function createPipelineClient(options: PipelineClientOptions): PipelineCl
     }
   }
 
+  /** 单独提出来而不是写在返回对象的方法里：`const { run } = client` 这种解构很自然，
+   *  方法里的 `this.cancel` 在解构后是 undefined，超时分支会炸成 TypeError。 */
+  async function cancel(runId: string, runOptions: { signal?: AbortSignal } = {}): Promise<void> {
+    await requestJson<Record<string, unknown>>(
+      `/v1/runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST" },
+      runOptions.signal,
+    );
+  }
+
   return {
     async run(request, runOptions = {}) {
       const signal = runOptions.signal;
@@ -314,7 +324,7 @@ export function createPipelineClient(options: PipelineClientOptions): PipelineCl
         if (TERMINAL.has(String(raw.status))) return normalizeRun(raw, runId);
         if (now() - started > runTimeoutMs) {
           // 超时不代表服务端停了：请求取消，让它别再白烧模型。
-          await this.cancel(runId).catch(() => undefined);
+          await cancel(runId).catch(() => undefined);
           throw new PipelineError("timeout", `流水线超过 ${Math.round(runTimeoutMs / 60_000)} 分钟仍未结束，已请求取消`);
         }
         await sleep(pollIntervalMs, signal);
@@ -326,13 +336,7 @@ export function createPipelineClient(options: PipelineClientOptions): PipelineCl
       return normalizeRun(raw, runId);
     },
 
-    async cancel(runId, runOptions = {}) {
-      await requestJson<Record<string, unknown>>(
-        `/v1/runs/${encodeURIComponent(runId)}/cancel`,
-        { method: "POST" },
-        runOptions.signal,
-      );
-    },
+    cancel,
 
     async health() {
       const raw = await requestJson<{ ok?: boolean; tools?: string[]; running?: number }>("/health", { method: "GET" });

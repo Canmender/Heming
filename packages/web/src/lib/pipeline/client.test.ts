@@ -188,6 +188,22 @@ describe("agent-pipeline 客户端", () => {
     expect(calls.some((c) => c.url.endsWith("/cancel"))).toBe(true);
   });
 
+  it("解构出来的 run 也能在超时时请求取消（方法里的 this 不能当依赖）", async () => {
+    let clock = 0;
+    const { client, calls } = makeClient(
+      [
+        { match: "POST /v1/runs", responses: [jsonResponse({ run_id: "r1", status: "running" }, 202)] },
+        { match: "GET /v1/runs/r1", responses: [RUNNING()] },
+        { match: "POST /v1/runs/r1/cancel", responses: [jsonResponse({ ok: true }, 202)] },
+      ],
+      { now: () => clock, runTimeoutMs: 1_000, sleep: async () => void (clock += 400) },
+    );
+    const { run } = client;
+
+    await expect(run({ goal: "x" })).rejects.toMatchObject({ kind: "timeout" });
+    expect(calls.some((c) => c.url.endsWith("/cancel"))).toBe(true);
+  });
+
   it("待审批的工具调用交给调用方裁决，并回填 /approve", async () => {
     const approval: PipelineApproval = {
       call_id: "c9",
