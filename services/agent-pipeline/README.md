@@ -298,7 +298,9 @@ run.answer; run.citations; run.coverage; run.stopReason;
 
 - **默认不接**：界面不会自动连它。流水线要单独部署（地址、密钥、回退策略都得定），未部署时不该让聊天链路出现超时；接不接、接到哪个地址，是产品决策，不是代码默认值能替用户拍的板。
 - 客户端自己的口径：并发满（429）按退避**重提一次**再报错；run 超过 `runTimeoutMs`（默认 30 分钟）会先 `POST /cancel` 再抛 `timeout`，不让服务端继续白烧模型；`signal` 中止立刻停轮询。
-- 12 个用例在 `packages/web/src/lib/pipeline/client.test.ts`，覆盖 429 重提、非 2xx 带 `detail`、连不上、用户中止、run 超时（含请求取消）、待审批回填、`normalizeRun` 的字段容错。
+- 服务端还有一道跨语言契约测试（`tests/test_client_contract.py`）钉住客户端读的字段名——它已经抓到过 `stop_reason` 没被带出去的缺陷。
+
+12 个用例在 `packages/web/src/lib/pipeline/client.test.ts`，覆盖 429 重提、非 2xx 带 `detail`、连不上、用户中止、run 超时（含请求取消）、待审批回填、`normalizeRun` 的字段容错。
 
 ## 测试与覆盖率门槛
 
@@ -307,7 +309,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **207 passed / 覆盖率 94.9%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **210 passed / 覆盖率 94.9%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

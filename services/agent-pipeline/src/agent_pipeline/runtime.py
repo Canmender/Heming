@@ -130,6 +130,7 @@ def _normalize(run_id: str, state: dict[str, Any], configuration_version: int, e
         tokens=int(state.get("tokens", 0)),
         config_version=configuration_version,
         error=error,
+        stop_reason=state.get("stop_reason"),
         dropped_context=list(state.get("dropped_context", [])),
     )
     for item in state.get("reflections", []):

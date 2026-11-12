@@ -233,6 +233,10 @@ class RunResult:
     tokens: int = 0
     config_version: int = 0
     error: str | None = None
+    # 为什么停下：max_steps / llm_calls / tokens / wall_clock / cancelled / coverage_gap /
+    # coverage_command_failed / critic_blocked …（在 state 里算好，这里只是带出去）。
+    # 桌面端 `packages/web/src/lib/pipeline/client.ts` 会读它来区分「做完了」和「预算烧完了」。
+    stop_reason: str | None = None
     dropped_context: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -249,6 +253,7 @@ class RunResult:
             "llm_calls": self.llm_calls,
             "tokens": self.tokens,
             "config_version": self.config_version,
+            "stop_reason": self.stop_reason,
             "error": self.error,
             "dropped_context": self.dropped_context,
         }
