@@ -121,6 +121,8 @@ class Settings:
     circuit_threshold: int = 5
     circuit_cooldown_s: float = 30.0
     idempotency_ttl_s: float = 600.0
+    # 幂等缓存条数上限：10 万次调用里参数几乎不重复，只靠 TTL 会让内存随调用量单调涨。
+    idempotency_max_entries: int = 1000
     # 工具审批（HITL）：off = 不拦；write = 非只读工具执行前等用户裁决
     approval_mode: str = "off"
     approval_timeout_s: float = 300.0
@@ -173,6 +175,7 @@ class Settings:
             latency_threshold_s=_env_float("AGENT_LATENCY_THRESHOLD_S", cls.latency_threshold_s),
             min_samples_for_rollback=_env_int("AGENT_MIN_SAMPLES", cls.min_samples_for_rollback),
             tool_timeout_s=_env_float("AGENT_TOOL_TIMEOUT_S", cls.tool_timeout_s),
+            idempotency_max_entries=_env_int("AGENT_IDEMPOTENCY_MAX_ENTRIES", cls.idempotency_max_entries),
             approval_mode=os.environ.get("AGENT_APPROVAL_MODE", cls.approval_mode),
             approval_timeout_s=_env_float("AGENT_APPROVAL_TIMEOUT_S", cls.approval_timeout_s),
             max_episodes=_env_int("AGENT_MAX_EPISODES", cls.max_episodes),

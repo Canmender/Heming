@@ -149,3 +149,46 @@ def test_default_registry_blocks_command_by_default() -> None:
     observation = runtime.execute(ToolRequest(call_id="c1", name="run_command", arguments={"command": "echo hi"}))
     assert observation.ok is False
     assert "未启用" in (observation.error or "")
+
+def test_idempotency_cache_is_capped() -> None:
+    """幂等缓存要封顶：10 万次真实调用里参数几乎不重复，只靠 TTL 会让内存随调用量单调涨。"""
+    executed: list[str] = []
+
+    def handler(args: dict[str, Any]) -> str:
+        executed.append(str(args["text"]))
+        return str(args["text"])
+
+    runtime = ToolRuntime(_registry(handler), idempotency_max_entries=3)
+    try:
+        for index in range(10):
+            runtime.execute(
+                ToolRequest(call_id=f"c{index}", name="echo", arguments={"text": str(index)}, risk="read")
+            )
+        assert len(runtime._cache) == 3  # noqa: SLF001 - 就是要盯这个内部上限
+        assert executed == [str(index) for index in range(10)], "参数不同时每次都要真的执行"
+        # 被挤掉的最旧一条不再命中缓存 → 会再执行一次
+        runtime.execute(ToolRequest(call_id="again", name="echo", arguments={"text": "0"}, risk="read"))
+        assert executed.count("0") == 2
+    finally:
+        runtime.close()
+
+
+def test_idempotency_cache_hit_still_works() -> None:
+    """封顶不能把幂等本身弄丢：同参调用只执行一次。"""
+    executed: list[str] = []
+
+    def handler(args: dict[str, Any]) -> str:
+        executed.append(str(args["text"]))
+        return str(args["text"])
+
+    runtime = ToolRuntime(_registry(handler), idempotency_max_entries=10)
+    try:
+        for index in range(3):
+            observation = runtime.execute(
+                ToolRequest(call_id=f"c{index}", name="echo", arguments={"text": "same"}, risk="read")
+            )
+            assert observation.result == "same"
+        assert executed == ["same"]
+        assert runtime.stats()["echo"]["cache_hits"] == 2
+    finally:
+        runtime.close()

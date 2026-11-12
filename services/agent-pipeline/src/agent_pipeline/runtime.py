@@ -91,6 +91,7 @@ def build_runtime(
         circuit_threshold=settings.circuit_threshold,
         circuit_cooldown_s=settings.circuit_cooldown_s,
         idempotency_ttl_s=settings.idempotency_ttl_s,
+        idempotency_max_entries=settings.idempotency_max_entries,
         default_timeout_s=settings.tool_timeout_s,
         metrics_hook=metrics.record_tool,
     )

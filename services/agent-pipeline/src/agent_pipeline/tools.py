@@ -219,13 +219,17 @@ class ToolRuntime:
         circuit_threshold: int = 5,
         circuit_cooldown_s: float = 30.0,
         idempotency_ttl_s: float = 600.0,
+        idempotency_max_entries: int = 1000,
         default_timeout_s: float = 20.0,
         metrics_hook: Callable[[str, str, float], None] | None = None,
     ) -> None:
         self.registry = registry
         self.circuit_threshold = circuit_threshold
         self.circuit_cooldown_s = circuit_cooldown_s
+        # 幂等缓存只按 TTL 过期在真实流量下不够：10 万次调用里参数几乎不重复，
+        # 600 秒窗口内就能堆几万条 Observation（每条都带结果文本）。所以同时给条数封顶。
         self.idempotency_ttl_s = idempotency_ttl_s
+        self.idempotency_max_entries = idempotency_max_entries
         self.default_timeout_s = default_timeout_s
         self.metrics_hook = metrics_hook
         self._cache: dict[str, tuple[float, Observation]] = {}
@@ -309,9 +313,24 @@ class ToolRuntime:
         self._trip(breaker, success=True)
         observation = self._observe(request, started, ok=True, result=result, stats=stats)
         if spec.idempotent:
-            with self._lock:
-                self._cache[key] = (time.monotonic(), observation)
+            self._store_cached(key, observation)
         return observation
+
+    def _store_cached(self, key: str, observation: Observation) -> None:
+        """写幂等缓存，并把它控制在 `idempotency_max_entries` 条以内（先清过期、再按插入序丢最旧）。"""
+        with self._lock:
+            self._cache[key] = (time.monotonic(), observation)
+            limit = self.idempotency_max_entries
+            if limit <= 0:
+                return
+            if len(self._cache) <= limit:
+                return
+            now = time.monotonic()
+            for stale in [k for k, (at, _) in self._cache.items() if now - at > self.idempotency_ttl_s]:
+                self._cache.pop(stale, None)
+            while len(self._cache) > limit:
+                oldest = next(iter(self._cache))
+                self._cache.pop(oldest, None)
 
     # ---- 内部 -------------------------------------------------------------
 

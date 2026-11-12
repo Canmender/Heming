@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import queue
 import statistics
@@ -142,6 +143,12 @@ def main(argv: list[str] | None = None) -> int:
         help="开启工具审批闸并自动批准（验证 HITL 挂起/裁决在负载下可用）",
     )
     parser.add_argument(
+        "--cancel-rate",
+        type=float,
+        default=0.0,
+        help="按比例模拟「用户中途取消」（例如 0.1 = 每 10 个 run 取消 1 个），验证取消收口在负载下不漏线程/不漏日志",
+    )
+    parser.add_argument(
         "--canary",
         action="store_true",
         help="注册一个灰度版本并让全部流量走它（配合 --fail-rate 验证回滚真的会发生）",
@@ -161,6 +168,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.approval:
         llm.tool_name = "run_command"  # 写工具才会挂审批闸
     memory = MemoryStore(":memory:")
+    if args.tools:
+        # 知识库里有真文档，knowledge_search 才会命中并带引用（否则只测到「空结果」）。
+        memory.add_document(
+            "doc-soak",
+            "和鸣安装器的通用外壳：双击后读更新服务器上的 latest.yml，安装包已就绪再静默安装内层包。",
+            title="浸泡知识",
+        )
     metrics = Metrics()
     config_store = ConfigStore(":memory:")
     runtime = build_runtime(
@@ -200,12 +214,20 @@ def main(argv: list[str] | None = None) -> int:
         candidate = config_store.register(PROMPTS, promote=False)
         config_store._set_stage(candidate.id, "canary")  # noqa: SLF001 - 与 tune 的灰度口径一致
         canary_id = candidate.id
+    cancel_flags: dict[str, threading.Event] = {}
+    cancel_lock = threading.Lock()
+    if args.cancel_rate > 0:
+        # 协作式取消：节点入口检查这个标志；取消后 summarize 仍会跑，给出「取消前已完成的内容」。
+        runtime.cancel = lambda rid: bool(
+            (flag := cancel_flags.get(rid)) is not None and flag.is_set()
+        )
     task = TaskSpec(goal="浸泡测试：给出结论", mode=args.mode)
 
     tracemalloc.start()
     durations: list[float] = []
     failures: list[str] = []
     result_lock = threading.Lock()
+    cancelled_count = {"n": 0}
     work: queue.Queue[int] = queue.Queue()
     for index in range(args.runs):
         work.put(index)
@@ -216,15 +238,34 @@ def main(argv: list[str] | None = None) -> int:
                 index = work.get_nowait()
             except queue.Empty:
                 return
+            run_id = f"soak-{index:06d}"
             t0 = time.perf_counter()
+            timer = None
+            if args.cancel_rate > 0 and random.random() < args.cancel_rate:
+                flag = threading.Event()
+                with cancel_lock:
+                    cancel_flags[run_id] = flag
+                # 5~15ms 后取消：足够让 run 已经进了节点（否则取消会落到第一轮之前，测不到中途取消）。
+                timer = threading.Timer(random.uniform(0.005, 0.015), flag.set)
+                timer.daemon = True
+                timer.start()
             try:
-                result, _row = run_once(runtime, task, run_id=f"soak-{index:06d}")
-                if result.status not in ("ok", "budget"):
+                result, row = run_once(runtime, task, run_id=run_id)
+                cancelled = result.status == "aborted" and row.get("stop_reason") == "cancelled"
+                if cancelled:
+                    with result_lock:
+                        cancelled_count["n"] += 1
+                elif result.status not in ("ok", "budget"):
                     with result_lock:
                         failures.append(f"{index}:{result.status}:{result.error}")
             except Exception as exc:  # noqa: BLE001 - 浸泡测试要把所有异常都记下来
                 with result_lock:
                     failures.append(f"{index}:{type(exc).__name__}:{exc}")
+            finally:
+                if timer is not None:
+                    timer.cancel()
+                    with cancel_lock:
+                        cancel_flags.pop(run_id, None)
             with result_lock:
                 durations.append(time.perf_counter() - t0)
 
@@ -259,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
         "canary_stage": (
             config_store.get(canary_id).stage if canary_id is not None and config_store.get(canary_id) else None
         ),
+        "cancelled": cancelled_count["n"],
         "failures": len(failures),
         "failure_samples": failures[:5],
         "elapsed_s": round(elapsed, 3),
@@ -280,6 +322,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"  失败            : {summary['failures']} {summary['failure_samples']}")
         print(f"  P50 / P95       : {summary['p50_ms']}ms / {summary['p95_ms']}ms")
+        if args.cancel_rate > 0:
+            print(f"  中途取消        : {summary['cancelled']} 个 run（协作式收口，仍出「取消前已完成的内容」）")
         print(f"  模型调用次数    : {summary['llm_calls']}")
         if args.tools:
             print(

@@ -97,6 +97,7 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_MAX_DOCUMENTS` | `2000` | 知识库文档上限（超限删最旧并连带删块） |
 | `AGENT_MAX_EPISODE_AGE_DAYS` | `0` | 情景记忆按天数过期（0＝不按时间淘汰，只受条数上限约束） |
 | `AGENT_OUTCOME_LIMIT` | `5000` | 回滚判定用的 outcome 行数上限（窗口只看最近 50 条；0＝不裁） |
+| `AGENT_IDEMPOTENCY_MAX_ENTRIES` | `1000` | 幂等缓存条数上限（0＝不限；真实流量下参数几乎不重复，只靠 TTL 会随调用量涨内存） |
 | `AGENT_CANARY_RATIO` | `0.1` | 灰度比例（按 run_id 稳定分桶） |
 | `AGENT_MAX_CONCURRENCY` | `4` | 并发上限 |
 | `AGENT_ERROR_THRESHOLD` | `0.2` | 自动回滚错误率阈值 |
@@ -191,6 +192,8 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 `--approval` 再往前一步：把工具换成写工具 `run_command`、开启审批闸（`ApprovalGate`），并起一个线程每 5ms 自动批准，模拟「用户一直点允许」。实测 `--runs 30 --concurrency 2 --tools --approval` → 30 次工具调用、30 次自动批准、0 失败、P50 75.7ms（不卡在等待裁决上）。
 
+`--cancel-rate FLOAT` 按比例模拟「用户中途点停止」：run 提交后 5–15ms 置取消标志，节点入口看到就收口、`summarize` 仍跑出一句「取消前已完成的内容」。它验证的是取消路径在并发下不漏线程、不漏日志、不把状态卡在 `running`——实测 `--runs 200 --concurrency 4 --tools --cancel-rate 0.25` → 48 个 run 被取消、0 失败。取消是协作式的：如果那一刻正卡在工具调用或审批裁决里，要等工具超时/裁决返回才会收口（这是有意为之，硬中断线程会留下半截写入）。
+
 `--concurrency N` 会让 N 个工作线程同时跑 run（默认 1 = 顺序）。它验证的是状态机、SQLite 记忆、指标与配置存储**在并发下不互相踩**：实测 `--runs 8000 --concurrency 8` → 0 失败、40,000 次模型调用、17.5 run/s、P50 462ms / P95 496ms、内存峰值 4.1MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。并发 + 注入失败也一起验过：`--runs 400 --concurrency 4 --fail-rate 0.25 --canary` → 自动回滚 1 次、canary 归档 `archived`。
 
 > 服务侧并发口径：`POST /v1/runs` 超过 `AGENT_MAX_CONCURRENCY` 时**直接 429 + `Retry-After`**，不排队（排队会让客户端超时掩盖背压）；同一个 `run_id` 重复提交是幂等的，只跑一次。`tests/test_concurrency.py` 覆盖了 429/放行/幂等三条。
@@ -215,6 +218,8 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 - **JSONL 日志会轮转**：`AGENT_LOG_MAX_BYTES`（默认 64MB）是单文件上限，超了整份改名为 `runs.jsonl.1`（只留一代）。10 万次调用 ≈ 10 万行，不轮转的话调优读日志、运维 `tail` 都会变慢。
 - **并发浸泡实测**：`scripts/soak.py --runs 20000 --concurrency 8` → **100,000 次模型调用、0 失败**、17.0 run/s、P50 471.65ms / P95 511.1ms、内存峰值 4.55MB / 结束 3.11MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。
 
+- **幂等缓存有上限**：`AGENT_IDEMPOTENCY_MAX_ENTRIES`（默认 1000）封顶 ToolRuntime 的幂等缓存——真实流量里参数几乎不重复，只靠 600 秒 TTL 的话，10 万次调用能在窗口内堆几万条 Observation。实测封顶前 20,000 run（20,000 次工具执行）结束内存 15.7MB，封顶后 12,000 run 只有 4.33MB（峰值 6.11MB），不再随调用量线性涨。
+- **取消也是并发路径**：`scripts/soak.py --cancel-rate 0.1` 在 20,000 run 里取消掉 1,999 个，0 失败、18,001 次工具调用照常落地；`tests/test_soak.py` 钉住「工具参数必须每次不同」（否则幂等缓存吃掉执行，浸泡变成只测缓存）。
 - **回滚库也有上限**：每个 run 落一条 outcome，`AGENT_OUTCOME_LIMIT`（默认 5000）按 id 裁旧的——窗口只看最近 50 条，留 5000 条足够判定，磁盘不会随调用量单调涨。
 
 ## 交付物自检
