@@ -158,6 +158,24 @@ describe("ModelPage · 结构与主路径", () => {
     expect(screen.getAllByText("可用模型").some((el) => el.closest(".ui-card") !== null)).toBe(true);
   });
 
+  it("视觉规范：分区切换走全站标准页签（下划线式），不再是贴左缘的药丸分段控件", () => {
+    installBridge();
+    const { container } = render(<ModelPage />);
+    // 页签栏与设置页 / 插件页 / 记忆页 / 团队页共用 PAGE_TABLIST（role=tablist 也在同一处）
+    const tablist = screen.getByRole("tablist", { name: "模型页分区" });
+    expect(tablist.className).not.toContain("ui-segment-group");
+    for (const label of ["模型", "智能体", "来源", "运行"]) {
+      const tab = screen.getByRole("tab", { name: label });
+      // pageTabClass 的下划线特征：-mb-px 让选中项的 2px 下划线压住内容区分隔线
+      expect(tab.className, `${label} 页签缺标准页签下划线样式`).toContain("-mb-px");
+      expect(tab.className, `${label} 页签缺标准页签下划线样式`).toContain("border-b-2");
+      // 图标是既定设计（d.125），换样式不丢
+      expect(tab.querySelector("svg"), `${label} 页签缺图标`).not.toBeNull();
+    }
+    // 一级切换栏不再使用药丸式分段控件（页内的二级筛选不在此断言内）
+    expect(container.querySelector(".ui-segment-group")).toBeNull();
+  });
+
   it("浏览器没有命令桥：提示只能在桌面端添加，但仍可看模型", () => {
     render(<ModelPage />);
     expect(screen.getByRole("status")).toHaveTextContent(/请打开和鸣桌面端/);

@@ -149,7 +149,7 @@ describe("信息中枢工具提供者", () => {
       error: "",
     });
     // 信息中枢是独立模块：装过之后才谈「启用/停用」。
-    useModuleStore.getState().install("infohub");
+    useModuleStore.getState().install("heming.infohub");
   });
 
   afterEach(() => {
@@ -178,12 +178,12 @@ describe("信息中枢工具提供者", () => {
     installBridge();
     useInfohubStore.setState({ available: true, running: true });
     // 安装并启用时注入
-    useModuleStore.getState().install("infohub");
+    useModuleStore.getState().install("heming.infohub");
     expect(buildInfohubToolsIfConnected()).not.toBeNull();
 
-    useModuleStore.getState().setEnabled("infohub", false);
+    useModuleStore.getState().setEnabled("heming.infohub", false);
     expect(buildInfohubToolsIfConnected()).toBeNull();
-    useModuleStore.getState().install("infohub");
+    useModuleStore.getState().install("heming.infohub");
   });
 
   it("sync 不暴露为工具（写归档只从信息中枢页发起）", () => {

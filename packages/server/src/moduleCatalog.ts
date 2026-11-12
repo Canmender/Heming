@@ -26,7 +26,7 @@ import {
 /** 随服务端发布的可选模块目录。 */
 const DEFAULT_MODULES: readonly ModuleCatalogEntry[] = [
   {
-    id: "automations",
+    id: "heming.automations",
     name: "自动化",
     version: "1.0.0",
     description: "一个页面管定时任务、工作流与简报：快速创建普通定时任务，或完整创建工作流并指定时间与次数。",
@@ -34,12 +34,14 @@ const DEFAULT_MODULES: readonly ModuleCatalogEntry[] = [
     engine: null,
   },
   {
-    id: "infohub",
+    id: "heming.infohub",
     name: "信息中枢",
-    version: "1.0.0",
-    description: "在本机采集、浏览、检索 QQ / 微信聊天记录和日程；采集引擎随插件安装，归档不出本机。",
+    // d.136：会话浏览从「聊天记录」插件并入模块页，版本随模块同步 1.1.0。
+    version: "1.1.0",
+    description: "在本机浏览、检索 QQ / 微信聊天记录和日程；归档不出本机。",
     author: "和鸣",
-    engine: "infohub",
+    // 引擎已并入同一个模块包（files/app + files/lib），这里记录它由该包提供。
+    engine: "heming.infohub",
   },
 ];
 

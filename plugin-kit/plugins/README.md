@@ -6,9 +6,10 @@
 | 目录 | 插件 id | 形态 | 说明 | 构建 / 测试 |
 |---|---|---|---|---|
 | [`infohub-collector/`](infohub-collector/) | `heming.infohub-collector` | v5 声明式 | 本机 InfoHub 采集桥（技能 + MCP + 命令 + 工具束） | `node scripts/plugin-lint.mjs plugin-kit/plugins/infohub-collector/plugin.json` |
-| [`infohub-page/`](infohub-page/) | `heming.infohub-page` | v4 bundle（仅首方） | 聊天记录页面：两栏浏览 InfoHub 归档；依赖 `infohub mcp` | `node scripts/plugin-lint.mjs plugin-kit/plugins/infohub-page`；本地用静态伺服 + 隔离 MCP 自测（见 README） |
 | [`pet-widget/`](pet-widget/) | `heming.pet` | v4 bundle（仅首方） | 桌宠界面插件；pnpm workspace 包 | `pnpm --filter @heming/pet-widget build` / `test`；发布前签名后 `run pack` |
 | [`workflow-kit/`](workflow-kit/) | `heming.workflow-kit` | v5 声明式 + 独立服务 | 节点式工作流引擎；清单在 `plugin/plugin.json` | `cd plugin-kit/plugins/workflow-kit && pnpm install && pnpm build && pnpm test` |
+
+聊天记录浏览已并入「信息中枢」模块页面，不再作为独立插件发布。
 
 ## 约定
 
@@ -16,6 +17,8 @@
 - 新增插件用 `pnpm plugin:new <id>`，默认生成到本目录；生成后立刻 lint。
 - 声明式插件现行 `schemaVersion: 5`（旧 v3 包按 [COOKBOOK §7](../COOKBOOK.md) 升级）；界面插件仍是 v4 bundle，只对首方开放。
 - 想让插件在左侧导航多一个入口：加 `contributions.page`（声明式写 `blocks`；仅首方 bundle 写 `entry`），见 [COOKBOOK §4](../COOKBOOK.md)。
-- 发布：`node scripts/publish-plugin.mjs <包目录或 plugin.json> --dest <插件目录>`。
-  工作流引擎是独立服务，使用它自己的 `scripts/build-release.mjs` 出包、`scripts/publish-cloud.mjs` 上传。
+- 发布：源码 → 本地暂存 → 云端，只有一条链路（d.137）：`node scripts/publish-plugin.mjs <包目录或 plugin.json>`
+  写到**仓库根 `plugins-catalog/`**（唯一暂存目录，`plugin-kit/` 下不再保留 `plugins-catalog`），再把这个目录
+  同步到云端 `/opt/heming/plugins`（即 `HEMING_PLUGIN_DIR`）。详见 `docs/PLUGINS.md` §9。
+  工作流引擎是独立服务，使用它自己的 `scripts/build-release.mjs` 出包、`scripts/publish-cloud.mjs` 上传（唯一例外）。
 - 这些包**不随和鸣安装包分发**（`packages/desktop/packaging.plugins.test.js` 守着这条边界）。

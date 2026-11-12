@@ -3,7 +3,7 @@ import { resolveUnit } from "@heming/shared";
 import { createDefaultStorage, readJson, writeJson } from "../memory/storage.js";
 import type { StorageLike } from "../memory/types.js";
 import { projectBuiltinUnits } from "../units/projection.js";
-import { MODULE_IDS, type ModuleId, MODULE_BY_ID } from "./registry.js";
+import { MODULE_IDS, type ModuleId, MODULE_BY_ID, LEGACY_MODULE_ID_MAP } from "./registry.js";
 
 /**
  * 内置能力模块的**安装 / 启用**状态（本机）。
@@ -52,9 +52,11 @@ export function defaultModuleState(): ModuleState {
 /**
  * 规整任意输入：只认已知 id 的布尔值，其余回落默认。
  *
- * 两条迁移口径：
+ * 三条迁移口径：
  * - 缺 `installed` → 未安装（老存储里的「全开」不再视为已装）；
- * - `installed=true` 且缺 `enabled` → 启用。
+ * - `installed=true` 且缺 `enabled` → 启用；
+ * - 包 id 加 `heming.` 前缀前的旧键（`infohub` / `automations`）照旧认，读成新 id 的值——
+ *   否则用户升级后已装模块会凭空消失（入口、工具注入、后台循环一起下线）。
  */
 export function normalizeModuleState(raw: unknown): ModuleState {
   const base = defaultModuleState();
@@ -62,16 +64,21 @@ export function normalizeModuleState(raw: unknown): ModuleState {
   const record = raw as { installed?: unknown; enabled?: unknown };
   const installed = record.installed && typeof record.installed === "object" ? record.installed : null;
   const enabled = record.enabled && typeof record.enabled === "object" ? record.enabled : null;
+  /** 先读当前包 id，没有再读旧 id（一次性兼容，写回始终用新 id）；都没有则用 fallback。 */
+  const readFlag = (source: unknown, id: ModuleId, fallback: boolean): boolean => {
+    if (!source || typeof source !== "object") return fallback;
+    const table = source as Record<string, unknown>;
+    if (typeof table[id] === "boolean") return table[id] as boolean;
+    for (const [legacyId, currentId] of Object.entries(LEGACY_MODULE_ID_MAP)) {
+      if (currentId === id && typeof table[legacyId] === "boolean") return table[legacyId] as boolean;
+    }
+    return fallback;
+  };
   for (const id of MODULE_IDS) {
-    const installedValue =
-      installed && typeof (installed as Record<string, unknown>)[id] === "boolean"
-        ? ((installed as Record<string, boolean>)[id] as boolean)
-        : false;
+    const installedValue = readFlag(installed, id, false);
     base.installed[id] = installedValue;
-    const enabledValue =
-      enabled && typeof (enabled as Record<string, unknown>)[id] === "boolean"
-        ? ((enabled as Record<string, boolean>)[id] as boolean)
-        : installedValue; // installed=true 且缺 enabled → 启用
+    // installed=true 且缺 enabled → 启用
+    const enabledValue = readFlag(enabled, id, installedValue);
     base.enabled[id] = installedValue && enabledValue;
   }
   return base;

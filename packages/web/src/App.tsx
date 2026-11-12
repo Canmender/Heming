@@ -28,6 +28,7 @@ import { refreshWidgets } from "./lib/widgets/store.js";
 import { startWidgetThemeSync } from "./lib/widgetTheme.js";
 import { useLlmStore } from "./store/llm.js";
 import { isPageAvailable } from "./lib/modules/nav.js";
+import { moduleForPage } from "./lib/modules/registry.js";
 import { usePluginPageEntries } from "./lib/pages/usePluginPages.js";
 import { isPluginPagePage, pluginPageEntry } from "./lib/pages/registry.js";
 import { PluginPageHost } from "./components/plugins/PluginPageHost.js";
@@ -572,7 +573,7 @@ function AppShell({
 
   // d.115：信息中枢模块生效 = 自动拉起本机边车（不依赖页面挂载），并自动识别、
   // 空库时采集一次；模块停用 = 运行时一起下线（不删任何归档数据）。
-  const infohubModuleOn = isModuleEffective(moduleState, "infohub");
+  const infohubModuleOn = isModuleEffective(moduleState, "heming.infohub");
   useEffect(() => {
     if (!infohubModuleOn) {
       if (!useInfohubStore.getState().running) return;
@@ -620,8 +621,11 @@ function AppShell({
     return bridge.onOpenPage((request) => {
       const page = request?.page;
       const ui = useUiStore.getState();
-      const moduleOn = (id: "staff" | "infohub") =>
-        isModuleEffective(useModuleStore.getState(), id);
+      // 模块未安装/停用时落在插件页（能一键安装/启用），而不是静默跳到一个不存在的页面
+      const moduleOn = (page: "staff" | "infohub") => {
+        const moduleId = moduleForPage(page)?.id;
+        return moduleId ? isModuleEffective(useModuleStore.getState(), moduleId) : false;
+      };
       if (page === "settings") {
         // widget 的「打开设置」与托盘「设置」项都该落到外观页的小组件卡（不是个人资料）
         ui.openSettings(request.settingsTab ?? "appearance");

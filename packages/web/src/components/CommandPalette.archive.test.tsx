@@ -76,7 +76,7 @@ describe("命令面板 · 本机归档检索", () => {
     useUiStore.setState({ page: "home", activeConversationId: null, infohubIntent: null });
     // 内置模块默认未安装；归档命中要落到信息中枢页，先把模块装上
     useModuleStore.getState().reset();
-    useModuleStore.getState().install("infohub");
+    useModuleStore.getState().install("heming.infohub");
     useInfohubStore.setState({ available: true, running: true, booted: true, error: "" });
   });
 

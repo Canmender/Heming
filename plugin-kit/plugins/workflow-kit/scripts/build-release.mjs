@@ -162,7 +162,7 @@ function landingHtml(info) {
     <ol>
       <li><b>启动本机服务</b>：解压服务包；Windows 双击 <code>start.cmd</code>，macOS/Linux 执行 <code>./start.sh</code>。
         看到「工作流引擎（独立插件）已启动 · http://127.0.0.1:8777」即就绪。关闭窗口即停止服务。</li>
-      <li><b>安装和鸣插件</b>：和鸣 → 插件区 → 安装 → 导入刚下载的 <code>plugin.json</code>（或粘贴其内容）。</li>
+      <li><b>安装和鸣插件</b>：和鸣 → 插件区 →「手动粘贴清单」→ 选择刚下载的 <code>plugin.json</code>（或粘贴其内容）。</li>
       <li><b>连接并授权</b>：接口区找到「工作流引擎」→ 连接（首次会列出 26 个工具，默认全部关闭）→ 按需打开
         <code>workflow_*</code> / <code>node_types</code> 等工具（写类操作仍会走人工确认）。</li>
       <li><b>开始使用</b>：可直接打开编辑器 <a href="http://127.0.0.1:8777/">http://127.0.0.1:8777/</a> 手动搭流程，

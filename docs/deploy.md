@@ -59,7 +59,7 @@ pnpm -r build
 # 产物**写到树外**（/tmp）：`-czf heming.tar.gz .` 会把正在增长的 tar 自己
 # 卷进归档，GNU tar 报 `tar: .: file changed as we read it` 并以 exit 1 结束。
 tar --exclude=node_modules --exclude=.git --exclude=.superpowers \
-    --exclude=.worktrees --exclude=data \
+    --exclude=.worktrees --exclude=.agents --exclude=data \
     --exclude=release --exclude=.claude --exclude=.tmp --exclude=.workbuddy \
     --exclude='packages/desktop/runtime' \
     --exclude='packages/desktop/web-dist' \
@@ -82,6 +82,9 @@ tar -tzf /tmp/heming.tar.gz | grep -c "packages/server/dist/"
 > 不认 `./` 前缀。包会从 5.6MB 撑到 **2.19GB**（把 `packages/desktop/release` 里的历史安装包全卷进去），
 > 而上传命令照样「成功」，要等远端解包才炸。
 > 打完先看体积：5MB 量级才对；几十 MB 以上先查排除表，别急着上传。
+> d.137 又踩一次：`.agents/`（代理会话的 git worktree，每份都是整仓副本）未排，部署包从
+> 5MB 级涨到 **73MB**，还会把过期的插件与文案副本塞进部署快照——`scripts/release.mjs` 的
+> `TAR_EXCLUDES`/`TAR_FORBIDDEN` 已补 `.agents`。
 
 上传：本机没有 `sshpass`/`plink`，密码认证只能走 paramiko。`.superpowers/deploy-bare.py` 是分步编排（凭据从同目录 `deploy-d21.py` 读，不入库、不回显），各步可单独重跑：
 
@@ -161,28 +164,30 @@ HEMING_SEED_USERS=admin:admin
 
 ```bash
 # 1) 本机把仓库里的插件包摆成服务端布局（声明式包 = 原样 plugin.json）
-node scripts/publish-plugin.mjs plugins/            # 缺省写到 ./plugins-catalog
+node scripts/publish-plugin.mjs plugin-kit/plugins/pet-widget/plugin.json  # 缺省写到仓库根 ./plugins-catalog
 
 # 1b) 界面插件（d.94，带代码与资源）：先构建 → 再发布成 plugin.json + package.tgz
 node scripts/build-pet-widget.mjs
 node scripts/pack-plugin.mjs plugin-kit/plugins/pet-widget/dist/package     # → dist/package.tgz（确定性 sha）
-node scripts/publish-plugin.mjs plugin-kit/plugins/pet-widget/dist/package  # → plugins-catalog/heming.pet/1.0.0/{plugin.json,package.tgz}
+node scripts/publish-plugin.mjs plugin-kit/plugins/pet-widget/dist/package  # → plugins-catalog/heming.pet/1.0.2/{plugin.json,package.tgz}
 
-# 2) 同步到服务器（沿用现有部署账号；只读发布，不含用户数据）
+# 2) 同步到云端仓库（唯一权威：/opt/heming/plugins；沿用现有部署账号，只读发布，不含用户数据）
 scp -r plugins-catalog/* root@<server>:/opt/heming/plugins/
-# 3) api.env 指到该目录并重启
-echo 'HEMING_PLUGIN_DIR=/opt/heming/plugins' >> /etc/heming/api.env
-systemctl restart heming-api
+# 3) 复核（HEMING_PLUGIN_DIR 由 provision.sh 首次写入 /etc/heming/api.env，不要重复追加）
 curl -s http://127.0.0.1:8787/api/plugins | head -c 300   # 应看到插件列表（bundle 条目带 package.sha256）
 ```
 
 - 目录布局：`/opt/heming/plugins/<插件 id>/<版本>/plugin.json`，界面插件另有 `package.tgz`；
   同 id 多版本时目录接口只返回最新版；
+- **唯一路径约定（d.137）**：源码 `plugin-kit/plugins/<目录名>/` → 本地暂存**仓库根 `plugins-catalog/`** →
+  云端 **`/opt/heming/plugins`**。`plugin-kit/` 下不再保留 `plugins-catalog` 副本；部署快照里的
+  `app/plugins`、`app/plugins-catalog` 不是仓库（d.137 已删除）。例外只有 `workflow-kit`，见
+  `docs/PLUGINS.md` §9；
 - 接口公开（不含用户数据）：`GET /api/plugins`（条目含 `distribution` 与 `package{sha256,size}`）、
   `GET /api/plugins/:id/:version/manifest`（带 `X-Plugin-Sha256`）、
   **`GET /api/plugins/:id/:version/package`（带 `X-Plugin-Package-Sha256`，仅 `distribution:"bundle"`）**；
 - 客户端下载后**自行校验 sha256**（清单与整包各一次），不一致拒绝安装；服务端只搬运、不解析执行；
-- **版本门槛**：`package` 路由需要服务端 ≥ d.94；桌面客户端 ≥ d.94 才有「桌面小组件」安装入口；
+- **版本门槛**：`package` 路由需要服务端 ≥ d.94；桌面客户端 ≥ d.94 才有界面插件安装入口（插件区 →「从插件仓库安装」）；
   声明式清单仍只接受 v1/v2/v3（v4 的模型预设已在 d.90 收回），v4 现在的唯一用途是界面插件；
 - 界面插件安装落点是客户端 `<userData>/plugins/<id>/<版本>/`（服务端不保存插件运行期数据），
   卸载/升级由客户端管，服务端只负责「有哪些包、哪个版本、指纹多少」。

@@ -26,8 +26,8 @@ beforeEach(() => {
   // 模块默认未安装：通知跳转要落到模块页，先装上幕僚与自动化
   useModuleStore.getState().reset();
   useModuleStore.getState().install("staff");
-  useModuleStore.getState().install("infohub");
-  useModuleStore.getState().install("automations");
+  useModuleStore.getState().install("heming.infohub");
+  useModuleStore.getState().install("heming.automations");
   setNotificationStorage(createMemoryStorage());
   useNotificationStore.setState({ items: [] });
   useUiStore.setState({
@@ -179,7 +179,7 @@ describe("通知中心面板", () => {
   });
 
   it("工作流失败通知点进去：进工作流页并投递定位意图（宿主不再 import 模块 store）", () => {
-    useModuleStore.getState().install("automations");
+    useModuleStore.getState().install("heming.automations");
     const workflowId = "w1";
     const item = makeItem({
       kind: "workflow",

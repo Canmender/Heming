@@ -293,41 +293,82 @@ describe("InterfacesView 嵌入视图", () => {
   });
 });
 
-/* ------------------------------------------------- 预置服务的删除与恢复（d.77） */
+/* ------------------------------------- 内置预置服务：缺失可见、可一键接入（d.78） */
 
-describe("内置预置服务：删除后可恢复", () => {
+describe("内置预置服务：缺失时列出并可接入", () => {
   /** 全新存储 → 首次预置两条（Windows 桌面控制 / 网页抓取）。 */
   function freshRegistry(): McpRegistry {
     return new McpRegistry(memStorage());
   }
 
-  it("没删过预置时不显示「恢复预置服务」按钮", () => {
+  it("预置都在时不占地方：不显示「预置服务」区", () => {
     const fresh = freshRegistry();
+    expect(fresh.servers()).toHaveLength(2);
     render(<InterfacesView registry={fresh} />);
-    expect(screen.queryByRole("button", { name: "恢复预置服务" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "预置服务" })).toBeNull();
   });
 
-  it("删预置后出现恢复按钮，点击把服务补回来并给 role=status 反馈", () => {
-    const fresh = freshRegistry();
-    fresh.remove("mcp-scrapling");
-    render(<InterfacesView registry={fresh} />);
+  /**
+   * 「预置凭空消失」的现场：存储里只有用户自己的服务，也没有删除记录
+   * ——旧版本里配置被覆盖 / 换账户后密文读不出都会这样。旧 UI 只在有删除记录时
+   * 才给找回入口，这种情形下用户完全看不到 Windows 桌面控制。
+   */
+  it("预置不在列表里（且没有删除记录）时也列出来，接入后自动连接", async () => {
+    const reg = new McpRegistry(memStorageWithServer());
+    render(<InterfacesView registry={reg} />);
+    const region = screen.getByRole("region", { name: "预置服务" });
+    expect(within(region).getByText("Windows 桌面控制")).toBeInTheDocument();
+    expect(within(region).getAllByRole("button", { name: /接入预置/ })).toHaveLength(2);
 
-    const restore = screen.getByRole("button", { name: "恢复预置服务" });
-    fireEvent.click(restore);
+    fireEvent.click(within(region).getByRole("button", { name: "接入预置 Windows 桌面控制" }));
 
-    expect(screen.getByRole("status")).toHaveTextContent("已恢复 1 个预置服务");
-    expect(screen.getByRole("region", { name: "MCP 服务 网页抓取（Scrapling）" })).toBeInTheDocument();
-    // 恢复后不再需要这个入口
-    expect(screen.queryByRole("button", { name: "恢复预置服务" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("已接入预置服务：Windows 桌面控制");
+    expect(screen.getByRole("region", { name: "MCP 服务 Windows 桌面控制" })).toBeInTheDocument();
+    // 接入即自动连接（与「添加服务」一致），不用再点一次
+    await waitFor(() => expect(refreshServerTools).toHaveBeenCalled());
+    // 这一条已接入 → 按钮消失；另一条还没接入 → 区还在
+    expect(screen.queryByRole("button", { name: "接入预置 Windows 桌面控制" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "接入预置 网页抓取（Scrapling）" }),
+    ).toBeInTheDocument();
   });
 
-  it("删除确认里说明这是内置预置、可用「恢复预置服务」找回", () => {
+  it("删除预置后该条在「预置服务」里重新出现，确认框说明可重新接入", () => {
     const fresh = freshRegistry();
     render(<InterfacesView registry={fresh} />);
+    expect(screen.queryByRole("region", { name: "预置服务" })).toBeNull();
+
     fireEvent.click(screen.getByRole("button", { name: "删除 网页抓取（Scrapling）" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText(/这是随应用内置的预置服务/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/恢复预置服务/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/可在「预置服务」里重新接入/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+
+    const region = screen.getByRole("region", { name: "预置服务" });
+    fireEvent.click(
+      within(region).getByRole("button", { name: "接入预置 网页抓取（Scrapling）" }),
+    );
+    expect(
+      screen.getByRole("region", { name: "MCP 服务 网页抓取（Scrapling）" }),
+    ).toBeInTheDocument();
+  });
+
+  it("已有同名服务时不再列出该预置（不给点了没反应的按钮）", () => {
+    const reg = new McpRegistry(
+      memStorageWithServer({
+        id: "mine",
+        name: "Windows 桌面控制",
+        url: "https://mine.example.com/mcp",
+      }),
+    );
+    render(<InterfacesView registry={reg} />);
+    expect(screen.queryByRole("button", { name: "接入预置 Windows 桌面控制" })).toBeNull();
+    // 网页抓取仍缺 → 区还在，说明只是这一条被同名服务顶替
+    expect(screen.getByRole("region", { name: "预置服务" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "接入预置 网页抓取（Scrapling）" }),
+    ).toBeInTheDocument();
+    expect(reg.servers().filter((s) => s.name === "Windows 桌面控制")).toHaveLength(1);
   });
 
   it("手填的服务删除确认里不出现预置说明", () => {

@@ -110,25 +110,9 @@ export const SETTINGS_CARDS: readonly SettingsCardMeta[] = [
     ],
     section: "appearance",
   },
-  {
-    id: "widgets",
-    title: "桌面小组件",
-    keywords: [
-      "桌宠",
-      "宠物",
-      "小组件",
-      "界面插件",
-      "widget",
-      "显示",
-      "隐藏",
-      "缩放",
-      "大小",
-      "点击穿透",
-      "重置位置",
-      "设置",
-    ],
-    section: "appearance",
-  },
+  // d.136：原先这里注册的「桌面小组件」卡已撤掉——设置 → 外观区不再有那张卡，
+  // 窗口设置（显示/缩放/穿透/重置位置/插件 settings.fields）挪进了插件区「插件详情」。
+  // 这里不能只删锚点却留着元数据：卡片搜索会命中一个不存在的卡，点了没有任何反应。
   {
     id: "nav-order",
     title: "导航顺序",

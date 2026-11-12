@@ -8,6 +8,11 @@
  * 用法：
  *   node scripts/build-web-module.mjs --id hello-page
  *   node scripts/build-web-module.mjs --id staff
+ *   node scripts/build-web-module.mjs --id heming.infohub --dir infohub
+ *
+ * `--id` 是**包 id**（写进清单、安装记录与 module-catalog 目录名），`--dir` 是
+ * `packages/modules/` 下的源目录名（缺省与 `--id` 相同）。两者分开是因为内置模块的
+ * 目录名保持短名（automations / infohub），而包 id 带首方前缀（heming.*）。
  *
  * 门禁（任一失败即非 0）：
  * - 产物必须存在且包含 `export`；
@@ -28,18 +33,26 @@ function option(name) {
 
 const moduleId = option("id");
 if (!moduleId || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(moduleId)) {
-  console.error("[build-web-module] 用法：node scripts/build-web-module.mjs --id <module-id>");
+  console.error(
+    "[build-web-module] 用法：node scripts/build-web-module.mjs --id <module-id> [--dir <source-dir>]",
+  );
+  process.exit(1);
+}
+// 源目录名与包 id 分离：内置模块目录仍是短名（automations / infohub），包 id 带 heming. 前缀。
+const moduleDir = option("dir") ?? moduleId;
+if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(moduleDir)) {
+  console.error(`[build-web-module] --dir 不合法：${moduleDir}`);
   process.exit(1);
 }
 
-const moduleRoot = resolve(ROOT, "packages/modules", moduleId);
+const moduleRoot = resolve(ROOT, "packages/modules", moduleDir);
 const entrySource = resolve(moduleRoot, "src/index.tsx");
 if (!existsSync(entrySource)) {
   console.error(`[build-web-module] 找不到入口：${entrySource}`);
   process.exit(1);
 }
 if (!existsSync(resolve(moduleRoot, "module.json"))) {
-  console.warn(`[build-web-module] 警告：${moduleId} 没有 module.json（只适合本地样例）`);
+  console.warn(`[build-web-module] 警告：${moduleDir} 没有 module.json（只适合本地样例）`);
 }
 
 const run = spawnSync(
@@ -47,7 +60,8 @@ const run = spawnSync(
   ["-C", "packages/web", "exec", "vite", "build", "--config", "module-build.config.mjs"],
   {
     cwd: ROOT,
-    env: { ...process.env, MODULE_ID: moduleId },
+    // module-build.config.mjs 用 MODULE_ID 找源码根，所以这里传**目录名**而不是包 id。
+    env: { ...process.env, MODULE_ID: moduleDir },
     stdio: "inherit",
     shell: process.platform === "win32",
   },

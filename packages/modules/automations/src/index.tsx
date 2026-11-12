@@ -8,7 +8,7 @@ import { useWorkflowScheduler } from "../../workflows/src/lib/workflow/scheduler
  * 自动化插件（d.134）：一个页面 = 定时任务 + 工作流 + 简报。
  * 后台巡检/调度仍随插件常驻；旧 staff/workflows 模块 id 只用于数据兼容，不再单独安装。
  */
-export const manifest = { id: "automations", version: "1.0.0" };
+export const manifest = { id: "heming.automations", version: "1.0.0" };
 
 export const pages = { automations: AutomationHomePage };
 export const homeCards = { automations: StaffHomeCard };

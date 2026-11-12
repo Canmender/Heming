@@ -23,8 +23,24 @@ import type { Page } from "../../store/ui.js";
  * 的候选链与 failover 照常工作）。
  */
 
-/** 可插拔的内置模块 id。新增模块时只加注册表项 + 页面 + 接线点。 */
-export type ModuleId = "staff" | "infohub" | "automations" | "workflows";
+/**
+ * 可插拔的内置模块 id。新增模块时只加注册表项 + 页面 + 接线点。
+ *
+ * 首方模块的包 id 带 `heming.` 前缀（与目录里的 `module.json`、安装记录、`module-catalog/`
+ * 目录名一致）；`staff` / `workflows` 是并入其它插件后只保留数据兼容的旧模块，沿用裸 id。
+ */
+export type ModuleId = "staff" | "heming.infohub" | "heming.automations" | "workflows";
+
+/**
+ * 旧版内置模块 id → 当前包 id。
+ *
+ * 只用于**读取**历史状态（localStorage `heming.modules.v1`）：包 id 统一加前缀后，旧安装
+ * 不该被当成「未安装」而丢掉入口。写回一律用新 id，不做双向映射。
+ */
+export const LEGACY_MODULE_ID_MAP: Readonly<Record<string, ModuleId>> = {
+  infohub: "heming.infohub",
+  automations: "heming.automations",
+};
 
 /** 用户可见的「插件」：一个插件可以贡献多个页面/后台任务（d.133）。 */
 export interface PluginGroup {
@@ -39,13 +55,13 @@ export const PLUGIN_GROUPS: readonly PluginGroup[] = [
     id: "assistant",
     name: "自动化",
     description: "一个页面管定时任务、工作流与简报：快速创建普通定时任务，或完整创建工作流并指定时间与次数。",
-    moduleIds: ["automations"],
+    moduleIds: ["heming.automations"],
   },
   {
     id: "infohub",
     name: "信息",
     description: "在本机采集、浏览、检索聊天记录与日程；采集引擎与归档都由这个插件管理。",
-    moduleIds: ["infohub"],
+    moduleIds: ["heming.infohub"],
   },
 ];
 
@@ -108,7 +124,7 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
     disableNote: "停用后不再后台巡检、首页幕僚卡与导航入口下线；已生成的简报仍保留在本机。",
   },
   {
-    id: "infohub",
+    id: "heming.infohub",
     name: "信息中枢",
     version: "v1.0.0",
     description:
@@ -128,7 +144,7 @@ export const BUILTIN_MODULES: readonly BuiltinModule[] = [
       "停用后导航入口、首页归档卡与 infohub_* 工具下线；不会自动启动或删除任何归档。重新启用即恢复。",
   },
   {
-    id: "automations",
+    id: "heming.automations",
     name: "自动化",
     version: "v1.0.0",
     description:

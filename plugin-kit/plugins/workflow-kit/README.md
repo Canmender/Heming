@@ -60,7 +60,7 @@ node dist/server/main.js
 ### 接入和鸣（可选）
 
 1. 先启动上面的服务；
-2. 和鸣 → 插件区 → 安装 → 选择本仓库的 `plugin/plugin.json`；
+2. 和鸣 → 插件区 →「手动粘贴清单」→ 选择本仓库的 `plugin/plugin.json`；
 3. 接口区找到「工作流引擎」服务 → 连接（首次会列出工具，默认全部关闭）；
 4. 按需打开 `workflow_*` / `node_types` 等工具（写类工具会走和鸣的人工确认）；
 5. 和鸣的智能体就能通过技能「工作流设计 / 运行工作流 / 从 n8n 迁移工作流」来用它。
@@ -145,7 +145,7 @@ node scripts/publish-cloud.mjs     # SFTP 上传 + 本地/远端/公网 sha256 �
 
 - 静态资源：`/opt/heming/updates/plugins/heming.workflow-kit/`（落地页 + 下载 + 校验文件）；
 - 插件目录：同时按 `/opt/heming/plugins/heming.workflow-kit/<版本>/plugin.json` 布局预上传，
-  等服务器版本带「云端插件目录」接口（`GET /api/plugins`）后，和鸣「插件区 → 在线目录」会自动列出；
+  服务端带「云端插件目录」接口（`GET /api/plugins`）时，和鸣「插件区 → 从插件仓库安装」会列出；
 - 凭据：优先 `HEMING_SSH_PWD`，否则读本机 `D:/Heming/.superpowers/deploy-*.py`（不落盘、不打印）。
 
 ## 测试

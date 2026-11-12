@@ -28,14 +28,14 @@ function memoryStorage(initial: Record<string, string> = {}): StorageLike & { ma
 describe("内置能力模块 · 状态规整", () => {
   it("缺省全部未安装：安装包默认不携带任何模块", () => {
     const state = defaultModuleState();
-    expect(state.installed).toEqual({ staff: false, infohub: false, automations: false, workflows: false });
-    expect(state.enabled).toEqual({ staff: false, infohub: false, automations: false, workflows: false });
+    expect(state.installed).toEqual({ staff: false, "heming.infohub": false, "heming.automations": false, workflows: false });
+    expect(state.enabled).toEqual({ staff: false, "heming.infohub": false, "heming.automations": false, workflows: false });
     expect(effectiveModuleIds(state)).toEqual([]);
   });
 
   it("坏 JSON / 非对象 / 缺字段一律回落默认（不把模块锁死）", () => {
     expect(parseModuleState("{bad json").installed.staff).toBe(false);
-    expect(parseModuleState("null").installed.infohub).toBe(false);
+    expect(parseModuleState("null").installed["heming.infohub"]).toBe(false);
     // 老存储只有 enabled（没有 installed）：不再视为已安装
     expect(normalizeModuleState({ enabled: { staff: true } })).toEqual(defaultModuleState());
     // 已安装但缺 enabled → 启用（装过就是开着）
@@ -51,15 +51,15 @@ describe("内置能力模块 · 状态规整", () => {
       installed: { ghost: true, staff: true },
       enabled: { ghost: true, staff: true },
     });
-    expect(state.installed).toEqual({ staff: true, infohub: false, automations: false, workflows: false });
-    expect(state.enabled).toEqual({ staff: true, infohub: false, automations: false, workflows: false });
+    expect(state.installed).toEqual({ staff: true, "heming.infohub": false, "heming.automations": false, workflows: false });
+    expect(state.enabled).toEqual({ staff: true, "heming.infohub": false, "heming.automations": false, workflows: false });
   });
 
   it("旧版本残留的已安装状态一次性归零，之后安装的状态正常保留", () => {
     const storage = memoryStorage({
       [MODULES_KEY]: JSON.stringify({
-        installed: { staff: true, infohub: true, automations: false },
-        enabled: { staff: true, infohub: true, automations: false },
+        installed: { staff: true, "heming.infohub": true, "heming.automations": false },
+        enabled: { staff: true, "heming.infohub": true, "heming.automations": false },
       }),
     });
     // 第一次读：没有 v2 标记 → 归零并写标记；业务数据不归本模块管
@@ -71,29 +71,43 @@ describe("内置能力模块 · 状态规整", () => {
     storage.setItem(
       MODULES_KEY,
       JSON.stringify({
-        installed: { staff: true, infohub: false, automations: false, workflows: false },
-        enabled: { staff: true, infohub: false, automations: false, workflows: false },
+        installed: { staff: true, "heming.infohub": false, "heming.automations": false, workflows: false },
+        enabled: { staff: true, "heming.infohub": false, "heming.automations": false, workflows: false },
       }),
     );
     const kept = readModuleStateWithMigration(storage);
     expect(kept.installed.staff).toBe(true);
     expect(kept.enabled.staff).toBe(true);
   });
+
+  it("旧包 id 的安装/启用状态按新包 id 接手（改名不把用户装好的插件当未安装）", () => {
+    const migrated = normalizeModuleState({
+      installed: { infohub: true, automations: true },
+      enabled: { infohub: false, automations: true },
+    });
+    expect(migrated.installed["heming.infohub"]).toBe(true);
+    expect(migrated.enabled["heming.infohub"]).toBe(false);
+    expect(migrated.installed["heming.automations"]).toBe(true);
+    expect(migrated.enabled["heming.automations"]).toBe(true);
+    // 旧 id 不再是模块键，避免页面上出现对不存在的模块的开关
+    expect(migrated.installed).not.toHaveProperty("infohub");
+    expect(migrated.installed).not.toHaveProperty("automations");
+  });
 });
 
 describe("内置能力模块 · 安装 / 启用语义", () => {
   it("自动化不依赖信息中枢：只停信息中枢时自动化仍生效", () => {
     const state = defaultModuleState();
-    state.installed.infohub = true;
-    state.enabled.infohub = true;
-    state.installed.automations = true;
-    state.enabled.automations = true;
+    state.installed["heming.infohub"] = true;
+    state.enabled["heming.infohub"] = true;
+    state.installed["heming.automations"] = true;
+    state.enabled["heming.automations"] = true;
 
-    state.enabled.infohub = false;
-    expect(state.enabled.automations).toBe(true);
-    expect(isModuleEffective(state, "automations")).toBe(true);
-    expect(missingRequirements(state, "automations")).toEqual([]);
-    expect(effectiveModuleIds(state)).toEqual(["automations"]);
+    state.enabled["heming.infohub"] = false;
+    expect(state.enabled["heming.automations"]).toBe(true);
+    expect(isModuleEffective(state, "heming.automations")).toBe(true);
+    expect(missingRequirements(state, "heming.automations")).toEqual([]);
+    expect(effectiveModuleIds(state)).toEqual(["heming.automations"]);
   });
 
   it("已安装但自身关闭即不生效；未安装时开关为 false", () => {
@@ -101,7 +115,7 @@ describe("内置能力模块 · 安装 / 启用语义", () => {
     state.installed.staff = true;
     state.enabled.staff = false;
     expect(isModuleEffective(state, "staff")).toBe(false);
-    expect(isModuleEffective(state, "infohub")).toBe(false);
+    expect(isModuleEffective(state, "heming.infohub")).toBe(false);
   });
 });
 
@@ -119,17 +133,17 @@ describe("内置能力模块 · 存储", () => {
   });
 
   it("install 落盘（安装并启用），重新读回一致（本机、不上云）", () => {
-    useModuleStore.getState().install("infohub");
+    useModuleStore.getState().install("heming.infohub");
     const s = useModuleStore.getState();
-    expect(s.installed.infohub).toBe(true);
-    expect(s.enabled.infohub).toBe(true);
+    expect(s.installed["heming.infohub"]).toBe(true);
+    expect(s.enabled["heming.infohub"]).toBe(true);
     const raw = storage.map.get(MODULES_KEY);
     expect(raw).toBeTruthy();
     expect(JSON.parse(raw as string)).toEqual({
-      installed: { staff: false, infohub: true, automations: false, workflows: false },
-      enabled: { staff: false, infohub: true, automations: false, workflows: false },
+      installed: { staff: false, "heming.infohub": true, "heming.automations": false, workflows: false },
+      enabled: { staff: false, "heming.infohub": true, "heming.automations": false, workflows: false },
     });
-    expect(readModuleState(storage).installed.infohub).toBe(true);
+    expect(readModuleState(storage).installed["heming.infohub"]).toBe(true);
   });
 
   it("setEnabled 只改开关；uninstall 回到未安装并关掉开关", () => {

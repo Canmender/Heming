@@ -28,10 +28,11 @@ beforeEach(() => {
 
 describe("modulePageOf", () => {
   it("旧 staff/workflows 页面 id 重定向到统一的自动化页", () => {
-    expect(modulePageOf("staff")).toBe("automations");
-    expect(modulePageOf("workflows")).toBe("automations");
-    expect(modulePageOf("automations")).toBe("automations");
-    expect(modulePageOf("infohub")).toBe("infohub");
+    // 返回的是模块**包 id**（带 heming. 前缀），页面 id 仍是 staff/workflows/automations/infohub。
+    expect(modulePageOf("staff")).toBe("heming.automations");
+    expect(modulePageOf("workflows")).toBe("heming.automations");
+    expect(modulePageOf("automations")).toBe("heming.automations");
+    expect(modulePageOf("infohub")).toBe("heming.infohub");
   });
 
   it("非模块页返回 null", () => {
@@ -112,21 +113,25 @@ describe("ModuleHomeCard", () => {
 describe("ModuleBackgroundSlots", () => {
   it("只挂自动化插件的统一后台组件（内部负责巡检/调度/工作流）", () => {
     const calls: boolean[] = [];
-    useWebModuleEntry.mockImplementation((id: string) => ({
-      entry: {
-        manifest: { id, version: "1.0.0" },
-        pages: { [id]: () => null },
-        background: {
-          [id]: ({ active }: { active: boolean }) => {
-            calls.push(active);
-            return <div data-testid={`bg-${id}`} />;
+    useWebModuleEntry.mockImplementation((id: string) => {
+      // 模块包里的 pages/background 以**页面 id** 为键；包 id 只是安装/加载标识。
+      const page = id === "heming.automations" ? "automations" : id;
+      return {
+        entry: {
+          manifest: { id, version: "1.0.0" },
+          pages: { [page]: () => null },
+          background: {
+            [page]: ({ active }: { active: boolean }) => {
+              calls.push(active);
+              return <div data-testid={`bg-${page}`} />;
+            },
           },
         },
-      },
-      loading: false,
-      error: "",
-    }));
-    useModuleStore.getState().install("automations");
+        loading: false,
+        error: "",
+      };
+    });
+    useModuleStore.getState().install("heming.automations");
     render(
       <ModuleBackgroundSlots authUser moduleState={useModuleStore.getState()} />,
     );

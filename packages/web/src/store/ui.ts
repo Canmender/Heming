@@ -665,7 +665,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     workflowFocusId: null,
     }),
   openStaff: () => {
-    if (!isModuleOn("automations")) {
+    if (!isModuleOn("heming.automations")) {
       get().openModuleManager();
       return;
     }
@@ -673,7 +673,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   openInfohub: (intent) => {
     // 模块未安装/未启用时不再切到一个不该存在的页面；落到插件页让用户能安装/启用它
-    if (!isModuleOn("infohub")) {
+    if (!isModuleOn("heming.infohub")) {
       get().openModuleManager();
       return;
     }
@@ -692,7 +692,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   consumeInfohubIntent: () => set({ infohubIntent: null }),
   openAutomations: (intent) => {
-    if (!isModuleOn("automations")) {
+    if (!isModuleOn("heming.automations")) {
       get().openModuleManager();
       return;
     }
@@ -713,7 +713,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   consumeAutomationIntent: () => set({ automationIntent: null }),
   focusWorkflow: (workflowId) => {
-    if (!isModuleOn("automations")) {
+    if (!isModuleOn("heming.automations")) {
       get().openModuleManager();
       return;
     }
@@ -816,7 +816,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     }),
   consumeTeamActivityFocus: () => set({ teamFocusActivityId: null }),
   focusAutomation: (taskId) => {
-    if (!isModuleOn("automations")) {
+    if (!isModuleOn("heming.automations")) {
       get().openModuleManager();
       return;
     }

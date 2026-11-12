@@ -84,8 +84,8 @@ pnpm --filter @heming/pet-widget typecheck
 
 ## 3. 安装 / 启用 / 卸载（宿主侧语义）
 
-- 安装入口：主窗「插件区 → 桌面小组件 → 安装」，支持**官方云端目录**（带 `sha256`）与**本地 `.tgz` 显式导入**。
-  本地导入会二次确认「本插件包含可执行内容」；未签名包允许本地联调（`bundle` 的签名可选、带则做结构校验）。
+- 安装入口：主窗「插件区 →「从插件仓库安装」」，走官方云端目录（带 `sha256` 校验）；**本地 `.tgz` 导入**在当前客户端界面没有入口（主进程 `widgets:installFromFile` 仍保留给本地联调）。
+  未签名包只允许本地联调（`bundle` 的签名可选、带则做结构校验）。
 - 落盘：`<userData>/plugins/heming.pet/<version>/`（`plugin.json` + `files/**`）+ `current.json` 指针；
   设置 `settings.json`、窗口状态 `state.json` 同目录；注册表 `installed.json`。
 - 启用/停用：停用销毁窗口与托盘、保留文件与设置；重新启用即恢复。卸载：删版本目录 + 记录 + 设置（二次确认）。
@@ -106,7 +106,7 @@ pnpm --filter @heming/pet-widget typecheck
 | `__heming_widget` | IPC | 本包用途 |
 |---|---|---|
 | `state()` | `widget:state` | 右键菜单显示「鼠标穿透（已开/已关）」 |
-| `show()/hide()/toggle()` | `widget:show/hide/toggle` | 菜单「隐藏」；宿主托盘/设置区也走同一状态 |
+| `show()/hide()/toggle()` | `widget:show/hide/toggle` | 菜单「隐藏」；宿主托盘/插件详情「窗口设置」也走同一状态 |
 | `setScale(1 \| -1)` | `widget:set-scale` | 菜单「放大一档 / 缩小一档」（绝对档位由宿主决定） |
 | `setClickThrough(on)` | `widget:set-click-through` | 菜单切换穿透 |
 | `setInteractive(on)` | `widget:set-interactive` | 命中区变化时上报（仅 `clickThrough:"auto"` 生效） |

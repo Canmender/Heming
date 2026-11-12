@@ -18,8 +18,8 @@ import {
 const SETTINGS_TAB_IDS = new Set(["profile", "model", "appearance", "navigation", "about"]);
 
 describe("registry 完整性", () => {
-  it("15 张卡（新增「后台任务模型」；模型路由页下线后移除「候选链」卡）、id 唯一、分区合法、标题与关键词非空", () => {
-    expect(SETTINGS_CARDS).toHaveLength(15);
+  it("14 张卡（d.136 撤掉「桌面小组件」卡）、id 唯一、分区合法、标题与关键词非空", () => {
+    expect(SETTINGS_CARDS).toHaveLength(14);
     const ids = SETTINGS_CARDS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const card of SETTINGS_CARDS) {
@@ -45,7 +45,9 @@ describe("registry 完整性", () => {
     expect(settingsCardById("hitl-policy")?.title).toBe("工具调用确认");
     expect(settingsCardById("nope")).toBeUndefined();
     expect(sectionLabelOf("appearance")).toBe("外观");
-    expect(settingsCardLabel(settingsCardById("widgets")!)).toBe("桌面小组件 · 外观");
+    expect(settingsCardLabel(settingsCardById("nav-mode")!)).toBe("导航栏 · 外观");
+    // d.136：卡片挪进插件详情后不能再留元数据，否则搜到了也点不过去
+    expect(settingsCardById("widgets")).toBeUndefined();
   });
 });
 
@@ -69,7 +71,7 @@ describe("matchSettingsCards（跨分区匹配）", () => {
 
   it("分区名也参与匹配：搜「外观」命中该分区全部卡片（渲染顺序）", () => {
     const ids = matchSettingsCards("外观").map((c) => c.id);
-    expect(ids).toEqual(["theme-mode", "accent-color", "nav-mode", "widgets"]);
+    expect(ids).toEqual(["theme-mode", "accent-color", "nav-mode"]);
   });
 
   it("大小写不敏感、空格分词为 AND：搜「key 存储」→ 密钥存储", () => {

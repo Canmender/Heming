@@ -29,8 +29,8 @@ const GROUP_ICONS: Record<PluginGroup["id"], ComponentType<SVGProps<SVGSVGElemen
 
 const MODULE_ICONS: Record<ModuleId, ComponentType<SVGProps<SVGSVGElement>>> = {
   staff: StaffIcon,
-  infohub: InfoHubIcon,
-  automations: AutomationIcon,
+  "heming.infohub": InfoHubIcon,
+  "heming.automations": AutomationIcon,
   workflows: WorkflowIcon,
 };
 

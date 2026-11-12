@@ -17,9 +17,21 @@ const path = require("node:path");
 const { createModuleStore } = require("./module-store");
 const { downloadModule, moduleUrl } = require("./module-download");
 
-const ENGINE_ID = "infohub";
-/** 应用期望的引擎版本；升级引擎时改这里（模块自己的 version 必须一致）。 */
-const ENGINE_VERSION = "1.0.0";
+/**
+ * 引擎所在模块包的 id。
+ *
+ * 引擎已并入「信息中枢」模块包（同一个包同时带 `files/web/**` 与 `files/app`+`files/lib`），
+ * 所以这里必须等于模块包 id：包 id 统一加 `heming.` 前缀后也要跟着改。
+ * 已装用户的旧目录/记录由 `module-store.js` 的 `migrateLegacyIds()` 在启动时迁到新 id。
+ */
+const ENGINE_ID = "heming.infohub";
+/**
+ * 应用期望的引擎版本；升级引擎时改这里（模块自己的 version 必须一致）。
+ *
+ * 必须与 `packages/modules/infohub/module.json` 的 `version` 一致：`ensure()` 按这个
+ * 版本从更新源补下载同一模块包，对不上就会去要一个下载源里不存在的版本。
+ */
+const ENGINE_VERSION = "1.1.0";
 const DEFAULT_FEED = process.env.HEMING_MODULE_FEED || "http://47.92.39.184/updates/modules";
 
 const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/;

@@ -333,8 +333,8 @@ describe("d.67 页面合并：旧页面 id 折叠成宿主页 + 视图意图", (
 describe("ui store 自动化意图", () => {
   beforeEach(() => {
     useModuleStore.getState().reset();
-    useModuleStore.getState().install("infohub");
-    useModuleStore.getState().install("automations");
+    useModuleStore.getState().install("heming.infohub");
+    useModuleStore.getState().install("heming.automations");
     useUiStore.setState({
       page: "home",
       activeConversationId: null,
@@ -493,7 +493,7 @@ describe("模块停用时的跳转落点", () => {
     expect(s.pageView).toBe("plugins");
     expect(s.infohubIntent).toBeNull();
 
-    useModuleStore.getState().install("infohub");
+    useModuleStore.getState().install("heming.infohub");
     useUiStore.getState().openInfohub({ tab: "agenda" });
     s = useUiStore.getState();
     expect(s.page).toBe("infohub");
@@ -519,7 +519,7 @@ describe("模块停用时的跳转落点", () => {
     expect(useUiStore.getState().page).toBe("plugins");
     expect(useUiStore.getState().pageView).toBe("plugins");
 
-    useModuleStore.getState().install("automations");
+    useModuleStore.getState().install("heming.automations");
     useUiStore.getState().openStaff();
     // d.134：幕僚简报并入自动化单页，属「简报」Tab
     expect(useUiStore.getState().page).toBe("automations");

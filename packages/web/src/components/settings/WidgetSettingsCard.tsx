@@ -22,7 +22,7 @@ import {
 } from "../../lib/widgets/legacy.js";
 
 /**
- * 设置区「外观 · 桌面小组件」卡（d.98 · 规格 §4.2）。
+ * 桌面小组件的「窗口设置」卡（d.98 · 规格 §4.2；d.136 起可嵌入插件详情）。
  *
  * 两段内容，全部由宿主通用渲染、插件不需要写设置界面：
  * 1. **宿主动作**（规格 §2.3「窗口通用动作」）：显示/隐藏、放大一档/缩小一档、
@@ -30,9 +30,14 @@ import {
  * 2. **清单 `settings.fields` 通用表单**：boolean / select / text / number / agent 五种类型。
  *    值由主进程持有（`userData/plugins/<id>/settings.json`），这里经 IPC 读写。
  *
- * ★ 为什么设置卡放在「外观」：它是桌面外观的一部分（原桌宠卡的位置），
- *   用户找「怎么让桌宠回来 / 怎么调大小」时不会想到去插件区深处翻。
- *   未安装时同页给一次性「桌宠已改为插件」提示（与插件区同源，只提示一次）。
+ * ★ 为什么设置卡放在了插件区「插件详情」：窗口的显示/缩放/穿透属于某个插件自己的行为，
+ *   跟插件放在一起才找得到；用户也反馈设置 → 外观区不该出现「桌面小组件」卡。
+ *   默认导出形态（无 props）仍是完整卡片，留作嵌入式以外的通用入口与既有测试基线。
+ *
+ * ★ 两种渲染形态：
+ *   - 默认：独立卡（外层 ui-card + 「桌面小组件」大标题 + 空态引导），可列全部小组件；
+ *   - `embedded`：只渲染窗口动作 + 设置表单，没有卡片壳、大标题与空态引导——
+ *     插件详情里已经交代了「这是哪个插件」，再套一层壳会变成卡中卡。
  */
 
 /** 无设置字段时也要显示的宿主动作（规格要求「宿主渲染，不用插件声明」）。 */
@@ -47,7 +52,15 @@ function scaleLabel(scale: number | undefined): string {
   return scale ? `${Math.round(scale * 100)}%` : "—";
 }
 
-export function WidgetSettingsCard() {
+export function WidgetSettingsCard({
+  onlyPluginId,
+  embedded = false,
+}: {
+  /** 只渲染这个 id 的小组件（插件详情里嵌该插件的窗口设置）。 */
+  onlyPluginId?: string;
+  /** 嵌入插件详情：不要外层卡片壳/大标题/空态引导；没有记录时返回 null。 */
+  embedded?: boolean;
+} = {}) {
   const records = useWidgetsStore((state) => state.records);
   const states = useWidgetsStore((state) => state.states);
   const loaded = useWidgetsStore((state) => state.loaded);
@@ -57,12 +70,18 @@ export function WidgetSettingsCard() {
   const [error, setError] = useState<string | null>(null);
   const [petHint, setPetHint] = useState(false);
 
+  /** 嵌入时只看目标插件；默认形态列全部（与老行为一致）。 */
+  const visibleRecords = useMemo(
+    () => (onlyPluginId ? records.filter((record) => record.id === onlyPluginId) : records),
+    [records, onlyPluginId],
+  );
+
   const needsAgents = useMemo(
     () =>
-      records.some((record) =>
+      visibleRecords.some((record) =>
         (record.widget?.settings?.fields ?? []).some((field) => field.type === "agent"),
       ),
-    [records],
+    [visibleRecords],
   );
   const agentsRoster = useChatStore((state) => state.agentsRoster);
   const loadAgentsRoster = useChatStore((state) => state.loadAgentsRoster);
@@ -79,12 +98,13 @@ export function WidgetSettingsCard() {
   }, [needsAgents, loadAgentsRoster]);
 
   useEffect(() => {
-    if (!loaded) return;
+    // 迁移提示只属于设置 → 外观那个独立卡；嵌进插件详情时不再重复打扰。
+    if (embedded || !loaded) return;
     if (shouldShowPetMigrationHint(records)) {
       setPetHint(true);
       dismissPetMigrationHint();
     }
-  }, [loaded, records]);
+  }, [embedded, loaded, records]);
 
   const flashSaved = useCallback(() => {
     setSaved(true);
@@ -111,6 +131,39 @@ export function WidgetSettingsCard() {
     if (!result.ok) setError(result.error ?? "操作失败");
     else setError(null);
   }, []);
+
+  /**
+   * 嵌进插件详情（d.136）的形态：不套卡片壳、不写「桌面小组件」大标题、不做空态引导。
+   * 没有这个插件的窗口记录（页面型插件，或记录还没回来）时整块返回 null，
+   * 由插件详情自己决定这一节渲不渲染。
+   */
+  if (embedded) {
+    if (!available || visibleRecords.length === 0) return null;
+    return (
+      <div className="space-y-3">
+        {error && (
+          <p role="alert" className="ui-body-sm text-[var(--danger)]">
+            {error}
+          </p>
+        )}
+        {saved && (
+          <p role="status" className="ui-caption">
+            已保存
+          </p>
+        )}
+        {visibleRecords.map((record) => (
+          <WidgetBlock
+            key={record.id}
+            record={record}
+            state={states[record.id]}
+            agents={agentsRoster}
+            onAction={onAction}
+            onCommit={(field, raw) => void commit(record, field, raw)}
+          />
+        ))}
+      </div>
+    );
+  }
 
   if (!available) {
     return (
@@ -159,7 +212,7 @@ export function WidgetSettingsCard() {
 
       {!loaded ? (
         <p className="mt-3 ui-caption">正在读取桌面小组件…</p>
-      ) : records.length === 0 ? (
+      ) : visibleRecords.length === 0 ? (
         <div className="mt-3 rounded-lg bg-[var(--subtle-2)] px-3 py-2">
           <p className="ui-caption">
             还没有安装桌面小组件。桌宠已改为插件，装好后这里会出现它的设置。
@@ -174,7 +227,7 @@ export function WidgetSettingsCard() {
         </div>
       ) : (
         <div className="mt-3 space-y-4">
-          {records.map((record) => (
+          {visibleRecords.map((record) => (
             <WidgetBlock
               key={record.id}
               record={record}

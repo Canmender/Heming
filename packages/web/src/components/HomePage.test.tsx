@@ -341,7 +341,7 @@ describe("HomePage", () => {
     // booted=true 挡住卡内兜底 boot()（没有桥时它会把 available 改回 false）。
     useInfohubStore.setState({ available: true, running: false, booted: true });
     // 内置模块默认未安装：先装上，确认默认渲染时有归档卡
-    useModuleStore.getState().install("infohub");
+    useModuleStore.getState().install("heming.infohub");
     const first = render(<HomePage />);
     await act(async () => {});
     // d.131 M2–M4：幕僚/信息中枢卡都由模块包提供；jsdom 没有模块构建，首页不再渲染内置回退
@@ -349,7 +349,7 @@ describe("HomePage", () => {
     expect(screen.queryByRole("region", { name: "本机归档" })).toBeNull();
     first.unmount();
 
-    useModuleStore.getState().setEnabled("infohub", false);
+    useModuleStore.getState().setEnabled("heming.infohub", false);
     render(<HomePage />);
     await act(async () => {});
     expect(screen.queryByRole("region", { name: "本机归档" })).not.toBeInTheDocument();

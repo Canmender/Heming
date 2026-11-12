@@ -15,7 +15,7 @@ import {
 import { PlusIcon, TrashIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { RegistryPage } from "./RegistryPage.js";
-import { MCP_PRESETS } from "../lib/mcp/presets.js";
+import { DEFAULT_PRESET_SERVERS, MCP_PRESETS, presetServerId } from "../lib/mcp/presets.js";
 import { PageShell } from "./layout/PageShell.js";
 import { describeSystemPlugin, pluginStore, type PluginStore } from "../lib/plugins/index.js";
 import { useUiStore } from "../store/ui.js";
@@ -153,10 +153,24 @@ export function InterfacesView({
     [registry, servers, toolsByServer, tick],
   );
   /**
-   * 被删掉过的预置服务 id（d.77）：有值才显示「恢复预置服务」。
-   * 预置的删除是「不再自动补回」的语义，没有这个入口就只能手填找回。
+   * 还没接入的内置预置服务：界面把它们显式列出来，而不是等「用户删过」才给入口。
+   *
+   * 为什么不只看删除记录：预置可能因为升级、配置被覆盖、换系统账户后密文读不出
+   * 而凭空消失，这时根本没有删除记录，旧 UI 连找回按钮都不显示，用户只能手填。
+   * 改成「当前列表里缺哪条」来判断，丢过的预置就一定会重新出现、可以一键接回。
    */
-  const removedPresets = useMemo(() => registry.removedPresetIds(), [registry, tick]);
+  const missingPresets = useMemo(
+    () =>
+      DEFAULT_PRESET_SERVERS.filter(
+        // 同名也算「已有」：用户可能手填过同名服务，那再列一条「未接入」只会
+        // 点出一个「同名已存在，未重复接入」的提示，等于给用户一个没用的按钮。
+        (p) =>
+          !servers.some(
+            (s) => s.id === presetServerId(p.id) || s.name.trim() === p.name.trim(),
+          ),
+      ),
+    [servers],
+  );
 
   // 组件卸载时刷新不设置状态
   useEffect(() => () => setConn({}), []);
@@ -231,17 +245,16 @@ export function InterfacesView({
     setRemoveTarget(server);
   };
 
-  /** 恢复被删掉的预置服务；按钮只在存在删除记录时出现（见 removedPresets）。 */
-  const restorePresets = () => {
-    const restored = registry.restorePresets();
+  /** 接入一条内置预置服务；成功后顺手连一次，失败不阻断（配置已存下，可在列表里重试）。 */
+  const restorePreset = (presetId: string) => {
+    const added = registry.restorePreset(presetId);
     bump();
-    setMsg({
-      kind: "ok",
-      text:
-        restored > 0
-          ? `已恢复 ${restored} 个预置服务`
-          : "预置服务都在（同名服务已存在，不覆盖其配置）",
-    });
+    if (!added) {
+      setMsg({ kind: "ok", text: "同名服务已存在，未重复接入（不会覆盖你的配置）" });
+      return;
+    }
+    setMsg({ kind: "ok", text: `已接入预置服务：${added.name}，正在拉取工具…` });
+    void connect(added);
   };
 
   const confirmRemoveServer = () => {
@@ -322,11 +335,6 @@ export function InterfacesView({
           <PlusIcon width={13} height={13} />
           添加 MCP 服务
         </button>
-        {removedPresets.length > 0 && (
-          <button type="button" onClick={restorePresets} className="ui-btn ui-btn-md ui-btn-ghost">
-            恢复预置服务
-          </button>
-        )}
         <span className="ml-auto text-[11px] text-muted">
           MCP 协议 {MCP_PROTOCOL_VERSION} · 工具默认关闭，需要逐个授权
         </span>
@@ -342,6 +350,42 @@ export function InterfacesView({
         >
           {msg.text}
         </div>
+      )}
+
+      {/* 内置预置服务缺失时列在这里（判断见 missingPresets 注释）：
+          用户永远看得见「本该有这条」，点一下就能接回，不用手填命令与参数。 */}
+      {missingPresets.length > 0 && (
+        <section
+          aria-label="预置服务"
+          className="mb-4 rounded-xl border border-line bg-[var(--surface)] p-3 shadow-card"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="ui-section-title">预置服务</span>
+            <span className="ui-chip">未接入</span>
+            <span className="ml-auto text-[11px] text-muted">随应用内置，无需填地址</span>
+          </div>
+          <p className="mt-1 text-[11px] text-muted">
+            工具默认关闭；启用后每次调用仍需你确认。
+          </p>
+          <div className="mt-2 flex flex-col gap-2">
+            {missingPresets.map((preset) => (
+              <div key={preset.id} className="flex flex-wrap items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-bold">{preset.name}</div>
+                  <div className="mt-0.5 ui-caption">{preset.hint}</div>
+                </div>
+                <button
+                  type="button"
+                  aria-label={`接入预置 ${preset.name}`}
+                  onClick={() => restorePreset(preset.id)}
+                  className="ui-btn ui-btn-sm ui-btn-primary"
+                >
+                  接入
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {formOpen && (
@@ -728,7 +772,7 @@ export function InterfacesView({
           <p className="text-[12px] leading-6">
             删除 MCP 服务「{removeTarget.name}」？这条配置、缓存的工具清单与逐个工具的授权开关都会被移除；
             {registry.isPreset(removeTarget.id)
-              ? "这是随应用内置的预置服务，删除后可用列表上方的「恢复预置服务」找回。"
+              ? "这是随应用内置的预置服务，删除后可在「预置服务」里重新接入。"
               : "需要时得重新添加或从发现页安装。"}
             删除不会卸载本机的第三方包。
           </p>

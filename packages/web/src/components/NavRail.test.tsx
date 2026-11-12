@@ -40,7 +40,7 @@ describe("NavRail 图标轨（A 方案）", () => {
   });
 
   it("装上并启用模块后，入口追加在导航最下面（8 项顺序不变），停用后消失", () => {
-    useModuleStore.getState().install("automations");
+    useModuleStore.getState().install("heming.automations");
     render(<NavRail />);
     const labels = screen
       .getAllByRole("button")
@@ -50,18 +50,18 @@ describe("NavRail 图标轨（A 方案）", () => {
     expect(labels).toEqual(["主页", "插件", "记忆", "设置", "自动化"]);
 
     // 停用（不是删除）→ 入口下线；重新启用 → 回来
-    act(() => useModuleStore.getState().setEnabled("automations", false));
+    act(() => useModuleStore.getState().setEnabled("heming.automations", false));
     expect(screen.queryByRole("button", { name: "自动化" })).not.toBeInTheDocument();
-    act(() => useModuleStore.getState().setEnabled("automations", true));
+    act(() => useModuleStore.getState().setEnabled("heming.automations", true));
     expect(screen.getByRole("button", { name: "自动化" })).toBeInTheDocument();
 
     // 删除 → 入口消失
-    act(() => useModuleStore.getState().uninstall("automations"));
+    act(() => useModuleStore.getState().uninstall("heming.automations"));
     expect(screen.queryByRole("button", { name: "工作流" })).not.toBeInTheDocument();
   });
 
   it("点模块入口能切到对应页面（模块页不需要从插件卡绕）", () => {
-    useModuleStore.getState().install("infohub");
+    useModuleStore.getState().install("heming.infohub");
     render(<NavRail />);
     fireEvent.click(screen.getByRole("button", { name: "信息中枢" }));
     expect(useUiStore.getState().page).toBe("infohub");
@@ -230,7 +230,7 @@ describe("NavRail 导航顺序固定（d.123：不可自定义）", () => {
   });
 
   it("已装模块入口追加在 8 项之后，不改变前 8 项顺序", () => {
-    useModuleStore.getState().install("automations");
+    useModuleStore.getState().install("heming.automations");
     render(<NavRail />);
     const labels = screen
       .getAllByRole("button")

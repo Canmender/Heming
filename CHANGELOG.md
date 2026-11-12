@@ -2,6 +2,99 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.137.3.54.10（2026-11-12）— 建模室改名，内置模块包 ID 统一成 `heming.*`
+
+- **建模工作室 → 建模室**：插件 `heming.studio` 的清单 `name`、页面标题、命令文案统一成两个字
+  （`0.2.1 → 0.2.2`；源码与示例里 34 处旧名一并替换）。重新打包、签名后发布到
+  `plugins-catalog/heming.studio/0.2.2` 与云端 `/opt/heming/plugins`，云端 0.2.1 删除；
+  `GET /api/plugins` 复核为「建模室 0.2.2」。
+- **模块包 ID 与插件同一口径**：内置模块的包 id 由裸名改成 `heming.infohub` / `heming.automations`
+  （`module.json`、`src/index.tsx` 清单、`module-catalog/<包id>/<version>/`、服务端 `DEFAULT_MODULES`、
+  `build-modules.mjs` 的 TARGETS、`check-module-packages.mjs` 的「目录名 → 包 id」映射全部对齐）。
+  `build-web-module.mjs` / `pack-web-module.mjs` 新增 `--dir`（源目录），`--id` 只表示包 id——
+  目录名与包 id 不再强绑。
+- **页面层一律不动**：页面 id、`PluginGroup.id`、`homeCard` / `backgroundLoop` / `toolPrefixes` /
+  `storageKeys` 贡献 id、IPC 通道（`infohub:*`）、`app://` 资源路径保持原值；只换「包 id」这一层，
+  避免迁移波及贡献注册与已有通知、深链。
+- **旧安装自动迁移**：桌面端 `module-store` 启动时幂等执行 `migrateLegacyIds()`（旧目录整目录 rename、
+  `installed.json` 改新 id；新 id 目录已存在则作废旧目录；失败只记日志、按未安装处理，绝不阻塞启动）；
+  web 侧 `normalizeModuleState` 把 localStorage 旧键 `infohub` / `automations` 的安装与启用状态按新 id
+  接手（只读兼容，写回一律新 id）。`infohub-engine.js` 的 `ENGINE_ID` 同步为 `heming.infohub`，
+  `ENGINE_VERSION` 与 `packages/modules/infohub/module.json` 的 `1.1.0` 对齐（两处必须同版本，
+  否则首次启用会去下载不存在的版本）。
+- **发版顺序（硬约束）**：服务端与 `module-catalog` 必须同批部署——客户端只认新 id，若服务端目录
+  仍报旧 id，插件仓库里两张模块卡会直接不渲染（不崩）。`docs/PLUGINS.md` §12 补齐包 id、`--only <包id>`
+  与迁移说明。
+- **门禁（d.137.3.54.10 实跑）**：`pnpm test` 全绿——web vitest 291 文件 / 4227 例、shared 8 / 106、
+  server 16 / 273、desktop node:test 790 例、pet-widget 11 / 138，合计 5534 例；五包 typecheck 全绿；
+  `check-module-packages.mjs` OK（4 个包契约通过）；`build-modules.mjs` 重出
+  `module-catalog/heming.automations/1.0.0` 与 `module-catalog/heming.infohub/1.1.0`（均含
+  `module.json` + `module.tgz`），旧裸 id 目录已删。
+
+## d.136.3.54.10（2026-11-12）— 模块目录条目随构建产出，云端六个插件位补齐
+
+- **目录条目落进构建产物**：`scripts/build-modules.mjs` 打包后按模块清单生成
+  `module-catalog/<id>/<version>/module.json`（id / name / version / description / author / engine）。
+  服务端 `moduleCatalog.list()` 只认这个文件，缺了它会回落到编译进 server 的 `DEFAULT_MODULES`——
+  云端换了新包、`/api/modules` 却还报发服务器那一刻的版本（本次信息中枢明明已是 1.1.0，
+  接口仍报 1.0.0 就是这个原因）。`docs/PLUGINS.md` §12.3 写明两个文件要一起部署。
+- **云端模块目录发布**：上传 `infohub/1.1.0`（含会话浏览，14.1MB）与 `automations/1.0.0`
+  的 `module.tgz` + `module.json`；删除 `infohub/1.0.0`、以及从未挂目录条目的遗留包
+  `staff/1.0.0`、`workflows/1.0.0`、`heming.infohub-engine/1.0.0`（引擎已随信息中枢包内置）。
+  `GET /api/modules` 现在返回「信息中枢 1.1.0」「自动化 1.0.0」，`module.tgz` 200。
+- **云端插件位最终清单**（`/api/plugins` + `/api/modules`）：导演台 0.3.1、剪辑室 0.1.0、
+  建模工作室 0.2.1、桌宠 1.0.2、信息中枢 1.1.0、自动化 1.0.0。
+
+## d.136.3.54.9（2026-11-12）— 插件仓库路径统一：一条链路，云端只留一个权威目录
+
+- **唯一路径约定**：源码 `plugin-kit/plugins/<目录名>/` → 本地暂存**仓库根 `plugins-catalog/`** →
+  云端 **`/opt/heming/plugins`**（即 `HEMING_PLUGIN_DIR`）。`plugin-kit/plugins-catalog/` 不再保留副本
+  （其内容并入仓库根后删除）；`docs/PLUGINS.md` §9、`docs/deploy.md` §4.1、`plugin-kit/plugins/README.md`
+  三处写死这条链路。唯一例外是 `workflow-kit`：它自带服务包与落地页，走自己的 `publish-cloud.mjs`。
+- **过时产物删除（本地）**：`plugins-catalog/heming.studio/0.2.0`（云端只有 0.2.1）、
+  `plugin-kit/plugins-catalog/`（只含与仓库根重复的 video-editor 0.1.0）。
+- **云端（47.92.39.184）**：把本地 `heming.pet` 1.0.2 同步到权威目录并替换云端过时的 1.0.0（清单与整包
+  sha256 均与本地一致）；删除部署快照里的两份伪仓库 `/opt/heming/app/plugins`（48K，examples 与旧采集桥源码）
+  与 `/opt/heming/app/plugins-catalog`（5.1M，studio 0.2.0 / pet 1.0.2 副本）——此前「插件到底放哪」的混乱
+  正来自这两处残留。`/opt/heming/plugins` 现在只有 image-studio 0.3.1、pet 1.0.2、studio 0.2.1、
+  video-editor 0.1.0；`GET /api/plugins` 复核 pet 1.0.2，`/api/health` 200。
+- **文档示例修正**：`publish-plugin.mjs plugins/`（该目录不存在）改为 `plugin-kit/plugins/<包>/`；
+  §9 示例里已废弃的 `infohub-collector` 换成 `pet-widget`，补上「本地暂存 → scp → 复核」三步。
+
+## d.136.3.54.8（2026-11-12）— 信息中枢并入会话浏览；工作区与云端清理
+
+- **「会话」页签并进信息中枢**：原「聊天记录」插件（`heming.infohub-page`）的会话浏览整体搬进内置模块
+  `infohub`（1.0.0 → 1.1.0）：左栏会话列表（来源筛选、会话名关键词防抖、分页加载），右栏消息流
+  （按天分隔、群聊显示发送人、自己靠右、向前翻页保持滚动位置、按 id 去重）。数据只走宿主桥
+  `conversations` / `messages`，归档仍只在本机读取；不再需要单独安装插件，也不再自带一份 Python 引擎与浏览器壳。
+- 插件原有的「生成摘要写入知识库」没有并入：它依赖插件私有的 `kb.archive` 通道，宿主桥没有这个能力，
+  硬接会绕开模块权限边界；需要摘要时走检索 / 日程已有能力。
+- **删除旧插件**：`plugin-kit/plugins/infohub-page/`（源码、引擎、构建脚本、页面资源）与
+  `plugin-kit/plugins-catalog/heming.infohub-page/`（0.1.0 陈旧副本）从仓库移除。
+- **工作区清理**：删除三处已无引用的旧界面组件（`PluginInstallDialog`、`ModulePluginCard`、
+  `PluginRepositoryPanel` 及其测试）与一张零引用截图 `login-boot-7.png`；16 份当前文档按 d.135 / d.136
+  后的真实入口修正（安装统一走「插件区 → 从插件仓库安装」/「手动粘贴清单」，窗口设置走
+  「插件详情 → 窗口设置」，诊断走「插件区 → 页面底部「诊断」」），历史记录未改写。
+- **服务端目录同步**：`DEFAULT_MODULES` 里信息中枢的版本与描述同步为 1.1.0 /
+  「在本机浏览、检索 QQ / 微信聊天记录和日程」。
+- **云端清理**：删除 3.8GB 过期数据 —— 只保留当前与上一版安装包、最近 3 次部署备份，
+  清掉旧插件版本、空目录与构建残留（`/opt/heming` 5.1G → 约 1.2G）；服务与 API 复核正常。
+  模块 1.1.0 已构建签名，随下次发版发布。
+
+## d.135.3.54.8（2026-11-12）— 三处界面修复：预置 MCP 找回、外观区收拾、模型页页签统一
+
+- **预置 MCP 服务看得见、接得回**：MCP 列表上方新增「预置服务」区，把缺失的内置预置服务（Windows 桌面控制 /
+  网页抓取）逐条列出并给「接入」按钮，点一下补回并自动拉取工具；同一入口取代原先「删掉之后才会出现」的
+  「恢复预置服务」按钮，配置被覆盖或迁移丢条目时也能找回。已有配置不动：同 id / 同名服务不重复、不覆盖。
+- **设置 → 外观不再出现「桌面小组件」**：窗口设置（显示/缩放/穿透/位置与插件设置项）挪到插件区「插件详情」，
+  按插件显示，页面型插件不显示这一段；恢复默认外观的确认文案同步去掉「桌面小组件」。
+- **外观页卡片间距**：卡片根节点本来没有外边距，d.129 把样式收口成 `ui-card` 时丢了原来的 `mt-3`，导致卡片上下贴死；
+  现在外观页统一用 12px 纵向间距。
+- **模型页一级切换栏与全站统一**：左上角原本是贴着窗口左缘的药丸控件，改为设置页 / 插件页 / 记忆页 / 团队页
+  同一套下划线页签，左右内边距与页头对齐，图标保留。
+- 连带收口：设置卡片搜索元数据删掉「桌面小组件」（卡片已不存在，留着会搜到点不动）；
+  插件页面里 `target.kind = "settings"` 的定位卡片校验以现存卡片为准。
+
 ## d.135.3.54.7（2026-11-11）— 插件界面不再出现「官方」前缀
 
 - 插件仓库、安装预览、MCP 发现页、模块卡里的「官方插件 / 官方目录 / 官方云端目录」等字样全部去掉；

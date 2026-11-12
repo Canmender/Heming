@@ -6,6 +6,8 @@ import { SkillPool, type StorageLike } from "../lib/skills/index.js";
 import { McpRegistry, type McpServerConfig } from "../lib/mcp/index.js";
 import { useUiStore } from "../store/ui.js";
 import { useModuleStore } from "../lib/modules/store.js";
+import { resetWidgetsStore } from "../lib/widgets/store.js";
+import type { WidgetRecord, WidgetsBridge } from "../types/widgets.js";
 
 /**
  * 插件区 UI 用例：真实 PluginStore + SkillPool，只注入独立内存存储与 MCP 端口，
@@ -57,7 +59,7 @@ vi.mock("../lib/plugins/catalogClient.js", async (importOriginal) => {
 vi.mock("../lib/modules/catalogClient.js", () => ({
   fetchModuleCatalog: vi.fn(async () => [
     {
-      id: "automations",
+      id: "heming.automations",
       name: "自动化",
       version: "1.0.0",
       description: "定时任务、工作流与简报。",
@@ -65,12 +67,12 @@ vi.mock("../lib/modules/catalogClient.js", () => ({
       engine: null,
     },
     {
-      id: "infohub",
+      id: "heming.infohub",
       name: "信息中枢",
       version: "1.0.0",
       description: "在本机浏览归档。",
       author: "和鸣",
-      engine: "infohub",
+      engine: "heming.infohub",
     },
   ]),
 }));
@@ -260,15 +262,15 @@ describe("PluginsPage · 插件从云端安装", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "安装插件 自动化" }));
     // 安装是异步的（桌面端还要下载插件包）
-    await waitFor(() => expect(useModuleStore.getState().installed.automations).toBe(true));
-    expect(useModuleStore.getState().enabled.automations).toBe(true);
+    await waitFor(() => expect(useModuleStore.getState().installed["heming.automations"]).toBe(true));
+    expect(useModuleStore.getState().enabled["heming.automations"]).toBe(true);
 
     fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
     const card = screen.getByRole("region", { name: "插件 自动化" });
     expect(card).toHaveTextContent("这个插件带来");
 
     fireEvent.click(within(card).getByRole("switch", { name: "停用插件 自动化" }));
-    expect(useModuleStore.getState().enabled.automations).toBe(false);
+    expect(useModuleStore.getState().enabled["heming.automations"]).toBe(false);
 
     fireEvent.click(within(card).getByRole("button", { name: "删除插件 自动化" }));
     fireEvent.click(
@@ -276,7 +278,7 @@ describe("PluginsPage · 插件从云端安装", () => {
         name: "删除",
       }),
     );
-    await waitFor(() => expect(useModuleStore.getState().installed.automations).toBe(false));
+    await waitFor(() => expect(useModuleStore.getState().installed["heming.automations"]).toBe(false));
     expect(screen.queryByRole("region", { name: "插件 自动化" })).toBeNull();
     useModuleStore.getState().reset();
   });
@@ -870,5 +872,112 @@ describe("PluginsPage · 插件页面入口", () => {
     // 停用是「现在不生效」，贡献行照常显示页面，但不给可点的入口
     expect(card).toHaveTextContent("页面 1");
     expect(within(card).queryByRole("button", { name: /打开插件页面/ })).toBeNull();
+  });
+});
+
+/* ------------------------------------------------ 插件详情 · 窗口设置（d.136） */
+
+/**
+ * d.136：设置 → 外观区的「桌面小组件」卡撤掉，窗口设置挪到插件区「插件详情」。
+ * 只有存在该插件窗口记录、且桌面桥可用时才渲染这一段；纯技能包/浏览器里不留空标题。
+ */
+describe("PluginsPage · 插件详情窗口设置（d.136）", () => {
+  function widgetRecord(id: string, name: string): WidgetRecord {
+    return {
+      id,
+      name,
+      version: "1.0.0",
+      enabled: true,
+      widget: {
+        id: "pet",
+        name,
+        entry: "files/index.html",
+        width: 300,
+        height: 420,
+        scales: [1],
+        defaultScale: 1,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        resizable: false,
+        clickThrough: "auto",
+        position: { anchor: "bottom-right", margin: 24, remember: true },
+        settings: {
+          title: name,
+          fields: [
+            {
+              key: "presence",
+              type: "select",
+              label: "打扰强度",
+              default: "normal",
+              options: [
+                { value: "quiet", label: "安静" },
+                { value: "normal", label: "正常" },
+              ],
+            },
+          ],
+        },
+      },
+      settings: { presence: "normal" },
+      installedAt: "2026-11-07T12:00:00.000Z",
+    };
+  }
+
+  /** 只实现本组用例会走到的通道；其余留空实现（窗口设置不碰安装/卸载）。 */
+  function widgetBridge(records: WidgetRecord[]): WidgetsBridge {
+    return {
+      list: async () => records,
+      pickPackage: async () => ({ canceled: true }),
+      install: async () => ({ ok: false, error: "本用例不安装" }),
+      installFromFile: async () => ({ ok: false, error: "本用例不安装" }),
+      uninstall: async () => ({ ok: true }),
+      setEnabled: async () => ({ ok: true }),
+      settingsGet: async () => ({}),
+      settingsSet: async (input) => input.patch,
+      action: async () => ({ ok: true, state: { visible: true, scale: 1, clickThrough: false } }),
+      state: async () => ({ visible: false, scale: 1, clickThrough: false }),
+      publish: () => {},
+      migrateLegacy: async () => ({ ok: true }),
+    } as WidgetsBridge;
+  }
+
+  beforeEach(() => {
+    resetWidgetsStore();
+    delete window.__heming_widgets;
+  });
+
+  it("有窗口记录的插件：详情里出现「窗口设置」，宿主动作与插件表单都在", async () => {
+    window.__heming_widgets = widgetBridge([widgetRecord("acme.finance", "财务助手包")]);
+    renderPage();
+    installNow();
+    fireEvent.click(screen.getByRole("button", { name: "查看插件详情 财务助手包" }));
+
+    const dialog = screen.getByRole("dialog", { name: "插件详情 财务助手包" });
+    expect(await within(dialog).findByRole("region", { name: "窗口设置" })).toBeInTheDocument();
+    // 宿主动作（显示/重置位置）与插件声明的表单项都在
+    expect(within(dialog).getByRole("button", { name: "显示" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "重置位置" })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("打扰强度")).toBeInTheDocument();
+  });
+
+  it("没有窗口记录的纯技能包：详情里不出现「窗口设置」", async () => {
+    window.__heming_widgets = widgetBridge([]);
+    renderPage();
+    installNow();
+    fireEvent.click(screen.getByRole("button", { name: "查看插件详情 财务助手包" }));
+
+    const dialog = screen.getByRole("dialog", { name: "插件详情 财务助手包" });
+    expect(within(dialog).queryByRole("region", { name: "窗口设置" })).toBeNull();
+    expect(within(dialog).queryByText("窗口设置")).toBeNull();
+  });
+
+  it("浏览器（无桌面桥）：详情里不显示窗口设置，其余内容照常", () => {
+    renderPage();
+    installNow();
+    fireEvent.click(screen.getByRole("button", { name: "查看插件详情 财务助手包" }));
+
+    const dialog = screen.getByRole("dialog", { name: "插件详情 财务助手包" });
+    expect(within(dialog).queryByText("窗口设置")).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "卸载插件" })).toBeInTheDocument();
   });
 });

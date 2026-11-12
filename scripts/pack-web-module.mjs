@@ -5,8 +5,11 @@
  * 用法：
  *   node scripts/pack-web-module.mjs --id staff
  *   node scripts/pack-web-module.mjs --id automations --out module-catalog/automations/1.0.0/module.tgz
+ *   node scripts/pack-web-module.mjs --id heming.infohub --dir infohub
  *   node scripts/pack-web-module.mjs --id staff --install "$env:APPDATA/heming/modules"
  *
+ * `--id` 是**包 id**（写进签名清单、安装记录与目录名）；`--dir` 是 `packages/modules/`
+ * 下的源目录名，缺省与 `--id` 相同（内置模块目录保持短名，包 id 带 heming. 前缀）。
  * 产出布局（与 module-package.js 一致）：根 module.json + files/web/**。
  * 签名沿用 `sign-plugin.mjs` 的 canonical-v1；web.entry/contributions 已进入签名文本。
  */
@@ -34,17 +37,21 @@ function fail(message) {
 }
 
 const id = option("id");
-if (!id || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) fail("用法：--id <module-id>");
-const moduleRoot = resolve(ROOT, "packages/modules", id);
+if (!id || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) fail("用法：--id <module-id> [--dir <source-dir>]");
+// 源目录名与包 id 分离：目录保持短名（automations / infohub），清单 id 带 heming. 前缀。
+const moduleDir = option("dir") ?? id;
+if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(moduleDir)) fail(`--dir 不合法：${moduleDir}`);
+const moduleRoot = resolve(ROOT, "packages/modules", moduleDir);
 const manifestPath = join(moduleRoot, "module.json");
 const distRoot = join(moduleRoot, "dist");
 if (!existsSync(manifestPath)) fail(`缺少 ${manifestPath}`);
-if (!existsSync(join(distRoot, "entry.js"))) fail(`缺少 ${distRoot}/entry.js，请先运行 build-web-module.mjs --id ${id}`);
+if (!existsSync(join(distRoot, "entry.js")))
+  fail(`缺少 ${distRoot}/entry.js，请先运行 build-web-module.mjs --id ${id} --dir ${moduleDir}`);
 
 const source = JSON.parse(readFileSync(manifestPath, "utf8"));
 const version = option("version") ?? source.version;
 if (!version) fail("module.json 缺少 version");
-if (source.id !== id) fail(`module.json id=${source.id} 与目录 ${id} 不一致`);
+if (source.id !== id) fail(`module.json id=${source.id} 与包 id ${id} 不一致`);
 const webSource = source.web && typeof source.web === "object" ? source.web : null;
 if (!webSource || typeof webSource.entry !== "string") fail("module.json 缺少 web.entry");
 const contributions = Array.isArray(webSource.contributions) ? webSource.contributions : [];

@@ -57,7 +57,7 @@ describe("模块安装/开关 · 导航与路由过滤", () => {
   });
 
   it("未安装/停用的模块页从过滤结果里撤下，其余页顺序不变", () => {
-    const state = on({ staff: false, infohub: false, automations: false });
+    const state = on({ staff: false, "heming.infohub": false, "heming.automations": false });
     expect(filterNavOrder(legacyList, state)).toEqual([
       "home",
       "team",
@@ -70,7 +70,7 @@ describe("模块安装/开关 · 导航与路由过滤", () => {
   });
 
   it("自动化不依赖信息中枢：只停信息中枢时自动化仍可用", () => {
-    const state = on({ infohub: false });
+    const state = on({ "heming.infohub": false });
     expect(isPageAvailable("infohub", state)).toBe(false);
     expect(isPageAvailable("automations", state)).toBe(true);
     expect(isPageAvailable("staff", state)).toBe(true);
@@ -97,7 +97,7 @@ describe("模块安装/开关 · 导航与路由过滤", () => {
   });
 
   it("当前页被停用时落到主页；可用时原样返回", () => {
-    const state = on({ infohub: false });
+    const state = on({ "heming.infohub": false });
     expect(fallbackPage("infohub", state)).toBe("home");
     expect(fallbackPage("staff", state)).toBe("staff");
     expect(fallbackPage("automations", state)).toBe("automations");
@@ -136,8 +136,8 @@ describe("已装模块的导航入口（d.119）", () => {
 
   it("只装一个模块时只多一项（不多塞未装的）", () => {
     const state = defaultModuleState();
-    state.installed.automations = true;
-    state.enabled.automations = true;
+    state.installed["heming.automations"] = true;
+    state.enabled["heming.automations"] = true;
     expect(moduleNavPages(state)).toEqual(["automations"]);
     expect(withModuleNav(DEFAULT_NAV_ORDER, state)).toEqual([...DEFAULT_NAV_ORDER, "automations"]);
   });

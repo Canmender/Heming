@@ -3,7 +3,7 @@
 // vitest 的 defineConfig 同时接受 vite 配置项（plugins/build/server 等），行为不变。
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import appPkg from "../desktop/package.json";
@@ -18,14 +18,40 @@ import appPkg from "../desktop/package.json";
 // 所以它属于环境噪音，不要在这里试各种绕法；server/shared 两包同理。
 
 
-/** 开发态模块包：把 packages/modules/<id>/dist 以 /__modules__/<id>/* 挂到 vite dev server。
- * 生产桌面走 app:// 协议；两者路径语义一致，便于浏览器里直接验证模块包。 */
+/** 开发态模块包：把 packages/modules/<dir>/dist 以 /__modules__/<包 id>/* 挂到 vite dev server。
+ * 生产桌面走 app:// 协议；两者路径语义一致，便于浏览器里直接验证模块包。
+ *
+ * 包 id 与源目录名不是一回事（首方模块目录保持短名、包 id 带 `heming.` 前缀），
+ * 所以这里扫一遍 packages/modules 下每个目录的 module.json，建「包 id → 目录名」索引；
+ * 没有清单的目录（本地样例）按目录名回退。 */
+function moduleDirIndex(root: string): Map<string, string> {
+  const index = new Map<string, string>();
+  let names: string[] = [];
+  try {
+    names = readdirSync(root);
+  } catch {
+    return index;
+  }
+  for (const name of names) {
+    try {
+      const manifestPath = resolve(root, name, "module.json");
+      if (!existsSync(manifestPath)) continue;
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { id?: unknown };
+      if (typeof manifest.id === "string" && manifest.id) index.set(manifest.id, name);
+    } catch {
+      // 坏清单只是 dev 便利功能：忽略该项，按目录名回退即可
+    }
+  }
+  return index;
+}
+
 function modulesDevServer() {
   const root = fileURLToPath(new URL("../modules", import.meta.url));
   return {
     name: "heming-modules-dev",
     apply: "serve" as const,
     configureServer(server: { middlewares: { use: (route: string, fn: (req: { url?: string }, res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (b?: string | Buffer) => void; }, next: () => void) => void) => void } }) {
+      const dirs = moduleDirIndex(root);
       server.middlewares.use("/__modules__", (req, res, next) => {
         const url = decodeURIComponent((req.url || "").split("?")[0] || "");
         const match = /^\/([a-z0-9][a-z0-9._-]{0,63})\/(.+)$/.exec(url);
@@ -36,7 +62,9 @@ function modulesDevServer() {
           res.end("bad path");
           return;
         }
-        const file = resolve(root, id, "dist", rel);
+        // 包 id → 源目录（内置模块目录是短名）；没有清单时按目录名回退。
+        const dir = dirs.get(id) ?? id;
+        const file = resolve(root, dir, "dist", rel);
         if (!existsSync(file) || !statSync(file).isFile()) {
           res.statusCode = 404;
           res.end("module build not found");

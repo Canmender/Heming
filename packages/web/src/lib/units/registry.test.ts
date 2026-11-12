@@ -123,12 +123,12 @@ describe("读投影（registry 薄层）", () => {
   it("buildUnitStatuses 用注入数据源计算，自动化不依赖信息中枢", () => {
     const statuses = buildUnitStatuses({
       modules: BUILTIN_MODULES,
-      moduleEnabled: { staff: true, infohub: false, automations: true },
+      moduleEnabled: { staff: true, "heming.infohub": false, "heming.automations": true },
     });
     const byId = new Map(statuses.map((status) => [status.unit.id, status] as const));
     expect(statuses).toHaveLength(BUILTIN_MODULES.length);
-    expect(byId.get("infohub")!.reason).toEqual({ kind: "disabled" });
-    expect(byId.get("automations")!.effective).toBe(true);
+    expect(byId.get("heming.infohub")!.reason).toEqual({ kind: "disabled" });
+    expect(byId.get("heming.automations")!.effective).toBe(true);
     expect(byId.get("staff")!.effective).toBe(true);
   });
 
@@ -143,8 +143,8 @@ describe("读投影（registry 薄层）", () => {
 
     act(() => {
       useModuleStore.setState({
-        installed: { staff: true, infohub: true, automations: true, workflows: true },
-        enabled: { staff: false, infohub: true, automations: true, workflows: true },
+        installed: { staff: true, "heming.infohub": true, "heming.automations": true, workflows: true },
+        enabled: { staff: false, "heming.infohub": true, "heming.automations": true, workflows: true },
       });
     });
     const installedIds = result.current.map((status) => status.unit.id);
@@ -155,11 +155,11 @@ describe("读投影（registry 薄层）", () => {
 
     act(() => {
       useModuleStore.setState({
-        installed: { staff: true, infohub: false, automations: true, workflows: true },
-        enabled: { staff: false, infohub: false, automations: true, workflows: true },
+        installed: { staff: true, "heming.infohub": false, "heming.automations": true, workflows: true },
+        enabled: { staff: false, "heming.infohub": false, "heming.automations": true, workflows: true },
       });
     });
-    const infohub = result.current.find((status) => status.unit.id === "infohub");
+    const infohub = result.current.find((status) => status.unit.id === "heming.infohub");
     // 未安装的模块不再投影（原生应用不显示「内置模块」卡片）
     expect(infohub).toBeUndefined();
   });

@@ -146,7 +146,7 @@ describe("projectUnits · 四类来源", () => {
   it("按 系统 → 内置 → 声明式 → 插件 的稳定顺序产出，id 不混淆", () => {
     const units = projectUnits({
       system: systemFixture(),
-      moduleEnabled: { staff: true, infohub: true, automations: true },
+      moduleEnabled: { staff: true, "heming.infohub": true, "heming.automations": true },
       plugins: [installedPlugin()],
       widgets: [widgetRecord()],
       appVersion: APP_VERSION,
@@ -198,24 +198,24 @@ describe("projectBuiltinUnits · 模块依赖、安装与开关", () => {
       expect(unit.source).toBe("builtin");
       expect(unit.contributions.some((item) => item.kind === "page")).toBe(true);
     }
-    expect(byId(units).get("automations")!.requires).toBeUndefined();
+    expect(byId(units).get("heming.automations")!.requires).toBeUndefined();
     expect(byId(units).get("workflows")!.requires).toBeUndefined();
   });
 
   it("信息中枢停用不影响自动化：两者互不依赖，各自按开关判定", () => {
     const statuses = projectUnitStatuses({
-      moduleEnabled: { staff: true, infohub: false, automations: true },
+      moduleEnabled: { staff: true, "heming.infohub": false, "heming.automations": true },
     });
     const map = new Map(statuses.map((status) => [status.unit.id, status] as const));
-    expect(map.get("infohub")!.effective).toBe(false);
-    expect(map.get("infohub")!.reason).toEqual({ kind: "disabled" });
-    expect(map.get("automations")!.effective).toBe(true);
+    expect(map.get("heming.infohub")!.effective).toBe(false);
+    expect(map.get("heming.infohub")!.reason).toEqual({ kind: "disabled" });
+    expect(map.get("heming.automations")!.effective).toBe(true);
   });
 
   it("未安装：notInstalled 短路，即使 enabled=true 也不生效", () => {
     const statuses = projectUnitStatuses({
-      moduleEnabled: { staff: true, infohub: true, automations: true },
-      moduleInstalled: { staff: false, infohub: false, automations: false },
+      moduleEnabled: { staff: true, "heming.infohub": true, "heming.automations": true },
+      moduleInstalled: { staff: false, "heming.infohub": false, "heming.automations": false },
     });
     for (const status of statuses) {
       expect(status.effective).toBe(false);
@@ -225,7 +225,7 @@ describe("projectBuiltinUnits · 模块依赖、安装与开关", () => {
 
   it("总开关关闭：只报 disabled，不报依赖缺失", () => {
     const statuses = projectUnitStatuses({
-      moduleEnabled: { staff: false, infohub: true, automations: true },
+      moduleEnabled: { staff: false, "heming.infohub": true, "heming.automations": true },
     });
     const staff = statuses.find((status) => status.unit.id === "staff")!;
     expect(staff.effective).toBe(false);

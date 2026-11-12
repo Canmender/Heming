@@ -127,3 +127,75 @@ describe("恢复预置服务 restorePresets()", () => {
     expect(restored.enabled).toBe(true);
   });
 });
+
+/**
+ * 单条接入（d.78）：界面「预置服务」区点「接入」调的就是它。
+ *
+ * 与 `restorePresets()` 的差别是「不依赖删除记录」——预置可能在旧版本里
+ * 因为配置被覆盖 / 换系统账户后密文读不出而消失，那时根本没有记录可依。
+ */
+describe("单条接入 restorePreset()", () => {
+  /** 只有用户自有服务的存储：列表非空 → 不会自动预置，也没有删除记录。 */
+  function storageWithUserServer(name = "我自己的服务"): ReturnType<typeof memStorage> {
+    return memStorage({
+      [MCP_SERVERS_KEY]: JSON.stringify([
+        {
+          id: "mine",
+          name,
+          transport: "http",
+          url: "https://mine.example.com/mcp",
+          enabled: true,
+          createdAt: FIXED_NOW(),
+          updatedAt: FIXED_NOW(),
+        },
+      ]),
+    });
+  }
+
+  it("没有删除记录也能补回指定预置（预置在旧配置里丢过的情形）", () => {
+    const storage = storageWithUserServer();
+    const registry = new McpRegistry(storage, FIXED_NOW);
+    expect(registry.servers().map((s) => s.name)).toEqual(["我自己的服务"]);
+
+    const added = registry.restorePreset("windows-desktop");
+    expect(added?.id).toBe("mcp-windows-desktop");
+    expect(added?.name).toBe("Windows 桌面控制");
+    expect(added?.enabled).toBe(true);
+    // 落盘：重开后仍在，且用户那条没有被冲掉
+    const reopened = new McpRegistry(storage, FIXED_NOW);
+    expect(reopened.servers().map((s) => s.id).sort()).toEqual(["mcp-windows-desktop", "mine"]);
+  });
+
+  it("已存在同 id 时返回 null，不重复添加", () => {
+    const registry = new McpRegistry(memStorage(), FIXED_NOW);
+    expect(registry.restorePreset("windows-desktop")).toBeNull();
+    expect(registry.servers().filter((s) => s.id === "mcp-windows-desktop")).toHaveLength(1);
+  });
+
+  it("同名用户服务存在时返回 null，也不覆盖它", () => {
+    const registry = new McpRegistry(storageWithUserServer("Windows 桌面控制"), FIXED_NOW);
+    expect(registry.restorePreset("windows-desktop")).toBeNull();
+    const kept = registry.get("mine")!;
+    expect(kept.url).toBe("https://mine.example.com/mcp");
+    expect(registry.servers()).toHaveLength(1);
+  });
+
+  it("清掉该条的删除记录：移除 → 接入 → 再删仍记得住", () => {
+    const registry = new McpRegistry(memStorage(), FIXED_NOW);
+    registry.remove("mcp-scrapling");
+    expect(registry.removedPresetIds()).toEqual(["mcp-scrapling"]);
+
+    expect(registry.restorePreset("scrapling")?.id).toBe("mcp-scrapling");
+    expect(registry.removedPresetIds()).toEqual([]);
+    // 其它预置不受影响
+    expect(registry.servers().filter((s) => s.id === "mcp-windows-desktop")).toHaveLength(1);
+
+    registry.remove("mcp-scrapling");
+    expect(registry.removedPresetIds()).toEqual(["mcp-scrapling"]);
+  });
+
+  it("未知预置 id 返回 null", () => {
+    const registry = new McpRegistry(memStorage(), FIXED_NOW);
+    expect(registry.restorePreset("nope")).toBeNull();
+  });
+});

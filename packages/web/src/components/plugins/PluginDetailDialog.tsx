@@ -10,6 +10,8 @@ import { useModalA11y } from "../useModalA11y.js";
 import { PackageIcon, XIcon } from "../icons.js";
 import { ConfirmDialog } from "../ConfirmDialog.js";
 import { PluginPermissionList } from "./PluginPermissionList.js";
+import { WidgetSettingsCard } from "../settings/WidgetSettingsCard.js";
+import { useWidgetsStore, widgetsAvailable } from "../../lib/widgets/store.js";
 import {
   BTN_DANGER_SM,
   BTN_GHOST,
@@ -40,6 +42,9 @@ interface PendingToolToggle {
 /**
  * 插件详情抽屉（d.64 · T2）：技能/服务两份物化清单之外，
  * 补「贡献」与「权限」两段——安装前的声明在装好之后也要能随时回看。
+ *
+ * d.136：有窗口的插件（如桌宠）在这里多一段「窗口设置」——显示/缩放/穿透/位置
+ * 与插件声明的设置项。设置 → 外观区不再出现「桌面小组件」卡：窗口行为属于插件本身。
  */
 export function PluginDetailDialog({
   plugin,
@@ -83,6 +88,14 @@ export function PluginDetailDialog({
   const pluginEnabled = plugin.enabled;
   /** 清单声明的页面（每插件最多 1 个）。 */
   const page = plugin.manifest.contributions.page;
+  /**
+   * 只有「装好并且有窗口记录」的插件才显示窗口设置：
+   * 页面型插件没有浮窗，纯技能包也没有，这时整段不渲染，不留空标题。
+   */
+  const hasWidgetRecord = useWidgetsStore((state) =>
+    state.records.some((record) => record.id === plugin.manifest.id),
+  );
+  const widgetsReady = widgetsAvailable();
 
   return (
     <div
@@ -210,6 +223,21 @@ export function PluginDetailDialog({
               schemaVersion={plugin.manifest.schemaVersion}
             />
           </section>
+
+          {/* d.136 窗口设置：放在只读的「贡献/权限」之后、技能清单之前——
+              先看清插件声明了什么、被授权了什么，再动手调它的窗口。
+              没有窗口记录的插件（页面型/纯技能包）整段不渲染，不留空标题。 */}
+          {widgetsReady && hasWidgetRecord ? (
+            <section className="mt-4" aria-label="窗口设置">
+              <h3 className="ui-section-title">窗口设置</h3>
+              <p className="mt-1 ui-caption">
+                显示/隐藏、缩放、鼠标穿透与位置由宿主提供，下面几项由插件自己声明。
+              </p>
+              <div className="mt-2">
+                <WidgetSettingsCard onlyPluginId={plugin.manifest.id} embedded />
+              </div>
+            </section>
+          ) : null}
 
           <section className="mt-4" aria-label="插件技能">
             <h3 className="ui-section-title">技能（{skills.length}）</h3>

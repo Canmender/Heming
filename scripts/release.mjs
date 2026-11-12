@@ -75,6 +75,12 @@ const TAR_EXCLUDES = [
   ".git",
   ".superpowers",
   ".worktrees",
+  /*
+   * `.agents/` 是 IDE/代理会话留的 git worktree（每份都是整个仓库副本，含 node_modules
+   * 与历史产物），既不是云端要的产物，也不该出现在部署快照里——d.137 实测它把部署包
+   * 从 5MB 级撑到 73MB，还把过期的插件/文案副本带上云。
+   */
+  ".agents",
   "data",
   "release",
   ".claude",
@@ -84,17 +90,23 @@ const TAR_EXCLUDES = [
   "packages/desktop/web-dist",
   /*
    * 云端只用三样东西：`packages/web/dist`（静态页）、`packages/{server,shared}/dist`（node 进程）、
-   * `module-catalog` / `plugins-catalog`（目录接口的数据源）。
+   * `module-catalog`（目录接口的数据源）。
    * 桌面侧资源、vendor 源码与引擎构建缓存都不需要上云——它们曾把部署包从 5MB 量级撑到
    * 183MB（`packages/desktop/resources/magpie` 的 magpie-core.exe ×2 就占约 144MB），
    * 每次上传与 `keep` 都白花磁盘与时间。加「只在本地用」的大目录时，先把裸段名加到这里，
    * 再由 `TAR_FORBIDDEN` 兜底核对。
+   *
+   * `plugins-catalog` 只在本地暂存、由人工同步到云端 `/opt/heming/plugins`（d.137 唯一路径
+   * 约定），云端进程只读 `HEMING_PLUGIN_DIR`，部署快照里再放一份就是「伪仓库」，只会让
+   * 人分不清哪份才是权威的。
    *
    * `plugin-kit` **不能整目录排除**：`pnpm-workspace.yaml` 把
    * `plugin-kit/plugins/pet-widget` 列为 workspace 项目，云端 `install-app.sh` 的
    * `pnpm install --frozen-lockfile` 会校验全部 workspace 清单——缺了这个目录，
    * 安装会以 `ERR_PNPM_OUTDATED_LOCKFILE` 失败（d.122 首次部署实测）。所以只排它的构建产物。
    */
+  "plugins-catalog",
+  "*.log",
   "packages/desktop/resources",
   "packages/infohub",
   "plugin-kit/plugins/pet-widget/dist",
@@ -108,7 +120,7 @@ const TAR_EXCLUDES = [
 ];
 
 /** deploy.md §2 的两条校验：不该有的必须为 0，必须有的至少 1。 */
-const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp|\.workbuddy|\.ui-check-tmp|packages\/desktop\/(runtime|web-dist|resources)/;
+const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp|\.workbuddy|\.ui-check-tmp|\.agents|(^|\/)plugins-catalog\/|\.log$|packages\/desktop\/(runtime|web-dist|resources)/;
 const TAR_REQUIRED = [
   "packages/web/dist/index.html",
   "packages/server/dist/",

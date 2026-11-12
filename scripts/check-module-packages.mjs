@@ -3,7 +3,9 @@
  * 模块包契约检查（d.131 M6）。
  *
  * 不构建、不启动 Electron，只对磁盘上的模块清单做发布前守卫：
- * 1. 每个模块目录有 module.json，id 与目录一致，web.entry 合法且贡献非空；
+ * 1. 每个模块目录有 module.json，id 与目录一致（staff / workflows 是旧模块），或等于该目录的包
+ *    id（automations → heming.automations、infohub → heming.infohub；包 id 带 heming. 前缀，
+ *    源码目录名保持不变），web.entry 合法且贡献非空；
  * 2. module.sdk.json 的每个宿主依赖都仍存在于 packages/web/src（迁走的目录不能残留引用；
  *    infohub client/store/tools 是宿主引擎桥，允许）；
  * 3. 如果已有 dist/entry.js，检查体积与「没打包 React」。
@@ -19,6 +21,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MODULES = join(ROOT, "packages/modules");
 const WEB_SRC = join(ROOT, "packages/web/src");
 const SKIP = new Set(["sdk", "hello-page"]);
+/** 目录名 → 包 id：包 id 统一加 heming. 前缀那次改名后，只有这两个目录的清单 id 与目录名不同。 */
+const PACKAGE_ID = new Map([
+  ["automations", "heming.automations"],
+  ["infohub", "heming.infohub"],
+]);
 const MIGRATED = [/^lib\/staff\//, /^lib\/automation\//, /^lib\/workflow\//, /^components\/workflow\//];
 const ALLOWED_CONTRIB = new Set(["page", "homeCard", "background", "settings", "tools"]);
 const MAX_ENTRY_BYTES = 2.5 * 1024 * 1024;
@@ -56,7 +63,8 @@ for (const id of ids) {
     continue;
   }
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  if (manifest.id !== id) fail(id, `module.json id=${manifest.id} 与目录不一致`);
+  const expectedId = PACKAGE_ID.get(id) ?? id;
+  if (manifest.id !== expectedId) fail(id, `module.json id=${manifest.id} 应为 ${expectedId}`);
   if (manifest.distribution !== "module") fail(id, "distribution 必须是 module");
   if (manifest.meta?.kind !== "module") fail(id, "meta.kind 必须是 module");
   const web = manifest.web;

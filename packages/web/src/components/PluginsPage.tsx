@@ -428,7 +428,8 @@ export function PluginsPage({
         bump();
         setMsg({
           kind: "ok",
-          text: `已${outcome.updated ? "更新" : "安装"}界面插件「${name}」${version}，可在「设置 → 外观 → 桌面小组件」启停`,
+          // d.136：窗口设置不再在「设置 → 外观」，改为本页插件详情，安装完的提示同步指过去。
+          text: `已${outcome.updated ? "更新" : "安装"}界面插件「${name}」${version}，可在本页插件列表启停；窗口设置点「详情」调整`,
         });
         return;
       }

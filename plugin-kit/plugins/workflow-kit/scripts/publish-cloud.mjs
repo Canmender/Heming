@@ -8,7 +8,7 @@
  *     → nginx 的 /updates/ 直接 alias 到 /opt/heming/updates/，用户可下载
  *   /opt/heming/plugins/heming.workflow-kit/<ver>/plugin.json
  *     → 云端插件目录（服务端 pluginCatalog 的目录布局）；等服务器版本带目录接口后，
- *       和鸣「插件区 → 在线目录」会自动列出本插件，无需再次上传。
+ *       和鸣「插件区 → 从插件仓库安装」会自动列出本插件，无需再次上传。
  *
  * 安全：密码不落盘、不打印；优先环境变量 HEMING_SSH_PWD，否则从本机
  * `.superpowers/deploy-*.py` 解析既有凭据（与 scripts/publish-update.mjs 同口径）。

@@ -280,8 +280,8 @@ describe("命令面板 v2 · 四个动作的分发", () => {
 
     // 安装三个后停信息中枢：幕僚与自动化仍生效（自动化不依赖信息中枢）→ 2/4
     const store = useModuleStore.getState();
-    for (const id of ["staff", "infohub", "automations"] as const) store.install(id);
-    store.setEnabled("infohub", false);
+    for (const id of ["staff", "heming.infohub", "heming.automations"] as const) store.install(id);
+    store.setEnabled("heming.infohub", false);
     render(<CommandPalette onClose={vi.fn()} />);
     expect(screen.getAllByText(/已启用 2\/4/).length).toBeGreaterThan(0);
   });

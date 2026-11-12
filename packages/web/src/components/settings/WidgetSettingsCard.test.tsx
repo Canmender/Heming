@@ -218,3 +218,53 @@ describe("WidgetSettingsCard · 通用表单", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/磁盘只读/);
   });
 });
+
+/**
+ * d.136：窗口设置挪进插件详情后，同一张卡有两种形态。
+ * - `onlyPluginId`：只渲染这个插件的记录（插件详情里嵌的就是单个插件）；
+ * - `embedded`：不套「桌面小组件」卡片壳、大标题与空态引导，只留窗口动作与表单；
+ *   没有记录时返回 null（不占位、不留空标题）。
+ */
+describe("WidgetSettingsCard · 嵌入插件详情（d.136）", () => {
+  /** 另一个插件的小组件：用于验证 onlyPluginId 的过滤。 */
+  function otherRecord(): WidgetRecord {
+    const base = record();
+    return record({
+      id: "acme.clock",
+      name: "时钟",
+      widget: {
+        ...base.widget!,
+        name: "时钟",
+        settings: { title: "时钟", fields: FIELDS },
+      },
+    });
+  }
+
+  it("onlyPluginId：只渲染目标插件的窗口设置", async () => {
+    window.__heming_widgets = makeBridge({ list: async () => [record(), otherRecord()] });
+    render(<WidgetSettingsCard onlyPluginId="heming.pet" embedded />);
+
+    await screen.findByText("桌宠");
+    expect(document.querySelector('[data-widget-settings-id="heming.pet"]')).not.toBeNull();
+    expect(document.querySelector('[data-widget-settings-id="acme.clock"]')).toBeNull();
+  });
+
+  it("embedded：没有卡片壳、没有大标题，但窗口动作与设置表单都在", async () => {
+    window.__heming_widgets = makeBridge();
+    const { container } = render(<WidgetSettingsCard onlyPluginId="heming.pet" embedded />);
+
+    await screen.findByText("桌宠");
+    // 不套 <section className="ui-card">，也不再写「桌面小组件」这个标题
+    expect(container.querySelector("section")).toBeNull();
+    expect(screen.queryByText("桌面小组件")).toBeNull();
+    expect(screen.getByRole("button", { name: "显示" })).toBeTruthy();
+    expect(screen.getByLabelText("打扰强度")).toBeTruthy();
+  });
+
+  it("embedded：没有这个插件的记录 → 返回 null（不占位）", async () => {
+    window.__heming_widgets = makeBridge();
+    const { container } = render(<WidgetSettingsCard onlyPluginId="acme.clock" embedded />);
+
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+});

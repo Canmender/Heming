@@ -8,6 +8,7 @@ import {
 } from "../secureStorage.js";
 import type { McpServerConfig, McpTool, McpToolRef, McpTransport } from "./types.js";
 import { DEFAULT_PRESET_SERVERS, presetServerId } from "./presets.js";
+import type { McpPreset } from "./presets.js";
 
 /** 存储键（带版本，便于将来迁移）。 */
 export const MCP_SERVERS_KEY = "heming.mcp.servers.v1";
@@ -202,20 +203,34 @@ export class McpRegistry {
       // 每条预置有各自的固定 id（删除记录、isPreset 判定都按 id 走）
       const id = presetServerId(preset.id);
       if (removed.has(id)) continue;
-      this.serverList.push({
-        id,
-        name: preset.name,
-        transport: preset.transport,
-        url: preset.url,
-        command: preset.command,
-        args: preset.args ? [...preset.args] : undefined,
-        enabled: true,
-        createdAt: at,
-        updatedAt: at,
-      });
-      changed = true;
+      if (this.pushPreset(preset, at)) changed = true;
     }
     if (changed) this.saveServers();
+  }
+
+  /**
+   * 往列表末尾补一条预置；同 id 或同名服务已存在时不覆盖，返回 false。
+   *
+   * 首次预置与两条「找回」路径（`restorePresets` / `restorePreset`）共用这一处，
+   * 免得哪天规则只改了一边：用户手填了同名服务时，任何路径都不能拿预置去顶掉他的配置。
+   */
+  private pushPreset(preset: McpPreset, at: string): boolean {
+    const id = presetServerId(preset.id);
+    const hasSameId = this.serverList.some((s) => s.id === id);
+    const hasSameName = this.serverList.some((s) => s.name.trim() === preset.name.trim());
+    if (hasSameId || hasSameName) return false;
+    this.serverList.push({
+      id,
+      name: preset.name,
+      transport: preset.transport,
+      url: preset.url,
+      command: preset.command,
+      args: preset.args ? [...preset.args] : undefined,
+      enabled: true,
+      createdAt: at,
+      updatedAt: at,
+    });
+    return true;
   }
 
   /**
@@ -363,26 +378,8 @@ export class McpRegistry {
     const at = this.now();
     let restored = 0;
     for (const preset of DEFAULT_PRESET_SERVERS) {
-      const id = presetServerId(preset.id);
-      removed.delete(id);
-      const hasSameId = this.serverList.some((s) => s.id === id);
-      const hasSameName = this.serverList.some((s) => s.name.trim() === preset.name.trim());
-      if (hasSameId || hasSameName) continue;
-      this.serverList = [
-        ...this.serverList,
-        {
-          id,
-          name: preset.name,
-          transport: preset.transport,
-          url: preset.url,
-          command: preset.command,
-          args: preset.args ? [...preset.args] : undefined,
-          enabled: true,
-          createdAt: at,
-          updatedAt: at,
-        },
-      ];
-      restored += 1;
+      removed.delete(presetServerId(preset.id));
+      if (this.pushPreset(preset, at)) restored += 1;
     }
     if (restored > 0) {
       this.serversMutated = true;
@@ -392,6 +389,27 @@ export class McpRegistry {
     // 记录清掉才能让「以后再删一次」重新被记住。
     if ([...removed].sort().join(",") !== before) this.writeRemovedPresets(removed);
     return restored;
+  }
+
+  /**
+   * 按预置 id 补回**指定**的一条预置服务（界面「预置服务」区的一键接入）。
+   *
+   * 与 `restorePresets()` 的差别：只处理点的那一条，别的服务与工具授权都不动。
+   * 调用前没有删除记录也允许——用户可能是在旧版本里丢过这条预置
+   * （配置被覆盖 / 换账户后密文读不出），不该因为「没删过」就找不回来。
+   *
+   * @returns 新加的服务（界面据此顺手触发一次连接）；同 id/同名已存在时 null
+   */
+  restorePreset(presetId: string): McpServerConfig | null {
+    const preset = DEFAULT_PRESET_SERVERS.find((p) => p.id === presetId);
+    if (!preset) return null;
+    const removed = this.readRemovedPresets();
+    if (removed.delete(presetServerId(preset.id))) this.writeRemovedPresets(removed);
+    if (!this.pushPreset(preset, this.now())) return null;
+    this.serversMutated = true;
+    this.saveServers();
+    const created = this.serverList[this.serverList.length - 1];
+    return created ? { ...created, args: created.args ? [...created.args] : undefined } : null;
   }
 
   private readServers(): McpServerConfig[] {

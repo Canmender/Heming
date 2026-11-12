@@ -1,8 +1,8 @@
 {
   "schemaVersion": 4,
-  "id": "infohub",
+  "id": "heming.infohub",
   "name": "信息中枢",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "在本机浏览、检索 QQ / 微信聊天记录和日程；归档不出本机。",
   "author": "和鸣",
   "distribution": "module",

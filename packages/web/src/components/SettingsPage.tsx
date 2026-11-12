@@ -7,7 +7,7 @@ import { BackgroundModelCard } from "./BackgroundModelCard.js";
 import { FileEditCard } from "./FileEditCard.js";
 import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
-import { WidgetSettingsCard } from "./settings/WidgetSettingsCard.js";import { ThemeModeCard } from "./settings/ThemeModeCard.js";
+import { ThemeModeCard } from "./settings/ThemeModeCard.js";
 import { DEFAULT_NAV_ORDER, useUiStore, type NavPage } from "../store/ui.js";
 import { useModuleStore } from "../lib/modules/store.js";
 import { withModuleNav } from "../lib/modules/nav.js";
@@ -530,10 +530,16 @@ function ProfileSection() {
 }
 
 /**
- * 外观分组（d.68 顺序）：主题模式 → 主题色 → 导航栏 → 桌面小组件 + 恢复默认外观。
+ * 外观分组（d.68 顺序）：主题模式 → 主题色 → 导航栏 → 恢复默认外观。
  *
  * 为什么顺序要改：主题模式决定「亮/暗」，是最粗的一层；主题色只改填充强调色；
- * 导航栏与桌面小组件是局部外观偏好。从粗到细看下来，用户不用来回跳。
+ * 导航栏是局部外观偏好。从粗到细看下来，用户不用来回跳。
+ *
+ * 桌面小组件的窗口设置在 d.136 挪到了插件区「插件详情」：用户反馈外观区不该出现
+ * 「桌面小组件」卡——窗口的显示/缩放/穿透属于某个插件自己的行为，跟插件放一起才找得到。
+ *
+ * 各卡片外层用 flex-col gap-3 统一 12px 间距：anchorClass 只管高亮描边、不自带边距，
+ * 早先直接平铺会让卡片上下贴死（用户反馈「卡片之间没有间距」）。
  *
  * 「恢复默认外观」用既有 ConfirmDialog 二次确认：它一次改三处（主题模式/主题色/导航），
  * 误点的代价比单张卡片的「恢复默认」大，值得多问一句。
@@ -554,7 +560,7 @@ function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
   };
 
   return (
-    <>
+    <div className="flex max-w-full flex-col gap-3">
       {/* d.67 T3：主题模式（浅色/深色/跟随系统）排在最前，它决定整套配色 */}
       <div data-settings-id="theme-mode" className={anchorClass(highlightedId === "theme-mode")}>
         <ThemeModeCard key={themeModeKey} />
@@ -568,10 +574,6 @@ function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
       {/* d.68：导航栏显示方式（常显 / 自动隐藏），与导航轨底部 pin 按钮同源 */}
       <div data-settings-id="nav-mode" className={anchorClass(highlightedId === "nav-mode")}>
         <NavModeSection />
-      </div>
-      {/* d.94：桌面小组件（原「桌宠」卡）——桌宠已拆成界面插件，这里只放宿主动作 + 通用表单 */}
-      <div data-settings-id="widgets" className={anchorClass(highlightedId === "widgets")}>
-        <WidgetSettingsCard />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line-soft bg-subtle px-4 py-3">
@@ -612,11 +614,11 @@ function AppearanceTab({ highlightedId }: { highlightedId: string | null }) {
           }
         >
           <p className="ui-body">
-            将把主题模式改为「跟随系统」、主题色恢复墨黑、导航栏恢复常显。桌面小组件与其它设置不受影响。
+            将把主题模式改为「跟随系统」、主题色恢复墨黑、导航栏恢复常显。其它设置不受影响。
           </p>
         </ConfirmDialog>
       )}
-    </>
+    </div>
   );
 }
 

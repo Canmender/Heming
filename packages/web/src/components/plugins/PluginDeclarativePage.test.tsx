@@ -85,7 +85,7 @@ function pageManifest(overrides: Record<string, unknown> = {}): Record<string, u
             title: "快捷入口",
             items: [
               { label: "打开信息中枢", target: { kind: "page", page: "infohub" } },
-              { label: "打开设置", target: { kind: "settings", card: "widgets" } },
+              { label: "打开设置", target: { kind: "settings", card: "theme-mode" } },
               { label: "查看单元", target: { kind: "unit", unitId: "acme.collector" } },
               { label: "查看插件详情", target: { kind: "plugin" } },
             ],
@@ -232,6 +232,8 @@ describe("PluginDeclarativePage · actions 跳转", () => {
     expect(useUiStore.getState().page).toBe("infohub");
   });
 
+  // d.136：定位目标从 "widgets" 换成仍在设置页的 "theme-mode"——「桌面小组件」卡已挪进
+  // 插件详情，registry 里不再有它，清单校验会拒绝未知卡片 id（见 manifest.ts assertTargetUsable）。
   it("settings 目标：切设置页并投递定位卡片意图", () => {
     installPagePlugin();
     renderPage();
@@ -240,7 +242,7 @@ describe("PluginDeclarativePage · actions 跳转", () => {
     expect(useUiStore.getState().page).toBe("settings");
     expect(useUiStore.getState().paletteIntent).toMatchObject({
       kind: "focus-settings",
-      data: { card: "widgets" },
+      data: { card: "theme-mode" },
     });
   });
 

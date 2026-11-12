@@ -24,7 +24,7 @@
 > `plugin-kit/plugins/pet-widget/`（桌宠，v4 bundle）。源码索引见 [`plugin-kit/plugins/README.md`](../plugin-kit/plugins/README.md)。
 >
 > 分发链路：`node scripts/publish-plugin.mjs` 把包摆成服务端目录布局 → 服务端 `GET /api/plugins`
-> 列出目录 → 客户端「插件区 → 安装插件 → 从云端浏览」下载原文、**校验 sha256** 后走同一套安装预览。
+> 列出目录 → 客户端「插件区 → 从插件仓库安装」下载原文、**校验 sha256** 后安装（声明式包仍走同一套安装预览）。
 > 界面插件多一步：服务端 `GET /api/plugins/:id/:version/package` 分发 `package.tgz`，客户端比 sha256 后交主进程解包安装。
 
 ## 1. 最小清单
@@ -53,7 +53,7 @@
 }
 ```
 
-只有技能时 `permissions` 可以省略。安装入口：插件区 → 安装 → 粘贴/导入 `plugin.json`。
+只有技能时 `permissions` 可以省略。安装入口：插件区 →「手动粘贴清单」→ 粘贴/导入 `plugin.json`。
 
 需要导航入口时，在 `contributions` 里再加一个 `page`（声明式写 `blocks`，界面插件写 `entry`）——不写就没有入口，见 §13。
 
@@ -123,8 +123,8 @@ web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `
 ## 5. 生命周期与数据
 
 - **安装**：技能写入技能池（标记插件来源）、服务登记进接口区（标记插件来源）、命令进面板。数据只在本机（`heming.plugins.v1` + 技能池/MCP 注册表既有键），不上传。
-- **查找**：插件区支持按名称 / id / 作者 / 描述 / 技能名 / 服务名搜索，并按「全部 / 已启用 / 已停用」筛选；装完自动回到插件列表并高亮新装的卡片。
-- **云端安装**：安装弹窗「从云端浏览」列出服务端插件目录（版本/权限/贡献/指纹），点「载入清单」下载并**校验 sha256** 后填进同一个清单框——安装预览、信任确认、写入语义与手动粘贴完全一致；目录不可用时只影响该面板。
+- **查找**：插件区支持按名称 / id / 描述 / 贡献搜索，并按来源（全部插件 / 系统 / 插件）与状态（全部 / 已启用 / 已停用）筛选；装完自动回到插件列表并高亮新装的卡片。
+- **云端安装**：主入口是插件区「从插件仓库安装」——模块与声明式/界面插件在同一列表，安装时按类型自动走各自的下载/验签路径；手动安装弹窗里的「从云端浏览插件」列出同一份目录的清单（版本/权限/贡献/指纹），点「载入清单」下载并**校验 sha256** 后填进清单框——安装预览、信任确认、写入语义与手动粘贴完全一致；目录不可用时只影响该面板。
 - **更新**：同 `id` 再次安装 = 更新；弹窗会展示技能/服务的增删改差异与服务 id 冲突。
 - **停用**：技能与服务保留记录但不生效，命令消失；重新启用即恢复。
 - **卸载**：级联收回本插件物化的技能与服务；用户手工改过的技能/服务不会被误删（按归属判断）。
@@ -208,7 +208,7 @@ web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `
 
 ## 9. 云端插件仓库（d.95）
 
-安装包**不内置**任何第三方插件；官网/服务端只维护**一份**插件仓库，客户端在「插件区 → 仓库」
+安装包**不内置**任何第三方插件；官网/服务端只维护**一份**插件仓库，客户端在「插件区 → 从插件仓库安装」
 里浏览、下载、安装。仓库是静态目录，服务端只做「列目录 + 原样分发清单」，不执行插件代码。
 
 ### 目录布局（服务端 `HEMING_PLUGIN_DIR`）
@@ -218,6 +218,22 @@ web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `
 ```
 
 缺省 `<cwd>/plugins-catalog`；部署时把发布产物同步到这个目录，或用环境变量指定。
+
+### 唯一路径约定（d.137）
+
+插件产物只能有一条链路，仓库里不再出现第二份暂存目录：
+
+1. **源码**：`plugin-kit/plugins/<目录名>/`
+2. **本地发布暂存**：仓库根 `plugins-catalog/`（gitignore）。这是 `scripts/publish-plugin.mjs` 的缺省目标
+   （未设置 `HEMING_PLUGIN_DIR` 时即 `<cwd>/plugins-catalog`）；`plugin-kit/` 下不再保留任何
+   `plugins-catalog` 副本。
+3. **云端仓库（唯一权威）**：`/opt/heming/plugins`，由 `/etc/heming/api.env` 的 `HEMING_PLUGIN_DIR`
+   指定。部署快照里的 `app/plugins`、`app/plugins-catalog` 不是仓库，不要读写（d.137 已从服务器删除）。
+
+发布固定三步：本地 `publish-plugin.mjs` 写 `plugins-catalog/` → 同步到 `/opt/heming/plugins/` →
+`GET /api/plugins` 复核版本与 sha256。唯一例外是 `workflow-kit`（自带服务包与落地页，走它自己的
+`scripts/publish-cloud.mjs`：写 `/opt/heming/updates/plugins/heming.workflow-kit/` 与
+`/opt/heming/plugins/heming.workflow-kit/<版本>/plugin.json`）。
 
 ### 接口（公开读 / 密钥写）
 
@@ -231,17 +247,23 @@ web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `
 
 - 写接口只在配置了 `HEMING_PLUGIN_PUBLISH_KEY` 时开启，否则一律 503；密钥不对 401；
 - 服务端不解析权限、不执行代码；权限/签名/安装校验仍由客户端在下载后做（sha256 不符就不装）；
-- 目录接口是公开产物，不含用户数据；客户端「插件区 → 仓库」与安装弹窗里的「从云端浏览」
+- 目录接口是公开产物，不含用户数据；客户端「插件区 → 从插件仓库安装」与安装弹窗里的「从云端浏览插件」
   走同一批接口，安装预览/信任确认/写入语义完全一致。
 
 ### 发布
 
 ```bash
-# 1) 写本地发布目录（沿用「同步目录到服务器」的部署链）
-node scripts/publish-plugin.mjs plugin-kit/plugins/infohub-collector/plugin.json --dest /opt/heming/plugins
+# 1) 写本地发布暂存目录（唯一约定：仓库根 plugins-catalog/，不要另建目录）
+node scripts/publish-plugin.mjs plugin-kit/plugins/pet-widget/plugin.json
 
-# 2) 或直接推到云端仓库（CI 用；需服务端已配置发布密钥）
-HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugins/ --push https://heming.example.com
+# 2) 同步到云端仓库（唯一权威：/opt/heming/plugins）
+scp -r plugins-catalog/* root@<服务器>:/opt/heming/plugins/
+
+# 3) 复核：版本与 sha256 应与本地一致
+curl -s https://heming.example.com/api/plugins | head
+
+# 或直接推到云端仓库（CI 用；需服务端已配置发布密钥）
+HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugins/pet-widget/plugin.json --push https://heming.example.com
 ```
 
 两种方式都会先做「能不能解析 / id 与版本是否合规 / schemaVersion 是否是整数 / 有没有名字」的基础校验，
@@ -249,7 +271,7 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugin
 
 ## 10. 界面插件（v4 · `distribution: "bundle"`，d.98；d.124 起可带页面）
 
-界面插件是**唯一带可执行内容**的插件：它提供一个独立窗口的渲染包（第一个也是当前唯一一个：桌宠 `heming.pet`，见 `docs/PET.md`）；d.124 起还可以在**主窗内容区**嵌一个自己的页面（`contributions.page.entry`，见 §13.4）。
+界面插件是**唯一带可执行内容**的插件：它提供一个独立窗口的渲染包（第一个也是当前唯一一个：桌宠 `heming.pet`，见 `docs/PET.md`；原首方 bundle「聊天记录」的浏览界面已并入「信息中枢」模块，不再作为插件分发）；d.124 起还可以在**主窗内容区**嵌一个自己的页面（`contributions.page.entry`，见 §13.4）。
 因为「装插件 = 在本机运行代码」，它与纯声明式包走两套清单字段、两套安装链路，**只有官方目录发布的包才允许安装**（第三方仍只能是 §1–§8 的声明式包）。
 
 ### 9.1 清单
@@ -354,7 +376,9 @@ package.tgz
 - **完整性**：启动前按盘上 `files/**` 重算摘要（与安装同算法）比对；`engine.entry/lib` 与 `permissions.kb`
   都进入首方签名文本——签名后改入口、删依赖、补 kb 都会验签失败。
 - **生命周期**：插件停用/卸载/更新、页面与窗口关闭时回收引擎进程；`readPackage` 与页面视图失败态都会给出中文原因。
-- 参考实现与构建：`plugin-kit/plugins/infohub-page/`（`build.mjs` 把 Python 依赖 staging 到
+- 参考实现与构建：宿主侧托管在 `packages/desktop/plugin-engine.js`（校验、stdin/stdout 协议、生命周期、
+  `engineStatus/engineCall`）；仓库里暂无随包携带引擎的插件包（原「聊天记录」已并入信息中枢模块），
+  打包参考 `scripts/build-pet-widget.mjs` + `scripts/pack-plugin.mjs`（把 Python 依赖 staging 到
   `files/engine/lib` 后再 `pack-plugin`；包体上限 64MB / 4000 文件 / 单文件 16MB）。
 
 ### 9.4 发布
@@ -365,7 +389,7 @@ node scripts/build-pet-widget.mjs           # 构建插件 → plugin-kit/plugin
 node scripts/sign-plugin.mjs sign plugin-kit/plugins/pet-widget/dist/package/plugin.json <正式私钥> --id heming --write
                                             # 签名前自动按 files/** 重算 packageSha256；签名因此覆盖代码字节
 node scripts/publish-plugin.mjs plugin-kit/plugins/pet-widget/dist/package --dest <plugin-dir>
-# 把 <plugin-dir> 同步到服务器的 HEMING_PLUGIN_DIR，客户端「插件区 → 桌面小组件」即可看到
+# 把 <plugin-dir> 同步到服务器的 HEMING_PLUGIN_DIR，客户端「插件区 → 从插件仓库安装」即可看到
 ```
 
 > 发版前跑 `node scripts/check-release-keys.mjs`：若 `resources/official-keys.json` 里只有 `dev-*` 公钥会以非 0 退出
@@ -474,7 +498,7 @@ await data.dataDelete("cache");
 
 `contributions.page = { title, icon?, summary?, entry }`：`entry` 是包内 `.html`，宿主在**主窗内容区**用
 `WebContentsView` 拉起一个 `widget://<插件 id>/` 沙箱视图（同 `preload`、同 CSP，`rect` 由宿主算并钳制）。
-它与桌面小组件可并存；停用/卸载/更新/切页时视图销毁，不留孤儿。清单字段、导航入口与安全边界见 §13.3–§13.6。
+它与界面插件的独立窗口（插件详情 →「窗口设置」）可并存；停用/卸载/更新/切页时视图销毁，不留孤儿。清单字段、导航入口与安全边界见 §13.3–§13.6。
 
 ## 11. 清单 v5：版本兼容、上架元数据与安装事务（d.106）
 
@@ -560,20 +584,27 @@ node scripts/plugin-schema.mjs --check                         # 校验 plugin-k
 | v4（界面插件） | 可装（**不验签**，已知缺口） | 可装，**必须首方签名** |
 | v5 | 拒绝（schemaVersion 不认识） | 可装，按 `engines.heming` 判定 |
 
-## 12. 选装模块（可执行能力：信息中枢引擎，d.116）
+## 12. 选装模块（页面 + 可执行能力，d.116 / d.133）
 
-界面插件（bundle）是声明 + 沙箱页面；**模块**是另一类产物：带可执行代码与依赖，由宿主用
-stdio 子进程拉起。当前唯一模块是 `heming.infohub-engine`（信息中枢的 QQ / 微信归档引擎）。
+界面插件（bundle）是声明 + 沙箱页面；**模块**是另一类产物，由宿主从云端模块目录安装：
+清单用 `web.entry` + `web.contributions` 声明页面 / 首页卡 / 后台代码，可选携带 Python 引擎
+（`meta.entry = "app"`，由宿主用 stdio 子进程拉起）。云端目录当前提供 **自动化**
+（包 id `heming.automations` 1.0.0，携带后台循环）与 **信息中枢**（包 id `heming.infohub` 1.1.0：
+检索 / 会话 / 日程页面 + QQ / 微信归档引擎）。内置模块的包 id 统一带 `heming.` 前缀，
+源码目录名仍是 `packages/modules/<目录名>`——目录名与清单 `id` 不再相同，构建脚本用
+`--dir` / `TARGETS` 映射两者（`staff` / `workflows` 是旧模块，仍保留裸 id）。
 
 **安装包不携带模块**：`build.extraResources` 里没有 `../infohub`，打包边界由
-`packaging.plugins.test.js` 钉住。用户启用「信息中枢」时，应用按需从更新源下载模块包 →
-首方验签 → 解包到 `<userData>/modules`，随后自动启动，没有任何配置界面。
+`packaging.plugins.test.js` 钉住。模块由用户在插件区「从插件仓库安装」安装：下载官签名
+`module.tgz` → 验签 → 解包到 `<userData>/modules`；「信息中枢」首次启用时，引擎缺失也会
+按需补下载同一份模块包，随后自动启动，没有任何配置界面。
 
 ### 12.1 包格式（`module.tgz`）
 
 ```
 module.json
-files/app/infohub/**      # Python 包（meta.entry = "app"）
+files/web/entry.js        # 宿主加载的 UI bundle（web.entry 指向；页面 / 首页卡 / 后台）
+files/app/infohub/**      # 可选 Python 引擎（meta.entry = "app"，信息中枢携带）
 files/lib/**              # 可选第三方依赖（meta.lib = "lib"，加进 PYTHONPATH）
 ```
 
@@ -593,8 +624,11 @@ files/lib/**              # 可选第三方依赖（meta.lib = "lib"，加进 PY
 
 ### 12.2 落盘与启动
 
-`<userData>/modules/<id>/<version>/files/{app,lib}`，版本切换后旧版本会被清理；
-目录被手工删除时按「未安装」处理。桥（`infohub-bridge.js`）用内置 Python 3.12 拉起
+`<userData>/modules/<id>/<version>/files/{web,app,lib}`（`<id>` = 清单 `id`，即包 id），
+版本切换后旧版本会被清理；目录被手工删除时按「未安装」处理。包 id 统一加 `heming.` 前缀那次
+改名后，启动时会把旧 id（`infohub` / `automations`）的安装**原地迁移**：目录整目录 rename、
+`installed.json` 记录改 id，幂等；任一步失败只记日志并等价于「未安装」，不会把桌面端启动弄崩。
+桥（`infohub-bridge.js`）用内置 Python 3.12 拉起
 `python -m infohub.bridge`，`PYTHONPATH = app + lib`，**不开端口、不走网络**。
 
 ### 12.3 构建与发布
@@ -603,14 +637,20 @@ files/lib/**              # 可选第三方依赖（meta.lib = "lib"，加进 PY
 # 依赖目录（.tmp-engine-lib/）需先按内置 Python 版本下载 cp312 wheel 并解包：
 #   pip download --no-deps --only-binary=:all: --python-version 312 \
 #     --platform win_amd64 --implementation cp --abi cp312 -d <tmp> <包名>
-node scripts/build-module.mjs                  # 默认：packages/infohub + .tmp-engine-lib
-node scripts/build-module.mjs --install <modulesDir>   # 构建后装到本机模块目录自检
+node scripts/build-modules.mjs                  # 全部云端模块 → module-catalog/<id>/<版本>/module.tgz
+node scripts/build-modules.mjs --only infohub   # 只构建信息中枢（web UI + Python 引擎）；也可传包 id heming.infohub
 ```
 
-产物默认在 `module-catalog/<id>/<version>/module.tgz`，脚本会用**安装端口径**
+产物在 `module-catalog/<id>/<版本>/module.tgz`（`<id>` 是**包 id**，例如
+`module-catalog/heming.infohub/1.1.0/`；源码目录名由 `--dir` 传入），以及同目录的
+`module.json`（d.137 起由构建脚本按模块清单生成）。**两个文件要一起部署**：服务端
+`moduleCatalog.list()` 只认 `<dir>/<id>/<版本>/module.json`，缺了它 `/api/modules` 会回落到
+编译进 server 的 `DEFAULT_MODULES`——云端换了新包、接口却还报发服务器那一刻的版本号。
+打包脚本会用**安装端口径**
 （`readModulePackage`：配额 / 布局 / 验签 / 摘要）回读校验并打印 keyId。
-发布时把 `module-catalog/<id>/<version>/module.tgz` 放到模块源
-`http://47.92.39.184/updates/modules/<id>/<version>/module.tgz`；上传属于部署动作，需单独确认。
+发布时把 `module-catalog/` 随服务端一起部署（`HEMING_MODULE_DIR`，缺省 `<cwd>/module-catalog`），
+客户端从 `GET /api/modules` 取目录、从 `GET /api/modules/<id>/<version>/module.tgz` 下载；
+上传属于部署动作，需单独确认。
 
 开发态若模块未装、但仓库里有 `packages/infohub`，主进程直接退回源码目录（`electron .`
 不必每次构建模块包）；打包版没有这条退路。

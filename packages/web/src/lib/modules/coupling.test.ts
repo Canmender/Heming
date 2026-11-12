@@ -34,7 +34,13 @@ const MIGRATED_PATHS = [
   "components/WorkflowPage.tsx",
 ];
 
-const MODULE_IDS = ["staff", "automations", "infohub", "workflows"];
+/** 模块的「源码目录名 → 包 id」对照：目录名是历史命名，包 id 带 heming. 前缀。 */
+const MODULE_PACKAGES: ReadonlyArray<readonly [dir: string, id: string]> = [
+  ["staff", "staff"],
+  ["automations", "heming.automations"],
+  ["infohub", "heming.infohub"],
+  ["workflows", "workflows"],
+];
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -59,9 +65,9 @@ describe("插件独立化：模块实现不得再进本体（基线已归零）"
   });
 
   it("四个模块包都在 packages/modules，且声明 web 入口", () => {
-    for (const id of MODULE_IDS) {
-      const manifest = JSON.parse(readFileSync(join(MODULES_DIR, id, "module.json"), "utf8"));
-      expect(manifest.id).toBe(id);
+    for (const [dir, id] of MODULE_PACKAGES) {
+      const manifest = JSON.parse(readFileSync(join(MODULES_DIR, dir, "module.json"), "utf8"));
+      expect(manifest.id, `模块包 id 应为 ${id}`).toBe(id);
       expect(manifest.distribution).toBe("module");
       expect(manifest.web?.entry).toMatch(/^files\/web\/.+\.js$/);
       expect(Array.isArray(manifest.web.contributions)).toBe(true);

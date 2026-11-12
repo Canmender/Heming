@@ -24,6 +24,17 @@ const { readModulePackage } = require("./module-package");
 const REGISTRY_FILE = "installed.json";
 const STAGING_DIR = ".staging";
 
+/**
+ * 旧内置模块 id → 当前包 id（包 id 统一加 `heming.` 前缀的那次改名）。
+ *
+ * 只迁移这两个：`staff` / `workflows` 仍是旧模块（只保留数据兼容），
+ * 独立引擎包 `heming.infohub-engine` 是另一条历史方案，都不动。
+ */
+const LEGACY_ID_ALIASES = new Map([
+  ["infohub", "heming.infohub"],
+  ["automations", "heming.automations"],
+]);
+
 function defaultExists(target) {
   try {
     return fs.existsSync(target);
@@ -74,6 +85,51 @@ function createModuleStore(options = {}) {
     const raw = readJson(registryPath());
     const modules = raw && Array.isArray(raw.modules) ? raw.modules : [];
     return modules.filter((item) => item && typeof item.id === "string");
+  }
+
+  /**
+   * 把旧 id 的安装原地迁移到新 id（幂等、尽力而为）。
+   *
+   * 包 id 改名后，升级用户的目录与记录还停在 `infohub` / `automations`：
+   * 不迁移的话插件区会显示「未安装」，用户重装会再多下一份包，旧目录则变成幽灵数据。
+   * 做法是最小侵入的：目录整目录 rename、installed.json 里改记录 id。
+   *
+   * 边界：任何一步失败只记日志——迁移失败等价于「未安装」，用户重装即可，
+   * 绝不能让模块目录的问题把桌面端启动弄崩。
+   */
+  function migrateLegacyIds() {
+    const records = registry();
+    const legacyRecords = records.filter((item) => LEGACY_ID_ALIASES.has(item.id));
+    if (legacyRecords.length === 0) return;
+    const byId = new Map(records.map((item) => [item.id, item]));
+    for (const record of legacyRecords) {
+      const legacyId = record.id;
+      const nextId = LEGACY_ID_ALIASES.get(legacyId);
+      const legacyDir = baseDir(legacyId);
+      const nextDir = baseDir(nextId);
+      const nextRecord = byId.get(nextId);
+      try {
+        if (exists(legacyDir)) {
+          if (exists(nextDir)) {
+            // 新 id 已有安装（用户先重装过）：旧目录作废，避免两份版本目录并存。
+            fs.rmSync(legacyDir, { recursive: true, force: true });
+          } else {
+            fs.renameSync(legacyDir, nextDir);
+          }
+        }
+      } catch (err) {
+        log(`[modules] 旧 id 迁移失败（${legacyId} → ${nextId}）：${(err && err.message) || err}`);
+        continue;
+      }
+      if (!nextRecord) byId.set(nextId, { ...record, id: nextId });
+      byId.delete(legacyId);
+      log(`[modules] 已迁移旧模块 id：${legacyId} → ${nextId}`);
+    }
+    try {
+      writeJsonAtomic(registryPath(), { modules: [...byId.values()] });
+    } catch (err) {
+      log(`[modules] 旧 id 迁移写回失败：${(err && err.message) || err}`);
+    }
   }
 
   function find(id) {
@@ -224,6 +280,9 @@ function createModuleStore(options = {}) {
     }
     return true;
   }
+
+  // 启动即迁移（幂等）：后续 registry()/current()/install() 看到的就是新 id。
+  migrateLegacyIds();
 
   return { current, find, install, registry, remove };
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PageShell } from "./layout/PageShell.js";
+import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import {
   AlertIcon,
   AssistantIcon,
@@ -380,14 +381,22 @@ export function ModelPage() {
         </button>
       }
       headerExtra={
-        <div role="tablist" aria-label="模型页分区" className="ui-segment-group">
+        // 一级页签统一走 PAGE_TABLIST / pageTabClass（下划线式，与设置页、插件页、记忆页、团队页同一套视觉）。
+        // 之前是贴着窗口左缘的 .ui-segment-group 药丸控件，与全站页面级切换栏不一致。
+        // 左右内边距与页头/内容区同列（24 / 窄窗 16），选中项的 -mb-px 压住 PageShell.headerExtra 的外边框。
+        <div
+          role="tablist"
+          aria-label="模型页分区"
+          className={`${PAGE_TABLIST} px-6 max-[1199px]:px-4`}
+        >
           {TABS.filter((item) => cli !== null || item.key !== "sources").map((item) => (
             <button
               key={item.key}
               type="button"
               role="tab"
               aria-selected={tab === item.key}
-              className="ui-segment"
+              // 标准页签本身只给排版类名；这里保留 14px 图标，所以补 inline-flex + gap 让图标与文案对齐。
+              className={`${pageTabClass(tab === item.key)} inline-flex items-center gap-1.5`}
               onClick={() => setTab(item.key)}
             >
               {item.icon}

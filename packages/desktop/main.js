@@ -81,7 +81,7 @@ const { registerFileIpc } = require("./file-fs");
 const { registerSecretIpc } = require("./secret-store");
 const { registerNotifyIpc } = require("./notify-bridge");
 const { registerWorkflowHttpIpc } = require("./http-bridge");
-const { createInfohubEngine } = require("./infohub-engine");
+const { createInfohubEngine, ENGINE_ID: INFOHUB_MODULE_ID } = require("./infohub-engine");
 const { createInfohubBridge, registerInfohubIpc, resolveDefaultHome, resolveInfohubPackageDir } =
   require("./infohub-bridge");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
@@ -1080,12 +1080,13 @@ if (!gotLock) {
   secureIpc.handle("modules:install", async (_event, payload) => {
     const id = payload && typeof payload.id === "string" ? payload.id : "";
     const version = payload && typeof payload.version === "string" ? payload.version : "";
-    if (id === "infohub") await stopInfohubForModuleChange();
+    // 信息中枢的引擎就在这个模块包里：装/升/卸之前先停引擎，否则 Windows 上文件被占用。
+    if (id === INFOHUB_MODULE_ID) await stopInfohubForModuleChange();
     return webModuleInstaller.install(id, version);
   });
   secureIpc.handle("modules:remove", async (_event, id) => {
     const target = String(id || "");
-    if (target === "infohub") await stopInfohubForModuleChange();
+    if (target === INFOHUB_MODULE_ID) await stopInfohubForModuleChange();
     return webModuleInstaller.remove(target);
   });
   secureIpc.handle("modules:web-list", () =>

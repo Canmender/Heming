@@ -21,12 +21,19 @@ import { useInfohubStore } from "@heming/sdk";
 import { useUiStore, type InfohubIntent } from "@heming/sdk";
 import { isModuleEffective, useModuleStore } from "@heming/sdk";
 import { PageShell } from "@heming/sdk";
+import { InfohubChats } from "./InfohubChats.js";
 
 const SEARCH_LIMIT = 100;
 
 type Phase = "idle" | "connecting" | "ready" | "error";
-/** 去 IM 后只保留检索与日程：归档里的聊天会话不再提供浏览入口。 */
-type Tab = "search" | "agenda";
+/**
+ * 页面顶层的三个页签：检索 / 会话 / 日程。
+ *
+ * 会话页签是原 infohub-page 插件的聊天浏览界面并入后的入口：同样只读本机归档，
+ * 数据走桥的 conversations / messages，不再单独安装插件。
+ * 默认仍是「检索」：首页卡和命令面板投递的意图都以检索为主，会话是并列的浏览入口。
+ */
+type Tab = "search" | "chats" | "agenda";
 
 function sourceLabel(source: string): string {
   if (source === "qq") return "QQ";
@@ -460,6 +467,11 @@ export function InfohubPage() {
   }
 
   const ready = phase === "ready";
+  // 会话页签的数据在组件内部按需拉取；归档规模变化（同步/刷新）时给一个 token 触发重载，
+  // 规模没变就不打断用户正在看的列表与消息。
+  const chatsRefreshToken = status
+    ? `${status.stats.messages}:${status.stats.conversations}`
+    : "";
   // status.config 里带着 Python 的识别结果：已配置路径优先，缺失时用检测值。
   const detected = detectedSourcesFromSummary(status?.config);
   const lastMessageText = status?.lastMessageTs ? formatInfohubTime(status.lastMessageTs) : "";
@@ -687,6 +699,7 @@ export function InfohubPage() {
             {(
               [
                 ["search", "检索"],
+                ["chats", "会话"],
                 ["agenda", "日程"],
               ] as [Tab, string][]
             ).map(([value, label]) => (
@@ -777,6 +790,15 @@ export function InfohubPage() {
                 )}
               </div>
             </div>
+          )}
+
+          {tab === "chats" && (
+            <InfohubChats
+              ready={ready}
+              status={status}
+              refreshToken={chatsRefreshToken}
+              onError={setError}
+            />
           )}
 
           {tab === "agenda" && (

@@ -34,7 +34,7 @@ pnpm plugin:new acme.hello --name 问候工具
 pnpm plugin:lint                 # 批量校验 plugin-kit/plugins 与 plugin-kit/examples
 node scripts/plugin-lint.mjs plugin-kit/plugins/hello/plugin.json --strict
 
-# ③ 在应用里试装：插件区 → 安装 → 选文件/粘贴 plugin.json → 先看预览，再点安装
+# ③ 在应用里试装：插件区 →「手动粘贴清单」→ 选文件/粘贴 plugin.json → 先看预览，再点安装
 ```
 
 生成后的目录（声明式）：
@@ -214,7 +214,7 @@ plugin-kit/plugins/demo-widget/
 - `blocks` 至少 1 个、最多 12 个；`page` 是对象不是数组（没有多页面/Tab/子路由）。
 - 页面**不新增权限、不联网**：它是**静态展示**（清单文本 + 本地贡献清单），宿主不代拉数据；要展示会变化的信息，用技能/命令产出结果，发版时更新清单文本。
 - 没有 `page` 贡献的纯能力包照旧不新增导航入口；有 `page` 的才多一项，入口固定在模块入口之后、不受插件加载顺序影响。
-- 想改成首方 bundle 自带页：按 §3.4 的清单格式，把 `page` 换成 `{ "title": "…", "entry": "files/page.html" }`，`entry` 必须出现在 `files` 里；页面与桌面小组件可并存。可抄 [`examples/05-plugin-page/README.md`](examples/05-plugin-page/README.md) 的改法说明。
+- 想改成首方 bundle 自带页：按 §3.4 的清单格式，把 `page` 换成 `{ "title": "…", "entry": "files/page.html" }`，`entry` 必须出现在 `files` 里；页面与界面插件的独立窗口（插件详情 →「窗口设置」）可并存。可抄 [`examples/05-plugin-page/README.md`](examples/05-plugin-page/README.md) 的改法说明。
 
 ### 3.6 给插件加一个本机引擎（bundle，仅首方）
 
@@ -240,8 +240,9 @@ plugin-kit/plugins/demo-widget/
 - 引擎代码与依赖都在 `files/**` 里，`packageSha256` + 首方签名覆盖代码字节；
   `engine.entry/lib`、`permissions.kb` 也进入签名文本——签名后改入口/补权限会验签失败。
 - 包体上限随引擎放宽：解包 ≤64MB、≤4000 文件、单文件 ≤16MB。
-- 参考实现：`plugin-kit/plugins/infohub-page/`（`engine/bridge.py` + `build.mjs`：把 Python 依赖
-  staging 进 `files/engine/lib` 后再 `pack-plugin`）。
+- 参考实现：宿主侧 `packages/desktop/plugin-engine.js`（校验、协议、生命周期）；打包参考
+  `scripts/build-pet-widget.mjs` + `scripts/pack-plugin.mjs`（把 Python 依赖 staging 进 `files/engine/lib` 后再 `pack-plugin`）。
+  仓库里暂无随包携带引擎的插件包（原「聊天记录」已并入「信息中枢」模块）。
 
 ---
 
@@ -277,9 +278,9 @@ plugin-kit/plugins/demo-widget/
 |---|---|---|
 | 权威校验 | `pnpm plugin:lint` / `node scripts/plugin-lint.mjs <file\|dir> [--strict] [--json]` | 中文报错 + 字段路径，CI 可挡坏包 |
 | 编辑器补全 | `plugin.json` 里 `"$schema": "../../plugin.schema.json"`（从 `plugin-kit/plugins/<包>/` 相对到 kit） | 字段提示（**不等于**能装） |
-| 安装预览 | 插件区 → 安装 → 粘贴/选文件 | 只读差异、冲突、权限、兼容性；不点安装不写盘 |
-| 诊断 | 插件详情 →「诊断」 | 为什么没生效：停用/贡献级关/依赖/需更新/签名/超权限/孤儿 |
-| 健康检查 | 插件区 → 健康检查 →「修复记录」 | 记录损坏、技能或服务对不上 |
+| 安装预览 | 插件区 → 手动粘贴清单 → 粘贴/选文件 | 只读差异、冲突、权限、兼容性；不点安装不写盘 |
+| 诊断 | 插件区 → 页面底部「诊断」 | 为什么没生效：停用/贡献级关/依赖/需更新/签名/超权限/孤儿 |
+| 健康检查 | 插件区 → 页面底部「诊断」→「修复记录」 | 记录损坏、技能或服务对不上 |
 
 装完不生效的排查顺序：**总开关 → 贡献级开关 → 兼容性（需更新和鸣）→ 签名/信任 → 工具上限（未注入）→ 孤儿记录**。
 不要靠猜，诊断区直接写原因。
@@ -299,7 +300,7 @@ HEMING_PLUGIN_PUBLISH_KEY=*** pnpm plugin:publish -- <目录> --push https://hem
 ```
 
 - 发布目录布局：`<dir>/<id>/<version>/plugin.json`（原样字节）。
-- 市场索引 v2：v5 包才会出现在「市场」页；`hostVersion` 过滤按 `engines` 判定。
+- 市场索引 v2：v5 包才会进入市场索引（`/api/plugin-market`）；客户端安装入口统一在「插件区 → 从插件仓库安装」，`hostVersion` 过滤按 `engines` 判定。
 - bundle 额外：`pnpm plugin:pack` 打包（确定性 tgz）→ 签名 → 再发布；发版前 `node scripts/check-release-keys.mjs`。
 
 ---

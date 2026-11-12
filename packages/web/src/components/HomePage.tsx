@@ -165,8 +165,11 @@ export function HomePage() {
   // 内置模块默认未安装：卡片只在「已安装 + 已启用 + 依赖满足」时出现。
   const moduleState = {
     staff: isModuleEffective({ installed: moduleInstalled, enabled: moduleEnabled }, "staff"),
-    automations: isModuleEffective({ installed: moduleInstalled, enabled: moduleEnabled }, "automations"),
-    infoHub: isModuleEffective({ installed: moduleInstalled, enabled: moduleEnabled }, "infohub"),
+    automations: isModuleEffective(
+      { installed: moduleInstalled, enabled: moduleEnabled },
+      "heming.automations",
+    ),
+    infoHub: isModuleEffective({ installed: moduleInstalled, enabled: moduleEnabled }, "heming.infohub"),
   };
 
   const monthKey = useMemo(() => monthKeyOf(new Date().toISOString()), []);
@@ -547,10 +550,10 @@ export function HomePage() {
 
       {/* 2.6 本机归档：日程摘要与归档规模（仅桌面端渲染）。
           d.70：信息中枢模块停用后整张卡下线，不在首页留假入口。 */}
-      <ModuleHomeCard moduleId="infohub" active={moduleState.infoHub} />
+      <ModuleHomeCard moduleId="heming.infohub" active={moduleState.infoHub} />
 
       {/* 2.7 幕僚：最近一份主动简报（d.48）；d.131 起优先由模块包提供卡片，未加载回退内置 */}
-      <ModuleHomeCard moduleId="automations" active={moduleState.automations} />
+      <ModuleHomeCard moduleId="heming.automations" active={moduleState.automations} />
 
       {/* 3/4/5/6. 两栏：左团队动向；右智能体动态 + 在线成员 + 系统状态。
           窄窗（<1200）折成单列：1.5fr/1fr 的比例在 1000px 出头的窗口里会把左栏压得读不完整。 */}
