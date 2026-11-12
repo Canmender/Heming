@@ -34,7 +34,9 @@ groups:
             (
               sum by (tool) (rate(pipeline_tool_calls_total{status="error"}[5m]))
                 /
-              clamp_min(sum by (tool) (rate(pipeline_tool_calls_total[5m])), 0.001)
+              # 分母只算「真的执行过」的调用：cached 是幂等缓存命中、零风险，
+              # 混进分母会把失败率稀释掉（每次都失败但常命中的工具会永远不告警）。
+              clamp_min(sum by (tool) (rate(pipeline_tool_calls_total{status=~"ok|error"}[5m])), 0.001)
             )
             or vector(0)
           ) > 0.3

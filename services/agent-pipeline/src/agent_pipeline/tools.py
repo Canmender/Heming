@@ -235,10 +235,33 @@ class ToolRuntime:
         self._cache: dict[str, tuple[float, Observation]] = {}
         self._breakers: dict[str, _Breaker] = {}
         self._stats: dict[str, ToolStats] = {}
+        # 指标标签是有界的：tool 名来自模型输出（可能被幻觉成任意字符串），
+        # 直接当 label 会让 Prometheus 的时序数随调用量无限涨。
+        self._metric_labels: set[str] = set()
         self._lock = threading.RLock()
         self._pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool")
 
     # ---- 对外 -------------------------------------------------------------
+
+    MAX_TOOL_METRIC_LABELS = 32
+
+    def _metric_label(self, name: str) -> str:
+        """把工具名压到有界的标签集合里。
+
+        模型可能调用不存在的工具（``fs__lisst_dir`` 这种），每次幻觉都是一个新名字；
+        直接当 label 会给 Prometheus 造出无上限的时序（内存和抓取时间都会涨）。
+        已注册的工具名是代码里写死的、天然有界；其余归到 ``other``。
+        """
+        try:
+            self.registry.get(name)
+        except ToolError:
+            return "unknown"
+        if name in self._metric_labels:
+            return name
+        if len(self._metric_labels) < self.MAX_TOOL_METRIC_LABELS:
+            self._metric_labels.add(name)
+            return name
+        return "other"
 
     def execute(self, request: ToolRequest) -> Observation:
         started = time.monotonic()
@@ -265,6 +288,10 @@ class ToolRuntime:
                 if hit and time.monotonic() - hit[0] <= self.idempotency_ttl_s:
                     stats.cache_hits += 1
                     cached = hit[1]
+                    if self.metrics_hook is not None:
+                        # 单独记 cached：缓存命中不是一次真实执行，混进 ok 会让
+                        # 「工具到底调了几次」和「真的跑了几次」分不清。
+                        self.metrics_hook(self._metric_label(request.name), "cached", 0.0)
                     return Observation(
                         call_id=request.call_id,
                         tool=cached.tool,
@@ -361,7 +388,7 @@ class ToolRuntime:
                 stats.errors += 1
             stats.total_ms += duration_ms
         if self.metrics_hook is not None:
-            self.metrics_hook(request.name, "ok" if ok else "error", duration_ms / 1000)
+            self.metrics_hook(self._metric_label(request.name), "ok" if ok else "error", duration_ms / 1000)
         return Observation(
             call_id=request.call_id,
             tool=request.name,

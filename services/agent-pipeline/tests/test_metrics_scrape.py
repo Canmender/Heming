@@ -12,12 +12,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from prometheus_client.parser import text_string_to_metric_families
 
 from agent_pipeline.config import Settings
 from agent_pipeline.llm import FakeLLM
+
+ROOT = Path(__file__).resolve().parents[1]
 from agent_pipeline.metrics import Metrics
 from agent_pipeline.protocol import TaskSpec
 from agent_pipeline.runtime import build_runtime, run_once
@@ -125,3 +128,13 @@ def test_tool_metric_absent_before_first_tool_call(tmp_path) -> None:
     content = alert_file.read_text(encoding="utf-8")
     tool_alert = content.split("ToolFailureRateHigh", 1)[1].split("annotations", 1)[0]
     assert "or vector(0)" in tool_alert, "工具失败率告警缺零样本兜底"
+
+def test_tool_failure_alert_excludes_cache_hits_from_denominator() -> None:
+    """分母只算真实执行的调用（ok/error）：cached 是零风险的缓存命中。
+
+    否则「每次真跑都失败、但经常命中缓存」的工具，失败率会被缓存命中稀释掉，
+    告警永远不触发——这比没告警更糟，因为它看起来有覆盖。
+    """
+    text = (ROOT / "prometheus" / "alerts.yml").read_text(encoding="utf-8")
+    assert 'pipeline_tool_calls_total{status=~"ok|error"}' in text
+    assert "rate(pipeline_tool_calls_total[5m])" not in text
