@@ -229,6 +229,8 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 `--approval` 再往前一步：把工具换成写工具 `run_command`、开启审批闸（`ApprovalGate`），并起一个线程每 5ms 自动批准，模拟「用户一直点允许」。实测 `--runs 30 --concurrency 2 --tools --approval` → 30 次工具调用、30 次自动批准、0 失败、P50 75.7ms（不卡在等待裁决上）。
 
+> 最新一轮合并压测（功能全接齐、幂等缓存封顶、关停收口之后）：`--runs 20000 --concurrency 8 --tools --cancel-rate 0.1` → **108,276 次模型调用、17,986 次真实工具执行、2,014 次取消、0 失败**、12.4 run/s、P50 688.9ms / P95 804.3ms、内存峰值 6.46MB（结束 4.18MB）、`episodes` 稳定 5000。
+
 `--cancel-rate FLOAT` 按比例模拟「用户中途点停止」：run 提交后 5–15ms 置取消标志，节点入口看到就收口、`summarize` 仍跑出一句「取消前已完成的内容」。它验证的是取消路径在并发下不漏线程、不漏日志、不把状态卡在 `running`——实测 `--runs 200 --concurrency 4 --tools --cancel-rate 0.25` → 48 个 run 被取消、0 失败。取消是协作式的：如果那一刻正卡在工具调用或审批裁决里，要等工具超时/裁决返回才会收口（这是有意为之，硬中断线程会留下半截写入）。
 
 `--concurrency N` 会让 N 个工作线程同时跑 run（默认 1 = 顺序）。它验证的是状态机、SQLite 记忆、指标与配置存储**在并发下不互相踩**：实测 `--runs 8000 --concurrency 8` → 0 失败、40,000 次模型调用、17.5 run/s、P50 462ms / P95 496ms、内存峰值 4.1MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。并发 + 注入失败也一起验过：`--runs 400 --concurrency 4 --fail-rate 0.25 --canary` → 自动回滚 1 次、canary 归档 `archived`。

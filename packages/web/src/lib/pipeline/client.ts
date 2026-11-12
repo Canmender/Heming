@@ -72,13 +72,19 @@ export class PipelineError extends Error {
   readonly status: number | undefined;
   /** 服务端 `detail` 文案（有的话），便于直接展示给用户。 */
   readonly detail: string | undefined;
+  /**
+   * 服务端给的 `Retry-After`（毫秒）。
+   * 429 时服务端写的是 5 秒；不把它带出来，调用方只能盲等 1 秒然后继续撞 429。
+   */
+  readonly retryAfterMs: number | undefined;
 
-  constructor(kind: PipelineErrorKind, message: string, status?: number, detail?: string) {
+  constructor(kind: PipelineErrorKind, message: string, status?: number, detail?: string, retryAfterMs?: number) {
     super(message);
     this.name = "PipelineError";
     this.kind = kind;
     this.status = status;
     this.detail = detail;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -247,7 +253,14 @@ export function createPipelineClient(options: PipelineClientOptions): PipelineCl
     }
     if (!response.ok) {
       const detail = await readDetail(response);
-      throw new PipelineError("http", `流水线返回 ${response.status}${detail ? `：${detail}` : ""}`, response.status, detail);
+      const retryAfter = response.headers?.get?.("retry-after") ?? null;
+      throw new PipelineError(
+        "http",
+        `流水线返回 ${response.status}${detail ? `：${detail}` : ""}`,
+        response.status,
+        detail,
+        retryAfter === null ? undefined : parseRetryAfter(retryAfter),
+      );
     }
     return (await response.json()) as T;
   }
@@ -274,8 +287,8 @@ export function createPipelineClient(options: PipelineClientOptions): PipelineCl
       return { runId: raw.run_id, status: raw.status };
     } catch (error) {
       if (error instanceof PipelineError && error.status === 429) {
-        // 并发满不是错误，是背压：等 Retry-After 再来一次，别让用户看到红字。
-        await sleep(parseRetryAfter(null), signal);
+        // 并发满不是错误，是背压：按服务端给的 Retry-After 等一轮再来一次，别让用户看到红字。
+        await sleep(error.retryAfterMs ?? parseRetryAfter(null), signal);
         const raw = await requestJson<{ run_id: string; status: string }>(
           "/v1/runs",
           { method: "POST", body: JSON.stringify(body) },
@@ -292,11 +305,18 @@ export function createPipelineClient(options: PipelineClientOptions): PipelineCl
     if (pending.length === 0 || !options.onPendingApproval) return;
     for (const approval of pending) {
       const approved = await options.onPendingApproval(approval);
-      await requestJson(
-        `/v1/runs/${encodeURIComponent(runId)}/approve`,
-        { method: "POST", body: JSON.stringify({ call_id: approval.call_id, approved }) },
-        signal,
-      );
+      try {
+        await requestJson(
+          `/v1/runs/${encodeURIComponent(runId)}/approve`,
+          { method: "POST", body: JSON.stringify({ call_id: approval.call_id, approved }) },
+          signal,
+        );
+      } catch (error) {
+        // 404/409 表示这条待审批已经不在了（服务端超时按拒绝收口、或上一次其实已经提交成功）。
+        // 这时再把整个 run 抛错给用户是错的——继续轮询，稍后就能看到终态。
+        if (error instanceof PipelineError && (error.status === 404 || error.status === 409)) continue;
+        throw error;
+      }
     }
   }
 

@@ -115,7 +115,7 @@ describe("agent-pipeline 客户端", () => {
     expect(sleeps).toEqual([500, 500]);
   });
 
-  it("429（并发满）不是错误：退避后重提一次", async () => {
+  it("429（并发满）不是错误：按服务端 Retry-After 退避后重提一次", async () => {
     const { client, calls, sleeps } = makeClient([
       {
         match: "POST /v1/runs",
@@ -129,6 +129,55 @@ describe("agent-pipeline 客户端", () => {
     expect(run.status).toBe("ok");
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(2);
     expect(sleeps[0]).toBe(1_000); // Retry-After 缺失时按 1s 兜底
+  });
+
+  it("429 带 Retry-After 时按服务端给的秒数等，而不是死等 1 秒继续撞", async () => {
+    const withRetryAfter = {
+      ok: false,
+      status: 429,
+      headers: { get: (name: string) => (name.toLowerCase() === "retry-after" ? "5" : null) },
+      json: async () => ({ detail: "并发已满" }),
+    } as unknown as Response;
+    const { client, sleeps } = makeClient([
+      {
+        match: "POST /v1/runs",
+        responses: [withRetryAfter, jsonResponse({ run_id: "r1", status: "running" }, 202)],
+      },
+      { match: "GET /v1/runs/r1", responses: [finished()] },
+    ]);
+
+    await client.run({ goal: "x" });
+
+    expect(sleeps[0]).toBe(5_000);
+  });
+
+  it("审批来得太晚（服务端已按拒绝收口 → 409）不该把整个 run 抛错", async () => {
+    const pending: PipelineApproval = {
+      call_id: "c1",
+      tool: "run_command",
+      arguments: { command: "echo hi" },
+      requested_at: 1_699_848_000,
+      timeout_s: 300,
+    };
+    const { client } = makeClient(
+      [
+        { match: "POST /v1/runs", responses: [jsonResponse({ run_id: "r1", status: "running" }, 202)] },
+        {
+          match: "GET /v1/runs/r1",
+          responses: [
+            jsonResponse({ run_id: "r1", status: "running", pending_approvals: [pending] }),
+            finished(),
+          ],
+        },
+        { match: "POST /v1/runs/r1/approve", responses: [jsonResponse({ detail: "没有待审批的工具调用" }, 409)] },
+      ],
+      { onPendingApproval: () => true },
+    );
+
+    const run = await client.run({ goal: "x" });
+
+    expect(run.status).toBe("ok");
+    expect(run.answer).toBe("装好了");
   });
 
   it("非 2xx 抛 PipelineError(http)，带上服务端 detail", async () => {
