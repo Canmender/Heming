@@ -301,12 +301,25 @@ def execute_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     new_observations: list[Observation] = []
     # 只读工具一起跑（顺序执行但互不依赖），写工具天然串行——这里统一顺序执行，行为确定。
     known = set(runtime.tools.registry.names())
+    # tools_allowed 是「本次允许用哪些工具」的硬约束：模型仍可能凭上下文发出别的名字
+    # （尤其是上一次对话里见过的写工具），所以除了下发 schema 时过滤，这里再挡一次执行。
+    allowed_names = set(task.tools_allowed) if task.tools_allowed else known
     for call in calls:
         name = str(call.get("name") or "")
         arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
         call_id = str(call.get("id") or f"call_{hashlib.sha1((name + str(arguments)).encode()).hexdigest()[:8]}")
         if name not in known:
             observation = Observation(call_id=call_id, tool=name, ok=False, error=f"未注册的工具：{name}")
+        elif name not in allowed_names:
+            observation = Observation(
+                call_id=call_id,
+                tool=name,
+                ok=False,
+                error=(
+                    f"工具不在本次允许的范围内：{name}"
+                    f"（允许：{'、'.join(sorted(allowed_names)) or '无'}）"
+                ),
+            )
         else:
             spec = runtime.tools.registry.get(name)
             if runtime.approval is not None and spec.risk != "read":

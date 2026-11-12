@@ -150,6 +150,14 @@ curl -s http://localhost:8000/v1/knowledge \
   -d '{"doc_id":"installer","title":"安装器手册","text":"通用外壳只适用于在线版……"}'
 ```
 
+## 工具允许清单（`tools_allowed`）
+
+`POST /v1/runs` 的 `tools_allowed` 是**硬约束**，不是提示：允许清单非空时，
+`execute` 节点只把清单内的工具 schema 下发给模型，执行侧再挡一次——模型凭上下文发出的清单外工具
+（常见于上一轮对话里见过的写工具）会得到一条 `ok=False` 的观测「工具不在本次允许的范围内：X（允许：…）」，
+工具本身不会执行。此前只校验「工具注册过没有」，于是限制成只读工具的一次 run 依然能真跑 `run_command`。
+`tests/test_tools_allowed.py` 2 例钉住「越权不发 schema 也不执行」和「允许的工具照常跑」两条。
+
 ## 工具审批（HITL）
 
 `AGENT_APPROVAL_MODE=write` 时，`execute` 节点在跑**非只读**工具前会挂起，等外部裁决：
