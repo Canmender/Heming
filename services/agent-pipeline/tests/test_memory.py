@@ -128,3 +128,69 @@ def test_prune_is_idempotent_and_accepts_overrides():
         store.add_episodic(MemoryRecord(kind="lesson", text=f"x{i}", run_id="r"))
     assert store.prune(max_episodes=2) == {"episodes": 2, "documents": 0}
     assert store.prune(max_episodes=2) == {"episodes": 0, "documents": 0}
+
+
+def test_prune_expires_episodes_by_age():
+    """按时间过期：max_episode_age_days>0 时，超龄的流水账自动消失。"""
+    import time
+
+    from agent_pipeline.memory import MemoryStore
+    from agent_pipeline.protocol import MemoryRecord
+
+    store = MemoryStore(":memory:", max_episodes=0, max_episode_age_days=30)
+    store.add_episodic(MemoryRecord(kind="lesson", text="上个月的经验", run_id="r1"))
+    store.add_episodic(MemoryRecord(kind="lesson", text="今天的经验", run_id="r2"))
+    # 把第一条拨回 40 天前（直接改 created_at，模拟时间流逝）
+    with store._lock:  # noqa: SLF001 - 测试里就是要造时间差
+        store._conn.execute(  # noqa: SLF001
+            "UPDATE episodic SET created_at = created_at - ? WHERE text = ?",
+            (40 * 86_400.0, "上个月的经验"),
+        )
+        store._conn.commit()  # noqa: SLF001
+    removed = store.prune(max_episode_age_days=30)
+    assert removed["episodes"] == 1
+    texts = [hit.text for hit in store.search("经验", limit=10)]
+    assert "今天的经验" in texts
+    assert "上个月的经验" not in texts
+    store.close()
+
+
+def test_prune_drops_low_importance_before_old_high_importance():
+    """超容量时先删低重要性：老的「反复验证过的教训」不该被今天的流水账挤掉。"""
+    from agent_pipeline.memory import MemoryStore
+    from agent_pipeline.protocol import MemoryRecord
+
+    # 注意：add_episodic 末尾会自动 prune，所以这里先放开上限，最后显式调 prune(max_episodes=2)
+    store = MemoryStore(":memory:", max_episodes=100)
+    store.add_episodic(MemoryRecord(kind="lesson", text="重要的老经验", run_id="r0", importance=0.95))
+    store.add_episodic(MemoryRecord(kind="episodic", text="今天的流水账", run_id="r1", importance=0.1))
+    store.add_episodic(MemoryRecord(kind="episodic", text="普通记录", run_id="r2", importance=0.5))
+
+    removed = store.prune(max_episodes=2)
+    assert removed["episodes"] == 1
+    with store._lock:  # noqa: SLF001 - 直接看库里剩下哪些
+        texts = [row[0] for row in store._conn.execute("SELECT text FROM episodic")]  # noqa: SLF001
+    assert "重要的老经验" in texts
+    assert "普通记录" in texts
+    assert "今天的流水账" not in texts
+    store.close()
+
+
+def test_prune_keeps_everything_when_age_disabled():
+    """max_episode_age_days=0 是默认：不按时间淘汰（只受条数上限约束）。"""
+    import time
+
+    from agent_pipeline.memory import MemoryStore
+    from agent_pipeline.protocol import MemoryRecord
+
+    store = MemoryStore(":memory:", max_episodes=100, max_episode_age_days=0)
+    store.add_episodic(MemoryRecord(kind="lesson", text="很老的经验", run_id="r1"))
+    with store._lock:  # noqa: SLF001
+        store._conn.execute(  # noqa: SLF001
+            "UPDATE episodic SET created_at = ? WHERE text = ?",
+            (time.time() - 400 * 86_400.0, "很老的经验"),
+        )
+        store._conn.commit()  # noqa: SLF001
+    assert store.prune()["episodes"] == 0
+    assert store.count()["episodes"] == 1
+    store.close()

@@ -79,6 +79,7 @@ def build_runtime(
         settings.db_path,
         max_episodes=settings.max_episodes,
         max_documents=settings.max_documents,
+        max_episode_age_days=settings.max_episode_age_days,
     )
     config_store = config_store or ConfigStore(settings.db_path)
     registry = build_default_registry(

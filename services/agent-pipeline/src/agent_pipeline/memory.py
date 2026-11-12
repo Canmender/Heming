@@ -16,6 +16,7 @@ import math
 import re
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -114,11 +115,15 @@ class MemoryStore:
         dim: int = 256,
         max_episodes: int = 5_000,
         max_documents: int = 2_000,
+        max_episode_age_days: float = 0.0,
     ) -> None:
         self.path = str(path)
         self.dim = dim
         self.max_episodes = max(0, int(max_episodes))
         self.max_documents = max(0, int(max_documents))
+        # 0 表示「只按条数上限淘汰、不按时间过期」——按时间淘汰需要调用方愿意接受
+        # 「三个月前的经验自动消失」，所以默认关，由 AGENT_MAX_EPISODE_AGE_DAYS 打开。
+        self.max_episode_age_days = max(0.0, float(max_episode_age_days))
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -244,24 +249,44 @@ class MemoryStore:
         results.sort(key=lambda r: r.score, reverse=True)
         return results[:limit]
 
-    def prune(self, *, max_episodes: int | None = None, max_documents: int | None = None) -> dict[str, int]:
-        """按容量上限删最旧记录（幂等；可在任意时刻调用）。
+    def prune(
+        self,
+        *,
+        max_episodes: int | None = None,
+        max_documents: int | None = None,
+        max_episode_age_days: float | None = None,
+        now: float | None = None,
+    ) -> dict[str, int]:
+        """按容量上限与（可选）时间上限删记录（幂等；可在任意时刻调用）。
+
+        - 情景记忆先按 ``max_episode_age_days`` 过期（0 = 不按时间淘汰），
+          再按条数裁到 ``max_episodes``；裁的时候**先删低重要性的**，
+          同等重要性才比新旧——「三个月前反复验证过的教训」不该因为一条
+          今天随手记的流水账就被挤掉。
+        - 文档按 ``max_documents`` 删最旧，连带删 chunks（同一事务，避免孤儿块）。
 
         返回 ``{"episodes": n, "documents": n}``——删掉的条数，便于日志与测试断言。
-        删文档会连带删掉它的 chunks（同一事务里做，避免留下孤儿块）。
         """
         keep_episodes = self.max_episodes if max_episodes is None else max(0, int(max_episodes))
         keep_documents = self.max_documents if max_documents is None else max(0, int(max_documents))
+        age_days = self.max_episode_age_days if max_episode_age_days is None else max(0.0, float(max_episode_age_days))
+        current = time.time() if now is None else float(now)
         removed_episodes = 0
         removed_documents = 0
         with self._lock:
+            if age_days > 0:
+                cur = self._conn.execute(
+                    "DELETE FROM episodic WHERE created_at < ?",
+                    (current - age_days * 86_400.0,),
+                )
+                removed_episodes += max(0, cur.rowcount or 0)
             if keep_episodes:
                 cur = self._conn.execute(
                     "DELETE FROM episodic WHERE rowid NOT IN "
-                    "(SELECT rowid FROM episodic ORDER BY rowid DESC LIMIT ?)",
+                    "(SELECT rowid FROM episodic ORDER BY importance DESC, created_at DESC, rowid DESC LIMIT ?)",
                     (keep_episodes,),
                 )
-                removed_episodes = max(0, cur.rowcount or 0)
+                removed_episodes += max(0, cur.rowcount or 0)
             if keep_documents:
                 stale = [
                     row[0]

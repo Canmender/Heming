@@ -108,6 +108,8 @@ class Settings:
     # 记忆容量上限（超限删最旧；0 = 不限制，只建议测试里用）
     max_episodes: int = 5_000
     max_documents: int = 2_000
+    # 0 = 只按条数上限淘汰；>0 时情景记忆按天数过期（「三个月前的流水账自动消失」）。
+    max_episode_age_days: float = 0.0
     # 评审与对抗
     critic_threshold: float = 0.6
     coverage_target: float = 0.9
@@ -173,6 +175,7 @@ class Settings:
             approval_timeout_s=_env_float("AGENT_APPROVAL_TIMEOUT_S", cls.approval_timeout_s),
             max_episodes=_env_int("AGENT_MAX_EPISODES", cls.max_episodes),
             max_documents=_env_int("AGENT_MAX_DOCUMENTS", cls.max_documents),
+            max_episode_age_days=_env_float("AGENT_MAX_EPISODE_AGE_DAYS", cls.max_episode_age_days),
             tune_enabled=_env_bool("AGENT_TUNE_ENABLED", cls.tune_enabled),
             tune_interval_s=_env_float("AGENT_TUNE_INTERVAL_S", cls.tune_interval_s),
             tune_window_hours=_env_int("AGENT_TUNE_WINDOW_HOURS", cls.tune_window_hours),
