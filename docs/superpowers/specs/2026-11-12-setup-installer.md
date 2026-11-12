@@ -139,7 +139,7 @@ cd packages/setup && node --test                  # 纯函数与编排测试
 - 无代码签名，仍是「未知发布者」；
 - 安装阶段没有精确百分比（内层不暴露），只能按文件数/字节数给实感；
 - 外层安装器自身的自动更新未做（应用内更新由第 8 节的内置更新助手承接，助手版本随桌面版本一起换，不单独自更新）；
-- 内置更新助手让桌面安装包多约 105MB（一个完整 Electron 运行时），换来更新时与首次安装完全一致的画面；
+- 内置更新助手让桌面安装包多约 98MB（一个完整 Electron 运行时，d.140 起为在线版；此前内置离线版时是 409MB），换来更新时与首次安装完全一致的画面；
 - 只做 zh_CN/Windows x64；arm64、多语言、埋点均未做；
 - electron-builder 26 的 `portable.splashImage` / `portable.requestExecutionLevel` 已随构建验证有效；
 - **本机环境坑**：从仓库目录（`D:\Heming\...\packages\setup\release\`）启动 portable exe 时，NSIS 外壳写临时文件失败并弹 `Error writing temporary file. Make sure your temp folder is valid.`（与 `2026-11-07-installer-branding.md` 里卸载器那条同源）；把 exe 复制到普通用户目录（如 `%TEMP%\heming-setup\psetup-final\setup.exe`）再运行即正常。属于本机 DSH 启动环境的 TEMP 限制，不是产品缺陷，验收时按复制方式跑。
@@ -148,7 +148,7 @@ cd packages/setup && node --test                  # 纯函数与编排测试
 
 应用内更新原本调 `autoUpdater.quitAndInstall(false, true)`，electron-updater 会启动内层 NSIS 包并显示 MUI 向导——用户装过一次之后，更新时又看到另一套界面，视觉上和「程序」断开了。这里把同一套自绘窗口复用为**更新助手**。
 
-为什么必须是独立进程：Windows 会锁住正在运行的程序文件，应用自己不能在退出前重装自己；所以助手是 `packages/setup` 打出来的单 exe，以 ~105MB 的代价内置进桌面安装包（`resources/updater/setup.exe`），不用时只是磁盘占用。
+为什么必须是独立进程：Windows 会锁住正在运行的程序文件，应用自己不能在退出前重装自己；所以助手是 `packages/setup` 打出来的单 exe，内置进桌面安装包（`resources/updater/setup.exe`），不用时只是磁盘占用。体积从 d.138 的约 409MB（内嵌 357MB 内层包）降到 d.140 的 **97.8MB**（在线版，见本节末「d.140 瘦身」）。
 
 流程：
 
@@ -170,6 +170,8 @@ cd packages/setup && node --test                  # 纯函数与编排测试
 构建：`scripts/build-desktop.mjs` 的 `stageUpdateHelper()` 在打包前把 `packages/setup/release/和鸣安装程序 *.exe` 里最新者复制成 `packages/desktop/update-helper/setup.exe`（该目录被 `extraResources` 搬到 `resources/updater/`，`*.exe` 不入库）。找不到 setup 产物时只告警并清掉旧暂存，不中止打包。
 
 测试：`packages/setup/lib/update-plan.test.js`（6 例：模式识别、路径解析、计划校验/归一化、缺失与坏 JSON 归 `no-payload`）、`packages/desktop/update-helper.test.js`（6 例：助手/计划路径、计划组装、`ELECTRON_RUN_AS_NODE` 清理、跨包常量一致）。
+
+**d.140 瘦身：助手改为在线版（不加 `--embed-inner`）**。原先把 `packages/setup` 的**离线版**（`--embed-inner`，自带 357MB 内层 NSIS 包，409MB）内置进桌面端，是安装包从 247MB 涨到 645MB 的主因；但更新模式根本用不到内嵌包——计划里的 `installerPath` 就是 electron-updater 已下载好的安装包，`packages/setup/lib/pipeline.js` 的 `resolvePayload(ctx, forcedPath)` 优先返回 `forcedPath`，`config.payloadMode === "embedded"` 才会去读内嵌包。所以 d.140 起助手改用 `node scripts/build-setup.mjs`（默认在线版，`config/generated.json` 里 `payload: "network"`）产出的 97.8MB 单 exe，桌面安装包 676MB → 335MB。代价只有一个：把这个 portable 当**首次安装器**单独运行时需要联网从 `/updates/latest.yml` 下载内层包；要做离线安装盘时再 `--embed-inner` 重打。打包顺序必须是先助手后桌面（`stageUpdateHelper()` 按 mtime 取 `packages/setup/release` 最新者），否则会把上一版助手打进桌面端。
 
 2026-11-12 冒烟：把计划里的 `installerPath` 指向一个假安装包，用真实 `main.js` 跑更新模式——窗口标题「更新 和鸣」、标题栏「更新程序」、直接进 work 屏，右栏三条事实变成「版本 / 现在是什么版本 / 已在后台下载」，失败后错误屏为「更新没能完成。」+ `install-failed`，说明「读计划 → 自动开跑 → 按磁盘结果判定」整条链路是通的（计划缺失时错误屏为「更新包已经不在原处了」，「重试」改为关窗回应用）。
 

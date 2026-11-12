@@ -215,6 +215,21 @@ node scripts/build-desktop.mjs --win nsis --config.directories.output=release-ne
 「已有安装包」列表走同一解析。所以**本机默认把安装包放在 D 盘**，仓库里不再留产物。
 临时换目录：`HEMING_RELEASE_DIR=E:/tmp/out node scripts/build-desktop.mjs --win nsis`。
 
+### 同版本重出安装包（覆盖发布）
+
+只有**打包配置或体积**变化、功能未变时（例：d.140 的 645MB → 320MB 瘦身），可以**不 bump 版本号**，直接在同一个
+`release/rNN` 里重出并覆盖更新源。代价与口径：
+
+1. 版本号不变 → 已装客户端不会被迫重下几百 MB（`latest.yml` 的 `version` 没变，electron-updater 判为「已是最新」）；
+2. 覆盖发布用 `node scripts/release.mjs --only publish --publish --release-r NN`（`--only` 跳过预检，所以脏工作区也能发，
+   但顺序上仍然先提交更干净）；`publish-update.mjs` 会在远端**重算 sha512** 再与本地核对；
+3. 必须回填 `docs/HANDOFF.md` §2 的「安装包（最新）」「安装包（已发布）」「自动更新源」三行（新 size / 新 sha512），
+   并在 CHANGELOG 对应条目里加一条「同日重出」，写清降幅与三处改动；`docs/RELEASE-NOTES.md` 补一条用户向说明；
+4. **tag 不移动**：`d.<ver>` 仍指向当轮功能提交，HANDOFF 里注明「安装包同日重出，tag 指向功能提交」；
+5. **产物位置与发布步骤必须一致**：手工 `pnpm dist:desktop` 落 `packages/desktop/release/` 根（默认输出目录），
+   而 `release.mjs --release-r NN` 读 `release/rNN`——覆盖前把 exe / `.blockmap` / `latest.yml` 三件一起拷进 `rNN`，
+   否则发布脚本会把目录里的旧包再传一遍（d.140 实踩：第一次发布又传了 676MB 旧包）。
+
 它替你做三件事：
 
 1. 把 `hemingVersion` 注入 `HEMING_APP_VERSION`——`build.nsis.artifactName` /

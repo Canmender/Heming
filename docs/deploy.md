@@ -338,6 +338,26 @@ HEMING_RELEASE_DIR=D:/Heming/packages/desktop/release/r34 node scripts/publish-u
 > ② 同日二次发版会覆盖上午那份备份（备份名按日期生成）——发版前先把新备份改名留档
 >    （本轮存为 `heming-data-2026-10-22-d30.tar.gz`）。
 
+### 安装包体积构成（d.140 瘦身记录）
+
+`d.140.3.54.10` 首次出包 676MB，当天在「不动功能和技术」的口径下收到 **335,458,870 字节**（`win-unpacked` 1,233MB → 856MB，-50.4%）。构成与开关记在这里，下次再动体积先看这张表：
+
+| 部分 | 体积 | 能不能动 |
+| --- | --- | --- |
+| Electron 运行时（`Heming.exe` 239MB + `dxcompiler.dll` 25MB + `resources.pak` 13MB + `icudtl.dat` 11MB + …） | 约 300MB | 不能。`electron.exe` 本体 249,788,928B 是 Electron 45.2.1 的产物；`locales` 已只留 zh-CN/en-US（49MB → 2MB） |
+| `resources/updater/setup.exe`（更新助手） | **98MB**（原 409MB） | 已是上线版能到的最小值；助手本身是压缩过的 NSIS portable，再压几乎不缩 |
+| `resources/runtime/mcp-env` | **364MB**（原 382MB） | 里面都是真依赖：playwright 106 + patchright 106（`scrapling[fetchers]` 的普通/隐身两套浏览器驱动，二选一等于砍功能）、numpy 43 + PIL 15（`windows_mcp` 直接 import）、cryptography 11、lxml 9 … |
+| `resources/magpie`（模型网关） | 70MB | 按需下载属结构性方案，未做 |
+| `resources/web` + `app.asar` | 14MB + 3MB | 界面产物，不动 |
+
+三处实际改动：
+
+1. **更新助手改在线版**：`node scripts/build-setup.mjs`（**不带** `--embed-inner`）→ `packages/setup/release/和鸣安装程序 <ver>.exe`（409MB → 97.8MB），`packages/setup/config/generated.json` 变 `payload: "network"`。打包顺序必须是**先助手、后桌面**：`build-desktop.mjs` 的 `stageUpdateHelper()` 按 mtime 取 `packages/setup/release` 里最新的那个复制成 `packages/desktop/update-helper/setup.exe`。应用内更新不受影响（计划文件的 `installerPath` 优先于内嵌包）；只有把这个 portable 当**首次安装器**单独跑时，才需要联网从 `/updates/latest.yml` 下载内层包——要做离线安装盘就还得用 `--embed-inner`，那会多回 357MB。
+2. **压缩与语言**：`packages/desktop/package.json` 与 `packages/setup/package.json` 的 `build` 各加 `"compression": "maximum"`、`"electronLanguages": ["zh-CN","en-US"]`。
+3. **运行时过滤**：desktop `extraResources` 里 runtime 那条 filter 补 `!**/__pycache__/**`、`!**/tests/**`、`!**/test/**`、`!**/*.chm`（`tests` 16MB、`__pycache__` 6MB、`PyWin32.chm` 3MB）。
+
+⚠️ 发布口径：手工 `pnpm dist:desktop` 的产物落在 `packages/desktop/release/` **根目录**，而 `release.mjs --release-r NN` 的发布步骤读 `release/rNN`。覆盖发布时要把 `和鸣 Setup <ver>.exe`、`.blockmap`、`latest.yml` **三件一起**拷进 `rNN` 再发，否则会把旧包原样再传一遍（d.140 实踩）。
+
 ### 四个必须知道的坑
 
 1. **`latest.yml` 不会自动生成。** electron-builder 默认不产出更新元数据，少了它客户端永远提示「已是最新」——**界面上与正常无差别，无法靠肉眼发现**。`build-desktop.mjs` 已默认注入 `--publish always`，产物目录里必须能看到 `latest.yml` 才算打包成功。
