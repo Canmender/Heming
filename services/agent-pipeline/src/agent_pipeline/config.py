@@ -126,6 +126,9 @@ class Settings:
     # 工具审批（HITL）：off = 不拦；write = 非只读工具执行前等用户裁决
     approval_mode: str = "off"
     approval_timeout_s: float = 300.0
+    # 允许 http_get 访问内网/本机地址（默认关）：模型给的 URL 不可信，
+    # 放开就等于给它一个能读内部接口和云元数据的通道（SSRF）。
+    allow_private_hosts: bool = False
     # 服务
     max_concurrent_runs: int = 4
     # 回滚
@@ -199,6 +202,7 @@ class Settings:
             tool_timeout_s=_env_float("AGENT_TOOL_TIMEOUT_S", cls.tool_timeout_s),
             idempotency_max_entries=_env_int("AGENT_IDEMPOTENCY_MAX_ENTRIES", cls.idempotency_max_entries),
             approval_mode=os.environ.get("AGENT_APPROVAL_MODE", cls.approval_mode),
+            allow_private_hosts=_env_bool("AGENT_ALLOW_PRIVATE_HOSTS", cls.allow_private_hosts),
             approval_timeout_s=_env_float("AGENT_APPROVAL_TIMEOUT_S", cls.approval_timeout_s),
             max_episodes=_env_int("AGENT_MAX_EPISODES", cls.max_episodes),
             max_documents=_env_int("AGENT_MAX_DOCUMENTS", cls.max_documents),

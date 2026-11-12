@@ -87,6 +87,7 @@ def build_runtime(
     registry = build_default_registry(
         allow_commands=os.environ.get("AGENT_PIPELINE_ALLOW_COMMANDS") == "1",
         memory=memory,
+        allow_private_hosts=settings.allow_private_hosts,
     )
     tools = ToolRuntime(
         registry,

@@ -123,6 +123,7 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_TUNE_EVAL` | `0` | 开「回放 A/B」评测器（否则调优只出报告，不注册灰度） |
 | `AGENT_APPROVAL_MODE` | `off` | `write` = 非只读工具执行前挂起等审批；`off` = 不拦 |
 | `AGENT_APPROVAL_TIMEOUT_S` | `300` | 等审批的时限；超时按**拒绝**处理（绝不悄悄放行） |
+| `AGENT_ALLOW_PRIVATE_HOSTS` | `0` | 放开 `http_get` 访问内网/本机地址（默认拒；见「网络出口」） |
 
 预算（`Budget`）：`max_steps=8`、`max_llm_calls=40`、`max_tokens=120_000`、`max_wall_clock_s=600`、`step_tool_budget=6`、`max_replans=2`、`max_adversarial_rounds=2`。超预算时流水线**不硬失败**，而是带 `status="budget"` 和 `stop_reason` 返回已完成的部分。
 
@@ -267,6 +268,21 @@ curl -s -X POST http://localhost:8000/v1/runs/$ID/approve \
 - **只允许 http/https**：`file://`、相对路径一律 `ToolError("只支持 http/https")`；
 - **连不上变成 `ok=False` 观测**：带错误文案往下走，Reflect 能看到「这个接口挂了」并换方案。
 
+### 网络出口：默认不给模型一条通内网的隧道（SSRF 防护）
+
+`http_get` 的 URL 是**模型**写的，而模型的输入来自不可信内容（网页正文、工具返回、知识库切片）。
+一条提示注入就能让它请求内网接口，再把响应原样带回对话里——这是 SSRF，不是理论问题：
+
+- 默认**拒绝**本机、内网、链路本地、保留地址（`127.0.0.1`、`localhost`、`10/8`、`192.168/16`、`172.16/12`、
+  `169.254.169.254` 云元数据、`::1` 等），报错写明「拒绝访问内网地址：X（…确实需要时由服务端设置
+  `AGENT_ALLOW_PRIVATE_HOSTS=1`）」，模型能看懂并换方案；
+- 主机名会先解析再判断，解析失败的域名不当作「内网」（否则「域名写错」会被说成「内网被拒」，排查方向就歪了）；
+- 真需要访问内网（内网 API、本机模型服务）时由服务端显式打开 `AGENT_ALLOW_PRIVATE_HOSTS=1`——这是运维决定，不是模型决定；
+- `tests/test_http_tool.py` 用五个地址（含云元数据）钉住默认拒绝，另有一条用例钉住「显式打开后放行」。
+
+仍未覆盖：DNS rebinding（解析与应用之间地址被换掉）。要彻底堵住需要连到解析后的 IP 再校验，
+本项目选择「不做花活、把默认面收紧」，并把这条写进「已知边界」。
+
 ## 可观测与回滚
 
 - 指标：`pipeline_runs_total{status}`、`pipeline_run_duration_seconds`、`pipeline_node_duration_seconds{node}`、`pipeline_tool_calls_total{tool,status}`（**`tool` 标签有界**：已注册工具名最多 32 个，其余归 `other`；模型幻觉出来的不存在工具归 `unknown`——否则模型每次编个新名字就是一个新时序，Prometheus 会被撑爆。`status` 里 `cached` 表示幂等缓存命中、没真的执行，`ok`/`error` 才是真实执行；工具失败率告警的分母只取 `ok|error`，否则缓存命中会把失败率稀释成不告警）、`pipeline_llm_tokens_total{kind}`、`pipeline_coverage_ratio`、`pipeline_rollback_total{reason}`、`pipeline_config_version`。
@@ -398,7 +414,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **210 passed / 覆盖率 94.9%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **241 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 
@@ -408,4 +424,5 @@ run.answer; run.citations; run.coverage; run.stopReason;
 2. **对抗模式的覆盖率必须来自真实命令**：没配 `coverage_runner` 时 `coverage=None`，此时 `adversarial_passed` 永远为 False，不会假装达标。
 3. **HITL 只在单进程内有效**：`AGENT_APPROVAL_MODE=write` 的等待是在执行线程里阻塞，服务重启/进程崩溃后待审批的调用会随线程一起消失（客户端会看到该 run 变 `error`）；跨重启续跑需要 LangGraph `interrupt` + checkpointer，还没做。
 4. **知识库检索是词面为主**：BM25 + 哈希向量的混合检索，对同义改写不如真正的 embedding 模型；中文靠单字/双字切词，短查询容易放大无关片段。要更好的语义召回，需要接一个 embedding 服务（当前没有外部依赖）。
-5. **调优不自动上线**：每日调度器（`AGENT_TUNE_ENABLED=1`）会自动跑 `tune`，但只产出候选 + 注册灰度；提升到 active 仍需要 `/v1/config/promote` 或人工看板。自动转正的条件（连续 N 轮灰度指标更好）还没做。回放评测器默认关闭（`AGENT_TUNE_EVAL=1` 才开），因为它会真跑流水线、花真钱。
+5. **`http_get` 仍有 DNS rebinding 未覆盖**：默认拒绝本机/内网/链路本地/保留地址（含云元数据），主机名先解析再判断，但「解析发生在校验之后、请求时又解析一次」这个缝隙没堵；彻底做法是连解析结果里的 IP 再校验（或自建连接池），本项目选择先把默认面收紧。
+6. **调优不自动上线**：每日调度器（`AGENT_TUNE_ENABLED=1`）会自动跑 `tune`，但只产出候选 + 注册灰度；提升到 active 仍需要 `/v1/config/promote` 或人工看板。自动转正的条件（连续 N 轮灰度指标更好）还没做。回放评测器默认关闭（`AGENT_TUNE_EVAL=1` 才开），因为它会真跑流水线、花真钱。

@@ -54,7 +54,8 @@ def api() -> Iterator[str]:
 
 @pytest.fixture()
 def runtime() -> Iterator[ToolRuntime]:
-    instance = ToolRuntime(build_default_registry())
+    # 测试桩跑在 127.0.0.1 上，所以要显式放开内网访问（生产默认是拒的）。
+    instance = ToolRuntime(build_default_registry(allow_private_hosts=True))
     try:
         yield instance
     finally:
@@ -108,6 +109,39 @@ def test_http_get_schema_is_enforced(runtime: ToolRuntime) -> None:
     )
     assert observation.ok is False
     assert "参数" in observation.error or "schema" in observation.error.lower()
+
+
+def test_http_get_blocks_private_addresses_by_default(api: str) -> None:
+    """SSRF 防护：模型给的 URL 来自不可信内容，默认不许打本机/内网。
+
+    云元数据（169.254.169.254）与内网管理接口都在这一类：一条提示注入就能让
+    模型把内部数据读进对话里。
+    """
+    instance = ToolRuntime(build_default_registry())
+    try:
+        for url in (
+            api,  # 127.0.0.1
+            "http://localhost:8000/health",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]:8000/",
+            "http://10.0.0.1/",
+        ):
+            observation = _call(instance, url)
+            assert observation.ok is False, url
+            assert "内网" in observation.error, observation.error
+    finally:
+        instance.close()
+
+
+def test_http_get_allows_private_when_explicitly_enabled(api: str) -> None:
+    """确实需要访问内网时由服务端显式打开（AGENT_ALLOW_PRIVATE_HOSTS=1）。"""
+    instance = ToolRuntime(build_default_registry(allow_private_hosts=True))
+    try:
+        observation = _call(instance, f"{api}/json")
+        assert observation.ok is True
+        assert observation.result["status"] == 200
+    finally:
+        instance.close()
 
 
 def test_http_get_declares_net_risk() -> None:

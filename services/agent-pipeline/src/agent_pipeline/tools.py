@@ -9,13 +9,16 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
+import socket
 import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
+from urllib.parse import urlparse
 
 from .protocol import Citation, Observation, Risk, ToolRequest, idempotency_key
 
@@ -414,7 +417,46 @@ class ToolRuntime:
 # ---------------------------------------------------------------------------
 
 
-def build_default_registry(*, allow_commands: bool = False, memory: Any = None) -> ToolRegistry:
+def _host_is_private(host: str) -> bool:
+    """URL 里的主机是否指向本机/内网（云元数据 169.254.169.254 也在这类）。
+
+    模型给的 URL 来自不可信内容（网页正文、工具返回），一条提示注入就能让它
+    去请求内网服务再把结果原样带回对话里——这是 SSRF，不是理论问题。
+    解析不了的域名交给 `requests` 自己报错，不在这里假装私有（否则「域名写错」
+    会被说成「内网被拒」，排查方向就歪了）。
+    """
+    if not host:
+        return True
+    name = host.strip("[]").lower()
+    if name in {"localhost", "localhost.localdomain", "ip6-localhost"}:
+        return True
+    try:
+        infos = socket.getaddrinfo(name, None)
+    except OSError:
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
+        except ValueError:
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return True
+    return False
+
+
+def build_default_registry(
+    *,
+    allow_commands: bool = False,
+    memory: Any = None,
+    allow_private_hosts: bool = False,
+) -> ToolRegistry:
     registry = ToolRegistry()
 
     @registry.tool(
@@ -437,6 +479,13 @@ def build_default_registry(*, allow_commands: bool = False, memory: Any = None) 
         url = str(args["url"])
         if not url.startswith(("http://", "https://")):
             raise ToolError("只支持 http/https")
+        host = urlparse(url).hostname or ""
+        if not allow_private_hosts and _host_is_private(host):
+            raise ToolError(
+                f"拒绝访问内网地址：{host}（模型给的 URL 可能来自不可信内容，"
+                "访问内网会把内部接口/云元数据带进对话；确实需要时由服务端设置 "
+                "AGENT_ALLOW_PRIVATE_HOSTS=1）"
+            )
         response = requests.get(url, timeout=float(args.get("timeout_s", 15)), headers={"User-Agent": "agent-pipeline/0.1"})
         body = response.text[:8000]
         return {"status": response.status_code, "body": body}
