@@ -200,7 +200,8 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 - `Dockerfile`：python:3.12-slim，非 root 用户，`HEALTHCHECK` 打 `/health`。
 - `docker-compose.yml`：`agent-pipeline` + `prometheus`，数据卷持久化 `runs.jsonl` 与 SQLite。
-- `prometheus/prometheus.yml`、`prometheus/alerts.yml`：错误率 > 20%、P95 > 120s、单工具失败率 > 30%、发生自动回滚、服务掉线、覆盖率 < 0.9 六条告警。
+- `prometheus/prometheus.yml`、`prometheus/alerts.yml`：错误率 > 20%、P95 > 120s、单工具失败率 > 30%、发生自动回滚、服务掉线、覆盖率 < 0.9、在线但 30 分钟没有 run 结束（共七条）。
+- **零样本兜底**：带标签的 counter 在第一次自增之前不会出现在 `/metrics` 里（Prometheus 抓到的就是 no data）。所以「工具失败率」「自动回滚」两条告警的表达式外层都套了 `or vector(0)`——没有流量时是 0 而不是空，避免开了 nodata 处理的告警误报或哑掉。`tests/test_metrics_scrape.py` 3 例用 `prometheus_client.parser` 真解析 `/metrics` 文本（格式坏了 Prometheus 就抓不动，字符串包含检查看不出来），并断言零工具流量时确实没有 tool 样本、告警文件里有兜底。
 
 > 本机（Windows 开发机）没有 docker，这份容器配置只写不可本地构建验证；语义已按 compose v2 写。
 

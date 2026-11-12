@@ -26,11 +26,18 @@ groups:
           description: "P95 = {{ $value }}s；先看 pipeline_node_duration_seconds 是哪个节点慢（plan/execute/reflect/critic/adversarial）。"
 
       # 工具失败率：单个工具 5 分钟内失败占比 > 30%。
+      # 带标签的 counter 第一次自增前不会出现在 /metrics 里：外层 `or vector(0)`
+      # 让「零工具流量」是 0 而不是 no data（否则开了 nodata 处理的告警会误报/哑掉）。
       - alert: ToolFailureRateHigh
         expr: |
-          sum by (tool) (rate(pipeline_tool_calls_total{status="error"}[5m]))
-            /
-          clamp_min(sum by (tool) (rate(pipeline_tool_calls_total[5m])), 0.001) > 0.3
+          (
+            (
+              sum by (tool) (rate(pipeline_tool_calls_total{status="error"}[5m]))
+                /
+              clamp_min(sum by (tool) (rate(pipeline_tool_calls_total[5m])), 0.001)
+            )
+            or vector(0)
+          ) > 0.3
         for: 5m
         labels:
           severity: warning
@@ -38,15 +45,25 @@ groups:
           summary: "工具 {{ $labels.tool }} 失败率超过 30%"
           description: "先看 run 日志里的 observation error 字段；连续失败会被 ToolRuntime 断路器切断冷却 30s。"
 
-      # 连续回滚说明当前候选配置有问题。
+      # 连续回滚说明当前候选配置有问题。同样用 `or vector(0)` 保证没有回滚时是 0 而不是 no data。
       - alert: PipelineRollbackSpike
-        expr: increase(pipeline_rollback_total[1h]) > 0
+        expr: (increase(pipeline_rollback_total[1h]) or vector(0)) > 0
         for: 0m
         labels:
           severity: critical
         annotations:
           summary: "过去 1 小时发生了自动回滚"
           description: "回滚原因见 pipeline_rollback_total 的 reason 标签；需人工确认候选配置并考虑 pin 住旧版本。"
+
+      # 服务活着但一条 run 都没跑完：多半是没人用、或者提交路径坏了（比 Down 更容易漏）。
+      - alert: PipelineNoCompletedRuns
+        expr: up{job="agent-pipeline"} == 1 and absent(pipeline_runs_total)
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "服务在线但 30 分钟没有一次 run 结束"
+          description: "如果确实有人在用，检查 POST /v1/runs 是否 429（并发满）或上游模型一直挂住。"
 
       # 服务本身挂掉（Prometheus 抓不到）。
       - alert: AgentPipelineDown
