@@ -117,6 +117,9 @@ class Settings:
     circuit_threshold: int = 5
     circuit_cooldown_s: float = 30.0
     idempotency_ttl_s: float = 600.0
+    # 工具审批（HITL）：off = 不拦；write = 非只读工具执行前等用户裁决
+    approval_mode: str = "off"
+    approval_timeout_s: float = 300.0
     # 服务
     max_concurrent_runs: int = 4
     # 回滚
@@ -159,6 +162,8 @@ class Settings:
             latency_threshold_s=_env_float("AGENT_LATENCY_THRESHOLD_S", cls.latency_threshold_s),
             min_samples_for_rollback=_env_int("AGENT_MIN_SAMPLES", cls.min_samples_for_rollback),
             tool_timeout_s=_env_float("AGENT_TOOL_TIMEOUT_S", cls.tool_timeout_s),
+            approval_mode=os.environ.get("AGENT_APPROVAL_MODE", cls.approval_mode),
+            approval_timeout_s=_env_float("AGENT_APPROVAL_TIMEOUT_S", cls.approval_timeout_s),
             max_episodes=_env_int("AGENT_MAX_EPISODES", cls.max_episodes),
             max_documents=_env_int("AGENT_MAX_DOCUMENTS", cls.max_documents),
             tune_enabled=_env_bool("AGENT_TUNE_ENABLED", cls.tune_enabled),

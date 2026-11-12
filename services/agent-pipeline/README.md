@@ -65,7 +65,7 @@ AGENT_TUNE_ENABLED=1 .venv/Scripts/python.exe -m agent_pipeline.runner serve --p
 | GET | `/metrics` | Prometheus 指标（`pipeline_*`） |
 | POST | `/v1/runs` | 提交一次 run（202；并发满返回 429 + `Retry-After`；同 `run_id` 幂等） |
 | GET | `/v1/runs/{id}` | 查状态/结果 |
-| POST | `/v1/runs/{id}/approve` | HITL 审批（非待审批 409；本版本未启用中断，返回 501） |
+| POST | `/v1/runs/{id}/approve` | HITL 审批（需 `AGENT_APPROVAL_MODE=write`；body `{call_id?, approved}`，没有待审批返回 409） |
 | GET | `/v1/config` | 当前 active/canary 配置与历史 |
 | POST | `/v1/config/promote` | 把 canary 提升为 active |
 | POST | `/v1/config/rollback` | 手动回滚（幂等） |
@@ -98,8 +98,30 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_TUNE_WINDOW_HOURS` | `24` | 每轮看最近多少小时的日志 |
 | `AGENT_TUNE_OUT` | 空 | 每轮调优报告的落盘路径（空 = 不落盘） |
 | `AGENT_TUNE_EVAL` | `0` | 开「回放 A/B」评测器（否则调优只出报告，不注册灰度） |
+| `AGENT_APPROVAL_MODE` | `off` | `write` = 非只读工具执行前挂起等审批；`off` = 不拦 |
+| `AGENT_APPROVAL_TIMEOUT_S` | `300` | 等审批的时限；超时按**拒绝**处理（绝不悄悄放行） |
 
 预算（`Budget`）：`max_steps=8`、`max_llm_calls=40`、`max_tokens=120_000`、`max_wall_clock_s=600`、`step_tool_budget=6`、`max_replans=2`、`max_adversarial_rounds=2`。超预算时流水线**不硬失败**，而是带 `status="budget"` 和 `stop_reason` 返回已完成的部分。
+
+## 工具审批（HITL）
+
+`AGENT_APPROVAL_MODE=write` 时，`execute` 节点在跑**非只读**工具前会挂起，等外部裁决：
+
+```bash
+# 1) 提交后轮询，直到 pending_approvals 里出现待审批
+curl -s http://localhost:8000/v1/runs/$ID | jq '.pending_approvals'
+# 2) 裁决（call_id 省略 = 只有唯一一条待审批时自动选中）
+curl -s -X POST http://localhost:8000/v1/runs/$ID/approve \
+  -H 'content-type: application/json' \
+  -d '{"call_id":"call_abc","approved":true}'
+```
+
+几条刻意的设计：
+
+- **只拦非只读**：`risk="read"` 的工具（`http_get` 之类）不审批——全拦只会让用户点烦了把闸关掉，反而没了防护；
+- **等待在 run 自己的线程里**：一个 run 阻塞不会拖住别的 run，也不需要 LangGraph `interrupt` + checkpointer（重启后无法恢复的「半暂停」比同步等待更难解释）；
+- **超时即拒绝**：`AGENT_APPROVAL_TIMEOUT_S` 到了还没裁决，按拒绝写进观测（`工具 X 等待用户批准超时…已按拒绝处理`），流水线照常往下走，不会假装执行过；
+- **拒绝留痕**：被拒绝的调用以 `ok=False` 进观测，Reflect/Critic 能看到「这一步没做成」，而不是以为成功。
 
 ## 可观测与回滚
 
@@ -138,5 +160,5 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 1. **记忆有容量上限、没有 TTL**：`MemoryStore` 每次写入后按 `max_episodes` / `max_documents` 删最旧的（删文档连带删块，同一事务），所以磁盘与检索延迟有界；但「三个月前的经验自动过期」还没做——需要按重要性/时间的淘汰策略，而不是只看新旧。
 2. **对抗模式的覆盖率必须来自真实命令**：没配 `coverage_runner` 时 `coverage=None`，此时 `adversarial_passed` 永远为 False，不会假装达标。
-3. **HITL 中断未启用**：`/approve` 返回 501，流水线在工具风险上是「服务端默认信任已注册工具」；接真实写操作前需补审批队列。
+3. **HITL 只在单进程内有效**：`AGENT_APPROVAL_MODE=write` 的等待是在执行线程里阻塞，服务重启/进程崩溃后待审批的调用会随线程一起消失（客户端会看到该 run 变 `error`）；跨重启续跑需要 LangGraph `interrupt` + checkpointer，还没做。
 4. **调优不自动上线**：每日调度器（`AGENT_TUNE_ENABLED=1`）会自动跑 `tune`，但只产出候选 + 注册灰度；提升到 active 仍需要 `/v1/config/promote` 或人工看板。自动转正的条件（连续 N 轮灰度指标更好）还没做。回放评测器默认关闭（`AGENT_TUNE_EVAL=1` 才开），因为它会真跑流水线、花真钱。

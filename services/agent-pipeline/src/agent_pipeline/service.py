@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST
 from pydantic import BaseModel, Field
 
+from .approval import ApprovalGate
 from .config import Settings
 from .nodes import Runtime
 from .protocol import TaskSpec
@@ -39,6 +40,13 @@ class TuneRequest(BaseModel):
     since_hours: int = 24
 
 
+class ApproveRequest(BaseModel):
+    """一次工具审批的裁决。``call_id`` 省略时，只有唯一一条待审批才允许省略。"""
+
+    call_id: str | None = None
+    approved: bool = True
+
+
 def create_app(settings: Settings | None = None, runtime: Runtime | None = None) -> FastAPI:
     if runtime is not None:
         # 注入 runtime 时（测试、嵌入别处）必须沿用它自己的 Settings，
@@ -47,6 +55,9 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
     else:
         settings = settings or Settings.from_env()
         runtime = build_runtime(settings)
+    # 工具审批闸：只有显式打开 AGENT_APPROVAL_MODE=write 才拦非只读工具。
+    gate = ApprovalGate(settings.approval_timeout_s) if settings.approval_mode != "off" else None
+    runtime.approval = gate
     # 没有评测器时 tune 只会出报告、永不注册灰度；打开 AGENT_TUNE_EVAL=1 才用
     # 「回放 A/B」真评一次（2 × tune_eval_budget 次流水线，成本可控但非零）。
     evaluator = None
@@ -111,6 +122,8 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             "config_version": active.id if active else 0,
             "memory": runtime.memory.count(),
             "tools": runtime.tools.registry.names(),
+            "approval_mode": settings.approval_mode,
+            "pending_approvals": len(gate.pending()) if gate is not None else 0,
             "running": sum(1 for item in runs.values() if item.get("status") == "running"),
             "tuner": {
                 "enabled": settings.tune_enabled,
@@ -155,19 +168,28 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             entry = runs.get(run_id)
         if entry is None:
             raise HTTPException(status_code=404, detail="没有这个 run")
-        return dict(entry)
+        payload = dict(entry)
+        # 轮询方靠这个字段知道「现在轮到我裁决了」，不用另开长连接。
+        payload["pending_approvals"] = gate.pending(run_id) if gate is not None else []
+        return payload
 
     @app.post("/v1/runs/{run_id}/approve")
-    def approve_run(run_id: str) -> dict[str, Any]:
+    def approve_run(run_id: str, body: ApproveRequest) -> dict[str, Any]:
         with lock:
             entry = runs.get(run_id)
         if entry is None:
             raise HTTPException(status_code=404, detail="没有这个 run")
-        if entry.get("status") != "awaiting_approval":
-            raise HTTPException(status_code=409, detail="该 run 不在等待审批状态（interrupt 未启用或已结束）")
-        # 中断式审批需要 graph.compile(interrupt_before=[...]) + checkpointer；
-        # 本服务默认关闭中断，故此处只保证协议一致，不假装继续执行。
-        raise HTTPException(status_code=501, detail="当前部署未启用中断式审批")
+        if gate is None:
+            raise HTTPException(status_code=409, detail="审批未启用（AGENT_APPROVAL_MODE=off）")
+        waiting = gate.pending(run_id)
+        if not waiting:
+            raise HTTPException(status_code=409, detail="该 run 当前没有待审批的工具调用")
+        call_id = body.call_id or (waiting[0]["call_id"] if len(waiting) == 1 else None)
+        if call_id is None:
+            raise HTTPException(status_code=400, detail="有多条待审批，必须显式给 call_id")
+        if not gate.resolve(run_id, call_id, body.approved):
+            raise HTTPException(status_code=409, detail=f"没有待审批的 call_id：{call_id}")
+        return {"run_id": run_id, "call_id": call_id, "approved": body.approved}
 
     @app.get("/v1/config")
     def get_config() -> dict[str, Any]:

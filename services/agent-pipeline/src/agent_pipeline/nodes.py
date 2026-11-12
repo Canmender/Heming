@@ -15,6 +15,7 @@ from .config import Settings
 from .llm import LLMClient, LLMResponse
 from .memory import MemoryStore
 from .metrics import Metrics
+from .approval import ApprovalGate
 from .protocol import (
     Citation,
     Critique,
@@ -47,6 +48,8 @@ class Runtime:
     coverage_runner: Callable[[], dict[str, Any]] | None = None
     log_sink: Callable[[dict[str, Any]], None] | None = None
     clock: Callable[[], float] = time.monotonic
+    # 工具审批闸：None = 不拦（默认）。开了以后 execute 在跑非只读工具前会阻塞等待裁决。
+    approval: ApprovalGate | None = None
 
     def prompt(self, key: str) -> str:
         return self.prompts.get(key) or DEFAULT_PROMPTS.get(key, "")
@@ -282,6 +285,24 @@ def execute_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
             observation = Observation(call_id=call_id, tool=name, ok=False, error=f"未注册的工具：{name}")
         else:
             spec = runtime.tools.registry.get(name)
+            if runtime.approval is not None and spec.risk != "read":
+                # 只读工具不拦：拦了只会让用户点烦了把闸关掉，反而没了防护。
+                approved, denial = runtime.approval.request(
+                    str(state.get("run_id", "")),
+                    call_id,
+                    tool=name,
+                    arguments=arguments,
+                )
+                if not approved:
+                    observation = Observation(
+                        call_id=call_id,
+                        tool=name,
+                        ok=False,
+                        error=denial,
+                    )
+                    observations.append(observation)
+                    new_observations.append(observation)
+                    continue
             request = ToolRequest(call_id=call_id, name=name, arguments=arguments, risk=spec.risk)
             observation = runtime.tools.execute(request)
         observations.append(observation)

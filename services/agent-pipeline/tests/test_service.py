@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from agent_pipeline.protocol import TaskSpec  # noqa: F401  (契约参考)
 from agent_pipeline.service import create_app
+from agent_pipeline.tools import ToolSpec
 
 
 def _json(payload: dict) -> dict:
@@ -150,3 +151,78 @@ def test_tune_evaluator_only_wired_when_enabled(runtime_factory) -> None:
     app = create_app(runtime=enabled)
     # 开启后才接「回放 A/B」评测器：默认只出报告，不注册任何版本
     assert app.state.tuner.evaluator is not None
+
+
+def test_approve_endpoint_unblocks_write_tool(runtime_factory) -> None:
+    """HTTP 侧的审批闭环：挂起 → 轮询看到 pending → 裁决 → run 继续跑完。"""
+    executed: list[dict] = []
+
+    def handler(args: dict) -> str:
+        executed.append(args)
+        return "written"
+
+    spec = ToolSpec(
+        name="write_file",
+        description="写文件",
+        schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        risk="write",
+        handler=handler,
+        idempotent=False,
+    )
+    script = [
+        _json({"steps": [{"goal": "写文件", "done_when": "观测里出现 written"}]}),
+        {
+            "text": "先写",
+            "tool_calls": [{"id": "c1", "name": "write_file", "arguments": {"path": "a.txt"}}],
+        },
+        {"text": "写好了"},
+        _json({"verdict": "done", "reasons": ["有 written"]}),
+        _json({"score": 0.9, "blocking_issues": []}),
+        _json({"answer": "完成", "citations": []}),
+    ]
+    runtime = runtime_factory(script, tools=[spec])
+    runtime.settings = replace(runtime.settings, approval_mode="write", approval_timeout_s=5.0)
+    client = TestClient(create_app(runtime=runtime))
+
+    health = client.get("/health").json()
+    assert health["approval_mode"] == "write"
+
+    response = client.post("/v1/runs", json={"goal": "写文件", "run_id": "run-approve"})
+    assert response.status_code == 202
+
+    deadline = time.time() + 5
+    pending: list[dict] = []
+    while time.time() < deadline:
+        body = client.get("/v1/runs/run-approve").json()
+        pending = body.get("pending_approvals") or []
+        if pending:
+            break
+        time.sleep(0.02)
+    assert pending, "写工具执行时必须先挂起等审批"
+
+    approved = client.post(
+        "/v1/runs/run-approve/approve",
+        json={"call_id": pending[0]["call_id"], "approved": True},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["approved"] is True
+
+    body = _wait(client, "run-approve")
+    assert body["status"] == "ok"
+    assert executed == [{"path": "a.txt"}]
+
+    # 已经裁决过的 call_id 再来一次：没有待审批 → 409（不假装成功）
+    again = client.post("/v1/runs/run-approve/approve", json={"approved": True})
+    assert again.status_code == 409
+
+
+def test_approve_endpoint_rejects_when_mode_off(runtime_factory) -> None:
+    runtime = runtime_factory([])
+    client = TestClient(create_app(runtime=runtime))
+    response = client.post("/v1/runs/nope/approve", json={"approved": True})
+    assert response.status_code == 404
