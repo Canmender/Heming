@@ -30,6 +30,34 @@ function makeDeps(overrides: Partial<Parameters<typeof runAgentMentions>[3]> = {
 }
 
 describe("runAgentMentions", () => {
+  it("工具目录构建失败：降级为纯对话并说明原因，不让整轮「生成出错」", async () => {
+    const { send, deps } = makeDeps({
+      getTools: () => {
+        throw new Error("MCP 目录读取失败：EACCES");
+      },
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const frames = send.mock.calls.map((c: unknown[]) => c[0] as { type: string; text?: string });
+    const chunks = frames
+      .filter((f) => f.type === "agent_chunk")
+      .map((f) => String(f.text ?? ""))
+      .join("");
+    expect(chunks).toContain("工具目录加载失败");
+    expect(chunks).toContain("MCP 目录读取失败");
+    // 这一轮仍正常回答，且没有把工具塞给模型
+    expect(frames.filter((f) => f.type === "agent_error")).toHaveLength(0);
+    // 说明会拼在正文前面一起收口（用户看得见），回答本身照常完成
+    expect(frames.find((f) => f.type === "agent_finish")).toMatchObject({
+      text: expect.stringContaining("你好"),
+    });
+    const opts = (deps.streamChat as ReturnType<typeof vi.fn>).mock.calls[0][2] as {
+      tools?: unknown;
+    };
+    expect(opts.tools).toBeUndefined();
+  });
+
   it("无绑定 → 发 agent_error(provider_error) 不调 streamChat", async () => {
     const { send, deps } = makeDeps({ getProfile: () => undefined });
     const streamChat = deps.streamChat as ReturnType<typeof vi.fn>;

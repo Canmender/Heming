@@ -811,7 +811,21 @@ export function runAgentMentions(
           usageOutput = 0;
           usageRounds = 0;
           usageSplitRounds = 0;
-          const bridge = deps.getTools?.(m.agentId) ?? null;
+          /**
+           * 工具目录构建失败不能带走整轮对话。
+           *
+           * `getTools` 走的是能力注册表：任一提供者的 `build()` 抛错（插件清单坏了、
+           * MCP 目录读失败、合并冲突）都会把异常抛到这里。以前它一路冒到外层 catch，
+           * 用户看到的是一条「生成出错」——明明是工具没装上，回答本身完全能完成。
+           * 现在降级为「本轮没有工具」，并明确告诉用户原因。
+           */
+          let bridge: ReturnType<NonNullable<typeof deps.getTools>> = null;
+          let toolsError: string | null = null;
+          try {
+            bridge = deps.getTools?.(m.agentId) ?? null;
+          } catch (error) {
+            toolsError = error instanceof Error ? error.message : String(error);
+          }
           // 两个条件缺一不可：能力表认定该模型支持函数调用，且真的有工具可给。
           // 不支持时给了也没用，反而让模型胡言「我去查一下」——所以在这里就丢掉（判定与丢弃同源）。
           // 形状差异不必在这里管：d.93 起只有 OpenAI 兼容协议（协议翻译在 magpie 网关侧）。
@@ -825,12 +839,20 @@ export function runAgentMentions(
            * 只在「确实有工具、但模型不支持」时说一句（每次 run 一次），其余缺失原因
            * （没配 MCP / 没有内置工具）由界面上的能力提示负责，不在这里重复。
            */
-          if (!useTools && !gateNoticed && bridge && bridge.tools.length > 0 && !aborted) {
-            gateNoticed = true;
-            emitDelta(
-              `（当前模型（${profile.model}）不支持工具调用，本轮只能纯对话；换一个支持函数调用的模型再试。）`,
-              aggressive,
-            );
+          if (!useTools && !gateNoticed && !aborted) {
+            if (toolsError) {
+              gateNoticed = true;
+              emitDelta(
+                `（本轮工具目录加载失败：${toolsError}。这次只能凭对话回答；可以检查 MCP/插件配置后重试。）`,
+                aggressive,
+              );
+            } else if (bridge && bridge.tools.length > 0) {
+              gateNoticed = true;
+              emitDelta(
+                `（当前模型（${profile.model}）不支持工具调用，本轮只能纯对话；换一个支持函数调用的模型再试。）`,
+                aggressive,
+              );
+            }
           }
           /**
            * 工具目录超过阈值时改「按需发现」（对应 Codex 的 tool_search）。

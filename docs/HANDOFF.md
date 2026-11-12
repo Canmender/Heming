@@ -38,6 +38,7 @@
 - **工具轮的过程说明不再被当最终答案**（`lib/agentStream.ts` 的 catch 分支）：`partial` 只取已上行/本地累积的正文；若一个字都没有而缓冲里有中间话术，才带「（本轮工具调用未完成，以上是中断前的过程说明，不是最终答案。）」兜底——落库的话会让气泡看起来「答完了」。
 - **历史压缩每次 run 只算一次**（`lib/agentStream.ts` 的 `historyCache`）：工具轮每轮都重新组装 messages，以前每轮都重新 `prepareHistory`（12 轮 = 13 次压缩/摘要调用）；现在按 aggressive 级别缓存，溢出重试换级别才重算。
 - **图片也计入上下文预算**（`lib/agentContext/tokens.ts`）：`estimateRowsTokens` 以前只看 `content` 文本，带图的历史行按 4 token 算——供应商实际要花上千 token 读图，「预算说还能塞」的请求其实已经超限，撞 400 后按 `aggressive` 收紧也收不回来（超的是图片不是文字）。新增 `IMAGE_TOKEN_COST = 1500` 与 `estimateRowTokens()`，图片按固定成本、文本片按字数计；工具回灌的图片成本也从写死的 800 改成同一常量。
+- **工具目录构建失败不再带走整轮对话**（`lib/agentStream.ts`）：`getTools` 走能力注册表，任一提供者 `build()` 抛错（插件清单坏了、MCP 目录读失败、合并冲突）以前会一路冒到外层 catch，用户看到的是「生成出错」——明明是工具没装上，回答本身完全能完成。现在降级成「本轮没有工具」，并在正文前说明原因（「本轮工具目录加载失败：…，这次只能凭对话回答」）。
 - **413（请求体太大）也按上下文超限收紧重试**（`lib/agentStream.ts` 的 `isContextOverflow`）：以前只认错误文本里的 `400`，而 413 恰恰是「塞不下了」、正文里没有 400 字样，于是被当成普通失败直接抛给用户——而这正是收紧历史能救的那一类。现在读 `err.status`，413 直接触发 `aggressive` 收紧重试。
 - **「继续生成」改成续写，不再重发原提问**（`components/ChatPage.tsx` 的 `retryStream`）：以前点它会把原提问整轮重跑——历史里多一条同样的用户消息（模型看到问题被问了两次，回答开始自我重复），并且已执行过的工具会再跑一遍（同一次读文件/写盘重复落地）。现在发一条固定续写指令（`CONTINUE_PROMPT = "继续（接着上一轮往下写，不要重复已经写过的内容；如果上一轮被中断，请先把没说完的结论补完）"`），并且走 `submitMessage` 正常发送路径——续写指令也要落库、上行，否则别的设备看不到这一轮、重启后历史断在中断处。
 - **同名同参数的重复调用会提醒模型**（`lib/agentStream.ts`）：ReAct 循环里模型常常原地打转（同一检索连发好几轮，直到 `MAX_TOOL_ROUNDS`）。这里不做去重——截图/读文件同参数再调一次可能是故意的（点完按钮再看一眼）——而是在结果前加一句「这次调用的参数与本轮第 N 次完全相同」，让模型自己判断要不要换路。计数作用域是整次尝试（跨轮可见），溢出重试重新计数。
@@ -50,7 +51,7 @@
 - **截断提示的换行是真换行**（`lib/agentStream.ts` 第 936/944 行）：这两条文案早先用脚本补进文件时被过度转义成 `"\\n\\n…"`，TS 里是字面量反斜杠 + n，用户会在气泡里看到 `\n\n（回复被输出长度上限截断…` 而不是换行。已改回 `"\n\n…"`，并在 `agentStream.tools.test.ts` 的截断用例里加「必须含真换行、不含反斜杠」的断言防回归（全仓 `packages/**/*.ts*` 扫过，只此两处）。
 - **流水线有了桌面端客户端（默认不启用）**（`lib/pipeline/client.ts`）：`services/agent-pipeline` 之前只有 HTTP 协议、没有前端入口，接不接只能靠手写 fetch。新增薄客户端：提交→轮询→终态一次 `await`，`snake_case`→`camelCase`，429 退避重提一次，run 超时先 `POST /cancel` 再抛 `timeout`，`onPendingApproval` 接桌面端确认弹窗（服务端 404/409 说明这条审批已经不在，不再把整个 run 抛错）；429 按服务端 `Retry-After` 的秒数退避（以前忽略响应头、固定等 1 秒继续撞）。**默认不构造**——流水线要单独部署（地址/密钥/回退策略属产品决策），未部署不该让聊天链路超时。12 例测试。
 
-验证：`pnpm --filter @heming/web test` → **297 文件 / 4344 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
+验证：`pnpm --filter @heming/web test` → **297 文件 / 4345 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
 ### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）
