@@ -41,6 +41,16 @@ const SPACE_HEADROOM_BYTES = 200 * 1024 * 1024;
 const MAX_EXISTS_WALK = 12;
 /** 下载失败自动重试次数：断网、代理抖动、服务器提前掐断都值得再试两次，.part 会接着续。 */
 const MAX_DOWNLOAD_ATTEMPTS = 3;
+/**
+ * 进度事件的最小间隔。
+ *
+ * download.js 每收一个数据块就回调一次（64KB 级，300MB 的包意味着几千次），
+ * 原样转发会变成每秒上百次 IPC + 上百次界面重绘，进度条反而更卡。
+ * 120ms 约等于 8fps，肉眼看是连续的，渲染开销降一个数量级。
+ */
+const PROGRESS_EMIT_INTERVAL_MS = 120;
+/** 安装包缓存元数据：版本 / 大小 / 摘要 / mtime，用来免掉每次启动的全量哈希。 */
+const PAYLOAD_META_SUFFIX = ".meta.json";
 const NOOP_LOG = Object.freeze({ info() {}, warn() {}, error() {} });
 
 function createDefaultServices() {
@@ -173,8 +183,38 @@ function createPipeline(input) {
   /**
    * 上次已经下好并校验通过的安装包可以直接复用：
    * 大小与 latest.yml 对得上、sha512 也对得上才算命中，否则当垃圾清掉重下。
-   * 这一步只多花一次读盘哈希（300MB 约两三百毫秒），换掉整次 300MB 下载。
+   *
+   * 第一次启动必须对整包做一次 sha512（300MB 约几百毫秒）。下载成功时我们把
+   * 版本/大小/mtime/摘要写在旁边的 .meta.json 里；文件没被动过就直接信这份
+   * 元数据，省掉这次全量读盘。大小或 mtime 变了就退回真正的哈希校验。
    */
+  async function readPayloadMeta(dest) {
+    try {
+      const text = await fs.readFile(`${dest}${PAYLOAD_META_SUFFIX}`, "utf8");
+      const meta = JSON.parse(text);
+      return meta && typeof meta === "object" ? meta : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function writePayloadMeta(dest, version, result) {
+    try {
+      const stats = await services.statFile(dest);
+      if (!stats || !stats.isFile()) return;
+      const meta = {
+        version,
+        size: typeof result.bytes === "number" ? result.bytes : stats.size,
+        sha512: result.sha512 ?? null,
+        mtimeMs: stats.mtimeMs,
+      };
+      await fs.writeFile(`${dest}${PAYLOAD_META_SUFFIX}`, JSON.stringify(meta), "utf8");
+    } catch (error) {
+      // 元数据只是加速手段，写不进去不影响安装，最多下次多算一次哈希。
+      log.warn(`写入安装包缓存元数据失败：${error.message}`);
+    }
+  }
+
   async function cachedPayload(file, version) {
     const dest = payloadDestination();
     if (!(await services.exists(dest))) return null;
@@ -182,8 +222,26 @@ function createPipeline(input) {
     if (!stats || !stats.isFile()) return null;
     const expected = typeof file.size === "number" ? file.size : null;
     if (expected !== null && stats.size !== expected) return null;
+
+    const meta = await readPayloadMeta(dest);
+    const metaTrusted =
+      meta &&
+      meta.version === version &&
+      meta.size === stats.size &&
+      Number.isFinite(meta.mtimeMs) &&
+      Math.abs(stats.mtimeMs - meta.mtimeMs) < 2000 &&
+      (!file.sha512 || !meta.sha512 || services.sha512Equals(file.sha512, meta.sha512));
+    if (metaTrusted) {
+      log.info(`安装包缓存命中（元数据一致），跳过整包校验：${dest}`);
+      return { filePath: dest, version, source: "cache" };
+    }
+
     const actual = await services.sha512File(dest);
-    if (file.sha512 && !services.sha512Equals(file.sha512, actual)) return null;
+    if (file.sha512 && !services.sha512Equals(file.sha512, actual)) {
+      await services.removeFile(dest);
+      await services.removeFile(`${dest}${PAYLOAD_META_SUFFIX}`);
+      return null;
+    }
     return { filePath: dest, version, source: "cache" };
   }
 
@@ -191,12 +249,14 @@ function createPipeline(input) {
    * 下载安装包：失败自动重试，续传走 .part（download.js 在续传模式下只补缺的字节，
    * 并把已有前缀一起喂给 sha512，所以校验的始终是整个文件）。
    */
-  async function downloadPayload(file, url, ctx, sink) {
+  async function downloadPayload(file, url, ctx, sink, version) {
     const dest = payloadDestination();
     const expected = typeof file.size === "number" ? file.size : null;
     let lastError = null;
     for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt += 1) {
       const eta = new EtaEstimator();
+      // 每次重试都重新计时：续传的第一帧要立刻让界面知道「动了」。
+      let lastEmitAt = 0;
       try {
         const result = await services.downloadFile(url, dest, {
           signal: ctx.signal,
@@ -204,6 +264,10 @@ function createPipeline(input) {
           resume: true,
           onProgress: ({ received, total }) => {
             eta.sample(received);
+            const nowMs = Date.now();
+            const complete = expected !== null && received >= expected;
+            if (!complete && lastEmitAt !== 0 && nowMs - lastEmitAt < PROGRESS_EMIT_INTERVAL_MS) return;
+            lastEmitAt = nowMs;
             sink({
               type: "progress",
               received,
@@ -216,6 +280,7 @@ function createPipeline(input) {
         if (file.sha512 && !services.sha512Equals(file.sha512, result.sha512)) {
           throw new SetupError(CODES.HASH_MISMATCH, "下载的安装包不完整", "校验值对不上，请重试");
         }
+        await writePayloadMeta(dest, version, result);
         return result;
       } catch (error) {
         if (isAbort(error)) throw error;
@@ -331,7 +396,7 @@ function createPipeline(input) {
     }
 
     sink({ type: "phase", phase: "download", label: "下载安装包", totalBytes: file.size ?? null, version });
-    const result = await downloadPayload(file, url, ctx, sink);
+    const result = await downloadPayload(file, url, ctx, sink, version);
 
     sink({ type: "phase", phase: "verify", label: "校验安装包" });
     return { filePath: result.filePath, version, source: "network" };

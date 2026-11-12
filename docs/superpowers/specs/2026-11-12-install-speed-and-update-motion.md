@@ -1,7 +1,7 @@
 # 安装提速与应用内更新动画
 
 日期：2026-11-12
-状态：已实现并验证（安装器提速单测 49 例全绿、预取三态截图已过目；应用内更新动画 `tsc` 通过、`UpdateCard` 14 例全绿；真机联网安装与观感复验待完整仓/发布环境）
+状态：已实现并验证（安装器单测 57 例全绿、预取三态与工作屏截图已过目；应用内更新动画 `tsc` 通过、`UpdateCard` 14 例全绿、桌面端 `auto-update`/`update-helper` 25 例全绿；真机联网安装与观感复验待完整仓/发布环境）
 
 ## 1. 需求
 
@@ -45,9 +45,22 @@
 - 校验通过 → 跳过下载，发一条 `phase`「使用已下载的安装包」；
 - 大小不符 → 重新下载（不做「半信半疑地用」这种判断）。
 
+下载成功时在包旁边写一份 `<包名>.meta.json`（版本 / 大小 / sha512 / mtime）。下次启动若元数据与当前文件的大小、mtime、目标版本都对得上，就直接信这份回执，省掉对 300MB 文件的全量 sha512（几百毫秒的纯读盘）。文件被动过（大小或 mtime 变了）就退回真正的哈希校验；认不出时宁可多算一次，不冒用坏包的风险。
+
 ### 2.4 让出 IO
 
 安装期目录轮询从 600ms 放宽到 900ms——解压本身在猛读写目标盘，轮询太密只会跟它抢 IO，进度条也没必要 600ms 一跳。
+
+### 2.5 进度节流
+
+下载回调是「每收一个数据块一次」（64KB 级，300MB 的包有几千次）。原样转发等于每秒上百次 IPC + 上百次界面重绘，进度条反而更抖。现在：
+
+- 安装器侧（`pipeline.js`）按 `PROGRESS_EMIT_INTERVAL_MS = 120`（约 8fps）合并中间帧，但**首帧与收尾帧（`received >= total`）不受节流**——前者让界面立刻知道开始了，后者保证进度能走到 100%；
+- 桌面端 `auto-update.js` 对 electron-updater 的 `download-progress` 做同样 120ms 节流，首帧与 100% 立即转发，避免更新卡下载时把渲染进程刷爆。
+
+### 2.6 工作屏秒表
+
+内层 NSIS 解压 + 复制占安装时间的大头，这段没有可信百分比。工作屏在状态行下加一行「已用 X 秒」（超过一分钟变「X 分 YY 秒」），让用户确认程序在走，也给「这台机器装一次要多久」留下可对照的数字。
 
 ## 3. 应用内更新动画
 
@@ -73,16 +86,18 @@
 - `packages/setup/lib/download.js`：`headers`/`acceptPartial`/`resume`、`partSize`、`hashPrefix`。
 - `packages/setup/lib/pipeline.js`：`prefetch()`、`ensurePayloadTask`、`cachedPayload`、`downloadPayload`（3 次重试）、`prefetchSinkFor`、轮询 900ms、取消作用域。
 - `packages/setup/lib/download.test.js`（新）：本地 http 服务器测完整下载/续传/服务器不支持 Range/中断保留 `.part`。
-- `packages/setup/lib/pipeline.test.js`：+5 例（预取不重复下载、缓存命中、缓存不可信、预取失败不弹错、空闲取消预取）。
+- `packages/setup/lib/pipeline.test.js`：+7 例（预取不重复下载、缓存命中、缓存不可信、缓存元数据跳过哈希、进度节流、预取失败不弹错、空闲取消预取）。
 - `packages/setup/main.js`：`did-finish-load` 触发预取（截图模式除外）。
-- `packages/setup/renderer/{index.html,app.js,styles.css}`：`#prefetch-note` 小字与进度线、`onPrefetch` 处理。
+- `packages/setup/renderer/{index.html,app.js,styles.css}`：`#prefetch-note` 小字与进度线、`onPrefetch` 处理、工作屏「已用 X 秒」秒表。
+- `packages/desktop/auto-update.js`：`download-progress` 转发按 120ms 节流（首帧与 100% 立即发）。
 - `packages/web/src/components/UpdateMotion.tsx`（新）、`UpdateCard.tsx`、`UpdateCard.test.tsx`。
 
 ## 5. 验证
 
-- `cd packages/setup && node --test lib/*.test.js`：下载 4 例 + 既有 41 例（共 45），预期全绿。
-- `node --check` 覆盖全部改动文件。
-- 安装器视觉：`HEMING_SETUP_CAPTURE_DIR=<dir>` 启动打包产物（必须用 node spawn 启动，不能从 MSYS bash 前台跑），看 ready 屏预取小字与 6 张状态图。
+- `cd packages/setup && node --test lib/*.test.js`：8 个文件 57 例（含下载器 4 例、预取/缓存/节流 7 例），预期全绿。
+- `cd packages/desktop && node --test auto-update.test.js update-helper.test.js`：25 例全绿。
+- `node --check` 覆盖全部改动文件；`pnpm exec tsc -p packages/web/tsconfig.json --noEmit`。
+- 安装器视觉：`HEMING_SETUP_CAPTURE_DIR=<dir>` 启动打包产物（必须用 node spawn 启动，不能从 MSYS bash 前台跑），看 ready 屏预取小字、工作屏秒表与 6 张状态图。
 - 应用内更新：`pnpm --filter @heming/web test`（`UpdateCard.test.tsx` 新增 3 例 + 改造后的安装确认例）。
 
 ## 6. 已知限制

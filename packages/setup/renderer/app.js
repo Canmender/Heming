@@ -76,6 +76,7 @@
 
   let wordmarkFrame = 0;
   let wordmarkDotTimer = null;
+  let elapsedTimer = null;
 
   // ---------- 格式化 ----------
 
@@ -216,6 +217,42 @@
     wordmarkFrame = requestAnimationFrame(tick);
   }
 
+  // ---------- 计时 ----------
+
+  /**
+   * 工作屏右侧一直显示「已用 X 秒」。
+   *
+   * 安装的大头是内层 NSIS 解压 + 复制，那一步没有可信的百分比；一个持续走的
+   * 秒数能让用户确认程序没卡死，也让「这台机器装一次要多久」有据可查。
+   */
+  function formatElapsed(ms) {
+    const seconds = Math.max(0, Math.floor(ms / 1000));
+    if (seconds < 60) return `已用 ${seconds} 秒`;
+    const minutes = Math.floor(seconds / 60);
+    const rest = seconds % 60;
+    return `已用 ${minutes} 分 ${String(rest).padStart(2, "0")} 秒`;
+  }
+
+  function updateElapsedClock(running) {
+    const label = $("status-elapsed");
+    if (!label) return;
+    if (elapsedTimer) {
+      clearInterval(elapsedTimer);
+      elapsedTimer = null;
+    }
+    if (!running) {
+      label.textContent = "";
+      label.hidden = true;
+      return;
+    }
+    const startedAtMs = Date.now();
+    label.hidden = false;
+    label.textContent = formatElapsed(0);
+    elapsedTimer = setInterval(() => {
+      label.textContent = formatElapsed(Date.now() - startedAtMs);
+    }, 1000);
+  }
+
   // ---------- 屏幕与文案 ----------
 
   function showScreen(name) {
@@ -237,6 +274,7 @@
     // 预取那行小字只属于「安装位置」屏；进工作屏后进度改由进度条承担。
     const prefetchNote = $("prefetch-note");
     if (prefetchNote && name !== "ready") prefetchNote.hidden = true;
+    updateElapsedClock(name === "work");
   }
 
   function setWorkHeadline(text) {

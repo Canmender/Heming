@@ -1,6 +1,8 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const { createPipeline } = require("./pipeline");
@@ -33,7 +35,7 @@ function norm(target) {
 function harness(overrides = {}) {
   const events = [];
   const logs = [];
-  const calls = { startInstaller: null, statTree: 0, launch: [], downloadFile: null, downloadCount: 0, fetchText: null };
+  const calls = { startInstaller: null, statTree: 0, launch: [], downloadFile: null, downloadCount: 0, fetchText: null, sha512Calls: 0 };
   const existing = new Set((overrides.existing ?? []).map(norm));
 
   const services = {
@@ -72,6 +74,7 @@ function harness(overrides = {}) {
       return { filePath: dest, bytes: 1000, sha512: "sha-ok", total: 1000 };
     },
     async sha512File() {
+      calls.sha512Calls += 1;
       return overrides.sha512 ?? "sha-ok";
     },
     sha512Equals: (a, b) => a === b,
@@ -95,7 +98,11 @@ function harness(overrides = {}) {
 
   const pipeline = createPipeline({
     config,
-    paths: { workDir: WORK_DIR, setupDir: SETUP_DIR, setupExeName: "和鸣安装程序 d.135.3.54.7.exe" },
+    paths: {
+      workDir: overrides.workDir ?? WORK_DIR,
+      setupDir: SETUP_DIR,
+      setupExeName: "和鸣安装程序 d.135.3.54.7.exe",
+    },
     services,
     emit: (event) => {
       events.push(event);
@@ -321,6 +328,55 @@ test("缓存不可信：大小对不上时重新下载而不是硬用", async ()
 
   assert.equal(result.ok, true);
   assert.equal(h.calls.downloadCount, 1);
+});
+
+test("缓存元数据一致时跳过整包 sha512 重算", async () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "heming-meta-"));
+  const cachePath = path.join(workDir, "inner-setup.exe");
+  fs.writeFileSync(cachePath, "cached");
+  fs.writeFileSync(
+    `${cachePath}.meta.json`,
+    JSON.stringify({ version: "d.140.0.1.0", size: 1000, sha512: "sha-ok", mtimeMs: 1_700_000_000_000 }),
+  );
+  const h = harness({
+    existing: [cachePath, EXE_PATH],
+    workDir,
+    config: { payloadMode: "network" },
+    feedText: FEED_TEXT,
+    statFile: () => ({ isFile: () => true, size: 1000, mtimeMs: 1_700_000_000_000 }),
+  });
+
+  const result = await h.pipeline.start({ installDir: INSTALL_DIR, launchAfter: false });
+
+  assert.equal(result.ok, true);
+  assert.equal(h.calls.downloadCount, 0);
+  // 关键：元数据可信时不再读整包算 sha512（真实 300MB 那一次要几百毫秒）
+  assert.equal(h.calls.sha512Calls, 0);
+  fs.rmSync(workDir, { recursive: true, force: true });
+});
+
+test("下载进度按 120ms 节流，但首帧与收尾帧一定送到", async () => {
+  const h = harness({
+    existing: [PAYLOAD_PATH, EXE_PATH],
+    config: { payloadMode: "network" },
+    feedText: FEED_TEXT,
+    downloadFile: async (url, dest, options) => {
+      // 模拟一次真实下载的回调密度：一个包会有成百上千次，这里取 15 次同一毫秒内到达。
+      for (let received = 64; received < 1000; received += 64) {
+        options.onProgress({ received, total: 1000 });
+      }
+      options.onProgress({ received: 1000, total: 1000 });
+      return { filePath: dest, bytes: 1000, sha512: "sha-ok", total: 1000 };
+    },
+  });
+
+  const result = await h.pipeline.start({ installDir: INSTALL_DIR, launchAfter: false });
+
+  assert.equal(result.ok, true);
+  const progress = h.events.filter((event) => event.type === "progress");
+  assert.ok(progress.length <= 3, `同一毫秒内的进度应被合并，实际转发 ${progress.length} 次`);
+  assert.equal(progress[0].received, 64, "首帧必须立刻转发，界面要知道开始了");
+  assert.equal(progress[progress.length - 1].received, 1000, "收尾帧必须转发，进度要能到 100%");
 });
 
 test("预取失败只发 prefetch 事件，不弹错误屏", async () => {

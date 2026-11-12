@@ -372,6 +372,9 @@ body {
 
 .status { margin: 12px 0 0; min-height: 18px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* 秒表：安装期没有可信百分比，但「还在走」本身是有效信息。 */
+.status-elapsed { margin: 4px 0 0; min-height: 16px; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+
 /* ---------- 完成：一枚朱砂印 ---------- */
 
 .seal {

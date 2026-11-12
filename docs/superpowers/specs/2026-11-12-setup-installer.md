@@ -55,7 +55,7 @@ UAC 取消、安装器被外部结束、静默安装在部分路径下都可能�
 ### 3.3 进度语义
 
 - **下载阶段**：有真实 Content-Length，给百分比、速度、剩余时间（`EtaEstimator` 窗口 8 个样本、跨度 ≥500ms 才算速率）；
-- **安装阶段**：内层安装器不暴露进度，主进程每 600ms `statTree()` 统计目标目录文件数与字节数，界面显示「已安装 N 个文件 / X MB」；`config.installedBytes`（构建期算好的总体积）已知时给百分比，未知时进度条退化为不确定态——**绝不编假百分比**。
+- **安装阶段**：内层安装器不暴露进度，主进程每 900ms `statTree()` 统计目标目录文件数与字节数，界面显示「已安装 N 个文件 / X MB」；`config.installedBytes`（构建期算好的总体积）已知时给百分比，未知时进度条退化为不确定态——**绝不编假百分比**。
 
 ### 3.4 取消语义
 
@@ -125,13 +125,13 @@ electron packages/setup --capture=<dir>           # 开发态出 6 张状态截�
 cd packages/setup && node --test                  # 纯函数与编排测试
 ```
 
-门禁：`node --check` 覆盖 main/preload/lib 全部文件；7 个 `node --test`（feed/args/format/eta/paths/download/pipeline；`download.test.js` 用本地 http 服务器验断点续传与中断保留，pipeline 用注入的 fake services，不真装）；打包后用 `win-unpacked` 或安装到测试用户目录真机走一遍。
+门禁：`node --check` 覆盖 main/preload/lib 全部文件；8 个 `node --test`（feed/args/format/eta/paths/download/pipeline/update-plan；`download.test.js` 用本地 http 服务器验断点续传与中断保留，pipeline 用注入的 fake services，不真装）；打包后用 `win-unpacked` 或安装到测试用户目录真机走一遍。
 
 打包后的 exe 不方便透传命令行参数，截图目录也可以用环境变量给出：`HEMING_SETUP_CAPTURE_DIR=<dir>`（优先级高于 `--capture=`，见 `main.js` 的 `readCaptureTarget`）。
 
 安装包预取：窗口加载完成后（`main.js` 的 `did-finish-load`）立即调 `pipeline.prefetch()`，在用户选安装位置的十几秒里把安装包下好；ready 屏只多一行「安装包 已准备 X%」的细进度。点「开始安装」时直接接管同一个下载任务（`prefetchTask.visible = true`），不重复下载；上次下好的包大小与 sha512 都对得上则跳过整次下载。断点续传落盘为 `inner-setup.exe.part`，失败重试与下次启动只补缺的字节。截图模式（`--capture` / `HEMING_SETUP_CAPTURE_DIR`）不预取，避免截图时后台下载干扰。细节见 `2026-11-12-install-speed-and-update-motion.md`。
 
-2026-11-12 验收记录：`node --check` 17 个文件通过；7 个测试文件共 49 例全绿（含同日提速新增的预取、断点续传、缓存命中用例）；`scripts/make-setup-assets.py` 生成 `build/splash.bmp`（1.67 MB）与 `build/icon.ico`（20 KB）；`node scripts/build-setup.mjs` 打出 `和鸣安装程序 d.135.3.54.7.exe`（105.2 MB），复制到普通用户目录运行后，在 900×622（DPR 1.5）窗口产出 6 张状态 PNG 与 `diagnostics.json`（10 条词标 path 的 `strokeDashoffset` 全为 0、无渲染异常）。打包态排查看 `%TEMP%\heming-setup\bootstrap.log`（`main.js` 的 `traceStep` 记录启动各阶段）。
+2026-11-12 验收记录：`node --check` 17 个文件通过；8 个测试文件共 57 例全绿（含同日提速新增的预取、断点续传、缓存命中、缓存元数据、进度节流用例）；`scripts/make-setup-assets.py` 生成 `build/splash.bmp`（1.67 MB）与 `build/icon.ico`（20 KB）；`node scripts/build-setup.mjs` 打出 `和鸣安装程序 d.135.3.54.7.exe`（105.2 MB），复制到普通用户目录运行后，在 900×622（DPR 1.5）窗口产出 6 张状态 PNG 与 `diagnostics.json`（10 条词标 path 的 `strokeDashoffset` 全为 0、无渲染异常）。打包态排查看 `%TEMP%\heming-setup\bootstrap.log`（`main.js` 的 `traceStep` 记录启动各阶段）。
 
 ## 7. 已知限制
 
