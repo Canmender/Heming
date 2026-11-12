@@ -63,6 +63,15 @@ def test_alert_rules_parse_and_are_well_formed() -> None:
         assert "pipeline_" in rule["expr"] or "up{" in rule["expr"], rule["alert"]
 
 
+def test_error_rate_alert_ignores_user_cancellations() -> None:
+    """取消不是服务故障：分子分母都不能把 aborted 算成错误。"""
+    data = _load("prometheus/alerts.yml")
+    rules = {rule["alert"]: rule for group in data["groups"] for rule in group["rules"]}
+    expr = rules["PipelineErrorRateHigh"]["expr"]
+    assert 'status=~"error|budget"' in expr, expr
+    assert 'status!="ok"' not in expr, expr
+
+
 def test_alert_expressions_use_bounded_labels() -> None:
     """工具失败率的分母必须排除 cached：缓存命中是零风险，算进分母会把失败率稀释掉。"""
     data = _load("prometheus/alerts.yml")

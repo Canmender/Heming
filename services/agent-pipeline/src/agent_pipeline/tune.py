@@ -79,6 +79,10 @@ def read_logs(path: str | Path, *, since_hours: int = 24, now: float | None = No
 
 
 def classify(row: dict[str, Any]) -> str | None:
+    # 用户主动取消不是提示词的问题：当成失败样本会让「每天自动微调」去改一堆
+    # 因为用户点了停止而「失败」的 run，真正的问题反而被稀释。
+    if str(row.get("stop_reason") or "") == "cancelled":
+        return None
     # stop_reason 更能说明「为什么没跑完」，优先于笼统的 status=error/budget。
     if row.get("stop_reason"):
         return str(row["stop_reason"])

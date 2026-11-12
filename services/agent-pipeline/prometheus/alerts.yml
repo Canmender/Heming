@@ -2,11 +2,13 @@ groups:
   - name: agent-pipeline
     rules:
       # 错误率：5 分钟内失败占比 > 20%（与 Settings.error_threshold 同口径）。
+      # 只算「真的出错」和「预算烧完」：用户主动取消（status="aborted"）不算服务故障，
+      # 混进分子会让一次多人取消就触发 critical 告警。
       - alert: PipelineErrorRateHigh
         expr: |
-          sum(rate(pipeline_runs_total{status!="ok"}[5m]))
+          sum(rate(pipeline_runs_total{status=~"error|budget"}[5m]))
             /
-          clamp_min(sum(rate(pipeline_runs_total[5m])), 0.001) > 0.2
+          clamp_min(sum(rate(pipeline_runs_total{status=~"ok|error|budget"}[5m])), 0.001) > 0.2
         for: 5m
         labels:
           severity: critical

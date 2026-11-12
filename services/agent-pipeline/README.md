@@ -135,6 +135,7 @@ curl -s http://localhost:8000/v1/runs \
 - 已完成/失败的 run 再取消返回 409；不存在的 run 返回 404；
 - **卡在等审批会被立刻放出来**：取消同时把该 run 的待审批全部按拒绝收口，执行线程不再干等 `AGENT_APPROVAL_TIMEOUT_S`（默认 300s）。否则用户点了取消，界面两三分钟没反应，看起来就是「取消坏了」；run 正常结束时也会清掉残留审批，`/health` 的 `pending_approvals` 不会只增不减。`tests/test_cancel_approval.py` 2 例钉住；
 - 取消是协作式的：正在跑的那一次工具调用不会被硬杀（`ToolRuntime` 的线程池没法安全打断），但**工具轮里剩下的调用不再启动**——每次 `http_get`/`run_command` 可能要几十秒，以前用户点了取消要等整轮跑完才收口。现在执行节点在每次调用前查取消标记，剩下的调用逐个记成 `ok=False` 观测（「这次调用没有执行：用户取消了本次运行。」），并直接以 `aborted` 收口，省掉一次模型调用；`tests/test_cancel_tool_round.py` 1 例钉住「第一个跑、后两个不跑、有痕迹」；
+- **取消不算故障**：`aborted`/`cancelled` 不进错误率窗口（`ConfigStore.record_outcome` 跳过），所以灰度期间用户多按几次取消不会把一份正常配置自动回滚掉；`tune.classify` 也返回 `None`，每日调优不会拿「用户点了停止」当一类失败去改提示词；`PipelineErrorRateHigh` 的分子只算 `status=~"error|budget"`（`tests/test_cancel_outcome.py` 2 例 + `tests/test_deploy_yaml.py` 1 例钉住）。
 - `tests/test_cancel.py` 4 例覆盖（跑到一半取消、未知 run、已结束 run、重复取消）。
 
 **四路叠加压测**（工具 + 审批 + 中途取消 + 8 线程并发）：
@@ -436,7 +437,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **246 passed / 覆盖率 95.2%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **249 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 

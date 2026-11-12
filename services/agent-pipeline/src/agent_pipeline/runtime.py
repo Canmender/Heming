@@ -193,7 +193,14 @@ def run_once(
         runtime.metrics.set_config_version(config_version)
 
     if runtime.config_store is not None and config_version:
-        runtime.config_store.record_outcome(config_version, ok=result.status == "ok", latency_s=duration_s)
+        # 用户取消不是「配置坏了」：以前把 aborted 当 ok=False 记进窗口，
+        # 灰度期间用户多按几次取消就能把一份正常的候选配置自动回滚掉；
+        # 调优那边也会把 cancelled 当成一类失败样本去改提示词。计数照记（runs_total 有 aborted），
+        # 但不进错误率窗口。
+        if result.stop_reason != "cancelled":
+            runtime.config_store.record_outcome(
+                config_version, ok=result.status == "ok", latency_s=duration_s
+            )
         rolled_back = runtime.config_store.maybe_rollback(
             error_threshold=runtime.settings.error_threshold,
             latency_threshold_s=runtime.settings.latency_threshold_s,
