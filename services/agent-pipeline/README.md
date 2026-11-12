@@ -60,7 +60,7 @@ AGENT_TUNE_ENABLED=1 .venv/Scripts/python.exe -m agent_pipeline.runner serve --p
 - **起来就先跑一次**，之后每 `AGENT_TUNE_INTERVAL_S`（默认 86400 秒）跑一次；容器重启不会白等一天；
 - 每轮读 `AGENT_LOG_PATH` 里最近 `AGENT_TUNE_WINDOW_HOURS`（默认 24）小时的 run 日志，走 `tune()` 同一套逻辑：聚类失败模式 → 出候选 → 评测 → **只有评测有提升才注册 canary 版本**；
 - 任何异常都被收成 `ScheduleResult.error` 并计入 `pipeline_tune_runs_total{status="error"}`，线程不会因为一轮失败而死掉；
-- `/health` 的 `tuner` 段给出 `enabled / running / last_error / last_ran_at`，`GET /metrics` 另有 `pipeline_tune_candidates`、`pipeline_tune_applied_version`；
+- `/health` 的 `tuner` 段给出 `enabled / running / last_error / last_ran_at / next_run_at`，以及 `last_report` 摘要（这轮读了多少 run、多少失败、失败模式、候选数、是否落地了版本）——只看指标看不出「调优到底读到了什么」，出问题时要能一眼看出是「日志没数据」还是「没有可改进的候选」；`GET /metrics` 另有 `pipeline_tune_candidates`、`pipeline_tune_applied_version`；
 - `POST /v1/tune` 手动触发一次（走同一个 `DailyTuner`，指标口径一致）。
 
 **评测器**：`tune` 只有在评测器给出「候选 ≥ 基线 + 0.02」时才会注册灰度。`AGENT_TUNE_EVAL=1` 会接上内置的「回放 A/B」评测器（`scheduler.build_replay_evaluator`）：取日志里最近 `tune_eval_budget`（默认 20）个失败任务，同一批任务分别用「现状提示词」和「现状 + 失败模式建议 + few-shot」各跑一遍完整流水线，比较成功率。

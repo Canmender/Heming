@@ -47,6 +47,14 @@ def test_lifespan_starts_tuner_when_enabled(runtime_factory, tmp_path) -> None:
         text = client.get("/metrics").text
         assert 'pipeline_tune_runs_total{status="ok"}' in text
 
+        # 报告与「下次什么时候跑」必须能从 /health 读到：只看指标看不出调优读到了什么
+        health = client.get("/health").json()["tuner"]
+        assert health["last_report"] is not None
+        assert health["last_report"]["total_runs"] == 0
+        assert health["last_report"]["candidates"] == 0
+        assert health["next_run_at"] is not None
+        assert health["next_run_at"] > health["last_ran_at"]
+
     assert app.state.tuner.running is False, "退出 lifespan 必须停线程，否则测试进程不退出"
 
 

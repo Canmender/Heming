@@ -65,6 +65,20 @@ class RollbackRequest(BaseModel):
     version_id: int | None = None
 
 
+def _tuner_summary(report: Any) -> dict[str, Any] | None:
+    """`/health` 里只放摘要：调优报告可能很长，运维要看的是「这几天有没有在跑、有没有落地」。"""
+    if report is None:
+        return None
+    return {
+        "window_hours": report.window_hours,
+        "total_runs": report.total_runs,
+        "failed_runs": report.failed_runs,
+        "failure_modes": report.failure_modes,
+        "candidates": len(report.candidates),
+        "applied_version": report.applied_version,
+    }
+
+
 def create_app(settings: Settings | None = None, runtime: Runtime | None = None) -> FastAPI:
     if runtime is not None:
         # 注入 runtime 时（测试、嵌入别处）必须沿用它自己的 Settings，
@@ -241,6 +255,13 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                 "running": tuner.running,
                 "last_error": tuner.last.error if tuner.last else None,
                 "last_ran_at": tuner.last.ran_at if tuner.last else None,
+                "last_report": _tuner_summary(tuner.last.report) if tuner.last else None,
+                # 定时调优默认一天一次；没有这个字段，运维只能靠翻日志猜「下次什么时候跑」。
+                "next_run_at": (
+                    tuner.last.ran_at + settings.tune_interval_s
+                    if tuner.running and tuner.last
+                    else None
+                ),
             },
         }
 

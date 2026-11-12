@@ -115,7 +115,12 @@ def test_health_reports_tuner_state(runtime_factory) -> None:
 
     tuner = client.get("/health").json()["tuner"]
     # 默认不开：容器启动不该在没人看的时候悄悄改配置
-    assert tuner == {"enabled": False, "running": False, "last_error": None, "last_ran_at": None}
+    assert tuner["enabled"] is False
+    assert tuner["running"] is False
+    assert tuner["last_error"] is None
+    assert tuner["last_ran_at"] is None
+    assert tuner["last_report"] is None
+    assert tuner["next_run_at"] is None
 
 
 def test_tune_endpoint_reports_failures(runtime_factory) -> None:
