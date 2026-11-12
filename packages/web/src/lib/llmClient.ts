@@ -1,6 +1,7 @@
 import type { LlmProfile } from "../store/llm.js";
 import { carriedStatus } from "./llmFailure.js";
 import { maskMessages } from "./llmMask.js";
+import { resolveCapability } from "./modelCaps.js";
 
 /**
  * 模型请求客户端（d.93：只剩 OpenAI 兼容协议）。
@@ -137,6 +138,13 @@ export function buildRequest(
       model: profile.model,
       stream: opts.stream,
       temperature: profile.temperature,
+      // 显式给 max_tokens：不给的话由网关/上游按自己的默认值决定，历史预算
+      // （agentContext/budget.ts）就无从计算——「历史 6000 token + 输出未知」等于没有预算。
+      // 优先级：档案手填 > 模型能力表的 maxOutput（未知模型回落 DEFAULT_CAPABILITY）。
+      ...(() => {
+        const maxTokens = profile.maxTokens ?? resolveCapability(profile).maxOutput;
+        return maxTokens > 0 ? { max_tokens: maxTokens } : {};
+      })(),
       messages: messages.map(({ contentParts, ...m }) => ({
         ...m,
         content: contentParts ? toOpenAiContent(contentParts) : m.content,
@@ -263,6 +271,33 @@ export async function streamChat(
   };
 
   const toolCalls = new Map<number, { id: string; name: string; args: string }>();
+  /**
+   * 拼接一个逐片下发的字段（函数名）。
+   *
+   * OpenAI 的规范是「名字只在首片出现、后续片只带 arguments」，但兼容网关的实现五花八门：
+   * 有的每片都重发**全名**，有的发**累积值**（"ec" → "echo"），有的只发真分片（"ec"+"ho"）。
+   * 单纯的 `+=` 在「每片重发全名」的供应商上会把名字拼成 `echoecho`——工具名对不上，
+   * 整轮工具调用直接失败（模型说「我查一下」，用户什么也看不到）。
+   */
+  const joinName = (base: string, piece: string): string => {
+    if (!piece) return base;
+    if (!base) return piece;
+    if (piece === base || base.startsWith(piece) || base.endsWith(piece)) return base;
+    if (piece.startsWith(base)) return piece; // 累积式重发
+    return base + piece; // 真·分片
+  };
+  /**
+   * 拼接参数分片：兼容「累积式重发」（每片带完整 JSON 前缀）。
+   *
+   * 正常分片 `{"a"` + `:1}` 走追加；`{"a":1}` 这种「前一版是当前版前缀」的，
+   * 说明供应商重发了完整参数，取新的那份，否则会拼出非法 JSON。
+   */
+  const joinArgs = (base: string, piece: string): string => {
+    if (!piece) return base;
+    if (!base) return piece;
+    if (piece.startsWith(base)) return piece;
+    return base + piece;
+  };
   const collectToolCalls = (list: unknown) => {
     if (!Array.isArray(list)) return;
     for (const raw of list) {
@@ -272,11 +307,24 @@ export async function streamChat(
         id?: string;
         function?: { name?: string; arguments?: string };
       };
-      const index = typeof c.index === "number" ? c.index : toolCalls.size;
+      const id = typeof c.id === "string" ? c.id : "";
+      /**
+       * index 缺失时的归属（OpenAI 规范要求 index，但部分网关不发）：
+       * - 带着**新 id** → 新的一次调用（新下标）；
+       * - 没有 id（纯参数分片）→ 归到当前最后一调用，否则分片会各建一条坏调用。
+       */
+      let index: number;
+      if (typeof c.index === "number") {
+        index = c.index;
+      } else if (id && ![...toolCalls.values()].some((v) => v.id === id)) {
+        index = toolCalls.size ? Math.max(...toolCalls.keys()) + 1 : 0;
+      } else {
+        index = toolCalls.size ? Math.max(...toolCalls.keys()) : 0;
+      }
       const cur = toolCalls.get(index) ?? { id: "", name: "", args: "" };
-      if (typeof c.id === "string" && c.id) cur.id = c.id;
-      if (typeof c.function?.name === "string" && c.function.name) cur.name += c.function.name;
-      if (typeof c.function?.arguments === "string") cur.args += c.function.arguments;
+      if (id) cur.id = id;
+      cur.name = joinName(cur.name, c.function?.name ?? "");
+      cur.args = joinArgs(cur.args, c.function?.arguments ?? "");
       toolCalls.set(index, cur);
     }
   };

@@ -598,6 +598,34 @@ describe("runAgentMentions 上下文预算接线", () => {
     expect(onTurnComplete).toHaveBeenCalledWith("a1", "hi", "好", "ok");
   });
 
+  it("工具配对 400 也重试：孤儿 tool 消息可用更紧的历史救回", async () => {
+    const pairing = () =>
+      new Error(
+        `provider_error: HTTP 400 {"error":{"message":"messages with role 'tool' must be a response to a preceding message with 'tool_calls'"}}`,
+      );
+    const prepareHistory = vi.fn(
+      async (rows: ChatMessage[], _agentId: string, opts?: { aggressive?: 1 | 2 }) => [
+        ...(opts?.aggressive ? [{ role: "system" as const, content: `摘要${opts.aggressive}` }] : []),
+        ...rows,
+      ],
+    );
+    let n = 0;
+    const streamChat = vi.fn(async (_p: unknown, _m: unknown, o: { onDelta: (t: string) => void }) => {
+      n += 1;
+      if (n === 1) throw pairing();
+      o.onDelta("好");
+      return "好";
+    });
+    const { send, deps } = makeDeps({ prepareHistory, streamChat });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(streamChat).toHaveBeenCalledTimes(2);
+    expect(prepareHistory.mock.calls[1][2]).toEqual({ aggressive: 1 });
+    expect(framesOf(send, "agent_finish")[0]).toMatchObject({ text: "好" });
+    expect(framesOf(send, "agent_error")).toHaveLength(0);
+  });
+
   it("非超限错误不重试：401 与「不含超限特征的 400」都只调一次 streamChat", async () => {
     for (const message of [
       "provider_error: HTTP 401 bad key",

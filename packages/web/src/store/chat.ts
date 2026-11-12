@@ -877,6 +877,16 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
     if (e.type === "agent_error") {
       const local = !!get().streamOwner[e.streamId];
+      /**
+       * 中断收口不该再造一个空气泡：触发端先 `finish(partial)`（message_new 已把流项移除、
+       * 正式消息入库），随后才补 `agent_error(aborted)`。这时 streaming 里已经没有这一项，
+       * 再 `upsertStream` 会以 `text: ""` 起底，界面上就多出一个空白的错误气泡——
+       * 用户看到的就是「点中断后冒出来一条空气泡」。
+       *
+       * 三条同时成立才忽略：本机流、code=aborted、流项已被 finish 收走。
+       * provider_error（finish 失败、部分内容没入库）仍然照常显示错误行供重试。
+       */
+      if (local && e.code === "aborted" && !get().streaming[e.streamId]) return;
       const applyError = (errorMessage: string) => {
         get().upsertStream(e.streamId, {
           agentId: e.agentId,

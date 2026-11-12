@@ -49,6 +49,14 @@ export interface BuildContextInput {
    * （`resolveExcerpt`）留给记忆页预览等异步路径，注入路径不 await 读文件。
    */
   vaultMemory?: VaultMemoryInput;
+  /**
+   * 智能体级记忆偏好（`memory/agentPrefs.ts`）。缺省 = 不按偏好收口（沿用旧行为）。
+   *
+   * ★ 传了就必须按层生效：长期关 → 不召回语义/情景；短期关 → 不召回工作记忆；
+   * 个人数据库关 → 不接个人知识库。以前这些开关只影响「写」，读侧照样注入，
+   * 用户关掉后仍在提示词里看到旧记忆。
+   */
+  agentPrefs?: { shortTerm: boolean; longTerm: boolean; personalDb: boolean };
 }
 
 /**
@@ -127,7 +135,8 @@ function recallQuery(memory: MemoryStore, input: BuildContextInput): string {
  */
 function vaultOptionsOf(input: BuildContextInput, memory: MemoryStore): VaultRecallOptions {
   const bridge = input.vaultMemory;
-  let enabled = true;
+  // 个人数据库关掉 → 知识库这一层整体不参与（与「读侧按偏好收口」同一口径）。
+  let enabled = input.agentPrefs?.personalDb ?? true;
   let available = false;
   let entries: SemanticEntry[] | undefined;
   try {
@@ -153,15 +162,23 @@ function collectMemory(
         agentId: input.agentId,
         conversationId: input.conversationId,
         query: recallQuery(memory, input),
+        ...(input.agentPrefs ? { prefs: input.agentPrefs } : {}),
       },
       input.usage,
       vaultOptionsOf(input, memory),
     );
     const { text, observability } = summarizeInjection(found);
+    const prefs = input.agentPrefs;
+    const skippedByPrefs: string[] = [];
+    if (prefs) {
+      if (!prefs.longTerm) skippedByPrefs.push("长期记忆未开启：不注入语义/情景记忆");
+      if (!prefs.shortTerm) skippedByPrefs.push("短期记忆未开启：不注入会话内工作记忆");
+      if (!prefs.personalDb) skippedByPrefs.push("个人数据库未开启：不接入个人知识库");
+    }
     return {
       section: text,
       recalled: { semantic: found.semantic, episodic: found.episodic, working: found.working },
-      trace: observability,
+      trace: prefs ? { ...observability, prefs, skippedByPrefs } : observability,
     };
   } catch {
     return { section: "", recalled: emptyRecalled(), trace: emptyObservability() };

@@ -51,6 +51,8 @@ export interface LlmProfile {
   apiKey: string;
   model: string;
   temperature?: number;
+  /** 单次回复的最大输出 token；缺省按模型能力表的 maxOutput（未知模型用默认值）。 */
+  maxTokens?: number;
   /** 出站脱敏：对发往网关的请求生效（magpie 的 Privacy masking 语义）。 */
   mask?: boolean;
 }

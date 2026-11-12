@@ -11,8 +11,9 @@ import { ROW_TOKEN_OVERHEAD, estimateTokens } from "./tokens.js";
  *
  * 口径（与 `planContext` 一致，测试锁定）：
  * - 只折叠 `role === "tool"` 的消息，用户/助手消息一律不动（它们是语义，不是数据）；
+ * - 预算只按工具结果统计（用户贴的长文档不该把工具结果挤掉）；
  * - 最近 `keepRecent` 条工具结果**永不折叠**——模型往往还在用它们；
- * - 从最旧的开始折叠，折叠到总量进入预算即停；
+ * - 从最旧的开始折叠，折叠到工具结果总量进入预算即停；
  * - 折叠是**替换内容为占位说明**，不是删除消息：删掉会让 tool_call 与 tool_result
  *   对不上，OpenAI 与 Anthropic 都会直接 400。
  */
@@ -56,7 +57,15 @@ export function foldToolResults(rows: ChatMessage[], options: FoldOptions = {}):
     options.placeholder ??
     (({ chars }) => `（较早的工具结果已折叠：原 ${chars} 字符，如需重查请再次调用该工具）`);
 
-  const beforeTokens = list.reduce((sum, row) => sum + toolCost(row), 0);
+  /**
+   * 只统计工具结果本身（P2-9）：这个预算管的是「工具输出占了多少」，
+   * 用户/助手文本不是折叠对象——把它们算进来，会在用户贴长文档时白折掉
+   * 还有用的工具结果，而且折完预算照样超（白丢上下文、不见效）。
+   */
+  const beforeTokens = list.reduce(
+    (sum, row) => (row?.role === "tool" ? sum + toolCost(row) : sum),
+    0,
+  );
   if (beforeTokens <= budget) {
     return { rows: list, folded: 0, beforeTokens, afterTokens: beforeTokens };
   }

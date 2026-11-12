@@ -1,7 +1,10 @@
 export {
   MCP_PROTOCOL_VERSION,
   MCP_HTTP_TIMEOUT_MS,
+  MCP_TIMEOUT_MAX_MS,
+  MCP_TIMEOUT_MIN_MS,
   createHttpMcpClient,
+  resolveTimeoutMs,
   stringifyContent,
   type HttpMcpClient,
 } from "./httpClient.js";
@@ -18,6 +21,7 @@ export {
   TOOL_NAME_SEP,
   buildToolCatalog,
   executeToolCall,
+  nearestToolNames,
   slugPart,
   toAnthropicTools,
   toOpenAiTools,

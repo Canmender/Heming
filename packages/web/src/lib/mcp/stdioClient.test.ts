@@ -83,6 +83,22 @@ describe("stdio 客户端", () => {
     expect(result.text).toBe("失败了");
   });
 
+  it("超时可配：把服务上的 timeoutMs 一并发给主进程", async () => {
+    const bridge = installBridge(() => ({ tools: [] }));
+    const client = createStdioMcpClient({ ...SERVER, timeoutMs: 120_000 });
+    await client.listTools();
+    const [, config] = bridge.request.mock.calls[0];
+    expect(config).toMatchObject({ command: "node", args: ["server.js"], timeoutMs: 120_000 });
+  });
+
+  it("没有配 timeoutMs 时不发这个字段（主进程用缺省 30s）", async () => {
+    const bridge = installBridge(() => ({ tools: [] }));
+    const client = createStdioMcpClient(SERVER);
+    await client.listTools();
+    const [, config] = bridge.request.mock.calls[0];
+    expect(config).not.toHaveProperty("timeoutMs");
+  });
+
   it("缺命令直接抛错（不把空命令交给主进程）", () => {
     installBridge();
     expect(() => createStdioMcpClient({ ...SERVER, command: "" })).toThrow(/启动命令/);

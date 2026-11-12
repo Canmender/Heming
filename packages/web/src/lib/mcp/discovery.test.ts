@@ -71,3 +71,33 @@ describe("searchTools", () => {
     expect(searchTools(tools, "不存在的关键词")).toEqual([]);
   });
 });
+
+describe("searchTools 跨语言（英文目录 + 中文查询）", () => {
+  // 真实场景：MCP 服务是英文名、英文描述，用户和模型用中文搜。
+  const english = discoverTools([
+    spec("windows-desktop__screenshot", "Capture the screen and return a PNG image"),
+    spec("windows-desktop__click", "Click at the given screen coordinates"),
+    spec("windows-desktop__scroll", "Scroll the active window"),
+    spec("scrapling__browser_fetch", "Fetch a web page with a headless browser"),
+  ]);
+
+  it("「截图」命中 screenshot/snapshot", () => {
+    expect(searchTools(english, "截图")[0]?.name).toBe("windows-desktop__screenshot");
+  });
+
+  it("「截个图」这种口语也命中", () => {
+    expect(searchTools(english, "帮我截个图")[0]?.name).toBe("windows-desktop__screenshot");
+  });
+
+  it("「点击一下」命中 click", () => {
+    expect(searchTools(english, "点击一下")[0]?.name).toBe("windows-desktop__click");
+  });
+
+  it("「打开网页」命中 browser_fetch", () => {
+    expect(searchTools(english, "打开网页")[0]?.name).toBe("scrapling__browser_fetch");
+  });
+
+  it("纯英文查询仍然按原逻辑工作", () => {
+    expect(searchTools(english, "scroll")[0]?.name).toBe("windows-desktop__scroll");
+  });
+});

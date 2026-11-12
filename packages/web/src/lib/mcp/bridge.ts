@@ -57,6 +57,44 @@ export function buildToolCatalog(refs: McpToolRef[]): ToolCatalog {
   return { entries, byName };
 }
 
+/**
+ * 清洗 MCP 报上来的 inputSchema（MCP 审计 D5）。
+ *
+ * 以前原样透传：服务器少写 `type`、把 `required` 指向不存在的属性、
+ * 或塞进一堆供应商不认的键，请求体就会被对方 400 掉——整轮对话直接失败，
+ * 而我们这边看起来只是「模型不调工具」。
+ *
+ * 这里只做**能明确判定为非法**的最小修正，不猜语义：
+ * 顶层强制成 object，`properties` 必须是对象，`required` 只保留真实存在的键。
+ */
+export function sanitizeSchema(schema: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = { type: "object", properties: {} };
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return out;
+  const src = schema as Record<string, unknown>;
+  const props = src.properties;
+  const properties: Record<string, unknown> = {};
+  if (props && typeof props === "object" && !Array.isArray(props)) {
+    for (const [key, value] of Object.entries(props as Record<string, unknown>)) {
+      if (value && typeof value === "object" && !Array.isArray(value)) properties[key] = value;
+    }
+  }
+  out.properties = properties;
+  if (typeof src.description === "string" && src.description.trim()) {
+    out.description = src.description;
+  }
+  const required = src.required;
+  if (Array.isArray(required)) {
+    const kept = required.filter(
+      (key): key is string => typeof key === "string" && Object.hasOwn(properties, key),
+    );
+    if (kept.length) out.required = kept;
+  }
+  if (typeof src.additionalProperties === "boolean") {
+    out.additionalProperties = src.additionalProperties;
+  }
+  return out;
+}
+
 /** OpenAI 兼容的 tools 数组（`tools` 字段直接塞进请求体）。 */
 export function toOpenAiTools(catalog: ToolCatalog): unknown[] {
   return catalog.entries.map((e) => ({
@@ -64,7 +102,7 @@ export function toOpenAiTools(catalog: ToolCatalog): unknown[] {
     function: {
       name: e.openAiName,
       description: e.ref.tool.description ?? `${e.ref.serverName} 提供的工具 ${e.ref.tool.name}`,
-      parameters: e.ref.tool.inputSchema ?? { type: "object", properties: {} },
+      parameters: sanitizeSchema(e.ref.tool.inputSchema),
     },
   }));
 }
@@ -78,10 +116,44 @@ export function toAnthropicTools(catalog: ToolCatalog): unknown[] {
   }));
 }
 
+/** 工具附带的结构化图片（截图等）。`data` 是 base64，不含 `data:` 前缀。 */
+export interface ToolImage {
+  mimeType: string;
+  data: string;
+}
+
 /** 工具调用结果：`ok=false` 时 `text` 是给用户/模型看的失败原因。 */
 export interface ToolExecutionResult {
   text: string;
   ok: boolean;
+  /**
+   * 结构化的图片块。
+   *
+   * ★ 以前图片在客户端里就被压成 `[图片 image/png]` 一行占位符——截图工具
+   * （Windows-MCP 的 Screenshot / Snapshot）的结果等于没返回，模型只能猜坐标。
+   * 现在文本里留说明，图片原文交给上层决定怎么投喂（见 agentStream 的图片回灌）。
+   */
+  images?: ToolImage[];
+}
+
+/** 单次工具结果最多带回几张图片：再多就会把上下文预算吃穿。 */
+export const MAX_TOOL_IMAGES = 3;
+
+/** 单张图片的 base64 长度上限（约 3MB 原图）；超出的丢掉并在文本里说明。 */
+const MAX_IMAGE_CHARS = 4_000_000;
+
+/** 从 MCP 的 content 数组里取出 image 块（其余块由 stringifyContent 负责）。 */
+export function imagesFromContent(content: unknown[]): ToolImage[] {
+  const out: ToolImage[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as { type?: string; data?: string; mimeType?: string };
+    if (b.type !== "image" || typeof b.data !== "string" || !b.data) continue;
+    if (b.data.length > MAX_IMAGE_CHARS) continue;
+    out.push({ mimeType: b.mimeType || "image/png", data: b.data });
+    if (out.length >= MAX_TOOL_IMAGES) break;
+  }
+  return out;
 }
 
 /**
@@ -122,6 +194,50 @@ export interface ToolCallOptions {
   signal?: AbortSignal;
 }
 
+/** 编辑距离（Levenshtein），只用来给「工具名记岔了」找近邻。 */
+function editDistance(a: string, b: string): number {
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  let prev = Array.from({ length: cols }, (_, j) => j);
+  for (let i = 1; i < rows; i += 1) {
+    const cur = new Array<number>(cols);
+    cur[0] = i;
+    for (let j = 1; j < cols; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = cur;
+  }
+  return prev[cols - 1];
+}
+
+/**
+ * 找出与 `name` 最像的若干个工具名（最多 3 个）。
+ *
+ * 同时比「整名」和「`__` 之后那半截」：模型有时只写工具那一半（`Screenshot`），
+ * 有时把服务名写成 `windows-mcp`，两种都算「像」。相似度按编辑距离/长度归一，
+ * 低于 0.5 的不提——凑数的近邻比没有更糟（会让模型以为名字就是这个）。
+ */
+export function nearestToolNames(name: string, names: string[], limit = 3): string[] {
+  const target = name.trim().toLowerCase();
+  if (!target) return [];
+  const scored: { name: string; score: number }[] = [];
+  for (const full of names) {
+    const tool = full.includes("__") ? full.split("__").slice(1).join("__") : full;
+    const candidates = [full.toLowerCase(), tool.toLowerCase()];
+    let best = 0;
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const distance = editDistance(target, candidate);
+      const score = 1 - distance / Math.max(target.length, candidate.length);
+      if (score > best) best = score;
+    }
+    if (best >= 0.5) scored.push({ name: full, score: best });
+  }
+  scored.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  return scored.slice(0, limit).map((item) => item.name);
+}
+
 export interface ToolExecutionDeps {
   /** 按服务 id 拿客户端（同一次对话里应复用，保持 MCP 会话）。 */
   clientFor: (serverId: string) => HttpMcpClient;
@@ -140,7 +256,21 @@ export async function executeToolCall(
   opts?: ToolCallOptions,
 ): Promise<ToolExecutionResult> {
   const entry = catalog.byName.get(call.name);
-  if (!entry) return { text: `工具调用失败：未知工具 ${call.name}`, ok: false };
+  if (!entry) {
+    // 模型偶尔会把工具名记岔（少个前缀、大小写不同、把「服务 · 工具」当名字）。
+    // 只回「未知工具 x」等于让它再猜一次；给出最近的名字，它下一轮就能改对。
+    const names = [...catalog.byName.keys()];
+    const near = nearestToolNames(call.name, names);
+    const hint = near.length
+      ? `；相近的有：${near.join("、")}`
+      : names.length
+        ? "；可用工具的名字请先用 tool_search 查一下"
+        : "；当前没有任何可用的外部工具";
+    return {
+      text: `工具调用失败：未知工具 ${call.name}（共 ${names.length} 个可用工具${hint}）`,
+      ok: false,
+    };
+  }
 
   let args: Record<string, unknown> = {};
   const raw = call.arguments?.trim();
@@ -166,7 +296,13 @@ export async function executeToolCall(
     if (result.isError) {
       return { text: truncateToolResult(`工具返回错误：${result.text || "（无详情）"}`), ok: false };
     }
-    return { text: truncateToolResult(result.text || "（工具没有返回文本内容）"), ok: true };
+    const images = imagesFromContent(result.content ?? []);
+    const note = images.length ? `\n（工具返回 ${images.length} 张图片，已在下面单独附上）` : "";
+    return {
+      text: truncateToolResult(result.text || "（工具没有返回文本内容）") + note,
+      ok: true,
+      ...(images.length ? { images } : {}),
+    };
   } catch (err) {
     return { text: truncateToolResult(`工具调用失败：${err instanceof Error ? err.message : String(err)}`), ok: false };
   }

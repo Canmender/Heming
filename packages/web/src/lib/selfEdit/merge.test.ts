@@ -67,6 +67,28 @@ describe("mergeToolBridges", () => {
     expect(r.text).toContain("未知工具");
   });
 
+
+  it("★ 执行时把 opts（AbortSignal）透传给真正执行的桥", async () => {
+    // 多提供者合并是常态（MCP + 内置同时在线）。漏传 opts 的话，
+    // 用户点了中断，合并后的桥仍让底层工具继续跑。
+    const seen: (AbortSignal | undefined)[] = [];
+    const a: ToolBridge = {
+      tools: [{ type: "function", function: { name: "a" } }],
+      execute: async (_call, opts) => {
+        seen.push(opts?.signal);
+        return { text: "ok", ok: true };
+      },
+    };
+    const b: ToolBridge = {
+      tools: [{ type: "function", function: { name: "b" } }],
+      execute: async () => ({ text: "ok", ok: true }),
+    };
+    const controller = new AbortController();
+    const merged = mergeToolBridges(a, b);
+    await merged!.execute({ name: "a", arguments: "{}" }, { signal: controller.signal });
+    expect(seen[0]).toBe(controller.signal);
+  });
+
   // ★ 下面这条是本文件存在的核心理由
   it("★ meta 与 execute 路由到同一个桥（问的桥必须就是执行的桥）", () => {
     const self = makeBridge(["self_memory_write"], { self_memory_write: "write" });

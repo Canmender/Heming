@@ -3,6 +3,9 @@ import {
   buildToolBridge,
   buildToolCatalog,
   createHttpMcpClient,
+  MCP_TIMEOUT_MAX_MS,
+  MCP_TIMEOUT_MIN_MS,
+  resolveTimeoutMs,
   executeToolCall,
   formatRpcError,
   MCP_SERVERS_KEY,
@@ -423,6 +426,23 @@ describe("工具桥接（命名空间 + 执行）", () => {
     expect(tools[0].function.parameters).toEqual({ type: "object", properties: {} });
   });
 
+  it("未知工具会给出最近的名字（模型下一轮就能改对，不必反复猜）", async () => {
+    const catalog = buildToolCatalog([
+      { serverId: "s1", serverName: "shot", tool: { name: "Screenshot", description: "截屏" } },
+      { serverId: "s1", serverName: "shot", tool: { name: "Click", description: "点击" } },
+    ]);
+    const result = await executeToolCall(
+      { name: "shot__Screnshot", arguments: "{}" },
+      catalog,
+      { clientFor: () => ({ } as never) },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("未知工具");
+    // 工具名统一过 slug（小写），近邻建议也用同一个名字，模型直接照抄即可
+    expect(result.text).toContain("shot__screenshot");
+    expect(result.text).toContain("共 2 个可用工具");
+  });
+
   it("执行：未知工具 / 非法 JSON / 服务端错误都返回文字而不抛", async () => {
     const catalog = buildToolCatalog([{ serverId: "s1", serverName: "demo", tool: { name: "echo" } }]);
     const name = catalog.entries[0].openAiName;
@@ -503,5 +523,16 @@ describe("工具桥 · 注入期过滤（d.77 插件风险上限）", () => {
       url: "HTTPS://mcp.example.com/mcp",
     });
     expect(server.url).toBe("HTTPS://mcp.example.com/mcp");
+  });
+});
+
+describe("单次请求超时可配", () => {
+  it("配置值夹到 [2s, 600s]，非法值回落缺省", () => {
+    expect(resolveTimeoutMs(undefined, 30_000)).toBe(30_000);
+    expect(resolveTimeoutMs(120_000, 30_000)).toBe(120_000);
+    expect(resolveTimeoutMs(1, 20_000)).toBe(MCP_TIMEOUT_MIN_MS);
+    expect(resolveTimeoutMs(10_000_000, 20_000)).toBe(MCP_TIMEOUT_MAX_MS);
+    expect(resolveTimeoutMs(Number.NaN, 20_000)).toBe(20_000);
+    expect(resolveTimeoutMs(0, 20_000)).toBe(20_000);
   });
 });

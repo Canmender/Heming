@@ -24,11 +24,14 @@ function makeDeps(rounds: Round[], opts: {
   execute: (call: { name: string; arguments: string }, o?: { signal?: AbortSignal }) => Promise<{
     text: string;
     ok: boolean;
+    images?: { mimeType: string; data: string }[];
   }>;
   risk?: (name: string) => "read" | "write" | "danger";
   rollout?: (item: { type: string; [k: string]: unknown }) => void;
   /** 工具目录（名字列表）；缺省只有一个 `srv__x`。 */
   toolNames?: string[];
+  /** 覆盖档案（解码图片需要 vision 能力的模型）。 */
+  profile?: LlmProfile;
 }) {
   let index = 0;
   const requests: ChatMessage[][] = [];
@@ -63,7 +66,7 @@ function makeDeps(rounds: Round[], opts: {
     toolOptions,
     streamChat,
     deps: {
-      getProfile: () => profile,
+      getProfile: () => opts.profile ?? profile,
       getPrompt: () => "sys",
       fetchHistory: async () => [],
       streamChat: streamChat as never,
@@ -490,5 +493,143 @@ describe("按需工具发现（tool_search）", () => {
       (t) => (t as { function: { name: string } }).function.name,
     );
     expect(names).toEqual(["srv__a", "srv__b"]);
+  });
+});
+
+describe("上下文超限重试不重放工具（溢出重试的副作用防护）", () => {
+  it("同一 call.id 的写操作在重试后只执行一次", async () => {
+    const toolCall = () => ({
+      id: "c1",
+      type: "function",
+      function: { name: "srv__write", arguments: "{}" },
+    });
+    let attempt = 0;
+    const streamChat = vi.fn(
+      async (
+        _p: unknown,
+        _messages: ChatMessage[],
+        o: { onDelta: (t: string) => void; onToolCalls?: (c: unknown[]) => void },
+      ) => {
+        attempt += 1;
+        if (attempt === 1) {
+          o.onToolCalls?.([toolCall()]);
+          return "";
+        }
+        if (attempt === 2) throw new Error("400 maximum context length exceeded");
+        if (attempt === 3) {
+          // 重试时模型重复给出同一个调用（同 id）：必须命中缓存，不能再落地一次。
+          o.onToolCalls?.([toolCall()]);
+          return "";
+        }
+        o.onDelta("完成");
+        return "完成";
+      },
+    );
+    const execute = vi.fn(async () => ({ text: "已写入", ok: true }));
+    const send = vi.fn();
+    const deps = {
+      getProfile: () => profile,
+      getPrompt: () => "sys",
+      fetchHistory: async () => [] as ChatMessage[],
+      prepareHistory: async (history: ChatMessage[]) => history,
+      streamChat,
+      send,
+      onLocalDelta: vi.fn(),
+      getTools: () => ({
+        tools: [{ type: "function", function: { name: "srv__write", description: "写" } }],
+        meta: () => ({ risk: "write" as const }),
+        execute,
+      }),
+    };
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps as never);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(finishText(send)).toContain("完成");
+  });
+});
+
+describe("图片回灌（MCP 审计 D1）", () => {
+  const shot = { id: "1", name: "srv__shot" };
+  const rounds: Round[] = [
+    { text: "我先截个图", calls: [shot] },
+    { text: "按钮在左上角，坐标约 (120, 240)", calls: [] },
+  ];
+  const png = "iVBORw0KGgoAAAANSUhEUg==";
+
+  it("vision 模型：截图另起一条图片消息投喂，模型真的能看图", async () => {
+    const h = makeDeps(rounds, {
+      profile: { id: "p2", label: "l", provider: "openai", apiKey: "k", model: "gpt-4o" },
+      execute: async () => ({
+        text: "已截图（1280x720）",
+        ok: true,
+        images: [{ mimeType: "image/png", data: png }],
+      }),
+    });
+    await runAgentMentions(
+      "c1",
+      [{ agentId: "a", name: "A" }],
+      "截个图",
+      h.deps as never,
+    );
+    const second = h.requests[1] ?? [];
+    // 工具消息保留工具原文；图片另行作为图片消息投喂（不是占位符）
+    const toolMsg = second.find((m) => m.role === "tool");
+    expect(toolMsg?.content).toContain("已截图");
+    expect(toolMsg?.content).not.toContain("不支持读图");
+    // 图片本身作为 user 消息的 contentParts 发出
+    const imageMsg = second.find((m) => m.role === "user" && (m.contentParts?.length ?? 0) > 0);
+    const parts = imageMsg?.contentParts ?? [];
+    expect(parts.some((p) => p.type === "image" && p.data === png)).toBe(true);
+    expect(parts.some((p) => p.type === "text" && p.text.includes("看图"))).toBe(true);
+  });
+
+  it("非 vision 模型：不发图片，只在文本里说明已省略", async () => {
+    const h = makeDeps(rounds, {
+      profile: { id: "p3", label: "l", provider: "openai", apiKey: "k", model: "deepseek-chat" },
+      execute: async () => ({
+        text: "已截图",
+        ok: true,
+        images: [{ mimeType: "image/png", data: png }],
+      }),
+    });
+    await runAgentMentions(
+      "c1",
+      [{ agentId: "a", name: "A" }],
+      "截个图",
+      h.deps as never,
+    );
+    const second = h.requests[1] ?? [];
+    const toolMsg = second.find((m) => m.role === "tool");
+    expect(toolMsg?.content).toContain("不支持读图");
+    expect(second.some((m) => (m.contentParts?.length ?? 0) > 0)).toBe(false);
+  });
+});
+
+describe("历史压缩缓存（P2-6）", () => {
+  it("多轮工具循环只压一次历史，不每轮都调摘要模型", async () => {
+    // 三轮工具调用 + 最后一轮回答：历史在 run 内不变，prepareHistory 应只跑一次。
+    const rounds: Round[] = [
+      { text: "先查一下", calls: [{ id: "c1", name: "srv__x" }] },
+      { text: "再看一下", calls: [{ id: "c2", name: "srv__x" }] },
+      { text: "快好了", calls: [{ id: "c3", name: "srv__x" }] },
+      { text: "答案", calls: [] },
+    ];
+    const h = makeDeps(rounds, { execute: async () => ({ text: "ok", ok: true }) });
+    const prepareHistory = vi.fn(async (rows: ChatMessage[]) => [
+      { role: "system" as const, content: "（压缩过的历史摘要）" },
+      ...rows,
+    ]);
+    (h.deps as { prepareHistory?: unknown }).prepareHistory = prepareHistory;
+
+    await runAgentMentions("c1", [{ agentId: "a", name: "A" }], "hi", h.deps as never);
+
+    // 4 次模型调用（3 轮工具 + 最终回答），历史压缩只有 1 次。
+    expect(h.requests).toHaveLength(4);
+    expect(prepareHistory).toHaveBeenCalledTimes(1);
+    // 每一轮都带着同一份压缩历史（缓存命中，不是漏掉）。
+    for (const messages of h.requests) {
+      expect(messages.some((m) => m.content === "（压缩过的历史摘要）")).toBe(true);
+    }
   });
 });

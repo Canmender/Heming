@@ -35,6 +35,23 @@ describe("风险分类", () => {
     expect(riskOfName("tone_detect")).toBe("read");
   });
 
+  it("MCP 工具不按名字猜只读：db__query / api__get_url 必须先确认", () => {
+    // 服务端工具名可以是任意词，`query`/`get` 也可能是写操作；
+    // 以前整串跑 READ_WORDS 会把它们判成 read 免确认执行。
+    expect(riskOfName("db__query")).toBe("write");
+    expect(riskOfName("api__get_url")).toBe("write");
+    expect(riskOfName("fs__list_directory")).toBe("write");
+    expect(riskOfName("windows-desktop__screenshot")).toBe("write");
+    // 真危险词照旧升档
+    expect(riskOfName("db__run_sql")).toBe("danger");
+    expect(riskOfName("shell__exec")).toBe("danger");
+  });
+
+  it("非命名空间的内置工具仍按读意图判只读", () => {
+    expect(riskOfName("list_files")).toBe("read");
+    expect(riskOfName("fetch_page")).toBe("read");
+  });
+
   it("未知工具一律 write——绝不兜底成 read", () => {
     expect(riskOfName("some_unknown_tool")).toBe("write");
     expect(riskOfName("")).toBe("write");
@@ -48,11 +65,11 @@ describe("风险分类", () => {
     expect(riskOfName("srv__write_registry")).toBe("danger");
   });
 
-  it("读意图启发只在前缀表与危险词都没命中时生效", () => {
-    expect(riskOfName("srv__get_file")).toBe("read");
-    expect(riskOfName("srv__list_dir")).toBe("read");
-    expect(riskOfName("srv__query_db")).toBe("read");
-    expect(riskOfName("srv__search_web")).toBe("read");
+  it("读意图启发只对非 MCP 名字生效（MCP 见下一条护栏）", () => {
+    expect(riskOfName("list_files")).toBe("read");
+    expect(riskOfName("fetch_page")).toBe("read");
+    expect(riskOfName("search_web")).toBe("read");
+    expect(riskOfName("view_image")).toBe("read");
   });
 
   it("桥自带 meta.risk 优先级最高，覆盖一切名字启发", () => {
@@ -73,9 +90,11 @@ describe("风险分类", () => {
     // → 声明了 readOnlyHint: true 的 delete_file 仍然是 danger。
     expect(resolveRisk("srv__delete_file", { readOnlyHint: true })).toBe("danger");
     // 声明了 readOnlyHint: false 的陌生工具**不会**因此被判 write——
-    // 它按名字判：`get_file` 命中读意图启发 → read（这是对的，它是读操作）。
-    // 重点是：声明为 false 也没有「强制降级」的效果。
-    expect(resolveRisk("srv__get_file", { readOnlyHint: false })).toBe("read");
+    // 但也不会按名字被降级成 read：MCP 名字由服务端随意起，
+    // `srv__get_file` 可能是写操作，所以 MCP 一律先按 write 收口。
+    expect(resolveRisk("srv__get_file", { readOnlyHint: false })).toBe("write");
+    // 非 MCP 的内置工具不受这条影响，仍按读意图判只读
+    expect(riskOfName("get_file")).toBe("read");
     // 作者显式声明的 meta.risk 仍然优先（那是我们自己写的桥，可信）
     expect(resolveRisk("srv__delete_file", { risk: "write", readOnlyHint: true })).toBe("write");
   });
@@ -189,13 +208,14 @@ describe("classifyCall", () => {
   it("显示名给中文动作；认不出来的工具给通用名", () => {
     expect(displayNameOf("self_mcp_enable")).toBe("启用 MCP 工具");
     expect(displayNameOf("chart_render")).toBe("生成图表");
-    expect(displayNameOf("windows-mcp__Screenshot")).toBe("外部工具");
+    expect(displayNameOf("windows-mcp__Screenshot")).toBe("windows-mcp · Screenshot");
   });
 
   it("toHitlCall 带上模型给的 tool_call id", () => {
     const call = toHitlCall({ id: "call_1", function: { name: "srv__get_file", arguments: "{}" } });
     expect(call.id).toBe("call_1");
-    expect(call.risk).toBe("read");
+    // MCP 工具名不可信，首次一律按 write 收口（见「MCP 工具不按名字猜只读」）
+    expect(call.risk).toBe("write");
   });
 });
 

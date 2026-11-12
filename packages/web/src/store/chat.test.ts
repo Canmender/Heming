@@ -846,3 +846,45 @@ describe("chat store · 会话分页（d.130）", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe("中断收口不造空气泡（幽灵气泡 P0）", () => {
+  it("finish 已入库后再收到 aborted 错误，不会新建一个空 text 的流项", () => {
+    useChatStore.getState().markStreamOwner("s1");
+    useChatStore
+      .getState()
+      .upsertStream("s1", { agentId: "a1", conversationId: "c1", text: "半句话", status: "streaming" });
+    // 触发端先 finish(partial)：message_new 收走流项，正文入库
+    useChatStore.getState().onWsEvent({
+      type: "message_new",
+      message: { ...msg("m2", "半句话"), senderType: "agent" as const, senderId: "a1" },
+      streamId: "s1",
+    });
+    expect(useChatStore.getState().streaming["s1"]).toBeUndefined();
+    // 随后补发的 aborted 不应该再造一个气泡
+    useChatStore.getState().onWsEvent({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "s1",
+      code: "aborted",
+      message: "已中断，可继续生成",
+    });
+    expect(useChatStore.getState().streaming["s1"]).toBeUndefined();
+  });
+
+  it("没有 finish 过的本机流仍会显示错误行（provider_error 不受影响）", () => {
+    useChatStore.getState().markStreamOwner("s2");
+    useChatStore.getState().onWsEvent({
+      type: "agent_error",
+      conversationId: "c1",
+      agentId: "a1",
+      streamId: "s2",
+      code: "provider_error",
+      message: "HTTP 500",
+    });
+    expect(useChatStore.getState().streaming["s2"]).toMatchObject({
+      status: "error",
+      errorMessage: "HTTP 500",
+    });
+  });
+});

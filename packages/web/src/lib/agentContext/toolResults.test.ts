@@ -65,4 +65,15 @@ describe("foldToolResults", () => {
     expect(MAX_TOOL_CONTEXT_TOKENS).toBeGreaterThan(0);
     expect(KEEP_RECENT_TOOL_RESULTS).toBe(3);
   });
+
+  it("用户贴长文档不触发折叠（预算只算工具输出，不拿对话文本充数）", () => {
+    const rows: ChatMessage[] = [
+      { role: "user", content: "字".repeat(50_000) },
+      { role: "assistant", content: "字".repeat(10_000) },
+      toolRow(100, "a"),
+    ];
+    const result = foldToolResults(rows, { budgetTokens: MAX_TOOL_CONTEXT_TOKENS });
+    expect(result.folded).toBe(0);
+    expect(result.rows).toBe(rows);
+  });
 });

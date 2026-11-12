@@ -12,7 +12,7 @@ import type { McpServerConfig, McpTool } from "./types.js";
 export interface McpStdioBridgeApi {
   request: (
     serverId: string,
-    config: { command: string; args?: string[] },
+    config: { command: string; args?: string[]; timeoutMs?: number },
     method: string,
     params?: unknown,
   ) => Promise<unknown>;
@@ -35,7 +35,12 @@ export function createStdioMcpClient(server: McpServerConfig): HttpMcpClient {
   if (!bridge) throw new Error("stdio 传输需要桌面端运行（浏览器不支持拉起本地进程）");
   const command = server.command?.trim();
   if (!command) throw new Error("stdio 服务缺少启动命令");
-  const config = { command, args: server.args ?? [] };
+  // 超时随配置一并发给主进程：stdio 侧的超时在主进程计时（见 mcp-stdio.js）。
+  const config = {
+    command,
+    args: server.args ?? [],
+    ...(typeof server.timeoutMs === "number" ? { timeoutMs: server.timeoutMs } : {}),
+  };
   let sessionId: string | null = null;
 
   const call = async <T>(method: string, params?: unknown, signal?: AbortSignal): Promise<T> => {

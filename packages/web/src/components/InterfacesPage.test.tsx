@@ -146,6 +146,34 @@ describe("InterfacesPage", () => {
     expect(registry.servers().map((s) => s.name)).not.toContain("坏地址");
   });
 
+  it("可填单次超时（秒）：按毫秒存进配置，留空则不写该字段", () => {
+    render(<InterfacesPage registry={registry} />);
+    openForm();
+    fireEvent.change(screen.getByLabelText("服务名称"), { target: { value: "慢工具" } });
+    fireEvent.change(screen.getByLabelText("服务地址"), { target: { value: "https://slow.example.com/mcp" } });
+    fireEvent.change(screen.getByLabelText("单次超时"), { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存服务" }));
+    expect(registry.servers().find((s) => s.name === "慢工具")?.timeoutMs).toBe(90_000);
+
+    openForm();
+    fireEvent.change(screen.getByLabelText("服务名称"), { target: { value: "默认超时" } });
+    fireEvent.change(screen.getByLabelText("服务地址"), { target: { value: "https://default.example.com/mcp" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存服务" }));
+    expect(registry.servers().find((s) => s.name === "默认超时")).not.toHaveProperty("timeoutMs");
+  });
+
+  it("单次超时填非法值时报错、不写库", () => {
+    render(<InterfacesPage registry={registry} />);
+    openForm();
+    fireEvent.change(screen.getByLabelText("服务名称"), { target: { value: "坏超时" } });
+    fireEvent.change(screen.getByLabelText("服务地址"), { target: { value: "https://x/mcp" } });
+    fireEvent.change(screen.getByLabelText("单次超时"), { target: { value: "abc" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存服务" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(/单次超时/);
+    expect(registry.servers().map((s) => s.name)).not.toContain("坏超时");
+  });
+
   it("连接后列出工具，勾选即授权；工具默认不启用", async () => {
     const added = registry.add({ name: "Demo", transport: "http", url: "https://x/mcp" });
     render(<InterfacesPage registry={registry} />);

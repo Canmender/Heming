@@ -196,6 +196,13 @@ export interface MemoryObservability {
    * 既有调用点与用例的形状不变）。
    */
   vault?: VaultInjectStats;
+  /**
+   * 本次生效的智能体记忆偏好（**可选**：调用方没传偏好时缺省，形状不变）。
+   * 关掉的层会在 `skippedByPrefs` 里留下人话原因——否则用户只会觉得「记忆没了」。
+   */
+  prefs?: { shortTerm: boolean; longTerm: boolean; personalDb: boolean };
+  /** 因偏好关闭而被整层跳过的说明（空数组表示没有因偏好跳过任何层）。 */
+  skippedByPrefs?: string[];
 }
 
 /** 召回了却没注入的原因：被同键新值覆盖（正常）／被预算裁掉（额度不够）。 */

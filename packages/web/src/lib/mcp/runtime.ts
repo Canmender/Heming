@@ -58,18 +58,34 @@ export async function refreshServerTools(
 ): Promise<McpTool[]> {
   const server = registry.get(serverId);
   if (!server) throw new Error("MCP 服务不存在");
-  if (server.transport === "stdio" && !hasStdioBridge()) {
-    throw new Error("stdio 传输需要桌面端运行（浏览器无法拉起本地进程）");
+  try {
+    if (server.transport === "stdio" && !hasStdioBridge()) {
+      throw new Error("stdio 传输需要桌面端运行（浏览器无法拉起本地进程）");
+    }
+    resetClient(serverId);
+    const client = clientFor(server);
+    await client.initialize();
+    const tools = await client.listTools();
+    registry.setTools(serverId, tools);
+    // 预置服务：把只读那批工具自动打开（PowerShell/Registry 这类写操作的绝不在内）。
+    // 用户手动关掉的不会被再打开——autoEnableSafeTools 内部查 userDisabled。
+    if (registry.isPreset(serverId)) registry.autoEnableSafeTools(serverId, tools);
+    registry.setStatus(serverId, { state: "connected", tools: tools.length });
+    return tools;
+  } catch (err) {
+    /*
+     * 失败必须留痕（MCP 审计 D3）：以前这里只把错误抛给调用方，界面却按
+     * 「有没有落盘的工具快照」显示「已连接」——服务早就死了，用户看到的是绿点，
+     * 模型拿到的是指向死进程的目录。现在记录最近一次尝试的结果，界面据此显示
+     * 「连接失败（工具清单已过期）」。
+     */
+    const message = err instanceof Error ? err.message : String(err);
+    registry.setStatus(serverId, {
+      state: registry.hasDiscovered(serverId) ? "stale" : "error",
+      error: message,
+    });
+    throw err;
   }
-  resetClient(serverId);
-  const client = clientFor(server);
-  await client.initialize();
-  const tools = await client.listTools();
-  registry.setTools(serverId, tools);
-  // 预置服务：把只读那批工具自动打开（PowerShell/Registry 这类写操作的绝不在内）。
-  // 用户手动关掉的不会被再打开——autoEnableSafeTools 内部查 userDisabled。
-  if (registry.isPreset(serverId)) registry.autoEnableSafeTools(serverId, tools);
-  return tools;
 }
 
 /** 一台服务的连接结果（自动连接用；失败不抛，交给调用方决定要不要提示）。 */

@@ -1,5 +1,6 @@
 import type { ChatMessage } from "./types.js";
 import { DEFAULT_RESERVED_TOKENS, planContext } from "./budget.js";
+import { estimateRowsTokens } from "./tokens.js";
 import { SUMMARY_HEADER, SUMMARY_NOTICE, buildSummaryPrompt, deterministicSummary } from "./summary.js";
 import { normalizeContextSettings, type ContextSettings } from "./settings.js";
 import type { SummaryCache } from "./store.js";
@@ -69,12 +70,35 @@ export async function prepareHistory(
     if (!settings.enabled || !source.length) return source;
 
     const effective = tighten(settings, deps.aggressive);
-    const plan = planContext(source, {
+    let plan = planContext(source, {
       budgetTokens: effective.budgetTokens,
       keepRecentTurns: effective.keepRecentTurns,
       reservedTokens: deps.reservedTokens ?? DEFAULT_RESERVED_TOKENS,
     });
-    if (!plan.older.length) return source;
+    if (!plan.older.length) {
+      // ★ 溢出重试的真实痛点：如果历史本来就全放得下，`older` 为空 → 原样返回 →
+      // 重试发出去的请求和上一次**一模一样**，必然再撞同一个 400（纯浪费一次调用）。
+      // 重试轮必须真的变短：强制只留最后一轮原文，其余全部压成摘要。
+      if (!deps.aggressive || source.length <= 2) return source;
+      let lastUser = source.length - 1;
+      while (lastUser > 0 && source[lastUser].role !== "user") lastUser -= 1;
+      const recent = source.slice(lastUser);
+      const older = source.slice(0, lastUser);
+      if (!older.length) return source;
+      plan = {
+        recent,
+        older,
+        usedTokens: estimateRowsTokens(recent),
+        overflowTokens: estimateRowsTokens(older),
+      };
+    }
+
+    // 切点保护：`plan.recent` 的第 0 条不能是 role=tool ——
+    // 那条工具结果对应的 assistant(tool_calls) 已经进摘要（被切走了），
+    // 只发 tool 消息会被供应商判 400（「tool 消息没有对应的 tool_call」）。
+    // 宁可丢掉这几条工具结果，也不能让整轮请求失败。
+    const start = plan.recent.findIndex((row) => row.role !== "tool");
+    if (start > 0) plan.recent.splice(0, start);
 
     const cache = deps.cache;
     const conversationId = deps.conversationId ?? "";

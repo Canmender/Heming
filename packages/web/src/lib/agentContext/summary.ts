@@ -29,7 +29,9 @@ export const SUMMARY_INSTRUCTION =
 /** 提示词正文导语。 */
 export const SUMMARY_TASK = "以下是同一会话中较早的一段对话，请按要求压缩为上述三段：";
 
-const ROLE_LABEL: Record<string, string> = { user: "用户", assistant: "助手", system: "系统" };
+const ROLE_LABEL: Record<string, string> = { user: "用户", assistant: "助手", system: "系统", tool: "工具" };
+/** 转写时单条工具输出的字符上限：工具结果里常是整页 HTML/JSON，原样塞进摘要提示词会挤爆预算。 */
+const TOOL_TRANSCRIPT_CHARS = 200;
 
 /** 折叠空白：多行/连续空格合成单行，避免破坏骨架排版。 */
 function squeeze(text: string): string {
@@ -53,7 +55,15 @@ function firstSentence(text: string): string {
 /** 逐条转写（一行一条），供提示词使用。 */
 function transcript(rows: ChatMessage[]): string {
   return rows
-    .map((row) => `${ROLE_LABEL[row?.role ?? ""] ?? "其他"}：${squeeze(String(row?.content ?? ""))}`)
+    .map((row) => {
+      const text = squeeze(String(row?.content ?? ""));
+      const body =
+        row?.role === "tool" && text.length > TOOL_TRANSCRIPT_CHARS
+          ? `${clip(text, TOOL_TRANSCRIPT_CHARS)}…（工具输出已截断）`
+          : text;
+      const label = ROLE_LABEL[row?.role ?? ""] ?? "其他";
+      return `${label}：${body}`;
+    })
     .join("\n");
 }
 

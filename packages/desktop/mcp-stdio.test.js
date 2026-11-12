@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const path = require("node:path");
 const {
+  clampTimeout,
   createStdioBridge,
   encodeMessage,
   extractMessages,
@@ -129,6 +130,54 @@ test("错误响应 → 拒绝并带 code；进程退出 → 挂起请求全部�
   child.emit("exit", 1, null);
   await assert.rejects(hanging, /进程已退出/);
   assert.equal(bridge.running().includes("s1"), false);
+});
+
+test("超时可配：配置值夹到 [2s, 600s]，非法值回落缺省", () => {
+  assert.equal(clampTimeout(undefined, 30_000), 30_000);
+  assert.equal(clampTimeout(120_000, 30_000), 120_000);
+  assert.equal(clampTimeout(1, 30_000), 2_000);
+  assert.equal(clampTimeout(999_999_999, 30_000), 600_000);
+  assert.equal(clampTimeout(Number.NaN, 30_000), 30_000);
+  assert.equal(clampTimeout(-5, 30_000), 30_000);
+});
+
+test("超时会发 notifications/cancelled，并在文案里说明子进程可能仍在跑", async () => {
+  const { child, writes } = fakeChild();
+  const bridge = makeBridge({ spawn: () => child, timeoutMs: 40 });
+
+  await assert.rejects(
+    bridge.request("s1", { command: "x" }, "tools/call", { name: "slow" }),
+    /超时.*已通知服务端取消.*可能仍在执行/,
+  );
+  const cancelled = writes
+    .map((line) => JSON.parse(line.trim()))
+    .find((msg) => msg.method === "notifications/cancelled");
+  assert.ok(cancelled, "应当发出取消通知");
+  assert.equal(cancelled.params.requestId, 1);
+  assert.match(cancelled.params.reason, /超时/);
+});
+
+test("服务端发起的请求会被明确拒绝（-32601），ping 回空结果；通知不回应", async () => {
+  const { child, writes } = fakeChild();
+  const bridge = makeBridge({ spawn: () => child, timeoutMs: 200 });
+
+  const pending = bridge.request("s1", { command: "x" }, "tools/list", {});
+  // 服务端反过来请求我们（id 空间与客户端独立，容易错配）
+  reply(child, { jsonrpc: "2.0", id: 7, method: "roots/list" });
+  reply(child, { jsonrpc: "2.0", id: 8, method: "ping" });
+  reply(child, { jsonrpc: "2.0", method: "notifications/message", params: { level: "info" } });
+  reply(child, { jsonrpc: "2.0", id: 1, result: { tools: [] } });
+
+  assert.deepEqual(await pending, { tools: [] });
+
+  const sent = writes.map((line) => JSON.parse(line.trim()));
+  const rejected = sent.find((msg) => msg.id === 7);
+  assert.equal(rejected.error.code, -32601);
+  assert.match(rejected.error.message, /roots\/list/);
+  const pong = sent.find((msg) => msg.id === 8);
+  assert.deepEqual(pong.result, {});
+  // 服务端通知没有 id：不应产生任何回应（写出去的一共只有 1 条请求 + 2 条回应）
+  assert.equal(sent.length, 3);
 });
 
 test("超时 → 拒绝；stop → 关 stdin 并回收整棵进程树", async () => {

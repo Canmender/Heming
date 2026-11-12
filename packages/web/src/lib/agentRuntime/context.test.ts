@@ -345,6 +345,32 @@ describe("buildAgentContext：注入旁路（可观测性）", () => {
     expect(out.recallTrace.dropped).toEqual([]);
   });
 
+  it("智能体记忆偏好：长期关掉 → 记忆段为空，且在旁路里留下人话原因", () => {
+    const memory = makeMemory();
+    memory.upsertSemantic({ agentId: "a1", key: "称呼", value: "用户希望被称为「阿和」", source: "explicit" });
+    memory.addEpisodic({ agentId: "a1", conversationId: "c1", summary: "确认了部署端口与备份策略" });
+
+    const out = buildAgentContext({
+      agentId: "a1",
+      conversationId: "c1",
+      userText: "我的称呼是什么？顺便看下部署端口",
+      basePrompt: BASE,
+      memory,
+      agentPrefs: { shortTerm: false, longTerm: false, personalDb: true },
+    });
+
+    // 读侧真的收口了：不只是「召回后不注入」，而是提示词里一个字都没有
+    expect(out.systemPrompt).toBe(BASE);
+    expect(out.recallTrace.injected).toEqual([]);
+    expect(out.recallTrace.counts).toEqual({ semantic: 0, episodic: 0, working: 0 });
+    // 但要能解释「为什么没记忆」，否则用户只会觉得坏了
+    expect(out.recallTrace.prefs).toEqual({ shortTerm: false, longTerm: false, personalDb: true });
+    expect(out.recallTrace.skippedByPrefs).toEqual([
+      "长期记忆未开启：不注入语义/情景记忆",
+      "短期记忆未开启：不注入会话内工作记忆",
+    ]);
+  });
+
   it("召回 ≠ 注入：被预算裁掉的候选进 dropped，绝不进 injected", () => {
     const memory = makeMemory();
     // 6 条 200 字的长事实，语义层额度（约 460 字）吃不下

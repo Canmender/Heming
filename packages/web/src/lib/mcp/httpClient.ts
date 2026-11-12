@@ -11,8 +11,23 @@ import type { McpCallResult, McpServerConfig, McpTool } from "./types.js";
 /** MCP 协议版本（客户端声明；服务端可回落到它自己支持的版本）。 */
 export const MCP_PROTOCOL_VERSION = "2024-11-05";
 
-/** 单次 HTTP 请求的超时（毫秒）：MCP 服务挂了不能把整轮对话卡死。 */
+/** 单次 HTTP 请求的缺省超时（毫秒）：MCP 服务挂了不能把整轮对话卡死。 */
 export const MCP_HTTP_TIMEOUT_MS = 20_000;
+
+/** 单次请求超时可调（每台服务可覆盖），但要有下限与上限。 */
+export const MCP_TIMEOUT_MIN_MS = 2_000;
+export const MCP_TIMEOUT_MAX_MS = 600_000;
+
+/**
+ * 解析单次请求超时：服务配置里写了就用（夹到 [2s, 600s]），否则用传输层的缺省值。
+ *
+ * 为什么要可配：`tools/call` 有的很快（读剪贴板），有的要几分钟（拉页面、跑构建）。
+ * 写死 20s 会把后者当失败；写死 10 分钟又会让「服务卡死」看起来像「一切正常」。
+ */
+export function resolveTimeoutMs(requested: number | undefined, fallback: number): number {
+  if (typeof requested !== "number" || !Number.isFinite(requested) || requested <= 0) return fallback;
+  return Math.min(MCP_TIMEOUT_MAX_MS, Math.max(MCP_TIMEOUT_MIN_MS, Math.round(requested)));
+}
 
 export interface HttpMcpClient {
   /** `initialize` 之后服务端返回的会话 id（Streamable HTTP 用它维持会话）。 */
@@ -52,13 +67,14 @@ export function createHttpMcpClient(
   if (!server.url) throw new Error("该 MCP 服务缺少 URL");
   let sessionId: string | null = null;
   let nextId = 1;
+  const timeoutMs = resolveTimeoutMs(server.timeoutMs, MCP_HTTP_TIMEOUT_MS);
 
   const post = async (
     body: string,
     external?: AbortSignal,
   ): Promise<{ messages: JsonRpcResponse[] }> => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), MCP_HTTP_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     /**
      * 外部中断（用户点了「中断」）也要能打断这一次 POST。
      *
@@ -100,7 +116,7 @@ export function createHttpMcpClient(
         // 外部中断与内置超时都表现为 AbortError：按哪个信号先触发来区分文案，
         // 否则用户会看到「MCP 服务超时 20s」而实际上是他自己点了中断。
         if (external?.aborted) throw new Error("工具调用已中断");
-        throw new Error(`MCP 服务超时（${MCP_HTTP_TIMEOUT_MS / 1000}s 未响应）`);
+        throw new Error(`MCP 服务超时（${timeoutMs / 1000}s 未响应）`);
       }
       // fetch 的网络层失败在浏览器里抛 TypeError("Failed to fetch")：这句英文对用户毫无意义，
       // 也看不出是「服务没开」「地址写错」还是「服务不允许跨域」。统一翻成可排查的一句话。

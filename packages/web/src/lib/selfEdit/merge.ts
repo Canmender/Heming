@@ -33,10 +33,12 @@ export function mergeToolBridges(...bridges: (ToolBridge | null)[]): ToolBridge 
   const tools = usable.flatMap((b) => b.tools);
   return {
     tools,
-    execute: async (call) => {
+    execute: (call, opts) => {
       const owner = usable.find((b) => listsName(b, call.name));
-      if (owner) return owner.execute(call);
-      return { text: `未知工具 ${call.name}`, ok: false };
+      // opts 必须透传：里面是本轮的 AbortSignal，漏传等于「用户点了中断、
+      // 合并后的桥还在跑工具」——多提供者合并是缺省状态（MCP + 内置常常同时在）。
+      if (owner) return owner.execute(call, opts);
+      return Promise.resolve({ text: `未知工具 ${call.name}`, ok: false });
     },
     meta: (name) => {
       const owner = usable.find((b) => listsName(b, name));

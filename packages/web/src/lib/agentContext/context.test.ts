@@ -329,6 +329,21 @@ describe("buildSummaryPrompt：发给模型的固定骨架提示词", () => {
     expect(prompt[1].content).toContain("助手：在的");
   });
 
+  it("工具结果进转写且署名「工具」，超长截断（P2-10：摘要不再丢工具结论）", () => {
+    const toolRow = {
+      role: "tool" as const,
+      tool_call_id: "c1",
+      name: "srv__query",
+      content: `查询到 42 条记录：${"字".repeat(500)}`,
+    };
+    const prompt = buildSummaryPrompt([msg("user", "查一下"), toolRow]);
+    const body = prompt[1].content;
+    // 工具输出以「工具：」署名进提示词（以前会标成「其他」或被整段丢掉）
+    expect(body).toContain("工具：查询到 42 条记录");
+    expect(body).toContain("工具输出已截断");
+    expect(body).not.toContain("字".repeat(300));
+  });
+
   it("maxChars 截断转写并保留最靠近 recent 的尾部", () => {
     const older = conversation(4);
     const full = buildSummaryPrompt(older)[1].content;
@@ -675,6 +690,49 @@ describe("prepareHistory：五条分支", () => {
     });
     expect(out).toEqual([msg("user", "最近一条")]);
     expect(out.some((m) => m.role === "system")).toBe(false);
+  });
+
+  it("溢出重试必须真的变短：历史本来就放得下时，aggressive 强制只留最后一轮原文", async () => {
+    const rows = conversation(2); // 4 条，按 PLAN_SETTINGS 预算全放得下
+    const first = await prepareHistory(rows, { settings: PLAN_SETTINGS, reservedTokens: 0 });
+    expect(first).toBe(rows); // 首次：不需要压缩
+
+    const retried = await prepareHistory(rows, {
+      settings: PLAN_SETTINGS,
+      reservedTokens: 0,
+      aggressive: 1,
+    });
+    // 重试轮不能原样再发一遍（那样只会撞同一个 400）：摘要 + 最后一轮
+    expect(retried).not.toBe(rows);
+    expect(retried[0].role).toBe("system");
+    expect(retried[0].content).toContain("意图：");
+    expect(retried.slice(1)).toEqual(rows.slice(2));
+  });
+
+  it("切点保护：recent 以 role=tool 开头时丢掉孤儿工具行（供应商会 400）", async () => {
+    const rows: ChatMessage[] = [
+      msg("user", "旧问题"),
+      {
+        role: "assistant",
+        content: "我查一下",
+        tool_calls: [{ id: "c1", type: "function", function: { name: "f", arguments: "{}" } }],
+      },
+      { role: "tool", tool_call_id: "c1", name: "f", content: "工具结果" },
+      msg("user", "新问题"),
+      msg("assistant", "新回答"),
+    ];
+    // 预算刚好放得下最后三条（tool + user + assistant），切点落在 assistant(tool_calls) 之后：
+    // 那条 assistant 进了摘要，如果原样把 tool 发出去，就是「没有对应 tool_call 的 tool 消息」。
+    const budget = total(rows.slice(2));
+    const out = await prepareHistory(rows, {
+      settings: { ...PLAN_SETTINGS, budgetTokens: budget, keepRecentTurns: 8 },
+      reservedTokens: 0,
+    });
+
+    expect(out[0].role).toBe("system");
+    expect(out.slice(1).map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(out.some((m) => m.role === "tool")).toBe(false);
+    expect(out[1].content).toBe("新问题");
   });
 
   it("分支五：任何异常 → 原样返回（缓存指纹抛错 / 设置访问抛错）", async () => {

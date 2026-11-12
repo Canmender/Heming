@@ -61,6 +61,21 @@ function isValidArgs(args) {
   );
 }
 
+/** 单次请求超时的下限/上限（毫秒）。 */
+const TIMEOUT_MIN_MS = 2_000;
+const TIMEOUT_MAX_MS = 600_000;
+
+/**
+ * 解析单次请求超时：服务配置里写了就用（夹到 [2s, 600s]），否则用桥的缺省值。
+ *
+ * 为什么可配：`tools/call` 有的很快（读剪贴板），有的要几分钟（拉页面、跑构建）。
+ * 写死 30s 会把后者当失败；写死 10 分钟又让「卡死」看起来像「一切正常」。
+ */
+function clampTimeout(requested, fallback) {
+  if (typeof requested !== "number" || !Number.isFinite(requested) || requested <= 0) return fallback;
+  return Math.min(TIMEOUT_MAX_MS, Math.max(TIMEOUT_MIN_MS, Math.round(requested)));
+}
+
 /**
  * 补全子进程的 PATH。
  *
@@ -234,6 +249,34 @@ function createStdioBridge({
     entry.pending.clear();
   };
 
+  /**
+   * 回应服务端发起的消息（MCP 规范允许服务端反过来请求客户端，如 roots/list、
+   * sampling/createMessage、ping）。
+   *
+   * 以前这里直接 `continue`：服务端等不到回应就一直挂着，既会占住它的主循环
+   * （后续 tools/call 全变慢/超时），也让用户看到莫名其妙的「工具调用超时」。
+   * 我们现在没有实现这些能力，就按 JSON-RPC 规范明确回 -32601（方法未实现），
+   * 让服务端立刻知道「这条路走不通」，而不是等它自己超时。
+   */
+  function answerServerMessage(entry, msg, serverId) {
+    if (msg.id === undefined || msg.id === null) return; // 通知：无需回应
+    const reply =
+      msg.method === "ping"
+        ? { jsonrpc: "2.0", id: msg.id, result: {} }
+        : {
+            jsonrpc: "2.0",
+            id: msg.id,
+            error: { code: -32601, message: `和鸣暂不支持服务端发起的「${msg.method}」请求` },
+          };
+    try {
+      entry.child.stdin.write(encodeMessage(reply));
+    } catch (err) {
+      log(`[mcp:${serverId}] 回应服务端请求失败：${err?.message ?? err}`);
+      return;
+    }
+    if (msg.method !== "ping") log(`[mcp:${serverId}] 已拒绝服务端请求 ${msg.method}（未实现）`);
+  }
+
   function start(serverId, config) {
     if (servers.has(serverId)) return servers.get(serverId);
 
@@ -288,6 +331,15 @@ function createStdioBridge({
       entry.buffer = rest;
       for (const msg of messages) {
         if (!msg || typeof msg !== "object") continue;
+        /**
+         * 带 `method` 的是**服务端发起的消息**（请求或通知），不带 `method` 的才是
+         * 我们请求的响应。两边的 id 空间相互独立，混着查会把服务端请求错认成
+         * 我们某次请求的响应 —— 那个请求就永远等不到结果（表现为「工具调用超时」）。
+         */
+        if (typeof msg.method === "string") {
+          answerServerMessage(entry, msg, serverId);
+          continue;
+        }
         if (msg.id === undefined || msg.id === null) continue; // 通知：无需配对
         const waiter = entry.pending.get(msg.id);
         if (!waiter) continue;
@@ -324,13 +376,36 @@ function createStdioBridge({
     let entry = servers.get(serverId);
     if (!entry) entry = start(serverId, config);
     const id = entry.nextId++;
+    const requestTimeout = clampTimeout(config?.timeoutMs, timeoutMs);
     const message = { jsonrpc: "2.0", id, method };
     if (params !== undefined) message.params = params;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         entry.pending.delete(id);
-        reject(new Error(`MCP stdio 请求超时（${Math.round(timeoutMs / 1000)}s）：${method}`));
-      }, timeoutMs);
+        /**
+         * 超时不能只丢下就完：先按规范发 `notifications/cancelled` 告诉服务端
+         * 「这次别做了」。合规实现会中止工具调用；不理会这条通知的实现会继续跑，
+         * 所以文案必须说清「子进程里可能仍在执行」——否则用户以为已经停了，
+         * 实际副作用照旧发生（删文件、发请求都发生过）。
+         */
+        try {
+          entry.child.stdin.write(
+            encodeMessage({
+              jsonrpc: "2.0",
+              method: "notifications/cancelled",
+              params: { requestId: id, reason: `请求超时（${Math.round(requestTimeout / 1000)}s）` },
+            }),
+          );
+        } catch {
+          /* 子进程已退出：没有可通知的对象 */
+        }
+        reject(
+          new Error(
+            `MCP stdio 请求超时（${Math.round(requestTimeout / 1000)}s）：${method}` +
+              "（已通知服务端取消；若它不理会，子进程里可能仍在执行）",
+          ),
+        );
+      }, requestTimeout);
       entry.pending.set(id, { resolve, reject, timer, startedAt: now() });
       try {
         entry.child.stdin.write(encodeMessage(message));
@@ -412,6 +487,7 @@ function createStdioBridge({
 }
 
 module.exports = {
+  clampTimeout,
   buildChildEnv,
   createStdioBridge,
   encodeMessage,

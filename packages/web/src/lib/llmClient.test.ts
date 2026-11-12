@@ -212,6 +212,92 @@ describe("streamChat", () => {
     ]);
   });
 
+  it("工具名每片重发全名时不重复拼接（兼容网关）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse([
+          JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "read_file" } }] } }],
+          }),
+          JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "read_file" } }] } }],
+          }),
+          JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":"a"}' } }] } }],
+          }),
+          "[DONE]",
+        ]),
+      ),
+    );
+    const c = capture();
+    await streamChat(openai, msgs, c.opts());
+    expect(c.toolCalls).toEqual([
+      [{ id: "c1", type: "function", function: { name: "read_file", arguments: '{"path":"a"}' } }],
+    ]);
+  });
+
+  it("工具名累积式重发（ec → echo）也能拼对", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse([
+          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "ec" } }] } }] }),
+          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "echo" } }] } }] }),
+          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "{}" } }] } }] }),
+          "[DONE]",
+        ]),
+      ),
+    );
+    const c = capture();
+    await streamChat(openai, msgs, c.opts());
+    expect(c.toolCalls).toEqual([
+      [{ id: "c1", type: "function", function: { name: "echo", arguments: "{}" } }],
+    ]);
+  });
+
+  it("index 缺失的参数分片归到同一次调用（不新建坏调用）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse([
+          JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ id: "c1", function: { name: "echo", arguments: '{"a"' } }] } }],
+          }),
+          JSON.stringify({ choices: [{ delta: { tool_calls: [{ function: { arguments: ":1}" } }] } }] }),
+          "[DONE]",
+        ]),
+      ),
+    );
+    const c = capture();
+    await streamChat(openai, msgs, c.opts());
+    expect(c.toolCalls).toEqual([
+      [{ id: "c1", type: "function", function: { name: "echo", arguments: '{"a":1}' } }],
+    ]);
+  });
+
+  it("参数累积式重发时取新值，不拼出非法 JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse([
+          JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "echo", arguments: '{"a"' } }] } }],
+          }),
+          JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"a":1}' } }] } }],
+          }),
+          "[DONE]",
+        ]),
+      ),
+    );
+    const c = capture();
+    await streamChat(openai, msgs, c.opts());
+    expect(c.toolCalls).toEqual([
+      [{ id: "c1", type: "function", function: { name: "echo", arguments: '{"a":1}' } }],
+    ]);
+  });
+
   it("非流式 json：整段回调；长文本切片 ≤3000", async () => {
     const long = "x".repeat(6500);
     vi.stubGlobal(
@@ -281,5 +367,35 @@ describe("错误与工具函数", () => {
     expect(carriedError({ choices: [] })).toBeNull();
     expect(carriedError({ error: { message: "boom" } })).toBeInstanceOf(LlmHttpError);
     expect(carriedError({ type: "error", message: "boom" })?.status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe("buildRequest 的输出预算（max_tokens）", () => {
+  it("请求体带 max_tokens：缺省取模型能力表的 maxOutput", () => {
+    const body = JSON.parse(
+      buildRequest({ ...openai, model: "gpt-4o" }, [{ role: "user", content: "hi" }], {
+        stream: true,
+      }).body,
+    ) as { max_tokens?: number };
+    expect(typeof body.max_tokens).toBe("number");
+    expect(body.max_tokens).toBeGreaterThan(0);
+  });
+
+  it("档案手填的 maxTokens 优先于能力表", () => {
+    const body = JSON.parse(
+      buildRequest({ ...openai, model: "gpt-4o", maxTokens: 1234 }, [{ role: "user", content: "hi" }], {
+        stream: true,
+      }).body,
+    ) as { max_tokens?: number };
+    expect(body.max_tokens).toBe(1234);
+  });
+
+  it("未知模型也有兜底上限（不会漏成「由上游决定」）", () => {
+    const body = JSON.parse(
+      buildRequest({ ...openai, model: "some-unknown-model-xyz" }, [{ role: "user", content: "hi" }], {
+        stream: false,
+      }).body,
+    ) as { max_tokens?: number };
+    expect(body.max_tokens).toBeGreaterThan(0);
   });
 });

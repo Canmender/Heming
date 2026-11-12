@@ -941,7 +941,10 @@ describe("ChatPage", () => {
       ),
     );
     await waitFor(() => expect(sealedOf(send, "agent_finish")).toHaveLength(1));
-    expect(sealedOf(send, "agent_finish")[0].plain).toMatchObject({ kind: "text", text: "半" });
+    expect(sealedOf(send, "agent_finish")[0].plain).toMatchObject({
+      kind: "text",
+      text: expect.stringContaining("半"),
+    });
 
     const errEv = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_error");
     expect(errEv).toMatchObject({ code: "aborted", message: "" }); // fix I2：message 进密文
@@ -1027,7 +1030,10 @@ describe("ChatPage", () => {
     view.unmount(); // cleanup：WS effect 先排期延迟 close，随后 abort effect 中止进行中流
 
     await waitFor(() => expect(close).toHaveBeenCalled());
-    expect(sealedOf(send, "agent_finish")[0]?.plain).toMatchObject({ kind: "text", text: "半" });
+    expect(sealedOf(send, "agent_finish")[0]?.plain).toMatchObject({
+      kind: "text",
+      text: expect.stringContaining("半"),
+    });
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({ type: "agent_error", code: "aborted" }),
     );
@@ -1069,7 +1075,7 @@ describe("ChatPage", () => {
     expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 中断行不再出现（no-op 中断按钮消失）
   });
 
-  it("I3 fetchHistory 只取近 30 条：35 条历史组装出末 30 轮 + 本条 user 轮", async () => {
+  it("I3 fetchHistory 不再硬截 30 条：35 条历史全部进提示词（压缩交给 prepareHistory）", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
         const history = Array.from({ length: 35 }, (_, i) =>
@@ -1089,13 +1095,76 @@ describe("ChatPage", () => {
     await pickAndSend("@和小鸣 查下上下文");
     await waitFor(() => expect(seen).toBeDefined());
 
-    // 35 条 → slice(-30) 从「历史6」起；末条不等于发送文本故不被剔除 → 30 轮历史
-    // （bindAssistant 的系统提示词 unshift 在最前 + 本条 user 轮追加在尾 → 32 条）
-    expect(seen).toHaveLength(32);
+    // 窗口是 120 条 → 35 条全在；末条不等于发送文本故不被剔除
+    // （bindAssistant 的系统提示词 unshift 在最前 + 本条 user 轮追加在尾 → 37 条）
+    expect(seen).toHaveLength(37);
     expect(seen![0]).toEqual({ role: "system", content: "你是和小鸣" });
-    expect(seen![1]).toEqual({ role: "user", content: "历史6" });
-    expect(seen![30]).toEqual({ role: "user", content: "历史35" }); // 第 31 条之前的末轮历史
-    expect(seen![31]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
+    expect(seen![1]).toEqual({ role: "user", content: "历史1" }); // 第 31 条以前的原话不再被丢
+    expect(seen![35]).toEqual({ role: "user", content: "历史35" });
+    expect(seen![36]).toEqual({ role: "user", content: "@和小鸣 查下上下文" });
+  });
+
+  it("I3b fetchHistory 带回上一轮工具链：tool_calls 与 role=tool 严格配对", async () => {
+    type SentRow = {
+      role: string;
+      content: string;
+      tool_call_id?: string;
+      name?: string;
+      tool_calls?: { id: string; type: string; function: { name: string; arguments: string } }[];
+    };
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    const assistant: Message = {
+      ...agentMsg("m2", "我查一下天气。", "2026-10-14T01:00:01.000Z"),
+      tools: [
+        {
+          id: "call_1",
+          name: "天气__查询",
+          args: '{"city":"杭州"}',
+          status: "ok",
+          result: "杭州 22℃ 多云",
+          startedAt: 1,
+          endedAt: 2,
+        },
+        {
+          id: "call_2",
+          name: "shell__exec",
+          args: '{"cmd":"ls"}',
+          status: "denied",
+          startedAt: 3,
+        },
+      ],
+    } as Message;
+    mockMessagesFetch([msg("m1", "杭州天气怎么样？", "2026-10-14T01:00:00.000Z"), assistant]);
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    let seen: SentRow[] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages as unknown as SentRow[];
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 接着说");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    const rows = seen!;
+    const assistantRow = rows.find((r) => (r.tool_calls?.length ?? 0) > 0);
+    expect(assistantRow).toBeDefined();
+    expect(assistantRow!.role).toBe("assistant");
+    expect(assistantRow!.tool_calls!.map((c) => c.id)).toEqual(["call_1", "call_2"]);
+    // 名字与参数原样带回：模型才知道上一轮到底调了什么、传了什么
+    expect(assistantRow!.tool_calls![0].function).toEqual({
+      name: "天气__查询",
+      arguments: '{"city":"杭州"}',
+    });
+
+    const toolRows = rows.filter((r) => r.role === "tool");
+    expect(toolRows.map((r) => r.tool_call_id)).toEqual(["call_1", "call_2"]);
+    expect(toolRows[0].content).toContain("杭州 22℃");
+    // 被拒绝的调用也要留痕：否则模型会以为那次执行成功过
+    expect(toolRows[1].content).toContain("用户拒绝");
   });
 
   it("附件文本进提示词：模型能看到文件内容，且带清晰边界", async () => {
@@ -3661,7 +3730,7 @@ describe("ChatPage 工具轮可视化接线", () => {
         expect(screen.getByRole("dialog", { name: /请求调用工具/ })).toBeInTheDocument(),
       );
       // 放行：只有勾上的项才执行
-      fireEvent.click(screen.getByLabelText("允许 外部工具"));
+      fireEvent.click(screen.getByLabelText("允许 echo-svc · echo"));
       fireEvent.click(screen.getByRole("button", { name: "仅本次允许" }));
       await waitFor(() => expect(screen.getByText("完成")).toBeInTheDocument());
 
@@ -3866,8 +3935,11 @@ describe("ChatPage 工具轮可视化接线", () => {
         .mock.calls.map((c) => c[1] as { kind?: string; text?: string })
         .filter((p) => p.kind === kind)
         .map((p) => p.text);
-    // partial 里带着「半」——一个字都没丢
-    expect(sealedTexts("text")).toContain("半");
+    // partial 里带着「半」——一个字都没丢；工具轮的缓冲不能当最终答案落库，
+    // 因此会补一句「以上是中断前的过程说明」（P1-5）。
+    const sealed = sealedTexts("text");
+    expect(sealed.some((t) => (t ?? "").includes("半"))).toBe(true);
+    expect(sealed.some((t) => (t ?? "").includes("不是最终答案"))).toBe(true);
   });
 
   it("未授权自我优化时不注入 self 工具，但 chart 工具照常在（两者授权是独立的）", async () => {

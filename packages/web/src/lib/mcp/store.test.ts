@@ -199,3 +199,27 @@ describe("单条接入 restorePreset()", () => {
     expect(registry.restorePreset("nope")).toBeNull();
   });
 });
+
+describe("单次请求超时（timeoutMs）", () => {
+  it("存的时候夹到 [2s, 600s]，不给无效值", () => {
+    const registry = new McpRegistry(memStorage(), () => "2026-01-01T00:00:00.000Z");
+    expect(registry.add({ name: "a", transport: "http", url: "https://a/mcp", timeoutMs: 500 })).toMatchObject({
+      timeoutMs: 2_000,
+    });
+    expect(registry.add({ name: "b", transport: "http", url: "https://b/mcp", timeoutMs: 9_999_999 })).toMatchObject({
+      timeoutMs: 600_000,
+    });
+    const plain = registry.add({ name: "c", transport: "http", url: "https://c/mcp" });
+    expect(plain).not.toHaveProperty("timeoutMs");
+    const bad = registry.add({ name: "d", transport: "http", url: "https://d/mcp", timeoutMs: Number.NaN });
+    expect(bad).not.toHaveProperty("timeoutMs");
+  });
+
+  it("能穿过存储往返（不是只在内存里改）", () => {
+    const storage = memStorage();
+    const first = new McpRegistry(storage, () => "2026-01-01T00:00:00.000Z");
+    const saved = first.add({ name: "慢", transport: "stdio", command: "node", timeoutMs: 120_000 });
+    const reopened = new McpRegistry(storage, () => "2026-01-01T00:00:00.000Z");
+    expect(reopened.get(saved.id)?.timeoutMs).toBe(120_000);
+  });
+});

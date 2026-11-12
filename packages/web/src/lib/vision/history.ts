@@ -32,9 +32,22 @@ export interface VisionImageSlot {
 }
 
 export interface HistoryRow {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
   contentParts?: ContentPart[];
+  /**
+   * 历史里的工具调用（跟本轮请求里的形状一致）。
+   *
+   * ★ 以前历史只保留 user/assistant 的**文本**，工具调用与结果全被丢掉：
+   * 模型回看上一轮只知道「我说过一句话」，不知道自己查过什么、拿到什么，
+   * 于是重复调用同一个工具、或者把已经核实过的事实当成没结论重新猜
+   * （就是用户说的「逻辑链断了」）。
+   */
+  tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
+  /** role=tool 时对应哪次调用（必须与 tool_calls 的 id 对得上，否则供应商 400）。 */
+  tool_call_id?: string;
+  /** role=tool 时的工具名（部分供应商要求）。 */
+  name?: string;
 }
 
 /** 能不能当图片发给模型：类型对、体积在限内（0 字节视为坏文件）。 */

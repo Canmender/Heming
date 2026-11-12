@@ -19,6 +19,13 @@ export interface McpServerConfig {
   /** transport=stdio 时必填，如 `npx`（仅桌面端可用）。 */
   command?: string;
   args?: string[];
+  /**
+   * 单次请求超时（毫秒，可选）。缺省 HTTP 20s / stdio 30s，夹在 [2s, 600s]。
+   *
+   * 有的工具很快（读剪贴板），有的要几分钟（拉页面、跑构建）；写死一个值
+   * 不是把慢的误判成失败，就是把卡死的当正常。界面里按服务单独填。
+   */
+  timeoutMs?: number;
   /** 额外请求头（如 Authorization），值原样发给该 MCP 服务。 */
   headers?: Record<string, string>;
   enabled: boolean;
@@ -105,7 +112,14 @@ export interface McpToolRef {
 }
 
 /** 连接状态（只在前端展示，不落盘）。 */
-export type McpConnState = "idle" | "connecting" | "ready" | "error";
+/**
+ * 连接状态。
+ *
+ * `stale` = 以前连上过（有落盘的工具快照），但**最近一次连接失败**。
+ * 不能把它显示成「已连接」：模型会拿着指向死进程的目录一直调失败，
+ * 用户却以为一切正常。
+ */
+export type McpConnState = "idle" | "connecting" | "ready" | "stale" | "error";
 
 /** `tools/call` 的结构化结果。 */
 export interface McpCallResult {

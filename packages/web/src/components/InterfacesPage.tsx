@@ -122,6 +122,8 @@ export function InterfacesView({
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const [headersText, setHeadersText] = useState("");
+  /** 单次请求超时（秒，可选）：空＝缺省（HTTP 20s / stdio 30s）。 */
+  const [timeoutSec, setTimeoutSec] = useState("");
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   /** 当前选中的预设说明（点预设后显示，方便看前置条件与风险提示）。 */
   const [presetHint, setPresetHint] = useState("");
@@ -182,6 +184,7 @@ export function InterfacesView({
     setCommand("");
     setArgs("");
     setHeadersText("");
+    setTimeoutSec("");
   };
 
   const parseHeaders = (): Record<string, string> | undefined => {
@@ -203,6 +206,20 @@ export function InterfacesView({
     return Object.keys(out).length ? out : undefined;
   };
 
+  /**
+   * 秒 → 毫秒。留空＝用缺省值；填了就必须是正数（不合法直接抛给用户看，
+   * 而不是静默丢掉——静默丢掉的话用户会以为设置生效了）。
+   */
+  const parseTimeoutMs = (text: string): number | undefined => {
+    const raw = text.trim();
+    if (!raw) return undefined;
+    const seconds = Number(raw);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      throw new Error("单次超时请填正数（秒），留空表示用缺省值");
+    }
+    return Math.round(seconds * 1000);
+  };
+
   const addServer = () => {
     try {
       const created = registry.add({
@@ -212,6 +229,7 @@ export function InterfacesView({
         command: transport === "stdio" ? command : undefined,
         args: transport === "stdio" ? args.split(/\s+/).filter(Boolean) : undefined,
         headers: parseHeaders(),
+        timeoutMs: parseTimeoutMs(timeoutSec),
         enabled: true,
       });
       resetForm();
@@ -477,6 +495,17 @@ export function InterfacesView({
                 </label>
               </>
             )}
+            <label className="ui-caption">
+              单次超时（秒，可选）
+              <input
+                aria-label="单次超时"
+                inputMode="numeric"
+                value={timeoutSec}
+                onChange={(e) => setTimeoutSec(e.target.value)}
+                placeholder={transport === "http" ? "20" : "30"}
+                className="mt-1 block w-full ui-input"
+              />
+            </label>
             <label className="ui-caption md:col-span-2">
               请求头（可选，JSON）
               <input
@@ -529,8 +558,20 @@ export function InterfacesView({
             // 已发现 = App 启动时已自动连过（清单会落盘），显示「已连接」；
             // 未发现 = 还没连过或连失败，显示各自状态。
             // 用 hasDiscovered 而不是「清单长度>0」——零工具的服务也算连上过。
-            const state =
-              conn[server.id] ?? (registry.hasDiscovered(server.id) ? "ready" : "idle");
+            // 优先看本页刚发起的连接；没有就看**最近一次连接尝试**的结果，
+            // 只有「从没连过但有旧快照」才退回「已连接」——其余情况一律如实标错。
+            const live = registry.status(server.id);
+            const state: McpConnState =
+              conn[server.id] ??
+              (live
+                ? live.state === "connected"
+                  ? "ready"
+                  : live.state
+                : registry.hasDiscovered(server.id)
+                  ? // 有快照但本进程还没连过：显示已连接（沿用历史语义），
+                    // 真正的「坏了」由 setStatus 记录后覆盖成 stale
+                    "ready"
+                  : "idle");
             return (
               <section
                 key={server.id}
@@ -578,12 +619,23 @@ export function InterfacesView({
                         ? "bg-[var(--success-soft)] text-[var(--success)]"
                         : state === "error"
                           ? "bg-[var(--danger-soft)] text-[var(--danger)]"
-                          : state === "connecting"
+                          : state === "stale"
                             ? "bg-[var(--warn-soft)] text-[var(--warn)]"
-                            : "bg-[var(--subtle-2)] text-muted"
+                            : state === "connecting"
+                              ? "bg-[var(--warn-soft)] text-[var(--warn)]"
+                              : "bg-[var(--subtle-2)] text-muted"
                     }`}
+                    title={state === "stale" ? registry.status(server.id)?.error ?? "最近一次连接失败" : undefined}
                   >
-                    {state === "ready" ? "已连接" : state === "error" ? "连接失败" : state === "connecting" ? "连接中…" : "未连接"}
+                    {state === "ready"
+                      ? "已连接"
+                      : state === "error"
+                        ? "连接失败"
+                        : state === "stale"
+                          ? "已断开（清单过期）"
+                          : state === "connecting"
+                            ? "连接中…"
+                            : "未连接"}
                   </span>
                   <span className="text-[11px] text-muted">
                     {tools.length ? `${tools.length} 个工具` : "未获取工具"}

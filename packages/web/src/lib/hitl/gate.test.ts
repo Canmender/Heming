@@ -326,7 +326,9 @@ describe("HITL 闸门：记住的规则", () => {
 describe("toHitlBatch", () => {
   it("把模型的 tool_call 转成分类好的批次", () => {
     const batch = toHitlBatch(
-      [{ id: "call_1", function: { name: "srv__get_file", arguments: '{"path":"a.md"}' } }],
+      // 用非 MCP 名字：MCP 工具（服务__工具）一律先按 write 收口，
+      // 这条用例考的是「转换结果」而不是风险策略（策略见 classify.test.ts）。
+      [{ id: "call_1", function: { name: "get_file", arguments: '{"path":"a.md"}' } }],
       { agentId: "a1", agentName: "架构师", streamId: "s1", conversationId: "c1" },
     );
     expect(batch.calls[0].id).toBe("call_1");

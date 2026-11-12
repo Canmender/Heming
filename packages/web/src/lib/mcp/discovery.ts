@@ -40,13 +40,89 @@ export function discoverTools(tools: unknown[]): DiscoveredTool[] {
   return out;
 }
 
-/** 查询分词：ASCII 按词切，CJK 按单字切（中文没有空格，二元切分反而更难对齐）。 */
+/**
+ * 中文查询 → 英文工具名的常见对照。
+ *
+ * MCP 服务基本都是英文名/英文描述（`srv__screenshot`、`click`），而用户和模型
+ * 习惯用中文搜「截个图」「点一下」。没有这张表，中文查询在英文目录里恒 0 命中，
+ * 模型只能换关键词或者干脆猜名字——这正是「工具调用有问题」的常见来源。
+ */
+const CJK_SYNONYMS: Array<[string, string[]]> = [
+  ["截图", ["screenshot", "snapshot", "capture", "screen"]],
+  ["截屏", ["screenshot", "snapshot", "capture", "screen"]],
+  ["屏幕", ["screen", "display", "screenshot"]],
+  ["窗口", ["window"]],
+  ["桌面", ["desktop"]],
+  ["点击", ["click"]],
+  ["双击", ["click", "double"]],
+  ["鼠标", ["mouse", "pointer", "click"]],
+  ["滚动", ["scroll"]],
+  ["键盘", ["keyboard", "key", "type"]],
+  ["按键", ["key", "press"]],
+  ["输入", ["type", "input", "fill", "write"]],
+  ["网页", ["web", "browser", "http", "url", "fetch"]],
+  ["浏览器", ["browser"]],
+  ["抓取", ["fetch", "scrape", "crawl", "request"]],
+  ["下载", ["download", "fetch"]],
+  ["搜索", ["search", "query", "find"]],
+  ["查询", ["query", "search", "get"]],
+  ["文件", ["file", "path", "fs"]],
+  ["目录", ["directory", "folder", "list", "dir"]],
+  ["读取", ["read", "get", "load"]],
+  ["写入", ["write", "save", "put"]],
+  ["列表", ["list"]],
+  ["删除", ["delete", "remove"]],
+  ["剪贴板", ["clipboard"]],
+  ["运行", ["run", "exec", "execute", "command"]],
+  ["命令", ["command", "exec", "shell"]],
+  ["脚本", ["script", "eval", "python"]],
+  ["图片", ["image", "picture", "png", "jpg"]],
+  ["时间", ["time", "date", "clock"]],
+  ["会话", ["session"]],
+  ["网络", ["network", "http", "request"]],
+];
+
+/** `needle` 的每个字按顺序出现在 `haystack` 里（中间可以有别的字）。 */
+function isSubsequence(needle: string, haystack: string): boolean {
+  if (!needle) return false;
+  let at = 0;
+  for (const char of haystack) {
+    if (char === needle[at]) {
+      at += 1;
+      if (at === needle.length) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 查询分词：ASCII 按词切；CJK 同时产出单字、相邻双字和英文同义词。
+ *
+ * 为什么要单字**和**双字：`segment` 只给「截图」时，英文名 `screenshot` 依然
+ * 命中不了；只给单字时「截」「图」太散，会把无关工具带进来。两个都给，
+ * 双字负责精确、单字负责兜底，同义词负责跨语言。
+ */
 function tokenize(query: string): string[] {
-  return String(query ?? "")
-    .toLowerCase()
-    .split(/[^a-z0-9\u4e00-\u9fff]+/)
-    .filter((t) => t.length > 0)
-    .slice(0, 12);
+  const text = String(query ?? "").toLowerCase();
+  const tokens: string[] = [];
+  for (const piece of text.split(/[^a-z0-9\u4e00-\u9fff]+/)) {
+    if (!piece) continue;
+    if (/^[a-z0-9]+$/.test(piece)) {
+      tokens.push(piece);
+      continue;
+    }
+    const cjk = piece.match(/[\u4e00-\u9fff]/g) ?? [];
+    if (cjk.length) {
+      tokens.push(...cjk); // 单字兜底
+      for (let i = 0; i + 1 < cjk.length; i++) tokens.push(cjk[i] + cjk[i + 1]); // 双字精确
+    }
+    for (const [zh, en] of CJK_SYNONYMS) {
+      // 直接包含，或「字按顺序出现」——后者覆盖「截个图」「帮我截张图」这类插字口语。
+      if (piece.includes(zh) || isSubsequence(zh, piece)) tokens.push(...en);
+    }
+  }
+  // 去重并保持稳定顺序；上限放宽到 24（同义词展开后条目会变多）。
+  return [...new Set(tokens.filter((t) => t.length > 0))].slice(0, 24);
 }
 
 /**

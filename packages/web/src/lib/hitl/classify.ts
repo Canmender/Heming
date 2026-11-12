@@ -241,6 +241,17 @@ export function riskOfName(name: string): RiskLevel {
     if (name.startsWith(prefix)) return risk;
   }
   if (DANGER_WORDS.test(name)) return "danger";
+  /**
+   * MCP 工具（`服务__工具`）：**不能按子串猜只读**。
+   *
+   * 名字是我们拼的，工具那一半由服务端随便起：`db__query` 可能是写库、
+   * `api__get_token` 可能是签发凭据。以前整串跑 `READ_WORDS`，这些会被判成
+   * read 并在 guarded + floor=read 下**免确认直接执行**——安全默认直接失效。
+   *
+   * 口径改成：MCP 一律先按 write 收口（首次让用户确认一次），用户在弹窗里
+   * 记住规则后不再打扰；真危险的词（run/exec/write…）仍然升到 danger。
+   */
+  if (name.includes("__")) return "write";
   if (READ_WORDS.test(name)) return "read";
   return "write";
 }
@@ -259,13 +270,25 @@ export function resolveRisk(name: string, hints?: HitlRiskHints): RiskLevel {
   return riskOfName(name);
 }
 
-/** 给人看的中文动作名。 */
+/**
+ * 给人看的中文动作名。
+ *
+ * MCP 工具（`服务__工具`）以前一律显示「外部工具」：用户在确认弹窗里看到的
+ * 是一句没有信息量的话，只能靠回忆「我刚才让它干嘛」判断该不该点允许。
+ * 现在按「服务 · 工具」显示——两个名字都来自我们自己的命名空间，与服务端
+ * 自述无关，所以不涉及「信任不可信标注」的问题。
+ */
 export function displayNameOf(name: string, hints?: HitlRiskHints): string {
   if (hints?.displayName) return hints.displayName;
   const exact = DISPLAY_NAMES[name];
   if (exact) return exact;
   for (const { prefix, label } of PREFIX_DISPLAY) {
     if (name.startsWith(prefix)) return label;
+  }
+  if (name.includes("__")) {
+    const [server, ...rest] = name.split("__");
+    const tool = rest.join("__");
+    if (server && tool) return `${server} · ${tool}`;
   }
   return UNKNOWN_DISPLAY;
 }

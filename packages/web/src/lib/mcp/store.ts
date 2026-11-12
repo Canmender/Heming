@@ -80,6 +80,17 @@ export function toolKey(serverId: string, toolName: string): string {
 
 const TRANSPORTS: McpTransport[] = ["http", "stdio"];
 
+/**
+ * 归一化单次请求超时（毫秒）：无效值一律当没填，有效值夹到 [2s, 600s]。
+ *
+ * 存的时候归一化，而不是等到调用时再夹：否则界面上显示 500ms、实际按 2s 走，
+ * 用户永远对不上账。归一化规则与 `resolveTimeoutMs`（httpClient）保持一致。
+ */
+function normalizeTimeout(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  return Math.min(600_000, Math.max(2_000, Math.round(value)));
+}
+
 function coerceServer(raw: unknown, now: string): McpServerConfig | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
@@ -102,6 +113,9 @@ function coerceServer(raw: unknown, now: string): McpServerConfig | null {
     command: typeof r.command === "string" ? r.command : undefined,
     args: Array.isArray(r.args) ? r.args.filter((a): a is string => typeof a === "string") : undefined,
     headers: Object.keys(headers).length ? headers : undefined,
+    // 单次超时同样是白名单字段：不写会在重开应用后被丢掉，界面上的设置
+    // 就变成了「这次生效、下次回到缺省」的幽灵设置。
+    timeoutMs: normalizeTimeout(r.timeoutMs),
     enabled: r.enabled !== false,
     // 来源与 Registry 名：缺省视为手填（兼容旧数据）。
     // ★ 这两个字段必须在这里显式透传——coerceServer 做的是字段白名单，
@@ -151,6 +165,23 @@ function coerceTool(raw: unknown): McpTool | null {
  * 只做「配置 + 工具清单 + 启用开关」的持久化；**连接与调用**在 `httpClient.ts`，
  * 二者分离后本类可在 node 环境直接单测（注入内存 StorageLike）。
  */
+/**
+ * 一台服务的连接状态（运行时，不落盘）。
+ *
+ * ★ 为什么不能只看「有没有缓存清单」：快照会落盘，服务第二天起不来时清单还在，
+ * 界面就显示「已连接」，模型则拿到一份指向死进程的工具目录——问也问不出错，
+ * 只会一直调失败。状态必须反映**最近一次连接尝试的结果**。
+ */
+export interface McpServerStatus {
+  state: "connected" | "stale" | "error";
+  /** 最近一次尝试的时间（ISO）。 */
+  at: string;
+  /** 失败原因（stale/error 时）。 */
+  error?: string;
+  /** 连上时发现的工具数。 */
+  tools?: number;
+}
+
 export class McpRegistry {
   private readonly storage: StorageLike;
   private readonly now: () => string;
@@ -162,6 +193,8 @@ export class McpRegistry {
    * 一旦为真，hydrate 完成后不再重读安全键——内存就是最新值，重读会把用户刚改的冲掉。
    */
   private serversMutated = false;
+  /** 每台服务最近一次连接结果（仅本进程内存；刷新页面即重置）。 */
+  private readonly connectStatus = new Map<string, McpServerStatus>();
 
   constructor(storage: StorageLike = defaultStorage(), now: () => string = () => new Date().toISOString()) {
     this.storage = storage;
@@ -502,6 +535,9 @@ export class McpRegistry {
       command: input.command?.trim() || undefined,
       args: input.args?.filter((a) => a.trim()),
       headers: input.headers,
+      ...(normalizeTimeout(input.timeoutMs) !== undefined
+        ? { timeoutMs: normalizeTimeout(input.timeoutMs) }
+        : {}),
       enabled: input.enabled !== false,
       // 来源字段必须显式带过：`add()` 是字段白名单，不写就会被丢掉，
       // Registry 装出来的服务会退化成「手填」，界面也就无法判「已安装」。
@@ -571,6 +607,21 @@ export class McpRegistry {
    */
   hasDiscovered(serverId: string): boolean {
     return Object.prototype.hasOwnProperty.call(this.toolMap, serverId);
+  }
+
+  /** 记录一次连接结果（refreshServerTools 成功/失败时调用）。 */
+  setStatus(serverId: string, status: Omit<McpServerStatus, "at"> & { at?: string }): void {
+    this.connectStatus.set(serverId, { ...status, at: status.at ?? this.now() });
+  }
+
+  /** 最近一次连接结果；从没连过返回 undefined。 */
+  status(serverId: string): McpServerStatus | undefined {
+    return this.connectStatus.get(serverId);
+  }
+
+  /** 清掉状态（删除服务时）。 */
+  clearStatus(serverId: string): void {
+    this.connectStatus.delete(serverId);
   }
 
   /** 全部服务的工具（带服务名，便于展示与命名空间化）。 */

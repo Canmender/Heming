@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  MAX_TOOL_IMAGES,
   MAX_TOOL_RESULT_CHARS,
   buildToolCatalog,
   executeToolCall,
+  imagesFromContent,
+  sanitizeSchema,
+  toOpenAiTools,
   truncateToolResult,
 } from "./bridge.js";
 import type { HttpMcpClient } from "./httpClient.js";
@@ -120,5 +124,89 @@ describe("executeToolCall", () => {
     );
     expect(result.ok).toBe(true);
     expect(result.text.length).toBeLessThan(MAX_TOOL_RESULT_CHARS + 200);
+  });
+});
+
+describe("图片结构化（MCP 审计 D1）", () => {
+  const png = "iVBORw0KGgoAAAANSUhEUg==";
+
+  it("从 content 里取出 image 块，不再压成占位符", async () => {
+    const client = fakeClient(async () => ({
+      text: "已截图 1280x720",
+      isError: false,
+      content: [
+        { type: "text", text: "已截图 1280x720" },
+        { type: "image", data: png, mimeType: "image/png" },
+      ],
+    }));
+    const result = await executeToolCall(
+      { name: echoName, arguments: "{}" },
+      catalog,
+      { clientFor: () => client },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.images).toEqual([{ mimeType: "image/png", data: png }]);
+    expect(result.text).toContain("已截图 1280x720");
+    expect(result.text).toContain("已在下面单独附上");
+  });
+
+  it("没有图片时 images 字段不出现（不改变既有形状）", async () => {
+    const client = fakeClient(async () => ({ text: "纯文本", isError: false, content: [{ type: "text", text: "纯文本" }] }));
+    const result = await executeToolCall({ name: echoName, arguments: "{}" }, catalog, {
+      clientFor: () => client,
+    });
+    expect(result.images).toBeUndefined();
+  });
+
+  it("图片数量有上限，超出的丢弃（防止一次吃穿预算）", () => {
+    const content = Array.from({ length: MAX_TOOL_IMAGES + 3 }, () => ({
+      type: "image",
+      data: png,
+      mimeType: "image/png",
+    }));
+    expect(imagesFromContent(content)).toHaveLength(MAX_TOOL_IMAGES);
+  });
+
+  it("超大图片（>4MB base64）直接丢弃", () => {
+    expect(imagesFromContent([{ type: "image", data: "x".repeat(4_000_001), mimeType: "image/png" }])).toEqual([]);
+  });
+});
+
+describe("inputSchema 清洗（MCP 审计 D5）", () => {
+  it("缺 type/properties 的 schema 被补成合法 object", () => {
+    expect(sanitizeSchema(undefined)).toEqual({ type: "object", properties: {} });
+    expect(sanitizeSchema({})).toEqual({ type: "object", properties: {} });
+    expect(sanitizeSchema({ type: "string" })).toEqual({ type: "object", properties: {} });
+  });
+
+  it("required 指向不存在的属性时会被剔除（否则供应商 400）", () => {
+    const out = sanitizeSchema({
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path", "ghost"],
+    });
+    expect(out.required).toEqual(["path"]);
+  });
+
+  it("非法 properties 项被丢掉，additionalProperties 非布尔值时被丢弃", () => {
+    const out = sanitizeSchema({
+      properties: { ok: { type: "string" }, bad: "not-an-object", worse: [1] },
+      additionalProperties: "no",
+    });
+    expect(Object.keys(out.properties as object)).toEqual(["ok"]);
+    expect(out.additionalProperties).toBeUndefined();
+  });
+
+  it("toOpenAiTools 走同一套清洗（模型看到的就是校验后的声明）", () => {
+    const c = buildToolCatalog([
+      {
+        serverId: "s1",
+        serverName: "srv",
+        tool: { name: "t", description: "d", inputSchema: { properties: {}, required: ["nope"] } },
+      },
+    ]);
+    const tools = toOpenAiTools(c) as { function: { parameters: Record<string, unknown> } }[];
+    expect(tools[0]?.function.parameters.type).toBe("object");
+    expect(tools[0]?.function.parameters.required).toBeUndefined();
   });
 });

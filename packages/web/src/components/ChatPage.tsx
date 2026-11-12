@@ -80,7 +80,7 @@ import {
   prepareHistory as prepareAgentHistory,
   summaryCache,
 } from "../lib/agentContext/index.js";
-import { memoryStore } from "../lib/memory/index.js";
+import { agentPrefsStore, memoryStore } from "../lib/memory/index.js";
 import { recallRecorder } from "../lib/memory/runRecorder.js";
 import { maybeRunReview } from "../lib/memory/reviewRunner.js";
 import { skillPool } from "../lib/skills/index.js";
@@ -248,6 +248,39 @@ export function clampComposerHeight(n: number): number {
  * 留 80px 余量是因为滚动条末端的 1~2px 抖动不该被当成「用户上滑了」。
  */
 const STICK_BOTTOM_PX = 80;
+
+/**
+ * 历史里最多回放的轮数。
+ *
+ * ★ 以前是 `slice(-30)`：第 31 条以前的消息**在进摘要之前就被丢掉**了，
+ * 用户翻旧账时模型对更早的约定毫无印象（而且摘要也救不回来——它根本没看到）。
+ * 放宽到 120，超出的部分由 `prepareHistory` 压缩成摘要，而不是在这里静默消失。
+ */
+const HISTORY_MESSAGE_WINDOW = 120;
+
+/** 单轮最多回放多少次工具调用（历史只做参考，别把整轮工具流水搬进提示词）。 */
+const HISTORY_TOOLS_PER_TURN = 8;
+
+/** 单条工具结果进历史时的字符上限。 */
+const HISTORY_TOOL_TEXT_MAX = 1200;
+
+/**
+ * 把一次工具调用还原成「给模型看的历史文本」。
+ *
+ * 关键在于**别丢**：模型不知道上一轮查过什么，就会重复查、或者把已核实的事实重新猜
+ * （用户看到的「逻辑链断了」）。拒绝/中断也要留下痕迹，否则模型会以为那次调用成功了。
+ */
+function historyToolText(trace: ToolTrace): string {
+  if (trace.status === "denied") return "（用户拒绝了这次调用，工具未执行。）";
+  if (trace.status === "running") return "（这次调用被中断，没有拿到结果。）";
+  const raw = trace.result ?? "";
+  if (!raw) return trace.status === "error" ? "（工具执行失败，没有返回内容。）" : "（工具执行完成，没有返回内容。）";
+  const clipped =
+    raw.length > HISTORY_TOOL_TEXT_MAX
+      ? `${raw.slice(0, HISTORY_TOOL_TEXT_MAX)}\n…（结果过长，已截断）`
+      : raw;
+  return trace.status === "error" ? `（工具执行失败）\n${clipped}` : clipped;
+}
 
 /**
  * 输入区提示行（A9）：info 3 秒自动消失；error 用红色 + role="alert"，
@@ -799,11 +832,24 @@ export function ChatPage({
    * 改成发送时现查现判——条件不满足就是一次 Map 查找，成本可忽略。
    */
   const mcpPrefetched = useRef(false);
+  /** 补连冷却时间戳：连续失败时不要每发一条消息都去重连（会很吵、也很慢）。 */
+  const mcpRetryAtRef = useRef(0);
 
-  /** 是否还有「启用中但没发现过工具」的服务（决定要不要补连）。异常时返回 false，不拦发送。 */
+  /**
+   * 是否还有需要补连的服务。异常时返回 false，不拦发送。
+   *
+   * 判据除了「没发现过工具」，还包括「最近一次连接失败」——
+   * 工具快照是落盘的，服务第二天起不来时快照还在，只看 `hasDiscovered`
+   * 就会一直显示已连接、也永远不会重连，模型拿着死目录反复失败（MCP 审计 D3）。
+   */
   const mcpNeedsConnect = () => {
     try {
-      return mcpRegistry.servers().some((s) => s.enabled && !mcpRegistry.hasDiscovered(s.id));
+      return mcpRegistry.servers().some((s) => {
+        if (!s.enabled) return false;
+        if (!mcpRegistry.hasDiscovered(s.id)) return true;
+        const status = mcpRegistry.status(s.id);
+        return status ? status.state !== "connected" : false;
+      });
     } catch {
       return false;
     }
@@ -1386,7 +1432,9 @@ export function ChatPage({
       fetchHistory: async (historyProfile) => {
         // spec §3：提示词只带近 30 条历史；E2E 信封经 loadMessages 合并
         // （缓存优先 → handler 解密 → 占位）——**解不开的不进提示词**（硬验收⑤）。
-        const msgs = (await useChatStore.getState().loadMessages(convId)).slice(-30);
+        const msgs = (await useChatStore.getState().loadMessages(convId)).slice(
+          -HISTORY_MESSAGE_WINDOW,
+        );
         const plainOf = useChatStore.getState().plainById[convId] ?? {};
         // 视觉能力按**本智能体绑定的模型**判定。
         const vision = resolveCapability(historyProfile).supportsVision;
@@ -1415,10 +1463,37 @@ export function ChatPage({
           if (vision && isVisionImage(m.payload.file)) {
             images.push({ rowIndex: rows.length, file: m.payload.file });
           }
-          rows.push({
-            role: m.senderType === "user" ? "user" : "assistant",
-            content,
-          });
+          // 历史里的工具链：assistant 的 tool_calls + 对应的 role:"tool" 结果。
+          // 只用当前这轮的转录（`transcriptOf`），且与 assistant 行严格配对——
+          // 供应商对「声明了 tool_call 却没有 tool 消息」会直接 400。
+          const tools =
+            m.senderType === "user"
+              ? []
+              : (transcriptOf(m)?.tools ?? []).filter((t) => t.id && t.name).slice(-HISTORY_TOOLS_PER_TURN);
+          if (tools.length) {
+            rows.push({
+              role: "assistant",
+              content,
+              tool_calls: tools.map((t) => ({
+                id: t.id,
+                type: "function" as const,
+                function: { name: t.name, arguments: t.args.trim() || "{}" },
+              })),
+            });
+            for (const t of tools) {
+              rows.push({
+                role: "tool",
+                tool_call_id: t.id,
+                name: t.name,
+                content: historyToolText(t),
+              });
+            }
+          } else {
+            rows.push({
+              role: m.senderType === "user" ? "user" : "assistant",
+              content,
+            });
+          }
         }
         const last = rows[rows.length - 1];
         if (last && last.role === "user" && last.content === text) rows.pop();
@@ -1558,6 +1633,10 @@ export function ChatPage({
             skills: skillPool,
             // 个性化加权（d.28）：被疑似引用过的记忆在同等相关度下排前面；读不到账本就退化成不加权。
             usage: recallRecorder.usageView,
+            // 智能体级记忆偏好（读侧同样生效）：长期/短期/个人数据库关掉就不读那一层。
+            // 以前只有写侧（复盘）看这个开关，读侧照旧注入——用户在记忆页关掉后
+            // 提示词里还能看到旧记忆，等于开关是摆设。
+            agentPrefs: agentPrefsStore.get(agentId),
           });
           // 登记本次注入旁路，供轮次收尾时写召回日志（可观测性；零注入不留档）。
           recallRecorder.capture(agentId, convId, text, built.recallTrace);
@@ -1957,6 +2036,13 @@ export function ChatPage({
         hadClosed = true;
         setConnected(false);
         setConnState("closed");
+        // 意外掉线时把进行中的流也收口：否则要等 60s 看门狗才收尾，
+        // 这轮回复既不落库、也不报错；HITL 弹窗还杵在屏幕上，闸门 await 永不 resolve。
+        // 帧发不出去没关系（连接已经断了），至少本地气泡能收口、任务区能标失败。
+        for (const runs of Object.values(runsRef.current)) {
+          for (const handle of runs) handle.abortAll();
+        }
+        useHitlStore.getState().cancelAll("连接断开");
         // 恢复提示与断线横幅互斥：断开时立刻收起恢复提示并停掉它的计时。
         setRecovered(false);
         if (recoveredTimer.current) {
@@ -2183,15 +2269,19 @@ export function ChatPage({
      * 永不阻塞发送：预检失败只是这轮没有 MCP 工具，聊天照常。
      * 已预检过（mcpPrefetched）就不再重复——一次会话里补连一次就够了。
      */
-    if (!mcpPrefetched.current && mcpNeedsConnect()) {
+    if (!mcpPrefetched.current && Date.now() >= mcpRetryAtRef.current && mcpNeedsConnect()) {
       mcpPrefetched.current = true;
       void autoConnectAll()
         .then(() => {
-          // 连完把标记复位：下次仍有「未发现」的服务时还能再补
+          // 连完把标记复位：下次仍有缺工具的服务时还能再补
           mcpPrefetched.current = false;
+          // 还是连不上 → 冷却一分钟，别让每条消息都卡在重连上
+          if (mcpNeedsConnect()) mcpRetryAtRef.current = Date.now() + 60_000;
         })
         .catch(() => {
           /* 静默：这轮没有 MCP 工具，但不该挡住聊天 */
+          mcpPrefetched.current = false;
+          mcpRetryAtRef.current = Date.now() + 60_000;
         });
     }
     // 硬验收⑤：无 subtle 先拦（保留草稿与已选 mention），绝不降级明文发送
@@ -2258,6 +2348,13 @@ export function ChatPage({
     e.preventDefault();
     // 空草稿：按钮已 disabled；回车/表单提交也要兜住，不把「消息为空」当成错误弹红
     if (!draft.trim()) return;
+    // 生成中不再接受新消息（d.13x）：并发两条流会共用 turnToolCountRef / selfEdit 预算，
+    // 第一条的「本轮工具次数」「自改预算」被第二条重置 —— 复盘判定与预算双双失真。
+    // 想让模型接着做，用本轮的「继续」或在停止后再发。
+    if (activeLocal.length > 0) {
+      setSendNotice("正在生成中：先点停止，或等这一轮结束再发", "info");
+      return;
+    }
     const text = draft;
     const mentions = effectiveMentions;
     const result = await submitMessage(text, mentions);
@@ -3374,8 +3471,14 @@ export function ChatPage({
           </button>
           <button
             type="submit"
-            disabled={!draft.trim() || uploading || Boolean(unboundAgent)}
-            title={unboundAgent ? unboundNoticeText(unboundAgent.name) : "发送"}
+            disabled={!draft.trim() || uploading || Boolean(unboundAgent) || activeLocal.length > 0}
+            title={
+              activeLocal.length > 0
+                ? "正在生成中：先点停止，或等这一轮结束再发"
+                : unboundAgent
+                  ? unboundNoticeText(unboundAgent.name)
+                  : "发送"
+            }
             className="rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             发送

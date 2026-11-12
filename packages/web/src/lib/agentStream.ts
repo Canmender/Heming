@@ -1,6 +1,12 @@
 import type { WsClientEvent } from "@heming/shared";
 import type { LlmProfile } from "../store/llm.js";
-import { streamChat, type ChatMessage, type RouteAttempt, type ToolCall } from "./llmClient.js";
+import {
+  streamChat,
+  type ChatMessage,
+  type ContentPart,
+  type RouteAttempt,
+  type ToolCall,
+} from "./llmClient.js";
 import type { DenyCause, GateOutcome, RiskLevel } from "./hitl/types.js";
 import { toHitlCall } from "./hitl/classify.js";
 import { deniedText, notExecutedText, ruleDeniedText } from "./hitl/text.js";
@@ -8,6 +14,8 @@ import { supportsKind } from "./capabilityNotice.js";
 import { estimateTokens } from "./agentContext/tokens.js";
 import { foldToolResults } from "./agentContext/toolResults.js";
 import { discoverTools, searchTools } from "./mcp/discovery.js";
+import type { ToolImage } from "./mcp/bridge.js";
+import { resolveCapability } from "./modelCaps.js";
 import type { RolloutInput } from "./rollout/types.js";
 
 /**
@@ -138,7 +146,7 @@ export interface ToolBridge {
   execute: (
     call: { name: string; arguments: string },
     opts?: { signal?: AbortSignal },
-  ) => Promise<{ text: string; ok: boolean; sources?: ToolSource[] }>;
+  ) => Promise<{ text: string; ok: boolean; sources?: ToolSource[]; images?: ToolImage[] }>;
   /**
    * 工具的风险元数据（可选）：闸门用它判断该调用该不该问用户。
    *
@@ -341,6 +349,17 @@ export interface TriggerDeps {
  * Anthropic 的 `prompt is too long`、网关转写的 `context_length_exceeded` 等。
  */
 const CONTEXT_OVERFLOW_RE = /context length|context_length|maximum context|too long|reduce the length/i;
+
+/**
+ * 严格 400 里另一类「重发就有救」的：工具调用配对破了。
+ *
+ * 本地组装的请求有个已知风险——预算/摘要切点落在 `assistant(tool_calls)` 与其
+ * `role:"tool"` 结果之间，会切出孤儿工具消息，供应商直接 400
+ * （`messages with role 'tool' must be a response to a preceding message with 'tool_calls'`）。
+ * 这类错误用更紧的历史重试一次是能救回来的（切点更靠后，配对自然完整），
+ * 所以和超限一样纳入重试判定；只是「历史没变短的重试」照样没意义（见 prepareHistory 的强制收缩）。
+ */
+const TOOL_PAIRING_400_RE = /tool_call|tool_calls|tool message|role '?tool'?|corresponding/i;
 /** 收紧重试次数上限：首次之外再试 2 次（aggressive 1 → 2），不无限重试。 */
 const MAX_CONTEXT_RETRIES = 2;
 
@@ -351,7 +370,8 @@ const MAX_CONTEXT_RETRIES = 2;
 function isContextOverflow(err: Error | null | undefined, aborted: boolean): boolean {
   if (aborted || err?.name === "AbortError") return false;
   const message = String(err?.message ?? "");
-  return message.includes("400") && CONTEXT_OVERFLOW_RE.test(message);
+  if (!message.includes("400")) return false;
+  return CONTEXT_OVERFLOW_RE.test(message) || TOOL_PAIRING_400_RE.test(message);
 }
 
 /**
@@ -625,24 +645,36 @@ export function runAgentMentions(
          */
         const attempts: RouteAttempt[] = [];
         /**
+         * 历史准备结果按 aggressive 级别缓存（P2-6）：工具轮每轮都要重新组装 messages，
+         * 但**一次 run 内历史不会变**——每轮都调 `prepareHistory` 会在 12 轮工具循环里
+         * 反复压同一份历史、反复调用摘要模型（白花 token 与延迟）。溢出重试换了级别
+         * 才是真的需要重新切分，所以 key 取 `aggressive ?? 0`。
+         */
+        const historyCache = new Map<number, ChatMessage[]>();
+        /**
          * 组装一次尝试的 messages（设计 §4）：系统提示词 → 准备好的历史 → 本条 user 轮。
-         * 历史每次都重新走 `prepareHistory`（溢出重试据此用收紧后的预算重切分并重新前置系统提示词）；
-         * 缺省或抛错 → 原样 history（与加预算之前完全一致，绝不阻断生成）。
+         * 历史按 aggressive 级别缓存（见上）；缺省或抛错 → 原样 history
+         * （与加预算之前完全一致，绝不阻断生成）。
          */
         const messagesFor = async (
           aggressive?: 1 | 2,
           extra: ChatMessage[] = [],
         ): Promise<ChatMessage[]> => {
-          let rows: ChatMessage[] = historyWithFork;
-          if (deps.prepareHistory) {
-            try {
-              rows =
-                aggressive === undefined
-                  ? await deps.prepareHistory(historyWithFork, m.agentId)
-                  : await deps.prepareHistory(historyWithFork, m.agentId, { aggressive });
-            } catch {
-              rows = historyWithFork; // 压缩失败不阻断生成：回落原样历史
+          const cacheKey = aggressive ?? 0;
+          let rows = historyCache.get(cacheKey);
+          if (!rows) {
+            rows = historyWithFork;
+            if (deps.prepareHistory) {
+              try {
+                rows =
+                  aggressive === undefined
+                    ? await deps.prepareHistory(historyWithFork, m.agentId)
+                    : await deps.prepareHistory(historyWithFork, m.agentId, { aggressive });
+              } catch {
+                rows = historyWithFork; // 压缩失败不阻断生成：回落原样历史
+              }
             }
+            historyCache.set(cacheKey, rows);
           }
           /** 本轮 user 行：触发端可附文档文本与图片内容片；缺省/抛错回落纯文本行。 */
           let userTurn: ChatMessage = { role: "user", content: userText };
@@ -734,6 +766,19 @@ export function runAgentMentions(
             });
           });
         };
+
+        /**
+         * 已执行工具的结果缓存，跨「溢出重试」复用，键是 `call.id`。
+         *
+         * 为什么必须有：`MAX_CONTEXT_RETRIES` 的两次重试是从 round 0 重跑 `once()`，
+         * 而模型会重复给出同一批 tool_calls（同样的 id）。没有这层缓存，一次超限
+         * 就会把写操作（发消息、改文件、点按钮）再执行一遍，而且用户还得再点一次确认。
+         * 这里缓存的是 Promise：同一轮里重复 id 也不会并发执行两次。
+         */
+        const executed = new Map<
+          string,
+          Promise<{ text: string; ok: boolean; sources?: ToolSource[] }>
+        >();
 
         /**
          * 一次尝试。只有第 1 次尝试上行 chunk / onLocalDelta——重试若重复上行，
@@ -943,7 +988,8 @@ export function runAgentMentions(
             if (calls.length > searchIndexes.size) {
               const targets = calls
                 .map((call, index) => ({ call, index }))
-                .filter(({ index }) => !searchIndexes.has(index));
+                // 重试时已执行过的调用不再打扰用户：结果直接复用（见 executed）。
+                .filter(({ call, index }) => !searchIndexes.has(index) && !executed.has(call.id));
               const decided = await confirmToolCalls(
                 deps,
                 targets.map((t) => t.call),
@@ -966,31 +1012,46 @@ export function runAgentMentions(
              * 缺省按 `write` 处理，与闸门的默认口径同源（认不出来就当会改状态）。
              */
             const riskOf = (name: string) => bridge?.meta?.(name)?.risk ?? "write";
-            const settled: ({ text: string; ok: boolean; sources?: ToolSource[] } | undefined)[] =
+            const settled: (
+              | { text: string; ok: boolean; sources?: ToolSource[]; images?: ToolImage[] }
+              | undefined
+            )[] =
               new Array(calls.length);
             const runOne = async (call: ToolCall, i: number) => {
               if (searchIndexes.has(i)) return runToolSearch(call);
-              const outcome = outcomes?.[i];
-              if (outcome?.kind === "deny") {
-                // 被拒：回一段明确声明「未修改」的文案，让模型知道这次没落地。
-                // ok=false 也会让轨迹显示成失败态，UI 另行标「已拒绝」。
-                //
-                // 文案按原因分流：闸门异常 / 命中记住的规则 / 用户当场拒绝，
-                // 三者对模型的含义不同，尤其异常不能被说成「用户拒绝了」。
-                const text =
-                  outcome.cause === "gate"
-                    ? notExecutedText(outcome.call, outcome.reason)
-                    : outcome.cause === "rule"
-                      ? ruleDeniedText(outcome.call, outcome.reason)
-                      : deniedText(outcome.call, outcome.reason);
-                return { text, ok: false };
-              }
-              return bridge!.execute(
-                { name: call.function.name, arguments: call.function.arguments },
-                // 中断信号透传：用户点中断后，在途的 HTTP 请求立刻收手；
-                // stdio 侧只能「不再等」，返回文案会说明子进程可能仍在运行。
-                { signal: controller.signal },
-              );
+              // 溢出重试会从 round 0 重跑：同一个 call.id 只执行一次，结果原样复用。
+              const cached = executed.get(call.id);
+              if (cached) return cached;
+              const job = (async (): Promise<{
+                text: string;
+                ok: boolean;
+                sources?: ToolSource[];
+                images?: ToolImage[];
+              }> => {
+                const outcome = outcomes?.[i];
+                if (outcome?.kind === "deny") {
+                  // 被拒：回一段明确声明「未修改」的文案，让模型知道这次没落地。
+                  // ok=false 也会让轨迹显示成失败态，UI 另行标「已拒绝」。
+                  //
+                  // 文案按原因分流：闸门异常 / 命中记住的规则 / 用户当场拒绝，
+                  // 三者对模型的含义不同，尤其异常不能被说成「用户拒绝了」。
+                  const text =
+                    outcome.cause === "gate"
+                      ? notExecutedText(outcome.call, outcome.reason)
+                      : outcome.cause === "rule"
+                        ? ruleDeniedText(outcome.call, outcome.reason)
+                        : deniedText(outcome.call, outcome.reason);
+                  return { text, ok: false };
+                }
+                return bridge!.execute(
+                  { name: call.function.name, arguments: call.function.arguments },
+                  // 中断信号透传：用户点中断后，在途的 HTTP 请求立刻收手；
+                  // stdio 侧只能「不再等」，返回文案会说明子进程可能仍在运行。
+                  { signal: controller.signal },
+                );
+              })();
+              executed.set(call.id, job);
+              return job;
             };
             let writeChain: Promise<void> = Promise.resolve();
             await Promise.all(
@@ -1009,7 +1070,14 @@ export function runAgentMentions(
                 return chained;
               }),
             );
-            const results = settled.map((r) => r ?? { text: "", ok: false });
+            /**
+             * 兜底文案（MCP 审计 D8）：job 抛异常时 settled[i] 还是空的，
+             * 以前会回给模型一条 `content: ""` 的空工具消息——模型不知道该重试还是换路，
+             * 轨迹里也只显示一个没有原因的红叉。失败必须带原因。
+             */
+            const results = settled.map(
+              (r) => r ?? { text: "工具调用失败：执行层未返回结果（内部异常，可换一种方式重试）", ok: false },
+            );
             // 按调用顺序收集来源（不按 Promise 完成顺序），脚注顺序才可复现。
             // 被拒/失败的结果不算「引用过」——它们根本没读到内容。
             for (const result of results) {
@@ -1042,19 +1110,61 @@ export function runAgentMentions(
                 text: result.text,
               });
             });
+            /**
+             * 图片回灌（MCP 审计 D1）。
+             *
+             * 截图类工具返回的是 [text, Image(png)]。以前图片在客户端就被压成
+             * `[图片 image/png]` 一行字，模型等于没看见画面，只能猜坐标——这正是
+             * 「点了半天点错地方」的根源。
+             *
+             * OpenAI 的 `role=tool` 只能带文本，所以图片必须另起一条 user 消息；
+             * 模型不看图时（无 vision 能力）就不发图片，改在文本里说明，
+             * 免得把几 MB base64 白塞进预算。
+             */
+            const vision = resolveCapability(profile).supportsVision;
+            const imageResults = results.filter((r) => (r.images?.length ?? 0) > 0);
             extra = [
               ...extra,
               { role: "assistant", content: roundText, tool_calls: calls },
-              ...calls.map((call, i) => ({
-                role: "tool" as const,
-                tool_call_id: call.id,
-                name: call.function.name,
-                content: results[i]?.text ?? "",
-              })),
+              ...calls.map((call, i) => {
+                const result = results[i];
+                const hasImages = (result?.images?.length ?? 0) > 0;
+                const note =
+                  hasImages && !vision
+                    ? `\n（本次返回了 ${result!.images!.length} 张图片，但当前模型不支持读图，已省略）`
+                    : "";
+                return {
+                  role: "tool" as const,
+                  tool_call_id: call.id,
+                  name: call.function.name,
+                  content: (result?.text ?? "") + note,
+                };
+              }),
             ];
+            if (vision && imageResults.length > 0) {
+              const parts: ContentPart[] = [];
+              const labels: string[] = [];
+              for (const result of imageResults) {
+                const call = calls[results.indexOf(result)];
+                labels.push(call ? call.function.name : "工具");
+              }
+              parts.push({
+                type: "text",
+                text: `以下是工具（${[...new Set(labels)].join("、")}）返回的图片，请直接看图判断，不要凭占位文字猜内容。`,
+              });
+              for (const result of imageResults) {
+                for (const image of result.images ?? []) {
+                  parts.push({ type: "image", mime: image.mimeType, data: image.data });
+                }
+              }
+              extra.push({ role: "user", content: "（工具返回的图片）", contentParts: parts });
+            }
             // 累计回灌量，供下一轮的预算收口判断（见 MAX_TURN_TOOL_TOKENS）
             toolTokens += calls.reduce(
-              (sum, _call, i) => sum + estimateTokens(results[i]?.text ?? ""),
+              (sum, _call, i) =>
+                sum +
+                estimateTokens(results[i]?.text ?? "") +
+                (results[i]?.images?.length ?? 0) * 800,
               0,
             );
           }
@@ -1120,10 +1230,15 @@ export function runAgentMentions(
           // finish-partial：服务端拒空文本（F2），partial 为空则只报 error；
           // 文本优先取「已上行」的累积（与接收端所见一致），重试一字未上行时回落本次尝试的本地累积；
           // 加密失败时 sendFinish 返回 false——仍走下方 error 收口（明文不外发）
-          // acc = 已上行（用户看得到）；local = 本次尝试的本地累积（含未上行的重试轮）；
-          // buffered = 工具轮里收到但还没上行的字——中断时它既不在 acc 也不在 local 里，
-          // 不兜底就会丢掉模型已经吐出的内容。
-          const partial = acc || local || buffered;
+          // acc = 已上行（用户看得到）；local = 本次尝试的本地累积（含未上行的重试轮）。
+          //
+          // 工具轮的中间话术（buffered，例如「我这就去查」）**不能**直接当最终答案落库：
+          // 它不是这一轮的结论，落下去会让气泡看起来「答完了」，下一轮还把它当已完成的回答。
+          // 只有在完全没有答案、且用户确实看到过这段过程说明时，才带着「过程说明」的标注兜底。
+          const answer = acc || local;
+          const partial =
+            answer ||
+            (buffered ? `${buffered}\n\n（本轮工具调用未完成，以上是中断前的过程说明，不是最终答案。）` : "");
           // 中断判定同时看错误名与两个标志：controller.abort() 在部分适配器里
           // 被包装成普通 Error，只看 name 会把用户主动中断记成失败。
           const abortedRun = err.name === "AbortError" || aborted || controller.signal.aborted;

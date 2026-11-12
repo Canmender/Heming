@@ -75,6 +75,11 @@ describe("autoConnectAll：自动连接编排", () => {
     expect(good).toBeDefined();
     expect(bad).toBeDefined();
     expect(bad!.ok).toBe(false);
+    // 失败必须留下状态痕迹（MCP 审计 D3）：界面据此显示「连接失败」而不是「已连接」
+    const status = registry.status("bad");
+    expect(status?.state).toBe("error");
+    expect(status?.error).toBeTruthy();
+    expect(registry.status("ok")?.state ?? "connected").toBeDefined();
   });
 
   it("结果里带 serverId 与名字，界面可直接展示", async () => {

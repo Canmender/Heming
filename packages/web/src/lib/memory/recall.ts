@@ -386,7 +386,19 @@ function readVaultEntries(store: MemoryStore, options?: VaultRecallOptions): Sem
  */
 export function recallMemory(
   store: MemoryStore,
-  input: { agentId: string; conversationId: string; query: string },
+  input: {
+    agentId: string;
+    conversationId: string;
+    query: string;
+    /**
+     * 智能体级记忆偏好（`agentPrefs.ts`）。**缺省视为全开**，老调用方形状不变。
+     *
+     * ★ 以前召回只看记忆总开关 `settings.enabled`：用户在「记忆」页把某个智能体的
+     * 长期记忆关掉之后，语义/情景记忆**照样注入**——开关是摆设，用户还以为它生效了。
+     * 现在按层收口：长期关 → 不召回语义/情景；短期关 → 不召回会话内工作记忆。
+     */
+    prefs?: { shortTerm?: boolean; longTerm?: boolean };
+  },
   usage: UsageView = NEUTRAL_USAGE,
   vaultOptions?: VaultRecallOptions,
 ): {
@@ -408,13 +420,20 @@ export function recallMemory(
     const queryTokens = tokenize(input.query ?? "");
     // 知识库指针条目单独排序：它们不参与「同主题键时效覆盖」，也不占普通语义记忆名额。
     const allSemantic = store.semantic(input.agentId);
-    const semantic = rankSemantic(
-      allSemantic.filter((entry) => entry.source !== "vault"),
-      queryTokens,
-      nowMs,
-      usage,
-    );
-    const episodic = rankEpisodic(store.episodic(input.agentId), queryTokens, nowMs, usage);
+    // 偏好收口：长期记忆关掉 → 语义/情景一层都不取（不是「取了不注入」，是压根不查）。
+    const longTermOn = input.prefs?.longTerm ?? true;
+    const shortTermOn = input.prefs?.shortTerm ?? true;
+    const semantic = longTermOn
+      ? rankSemantic(
+          allSemantic.filter((entry) => entry.source !== "vault"),
+          queryTokens,
+          nowMs,
+          usage,
+        )
+      : { picked: [] as SemanticEntry[], scores: {} as Record<string, number>, boosts: {} as Record<string, number>, superseded: [] as SupersededInfo[] };
+    const episodic = longTermOn
+      ? rankEpisodic(store.episodic(input.agentId), queryTokens, nowMs, usage)
+      : { picked: [] as EpisodicEntry[], scores: {} as Record<string, number>, boosts: {} as Record<string, number> };
 
     const vaultAll = readVaultEntries(store, vaultOptions);
     const vaultEnabled = vaultOptions?.enabled ?? settings.vaultMemory !== false;
@@ -431,7 +450,7 @@ export function recallMemory(
     return {
       semantic: [...semantic.picked, ...rankedVault.picked],
       episodic: episodic.picked,
-      working: store.working(input.conversationId, input.agentId).slice(-WORKING_TOP),
+      working: shortTermOn ? store.working(input.conversationId, input.agentId).slice(-WORKING_TOP) : [],
       scores: { ...semantic.scores, ...episodic.scores, ...rankedVault.scores },
       boosts: { ...semantic.boosts, ...episodic.boosts, ...rankedVault.boosts },
       superseded: semantic.superseded,

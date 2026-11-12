@@ -630,3 +630,51 @@ describe("个性化加权（d.28）", () => {
     expect(summarizeInjection({ semantic: [] }).observability.boosts).toEqual({});
   });
 });
+
+describe("智能体记忆偏好：读侧同样收口（不是只影响写侧）", () => {
+  const seeded = () =>
+    storeOf({
+      semantic: [semantic("s1", "称呼", "阿和")],
+      episodic: [episodic("e1", "讨论了部署端口")],
+      working: [working("w1", "部署到哪台机器", "47.92.39.184")],
+    });
+
+  it("长期记忆关掉 → 语义/情景一层都不取（工作记忆仍在）", () => {
+    const store = seeded();
+    const out = recallMemory(
+      store,
+      {
+        agentId: "agent-1",
+        conversationId: "conv-1",
+        query: "部署",
+        prefs: { shortTerm: true, longTerm: false },
+      },
+    );
+    expect(out.semantic).toEqual([]);
+    expect(out.episodic).toEqual([]);
+    expect(out.working.map((w) => w.id)).toEqual(["w1"]);
+  });
+
+  it("短期记忆关掉 → 不取会话内工作记忆（长期层照旧）", () => {
+    const store = seeded();
+    const out = recallMemory(
+      store,
+      {
+        agentId: "agent-1",
+        conversationId: "conv-1",
+        query: "部署",
+        prefs: { shortTerm: false, longTerm: true },
+      },
+    );
+    expect(out.working).toEqual([]);
+    expect(out.episodic.map((e) => e.id)).toEqual(["e1"]);
+  });
+
+  it("不传 prefs → 旧行为（全取），老调用方形状不变", () => {
+    const store = seeded();
+    const out = recallMemory(store, { agentId: "agent-1", conversationId: "conv-1", query: "称呼" });
+    expect(out.semantic.length).toBeGreaterThan(0);
+    // 工作记忆不看查询命中：这一轮本来就该带上会话上下文
+    expect(out.working.length).toBeGreaterThan(0);
+  });
+});
