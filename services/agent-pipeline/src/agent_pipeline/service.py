@@ -55,6 +55,12 @@ class ApproveRequest(BaseModel):
     approved: bool = True
 
 
+class RollbackRequest(BaseModel):
+    """人工回滚：给 ``version_id`` 就切到那个历史版本；不给就只归档当前灰度。"""
+
+    version_id: int | None = None
+
+
 def create_app(settings: Settings | None = None, runtime: Runtime | None = None) -> FastAPI:
     if runtime is not None:
         # 注入 runtime 时（测试、嵌入别处）必须沿用它自己的 Settings，
@@ -254,13 +260,19 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         }
 
     @app.post("/v1/config/rollback")
-    def rollback() -> dict[str, Any]:
+    def rollback(body: RollbackRequest | None = None) -> dict[str, Any]:
         store = runtime.config_store
         if store is None:
             raise HTTPException(status_code=409, detail="没有配置存储")
+        if body is not None and body.version_id is not None:
+            activated = store.activate(body.version_id)
+            if activated is None:
+                raise HTTPException(status_code=404, detail=f"没有这个配置版本：{body.version_id}")
+            runtime.metrics.record_rollback("manual")
+            return {"ok": True, "active": activated.id, "reason": "activate"}
         active = store.rollback("manual")
         runtime.metrics.record_rollback("manual")
-        return {"ok": True, "active": active.id if active else None}
+        return {"ok": True, "active": active.id if active else None, "reason": "canary"}
 
     @app.post("/v1/config/promote")
     def promote() -> dict[str, Any]:

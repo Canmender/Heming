@@ -121,12 +121,31 @@ class ConfigStore:
         return self.active()
 
     def rollback(self, reason: str = "manual") -> Version | None:
-        """把 canary 归档，active 保持不变（幂等：没有 canary 时什么都不做）。"""
+        """把 canary 归档，active 保持不变（幂等：没有 canary 时什么都不做）。
+
+        需要「退回某个具体历史版本」时用 :meth:`activate`——因为单凭 rollback 无法
+        区分「回滚灰度」与「人工后悔上一次 promote」，来回点会把 active 弹回去。
+        """
         with self._lock:
             canary = self.canary()
             if canary is None:
                 return self.active()
             self._set_stage(canary.id, STAGE_ARCHIVED)
+            self._conn.commit()
+        return self.active()
+
+    def activate(self, version_id: int) -> Version | None:
+        """把指定历史版本重新设为 active（其余 active/canary 归档）；不存在返回 None。"""
+        with self._lock:
+            version = self.get(version_id)
+            if version is None:
+                return None
+            canary = self.canary()
+            if canary is not None and canary.id != version.id:
+                # 人工切版本时灰度必须一起收掉：否则同一时刻有两套配置在跑，
+                # 「我明明切回去了怎么还是新提示词」就是这种状态。
+                self._set_stage(canary.id, STAGE_ARCHIVED)
+            self._set_stage(version.id, STAGE_ACTIVE)
             self._conn.commit()
         return self.active()
 

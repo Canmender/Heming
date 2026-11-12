@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_pipeline.rollback import STAGE_ACTIVE, STAGE_CANARY, ConfigStore
+from agent_pipeline.rollback import STAGE_ACTIVE, STAGE_ARCHIVED, STAGE_CANARY, ConfigStore
 
 
 def test_register_promotes_to_active() -> None:
@@ -141,4 +141,33 @@ def test_outcome_limit_zero_means_no_prune(tmp_path):
     for _ in range(7):
         store.record_outcome(version.id, ok=True, latency_s=0.2)
     assert store.outcome_count() == 7
+    store.close()
+
+
+def test_activate_switches_to_a_specific_history_version(tmp_path):
+    """人工回滚必须能指到具体版本：只靠 rollback 无法区分「撤销灰度」与「后悔 promote」。"""
+    store = ConfigStore(tmp_path / "c.db")
+    first = store.register({"prompts": {"plan": "第一版"}}, promote=True)
+    second = store.register({"prompts": {"plan": "第二版"}}, promote=True)
+
+    assert store.active().id == second.id
+    activated = store.activate(first.id)
+
+    assert activated is not None and activated.id == first.id
+    assert store.get(second.id).stage == STAGE_ARCHIVED, "切换后旧 active 必须归档，不能有两个 active"
+    assert store.activate(9999) is None
+    assert len([v for v in store.history(10) if v.stage == STAGE_ACTIVE]) == 1
+    store.close()
+
+
+def test_activate_archives_canary_too(tmp_path):
+    store = ConfigStore(tmp_path / "c.db")
+    first = store.register({"prompts": {"plan": "第一版"}}, promote=True)
+    candidate = store.register({"prompts": {"plan": "候选"}}, promote=False)
+    store._set_stage(candidate.id, STAGE_CANARY)
+
+    store.activate(first.id)
+
+    assert store.canary() is None, "人工切版本后灰度不能继续跑，否则同一时刻两套配置"
+    assert store.active().id == first.id
     store.close()

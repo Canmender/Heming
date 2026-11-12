@@ -81,7 +81,7 @@ AGENT_TUNE_ENABLED=1 .venv/Scripts/python.exe -m agent_pipeline.runner serve --p
 | POST | `/v1/runs/{id}/approve` | HITL 审批（需 `AGENT_APPROVAL_MODE=write`；body `{call_id?, approved}`，没有待审批返回 409） |
 | GET | `/v1/config` | 当前 active/canary 配置与历史 |
 | POST | `/v1/config/promote` | 把 canary 提升为 active |
-| POST | `/v1/config/rollback` | 手动回滚（幂等） |
+| POST | `/v1/config/rollback` | 手动回滚；body 里给 `version_id` 就切到那个历史版本，不给就只归档当前灰度 |
 | POST | `/v1/tune` | 基于日志生成候选配置（可选 evaluator 决定是否上灰度） |
 | GET | `/v1/tools` | 已注册工具与 schema |
 | POST | `/v1/knowledge` | 往知识库写一份文档 `{doc_id, text, title?}`（同 id 整体替换，返回切块数与统计） |
@@ -190,6 +190,8 @@ curl -s -X POST http://localhost:8000/v1/runs/$ID/approve \
 - 指标：`pipeline_runs_total{status}`、`pipeline_run_duration_seconds`、`pipeline_node_duration_seconds{node}`、`pipeline_tool_calls_total{tool,status}`、`pipeline_llm_tokens_total{kind}`、`pipeline_coverage_ratio`、`pipeline_rollback_total{reason}`、`pipeline_config_version`。
 - 每次 run 结束写一行 JSON 到 `runs.jsonl`，字段含 `status/stop_reason/llm_calls/tokens/coverage/replans/steps_executed/adversarial_round/adversarial_passed/plan/observations`——`tune` 和回滚窗口都只读这份日志。
 - 灰度：`/v1/tune` 产出候选配置 → 注册为 canary（按 `run_id` 哈希分流）→ 窗口内错误率或 P95 超阈值自动回滚到 active（`ConfigStore.maybe_rollback`）。
+- **人工回滚要指得到版本**：`POST /v1/config/rollback` 不带参数时只归档当前灰度（幂等，自动回滚走的就是这条）；`{"version_id": 7}` 则把 7 号版本切回 active，同时归档当前 active 与灰度。只给「归档灰度」的话，`promote` 之后发现新版本有问题就没有撤销入口——只能改库。`GET /v1/config` 的 `history` 就是可选版本清单（含 id/stage）。
+- 两个「不可变性」约束：任意时刻**最多一个** active、最多一个 canary；`activate` 会同时收掉灰度，避免「我明明切回去了怎么还是新提示词」。
 
 ## 容器化
 
