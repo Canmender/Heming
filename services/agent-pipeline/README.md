@@ -95,6 +95,7 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_PIPELINE_DB` | `agent-pipeline.db` | 记忆 + 配置版本 SQLite |
 | `AGENT_MAX_EPISODES` | `5000` | 情景记忆上限（超限删最旧；0 = 不限制） |
 | `AGENT_MAX_DOCUMENTS` | `2000` | 知识库文档上限（超限删最旧并连带删块） |
+| `AGENT_MAX_EPISODE_AGE_DAYS` | `0` | 情景记忆按天数过期（0＝不按时间淘汰，只受条数上限约束） |
 | `AGENT_CANARY_RATIO` | `0.1` | 灰度比例（按 run_id 稳定分桶） |
 | `AGENT_MAX_CONCURRENCY` | `4` | 并发上限 |
 | `AGENT_ERROR_THRESHOLD` | `0.2` | 自动回滚错误率阈值 |
@@ -195,6 +196,13 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 - **覆盖率命令坏掉不硬撑**：`coverage_runner` 抛异常或拿不到数字时，`coverage=None`；连续两轮都拿不到就写 `stop_reason="coverage_command_failed"` 并转 summarize，不再空转到 `max_adversarial_rounds`（配置调大也不会白烧钱）。
 - **轮数用尽如实收口**：最后一轮仍未达标时 `stop_reason="coverage_gap"`，`adversarial_passed=False`，不会把 0.4 的覆盖率说成通过。
 - **「评审不过 → 重规划」在节点里生效**：`critic_node` 重置计划并累加 `replans`（用尽后写 `stop_reason="critic_blocked"`）。以前这些改动写在 LangGraph 的条件边里，边对 state 的修改不保证进图状态，等于每次都拿同一份计划重跑。
+
+## 记忆淘汰口径
+
+- **容量硬上限**：情景记忆 `AGENT_MAX_EPISODES`（默认 5000）、文档 `AGENT_MAX_DOCUMENTS`（默认 2000），每次写入后 `prune()` 收口，10 万次调用不会让库单调上涨。
+- **先删低重要性、再比新旧**：超容量时按 `importance DESC, created_at DESC` 保留，老的「反复验证过的教训」（importance 高）不会被今天的流水账挤掉。
+- **可选时间过期**：`AGENT_MAX_EPISODE_AGE_DAYS > 0` 时先按 `created_at` 删超龄记录；默认关闭——「三个月前的经验自动消失」要调用方明确开启。
+- 文档删旧时连带删 chunks（同一事务），不会留孤儿块。
 
 ## 长跑不飘（进程内状态有上限）
 
