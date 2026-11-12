@@ -3,9 +3,10 @@
 /**
  * 界面插件渲染面的**唯一**桥（规格 §3.4；d.124 §5.2 扩展为「页面视图」共用）。
  *
- * 两个宿主场景共用这一份 preload：
+ * 三个宿主场景共用这一份 preload：
  * - widget 窗口（`widget://<id>/…` 的独立透明窗，可拖拽/穿透/托盘）；
- * - 页面视图（d.124 B 路径：主窗内容区里的 `WebContentsView`，只占一块矩形）。
+ * - 页面视图（d.124 B 路径：主窗内容区里的 `WebContentsView`，只占一块矩形）；
+ * - 后台常驻页（沙箱 bundle 插件的 `contributions.background`，`show:false` 的隐藏窗口）。
  * 主进程建页面视图时用 `--heming-page-view` 参数标记（见 plugin-host.js 的 PAGE_VIEW_FLAG），
  * 本文件据此把**窗口几何类** API 换成明确的不支持错误——页面没有独立窗口，
  * 静默 no-op 会让插件作者以为「拖拽/穿透生效了」。
@@ -29,10 +30,19 @@ const { contextBridge, ipcRenderer } = require("electron");
 /** 页面视图标记参数（与 plugin-host.js 的 PAGE_VIEW_FLAG 是同一字面量，改一处必须改两处）。 */
 const PAGE_VIEW_FLAG = "--heming-page-view";
 
+/**
+ * 后台常驻页标记参数（与 plugin-host.js 的 BACKGROUND_FLAG 是同一字面量）。
+ *
+ * 后台页是 `show:false` 的隐藏窗口：它有自己的 webContents，但用户看不见、也拖不动。
+ * 语义上与页面视图一样属于「没有窗口的渲染面」，所以复用同一套 unsupported 处理。
+ */
+const BACKGROUND_FLAG = "--heming-widget-mode=background";
+
 /** 当前 preload 是否跑在页面视图里（sandbox preload 里 process.argv 只读可用）。 */
 const PAGE_VIEW_MODE = (() => {
   try {
-    return Array.isArray(process.argv) && process.argv.includes(PAGE_VIEW_FLAG);
+    if (!Array.isArray(process.argv)) return false;
+    return process.argv.includes(PAGE_VIEW_FLAG) || process.argv.includes(BACKGROUND_FLAG);
   } catch {
     return false;
   }
@@ -184,4 +194,34 @@ contextBridge.exposeInMainWorld("__heming_widget", {
 
   /** 插件自己的日志（主进程统一加前缀，限长 500）。 */
   log: (line) => ipcRenderer.send("widget:log", typeof line === "string" ? line : String(line ?? "")),
+
+  /* ── 沙箱 bundle 插件的新能力（首页卡片 / 后台常驻页 / 通知 / 信息中枢） ── */
+  /**
+   * 调用信息中枢（`widget:infohub-call`，invoke）。
+   *
+   * ★ 声明制：只有清单 `permissions.infohub === true` 的插件能调；未声明时主进程 reject。
+   * ★ 方法白名单在宿主（只读查询 + 同步，没有 shutdown），参数/返回值都必须是 JSON。
+   * ★ 长任务（采集/归档）显式传 `{ timeoutMs }`：默认 60s，上限 30 分钟。
+   */
+  infohubCall: (method, params, options) =>
+    ipcRenderer.invoke("widget:infohub-call", {
+      method,
+      params,
+      timeoutMs: options && typeof options === "object" ? options.timeoutMs : undefined,
+    }),
+  /**
+   * 弹一条插件通知（`widget:notify`，invoke）：`{ title, body?, level?: "info"|"warn"|"error" }`。
+   *
+   * ★ 声明制：需要清单 `permissions.notify === true`；未声明时 reject。
+   * ★ 主窗在就进主窗通知中心，主窗不在才退回系统通知（由宿主决定，插件不用关心）。
+   */
+  notify: (payload) => ipcRenderer.invoke("widget:notify", payload),
+  /**
+   * 更新自己的一张首页卡片（`widget:homecard-set`，invoke）：`(cardId, { text?, detail?, badge? })`。
+   *
+   * ★ cardId 必须是清单 `contributions.homeCards` 里声明过的；未声明时 reject。
+   * ★ 只允许改展示文案三字段，id/title/icon 由清单（安装验签）固定。
+   * ★ 写盘后宿主广播给主窗，首页即时更新；单卡 2KB、单字段 200 字上限。
+   */
+  homeCardSet: (cardId, patch) => ipcRenderer.invoke("widget:homecard-set", { cardId, patch }),
 });

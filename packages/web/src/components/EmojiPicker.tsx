@@ -12,7 +12,7 @@ const EMOJIS = [
 
 export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
   return (
-    <div className="absolute bottom-full left-12 z-40 mb-1 grid w-[220px] grid-cols-8 gap-1 rounded-xl border border-[#ececec] bg-white p-2 shadow-card">
+    <div className="absolute bottom-full left-12 z-40 mb-1 grid w-[220px] grid-cols-8 gap-1 rounded-xl border border-line bg-[var(--surface)] p-2 shadow-card">
       {EMOJIS.map((e) => (
         <button
           key={e}

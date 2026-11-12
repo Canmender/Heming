@@ -72,6 +72,9 @@ export function canonicalJsonText(value: unknown): string {
  * 对象键顺序、空白与末尾换行都不影响结果（安装弹窗粘贴同一份清单的不同排版 = 同一指纹）。
  */
 export function canonicalManifestText(manifest: PluginManifest): string {
+  // d.125：归一化清单恒带 `homeCards: []`，空数组 / 缺省的 background 不代表内容，
+  // 不该进内容指纹——否则升级后所有已装插件都会被判「内容变了」而假告警。
+  const { homeCards, background, ...restContributions } = manifest.contributions;
   return canonicalJsonText({
     id: manifest.id,
     version: manifest.version,
@@ -79,7 +82,11 @@ export function canonicalManifestText(manifest: PluginManifest): string {
     description: manifest.description,
     author: manifest.author,
     permissions: manifest.permissions,
-    contributions: manifest.contributions,
+    contributions: {
+      ...restContributions,
+      ...(homeCards.length > 0 ? { homeCards } : {}),
+      ...(background ? { background } : {}),
+    },
     // v5 起把 engines/meta 纳入内容指纹（否则「同版本只改 engines 或上架元数据」
     // 不会触发指纹变化，安装预览发现不了内容被改）。v1–v4 没有这两个字段，
     // canonicalJsonText 会丢弃 undefined → 旧包指纹逐字节不变（现有测试钉住了这点）。

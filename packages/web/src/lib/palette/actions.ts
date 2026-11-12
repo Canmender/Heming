@@ -12,7 +12,7 @@ export type PaletteActionId =
   | "new-agent"
   | "notifications"
   | "settings"
-  | "modules"
+  | "plugins"
   /**
    * d.113 第二轮：知识库四个动作。执行时统一切到知识库页并通过 `vaultIntent`
    * 投递动作（新建 / 日记 / 画布 / 设置），页面消费后执行——不在这里直接读写文件。
@@ -35,7 +35,7 @@ export const PALETTE_ACTIONS: PaletteAction[] = [
   {
     id: "new-task",
     label: "新建任务",
-    description: "去任务区直接填写目标即可运行",
+    description: "在对话里描述目标，交给智能体带工具执行",
     keywords: ["任务", "派活", "运行", "task"],
   },
   {
@@ -57,11 +57,11 @@ export const PALETTE_ACTIONS: PaletteAction[] = [
     keywords: ["设置", "偏好", "配置", "settings"],
   },
   {
-    id: "modules",
-    // 模块已并入插件页：这里给一个直达入口（插件 Tab），可一键安装/启停内置插件。
-    label: "插件与模块",
-    description: "安装、删除或启停内置插件：幕僚、信息中枢、自动化",
-    keywords: ["模块", "内置模块", "模块管理", "插件", "安装", "module", "modules", "plugin"],
+    id: "plugins",
+    // 唯一的能力安装入口：插件 Tab（安装/启停/删除都在那里）。
+    label: "插件管理",
+    description: "安装、删除或启停插件：自动化、信息中枢、技能与页面",
+    keywords: ["插件", "插件管理", "安装", "启停", "删除", "plugin", "plugins"],
   },
   {
     id: "vault-new-note",

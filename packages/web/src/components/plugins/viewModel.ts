@@ -97,6 +97,10 @@ export interface PluginPermissionView {
   accepted: boolean;
   /** v1/v2 旧包：归一化时补的权限，界面要明说「未声明」。 */
   legacy: boolean;
+  /** d.125：是否允许经 widget 桥调用 infohub（本机归档读写）。 */
+  infohub: boolean;
+  /** d.125：是否允许经 widget 桥发桌面通知。 */
+  notify: boolean;
 }
 
 const CEILING_LABEL: Record<PluginPermissionView["ceiling"], string> = {
@@ -123,6 +127,9 @@ export function permissionViewOf(manifest: PluginManifest): PluginPermissionView
     files: report.files,
     accepted: report.accepted,
     legacy: manifest.schemaVersion < 3,
+    // d.125：widget 桥两域；旧清单归一化后是 false（而不是缺字段），这里按 true 才放行。
+    infohub: manifest.permissions.infohub === true,
+    notify: manifest.permissions.notify === true,
   };
 }
 

@@ -97,14 +97,14 @@ describe("palette · 设置分区与动作目录", () => {
       "new-agent",
       "notifications",
       "settings",
-      "modules",
+      "plugins",
       "vault-new-note",
       "vault-daily",
       "vault-new-canvas",
       "vault-settings",
     ]);
     expect(findPaletteAction("new-task")?.label).toBe("新建任务");
-    expect(findPaletteAction("modules")?.label).toBe("插件与模块");
+    expect(findPaletteAction("plugins")?.label).toBe("插件管理");
     expect(findPaletteAction("vault-daily")?.label).toBe("打开今天的日记");
     expect(findPaletteAction("nope")).toBeUndefined();
   });

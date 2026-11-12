@@ -424,7 +424,7 @@ describe("设置区 · 导航顺序（含已装插件页面，d.124）", () => {
     pluginStore.remove("acme.collector");
   });
 
-  it("在 8 项与模块页之后追加已装插件页面，只读展示且标明固定末位", () => {
+  it("在 8 项导航之后追加已装插件页面，只读展示且标明固定末位", () => {
     pluginStore.install(JSON.stringify(pageManifest));
     render(<SettingsPage />);
     goTab("导航");
@@ -435,7 +435,7 @@ describe("设置区 · 导航顺序（含已装插件页面，d.124）", () => {
     expect(labels[7]).toContain("设置");
     expect(labels[8]).toContain("采集桥");
     expect(labels[8]).toContain("插件页面 · 固定末位");
-    expect(region.textContent).toContain("带页面的插件会自动追加在最下面");
+    expect(region.textContent).toContain("带页面的插件（信息中枢、自动化等）会自动追加在最下面");
   });
 });
 
@@ -777,7 +777,7 @@ describe("设置区布局（d.62-B）", () => {
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveClass("ui-page-title");
-    expect(headings[0]).toHaveTextContent("设置区");
+    expect(headings[0]).toHaveTextContent("设置");
     expect(document.querySelector(".ui-page-sub")?.textContent).toContain("不用重启");
     // 内容列 760 且水平居中：宽屏下不再贴左留出半屏空白
     const column = document.querySelector('[class*="max-w-[760px]"]');

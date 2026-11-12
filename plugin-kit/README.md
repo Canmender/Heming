@@ -22,7 +22,7 @@ pnpm plugin:check                             # CI 口径：构建 + 校验 + sc
 
 | 你想…… | 看这里 |
 |---|---|
-| 看/改真实插件源码 | [`plugins/`](plugins/README.md)：InfoHub 采集桥、桌宠、工作流引擎 |
+| 看/改真实插件源码 | [`plugins/`](plugins/README.md)：InfoHub 采集桥、桌宠、自动化、信息中枢、工作流引擎 |
 | 先跑起来、抄一份能用的 | [`examples/`](examples/README.md)，五份可 lint 通过的完整示例 |
 | 知道字段与语义（契约） | [`STANDARD.md`](STANDARD.md) |
 | 知道怎么做（操作标准 + 检查清单） | [`AUTHORING.md`](AUTHORING.md) |

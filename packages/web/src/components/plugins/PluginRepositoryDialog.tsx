@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ModuleCatalogEntry, PluginCatalogEntry } from "@heming/shared";
+import type { PluginCatalogEntry } from "@heming/shared";
 import {
   fetchPluginCatalog,
   type CatalogClientDeps,
 } from "../../lib/plugins/catalogClient.js";
-import { fetchModuleCatalog } from "../../lib/modules/catalogClient.js";
-import { MODULE_BY_ID, pluginGroupOf, type ModuleId } from "../../lib/modules/registry.js";
 import { useModalA11y } from "../useModalA11y.js";
 import { PackageIcon, SearchIcon, XIcon } from "../icons.js";
 import { BTN_GHOST, BTN_PRIMARY, CHIP, ERROR_TEXT, HINT } from "./shared.js";
@@ -15,30 +13,19 @@ import { EmptyState } from "../ui/EmptyState.js";
  * 「从插件仓库安装」弹窗（d.135.6）。
  *
  * 用户口径：没有「官方插件 / 更多插件」之分，**全部统称为插件**。
- * 这里把官方模块与声明式/界面插件合并成**一个列表**：同一个搜索框、同一个刷新、
- * 同一张卡片样式；安装时后台按来源走各自的下载/验签路径。
+ * 模块运行时下线后这里只剩一条来源：云端插件仓库里的声明式/界面插件清单。
+ * 解到本地后走各自的下载/验签路径（bundle 由主进程装，声明式进安装预览）。
  */
 
-type RepoItem =
-  | {
-      kind: "module";
-      key: string;
-      id: string;
-      name: string;
-      version: string;
-      description: string;
-      installed: boolean;
-    }
-  | {
-      kind: "plugin";
-      key: string;
-      id: string;
-      name: string;
-      version: string;
-      description: string;
-      entry: PluginCatalogEntry;
-      installed: boolean;
-    };
+type RepoItem = {
+  key: string;
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  entry: PluginCatalogEntry;
+  installed: boolean;
+};
 
 export function PluginRepositoryDialog({
   installed,
@@ -47,8 +34,6 @@ export function PluginRepositoryDialog({
   onClose,
   onError,
   catalog,
-  moduleInstalled,
-  onInstallModule,
 }: {
   installed: { id: string; version: string }[];
   loadingKey?: string | null;
@@ -56,12 +41,9 @@ export function PluginRepositoryDialog({
   onClose: () => void;
   onError?: (message: string) => void;
   catalog?: CatalogClientDeps;
-  moduleInstalled?: Record<string, boolean>;
-  onInstallModule?: (id: ModuleId, version: string) => Promise<void>;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalA11y(dialogRef, onClose, { active: true });
-  const [modules, setModules] = useState<ModuleCatalogEntry[] | null>(null);
   const [plugins, setPlugins] = useState<PluginCatalogEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,52 +54,32 @@ export function PluginRepositoryDialog({
     setLoading(true);
     setError(null);
     try {
-      const [moduleEntries, pluginEntries] = await Promise.all([
-        onInstallModule ? fetchModuleCatalog() : Promise.resolve([] as ModuleCatalogEntry[]),
-        fetchPluginCatalog(catalog, { distribution: "all" }),
-      ]);
-      setModules(moduleEntries);
+      const pluginEntries = await fetchPluginCatalog(catalog, { distribution: "all" });
       setPlugins(pluginEntries);
     } catch (err) {
       setError(err instanceof Error ? err.message : "插件仓库读取失败");
     } finally {
       setLoading(false);
     }
-  }, [catalog, onInstallModule]);
+  }, [catalog]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const items = useMemo<RepoItem[]>(() => {
-    const moduleItems: RepoItem[] = (modules ?? [])
-      .map((entry): RepoItem | null => {
-        const mod = MODULE_BY_ID[entry.id as ModuleId];
-        if (!mod) return null;
-        const group = pluginGroupOf(mod.id);
-        return {
-          kind: "module" as const,
-          key: `module:${entry.id}`,
-          id: entry.id,
-          name: group?.name ?? mod.name,
-          version: entry.version,
-          description: group?.description ?? mod.description,
-          installed: Boolean(moduleInstalled?.[mod.id]),
-        };
-      })
-      .filter((item): item is RepoItem => Boolean(item));
-    const pluginItems: RepoItem[] = (plugins ?? []).map((entry) => ({
-      kind: "plugin" as const,
-      key: `plugin:${entry.id}@${entry.version}`,
-      id: entry.id,
-      name: entry.name,
-      version: entry.version,
-      description: entry.description,
-      entry,
-      installed: installed.some((item) => item.id === entry.id),
-    }));
-    return [...moduleItems, ...pluginItems];
-  }, [modules, plugins, moduleInstalled, installed]);
+  const items = useMemo<RepoItem[]>(
+    () =>
+      (plugins ?? []).map((entry) => ({
+        key: `plugin:${entry.id}@${entry.version}`,
+        id: entry.id,
+        name: entry.name,
+        version: entry.version,
+        description: entry.description,
+        entry,
+        installed: installed.some((item) => item.id === entry.id),
+      })),
+    [plugins, installed],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -134,12 +96,7 @@ export function PluginRepositoryDialog({
     setBusyKey(item.key);
     setError(null);
     try {
-      if (item.kind === "module") {
-        if (!onInstallModule) throw new Error("当前环境不支持安装这个插件");
-        await onInstallModule(item.id as ModuleId, item.version);
-      } else {
-        await onLoad(item.entry);
-      }
+      await onLoad(item.entry);
     } catch (err) {
       const message = err instanceof Error ? err.message : "插件安装失败";
       setError(message);

@@ -57,7 +57,7 @@ export function PageShell({
   title,
   subtitle,
   actions,
-  width = "full",
+  width = "wide",
   scroll = true,
   className = "",
   bodyClassName = "",
@@ -83,12 +83,19 @@ export function PageShell({
       {headerExtra ? <div className="shrink-0 border-b border-line-soft">{headerExtra}</div> : null}
       {scroll ? (
         <div
-          className={`min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden ${padded ? "px-6 py-5 max-[1199px]:px-4" : ""}`}
+          className={`min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-auto ${padded ? "px-6 py-5 max-[1199px]:px-4" : ""}`}
         >
           <div className={`mx-auto w-full ${WIDTH_CLASS[width]} ${bodyClassName}`}>{children}</div>
         </div>
       ) : (
-        <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${bodyClassName}`}>{children}</div>
+        /* scroll=false（双栏/三栏页自己管滚动）此前**没有套宽度档**：传 width 也不生效，
+           于是记忆页通栏 1330px、设置页 ~720 左对齐、团队页分栏，同站三种宽度策略。
+           这里补上同一层宽度容器，并把横向溢出交给内层（见评审报告 P0-1 / P1）。 */
+        <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${bodyClassName}`}>
+          <div className={`mx-auto flex h-full min-h-0 w-full ${WIDTH_CLASS[width]} flex-col`}>
+            {children}
+          </div>
+        </div>
       )}
     </div>
   );

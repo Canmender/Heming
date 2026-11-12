@@ -16,6 +16,7 @@ import { describeSystemPlugin, pluginStore, type PluginStore } from "../lib/plug
 import { useUiStore } from "../store/ui.js";
 import { useSessionTab } from "../lib/sessionState.js";
 import { SkillHubPanel } from "./skills/SkillHubPanel.js";
+import { Switch } from "./ui/Switch.js";
 
 /**
  * 技能区：技能（四类分组）/ 技能池（全量表格）两个视图。
@@ -341,35 +342,7 @@ function SkillCreateDialog({
 
 /* ---------------------------------------------------------------- 基础件 */
 
-function Switch({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-150 ${
-        checked ? "bg-ink" : "bg-[color:var(--switch-off)]"
-      }`}
-    >
-      <span
-        style={{ backgroundColor: checked ? "var(--heming-on-accent)" : "var(--switch-knob)" }}
-        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all duration-150 ${
-          checked ? "left-[16px]" : "left-[2px]"
-        }`}
-      />
-    </button>
-  );
-}
+/* 开关已抽到 ui/Switch.tsx（d.138）：与上下文设置卡、记忆页的三份逐字节相同拷贝合并。 */
 
 function TagList({ items, empty }: { items: string[]; empty: string }) {
   if (items.length === 0) return <span className={hintCls}>{empty}</span>;

@@ -11,10 +11,6 @@ import {
   ModelIcon,
   PinIcon,
   BookIcon,
-  StaffIcon,
-  InfoHubIcon,
-  AutomationIcon,
-  WorkflowIcon,
 } from "./icons.js";
 import { DEFAULT_NAV_ORDER, useUiStore, type NavPage } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
@@ -23,8 +19,6 @@ import { ConfirmDialog } from "./ConfirmDialog.js";
 import { GlobalFocusRing } from "./a11y/GlobalFocusRing.js";
 import { hasOpenModal } from "./useModalA11y.js";
 import { NAV_HIDE_DELAY_MS, NAV_HOTZONE_PX, otherNavMode } from "../lib/navPrefs.js";
-import { useModuleStore } from "../lib/modules/store.js";
-import { withModuleNav } from "../lib/modules/nav.js";
 import { navGroupOf, needsGroupDivider } from "../lib/navGroups.js";
 import { usePluginPageEntries } from "../lib/pages/usePluginPages.js";
 import { withPluginNav } from "../lib/pages/registry.js";
@@ -35,9 +29,9 @@ import { PluginPageIcon } from "./plugins/PluginPageIcon.js";
  * 而 digit 固定绑定页本身——所以排序后 Alt+N 快捷键不变。
  *
  * **默认可视 8 项**：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置。
- * 另外还有 4 个**模块入口**（幕僚 / 信息中枢 / 自动化 / 工作流）：它们默认不出现，
- * 装好且启用后才由 `withModuleNav()` 追加到**最下面**（d.119 用户口径：上面这 8 项
- * 从上到下的顺序原样不动，模块入口不许插在中间）。模块页不占数字快捷键。
+ * 另外还有带页面的插件（信息中枢 / 自动化 / 工作流等）：它们默认不出现，
+ * 装好且启用后才由 `withPluginNav()` 追加到**最下面**（d.119 用户口径：上面这 8 项
+ * 从上到下的顺序原样不动，插件入口不许插在中间）。插件页不占数字快捷键。
  *
  * 数字键沿用既有绑定：1 主页、2 团队、5 记忆、6 设置、8 智能体、0 插件；
  * 3 / 4 原是技能区 / 接口区，合并后空着不用——不给现有页凭空换号。
@@ -48,13 +42,8 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
   { page: "team", label: "团队", icon: <TeamIcon width={17} height={17} />, digit: "2" },
   // 智能体（本机运行）：承接原「通用智能体」的任务视图
   { page: "chat", label: "智能体", icon: <AssistantIcon width={17} height={17} />, digit: "8" },
-  // 插件（能力中枢）：插件包 + 可安装的内置插件 + 技能 / 工具 / MCP / 组件
+  // 插件（能力中枢）：插件包 + 技能 / 工具 / MCP / 组件
   { page: "plugins", label: "插件", icon: <PackageIcon width={17} height={17} />, digit: "0" },
-  // 模块入口（装好才进轨，追加在导航末尾；无数字键）
-  { page: "staff", label: "幕僚", icon: <StaffIcon width={17} height={17} /> },
-  { page: "infohub", label: "信息中枢", icon: <InfoHubIcon width={17} height={17} /> },
-  { page: "automations", label: "自动化", icon: <AutomationIcon width={17} height={17} /> },
-  { page: "workflows", label: "工作流", icon: <WorkflowIcon width={17} height={17} /> },
   { page: "memory", label: "记忆", icon: <MemoryIcon width={17} height={17} />, digit: "5" },
   // 知识库：本地 vault（文件树/双链/标签/搜索/图谱），数据不出设备
   { page: "vault", label: "知识库", icon: <BookIcon width={17} height={17} /> },
@@ -64,9 +53,13 @@ const ITEMS: { page: NavPage; label: string; icon: JSX.Element; digit?: string }
 ];
 
 /** 悬停黑色胶囊浮签：淡入 + 轻微左移进入（group-hover，150ms）。 */
+/** 浮签：鼠标悬停或键盘聚焦时出现（焦点可见性，不再只服务鼠标用户）。 */
 function Tip({ label, shortcut }: { label: string; shortcut?: string }) {
   return (
-    <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-1.5 whitespace-nowrap rounded-lg bg-ink px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-card transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100">
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 flex -translate-y-1/2 translate-x-1 items-center gap-1.5 whitespace-nowrap rounded-lg bg-ink px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-card transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
+    >
       <span>{label}</span>
       {shortcut && (
         <kbd className="rounded-sm border border-current px-1 text-[10px] font-normal opacity-70">
@@ -117,8 +110,6 @@ export function NavRail({
 } = {}) {
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
-  const moduleEnabled = useModuleStore((s) => s.enabled);
-  const moduleInstalled = useModuleStore((s) => s.installed);
   /** d.124：已装插件声明的页面入口（声明式 + 界面插件由注册表统一投影）。 */
   const pluginEntries = usePluginPageEntries();
   /*
@@ -127,18 +118,11 @@ export function NavRail({
    *
    * 不再读取 `heming.navOrder.v1`：旧版允许拖拽排序，用户的存储里可能留着与固定顺序不同的
    * 旧排列（升级/换设备后表现为「顺序不对」），继续沿用会让「永远固定」落空。
-   * 已装且启用的模块页与插件页面仍追加在这 8 项之后（d.124：模块页在前、插件页在后），
-   * 不改变上面 8 项的顺序。
+   * 已装且启用的插件页面仍追加在这 8 项之后，不改变上面 8 项的顺序。
    */
-  const navOrder = withPluginNav(
-    withModuleNav([...DEFAULT_NAV_ORDER], {
-      installed: moduleInstalled,
-      enabled: moduleEnabled,
-    }),
-    pluginEntries,
-  );
+  const navOrder = withPluginNav([...DEFAULT_NAV_ORDER], pluginEntries);
   /**
-   * 导航项目录 = 固定 8 宿主页 + 4 模块页（ITEMS） + 插件页面（按清单标题/图标生成）。
+   * 导航项目录 = 固定 8 宿主页（ITEMS） + 插件页面（按清单标题/图标生成）。
    *
    * 插件页面是运行时才知道的页面，不能塞进模块级常量 ITEMS；这里用注册表投影
    * 生成，再用同一个 `find` 口径把顺序映射成可见项，避免两处各判一次「能不能进」。
@@ -265,7 +249,7 @@ export function NavRail({
   }, [auto, navOpen, closeNav]);
 
   /**
-   * 可见导航项（顺序跟 store 走、模块停用的撤下）。
+   * 可见导航项（顺序跟 store 走、不可用的插件页撤下）。
    * 抽成变量是为了让分隔线能看「上一项是谁」——内联 map 里拿不到过滤后的前一项。
    */
   const visibleItems = navOrder
@@ -306,12 +290,12 @@ export function NavRail({
         </div>
       </div>
 
-      {/* 中组：导航页（宿主页 + 已装模块入口），垂直居中（组内间距 8px；组间用一条细线分隔，见 lib/navGroups） */}
+      {/* 中组：导航页（宿主 8 页 + 已装插件的页面），垂直居中（组内间距 8px；组间用一条细线分隔，见 lib/navGroups） */}
       <div className="flex flex-1 flex-col items-center justify-center gap-2">
         {visibleItems.map((it, index) => {
           const active = page === it.page;
           const shortcut = it.digit ? `Alt${it.digit}` : "";
-          // 显示名固定在本文件（含模块入口，模块页也要能在这条轨上被点到）
+          // 显示名固定在本文件（含插件页标题，插件页也要能在这条轨上被点到）
           const label = it.label;
           // 按「工作台 / 能力 / 资料 / 系统」分组画分隔线。
           // 用可见相邻项算，所以不会出现空组或悬空线。
@@ -322,7 +306,8 @@ export function NavRail({
               <div className="group relative" data-nav-group={navGroupOf(it.page)}>
                 <button
                   type="button"
-                  aria-label={`${label}${shortcut ? ` ${shortcut}` : ""}`}
+                  aria-label={label}
+                  aria-keyshortcuts={it.digit ? `Alt+${it.digit}` : undefined}
                   aria-current={active ? "page" : undefined}
                   onClick={() => {
                     setPage(it.page);

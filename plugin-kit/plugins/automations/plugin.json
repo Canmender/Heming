@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 4,
+  "id": "heming.automations",
+  "name": "自动化",
+  "version": "1.0.0",
+  "description": "定时同步归档、重扫日程；和鸣关着时错过的点不补跑。",
+  "author": "和鸣",
+  "distribution": "bundle",
+  "permissions": {
+    "network": [],
+    "tools": "none",
+    "files": [],
+    "events": [
+      "theme"
+    ],
+    "graphics": [],
+    "eval": false,
+    "chat": false,
+    "kb": false,
+    "infohub": true,
+    "notify": true
+  },
+  "contributions": {
+    "page": {
+      "title": "自动化",
+      "icon": "calendar",
+      "summary": "定时同步归档、重扫日程；和鸣关着时错过的点不补跑。",
+      "entry": "files/index.html"
+    },
+    "background": {
+      "entry": "files/background.html"
+    },
+    "homeCards": [
+      {
+        "id": "automations",
+        "title": "自动化",
+        "summary": "下一次执行与最近一次结果",
+        "icon": "calendar",
+        "page": "plugin:heming.automations",
+        "primary": "还没有自动化任务"
+      }
+    ]
+  },
+  "publisher": {
+    "id": "heming",
+    "publicKey": "ZARHK4iibpO7Obf5SRFpt8esKip2CJz4bhuanQvrVtk"
+  },
+  "packageSha256": "caebf0650017d3ced900c7126459dbf05f4a65863ec5fd207419e019a3f40daf",
+  "signature": {
+    "alg": "ed25519",
+    "value": "8s6wzwXuCaAXJxZrirXbAzUeysVlhXnTooiqHuq0Niu1RizCH2rUc5AeC4HLSLQhYLRVWwbvyUkV8F5xcSxHAg"
+  }
+}

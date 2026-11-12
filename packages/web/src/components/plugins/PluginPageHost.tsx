@@ -15,7 +15,7 @@ import { PluginDeclarativePage } from "./PluginDeclarativePage.js";
  * 由这里收口后，App 的路由只剩「是不是插件页」一个判断。
  *
  * 入口不存在/已停用/已卸载时，本组件不渲染任何页面内容，而是把当前页拨回主页
- * （与 `App.tsx` 对模块页的 `fallbackPage` 同一口径：不渲染不该存在的页面）。
+ * （与 `App.tsx` 用 `resolvePage` 折叠旧模块页 id 的口径一致：不渲染不该存在的页面）。
  */
 export function PluginPageHost({ page }: { page: PluginPageId }): React.ReactElement | null {
   const entry = usePluginPageEntry(page);

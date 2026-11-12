@@ -243,6 +243,35 @@ export interface WidgetScaleDirection {
   dir: 1 | -1;
 }
 
+/** `infohubCall()` 的调用选项：与 `engineCall` 同一口径（默认 60s、上限 30 分钟）。 */
+export interface WidgetInfohubCallOptions {
+  timeoutMs?: number;
+}
+
+/**
+ * `notify()` 的载荷。
+ *
+ * `title` 必填；`body` 可选（空正文不进载荷）；`level` 只影响主窗通知中心的样式，
+ * 取值不在三档内时宿主按 `info` 处理（不整条丢弃）。
+ */
+export interface WidgetNotifyPayload {
+  title: string;
+  body?: string;
+  level?: "info" | "warn" | "error";
+}
+
+/**
+ * `homeCardSet()` 可覆盖的展示字段（单字段 ≤200 字，空串表示清除覆盖、回落清单值）。
+ *
+ * `id/title/icon/page` 来自清单（安装时已验签），运行期不可改——首页卡片既是导航
+ * 入口也是信任标记，不能让插件运行期把它指到别处。
+ */
+export interface WidgetHomeCardPatch {
+  text?: string;
+  detail?: string;
+  badge?: string;
+}
+
 /**
  * 宿主注入的 `window.__heming_widget` 的完整方法集（唯一事实来源是 preload）。
  *
@@ -437,6 +466,40 @@ export interface HemingWidgetApi {
    * 不要用它打印密钥或用户隐私数据（会进宿主日志）。
    */
   log(line: string): void;
+
+  /* ── 沙箱 bundle 插件：首页卡片 / 后台常驻页 / 通知 / 信息中枢 ── */
+
+  /**
+   * 调用信息中枢（`widget:infohub-call`，invoke）。
+   *
+   * ★ 声明制：需要清单 `permissions.infohub === true`，未声明时 reject。
+   * ★ 方法白名单在宿主（ping/status/conversations/messages/search/agenda/sync/
+   *   config.summary/config.detect），没有 shutdown；参数与返回值都必须是 JSON。
+   * ★ 长任务（采集、归档）显式传 `{ timeoutMs }`：默认 60s，上限 30 分钟。
+   */
+  infohubCall<T = unknown>(
+    method: string,
+    params?: unknown,
+    options?: WidgetInfohubCallOptions,
+  ): Promise<T>;
+
+  /**
+   * 弹一条插件通知（`widget:notify`，invoke）。
+   *
+   * ★ 声明制：需要清单 `permissions.notify === true`，未声明时 reject。
+   * ★ 主窗在就进主窗通知中心，主窗不在才退回系统通知——由宿主决定，插件不用关心。
+   * ★ 标题 ≤80 字、正文 ≤160 字（宿主清洗控制符并截断）。
+   */
+  notify(payload: WidgetNotifyPayload): Promise<void>;
+
+  /**
+   * 更新自己的一张首页卡片（`widget:homecard-set`，invoke）。
+   *
+   * ★ `cardId` 必须是清单 `contributions.homeCards[]` 里声明过的，未声明时 reject。
+   * ★ 只允许改 `text/detail/badge` 三个展示字段；写盘后宿主广播给主窗，首页即时刷新。
+   * ★ 单字段 ≤200 字、单卡 JSON ≤2KB；超限 reject（不静默截断）。
+   */
+  homeCardSet(cardId: string, patch: WidgetHomeCardPatch): Promise<void>;
 }
 
 /**
@@ -479,6 +542,9 @@ export const WIDGET_API_METHODS = [
   "engineCall",
   "onEngineEvent",
   "log",
+  "infohubCall",
+  "notify",
+  "homeCardSet",
 ] as const satisfies readonly (keyof HemingWidgetApi)[];
 
 /** 接口里存在、但清单漏掉的方法（正常应为 `never`）。 */

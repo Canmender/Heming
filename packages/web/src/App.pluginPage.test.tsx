@@ -96,7 +96,7 @@ describe("插件页面接线（d.124）", () => {
   it("装好带页面的插件后导航出现入口，点进去渲染声明式页面", async () => {
     render(<App />);
     // 先确认没装时没有入口
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
     expect(screen.queryByRole("button", { name: "采集看板" })).toBeNull();
 
     pluginStore.install(JSON.stringify(PAGE_MANIFEST));

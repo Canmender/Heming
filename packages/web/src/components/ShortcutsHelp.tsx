@@ -93,7 +93,7 @@ export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
       onClick={onClose}
     >
       <div
@@ -102,15 +102,16 @@ export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
         aria-modal="true"
         aria-label="快捷键"
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[80vh] w-[min(480px,92vw)] flex-col overflow-hidden rounded-xl border border-[#ececec] bg-white shadow-card"
+        // d.138：壳与 ConfirmDialog 对齐——遮罩/面板/hover 全走 token，暗色下不再是白面板。
+        className="flex max-h-[80vh] w-[min(480px,92vw)] flex-col overflow-hidden rounded-xl border border-line bg-[var(--surface)] shadow-card"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
-          <span className="text-[13px] font-bold">快捷键</span>
+          <span className="ui-section-title">快捷键</span>
           <button
             type="button"
             aria-label="关闭快捷键"
             onClick={onClose}
-            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
           >
             <XIcon width={16} height={16} aria-hidden="true" />
           </button>

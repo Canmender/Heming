@@ -23,10 +23,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { teardownChild } = require("./child-kill");
 
-/** 引擎缺失时给用户的下一步：模块是选装的，装好后自动启动，不需要任何配置界面。 */
+/** 引擎缺失时给用户的下一步：Python 引擎是选装的，首次使用会自动下载，不需要配置界面。 */
 const ENGINE_MISSING_MESSAGE =
-  "信息中枢引擎未安装（选装模块）。请到「插件」页安装「信息中枢」，装好后会自动启动；" +
-  "安装需要联网下载模块包。";
+  "信息中枢引擎未安装（选装 Python 引擎）。首次使用时会自动从更新源下载安装，" +
+  "请确认网络可用后重试。";
 
 /** 与 packages/infohub/infohub/bridge.py 的 `_ALLOWED_METHODS` 保持一致。 */
 const ALLOWED_METHODS = new Set([
@@ -61,9 +61,9 @@ const MAX_STDERR_TAIL = 4_000;
 /**
  * 开发态 InfoHub 源码目录：`packages/desktop/../infohub`。
  *
- * 打包后**不再有内置引擎**（d.116：模块是选装的，由 `module-store` 从更新源装到
- * `<userData>/modules`），所以这里返回空串；调用方据此给出「请安装模块」的提示，
- * 而不是去一个不存在的 `resources/infohub` 里撞运气。
+ * 打包后**不再有内置引擎**（d.116：Python 引擎是选装的，由 `infohub-engine.js` /
+ * `module-store` 从更新源装到 `<userData>/modules`），所以这里返回空串；调用方据此
+ * 给出「请下载引擎」的提示，而不是去一个不存在的 `resources/infohub` 里撞运气。
  */
 function resolveInfohubPackageDir({ isPackaged, dirname }) {
   if (isPackaged) return "";

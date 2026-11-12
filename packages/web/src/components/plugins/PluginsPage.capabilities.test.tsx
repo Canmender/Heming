@@ -651,7 +651,7 @@ describe("插件页 · 系统能力卡（d.65）", () => {
     expect(card).toHaveTextContent("技能 2");
     expect(card).toHaveTextContent("服务 1");
     expect(card).toHaveTextContent("工具 3");
-    expect(card).toHaveTextContent("随应用内置，不可停用或卸载");
+    expect(card).toHaveTextContent("技能与工具随应用版本更新，无需单独升级");
     // 只读：没有启用开关、没有卸载/停用按钮
     expect(within(card).queryByRole("switch")).toBeNull();
     expect(within(card).queryByRole("button")).toBeNull();

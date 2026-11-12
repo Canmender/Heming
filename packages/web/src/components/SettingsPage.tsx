@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../store/auth.js";
 import { UserIcon } from "./icons.js";
+import { TextField } from "./ui/Field.js";
 import { KeyStorageCard } from "./KeyStorageCard.js";
 import { ContextSettingsCard } from "./ContextSettingsCard.js";
 import { BackgroundModelCard } from "./BackgroundModelCard.js";
@@ -9,8 +10,6 @@ import { HitlPolicyCard } from "./HitlPolicyCard.js";
 import { StorageUsageCard } from "./StorageUsageCard.js";
 import { ThemeModeCard } from "./settings/ThemeModeCard.js";
 import { DEFAULT_NAV_ORDER, useUiStore, type NavPage } from "../store/ui.js";
-import { useModuleStore } from "../lib/modules/store.js";
-import { withModuleNav } from "../lib/modules/nav.js";
 import { usePluginPageEntries } from "../lib/pages/usePluginPages.js";
 import { PluginPageIcon } from "./plugins/PluginPageIcon.js";
 import { useThemeStore, ACCENT_PRESETS } from "../store/theme.js";
@@ -217,13 +216,15 @@ export function SettingsPage() {
   return (
     <PageShell
       scroll={false}
-      title="设置区"
+      title="设置"
       subtitle="改完立即生效，只影响本机，不用重启。"
       headerExtra={
         <div className="px-6 pb-3 pt-3 max-[1199px]:px-4">
-          {/* d.72：标签栏与搜索框跟正文同列居中。之前正文固定 720px 贴左，
-              宽屏（1600）右侧空出半屏，看起来像页面没铺满。 */}
-          <div className="mx-auto w-full max-w-[760px]">
+          {/* d.72 曾把这一列改成居中以填满宽屏；d.138 改回左对齐：
+              宽度上限 760 保留（表单行宽不宜过长），但不再 mx-auto——
+              居中的结果是与首页/记忆/插件页的左边缘对不上，同一站点两种对齐网格。
+              左对齐后标签栏、搜索框、卡片共用页面内容区的左基线。 */}
+          <div className="w-full max-w-[760px]">
           {/* 横向标签栏：选中项白底、选中线压在下边框上（与内容区连成一体） */}
           <div className={PAGE_TABLIST} role="tablist" aria-label="设置分组">
             {SETTINGS_TABS.map((t) => {
@@ -276,7 +277,7 @@ export function SettingsPage() {
     >
       {/* 内容区：一次只渲染当前分组，切换时不保留上一次的输入态（草稿本就一次性保存） */}
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 max-[1199px]:px-4">
-        <div className="mx-auto w-full max-w-[760px]">
+        <div className="w-full max-w-[760px]">
           {searching ? (
             <section aria-label="设置搜索结果">
               {results.length === 0 ? (
@@ -478,7 +479,7 @@ function ProfileSection() {
             onChange={onPickFile}
           />
         </label>
-        {fileError && <span className="text-[12px] text-red-600">{fileError}</span>}
+        {fileError && <span className="ui-caption text-[var(--danger)]">{fileError}</span>}
       </div>
 
       {avatar && (
@@ -496,19 +497,18 @@ function ProfileSection() {
       )}
 
       <form onSubmit={save} className="mt-4 flex flex-col gap-3">
-        <label className="ui-caption">
-          昵称
-          <input
-            value={displayName}
-            maxLength={64}
-            onChange={(e) => {
-              setDisplayName(e.target.value);
-              setSaved(false);
-            }}
-            className="mt-1 block w-full ui-input"
-          />
-        </label>
-        {error && <div role="alert" className="text-[12px] text-red-600">{error}</div>}
+        {/* d.138：昵称换成 TextField 基元——错误行原来用 text-red-600 且没和输入框关联，
+            读屏只说「编辑框」；现在错误行有 role=alert + aria-describedby。 */}
+        <TextField
+          label="昵称"
+          value={displayName}
+          maxLength={64}
+          onChange={(e) => {
+            setDisplayName(e.target.value);
+            setSaved(false);
+          }}
+          error={error}
+        />
         <div className="flex items-center gap-3">
           <button
             type="submit"
@@ -734,6 +734,13 @@ function AppearanceSection() {
     >
       <div className="flex items-center gap-2">
         <span className="ui-section-title">主题色</span>
+        {/* d.138：色点原本只有 title/aria-label 带名字，界面上六个圆点没有一处文字说明；
+            选中后也看不出「现在是什么色」。这里把当前色名写出来（自定义色显示「自定义」）。 */}
+        <span className="ui-caption">
+          {/* JSX 会吃掉行首空格，分隔点要显式写成表达式，否则读屏拼成「主题色· 墨黑」。 */}
+          {" · "}
+          {ACCENT_PRESETS.find((p) => p.color === accent)?.name ?? "自定义"}
+        </span>
         {applied && (
           <span role="status" className="ui-caption">
             已生效
@@ -756,8 +763,10 @@ function AppearanceSection() {
               setAccentError(null);
               setApplied(true);
             }}
-            className={`h-6 w-6 rounded-full border border-black/10 shadow-card ${
-              accent === p.color ? "ring-2 ring-offset-2 ring-[#1a1a1a]" : ""
+            className={`h-6 w-6 rounded-full border border-line shadow-card ${
+              // 选中环用 --ink + --surface 做 offset：写死 #1a1a1a/白 offset 在暗色下
+              // 要么环看不见、要么套一圈白光。深色色点（墨黑）也靠 border-line 才不至于融进卡片。
+              accent === p.color ? "ring-2 ring-offset-2 ring-[var(--ink)] ring-offset-[var(--surface)]" : ""
             }`}
             style={{ backgroundColor: p.color }}
           />
@@ -789,21 +798,17 @@ function AppearanceSection() {
           恢复默认
         </button>
       </div>
-      {accentError && <div role="alert" className="mt-2 text-[12px] text-red-600">{accentError}</div>}
+      {accentError && <div role="alert" className="mt-2 ui-caption text-[var(--danger)]">{accentError}</div>}
     </section>
   );
 }
 
 /** 导航分组：左侧导航顺序**固定**（d.123 用户口径），这里只展示，不再提供排序操作。 */
 function NavigationSection() {
-  const moduleEnabled = useModuleStore((u) => u.enabled);
-  const moduleInstalled = useModuleStore((u) => u.installed);
-  const moduleState = { installed: moduleInstalled, enabled: moduleEnabled };
-  // 已装且启用的模块入口追加在 8 项之后（与 NavRail 同源：modules/nav.ts 的 withModuleNav）
-  const navOrder = withModuleNav([...DEFAULT_NAV_ORDER], moduleState);
-  const installedPages = navOrder.slice(DEFAULT_NAV_ORDER.length);
+  // 导航固定 8 项；带页面的插件由同一份注册表投影追加在末尾（与 NavRail 同源）。
+  const navOrder = [...DEFAULT_NAV_ORDER];
   /**
-   * d.124：已装插件页面（声明式 + 界面插件）也追加在模块页之后。
+   * d.124：已装插件页面（声明式 + 界面插件）追加在 8 项之后。
    *
    * 读的是导航轨/路由同一份注册表投影 `usePluginPageEntries()`，不在设置页里
    * 再判一遍「有没有页面、能不能进」——那会变成第四套口径。
@@ -818,8 +823,8 @@ function NavigationSection() {
       <div className="ui-section-title">导航顺序</div>
       <div className="mt-1 ui-caption">
         导航固定 8 项、顺序不可调整（数字快捷键仍对应原来的页面：Alt+1 / 2 / 5 / 6 / 8 / 0）。
-        已安装的模块页面（幕僚、信息中枢、自动化、工作流）与带页面的插件会自动追加在最下面，
-        不改变上面 8 项的顺序；停用或删除后入口随之消失。
+        带页面的插件（信息中枢、自动化等）会自动追加在最下面，不改变上面 8 项的顺序；
+        停用或卸载后入口随之消失。
       </div>
       <ol className="mt-2 flex flex-col gap-1">
         {navOrder.map((page, index) => (
@@ -841,16 +846,14 @@ function NavigationSection() {
             key={entry.pageId}
             className="flex items-center gap-2 rounded-lg border border-line-soft px-2 py-1.5"
           >
-            <span className="w-[18px] ui-caption">
-              {DEFAULT_NAV_ORDER.length + installedPages.length + index + 1}
-            </span>
+            <span className="w-[18px] ui-caption">{DEFAULT_NAV_ORDER.length + index + 1}</span>
             <PluginPageIcon icon={entry.icon} size={14} />
             <span className="flex-1 text-[12px]">{entry.title}</span>
             <span className="ui-micro shrink-0 text-muted">插件页面 · 固定末位</span>
           </li>
         ))}
       </ol>
-      {installedPages.length === 0 && pluginPages.length === 0 ? (
+      {pluginPages.length === 0 ? (
         <p className="mt-2 ui-caption">当前没有已安装的插件页面；到「插件」页安装后会自动出现在导航最下面。</p>
       ) : null}
     </section>

@@ -280,6 +280,10 @@ function normalizeManifest(manifest) {
       // d.125：permissions.kb（写和鸣知识库）同 chat 口径——只在 true 时进文本，
       // 未声明/旧包的 canonical 字节不变；擅自补一个 `kb: true` 会让验签失败。
       ...(permissions.kb === true ? { kb: true } : {}),
+      // d.138：沙箱桥新权限位（本机归档只读 / 桌面通知）同 chat 口径——归一化清单恒有
+      // 这两个 false 字段，原样签进去会让所有历史签名一起失效。
+      ...(permissions.infohub === true ? { infohub: true } : {}),
+      ...(permissions.notify === true ? { notify: true } : {}),
     },
     ...(normalizeModuleWeb(manifest.web) ? { web: normalizeModuleWeb(manifest.web) } : {}),
     contributions: {
@@ -325,10 +329,55 @@ function normalizeManifest(manifest) {
       // d.125：插件自带引擎——只在声明时进入签名文本。否则「签名后把 engine.entry
       // 指到包内另一个 .py」不会改变签名（files 摘要没变），等于绕过验签拿到新入口。
       ...(normalizeEngine(contributions.engine) ? { engine: normalizeEngine(contributions.engine) } : {}),
+      // d.138：首页卡片与后台页——只在真正声明了内容时才进文本；归一化清单恒有
+      // `homeCards: []`，空数组入文本会让所有既有签名失效。
+      ...(normalizeHomeCards(contributions.homeCards).length > 0
+        ? { homeCards: normalizeHomeCards(contributions.homeCards) }
+        : {}),
+      ...(normalizeBackground(contributions.background)
+        ? { background: normalizeBackground(contributions.background) }
+        : {}),
       // d.90：清单里的 llmPresets 会被应用丢弃，签名文本恒为空数组。
       llmPresets: [],
     },
   };
+}
+
+/**
+ * 首页卡片 → 签名用的确定性形状（d.138）。
+ *
+ * 标题、说明、跳转页都是可感知的入口数据，必须受签；空 summary/icon/primary 不进文本，
+ * 与 web 侧 signature.ts 的 canonicalHomeCard 逐字段一致。
+ */
+function normalizeHomeCard(card) {
+  if (!card || typeof card !== "object" || Array.isArray(card)) return null;
+  const id = trim(card.id);
+  const title = trim(card.title);
+  const page = trim(card.page);
+  if (!id || !title || !page) return null;
+  const summary = trim(card.summary);
+  const icon = trim(card.icon);
+  const primary = trim(card.primary);
+  return {
+    id,
+    title,
+    page,
+    ...(summary ? { summary } : {}),
+    ...(icon ? { icon } : {}),
+    ...(primary ? { primary } : {}),
+  };
+}
+
+/** 首页卡片数组 → canonical 列表（丢弃非法项；空数组入文本无意义）。 */
+function normalizeHomeCards(cards) {
+  return (Array.isArray(cards) ? cards : []).map(normalizeHomeCard).filter(Boolean);
+}
+
+/** 后台页入口 → 签名用的确定性形状（d.138）：入口换了等于换了要执行的页面。 */
+function normalizeBackground(background) {
+  if (!background || typeof background !== "object" || Array.isArray(background)) return null;
+  const entry = trim(background.entry);
+  return entry ? { entry } : null;
 }
 
 /**

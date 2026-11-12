@@ -4,12 +4,10 @@ import { NavRail } from "./NavRail.js";
 import { useUiStore, DEFAULT_NAV_ORDER } from "../store/ui.js";
 import { useAuthStore } from "../store/auth.js";
 import { useChatStore } from "../store/chat.js";
-import { useModuleStore } from "../lib/modules/store.js";
 import { DEFAULT_NAV_ORDER as NEW_DEFAULT } from "../store/ui.js";
 
 describe("NavRail 图标轨（A 方案）", () => {
   beforeEach(() => {
-    useModuleStore.getState().reset();
     useUiStore.setState({ page: "home", activeConversationId: null });
     // 角标用例注入未读会话：逐例清零，避免泄漏到「无角标」断言
     useChatStore.setState({ conversations: [] });
@@ -21,50 +19,31 @@ describe("NavRail 图标轨（A 方案）", () => {
     });
   });
 
-  it("带快捷键徽标的图标按钮（aria-label = 名称 + 快捷键），无数字键的页只有名称", () => {
+  it("图标按钮的可访问名只有页名，快捷键走 aria-keyshortcuts（不再把 AltN 拼进名字）", () => {
     render(<NavRail />);
-    for (const name of ["主页 Alt1", "团队 Alt2", "记忆 Alt5", "设置 Alt6", "智能体 Alt8", "插件 Alt0"]) {
-      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    for (const [label, key] of [
+      ["主页", "Alt+1"],
+      ["团队", "Alt+2"],
+      ["记忆", "Alt+5"],
+      ["设置", "Alt+6"],
+      ["智能体", "Alt+8"],
+      ["插件", "Alt+0"],
+    ] as const) {
+      const btn = screen.getByRole("button", { name: label });
+      expect(btn).toHaveAttribute("aria-keyshortcuts", key);
     }
-    // 知识库 / 模型不占数字键：只有名称
+    // 知识库 / 模型不占数字键：只有名称，也没有 aria-keyshortcuts
     for (const name of ["知识库", "模型"]) {
-      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+      const btn = screen.getByRole("button", { name });
+      expect(btn).not.toHaveAttribute("aria-keyshortcuts");
     }
   });
 
-  it("没装模块时导航只有 8 个宿主页：幕僚 / 信息中枢 / 自动化 / 工作流都不在轨上", () => {
+  it("宿主导航只有 8 个固定页：旧模块页不会再出现在轨上", () => {
     render(<NavRail />);
     for (const name of ["幕僚", "信息中枢", "自动化", "工作流", "模型路由"]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
-  });
-
-  it("装上并启用模块后，入口追加在导航最下面（8 项顺序不变），停用后消失", () => {
-    useModuleStore.getState().install("heming.automations");
-    render(<NavRail />);
-    const labels = screen
-      .getAllByRole("button")
-      .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
-      .filter((label) => ["主页", "插件", "记忆", "设置", "自动化"].includes(label));
-    // 宿主页顺序原样；模块只挂在最后（设置之后）
-    expect(labels).toEqual(["主页", "插件", "记忆", "设置", "自动化"]);
-
-    // 停用（不是删除）→ 入口下线；重新启用 → 回来
-    act(() => useModuleStore.getState().setEnabled("heming.automations", false));
-    expect(screen.queryByRole("button", { name: "自动化" })).not.toBeInTheDocument();
-    act(() => useModuleStore.getState().setEnabled("heming.automations", true));
-    expect(screen.getByRole("button", { name: "自动化" })).toBeInTheDocument();
-
-    // 删除 → 入口消失
-    act(() => useModuleStore.getState().uninstall("heming.automations"));
-    expect(screen.queryByRole("button", { name: "工作流" })).not.toBeInTheDocument();
-  });
-
-  it("点模块入口能切到对应页面（模块页不需要从插件卡绕）", () => {
-    useModuleStore.getState().install("heming.infohub");
-    render(<NavRail />);
-    fireEvent.click(screen.getByRole("button", { name: "信息中枢" }));
-    expect(useUiStore.getState().page).toBe("infohub");
   });
 
   it("导航区不出现产品名文字（A 方案无品牌位）", () => {
@@ -75,20 +54,20 @@ describe("NavRail 图标轨（A 方案）", () => {
 
   it("点击切页，选中项为 ink 底反白并标记 aria-current", () => {
     render(<NavRail />);
-    const homeBtn = screen.getByRole("button", { name: "主页 Alt1" });
+    const homeBtn = screen.getByRole("button", { name: "主页" });
     expect(homeBtn.className).toContain("bg-ink");
     expect(homeBtn.className).toContain("text-white");
     expect(homeBtn).toHaveAttribute("aria-current", "page");
 
-    fireEvent.click(screen.getByRole("button", { name: "插件 Alt0" }));
+    fireEvent.click(screen.getByRole("button", { name: "插件" }));
     expect(useUiStore.getState().page).toBe("plugins");
 
-    const pluginsBtn = screen.getByRole("button", { name: "插件 Alt0" });
+    const pluginsBtn = screen.getByRole("button", { name: "插件" });
     expect(pluginsBtn.className).toContain("bg-ink");
     expect(pluginsBtn.className).toContain("text-white");
     expect(pluginsBtn).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "主页 Alt1" }).className).not.toContain("bg-ink");
-    expect(screen.getByRole("button", { name: "主页 Alt1" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "主页" }).className).not.toContain("bg-ink");
+    expect(screen.getByRole("button", { name: "主页" })).not.toHaveAttribute("aria-current");
   });
 
   it("悬停浮签内容常驻 DOM（名称 + 快捷键徽标，opacity 0 → group-hover 淡入）", () => {
@@ -178,7 +157,7 @@ describe("NavRail 图标轨（A 方案）", () => {
   it("图标列包在垂直居中容器内，头像在容器外", () => {
     render(<NavRail />);
     const nav = screen.getByLabelText("主导航");
-    const items = ["主页 Alt1", "团队 Alt2", "插件 Alt0", "记忆 Alt5", "设置 Alt6"].map((l) =>
+    const items = ["主页", "团队", "插件", "记忆", "设置"].map((l) =>
       screen.getByLabelText(l),
     );
     const wrapper = items[0].closest("div")!.parentElement!;
@@ -204,8 +183,8 @@ describe("NavRail 导航顺序固定（d.123：不可自定义）", () => {
       .filter((label) => ["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"].includes(label));
     expect(labels).toEqual(["主页", "团队", "智能体", "插件", "记忆", "知识库", "模型", "设置"]);
     // 数字键仍绑页本身
-    expect(screen.getByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "设置 Alt6" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "主页" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
   });
 
   it("存储里残留自定义顺序/旧页 id 时不生效，导航仍是固定 8 项且不重复", () => {
@@ -227,16 +206,6 @@ describe("NavRail 导航顺序固定（d.123：不可自定义）", () => {
     for (const name of ["团队", "插件", "智能体"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(`^${name}( |$)`) }).length).toBe(1);
     }
-  });
-
-  it("已装模块入口追加在 8 项之后，不改变前 8 项顺序", () => {
-    useModuleStore.getState().install("heming.automations");
-    render(<NavRail />);
-    const labels = screen
-      .getAllByRole("button")
-      .map((b) => (b.getAttribute("aria-label") || "").split(" ")[0])
-      .filter((label) => ["主页", "设置", "自动化"].includes(label));
-    expect(labels).toEqual(["主页", "设置", "自动化"]);
   });
 });
 
@@ -354,7 +323,7 @@ describe("NavRail 导航自动隐藏（d.68）", () => {
     const nav = screen.getByLabelText("主导航");
     // 先有一次键盘交互，再聚焦：模拟「Tab 进导航」，不是鼠标点击留下的焦点
     fireEvent.keyDown(nav, { key: "Tab" });
-    screen.getByLabelText("主页 Alt1").focus();
+    screen.getByLabelText("主页").focus();
 
     fireEvent.mouseLeave(nav);
     act(() => {
@@ -371,7 +340,7 @@ describe("NavRail 导航自动隐藏（d.68）", () => {
     fireEvent.mouseEnter(screen.getByRole("button", { name: "展开导航" }));
     const nav = screen.getByLabelText("主导航");
     // 只有 focus（无键盘交互）= 鼠标点击后的焦点状态（d.68 自检实测到的「浮层关不掉」）
-    screen.getByLabelText("主页 Alt1").focus();
+    screen.getByLabelText("主页").focus();
     fireEvent.mouseLeave(nav);
     act(() => {
       vi.advanceTimersByTime(320);
@@ -384,7 +353,7 @@ describe("NavRail 导航自动隐藏（d.68）", () => {
     render(<NavRail />);
 
     fireEvent.mouseEnter(screen.getByRole("button", { name: "展开导航" }));
-    const item = screen.getByLabelText("记忆 Alt5");
+    const item = screen.getByLabelText("记忆");
     // 真实鼠标点击顺序：pointerdown（标记鼠标交互）→ click
     fireEvent.pointerDown(item);
     fireEvent.click(item);
@@ -423,7 +392,6 @@ describe("NavRail 导航自动隐藏（d.68）", () => {
 
 describe("NavRail 分组（固定 8 项）", () => {
   beforeEach(() => {
-    useModuleStore.getState().reset();
     useUiStore.setState({ page: "home", navOrder: [...NEW_DEFAULT] });
   });
 

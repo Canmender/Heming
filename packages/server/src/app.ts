@@ -28,7 +28,6 @@ import { issueToken, userIdFromToken } from "./auth.js";
 import { presence } from "./presence.js";
 import { dayKeyUtc, parseDayKey, summarizeTeamUsage, usageRangeBounds } from "./teamUsage.js";
 import { createPluginCatalog } from "./pluginCatalog.js";
-import { createModuleCatalog } from "./moduleCatalog.js";
 import { createPluginMarketRouter } from "./pluginMarket.js";
 import { createSkillHubRouter } from "./skillHub.js";
 
@@ -78,8 +77,6 @@ export interface CreateAppOptions {
   allowRegister?: boolean;
   /** 云端插件目录（测试注入；缺省 HEMING_PLUGIN_DIR 或 <cwd>/plugins-catalog）。 */
   pluginDir?: string;
-  /** 云端模块目录（测试注入；缺省 HEMING_MODULE_DIR 或 <cwd>/module-catalog）。 */
-  moduleDir?: string;
 }
 
 export function createApp(store: Store, opts?: CreateAppOptions): express.Express {
@@ -95,14 +92,6 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
       process.env.HEMING_PLUGIN_DIR ??
       join(process.cwd(), "plugins-catalog"),
   });
-  /**
-   * 云端模块目录（d.117）：原生应用不再写死「内置模块」卡片，只显示服务端真实提供的模块。
-   * 目录可被 HEMING_MODULE_DIR 覆盖；缺省回落到随服务端发布的三条可选模块。
-   */
-  const moduleCatalog = createModuleCatalog({
-    dir: opts?.moduleDir ?? process.env.HEMING_MODULE_DIR,
-  });
-
   const app = express();
   app.use(cors);
   /**
@@ -148,29 +137,6 @@ export function createApp(store: Store, opts?: CreateAppOptions): express.Expres
    */
   app.get("/api/plugins", (_req, res) => {
     res.json({ plugins: pluginCatalog.list(), generatedAt: new Date().toISOString() });
-  });
-
-  /**
-   * 可选模块目录：公开、只读。客户端插件页据此显示「从云端安装」的模块；
-   * 目录为空时客户端不显示任何模块（原生应用不携带模块）。
-   */
-  app.get("/api/modules", (_req, res) => {
-    res.json({ modules: moduleCatalog.list(), generatedAt: new Date().toISOString() });
-  });
-
-  /**
-   * 模块包下载（d.133）：客户端「从云端安装插件」直接拿官方签名 module.tgz。
-   * 只服务目录里真实存在的 id@version；路径由 moduleCatalog 夹取，不接受任意文件名。
-   */
-  app.get("/api/modules/:id/:version/module.tgz", (req, res) => {
-    const file = moduleCatalog.packagePath(req.params.id, req.params.version);
-    if (!file) {
-      res.status(404).json({ error: "模块包不存在" });
-      return;
-    }
-    res.setHeader("Content-Type", "application/octet-stream");
-    res.setHeader("Cache-Control", "public, max-age=300");
-    res.sendFile(file);
   });
 
   app.get("/api/plugins/:id/:version/manifest", (req, res) => {

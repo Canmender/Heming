@@ -229,7 +229,8 @@ describe("PluginDeclarativePage · actions 跳转", () => {
     renderPage();
 
     fireEvent.click(screen.getByRole("button", { name: "打开信息中枢" }));
-    expect(useUiStore.getState().page).toBe("infohub");
+    // setPage 会经 resolvePage 把旧 "infohub" id 折叠到插件页
+    expect(useUiStore.getState().page).toBe("plugin:heming.infohub");
   });
 
   // d.136：定位目标从 "widgets" 换成仍在设置页的 "theme-mode"——「桌面小组件」卡已挪进

@@ -83,7 +83,7 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
           type="button"
           disabled={busy}
           onClick={() => void onExport()}
-          className="rounded-md border border-line bg-white px-2 py-0.5 text-[11px] shadow-card transition-colors duration-150 hover:bg-[#fafafa] disabled:opacity-50"
+          className="rounded-md border border-line bg-white px-2 py-0.5 text-[11px] shadow-card transition-colors duration-150 hover:bg-[var(--subtle-2)] disabled:opacity-50"
         >
           导出 HTML
         </button>
@@ -91,7 +91,7 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
           type="button"
           disabled={busy}
           onClick={() => void onOpen()}
-          className="rounded-md border border-line bg-white px-2 py-0.5 text-[11px] shadow-card transition-colors duration-150 hover:bg-[#fafafa] disabled:opacity-50"
+          className="rounded-md border border-line bg-white px-2 py-0.5 text-[11px] shadow-card transition-colors duration-150 hover:bg-[var(--subtle-2)] disabled:opacity-50"
         >
           打开
         </button>

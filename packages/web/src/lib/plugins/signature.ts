@@ -44,11 +44,20 @@ interface PublisherData {
  * ★ 与 scripts/sign-plugin.mjs 一致：`permissions.chat` **只在 true 时进入文本**。
  *   应用归一化后的 v5 权限对象恒有 `chat: false`，若原样签进去，脚本签出的 v5 包
  *   在应用里会因多一个 `"chat":false` 而验签失败（历史遗留口径陷阱，d.124 顺手对齐）。
+ *
+ * d.125：widget 桥新域 `infohub` / `notify` 沿用同一条口径——归一化清单恒有这两个
+ * false 字段，而签名脚本不认识它们；只让 true 进文本，才能保证「旧脚本签的包」在
+ * 新应用里仍然验得过。签名脚本与桌面侧 canonicalizer 需同步这条规则（遗留跟进）。
  */
 function canonicalPermissions(permissions: PluginManifest["permissions"]): Record<string, unknown> {
   const record = permissions as unknown as Record<string, unknown>;
-  const { chat, ...rest } = record;
-  return { ...rest, ...(chat === true ? { chat: true } : {}) };
+  const { chat, infohub, notify, ...rest } = record;
+  return {
+    ...rest,
+    ...(chat === true ? { chat: true } : {}),
+    ...(infohub === true ? { infohub: true } : {}),
+    ...(notify === true ? { notify: true } : {}),
+  };
 }
 
 /** 签名文本里统一用 trim 后的纯文本（数字/缺失一律空串）。 */
@@ -149,12 +158,50 @@ function canonicalPage(page: unknown): Record<string, unknown> | undefined {
   return out;
 }
 
+/**
+ * 首页卡片 → 签名用的确定性形状（d.125）。
+ *
+ * 首页卡片是插件声明给主窗口的入口数据，改 title/跳转页/文案属于可感知变更，
+ * 所以必须绑进签名；但空 summary/icon/primary 不进文本，保持与 shared 的
+ * 「缺省即空」口径一致（键顺序无所谓：canonicalJsonText 会按键排序）。
+ */
+function canonicalHomeCard(card: unknown): Record<string, unknown> | undefined {
+  if (!card || typeof card !== "object") return undefined;
+  const record = card as Record<string, unknown>;
+  const id = trimText(record.id);
+  const title = trimText(record.title);
+  const page = trimText(record.page);
+  if (!id || !title || !page) return undefined;
+  const out: Record<string, unknown> = { id, title, page };
+  const summary = trimText(record.summary);
+  if (summary) out.summary = summary;
+  const icon = trimText(record.icon);
+  if (icon) out.icon = icon;
+  const primary = trimText(record.primary);
+  if (primary) out.primary = primary;
+  return out;
+}
+
+/** 后台页入口 → 签名用的确定性形状（d.125）：入口换了等于换了要执行的页面。 */
+function canonicalBackground(background: unknown): Record<string, unknown> | undefined {
+  if (!background || typeof background !== "object") return undefined;
+  const entry = trimText((background as Record<string, unknown>).entry);
+  return entry ? { entry } : undefined;
+}
+
 /** 规范化签名文本：与内容指纹同款排序，但**包含 publisher、排除 signature**。 */
 export function signedManifestText(manifest: PluginManifest): string {
   // d.124：页面（title/icon/summary/entry/blocks）必须进签名，否则「签名后换页面入口/
   // 换标题」验不出来。仅声明页面时才出现该键——旧包 canonical 字节逐字不变。
-  const { page, ...restContributions } = manifest.contributions;
+  // d.125：homeCards / background 同理，只在真的声明了内容时才进文本；
+  // 归一化清单恒有 `homeCards: []`，若原样签进去，所有既有签名会一起失效。
+  const { page, homeCards, background, ...restContributions } = manifest.contributions;
   const signedPage = canonicalPage(page);
+  // 落盘的旧记录可能没有 homeCards（类型是新的，数据是旧的），按空数组兜底。
+  const signedHomeCards = (Array.isArray(homeCards) ? homeCards : [])
+    .map(canonicalHomeCard)
+    .filter((card) => card !== undefined);
+  const signedBackground = canonicalBackground(background);
   return canonicalJsonText({
     id: manifest.id,
     version: manifest.version,
@@ -165,6 +212,8 @@ export function signedManifestText(manifest: PluginManifest): string {
     permissions: canonicalPermissions(manifest.permissions),
     contributions: {
       ...restContributions,
+      ...(signedHomeCards.length > 0 ? { homeCards: signedHomeCards } : {}),
+      ...(signedBackground ? { background: signedBackground } : {}),
       ...(signedPage ? { page: signedPage } : {}),
     },
     // 界面插件（bundle）把 files/** 摘要绑进清单，签名因此覆盖代码字节。

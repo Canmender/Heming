@@ -70,7 +70,7 @@ describe("命令面板 · 插件命令", () => {
     fireEvent.change(searchBox(), { target: { value: "插件区" } });
 
     expect(screen.getByText("插件命令")).toBeInTheDocument();
-    const item = screen.getByRole("option", { name: "选择 打开插件区" });
+    const item = screen.getByRole("option", { name: "打开插件区" });
     expect(item.textContent).toContain("桌宠（插件）");
     expect(item.textContent).toContain("去插件列表");
   });
@@ -79,7 +79,7 @@ describe("命令面板 · 插件命令", () => {
     const onClose = vi.fn();
     render(<CommandPalette onClose={onClose} />);
     fireEvent.change(searchBox(), { target: { value: "插件区" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 打开插件区" }));
+    fireEvent.click(screen.getByRole("option", { name: "打开插件区" }));
     expect(useUiStore.getState().page).toBe("plugins");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -92,7 +92,7 @@ describe("命令面板 · 插件命令", () => {
     ]);
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "我的详情" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 打开我的详情" }));
+    fireEvent.click(screen.getByRole("option", { name: "打开我的详情" }));
     expect(useUiStore.getState().page).toBe("plugins");
     expect(useUiStore.getState().paletteIntent).toMatchObject({
       kind: "open-plugin",
@@ -112,7 +112,7 @@ describe("命令面板 · 插件命令", () => {
     render(<CommandPalette onClose={vi.fn()} />);
 
     fireEvent.change(searchBox(), { target: { value: "主题设置" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 去主题设置" }));
+    fireEvent.click(screen.getByRole("option", { name: "去主题设置" }));
     expect(useUiStore.getState().page).toBe("settings");
     expect(useUiStore.getState().paletteIntent).toMatchObject({
       kind: "focus-settings",
@@ -120,7 +120,7 @@ describe("命令面板 · 插件命令", () => {
     });
 
     fireEvent.change(searchBox(), { target: { value: "桌宠单元" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 去桌宠单元" }));
+    fireEvent.click(screen.getByRole("option", { name: "去桌宠单元" }));
     expect(useUiStore.getState().page).toBe("plugins");
     expect(useUiStore.getState().paletteIntent).toMatchObject({
       kind: "open-plugin",

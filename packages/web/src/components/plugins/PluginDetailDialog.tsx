@@ -16,9 +16,11 @@ import {
   BTN_DANGER_SM,
   BTN_GHOST,
   BTN_GHOST_SM,
+  BTN_PRIMARY,
   CHIP,
   HINT,
   Switch,
+  fmtBytes,
   formatAt,
 } from "./shared.js";
 import {
@@ -45,8 +47,85 @@ interface PendingToolToggle {
  *
  * d.136：有窗口的插件（如桌宠）在这里多一段「窗口设置」——显示/缩放/穿透/位置
  * 与插件声明的设置项。设置 → 外观区不再出现「桌面小组件」卡：窗口行为属于插件本身。
+ *
+ * 模块运行时下线后只剩包插件一条来源：声明式插件与界面插件共用这一个壳，
+ * 不再有「内置插件组」的第二套正文。
  */
-export function PluginDetailDialog({
+
+interface CommonDetailProps {
+  onClose: () => void;
+}
+
+/** 包详情（声明式 / 界面插件）的 props。 */
+interface PackageDetailProps extends CommonDetailProps {
+  plugin: InstalledPlugin;
+  skills: PluginSkillInfo[];
+  servers: PluginServerInfo[];
+  /** 该插件的工具束（来自能力目录解析，含 matched/unresolved）。 */
+  toolPacks: ToolPackGroup["packs"];
+  /** 工具开关的真实写入口（与 MCP 服务同源）。 */
+  mcp: { setToolEnabled(serverId: string, toolName: string, enabled: boolean): void };
+  /** serverId → 服务名（所属服务列展示）。 */
+  serverNameOf: (serverId: string) => string;
+  hostOf: (url: string) => string;
+  onRemove: () => void;
+  onGoSkills: () => void;
+  onGoInterfaces: () => void;
+  /** 打开插件自己的页面（d.124）；没声明页面或页面当前不可用时省略。 */
+  onOpenPage?: () => void;
+  /** 贡献级开关（技能/服务/命令/工具束），受主开关控制。 */
+  onKindToggle: (kind: PluginContributionKind, enabled: boolean) => void;
+}
+
+/** 包详情（声明式 / 界面插件）的 props。 */
+export type PluginDetailDialogProps = PackageDetailProps;
+
+/**
+ * 插件详情弹窗（d.64 / d.134）：声明式插件与界面插件共用这个外壳。
+ *
+ * 两种来源都在这里看「贡献 / 数据 / 启停 / 删除」，不另开一套详情面板；
+ * 用户口径只有一个——插件详情。内部「模块」词汇不进入界面文案。
+ */
+export function PluginDetailDialog(props: PluginDetailDialogProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y(dialogRef, props.onClose, { active: true });
+  const title = props.plugin.manifest.name;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4"
+      onClick={props.onClose}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`插件详情 ${title}`}
+        className="plugin-dialog-pop flex max-h-[88vh] w-[min(660px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-[var(--surface)] shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2.5 border-b border-line-soft px-4 py-3">
+          <span className="plugin-icon-tile h-8 w-8" aria-hidden="true">
+            <PackageIcon width={15} height={15} />
+          </span>
+          <span className="ui-section-title">插件详情</span>
+          <button
+            type="button"
+            aria-label="关闭插件详情"
+            onClick={props.onClose}
+            className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
+          >
+            <XIcon width={14} height={14} aria-hidden="true" />
+          </button>
+        </div>
+        <PackageDetailBody {...props} />
+      </div>
+    </div>
+  );
+}
+
+/** 包插件详情正文（原实现，只从外壳里拆出来）。 */
+function PackageDetailBody({
   plugin,
   skills,
   servers,
@@ -60,34 +139,19 @@ export function PluginDetailDialog({
   onGoInterfaces,
   onOpenPage,
   onKindToggle,
-}: {
-  plugin: InstalledPlugin;
-  skills: PluginSkillInfo[];
-  servers: PluginServerInfo[];
-  /** 该插件的工具束（来自能力目录解析，含 matched/unresolved）。 */
-  toolPacks: ToolPackGroup["packs"];
-  /** 工具开关的真实写入口（与 MCP 服务同源）。 */
-  mcp: { setToolEnabled(serverId: string, toolName: string, enabled: boolean): void };
-  /** serverId → 服务名（所属服务列展示）。 */
-  serverNameOf: (serverId: string) => string;
-  hostOf: (url: string) => string;
-  onClose: () => void;
-  onRemove: () => void;
-  onGoSkills: () => void;
-  onGoInterfaces: () => void;
-  /** 打开插件自己的页面（d.124）；没声明页面或页面当前不可用时省略。 */
-  onOpenPage?: () => void;
-  /** 贡献级开关（技能/服务/命令/工具束），受主开关控制。 */
-  onKindToggle: (kind: PluginContributionKind, enabled: boolean) => void;
-}) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalA11y(dialogRef, onClose, { active: true });
+}: PackageDetailProps) {
   const counts = contributionCountsOf(plugin);
   const permission = permissionViewOf(plugin.manifest);
   const [pending, setPending] = useState<PendingToolToggle | null>(null);
   const pluginEnabled = plugin.enabled;
   /** 清单声明的页面（每插件最多 1 个）。 */
   const page = plugin.manifest.contributions.page;
+  /**
+   * d.125：首页卡片与后台页。前者是数据（宿主渲染入口），后者是包内 HTML
+   * （宿主建隐藏窗口跑它）——都不是可单独启停的贡献类别，所以只做只读展示。
+   */
+  const homeCards = plugin.manifest.contributions.homeCards;
+  const background = plugin.manifest.contributions.background;
   /**
    * 只有「装好并且有窗口记录」的插件才显示窗口设置：
    * 页面型插件没有浮窗，纯技能包也没有，这时整段不渲染，不留空标题。
@@ -98,34 +162,8 @@ export function PluginDetailDialog({
   const widgetsReady = widgetsAvailable();
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4"
-      onClick={onClose}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`插件详情 ${plugin.manifest.name}`}
-        className="plugin-dialog-pop flex max-h-[88vh] w-[min(660px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-[var(--surface)] shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2.5 border-b border-line-soft px-4 py-3">
-          <span className="plugin-icon-tile h-8 w-8" aria-hidden="true">
-            <PackageIcon width={15} height={15} />
-          </span>
-          <span className="ui-section-title">插件详情</span>
-          <button
-            type="button"
-            aria-label="关闭插件详情"
-            onClick={onClose}
-            className="ml-auto rounded-sm p-1 text-muted hover:bg-[var(--subtle-3)] hover:text-ink"
-          >
-            <XIcon width={14} height={14} aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+    <>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[14px] font-extrabold">{plugin.manifest.name}</span>
             <span className={CHIP}>v{plugin.manifest.version}</span>
@@ -150,6 +188,7 @@ export function PluginDetailDialog({
             <p className="mt-1 ui-body-sm">
               {contributionText(counts)}
               {page ? " · 页面 1" : ""}
+              {homeCards.length > 0 ? ` · 首页卡片 ${homeCards.length}` : ""}
             </p>
             <ul className="mt-2 flex flex-col gap-1.5">
               {contributionKindRows(plugin).map((row) => {
@@ -200,6 +239,30 @@ export function PluginDetailDialog({
                   ) : (
                     <span className="ui-caption">{plugin.enabled ? "暂不可用" : "主开关已关闭"}</span>
                   )}
+                </li>
+              ) : null}
+              {/* d.125 首页卡片：卡片文案由插件运行时回填，这里只展示清单声明的入口。 */}
+              {homeCards.length > 0 ? (
+                <li className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft px-3 py-1.5">
+                  <span className="ui-body-sm font-medium">首页卡片</span>
+                  <span className={`${CHIP} ui-numeric`}>{homeCards.length}</span>
+                  <span className="ml-auto ui-caption">
+                    {homeCards.map((card) => card.title).join("、")}
+                  </span>
+                  <span className="ui-caption">
+                    {plugin.enabled ? "已生效" : "主开关已关闭"}
+                  </span>
+                </li>
+              ) : null}
+              {/* d.125 后台页：宿主在插件启用时建隐藏窗口跑这个入口，停用/卸载即销毁。 */}
+              {background ? (
+                <li className="flex flex-wrap items-center gap-2 rounded-lg border border-line-soft px-3 py-1.5">
+                  <span className="ui-body-sm font-medium">后台运行</span>
+                  <span className={`${CHIP} ui-numeric`}>1</span>
+                  <span className="ml-auto break-all ui-caption">{background.entry}</span>
+                  <span className="ui-caption">
+                    {plugin.enabled ? "运行中" : "主开关已关闭"}
+                  </span>
                 </li>
               ) : null}
             </ul>
@@ -391,7 +454,6 @@ export function PluginDetailDialog({
             关闭
           </button>
         </div>
-      </div>
 
       {pending && (
         <ConfirmDialog
@@ -428,6 +490,8 @@ export function PluginDetailDialog({
           </p>
         </ConfirmDialog>
       )}
-    </div>
+    </>
   );
 }
+
+

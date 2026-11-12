@@ -1,6 +1,9 @@
 "use strict";
 /**
- * 选装模块包的下载（主进程）。
+ * 选装 Python 引擎包的下载（主进程）。
+ *
+ * 只服务信息中枢引擎的补下载（web 模块体系已下线）：`infohub-engine.js` 在
+ * `<userData>/modules` 里没找到目标版本时，按 id@version 从更新源取 `module.tgz`。
  *
  * 只负责「把字节拿下来」，验签与解包在 `module-package.js` / `module-store.js`。
  * 支持三种来源，便于发布与本机自检共用同一条路：

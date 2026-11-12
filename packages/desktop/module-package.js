@@ -1,6 +1,11 @@
 "use strict";
 /**
- * 选装模块包（`module.tgz`）的读取与验签。
+ * 选装 Python 引擎包（`module.tgz`）的读取与验签。
+ *
+ * ★ 与已下线的 web 模块体系无关：这里的「模块」特指信息中枢的 Python 引擎包
+ *   （页面经 app:// 加载的宿主式模块已整体下线，module-installer.js 已删除）。
+ *   保留这条链路是因为 `infohub-engine.js` 仍靠它验签/安装引擎包——
+ *   沙箱插件的 permissions.infohub 依赖宿主引擎可用。
  *
  * ## 为什么不是界面插件包
  * 界面插件（`package.tgz`）跑在 sandbox 里、只有页面与桌面小组件，20MB 解包上限

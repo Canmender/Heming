@@ -197,7 +197,11 @@ describe("字体与排版 token（index.css 源码守卫）", () => {
     ]) {
       expect(css).toContain(cls);
     }
-    expect(css).toMatch(/\.ui-page-title\s*\{[^}]*text-\[18px\][^}]*leading-\[26px\]/);
-    expect(css).toMatch(/\.ui-caption\s*\{[^}]*text-\[11px\][^}]*leading-\[17px\]/);
+    // d.138 尺度重定：页标题 18/26 → 28/36，说明文字 12 → 14，正文 13 → 14。
+    // 目标不是「档位更多」而是「档距拉开」：标题至少是正文的 2.0 倍。
+    expect(css).toMatch(/\.ui-page-title\s*\{[^}]*text-\[28px\][^}]*leading-\[36px\]/);
+    expect(css).toMatch(/\.ui-page-sub\s*\{[^}]*text-\[14px\][^}]*leading-\[22px\]/);
+    expect(css).toMatch(/\.ui-body\s*\{[^}]*text-\[14px\][^}]*leading-\[22px\]/);
+    expect(css).toMatch(/\.ui-caption\s*\{[^}]*text-\[12px\][^}]*leading-\[18px\]/);
   });
 });

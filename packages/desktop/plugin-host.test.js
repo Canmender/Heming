@@ -297,6 +297,9 @@ function makeHost(overrides = {}) {
     spawn: overrides.spawn || (() => { throw new Error("测试未预期启动引擎"); }),
     bundledPythonPath: overrides.bundledPythonPath === undefined ? "/tmp/python" : overrides.bundledPythonPath,
     getKbRoots: overrides.getKbRoots,
+    // contract §3：widget 桥的两条外部边界（默认不接；要测的用例自己注入）
+    infohubRequest: overrides.infohubRequest,
+    notifyPlugin: overrides.notifyPlugin,
     openPage: (payload) => openedPages.push(payload),
     log: (line) => logs.push(line),
     setTimeout: (fn) => { fn(); return 1; },
@@ -1536,5 +1539,280 @@ test("页面视图：主题切换按现有 widget:event 通道推送给页面（
   second.host.start();
   await second.host.pageMount({ id: "acme.page", rect: {} });
   assert.equal(second.host.publish({ kind: "theme", theme: "dark" }), "no-target");
+});
+
+/* ───────────────── 沙箱 bundle 插件：后台常驻页 / 首页卡片 / 信息中枢 / 通知 ───────────────── */
+
+/** 只声明后台常驻页 + 首页卡片的记录（不声明 desktopWidget，避免顺带建托盘窗口）。 */
+function backgroundRecord(overrides = {}) {
+  return {
+    id: "acme.bg",
+    name: "自动化",
+    version: "1.0.0",
+    enabled: true,
+    permissions: { infohub: true, notify: true },
+    background: { entry: "files/background.html" },
+    homeCards: [
+      {
+        id: "brief",
+        title: "今日简报",
+        summary: "每天 8 点汇总",
+        icon: "assets/brief.png",
+        page: "plugin:acme.bg",
+        primary: "等待第一次汇总",
+      },
+    ],
+    installedAt: "2026-11-07T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function backgroundStore(overrides = {}) {
+  const store = makeStore();
+  store.setRecords([backgroundRecord(overrides)]);
+  return store;
+}
+
+/** 假主窗：记录收到的事件（首页卡片广播 / 插件通知）。 */
+function fakeCardMainWindow() {
+  const sent = [];
+  return {
+    sent,
+    window: {
+      isDestroyed: () => false,
+      webContents: {
+        isDestroyed: () => false,
+        send: (ch, payload) => sent.push({ ch, payload }),
+      },
+    },
+  };
+}
+
+test("后台常驻页：enabled 且声明 background 时建隐藏窗口（沙箱 + background 标记），停用即销毁", async () => {
+  const store = backgroundStore();
+  const { host, created, logs } = makeHost({ store });
+  host.start();
+
+  assert.equal(host.backgroundCount, 1);
+  const win = onlyWindow(created);
+  assert.equal(win.opts.show, false);
+  assert.equal(win.opts.skipTaskbar, true);
+  assert.equal(win.opts.webPreferences.preload, "/tmp/widget-preload.js");
+  assert.equal(win.opts.webPreferences.sandbox, true);
+  assert.equal(win.opts.webPreferences.backgroundThrottling, false);
+  assert.deepEqual(win.opts.webPreferences.additionalArguments, ["--heming-widget-mode=background"]);
+  assert.equal(win._url, "widget://acme.bg/files/background.html");
+  // 隐藏窗口：用户看不见，也不进任务栏
+  assert.equal(win._visible, false);
+
+  // 同一份 widget 桥照常可用（data API 走 withRuntimeOrPage 的 sender 反查）
+  const event = { sender: win.webContents };
+  invokeChannel("widget:data-set", event, { key: "cursor", value: { at: 1 } });
+  assert.deepEqual(store.readData("acme.bg", "cursor"), { at: 1 });
+
+  // 停用 → 下一轮对账立即销毁，不留孤儿渲染进程
+  store.setRecords([backgroundRecord({ enabled: false })]);
+  host.reconcile();
+  assert.equal(host.backgroundCount, 0);
+  assert.equal(win._destroyed, true);
+
+  assert.ok(logs.some((line) => line.includes("后台常驻页已启动")));
+});
+
+test("后台常驻页：版本或入口变化时重建；destroyAll 统一关闭", () => {
+  const store = backgroundStore();
+  const { host, created } = makeHost({ store });
+  host.start();
+  const first = created[0];
+
+  store.setRecords([backgroundRecord({ version: "2.0.0" })]);
+  host.reconcile();
+  assert.equal(first._destroyed, true);
+  assert.equal(host.backgroundCount, 1);
+  assert.equal(created.length, 2);
+  assert.equal(created[1]._url, "widget://acme.bg/files/background.html");
+
+  // 入口也变了：旧窗销毁、新窗按新入口加载
+  store.setRecords([backgroundRecord({ version: "2.0.0", background: { entry: "files/next.html" } })]);
+  host.reconcile();
+  assert.equal(created[1]._destroyed, true);
+  assert.equal(created[2]._url, "widget://acme.bg/files/next.html");
+
+  host.destroyAll();
+  assert.equal(host.backgroundCount, 0);
+  assert.equal(created[2]._destroyed, true);
+});
+
+test("后台常驻页：没有模块时不建（只认 enabled + 无错误 + 有 background.entry）", () => {
+  const store = makeStore();
+  store.setRecords([
+    backgroundRecord({ enabled: false }),
+    backgroundRecord({ id: "acme.broken", error: "插件文件缺失，请重新安装" }),
+    { ...backgroundRecord({ id: "acme.nobg" }), background: null },
+  ]);
+  const { host, created } = makeHost({ store });
+  host.start();
+  assert.equal(host.backgroundCount, 0);
+  assert.equal(created.length, 0);
+});
+
+test("homeCards：只收启用插件，text 缺省用清单 primary，homeCardSet 写盘后覆盖生效", async () => {
+  const store = backgroundStore();
+  const { host, created } = makeHost({ store });
+  host.start();
+
+  const before = host.homeCards();
+  assert.equal(before.length, 1);
+  assert.deepEqual(before[0], {
+    pluginId: "acme.bg",
+    pluginName: "自动化",
+    id: "brief",
+    title: "今日简报",
+    summary: "每天 8 点汇总",
+    icon: "assets/brief.png",
+    page: "plugin:acme.bg",
+    text: "等待第一次汇总",
+    detail: "",
+    badge: "",
+  });
+
+  const result = await invokeChannel("widget:homecard-set", { sender: created[0].webContents }, {
+    cardId: "brief",
+    patch: { text: "3 条待办", badge: "3" },
+  });
+  assert.equal(result.ok, true);
+  // 覆盖值落在插件数据目录的 homecards.json（卸载时随 data/ 一起清理）
+  assert.deepEqual(store.readData("acme.bg", "homecards"), { brief: { text: "3 条待办", badge: "3" } });
+  assert.equal(host.homeCards()[0].text, "3 条待办");
+  assert.equal(host.homeCards()[0].badge, "3");
+
+  // 停用后首页不再出现这张卡（不能留一个点不开的死链）
+  store.setRecords([backgroundRecord({ enabled: false })]);
+  assert.deepEqual(host.homeCards(), []);
+});
+
+test("homecard-set：写盘后广播给主窗，只允许清单声明过的 cardId，主窗/陌生 sender 调不到", async () => {
+  const store = backgroundStore();
+  const main = fakeCardMainWindow();
+  const { host, created } = makeHost({ store, getMainWindow: () => main.window });
+  host.start();
+  const event = { sender: created[0].webContents };
+
+  const result = await invokeChannel("widget:homecard-set", event, {
+    cardId: "brief",
+    patch: { detail: "3 篇未读" },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.card.detail, "3 篇未读");
+  assert.deepEqual(main.sent.at(-1), { ch: "plugin:homecard", payload: result.card });
+
+  // 未声明的 cardId：拒绝（防止插件往首页塞清单里没有的卡片）
+  assert.throws(
+    () => invokeChannel("widget:homecard-set", event, { cardId: "nope", patch: { text: "x" } }),
+    /未声明首页卡片/,
+  );
+  // 不是 widget 视图的 webContents：fail-closed 返回 denied，且不会写盘
+  assert.equal(
+    invokeChannel("widget:homecard-set", { sender: { id: 1 } }, { cardId: "brief", patch: { text: "x" } }),
+    null,
+  );
+  assert.deepEqual(store.readData("acme.bg", "homecards"), { brief: { detail: "3 篇未读" } });
+});
+
+test("infohub-call：转发给注入的 request，超时收口（默认 60s / 1s..30min）", async () => {
+  const calls = [];
+  const infohubRequest = async (method, params, options) => {
+    calls.push({ method, params, options });
+    return { ok: true, method };
+  };
+  const store = backgroundStore();
+  const { host, created } = makeHost({ store, infohubRequest });
+  host.start();
+  const event = { sender: created[0].webContents };
+
+  assert.deepEqual(await invokeChannel("widget:infohub-call", event, { method: "ping" }), {
+    ok: true,
+    method: "ping",
+  });
+  assert.deepEqual(calls.at(-1), { method: "ping", params: undefined, options: { timeoutMs: 60_000 } });
+
+  await invokeChannel("widget:infohub-call", event, {
+    method: "sync",
+    params: { full: true },
+    timeoutMs: 999_999_999,
+  });
+  assert.deepEqual(calls.at(-1), {
+    method: "sync",
+    params: { full: true },
+    options: { timeoutMs: 30 * 60_000 },
+  });
+
+  // 小于下限抬到 1s（别让插件用 1ms 超时把桥打成失败）
+  await invokeChannel("widget:infohub-call", event, { method: "search", timeoutMs: 1 });
+  assert.deepEqual(calls.at(-1).options, { timeoutMs: 1_000 });
+
+  // shutdown 不在渲染层白名单（只有主进程可停引擎）
+  // handler 是同步抛错的（invoke 侧由 Electron 转成 reject），所以用 assert.throws 断言。
+  assert.throws(
+    () => invokeChannel("widget:infohub-call", event, { method: "shutdown" }),
+    /信息中枢不支持的方法/,
+  );
+});
+
+test("infohub-call / notify：未声明对应 permissions 一律拒绝（宿主不代插件越权）", async () => {
+  const store = backgroundStore({ permissions: {} });
+  const { host, created } = makeHost({
+    store,
+    infohubRequest: async () => ({ ok: true }),
+    notifyPlugin: () => ({ delivered: "renderer" }),
+  });
+  host.start();
+  const event = { sender: created[0].webContents };
+
+  assert.throws(
+    () => invokeChannel("widget:infohub-call", event, { method: "ping" }),
+    /缺少 permissions\.infohub/,
+  );
+  assert.throws(
+    () => invokeChannel("widget:notify", event, { title: "x" }),
+    /缺少 permissions\.notify/,
+  );
+});
+
+test("infohub / notify：宿主没接线时给可读错误（不是静默 no-op）", async () => {
+  const store = backgroundStore();
+  const { host, created } = makeHost({ store });
+  host.start();
+  const event = { sender: created[0].webContents };
+
+  assert.throws(
+    () => invokeChannel("widget:infohub-call", event, { method: "ping" }),
+    /信息中枢不可用/,
+  );
+  assert.throws(() => invokeChannel("widget:notify", event, { title: "x" }), /通知通道不可用/);
+});
+
+test("notify：把插件身份与正文一起交给注入的 notifyPlugin，返回投递方式", async () => {
+  const delivered = [];
+  const notifyPlugin = (payload) => {
+    delivered.push(payload);
+    return { delivered: "renderer" };
+  };
+  const store = backgroundStore();
+  const { host, created } = makeHost({ store, notifyPlugin });
+  host.start();
+
+  const result = await invokeChannel("widget:notify", { sender: created[0].webContents }, {
+    title: "汇总完成",
+    body: "3 条待办",
+    level: "warn",
+  });
+  assert.deepEqual(result, { ok: true, delivered: "renderer" });
+  assert.deepEqual(delivered.at(-1), {
+    pluginId: "acme.bg",
+    title: "汇总完成",
+    body: "3 条待办",
+    level: "warn",
+  });
 });
 

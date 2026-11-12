@@ -4,7 +4,6 @@ import { NotificationCenter, formatRelativeTime } from "./NotificationCenter.js"
 import { setNotificationStorage, useNotificationStore } from "../store/notifications.js";
 import { createMemoryStorage } from "../lib/memory/storage.js";
 import { useUiStore } from "../store/ui.js";
-import { useModuleStore } from "../lib/modules/store.js";
 import type { AppNotification } from "../store/notifications.js";
 
 function makeItem(overrides: Partial<AppNotification> = {}): AppNotification {
@@ -23,11 +22,7 @@ function makeItem(overrides: Partial<AppNotification> = {}): AppNotification {
 
 beforeEach(() => {
   localStorage.clear();
-  // 模块默认未安装：通知跳转要落到模块页，先装上幕僚与自动化
-  useModuleStore.getState().reset();
-  useModuleStore.getState().install("staff");
-  useModuleStore.getState().install("heming.infohub");
-  useModuleStore.getState().install("heming.automations");
+  // 通知跳转落点是插件页（plugin:heming.automations 等），由 store 直接给出
   setNotificationStorage(createMemoryStorage());
   useNotificationStore.setState({ items: [] });
   useUiStore.setState({
@@ -148,8 +143,8 @@ describe("通知中心面板", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
     fireEvent.click(screen.getByRole("button", { name: "打开通知：幕僚简报" }));
-    // d.134：幕僚简报并入自动化页的「简报」Tab
-    expect(useUiStore.getState().page).toBe("automations");
+    // d.134：幕僚简报并入自动化插件的「简报」Tab
+    expect(useUiStore.getState().page).toBe("plugin:heming.automations");
     expect(useUiStore.getState().automationTab).toBe("briefing");
   });
 
@@ -172,14 +167,13 @@ describe("通知中心面板", () => {
     expect(within(dialog).getByText("自动化")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "打开通知：「同步本机归档」执行失败" }));
 
-    expect(useUiStore.getState().page).toBe("automations");
+    expect(useUiStore.getState().page).toBe("plugin:heming.automations");
     expect(useUiStore.getState().automationFocusId).toBe("a1");
     // 不带会话跳转：自动化失败通知不是某条聊天记录
     expect(useUiStore.getState().activeConversationId).toBeNull();
   });
 
-  it("工作流失败通知点进去：进工作流页并投递定位意图（宿主不再 import 模块 store）", () => {
-    useModuleStore.getState().install("heming.automations");
+  it("工作流失败通知点进去：进自动化插件页并投递定位意图", () => {
     const workflowId = "w1";
     const item = makeItem({
       kind: "workflow",
@@ -197,7 +191,7 @@ describe("通知中心面板", () => {
     expect(within(dialog).getByText("工作流")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "打开通知：工作流「抓取接口」执行失败" }));
 
-    expect(useUiStore.getState().page).toBe("automations");
+    expect(useUiStore.getState().page).toBe("plugin:heming.automations");
     expect(useUiStore.getState().automationTab).toBe("workflows");
     // 宿主只投递一次性意图；自动化页加载后自己 select 并消费
     expect(useUiStore.getState().workflowFocusId).toBe(workflowId);
@@ -315,15 +309,15 @@ describe("通知中心面板", () => {
     }
   });
 
-  it("筛选后没有该类型通知：显示「该类型暂无通知」（不是全空态文案）", () => {
+  it("筛选后没有该类型通知：显示「还没有这类通知」（不是全空态文案）", () => {
     useNotificationStore.setState({ items: [makeItem({ kind: "task", title: "只有任务" })] });
     render(<NotificationCenter />);
     fireEvent.click(screen.getByRole("button", { name: "通知中心 1 条未读" }));
     const panel = screen.getByRole("dialog", { name: "通知中心" });
     fireEvent.click(within(panel).getByRole("button", { name: "幕僚" }));
-    expect(within(panel).getByText("该类型暂无通知")).toBeInTheDocument();
+    expect(within(panel).getByText("还没有这类通知")).toBeInTheDocument();
     expect(within(panel).queryByText("只有任务")).toBeNull();
-    expect(within(panel).queryByText(/还没有通知/)).toBeNull();
+    expect(within(panel).queryByText(/任务完成、需要确认的工具调用/)).toBeNull();
   });
 
   it("「全部已读」不受筛选影响：筛选到任务也能清掉全部未读", () => {

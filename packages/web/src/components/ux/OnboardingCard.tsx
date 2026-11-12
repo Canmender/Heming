@@ -17,6 +17,8 @@ export interface OnboardingCardProps {
 
 export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) {
   const doneCount = steps.filter((step) => step.done).length;
+  // 下一个该做的步骤：三张卡不再同等对待——已完成的是回执，下一步是唯一的主对象。
+  const nextIndex = steps.findIndex((step) => !step.done);
   return (
     <section
       aria-label="开始使用"
@@ -46,7 +48,11 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
             key={step.id}
             aria-label={`${step.title}${step.done ? "（已完成）" : "（未完成）"}`}
             className={`flex flex-col gap-1.5 rounded-lg border px-3 py-2.5 ${
-              step.done ? "border-[var(--success-line)] bg-[var(--success-soft)]" : "border-line-soft bg-[var(--subtle-2)]"
+              step.done
+                ? "border-[var(--success-line)] bg-[var(--success-soft)]"
+                : index === nextIndex
+                  ? "border-[var(--line-strong)] bg-[var(--surface)]"
+                  : "border-line-soft bg-[var(--subtle-2)]"
             }`}
           >
             <div className="flex items-center gap-2">
@@ -67,15 +73,22 @@ export function OnboardingCard({ steps, onGo, onDismiss }: OnboardingCardProps) 
                 </span>
               )}
             </div>
-            <p className="text-[11px] leading-4 text-muted">{step.description}</p>
-            <button
-              type="button"
-              disabled={step.done}
-              onClick={() => onGo(step.target)}
-              className={`ui-btn ui-btn-sm ui-btn-ghost mt-auto self-start disabled:cursor-default ${FOCUS_RING_TIGHT}`}
-            >
-              {step.done ? "已完成" : step.actionLabel}
-            </button>
+            {/* 已完成的步骤不该再读「在「智能体」页挑一个智能体，发第一句话」——
+                那是待办句式，勾了还这么写，等于让用户怀疑自己漏做了。 */}
+            <p className="text-[11px] leading-4 text-muted">
+              {step.done ? "这一步已经完成，不用再动。" : step.description}
+            </p>
+            {/* 已完成的步骤不再给按钮：右上「已完成」+ 下方一句回执已经足够，
+                再放一个灰色的「已完成」按钮是三处重复同一件事。 */}
+            {!step.done && (
+              <button
+                type="button"
+                onClick={() => onGo(step.target)}
+                className={`ui-btn ui-btn-sm ui-btn-ghost mt-auto self-start ${FOCUS_RING_TIGHT}`}
+              >
+                {step.actionLabel}
+              </button>
+            )}
           </li>
         ))}
       </ol>

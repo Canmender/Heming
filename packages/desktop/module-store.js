@@ -1,6 +1,10 @@
 "use strict";
 /**
- * 选装模块的落盘（`<userData>/modules`）。
+ * 选装 Python 引擎包的落盘（`<userData>/modules`）。
+ *
+ * ★ 只服务信息中枢引擎：web 模块体系（页面经 app:// 加载的宿主式模块）这一轮已整体
+ *   下线，module-installer.js 随之删除；保留本文件是因为 `infohub-engine.js` 仍靠它
+ *   安装/补下载/定位 Python 引擎包（沙箱插件的 permissions.infohub 依赖它）。别误删。
  *
  * 目录布局：
  * ```
@@ -25,10 +29,10 @@ const REGISTRY_FILE = "installed.json";
 const STAGING_DIR = ".staging";
 
 /**
- * 旧内置模块 id → 当前包 id（包 id 统一加 `heming.` 前缀的那次改名）。
+ * 旧引擎包 id → 当前包 id（包 id 统一加 `heming.` 前缀的那次改名）。
  *
- * 只迁移这两个：`staff` / `workflows` 仍是旧模块（只保留数据兼容），
- * 独立引擎包 `heming.infohub-engine` 是另一条历史方案，都不动。
+ * web 模块体系已下线，这里只为老用户机器上已装的记录服务：不迁移就会认为引擎
+ * 未安装、白白重新下载一遍。`heming.infohub-engine` 是更早的独立引擎包方案，不动。
  */
 const LEGACY_ID_ALIASES = new Map([
   ["infohub", "heming.infohub"],

@@ -114,7 +114,7 @@ export function NotificationCenter() {
       return;
     }
     if (item.kind === "staff") {
-      // 幕僚模块停用时落到插件页，而不是 setPage 后被路由重定向回主页
+      // 旧幕僚入口统一落到自动化插件的「简报」Tab（openStaff 内部处理），不会被路由折回主页
       useUiStore.getState().openStaff();
       return;
     }
@@ -255,9 +255,9 @@ export function NotificationCenter() {
                 任务完成、需要确认的工具调用和幕僚简报会出现在这里。
               </p>
             ) : visible.length === 0 ? (
-              <p className="px-3 py-6 text-center text-[12px] text-muted">该类型暂无通知</p>
+              <p className="px-3 py-6 text-center text-[12px] text-muted">还没有这类通知</p>
             ) : (
-              <ul className="divide-y divide-[#f0f0f0]">
+              <ul className="divide-y divide-line-soft">
                 {visible.map((item) => (
                   <li key={item.id} className={`px-3 py-2 ${item.read ? "" : "bg-[var(--subtle)]"}`}>
                     <div className="flex items-start gap-2">

@@ -44,8 +44,6 @@ import { RemovePluginDialog } from "./plugins/RemovePluginDialog.js";
 import { PluginStats } from "./plugins/PluginStats.js";
 import { SystemPluginCard } from "./plugins/SystemPluginCard.js";
 import { PluginToolPanel } from "./plugins/PluginToolPanel.js";
-import { PluginGroupCard } from "./plugins/PluginGroupCard.js";
-import { installPluginPackage } from "../lib/modules/cloudInstall.js";
 import { SkillsView } from "./SkillsPage.js";
 import { InterfacesView } from "./InterfacesPage.js";
 import {
@@ -56,8 +54,6 @@ import {
   installResultMessage,
 } from "./plugins/viewModel.js";
 import { BTN_GHOST_SM, ERROR_TEXT, HINT, OK_TEXT } from "./plugins/shared.js";
-import { BUILTIN_MODULES, MODULE_BY_ID, pluginGroupOf, type ModuleId } from "../lib/modules/registry.js";
-import { useModuleStore } from "../lib/modules/store.js";
 import { refreshWidgets, useWidgetsStore, widgetsAvailable } from "../lib/widgets/store.js";
 import { pluginPageEntries } from "../lib/pages/registry.js";
 import {
@@ -71,9 +67,10 @@ import { UnitDiagnostics } from "./plugins/UnitDiagnostics.js";
 /**
  * 插件区 · 统一能力中枢。
  *
- * 插件 = 能力包：技能 / 工具 / MCP 服务 / 命令，外加随应用发布的**可安装内置模块**
- * （幕僚 / 信息中枢 / 自动化）。本页把此前散在插件区、技能区、接口区的口径合并成
- * 三个 Tab（插件 / 技能 / MCP），数据全部只读本机（插件存储、技能池、能力目录、MCP 注册表），不发起网络请求。
+ * 插件 = 能力包：技能 / 工具 / MCP 服务 / 命令，外加带页面的沙箱 bundle 插件
+ * （信息中枢 / 自动化等，由 `plugin-kit/plugins` 提供）。本页把此前散在插件区、技能区、
+ * 接口区的口径合并成三个 Tab（插件 / 技能 / MCP），数据全部只读本机（插件存储、技能池、
+ * 能力目录、MCP 注册表），不发起网络请求。
  *
  * 市场页与模块页已删除：市场只保留「仓库」一条安装路径（同一份云端清单），
  * 官方页面插件、声明式插件与界面插件统一放在「插件」Tab（可安装/删除/启停/打开页面），全部由我们的服务器仓库分发。
@@ -98,13 +95,11 @@ const TABS: { key: TabKey; label: string }[] = [
  * 宿主页视图意图 → 本页 Tab。
  *
  * 一次性意图由 `store/ui.ts` 的 `pageView` 投递：旧链接 `setPage("skills")` /
- * `setPage("interfaces")` 会被折叠成「插件 + 对应视图」；旧的 `modules` 意图
- * （模块页删除前）落到插件 Tab——模块卡就在那里。
+ * `setPage("interfaces")` 会被折叠成「插件 + 对应视图」。
  */
 const VIEW_TO_TAB: Partial<Record<PageView, TabKey>> = {
   skills: "skills",
   interfaces: "mcp",
-  modules: "plugins",
   plugins: "plugins",
 };
 
@@ -178,7 +173,7 @@ export function PluginsPage({
 
   // 命令面板「插件」结果跳转：打开该插件详情并短暂高亮卡片（d.61 起的既有行为）。
   // d.108：`open-plugin` 意图也被 target=unit 复用（id 是单元 id）；声明式插件仍开详情，
-  // 其它来源（系统 / 内置模块 / 界面插件）没有插件详情，改为在统一单元列表里定位。
+  // 其它来源（系统 / 界面插件）没有插件详情，改为在统一单元列表里定位。
   const paletteIntent = useUiStore((s) => s.paletteIntent);
   const consumePaletteIntent = useUiStore((s) => s.consumePaletteIntent);
   const [highlightPluginId, setHighlightPluginId] = useState<string | null>(null);
@@ -237,19 +232,11 @@ export function PluginsPage({
   const system = capabilities.system;
 
   /**
-   * d.105 统一能力单元：系统 / 内置模块 / 声明式插件 / 界面插件。
+   * d.105 统一能力单元：系统 / 声明式插件 / 界面插件。
    *
    * 数据源全部来自本页实际使用的 store（注入 props 优先），所以测试夹具与宿主一致的；
-   * 模块/界面插件用 zustand selector 订阅，任一变化都会触发下面的投影重算。
+   * 界面插件用 zustand selector 订阅，任一变化都会触发下面的投影重算。
    */
-  const moduleEnabled = useModuleStore((s) => s.enabled);
-  const moduleInstalled = useModuleStore((s) => s.installed);
-  const installModule = useModuleStore((s) => s.install);
-  /** 只有「已安装」的模块才进统一列表；未安装的模块不渲染（原生应用不携带模块）。 */
-  const installedModules = useMemo(
-    () => BUILTIN_MODULES.filter((mod) => moduleInstalled[mod.id]),
-    [moduleInstalled],
-  );
   const widgetsRecords = useWidgetsStore((s) => s.records);
   /**
    * d.124：插件页面入口（与导航轨、App 路由、设置区导航说明读**同一份注册表投影**）。
@@ -271,13 +258,10 @@ export function PluginsPage({
     () =>
       buildUnitStatuses({
         system,
-        modules: installedModules,
-        moduleEnabled,
-        moduleInstalled,
         plugins: list,
         widgets: widgetsRecords,
       }),
-    [system, installedModules, moduleEnabled, moduleInstalled, list, widgetsRecords],
+    [system, list, widgetsRecords],
   );
 
   const stats = useMemo(
@@ -599,7 +583,9 @@ export function PluginsPage({
         })}
         <span className="ml-auto self-center ui-caption">
           {tab === "plugins"
-            ? `已启用 ${enabledCount}/${list.length} 个插件 · 全部由我们的服务器仓库分发`
+            ? list.length === 0
+              ? "还没有安装插件 · 内置能力随应用版本更新"
+              : `已启用 ${enabledCount}/${list.length} 个插件 · 来自身份已校验的插件仓库`
             : tab === "skills"
               ? "和鸣自带 + 社区（论坛）快捷安装"
               : "和鸣自带/预置 + 注册表社区安装 · 工具授权也在本页"}
@@ -663,7 +649,7 @@ export function PluginsPage({
                 </div>
               </div>
             )}
-            {/* d.105：四类来源（系统 / 内置模块 / 声明式插件 / 界面插件）统一读投影。
+            {/* d.105：三类来源（系统 / 声明式插件 / 界面插件）统一读投影。
                 系统卡与插件卡沿用既有组件，详情/启停/卸载入口不变；其余来源用默认行。 */}
             <UnitListView
               statuses={unitStatuses}
@@ -674,14 +660,6 @@ export function PluginsPage({
               renderUnit={(status) => {
                 const unit = status.unit;
                 if (unit.source === "system") return <SystemPluginCard system={system} />;
-                // 内置模块（幕僚 / 信息中枢 / 自动化）：可安装 / 删除 / 启停，投影里已按顺序排好。
-                if (unit.source === "builtin") {
-                  const mod = MODULE_BY_ID[unit.id as ModuleId];
-                  const group = mod ? pluginGroupOf(mod.id) : null;
-                  // 一个插件贡献多个页面：只在组首模块渲染一张插件卡，其余单元不重复出卡。
-                  if (!mod || !group || group.moduleIds[0] !== mod.id) return null;
-                  return <PluginGroupCard group={group} />;
-                }
                 if (unit.source !== "package") return null;
                 const plugin = plugins.get(unit.id);
                 if (!plugin) return null;
@@ -708,7 +686,7 @@ export function PluginsPage({
             {list.length === 0 && (
               <section
                 className="mt-3 flex flex-col items-center gap-2 rounded-xl border border-line-soft bg-[var(--surface)] py-10 text-center shadow-card"
-                aria-label="暂无插件"
+                aria-label="插件列表为空"
               >
                 <span className="plugin-icon-tile mb-1 h-11 w-11" aria-hidden="true">
                   <PackageIcon width={20} height={20} />
@@ -782,12 +760,6 @@ export function PluginsPage({
           onLoad={loadFromRepository}
           onClose={() => setRepoDialogOpen(false)}
           onError={(message) => setMsg({ kind: "error", text: message })}
-          moduleInstalled={moduleInstalled}
-          onInstallModule={async (id, version) => {
-            await installPluginPackage(id, version);
-            installModule(id);
-            bump();
-          }}
         />
       )}
 

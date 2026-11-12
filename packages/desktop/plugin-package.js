@@ -72,6 +72,16 @@ const PAGE_SUMMARY_MAX = 200;
 /** 宿主图标词表 id 的形状（与 shared `PAGE_ICON_RE` 同源；未知 id 由 web 侧回落 package）。 */
 const PAGE_ICON_RE = /^[a-z][a-z0-9-]{0,31}$/;
 
+/* ── 首页卡片 / 后台常驻页（沙箱 bundle 插件，contract §1） ── */
+/** 单插件首页卡片上限：首页是导航区，不是列表页。 */
+const MAX_HOME_CARDS = 8;
+/** 卡片标题上限（与导航项标题同一口径）。 */
+const HOME_CARD_TITLE_MAX = 40;
+/** 卡片副标题上限。 */
+const HOME_CARD_SUMMARY_MAX = 120;
+/** 卡片初始文案上限：运行期由 homeCardSet 覆盖，这里只管清单里的初始值。 */
+const HOME_CARD_TEXT_MAX = 200;
+
 /** sha256 十六进制（整包字节的完整性指纹；发布侧算的也是这个）。 */
 function sha256Hex(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -215,6 +225,122 @@ function normalizePageSpec(raw) {
 
   if (errors.length > 0) return { ok: false, errors, page: null };
   return { ok: true, errors: [], page: { title, icon, summary, entry } };
+}
+
+/**
+ * 归一化首页卡片贡献（`contributions.homeCards[]`，contract §1）。
+ *
+ * 首页卡片由**宿主渲染**（不是 React 组件）：清单只提供 id/标题/图标/入口与初始文案，
+ * 运行期文案由插件 `homeCardSet` 覆盖。所以这里校验的是「宿主敢展示什么」：
+ * 文案长度有上限，`page` 只能指向本插件自己的页面——卡片是导航入口，绝不能让一个
+ * 插件的清单把用户带到别人的页面上。
+ *
+ * 错误一律中文 + 字段路径 `contributions.homeCards[i].*`，可直接展示给插件作者。
+ *
+ * @param {unknown} raw 清单里的 `contributions.homeCards`
+ * @param {string} [pluginId] 本插件 id（用于 `page` 的缺省与归属校验）
+ * @returns {{ ok: boolean, errors: string[], cards: object[] }}
+ */
+function normalizeHomeCards(raw, pluginId) {
+  const at = "contributions.homeCards";
+  if (raw === undefined) return { ok: true, errors: [], cards: [] };
+  if (!Array.isArray(raw)) return { ok: false, errors: [`${at} 必须是数组`], cards: [] };
+  if (raw.length > MAX_HOME_CARDS) {
+    return { ok: false, errors: [`${at} 最多 ${MAX_HOME_CARDS} 张`], cards: [] };
+  }
+  const errors = [];
+  const cards = [];
+  const seen = new Set();
+  raw.forEach((item, index) => {
+    const where = `${at}[${index}]`;
+    if (!isPlainObject(item)) {
+      errors.push(`${where} 必须是对象`);
+      return;
+    }
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    if (!ID_RE.test(id)) {
+      errors.push(`${where}.id 必须是小写字母/数字/点/下划线/连字符（≤64）`);
+      return;
+    }
+    if (seen.has(id)) {
+      errors.push(`${where}.id 与前面的卡片重复：${id}`);
+      return;
+    }
+    seen.add(id);
+
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    if (!title || title.length > HOME_CARD_TITLE_MAX) {
+      errors.push(`${where}.title 必须是 1–${HOME_CARD_TITLE_MAX} 字的文本`);
+    }
+
+    let summary = "";
+    if (item.summary !== undefined) {
+      if (typeof item.summary !== "string" || item.summary.trim().length > HOME_CARD_SUMMARY_MAX) {
+        errors.push(`${where}.summary 必须是不超过 ${HOME_CARD_SUMMARY_MAX} 字的文本`);
+      } else {
+        summary = item.summary.trim();
+      }
+    }
+
+    let icon = "";
+    if (item.icon !== undefined) {
+      if (typeof item.icon !== "string" || !PAGE_ICON_RE.test(item.icon.trim())) {
+        errors.push(`${where}.icon 只接受宿主图标 id（小写字母/数字/连字符，≤32）`);
+      } else {
+        icon = item.icon.trim();
+      }
+    }
+
+    let primary = "";
+    if (item.primary !== undefined) {
+      if (typeof item.primary !== "string" || item.primary.trim().length > HOME_CARD_TEXT_MAX) {
+        errors.push(`${where}.primary 必须是不超过 ${HOME_CARD_TEXT_MAX} 字的文本`);
+      } else {
+        primary = item.primary.trim();
+      }
+    }
+
+    // page 缺省指向本插件；写了就必须是 plugin:<本插件 id>（不能借卡片跳去别人的页面）
+    let page = typeof pluginId === "string" && pluginId ? `plugin:${pluginId}` : "";
+    if (item.page !== undefined) {
+      const target = typeof item.page === "string" ? item.page.trim() : "";
+      if (!target) errors.push(`${where}.page 必须是非空文本`);
+      else if (pluginId && target !== `plugin:${pluginId}`) {
+        errors.push(`${where}.page 只能是 plugin:${pluginId}（首页卡片只能打开自己的页面）`);
+      } else {
+        page = target;
+      }
+    }
+
+    cards.push({ id, title, summary, icon, page, primary });
+  });
+  if (errors.length > 0) return { ok: false, errors, cards: [] };
+  return { ok: true, errors: [], cards };
+}
+
+/**
+ * 归一化后台常驻页（`contributions.background`，contract §1）。
+ *
+ * 插件启用时宿主会用一个**隐藏窗口**加载这个入口（`show:false`，用户看不见），
+ * 适合定时任务这种「不需要界面但要常驻」的逻辑。入口与页面入口同口径：
+ * 必须是包内 `files/**` 的相对 `.html`，存在性在 `readPackage` 里对着文件清单再查。
+ *
+ * @param {unknown} raw 清单里的 `contributions.background`
+ * @returns {{ ok: boolean, errors: string[], background: {entry:string}|null }}
+ */
+function normalizeBackgroundSpec(raw) {
+  const at = "contributions.background";
+  if (raw === undefined) return { ok: true, errors: [], background: null };
+  if (!isPlainObject(raw)) return { ok: false, errors: [`${at} 必须是对象`], background: null };
+  const errors = [];
+  const entry = normalizeRelativeAssetPath(raw.entry);
+  if (!entry || !entry.endsWith(".html")) {
+    errors.push(
+      `${at}.entry 必须是包内相对 .html 入口（禁绝对路径 / .. / 反斜杠 / 协议前缀，≤200 字符）`,
+    );
+  }
+  if (errors.length > 0) return { ok: false, errors, background: null };
+  return { ok: true, errors: [], background: { entry } };
 }
 
 /** 引擎入口/依赖目录的最大长度（清单是落盘文件，别让它把环境变量撑爆）。 */
@@ -403,6 +529,18 @@ function validateBundleManifest(raw, options = {}) {
     errors.push("permissions.kb 只对界面插件（distribution: \"bundle\"）有意义");
   }
   const kb = permissionsRaw.kb === true;
+  // 沙箱 bundle 插件（contract §2）：信息中枢调用与插件通知同样是声明制权限。
+  // 两者都依赖 widget 桥，只有 bundle 有入口；声明式包写了也走不到，按清单错误早报。
+  for (const name of ["infohub", "notify"]) {
+    if (permissionsRaw[name] !== undefined && typeof permissionsRaw[name] !== "boolean") {
+      errors.push(`permissions.${name} 必须是 boolean（默认 false）`);
+    }
+    if (permissionsRaw[name] === true && distribution !== "bundle") {
+      errors.push(`permissions.${name} 只对界面插件（distribution: "bundle"）有意义`);
+    }
+  }
+  const infohub = permissionsRaw.infohub === true;
+  const notify = permissionsRaw.notify === true;
 
   /* ── contributions：只允许 commands + desktopWidgets + page（界面插件不贡献技能/服务/工具束） ── */
   const contributionsRaw = isPlainObject(raw.contributions) ? raw.contributions : {};
@@ -475,6 +613,21 @@ function validateBundleManifest(raw, options = {}) {
     if (!normalized.ok) errors.push(...normalized.errors);
     else page = normalized.page;
   }
+  // 首页卡片（contract §1）：宿主渲染的导航卡片，只允许指向本插件自己的页面。
+  let homeCards = [];
+  if (contributionsRaw.homeCards !== undefined) {
+    const normalized = normalizeHomeCards(contributionsRaw.homeCards, typeof raw.id === "string" ? raw.id : "");
+    if (!normalized.ok) errors.push(...normalized.errors);
+    else homeCards = normalized.cards;
+  }
+
+  // 后台常驻页（contract §1）：enabled 时宿主建隐藏窗口加载这个入口。
+  let background = null;
+  if (contributionsRaw.background !== undefined) {
+    const normalized = normalizeBackgroundSpec(contributionsRaw.background);
+    if (!normalized.ok) errors.push(...normalized.errors);
+    else background = normalized.background;
+  }
   if (!widget && !page) {
     errors.push(
       'distribution: "bundle" 必须声明至少 1 个 contributions.desktopWidgets 或 contributions.page（否则就是纯声明式包）',
@@ -502,6 +655,8 @@ function validateBundleManifest(raw, options = {}) {
     eval: permissionsRaw.eval === true,
     chat,
     kb,
+    infohub,
+    notify,
   };
 
   return {
@@ -510,6 +665,8 @@ function validateBundleManifest(raw, options = {}) {
     manifest: raw,
     widget,
     page,
+    background,
+    homeCards,
     engine,
     permissions,
     distribution,
@@ -653,6 +810,7 @@ function readPackage(bytes, options = {}) {
   const manifest = manifestCheck.manifest;
   const widget = manifestCheck.widget;
   const page = manifestCheck.page;
+  const background = manifestCheck.background;
   const errors = [];
   // entry 必须存在于包里（规格 §2.1）：一个不存在的 entry 会变成一块打不开的透明窗
   if (widget && !paths.has(widget.entry)) errors.push(`entry 不存在于插件包：${widget.entry}`);
@@ -662,6 +820,10 @@ function readPackage(bytes, options = {}) {
   }
   // d.124：页面入口同样必须在包内——安装时校验，别等到用户点进页面才白屏。
   if (page && !paths.has(page.entry)) errors.push(`页面入口不存在于插件包：${page.entry}`);
+  // 后台常驻页同理：入口不在包里，插件启用后隐藏窗口只会加载失败（而且用户看不见）。
+  if (background && !paths.has(background.entry)) {
+    errors.push(`后台页入口不存在于插件包：${background.entry}`);
+  }
   // d.125：引擎入口必须在包内（解释器由宿主固定，缺文件只会让页面永久「引擎启动失败」）。
   const engine = manifestCheck.engine;
   if (engine && !paths.has(engine.entry)) errors.push(`引擎入口不存在于插件包：${engine.entry}`);
@@ -683,6 +845,8 @@ function readPackage(bytes, options = {}) {
     manifest,
     widget,
     page,
+    background,
+    homeCards: manifestCheck.homeCards,
     engine,
     permissions: manifestCheck.permissions,
     signed: manifestCheck.signed === true,
@@ -721,6 +885,8 @@ module.exports = {
   validateBundleManifest,
   normalizeBundleCommands,
   normalizePageSpec,
+  normalizeHomeCards,
+  normalizeBackgroundSpec,
   normalizeEngineSpec,
   readPackage,
   packPackage,

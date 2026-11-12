@@ -89,8 +89,7 @@ const TAR_EXCLUDES = [
   "packages/desktop/runtime",
   "packages/desktop/web-dist",
   /*
-   * 云端只用三样东西：`packages/web/dist`（静态页）、`packages/{server,shared}/dist`（node 进程）、
-   * `module-catalog`（目录接口的数据源）。
+   * 云端只用两样东西：`packages/web/dist`（静态页）与 `packages/{server,shared}/dist`（node 进程）。
    * 桌面侧资源、vendor 源码与引擎构建缓存都不需要上云——它们曾把部署包从 5MB 量级撑到
    * 183MB（`packages/desktop/resources/magpie` 的 magpie-core.exe ×2 就占约 144MB），
    * 每次上传与 `keep` 都白花磁盘与时间。加「只在本地用」的大目录时，先把裸段名加到这里，
@@ -114,7 +113,6 @@ const TAR_EXCLUDES = [
   "vendor",
   ".tmp-engine-lib",
   ".tmp-engine-wheels",
-  ".tmp-module-dl",
   ".ui-check-tmp",
   "@hemingdesktop",
 ];

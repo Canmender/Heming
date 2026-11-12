@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { Agent } from "@heming/shared";
 import { Avatar } from "../Avatar.js";
 import { PlusIcon, SearchIcon } from "../icons.js";
+import { EmptyState } from "../ui/EmptyState.js";
 
 /**
  * 智能体 Tab · 名册（d.126 阶段 B）。
@@ -111,38 +112,44 @@ export function AgentRosterView({
         ) : null}
 
         {agents.length === 0 ? (
-          <div className="ui-empty mt-8">
-            <p className="ui-empty-title">还没有智能体</p>
-            <p className="ui-empty-desc">从模板开始最快：选个预设、改个名字就能用。</p>
-            <div className="ui-empty-actions">
-              <button
-                type="button"
-                onClick={() => onCreate("name")}
-                className="ui-btn ui-btn-md ui-btn-primary"
-              >
-                新建智能体
-              </button>
-              <button
-                type="button"
-                onClick={() => onCreate("templates")}
-                className="ui-btn ui-btn-md ui-btn-ghost"
-              >
-                从模板创建
-              </button>
-            </div>
-          </div>
+          <EmptyState
+            className="mt-8"
+            title="还没有智能体"
+            desc="从模板开始最快：选个预设、改个名字就能用。"
+            actions={
+              <>
+                <button
+                  type="button"
+                  onClick={() => onCreate("name")}
+                  className="ui-btn ui-btn-md ui-btn-primary"
+                >
+                  新建智能体
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCreate("templates")}
+                  className="ui-btn ui-btn-md ui-btn-ghost"
+                >
+                  从模板创建
+                </button>
+              </>
+            }
+          />
         ) : filtered.length === 0 ? (
-          <div className="ui-empty mt-8">
-            <p className="ui-empty-title">没有匹配的智能体</p>
-            <p className="ui-empty-desc">换个名字试试，或清空关键词。</p>
-            <button
-              type="button"
-              className="ui-btn ui-btn-md ui-btn-ghost"
-              onClick={() => setQuery("")}
-            >
-              清空搜索
-            </button>
-          </div>
+          <EmptyState
+            className="mt-8"
+            title="没有匹配的智能体"
+            desc="换个名字试试，或清空关键词。"
+            actions={
+              <button
+                type="button"
+                className="ui-btn ui-btn-md ui-btn-ghost"
+                onClick={() => setQuery("")}
+              >
+                清空搜索
+              </button>
+            }
+          />
         ) : (
           groups
             .filter((g) => g.items.length > 0)
@@ -162,18 +169,24 @@ export function AgentRosterView({
                       >
                         <button
                           type="button"
-                          aria-label={`与智能体 ${agent.name} 对话`}
+                          // d.138：与选择页同一口径——没绑模型时头部不再假装能开聊，直接去编辑器选模型。
+                          aria-label={
+                            bound ? `与智能体 ${agent.name} 对话` : `编辑智能体 ${agent.name}：先绑定模型`
+                          }
                           disabled={busy}
-                          onClick={() => onStartChat(agent.id)}
+                          onClick={() => (bound ? onStartChat(agent.id) : onEdit(agent))}
                           className="flex min-w-0 items-start gap-2.5 text-left disabled:opacity-60"
                         >
-                          <Avatar
-                            user={{
-                              displayName: agent.name,
-                              avatar: agent.avatar ?? undefined,
-                            }}
-                            size={32}
-                          />
+                          {/* 头像单字会被读屏拼进按钮名（「和和小鸣…」），按钮已有 aria-label，头像纯装饰 */}
+                          <span aria-hidden="true" className="shrink-0">
+                            <Avatar
+                              user={{
+                                displayName: agent.name,
+                                avatar: agent.avatar ?? undefined,
+                              }}
+                              size={32}
+                            />
+                          </span>
                           <span className="min-w-0 flex-1">
                             <span className="ui-body-sm block truncate font-medium">
                               {agent.name}
@@ -209,15 +222,19 @@ export function AgentRosterView({
                             >
                               编辑
                             </button>
-                            <button
-                              type="button"
-                              aria-label={`与智能体 ${agent.name} 开始对话`}
-                              disabled={busy}
-                              onClick={() => onStartChat(agent.id)}
-                              className="ui-btn ui-btn-sm ui-btn-ghost"
-                            >
-                              {busy ? "打开中…" : "开始对话"}
-                            </button>
+                            {bound && (
+                              <button
+                                type="button"
+                                aria-label={`与智能体 ${agent.name} 开始对话`}
+                                disabled={busy}
+                                onClick={() => onStartChat(agent.id)}
+                                className="ui-btn ui-btn-sm ui-btn-ghost"
+                              >
+                                {busy ? "打开中…" : "开始对话"}
+                              </button>
+                            )}
+                            {/* d.138：没绑模型时不给「开始对话」——进去也发不出消息。
+                                下一步是「编辑」（在里面选模型），所以这里只留编辑。 */}
                           </span>
                         </div>
                       </div>

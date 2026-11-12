@@ -102,6 +102,9 @@ describe("parsePluginManifest · v5 合法清单", () => {
       graphics: [],
       eval: false,
       chat: false,
+      // d.125：沙箱桥新增权限域，未声明时为 false。
+      infohub: false,
+      notify: false,
     });
     // web 内部形状恒定带 llmPresets（旧消费方兼容字段）。
     expect(parsed.contributions.llmPresets).toEqual([]);

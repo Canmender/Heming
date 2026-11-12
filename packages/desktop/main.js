@@ -13,14 +13,11 @@ const {
   DEFAULT_API_ORIGIN,
   INDEX_FILE,
   resolveRequest,
-  resolveModuleAssetPath,
   resolveWidgetRequest,
   contentTypeFor,
   widgetCspHeaders,
 } = require("./app-protocol");
 const { createPluginStore } = require("./plugin-store");
-const { createModuleStore } = require("./module-store");
-const { createModuleInstaller } = require("./module-installer");
 const { createWidgetHost } = require("./plugin-host");
 const { readWidgetTheme, writeWidgetTheme } = require("./widget-theme");
 const { WIDGET_SCHEME } = require("./plugin-window");
@@ -80,8 +77,9 @@ const { registerExportIpc } = require("./export-fs");
 const { registerFileIpc } = require("./file-fs");
 const { registerSecretIpc } = require("./secret-store");
 const { registerNotifyIpc } = require("./notify-bridge");
+const { createPluginNotifier } = require("./plugin-notify");
 const { registerWorkflowHttpIpc } = require("./http-bridge");
-const { createInfohubEngine, ENGINE_ID: INFOHUB_MODULE_ID } = require("./infohub-engine");
+const { createInfohubEngine } = require("./infohub-engine");
 const { createInfohubBridge, registerInfohubIpc, resolveDefaultHome, resolveInfohubPackageDir } =
   require("./infohub-bridge");
 const { crashLogDir, installCrashHandlers, attachRenderCrashRecovery } = require("./crash-log");
@@ -153,9 +151,8 @@ const TRUSTED_CHANNELS = [
   "mcp:stdio:request",
   "mcp:stdio:stop",
   "runtime:probe",
-  "modules:web-list",
-  "modules:install",
-  "modules:remove",
+  // web 模块体系（d.131）已下线：模块页/模块包全部改由插件体系承担，
+  // 这里不再保留 modules:web-list / modules:install / modules:remove 三条主窗通道。
   "update:check",
   "update:download",
   "update:install",
@@ -201,6 +198,8 @@ const TRUSTED_CHANNELS = [
   "widgets:page-mount",
   "widgets:page-bounds",
   "widgets:page-unmount",
+  // contract §4：主窗拉插件首页卡片（只读；插件渲染面拿不到这份桥）
+  "plugins:homecards",
 ];
 
 // ── 崩溃兜底（d.30 · P0-4）─────────────────────────────────────────────
@@ -402,47 +401,17 @@ function attachCspReportLogger(win) {
 /**
  * 注册 app:// 的资源处理器（须在 app ready 之后）。逻辑下沉到 app-protocol.js 的
  * 纯函数，这里只做「解析 → 读文件 → 回响应」。
+ *
+ * 只服务安装包内的 web 产物：宿主加载式模块包（d.131）的 `/modules/...` 路由已随
+ * modules 体系下线删除——插件页面走独立的 `widget://` 协议，不再复用 app://。
  */
-function installAppProtocol(moduleStore, modulesDir) {
+function installAppProtocol() {
   protocol.handle(EMBEDDED_SCHEME, async (request) => {
     let urlPath = "/";
     try {
       urlPath = new URL(request.url).pathname;
     } catch {
       return new Response("bad request", { status: 400 });
-    }
-    // 宿主加载式模块包（d.131）：只读、只服务已安装且声明 web 的 id@version。
-    if (urlPath.startsWith("/modules/")) {
-      const exists = (f) => {
-        try {
-          return fs.existsSync(f);
-        } catch {
-          return false;
-        }
-      };
-      const file = resolveModuleAssetPath(urlPath, {
-        modulesDir,
-        installed: moduleStore ? moduleStore.registry() : [],
-      });
-      if (!file || !exists(file)) {
-        return new Response("module asset not found", {
-          status: 404,
-          headers: { "Content-Type": "text/plain; charset=utf-8", ...cspHeadersFor(urlPath, cspOptions()) },
-        });
-      }
-      try {
-        const body = await fs.promises.readFile(file);
-        return new Response(body, {
-          status: 200,
-          headers: {
-            "Content-Type": contentTypeFor(file),
-            "Cache-Control": "public, max-age=31536000, immutable",
-            ...cspHeadersFor(urlPath, cspOptions()),
-          },
-        });
-      } catch {
-        return new Response("read failed", { status: 500 });
-      }
     }
     const root = webDistDir();
     const resolved = resolveRequest(urlPath, root, (f) => {
@@ -1051,54 +1020,18 @@ if (!gotLock) {
 
   // —— InfoHub 本机进程桥（d.45 信息中枢）——
   // 归档数据只留在本机：主进程用 stdio 拉起 Python 桥，不开端口、不走网络。
-  // d.116 起引擎是**选装模块**：安装包里不再携带 Python 包，启用模块时从更新源
-  // 下载官签名模块包，落到 `<userData>/modules` 后自动拉起。开发态若模块未装，
-  // 退回仓库源码，避免每次改前端都得先构建模块包。
+  // d.116 起 Python 引擎是**选装**：安装包里不再携带，首次启用时从更新源补下载
+  // 官签名包，落到 `<userData>/modules` 后自动拉起。开发态若未安装，退回仓库源码，
+  // 避免每次改前端都得先构建模块包。
+  // 注意：module-store/package/download 只服务这个 Python 引擎的选装/补下载，
+  // 与已下线的 web 模块体系（页面经 app:// 加载）无关。
   let infohubBridge = null;
 
-  // 宿主加载式模块包（d.131）：与 infohub 引擎共用 <userData>/modules 目录。
-  // 只读 registry 供 app:// 路由与渲染层查询；安装/验签仍走 module-store。
-  const webModulesRoot = path.join(app.getPath("userData"), "modules");
-  const webModuleStore = createModuleStore({ dir: webModulesRoot, log: (line) => console.log(line) });
-  const moduleFeed =
-    process.env.HEMING_MODULE_FEED ||
-    `${String(APP_DEFAULT_URL).replace(/\/+$/, "")}/api/modules`;
-  const webModuleInstaller = createModuleInstaller({
-    store: webModuleStore,
-    feed: moduleFeed,
-    log: (line) => console.log(line),
-  });
-  /** 安装/卸载信息插件前先停引擎：Windows 上运行中的 Python 会锁住模块目录，导致覆盖安装 EPERM。 */
-  async function stopInfohubForModuleChange() {
-    try {
-      infohubBridge?.stop({ killDelayMs: 0, silent: true });
-    } catch {
-      /* 没在跑就无需停 */
-    }
-    await new Promise((resolve) => setTimeout(resolve, 600));
-  }
-  secureIpc.handle("modules:install", async (_event, payload) => {
-    const id = payload && typeof payload.id === "string" ? payload.id : "";
-    const version = payload && typeof payload.version === "string" ? payload.version : "";
-    // 信息中枢的引擎就在这个模块包里：装/升/卸之前先停引擎，否则 Windows 上文件被占用。
-    if (id === INFOHUB_MODULE_ID) await stopInfohubForModuleChange();
-    return webModuleInstaller.install(id, version);
-  });
-  secureIpc.handle("modules:remove", async (_event, id) => {
-    const target = String(id || "");
-    if (target === INFOHUB_MODULE_ID) await stopInfohubForModuleChange();
-    return webModuleInstaller.remove(target);
-  });
-  secureIpc.handle("modules:web-list", () =>
-    webModuleStore
-      .registry()
-      .filter((item) => item && item.web && typeof item.web.entry === "string")
-      .map((item) => ({ id: item.id, version: item.version, name: item.name, entry: item.web.entry })),
-  );
+  // web 模块体系（d.131）已下线：不再有 /api/modules 拉取、模块安装 IPC 与
+  // app:// 的 /modules/... 路由——自动化/信息中枢页面改由插件体系的 widget:// 承担。
 
   const infohubEngine = createInfohubEngine({
     dir: path.join(app.getPath("userData"), "modules"),
-    base: moduleFeed,
     log: (line) => console.log(line),
     broadcast: (payload) => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -1106,7 +1039,7 @@ if (!gotLock) {
     },
   });
 
-  /** 开发态仓库里的引擎源码；打包版恒为空（模块必须走下载）。 */
+  /** 开发态仓库里的引擎源码；打包版恒为空（引擎包必须走更新源补下载）。 */
   const devEngineDir = () => {
     if (app.isPackaged) return "";
     const repo = resolveInfohubPackageDir({
@@ -1117,7 +1050,7 @@ if (!gotLock) {
     return fs.existsSync(repo) ? repo : "";
   };
 
-  /** 引擎目录：已安装模块优先；未打包时退回仓库源码。 */
+  /** 引擎目录：已安装的选装引擎优先；未打包时退回仓库源码。 */
   const infohubEngineDirs = () => {
     const dirs = infohubEngine.dirs();
     if (dirs.packageDir) return dirs;
@@ -1342,7 +1275,7 @@ app.whenReady().then(() => {
     });
     widgetStore.init();
     // 自定义协议处理器须在创建窗口之前装好，否则首次 loadURL 会拿到空响应
-    installAppProtocol(webModuleStore, webModulesRoot);
+    installAppProtocol();
     if (dataWikiRoot) {
       void ensureStandardVault(dataWikiRoot).catch((err) => {
         console.warn("[heming] 初始化默认知识库结构失败：", (err && err.message) || err);
@@ -1427,6 +1360,13 @@ app.whenReady().then(() => {
     // 只给「已安装 + enabled + 文件完好」的插件建窗。老 pet-state.json 一次性种入
     // heming.pet 的 state.json（幂等；老文件保留一版不删，方便回滚）。
     widgetStore.seedLegacyState("heming.pet", readLegacyPetState());
+    // contract §3：插件 notify 先投给主窗（web 侧进现有通知 store），主窗不可用再退回系统通知。
+    // 通知的目标只由主进程决定：插件渲染面只能表达「标题/正文/级别」，决定不了投递渠道。
+    const pluginNotifier = createPluginNotifier({
+      getMainWindow: () => mainWindow,
+      Notification,
+      log: (line) => console.log(line),
+    });
     widgetHost = createWidgetHost({
       BrowserWindow,
       Tray,
@@ -1467,6 +1407,31 @@ app.whenReady().then(() => {
           writeDirs: [...(vault.writeDirs || [])],
         }));
       },
+      // contract §3：widget 桥的三条新语义都以「外部边界」注入宿主，而不是 host 直接
+      // require infohub / Notification——单测可替换，host 也不持有额外权限。
+      infohubRequest: (method, params, options) => {
+        if (!infohubBridge) return Promise.reject(new Error("信息中枢不可用"));
+        const timeoutMs = (options && options.timeoutMs) || 60_000;
+        let timer = null;
+        // infohub-bridge.call 自身没有超时参数：用 race 给插件侧一个明确的 deadline，
+        // 避免后台页 await 一个永不返回的调用（插件的超时语义属于 widget 桥契约）。
+        const deadline = new Promise((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`信息中枢调用超时（${method}，${timeoutMs}ms）`)),
+            timeoutMs,
+          );
+          if (timer && typeof timer.unref === "function") timer.unref();
+        });
+        const work = infohubBridge.call(
+          method,
+          params && typeof params === "object" ? params : {},
+          {},
+        );
+        return Promise.race([work, deadline]).finally(() => {
+          if (timer) clearTimeout(timer);
+        });
+      },
+      notifyPlugin: (payload) => pluginNotifier.notify(payload),
       openPage: (payload) => openPageInMainWindow(payload),
       log: (line) => console.log(line),
     });
@@ -1493,6 +1458,8 @@ app.whenReady().then(() => {
     };
 
     secureIpc.handle("widgets:list", () => widgetStore.list());
+    // contract §4：首页卡片全量拉取（含 homeCardSet 覆盖后的文案）
+    secureIpc.handle("plugins:homecards", () => widgetHost.homeCards());
     secureIpc.handle("widgets:pickPackage", async () => {
       const filePath = await pickPluginFile();
       return filePath ? { canceled: false, path: filePath } : { canceled: true };

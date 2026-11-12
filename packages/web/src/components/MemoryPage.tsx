@@ -56,6 +56,8 @@ import { fetchFiles } from "../lib/api.js";
 import { ChevronIcon, PlusIcon, TrashIcon, XIcon } from "./icons.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { PageShell } from "./layout/PageShell.js";
+import { EmptyState } from "./ui/EmptyState.js";
+import { Switch } from "./ui/Switch.js";
 import { PAGE_TABLIST, pageTabClass } from "../lib/ui/tabStyles.js";
 import { useModalA11y } from "./useModalA11y.js";
 
@@ -91,7 +93,7 @@ const btnPrimarySm = "ui-btn ui-btn-sm ui-btn-primary";
 const hintCls = "ui-caption";
 /** 召回记录默认只列最近 3 次，其余按需展开。 */
 const RECALL_RUNS_PREVIEW = 3;
-const errorCls = "ui-body-sm text-red-600";
+const errorCls = "ui-body-sm text-[var(--danger)]";
 const okCls = "ui-body-sm text-muted";
 const badgeCls = "ui-chip";
 
@@ -307,35 +309,7 @@ function splitList(raw: string): string[] {
 
 /* ---------------------------------------------------------------- 基础件 */
 
-function Switch({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-150 ${
-        checked ? "bg-ink" : "bg-[color:var(--switch-off)]"
-      }`}
-    >
-      <span
-        style={{ backgroundColor: checked ? "var(--heming-on-accent)" : "var(--switch-knob)" }}
-        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all duration-150 ${
-          checked ? "left-[16px]" : "left-[2px]"
-        }`}
-      />
-    </button>
-  );
-}
+/* 开关已抽到 ui/Switch.tsx（d.138）：与上下文设置卡、技能页的三份逐字节相同拷贝合并。 */
 
 function Modal({
   label,
@@ -1170,7 +1144,12 @@ export function MemoryPage({
         </div>
       )}
       {groups.length === 0 ? (
-        <div className={`mt-3 ${hintCls}`}>当前没有未过期的短期记忆</div>
+        <EmptyState
+          compact
+          className="mt-3"
+          title="当前没有未过期的短期记忆"
+          desc="短期记忆只在对话进行时短暂保留（约 2 小时未活动或满 40 轮后过期），不会长期占用空间。"
+        />
       ) : (
         groups.map((group) => {
           const key = group.conversationId || "未命名会话";
@@ -1611,7 +1590,18 @@ export function MemoryPage({
         <div role="group" aria-label="语义记忆条目" className="mt-3">
           <div className="ui-section-title">语义记忆（{semanticShown.length}）</div>
           {semanticShown.length === 0 ? (
-            <div className={`mt-1 ${hintCls}`}>{query ? "无匹配条目" : "暂无条目"}</div>
+            // d.138：空态接统一的 EmptyState（三段式：是什么 / 为什么空 / 下一步），
+            // 不再是一行 ui-caption 灰字——记忆页此前是「零状态组件」的三页之一。
+            <EmptyState
+              compact
+              className="mt-2"
+              title={query ? "无匹配条目" : "还没有条目"}
+              desc={
+                query
+                  ? "换个关键词，或清空搜索框看全部条目。"
+                  : "对话里值得长期记住的事实会自动写进来；也可以在上方手动新增一条。"
+              }
+            />
           ) : (
             semanticShown.map((entry) => (
               <div
@@ -1739,7 +1729,16 @@ export function MemoryPage({
         <div role="group" aria-label="情景记忆条目" className="mt-4 border-t border-line-soft pt-3">
           <div className="ui-section-title">情景记忆（{episodicShown.length}）</div>
           {episodicShown.length === 0 ? (
-            <div className={`mt-1 ${hintCls}`}>{query ? "无匹配条目" : "暂无条目"}</div>
+            <EmptyState
+              compact
+              className="mt-2"
+              title={query ? "无匹配条目" : "还没有条目"}
+              desc={
+                query
+                  ? "换个关键词，或清空搜索框看全部条目。"
+                  : "每组对话收尾时会自动留下摘要（不含原文）；先和智能体聊一轮就会出现在这里。"
+              }
+            />
           ) : (
             episodicShown.map((entry) => (
               <div
@@ -1876,9 +1875,12 @@ export function MemoryPage({
           )}
         </div>
         {runs.length === 0 ? (
-          <div className={`mt-2 ${hintCls}`}>
-            还没有记录。开着记忆时，在聊天里 @ 智能体说话就会留档。
-          </div>
+          <EmptyState
+            compact
+            className="mt-2"
+            title="还没有记录"
+            desc="开着记忆时，在聊天里跟智能体说话就会留档；这里能看到那次召回了哪几条。"
+          />
         ) : (
           <>
             <ul aria-label="召回记录列表" className="mt-3 space-y-2">
@@ -2170,32 +2172,33 @@ export function MemoryPage({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="text-[11px] text-muted">频率</span>
-        {(
-          [
-            ["never", "关闭"],
-            ["after_complex_tasks", "仅复杂任务"],
-            ["always", "每轮都复盘"],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            aria-label={`复盘频率 ${label}`}
-            aria-pressed={reviewSettings.frequency === value}
-            onClick={() => patchReview({ frequency: value })}
-            className={`rounded-lg border px-2 py-1 text-[11px] ${
-              reviewSettings.frequency === value
-                ? "border-ink bg-ink text-[var(--surface)]"
-                : "border-line hover:bg-[var(--subtle-2)]"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+        <span className="ui-caption">频率</span>
+        {/* d.138：这里原来是自己画的三颗「描边胶囊」，与全站分段控件（.ui-segment-group）
+            不是一套语言——同一页往下滚就能看到另一种开关样式。改用统一分段控件。 */}
+        <div role="group" aria-label="复盘频率" className="ui-segment-group">
+          {(
+            [
+              ["never", "关闭"],
+              ["after_complex_tasks", "仅复杂任务"],
+              ["always", "每轮都复盘"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-label={`复盘频率 ${label}`}
+              aria-pressed={reviewSettings.frequency === value}
+              onClick={() => patchReview({ frequency: value })}
+              className="ui-segment"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         {/* 间隔是**所有频率档共用**的节流（不是某一档的专属参数），所以常显；
-            但要在界面上说清「每 N 轮」，否则一个孤零零的 10 看不出在控制什么。 */}
-        <label className="flex items-center gap-1 text-[11px] text-muted">
+            文案要说清它是上限而不是触发条件——原来写「每 N 轮才复盘一次」，
+            读起来像「必须攒够 N 轮」，与左边的频率档互相打架。 */}
+        <label className="flex items-center gap-1 ui-caption">
           每
           <input
             aria-label="每隔几轮复盘"
@@ -2207,7 +2210,7 @@ export function MemoryPage({
             onChange={(e) => patchReview({ turnsThreshold: Number(e.target.value) })}
             className="w-[56px] rounded-lg border border-line-strong px-2 py-1 text-[12px] disabled:opacity-50"
           />
-          轮才复盘一次
+          轮最多复盘一次
         </label>
       </div>
 
@@ -2461,7 +2464,7 @@ export function MemoryPage({
   return (
     <PageShell
       scroll={false}
-      title="记忆区"
+      title="记忆"
       subtitle="智能体的记忆开关、共享记忆库和你的个人知识库。"
       actions={
         <label className="flex shrink-0 items-center gap-2 whitespace-nowrap ui-caption">

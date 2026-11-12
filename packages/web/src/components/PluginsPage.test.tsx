@@ -1,11 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, within, act, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { PluginsPage } from "./PluginsPage.js";
 import { PluginStore, PLUGINS_KEY, pluginServerId, type PluginMcpPort } from "../lib/plugins/index.js";
 import { SkillPool, type StorageLike } from "../lib/skills/index.js";
 import { McpRegistry, type McpServerConfig } from "../lib/mcp/index.js";
 import { useUiStore } from "../store/ui.js";
-import { useModuleStore } from "../lib/modules/store.js";
 import { resetWidgetsStore } from "../lib/widgets/store.js";
 import type { WidgetRecord, WidgetsBridge } from "../types/widgets.js";
 
@@ -55,28 +54,7 @@ vi.mock("../lib/plugins/catalogClient.js", async (importOriginal) => {
   };
 });
 
-// 模块目录走服务端：固定成可控数据，不依赖网络。
-vi.mock("../lib/modules/catalogClient.js", () => ({
-  fetchModuleCatalog: vi.fn(async () => [
-    {
-      id: "heming.automations",
-      name: "自动化",
-      version: "1.0.0",
-      description: "定时任务、工作流与简报。",
-      author: "和鸣",
-      engine: null,
-    },
-    {
-      id: "heming.infohub",
-      name: "信息中枢",
-      version: "1.0.0",
-      description: "在本机浏览归档。",
-      author: "和鸣",
-      engine: "heming.infohub",
-    },
-  ]),
-}));
-
+// 模块目录已随 modules 体系下线：插件仓库现在只从插件目录拉清单（见上方 catalogClient mock）。
 const T0 = new Date("2026-11-01T08:00:00.000Z").getTime();
 
 function makeStorage(map: Map<string, string> = new Map()): StorageLike {
@@ -235,61 +213,12 @@ describe("PluginsPage · 仓库 Tab（d.95）", () => {
   });
 });
 
-describe("PluginsPage · 插件从云端安装", () => {
-  it("原生页面不显示任何模块卡片；pageView=modules 只落到插件 Tab", () => {
-    useModuleStore.getState().reset();
-    renderPage();
-    act(() => {
-      useUiStore.getState().setPage("plugins", "modules");
-    });
-    expect(screen.getByRole("tab", { name: "插件" })).toHaveAttribute("aria-selected", "true");
-    // 未安装的模块不再写死渲染
-    for (const name of ["幕僚", "信息中枢", "自动化"]) {
-      expect(screen.queryByRole("region", { name: `插件 ${name}` })).toBeNull();
-    }
-    expect(screen.getByRole("button", { name: "从插件仓库安装" })).toBeInTheDocument();
-  });
-
-  it("从云端安装插件：目录里的模块才出现；安装后可启停/删除", async () => {
-    useModuleStore.getState().reset();
-    renderPage();
-
-    fireEvent.click(screen.getByRole("button", { name: "从插件仓库安装" }));
-    const dialog = await screen.findByRole("dialog", { name: "插件仓库" });
-    // d.134：云端目录只剩「自动化」「信息」两个插件
-    expect(await within(dialog).findByText("自动化")).toBeInTheDocument();
-    expect(within(dialog).getByText("信息")).toBeInTheDocument();
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "安装插件 自动化" }));
-    // 安装是异步的（桌面端还要下载插件包）
-    await waitFor(() => expect(useModuleStore.getState().installed["heming.automations"]).toBe(true));
-    expect(useModuleStore.getState().enabled["heming.automations"]).toBe(true);
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
-    const card = screen.getByRole("region", { name: "插件 自动化" });
-    expect(card).toHaveTextContent("这个插件带来");
-
-    fireEvent.click(within(card).getByRole("switch", { name: "停用插件 自动化" }));
-    expect(useModuleStore.getState().enabled["heming.automations"]).toBe(false);
-
-    fireEvent.click(within(card).getByRole("button", { name: "删除插件 自动化" }));
-    fireEvent.click(
-      within(screen.getByRole("dialog", { name: "删除插件 自动化" })).getByRole("button", {
-        name: "删除",
-      }),
-    );
-    await waitFor(() => expect(useModuleStore.getState().installed["heming.automations"]).toBe(false));
-    expect(screen.queryByRole("region", { name: "插件 自动化" })).toBeNull();
-    useModuleStore.getState().reset();
-  });
-});
-
 describe("PluginsPage 插件", () => {
   it("空态与安装面板：没有清单时确认按钮禁用", () => {
     renderPage();
 
     expect(screen.getAllByRole("heading", { name: "插件" }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("region", { name: "暂无插件" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "插件列表为空" })).toBeInTheDocument();
     expect(screen.getByText("还没有安装插件")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "手动粘贴清单" }));
@@ -318,7 +247,7 @@ describe("PluginsPage 插件", () => {
       "已安装插件「财务助手包」：新增 2 个技能、0 台 MCP 服务",
     );
     expect(screen.getByRole("region", { name: "插件 财务助手包" })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "暂无插件" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "插件列表为空" })).not.toBeInTheDocument();
 
     const skills = pool.list().filter((s) => s.pluginId === "acme.finance");
     expect(skills).toHaveLength(2);
@@ -362,7 +291,7 @@ describe("PluginsPage 插件", () => {
     fireEvent.click(within(confirm).getByRole("button", { name: "卸载" }));
 
     expect(screen.queryByRole("dialog", { name: "卸载插件" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "暂无插件" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "插件列表为空" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("已卸载插件「财务助手包」");
     expect(store.list()).toEqual([]);
     expect(pool.list().filter((s) => s.pluginId)).toEqual([]);

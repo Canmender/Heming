@@ -1,15 +1,23 @@
 # 真实插件源码（plugin-kit/plugins）
 
-这里放**要发布/安装的真实插件**；[`../examples/`](../examples/README.md) 只是教学示例，
+这里放**要发布/安装的真实插件**（含 d.138 起由内置模块改写成的两个沙箱 bundle 插件）；
+[`../examples/`](../examples/README.md) 只是教学示例，
 [`../templates/`](../templates/) 是脚手架。
 
 | 目录 | 插件 id | 形态 | 说明 | 构建 / 测试 |
 |---|---|---|---|---|
+| [`automations/`](automations/) | `heming.automations` | 沙箱 bundle 插件（页面 + 后台页） | 自动化：自动化页面 + 后台循环 + 首页卡 | 无构建（原生 HTML/JS）；发布用 `node scripts/publish-plugin.mjs` |
+| [`infohub/`](infohub/) | `heming.infohub` | 沙箱 bundle 插件（页面 + 命令） | 信息中枢：检索 / 会话 / 日程页面 + 命令 + 首页卡 | 无构建（原生 HTML/JS）；发布用 `node scripts/publish-plugin.mjs` |
 | [`infohub-collector/`](infohub-collector/) | `heming.infohub-collector` | v5 声明式 | 本机 InfoHub 采集桥（技能 + MCP + 命令 + 工具束） | `node scripts/plugin-lint.mjs plugin-kit/plugins/infohub-collector/plugin.json` |
 | [`pet-widget/`](pet-widget/) | `heming.pet` | v4 bundle（仅首方） | 桌宠界面插件；pnpm workspace 包 | `pnpm --filter @heming/pet-widget build` / `test`；发布前签名后 `run pack` |
 | [`workflow-kit/`](workflow-kit/) | `heming.workflow-kit` | v5 声明式 + 独立服务 | 节点式工作流引擎；清单在 `plugin/plugin.json` | `cd plugin-kit/plugins/workflow-kit && pnpm install && pnpm build && pnpm test` |
 
-聊天记录浏览已并入「信息中枢」模块页面，不再作为独立插件发布。
+聊天记录浏览已并入「信息中枢」插件页面，不再作为独立插件发布。
+
+上表前两行（d.138 起）不再有单独的模块链路：`plugin.json` 用 `distribution: "bundle"`，页面与后台页是包内
+原生 HTML（`widget://` 沙箱加载），发布同样走 `scripts/publish-plugin.mjs` → 仓库根 `plugins-catalog/` →
+云端 `/opt/heming/plugins`。modules 体系（`module.json` / `module.tgz` / `module-catalog/` / `/api/modules`）
+已整体下线，见 `docs/PLUGINS.md` §12。
 
 ## 约定
 

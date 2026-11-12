@@ -2,6 +2,9 @@
 /**
  * 模块包测试夹具：用临时生成的 Ed25519 密钥签一份 module.json，并打成 tgz。
  * 文件名不以 `.test.js` 结尾，`node --test` 不会把它当测试跑。
+ *
+ * 这里的「模块」只指信息中枢 Python 引擎包（web 模块体系已下线）；夹具供
+ * module-package / module-store / module-download / infohub-engine 的用例复用。
  */
 
 const { createHash, createPublicKey, generateKeyPairSync, sign } = require("node:crypto");

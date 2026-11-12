@@ -15,7 +15,7 @@ import {
   type InfohubSearchResult,
 } from "./client.js";
 import { canUseInfohub, useInfohubStore } from "./store.js";
-import { isModuleOn } from "../modules/store.js";
+import { pluginStore } from "../plugins/store.js";
 
 /**
  * 本机归档工具（d.46）：让智能体直接检索/阅读 InfoHub 的 QQ/微信归档。
@@ -338,9 +338,21 @@ export function buildInfohubToolBridge(): ToolBridge {
   };
 }
 
+/**
+ * d.125：信息中枢已从「内置模块」改成沙箱轮子插件（`heming.infohub`）。
+ *
+ * 注入条件从模块状态改成「插件已安装且启用」：插件停用/卸载后工具必须一起下线，
+ * 否则模型仍能检索用户以为「已关掉」的归档（d.70 的同一条理由）。
+ * 损坏记录（`invalidRecord`）不算启用——它的清单已不可信，不能当成能用的插件。
+ */
+export function isInfohubPluginEnabled(): boolean {
+  const plugin = pluginStore.get("heming.infohub");
+  return plugin !== undefined && plugin.enabled && plugin.invalidRecord !== true;
+}
+
 /** 只在桌面端且已连接时提供归档工具。 */
 export function buildInfohubToolsIfConnected(): ToolBridge | null {
-  // d.70：信息中枢模块停用后，工具与页面一起下线——否则模型仍能检索用户以为「已关掉」的归档
-  if (!isModuleOn("heming.infohub")) return null;
+  // 插件停用/卸载后立即下线；内置模块路径已随 modules 体系删除，不再兜底。
+  if (!isInfohubPluginEnabled()) return null;
   return canUseInfohub() ? buildInfohubToolBridge() : null;
 }

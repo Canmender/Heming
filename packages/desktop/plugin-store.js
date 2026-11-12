@@ -2,7 +2,13 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { readPackage, normalizeBundleCommands, normalizeEngineSpec } = require("./plugin-package");
+const {
+  readPackage,
+  normalizeBundleCommands,
+  normalizeEngineSpec,
+  normalizeHomeCards,
+  normalizeBackgroundSpec,
+} = require("./plugin-package");
 
 /**
  * 界面插件的本机注册表（主进程持有，规格 §3.1）。
@@ -196,6 +202,16 @@ function createPluginStore(options = {}) {
       const engine = normalizeEngineSpec((manifest && manifest.contributions && manifest.contributions.engine) || {});
       if (engine.ok && engine.engine) plugin.engine = engine.engine;
       else delete plugin.engine;
+      // contract §1：首页卡片与后台常驻页也从当前清单回填。旧安装记录没有这两个键，
+      // 升级宿主后第一次启动就能拿到（不需要重装插件），且回填走的是纯函数归一化——
+      // 磁盘上的 plugin.json 被改过也只认合法形状。
+      const contributions = (manifest && manifest.contributions) || {};
+      const manifestId = manifest && typeof manifest.id === "string" ? manifest.id : plugin.id;
+      const homeCards = normalizeHomeCards(contributions.homeCards, manifestId);
+      plugin.homeCards = homeCards.ok ? homeCards.cards : [];
+      const background = normalizeBackgroundSpec(contributions.background);
+      if (background.ok && background.background) plugin.background = background.background;
+      else delete plugin.background;
     }
     save();
     return api;
@@ -213,6 +229,9 @@ function createPluginStore(options = {}) {
       ...(plugin.page ? { page: plugin.page } : {}),
       // d.125：随插件分发的本机引擎（入口/依赖目录，已由 plugin-package 归一化）
       ...(plugin.engine ? { engine: plugin.engine } : {}),
+      // contract §1：首页卡片与后台常驻页（主窗 `plugins:homecards` 与宿主建隐藏窗都读它）
+      homeCards: Array.isArray(plugin.homeCards) ? plugin.homeCards : [],
+      ...(plugin.background ? { background: plugin.background } : {}),
       permissions: plugin.permissions || null,
       settings: resolveSettings(plugin.widget, stored),
       installedAt: plugin.installedAt,
@@ -249,7 +268,7 @@ function createPluginStore(options = {}) {
       return { ok: false, error: parsed.errors.join("；") };
     }
 
-    const { manifest, widget, page, engine, permissions, sha256, files } = parsed;
+    const { manifest, widget, page, background, homeCards, engine, permissions, sha256, files } = parsed;
     const id = manifest.id;
     const version = manifest.version;
     const existing = find(id);
@@ -312,6 +331,10 @@ function createPluginStore(options = {}) {
       ...(page ? { page } : {}),
       // d.125：随插件分发的本机引擎（readPackage 已校验入口在包内；启动时再复核盘上摘要）
       ...(engine ? { engine } : {}),
+      // contract §1：首页卡片与后台常驻页。入口存在性已由 readPackage 对着包内文件校验过，
+      // 这里只落归一化后的形状（web 侧直接消费，宿主按它建隐藏窗口）。
+      homeCards: Array.isArray(homeCards) ? homeCards : [],
+      ...(background ? { background } : {}),
       permissions,
       // 包是否带 ed25519 签名；d.105 起 readPackage 已强制首方验签，能走到这里即已通过
       signed: parsed.signed === true,

@@ -6,9 +6,10 @@ import { isPluginPagePage } from "./pages/ids.js";
  *
  * 导航默认 8 项，分组按「干活 → 能力 → 资料 → 系统」：
  * - `work`（工作台）：主页 / 团队 / 智能体；
- * - `capability`（能力）：插件（安装后带入技能、工具、MCP 服务与内置插件），
- *   以及**已安装模块的入口**（幕僚 / 信息中枢 / 自动化 / 工作流；d.119 起追加在导航最下面，
- *   分组表里仍算「能力」，所以末尾会有一次「系统 → 能力」的分隔线，位置稳定不跳动）；
+ * - `capability`（能力）：插件（安装后带入技能、工具、MCP 服务与页面），
+ *   以及**已安装插件的页面入口**（声明式插件页与沙箱 bundle 插件页，d.128 起追加在
+ *   导航最下面，分组表里仍算「能力」，所以末尾会有一次「系统 → 能力」的分隔线，
+ *   位置稳定不跳动）；
  * - `resources`（资料）：记忆 / 知识库 / 模型；
  * - `system`（系统）：设置。
  *
@@ -17,8 +18,8 @@ import { isPluginPagePage } from "./pages/ids.js";
  * 迁移规则会复杂到没法解释。这里的分组只是**视觉分隔**：用户把某页拖出组时，
  * 分隔线跟着「组变化」的位置走，不会出现空组或幽灵线。
  *
- * 模块页在本表里有归属（都算「能力」），但它们是否**出现在导航里**由
- * `modules/nav.ts` 的 `withModuleNav` 按安装/启用状态决定——分组表本身不表达可见性。
+ * 插件页在本表里没有静态归属（页面 id 是安装后才有的 `plugin:<id>`），
+ * 由 `navGroupOf` 统一算「能力」；表只表达宿主 8 页的归属。
  */
 export type NavGroupId = "work" | "capability" | "resources" | "system";
 
@@ -30,19 +31,14 @@ export const NAV_GROUP_LABEL: Record<NavGroupId, string> = {
 };
 
 /**
- * 页面 → 分组。8 个固定导航页 + 4 个模块页（模块入口装上才进轨）。
- * 新增导航页/模块时这里与 `DEFAULT_NAV_ORDER` / 模块注册表一起改，测试会钉住集合一致。
+ * 页面 → 分组。只列 8 个固定导航页；插件页由 `navGroupOf` 动态归入能力组。
+ * 新增宿主导航页时这里与 `DEFAULT_NAV_ORDER` 一起改，测试会钉住集合一致。
  */
 export const NAV_GROUP_OF: Partial<Record<NavPage, NavGroupId>> = {
   home: "work",
   team: "work",
   chat: "work",
   plugins: "capability",
-  // 模块入口与「插件」同一组：它们就是从插件页装出来的能力
-  staff: "capability",
-  infohub: "capability",
-  automations: "capability",
-  workflows: "capability",
   memory: "resources",
   vault: "resources",
   model: "resources",
@@ -51,7 +47,7 @@ export const NAV_GROUP_OF: Partial<Record<NavPage, NavGroupId>> = {
 
 /** 分组查询：插件页面一律算「能力」；不在表里的页回落到系统组，不抛。 */
 export function navGroupOf(page: NavPage): NavGroupId {
-  // d.124：插件页面是「装出来的能力」，与插件/模块同一组（导航末尾的分隔线口径不变）。
+  // d.124：插件页面是「装出来的能力」，与插件同一组（导航末尾的分隔线口径不变）。
   if (isPluginPagePage(page)) return "capability";
   return NAV_GROUP_OF[page] ?? "system";
 }

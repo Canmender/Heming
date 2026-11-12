@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { isModuleOn } from "../lib/modules/store.js";
 import type { PluginPageId } from "../lib/pages/ids.js";
 import {
   persistNavMode,
@@ -10,11 +9,10 @@ import {
 /**
  * 导航页（固定 8 项：主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
  *
- * 前三类「模块页」不再进导航，但**不能从类型里删掉**：
- * 旧链接、命令面板与通知中心的跳转、桌宠气泡的 route 都还在产出这些字符串，
- * 插件页的模块卡也仍要用 `setPage("staff")` 之类打开已安装模块的页面。
- * 删掉它们只会把兼容处理逼进 `as never` 之类的强转里，所以保留在 `Page` 里，
- * 由 `App.tsx` 的路由守卫（`isPageAvailable`）保证未安装模块页不会被渲染。
+ * 旧的幕僚 / 信息中枢 / 自动化 / 工作流页面字符串仍**保留在类型里**：
+ * 旧链接、命令面板与通知中心的跳转、桌宠气泡的 route、插件命令清单里都还可能出现这些
+ * 字符串。它们不再有对应页面——`resolvePage` 会折叠到现在的插件页（信息中枢 /
+ * 自动化由沙箱 bundle 插件提供，幕僚与工作流入口已下线），保证旧入口不白屏。
  *
  * 智能体页沿用内部名 `chat`（会话链路的既有锚点），显示名由 NavRail 决定。
  */
@@ -54,7 +52,7 @@ export type PageId = Page | LegacyPage;
  * 的 Tab 是局部 state；把 Tab 长期放 store 又会让「切走再回来」被钉在上次的位置，
  * 那超出了跳转方的意图。消费一次即清，与 `automationIntent` / `paletteIntent` 同口径。
  */
-export type PageView = "board" | "tasks" | "skills" | "interfaces" | "modules" | "plugins" | "chat";
+export type PageView = "board" | "tasks" | "skills" | "interfaces" | "plugins" | "chat";
 
 /** 导航项：所有页面都可排进导航轨（只含合并后的宿主页）。 */
 export type NavPage = Page;
@@ -63,13 +61,13 @@ export type NavPage = Page;
  * 导航默认顺序：固定 8 个**宿主页**（主页 / 团队 / 智能体 / 插件 / 记忆 / 知识库 / 模型 / 设置）。
  * 快捷键数字由 App/NavRail 按页面固定绑定（显示顺序改了不影响快捷键）。
  *
- * 幕僚 / 信息中枢 / 自动化 / 工作流这 4 个模块页**不在个性化顺序里**，而是由
- * `lib/modules/nav.ts` 的 `withModuleNav()` 按「已安装且启用」动态插到「插件」之后
- * （d.119 用户口径：装上就在导航里看得到）。所以本数组只表达宿主页；
+ * 幕僚 / 信息中枢 / 自动化 / 工作流这些旧页面的历史顺序仍认在 `LEGACY_DEFAULT_NAV_ORDERS`
+ * 里：老用户存过这些默认值，必须能识别并迁到当前 8 项，否则会被当成「自定义顺序」。
+ * 已装插件页面不写进本数组，由 `lib/pages/registry.ts` 的 `withPluginNav()` 追加到末尾。
  * 模型路由页已由 magpie 路由组取代、彻底删除，`Page` 类型仍保留这些字符串，
- * 供旧链接、通知跳转与模块卡路由使用。
+ * 供旧链接、通知跳转使用。
  *
- * 视觉分组见 `lib/navGroups.ts`：工作台（主页/团队/智能体）→ 能力（插件 + 已装模块）→
+ * 视觉分组见 `lib/navGroups.ts`：工作台（主页/团队/智能体）→ 能力（插件 + 已装插件页）→
  * 资料（记忆/知识库/模型）→ 系统（设置）。
  */
 export const DEFAULT_NAV_ORDER: NavPage[] = [
@@ -159,7 +157,10 @@ function sameOrder(a: readonly NavPage[], b: readonly NavPage[]): boolean {
 /** 旧页面 id → 宿主页 + 视图的折叠表。新增合并页时只改这里与 `Page`。 */
 const LEGACY_ROUTES: Record<LegacyPage, { page: Page; view: PageView }> = {
   workspace: { page: "team", view: "board" },
-  tasks: { page: "chat", view: "tasks" },
+  // d.138：tasks 原来折叠到 { chat, view: "tasks" }，而对话页早就不认这个视图了——
+  // 于是「派任务」「新建任务」「引导第 3 步」都会静默落到对话 Tab，像点了没反应。
+  // 任务本身现在活在团队页的看板里（TeamTaskPanel），旧链接一律指到那里。
+  tasks: { page: "team", view: "board" },
   skills: { page: "plugins", view: "skills" },
   interfaces: { page: "plugins", view: "interfaces" },
 };
@@ -168,6 +169,20 @@ const LEGACY_ROUTES: Record<LegacyPage, { page: Page; view: PageView }> = {
 export function isLegacyPage(value: unknown): value is LegacyPage {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(LEGACY_ROUTES, value);
 }
+
+/**
+ * 已下线的内置模块页 → 现在的落点。
+ *
+ * 信息中枢与自动化已迁成沙箱 bundle 插件（`plugin:<id>` 路由）；幕僚与工作流随模块
+ * 运行时一起下线，统一落到插件区（可在那里安装/启用对应插件）。
+ * 保留映射而不是删掉字符串：旧链接、通知中心与插件命令清单里仍有这些 page 值。
+ */
+const LEGACY_MODULE_ROUTES: Partial<Record<Page, Page>> = {
+  infohub: "plugin:heming.infohub",
+  automations: "plugin:heming.automations",
+  workflows: "plugin:heming.automations",
+  staff: "plugins",
+};
 
 /**
  * 把任意旧页面名/宿主页归一成「宿主页 + 视图」。
@@ -180,7 +195,7 @@ export function resolvePage(page: PageId, view?: PageView | null): { page: Page;
     const route = LEGACY_ROUTES[page];
     return { page: route.page, view: view ?? route.view };
   }
-  return { page, view: view ?? null };
+  return { page: LEGACY_MODULE_ROUTES[page] ?? page, view: view ?? null };
 }
 
 /** 导航顺序本地存储键。 */
@@ -407,14 +422,14 @@ interface UiState {
   /** 取走宿主的视图意图并清空（页面 effect 消费一次）。 */
   consumePageView: () => PageView | null;
   /** 跳到信息中枢并投递意图；不传意图即普通进入。 */
-  /** 跳转到插件页（插件 Tab）：未安装/停用模块的通知与旧链接统一落到这里，而不是静默不动。 */
+  /** 跳到插件页（插件 Tab）：旧模块页/通知的入口统一落到这里，而不是静默不动。 */
   openModuleManager: () => void;
-  /** 打开幕僚页；模块未安装/未启用时落到插件页（可一键安装）。 */
+  /** 打开幕僚页；幕僚已随模块运行时下线，统一落到插件区（提示装对应插件）。 */
   openStaff: () => void;
   consumeAutomationTab: () => void;
   openInfohub: (intent?: InfohubIntent) => void;
   consumeInfohubIntent: () => void;
-  /** 跳到自动化页；带意图时打开预填的新建表单。 */
+  /** 跳到自动化插件页；带意图时打开预填的新建表单。 */
   openAutomations: (intent?: AutomationIntent) => void;
   consumeAutomationIntent: () => void;
   /** 进入知识库页并投递动作意图（笔记 / 新建 / 日记 / 画布 / 设置）。 */
@@ -665,20 +680,25 @@ export const useUiStore = create<UiState>((set, get) => ({
     workflowFocusId: null,
     }),
   openStaff: () => {
-    if (!isModuleOn("heming.automations")) {
-      get().openModuleManager();
-      return;
-    }
-    set({ page: "automations", pageView: null, automationTab: "briefing", workflowFocusId: null });
+    // 幕僚页已并入自动化插件的「简报」Tab：旧入口（通知中心、首页待办等）直接落到那里，
+    // 而不是被路由重定向回主页；页面本身由插件 bundle 渲染。
+    set({
+      page: "plugin:heming.automations",
+      pageView: null,
+      automationTab: "briefing",
+      activeConversationId: null,
+      pendingAttachment: null,
+      taskDraft: null,
+      taskFocusId: null,
+      automationFocusId: null,
+      workflowFocusId: null,
+      infohubIntent: null,
+      automationIntent: null,
+    });
   },
   openInfohub: (intent) => {
-    // 模块未安装/未启用时不再切到一个不该存在的页面；落到插件页让用户能安装/启用它
-    if (!isModuleOn("heming.infohub")) {
-      get().openModuleManager();
-      return;
-    }
     set({
-      page: "infohub",
+      page: "plugin:heming.infohub",
       pageView: null,
       activeConversationId: null,
       pendingAttachment: null,
@@ -692,12 +712,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   consumeInfohubIntent: () => set({ infohubIntent: null }),
   openAutomations: (intent) => {
-    if (!isModuleOn("heming.automations")) {
-      get().openModuleManager();
-      return;
-    }
     set({
-      page: "automations",
+      page: "plugin:heming.automations",
       pageView: null,
       automationTab: "tasks",
       activeConversationId: null,
@@ -713,12 +729,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   consumeAutomationIntent: () => set({ automationIntent: null }),
   focusWorkflow: (workflowId) => {
-    if (!isModuleOn("heming.automations")) {
-      get().openModuleManager();
-      return;
-    }
     set({
-      page: "automations",
+      page: "plugin:heming.automations",
       pageView: null,
       automationTab: "workflows",
       activeConversationId: null,
@@ -816,12 +828,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     }),
   consumeTeamActivityFocus: () => set({ teamFocusActivityId: null }),
   focusAutomation: (taskId) => {
-    if (!isModuleOn("heming.automations")) {
-      get().openModuleManager();
-      return;
-    }
     set({
-      page: "automations",
+      page: "plugin:heming.automations",
       pageView: null,
       automationFocusId: taskId,
       // 与 setPage 同口径清掉跨页瞬态：自动化页不该继承任务区的投递/选中，

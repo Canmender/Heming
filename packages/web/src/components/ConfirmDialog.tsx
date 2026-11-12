@@ -45,7 +45,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)]"
       // 点遮罩 = 拒绝：与 Esc 同一个口径（用户想中止这次操作）。
       onClick={onCancel}
     >
@@ -56,7 +56,8 @@ export function ConfirmDialog({
         aria-label={title}
         // 点弹窗内部不冒泡到遮罩（否则点内容就等于拒绝）。
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[80vh] w-[min(560px,92vw)] flex-col overflow-hidden rounded-xl border border-[#ececec] bg-white shadow-card"
+        // d.138：写死的 #ececec / bg-white 在暗色下是一块亮面板，改用 token。
+        className="flex max-h-[80vh] w-[min(560px,92vw)] flex-col overflow-hidden rounded-xl border border-line bg-[var(--surface)] shadow-card"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5">
           <span className="truncate ui-section-title">{title}</span>
@@ -64,7 +65,7 @@ export function ConfirmDialog({
             type="button"
             aria-label="关闭并拒绝"
             onClick={onCancel}
-            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[#f0f0f0] hover:text-ink"
+            className="shrink-0 rounded-sm p-1 text-muted hover:bg-[var(--subtle-4)] hover:text-ink"
           >
             <XIcon width={16} height={16} aria-hidden="true" />
           </button>

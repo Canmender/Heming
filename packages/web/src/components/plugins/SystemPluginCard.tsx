@@ -23,9 +23,9 @@ export function SystemPluginCard({ system }: { system: SystemPlugin }) {
         </span>
         <span className="text-[13px] font-extrabold">{system.name}</span>
         <span className={CHIP}>内置</span>
-        <span className={CHIP}>置顶</span>
         <span className={CHIP}>v{system.version}</span>
-        <span className={`ml-auto ${CHIP}`}>随应用内置</span>
+        {/* 只留「内置 + 版本」两枚：原来还有「置顶」「随应用内置」，四个胶囊里两个在说同一件事，
+            而卡片底部那句已经写清「不可停用或卸载」。 */}
       </div>
       <p className="mt-1 ui-caption">{system.description}</p>
 
@@ -44,7 +44,8 @@ export function SystemPluginCard({ system }: { system: SystemPlugin }) {
         </div>
       </dl>
 
-      <p className="mt-2 ui-caption">随应用内置，不可停用或卸载；其技能与工具随应用版本更新。</p>
+      {/* 这句不再重复上面那句「随应用内置…不可停用或卸载」，只补一个不同的事实：更新方式。 */}
+      <p className="mt-2 ui-caption">技能与工具随应用版本更新，无需单独升级。</p>
     </section>
   );
 }

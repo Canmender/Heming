@@ -15,20 +15,11 @@ import { BootWave } from "./components/BootWave.js";
 import { autoConnectAll } from "./lib/mcp/runtime.js";
 import { useInfohubStore } from "./lib/infohub/store.js";
 import { ensureDesktopGateway } from "./lib/magpieHost.js";
-import { useModuleStore, isModuleEffective } from "./lib/modules/store.js";
-// d.128：内置模块的页面/后台循环由运行时注册表统一装配，App 不再直连模块实现。
-import {
-  ModuleBackgroundSlots,
-  ModulePage,
-  modulePageOf,
-} from "./lib/modules/runtime.js";
 import { useAppPresence } from "./lib/appPresence.js";
 import { startWidgetEvents } from "./lib/widgetEvents.js";
 import { refreshWidgets } from "./lib/widgets/store.js";
 import { startWidgetThemeSync } from "./lib/widgetTheme.js";
 import { useLlmStore } from "./store/llm.js";
-import { isPageAvailable } from "./lib/modules/nav.js";
-import { moduleForPage } from "./lib/modules/registry.js";
 import { usePluginPageEntries } from "./lib/pages/usePluginPages.js";
 import { isPluginPagePage, pluginPageEntry } from "./lib/pages/registry.js";
 import { PluginPageHost } from "./components/plugins/PluginPageHost.js";
@@ -229,7 +220,7 @@ function SharedFilesPanel({
           aria-label="绑定本地文件到会话"
           title="绑定工作区文件到当前会话（需先打开一个会话）"
           onClick={onBind}
-          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
+          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[var(--subtle-2)]"
         >
           绑定
         </button>
@@ -237,7 +228,7 @@ function SharedFilesPanel({
           type="button"
           title="上传文件到共享文件"
           onClick={onUpload}
-          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
+          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[var(--subtle-2)]"
         >
           上传
         </button>
@@ -246,7 +237,7 @@ function SharedFilesPanel({
             type="button"
             aria-label="关闭共享文件面板"
             onClick={onClose}
-            className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[#fafafa]"
+            className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] shadow-card hover:bg-[var(--subtle-2)]"
           >
             关闭
           </button>
@@ -435,7 +426,7 @@ function ReconnectPanel({
           <button
             type="button"
             onClick={onLogout}
-            className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[#fafafa]"
+            className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted hover:bg-[var(--subtle-2)]"
           >
             退出登录
           </button>
@@ -562,20 +553,18 @@ function AppShell({
 
   const page = useUiStore((s) => s.page);
   const setPage = useUiStore((s) => s.setPage);
-  // 内置能力模块的安装/启用状态。页面可用性、后台循环与跨页跳转都读这一份。
-  const moduleEnabled = useModuleStore((s) => s.enabled);
-  const moduleInstalled = useModuleStore((s) => s.installed);
-  const moduleState = { installed: moduleInstalled, enabled: moduleEnabled };
   /** auto 模式下给左缘热区留一条 8px 空档，避免热区盖住内容最左侧的可点元素（列表整行按钮等）。 */
   const navMode = useUiStore((s) => s.navMode);
 
-  // 本机自动化 / 工作流调度 / 常驻幕僚：实现收在 lib/modules/runtime，App 只按生效状态统一挂载。
+  // d.124：插件页面入口（导航轨、设置区导航说明、路由守卫读同一份注册表投影）。
+  const pluginPageEntries = usePluginPageEntries();
 
-  // d.115：信息中枢模块生效 = 自动拉起本机边车（不依赖页面挂载），并自动识别、
-  // 空库时采集一次；模块停用 = 运行时一起下线（不删任何归档数据）。
-  const infohubModuleOn = isModuleEffective(moduleState, "heming.infohub");
+  // d.115：信息中枢插件生效 = 自动拉起本机边车（不依赖页面挂载），并自动识别、
+  // 空库时采集一次；插件停用 = 运行时一起下线（不删任何归档数据）。
+  const infohubPluginOn =
+    pluginPageEntry(pluginPageEntries, "plugin:heming.infohub")?.available === true;
   useEffect(() => {
-    if (!infohubModuleOn) {
+    if (!infohubPluginOn) {
       if (!useInfohubStore.getState().running) return;
       void useInfohubStore
         .getState()
@@ -586,7 +575,7 @@ function AppShell({
       return;
     }
     void useInfohubStore.getState().ensureRunning();
-  }, [infohubModuleOn]);
+  }, [infohubPluginOn]);
 
   // 系统通知点击 → 主进程回传会话 id → 打开会话（未登录时忽略，登录后再点即可）
   useEffect(() => {
@@ -598,17 +587,12 @@ function AppShell({
     });
   }, []);
 
-  // 模块页被停用/未安装（或被通知/桌宠/旧链接指到）时统一回主页，不渲染不该存在的页面。
   // 模型路由页已删除：旧存储/旧链接里的 `modelroute` 同样回落主页。
   // d.124：插件页面同一条纪律——入口不在注册表里、或已停用/卸载，一律回主页。
-  const pluginPageEntries = usePluginPageEntries();
   const resolvedPage: Page = page === "modelroute" ? "home" : page;
   const pluginPageAvailable =
     !isPluginPagePage(resolvedPage) || pluginPageEntry(pluginPageEntries, resolvedPage)?.available === true;
-  // 内置模块页（幕僚/信息中枢/自动化/工作流）统一走 ModulePage；迁移到插件后只换 runtime 条目。
-  const modulePage = modulePageOf(resolvedPage);
-  const currentPage: Page =
-    isPageAvailable(resolvedPage, moduleState) && pluginPageAvailable ? resolvedPage : "home";
+  const currentPage: Page = pluginPageAvailable ? resolvedPage : "home";
   useEffect(() => {
     if (page !== currentPage) setPage(currentPage);
   }, [page, currentPage, setPage]);
@@ -621,24 +605,15 @@ function AppShell({
     return bridge.onOpenPage((request) => {
       const page = request?.page;
       const ui = useUiStore.getState();
-      // 模块未安装/停用时落在插件页（能一键安装/启用），而不是静默跳到一个不存在的页面
-      const moduleOn = (page: "staff" | "infohub") => {
-        const moduleId = moduleForPage(page)?.id;
-        return moduleId ? isModuleEffective(useModuleStore.getState(), moduleId) : false;
-      };
       if (page === "settings") {
         // widget 的「打开设置」与托盘「设置」项都该落到外观页的小组件卡（不是个人资料）
         ui.openSettings(request.settingsTab ?? "appearance");
       } else if (page === "team") ui.setPage("team");
       else if (page === "tasks") ui.setPage("tasks");
-      // 模块未安装/停用时落在插件页（能一键安装/启用），而不是静默跳到一个不存在的页面
-      else if (page === "staff") {
-        if (moduleOn("staff")) ui.openStaff();
-        else ui.openModuleManager();
-      } else if (page === "infohub") {
-        if (moduleOn("infohub")) ui.openInfohub();
-        else ui.openModuleManager();
-      }
+      // 幕僚页面已随模块运行时下线：旧桌宠/托盘入口统一落到插件区。
+      else if (page === "staff") ui.openStaff();
+      // 信息中枢由沙箱插件提供页面；openInfohub 会落到 `plugin:heming.infohub`。
+      else if (page === "infohub") ui.openInfohub();
       // 白名单之外的 page（主进程已过滤过）一律忽略
     });
   }, []);
@@ -778,8 +753,6 @@ function AppShell({
       <div className="flex h-screen flex-col overflow-hidden">
         {/* 桌面壳自定义标题栏：浏览器端渲染 null，布局与原先一致（设计 §5） */}
         <TitleBar />
-        {/* 模块包后台循环槽位（d.131）：幕僚等模块迁出后由模块 entry 提供，未加载时回退内置。 */}
-        <ModuleBackgroundSlots authUser={Boolean(authUser)} moduleState={moduleState} />
         <div className="flex min-h-0 flex-1">
           {hasToken ? (
             authStatus === "pending" && !restoreError ? (
@@ -810,9 +783,6 @@ function AppShell({
     ) : currentPage === "chat" ? (
       // 智能体（本机运行）：左侧智能体名册 + 右侧对话；d.67 起承接「任务」视图
       <AssistantPage />
-    ) : modulePage ? (
-      // 内置模块页：幕僚 / 信息中枢 / 自动化 / 工作流（实现见 lib/modules/runtime.tsx）
-      <ModulePage moduleId={modulePage} />
     ) : currentPage === "model" ? (
       // 模型页：内核管理面——供应商/订阅账号/分组/用量/备份/同步
       <ModelPage />
@@ -863,7 +833,7 @@ function AppShell({
                 aria-haspopup="dialog"
                 aria-expanded={filesDrawerOpen}
                 onClick={() => setFilesDrawerOpen(true)}
-                className="rounded-md border border-line px-2.5 py-1 text-[12px] shadow-card hover:bg-[#fafafa]"
+                className="rounded-md border border-line px-2.5 py-1 text-[12px] shadow-card hover:bg-[var(--subtle-2)]"
               >
                 共享文件
               </button>

@@ -41,12 +41,19 @@ describe("PageShell 布局与排版基元", () => {
     );
     expect(container.querySelector(".mx-auto.w-full")?.className).toContain("max-w-[720px]");
     rerender(
-      <PageShell title="通栏">
+      <PageShell title="默认档">
         <div>内容</div>
       </PageShell>,
     );
+    // 默认档从 full 改成 wide（d.138）：不传 width 的页面也有了统一行宽上限。
     const body = container.querySelector(".mx-auto.w-full");
-    expect(body?.className).not.toContain("max-w-[");
+    expect(body?.className).toContain("max-w-[1200px]");
+    rerender(
+      <PageShell title="通栏" width="full">
+        <div>内容</div>
+      </PageShell>,
+    );
+    expect(container.querySelector(".mx-auto.w-full")?.className).not.toContain("max-w-[");
   });
 
   it("scroll=false 时不生成滚动容器（双栏/三栏页面自管滚动）", () => {
@@ -57,5 +64,15 @@ describe("PageShell 布局与排版基元", () => {
     );
     expect(container.querySelector(".overflow-y-auto")).toBeNull();
     expect(container.querySelector(".custom-body")).toBeInTheDocument();
+  });
+
+  it("scroll=false 时也套宽度档位（此前传 width 被静默忽略）", () => {
+    const { container } = render(
+      <PageShell title="设置" width="readable" scroll={false}>
+        <div>内容</div>
+      </PageShell>,
+    );
+    const body = container.querySelector(".mx-auto.w-full");
+    expect(body?.className).toContain("max-w-[960px]");
   });
 });

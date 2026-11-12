@@ -153,6 +153,12 @@
         "chat": {
           "type": "boolean"
         },
+        "infohub": {
+          "type": "boolean"
+        },
+        "notify": {
+          "type": "boolean"
+        },
         "graphics": {
           "maxItems": 8,
           "type": "array",
@@ -648,6 +654,65 @@
             ],
             "additionalProperties": false
           }
+        },
+        "homeCards": {
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              "summary": {
+                "default": "",
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 200
+              },
+              "icon": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,31}$"
+              },
+              "page": {
+                "type": "string",
+                "pattern": "^(?:[a-z][a-z0-9-]{0,31}|plugin:[a-z0-9][a-z0-9._-]{0,63})$"
+              },
+              "primary": {
+                "default": "",
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 60
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "summary",
+              "page",
+              "primary"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "background": {
+          "type": "object",
+          "properties": {
+            "entry": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "entry"
+          ],
+          "additionalProperties": false
         },
         "page": {
           "type": "object",

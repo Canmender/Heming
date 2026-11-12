@@ -340,7 +340,7 @@ export function AgentFormPanel({
           }}
         />
         {errorField === "name" && error && (
-          <span id="agent-name-error" role="alert" className="mt-1 block text-[12px] text-red-600">
+          <span id="agent-name-error" role="alert" className="mt-1 block ui-caption text-[var(--danger)]">
             {error}
           </span>
         )}
@@ -368,7 +368,7 @@ export function AgentFormPanel({
           )}
         </div>
         {fileError && (
-          <div role="alert" className="mt-1 text-[12px] text-red-600">
+          <div role="alert" className="mt-1 ui-caption text-[var(--danger)]">
             {fileError}
           </div>
         )}
@@ -456,7 +456,7 @@ export function AgentFormPanel({
       )}
 
       {error && errorField !== "name" && (
-        <div role="alert" className="mb-2 text-[12px] text-red-600">
+        <div role="alert" className="mb-2 ui-caption text-[var(--danger)]">
           {error}
         </div>
       )}
@@ -475,7 +475,7 @@ export function AgentFormPanel({
             type="button"
             onClick={() => setConfirmDelete(true)}
             disabled={pending}
-            className="mr-auto rounded-lg border border-[#e3b6b2] px-3 py-1.5 text-[13px] text-[#b42318] disabled:opacity-60"
+            className="mr-auto rounded-lg border border-[var(--danger-line)] px-3 py-1.5 text-[13px] text-[var(--danger)] disabled:opacity-60"
           >
             删除智能体
           </button>

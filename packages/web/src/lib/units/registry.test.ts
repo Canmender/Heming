@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { BUILTIN_MODULES } from "../modules/registry.js";
-import { defaultModuleState, useModuleStore } from "../modules/store.js";
 import {
   __resetUnitsForTest,
   buildUnitStatuses,
@@ -21,7 +19,6 @@ import {
 
 afterEach(() => {
   __resetUnitsForTest();
-  useModuleStore.setState(defaultModuleState());
 });
 
 describe("mountContribution / disposeUnit", () => {
@@ -120,47 +117,19 @@ describe("mountContribution / disposeUnit", () => {
 });
 
 describe("读投影（registry 薄层）", () => {
-  it("buildUnitStatuses 用注入数据源计算，自动化不依赖信息中枢", () => {
-    const statuses = buildUnitStatuses({
-      modules: BUILTIN_MODULES,
-      moduleEnabled: { staff: true, "heming.infohub": false, "heming.automations": true },
-    });
-    const byId = new Map(statuses.map((status) => [status.unit.id, status] as const));
-    expect(statuses).toHaveLength(BUILTIN_MODULES.length);
-    expect(byId.get("heming.infohub")!.reason).toEqual({ kind: "disabled" });
-    expect(byId.get("heming.automations")!.effective).toBe(true);
-    expect(byId.get("staff")!.effective).toBe(true);
+  it("buildUnitStatuses 用注入数据源计算：没有插件就没有单元", () => {
+    expect(buildUnitStatuses({ plugins: [] })).toEqual([]);
   });
 
-  it("useUnitStatuses 只列已安装模块，并订阅模块安装/开关变化", () => {
+  it("useUnitStatuses 默认只剩系统能力（插件 store 为空）", () => {
     refreshUnits();
     const { result } = renderHook(() => useUnitStatuses());
-    const ids = result.current.map((status) => status.unit.id);
-    expect(ids).toContain("heming.core");
-    // 原生应用不显示未安装模块：默认一个都不在投影里
-    for (const mod of BUILTIN_MODULES) expect(ids).not.toContain(mod.id);
-    expect(result.current.every((status) => status.unit.source !== "bundle")).toBe(true);
+    expect(result.current.map((status) => status.unit.id)).toEqual(["heming.core"]);
+    expect(result.current.every((status) => status.unit.source === "system")).toBe(true);
 
     act(() => {
-      useModuleStore.setState({
-        installed: { staff: true, "heming.infohub": true, "heming.automations": true, workflows: true },
-        enabled: { staff: false, "heming.infohub": true, "heming.automations": true, workflows: true },
-      });
+      refreshUnits();
     });
-    const installedIds = result.current.map((status) => status.unit.id);
-    for (const mod of BUILTIN_MODULES) expect(installedIds).toContain(mod.id);
-    const staff = result.current.find((status) => status.unit.id === "staff");
-    expect(staff!.effective).toBe(false);
-    expect(staff!.reason).toEqual({ kind: "disabled" });
-
-    act(() => {
-      useModuleStore.setState({
-        installed: { staff: true, "heming.infohub": false, "heming.automations": true, workflows: true },
-        enabled: { staff: false, "heming.infohub": false, "heming.automations": true, workflows: true },
-      });
-    });
-    const infohub = result.current.find((status) => status.unit.id === "heming.infohub");
-    // 未安装的模块不再投影（原生应用不显示「内置模块」卡片）
-    expect(infohub).toBeUndefined();
+    expect(result.current.map((status) => status.unit.id)).toEqual(["heming.core"]);
   });
 });

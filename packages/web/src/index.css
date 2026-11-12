@@ -65,6 +65,9 @@
   --subtle-2: #f7f7f7;
   --subtle-3: #f3f3f3;
   --subtle-4: #f0f0f0;
+  /* 弹窗遮罩：此前 23 处手写 bg-black/10·20·30·75，四种不透明度的「同一层意思」。
+     统一成一个 token，暗色下需要更重（深底上 20% 黑几乎看不出遮罩）。 */
+  --scrim: rgb(0 0 0 / 0.20);
   --body: #555555;
   /* 占位符对比度（d.68）：#b8b8b8 在 #ffffff 上只有约 2.0:1，低于 WCAG 2.2 AA 的 3:1；
      #767676 ≈ 4.5:1，仍明显弱于正文，观感上还是「占位」而不是「已输入」。 */
@@ -132,6 +135,8 @@
   --subtle-2: #1b1c20;
   --subtle-3: #232529;
   --subtle-4: #2a2c31;
+  /* 暗色遮罩要更重：深底上 20% 黑基本看不出「下面被挡住了」。 */
+  --scrim: rgb(0 0 0 / 0.55);
   --body: #c7ccd3;
   /* 暗色占位符：#6b7078 在 #16171a 上约 3.6:1，偏弱；#8b9199 ≈ 5:1，
      仍弱于正文 #c7ccd3（约 9:1），层级不丢。 */
@@ -403,35 +408,40 @@ samp {
  *
  * 命名前缀 `ui-`：与 Tailwind 工具类区分，便于源码检索「还有谁没用统一档位」。
  * 尺寸取现有界面里出现最多、观感最稳的值，不追求新奇（d.68 微调行高，类名不变）：
- *   page-title 18/26 600   —— 页面级标题（原来 15/17/18px 混用）
- *   page-sub   12/20 400   —— 标题下方一句话说明
- *   section    13/20 600   —— 卡片/分区标题
- *   body       13/22 400   —— 正文（中文 13px 在 100% 缩放下最易读）
- *   body-sm    12/20 400   —— 次要正文/表格
- *   caption    11/17 400   —— 注释/时间/辅助信息
+ *   page-title 28/36 600   —— 页面级标题（原来 15/17/18px 混用）
+ *   page-sub   14/22 400   —— 标题下方一句话说明
+ *   section    15/22 600   —— 卡片/分区标题
+ *   body       14/22 400   —— 正文（中文 14px 在 100% 缩放下最易读）
+ *   body-sm    13/20 400   —— 次要正文/表格
+ *   caption    12/18 400   —— 注释/时间/辅助信息
  *   micro      10/14 500   —— 角标/徽标（仅此用途，别再扩）
  *   numeric    tabular-nums —— 数字对齐（表格/统计）
+ *
+ * d.138 重定尺度（设计评审 P0-1）：标题 18→28、副标题 12→14、卡片标题 13→15、
+ * 正文 13→14、次要正文 12→13、注释 11→12。目标是**标题/正文 ≥ 2.0×**——18px 标题
+ * 配 13px 正文只有 1.38×，全站因此看起来像「同一个字号加粗」而不是有层级。
+ * 只改这 6 个语义类的值，669 处 `text-[Npx]` 留给后续逐页收口（见评审报告 §9 步骤 2）。
  *
  * 行高刻意比 Tailwind 默认松一点：中文方块字在 1.55–1.7 行高下才不挤。
  */
 @layer components {
   .ui-page-title {
-    @apply text-[18px] font-semibold leading-[26px] tracking-[-0.01em] text-ink;
+    @apply text-[28px] font-semibold leading-[36px] tracking-[-0.02em] text-ink;
   }
   .ui-page-sub {
-    @apply mt-1 text-[12px] leading-5 text-muted;
+    @apply mt-1.5 text-[14px] leading-[22px] text-muted;
   }
   .ui-section-title {
-    @apply text-[13px] font-semibold leading-5 text-ink;
+    @apply text-[15px] font-semibold leading-[22px] text-ink;
   }
   .ui-body {
-    @apply text-[13px] leading-[22px] text-ink;
+    @apply text-[14px] leading-[22px] text-ink;
   }
   .ui-body-sm {
-    @apply text-[12px] leading-5 text-ink;
+    @apply text-[13px] leading-5 text-ink;
   }
   .ui-caption {
-    @apply text-[11px] leading-[17px] text-muted;
+    @apply text-[12px] leading-[18px] text-muted;
   }
   .ui-micro {
     @apply text-[10px] font-medium leading-4 text-muted;
@@ -522,11 +532,15 @@ samp {
   .ui-btn-ghost:hover:not(:disabled) {
     background-color: var(--subtle-2);
   }
+  /* d.138：危险按钮改走 --danger token（此前写死 #c43d3d/#b03535，暗色下
+     和 --danger-soft 的红不是同一支，按钮比提示条更亮、也更像「营销红」）。
+     hover 用 brightness 而不是第二个写死色值，主题换色时不用再改这里。 */
   .ui-btn-danger {
-    @apply border-transparent bg-[#c43d3d] text-white;
+    @apply border-transparent text-white;
+    background-color: var(--danger);
   }
   .ui-btn-danger:hover:not(:disabled) {
-    @apply bg-[#b03535];
+    filter: brightness(0.92);
   }
 
   /* 文字链接按钮（R16）：首页卡片右上、卡片内「进入团队 / 全部名册」等。
@@ -616,45 +630,16 @@ samp {
   /*
    * ── 插件区视觉层（2026-11 UI/UX 轮）──────────────────────────────
    *
-   * 目标不是换一套配色，而是把「能力中枢」做出层次：
-   *   · hero 用主题色 4% 光晕托住概览，不抢正文；
-   *   · 图标砖统一 8% 主题色底，卡片之间靠留白与状态点区分；
-   *   · 悬浮只抬 1px + 柔和阴影，避免整页「弹跳」；
-   *   · 暗色下同样用变量混合，不写死亮色。
+   * d.138：去掉 hero 右上角的 radial 光晕球与状态点的外发光——
+   *   · 光晕是模板化的「AI 感」装饰（unslop: radial glow / blurred orb），
+   *     它不承载信息，只是让空页面显得有内容；
+   *   · 状态点靠实心色 + 文字标签识别，不需要 3px 光环。
+   * 保留的是有语义的部分：8% 主题色图标砖、启用态左侧 2px 竖条、
+   * 悬停抬 1px。层次靠留白与分割线建立，不靠发光。
    */
-  .plugin-hero {
-    position: relative;
-    overflow: hidden;
-    border-radius: 16px;
-    border: 1px solid var(--line-soft);
-    background-color: var(--surface);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.055);
-  }
-  .plugin-hero::after {
-    content: "";
-    position: absolute;
-    top: -120px;
-    right: -60px;
-    width: 300px;
-    height: 300px;
-    border-radius: 9999px;
-    background: radial-gradient(
-      circle,
-      color-mix(in srgb, var(--heming-accent) 16%, transparent) 0%,
-      transparent 68%
-    );
-    pointer-events: none;
-  }
-  [data-theme="dark"] .plugin-hero {
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-  }
-  [data-theme="dark"] .plugin-hero::after {
-    background: radial-gradient(
-      circle,
-      color-mix(in srgb, var(--heming-accent) 10%, transparent) 0%,
-      transparent 68%
-    );
-  }
+  /* 2026-11 UI/UX 轮留下的 `.plugin-hero` 卡片壳已随 d.138 一并删除：
+     能力统计不再是一张「hero 大卡」，而是页面上直接排的标题行 + 数字格，
+     避免卡套卡。有语义的部分（图标砖、启用竖条、悬停位移）仍在下面。 */
   .plugin-icon-tile {
     display: inline-flex;
     align-items: center;
@@ -693,21 +678,21 @@ samp {
     background: var(--heming-accent);
     opacity: 0.8;
   }
+  /* d.138：6px 实心点 + 3px 半透明光圈 → 7px 实心点。
+     光圈在浅色卡上是「发光」而不是阴影，同一屏里又和图表图例点重复；
+     状态区分已经由旁边文字/开关承担，点只做视觉锚点。 */
   .plugin-dot {
     display: inline-block;
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
     border-radius: 9999px;
     background: var(--success);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 16%, transparent);
   }
   .plugin-dot[data-off="true"] {
     background: var(--muted);
-    box-shadow: none;
   }
   .plugin-dot[data-warn="true"] {
     background: var(--warn);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent);
   }
   .plugin-segment {
     @apply inline-flex items-center rounded-md px-2.5 text-[11px] font-medium leading-6 transition-colors;

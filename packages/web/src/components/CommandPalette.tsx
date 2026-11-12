@@ -13,9 +13,6 @@ import { readLocalSnapshot, type LocalSnapshot } from "../lib/palette/local.js";
 import { PALETTE_PAGES, shortcutLabel } from "../lib/palette/pages.js";
 import { runPluginCommandTarget } from "../lib/palette/pluginCommands.js";
 import { pluginStore } from "../lib/plugins/index.js";
-import { effectiveModuleIds, useModuleStore } from "../lib/modules/store.js";
-import { MODULE_IDS } from "../lib/modules/registry.js";
-import { filterPalettePages } from "../lib/modules/nav.js";
 import { skillPool } from "../lib/skills/index.js";
 import { refreshWidgets, useWidgetsStore, widgetsAvailable } from "../lib/widgets/store.js";
 import { widgetCommands } from "../lib/widgets/commands.js";
@@ -31,6 +28,17 @@ import {
 import type { VaultIndex } from "../lib/vault/types.js";
 import { rankQuickOpenNotes } from "./knowledge/quickOpenModel.js";
 import { Avatar } from "./Avatar.js";
+import {
+  ArchiveIcon,
+  BookIcon,
+  GearIcon,
+  HomeIcon,
+  MemoryIcon,
+  PlugIcon,
+  SkillsIcon,
+  SparkIcon,
+  TaskIcon,
+} from "./icons.js";
 import { useModalA11y } from "./useModalA11y.js";
 
 // 旧版导出保持不变：`searchAll`/`searchAllDetailed` 是纯函数、有独立用例覆盖，
@@ -78,18 +86,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const setPaletteIntent = useUiStore((s) => s.setPaletteIntent);
   const focusTask = useUiStore((s) => s.focusTask);
   const infohubRunning = useInfohubStore((s) => s.running);
-  // 模块页面目录过滤：内置模块未安装/停用时其页面不在「页面跳转」里出现
-  const moduleEnabled = useModuleStore((s) => s.enabled);
-  const moduleInstalled = useModuleStore((s) => s.installed);
-  const pages = useMemo(
-    () => filterPalettePages(PALETTE_PAGES, { installed: moduleInstalled, enabled: moduleEnabled }),
-    [moduleInstalled, moduleEnabled],
-  );
-  /** 「插件与模块」动作的副标题显示实际生效数（依赖未满足/未安装的不计）。 */
-  const effectiveModuleCount = effectiveModuleIds({
-    installed: moduleInstalled,
-    enabled: moduleEnabled,
-  }).length;
+  /** 页面跳转目录固定 8 个宿主页；带页面的插件由插件命令/注册表走另一条路径。 */
+  const pages = PALETTE_PAGES;
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -258,9 +256,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       case "settings":
         openSettings();
         break;
-      case "modules":
-        // 直达插件页的「插件」Tab（模块已并入插件页，可一键安装/启停），
-        // 与未安装/停用模块时的跳转落点同一入口。
+      case "plugins":
+        // 直达插件页的「插件」Tab（安装/启停都在这页），旧链接与通知也落到同一入口。
         openModuleManager();
         break;
       // d.113 第二轮：知识库四个动作统一「切页 + 投意图」，由知识库页执行；
@@ -327,7 +324,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         if (!command) break;
         runPluginCommandTarget(command.target, {
           pluginId: command.pluginId,
-          // 页面白名单不在这里复制：用已按「模块已装/启用」过滤过的面板页面目录。
+          // 页面白名单不在这里复制：用已按「插件安装/启用」过滤过的面板页面目录。
           canOpenPage: (page) => pages.some((p) => p.page === page),
           skillIdOf: (name) => skillPool.list().find((s) => s.name === name)?.id ?? null,
           setPage,
@@ -467,7 +464,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     id={optionId(index)}
                     role="option"
                     aria-selected={selected}
-                    aria-label={`选择 ${item.name}`}
+                    aria-label={item.name}
                     // tabIndex=-1：结果项不参与 Tab 序列（焦点本该留在输入框、用
                     // aria-activedescendant 指示），但要能被程序化 focus——面板的
                     // 键盘约定挂在容器上，焦点落在结果项时 Esc/↑↓ 才接得住。
@@ -481,16 +478,16 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     {item.kind === "member" ? (
                       <Avatar user={{ displayName: item.name, avatar: item.avatar }} size={22} />
                     ) : (
-                      <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm bg-[var(--subtle-3)] text-[10px] text-muted">
-                        {kindGlyph(item.kind)}
+                      <span
+                        aria-hidden="true"
+                        className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm bg-[var(--subtle-3)] text-muted"
+                      >
+                        {kindIcon(item.kind)}
                       </span>
                     )}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{item.name}</span>
-                      <span className="block truncate text-[10px] text-muted">
-                        {item.detail}
-                        {item.actionId === "modules" ? ` · 已启用 ${effectiveModuleCount}/${MODULE_IDS.length}` : null}
-                      </span>
+                      <span className="block truncate text-[10px] text-muted">{item.detail}</span>
                     </span>
                     {item.kind === "page" && shortcutLabel(item.digit) ? (
                       <kbd className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-muted">
@@ -531,14 +528,27 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           ) : null}
         </div>
 
-        <div className="flex items-center gap-3 border-t border-line-soft px-3.5 py-1.5 text-[10px] text-muted">
-          <span>↑↓ 选择</span>
-          <span>Enter 打开</span>
-          <span>Esc 关闭</span>
+        {/* d.138：三段快捷键提示原本是三个裸 <span>，读屏会把它们连成
+            「↑↓ 选择Enter 打开Esc 关闭」；键名改用 <kbd>（与右侧 Alt+N 同一样式），
+            段间补分隔点，视觉与朗读都断得开。 */}
+        <div className="flex items-center gap-2 border-t border-line-soft px-3.5 py-1.5 text-[10px] text-muted">
+          <span className="inline-flex items-center gap-1">
+            <kbd className="rounded-sm border border-line px-1">↑↓</kbd> 选择
+          </span>
+          <span> · </span>
+          <span className="inline-flex items-center gap-1">
+            <kbd className="rounded-sm border border-line px-1">Enter</kbd> 打开
+          </span>
+          <span> · </span>
+          <span className="inline-flex items-center gap-1">
+            <kbd className="rounded-sm border border-line px-1">Esc</kbd> 关闭
+          </span>
           {!infohubRunning ? (
             // 归档能力的说明常驻在这里：未连接时也告诉用户「连上就能搜本机消息」，
             // 但不产生任何请求（避免每次敲键都撞到不存在的桥）。
-            <span className="ml-auto truncate">连接信息中枢后，可在这里搜本机 QQ/微信历史消息</span>
+            // 前缀补一个分隔点：这一句和左边的「Esc 关闭」在无障碍树里原本粘成
+            // 「关闭连接信息中枢后…」，读起来像同一个句子。
+            <span className="ml-auto truncate">· 连接信息中枢后，可在这里搜本机 QQ/微信历史消息</span>
           ) : null}
         </div>
       </div>
@@ -546,30 +556,36 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** 结果项左侧的小字标记：用一个汉字区分类型，比图标省事也不占视觉重量。 */
-function kindGlyph(kind: PaletteItem["kind"]): string {
+/**
+ * 结果项左侧的类型图标。
+ *
+ * d.138 换掉原来的「汉字方块」（页/动/设…）：一个字当图标在视觉上读作未完成的占位符，
+ * 而且这些字会被拼进无障碍名（读屏念「动新建任务去任务区…」）。图标统一 aria-hidden，
+ * 语义交给 role=option 的 aria-label。
+ */
+function kindIcon(kind: PaletteItem["kind"]) {
+  const p = { width: 13, height: 13 } as const;
   switch (kind) {
     case "page":
-      return "页";
+      return <HomeIcon {...p} />;
     case "vault":
-      return "库";
+      return <BookIcon {...p} />;
     case "setting":
-      return "设";
+      return <GearIcon {...p} />;
     case "action":
-      return "动";
+      return <SparkIcon {...p} />;
     case "plugin-command":
-      return "令";
-    case "task":
-      return "任";
-    case "memory":
-      return "忆";
     case "plugin":
-      return "件";
+      return <PlugIcon {...p} />;
+    case "task":
+      return <TaskIcon {...p} />;
+    case "memory":
+      return <MemoryIcon {...p} />;
     case "skill":
-      return "技";
+      return <SkillsIcon {...p} />;
     case "archive":
-      return "档";
+      return <ArchiveIcon {...p} />;
     default:
-      return "·";
+      return <SparkIcon {...p} />;
   }
 }

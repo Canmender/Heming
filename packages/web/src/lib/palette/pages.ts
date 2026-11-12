@@ -10,7 +10,7 @@ import type { Page } from "../../store/ui.js";
  *
  * 快捷键口径与 `App.tsx` 的 `SHORTCUT_PAGES`、`NavRail` 的 `digit` 保持一致：
  * 1 主页 / 2 团队 / 5 记忆 / 6 设置 / 8 智能体 / 0 插件。
- * 幕僚 / 信息中枢 / 自动化是可安装的内置插件（入口在插件页的模块卡），
+ * 幕僚 / 信息中枢 / 自动化已迁到沙箱插件（页面入口由插件页装出来），
  * 模型路由页已删除——它们都不在页面目录里。
  */
 export interface PalettePage {
@@ -30,7 +30,7 @@ export const PALETTE_PAGES: PalettePage[] = [
   {
     page: "plugins",
     label: "插件",
-    description: "安装插件与内置模块：技能、工具、MCP 服务与命令",
+    description: "安装、删除或启停插件：技能、工具、MCP 服务与页面",
     digit: "0",
   },
   { page: "memory", label: "记忆", description: "三层记忆与本机数据", digit: "5" },
@@ -53,10 +53,11 @@ export const PALETTE_PAGES: PalettePage[] = [
 ];
 
 /**
- * 内置插件页：不在导航轨与页面目录里，但模块装好后仍可路由。
+ * 可额外路由的页面 id（不在导航轨与页面目录里）。
  *
- * 插件命令允许指向它们（例如信息中枢插件的「搜索归档」直接落到信息中枢页），
- * 所以「可路由页面」比「面板页面目录」多这一组；面板自身不会把它们列出来。
+ * 插件命令可能指向旧模块页 id（例如信息中枢插件的「搜索归档」历史上写 `infohub`），
+ * 所以保留这一组做兼容：`store/ui.ts` 的 `resolvePage` 会把它们折叠到对应的插件页
+ * （`infohub` → `plugin:heming.infohub` 等），不会白屏。新插件请直接写 `plugin:<id>`。
  */
 export const ROUTABLE_PLUGIN_PAGES = ["staff", "infohub", "automations"] as const;
 

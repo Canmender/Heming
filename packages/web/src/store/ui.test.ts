@@ -10,7 +10,6 @@ import {
   SESSION_VIEW_KEY,
 } from "./ui.js";
 import { NAV_MODE_KEY } from "../lib/navPrefs.js";
-import { useModuleStore } from "../lib/modules/store.js";
 
 describe("ui store 页面与会话状态", () => {
   beforeEach(() => {
@@ -286,7 +285,9 @@ describe("d.67 页面合并：旧页面 id 折叠成宿主页 + 视图意图", (
 
   it("resolvePage 折叠四个已合并页面", () => {
     expect(resolvePage("workspace")).toEqual({ page: "team", view: "board" });
-    expect(resolvePage("tasks")).toEqual({ page: "chat", view: "tasks" });
+    // d.138：tasks 不再折叠到对话页的「任务视图」——那个视图早就没了，
+    // 折叠过去只会静默落到对话 Tab；任务现在在团队看板里。
+    expect(resolvePage("tasks")).toEqual({ page: "team", view: "board" });
     expect(resolvePage("skills")).toEqual({ page: "plugins", view: "skills" });
     expect(resolvePage("interfaces")).toEqual({ page: "plugins", view: "interfaces" });
     // 宿主页本身不产生视图意图
@@ -332,9 +333,6 @@ describe("d.67 页面合并：旧页面 id 折叠成宿主页 + 视图意图", (
 
 describe("ui store 自动化意图", () => {
   beforeEach(() => {
-    useModuleStore.getState().reset();
-    useModuleStore.getState().install("heming.infohub");
-    useModuleStore.getState().install("heming.automations");
     useUiStore.setState({
       page: "home",
       activeConversationId: null,
@@ -354,7 +352,7 @@ describe("ui store 自动化意图", () => {
     });
 
     const s = useUiStore.getState();
-    expect(s.page).toBe("automations");
+    expect(s.page).toBe("plugin:heming.automations");
     expect(s.activeConversationId).toBeNull();
     expect(s.infohubIntent).toBeNull();
     expect(s.automationIntent).toEqual({
@@ -385,7 +383,7 @@ describe("ui store 自动化意图", () => {
     useUiStore.getState().focusAutomation("a1");
 
     const s = useUiStore.getState();
-    expect(s.page).toBe("automations");
+    expect(s.page).toBe("plugin:heming.automations");
     expect(s.automationFocusId).toBe("a1");
     // 跳转带过来的旧瞬态必须一起清掉：否则自动化页一进去就弹新建表单，
     // 任务区那边还残留一个「要选中」的 id。
@@ -479,50 +477,48 @@ describe("ui store 导航栏模式", () => {
   });
 });
 
-/** d.71：停用模块的通知/旧链接不能静默不动，统一落到「插件区 → 模块」。 */
-describe("模块停用时的跳转落点", () => {
+/** modules 运行时下线后：旧模块页 id 一律折叠到对应插件页，入口不再被门禁拦到插件区。 */
+describe("旧模块页入口折叠到插件页", () => {
   beforeEach(() => {
-    useModuleStore.getState().reset();
     useUiStore.setState({ page: "home", pageView: null, infohubIntent: null, automationIntent: null });
   });
 
-  it("openInfohub：未安装/停用 → 插件页；启用 → 信息中枢页", () => {
-    useUiStore.getState().openInfohub({ tab: "agenda" });
-    let s = useUiStore.getState();
-    expect(s.page).toBe("plugins");
-    expect(s.pageView).toBe("plugins");
-    expect(s.infohubIntent).toBeNull();
+  it("resolvePage 把旧模块页 id 折成 plugin:<id>", () => {
+    expect(resolvePage("infohub")).toEqual({ page: "plugin:heming.infohub", view: null });
+    expect(resolvePage("automations")).toEqual({ page: "plugin:heming.automations", view: null });
+    expect(resolvePage("workflows")).toEqual({ page: "plugin:heming.automations", view: null });
+    // 幕僚页已并入自动化插件的简报 Tab，没有独立插件页，落到插件区
+    expect(resolvePage("staff")).toEqual({ page: "plugins", view: null });
+    // 已带 plugin: 前缀的页保持原样
+    expect(resolvePage("plugin:heming.infohub")).toEqual({ page: "plugin:heming.infohub", view: null });
+  });
 
-    useModuleStore.getState().install("heming.infohub");
+  it("openInfohub 总是进信息中枢插件页并投递检索意图", () => {
     useUiStore.getState().openInfohub({ tab: "agenda" });
-    s = useUiStore.getState();
-    expect(s.page).toBe("infohub");
+    const s = useUiStore.getState();
+    expect(s.page).toBe("plugin:heming.infohub");
     expect(s.infohubIntent).toEqual({ tab: "agenda" });
   });
 
-  it("openAutomations / focusAutomation：未安装/停用 → 插件页，不留下选中态", () => {
+  it("openAutomations / focusAutomation 进自动化插件页", () => {
     useUiStore.getState().openAutomations({ kind: "infohub.agenda" });
-    expect(useUiStore.getState().page).toBe("plugins");
-    expect(useUiStore.getState().pageView).toBe("plugins");
+    expect(useUiStore.getState()).toMatchObject({
+      page: "plugin:heming.automations",
+      automationTab: "tasks",
+      automationIntent: { kind: "infohub.agenda" },
+    });
 
     useUiStore.getState().focusAutomation("a1");
     expect(useUiStore.getState()).toMatchObject({
-      page: "plugins",
-      pageView: "plugins",
-      automationFocusId: null,
+      page: "plugin:heming.automations",
+      automationFocusId: "a1",
       automationIntent: null,
     });
   });
 
-  it("openStaff：未安装/停用 → 插件页；启用 → 幕僚页", () => {
+  it("openStaff 进自动化插件的简报 Tab（幕僚简报已并入）", () => {
     useUiStore.getState().openStaff();
-    expect(useUiStore.getState().page).toBe("plugins");
-    expect(useUiStore.getState().pageView).toBe("plugins");
-
-    useModuleStore.getState().install("heming.automations");
-    useUiStore.getState().openStaff();
-    // d.134：幕僚简报并入自动化单页，属「简报」Tab
-    expect(useUiStore.getState().page).toBe("automations");
+    expect(useUiStore.getState().page).toBe("plugin:heming.automations");
     expect(useUiStore.getState().automationTab).toBe("briefing");
   });
 });

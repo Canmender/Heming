@@ -79,7 +79,7 @@ afterEach(() => {
 describe("Ctrl/⌘+B 切换导航栏显隐", () => {
   it("pinned → auto（隐藏）并落盘；再按呼出、再按收回", async () => {
     render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
 
     fireEvent.keyDown(window, { key: "b", ctrlKey: true });
     let s = useUiStore.getState();
@@ -100,7 +100,7 @@ describe("Ctrl/⌘+B 切换导航栏显隐", () => {
 
   it("⌘+B 等价（macOS 用 metaKey）", async () => {
     render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
     fireEvent.keyDown(window, { key: "b", metaKey: true });
     expect(useUiStore.getState().navMode).toBe("auto");
   });
@@ -127,7 +127,7 @@ describe("Ctrl/⌘+B 切换导航栏显隐", () => {
 
   it("焦点在输入框里不响应（不抢浏览器加粗快捷键）", async () => {
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
 
     const probe = document.createElement("input");
     container.appendChild(probe);
@@ -143,7 +143,7 @@ describe("Ctrl/⌘+B 切换导航栏显隐", () => {
 
   it("auto 下壳层给热区留 8px 空档（热区不压内容最左侧），pinned 不留", async () => {
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
 
     const shellRow = () => container.querySelector<HTMLElement>("main")?.parentElement ?? null;
     // pinned：没有额外的左内边距（与 d.67 布局一致）

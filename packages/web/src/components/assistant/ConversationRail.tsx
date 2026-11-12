@@ -473,7 +473,7 @@ export function ConversationRail({
       </div>
 
       {error && (
-        <p role="alert" className="border-t border-line-soft px-3 py-2 text-[11px] text-[#b42318]">
+        <p role="alert" className="border-t border-line-soft px-3 py-2 text-[11px] text-[var(--danger)]">
           {error}
         </p>
       )}

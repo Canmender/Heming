@@ -89,6 +89,9 @@ describe("parsePluginManifest · v3 合法清单", () => {
       events: [],
       graphics: [],
       eval: false,
+      // d.125：沙箱桥新增的权限域在归一化后恒为布尔 false（缺省即关闭）。
+      infohub: false,
+      notify: false,
     });
   });
 
@@ -143,6 +146,9 @@ describe("parsePluginManifest · v3 合法清单", () => {
       events: [],
       graphics: [],
       eval: false,
+      // d.125：沙箱桥新增的权限域在归一化后恒为布尔 false（缺省即关闭）。
+      infohub: false,
+      notify: false,
     });
     expect(parsed.contributions.mcpServers).toEqual([]);
   });
@@ -360,6 +366,9 @@ describe("parsePluginManifest · v1 / v2 归一化", () => {
       events: [],
       graphics: [],
       eval: false,
+      // d.125：沙箱桥新增的权限域在归一化后恒为布尔 false（缺省即关闭）。
+      infohub: false,
+      notify: false,
     });
     expect("extra" in parsed).toBe(false);
   });
@@ -379,6 +388,9 @@ describe("parsePluginManifest · v1 / v2 归一化", () => {
       events: [],
       graphics: [],
       eval: false,
+      // d.125：沙箱桥新增的权限域在归一化后恒为布尔 false（缺省即关闭）。
+      infohub: false,
+      notify: false,
     });
   });
 
@@ -914,13 +926,13 @@ describe("parsePluginManifest · v4 插件", () => {
     expect(parsed.permissions.eval).toBe(false);
   });
 
-  it("bundle 不能声明技能 / MCP 服务 / 工具束（只允许 commands + desktopWidgets）", () => {
+  it("bundle 不能声明技能 / MCP 服务 / 工具束（只允许 commands + desktopWidgets + homeCards + background）", () => {
     expect(
       failure(bundle({ contributions: { desktopWidgets: [widget], skills: [skill] } })),
-    ).toContain("只允许贡献 commands 与 desktopWidgets");
+    ).toContain("只允许贡献 commands、desktopWidgets、homeCards 与 background");
     expect(
       failure(bundle({ contributions: { desktopWidgets: [widget], mcpServers: [server] } })),
-    ).toContain("只允许贡献 commands 与 desktopWidgets");
+    ).toContain("只允许贡献 commands、desktopWidgets、homeCards 与 background");
     expect(
       failure(
         bundle({
@@ -930,7 +942,7 @@ describe("parsePluginManifest · v4 插件", () => {
           },
         }),
       ),
-    ).toContain("只允许贡献 commands 与 desktopWidgets");
+    ).toContain("只允许贡献 commands、desktopWidgets、homeCards 与 background");
   });
 
   it("desktopWidgets 非空但 distribution 不是 bundle → 拒绝", () => {
@@ -1155,5 +1167,116 @@ describe("parsePluginManifest · 命令 target 扩展（d.108）", () => {
     expect(failure(v4Declarative({ kind: "settings", card: "theme-mode" }))).toContain(
       "schemaVersion 4 不支持 settings 目标",
     );
+  });
+});
+
+/* ───────────────────── d.125 首页卡片 / 后台页 / 新权限域 ───────────────────── */
+
+const homeCard = {
+  id: "archive",
+  title: "信息中枢",
+  summary: "本机 QQ / 微信聊天记录与日程",
+  icon: "grid",
+  page: "plugin:heming.info-hub",
+  primary: "还没有归档数据",
+};
+
+/** 在合法 v4 bundle 的 contributions 上叠加首页卡片 / 后台页。 */
+function bundleWith(extra: Record<string, unknown>): Record<string, unknown> {
+  return bundle({
+    contributions: { ...(bundle().contributions as Record<string, unknown>), ...extra },
+  });
+}
+
+describe("parsePluginManifest · 首页卡片与后台页", () => {
+  it("bundle 首页卡片归一化：summary / primary / icon 可省略", () => {
+    // 为什么允许省略：primary 只是「还没有数据」时的初始文案，运行期由 homeCardSet 覆盖；
+    // 归一化补空串而不是留 undefined，让 web 侧渲染与签名文本只有一种形状。
+    const parsed = parsePluginManifest(
+      bundleWith({ homeCards: [{ id: "archive", title: "信息中枢", page: "plugin:heming.info-hub" }] }),
+    );
+    expect(parsed.contributions.homeCards).toEqual([
+      { id: "archive", title: "信息中枢", summary: "", page: "plugin:heming.info-hub", primary: "" },
+    ]);
+  });
+
+  it("声明式清单也能带首页卡片（首页卡片是纯数据，不需要随包文件）", () => {
+    const parsed = parsePluginManifest(
+      meta({ schemaVersion: 4, contributions: { skills: [skill], homeCards: [homeCard] } }),
+    );
+    expect(parsed.distribution).toBe("manifest");
+    expect(parsed.contributions.homeCards[0].title).toBe("信息中枢");
+  });
+
+  it("首页卡片最多 4 张、id 插件内唯一", () => {
+    const cards = Array.from({ length: 5 }, (_, index) => ({
+      id: `card-${index}`,
+      title: `卡 ${index}`,
+      page: "plugin:heming.info-hub",
+    }));
+    expect(failure(bundleWith({ homeCards: cards }))).toContain("单个插件最多 4 张首页卡片");
+    expect(failure(bundleWith({ homeCards: [homeCard, { ...homeCard, title: "第二张" }] }))).toContain(
+      "首页卡片 id 重复",
+    );
+  });
+
+  it("首页卡片 id / page / icon 形状校验（错误里带字段路径，作者能定位）", () => {
+    const withCard = (patch: Record<string, unknown>) => bundleWith({ homeCards: [{ ...homeCard, ...patch }] });
+    expect(failure(withCard({ id: "Bad Id" }))).toContain("首页卡片 id");
+    expect(failure(withCard({ page: "https://evil.example" }))).toContain("首页卡片页面");
+    expect(failure(withCard({ icon: "Grid" }))).toContain("首页卡片图标");
+    // 内置页面 id 也允许：迁移期信息中枢页面可能还没切成 plugin: 前缀。
+    expect(() => parsePluginManifest(withCard({ page: "infohub" }))).not.toThrow();
+  });
+
+  it("background 只在 bundle 清单里合法（后台页要加载包内 HTML）", () => {
+    expect(
+      failure(
+        meta({ schemaVersion: 4, contributions: { skills: [skill], background: { entry: "background.html" } } }),
+      ),
+    ).toContain('必须 distribution: "bundle"');
+    expect(failure(bundleWith({ background: { entry: "/abs/background.html" } }))).toContain("后台页入口");
+    expect(
+      parsePluginManifest(bundleWith({ background: { entry: "background.html" } })).contributions.background,
+    ).toEqual({ entry: "background.html" });
+  });
+
+  it("v3 清单写首页卡片 / 后台页 / 新权限域 → 逐字段拒绝（不被 zod 静默 strip）", () => {
+    expect(
+      failure(meta({ schemaVersion: 3, contributions: { homeCards: [homeCard] } })),
+    ).toContain("schemaVersion 3 不支持 contributions.homeCards");
+    expect(
+      failure(meta({ schemaVersion: 3, contributions: { background: { entry: "background.html" } } })),
+    ).toContain("schemaVersion 3 不支持 contributions.background");
+    for (const key of ["infohub", "notify"] as const) {
+      expect(
+        failure(meta({ schemaVersion: 3, permissions: { network: [], tools: "read", [key]: true } })),
+        key,
+      ).toContain(`schemaVersion 3 不支持 permissions.${key}`);
+    }
+  });
+
+  it("permissions.infohub / notify 归一化：显式 true 保留、缺省 false", () => {
+    const parsed = parsePluginManifest(
+      meta({
+        schemaVersion: 4,
+        contributions: { skills: [skill] },
+        permissions: { network: [], tools: "read", infohub: true, notify: true },
+      }),
+    );
+    expect(parsed.permissions.infohub).toBe(true);
+    expect(parsed.permissions.notify).toBe(true);
+    const defaults = parsePluginManifest(meta({ schemaVersion: 4, contributions: { skills: [skill] } }));
+    expect(defaults.permissions.infohub).toBe(false);
+    expect(defaults.permissions.notify).toBe(false);
+    expect(
+      failure(
+        meta({
+          schemaVersion: 4,
+          contributions: { skills: [skill] },
+          permissions: { network: [], tools: "read", infohub: "yes" },
+        }),
+      ),
+    ).toContain("permissions.infohub");
   });
 });

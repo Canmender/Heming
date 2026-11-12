@@ -463,7 +463,7 @@ export function RouteGroupsCard() {
             <div className="mt-1 ui-caption">只有一个候选，等于不换人——再加一个才有备胎。</div>
           )}
 
-          {error && <div role="alert" className="mt-2 text-[12px] text-red-600">{error}</div>}
+          {error && <div role="alert" className="mt-2 ui-caption text-[var(--danger)]">{error}</div>}
           <div className="mt-3 flex items-center gap-2">
             <button
               type="submit"

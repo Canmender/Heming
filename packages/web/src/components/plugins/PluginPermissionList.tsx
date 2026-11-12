@@ -4,7 +4,7 @@ import { hostPreview } from "./viewModel.js";
 /**
  * 权限清单（安装预览 / 详情抽屉共用）。
  *
- * 展示顺序固定：网络 -> 工具风险上限 -> 文件根。
+ * 展示顺序固定：网络 -> 工具风险上限 -> 文件根 -> 本机归档/桌面通知（d.125）。
  * 网络只列前 3 行，其余折成「共 N 项」——插件允许 20 个主机，
  * 全量铺开会把弹窗撑满，用户真正要看的是「大概访问哪些、总数多少」。
  */
@@ -57,6 +57,11 @@ export function PluginPermissionList({
             "未声明（预留字段，当前不生效）"
           )}
         </dd>
+        {/* d.125：沙箱插件访问本机归档/发通知都要显式声明，默认关闭。 */}
+        <dt className="text-muted">本机归档</dt>
+        <dd>{view.infohub ? "允许（经插件桥调用 infohub）" : "不允许"}</dd>
+        <dt className="text-muted">桌面通知</dt>
+        <dd>{view.notify ? "允许（经插件桥发通知）" : "不允许"}</dd>
       </dl>
 
       {view.legacy && (

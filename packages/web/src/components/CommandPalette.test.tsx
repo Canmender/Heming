@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { CommandPalette } from "./CommandPalette.js";
 import { useUiStore } from "../store/ui.js";
-import { useModuleStore } from "../lib/modules/store.js";
 import { useInfohubStore } from "../lib/infohub/store.js";
 import { fetchTeam } from "../lib/api.js";
 import { RECENT_KEY } from "../lib/palette/recent.js";
@@ -31,12 +30,12 @@ vi.mock("../lib/palette/local.js", async (importOriginal) => {
  * 最近使用落盘与再次打开时置顶。
  */
 
-const OPTION = (name: string) => screen.getByRole("option", { name: `选择 ${name}` });
+// d.138：选项的可访问名就是条目名（另一会话把 aria-label 从「选择 X」改成了 X）。
+const OPTION = (name: string) => screen.getByRole("option", { name });
 const searchBox = () => screen.getByLabelText("搜索页面、动作与成员");
 
 function resetStores() {
   localStorage.clear();
-  useModuleStore.getState().reset();
   useUiStore.setState({
     page: "home",
     activeConversationId: null,
@@ -216,7 +215,7 @@ describe("命令面板 v2 · 检索", () => {
     });
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "免检单" } });
-    const row = await screen.findByRole("option", { name: "选择 免检单讨论组" });
+    const row = await screen.findByRole("option", { name: "免检单讨论组" });
     expect(row.textContent).toContain("团队");
     fireEvent.click(row);
     expect(useUiStore.getState()).toMatchObject({ page: "team", teamFocusUserId: "u9" });
@@ -232,12 +231,14 @@ describe("命令面板 v2 · 四个动作的分发", () => {
   });
   afterEach(() => cleanup());
 
-  it("新建任务 → 切到智能体页的任务视图（任务区已并入）", () => {
+  it("新建任务 → 切到团队页看板（任务已经长在团队页里）", () => {
     const onClose = vi.fn();
     render(<CommandPalette onClose={onClose} />);
     fireEvent.click(OPTION("新建任务"));
-    expect(useUiStore.getState().page).toBe("chat");
-    expect(useUiStore.getState().pageView).toBe("tasks");
+    // d.138：tasks 旧页面折叠目标从 chat/tasks 改成 team/board——对话页不认 tasks 视图，
+    // 原来点完停在对话 Tab，看起来像没反应。
+    expect(useUiStore.getState().page).toBe("team");
+    expect(useUiStore.getState().pageView).toBe("board");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -265,31 +266,23 @@ describe("命令面板 v2 · 四个动作的分发", () => {
     expect(useUiStore.getState().settingsTab).toBeNull();
   });
 
-  it("「插件与模块」→ 插件页 + 插件 Tab 意图（与未安装/停用模块后的跳转落点同一入口）", () => {
+  it("「插件管理」→ 插件页 + 插件 Tab 意图（旧模块页入口也落到这里）", () => {
     render(<CommandPalette onClose={vi.fn()} />);
-    fireEvent.click(OPTION("插件与模块"));
+    fireEvent.click(OPTION("插件管理"));
     const s = useUiStore.getState();
     expect(s.page).toBe("plugins");
     expect(s.pageView).toBe("plugins");
   });
 
-  it("「插件与模块」动作按安装/启用状态显示实际生效数", () => {
-    // 默认全部未安装 → 0/4
+  it("「插件管理」动作跳插件页（动作文案不再带模块启用计数）", () => {
     render(<CommandPalette onClose={vi.fn()} />);
-    expect(screen.getByText(/已启用 0\/4/)).toBeInTheDocument();
-
-    // 安装三个后停信息中枢：幕僚与自动化仍生效（自动化不依赖信息中枢）→ 2/4
-    const store = useModuleStore.getState();
-    for (const id of ["staff", "heming.infohub", "heming.automations"] as const) store.install(id);
-    store.setEnabled("heming.infohub", false);
-    render(<CommandPalette onClose={vi.fn()} />);
-    expect(screen.getAllByText(/已启用 2\/4/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("option", { name: "插件管理" })).toBeInTheDocument();
   });
 
-  it("搜「模块」能命中「插件与模块」动作（此前一条结果都没有）", async () => {
+  it("搜「插件」能命中「插件管理」动作（此前一条结果都没有）", async () => {
     render(<CommandPalette onClose={vi.fn()} />);
-    fireEvent.change(searchBox(), { target: { value: "模块" } });
-    expect(await screen.findByRole("option", { name: "选择 插件与模块" })).toBeInTheDocument();
+    fireEvent.change(searchBox(), { target: { value: "插件" } });
+    expect(await screen.findByRole("option", { name: "插件管理" })).toBeInTheDocument();
   });
 
   it("连续两次「新智能体」意图的 token 不同（不会被合并成一次）", () => {
@@ -297,7 +290,7 @@ describe("命令面板 v2 · 四个动作的分发", () => {
     // 点过一次后该动作会同时出现在「最近使用」与「常用动作」两组里，取第一条即可
     fireEvent.click(OPTION("新建智能体"));
     const first = useUiStore.getState().paletteIntent;
-    fireEvent.click(screen.getAllByRole("option", { name: "选择 新建智能体" })[0]);
+    fireEvent.click(screen.getAllByRole("option", { name: "新建智能体" })[0]);
     const second = useUiStore.getState().paletteIntent;
     expect(second?.kind).toBe("agent-create");
     expect(second!.token).not.toBe(first!.token);
@@ -344,7 +337,7 @@ describe("命令面板 v2 · 最近使用", () => {
     });
     const view = render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "Alice" } });
-    const row = await screen.findByRole("option", { name: "选择 Alice" });
+    const row = await screen.findByRole("option", { name: "Alice" });
     fireEvent.click(row);
     expect(localStorage.getItem(RECENT_KEY)).toBeNull();
     view.unmount();
@@ -470,7 +463,7 @@ describe("命令面板 · 本机三组（任务 / 记忆 / 插件）", () => {
   it("本机结果不携带报告正文（面板项文本只到截断后的 detail）", async () => {
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "周报" } });
-    const row = await screen.findByRole("option", { name: "选择 整理周报" });
+    const row = await screen.findByRole("option", { name: "整理周报" });
     expect(row.textContent).not.toContain("本周完成 3 项");
   });
 });
@@ -521,7 +514,7 @@ describe("命令面板 · 知识库（d.114）", () => {
     for (const item of cases) {
       const view = render(<CommandPalette onClose={vi.fn()} />);
       fireEvent.change(searchBox(), { target: { value: item.query } });
-      fireEvent.click(await screen.findByRole("option", { name: `选择 ${item.label}` }));
+      fireEvent.click(await screen.findByRole("option", { name: `${item.label}` }));
       expect(useUiStore.getState().page).toBe("vault");
       expect(useUiStore.getState().vaultIntent?.kind).toBe(item.kind);
       view.unmount();
@@ -560,7 +553,7 @@ describe("命令面板 · 知识库（d.114）", () => {
     fireEvent.change(searchBox(), { target: { value: "会议" } });
     const group = await screen.findByRole("group", { name: "知识库笔记" });
     expect(group).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("option", { name: "选择 会议记录" }));
+    fireEvent.click(screen.getByRole("option", { name: "会议记录" }));
     expect(useUiStore.getState().page).toBe("vault");
     expect(useUiStore.getState().vaultIntent).toMatchObject({
       kind: "open",

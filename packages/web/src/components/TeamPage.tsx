@@ -542,15 +542,15 @@ export function TeamPage() {
       headerExtra={
         tab === "workspace" ? null : (
         <div className="bg-[var(--subtle)] px-6 py-2">
+          {/* d.138：原来一进来就是一句 40 多字的合规说明 + 三个复选框挤在同一行，
+              任务被说明压住。改成「标题 + 开关」在前、说明降为一行注释。 */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-            <span className="ui-caption">
-              向团队共享（只上报标题与状态摘要，不含对话、提示词与工具参数；关闭只停止上报，不撤回已上传的内容）：
-            </span>
+            <span className="ui-caption font-medium text-ink">共享给团队</span>
             <div className="flex items-center gap-3" role="group" aria-label="共享内容">
               <label className="flex items-center gap-1 ui-caption">
                 <input
                   type="checkbox"
-                  className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                  className="h-3.5 w-3.5 accent-[var(--ink)]"
                   checked={share.tasks}
                   onChange={(e) => (e.target.checked ? updateShare({ tasks: true }) : turnOffShare("tasks"))}
                 />
@@ -559,7 +559,7 @@ export function TeamPage() {
               <label className="flex items-center gap-1 ui-caption">
                 <input
                   type="checkbox"
-                  className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                  className="h-3.5 w-3.5 accent-[var(--ink)]"
                   checked={share.agenda}
                   onChange={(e) => (e.target.checked ? updateShare({ agenda: true }) : turnOffShare("agenda"))}
                 />
@@ -568,7 +568,7 @@ export function TeamPage() {
               <label className="flex items-center gap-1 ui-caption">
                 <input
                   type="checkbox"
-                  className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                  className="h-3.5 w-3.5 accent-[var(--ink)]"
                   checked={share.usage}
                   onChange={(e) => (e.target.checked ? updateShare({ usage: true }) : turnOffShare("usage"))}
                 />
@@ -598,13 +598,25 @@ export function TeamPage() {
               清除共享记录
             </button>
           </div>
+          {shareCount > 0 ? (
+            <p className="mt-1 ui-micro">
+              只上报标题与状态摘要，不含对话、提示词与工具参数；关闭只停止上报，不撤回已上传的内容。
+            </p>
+          ) : shareNotice ? (
+            // 刚关掉最后一项：此时「什么都没共享」与「关≠撤回」两句都成立，
+            // 先说清后者——用户以为关掉就把已上传的删了，才是真正的误解点。
+            <p className="mt-1 ui-micro">
+              只上报标题与状态摘要，不含对话、提示词与工具参数；关闭只停止上报，不撤回已上传的内容。
+            </p>
+          ) : (
+            <p className="mt-1 ui-micro">
+              只上报标题与状态摘要，不含对话、提示词与工具参数。当前未共享任何内容：团队看不到你的任务、日程或用量。
+            </p>
+          )}
           {shareNotice && (
             <p role="status" className="mt-1 ui-micro text-[var(--warn)]">
               {shareNotice}
             </p>
-          )}
-          {shareCount === 0 && (
-            <p className="mt-1 ui-micro">当前未共享任何内容：团队看不到你的任务、日程或用量。</p>
           )}
           {members.length <= 1 && (
             <p className="mt-1 ui-micro">
@@ -637,7 +649,7 @@ export function TeamPage() {
                 <label className="flex items-center gap-1 text-muted">
                   <input
                     type="checkbox"
-                    className="h-3.5 w-3.5 accent-[#1a1a1a]"
+                    className="h-3.5 w-3.5 accent-[var(--ink)]"
                     checked={onlineOnly}
                     onChange={(e) => setOnlineOnly(e.target.checked)}
                   />

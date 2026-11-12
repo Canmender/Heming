@@ -12,6 +12,8 @@ import {
   WorkflowIcon,
 } from "./icons.js";
 import { ModelTraceView } from "./ModelTraceView.js";
+import { Button } from "./ui/Button.js";
+import { Stat } from "./ui/Stat.js";
 import { ModelUsageView } from "./ModelUsageView.js";
 import { BackupPanel } from "./model/BackupPanel.js";
 import { useLlmStore } from "../store/llm.js";
@@ -419,11 +421,15 @@ export function ModelPage() {
         {/* ── 模型 ───────────────────────────────────────────── */}
         {tab === "models" && (
           <section aria-label="可用模型" className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <StatCard label="可用模型" value={profiles.length} hint="智能体可选的模型" />
-              <StatCard label="已添加来源" value={providers.length} hint="订阅、厂商或自定义地址" />
-              <StatCard label="订阅账号" value={accounts.length} hint="登录后可用的额度" />
-            </div>
+            {/* d.138：三个 0 的统计条不再占首屏——空态本身已经说明「还没有」，
+                再排一行 0/0/0 只会让页面显得像没加载完。有任意数据时才出现。 */}
+            {profiles.length + providers.length + accounts.length > 0 && (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Stat label="可用模型" value={profiles.length} hint="智能体可选的模型" />
+                <Stat label="已添加来源" value={providers.length} hint="订阅、厂商或自定义地址" />
+                <Stat label="订阅账号" value={accounts.length} hint="登录后可用的额度" />
+              </div>
+            )}
 
             {loading ? (
               <div className="space-y-2" aria-label="读取模型">
@@ -436,17 +442,13 @@ export function ModelPage() {
                 <span className="ui-icon-tile mx-auto mb-3">
                   <ModelIcon width={20} height={20} />
                 </span>
-                <div className="text-[15px] font-bold">还没有可用的模型</div>
+                <div className="ui-section-title">还没有可用的模型</div>
                 <p className="mx-auto mt-1 max-w-[420px] ui-caption">
                   添加一个来源：订阅一个账号，或填一个厂商的 API Key。加完模型会自动出现。
                 </p>
-                <button
-                  type="button"
-                  className="ui-btn ui-btn-md ui-btn-primary mt-4"
-                  onClick={() => setTab("sources")}
-                >
+                <Button className="mt-4" onClick={() => setTab("sources")}>
                   添加来源
-                </button>
+                </Button>
               </div>
             ) : (
               <div className="ui-card p-4">
@@ -1155,7 +1157,8 @@ export function ModelPage() {
                   );
                 })}
                 {providers.length === 0 && (
-                  <li className="py-2 ui-caption">还没有来源，从上面选一个开始。</li>
+                  // d.138：方位词（「从上面选」）在滚动后失效——直接说清下一步动作名。
+                  <li className="py-2 ui-caption">还没有来源。点页面顶部的「添加来源」，填服务地址和 Key。</li>
                 )}
               </ul>
             </div>
@@ -1594,12 +1597,5 @@ export function ModelPage() {
   );
 }
 
-function StatCard({ label, value, hint }: { label: string; value: number; hint: string }) {
-  return (
-    <div className="ui-card p-4">
-      <div className="text-[12px] font-medium text-muted">{label}</div>
-      <div className="ui-numeric mt-1.5 text-[26px] font-bold leading-none">{value}</div>
-      <div className="mt-1.5 ui-caption">{hint}</div>
-    </div>
-  );
-}
+/* 统计卡已抽到 ui/Stat.tsx（d.138）：此前这里的数字是 26px/p-4，首页同名卡片是
+   20px/p-3，同一套「数字卡」两个页面不一样大。 */

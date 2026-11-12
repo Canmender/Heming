@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, within, act, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import type { TeamActivity, TeamMember, User } from "@heming/shared";
 import { HomePage } from "./HomePage.js";
 import { useAuthStore } from "../store/auth.js";
@@ -10,8 +10,7 @@ import { useTaskStore } from "../lib/tasks/store.js";
 import { useTokenUsageStore, monthKeyOf, daysOfMonth } from "../store/tokenUsage.js";
 import { ONBOARDING_KEY, useOnboardingStore } from "../lib/onboarding.js";
 import { FILE_ROOTS_KEY } from "../lib/fileEdit/roots.js";
-import { useModuleStore } from "../lib/modules/store.js";
-import { useInfohubStore } from "../lib/infohub/store.js";
+import { resetPluginHomeCards } from "../lib/plugins/homeCards.js";
 import { fetchTeam, fetchTeamActivities } from "../lib/api.js";
 import { latestUserUpdates } from "../lib/changelog.js";
 
@@ -109,7 +108,6 @@ describe("HomePage", () => {
     localStorage.removeItem(ONBOARDING_KEY);
     // 可写根是 localStorage 的全局状态：不清会漏到后面的用例（尤其新加的「文件可写目录」用例）
     localStorage.removeItem(FILE_ROOTS_KEY);
-    useModuleStore.getState().reset();
     useOnboardingStore.setState({ dismissedAt: null });
     useLlmStore.setState({ profiles: [], bindings: {}, prompts: {} });
     useTaskStore.setState({ tasks: [] });
@@ -336,23 +334,45 @@ describe("HomePage", () => {
     expect(screen.queryByText("文件目录：未绑定")).toBeNull();
   });
 
-  it("未安装或停用幕僚 / 信息中枢模块后，首页对应的卡一起下线（不留假入口）", async () => {
-    // jsdom 没有 InfoHub 桥，默认 available=false 卡本来就不渲染；先给一个「未连接」状态让卡出现。
-    // booted=true 挡住卡内兜底 boot()（没有桥时它会把 available 改回 false）。
-    useInfohubStore.setState({ available: true, running: false, booted: true });
-    // 内置模块默认未安装：先装上，确认默认渲染时有归档卡
-    useModuleStore.getState().install("heming.infohub");
-    const first = render(<HomePage />);
-    await act(async () => {});
-    // d.131 M2–M4：幕僚/信息中枢卡都由模块包提供；jsdom 没有模块构建，首页不再渲染内置回退
-    expect(screen.queryByRole("region", { name: "幕僚" })).toBeNull();
-    expect(screen.queryByRole("region", { name: "本机归档" })).toBeNull();
-    first.unmount();
+  it("桌面端有插件桥时首页渲染插件首页卡，点击跳插件页（d.125 沙箱插件卡片）", async () => {
+    try {
+      // 首页卡数据由宿主按「已安装 + 已启用 + 文件完好」的插件清单给出，
+      // web 侧只渲染数据、不执行插件代码；内置模块卡已随 modules 体系删除。
+      window.__heming_plugins = {
+        homeCards: async () => [
+          {
+            pluginId: "heming.infohub",
+            pluginName: "信息中枢",
+            id: "archive",
+            title: "信息中枢",
+            summary: "本机 QQ / 微信聊天记录与日程",
+            icon: "grid",
+            page: "plugin:heming.infohub",
+            text: "128 条归档",
+            detail: "",
+            badge: "已连接",
+          },
+        ],
+        onHomeCard: () => () => {},
+        onNotify: () => () => {},
+      };
+      render(<HomePage />);
+      await act(async () => {});
+      const region = await screen.findByRole("region", { name: "插件首页卡" });
+      expect(region).toBeInTheDocument();
+      fireEvent.click(within(region).getByRole("button", { name: "打开 信息中枢" }));
+      expect(useUiStore.getState().page).toBe("plugin:heming.infohub");
+    } finally {
+      delete window.__heming_plugins;
+      resetPluginHomeCards();
+    }
+  });
 
-    useModuleStore.getState().setEnabled("heming.infohub", false);
+  it("没有插件桥时首页不出现插件卡区块（浏览器端静默降级，不留空壳）", async () => {
+    delete window.__heming_plugins;
     render(<HomePage />);
     await act(async () => {});
-    expect(screen.queryByRole("region", { name: "本机归档" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "插件首页卡" })).toBeNull();
   });
 
   it("云端探测失败时页脚显示「失败」", async () => {

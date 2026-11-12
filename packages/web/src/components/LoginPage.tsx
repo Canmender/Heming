@@ -113,7 +113,7 @@ export function LoginPage() {
             </div>
             {error && (
               // 失败原因必须被读屏播报：role=alert 让它在出现时立刻读出（不是等用户 Tab 到）
-              <div id="login-error" role="alert" className="ui-caption text-[#b42318]">
+              <div id="login-error" role="alert" className="ui-caption text-[var(--danger)]">
                 {error}
               </div>
             )}

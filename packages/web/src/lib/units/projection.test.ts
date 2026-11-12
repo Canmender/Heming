@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { CapabilityUnit } from "@heming/shared";
-import { BUILTIN_MODULES } from "../modules/registry.js";
 import { contentFingerprint } from "../plugins/integrity.js";
 import { parsePluginManifest } from "../plugins/manifest.js";
 import type { InstalledPlugin } from "../plugins/store.js";
@@ -11,7 +9,6 @@ import {
   detectUnitOrphans,
   pluginBlocks,
   pluginEngines,
-  projectBuiltinUnits,
   projectBundleUnits,
   projectPackageUnits,
   projectSystemUnit,
@@ -138,42 +135,21 @@ function widgetRecord(overrides: Partial<WidgetRecord> = {}): WidgetRecord {
   };
 }
 
-function byId(units: CapabilityUnit[]): Map<string, CapabilityUnit> {
-  return new Map(units.map((unit) => [unit.id, unit] as const));
-}
-
-describe("projectUnits · 四类来源", () => {
-  it("按 系统 → 内置 → 声明式 → 插件 的稳定顺序产出，id 不混淆", () => {
+describe("projectUnits · 三类来源", () => {
+  it("按 系统 → 声明式 → 插件 的稳定顺序产出，id 不混淆", () => {
     const units = projectUnits({
       system: systemFixture(),
-      moduleEnabled: { staff: true, "heming.infohub": true, "heming.automations": true },
       plugins: [installedPlugin()],
       widgets: [widgetRecord()],
       appVersion: APP_VERSION,
     });
-    expect(units.map((unit) => unit.source)).toEqual([
-      "system",
-      ...BUILTIN_MODULES.map(() => "builtin"),
-      "package",
-      "bundle",
-    ]);
-    expect(units.map((unit) => unit.id)).toEqual([
-      "heming.core",
-      ...BUILTIN_MODULES.map((mod) => mod.id),
-      "acme.report-kit",
-      "heming.pet",
-    ]);
+    expect(units.map((unit) => unit.source)).toEqual(["system", "package", "bundle"]);
+    expect(units.map((unit) => unit.id)).toEqual(["heming.core", "acme.report-kit", "heming.pet"]);
   });
 
-  it("没有提供来源时只保留始终存在的内置模块", () => {
-    const builtinOnly = projectUnits({});
-    expect(builtinOnly.map((unit) => unit.source)).toEqual(
-      BUILTIN_MODULES.map(() => "builtin"),
-    );
-    expect(projectUnits({ modules: [] })).toEqual([]);
-    expect(
-      projectUnits({ modules: [], plugins: [], widgets: [] }),
-    ).toEqual([]);
+  it("没有提供来源时投影为空（不再有内置模块兜底）", () => {
+    expect(projectUnits({})).toEqual([]);
+    expect(projectUnits({ plugins: [], widgets: [] })).toEqual([]);
   });
 
   it("系统能力单元只读、置顶、贡献计数来自系统视图", () => {
@@ -184,52 +160,9 @@ describe("projectUnits · 四类来源", () => {
     expect(unit.contributions).toContainEqual({ kind: "skills", count: 2, enabled: true });
     expect(unit.contributions).toContainEqual({ kind: "mcpServers", count: 1, enabled: true });
 
-    const [status] = projectUnitStatuses({ system: systemFixture(), modules: [] });
+    const [status] = projectUnitStatuses({ system: systemFixture() });
     expect(status!.effective).toBe(true);
     expect(status!.activeKinds).toEqual(["skills", "mcpServers"]);
-  });
-});
-
-describe("projectBuiltinUnits · 模块依赖、安装与开关", () => {
-  it("四个模块都有 page 贡献，且互不依赖（自动化已独立成插件）", () => {
-    const units = projectBuiltinUnits({});
-    expect(units).toHaveLength(4);
-    for (const unit of units) {
-      expect(unit.source).toBe("builtin");
-      expect(unit.contributions.some((item) => item.kind === "page")).toBe(true);
-    }
-    expect(byId(units).get("heming.automations")!.requires).toBeUndefined();
-    expect(byId(units).get("workflows")!.requires).toBeUndefined();
-  });
-
-  it("信息中枢停用不影响自动化：两者互不依赖，各自按开关判定", () => {
-    const statuses = projectUnitStatuses({
-      moduleEnabled: { staff: true, "heming.infohub": false, "heming.automations": true },
-    });
-    const map = new Map(statuses.map((status) => [status.unit.id, status] as const));
-    expect(map.get("heming.infohub")!.effective).toBe(false);
-    expect(map.get("heming.infohub")!.reason).toEqual({ kind: "disabled" });
-    expect(map.get("heming.automations")!.effective).toBe(true);
-  });
-
-  it("未安装：notInstalled 短路，即使 enabled=true 也不生效", () => {
-    const statuses = projectUnitStatuses({
-      moduleEnabled: { staff: true, "heming.infohub": true, "heming.automations": true },
-      moduleInstalled: { staff: false, "heming.infohub": false, "heming.automations": false },
-    });
-    for (const status of statuses) {
-      expect(status.effective).toBe(false);
-      expect(status.reason).toEqual({ kind: "notInstalled" });
-    }
-  });
-
-  it("总开关关闭：只报 disabled，不报依赖缺失", () => {
-    const statuses = projectUnitStatuses({
-      moduleEnabled: { staff: false, "heming.infohub": true, "heming.automations": true },
-    });
-    const staff = statuses.find((status) => status.unit.id === "staff")!;
-    expect(staff.effective).toBe(false);
-    expect(staff.reason).toEqual({ kind: "disabled" });
   });
 });
 
@@ -250,7 +183,7 @@ describe("projectPackageUnits · 贡献计数 / 停用 / meta", () => {
 
   it("贡献级停用：只挡那一类贡献，整个单元仍生效", () => {
     const plugin = installedPlugin({ disabledKinds: ["skills"] });
-    const [status] = projectUnitStatuses({ plugins: [plugin], modules: [], appVersion: APP_VERSION });
+    const [status] = projectUnitStatuses({ plugins: [plugin], appVersion: APP_VERSION });
     expect(status!.effective).toBe(true);
     expect(status!.activeKinds).not.toContain("skills");
     expect(status!.diagnostics).toContainEqual({ kind: "kindDisabled", contribution: "skills" });
@@ -259,7 +192,6 @@ describe("projectPackageUnits · 贡献计数 / 停用 / meta", () => {
   it("主开关关闭：disabled 且不再逐类报 kindDisabled", () => {
     const [status] = projectUnitStatuses({
       plugins: [installedPlugin({ enabled: false })],
-      modules: [],
       appVersion: APP_VERSION,
     });
     expect(status!.effective).toBe(false);
@@ -285,7 +217,7 @@ describe("projectPackageUnits · engines / 签名 / 指纹阻断", () => {
   it("engines 要求更高版本：incompatible 并带两侧版本", () => {
     const plugin = installedPlugin();
     (plugin.manifest as unknown as { engines: { heming: string } }).engines = { heming: "d.106" };
-    const [status] = projectUnitStatuses({ plugins: [plugin], modules: [], appVersion: APP_VERSION });
+    const [status] = projectUnitStatuses({ plugins: [plugin], appVersion: APP_VERSION });
     expect(status!.effective).toBe(false);
     expect(status!.reason).toEqual({
       kind: "incompatible",
@@ -297,20 +229,19 @@ describe("projectPackageUnits · engines / 签名 / 指纹阻断", () => {
   it("engines 非法：invalidEngines（失败关闭，不当作兼容）", () => {
     const plugin = installedPlugin();
     (plugin.manifest as unknown as { engines: { heming: string } }).engines = { heming: "v1" };
-    const [status] = projectUnitStatuses({ plugins: [plugin], modules: [], appVersion: APP_VERSION });
+    const [status] = projectUnitStatuses({ plugins: [plugin], appVersion: APP_VERSION });
     expect(status!.reason).toEqual({ kind: "invalidEngines", required: "v1" });
   });
 
   it("签名无效：signature 阻断；未签名/环境不支持不阻断", () => {
     const invalid = installedPlugin({ signature: { status: "invalid", alg: "ed25519" } });
-    const [invalidStatus] = projectUnitStatuses({ plugins: [invalid], modules: [], appVersion: APP_VERSION });
+    const [invalidStatus] = projectUnitStatuses({ plugins: [invalid], appVersion: APP_VERSION });
     expect(invalidStatus!.effective).toBe(false);
     expect(invalidStatus!.reason!.kind).toBe("signature");
 
     for (const signature of [null, { status: "unsupported" as const }]) {
       const [status] = projectUnitStatuses({
         plugins: [installedPlugin({ signature })],
-        modules: [],
         appVersion: APP_VERSION,
       });
       expect(status!.effective).toBe(true);
@@ -340,14 +271,13 @@ describe("projectBundleUnits · 插件", () => {
     expect(unit!.contributions).toEqual([
       { kind: "desktopWidgets", count: 1, enabled: true },
     ]);
-    const [status] = projectUnitStatuses({ widgets: [widgetRecord()], modules: [], appVersion: APP_VERSION });
+    const [status] = projectUnitStatuses({ widgets: [widgetRecord()], appVersion: APP_VERSION });
     expect(status!.effective).toBe(true);
   });
 
   it("记录损坏（error）：degraded 阻断，诊断带上原始原因", () => {
     const [status] = projectUnitStatuses({
       widgets: [widgetRecord({ error: "插件文件缺失，请重新安装" })],
-      modules: [],
       appVersion: APP_VERSION,
     });
     expect(status!.effective).toBe(false);
@@ -357,7 +287,6 @@ describe("projectBundleUnits · 插件", () => {
   it("停用的插件：disabled，不伪造已完成状态", () => {
     const [status] = projectUnitStatuses({
       widgets: [widgetRecord({ enabled: false })],
-      modules: [],
       appVersion: APP_VERSION,
     });
     expect(status!.reason).toEqual({ kind: "disabled" });

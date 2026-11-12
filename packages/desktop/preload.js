@@ -62,17 +62,6 @@ contextBridge.exposeInMainWorld("__heming_runtime", {
   probe: () => ipcRenderer.invoke("runtime:probe"),
 });
 
-// —— 宿主加载式模块包（d.131）——
-// 只读已安装模块清单（含 web 入口），供主窗口拼 app://heming/modules/<id>/<version>/files/web/... URL。
-// 真正的文件读取在 app:// 协议层做「已安装 + 路径夹取」双重校验，这里不传任意路径。
-contextBridge.exposeInMainWorld("__heming_modules", {
-  webList: () => ipcRenderer.invoke("modules:web-list"),
-  /** 下载 + 验签 + 安装官方模块包；返回安装记录。 */
-  install: (id, version) => ipcRenderer.invoke("modules:install", { id, version }),
-  /** 卸载模块包（只删安装目录记录，不删业务数据）。 */
-  remove: (id) => ipcRenderer.invoke("modules:remove", id),
-});
-
 // —— 版本号 ——
 // 展示与更新比较都用 5 段版本（d.特性.破坏性.修订.构建），不在渲染层重复读 package.json。
 contextBridge.exposeInMainWorld("__heming_version", readAppVersion());
@@ -437,6 +426,32 @@ contextBridge.exposeInMainWorld("__heming_widgets", {
   },
   replyChatConfig: (requestId, config) =>
     ipcRenderer.invoke("widgets:chat-config-reply", { requestId, config }),
+});
+
+// —— 插件首页卡片 / 通知桥（contract §4：主窗专用）——
+// 沙箱 bundle 插件跑在自己的渲染面里，只能经主进程把「首页卡片文案」和「通知」送出来；
+// 主窗这边需要一个只读窗口：拉一次全量卡片 + 订阅增量，不暴露任何安装/文件能力。
+// 三个方法都走 secureIpc + TRUSTED_CHANNELS（主窗专用），插件自己的渲染面拿不到这份桥。
+contextBridge.exposeInMainWorld("__heming_plugins", {
+  /**
+   * 已安装 + enabled + 文件完好插件的首页卡片（含插件经 homeCardSet 覆盖过的文案）。
+   * 每张：{ pluginId, pluginName, id, title, summary, icon, page, text, detail, badge }。
+   */
+  homeCards: () => ipcRenderer.invoke("plugins:homecards"),
+  /** 某张卡片被插件更新（主进程广播）；返回取消订阅函数。 */
+  onHomeCard: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, card) => callback(card);
+    ipcRenderer.on("plugin:homecard", listener);
+    return () => ipcRenderer.removeListener("plugin:homecard", listener);
+  },
+  /** 插件发来的通知（宿主已按权限/长度收口）；返回取消订阅函数。 */
+  onNotify: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("plugin:notify", listener);
+    return () => ipcRenderer.removeListener("plugin:notify", listener);
+  },
 });
 
 // —— 文件编辑桥（d.55 · file_patch）——

@@ -45,7 +45,9 @@ export function RecentConversations() {
   );
 
   return (
-    <section aria-label="最近对话" className="ui-card p-3">
+    // d.138：h-full 让这张卡与左栏「团队动向」底边齐平——首页两栏此前顶对齐、
+    // 右卡内容少时底边差出一截，看起来像布局没做完。
+    <section aria-label="最近对话" className="ui-card h-full p-3">
       <div className="mb-1.5 flex items-center justify-between">
         <div className="text-[12px] font-bold text-muted">最近对话</div>
         <button type="button" className="ui-link" onClick={() => setPage("chat")}>

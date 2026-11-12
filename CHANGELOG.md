@@ -2,6 +2,48 @@
 
 和鸣的版本记录。版本号规则见 `docs/VERSION-MANAGEMENT.md`（5 段：`d.特性.破坏性.修订.构建`）。
 
+## d.138.3.54.10（2026-11-12）— 自动化与信息中枢变成普通插件：modules 体系下线
+
+- **modules 体系整体下线**：`packages/modules/` 整个目录删除（127 个文件、约 2.2 万行），
+  web 侧的 `lib/modules/{runtime,store,registry,nav,webModules,catalogClient,cloudInstall,host-sdk,coupling}`
+  一并删除；`scripts/{build-modules,build-web-module,check-module-packages,generate-module-sdk,pack-web-module}.mjs`
+  与根 `package.json` 的 `modules:build` / `module:check` 脚本删掉；server 去掉
+  `GET /api/modules` 与 `GET /api/modules/:id/:version/module.tgz`（`moduleCatalog.ts` 删除）；
+  桌面端去掉 web 模块安装 IPC 与 `app://heming/modules/...` 只读路由；`module-catalog/` 不再产出、
+  不再随部署上传。目录、页面与后台循环的装配只剩插件一条路。
+- **两个内置能力改成沙箱 bundle 插件**：`plugin-kit/plugins/automations/`（`heming.automations` 1.0.0）
+  与 `plugin-kit/plugins/infohub/`（`heming.infohub` 1.2.0）——`schemaVersion: 4` + `distribution: "bundle"`，
+  页面是包内原生 HTML（不引 React、无构建步骤），宿主在 `widget://` 沙箱里加载。贡献 =
+  页面 + 首页卡；automations 另有 `files/background.html` 后台页（定时调宿主桥），
+  infohub 另有 `commands.open-infohub`。权限声明 `infohub: true`（只读 `infohubCall` 桥）与
+  `notify: true`（应用内/系统通知）。两个包都由首方签名覆盖包字节（`packageSha256` + ed25519），
+  产物在 `plugins-catalog/<包id>/<版本>/`。
+- **清单与签名（schemaVersion 4）**：新增 `contributions.homeCards`（id / title / page 必填，
+  page 必须可路由）与 `contributions.background`（只取 `entry`）；bundle 只允许
+  commands / desktopWidgets / homeCards / background 四类贡献，`background` 必须是 bundle；
+  permissions 新增 `infohub` / `notify` 布尔位。`scripts/sign-plugin.mjs` 的 canonical 文本改为
+  「有值才入签」（新字段为 false/空时不进文本），否则归一化清单里两个恒 false 的新权限字段
+  会让全部历史签名一起失效。
+- **宿主与界面**：桌面端新增 `home-cards.js`（首页卡聚合 + 本机覆盖表 + 单插件上限与字段/体积校验）、
+  `plugin-notify.js`（主窗优先 → 系统通知 → 都不可用返回 none）、`plugin-host.js` 的后台常驻窗
+  （`--heming-widget-mode=background`、`backgroundThrottling: false`）以及
+  `plugins:homecards`、`widget:homecard-set` 两条桥；web 端新增 `PluginHomeCards` 与
+  `lib/plugins/homeCards.ts`（只认可路由 page、坏卡丢弃、拉取失败清空不留假入口），
+  `lib/pages/registry.ts` 统一投影声明式与 bundle 两类插件页。
+- **旧安装不自动迁移**：归档、自动化运行记录等本机数据不变；但旧版本的模块安装不会自动变成插件——
+  升级后这两个入口消失，需要在插件区从插件仓库重新安装。旧 `<userData>/modules` 目录自 d.116 起
+  只服务选装的 Python 信息中枢引擎，与已下线的 web 模块体系无关。
+- **仍保留 module 产物的唯一例外**：`scripts/build-module.mjs` 只为信息中枢选装引擎
+  （`heming.infohub-engine`，`distribution: "module"`，首次启用从 `/updates/modules` 补下载）构建；
+  desktop 的 `module-{store,package,download}.js` 同理只为这个引擎保留，不再有 web 模块入口。
+- **文档与发布**：`docs/PLUGINS.md` §12 改写为「内置能力去哪了：modules 已下线」终态；
+  插件发布统一走 `node scripts/publish-plugin.mjs plugin-kit/plugins/<目录>` →
+  `plugins-catalog/` → 云端 `/opt/heming/plugins`；禁止再新增 `module.json` / `module.tgz` /
+  `module-catalog/` / `modules:build` / `web.entry`（选装引擎除外）。
+- **本轮门禁**：`pnpm -w run plugin:check`（两个 bundle 清单 + 既有两个界面插件 + 5 个示例 + schema 检查）、
+  `@heming/web` typecheck、bundle 圈 vitest 31 文件 / 474 例、`@heming/server` 15 文件 / 268 例、
+  `@heming/shared` 8 文件 / 115 例、`@heming/desktop` 全套 node:test 全绿。
+
 ## d.137.3.54.10（2026-11-12）— 建模室改名，内置模块包 ID 统一成 `heming.*`
 
 - **建模工作室 → 建模室**：插件 `heming.studio` 的清单 `name`、页面标题、命令文案统一成两个字

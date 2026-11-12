@@ -9,6 +9,7 @@ import {
 import { canRememberCall, prefixesOfCall } from "../lib/fileEdit/remember.js";
 import { toolNameLabel } from "../lib/toolName.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { Button } from "./ui/Button.js";
 
 /**
  * 工具调用确认弹窗（内容区）。
@@ -131,30 +132,20 @@ export function ToolApprovalModal({
         <p className="text-[11px] text-muted">先勾选要放行的调用，再点下方按钮；没勾的会按拒绝处理。</p>
       )}
       <div className="flex w-full flex-wrap items-center justify-end gap-2">
-        <button
-          type="button"
-          ref={denyRef}
-          onClick={denyAll}
-          className="ui-btn ui-btn-md ui-btn-ghost text-[var(--danger)]"
-        >
+        {/* d.138 危险语义归位：此前「拒绝」是 md 红字（全页最显眼的按钮），
+            「仅本次允许」反而是 sm 次级——安全动作看起来比放行更危险，主次是反的。
+            现在两者同尺寸：放行是 primary，拒绝是 ghost（不再染红——拒绝不是破坏性操作）。 */}
+        <Button ref={denyRef} variant="ghost" onClick={denyAll}>
           拒绝
-        </button>
+        </Button>
         {!hasPatch && (
-          <button
-            type="button"
-            onClick={() => allowChecked("allow-session")}
-            className="ui-btn ui-btn-sm ui-btn-ghost"
-          >
+          <Button variant="ghost" onClick={() => allowChecked("allow-session")}>
             本会话内允许此工具
-          </button>
+          </Button>
         )}
-        <button
-          type="button"
-          onClick={() => allowChecked("allow")}
-          className="ui-btn ui-btn-sm ui-btn-primary"
-        >
+        <Button variant="primary" onClick={() => allowChecked("allow")}>
           仅本次允许
-        </button>
+        </Button>
       </div>
     </div>
   );

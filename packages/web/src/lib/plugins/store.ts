@@ -784,6 +784,10 @@ function copyManifest(manifest: PluginManifest): PluginManifest {
       })),
       // d.124：页面（声明式 blocks / 界面插件 entry）；不拷贝会丢页面且指纹不一致
       ...(contributions.page ? { page: copyPage(contributions.page) } : {}),
+      // d.125：首页卡片与后台页；漏拷会让「装完重启」丢掉首页卡与后台窗口，指纹也会漂移。
+      // 旧落盘记录没有该字段，按空数组兜底（类型先行、数据滞后）。
+      homeCards: (contributions.homeCards ?? []).map((card) => ({ ...card })),
+      ...(contributions.background ? { background: { ...contributions.background } } : {}),
       llmPresets: [],
     },
     permissions: {
@@ -796,6 +800,9 @@ function copyManifest(manifest: PluginManifest): PluginManifest {
       // d.113 的 v5 字段：漏拷会让 `list()` 的清单与落盘清单指纹不一致，
       // 所有 v5 插件一装完就被判「降级」。
       chat: permissions.chat,
+      // d.125：widget 桥两域；同样是「漏拷就判降级」的字段。
+      infohub: permissions.infohub,
+      notify: permissions.notify,
     },
     // v5：engines/meta 是可选字段，只对 v5 清单出现。
     ...(manifest.engines ? { engines: { ...manifest.engines } } : {}),
@@ -969,6 +976,8 @@ function salvageCorruptManifest(
         commands: [],
         toolPacks: [],
         desktopWidgets: [],
+        // d.125：损坏记录不保留首页卡片/后台页（同样不可信）。
+        homeCards: [],
         llmPresets: [],
       },
       permissions: { network: [], tools: "read", files: [], events: [], graphics: [], eval: false },

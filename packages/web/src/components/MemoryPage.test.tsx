@@ -160,7 +160,7 @@ describe("MemoryPage 三分区结构", () => {
     mockApi({ agents: AGENTS });
     renderPage();
 
-    expect(screen.getByRole("heading", { name: "记忆区" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "记忆" })).toBeInTheDocument();
     for (const label of ["智能体", "数据库", "个人知识库"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
     }
@@ -196,7 +196,7 @@ describe("MemoryPage 三分区结构", () => {
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveClass("ui-page-title");
-    expect(headings[0]).toHaveTextContent("记忆区");
+    expect(headings[0]).toHaveTextContent("记忆");
     expect(document.querySelector(".ui-page-sub")?.textContent).toContain("智能体的记忆开关");
   });
 });
@@ -289,7 +289,7 @@ describe("MemoryPage 数据库记忆", () => {
 
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("保留天数需为 1–3650 之间的整数");
-    expect(alert.className).toContain("text-red-600");
+    expect(alert.className).toContain("text-[var(--danger)]");
     expect(memory.getSettings().retentionDays).toBe(90);
   });
 
@@ -363,7 +363,7 @@ describe("MemoryPage 数据库记忆", () => {
       }),
     );
     expect(memory.episodic("a1")).toHaveLength(0);
-    expect(within(episodicList()).getByText("暂无条目")).toBeInTheDocument();
+    expect(within(episodicList()).getByText("还没有条目")).toBeInTheDocument();
   });
 
   it("添加/编辑/置顶语义条目仍工作；未选智能体时写入口禁用", async () => {
@@ -622,8 +622,9 @@ describe("记忆区 · 复盘沉淀卡", () => {
       "aria-pressed",
       "true",
     );
-    // d.77：孤零零的数字看不出在控制什么，改成「每 N 轮才复盘一次」
-    expect(screen.getByText(/轮才复盘一次/)).toBeInTheDocument();
+    // d.77：孤零零的数字看不出在控制什么 → 补「每 N 轮」说明；
+    // d.138：改成「最多」——它是节流上限，不是「攒够 N 轮才触发」的触发条件。
+    expect(screen.getByText(/轮最多复盘一次/)).toBeInTheDocument();
     expect(screen.getByLabelText("每隔几轮复盘")).toBeInTheDocument();
     expect(screen.getByLabelText("每隔几轮复盘")).toBeEnabled();
   });

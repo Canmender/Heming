@@ -204,7 +204,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
               aria-selected={view === v}
               onClick={() => setView(v)}
               className={`${i > 0 ? "border-l border-line" : ""} px-3 py-1.5 text-[12px] ${
-                view === v ? "bg-ink font-bold text-white" : "text-muted hover:bg-[#fafafa]"
+                view === v ? "bg-ink font-bold text-white" : "text-muted hover:bg-[var(--subtle-2)]"
               }`}
             >
               {VIEW_LABEL[v]}
@@ -245,7 +245,7 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
         </div>
       )}
       {msg && (
-        <div role="status" className={`mb-2 text-[12px] ${msg.kind === "error" ? "text-red-600" : "text-muted"}`}>
+        <div role="status" className={`mb-2 ui-caption ${msg.kind === "error" ? "text-[var(--danger)]" : "text-muted"}`}>
           {msg.text}
         </div>
       )}
@@ -393,4 +393,4 @@ export function WikiPanel({ bridge: injected }: { bridge?: WikiBridge } = {}) {
 
 const btnPrimary = "ui-btn ui-btn-sm ui-btn-primary";
 const btnGhost =
-  "rounded-lg border border-line px-2 py-1 ui-caption shadow-card hover:bg-[#fafafa]";
+  "rounded-lg border border-line px-2 py-1 ui-caption shadow-card hover:bg-[var(--subtle-2)]";

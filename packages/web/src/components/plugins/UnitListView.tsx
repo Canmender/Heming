@@ -18,7 +18,7 @@ import { BTN_GHOST_SM, CHIP, HINT } from "./shared.js";
 /**
  * 插件区「已安装」统一单元列表（d.105 · 阶段 A）。
  *
- * 四类来源（系统 / 内置模块 / 声明式插件 / 界面插件）读同一份 `UnitStatus[]`：
+ * 三类来源（系统 / 声明式插件 / 界面插件）读同一份 `UnitStatus[]`：
  * - 来源徽标 + 名称 + 版本 + 状态（生效 / 停用 / 待依赖 / 不兼容 / 降级）；
  * - 贡献摘要（技能 3 · 服务 1 …；被贡献级停用的类别标「未生效」）；
  * - 搜索（名称 / id / 描述 / 关键词）与来源筛选；
@@ -30,7 +30,7 @@ import { BTN_GHOST_SM, CHIP, HINT } from "./shared.js";
  */
 
 /**
- * 来源筛选（d.133）：用户口径「全部是插件」——不再区分内置模块/声明式/界面插件，
+ * 来源筛选（d.133）：用户口径「全部是插件」——不再区分声明式/界面插件，
  * 只保留「系统能力（只读）」和「插件」两档。
  */
 type SourceFilter = "all" | "system" | "plugin";
@@ -294,7 +294,7 @@ export function UnitListView({
     [],
   );
 
-  /** 当前列表里真实出现的来源：没有的筛选按钮不渲染（例如原生应用没有模块）。 */
+  /** 当前列表里真实出现的来源：没有的筛选按钮不渲染（例如原生应用没有界面插件）。 */
   const presentSources = useMemo(() => new Set(all.map((item) => item.unit.source)), [all]);
   const sourceFilters = useMemo(
     () =>
@@ -324,6 +324,9 @@ export function UnitListView({
   );
 
   const filterActive = query.trim().length > 0 || source !== "all" || statusFilter !== "all";
+  // d.138：只有一两个单元时，来源/状态两组筛选是纯噪声（1 个只读项配 6 个控件）。
+  // 3 个单元起才展开这两组；搜索框一直保留，因为它同时能过滤描述与贡献。
+  const showFilterGroups = sourceUnits.length > 2;
   const clearFilters = () => {
     setQuery("");
     setSource("all");
@@ -348,40 +351,44 @@ export function UnitListView({
             className="ui-input pl-7"
           />
         </div>
-        <div
-          role="group"
-          aria-label="按来源筛选"
-          className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-0.5"
-        >
-          {sourceFilters.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              aria-pressed={source === item.key}
-              onClick={() => setSource(item.key)}
-              className="plugin-segment"
+        {showFilterGroups ? (
+          <>
+            <div
+              role="group"
+              aria-label="按来源筛选"
+              className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-0.5"
             >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div
-          role="group"
-          aria-label="按状态筛选"
-          className="inline-flex items-center gap-0.5 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-0.5"
-        >
-          {STATUS_FILTERS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              aria-pressed={statusFilter === item.key}
-              onClick={() => setStatusFilter(item.key)}
-              className="plugin-segment"
+              {sourceFilters.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  aria-pressed={source === item.key}
+                  onClick={() => setSource(item.key)}
+                  className="plugin-segment"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <div
+              role="group"
+              aria-label="按状态筛选"
+              className="inline-flex items-center gap-0.5 rounded-lg border border-line-soft bg-[var(--subtle-2)] p-0.5"
             >
-              {item.label}
-            </button>
-          ))}
-        </div>
+              {STATUS_FILTERS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  aria-pressed={statusFilter === item.key}
+                  onClick={() => setStatusFilter(item.key)}
+                  className="plugin-segment"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
         <span aria-live="polite" className="ml-auto ui-caption ui-numeric">
           {filterActive
             ? `匹配 ${visible.length} / 共 ${sourceUnits.length} 个单元`

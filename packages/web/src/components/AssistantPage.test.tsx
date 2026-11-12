@@ -381,13 +381,19 @@ describe("对话 Tab · 没有选中会话时的智能体选择页", () => {
 
     const search = screen.getByLabelText("搜索智能体");
     fireEvent.change(search, { target: { value: "周报" } });
-    expect(screen.getByRole("button", { name: "与智能体 自建助手1 对话" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "与智能体 自建助手2 对话" })).toBeNull();
+    // d.138：未绑定模型的卡片，头部与右下按钮都指向「先绑定模型」，可访问名随之变化；
+    // 这里要断言的仍是「搜索是否筛掉了其它卡片」。
+    expect(
+      screen.getByRole("button", { name: "编辑智能体 自建助手1：先绑定模型" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑智能体 自建助手2：先绑定模型" })).toBeNull();
 
     fireEvent.change(search, { target: { value: "不存在的名字" } });
     expect(screen.getByText("没有匹配的智能体")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
-    expect(screen.getByRole("button", { name: "与智能体 自建助手2 对话" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "编辑智能体 自建助手2：先绑定模型" }),
+    ).toBeInTheDocument();
   });
 
   it("选择页的「编辑」进入智能体 Tab 的编辑页（不是弹窗）", () => {
@@ -459,13 +465,19 @@ describe("智能体 Tab · 名册与独立编辑页", () => {
 
     const search = screen.getByLabelText("搜索智能体");
     fireEvent.change(search, { target: { value: "周报" } });
-    expect(screen.getByRole("button", { name: "与智能体 自建助手1 对话" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "与智能体 自建助手2 对话" })).toBeNull();
+    // d.138：未绑定模型的卡片，头部与右下按钮都指向「先绑定模型」，可访问名随之变化；
+    // 这里要断言的仍是「搜索是否筛掉了其它卡片」。
+    expect(
+      screen.getByRole("button", { name: "编辑智能体 自建助手1：先绑定模型" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑智能体 自建助手2：先绑定模型" })).toBeNull();
 
     fireEvent.change(search, { target: { value: "不存在" } });
     expect(screen.getByText("没有匹配的智能体")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
-    expect(screen.getByRole("button", { name: "与智能体 自建助手2 对话" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "编辑智能体 自建助手2：先绑定模型" }),
+    ).toBeInTheDocument();
   });
 
   it("新建智能体走独立编辑页，保存（创建）后直接开聊并回到对话 Tab", async () => {

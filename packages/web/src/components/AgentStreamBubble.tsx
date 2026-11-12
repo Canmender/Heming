@@ -262,7 +262,7 @@ function StatusDot({ status }: { status: ToolTrace["status"] }) {
         ? "bg-[var(--success)]"
         : status === "denied"
           ? "bg-[var(--danger)]"
-          : "bg-[#b42318]";
+          : "bg-[var(--danger)]";
   return (
     <span
       aria-hidden="true"

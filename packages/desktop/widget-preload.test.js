@@ -6,6 +6,8 @@ const Module = require("node:module");
 
 const preloadPath = path.join(__dirname, "widget-preload.js");
 const PAGE_VIEW_FLAG = "--heming-page-view";
+/** 后台常驻页的标记参数：语义与页面视图一样「没有独立窗口」（contract §5）。 */
+const BACKGROUND_FLAG = "--heming-widget-mode=background";
 
 /**
  * 真实执行 `widget-preload.js`（stub 掉 electron 的 contextBridge/ipcRenderer），
@@ -19,7 +21,10 @@ function loadWidgetBridge(options = {}) {
   const invoked = [];
   const sent = [];
   const originalArgv = process.argv;
-  process.argv = options.pageView ? [...originalArgv, PAGE_VIEW_FLAG] : originalArgv.filter((arg) => arg !== PAGE_VIEW_FLAG);
+  const nextArgv = originalArgv.filter((arg) => arg !== PAGE_VIEW_FLAG && arg !== BACKGROUND_FLAG);
+  if (options.pageView) nextArgv.push(PAGE_VIEW_FLAG);
+  if (options.background) nextArgv.push(BACKGROUND_FLAG);
+  process.argv = nextArgv;
 
   const stubElectron = {
     contextBridge: {
@@ -159,4 +164,31 @@ test("widget-preload 不暴露 secrets / mcp / files / 会话类桥（页面视�
   }
   assert.equal(typeof bridge.list, "undefined");
   assert.equal(typeof bridge.install, "undefined");
+});
+
+test("后台常驻页：新桥三方法可用，窗口几何类 API 仍按 unsupported 处理", async () => {
+  const { bridge, invoked, sent } = loadWidgetBridge({ background: true });
+  assert.ok(bridge, "应暴露 __heming_widget");
+
+  await bridge.infohubCall("conversations", { limit: 5 }, { timeoutMs: 5000 });
+  assert.deepEqual(invoked.at(-1), [
+    "widget:infohub-call",
+    { method: "conversations", params: { limit: 5 }, timeoutMs: 5000 },
+  ]);
+
+  await bridge.notify({ title: "后台任务完成", level: "info" });
+  assert.deepEqual(invoked.at(-1), ["widget:notify", { title: "后台任务完成", level: "info" }]);
+
+  await bridge.homeCardSet("brief", { text: "3 条待办" });
+  assert.deepEqual(invoked.at(-1), [
+    "widget:homecard-set",
+    { cardId: "brief", patch: { text: "3 条待办" } },
+  ]);
+
+  // 与页面视图同一口径：后台页也没有独立窗口
+  assert.equal(await bridge.state(), null);
+  assert.throws(() => bridge.hide(), /页面视图不支持窗口操作/);
+  for (const [channel] of [...sent, ...invoked]) {
+    assert.ok(channel.startsWith("widget:"), `插件桥不应调非 widget: 通道：${channel}`);
+  }
 });

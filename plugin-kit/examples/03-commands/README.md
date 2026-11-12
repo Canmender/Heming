@@ -13,7 +13,7 @@ node scripts/plugin-lint.mjs plugin-kit/examples/03-commands
 | `page` | `page` | 跳到某个页面 | 「去插件区 / 去知识库」这类导航 |
 | `skill` | `name` | 跳到技能区并定位到该技能 | 你有明确的技能入口 |
 | `settings` | `card` | 跳到设置区并定位某张卡 | 引导用户改某个设置（如主题） |
-| `unit` | `unitId` | 打开插件区某能力单元详情 | 指向模块/内置能力 |
+| `unit` | `unitId` | 打开插件区某能力单元详情 | 指向能力单元（插件贡献或内置能力） |
 | `plugin` | — | 打开本插件详情 | 「关于本插件」「看权限」 |
 
 ## 限制

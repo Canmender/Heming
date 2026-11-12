@@ -15,6 +15,8 @@ const {
   normalizeWidgetPage,
 } = require("./plugin-window");
 const { createPluginEngine } = require("./plugin-engine");
+const { RENDERER_METHODS } = require("./infohub-bridge");
+const { CARD_KEY, readOverrides, projectCard, collectCards, applyPatch } = require("./home-cards");
 
 /**
  * 界面插件（desktopWidget）的宿主运行时：按清单规格建窗、托盘、穿透、拖拽、位置记忆，
@@ -74,6 +76,32 @@ const MAX_PENDING_LIFECYCLE = 20;
 const PAGE_VIEW_FLAG = "--heming-page-view";
 /** 页面视图允许占用的 contentView 最小尺寸（宽高各至少 1 DIP，否则 Chromium 不给合成）。 */
 const PAGE_MIN_SIZE = 1;
+
+/* ────────────────────── 后台常驻页（沙箱 bundle 插件，contract §1/§5） ────────────────────── */
+
+/**
+ * 后台常驻页的 preload 标记参数。
+ *
+ * 与页面视图一样属于「没有独立窗口的渲染面」：拖拽/显隐/穿透在后台页里没有意义。
+ * 用带值的 `--heming-widget-mode=background` 而不是再一个布尔 flag——以后若要区分
+ * 「页面视图 / 后台页 / 其他宿主视图」，preload 不必再加参数。
+ */
+const BACKGROUND_FLAG = "--heming-widget-mode=background";
+
+/**
+ * 隐藏窗口的初始尺寸。
+ *
+ * 不用 0×0：部分平台的合成器会跳过零尺寸窗口（页面不渲染，定时器照跑但 DOM 布局
+ * 全是 0，插件按尺寸算的逻辑会算错）。给一个正常桌面尺寸但 `show:false`，用户看不见。
+ */
+const BACKGROUND_WIDTH = 480;
+const BACKGROUND_HEIGHT = 320;
+
+/* ── 信息中枢 / 通知（contract §3） ── */
+/** `widget:infohub-call` 的默认超时与上下限（与 `engineCall` 同一口径：60s / 30 分钟）。 */
+const INFOHUB_TIMEOUT_DEFAULT = 60_000;
+const INFOHUB_TIMEOUT_MAX = 30 * 60_000;
+const INFOHUB_TIMEOUT_MIN = 1_000;
 
 function text(value, max) {
   if (typeof value !== "string") return null;
@@ -154,6 +182,10 @@ function normalizeChatConfig(raw) {
  * @param {() => Promise<{baseUrl: string|null, key: string}>} [deps.getGateway] 本机 magpie 反代
  * @param {(timeoutMs: number) => Promise<object|null>} [deps.requestChatConfig] 向主窗请求 agents/binding
  * @param {(payload: object) => void} [deps.openPage] 主进程 → 主窗跳转（widgets:open-page）
+ * @param {(method: string, params: any, options: { timeoutMs: number }) => Promise<any>} [deps.infohubRequest]
+ *   信息中枢请求（contract §3；main.js 注入 infohubBridge 调用，单测可替换）
+ * @param {(payload: object) => { delivered: string }} [deps.notifyPlugin]
+ *   插件通知投递（contract §3；main.js 注入 plugin-notify，单测可替换）
  * @param {(line: string) => void} [deps.log]
  * @param {(fn: Function, ms: number) => any} [deps.setTimeout]
  * @param {(timer: any) => void} [deps.clearTimeout]
@@ -182,6 +214,10 @@ function createWidgetHost(deps = {}) {
     spawn,
     bundledPythonPath = null,
     getKbRoots,
+    // contract §3：widget 桥的新语义由主进程注入。host 不直接依赖 infohub 实现与
+    // 通知实现，单测可以替换这两条外部边界（也不必在 host 里 require Electron 的 Notification）。
+    infohubRequest,
+    notifyPlugin,
     log = () => {},
     setTimeout: setTimer = setTimeout,
     clearTimeout: clearTimer = clearTimeout,
@@ -205,6 +241,15 @@ function createWidgetHost(deps = {}) {
    * 页面视图与 widget 窗口共用 `widget-preload.js` 桥，IPC 靠 sender 反查归属。
    */
   let pageInfo = null;
+
+  /**
+   * 后台常驻页的隐藏窗口（contract §1/§5）：一个插件最多一个，key = pluginId。
+   *
+   * 记录 `version/entry` 供对账：停用/卸载/版本或入口变化 → 销毁旧窗按新清单重建。
+   * 窗口本身 `show:false` 且 `skipTaskbar`，用户看不见；它拿到的仍是同一份
+   * `widget-preload.js` 桥（sender 反查归属，查不到就拒绝）。
+   */
+  const backgrounds = new Map();
 
   /**
    * 生命周期对账状态（d.108，规格 §5.4）。
@@ -1114,6 +1159,200 @@ function createWidgetHost(deps = {}) {
     return false;
   }
 
+  /* ───────────────────────── 后台常驻页（contract §1/§5） ───────────────────────── */
+
+  /**
+   * 后台常驻页的 webPreferences。
+   *
+   * 与页面视图同级（sandbox + contextIsolation + 无 nodeIntegration），区别只有两点：
+   * 1) 标记参数是 `--heming-widget-mode=background`，preload 据此把它当「没有独立窗口」处理；
+   * 2) 关掉 `backgroundThrottling`——隐藏窗口默认会被 Chromium 降频，定时同步/轮询会漂移，
+   *    而后台页存在的意义就是「按时跑」。
+   */
+  function backgroundWebPreferences() {
+    return {
+      preload: preloadPath,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      spellcheck: false,
+      backgroundThrottling: false,
+      additionalArguments: [BACKGROUND_FLAG],
+    };
+  }
+
+  /** 销毁一个插件的后台隐藏窗（重复调用无害）。 */
+  function destroyBackground(pluginId) {
+    const info = backgrounds.get(pluginId);
+    if (!info) return false;
+    backgrounds.delete(pluginId);
+    info.closed = true;
+    if (typeof info.detachDownload === "function") {
+      try {
+        info.detachDownload();
+      } catch {
+        /* session 已销毁：忽略 */
+      }
+    }
+    try {
+      if (info.window && !info.window.isDestroyed()) info.window.destroy();
+    } catch (err) {
+      log(`[widgets:${pluginId}] 后台常驻页关闭失败：${(err && err.message) || err}`);
+    }
+    return true;
+  }
+
+  /** 退出时统一关闭所有后台隐藏窗（destroyAll 调用，避免退出时残留渲染进程）。 */
+  function destroyAllBackgrounds() {
+    for (const pluginId of [...backgrounds.keys()]) destroyBackground(pluginId);
+  }
+
+  /**
+   * 给一个插件建后台隐藏窗并加载它的 `contributions.background.entry`。
+   *
+   * 与 widget 窗口不同：不建托盘、不读窗口状态、用户不可见；只提供一块常驻渲染面
+   * （automations 的定时器、infohub 的后台同步都靠它）。入口非法/创建失败只记日志，
+   * 不影响插件其余贡献（首页卡片、页面）可用。
+   */
+  function createBackgroundRuntime(record) {
+    const background = record.background;
+    if (!background || !background.entry) return null;
+    if (typeof BrowserWindow !== "function") return null;
+    const url = widgetUrl(record.id, background.entry);
+    if (!url) {
+      log(`[widgets:${record.id}] 后台页入口非法，已跳过：${String(background.entry)}`);
+      return null;
+    }
+    let win;
+    try {
+      win = new BrowserWindow({
+        show: false,
+        width: BACKGROUND_WIDTH,
+        height: BACKGROUND_HEIGHT,
+        skipTaskbar: true,
+        autoHideMenuBar: true,
+        webPreferences: backgroundWebPreferences(),
+      });
+    } catch (err) {
+      log(`[widgets:${record.id}] 后台常驻页创建失败：${(err && err.message) || err}`);
+      return null;
+    }
+    const info = {
+      id: record.id,
+      version: record.version,
+      entry: background.entry,
+      record,
+      window: win,
+      webContents: win.webContents,
+      closed: false,
+      detachDownload: null,
+    };
+    // 同一套导航/下载闸：后台页也不能自己跳去外网或静默下载文件
+    attachPageGuards(info);
+    backgrounds.set(record.id, info);
+    try {
+      const pending = win.loadURL(url);
+      if (pending && typeof pending.catch === "function") {
+        pending.catch((err) => {
+          info.loadError = (err && err.message) || String(err);
+          log(`[widgets:${record.id}] 后台常驻页加载失败：${info.loadError}`);
+        });
+      }
+    } catch (err) {
+      info.loadError = (err && err.message) || String(err);
+      log(`[widgets:${record.id}] 后台常驻页加载失败：${info.loadError}`);
+    }
+    win.on("closed", () => {
+      info.closed = true;
+      if (backgrounds.get(record.id) === info) backgrounds.delete(record.id);
+      log(`[widgets:${record.id}] 后台常驻页已关闭`);
+    });
+    log(`[widgets] ${record.id} 后台常驻页已启动（${background.entry}）`);
+    return info;
+  }
+
+  /**
+   * 后台常驻页对账（contract §5）：`enabled`、文件完好、声明了 background 才该有窗口。
+   *
+   * 停用/卸载/版本或入口变化 → 销毁；缺的补建。失败只记日志：某个插件的后台页起不来，
+   * 不该拖垮宿主其余插件的对账。
+   */
+  function syncBackgroundViews(records) {
+    const desired = new Map();
+    for (const record of Array.isArray(records) ? records : []) {
+      if (!record || record.enabled !== true || record.error) continue;
+      if (!record.background || !record.background.entry) continue;
+      desired.set(record.id, record);
+    }
+    for (const [pluginId, info] of [...backgrounds.entries()]) {
+      const next = desired.get(pluginId);
+      const stale =
+        !next || next.version !== info.version || next.background.entry !== info.entry;
+      if (stale) destroyBackground(pluginId);
+    }
+    for (const [pluginId, record] of desired) {
+      if (backgrounds.has(pluginId)) continue;
+      createBackgroundRuntime(record);
+    }
+    return backgrounds.size;
+  }
+
+  /** 按 sender 反查后台常驻页（查不到 = 不是后台页；fail-closed）。 */
+  function backgroundTargetForEvent(event) {
+    const sender = event && event.sender;
+    if (!sender) return null;
+    for (const info of backgrounds.values()) {
+      if (info.closed) continue;
+      if (info.webContents !== sender) continue;
+      return {
+        isBackground: true,
+        pluginId: info.id,
+        record: info.record,
+        webContents: info.webContents,
+      };
+    }
+    return null;
+  }
+
+  /* ── 首页卡片 / 信息中枢 / 通知的宿主侧数据源（contract §3/§4） ── */
+
+  /** 超时参数收口：非数字 → 默认 60s；夹在 1s..30min（与 engineCall 同口径）。 */
+  function clampInfohubTimeout(value) {
+    const ms = Number(value);
+    if (!Number.isFinite(ms) || ms <= 0) return INFOHUB_TIMEOUT_DEFAULT;
+    return Math.min(INFOHUB_TIMEOUT_MAX, Math.max(INFOHUB_TIMEOUT_MIN, Math.round(ms)));
+  }
+
+  /** 把一张合并后的卡片推给主窗（首页即时刷新）；主窗不在就跳过，下次拉列表自然是新值。 */
+  function broadcastHomeCard(card) {
+    const win = typeof getMainWindow === "function" ? getMainWindow() : null;
+    if (!win) return false;
+    try {
+      if (typeof win.isDestroyed === "function" && win.isDestroyed()) return false;
+    } catch {
+      return false;
+    }
+    const wc = win.webContents;
+    if (!wc || (typeof wc.isDestroyed === "function" && wc.isDestroyed())) return false;
+    try {
+      wc.send("plugin:homecard", card);
+      return true;
+    } catch (err) {
+      log(`[widgets] 首页卡片广播失败：${(err && err.message) || err}`);
+      return false;
+    }
+  }
+
+  /**
+   * 主窗 `plugins:homecards` 的数据源（contract §4）。
+   *
+   * 只返回「已安装 + enabled + 文件完好」的卡片；`text/detail/badge` 用 data 里的覆盖值，
+   * 缺省回落到清单里的 `primary`——这样插件即使从没调过 homeCardSet 也有可读文案。
+   */
+  function homeCards() {
+    return collectCards(store.list(), (pluginId, key) => store.readData(pluginId, key));
+  }
+
   /** 按 sender 反查页面视图（查不到 = 不是页面视图；fail-closed）。 */
   function pageTargetForEvent(event) {
     const info = pageInfo;
@@ -1163,6 +1402,15 @@ function createWidgetHost(deps = {}) {
         /* 页面刚卸载：丢弃 */
       }
     }
+    const background = backgrounds.get(pluginId);
+    if (background && !background.closed) {
+      try {
+        background.webContents.send("widget:settings", next);
+        delivered += 1;
+      } catch {
+        /* 后台页刚关闭：丢弃 */
+      }
+    }
     return delivered;
   }
 
@@ -1175,7 +1423,13 @@ function createWidgetHost(deps = {}) {
    */
   function rejectPageWindowOp(event, channel) {
     const page = pageTargetForEvent(event);
-    if (!page) return false;
+    if (!page) {
+      // 后台常驻页同样没有独立窗口：几何/拖拽/穿透一律拒绝（contract §5）
+      const background = backgroundTargetForEvent(event);
+      if (!background) return false;
+      log(`[widgets:${background.pluginId}] 后台常驻页不支持窗口操作通道：${channel}`);
+      return true;
+    }
     log(`[widgets:${page.pluginId}] 页面视图不支持窗口操作通道：${channel}`);
     return true;
   }
@@ -1215,6 +1469,9 @@ function createWidgetHost(deps = {}) {
     if (runtime) return fn(runtime);
     const page = pageTargetForEvent(event);
     if (page) return fn(page);
+    // 后台常驻页也是「没有独立窗口的渲染面」，data/infohub/notify/homeCardSet 都要认
+    const background = backgroundTargetForEvent(event);
+    if (background) return fn(background);
     return denied;
   }
 
@@ -1479,6 +1736,76 @@ function createWidgetHost(deps = {}) {
         undefined,
       ),
     );
+
+    /* ── 沙箱 bundle 插件的三条新语义（contract §3） ──
+       只认 widget 窗口 / 页面视图 / 后台常驻页的 webContents（withRuntimeOrPage 的 sender
+       反查，查不到 fail-closed）。它们刻意不挂到主窗 secureIpc 上：主窗代码不能代替插件
+       发信息中枢请求或发通知，插件身份必须由「哪个渲染面发起的」反查出来。 */
+    ipcMain.handle("widget:infohub-call", (event, payload) =>
+      withRuntimeOrPage(
+        event,
+        (rt) => {
+          const permissions = (rt.record && rt.record.permissions) || {};
+          if (permissions.infohub !== true) {
+            throw new Error("缺少 permissions.infohub（该插件未声明信息中枢权限）");
+          }
+          if (typeof infohubRequest !== "function") throw new Error("信息中枢不可用");
+          const input = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+          const method = typeof input.method === "string" ? input.method.trim() : "";
+          if (!method || !RENDERER_METHODS.has(method)) {
+            throw new Error(`信息中枢不支持的方法：${method || "(空)"}`);
+          }
+          return infohubRequest(method, input.params, {
+            timeoutMs: clampInfohubTimeout(input.timeoutMs),
+          });
+        },
+        null,
+      ),
+    );
+    ipcMain.handle("widget:notify", (event, payload) =>
+      withRuntimeOrPage(
+        event,
+        (rt) => {
+          const permissions = (rt.record && rt.record.permissions) || {};
+          if (permissions.notify !== true) {
+            throw new Error("缺少 permissions.notify（该插件未声明通知权限）");
+          }
+          if (typeof notifyPlugin !== "function") throw new Error("通知通道不可用");
+          const input = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+          const result = notifyPlugin({
+            pluginId: rt.pluginId,
+            title: input.title,
+            body: input.body,
+            level: input.level,
+          });
+          return { ok: true, delivered: (result && result.delivered) || "none" };
+        },
+        null,
+      ),
+    );
+    ipcMain.handle("widget:homecard-set", (event, payload) =>
+      withRuntimeOrPage(
+        event,
+        (rt) => {
+          const input = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+          const cardId = typeof input.cardId === "string" ? input.cardId.trim() : "";
+          if (!cardId) throw new Error("homecard-set：缺少 cardId");
+          const cards = Array.isArray(rt.record.homeCards) ? rt.record.homeCards : [];
+          const spec = cards.find((card) => card && card.id === cardId);
+          if (!spec) throw new Error(`该插件未声明首页卡片：${cardId}`);
+          const readData = (pluginId, key) => store.readData(pluginId, key);
+          const overrides = readOverrides(readData, rt.pluginId);
+          const patched = applyPatch(overrides, cardId, input.patch);
+          if (!patched.ok) throw new Error(patched.error);
+          // 只写 homecards.json（不落注册表）：卡片文案是运行期数据，卸载时随 data/ 清掉
+          store.writeData(rt.pluginId, CARD_KEY, patched.next);
+          const card = projectCard(rt.record, spec, patched.next[cardId]);
+          broadcastHomeCard(card);
+          return { ok: true, card };
+        },
+        null,
+      ),
+    );
   }
 
   /* ───────────────────────── 显示器监听（全局一份） ───────────────────────── */
@@ -1691,6 +2018,8 @@ function createWidgetHost(deps = {}) {
     }
     // 页面视图对账放在最后：停用/卸载/版本更新/页面入口变化都在这里收口（不留孤儿视图）
     syncPageView();
+    // 后台常驻页同一轮对账：与页面视图同为「无独立窗口的渲染面」，启停规则一致
+    syncBackgroundViews(records);
     // 引擎对账：停用/卸载/版本变化/入口变化 → 回收进程。失败只记日志：
     // 引擎是插件的可选能力，回收异常不该让整个插件宿主起不来。
     engineHost.reconcile(records).catch((err) => {
@@ -1708,6 +2037,8 @@ function createWidgetHost(deps = {}) {
   function destroyAll() {
     // 页面视图先销毁：主窗关闭 / app.quit 都不该留下一个没有宿主的渲染进程
     destroyPageView();
+    // 后台常驻页同理：宿主退出前必须显式关掉，否则留下无主的隐藏渲染进程
+    destroyAllBackgrounds();
     for (const runtime of [...runtimes.values()]) destroyRuntime(runtime);
     pendingLifecycle.clear();
     unwatchDisplays();
@@ -1858,6 +2189,11 @@ function createWidgetHost(deps = {}) {
     },
     get pageCount() {
       return pageInfo ? 1 : 0;
+    },
+    // contract §4：主窗 `plugins:homecards` 的数据源；contract §5：后台隐藏窗数量（对账/诊断用）
+    homeCards,
+    get backgroundCount() {
+      return backgrounds.size;
     },
     _internal: { registerIpc, normalizeEvent, normalizeChatConfig, setTheme: (next) => (theme = next) },
   };

@@ -161,7 +161,7 @@ plugin-kit/plugins/demo-widget/
 
 ### 3.5 给插件加一个页面（导航里多一个入口，d.124）
 
-装好插件 → 左侧导航**末位**（模块入口之后）多一项 → 点进去是插件自己的页面。每插件最多一个页面。
+装好插件 → 左侧导航**末位**（其它插件页面之后）多一项 → 点进去是插件自己的页面。每插件最多一个页面。
 
 先选形态：
 
@@ -213,7 +213,7 @@ plugin-kit/plugins/demo-widget/
 
 - `blocks` 至少 1 个、最多 12 个；`page` 是对象不是数组（没有多页面/Tab/子路由）。
 - 页面**不新增权限、不联网**：它是**静态展示**（清单文本 + 本地贡献清单），宿主不代拉数据；要展示会变化的信息，用技能/命令产出结果，发版时更新清单文本。
-- 没有 `page` 贡献的纯能力包照旧不新增导航入口；有 `page` 的才多一项，入口固定在模块入口之后、不受插件加载顺序影响。
+- 没有 `page` 贡献的纯能力包照旧不新增导航入口；有 `page` 的才多一项，入口固定在宿主 8 页与其它插件页面之后、不受插件加载顺序影响。
 - 想改成首方 bundle 自带页：按 §3.4 的清单格式，把 `page` 换成 `{ "title": "…", "entry": "files/page.html" }`，`entry` 必须出现在 `files` 里；页面与界面插件的独立窗口（插件详情 →「窗口设置」）可并存。可抄 [`examples/05-plugin-page/README.md`](examples/05-plugin-page/README.md) 的改法说明。
 
 ### 3.6 给插件加一个本机引擎（bundle，仅首方）
@@ -242,7 +242,8 @@ plugin-kit/plugins/demo-widget/
 - 包体上限随引擎放宽：解包 ≤64MB、≤4000 文件、单文件 ≤16MB。
 - 参考实现：宿主侧 `packages/desktop/plugin-engine.js`（校验、协议、生命周期）；打包参考
   `scripts/build-pet-widget.mjs` + `scripts/pack-plugin.mjs`（把 Python 依赖 staging 进 `files/engine/lib` 后再 `pack-plugin`）。
-  仓库里暂无随包携带引擎的插件包（原「聊天记录」已并入「信息中枢」模块）。
+  仓库里暂无随包携带引擎的插件包：当前首方 bundle 都不带本机引擎——信息中枢走 `permissions.infohub`
+  只读桥，自动化靠后台页（`contributions.background`），原「聊天记录」已并入「信息中枢」插件。
 
 ---
 

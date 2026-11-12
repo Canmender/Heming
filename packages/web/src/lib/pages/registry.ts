@@ -123,11 +123,10 @@ export function pluginNavPages(entries: readonly PluginPageEntry[]): PluginPageI
 }
 
 /**
- * 把可用插件页面追加到导航顺序末尾（宿主 8 项与模块页顺序原样不动）。
+ * 把可用插件页面追加到导航顺序末尾（宿主 8 项顺序原样不动）。
  *
- * 与 `modules/nav.ts` 的 `withModuleNav` 同一口径：插件入口是「装出来的」，
- * 不写进 `heming.navOrder.v1`、不参与个性化排序——否则同一份顺序在不同安装
- * 状态下含义会变。
+ * 同一口径：插件入口是「装出来的」，不写进 `heming.navOrder.v1`、不参与个性化排序——
+ * 否则同一份顺序在不同安装状态下含义会变。
  */
 export function withPluginNav<T extends string>(
   order: readonly T[],

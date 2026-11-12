@@ -52,8 +52,11 @@ const CARDS: {
 
 export function PluginStats({ stats }: { stats: CapabilityStats }) {
   return (
-    <section aria-label="能力统计" className="plugin-hero plugin-rise mb-4">
-      <div className="relative z-10 flex flex-col gap-4 p-4 sm:p-5">
+    <section aria-label="能力统计" className="mb-4">
+      {/* d.138：不再套 `.plugin-hero` 卡片壳——外层卡片里再放四张统计卡是「卡套卡」，
+          而且 hero 壳 + 光晕是落地页套路，不是设置型页面的组织方式。
+          这里改成页面上直接排：标题行 + 四个数字格，靠留白分组。 */}
+      <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <span className="plugin-icon-tile h-11 w-11" aria-hidden="true">
             <SparkIcon width={20} height={20} />
@@ -65,10 +68,9 @@ export function PluginStats({ stats }: { stats: CapabilityStats }) {
                 本机管理
               </span>
             </div>
-            <p className="mt-0.5 ui-caption">
-              系统 {stats.system} · 已装插件 {stats.plugins} · {stats.skills} 个技能 ·{" "}
-              {stats.tools} 个工具 · {stats.mcpServers} 台 MCP 服务
-            </p>
+            {/* d.138：这行原来把下面四张统计卡的数字再念一遍（同一屏三处重复），
+                改成说「能力单元装一次都带走」这件卡片说明不了的事；数字只留在卡片里。 */}
+            <p className="mt-0.5 ui-caption">装一个插件，就能同时带入它的技能、工具与命令。</p>
           </div>
           <span className="ml-auto hidden items-center gap-1.5 ui-micro sm:inline-flex">
             <span className="plugin-dot" aria-hidden="true" />

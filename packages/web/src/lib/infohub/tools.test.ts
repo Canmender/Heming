@@ -3,9 +3,10 @@ import {
   INFOHUB_TOOLS,
   buildInfohubToolBridge,
   buildInfohubToolsIfConnected,
+  isInfohubPluginEnabled,
 } from "./tools.js";
 import { useInfohubStore } from "./store.js";
-import { useModuleStore } from "../modules/store.js";
+import { pluginStore, type InstalledPlugin } from "../plugins/store.js";
 import type {
   InfohubAgendaItem,
   InfohubBridgeInfo,
@@ -132,6 +133,15 @@ function names(tools: unknown[]): string[] {
   return tools.map((t) => (t as { function: { name: string } }).function.name);
 }
 
+/** 只造判定用到的字段：注入条件只看插件是否安装/启用/记录可信。 */
+function fakePlugin(overrides: Partial<InstalledPlugin> = {}): InstalledPlugin {
+  return {
+    manifest: { id: "heming.infohub" },
+    enabled: true,
+    ...overrides,
+  } as unknown as InstalledPlugin;
+}
+
 describe("信息中枢工具提供者", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -148,11 +158,12 @@ describe("信息中枢工具提供者", () => {
       busy: "",
       error: "",
     });
-    // 信息中枢是独立模块：装过之后才谈「启用/停用」。
-    useModuleStore.getState().install("heming.infohub");
+    // 注入条件只认「插件已安装且启用」这一条口径。
+    vi.spyOn(pluginStore, "get").mockReturnValue(fakePlugin());
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
   });
 
@@ -172,18 +183,6 @@ describe("信息中枢工具提供者", () => {
       "infohub_agenda",
       "infohub_agenda_rebuild",
     ]);
-  });
-
-  it("信息中枢模块停用后不再注入工具（页面关了，模型也不该还能查归档）", () => {
-    installBridge();
-    useInfohubStore.setState({ available: true, running: true });
-    // 安装并启用时注入
-    useModuleStore.getState().install("heming.infohub");
-    expect(buildInfohubToolsIfConnected()).not.toBeNull();
-
-    useModuleStore.getState().setEnabled("heming.infohub", false);
-    expect(buildInfohubToolsIfConnected()).toBeNull();
-    useModuleStore.getState().install("heming.infohub");
   });
 
   it("sync 不暴露为工具（写归档只从信息中枢页发起）", () => {
@@ -420,5 +419,47 @@ describe("信息中枢工具提供者", () => {
     installBridge();
     useInfohubStore.setState({ available: true, running: true });
     expect(await run("infohub_nope")).toEqual({ text: "未知工具 infohub_nope", ok: false });
+  });
+});
+
+/* ───────────────── d.125 注入条件改为「插件已安装并启用」 ───────────────── */
+
+describe("信息中枢工具注入 · 插件化口径", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    installBridge();
+    useInfohubStore.setState({ available: true, running: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (window as unknown as { __heming_infohub?: unknown }).__heming_infohub;
+  });
+
+  it("插件已安装且启用 → 注入", () => {
+    vi.spyOn(pluginStore, "get").mockReturnValue(fakePlugin());
+    expect(isInfohubPluginEnabled()).toBe(true);
+    expect(buildInfohubToolsIfConnected()).not.toBeNull();
+  });
+
+  it("插件停用 / 卸载 / 记录损坏 → 不注入（模型不该还能查用户以为关掉的归档）", () => {
+    const get = vi.spyOn(pluginStore, "get");
+    get.mockReturnValue(undefined);
+    expect(isInfohubPluginEnabled()).toBe(false);
+    expect(buildInfohubToolsIfConnected()).toBeNull();
+
+    get.mockReturnValue(fakePlugin({ enabled: false }));
+    expect(isInfohubPluginEnabled()).toBe(false);
+    expect(buildInfohubToolsIfConnected()).toBeNull();
+
+    get.mockReturnValue(fakePlugin({ invalidRecord: true, invalidReason: "清单损坏" }));
+    expect(isInfohubPluginEnabled()).toBe(false);
+    expect(buildInfohubToolsIfConnected()).toBeNull();
+  });
+
+  it("插件判定只认 heming.infohub 这个 id（其它插件启用不影响归档工具）", () => {
+    const get = vi.spyOn(pluginStore, "get").mockReturnValue(undefined);
+    expect(buildInfohubToolsIfConnected()).toBeNull();
+    expect(get).toHaveBeenCalledWith("heming.infohub");
   });
 });

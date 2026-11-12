@@ -143,7 +143,7 @@ export function FileEditCard({
                       type="button"
                       aria-label={`删除根 ${root.name}`}
                       onClick={() => removeRoot(root.path)}
-                      className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-red-600 hover:bg-[var(--subtle-2)]"
+                      className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-[var(--danger)] hover:bg-[var(--subtle-2)]"
                     >
                       删除
                     </button>
@@ -192,7 +192,7 @@ export function FileEditCard({
             </button>
           </div>
           {error && (
-            <div role="alert" className="mt-2 text-[12px] text-red-600">
+            <div role="alert" className="mt-2 ui-caption text-[var(--danger)]">
               {error}
             </div>
           )}

@@ -34,6 +34,9 @@ function reordered(parsed: PluginManifest): PluginManifest {
       eval: parsed.permissions.eval,
       graphics: parsed.permissions.graphics,
       events: parsed.permissions.events,
+      // d.125：沙箱桥新增两个权限域，归一化后恒带 false，重排键顺序时同样不能漏。
+      infohub: parsed.permissions.infohub,
+      notify: parsed.permissions.notify,
     },
     contributions: {
       toolPacks: parsed.contributions.toolPacks,
@@ -44,6 +47,10 @@ function reordered(parsed: PluginManifest): PluginManifest {
       desktopWidgets: parsed.contributions.desktopWidgets,
       // d.88：v4 归一化后恒带空数组，重排键顺序时不能漏掉它（否则不是「同一份清单」）
       llmPresets: parsed.contributions.llmPresets,
+      // d.125：归一化后恒带空数组；空数组会被规范化剔除，这里仍带上以与真实清单同形
+      homeCards: parsed.contributions.homeCards,
+      // d.125：background 缺省时是 undefined，规范化会剔除；带上以与真实清单同形。
+      background: parsed.contributions.background,
     },
   } as PluginManifest;
 }

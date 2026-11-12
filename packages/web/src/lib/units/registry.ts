@@ -7,8 +7,6 @@ import {
   type UnitBlockReason,
   type UnitStatus,
 } from "@heming/shared";
-import { useModuleStore } from "../modules/store.js";
-import { BUILTIN_MODULES } from "../modules/registry.js";
 import { pluginStore } from "../plugins/store.js";
 import { describeSystemPlugin } from "../plugins/system.js";
 import { useWidgetsStore } from "../widgets/store.js";
@@ -23,7 +21,7 @@ import {
  * 能力单元注册表（d.105 · 阶段 A）。
  *
  * 两件事：
- * 1. **读投影**：`useUnitStatuses()` 订阅 plugins / modules / widgets 三处状态，
+ * 1. **读投影**：`useUnitStatuses()` 订阅 plugins / widgets 两处状态，
  *    把投影 + 生效判定结果给插件页统一列表与诊断用。`pluginStore` 没有订阅 API，
  *    改插件后由调用方 `refreshUnits()` 显式失效（插件页安装/启停/卸载处已接）。
  * 2. **运行时贡献挂载**：`mountContribution(kind, unitId, mount)` 返回撤销句柄；
@@ -163,13 +161,8 @@ export function buildUnitStatuses(sources: UnitProjectionSources = {}): UnitStat
 }
 
 function readDefaultSources(): UnitProjectionSources {
-  const installed = useModuleStore.getState().installed;
   return {
     system: describeSystemPlugin(),
-    // 只投影已安装的模块：原生应用不显示任何「内置模块」，模块从云端目录安装。
-    modules: BUILTIN_MODULES.filter((mod) => installed[mod.id]),
-    moduleEnabled: useModuleStore.getState().enabled,
-    moduleInstalled: installed,
     plugins: pluginStore.list(),
     widgets: useWidgetsStore.getState().records,
     appVersion: currentAppVersion(),
@@ -189,7 +182,6 @@ export function refreshUnits(): void {
 function bindStoreSubscriptions(): void {
   if (bound) return;
   bound = true;
-  useModuleStore.subscribe(() => refreshUnits());
   useWidgetsStore.subscribe(() => refreshUnits());
 }
 
@@ -209,7 +201,7 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-/** 插件页统一列表/诊断用：四类来源的单元状态（订阅模块与界面插件 store）。 */
+/** 插件页统一列表/诊断用：三类来源的单元状态（订阅界面插件 store，插件包写入后显式 refreshUnits）。 */
 export function useUnitStatuses(): UnitStatus[] {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).statuses;
 }

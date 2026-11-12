@@ -76,6 +76,20 @@ export const MAX_DESKTOP_WIDGET_SCALES = 6;
 export const MAX_WIDGET_SETTING_FIELDS = 20;
 /** `select` 字段最多选项数。 */
 export const MAX_WIDGET_SETTING_OPTIONS = 20;
+/**
+ * 首页插件卡上限（d.125）。
+ *
+ * 首页的纵向空间要先留给统计与团队动向；4 张是「内置插件全部装齐」的量级，
+ * 再多就会把真正的页面区块挤出第一屏。
+ */
+export const MAX_PLUGIN_HOME_CARDS = 4;
+const HOME_CARD_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const HOME_CARD_TITLE_MAX = 40;
+const HOME_CARD_SUMMARY_MAX = 200;
+const HOME_CARD_PRIMARY_MAX = 60;
+const HOME_CARD_PAGE_MAX = 200;
+/** 首页卡的跳转目标：宿主页面 id，或插件页的 `plugin:<插件 id>`。 */
+const HOME_CARD_PAGE_RE = /^(?:[a-z][a-z0-9-]{0,31}|plugin:[a-z0-9][a-z0-9._-]{0,63})$/;
 
 /** 预留文件根上限（本轮只校验与展示，不执行）。 */
 const MAX_PLUGIN_FILES = 5;
@@ -423,6 +437,10 @@ const PermissionsSchema = z.object(
       .optional(),
     /** d.98 新增（v4）：是否允许 `unsafe-eval`（pixi6 需要 true；只对声明了的第一方 widget 放开）。 */
     eval: z.boolean(typeParams("permissions.eval 必须是布尔值")).optional(),
+    /** d.125 新增（v4）：允许调 widget 桥的 `infohubCall`（只读检索本机归档）。 */
+    infohub: z.boolean(typeParams("permissions.infohub 必须是布尔值")).optional(),
+    /** d.125 新增（v4）：允许调 widget 桥的 `notify`（发桌面通知，用户可在通知中心看到）。 */
+    notify: z.boolean(typeParams("permissions.notify 必须是布尔值")).optional(),
   },
   typeParams("permissions 必须是 JSON 对象"),
 );
@@ -766,6 +784,68 @@ export type PluginWidgetPosition = z.infer<typeof WidgetPositionSchema>;
 export type PluginWidgetTrayItem = z.infer<typeof WidgetTrayItemSchema>;
 export type PluginWidgetTray = z.infer<typeof WidgetTraySchema>;
 
+/* ══════════════════ d.125 · 首页插件卡与后台页 ══════════════════ */
+
+/**
+ * 首页插件卡（v4，数据-only）。
+ *
+ * 为什么是数据而不是组件：首页由本体统一渲染，插件只声明「显示什么、点了去哪」；
+ * 运行期文案由 widget 桥的 `homeCardSet()` 覆盖，`primary` 只是第一帧的初始值。
+ */
+const HomeCardSpecSchema = z.object(
+  {
+    id: z
+      .string(typeParams("缺少首页卡片 id", "首页卡片 id 必须是文本"))
+      .trim()
+      .regex(HOME_CARD_ID_RE, "首页卡片 id 只能用小写字母、数字和连字符，且以字母或数字开头（≤32）"),
+    title: z
+      .string(typeParams("缺少首页卡片标题", "首页卡片标题必须是文本"))
+      .trim()
+      .min(1, "首页卡片标题不能为空")
+      .max(HOME_CARD_TITLE_MAX, `首页卡片标题最多 ${HOME_CARD_TITLE_MAX} 字`),
+    summary: z
+      .string(typeParams("首页卡片摘要必须是文本"))
+      .trim()
+      .max(HOME_CARD_SUMMARY_MAX, `首页卡片摘要最多 ${HOME_CARD_SUMMARY_MAX} 字`)
+      .default(""),
+    icon: z
+      .string(typeParams("首页卡片图标必须是文本"))
+      .trim()
+      .regex(HOME_CARD_ID_RE, "首页卡片图标只接受宿主图标 id（小写字母/数字/连字符，≤32）")
+      .optional(),
+    page: z
+      .string(typeParams("缺少首页卡片页面", "首页卡片页面必须是文本"))
+      .trim()
+      .min(1, "首页卡片页面不能为空")
+      .max(HOME_CARD_PAGE_MAX, `首页卡片页面最多 ${HOME_CARD_PAGE_MAX} 字符`)
+      .regex(HOME_CARD_PAGE_RE, '首页卡片页面必须是宿主页面 id 或 "plugin:<插件 id>"'),
+    primary: z
+      .string(typeParams("首页卡片初始文案必须是文本"))
+      .trim()
+      .max(HOME_CARD_PRIMARY_MAX, `首页卡片初始文案最多 ${HOME_CARD_PRIMARY_MAX} 字`)
+      .default(""),
+  },
+  typeParams("首页卡片必须是 JSON 对象"),
+);
+
+/**
+ * 后台页入口（v4）：包内相对 `.html`。
+ *
+ * 只有界面插件（distribution: "bundle"）能声明——声明式插件没有随包文件，
+ * 这条在 superRefine 里按 distribution 判，schema 层只校验路径形状。
+ */
+const BackgroundSpecSchema = z.object(
+  {
+    entry: z
+      .string(typeParams("缺少后台页入口", "后台页入口必须是文本"))
+      .trim()
+      .min(1, "后台页入口不能为空")
+      .max(WIDGET_ENTRY_MAX, `后台页入口最多 ${WIDGET_ENTRY_MAX} 字符`)
+      .refine(isWidgetEntry, "后台页入口必须是包内相对 .html 路径（禁绝对路径 / .. / 反斜杠 / 协议前缀）"),
+  },
+  typeParams("background 必须是 JSON 对象"),
+);
+
 const ContributionsSchema = z.object(
   {
     skills: z
@@ -795,6 +875,18 @@ const ContributionsSchema = z.object(
       .array(DesktopWidgetSpecSchema, typeParams("桌面小组件列表必须是数组"))
       .max(MAX_PLUGIN_DESKTOP_WIDGETS, `本轮最多 ${MAX_PLUGIN_DESKTOP_WIDGETS} 个桌面小组件`)
       .optional(),
+    /**
+     * d.125 首页插件卡。
+     *
+     * 用 `optional` 与 desktopWidgets 同理：v3 带这些字段要能被识别并明确拒绝，
+     * 而不是被默认值抹平后静默通过。归一化时统一成数组（见 `PluginContributions`）。
+     */
+    homeCards: z
+      .array(HomeCardSpecSchema, typeParams("首页卡片列表必须是数组"))
+      .max(MAX_PLUGIN_HOME_CARDS, `单个插件最多 ${MAX_PLUGIN_HOME_CARDS} 张首页卡片`)
+      .optional(),
+    /** d.125 后台页：只有界面插件能声明；distribution 规则在 superRefine 里判。 */
+    background: BackgroundSpecSchema.optional(),
   },
   typeParams("contributions 必须是 JSON 对象"),
 );
@@ -910,6 +1002,8 @@ const PluginManifestSchema = z
     const commands = legacy ? [] : (manifest.contributions?.commands ?? []);
     const toolPacks = legacy ? [] : (manifest.contributions?.toolPacks ?? []);
     const desktopWidgets = legacy ? [] : (manifest.contributions?.desktopWidgets ?? []);
+    const homeCards = legacy ? [] : (manifest.contributions?.homeCards ?? []);
+    const background = legacy ? undefined : manifest.contributions?.background;
     const distribution = manifest.distribution ?? "manifest";
 
     /**
@@ -933,7 +1027,21 @@ const PluginManifestSchema = z
             "schemaVersion 3 不支持 contributions.desktopWidgets（界面插件），请升级到 schemaVersion 4",
         });
       }
-      (["events", "graphics", "eval"] as const).forEach((key) => {
+      if (manifest.contributions?.homeCards !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "homeCards"],
+          message: "schemaVersion 3 不支持 contributions.homeCards（首页插件卡），请升级到 schemaVersion 4",
+        });
+      }
+      if (manifest.contributions?.background !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "background"],
+          message: "schemaVersion 3 不支持 contributions.background（后台页），请升级到 schemaVersion 4",
+        });
+      }
+      (["events", "graphics", "eval", "infohub", "notify"] as const).forEach((key) => {
         if (manifest.permissions?.[key] !== undefined) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -1006,14 +1114,22 @@ const PluginManifestSchema = z
           message: `schemaVersion ${manifest.schemaVersion} 必须声明 contributions（技能 / MCP 服务 / 命令 / 工具束${isV4 ? " / 桌面小组件" : ""}至少一类）`,
         });
       } else if (
-        skills.length + servers.length + commands.length + toolPacks.length + desktopWidgets.length ===
+        // d.125：首页卡片（数据）与后台页（包内 HTML）也算一类能力，
+        // 否则「只声明一张首页卡的 bundle」会被误判成空包。
+        skills.length +
+          servers.length +
+          commands.length +
+          toolPacks.length +
+          desktopWidgets.length +
+          homeCards.length +
+          (background ? 1 : 0) ===
         0
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["contributions"],
           message: isV4
-            ? "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令 / 工具束 / 桌面小组件）"
+            ? "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令 / 工具束 / 桌面小组件 / 首页卡片 / 后台页）"
             : "插件至少要包含 1 项能力（技能 / MCP 服务 / 命令 / 工具束）",
         });
       }
@@ -1044,15 +1160,25 @@ const PluginManifestSchema = z
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["contributions", key],
-            message: `界面插件（distribution: "bundle"）只允许贡献 commands 与 desktopWidgets，不能声明${label}`,
+            message: `界面插件（distribution: "bundle"）只允许贡献 commands、desktopWidgets、homeCards 与 background，不能声明${label}`,
           });
         }
-      } else if (desktopWidgets.length > 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["contributions", "desktopWidgets"],
-          message: '声明 contributions.desktopWidgets 时必须 distribution: "bundle"（界面插件需要随包文件）',
-        });
+      } else {
+        if (desktopWidgets.length > 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["contributions", "desktopWidgets"],
+            message: '声明 contributions.desktopWidgets 时必须 distribution: "bundle"（界面插件需要随包文件）',
+          });
+        }
+        // 后台页要加载包内 HTML；声明式插件没有随包文件，写这个字段只会得到一个永远跑不起来的窗口。
+        if (background) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["contributions", "background"],
+            message: '声明 contributions.background 时必须 distribution: "bundle"（后台运行需要包内 HTML 入口）',
+          });
+        }
       }
     }
 
@@ -1078,6 +1204,19 @@ const PluginManifestSchema = z
         });
       }
       seenServers.add(server.key);
+    });
+
+    // d.125：首页卡片 id 在插件内唯一——宿主用 id 找卡片做运行期文案更新（homeCardSet）。
+    const seenHomeCards = new Set<string>();
+    homeCards.forEach((card, index) => {
+      if (seenHomeCards.has(card.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contributions", "homeCards", index, "id"],
+          message: `首页卡片 id 重复：${card.id}`,
+        });
+      }
+      seenHomeCards.add(card.id);
     });
 
     // v3：权限声明必须覆盖全部 MCP 服务主机（声明即约束）。
@@ -1222,6 +1361,10 @@ export interface PluginPermissions {
   eval: boolean;
   /** d.113：界面插件是否允许读取智能体名册与网关地址（默认 false）。 */
   chat?: boolean;
+  /** d.125：界面插件是否允许调 widget 桥的 `infohubCall`（只读检索本机归档）。 */
+  infohub?: boolean;
+  /** d.125：界面插件是否允许调 widget 桥的 `notify`（发桌面通知）。 */
+  notify?: boolean;
 }
 
 /** 界面插件可接收的事件类别（当前只有通知中心转发）。 */
@@ -1246,6 +1389,13 @@ export interface PluginContributions {
   /** d.98（v4）：界面插件声明；v3 及更旧清单恒为空数组。 */
   desktopWidgets: PluginDesktopWidgetSpec[];
   /**
+   * d.125 首页插件卡：数据-only（宿主渲染），声明式与界面插件都可声明。
+   * 运行期文案由 homeCardSet() 覆盖，清单里的 primary 只是初始值。
+   */
+  homeCards: PluginHomeCardSpec[];
+  /** d.125 后台页：只有界面插件会声明；每插件最多 1 个。 */
+  background?: PluginBackgroundSpec;
+  /**
    * d.124：插件页面（每插件最多 1 个）。声明式写 blocks，界面插件写 entry；
    * 没声明就没有导航入口。缺省 `undefined`（旧清单不会凭空多出页面）。
    */
@@ -1262,6 +1412,10 @@ export type PluginPageSpec = PluginPageV5;
 
 /** 归一化后的 `desktopWidget` 规格（类型来源是 zod schema，避免两处手写漂移）。 */
 export type PluginDesktopWidgetSpec = z.infer<typeof DesktopWidgetSpecSchema>;
+/** 归一化后的首页插件卡（d.125；清单静态内容）。 */
+export type PluginHomeCardSpec = z.infer<typeof HomeCardSpecSchema>;
+/** 归一化后的后台页声明（d.125；仅界面插件）。 */
+export type PluginBackgroundSpec = z.infer<typeof BackgroundSpecSchema>;
 
 /** 发布者声明（d.67，TOFU）：公钥只是内容，不证明身份；信任由首次安装确认。 */
 export interface PluginPublisher {
@@ -1351,6 +1505,9 @@ function legacyPermissions(servers: PluginMcpServerSpec[]): PluginPermissions {
     events: [],
     graphics: [],
     eval: false,
+    // d.125 新增两域同样是 v4 概念：旧包一律没有。
+    infohub: false,
+    notify: false,
   };
 }
 
@@ -1505,6 +1662,9 @@ function fromV5(parsed: PluginV5ParseResult): PluginManifest {
       })),
       toolPacks: v5.contributions.toolPacks.map((pack) => ({ ...pack, tools: [...pack.tools] })),
       desktopWidgets: v5.contributions.desktopWidgets as unknown as PluginDesktopWidgetSpec[],
+      // d.125：数据-only，逐项深拷贝（会进安装记录与 IPC，浅拷贝会留下共享引用）。
+      homeCards: v5.contributions.homeCards.map((card) => ({ ...card })),
+      ...(v5.contributions.background ? { background: { ...v5.contributions.background } } : {}),
       ...(v5.contributions.page ? { page: copyPage(v5.contributions.page) } : {}),
       llmPresets: [],
     },
@@ -1518,6 +1678,8 @@ function fromV5(parsed: PluginV5ParseResult): PluginManifest {
       graphics: [...((v5.permissions.graphics ?? []) as PluginGraphicsCapability[])],
       eval: v5.permissions.eval ?? false,
       chat: v5.permissions.chat ?? false,
+      infohub: v5.permissions.infohub ?? false,
+      notify: v5.permissions.notify ?? false,
     },
     engines: { heming: v5.engines.heming },
     meta: copyMeta(v5.meta),
@@ -1610,6 +1772,11 @@ export function parsePluginManifestDetailed(input: string | unknown): {
         })),
     // d.98：界面插件声明（v3 及更旧恒为空数组）；深拷贝避免调用方改到解析缓存。
     desktopWidgets: legacy ? [] : (manifest.contributions?.desktopWidgets ?? []).map(copyWidgetSpec),
+    // d.125：首页卡片是数据-only，逐项深拷贝；后台页只有界面插件会声明（v4 规则已在 superRefine 拒绝）。
+    homeCards: legacy ? [] : (manifest.contributions?.homeCards ?? []).map((card) => ({ ...card })),
+    ...(legacy || !manifest.contributions?.background
+      ? {}
+      : { background: { ...manifest.contributions.background } }),
     // 插件不再能声明模型预设（d.90：模型统一由 magpie 网关提供）；字段保留为空数组以兼容既有消费方。
     llmPresets: [],
   };
@@ -1622,6 +1789,9 @@ export function parsePluginManifestDetailed(input: string | unknown): {
         events: uniq(manifest.permissions?.events ?? []),
         graphics: uniq(manifest.permissions?.graphics ?? []),
         eval: manifest.permissions?.eval === true,
+        // d.125：两域先归一化成布尔，UI 与签名口径都不用再判 undefined。
+        infohub: manifest.permissions?.infohub === true,
+        notify: manifest.permissions?.notify === true,
       };
   return {
     manifest: {

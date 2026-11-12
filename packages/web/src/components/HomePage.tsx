@@ -20,10 +20,12 @@ import {
 } from "../lib/onboarding.js";
 import { fetchTeam, fetchTeamActivities, resolveUrl } from "../lib/api.js";
 import { Avatar } from "./Avatar.js";
+import { Button } from "./ui/Button.js";
 import { PageShell } from "./layout/PageShell.js";
 import { EmptyState } from "./ui/EmptyState.js";
 import { SkeletonLine } from "./ui/Skeleton.js";
-import { ModuleHomeCard } from "../lib/modules/runtime.js";
+import { Stat } from "./ui/Stat.js";
+import { PluginHomeCards } from "./plugins/PluginHomeCards.js";
 import { TokenHeatmap } from "./TokenHeatmap.js";
 import { OnboardingCard } from "./ux/OnboardingCard.js";
 import { HomeTeamUsage } from "./HomeTeamUsage.js";
@@ -33,46 +35,11 @@ import { unreadCount, useNotificationStore } from "../store/notifications.js";
 import { useHitlStore } from "../store/hitl.js";
 import { TeamIcon } from "./icons.js";
 import { fileRootsStore } from "../lib/fileEdit/roots.js";
-import { FOCUS_RING } from "../lib/a11y/focus.js";
-import { isModuleEffective, useModuleStore } from "../lib/modules/store.js";
-
 
 /**
- * 统计卡：数字 + 一句说明。传了 `onOpen` 就是**可下钻的动作指标**
- * （不传则是纯看板数字——首页改造后只保留可点的那种）。
+ * 统计卡已抽到 ui/Stat.tsx（d.138）：首页与模型页此前各写一份、尺寸不同
+ * （首页 20px / p-3，模型页 26px / p-4），同一套「数字卡」两个页面不一样大。
  */
-function StatCard({
-  title,
-  value,
-  sub,
-  onOpen,
-  actionLabel,
-}: {
-  title: string;
-  value: string;
-  sub?: string;
-  onOpen?: () => void;
-  actionLabel?: string;
-}) {
-  const body = (
-    <>
-      <div className="text-[11px] font-bold text-muted">{title}</div>
-      <div className="mt-0.5 text-[20px] font-extrabold">{value}</div>
-      {sub && <div className="mt-0.5 text-[10px] text-muted">{sub}</div>}
-    </>
-  );
-  if (!onOpen) return <div className="ui-card p-3">{body}</div>;
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-label={actionLabel ?? `${title}：${value}`}
-      className={`ui-card p-3 text-left transition-colors hover:bg-[var(--subtle)] ${FOCUS_RING}`}
-    >
-      {body}
-    </button>
-  );
-}
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
@@ -160,18 +127,6 @@ export function HomePage() {
     };
   }, []);
 
-  const moduleEnabled = useModuleStore((s) => s.enabled);
-  const moduleInstalled = useModuleStore((s) => s.installed);
-  // 内置模块默认未安装：卡片只在「已安装 + 已启用 + 依赖满足」时出现。
-  const moduleState = {
-    staff: isModuleEffective({ installed: moduleInstalled, enabled: moduleEnabled }, "staff"),
-    automations: isModuleEffective(
-      { installed: moduleInstalled, enabled: moduleEnabled },
-      "heming.automations",
-    ),
-    infoHub: isModuleEffective({ installed: moduleInstalled, enabled: moduleEnabled }, "heming.infohub"),
-  };
-
   const monthKey = useMemo(() => monthKeyOf(new Date().toISOString()), []);
   const monthSummary = useMemo(() => summarizeMonth(records, monthKey), [records, monthKey]);
 
@@ -237,7 +192,9 @@ export function HomePage() {
   const openRunningTasks = () => {
     const first = runningTasks[0];
     if (first) useUiStore.getState().focusTask(first.id, first.conversationId);
-    else setPage("chat", "tasks");
+    // d.138：没有在跑的任务时，「查看任务」指向团队页看板——任务列表在那里，
+    // 而不是对话页一个早就不存在的 tasks 视图。
+    else setPage("team", "board");
   };
 
   const greeting = (() => {
@@ -311,7 +268,9 @@ export function HomePage() {
       title={
         <>
           {greeting}，{user?.displayName ?? ""}
-          <span className="ml-2 ui-caption font-normal">{today}</span>
+          {/* d.138：日期此前是紧贴标题的 span，无障碍树把标题读成
+              「下午好，设计评审2026-11-12 周四」；分隔点两侧留空格，视觉与朗读都断开。 */}
+          <span className="ui-caption font-normal"> · {today}</span>
         </>
       }
       subtitle="要处理什么、上次聊到哪、手上有什么在跑。"
@@ -319,21 +278,17 @@ export function HomePage() {
       bodyClassName="flex flex-col gap-4"
       actions={
         <>
-          {/* 首页是「开始干活」的地方：先给动作，再给数字（审计：原来这里是版本号 + 今日用量） */}
-          <button
-            type="button"
-            className="ui-btn ui-btn-sm ui-btn-ghost"
-            onClick={() => setPage("chat")}
-          >
+          {/* 首页是「开始干活」的地方：先给动作，再给数字（审计：原来这里是版本号 + 今日用量）。
+              d.138 主次对调：最高频的「新对话」用实心主按钮，「派任务」降为描边——
+              此前低频的派任务反而是全页最重的黑色按钮，主次是反的。
+              d.138 另外把「派任务」的目的地从 chat/tasks（对话页不认这个视图，等于静默掉到
+              对话 Tab）改成团队页看板——任务本来就长在 TeamTaskPanel 里。 */}
+          <Button size="sm" variant="primary" onClick={() => setPage("chat")}>
             新对话
-          </button>
-          <button
-            type="button"
-            className="ui-btn ui-btn-sm ui-btn-primary"
-            onClick={() => setPage("chat", "tasks")}
-          >
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setPage("team", "board")}>
             派任务
-          </button>
+          </Button>
         </>
       }
     >
@@ -348,10 +303,10 @@ export function HomePage() {
 
       {/* 2. 四张动作指标卡（不是看板数字）：宽窗 4 列，窄窗折成 2 列 */}
       <div className="grid grid-cols-4 gap-2.5 max-[1199px]:grid-cols-2">
-        <StatCard
-          title="待处理"
-          value={String(pendingCount)}
-          sub={
+        <Stat
+          label="待处理"
+          value={pendingCount}
+          hint={
             pendingCount === 0
               ? "没有需要你处理的事"
               : unreadNotifications > 0
@@ -361,24 +316,24 @@ export function HomePage() {
           onOpen={pendingCount > 0 ? openPending : undefined}
           actionLabel="打开待处理事项"
         />
-        <StatCard
-          title="运行中任务"
-          value={String(runningTasks.length)}
-          sub={runningTasks.length === 0 ? "没有在跑的任务" : "点开查看进度"}
+        <Stat
+          label="运行中任务"
+          value={runningTasks.length}
+          hint={runningTasks.length === 0 ? "没有在跑的任务" : "点开查看进度"}
           onOpen={runningTasks.length > 0 ? openRunningTasks : undefined}
           actionLabel="查看运行中的任务"
         />
-        <StatCard
-          title="我的智能体"
-          value={String(agentsRoster.length)}
-          sub="本机运行"
+        <Stat
+          label="我的智能体"
+          value={agentsRoster.length}
+          hint="本机运行"
           onOpen={() => setPage("chat")}
           actionLabel="打开智能体页"
         />
-        <StatCard
-          title="今日动向"
-          value={teamError ? "—" : String(todayActivities)}
-          sub={teamError ? "团队数据加载失败" : "成员共享的任务与日程"}
+        <Stat
+          label="今日动向"
+          value={teamError ? "—" : todayActivities}
+          hint={teamError ? "团队数据加载失败" : "成员共享的任务与日程"}
           onOpen={teamError ? undefined : () => setPage("team")}
           actionLabel="打开团队页"
         />
@@ -386,8 +341,10 @@ export function HomePage() {
           {!monthHasRecords ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] font-bold text-muted">Token 用量 · {monthKey}</span>
+              {/* 分隔符写在文本节点里：两个 span 之间只有 gap，读屏会把「2026-11」和
+                  「本月还没有…」拼成「2026-11本月还没有…」。 */}
               <span className="text-[11px] text-muted">
-                本月还没有调用记录；接入模型并开始对话后自动统计。
+                {" · "}本月还没有调用记录；接入模型并开始对话后自动统计。
               </span>
               <button
                 type="button"
@@ -449,7 +406,7 @@ export function HomePage() {
                   <EmptyState
                     compact
                     className="px-0 py-2"
-                    title="暂无调用记录"
+                    title="还没有调用记录"
                     desc="接入模型、开始对话后自动累计。"
                   />
                 ) : (
@@ -548,16 +505,15 @@ export function HomePage() {
         </div>
       </div>
 
-      {/* 2.6 本机归档：日程摘要与归档规模（仅桌面端渲染）。
-          d.70：信息中枢模块停用后整张卡下线，不在首页留假入口。 */}
-      <ModuleHomeCard moduleId="heming.infohub" active={moduleState.infoHub} />
+      {/* 2.6 插件首页卡（d.125）：沙箱 bundle 插件声明的卡片（信息中枢 / 自动化等）。
+          数据只经 `window.__heming_plugins` 从宿主读，浏览器/旧版桌面端整块不渲染；
+          模块运行时下线后这里是首页唯一的内置能力入口来源。 */}
+      <PluginHomeCards />
 
-      {/* 2.7 幕僚：最近一份主动简报（d.48）；d.131 起优先由模块包提供卡片，未加载回退内置 */}
-      <ModuleHomeCard moduleId="heming.automations" active={moduleState.automations} />
-
-      {/* 3/4/5/6. 两栏：左团队动向；右智能体动态 + 在线成员 + 系统状态。
-          窄窗（<1200）折成单列：1.5fr/1fr 的比例在 1000px 出头的窗口里会把左栏压得读不完整。 */}
-      <div className="grid grid-cols-[1.5fr_1fr] items-start gap-3 max-[1199px]:grid-cols-1">
+      {/* 3/4/5/6. 两栏：左团队动向；右最近对话。
+          窄窗（<1200）折成单列：1.5fr/1fr 的比例在 1000px 出头的窗口里会把左栏压得读不完整。
+          d.138：去掉 items-start，两栏等高——此前右卡内容少时底边比左卡高一截。 */}
+      <div className="grid grid-cols-[1.5fr_1fr] gap-3 max-[1199px]:grid-cols-1">
         <section className="ui-card p-3">
           <div className="mb-1.5 flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-[12px] font-bold text-muted">
@@ -652,12 +608,16 @@ export function HomePage() {
         </div>
       </div>
 
-      {/* 7. 底部：服务状态 + 更新日志入口（只留一行，异常时才变醒目） */}
-      <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 ui-micro">
+      {/* 7. 底部：服务状态 + 更新日志入口（只留一行，异常时才变醒目）。
+          d.138：三项之间补分隔点——此前只靠 gap 撑开，无障碍树把整行读成
+          「服务：正常文件目录：未绑定」。 */}
+      <footer className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 ui-micro">
         <span>服务：{cloud}</span>
+        <span> · </span>
         <span>
           文件目录：{writeRootCount > 0 ? `已绑定 ${writeRootCount} 个` : "未绑定"}
         </span>
+        <span> · </span>
         <button type="button" className="ui-link" onClick={() => openSettings("about")}>
           更新日志
         </button>

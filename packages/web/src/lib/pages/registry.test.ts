@@ -35,6 +35,8 @@ function installedPlugin(input: {
         commands: [],
         toolPacks: [],
         desktopWidgets: [],
+        // d.125：首页卡片是归一化清单的必填字段，夹具必须补齐
+        homeCards: [],
         llmPresets: [],
         ...(input.page
           ? {

@@ -38,6 +38,10 @@ export const PLUGIN_LIMITS = {
   networkHosts: 20,
   files: 5,
   desktopWidgets: 1,
+  /** d.125 首页插件卡：首页信息密度高，超过 4 张会把其它区块挤下去。 */
+  homeCards: 4,
+  /** 首页卡运行期文案的初始值（homeCardSet() 只覆盖显示，不改清单）。 */
+  homeCardPrimaryChars: 60,
   widgetScales: 6,
   widgetSettingFields: 20,
   widgetSettingOptions: 20,
@@ -465,6 +469,43 @@ const PageSchema = z.strictObject({
   blocks: z.array(PageBlockSchema).max(PLUGIN_LIMITS.pageBlocks, { error: "页面块最多 12 个" }).optional(),
 });
 
+/* ───────────────────── 首页插件卡与后台页（d.125） ───────────────────── */
+
+/** 首页卡的 page：宿主页面 id（如 home / infohub），或插件自己的 `plugin:<插件 id>`。 */
+const HOME_CARD_PAGE_RE = /^(?:[a-z][a-z0-9-]{0,31}|plugin:[a-z0-9][a-z0-9._-]{0,63})$/;
+
+/**
+ * 首页插件卡（数据-only）。
+ *
+ * 为什么是数据而不是组件：首页由宿主统一渲染，插件只声明「显示什么、点了去哪」，
+ * 避免清单变成代码入口；运行期文案（如「3 条新归档」）由插件通过 widget 桥的
+ * `homeCardSet()` 覆盖，清单里的 `primary` 只是第一帧的初始值。
+ */
+const HomeCardSchema = z.strictObject({
+  id: z
+    .string({ error: "首页卡片 id 必须是文本" })
+    .regex(WIDGET_ID_RE, { error: "首页卡片 id 只能用小写字母/数字/连字符，≤32" }),
+  title: trimmed(PLUGIN_LIMITS.pageTitleChars),
+  summary: trimmed(PLUGIN_LIMITS.pageSummaryChars, 0).optional().default(""),
+  icon: z
+    .string({ error: "首页卡片图标必须是文本" })
+    .regex(PAGE_ICON_RE, { error: "首页卡片图标只接受宿主图标 id（小写字母/数字/连字符，≤32）" })
+    .optional(),
+  page: z
+    .string({ error: "首页卡片 page 必须是文本" })
+    .trim()
+    .regex(HOME_CARD_PAGE_RE, { error: '首页卡片 page 必须是宿主页面 id 或 "plugin:<插件 id>"' }),
+  primary: trimmed(PLUGIN_LIMITS.homeCardPrimaryChars, 0).optional().default(""),
+});
+
+/**
+ * 后台页（仅界面插件）：插件启用时宿主创建隐藏窗口加载这个入口。
+ *
+ * 为什么必须在清单里声明：没有它，插件无法在没人打开页面的情况下持续采集/整理数据；
+ * 入口必须是包内 `.html`，防止指向网络地址或本机任意文件。
+ */
+const BackgroundSchema = z.strictObject({ entry: PageEntrySchema });
+
 const IconSchema = z
   .string()
   .max(PLUGIN_LIMITS.iconChars, { error: "图标字符串过长（建议用 https URL）" })
@@ -518,6 +559,10 @@ const PermissionsSchema = z
     events: z.array(z.enum(["notify", "lifecycle", "theme", "tray"]), { error: "事件只支持 notify / lifecycle / theme / tray" }).max(8).optional(),
     /** 界面插件：是否允许读取本机智能体名册与网关地址（chatConfig；默认 false）。 */
     chat: z.boolean().optional(),
+    /** d.125：允许调 widget 桥的 infohubCall（只读检索本机归档）。 */
+    infohub: z.boolean().optional(),
+    /** d.125：允许调 widget 桥的 notify（发桌面通知）。 */
+    notify: z.boolean().optional(),
     graphics: z.array(z.enum(["webgl", "webgl2", "wasm"]), { error: "渲染能力只支持 webgl / webgl2 / wasm" }).max(8).optional(),
     eval: z.boolean().optional(),
   })
@@ -568,6 +613,13 @@ const ContributionsSchema = z
       .array(DesktopWidgetSchema)
       .max(PLUGIN_LIMITS.desktopWidgets, { error: "本轮每包最多 1 个桌面小组件" })
       .optional(),
+    /** d.125 首页插件卡：数据-only，声明式与界面插件都可声明。 */
+    homeCards: z
+      .array(HomeCardSchema)
+      .max(PLUGIN_LIMITS.homeCards, { error: "首页卡片最多 4 张" })
+      .optional(),
+    /** d.125 后台页：只有界面插件能声明（宿主加载包内 HTML），distribution 规则在解析器里判。 */
+    background: BackgroundSchema.optional(),
     /** d.124 插件页面：声明式写 `blocks`，界面插件写 `entry`（互斥，见解析器规则）。 */
     page: PageSchema.optional(),
   })
@@ -588,6 +640,7 @@ const ContributionsSchema = z
     dup(contributions.mcpServers?.map((server) => ({ key: server.key })), "服务 key", "mcpServers");
     dup(contributions.commands?.map((command) => ({ key: command.id })), "命令 id", "commands");
     dup(contributions.toolPacks?.map((pack) => ({ key: pack.id })), "工具束 id", "toolPacks");
+    dup(contributions.homeCards?.map((card) => ({ key: card.id })), "首页卡片 id", "homeCards");
 
     const toolOwners = new Map<string, string>();
     for (const pack of contributions.toolPacks ?? []) {
@@ -666,6 +719,10 @@ export type PluginCommandV5 = z.infer<typeof CommandSchema>;
 export type PluginToolPackV5 = z.infer<typeof ToolPackSchema>;
 export type PluginDesktopWidgetV5 = z.infer<typeof DesktopWidgetSchema>;
 export type PluginPageBlockV5 = z.infer<typeof PageBlockSchema>;
+/** d.125 首页插件卡（清单静态内容；运行期文案由 homeCardSet() 覆盖）。 */
+export type PluginHomeCardV5 = z.infer<typeof HomeCardSchema>;
+/** d.125 后台页入口（仅界面插件）。 */
+export type PluginBackgroundV5 = z.infer<typeof BackgroundSchema>;
 
 /**
  * 归一化后的插件页面（d.124）。
@@ -700,6 +757,10 @@ export interface PluginManifestV5 {
     commands: PluginCommandV5[];
     toolPacks: PluginToolPackV5[];
     desktopWidgets: PluginDesktopWidgetV5[];
+    /** d.125 首页插件卡（数据-only）；没声明就是空数组。 */
+    homeCards: PluginHomeCardV5[];
+    /** d.125 后台页：只有界面插件会声明，宿主建隐藏窗口跑这个页面。 */
+    background?: PluginBackgroundV5;
     /** d.124：声明了页面才有；每插件最多一个。 */
     page?: PluginPageV5;
   };
@@ -753,24 +814,33 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
   const commands = contributions.commands ?? [];
   const toolPacks = contributions.toolPacks ?? [];
   const desktopWidgets = contributions.desktopWidgets ?? [];
+  const homeCards = contributions.homeCards ?? [];
+  const background = contributions.background;
   const page = contributions.page;
 
   if (distribution === "bundle") {
     if (skills.length > 0 || mcpServers.length > 0 || toolPacks.length > 0) {
       throw new PluginManifestInvalidError(
-        "界面插件（distribution: bundle）只允许 commands + desktopWidgets + page，不允许声明 skills / mcpServers / toolPacks" +
+        "界面插件（distribution: bundle）只允许 commands + desktopWidgets + page + homeCards + background，不允许声明 skills / mcpServers / toolPacks" +
           "（见 contributions）",
       );
     }
-    if (desktopWidgets.length === 0 && !page) {
+    // homeCards 是纯数据，本身不需要随包文件；所以只有「需要包内文件」的三类才算 bundle 的理由。
+    if (desktopWidgets.length === 0 && !page && !background) {
       throw new PluginManifestInvalidError(
-        "distribution: bundle 必须声明至少 1 个 contributions.desktopWidgets 或 contributions.page（否则就是纯声明式包）",
+        "distribution: bundle 必须声明至少 1 个 contributions.desktopWidgets / contributions.page / contributions.background（否则就是纯声明式包）",
       );
     }
   } else {
     if (desktopWidgets.length > 0) {
       throw new PluginManifestInvalidError(
         "声明了 contributions.desktopWidgets 时必须写 distribution: \"bundle\"",
+      );
+    }
+    // background 要加载包内 HTML；声明式插件没有随包文件，写这个字段只会得到一个永远跑不起来的窗口。
+    if (background) {
+      throw new PluginManifestInvalidError(
+        "声明了 contributions.background 时必须写 distribution: \"bundle\"（后台运行需要包内 HTML 入口）",
       );
     }
     if (page?.entry) {
@@ -807,11 +877,18 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
   }
 
   if (
-    skills.length + mcpServers.length + commands.length + toolPacks.length + desktopWidgets.length + (page ? 1 : 0) ===
+    skills.length +
+      mcpServers.length +
+      commands.length +
+      toolPacks.length +
+      desktopWidgets.length +
+      homeCards.length +
+      (background ? 1 : 0) +
+      (page ? 1 : 0) ===
     0
   ) {
     throw new PluginManifestInvalidError(
-      "至少要让 contributions 里有一类非空（技能 / 服务 / 命令 / 工具束 / 小组件 / 页面）",
+      "至少要让 contributions 里有一类非空（技能 / 服务 / 命令 / 工具束 / 小组件 / 页面 / 首页卡片 / 后台页）",
     );
   }
 
@@ -872,6 +949,8 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
         graphics: permissions.graphics ?? [],
         eval: permissions.eval ?? false,
         chat: permissions.chat ?? false,
+        infohub: permissions.infohub ?? false,
+        notify: permissions.notify ?? false,
       },
       contributions: {
         skills,
@@ -879,6 +958,8 @@ export function parsePluginManifestV5(raw: unknown): PluginV5ParseResult {
         commands,
         toolPacks,
         desktopWidgets,
+        homeCards,
+        ...(background ? { background } : {}),
         ...(page
           ? {
               page: page.entry
@@ -923,6 +1004,9 @@ export interface LegacyNormalizedPlugin {
     events?: string[];
     graphics?: string[];
     eval?: boolean;
+    chat?: boolean;
+    infohub?: boolean;
+    notify?: boolean;
   };
   contributions: {
     skills: unknown[];
@@ -930,6 +1014,8 @@ export interface LegacyNormalizedPlugin {
     commands: unknown[];
     toolPacks: unknown[];
     desktopWidgets?: unknown[];
+    homeCards?: unknown[];
+    background?: unknown;
   };
   publisher?: { id: string; publicKey: string };
   signature?: { alg: "ed25519"; value: string };
@@ -953,7 +1039,9 @@ export function toV5View(legacy: LegacyNormalizedPlugin): PluginManifestV5 {
       events: (legacy.permissions.events ?? []) as PluginPermissionsV5["events"],
       graphics: (legacy.permissions.graphics ?? []) as PluginPermissionsV5["graphics"],
       eval: legacy.permissions.eval ?? false,
-      chat: false,
+      chat: legacy.permissions.chat ?? false,
+      infohub: legacy.permissions.infohub ?? false,
+      notify: legacy.permissions.notify ?? false,
     },
     contributions: {
       skills: (legacy.contributions.skills ?? []) as PluginSkillV5[],
@@ -961,6 +1049,10 @@ export function toV5View(legacy: LegacyNormalizedPlugin): PluginManifestV5 {
       commands: (legacy.contributions.commands ?? []) as PluginCommandV5[],
       toolPacks: (legacy.contributions.toolPacks ?? []) as PluginToolPackV5[],
       desktopWidgets: (legacy.contributions.desktopWidgets ?? []) as PluginDesktopWidgetV5[],
+      homeCards: (legacy.contributions.homeCards ?? []) as PluginHomeCardV5[],
+      ...(legacy.contributions.background
+        ? { background: legacy.contributions.background as PluginBackgroundV5 }
+        : {}),
     },
     ...(legacy.publisher ? { publisher: legacy.publisher } : {}),
     ...(legacy.signature ? { signature: legacy.signature } : {}),

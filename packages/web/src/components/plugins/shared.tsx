@@ -27,6 +27,14 @@ export function formatAt(at: string | undefined): string {
   )}:${pad(date.getMinutes())}`;
 }
 
+/** 本机数据占用 → 人类可读体积；0 表示「无数据」。 */
+export function fmtBytes(bytes: number): string {
+  if (bytes <= 0) return "无数据";
+  if (bytes < 1024) return `约 ${bytes} B`;
+  if (bytes < 1024 * 1024) return `约 ${(bytes / 1024).toFixed(1)} KB`;
+  return `约 ${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function Switch({
   label,
   checked,

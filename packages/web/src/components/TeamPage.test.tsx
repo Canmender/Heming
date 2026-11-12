@@ -333,7 +333,8 @@ describe("团队日程：只读摘要", () => {
     expect(screen.getByText(/不会自动拉起/)).toBeInTheDocument();
     // 空态必须给出可点的下一步（审计 P1-7：原来只有一段术语，没有出口）
     fireEvent.click(screen.getByRole("button", { name: "去连接信息中枢" }));
-    expect(useUiStore.getState().page).toBe("infohub");
+    // 旧 "infohub" 页 id 由 resolvePage 折叠到插件页，入口本身仍直达信息中枢
+    expect(useUiStore.getState().page).toBe("plugin:heming.infohub");
     expect(uploadTeamActivities).not.toHaveBeenCalled();
     expect(useInfohubStore.getState().running).toBe(false);
   });

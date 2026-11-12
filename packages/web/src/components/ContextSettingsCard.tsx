@@ -6,6 +6,7 @@ import {
 } from "../lib/agentContext/settings.js";
 import { useLlmStore } from "../store/llm.js";
 import { lookupCapability } from "../lib/modelCaps.js";
+import { Switch } from "./ui/Switch.js";
 
 /**
  * 设置区 · 上下文预算（设计 §5）：@ 触发链路的历史 token 预算与压缩开关。
@@ -31,35 +32,7 @@ const selectCls =
   "mt-1 block rounded-lg border border-line px-3 py-2 text-sm outline-hidden focus:border-[#bbb]";
 const hintCls = "ui-caption";
 
-function Switch({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-150 ${
-        checked ? "bg-ink" : "bg-[color:var(--switch-off)]"
-      }`}
-    >
-      <span
-        style={{ backgroundColor: checked ? "var(--heming-on-accent)" : "var(--switch-knob)" }}
-        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all duration-150 ${
-          checked ? "left-[16px]" : "left-[2px]"
-        }`}
-      />
-    </button>
-  );
-}
+/* 开关已抽到 ui/Switch.tsx（d.138）：与记忆页、技能页的三份逐字节相同拷贝合并。 */
 
 export function ContextSettingsCard() {
   const [settings, setSettings] = useState<ContextSettings>(() => loadContextSettings());

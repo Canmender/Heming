@@ -15,7 +15,7 @@ import { deriveOnboardingSteps } from "../../lib/onboarding.js";
 describe("OnboardingCard", () => {
   const steps = deriveOnboardingSteps({ connections: 0, conversations: 1, tasks: 0 });
 
-  it("三步都画出来，已完成步骤标「已完成」且按钮禁用", () => {
+  it("三步都画出来，已完成步骤标「已完成」且不再给按钮", () => {
     render(<OnboardingCard steps={steps} onGo={vi.fn()} onDismiss={vi.fn()} />);
     const card = screen.getByRole("region", { name: "开始使用" });
     expect(within(card).getByText("配置模型连接")).toBeInTheDocument();
@@ -23,8 +23,9 @@ describe("OnboardingCard", () => {
     expect(within(card).getByText("建第一个任务")).toBeInTheDocument();
     // 1/3 完成
     expect(within(card).getByText(/1\/3\s*已完成/)).toBeInTheDocument();
-    const doneButton = within(card).getByRole("button", { name: "已完成" });
-    expect(doneButton).toBeDisabled();
+    // 已完成的步骤只留回执（徽标 + 一句说明），不再放一个禁用的「已完成」按钮
+    expect(within(card).queryByRole("button", { name: "已完成" })).toBeNull();
+    expect(within(card).getByText("这一步已经完成，不用再动。")).toBeInTheDocument();
   });
 
   it("未完成步骤的按钮把目标页交给上层（设置 / 对话 / 任务区）", () => {

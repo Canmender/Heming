@@ -76,9 +76,11 @@ export function NeedsAttention() {
       out.push({
         key: "task:more",
         title: `还有 ${running.length - 2} 个任务在跑`,
-        detail: "到任务区看全部运行中的任务",
-        actionLabel: "去任务区",
-        onOpen: () => ui.setPage("chat", "tasks"),
+        detail: "在团队页看板的「任务」里查看全部运行中的任务",
+        actionLabel: "查看任务",
+        // d.138：任务列表在团队页看板；原来指向 chat/tasks，对话页不认这个视图，
+        // 点完整页几乎没变化（只是停在对话 Tab）。
+        onOpen: () => ui.setPage("team", "board"),
       });
     }
 

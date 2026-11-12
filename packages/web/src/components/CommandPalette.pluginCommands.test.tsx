@@ -77,7 +77,7 @@ describe("命令面板 · 插件命令分组", () => {
     fireEvent.change(searchBox(), { target: { value: "导出" } });
 
     expect(screen.getByText("插件命令")).toBeInTheDocument();
-    const item = screen.getByRole("option", { name: "选择 导出本周天气" });
+    const item = screen.getByRole("option", { name: "导出本周天气" });
     expect(item.textContent).toContain("天气能力包");
     expect(item.textContent).toContain("Markdown");
   });
@@ -85,13 +85,13 @@ describe("命令面板 · 插件命令分组", () => {
   it("按描述命中（标题里没有该词）", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "Markdown" } });
-    expect(screen.getByRole("option", { name: "选择 导出本周天气" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "导出本周天气" })).toBeInTheDocument();
   });
 
   it("按关键词命中", () => {
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "周报" } });
-    expect(screen.getByRole("option", { name: "选择 导出本周天气" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "导出本周天气" })).toBeInTheDocument();
   });
 
   it("插件停用后（store 不再返回命令）该组消失", () => {
@@ -108,7 +108,7 @@ describe("命令面板 · 插件命令的三种 target 分发", () => {
     commandsStub.current = [cmd({ target: { kind: "page", page: "memory" } })];
     render(<CommandPalette onClose={onClose} />);
     fireEvent.change(searchBox(), { target: { value: "导出" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
+    fireEvent.click(screen.getByRole("option", { name: "导出本周天气" }));
 
     expect(useUiStore.getState().page).toBe("memory");
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -118,7 +118,7 @@ describe("命令面板 · 插件命令的三种 target 分发", () => {
     commandsStub.current = [cmd({ target: { kind: "page", page: "not-a-page" } })];
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "导出" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
+    fireEvent.click(screen.getByRole("option", { name: "导出本周天气" }));
     expect(useUiStore.getState().page).toBe("home");
   });
 
@@ -126,7 +126,7 @@ describe("命令面板 · 插件命令的三种 target 分发", () => {
     commandsStub.current = [cmd({ target: { kind: "skill", name: "出行建议" } })];
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "导出" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
+    fireEvent.click(screen.getByRole("option", { name: "导出本周天气" }));
 
     // 技能区已并入插件区：页面落到插件区，并投递「技能」视图意图
     await waitFor(() => expect(useUiStore.getState().page).toBe("plugins"));
@@ -141,7 +141,7 @@ describe("命令面板 · 插件命令的三种 target 分发", () => {
     commandsStub.current = [cmd({ target: { kind: "skill", name: "不存在的技能" } })];
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "导出" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
+    fireEvent.click(screen.getByRole("option", { name: "导出本周天气" }));
 
     await waitFor(() => expect(useUiStore.getState().page).toBe("plugins"));
     expect(useUiStore.getState().pageView).toBe("skills");
@@ -152,7 +152,7 @@ describe("命令面板 · 插件命令的三种 target 分发", () => {
     commandsStub.current = [cmd({ target: { kind: "plugin" } })];
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "导出" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
+    fireEvent.click(screen.getByRole("option", { name: "导出本周天气" }));
 
     await waitFor(() => expect(useUiStore.getState().page).toBe("plugins"));
     expect(useUiStore.getState().paletteIntent).toMatchObject({
@@ -176,7 +176,7 @@ describe("命令面板 · d.108 新增 target（settings / unit）", () => {
     commandsStub.current = [cmd({ target: { kind: "settings", card: "theme-mode" } })];
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "导出" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
+    fireEvent.click(screen.getByRole("option", { name: "导出本周天气" }));
 
     await waitFor(() => expect(useUiStore.getState().page).toBe("settings"));
     expect(useUiStore.getState().paletteIntent).toMatchObject({
@@ -189,7 +189,7 @@ describe("命令面板 · d.108 新增 target（settings / unit）", () => {
     commandsStub.current = [cmd({ target: { kind: "unit", unitId: "heming.pet" } })];
     render(<CommandPalette onClose={vi.fn()} />);
     fireEvent.change(searchBox(), { target: { value: "导出" } });
-    fireEvent.click(screen.getByRole("option", { name: "选择 导出本周天气" }));
+    fireEvent.click(screen.getByRole("option", { name: "导出本周天气" }));
 
     await waitFor(() => expect(useUiStore.getState().page).toBe("plugins"));
     expect(useUiStore.getState().paletteIntent).toMatchObject({

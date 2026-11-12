@@ -124,7 +124,7 @@ web 侧再从已装记录物化进命令面板（`__heming_widgets.list()` → `
 
 - **安装**：技能写入技能池（标记插件来源）、服务登记进接口区（标记插件来源）、命令进面板。数据只在本机（`heming.plugins.v1` + 技能池/MCP 注册表既有键），不上传。
 - **查找**：插件区支持按名称 / id / 描述 / 贡献搜索，并按来源（全部插件 / 系统 / 插件）与状态（全部 / 已启用 / 已停用）筛选；装完自动回到插件列表并高亮新装的卡片。
-- **云端安装**：主入口是插件区「从插件仓库安装」——模块与声明式/界面插件在同一列表，安装时按类型自动走各自的下载/验签路径；手动安装弹窗里的「从云端浏览插件」列出同一份目录的清单（版本/权限/贡献/指纹），点「载入清单」下载并**校验 sha256** 后填进清单框——安装预览、信任确认、写入语义与手动粘贴完全一致；目录不可用时只影响该面板。
+- **云端安装**：主入口是插件区「从插件仓库安装」——声明式插件与界面插件（bundle）在同一列表，安装时按类型自动走各自的下载/验签路径；手动安装弹窗里的「从云端浏览插件」列出同一份目录的清单（版本/权限/贡献/指纹），点「载入清单」下载并**校验 sha256** 后填进清单框——安装预览、信任确认、写入语义与手动粘贴完全一致；目录不可用时只影响该面板。
 - **更新**：同 `id` 再次安装 = 更新；弹窗会展示技能/服务的增删改差异与服务 id 冲突。
 - **停用**：技能与服务保留记录但不生效，命令消失；重新启用即恢复。
 - **卸载**：级联收回本插件物化的技能与服务；用户手工改过的技能/服务不会被误删（按归属判断）。
@@ -271,7 +271,7 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugin
 
 ## 10. 界面插件（v4 · `distribution: "bundle"`，d.98；d.124 起可带页面）
 
-界面插件是**唯一带可执行内容**的插件：它提供一个独立窗口的渲染包（第一个也是当前唯一一个：桌宠 `heming.pet`，见 `docs/PET.md`；原首方 bundle「聊天记录」的浏览界面已并入「信息中枢」模块，不再作为插件分发）；d.124 起还可以在**主窗内容区**嵌一个自己的页面（`contributions.page.entry`，见 §13.4）。
+界面插件是**唯一带可执行内容**的插件：它提供一个独立窗口的渲染包（桌宠 `heming.pet`，见 `docs/PET.md`），d.124 起还可以在**主窗内容区**嵌一个自己的页面（`contributions.page.entry`，见 §13.4）。当前首方 bundle 除桌宠外还有两个普通界面插件：自动化 `heming.automations`（页面 + 后台页 + 首页卡）与信息中枢 `heming.infohub`（检索 / 会话 / 日程页面 + 命令）；原首方 bundle「聊天记录」的浏览界面已并入信息中枢插件，不再单独分发。
 因为「装插件 = 在本机运行代码」，它与纯声明式包走两套清单字段、两套安装链路，**只有官方目录发布的包才允许安装**（第三方仍只能是 §1–§8 的声明式包）。
 
 ### 9.1 清单
@@ -317,8 +317,11 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugin
 
 约束：
 
-- `distribution: "bundle"` 的包**只允许** `desktopWidgets` + `commands` + `page` + `engine`；声明 `skills` / `mcpServers` / `toolPacks` 一律拒绝。
+- `distribution: "bundle"` 的包**只允许** `desktopWidgets` + `commands` + `page` + `homeCards` + `background` + `engine`；声明 `skills` / `mcpServers` / `toolPacks` 一律拒绝。
   `page` 与 `desktopWidgets` 可并存（同一插件既能有浮窗又能有页面），每类最多 1 个；`page.entry` 必须是包内 `.html` 且出现在 `files` 里。
+  除 `homeCards`（纯数据）外，bundle 必须至少声明 `desktopWidgets` / `page` / `background` 之一——否则它就是纯声明式包，不该走 bundle。
+- `homeCards`（≤4 个，纯数据）与 `background`（1 个包内 HTML，宿主建常驻隐藏窗口）原本只给内置模块用，modules 下线后（d.138）成为界面插件的正式能力：
+  首页卡由宿主统一渲染、文案可经 `homeCardSet()` 在运行期覆盖；后台页与页面共享同一份插件 data 目录，停用/卸载/更新即回收。
 - **`packageSha256` 必填（审计 P0-1）**：它是包内 `files/**` 的确定性内容摘要（不是 tgz 自身字节的 sha256——清单在 tgz 里，写自己的 tgz 摘要会构成自引用）。
   首方签名覆盖清单（含该字段）→ 签名**间接覆盖全部代码字节**；安装端解包后重算并比对，只换包内 JS、保留官方清单+签名的「借壳包」会被拒。
   旧的无该字段的 bundle 包**不再允许新装**（已安装记录不受影响）；打包/签名脚本会自动写入/校验该字段。
@@ -377,7 +380,8 @@ package.tgz
   都进入首方签名文本——签名后改入口、删依赖、补 kb 都会验签失败。
 - **生命周期**：插件停用/卸载/更新、页面与窗口关闭时回收引擎进程；`readPackage` 与页面视图失败态都会给出中文原因。
 - 参考实现与构建：宿主侧托管在 `packages/desktop/plugin-engine.js`（校验、stdin/stdout 协议、生命周期、
-  `engineStatus/engineCall`）；仓库里暂无随包携带引擎的插件包（原「聊天记录」已并入信息中枢模块），
+  `engineStatus/engineCall`）；当前仓库里的首方 bundle 都不携带引擎——信息中枢用 `permissions.infohub` 只读桥
+  调本机归档，自动化用 `background` 页跑调度；引擎机制保留给以后确实需要独立本机进程的首方包。
   打包参考 `scripts/build-pet-widget.mjs` + `scripts/pack-plugin.mjs`（把 Python 依赖 staging 到
   `files/engine/lib` 后再 `pack-plugin`；包体上限 64MB / 4000 文件 / 单文件 16MB）。
 
@@ -584,76 +588,32 @@ node scripts/plugin-schema.mjs --check                         # 校验 plugin-k
 | v4（界面插件） | 可装（**不验签**，已知缺口） | 可装，**必须首方签名** |
 | v5 | 拒绝（schemaVersion 不认识） | 可装，按 `engines.heming` 判定 |
 
-## 12. 选装模块（页面 + 可执行能力，d.116 / d.133）
+## 12. 内置能力去哪了：modules 已下线（d.138）
 
-界面插件（bundle）是声明 + 沙箱页面；**模块**是另一类产物，由宿主从云端模块目录安装：
-清单用 `web.entry` + `web.contributions` 声明页面 / 首页卡 / 后台代码，可选携带 Python 引擎
-（`meta.entry = "app"`，由宿主用 stdio 子进程拉起）。云端目录当前提供 **自动化**
-（包 id `heming.automations` 1.0.0，携带后台循环）与 **信息中枢**（包 id `heming.infohub` 1.1.0：
-检索 / 会话 / 日程页面 + QQ / 微信归档引擎）。内置模块的包 id 统一带 `heming.` 前缀，
-源码目录名仍是 `packages/modules/<目录名>`——目录名与清单 `id` 不再相同，构建脚本用
-`--dir` / `TARGETS` 映射两者（`staff` / `workflows` 是旧模块，仍保留裸 id）。
+早期「自动化 / 信息中枢」是宿主加载式的**模块包**（`module.json` + `module.tgz` + `module-catalog/`，
+经 `/api/modules` 分发、由 web 模块运行时渲染）。d.138 起这套体系**整体下线**：两个能力改写成普通
+**沙箱 bundle 插件**，清单、签名、安装、发布与桌宠等界面插件走完全同一条链路，不再有第二种插件形态。
 
-**安装包不携带模块**：`build.extraResources` 里没有 `../infohub`，打包边界由
-`packaging.plugins.test.js` 钉住。模块由用户在插件区「从插件仓库安装」安装：下载官签名
-`module.tgz` → 验签 → 解包到 `<userData>/modules`；「信息中枢」首次启用时，引擎缺失也会
-按需补下载同一份模块包，随后自动启动，没有任何配置界面。
+- 源码：`plugin-kit/plugins/automations/`（`heming.automations` 1.0.0）与
+  `plugin-kit/plugins/infohub/`（`heming.infohub` 1.2.0），与其它插件并列。
+- 页面：`contributions.page.entry` 指向包内原生 HTML（无构建步骤、不引 React），宿主在 `widget://`
+  沙箱里加载（见 §13.4）；自动化另有 `contributions.background` 后台页，信息中枢另有 `commands`。
+- 首页卡：两者都声明 `contributions.homeCards`，由宿主首页统一渲染（运行期文案由 `homeCardSet()` 覆盖）。
+- 能力边界：信息中枢的归档检索通过 `permissions.infohub`（只读 `infohubCall`）调宿主桥，自动化靠
+  后台页定时调同一座桥；插件包本身不再自带 Python 引擎，也不需要「首次启用补下载模块包」；
+  信息中枢要读归档仍依赖选装的 Python 引擎（见本节末尾的例外说明）。
+- 发布：与其它插件相同——`node scripts/publish-plugin.mjs plugin-kit/plugins/<目录>` 发布到仓库根
+  `plugins-catalog/`，再同步到云端 `/opt/heming/plugins`（见 §9）；源码树里的 `packageSha256` /
+  `publisher` / `signature` 由打包工具回写。
 
-### 12.1 包格式（`module.tgz`）
+因此不要再新增 `module.json`、`module.tgz`、`module-catalog/`、`modules:build` 或 `web.entry` 式模块；
+需要页面 / 后台 / 首页卡就按 §10 与 §13 写 bundle 插件。`packages/modules/`、server 的 `/api/modules`、
+web 模块运行时与 `__modules__` 开发中间件都已随本轮移除，历史版本说明见 changelog。
 
-```
-module.json
-files/web/entry.js        # 宿主加载的 UI bundle（web.entry 指向；页面 / 首页卡 / 后台）
-files/app/infohub/**      # 可选 Python 引擎（meta.entry = "app"，信息中枢携带）
-files/lib/**              # 可选第三方依赖（meta.lib = "lib"，加进 PYTHONPATH）
-```
-
-清单是 **schemaVersion 4**（走 canonical-v1，与 `sign-plugin.mjs` / `plugin-signature.js`
-逐字节一致），并额外声明：
-
-```jsonc
-{
-  "distribution": "module",
-  "meta": { "kind": "module", "entry": "app", "lib": "lib" },
-  "packageSha256": "<files/** 内容摘要>"
-}
-```
-
-`packageSha256` 让首方签名间接覆盖全部代码字节；安装端（`module-package.js`）重新计算并比对，
-不一致直接拒绝。打包版**拒绝 `dev-*` 公钥**，与界面插件同一把信任锚。
-
-### 12.2 落盘与启动
-
-`<userData>/modules/<id>/<version>/files/{web,app,lib}`（`<id>` = 清单 `id`，即包 id），
-版本切换后旧版本会被清理；目录被手工删除时按「未安装」处理。包 id 统一加 `heming.` 前缀那次
-改名后，启动时会把旧 id（`infohub` / `automations`）的安装**原地迁移**：目录整目录 rename、
-`installed.json` 记录改 id，幂等；任一步失败只记日志并等价于「未安装」，不会把桌面端启动弄崩。
-桥（`infohub-bridge.js`）用内置 Python 3.12 拉起
-`python -m infohub.bridge`，`PYTHONPATH = app + lib`，**不开端口、不走网络**。
-
-### 12.3 构建与发布
-
-```bash
-# 依赖目录（.tmp-engine-lib/）需先按内置 Python 版本下载 cp312 wheel 并解包：
-#   pip download --no-deps --only-binary=:all: --python-version 312 \
-#     --platform win_amd64 --implementation cp --abi cp312 -d <tmp> <包名>
-node scripts/build-modules.mjs                  # 全部云端模块 → module-catalog/<id>/<版本>/module.tgz
-node scripts/build-modules.mjs --only infohub   # 只构建信息中枢（web UI + Python 引擎）；也可传包 id heming.infohub
-```
-
-产物在 `module-catalog/<id>/<版本>/module.tgz`（`<id>` 是**包 id**，例如
-`module-catalog/heming.infohub/1.1.0/`；源码目录名由 `--dir` 传入），以及同目录的
-`module.json`（d.137 起由构建脚本按模块清单生成）。**两个文件要一起部署**：服务端
-`moduleCatalog.list()` 只认 `<dir>/<id>/<版本>/module.json`，缺了它 `/api/modules` 会回落到
-编译进 server 的 `DEFAULT_MODULES`——云端换了新包、接口却还报发服务器那一刻的版本号。
-打包脚本会用**安装端口径**
-（`readModulePackage`：配额 / 布局 / 验签 / 摘要）回读校验并打印 keyId。
-发布时把 `module-catalog/` 随服务端一起部署（`HEMING_MODULE_DIR`，缺省 `<cwd>/module-catalog`），
-客户端从 `GET /api/modules` 取目录、从 `GET /api/modules/<id>/<version>/module.tgz` 下载；
-上传属于部署动作，需单独确认。
-
-开发态若模块未装、但仓库里有 `packages/infohub`，主进程直接退回源码目录（`electron .`
-不必每次构建模块包）；打包版没有这条退路。
+唯一保留的 module 产物是**信息中枢选装 Python 引擎**：`scripts/build-module.mjs` 仍构建
+`heming.infohub-engine`（`distribution: "module"`），首次启用时从更新源 `/updates/modules` 补下载到
+`<userData>/modules`；desktop 的 `module-{store,package,download}.js` 只服务这条链，与上面已下线的
+web 模块体系无关，也不要按它给插件加第二种形态。
 
 ## 13. 插件页面（d.124）
 
@@ -667,7 +627,7 @@ node scripts/build-modules.mjs --only infohub   # 只构建信息中枢（web UI
 | **A · 声明式页** | v5 `contributions.page.blocks` | web 组件 `PluginDeclarativePage`（宿主按受控块渲染） | 否（内容是数据，全部转义） | 安装版 + 浏览器版 |
 | **B · 自带页** | v4 bundle `contributions.page.entry` | 主进程 `WebContentsView`，嵌在主窗内容区的 `widget://<插件 id>/` 沙箱 | 是（同 widget 沙箱与 CSP，仅首方签名包） | 仅安装版（浏览器版给降级说明） |
 
-两条路径共用同一份**页面注册表**：已装且启用的模块页 + 声明式页 + 自带页被投影成导航/路由/命令面板的同一份数据，
+两条路径共用同一份**页面注册表**：声明式页 + 自带页被投影成导航/路由/命令面板的同一份数据，
 各处只读这份投影、不各自判断。
 
 ### 13.2 声明式页（v5）
@@ -717,7 +677,7 @@ node scripts/build-modules.mjs --only infohub   # 只构建信息中枢（web UI
 |---|---|
 | 路由 id | `plugin:<插件 id>`；`Page` 联合类型加模板字面量，`normalizePage` 放行 `plugin:` 前缀 |
 | 有效性 | 由路由守卫判：未装/停用/记录损坏 → 入口不出现，直开路由 `fallbackPage` 回主页；浏览器版里 bundle 页不可用（入口不出现；宿主缺页面视图能力时显示降级说明）；**不写进 `navOrder`** |
-| 导航顺序 | 8 个宿主页 → 模块页（注册表顺序）→ 声明式插件页（首次安装时间升序）→ bundle 插件页（同序）；同刻按 pluginId 字典序 |
+| 导航顺序 | 8 个宿主页 → 声明式插件页（首次安装时间升序）→ bundle 插件页（同序）；同刻按 pluginId 字典序 |
 | 稳定性 | 插件升级不改位置（沿用首次 `installedAt`）；卸载后重装排到末尾 |
 | 分组 / 快捷键 | 归「能力」组；**不分配快捷键**（数字键仍只绑 8 个宿主页） |
 | 命令面板 | **不新增**「插件页面」跳转组（v1 明确不做，避免双入口漂移） |
@@ -769,7 +729,7 @@ node scripts/build-modules.mjs --only infohub   # 只构建信息中枢（web UI
 5. 隐私：页面不上传任何数据；声明式页展示的是本机清单数据；自带页的数据读写仍只到
    `<userData>/plugins/<id>/data/`（单文件 ≤1MB 配额）。
 
-**本轮明确不做**：插件修改宿主现有界面（注入 DOM、改导航顺序/分组/快捷键、给宿主页加卡片）；每插件多页面或页内 Tab/子路由；
+**本轮明确不做**：插件修改宿主现有界面（注入 DOM、改导航顺序/分组/快捷键、在宿主页里注入自定义卡片——首页卡只能走独立的 `contributions.homeCards`，见 §10）；每插件多页面或页内 Tab/子路由；
 命令面板的「插件页面」跳转组；第三方 bundle 页面的信任链（另立规格）；页面内嵌外部网页/iframe/视频/下载；
 声明式页的数据绑定或远程请求；浏览器版渲染自带页（只给不可用/降级说明）。
 

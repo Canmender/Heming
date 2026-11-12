@@ -124,7 +124,7 @@
 ### 2.3 限制与严格度分层
 
 - 数量上限（唯一来源 `PLUGIN_LIMITS`）：技能 50、MCP 服务 10、命令 30、工具束 10（每束工具 50）、网络主机 20、
-  文件根 5、桌面小组件 1、缩放档 6、设置字段 20、分类标签 8、关键词 20、截图 4。
+  文件根 5、桌面小组件 1、首页卡 4、后台页 1、缩放档 6、设置字段 20、分类标签 8、关键词 20、截图 4。
 - 页面（§3.7）：每插件 1 个；`title` ≤40 字、`summary` ≤200 字、`blocks` ≤12 个
   （markdown 正文 ≤4000 字；指标 ≤8 项；表格 ≤6 列 × ≤50 行、单元格 ≤120 字；列表 ≤20 项；动作 ≤6 项）。
 - 同一清单内：技能名 / 服务 key / 命令 id / 工具束 id **必须唯一**；工具名**不得跨束重复**（重复会点名两处）。
@@ -152,7 +152,9 @@
   },
   contributions: {
     skills, mcpServers, commands, toolPacks, desktopWidgets,
-    page?,   // 只有声明了页面才有：{ kind: "blocks" | "entry", title, icon, summary, … }（§3.7）
+    page?,        // 只有声明了页面才有：{ kind: "blocks" | "entry", title, icon, summary, … }（§3.7）
+    homeCards?,   // ≤4，纯数据，由宿主渲染（§3.7；d.138 起 bundle 也可声明）
+    background?,  // 1 个包内 HTML，宿主建常驻隐藏窗口（§3.7；仅 bundle）
   },
   publisher?, signature?, packageSha256?,
 }
@@ -164,18 +166,22 @@
 
 ### 3.1 准入矩阵（来源 × 贡献点，唯一事实来源 `shared/src/plugin/unit.ts`）
 
-| 贡献点 | 系统 | 内置模块 | 声明式插件 | 界面插件 |
-|---|---|---|---|---|
-| `skills` | ✅ | ✅ | ✅ | ❌ |
-| `mcpServers` | ✅ | ✅ | ✅ | ❌ |
-| `commands` | ✅ | ✅ | ✅ | ✅（target 受限） |
-| `toolPacks` | ❌ | ❌ | ✅ | ❌ |
-| `desktopWidgets` | ❌ | ❌ | ❌ | ✅（首方） |
-| `page`（插件页面，每插件 1 个） | ❌ | ✅（模块页，非插件声明） | ✅（声明式 `blocks`） | ✅（`entry` 自带页，仅首方） |
-| `hook`（生命周期订阅） | ❌ | ❌ | ❌ | ✅ |
-| `homeCard` / `settingsCard` / `backgroundJob` | ❌ | ✅ | ❌ | ❌ |
+| 贡献点 | 系统 | 声明式插件 | 界面插件（bundle） |
+|---|---|---|---|
+| `skills` | ✅ | ✅ | ❌ |
+| `mcpServers` | ✅ | ✅ | ❌ |
+| `commands` | ✅ | ✅ | ✅（target 受限） |
+| `toolPacks` | ❌ | ✅ | ❌ |
+| `desktopWidgets` | ❌ | ❌ | ✅（首方，每插件 1 个） |
+| `page`（插件页面，每插件 1 个） | ❌ | ✅（声明式 `blocks`） | ✅（`entry` 自带页，仅首方） |
+| `homeCards`（首页卡，≤4，纯数据） | ✅ | ❌ | ✅（d.138 起） |
+| `background`（后台页，1 个包内 HTML） | ❌ | ❌ | ✅（d.138 起，仅首方） |
+| `hook`（生命周期订阅） | ❌ | ❌ | ✅ |
 
 声明超出准入的贡献点 → **解析期直接拒绝**并给中文原因（不是静默不生效）。
+
+> d.138 起 modules 体系下线，原先只给内置模块用的 `homeCards` / `background` 成为界面插件的正式贡献点；
+> 代码侧准入表（`shared/src/plugin/unit.ts`）随本轮改造同步。
 
 > 术语说明：`hook` 目前唯一的落地形态是界面插件的 `permissions.events: ["lifecycle"]`（§5.5），
 > 清单里**没有**独立的 `hook` 字段——不要去找它。
@@ -249,13 +255,13 @@
 | `settings` | 否 | `{ title, fields[≤20] }`；字段类型 boolean/select/text/number/agent，`options` ≤20 |
 
 bundle 额外约束：
-- `distribution: "bundle"` 时**只允许** `commands` + `desktopWidgets` + `page`（声明 `skills`/`mcpServers`/`toolPacks` 一律拒绝）。
+- `distribution: "bundle"` 时**只允许** `commands` + `desktopWidgets` + `page` + `homeCards` + `background`（声明 `skills`/`mcpServers`/`toolPacks` 一律拒绝），且必须至少声明 `desktopWidgets` / `page` / `background` 之一（`homeCards` 是纯数据，不算 bundle 理由）。
 - 必须提供 `packageSha256`：`files/**` 的**确定性内容摘要**（不是 tgz 自身哈希，避免自引用）。
   算法：按路径排序后对每条 `pathNULlenNULsha256(content)` 再取 sha256。签名的清单因此**间接覆盖全部代码字节**。
 
 ### 3.7 `page`（插件页面，每插件 1 个）
 
-装好插件 → 左侧导航**末位**（模块页之后）多一个入口 → 点进去是该插件自己的页面。
+装好插件 → 左侧导航**末位**（其它插件页面之后）多一个入口 → 点进去是该插件自己的页面。
 `page` 是**对象不是数组**：每插件最多 1 个，页内没有 Tab/子路由。两种形态由 `distribution` 决定且**互斥**。
 
 **A · 声明式页（v5，`distribution: "manifest"`）**：内容写在清单里，宿主渲染受控块，**永不执行代码**。
@@ -311,16 +317,16 @@ bundle 额外约束：
 
 - 写 `page` 的包应把 `engines.heming` 提到 `d.124`：`contributions` 是 strict 对象，旧版宿主不认识 `page`，含该字段的清单在旧版会被拒绝安装；**不带 `page` 的旧包不受影响**。
 - 仅声明式可写 `blocks`，仅 bundle 可写 `entry`；混写直接拒绝（声明式写 `entry` →「改用 blocks 或 `distribution: "bundle"`」；bundle 写 `blocks` → 拒绝）。
-- bundle 允许的贡献 = `commands` + `desktopWidgets` + `page` + `engine`；仍**不允许** `skills` / `mcpServers` / `toolPacks`。
-  `page` 与 `desktopWidgets` 可并存（同一插件既能有浮窗又能有页面），每类最多 1 个。
+- bundle 允许的贡献 = `commands` + `desktopWidgets` + `page` + `homeCards` + `background` + `engine`；仍**不允许** `skills` / `mcpServers` / `toolPacks`。
+  `page` 与 `desktopWidgets` 可并存（同一插件既能有浮窗又能有页面），每类最多 1 个；且必须至少声明 `desktopWidgets` / `page` / `background` 之一（`homeCards` 是纯数据，不算 bundle 理由）。
 - 包内页面的代码由 `packageSha256` + 首方签名间接覆盖（§8.3）；声明式页零代码。
 - **签名覆盖页面元数据**：`page` 进入首方签名文本（canonical-v1/v2 的 `contributions.page`，含
   `title/icon/summary/entry` 与声明式 `blocks`）——签名后改页面标题/入口/摘要/块内容，验签必失败。
   只在声明 `page` 时才进文本，没有页面的旧包 canonical 字节与历史签名逐字不变。
 - 页面**不新增权限**：`permissions` 不变；bundle 页面仍按清单生成 CSP（`connect-src` 跟随 `permissions.network`），
   能调到的宿主能力 = 既有 `__heming_widget` 白名单桥，没有新增 secrets / files / MCP / 会话桥。
-- 页面**只能拥有自己**：不能改宿主现有页面/布局/导航顺序、不能注入宿主 DOM、不能给宿主页加卡片（首页卡/设置卡仍不做）。
-- 导航口径：宿主 8 页 → 模块页 → 声明式插件页 → bundle 插件页（按首次安装时间升序，插件升级不改位置）；
+- 页面**只能拥有自己**：不能改宿主现有页面/布局/导航顺序、不能注入宿主 DOM；首页卡只能通过 `contributions.homeCards` 声明（≤4、纯数据、由宿主渲染，d.138 起），设置卡仍不做。
+- 导航口径：宿主 8 页 → 声明式插件页 → bundle 插件页（按首次安装时间升序，插件升级不改位置）；
   不分配快捷键，命令面板不新增「插件页面」跳转组。
 - 浏览器版（无桌面桥）**只渲染声明式页**；bundle 页在浏览器里不可用（导航不出现入口；宿主缺少页面视图能力时给「只在安装版可用」的降级说明，不渲染空壳）。
 

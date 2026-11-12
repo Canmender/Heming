@@ -112,7 +112,7 @@ describe("App 认证门禁", () => {
     render(<App />);
 
     // 导航 A 方案：壳以图标轨呈现（原「已登录」状态页脚已随展开文字栏移除，改查导航按钮）
-    expect(await screen.findByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "主页" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     expect(screen.getAllByText("主页").length).toBeGreaterThan(0); // 浮签名称文本
     expect(screen.getByRole("navigation", { name: "主导航" }).textContent).not.toMatch(
@@ -345,7 +345,7 @@ describe("App 记忆区接线", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "记忆区" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "记忆" })).toBeInTheDocument();
     for (const label of ["智能体", "数据库", "个人知识库"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
     }
@@ -370,7 +370,7 @@ describe("App 导航快捷键与隐藏态", () => {
     setToken("t1");
     mockFetch();
     render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
 
     fireEvent.keyDown(window, { key: "2", altKey: true });
     expect(useUiStore.getState().page).toBe("team");
@@ -404,14 +404,14 @@ describe("App 导航快捷键与隐藏态", () => {
     // 导航轨常驻：Ctrl+\ 不再折叠导航，主导航始终在
     fireEvent.keyDown(window, { key: "\\", ctrlKey: true });
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "主页 Alt1" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "主页" })).toBeInTheDocument();
   });
 
   it("焦点在输入框 / 未登录时，Alt+数字 不切页", async () => {
     setToken("t1");
     mockFetch();
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
 
     // 焦点在文本输入（右栏上传按钮无 input，用导航区外的窗口内 input 模拟）
     const probe = document.createElement("input");
@@ -456,7 +456,7 @@ describe("App 导航快捷键与隐藏态", () => {
     });
     vi.mocked(fetchFileBlobText).mockResolvedValue("# 内容\n正文");
     render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
 
     fireEvent.click(await screen.findByLabelText("预览 需求草案.md"));
     await screen.findByLabelText("关闭预览");
@@ -479,7 +479,7 @@ describe("App 导航快捷键与隐藏态", () => {
     setToken("t1");
     mockFetch();
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
 
     const probe = document.createElement("input");
     container.appendChild(probe);
@@ -519,7 +519,7 @@ describe("App 导航快捷键与隐藏态", () => {
     });
 
     // 焦点不在输入框（在结果按钮上）：Esc 由面板容器接住
-    const result = await within(dialog).findByRole("option", { name: "选择 张三" });
+    const result = await within(dialog).findByRole("option", { name: "张三" });
     result.focus();
     fireEvent.keyDown(result, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "命令面板" })).not.toBeInTheDocument();
@@ -543,14 +543,14 @@ describe("App 导航快捷键与隐藏态", () => {
     });
     // 成员最多展示 8 条 → 12 − 8 = 4
     expect(await within(dialog).findByText("还有 4 条")).toBeInTheDocument();
-    expect(within(dialog).getAllByRole("option", { name: /^选择 候选/ })).toHaveLength(8);
+    expect(within(dialog).getAllByRole("option", { name: /^候选/ })).toHaveLength(8);
   });
 
   it("进入会话后左侧导航仍常驻（不再收起、不再有呼出条）", async () => {
     setToken("t1");
     mockFetch();
     render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
 
     // jsdom 未实现 scrollIntoView（ChatPage 滚到底部用），进入会话前补个空实现
     Element.prototype.scrollIntoView = vi.fn();
@@ -584,7 +584,7 @@ describe("App 桌面窗口标题栏", () => {
     (window as unknown as { heming: unknown }).heming = { platform: "win32" };
 
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
 
     expect(container.querySelector(".desktop-titlebar")).not.toBeNull();
   });
@@ -603,7 +603,7 @@ describe("App 桌面窗口标题栏", () => {
     mockFetch();
 
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
 
     expect(container.querySelector(".desktop-titlebar")).toBeNull();
   });
@@ -621,7 +621,7 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽（仅智能体页�
 
   it("目录栏头部有「绑定」与「上传」两个入口", async () => {
     render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
     expect(screen.getByRole("button", { name: "绑定本地文件到会话" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "上传" })).toBeInTheDocument();
   });
@@ -629,14 +629,14 @@ describe("右侧工作目录栏：绑定按钮与拖动调宽（仅智能体页�
   it("没有打开会话时点绑定给出提示（不静默失败）", async () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
     fireEvent.click(screen.getByRole("button", { name: "绑定本地文件到会话" }));
     expect(alertSpy).toHaveBeenCalledWith("先打开一个会话，再绑定文件");
   });
 
   it("拖动手柄可改变目录栏宽度并落盘", async () => {
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
     const handle = screen.getByRole("separator", { name: "调整目录栏宽度" });
     const aside = container.querySelector('aside[aria-label="共享文件"]') as HTMLElement;
 
@@ -761,7 +761,7 @@ describe("App 窄窗响应式：共享文件改抽屉", () => {
   it("窄窗切到宽页面（settings）时主内容列仍是 min-w-0/overflow-hidden，且不再有共享文件入口", async () => {
     useUiStore.setState({ page: "settings" });
     const { container } = render(<App />);
-    await screen.findByRole("button", { name: "主页 Alt1" });
+    await screen.findByRole("button", { name: "主页" });
     // d.76：文件管理只在智能体页，其它页连入口都不出现
     expect(screen.queryByRole("button", { name: "打开共享文件" })).not.toBeInTheDocument();
 

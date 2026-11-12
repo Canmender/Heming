@@ -8,7 +8,6 @@ import {
   type UnitSource,
   type UnitStatus,
 } from "@heming/shared";
-import { BUILTIN_MODULES, type BuiltinModule, type ModuleId } from "../modules/registry.js";
 import { contentFingerprint } from "../plugins/integrity.js";
 import { pluginIdFromServerId } from "../plugins/permissions.js";
 import type { InstalledPlugin } from "../plugins/store.js";
@@ -18,15 +17,17 @@ import type { WidgetRecord } from "../../types/widgets.js";
 /**
  * 能力单元只读投影（d.105 · 阶段 A）。
  *
- * 把四套并行机制拍成同一张 `CapabilityUnit` 表：
+ * 把三套并行机制拍成同一张 `CapabilityUnit` 表：
  * - `system`：`lib/plugins/system.ts` 的 `describeSystemPlugin()` 结果（`heming.core`）；
- * - `builtin`：`lib/modules/registry.ts` 的四个内置模块 + `heming.modules.v1` 开关；
  * - `package`：`pluginStore.list()`（声明式插件，v1–v4/v5 归一化后的 web 形状）；
  * - `bundle`：`lib/widgets/store.ts` 的已装界面插件（桌面端才有）。
  *
- * ★ 本文件**不 import 任何 store 单例**（`pluginStore` / `useModuleStore` / widgets store）：
- *   默认数据源由 `lib/units/registry.ts` 注入，避免 `modules/store → projection → plugins/store
- *   → 系统能力 → capability providers → infohub tools → modules/store` 这类环。
+ * 模块运行时（`lib/modules/*`）已整体下线：内置模块的能力改由沙箱 bundle 插件
+ * （`plugin-kit/plugins/*`）提供，数据源只剩插件两套。
+ *
+ * ★ 本文件**不 import 任何 store 单例**（`pluginStore` / widgets store）：
+ *   默认数据源由 `lib/units/registry.ts` 注入，避免 `projection → plugins/store
+ *   → 系统能力 → capability providers → infohub tools` 这类环。
  *   因此本文件是纯函数，测试直接传夹具。
  *
  * ★ 投影不复制具体条目内容：技能正文/服务地址仍由各自 store 持有，这里只给
@@ -37,16 +38,6 @@ import type { WidgetRecord } from "../../types/widgets.js";
 export interface UnitProjectionSources {
   /** 系统能力视图（`describeSystemPlugin()` 的结果）；缺省不产出系统单元。 */
   system?: SystemPlugin | null;
-  /** 内置模块注册表（默认 `BUILTIN_MODULES`，测试可传子集）。 */
-  modules?: readonly BuiltinModule[];
-  /** 模块开关（`heming.modules.v1` 的 enabled，缺省视为开）。 */
-  moduleEnabled?: Partial<Record<ModuleId, boolean>>;
-  /**
-   * 模块安装状态（`heming.modules.v1` 的 installed）。
-   * 缺省（整个来源不传）视为「已安装」——纯投影调用不关心安装态；
-   * 一旦传入，缺项的模块按**未安装**处理（安装包默认不携带任何插件）。
-   */
-  moduleInstalled?: Partial<Record<ModuleId, boolean>>;
   /** 已装声明式插件（`pluginStore.list()`）。 */
   plugins?: readonly InstalledPlugin[];
   /** 已装界面插件（`useWidgetsStore().records`）。 */
@@ -63,24 +54,6 @@ export function currentAppVersion(): string {
     /* 非 vite 注入环境（个别单测/脚本）：走回落 */
   }
   return "d.0";
-}
-
-/** 模块开关缺省值：与 `modules/store.ts` 的「装了就是开着」一致（缺项视为开）。 */
-function moduleOn(
-  enabled: Partial<Record<ModuleId, boolean>> | undefined,
-  id: ModuleId,
-): boolean {
-  if (!enabled) return true;
-  return enabled[id] !== false;
-}
-
-/** 模块安装状态：未传来源视为已安装；传了则缺项按未安装处理。 */
-function moduleInstalled(
-  installed: Partial<Record<ModuleId, boolean>> | undefined,
-  id: ModuleId,
-): boolean {
-  if (!installed) return true;
-  return installed[id] === true;
 }
 
 function contribution(
@@ -107,45 +80,6 @@ export function projectSystemUnit(system: SystemPlugin): CapabilityUnit {
       contribution("mcpServers", servers.length, true),
     ],
   };
-}
-
-/**
- * 内置模块单元：`page` / `homeCard` / `backgroundJob` 是它们真实贡献的运行时能力，
- * `requires` 直接映射模块依赖（当前三个模块互不依赖）。开关来自 `heming.modules.v1`。
- *
- * 未安装的模块**照样投影出来**（插件页要把它列为可安装项），但 `installed=false`
- * 且 `enabled=false`——`resolveUnit` 会以 `notInstalled` 短路，不生效。
- */
-export function projectBuiltinUnits(
-  enabled: Partial<Record<ModuleId, boolean>> = {},
-  modules: readonly BuiltinModule[] = BUILTIN_MODULES,
-  installed?: Partial<Record<ModuleId, boolean>>,
-): CapabilityUnit[] {
-  return modules.map((mod) => {
-    const isInstalled = moduleInstalled(installed, mod.id);
-    const on = isInstalled && moduleOn(enabled, mod.id);
-    const contributions = [
-      contribution("page", mod.contributions.page ? 1 : 0, on),
-      contribution("homeCard", mod.contributions.homeCard ? 1 : 0, on),
-      contribution(
-        "backgroundJob",
-        mod.contributions.backgroundLoop ? 1 : 0,
-        on,
-      ),
-    ].filter((item) => item.count > 0);
-    return {
-      source: "builtin" as UnitSource,
-      id: mod.id,
-      name: mod.name,
-      version: mod.version,
-      description: mod.description,
-      enabled: on,
-      installed: isInstalled,
-      requires: mod.requires ? [...mod.requires] : undefined,
-      contributions,
-      storageKeys: mod.storageKeys.length > 0 ? [...mod.storageKeys] : undefined,
-    };
-  });
 }
 
 /* ─────────────────── 声明式插件：engines / 信任 / 指纹 ─────────────────── */
@@ -325,7 +259,7 @@ export function projectBundleUnits(
 }
 
 /**
- * 四类来源 → 单元列表（稳定顺序：系统 → 内置模块 → 声明式插件 → 界面插件）。
+ * 三类来源 → 单元列表（稳定顺序：系统 → 声明式插件 → 界面插件）。
  *
  * 这就是插件页「已安装」区、诊断区与后续导航/命令面板的统一读模型；
  * 不含任何写入，也不改变各 store 的语义。
@@ -333,13 +267,6 @@ export function projectBundleUnits(
 export function projectUnits(sources: UnitProjectionSources = {}): CapabilityUnit[] {
   const units: CapabilityUnit[] = [];
   if (sources.system) units.push(projectSystemUnit(sources.system));
-  units.push(
-    ...projectBuiltinUnits(
-      sources.moduleEnabled ?? {},
-      sources.modules ?? BUILTIN_MODULES,
-      sources.moduleInstalled,
-    ),
-  );
   const appVersion = sources.appVersion ?? currentAppVersion();
   if (sources.plugins && sources.plugins.length > 0) {
     units.push(...projectPackageUnits(sources.plugins, appVersion));

@@ -61,37 +61,11 @@ test("界面插件（desktopWidget bundle）同样不随安装包分发（d.98�
   }
 });
 
-test("选装模块（信息中枢引擎）不随安装包分发（d.116）", () => {
-  // 模块功能是选装的：安装包只带共享运行时，引擎由用户在插件页安装后从更新源下载。
-  // 旧口径把 packages/infohub 塞进 extraResources——那样「不携带内置模块」就是一句空话。
+test("modules 体系已下线：安装包不携带 web 模块运行时、实现目录与发布产物", () => {
+  // 自动化/信息中枢已是沙箱 bundle 插件（plugin-kit/plugins，页面走 widget:// + 插件安装链路），
+  // web 模块运行时（app:// 的 /modules/... 路由、modules:* IPC、module-installer）已整条删除。
+  // 这里把「不回头」钉在配置层：谁把模块实现目录或旧安装器塞回打包清单，测试立刻红。
   for (const source of packagedSources()) {
-    assert.ok(
-      !/(^|[\\/])infohub([\\/]|$)/.test(source),
-      `安装包不应携带模块引擎目录：${source}`,
-    );
-    // 构建产物目录也不该被打进安装包（它们是发布到更新源的独立文件）
-    assert.ok(
-      !/(^|[\\/])module-catalog([\\/]|$)/.test(source),
-      `安装包不应携带模块发布目录：${source}`,
-    );
-  }
-  // 安装链路本身必须在本体里：缺了就是「点了安装也不会动」。
-  const files = Array.isArray(build.files) ? build.files : [];
-  for (const required of [
-    "infohub-bridge.js",
-    "infohub-engine.js",
-    "module-package.js",
-    "module-store.js",
-    "module-download.js",
-  ]) {
-    assert.ok(files.includes(required), `安装包应包含选装模块安装链路：${required}`);
-  }
-});
-
-test("宿主加载式模块（d.131）不随安装包分发：模块目录/产物只能进插件目录", () => {
-  for (const source of packagedSources()) {
-    // 注意：module-store.js / module-package.js 是宿主运行时，必须保留；
-    // 这里禁的是「模块实现目录」「构建产物目录」，不是模块运行时文件。
     assert.ok(
       !/(^|[\\/])packages[\\/]modules([\\/]|$)/.test(source),
       `安装包不应携带模块实现目录：${source}`,
@@ -100,10 +74,31 @@ test("宿主加载式模块（d.131）不随安装包分发：模块目录/产�
       !/(^|[\\/])module-catalog([\\/]|$)/.test(source),
       `安装包不应携带模块发布目录：${source}`,
     );
+    assert.ok(
+      !/(^|[\\/])module-installer\.js$/.test(source),
+      `安装包不应携带已删除的 web 模块安装器：${source}`,
+    );
   }
+});
+
+test("信息中枢引擎装机链必须随安装包分发（选装 Python 引擎，permissions.infohub 依赖）", () => {
+  // 引擎包本身不随安装包分发（d.116：首次启用时从更新源补下载）；但下载/验签/解包/定位
+  // 这条装机链必须在本体里 —— 缺了安装版就装不上引擎，沙箱插件的 permissions.infohub 直接失效。
+  // 该链路与已下线的 web 模块体系无关，是「选装 Python 引擎」的装机机制，别误删。
   const files = Array.isArray(build.files) ? build.files : [];
-  // 安装链路本身必须在：缺了就是「装完模块加载不出来」。
-  for (const required of ["module-store.js", "module-package.js", "app-protocol.js"]) {
-    assert.ok(files.includes(required), `安装包应包含模块运行时 ${required}`);
+  for (const required of [
+    "infohub-bridge.js",
+    "infohub-engine.js",
+    "module-package.js",
+    "module-store.js",
+    "module-download.js",
+  ]) {
+    assert.ok(files.includes(required), `安装包应包含引擎装机链：${required}`);
+  }
+  for (const source of packagedSources()) {
+    assert.ok(
+      !/(^|[\\/])infohub([\\/]|$)/.test(source),
+      `安装包不应携带引擎源码目录：${source}`,
+    );
   }
 });

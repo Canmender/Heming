@@ -448,3 +448,138 @@ describe("parsePluginManifestV5 · 插件页面", () => {
     ).toThrow();
   });
 });
+
+/* ───────────────────── d.125 首页卡片与后台页 ───────────────────── */
+
+const HOME_CARD = {
+  id: "archive",
+  title: "信息中枢",
+  summary: "本机 QQ / 微信聊天记录与日程",
+  icon: "grid",
+  page: "plugin:heming.info-hub",
+  primary: "还没有归档数据",
+};
+
+describe("parsePluginManifestV5 · 首页卡片与后台页", () => {
+  it("首页卡片归一化：summary / primary / icon 可省略并补空串", () => {
+    // 为什么允许省略：清单里的 primary 只是「还没数据」时的初始文案，运行期由 homeCardSet 覆盖，
+    // 作者不写也要能装上；summary 同理只是副标题。
+    const parsed = parsePluginManifestV5(
+      bundleManifest({
+        homeCards: [{ id: "archive", title: "信息中枢", page: "plugin:heming.info-hub" }],
+      }),
+    );
+    expect(parsed.manifest.contributions.homeCards).toEqual([
+      { id: "archive", title: "信息中枢", summary: "", page: "plugin:heming.info-hub", primary: "" },
+    ]);
+  });
+
+  it("首页卡片最多 4 张（首页空间有限，超出直接拒绝而不是静默截断）", () => {
+    const cards = Array.from({ length: 5 }, (_, index) => ({
+      id: `card-${index}`,
+      title: `卡 ${index}`,
+      page: "plugin:heming.info-hub",
+    }));
+    expect(() => parsePluginManifestV5(bundleManifest({ homeCards: cards }))).toThrow(/首页卡片最多 4 张/);
+  });
+
+  it("首页卡片 id 插件内唯一（渲染与 homeCardSet 都按 id 定位）", () => {
+    const parsed = parsePluginManifestV5(bundleManifest({ homeCards: [HOME_CARD] }));
+    expect(parsed.manifest.contributions.homeCards[0].id).toBe("archive");
+    expect(() =>
+      parsePluginManifestV5(bundleManifest({ homeCards: [HOME_CARD, { ...HOME_CARD, title: "另一张" }] })),
+    ).toThrow(/首页卡片 id\s*重复/);
+  });
+
+  it("首页卡片 id / page / icon 形状校验", () => {
+    const withCard = (patch: Record<string, unknown>) =>
+      bundleManifest({ homeCards: [{ ...HOME_CARD, ...patch }] });
+    expect(() => parsePluginManifestV5(withCard({ id: "Bad Id" }))).toThrow(/首页卡片 id/);
+    expect(() => parsePluginManifestV5(withCard({ page: "https://evil.example" }))).toThrow(/首页卡片 page/);
+    expect(() => parsePluginManifestV5(withCard({ icon: "Grid" }))).toThrow(/首页卡片图标/);
+    // 宿主内置页（非 plugin: 前缀）也允许：迁移期信息中枢页面可能还是内置 page id。
+    expect(() =>
+      parsePluginManifestV5(withCard({ page: "infohub", icon: undefined })),
+    ).not.toThrow();
+  });
+
+  it("background 只能出现在 bundle 清单（后台页要加载包内 HTML）", () => {
+    expect(() =>
+      parsePluginManifestV5(baseManifest({ contributions: { background: { entry: "background.html" } } })),
+    ).toThrow(/必须写 distribution/);
+    expect(() => parsePluginManifestV5(bundleManifest({ background: { entry: "/abs.html" } }))).toThrow(
+      /页面入口/,
+    );
+  });
+
+  it("bundle 只声明首页卡片仍不合格（首页卡片是纯数据，不算包内入口）", () => {
+    // 为什么：bundle 的判定标准是「有没有包内可加载的东西」。首页卡片只是数据，
+    // 没有 page / desktopWidgets / background 时宿主没东西可加载，必须拒绝以免装出空外壳。
+    expect(() =>
+      parsePluginManifestV5({
+        schemaVersion: 5,
+        id: "acme.home-only",
+        name: "只有卡片",
+        version: "1.0.0",
+        engines: { heming: "d.125" },
+        distribution: "bundle",
+        packageSha256: "c".repeat(64),
+        permissions: { network: [], tools: "none" },
+        contributions: { homeCards: [HOME_CARD] },
+      }),
+    ).toThrow(/desktopWidgets \/ contributions\.page \/ contributions\.background/);
+  });
+
+  it("bundle + background 合法，且可与 page / 首页卡片共存", () => {
+    const parsed = parsePluginManifestV5(
+      bundleManifest({
+        background: { entry: "background.html" },
+        homeCards: [HOME_CARD],
+      }),
+    );
+    expect(parsed.manifest.distribution).toBe("bundle");
+    expect(parsed.manifest.contributions.background).toEqual({ entry: "background.html" });
+    expect(parsed.manifest.contributions.homeCards).toHaveLength(1);
+  });
+
+  it("permissions.infohub / notify：布尔校验，缺省归一为 false", () => {
+    const parsed = parsePluginManifestV5(
+      baseManifest({ permissions: { network: [], tools: "read", infohub: true, notify: true } }),
+    );
+    expect(parsed.manifest.permissions.infohub).toBe(true);
+    expect(parsed.manifest.permissions.notify).toBe(true);
+    // 归一化必须补齐 false：web 侧签名/指纹按归一化清单算，缺字段会让同一清单算出两种文本。
+    const defaults = parsePluginManifestV5(baseManifest());
+    expect(defaults.manifest.permissions.infohub).toBe(false);
+    expect(defaults.manifest.permissions.notify).toBe(false);
+    expect(() =>
+      parsePluginManifestV5(baseManifest({ permissions: { network: [], tools: "read", infohub: "yes" } })),
+    ).toThrow();
+  });
+
+  it("toV5View 保留首页卡片 / 后台页 / 新权限域（旧格式升级不丢新字段）", () => {
+    const view = toV5View({
+      schemaVersion: 4,
+      id: "heming.info-hub",
+      name: "信息中枢",
+      version: "1.0.0",
+      description: "",
+      author: "",
+      distribution: "bundle",
+      permissions: { network: [], tools: "none", files: [], infohub: true },
+      contributions: {
+        skills: [],
+        mcpServers: [],
+        commands: [],
+        toolPacks: [],
+        desktopWidgets: [],
+        homeCards: [HOME_CARD],
+        background: { entry: "background.html" },
+      },
+    });
+    expect(view.contributions.homeCards?.[0].id).toBe("archive");
+    expect(view.contributions.background?.entry).toBe("background.html");
+    expect(view.permissions.infohub).toBe(true);
+    expect(view.permissions.notify).toBe(false);
+  });
+});
