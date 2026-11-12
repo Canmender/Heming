@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -328,9 +329,33 @@ def execute_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     allowed_names = set(task.tools_allowed) if task.tools_allowed else known
     for call in calls:
         name = str(call.get("name") or "")
-        arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+        raw_arguments = call.get("arguments")
+        bad_arguments: str | None = None
+        if isinstance(raw_arguments, dict):
+            arguments = raw_arguments
+        elif isinstance(raw_arguments, str) and raw_arguments.strip():
+            # 有的客户端/供应商把 arguments 原样给成 JSON 字符串（OpenAI 的线上格式就是这样）。
+            # 以前这里直接当空 dict，模型明明写了参数却收到「$ 是必填字段」，很难查。
+            try:
+                parsed = json.loads(raw_arguments)
+            except json.JSONDecodeError as exc:
+                parsed = None
+                bad_arguments = f"工具参数不是合法 JSON：{exc}"
+            arguments = parsed if isinstance(parsed, dict) else {}
+            if parsed is not None and not isinstance(parsed, dict):
+                bad_arguments = f"工具参数必须是 JSON 对象，收到的是 {type(parsed).__name__}"
+        else:
+            arguments = {}
+        # 任务的 cwd 要真的落到命令执行上：模型在提示里看到「工作目录：D:/proj」，
+        # 但 run_command 以前总在服务进程自己的目录里跑，写出来的文件落在错的地方。
+        if name == "run_command" and "cwd" not in arguments:
+            task_cwd = str(task.cwd or "").strip()
+            if task_cwd and task_cwd != ".":
+                arguments = {**arguments, "cwd": task_cwd}
         call_id = str(call.get("id") or f"call_{hashlib.sha1((name + str(arguments)).encode()).hexdigest()[:8]}")
-        if name not in known:
+        if bad_arguments:
+            observation = Observation(call_id=call_id, tool=name, ok=False, error=f"工具没有执行：{bad_arguments}")
+        elif name not in known:
             observation = Observation(call_id=call_id, tool=name, ok=False, error=f"未注册的工具：{name}")
         elif name not in allowed_names:
             observation = Observation(

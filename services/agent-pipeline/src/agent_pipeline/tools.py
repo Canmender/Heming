@@ -450,6 +450,9 @@ def build_default_registry(*, allow_commands: bool = False, memory: Any = None) 
             "properties": {
                 "command": {"type": "string"},
                 "timeout_s": {"type": "number"},
+                # 目录：不填时由执行节点用 TaskSpec.cwd 兜底（以前模型被告知「工作目录：D:/proj」，
+                # 命令却在服务进程自己的目录里跑，写文件就会落在错地方）。
+                "cwd": {"type": "string"},
             },
             "required": ["command"],
             "additionalProperties": False,
@@ -459,7 +462,8 @@ def build_default_registry(*, allow_commands: bool = False, memory: Any = None) 
     def run_command(args: dict[str, Any]) -> Any:
         if not allow_commands:
             raise ToolError("run_command 未启用（服务端需显式开启）")
-        return run_shell(str(args["command"]), timeout_s=float(args.get("timeout_s", 60)))
+        cwd = str(args.get("cwd") or "").strip() or None
+        return run_shell(str(args["command"]), cwd=cwd, timeout_s=float(args.get("timeout_s", 60)))
 
     if memory is not None:
         # RAG：让模型能主动翻知识库（而不是只能靠 plan 阶段被动注入的记忆）。
