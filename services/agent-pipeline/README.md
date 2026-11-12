@@ -206,6 +206,10 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 `tests/test_packaging.py` 会把交付物和代码对一遍：Dockerfile/compose 里出现的每个 `AGENT_*` 变量都必须真的被代码读取（只认「读环境变量」的行，注释不算）、`HEALTHCHECK` 的 `/health` 路由必须存在、compose 引用的 `prometheus/*.yml` 必须存在、告警表达式里的每个 `pipeline_*` 指标都必须真的会被导出、`pyproject` 的 `agent-pipeline` 入口必须就是 Dockerfile 的 `CMD`。它挡的是「文件写了但代码不读」——这条真踩过：`config.py` 读 `AGENT_PIPELINE_LOG`、容器里设的却是 `AGENT_LOG_PATH`，日志于是写到 `/app/runs.jsonl`，重建容器就丢调优输入。
 
+## 部署冒烟（本机没有 docker 时的替代证据）
+
+`tests/test_e2e_serve.py` 真的用子进程起服务（`python -m agent_pipeline.runner serve`，与 Dockerfile 的 `CMD` 同一条路），上游模型换成本地桩 HTTP 服务，然后从外面走一遍：`/health` 起来 → `POST /v1/runs` 202 → 轮询到 `ok` → `/metrics` 里有 `pipeline_runs_total{status="ok"}` → `AGENT_LOG_PATH` 指的文件里确实落了 1 行 JSONL。再加上 `uv build --wheel` 产出的 wheel 里带 `entry_points.txt`（`agent-pipeline = agent_pipeline.runner:main`）与 16 个模块，容器里那套「装包 → 起进程 → 接请求」的路径就算被覆盖了；真正没覆盖的只有镜像层（基础镜像、卷挂载、非 root 用户）。
+
 ## 已知边界
 
 1. **记忆有容量上限、没有 TTL**：`MemoryStore` 每次写入后按 `max_episodes` / `max_documents` 删最旧的（删文档连带删块，同一事务），所以磁盘与检索延迟有界；但「三个月前的经验自动过期」还没做——需要按重要性/时间的淘汰策略，而不是只看新旧。
