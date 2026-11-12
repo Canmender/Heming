@@ -272,6 +272,7 @@ curl -s -X POST http://localhost:8000/v1/runs/$ID/approve \
 - 指标：`pipeline_runs_total{status}`、`pipeline_run_duration_seconds`、`pipeline_node_duration_seconds{node}`、`pipeline_tool_calls_total{tool,status}`（**`tool` 标签有界**：已注册工具名最多 32 个，其余归 `other`；模型幻觉出来的不存在工具归 `unknown`——否则模型每次编个新名字就是一个新时序，Prometheus 会被撑爆。`status` 里 `cached` 表示幂等缓存命中、没真的执行，`ok`/`error` 才是真实执行；工具失败率告警的分母只取 `ok|error`，否则缓存命中会把失败率稀释成不告警）、`pipeline_llm_tokens_total{kind}`、`pipeline_coverage_ratio`、`pipeline_rollback_total{reason}`、`pipeline_config_version`。
 - 每次 run 结束写一行 JSON 到 `runs.jsonl`，字段含 `status/stop_reason/llm_calls/tokens/coverage/replans/steps_executed/adversarial_round/adversarial_passed/plan/observations`——`tune` 和回滚窗口都只读这份日志。
 - 灰度：`/v1/tune` 产出候选配置 → 注册为 canary（按 `run_id` 哈希分流）→ 窗口内错误率或 P95 超阈值自动回滚到 active（`ConfigStore.maybe_rollback`）。
+- **这条链路有 HTTP 闭环测试**（`tests/test_auto_rollback_service.py`）：真服务里灰度版本连续失败 → 自动回滚 → `GET /v1/config` 的 active 换回稳定版、canary 变 `archived`、`/metrics` 出现 `pipeline_rollback_total{reason="error_rate"}`；样本数不够时不动（不因为一次上游抖动就判死刑）。
 - **人工回滚要指得到版本**：`POST /v1/config/rollback` 不带参数时只归档当前灰度（幂等，自动回滚走的就是这条）；`{"version_id": 7}` 则把 7 号版本切回 active，同时归档当前 active 与灰度。只给「归档灰度」的话，`promote` 之后发现新版本有问题就没有撤销入口——只能改库。`GET /v1/config` 的 `history` 就是可选版本清单（含 id/stage）。
 - 两个「不可变性」约束：任意时刻**最多一个** active、最多一个 canary；`activate` 会同时收掉灰度，避免「我明明切回去了怎么还是新提示词」。
 
