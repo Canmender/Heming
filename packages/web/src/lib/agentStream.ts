@@ -828,11 +828,24 @@ export function runAgentMentions(
            */
           const allSpecs = useTools ? discoverTools(bridge!.tools) : [];
           const useDiscovery = useTools && allSpecs.length > TOOL_SEARCH_THRESHOLD;
+          /**
+           * 发现模式下首批可见的工具：**先按本轮用户原话检索一次，再按目录顺序补齐**。
+           *
+           * 以前固定取目录前 `MAX_VISIBLE_TOOLS` 个——目录顺序就是提供者注册顺序（MCP 在前），
+           * 所以本地知识库/白板这类工具常年排在第 21 位之后，模型必须先「猜到要检索」才摸得到：
+           * 用户说「查一下我的笔记」，它第一轮只能看见一堆截图/点击工具。
+           * 现在一半名额给相关度命中（同一句输入结果确定），其余按目录序补齐。
+           */
+          const relevantSpecs = useDiscovery
+            ? searchTools(allSpecs, userText, { limit: Math.max(1, Math.floor(MAX_VISIBLE_TOOLS / 2)) })
+            : [];
+          const rankedNames: string[] = [];
+          for (const tool of [...relevantSpecs, ...allSpecs]) {
+            if (!rankedNames.includes(tool.name)) rankedNames.push(tool.name);
+          }
           /** 当前可调用（模型看得见）的工具名。检索命中会往里加，下一轮即生效。 */
           const visible = new Set<string>(
-            useDiscovery
-              ? allSpecs.slice(0, MAX_VISIBLE_TOOLS).map((t) => t.name)
-              : allSpecs.map((t) => t.name),
+            useDiscovery ? rankedNames.slice(0, MAX_VISIBLE_TOOLS) : rankedNames,
           );
           const toolSearchId = useDiscovery ? TOOL_SEARCH_NAME : "";
           /** 本轮请求要带的 tools：发现模式下 = tool_search + 当前可见工具（按目录原序）。 */

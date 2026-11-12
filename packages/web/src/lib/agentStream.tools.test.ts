@@ -482,6 +482,40 @@ describe("按需工具发现（tool_search）", () => {
     expect(String(toolMsg?.content)).toContain("没有找到");
   });
 
+  it("首轮可见工具按用户原话排序：排在目录第 24 位的笔记工具也能第一轮就看见", async () => {
+    const names = Array.from({ length: 24 }, (_, i) => `srv__t${String(i).padStart(2, "0")}`);
+    names.push("notes__查笔记");
+    const { deps, toolOptions } = makeDeps([{ text: "答案", calls: [] }], {
+      toolNames: names,
+      execute: async () => ({ text: "ok", ok: true }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "帮我查笔记", deps);
+
+    const firstNames = (toolOptions[0] ?? []).map(
+      (t) => (t as { function: { name: string } }).function.name,
+    );
+    // 目录第 25 个（索引 24）的工具因为命中「笔记」被提到可见集合里
+    expect(firstNames).toContain("notes__查笔记");
+    expect(firstNames).toContain(TOOL_SEARCH_NAME);
+    // 名额仍然有上限（不是把全量 schema 塞回去）
+    expect(firstNames).toHaveLength(MAX_VISIBLE_TOOLS + 1);
+  });
+
+  it("用户原话不命中任何工具时按目录顺序取，行为与以前一致", async () => {
+    const { deps, toolOptions } = makeDeps([{ text: "答案", calls: [] }], {
+      toolNames: manyNames,
+      execute: async () => ({ text: "ok", ok: true }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    const firstNames = (toolOptions[0] ?? []).map(
+      (t) => (t as { function: { name: string } }).function.name,
+    );
+    expect(firstNames).toEqual([TOOL_SEARCH_NAME, ...manyNames.slice(0, MAX_VISIBLE_TOOLS)]);
+  });
+
   it("目录未超阈值：不注入 tool_search（行为与之前逐字等价）", async () => {
     const rounds: Round[] = [{ text: "答案", calls: [] }];
     const { deps, toolOptions } = makeDeps(rounds, {
