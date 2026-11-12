@@ -410,6 +410,13 @@ export function recallMemory(
   superseded: SupersededInfo[];
   /** 知识库层参与情况；没有知识库条目且未显式传入选项时缺省（老调用方形状不变）。 */
   vault?: VaultRecallInfo;
+  /**
+   * 召回过程抛错时的原因（异常仍不影响生成，但要让上层能说清「为什么这轮没有记忆」）。
+   *
+   * ★ 以前 catch 里直接 `return empty()`：用户看到的是「小鸣没记住我说过的话」，
+   * 与「你压根没开记忆」/「记忆库读坏了」在界面上完全一样，查不出是哪种。
+   */
+  error?: string;
 } {
   // 两条早退各回一份新表：共用一个对象会让调用方改一次影响下一次。
   const empty = () => ({ semantic: [], episodic: [], working: [], scores: {}, boosts: {}, superseded: [] });
@@ -466,7 +473,7 @@ export function recallMemory(
           }
         : {}),
     };
-  } catch {
-    return empty();
+  } catch (error) {
+    return { ...empty(), error: error instanceof Error ? error.message : String(error) };
   }
 }

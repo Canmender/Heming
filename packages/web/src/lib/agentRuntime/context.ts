@@ -98,6 +98,8 @@ export interface BuiltContext {
   skills: SkillMatch[];
   /** 记忆注入旁路；未接记忆/零注入时为 `injected: []` 的空档。 */
   recallTrace: MemoryObservability;
+  /** 技能池路由抛错时的原因（技能段降级为空，但界面能说清为什么）。 */
+  skillsError?: string;
 }
 
 function emptyRecalled(): RecalledMemory {
@@ -178,10 +180,23 @@ function collectMemory(
     return {
       section: text,
       recalled: { semantic: found.semantic, episodic: found.episodic, working: found.working },
-      trace: prefs ? { ...observability, prefs, skippedByPrefs } : observability,
+      trace: {
+        ...observability,
+        ...(prefs ? { prefs, skippedByPrefs } : {}),
+        // 召回内部抛错时仍按「无记忆」注入，但把原因带出去，避免「没记住」和「读坏了」
+        // 在界面上长得一模一样。
+        ...(found.error ? { error: found.error } : {}),
+      },
     };
-  } catch {
-    return { section: "", recalled: emptyRecalled(), trace: emptyObservability() };
+  } catch (error) {
+    return {
+      section: "",
+      recalled: emptyRecalled(),
+      trace: {
+        ...emptyObservability(),
+        error: error instanceof Error ? error.message : String(error),
+      },
+    };
   }
 }
 
@@ -192,13 +207,18 @@ function collectMemory(
 function collectSkills(
   input: BuildContextInput,
   skills: SkillPool | undefined,
-): { section: string; matches: SkillMatch[] } {
+): { section: string; matches: SkillMatch[]; error?: string } {
   if (!skills) return { section: "", matches: [] };
   let matches: SkillMatch[];
   try {
     matches = skills.route({ query: input.userText, agentId: input.agentId });
-  } catch {
-    return { section: "", matches: [] };
+  } catch (error) {
+    // 技能池读坏了不能拦住生成，但要说清楚「这轮没有技能提示」。
+    return {
+      section: "",
+      matches: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
   const section = formatSkillSection(matches);
   if (section) {
@@ -220,12 +240,14 @@ export function buildAgentContext(input: BuildContextInput): BuiltContext {
   const memory = collectMemory(input, input.memory);
   const skills = collectSkills(input, input.skills);
 
+  const extras = skills.error ? { skillsError: skills.error } : {};
   if (!memory.section && !skills.section) {
     return {
       systemPrompt: base,
       recalled: memory.recalled,
       skills: skills.matches,
       recallTrace: memory.trace,
+      ...extras,
     };
   }
   return {
@@ -233,5 +255,6 @@ export function buildAgentContext(input: BuildContextInput): BuiltContext {
     recalled: memory.recalled,
     skills: skills.matches,
     recallTrace: memory.trace,
+    ...extras,
   };
 }

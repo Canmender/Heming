@@ -1664,8 +1664,20 @@ export function ChatPage({
           });
           // 登记本次注入旁路，供轮次收尾时写召回日志（可观测性；零注入不留档）。
           recallRecorder.capture(agentId, convId, text, built.recallTrace);
+          // 记忆/技能层降级时必须说一声：用户看到「它不记得我」时，要能区分
+          // 「你没开记忆」/「记忆库读坏了」/「这轮压根没检索」，否则只能瞎猜。
+          const degraded: string[] = [];
+          if (built.recallTrace?.error) degraded.push(`记忆读取失败（${built.recallTrace.error}）`);
+          if (built.skillsError) degraded.push(`技能匹配失败（${built.skillsError}）`);
+          if (degraded.length) {
+            setSendNotice(`本轮上下文降级：${degraded.join("；")}。这一轮只能凭对话本身回答。`, "info");
+          }
           return built.systemPrompt;
-        } catch {
+        } catch (err) {
+          setSendNotice(
+            `本轮上下文组装失败：${(err as Error).message}。这一轮只能凭对话本身回答。`,
+            "info",
+          );
           return basePrompt;
         }
       },

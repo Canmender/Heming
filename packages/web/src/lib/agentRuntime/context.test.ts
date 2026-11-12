@@ -159,6 +159,8 @@ describe("buildAgentContext", () => {
     });
     expect(out.systemPrompt).toBe(BASE);
     expect(out.recalled).toEqual(EMPTY_RECALLED);
+    // 降级不能只降级：原因要能带出去，否则「没记住」和「读坏了」界面上一样
+    expect(out.recallTrace.error).toContain("storage boom");
   });
 
   it("记忆读取抛错时不影响技能段（两层各自隔离）", () => {
@@ -232,6 +234,7 @@ describe("buildAgentContext", () => {
       skills: broken,
     });
     expect(out.systemPrompt).toBe(BASE);
+    expect(out.skillsError).toContain("route boom");
     expect(out.skills).toEqual([]);
   });
 

@@ -670,6 +670,19 @@ describe("智能体记忆偏好：读侧同样收口（不是只影响写侧）"
     expect(out.episodic.map((e) => e.id)).toEqual(["e1"]);
   });
 
+  it("召回内部抛错 → 空结果 + error 带上原因（不再静默当成「没有记忆」）", () => {
+    const broken = {
+      getSettings: () => {
+        throw new Error("storage disabled");
+      },
+    } as unknown as MemoryStore;
+    const out = recallMemory(broken, { agentId: "agent-1", conversationId: "conv-1", query: "称呼" });
+    expect(out.semantic).toEqual([]);
+    expect(out.episodic).toEqual([]);
+    expect(out.working).toEqual([]);
+    expect(out.error).toContain("storage disabled");
+  });
+
   it("不传 prefs → 旧行为（全取），老调用方形状不变", () => {
     const store = seeded();
     const out = recallMemory(store, { agentId: "agent-1", conversationId: "conv-1", query: "称呼" });

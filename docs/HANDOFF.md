@@ -21,6 +21,7 @@
 - **溢出重试真的变短**（`lib/agentContext/history.ts`）：历史本来放得下时（`older` 为空）强制只留最后一轮原文 + 摘要，否则重试只是把同一个超长请求再发一遍；另加「工具配对 400」也重试（`agentStream.ts` 的 `TOOL_PAIRING_400_RE`）。切点保护：`recent` 以 `role:"tool"` 开头时丢掉孤儿工具行（供应商会 400）。
 - **跨轮历史带工具链**（`components/ChatPage.tsx` 的 `fetchHistory`、`lib/vision/history.ts`）：以前只映射 user/assistant 文本，模型不知道自己上一轮查过什么 → 重复调用/重新猜。现在从消息转录重建 `assistant(tool_calls)` + `role:"tool"`（每轮 ≤8 条、单条 ≤1200 字；被拒/中断都留人话痕迹）。30 条硬截断改为 `HISTORY_MESSAGE_WINDOW = 120`，超出交给 `prepareHistory` 摘要（不静默丢）。
 - **记忆读侧按偏好收口**（`lib/memory/recall.ts`、`lib/agentRuntime/context.ts`、`ChatPage.tsx`）：长期/短期/个人数据库三个开关以前只影响「写」（复盘），读侧照旧注入。现在 longTerm 关 → 不召回语义/情景，shortTerm 关 → 不召回工作记忆，personalDb 关 → 不接知识库；旁路里记 `prefs` + `skippedByPrefs`（人话原因），不再「记忆没了」却查不出为什么。
+- **上下文降级不再静默**（`lib/memory/recall.ts`、`lib/agentRuntime/context.ts`、`components/ChatPage.tsx`）：召回/技能路由内部抛错以前一律 `return empty()`，界面上「记忆里本来没有」/「你没开记忆」/「记忆库读坏了」长得一模一样。现在 `recallMemory` 返回 `error`、`MemoryObservability.error` 与 `BuiltContext.skillsError` 把原因带出来，`buildSystemPrompt` 给一条提示条「本轮上下文降级：记忆读取失败（…）/技能匹配失败（…）。这一轮只能凭对话本身回答。」（整体组装失败也提示；以前只静默 `return basePrompt`）。
 - **MCP 风险分类不按名字猜只读**（`lib/hitl/classify.ts`）：`db__query`/`api__get_url` 这类名字曾命中 `READ_WORDS` 在 guarded+floor=read 下免确认执行；现在命名空间工具一律先按 `write` 收口（真危险词仍升 danger），非 MCP 内置工具保持读意图启发。
 - **MCP 工具桥其它收口**：`sanitizeSchema()` 清洗服务端 schema（顶层 object/properties、required 幽灵键、非法 additionalProperties）；连接状态改 `idle/connecting/ready/stale/error`（`stale` = 有快照但最近一次连接失败，界面显示「已断开（清单过期）」）；`mcpNeedsConnect()` 会因 status 重连并 60s 冷却；`mergeToolBridges` 透传 `AbortSignal`（中断后不再有工具继续跑）；执行层异常不再回空 tool 消息（改成可重试的人话）。
 - **中文工具检索**（`lib/mcp/discovery.ts`）：CJK 单字 + 相邻双字 + 31 组同义词（截图/点击/网页/文件…），并支持「截个图」这类字间插话。
@@ -44,7 +45,7 @@
 - **截断提示的换行是真换行**（`lib/agentStream.ts` 第 936/944 行）：这两条文案早先用脚本补进文件时被过度转义成 `"\\n\\n…"`，TS 里是字面量反斜杠 + n，用户会在气泡里看到 `\n\n（回复被输出长度上限截断…` 而不是换行。已改回 `"\n\n…"`，并在 `agentStream.tools.test.ts` 的截断用例里加「必须含真换行、不含反斜杠」的断言防回归（全仓 `packages/**/*.ts*` 扫过，只此两处）。
 - **流水线有了桌面端客户端（默认不启用）**（`lib/pipeline/client.ts`）：`services/agent-pipeline` 之前只有 HTTP 协议、没有前端入口，接不接只能靠手写 fetch。新增薄客户端：提交→轮询→终态一次 `await`，`snake_case`→`camelCase`，429 退避重提一次，run 超时先 `POST /cancel` 再抛 `timeout`，`onPendingApproval` 接桌面端确认弹窗（服务端 404/409 说明这条审批已经不在，不再把整个 run 抛错）；429 按服务端 `Retry-After` 的秒数退避（以前忽略响应头、固定等 1 秒继续撞）。**默认不构造**——流水线要单独部署（地址/密钥/回退策略属产品决策），未部署不该让聊天链路超时。12 例测试。
 
-验证：`pnpm --filter @heming/web test` → **297 文件 / 4335 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
+验证：`pnpm --filter @heming/web test` → **297 文件 / 4336 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
 ### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）

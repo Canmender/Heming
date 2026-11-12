@@ -201,6 +201,8 @@ export interface MemoryObservability {
    * 关掉的层会在 `skippedByPrefs` 里留下人话原因——否则用户只会觉得「记忆没了」。
    */
   prefs?: { shortTerm: boolean; longTerm: boolean; personalDb: boolean };
+  /** 召回失败的原因（为空 = 没出错；有值 = 这轮没注入记忆，且能说清为什么）。 */
+  error?: string;
   /** 因偏好关闭而被整层跳过的说明（空数组表示没有因偏好跳过任何层）。 */
   skippedByPrefs?: string[];
 }
