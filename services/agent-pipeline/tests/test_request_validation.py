@@ -64,3 +64,23 @@ def test_tune_window_is_bounded(runtime_factory, tmp_path) -> None:
             response = client.post("/v1/tune", json={"since_hours": bad})
             assert response.status_code == 422, (bad, response.status_code, response.text)
         assert client.post("/v1/tune", json={"since_hours": 1}).status_code == 200
+
+
+def test_unknown_fields_are_rejected_instead_of_silently_ignored(runtime_factory) -> None:
+    """字段名写错（camelCase）必须 422，不能静默按默认值跑。
+
+    pydantic 默认 `extra=ignore`：调用方把 `coverage_target` 写成 `coverageTarget`，
+    服务会安静地用默认 0.9——看起来「参数设了」，实际没生效，事后查不出来。
+    """
+    with _client(runtime_factory) as client:
+        run = client.post("/v1/runs", json={"goal": "x", "coverageTarget": 0.9})
+        assert run.status_code == 422, run.text
+        assert "coverageTarget" in run.text, "422 要指出是哪个字段，否则还是难查"
+        knowledge = client.post("/v1/knowledge", json={"docId": "d1", "text": "x"})
+        assert knowledge.status_code == 422, knowledge.text
+        tune = client.post("/v1/tune", json={"sinceHours": 1})
+        assert tune.status_code == 422, tune.text
+        approve = client.post("/v1/runs/nope/approve", json={"callId": "c1"})
+        assert approve.status_code == 422, "未知字段要在查 run 之前就被 422 拦住"
+        rollback = client.post("/v1/config/rollback", json={"versionId": 3})
+        assert rollback.status_code == 422, rollback.text

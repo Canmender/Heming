@@ -17,7 +17,7 @@ from typing import Annotated, Any
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .approval import ApprovalGate
 from .config import Settings
@@ -30,12 +30,20 @@ from .scheduler import DailyTuner, build_replay_evaluator
 class KnowledgeDoc(BaseModel):
     """往知识库里写一份文档（RAG 的入口）。同一个 ``doc_id`` 再写会整体替换。"""
 
+    # 未知字段一律 422：pydantic 默认静默忽略，调用方写错字段名（例如把 doc_id 写成
+    # docId）时会以为写进去了、其实整份内容被忽略，排查时只剩「怎么没生效」。
+    model_config = ConfigDict(extra="forbid")
+
     doc_id: str = Field(min_length=1, max_length=200)
     text: str = Field(min_length=1, max_length=200_000)
     title: str = Field(default="", max_length=300)
 
 
 class RunRequest(BaseModel):
+    # 未知字段一律 422：调用方把 coverage_target 写成 coverageTarget 时，
+    # pydantic 默认会静默忽略 → 跑出来用的是默认 0.9，谁都不知道参数没生效。
+    model_config = ConfigDict(extra="forbid")
+
     goal: str = Field(min_length=1, max_length=4000)
     # cwd 会进日志和工具调用；不封顶的话一个超长字符串就能把日志行撑大。
     cwd: str = Field(default=".", max_length=1000)
@@ -50,6 +58,8 @@ class RunRequest(BaseModel):
 
 
 class TuneRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # 负数/0 会算出「未来」的窗口 → 读到 0 行、报告 0 个失败样本，看起来像「系统很健康」；
     # 上限 30 天是为了不让一次调用扫完全部历史日志（读放大）。
     since_hours: int = Field(default=24, ge=1, le=720)
@@ -58,12 +68,16 @@ class TuneRequest(BaseModel):
 class ApproveRequest(BaseModel):
     """一次工具审批的裁决。``call_id`` 省略时，只有唯一一条待审批才允许省略。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     call_id: str | None = None
     approved: bool = True
 
 
 class RollbackRequest(BaseModel):
     """人工回滚：给 ``version_id`` 就切到那个历史版本；不给就只归档当前灰度。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     version_id: int | None = None
 
