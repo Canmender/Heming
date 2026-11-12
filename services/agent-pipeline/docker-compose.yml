@@ -1,0 +1,46 @@
+# 一键起「流水线 + Prometheus + 告警看板」。
+#
+#   export AGENT_PIPELINE_API_KEY=sk-...
+#   docker compose up --build
+#
+# 服务 http://localhost:8000（/metrics 给 Prometheus 抓），Prometheus http://localhost:9090。
+# 本机没装 docker 时这份文件只作交付物，构建/联调需在有 Docker 的机器上做。
+services:
+  agent-pipeline:
+    build: .
+    image: agent-pipeline:0.1.0
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      AGENT_PIPELINE_API_KEY: ${AGENT_PIPELINE_API_KEY:?需要设置 AGENT_PIPELINE_API_KEY}
+      AGENT_PIPELINE_MODEL: ${AGENT_PIPELINE_MODEL:-deepseek-chat}
+      AGENT_PIPELINE_BASE_URL: ${AGENT_PIPELINE_BASE_URL:-https://api.deepseek.com}
+      AGENT_PIPELINE_CANARY_RATIO: ${AGENT_PIPELINE_CANARY_RATIO:-0.1}
+      AGENT_PIPELINE_MAX_CONCURRENT_RUNS: ${AGENT_PIPELINE_MAX_CONCURRENT_RUNS:-4}
+    volumes:
+      - pipeline-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    depends_on:
+      - agent-pipeline
+
+volumes:
+  pipeline-data:
+  prometheus-data:

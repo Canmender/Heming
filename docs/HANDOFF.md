@@ -8,6 +8,53 @@
 
 ---
 
+## 0. 2026-11-13 智能体链路修复 + Multi-Agent 流水线（未提交）
+
+两条线并行推进，都在工作区里，**尚未提交**（与同轮安装器/插件卡片改动混在一起，提交时按目录拆分）。
+
+### 0.1 智能体对话链路（packages/web）
+
+按三份只读审计（ChatPage 接线 / 记忆上下文 / MCP 工具桥）逐条修，用户报的「工具调用、ReAct、引用、逻辑链有问题」对得上的是这些：
+
+- **工具结果回灌图片**（`lib/mcp/bridge.ts`、`lib/agentStream.ts`）：截图类工具以前被压成「[图片 image/png]」占位符，模型只能猜坐标。现在 `imagesFromContent()` 取出 image 块（≤3 张、≤4M 字符），视觉模型转成 `image` 内容片附在工具轮后（明确要求「看图判断，不要凭占位文字猜」），非视觉模型给可见说明并计入预算。
+- **上下文溢出重试不再重放工具**（`lib/agentStream.ts`）：run 作用域 `executed: Map<call.id, Promise<...>>` 缓存工具结果，`MAX_CONTEXT_RETRIES` 的 aggressive 重试从 round 0 重跑时同一 call 只执行一次、也不再重复弹确认。
+- **溢出重试真的变短**（`lib/agentContext/history.ts`）：历史本来放得下时（`older` 为空）强制只留最后一轮原文 + 摘要，否则重试只是把同一个超长请求再发一遍；另加「工具配对 400」也重试（`agentStream.ts` 的 `TOOL_PAIRING_400_RE`）。切点保护：`recent` 以 `role:"tool"` 开头时丢掉孤儿工具行（供应商会 400）。
+- **跨轮历史带工具链**（`components/ChatPage.tsx` 的 `fetchHistory`、`lib/vision/history.ts`）：以前只映射 user/assistant 文本，模型不知道自己上一轮查过什么 → 重复调用/重新猜。现在从消息转录重建 `assistant(tool_calls)` + `role:"tool"`（每轮 ≤8 条、单条 ≤1200 字；被拒/中断都留人话痕迹）。30 条硬截断改为 `HISTORY_MESSAGE_WINDOW = 120`，超出交给 `prepareHistory` 摘要（不静默丢）。
+- **记忆读侧按偏好收口**（`lib/memory/recall.ts`、`lib/agentRuntime/context.ts`、`ChatPage.tsx`）：长期/短期/个人数据库三个开关以前只影响「写」（复盘），读侧照旧注入。现在 longTerm 关 → 不召回语义/情景，shortTerm 关 → 不召回工作记忆，personalDb 关 → 不接知识库；旁路里记 `prefs` + `skippedByPrefs`（人话原因），不再「记忆没了」却查不出为什么。
+- **MCP 风险分类不按名字猜只读**（`lib/hitl/classify.ts`）：`db__query`/`api__get_url` 这类名字曾命中 `READ_WORDS` 在 guarded+floor=read 下免确认执行；现在命名空间工具一律先按 `write` 收口（真危险词仍升 danger），非 MCP 内置工具保持读意图启发。
+- **MCP 工具桥其它收口**：`sanitizeSchema()` 清洗服务端 schema（顶层 object/properties、required 幽灵键、非法 additionalProperties）；连接状态改 `idle/connecting/ready/stale/error`（`stale` = 有快照但最近一次连接失败，界面显示「已断开（清单过期）」）；`mcpNeedsConnect()` 会因 status 重连并 60s 冷却；`mergeToolBridges` 透传 `AbortSignal`（中断后不再有工具继续跑）；执行层异常不再回空 tool 消息（改成可重试的人话）。
+- **中文工具检索**（`lib/mcp/discovery.ts`）：CJK 单字 + 相邻双字 + 31 组同义词（截图/点击/网页/文件…），并支持「截个图」这类字间插话。
+- **超时不再是写死的 20s/30s**（`lib/mcp/{types,httpClient,stdioClient}.ts`、`packages/desktop/mcp-stdio.js`）：`McpServerConfig.timeoutMs` 可按服务配置（夹在 [2s, 600s]），界面在添加服务时填「单次超时（秒）」，空＝缺省；`store` 的 `coerceServer` 白名单必须显式带过该字段，否则重开应用就丢。
+- **stdio 超时会按协议发 `notifications/cancelled`**（`mcp-stdio.js`）：以前超时只是本地 reject，子进程里工具照跑、副作用照发生。现在先通知服务端取消，文案明说「若它不理会，子进程里可能仍在执行」——不假装已经停了。
+- **服务端发起的请求会被明确拒绝**（`mcp-stdio.js` 的 `answerServerMessage`）：原来带 `method` 的消息会被当成「配不上的响应」直接丢掉，服务端（roots/list、sampling/createMessage）一直等 → 表现为「工具调用莫名超时」。现在 `ping` 回 `{}`，其余按 JSON-RPC 回 **-32601**，并记一行日志。
+- **未知工具会给出近邻名字**（`lib/mcp/bridge.ts` 的 `nearestToolNames`）：模型把工具名记岔时只回「未知工具 x」等于让它再猜一轮；现在附「相近的有：…（共 N 个可用工具）」，编辑距离归一 <0.5 的不提。
+- **确认弹窗里 MCP 工具不再一律叫「外部工具」**（`lib/hitl/classify.ts` 的 `displayNameOf`）：`服务__工具` 显示成「服务 · 工具」，用户能看懂自己正要允许什么。
+- **生成中不再能重复发送**（`components/ChatPage.tsx` 的 `send` / 发送按钮）：并发的两条流会共用 `turnToolCountRef` 与 `selfEdit` 预算，第一条被第二条重置（复盘判定跟着错）。现在生成中点发送只给一条提示条，不新起流。
+- **断线立刻收口**（同文件 ws `onClose`）：以前要等 60s 看门狗，回复永不落库、HITL 弹窗还挂着。现在掉线就 `abortAll()` 所有在飞的流并 `cancelAll("连接断开")`。
+- **工具轮的过程说明不再被当最终答案**（`lib/agentStream.ts` 的 catch 分支）：`partial` 只取已上行/本地累积的正文；若一个字都没有而缓冲里有中间话术，才带「（本轮工具调用未完成，以上是中断前的过程说明，不是最终答案。）」兜底——落库的话会让气泡看起来「答完了」。
+- **历史压缩每次 run 只算一次**（`lib/agentStream.ts` 的 `historyCache`）：工具轮每轮都重新组装 messages，以前每轮都重新 `prepareHistory`（12 轮 = 13 次压缩/摘要调用）；现在按 aggressive 级别缓存，溢出重试换级别才重算。
+- **工具结果预算只算工具输出**（`lib/agentContext/toolResults.ts`）：以前把 user/assistant 文本也算进 3000 token 预算，用户贴长文档时会白折掉还有用的工具结果、折完还超限。
+
+验证：`pnpm --filter @heming/web test` → **295 文件 / 4309 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 38 例全绿（含超时取消、服务端请求回应）。
+（注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
+
+### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）
+
+用户要的「Memory↔Tool 协议、Plan/Execute/Reflect、LangGraph 状态机、Planner/Critic/Summarizer、RAG、Function Calling、写码/挑错对抗到覆盖率、容器化 + Prometheus + 自动回滚 + 日志驱动每日调优」，落成一个**可离线跑**的独立服务，设计与口径见 `services/agent-pipeline/DESIGN.md`（15 节）：
+
+- 状态机：`plan → execute → reflect →(continue/replan/done/abort)→ critic →(不过阈)→ adversarial → summarize`；预算（步数/LLM 次数/token/墙钟/重规划/对抗轮）每一步收口。
+- Memory：SQLite（episodic/documents/chunks），BM25 + blake2b 向量混合检索，注入即引用（`Citation` 只保留观测里真实出现过的 doc）；上下文按「最新观测优先」分配预算。**容量有硬上限**：`max_episodes=5000` / `max_documents=2000`，每次写入后 `prune()` 删最旧的（删文档连带删块，同一事务），磁盘与检索延迟不随运行时长线性上涨。
+- Tool 协议：schema 严格校验 → 幂等缓存（按 tool+args 键）→ 断路器（阈值/冷却）→ 线程池超时 → 结构化 `Observation`（含 error/citations/dropped_chars）；只有 `read` 类工具走并行，`write` 严格串行。
+- 对抗环：Coder 改码 → **真实跑覆盖率命令** → Tester 找 bug，`coverage >= target` 且无 blocking 才放行。
+- 可观测/回滚：`/metrics`（runs/时长/节点/工具/token/覆盖率/回滚/配置版本）、JSONL 回合日志、配置灰度（canary 稳定分桶）+ 错误率/P95 阈值自动回滚（幂等）。
+- 每日调优：`tune` 读日志 → 分类（stop_reason 优先）→ 生成 Prompt/Few-shot 候选 → 有 evaluator 时才注册灰度，不自动上线。
+- 交付物：`Dockerfile`（非 root、HEALTHCHECK）、`docker-compose.yml`（+ Prometheus v2.54.1）、`prometheus/{prometheus,alerts}.yml`（错误率/延迟/工具失败率/回滚尖峰/覆盖率 6 条告警）、`README.md`、`scripts/soak.py`。
+- 验证：`./.venv/Scripts/python.exe -m pytest` → **59 passed**（含记忆容量回收 3 例）；`scripts/soak.py --runs 20000 --json` → **100,000 次模型调用、0 失败**、17.8 次/s、P50 56.4ms / P95 60.2ms、内存峰值 1.62MB、`episodes` 稳定在 5000（容量回收真的在删，没随时间涨）。**本机没有 docker**，容器文件只写了未构建验证。
+
+已知边界（下一轮可继续）：stdio 请求超时**不 kill 子进程**（只发取消通知；要硬停需另做「连续超时 → 回收进程」策略）；记忆有容量上限但**没有 TTL/重要性淘汰**（只看新旧，不会让「三个月前的经验」按时间过期）；pipeline 与桌面端的实际对接（目前是独立服务 + 设计文档，未接进 ChatPage 的生成链路）；本机无 docker，容器文件未构建验证。
+
+---
+
 ## 1. 项目是什么
 
 **和鸣**：原生桌面端（Electron）智能体应用平台 = 云端服务器（**团队名册 + 团队动向**）+ 桌面/网页客户端。
@@ -389,6 +436,8 @@ r65 安装包（d.75.2.40.0）修正了 web-dist 版本不一致与安装目录 
 **自绘安装器（`packages/setup`，d.136 起在途，已构建验收）**：用户要求安装过程也可自定义，并指定参考 `https://github.com/mshumer/unslop` 的反套路设计。方案是**外层自绘 + 内层原样 NSIS**：新增 `packages/setup`（Electron 900×620 无边框窗口，纸白/墨黑/发丝线/朱砂，手写「Heming」逐笔描画开场、24 点波浪、完成落章），打包成 electron-builder `portable` 单 exe；用户点「开始安装」后主进程 `spawn` 现有 `和鸣 Setup <5段版本>.exe` 静默安装（`/S /NCRC /D=<目录>`，`/D=` 必须最后且不加引号、必须 `windowsVerbatimArguments`），注册表/快捷方式/卸载器/差分更新/自动更新全沿用，不改动安装语义。内层安装包三种来源：内嵌（`--embed-inner`）、setup 同目录离线包、更新源 `latest.yml` 在线下载（sha512 校验）。安装成败**以磁盘上 `Heming.exe` 为准**（退出码不可信，UAC 取消也可能返 0）；安装期每 2500ms 统计目标目录文件数/字节数（`statTree` 两段式：先收集路径、再有界并发 stat；主进程把 `UV_THREADPOOL_SIZE` 调到 16），不给假百分比；下载/校验可取消，安装期不提供取消。构建：`node scripts/make-setup-assets.py` → `pnpm dist:setup [-- --embed-inner]`；开发态 `electron packages/setup --capture=<dir>` 出 6 张状态截图。已知限制：portable 自解压的 1–3s 只能显示静态 `splash.bmp`；无签名仍是「未知发布者」；外层安装器自身不参与自动更新；仅 zh_CN/x64。规格 `docs/superpowers/specs/2026-11-12-setup-installer.md`。**当前状态（2026-11-12 验收）**：`node --check` 17 个文件通过，9 个 `node --test` 共 62 例全绿（见下文验证）；素材由 `scripts/make-setup-assets.py` 生成；打包出 `和鸣安装程序 d.135.3.54.7.exe`（105.2 MB，sha512 `OX5G1Y0vFG2cqr5/x00vTWOXAEw5Twg/czRULX1YAKcsg+pdXZQxunbUqFgxsC0mjsKI04uNyK7Eqwl/povRGA==`），复制到普通用户目录（`%TEMP%\heming-setup\psetup-final\setup.exe`）运行通过，`HEMING_SETUP_CAPTURE_DIR` 出 6 张状态截图与 `diagnostics.json`（10 条词标 path 全部收笔、无渲染错误）。注意两点：① portable 外壳从仓库目录启动会撞本机 NSIS TEMP 限制（`Error writing temporary file`，与上方卸载器那条同源），复制到用户目录即可，非产品缺陷；② worktree 缺 web-dist/runtime/magpie，`installedBytes` 只统计到 electron dist（357 MB），真实体积约 1 GB，需在完整仓重打一次并做真机安装复验。**2026-11-12 提速与更新动画（同分支，已验证）**：安装器新增后台预取（窗口打开即解析并下载、任务单飞、失败只写日志不弹错）、断点续传（`.part` + `Range`，服务器不支持 Range 时整包重写）、缓存命中（大小与 sha512 都对上则跳过下载），安装期目录轮询 600→900ms 让出 IO；`packages/setup/lib/download.test.js` 新增 4 例、`pipeline.test.js` 新增 5 例。**二次优化（同日）**：下载进度事件按 120ms 合并（首帧与收尾必发，安装器与桌面端 `auto-update.js` 都做），避免 300MB 包把 IPC 与界面重绘刷爆；下载成功后写 `<包名>.meta.json`（版本/大小/sha512/mtime），下次启动元数据与文件对得上就跳过百 MB 级重算哈希；工作屏状态行下加「已用 X 秒」秒表，让用户在无可信百分比的解压阶段看见程序在走；`done` 事件带 `elapsedMs/timings`，完成屏显示「用时 X 秒 · 安装 Y 秒」，安装日志同记准备/安装/合计三段。`pipeline.test.js` 累计 +7 例。**三次优化（同日，安装期轮询）**：实测 `win-unpacked`（8486 文件 / 882 MB）旧 `statTree` 一次 799ms，按 900ms 一轮等于全程占满线程池跟解压抢 IO；改为两段式（先收集路径 205ms，再有界并发 stat）+ 主进程 `UV_THREADPOOL_SIZE=16`，单次降到 300~400ms，轮询间隔 900→2500ms，占用从约 80% 降到百分之十几；新增 `lib/dir-stats.test.js` 5 例。设置区更新卡新增 `UpdateMotion` 四相动效（检查三点脉冲、下载墨点波浪 + 真实百分比、完成落章、确认后 800ms 落章再重启），保留原 `role="progressbar"` 与「已下载 X%」文案。规格 `docs/superpowers/specs/2026-11-12-install-speed-and-update-motion.md`。**验证（2026-11-12）**：`packages/setup` 9 个测试文件共 62 例全绿（`pipeline` 16 例、`dir-stats` 5 例、`download` 4 例、`update-plan` 6 例）、`node --check` 全过；`pnpm --filter @heming/setup test` 可复跑。`packages/desktop` 的 `auto-update.test.js` + `update-helper.test.js` 25 例全绿。应用内更新动画：`pnpm exec tsc -p packages/web/tsconfig.json --noEmit` 通过、`pnpm exec vitest run src/components/UpdateCard.test.tsx` 14 例全绿（含「检查中三点脉冲」「下载中墨点波浪 + 真实百分比」「下载完成落朱砂章」「确认后 800ms 才 install」）。安装器预取行三态（下载中 37% / 已就绪 · 版本 / 失败隐藏）已用离屏窗口截图过目。未做：真机联网安装与更新动画观感复验（需完整仓 + 发布环境）。
 
 **2026-11-12 更新助手（方案 A，代码完成待验证）**：用户要求「彻底统一」——应用内更新的观感要和首次安装一致，于是把自绘安装器本身内置成更新助手（`resources/updater/setup.exe`，桌面包 +~105MB）。原因：Windows 锁住运行中的程序文件，重装自己必须在应用退出后由另一个进程做，而自绘窗口是 Electron 应用，所以内置而不是按需下载。链路：渲染层确认「重启并安装」→ `packages/desktop/main.js` 的 `installUpdate()` 写 `%TEMP%\heming-setup\update-plan.json`（`installerPath/installDir/version/currentVersion/relaunch`）→ detached 启动助手并传 `HEMING_SETUP_UPDATE=1`、`HEMING_SETUP_UPDATE_PLAN=<路径>`（不用命令行参数，portable 外壳会重拼参数）→ 500ms 后 `app.quit()`；助手（`packages/setup/main.js` 的 update 模式 + `lib/update-plan.js`）校验计划后直接进 work 屏，用 `installerPath` 当 payload 跑原静默 NSIS，按 `relaunch` 拉起新版本，done 后删计划。回退：助手/计划/下载文件任一缺失或状态不是 `downloaded` → 原 `quitAndInstall()` MUI 路径。构建：`scripts/build-desktop.mjs` 的 `stageUpdateHelper()` 打包前把 `packages/setup/release/和鸣安装程序 *.exe` 最新者复制为 `packages/desktop/update-helper/setup.exe`（`extraResources` 搬到 `resources/updater/`，`*.exe` 不入库），找不到只告警不清空构建。测试：`packages/setup/lib/update-plan.test.js` 6 例、`packages/desktop/update-helper.test.js` 6 例（含跨包常量一致、`ELECTRON_RUN_AS_NODE` 清理）。规格见 `2026-11-12-setup-installer.md` 第 8 节。**待办**：跑两处新测试与 `node --check`、打包后端到端走一遍升级（需先 `pnpm dist:setup` 再 `pnpm dist:desktop`）、文档与提交。
+
+**2026-11-12 通用外壳（在线版跨版本复用）**：编辑反馈「每版都要重出外壳」不划算，于是把 97.8MB 的在线外壳改成**通用**：新增 `packages/setup/lib/pipeline.js` 的 `probeLatest()`（只读 `<feed>/latest.yml` → `{version,size,url}`，不下载、不校验签名），`main.js` 在窗口创建后探测一次（8 秒超时，失败静默），`setup:init` 返回 `version = latestVersion || generated.hemingVersion`、并单列 `installerVersion` 与 `latestKnown/latestSize`；渲染层收到 `{type:"latest"}` 事件后刷新「版本」行，因此装新版不会再显示构建时的旧号。更新模式不探测（装哪版由计划文件决定）。构建加 `--generic`：产物改名为 `和鸣安装程序.exe`（不带版本），`generated.json` 记 `generic:true`；`build-desktop.mjs` 的 `stageUpdateHelper()` 同时认「和鸣安装程序.exe」与带版本两种命名。仍不通用的是离线版（`--embed-inner` 内嵌 357MB 包 + sha512 校验，只能装那一版）。已知小偏差：进度条分母 `installedBytes` 仍是构建时统计，跨版本会有几个百分点误差。测试 `pipeline.test.js` +3 例（套件共 65 例全绿）。构建命令 `node scripts/build-setup.mjs --generic`。
 
 **20 轮 UI/UX 自检优化已完成，并追加 R21–R24（`d.74.2.39.0`；已合入 main）**：用户要求连续 20 轮治理「不符合使用习惯 / 排版不合理 / UI 不一致 / AI 腔文案」。R1–R20 全部完成：13 处页头副标题与空态改写成短句、模块/引导文案去术语、主/危险/次级按钮统一语义类（42 处）、五个主页面一级 Tab 统一下划线式（新增 `lib/ui/tabStyles.ts`）、记忆区收 1200px 居中列并重写召回文案、团队共享条压成单行、弹窗与设置搜索支持回车提交、设置卡宽度统一、删掉重复生效说明、分段控件统一、首页小点击目标统一 24px、智能体编辑按钮键盘可见、插件空态补 CTA、暗色逐页抽查无回归。轮次看板与遗留见 `docs/superpowers/specs/2026-11-07-ui-polish-rounds.md`；R7 起继续（记忆区行宽、团队页共享条、首页密度、键盘/空态/暗色等）。**随后 d.74.2.33.0**：命令面板新增「模块管理」动作（搜「模块」唯一命中，副标题显示实际生效数，回车落插件区模块 Tab），补上 d.70 模块概念在面板里的入口缺口。**同分支上一轮 d.71.2.33.0** 做了模块「清理本机数据」（`lib/modules/lifecycle.ts`，走各模块 store 清内存+磁盘，运行中拒绝，信息中枢无入口），见 CHANGELOG。**下一步**：① 若要合并/打包，需在 main 工作树合并 `feat/d71-modules-polish` 后按 `docs/VERSION-MANAGEMENT.md` 走 `release.mjs --desktop --release-r 63`；② 本轮明确不做：导航分组自定义/折叠、图标轨加文字、页面宽度大改；③ 前几轮遗留仍在（聊天失败行不落历史、历史工具轨迹、任务模板/分叉、导出真机下载、读屏/高对比真机、模块级权限声明）。
 

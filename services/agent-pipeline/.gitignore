@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+pytest-of-*/
+.pytest_cache/
+runs.jsonl
+*.db
+.tmp-runs.jsonl

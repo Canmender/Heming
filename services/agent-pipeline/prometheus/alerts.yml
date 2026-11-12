@@ -1,0 +1,69 @@
+groups:
+  - name: agent-pipeline
+    rules:
+      # 错误率：5 分钟内失败占比 > 20%（与 Settings.error_threshold 同口径）。
+      - alert: PipelineErrorRateHigh
+        expr: |
+          sum(rate(pipeline_runs_total{status!="ok"}[5m]))
+            /
+          clamp_min(sum(rate(pipeline_runs_total[5m])), 0.001) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "智能体流水线错误率超过 20%"
+          description: "5 分钟窗口内非 ok 状态占比 {{ $value | humanizePercentage }}，检查 /v1/config 是否已自动回滚、以及更新源/模型是否可用。"
+
+      # 端到端 P95 超过 120 秒（与 Settings.latency_threshold_s 同口径）。
+      - alert: PipelineLatencyHigh
+        expr: |
+          histogram_quantile(0.95, sum(rate(pipeline_run_duration_seconds_bucket[10m])) by (le)) > 120
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "智能体流水线 P95 耗时超过 120s"
+          description: "P95 = {{ $value }}s；先看 pipeline_node_duration_seconds 是哪个节点慢（plan/execute/reflect/critic/adversarial）。"
+
+      # 工具失败率：单个工具 5 分钟内失败占比 > 30%。
+      - alert: ToolFailureRateHigh
+        expr: |
+          sum by (tool) (rate(pipeline_tool_calls_total{status="error"}[5m]))
+            /
+          clamp_min(sum by (tool) (rate(pipeline_tool_calls_total[5m])), 0.001) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "工具 {{ $labels.tool }} 失败率超过 30%"
+          description: "先看 run 日志里的 observation error 字段；连续失败会被 ToolRuntime 断路器切断冷却 30s。"
+
+      # 连续回滚说明当前候选配置有问题。
+      - alert: PipelineRollbackSpike
+        expr: increase(pipeline_rollback_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "过去 1 小时发生了自动回滚"
+          description: "回滚原因见 pipeline_rollback_total 的 reason 标签；需人工确认候选配置并考虑 pin 住旧版本。"
+
+      # 服务本身挂掉（Prometheus 抓不到）。
+      - alert: AgentPipelineDown
+        expr: up{job="agent-pipeline"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "agent-pipeline 抓取失败"
+          description: "容器可能已退出：docker compose ps / docker compose logs agent-pipeline。"
+
+      # 覆盖率长期不达标（对抗模式的核心目标）。
+      - alert: CoverageBelowTarget
+        expr: pipeline_coverage_ratio > 0 and pipeline_coverage_ratio < 0.9
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "最近一次对抗迭代覆盖率 {{ $value }} 低于目标 0.9"
+          description: "看 run 日志里 adversarial_round / blocking_issues；tester 报的 bug 应逐条转成测试用例。"
