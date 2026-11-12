@@ -135,6 +135,16 @@ curl -s http://localhost:8000/v1/runs \
 - 取消是协作式的：卡在**工具调用**里的 run 要等这次工具超时（`AGENT_TOOL_TIMEOUT_S`）才走到下一个边界（工具线程没法安全打断）；
 - `tests/test_cancel.py` 4 例覆盖（跑到一半取消、未知 run、已结束 run、重复取消）。
 
+## 预算截断要看得见
+
+- **单步工具预算**：一步最多 `AGENT_STEP_TOOL_BUDGET`（默认 6）次调用。超出时以前 `calls[:remaining]`
+  直接切掉——模型以为自己调过了，下一轮基于「其实没发生」的前提推理。现在每个被丢掉的调用都留一条
+  失败观测「这次调用没有执行：本步骤的工具调用预算已用尽（每步最多 N 次）」，模型能看到并决定下一步。
+- **计划步数**：规划提示里写明「本次最多 N 个步骤（超出会被丢弃）」，N 取 `AGENT_MAX_STEPS`。
+  提示词默认写「3-7 步」，但预算被调小时旧实现会静默截断后几步计划。
+
+`tests/test_step_budget_observable.py`、`tests/test_plan_step_limit.py` 各 1 例。
+
 ## 任务的 `cwd` 真的决定命令在哪跑
 
 `TaskSpec.cwd` 以前只写进提示词（「工作目录：D:/proj」），但 `run_command` 总在**服务进程自己的目录**里执行——

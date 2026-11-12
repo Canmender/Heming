@@ -247,7 +247,18 @@ def plan_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
             if suggestions:
                 replan_brief += "\n评审建议：\n" + "\n".join(f"- {item}" for item in suggestions)
             replan_brief += "\n"
-    context = _context(runtime, state, extra=f"{replan_brief}请只输出 JSON 计划。", memories=recalled)
+    # 计划步数上限要说出来：提示词里写死「3-7 步」，但 max_steps 可能被调小（比如预算测试用 2），
+    # 多出来的步骤会被静默截掉，规划者以为自己的后几步会被执行。
+    step_limit = runtime.settings.budget.max_steps
+    context = _context(
+        runtime,
+        state,
+        extra=(
+            f"{replan_brief}本次最多 {step_limit} 个步骤（超出会被丢弃），每步都要能独立验证。"
+            "请只输出 JSON 计划。"
+        ),
+        memories=recalled,
+    )
     data, _ = _call_json(runtime, state, prompt_key="plan", user_text=context)
     raw_steps = data.get("steps") or []
     if not isinstance(raw_steps, list) or not raw_steps:
@@ -319,9 +330,31 @@ def execute_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
         }
 
     remaining = runtime.settings.budget.step_tool_budget - int(state.get("step_tool_calls", 0))
-    calls = calls[: max(0, remaining)]
+    keep = max(0, remaining)
+    dropped_calls = list(calls[keep:])
+    calls = calls[:keep]
     observations = _observations_of(state)
     new_observations: list[Observation] = []
+    # 超出单步预算的调用不能悄悄丢掉：模型以为自己调过了，下一步就会基于「其实没发生」的前提推理。
+    # 这里给每个被丢掉的调用留一条失败观测，模型下一轮能看到「这次没执行」。
+    for index_dropped, dropped in enumerate(dropped_calls):
+        dropped_name = str(dropped.get("name") or "（未命名工具）")
+        dropped_id = str(
+            dropped.get("id")
+            or f"call_dropped_{hashlib.sha1((dropped_name + str(index_dropped)).encode()).hexdigest()[:8]}"
+        )
+        note = Observation(
+            call_id=dropped_id,
+            tool=dropped_name,
+            ok=False,
+            error=(
+                f"这次调用没有执行：本步骤的工具调用预算已用尽"
+                f"（每步最多 {runtime.settings.budget.step_tool_budget} 次）。"
+                f"如果还需要，请下一步再试。"
+            ),
+        )
+        observations.append(note)
+        new_observations.append(note)
     # 只读工具一起跑（顺序执行但互不依赖），写工具天然串行——这里统一顺序执行，行为确定。
     known = set(runtime.tools.registry.names())
     # tools_allowed 是「本次允许用哪些工具」的硬约束：模型仍可能凭上下文发出别的名字
