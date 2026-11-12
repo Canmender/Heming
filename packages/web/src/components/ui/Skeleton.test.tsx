@@ -29,7 +29,8 @@ describe("Skeleton 统一骨架", () => {
   it("SkeletonCard 渲染卡片轮廓 + 可指定行数，最后一行更短", () => {
     const { container } = render(<SkeletonCard lines={3} />);
     const card = container.firstElementChild as HTMLElement;
-    expect(card.className).toContain("rounded-xl");
+    // d.138：卡片轮廓（圆角/描边/底色/阴影）走 .ui-card 基元，不再手写 rounded-xl
+    expect(card.className).toContain("ui-card");
     expect(card).toHaveAttribute("aria-hidden", "true");
     // 1 行标题 + 3 行正文
     const lines = card.querySelectorAll(".ui-skeleton");

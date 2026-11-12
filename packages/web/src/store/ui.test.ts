@@ -205,6 +205,10 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
   it("合并前的旧页面名折叠成宿主页，且不与已有宿主页重复", () => {
     // 老用户 localStorage 里可能还是 13 项：读回后必须只剩 10 个宿主页，
     // 顺序以旧列表中「第一次出现」的位置为准。
+    // d.138：tasks 原来折叠到 { chat, view: "tasks" }，而对话页早就不认这个视图——
+    // 「派任务」「新建任务」会静默落到对话 Tab。任务现在活在团队页看板里，
+    // tasks 改折叠成 team/board，于是旧的 tasks 项不再占 chat 的位置，
+    // chat 只能按默认顺序补到 memory 之后。
     expect(
       normalizeNavOrder([
         "settings",
@@ -220,8 +224,8 @@ describe("normalizeNavOrder / readStoredNavOrder", () => {
       "team",
       "home",
       "plugins",
-      "chat",
       "memory",
+      "chat",
       "vault",
       "model",
     ]);

@@ -77,12 +77,10 @@ describe("用量热力图配色跟随主题", () => {
 });
 
 describe("开关（Switch）配色跟随主题", () => {
-  const switchFiles = [
-    "src/components/ContextSettingsCard.tsx",
-    "src/components/MemoryPage.tsx",
-    "src/components/SkillsPage.tsx",
-    "src/components/plugins/shared.tsx",
-  ];
+  // d.138：上下文设置卡 / 记忆页 / 技能页三份「逐字节相同」的开关已收口到
+  // ui/Switch.tsx（三份拷贝正是本命 bug 的温床：改一处漏两处，同一应用两种开关）。
+  // 所以变量守卫钉在基元上，页面侧改为守卫「必须用基元，不许再复制一份」。
+  const switchFiles = ["src/components/ui/Switch.tsx", "src/components/plugins/shared.tsx"];
   const sources = switchFiles.map((f) => [f, readFileSync(f, "utf8")] as const);
 
   it("轨道/滑块变量亮暗各一套", () => {
@@ -93,6 +91,16 @@ describe("开关（Switch）配色跟随主题", () => {
   it.each(sources)("%s 的开关使用变量，不再用 #d8d8d8 / bg-white", (file, src) => {
     expect(src, file).toContain("var(--switch-off)");
     expect(src, file).toContain("var(--switch-knob)");
+    expect(src, file).not.toContain("bg-[#d8d8d8]");
+  });
+
+  it.each([
+    "src/components/ContextSettingsCard.tsx",
+    "src/components/MemoryPage.tsx",
+    "src/components/SkillsPage.tsx",
+  ])("%s 使用统一开关基元，不再各自复制一套", (file) => {
+    const src = readFileSync(file, "utf8");
+    expect(src, file).toContain('from "./ui/Switch');
     expect(src, file).not.toContain("bg-[#d8d8d8]");
   });
 });

@@ -770,18 +770,19 @@ describe("设置区 · 导航栏与恢复默认外观（d.68）", () => {
   });
 });
 
-/** d.62-B 布局迁移守卫：页头走 PageShell、内容列收口并居中（d.73 起 760）。 */
+/** d.62-B 布局迁移守卫：页头走 PageShell、内容列收口到 760（d.138 起左对齐）。 */
 describe("设置区布局（d.62-B）", () => {
-  it("页头由 PageShell 提供（唯一 h1 + 副标题），内容列 760 居中", () => {
+  it("页头由 PageShell 提供（唯一 h1 + 副标题），内容列 760 左对齐", () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveClass("ui-page-title");
     expect(headings[0]).toHaveTextContent("设置");
     expect(document.querySelector(".ui-page-sub")?.textContent).toContain("不用重启");
-    // 内容列 760 且水平居中：宽屏下不再贴左留出半屏空白
+    // d.138 改回左对齐：760 的宽度上限保留（表单行不宜过长），但不再 mx-auto——
+    // 居中会让设置页左边缘与首页/记忆/插件页对不上，同站出现两种对齐网格。
     const column = document.querySelector('[class*="max-w-[760px]"]');
     expect(column).not.toBeNull();
-    expect(column?.className).toContain("mx-auto");
+    expect(column?.className).not.toContain("mx-auto");
   });
 });

@@ -170,8 +170,10 @@ describe("MemoryPage 三分区结构", () => {
       "false",
     );
     // 默认展示短期记忆面板
-    expect(screen.getByRole("region", { name: "短期记忆" })).toBeInTheDocument();
-    expect(screen.getByText(/约 2 小时未活动或满 40 轮后过期/)).toBeInTheDocument();
+    const shortTerm = screen.getByRole("region", { name: "短期记忆" });
+    expect(shortTerm).toBeInTheDocument();
+    // 「40 轮后过期」在抬头和下方说明卡里各有一句，用抬头那句唯一的文案定位
+    expect(within(shortTerm).getByText(/^会话级缓冲/)).toHaveTextContent("满 40 轮后过期");
 
     expect(await screen.findAllByRole("option", { name: "阿和" })).not.toHaveLength(0);
     expect(screen.getByRole("option", { name: "小码" })).toBeInTheDocument();
