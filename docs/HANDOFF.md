@@ -38,7 +38,9 @@
 - **工具被能力闸摘掉不再无声**（`lib/agentStream.ts` 的 `gateNoticed`）：模型不支持函数调用时，以前只是整轮不给 tools，用户看模型说「我查一下」却什么都没发生；现在每次 run 提示一次「当前模型（…）不支持工具调用」。
 - **轨迹表与 streamOwner 不再只增不删**（`components/ChatPage.tsx` / `store/chat.ts`）：`toolTraceRef` 在流收口后按「没有在飞的流就整表清空」回收；`streamOwner` 给 120s 回收窗口（回声窗口内保留，过期删键，进行中的同 id 流不删）——长会话不会随轮次单调上涨。
 
-验证：`pnpm --filter @heming/web test` → **295 文件 / 4314 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 38 例全绿（含超时取消、服务端请求回应）。
+- **历史里的图片只挂 user 行、同文重发不再重复**（`components/ChatPage.tsx` 的 `fetchHistory`）：图片内容片原先按「任意带 file 的行」挂，助手行一旦同时有 `tool_calls`，`content` 变成数组会被供应商当非法请求拒掉；现在只挂 user 行。去重原先比 `content`，带附件时 content 拼了文件块 → 永远不相等 → 失败重发时当前这轮在提示词里出现两遍；改为比正文（`payload.text`）。
+
+验证：`pnpm --filter @heming/web test` → **295 文件 / 4316 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 38 例全绿（含超时取消、服务端请求回应）。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
 ### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）

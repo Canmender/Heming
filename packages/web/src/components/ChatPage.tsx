@@ -1455,6 +1455,10 @@ export function ChatPage({
         const vision = resolveCapability(historyProfile).supportsVision;
         const rows: HistoryRow[] = [];
         const images: VisionImageSlot[] = [];
+        // 去重要看「正文」，不是 content：带文档附件时 content 里拼了文件块，
+        // 直接比 content 会漏判，当前这轮就会在提示词里出现两遍（history + buildUserTurn）。
+        let lastUserRow = -1;
+        let lastUserPlain: string | null = null;
         for (const m of msgs) {
           // 本轮同发的附件不进历史：它由 buildUserTurn 拼在当前 user 轮上，
           // 回声若已入库会在这里出现第二份（同一张图发两遍）。
@@ -1475,7 +1479,9 @@ export function ChatPage({
             ? `${m.payload.text}\n\n${docFileBlock(m.payload.file!.name, docText)}`
             : m.payload.text;
           // 图片不进正文文本，而是作为内容片（供应商各要各的形状）。
-          if (vision && isVisionImage(m.payload.file)) {
+          // 只挂 user 行：assistant 行一旦带 tool_calls，content 必须是字符串，
+          // 塞数组内容片会被供应商当非法请求拒掉。
+          if (vision && m.senderType === "user" && isVisionImage(m.payload.file)) {
             images.push({ rowIndex: rows.length, file: m.payload.file });
           }
           // 历史里的工具链：assistant 的 tool_calls + 对应的 role:"tool" 结果。
@@ -1504,14 +1510,15 @@ export function ChatPage({
               });
             }
           } else {
-            rows.push({
-              role: m.senderType === "user" ? "user" : "assistant",
-              content,
-            });
+            const role = m.senderType === "user" ? "user" : "assistant";
+            if (role === "user") {
+              lastUserRow = rows.length;
+              lastUserPlain = m.payload.text;
+            }
+            rows.push({ role, content });
           }
         }
-        const last = rows[rows.length - 1];
-        if (last && last.role === "user" && last.content === text) rows.pop();
+        if (lastUserRow >= 0 && lastUserRow === rows.length - 1 && lastUserPlain === text) rows.pop();
         return attachImageParts(rows, images, visionImageDataUrl);
       },
       // 本轮附件拼进当前 user 轮（与历史行的口径一致：文档文本跟在正文后、图片走内容片）。

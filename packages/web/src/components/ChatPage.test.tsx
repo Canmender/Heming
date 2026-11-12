@@ -1167,6 +1167,100 @@ describe("ChatPage", () => {
     expect(toolRows[1].content).toContain("用户拒绝");
   });
 
+  it("I3c 带附件的同文历史不被当成本轮重复：提示词里只出现一次", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    // 失败重发场景：上一轮同一句话（带文档）已经落库，本轮正文一字不差重发。
+    // 旧实现拿 content 比正文，带的附件块让两边永远不相等 → 当前这轮在提示词里出现两遍。
+    const echoed: Message = {
+      ...msg("m1", "@和小鸣 帮我总结这份报告", "2026-10-14T01:00:00.000Z"),
+      payload: {
+        text: "@和小鸣 帮我总结这份报告",
+        file: {
+          id: "f1",
+          name: "季度报告.pdf",
+          mime: "application/pdf",
+          size: 2048,
+          text: "本季度营收 1580 万元。",
+        },
+      },
+    };
+    mockMessagesFetch([echoed]);
+    render(<ChatPage />);
+    await act(async () => {});
+    bindAssistant();
+
+    let seen: Parameters<typeof streamChat>[1] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages;
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 帮我总结这份报告");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    const same = seen!.filter(
+      (m) => m.role === "user" && m.content.includes("帮我总结这份报告"),
+    );
+    expect(same).toHaveLength(1);
+  });
+
+  it("I3d 视觉历史：图片只挂 user 行，带 tool_calls 的助手行 content 保持字符串", async () => {
+    const send = vi.fn();
+    vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
+    type SentRow = {
+      role: string;
+      content: unknown;
+      contentParts?: unknown;
+      tool_calls?: { id: string }[];
+      tool_call_id?: string;
+    };
+    // 助手行同时带图与工具调用：图片错挂到它身上（content 变数组）会被供应商当非法请求拒掉。
+    const assistantWithImage = {
+      ...agentMsg("m2", "我看看这张图。", "2026-10-14T01:00:01.000Z"),
+      payload: {
+        text: "我看看这张图。",
+        file: { id: "f7", name: "cat.png", mime: "image/png", size: 900, key: "k7" },
+      },
+      tools: [
+        {
+          id: "call_1",
+          name: "天气__查询",
+          args: '{"city":"杭州"}',
+          status: "ok",
+          result: "杭州 22℃",
+          startedAt: 1,
+          endedAt: 2,
+        },
+      ],
+    } as unknown as Message;
+    mockMessagesFetch([msg("m1", "这是什么", "2026-10-14T01:00:00.000Z"), assistantWithImage]);
+    render(<ChatPage />);
+    await act(async () => {});
+    useLlmStore.setState({
+      profiles: [{ ...testProfile, model: "gpt-4o" }],
+      bindings: { "system-assistant": "p1" },
+      prompts: { "system-assistant": "你是和小鸣" },
+    });
+
+    let seen: SentRow[] | undefined;
+    vi.mocked(streamChat).mockImplementation(async (_profile, messages) => {
+      seen = messages as unknown as SentRow[];
+      return "";
+    });
+
+    await pickAndSend("@和小鸣 接着说");
+    await waitFor(() => expect(seen).toBeDefined());
+
+    const assistantRow = seen!.find((r) => (r.tool_calls?.length ?? 0) > 0);
+    expect(assistantRow).toBeDefined();
+    expect(typeof assistantRow!.content).toBe("string");
+    expect(assistantRow!.contentParts).toBeUndefined();
+    // 工具行仍严格配对（助手行带图也不能破坏 tool_call 链）
+    const toolRows = seen!.filter((r) => r.role === "tool");
+    expect(toolRows.map((r) => r.tool_call_id)).toEqual(["call_1"]);
+  });
+
   it("附件文本进提示词：模型能看到文件内容，且带清晰边界", async () => {
     const send = vi.fn();
     vi.mocked(connectWs).mockReturnValue({ send, close: vi.fn() } satisfies WsHandle);
