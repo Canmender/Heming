@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { ChatMessage } from "../llmClient.js";
 import type { StorageLike } from "../memory/types.js";
-import { estimateRowsTokens, estimateTokens } from "./tokens.js";
+import { IMAGE_TOKEN_COST, estimateRowTokens, estimateRowsTokens, estimateTokens } from "./tokens.js";
 import { DEFAULT_RESERVED_TOKENS, planContext } from "./budget.js";
 import { SUMMARY_HEADER, buildSummaryPrompt, deterministicSummary } from "./summary.js";
 import {
@@ -89,6 +89,31 @@ describe("estimateRowsTokens：每条 +4 结构开销", () => {
 
   it("逐条累加：内容 token + 4", () => {
     expect(estimateRowsTokens([msg("user", "abcd"), msg("assistant", "你好")])).toBe(1 + 4 + 2 + 4);
+  });
+
+  it("带图的历史行按图片成本计（不再按 4 token 算成免费）", () => {
+    const withImage = {
+      role: "user" as const,
+      content: "",
+      contentParts: [
+        { type: "image" as const, mime: "image/png", data: "AAA" },
+        { type: "text" as const, text: "看看这张" },
+      ],
+    };
+    // 图片固定成本 + 文字 token + 结构开销
+    expect(estimateRowTokens(withImage)).toBe(IMAGE_TOKEN_COST + estimateTokens("看看这张") + 4);
+    expect(estimateRowsTokens([withImage])).toBe(estimateRowTokens(withImage));
+    // 纯文本行口径没变
+    expect(estimateRowsTokens([msg("user", "abcd")])).toBe(1 + 4);
+  });
+
+  it("内容片只有文本时按文本计，不额外叠正文", () => {
+    const row = {
+      role: "user" as const,
+      content: "这段正文不该再算一遍",
+      contentParts: [{ type: "text" as const, text: "abc" }],
+    };
+    expect(estimateRowTokens(row)).toBe(1 + 4);
   });
 
   it("与逐条 cost() 口径一致", () => {

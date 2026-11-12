@@ -11,7 +11,7 @@ import type { DenyCause, GateOutcome, RiskLevel } from "./hitl/types.js";
 import { toHitlCall } from "./hitl/classify.js";
 import { deniedText, notExecutedText, ruleDeniedText } from "./hitl/text.js";
 import { supportsKind } from "./capabilityNotice.js";
-import { estimateTokens } from "./agentContext/tokens.js";
+import { IMAGE_TOKEN_COST, estimateTokens } from "./agentContext/tokens.js";
 import { foldToolResults } from "./agentContext/toolResults.js";
 import { discoverTools, searchTools } from "./mcp/discovery.js";
 import type { ToolImage } from "./mcp/bridge.js";
@@ -1205,7 +1205,8 @@ export function runAgentMentions(
               (sum, _call, i) =>
                 sum +
                 estimateTokens(results[i]?.text ?? "") +
-                (results[i]?.images?.length ?? 0) * 800,
+                // 与预算层同一个口径（图片不便宜，别按 800 凑合）
+                (results[i]?.images?.length ?? 0) * IMAGE_TOKEN_COST,
               0,
             );
           }

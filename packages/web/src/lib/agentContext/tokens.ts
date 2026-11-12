@@ -57,12 +57,37 @@ export function estimateTokens(text: string): number {
   return tokens;
 }
 
+/**
+ * 一张图片按多少 token 计（估算口径，宁可高估）。
+ *
+ * ★ 以前 `estimateRowsTokens` 只看 `content` 文本：带图的历史行按 4 token 算，
+ * 实际供应商要花上千 token 读图。于是「预算说还能塞 5000 token」的请求实际已经超限，
+ * 撞 400 之后按 `aggressive` 收紧预算也收不回来——超的是图片，不是文字。
+ * 取值偏保守（1280×720 一档图约 1.1k token，取 1500 留余量）。
+ */
+export const IMAGE_TOKEN_COST = 1500;
+
+/** 单条消息的估算 token：正文 + 内容片（图片按固定成本、文本按字数）+ 结构开销。 */
+export function estimateRowTokens(row: ChatMessage): number {
+  const overhead = ROW_TOKEN_OVERHEAD;
+  const parts = row?.contentParts;
+  if (!Array.isArray(parts) || !parts.length) {
+    return estimateTokens(String(row?.content ?? "")) + overhead;
+  }
+  let sum = 0;
+  for (const part of parts) {
+    if (!part) continue;
+    sum += part.type === "image" ? IMAGE_TOKEN_COST : estimateTokens(String(part.text ?? ""));
+  }
+  return sum + overhead;
+}
+
 /** 整段历史的 token 估算：逐条内容 + 每条约 4 token 结构开销。 */
 export function estimateRowsTokens(rows: ChatMessage[]): number {
   if (!Array.isArray(rows) || !rows.length) return 0;
   let sum = 0;
   for (const row of rows) {
-    sum += estimateTokens(String(row?.content ?? "")) + ROW_TOKEN_OVERHEAD;
+    sum += estimateRowTokens(row);
   }
   return sum;
 }
