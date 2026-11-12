@@ -1,6 +1,6 @@
 {
   "name": "@heming/setup",
-  "version": "135.3.54",
+  "version": "138.3.54",
   "private": true,
   "description": "和鸣 安装程序：自绘安装界面与安装动效，内部静默调用 electron-builder 生成的 NSIS 安装器",
   "author": "和鸣",
@@ -53,5 +53,5 @@
       "splashImage": "build/splash.bmp"
     }
   },
-  "hemingVersion": "d.135.3.54.7"
+  "hemingVersion": "d.138.3.54.10"
 }
