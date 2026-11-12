@@ -105,6 +105,7 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_LOG_PATH` | `runs.jsonl` | 每次 run 一行 JSON（调优输入） |
 | `AGENT_LOG_MAX_BYTES` | `67108864` | 日志超过该字节数就整份轮转为 `.1`（留一代） |
 | `AGENT_RUN_HISTORY_LIMIT` | `500` | 服务内存里保留多少个已结束 run（超出丢最旧，避免长跑漏内存） |
+| `AGENT_SHUTDOWN_GRACE_S` | `5` | 关停时给在跑的 run 留多少秒自己收口（置取消标记后等它走到节点边界） |
 | `AGENT_PIPELINE_DB` | `agent-pipeline.db` | 记忆 + 配置版本 SQLite |
 | `AGENT_MAX_EPISODES` | `5000` | 情景记忆上限（超限删最旧；0 = 不限制） |
 | `AGENT_MAX_DOCUMENTS` | `2000` | 知识库文档上限（超限删最旧并连带删块） |
@@ -203,6 +204,7 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 ```
 
 - `Dockerfile`：python:3.12-slim，非 root 用户，`HEALTHCHECK` 打 `/health`。
+- **滚动更新**：`docker compose up --build` 时旧容器收到 SIGTERM，uvicorn 走 lifespan 关停——`AGENT_SHUTDOWN_GRACE_S` 内把在跑的 run 收口成 `aborted`/`error` 再退出，不会留下「日志里有半截、客户端只看到断连」的 run。
 - `docker-compose.yml`：`agent-pipeline` + `prometheus`，数据卷持久化 `runs.jsonl` 与 SQLite。
 - `prometheus/prometheus.yml`、`prometheus/alerts.yml`：错误率 > 20%、P95 > 120s、单工具失败率 > 30%、发生自动回滚、服务掉线、覆盖率 < 0.9、在线但 30 分钟没有 run 结束（共七条）。
 - **零样本兜底**：带标签的 counter 在第一次自增之前不会出现在 `/metrics` 里（Prometheus 抓到的就是 no data）。所以「工具失败率」「自动回滚」两条告警的表达式外层都套了 `or vector(0)`——没有流量时是 0 而不是空，避免开了 nodata 处理的告警误报或哑掉。`tests/test_metrics_scrape.py` 3 例用 `prometheus_client.parser` 真解析 `/metrics` 文本（格式坏了 Prometheus 就抓不动，字符串包含检查看不出来），并断言零工具流量时确实没有 tool 样本、告警文件里有兜底。
@@ -261,6 +263,7 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 ## 长跑不飘（进程内状态有上限）
 
 - **run 历史有上限**：`AGENT_RUN_HISTORY_LIMIT`（默认 500）控制服务内存里保留多少个已结束 run；超出按完成顺序丢最旧，正在跑的 run 不动。`/health` 的 `runs_retained` 可以看当前占用。没有这一步时，每个请求都会把完整结果（含整份日志行）留在进程里，跑久了就是稳定泄漏。
+- **关停不硬砍在跑的 run**：`AGENT_SHUTDOWN_GRACE_S`（默认 5 秒）——lifespan 退出时先给所有在跑的 run 置取消标记（与用户点「取消」同一条协作式路径），最多等这么久让它们收口；宽限期用完还没结束的落成 `error` 并写明「服务关停：宽限期内没跑完，已中止」，客户端不会永远等到超时。同时释放工具线程池与 SQLite 连接，容器滚动更新时进程能干脆退出。`tests/test_shutdown.py` 3 例覆盖（在跑时关停 / 没有在跑时秒退 / 线程表随 run 结束清理）。
 - **JSONL 日志会轮转**：`AGENT_LOG_MAX_BYTES`（默认 64MB）是单文件上限，超了整份改名为 `runs.jsonl.1`（只留一代）。10 万次调用 ≈ 10 万行，不轮转的话调优读日志、运维 `tail` 都会变慢。
 - **并发浸泡实测**：`scripts/soak.py --runs 20000 --concurrency 8` → **100,000 次模型调用、0 失败**、17.0 run/s、P50 471.65ms / P95 511.1ms、内存峰值 4.55MB / 结束 3.11MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。
 

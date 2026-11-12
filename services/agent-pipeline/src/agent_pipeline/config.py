@@ -153,6 +153,9 @@ class Settings:
     log_max_bytes: int = 64 * 1024 * 1024
     # 服务进程内保留多少个 run 的完整结果（含 log 行）。无上限就是内存泄漏。
     run_history_limit: int = 500
+    # 关停时给正在跑的 run 留多少秒自己收口（节点边界看到取消标记就停）。
+    # 容器滚动更新/重启时太短会把 run 硬砍成 error，太长又把部署拖住。
+    shutdown_grace_s: float = 5.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -189,6 +192,7 @@ class Settings:
             tune_eval_enabled=_env_bool("AGENT_TUNE_EVAL", cls.tune_eval_enabled),
             log_max_bytes=_env_int("AGENT_LOG_MAX_BYTES", cls.log_max_bytes),
             run_history_limit=_env_int("AGENT_RUN_HISTORY_LIMIT", cls.run_history_limit),
+            shutdown_grace_s=_env_float("AGENT_SHUTDOWN_GRACE_S", cls.shutdown_grace_s),
         )
 
     def with_budget(self, **kwargs: Any) -> "Settings":

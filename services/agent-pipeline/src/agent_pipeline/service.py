@@ -90,23 +90,81 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         metrics=runtime.metrics,
     )
 
+    runs: dict[str, dict[str, Any]] = {}
+    # 取消标记：run_id → Event。run 结束后立刻丢弃，避免长期占用。
+    cancels: dict[str, threading.Event] = {}
+    # run_id → 执行线程。关停时要能把它们 join 掉，否则容器 SIGTERM 会直接从中间砍断。
+    threads: dict[str, threading.Thread] = {}
+
+    def _drain_runs() -> None:
+        """关停前先让正在跑的 run 自己收口：置取消标记，再等最多 ``shutdown_grace_s``。
+
+        不这么做，容器滚动更新时 SIGTERM 会直接杀掉进程：客户端看到的是「连不上」，
+        而且这些 run 既没落 ``aborted`` 也没落 ``error``，日志里只剩半截——事后查不出发生过什么。
+        节点边界看到取消标记会走正常收口（answer 里说明是取消前完成的），和用户点「取消」同一条路。
+        """
+        with lock:
+            pending = [rid for rid, entry in runs.items() if entry.get("status") in {"running", "cancelling"}]
+            events = [cancels[rid] for rid in pending if rid in cancels]
+            joining = [threads[rid] for rid in pending if rid in threads]
+        for event in events:
+            event.set()
+        if not joining:
+            return
+        deadline = time.monotonic() + max(0.0, settings.shutdown_grace_s)
+        for thread in joining:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(timeout=remaining)
+        with lock:
+            still_running = [rid for rid in pending if runs.get(rid, {}).get("status") in {"running", "cancelling"}]
+        if still_running:
+            # 宽限期用完还没收口的，至少把状态落成 error 并留一句话，别让客户端永远等到超时。
+            with lock:
+                for rid in still_running:
+                    entry = runs.get(rid) or {"run_id": rid}
+                    entry.update(
+                        status="error",
+                        error="服务关停：宽限期内没跑完，已中止",
+                        finished_at=time.time(),
+                    )
+                    runs[rid] = entry
+
+    def _close_runtime() -> None:
+        """释放进程外资源：工具线程池、SQLite 连接。
+
+        少了这一步，uvicorn 退出时线程池里还有活线程会让进程退得慢，
+        SQLite 的 WAL 也可能留到下次启动才合并。
+        """
+        closer = getattr(runtime.tools, "close", None)
+        if callable(closer):
+            closer()
+        for target in (runtime.memory, runtime.config_store):
+            close = getattr(target, "close", None)
+            if callable(close):
+                close()
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         # 只有显式开启才起后台线程：默认关闭，免得容器一跑起来就在没人看的情况下改配置。
         if settings.tune_enabled:
             tuner.start()
-        yield
-        tuner.stop()
+        try:
+            yield
+        finally:
+            tuner.stop()
+            _drain_runs()
+            _close_runtime()
 
     app = FastAPI(title="agent-pipeline", version="0.1.0", lifespan=lifespan)
-    runs: dict[str, dict[str, Any]] = {}
-    # 取消标记：run_id → Event。run 结束后立刻丢弃，避免长期占用。
-    cancels: dict[str, threading.Event] = {}
     runtime.cancel = lambda run_id: cancels.get(run_id) is not None and cancels[run_id].is_set()
     lock = threading.Lock()
     semaphore = threading.BoundedSemaphore(settings.max_concurrent_runs)
     app.state.runtime = runtime
     app.state.runs = runs
+    app.state.cancels = cancels
+    app.state.threads = threads
     app.state.tuner = tuner
 
     def _evict_locked() -> None:
@@ -152,6 +210,7 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         finally:
             with lock:
                 cancels.pop(run_id, None)
+                threads.pop(run_id, None)
             if gate is not None:
                 # run 已经结束（正常/异常都算）：残留的待审批没人会来点了，
                 # 不收口的话这些 entry 会一直挂在 gate 里，pending 计数只增不减。
@@ -208,6 +267,8 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             tools_allowed=body.tools_allowed,
         )
         thread = threading.Thread(target=_execute, args=(run_id, task), daemon=True, name=f"run-{run_id[:8]}")
+        with lock:
+            threads[run_id] = thread
         thread.start()
         return JSONResponse(status_code=202, content={"run_id": run_id, "status": "running", "poll": f"/v1/runs/{run_id}"})
 
