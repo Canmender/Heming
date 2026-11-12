@@ -202,6 +202,10 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 - **JSONL 日志会轮转**：`AGENT_LOG_MAX_BYTES`（默认 64MB）是单文件上限，超了整份改名为 `runs.jsonl.1`（只留一代）。10 万次调用 ≈ 10 万行，不轮转的话调优读日志、运维 `tail` 都会变慢。
 - **并发浸泡实测**：`scripts/soak.py --runs 20000 --concurrency 8` → **100,000 次模型调用、0 失败**、17.0 run/s、P50 471.65ms / P95 511.1ms、内存峰值 4.55MB / 结束 3.11MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。
 
+## 交付物自检
+
+`tests/test_packaging.py` 会把交付物和代码对一遍：Dockerfile/compose 里出现的每个 `AGENT_*` 变量都必须真的被代码读取（只认「读环境变量」的行，注释不算）、`HEALTHCHECK` 的 `/health` 路由必须存在、compose 引用的 `prometheus/*.yml` 必须存在、告警表达式里的每个 `pipeline_*` 指标都必须真的会被导出、`pyproject` 的 `agent-pipeline` 入口必须就是 Dockerfile 的 `CMD`。它挡的是「文件写了但代码不读」——这条真踩过：`config.py` 读 `AGENT_PIPELINE_LOG`、容器里设的却是 `AGENT_LOG_PATH`，日志于是写到 `/app/runs.jsonl`，重建容器就丢调优输入。
+
 ## 已知边界
 
 1. **记忆有容量上限、没有 TTL**：`MemoryStore` 每次写入后按 `max_episodes` / `max_documents` 删最旧的（删文档连带删块，同一事务），所以磁盘与检索延迟有界；但「三个月前的经验自动过期」还没做——需要按重要性/时间的淘汰策略，而不是只看新旧。

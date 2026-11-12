@@ -138,7 +138,10 @@ class Settings:
     model: str = field(default_factory=lambda: os.environ.get("AGENT_PIPELINE_MODEL", "deepseek-chat"))
     base_url: str = field(default_factory=lambda: os.environ.get("AGENT_PIPELINE_BASE_URL", "https://api.deepseek.com/v1"))
     api_key_env: str = "AGENT_PIPELINE_API_KEY"
-    log_path: str = field(default_factory=lambda: os.environ.get("AGENT_PIPELINE_LOG", "runs.jsonl"))
+    # 名字要和 Dockerfile / compose / README 一致：以前这里读的是
+    # AGENT_PIPELINE_LOG，结果容器里设的 AGENT_LOG_PATH=/app/data/runs.jsonl 被忽略，
+    # 日志写到了 /app/runs.jsonl（重建容器就丢，调优输入也跟着丢）。
+    log_path: str = field(default_factory=lambda: os.environ.get("AGENT_LOG_PATH", "runs.jsonl"))
     db_path: str = field(default_factory=lambda: os.environ.get("AGENT_PIPELINE_DB", "agent-pipeline.db"))
     # 10 万次调用会写 10 万行 JSONL；超过该字节数就整份改名为 .1（保留一代）。
     log_max_bytes: int = 64 * 1024 * 1024
