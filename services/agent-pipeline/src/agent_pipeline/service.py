@@ -152,6 +152,10 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         finally:
             with lock:
                 cancels.pop(run_id, None)
+            if gate is not None:
+                # run 已经结束（正常/异常都算）：残留的待审批没人会来点了，
+                # 不收口的话这些 entry 会一直挂在 gate 里，pending 计数只增不减。
+                gate.cancel_run(run_id)
             semaphore.release()
 
     @app.get("/health")
@@ -215,6 +219,10 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                 raise HTTPException(status_code=409, detail=f"这个 run 已经结束（{entry.get('status')}）")
             cancels.setdefault(run_id, threading.Event()).set()
             entry["status"] = "cancelling"
+        if gate is not None:
+            # 取消必须能把「正卡在等审批」的执行线程放出来：否则用户点了取消，
+            # 还要等 approval_timeout_s（默认 300s）才动，看起来就是「取消没反应」。
+            gate.cancel_run(run_id)
         return {"run_id": run_id, "status": "cancelling", "poll": f"/v1/runs/{run_id}"}
 
     @app.get("/v1/runs/{run_id}")

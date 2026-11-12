@@ -129,7 +129,8 @@ curl -s http://localhost:8000/v1/runs \
 长任务不能只能靠杀进程停。`POST /v1/runs/{id}/cancel` 只置一个标记：正在执行的那次模型调用不会被打断（HTTP 请求没法安全打断），但**下一个节点边界**会看到标记，直接以 `status="aborted"` / `stop_reason="cancelled"` 收口，`summarize` 仍会跑完并回「取消前已完成的内容」——不用等 10 分钟墙钟超时。
 
 - 已完成/失败的 run 再取消返回 409；不存在的 run 返回 404；
-- 取消是协作式的：卡在工具调用里的 run 要等这次工具超时（`AGENT_TOOL_TIMEOUT_S`）才走到下一个边界；
+- **卡在等审批会被立刻放出来**：取消同时把该 run 的待审批全部按拒绝收口，执行线程不再干等 `AGENT_APPROVAL_TIMEOUT_S`（默认 300s）。否则用户点了取消，界面两三分钟没反应，看起来就是「取消坏了」；run 正常结束时也会清掉残留审批，`/health` 的 `pending_approvals` 不会只增不减。`tests/test_cancel_approval.py` 2 例钉住；
+- 取消是协作式的：卡在**工具调用**里的 run 要等这次工具超时（`AGENT_TOOL_TIMEOUT_S`）才走到下一个边界（工具线程没法安全打断）；
 - `tests/test_cancel.py` 4 例覆盖（跑到一半取消、未知 run、已结束 run、重复取消）。
 
 ## 知识库（RAG）
