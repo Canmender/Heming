@@ -957,6 +957,45 @@ describe("ChatPage", () => {
     expect(screen.queryByText("生成中：和小鸣")).not.toBeInTheDocument(); // 不再生成中
   });
 
+  it("「继续生成」是续写而不是重发原提问（不重复用户消息、不重跑工具）", async () => {
+    const send = await setupAgentChat();
+    bindAssistant();
+    vi.mocked(streamChat).mockImplementation(
+      (_p, _m, o) =>
+        new Promise<string>((_res, rej) => {
+          o.onDelta("半");
+          o.signal.addEventListener("abort", () =>
+            rej(new DOMException("AbortError", "AbortError")),
+          );
+        }),
+    );
+
+    await pickAndSend("@和小鸣 写段文字");
+    await waitFor(() => expect(screen.getByText("生成中：和小鸣")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
+    const errEv = await waitFor(() => {
+      const found = send.mock.calls.map((c) => c[0]).find((e) => e.type === "agent_error");
+      expect(found).toBeTruthy();
+      return found;
+    });
+    act(() => {
+      lastHandlers().onEvent(errEv);
+    });
+    await waitFor(() => expect(screen.getByText("继续生成")).toBeInTheDocument());
+
+    const before = sealedOf(send, "send_message").length;
+    fireEvent.click(screen.getByText("继续生成"));
+
+    await waitFor(() => expect(sealedOf(send, "send_message").length).toBe(before + 1));
+    const texts = sealedOf(send, "send_message").map(
+      (c) => String((c.plain as { text?: string }).text ?? ""),
+    );
+    // 续写指令发出去了
+    expect(texts.at(-1)).toContain("接着上一轮往下写");
+    // 原提问全篇只出现一次（没有被重发成第二条用户消息）
+    expect(texts.filter((text) => text.includes("写段文字"))).toHaveLength(1);
+  });
+
   it("他机流：非本机 agent_chunk 按 text 累积渲染，message_new{streamId} 收口移除", async () => {
     await setupAgentChat();
 

@@ -250,6 +250,15 @@ export function clampComposerHeight(n: number): number {
 const STICK_BOTTOM_PX = 80;
 
 /**
+ * 「继续生成」发出去的续写指令（不是重发原提问）。
+ *
+ * 重发原提问会在历史里留下第二条同样的用户消息，并把已执行过的工具再跑一遍；
+ * 只让模型接着写，历史里已有原提问与被中断的部分回答，它知道从哪接。
+ */
+const CONTINUE_PROMPT =
+  "继续（接着上一轮往下写，不要重复已经写过的内容；如果上一轮被中断，请先把没说完的结论补完）";
+
+/**
  * 历史里最多回放的轮数。
  *
  * ★ 以前是 `slice(-30)`：第 31 条以前的消息**在进摘要之前就被丢掉**了，
@@ -662,7 +671,9 @@ export function ChatPage({
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 触发句柄（convId → 集合）：「中断」只 abort 当前会话的流；卸载时全部中止（关页不空烧 token）。 */
   const runsRef = useRef<Record<string, Set<{ abortAll(): void }>>>({});
-  /** 本机流元数据（streamId → 触发上下文）：onLocalDelta 回填 agentId、重试取原触发文本与本轮附件。 */
+  /**
+   * 本机流元数据（streamId → 触发上下文）：onLocalDelta 回填 agentId、续写沿用同一智能体。
+   */
   const streamMeta = useRef<
     Record<string, { agentId: string; name: string; text: string; attachment?: TurnAttachment }>
   >({});
@@ -1919,6 +1930,15 @@ export function ChatPage({
   );
 
   /** 错误行重试：清掉旧项，按原触发文本重新跑该单个 mention（新 streamId 重新登记）。 */
+  /**
+   * 「继续生成」：接着上一轮往下写，**不重发原提问**。
+   *
+   * 以前这里用 `meta.text` 整轮重跑，带来两个真实问题：
+   * 1. 历史里会再出现一条同样的用户消息——模型看到问题被问了两次，回答开始自我重复；
+   * 2. 已经执行过的工具会再跑一遍（同一次读文件、同一次写盘都重复落地）。
+   *
+   * 续写指令只说「接着写」，原提问与被中断的部分回答都已在历史里，模型自然知道从哪接。
+   */
   const retryStream = (streamId: string) => {
     const meta = streamMeta.current[streamId];
     if (!meta) return;
@@ -1930,7 +1950,13 @@ export function ChatPage({
     removeStream(streamId);
     delete streamMeta.current[streamId];
     delete streamTaskRef.current[streamId];
-    startRun([{ agentId: meta.agentId, name: meta.name }], meta.text, taskId, meta.attachment);
+    // 走正常发送路径（不是 startRun）：续写指令也要作为一条用户消息落库、上行，
+    // 否则别的设备/成员看不到这一轮是被接着生成的，重启后历史里也断在中断处。
+    void submitMessage(CONTINUE_PROMPT, [{ agentId: meta.agentId, name: meta.name }], taskId).then(
+      (result) => {
+        if (!result.ok) setSendNotice(result.error, "error");
+      },
+    );
   };
 
   // 切会话清输入区浮层：表情/语音都是会话级（ChatPage 常驻不重挂）。
