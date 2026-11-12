@@ -108,6 +108,15 @@ const TAR_EXCLUDES = [
   "*.log",
   "packages/desktop/resources",
   "packages/infohub",
+  /*
+   * 自绘安装器（d.138）的构建产物：`packages/setup/payload/inner-setup.exe`（357MB）与
+   * `packages/desktop/update-helper/setup.exe`（409MB）都是 electron-builder 打出的整包副本。
+   * d.140 第一次带着它们打部署包，体积从 d.137 的 34MB 涨到 790MB，被第 8 步的 300MB 红线拦下。
+   * 云端只要 web/server/shared 的 dist，这两处纯属本机安装器原料。
+   */
+  "packages/setup/build",
+  "packages/setup/payload",
+  "packages/desktop/update-helper",
   "plugin-kit/plugins/pet-widget/dist",
   "plugin-kit/plugins/workflow-kit/dist",
   "vendor",
@@ -118,7 +127,7 @@ const TAR_EXCLUDES = [
 ];
 
 /** deploy.md §2 的两条校验：不该有的必须为 0，必须有的至少 1。 */
-const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp|\.workbuddy|\.ui-check-tmp|\.agents|(^|\/)plugins-catalog\/|\.log$|packages\/desktop\/(runtime|web-dist|resources)/;
+const TAR_FORBIDDEN = /node_modules|\.superpowers|@hemingdesktop|(^|\/)release\/|\.tmp|\.workbuddy|\.ui-check-tmp|\.agents|(^|\/)plugins-catalog\/|\.log$|packages\/desktop\/(runtime|web-dist|resources)|(^|\/)packages\/(setup\/(build|payload)|desktop\/update-helper)\//;
 const TAR_REQUIRED = [
   "packages/web/dist/index.html",
   "packages/server/dist/",
