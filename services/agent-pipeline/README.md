@@ -135,6 +135,12 @@ curl -s http://localhost:8000/v1/runs \
 - 取消是协作式的：卡在**工具调用**里的 run 要等这次工具超时（`AGENT_TOOL_TIMEOUT_S`）才走到下一个边界（工具线程没法安全打断）；
 - `tests/test_cancel.py` 4 例覆盖（跑到一半取消、未知 run、已结束 run、重复取消）。
 
+**四路叠加压测**（工具 + 审批 + 中途取消 + 8 线程并发）：
+`soak.py --runs 3000 --concurrency 8 --tools --approval --cancel-rate 0.15` →
+2,571 次真实工具执行、2,690 次审批自动裁决、429 次中途取消、15,494 次模型调用、**0 失败**、
+14.9 run/s、P50 600ms / P95 749ms、内存峰值 4.76MB（结束 1.78MB）、`episodes` 稳定在 5000。
+这条比单跑一条路径更接近真实流量：审批闸、取消标记、工具线程池、SQLite、指标都在同一时刻被用。
+
 ## 预算截断要看得见
 
 - **单步工具预算**：一步最多 `AGENT_STEP_TOOL_BUDGET`（默认 6）次调用。超出时以前 `calls[:remaining]`

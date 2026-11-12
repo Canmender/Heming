@@ -105,3 +105,20 @@ def test_same_run_id_submitted_twice_runs_once(runtime_factory) -> None:
         done = _wait_done(client, "fixed-run-id")
         assert done["status"] == "ok"
         assert _runs_ok(client.get("/metrics").text) == 1, "幂等提交不能把同一个 run 跑两遍"
+
+def test_same_run_id_submitted_concurrently_runs_once(runtime_factory) -> None:
+    """幂等必须在**并发**下也成立：8 个线程同时用同一个 run_id 提交，只能真跑一次。
+
+    串行提交的幂等靠「先查字典再写」就能过；并发时若没把「查+占位」放进同一把锁，
+    会出现两个线程都判定「还没有这个 run」→ 两条执行线程、两次计费、结果互相覆盖。
+    """
+    with _client(runtime_factory, max_concurrent=8) as client:
+        body = {"goal": "并发同 id", "run_id": "race-run-id"}
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            responses = list(pool.map(lambda _: client.post("/v1/runs", json=body), range(8)))
+
+        assert all(r.status_code == 202 for r in responses), [r.status_code for r in responses]
+        assert {r.json()["run_id"] for r in responses} == {"race-run-id"}
+
+        assert _wait_done(client, "race-run-id")["status"] == "ok"
+        assert _runs_ok(client.get("/metrics").text) == 1, "同一个 run_id 只能真正跑一次"
