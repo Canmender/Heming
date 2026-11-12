@@ -83,6 +83,8 @@ def new_state(run_id: str, task: TaskSpec, *, config_version: int = 0) -> dict[s
         "started_at": time.time(),
         "last_had_tool_calls": False,
         "blocking_issues": [],
+        "last_test_output": "",
+        "coverage_failures": 0,
     }
 
 
@@ -393,6 +395,26 @@ def critic_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     )
     critiques = [*(state.get("critiques", [])), critique.to_dict()]
     updates: dict[str, Any] = {"critiques": critiques, "blocking_issues": critique.blocking_issues}
+    # 「评审不过 → 重规划」的决定必须落在节点里：条件边里改 state 不保证进图状态，
+    # 以前 replans 与 plan 重置都写在边里，等于每次都从同一个没变的计划重来。
+    passed = critique.score >= runtime.settings.critic_threshold and not critique.blocking_issues
+    coverage = state.get("coverage")
+    target = task.coverage_target if task.coverage_target is not None else runtime.settings.coverage_target
+    coverage_ok = isinstance(coverage, (int, float)) and float(coverage) >= target
+    wants_adversarial = task.mode == "adversarial" and not coverage_ok
+    if not passed and not wants_adversarial:
+        replans = int(state.get("replans", 0))
+        if replans < runtime.settings.budget.max_replans:
+            updates.update(
+                {
+                    "replans": replans + 1,
+                    "plan": [],
+                    "step_index": 0,
+                    "step_tool_calls": 0,
+                }
+            )
+        else:
+            updates["stop_reason"] = "critic_blocked"
     return {**state, **updates}
 
 
@@ -402,11 +424,19 @@ def adversarial_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
         return {**state, "status": "budget"}
     round_no = int(state.get("adversarial_round", 0)) + 1
     issues = state.get("blocking_issues") or []
-    context = _context(
-        runtime,
-        state,
-        extra="上轮评审问题：\n" + ("\n".join(f"- {i}" for i in issues) if issues else "（无）") + "\n请只输出 JSON。",
-    )
+    # 实现者必须看到「上一轮到底哪条测试红了、覆盖率怎么变的」——只给评审意见
+    # 会让它反复改同一处、或改一个早已通过的用例。
+    previous_coverage = state.get("coverage")
+    previous_output = str(state.get("last_test_output", ""))[-1200:]
+    coder_brief = [
+        "上轮评审问题：",
+        "\n".join(f"- {i}" for i in issues) if issues else "（无）",
+        f"上一轮覆盖率：{previous_coverage if previous_coverage is not None else '（还没跑出数字）'}",
+    ]
+    if previous_output.strip():
+        coder_brief += ["上一轮测试命令输出（尾部）：", previous_output]
+    coder_brief.append("请只输出 JSON。")
+    context = _context(runtime, state, extra="\n".join(coder_brief))
     coder, _ = _call_json(runtime, state, prompt_key="adversarial_coder", user_text=context)
 
     # 覆盖率必须来自真实命令输出；没有接测试命令就如实记 None。
@@ -419,6 +449,10 @@ def adversarial_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     coverage = report.get("coverage")
     if isinstance(coverage, (int, float)):
         runtime.metrics.set_coverage(float(coverage))
+    # 覆盖率命令本身跑不起来（缺依赖、命令写错、测试直接崩）时，别硬耗满对抗轮数：
+    # 连续两轮都拿不到数字就收口，并如实写 stop_reason，而不是假装在"迭代"。
+    coverage_failures = int(state.get("coverage_failures", 0))
+    coverage_failures = 0 if isinstance(coverage, (int, float)) else coverage_failures + 1
 
     tester_context = (
         f"实现者说明：{coder.get('summary', '')}\n"
@@ -440,7 +474,11 @@ def adversarial_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
         "adversarial_round": round_no,
         "coverage": float(coverage) if isinstance(coverage, (int, float)) else None,
         "blocking_issues": [str(b.get("case", b)) if isinstance(b, dict) else str(b) for b in bugs],
+        "last_test_output": str(report.get("output", ""))[-2000:],
+        "coverage_failures": coverage_failures,
     }
+    if coverage_failures >= 2:
+        updates["stop_reason"] = "coverage_command_failed"
     target = TaskSpec(**_task(state)).coverage_target
     target = runtime.settings.coverage_target if target is None else target
     passed = (
@@ -449,6 +487,10 @@ def adversarial_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
         and not bugs
     )
     updates["adversarial_passed"] = passed
+    # 「本轮是最后一轮但还没达标」要在节点里写 stop_reason：条件边的返回值只决定
+    # 走向，边里对 state 的改动不保证进图状态，收口原因会丢。
+    if not passed and round_no >= runtime.settings.budget.max_adversarial_rounds:
+        updates.setdefault("stop_reason", "coverage_gap")
     return {**state, **updates}
 
 

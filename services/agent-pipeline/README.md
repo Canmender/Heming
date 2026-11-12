@@ -156,6 +156,13 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 `--fail-rate` 是确定性的：`fail_every = round(1 / fail_rate)`，每第 N 次模型调用抛 `LLMError`，所以同一组参数结果可复现。配合 `--canary` 时，灰度版本承接全部流量，错误率超过 `error_threshold` 后 `maybe_rollback` 会把它挪回 `archived`，而 active 版本继续可用——实测 `--runs 200 --fail-rate 0.5` 得到 `rollbacks: 1`、`canary_stage: "archived"`、退出码 0。
 
+## 对抗环（Coder ↔ Tester）的收口口径
+
+- **实现者看得到上一轮证据**：第二轮起，Coder 的上下文里带「上一轮测试输出尾部（1200 字）+ 上一轮覆盖率 + 上一轮缺陷清单」。只给评审意见会让它反复改同一处、或改一个早已通过的用例。
+- **覆盖率命令坏掉不硬撑**：`coverage_runner` 抛异常或拿不到数字时，`coverage=None`；连续两轮都拿不到就写 `stop_reason="coverage_command_failed"` 并转 summarize，不再空转到 `max_adversarial_rounds`（配置调大也不会白烧钱）。
+- **轮数用尽如实收口**：最后一轮仍未达标时 `stop_reason="coverage_gap"`，`adversarial_passed=False`，不会把 0.4 的覆盖率说成通过。
+- **「评审不过 → 重规划」在节点里生效**：`critic_node` 重置计划并累加 `replans`（用尽后写 `stop_reason="critic_blocked"`）。以前这些改动写在 LangGraph 的条件边里，边对 state 的修改不保证进图状态，等于每次都拿同一份计划重跑。
+
 ## 已知边界
 
 1. **记忆有容量上限、没有 TTL**：`MemoryStore` 每次写入后按 `max_episodes` / `max_documents` 删最旧的（删文档连带删块，同一事务），所以磁盘与检索延迟有界；但「三个月前的经验自动过期」还没做——需要按重要性/时间的淘汰策略，而不是只看新旧。

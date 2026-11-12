@@ -42,6 +42,8 @@ class PipelineState(TypedDict, total=False):
     started_at: float
     last_had_tool_calls: bool
     blocking_issues: list[str]
+    last_test_output: str
+    coverage_failures: int
     dropped_context: list[str]
 
 
@@ -95,15 +97,13 @@ def route_after_critic(state: dict[str, Any], runtime: Runtime) -> str:
     wants_adversarial = task.mode == "adversarial" and not _coverage_ok(state, runtime)
     if passed and not wants_adversarial:
         return "summarize"
-    if wants_adversarial and int(state.get("adversarial_round", 0)) < runtime.settings.budget.max_adversarial_rounds:
+    if wants_adversarial:
+        # 轮次用完时 adversarial_node 会自己写 stop_reason，再走一次也能立刻收口。
         return "adversarial"
-    if int(state.get("replans", 0)) < runtime.settings.budget.max_replans:
-        state["replans"] = int(state.get("replans", 0)) + 1
-        state["plan"] = []
-        state["step_index"] = 0
-        return "plan"
-    state["stop_reason"] = "critic_blocked"
-    return "summarize"
+    # critic_node 已经决定「重置计划重做」还是「收口」，这里只负责走向。
+    if state.get("stop_reason"):
+        return "summarize"
+    return "plan"
 
 
 def route_after_adversarial(state: dict[str, Any], runtime: Runtime) -> str:

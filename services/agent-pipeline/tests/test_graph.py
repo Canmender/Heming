@@ -133,3 +133,51 @@ def test_budget_exhaustion_does_not_call_model_again(runtime_factory, tmp_path) 
     assert "预算已用尽" in result.answer
     assert len(runtime.llm.calls) == 2, "预算耗尽后不能再调模型（否则预算形同虚设）"
     assert row["stop_reason"] == "llm_calls"
+
+def test_critic_rejection_replans_once(runtime_factory) -> None:
+    """评审不过要真的重规划（而不是拿同一份计划再跑一遍）。"""
+    script = [
+        _json({"steps": [{"goal": "实现主流程", "done_when": "能跑通"}]}),
+        {"text": "初版实现"},
+        _json({"verdict": "done", "reasons": ["能跑"]}),
+        _json({"score": 0.3, "blocking_issues": ["没处理异常分支"]}),
+        _json({"steps": [{"goal": "补异常分支", "done_when": "异常有测试覆盖"}]}),
+        {"text": "补上异常处理"},
+        _json({"verdict": "done", "reasons": ["补完了"]}),
+        _json({"score": 0.9, "blocking_issues": []}),
+        _json({"answer": "完成", "citations": []}),
+    ]
+    runtime = runtime_factory(script)
+
+    result, row = run_once(runtime, TaskSpec(goal="做个能用的功能", cwd="."))
+
+    assert result.status == "ok"
+    assert row["replans"] == 1
+    assert row["stop_reason"] is None
+    assert [step.goal for step in result.plan] == ["补异常分支"]
+    assert len(runtime.llm.calls) == 9
+
+
+def test_critic_blocked_when_replans_exhausted(runtime_factory) -> None:
+    """重规划次数用尽就如实收口，不能无限重来。"""
+    from dataclasses import replace
+
+    script = [
+        _json({"steps": [{"goal": "实现", "done_when": "能跑"}]}),
+        {"text": "一版"},
+        _json({"verdict": "done", "reasons": ["能跑"]}),
+        _json({"score": 0.2, "blocking_issues": ["完全不行"]}),
+        _json({"answer": "没做出来", "citations": []}),
+    ]
+    runtime = runtime_factory(script)
+    runtime.settings = replace(
+        runtime.settings,
+        budget=replace(runtime.settings.budget, max_replans=0),
+    )
+
+    result, row = run_once(runtime, TaskSpec(goal="实现", cwd="."))
+
+    assert row["stop_reason"] == "critic_blocked"
+    assert row["replans"] == 0
+    assert len(runtime.llm.calls) == 5
+    assert result.status == "ok"
