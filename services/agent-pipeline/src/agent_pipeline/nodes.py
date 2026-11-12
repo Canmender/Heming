@@ -400,14 +400,30 @@ def reflect_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
         updates["stop_reason"] = "reflect_abort"
     else:  # continue
         index = int(state.get("step_index", 0))
+        # 反射者可以指定「下一步做哪个步骤」：协议里有 next_step、提示词也要求它输出，
+        # 但以前没人读——反思说「先去第 3 步补验证」时，执行者仍按顺序往下走，
+        # 于是计划里写着「先查证再做决定」也会被做成「按顺序做」。
+        target = reflection.next_step
+        jumped = (
+            isinstance(target, int)
+            and 0 <= target < len(plan)
+            and target != index
+            and plan[target].status != "done"
+        )
+        if jumped:
+            index = target
+            updates["step_index"] = target
         step = plan[min(index, len(plan) - 1)] if plan else None
         updates["step_tool_calls"] = 0
         # 模型偶发只执行一半：本轮观测里有失败就把该步骤留着重试，但最多重试一次（受 max_steps 限制）。
         if step is not None and step.status not in ("done", "failed"):
             step.status = "running"
-            plan[state.get("step_index", 0)] = step if state.get("step_index", 0) < len(plan) else step
-            if int(state.get("step_index", 0)) >= len(plan):
+            position = min(index, len(plan) - 1)
+            plan[position] = step
+            if index >= len(plan):
                 updates["step_index"] = max(0, len(plan) - 1)
+            updates["plan"] = [s.to_dict() for s in plan]
+        elif jumped:
             updates["plan"] = [s.to_dict() for s in plan]
     _remember(runtime, state, "lesson", f"反思（{verdict}）：" + "；".join(reflection.reasons)[:200], importance=0.5)
     return {**state, **updates}
