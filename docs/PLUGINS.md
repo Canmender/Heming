@@ -601,7 +601,7 @@ node scripts/plugin-schema.mjs --check                         # 校验 plugin-k
 **沙箱 bundle 插件**，清单、签名、安装、发布与桌宠等界面插件走完全同一条链路，不再有第二种插件形态。
 
 - 源码：`plugin-kit/plugins/automations/`（`heming.automations` 1.0.0）与
-  `plugin-kit/plugins/infohub/`（`heming.infohub` 1.3.0），与其它插件并列。
+  `plugin-kit/plugins/infohub/`（`heming.infohub` 1.4.0），与其它插件并列。
 - 页面：`contributions.page.entry` 指向包内原生 HTML（无构建步骤、不引 React），宿主在 `widget://`
   沙箱里加载（见 §13.4）；自动化另有 `contributions.background` 后台页，信息中枢另有 `commands`。
 - 首页卡：两者都声明 `contributions.homeCards`，由宿主首页统一渲染（运行期文案与速览项由 `homeCardSet()` 覆盖）；
@@ -609,6 +609,10 @@ node scripts/plugin-schema.mjs --check                         # 校验 plugin-k
 - 能力边界：信息中枢的归档检索通过 `permissions.infohub`（只读 `infohubCall`）调宿主桥，自动化靠
   后台页定时调同一座桥；插件包本身不再自带 Python 引擎，也不需要「首次启用补下载模块包」；
   信息中枢要读归档仍依赖选装的 Python 引擎（见本节末尾的例外说明）。
+- 信息中枢的日程页（d.140）另外声明 `permissions.chat`：页面拿到 `chatConfig()` 的本机网关地址与模型列表，
+  在用户勾选「允许发送」后把归档消息切批发给 `/chat/completions`，把识别结果整理成可编辑表格
+  （只存插件私有数据 `aiItems`，不写回归档库、不写宿主日程）。这是 `chat` 权限继桌宠之后的第二个使用方；
+  宿主提示词与用户供应商 Key 仍然永不下发。
 - 发布：与其它插件相同——`node scripts/publish-plugin.mjs plugin-kit/plugins/<目录>` 发布到仓库根
   `plugins-catalog/`，再同步到云端 `/opt/heming/plugins`（见 §9）；源码树里的 `packageSha256` /
   `publisher` / `signature` 由打包工具回写。
