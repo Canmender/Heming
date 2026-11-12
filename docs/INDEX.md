@@ -9,7 +9,7 @@
 | [../README.md](../README.md) | 项目定位、启动、打包、结构、数据边界 |
 | [HANDOFF.md](HANDOFF.md) | 新会话接手：现状、架构红线、工作约定、下一步 |
 | [VERSION-MANAGEMENT.md](VERSION-MANAGEMENT.md) | 5 段版本号、bump 脚本、发布顺序、打包坑 |
-| [deploy.md](deploy.md) | 裸机部署（已去 Docker）、两套产物、自动更新源、备份回滚 |
+| [deploy.md](deploy.md) | 裸机部署（已去 Docker）、两套产物、自动更新源、安装包体积构成与瘦身、备份回滚 |
 
 ## 2. 功能说明（用户/维护者视角）
 
