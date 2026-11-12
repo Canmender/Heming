@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hmac
 import threading
 import time
 import uuid
@@ -77,6 +78,39 @@ def _tuner_summary(report: Any) -> dict[str, Any] | None:
         "candidates": len(report.candidates),
         "applied_version": report.applied_version,
     }
+
+
+def _install_auth(app: FastAPI, settings: Settings) -> None:
+    """入站鉴权：设了 `AGENT_SERVICE_TOKEN` 就校验 `Authorization: Bearer <token>`。
+
+    `/health`（存活探针）与 `/metrics`（Prometheus 抓取，只有计数没有对话内容）
+    放行；`/v1/**` 一律要令牌。空 token 视为本机调试形态，不校验——但要让它
+    可见：`/health` 会报 `auth: "off"`。
+    """
+    token = settings.service_token.strip()
+    if not token:
+        return
+    exempt = {"/health", "/metrics"}
+
+    @app.middleware("http")
+    async def _guard(request, call_next):  # noqa: ANN001 - Starlette 中间件签名
+        if request.url.path in exempt:
+            return await call_next(request)
+        header = request.headers.get("authorization", "")
+        presented = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        if not hmac.compare_digest(presented, token):
+            return JSONResponse(
+                {
+                    "detail": (
+                        "缺少或错误的 Authorization。这个服务要求 "
+                        "`Authorization: Bearer <AGENT_SERVICE_TOKEN>`（与上游模型的 "
+                        "AGENT_PIPELINE_API_KEY 不是同一个东西）。"
+                    )
+                },
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return await call_next(request)
 
 
 def create_app(settings: Settings | None = None, runtime: Runtime | None = None) -> FastAPI:
@@ -176,6 +210,9 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             _close_runtime()
 
     app = FastAPI(title="agent-pipeline", version="0.1.0", lifespan=lifespan)
+
+    # 鉴权中间件要在路由注册之前挂上（中间件对之后注册的路由同样生效，但顺序更清楚）。
+    _install_auth(app, settings)
     runtime.cancel = lambda run_id: cancels.get(run_id) is not None and cancels[run_id].is_set()
     lock = threading.Lock()
     semaphore = threading.BoundedSemaphore(settings.max_concurrent_runs)
@@ -244,6 +281,8 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             "memory": runtime.memory.count(),
             "tools": runtime.tools.registry.names(),
             "approval_mode": settings.approval_mode,
+            # 入站鉴权是否开启：空 token 时不校验，但必须让人一眼看见，而不是以为已经保护了。
+            "auth": "on" if settings.service_token.strip() else "off",
             "pending_approvals": len(gate.pending()) if gate is not None else 0,
             "running": sum(1 for item in runs.values() if item.get("status") == "running"),
             "runs_retained": len(runs),

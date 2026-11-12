@@ -124,6 +124,7 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_APPROVAL_MODE` | `off` | `write` = 非只读工具执行前挂起等审批；`off` = 不拦 |
 | `AGENT_APPROVAL_TIMEOUT_S` | `300` | 等审批的时限；超时按**拒绝**处理（绝不悄悄放行） |
 | `AGENT_ALLOW_PRIVATE_HOSTS` | `0` | 放开 `http_get` 访问内网/本机地址（默认拒；见「网络出口」） |
+| `AGENT_SERVICE_TOKEN` | 空 | 服务自己的入站令牌：设了则 `/v1/**` 要 `Authorization: Bearer <token>`（空 = 本机调试，`/health` 报 `auth: off`） |
 
 预算（`Budget`）：`max_steps=8`、`max_llm_calls=40`、`max_tokens=120_000`、`max_wall_clock_s=600`、`step_tool_budget=6`、`max_replans=2`、`max_adversarial_rounds=2`。超预算时流水线**不硬失败**，而是带 `status="budget"` 和 `stop_reason` 返回已完成的部分。
 
@@ -283,6 +284,25 @@ curl -s -X POST http://localhost:8000/v1/runs/$ID/approve \
 仍未覆盖：DNS rebinding（解析与应用之间地址被换掉）。要彻底堵住需要连到解析后的 IP 再校验，
 本项目选择「不做花活、把默认面收紧」，并把这条写进「已知边界」。
 
+## 入站鉴权（服务自己的门）
+
+`AGENT_PIPELINE_API_KEY` 是**上游模型**（DeepSeek 等）的 Key，不是这个服务的口令；
+服务自己的门是 `AGENT_SERVICE_TOKEN`：
+
+```bash
+export AGENT_SERVICE_TOKEN=$(python -c "import secrets;print(secrets.token_urlsafe(24))")
+curl -s http://localhost:8000/v1/tools -H "Authorization: Bearer $AGENT_SERVICE_TOKEN"
+```
+
+- 设了令牌后，`/v1/**`（提交 run、查 run、审批、知识库、配置、调优）都要求
+  `Authorization: Bearer <token>`，缺/错一律 401（`WWW-Authenticate: Bearer`），错误文案直接说明
+  「与上游模型的 `AGENT_PIPELINE_API_KEY` 不是同一个东西」；
+- `/health`（存活探针）与 `/metrics`（Prometheus 抓取，只有计数、没有对话内容）放行——否则
+  compose 的 `HEALTHCHECK` 与抓取会同时坏掉；
+- 令牌为空视为本机调试形态：服务不拦，但 `/health` 会报 `auth: "off"`，避免「以为已经保护了」；
+- `tests/test_auth.py` 4 例钉住：没带/带错 401、`/v1/knowledge` 与 `/v1/tools` 同样要令牌、
+  `/health` 与 `/metrics` 放行、令牌为空时 `auth == "off"` 且不拦。
+
 ## 可观测与回滚
 
 - 指标：`pipeline_runs_total{status}`、`pipeline_run_duration_seconds`、`pipeline_node_duration_seconds{node}`、`pipeline_tool_calls_total{tool,status}`（**`tool` 标签有界**：已注册工具名最多 32 个，其余归 `other`；模型幻觉出来的不存在工具归 `unknown`——否则模型每次编个新名字就是一个新时序，Prometheus 会被撑爆。`status` 里 `cached` 表示幂等缓存命中、没真的执行，`ok`/`error` 才是真实执行；工具失败率告警的分母只取 `ok|error`，否则缓存命中会把失败率稀释成不告警）、`pipeline_llm_tokens_total{kind}`、`pipeline_coverage_ratio`、`pipeline_rollback_total{reason}`、`pipeline_config_version`。
@@ -390,7 +410,8 @@ import { createPipelineClient } from "../lib/pipeline/client.js";
 
 const client = createPipelineClient({
   baseUrl: "http://127.0.0.1:8000",
-  apiKey: process.env.AGENT_PIPELINE_API_KEY,  // 与服务端 AGENT_PIPELINE_API_KEY 同一个值
+  // 服务自己的入站令牌（= 服务端 AGENT_SERVICE_TOKEN），不是上游模型的 Key
+  apiKey: process.env.AGENT_SERVICE_TOKEN,
   onPendingApproval: async (approval) => {
     // 这里接桌面端自己的确认弹窗（与 agentStream 的 HITL 是两套：这套问的是流水线里的工具）
     return window.confirm(`允许流水线执行 ${approval.tool}？`);
@@ -414,7 +435,7 @@ run.answer; run.citations; run.coverage; run.stopReason;
 .venv/bin/python -m pytest --cov                      # Linux / 容器
 ```
 
-- 当前 **241 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
+- 当前 **245 passed / 覆盖率 95.3%**，`pyproject.toml` 里 `[tool.coverage.report] fail_under = 90`：低于 90% 直接失败，防止后续重构悄悄丢掉错误分支。
 - 覆盖到的「容易写成纸面规则」的路径：预算三条线（墙钟 0 秒 / 1 token / 调用次数用尽都必须真停）、覆盖率解析（`TOTAL 140%`、`TOTAL -5%`、无数字都返回 `None` 而不是猜）、真实跑测试命令（退出码非 0 或超时判 `ok=False`）、`http_get` 打真 HTTP 服务、`/metrics` 用 `prometheus_client` 解析器验证格式、CLI 的中文汇报输出。
 - 覆盖率解析这条修过一个真 bug：`TOTAL -5%` 被读成 5%（正则把负号后的数字当覆盖率），已加 `(?<!-)` 并补用例。
 
