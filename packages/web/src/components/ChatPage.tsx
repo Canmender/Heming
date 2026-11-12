@@ -1072,12 +1072,27 @@ export function ChatPage({
    * 抽成函数而不是内联在 deps 里：HITL 闸门也要按工具名查风险元数据，
    * 桥必须**是同一个**——查的不是实际执行者的桥 = 问错了人。
    */
-  const buildToolsFor = (agentId: string) =>
-    capabilityRegistry.build({
+  /**
+   * 一次 run（一轮对话）内复用同一个工具桥。
+   *
+   * 每次 `capabilityRegistry.build()` 都是一份新目录：`getTools` 用 A 去执行、HITL
+   * 用 B 去查风险，等于问错了人（同名工具在两次构建之间可能已消失/换代）。
+   * 缓存到 onStart 清一次：新的一轮必须看到最新的 MCP 目录。
+   */
+  const toolBridgeRef = useRef(
+    new Map<string, ReturnType<typeof capabilityRegistry.build>>(),
+  );
+  const buildToolsFor = (agentId: string) => {
+    const cached = toolBridgeRef.current.get(agentId);
+    if (cached !== undefined) return cached;
+    const bridge = capabilityRegistry.build({
       agentId,
       conversationId: convId,
       selfEdit: selfEditRef.current!,
     });
+    toolBridgeRef.current.set(agentId, bridge);
+    return bridge;
+  };
 
   /**
    * 按工具名取风险元数据（闸门分类用）。
@@ -1086,8 +1101,8 @@ export function ChatPage({
    * MCP 桥不提供——它的 `annotations` 是 untrusted hint，服务端自述不算数。
    */
   const toolMetaOf = (name: string, agentId: string) => {
-    const bridge = buildToolsFor(agentId);
-    return bridge?.meta?.(name);
+    // 与执行走同一个缓存桥（见 toolBridgeRef 注释）
+    return buildToolsFor(agentId)?.meta?.(name);
   };
 
   /** HITL 待确认请求（工具调用确认弹窗的数据源）。 */
@@ -1606,6 +1621,8 @@ export function ChatPage({
           useTaskStore.getState().bindStream(taskId, streamId);
         }
         resetToolTrace(streamId);
+        // 新的一轮从最新的工具目录起步（上轮缓存的桥可能已过期）
+        toolBridgeRef.current.clear();
         routeTraceRef.current[streamId] = [];
         turnToolCountRef.current = 0;
         // 新一轮开始：重置自我修改的单轮预算（上轮用掉的次数不该拖累这一轮）
