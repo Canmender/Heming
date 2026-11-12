@@ -256,12 +256,14 @@ class ToolRuntime:
             self.registry.get(name)
         except ToolError:
             return "unknown"
-        if name in self._metric_labels:
-            return name
-        if len(self._metric_labels) < self.MAX_TOOL_METRIC_LABELS:
-            self._metric_labels.add(name)
-            return name
-        return "other"
+        # 检查-再-插入必须原子：并发下两个线程都看到「还没满 32」，各加一个就能越过上限。
+        with self._lock:
+            if name in self._metric_labels:
+                return name
+            if len(self._metric_labels) < self.MAX_TOOL_METRIC_LABELS:
+                self._metric_labels.add(name)
+                return name
+            return "other"
 
     def execute(self, request: ToolRequest) -> Observation:
         started = time.monotonic()

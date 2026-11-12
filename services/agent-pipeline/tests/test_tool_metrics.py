@@ -81,3 +81,28 @@ def test_too_many_distinct_registered_names_fall_back_to_other() -> None:
     labels = _labels(metrics.expose().decode())
     assert ("other", "ok") in labels, "超出上限的注册工具应归 other"
     assert len({tool for tool, _ in labels}) <= ToolRuntime.MAX_TOOL_METRIC_LABELS + 1
+
+
+def test_label_cap_holds_under_concurrency() -> None:
+    """上限检查必须是原子的：并发下「都看到没满 32」会各加一个，把上限顶穿。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    runtime, metrics = _runtime()
+    total = ToolRuntime.MAX_TOOL_METRIC_LABELS + 12
+    for index in range(total):
+        runtime.registry.tool(
+            name=f"conc_{index}",
+            description="并发注册",
+            schema={"type": "object", "properties": {}},
+            risk="read",
+        )(lambda args: {"ok": True})
+
+    requests = [ToolRequest(call_id=f"c{index}", name=f"conc_{index}", arguments={}) for index in range(total)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(runtime.execute, requests))
+
+    labels = _labels(metrics.expose().decode())
+    assert ("other", "ok") in labels
+    assert len({tool for tool, _ in labels}) <= ToolRuntime.MAX_TOOL_METRIC_LABELS + 1, (
+        f"并发下标签数越过上限：{sorted({tool for tool, _ in labels})}"
+    )
