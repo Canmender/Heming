@@ -135,6 +135,14 @@ curl -s http://localhost:8000/v1/runs \
 - 取消是协作式的：卡在**工具调用**里的 run 要等这次工具超时（`AGENT_TOOL_TIMEOUT_S`）才走到下一个边界（工具线程没法安全打断）；
 - `tests/test_cancel.py` 4 例覆盖（跑到一半取消、未知 run、已结束 run、重复取消）。
 
+## Plan / Execute / Reflect 的「下一步」
+
+`reflect` 节点的返回里除了 `verdict`，还有 `next_step`（步骤下标）。它现在**真的会影响编排**：
+`verdict=continue` 且 `next_step` 指向一个存在、未完成的步骤时，下一轮 `execute` 直接切到那一步；
+指向已完成/越界的下标则忽略，按当前进度继续（否则模型一句「再确认下第一步」就能让流程原地打转）。
+计划里常写「先查证再决定」，靠的就是这条；以前 `next_step` 只是存进反思记录，执行者永远按顺序走。
+`tests/test_reflect_next_step.py` 2 例钉住「能跳」与「不乱跳」。
+
 ## 知识库（RAG）
 
 记忆层同时是知识库：`POST /v1/knowledge` 写入文档后，run 里会多出一个只读工具
