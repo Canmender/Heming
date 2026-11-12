@@ -14,8 +14,9 @@
 ```bash
 cd services/agent-pipeline
 uv venv --python 3.14 .venv
-.venv/Scripts/python.exe -m pip install -e ".[dev]"    # Windows
-# source .venv/bin/activate && pip install -e ".[dev]"  # macOS / Linux
+# 注意：uv 建的 venv 里没有 pip，`python -m pip ...` 会失败，用 uv pip 装
+uv pip install --python .venv/Scripts/python.exe -e ".[dev]"    # Windows
+# uv pip install --python .venv/bin/python -e ".[dev]"            # macOS / Linux
 
 .venv/Scripts/python.exe -m pytest -q                 # 56 例，全离线
 ```
@@ -231,6 +232,17 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 `--concurrency N` 会让 N 个工作线程同时跑 run（默认 1 = 顺序）。它验证的是状态机、SQLite 记忆、指标与配置存储**在并发下不互相踩**：实测 `--runs 8000 --concurrency 8` → 0 失败、40,000 次模型调用、17.5 run/s、P50 462ms / P95 496ms、内存峰值 4.1MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。并发 + 注入失败也一起验过：`--runs 400 --concurrency 4 --fail-rate 0.25 --canary` → 自动回滚 1 次、canary 归档 `archived`。
 
 > 服务侧并发口径：`POST /v1/runs` 超过 `AGENT_MAX_CONCURRENCY` 时**直接 429 + `Retry-After`**，不排队（排队会让客户端超时掩盖背压）；同一个 `run_id` 重复提交是幂等的，只跑一次。`tests/test_concurrency.py` 覆盖了 429/放行/幂等三条。
+
+`--log PATH` 把每个 run 的 JSONL 写到你指定的文件（默认丢弃）。**写不进去会明确失败**：退出码 1 + stderr 报「只写进 N/M 行」，而 run 本身仍成功（`runtime.log_failures` 计数、`/health` 里也看得到 `log_failures`/`log_last_error`）——以前 `_write_log` 是 `except OSError: pass`，日志全丢也一切「正常」。它把「压测」和「调优」接起来了：`soak --log runs.jsonl` 跑出来的就是 `tune` / `DailyTuner` 读的那份日志，字段口径一致（`run_id`/`status`/`stop_reason`/`finished_at`/`llm_calls`/`tokens`）。所以可以这样复现「根据日志自动微调」：
+
+```bash
+# 1) 压一批会失败的 run（每 2 次模型调用失败 1 次）
+.venv/Scripts/python.exe scripts/soak.py --runs 200 --fail-rate 0.5 --max-failures 999 --log soak.jsonl
+# 2) 拿同一份日志出调优报告（不接评测器时只报告，不注册版本）
+.venv/Scripts/python.exe -m agent_pipeline.runner tune --log soak.jsonl --since-hours 1
+```
+
+以前 `soak.py` 的 `log_sink` 是写死丢弃的，跑完一点日志都不留，导致「日志驱动调优」只能拿手写 fixture 测。`tests/test_soak_tune.py` 4 例现在真跑一轮会失败的浸泡、再让 `tune` 与 `DailyTuner` 读它，并校验每行都是完整 JSON、20 个 run = 20 行。
 
 ## 对抗环（Coder ↔ Tester）的收口口径
 

@@ -54,6 +54,12 @@ def _cmd_tune(args: argparse.Namespace) -> int:
     from .rollback import ConfigStore
 
     settings = Settings.from_env()
+    # 「日志不存在」和「日志里没失败」是两件事：读空文件会打出一份 0 样本的报告，
+    # 看起来调优跑了其实什么都没看。
+    log_file = Path(args.log)
+    if not log_file.exists():
+        print(f"[tune] 找不到日志文件：{log_file}（先跑一次 run，或用 soak.py --log 生成）", file=sys.stderr)
+        return 1
     store = ConfigStore(settings.db_path, outcome_limit=settings.outcome_limit)
     report = tune(
         log_path=args.log,

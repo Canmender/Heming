@@ -53,6 +53,10 @@ class Runtime:
     # 取消标记：返回 True 表示这个 run 已被要求停止。节点之间会检查一次，
     # 命中就写 stop_reason="cancelled" 收口——长任务不能只能靠杀进程来停。
     cancel: Callable[[str], bool] | None = None
+    # 日志落盘失败次数：写日志不能把 run 弄崩，但也不能静默——否则「日志驱动调优」
+    # 会拿着一份空文件出报告，看起来一切正常。
+    log_failures: int = 0
+    log_last_error: str | None = None
 
     def prompt(self, key: str) -> str:
         return self.prompts.get(key) or DEFAULT_PROMPTS.get(key, "")

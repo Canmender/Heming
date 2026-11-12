@@ -170,6 +170,9 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             "pending_approvals": len(gate.pending()) if gate is not None else 0,
             "running": sum(1 for item in runs.values() if item.get("status") == "running"),
             "runs_retained": len(runs),
+            # 日志写不进去时 tune/回滚窗口都会静默拿到空数据，这里给出可见信号。
+            "log_failures": getattr(runtime, "log_failures", 0),
+            "log_last_error": getattr(runtime, "log_last_error", None),
             "tuner": {
                 "enabled": settings.tune_enabled,
                 "running": tuner.running,

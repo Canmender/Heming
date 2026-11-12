@@ -153,13 +153,24 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="注册一个灰度版本并让全部流量走它（配合 --fail-rate 验证回滚真的会发生）",
     )
+    parser.add_argument(
+        "--log",
+        default="",
+        metavar="PATH",
+        help="把每个 run 的 JSONL 写到这个文件（默认丢弃）：有了它，`agent-pipeline tune --log PATH` 可以直接拿浸泡日志做调优输入",
+    )
     args = parser.parse_args(argv)
 
     fail_every = round(1 / args.fail_rate) if args.fail_rate > 0 else 0
     if args.approval:
         os.environ["AGENT_PIPELINE_ALLOW_COMMANDS"] = "1"  # 只为--approval 打开 run_command（命令固定 echo）
+    log_path = os.devnull
+    if args.log:
+        log_file = Path(args.log).expanduser()
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_path = str(log_file)
     settings = Settings(
-        log_path=os.devnull,
+        log_path=log_path,
         db_path=":memory:",
         # 灰度验证：全量走 canary，样本门槛压低到 20（与线上默认一致），阈值仍用默认
         **({"canary_ratio": 1.0} if args.canary else {}),
@@ -183,7 +194,8 @@ def main(argv: list[str] | None = None) -> int:
         memory=memory,
         metrics=metrics,
         config_store=config_store,
-        log_sink=lambda _row: None,
+        # 不写文件时才丢弃；写了文件就走 runtime 的落盘路径，tune 才能读到
+        log_sink=None if args.log else (lambda _row: None),
     )
     gate = None
     approver_stop = threading.Event()
@@ -335,6 +347,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  自动回滚        : {summary['rollbacks']} 次（canary 版本最终 {summary['canary_stage']}）")
         print(f"  内存峰值/当前   : {summary['peak_mem_mb']}MB / {summary['current_mem_mb']}MB")
     approver_stop.set()
+    # --log 的「静默成功」是最坑的：跑完说 0 失败，结果日志一份没写，
+    # 后面 tune 读空文件出「0 个失败样本」的报告看起来也正常。
+    if args.log:
+        written = 0
+        log_file = Path(args.log).expanduser()
+        if log_file.exists():
+            try:
+                written = sum(1 for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip())
+            except OSError:
+                written = 0
+        if written < args.runs:
+            print(
+                f"[soak] 警告：--log 只写进 {written}/{args.runs} 行（{log_file}）；"
+                f"runtime.log_failures={runtime.log_failures}，最后一个错误：{runtime.log_last_error}",
+                file=sys.stderr,
+            )
+            return 1
     return 0 if len(failures) <= args.max_failures else 1
 
 

@@ -6,3 +6,6 @@ pytest-of-*/
 runs.jsonl
 *.db
 .tmp-runs.jsonl
+.coverage
+.coverage.*
+htmlcov/

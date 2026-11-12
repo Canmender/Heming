@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
 import time
 import uuid
@@ -253,6 +254,10 @@ def _write_log(runtime: Runtime, row: dict[str, Any]) -> None:
                     pass
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    except OSError:
-        # 日志写失败不能影响 run 结果；指标里已经记录。
-        pass
+    except OSError as exc:
+        # 日志写失败不能影响 run 结果，但必须留痕：`tune` 读的是这份文件，
+        # 静默失败会让人拿着空日志出「0 个失败样本」的报告。
+        runtime.log_failures += 1
+        runtime.log_last_error = f"{type(exc).__name__}: {exc}"
+        if runtime.log_failures == 1:
+            print(f"[agent-pipeline] 警告：run 日志写不进去（{runtime.log_last_error}），调优会读不到数据", file=sys.stderr)
