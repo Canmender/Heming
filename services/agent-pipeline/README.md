@@ -162,10 +162,28 @@ curl -s -X POST http://localhost:8000/v1/runs/$ID/approve \
 
 几条刻意的设计：
 
-- **只拦非只读**：`risk="read"` 的工具（`http_get` 之类）不审批——全拦只会让用户点烦了把闸关掉，反而没了防护；
+- **只拦非只读**：`risk="read"` 的工具（`knowledge_search` 这类，只读本地知识库）不审批——全拦只会让用户点烦了把闸关掉，反而没了防护。注意 `http_get` 是 `net` 风险（会把内部地址、查询词发出去），默认也要审批；
 - **等待在 run 自己的线程里**：一个 run 阻塞不会拖住别的 run，也不需要 LangGraph `interrupt` + checkpointer（重启后无法恢复的「半暂停」比同步等待更难解释）；
 - **超时即拒绝**：`AGENT_APPROVAL_TIMEOUT_S` 到了还没裁决，按拒绝写进观测（`工具 X 等待用户批准超时…已按拒绝处理`），流水线照常往下走，不会假装执行过；
 - **拒绝留痕**：被拒绝的调用以 `ok=False` 进观测，Reflect/Critic 能看到「这一步没做成」，而不是以为成功。
+
+## Function Calling 调外部 API（`http_get`）
+
+模型可以通过 `http_get` 直接调外部 HTTP 接口（OpenAI 兼容的 `tools` 字段就是这条链路）：
+
+```json
+{"type":"function","function":{"name":"http_get","parameters":{"type":"object",
+ "properties":{"url":{"type":"string"},"timeout_s":{"type":"number"}},
+ "required":["url"],"additionalProperties":false}}}
+```
+
+运行时的口径（对应 `tests/test_http_tool.py` 七条用例）：
+
+- **`risk="net"`**：会把地址和查询词发到外部，`AGENT_APPROVAL_MODE=write` 时默认要审批，不是「只读免审」；
+- **4xx/5xx 不抛异常**：`{"status":404,"body":"..."}` 作为数据进观测，让模型自己判断「要鉴权 / 路径错了」，而不是把 run 弄崩；
+- **正文截断到 8000 字符**：整页 HTML 会直接撑爆上下文预算，截断是刻意的；
+- **只允许 http/https**：`file://`、相对路径一律 `ToolError("只支持 http/https")`；
+- **连不上变成 `ok=False` 观测**：带错误文案往下走，Reflect 能看到「这个接口挂了」并换方案。
 
 ## 可观测与回滚
 
