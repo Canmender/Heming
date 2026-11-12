@@ -14,7 +14,7 @@
       <span class="brand-mark" aria-hidden="true">和</span>
       <span class="brand-name">和鸣</span>
       <span class="brand-sep" aria-hidden="true"></span>
-      <span class="brand-kind">安装程序</span>
+      <span class="brand-kind" id="brand-kind">安装程序</span>
     </div>
     <div class="window-controls">
       <button class="win-button" id="btn-minimize" type="button" title="最小化" aria-label="最小化">&#8212;</button>
@@ -39,6 +39,10 @@
           <button class="text-button" id="btn-choose" type="button">更改&#8230;</button>
         </div>
         <p class="hint" id="path-hint">装在这里不需要管理员权限。</p>
+        <p class="hint prefetch-line" id="prefetch-note" hidden>
+          <span id="prefetch-text">正在准备安装包</span>
+          <span class="prefetch-track" aria-hidden="true"><span class="prefetch-fill" id="prefetch-fill"></span></span>
+        </p>
         <label class="check">
           <input type="checkbox" id="launch-after" checked />
           <span class="check-box" aria-hidden="true"></span>
@@ -68,7 +72,7 @@
       </div>
 
       <div class="screen" id="screen-done" hidden>
-        <h1 class="headline">装好了。</h1>
+        <h1 class="headline" id="done-headline">装好了。</h1>
         <div class="seal" id="seal" aria-hidden="true">和</div>
         <p class="done-line" id="done-line">&nbsp;</p>
         <div class="actions">
@@ -78,7 +82,7 @@
       </div>
 
       <div class="screen" id="screen-error" hidden>
-        <h1 class="headline">没能装完。</h1>
+        <h1 class="headline" id="error-headline">没能装完。</h1>
         <p class="lede" id="error-message">安装程序提前停下了。</p>
         <pre class="detail" id="error-detail"></pre>
         <div class="actions">

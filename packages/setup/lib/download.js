@@ -30,7 +30,13 @@ const USER_AGENT = "HemingSetup/1.0 (Windows)";
  * @returns {Promise<import("node:http").IncomingMessage>}
  */
 function openStream(url, options = {}) {
-  const { signal, redirectsLeft = MAX_REDIRECTS, timeoutMs = CONNECT_TIMEOUT_MS } = options;
+  const {
+    signal,
+    redirectsLeft = MAX_REDIRECTS,
+    timeoutMs = CONNECT_TIMEOUT_MS,
+    headers = {},
+    acceptPartial = false,
+  } = options;
   return new Promise((resolve, reject) => {
     let parsed;
     try {
@@ -47,6 +53,7 @@ function openStream(url, options = {}) {
           "User-Agent": USER_AGENT,
           Accept: "*/*",
           Connection: "keep-alive",
+          ...headers,
         },
         timeout: timeoutMs,
       },
@@ -59,10 +66,11 @@ function openStream(url, options = {}) {
             return;
           }
           const next = new URL(response.headers.location, parsed).toString();
-          resolve(openStream(next, { signal, redirectsLeft: redirectsLeft - 1, timeoutMs }));
+          resolve(openStream(next, { signal, redirectsLeft: redirectsLeft - 1, timeoutMs, headers, acceptPartial }));
           return;
         }
-        if (status !== 200) {
+        const acceptable = status === 200 || (acceptPartial && status === 206);
+        if (!acceptable) {
           response.resume();
           reject(
             new SetupError(
@@ -137,21 +145,45 @@ async function fetchText(url, options = {}) {
  * @returns {Promise<{filePath: string, bytes: number, sha512: string, total: number|null}>}
  */
 async function downloadFile(url, dest, options = {}) {
-  const { signal, expectedSize = null, idleTimeoutMs = IDLE_TIMEOUT_MS, onProgress } = options;
+  const {
+    signal,
+    expectedSize = null,
+    idleTimeoutMs = IDLE_TIMEOUT_MS,
+    onProgress,
+    resume = false,
+  } = options;
   await fsp.mkdir(path.dirname(dest), { recursive: true });
 
-  const response = await openStream(url, { signal });
-  const total = numberOrNull(response.headers["content-length"]) ?? numberOrNull(expectedSize);
+  // 续传时真正落盘的是 <dest>.part：半截文件不是安装包，不能让它冒充成品。
+  const partPath = resume ? `${dest}.part` : dest;
+  let start = 0;
+  if (resume) {
+    start = await partSize(partPath, expectedSize);
+    if (start === 0) await fsp.rm(partPath, { force: true }).catch(() => {});
+  }
+
+  const response = await openStream(url, {
+    signal,
+    headers: start > 0 ? { Range: `bytes=${start}-` } : {},
+    acceptPartial: start > 0,
+  });
+  // 服务器不认 Range 会直接回 200 全量；这时只能从零开始写，否则文件会拼错。
+  if (start > 0 && response.statusCode !== 206) start = 0;
+
+  const contentLength = numberOrNull(response.headers["content-length"]);
+  const total = contentLength !== null ? start + contentLength : numberOrNull(expectedSize);
   const hash = crypto.createHash("sha512");
-  const out = fs.createWriteStream(dest);
-  let received = 0;
+  if (start > 0) await hashPrefix(partPath, start, hash);
+
+  const out = fs.createWriteStream(partPath, { flags: start > 0 ? "a" : "w" });
+  let received = start;
   let lastEmit = 0;
   let idleTimer = null;
 
-  const cleanup = async () => {
+  const cleanup = async (keepPart = false) => {
     if (idleTimer) clearTimeout(idleTimer);
     out.destroy();
-    await fsp.rm(dest, { force: true }).catch(() => {});
+    if (!keepPart || !resume) await fsp.rm(partPath, { force: true }).catch(() => {});
   };
 
   const armIdle = () => {
@@ -167,7 +199,8 @@ async function downloadFile(url, dest, options = {}) {
     const fail = async (error) => {
       if (settled) return;
       settled = true;
-      await cleanup();
+      // 续传模式下保留 .part：下一次尝试（或下次启动）能只补缺的字节。
+      await cleanup(resume);
       if (error && error.message === "cancelled") {
         reject(new SetupError(CODES.CANCELLED, "已取消下载", null));
       } else if (error && error.message === "idle") {
@@ -216,7 +249,7 @@ async function downloadFile(url, dest, options = {}) {
         settled = true;
         // 长度对不上先报错：比 sha512 不匹配的提示更具体（服务端文件被截断 / 代理缓存不完整）
         if (total !== null && received !== total) {
-          cleanup().then(() =>
+          cleanup(resume).then(() =>
             reject(
               new SetupError(
                 CODES.DOWNLOAD_FAILED,
@@ -227,9 +260,44 @@ async function downloadFile(url, dest, options = {}) {
           );
           return;
         }
-        resolve({ filePath: dest, bytes: received, sha512: hash.digest("base64"), total });
+        const digest = hash.digest("base64");
+        const finish = async () => {
+          if (partPath !== dest) await fsp.rename(partPath, dest);
+          resolve({ filePath: dest, bytes: received, sha512: digest, total });
+        };
+        finish().catch((error) =>
+          reject(new SetupError(CODES.DOWNLOAD_FAILED, "没法保存安装包", error)),
+        );
       });
     });
+  });
+}
+
+/**
+ * 已有 .part 文件的有效前缀长度。
+ * 比 expectedSize 还长说明这个半截文件不属于当前安装包（版本换了），只能重下。
+ * @param {string} partPath
+ * @param {number|null} expectedSize
+ * @returns {Promise<number>}
+ */
+async function partSize(partPath, expectedSize) {
+  try {
+    const stats = await fsp.stat(partPath);
+    if (!stats.isFile() || stats.size <= 0) return 0;
+    if (expectedSize !== null && stats.size > expectedSize) return 0;
+    return stats.size;
+  } catch {
+    return 0;
+  }
+}
+
+/** 把已下好的前缀喂给同一个 hash，续传时校验的仍是整个文件的 sha512。 */
+function hashPrefix(filePath, length, hash) {
+  return new Promise((resolve, reject) => {
+    const stream = fs.createReadStream(filePath, { start: 0, end: Math.max(0, length - 1) });
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", resolve);
+    stream.on("error", reject);
   });
 }
 

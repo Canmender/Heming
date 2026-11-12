@@ -21,6 +21,8 @@ const { createLog } = require("./lib/log");
 const { createConfig } = require("./lib/config");
 const { createPipeline } = require("./lib/pipeline");
 const { captureShots, DEFAULT_SHOTS } = require("./lib/capture");
+const { wantsUpdate, resolvePlanPath, readPlan, removePlan } = require("./lib/update-plan");
+const { CODES } = require("./lib/errors");
 
 const WINDOW_WIDTH = 900;
 const WINDOW_HEIGHT = 620;
@@ -33,6 +35,17 @@ let log = null;
 let config = null;
 let installing = false;
 let closing = false;
+/**
+ * 更新模式：桌面端把「装哪个包、装到哪」写在计划文件里再叫起本程序。
+ * 计划读失败时不让窗口停在「安装位置」屏——用户不知道自己要装什么，
+ * 直接把原因摆到错误屏，让他回应用里重试。
+ */
+const updateRequest = wantsUpdate(process.argv, process.env);
+const planFile = updateRequest ? resolvePlanPath(process.env, pathTools.workDir()) : null;
+/** @type {null | {installerPath: string, installDir: string, version: string, currentVersion: string, relaunch: boolean}} */
+let updatePlan = null;
+/** 计划读不出来时的错误文案（初始化时交给界面）。 */
+let planError = null;
 
 const captureDir = readCaptureTarget(process.argv);
 
@@ -72,6 +85,13 @@ traceStep(
   `module-load packaged=${app.isPackaged} capture=${captureDir ? "on" : "off"} argv=${JSON.stringify(process.argv.slice(1))}`,
 );
 
+/** 更新计划不可用时留下排查线索：界面上只会给一句人话，细节必须进日志。 */
+function recordPlanError(error, tag) {
+  const detail = error && (error.detail || error.message) ? error.detail || error.message : String(error);
+  traceStep(`update-plan-failed(${tag}) ${detail}`);
+  if (log) log.error(`更新计划不可用（${tag}）：${detail}`);
+}
+
 /** 用户双击的那个 setup.exe 所在目录；开发态指向包目录，方便放一个离线安装包测试。 */
 function resolveSetupLocation() {
   const workDir = pathTools.workDir();
@@ -102,6 +122,9 @@ function emitToWindow(event) {
 
 function sendEventFromPipeline(event) {
   emitToWindow(event);
+  // 更新完成就把计划删掉：留着它，下次用户手动双击安装器（没带环境变量）不受影响，
+  // 但若桌面端又用同一路径写新计划，旧内容也不会被误用。
+  if (event && event.type === "done" && planFile) removePlan(planFile);
 }
 
 function createWindow() {
@@ -115,7 +138,7 @@ function createWindow() {
     frame: false,
     show: false,
     backgroundColor: "#f5f2ea",
-    title: "安装 和鸣",
+    title: updateRequest ? "更新 和鸣" : "安装 和鸣",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -144,7 +167,14 @@ function createWindow() {
 
   windowRef.webContents.once("did-finish-load", async () => {
     traceStep("did-finish-load");
-    if (!captureDir) return;
+    if (!captureDir) {
+      // 窗口能画了才开始后台预取：不抢启动时的 CPU/IO，截图模式也不跑下载。
+      // 更新模式的安装包已经由桌面端下载好，没有可预取的东西。
+      if (pipeline && !updateRequest) {
+        pipeline.prefetch().catch((error) => traceStep(`prefetch-crashed ${error.message}`));
+      }
+      return;
+    }
     try {
       await new Promise((resolve) => setTimeout(resolve, CAPTURE_SETTLE_MS));
       windowRef.show();
@@ -164,11 +194,12 @@ function createWindow() {
 
 async function requestClose() {
   if (installing) {
+    const noun = updateRequest ? "更新" : "安装";
     const { response } = await dialog.showMessageBox(windowRef, {
       type: "question",
-      title: "安装还没结束",
-      message: "安装还在进行。现在退出会留下装了一半的文件，下次还得重装。",
-      buttons: ["继续安装", "仍然退出"],
+      title: `${noun}还没结束`,
+      message: `${noun}还在进行。现在退出会留下不完整的状态，下次还得再来一次。`,
+      buttons: [`继续${noun}`, "仍然退出"],
       defaultId: 0,
       cancelId: 0,
       noLink: true,
@@ -190,6 +221,16 @@ function registerIpc() {
     payloadMode: config.payloadMode,
     capture: Boolean(captureDir),
     logPath: log.path,
+    mode: updateRequest ? "update" : "install",
+    update: updatePlan
+      ? {
+          version: updatePlan.version || config.hemingVersion,
+          currentVersion: updatePlan.currentVersion,
+          installDir: updatePlan.installDir,
+          relaunch: updatePlan.relaunch,
+        }
+      : null,
+    planError: planError ? { code: planError.code, message: planError.message, detail: planError.detail } : null,
   }));
 
   ipcMain.handle("setup:choose-directory", async (_event, current) => {
@@ -214,13 +255,27 @@ function registerIpc() {
   });
 
   ipcMain.handle("setup:start", async (_event, options = {}) => {
-    const installDir = pathTools.sanitizeInstallDir(options.installDir) || pathTools.defaultInstallDir();
+    // 更新模式下计划读不出来时，界面上的「重试」不该退化成一次全新安装：
+    // 那会把程序装到默认目录，而用户以为自己只是在更新。
+    if (updateRequest && !updatePlan) {
+      return {
+        ok: false,
+        code: planError ? planError.code : CODES.NO_PAYLOAD,
+        message: planError ? planError.message : "更新计划读不出来，请回应用里重新下载。",
+        detail: planError ? planError.detail : "",
+      };
+    }
+    // 更新模式不接受界面传来的路径：装哪个包、装到哪由计划决定，
+    // 免得渲染层（或将来某个快捷键）改出计划外的安装位置。
+    const installDir = updatePlan
+      ? pathTools.sanitizeInstallDir(updatePlan.installDir)
+      : pathTools.sanitizeInstallDir(options.installDir) || pathTools.defaultInstallDir();
     installing = true;
     try {
       return await pipeline.start({
         installDir,
-        launchAfter: options.launchAfter !== false,
-        payloadPath: options.payloadPath || process.env.HEMING_SETUP_PAYLOAD || undefined,
+        launchAfter: updatePlan ? updatePlan.relaunch : options.launchAfter !== false,
+        payloadPath: updatePlan ? updatePlan.installerPath : options.payloadPath || process.env.HEMING_SETUP_PAYLOAD || undefined,
       });
     } finally {
       installing = false;
@@ -276,6 +331,32 @@ function bootstrap() {
       fs.mkdirSync(pathTools.workDir(), { recursive: true });
       log = createLog(path.join(pathTools.workDir(), "setup.log"));
       log.info(`安装器启动 heming=${config.hemingVersion} packaged=${app.isPackaged} capture=${captureDir ? "on" : "off"}`);
+      log.info(`模式=${updateRequest ? "update" : "install"}${planFile ? ` 计划=${planFile}` : ""}`);
+
+      if (updateRequest) {
+        try {
+          updatePlan = readPlan(planFile);
+          // 计划里的安装包是桌面端刚下载的临时文件，可能已经被清理工具带走：
+          // 早点确认存在，别等用户点了「继续」才失败。
+          if (!fs.existsSync(updatePlan.installerPath)) {
+            planError = {
+              code: CODES.NO_PAYLOAD,
+              message: "更新包已经不在原处了，请回应用里重新下载。",
+              detail: updatePlan.installerPath,
+            };
+            recordPlanError(planError, "missing-payload");
+          } else {
+            traceStep(`update-mode version=${updatePlan.version} dir=${updatePlan.installDir}`);
+          }
+        } catch (error) {
+          planError = {
+            code: error.code || CODES.NO_PAYLOAD,
+            message: error.message || "更新计划读不出来",
+            detail: error.detail || "",
+          };
+          recordPlanError(error, "plan-invalid");
+        }
+      }
 
       pipeline = createPipeline({
         config,

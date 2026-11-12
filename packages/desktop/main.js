@@ -32,6 +32,7 @@ const { startMagpieProxy } = require("./magpie-proxy");
 const { createMagpieCli, validateCliArgs, terminalCommand } = require("./magpie-cli");
 const { bundledPython } = require("./bundled-runtime");
 const { planStdioSpawn, probeLocalRuntime } = require("./local-runtime");
+const { helperPath, planPath, buildUpdatePlan, helperEnv } = require("./update-helper");
 
 /**
  * 本地开发（未打包）允许使用内置的 dev-* 首方公钥，否则界面插件在 `electron .` 下装不上。
@@ -1228,8 +1229,61 @@ if (!gotLock) {
 
   secureIpc.handle("update:check", () => updater.check());
   secureIpc.handle("update:download", () => updater.download());
-  secureIpc.handle("update:install", () => updater.quitAndInstall());
+  secureIpc.handle("update:install", () => installUpdate());
   secureIpc.handle("update:state", () => updater.getState());
+
+  /**
+   * 应用内「重启并安装」。
+   *
+   * 优先交给随安装包内置的自绘安装器助手（`resources/updater/setup.exe`）：
+   * 它会显示和首次安装一样的窗口，并在应用退出后静默装上已下载的版本。
+   * 助手缺失（从旧安装包升级上来、构建时没放进去）或拿不到下载路径时，
+   * 回退到 electron-updater 自带的安装流程——任何情况下更新都要能完成。
+   */
+  function installUpdate() {
+    const fallback = () => updater.quitAndInstall();
+    if (!app.isPackaged) return fallback();
+
+    const state = updater.getState();
+    const installer = typeof updater.getDownloadedInstaller === "function" ? updater.getDownloadedInstaller() : null;
+    if (state.status !== "downloaded" || !installer) return fallback();
+
+    const helper = helperPath(process.resourcesPath);
+    if (!fs.existsSync(helper) || !fs.existsSync(installer)) {
+      console.warn("[updater] 更新助手不可用，回退到内置安装流程：", { helper, installer });
+      return fallback();
+    }
+
+    const plan = buildUpdatePlan({
+      installerPath: installer,
+      installDir: path.dirname(process.execPath),
+      version: state.available ? state.available.version : state.currentVersion,
+      currentVersion: state.currentVersion,
+      relaunch: true,
+    });
+    if (!plan) return fallback();
+
+    try {
+      const file = planPath(os.tmpdir());
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(plan, null, 2), "utf8");
+
+      const child = require("node:child_process").spawn(helper, [], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false,
+        env: helperEnv(file),
+      });
+      child.unref();
+      console.log("[updater] 已交给自绘更新助手：", helper);
+      // 给助手一点时间把自己的主程序读起来，再退，免得刚启动就撞上目录清理。
+      setTimeout(() => app.quit(), 500);
+      return true;
+    } catch (error) {
+      console.error("[updater] 更新助手启动失败，回退到内置安装流程：", error && error.message);
+      return fallback();
+    }
+  }
 
   // 启动后延迟一小会儿再检查：冷启动时不必和界面抢网络，
   // 也不至于让用户等更新检查才看到首屏。

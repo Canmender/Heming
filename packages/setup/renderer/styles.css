@@ -206,6 +206,31 @@ body {
 .hint { margin: 0 0 22px; font-size: 11.5px; line-height: 1.6; color: var(--faint); }
 .hint.is-warning { color: var(--seal); }
 
+/* 预取那一行：文字 + 一根 96px 的发丝进度线，安静地待在安装位置下面 */
+.prefetch-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: -14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.prefetch-track {
+  width: 96px;
+  height: 1px;
+  overflow: hidden;
+  background: var(--line);
+}
+.prefetch-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--ink);
+  transition: width 240ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.prefetch-line.is-ready .prefetch-track { background: var(--line-strong); }
+.prefetch-line.is-ready .prefetch-fill { background: var(--seal); }
+
 /* ---------- 按钮 ---------- */
 
 .text-button {

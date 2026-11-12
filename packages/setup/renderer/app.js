@@ -40,16 +40,36 @@
     error: "第 4 步 · 没能走完",
   };
 
+  /**
+   * 更新模式（桌面端叫起的「更新助手」）只有三步：
+   * 没有「装在哪」这一屏，进度从第一秒就开始，所以步号和用词都要换。
+   */
+  const UPDATE_STEP_LABELS = {
+    ready: "正在更新",
+    work: "更新中",
+    done: "更新完成",
+    error: "更新没能完成",
+  };
+
+  function stepLabel(name) {
+    const labels = state.mode === "update" ? UPDATE_STEP_LABELS : STEP_LABELS;
+    return labels[name] || labels.ready;
+  }
+
   const state = {
     screen: "ready",
     phase: "idle",
     init: null,
+    /** "install" 首次安装；"update" 由桌面端叫起的更新助手。 */
+    mode: "install",
     installDir: "",
     launchAfter: true,
     chosenPayload: null,
     download: { received: 0, total: 0 },
     counts: { files: 0, bytes: 0 },
     doneInfo: null,
+    /** 更新模式下计划读不出来时的错误；非空表示「重试」只能关窗回应用。 */
+    planError: null,
     busy: false,
     capture: false,
   };
@@ -213,7 +233,10 @@
         element.classList.remove("is-current");
       }
     }
-    $("step-label").textContent = STEP_LABELS[name];
+    $("step-label").textContent = stepLabel(name);
+    // 预取那行小字只属于「安装位置」屏；进工作屏后进度改由进度条承担。
+    const prefetchNote = $("prefetch-note");
+    if (prefetchNote && name !== "ready") prefetchNote.hidden = true;
   }
 
   function setWorkHeadline(text) {
@@ -314,6 +337,34 @@
     }
   }
 
+  /**
+   * 后台预取：窗口一打开主进程就开始找包/下载，这一屏只多一行小字。
+   * 用户还没点「开始安装」，不该因为后台在下载就把整屏切走；
+   * 预取失败也不弹错——点了开始会重新尝试并给出真正的错误。
+   */
+  function onPrefetch(event) {
+    const note = $("prefetch-note");
+    const text = $("prefetch-text");
+    const fill = $("prefetch-fill");
+    if (!note || !text || !fill || state.screen !== "ready") return;
+    if (event.stage === "failed") {
+      note.hidden = true;
+      return;
+    }
+    if (event.stage === "ready") {
+      note.hidden = false;
+      note.classList.add("is-ready");
+      text.textContent = event.version ? `安装包已就绪 · ${event.version}` : "安装包已就绪";
+      fill.style.width = "100%";
+      return;
+    }
+    note.hidden = false;
+    note.classList.remove("is-ready");
+    const percent = typeof event.percent === "number" ? Math.round(event.percent) : null;
+    text.textContent = percent === null ? "正在准备安装包" : `正在准备安装包 · ${percent}%`;
+    if (percent !== null) fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+  }
+
   function onProgress(event) {
     if (state.phase !== "download") return;
     state.download.received = event.received || 0;
@@ -348,7 +399,10 @@
     state.doneInfo = { installDir: event.installDir, exePath: event.exePath, version: event.version };
     showScreen("done");
     const version = event.version ? ` ${event.version}` : "";
-    $("done-line").textContent = `和鸣${version} 已装到 ${event.installDir}`;
+    $("done-line").textContent =
+      state.mode === "update"
+        ? `和鸣${version} 已更新到 ${event.installDir}`
+        : `和鸣${version} 已装到 ${event.installDir}`;
     const seal = $("seal");
     seal.classList.remove("stamped");
     void seal.offsetWidth;
@@ -372,6 +426,11 @@
   function onCancelled() {
     state.busy = false;
     state.phase = "idle";
+    if (state.mode === "update") {
+      // 更新模式下没有「安装位置」可回；取消就等于这次不更新，直接关窗。
+      api.close();
+      return;
+    }
     showScreen("ready");
     const hint = $("path-hint");
     hint.classList.remove("is-warning");
@@ -386,6 +445,9 @@
         break;
       case "progress":
         onProgress(event);
+        break;
+      case "prefetch":
+        onPrefetch(event);
         break;
       case "files":
         onFiles(event);
@@ -412,10 +474,10 @@
     state.download = { received: 0, total: 0 };
     state.counts = { files: 0, bytes: 0 };
     showScreen("work");
-    setWorkHeadline("正在准备。");
+    setWorkHeadline(state.mode === "update" ? "正在更新。" : "正在准备。");
     setMetric("—", "", " ");
     setProgress(null);
-    setStatus("检查安装位置…");
+    setStatus(state.mode === "update" ? "退出应用后开始更新…" : "检查安装位置…");
     $("btn-cancel").hidden = false;
     try {
       await api.start({
@@ -463,6 +525,18 @@
     await api.openFolder(dir);
   }
 
+  /**
+   * 错误屏的「重试」：更新模式下若计划本身读不出来，重试没有意义——
+   * 包和安装位置都在计划里，缺了只能回应用里重新下载，所以直接关窗。
+   */
+  function retryInstall() {
+    if (state.mode === "update" && state.planError) {
+      api.close();
+      return;
+    }
+    beginInstall();
+  }
+
   function onKeyDown(event) {
     if (event.key === "Enter") {
       if (state.screen === "ready") {
@@ -473,7 +547,7 @@
         openInstalled();
       } else if (state.screen === "error") {
         event.preventDefault();
-        beginInstall();
+        retryInstall();
       }
       return;
     }
@@ -489,7 +563,7 @@
     $("btn-close").addEventListener("click", () => api.close());
     $("btn-quit").addEventListener("click", () => api.quit());
     $("btn-start").addEventListener("click", beginInstall);
-    $("btn-retry").addEventListener("click", beginInstall);
+    $("btn-retry").addEventListener("click", retryInstall);
     $("btn-cancel").addEventListener("click", cancelInstall);
     $("btn-choose").addEventListener("click", chooseDirectory);
     $("btn-open").addEventListener("click", openInstalled);
@@ -549,6 +623,9 @@
     buildWordmark();
     buildWave();
     bindEvents();
+    // 先订阅再 init：更新模式在 init 返回后马上就开跑，晚一步订阅会丢掉第一批 phase 事件。
+    api.onEvent(handleEvent);
+    api.onCaptureState(applyCaptureState);
     try {
       state.init = await api.init();
     } catch (error) {
@@ -557,14 +634,42 @@
       return;
     }
     state.capture = Boolean(state.init.capture);
+    state.mode = state.init.mode === "update" ? "update" : "install";
+
+    if (state.mode === "update") {
+      // 更新模式：没有「装在哪」这一步，界面语言也换成更新。
+      $("brand-kind").textContent = "更新程序";
+      document.title = "更新 和鸣";
+      $("done-headline").textContent = "更新好了。";
+      $("error-headline").textContent = "更新没能完成。";
+      // 更新装哪个包由计划决定，不给「选择安装包」入口。
+      $("btn-pick-payload").hidden = true;
+
+      if (state.init.planError) {
+        // 记住是「计划坏了」而不是「装到一半坏了」：重试按钮据此改成关窗。
+        state.planError = state.init.planError;
+        onError(state.init.planError);
+        return;
+      }
+      const update = state.init.update || {};
+      if (update.installDir) state.installDir = update.installDir;
+      state.launchAfter = update.relaunch !== false;
+      renderFacts();
+      // 右栏的四条事实换成「更新」口径：装哪个版本、现在是什么版本、包从哪来。
+      $("fact-version").textContent = update.version || state.init.version || "—";
+      $("fact-existing").textContent = update.currentVersion ? `当前 ${update.currentVersion}` : "已安装";
+      $("fact-source").textContent = "已在后台下载";
+      showScreen("work");
+      await beginInstall();
+      return;
+    }
+
     state.installDir = state.init.existingDir || state.init.defaultDir || "C:\\Programs\\Heming";
     state.launchAfter = true;
     renderInstallPath();
     renderFacts();
     showScreen("ready");
     drawWordmark();
-    api.onEvent(handleEvent);
-    api.onCaptureState(applyCaptureState);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

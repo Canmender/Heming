@@ -33,13 +33,17 @@ function norm(target) {
 function harness(overrides = {}) {
   const events = [];
   const logs = [];
-  const calls = { startInstaller: null, statTree: 0, launch: [], downloadFile: null, fetchText: null };
+  const calls = { startInstaller: null, statTree: 0, launch: [], downloadFile: null, downloadCount: 0, fetchText: null };
   const existing = new Set((overrides.existing ?? []).map(norm));
 
   const services = {
     async exists(target) {
       return existing.has(norm(target));
     },
+    async statFile() {
+      return typeof overrides.statFile === "function" ? overrides.statFile() : null;
+    },
+    async removeFile() {},
     async listDir(dir) {
       return typeof overrides.listDir === "function" ? overrides.listDir(dir) : [];
     },
@@ -60,6 +64,7 @@ function harness(overrides = {}) {
       return overrides.feedText ?? "";
     },
     async downloadFile(url, dest, options) {
+      calls.downloadCount += 1;
       calls.downloadFile = { url, dest, options };
       if (typeof overrides.downloadFile === "function") {
         return overrides.downloadFile(url, dest, options);
@@ -149,6 +154,8 @@ test("没有内嵌包时从更新服务器下载并校验 sha512", async () => {
   assert.equal(h.calls.fetchText, "http://host/updates/latest.yml");
   assert.equal(h.calls.downloadFile.dest, path.join(WORK_DIR, "inner-setup.exe"));
   assert.equal(h.calls.downloadFile.options.expectedSize, 1000);
+  // 断网重试要能接着上次的半截文件，下载器必须知道可以续传
+  assert.equal(h.calls.downloadFile.options.resume, true);
   assert.equal(h.calls.downloadFile.url.endsWith("d.140.0.1.0.exe"), true);
   assert.equal(h.events.some((e) => e.type === "progress" && e.received === 500), true);
   assert.equal(h.events.some((e) => e.type === "phase" && e.phase === "verify"), true);
@@ -257,4 +264,105 @@ test("安装阶段拒绝取消，busy 期间拒绝重复启动，装完仍然成
   const result = await startPromise;
   assert.equal(result.ok, true);
   assert.equal(installed, true);
+});
+
+test("预取：窗口一打开就在后台下好安装包，开始安装时不再重复下载", async () => {
+  const h = harness({
+    existing: [EXE_PATH],
+    config: { payloadMode: "network" },
+    feedText: FEED_TEXT,
+    downloadFile: async (url, dest) => ({ filePath: dest, bytes: 1000, sha512: "sha-ok", total: 1000 }),
+  });
+
+  const prefetched = await h.pipeline.prefetch();
+  assert.equal(prefetched.ok, true);
+  assert.equal(prefetched.version, "d.140.0.1.0");
+  assert.equal(h.calls.downloadCount, 1);
+  const ready = h.events.find((e) => e.type === "prefetch" && e.stage === "ready");
+  assert.equal(ready.version, "d.140.0.1.0");
+
+  const result = await h.pipeline.start({ installDir: INSTALL_DIR, launchAfter: false });
+  assert.equal(result.ok, true);
+  assert.equal(h.calls.downloadCount, 1, "预取已经下好，开始安装不应该再下一次");
+  assert.equal(h.calls.startInstaller.file, path.join(WORK_DIR, "inner-setup.exe"));
+});
+
+test("缓存命中：上次下好的安装包大小与 sha512 都对得上时跳过下载", async () => {
+  const CACHE_PATH = path.join(WORK_DIR, "inner-setup.exe");
+  const h = harness({
+    existing: [CACHE_PATH, EXE_PATH],
+    config: { payloadMode: "network" },
+    feedText: FEED_TEXT,
+    statFile: () => ({ isFile: () => true, size: 1000 }),
+  });
+
+  const result = await h.pipeline.start({ installDir: INSTALL_DIR, launchAfter: false });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.version, "d.140.0.1.0");
+  assert.equal(h.calls.downloadCount, 0);
+  assert.equal(
+    h.events.some((e) => e.type === "phase" && e.label === "使用已下载的安装包"),
+    true,
+  );
+});
+
+test("缓存不可信：大小对不上时重新下载而不是硬用", async () => {
+  const CACHE_PATH = path.join(WORK_DIR, "inner-setup.exe");
+  const h = harness({
+    existing: [CACHE_PATH, EXE_PATH],
+    config: { payloadMode: "network" },
+    feedText: FEED_TEXT,
+    statFile: () => ({ isFile: () => true, size: 512 }),
+    downloadFile: async (url, dest) => ({ filePath: dest, bytes: 1000, sha512: "sha-ok", total: 1000 }),
+  });
+
+  const result = await h.pipeline.start({ installDir: INSTALL_DIR, launchAfter: false });
+
+  assert.equal(result.ok, true);
+  assert.equal(h.calls.downloadCount, 1);
+});
+
+test("预取失败只发 prefetch 事件，不弹错误屏", async () => {
+  const h = harness({
+    existing: [EXE_PATH],
+    config: { payloadMode: "network" },
+    feedText: "version: 1.0.0\n",
+  });
+
+  const prefetched = await h.pipeline.prefetch();
+
+  assert.equal(prefetched.ok, false);
+  assert.equal(prefetched.code, "feed-invalid");
+  assert.equal(h.events.some((e) => e.type === "error"), false);
+  assert.equal(
+    h.events.some((e) => e.type === "prefetch" && e.stage === "failed" && e.code === "feed-invalid"),
+    true,
+  );
+});
+
+test("还停在安装位置时取消，取消的是后台预取", async () => {
+  const h = harness({
+    existing: [EXE_PATH],
+    config: { payloadMode: "network" },
+    feedText: FEED_TEXT,
+    downloadFile: (url, dest, options) =>
+      new Promise((resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          const error = new Error("cancelled");
+          error.name = "AbortError";
+          reject(error);
+        });
+      }),
+  });
+
+  const prefetchPromise = h.pipeline.prefetch();
+  while (h.calls.downloadCount === 0) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.deepEqual(h.pipeline.cancel(), { ok: true, scope: "prefetch" });
+  const prefetched = await prefetchPromise;
+  assert.equal(prefetched.ok, false);
+  assert.equal(prefetched.code, "cancelled");
 });

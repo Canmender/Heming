@@ -34,11 +34,13 @@ const download = require("./download");
 const { statTree } = require("./dir-stats");
 const { startInstaller, killInstallerTree } = require("./installer");
 
-/** 安装期间轮询目标目录的间隔：太密会拖慢安装器自己的 IO，太稀看不出版面在动。 */
-const POLL_INTERVAL_MS = 600;
+/** 安装期间轮询目标目录的间隔：太密会跟解压抢 IO，太稀看不出版面在动。 */
+const POLL_INTERVAL_MS = 900;
 /** 除了安装包本身，还要留出解压时的临时峰值（7z 先解到 TEMP 再复制过去）。 */
 const SPACE_HEADROOM_BYTES = 200 * 1024 * 1024;
 const MAX_EXISTS_WALK = 12;
+/** 下载失败自动重试次数：断网、代理抖动、服务器提前掐断都值得再试两次，.part 会接着续。 */
+const MAX_DOWNLOAD_ATTEMPTS = 3;
 const NOOP_LOG = Object.freeze({ info() {}, warn() {}, error() {} });
 
 function createDefaultServices() {
@@ -63,6 +65,16 @@ function createDefaultServices() {
         return true;
       } catch {
         return false;
+      }
+    },
+    async removeFile(target) {
+      await fs.rm(target, { force: true }).catch(() => {});
+    },
+    async statFile(target) {
+      try {
+        return await fs.stat(target);
+      } catch {
+        return null;
       }
     },
     async freeBytes(dir) {
@@ -98,6 +110,18 @@ function createPipeline(input) {
   let busy = false;
   let installPid = null;
   let phase = "idle";
+  /**
+   * 后台预取任务。窗口一打开就去找安装包、开始下载：用户在「安装位置」这屏
+   * 读路径、改目录的十几秒里，300MB 通常已经下完，点「开始安装」直接进安装。
+   * 同一份任务被「开始安装」接管（visible 翻成 true，进度改走工作屏）。
+   */
+  let prefetchTask = null;
+  /**
+   * 预取成功后把结论留下：用户点「开始安装」时直接用，不再重新找包、不再重算哈希。
+   */
+  let prefetchedPayload = null;
+
+  const isAbort = (error) => Boolean(error) && (error.name === "AbortError" || error.code === CODES.CANCELLED);
 
   const emitEvent = (event) => {
     if (event && event.type === "phase") phase = event.phase;
@@ -141,13 +165,114 @@ function createPipeline(input) {
     }
   }
 
+  /** 内层安装包在临时目录里的落脚点；续传的 .part 就在它旁边。 */
+  function payloadDestination() {
+    return path.join(paths.workDir, "inner-setup.exe");
+  }
+
+  /**
+   * 上次已经下好并校验通过的安装包可以直接复用：
+   * 大小与 latest.yml 对得上、sha512 也对得上才算命中，否则当垃圾清掉重下。
+   * 这一步只多花一次读盘哈希（300MB 约两三百毫秒），换掉整次 300MB 下载。
+   */
+  async function cachedPayload(file, version) {
+    const dest = payloadDestination();
+    if (!(await services.exists(dest))) return null;
+    const stats = await services.statFile(dest);
+    if (!stats || !stats.isFile()) return null;
+    const expected = typeof file.size === "number" ? file.size : null;
+    if (expected !== null && stats.size !== expected) return null;
+    const actual = await services.sha512File(dest);
+    if (file.sha512 && !services.sha512Equals(file.sha512, actual)) return null;
+    return { filePath: dest, version, source: "cache" };
+  }
+
+  /**
+   * 下载安装包：失败自动重试，续传走 .part（download.js 在续传模式下只补缺的字节，
+   * 并把已有前缀一起喂给 sha512，所以校验的始终是整个文件）。
+   */
+  async function downloadPayload(file, url, ctx, sink) {
+    const dest = payloadDestination();
+    const expected = typeof file.size === "number" ? file.size : null;
+    let lastError = null;
+    for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt += 1) {
+      const eta = new EtaEstimator();
+      try {
+        const result = await services.downloadFile(url, dest, {
+          signal: ctx.signal,
+          expectedSize: expected,
+          resume: true,
+          onProgress: ({ received, total }) => {
+            eta.sample(received);
+            sink({
+              type: "progress",
+              received,
+              total: total ?? expected,
+              rate: eta.rate(),
+              remaining: eta.remaining(total ?? expected),
+            });
+          },
+        });
+        if (file.sha512 && !services.sha512Equals(file.sha512, result.sha512)) {
+          throw new SetupError(CODES.HASH_MISMATCH, "下载的安装包不完整", "校验值对不上，请重试");
+        }
+        return result;
+      } catch (error) {
+        if (isAbort(error)) throw error;
+        lastError = error;
+        if (error && error.code === CODES.HASH_MISMATCH) {
+          // 半截 .part 本身可能是坏的：清掉重下，别让坏数据一直被续传。
+          await services.removeFile(`${dest}.part`);
+          await services.removeFile(dest);
+        }
+        if (attempt < MAX_DOWNLOAD_ATTEMPTS) {
+          const waitMs = 1000 * attempt;
+          log.warn(`下载安装包失败（第 ${attempt} 次）：${error.message}；${waitMs}ms 后重试`);
+          await services.sleep(waitMs);
+        }
+      }
+    }
+    throw asSetupError(lastError, CODES.DOWNLOAD_FAILED, "安装包下载失败");
+  }
+
+  /**
+   * 预取阶段的事件形状与安装阶段不同：界面在「安装位置」这屏只想显示一行
+   * 「安装包 已准备 37%」，不该因为后台下载就把整屏切走。
+   */
+  function prefetchSinkFor(task) {
+    return (event) => {
+      if (task.settled) return;
+      const base = { type: "prefetch" };
+      if (event.type === "progress") {
+        emit({
+          ...base,
+          stage: "downloading",
+          received: event.received,
+          total: event.total,
+          rate: event.rate,
+          remaining: event.remaining,
+          percent: percentOf(event.received, event.total),
+        });
+        return;
+      }
+      if (event.type === "phase") {
+        const stage = event.phase === "download" ? "downloading" : event.phase === "verify" ? "verifying" : "resolving";
+        emit({ ...base, stage, label: event.label || null, version: event.version || null });
+        return;
+      }
+      if (event.type === "prefetch") {
+        emit(event);
+      }
+    };
+  }
+
   /** 依次尝试：用户指定 → 内嵌安装包 → setup 同目录的离线安装包 → 更新服务器下载。 */
-  async function resolvePayload(ctx, forcedPath) {
+  async function resolvePayload(ctx, forcedPath, sink) {
     if (forcedPath) {
       if (!(await services.exists(forcedPath))) {
         throw new SetupError(CODES.NO_PAYLOAD, "找不到你选择的安装包", forcedPath);
       }
-      emitEvent({ type: "phase", phase: "prepare", label: "校验安装包" });
+      sink({ type: "phase", phase: "prepare", label: "校验安装包" });
       return {
         filePath: forcedPath,
         version: versionFromInstallerName(path.basename(forcedPath)) || config.hemingVersion,
@@ -157,7 +282,7 @@ function createPipeline(input) {
 
     if (config.payloadMode === "embedded" && config.payloadPath) {
       if (await services.exists(config.payloadPath)) {
-        emitEvent({ type: "phase", phase: "prepare", label: "校验内嵌安装包" });
+        sink({ type: "phase", phase: "prepare", label: "校验内嵌安装包" });
         if (config.payloadSha512) {
           const actual = await services.sha512File(config.payloadPath);
           if (!services.sha512Equals(config.payloadSha512, actual)) {
@@ -172,7 +297,7 @@ function createPipeline(input) {
     const entries = await services.listDir(paths.setupDir);
     const localName = findLocalPayload(entries, paths.setupExeName);
     if (localName) {
-      emitEvent({ type: "phase", phase: "prepare", label: "使用同目录的安装包" });
+      sink({ type: "phase", phase: "prepare", label: "使用同目录的安装包" });
       return {
         filePath: path.join(paths.setupDir, localName),
         version: versionFromInstallerName(localName) || config.hemingVersion,
@@ -180,13 +305,13 @@ function createPipeline(input) {
       };
     }
 
-    emitEvent({ type: "phase", phase: "prepare", label: "连接更新服务器" });
+    sink({ type: "phase", phase: "prepare", label: "连接更新服务器" });
     const feedUrl = `${config.feedUrl}/latest.yml`;
     let text;
     try {
       text = await services.fetchText(feedUrl, { signal: ctx.signal });
     } catch (error) {
-      if (error && error.name === "AbortError") throw error;
+      if (isAbort(error)) throw error;
       throw asSetupError(error, CODES.NETWORK, "连不上更新服务器，请检查网络后重试");
     }
 
@@ -196,36 +321,82 @@ function createPipeline(input) {
 
     const url = resolveDownloadUrl(config.feedUrl, file.url);
     const version = versionFromInstallerName(decodeFileName(file.url)) || null;
-    const destination = path.join(paths.workDir, "inner-setup.exe");
-    emitEvent({ type: "phase", phase: "download", label: "下载安装包", totalBytes: file.size ?? null, version });
 
-    const eta = new EtaEstimator();
-    let result;
-    try {
-      result = await services.downloadFile(url, destination, {
-        signal: ctx.signal,
-        expectedSize: file.size ?? null,
-        onProgress: ({ received, total }) => {
-          eta.sample(received);
-          emitEvent({
-            type: "progress",
-            received,
-            total: total ?? file.size ?? null,
-            rate: eta.rate(),
-            remaining: eta.remaining(total ?? file.size ?? null),
-          });
-        },
-      });
-    } catch (error) {
-      if (error && error.name === "AbortError") throw error;
-      throw asSetupError(error, CODES.DOWNLOAD_FAILED, "安装包下载失败");
+    // 缓存命中：同一个包上次已经下好、大小和 sha512 都对得上，直接进安装。
+    const cached = await cachedPayload(file, version);
+    if (cached) {
+      log.info("安装包已存在且校验通过，跳过下载");
+      sink({ type: "phase", phase: "prepare", label: "使用已下载的安装包", version });
+      return cached;
     }
 
-    emitEvent({ type: "phase", phase: "verify", label: "校验安装包" });
-    if (file.sha512 && !services.sha512Equals(file.sha512, result.sha512)) {
-      throw new SetupError(CODES.HASH_MISMATCH, "下载的安装包不完整", "校验值对不上，请重试");
-    }
+    sink({ type: "phase", phase: "download", label: "下载安装包", totalBytes: file.size ?? null, version });
+    const result = await downloadPayload(file, url, ctx, sink);
+
+    sink({ type: "phase", phase: "verify", label: "校验安装包" });
     return { filePath: result.filePath, version, source: "network" };
+  }
+
+  /**
+   * 单飞的「准备安装包」任务：预取和「开始安装」共用同一个 promise。
+   * 用户还没点开始，进度走 prefetch 事件；点了开始就翻转 visible，
+   * 同一个下载的后续进度改走工作屏，不会重复下载。
+   */
+  function ensurePayloadTask({ forcedPath = null, visible = false } = {}) {
+    if (prefetchTask && !prefetchTask.settled && prefetchTask.forcedPath === forcedPath) {
+      if (visible) prefetchTask.visible = true;
+      return prefetchTask;
+    }
+    const taskController = new AbortController();
+    const task = {
+      controller: taskController,
+      ctx: { signal: taskController.signal, stopped: false },
+      forcedPath,
+      visible,
+      settled: false,
+      promise: null,
+    };
+    const sinkToPrefetch = prefetchSinkFor(task);
+    const sink = (event) => {
+      if (task.settled) return;
+      try {
+        if (task.visible) {
+          emitEvent(event);
+        } else {
+          sinkToPrefetch(event);
+        }
+      } catch (error) {
+        log.error(`界面事件发送失败: ${error.message}`);
+      }
+    };
+    task.promise = resolvePayload(task.ctx, forcedPath, sink).finally(() => {
+      task.settled = true;
+    });
+    prefetchTask = task;
+    return task;
+  }
+
+  /**
+   * 后台预取安装包。窗口一打开就调用：用户在「安装位置」这屏的十几秒里，
+   * 安装包通常已经下完，点「开始安装」就不必再等下载。
+   * 失败不弹错——真正的失败等用户点开始时再报，免得打开窗口就吓人。
+   */
+  async function prefetch() {
+    if (busy || (prefetchTask && !prefetchTask.settled)) return { ok: true, reused: true };
+    const task = ensurePayloadTask({ visible: false });
+    try {
+      const payload = await task.promise;
+      prefetchedPayload = payload;
+      emitEvent({ type: "prefetch", stage: "ready", version: payload.version, source: payload.source });
+      log.info(`安装包已就绪：${payload.source} ${payload.version || ""}`);
+      return { ok: true, version: payload.version };
+    } catch (error) {
+      if (isAbort(error)) return { ok: false, code: CODES.CANCELLED };
+      const failure = asSetupError(error, CODES.NETWORK, "准备安装包失败");
+      emitEvent({ type: "prefetch", stage: "failed", code: failure.code, message: failure.message });
+      log.warn(`预取安装包失败：${failure.code} ${failure.message}`);
+      return { ok: false, code: failure.code };
+    }
   }
 
   /** 安装期间按目录增长刷新「已写入多少个文件」。装完的那一下不追求 100%，宁可停在 99%。 */
@@ -286,7 +457,20 @@ function createPipeline(input) {
       emitEvent({ type: "phase", phase: "prepare", label: "检查安装位置" });
       await checkSpace(installDir);
 
-      const payload = await resolvePayload(ctx, options.payloadPath);
+      let payload;
+      if (options.payloadPath) {
+        // 用户手动选了安装包：正在进行中的预取没用了，停掉，改走这个文件。
+        if (prefetchTask && !prefetchTask.settled) prefetchTask.controller.abort();
+        payload = await resolvePayload(ctx, options.payloadPath, emitEvent);
+      } else if (prefetchTask && !prefetchTask.settled) {
+        // 预取还没完：接手同一个任务，把后续进度切到工作屏，而不是再下一遍。
+        prefetchTask.visible = true;
+        payload = await prefetchTask.promise;
+      } else if (prefetchedPayload) {
+        payload = prefetchedPayload;
+      } else {
+        payload = await resolvePayload(ctx, null, emitEvent);
+      }
       emitEvent({
         type: "phase",
         phase: "install",
@@ -343,9 +527,7 @@ function createPipeline(input) {
       log.info(`安装完成 ${located.exePath}`);
       return { ok: true, ...result };
     } catch (error) {
-      const cancelled =
-        (error && error.code === CODES.CANCELLED) || (error && error.name === "AbortError");
-      if (cancelled) {
+      if (isAbort(error)) {
         emitEvent({ type: "cancelled" });
         log.warn("用户在下载阶段取消了安装");
         return { ok: false, code: CODES.CANCELLED };
@@ -364,13 +546,20 @@ function createPipeline(input) {
 
   /** 只有下载/准备阶段能取消；安装阶段打断内层安装器会留下半装状态，宁可让它跑完。 */
   function cancel() {
+    // 窗口还停在「安装位置」、后台正在预取：取消就是把预取停了，不算报错。
+    if (!busy && prefetchTask && !prefetchTask.settled) {
+      prefetchTask.controller.abort();
+      return { ok: true, scope: "prefetch" };
+    }
     if (!busy || !controller) return { ok: false, reason: "idle" };
     if (phase === "install") return { ok: false, reason: "installing" };
+    if (prefetchTask && !prefetchTask.settled) prefetchTask.controller.abort();
     controller.abort();
     return { ok: true };
   }
 
   function dispose() {
+    if (prefetchTask && !prefetchTask.settled) prefetchTask.controller.abort();
     if (controller) controller.abort();
     if (installPid) {
       killInstallerTree(installPid);
@@ -381,6 +570,7 @@ function createPipeline(input) {
 
   return {
     start,
+    prefetch,
     cancel,
     dispose,
     isBusy: () => busy,
