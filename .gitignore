@@ -70,3 +70,5 @@ module-catalog/
 
 # 本地 UI 自检临时目录（Electron userData / 截图，不入库）
 .ui-check-tmp/
+# 跨语言联调测试的临时工作目录（进程退出后句柄可能还占着一小会儿）
+.tmp-pipeline-live-*/

@@ -128,13 +128,25 @@ describe.skipIf(!HAS_PYTHON)("流水线客户端 ↔ 真服务（跨语言）", 
   }, 40_000);
 
   afterAll(async () => {
-    service?.kill();
-    upstream?.close();
-    try {
-      rmSync(workDir, { recursive: true, force: true });
-    } catch {
-      /* 清理失败不影响测试结论 */
+    // Windows 上 python 退出后 SQLite 句柄还会占用一小会儿：先等进程真的退，
+    // 再重试删除。否则测试跑一次就在仓库根留一个 .tmp-pipeline-live-* 目录。
+    if (service && service.exitCode === null) {
+      const exited = new Promise<void>((resolvePromise) => {
+        service.once("exit", () => resolvePromise());
+        service.kill();
+      });
+      await Promise.race([exited, new Promise((r) => setTimeout(r, 3000))]);
     }
+    upstream?.close();
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        rmSync(workDir, { recursive: true, force: true });
+        return;
+      } catch {
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    }
+    /* 还被占用就留着：`.gitignore` 已忽略这个前缀，不影响仓库状态 */
   });
 
   it("提交任务 → 轮询到 ok → 读到 answer/stop_reason/llm_calls", async () => {
