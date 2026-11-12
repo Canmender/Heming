@@ -24,6 +24,15 @@ const path = require("node:path");
 const { bundledEnv, resolveMcpCommand } = require("./bundled-runtime");
 const { DEFAULT_GRACE_MS, teardownChild } = require("./child-kill");
 
+/**
+ * 连续多少次请求超时就回收这个 MCP 子进程。
+ *
+ * 合规实现超时前会回错误（或至少回 `notifications/cancelled` 的确认），
+ * 连着几次一条消息都不回，基本等于这个进程的主循环已经卡死/假活：
+ * 再留着它，之后每次工具调用都要白等一个完整超时。回收掉，下次调用重新拉起。
+ */
+const RECYCLE_AFTER_TIMEOUTS = 3;
+
 /** 单条消息编码：MCP stdio 用换行分隔的 JSON-RPC。 */
 function encodeMessage(obj) {
   return JSON.stringify(obj) + "\n";
@@ -321,7 +330,7 @@ function createStdioBridge({
     };
     if (!isWindows) spawnOpts.detached = true;
     const child = spawn(command, args, spawnOpts);
-    const entry = { child, buffer: "", nextId: 1, pending: new Map() };
+    const entry = { child, buffer: "", nextId: 1, pending: new Map(), timeouts: 0 };
     servers.set(serverId, entry);
 
     child.stdout.setEncoding?.("utf8");
@@ -345,6 +354,8 @@ function createStdioBridge({
         if (!waiter) continue;
         clearTimeout(waiter.timer);
         entry.pending.delete(msg.id);
+        // 回得来消息就说明进程还活着、主循环在转：连续超时计数清零。
+        entry.timeouts = 0;
         if (msg.error) {
           waiter.reject(new Error(`${msg.error.message ?? "MCP 错误"}（code ${msg.error.code ?? "?"}）`));
         } else {
@@ -382,6 +393,7 @@ function createStdioBridge({
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         entry.pending.delete(id);
+        entry.timeouts += 1;
         /**
          * 超时不能只丢下就完：先按规范发 `notifications/cancelled` 告诉服务端
          * 「这次别做了」。合规实现会中止工具调用；不理会这条通知的实现会继续跑，
@@ -405,6 +417,18 @@ function createStdioBridge({
               "（已通知服务端取消；若它不理会，子进程里可能仍在执行）",
           ),
         );
+        /**
+         * 连续超时到上限就回收：这个进程已经不回消息了（连错误都不回），
+         * 留着它只会让后面每次调用都白白等满一个超时。stop 会关 stdin 并回收
+         * 进程树，下一次 request 会重新拉起一个干净的子进程。
+         */
+        if (entry.timeouts >= RECYCLE_AFTER_TIMEOUTS) {
+          entry.timeouts = 0;
+          log(
+            `[mcp:${serverId}] 连续 ${RECYCLE_AFTER_TIMEOUTS} 次请求超时，回收该 MCP 进程（下次调用会重新拉起）`,
+          );
+          stop(serverId);
+        }
       }, requestTimeout);
       entry.pending.set(id, { resolve, reject, timer, startedAt: now() });
       try {
@@ -488,6 +512,7 @@ function createStdioBridge({
 
 module.exports = {
   clampTimeout,
+  RECYCLE_AFTER_TIMEOUTS,
   buildChildEnv,
   createStdioBridge,
   encodeMessage,

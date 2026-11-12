@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const path = require("node:path");
 const {
+  RECYCLE_AFTER_TIMEOUTS,
   clampTimeout,
   createStdioBridge,
   encodeMessage,
@@ -133,6 +134,7 @@ test("错误响应 → 拒绝并带 code；进程退出 → 挂起请求全部�
 });
 
 test("超时可配：配置值夹到 [2s, 600s]，非法值回落缺省", () => {
+  assert.equal(RECYCLE_AFTER_TIMEOUTS, 3);
   assert.equal(clampTimeout(undefined, 30_000), 30_000);
   assert.equal(clampTimeout(120_000, 30_000), 120_000);
   assert.equal(clampTimeout(1, 30_000), 2_000);
@@ -155,6 +157,54 @@ test("超时会发 notifications/cancelled，并在文案里说明子进程可�
   assert.ok(cancelled, "应当发出取消通知");
   assert.equal(cancelled.params.requestId, 1);
   assert.match(cancelled.params.reason, /超时/);
+});
+
+test("连续超时到上限 → 回收该进程，下次调用重新拉起", async () => {
+  const kids = [];
+  const bridge = makeBridge({
+    timeoutMs: 20,
+    spawn: () => {
+      const f = fakeChild();
+      kids.push(f);
+      return f.child;
+    },
+  });
+
+  for (let i = 0; i < 3; i += 1) {
+    await assert.rejects(bridge.request("s1", { command: "x" }, "tools/call", {}), /超时/);
+  }
+  assert.equal(kids.length, 1, "达到上限之前复用同一个进程");
+  assert.equal(kids[0].child.stdin.ended, true, "达到上限后关 stdin 回收（合规实现会自己退）");
+  assert.deepEqual(bridge.running(), []);
+
+  const fourth = bridge.request("s1", { command: "x" }, "tools/list", {});
+  assert.equal(kids.length, 2, "下次调用重新拉起一个干净的子进程");
+  assert.equal(JSON.parse(kids[1].writes[0].trim()).id, 1, "新进程的 id 从头开始");
+  reply(kids[1].child, { jsonrpc: "2.0", id: 1, result: { tools: [] } });
+  assert.deepEqual(await fourth, { tools: [] });
+});
+
+test("中途回得来消息就把连续超时计数清零（不会误杀活着的进程）", async () => {
+  const kids = [];
+  const bridge = makeBridge({
+    timeoutMs: 20,
+    spawn: () => {
+      const f = fakeChild();
+      kids.push(f);
+      return f.child;
+    },
+  });
+
+  await assert.rejects(bridge.request("s1", { command: "x" }, "tools/call", {}), /超时/);
+  const ok = bridge.request("s1", { command: "x" }, "tools/list", {});
+  reply(kids[0].child, { jsonrpc: "2.0", id: 2, result: { tools: [] } });
+  assert.deepEqual(await ok, { tools: [] });
+
+  // 计数清零后，再连着两次超时也不应触发回收（3 次才到上限）
+  await assert.rejects(bridge.request("s1", { command: "x" }, "tools/call", {}), /超时/);
+  await assert.rejects(bridge.request("s1", { command: "x" }, "tools/call", {}), /超时/);
+  assert.equal(kids.length, 1);
+  assert.equal(kids[0].child.stdin.ended, false);
 });
 
 test("服务端发起的请求会被明确拒绝（-32601），ping 回空结果；通知不回应", async () => {
