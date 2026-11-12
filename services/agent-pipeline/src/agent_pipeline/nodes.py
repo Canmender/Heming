@@ -50,6 +50,9 @@ class Runtime:
     clock: Callable[[], float] = time.monotonic
     # 工具审批闸：None = 不拦（默认）。开了以后 execute 在跑非只读工具前会阻塞等待裁决。
     approval: ApprovalGate | None = None
+    # 取消标记：返回 True 表示这个 run 已被要求停止。节点之间会检查一次，
+    # 命中就写 stop_reason="cancelled" 收口——长任务不能只能靠杀进程来停。
+    cancel: Callable[[str], bool] | None = None
 
     def prompt(self, key: str) -> str:
         return self.prompts.get(key) or DEFAULT_PROMPTS.get(key, "")
@@ -513,6 +516,15 @@ def summarize_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     task = TaskSpec(**_task(state))
     observations = _observations_of(state)
     citations = [c.to_dict() for obs in observations for c in obs.citations]
+    if state.get("stop_reason") == "cancelled":
+        # 被取消的 run 不再调模型：把已经做完的部分交回去，状态标 aborted。
+        digest = "\n".join(obs.render(400) for obs in observations[-4:]) or "（取消前还没有工具结果）"
+        return {
+            **state,
+            "answer": f"（这次运行被取消，以下是取消前已完成的内容）\n{digest}",
+            "citations": citations,
+            "status": "aborted",
+        }
     if not _budget_left(state, runtime):
         # 预算已耗尽时不能再调模型：用已有观测拼答复，状态标 budget 交给上层展示。
         digest = "\n".join(obs.render(400) for obs in observations[-4:]) or "（没有可汇总的工具结果）"

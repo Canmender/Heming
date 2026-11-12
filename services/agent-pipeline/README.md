@@ -65,6 +65,7 @@ AGENT_TUNE_ENABLED=1 .venv/Scripts/python.exe -m agent_pipeline.runner serve --p
 | GET | `/metrics` | Prometheus 指标（`pipeline_*`） |
 | POST | `/v1/runs` | 提交一次 run（202；并发满返回 429 + `Retry-After`；同 `run_id` 幂等） |
 | GET | `/v1/runs/{id}` | 查状态/结果 |
+| POST | `/v1/runs/{id}/cancel` | 请求停止一个正在跑的 run（节点边界收口为 `aborted`，`stop_reason="cancelled"`；未结束前重复调用 202/409 都算正常） |
 | POST | `/v1/runs/{id}/approve` | HITL 审批（需 `AGENT_APPROVAL_MODE=write`；body `{call_id?, approved}`，没有待审批返回 409） |
 | GET | `/v1/config` | 当前 active/canary 配置与历史 |
 | POST | `/v1/config/promote` | 把 canary 提升为 active |
@@ -107,6 +108,14 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_APPROVAL_TIMEOUT_S` | `300` | 等审批的时限；超时按**拒绝**处理（绝不悄悄放行） |
 
 预算（`Budget`）：`max_steps=8`、`max_llm_calls=40`、`max_tokens=120_000`、`max_wall_clock_s=600`、`step_tool_budget=6`、`max_replans=2`、`max_adversarial_rounds=2`。超预算时流水线**不硬失败**，而是带 `status="budget"` 和 `stop_reason` 返回已完成的部分。
+
+## 取消一个 run
+
+长任务不能只能靠杀进程停。`POST /v1/runs/{id}/cancel` 只置一个标记：正在执行的那次模型调用不会被打断（HTTP 请求没法安全打断），但**下一个节点边界**会看到标记，直接以 `status="aborted"` / `stop_reason="cancelled"` 收口，`summarize` 仍会跑完并回「取消前已完成的内容」——不用等 10 分钟墙钟超时。
+
+- 已完成/失败的 run 再取消返回 409；不存在的 run 返回 404；
+- 取消是协作式的：卡在工具调用里的 run 要等这次工具超时（`AGENT_TOOL_TIMEOUT_S`）才走到下一个边界；
+- `tests/test_cancel.py` 4 例覆盖（跑到一半取消、未知 run、已结束 run、重复取消）。
 
 ## 知识库（RAG）
 

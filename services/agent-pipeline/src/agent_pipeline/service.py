@@ -94,6 +94,9 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
 
     app = FastAPI(title="agent-pipeline", version="0.1.0", lifespan=lifespan)
     runs: dict[str, dict[str, Any]] = {}
+    # 取消标记：run_id → Event。run 结束后立刻丢弃，避免长期占用。
+    cancels: dict[str, threading.Event] = {}
+    runtime.cancel = lambda run_id: cancels.get(run_id) is not None and cancels[run_id].is_set()
     lock = threading.Lock()
     semaphore = threading.BoundedSemaphore(settings.max_concurrent_runs)
     app.state.runtime = runtime
@@ -141,6 +144,8 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                 }
                 _evict_locked()
         finally:
+            with lock:
+                cancels.pop(run_id, None)
             semaphore.release()
 
     @app.get("/health")
@@ -179,6 +184,7 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                 return JSONResponse(status_code=202, content={"run_id": run_id, "status": existing["status"]})
             if not semaphore.acquire(blocking=False):
                 raise HTTPException(status_code=429, detail="并发已满，请稍后重试", headers={"Retry-After": "5"})
+            cancels[run_id] = threading.Event()
             runs[run_id] = {"run_id": run_id, "status": "running", "started_at": time.time()}
         task = TaskSpec(
             goal=body.goal,
@@ -191,6 +197,19 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         thread = threading.Thread(target=_execute, args=(run_id, task), daemon=True, name=f"run-{run_id[:8]}")
         thread.start()
         return JSONResponse(status_code=202, content={"run_id": run_id, "status": "running", "poll": f"/v1/runs/{run_id}"})
+
+    @app.post("/v1/runs/{run_id}/cancel", status_code=202)
+    def cancel_run(run_id: str) -> dict[str, Any]:
+        """请求停止一个 run：节点边界会看到标记并收口为 aborted（不是硬杀线程）。"""
+        with lock:
+            entry = runs.get(run_id)
+            if entry is None:
+                raise HTTPException(status_code=404, detail="没有这个 run")
+            if entry.get("status") != "running":
+                raise HTTPException(status_code=409, detail=f"这个 run 已经结束（{entry.get('status')}）")
+            cancels.setdefault(run_id, threading.Event()).set()
+            entry["status"] = "cancelling"
+        return {"run_id": run_id, "status": "cancelling", "poll": f"/v1/runs/{run_id}"}
 
     @app.get("/v1/runs/{run_id}")
     def get_run(run_id: str) -> dict[str, Any]:

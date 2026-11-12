@@ -129,6 +129,11 @@ def _wrap(name: str, runtime: Runtime) -> Callable[[PipelineState], PipelineStat
     impl = NODE_IMPLS[name]
 
     def node(state: PipelineState) -> PipelineState:
+        run_id = str(state.get("run_id") or "")
+        # summarize 是收尾节点：取消也要让它跑完，否则用户拿不到「已取消」的答复。
+        if name != "summarize" and runtime.cancel is not None and run_id and runtime.cancel(run_id):
+            # 节点边界检查取消：不用等当前这次模型调用超时，也不会把半截结果当完工。
+            return {**state, "stop_reason": "cancelled", "status": "aborted"}  # type: ignore[return-value]
         started = time.monotonic()
         result = impl(runtime, dict(state))  # type: ignore[arg-type]
         runtime.metrics.record_node(name, time.monotonic() - started)
