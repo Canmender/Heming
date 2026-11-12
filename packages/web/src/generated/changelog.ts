@@ -24,10 +24,11 @@ export const CHANGELOG: ChangelogEntry[] = [
       "**规则抽取保留**：原规则抽取列表收进日程页底部「规则抽取（备用）」折叠区，仍可「重扫议程」。",
       "**权限与签名**：清单加 `permissions.chat: true`（页面可读本机网关地址与模型列表、直连网关；宿主的人设prompt 与用户 Key 永不下发），版本 1.3.0 → 1.4.0，重新签名（`packageSha256",
       "**顺带修复**：插件页 `append()` 只接受数组（`for (const child of children)`），但检索页「检索出错 /没有查询 / 没有结果」三个空态传的是单个节点，`Node` 不可迭代 → `TypeError: children is not iterable`，",
+      "**安装包瘦身（同日重出）**：首次打包 676,172,763 字节，当天重新出包降到 **335,458,870 字节**（-50.4%），`win-unpacked` 1,233MB → 856MB。三处来源：① 更新助手改成在线版——`node scripts/build-setup.mjs` 不带",
       "**门禁**：见 `docs/HANDOFF.md` §2 测试行（d.140 实跑记录）。"
     ],
     "paragraphs": [
-      "网关（OpenAI 兼容 `/chat/completions`，流式与非流式都能解析），识别结果整理成表格（时间 / 事项 / 类型 /来源 / 依据）。表格可直接改时间与事项、按类型归类、删行、复制表格、导出 CSV；结果只存插件私有数据（键 `aiItems`），**不写回归档库、不改宿主日程**。必须勾选「允许发送」才会请求，识别期间可随时停止。前后废话、尾逗号与 `{ items: [...] }` 包装；纯日期按本地零点并标为全天，避免 UTC 零点显示成 08:00。9f04bc7b605c1ee77a9b84d9c117dc105eac2dbf39aa0dfd5e22ca63faa6cf55`）并发布到本地`plugins-catalog/heming.infohub/1.4.0/`。检索页在这些状态下整页崩（1.3.0 同样存在）。改为兼容单个子节点与空值。"
+      "网关（OpenAI 兼容 `/chat/completions`，流式与非流式都能解析），识别结果整理成表格（时间 / 事项 / 类型 /来源 / 依据）。表格可直接改时间与事项、按类型归类、删行、复制表格、导出 CSV；结果只存插件私有数据（键 `aiItems`），**不写回归档库、不改宿主日程**。必须勾选「允许发送」才会请求，识别期间可随时停止。前后废话、尾逗号与 `{ items: [...] }` 包装；纯日期按本地零点并标为全天，避免 UTC 零点显示成 08:00。9f04bc7b605c1ee77a9b84d9c117dc105eac2dbf39aa0dfd5e22ca63faa6cf55`）并发布到本地`plugins-catalog/heming.infohub/1.4.0/`。检索页在这些状态下整页崩（1.3.0 同样存在）。改为兼容单个子节点与空值。`--embed-inner` 重建，去掉内嵌的 357MB 内层安装包（`和鸣安装程序` 409MB → 97.8MB），更新时计划文件里的`installerPath` 本来就是 electron-updater 已下载好的安装包，助手不需要自带；② `packages/desktop` 与`packages/setup` 都加 `compression: \"maximum\"` 与 `electronLanguages: [\"zh-CN\",\"en-US\"]`（locales 49MB → 2MB）；③ `runtime` 的 extraResources filter 排除 `__pycache__`、`tests`、`*.chm`。版本号不变，更新源与安装包按新产物重新发布；剩余体积 = Electron 运行时 239MB + 更新助手 98MB + `runtime/mcp-env` 364MB + `magpie` 70MB。"
     ]
   },
   {

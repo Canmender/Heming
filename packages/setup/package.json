@@ -18,7 +18,11 @@
     "appId": "com.heming.setup",
     "productName": "和鸣安装程序",
     "asar": true,
-    "compression": "normal",
+    "compression": "maximum",
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
     "files": [
       "main.js",
       "preload.js",

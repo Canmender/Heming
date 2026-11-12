@@ -21,6 +21,11 @@
   "build": {
     "appId": "com.heming.app",
     "productName": "和鸣",
+    "compression": "maximum",
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
     "files": [
       "main.js",
       "data-root.js",
@@ -83,7 +88,11 @@
         "to": "runtime",
         "filter": [
           "**/*",
-          "!**/*.pyc.tmp"
+          "!**/*.pyc.tmp",
+          "!**/__pycache__/**",
+          "!**/tests/**",
+          "!**/test/**",
+          "!**/*.chm"
         ]
       },
       {

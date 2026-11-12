@@ -26,6 +26,13 @@
 - **顺带修复**：插件页 `append()` 只接受数组（`for (const child of children)`），但检索页「检索出错 /
   没有查询 / 没有结果」三个空态传的是单个节点，`Node` 不可迭代 → `TypeError: children is not iterable`，
   检索页在这些状态下整页崩（1.3.0 同样存在）。改为兼容单个子节点与空值。
+- **安装包瘦身（同日重出）**：首次打包 676,172,763 字节，当天重新出包降到 **335,458,870 字节**（-50.4%），
+  `win-unpacked` 1,233MB → 856MB。三处来源：① 更新助手改成在线版——`node scripts/build-setup.mjs` 不带
+  `--embed-inner` 重建，去掉内嵌的 357MB 内层安装包（`和鸣安装程序` 409MB → 97.8MB），更新时计划文件里的
+  `installerPath` 本来就是 electron-updater 已下载好的安装包，助手不需要自带；② `packages/desktop` 与
+  `packages/setup` 都加 `compression: "maximum"` 与 `electronLanguages: ["zh-CN","en-US"]`（locales 49MB → 2MB）；
+  ③ `runtime` 的 extraResources filter 排除 `__pycache__`、`tests`、`*.chm`。版本号不变，更新源与安装包按新产物
+  重新发布；剩余体积 = Electron 运行时 239MB + 更新助手 98MB + `runtime/mcp-env` 364MB + `magpie` 70MB。
 - **门禁**：见 `docs/HANDOFF.md` §2 测试行（d.140 实跑记录）。
 
 ## d.139.3.54.10（2026-11-12）— 首页卡快捷入口 + 页面意图：插件系统的通用卡片能力
