@@ -321,7 +321,13 @@ HEMING_PLUGIN_PUBLISH_KEY=**** node scripts/publish-plugin.mjs plugin-kit/plugin
   `page` 与 `desktopWidgets` 可并存（同一插件既能有浮窗又能有页面），每类最多 1 个；`page.entry` 必须是包内 `.html` 且出现在 `files` 里。
   除 `homeCards`（纯数据）外，bundle 必须至少声明 `desktopWidgets` / `page` / `background` 之一——否则它就是纯声明式包，不该走 bundle。
 - `homeCards`（≤4 个，纯数据）与 `background`（1 个包内 HTML，宿主建常驻隐藏窗口）原本只给内置模块用，modules 下线后（d.138）成为界面插件的正式能力：
-  首页卡由宿主统一渲染、文案可经 `homeCardSet()` 在运行期覆盖；后台页与页面共享同一份插件 data 目录，停用/卸载/更新即回收。
+  首页卡由宿主统一渲染；运行期可用 `homeCardSet()` 覆盖文案（`text` / `detail` / `badge`）与速览项
+  （`items`，≤3 条、每条 ≤40 字，纯展示不可点）；后台页与页面共享同一份插件 data 目录，停用/卸载/更新即回收。
+- **首页卡快捷入口（d.139）**：卡片可另外声明 `actions: [{ label, intent }]`——≤3 个、`label` 1–12 字、
+  `intent` 是 `/^[a-z0-9][a-z0-9._-]{0,31}$/` 的小写 token。快捷入口只为**本插件自己的页面**服务：
+  声明了 `actions` 的卡，`page` 必须指向 `plugin:<插件 id>`，否则清单直接拒绝（避免 intent 没有接收方）。
+  点击后宿主把 `intent` 拼进页面地址（`widget://<id>/<entry>#intent=<token>`），插件页自己解释语义；
+  宿主不理解 intent 含义，也不做跨页跳转。`actions` 进首方签名文本，但**仅在声明时出现**，旧包 canonical 字节不变。
 - **`packageSha256` 必填（审计 P0-1）**：它是包内 `files/**` 的确定性内容摘要（不是 tgz 自身字节的 sha256——清单在 tgz 里，写自己的 tgz 摘要会构成自引用）。
   首方签名覆盖清单（含该字段）→ 签名**间接覆盖全部代码字节**；安装端解包后重算并比对，只换包内 JS、保留官方清单+签名的「借壳包」会被拒。
   旧的无该字段的 bundle 包**不再允许新装**（已安装记录不受影响）；打包/签名脚本会自动写入/校验该字段。
@@ -595,10 +601,11 @@ node scripts/plugin-schema.mjs --check                         # 校验 plugin-k
 **沙箱 bundle 插件**，清单、签名、安装、发布与桌宠等界面插件走完全同一条链路，不再有第二种插件形态。
 
 - 源码：`plugin-kit/plugins/automations/`（`heming.automations` 1.0.0）与
-  `plugin-kit/plugins/infohub/`（`heming.infohub` 1.2.0），与其它插件并列。
+  `plugin-kit/plugins/infohub/`（`heming.infohub` 1.3.0），与其它插件并列。
 - 页面：`contributions.page.entry` 指向包内原生 HTML（无构建步骤、不引 React），宿主在 `widget://`
   沙箱里加载（见 §13.4）；自动化另有 `contributions.background` 后台页，信息中枢另有 `commands`。
-- 首页卡：两者都声明 `contributions.homeCards`，由宿主首页统一渲染（运行期文案由 `homeCardSet()` 覆盖）。
+- 首页卡：两者都声明 `contributions.homeCards`，由宿主首页统一渲染（运行期文案与速览项由 `homeCardSet()` 覆盖）；
+  信息中枢另外声明了两个 `actions` 快捷入口（检索归档 / 全部日程），点击后带 `#intent=` 进页面并切到对应页签。
 - 能力边界：信息中枢的归档检索通过 `permissions.infohub`（只读 `infohubCall`）调宿主桥，自动化靠
   后台页定时调同一座桥；插件包本身不再自带 Python 引擎，也不需要「首次启用补下载模块包」；
   信息中枢要读归档仍依赖选装的 Python 引擎（见本节末尾的例外说明）。
@@ -685,8 +692,12 @@ web 模块体系无关，也不要按它给插件加第二种形态。
 
 ### 13.4 自带页运行时（桌面端）
 
-- IPC：`widgets:page-mount { id, rect }`、`widgets:page-bounds { rect }`、`widgets:page-unmount`。
+- IPC：`widgets:page-mount { id, rect, intent? }`、`widgets:page-bounds { rect }`、`widgets:page-unmount`。
   web 侧占位 div 用 `ResizeObserver` + `getBoundingClientRect()` 上报内容区坐标。
+- 页面意图（d.139）：`pageMount` 可带 `intent`（与首页卡 `actions[].intent` 同一套 token）。主进程校验格式后把
+  `#intent=<token>` 拼到 `widget://<id>/<entry>` 再 `loadURL`；hash 只存在于页面自己的地址里，`will-navigate`
+  的同 origin 判定会剥掉 hash，宿主不理解语义——由插件页读 `location.hash` 自行解释（信息中枢据此选页签）。
+  非法/缺失的 `intent` 不拼 hash，页面按默认状态启动。
 - 主进程建/复用 `WebContentsView`：`preload = widget-preload.js`、`sandbox: true`、`contextIsolation: true`、
   `nodeIntegration: false`，`loadURL("widget://<id>/<entry>")`，CSP 用 `widgetCspHeaders(record.permissions)`。
 - 坐标口径：主窗 `contentView` 坐标系（CSS px = DIP）；主进程对 rect 做边界钳制（宽高 ≥1、超出内容区裁掉）。

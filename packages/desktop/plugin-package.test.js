@@ -13,6 +13,7 @@ const {
   validateLayout,
   validateBundleManifest,
   normalizePageSpec,
+  normalizeHomeCards,
   computeFilesDigest,
   sha256Hex,
 } = require("./plugin-package");
@@ -239,6 +240,51 @@ test("清单守卫：dev 模式放行「尚未打包」的 packageSha256，安�
 
   // 非 bundle 声明不受 dev 影响
   assert.equal(validateBundleManifest(baseManifest({ schemaVersion: 3 }), { dev: true }).ok, false);
+});
+
+test("清单守卫：首页卡快捷入口（d.139）透传 intent，非法形状在安装口径直接报错", () => {
+  const withCard = (card) =>
+    normalizeHomeCards(
+      [
+        {
+          id: "archive",
+          title: "信息中枢",
+          page: "plugin:heming.pet",
+          actions: [{ label: "检索", intent: "search" }],
+          ...card,
+        },
+      ],
+      "heming.pet",
+    );
+
+  const ok = withCard({});
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.cards[0].actions, [{ label: "检索", intent: "search" }]);
+
+  // 旧清单没写 actions：必须仍然能装（这次扩展不能把已发布插件挡在门外）
+  const legacy = normalizeHomeCards([{ id: "archive", title: "信息中枢" }], "heming.pet");
+  assert.equal(legacy.ok, true);
+  assert.deepEqual(legacy.cards[0].actions, []);
+
+  for (const [card, expected] of [
+    [{ actions: [{ label: "检索", intent: "Search" }] }, /intent 只能用/],
+    [{ actions: Array.from({ length: 4 }, (_, index) => ({ label: `入口${index}`, intent: `i${index}` })) }, /最多 3 个/],
+    [
+      {
+        actions: [
+          { label: "检索", intent: "search" },
+          { label: "检索", intent: "agenda" },
+        ],
+      },
+      /与前面的入口重复/,
+    ],
+    // 指向宿主页面的卡片没人解释 intent，声明了也没有接收方
+    [{ page: "home", actions: [{ label: "检索", intent: "search" }] }, /只能打开自己的页面/],
+  ]) {
+    const result = withCard(card);
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("；"), expected);
+  }
 });
 
 test("清单守卫：permissions 逐项受控（events/graphics/eval/network）", () => {

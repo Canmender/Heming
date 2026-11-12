@@ -1276,6 +1276,28 @@ test("页面视图：mount 建 WebContentsView（沙箱 + widget-preload + widge
   assert.equal(host.pageCount, 1);
 });
 
+test("页面视图：意图 token 合法时拼进 hash，插件页自己解释；非法/缺省不加 hash", async () => {
+  const { host, createdViews } = makePageHost();
+  host.start();
+
+  await host.pageMount({ id: "acme.page", rect: {}, intent: "agenda" });
+  assert.equal(createdViews[0].webContents._url, "widget://acme.page/files/page/index.html#intent=agenda");
+
+  // 大写/空白/超长/以符号开头都算非法：退化成普通挂载，不给页面添噪音
+  for (const intent of ["Agenda", "  ", "9" + "a".repeat(40), "-x", 42, null, undefined]) {
+    await host.pageMount({ id: "acme.page", rect: {}, intent });
+    assert.equal(
+      createdViews[createdViews.length - 1].webContents._url,
+      "widget://acme.page/files/page/index.html",
+      `非法 intent ${JSON.stringify(intent)} 不应改变入口地址`,
+    );
+  }
+
+  // 首尾空白会被裁掉，不产生空格 hash
+  await host.pageMount({ id: "acme.page", rect: {}, intent: "  search  " });
+  assert.equal(createdViews[createdViews.length - 1].webContents._url, "widget://acme.page/files/page/index.html#intent=search");
+});
+
 test("页面视图：rect 按主窗内容区钳制（负坐标归零、超出裁掉、宽高至少 1）", async () => {
   const { host, createdViews } = makePageHost();
   host.start();
@@ -1674,6 +1696,8 @@ test("homeCards：只收启用插件，text 缺省用清单 primary，homeCardSe
     text: "等待第一次汇总",
     detail: "",
     badge: "",
+    items: [],
+    actions: [],
   });
 
   const result = await invokeChannel("widget:homecard-set", { sender: created[0].webContents }, {

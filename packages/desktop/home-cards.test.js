@@ -45,6 +45,8 @@ test("projectCard：清单 primary 作为初始文案，覆盖值优先且字段
     text: "等待第一次汇总",
     detail: "",
     badge: "",
+    items: [],
+    actions: [],
   });
 
   const covered = projectCard(record(), spec, { text: "3 条待办", badge: "3" });
@@ -162,4 +164,71 @@ test("applyPatch：不改入参（写盘失败时调用方保持原状）", () =
   assert.equal(result.ok, true);
   assert.equal(current.brief.text, "旧");
   assert.equal(result.next.brief.text, "新");
+});
+
+/* ───────────────────── d.139 速览项与快捷入口 ───────────────────── */
+
+/** 带快捷入口的清单卡片：actions 来自清单（受签），items 来自运行期覆盖。 */
+function actionRecord() {
+  return record({
+    homeCards: [
+      {
+        ...record().homeCards[0],
+        actions: [
+          { label: "检索归档", intent: "search" },
+          { label: "全部日程", intent: "agenda" },
+        ],
+      },
+    ],
+  });
+}
+
+test("projectCard：快捷入口来自清单声明，非法项被过滤（渲染层不该看到半个按钮）", () => {
+  const spec = actionRecord().homeCards[0];
+  const card = projectCard(actionRecord(), spec, null);
+  assert.deepEqual(card.actions, [
+    { label: "检索归档", intent: "search" },
+    { label: "全部日程", intent: "agenda" },
+  ]);
+  assert.deepEqual(card.items, []);
+
+  const filtered = projectCard(actionRecord(), { ...spec, actions: [null, { label: "缺 intent" }, { label: "ok", intent: "x" }] }, null);
+  assert.deepEqual(filtered.actions, [{ label: "ok", intent: "x" }]);
+});
+
+test("applyPatch：items 写入/截断/清除，非数组报错", () => {
+  const first = applyPatch({}, "brief", { items: ["  第一条  ", "", "第二条", "第三条", "第四条"] });
+  assert.equal(first.ok, true);
+  // 去空串、最多 3 条
+  assert.deepEqual(first.next, { brief: { items: ["第一条", "第二条", "第三条"] } });
+
+  const long = applyPatch({}, "brief", { items: ["字".repeat(80)] });
+  assert.equal(long.ok, true);
+  assert.equal(long.next.brief.items[0].length, 40);
+
+  const cleared = applyPatch(first.next, "brief", { items: [] });
+  assert.equal(cleared.ok, true);
+  assert.deepEqual(cleared.next, {});
+
+  const bad = applyPatch({}, "brief", { items: "不是数组" });
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /必须是字符串数组/);
+
+  // items 也是「可识别字段」：只推 items 不该被判成空 patch
+  assert.equal(applyPatch({}, "brief", { items: ["进行中"] }).ok, true);
+});
+
+test("readOverrides：items 逐条归一化，坏值按没有覆盖处理", () => {
+  const overrides = readOverrides(
+    () => ({
+      brief: { text: "3 条待办", items: [" 日程 A ", 42, "", "日程 B"] },
+      other: { items: ["只有 items"] },
+      broken: { items: "坏值" },
+    }),
+    "acme.plugin",
+  );
+  assert.deepEqual(overrides.brief, { text: "3 条待办", items: ["日程 A", "日程 B"] });
+  assert.deepEqual(overrides.other, { items: ["只有 items"] });
+  // items 坏值不会让整条覆盖消失，但没有别的字段时就不会留下空条目
+  assert.equal(overrides.broken, undefined);
 });

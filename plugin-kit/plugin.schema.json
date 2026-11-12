@@ -689,6 +689,29 @@
                 "type": "string",
                 "minLength": 0,
                 "maxLength": 60
+              },
+              "actions": {
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 12
+                    },
+                    "intent": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,31}$"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "intent"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [

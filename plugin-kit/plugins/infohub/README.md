@@ -20,7 +20,8 @@ infohub/
 - `permissions.infohub: true`：允许调用 `infohubCall`（宿主侧校验，缺少会返回“缺少 permissions.infohub”）。
 - `permissions.notify: true`：允许手动采集完成后发系统通知；旧宿主机没有 `notify` 时静默跳过。
 - `contributions.page`：插件页面，`entry: "files/index.html"`。
-- `contributions.homeCards`：首页卡片 `infohub`，点击进入 `plugin:heming.infohub`；页面加载状态后通过 `homeCardSet` 覆盖为“已归档 N 个会话 · M 条消息”与逾期/今天/本周数量。
+- `contributions.homeCards`：首页卡片 `infohub`，点击进入 `plugin:heming.infohub`；页面加载状态后通过 `homeCardSet` 覆盖为“已归档 N 个会话 · M 条消息”、逾期/今天/本周数量与接下来三项日程。
+- `homeCards[0].actions`（d.139）：卡片上的「检索归档 / 全部日程」快捷入口。`intent` 是给插件页自己的页面意图，宿主原样拼进 `widget://…/files/index.html#intent=<intent>`，插件读 `location.hash` 决定落在哪个页签。
 - `commands.open-infohub`：命令面板入口。
 
 ## 使用的宿主桥
@@ -34,7 +35,7 @@ infohub/
 | `infohubCall("messages", { conversationId, limit, beforeTs? })` | 消息流（向前翻页） |
 | `infohubCall("sync", { sources, full, archive })` | 手动 / 首次自动采集，30 分钟超时 |
 | `dataGet / dataSet("autoSyncAt")` | 记录自动采集时间，10 分钟内不重复自动采集 |
-| `homeCardSet("infohub", { text, detail })` | 刷新首页卡片文案 |
+| `homeCardSet("infohub", { text, detail, items })` | 刷新首页卡片文案与速览项；`items` 是接下来三项日程（纯展示，不可点） |
 | `notify({ title, body })` | 手动采集完成通知 |
 | `info() / onEvent({ kind: "theme" })` | 跟随宿主深浅色 |
 | `log(line)` | 启动日志 |
@@ -44,6 +45,7 @@ infohub/
 ## 功能
 
 - 三个页签：检索、会话、日程；页头显示连接状态、归档会话数与归档大小。
+- 首页卡：统计文案 + 逾期/今天/本周 + 接下来三项日程；「检索归档 / 全部日程」两个快捷入口直接落在对应页签（页面意图走 `#intent=`）。
 - 采集来源区：微信目录、QQNT 消息库、QQ 导出目录的识别状态、路径查看与复制。
 - 同步面板：QQ / 微信来源勾选、全量重扫、导出知识库；采集期间显示不确定进度条（桥没有进度事件）。
 - 归档为空且检测到来源时自动采集一次（10 分钟冷却），之后可手动刷新。
@@ -57,8 +59,8 @@ infohub/
 
 1. **同步进度事件**：只显示不确定进度条与“正在同步…”，无法展示逐来源进度。
 2. **定时同步 / 定时重扫议程 / 保存为定时任务**：需要写入宿主自动化（`infohub.sync` 等），沙箱桥未开放自动化接口，入口已移除。
-3. **首页卡片的“检索归档 / 全部日程”快捷入口与前三项日程**：首页卡片现在只展示归档统计与日程计数，点击进入插件页。
-4. **宿主 palette intent（`infohubIntent`）**：沙箱页面拿不到宿主页面意图，进入后默认落在检索页。
+3. ~~首页卡片的“检索归档 / 全部日程”快捷入口与前三项日程~~：**d.139 已回收**。宿主把首页卡片升级成通用能力——清单可声明 `actions`（快捷入口），运行期 `homeCardSet` 可推 `items`（速览项），插件不需要任何专用硬编码。
+4. **宿主 palette intent（`infohubIntent`）**：部分回收——首页卡快捷入口能带页面意图（`#intent=`）直接落在检索/会话/日程页签；但从命令面板或宿主 palette 进入时仍固定落在检索页（宿主还没有把页面意图交给沙箱页面）。
 5. **主开关与部分停用**：启停、安装与删除由宿主插件管理界面的通用逻辑处理，插件页面不重复提供。
 
-以上差异需要在宿主桥补齐进度事件 / 自动化接口后再回收。
+剩余差异（进度事件、自动化接口、palette 意图）需要在宿主桥继续补齐后再回收。

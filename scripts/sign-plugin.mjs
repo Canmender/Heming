@@ -316,6 +316,7 @@ function normalizeHomeCard(card) {
   const summary = trim(card.summary);
   const icon = trim(card.icon);
   const primary = trim(card.primary);
+  const actions = normalizeHomeCardActions(card.actions);
   return {
     id,
     title,
@@ -323,7 +324,23 @@ function normalizeHomeCard(card) {
     ...(summary ? { summary } : {}),
     ...(icon ? { icon } : {}),
     ...(primary ? { primary } : {}),
+    // d.139：快捷入口（文案 + intent）也受签；没声明时不出键，d.138 的签名逐字不变。
+    ...(actions.length > 0 ? { actions } : {}),
   };
+}
+
+/** 首页卡快捷入口 → 签名用的确定性形状（d.139）：与 desktop / web 三处逐字段一致。 */
+function normalizeHomeCardActions(actions) {
+  if (!Array.isArray(actions)) return [];
+  const out = [];
+  for (const action of actions) {
+    if (!action || typeof action !== "object" || Array.isArray(action)) continue;
+    const label = trim(action.label);
+    const intent = trim(action.intent);
+    if (!label || !intent) continue;
+    out.push({ label, intent });
+  }
+  return out;
 }
 
 /** 首页卡片数组 → canonical 列表（丢弃非法项，空数组入文本无意义）。 */

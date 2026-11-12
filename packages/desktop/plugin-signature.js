@@ -358,6 +358,7 @@ function normalizeHomeCard(card) {
   const summary = trim(card.summary);
   const icon = trim(card.icon);
   const primary = trim(card.primary);
+  const actions = normalizeHomeCardActions(card.actions);
   return {
     id,
     title,
@@ -365,7 +366,29 @@ function normalizeHomeCard(card) {
     ...(summary ? { summary } : {}),
     ...(icon ? { icon } : {}),
     ...(primary ? { primary } : {}),
+    // d.139：快捷入口（文案 + intent）。空数组不入文本，保证 d.138 的既有签名不变。
+    ...(actions.length > 0 ? { actions } : {}),
   };
+}
+
+/**
+ * 首页卡快捷入口 → 签名用的确定性形状（d.139）。
+ *
+ * 为什么入口也受签：按钮文案与 intent 决定用户点下去看到什么；签名后偷偷把
+ * `检索归档` 改成 `删除归档`、或把 intent 指向别的视图，都是可感知的行为改变。
+ * 非法项（非对象 / label 空 / intent 形状不对）丢弃——它们本来也会被安装口径拒绝。
+ */
+function normalizeHomeCardActions(actions) {
+  if (!Array.isArray(actions)) return [];
+  const out = [];
+  for (const action of actions) {
+    if (!action || typeof action !== "object" || Array.isArray(action)) continue;
+    const label = trim(action.label);
+    const intent = trim(action.intent);
+    if (!label || !intent) continue;
+    out.push({ label, intent });
+  }
+  return out;
 }
 
 /** 首页卡片数组 → canonical 列表（丢弃非法项；空数组入文本无意义）。 */

@@ -126,7 +126,7 @@ let currentRect = domRect(240, 64, 960, 600);
 beforeEach(() => {
   resetWidgetsStore();
   delete window.__heming_widgets;
-  useUiStore.setState({ page: "home" });
+  useUiStore.setState({ page: "home", pluginPageIntent: null });
   FakeResizeObserver.instances = [];
   vi.stubGlobal("ResizeObserver", FakeResizeObserver);
   currentRect = domRect(240, 64, 960, 600);
@@ -179,6 +179,46 @@ describe("PluginBundlePage · 挂载与页头", () => {
     await waitFor(() => expect(screen.queryByText("正在加载插件页面…")).toBeNull());
     // 没有尺寸变化就不该发 pageBounds
     expect(pageBounds).not.toHaveBeenCalled();
+  });
+
+  it("首页卡 action 带意图进入：pageMount 收到 intent，且意图用后即清（d.139）", async () => {
+    const pageMount = vi.fn(
+      async (_input: { id: string; rect: WidgetPageRect; intent?: string }) => ({ ok: true as const }),
+    );
+    window.__heming_widgets = makePageBridge({ pageMount });
+    useUiStore.setState({ pluginPageIntent: { pluginId: "heming.panel", intent: "agenda" } });
+
+    render(<PluginBundlePage pluginId="heming.panel" />);
+
+    await waitFor(() => expect(pageMount).toHaveBeenCalledTimes(1));
+    expect(pageMount).toHaveBeenCalledWith({
+      id: "heming.panel",
+      rect: { x: 240, y: 64, width: 960, height: 600 },
+      intent: "agenda",
+    });
+    expect(useUiStore.getState().pluginPageIntent).toBeNull();
+  });
+
+  it("意图属于别的插件时按普通进入挂载（不传 intent、不消费）", async () => {
+    const pageMount = vi.fn(
+      async (_input: { id: string; rect: WidgetPageRect; intent?: string }) => ({ ok: true as const }),
+    );
+    window.__heming_widgets = makePageBridge({ pageMount });
+    useUiStore.setState({ pluginPageIntent: { pluginId: "heming.other", intent: "agenda" } });
+
+    render(<PluginBundlePage pluginId="heming.panel" />);
+
+    await waitFor(() => expect(pageMount).toHaveBeenCalledTimes(1));
+    // 无意图时不带 intent 键，保持旧宿主/旧断言的形状。
+    expect(pageMount).toHaveBeenCalledWith({
+      id: "heming.panel",
+      rect: { x: 240, y: 64, width: 960, height: 600 },
+    });
+    expect(useUiStore.getState().pluginPageIntent).toEqual({
+      pluginId: "heming.other",
+      intent: "agenda",
+    });
+    useUiStore.setState({ pluginPageIntent: null });
   });
 
   it("尺寸变化时上报新矩形（DIP，含位置），同尺寸重复通知只报一次", async () => {

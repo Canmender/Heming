@@ -22,6 +22,23 @@ const CARD_KEY = "homecards";
 /** 插件运行期可以覆盖的字段。 */
 const CARD_FIELDS = ["text", "detail", "badge"];
 
+/**
+ * d.139 追加的列表字段：一行一条的「速览项」（如日程前三项）。
+ *
+ * 为什么不并进 CARD_FIELDS：那三个字段是单行短文本，这个是多条列表，校验、
+ * 截断与「空数组=清除」的语义都不一样，混在一起只会让 applyPatch 变成 if 森林。
+ */
+const CARD_ITEMS_FIELD = "items";
+
+/** 单条速览项的长度上限（字符）：卡片一行放得下，不换行。 */
+const CARD_ITEM_MAX = 40;
+
+/** 速览项条数上限：与卡片的「一眼看完」定位、以及快捷入口一行 3 个同量级。 */
+const CARD_ITEMS_MAX = 3;
+
+/** 快捷入口条数上限（与 plugin-package 的清单校验、web 渲染行容量同一口径）。 */
+const CARD_ACTIONS_MAX = 3;
+
 /** 单字段长度上限（字符）。卡片是首页摘要，不是正文。 */
 const CARD_FIELD_MAX = 200;
 
@@ -47,7 +64,25 @@ function fieldValue(value) {
 }
 
 /**
- * 读某插件的覆盖表（`{ [cardId]: { text?, detail?, badge? } }`）。
+ * 归一化速览项列表：非数组 → null（视为「清除覆盖」）；否则逐条 trim、丢弃空串、
+ * 截断到上限并只保留前 CARD_ITEMS_MAX 条。空结果返回 null，让调用方把键删掉，
+ * 避免覆盖表里留下一个 `items: []` 的无意义键。
+ */
+function itemsValue(value) {
+  if (!Array.isArray(value)) return null;
+  const items = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const text = item.trim();
+    if (!text) continue;
+    items.push(text.length > CARD_ITEM_MAX ? text.slice(0, CARD_ITEM_MAX) : text);
+    if (items.length >= CARD_ITEMS_MAX) break;
+  }
+  return items.length > 0 ? items : null;
+}
+
+/**
+ * 读某插件的覆盖表（`{ [cardId]: { text?, detail?, badge?, items? } }`）。
  *
  * 读不到、格式损坏、字段类型不对都按「没有覆盖」处理：首页不能因为一个坏 JSON
  * 整块空掉（宿主渲染的是清单声明的卡片，覆盖只是可选增强）。
@@ -69,6 +104,8 @@ function readOverrides(readData, pluginId) {
       const text = fieldValue(value[field]);
       if (text !== null) entry[field] = text;
     }
+    const items = itemsValue(value[CARD_ITEMS_FIELD]);
+    if (items !== null) entry[CARD_ITEMS_FIELD] = items;
     if (Object.keys(entry).length > 0) overrides[cardId] = entry;
   }
   return overrides;
@@ -94,6 +131,22 @@ function projectCard(record, spec, override) {
     text: entry.text || (typeof spec.primary === "string" ? spec.primary : ""),
     detail: entry.detail || "",
     badge: entry.badge || "",
+    // d.139：速览项（运行期）与快捷入口（清单，受签）。两者都恒为数组，
+    // 渲染层不用判空；actions 里的 label/intent 已在安装口径校验过，这里只做防御性过滤。
+    items: Array.isArray(entry.items) ? entry.items.slice(0, CARD_ITEMS_MAX) : [],
+    actions: Array.isArray(spec.actions)
+      ? spec.actions
+          .filter(
+            (action) =>
+              isPlainObject(action) &&
+              typeof action.label === "string" &&
+              typeof action.intent === "string" &&
+              action.label !== "" &&
+              action.intent !== "",
+          )
+          .slice(0, CARD_ACTIONS_MAX)
+          .map((action) => ({ label: action.label, intent: action.intent }))
+      : [],
   };
 }
 
@@ -132,11 +185,12 @@ function applyPatch(overrides, cardId, patch) {
     return { ok: false, error: "homeCardSet：cardId 必须是 1-64 位字母/数字/点/下划线/连字符" };
   }
   if (!isPlainObject(patch)) {
-    return { ok: false, error: "homeCardSet：patch 必须是对象（text/detail/badge）" };
+    return { ok: false, error: "homeCardSet：patch 必须是对象（text/detail/badge/items）" };
   }
   const recognized = CARD_FIELDS.filter((field) => Object.prototype.hasOwnProperty.call(patch, field));
-  if (recognized.length === 0) {
-    return { ok: false, error: "homeCardSet：patch 至少要包含 text / detail / badge 之一" };
+  const hasItems = Object.prototype.hasOwnProperty.call(patch, CARD_ITEMS_FIELD);
+  if (recognized.length === 0 && !hasItems) {
+    return { ok: false, error: "homeCardSet：patch 至少要包含 text / detail / badge / items 之一" };
   }
   const next = {};
   const current = isPlainObject(overrides) ? overrides : {};
@@ -154,6 +208,15 @@ function applyPatch(overrides, cardId, patch) {
     if (text === null) delete entry[field];
     else entry[field] = text;
   }
+  // 速览项：数组才认；空数组/全空串 = 清除覆盖（回落「不显示」）
+  if (hasItems) {
+    if (!Array.isArray(patch.items)) {
+      return { ok: false, error: "homeCardSet：items 必须是字符串数组" };
+    }
+    const items = itemsValue(patch.items);
+    if (items === null) delete entry.items;
+    else entry.items = items;
+  }
   if (Object.keys(entry).length > 0) next[cardId] = entry;
   const bytes = Buffer.byteLength(JSON.stringify(next), "utf8");
   if (bytes > CARD_MAX_BYTES) {
@@ -166,6 +229,10 @@ module.exports = {
   CARD_KEY,
   CARD_FIELDS,
   CARD_FIELD_MAX,
+  CARD_ITEMS_FIELD,
+  CARD_ITEM_MAX,
+  CARD_ITEMS_MAX,
+  CARD_ACTIONS_MAX,
   CARD_MAX_BYTES,
   MAX_HOME_CARDS,
   CARD_ID_RE,

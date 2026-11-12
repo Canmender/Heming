@@ -273,6 +273,19 @@ export interface InfohubIntent {
 }
 
 /**
+ * 进入插件页时的一次性页面意图（d.139 通用首页卡快捷入口）。
+ *
+ * 首页卡片上的 action 只声明「意图 token」，含义由插件页自己解释（例如信息中枢把
+ * `agenda` 映射到日程页签）；web 只负责把它交给 `PluginBundlePage` 的 `pageMount`。
+ * 不引入自增 token：意图只是字符串提示，不像 vaultIntent 那样需要「连点两次各触发
+ * 一次」；但**用后必须清空**，否则从侧边栏再进同一插件页会被旧意图劫持。
+ */
+export interface PluginPageIntent {
+  pluginId: string;
+  intent: string;
+}
+
+/**
  * 进入自动化页时的一次性意图（d.47）：信息中枢页把「当前同步选项」或
  * 「重扫日程」交给新建表单，不把任务状态复制到全局。
  */
@@ -415,6 +428,11 @@ interface UiState {
   /** 进入知识库页并执行动作（打开笔记 / 新建 / 日记 / 画布 / 设置）的一次性意图。 */
   vaultIntent: VaultIntent | null;
   /**
+   * 进入插件页时给插件页的页面意图（首页卡 action）；目标插件页挂载时消费即清。
+   * 只在「点 action → 进对应插件页」这条链上有意义，离开页面一律清掉。
+   */
+  pluginPageIntent: PluginPageIntent | null;
+  /**
    * 切页。接受合并前的旧页面 id（`workspace` / `tasks` / `skills` / `interfaces`），
    * 会折叠成宿主页并投递对应视图意图；`view` 省略即「不指定视图」。
    */
@@ -435,6 +453,13 @@ interface UiState {
   /** 进入知识库页并投递动作意图（笔记 / 新建 / 日记 / 画布 / 设置）。 */
   openVault: (intent?: Omit<VaultIntent, "token">) => void;
   consumeVaultIntent: () => void;
+  /**
+   * 投递插件页意图。**必须在导航之后调用**：`setPage` 按「切页清跨页瞬态」的
+   * 口径会清掉它，先投后导航等于自己刚投就被抹掉。
+   */
+  setPluginPageIntent: (pluginId: string, intent: string) => void;
+  /** 取走插件页意图并清空（目标插件页挂载时消费一次，返回原值供核对）。 */
+  consumePluginPageIntent: () => PluginPageIntent | null;
   /**
    * 设置页要打开的分组（null=保持默认「个人资料」）。
    * 桌宠未配置模型时的「去设置」用它直达「模型」分组，避免用户进来还要自己找。
@@ -625,6 +650,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   teamFocusActivityId: null,
   automationFocusId: null,
   infohubIntent: null,
+  pluginPageIntent: null,
   automationIntent: null,
   vaultIntent: null,
   settingsTab: null,
@@ -654,6 +680,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
     workflowFocusId: null,
       infohubIntent: null,
+      pluginPageIntent: null,
       automationIntent: null,
       // 知识库动作意图同样一次性：切走就作废，回来不能莫名其妙弹一个新建框
       vaultIntent: null,
@@ -675,6 +702,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       taskDraft: null,
       taskFocusId: null,
       infohubIntent: null,
+      pluginPageIntent: null,
       automationIntent: null,
       automationFocusId: null,
     workflowFocusId: null,
@@ -693,6 +721,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
       workflowFocusId: null,
       infohubIntent: null,
+      pluginPageIntent: null,
       automationIntent: null,
     });
   },
@@ -707,6 +736,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
     workflowFocusId: null,
       infohubIntent: intent ?? null,
+      // 这是信息中枢自己的意图槽；首页卡 action 的通用意图不能带进来。
+      pluginPageIntent: null,
       automationIntent: null,
     });
   },
@@ -724,6 +755,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
     workflowFocusId: null,
       infohubIntent: null,
+      pluginPageIntent: null,
       automationIntent: intent ?? null,
     });
   },
@@ -738,6 +770,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
       automationIntent: null,
       infohubIntent: null,
+      pluginPageIntent: null,
       vaultIntent: null,
       taskDraft: null,
       pendingAttachment: null,
@@ -757,12 +790,19 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
     workflowFocusId: null,
       infohubIntent: null,
+      pluginPageIntent: null,
       automationIntent: null,
       // 无 intent = 普通进入知识库页（清掉残留动作，不重复执行上次的「新建」）
       vaultIntent: intent ? { ...intent, token: vaultIntentToken } : null,
     });
   },
   consumeVaultIntent: () => set({ vaultIntent: null }),
+  setPluginPageIntent: (pluginId, intent) => set({ pluginPageIntent: { pluginId, intent } }),
+  consumePluginPageIntent: () => {
+    const pending = get().pluginPageIntent;
+    if (pending) set({ pluginPageIntent: null });
+    return pending;
+  },
   openSettings: (tab) => {
     get().setPage("settings");
     set({ settingsTab: tab ?? null });
@@ -782,6 +822,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       automationFocusId: null,
     workflowFocusId: null,
       infohubIntent: null,
+      pluginPageIntent: null,
       automationIntent: null,
     }),
   focusConversation: (id) => set({ activeConversationId: id }),
@@ -798,6 +839,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       taskDraft: null,
       pendingAttachment: null,
       infohubIntent: null,
+      pluginPageIntent: null,
       automationIntent: null,
       ...(conversationId ? { activeConversationId: conversationId } : {}),
     }),
@@ -812,6 +854,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       taskDraft: null,
       taskFocusId: null,
       infohubIntent: null,
+      pluginPageIntent: null,
       automationIntent: null,
     }),
   consumeTeamFocus: () => set({ teamFocusUserId: null }),
@@ -825,6 +868,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       pendingAttachment: null,
       taskDraft: null,
       taskFocusId: null,
+      // 切到团队页：插件页的一过性意图跟着作废，回来不能再被旧 token 劫持。
+      pluginPageIntent: null,
     }),
   consumeTeamActivityFocus: () => set({ teamFocusActivityId: null }),
   focusAutomation: (taskId) => {
@@ -839,11 +884,13 @@ export const useUiStore = create<UiState>((set, get) => ({
       taskDraft: null,
       pendingAttachment: null,
       infohubIntent: null,
+      pluginPageIntent: null,
       activeConversationId: null,
     });
   },
   consumeAutomationFocus: () => set({ automationFocusId: null }),
-  leaveConversation: () => set({ page: "chat", pageView: "chat", activeConversationId: null }),
+  leaveConversation: () =>
+    set({ page: "chat", pageView: "chat", activeConversationId: null, pluginPageIntent: null }),
   sendFileToConversation: (conversationId, file) =>
     set({ pendingAttachment: { conversationId, file } }),
   consumePendingAttachment: () => set({ pendingAttachment: null }),

@@ -503,6 +503,62 @@ describe("parsePluginManifestV5 · 首页卡片与后台页", () => {
     ).not.toThrow();
   });
 
+  it("首页卡快捷入口（d.139）：intent 是页面内 token，随卡片一起归一化", () => {
+    // 为什么是 token 而不是 URL：卡片只负责「去本插件页面的某个视图」，
+    // 插件页自己解释 intent（信息中枢把 search/agenda 映射到页签）。
+    const parsed = parsePluginManifestV5(
+      bundleManifest({
+        homeCards: [
+          {
+            ...HOME_CARD,
+            actions: [
+              { label: "检索归档", intent: "search" },
+              { label: "全部日程", intent: "agenda.today" },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(parsed.manifest.contributions.homeCards[0].actions).toEqual([
+      { label: "检索归档", intent: "search" },
+      { label: "全部日程", intent: "agenda.today" },
+    ]);
+  });
+
+  it("首页卡快捷入口的形状限制：≤3 个、文案 ≤12 字且卡内唯一、intent 只接受小写 token", () => {
+    const withCard = (patch: Record<string, unknown>) =>
+      bundleManifest({ homeCards: [{ ...HOME_CARD, actions: [{ label: "检索", intent: "search" }], ...patch }] });
+    const many = Array.from({ length: 4 }, (_, index) => ({ label: `入口${index}`, intent: `i${index}` }));
+    expect(() => parsePluginManifestV5(withCard({ actions: many }))).toThrow(/快捷入口最多 3 个/);
+    expect(() => parsePluginManifestV5(withCard({ actions: [{ label: "一二三四五六七八九十一二三", intent: "x" }] }))).toThrow(
+      /最多 12 个字/,
+    );
+    expect(() => parsePluginManifestV5(withCard({ actions: [{ label: "检索", intent: "Search" }] }))).toThrow(
+      /快捷入口 intent/,
+    );
+    // 同卡内按钮同名：用户区分不出点哪个，直接拒绝而不是让宿主去重。
+    expect(() =>
+      parsePluginManifestV5(
+        withCard({
+          actions: [
+            { label: "检索", intent: "search" },
+            { label: "检索", intent: "agenda" },
+          ],
+        }),
+      ),
+    ).toThrow(/快捷入口文案重复/);
+  });
+
+  it("首页卡声明了快捷入口时 page 必须指向插件页面（否则 intent 没人接收）", () => {
+    expect(() =>
+      parsePluginManifestV5(
+        bundleManifest({
+          homeCards: [{ ...HOME_CARD, page: "infohub", actions: [{ label: "检索", intent: "search" }] }],
+        }),
+      ),
+    ).toThrow(/page 必须指向插件页面/);
+  });
+
   it("background 只能出现在 bundle 清单（后台页要加载包内 HTML）", () => {
     expect(() =>
       parsePluginManifestV5(baseManifest({ contributions: { background: { entry: "background.html" } } })),

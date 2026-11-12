@@ -498,3 +498,83 @@ test("验签：签了引擎/kb 后改入口、删依赖、补 kb → 全部失�
     assert.match(result.reason, /不匹配/);
   }
 });
+
+/* ───────────────────── d.139 首页卡快捷入口 ───────────────────── */
+
+/**
+ * 带快捷入口的信息中枢形状（与 plugin-kit/plugins/infohub/plugin.json 同构）。
+ * 用 schemaVersion 4：它才是线上 bundle 清单的版本，签名算法按 v1 canonical 文本。
+ */
+const CARD_ACTIONS_MANIFEST = {
+  schemaVersion: 4,
+  id: "heming.info-hub",
+  name: "信息中枢",
+  version: "1.2.0",
+  description: "本机归档",
+  author: "和鸣",
+  distribution: "bundle",
+  packageSha256: "ab".repeat(32),
+  permissions: { network: [], tools: "none", files: [], events: ["theme"], graphics: [], eval: false, chat: false, infohub: true, notify: true },
+  contributions: {
+    page: { title: "信息中枢", icon: "message", summary: "本机归档", entry: "files/index.html" },
+    homeCards: [
+      {
+        id: "infohub",
+        title: "信息中枢",
+        page: "plugin:heming.info-hub",
+        primary: "还没有归档数据",
+        actions: [
+          { label: "检索归档", intent: "search" },
+          { label: "全部日程", intent: "agenda" },
+        ],
+      },
+    ],
+  },
+};
+
+test("canonical：首页卡快捷入口（d.139）受签——改文案/intent 必须验签失败", () => {
+  const signed = signForTest(CARD_ACTIONS_MANIFEST);
+  assert.deepEqual(verifyOfficialSignature(signed), { ok: true, keyId: "dev-test-2026-11" });
+  const text = canonicalManifestText(signed);
+  // canonicalJsonText 按键名排序，所以断言只钉「入口确实进了文本」
+  assert.ok(text.includes('"actions":['), text);
+  assert.ok(text.includes('"intent":"agenda"'));
+
+  const withActions = (actions) => {
+    const next = JSON.parse(JSON.stringify(signed));
+    next.contributions.homeCards[0].actions = actions;
+    return next;
+  };
+  for (const tampered of [
+    // 按钮文案改成危险动作（页面与包字节都没变，只有签名文本能挡）
+    withActions([{ label: "删除归档", intent: "search" }, { label: "全部日程", intent: "agenda" }]),
+    // intent 指向另一个视图
+    withActions([{ label: "检索归档", intent: "chats" }, { label: "全部日程", intent: "agenda" }]),
+    // 凭空加一个没签过的入口
+    withActions([{ label: "检索归档", intent: "search" }, { label: "全部日程", intent: "agenda" }, { label: "导出", intent: "export" }]),
+  ]) {
+    const result = verifyOfficialSignature(tampered);
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /不匹配/);
+  }
+});
+
+test("canonical：没声明快捷入口的旧清单签名文本逐字不变（d.138 兼容）", () => {
+  const legacy = JSON.parse(JSON.stringify(CARD_ACTIONS_MANIFEST));
+  delete legacy.contributions.homeCards[0].actions;
+  assert.ok(!canonicalManifestText(withPublisher(legacy)).includes('"actions"'));
+  // 空的 actions 数组也不应进入文本（归一化清单可能带 []）
+  const empty = JSON.parse(JSON.stringify(CARD_ACTIONS_MANIFEST));
+  empty.contributions.homeCards[0].actions = [];
+  assert.equal(canonicalManifestText(withPublisher(empty)), canonicalManifestText(withPublisher(legacy)));
+});
+
+test("canonical：首页卡快捷入口与 scripts/sign-plugin.mjs 逐字节一致", async () => {
+  const { pathToFileURL } = require("node:url");
+  const scriptUrl = pathToFileURL(path.join(__dirname, "..", "..", "scripts", "sign-plugin.mjs")).href;
+  const scriptApi = await import(scriptUrl);
+  assert.equal(
+    scriptApi.signedManifestText(withPublisher(CARD_ACTIONS_MANIFEST)),
+    canonicalManifestText(withPublisher(CARD_ACTIONS_MANIFEST)),
+  );
+});

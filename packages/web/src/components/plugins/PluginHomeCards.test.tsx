@@ -28,6 +28,8 @@ function card(overrides: Partial<PluginHomeCard> = {}): PluginHomeCard {
     text: "128 条归档",
     detail: "今天 3 条日程",
     badge: "已连接",
+    items: [],
+    actions: [],
     ...overrides,
   };
 }
@@ -44,13 +46,13 @@ function bridgeOf(overrides: Partial<PluginsBridge> = {}): PluginsBridge {
 beforeEach(() => {
   resetPluginHomeCards();
   delete window.__heming_plugins;
-  useUiStore.setState({ page: "home" });
+  useUiStore.setState({ page: "home", pluginPageIntent: null });
 });
 
 afterEach(() => {
   delete window.__heming_plugins;
   resetPluginHomeCards();
-  useUiStore.setState({ page: "home" });
+  useUiStore.setState({ page: "home", pluginPageIntent: null });
 });
 
 describe("首页插件卡片", () => {
@@ -115,5 +117,63 @@ describe("首页插件卡片", () => {
     await screen.findAllByText("信息中枢");
     expect(screen.queryByText("坏卡片")).toBeNull();
     expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+});
+
+describe("首页插件卡片 · items / actions（d.139）", () => {
+  it("items 逐条渲染在主文案下方（纯展示，不可点）", async () => {
+    window.__heming_plugins = bridgeOf({
+      homeCards: async () => [card({ items: ["今天 3 条日程", "2 个待归档对话"] })],
+    });
+    render(<PluginHomeCards />);
+    await screen.findByText("2 个待归档对话");
+    // 与 detail 同文时不合并：详情一份、item 一份。
+    expect(screen.getAllByText("今天 3 条日程")).toHaveLength(2);
+    // items 只是文本：没有为每条生成按钮，卡片只有主区 1 个 button。
+    expect(screen.queryByRole("button", { name: /2 个待归档对话/ })).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
+  it("actions 渲染为小 pill 按钮，点击先导航再投递页面意图", async () => {
+    window.__heming_plugins = bridgeOf({
+      homeCards: async () => [
+        card({
+          items: ["今天 3 条日程"],
+          actions: [
+            { label: "日程", intent: "agenda" },
+            { label: "归档", intent: "archive" },
+          ],
+        }),
+      ],
+    });
+    render(<PluginHomeCards />);
+    const agenda = await screen.findByRole("button", { name: "日程：信息中枢" });
+    fireEvent.click(agenda);
+    // 导航本身会清跨页瞬态，所以「意图还在」正是顺序正确的证据。
+    expect(useUiStore.getState().page).toBe("plugin:heming.infohub");
+    expect(useUiStore.getState().pluginPageIntent).toEqual({
+      pluginId: "heming.infohub",
+      intent: "agenda",
+    });
+  });
+
+  it("按钮不嵌套：主区是 button，action 行在其外层容器里", async () => {
+    window.__heming_plugins = bridgeOf({
+      homeCards: async () => [card({ actions: [{ label: "日程", intent: "agenda" }] })],
+    });
+    render(<PluginHomeCards />);
+    const main = await screen.findByRole("button", { name: "打开 信息中枢" });
+    expect(main.querySelector("button")).toBeNull();
+    // 两个按钮是兄弟关系，而不是父子。
+    expect(main.parentElement?.querySelectorAll("button")).toHaveLength(2);
+  });
+
+  it("没有 items / actions 时不渲染空容器", async () => {
+    window.__heming_plugins = bridgeOf({ homeCards: async () => [card()] });
+    render(<PluginHomeCards />);
+    const main = await screen.findByRole("button", { name: "打开 信息中枢" });
+    expect(globalThis.document.querySelectorAll("button")).toHaveLength(1);
+    // 卡片容器只有主区一个直接子节点（无空的 items 列表 / actions 行）。
+    expect(main.parentElement?.children).toHaveLength(1);
   });
 });

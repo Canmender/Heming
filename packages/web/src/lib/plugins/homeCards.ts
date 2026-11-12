@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { isPluginPagePage } from "../pages/ids.js";
+import { isPluginPagePage, pluginPageId } from "../pages/ids.js";
 import { ROUTABLE_PAGE_IDS } from "../palette/pages.js";
 
 /**
@@ -15,6 +15,14 @@ import { ROUTABLE_PAGE_IDS } from "../palette/pages.js";
  * 所以本模块不再叠加一遍插件状态判断，避免两处口径漂移（插件停用后宿主会推
  * 空的更新，界面自然下线）。浏览器里没有桥 → 整块不渲染（不是显示空卡）。
  */
+
+/** 首页卡上的一个快捷入口：点它进本插件页，并把 intent 作为页面意图交给插件页解释。 */
+export interface PluginHomeCardAction {
+  /** 按钮文案（清单限制 1–12 字）。 */
+  label: string;
+  /** 小写意图 token（如 `agenda`）；插件页自己解释，web 只负责透传。 */
+  intent: string;
+}
 
 /** 宿主 → 主窗口的一张首页卡片（运行时形态；`text/detail/badge` 由插件回填）。 */
 export interface PluginHomeCard {
@@ -34,6 +42,13 @@ export interface PluginHomeCard {
   text: string;
   detail: string;
   badge: string;
+  /** 卡内纯展示要点（≤3 条、每条 ≤40 字，不可点）。 */
+  items: string[];
+  /**
+   * 快捷入口（≤3 个）。点击 = 导航到 `plugin:<pluginId>` 页并投递 intent；
+   * 所以只有 `page` 就是本插件页时这组按钮才有意义（见 normalization）。
+   */
+  actions: PluginHomeCardAction[];
 }
 
 /**
@@ -83,11 +98,63 @@ function textOf(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/** 与清单契约同一口径的条数/字数上限（web 侧再兜一层，坏数据不进渲染）。 */
+const MAX_ITEMS = 3;
+const MAX_ITEM_CHARS = 40;
+const MAX_ACTIONS = 3;
+const MAX_ACTION_LABEL_CHARS = 12;
+/** 意图 token：小写字母/数字开头，可含 `.` `_` `-`，总长 ≤32。 */
+const ACTION_INTENT_PATTERN = /^[a-z0-9][a-z0-9._-]{0,31}$/;
+
+/** 按「字」（码点）截断：`slice` 会把 emoji 劈成半个代理对。 */
+function clampChars(value: string, max: number): string {
+  return [...value].slice(0, max).join("");
+}
+
+/**
+ * 纯展示要点：trim、去空、≤3 条、每条 ≤40 字。
+ * 超长截断而不是整条丢弃——它只是展示文本，截断不会制造假的点击入口。
+ */
+function itemsOf(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const items: string[] = [];
+  for (const entry of value) {
+    const text = textOf(entry);
+    if (!text) continue;
+    items.push(clampChars(text, MAX_ITEM_CHARS));
+    if (items.length === MAX_ITEMS) break;
+  }
+  return items;
+}
+
+/**
+ * 快捷入口：intent 不合口径 / 文案为空 → 整条丢弃；label 重复保留第一条；≤3 条。
+ * 为什么逐条丢而不是整组丢：一条坏数据不该让同一张卡上其它可用入口也消失。
+ */
+function actionsOf(value: unknown): PluginHomeCardAction[] {
+  if (!Array.isArray(value)) return [];
+  const actions: PluginHomeCardAction[] = [];
+  const labels = new Set<string>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+    const intent = textOf(record.intent);
+    if (!ACTION_INTENT_PATTERN.test(intent)) continue;
+    const label = clampChars(textOf(record.label), MAX_ACTION_LABEL_CHARS);
+    if (!label || labels.has(label)) continue;
+    labels.add(label);
+    actions.push({ label, intent });
+    if (actions.length === MAX_ACTIONS) break;
+  }
+  return actions;
+}
+
 /**
  * 宿主数据 → 可信卡片；不合法返回 null。
  *
  * 为什么在 web 再校验一遍：桥的另一端是宿主，但卡片 page 最终会喂给 `setPage`，
  * 非法值会让路由白屏。这里只做「形状 + 可路由」校验，业务含义仍归宿主。
+ * `items` / `actions` 缺省即空数组，渲染层不必再判 undefined。
  */
 export function normalizePluginHomeCard(raw: unknown): PluginHomeCard | null {
   if (!raw || typeof raw !== "object") return null;
@@ -97,6 +164,9 @@ export function normalizePluginHomeCard(raw: unknown): PluginHomeCard | null {
   const title = textOf(record.title);
   const page = textOf(record.page);
   if (!pluginId || !id || !title || !isRoutableCardPage(page)) return null;
+  // action 的语义是「点它进**这张卡自己的插件页**并带 intent」；page 不是
+  // `plugin:<pluginId>` 时意图没有插件页会消费，按钮等于死入口，整组丢掉。
+  const actions = page === pluginPageId(pluginId) ? actionsOf(record.actions) : [];
   return {
     pluginId,
     pluginName: textOf(record.pluginName),
@@ -108,6 +178,8 @@ export function normalizePluginHomeCard(raw: unknown): PluginHomeCard | null {
     text: textOf(record.text),
     detail: textOf(record.detail),
     badge: textOf(record.badge),
+    items: itemsOf(record.items),
+    actions,
   };
 }
 

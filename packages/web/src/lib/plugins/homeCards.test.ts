@@ -25,6 +25,8 @@ function card(overrides: Partial<PluginHomeCard> = {}): PluginHomeCard {
     text: "128 条归档",
     detail: "今天 3 条日程",
     badge: "已连接",
+    items: [],
+    actions: [],
     ...overrides,
   };
 }
@@ -111,6 +113,83 @@ describe("插件首页卡片 · 数据校验", () => {
   it("唯一键是 pluginId:id（同 id 不同插件不能互相覆盖）", () => {
     expect(pluginHomeCardKey(card())).toBe("heming.infohub:archive");
     expect(pluginHomeCardKey(card({ pluginId: "heming.automations" }))).toBe("heming.automations:archive");
+  });
+});
+
+describe("插件首页卡片 · items / actions 归一化（d.139）", () => {
+  it("items：trim、去空、非字符串丢弃、最多 3 条、每条截到 40 字", () => {
+    const normalized = normalizePluginHomeCard({
+      ...card(),
+      items: ["  今天 3 条日程 ", "", 42, null, "第二条", "第三条", "第四条"],
+    });
+    expect(normalized?.items).toEqual(["今天 3 条日程", "第二条", "第三条"]);
+
+    const long = "长".repeat(50);
+    expect(normalizePluginHomeCard({ ...card(), items: [long] })?.items[0]).toHaveLength(40);
+  });
+
+  it("items 缺省 / 非数组 → 空数组（渲染层不必再判 undefined）", () => {
+    expect(normalizePluginHomeCard(card())?.items).toEqual([]);
+    expect(normalizePluginHomeCard({ ...card(), items: "oops" })?.items).toEqual([]);
+  });
+
+  it("actions：label 非空且 intent 合规才保留，缺一整条丢弃", () => {
+    const normalized = normalizePluginHomeCard({
+      ...card(),
+      actions: [
+        { label: " 日程 ", intent: "agenda" },
+        { label: "", intent: "empty-label" },
+        { label: "无意图", intent: "" },
+        { label: "大写", intent: "Agenda" },
+        { label: "坏字符", intent: "has space" },
+        { label: "超长 token", intent: "a".repeat(33) },
+        { label: "缺意图" },
+        "agenda",
+        42,
+      ],
+    });
+    expect(normalized?.actions).toEqual([{ label: "日程", intent: "agenda" }]);
+  });
+
+  it("actions：最多 3 条、label 重复保留第一条、超长 label 截到 12 字", () => {
+    const normalized = normalizePluginHomeCard({
+      ...card(),
+      actions: [
+        { label: "日程", intent: "agenda" },
+        { label: "日程", intent: "agenda-dup" },
+        { label: "归档", intent: "archive" },
+        { label: "检索", intent: "search" },
+        { label: "第四条", intent: "fourth" },
+      ],
+    });
+    expect(normalized?.actions).toEqual([
+      { label: "日程", intent: "agenda" },
+      { label: "归档", intent: "archive" },
+      { label: "检索", intent: "search" },
+    ]);
+
+    const longLabel = normalizePluginHomeCard({
+      ...card(),
+      actions: [{ label: "很".repeat(20), intent: "x" }],
+    });
+    expect(longLabel?.actions[0]?.label).toHaveLength(12);
+  });
+
+  it("page 不是本插件页时 actions 整组丢弃（点了没有插件页消费意图）", () => {
+    const normalized = normalizePluginHomeCard({
+      ...card(),
+      page: "infohub",
+      actions: [{ label: "日程", intent: "agenda" }],
+      items: ["要点"],
+    });
+    expect(normalized?.actions).toEqual([]);
+    // items 只是展示文本，与 page 无关，照常保留
+    expect(normalized?.items).toEqual(["要点"]);
+  });
+
+  it("actions 缺省 → 空数组", () => {
+    expect(normalizePluginHomeCard(card())?.actions).toEqual([]);
+    expect(normalizePluginHomeCard({ ...card(), actions: "oops" })?.actions).toEqual([]);
   });
 });
 

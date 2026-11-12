@@ -283,8 +283,11 @@ export interface WidgetsBridge {
    *
    * 主进程会先销毁上一个页面视图再创建；无 `page` 贡献/已停用的插件会被拒绝。
    * 旧版桌面端没有该方法 —— 调用方必须降级而不是假定存在。
+   *
+   * d.139：`intent` 是首页卡 action 透传的页面意图（如 `agenda`），宿主把它拼成
+   * `#intent=<intent>` 给 sandbox 页读；纯提示字段，缺省即「普通进入」。
    */
-  pageMount?(input: { id: string; rect: WidgetPageRect }): Promise<WidgetPageMountResult>;
+  pageMount?(input: { id: string; rect: WidgetPageRect; intent?: string }): Promise<WidgetPageMountResult>;
   /** 更新页面视图边界（窗口/布局变化时；fire-and-forget，主进程自己钳制）。 */
   pageBounds?(input: { rect: WidgetPageRect }): void;
   /** 移除并销毁当前页面视图（离开页面/切页时；重复调用无害）。 */

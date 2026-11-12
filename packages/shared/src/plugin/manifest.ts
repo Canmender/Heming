@@ -42,6 +42,13 @@ export const PLUGIN_LIMITS = {
   homeCards: 4,
   /** 首页卡运行期文案的初始值（homeCardSet() 只覆盖显示，不改清单）。 */
   homeCardPrimaryChars: 60,
+  /**
+   * d.139 首页卡快捷入口（actions）：卡片是「一眼看完」的概览，超过 3 个按钮
+   * 就会把正文挤掉；这也是宿主渲染一行 pill 的容量上限。
+   */
+  homeCardActions: 3,
+  /** 入口按钮文案：够短才不会被宿主截断成「检索归...」。 */
+  homeCardActionLabelChars: 12,
   widgetScales: 6,
   widgetSettingFields: 20,
   widgetSettingOptions: 20,
@@ -475,6 +482,28 @@ const PageSchema = z.strictObject({
 const HOME_CARD_PAGE_RE = /^(?:[a-z][a-z0-9-]{0,31}|plugin:[a-z0-9][a-z0-9._-]{0,63})$/;
 
 /**
+ * 首页卡快捷入口（d.139）的 intent token：小写字母/数字开头，点/下划线/连字符，≤32。
+ *
+ * 为什么规则与 `permissions` 等处的 key 一致：intent 会进 widget 页的 URL fragment
+ * （`#intent=<token>`），长度和字符集必须能安全地拼进 URL，且插件页按它分发行为。
+ */
+const HOME_CARD_INTENT_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;
+
+/**
+ * 首页卡快捷入口：点一下就是「去本插件页面的某个视图」。
+ *
+ * 为什么不是自由 URL：卡片仍然只描述「显示什么 / 点了去哪」，真正跨页面的能力
+ * 由命令面板（commands）承担；这里只补一个「页内意图」，让插件不必为了
+ * 「首页直达日程」这种诉求把页面拆成多个。
+ */
+const HomeCardActionSchema = z.strictObject({
+  label: trimmed(PLUGIN_LIMITS.homeCardActionLabelChars),
+  intent: z
+    .string({ error: "快捷入口 intent 必须是文本" })
+    .regex(HOME_CARD_INTENT_RE, { error: "快捷入口 intent 只能用小写字母/数字开头，含 . _ -，≤32" }),
+});
+
+/**
  * 首页插件卡（数据-only）。
  *
  * 为什么是数据而不是组件：首页由宿主统一渲染，插件只声明「显示什么、点了去哪」，
@@ -496,6 +525,16 @@ const HomeCardSchema = z.strictObject({
     .trim()
     .regex(HOME_CARD_PAGE_RE, { error: '首页卡片 page 必须是宿主页面 id 或 "plugin:<插件 id>"' }),
   primary: trimmed(PLUGIN_LIMITS.homeCardPrimaryChars, 0).optional().default(""),
+  /**
+   * d.139 快捷入口：渲染成卡片正文下方的一行 pill 按钮。
+   *
+   * 声明了 actions 就必须把 page 指向插件页面（解析器里判）——intent 只能由
+   * 插件自己的页面解释，指向宿主页面时没人接收，静默忽略比报错更糟。
+   */
+  actions: z
+    .array(HomeCardActionSchema)
+    .max(PLUGIN_LIMITS.homeCardActions, { error: "首页卡快捷入口最多 3 个" })
+    .optional(),
 });
 
 /**
@@ -641,6 +680,31 @@ const ContributionsSchema = z
     dup(contributions.commands?.map((command) => ({ key: command.id })), "命令 id", "commands");
     dup(contributions.toolPacks?.map((pack) => ({ key: pack.id })), "工具束 id", "toolPacks");
     dup(contributions.homeCards?.map((card) => ({ key: card.id })), "首页卡片 id", "homeCards");
+
+    // d.139 首页卡快捷入口：同一张卡里的按钮文案不许重复（点错按钮的代价比文案重复高），
+    // 且声明了 actions 的卡必须指向插件页面——宿主只会把 intent 递给插件页。
+    for (const [index, card] of (contributions.homeCards ?? []).entries()) {
+      const actions = card.actions ?? [];
+      const labels = new Set<string>();
+      for (const [actionIndex, action] of actions.entries()) {
+        if (labels.has(action.label)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["homeCards", index, "actions", actionIndex, "label"],
+            message: `快捷入口文案重复：同一张卡里已有「${action.label}」`,
+          });
+        } else {
+          labels.add(action.label);
+        }
+      }
+      if (actions.length > 0 && !card.page.startsWith("plugin:")) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["homeCards", index, "page"],
+          message: '声明了 actions 的首页卡，page 必须指向插件页面（"plugin:<插件 id>"），否则插件页收不到 intent',
+        });
+      }
+    }
 
     const toolOwners = new Map<string, string>();
     for (const pack of contributions.toolPacks ?? []) {

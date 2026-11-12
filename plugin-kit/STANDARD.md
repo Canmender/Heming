@@ -326,6 +326,9 @@ bundle 额外约束：
 - 页面**不新增权限**：`permissions` 不变；bundle 页面仍按清单生成 CSP（`connect-src` 跟随 `permissions.network`），
   能调到的宿主能力 = 既有 `__heming_widget` 白名单桥，没有新增 secrets / files / MCP / 会话桥。
 - 页面**只能拥有自己**：不能改宿主现有页面/布局/导航顺序、不能注入宿主 DOM；首页卡只能通过 `contributions.homeCards` 声明（≤4、纯数据、由宿主渲染，d.138 起），设置卡仍不做。
+  首页卡自 d.139 起可声明 ≤3 个 `actions: [{label,intent}]` 快捷入口（label ≤12 字，intent 为 `/^[a-z0-9][a-z0-9._-]{0,31}$/` 的小写 token），
+  但**只指向本插件页面**（声明 actions 时 `page` 必须是 `plugin:<同 id>`）：宿主只把 `#intent=<intent>` 拼进页面地址，不理解语义、也不做跨页跳转；
+  运行期 `homeCardSet()` 可覆盖 `text` / `detail` / `badge` 与 ≤3 条 `items`（每条 ≤40 字，纯展示不可点）。
 - 导航口径：宿主 8 页 → 声明式插件页 → bundle 插件页（按首次安装时间升序，插件升级不改位置）；
   不分配快捷键，命令面板不新增「插件页面」跳转组。
 - 浏览器版（无桌面桥）**只渲染声明式页**；bundle 页在浏览器里不可用（导航不出现入口；宿主缺少页面视图能力时给「只在安装版可用」的降级说明，不渲染空壳）。

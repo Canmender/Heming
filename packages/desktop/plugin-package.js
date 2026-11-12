@@ -81,6 +81,17 @@ const HOME_CARD_TITLE_MAX = 40;
 const HOME_CARD_SUMMARY_MAX = 120;
 /** 卡片初始文案上限：运行期由 homeCardSet 覆盖，这里只管清单里的初始值。 */
 const HOME_CARD_TEXT_MAX = 200;
+/**
+ * 首页卡快捷入口（d.139）：卡片正文下方一行 pill 按钮。
+ *
+ * 上限 3 与 shared 的 `PLUGIN_LIMITS.homeCardActions` 同口径——宿主只渲染一行，
+ * 第 4 个必然被挤掉，与其静默截断不如在安装时就报错。
+ */
+const HOME_CARD_ACTIONS = 3;
+/** 入口文案上限（与 shared `homeCardActionLabelChars` 一致）。 */
+const HOME_CARD_ACTION_LABEL_MAX = 12;
+/** intent token 形状（与 shared `HOME_CARD_INTENT_RE` 一致；会拼进 widget 页 URL fragment）。 */
+const HOME_CARD_INTENT_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;
 
 /** sha256 十六进制（整包字节的完整性指纹；发布侧算的也是这个）。 */
 function sha256Hex(bytes) {
@@ -312,7 +323,46 @@ function normalizeHomeCards(raw, pluginId) {
       }
     }
 
-    cards.push({ id, title, summary, icon, page, primary });
+    /*
+     * 快捷入口（d.139）：每个入口 = 文案 + 页内 intent token。
+     * 宿主渲染成按钮，点击后打开 page 并把 intent 递给插件页；所以这里只校验
+     * 「点得准不准」（文案不重复、token 形状可拼进 URL），跳转目标由上面的 page 决定。
+     */
+    const actions = [];
+    if (item.actions !== undefined) {
+      if (!Array.isArray(item.actions)) {
+        errors.push(`${where}.actions 必须是数组`);
+      } else if (item.actions.length > HOME_CARD_ACTIONS) {
+        errors.push(`${where}.actions 最多 ${HOME_CARD_ACTIONS} 个`);
+      } else {
+        const labels = new Set();
+        item.actions.forEach((action, actionIndex) => {
+          const actionAt = `${where}.actions[${actionIndex}]`;
+          if (!isPlainObject(action)) {
+            errors.push(`${actionAt} 必须是对象`);
+            return;
+          }
+          const label = typeof action.label === "string" ? action.label.trim() : "";
+          if (!label || label.length > HOME_CARD_ACTION_LABEL_MAX) {
+            errors.push(`${actionAt}.label 必须是 1–${HOME_CARD_ACTION_LABEL_MAX} 字的文本`);
+          } else if (labels.has(label)) {
+            errors.push(`${actionAt}.label 与前面的入口重复：${label}`);
+          }
+          labels.add(label);
+          const intent = typeof action.intent === "string" ? action.intent.trim() : "";
+          if (!HOME_CARD_INTENT_RE.test(intent)) {
+            errors.push(`${actionAt}.intent 只能用小写字母/数字开头，含 . _ -，≤32`);
+          }
+          if (label && HOME_CARD_INTENT_RE.test(intent)) actions.push({ label, intent });
+        });
+      }
+    }
+    // 入口只对插件页面有意义：宿主页面没人解释 intent，声明了也没有接收方。
+    if (actions.length > 0 && !page.startsWith("plugin:")) {
+      errors.push(`${where}.actions 需要 page 指向插件页面（plugin:<插件 id>），否则 intent 没有接收方`);
+    }
+
+    cards.push({ id, title, summary, icon, page, primary, actions });
   });
   if (errors.length > 0) return { ok: false, errors, cards: [] };
   return { ok: true, errors: [], cards };

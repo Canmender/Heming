@@ -2,7 +2,7 @@
   "schemaVersion": 4,
   "id": "heming.infohub",
   "name": "信息中枢",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "在本机采集、浏览、检索 QQ / 微信聊天记录与日程；归档只读，数据不离开本机。",
   "author": "和鸣",
   "distribution": "bundle",
@@ -33,7 +33,17 @@
         "summary": "本机 QQ / 微信聊天记录与日程",
         "icon": "message",
         "page": "plugin:heming.infohub",
-        "primary": "还没有归档数据"
+        "primary": "还没有归档数据",
+        "actions": [
+          {
+            "label": "检索归档",
+            "intent": "search"
+          },
+          {
+            "label": "全部日程",
+            "intent": "agenda"
+          }
+        ]
       }
     ],
     "commands": [
@@ -60,9 +70,9 @@
     "id": "heming",
     "publicKey": "ZARHK4iibpO7Obf5SRFpt8esKip2CJz4bhuanQvrVtk"
   },
-  "packageSha256": "8f047dcf955c4f2c31675fe0e0e2aa06b1b3d4a06999bb314ce96d806a2c8cc0",
+  "packageSha256": "c03d47261ce4062598186c606dba24b98da126975139df0f455253c5cf417630",
   "signature": {
     "alg": "ed25519",
-    "value": "MMj_m5VPiUJy9aNyc0ps2VPIWMhWZKL7hjNVAwdk3Vr6ldImIhyyFYwljqxaleoYrMb6sbfVkWfVRt9LEwlDBw"
+    "value": "bMnmykm_HJx16AM2rgmnyw4AhuHOjdCxbhweLOmuW1MxbjUHvvLxPWnRr5_8jcU5d3AeCNtGwMPBVAMLzRmkDQ"
   }
 }

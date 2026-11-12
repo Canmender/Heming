@@ -77,6 +77,22 @@ const PAGE_VIEW_FLAG = "--heming-page-view";
 /** 页面视图允许占用的 contentView 最小尺寸（宽高各至少 1 DIP，否则 Chromium 不给合成）。 */
 const PAGE_MIN_SIZE = 1;
 
+/**
+ * 页面意图 token（`pageMount({ intent })`）：首页卡快捷入口点进来时要落到哪个视角。
+ *
+ * ★ 只拼进 `#intent=<token>` 的 hash：不进 IPC 之外的通道、不跨插件 origin，
+ *   widget origin 校验只看 origin/path（isSameWidgetOrigin 会剥掉 hash），
+ *   插件页读 location.hash 自己解释——宿主不理解语义，插件加新意图不用改宿主。
+ */
+const PAGE_INTENT_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;
+
+/** 归一化页面意图；不合法一律返回空串（退化成普通挂载，不给页面添噪音）。 */
+function normalizePageIntent(value) {
+  if (typeof value !== "string") return "";
+  const intent = value.trim();
+  return PAGE_INTENT_RE.test(intent) ? intent : "";
+}
+
 /* ────────────────────── 后台常驻页（沙箱 bundle 插件，contract §1/§5） ────────────────────── */
 
 /**
@@ -1041,6 +1057,10 @@ function createWidgetHost(deps = {}) {
    * 挂载插件页面视图（`widgets:page-mount`）：
    * 「先销毁旧视图 → 找已装且启用的 bundle 记录 → 建 WebContentsView → 嵌进主窗内容区」。
    *
+   * `payload.intent` 是首页卡快捷入口带来的目标视角：合法 token 会以
+   * `#intent=<token>` 拼进入口地址，由插件页自己读 location.hash 解释
+   * （宿主不理解语义）；不合法就当没带，不影响页面正常挂载。
+   *
    * 返回 `{ ok:true }` 或 `{ ok:false, error }`（error 已是可直接展示的中文）；
    * 加载失败也会把刚建的视图销毁——失败不留一块白屏/空视图。
    */
@@ -1048,6 +1068,7 @@ function createWidgetHost(deps = {}) {
     const id =
       payload && typeof payload === "object" && typeof payload.id === "string" ? payload.id.trim() : "";
     if (!id) return { ok: false, error: "页面挂载失败：缺少插件 id" };
+    const intent = normalizePageIntent(payload && payload.intent);
 
     const record = typeof store.get === "function" ? store.get(id) : null;
     if (!record) return { ok: false, error: `页面挂载失败：插件未安装（${id}）` };
@@ -1070,6 +1091,7 @@ function createWidgetHost(deps = {}) {
     // 再归一化一次入口：落盘清单可能被外部改过，不能假设 store 里的值一定合法
     const url = widgetUrl(id, spec.entry);
     if (!url) return { ok: false, error: `页面挂载失败：页面入口非法（${String(spec.entry)}）` };
+    const targetUrl = intent ? `${url}#intent=${intent}` : url;
 
     const rect = clampPageRect(payload.rect, main);
     // 先销毁旧视图：切插件/重进页面/更新后重建都走同一入口，同一时刻只留一个页面视图
@@ -1090,6 +1112,7 @@ function createWidgetHost(deps = {}) {
       view,
       webContents: view.webContents,
       rect,
+      intent,
       closed: false,
       detachDownload: null,
     };
@@ -1105,7 +1128,7 @@ function createWidgetHost(deps = {}) {
     }
 
     try {
-      await info.webContents.loadURL(url);
+      await info.webContents.loadURL(targetUrl);
     } catch (err) {
       // 加载失败：只要还是当前视图就销毁，回错误让 web 显示错误态而不是白屏
       if (pageInfo === info) destroyPageView();

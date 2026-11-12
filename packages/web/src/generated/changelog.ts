@@ -12,6 +12,23 @@ export interface ChangelogEntry {
 /** 更新日志条目，按 CHANGELOG.md 原文顺序（新 → 旧）。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "d.139.3.54.10",
+    "date": "2026-11-12",
+    "title": "首页卡快捷入口 + 页面意图：插件系统的通用卡片能力",
+    "bullets": [
+      "**清单契约**：`contributions.homeCards[]` 新增 `actions?: [{ label, intent }]`——≤3 个、`label` 1–12 字、`intent` 必须匹配 `/^[a-z0-9][a-z0-9._-]{0,31}$/`；同一张卡内 `label` 不许重复；声明了 `actions` 的卡",
+      "**签名**：`scripts/sign-plugin.mjs`、`packages/desktop/plugin-signature.js`、`packages/web/src/lib/plugins/signature.ts` 三处 canonicalizer 同步加 `actions`，且**仅非空时入签**——",
+      "**桌面端**：`plugin-package.js` 的 `normalizeHomeCards` 校验并透传 actions；`home-cards.js` 的卡片投影带 `items` / `actions`，`homeCardSet` 支持运行期推 `items`（≤3 条、每条 ≤40 字，序列化仍受 2KB 上限）；",
+      "**web**：`lib/plugins/homeCards.ts` 归一化 items/actions（actions 仅当 `page` 指向本插件页时保留）；`PluginHomeCards.tsx` 重排为「外层容器 + 主区按钮 + 快捷入口胶囊行」，不再出现按钮嵌套；",
+      "**信息中枢 1.3.0**：清单加两个 actions（检索归档 / `search`、全部日程 / `agenda`）；`app.js` 推日程前三项 `items`、启动时读 `#intent=` 并按白名单映射页签；重新签名（`packageSha256 c03d4726…`）并发布",
+      "**门禁**：`pnpm -w run plugin:check` exit 0（6 个清单 + pet-widget 源码工程 + 5 个 example 全过，infohub 1.3.0「bundle 校验通过」，schema 已最新）；`@heming/shared` 8 文件 / 118 例全绿（新增 3 例）；",
+      "**遗留**：未提交 / 未打包 / 未部署；插件包只在本地 `plugins-catalog/`，云端未上传。已知边界——用户已经停在该插件页时再收到同插件意图，web 不会重发 `pageMount`，意图留到下次切页才清（要修得加"
+    ],
+    "paragraphs": [
+      "`page` 必须指向 `plugin:<同插件 id>`，否则清单直接拒绝（intent 需要有接收方）。权威校验在`packages/shared/src/plugin/manifest.ts`（`HomeCardActionSchema`、`PLUGIN_LIMITS.homeCardActions: 3`、`homeCardActionLabelChars: 12`、`HOME_CARD_INTENT_RE`），`plugin-kit/plugin.schema.json` 重新生成。没有 actions 的历史包 canonical 字节与旧签名逐字不变（有测试钉住这一点）。`plugin-host.js` 的 `pageMount` 接受 `intent`（同一条正则校验，非法/缺失不拼），把 `#intent=<token>`拼到 `widget://<id>/<entry>` 再 `loadURL`——hash 只存在于该页面自己的地址里，导航守卫的同 origin 判定会剥掉它。点 action 必须**先 `setPage` 再 `setPluginPageIntent`**（顺序反了意图会被 setPage 清掉）；`PluginBundlePage` 挂载时把匹配本插件的意图随 `pageMount` 发出并消费；`store/ui.ts` 新增`pluginPageIntent` 与 set/consume，切页与各入口跳转时置空（与既有 infohubIntent / vaultIntent 同口径）。`plugins-catalog/heming.infohub/1.3.0/`；README 差异清单第 3 项标「已回收」、第 4 项改「部分回收」。`@heming/desktop` 全套 `node --test` exit 0（含 home-cards 11 例、plugin-package 33 例、plugin-signature 23 例、plugin-host 72 例、widget-pages、packaging.plugins、version-sync）；`pnpm --filter @heming/web typecheck` exit 0；bundle 圈 vitest 32 文件 / 512 例全绿。`pageIntent` IPC 或监听意图变化，本轮不做）；命令面板 / palette 进入插件页仍不带意图。"
+    ]
+  },
+  {
     "version": "d.138.3.54.10",
     "date": "2026-11-12",
     "title": "自动化与信息中枢变成普通插件：modules 体系下线",

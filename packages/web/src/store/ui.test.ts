@@ -556,3 +556,45 @@ describe("知识库动作意图 vaultIntent（d.114）", () => {
     expect(useUiStore.getState().vaultIntent).toBeNull();
   });
 });
+
+describe("插件首页卡快捷入口意图 pluginPageIntent（d.139）", () => {
+  it("先导航再投递：切页清理不会抹掉刚设的意图", () => {
+    useUiStore.setState({ page: "home", pluginPageIntent: null });
+    useUiStore.getState().setPage("plugin:heming.infohub");
+    useUiStore.getState().setPluginPageIntent("heming.infohub", "agenda");
+    expect(useUiStore.getState().page).toBe("plugin:heming.infohub");
+    expect(useUiStore.getState().pluginPageIntent).toEqual({
+      pluginId: "heming.infohub",
+      intent: "agenda",
+    });
+  });
+
+  it("顺序反了（先设再导航）会被切页清掉——文档化这个坑", () => {
+    useUiStore.setState({ page: "home", pluginPageIntent: null });
+    useUiStore.getState().setPluginPageIntent("heming.infohub", "agenda");
+    useUiStore.getState().setPage("plugin:heming.infohub");
+    expect(useUiStore.getState().pluginPageIntent).toBeNull();
+  });
+
+  it("consumePluginPageIntent 返回并清空（一过性提示，用后即清）", () => {
+    useUiStore.getState().setPage("home");
+    useUiStore.getState().setPluginPageIntent("heming.infohub", "archive");
+    expect(useUiStore.getState().consumePluginPageIntent()).toEqual({
+      pluginId: "heming.infohub",
+      intent: "archive",
+    });
+    expect(useUiStore.getState().pluginPageIntent).toBeNull();
+    expect(useUiStore.getState().consumePluginPageIntent()).toBeNull();
+  });
+
+  it("再导航 / 离开会话都会清掉未消费的残留意图", () => {
+    useUiStore.getState().setPage("home");
+    useUiStore.getState().setPluginPageIntent("heming.infohub", "agenda");
+    useUiStore.getState().setPage("vault");
+    expect(useUiStore.getState().pluginPageIntent).toBeNull();
+
+    useUiStore.getState().setPluginPageIntent("heming.infohub", "agenda");
+    useUiStore.getState().leaveConversation();
+    expect(useUiStore.getState().pluginPageIntent).toBeNull();
+  });
+});

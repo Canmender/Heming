@@ -1395,6 +1395,27 @@
     return state.agenda;
   }
 
+  /**
+   * 首页卡上的「接下来三项」。
+   *
+   * ★ 卡片速览项是纯展示文本（宿主不渲染点击），所以这里只挑最有信息量的三条：
+   *   时间 + 事项标题。日程引擎给了 dueText 就用它（口径与日程页一致），
+   *   否则自己按 dueTs 拼「今天 14:00」；超过 40 字由宿主硬截断，这里先缩短，
+   *   免得截在半个字上看起来像 bug。
+   */
+  function agendaHighlights(agenda) {
+    const items = (agenda && agenda.items) || [];
+    const lines = [];
+    for (const item of items) {
+      if (!item || !item.title) continue;
+      const when = item.dueText || (item.dueTs ? `${formatDayLabel(item.dueTs)} ${fmtClock(item.dueTs)}`.trim() : "");
+      const line = when ? `${when} · ${item.title}` : String(item.title);
+      lines.push(line.length > 40 ? `${line.slice(0, 39)}…` : line);
+      if (lines.length >= 3) break;
+    }
+    return lines;
+  }
+
   function updateHomeCard() {
     if (!widget || typeof widget.homeCardSet !== "function") return;
     const status = state.status;
@@ -1410,8 +1431,10 @@
     const detail = summary
       ? `逾期 ${summary.overdue || 0} · 今天 ${summary.today || 0} · 本周 ${summary.week || 0}`
       : "";
+    // items 让卡片直接露出「接下来三项」，不用点进插件才知道今天有什么
+    const items = agendaHighlights(agenda);
     try {
-      Promise.resolve(widget.homeCardSet("infohub", { text, detail })).catch(() => {});
+      Promise.resolve(widget.homeCardSet("infohub", { text, detail, items })).catch(() => {});
     } catch {
       /* 旧宿主没有 homeCardSet 时静默跳过 */
     }
@@ -1578,8 +1601,37 @@
     }
   }
 
+  /**
+   * 首页卡快捷入口带来的页面意图：`widget://<id>/files/index.html#intent=agenda`。
+   *
+   * ★ 宿主只负责把 token 放进 hash，语义由插件自己解释（宿主不理解页签概念）。
+   *   这里三个页签与 intent 同名映射；未知 intent 一律回落默认页签，
+   *   免得以后改了页签名、旧卡片把页面点成空白。
+   */
+  const TAB_INTENTS = new Set(["search", "chats", "agenda"]);
+
+  function intentFromHash() {
+    let raw = "";
+    try {
+      raw = String((typeof location !== "undefined" && location.hash) || "").replace(/^#/, "");
+    } catch {
+      return "";
+    }
+    if (!raw) return "";
+    let intent = "";
+    try {
+      intent = String(new URLSearchParams(raw).get("intent") || "").trim().toLowerCase();
+    } catch {
+      return "";
+    }
+    return TAB_INTENTS.has(intent) ? intent : "";
+  }
+
   function boot() {
     applyTheme();
+    // 从首页卡「检索归档 / 全部日程」点进来时，直接落在对应页签
+    const intent = intentFromHash();
+    if (intent) state.tab = intent;
     const close = el("error-close");
     if (close) {
       close.addEventListener("click", () => showError(""));

@@ -179,6 +179,25 @@ function canonicalHomeCard(card: unknown): Record<string, unknown> | undefined {
   if (icon) out.icon = icon;
   const primary = trimText(record.primary);
   if (primary) out.primary = primary;
+  // d.139：快捷入口（文案 + intent）。签名后偷改按钮文案或 intent 同样是可感知变更；
+  // 没声明时不出这个键，d.138 之前的所有签名保持逐字不变。
+  const actions = canonicalHomeCardActions(record.actions);
+  if (actions.length > 0) out.actions = actions;
+  return out;
+}
+
+/** 首页卡快捷入口 → 签名用的确定性形状（d.139）：与 desktop plugin-signature.js 同口径。 */
+function canonicalHomeCardActions(actions: unknown): Array<{ label: string; intent: string }> {
+  if (!Array.isArray(actions)) return [];
+  const out: Array<{ label: string; intent: string }> = [];
+  for (const action of actions) {
+    if (!action || typeof action !== "object") continue;
+    const record = action as Record<string, unknown>;
+    const label = trimText(record.label);
+    const intent = trimText(record.intent);
+    if (!label || !intent) continue;
+    out.push({ label, intent });
+  }
   return out;
 }
 

@@ -130,9 +130,23 @@ export function PluginBundlePage({ pluginId }: PluginBundlePageProps) {
       lastKey = rectKey(rect);
       setPhase("mounting");
       setMountError(null);
+      /**
+       * 首页卡的 action 会先导航到这里、再把「页面意图」投进 store（d.139）。
+       * 用 `getState()` 读而不是当 effect 依赖：意图只是一次性提示，不该因为
+       * store 变化重建视图（重建会丢插件页里的输入）。取走即清，避免下次从
+       * 侧边栏进来时被旧意图劫持；pluginId 不匹配就当作普通进入。
+       */
+      const pending = useUiStore.getState().pluginPageIntent;
+      const intent = pending?.pluginId === pluginId ? pending.intent : undefined;
+      if (intent !== undefined) useUiStore.getState().consumePluginPageIntent();
       let result: WidgetPageMountResult;
       try {
-        result = await pageMount({ id: pluginId, rect });
+        result = await pageMount({
+          id: pluginId,
+          rect,
+          // 无意图时不带这个键：旧宿主/旧测试按 `{ id, rect }` 全等比对也能过。
+          ...(intent === undefined ? {} : { intent }),
+        });
       } catch (err) {
         // IPC 本身失败（桥断了/主进程未就绪）：与业务失败同一套错误态，别白屏。
         if (runId !== runSeq.current) return;

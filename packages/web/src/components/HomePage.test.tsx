@@ -351,6 +351,9 @@ describe("HomePage", () => {
             text: "128 条归档",
             detail: "",
             badge: "已连接",
+            // d.139 起 items/actions 是必填数组（此处只验证既有卡片渲染，不测扩展）。
+            items: [],
+            actions: [],
           },
         ],
         onHomeCard: () => () => {},
