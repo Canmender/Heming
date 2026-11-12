@@ -92,6 +92,25 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
     app.state.runs = runs
     app.state.tuner = tuner
 
+    def _evict_locked() -> None:
+        """只留最近 ``run_history_limit`` 个已结束的 run。
+
+        没有这一步，长跑的服务每来一个请求就把完整结果（含整份日志行）留在内存里，
+        10 万次调用之后进程会一直涨——这是「跑久了就飘」的典型来源。
+        正在跑的 run 一律不动（客户端还要轮询它）。
+        """
+        limit = max(1, int(settings.run_history_limit or 1))
+        overflow = len(runs) - limit
+        if overflow <= 0:
+            return
+        for key in list(runs):
+            if overflow <= 0:
+                break
+            if runs.get(key, {}).get("status") == "running":
+                continue
+            del runs[key]
+            overflow -= 1
+
     def _execute(run_id: str, task: TaskSpec) -> None:
         try:
             result, row = run_once(runtime, task, run_id=run_id)
@@ -103,6 +122,7 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                     "log": row,
                     "finished_at": time.time(),
                 }
+                _evict_locked()
         except Exception as exc:  # noqa: BLE001 - 后台线程绝不能把异常抛出去
             with lock:
                 runs[run_id] = {
@@ -111,6 +131,7 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                     "error": f"{type(exc).__name__}: {exc}",
                     "finished_at": time.time(),
                 }
+                _evict_locked()
         finally:
             semaphore.release()
 
@@ -125,6 +146,7 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             "approval_mode": settings.approval_mode,
             "pending_approvals": len(gate.pending()) if gate is not None else 0,
             "running": sum(1 for item in runs.values() if item.get("status") == "running"),
+            "runs_retained": len(runs),
             "tuner": {
                 "enabled": settings.tune_enabled,
                 "running": tuner.running,

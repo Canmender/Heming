@@ -86,6 +86,8 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_PIPELINE_MODEL` | `deepseek-chat` | 模型名 |
 | `AGENT_PIPELINE_BASE_URL` | `https://api.deepseek.com` | OpenAI 兼容端点 |
 | `AGENT_LOG_PATH` | `runs.jsonl` | 每次 run 一行 JSON（调优输入） |
+| `AGENT_LOG_MAX_BYTES` | `67108864` | 日志超过该字节数就整份轮转为 `.1`（留一代） |
+| `AGENT_RUN_HISTORY_LIMIT` | `500` | 服务内存里保留多少个已结束 run（超出丢最旧，避免长跑漏内存） |
 | `AGENT_PIPELINE_DB` | `agent-pipeline.db` | 记忆 + 配置版本 SQLite |
 | `AGENT_MAX_EPISODES` | `5000` | 情景记忆上限（超限删最旧；0 = 不限制） |
 | `AGENT_MAX_DOCUMENTS` | `2000` | 知识库文档上限（超限删最旧并连带删块） |
@@ -166,6 +168,12 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 - **覆盖率命令坏掉不硬撑**：`coverage_runner` 抛异常或拿不到数字时，`coverage=None`；连续两轮都拿不到就写 `stop_reason="coverage_command_failed"` 并转 summarize，不再空转到 `max_adversarial_rounds`（配置调大也不会白烧钱）。
 - **轮数用尽如实收口**：最后一轮仍未达标时 `stop_reason="coverage_gap"`，`adversarial_passed=False`，不会把 0.4 的覆盖率说成通过。
 - **「评审不过 → 重规划」在节点里生效**：`critic_node` 重置计划并累加 `replans`（用尽后写 `stop_reason="critic_blocked"`）。以前这些改动写在 LangGraph 的条件边里，边对 state 的修改不保证进图状态，等于每次都拿同一份计划重跑。
+
+## 长跑不飘（进程内状态有上限）
+
+- **run 历史有上限**：`AGENT_RUN_HISTORY_LIMIT`（默认 500）控制服务内存里保留多少个已结束 run；超出按完成顺序丢最旧，正在跑的 run 不动。`/health` 的 `runs_retained` 可以看当前占用。没有这一步时，每个请求都会把完整结果（含整份日志行）留在进程里，跑久了就是稳定泄漏。
+- **JSONL 日志会轮转**：`AGENT_LOG_MAX_BYTES`（默认 64MB）是单文件上限，超了整份改名为 `runs.jsonl.1`（只留一代）。10 万次调用 ≈ 10 万行，不轮转的话调优读日志、运维 `tail` 都会变慢。
+- **并发浸泡实测**：`scripts/soak.py --runs 20000 --concurrency 8` → **100,000 次模型调用、0 失败**、17.0 run/s、P50 471.65ms / P95 511.1ms、内存峰值 4.55MB / 结束 3.11MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。
 
 ## 已知边界
 

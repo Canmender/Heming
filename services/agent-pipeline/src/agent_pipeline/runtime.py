@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -223,15 +224,29 @@ def run_once(
     return result, row
 
 
+_log_lock = threading.Lock()
+
+
 def _write_log(runtime: Runtime, row: dict[str, Any]) -> None:
     if runtime.log_sink is not None:
         runtime.log_sink(row)
         return
     path = Path(runtime.settings.log_path)
+    limit = int(getattr(runtime.settings, "log_max_bytes", 0) or 0)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        with _log_lock:
+            # 10 万次调用 = 10 万行；不轮转的话单文件会涨到几百 MB，
+            # 调优读日志、运维 tail 都会变慢。超过上限就整份改成 .1（保留一代）。
+            if limit > 0 and path.exists() and path.stat().st_size >= limit:
+                backup = path.with_suffix(path.suffix + ".1")
+                try:
+                    backup.unlink(missing_ok=True)
+                    path.rename(backup)
+                except OSError:
+                    pass
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     except OSError:
         # 日志写失败不能影响 run 结果；指标里已经记录。
         pass

@@ -140,6 +140,10 @@ class Settings:
     api_key_env: str = "AGENT_PIPELINE_API_KEY"
     log_path: str = field(default_factory=lambda: os.environ.get("AGENT_PIPELINE_LOG", "runs.jsonl"))
     db_path: str = field(default_factory=lambda: os.environ.get("AGENT_PIPELINE_DB", "agent-pipeline.db"))
+    # 10 万次调用会写 10 万行 JSONL；超过该字节数就整份改名为 .1（保留一代）。
+    log_max_bytes: int = 64 * 1024 * 1024
+    # 服务进程内保留多少个 run 的完整结果（含 log 行）。无上限就是内存泄漏。
+    run_history_limit: int = 500
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -171,6 +175,8 @@ class Settings:
             tune_window_hours=_env_int("AGENT_TUNE_WINDOW_HOURS", cls.tune_window_hours),
             tune_out_path=os.environ.get("AGENT_TUNE_OUT", cls.tune_out_path),
             tune_eval_enabled=_env_bool("AGENT_TUNE_EVAL", cls.tune_eval_enabled),
+            log_max_bytes=_env_int("AGENT_LOG_MAX_BYTES", cls.log_max_bytes),
+            run_history_limit=_env_int("AGENT_RUN_HISTORY_LIMIT", cls.run_history_limit),
         )
 
     def with_budget(self, **kwargs: Any) -> "Settings":
