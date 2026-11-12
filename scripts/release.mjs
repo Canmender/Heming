@@ -117,6 +117,7 @@ const TAR_EXCLUDES = [
   "packages/setup/build",
   "packages/setup/payload",
   "packages/desktop/update-helper",
+  ".tmp-module-dl",
   "plugin-kit/plugins/pet-widget/dist",
   "plugin-kit/plugins/workflow-kit/dist",
   "vendor",
