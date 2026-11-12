@@ -781,6 +781,13 @@ export function runAgentMentions(
         >();
         /** 「工具被能力闸摘掉」只提示一次（重试会再进 once()，不重复刷屏）。 */
         let gateNoticed = false;
+        /**
+         * 本轮尝试内「同名 + 同参数」出现次数（用于重复调用提醒）。
+         *
+         * 作用域是**整次尝试**而不是单轮：模型原地打转的典型形态是「规划轮 → 同一检索 →
+         * 再同一检索」，跨轮才看得出来。溢出重试会重新进 `once()`，这里自然重开计数。
+         */
+        const repeatedCalls = new Map<string, number>();
 
         /**
          * 一次尝试。只有第 1 次尝试上行 chunk / onLocalDelta——重试若重复上行，
@@ -1091,9 +1098,26 @@ export function runAgentMentions(
                   { signal: controller.signal },
                 );
               })();
-              executed.set(call.id, job);
-              return job;
+              const callKey = `${call.function.name}\u0000${call.function.arguments}`;
+              const repeat = repeatedCalls.get(callKey) ?? 0;
+              repeatedCalls.set(callKey, repeat + 1);
+              const tracked = job.then((result) => {
+                if (repeat === 0) return result;
+                return {
+                  ...result,
+                  text: `（提醒：这次调用的参数与本轮第 ${repeat} 次完全相同。如果需要看到最新状态，请先说明你在等什么变化；如果只是重复确认，可以直接用上面的结果。）\n${result.text}`,
+                };
+              });
+              executed.set(call.id, tracked);
+              return tracked;
             };
+            /**
+             * 同一轮里「同名 + 同参数」的重复调用（attempt 作用域，溢出重试重新计数）。
+             *
+             * 不是简单的去重：截图/读文件这类工具，同样的参数再调一次可能是**故意的**
+             * （点完按钮再看一眼）。但模型也常常原地打转——同一个检索连发 5 次，直到
+             * 轮数上限为止。这里只做提醒（结果仍真的执行），让模型自己判断要不要换路。
+             */
             let writeChain: Promise<void> = Promise.resolve();
             await Promise.all(
               calls.map((call, i) => {

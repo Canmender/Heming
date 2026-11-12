@@ -392,6 +392,56 @@ describe("回合事件日志（G6）", () => {
   });
 });
 
+describe("重复调用提醒（原地打转的模型）", () => {
+  function toolTexts(rows: ChatMessage[]): string[] {
+    return rows
+      .filter((row) => row.role === "tool")
+      .map((row) => String(row.content ?? ""));
+  }
+
+  it("同名同参数第二次调用照常执行，但在结果前提醒它和第几次一样", async () => {
+    const executed: string[] = [];
+    const rounds: Round[] = [
+      { text: "", calls: [{ id: "a1", name: "srv__read", args: '{"path":"a.md"}' }] },
+      { text: "", calls: [{ id: "a2", name: "srv__read", args: '{"path":"a.md"}' }] },
+      { text: "看完了", calls: [] },
+    ];
+    const { deps, requests } = makeDeps(rounds, {
+      risk: () => "read",
+      execute: async (call) => {
+        executed.push(call.name);
+        return { text: "a.md 内容", ok: true };
+      },
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "读一下 a.md", deps);
+
+    // 仍然真的执行两次（截图/文件这类工具，同参数也可能想看最新状态）
+    expect(executed).toEqual(["srv__read", "srv__read"]);
+    const texts = toolTexts(requests.at(-1) ?? []);
+    expect(texts[0]).toBe("a.md 内容");
+    expect(texts[1]).toContain("与本轮第 1 次完全相同");
+    expect(texts[1]).toContain("a.md 内容");
+  });
+
+  it("参数不同的调用不会被误判成重复", async () => {
+    const rounds: Round[] = [
+      { text: "", calls: [{ id: "b1", name: "srv__read", args: '{"path":"a.md"}' }] },
+      { text: "", calls: [{ id: "b2", name: "srv__read", args: '{"path":"b.md"}' }] },
+      { text: "好", calls: [] },
+    ];
+    const { deps, requests } = makeDeps(rounds, {
+      risk: () => "read",
+      execute: async () => ({ text: "内容", ok: true }),
+    });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "读两篇", deps);
+
+    const texts = toolTexts(requests.at(-1) ?? []);
+    expect(texts.every((item) => !item.includes("完全相同"))).toBe(true);
+  });
+});
+
 describe("按需工具发现（tool_search）", () => {
   const manyNames = Array.from({ length: 25 }, (_, i) => `srv__t${String(i).padStart(2, "0")}`);
 

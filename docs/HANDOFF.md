@@ -38,6 +38,7 @@
 - **工具轮的过程说明不再被当最终答案**（`lib/agentStream.ts` 的 catch 分支）：`partial` 只取已上行/本地累积的正文；若一个字都没有而缓冲里有中间话术，才带「（本轮工具调用未完成，以上是中断前的过程说明，不是最终答案。）」兜底——落库的话会让气泡看起来「答完了」。
 - **历史压缩每次 run 只算一次**（`lib/agentStream.ts` 的 `historyCache`）：工具轮每轮都重新组装 messages，以前每轮都重新 `prepareHistory`（12 轮 = 13 次压缩/摘要调用）；现在按 aggressive 级别缓存，溢出重试换级别才重算。
 - **图片也计入上下文预算**（`lib/agentContext/tokens.ts`）：`estimateRowsTokens` 以前只看 `content` 文本，带图的历史行按 4 token 算——供应商实际要花上千 token 读图，「预算说还能塞」的请求其实已经超限，撞 400 后按 `aggressive` 收紧也收不回来（超的是图片不是文字）。新增 `IMAGE_TOKEN_COST = 1500` 与 `estimateRowTokens()`，图片按固定成本、文本片按字数计；工具回灌的图片成本也从写死的 800 改成同一常量。
+- **同名同参数的重复调用会提醒模型**（`lib/agentStream.ts`）：ReAct 循环里模型常常原地打转（同一检索连发好几轮，直到 `MAX_TOOL_ROUNDS`）。这里不做去重——截图/读文件同参数再调一次可能是故意的（点完按钮再看一眼）——而是在结果前加一句「这次调用的参数与本轮第 N 次完全相同」，让模型自己判断要不要换路。计数作用域是整次尝试（跨轮可见），溢出重试重新计数。
 - **工具结果预算只算工具输出**（`lib/agentContext/toolResults.ts`）：以前把 user/assistant 文本也算进 3000 token 预算，用户贴长文档时会白折掉还有用的工具结果、折完还超限。
 - **输出被截断时不再静默**（`lib/llmClient.ts` 的 `finishReason` + `agentStream.ts`）：以前没人读 `finish_reason`，`length` 截断拼出来的半截工具参数会一路走到执行层，变成一条「Unexpected end of JSON input」的假失败。现在截断时丢掉参数不完整的调用、`onFinish` 回报原因，正文明确写「回复被输出长度上限截断，回复「继续」可以接着写」。
 - **工具被能力闸摘掉不再无声**（`lib/agentStream.ts` 的 `gateNoticed`）：模型不支持函数调用时，以前只是整轮不给 tools，用户看模型说「我查一下」却什么都没发生；现在每次 run 提示一次「当前模型（…）不支持工具调用」。
@@ -47,7 +48,7 @@
 - **截断提示的换行是真换行**（`lib/agentStream.ts` 第 936/944 行）：这两条文案早先用脚本补进文件时被过度转义成 `"\\n\\n…"`，TS 里是字面量反斜杠 + n，用户会在气泡里看到 `\n\n（回复被输出长度上限截断…` 而不是换行。已改回 `"\n\n…"`，并在 `agentStream.tools.test.ts` 的截断用例里加「必须含真换行、不含反斜杠」的断言防回归（全仓 `packages/**/*.ts*` 扫过，只此两处）。
 - **流水线有了桌面端客户端（默认不启用）**（`lib/pipeline/client.ts`）：`services/agent-pipeline` 之前只有 HTTP 协议、没有前端入口，接不接只能靠手写 fetch。新增薄客户端：提交→轮询→终态一次 `await`，`snake_case`→`camelCase`，429 退避重提一次，run 超时先 `POST /cancel` 再抛 `timeout`，`onPendingApproval` 接桌面端确认弹窗（服务端 404/409 说明这条审批已经不在，不再把整个 run 抛错）；429 按服务端 `Retry-After` 的秒数退避（以前忽略响应头、固定等 1 秒继续撞）。**默认不构造**——流水线要单独部署（地址/密钥/回退策略属产品决策），未部署不该让聊天链路超时。12 例测试。
 
-验证：`pnpm --filter @heming/web test` → **297 文件 / 4340 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
+验证：`pnpm --filter @heming/web test` → **297 文件 / 4342 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 42 例全绿（含用户中断取消、超时取消、连续超时回收、服务端请求回应）；desktop 全套 830 例。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
 ### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）
