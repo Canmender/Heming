@@ -24,8 +24,10 @@ import argparse
 import json
 import os
 import re
+import queue
 import statistics
 import sys
+import threading
 import time
 import tracemalloc
 from pathlib import Path
@@ -53,6 +55,7 @@ class CycleLLM(LLMClient):
     def __init__(self, fail_every: int = 0) -> None:
         self.calls = 0
         self.fail_every = fail_every
+        self._lock = threading.Lock()
         self._by_prompt = {
             PROMPTS["plan"]: {"steps": [{"goal": "直接回答", "done_when": "有一句结论"}]},
             PROMPTS["reflect"]: {"verdict": "done", "reasons": ["已给出结论"]},
@@ -63,8 +66,11 @@ class CycleLLM(LLMClient):
         }
 
     def chat(self, messages, *, tools=None, temperature=0.2, max_tokens=2000) -> LLMResponse:
-        self.calls += 1
-        if self.fail_every and self.calls % self.fail_every == 0:
+        # 并发浸泡时会多线程同时调模型：计数必须原子，否则 fail_every 的节拍会漂。
+        with self._lock:
+            self.calls += 1
+            calls = self.calls
+        if self.fail_every and calls % self.fail_every == 0:
             raise LLMError("模拟上游 500（浸泡测试注入）")
         system = str(messages[0].get("content", "")) if messages else ""
         if system == PROMPTS["execute"]:
@@ -88,6 +94,12 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=0.0,
         help="注入上游失败的比例（例如 0.3 = 每 3 次模型调用失败 1 次），用于验证自动回滚",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="并发跑 run 的工作线程数（默认 1 = 顺序；用来验证状态机/SQLite/指标在并发下不互相踩）",
     )
     parser.add_argument(
         "--canary",
@@ -126,16 +138,36 @@ def main(argv: list[str] | None = None) -> int:
     tracemalloc.start()
     durations: list[float] = []
     failures: list[str] = []
-    started = time.perf_counter()
+    result_lock = threading.Lock()
+    work: queue.Queue[int] = queue.Queue()
     for index in range(args.runs):
-        t0 = time.perf_counter()
-        try:
-            result, _row = run_once(runtime, task, run_id=f"soak-{index:06d}")
-            if result.status not in ("ok", "budget"):
-                failures.append(f"{index}:{result.status}:{result.error}")
-        except Exception as exc:  # noqa: BLE001 - 浸泡测试要把所有异常都记下来
-            failures.append(f"{index}:{type(exc).__name__}:{exc}")
-        durations.append(time.perf_counter() - t0)
+        work.put(index)
+
+    def _worker() -> None:
+        while True:
+            try:
+                index = work.get_nowait()
+            except queue.Empty:
+                return
+            t0 = time.perf_counter()
+            try:
+                result, _row = run_once(runtime, task, run_id=f"soak-{index:06d}")
+                if result.status not in ("ok", "budget"):
+                    with result_lock:
+                        failures.append(f"{index}:{result.status}:{result.error}")
+            except Exception as exc:  # noqa: BLE001 - 浸泡测试要把所有异常都记下来
+                with result_lock:
+                    failures.append(f"{index}:{type(exc).__name__}:{exc}")
+            with result_lock:
+                durations.append(time.perf_counter() - t0)
+
+    workers = max(1, args.concurrency)
+    started = time.perf_counter()
+    threads = [threading.Thread(target=_worker, daemon=True) for _ in range(workers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
     elapsed = time.perf_counter() - started
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
@@ -149,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     summary = {
         "runs": args.runs,
+        "concurrency": max(1, args.concurrency),
         "rollbacks": rollbacks,
         "canary_stage": (
             config_store.get(canary_id).stage if canary_id is not None and config_store.get(canary_id) else None
@@ -168,7 +201,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(summary, ensure_ascii=False))
     else:
         print("浸泡测试结果")
-        print(f"  runs            : {summary['runs']}（{summary['runs_per_s']}/s，总耗时 {summary['elapsed_s']}s）")
+        print(
+            f"  runs            : {summary['runs']}（并发 {summary['concurrency']}，"
+            f"{summary['runs_per_s']}/s，总耗时 {summary['elapsed_s']}s）"
+        )
         print(f"  失败            : {summary['failures']} {summary['failure_samples']}")
         print(f"  P50 / P95       : {summary['p50_ms']}ms / {summary['p95_ms']}ms")
         print(f"  模型调用次数    : {summary['llm_calls']}")

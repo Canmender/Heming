@@ -156,6 +156,10 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 
 `--fail-rate` 是确定性的：`fail_every = round(1 / fail_rate)`，每第 N 次模型调用抛 `LLMError`，所以同一组参数结果可复现。配合 `--canary` 时，灰度版本承接全部流量，错误率超过 `error_threshold` 后 `maybe_rollback` 会把它挪回 `archived`，而 active 版本继续可用——实测 `--runs 200 --fail-rate 0.5` 得到 `rollbacks: 1`、`canary_stage: "archived"`、退出码 0。
 
+`--concurrency N` 会让 N 个工作线程同时跑 run（默认 1 = 顺序）。它验证的是状态机、SQLite 记忆、指标与配置存储**在并发下不互相踩**：实测 `--runs 8000 --concurrency 8` → 0 失败、40,000 次模型调用、17.5 run/s、P50 462ms / P95 496ms、内存峰值 4.1MB、`episodes` 稳定在 5000（容量回收在并发下同样生效）。并发 + 注入失败也一起验过：`--runs 400 --concurrency 4 --fail-rate 0.25 --canary` → 自动回滚 1 次、canary 归档 `archived`。
+
+> 服务侧并发口径：`POST /v1/runs` 超过 `AGENT_MAX_CONCURRENCY` 时**直接 429 + `Retry-After`**，不排队（排队会让客户端超时掩盖背压）；同一个 `run_id` 重复提交是幂等的，只跑一次。`tests/test_concurrency.py` 覆盖了 429/放行/幂等三条。
+
 ## 对抗环（Coder ↔ Tester）的收口口径
 
 - **实现者看得到上一轮证据**：第二轮起，Coder 的上下文里带「上一轮测试输出尾部（1200 字）+ 上一轮覆盖率 + 上一轮缺陷清单」。只给评审意见会让它反复改同一处、或改一个早已通过的用例。
