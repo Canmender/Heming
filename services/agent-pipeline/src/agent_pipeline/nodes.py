@@ -230,7 +230,23 @@ def plan_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
         return {**state, "status": "budget"}
     task = TaskSpec(**_task(state))
     recalled = runtime.memory.search(task.goal, limit=runtime.settings.max_memory_items)
-    context = _context(runtime, state, extra="请只输出 JSON 计划。", memories=recalled)
+    # 评审不过 → 重规划时，必须让规划者看到「上一版为什么不过」。
+    # 以前只把计划清空重排，critic 的 blocking_issues/suggestions 只进了旁路记录，
+    # 规划者看到的上下文和第一次一模一样 → 重排出来的计划也基本一样，白烧一轮。
+    critiques = state.get("critiques") or []
+    last_critique = critiques[-1] if critiques and isinstance(critiques[-1], dict) else {}
+    replan_brief = ""
+    if last_critique:
+        issues = [str(item) for item in (last_critique.get("blocking_issues") or [])][:5]
+        suggestions = [str(item) for item in (last_critique.get("suggestions") or [])][:5]
+        if issues or suggestions:
+            replan_brief = "上一版计划没通过评审，重排时请针对性修正："
+            if issues:
+                replan_brief += "\n阻断问题：\n" + "\n".join(f"- {item}" for item in issues)
+            if suggestions:
+                replan_brief += "\n评审建议：\n" + "\n".join(f"- {item}" for item in suggestions)
+            replan_brief += "\n"
+    context = _context(runtime, state, extra=f"{replan_brief}请只输出 JSON 计划。", memories=recalled)
     data, _ = _call_json(runtime, state, prompt_key="plan", user_text=context)
     raw_steps = data.get("steps") or []
     if not isinstance(raw_steps, list) or not raw_steps:

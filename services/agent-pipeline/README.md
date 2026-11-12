@@ -135,6 +135,13 @@ curl -s http://localhost:8000/v1/runs \
 - 取消是协作式的：卡在**工具调用**里的 run 要等这次工具超时（`AGENT_TOOL_TIMEOUT_S`）才走到下一个边界（工具线程没法安全打断）；
 - `tests/test_cancel.py` 4 例覆盖（跑到一半取消、未知 run、已结束 run、重复取消）。
 
+## 评审不过 → 重排时带上「为什么不过」
+
+`critic` 判不过时，`plan` 节点会重排计划；重排的提示词里现在会附上上一轮评审的 `blocking_issues`
+与 `suggestions`（各取前 5 条）。以前只清空计划重排，规划者拿到的上下文和第一次一模一样，
+重排出来的计划也基本一样——白烧一轮模型与工具。`tests/test_replan_brief.py` 钉住「第一次计划看不到评审意见、
+重排那次必须看到具体问题与建议」。
+
 ## Plan / Execute / Reflect 的「下一步」
 
 `reflect` 节点的返回里除了 `verdict`，还有 `next_step`（步骤下标）。它现在**真的会影响编排**：
