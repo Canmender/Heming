@@ -2006,6 +2006,12 @@ export function ChatPage({
           e.type === "message_new" && e.streamId ? collectStreamTranscript(e.streamId) : undefined;
         // 流式三事件收口（chunk 累积/message_new{streamId} 移除/agent_error 分态）在 store 统一处理
         useChatStore.getState().onWsEvent(e);
+        /**
+         * 轨迹只在收口前有用：留着就是按 streamId 只增不删的表（长会话累积几条无关紧要，
+         * 但一个页面开一整天、每个流都留一份工具结果副本，就没有理由了）。
+         * 没有在飞的流时整表清空，比逐个猜哪条该删安全。
+         */
+        if (!Object.keys(useChatStore.getState().streaming).length) toolTraceRef.current = {};
         if (e.type === "message_new" && e.message.conversationId === convId) {
           if (finishedTranscript) {
             // 先落盘再入列：切会话/刷新后拉历史能按消息 id 贴回这两个字段

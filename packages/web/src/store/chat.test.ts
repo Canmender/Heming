@@ -888,3 +888,36 @@ describe("中断收口不造空气泡（幽灵气泡 P0）", () => {
     });
   });
 });
+
+describe("streamOwner 有回收窗口（不随会话长度单调上涨）", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    useChatStore.setState({ streaming: {}, streamOwner: {} });
+  });
+
+  it("TTL 内保留（回声还能分类），超过 TTL 后键被清掉", () => {
+    vi.useFakeTimers();
+    useChatStore.getState().markStreamOwner("s9");
+    useChatStore.getState().removeStream("s9");
+    // 回声窗口内必须留着：finish 的 message_new 先到、agent_error 后到靠它判本机流
+    vi.advanceTimersByTime(60_000);
+    expect(useChatStore.getState().streamOwner["s9"]).toBe(true);
+    vi.advanceTimersByTime(120_000);
+    expect(useChatStore.getState().streamOwner["s9"]).toBeUndefined();
+  });
+
+  it("同一 id 又起流时不清（进行中的流不能被误删）", () => {
+    vi.useFakeTimers();
+    useChatStore.getState().markStreamOwner("s10");
+    useChatStore.getState().removeStream("s10");
+    useChatStore.getState().upsertStream("s10", {
+      agentId: "a1",
+      conversationId: "c1",
+      text: "",
+      status: "streaming",
+      lastAt: Date.now(),
+    });
+    vi.advanceTimersByTime(120_000);
+    expect(useChatStore.getState().streamOwner["s10"]).toBe(true);
+  });
+});

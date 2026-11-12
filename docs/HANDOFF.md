@@ -34,8 +34,11 @@
 - **工具轮的过程说明不再被当最终答案**（`lib/agentStream.ts` 的 catch 分支）：`partial` 只取已上行/本地累积的正文；若一个字都没有而缓冲里有中间话术，才带「（本轮工具调用未完成，以上是中断前的过程说明，不是最终答案。）」兜底——落库的话会让气泡看起来「答完了」。
 - **历史压缩每次 run 只算一次**（`lib/agentStream.ts` 的 `historyCache`）：工具轮每轮都重新组装 messages，以前每轮都重新 `prepareHistory`（12 轮 = 13 次压缩/摘要调用）；现在按 aggressive 级别缓存，溢出重试换级别才重算。
 - **工具结果预算只算工具输出**（`lib/agentContext/toolResults.ts`）：以前把 user/assistant 文本也算进 3000 token 预算，用户贴长文档时会白折掉还有用的工具结果、折完还超限。
+- **输出被截断时不再静默**（`lib/llmClient.ts` 的 `finishReason` + `agentStream.ts`）：以前没人读 `finish_reason`，`length` 截断拼出来的半截工具参数会一路走到执行层，变成一条「Unexpected end of JSON input」的假失败。现在截断时丢掉参数不完整的调用、`onFinish` 回报原因，正文明确写「回复被输出长度上限截断，回复「继续」可以接着写」。
+- **工具被能力闸摘掉不再无声**（`lib/agentStream.ts` 的 `gateNoticed`）：模型不支持函数调用时，以前只是整轮不给 tools，用户看模型说「我查一下」却什么都没发生；现在每次 run 提示一次「当前模型（…）不支持工具调用」。
+- **轨迹表与 streamOwner 不再只增不删**（`components/ChatPage.tsx` / `store/chat.ts`）：`toolTraceRef` 在流收口后按「没有在飞的流就整表清空」回收；`streamOwner` 给 120s 回收窗口（回声窗口内保留，过期删键，进行中的同 id 流不删）——长会话不会随轮次单调上涨。
 
-验证：`pnpm --filter @heming/web test` → **295 文件 / 4309 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 38 例全绿（含超时取消、服务端请求回应）。
+验证：`pnpm --filter @heming/web test` → **295 文件 / 4314 例全绿**；`pnpm --filter @heming/web typecheck` exit 0；`node --test packages/desktop/mcp-stdio.test.js` → 38 例全绿（含超时取消、服务端请求回应）。
 （注：`ChatPage.test.tsx` 里有几条用例依赖同文件更早的用例铺好的状态，单独用 `-t` 或单文件跑会红；整套跑是绿的。）
 
 ### 0.2 Multi-Agent 流水线（services/agent-pipeline，Python）

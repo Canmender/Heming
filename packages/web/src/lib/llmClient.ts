@@ -208,6 +208,8 @@ export interface StreamChatOpts {
   onReasoning?: (text: string) => void;
   /** 本轮供应商上报的用量：结束时恰好回调一次；拿不到就不回调。 */
   onUsage?: (u: UsageTotals) => void;
+  /** 本轮 `finish_reason`（stop / length / tool_calls …）：结束时回调一次；拿不到就不回调。 */
+  onFinish?: (reason: string) => void;
   /** 逐候选留痕：只有 `streamChatRouted` 会读它。 */
   onAttempt?: (a: RouteAttempt) => void;
 }
@@ -272,6 +274,15 @@ export async function streamChat(
 
   const toolCalls = new Map<number, { id: string; name: string; args: string }>();
   /**
+   * 本轮的 `finish_reason`（OpenAI 兼容：stop / length / tool_calls …）。
+   *
+   * 为什么要记：`length` 表示输出被 max_tokens 截断，此时流里拼出来的工具参数可能是
+   * 半截 JSON。以前没人读这个字段，于是「参数被截断」会一路走到执行层，变成一条
+   * 「工具调用失败：Unexpected end of JSON input」——用户只看到工具乱报错，
+   * 不知道其实是输出预算不够。现在按它把不可执行的调用丢掉并回报截断。
+   */
+  let finishReason: string | null = null;
+  /**
    * 拼接一个逐片下发的字段（函数名）。
    *
    * OpenAI 的规范是「名字只在首片出现、后续片只带 arguments」，但兼容网关的实现五花八门：
@@ -328,11 +339,30 @@ export async function streamChat(
       toolCalls.set(index, cur);
     }
   };
+  /**
+   * 参数是否是一个完整的 JSON 对象。
+   *
+   * 只在 `finish_reason === "length"`（输出被截断）时用来挡掉半截参数；正常结束时
+   * 不查——部分兼容网关会发非 JSON 的参数（例如 "null"），交给执行层报错更诚实。
+   */
+  const isCompleteArgs = (args: string): boolean => {
+    if (!args.trim()) return true;
+    try {
+      const parsed: unknown = JSON.parse(args);
+      return typeof parsed === "object" && parsed !== null;
+    } catch {
+      return false;
+    }
+  };
   const flushToolCalls = () => {
     if (!toolCalls.size) return;
+    const truncated = finishReason === "length";
     const calls: ToolCall[] = [...toolCalls.entries()]
       .sort((a, b) => a[0] - b[0])
       .filter(([, v]) => v.name)
+      // 被截断时，参数拼不成完整对象的调用不能交给执行层：它只会变成一条
+      // 「Unexpected end of JSON input」的假失败，掩盖真正的原因（输出预算不够）。
+      .filter(([, v]) => !truncated || isCompleteArgs(v.args))
       .map(([, v]) => ({
         id: v.id || `call_${Math.random().toString(36).slice(2, 10)}`,
         type: "function" as const,
@@ -379,6 +409,7 @@ export async function streamChat(
           reasoning_content?: string;
           reasoning?: string;
         };
+        finish_reason?: string;
       }[];
       usage?: unknown;
     };
@@ -390,9 +421,12 @@ export async function streamChat(
     }
     const carried = carriedError(json);
     if (carried) throw carried;
+    const finish = json.choices?.[0]?.finish_reason;
+    if (typeof finish === "string" && finish) finishReason = finish;
     const text = json.choices?.[0]?.message?.content ?? "";
     collectToolCalls(json.choices?.[0]?.message?.tool_calls);
     flushToolCalls();
+    if (finishReason) opts.onFinish?.(finishReason);
     const reasoning = json.choices?.[0]?.message?.reasoning_content ?? json.choices?.[0]?.message?.reasoning;
     if (reasoning) opts.onReasoning?.(reasoning);
     if (text) {
@@ -423,12 +457,15 @@ export async function streamChat(
             reasoning_content?: string;
             reasoning?: string;
           };
+          finish_reason?: string;
         }[];
         usage?: unknown;
         error?: unknown;
       };
       mergeUsage(parsed.usage);
       carried = carriedError(parsed);
+      const finish = parsed.choices?.[0]?.finish_reason;
+      if (typeof finish === "string" && finish) finishReason = finish;
       collectToolCalls(parsed.choices?.[0]?.delta?.tool_calls);
       const reasoningDelta =
         parsed.choices?.[0]?.delta?.reasoning_content ?? parsed.choices?.[0]?.delta?.reasoning;
@@ -457,6 +494,7 @@ export async function streamChat(
     }
     if (buffer.trim()) handleLine(buffer.trim());
     flushToolCalls();
+    if (finishReason) opts.onFinish?.(finishReason);
     emitUsage();
   } catch (e) {
     if (opts.signal.aborted || (e as { name?: string })?.name === "AbortError") throw toAbortError();

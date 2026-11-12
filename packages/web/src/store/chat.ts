@@ -340,6 +340,14 @@ const REMOTE_ERROR_TTL_MS = 6000;
  * （patch 会清掉 errorMessage 并回到 streaming）；60s 对常规对话式生成足够宽松，误报成本可接受。
  */
 const STREAM_STALE_MS = 60_000;
+/**
+ * `streamOwner` 的回收窗口（毫秒）。
+ *
+ * 这个标记必须比流项活得久一点：finish 的 `message_new` 先到、`agent_error` 回声后到，
+ * 没了它就会把本机流的错误误判成他机流、走自清丢掉重试入口。但一直不删就是按 streamId
+ * 只增不删的表（页面开一整天、每轮都留一个键）。120s 远超任何回声延迟。
+ */
+const STREAM_OWNER_TTL_MS = 120_000;
 
 interface ChatState {
   conversations: Conversation[];
@@ -795,10 +803,16 @@ export const useChatStore = create<ChatState>((set, get) => {
     });
   },
   removeStream(id) {
-    // streamOwner 刻意不清理：finish 的 message_new 先到、agent_error 回声后到时，
-    // 仍能按本机流归类（置 error 供重试），否则会被误当他机流走去自清
+    // streamOwner 刻意不立即清理：finish 的 message_new 先到、agent_error 回声后到时，
+    // 仍能按本机流归类（置 error 供重试），否则会被误当他机流走去自清。
     const { [id]: _removed, ...rest } = get().streaming;
     set({ streaming: rest });
+    // 但也不能永远留着：回声窗口过去后再收，表就不会随会话长度单调上涨。
+    setTimeout(() => {
+      if (get().streaming[id] || !get().streamOwner[id]) return;
+      const { [id]: _gone, ...kept } = get().streamOwner;
+      set({ streamOwner: kept });
+    }, STREAM_OWNER_TTL_MS);
   },
   markStreamOwner(id) {
     set({ streamOwner: { ...get().streamOwner, [id]: true } });

@@ -779,6 +779,8 @@ export function runAgentMentions(
           string,
           Promise<{ text: string; ok: boolean; sources?: ToolSource[] }>
         >();
+        /** 「工具被能力闸摘掉」只提示一次（重试会再进 once()，不重复刷屏）。 */
+        let gateNoticed = false;
 
         /**
          * 一次尝试。只有第 1 次尝试上行 chunk / onLocalDelta——重试若重复上行，
@@ -804,6 +806,18 @@ export function runAgentMentions(
             bridge.tools.length > 0 &&
             supportsKind(profile, "tools") &&
             !aborted;
+          /**
+           * 工具被静默摘掉是误导：用户看到模型说「我查一下」却什么都没发生，只会以为工具坏了。
+           * 只在「确实有工具、但模型不支持」时说一句（每次 run 一次），其余缺失原因
+           * （没配 MCP / 没有内置工具）由界面上的能力提示负责，不在这里重复。
+           */
+          if (!useTools && !gateNoticed && bridge && bridge.tools.length > 0 && !aborted) {
+            gateNoticed = true;
+            emitDelta(
+              `（当前模型（${profile.model}）不支持工具调用，本轮只能纯对话；换一个支持函数调用的模型再试。）`,
+              aggressive,
+            );
+          }
           /**
            * 工具目录超过阈值时改「按需发现」（对应 Codex 的 tool_search）。
            *
@@ -863,11 +877,16 @@ export function runAgentMentions(
             const roundChunks: string[] = [];
             let roundText = "";
             let calls: ToolCall[] = [];
+            /** 本轮是否被输出长度上限截断（finish_reason=length）：要明确告诉用户，别让它像「模型变傻了」。 */
+            let truncated = false;
             await deps.streamChat(profile, await messagesFor(aggressive, extra), {
               signal: controller.signal,
               ...(useTools ? { tools: toolsForRequest() } : {}),
               onToolCalls: (c) => {
                 calls = c;
+              },
+              onFinish: (reason) => {
+                if (reason === "length") truncated = true;
               },
               onAttempt: (a) => {
                 attempts.push(a);
@@ -911,9 +930,18 @@ export function runAgentMentions(
             // 没有工具调用 = 这一轮就是答案，逐片补发文本后结束。
             // 逐片而非整段：保住打字机效果，与无工具路径表现一致。
             if (calls.length === 0) {
+              // 被输出上限截断时，用户看到的是一句话说到一半就停了：必须说明原因，
+              // 否则他会以为模型坏了（这跟「工具参数不完整被丢弃」是同一件事的两面）。
+              if (truncated) {
+                emitDelta("\\n\\n（回复被输出长度上限截断，回复「继续」可以接着写。）", aggressive);
+              }
               for (const chunk of roundChunks) emitDelta(chunk, aggressive);
               emitFooter();
               return;
+            }
+            if (truncated) {
+              // 还有工具调用但整轮被截断：参数完整的那些会照常执行，这里只提示「没说完」。
+              emitDelta("\\n\\n（本轮输出触到长度上限，可能有工具调用没来得及说完，已丢弃。）", aggressive);
             }
             // 到上限还在要工具：把已有文本给用户，并**说明**为什么停在这里。
             // 静默 return 是曾经的实现——用户只看到话没说完，不知道是被截断的。

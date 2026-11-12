@@ -154,17 +154,20 @@ describe("streamChat", () => {
     const reasoning: string[] = [];
     const toolCalls: unknown[] = [];
     const usages: unknown[] = [];
+    const finishes: string[] = [];
     return {
       deltas,
       reasoning,
       toolCalls,
       usages,
+      finishes,
       opts: (signal = new AbortController().signal) => ({
         signal,
         onDelta: (d: string) => deltas.push(d),
         onReasoning: (t: string) => reasoning.push(t),
         onToolCalls: (c: unknown) => toolCalls.push(c),
         onUsage: (u: unknown) => usages.push(u),
+        onFinish: (r: string) => finishes.push(r),
       }),
     };
   }
@@ -296,6 +299,47 @@ describe("streamChat", () => {
     expect(c.toolCalls).toEqual([
       [{ id: "c1", type: "function", function: { name: "echo", arguments: '{"a":1}' } }],
     ]);
+  });
+
+  it("finish_reason=length 时丢掉半截参数的调用，并回报截断", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse([
+          JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "echo", arguments: '{"a":' } }] } }],
+          }),
+          JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] }),
+          "[DONE]",
+        ]),
+      ),
+    );
+    const c = capture();
+    await streamChat(openai, msgs, c.opts());
+    // 参数拼不成完整对象 → 不能交给执行层（否则只剩一条假的 Unexpected end of JSON input）
+    expect(c.toolCalls).toEqual([]);
+    expect(c.finishes).toEqual(["length"]);
+  });
+
+  it("finish_reason=length 但参数完整时，调用照常下发", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse([
+          JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "echo", arguments: '{"a":1}' } }] } }],
+          }),
+          JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] }),
+          "[DONE]",
+        ]),
+      ),
+    );
+    const c = capture();
+    await streamChat(openai, msgs, c.opts());
+    expect(c.toolCalls).toEqual([
+      [{ id: "c1", type: "function", function: { name: "echo", arguments: '{"a":1}' } }],
+    ]);
+    expect(c.finishes).toEqual(["length"]);
   });
 
   it("非流式 json：整段回调；长文本切片 ≤3000", async () => {

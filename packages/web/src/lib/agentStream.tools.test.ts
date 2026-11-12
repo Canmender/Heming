@@ -18,7 +18,7 @@ import { toHitlCall } from "./hitl/classify.js";
 
 const profile: LlmProfile = { id: "p1", label: "l", provider: "openai", apiKey: "k", model: "m" };
 
-type Round = { text: string; calls: { id: string; name: string; args?: string }[] };
+type Round = { text: string; calls: { id: string; name: string; args?: string }[]; finish?: string };
 
 function makeDeps(rounds: Round[], opts: {
   execute: (call: { name: string; arguments: string }, o?: { signal?: AbortSignal }) => Promise<{
@@ -40,6 +40,7 @@ function makeDeps(rounds: Round[], opts: {
   const streamChat = vi.fn(async (_p: unknown, messages: ChatMessage[], o: {
     onDelta: (t: string) => void;
     onToolCalls?: (c: unknown[]) => void;
+    onFinish?: (reason: string) => void;
     tools?: unknown[];
   }) => {
     requests.push(messages);
@@ -56,6 +57,7 @@ function makeDeps(rounds: Round[], opts: {
         })),
       );
     }
+    if (round.finish) o.onFinish?.(round.finish);
     if (round.text) o.onDelta(round.text);
     return round.text;
   });
@@ -546,6 +548,20 @@ describe("上下文超限重试不重放工具（溢出重试的副作用防护�
 
     expect(execute).toHaveBeenCalledTimes(1);
     expect(finishText(send)).toContain("完成");
+  });
+});
+
+describe("输出被长度上限截断（P3-10 finish_reason）", () => {
+  it("finish_reason=length 且没有工具调用时，收口文案说明是「截断」", async () => {
+    const { deps, send } = makeDeps(
+      [{ text: "说到一半", calls: [], finish: "length" }],
+      { execute: async () => ({ text: "", ok: true }) },
+    );
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps as never);
+    const text = finishText(send);
+    expect(text).toContain("说到一半");
+    expect(text).toContain("长度上限截断");
+    expect(text).toContain("继续");
   });
 });
 
