@@ -98,11 +98,16 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 ## 浸泡/压测
 
 ```bash
-.venv/Scripts/python.exe scripts/soak.py --runs 2000          # 秒级，验证编排层不退化
-.venv/Scripts/python.exe scripts/soak.py --runs 100000 --json # 10 万次（约数分钟）
+.venv/Scripts/python.exe scripts/soak.py --runs 2000            # 秒级，验证编排层不退化
+.venv/Scripts/python.exe scripts/soak.py --runs 100000 --json   # 10 万次模型调用（约数分钟）
+
+# 验证「上游抖动 → 错误率超阈值 → 自动回滚」也真的会触发：
+.venv/Scripts/python.exe scripts/soak.py --runs 200 --fail-rate 0.5 --canary --json
 ```
 
-`soak.py` 用脚本化假模型跑完整状态机，输出失败数、P50/P95、吞吐、内存峰值和记忆条目数。它证明的是**编排层**在大量调用下稳定；真实模型调用成本需另算。
+`soak.py` 用脚本化假模型跑完整状态机，输出失败数、P50/P95、吞吐、内存峰值、记忆条目数，以及（`--canary` 时）自动回滚次数与灰度版本最终阶段。它证明的是**编排层**在大量调用下稳定；真实模型调用成本需另算。
+
+`--fail-rate` 是确定性的：`fail_every = round(1 / fail_rate)`，每第 N 次模型调用抛 `LLMError`，所以同一组参数结果可复现。配合 `--canary` 时，灰度版本承接全部流量，错误率超过 `error_threshold` 后 `maybe_rollback` 会把它挪回 `archived`，而 active 版本继续可用——实测 `--runs 200 --fail-rate 0.5` 得到 `rollbacks: 1`、`canary_stage: "archived"`、退出码 0。
 
 ## 已知边界
 

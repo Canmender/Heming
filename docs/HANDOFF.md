@@ -52,7 +52,7 @@
 - 可观测/回滚：`/metrics`（runs/时长/节点/工具/token/覆盖率/回滚/配置版本）、JSONL 回合日志、配置灰度（canary 稳定分桶）+ 错误率/P95 阈值自动回滚（幂等）。
 - 每日调优：`tune` 读日志 → 分类（stop_reason 优先）→ 生成 Prompt/Few-shot 候选 → 有 evaluator 时才注册灰度，不自动上线。
 - 交付物：`Dockerfile`（非 root、HEALTHCHECK）、`docker-compose.yml`（+ Prometheus v2.54.1）、`prometheus/{prometheus,alerts}.yml`（错误率/延迟/工具失败率/回滚尖峰/覆盖率 6 条告警）、`README.md`、`scripts/soak.py`。
-- 验证：`./.venv/Scripts/python.exe -m pytest` → **59 passed**（含记忆容量回收 3 例）；`scripts/soak.py --runs 20000 --json` → **100,000 次模型调用、0 失败**、17.8 次/s、P50 56.4ms / P95 60.2ms、内存峰值 1.62MB、`episodes` 稳定在 5000（容量回收真的在删，没随时间涨）。**本机没有 docker**，容器文件只写了未构建验证。
+- 验证：`./.venv/Scripts/python.exe -m pytest` → **59 passed**（含记忆容量回收 3 例）；`scripts/soak.py --runs 20000 --json` → **100,000 次模型调用、0 失败**、17.8 次/s、P50 56.4ms / P95 60.2ms、内存峰值 1.62MB、`episodes` 稳定在 5000（容量回收真的在删，没随时间涨）。`scripts/soak.py --runs 200 --fail-rate 0.5 --canary --json` → 注入上游失败后 **自动回滚 1 次、canary 版本归档为 `archived`**、退出码 0（错误率超阈值→回滚这条链路在负载下真的会触发，不只是单测算窗口）。**本机没有 docker**，容器文件只写了未构建验证。
 
 已知边界（下一轮可继续）：stdio 请求超时**不 kill 子进程**（只发取消通知；要硬停需另做「连续超时 → 回收进程」策略）；记忆有容量上限但**没有 TTL/重要性淘汰**（只看新旧，不会让「三个月前的经验」按时间过期）；pipeline 与桌面端的实际对接（目前是独立服务 + 设计文档，未接进 ChatPage 的生成链路）；本机无 docker，容器文件未构建验证。
 
