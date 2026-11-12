@@ -933,7 +933,7 @@ export function runAgentMentions(
               // 被输出上限截断时，用户看到的是一句话说到一半就停了：必须说明原因，
               // 否则他会以为模型坏了（这跟「工具参数不完整被丢弃」是同一件事的两面）。
               if (truncated) {
-                emitDelta("\\n\\n（回复被输出长度上限截断，回复「继续」可以接着写。）", aggressive);
+                emitDelta("\n\n（回复被输出长度上限截断，回复「继续」可以接着写。）", aggressive);
               }
               for (const chunk of roundChunks) emitDelta(chunk, aggressive);
               emitFooter();
@@ -941,7 +941,7 @@ export function runAgentMentions(
             }
             if (truncated) {
               // 还有工具调用但整轮被截断：参数完整的那些会照常执行，这里只提示「没说完」。
-              emitDelta("\\n\\n（本轮输出触到长度上限，可能有工具调用没来得及说完，已丢弃。）", aggressive);
+              emitDelta("\n\n（本轮输出触到长度上限，可能有工具调用没来得及说完，已丢弃。）", aggressive);
             }
             // 到上限还在要工具：把已有文本给用户，并**说明**为什么停在这里。
             // 静默 return 是曾经的实现——用户只看到话没说完，不知道是被截断的。

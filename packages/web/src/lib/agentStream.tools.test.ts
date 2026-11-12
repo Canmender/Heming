@@ -562,6 +562,9 @@ describe("输出被长度上限截断（P3-10 finish_reason）", () => {
     expect(text).toContain("说到一半");
     expect(text).toContain("长度上限截断");
     expect(text).toContain("继续");
+    // 文案要真的换行：曾经写成 "\\n\\n"，用户会看到一串反斜杠。
+    expect(text).toContain("\n\n（回复被输出长度上限截断");
+    expect(text).not.toContain("\\n");
   });
 });
 
