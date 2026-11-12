@@ -517,11 +517,16 @@ function createPipeline(input) {
     controller = new AbortController();
     const ctx = { signal: controller.signal, stopped: false };
     const launchAfter = options.launchAfter !== false;
+    // 分段计时：安装主体在内层 NSIS 里，外层只有「准备」和「安装」两段可控，
+    // 记下来才谈得上后面按真实数据决定还要不要动打包格式。
+    const startedAt = Date.now();
+    const timings = { payloadMs: 0, installMs: 0 };
 
     try {
       emitEvent({ type: "phase", phase: "prepare", label: "检查安装位置" });
       await checkSpace(installDir);
 
+      const payloadStartedAt = Date.now();
       let payload;
       if (options.payloadPath) {
         // 用户手动选了安装包：正在进行中的预取没用了，停掉，改走这个文件。
@@ -536,6 +541,7 @@ function createPipeline(input) {
       } else {
         payload = await resolvePayload(ctx, null, emitEvent);
       }
+      timings.payloadMs = Date.now() - payloadStartedAt;
       emitEvent({
         type: "phase",
         phase: "install",
@@ -554,12 +560,14 @@ function createPipeline(input) {
       };
       const started = services.startInstaller(command);
       installPid = started && started.child ? started.child.pid : null;
+      const installStartedAt = Date.now();
 
       const polling = pollInstall(installDir, ctx);
       const exit = await started.done;
       ctx.stopped = true;
       await polling;
       installPid = null;
+      timings.installMs = Date.now() - installStartedAt;
 
       const located = await locateInstalledExe(installDir);
       if (!located) {
@@ -581,15 +589,20 @@ function createPipeline(input) {
         }
       }
 
+      const elapsedMs = Date.now() - startedAt;
       const result = {
         type: "done",
         installDir: located.installDir,
         exePath: located.exePath,
         version: payload.version,
         launched,
+        elapsedMs,
+        timings: { ...timings, totalMs: elapsedMs },
       };
       emitEvent(result);
-      log.info(`安装完成 ${located.exePath}`);
+      log.info(
+        `安装完成 ${located.exePath}（准备 ${timings.payloadMs}ms / 安装 ${timings.installMs}ms / 合计 ${elapsedMs}ms）`,
+      );
       return { ok: true, ...result };
     } catch (error) {
       if (isAbort(error)) {

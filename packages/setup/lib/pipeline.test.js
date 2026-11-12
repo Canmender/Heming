@@ -141,6 +141,12 @@ test("内嵌安装包：校验后静默安装并确认主程序落地", async ()
   assert.equal(h.events.some((e) => e.type === "error"), false);
   const done = h.events.find((e) => e.type === "done");
   assert.equal(done.version, "d.135.3.54.7");
+  // 完成事件带分段耗时：界面用它显示「用时 X 秒 · 安装 Y 秒」。
+  assert.equal(Number.isFinite(done.elapsedMs), true);
+  assert.equal(done.elapsedMs >= 0, true);
+  assert.equal(Number.isFinite(done.timings.payloadMs), true);
+  assert.equal(Number.isFinite(done.timings.installMs), true);
+  assert.equal(done.timings.totalMs, done.elapsedMs);
 });
 
 test("没有内嵌包时从更新服务器下载并校验 sha512", async () => {

@@ -225,12 +225,17 @@
    * 安装的大头是内层 NSIS 解压 + 复制，那一步没有可信的百分比；一个持续走的
    * 秒数能让用户确认程序没卡死，也让「这台机器装一次要多久」有据可查。
    */
-  function formatElapsed(ms) {
-    const seconds = Math.max(0, Math.floor(ms / 1000));
-    if (seconds < 60) return `已用 ${seconds} 秒`;
+  /** 安装完成的收尾行：总用时与外层可见的安装段，给「装一次多久」留个真实数字。 */
+  function durationText(ms) {
+    const seconds = Math.max(0, Math.round(ms / 1000));
+    if (seconds < 60) return `${seconds} 秒`;
     const minutes = Math.floor(seconds / 60);
     const rest = seconds % 60;
-    return `已用 ${minutes} 分 ${String(rest).padStart(2, "0")} 秒`;
+    return `${minutes} 分 ${String(rest).padStart(2, "0")} 秒`;
+  }
+
+  function formatElapsed(ms) {
+    return `已用 ${durationText(ms)}`;
   }
 
   function updateElapsedClock(running) {
@@ -441,6 +446,17 @@
       state.mode === "update"
         ? `和鸣${version} 已更新到 ${event.installDir}`
         : `和鸣${version} 已装到 ${event.installDir}`;
+    const timeNode = $("done-time");
+    if (timeNode) {
+      const total = Number.isFinite(event.elapsedMs) ? event.elapsedMs : null;
+      const install = event.timings && Number.isFinite(event.timings.installMs) ? event.timings.installMs : null;
+      if (total === null) {
+        timeNode.hidden = true;
+      } else {
+        timeNode.textContent = `用时 ${durationText(total)}${install === null ? "" : ` · 安装 ${durationText(install)}`}`;
+        timeNode.hidden = false;
+      }
+    }
     const seal = $("seal");
     seal.classList.remove("stamped");
     void seal.offsetWidth;
@@ -641,7 +657,13 @@
         onFiles({ type: "files", files: 12304, bytes: 742 * 1024 * 1024, percent: 64 });
         break;
       case "done":
-        onDone({ installDir: state.installDir || "D:\\Programs\\Heming", version, launched: false });
+        onDone({
+          installDir: state.installDir || "D:\\Programs\\Heming",
+          version,
+          launched: false,
+          elapsedMs: 54_000,
+          timings: { payloadMs: 12_000, installMs: 41_000, totalMs: 54_000 },
+        });
         break;
       case "error":
         onError({
