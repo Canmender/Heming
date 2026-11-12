@@ -1,7 +1,7 @@
 # 安装提速与应用内更新动画
 
 日期：2026-11-12
-状态：已实现并验证（安装器单测 57 例全绿、预取三态与工作屏截图已过目；应用内更新动画 `tsc` 通过、`UpdateCard` 14 例全绿、桌面端 `auto-update`/`update-helper` 25 例全绿；真机联网安装与观感复验待完整仓/发布环境）
+状态：已实现并验证（安装器 9 个测试文件共 62 例全绿、预取三态与工作屏/完成屏截图已过目；应用内更新动画 `tsc` 通过、`UpdateCard` 14 例全绿、桌面端 `auto-update`/`update-helper` 25 例全绿；真机联网安装与观感复验待完整仓/发布环境）
 
 ## 1. 需求
 
@@ -49,7 +49,7 @@
 
 ### 2.4 让出 IO
 
-安装期目录轮询从 600ms 放宽到 900ms——解压本身在猛读写目标盘，轮询太密只会跟它抢 IO，进度条也没必要 600ms 一跳。
+安装期目录轮询从 600ms 放宽到 2500ms——解压本身在猛读写目标盘，轮询太密只会跟它抢 IO，进度条也没必要 600ms 一跳。2500ms 的依据见 2.8 的实测（一次统计 300~400ms，占比从约 80% 降到百分之十几）。
 
 ### 2.5 进度节流
 
@@ -67,6 +67,16 @@
 `pipeline.start()` 用 `Date.now()` 记两段：安装包准备（含在线下载/校验，`timings.payloadMs`）与内层安装（`timings.installMs`）。`done` 事件携带 `elapsedMs` 与 `timings`，完成屏在安装路径下多一行「用时 54 秒 · 安装 41 秒」，安装日志同样记录三段数字（准备 / 安装 / 合计）。
 
 这么做的理由：安装主体耗时在内层 NSIS，外层能动的只有准备与调度。没有真实分段数据，「还要不要换打包格式/压缩级别」就只能凭感觉；有了这份回执，才能在完整仓真机装一次后按数字决策。截图验收时 `applyCaptureState("done")` 会注入一组假耗时，保证这条新行也在视觉验收范围内。
+
+### 2.8 目录统计本身也要便宜
+
+`statTree()` 是安装期唯一的进度信号，但实测（`win-unpacked`，8486 个文件 / 882 MB）原来「逐文件 await stat」一次要 **799ms**——按旧节奏 900ms 一轮，等于线程池常驻占满、全程跟解压抢 IO。三处改动：
+
+- **两段式**：先只 `opendir` 收路径（约 205ms），再用有界并发批量 `stat`（`STAT_CONCURRENCY = 8`）；
+- **线程池**：主进程启动时把 `UV_THREADPOOL_SIZE` 调到 16（Node 默认 4），`fs.stat` 走 libuv 线程池，实测一次降到 **300~400ms**；
+- **间隔**：轮询 900ms → 2500ms（见 2.4），轮询占用从约 80% 降到百分之十几。
+
+代价是进度 2~3 秒才动一次，但「已写入 N 个文件 / X MB」仍是真实读数；对这条信息来说毫秒级抖动没有意义，而安装主体（内层解压 + 复制）能否拿到干净 IO 才重要。
 
 ## 3. 应用内更新动画
 
@@ -90,7 +100,8 @@
 ## 4. 变更文件
 
 - `packages/setup/lib/download.js`：`headers`/`acceptPartial`/`resume`、`partSize`、`hashPrefix`。
-- `packages/setup/lib/pipeline.js`：`prefetch()`、`ensurePayloadTask`、`cachedPayload`、`downloadPayload`（3 次重试）、`prefetchSinkFor`、轮询 900ms、取消作用域。
+- `packages/setup/lib/pipeline.js`：`prefetch()`、`ensurePayloadTask`、`cachedPayload`、`downloadPayload`（3 次重试）、`prefetchSinkFor`、轮询 2500ms、取消作用域。
+- `packages/setup/lib/dir-stats.js`：`statTree()` 改两段式（收集路径 → 有界并发 stat），导出 `STAT_CONCURRENCY`。
 - `packages/setup/lib/download.test.js`（新）：本地 http 服务器测完整下载/续传/服务器不支持 Range/中断保留 `.part`。
 - `packages/setup/lib/pipeline.test.js`：+7 例（预取不重复下载、缓存命中、缓存不可信、缓存元数据跳过哈希、进度节流、预取失败不弹错、空闲取消预取）。
 - `packages/setup/main.js`：`did-finish-load` 触发预取（截图模式除外）。
@@ -100,7 +111,7 @@
 
 ## 5. 验证
 
-- `cd packages/setup && node --test lib/*.test.js`：8 个文件 57 例（含下载器 4 例、预取/缓存/节流 7 例），预期全绿。
+- `cd packages/setup && node --test lib/*.test.js`：9 个文件 62 例（含下载器 4 例、预取/缓存/节流 7 例、目录统计 5 例），预期全绿。
 - `cd packages/desktop && node --test auto-update.test.js update-helper.test.js`：25 例全绿。
 - `node --check` 覆盖全部改动文件；`pnpm exec tsc -p packages/web/tsconfig.json --noEmit`。
 - 安装器视觉：`HEMING_SETUP_CAPTURE_DIR=<dir>` 启动打包产物（必须用 node spawn 启动，不能从 MSYS bash 前台跑），看 ready 屏预取小字、工作屏秒表与 6 张状态图。

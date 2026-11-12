@@ -14,6 +14,15 @@
 
 const path = require("node:path");
 const fs = require("node:fs");
+
+/**
+ * 安装期要反复 stat 目标目录（lib/dir-stats.js），而 libuv 线程池默认只有 4 个
+ * 线程；实测 8486 个文件的目录树在默认线程数下要 600~700ms，调到 16 之后
+ * 是 300~400ms（哈希、下载写盘也共用这个池，算是顺手变快）。
+ * 必须在任何 fs 异步调用之前设置，Node 只在启动时读一次。
+ */
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || "16";
+
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 
 const pathTools = require("./lib/paths");

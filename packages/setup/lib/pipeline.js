@@ -34,8 +34,13 @@ const download = require("./download");
 const { statTree } = require("./dir-stats");
 const { startInstaller, killInstallerTree } = require("./installer");
 
-/** 安装期间轮询目标目录的间隔：太密会跟解压抢 IO，太稀看不出版面在动。 */
-const POLL_INTERVAL_MS = 900;
+/**
+ * 安装期间轮询目标目录的间隔。
+ * 实测（win-unpacked，8486 个文件 / 882 MB）：statTree 一次 400~700ms，
+ * 而 900ms 一轮等于常驻占用线程池、跟解压抢 IO；2500ms 让轮询占比降到
+ * 百分之十几，画面仍然每 2~3 秒动一次，够看出「程序在走」。
+ */
+const POLL_INTERVAL_MS = 2500;
 /** 除了安装包本身，还要留出解压时的临时峰值（7z 先解到 TEMP 再复制过去）。 */
 const SPACE_HEADROOM_BYTES = 200 * 1024 * 1024;
 const MAX_EXISTS_WALK = 12;

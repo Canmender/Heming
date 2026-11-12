@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "electron .",
     "typecheck": "node --check main.js && node --check preload.js && node --check lib/paths.js && node --check lib/format.js && node --check lib/feed.js && node --check lib/errors.js && node --check lib/eta.js && node --check lib/args.js && node --check lib/download.js && node --check lib/dir-stats.js && node --check lib/installer.js && node --check lib/config.js && node --check lib/log.js && node --check lib/pipeline.js && node --check lib/capture.js && node --check renderer/app.js && node --check renderer/wordmark.js",
-    "test": "node --test lib/feed.test.js && node --test lib/args.test.js && node --test lib/format.test.js && node --test lib/eta.test.js && node --test lib/paths.test.js && node --test lib/download.test.js && node --test lib/pipeline.test.js"
+    "test": "node --test lib/feed.test.js && node --test lib/args.test.js && node --test lib/format.test.js && node --test lib/eta.test.js && node --test lib/paths.test.js && node --test lib/download.test.js && node --test lib/dir-stats.test.js && node --test lib/update-plan.test.js && node --test lib/pipeline.test.js"
   },
   "devDependencies": {
     "electron": "^45.2.1",
