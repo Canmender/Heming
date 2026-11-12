@@ -21,6 +21,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _env_float(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -119,6 +126,11 @@ class Settings:
     min_samples_for_rollback: int = 20
     # 调优
     tune_eval_budget: int = 20
+    tune_enabled: bool = False          # 服务里是否启动每日调优线程
+    tune_interval_s: float = 86_400.0   # 一天一次；测试里可以调小
+    tune_window_hours: int = 24
+    tune_out_path: str = ""             # 每轮报告的落盘位置；空 = 不落盘
+    tune_eval_enabled: bool = False     # 用「回放 A/B」做真评测（开销 2 × tune_eval_budget 次流水线）
     # 模型
     model: str = field(default_factory=lambda: os.environ.get("AGENT_PIPELINE_MODEL", "deepseek-chat"))
     base_url: str = field(default_factory=lambda: os.environ.get("AGENT_PIPELINE_BASE_URL", "https://api.deepseek.com/v1"))
@@ -149,6 +161,11 @@ class Settings:
             tool_timeout_s=_env_float("AGENT_TOOL_TIMEOUT_S", cls.tool_timeout_s),
             max_episodes=_env_int("AGENT_MAX_EPISODES", cls.max_episodes),
             max_documents=_env_int("AGENT_MAX_DOCUMENTS", cls.max_documents),
+            tune_enabled=_env_bool("AGENT_TUNE_ENABLED", cls.tune_enabled),
+            tune_interval_s=_env_float("AGENT_TUNE_INTERVAL_S", cls.tune_interval_s),
+            tune_window_hours=_env_int("AGENT_TUNE_WINDOW_HOURS", cls.tune_window_hours),
+            tune_out_path=os.environ.get("AGENT_TUNE_OUT", cls.tune_out_path),
+            tune_eval_enabled=_env_bool("AGENT_TUNE_EVAL", cls.tune_eval_enabled),
         )
 
     def with_budget(self, **kwargs: Any) -> "Settings":

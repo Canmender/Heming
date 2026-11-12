@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ from .config import Settings
 from .nodes import Runtime
 from .protocol import TaskSpec
 from .runtime import build_runtime, make_coverage_runner, run_once
-from .tune import tune
+from .scheduler import DailyTuner, build_replay_evaluator
 
 
 class RunRequest(BaseModel):
@@ -39,14 +40,46 @@ class TuneRequest(BaseModel):
 
 
 def create_app(settings: Settings | None = None, runtime: Runtime | None = None) -> FastAPI:
-    settings = settings or Settings.from_env()
-    runtime = runtime or build_runtime(settings)
-    app = FastAPI(title="agent-pipeline", version="0.1.0")
+    if runtime is not None:
+        # 注入 runtime 时（测试、嵌入别处）必须沿用它自己的 Settings，
+        # 否则服务用的并发/日志路径/调优开关会和 runtime 里那套不一致。
+        settings = settings or runtime.settings
+    else:
+        settings = settings or Settings.from_env()
+        runtime = build_runtime(settings)
+    # 没有评测器时 tune 只会出报告、永不注册灰度；打开 AGENT_TUNE_EVAL=1 才用
+    # 「回放 A/B」真评一次（2 × tune_eval_budget 次流水线，成本可控但非零）。
+    evaluator = None
+    if settings.tune_eval_enabled:
+        evaluator = build_replay_evaluator(
+            runtime,
+            log_path=settings.log_path,
+            window_hours=settings.tune_window_hours,
+        )
+    tuner = DailyTuner(
+        settings=settings,
+        config_store=runtime.config_store,
+        log_path=settings.log_path,
+        out_path=settings.tune_out_path or None,
+        evaluator=evaluator,
+        metrics=runtime.metrics,
+    )
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # 只有显式开启才起后台线程：默认关闭，免得容器一跑起来就在没人看的情况下改配置。
+        if settings.tune_enabled:
+            tuner.start()
+        yield
+        tuner.stop()
+
+    app = FastAPI(title="agent-pipeline", version="0.1.0", lifespan=lifespan)
     runs: dict[str, dict[str, Any]] = {}
     lock = threading.Lock()
     semaphore = threading.BoundedSemaphore(settings.max_concurrent_runs)
     app.state.runtime = runtime
     app.state.runs = runs
+    app.state.tuner = tuner
 
     def _execute(run_id: str, task: TaskSpec) -> None:
         try:
@@ -79,6 +112,12 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
             "memory": runtime.memory.count(),
             "tools": runtime.tools.registry.names(),
             "running": sum(1 for item in runs.values() if item.get("status") == "running"),
+            "tuner": {
+                "enabled": settings.tune_enabled,
+                "running": tuner.running,
+                "last_error": tuner.last.error if tuner.last else None,
+                "last_ran_at": tuner.last.ran_at if tuner.last else None,
+            },
         }
 
     @app.get("/metrics")
@@ -162,8 +201,10 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
 
     @app.post("/v1/tune")
     def run_tune(body: TuneRequest) -> dict[str, Any]:
-        report = tune(log_path=runtime.settings.log_path, since_hours=body.since_hours, out_path=None)
-        return report.to_dict()
+        result = tuner.run_once(since_hours=body.since_hours)
+        if result.report is None:
+            raise HTTPException(status_code=500, detail=f"调优失败：{result.error}")
+        return result.report.to_dict()
 
     @app.get("/v1/tools")
     def list_tools() -> dict[str, Any]:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -104,3 +106,47 @@ def test_config_rollback_endpoint_is_idempotent(runtime_factory) -> None:
     second = client.post("/v1/config/rollback").json()
     assert second["ok"] is True
     assert client.get("/v1/config").json()["canary"] is None
+
+
+def test_health_reports_tuner_state(runtime_factory) -> None:
+    runtime = runtime_factory([])
+    client = TestClient(create_app(runtime=runtime))
+
+    tuner = client.get("/health").json()["tuner"]
+    # 默认不开：容器启动不该在没人看的时候悄悄改配置
+    assert tuner == {"enabled": False, "running": False, "last_error": None, "last_ran_at": None}
+
+
+def test_tune_endpoint_reports_failures(runtime_factory) -> None:
+    runtime = runtime_factory([])
+    Path(runtime.settings.log_path).write_text(
+        json.dumps(
+            {
+                "run_id": "r-tune",
+                "status": "error",
+                "stop_reason": "max_steps",
+                "finished_at": time.time(),
+                "task": {"goal": "把测试跑一遍"},
+                "answer": "",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(runtime=runtime))
+
+    body = client.post("/v1/tune", json={"since_hours": 24}).json()
+    assert body["total_runs"] == 1
+    assert body["failure_modes"] == {"max_steps": 1}
+    assert body["applied_version"] is None
+
+
+def test_tune_evaluator_only_wired_when_enabled(runtime_factory) -> None:
+    runtime = runtime_factory([])
+    assert create_app(runtime=runtime).state.tuner.evaluator is None
+
+    enabled = runtime_factory([], settings=replace(runtime.settings, tune_eval_enabled=True))
+    app = create_app(runtime=enabled)
+    # 开启后才接「回放 A/B」评测器：默认只出报告，不注册任何版本
+    assert app.state.tuner.evaluator is not None

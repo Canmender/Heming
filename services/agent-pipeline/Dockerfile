@@ -20,8 +20,11 @@ RUN pip install --no-cache-dir . \
 
 USER pipeline
 
-ENV AGENT_PIPELINE_LOG_PATH=/app/data/runs.jsonl \
-    AGENT_PIPELINE_DB_PATH=/app/data/agent-pipeline.db
+# 变量名以 config.Settings.from_env 为准：AGENT_LOG_PATH / AGENT_PIPELINE_DB。
+# （以前写成 AGENT_PIPELINE_LOG_PATH / AGENT_PIPELINE_DB_PATH，代码根本不读。）
+ENV AGENT_LOG_PATH=/app/data/runs.jsonl \
+    AGENT_PIPELINE_DB=/app/data/agent-pipeline.db \
+    AGENT_TUNE_ENABLED=0
 
 EXPOSE 8000
 

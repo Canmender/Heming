@@ -35,7 +35,27 @@ set AGENT_PIPELINE_API_KEY=sk-...
 
 # 日志驱动的每日调优（只分析，不自动上线）
 .venv/Scripts/python.exe -m agent_pipeline.runner tune --log runs.jsonl --since-hours 24
+
+# 让服务自己每天跑一次（默认关闭，需显式打开；见下方「每日调优调度」）
+AGENT_TUNE_ENABLED=1 .venv/Scripts/python.exe -m agent_pipeline.runner serve --port 8000
 ```
+
+## 每日调优调度
+
+`AGENT_TUNE_ENABLED=1` 时，服务启动会拉起一个后台 daemon 线程（`scheduler.DailyTuner`）：
+
+- **起来就先跑一次**，之后每 `AGENT_TUNE_INTERVAL_S`（默认 86400 秒）跑一次；容器重启不会白等一天；
+- 每轮读 `AGENT_LOG_PATH` 里最近 `AGENT_TUNE_WINDOW_HOURS`（默认 24）小时的 run 日志，走 `tune()` 同一套逻辑：聚类失败模式 → 出候选 → 评测 → **只有评测有提升才注册 canary 版本**；
+- 任何异常都被收成 `ScheduleResult.error` 并计入 `pipeline_tune_runs_total{status="error"}`，线程不会因为一轮失败而死掉；
+- `/health` 的 `tuner` 段给出 `enabled / running / last_error / last_ran_at`，`GET /metrics` 另有 `pipeline_tune_candidates`、`pipeline_tune_applied_version`；
+- `POST /v1/tune` 手动触发一次（走同一个 `DailyTuner`，指标口径一致）。
+
+**评测器**：`tune` 只有在评测器给出「候选 ≥ 基线 + 0.02」时才会注册灰度。`AGENT_TUNE_EVAL=1` 会接上内置的「回放 A/B」评测器（`scheduler.build_replay_evaluator`）：取日志里最近 `tune_eval_budget`（默认 20）个失败任务，同一批任务分别用「现状提示词」和「现状 + 失败模式建议 + few-shot」各跑一遍完整流水线，比较成功率。
+
+- 评测在**影子 runtime** 里跑：内存版配置库与记忆、`log_sink` 丢弃、独立指标——不会污染线上日志、灰度版本和指标，也不会把评测轨迹写进记忆；
+- 开销是 2 × `tune_eval_budget` 次完整流水线，所以默认关闭；不接评测器时只出报告、不注册任何版本。
+
+红线不变：调度器**只注册灰度版本**，转正走 `/v1/config/promote`，出错由错误率窗口自动回滚。
 
 ## HTTP 接口
 
@@ -73,6 +93,11 @@ curl -s http://localhost:8000/v1/runs \
 | `AGENT_MAX_CONCURRENCY` | `4` | 并发上限 |
 | `AGENT_ERROR_THRESHOLD` | `0.2` | 自动回滚错误率阈值 |
 | `AGENT_LATENCY_THRESHOLD_S` | `120` | 自动回滚 P95 延迟阈值 |
+| `AGENT_TUNE_ENABLED` | `0` | 是否在服务里跑每日调优线程 |
+| `AGENT_TUNE_INTERVAL_S` | `86400` | 调优周期（秒）；测试里可调小 |
+| `AGENT_TUNE_WINDOW_HOURS` | `24` | 每轮看最近多少小时的日志 |
+| `AGENT_TUNE_OUT` | 空 | 每轮调优报告的落盘路径（空 = 不落盘） |
+| `AGENT_TUNE_EVAL` | `0` | 开「回放 A/B」评测器（否则调优只出报告，不注册灰度） |
 
 预算（`Budget`）：`max_steps=8`、`max_llm_calls=40`、`max_tokens=120_000`、`max_wall_clock_s=600`、`step_tool_budget=6`、`max_replans=2`、`max_adversarial_rounds=2`。超预算时流水线**不硬失败**，而是带 `status="budget"` 和 `stop_reason` 返回已完成的部分。
 
@@ -114,4 +139,4 @@ docker compose up --build      # 服务 :8000 + Prometheus :9090
 1. **记忆有容量上限、没有 TTL**：`MemoryStore` 每次写入后按 `max_episodes` / `max_documents` 删最旧的（删文档连带删块，同一事务），所以磁盘与检索延迟有界；但「三个月前的经验自动过期」还没做——需要按重要性/时间的淘汰策略，而不是只看新旧。
 2. **对抗模式的覆盖率必须来自真实命令**：没配 `coverage_runner` 时 `coverage=None`，此时 `adversarial_passed` 永远为 False，不会假装达标。
 3. **HITL 中断未启用**：`/approve` 返回 501，流水线在工具风险上是「服务端默认信任已注册工具」；接真实写操作前需补审批队列。
-4. **调优不自动上线**：`tune` 只产出候选并（可选）注册灰度，提升到 active 需要 `/v1/config/promote` 或人工看板。
+4. **调优不自动上线**：每日调度器（`AGENT_TUNE_ENABLED=1`）会自动跑 `tune`，但只产出候选 + 注册灰度；提升到 active 仍需要 `/v1/config/promote` 或人工看板。自动转正的条件（连续 N 轮灰度指标更好）还没做。回放评测器默认关闭（`AGENT_TUNE_EVAL=1` 才开），因为它会真跑流水线、花真钱。

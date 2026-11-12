@@ -16,8 +16,19 @@ services:
       AGENT_PIPELINE_API_KEY: ${AGENT_PIPELINE_API_KEY:?需要设置 AGENT_PIPELINE_API_KEY}
       AGENT_PIPELINE_MODEL: ${AGENT_PIPELINE_MODEL:-deepseek-chat}
       AGENT_PIPELINE_BASE_URL: ${AGENT_PIPELINE_BASE_URL:-https://api.deepseek.com}
-      AGENT_PIPELINE_CANARY_RATIO: ${AGENT_PIPELINE_CANARY_RATIO:-0.1}
-      AGENT_PIPELINE_MAX_CONCURRENT_RUNS: ${AGENT_PIPELINE_MAX_CONCURRENT_RUNS:-4}
+      # 变量名以代码为准（config.Settings.from_env 读的就是这些）：
+      AGENT_CANARY_RATIO: ${AGENT_CANARY_RATIO:-0.1}
+      AGENT_MAX_CONCURRENCY: ${AGENT_MAX_CONCURRENCY:-4}
+      # 日志与 SQLite 放进命名卷，重建容器不丢调优输入和灰度/回滚历史。
+      AGENT_LOG_PATH: /app/data/runs.jsonl
+      AGENT_PIPELINE_DB: /app/data/agent-pipeline.db
+      # 每日调优：默认关；打开后服务起来先跑一轮，之后每 24h 一轮。
+      AGENT_TUNE_ENABLED: ${AGENT_TUNE_ENABLED:-0}
+      AGENT_TUNE_INTERVAL_S: ${AGENT_TUNE_INTERVAL_S:-86400}
+      AGENT_TUNE_WINDOW_HOURS: ${AGENT_TUNE_WINDOW_HOURS:-24}
+      AGENT_TUNE_OUT: /app/data/tune-report.json
+      # 打开后每天真评一次（2 × 20 次流水线）；不开则只出报告，永不注册灰度。
+      AGENT_TUNE_EVAL: ${AGENT_TUNE_EVAL:-0}
     volumes:
       - pipeline-data:/app/data
     healthcheck:

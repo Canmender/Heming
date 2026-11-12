@@ -46,6 +46,17 @@ class Metrics:
         self.config_version = Gauge(
             "pipeline_config_version", "当前生效配置版本号", registry=self.registry
         )
+        self.tune_runs = Counter(
+            "pipeline_tune_runs_total", "每日调优跑了几次（按结果）", ["status"], registry=self.registry
+        )
+        self.tune_candidates = Gauge(
+            "pipeline_tune_candidates", "最近一次调优产生的候选数量", registry=self.registry
+        )
+        self.tune_applied = Gauge(
+            "pipeline_tune_applied_version",
+            "最近一次调优注册的灰度版本号（0 = 没注册）",
+            registry=self.registry,
+        )
 
     # ---- 记录 -------------------------------------------------------------
 
@@ -71,6 +82,13 @@ class Metrics:
 
     def set_config_version(self, version: int) -> None:
         self.config_version.set(version)
+
+    def record_tune(self, status: str) -> None:
+        self.tune_runs.labels(status=status).inc()
+
+    def set_tune_candidates(self, count: int, applied_version: int | None = None) -> None:
+        self.tune_candidates.set(count)
+        self.tune_applied.set(applied_version or 0)
 
     def expose(self) -> bytes:
         return generate_latest(self.registry)
