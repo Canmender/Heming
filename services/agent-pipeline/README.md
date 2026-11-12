@@ -135,6 +135,16 @@ curl -s http://localhost:8000/v1/runs \
 - 取消是协作式的：卡在**工具调用**里的 run 要等这次工具超时（`AGENT_TOOL_TIMEOUT_S`）才走到下一个边界（工具线程没法安全打断）；
 - `tests/test_cancel.py` 4 例覆盖（跑到一半取消、未知 run、已结束 run、重复取消）。
 
+## 计划里的「建议工具」与反思里的「经验」
+
+- `PlanStep.tools_hint`：规划者写「这一步用 `http_get` 查」，执行节点会把这句放进本步提示
+  「计划建议使用：http_get（可以不用，但优先考虑）」。以前只解析进字段、没人读，等于规划者白写。
+  建议工具同样先过 `tools_allowed`：越权的名字不会出现在提示里，免得把模型往被拒的方向引。
+- `Reflection.lessons`：反思者现在会输出 1–3 条「这次学到、下次能复用」的经验，落进情景记忆
+  （importance 0.7，高于普通反思理由的 0.5），下一轮同类任务优先检索到——这是「越用越顺」的来源。
+  以前 `Reflection` 有这个字段但从不赋值，经验在 run 结束就丢了。
+  `tests/test_hint_and_lessons.py` 2 例钉住两条。
+
 ## 评审不过 → 重排时带上「为什么不过」
 
 `critic` 判不过时，`plan` 节点会重排计划；重排的提示词里现在会附上上一轮评审的 `blocking_issues`

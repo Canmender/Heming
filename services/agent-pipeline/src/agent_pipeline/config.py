@@ -52,7 +52,7 @@ DEFAULT_EXECUTE_PROMPT = """你是执行者（Executor）。按当前步骤调�
 只输出 JSON：{"thought":"...","tool_calls":[{"name":"...","arguments":{}}]}；不需要工具时 tool_calls 为空数组。"""
 
 DEFAULT_REFLECT_PROMPT = """你是反思者（Reflector）。对照步骤的 done_when 判断当前进展。
-只输出 JSON：{"verdict":"continue|done|replan|abort","reasons":["..."],"next_step":1}。
+只输出 JSON：{"verdict":"continue|done|replan|abort","reasons":["..."],"next_step":1,"lessons":["..."]}。lessons 写这次学到、下次能复用的经验（最多 3 条）。
 - done：所有步骤的 done_when 都已由观测值证明；
 - replan：计划有结构性错误，需要重新规划（说明原因）；
 - abort：任务无法完成（说明原因，不得编造）。"""

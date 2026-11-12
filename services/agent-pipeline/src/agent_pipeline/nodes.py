@@ -287,12 +287,18 @@ def execute_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     task = TaskSpec(**_task(state))
     allowed = task.tools_allowed or runtime.tools.registry.names()
     schemas = runtime.tools.registry.openai_tools(allowed)
+    # 计划里给的「建议工具」要真的告诉执行者：以前只解析进 PlanStep.tools_hint 就再没人读，
+    # 规划者写「用 http_get 查一下」等于白写，执行者只能自己猜。
+    allowed_set = set(allowed)
+    hints = [name for name in step.tools_hint if name in allowed_set][:5]
+    hint_line = f"\n计划建议使用：{'、'.join(hints)}（可以不用，但优先考虑）" if hints else ""
     context = _context(
         runtime,
         state,
         extra=(
             f"当前步骤 {step.id}/{len(plan)}：{step.goal}\n完成条件：{step.done_when}\n"
             f"本步骤剩余工具调用预算：{max(0, runtime.settings.budget.step_tool_budget - int(state.get('step_tool_calls', 0)))}"
+            f"{hint_line}"
         ),
     )
     # Execute 轮不强制 JSON：模型可以只说话（不调工具）或只发 tool_calls。
@@ -388,10 +394,12 @@ def reflect_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
     verdict = str(data.get("verdict") or "continue")
     if verdict not in ("continue", "done", "replan", "abort"):
         verdict = "continue"
+    lessons = [str(item) for item in (data.get("lessons") or []) if str(item).strip()][:3]
     reflection = Reflection(
         verdict=verdict,  # type: ignore[arg-type]
         reasons=[str(r) for r in (data.get("reasons") or [])],
         next_step=data.get("next_step") if isinstance(data.get("next_step"), int) else None,
+        lessons=lessons,
     )
     plan = _plan_of(state)
     prior_reflections = [
@@ -442,6 +450,9 @@ def reflect_node(runtime: Runtime, state: dict[str, Any]) -> dict[str, Any]:
         elif jumped:
             updates["plan"] = [s.to_dict() for s in plan]
     _remember(runtime, state, "lesson", f"反思（{verdict}）：" + "；".join(reflection.reasons)[:200], importance=0.5)
+    # 反思总结出的「经验」比「反思理由」更值得留：下次做同类任务要优先被检索到。
+    for lesson in lessons:
+        _remember(runtime, state, "lesson", lesson[:300], importance=0.7)
     return {**state, **updates}
 
 
