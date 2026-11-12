@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { runAgentMentions, newStreamId, sourceFooter, MAX_SOURCES } from "./agentStream.js";
+import { LlmHttpError } from "./llmClient.js";
 import type { ChatMessage } from "./llmClient.js";
 import type { LlmProfile } from "../store/llm.js";
 import { toHitlCall } from "./hitl/classify.js";
@@ -624,6 +625,30 @@ describe("runAgentMentions 上下文预算接线", () => {
     expect(prepareHistory.mock.calls[1][2]).toEqual({ aggressive: 1 });
     expect(framesOf(send, "agent_finish")[0]).toMatchObject({ text: "好" });
     expect(framesOf(send, "agent_error")).toHaveLength(0);
+  });
+
+  it("413（请求体太大）也按上下文超限重试：文本里没有 400 字样", async () => {
+    const prepareHistory = vi.fn(
+      async (rows: ChatMessage[], _agentId: string, opts?: { aggressive?: 1 | 2 }) => [
+        ...(opts?.aggressive ? [{ role: "system" as const, content: `摘要${opts.aggressive}` }] : []),
+        ...rows,
+      ],
+    );
+    let n = 0;
+    const streamChat = vi.fn(async (_p: unknown, _m: unknown, o: { onDelta: (t: string) => void }) => {
+      n += 1;
+      if (n === 1) throw new LlmHttpError(413, "Payload Too Large");
+      o.onDelta("好");
+      return "好";
+    });
+    const { send, deps } = makeDeps({ prepareHistory, streamChat });
+
+    await runAgentMentions("c1", [{ agentId: "a1", name: "X" }], "hi", deps);
+
+    expect(streamChat).toHaveBeenCalledTimes(2);
+    expect(prepareHistory.mock.calls[1][2]).toEqual({ aggressive: 1 });
+    expect(framesOf(send, "agent_error")).toHaveLength(0);
+    expect(framesOf(send, "agent_finish")[0]).toMatchObject({ text: "好" });
   });
 
   it("非超限错误不重试：401 与「不含超限特征的 400」都只调一次 streamChat", async () => {

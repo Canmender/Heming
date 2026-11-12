@@ -370,7 +370,14 @@ const MAX_CONTEXT_RETRIES = 2;
 function isContextOverflow(err: Error | null | undefined, aborted: boolean): boolean {
   if (aborted || err?.name === "AbortError") return false;
   const message = String(err?.message ?? "");
-  if (!message.includes("400")) return false;
+  const candidate = (err as unknown as { status?: unknown } | null | undefined)?.status;
+  const status = typeof candidate === "number" ? candidate : 0;
+  /**
+   * 413 是「请求体太大」，语义上就是塞不下了，但错误文本里没有 `400`。
+   * 只看 `400` 会把这类超限当成普通失败直接抛给用户——而它恰恰是收紧历史能救的。
+   */
+  if (status === 413) return true;
+  if (!message.includes("400") && status !== 400) return false;
   return CONTEXT_OVERFLOW_RE.test(message) || TOOL_PAIRING_400_RE.test(message);
 }
 
